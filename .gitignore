@@ -1,18 +1,39 @@
-data/
+# Binaries for programs and plugins
 *.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary, coverage profiles, and other test artifacts
+*.test
+*.out
+coverage.*
+*.coverprofile
+profile.cov
+
+# Go workspace files
+go.work
+go.work.sum
+
+# Local runtime data and database files
+data/
 *.db
 *.db-journal
 *.db-wal
 *.db-shm
-.idea/
-.vscode/
+*.log
+
+# Environment and private config
+.env
 config/config.yaml
 config/users.yaml
 config/xui_panels.yaml
 config/saml.yaml
 config/saml-sp.crt
 config/saml-sp.key
-*.log
+
+# Frontend dependencies and build output
 node_modules/
 /web/dist/
 
@@ -20,7 +41,11 @@ node_modules/
 internal/web/dist/*
 !internal/web/dist/.gitkeep
 
-# Reference YAML containing real credentials — never commit.
+# Reference YAML containing real credentials - never commit.
 user_*.yaml
 samples/
 private/
+
+# Editor/IDE
+.idea/
+.vscode/
