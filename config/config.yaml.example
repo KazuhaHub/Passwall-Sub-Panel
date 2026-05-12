@@ -1,0 +1,50 @@
+# Passwall-Sub-Panel main config example.
+# Copy to config.yaml and fill in jwt_secret + mysql.dsn (or set them via env).
+
+listen: ":8787"
+
+# Generate (PowerShell):
+#   -join ((48..57)+(65..90)+(97..122) | Get-Random -Count 48 | % {[char]$_})
+# or set env PSP_JWT_SECRET instead.
+jwt_secret: "CHANGE-ME-TO-RANDOM-48-CHAR-STRING"
+
+# Subscription URL base for the admin UI to display copyable links.
+sub_base_url: "https://sub.example.com"
+
+# YAML config directory (rule_sets, templates, xui_panels.yaml, saml.yaml).
+config_dir: "./config"
+
+# Runtime data dir (currently unused; reserved for future).
+data_dir: "./data"
+
+mysql:
+  # Database connection. Three accepted shapes:
+  #   - leave empty / unset           → SQLite at <data_dir>/panel.db (zero-config)
+  #   - "sqlite:./data/panel.db"      → SQLite at the given path
+  #   - "user:pw@tcp(host:3306)/db?…" → MySQL via go-sql-driver DSN
+  # Can also be set via env PSP_MYSQL_DSN (takes precedence).
+  dsn: ""
+
+# Reconciliation / traffic poll cadence (layered design — see ARCHITECTURE.md §9.4).
+cron:
+  traffic_pull_minutes: 5      # L2: traffic poll + light drift check
+  reconcile_minutes: 15        # L3: full reconciliation
+
+jwt:
+  access_ttl_minutes: 120
+  refresh_ttl_minutes: 10080   # 7 days
+  issuer: "passwall-sub-panel"
+
+rate_limit:
+  sub_per_ip_per_min: 60       # /sub/:token rate per client IP
+  login_per_ip_per_min: 5      # /api/auth/local/login per client IP
+
+# Defaults applied when admin creates a new user without overriding.
+new_user_defaults:
+  expire_days: 30              # 0 = never expire
+  traffic_limit_gb: 0          # 0 = unlimited
+  traffic_reset_period: "monthly"  # never | monthly | quarterly
+
+# Optional explicit paths for side-configs. Default values shown.
+# xui_panels_file: "./config/xui_panels.yaml"
+# saml_file: "./config/saml.yaml"

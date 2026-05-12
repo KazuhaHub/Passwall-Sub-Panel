@@ -1,0 +1,26 @@
+data/
+*.exe
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+.idea/
+.vscode/
+config/config.yaml
+config/users.yaml
+config/xui_panels.yaml
+config/saml.yaml
+config/saml-sp.crt
+config/saml-sp.key
+*.log
+node_modules/
+/web/dist/
+
+# Frontend build output is generated; only the embed placeholder is tracked.
+internal/web/dist/*
+!internal/web/dist/.gitkeep
+
+# Reference YAML containing real credentials — never commit.
+user_*.yaml
+samples/
+private/

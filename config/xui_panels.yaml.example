@@ -1,0 +1,25 @@
+# 3X-UI panel credentials. This file should be chmod 0600 in production.
+#
+# Each entry registers one 3X-UI panel. Nodes are linked to a panel by `name`.
+# Auth priority:
+#   - api_token (Bearer)  -> preferred, no login round-trip
+#   - username + password -> fallback, the client logs in and caches the cookie
+#
+# Sensitive fields may be AES-GCM encrypted. To do so, prefix the value with
+# "enc:" and supply the AES key via env PSP_SECRET_KEY. The CLI tool ships a
+# `psp encrypt` helper to produce the prefixed string.
+
+panels:
+  - name: default
+    url: "https://your-3x-ui.example.com:54321"
+    # Either api_token, or username + password.
+    api_token: "REPLACE_OR_DELETE_THIS_LINE"
+    username: ""
+    password: ""
+    remark: "Primary 3X-UI panel"
+
+  # Example of an encrypted password entry:
+  # - name: backup
+  #   url: "https://backup.example.com:54321"
+  #   username: "admin"
+  #   password: "enc:BASE64-AES-GCM-CIPHERTEXT-HERE"

@@ -1,0 +1,43 @@
+# SAML SSO configuration (optional). If the file is absent or enabled=false,
+# the panel falls back to local-account login only.
+#
+# The SP metadata XML is served at /api/auth/saml/metadata once enabled — you
+# can copy that URL into Entra ID to provision the SP-side automatically.
+
+enabled: false
+
+sp:
+  entity_id: "https://sub.example.com/saml/metadata"
+  acs_url: "https://sub.example.com/api/auth/saml/acs"
+  # SP signing key/cert (used for AuthnRequest signing and Response verification).
+  # Generate with:
+  #   openssl req -x509 -newkey rsa:2048 -nodes -keyout saml-sp.key -out saml-sp.crt \
+  #     -days 3650 -subj "/CN=passwall-sub-panel-sp"
+  cert_pem_path: "./config/saml-sp.crt"
+  key_pem_path: "./config/saml-sp.key"
+
+idp:
+  # Entra ID federation metadata URL — replace {tenant-id}.
+  metadata_url: "https://login.microsoftonline.com/{tenant-id}/federationmetadata/2007-06/federationmetadata.xml"
+  metadata_refresh_interval: "24h"
+
+# SAML attribute claim URIs. Defaults match Microsoft Entra ID's defaults.
+attribute_mapping:
+  upn: "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/upn"
+  email: "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress"
+  display_name: "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/displayname"
+  groups: "http://schemas.microsoft.com/ws/2008/06/identity/claims/groups"
+
+# Entra ID Group Object IDs. A user receives the panel admin role if their
+# SAML groups intersect this list.
+admin_group_ids:
+  - "00000000-0000-0000-0000-000000000001"
+
+# Default group (by slug) for first-time SSO users.
+default_group_slug: "default"
+
+# Defaults applied when a new SSO user is auto-provisioned.
+new_user_defaults:
+  traffic_limit_bytes: 0       # 0 = unlimited
+  expire_days: 30              # 0 = never
+  traffic_reset_period: "monthly"

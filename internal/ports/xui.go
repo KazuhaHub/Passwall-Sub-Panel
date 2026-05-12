@@ -1,0 +1,126 @@
+package ports
+
+import "context"
+
+// XUIClient is the abstract HTTP client for a single 3X-UI panel. The service
+// layer never instantiates this directly — it routes through XUIPool by
+// panel name.
+type XUIClient interface {
+	// Inbound CRUD
+	ListInbounds(ctx context.Context) ([]Inbound, error)
+	GetInbound(ctx context.Context, id int) (*Inbound, error)
+	AddInbound(ctx context.Context, spec InboundSpec) (int, error)
+	UpdateInbound(ctx context.Context, id int, spec InboundSpec) error
+	DelInbound(ctx context.Context, id int) error
+	SetInboundEnable(ctx context.Context, id int, enable bool) error
+
+	// Client CRUD. Implementations use a read-modify-write strategy
+	// internally so existing clients in the inbound are preserved.
+	AddClient(ctx context.Context, inboundID int, spec ClientSpec) error
+	UpdateClient(ctx context.Context, inboundID int, clientUUID string, spec ClientSpec) error
+	DelClient(ctx context.Context, inboundID int, clientUUID string) error
+	DelClientByEmail(ctx context.Context, inboundID int, email string) error
+	CopyClients(ctx context.Context, srcInboundID, dstInboundID int, emails []string) error
+
+	// Traffic
+	GetClientTraffic(ctx context.Context, email string) ([]ClientTraffic, error) // aggregated across inbounds
+	GetInboundTraffics(ctx context.Context, id int) ([]ClientTraffic, error)
+	ResetClientTraffic(ctx context.Context, inboundID int, email string) error
+
+	// GetInboundClients returns the parsed client list from inbound.settings.
+	// Useful for the "claim existing client" admin flow where the panel
+	// needs the uuid associated with a particular email before recording
+	// ownership.
+	GetInboundClients(ctx context.Context, inboundID int) ([]ClientDetail, error)
+}
+
+// ClientDetail is a normalised view of one inbound.settings.clients[] entry.
+// Fields not applicable to the underlying protocol come back zero.
+type ClientDetail struct {
+	ID         string // uuid (VLESS / VMess) or empty for SS
+	Email      string
+	Enable     bool
+	Flow       string
+	Password   string // Trojan / SS / SS-2022 user PSK
+	ExpiryTime int64
+	TotalGB    int64
+}
+
+// Inbound is the DTO returned by 3X-UI inbound endpoints. The Settings,
+// StreamSettings, Sniffing and Allocate fields are JSON strings (not parsed
+// here) because their shape varies by protocol.
+type Inbound struct {
+	ID             int
+	Up             int64
+	Down           int64
+	Total          int64
+	Remark         string
+	Enable         bool
+	ExpiryTime     int64
+	Listen         string
+	Port           int
+	Protocol       string
+	Settings       string
+	StreamSettings string
+	Tag            string
+	Sniffing       string
+	Allocate       string
+	ClientStats    []ClientTraffic
+}
+
+// InboundSpec is the request payload for AddInbound / UpdateInbound.
+type InboundSpec struct {
+	Remark         string
+	Enable         bool
+	Listen         string
+	Port           int
+	Protocol       string
+	Settings       string
+	StreamSettings string
+	Sniffing       string
+	Allocate       string
+	ExpiryTime     int64
+}
+
+// ClientSpec is the set of fields used when adding or updating a client.
+// Field meaning depends on the inbound protocol:
+//   - VLESS / VMess: ID holds the UUID (mapped to JSON "id" field)
+//   - Trojan: Password holds the password
+//   - Shadowsocks / SS-2022: Password holds the PSK
+type ClientSpec struct {
+	ID         string // UUID (VLESS/VMess)
+	Email      string
+	Enable     bool
+	Flow       string // e.g. "xtls-rprx-vision"
+	LimitIP    int
+	TotalGB    int64 // bytes; panel manages traffic, keep this at 0
+	ExpiryTime int64 // ms epoch; panel manages expiry, keep this at 0
+	SubID      string
+	TgID       string
+	Reset      int
+
+	// Protocol-specific
+	Password string // Trojan / SS / SS-2022
+	Method   string // SS / SS-2022 cipher
+}
+
+// ClientTraffic is the per-client traffic entry returned by 3X-UI.
+type ClientTraffic struct {
+	ID         int
+	InboundID  int
+	Email      string
+	Up         int64
+	Down       int64
+	Total      int64
+	Enable     bool
+	ExpiryTime int64
+	Reset      int
+}
+
+// XUIPool routes write/read calls to the appropriate 3X-UI client by panel
+// name. Multi-panel deployments require all service code to go through Pool.Get
+// rather than holding a XUIClient reference directly.
+type XUIPool interface {
+	Get(panelName string) (XUIClient, error)
+	List() []string
+}

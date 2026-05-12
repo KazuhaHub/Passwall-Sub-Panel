@@ -1,0 +1,34 @@
+[Unit]
+Description=Passwall-Sub-Panel
+Documentation=https://github.com/KazuhaHub/Passwall-Sub-Panel
+After=network-online.target mysql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=passwall-sub-panel
+Group=passwall-sub-panel
+WorkingDirectory=/opt/passwall-sub-panel
+# Place secrets and DSN here (chmod 600):
+#   PSP_SECRET_KEY=...
+#   PSP_MYSQL_DSN=user:pass@tcp(127.0.0.1:3306)/psp?...
+#   PSP_JWT_SECRET=...
+EnvironmentFile=/opt/passwall-sub-panel/.env
+ExecStart=/opt/passwall-sub-panel/panel
+Restart=on-failure
+RestartSec=5
+LimitNOFILE=65536
+
+# Hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/passwall-sub-panel/data
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+
+[Install]
+WantedBy=multi-user.target

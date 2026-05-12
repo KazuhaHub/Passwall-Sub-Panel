@@ -1,0 +1,33 @@
+.git/
+.github/
+.idea/
+.vscode/
+data/
+*.log
+docs/
+*.md
+LICENSE
+
+# Frontend artefacts — rebuilt inside the image.
+web/node_modules/
+web/dist/
+internal/web/dist/*
+!internal/web/dist/.gitkeep
+
+# Local secrets / examples.
+config/config.yaml
+config/users.yaml
+config/xui_panels.yaml
+config/saml.yaml
+config/saml-sp.crt
+config/saml-sp.key
+user_*.yaml
+samples/
+private/
+
+# Build artefacts.
+*.exe
+*.db
+*.db-journal
+*.db-wal
+*.db-shm

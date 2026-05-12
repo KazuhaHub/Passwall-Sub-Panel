@@ -1,0 +1,67 @@
+package mysql
+
+import (
+	"context"
+	"time"
+
+	"gorm.io/gorm"
+
+	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
+)
+
+type trafficRepo struct{ db *gorm.DB }
+
+func (r *trafficRepo) Insert(ctx context.Context, s *domain.TrafficSnapshot) error {
+	row := trafficRow{
+		UserID:     s.UserID,
+		UpBytes:    s.UpBytes,
+		DownBytes:  s.DownBytes,
+		TotalBytes: s.TotalBytes,
+		CapturedAt: s.CapturedAt,
+	}
+	if err := r.db.WithContext(ctx).Create(&row).Error; err != nil {
+		return err
+	}
+	s.ID = row.ID
+	return nil
+}
+
+func (r *trafficRepo) LatestForUser(ctx context.Context, userID int64) (*domain.TrafficSnapshot, error) {
+	var row trafficRow
+	err := r.db.WithContext(ctx).
+		Where("user_id = ?", userID).
+		Order("id DESC").
+		First(&row).Error
+	if err != nil {
+		return nil, wrapNotFound(err)
+	}
+	return row.toDomain(), nil
+}
+
+func (r *trafficRepo) LastBefore(ctx context.Context, userID int64, before time.Time) (*domain.TrafficSnapshot, error) {
+	var row trafficRow
+	err := r.db.WithContext(ctx).
+		Where("user_id = ? AND captured_at < ?", userID, before).
+		Order("captured_at DESC").
+		First(&row).Error
+	if err != nil {
+		return nil, wrapNotFound(err)
+	}
+	return row.toDomain(), nil
+}
+
+func (r *trafficRepo) ListByUser(ctx context.Context, userID int64, since, until time.Time) ([]*domain.TrafficSnapshot, error) {
+	var rows []trafficRow
+	err := r.db.WithContext(ctx).
+		Where("user_id = ? AND captured_at BETWEEN ? AND ?", userID, since, until).
+		Order("captured_at ASC").
+		Find(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*domain.TrafficSnapshot, len(rows))
+	for i := range rows {
+		out[i] = rows[i].toDomain()
+	}
+	return out, nil
+}

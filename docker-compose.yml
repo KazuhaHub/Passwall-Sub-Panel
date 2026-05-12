@@ -1,0 +1,21 @@
+services:
+  panel:
+    build: .
+    image: passwall-sub-panel:latest
+    container_name: passwall-sub-panel
+    restart: unless-stopped
+    # Bind to localhost only; let the host's Nginx terminate TLS and proxy.
+    ports:
+      - "127.0.0.1:8787:8787"
+    volumes:
+      - ./config:/app/config:ro
+      - ./data:/app/data
+    environment:
+      # PSP_CONFIG points at the main config file inside the container.
+      PSP_CONFIG: /app/config/config.yaml
+      # PSP_SECRET_KEY decrypts the "enc:..." fields in xui_panels.yaml.
+      # Generate with: openssl rand -hex 16
+      PSP_SECRET_KEY: ${PSP_SECRET_KEY}
+      # MySQL DSN overrides the one in config.yaml if set.
+      PSP_MYSQL_DSN: ${PSP_MYSQL_DSN}
+      PSP_JWT_SECRET: ${PSP_JWT_SECRET}
