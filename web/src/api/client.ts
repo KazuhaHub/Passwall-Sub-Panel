@@ -20,6 +20,10 @@ client.interceptors.request.use((config) => {
 // doesn't spam the user with the same warning.
 let lastSyncPendingToast = 0
 
+function responseErrorMessage(err: any): string {
+  return err.response?.data?.error || err.message || 'request failed'
+}
+
 client.interceptors.response.use(
   (res) => {
     // Backend signals "operation succeeded synchronously on the panel
@@ -39,13 +43,16 @@ client.interceptors.response.use(
     if (err.response?.status === 401) {
       sessionStorage.removeItem('psp_access')
       sessionStorage.removeItem('psp_refresh')
-      if (location.pathname !== '/login') {
+      const onLoginPage = location.pathname === '/login' || location.pathname.startsWith('/login/')
+      if (onLoginPage) {
+        ElMessage.error(responseErrorMessage(err))
+      } else {
         location.href = '/login'
       }
     } else if (err.response?.data?.error) {
-      ElMessage.error(err.response.data.error)
+      ElMessage.error(responseErrorMessage(err))
     } else {
-      ElMessage.error(err.message || 'request failed')
+      ElMessage.error(responseErrorMessage(err))
     }
     return Promise.reject(err)
   },

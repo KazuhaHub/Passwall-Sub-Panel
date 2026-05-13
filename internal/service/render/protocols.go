@@ -41,7 +41,7 @@ func emitProxy(displayName string, n *domain.Node, u *domain.User, inb *ports.In
 
 	switch protocol {
 	case domain.ProtoVLESS:
-		return emitVLESS(base, u.UUID, stream), nil
+		return emitVLESS(base, u.UUID, stream, n.Flow), nil
 	case domain.ProtoVMess:
 		return emitVMess(base, u.UUID, stream), nil
 	case domain.ProtoTrojan:
@@ -69,7 +69,7 @@ func emitSeparator(name string) map[string]any {
 	}
 }
 
-func emitVLESS(base map[string]any, uuid string, stream xuiStreamSettings) map[string]any {
+func emitVLESS(base map[string]any, uuid string, stream xuiStreamSettings, flow string) map[string]any {
 	base["type"] = "vless"
 	base["uuid"] = uuid
 	base["network"] = defaultStr(stream.Network, "tcp")
@@ -77,7 +77,7 @@ func emitVLESS(base map[string]any, uuid string, stream xuiStreamSettings) map[s
 	switch stream.Security {
 	case "reality":
 		base["tls"] = true
-		base["flow"] = "xtls-rprx-vision"
+		base["flow"] = defaultStr(flow, "xtls-rprx-vision")
 		if stream.RealitySettings != nil {
 			base["client-fingerprint"] = defaultStr(stream.RealitySettings.Settings.Fingerprint, "chrome")
 			base["servername"] = first(stream.RealitySettings.ServerNames)

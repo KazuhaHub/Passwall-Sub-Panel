@@ -71,9 +71,6 @@ func (r *userRepo) List(ctx context.Context, filter ports.UserFilter) ([]*domain
 	if filter.GroupID != nil {
 		q = q.Where("group_id = ?", *filter.GroupID)
 	}
-	if filter.Source != nil {
-		q = q.Where("source = ?", string(*filter.Source))
-	}
 	if filter.Role != nil {
 		q = q.Where("role = ?", string(*filter.Role))
 	}

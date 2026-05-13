@@ -96,11 +96,6 @@ function handleUserCommand(cmd: string) {
         </div>
         
         <div class="header-actions">
-          <div class="search-bar">
-            <el-icon><Search /></el-icon>
-            <input type="text" placeholder="搜索资源...">
-          </div>
-          
           <el-button text circle @click="toggleTheme" style="font-size: 18px; color: var(--text-muted); margin-left: 8px;">
             <el-icon><component :is="isDark ? 'Moon' : 'Sunny'" /></el-icon>
           </el-button>
@@ -279,33 +274,6 @@ function handleUserCommand(cmd: string) {
   gap: 24px;
 }
 
-.search-bar {
-  display: flex;
-  align-items: center;
-  background: var(--card-bg);
-  padding: 8px 16px;
-  border-radius: 20px;
-  border: 1px solid var(--header-border);
-  transition: var(--transition);
-  color: var(--text-muted);
-}
-
-.search-bar:focus-within {
-  border-color: #6366f1;
-  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.1);
-  color: #6366f1;
-}
-
-.search-bar input {
-  border: none;
-  background: none;
-  outline: none;
-  margin-left: 8px;
-  font-size: 14px;
-  color: var(--text-main);
-  width: 150px;
-}
-
 .user-profile {
   display: flex;
   align-items: center;
@@ -392,10 +360,6 @@ function handleUserCommand(cmd: string) {
   
   .desktop-only {
     display: none !important;
-  }
-  
-  .search-bar {
-    display: none;
   }
   
   .header {

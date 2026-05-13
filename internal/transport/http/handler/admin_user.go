@@ -32,7 +32,6 @@ type userDTO struct {
 	Username           string                    `json:"username"`
 	DisplayName        string                    `json:"display_name,omitempty"`
 	UPN                string                    `json:"upn,omitempty"`
-	Source             domain.UserSource         `json:"source"`
 	Role               domain.Role               `json:"role"`
 	GroupID            int64                     `json:"group_id"`
 	UUID               string                    `json:"uuid"`
@@ -314,7 +313,6 @@ func (h *AdminUserHandler) toDTO(ctx context.Context, u *domain.User) userDTO {
 		Username:           u.Username,
 		DisplayName:        u.DisplayName,
 		UPN:                u.UPN,
-		Source:             u.Source,
 		Role:               u.Role,
 		GroupID:            u.GroupID,
 		UUID:               u.UUID,

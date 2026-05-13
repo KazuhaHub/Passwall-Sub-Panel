@@ -148,12 +148,15 @@ onMounted(load)
 .psp-json {
   font-family: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
   font-size: 12px;
-  background: #f5f7fa;
-  padding: 8px;
-  border-radius: 4px;
+  line-height: 1.55;
+  background: var(--code-bg);
+  color: var(--text-main);
+  border: 1px solid var(--code-border);
+  padding: 10px;
+  border-radius: 8px;
   max-height: 240px;
   overflow: auto;
-  white-space: pre-wrap;
-  word-break: break-all;
+  white-space: pre;
+  word-break: normal;
 }
 </style>

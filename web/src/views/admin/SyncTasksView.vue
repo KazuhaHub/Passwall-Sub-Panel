@@ -16,7 +16,7 @@ const total = ref(0)
 const page = ref(1)
 const pageSize = ref(50)
 const loading = ref(false)
-const statusFilter = ref<SyncTaskStatus | ''>('pending')
+const statusFilter = ref<SyncTaskStatus | ''>('')
 const typeFilter = ref<SyncTaskType | ''>('')
 const selectedItems = ref<SyncTask[]>([])
 const batchBusy = ref<'retry' | 'cancel' | ''>('')
@@ -193,7 +193,7 @@ onMounted(load)
     <div class="psp-page-header">
       <div>
         <div class="psp-page-title">同步任务</div>
-        <div class="task-subtitle">等待重试：{{ pendingCount }}</div>
+        <div class="task-subtitle">当前列表等待重试：{{ pendingCount }}</div>
       </div>
       <div style="display: flex; gap: 8px;">
         <el-button type="danger" plain @click="purgeFinished">一键清空</el-button>
@@ -313,13 +313,16 @@ onMounted(load)
 .task-json {
   font-family: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
   font-size: 12px;
-  background: #f5f7fa;
+  line-height: 1.55;
+  background: var(--code-bg);
+  color: var(--text-main);
+  border: 1px solid var(--code-border);
   padding: 12px;
-  border-radius: 4px;
+  border-radius: 8px;
   max-height: 520px;
   overflow: auto;
-  white-space: pre-wrap;
-  word-break: break-all;
+  white-space: pre;
+  word-break: normal;
 }
 
 .selection-count {

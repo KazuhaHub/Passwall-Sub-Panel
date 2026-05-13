@@ -26,7 +26,6 @@ type UserFilter struct {
 	Pagination
 	Search  string
 	GroupID *int64
-	Source  *domain.UserSource
 	Role    *domain.Role
 	Enabled *bool
 }

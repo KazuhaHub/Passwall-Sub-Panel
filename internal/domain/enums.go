@@ -1,12 +1,5 @@
 package domain
 
-type UserSource string
-
-const (
-	UserSourceLocal UserSource = "local"
-	UserSourceSSO   UserSource = "sso"
-)
-
 type Role string
 
 const (
@@ -25,12 +18,12 @@ const (
 type AutoDisabledReason string
 
 const (
-	DisabledNone             AutoDisabledReason = ""
-	DisabledTrafficExceeded  AutoDisabledReason = "traffic_exceeded"
-	DisabledExpired          AutoDisabledReason = "expired"
-	DisabledManual           AutoDisabledReason = "manual"
-	DisabledPendingDelete    AutoDisabledReason = "pending_delete"
-	DisabledPendingApproval  AutoDisabledReason = "pending_approval"
+	DisabledNone            AutoDisabledReason = ""
+	DisabledTrafficExceeded AutoDisabledReason = "traffic_exceeded"
+	DisabledExpired         AutoDisabledReason = "expired"
+	DisabledManual          AutoDisabledReason = "manual"
+	DisabledPendingDelete   AutoDisabledReason = "pending_delete"
+	DisabledPendingApproval AutoDisabledReason = "pending_approval"
 )
 
 // Protocol identifies a 3X-UI inbound's protocol family.

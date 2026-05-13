@@ -31,7 +31,6 @@ func TestCreateLocalUsersWithBlankUPN(t *testing.T) {
 	users := []*domain.User{
 		{
 			Username:           "alice",
-			Source:             domain.UserSourceLocal,
 			PasswordHash:       "hash",
 			Role:               domain.RoleUser,
 			SubToken:           "sub-token-alice",
@@ -42,7 +41,6 @@ func TestCreateLocalUsersWithBlankUPN(t *testing.T) {
 		},
 		{
 			Username:           "bob",
-			Source:             domain.UserSourceLocal,
 			PasswordHash:       "hash",
 			Role:               domain.RoleUser,
 			SubToken:           "sub-token-bob",

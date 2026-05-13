@@ -199,7 +199,7 @@ func (s *Service) clientMissing(ctx context.Context, c ports.XUIClient, inboundI
 // On success the ownership table is updated so subsequent operations use
 // the new uuid as the path key.
 func (s *Service) RotateClientUUID(ctx context.Context, panelID int64, inboundID int,
-	email string, protocol domain.Protocol, oldUUID, newUUID string, enable bool, expireTime int64) error {
+	email string, protocol domain.Protocol, oldUUID, newUUID, flow string, enable bool, expireTime int64) error {
 
 	if err := s.ensureClientOwned(ctx, panelID, inboundID, email); err != nil {
 		return err
@@ -208,7 +208,7 @@ func (s *Service) RotateClientUUID(ctx context.Context, panelID int64, inboundID
 	if err != nil {
 		return err
 	}
-	spec := buildClientSpec(protocol, newUUID, email, "", expireTime)
+	spec := buildClientSpec(protocol, newUUID, email, flow, expireTime)
 	spec.Enable = enable
 	if err := c.UpdateClient(ctx, inboundID, oldUUID, spec); err != nil {
 		return fmt.Errorf("xui rotate uuid: %w", err)
@@ -223,7 +223,7 @@ func (s *Service) RotateClientUUID(ctx context.Context, panelID int64, inboundID
 // still matches what 3X-UI has. Uuid mismatch is handled by
 // RotateClientUUID, which takes both old and new uuids.
 func (s *Service) SetOwnedClientEnable(ctx context.Context, panelID int64, inboundID int,
-	email string, protocol domain.Protocol, userUUID string, enable bool, expireTime int64) error {
+	email string, protocol domain.Protocol, userUUID, flow string, enable bool, expireTime int64) error {
 
 	if err := s.ensureClientOwned(ctx, panelID, inboundID, email); err != nil {
 		return err
@@ -232,7 +232,7 @@ func (s *Service) SetOwnedClientEnable(ctx context.Context, panelID int64, inbou
 	if err != nil {
 		return err
 	}
-	spec := buildClientSpec(protocol, userUUID, email, "", expireTime)
+	spec := buildClientSpec(protocol, userUUID, email, flow, expireTime)
 	spec.Enable = enable
 	return c.UpdateClient(ctx, inboundID, userUUID, spec)
 }

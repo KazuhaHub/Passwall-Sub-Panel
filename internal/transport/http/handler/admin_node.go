@@ -37,10 +37,25 @@ type nodeDTO struct {
 	InboundID     int      `json:"inbound_id"`
 	DisplayName   string   `json:"display_name"`
 	ServerAddress string   `json:"server_address"`
+	Flow          string   `json:"flow,omitempty"`
 	Region        string   `json:"region"`
 	Tags          []string `json:"tags"`
 	SortOrder     int      `json:"sort_order"`
 	Enabled       bool     `json:"enabled"`
+}
+
+type inboundDTO struct {
+	ID             int    `json:"id"`
+	Remark         string `json:"remark"`
+	Enable         bool   `json:"enable"`
+	Listen         string `json:"listen"`
+	Port           int    `json:"port"`
+	Protocol       string `json:"protocol"`
+	Settings       string `json:"settings"`
+	StreamSettings string `json:"stream_settings"`
+	Sniffing       string `json:"sniffing"`
+	Allocate       string `json:"allocate"`
+	ExpiryTime     int64  `json:"expiry_time"`
 }
 
 type importNodeRequest struct {
@@ -48,6 +63,7 @@ type importNodeRequest struct {
 	InboundID     int      `json:"inbound_id" binding:"required"`
 	DisplayName   string   `json:"display_name" binding:"required"`
 	ServerAddress string   `json:"server_address" binding:"required"`
+	Flow          string   `json:"flow"`
 	Region        string   `json:"region" binding:"required"`
 	Tags          []string `json:"tags"`
 	SortOrder     int      `json:"sort_order"`
@@ -57,6 +73,7 @@ type createNodeRequest struct {
 	PanelID       int64          `json:"panel_id" binding:"required"`
 	DisplayName   string         `json:"display_name" binding:"required"`
 	ServerAddress string         `json:"server_address" binding:"required"`
+	Flow          string         `json:"flow"`
 	Region        string         `json:"region" binding:"required"`
 	Tags          []string       `json:"tags"`
 	SortOrder     int            `json:"sort_order"`
@@ -73,11 +90,13 @@ type inboundSpecDTO struct {
 	StreamSettings string `json:"stream_settings"`
 	Sniffing       string `json:"sniffing"`
 	Allocate       string `json:"allocate"`
+	ExpiryTime     int64  `json:"expiry_time"`
 }
 
 type updateMetadataRequest struct {
 	DisplayName   string   `json:"display_name"`
 	ServerAddress string   `json:"server_address"`
+	Flow          string   `json:"flow"`
 	Region        string   `json:"region"`
 	Tags          []string `json:"tags"`
 	SortOrder     int      `json:"sort_order"`
@@ -126,21 +145,37 @@ func (h *AdminNodeHandler) Get(c *gin.Context) {
 		return
 	}
 
+	inbound, inboundErr := h.node.GetInboundConfig(c.Request.Context(), id)
+
 	// Bundle the inbound clients so the detail page only needs one round-trip.
 	clients, err := h.node.ListClientsOfInbound(c.Request.Context(), id, h.ownership)
 	if err != nil {
 		// Detail without clients is still useful; surface the error but don't 500.
-		c.JSON(http.StatusOK, gin.H{
+		out := gin.H{
 			"node":          h.toNodeDTO(c.Request.Context(), n),
 			"clients":       []any{},
 			"clients_error": err.Error(),
-		})
+		}
+		if inbound != nil {
+			out["inbound"] = toInboundDTO(inbound)
+		}
+		if inboundErr != nil {
+			out["inbound_error"] = inboundErr.Error()
+		}
+		c.JSON(http.StatusOK, out)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{
+	out := gin.H{
 		"node":    h.toNodeDTO(c.Request.Context(), n),
 		"clients": clients,
-	})
+	}
+	if inbound != nil {
+		out["inbound"] = toInboundDTO(inbound)
+	}
+	if inboundErr != nil {
+		out["inbound_error"] = inboundErr.Error()
+	}
+	c.JSON(http.StatusOK, out)
 }
 
 func (h *AdminNodeHandler) ImportExisting(c *gin.Context) {
@@ -154,6 +189,7 @@ func (h *AdminNodeHandler) ImportExisting(c *gin.Context) {
 		InboundID:     req.InboundID,
 		DisplayName:   req.DisplayName,
 		ServerAddress: req.ServerAddress,
+		Flow:          req.Flow,
 		Region:        req.Region,
 		Tags:          req.Tags,
 		SortOrder:     req.SortOrder,
@@ -175,6 +211,7 @@ func (h *AdminNodeHandler) CreateInbound(c *gin.Context) {
 		PanelID:       req.PanelID,
 		DisplayName:   req.DisplayName,
 		ServerAddress: req.ServerAddress,
+		Flow:          req.Flow,
 		Region:        req.Region,
 		Tags:          req.Tags,
 		SortOrder:     req.SortOrder,
@@ -189,6 +226,7 @@ func (h *AdminNodeHandler) CreateInbound(c *gin.Context) {
 		StreamSettings: req.Inbound.StreamSettings,
 		Sniffing:       req.Inbound.Sniffing,
 		Allocate:       req.Inbound.Allocate,
+		ExpiryTime:     req.Inbound.ExpiryTime,
 	}
 	if err := h.node.CreateInbound(c.Request.Context(), n, spec); err != nil {
 		mapNodeServiceError(c, err)
@@ -223,6 +261,7 @@ func (h *AdminNodeHandler) UpdateMetadata(c *gin.Context) {
 	if req.ServerAddress != "" {
 		n.ServerAddress = req.ServerAddress
 	}
+	n.Flow = req.Flow
 	if req.Region != "" {
 		n.Region = req.Region
 	}
@@ -258,6 +297,7 @@ func (h *AdminNodeHandler) UpdateInboundConfig(c *gin.Context) {
 		StreamSettings: req.StreamSettings,
 		Sniffing:       req.Sniffing,
 		Allocate:       req.Allocate,
+		ExpiryTime:     req.ExpiryTime,
 	}
 	if err := h.node.UpdateInboundConfig(c.Request.Context(), id, spec); err != nil {
 		mapNodeServiceError(c, err)
@@ -363,10 +403,27 @@ func (h *AdminNodeHandler) toNodeDTO(ctx context.Context, n *domain.Node) nodeDT
 		InboundID:     n.InboundID,
 		DisplayName:   n.DisplayName,
 		ServerAddress: n.ServerAddress,
+		Flow:          n.Flow,
 		Region:        n.Region,
 		Tags:          n.Tags,
 		SortOrder:     n.SortOrder,
 		Enabled:       n.Enabled,
+	}
+}
+
+func toInboundDTO(inb *ports.Inbound) inboundDTO {
+	return inboundDTO{
+		ID:             inb.ID,
+		Remark:         inb.Remark,
+		Enable:         inb.Enable,
+		Listen:         inb.Listen,
+		Port:           inb.Port,
+		Protocol:       inb.Protocol,
+		Settings:       inb.Settings,
+		StreamSettings: inb.StreamSettings,
+		Sniffing:       inb.Sniffing,
+		Allocate:       inb.Allocate,
+		ExpiryTime:     inb.ExpiryTime,
 	}
 }
 

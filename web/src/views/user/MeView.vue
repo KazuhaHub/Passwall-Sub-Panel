@@ -327,11 +327,6 @@ onMounted(load)
   border-radius: 6px;
 }
 
-.source-tag {
-  background: rgba(148, 163, 184, 0.1);
-  color: var(--text-muted);
-}
-
 .status-tag.active {
   background: rgba(16, 185, 129, 0.1);
   color: #10b981;

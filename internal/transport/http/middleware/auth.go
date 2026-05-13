@@ -81,7 +81,6 @@ func RequireAuth(svc *auth.Service, users UserLookup) gin.HandlerFunc {
 		// RequireRole checks downstream.
 		claims.Role = u.Role
 		claims.Username = u.Username
-		claims.Source = u.Source
 		c.Set(CtxClaims, claims)
 		c.Set(CtxUserID, claims.UserID)
 		c.Next()
@@ -92,7 +91,6 @@ type authUserSnapshot struct {
 	ID       int64
 	Username string
 	Role     domain.Role
-	Source   domain.UserSource
 	Enabled  bool
 }
 
@@ -124,7 +122,6 @@ func authUserFromDomain(u *domain.User) authUserSnapshot {
 		ID:       u.ID,
 		Username: u.Username,
 		Role:     u.Role,
-		Source:   u.Source,
 		Enabled:  u.Enabled,
 	}
 }

@@ -46,7 +46,7 @@ func (h *UserMeHandler) Profile(c *gin.Context) {
 	// users (no password to begin with) and for non-admin local users when
 	// the admin has flipped DisallowUserPasswordChange on. Admins always
 	// keep the option as a break-glass path.
-	canChangePassword := u.Source == domain.UserSourceLocal
+	canChangePassword := u.HasLocalPassword()
 	settings, settingsErr := h.settings.Load(c.Request.Context(), ports.UISettings{})
 	if canChangePassword && u.Role != domain.RoleAdmin {
 		if settingsErr == nil && settings.DisallowUserPasswordChange {
@@ -186,8 +186,8 @@ func (h *UserMeHandler) ChangePassword(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	if u.Source != domain.UserSourceLocal {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "only local accounts may change password here"})
+	if !u.HasLocalPassword() {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "account has no local password"})
 		return
 	}
 	// Optional admin-controlled lock that prevents non-admin local users

@@ -14,10 +14,9 @@ import (
 
 // Claims is the JWT payload issued by the panel.
 type Claims struct {
-	UserID   int64             `json:"uid"`
-	Username string            `json:"u"`
-	Role     domain.Role       `json:"r"`
-	Source   domain.UserSource `json:"src"`
+	UserID   int64       `json:"uid"`
+	Username string      `json:"u"`
+	Role     domain.Role `json:"r"`
 	jwt.RegisteredClaims
 }
 
@@ -97,24 +96,23 @@ func (i *Issuer) AccessTTL() time.Duration  { return i.params().AccessTTL }
 func (i *Issuer) RefreshTTL() time.Duration { return i.params().RefreshTTL }
 
 // IssueAccess signs and returns an access token.
-func (i *Issuer) IssueAccess(uid int64, username string, role domain.Role, src domain.UserSource) (string, error) {
+func (i *Issuer) IssueAccess(uid int64, username string, role domain.Role) (string, error) {
 	p := i.params()
-	return i.issue(uid, username, role, src, "access", p.AccessTTL, p.Issuer)
+	return i.issue(uid, username, role, "access", p.AccessTTL, p.Issuer)
 }
 
 // IssueRefresh signs and returns a refresh token.
-func (i *Issuer) IssueRefresh(uid int64, username string, role domain.Role, src domain.UserSource) (string, error) {
+func (i *Issuer) IssueRefresh(uid int64, username string, role domain.Role) (string, error) {
 	p := i.params()
-	return i.issue(uid, username, role, src, "refresh", p.RefreshTTL, p.Issuer)
+	return i.issue(uid, username, role, "refresh", p.RefreshTTL, p.Issuer)
 }
 
-func (i *Issuer) issue(uid int64, username string, role domain.Role, src domain.UserSource, sub string, ttl time.Duration, iss string) (string, error) {
+func (i *Issuer) issue(uid int64, username string, role domain.Role, sub string, ttl time.Duration, iss string) (string, error) {
 	now := time.Now()
 	claims := Claims{
 		UserID:   uid,
 		Username: username,
 		Role:     role,
-		Source:   src,
 		RegisteredClaims: jwt.RegisteredClaims{
 			Issuer:    iss,
 			Subject:   sub,

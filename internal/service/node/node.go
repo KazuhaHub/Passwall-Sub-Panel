@@ -84,6 +84,18 @@ func (s *Service) Get(ctx context.Context, id int64) (*domain.Node, error) {
 	return s.nodes.GetByID(ctx, id)
 }
 
+func (s *Service) GetInboundConfig(ctx context.Context, id int64) (*ports.Inbound, error) {
+	n, err := s.nodes.GetByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	c, err := s.pool.Get(n.PanelID)
+	if err != nil {
+		return nil, err
+	}
+	return c.GetInbound(ctx, n.InboundID)
+}
+
 func (s *Service) List(ctx context.Context) ([]*domain.Node, error) {
 	return s.nodes.List(ctx)
 }
@@ -146,6 +158,7 @@ func (s *Service) CreateInbound(ctx context.Context, n *domain.Node, spec ports.
 	if err := s.syncExistingUsersToNode(ctx, n); err != nil {
 		log.Warn("sync users on create", "node_id", n.ID, "err", err)
 	}
+	s.recordNodeTaskSucceeded(ctx, domain.SyncTaskNodeCreate, n, fmt.Sprintf("create node %s", n.DisplayName), spec)
 	return nil
 }
 
@@ -182,6 +195,7 @@ func (s *Service) UpdateInboundConfig(ctx context.Context, id int64, spec ports.
 	if err := c.UpdateInbound(ctx, n.InboundID, spec); err != nil {
 		return s.enqueueNodeTask(ctx, domain.SyncTaskNodeUpdate, n, "update node config", spec)
 	}
+	s.recordNodeTaskSucceeded(ctx, domain.SyncTaskNodeUpdate, n, fmt.Sprintf("update node config %s", n.DisplayName), spec)
 	return nil
 }
 
@@ -201,6 +215,7 @@ func (s *Service) SetEnabled(ctx context.Context, id int64, enabled bool) error 
 	if err := c.SetInboundEnable(ctx, n.InboundID, enabled); err != nil {
 		return s.enqueueNodeTask(ctx, domain.SyncTaskNodeSetEnabled, n, "sync node enabled state", map[string]bool{"enabled": enabled})
 	}
+	s.recordNodeTaskSucceeded(ctx, domain.SyncTaskNodeSetEnabled, n, fmt.Sprintf("sync node enabled state %s", n.DisplayName), map[string]bool{"enabled": enabled})
 	return nil
 }
 
@@ -374,6 +389,29 @@ func (s *Service) enqueueNodeTask(ctx context.Context, typ domain.SyncTaskType, 
 	})
 }
 
+func (s *Service) recordNodeTaskSucceeded(ctx context.Context, typ domain.SyncTaskType, n *domain.Node, summary string, payload any) {
+	if s.tasks == nil {
+		return
+	}
+	var payloadJSON string
+	if payload != nil {
+		if b, err := json.Marshal(payload); err == nil {
+			payloadJSON = string(b)
+		}
+	}
+	now := time.Now()
+	_ = s.tasks.Create(ctx, &domain.SyncTask{
+		Type:       typ,
+		Status:     domain.SyncTaskSucceeded,
+		TargetType: "node",
+		TargetID:   n.ID,
+		Summary:    summary,
+		Payload:    payloadJSON,
+		NextRunAt:  now,
+		FinishedAt: &now,
+	})
+}
+
 // nodeTaskBackoff returns a flat 1-minute retry interval — same rationale
 // as deleteTaskBackoff in user.go.
 func nodeTaskBackoff(_ int) time.Duration {
@@ -472,6 +510,9 @@ func (s *Service) inspectInbound(ctx context.Context, n *domain.Node) (*inboundI
 		}
 	} else {
 		info.protocol = crypto.DetectProtocol(inb.Protocol, "")
+	}
+	if info.flow == "" {
+		info.flow = n.Flow
 	}
 	// Reality default — when the inbound has no clients yet, settings.clients[]
 	// can't tell us the flow. VLESS+Reality effectively always wants

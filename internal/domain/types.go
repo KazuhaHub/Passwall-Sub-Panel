@@ -19,8 +19,7 @@ type User struct {
 	ID                 int64
 	Username           string // unique for local accounts
 	UPN                string // unique for SSO users (Entra ID UPN)
-	Source             UserSource
-	PasswordHash       string // bcrypt; only when Source == local
+	PasswordHash       string // bcrypt; present when the account has local-password login
 	Role               Role
 	SubToken           string // 32-byte base64url, subscription URL credential
 	UUID               string // v4, used as the derivation seed for proxy passwords
@@ -48,6 +47,13 @@ type User struct {
 // IsExpired reports whether ExpireAt is non-nil and earlier than t.
 func (u *User) IsExpired(t time.Time) bool {
 	return u.ExpireAt != nil && t.After(*u.ExpireAt)
+}
+
+// HasLocalPassword reports whether the user can authenticate through the
+// panel's local username/password flow. SSO-linked pre-created accounts keep
+// their password hash, so this deliberately does not mean "not SSO".
+func (u *User) HasLocalPassword() bool {
+	return u != nil && u.PasswordHash != ""
 }
 
 // ClientEmail builds the 3X-UI client.email for one (user, node) pair.
@@ -122,7 +128,8 @@ type SortEntry struct {
 
 // Node is the panel-side metadata for a 3X-UI inbound (1:1 mapping).
 // Protocol parameters (addr/port/TLS/Reality) are NOT stored here —
-// those live in 3X-UI and are fetched on demand.
+// those live in 3X-UI and are fetched on demand. Flow is the exception:
+// the panel owns it so managed VLESS clients can be kept consistent.
 //
 // ServerAddress is the public hostname that clients dial. 3X-UI inbounds
 // don't carry this on their own (their `listen` is a bind interface), so
@@ -134,6 +141,7 @@ type Node struct {
 	InboundID     int
 	DisplayName   string
 	ServerAddress string
+	Flow          string
 	Region        string
 	Tags          []string
 	SortOrder     int

@@ -22,7 +22,6 @@ type userRow struct {
 	ID                 int64   `gorm:"primaryKey;autoIncrement"`
 	Username           string  `gorm:"size:64;uniqueIndex;not null"`
 	UPN                *string `gorm:"size:255;uniqueIndex"`
-	Source             string  `gorm:"size:16;not null"`
 	PasswordHash       string  `gorm:"size:255"`
 	Role               string  `gorm:"size:16;not null;default:user"`
 	SubToken           string  `gorm:"size:64;uniqueIndex;not null"`
@@ -54,7 +53,6 @@ func (r *userRow) toDomain() *domain.User {
 		ID:                 r.ID,
 		Username:           r.Username,
 		UPN:                upn,
-		Source:             domain.UserSource(r.Source),
 		PasswordHash:       r.PasswordHash,
 		Role:               domain.Role(r.Role),
 		SubToken:           r.SubToken,
@@ -85,7 +83,6 @@ func userFromDomain(u *domain.User) *userRow {
 		ID:                 u.ID,
 		Username:           u.Username,
 		UPN:                upn,
-		Source:             string(u.Source),
 		PasswordHash:       u.PasswordHash,
 		Role:               string(u.Role),
 		SubToken:           u.SubToken,
@@ -151,6 +148,7 @@ type nodeRow struct {
 	InboundID     int    `gorm:"not null;uniqueIndex:uk_panel_inbound,priority:2"`
 	DisplayName   string `gorm:"size:255;not null"`
 	ServerAddress string `gorm:"size:255"`
+	Flow          string `gorm:"size:64"`
 	Region        string `gorm:"size:16;not null"`
 	Tags          jsonStrings
 	SortOrder     int  `gorm:"default:0"`
@@ -168,6 +166,7 @@ func (r *nodeRow) toDomain() *domain.Node {
 		InboundID:     r.InboundID,
 		DisplayName:   r.DisplayName,
 		ServerAddress: r.ServerAddress,
+		Flow:          r.Flow,
 		Region:        r.Region,
 		Tags:          []string(r.Tags),
 		SortOrder:     r.SortOrder,
@@ -184,6 +183,7 @@ func nodeFromDomain(n *domain.Node) *nodeRow {
 		InboundID:     n.InboundID,
 		DisplayName:   n.DisplayName,
 		ServerAddress: n.ServerAddress,
+		Flow:          n.Flow,
 		Region:        n.Region,
 		Tags:          jsonStrings(n.Tags),
 		SortOrder:     n.SortOrder,
@@ -519,7 +519,7 @@ func (j *jsonLayout) Scan(value any) error {
 // Keep schema changes centralized here instead of adding one-off schema update
 // helpers for every new field.
 func EnsureSchema(db *gorm.DB) error {
-	return db.AutoMigrate(
+	if err := db.AutoMigrate(
 		&userRow{},
 		&groupRow{},
 		&nodeRow{},
@@ -533,7 +533,15 @@ func EnsureSchema(db *gorm.DB) error {
 		&ruleSetRow{},
 		&samlConfigRow{},
 		&oidcConfigRow{},
-	)
+	); err != nil {
+		return err
+	}
+	if db.Migrator().HasColumn(&userRow{}, "source") {
+		if err := db.Migrator().DropColumn(&userRow{}, "source"); err != nil {
+			return fmt.Errorf("drop users.source: %w", err)
+		}
+	}
+	return nil
 }
 
 // wrapNotFound maps GORM's ErrRecordNotFound to domain.ErrNotFound so that

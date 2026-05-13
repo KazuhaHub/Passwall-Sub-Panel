@@ -1,11 +1,26 @@
 import { client } from './client'
 import type { ListResponse, Node, UnmanagedInbound } from './types'
 
+export interface AdminInbound {
+  id: number
+  remark: string
+  enable: boolean
+  listen: string
+  port: number
+  protocol: string
+  settings: string
+  stream_settings: string
+  sniffing: string
+  allocate: string
+  expiry_time: number
+}
+
 export interface ImportNodeRequest {
   panel_id: number
   inbound_id: number
   display_name: string
   server_address: string
+  flow?: string
   region: string
   tags?: string[]
   sort_order?: number
@@ -14,6 +29,7 @@ export interface ImportNodeRequest {
 export interface UpdateNodeMetadataRequest {
   display_name?: string
   server_address?: string
+  flow?: string
   region?: string
   tags?: string[]
   sort_order?: number
@@ -25,7 +41,13 @@ export async function listNodes() {
 }
 
 export async function getNode(id: number) {
-  const { data } = await client.get<{ node: Node; clients: unknown[] }>(`/admin/nodes/${id}`)
+  const { data } = await client.get<{
+    node: Node
+    inbound?: AdminInbound
+    clients: unknown[]
+    inbound_error?: string
+    clients_error?: string
+  }>(`/admin/nodes/${id}`)
   return data
 }
 
@@ -44,12 +66,14 @@ export interface InboundSpec {
   stream_settings: string
   sniffing: string
   allocate: string
+  expiry_time?: number
 }
 
 export interface CreateInboundRequest {
   panel_id: number
   display_name: string
   server_address: string
+  flow?: string
   region: string
   tags?: string[]
   sort_order?: number
@@ -75,6 +99,10 @@ export async function generateRealityKeypair() {
 export async function updateNodeMetadata(id: number, req: UpdateNodeMetadataRequest) {
   const { data } = await client.put<Node>(`/admin/nodes/${id}/metadata`, req)
   return data
+}
+
+export async function updateInboundConfig(id: number, req: InboundSpec) {
+  await client.put(`/admin/nodes/${id}/inbound`, req)
 }
 
 export async function setNodeEnabled(id: number, enabled: boolean) {

@@ -19,7 +19,6 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/log"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 
-	"golang.org/x/crypto/bcrypt"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/audit"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/auth"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/group"
@@ -30,6 +29,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/traffic"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/user"
 	httptransport "github.com/KazuhaHub/passwall-sub-panel/internal/transport/http"
+	"golang.org/x/crypto/bcrypt"
 )
 
 // App holds everything assembled for serving. Run() blocks on
@@ -362,7 +362,7 @@ func (a *App) runReconcileLoop(ctx context.Context) {
 func initAdminIfNeeded(ctx context.Context, repos ports.Repos) error {
 	roleAdmin := domain.RoleAdmin
 	_, total, err := repos.User.List(ctx, ports.UserFilter{
-		Role: &roleAdmin,
+		Role:       &roleAdmin,
 		Pagination: ports.Pagination{Page: 1, PageSize: 1},
 	})
 	if err != nil {
@@ -399,7 +399,6 @@ func initAdminIfNeeded(ctx context.Context, repos ports.Repos) error {
 	now := time.Now()
 	u := &domain.User{
 		Username:           "admin",
-		Source:             domain.UserSourceLocal,
 		PasswordHash:       string(hash),
 		Role:               domain.RoleAdmin,
 		SubToken:           subToken,
@@ -413,7 +412,7 @@ func initAdminIfNeeded(ctx context.Context, repos ports.Repos) error {
 	if err := repos.User.Create(ctx, u); err != nil {
 		return err
 	}
-	
+
 	log.Info("bootstrap admin created",
 		"username", u.Username,
 		"password", pw,
@@ -421,4 +420,3 @@ func initAdminIfNeeded(ctx context.Context, repos ports.Repos) error {
 		"group", g.Slug)
 	return nil
 }
-

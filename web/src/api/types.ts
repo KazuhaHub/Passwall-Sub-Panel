@@ -2,7 +2,6 @@
 // internal/transport/http/handler/*.go DTO definitions.
 
 export type Role = 'admin' | 'user'
-export type UserSource = 'local' | 'sso'
 export type ResetPeriod = 'never' | 'monthly' | 'quarterly'
 
 export interface User {
@@ -10,7 +9,6 @@ export interface User {
   username: string
   display_name?: string
   upn?: string
-  source: UserSource
   role: Role
   group_id: number
   uuid: string
@@ -75,6 +73,7 @@ export interface Node {
   inbound_id: number
   display_name: string
   server_address: string
+  flow?: string
   region: string
   tags: string[]
   sort_order: number

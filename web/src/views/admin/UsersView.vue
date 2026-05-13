@@ -202,9 +202,7 @@ async function submitEdit() {
       traffic_reset_period: editForm.traffic_reset_period,
       remark: editForm.remark,
       display_name: editForm.display_name,
-    }
-    if (editing.value.source === 'local') {
-      req.role = editForm.role
+      role: editForm.role,
     }
     if (editForm.expireMode === 'permanent') {
       req.clear_expire = true
@@ -516,9 +514,7 @@ onMounted(async () => {
 
     <el-table v-loading="loading" :data="users" stripe @selection-change="handleSelectionChange">
       <el-table-column type="selection" width="48" :selectable="canSelectUser" />
-      <el-table-column label="显示名" min-width="160">
-        <template #default="{ row }">{{ row.display_name || row.username }}</template>
-      </el-table-column>
+      <el-table-column prop="id" label="UserID" min-width="100" />
       <el-table-column prop="username" label="登录名" min-width="160" />
       <el-table-column label="分组" min-width="140">
         <template #default="{ row }">{{ groupName(row.group_id) }}</template>
@@ -653,7 +649,7 @@ onMounted(async () => {
           <el-form-item label="显示名">
             <el-input v-model="editForm.display_name" placeholder="UI 上显示的友好名称（可留空，将回退到登录名）" />
           </el-form-item>
-          <el-form-item v-if="editing.source === 'local'" label="权限">
+          <el-form-item label="权限">
             <el-radio-group v-model="editForm.role">
               <el-radio value="user">普通用户</el-radio>
               <el-radio value="admin">管理员</el-radio>

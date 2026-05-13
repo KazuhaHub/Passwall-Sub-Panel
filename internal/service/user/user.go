@@ -33,10 +33,10 @@ type ClientSyncer interface {
 		protocol domain.Protocol, userUUID, email, flow string, expireTime int64) error
 	DelOwnedClient(ctx context.Context, panelID int64, inboundID int, email string) error
 	SetOwnedClientEnable(ctx context.Context, panelID int64, inboundID int, email string,
-		protocol domain.Protocol, userUUID string, enable bool, expireTime int64) error
+		protocol domain.Protocol, userUUID, flow string, enable bool, expireTime int64) error
 	DelAllOwnedForUser(ctx context.Context, userID int64) error
 	RotateClientUUID(ctx context.Context, panelID int64, inboundID int, email string,
-		protocol domain.Protocol, oldUUID, newUUID string, enable bool, expireTime int64) error
+		protocol domain.Protocol, oldUUID, newUUID, flow string, enable bool, expireTime int64) error
 }
 
 type Service struct {
@@ -137,7 +137,7 @@ func (s *Service) HasPendingSync(ctx context.Context, userID int64) bool {
 	return pending
 }
 
-// CreateLocal persists a new local-source user in the DB. It does NOT touch
+// CreateLocal persists a new local-password user in the DB. It does NOT touch
 // 3X-UI — use CreateLocalAndSync for the full "user appears on every
 // authorised inbound" flow.
 func (s *Service) CreateLocal(ctx context.Context, in CreateLocalInput) (*CreateLocalResult, error) {
@@ -178,7 +178,6 @@ func (s *Service) CreateLocal(ctx context.Context, in CreateLocalInput) (*Create
 	u := &domain.User{
 		Username:           in.Username,
 		DisplayName:        in.DisplayName,
-		Source:             domain.UserSourceLocal,
 		PasswordHash:       string(hash),
 		Role:               domain.RoleUser,
 		SubToken:           subToken,
@@ -253,10 +252,10 @@ func (s *Service) EnsureSSO(ctx context.Context, in EnsureSSOInput) (*domain.Use
 		}
 		// Fix garbled usernames from earlier versions that stored the opaque
 		// UPN/NameID. Prefer email, then display name, then keep current.
-		// If the target name is held by a stale SSO orphan (different user,
-		// also SSO source), delete the orphan so the rename can proceed.
-		// Local accounts are NEVER auto-deleted — admin-created identities
-		// stay sacred.
+		// If the target name is held by a stale passwordless SSO orphan
+		// (different user), delete the orphan so the rename can proceed.
+		// Password-enabled accounts are NEVER auto-deleted — admin-created
+		// identities stay sacred.
 		betterName := ssoDisplayName(in)
 		if betterName != "" && betterName != in.UPN && u.Username == in.UPN {
 			existing, nameErr := s.users.GetByUsername(ctx, betterName)
@@ -265,7 +264,7 @@ func (s *Service) EnsureSSO(ctx context.Context, in EnsureSSOInput) (*domain.Use
 				// Name is free.
 				u.Username = betterName
 				dirty = true
-			case existing.ID != u.ID && existing.Source == domain.UserSourceSSO:
+			case existing.ID != u.ID && !existing.HasLocalPassword():
 				// Stale SSO record from an earlier login cycle blocking the
 				// rename. Drop it (and any 3X-UI clients it still owns) so
 				// the rename can proceed.
@@ -296,7 +295,7 @@ func (s *Service) EnsureSSO(ctx context.Context, in EnsureSSOInput) (*domain.Use
 				// the panel row and any 3X-UI clients it still owns.
 				s.dropOrphanUser(ctx, linked.ID)
 			case linked.UPN == "":
-				// Genuine pre-created local account → claim it for this SSO id.
+				// Genuine pre-created password account → claim it for this SSO id.
 				linked.UPN = in.UPN
 				if linked.Role != desiredRole {
 					linked.Role = desiredRole
@@ -353,7 +352,6 @@ func (s *Service) EnsureSSO(ctx context.Context, in EnsureSSOInput) (*domain.Use
 	u = &domain.User{
 		Username:           desiredUsername,
 		UPN:                in.UPN,
-		Source:             domain.UserSourceSSO,
 		Role:               domain.RoleAdmin,
 		SubToken:           subToken,
 		UUID:               idgen.NewUUID(),
@@ -383,13 +381,13 @@ func ssoDisplayName(in EnsureSSOInput) string {
 	return in.UPN
 }
 
-// VerifyLocalPassword returns the user if username/password match a local account.
+// VerifyLocalPassword returns the user if username/password match a password-enabled account.
 func (s *Service) VerifyLocalPassword(ctx context.Context, username, password string) (*domain.User, error) {
 	u, err := s.users.GetByUsername(ctx, username)
 	if err != nil {
 		return nil, err
 	}
-	if u.Source != domain.UserSourceLocal {
+	if !u.HasLocalPassword() {
 		return nil, domain.ErrUnauthorized
 	}
 	if !u.Enabled {
@@ -460,7 +458,7 @@ func (s *Service) ResetCredentialsAndSync(ctx context.Context, userID int64) (*R
 			continue
 		}
 		if err := s.syncer.RotateClientUUID(ctx, e.PanelID, e.InboundID, e.ClientEmail,
-			info.protocol, oldUUID, newUUID, u.Enabled, expireTime); err != nil {
+			info.protocol, oldUUID, newUUID, info.flow, u.Enabled, expireTime); err != nil {
 			needsRetry = true
 		}
 	}
@@ -468,18 +466,20 @@ func (s *Service) ResetCredentialsAndSync(ctx context.Context, userID int64) (*R
 		if err := s.enqueueUserTask(ctx, domain.SyncTaskUserResync, userID, fmt.Sprintf("sync credentials for user %s", u.Username)); err != nil {
 			return nil, err
 		}
+	} else {
+		s.recordUserTaskSucceeded(ctx, domain.SyncTaskUserResync, userID, fmt.Sprintf("sync credentials for user %s", u.Username))
 	}
 	return &ResetCredentialsResult{SubToken: token, UUID: newUUID}, nil
 }
 
-// SetPassword updates a local account's password (admin-side reset).
+// SetPassword updates a password-enabled account's password (admin-side reset).
 func (s *Service) SetPassword(ctx context.Context, userID int64, newPassword string) error {
 	u, err := s.users.GetByID(ctx, userID)
 	if err != nil {
 		return err
 	}
-	if u.Source != domain.UserSourceLocal {
-		return fmt.Errorf("%w: not a local account", domain.ErrValidation)
+	if !u.HasLocalPassword() {
+		return fmt.Errorf("%w: account has no local password", domain.ErrValidation)
 	}
 	hash, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
 	if err != nil {
@@ -576,6 +576,8 @@ func (s *Service) CreateLocalAndSync(ctx context.Context, in CreateLocalInput) (
 		if err := s.enqueueUserTask(ctx, domain.SyncTaskUserResync, u.ID, fmt.Sprintf("sync node membership for user %s", u.Username)); err != nil {
 			return nil, err
 		}
+	} else {
+		s.recordUserTaskSucceeded(ctx, domain.SyncTaskUserResync, u.ID, fmt.Sprintf("sync node membership for user %s", u.Username))
 	}
 
 	return &CreateLocalSyncedResult{
@@ -606,6 +608,7 @@ func (s *Service) DeleteAndSync(ctx context.Context, userID int64) error {
 	// pattern applied to deletion.
 	if err := s.syncer.DelAllOwnedForUser(ctx, u.ID); err == nil {
 		if err := s.users.Delete(ctx, u.ID); err == nil {
+			s.recordUserTaskSucceeded(ctx, domain.SyncTaskUserDelete, userID, fmt.Sprintf("delete user %s", u.Username))
 			return nil
 		}
 	}
@@ -675,7 +678,7 @@ func (s *Service) UpdateProfile(ctx context.Context, userID int64, in UpdateInpu
 		groupChanged = true
 	}
 	if in.Role != nil && *in.Role != u.Role {
-		if u.Source != domain.UserSourceLocal {
+		if !u.HasLocalPassword() {
 			return fmt.Errorf("%w: only local users can be assigned admin role here", domain.ErrValidation)
 		}
 		switch *in.Role {
@@ -711,6 +714,7 @@ func (s *Service) UpdateProfile(ctx context.Context, userID int64, in UpdateInpu
 		if err := s.ResyncMembership(ctx, userID); err != nil {
 			return s.enqueueUserTask(ctx, domain.SyncTaskUserResync, userID, fmt.Sprintf("sync node membership for user %s", u.Username))
 		}
+		s.recordUserTaskSucceeded(ctx, domain.SyncTaskUserResync, userID, fmt.Sprintf("sync node membership for user %s", u.Username))
 	}
 	// Note: ResyncMembership skips updating existing clients, so if expireChanged we
 	// must explicitly push it. We do this by calling a sync loop similar to SetEnabledAndSync.
@@ -718,6 +722,7 @@ func (s *Service) UpdateProfile(ctx context.Context, userID int64, in UpdateInpu
 		if err := s.pushClientConfigToAll(ctx, u); err != nil {
 			return s.enqueueUserTask(ctx, domain.SyncTaskUserPushConfig, userID, fmt.Sprintf("sync enabled/expiry config for user %s", u.Username))
 		}
+		s.recordUserTaskSucceeded(ctx, domain.SyncTaskUserPushConfig, userID, fmt.Sprintf("sync enabled/expiry config for user %s", u.Username))
 	}
 	return nil
 }
@@ -763,6 +768,8 @@ func (s *Service) UseEmergencyAccess(ctx context.Context, userID int64) (*Emerge
 		if taskErr := s.enqueueUserTask(ctx, domain.SyncTaskUserPushConfig, userID, fmt.Sprintf("sync emergency access for user %s", u.Username)); taskErr != nil {
 			return nil, taskErr
 		}
+	} else {
+		s.recordUserTaskSucceeded(ctx, domain.SyncTaskUserPushConfig, userID, fmt.Sprintf("sync emergency access for user %s", u.Username))
 	}
 	return &EmergencyAccessResult{
 		User:          u,
@@ -807,6 +814,7 @@ func (s *Service) ChangeGroupAndSync(ctx context.Context, userID, newGroupID int
 	if err := s.ResyncMembership(ctx, userID); err != nil {
 		return s.enqueueUserTask(ctx, domain.SyncTaskUserResync, userID, fmt.Sprintf("sync node membership for user %s", u.Username))
 	}
+	s.recordUserTaskSucceeded(ctx, domain.SyncTaskUserResync, userID, fmt.Sprintf("sync node membership for user %s", u.Username))
 	return nil
 }
 
@@ -922,6 +930,7 @@ func (s *Service) SetEnabledAndSync(ctx context.Context, userID int64, enabled b
 	if err := s.pushClientConfigToAll(ctx, u); err != nil {
 		return s.enqueueUserTask(ctx, domain.SyncTaskUserPushConfig, userID, fmt.Sprintf("sync enabled/expiry config for user %s", u.Username))
 	}
+	s.recordUserTaskSucceeded(ctx, domain.SyncTaskUserPushConfig, userID, fmt.Sprintf("sync enabled/expiry config for user %s", u.Username))
 	return nil
 }
 
@@ -949,7 +958,7 @@ func (s *Service) pushClientConfigToAll(ctx context.Context, u *domain.User) err
 			continue
 		}
 		if err := s.syncer.SetOwnedClientEnable(ctx, e.PanelID, e.InboundID, e.ClientEmail,
-			info.protocol, u.UUID, u.Enabled, expireTime); err != nil && firstErr == nil {
+			info.protocol, u.UUID, info.flow, u.Enabled, expireTime); err != nil && firstErr == nil {
 			firstErr = err
 		}
 	}
@@ -1056,6 +1065,22 @@ func (s *Service) enqueueUserTask(ctx context.Context, typ domain.SyncTaskType, 
 	})
 }
 
+func (s *Service) recordUserTaskSucceeded(ctx context.Context, typ domain.SyncTaskType, userID int64, summary string) {
+	if s.tasks == nil {
+		return
+	}
+	now := time.Now()
+	_ = s.tasks.Create(ctx, &domain.SyncTask{
+		Type:       typ,
+		Status:     domain.SyncTaskSucceeded,
+		TargetType: "user",
+		TargetID:   userID,
+		Summary:    summary,
+		NextRunAt:  now,
+		FinishedAt: &now,
+	})
+}
+
 // ResetUUIDAndSync rotates the user UUID and pushes the change to every
 // owned 3X-UI client via SyncSvc.RotateClientUUID.
 //
@@ -1092,12 +1117,14 @@ func (s *Service) ResetUUIDAndSync(ctx context.Context, userID int64) (string, e
 			continue
 		}
 		if err := s.syncer.RotateClientUUID(ctx, e.PanelID, e.InboundID, e.ClientEmail,
-			info.protocol, oldUUID, newUUID, u.Enabled, expireTime); err != nil {
+			info.protocol, oldUUID, newUUID, info.flow, u.Enabled, expireTime); err != nil {
 			needsRetry = true
 		}
 	}
 	if needsRetry {
 		_ = s.enqueueUserTask(ctx, domain.SyncTaskUserResync, userID, fmt.Sprintf("sync credentials for user %s", u.Username))
+	} else {
+		s.recordUserTaskSucceeded(ctx, domain.SyncTaskUserResync, userID, fmt.Sprintf("sync credentials for user %s", u.Username))
 	}
 	return newUUID, nil
 }
@@ -1147,6 +1174,9 @@ func (s *Service) inspectInbound(ctx context.Context, n *domain.Node) (*inboundI
 		flow:     extractDefaultFlow(inb.Settings),
 	}
 	info.protocol = crypto.DetectProtocol(inb.Protocol, info.ssMethod)
+	if info.flow == "" {
+		info.flow = n.Flow
+	}
 	return info, nil
 }
 
