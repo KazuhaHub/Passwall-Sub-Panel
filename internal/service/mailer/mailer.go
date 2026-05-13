@@ -208,20 +208,16 @@ func defaultHTMLTemplate(title, message, metricLabel, metricValue string) string
       <p style="margin:0 0 24px;font-size:15px;line-height:1.7;color:#374151;">` + message + `</p>
       <table role="presentation" style="width:100%;border-collapse:collapse;margin:0 0 26px;background:#f8fafc;border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;">
         <tr>
-          <td style="padding:14px 18px;color:#64748b;font-size:13px;">UPN</td>
-          <td style="padding:14px 18px;text-align:right;font-size:14px;font-weight:600;color:#111827;">{{.UPN}}</td>
-        </tr>
-        <tr>
-          <td style="padding:14px 18px;color:#64748b;font-size:13px;border-top:1px solid #e5e7eb;">` + metricLabel + `</td>
-          <td style="padding:14px 18px;text-align:right;font-size:14px;font-weight:600;color:#111827;border-top:1px solid #e5e7eb;">` + metricValue + `</td>
+          <td style="padding:14px 18px;color:#64748b;font-size:13px;">` + metricLabel + `</td>
+          <td style="padding:14px 18px;text-align:right;font-size:14px;font-weight:600;color:#111827;">` + metricValue + `</td>
         </tr>
         <tr>
           <td style="padding:14px 18px;color:#64748b;font-size:13px;border-top:1px solid #e5e7eb;">生成时间</td>
           <td style="padding:14px 18px;text-align:right;font-size:14px;font-weight:600;color:#111827;border-top:1px solid #e5e7eb;">{{.GeneratedAt}}</td>
         </tr>
       </table>
-      <a href="{{.SubURL}}" style="display:inline-block;background:#2563eb;color:#ffffff;text-decoration:none;border-radius:8px;padding:12px 18px;font-size:14px;font-weight:700;">查看我的订阅</a>
-      <p style="margin:24px 0 0;font-size:12px;line-height:1.6;color:#6b7280;">如果按钮无法打开，请复制以下链接：<br><span style="word-break:break-all;color:#374151;">{{.SubURL}}</span></p>
+      <a href="{{.PanelURL}}" style="display:inline-block;background:#2563eb;color:#ffffff;text-decoration:none;border-radius:8px;padding:12px 18px;font-size:14px;font-weight:700;">登录面板</a>
+      {{if .PanelURL}}<p style="margin:24px 0 0;font-size:12px;line-height:1.6;color:#6b7280;">如果按钮无法打开，请复制以下链接：<br><span style="word-break:break-all;color:#374151;">{{.PanelURL}}</span></p>{{end}}
     </div>
   </div>
 </body>
@@ -670,7 +666,7 @@ func (s *Service) templateData(ctx context.Context, settings domain.MailSettings
 	}
 	siteTitle := "Passwall"
 	logoURL := "" // Empty by default - no logo if not configured
-	subURL := "/sub/" + u.SubToken
+	panelURL := "" // Panel URL for email button
 	if s.settings != nil {
 		st, err := s.settings.Load(ctx, ports.UISettings{
 			SiteTitle: "Passwall",
@@ -682,7 +678,7 @@ func (s *Service) templateData(ctx context.Context, settings domain.MailSettings
 			}
 			base := strings.TrimRight(st.SubBaseURL, "/")
 			if base != "" {
-				subURL = base + "/sub/" + u.SubToken
+				panelURL = base
 			}
 			// Logo URL - must be absolute URL (http/https) for email clients
 			if st.LogoURL != "" && (strings.HasPrefix(st.LogoURL, "http://") || strings.HasPrefix(st.LogoURL, "https://")) {
@@ -697,6 +693,7 @@ func (s *Service) templateData(ctx context.Context, settings domain.MailSettings
 		"Email":                u.Email,
 		"SiteTitle":            siteTitle,
 		"LogoURL":              logoURL,
+		"PanelURL":             panelURL,
 		"GeneratedAt":          time.Now().Format("2006-01-02 15:04"),
 		"ExpireAt":             expireAt,
 		"ExpireBeforeDays":     settings.ExpireBeforeDays,
@@ -704,7 +701,6 @@ func (s *Service) templateData(ctx context.Context, settings domain.MailSettings
 		"PeriodUsedGB":         periodUsedGB,
 		"TrafficLimitGB":       trafficLimitGB,
 		"TrafficRemainGB":      trafficRemainGB,
-		"SubURL":               subURL,
 	}
 }
 

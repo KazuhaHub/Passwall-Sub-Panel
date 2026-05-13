@@ -58,6 +58,7 @@ const jwtRefreshTTLMinutes = ref(10080)
 const jwtIssuer = ref('passwall-sub-panel')
 const subPerIPPerMin = ref(60)
 const loginPerIPPerMin = ref(5)
+const footerText = ref('© Passwall Sub Panel')
 const generalLoading = ref(true)
 const generalSaving = ref(false)
 
@@ -226,6 +227,7 @@ async function loadGeneral() {
     jwtIssuer.value = s.jwt_issuer || 'passwall-sub-panel'
     subPerIPPerMin.value = s.sub_per_ip_per_min || 60
     loginPerIPPerMin.value = s.login_per_ip_per_min || 5
+    footerText.value = s.footer_text || '© Passwall Sub Panel'
   } finally {
     generalLoading.value = false
   }
@@ -251,7 +253,6 @@ async function saveGeneral() {
       emergency_access_enabled: emergencyAccessEnabled.value,
       emergency_access_hours: emergencyAccessHours.value,
       emergency_access_max_count: emergencyAccessMaxCount.value,
-      sub_base_url: subBaseURL.value,
       cron_traffic_pull_minutes: cronTrafficPullMinutes.value,
       cron_reconcile_minutes: cronReconcileMinutes.value,
       jwt_access_ttl_minutes: jwtAccessTTLMinutes.value,
@@ -260,6 +261,7 @@ async function saveGeneral() {
       sub_per_ip_per_min: subPerIPPerMin.value,
       login_per_ip_per_min: loginPerIPPerMin.value,
       // Preserve subscription settings
+      sub_base_url: current.sub_base_url,
       sub_path: current.sub_path,
       sub_client_rules: current.sub_client_rules,
       sub_import_clients: current.sub_import_clients,
@@ -274,6 +276,7 @@ async function saveGeneral() {
         level: 'info',
         updated_at: '',
       },
+      footer_text: footerText.value,
     })
     useSiteStore().update(siteTitle.value, appTitle.value, iconUrl.value, logoUrl.value, logoUrlDark.value)
     ElMessage.success('已保存')
@@ -673,6 +676,7 @@ async function saveSubPath() {
   subSaving.value = true
   try {
     const s = await getUISettings()
+    s.sub_base_url = subBaseURL.value
     s.sub_path = subPath.value || 'sub'
     await putUISettings(s)
     ElMessage.success('订阅路径已保存')
@@ -919,18 +923,6 @@ onMounted(() => {
           </el-form-item>
         </el-form>
 
-        <h3 class="section-title" style="margin-top:32px;">公开订阅地址</h3>
-        <p class="section-hint">
-          用户拿到的订阅链接前缀，格式 <code>https://your.domain</code>（不要加结尾 /）。
-          留空则使用相对路径 <code>/sub/&lt;token&gt;</code>，仅在面板自身域名下可用。
-          也用于 SAML 自动模式生成 ACS URL。
-        </p>
-        <el-form label-position="top" style="max-width:480px">
-          <el-form-item label="公网基地址">
-            <el-input v-model="subBaseURL" placeholder="https://panel.example.com" />
-          </el-form-item>
-        </el-form>
-
         <h3 class="section-title" style="margin-top:32px;">审计日志保留</h3>
         <p class="section-hint">
           自动删除超过指定天数的审计记录。设为 0 表示永不自动删除。
@@ -1117,17 +1109,23 @@ onMounted(() => {
     <!-- Subscription Settings -->
     <div v-show="activeTab === 'subscription'" v-loading="subLoading">
       <el-card class="settings-card">
-        <h3 class="section-title">订阅路径</h3>
+        <h3 class="section-title">订阅地址</h3>
         <p class="section-hint">
-          设置订阅链接的路径前缀。修改后需要重启面板生效。
+          配置订阅链接的公网地址和路径前缀。
         </p>
         <el-form label-position="top" style="max-width:480px">
+          <el-form-item label="公网基地址">
+            <el-input v-model="subBaseURL" placeholder="https://panel.example.com" />
+            <div class="form-hint">
+              格式 <code>https://your.domain</code>（不要加结尾 /）。留空则使用相对路径，仅在面板自身域名下可用。
+            </div>
+          </el-form-item>
           <el-form-item label="路径前缀">
             <el-input v-model="subPath" placeholder="sub" />
-            <div class="form-hint">完整示例: /{{ subPath }}/&lt;token&gt;</div>
+            <div class="form-hint">完整示例: {{ subBaseURL ? subBaseURL : '' }}/{{ subPath }}/&lt;token&gt;</div>
           </el-form-item>
           <el-form-item>
-            <el-button type="primary" :loading="subSaving" @click="saveSubPath">保存路径</el-button>
+            <el-button type="primary" :loading="subSaving" @click="saveSubPath">保存地址设置</el-button>
           </el-form-item>
         </el-form>
 
@@ -1393,6 +1391,16 @@ onMounted(() => {
         <el-form label-position="top" style="max-width:480px">
           <el-form-item label="Icon 地址">
             <el-input v-model="iconUrl" placeholder="留空使用默认 Icon" />
+          </el-form-item>
+        </el-form>
+
+        <h3 class="section-title" style="margin-top:32px;">页脚文本</h3>
+        <p class="section-hint">
+          登录页面底部显示的文本。支持版权符号和年份。
+        </p>
+        <el-form label-position="top" style="max-width:480px">
+          <el-form-item label="页脚文本">
+            <el-input v-model="footerText" placeholder="© Passwall Sub Panel" />
           </el-form-item>
         </el-form>
 

@@ -8,6 +8,40 @@ export interface SubClientRule {
   enabled: boolean
 }
 
+export interface UISettings {
+  login_mode: LoginMode
+  site_title: string
+  app_title: string
+  icon_url: string
+  logo_url: string
+  logo_url_dark: string
+  email_domain: string
+  audit_retention_days: number
+  sub_base_url: string
+  // Runtime tuning — changes take effect on next panel restart.
+  cron_traffic_pull_minutes: number
+  cron_reconcile_minutes: number
+  jwt_access_ttl_minutes: number
+  jwt_refresh_ttl_minutes: number
+  jwt_issuer: string
+  sub_per_ip_per_min: number
+  login_per_ip_per_min: number
+  sync_task_retention_days: number
+  disallow_user_local_login: boolean
+  disallow_user_password_change: boolean
+  emergency_access_enabled: boolean
+  emergency_access_hours: number
+  emergency_access_max_count: number
+  // Subscription settings
+  sub_path: string
+  sub_client_rules: SubClientRule[]
+  sub_log_retention_days: number
+  sub_block_auto_disable: boolean
+  sub_block_auto_disable_count: number
+  // Footer
+  footer_text: string
+}
+
 export interface SubImportClient {
   name: string
   platforms: Array<'windows' | 'macos' | 'linux' | 'ios' | 'android' | 'universal'>

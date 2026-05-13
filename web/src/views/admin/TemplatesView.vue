@@ -116,7 +116,8 @@ function extractProxyGroups(content: string) {
 }
 
 function usesDynamicProxyGroups(content: string) {
-  return /\{\{\s*proxy_groups\s*\}\}/.test(content)
+  // Check for both mihomo ({{ proxy_groups }}) and sing-box ({{ outbounds }}) placeholders
+  return /\{\{\s*proxy_groups\s*\}\}/.test(content) || /\{\{\s*outbounds\s*\}\}/.test(content)
 }
 
 function extractRuleTargets(sets: RuleSet[]) {
@@ -304,14 +305,17 @@ onMounted(load)
           <div v-if="formDynamicProxyGroups && form.rule_sets.length > 0" class="target-ok">
             策略组将根据已绑定规则集的规则目标自动生成。
           </div>
-          <div v-else-if="formMissingTargets.length > 0" class="target-warning">
+          <div v-else-if="formMissingTargets.length > 0 && form.content.length > 50" class="target-warning">
             规则目标未在模板策略组中找到：{{ formMissingTargets.slice(0, 8).join('、') }}{{ formMissingTargets.length > 8 ? ` 等 ${formMissingTargets.length} 个` : '' }}
           </div>
-          <div v-else-if="form.rule_sets.length > 0" class="target-ok">
+          <div v-else-if="form.rule_sets.length > 0 && formProxyGroups.size > 0" class="target-ok">
             已识别 {{ formProxyGroups.size }} 个策略组，规则目标匹配正常。
           </div>
-          <div v-else class="target-empty">
+          <div v-else-if="form.rule_sets.length === 0" class="target-empty">
             当前未绑定规则集，只会渲染节点、策略组和个人规则。
+          </div>
+          <div v-else-if="form.content.length < 50" class="target-empty">
+            模板内容尚未完整，请继续编辑。
           </div>
         </el-form-item>
         <el-form-item label="模板内容">

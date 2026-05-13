@@ -19,6 +19,7 @@ export interface AuthMethods {
   icon_url: string
   logo_url: string
   logo_url_dark: string
+  footer_text: string
 }
 
 export async function getAuthMethods() {

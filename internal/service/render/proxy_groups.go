@@ -113,11 +113,20 @@ func proxyGroupChoices(name string) []string {
 		strings.Contains(name, "国内媒体") ||
 		strings.Contains(name, "哔哩哔哩") ||
 		strings.Contains(name, "谷歌FCM") ||
+		strings.Contains(name, "微软Bing") ||
 		strings.Contains(name, "微软云盘") ||
 		strings.Contains(name, "微软服务") ||
 		strings.Contains(name, "苹果服务") ||
-		strings.Contains(name, "网易音乐"):
+		strings.Contains(name, "网易音乐") ||
+		strings.Contains(name, "电报消息"):
 		return []string{"DIRECT", "@all"}
+	case strings.Contains(name, "国外媒体") ||
+		strings.Contains(name, "奈飞视频") ||
+		strings.Contains(name, "油管视频") ||
+		strings.Contains(name, "巴哈姆特") ||
+		strings.Contains(name, "游戏平台") ||
+		strings.Contains(name, "Ai平台"):
+		return []string{"🚀 节点选择", "@all", "DIRECT"}
 	case strings.Contains(name, "漏网之鱼"):
 		return []string{"🚀 节点选择", "DIRECT", "@all"}
 	default:

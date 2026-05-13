@@ -58,6 +58,7 @@ func (r *settingsRepo) Load(ctx context.Context, defaults ports.UISettings) (por
 		SubBlockAutoDisableCount:   row.SubBlockAutoDisableCount,
 		QuickLinks:                 row.QuickLinks.toDomain(),
 		GlobalAnnouncement:         row.GlobalAnnouncement.toDomain(),
+		FooterText:                 row.FooterText,
 	}
 	if out.LoginMode == "" {
 		out.LoginMode = defaults.LoginMode
@@ -117,6 +118,9 @@ func (r *settingsRepo) Load(ctx context.Context, defaults ports.UISettings) (por
 	}
 	if out.SubBlockAutoDisableCount <= 0 {
 		out.SubBlockAutoDisableCount = 3
+	}
+	if out.FooterText == "" {
+		out.FooterText = "© Passwall Sub Panel"
 	}
 	return out, nil
 }
@@ -220,6 +224,7 @@ func (r *settingsRepo) Save(ctx context.Context, s ports.UISettings) error {
 		SubBlockAutoDisableCount:   s.SubBlockAutoDisableCount,
 		QuickLinks:                 jsonQuickLinksFromDomain(s.QuickLinks),
 		GlobalAnnouncement:         jsonGlobalAnnouncementFromDomain(s.GlobalAnnouncement),
+		FooterText:                 s.FooterText,
 	}
 	return r.db.WithContext(ctx).Clauses(clause.OnConflict{UpdateAll: true}).Create(&row).Error
 }

@@ -14,11 +14,13 @@ const loading = ref(false)
 const mode = ref<LoginMode>('dual')
 const appTitle = ref('')
 const logoSrc = ref('/images/logo+title-circle-darkmode.png')
+const logoSrcLight = ref('/images/logo+title-circle.png')
 const iconUrl = ref('/images/HeadPicture.png')
 const ssoEnabled = ref(false)
 const samlEnabled = ref(false)
 const oidcEnabled = ref(false)
 const probing = ref(true)
+const footerText = ref('© Passwall Sub Panel')
 
 async function probe() {
   probing.value = true
@@ -30,9 +32,11 @@ async function probe() {
     updateIcon(iconUrl.value)
     appTitle.value = m.app_title || 'Passwall'
     logoSrc.value = m.logo_url_dark || m.logo_url || '/images/logo+title-circle-darkmode.png'
+    logoSrcLight.value = m.logo_url || '/images/logo+title-circle.png'
     ssoEnabled.value = m.sso
     samlEnabled.value = !!m.saml
     oidcEnabled.value = !!m.oidc
+    footerText.value = m.footer_text || '© Passwall Sub Panel'
     if (m.login_mode === 'sso_redirect' && m.sso) {
       ssoLogin()
       return
@@ -99,179 +103,137 @@ onMounted(probe)
 
 <template>
   <div class="login-page">
-    <div class="bg-shape shape-1"></div>
-    <div class="bg-shape shape-2"></div>
-
     <div class="login-container" v-if="!probing">
       <div class="login-brand">
-        <img class="logo" :src="logoSrc" alt="Logo" />
+        <img class="logo light-logo" :src="logoSrcLight" alt="Logo" />
+        <img class="logo dark-logo" :src="logoSrc" alt="Logo" />
         <div v-if="appTitle" class="login-title">{{ appTitle }}</div>
         <div class="login-subtitle">Welcome back, please sign in.</div>
       </div>
 
-      <!-- SSO-only modes: direct redirect is handled in probe(); this button
-           view remains as the fallback and for sso_first. -->
+      <!-- SSO-only modes -->
       <template v-if="mode === 'sso_redirect' || mode === 'sso_first'">
-        <el-button v-if="samlEnabled" class="primary-btn" size="large" @click="samlLogin">
-          <el-icon class="mr-2"><Right /></el-icon>
-          使用 SAML 登录
-        </el-button>
-        <el-button v-if="oidcEnabled" class="primary-btn" size="large"
-          :style="samlEnabled ? 'margin-top:12px' : ''" @click="oidcLogin">
-          <el-icon class="mr-2"><Right /></el-icon>
-          使用 OIDC 登录
-        </el-button>
+        <button v-if="ssoEnabled" class="btn btn-primary" @click="ssoLogin">
+          <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+            <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"></path>
+            <path d="m10 17 5-5-5-5"></path>
+            <path d="M15 12H3"></path>
+          </svg>
+          <span>使用 SSO 登录</span>
+        </button>
       </template>
 
-      <!-- Dual: SSO button(s) on top, local form below -->
+      <!-- Dual mode -->
       <template v-else-if="mode === 'dual'">
-        <el-button v-if="samlEnabled" class="primary-btn" size="large" @click="samlLogin">
-          <el-icon class="mr-2"><Right /></el-icon>
-          使用 SAML 登录
-        </el-button>
-        <el-button v-if="oidcEnabled" class="primary-btn" size="large"
-          :style="samlEnabled ? 'margin-top:12px' : ''" @click="oidcLogin">
-          <el-icon class="mr-2"><Right /></el-icon>
-          使用 OIDC 登录
-        </el-button>
-        <el-divider class="login-divider">OR</el-divider>
-        <el-form @submit.prevent="submit" class="login-form">
-          <el-form-item>
-            <el-input
-              v-model="form.upn"
-              placeholder="UPN"
-              autocomplete="email"
-              size="large"
-              prefix-icon="User"
-            />
-          </el-form-item>
-          <el-form-item>
-            <el-input
-              v-model="form.password"
-              type="password"
-              show-password
-              placeholder="密码"
-              autocomplete="current-password"
-              size="large"
-              prefix-icon="Lock"
-            />
-          </el-form-item>
-          <el-form-item>
-            <el-button
-              type="primary"
-              :loading="loading"
-              class="secondary-btn"
-              size="large"
-              @click="submit"
-            >
-              登录
-            </el-button>
-          </el-form-item>
-        </el-form>
+        <button v-if="ssoEnabled" class="btn btn-primary" @click="ssoLogin">
+          <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+            <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"></path>
+            <path d="m10 17 5-5-5-5"></path>
+            <path d="M15 12H3"></path>
+          </svg>
+          <span>使用 SSO 登录</span>
+        </button>
+        <div class="divider">
+          <span>OR</span>
+        </div>
+        <form @submit.prevent="submit" class="login-form">
+          <input
+            v-model="form.upn"
+            type="text"
+            placeholder="UPN"
+            autocomplete="email"
+            class="input"
+          />
+          <input
+            v-model="form.password"
+            type="password"
+            placeholder="密码"
+            autocomplete="current-password"
+            class="input"
+          />
+          <button type="submit" class="btn btn-primary" :disabled="loading">
+            {{ loading ? '登录中...' : '登录' }}
+          </button>
+        </form>
       </template>
 
-      <!-- local_only is handled by redirect in probe(); render local form as a fallback. -->
+      <!-- Local only -->
       <template v-else>
-        <el-form @submit.prevent="submit" class="login-form">
-          <el-form-item>
-            <el-input
-              v-model="form.upn"
-              placeholder="UPN"
-              autocomplete="email"
-              size="large"
-              prefix-icon="User"
-            />
-          </el-form-item>
-          <el-form-item>
-            <el-input
-              v-model="form.password"
-              type="password"
-              show-password
-              placeholder="密码"
-              autocomplete="current-password"
-              size="large"
-              prefix-icon="Lock"
-            />
-          </el-form-item>
-          <el-form-item>
-            <el-button
-              type="primary"
-              :loading="loading"
-              class="primary-btn"
-              size="large"
-              @click="submit"
-            >
-              登录
-            </el-button>
-          </el-form-item>
-        </el-form>
+        <form @submit.prevent="submit" class="login-form">
+          <input
+            v-model="form.upn"
+            type="text"
+            placeholder="UPN"
+            autocomplete="email"
+            class="input"
+          />
+          <input
+            v-model="form.password"
+            type="password"
+            placeholder="密码"
+            autocomplete="current-password"
+            class="input"
+          />
+          <button type="submit" class="btn btn-primary" :disabled="loading">
+            {{ loading ? '登录中...' : '登录' }}
+          </button>
+        </form>
       </template>
+
+      <div class="footer">{{ footerText }}</div>
     </div>
   </div>
 </template>
 
 <style scoped>
+:root {
+  --brand-color: #2563eb;
+  --bg: #f6f7f9;
+  --surface: #ffffff;
+  --text: #111827;
+  --text-muted: #6b7280;
+  --border: #e5e7eb;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0b0f19;
+    --surface: #111827;
+    --text: #f3f4f6;
+    --text-muted: #9ca3af;
+    --border: #1f2937;
+  }
+}
+
 .login-page {
-  position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
   min-height: 100vh;
-  background-color: #0f172a;
-  overflow: hidden;
-}
-
-.bg-shape {
-  position: absolute;
-  border-radius: 50%;
-  filter: blur(80px);
-  z-index: 0;
-  opacity: 0.6;
-}
-
-.shape-1 {
-  width: 500px;
-  height: 500px;
-  background: linear-gradient(135deg, #6366f1, #8b5cf6);
-  top: -100px;
-  left: -100px;
-  animation: float 10s ease-in-out infinite alternate;
-}
-
-.shape-2 {
-  width: 400px;
-  height: 400px;
-  background: linear-gradient(135deg, #3b82f6, #2dd4bf);
-  bottom: -50px;
-  right: -50px;
-  animation: float 12s ease-in-out infinite alternate-reverse;
-}
-
-@keyframes float {
-  0% {
-    transform: translateY(0) scale(1);
-  }
-  100% {
-    transform: translateY(30px) scale(1.05);
-  }
+  background: var(--bg);
+  padding: 24px 16px;
 }
 
 .login-container {
-  position: relative;
-  z-index: 1;
-  width: 420px;
-  padding: 40px;
-  background: rgba(255, 255, 255, 0.05);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 24px;
-  box-shadow: 0 24px 40px rgba(0, 0, 0, 0.2);
-  color: white;
+  background: var(--surface);
+  border-radius: 16px;
+  padding: 32px 28px;
+  max-width: 420px;
+  width: 100%;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.06);
+  border: 1px solid var(--border);
+}
+
+@media (prefers-color-scheme: dark) {
+  .login-container {
+    box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+  }
 }
 
 .login-brand {
-  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
   margin-bottom: 28px;
 }
 
@@ -281,80 +243,138 @@ onMounted(probe)
   margin-bottom: 16px;
 }
 
+.light-logo {
+  display: block;
+}
+
+.dark-logo {
+  display: none;
+}
+
+@media (prefers-color-scheme: dark) {
+  .light-logo {
+    display: none;
+  }
+  .dark-logo {
+    display: block;
+  }
+}
+
 .login-title {
-  font-size: 24px;
-  font-weight: 700;
-  letter-spacing: 1px;
+  font-size: 20px;
+  font-weight: 600;
   margin-bottom: 8px;
+  color: var(--text);
 }
 
 .login-subtitle {
   font-size: 14px;
-  color: #94a3b8;
+  color: var(--text-muted);
+  margin: 0;
 }
 
-.primary-btn {
+/* Buttons */
+.btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
   width: 100%;
-  border-radius: 12px;
-  background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
-  border: none;
-  color: #fff;
-  font-weight: 600;
-  transition: transform 0.2s, box-shadow 0.2s;
+  padding: 12px 20px;
+  border-radius: 10px;
+  font-size: 15px;
+  font-weight: 500;
+  cursor: pointer;
+  text-decoration: none;
+  font-family: inherit;
+  transition: opacity 0.15s, background 0.15s;
+  border: 1px solid transparent;
 }
 
-.primary-btn:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 8px 20px rgba(99, 102, 241, 0.4);
-  color: #fff;
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
-.secondary-btn {
-  width: 100%;
-  border-radius: 12px;
+.btn + .btn {
+  margin-top: 10px;
 }
 
-.secondary-link {
-  display: block;
-  text-align: center;
-  margin-top: 18px;
+.btn-primary {
+  background: #2563eb;
+  color: white;
+}
+
+.btn-primary:hover:not(:disabled) {
+  opacity: 0.9;
+}
+
+.btn-primary:active:not(:disabled) {
+  opacity: 0.8;
+}
+
+.btn-icon {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  stroke-width: 2;
+}
+
+/* Divider */
+.divider {
+  display: flex;
+  align-items: center;
+  margin: 20px 0;
+  color: var(--text-muted);
   font-size: 13px;
-  color: rgba(255, 255, 255, 0.7);
 }
 
-.secondary-link:hover {
-  color: #fff;
+.divider::before,
+.divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border);
 }
 
-.login-divider :deep(.el-divider__text) {
-  background: transparent;
-  color: #64748b;
+.divider span {
+  padding: 0 12px;
 }
 
-.login-divider :deep(.el-divider) {
-  border-color: rgba(255, 255, 255, 0.1);
+/* Form inputs */
+.input {
+  display: block;
+  width: 100%;
+  padding: 12px 14px;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  font-size: 15px;
+  font-family: inherit;
+  margin-bottom: 10px;
+  box-sizing: border-box;
 }
 
-.login-form :deep(.el-input__wrapper) {
-  background: rgba(255, 255, 255, 0.05);
-  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.1) inset;
-  border-radius: 12px;
+.input:focus {
+  outline: none;
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37,99,235,0.15);
 }
 
-.login-form :deep(.el-input__wrapper.is-focus) {
-  box-shadow: 0 0 0 1px #6366f1 inset !important;
-  background: rgba(255, 255, 255, 0.1);
+.input::placeholder {
+  color: var(--text-muted);
 }
 
-.login-form :deep(.el-input__inner) {
-  color: #f8fafc;
+.login-form {
+  width: 100%;
 }
 
-.login-form :deep(.el-input__inner::placeholder) {
-  color: #64748b;
-}
-
-.mr-2 {
-  margin-right: 6px;
+/* Footer */
+.footer {
+  margin-top: 32px;
+  text-align: center;
+  font-size: 11px;
+  color: var(--text-muted);
 }
 </style>

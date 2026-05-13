@@ -379,15 +379,15 @@ type uiSettingsRow struct {
 	EmergencyAccessHours       int
 	EmergencyAccessMaxCount    int
 	// Subscription settings
-	SubPath                  string               `gorm:"size:128;default:'sub'"`
-	SubClientRules           jsonSubRules         `gorm:"type:json"`
-	SubImportClients         jsonSubImportClients `gorm:"type:json"`
-	SubLogRetentionDays      int                  `gorm:"default:7"`
-	SubBlockAutoDisable      bool                 `gorm:"default:false"`
-	SubBlockAutoDisableCount int                  `gorm:"default:3"`
-	// User portal settings
-	QuickLinks         jsonQuickLinks         `gorm:"type:json"`
+	SubPath            string       `gorm:"size:128;default:'sub'"`
+	SubClientRules     jsonSubRules `gorm:"type:json"`
+	SubImportClients   jsonSubImportClients `gorm:"type:json"`
+	SubLogRetentionDays int         `gorm:"default:7"`
+	SubBlockAutoDisable bool        `gorm:"default:false"`
+	SubBlockAutoDisableCount int    `gorm:"default:3"`
+	QuickLinks         jsonQuickLinks `gorm:"type:json"`
 	GlobalAnnouncement jsonGlobalAnnouncement `gorm:"type:json"`
+	FooterText         string       `gorm:"size:255"`
 	UpdatedAt          time.Time
 }
 

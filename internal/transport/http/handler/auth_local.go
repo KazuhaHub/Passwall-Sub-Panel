@@ -80,6 +80,7 @@ func (h *AuthLocalHandler) Methods(c *gin.Context) {
 		"icon_url":      s.IconURL,
 		"logo_url":      s.LogoURL,
 		"logo_url_dark": s.LogoURLDark,
+		"footer_text":   s.FooterText,
 	})
 }
 

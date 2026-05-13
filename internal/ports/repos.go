@@ -241,8 +241,6 @@ type UISettings struct {
 	// SubClientRules defines allowed clients and their detection rules.
 	// Empty means all clients are allowed. Dynamic, no restart required.
 	SubClientRules []SubClientRule `yaml:"sub_client_rules" json:"sub_client_rules"`
-	// SubImportClients defines user-facing one-click import targets.
-	SubImportClients []SubImportClient `yaml:"sub_import_clients" json:"sub_import_clients"`
 	// SubLogRetentionDays controls automatic subscription log cleanup.
 	// 0 means never delete logs automatically. Default 7.
 	SubLogRetentionDays int `yaml:"sub_log_retention_days" json:"sub_log_retention_days"`
@@ -250,10 +248,15 @@ type UISettings struct {
 	SubBlockAutoDisable bool `yaml:"sub_block_auto_disable" json:"sub_block_auto_disable"`
 	// SubBlockAutoDisableCount is the number of violations before auto-disabling. Default 3.
 	SubBlockAutoDisableCount int `yaml:"sub_block_auto_disable_count" json:"sub_block_auto_disable_count"`
-
-	// ---- User portal settings ----
-	QuickLinks         []QuickLink        `yaml:"quick_links" json:"quick_links"`
+	// SubImportClients defines user-facing one-click subscription import targets.
+	SubImportClients []SubImportClient `yaml:"sub_import_clients" json:"sub_import_clients"`
+	// QuickLinks defines shortcut buttons on the user self-service page.
+	QuickLinks []QuickLink `yaml:"quick_links" json:"quick_links"`
+	// GlobalAnnouncement is a single pinned notice shown to all users.
 	GlobalAnnouncement GlobalAnnouncement `yaml:"global_announcement" json:"global_announcement"`
+	// FooterText is the text displayed at the bottom of the login page.
+	// Defaults to "© Passwall Sub Panel".
+	FooterText string `yaml:"footer_text" json:"footer_text"`
 }
 
 // SubClientRule defines a subscription client detection rule.
