@@ -368,8 +368,10 @@ type uiSettingsRow struct {
 	JWTIssuer              string `gorm:"size:128"`
 	SubPerIPPerMin         int
 	LoginPerIPPerMin       int
-	SyncTaskRetentionDays  int
-	UpdatedAt              time.Time
+	SyncTaskRetentionDays      int
+	DisallowUserLocalLogin     bool
+	DisallowUserPasswordChange bool
+	UpdatedAt                  time.Time
 }
 
 func (uiSettingsRow) TableName() string { return "ui_settings" }

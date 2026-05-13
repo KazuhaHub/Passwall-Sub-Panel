@@ -18,6 +18,8 @@ export interface UISettings {
   sub_per_ip_per_min: number
   login_per_ip_per_min: number
   sync_task_retention_days: number
+  disallow_user_local_login: boolean
+  disallow_user_password_change: boolean
 }
 
 export async function getUISettings() {

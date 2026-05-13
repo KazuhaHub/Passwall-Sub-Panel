@@ -31,6 +31,8 @@ const logoUrlDark = ref('')
 const emailDomain = ref('psp.local')
 const auditRetentionDays = ref(0)
 const syncTaskRetentionDays = ref(0)
+const disallowUserLocalLogin = ref(false)
+const disallowUserPasswordChange = ref(false)
 const subBaseURL = ref('')
 const cronTrafficPullMinutes = ref(5)
 const cronReconcileMinutes = ref(15)
@@ -53,6 +55,8 @@ async function loadGeneral() {
     emailDomain.value = s.email_domain || 'psp.local'
     auditRetentionDays.value = s.audit_retention_days || 0
     syncTaskRetentionDays.value = s.sync_task_retention_days || 0
+    disallowUserLocalLogin.value = !!s.disallow_user_local_login
+    disallowUserPasswordChange.value = !!s.disallow_user_password_change
     subBaseURL.value = s.sub_base_url || ''
     cronTrafficPullMinutes.value = s.cron_traffic_pull_minutes || 5
     cronReconcileMinutes.value = s.cron_reconcile_minutes || 15
@@ -77,6 +81,8 @@ async function saveGeneral() {
       email_domain: emailDomain.value,
       audit_retention_days: auditRetentionDays.value,
       sync_task_retention_days: syncTaskRetentionDays.value,
+      disallow_user_local_login: disallowUserLocalLogin.value,
+      disallow_user_password_change: disallowUserPasswordChange.value,
       sub_base_url: subBaseURL.value,
       cron_traffic_pull_minutes: cronTrafficPullMinutes.value,
       cron_reconcile_minutes: cronReconcileMinutes.value,
@@ -362,6 +368,30 @@ onMounted(() => {
         <el-form label-position="top" style="max-width:480px">
           <el-form-item label="保留天数">
             <el-input-number v-model="auditRetentionDays" :min="0" :max="3650" />
+          </el-form-item>
+        </el-form>
+
+        <h3 class="section-title" style="margin-top:32px;">非管理员策略</h3>
+        <p class="section-hint">
+          针对普通用户（非管理员）的硬性限制。管理员账户不受影响——
+          这两项的设计目的就是让管理员保留"破窗"通道，
+          普通用户走 SSO 即可。
+        </p>
+        <el-form label-position="top" style="max-width:480px">
+          <el-form-item>
+            <el-switch v-model="disallowUserLocalLogin" />
+            <span style="margin-left: 12px">禁止普通用户使用本地账号密码登录</span>
+            <div class="hint-inline">
+              即使登录页还在 dual / local_only 模式，也会在后端拒绝普通用户的本地登录提交（403）。
+              sso_strict 模式隐含已开启。
+            </div>
+          </el-form-item>
+          <el-form-item>
+            <el-switch v-model="disallowUserPasswordChange" />
+            <span style="margin-left: 12px">禁止普通用户修改自己的密码</span>
+            <div class="hint-inline">
+              普通用户在 /user/me 页面点"修改密码"提交时后端返回 403。
+            </div>
           </el-form-item>
         </el-form>
 
@@ -731,6 +761,13 @@ export default { data() { return { ssoSubTab: 'saml' } } }
   color: var(--text-muted);
   font-size: 13px;
   margin: 0 0 16px;
+}
+
+.hint-inline {
+  color: var(--text-muted);
+  font-size: 12px;
+  margin-top: 4px;
+  margin-left: 60px;
 }
 
 .mode-group {

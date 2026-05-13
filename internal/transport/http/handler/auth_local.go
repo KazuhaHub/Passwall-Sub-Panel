@@ -40,6 +40,19 @@ func (h *AuthLocalHandler) activeLoginMode(c *gin.Context) string {
 	return s.LoginMode
 }
 
+// localLoginDisallowedForUsers reports whether non-admin accounts should be
+// rejected when they POST /api/auth/local/login. Two paths trigger it:
+//   - LoginMode == sso_strict (legacy single-knob mode that implies this)
+//   - DisallowUserLocalLogin == true (explicit toggle that works under any
+//     login mode, e.g. dual mode where a local form is still rendered)
+func (h *AuthLocalHandler) localLoginDisallowedForUsers(c *gin.Context) bool {
+	s, err := h.settings.Load(c.Request.Context(), ports.UISettings{})
+	if err != nil {
+		return false
+	}
+	return s.LoginMode == "sso_strict" || s.DisallowUserLocalLogin
+}
+
 func (h *AuthLocalHandler) Methods(c *gin.Context) {
 	defaults := ports.UISettings{LoginMode: "dual", SiteTitle: "Passwall"}
 	s, err := h.settings.Load(c.Request.Context(), defaults)
@@ -101,11 +114,10 @@ func (h *AuthLocalHandler) Login(c *gin.Context) {
 		}
 		return
 	}
-	// sso_strict: only admins may use the local password form, even with a
-	// valid credential. Regular users must come through SSO. This is the
-	// break-glass mode — /login/local stays reachable by URL so admins can
-	// recover when SSO is broken.
-	if h.activeLoginMode(c) == "sso_strict" && u.Role != domain.RoleAdmin {
+	// Non-admin local-login lock: either implied by sso_strict, or set
+	// explicitly via the DisallowUserLocalLogin setting. /login/local
+	// itself stays reachable so admins always have a break-glass path.
+	if u.Role != domain.RoleAdmin && h.localLoginDisallowedForUsers(c) {
 		c.JSON(http.StatusForbidden, gin.H{"error": "local login is restricted to administrators; please use SSO"})
 		return
 	}

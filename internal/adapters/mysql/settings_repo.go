@@ -42,7 +42,9 @@ func (r *settingsRepo) Load(ctx context.Context, defaults ports.UISettings) (por
 		JWTIssuer:              row.JWTIssuer,
 		SubPerIPPerMin:         row.SubPerIPPerMin,
 		LoginPerIPPerMin:       row.LoginPerIPPerMin,
-		SyncTaskRetentionDays:  row.SyncTaskRetentionDays,
+		SyncTaskRetentionDays:      row.SyncTaskRetentionDays,
+		DisallowUserLocalLogin:     row.DisallowUserLocalLogin,
+		DisallowUserPasswordChange: row.DisallowUserPasswordChange,
 	}
 	if out.LoginMode == "" {
 		out.LoginMode = defaults.LoginMode
@@ -99,7 +101,9 @@ func (r *settingsRepo) Save(ctx context.Context, s ports.UISettings) error {
 		JWTIssuer:              s.JWTIssuer,
 		SubPerIPPerMin:         s.SubPerIPPerMin,
 		LoginPerIPPerMin:       s.LoginPerIPPerMin,
-		SyncTaskRetentionDays:  s.SyncTaskRetentionDays,
+		SyncTaskRetentionDays:      s.SyncTaskRetentionDays,
+		DisallowUserLocalLogin:     s.DisallowUserLocalLogin,
+		DisallowUserPasswordChange: s.DisallowUserPasswordChange,
 	}
 	return r.db.WithContext(ctx).Clauses(clause.OnConflict{UpdateAll: true}).Create(&row).Error
 }

@@ -121,6 +121,16 @@ func (h *UserMeHandler) ChangePassword(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "only local accounts may change password here"})
 		return
 	}
+	// Optional admin-controlled lock that prevents non-admin local users
+	// from rotating their password through the panel UI. Admins always retain
+	// the ability (used by the break-glass account when SSO is broken).
+	if u.Role != domain.RoleAdmin {
+		s, sErr := h.settings.Load(c.Request.Context(), ports.UISettings{})
+		if sErr == nil && s.DisallowUserPasswordChange {
+			c.JSON(http.StatusForbidden, gin.H{"error": "password change is disabled for non-administrators"})
+			return
+		}
+	}
 	if _, err := h.user.VerifyLocalPassword(c.Request.Context(), u.Username, req.OldPassword); err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "old password incorrect"})
 		return

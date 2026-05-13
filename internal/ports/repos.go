@@ -213,6 +213,13 @@ type UISettings struct {
 	// pending/running stay (still doing work) and canceled/error stay
 	// (worth keeping for diagnosis). 0 disables auto-cleanup.
 	SyncTaskRetentionDays int `json:"sync_task_retention_days"`
+
+	// Hard policies that apply REGARDLESS of LoginMode. sso_strict already
+	// blocks non-admin local login at the login-mode level; these knobs let
+	// admins enforce the same policy in dual/local_only mode too, and add an
+	// independent password-change lock.
+	DisallowUserLocalLogin     bool `json:"disallow_user_local_login"`
+	DisallowUserPasswordChange bool `json:"disallow_user_password_change"`
 }
 
 type SettingsRepo interface {
