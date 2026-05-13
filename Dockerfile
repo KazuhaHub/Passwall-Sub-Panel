@@ -28,6 +28,7 @@ RUN apk add --no-cache ca-certificates tzdata && \
     addgroup -S psp && adduser -S -G psp psp
 WORKDIR /app
 COPY --from=go-builder /out/psp /app/psp
+COPY config/ /app/config/
 USER psp
 EXPOSE 8788
 ENTRYPOINT ["/app/psp"]

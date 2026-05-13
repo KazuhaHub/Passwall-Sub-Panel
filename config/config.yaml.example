@@ -2,6 +2,10 @@
 # Copy to config.yaml and fill in jwt_secret (or set PSP_JWT_SECRET).
 # Database is zero-config by default: if mysql.dsn is omitted or empty, the
 # panel uses SQLite at <data_dir>/panel.db.
+#
+# All other settings (sub_base_url, cron cadence, JWT TTLs, rate limits,
+# login mode, new-user defaults, etc.) are stored in the database and
+# managed via Admin -> Settings. They are NOT read from this file.
 
 listen: ":8788"
 
@@ -9,13 +13,6 @@ listen: ":8788"
 #   -join ((48..57)+(65..90)+(97..122) | Get-Random -Count 48 | % {[char]$_})
 # or set env PSP_JWT_SECRET instead.
 jwt_secret: "CHANGE-ME-TO-RANDOM-48-CHAR-STRING"
-
-# Subscription URL base shown in the admin UI when copying subscription links.
-# Example:
-#   sub_base_url: "https://sub.example.com"
-# Local testing example:
-#   sub_base_url: "http://127.0.0.1:8788"
-sub_base_url: "https://sub.example.com"
 
 # YAML config directory (templates).
 config_dir: "./config"
@@ -26,53 +23,27 @@ data_dir: "./data"
 
 # Optional database connection.
 #
-# Default: leave this whole block commented to use SQLite automatically:
-#   ./data/panel.db
+# Default: leave the whole mysql block commented out to use embedded SQLite
+# at <data_dir>/panel.db. Zero-config, no extra setup needed.
 #
-# Example 1: explicitly use the default SQLite file:
+# To use a custom SQLite file path:
 # mysql:
-#   dsn: ""
+#   dsn: "sqlite:./data/my-custom.db"
 #
-# Example 2: use a custom SQLite file:
+# To use MySQL, uncomment and fill in the fields below:
+#
 # mysql:
-#   dsn: "sqlite:./data/passwall-sub-panel.db"
+#   host: "127.0.0.1"        # MySQL server hostname or IP
+#   port: 3306               # TCP port (default 3306)
+#   user: "psp"              # MySQL username
+#   password: "your_password"
+#   database: "passwall"     # database name (must already exist)
+#   # params: ""             # extra DSN params; blank uses the safe default
+#                            # (parseTime=true&charset=utf8mb4&loc=Local)
 #
-# Example 3: use MySQL:
-# mysql:
-#   dsn: "psp_user:psp_password@tcp(127.0.0.1:3306)/passwall_sub_panel?charset=utf8mb4&parseTime=True&loc=Local"
+# Advanced: set dsn to a raw go-sql-driver string when discrete fields
+# don't fit (unix socket, TLS, multi-host, etc.). When set, dsn wins
+# over the discrete fields above.
+#   dsn: "user:pw@unix(/tmp/mysql.sock)/db?parseTime=true"
 #
-# Environment override:
-#   PSP_MYSQL_DSN takes precedence over this file.
-
-# Reconciliation / traffic poll cadence (layered design — see ARCHITECTURE.md §9.4).
-cron:
-  traffic_pull_minutes: 5      # L2: traffic poll + light drift check
-  reconcile_minutes: 15        # L3: full reconciliation
-
-jwt:
-  access_ttl_minutes: 120
-  refresh_ttl_minutes: 10080   # 7 days
-  issuer: "passwall-sub-panel"
-
-rate_limit:
-  sub_per_ip_per_min: 60       # /sub/:token rate per client IP
-  login_per_ip_per_min: 5      # /api/auth/local/login per client IP
-
-# Login page mode bootstrap default. Runtime edits are stored in the DB.
-# Frontend GET /api/auth/methods reads the current value and renders
-# accordingly. If no SSO provider is enabled, the panel forces local_only.
-#
-#   sso_first  → big SSO button on the main /login page; small "本地账号登录"
-#                link sends users to /login/local for the username/password form.
-#   dual       → both SSO button and local username/password form rendered
-#                on /login at the same time (current behavior).
-#   local_only → only the local form; users navigating to /login are
-#                redirected to /login/local.
-auth:
-  login_mode: "dual"
-
-# Defaults applied when admin creates a new user without overriding.
-new_user_defaults:
-  expire_days: 30              # 0 = never expire
-  traffic_limit_gb: 0          # 0 = unlimited
-  traffic_reset_period: "monthly"  # never | monthly | quarterly
+# Env override: PSP_MYSQL_DSN replaces everything in this block.
