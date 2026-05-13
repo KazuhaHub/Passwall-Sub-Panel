@@ -25,28 +25,34 @@ func NewAdminSettingsHandler(repo ports.SettingsRepo, jwtParams *jwtutil.ParamsC
 }
 
 type settingsDTO struct {
-	LoginMode                  string `json:"login_mode"`
-	SiteTitle                  string `json:"site_title"`
-	AppTitle                   string `json:"app_title"`
-	IconURL                    string `json:"icon_url"`
-	LogoURL                    string `json:"logo_url"`
-	LogoURLDark                string `json:"logo_url_dark"`
-	EmailDomain                string `json:"email_domain"`
-	AuditRetentionDays         int    `json:"audit_retention_days"`
-	SubBaseURL                 string `json:"sub_base_url"`
-	CronTrafficPullMinutes     int    `json:"cron_traffic_pull_minutes"`
-	CronReconcileMinutes       int    `json:"cron_reconcile_minutes"`
-	JWTAccessTTLMinutes        int    `json:"jwt_access_ttl_minutes"`
-	JWTRefreshTTLMinutes       int    `json:"jwt_refresh_ttl_minutes"`
-	JWTIssuer                  string `json:"jwt_issuer"`
-	SubPerIPPerMin             int    `json:"sub_per_ip_per_min"`
-	LoginPerIPPerMin           int    `json:"login_per_ip_per_min"`
-	SyncTaskRetentionDays      int    `json:"sync_task_retention_days"`
-	DisallowUserLocalLogin     bool   `json:"disallow_user_local_login"`
-	DisallowUserPasswordChange bool   `json:"disallow_user_password_change"`
-	EmergencyAccessEnabled     bool   `json:"emergency_access_enabled"`
-	EmergencyAccessHours       int    `json:"emergency_access_hours"`
-	EmergencyAccessMaxCount    int    `json:"emergency_access_max_count"`
+	LoginMode                  string                  `json:"login_mode"`
+	SiteTitle                  string                  `json:"site_title"`
+	AppTitle                   string                  `json:"app_title"`
+	IconURL                    string                  `json:"icon_url"`
+	LogoURL                    string                  `json:"logo_url"`
+	LogoURLDark                string                  `json:"logo_url_dark"`
+	EmailDomain                string                  `json:"email_domain"`
+	AuditRetentionDays         int                     `json:"audit_retention_days"`
+	SubBaseURL                 string                  `json:"sub_base_url"`
+	CronTrafficPullMinutes     int                     `json:"cron_traffic_pull_minutes"`
+	CronReconcileMinutes       int                     `json:"cron_reconcile_minutes"`
+	JWTAccessTTLMinutes        int                     `json:"jwt_access_ttl_minutes"`
+	JWTRefreshTTLMinutes       int                     `json:"jwt_refresh_ttl_minutes"`
+	JWTIssuer                  string                  `json:"jwt_issuer"`
+	SubPerIPPerMin             int                     `json:"sub_per_ip_per_min"`
+	LoginPerIPPerMin           int                     `json:"login_per_ip_per_min"`
+	SyncTaskRetentionDays      int                     `json:"sync_task_retention_days"`
+	DisallowUserLocalLogin     bool                    `json:"disallow_user_local_login"`
+	DisallowUserPasswordChange bool                    `json:"disallow_user_password_change"`
+	EmergencyAccessEnabled     bool                    `json:"emergency_access_enabled"`
+	EmergencyAccessHours       int                     `json:"emergency_access_hours"`
+	EmergencyAccessMaxCount    int                     `json:"emergency_access_max_count"`
+	SubPath                    string                  `json:"sub_path"`
+	SubClientRules             []ports.SubClientRule   `json:"sub_client_rules"`
+	SubImportClients           []ports.SubImportClient `json:"sub_import_clients"`
+	SubLogRetentionDays        int                     `json:"sub_log_retention_days"`
+	SubBlockAutoDisable        bool                    `json:"sub_block_auto_disable"`
+	SubBlockAutoDisableCount   int                     `json:"sub_block_auto_disable_count"`
 }
 
 func (h *AdminSettingsHandler) defaults() ports.UISettings {
@@ -89,6 +95,12 @@ func (h *AdminSettingsHandler) Get(c *gin.Context) {
 		EmergencyAccessEnabled:     s.EmergencyAccessEnabled,
 		EmergencyAccessHours:       s.EmergencyAccessHours,
 		EmergencyAccessMaxCount:    s.EmergencyAccessMaxCount,
+		SubPath:                    s.SubPath,
+		SubClientRules:             s.SubClientRules,
+		SubImportClients:           s.SubImportClients,
+		SubLogRetentionDays:        s.SubLogRetentionDays,
+		SubBlockAutoDisable:        s.SubBlockAutoDisable,
+		SubBlockAutoDisableCount:   s.SubBlockAutoDisableCount,
 	})
 }
 
@@ -128,6 +140,12 @@ func (h *AdminSettingsHandler) Put(c *gin.Context) {
 		EmergencyAccessEnabled:     req.EmergencyAccessEnabled,
 		EmergencyAccessHours:       req.EmergencyAccessHours,
 		EmergencyAccessMaxCount:    req.EmergencyAccessMaxCount,
+		SubPath:                    strings.TrimSpace(req.SubPath),
+		SubClientRules:             req.SubClientRules,
+		SubImportClients:           normalizeSubImportClients(req.SubImportClients),
+		SubLogRetentionDays:        req.SubLogRetentionDays,
+		SubBlockAutoDisable:        req.SubBlockAutoDisable,
+		SubBlockAutoDisableCount:   req.SubBlockAutoDisableCount,
 	}
 	if s.AuditRetentionDays < 0 || s.SyncTaskRetentionDays < 0 {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "retention days must be >= 0"})
@@ -136,7 +154,8 @@ func (h *AdminSettingsHandler) Put(c *gin.Context) {
 	if s.CronTrafficPullMinutes < 0 || s.CronReconcileMinutes < 0 ||
 		s.JWTAccessTTLMinutes < 0 || s.JWTRefreshTTLMinutes < 0 ||
 		s.SubPerIPPerMin < 0 || s.LoginPerIPPerMin < 0 ||
-		s.EmergencyAccessHours < 0 || s.EmergencyAccessMaxCount < 0 {
+		s.EmergencyAccessHours < 0 || s.EmergencyAccessMaxCount < 0 ||
+		s.SubLogRetentionDays < 0 || s.SubBlockAutoDisableCount < 0 {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "runtime tuning values must be >= 0"})
 		return
 	}
@@ -155,6 +174,9 @@ func (h *AdminSettingsHandler) Put(c *gin.Context) {
 	}
 	if s.IconURL == "" {
 		s.IconURL = "/images/HeadPicture.png"
+	}
+	if s.SubPath == "" {
+		s.SubPath = "sub"
 	}
 	if err := h.repo.Save(c.Request.Context(), s); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -188,5 +210,42 @@ func (h *AdminSettingsHandler) Put(c *gin.Context) {
 		EmergencyAccessEnabled:     s.EmergencyAccessEnabled,
 		EmergencyAccessHours:       s.EmergencyAccessHours,
 		EmergencyAccessMaxCount:    s.EmergencyAccessMaxCount,
+		SubPath:                    s.SubPath,
+		SubClientRules:             s.SubClientRules,
+		SubImportClients:           s.SubImportClients,
+		SubLogRetentionDays:        s.SubLogRetentionDays,
+		SubBlockAutoDisable:        s.SubBlockAutoDisable,
+		SubBlockAutoDisableCount:   s.SubBlockAutoDisableCount,
 	})
+}
+
+func normalizeSubImportClients(clients []ports.SubImportClient) []ports.SubImportClient {
+	out := make([]ports.SubImportClient, 0, len(clients))
+	for _, c := range clients {
+		c.Name = strings.TrimSpace(c.Name)
+		c.RenderFormat = strings.TrimSpace(c.RenderFormat)
+		c.ImportURLTemplate = strings.TrimSpace(c.ImportURLTemplate)
+		c.InstallURL = strings.TrimSpace(c.InstallURL)
+		platforms := make([]string, 0, len(c.Platforms))
+		seen := map[string]bool{}
+		for _, p := range c.Platforms {
+			p = strings.ToLower(strings.TrimSpace(p))
+			switch p {
+			case "windows", "macos", "linux", "ios", "android", "universal":
+				if !seen[p] {
+					seen[p] = true
+					platforms = append(platforms, p)
+				}
+			}
+		}
+		c.Platforms = platforms
+		if c.Name == "" || c.ImportURLTemplate == "" || len(c.Platforms) == 0 {
+			continue
+		}
+		if c.RenderFormat != "sing-box" {
+			c.RenderFormat = "mihomo"
+		}
+		out = append(out, c)
+	}
+	return out
 }

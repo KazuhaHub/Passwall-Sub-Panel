@@ -874,13 +874,14 @@ func (s *Service) ResyncMembership(ctx context.Context, userID int64) error {
 // Iterates over the ownership table (rather than re-deriving from the
 // user's group) so imported clients with their recorded email are still
 // updated correctly.
-func (s *Service) SetEnabledAndSync(ctx context.Context, userID int64, enabled bool, reason domain.AutoDisabledReason) error {
+func (s *Service) SetEnabledAndSync(ctx context.Context, userID int64, enabled bool, reason domain.AutoDisabledReason, detail string) error {
 	u, err := s.users.GetByID(ctx, userID)
 	if err != nil {
 		return err
 	}
 	u.Enabled = enabled
 	u.AutoDisabledReason = reason
+	u.DisableDetail = detail
 	if err := s.users.Update(ctx, u); err != nil {
 		return err
 	}

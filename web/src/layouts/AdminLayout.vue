@@ -30,8 +30,8 @@ const nav: NavItem[] = [
   { path: '/admin/rules', label: '规则库', icon: 'List' },
   { path: '/admin/templates', label: '配置方案', icon: 'Document' },
   { path: '/admin/traffic', label: '流量统计', icon: 'TrendCharts' },
+  { path: '/admin/logs', label: '日志管理', icon: 'Notebook' },
   { path: '/admin/sync-tasks', label: '同步任务', icon: 'Refresh' },
-  { path: '/admin/audit', label: '审计日志', icon: 'Clock' },
   { path: '/admin/settings', label: '系统设置', icon: 'Setting' },
 ]
 

@@ -63,8 +63,8 @@ export async function resetEmergencyUsage(id: number) {
   await client.post(`/admin/users/${id}/reset-emergency-usage`)
 }
 
-export async function setEnabled(id: number, enabled: boolean) {
-  await client.post(`/admin/users/${id}/set-enabled`, { enabled })
+export async function setEnabled(id: number, enabled: boolean, reason?: string) {
+  await client.post(`/admin/users/${id}/set-enabled`, { enabled, reason })
 }
 
 export async function getUserRules(id: number) {

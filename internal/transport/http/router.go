@@ -2,6 +2,7 @@
 package http
 
 import (
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -60,9 +61,10 @@ func NewRouter(d Deps) *gin.Engine {
 	// Public endpoints
 	g.GET("/health", handler.Health)
 
+	// Subscription handler — uses dynamic path from settings.
+	// The actual route is registered via NoRoute handler for dynamic path support.
+	subHandler := handler.NewSubHandler(d.User, d.Render, d.Repos.SubLog, d.Repos.Settings, d.Repos.User, d.Mail)
 	subLimiter := middleware.NewPerIPLimiter(d.SubPerIPPerMin, time.Minute)
-	subHandler := handler.NewSubHandler(d.User, d.Render, d.Repos.SubLog)
-	g.GET("/sub/:token", subLimiter.Handler(), subHandler.Get)
 
 	// Auth endpoints
 	authLocal := handler.NewAuthLocalHandler(d.Auth, d.User, d.SAML, d.OIDC, d.Repos.Settings)
@@ -111,7 +113,7 @@ func NewRouter(d Deps) *gin.Engine {
 	)
 	adminGroup.Use(middleware.AdminAudit(d.Audit))
 	{
-		users := handler.NewAdminUserHandler(d.User, d.Repos.Settings)
+		users := handler.NewAdminUserHandler(d.User, d.Repos.Settings, d.Mail)
 		adminGroup.GET("/users", users.List)
 		adminGroup.POST("/users", users.Create)
 		adminGroup.GET("/users/:id", users.Get)
@@ -199,11 +201,39 @@ func NewRouter(d Deps) *gin.Engine {
 		adminGroup.POST("/sync-tasks/:id/retry", tasks.Retry)
 		adminGroup.POST("/sync-tasks/:id/cancel", tasks.Cancel)
 		adminGroup.POST("/sync-tasks/purge", tasks.PurgeFinished)
+
+		subLogs := handler.NewAdminSubLogHandler(d.Repos.SubLog, d.Repos.Settings)
+		adminGroup.GET("/sub-logs", subLogs.List)
+		adminGroup.DELETE("/sub-logs", subLogs.Clear)
+		adminGroup.POST("/sub-logs/purge", subLogs.Purge)
 	}
 
 	// Static SPA bundle (embedded). Must be registered last so /api and
-	// /sub keep precedence.
-	g.NoRoute(handler.StaticSPA)
+	// subscription path keep precedence.
+	// NoRoute handles both dynamic subscription paths and SPA fallback.
+	g.NoRoute(func(c *gin.Context) {
+		// Check if this is a subscription request.
+		if isSubRequest(c, d.Repos.Settings) {
+			subLimiter.Handler()(c)
+			if !c.IsAborted() {
+				subHandler.Get(c)
+			}
+			return
+		}
+		// Otherwise serve SPA.
+		handler.StaticSPA(c)
+	})
 
 	return g
+}
+
+// isSubRequest checks if the request path matches the subscription path prefix.
+func isSubRequest(c *gin.Context, settings ports.SettingsRepo) bool {
+	// Load current settings to get the sub path prefix.
+	s, err := settings.Load(c.Request.Context(), ports.UISettings{})
+	if err != nil {
+		return false
+	}
+	prefix := "/" + strings.Trim(s.SubPath, "/") + "/"
+	return strings.HasPrefix(c.Request.URL.Path, prefix)
 }

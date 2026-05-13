@@ -1,0 +1,77 @@
+slug: default-sing-box
+name: 默认 sing-box
+client_type: sing-box
+is_default: true
+rule_sets:
+  - default_rules
+content: |
+  {
+    "log": {
+      "level": "info",
+      "timestamp": true
+    },
+    "dns": {
+      "servers": [
+        {
+          "tag": "alidns",
+          "address": "https://dns.alidns.com/dns-query",
+          "detour": "direct"
+        },
+        {
+          "tag": "dnspod",
+          "address": "https://doh.pub/dns-query",
+          "detour": "direct"
+        },
+        {
+          "tag": "cloudflare-gateway",
+          "address": "https://v5brh3pn84.cloudflare-gateway.com/dns-query",
+          "detour": "🚀 节点选择"
+        },
+        {
+          "tag": "cloudflare",
+          "address": "https://cloudflare-dns.com/dns-query",
+          "detour": "🚀 节点选择"
+        }
+      ],
+      "rules": [
+        {
+          "domain_suffix": [
+            "lan",
+            "local",
+            "arpa"
+          ],
+          "server": "alidns"
+        }
+      ],
+      "final": "alidns",
+      "strategy": "prefer_ipv4"
+    },
+    "inbounds": [
+      {
+        "type": "tun",
+        "tag": "tun-in",
+        "address": [
+          "172.19.0.1/30",
+          "fdfe:dcba:9876::1/126"
+        ],
+        "auto_route": true,
+        "strict_route": true,
+        "sniff": true
+      },
+      {
+        "type": "mixed",
+        "tag": "mixed-in",
+        "listen": "127.0.0.1",
+        "listen_port": 7890,
+        "sniff": true
+      }
+    ],
+    "outbounds":
+      {{ outbounds }},
+    "route": {
+      "rules":
+        {{ route_rules }},
+      "final": {{ final_outbound }},
+      "auto_detect_interface": true
+    }
+  }

@@ -11,7 +11,9 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/log"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/mailer"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/user"
 )
 
@@ -19,10 +21,11 @@ import (
 type AdminUserHandler struct {
 	user     *user.Service
 	settings ports.SettingsRepo
+	mailer   *mailer.Service
 }
 
-func NewAdminUserHandler(userSvc *user.Service, settings ports.SettingsRepo) *AdminUserHandler {
-	return &AdminUserHandler{user: userSvc, settings: settings}
+func NewAdminUserHandler(userSvc *user.Service, settings ports.SettingsRepo, mailerSvc *mailer.Service) *AdminUserHandler {
+	return &AdminUserHandler{user: userSvc, settings: settings, mailer: mailerSvc}
 }
 
 // ---- DTOs ----
@@ -216,7 +219,8 @@ func (h *AdminUserHandler) ResetEmergencyUsage(c *gin.Context) {
 }
 
 type setEnabledRequest struct {
-	Enabled bool `json:"enabled"`
+	Enabled bool   `json:"enabled"`
+	Reason  string `json:"reason,omitempty"`
 }
 
 func (h *AdminUserHandler) SetEnabled(c *gin.Context) {
@@ -231,13 +235,41 @@ func (h *AdminUserHandler) SetEnabled(c *gin.Context) {
 		return
 	}
 	reason := domain.DisabledNone
+	detail := ""
 	if !req.Enabled {
 		reason = domain.DisabledManual
+		detail = req.Reason
 	}
-	if err := h.user.SetEnabledAndSync(c.Request.Context(), id, req.Enabled, reason); err != nil {
+	if err := h.user.SetEnabledAndSync(c.Request.Context(), id, req.Enabled, reason, detail); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+
+	// Send notification email (async).
+	if h.mailer != nil {
+		go func() {
+			if !req.Enabled {
+				// Disabling
+				reasonText := "管理员手动停用"
+				if detail != "" {
+					reasonText = detail
+				}
+				if err := h.mailer.SendAccountDisabledToUser(c.Request.Context(), id, reasonText, detail); err != nil {
+					log.Warn("failed to send disable notification", "user_id", id, "err", err)
+				}
+			} else {
+				// Enabling
+				reasonText := "管理员手动恢复"
+				if detail != "" {
+					reasonText = detail
+				}
+				if err := h.mailer.SendAccountEnabledToUser(c.Request.Context(), id, reasonText, detail); err != nil {
+					log.Warn("failed to send enable notification", "user_id", id, "err", err)
+				}
+			}
+		}()
+	}
+
 	if h.user.HasPendingSync(c.Request.Context(), id) {
 		c.Header("X-Sync-Pending", "1")
 	}

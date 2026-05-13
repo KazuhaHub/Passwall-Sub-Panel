@@ -70,6 +70,7 @@ func (h *UserMeHandler) Profile(c *gin.Context) {
 		"display_name":         u.DisplayName,
 		"upn":                  u.UPN,
 		"sub_url":              h.subURL(c.Request.Context(), u.SubToken),
+		"sub_import_clients":   enabledSubImportClients(settings.SubImportClients),
 		"expire_at":            u.ExpireAt,
 		"traffic_limit_bytes":  u.TrafficLimitBytes,
 		"traffic_reset_period": u.TrafficResetPeriod,
@@ -83,6 +84,16 @@ func (h *UserMeHandler) Profile(c *gin.Context) {
 			"remaining":      emergencyRemaining,
 		},
 	})
+}
+
+func enabledSubImportClients(clients []ports.SubImportClient) []ports.SubImportClient {
+	out := make([]ports.SubImportClient, 0, len(clients))
+	for _, c := range clients {
+		if c.Enabled {
+			out = append(out, c)
+		}
+	}
+	return out
 }
 
 func (h *UserMeHandler) EmergencyAccess(c *gin.Context) {

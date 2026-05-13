@@ -16,7 +16,7 @@ import (
 // UserDisabler is the narrow subset of user.Service this package needs.
 // Defined here to keep the import direction one-way.
 type UserDisabler interface {
-	SetEnabledAndSync(ctx context.Context, userID int64, enabled bool, reason domain.AutoDisabledReason) error
+	SetEnabledAndSync(ctx context.Context, userID int64, enabled bool, reason domain.AutoDisabledReason, detail string) error
 }
 
 type Service struct {
@@ -108,7 +108,7 @@ func (s *Service) pollUser(ctx context.Context, u *domain.User) error {
 		// If they were auto-disabled for traffic, the new period gives them
 		// quota back — re-enable.
 		if !u.Enabled && u.AutoDisabledReason == domain.DisabledTrafficExceeded {
-			if err := s.disabler.SetEnabledAndSync(ctx, u.ID, true, domain.DisabledNone); err != nil {
+			if err := s.disabler.SetEnabledAndSync(ctx, u.ID, true, domain.DisabledNone, ""); err != nil {
 				log.Warn("traffic re-enable", "user_id", u.ID, "err", err)
 			}
 		} else {
@@ -128,7 +128,7 @@ func (s *Service) pollUser(ctx context.Context, u *domain.User) error {
 		return err
 	}
 	if periodUsed >= u.TrafficLimitBytes {
-		if err := s.disabler.SetEnabledAndSync(ctx, u.ID, false, domain.DisabledTrafficExceeded); err != nil {
+		if err := s.disabler.SetEnabledAndSync(ctx, u.ID, false, domain.DisabledTrafficExceeded, "traffic limit exceeded"); err != nil {
 			return fmt.Errorf("auto-disable: %w", err)
 		}
 		log.Info("auto-disabled user (traffic exceeded)",
@@ -254,10 +254,10 @@ func (s *Service) SetPeriodUsage(ctx context.Context, userID int64, usedBytes in
 		return nil
 	}
 	if usedBytes >= u.TrafficLimitBytes && u.Enabled {
-		return s.disabler.SetEnabledAndSync(ctx, u.ID, false, domain.DisabledTrafficExceeded)
+		return s.disabler.SetEnabledAndSync(ctx, u.ID, false, domain.DisabledTrafficExceeded, "traffic limit exceeded")
 	}
 	if usedBytes < u.TrafficLimitBytes && !u.Enabled && u.AutoDisabledReason == domain.DisabledTrafficExceeded {
-		return s.disabler.SetEnabledAndSync(ctx, u.ID, true, domain.DisabledNone)
+		return s.disabler.SetEnabledAndSync(ctx, u.ID, true, domain.DisabledNone, "")
 	}
 	return nil
 }

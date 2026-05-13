@@ -283,8 +283,25 @@ async function confirmDelete(row: User) {
 }
 
 async function toggleEnabled(row: User) {
-  await setEnabled(row.id, !row.enabled)
-  ElMessage.success(!row.enabled ? '已启用' : '已禁用')
+  const enabling = !row.enabled
+  let reason = ''
+
+  // Ask for reason (optional for both enable/disable)
+  try {
+    const action = enabling ? '启用' : '停用'
+    const { value } = await ElMessageBox.prompt(`请输入${action}原因（可选）`, `${action}用户`, {
+      confirmButtonText: '确定',
+      cancelButtonText: '取消',
+      inputPlaceholder: `${action}原因`,
+      inputType: 'textarea',
+    })
+    reason = value || ''
+  } catch {
+    return // User cancelled
+  }
+
+  await setEnabled(row.id, enabling, reason)
+  ElMessage.success(enabling ? '已启用' : '已禁用')
   await load()
 }
 
@@ -312,9 +329,25 @@ async function quickRenew(row: User, days = 30) {
 async function batchSetEnabled(enabled: boolean) {
   if (selectedUsers.value.length === 0) return
   const rows = selectedUsers.value.slice()
+
+  // Ask for reason (optional)
+  let reason = ''
+  try {
+    const action = enabled ? '启用' : '停用'
+    const { value } = await ElMessageBox.prompt(`请输入${action}原因（可选）`, `批量${action}用户`, {
+      confirmButtonText: '确定',
+      cancelButtonText: '取消',
+      inputPlaceholder: `${action}原因`,
+      inputType: 'textarea',
+    })
+    reason = value || ''
+  } catch {
+    return // User cancelled
+  }
+
   batchBusy.value = enabled ? 'enable' : 'disable'
   try {
-    const results = await Promise.allSettled(rows.map((row) => setEnabled(row.id, enabled)))
+    const results = await Promise.allSettled(rows.map((row) => setEnabled(row.id, enabled, reason)))
     const failed = results.filter((result) => result.status === 'rejected').length
     if (failed > 0) {
       ElMessage.warning(`已${enabled ? '启用' : '禁用'} ${rows.length - failed} 个用户，失败 ${failed} 个`)

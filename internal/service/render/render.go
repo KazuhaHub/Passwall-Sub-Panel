@@ -79,7 +79,10 @@ func (s *Service) RenderForUser(ctx context.Context, u *domain.User, ct domain.C
 	if err != nil {
 		return nil, fmt.Errorf("resolve rules: %w", err)
 	}
-	proxyGroupsYAML, err := buildProxyGroupsYAML(rulesCommon)
+	if ct == domain.ClientSingBox {
+		return s.renderSingBox(ctx, u, tpl, items, rulesCommon)
+	}
+	proxyGroupsYAML, err := buildProxyGroupsYAML(strings.Join([]string{u.PersonalRules, rulesCommon}, "\n"))
 	if err != nil {
 		return nil, fmt.Errorf("build proxy groups: %w", err)
 	}

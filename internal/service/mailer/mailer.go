@@ -60,6 +60,18 @@ func DefaultTemplates() []*domain.MailTemplate {
 			Subject: "剩余流量低于 {{.TrafficRemainPercent}}%",
 			Body:    defaultHTMLTemplate("剩余流量不足", "你的本周期剩余流量已低于 {{.TrafficRemainPercent}}%。请合理安排使用，或联系管理员调整套餐。", "剩余流量", "{{.TrafficRemainGB}} GB"),
 		},
+		{
+			Kind:    domain.MailReminderAccountDisable,
+			Enabled: true,
+			Subject: "账号已被停用",
+			Body:    defaultHTMLTemplate("账号已停用", "你的账号已被停用。{{.DisableReason}}", "停用原因", "{{.DisableDetail}}"),
+		},
+		{
+			Kind:    domain.MailReminderAccountEnable,
+			Enabled: true,
+			Subject: "账号已恢复正常",
+			Body:    defaultHTMLTemplate("账号已恢复", "你的账号已恢复正常，可以继续使用订阅服务。{{.EnableReason}}", "备注", "{{.EnableDetail}}"),
+		},
 	}
 }
 
@@ -90,7 +102,7 @@ func defaultHTMLTemplate(title, message, metricLabel, metricValue string) string
           <td style="padding:14px 18px;text-align:right;font-size:14px;font-weight:600;color:#111827;border-top:1px solid #e5e7eb;">{{.GeneratedAt}}</td>
         </tr>
       </table>
-      <a href="{{.SubURL}}" style="display:inline-block;background:#2563eb;color:#ffffff;text-decoration:none;border-radius:8px;padding:12px 18px;font-size:14px;font-weight:700;">打开订阅链接</a>
+      <a href="{{.SubURL}}" style="display:inline-block;background:#2563eb;color:#ffffff;text-decoration:none;border-radius:8px;padding:12px 18px;font-size:14px;font-weight:700;">查看我的订阅</a>
       <p style="margin:24px 0 0;font-size:12px;line-height:1.6;color:#6b7280;">如果按钮无法打开，请复制以下链接：<br><span style="word-break:break-all;color:#374151;">{{.SubURL}}</span></p>
     </div>
   </div>
@@ -154,7 +166,7 @@ func (s *Service) SaveTemplate(ctx context.Context, tpl *domain.MailTemplate) er
 		return fmt.Errorf("%w: template required", domain.ErrValidation)
 	}
 	switch tpl.Kind {
-	case domain.MailReminderExpireBefore, domain.MailReminderExpired, domain.MailReminderTrafficLow:
+	case domain.MailReminderExpireBefore, domain.MailReminderExpired, domain.MailReminderTrafficLow, domain.MailReminderAccountDisable, domain.MailReminderAccountEnable:
 	default:
 		return fmt.Errorf("%w: invalid template kind", domain.ErrValidation)
 	}
@@ -181,6 +193,108 @@ func (s *Service) SendTest(ctx context.Context, to string) error {
 		return fmt.Errorf("%w: recipient required", domain.ErrValidation)
 	}
 	return sendSMTP(ctx, settings, to, "Passwall 邮件测试", "这是一封来自 Passwall Sub Panel 的测试邮件。")
+}
+
+// SendAccountDisabledNotification sends an email notification when an account is disabled.
+func (s *Service) SendAccountDisabledNotification(ctx context.Context, u *domain.User, disableReason, disableDetail string) error {
+	settings, err := s.LoadSettings(ctx)
+	if err != nil {
+		return err
+	}
+	if !settings.Enabled {
+		return nil
+	}
+	templates, err := s.ListTemplates(ctx)
+	if err != nil {
+		return err
+	}
+	// Find the account_disabled template.
+	var tpl *domain.MailTemplate
+	for _, t := range templates {
+		if t.Kind == domain.MailReminderAccountDisable && t.Enabled {
+			tpl = t
+			break
+		}
+	}
+	if tpl == nil {
+		return nil // Template not found or disabled.
+	}
+	to := reminderAddress(u)
+	if to == "" {
+		return nil // No email address.
+	}
+	data := s.templateData(ctx, settings, u)
+	data["DisableReason"] = disableReason
+	data["DisableDetail"] = disableDetail
+	subject, err := renderTemplate("account_disabled_subject", tpl.Subject, data)
+	if err != nil {
+		return err
+	}
+	body, err := renderTemplate("account_disabled_body", tpl.Body, data)
+	if err != nil {
+		return err
+	}
+	return sendSMTP(ctx, settings, to, subject, body)
+}
+
+// SendAccountDisabledToUser is a convenience wrapper for sending disable notification.
+func (s *Service) SendAccountDisabledToUser(ctx context.Context, userID int64, disableReason, disableDetail string) error {
+	u, err := s.users.GetByID(ctx, userID)
+	if err != nil {
+		return err
+	}
+	return s.SendAccountDisabledNotification(ctx, u, disableReason, disableDetail)
+}
+
+// SendAccountEnabledNotification sends an email notification when an account is re-enabled.
+func (s *Service) SendAccountEnabledNotification(ctx context.Context, u *domain.User, enableReason, enableDetail string) error {
+	settings, err := s.LoadSettings(ctx)
+	if err != nil {
+		return err
+	}
+	if !settings.Enabled {
+		return nil
+	}
+	templates, err := s.ListTemplates(ctx)
+	if err != nil {
+		return err
+	}
+	// Find the account_enabled template.
+	var tpl *domain.MailTemplate
+	for _, t := range templates {
+		if t.Kind == domain.MailReminderAccountEnable && t.Enabled {
+			tpl = t
+			break
+		}
+	}
+	if tpl == nil {
+		return nil // Template not found or disabled.
+	}
+	to := reminderAddress(u)
+	if to == "" {
+		return nil // No email address.
+	}
+	data := s.templateData(ctx, settings, u)
+	data["EnableReason"] = enableReason
+	data["EnableDetail"] = enableDetail
+	subject, err := renderTemplate("account_enabled_subject", tpl.Subject, data)
+	if err != nil {
+		return err
+	}
+	body, err := renderTemplate("account_enabled_body", tpl.Body, data)
+	if err != nil {
+		return err
+	}
+	return sendSMTP(ctx, settings, to, subject, body)
+}
+
+// SendAccountEnabledToUser is a convenience wrapper for sending enable notification.
+func (s *Service) SendAccountEnabledToUser(ctx context.Context, userID int64, enableReason, enableDetail string) error {
+	u, err := s.users.GetByID(ctx, userID)
+	if err != nil {
+		return err
+	}
+	return s.SendAccountEnabledNotification(ctx, u, enableReason, enableDetail)
 }
 
 type AnnouncementInput struct {

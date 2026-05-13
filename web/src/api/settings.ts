@@ -1,6 +1,23 @@
 import { client } from './client'
 import type { LoginMode } from './auth'
 
+export interface SubClientRule {
+  name: string
+  keywords: string[]
+  render_format: 'mihomo' | 'sing-box'
+  enabled: boolean
+}
+
+export interface SubImportClient {
+  name: string
+  platforms: Array<'windows' | 'macos' | 'linux' | 'ios' | 'android' | 'universal'>
+  render_format: 'mihomo' | 'sing-box'
+  import_url_template: string
+  install_url: string
+  enabled: boolean
+  sort: number
+}
+
 export interface UISettings {
   login_mode: LoginMode
   site_title: string
@@ -25,6 +42,13 @@ export interface UISettings {
   emergency_access_enabled: boolean
   emergency_access_hours: number
   emergency_access_max_count: number
+  // Subscription settings
+  sub_path: string
+  sub_client_rules: SubClientRule[]
+  sub_import_clients: SubImportClient[]
+  sub_log_retention_days: number
+  sub_block_auto_disable: boolean
+  sub_block_auto_disable_count: number
 }
 
 export async function getUISettings() {

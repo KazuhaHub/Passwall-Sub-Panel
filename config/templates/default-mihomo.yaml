@@ -3,7 +3,7 @@ name: 默认 mihomo
 client_type: mihomo
 is_default: true
 rule_sets:
-  - default_mihomo_rules
+  - default_rules
 content: |
   mixed-port: 7890
   allow-lan: true
@@ -96,5 +96,5 @@ content: |
     {{ proxy_groups }}
 
   rules:
-    {{ rules_common }}
     {{ rules_personal }}
+    {{ rules_common }}

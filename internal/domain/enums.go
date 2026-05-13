@@ -24,6 +24,7 @@ const (
 	DisabledManual          AutoDisabledReason = "manual"
 	DisabledPendingDelete   AutoDisabledReason = "pending_delete"
 	DisabledPendingApproval AutoDisabledReason = "pending_approval"
+	DisabledBlockedClient   AutoDisabledReason = "blocked_client"
 )
 
 // Protocol identifies a 3X-UI inbound's protocol family.

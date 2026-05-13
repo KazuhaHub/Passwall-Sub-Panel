@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { Plus, Edit, Delete } from '@element-plus/icons-vue'
 import {
   getUISettings,
   putUISettings,
@@ -17,6 +18,8 @@ import {
   type OIDCConfig,
   type MailSettings,
   type MailTemplate,
+  type SubClientRule,
+  type SubImportClient,
 } from '@/api/settings'
 import { useSiteStore } from '@/stores/site'
 import type { LoginMode } from '@/api/auth'
@@ -86,6 +89,8 @@ function templateLabel(kind: string) {
   if (kind === 'expire_before') return '到期前提醒'
   if (kind === 'expired') return '到期提醒'
   if (kind === 'traffic_low') return '流量不足提醒'
+  if (kind === 'account_disabled') return '账号停用通知'
+  if (kind === 'account_enabled') return '账号恢复通知'
   return kind
 }
 
@@ -201,6 +206,8 @@ async function loadGeneral() {
 async function saveGeneral() {
   generalSaving.value = true
   try {
+    // Load current settings to preserve subscription fields.
+    const current = await getUISettings()
     await putUISettings({
       login_mode: loginMode.value,
       site_title: siteTitle.value,
@@ -224,6 +231,13 @@ async function saveGeneral() {
       jwt_issuer: jwtIssuer.value,
       sub_per_ip_per_min: subPerIPPerMin.value,
       login_per_ip_per_min: loginPerIPPerMin.value,
+      // Preserve subscription settings
+      sub_path: current.sub_path,
+      sub_client_rules: current.sub_client_rules,
+      sub_import_clients: current.sub_import_clients,
+      sub_log_retention_days: current.sub_log_retention_days,
+      sub_block_auto_disable: current.sub_block_auto_disable,
+      sub_block_auto_disable_count: current.sub_block_auto_disable_count,
     })
     useSiteStore().update(siteTitle.value, appTitle.value, iconUrl.value, logoUrl.value, logoUrlDark.value)
     ElMessage.success('已保存')
@@ -403,11 +417,236 @@ async function onEnableOIDC(val: boolean) {
   oidc.enabled = val
 }
 
+// ---- Subscription Settings ----
+const subLoading = ref(true)
+const subSaving = ref(false)
+const subPath = ref('sub')
+const subClientRules = ref<SubClientRule[]>([])
+const subImportClients = ref<SubImportClient[]>([])
+const subLogRetentionDays = ref(7)
+const subBlockAutoDisable = ref(false)
+const subBlockAutoDisableCount = ref(3)
+
+// Client rule dialog state
+const dialogVisible = ref(false)
+const dialogMode = ref<'add' | 'edit'>('add')
+const editIndex = ref(-1)
+const ruleForm = reactive<SubClientRule>({
+  name: '',
+  keywords: [],
+  render_format: 'mihomo',
+  enabled: true,
+})
+const keywordsInput = ref('')
+
+// Import client dialog state
+const importDialogVisible = ref(false)
+const importDialogMode = ref<'add' | 'edit'>('add')
+const importEditIndex = ref(-1)
+const platformOptions = [
+  { label: 'Windows', value: 'windows' },
+  { label: 'macOS', value: 'macos' },
+  { label: 'Linux', value: 'linux' },
+  { label: 'iOS', value: 'ios' },
+  { label: 'Android', value: 'android' },
+  { label: '通用', value: 'universal' },
+] as const
+const importForm = reactive<SubImportClient>({
+  name: '',
+  platforms: [],
+  render_format: 'mihomo',
+  import_url_template: '',
+  install_url: '',
+  enabled: true,
+  sort: 100,
+})
+
+async function loadSubSettings() {
+  subLoading.value = true
+  try {
+    const s = await getUISettings()
+    subPath.value = s.sub_path || 'sub'
+    subClientRules.value = s.sub_client_rules || []
+    subImportClients.value = s.sub_import_clients || []
+    subLogRetentionDays.value = s.sub_log_retention_days || 7
+    subBlockAutoDisable.value = !!s.sub_block_auto_disable
+    subBlockAutoDisableCount.value = s.sub_block_auto_disable_count || 3
+  } finally {
+    subLoading.value = false
+  }
+}
+
+async function saveSubPath() {
+  subSaving.value = true
+  try {
+    const s = await getUISettings()
+    s.sub_path = subPath.value || 'sub'
+    await putUISettings(s)
+    ElMessage.success('订阅路径已保存')
+  } finally {
+    subSaving.value = false
+  }
+}
+
+async function saveSubRules() {
+  subSaving.value = true
+  try {
+    const s = await getUISettings()
+    s.sub_client_rules = subClientRules.value
+    s.sub_import_clients = subImportClients.value
+    s.sub_log_retention_days = subLogRetentionDays.value
+    s.sub_block_auto_disable = subBlockAutoDisable.value
+    s.sub_block_auto_disable_count = subBlockAutoDisableCount.value
+    await putUISettings(s)
+    ElMessage.success('客户端规则已保存')
+  } finally {
+    subSaving.value = false
+  }
+}
+
+function openAddImportClient() {
+  importDialogMode.value = 'add'
+  importEditIndex.value = -1
+  Object.assign(importForm, {
+    name: '',
+    platforms: [],
+    render_format: 'mihomo',
+    import_url_template: '',
+    install_url: '',
+    enabled: true,
+    sort: 100,
+  })
+  importDialogVisible.value = true
+}
+
+function openEditImportClient(index: number) {
+  importDialogMode.value = 'edit'
+  importEditIndex.value = index
+  const item = subImportClients.value[index]
+  Object.assign(importForm, {
+    ...item,
+    platforms: [...item.platforms],
+  })
+  importDialogVisible.value = true
+}
+
+function handleImportClientConfirm() {
+  if (!importForm.name.trim()) {
+    ElMessage.warning('请输入客户端名称')
+    return
+  }
+  if (importForm.platforms.length === 0) {
+    ElMessage.warning('请选择至少一个系统')
+    return
+  }
+  if (!importForm.import_url_template.trim()) {
+    ElMessage.warning('请输入导入 URL 模板')
+    return
+  }
+  const item: SubImportClient = {
+    name: importForm.name.trim(),
+    platforms: [...importForm.platforms],
+    render_format: importForm.render_format,
+    import_url_template: importForm.import_url_template.trim(),
+    install_url: importForm.install_url.trim(),
+    enabled: importForm.enabled,
+    sort: importForm.sort || 100,
+  }
+  if (importDialogMode.value === 'add') {
+    subImportClients.value.push(item)
+  } else {
+    subImportClients.value[importEditIndex.value] = item
+  }
+  subImportClients.value.sort((a, b) => (a.sort || 0) - (b.sort || 0))
+  importDialogVisible.value = false
+}
+
+function handleDeleteImportClient(index: number) {
+  const item = subImportClients.value[index]
+  ElMessageBox.confirm(
+    `确定要删除导入客户端 "${item.name}" 吗？`,
+    '确认删除',
+    { confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning' },
+  ).then(() => {
+    subImportClients.value.splice(index, 1)
+  }).catch(() => {})
+}
+
+function toggleImportClientEnabled(index: number) {
+  subImportClients.value[index].enabled = !subImportClients.value[index].enabled
+}
+
+function openAddRule() {
+  dialogMode.value = 'add'
+  editIndex.value = -1
+  ruleForm.name = ''
+  ruleForm.keywords = []
+  ruleForm.render_format = 'mihomo'
+  ruleForm.enabled = true
+  keywordsInput.value = ''
+  dialogVisible.value = true
+}
+
+function openEditRule(index: number) {
+  dialogMode.value = 'edit'
+  editIndex.value = index
+  const rule = subClientRules.value[index]
+  ruleForm.name = rule.name
+  ruleForm.keywords = [...rule.keywords]
+  ruleForm.render_format = rule.render_format
+  ruleForm.enabled = rule.enabled
+  keywordsInput.value = rule.keywords.join(', ')
+  dialogVisible.value = true
+}
+
+function handleRuleConfirm() {
+  if (!ruleForm.name.trim()) {
+    ElMessage.warning('请输入客户端名称')
+    return
+  }
+  const keywords = keywordsInput.value
+    .split(',')
+    .map(k => k.trim())
+    .filter(k => k)
+  if (keywords.length === 0) {
+    ElMessage.warning('请输入至少一个关键词')
+    return
+  }
+  const rule: SubClientRule = {
+    name: ruleForm.name.trim(),
+    keywords,
+    render_format: ruleForm.render_format,
+    enabled: ruleForm.enabled,
+  }
+  if (dialogMode.value === 'add') {
+    subClientRules.value.push(rule)
+  } else {
+    subClientRules.value[editIndex.value] = rule
+  }
+  dialogVisible.value = false
+}
+
+function handleDeleteRule(index: number) {
+  const rule = subClientRules.value[index]
+  ElMessageBox.confirm(
+    `确定要删除规则 "${rule.name}" 吗？`,
+    '确认删除',
+    { confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning' },
+  ).then(() => {
+    subClientRules.value.splice(index, 1)
+  }).catch(() => {})
+}
+
+function toggleRuleEnabled(index: number) {
+  subClientRules.value[index].enabled = !subClientRules.value[index].enabled
+}
+
 onMounted(() => {
   loadGeneral()
   loadMail()
   loadSAML()
   loadOIDC()
+  loadSubSettings()
 })
 </script>
 
@@ -422,6 +661,7 @@ onMounted(() => {
       <button
         v-for="t in [
           { key: 'general', label: '基本设置', icon: '⚙' },
+          { key: 'subscription', label: '订阅管理', icon: '🔗' },
           { key: 'mail', label: '邮件提醒', icon: '✉' },
           { key: 'brand', label: '站点品牌', icon: '🎨' },
           { key: 'sso', label: 'SSO 认证', icon: '🔐' },
@@ -590,6 +830,135 @@ onMounted(() => {
 
         <div class="actions">
           <el-button type="primary" :loading="generalSaving" @click="saveGeneral">保存</el-button>
+        </div>
+      </el-card>
+    </div>
+
+    <!-- Subscription Settings -->
+    <div v-show="activeTab === 'subscription'" v-loading="subLoading">
+      <el-card class="settings-card">
+        <h3 class="section-title">订阅路径</h3>
+        <p class="section-hint">
+          设置订阅链接的路径前缀。修改后需要重启面板生效。
+        </p>
+        <el-form label-position="top" style="max-width:480px">
+          <el-form-item label="路径前缀">
+            <el-input v-model="subPath" placeholder="sub" />
+            <div class="form-hint">完整示例: /{{ subPath }}/&lt;token&gt;</div>
+          </el-form-item>
+          <el-form-item>
+            <el-button type="primary" :loading="subSaving" @click="saveSubPath">保存路径</el-button>
+          </el-form-item>
+        </el-form>
+
+        <h3 class="section-title" style="margin-top:32px;">客户端规则</h3>
+        <p class="section-hint">
+          UA 检测优先于 query 参数，禁用的客户端将直接返回 403。规则按顺序匹配，命中第一条即停止。
+        </p>
+        <div style="margin-bottom: 16px;">
+          <el-button type="primary" :icon="Plus" @click="openAddRule">添加规则</el-button>
+        </div>
+        <el-table :data="subClientRules" stripe>
+          <el-table-column prop="name" label="名称" min-width="100" />
+          <el-table-column label="关键词" min-width="150">
+            <template #default="{ row }">
+              <div style="display: flex; flex-wrap: wrap; gap: 4px;">
+                <el-tag v-for="kw in row.keywords" :key="kw" size="small">
+                  {{ kw }}
+                </el-tag>
+              </div>
+            </template>
+          </el-table-column>
+          <el-table-column label="渲染格式" width="100">
+            <template #default="{ row }">
+              <el-tag :type="row.render_format === 'sing-box' ? 'success' : 'primary'" size="small">
+                {{ row.render_format }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="允许" width="70" align="center">
+            <template #default="{ row, $index }">
+              <el-switch :model-value="row.enabled" @change="toggleRuleEnabled($index)" />
+            </template>
+          </el-table-column>
+          <el-table-column label="操作" width="100" align="center">
+            <template #default="{ $index }">
+              <div style="display: flex; justify-content: center; gap: 4px;">
+                <el-button text type="primary" :icon="Edit" @click="openEditRule($index)" />
+                <el-button text type="danger" :icon="Delete" @click="handleDeleteRule($index)" />
+              </div>
+            </template>
+          </el-table-column>
+        </el-table>
+
+        <h3 class="section-title" style="margin-top:32px;">导入客户端</h3>
+        <p class="section-hint">
+          用户页会按系统展示这里启用的客户端。导入模板支持
+          <code v-pre>{{ sub_url }}</code>、<code v-pre>{{ sub_url_encoded }}</code>、
+          <code v-pre>{{ profile_name }}</code>、<code v-pre>{{ profile_name_encoded }}</code>。
+        </p>
+        <div style="margin-bottom: 16px;">
+          <el-button type="primary" :icon="Plus" @click="openAddImportClient">添加客户端</el-button>
+        </div>
+        <el-table :data="subImportClients" stripe>
+          <el-table-column prop="name" label="客户端" min-width="140" />
+          <el-table-column label="系统" min-width="180">
+            <template #default="{ row }">
+              <div style="display: flex; flex-wrap: wrap; gap: 4px;">
+                <el-tag v-for="p in row.platforms" :key="p" size="small">{{ p }}</el-tag>
+              </div>
+            </template>
+          </el-table-column>
+          <el-table-column label="格式" width="100">
+            <template #default="{ row }">
+              <el-tag :type="row.render_format === 'sing-box' ? 'success' : 'primary'" size="small">
+                {{ row.render_format }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column prop="sort" label="排序" width="80" />
+          <el-table-column label="启用" width="70" align="center">
+            <template #default="{ row, $index }">
+              <el-switch :model-value="row.enabled" @change="toggleImportClientEnabled($index)" />
+            </template>
+          </el-table-column>
+          <el-table-column label="操作" width="100" align="center">
+            <template #default="{ $index }">
+              <div style="display: flex; justify-content: center; gap: 4px;">
+                <el-button text type="primary" :icon="Edit" @click="openEditImportClient($index)" />
+                <el-button text type="danger" :icon="Delete" @click="handleDeleteImportClient($index)" />
+              </div>
+            </template>
+          </el-table-column>
+        </el-table>
+
+        <h3 class="section-title" style="margin-top:32px;">日志保留</h3>
+        <p class="section-hint">
+          自动清理超过指定天数的订阅访问日志。设为 0 表示永不自动清理。
+        </p>
+        <el-form label-position="top" style="max-width:480px">
+          <el-form-item label="保留天数">
+            <el-input-number v-model="subLogRetentionDays" :min="0" :max="365" />
+          </el-form-item>
+        </el-form>
+
+        <h3 class="section-title" style="margin-top:32px;">违规自动停用</h3>
+        <p class="section-hint">
+          当用户多次使用被禁止的客户端访问订阅时，自动停用其账号。可用于防止用户使用不兼容的客户端导致配置泄露。
+        </p>
+        <el-form label-position="top" style="max-width:480px">
+          <el-form-item>
+            <el-switch v-model="subBlockAutoDisable" />
+            <span style="margin-left: 12px">启用违规自动停用</span>
+          </el-form-item>
+          <el-form-item v-if="subBlockAutoDisable" label="触发次数">
+            <el-input-number v-model="subBlockAutoDisableCount" :min="1" :max="100" />
+            <div class="form-hint">用户使用禁用客户端达到此次数后，账号将被自动停用</div>
+          </el-form-item>
+        </el-form>
+
+        <div class="actions">
+          <el-button type="primary" :loading="subSaving" @click="saveSubRules">保存规则</el-button>
         </div>
       </el-card>
     </div>
@@ -947,6 +1316,83 @@ onMounted(() => {
         </el-tab-pane>
       </el-tabs>
     </div>
+
+    <!-- Subscription Rule Dialog -->
+    <el-dialog
+      v-model="dialogVisible"
+      :title="dialogMode === 'add' ? '添加规则' : '编辑规则'"
+      width="480px"
+    >
+      <el-form label-width="80px">
+        <el-form-item label="名称">
+          <el-input v-model="ruleForm.name" placeholder="例如: Shadowrocket" />
+        </el-form-item>
+        <el-form-item label="关键词">
+          <el-input v-model="keywordsInput" placeholder="多个用逗号分隔，例如: shadowrocket" />
+          <div class="form-hint">从 User-Agent 中匹配的关键词，多个用逗号分隔</div>
+        </el-form-item>
+        <el-form-item label="渲染格式">
+          <el-radio-group v-model="ruleForm.render_format">
+            <el-radio value="mihomo">mihomo</el-radio>
+            <el-radio value="sing-box">sing-box</el-radio>
+          </el-radio-group>
+        </el-form-item>
+        <el-form-item label="状态">
+          <el-checkbox v-model="ruleForm.enabled">允许访问</el-checkbox>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="dialogVisible = false">取消</el-button>
+        <el-button type="primary" @click="handleRuleConfirm">确定</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog
+      v-model="importDialogVisible"
+      :title="importDialogMode === 'add' ? '添加导入客户端' : '编辑导入客户端'"
+      width="680px"
+    >
+      <el-form label-width="120px">
+        <el-form-item label="客户端名称">
+          <el-input v-model="importForm.name" placeholder="例如: Clash Verge Rev" />
+        </el-form-item>
+        <el-form-item label="适用系统">
+          <el-checkbox-group v-model="importForm.platforms">
+            <el-checkbox v-for="p in platformOptions" :key="p.value" :value="p.value">
+              {{ p.label }}
+            </el-checkbox>
+          </el-checkbox-group>
+        </el-form-item>
+        <el-form-item label="渲染格式">
+          <el-radio-group v-model="importForm.render_format">
+            <el-radio value="mihomo">mihomo</el-radio>
+            <el-radio value="sing-box">sing-box</el-radio>
+          </el-radio-group>
+        </el-form-item>
+        <el-form-item label="导入 URL 模板">
+          <el-input
+            v-model="importForm.import_url_template"
+            type="textarea"
+            :rows="2"
+            placeholder="clash://install-config?url={{ sub_url_encoded }}"
+          />
+          <div class="form-hint">用于生成用户页的一键导入链接。</div>
+        </el-form-item>
+        <el-form-item label="安装地址">
+          <el-input v-model="importForm.install_url" placeholder="https://..." />
+        </el-form-item>
+        <el-form-item label="排序">
+          <el-input-number v-model="importForm.sort" :min="0" :max="9999" />
+        </el-form-item>
+        <el-form-item label="状态">
+          <el-checkbox v-model="importForm.enabled">启用</el-checkbox>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="importDialogVisible = false">取消</el-button>
+        <el-button type="primary" @click="handleImportClientConfirm">确定</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -1013,7 +1459,6 @@ export default { data() { return { ssoSubTab: 'saml' } } }
   border-radius: 16px;
   border: 1px solid var(--header-border);
   background: var(--card-bg);
-  max-width: 720px;
 }
 
 .mail-settings-card {
@@ -1226,5 +1671,36 @@ export default { data() { return { ssoSubTab: 'saml' } } }
   .test-mail-row {
     flex-direction: column;
   }
+
+  .psp-page-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+  }
+
+  .category-tabs {
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .category-tab {
+    padding: 8px 14px;
+    font-size: 13px;
+  }
+
+  .el-table {
+    font-size: 13px;
+  }
+}
+
+.keyword-tag {
+  margin-right: 4px;
+  margin-bottom: 4px;
+}
+
+.form-hint {
+  color: var(--text-muted);
+  font-size: 12px;
+  margin-top: 4px;
 }
 </style>

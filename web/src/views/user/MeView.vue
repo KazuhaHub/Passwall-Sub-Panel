@@ -10,6 +10,7 @@ interface MeProfile {
   display_name?: string
   upn: string
   sub_url: string
+  sub_import_clients: SubImportClient[]
   expire_at?: string | null
   traffic_limit_bytes: number
   traffic_reset_period: string
@@ -24,8 +25,28 @@ interface MeProfile {
   }
 }
 
+interface SubImportClient {
+  name: string
+  platforms: string[]
+  render_format: 'mihomo' | 'sing-box'
+  import_url_template: string
+  install_url: string
+  enabled: boolean
+  sort: number
+}
+
 const profile = ref<MeProfile | null>(null)
 const displayName = computed(() => profile.value?.display_name || profile.value?.upn || '')
+const detectedPlatform = computed(() => detectPlatform())
+const platformLabel = computed(() => platformName(detectedPlatform.value))
+const importClients = computed(() => {
+  const clients = (profile.value?.sub_import_clients || [])
+    .filter((c) => c.enabled)
+    .slice()
+    .sort((a, b) => (a.sort || 0) - (b.sort || 0))
+  const matched = clients.filter((c) => c.platforms.includes(detectedPlatform.value) || c.platforms.includes('universal'))
+  return matched.length > 0 ? matched : clients
+})
 const usage = ref<UsageReport | null>(null)
 const qrDataURL = ref<string>('')
 const passwordDialog = ref(false)
@@ -60,6 +81,56 @@ async function load() {
 function copyText(s: string) {
   navigator.clipboard.writeText(s)
   ElMessage.success('已复制到剪贴板')
+}
+
+function subURLFor(format: 'mihomo' | 'sing-box') {
+  const raw = profile.value?.sub_url || ''
+  const absolute = new URL(raw, window.location.origin)
+  absolute.searchParams.set('client', format)
+  return absolute.toString()
+}
+
+function importURLFor(item: SubImportClient) {
+  const subURL = subURLFor(item.render_format)
+  const profileName = `${displayName.value || 'Passwall'} - ${item.name}`
+  return item.import_url_template
+    .replaceAll('{{ sub_url }}', subURL)
+    .replaceAll('{{sub_url}}', subURL)
+    .replaceAll('{{ sub_url_encoded }}', encodeURIComponent(subURL))
+    .replaceAll('{{sub_url_encoded}}', encodeURIComponent(subURL))
+    .replaceAll('{{ profile_name }}', profileName)
+    .replaceAll('{{profile_name}}', profileName)
+    .replaceAll('{{ profile_name_encoded }}', encodeURIComponent(profileName))
+    .replaceAll('{{profile_name_encoded}}', encodeURIComponent(profileName))
+}
+
+function openImport(item: SubImportClient) {
+  window.location.href = importURLFor(item)
+}
+
+function openInstall(item: SubImportClient) {
+  if (item.install_url) window.open(item.install_url, '_blank', 'noopener,noreferrer')
+}
+
+function detectPlatform() {
+  const ua = navigator.userAgent.toLowerCase()
+  if (/iphone|ipad|ipod/.test(ua)) return 'ios'
+  if (/android/.test(ua)) return 'android'
+  if (/windows/.test(ua)) return 'windows'
+  if (/mac os x|macintosh/.test(ua)) return 'macos'
+  if (/linux/.test(ua)) return 'linux'
+  return 'universal'
+}
+
+function platformName(p: string) {
+  switch (p) {
+    case 'windows': return 'Windows'
+    case 'macos': return 'macOS'
+    case 'linux': return 'Linux'
+    case 'ios': return 'iOS'
+    case 'android': return 'Android'
+    default: return '当前系统'
+  }
 }
 
 async function confirmResetCredentials() {
@@ -274,14 +345,42 @@ onMounted(load)
             <div class="qr-frame">
               <img v-if="qrDataURL" :src="qrDataURL" alt="QR Code" class="qr-image" />
             </div>
-            <p class="qr-hint">使用任意支持的客户端扫描二维码</p>
+            <p class="qr-hint">使用客户端扫描二维码，或选择下方一键导入</p>
+          </div>
+
+          <div v-if="importClients.length > 0" class="client-import-section">
+            <div class="section-head">
+              <p class="section-label">检测到 {{ platformLabel }}</p>
+              <el-tag size="small" type="info">{{ importClients.length }} 个客户端</el-tag>
+            </div>
+            <div class="client-list">
+              <div v-for="item in importClients" :key="item.name" class="client-row">
+                <div class="client-main">
+                  <div class="client-name">{{ item.name }}</div>
+                  <div class="client-meta">
+                    <span>{{ item.render_format }}</span>
+                    <span>{{ item.platforms.join(' / ') }}</span>
+                  </div>
+                </div>
+                <div class="client-actions">
+                  <el-button size="small" type="primary" @click="openImport(item)">导入</el-button>
+                  <el-button v-if="item.install_url" size="small" plain @click="openInstall(item)">
+                    下载
+                  </el-button>
+                </div>
+              </div>
+            </div>
           </div>
 
           <div class="sub-url-section">
-            <p class="section-label">或复制订阅链接：</p>
+            <p class="section-label">复制通用订阅链接：</p>
             <div class="url-box">
               <input type="text" :value="profile.sub_url" readonly class="url-input" />
               <button class="copy-btn" @click="copyText(profile.sub_url)">复制</button>
+            </div>
+            <div class="format-copy-row">
+              <el-button size="small" plain @click="copyText(subURLFor('mihomo'))">复制 mihomo</el-button>
+              <el-button size="small" plain @click="copyText(subURLFor('sing-box'))">复制 sing-box</el-button>
             </div>
           </div>
 
@@ -579,6 +678,76 @@ onMounted(load)
   opacity: 0.9;
 }
 
+.sub-url-section {
+  margin-top: 24px;
+}
+
+.section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.client-import-section {
+  border-top: 1px solid var(--header-border);
+  border-bottom: 1px solid var(--header-border);
+  padding: 18px 0;
+  margin-bottom: 20px;
+}
+
+.client-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.client-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--header-border);
+  border-radius: 8px;
+  background: rgba(148, 163, 184, 0.04);
+}
+
+.client-main {
+  min-width: 0;
+}
+
+.client-name {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-main);
+}
+
+.client-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 4px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.client-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.format-copy-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: -12px;
+  margin-bottom: 24px;
+}
+
 .sub-actions {
   margin-top: auto;
 }
@@ -614,6 +783,17 @@ onMounted(load)
 
 .mr-1 {
   margin-right: 4px;
+}
+
+@media (max-width: 480px) {
+  .client-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .client-actions {
+    justify-content: flex-end;
+  }
 }
 
 </style>

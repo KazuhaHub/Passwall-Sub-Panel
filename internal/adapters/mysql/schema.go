@@ -10,6 +10,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 )
 
 // ---- GORM row types ----
@@ -19,80 +20,86 @@ import (
 // adapter-internal concern, converted via to/from helpers.
 
 type userRow struct {
-	ID                 int64  `gorm:"primaryKey;autoIncrement"`
-	UPN                string `gorm:"size:255;uniqueIndex;not null"`
-	Email              string `gorm:"size:255;index"`
-	PasswordHash       string `gorm:"size:255"`
-	Role               string `gorm:"size:16;not null;default:user"`
-	SubToken           string `gorm:"size:64;uniqueIndex;not null"`
-	UUID               string `gorm:"size:36;not null"`
-	GroupID            int64  `gorm:"index;not null"`
-	EnabledRuleSets    jsonStrings
-	PersonalRules      string `gorm:"type:text"`
-	ExpireAt           *time.Time
-	TrafficLimitBytes  int64
-	TrafficResetPeriod string `gorm:"size:16;default:never"`
-	TrafficPeriodStart *time.Time
-	DisplayName        string `gorm:"size:128"`
-	Remark             string `gorm:"size:255"`
-	Enabled            bool   `gorm:"not null"`
-	AutoDisabledReason string `gorm:"size:32"`
-	EmergencyUsedCount int
-	CreatedAt          time.Time
-	UpdatedAt          time.Time
+	ID                  int64  `gorm:"primaryKey;autoIncrement"`
+	UPN                 string `gorm:"size:255;uniqueIndex;not null"`
+	Email               string `gorm:"size:255;index"`
+	PasswordHash        string `gorm:"size:255"`
+	Role                string `gorm:"size:16;not null;default:user"`
+	SubToken            string `gorm:"size:64;uniqueIndex;not null"`
+	UUID                string `gorm:"size:36;not null"`
+	GroupID             int64  `gorm:"index;not null"`
+	EnabledRuleSets     jsonStrings
+	PersonalRules       string `gorm:"type:text"`
+	ExpireAt            *time.Time
+	TrafficLimitBytes   int64
+	TrafficResetPeriod  string `gorm:"size:16;default:never"`
+	TrafficPeriodStart  *time.Time
+	DisplayName         string `gorm:"size:128"`
+	Remark              string `gorm:"size:255"`
+	Enabled             bool   `gorm:"not null"`
+	AutoDisabledReason  string `gorm:"size:32"`
+	DisableDetail       string `gorm:"type:text"`
+	BlockViolationCount int    `gorm:"default:0"`
+	EmergencyUsedCount  int
+	CreatedAt           time.Time
+	UpdatedAt           time.Time
 }
 
 func (userRow) TableName() string { return "users" }
 
 func (r *userRow) toDomain() *domain.User {
 	return &domain.User{
-		ID:                 r.ID,
-		UPN:                r.UPN,
-		Email:              r.Email,
-		PasswordHash:       r.PasswordHash,
-		Role:               domain.Role(r.Role),
-		SubToken:           r.SubToken,
-		UUID:               r.UUID,
-		GroupID:            r.GroupID,
-		EnabledRuleSets:    []string(r.EnabledRuleSets),
-		PersonalRules:      r.PersonalRules,
-		ExpireAt:           r.ExpireAt,
-		TrafficLimitBytes:  r.TrafficLimitBytes,
-		TrafficResetPeriod: domain.ResetPeriod(r.TrafficResetPeriod),
-		TrafficPeriodStart: r.TrafficPeriodStart,
-		DisplayName:        r.DisplayName,
-		Remark:             r.Remark,
-		Enabled:            r.Enabled,
-		AutoDisabledReason: domain.AutoDisabledReason(r.AutoDisabledReason),
-		EmergencyUsedCount: r.EmergencyUsedCount,
-		CreatedAt:          r.CreatedAt,
-		UpdatedAt:          r.UpdatedAt,
+		ID:                  r.ID,
+		UPN:                 r.UPN,
+		Email:               r.Email,
+		PasswordHash:        r.PasswordHash,
+		Role:                domain.Role(r.Role),
+		SubToken:            r.SubToken,
+		UUID:                r.UUID,
+		GroupID:             r.GroupID,
+		EnabledRuleSets:     []string(r.EnabledRuleSets),
+		PersonalRules:       r.PersonalRules,
+		ExpireAt:            r.ExpireAt,
+		TrafficLimitBytes:   r.TrafficLimitBytes,
+		TrafficResetPeriod:  domain.ResetPeriod(r.TrafficResetPeriod),
+		TrafficPeriodStart:  r.TrafficPeriodStart,
+		DisplayName:         r.DisplayName,
+		Remark:              r.Remark,
+		Enabled:             r.Enabled,
+		AutoDisabledReason:  domain.AutoDisabledReason(r.AutoDisabledReason),
+		DisableDetail:       r.DisableDetail,
+		BlockViolationCount: r.BlockViolationCount,
+		EmergencyUsedCount:  r.EmergencyUsedCount,
+		CreatedAt:           r.CreatedAt,
+		UpdatedAt:           r.UpdatedAt,
 	}
 }
 
 func userFromDomain(u *domain.User) *userRow {
 	return &userRow{
-		ID:                 u.ID,
-		UPN:                u.UPN,
-		Email:              u.Email,
-		PasswordHash:       u.PasswordHash,
-		Role:               string(u.Role),
-		SubToken:           u.SubToken,
-		UUID:               u.UUID,
-		GroupID:            u.GroupID,
-		EnabledRuleSets:    jsonStrings(u.EnabledRuleSets),
-		PersonalRules:      u.PersonalRules,
-		ExpireAt:           u.ExpireAt,
-		TrafficLimitBytes:  u.TrafficLimitBytes,
-		TrafficResetPeriod: string(u.TrafficResetPeriod),
-		TrafficPeriodStart: u.TrafficPeriodStart,
-		DisplayName:        u.DisplayName,
-		Remark:             u.Remark,
-		Enabled:            u.Enabled,
-		AutoDisabledReason: string(u.AutoDisabledReason),
-		EmergencyUsedCount: u.EmergencyUsedCount,
-		CreatedAt:          u.CreatedAt,
-		UpdatedAt:          u.UpdatedAt,
+		ID:                  u.ID,
+		UPN:                 u.UPN,
+		Email:               u.Email,
+		PasswordHash:        u.PasswordHash,
+		Role:                string(u.Role),
+		SubToken:            u.SubToken,
+		UUID:                u.UUID,
+		GroupID:             u.GroupID,
+		EnabledRuleSets:     jsonStrings(u.EnabledRuleSets),
+		PersonalRules:       u.PersonalRules,
+		ExpireAt:            u.ExpireAt,
+		TrafficLimitBytes:   u.TrafficLimitBytes,
+		TrafficResetPeriod:  string(u.TrafficResetPeriod),
+		TrafficPeriodStart:  u.TrafficPeriodStart,
+		DisplayName:         u.DisplayName,
+		Remark:              u.Remark,
+		Enabled:             u.Enabled,
+		AutoDisabledReason:  string(u.AutoDisabledReason),
+		DisableDetail:       u.DisableDetail,
+		BlockViolationCount: u.BlockViolationCount,
+		EmergencyUsedCount:  u.EmergencyUsedCount,
+		CreatedAt:           u.CreatedAt,
+		UpdatedAt:           u.UpdatedAt,
 	}
 }
 
@@ -371,7 +378,114 @@ type uiSettingsRow struct {
 	EmergencyAccessEnabled     bool
 	EmergencyAccessHours       int
 	EmergencyAccessMaxCount    int
-	UpdatedAt                  time.Time
+	// Subscription settings
+	SubPath                  string               `gorm:"size:128;default:'sub'"`
+	SubClientRules           jsonSubRules         `gorm:"type:json"`
+	SubImportClients         jsonSubImportClients `gorm:"type:json"`
+	SubLogRetentionDays      int                  `gorm:"default:7"`
+	SubBlockAutoDisable      bool                 `gorm:"default:false"`
+	SubBlockAutoDisableCount int                  `gorm:"default:3"`
+	UpdatedAt                time.Time
+}
+
+// jsonSubRules is a JSON wrapper for []ports.SubClientRule.
+type jsonSubRules []ports.SubClientRule
+
+func (j jsonSubRules) toDomain() []ports.SubClientRule {
+	if j == nil {
+		return nil
+	}
+	out := make([]ports.SubClientRule, len(j))
+	copy(out, j)
+	return out
+}
+
+func jsonSubRulesFromDomain(rules []ports.SubClientRule) jsonSubRules {
+	if rules == nil {
+		return nil
+	}
+	out := make(jsonSubRules, len(rules))
+	copy(out, rules)
+	return out
+}
+
+func (j jsonSubRules) Value() (driver.Value, error) {
+	if j == nil {
+		return "[]", nil
+	}
+	b, err := json.Marshal(j)
+	return string(b), err
+}
+
+func (j *jsonSubRules) Scan(value any) error {
+	if value == nil {
+		*j = nil
+		return nil
+	}
+	var b []byte
+	switch v := value.(type) {
+	case []byte:
+		b = v
+	case string:
+		b = []byte(v)
+	default:
+		return fmt.Errorf("unsupported scan type for jsonSubRules: %T", value)
+	}
+	if len(b) == 0 {
+		*j = nil
+		return nil
+	}
+	return json.Unmarshal(b, j)
+}
+
+// jsonSubImportClients is a JSON wrapper for []ports.SubImportClient.
+type jsonSubImportClients []ports.SubImportClient
+
+func (j jsonSubImportClients) toDomain() []ports.SubImportClient {
+	if j == nil {
+		return nil
+	}
+	out := make([]ports.SubImportClient, len(j))
+	copy(out, j)
+	return out
+}
+
+func jsonSubImportClientsFromDomain(clients []ports.SubImportClient) jsonSubImportClients {
+	if clients == nil {
+		return nil
+	}
+	out := make(jsonSubImportClients, len(clients))
+	copy(out, clients)
+	return out
+}
+
+func (j jsonSubImportClients) Value() (driver.Value, error) {
+	if j == nil {
+		return "[]", nil
+	}
+	b, err := json.Marshal(j)
+	return string(b), err
+}
+
+func (j *jsonSubImportClients) Scan(value any) error {
+	if value == nil {
+		*j = nil
+		return nil
+	}
+	var b []byte
+	switch v := value.(type) {
+	case []byte:
+		b = v
+	case string:
+		b = []byte(v)
+	default:
+		return fmt.Errorf("unsupported scan type for jsonSubImportClients: %T", value)
+	}
+	if len(b) == 0 {
+		*j = nil
+		return nil
+	}
+	return json.Unmarshal(b, j)
 }
 
 func (uiSettingsRow) TableName() string { return "ui_settings" }

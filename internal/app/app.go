@@ -80,6 +80,10 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	if err != nil {
 		return nil, fmt.Errorf("template repo: %w", err)
 	}
+	ruleSetRepo, err := yamladapter.NewRuleSetRepo(cfg.ConfigDir)
+	if err != nil {
+		return nil, fmt.Errorf("ruleset repo: %w", err)
+	}
 
 	samlCfg, err := mysqlRepos.SAMLConfig.Load(ctx)
 	if err != nil {
@@ -100,7 +104,7 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 		Audit:      mysqlRepos.Audit,
 		SubLog:     mysqlRepos.SubLog,
 		SyncTask:   mysqlRepos.SyncTask,
-		RuleSet:    mysqlRepos.RuleSet,
+		RuleSet:    ruleSetRepo,
 		Template:   templateRepo,
 		XUIPanel:   mysqlRepos.XUIPanel,
 		Settings:   mysqlRepos.Settings,
@@ -111,9 +115,6 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 
 	if err := initAdminIfNeeded(ctx, repos); err != nil {
 		return nil, fmt.Errorf("init admin: %w", err)
-	}
-	if err := seedRuleSetsIfEmpty(ctx, cfg.ConfigDir, repos.RuleSet); err != nil {
-		return nil, fmt.Errorf("seed rule sets: %w", err)
 	}
 
 	pool, err := xuiadapter.NewPool(ctx, repos.XUIPanel)

@@ -1,5 +1,5 @@
-slug: default_mihomo_rules
-name: 默认 mihomo 规则
+slug: default_rules
+name: 默认规则
 sort: 10
 enabled: true
 content: |

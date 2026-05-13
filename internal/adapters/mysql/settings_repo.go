@@ -50,6 +50,12 @@ func (r *settingsRepo) Load(ctx context.Context, defaults ports.UISettings) (por
 		EmergencyAccessEnabled:     row.EmergencyAccessEnabled,
 		EmergencyAccessHours:       row.EmergencyAccessHours,
 		EmergencyAccessMaxCount:    row.EmergencyAccessMaxCount,
+		SubPath:                    row.SubPath,
+		SubClientRules:             row.SubClientRules.toDomain(),
+		SubImportClients:           row.SubImportClients.toDomain(),
+		SubLogRetentionDays:        row.SubLogRetentionDays,
+		SubBlockAutoDisable:        row.SubBlockAutoDisable,
+		SubBlockAutoDisableCount:   row.SubBlockAutoDisableCount,
 	}
 	if out.LoginMode == "" {
 		out.LoginMode = defaults.LoginMode
@@ -95,7 +101,88 @@ func (r *settingsRepo) Load(ctx context.Context, defaults ports.UISettings) (por
 	if out.LoginPerIPPerMin <= 0 {
 		out.LoginPerIPPerMin = 5
 	}
+	if out.SubPath == "" {
+		out.SubPath = "sub"
+	}
+	if out.SubLogRetentionDays <= 0 {
+		out.SubLogRetentionDays = 7
+	}
+	if out.SubClientRules == nil {
+		out.SubClientRules = defaultSubClientRules()
+	}
+	if out.SubImportClients == nil {
+		out.SubImportClients = defaultSubImportClients()
+	}
+	if out.SubBlockAutoDisableCount <= 0 {
+		out.SubBlockAutoDisableCount = 3
+	}
 	return out, nil
+}
+
+// defaultSubClientRules returns the default subscription client detection rules.
+func defaultSubClientRules() []ports.SubClientRule {
+	return []ports.SubClientRule{
+		{Name: "Clash / mihomo", Keywords: []string{"clash", "mihomo", "meta"}, RenderFormat: "mihomo", Enabled: true},
+		{Name: "sing-box", Keywords: []string{"sing-box"}, RenderFormat: "sing-box", Enabled: true},
+		{Name: "Surge", Keywords: []string{"surge"}, RenderFormat: "mihomo", Enabled: true},
+		{Name: "Shadowrocket", Keywords: []string{"shadowrocket"}, RenderFormat: "mihomo", Enabled: true},
+		{Name: "Loon", Keywords: []string{"loon"}, RenderFormat: "mihomo", Enabled: true},
+		{Name: "Quantumult X", Keywords: []string{"quantumult x", "quantumultx"}, RenderFormat: "mihomo", Enabled: true},
+		{Name: "V2RayN", Keywords: []string{"v2rayn", "v2ray"}, RenderFormat: "mihomo", Enabled: true},
+		{Name: "Stash", Keywords: []string{"stash"}, RenderFormat: "mihomo", Enabled: true},
+		{Name: "Surfboard", Keywords: []string{"surfboard"}, RenderFormat: "mihomo", Enabled: true},
+	}
+}
+
+// defaultSubImportClients returns user-facing one-click import targets.
+func defaultSubImportClients() []ports.SubImportClient {
+	return []ports.SubImportClient{
+		{
+			Name:              "Clash Verge Rev",
+			Platforms:         []string{"windows", "macos", "linux"},
+			RenderFormat:      "mihomo",
+			ImportURLTemplate: "clash://install-config?url={{ sub_url_encoded }}",
+			InstallURL:        "https://github.com/clash-verge-rev/clash-verge-rev/releases",
+			Enabled:           true,
+			Sort:              10,
+		},
+		{
+			Name:              "Clash Meta for Android",
+			Platforms:         []string{"android"},
+			RenderFormat:      "mihomo",
+			ImportURLTemplate: "clash://install-config?url={{ sub_url_encoded }}",
+			InstallURL:        "https://github.com/MetaCubeX/ClashMetaForAndroid/releases",
+			Enabled:           true,
+			Sort:              20,
+		},
+		{
+			Name:              "Clash Mi",
+			Platforms:         []string{"windows", "macos", "linux", "android", "ios"},
+			RenderFormat:      "mihomo",
+			ImportURLTemplate: "clash://install-config?url={{ sub_url_encoded }}",
+			InstallURL:        "https://github.com/KaringX/clashmi/releases",
+			Enabled:           true,
+			Sort:              25,
+		},
+		{
+			Name:              "Stash",
+			Platforms:         []string{"ios"},
+			RenderFormat:      "mihomo",
+			ImportURLTemplate: "stash://install-config?url={{ sub_url_encoded }}",
+			InstallURL:        "https://apps.apple.com/app/stash-rule-based-proxy/id1596063349",
+			Enabled:           true,
+			Sort:              30,
+		},
+		{
+			Name:              "sing-box",
+			Platforms:         []string{"ios", "macos", "android"},
+			RenderFormat:      "sing-box",
+			ImportURLTemplate: "sing-box://import-remote-profile?url={{ sub_url_encoded }}#{{ profile_name_encoded }}",
+			InstallURL:        "https://sing-box.sagernet.org/clients/",
+			Enabled:           true,
+			Sort:              40,
+		},
+	}
 }
 
 func (r *settingsRepo) Save(ctx context.Context, s ports.UISettings) error {
@@ -123,6 +210,12 @@ func (r *settingsRepo) Save(ctx context.Context, s ports.UISettings) error {
 		EmergencyAccessEnabled:     s.EmergencyAccessEnabled,
 		EmergencyAccessHours:       s.EmergencyAccessHours,
 		EmergencyAccessMaxCount:    s.EmergencyAccessMaxCount,
+		SubPath:                    s.SubPath,
+		SubClientRules:             jsonSubRulesFromDomain(s.SubClientRules),
+		SubImportClients:           jsonSubImportClientsFromDomain(s.SubImportClients),
+		SubLogRetentionDays:        s.SubLogRetentionDays,
+		SubBlockAutoDisable:        s.SubBlockAutoDisable,
+		SubBlockAutoDisableCount:   s.SubBlockAutoDisableCount,
 	}
 	return r.db.WithContext(ctx).Clauses(clause.OnConflict{UpdateAll: true}).Create(&row).Error
 }

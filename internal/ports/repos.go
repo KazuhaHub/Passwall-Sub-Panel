@@ -117,6 +117,8 @@ type AuditRepo interface {
 type SubLogRepo interface {
 	Insert(ctx context.Context, log *domain.SubLog) error
 	List(ctx context.Context, filter SubLogFilter) (items []*domain.SubLog, total int64, err error)
+	Clear(ctx context.Context) error
+	DeleteBefore(ctx context.Context, cutoff int64) (int64, error)
 }
 
 type SyncTaskRepo interface {
@@ -231,6 +233,42 @@ type UISettings struct {
 	EmergencyAccessEnabled  bool `json:"emergency_access_enabled"`
 	EmergencyAccessHours    int  `json:"emergency_access_hours"`
 	EmergencyAccessMaxCount int  `json:"emergency_access_max_count"`
+
+	// ---- Subscription settings ----
+	// SubPath is the URL path prefix for subscription endpoints.
+	// Defaults to "sub". Dynamic, no restart required.
+	SubPath string `yaml:"sub_path" json:"sub_path"`
+	// SubClientRules defines allowed clients and their detection rules.
+	// Empty means all clients are allowed. Dynamic, no restart required.
+	SubClientRules []SubClientRule `yaml:"sub_client_rules" json:"sub_client_rules"`
+	// SubImportClients defines user-facing one-click import targets.
+	SubImportClients []SubImportClient `yaml:"sub_import_clients" json:"sub_import_clients"`
+	// SubLogRetentionDays controls automatic subscription log cleanup.
+	// 0 means never delete logs automatically. Default 7.
+	SubLogRetentionDays int `yaml:"sub_log_retention_days" json:"sub_log_retention_days"`
+	// SubBlockAutoDisable enables automatic account disabling when user uses blocked clients.
+	SubBlockAutoDisable bool `yaml:"sub_block_auto_disable" json:"sub_block_auto_disable"`
+	// SubBlockAutoDisableCount is the number of violations before auto-disabling. Default 3.
+	SubBlockAutoDisableCount int `yaml:"sub_block_auto_disable_count" json:"sub_block_auto_disable_count"`
+}
+
+// SubClientRule defines a subscription client detection rule.
+type SubClientRule struct {
+	Name         string   `yaml:"name" json:"name"`                   // Display name
+	Keywords     []string `yaml:"keywords" json:"keywords"`           // UA keywords to match
+	RenderFormat string   `yaml:"render_format" json:"render_format"` // "mihomo" or "sing-box"
+	Enabled      bool     `yaml:"enabled" json:"enabled"`             // Whether this client is allowed
+}
+
+// SubImportClient defines a user-facing one-click subscription import target.
+type SubImportClient struct {
+	Name              string   `yaml:"name" json:"name"`
+	Platforms         []string `yaml:"platforms" json:"platforms"` // windows, macos, linux, ios, android, universal
+	RenderFormat      string   `yaml:"render_format" json:"render_format"`
+	ImportURLTemplate string   `yaml:"import_url_template" json:"import_url_template"`
+	InstallURL        string   `yaml:"install_url" json:"install_url"`
+	Enabled           bool     `yaml:"enabled" json:"enabled"`
+	Sort              int      `yaml:"sort" json:"sort"`
 }
 
 type SettingsRepo interface {
