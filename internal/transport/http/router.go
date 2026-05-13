@@ -95,6 +95,7 @@ func NewRouter(d Deps) *gin.Engine {
 	{
 		userGroup.GET("", userMe.Profile)
 		userGroup.GET("/traffic", userMe.Traffic)
+		userGroup.POST("/emergency-access", userMe.EmergencyAccess)
 		userGroup.POST("/reset-credentials", userMe.ResetCredentials)
 		userGroup.POST("/change-password", userMe.ChangePassword)
 	}
@@ -113,6 +114,7 @@ func NewRouter(d Deps) *gin.Engine {
 		adminGroup.PUT("/users/:id", users.Update)
 		adminGroup.DELETE("/users/:id", users.Delete)
 		adminGroup.POST("/users/:id/reset-credentials", users.ResetCredentials)
+		adminGroup.POST("/users/:id/reset-emergency-usage", users.ResetEmergencyUsage)
 		adminGroup.POST("/users/:id/set-enabled", users.SetEnabled)
 
 		nodes := handler.NewAdminNodeHandler(d.Node, d.Sync, d.Repos.Ownership, d.Repos.XUIPanel)
@@ -155,6 +157,7 @@ func NewRouter(d Deps) *gin.Engine {
 		trafficH := handler.NewAdminTrafficHandler(d.Repos.User, d.Traffic)
 		adminGroup.GET("/traffic/top", trafficH.Top)
 		adminGroup.GET("/traffic/user/:id", trafficH.UserReport)
+		adminGroup.PUT("/traffic/user/:id", trafficH.SetUserUsage)
 
 		servers := handler.NewAdminServersHandler(d.Repos.XUIPanel, d.Pool, d.Repos.Node, d.Repos.Ownership)
 		adminGroup.GET("/servers", servers.List)

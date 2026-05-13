@@ -41,16 +41,14 @@ func (h *AuthLocalHandler) activeLoginMode(c *gin.Context) string {
 }
 
 // localLoginDisallowedForUsers reports whether non-admin accounts should be
-// rejected when they POST /api/auth/local/login. Two paths trigger it:
-//   - LoginMode == sso_strict (legacy single-knob mode that implies this)
-//   - DisallowUserLocalLogin == true (explicit toggle that works under any
-//     login mode, e.g. dual mode where a local form is still rendered)
+// rejected when they POST /api/auth/local/login. The /login/local route stays
+// reachable so admins always have a break-glass path.
 func (h *AuthLocalHandler) localLoginDisallowedForUsers(c *gin.Context) bool {
 	s, err := h.settings.Load(c.Request.Context(), ports.UISettings{})
 	if err != nil {
 		return false
 	}
-	return s.LoginMode == "sso_strict" || s.DisallowUserLocalLogin
+	return s.DisallowUserLocalLogin
 }
 
 func (h *AuthLocalHandler) Methods(c *gin.Context) {
@@ -63,7 +61,7 @@ func (h *AuthLocalHandler) Methods(c *gin.Context) {
 	samlEnabled := h.saml != nil && h.saml.Enabled()
 	oidcEnabled := h.oidc != nil && h.oidc.Enabled()
 	ssoEnabled := samlEnabled || oidcEnabled
-	if !ssoEnabled && (mode == "sso_first" || mode == "sso_strict" || mode == "dual") {
+	if !ssoEnabled && (mode == "sso_redirect" || mode == "sso_first" || mode == "dual") {
 		mode = "local_only"
 	}
 	c.JSON(http.StatusOK, gin.H{
@@ -114,9 +112,8 @@ func (h *AuthLocalHandler) Login(c *gin.Context) {
 		}
 		return
 	}
-	// Non-admin local-login lock: either implied by sso_strict, or set
-	// explicitly via the DisallowUserLocalLogin setting. /login/local
-	// itself stays reachable so admins always have a break-glass path.
+	// Non-admin local-login lock is controlled by DisallowUserLocalLogin.
+	// /login/local itself stays reachable so admins always have a break-glass path.
 	if u.Role != domain.RoleAdmin && h.localLoginDisallowedForUsers(c) {
 		c.JSON(http.StatusForbidden, gin.H{"error": "local login is restricted to administrators; please use SSO"})
 		return

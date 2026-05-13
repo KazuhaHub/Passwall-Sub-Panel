@@ -1,10 +1,14 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { Delete } from '@element-plus/icons-vue'
 import { deleteTemplate, listTemplates, saveTemplate, type Template } from '@/api/templates'
 
 const items = ref<Template[]>([])
 const loading = ref(false)
+const selectedItems = ref<Template[]>([])
+const batchBusy = ref(false)
+const selectedCount = computed(() => selectedItems.value.length)
 const dialog = ref(false)
 const editing = ref(false)
 const form = reactive<Template>({
@@ -19,9 +23,18 @@ async function load() {
   loading.value = true
   try {
     items.value = await listTemplates()
+    selectedItems.value = []
   } finally {
     loading.value = false
   }
+}
+
+function handleSelectionChange(rows: Template[]) {
+  selectedItems.value = rows
+}
+
+function canSelectTemplate(row: Template) {
+  return !row.is_default
 }
 
 function openCreate() {
@@ -62,6 +75,33 @@ async function confirmDelete(t: Template) {
   await load()
 }
 
+async function batchDelete() {
+  if (selectedItems.value.length === 0) return
+  const rows = selectedItems.value.slice()
+  const names = rows.slice(0, 5).map((row) => row.slug).join('、')
+  const suffix = rows.length > 5 ? ` 等 ${rows.length} 个模板` : ''
+  try {
+    await ElMessageBox.confirm(`确定删除 ${names}${suffix}？`, '批量删除模板', { type: 'warning' })
+  } catch {
+    return
+  }
+  batchBusy.value = true
+  try {
+    const results = await Promise.allSettled(rows.map((row) => deleteTemplate(row.slug)))
+    const deletedRows = rows.filter((_, index) => results[index].status === 'fulfilled')
+    const failed = rows.length - deletedRows.length
+    items.value = items.value.filter((item) => !deletedRows.some((row) => row.slug === item.slug))
+    selectedItems.value = []
+    if (failed > 0) {
+      ElMessage.warning(`已删除 ${deletedRows.length} 个模板，失败 ${failed} 个`)
+    } else {
+      ElMessage.success(`已删除 ${deletedRows.length} 个模板`)
+    }
+  } finally {
+    batchBusy.value = false
+  }
+}
+
 onMounted(load)
 </script>
 
@@ -72,7 +112,20 @@ onMounted(load)
       <el-button type="primary" @click="openCreate">新增模板</el-button>
     </div>
 
-    <el-table v-loading="loading" :data="items" stripe>
+    <div v-if="selectedCount > 0" class="psp-toolbar">
+      <span class="selection-count">已选 {{ selectedCount }}</span>
+      <el-button
+        type="danger"
+        :icon="Delete"
+        :loading="batchBusy"
+        @click="batchDelete"
+      >
+        批量删除
+      </el-button>
+    </div>
+
+    <el-table v-loading="loading" :data="items" stripe @selection-change="handleSelectionChange">
+      <el-table-column type="selection" width="48" :selectable="canSelectTemplate" />
       <el-table-column prop="slug" label="Slug" min-width="160" />
       <el-table-column prop="name" label="名称" min-width="180" />
       <el-table-column prop="client_type" label="客户端" width="140" />
@@ -135,5 +188,10 @@ onMounted(load)
   font-family: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
   font-size: 13px;
   line-height: 1.5;
+}
+
+.selection-count {
+  color: var(--text-muted);
+  white-space: nowrap;
 }
 </style>

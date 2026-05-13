@@ -214,12 +214,19 @@ type UISettings struct {
 	// (worth keeping for diagnosis). 0 disables auto-cleanup.
 	SyncTaskRetentionDays int `json:"sync_task_retention_days"`
 
-	// Hard policies that apply REGARDLESS of LoginMode. sso_strict already
-	// blocks non-admin local login at the login-mode level; these knobs let
-	// admins enforce the same policy in dual/local_only mode too, and add an
-	// independent password-change lock.
+	// Hard policies that apply REGARDLESS of LoginMode. These knobs let admins
+	// reject ordinary users' local-password login even when /login/local remains
+	// reachable as an admin break-glass path, and add an independent
+	// password-change lock.
 	DisallowUserLocalLogin     bool `json:"disallow_user_local_login"`
 	DisallowUserPasswordChange bool `json:"disallow_user_password_change"`
+
+	// Emergency access lets an enabled user extend a non-permanent account
+	// without admin intervention. Hours is the extension length per use;
+	// MaxCount is per-user until an admin resets that user's counter.
+	EmergencyAccessEnabled  bool `json:"emergency_access_enabled"`
+	EmergencyAccessHours    int  `json:"emergency_access_hours"`
+	EmergencyAccessMaxCount int  `json:"emergency_access_max_count"`
 }
 
 type SettingsRepo interface {

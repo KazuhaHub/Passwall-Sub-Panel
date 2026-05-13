@@ -21,6 +21,7 @@ export interface User {
   remark?: string
   enabled: boolean
   auto_disabled_reason?: string
+  emergency_used_count: number
   created_at: string
 }
 

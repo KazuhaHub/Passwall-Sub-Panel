@@ -16,6 +16,13 @@ interface MeProfile {
   traffic_reset_period: string
   enabled: boolean
   can_change_password: boolean
+  emergency_access: {
+    enabled: boolean
+    duration_hours: number
+    max_count: number
+    used_count: number
+    remaining: number
+  }
 }
 
 const profile = ref<MeProfile | null>(null)
@@ -25,6 +32,11 @@ const qrDataURL = ref<string>('')
 const passwordDialog = ref(false)
 const oldPassword = ref('')
 const newPassword = ref('')
+const emergencyBusy = ref(false)
+const canUseEmergency = computed(() => {
+  const e = profile.value?.emergency_access
+  return !!profile.value?.expire_at && !!e?.enabled && e.remaining > 0
+})
 
 async function load() {
   const [p, u] = await Promise.all([
@@ -74,6 +86,39 @@ async function changePassword() {
   passwordDialog.value = false
   oldPassword.value = ''
   newPassword.value = ''
+}
+
+async function useEmergencyAccess() {
+  const e = profile.value?.emergency_access
+  if (!profile.value || !e) return
+  try {
+    await ElMessageBox.confirm(
+      `确定使用一次紧急使用机会，将账号延长 ${e.duration_hours} 小时？`,
+      '紧急使用',
+      { type: 'warning', confirmButtonText: '立即延长', cancelButtonText: '取消' },
+    )
+  } catch {
+    return
+  }
+  emergencyBusy.value = true
+  try {
+    const { data } = await client.post<{
+      expire_at: string
+      used_count: number
+      max_count: number
+      remaining: number
+      sync_pending?: boolean
+    }>('/user/me/emergency-access')
+    profile.value.expire_at = data.expire_at
+    profile.value.emergency_access.used_count = data.used_count
+    profile.value.emergency_access.max_count = data.max_count
+    profile.value.emergency_access.remaining = data.remaining
+    ElMessage.success(data.sync_pending ? '已延长，节点配置正在后台同步' : '已延长')
+  } catch (err: any) {
+    ElMessage.error(err?.response?.data?.error ?? '紧急使用失败')
+  } finally {
+    emergencyBusy.value = false
+  }
 }
 
 function formatBytes(n: number): string {
@@ -146,7 +191,12 @@ onMounted(load)
 
         <!-- Expiration Card -->
         <el-card class="stat-card">
-          <h3 class="card-title">账户到期时间</h3>
+          <div class="card-header-flex">
+            <h3 class="card-title">账户到期时间</h3>
+            <span v-if="profile.emergency_access.enabled" class="reset-period">
+              紧急剩余 {{ profile.emergency_access.remaining }}/{{ profile.emergency_access.max_count }}
+            </span>
+          </div>
           <div class="expire-stats">
             <div v-if="profile.expire_at">
               <div class="expire-date">{{ new Date(profile.expire_at).toLocaleDateString() }}</div>
@@ -155,6 +205,21 @@ onMounted(load)
               </div>
             </div>
             <div v-else class="expire-date">永久有效</div>
+          </div>
+          <div v-if="profile.emergency_access.enabled && profile.expire_at" class="emergency-section">
+            <el-button
+              type="warning"
+              plain
+              class="w-full"
+              :disabled="!canUseEmergency"
+              :loading="emergencyBusy"
+              @click="useEmergencyAccess"
+            >
+              紧急使用，延长 {{ profile.emergency_access.duration_hours }} 小时
+            </el-button>
+            <p class="action-hint">
+              已使用 {{ profile.emergency_access.used_count }} 次，剩余 {{ profile.emergency_access.remaining }} 次。
+            </p>
           </div>
         </el-card>
       </div>
@@ -373,6 +438,10 @@ onMounted(load)
 
 .expire-countdown.danger {
   color: #ef4444;
+}
+
+.emergency-section {
+  margin-top: 20px;
 }
 
 /* Right Column (Subscription) */

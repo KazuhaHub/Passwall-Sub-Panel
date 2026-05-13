@@ -32,3 +32,10 @@ export async function userTraffic(userId: number) {
   const { data } = await client.get<UsageReport>(`/admin/traffic/user/${userId}`)
   return data
 }
+
+export async function setUserTraffic(userId: number, periodUsedGB: number) {
+  const { data } = await client.put<UsageReport>(`/admin/traffic/user/${userId}`, {
+    period_used_gb: periodUsedGB,
+  })
+  return data
+}

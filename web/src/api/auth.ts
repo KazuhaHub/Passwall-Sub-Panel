@@ -6,7 +6,7 @@ export async function ssoComplete(): Promise<AuthLoginResponse> {
   return data
 }
 
-export type LoginMode = 'sso_first' | 'sso_strict' | 'dual' | 'local_only'
+export type LoginMode = 'sso_redirect' | 'sso_first' | 'dual' | 'local_only'
 
 export interface AuthMethods {
   local: boolean

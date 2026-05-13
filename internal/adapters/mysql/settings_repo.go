@@ -28,23 +28,26 @@ func (r *settingsRepo) Load(ctx context.Context, defaults ports.UISettings) (por
 		return defaults, nil
 	}
 	out := ports.UISettings{
-		LoginMode:              row.LoginMode,
-		SiteTitle:              row.SiteTitle,
-		LogoURL:                row.LogoURL,
-		LogoURLDark:            row.LogoURLDark,
-		EmailDomain:            row.EmailDomain,
-		AuditRetentionDays:     row.AuditRetentionDays,
-		SubBaseURL:             row.SubBaseURL,
-		CronTrafficPullMinutes: row.CronTrafficPullMinutes,
-		CronReconcileMinutes:   row.CronReconcileMinutes,
-		JWTAccessTTLMinutes:    row.JWTAccessTTLMinutes,
-		JWTRefreshTTLMinutes:   row.JWTRefreshTTLMinutes,
-		JWTIssuer:              row.JWTIssuer,
-		SubPerIPPerMin:         row.SubPerIPPerMin,
-		LoginPerIPPerMin:       row.LoginPerIPPerMin,
+		LoginMode:                  row.LoginMode,
+		SiteTitle:                  row.SiteTitle,
+		LogoURL:                    row.LogoURL,
+		LogoURLDark:                row.LogoURLDark,
+		EmailDomain:                row.EmailDomain,
+		AuditRetentionDays:         row.AuditRetentionDays,
+		SubBaseURL:                 row.SubBaseURL,
+		CronTrafficPullMinutes:     row.CronTrafficPullMinutes,
+		CronReconcileMinutes:       row.CronReconcileMinutes,
+		JWTAccessTTLMinutes:        row.JWTAccessTTLMinutes,
+		JWTRefreshTTLMinutes:       row.JWTRefreshTTLMinutes,
+		JWTIssuer:                  row.JWTIssuer,
+		SubPerIPPerMin:             row.SubPerIPPerMin,
+		LoginPerIPPerMin:           row.LoginPerIPPerMin,
 		SyncTaskRetentionDays:      row.SyncTaskRetentionDays,
 		DisallowUserLocalLogin:     row.DisallowUserLocalLogin,
 		DisallowUserPasswordChange: row.DisallowUserPasswordChange,
+		EmergencyAccessEnabled:     row.EmergencyAccessEnabled,
+		EmergencyAccessHours:       row.EmergencyAccessHours,
+		EmergencyAccessMaxCount:    row.EmergencyAccessMaxCount,
 	}
 	if out.LoginMode == "" {
 		out.LoginMode = defaults.LoginMode
@@ -59,7 +62,7 @@ func (r *settingsRepo) Load(ctx context.Context, defaults ports.UISettings) (por
 		out.SubBaseURL = defaults.SubBaseURL
 	}
 	// Hardcoded fallbacks for runtime tuning fields. These preserve the
-	// pre-DB-migration defaults so an empty DB still produces a working panel.
+	// original defaults so an empty DB still produces a working panel.
 	if out.CronTrafficPullMinutes <= 0 {
 		out.CronTrafficPullMinutes = 5
 	}
@@ -86,24 +89,27 @@ func (r *settingsRepo) Load(ctx context.Context, defaults ports.UISettings) (por
 
 func (r *settingsRepo) Save(ctx context.Context, s ports.UISettings) error {
 	row := uiSettingsRow{
-		ID:                     1,
-		LoginMode:              s.LoginMode,
-		SiteTitle:              s.SiteTitle,
-		LogoURL:                s.LogoURL,
-		LogoURLDark:            s.LogoURLDark,
-		EmailDomain:            s.EmailDomain,
-		AuditRetentionDays:     s.AuditRetentionDays,
-		SubBaseURL:             s.SubBaseURL,
-		CronTrafficPullMinutes: s.CronTrafficPullMinutes,
-		CronReconcileMinutes:   s.CronReconcileMinutes,
-		JWTAccessTTLMinutes:    s.JWTAccessTTLMinutes,
-		JWTRefreshTTLMinutes:   s.JWTRefreshTTLMinutes,
-		JWTIssuer:              s.JWTIssuer,
-		SubPerIPPerMin:         s.SubPerIPPerMin,
-		LoginPerIPPerMin:       s.LoginPerIPPerMin,
+		ID:                         1,
+		LoginMode:                  s.LoginMode,
+		SiteTitle:                  s.SiteTitle,
+		LogoURL:                    s.LogoURL,
+		LogoURLDark:                s.LogoURLDark,
+		EmailDomain:                s.EmailDomain,
+		AuditRetentionDays:         s.AuditRetentionDays,
+		SubBaseURL:                 s.SubBaseURL,
+		CronTrafficPullMinutes:     s.CronTrafficPullMinutes,
+		CronReconcileMinutes:       s.CronReconcileMinutes,
+		JWTAccessTTLMinutes:        s.JWTAccessTTLMinutes,
+		JWTRefreshTTLMinutes:       s.JWTRefreshTTLMinutes,
+		JWTIssuer:                  s.JWTIssuer,
+		SubPerIPPerMin:             s.SubPerIPPerMin,
+		LoginPerIPPerMin:           s.LoginPerIPPerMin,
 		SyncTaskRetentionDays:      s.SyncTaskRetentionDays,
 		DisallowUserLocalLogin:     s.DisallowUserLocalLogin,
 		DisallowUserPasswordChange: s.DisallowUserPasswordChange,
+		EmergencyAccessEnabled:     s.EmergencyAccessEnabled,
+		EmergencyAccessHours:       s.EmergencyAccessHours,
+		EmergencyAccessMaxCount:    s.EmergencyAccessMaxCount,
 	}
 	return r.db.WithContext(ctx).Clauses(clause.OnConflict{UpdateAll: true}).Create(&row).Error
 }

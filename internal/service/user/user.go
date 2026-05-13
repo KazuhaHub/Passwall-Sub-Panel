@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
@@ -47,6 +48,8 @@ type Service struct {
 	syncer    ClientSyncer
 	pool      ports.XUIPool
 	settings  ports.SettingsRepo
+
+	emergencyMu sync.Mutex
 }
 
 func New(users ports.UserRepo, groups ports.GroupRepo, ownership ports.OwnershipRepo,
@@ -635,12 +638,21 @@ func (s *Service) DeleteAndSync(ctx context.Context, userID int64) error {
 // "explicit clear to permanent".
 type UpdateInput struct {
 	GroupID            *int64
+	Role               *domain.Role
 	ExpireAt           *time.Time
 	ClearExpire        bool
 	TrafficLimitBytes  *int64
 	TrafficResetPeriod *domain.ResetPeriod
 	Remark             *string
 	DisplayName        *string
+}
+
+type EmergencyAccessResult struct {
+	User          *domain.User
+	ExtendedFrom  time.Time
+	ExtendedUntil time.Time
+	UsedCount     int
+	MaxCount      int
 }
 
 // UpdateProfile applies a partial update to one user. If the group
@@ -661,6 +673,17 @@ func (s *Service) UpdateProfile(ctx context.Context, userID int64, in UpdateInpu
 		}
 		u.GroupID = *in.GroupID
 		groupChanged = true
+	}
+	if in.Role != nil && *in.Role != u.Role {
+		if u.Source != domain.UserSourceLocal {
+			return fmt.Errorf("%w: only local users can be assigned admin role here", domain.ErrValidation)
+		}
+		switch *in.Role {
+		case domain.RoleAdmin, domain.RoleUser:
+			u.Role = *in.Role
+		default:
+			return fmt.Errorf("%w: invalid role", domain.ErrValidation)
+		}
 	}
 	if in.ClearExpire && u.ExpireAt != nil {
 		u.ExpireAt = nil
@@ -697,6 +720,69 @@ func (s *Service) UpdateProfile(ctx context.Context, userID int64, in UpdateInpu
 		}
 	}
 	return nil
+}
+
+func (s *Service) UseEmergencyAccess(ctx context.Context, userID int64) (*EmergencyAccessResult, error) {
+	s.emergencyMu.Lock()
+	defer s.emergencyMu.Unlock()
+
+	settings, err := s.settings.Load(ctx, ports.UISettings{})
+	if err != nil {
+		return nil, err
+	}
+	if !settings.EmergencyAccessEnabled {
+		return nil, fmt.Errorf("%w: emergency access is disabled", domain.ErrForbidden)
+	}
+	if settings.EmergencyAccessHours <= 0 || settings.EmergencyAccessMaxCount <= 0 {
+		return nil, fmt.Errorf("%w: emergency access settings are invalid", domain.ErrValidation)
+	}
+
+	u, err := s.users.GetByID(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	if u.ExpireAt == nil {
+		return nil, fmt.Errorf("%w: permanent accounts do not need emergency access", domain.ErrValidation)
+	}
+	if u.EmergencyUsedCount >= settings.EmergencyAccessMaxCount {
+		return nil, fmt.Errorf("%w: emergency access limit reached", domain.ErrForbidden)
+	}
+
+	now := time.Now()
+	from := now
+	if u.ExpireAt.After(now) {
+		from = *u.ExpireAt
+	}
+	until := from.Add(time.Duration(settings.EmergencyAccessHours) * time.Hour)
+	u.ExpireAt = &until
+	u.EmergencyUsedCount++
+	if err := s.users.Update(ctx, u); err != nil {
+		return nil, err
+	}
+	if err := s.pushClientConfigToAll(ctx, u); err != nil {
+		if taskErr := s.enqueueUserTask(ctx, domain.SyncTaskUserPushConfig, userID, fmt.Sprintf("sync emergency access for user %s", u.Username)); taskErr != nil {
+			return nil, taskErr
+		}
+	}
+	return &EmergencyAccessResult{
+		User:          u,
+		ExtendedFrom:  from,
+		ExtendedUntil: until,
+		UsedCount:     u.EmergencyUsedCount,
+		MaxCount:      settings.EmergencyAccessMaxCount,
+	}, nil
+}
+
+func (s *Service) ResetEmergencyUsage(ctx context.Context, userID int64) error {
+	u, err := s.users.GetByID(ctx, userID)
+	if err != nil {
+		return err
+	}
+	if u.EmergencyUsedCount == 0 {
+		return nil
+	}
+	u.EmergencyUsedCount = 0
+	return s.users.Update(ctx, u)
 }
 
 // ChangeGroupAndSync moves a user to a different group and reconciles their

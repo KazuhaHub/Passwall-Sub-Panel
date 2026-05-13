@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { Delete, Lock, Unlock } from '@element-plus/icons-vue'
 import {
   deleteRuleSet,
   listRuleSets,
@@ -10,6 +11,9 @@ import {
 
 const items = ref<RuleSet[]>([])
 const loading = ref(false)
+const selectedItems = ref<RuleSet[]>([])
+const batchBusy = ref<'enable' | 'disable' | 'delete' | ''>('')
+const selectedCount = computed(() => selectedItems.value.length)
 const dialog = ref(false)
 const editing = ref(false)
 const form = reactive<RuleSet>({
@@ -24,9 +28,14 @@ async function load() {
   loading.value = true
   try {
     items.value = await listRuleSets()
+    selectedItems.value = []
   } finally {
     loading.value = false
   }
+}
+
+function handleSelectionChange(rows: RuleSet[]) {
+  selectedItems.value = rows
 }
 
 function openCreate() {
@@ -67,6 +76,51 @@ async function confirmDelete(rs: RuleSet) {
   await load()
 }
 
+async function batchSetEnabled(enabled: boolean) {
+  if (selectedItems.value.length === 0) return
+  const rows = selectedItems.value.slice()
+  batchBusy.value = enabled ? 'enable' : 'disable'
+  try {
+    const results = await Promise.allSettled(rows.map((row) => saveRuleSet({ ...row, enabled })))
+    const failed = results.filter((result) => result.status === 'rejected').length
+    if (failed > 0) {
+      ElMessage.warning(`已${enabled ? '启用' : '禁用'} ${rows.length - failed} 个规则集，失败 ${failed} 个`)
+    } else {
+      ElMessage.success(`已${enabled ? '启用' : '禁用'} ${rows.length} 个规则集`)
+    }
+    await load()
+  } finally {
+    batchBusy.value = ''
+  }
+}
+
+async function batchDelete() {
+  if (selectedItems.value.length === 0) return
+  const rows = selectedItems.value.slice()
+  const names = rows.slice(0, 5).map((row) => row.slug).join('、')
+  const suffix = rows.length > 5 ? ` 等 ${rows.length} 个规则集` : ''
+  try {
+    await ElMessageBox.confirm(`确定删除 ${names}${suffix}？`, '批量删除规则集', { type: 'warning' })
+  } catch {
+    return
+  }
+  batchBusy.value = 'delete'
+  try {
+    const results = await Promise.allSettled(rows.map((row) => deleteRuleSet(row.slug)))
+    const deletedRows = rows.filter((_, index) => results[index].status === 'fulfilled')
+    const failed = rows.length - deletedRows.length
+    items.value = items.value.filter((item) => !deletedRows.some((row) => row.slug === item.slug))
+    selectedItems.value = []
+    if (failed > 0) {
+      ElMessage.warning(`已删除 ${deletedRows.length} 个规则集，失败 ${failed} 个`)
+    } else {
+      ElMessage.success(`已删除 ${deletedRows.length} 个规则集`)
+    }
+  } finally {
+    batchBusy.value = ''
+  }
+}
+
 function countLines(s: string): number {
   return s ? s.split('\n').filter((l) => l.trim()).length : 0
 }
@@ -81,7 +135,37 @@ onMounted(load)
       <el-button type="primary" @click="openCreate">新增规则集</el-button>
     </div>
 
-    <el-table v-loading="loading" :data="items" stripe>
+    <div v-if="selectedCount > 0" class="psp-toolbar">
+      <span class="selection-count">已选 {{ selectedCount }}</span>
+      <el-button
+        :icon="Unlock"
+        :loading="batchBusy === 'enable'"
+        :disabled="batchBusy !== ''"
+        @click="batchSetEnabled(true)"
+      >
+        批量启用
+      </el-button>
+      <el-button
+        :icon="Lock"
+        :loading="batchBusy === 'disable'"
+        :disabled="batchBusy !== ''"
+        @click="batchSetEnabled(false)"
+      >
+        批量禁用
+      </el-button>
+      <el-button
+        type="danger"
+        :icon="Delete"
+        :loading="batchBusy === 'delete'"
+        :disabled="batchBusy !== ''"
+        @click="batchDelete"
+      >
+        批量删除
+      </el-button>
+    </div>
+
+    <el-table v-loading="loading" :data="items" stripe @selection-change="handleSelectionChange">
+      <el-table-column type="selection" width="48" />
       <el-table-column prop="slug" label="Slug" min-width="140" />
       <el-table-column prop="name" label="名称" min-width="160" />
       <el-table-column prop="sort" label="排序" width="80" />
@@ -145,5 +229,10 @@ onMounted(load)
   font-family: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
   font-size: 13px;
   line-height: 1.5;
+}
+
+.selection-count {
+  color: var(--text-muted);
+  white-space: nowrap;
 }
 </style>

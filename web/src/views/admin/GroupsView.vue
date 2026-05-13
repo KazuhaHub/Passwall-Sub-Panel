@@ -1,11 +1,15 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { Delete } from '@element-plus/icons-vue'
 import { createGroup, deleteGroup, listGroups, updateGroup } from '@/api/groups'
 import type { Group } from '@/api/types'
 
 const groups = ref<Group[]>([])
 const loading = ref(false)
+const selectedGroups = ref<Group[]>([])
+const batchBusy = ref(false)
+const selectedCount = computed(() => selectedGroups.value.length)
 
 const dialog = ref(false)
 const editing = ref<Group | null>(null)
@@ -22,9 +26,18 @@ async function load() {
   try {
     const res = await listGroups()
     groups.value = res.items
+    selectedGroups.value = []
   } finally {
     loading.value = false
   }
+}
+
+function handleSelectionChange(rows: Group[]) {
+  selectedGroups.value = rows
+}
+
+function canSelectGroup(row: Group) {
+  return row.members === 0
 }
 
 function openCreate() {
@@ -91,6 +104,33 @@ async function confirmDelete(g: Group) {
   await load()
 }
 
+async function batchDeleteGroups() {
+  if (selectedGroups.value.length === 0) return
+  const rows = selectedGroups.value.slice()
+  const names = rows.slice(0, 5).map((row) => row.name).join('、')
+  const suffix = rows.length > 5 ? ` 等 ${rows.length} 个分组` : ''
+  try {
+    await ElMessageBox.confirm(`确定删除 ${names}${suffix}？`, '批量删除分组', { type: 'warning' })
+  } catch {
+    return
+  }
+  batchBusy.value = true
+  try {
+    const results = await Promise.allSettled(rows.map((row) => deleteGroup(row.id)))
+    const deletedRows = rows.filter((_, index) => results[index].status === 'fulfilled')
+    const failed = rows.length - deletedRows.length
+    groups.value = groups.value.filter((group) => !deletedRows.some((row) => row.id === group.id))
+    selectedGroups.value = []
+    if (failed > 0) {
+      ElMessage.warning(`已删除 ${deletedRows.length} 个分组，失败 ${failed} 个`)
+    } else {
+      ElMessage.success(`已删除 ${deletedRows.length} 个分组`)
+    }
+  } finally {
+    batchBusy.value = false
+  }
+}
+
 onMounted(load)
 </script>
 
@@ -101,7 +141,20 @@ onMounted(load)
       <el-button type="primary" @click="openCreate">新增分组</el-button>
     </div>
 
-    <el-table v-loading="loading" :data="groups" stripe>
+    <div v-if="selectedCount > 0" class="psp-toolbar">
+      <span class="selection-count">已选 {{ selectedCount }}</span>
+      <el-button
+        type="danger"
+        :icon="Delete"
+        :loading="batchBusy"
+        @click="batchDeleteGroups"
+      >
+        批量删除
+      </el-button>
+    </div>
+
+    <el-table v-loading="loading" :data="groups" stripe @selection-change="handleSelectionChange">
+      <el-table-column type="selection" width="48" :selectable="canSelectGroup" />
       <el-table-column prop="name" label="名称" min-width="160" />
       <el-table-column prop="slug" label="Slug" min-width="120" />
       <el-table-column label="tag_filter" min-width="240">
@@ -160,3 +213,10 @@ onMounted(load)
     </el-dialog>
   </div>
 </template>
+
+<style scoped>
+.selection-count {
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+</style>

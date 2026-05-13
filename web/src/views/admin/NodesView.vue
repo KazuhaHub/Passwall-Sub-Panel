@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { Delete, Lock, Unlock } from '@element-plus/icons-vue'
 import {
   createInbound,
   deleteNode,
@@ -20,6 +21,9 @@ const unmanaged = ref<UnmanagedInbound[]>([])
 const servers = ref<Server[]>([])
 const loading = ref(false)
 const enabledBusy = ref<Record<number, boolean>>({})
+const selectedManaged = ref<Node[]>([])
+const batchBusy = ref<'enable' | 'disable' | 'delete' | ''>('')
+const selectedManagedCount = computed(() => selectedManaged.value.length)
 
 async function loadServers() {
   try {
@@ -182,6 +186,7 @@ async function load() {
   try {
     if (tab.value === 'managed') {
       managed.value = await listNodes()
+      selectedManaged.value = []
     } else {
       const res = await listUnmanagedInbounds()
       unmanaged.value = res.items
@@ -189,6 +194,10 @@ async function load() {
   } finally {
     loading.value = false
   }
+}
+
+function handleManagedSelectionChange(rows: Node[]) {
+  selectedManaged.value = rows
 }
 
 function startImport(row: UnmanagedInbound) {
@@ -276,6 +285,55 @@ async function confirmDelete(row: Node) {
   await load()
 }
 
+async function batchSetManagedEnabled(enabled: boolean) {
+  if (selectedManaged.value.length === 0) return
+  const rows = selectedManaged.value.slice()
+  batchBusy.value = enabled ? 'enable' : 'disable'
+  try {
+    const results = await Promise.allSettled(rows.map((row) => setNodeEnabled(row.id, enabled)))
+    const failed = results.filter((result) => result.status === 'rejected').length
+    if (failed > 0) {
+      ElMessage.warning(`已${enabled ? '启用' : '禁用'} ${rows.length - failed} 个节点，失败 ${failed} 个`)
+    } else {
+      ElMessage.success(`已${enabled ? '启用' : '禁用'} ${rows.length} 个节点`)
+    }
+    await load()
+  } finally {
+    batchBusy.value = ''
+  }
+}
+
+async function batchDeleteManaged() {
+  if (selectedManaged.value.length === 0) return
+  const rows = selectedManaged.value.slice()
+  const names = rows.slice(0, 5).map((row) => row.display_name).join('、')
+  const suffix = rows.length > 5 ? ` 等 ${rows.length} 个节点` : ''
+  try {
+    await ElMessageBox.confirm(
+      `确定删除 ${names}${suffix}？会先清除这些 inbound 内所有本系统纳管 client，再删除 inbound 本身。`,
+      '批量删除节点',
+      { type: 'warning' },
+    )
+  } catch {
+    return
+  }
+  batchBusy.value = 'delete'
+  try {
+    const results = await Promise.allSettled(rows.map((row) => deleteNode(row.id)))
+    const deletedRows = rows.filter((_, index) => results[index].status === 'fulfilled')
+    const failed = rows.length - deletedRows.length
+    managed.value = managed.value.filter((node) => !deletedRows.some((row) => row.id === node.id))
+    selectedManaged.value = []
+    if (failed > 0) {
+      ElMessage.warning(`已删除 ${deletedRows.length} 个节点，失败 ${failed} 个`)
+    } else {
+      ElMessage.success(`已删除 ${deletedRows.length} 个节点`)
+    }
+  } finally {
+    batchBusy.value = ''
+  }
+}
+
 async function changeEnabled(row: Node, enabled: boolean) {
   const previous = row.enabled
   row.enabled = enabled
@@ -321,7 +379,36 @@ onMounted(async () => {
 
     <el-tabs v-model="tab" @tab-change="load">
       <el-tab-pane label="纳管中" name="managed">
-        <el-table v-loading="loading" :data="managed" stripe>
+        <div v-if="selectedManagedCount > 0" class="psp-toolbar">
+          <span class="selection-count">已选 {{ selectedManagedCount }}</span>
+          <el-button
+            :icon="Unlock"
+            :loading="batchBusy === 'enable'"
+            :disabled="batchBusy !== ''"
+            @click="batchSetManagedEnabled(true)"
+          >
+            批量启用
+          </el-button>
+          <el-button
+            :icon="Lock"
+            :loading="batchBusy === 'disable'"
+            :disabled="batchBusy !== ''"
+            @click="batchSetManagedEnabled(false)"
+          >
+            批量禁用
+          </el-button>
+          <el-button
+            type="danger"
+            :icon="Delete"
+            :loading="batchBusy === 'delete'"
+            :disabled="batchBusy !== ''"
+            @click="batchDeleteManaged"
+          >
+            批量删除
+          </el-button>
+        </div>
+        <el-table v-loading="loading" :data="managed" stripe @selection-change="handleManagedSelectionChange">
+          <el-table-column type="selection" width="48" />
           <el-table-column prop="display_name" label="显示名" min-width="180" />
           <el-table-column prop="server_address" label="服务器" min-width="200" />
           <el-table-column prop="region" label="Region" width="80" />
@@ -515,3 +602,10 @@ onMounted(async () => {
     </el-dialog>
   </div>
 </template>
+
+<style scoped>
+.selection-count {
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+</style>

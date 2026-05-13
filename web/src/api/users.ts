@@ -3,17 +3,20 @@ import type {
   CreateUserRequest,
   CreateUserResponse,
   ListResponse,
+  Role,
   ResetPeriod,
   User,
 } from './types'
 
 export interface UpdateUserRequest {
   group_id?: number
+  role?: Role
   expire_at?: string | null
   clear_expire?: boolean
   traffic_limit_gb?: number
   traffic_reset_period?: ResetPeriod
   remark?: string
+  display_name?: string
 }
 
 export interface UserListParams {
@@ -53,6 +56,10 @@ export async function resetCredentials(id: number) {
     `/admin/users/${id}/reset-credentials`,
   )
   return data
+}
+
+export async function resetEmergencyUsage(id: number) {
+  await client.post(`/admin/users/${id}/reset-emergency-usage`)
 }
 
 export async function setEnabled(id: number, enabled: boolean) {

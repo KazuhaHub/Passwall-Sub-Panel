@@ -40,6 +40,7 @@ type User struct {
 	Remark             string
 	Enabled            bool
 	AutoDisabledReason AutoDisabledReason
+	EmergencyUsedCount int
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
 }

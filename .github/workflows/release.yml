@@ -100,6 +100,29 @@ jobs:
 
           (cd dist && sha256sum * > SHA256SUMS.txt)
 
+      - name: Generate release body
+        shell: bash
+        env:
+          VERSION: ${{ steps.release_tag.outputs.tag }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          OWNER_LC=$(echo "${OWNER}" | tr '[:upper:]' '[:lower:]')
+          cat <<EOF > release_notes.md
+          ### Docker image (ghcr.io)
+          
+          \`\`\`shell
+          docker pull ghcr.io/${OWNER_LC}/passwall-sub-panel:latest
+          # Or specific version
+          docker pull ghcr.io/${OWNER_LC}/passwall-sub-panel:${VERSION}
+          \`\`\`
+          
+          ### Verify
+          
+          \`\`\`shell
+          sha256sum -c SHA256SUMS.txt
+          \`\`\`
+          EOF
+
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -107,6 +130,8 @@ jobs:
           target_commitish: ${{ github.sha }}
           name: ${{ steps.release_tag.outputs.tag }}
           generate_release_notes: true
+          body_path: release_notes.md
+          append_body: true
           files: |
             dist/*
         env:

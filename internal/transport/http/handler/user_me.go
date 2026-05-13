@@ -47,10 +47,23 @@ func (h *UserMeHandler) Profile(c *gin.Context) {
 	// the admin has flipped DisallowUserPasswordChange on. Admins always
 	// keep the option as a break-glass path.
 	canChangePassword := u.Source == domain.UserSourceLocal
+	settings, settingsErr := h.settings.Load(c.Request.Context(), ports.UISettings{})
 	if canChangePassword && u.Role != domain.RoleAdmin {
-		if s, err := h.settings.Load(c.Request.Context(), ports.UISettings{}); err == nil && s.DisallowUserPasswordChange {
+		if settingsErr == nil && settings.DisallowUserPasswordChange {
 			canChangePassword = false
 		}
+	}
+	emergencyEnabled := false
+	emergencyHours := 0
+	emergencyMaxCount := 0
+	if settingsErr == nil {
+		emergencyEnabled = settings.EmergencyAccessEnabled
+		emergencyHours = settings.EmergencyAccessHours
+		emergencyMaxCount = settings.EmergencyAccessMaxCount
+	}
+	emergencyRemaining := emergencyMaxCount - u.EmergencyUsedCount
+	if emergencyRemaining < 0 {
+		emergencyRemaining = 0
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"id":                   u.ID,
@@ -63,6 +76,51 @@ func (h *UserMeHandler) Profile(c *gin.Context) {
 		"traffic_reset_period": u.TrafficResetPeriod,
 		"enabled":              u.Enabled,
 		"can_change_password":  canChangePassword,
+		"emergency_access": gin.H{
+			"enabled":        emergencyEnabled,
+			"duration_hours": emergencyHours,
+			"max_count":      emergencyMaxCount,
+			"used_count":     u.EmergencyUsedCount,
+			"remaining":      emergencyRemaining,
+		},
+	})
+}
+
+func (h *UserMeHandler) EmergencyAccess(c *gin.Context) {
+	claims := middleware.ClaimsFrom(c)
+	if claims == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "no auth"})
+		return
+	}
+	res, err := h.user.UseEmergencyAccess(c.Request.Context(), claims.UserID)
+	if err != nil {
+		switch {
+		case errors.Is(err, domain.ErrNotFound):
+			c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
+		case errors.Is(err, domain.ErrForbidden):
+			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+		case errors.Is(err, domain.ErrValidation):
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		}
+		return
+	}
+	if h.user.HasPendingSync(c.Request.Context(), claims.UserID) {
+		c.Header("X-Sync-Pending", "1")
+	}
+	remaining := res.MaxCount - res.UsedCount
+	if remaining < 0 {
+		remaining = 0
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"expire_at":      res.User.ExpireAt,
+		"extended_from":  res.ExtendedFrom,
+		"extended_until": res.ExtendedUntil,
+		"used_count":     res.UsedCount,
+		"max_count":      res.MaxCount,
+		"remaining":      remaining,
+		"sync_pending":   h.user.HasPendingSync(c.Request.Context(), claims.UserID),
 	})
 }
 

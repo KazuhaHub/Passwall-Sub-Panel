@@ -1,12 +1,14 @@
 package handler
 
 import (
+	"errors"
 	"net/http"
 	"sort"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/traffic"
 )
@@ -28,6 +30,10 @@ type trafficRow struct {
 	PermanentTotalBytes int64  `json:"permanent_total_bytes"`
 	PeriodUsedBytes     int64  `json:"period_used_bytes"`
 	TodayUsedBytes      int64  `json:"today_used_bytes"`
+}
+
+type setUserTrafficRequest struct {
+	PeriodUsedGB float64 `json:"period_used_gb"`
 }
 
 // Top returns the top-N users by current period usage. N defaults to 20.
@@ -82,6 +88,46 @@ func (h *AdminTrafficHandler) UserReport(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	report, err := h.traffic.ReportFor(c.Request.Context(), id)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"user_id":               report.UserID,
+		"permanent_total_bytes": report.PermanentTotalBytes,
+		"period_used_bytes":     report.PeriodUsedBytes,
+		"today_used_bytes":      report.TodayUsedBytes,
+	})
+}
+
+func (h *AdminTrafficHandler) SetUserUsage(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	var req setUserTrafficRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if req.PeriodUsedGB < 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "period_used_gb must be >= 0"})
+		return
+	}
+	usedBytes := int64(req.PeriodUsedGB * 1024 * 1024 * 1024)
+	if err := h.traffic.SetPeriodUsage(c.Request.Context(), id, usedBytes); err != nil {
+		switch {
+		case errors.Is(err, domain.ErrNotFound):
+			c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
+		case errors.Is(err, domain.ErrValidation):
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		}
 		return
 	}
 	report, err := h.traffic.ReportFor(c.Request.Context(), id)

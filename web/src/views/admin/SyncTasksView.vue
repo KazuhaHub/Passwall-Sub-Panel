@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { Close, Refresh } from '@element-plus/icons-vue'
 import {
   cancelSyncTask,
   listSyncTasks,
@@ -17,6 +18,8 @@ const pageSize = ref(50)
 const loading = ref(false)
 const statusFilter = ref<SyncTaskStatus | ''>('pending')
 const typeFilter = ref<SyncTaskType | ''>('')
+const selectedItems = ref<SyncTask[]>([])
+const batchBusy = ref<'retry' | 'cancel' | ''>('')
 
 const detailDialog = ref(false)
 const detailRow = ref<SyncTask | null>(null)
@@ -38,7 +41,8 @@ const typeOptions: { label: string; value: SyncTaskType }[] = [
   { label: '更新节点配置', value: 'node_update' },
 ]
 
-const pendingCount = computed(() => items.value.filter(row => statusOf(row) === 'pending').length)
+const pendingCount = computed(() => items.value.filter((row) => statusOf(row) === 'pending').length)
+const selectedCount = computed(() => selectedItems.value.length)
 
 function idOf(row: SyncTask) {
   return row.id ?? row.ID ?? 0
@@ -98,9 +102,14 @@ async function load() {
     const res = await listSyncTasks(params)
     items.value = res.items
     total.value = res.total
+    selectedItems.value = []
   } finally {
     loading.value = false
   }
+}
+
+function handleSelectionChange(rows: SyncTask[]) {
+  selectedItems.value = rows
 }
 
 async function retry(row: SyncTask) {
@@ -111,6 +120,49 @@ async function retry(row: SyncTask) {
 async function cancel(row: SyncTask) {
   await cancelSyncTask(idOf(row))
   await load()
+}
+
+async function batchRetry() {
+  if (selectedItems.value.length === 0) return
+  const rows = selectedItems.value.slice()
+  batchBusy.value = 'retry'
+  try {
+    const results = await Promise.allSettled(rows.map((row) => retrySyncTask(idOf(row))))
+    const failed = results.filter((result) => result.status === 'rejected').length
+    if (failed > 0) {
+      ElMessage.warning(`已重试 ${rows.length - failed} 个任务，失败 ${failed} 个`)
+    } else {
+      ElMessage.success(`已重试 ${rows.length} 个任务`)
+    }
+    await load()
+  } finally {
+    batchBusy.value = ''
+  }
+}
+
+async function batchCancel() {
+  if (selectedItems.value.length === 0) return
+  const rows = selectedItems.value.slice()
+  try {
+    await ElMessageBox.confirm(`确定中止选中的 ${rows.length} 个同步任务？`, '批量中止任务', {
+      type: 'warning',
+    })
+  } catch {
+    return
+  }
+  batchBusy.value = 'cancel'
+  try {
+    const results = await Promise.allSettled(rows.map((row) => cancelSyncTask(idOf(row))))
+    const failed = results.filter((result) => result.status === 'rejected').length
+    if (failed > 0) {
+      ElMessage.warning(`已中止 ${rows.length - failed} 个任务，失败 ${failed} 个`)
+    } else {
+      ElMessage.success(`已中止 ${rows.length} 个任务`)
+    }
+    await load()
+  } finally {
+    batchBusy.value = ''
+  }
 }
 
 function showDetail(row: SyncTask) {
@@ -159,9 +211,34 @@ onMounted(load)
       <el-select v-model="typeFilter" clearable placeholder="任务类型" style="width: 180px" @change="load">
         <el-option v-for="t in typeOptions" :key="t.value" :label="t.label" :value="t.value" />
       </el-select>
+      <template v-if="selectedCount > 0">
+        <el-divider direction="vertical" />
+        <span class="selection-count">已选 {{ selectedCount }}</span>
+        <el-button
+          type="primary"
+          plain
+          :icon="Refresh"
+          :loading="batchBusy === 'retry'"
+          :disabled="batchBusy !== ''"
+          @click="batchRetry"
+        >
+          批量重试
+        </el-button>
+        <el-button
+          type="danger"
+          plain
+          :icon="Close"
+          :loading="batchBusy === 'cancel'"
+          :disabled="batchBusy !== ''"
+          @click="batchCancel"
+        >
+          批量中止
+        </el-button>
+      </template>
     </div>
 
-    <el-table v-loading="loading" :data="items" stripe>
+    <el-table v-loading="loading" :data="items" stripe @selection-change="handleSelectionChange">
+      <el-table-column type="selection" width="48" />
       <el-table-column label="ID" width="80">
         <template #default="{ row }">{{ idOf(row) }}</template>
       </el-table-column>
@@ -243,5 +320,10 @@ onMounted(load)
   overflow: auto;
   white-space: pre-wrap;
   word-break: break-all;
+}
+
+.selection-count {
+  color: var(--text-muted);
+  white-space: nowrap;
 }
 </style>

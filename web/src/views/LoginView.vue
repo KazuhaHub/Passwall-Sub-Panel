@@ -29,6 +29,10 @@ async function probe() {
     ssoEnabled.value = m.sso
     samlEnabled.value = !!m.saml
     oidcEnabled.value = !!m.oidc
+    if (m.login_mode === 'sso_redirect' && m.sso) {
+      ssoLogin()
+      return
+    }
     // If only local is possible and we're not already showing it, send the
     // visitor to the dedicated local page for a cleaner UX.
     if (m.login_mode === 'local_only') {
@@ -91,10 +95,9 @@ onMounted(probe)
         <div class="login-subtitle">Welcome back, please sign in.</div>
       </div>
 
-      <!-- SSO-only modes: only SSO button(s), no local form/link.
-           sso_first  → /login/local is still reachable by URL for anyone
-           sso_strict → /login/local works for admins only (backend enforced) -->
-      <template v-if="mode === 'sso_first' || mode === 'sso_strict'">
+      <!-- SSO-only modes: direct redirect is handled in probe(); this button
+           view remains as the fallback and for sso_first. -->
+      <template v-if="mode === 'sso_redirect' || mode === 'sso_first'">
         <el-button v-if="samlEnabled" class="primary-btn" size="large" @click="samlLogin">
           <el-icon class="mr-2"><Right /></el-icon>
           使用 SAML 登录

@@ -1,19 +1,21 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Delete, Lock, Unlock } from '@element-plus/icons-vue'
+import { Clock, Delete, Lock, Unlock } from '@element-plus/icons-vue'
 import {
   createUser,
   deleteUser,
   listUsers,
   resetCredentials,
+  resetEmergencyUsage,
   setEnabled,
   updateUser,
 } from '@/api/users'
 import { listGroups } from '@/api/groups'
 import { runReconcile } from '@/api/reconcile'
+import { setUserTraffic, userTraffic } from '@/api/traffic'
 import { useAuthStore } from '@/stores/auth'
-import type { Group, User } from '@/api/types'
+import type { Group, Role, User } from '@/api/types'
 
 const auth = useAuthStore()
 
@@ -26,8 +28,9 @@ const search = ref('')
 const loading = ref(false)
 const reconcileBusy = ref(false)
 const selectedUsers = ref<User[]>([])
-const batchBusy = ref<'enable' | 'disable' | 'delete' | ''>('')
+const batchBusy = ref<'enable' | 'disable' | 'delete' | 'resetEmergency' | 'renew' | ''>('')
 const selectedCount = computed(() => selectedUsers.value.length)
+const renewableSelectedCount = computed(() => selectedUsers.value.filter((row) => canQuickRenew(row)).length)
 
 const createDialog = ref(false)
 const createBusy = ref(false)
@@ -48,14 +51,18 @@ const resultPassword = ref('')
 
 const editDialog = ref(false)
 const editBusy = ref(false)
+const editTrafficLoading = ref(false)
+const editOriginalUsedTrafficGB = ref(0)
 const editing = ref<User | null>(null)
 // expireMode: 'date' = ISO date, 'permanent' = clear_expire
 const editForm = reactive({
   display_name: '',
   group_id: undefined as number | undefined,
+  role: 'user' as Role,
   expireMode: 'date' as 'date' | 'permanent',
   expire_at: '' as string,
   traffic_limit_gb: 0,
+  used_traffic_gb: 0,
   traffic_reset_period: 'monthly' as 'never' | 'monthly' | 'quarterly',
   remark: '',
 })
@@ -138,9 +145,14 @@ async function submitCreate() {
   }
 }
 
-function openEdit(row: User) {
+function bytesToGB(bytes: number) {
+  return Math.round((bytes / 1024 / 1024 / 1024) * 100) / 100
+}
+
+async function openEdit(row: User) {
   editing.value = row
   editForm.group_id = row.group_id
+  editForm.role = row.role
   if (row.expire_at) {
     editForm.expireMode = 'date'
     editForm.expire_at = row.expire_at
@@ -152,7 +164,17 @@ function openEdit(row: User) {
   editForm.traffic_reset_period = row.traffic_reset_period
   editForm.remark = row.remark ?? ''
   editForm.display_name = row.display_name ?? ''
+  editForm.used_traffic_gb = 0
+  editOriginalUsedTrafficGB.value = 0
   editDialog.value = true
+  editTrafficLoading.value = true
+  try {
+    const report = await userTraffic(row.id)
+    editForm.used_traffic_gb = bytesToGB(report.period_used_bytes)
+    editOriginalUsedTrafficGB.value = editForm.used_traffic_gb
+  } finally {
+    editTrafficLoading.value = false
+  }
 }
 
 async function submitEdit() {
@@ -163,6 +185,17 @@ async function submitEdit() {
   }
   editBusy.value = true
   try {
+    if (editing.value.id === auth.userId && editing.value.role === 'admin' && editForm.role === 'user') {
+      try {
+        await ElMessageBox.confirm(
+          '你正在把当前登录的管理员账号降级为普通用户，保存后会失去管理后台权限。继续？',
+          '确认降级',
+          { type: 'warning' },
+        )
+      } catch {
+        return
+      }
+    }
     const req: Record<string, unknown> = {
       group_id: editForm.group_id,
       traffic_limit_gb: editForm.traffic_limit_gb,
@@ -170,12 +203,18 @@ async function submitEdit() {
       remark: editForm.remark,
       display_name: editForm.display_name,
     }
+    if (editing.value.source === 'local') {
+      req.role = editForm.role
+    }
     if (editForm.expireMode === 'permanent') {
       req.clear_expire = true
     } else if (editForm.expire_at) {
       req.expire_at = editForm.expire_at
     }
     await updateUser(editing.value.id, req)
+    if (editForm.used_traffic_gb !== editOriginalUsedTrafficGB.value) {
+      await setUserTraffic(editing.value.id, editForm.used_traffic_gb)
+    }
     // If the admin just edited their own row, propagate the new display
     // name into the auth store so the top-bar label updates immediately
     // instead of waiting for the next login.
@@ -205,6 +244,12 @@ async function confirmResetCredentials(row: User) {
   }
 }
 
+async function confirmResetEmergencyUsage(row: User) {
+  await resetEmergencyUsage(row.id)
+  ElMessage.success('已重置紧急使用次数')
+  await load()
+}
+
 async function confirmDelete(row: User) {
   try {
     await ElMessageBox.confirm(
@@ -219,12 +264,36 @@ async function confirmDelete(row: User) {
   // Optimistically remove the row — actual DB deletion is async (background sync task).
   users.value = users.value.filter((u) => u.id !== row.id)
   total.value = Math.max(0, total.value - 1)
+  if (editing.value?.id === row.id) {
+    editDialog.value = false
+  }
   ElMessage.success('已删除')
 }
 
 async function toggleEnabled(row: User) {
   await setEnabled(row.id, !row.enabled)
   ElMessage.success(!row.enabled ? '已启用' : '已禁用')
+  await load()
+}
+
+function canQuickRenew(row: User) {
+  return !!row.expire_at && row.auto_disabled_reason !== 'pending_delete'
+}
+
+function renewedExpireAt(row: User, days = 30) {
+  const now = Date.now()
+  const current = row.expire_at ? new Date(row.expire_at).getTime() : 0
+  const base = Number.isFinite(current) && current > now ? current : now
+  return new Date(base + days * 86400000).toISOString()
+}
+
+async function quickRenew(row: User, days = 30) {
+  if (!canQuickRenew(row)) {
+    ElMessage.info('永久账号无需快捷续期；如需改成限时账号，请进入编辑设置到期时间')
+    return
+  }
+  await updateUser(row.id, { expire_at: renewedExpireAt(row, days) })
+  ElMessage.success(`已续期 ${days} 天`)
   await load()
 }
 
@@ -239,6 +308,32 @@ async function batchSetEnabled(enabled: boolean) {
       ElMessage.warning(`已${enabled ? '启用' : '禁用'} ${rows.length - failed} 个用户，失败 ${failed} 个`)
     } else {
       ElMessage.success(`已${enabled ? '启用' : '禁用'} ${rows.length} 个用户`)
+    }
+    await load()
+  } finally {
+    batchBusy.value = ''
+  }
+}
+
+async function batchQuickRenew(days = 30) {
+  if (selectedUsers.value.length === 0) return
+  const rows = selectedUsers.value.filter((row) => canQuickRenew(row))
+  if (rows.length === 0) {
+    ElMessage.info('所选用户没有可快捷续期的限时账号')
+    return
+  }
+  batchBusy.value = 'renew'
+  try {
+    const results = await Promise.allSettled(
+      rows.map((row) => updateUser(row.id, { expire_at: renewedExpireAt(row, days) })),
+    )
+    const failed = results.filter((result) => result.status === 'rejected').length
+    const skipped = selectedUsers.value.length - rows.length
+    const skippedText = skipped > 0 ? `，跳过 ${skipped} 个永久/删除中账号` : ''
+    if (failed > 0) {
+      ElMessage.warning(`已续期 ${rows.length - failed} 个用户，失败 ${failed} 个${skippedText}`)
+    } else {
+      ElMessage.success(`已续期 ${rows.length} 个用户${skippedText}`)
     }
     await load()
   } finally {
@@ -277,6 +372,32 @@ async function batchDelete() {
     } else {
       ElMessage.success(`已删除 ${deletedRows.length} 个用户`)
     }
+  } finally {
+    batchBusy.value = ''
+  }
+}
+
+function batchMoreCommand(command: string) {
+  if (command === 'resetEmergency') {
+    batchResetEmergencyUsage()
+  } else if (command === 'delete') {
+    batchDelete()
+  }
+}
+
+async function batchResetEmergencyUsage() {
+  if (selectedUsers.value.length === 0) return
+  const rows = selectedUsers.value.slice()
+  batchBusy.value = 'resetEmergency'
+  try {
+    const results = await Promise.allSettled(rows.map((row) => resetEmergencyUsage(row.id)))
+    const failed = results.filter((result) => result.status === 'rejected').length
+    if (failed > 0) {
+      ElMessage.warning(`已重置 ${rows.length - failed} 个用户，失败 ${failed} 个`)
+    } else {
+      ElMessage.success(`已重置 ${rows.length} 个用户的紧急使用次数`)
+    }
+    await load()
   } finally {
     batchBusy.value = ''
   }
@@ -369,14 +490,27 @@ onMounted(async () => {
           批量禁用
         </el-button>
         <el-button
-          type="danger"
-          :icon="Delete"
-          :loading="batchBusy === 'delete'"
+          :icon="Clock"
+          :loading="batchBusy === 'renew'"
           :disabled="batchBusy !== ''"
-          @click="batchDelete"
+          @click="batchQuickRenew(30)"
         >
-          批量删除
+          续期30天
         </el-button>
+        <el-dropdown :disabled="batchBusy !== ''" @command="batchMoreCommand">
+          <el-button>
+            更多
+          </el-button>
+          <template #dropdown>
+            <el-dropdown-menu>
+              <el-dropdown-item command="resetEmergency">重置紧急次数</el-dropdown-item>
+              <el-dropdown-item command="delete" divided>批量删除</el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
+        <span v-if="renewableSelectedCount < selectedCount" class="users-selection-hint">
+          {{ selectedCount - renewableSelectedCount }} 个永久/删除中账号不会续期
+        </span>
       </template>
     </div>
 
@@ -413,19 +547,23 @@ onMounted(async () => {
           </el-tag>
         </template>
       </el-table-column>
+      <el-table-column label="紧急次数" width="100">
+        <template #default="{ row }">{{ row.emergency_used_count || 0 }}</template>
+      </el-table-column>
       <el-table-column label="订阅 URL" min-width="200">
         <template #default="{ row }">
           <el-button text size="small" @click="copyText(row.sub_url)">复制</el-button>
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="380">
+      <el-table-column label="操作" width="300" fixed="right">
         <template #default="{ row }">
           <el-button size="small" type="primary" @click="openEdit(row)">编辑</el-button>
+          <el-button size="small" :disabled="!canQuickRenew(row)" @click="quickRenew(row, 30)">
+            续期30天
+          </el-button>
           <el-button size="small" @click="toggleEnabled(row)">
             {{ row.enabled ? '禁用' : '启用' }}
           </el-button>
-          <el-button size="small" @click="confirmResetCredentials(row)">重置凭证</el-button>
-          <el-button size="small" type="danger" @click="confirmDelete(row)">删除</el-button>
         </template>
       </el-table-column>
     </el-table>
@@ -443,7 +581,7 @@ onMounted(async () => {
 
     <!-- Create user dialog -->
     <el-dialog v-model="createDialog" title="新增用户" width="500px">
-      <el-form label-width="100px" :model="createForm">
+      <el-form class="user-dialog-form" label-width="132px" :model="createForm">
         <el-form-item label="登录名" required>
           <el-input v-model="createForm.username" placeholder="登录用的标识，例如邮箱或自定义 id" />
         </el-form-item>
@@ -471,9 +609,9 @@ onMounted(async () => {
           <el-input-number v-model="createForm.expire_days" :min="0" />
           <span style="margin-left: 8px; color: var(--text-muted)">0 = 永久</span>
         </el-form-item>
-        <el-form-item label="流量限额 (GB)">
+        <el-form-item label="流量限额">
           <el-input-number v-model="createForm.traffic_limit_gb" :min="0" />
-          <span style="margin-left: 8px; color: var(--text-muted)">0 = 不限</span>
+          <span class="input-suffix">GB，0 = 不限</span>
         </el-form-item>
         <el-form-item label="重置周期">
           <el-select v-model="createForm.traffic_reset_period" style="width: 100%">
@@ -511,9 +649,15 @@ onMounted(async () => {
         </el-descriptions>
 
         <!-- Editable fields -->
-        <el-form label-width="100px" :model="editForm">
+        <el-form class="user-dialog-form" label-width="132px" :model="editForm">
           <el-form-item label="显示名">
             <el-input v-model="editForm.display_name" placeholder="UI 上显示的友好名称（可留空，将回退到登录名）" />
+          </el-form-item>
+          <el-form-item v-if="editing.source === 'local'" label="权限">
+            <el-radio-group v-model="editForm.role">
+              <el-radio value="user">普通用户</el-radio>
+              <el-radio value="admin">管理员</el-radio>
+            </el-radio-group>
           </el-form-item>
           <el-form-item label="分组" required>
             <el-select v-model="editForm.group_id" style="width: 100%">
@@ -534,9 +678,19 @@ onMounted(async () => {
               value-format="YYYY-MM-DDTHH:mm:ss[Z]"
             />
           </el-form-item>
-          <el-form-item label="流量限额 (GB)">
+          <el-form-item label="流量限额">
             <el-input-number v-model="editForm.traffic_limit_gb" :min="0" />
-            <span style="margin-left: 8px; color: var(--text-muted)">0 = 不限</span>
+            <span class="input-suffix">GB，0 = 不限</span>
+          </el-form-item>
+          <el-form-item label="已用流量">
+            <el-input-number
+              v-model="editForm.used_traffic_gb"
+              :min="0"
+              :precision="2"
+              :step="1"
+              :disabled="editTrafficLoading"
+            />
+            <span class="input-suffix">GB，本计费周期</span>
           </el-form-item>
           <el-form-item label="重置周期">
             <el-select v-model="editForm.traffic_reset_period" style="width: 100%">
@@ -549,6 +703,16 @@ onMounted(async () => {
             <el-input v-model="editForm.remark" />
           </el-form-item>
         </el-form>
+
+        <div class="edit-ops">
+          <div class="edit-ops-title">管理操作</div>
+          <div class="edit-ops-buttons">
+            <el-button size="small" @click="copyText(editing.sub_url)">复制订阅</el-button>
+            <el-button size="small" @click="confirmResetCredentials(editing)">重置凭证</el-button>
+            <el-button size="small" @click="confirmResetEmergencyUsage(editing)">重置紧急次数</el-button>
+            <el-button size="small" type="danger" :icon="Delete" @click="confirmDelete(editing)">删除用户</el-button>
+          </div>
+        </div>
       </div>
       <template #footer>
         <el-button @click="editDialog = false">取消</el-button>
@@ -593,5 +757,41 @@ onMounted(async () => {
 .users-selection-count {
   color: var(--text-muted);
   white-space: nowrap;
+}
+
+.users-selection-hint {
+  color: var(--text-muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.user-dialog-form :deep(.el-form-item__label) {
+  line-height: 32px;
+  white-space: nowrap;
+}
+
+.input-suffix {
+  color: var(--text-muted);
+  font-size: 13px;
+  margin-left: 10px;
+  white-space: nowrap;
+}
+
+.edit-ops {
+  border-top: 1px solid var(--header-border);
+  margin-top: 18px;
+  padding-top: 14px;
+}
+
+.edit-ops-title {
+  color: var(--text-muted);
+  font-size: 12px;
+  margin-bottom: 10px;
+}
+
+.edit-ops-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 </style>

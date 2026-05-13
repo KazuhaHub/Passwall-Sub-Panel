@@ -43,6 +43,7 @@ type userDTO struct {
 	Remark             string                    `json:"remark,omitempty"`
 	Enabled            bool                      `json:"enabled"`
 	AutoDisabledReason domain.AutoDisabledReason `json:"auto_disabled_reason,omitempty"`
+	EmergencyUsedCount int                       `json:"emergency_used_count"`
 	CreatedAt          time.Time                 `json:"created_at"`
 }
 
@@ -196,6 +197,23 @@ func (h *AdminUserHandler) ResetCredentials(c *gin.Context) {
 	})
 }
 
+func (h *AdminUserHandler) ResetEmergencyUsage(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	if err := h.user.ResetEmergencyUsage(c.Request.Context(), id); err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
 type setEnabledRequest struct {
 	Enabled bool `json:"enabled"`
 }
@@ -227,6 +245,7 @@ func (h *AdminUserHandler) SetEnabled(c *gin.Context) {
 
 type updateUserRequest struct {
 	GroupID            *int64     `json:"group_id,omitempty"`
+	Role               *string    `json:"role,omitempty"`
 	ExpireAt           *time.Time `json:"expire_at,omitempty"`
 	ClearExpire        bool       `json:"clear_expire,omitempty"`
 	TrafficLimitGB     *int64     `json:"traffic_limit_gb,omitempty"`
@@ -252,6 +271,10 @@ func (h *AdminUserHandler) Update(c *gin.Context) {
 		ClearExpire: req.ClearExpire,
 		Remark:      req.Remark,
 		DisplayName: req.DisplayName,
+	}
+	if req.Role != nil {
+		role := domain.Role(*req.Role)
+		in.Role = &role
 	}
 	if req.TrafficLimitGB != nil {
 		bytes := *req.TrafficLimitGB * 1024 * 1024 * 1024
@@ -302,6 +325,7 @@ func (h *AdminUserHandler) toDTO(ctx context.Context, u *domain.User) userDTO {
 		Remark:             u.Remark,
 		Enabled:            u.Enabled,
 		AutoDisabledReason: u.AutoDisabledReason,
+		EmergencyUsedCount: u.EmergencyUsedCount,
 		CreatedAt:          u.CreatedAt,
 	}
 }

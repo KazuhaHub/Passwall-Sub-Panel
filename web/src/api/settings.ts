@@ -20,6 +20,9 @@ export interface UISettings {
   sync_task_retention_days: number
   disallow_user_local_login: boolean
   disallow_user_password_change: boolean
+  emergency_access_enabled: boolean
+  emergency_access_hours: number
+  emergency_access_max_count: number
 }
 
 export async function getUISettings() {

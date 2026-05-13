@@ -202,3 +202,62 @@ func (s *Service) ReportFor(ctx context.Context, userID int64) (*UsageReport, er
 	}
 	return report, nil
 }
+
+// SetPeriodUsage adjusts the current billing-period usage by moving the
+// user's period baseline to "now". This keeps future 3X-UI poll results
+// additive from the admin-selected value instead of being overwritten by the
+// next cumulative snapshot.
+func (s *Service) SetPeriodUsage(ctx context.Context, userID int64, usedBytes int64) error {
+	if usedBytes < 0 {
+		return fmt.Errorf("%w: traffic usage must be >= 0", domain.ErrValidation)
+	}
+	u, err := s.users.GetByID(ctx, userID)
+	if err != nil {
+		return err
+	}
+
+	var latestTotal int64
+	if latest, err := s.traffic.LatestForUser(ctx, userID); err == nil && latest != nil {
+		latestTotal = latest.TotalBytes
+	}
+	baseTotal := latestTotal - usedBytes
+	if baseTotal < 0 {
+		baseTotal = 0
+	}
+	currentTotal := baseTotal + usedBytes
+	now := time.Now()
+	periodStart := now
+	baseAt := now.Add(-time.Millisecond)
+
+	if err := s.traffic.Insert(ctx, &domain.TrafficSnapshot{
+		UserID:     userID,
+		DownBytes:  baseTotal,
+		TotalBytes: baseTotal,
+		CapturedAt: baseAt,
+	}); err != nil {
+		return err
+	}
+	if err := s.traffic.Insert(ctx, &domain.TrafficSnapshot{
+		UserID:     userID,
+		DownBytes:  currentTotal,
+		TotalBytes: currentTotal,
+		CapturedAt: now,
+	}); err != nil {
+		return err
+	}
+
+	u.TrafficPeriodStart = &periodStart
+	if err := s.users.Update(ctx, u); err != nil {
+		return err
+	}
+	if u.TrafficLimitBytes <= 0 {
+		return nil
+	}
+	if usedBytes >= u.TrafficLimitBytes && u.Enabled {
+		return s.disabler.SetEnabledAndSync(ctx, u.ID, false, domain.DisabledTrafficExceeded)
+	}
+	if usedBytes < u.TrafficLimitBytes && !u.Enabled && u.AutoDisabledReason == domain.DisabledTrafficExceeded {
+		return s.disabler.SetEnabledAndSync(ctx, u.ID, true, domain.DisabledNone)
+	}
+	return nil
+}

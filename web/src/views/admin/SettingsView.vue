@@ -33,6 +33,9 @@ const auditRetentionDays = ref(0)
 const syncTaskRetentionDays = ref(0)
 const disallowUserLocalLogin = ref(false)
 const disallowUserPasswordChange = ref(false)
+const emergencyAccessEnabled = ref(false)
+const emergencyAccessHours = ref(24)
+const emergencyAccessMaxCount = ref(1)
 const subBaseURL = ref('')
 const cronTrafficPullMinutes = ref(5)
 const cronReconcileMinutes = ref(15)
@@ -57,6 +60,9 @@ async function loadGeneral() {
     syncTaskRetentionDays.value = s.sync_task_retention_days || 0
     disallowUserLocalLogin.value = !!s.disallow_user_local_login
     disallowUserPasswordChange.value = !!s.disallow_user_password_change
+    emergencyAccessEnabled.value = !!s.emergency_access_enabled
+    emergencyAccessHours.value = s.emergency_access_hours
+    emergencyAccessMaxCount.value = s.emergency_access_max_count
     subBaseURL.value = s.sub_base_url || ''
     cronTrafficPullMinutes.value = s.cron_traffic_pull_minutes || 5
     cronReconcileMinutes.value = s.cron_reconcile_minutes || 15
@@ -83,6 +89,9 @@ async function saveGeneral() {
       sync_task_retention_days: syncTaskRetentionDays.value,
       disallow_user_local_login: disallowUserLocalLogin.value,
       disallow_user_password_change: disallowUserPasswordChange.value,
+      emergency_access_enabled: emergencyAccessEnabled.value,
+      emergency_access_hours: emergencyAccessHours.value,
+      emergency_access_max_count: emergencyAccessMaxCount.value,
       sub_base_url: subBaseURL.value,
       cron_traffic_pull_minutes: cronTrafficPullMinutes.value,
       cron_reconcile_minutes: cronReconcileMinutes.value,
@@ -310,18 +319,18 @@ onMounted(() => {
         </p>
 
         <el-radio-group v-model="loginMode" class="mode-group">
+          <el-radio value="sso_redirect" class="mode-option">
+            <div class="mode-title">直接跳转 SSO (sso_redirect)</div>
+            <div class="mode-desc">
+              访问 <code>/login</code> 时直接发起 SSO 登录。
+              <code>/login/local</code> 仍可通过浏览器地址栏访问，是否允许普通用户本地登录由下方策略开关控制。
+            </div>
+          </el-radio>
           <el-radio value="sso_first" class="mode-option">
             <div class="mode-title">SSO 优先 (sso_first)</div>
             <div class="mode-desc">
               /login 只展示 SSO 按钮，不显示本地登录入口。
-              <code>/login/local</code> 仍可通过浏览器地址栏访问，任何账户都能用密码登录。
-            </div>
-          </el-radio>
-          <el-radio value="sso_strict" class="mode-option">
-            <div class="mode-title">强制 SSO (sso_strict)</div>
-            <div class="mode-desc">
-              和 sso_first 一样的 /login 渲染，但只有 <b>管理员</b> 才能通过 <code>/login/local</code> 用密码登录；
-              普通用户即使知道这个 URL，提交密码也会被服务器拒绝 (403)。SSO 故障时管理员的破窗入口。
+              <code>/login/local</code> 仍可通过浏览器地址栏访问，是否允许普通用户本地登录由下方策略开关控制。
             </div>
           </el-radio>
           <el-radio value="dual" class="mode-option">
@@ -383,7 +392,6 @@ onMounted(() => {
             <span style="margin-left: 12px">禁止普通用户使用本地账号密码登录</span>
             <div class="hint-inline">
               即使登录页还在 dual / local_only 模式，也会在后端拒绝普通用户的本地登录提交（403）。
-              sso_strict 模式隐含已开启。
             </div>
           </el-form-item>
           <el-form-item>
@@ -392,6 +400,24 @@ onMounted(() => {
             <div class="hint-inline">
               普通用户在 /user/me 页面点"修改密码"提交时后端返回 403。
             </div>
+          </el-form-item>
+        </el-form>
+
+        <h3 class="section-title" style="margin-top:32px;">紧急使用</h3>
+        <p class="section-hint">
+          允许普通用户在管理员不在线时自助延长账号到期时间。每次从当前到期时间和当前时间中较晚者开始延长；
+          使用次数按用户累计，管理员可在用户管理页重置。
+        </p>
+        <el-form label-position="top" style="max-width:480px">
+          <el-form-item>
+            <el-switch v-model="emergencyAccessEnabled" />
+            <span style="margin-left: 12px">启用紧急使用按钮</span>
+          </el-form-item>
+          <el-form-item label="每次延长时长（小时）">
+            <el-input-number v-model="emergencyAccessHours" :min="1" :max="720" />
+          </el-form-item>
+          <el-form-item label="每个用户最多允许次数">
+            <el-input-number v-model="emergencyAccessMaxCount" :min="1" :max="100" />
           </el-form-item>
         </el-form>
 

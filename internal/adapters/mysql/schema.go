@@ -38,6 +38,7 @@ type userRow struct {
 	Remark             string `gorm:"size:255"`
 	Enabled            bool   `gorm:"not null"`
 	AutoDisabledReason string `gorm:"size:32"`
+	EmergencyUsedCount int
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
 }
@@ -69,6 +70,7 @@ func (r *userRow) toDomain() *domain.User {
 		Remark:             r.Remark,
 		Enabled:            r.Enabled,
 		AutoDisabledReason: domain.AutoDisabledReason(r.AutoDisabledReason),
+		EmergencyUsedCount: r.EmergencyUsedCount,
 		CreatedAt:          r.CreatedAt,
 		UpdatedAt:          r.UpdatedAt,
 	}
@@ -99,6 +101,7 @@ func userFromDomain(u *domain.User) *userRow {
 		Remark:             u.Remark,
 		Enabled:            u.Enabled,
 		AutoDisabledReason: string(u.AutoDisabledReason),
+		EmergencyUsedCount: u.EmergencyUsedCount,
 		CreatedAt:          u.CreatedAt,
 		UpdatedAt:          u.UpdatedAt,
 	}
@@ -361,16 +364,19 @@ type uiSettingsRow struct {
 	AuditRetentionDays int
 	SubBaseURL         string `gorm:"size:512"`
 	// Runtime tuning (restart required to take effect).
-	CronTrafficPullMinutes int
-	CronReconcileMinutes   int
-	JWTAccessTTLMinutes    int
-	JWTRefreshTTLMinutes   int
-	JWTIssuer              string `gorm:"size:128"`
-	SubPerIPPerMin         int
-	LoginPerIPPerMin       int
+	CronTrafficPullMinutes     int
+	CronReconcileMinutes       int
+	JWTAccessTTLMinutes        int
+	JWTRefreshTTLMinutes       int
+	JWTIssuer                  string `gorm:"size:128"`
+	SubPerIPPerMin             int
+	LoginPerIPPerMin           int
 	SyncTaskRetentionDays      int
 	DisallowUserLocalLogin     bool
 	DisallowUserPasswordChange bool
+	EmergencyAccessEnabled     bool
+	EmergencyAccessHours       int
+	EmergencyAccessMaxCount    int
 	UpdatedAt                  time.Time
 }
 
@@ -509,7 +515,9 @@ func (j *jsonLayout) Scan(value any) error {
 
 // ---- Schema ----
 
-// EnsureSchema creates the tables the panel needs.
+// EnsureSchema keeps the database schema aligned with the current row structs.
+// Keep schema changes centralized here instead of adding one-off schema update
+// helpers for every new field.
 func EnsureSchema(db *gorm.DB) error {
 	return db.AutoMigrate(
 		&userRow{},

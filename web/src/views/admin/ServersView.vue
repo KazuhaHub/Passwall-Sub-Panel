@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { Delete, Refresh } from '@element-plus/icons-vue'
 import {
   createServer,
   deleteServer,
@@ -12,6 +13,9 @@ import {
 
 const items = ref<Server[]>([])
 const loading = ref(false)
+const selectedServers = ref<Server[]>([])
+const batchBusy = ref<'test' | 'delete' | ''>('')
+const selectedCount = computed(() => selectedServers.value.length)
 
 type ProbeState = {
   status: 'unknown' | 'checking' | 'ok' | 'fail' | 'unconfigured'
@@ -40,10 +44,15 @@ async function load() {
   loading.value = true
   try {
     items.value = await listServers()
+    selectedServers.value = []
     void refreshStatuses()
   } finally {
     loading.value = false
   }
+}
+
+function handleSelectionChange(rows: Server[]) {
+  selectedServers.value = rows
 }
 
 function credentialsConfigured(s: Server): boolean {
@@ -216,6 +225,49 @@ async function confirmDelete(s: Server) {
   await load()
 }
 
+async function batchRunTest() {
+  if (selectedServers.value.length === 0) return
+  const rows = selectedServers.value.slice()
+  batchBusy.value = 'test'
+  try {
+    await Promise.allSettled(rows.map((server) => probeServer(server)))
+    ElMessage.success(`已检测 ${rows.length} 台服务器`)
+  } finally {
+    batchBusy.value = ''
+  }
+}
+
+async function batchDeleteServers() {
+  if (selectedServers.value.length === 0) return
+  const rows = selectedServers.value.slice()
+  const names = rows.slice(0, 5).map((row) => row.name).join('、')
+  const suffix = rows.length > 5 ? ` 等 ${rows.length} 台服务器` : ''
+  try {
+    await ElMessageBox.confirm(
+      `确定删除 ${names}${suffix}？这些服务器必须没有节点引用才能删除。`,
+      '批量删除服务器',
+      { type: 'warning' },
+    )
+  } catch {
+    return
+  }
+  batchBusy.value = 'delete'
+  try {
+    const results = await Promise.allSettled(rows.map((row) => deleteServer(row.id)))
+    const deletedRows = rows.filter((_, index) => results[index].status === 'fulfilled')
+    const failed = rows.length - deletedRows.length
+    items.value = items.value.filter((server) => !deletedRows.some((row) => row.id === server.id))
+    selectedServers.value = []
+    if (failed > 0) {
+      ElMessage.warning(`已删除 ${deletedRows.length} 台服务器，失败 ${failed} 台`)
+    } else {
+      ElMessage.success(`已删除 ${deletedRows.length} 台服务器`)
+    }
+  } finally {
+    batchBusy.value = ''
+  }
+}
+
 onMounted(load)
 </script>
 
@@ -230,7 +282,29 @@ onMounted(load)
       节点（inbound）关联到服务器。新增节点时从这里的列表选择。
     </div>
 
-    <el-table v-loading="loading" :data="items" stripe>
+    <div v-if="selectedCount > 0" class="psp-toolbar">
+      <span class="selection-count">已选 {{ selectedCount }}</span>
+      <el-button
+        :icon="Refresh"
+        :loading="batchBusy === 'test'"
+        :disabled="batchBusy !== ''"
+        @click="batchRunTest"
+      >
+        批量测试
+      </el-button>
+      <el-button
+        type="danger"
+        :icon="Delete"
+        :loading="batchBusy === 'delete'"
+        :disabled="batchBusy !== ''"
+        @click="batchDeleteServers"
+      >
+        批量删除
+      </el-button>
+    </div>
+
+    <el-table v-loading="loading" :data="items" stripe @selection-change="handleSelectionChange">
+      <el-table-column type="selection" width="48" />
       <el-table-column prop="name" label="服务器名称" min-width="160" />
       <el-table-column prop="url" label="URL" min-width="280" />
       <el-table-column label="状态" min-width="180">
@@ -354,5 +428,10 @@ onMounted(load)
 
 .muted {
   color: var(--text-muted);
+}
+
+.selection-count {
+  color: var(--text-muted);
+  white-space: nowrap;
 }
 </style>
