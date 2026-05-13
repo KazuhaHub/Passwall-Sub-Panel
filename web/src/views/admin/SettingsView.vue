@@ -20,6 +20,8 @@ import {
   type MailTemplate,
   type SubClientRule,
   type SubImportClient,
+  type QuickLink,
+  type GlobalAnnouncement,
 } from '@/api/settings'
 import { useSiteStore } from '@/stores/site'
 import type { LoginMode } from '@/api/auth'
@@ -59,6 +61,31 @@ const loginPerIPPerMin = ref(5)
 const generalLoading = ref(true)
 const generalSaving = ref(false)
 
+// ---- User Portal Settings ----
+const portalLoading = ref(true)
+const portalSaving = ref(false)
+const portalSending = ref(false)
+const quickLinks = ref<QuickLink[]>([])
+const announcement = reactive<GlobalAnnouncement>({
+  enabled: false,
+  title: '',
+  content: '',
+  level: 'info',
+  updated_at: '',
+})
+const sendAnnouncementMail = ref(false)
+const announcementOnlyEnabled = ref(true)
+const quickLinkDialogVisible = ref(false)
+const quickLinkDialogMode = ref<'add' | 'edit'>('add')
+const quickLinkEditIndex = ref(-1)
+const quickLinkForm = reactive<QuickLink>({
+  label: '',
+  url: '',
+  new_window: true,
+  enabled: true,
+  sort: 100,
+})
+
 // ---- Mail Settings ----
 const mailLoading = ref(true)
 const mailSaving = ref(false)
@@ -91,6 +118,7 @@ function templateLabel(kind: string) {
   if (kind === 'traffic_low') return '流量不足提醒'
   if (kind === 'account_disabled') return '账号停用通知'
   if (kind === 'account_enabled') return '账号恢复通知'
+  if (kind === 'announcement') return '公告邮件'
   return kind
 }
 
@@ -238,12 +266,177 @@ async function saveGeneral() {
       sub_log_retention_days: current.sub_log_retention_days,
       sub_block_auto_disable: current.sub_block_auto_disable,
       sub_block_auto_disable_count: current.sub_block_auto_disable_count,
+      quick_links: current.quick_links || [],
+      global_announcement: current.global_announcement || {
+        enabled: false,
+        title: '',
+        content: '',
+        level: 'info',
+        updated_at: '',
+      },
     })
     useSiteStore().update(siteTitle.value, appTitle.value, iconUrl.value, logoUrl.value, logoUrlDark.value)
     ElMessage.success('已保存')
   } finally {
     generalSaving.value = false
   }
+}
+
+function assignAnnouncement(a?: GlobalAnnouncement) {
+  Object.assign(announcement, {
+    enabled: !!a?.enabled,
+    title: a?.title || '',
+    content: a?.content || '',
+    level: a?.level || 'info',
+    updated_at: a?.updated_at || '',
+  })
+}
+
+function announcementPayload(): GlobalAnnouncement {
+  return {
+    enabled: announcement.enabled,
+    title: announcement.title.trim(),
+    content: announcement.content.trim(),
+    level: announcement.level,
+    updated_at: new Date().toISOString(),
+  }
+}
+
+async function loadPortal() {
+  portalLoading.value = true
+  try {
+    const s = await getUISettings()
+    quickLinks.value = (s.quick_links || []).slice().sort((a, b) => (a.sort || 0) - (b.sort || 0))
+    assignAnnouncement(s.global_announcement)
+  } finally {
+    portalLoading.value = false
+  }
+}
+
+async function savePortal(options: { sendMail?: boolean } = {}) {
+  if (announcement.enabled && !announcement.title.trim() && !announcement.content.trim()) {
+    ElMessage.warning('启用公告时请填写标题或正文')
+    return
+  }
+  if (options.sendMail && (!announcement.title.trim() || !announcement.content.trim())) {
+    ElMessage.warning('发送邮件时请填写公告标题和正文')
+    return
+  }
+  if (options.sendMail) {
+    try {
+      await ElMessageBox.confirm(
+        '将先保存公告，再向用户发送公告邮件。发送后无法撤回，是否继续？',
+        '确认发送公告',
+        { confirmButtonText: '保存并发送', cancelButtonText: '取消', type: 'warning' },
+      )
+    } catch {
+      return
+    }
+  }
+  portalSaving.value = true
+  portalSending.value = !!options.sendMail
+  try {
+    const s = await getUISettings()
+    s.quick_links = quickLinks.value
+      .map((link) => ({
+        ...link,
+        label: link.label.trim(),
+        url: link.url.trim(),
+        sort: link.sort || 100,
+      }))
+      .filter((link) => link.label && link.url)
+      .sort((a, b) => (a.sort || 0) - (b.sort || 0))
+    s.global_announcement = announcementPayload()
+    const saved = await putUISettings(s)
+    quickLinks.value = saved.quick_links || []
+    assignAnnouncement(saved.global_announcement)
+
+    if (options.sendMail) {
+      const res = await sendMailAnnouncement({
+        subject: announcement.title.trim(),
+        body: announcement.content.trim(),
+        only_enabled: announcementOnlyEnabled.value,
+      })
+      if (res.failed > 0) {
+        const details = (res.errors || [])
+          .slice(0, 5)
+          .map((e) => `${e.upn || e.email}: ${e.error}`)
+          .join('<br>')
+        await ElMessageBox.alert(
+          `公告已保存。邮件已发送 ${res.sent} 封，跳过 ${res.skipped} 个，失败 ${res.failed} 个。<br><br>${details}`,
+          '公告邮件发送完成',
+          { type: 'warning', dangerouslyUseHTMLString: true },
+        )
+      } else {
+        ElMessage.success(`公告已保存并发送 ${res.sent} 封邮件，跳过 ${res.skipped} 个`)
+      }
+    } else {
+      ElMessage.success('用户门户配置已保存')
+    }
+  } finally {
+    portalSaving.value = false
+    portalSending.value = false
+  }
+}
+
+function openAddQuickLink() {
+  quickLinkDialogMode.value = 'add'
+  quickLinkEditIndex.value = -1
+  Object.assign(quickLinkForm, {
+    label: '',
+    url: '',
+    new_window: true,
+    enabled: true,
+    sort: 100,
+  })
+  quickLinkDialogVisible.value = true
+}
+
+function openEditQuickLink(index: number) {
+  quickLinkDialogMode.value = 'edit'
+  quickLinkEditIndex.value = index
+  Object.assign(quickLinkForm, quickLinks.value[index])
+  quickLinkDialogVisible.value = true
+}
+
+function handleQuickLinkConfirm() {
+  if (!quickLinkForm.label.trim()) {
+    ElMessage.warning('请输入按钮文字')
+    return
+  }
+  if (!quickLinkForm.url.trim()) {
+    ElMessage.warning('请输入跳转链接')
+    return
+  }
+  const item: QuickLink = {
+    label: quickLinkForm.label.trim(),
+    url: quickLinkForm.url.trim(),
+    new_window: quickLinkForm.new_window,
+    enabled: quickLinkForm.enabled,
+    sort: quickLinkForm.sort || 100,
+  }
+  if (quickLinkDialogMode.value === 'add') {
+    quickLinks.value.push(item)
+  } else {
+    quickLinks.value[quickLinkEditIndex.value] = item
+  }
+  quickLinks.value.sort((a, b) => (a.sort || 0) - (b.sort || 0))
+  quickLinkDialogVisible.value = false
+}
+
+function handleDeleteQuickLink(index: number) {
+  const item = quickLinks.value[index]
+  ElMessageBox.confirm(
+    `确定要删除快捷入口 "${item.label}" 吗？`,
+    '确认删除',
+    { confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning' },
+  ).then(() => {
+    quickLinks.value.splice(index, 1)
+  }).catch(() => {})
+}
+
+function toggleQuickLinkEnabled(index: number) {
+  quickLinks.value[index].enabled = !quickLinks.value[index].enabled
 }
 
 // ---- SAML ----
@@ -644,6 +837,7 @@ function toggleRuleEnabled(index: number) {
 onMounted(() => {
   loadGeneral()
   loadMail()
+  loadPortal()
   loadSAML()
   loadOIDC()
   loadSubSettings()
@@ -661,6 +855,7 @@ onMounted(() => {
       <button
         v-for="t in [
           { key: 'general', label: '基本设置', icon: '⚙' },
+          { key: 'portal', label: '用户门户', icon: '🏠' },
           { key: 'subscription', label: '订阅管理', icon: '🔗' },
           { key: 'mail', label: '邮件提醒', icon: '✉' },
           { key: 'brand', label: '站点品牌', icon: '🎨' },
@@ -830,6 +1025,91 @@ onMounted(() => {
 
         <div class="actions">
           <el-button type="primary" :loading="generalSaving" @click="saveGeneral">保存</el-button>
+        </div>
+      </el-card>
+    </div>
+
+    <!-- User Portal Settings -->
+    <div v-show="activeTab === 'portal'" v-loading="portalLoading">
+      <el-card class="settings-card">
+        <h3 class="section-title">快捷入口</h3>
+        <p class="section-hint">
+          用户个人中心会显示这里启用的入口。适合放 Canvas 教程、工单系统、客户端说明等外部链接。
+        </p>
+        <div style="margin-bottom: 16px;">
+          <el-button type="primary" :icon="Plus" @click="openAddQuickLink">添加入口</el-button>
+        </div>
+        <el-table :data="quickLinks" stripe>
+          <el-table-column prop="label" label="按钮文字" min-width="140" />
+          <el-table-column prop="url" label="跳转链接" min-width="260" show-overflow-tooltip />
+          <el-table-column label="打开方式" width="110">
+            <template #default="{ row }">
+              <el-tag size="small" :type="row.new_window ? 'primary' : 'info'">
+                {{ row.new_window ? '新窗口' : '当前页' }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column prop="sort" label="排序" width="80" />
+          <el-table-column label="启用" width="70" align="center">
+            <template #default="{ row, $index }">
+              <el-switch :model-value="row.enabled" @change="toggleQuickLinkEnabled($index)" />
+            </template>
+          </el-table-column>
+          <el-table-column label="操作" width="100" align="center">
+            <template #default="{ $index }">
+              <div style="display: flex; justify-content: center; gap: 4px;">
+                <el-button text type="primary" :icon="Edit" @click="openEditQuickLink($index)" />
+                <el-button text type="danger" :icon="Delete" @click="handleDeleteQuickLink($index)" />
+              </div>
+            </template>
+          </el-table-column>
+        </el-table>
+
+        <h3 class="section-title" style="margin-top:32px;">置顶公告</h3>
+        <p class="section-hint">
+          启用后会在用户个人中心顶部显示。保存并发送邮件会复用当前 SMTP 配置，并套用邮件设置里的“公告邮件”模板。
+        </p>
+        <el-form label-position="top" style="max-width:720px">
+          <el-form-item>
+            <el-switch v-model="announcement.enabled" />
+            <span style="margin-left: 12px">启用全局公告</span>
+          </el-form-item>
+          <el-form-item label="公告级别">
+            <el-select v-model="announcement.level" style="width: 180px">
+              <el-option label="普通" value="info" />
+              <el-option label="提醒" value="warning" />
+              <el-option label="重要" value="danger" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="公告标题">
+            <el-input v-model="announcement.title" placeholder="维护通知" />
+          </el-form-item>
+          <el-form-item label="公告内容">
+            <el-input
+              v-model="announcement.content"
+              type="textarea"
+              :rows="5"
+              resize="vertical"
+              placeholder="今晚 23:00-23:30 维护。"
+            />
+          </el-form-item>
+          <el-form-item>
+            <el-checkbox v-model="announcementOnlyEnabled">邮件只发送给启用中的用户</el-checkbox>
+          </el-form-item>
+        </el-form>
+
+        <div class="actions">
+          <el-button type="primary" :loading="portalSaving && !portalSending" @click="savePortal()">
+            保存
+          </el-button>
+          <el-button
+            type="warning"
+            plain
+            :loading="portalSending"
+            @click="savePortal({ sendMail: true })"
+          >
+            保存并发送邮件
+          </el-button>
         </div>
       </el-card>
     </div>
@@ -1025,7 +1305,7 @@ onMounted(() => {
 
         <h3 class="section-title" style="margin-top:32px;">手动公告</h3>
         <p class="section-hint">
-          即时发送给有收件邮箱的用户。支持 HTML 和同邮件模板一致的变量。
+          即时发送给有收件邮箱的用户。这里填写公告内容，实际邮件外观使用下方“公告邮件”模板。
         </p>
         <el-form label-position="top" style="max-width:720px">
           <el-form-item label="公告标题">
@@ -1052,7 +1332,7 @@ onMounted(() => {
 
         <h3 class="section-title" style="margin-top:32px;">邮件模板</h3>
         <p class="section-hint">
-          支持 HTML。可用变量包括：SiteTitle、LogoURL、GeneratedAt、UPN、DisplayName、Email、SubURL、ExpireAt、ExpireBeforeDays、TrafficRemainPercent、PeriodUsedGB、TrafficLimitGB、TrafficRemainGB。
+          支持 HTML。可用变量包括：SiteTitle、LogoURL、GeneratedAt、UPN、DisplayName、Email、SubURL、ExpireAt、ExpireBeforeDays、TrafficRemainPercent、PeriodUsedGB、TrafficLimitGB、TrafficRemainGB、AnnouncementTitle、AnnouncementBody、AnnouncementBodyHTML。
         </p>
         <div class="mail-template-list">
           <div v-for="tpl in mailTemplates" :key="tpl.kind" class="mail-template-item">
@@ -1316,6 +1596,38 @@ onMounted(() => {
         </el-tab-pane>
       </el-tabs>
     </div>
+
+    <!-- Quick Link Dialog -->
+    <el-dialog
+      v-model="quickLinkDialogVisible"
+      :title="quickLinkDialogMode === 'add' ? '添加快捷入口' : '编辑快捷入口'"
+      width="560px"
+    >
+      <el-form label-width="110px">
+        <el-form-item label="按钮文字">
+          <el-input v-model="quickLinkForm.label" placeholder="使用教程" />
+        </el-form-item>
+        <el-form-item label="跳转链接">
+          <el-input v-model="quickLinkForm.url" placeholder="https://canvas.example.com/..." />
+        </el-form-item>
+        <el-form-item label="打开方式">
+          <el-radio-group v-model="quickLinkForm.new_window">
+            <el-radio :value="true">新窗口</el-radio>
+            <el-radio :value="false">当前页</el-radio>
+          </el-radio-group>
+        </el-form-item>
+        <el-form-item label="排序">
+          <el-input-number v-model="quickLinkForm.sort" :min="0" :max="9999" />
+        </el-form-item>
+        <el-form-item label="状态">
+          <el-checkbox v-model="quickLinkForm.enabled">启用</el-checkbox>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="quickLinkDialogVisible = false">取消</el-button>
+        <el-button type="primary" @click="handleQuickLinkConfirm">确定</el-button>
+      </template>
+    </el-dialog>
 
     <!-- Subscription Rule Dialog -->
     <el-dialog

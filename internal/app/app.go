@@ -163,7 +163,7 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	userSvc := user.New(repos.User, repos.Group, repos.Ownership, repos.SyncTask, groupSvc, syncSvc, pool, repos.Settings)
 	nodeSvc := node.New(repos.Node, pool, syncSvc, repos.SyncTask, repos.Group, repos.User, syncSvc, repos.Settings)
 	trafficSvc := traffic.New(repos.User, repos.Ownership, repos.Traffic, pool, userSvc)
-	mailSvc := mailer.New(repos.Mail, repos.User, repos.Traffic, repos.Settings)
+	mailSvc := mailer.New(repos.Mail, repos.User, repos.Traffic, repos.Settings, repos.SyncTask)
 	reconcileSvc := reconcile.New(repos.User, repos.Ownership, repos.Node, repos.Group, repos.Settings, repos.Audit, pool, syncSvc)
 	renderSvc := render.New(repos, pool, groupSvc)
 
@@ -250,6 +250,10 @@ func (a *App) runMailLoop(ctx context.Context) {
 		if a.mail != nil {
 			if err := a.mail.ProcessReminders(ctx); err != nil {
 				log.Warn("mail reminders", "err", err)
+			}
+			// Process due mail notification tasks (retries).
+			if err := a.mail.ProcessDueMailTasks(ctx, 20); err != nil {
+				log.Warn("mail tasks", "err", err)
 			}
 		}
 		select {

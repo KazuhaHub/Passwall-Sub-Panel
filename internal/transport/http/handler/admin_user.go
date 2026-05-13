@@ -247,27 +247,30 @@ func (h *AdminUserHandler) SetEnabled(c *gin.Context) {
 
 	// Send notification email (async).
 	if h.mailer != nil {
-		go func() {
-			if !req.Enabled {
-				// Disabling
-				reasonText := "管理员手动停用"
-				if detail != "" {
-					reasonText = detail
-				}
-				if err := h.mailer.SendAccountDisabledToUser(c.Request.Context(), id, reasonText, detail); err != nil {
-					log.Warn("failed to send disable notification", "user_id", id, "err", err)
+		// Use background context since request context will be cancelled after response.
+		go func(userID int64, enabled bool, reasonText, detailText string) {
+			ctx := context.Background()
+			if !enabled {
+				if err := h.mailer.SendAccountDisabledToUser(ctx, userID, reasonText, detailText); err != nil {
+					log.Warn("failed to send disable notification", "user_id", userID, "err", err)
 				}
 			} else {
-				// Enabling
-				reasonText := "管理员手动恢复"
-				if detail != "" {
-					reasonText = detail
-				}
-				if err := h.mailer.SendAccountEnabledToUser(c.Request.Context(), id, reasonText, detail); err != nil {
-					log.Warn("failed to send enable notification", "user_id", id, "err", err)
+				if err := h.mailer.SendAccountEnabledToUser(ctx, userID, reasonText, detailText); err != nil {
+					log.Warn("failed to send enable notification", "user_id", userID, "err", err)
 				}
 			}
-		}()
+		}(id, req.Enabled, func() string {
+			if !req.Enabled {
+				if detail != "" {
+					return detail
+				}
+				return "管理员手动停用"
+			}
+			if detail != "" {
+				return detail
+			}
+			return "管理员手动恢复"
+		}(), detail)
 	}
 
 	if h.user.HasPendingSync(c.Request.Context(), id) {

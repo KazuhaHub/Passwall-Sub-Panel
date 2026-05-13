@@ -250,6 +250,10 @@ type UISettings struct {
 	SubBlockAutoDisable bool `yaml:"sub_block_auto_disable" json:"sub_block_auto_disable"`
 	// SubBlockAutoDisableCount is the number of violations before auto-disabling. Default 3.
 	SubBlockAutoDisableCount int `yaml:"sub_block_auto_disable_count" json:"sub_block_auto_disable_count"`
+
+	// ---- User portal settings ----
+	QuickLinks         []QuickLink        `yaml:"quick_links" json:"quick_links"`
+	GlobalAnnouncement GlobalAnnouncement `yaml:"global_announcement" json:"global_announcement"`
 }
 
 // SubClientRule defines a subscription client detection rule.
@@ -269,6 +273,24 @@ type SubImportClient struct {
 	InstallURL        string   `yaml:"install_url" json:"install_url"`
 	Enabled           bool     `yaml:"enabled" json:"enabled"`
 	Sort              int      `yaml:"sort" json:"sort"`
+}
+
+// QuickLink defines a user-facing shortcut button on the self-service page.
+type QuickLink struct {
+	Label     string `yaml:"label" json:"label"`
+	URL       string `yaml:"url" json:"url"`
+	NewWindow bool   `yaml:"new_window" json:"new_window"`
+	Enabled   bool   `yaml:"enabled" json:"enabled"`
+	Sort      int    `yaml:"sort" json:"sort"`
+}
+
+// GlobalAnnouncement is a single pinned notice shown to all users.
+type GlobalAnnouncement struct {
+	Enabled   bool   `yaml:"enabled" json:"enabled"`
+	Title     string `yaml:"title" json:"title"`
+	Content   string `yaml:"content" json:"content"`
+	Level     string `yaml:"level" json:"level"` // info, warning, danger
+	UpdatedAt string `yaml:"updated_at" json:"updated_at"`
 }
 
 type SettingsRepo interface {

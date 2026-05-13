@@ -18,6 +18,22 @@ export interface SubImportClient {
   sort: number
 }
 
+export interface QuickLink {
+  label: string
+  url: string
+  new_window: boolean
+  enabled: boolean
+  sort: number
+}
+
+export interface GlobalAnnouncement {
+  enabled: boolean
+  title: string
+  content: string
+  level: 'info' | 'warning' | 'danger'
+  updated_at: string
+}
+
 export interface UISettings {
   login_mode: LoginMode
   site_title: string
@@ -49,6 +65,9 @@ export interface UISettings {
   sub_log_retention_days: number
   sub_block_auto_disable: boolean
   sub_block_auto_disable_count: number
+  // User portal settings
+  quick_links: QuickLink[]
+  global_announcement: GlobalAnnouncement
 }
 
 export async function getUISettings() {
@@ -63,7 +82,7 @@ export async function putUISettings(s: UISettings) {
 
 // ---- Mail reminders ----
 
-export type MailReminderKind = 'expire_before' | 'expired' | 'traffic_low'
+export type MailReminderKind = 'expire_before' | 'expired' | 'traffic_low' | 'account_disabled' | 'account_enabled' | 'announcement'
 
 export interface MailSettings {
   enabled: boolean

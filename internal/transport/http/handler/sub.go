@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -118,11 +119,12 @@ clientCheckDone:
 
 			// Send account disabled notification email (async).
 			if h.mailer != nil {
-				go func() {
-					if err := h.mailer.SendAccountDisabledNotification(c.Request.Context(), u, "使用被禁止的客户端", u.DisableDetail); err != nil {
-						log.Warn("failed to send disable notification", "user_id", u.ID, "err", err)
+				go func(userCopy *domain.User) {
+					ctx := context.Background()
+					if err := h.mailer.SendAccountDisabledNotification(ctx, userCopy, "使用被禁止的客户端", userCopy.DisableDetail); err != nil {
+						log.Warn("failed to send disable notification", "user_id", userCopy.ID, "err", err)
 					}
-				}()
+				}(u)
 			}
 
 			c.String(http.StatusForbidden, "account disabled due to repeated use of blocked client")

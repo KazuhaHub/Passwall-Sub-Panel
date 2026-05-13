@@ -71,6 +71,8 @@ func (h *UserMeHandler) Profile(c *gin.Context) {
 		"upn":                  u.UPN,
 		"sub_url":              h.subURL(c.Request.Context(), u.SubToken),
 		"sub_import_clients":   enabledSubImportClients(settings.SubImportClients),
+		"quick_links":          enabledQuickLinks(settings.QuickLinks),
+		"global_announcement":  visibleGlobalAnnouncement(settings.GlobalAnnouncement),
 		"expire_at":            u.ExpireAt,
 		"traffic_limit_bytes":  u.TrafficLimitBytes,
 		"traffic_reset_period": u.TrafficResetPeriod,
@@ -94,6 +96,23 @@ func enabledSubImportClients(clients []ports.SubImportClient) []ports.SubImportC
 		}
 	}
 	return out
+}
+
+func enabledQuickLinks(links []ports.QuickLink) []ports.QuickLink {
+	out := make([]ports.QuickLink, 0, len(links))
+	for _, link := range links {
+		if link.Enabled {
+			out = append(out, link)
+		}
+	}
+	return out
+}
+
+func visibleGlobalAnnouncement(a ports.GlobalAnnouncement) *ports.GlobalAnnouncement {
+	if !a.Enabled || (strings.TrimSpace(a.Title) == "" && strings.TrimSpace(a.Content) == "") {
+		return nil
+	}
+	return &a
 }
 
 func (h *UserMeHandler) EmergencyAccess(c *gin.Context) {

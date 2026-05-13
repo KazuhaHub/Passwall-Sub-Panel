@@ -385,7 +385,10 @@ type uiSettingsRow struct {
 	SubLogRetentionDays      int                  `gorm:"default:7"`
 	SubBlockAutoDisable      bool                 `gorm:"default:false"`
 	SubBlockAutoDisableCount int                  `gorm:"default:3"`
-	UpdatedAt                time.Time
+	// User portal settings
+	QuickLinks         jsonQuickLinks         `gorm:"type:json"`
+	GlobalAnnouncement jsonGlobalAnnouncement `gorm:"type:json"`
+	UpdatedAt          time.Time
 }
 
 // jsonSubRules is a JSON wrapper for []ports.SubClientRule.
@@ -483,6 +486,93 @@ func (j *jsonSubImportClients) Scan(value any) error {
 	}
 	if len(b) == 0 {
 		*j = nil
+		return nil
+	}
+	return json.Unmarshal(b, j)
+}
+
+// jsonQuickLinks is a JSON wrapper for []ports.QuickLink.
+type jsonQuickLinks []ports.QuickLink
+
+func (j jsonQuickLinks) toDomain() []ports.QuickLink {
+	if j == nil {
+		return nil
+	}
+	out := make([]ports.QuickLink, len(j))
+	copy(out, j)
+	return out
+}
+
+func jsonQuickLinksFromDomain(links []ports.QuickLink) jsonQuickLinks {
+	if links == nil {
+		return nil
+	}
+	out := make(jsonQuickLinks, len(links))
+	copy(out, links)
+	return out
+}
+
+func (j jsonQuickLinks) Value() (driver.Value, error) {
+	if j == nil {
+		return "[]", nil
+	}
+	b, err := json.Marshal(j)
+	return string(b), err
+}
+
+func (j *jsonQuickLinks) Scan(value any) error {
+	if value == nil {
+		*j = nil
+		return nil
+	}
+	var b []byte
+	switch v := value.(type) {
+	case []byte:
+		b = v
+	case string:
+		b = []byte(v)
+	default:
+		return fmt.Errorf("unsupported scan type for jsonQuickLinks: %T", value)
+	}
+	if len(b) == 0 {
+		*j = nil
+		return nil
+	}
+	return json.Unmarshal(b, j)
+}
+
+// jsonGlobalAnnouncement is a JSON wrapper for ports.GlobalAnnouncement.
+type jsonGlobalAnnouncement ports.GlobalAnnouncement
+
+func (j jsonGlobalAnnouncement) toDomain() ports.GlobalAnnouncement {
+	return ports.GlobalAnnouncement(j)
+}
+
+func jsonGlobalAnnouncementFromDomain(a ports.GlobalAnnouncement) jsonGlobalAnnouncement {
+	return jsonGlobalAnnouncement(a)
+}
+
+func (j jsonGlobalAnnouncement) Value() (driver.Value, error) {
+	b, err := json.Marshal(ports.GlobalAnnouncement(j))
+	return string(b), err
+}
+
+func (j *jsonGlobalAnnouncement) Scan(value any) error {
+	if value == nil {
+		*j = jsonGlobalAnnouncement{}
+		return nil
+	}
+	var b []byte
+	switch v := value.(type) {
+	case []byte:
+		b = v
+	case string:
+		b = []byte(v)
+	default:
+		return fmt.Errorf("unsupported scan type for jsonGlobalAnnouncement: %T", value)
+	}
+	if len(b) == 0 {
+		*j = jsonGlobalAnnouncement{}
 		return nil
 	}
 	return json.Unmarshal(b, j)

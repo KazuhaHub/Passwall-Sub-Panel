@@ -56,6 +56,8 @@ func (r *settingsRepo) Load(ctx context.Context, defaults ports.UISettings) (por
 		SubLogRetentionDays:        row.SubLogRetentionDays,
 		SubBlockAutoDisable:        row.SubBlockAutoDisable,
 		SubBlockAutoDisableCount:   row.SubBlockAutoDisableCount,
+		QuickLinks:                 row.QuickLinks.toDomain(),
+		GlobalAnnouncement:         row.GlobalAnnouncement.toDomain(),
 	}
 	if out.LoginMode == "" {
 		out.LoginMode = defaults.LoginMode
@@ -216,6 +218,8 @@ func (r *settingsRepo) Save(ctx context.Context, s ports.UISettings) error {
 		SubLogRetentionDays:        s.SubLogRetentionDays,
 		SubBlockAutoDisable:        s.SubBlockAutoDisable,
 		SubBlockAutoDisableCount:   s.SubBlockAutoDisableCount,
+		QuickLinks:                 jsonQuickLinksFromDomain(s.QuickLinks),
+		GlobalAnnouncement:         jsonGlobalAnnouncementFromDomain(s.GlobalAnnouncement),
 	}
 	return r.db.WithContext(ctx).Clauses(clause.OnConflict{UpdateAll: true}).Create(&row).Error
 }

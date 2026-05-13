@@ -5,7 +5,10 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"html"
 	"mime"
 	"net"
 	"net/mail"
@@ -25,10 +28,11 @@ type Service struct {
 	users    ports.UserRepo
 	traffic  ports.TrafficRepo
 	settings ports.SettingsRepo
+	tasks    ports.SyncTaskRepo
 }
 
-func New(repo ports.MailRepo, users ports.UserRepo, traffic ports.TrafficRepo, settings ports.SettingsRepo) *Service {
-	return &Service{repo: repo, users: users, traffic: traffic, settings: settings}
+func New(repo ports.MailRepo, users ports.UserRepo, traffic ports.TrafficRepo, settings ports.SettingsRepo, tasks ports.SyncTaskRepo) *Service {
+	return &Service{repo: repo, users: users, traffic: traffic, settings: settings, tasks: tasks}
 }
 
 func DefaultSettings() domain.MailSettings {
@@ -38,6 +42,114 @@ func DefaultSettings() domain.MailSettings {
 		ExpireBeforeDays:     3,
 		TrafficRemainPercent: 10,
 	}
+}
+
+// MailNotifyPayload is the JSON payload stored in SyncTask for mail notifications.
+type MailNotifyPayload struct {
+	UserID       int64  `json:"user_id"`
+	TemplateKind string `json:"template_kind"`
+	Reason       string `json:"reason,omitempty"`
+	Detail       string `json:"detail,omitempty"`
+}
+
+// enqueueMailNotify creates a sync task for mail notification when sending fails.
+func (s *Service) enqueueMailNotify(ctx context.Context, userID int64, kind, reason, detail string) {
+	if s.tasks == nil {
+		return
+	}
+	// Check if there's already an active task for this user+kind.
+	if _, err := s.tasks.GetActiveByTarget(ctx, domain.SyncTaskMailNotify, fmt.Sprintf("user:%s", kind), userID); err == nil {
+		return // Already queued.
+	} else if !errors.Is(err, domain.ErrNotFound) {
+		log.Warn("mail enqueue check", "user_id", userID, "err", err)
+		return
+	}
+
+	payload := MailNotifyPayload{
+		UserID:       userID,
+		TemplateKind: kind,
+		Reason:       reason,
+		Detail:       detail,
+	}
+	payloadBytes, err := json.Marshal(payload)
+	if err != nil {
+		log.Warn("mail enqueue marshal", "user_id", userID, "err", err)
+		return
+	}
+
+	if err := s.tasks.Create(ctx, &domain.SyncTask{
+		Type:       domain.SyncTaskMailNotify,
+		Status:     domain.SyncTaskPending,
+		TargetType: fmt.Sprintf("user:%s", kind),
+		TargetID:   userID,
+		Summary:    fmt.Sprintf("send %s notification to user %d", kind, userID),
+		Payload:    string(payloadBytes),
+		NextRunAt:  time.Now(),
+	}); err != nil {
+		log.Warn("mail enqueue create", "user_id", userID, "err", err)
+	}
+}
+
+// ProcessDueMailTasks processes pending mail notification tasks.
+func (s *Service) ProcessDueMailTasks(ctx context.Context, limit int) error {
+	if s.tasks == nil {
+		return nil
+	}
+	tasks, err := s.tasks.ListDue(ctx, time.Now(), limit)
+	if err != nil {
+		return err
+	}
+	for _, task := range tasks {
+		if task.Type != domain.SyncTaskMailNotify {
+			continue
+		}
+		if err := s.tasks.MarkRunning(ctx, task.ID); err != nil {
+			return err
+		}
+		if err := s.processMailTask(ctx, task); err != nil {
+			next := time.Now().Add(mailTaskBackoff(task.Attempts + 1))
+			if markErr := s.tasks.MarkRetry(ctx, task.ID, err.Error(), next); markErr != nil {
+				return markErr
+			}
+			continue
+		}
+		if err := s.tasks.MarkSucceeded(ctx, task.ID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Service) processMailTask(ctx context.Context, task *domain.SyncTask) error {
+	var payload MailNotifyPayload
+	if err := json.Unmarshal([]byte(task.Payload), &payload); err != nil {
+		return fmt.Errorf("invalid mail payload: %w", err)
+	}
+	u, err := s.users.GetByID(ctx, payload.UserID)
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			return nil // User deleted, skip.
+		}
+		return err
+	}
+	switch payload.TemplateKind {
+	case "account_disabled":
+		return s.SendAccountDisabledNotification(ctx, u, payload.Reason, payload.Detail)
+	case "account_enabled":
+		return s.SendAccountEnabledNotification(ctx, u, payload.Reason, payload.Detail)
+	default:
+		return fmt.Errorf("unknown template kind: %s", payload.TemplateKind)
+	}
+}
+
+// mailTaskBackoff returns retry interval for mail tasks.
+func mailTaskBackoff(attempt int) time.Duration {
+	// Exponential backoff: 1m, 2m, 4m, 8m, max 30m.
+	interval := time.Minute * time.Duration(1<<(attempt-1))
+	if interval > 30*time.Minute {
+		interval = 30 * time.Minute
+	}
+	return interval
 }
 
 func DefaultTemplates() []*domain.MailTemplate {
@@ -72,6 +184,12 @@ func DefaultTemplates() []*domain.MailTemplate {
 			Subject: "账号已恢复正常",
 			Body:    defaultHTMLTemplate("账号已恢复", "你的账号已恢复正常，可以继续使用订阅服务。{{.EnableReason}}", "备注", "{{.EnableDetail}}"),
 		},
+		{
+			Kind:    domain.MailReminderAnnouncement,
+			Enabled: true,
+			Subject: "{{.AnnouncementTitle}}",
+			Body:    defaultHTMLTemplate("{{.AnnouncementTitle}}", "{{.AnnouncementBodyHTML}}", "公告时间", "{{.GeneratedAt}}"),
+		},
 	}
 }
 
@@ -81,7 +199,7 @@ func defaultHTMLTemplate(title, message, metricLabel, metricValue string) string
 <body style="margin:0;background:#f4f6fb;padding:32px 16px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;color:#111827;">
   <div style="max-width:640px;margin:0 auto;background:#ffffff;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden;">
     <div style="padding:28px 32px;border-bottom:1px solid #eef2f7;background:#0f172a;">
-      <img src="{{.LogoURL}}" alt="{{.SiteTitle}}" style="height:42px;max-width:220px;object-fit:contain;display:block;margin-bottom:18px;">
+      {{if .LogoURL}}<img src="{{.LogoURL}}" alt="{{.SiteTitle}}" style="height:42px;max-width:220px;object-fit:contain;display:block;margin-bottom:18px;">{{end}}
       <div style="font-size:13px;color:#94a3b8;letter-spacing:.08em;text-transform:uppercase;">{{.SiteTitle}}</div>
       <h1 style="margin:8px 0 0;font-size:24px;line-height:1.3;color:#ffffff;font-weight:700;">` + title + `</h1>
     </div>
@@ -166,7 +284,7 @@ func (s *Service) SaveTemplate(ctx context.Context, tpl *domain.MailTemplate) er
 		return fmt.Errorf("%w: template required", domain.ErrValidation)
 	}
 	switch tpl.Kind {
-	case domain.MailReminderExpireBefore, domain.MailReminderExpired, domain.MailReminderTrafficLow, domain.MailReminderAccountDisable, domain.MailReminderAccountEnable:
+	case domain.MailReminderExpireBefore, domain.MailReminderExpired, domain.MailReminderTrafficLow, domain.MailReminderAccountDisable, domain.MailReminderAccountEnable, domain.MailReminderAnnouncement:
 	default:
 		return fmt.Errorf("%w: invalid template kind", domain.ErrValidation)
 	}
@@ -234,7 +352,12 @@ func (s *Service) SendAccountDisabledNotification(ctx context.Context, u *domain
 	if err != nil {
 		return err
 	}
-	return sendSMTP(ctx, settings, to, subject, body)
+	if err := sendSMTP(ctx, settings, to, subject, body); err != nil {
+		// Enqueue for retry.
+		s.enqueueMailNotify(ctx, u.ID, "account_disabled", disableReason, disableDetail)
+		return err
+	}
+	return nil
 }
 
 // SendAccountDisabledToUser is a convenience wrapper for sending disable notification.
@@ -285,7 +408,12 @@ func (s *Service) SendAccountEnabledNotification(ctx context.Context, u *domain.
 	if err != nil {
 		return err
 	}
-	return sendSMTP(ctx, settings, to, subject, body)
+	if err := sendSMTP(ctx, settings, to, subject, body); err != nil {
+		// Enqueue for retry.
+		s.enqueueMailNotify(ctx, u.ID, "account_enabled", enableReason, enableDetail)
+		return err
+	}
+	return nil
 }
 
 // SendAccountEnabledToUser is a convenience wrapper for sending enable notification.
@@ -330,11 +458,19 @@ func (s *Service) SendAnnouncement(ctx context.Context, in AnnouncementInput) (*
 	if strings.TrimSpace(in.Body) == "" {
 		return nil, fmt.Errorf("%w: body required", domain.ErrValidation)
 	}
-	if _, err := template.New("announcement_subject").Parse(in.Subject); err != nil {
-		return nil, fmt.Errorf("%w: subject template: %v", domain.ErrValidation, err)
+	templates, err := s.ListTemplates(ctx)
+	if err != nil {
+		return nil, err
 	}
-	if _, err := template.New("announcement_body").Parse(in.Body); err != nil {
-		return nil, fmt.Errorf("%w: body template: %v", domain.ErrValidation, err)
+	var tpl *domain.MailTemplate
+	for _, t := range templates {
+		if t.Kind == domain.MailReminderAnnouncement {
+			tpl = t
+			break
+		}
+	}
+	if tpl == nil || !tpl.Enabled {
+		return nil, fmt.Errorf("%w: announcement template is disabled", domain.ErrValidation)
 	}
 
 	result := &AnnouncementResult{}
@@ -357,13 +493,16 @@ func (s *Service) SendAnnouncement(ctx context.Context, in AnnouncementInput) (*
 				continue
 			}
 			data := s.templateData(ctx, settings, u)
-			subject, err := renderTemplate("announcement_subject", in.Subject, data)
+			data["AnnouncementTitle"] = in.Subject
+			data["AnnouncementBody"] = in.Body
+			data["AnnouncementBodyHTML"] = announcementBodyHTML(in.Body)
+			subject, err := renderTemplate("announcement_subject", tpl.Subject, data)
 			if err != nil {
 				result.Failed++
 				result.Errors = append(result.Errors, announcementError(u, to, err))
 				continue
 			}
-			body, err := renderTemplate("announcement_body", in.Body, data)
+			body, err := renderTemplate("announcement_body", tpl.Body, data)
 			if err != nil {
 				result.Failed++
 				result.Errors = append(result.Errors, announcementError(u, to, err))
@@ -382,6 +521,13 @@ func (s *Service) SendAnnouncement(ctx context.Context, in AnnouncementInput) (*
 		page++
 	}
 	return result, nil
+}
+
+func announcementBodyHTML(body string) string {
+	escaped := html.EscapeString(strings.TrimSpace(body))
+	escaped = strings.ReplaceAll(escaped, "\r\n", "\n")
+	escaped = strings.ReplaceAll(escaped, "\r", "\n")
+	return strings.ReplaceAll(escaped, "\n", "<br>")
 }
 
 func announcementError(u *domain.User, to string, err error) AnnouncementError {
@@ -523,25 +669,24 @@ func (s *Service) templateData(ctx context.Context, settings domain.MailSettings
 		}
 	}
 	siteTitle := "Passwall"
-	logoURL := "/images/logo+title-circle.png"
+	logoURL := "" // Empty by default - no logo if not configured
 	subURL := "/sub/" + u.SubToken
 	if s.settings != nil {
 		st, err := s.settings.Load(ctx, ports.UISettings{
 			SiteTitle: "Passwall",
 			AppTitle:  "Passwall",
-			LogoURL:   "/images/logo+title-circle.png",
 		})
 		if err == nil {
 			if st.SiteTitle != "" {
 				siteTitle = st.SiteTitle
 			}
-			if st.LogoURL != "" {
-				logoURL = st.LogoURL
-			}
 			base := strings.TrimRight(st.SubBaseURL, "/")
 			if base != "" {
 				subURL = base + "/sub/" + u.SubToken
-				logoURL = absoluteURL(base, logoURL)
+			}
+			// Logo URL - must be absolute URL (http/https) for email clients
+			if st.LogoURL != "" && (strings.HasPrefix(st.LogoURL, "http://") || strings.HasPrefix(st.LogoURL, "https://")) {
+				logoURL = st.LogoURL
 			}
 		}
 	}

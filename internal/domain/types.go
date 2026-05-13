@@ -40,12 +40,12 @@ type User struct {
 	Enabled            bool
 	AutoDisabledReason AutoDisabledReason
 	// DisableDetail stores additional context for the disable reason (e.g., admin note, blocked client info).
-	DisableDetail      string
+	DisableDetail string
 	// BlockViolationCount tracks how many times the user attempted to use a blocked subscription client.
 	BlockViolationCount int
-	EmergencyUsedCount int
-	CreatedAt          time.Time
-	UpdatedAt          time.Time
+	EmergencyUsedCount  int
+	CreatedAt           time.Time
+	UpdatedAt           time.Time
 }
 
 // IsExpired reports whether ExpireAt is non-nil and earlier than t.
@@ -190,15 +190,15 @@ type TrafficSnapshot struct {
 
 // SubLog records one subscription URL fetch for diagnostics.
 type SubLog struct {
-	ID           int64     `json:"id"`
-	UserID       int64     `json:"user_id"`
-	UserUPN      string    `json:"user_upn,omitempty"`
-	UserDisplay  string    `json:"user_display,omitempty"`
-	UserGroupID  int64     `json:"user_group_id,omitempty"`
-	IP           string    `json:"ip"`
-	UA           string    `json:"ua"`
-	ClientType   string    `json:"client_type"`
-	AccessedAt   time.Time `json:"accessed_at"`
+	ID          int64     `json:"id"`
+	UserID      int64     `json:"user_id"`
+	UserUPN     string    `json:"user_upn,omitempty"`
+	UserDisplay string    `json:"user_display,omitempty"`
+	UserGroupID int64     `json:"user_group_id,omitempty"`
+	IP          string    `json:"ip"`
+	UA          string    `json:"ua"`
+	ClientType  string    `json:"client_type"`
+	AccessedAt  time.Time `json:"accessed_at"`
 }
 
 // AuditEntry is one immutable line in the admin audit log.
@@ -269,6 +269,7 @@ const (
 	MailReminderTrafficLow     MailReminderKind = "traffic_low"
 	MailReminderAccountDisable MailReminderKind = "account_disabled"
 	MailReminderAccountEnable  MailReminderKind = "account_enabled"
+	MailReminderAnnouncement   MailReminderKind = "announcement"
 )
 
 type MailSettings struct {

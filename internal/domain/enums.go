@@ -56,6 +56,7 @@ const (
 	SyncTaskNodeDelete     SyncTaskType = "node_delete"
 	SyncTaskNodeSetEnabled SyncTaskType = "node_set_enabled"
 	SyncTaskNodeUpdate     SyncTaskType = "node_update"
+	SyncTaskMailNotify     SyncTaskType = "mail_notify"
 )
 
 type SyncTaskStatus string

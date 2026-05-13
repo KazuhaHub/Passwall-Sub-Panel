@@ -11,6 +11,8 @@ interface MeProfile {
   upn: string
   sub_url: string
   sub_import_clients: SubImportClient[]
+  quick_links: QuickLink[]
+  global_announcement?: GlobalAnnouncement | null
   expire_at?: string | null
   traffic_limit_bytes: number
   traffic_reset_period: string
@@ -35,6 +37,22 @@ interface SubImportClient {
   sort: number
 }
 
+interface QuickLink {
+  label: string
+  url: string
+  new_window: boolean
+  enabled: boolean
+  sort: number
+}
+
+interface GlobalAnnouncement {
+  enabled: boolean
+  title: string
+  content: string
+  level: 'info' | 'warning' | 'danger'
+  updated_at: string
+}
+
 const profile = ref<MeProfile | null>(null)
 const displayName = computed(() => profile.value?.display_name || profile.value?.upn || '')
 const detectedPlatform = computed(() => detectPlatform())
@@ -47,8 +65,14 @@ const importClients = computed(() => {
   const matched = clients.filter((c) => c.platforms.includes(detectedPlatform.value) || c.platforms.includes('universal'))
   return matched.length > 0 ? matched : clients
 })
+const quickLinks = computed(() => (profile.value?.quick_links || [])
+  .filter((link) => link.enabled)
+  .slice()
+  .sort((a, b) => (a.sort || 0) - (b.sort || 0)))
+const announcement = computed(() => profile.value?.global_announcement || null)
 const usage = ref<UsageReport | null>(null)
 const qrDataURL = ref<string>('')
+const showQRCode = ref(false)
 const passwordDialog = ref(false)
 const rulesDialog = ref(false)
 const oldPassword = ref('')
@@ -110,6 +134,19 @@ function openImport(item: SubImportClient) {
 
 function openInstall(item: SubImportClient) {
   if (item.install_url) window.open(item.install_url, '_blank', 'noopener,noreferrer')
+}
+
+function openQuickLink(link: QuickLink) {
+  if (link.new_window) {
+    window.open(link.url, '_blank', 'noopener,noreferrer')
+    return
+  }
+  window.location.href = link.url
+}
+
+function announcementSymbol(level?: string) {
+  if (level === 'warning' || level === 'danger') return '!'
+  return 'i'
 }
 
 function detectPlatform() {
@@ -263,6 +300,18 @@ onMounted(load)
       </div>
     </div>
 
+    <div
+      v-if="announcement"
+      class="global-announcement"
+      :class="`announcement-${announcement.level || 'info'}`"
+    >
+      <div class="announcement-symbol">{{ announcementSymbol(announcement.level) }}</div>
+      <div class="announcement-body">
+        <div v-if="announcement.title" class="announcement-title">{{ announcement.title }}</div>
+        <div class="announcement-content">{{ announcement.content }}</div>
+      </div>
+    </div>
+
     <div class="dashboard-grid">
       <!-- Left Column: Stats & Usage -->
       <div class="grid-col-left">
@@ -292,11 +341,19 @@ onMounted(load)
 
         <el-card class="actions-card">
           <div class="card-header-flex">
-            <h3 class="card-title">操作区</h3>
+            <h3 class="card-title">快捷入口</h3>
           </div>
           <div class="action-grid">
             <el-button plain @click="openPersonalRulesDialog">
               个人规则
+            </el-button>
+            <el-button
+              v-for="link in quickLinks"
+              :key="link.label + link.url"
+              plain
+              @click="openQuickLink(link)"
+            >
+              {{ link.label }}
             </el-button>
           </div>
         </el-card>
@@ -340,18 +397,11 @@ onMounted(load)
       <div class="grid-col-right">
         <el-card class="sub-card">
           <h3 class="card-title text-center">快速导入订阅</h3>
-          
-          <div class="qr-container">
-            <div class="qr-frame">
-              <img v-if="qrDataURL" :src="qrDataURL" alt="QR Code" class="qr-image" />
-            </div>
-            <p class="qr-hint">使用客户端扫描二维码，或选择下方一键导入</p>
-          </div>
 
           <div v-if="importClients.length > 0" class="client-import-section">
             <div class="section-head">
-              <p class="section-label">检测到 {{ platformLabel }}</p>
-              <el-tag size="small" type="info">{{ importClients.length }} 个客户端</el-tag>
+              <p class="section-label">快速导入</p>
+              <el-tag size="small" type="info">{{ platformLabel }}</el-tag>
             </div>
             <div class="client-list">
               <div v-for="item in importClients" :key="item.name" class="client-row">
@@ -363,8 +413,8 @@ onMounted(load)
                   </div>
                 </div>
                 <div class="client-actions">
-                  <el-button size="small" type="primary" @click="openImport(item)">导入</el-button>
-                  <el-button v-if="item.install_url" size="small" plain @click="openInstall(item)">
+                  <el-button type="primary" class="client-action-btn" @click="openImport(item)">导入</el-button>
+                  <el-button v-if="item.install_url" plain class="client-action-btn" @click="openInstall(item)">
                     下载
                   </el-button>
                 </div>
@@ -372,15 +422,26 @@ onMounted(load)
             </div>
           </div>
 
+          <div class="qr-toggle-row">
+            <el-button plain class="qr-toggle-btn" @click="showQRCode = !showQRCode">
+              {{ showQRCode ? '隐藏二维码' : '显示二维码' }}
+            </el-button>
+          </div>
+
+          <Transition name="qr-fold">
+            <div v-if="showQRCode" class="qr-container">
+              <div class="qr-frame">
+                <img v-if="qrDataURL" :src="qrDataURL" alt="QR Code" class="qr-image" />
+              </div>
+              <p class="qr-hint">使用客户端扫描二维码导入通用订阅</p>
+            </div>
+          </Transition>
+
           <div class="sub-url-section">
-            <p class="section-label">复制通用订阅链接：</p>
+            <p class="section-label">复制订阅链接</p>
             <div class="url-box">
               <input type="text" :value="profile.sub_url" readonly class="url-input" />
               <button class="copy-btn" @click="copyText(profile.sub_url)">复制</button>
-            </div>
-            <div class="format-copy-row">
-              <el-button size="small" plain @click="copyText(subURLFor('mihomo'))">复制 mihomo</el-button>
-              <el-button size="small" plain @click="copyText(subURLFor('sing-box'))">复制 sing-box</el-button>
             </div>
           </div>
 
@@ -495,6 +556,74 @@ onMounted(load)
 .status-tag.inactive {
   background: rgba(239, 68, 68, 0.1);
   color: #ef4444;
+}
+
+.global-announcement {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+  margin-bottom: 24px;
+  padding: 16px 18px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+}
+
+.announcement-info {
+  background: rgba(59, 130, 246, 0.08);
+  border-color: rgba(59, 130, 246, 0.16);
+  color: #2563eb;
+}
+
+.announcement-warning {
+  background: rgba(245, 158, 11, 0.1);
+  border-color: rgba(245, 158, 11, 0.2);
+  color: #b45309;
+}
+
+.announcement-danger {
+  background: rgba(239, 68, 68, 0.1);
+  border-color: rgba(239, 68, 68, 0.18);
+  color: #ef4444;
+}
+
+.announcement-symbol {
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  color: white;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  font-weight: 800;
+  font-size: 16px;
+}
+
+.announcement-info .announcement-symbol {
+  background: #3b82f6;
+}
+
+.announcement-warning .announcement-symbol {
+  background: #f59e0b;
+}
+
+.announcement-danger .announcement-symbol {
+  background: #ef4444;
+}
+
+.announcement-body {
+  min-width: 0;
+}
+
+.announcement-title {
+  font-weight: 700;
+  font-size: 15px;
+  margin-bottom: 4px;
+}
+
+.announcement-content {
+  white-space: pre-wrap;
+  line-height: 1.6;
 }
 
 /* Grid Layout */
@@ -614,20 +743,34 @@ onMounted(load)
   display: flex;
   flex-direction: column;
   align-items: center;
-  margin-bottom: 32px;
+  margin-bottom: 18px;
+}
+
+.qr-toggle-row {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 18px;
+}
+
+.qr-toggle-btn {
+  height: 36px;
+  min-width: 120px;
+  padding: 0 18px;
+  font-weight: 600;
 }
 
 .qr-frame {
   background: white;
-  padding: 12px;
-  border-radius: 16px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.06);
+  padding: 10px;
+  border-radius: 12px;
   margin-bottom: 12px;
   border: 1px solid rgba(226, 232, 240, 0.8);
 }
 
 .qr-image {
-  border-radius: 8px;
+  width: 176px;
+  height: 176px;
+  border-radius: 6px;
   display: block;
 }
 
@@ -635,6 +778,17 @@ onMounted(load)
   font-size: 13px;
   color: var(--text-muted);
   margin: 0;
+}
+
+.qr-fold-enter-active,
+.qr-fold-leave-active {
+  transition: opacity 0.18s ease, transform 0.18s ease;
+}
+
+.qr-fold-enter-from,
+.qr-fold-leave-to {
+  opacity: 0;
+  transform: translateY(-4px);
 }
 
 .section-label {
@@ -650,7 +804,7 @@ onMounted(load)
   border: 1px solid var(--header-border);
   border-radius: 8px;
   overflow: hidden;
-  margin-bottom: 24px;
+  margin-bottom: 10px;
 }
 
 .url-input {
@@ -668,6 +822,7 @@ onMounted(load)
   background: var(--sidebar-active-bg);
   color: white;
   border: none;
+  min-width: 76px;
   padding: 0 20px;
   font-weight: 600;
   cursor: pointer;
@@ -679,7 +834,7 @@ onMounted(load)
 }
 
 .sub-url-section {
-  margin-top: 24px;
+  margin-top: 0;
 }
 
 .section-head {
@@ -691,27 +846,30 @@ onMounted(load)
 }
 
 .client-import-section {
-  border-top: 1px solid var(--header-border);
-  border-bottom: 1px solid var(--header-border);
-  padding: 18px 0;
-  margin-bottom: 20px;
+  border: 1px solid var(--header-border);
+  border-radius: 10px;
+  padding: 14px;
+  margin-bottom: 18px;
+  background: rgba(148, 163, 184, 0.035);
 }
 
 .client-list {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  border-top: 1px solid var(--header-border);
 }
 
 .client-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  padding: 10px 12px;
-  border: 1px solid var(--header-border);
-  border-radius: 8px;
-  background: rgba(148, 163, 184, 0.04);
+  gap: 14px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--header-border);
+}
+
+.client-row:last-child {
+  border-bottom: 0;
 }
 
 .client-main {
@@ -736,16 +894,15 @@ onMounted(load)
 .client-actions {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   flex-shrink: 0;
 }
 
-.format-copy-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-top: -12px;
-  margin-bottom: 24px;
+.client-action-btn {
+  min-width: 64px;
+  height: 36px;
+  padding: 0 16px;
+  font-weight: 600;
 }
 
 .sub-actions {
