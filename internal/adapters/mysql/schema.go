@@ -621,16 +621,6 @@ func EnsureSchema(db *gorm.DB) error {
 	); err != nil {
 		return err
 	}
-	if db.Migrator().HasColumn(&userRow{}, "source") {
-		if err := db.Migrator().DropColumn(&userRow{}, "source"); err != nil {
-			return fmt.Errorf("drop users.source: %w", err)
-		}
-	}
-	if db.Migrator().HasColumn(&userRow{}, "username") {
-		if err := db.Migrator().DropColumn(&userRow{}, "username"); err != nil {
-			return fmt.Errorf("drop users.username: %w", err)
-		}
-	}
 	return nil
 }
 
