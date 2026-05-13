@@ -140,11 +140,17 @@ func (s *SAMLService) Reload(ctx context.Context, cfg *config.SAMLConfig) error 
 // metadata at the configured interval. Recovers from transient failures
 // of the initial fetch by retrying here. Reads s.cfg on every tick so
 // Reload() can change the IdP metadata URL or disable SSO entirely.
-func (s *SAMLService) StartMetadataRefresh(ctx context.Context) {
+func (s *SAMLService) StartMetadataRefresh(ctx context.Context, wg ...*sync.WaitGroup) {
 	if s == nil {
 		return
 	}
+	if len(wg) > 0 && wg[0] != nil {
+		wg[0].Add(1)
+	}
 	go func() {
+		if len(wg) > 0 && wg[0] != nil {
+			defer wg[0].Done()
+		}
 		for {
 			s.mu.RLock()
 			cfg := s.cfg

@@ -557,7 +557,7 @@ func (s *Service) CreateLocalAndSync(ctx context.Context, in CreateLocalInput) (
 		if info.protocol == "" {
 			continue // unrecognised protocol — skip rather than fail the whole create
 		}
-		email := u.ClientEmail(rules)
+		email := u.ClientEmail(n.ID, rules)
 		var expireTime int64
 		if u.ExpireAt != nil {
 			expireTime = u.ExpireAt.UnixMilli()
@@ -789,7 +789,7 @@ func (s *Service) ResyncMembership(ctx context.Context, userID int64) error {
 		if info.protocol == "" {
 			continue
 		}
-		email := u.ClientEmail(rules)
+		email := u.ClientEmail(n.ID, rules)
 		var expireTime int64
 		if u.ExpireAt != nil {
 			expireTime = u.ExpireAt.UnixMilli()

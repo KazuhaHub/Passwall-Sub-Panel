@@ -85,11 +85,9 @@ jobs:
               ext=".exe"
             fi
 
-            CGO_ENABLED=0 GOOS="$goos" GOARCH="$goarch" go build -trimpath -ldflags="-s -w" -o "${outdir}/panel${ext}" ./cmd/panel
-            CGO_ENABLED=0 GOOS="$goos" GOARCH="$goarch" go build -trimpath -ldflags="-s -w" -o "${outdir}/psp-cli${ext}" ./cmd/cli
+            CGO_ENABLED=0 GOOS="$goos" GOARCH="$goarch" go build -trimpath -ldflags="-s -w" -o "${outdir}/psp${ext}" ./cmd/panel
 
             cp README.md "$outdir/" 2>/dev/null || true
-            cp config/config.yaml.example "$outdir/" 2>/dev/null || true
             mkdir -p "$outdir/config"
             cp -R config/templates "$outdir/config/" 2>/dev/null || true
 

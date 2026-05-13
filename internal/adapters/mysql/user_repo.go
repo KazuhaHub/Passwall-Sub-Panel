@@ -74,6 +74,9 @@ func (r *userRepo) List(ctx context.Context, filter ports.UserFilter) ([]*domain
 	if filter.Source != nil {
 		q = q.Where("source = ?", string(*filter.Source))
 	}
+	if filter.Role != nil {
+		q = q.Where("role = ?", string(*filter.Role))
+	}
 	if filter.Enabled != nil {
 		q = q.Where("enabled = ?", *filter.Enabled)
 	}

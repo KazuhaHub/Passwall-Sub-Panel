@@ -4,6 +4,7 @@ package jwtutil
 
 import (
 	"errors"
+	"sync/atomic"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -13,9 +14,9 @@ import (
 
 // Claims is the JWT payload issued by the panel.
 type Claims struct {
-	UserID   int64       `json:"uid"`
-	Username string      `json:"u"`
-	Role     domain.Role `json:"r"`
+	UserID   int64             `json:"uid"`
+	Username string            `json:"u"`
+	Role     domain.Role       `json:"r"`
 	Source   domain.UserSource `json:"src"`
 	jwt.RegisteredClaims
 }
@@ -27,6 +28,54 @@ type Params struct {
 	AccessTTL  time.Duration
 	RefreshTTL time.Duration
 	Issuer     string
+}
+
+// ParamsCache is an atomic, lock-free holder for live JWT issuance params.
+// The app updates it when Admin Settings are saved; token issuance reads it
+// without hitting the DB during login bursts.
+type ParamsCache struct {
+	current atomic.Pointer[Params]
+}
+
+func NewParamsCache(initial Params) *ParamsCache {
+	c := &ParamsCache{}
+	c.Store(initial)
+	return c
+}
+
+func (c *ParamsCache) Load() Params {
+	if c == nil {
+		return defaultParams()
+	}
+	p := c.current.Load()
+	if p == nil {
+		return defaultParams()
+	}
+	return *p
+}
+
+func (c *ParamsCache) Store(p Params) {
+	if c == nil {
+		return
+	}
+	if p.AccessTTL <= 0 {
+		p.AccessTTL = 120 * time.Minute
+	}
+	if p.RefreshTTL <= 0 {
+		p.RefreshTTL = 7 * 24 * time.Hour
+	}
+	if p.Issuer == "" {
+		p.Issuer = "passwall-sub-panel"
+	}
+	c.current.Store(&p)
+}
+
+func defaultParams() Params {
+	return Params{
+		AccessTTL:  120 * time.Minute,
+		RefreshTTL: 7 * 24 * time.Hour,
+		Issuer:     "passwall-sub-panel",
+	}
 }
 
 type Issuer struct {

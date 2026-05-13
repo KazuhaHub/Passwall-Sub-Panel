@@ -27,6 +27,7 @@ type UserFilter struct {
 	Search  string
 	GroupID *int64
 	Source  *domain.UserSource
+	Role    *domain.Role
 	Enabled *bool
 }
 

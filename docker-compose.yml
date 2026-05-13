@@ -1,17 +1,17 @@
 services:
-  panel:
+  psp:
+    # To build locally: docker compose build
+    # To pull from GHCR:  comment out 'build' and use the image tag directly.
     build: .
-    image: passwall-sub-panel:latest
-    container_name: passwall-sub-panel
+    image: ghcr.io/kazuhahub/passwall-sub-panel:latest
+    container_name: psp
     restart: unless-stopped
-    # Bind to localhost only; let the host's Nginx terminate TLS and proxy.
     ports:
       - "127.0.0.1:8788:8788"
     volumes:
       - ./config:/app/config:ro
-      - ./data:/app/data
+      - psp-data:/app/data
     environment:
-      # PSP_CONFIG points at the main config file inside the container.
       PSP_CONFIG: /app/config/config.yaml
       # PSP_SECRET_KEY decrypts the "enc:..." fields in xui_panels.yaml.
       # Generate with: openssl rand -hex 16
@@ -19,3 +19,6 @@ services:
       # MySQL DSN overrides the one in config.yaml if set.
       PSP_MYSQL_DSN: ${PSP_MYSQL_DSN}
       PSP_JWT_SECRET: ${PSP_JWT_SECRET}
+
+volumes:
+  psp-data:

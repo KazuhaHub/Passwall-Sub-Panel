@@ -1,10 +1,12 @@
 package handler
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/auth"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/user"
 )
@@ -46,9 +48,14 @@ func (h *AuthSSOCompleteHandler) Complete(c *gin.Context) {
 
 	// Fetch the live user so the SPA receives the freshest display name —
 	// the JWT only carries Username/Role to keep tokens compact.
-	displayName := ""
-	if u, err := h.user.Get(c.Request.Context(), claims.UserID); err == nil {
-		displayName = u.DisplayName
+	liveUser, err := h.user.Get(c.Request.Context(), claims.UserID)
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "account no longer exists"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "auth lookup failed"})
+		return
 	}
 
 	c.JSON(http.StatusOK, loginResponse{
@@ -56,9 +63,9 @@ func (h *AuthSSOCompleteHandler) Complete(c *gin.Context) {
 		RefreshToken: refreshToken,
 		User: userBrief{
 			ID:          claims.UserID,
-			Username:    claims.Username,
-			DisplayName: displayName,
-			Role:        claims.Role,
+			Username:    liveUser.Username,
+			DisplayName: liveUser.DisplayName,
+			Role:        liveUser.Role,
 		},
 	})
 }

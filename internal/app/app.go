@@ -13,9 +13,13 @@ import (
 	xuiadapter "github.com/KazuhaHub/passwall-sub-panel/internal/adapters/xui"
 	yamladapter "github.com/KazuhaHub/passwall-sub-panel/internal/adapters/yaml"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/config"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/idgen"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/jwtutil"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/log"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
+
+	"golang.org/x/crypto/bcrypt"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/audit"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/auth"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/group"
@@ -100,6 +104,10 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 		Settings:   mysqlRepos.Settings,
 		SAMLConfig: mysqlRepos.SAMLConfig,
 		OIDCConfig: mysqlRepos.OIDCConfig,
+	}
+
+	if err := initAdminIfNeeded(ctx, repos); err != nil {
+		return nil, fmt.Errorf("init admin: %w", err)
 	}
 
 	pool, err := xuiadapter.NewPool(ctx, repos.XUIPanel)
@@ -350,3 +358,67 @@ func (a *App) runReconcileLoop(ctx context.Context) {
 		}
 	}
 }
+
+func initAdminIfNeeded(ctx context.Context, repos ports.Repos) error {
+	roleAdmin := domain.RoleAdmin
+	_, total, err := repos.User.List(ctx, ports.UserFilter{
+		Role: &roleAdmin,
+		Pagination: ports.Pagination{Page: 1, PageSize: 1},
+	})
+	if err != nil {
+		return err
+	}
+	if total > 0 {
+		return nil
+	}
+
+	g, err := repos.Group.GetBySlug(ctx, "default")
+	if err != nil {
+		g = &domain.Group{
+			Slug:      "default",
+			Name:      "Default",
+			TagFilter: domain.TagFilter{All: true},
+		}
+		if err := repos.Group.Create(ctx, g); err != nil {
+			return err
+		}
+	}
+
+	pw, err := idgen.NewPassword()
+	if err != nil {
+		return err
+	}
+	hash, err := bcrypt.GenerateFromPassword([]byte(pw), bcrypt.DefaultCost)
+	if err != nil {
+		return err
+	}
+	subToken, err := idgen.NewSubToken()
+	if err != nil {
+		return err
+	}
+	now := time.Now()
+	u := &domain.User{
+		Username:           "admin",
+		Source:             domain.UserSourceLocal,
+		PasswordHash:       string(hash),
+		Role:               domain.RoleAdmin,
+		SubToken:           subToken,
+		UUID:               idgen.NewUUID(),
+		GroupID:            g.ID,
+		TrafficResetPeriod: domain.ResetMonthly,
+		TrafficPeriodStart: &now,
+		Enabled:            true,
+		Remark:             "bootstrap admin",
+	}
+	if err := repos.User.Create(ctx, u); err != nil {
+		return err
+	}
+	
+	log.Info("bootstrap admin created",
+		"username", u.Username,
+		"password", pw,
+		"user_id", u.ID,
+		"group", g.Slug)
+	return nil
+}
+

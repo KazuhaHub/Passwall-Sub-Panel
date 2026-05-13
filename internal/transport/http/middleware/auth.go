@@ -2,10 +2,13 @@
 package middleware
 
 import (
+	"container/list"
 	"context"
 	"errors"
 	"net/http"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -35,11 +38,11 @@ type UserLookup interface {
 // RequireAuth verifies a token (Authorization Bearer header OR HttpOnly
 // cookie set by SAML ACS) and stores the parsed Claims in the context.
 //
-// On every authenticated request it also re-reads the user from the store
-// so deletes/disables/role-changes take effect immediately — without this,
-// a previously-issued JWT keeps working until natural expiry, which means a
-// deleted admin can still use the console.
+// Authenticated requests also re-check the live user through a short in-memory
+// LRU so deletes/disables/role changes take effect quickly without hitting the
+// DB on every request.
 func RequireAuth(svc *auth.Service, users UserLookup) gin.HandlerFunc {
+	userCache := newAuthUserLRU(4096, 5*time.Second)
 	return func(c *gin.Context) {
 		raw := bearerToken(c.GetHeader("Authorization"))
 		if raw == "" {
@@ -56,14 +59,19 @@ func RequireAuth(svc *auth.Service, users UserLookup) gin.HandlerFunc {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid token"})
 			return
 		}
-		u, err := users.Get(c.Request.Context(), claims.UserID)
-		if err != nil {
-			if errors.Is(err, domain.ErrNotFound) {
-				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "account no longer exists"})
+		u, ok := userCache.Get(claims.UserID)
+		if !ok {
+			liveUser, err := users.Get(c.Request.Context(), claims.UserID)
+			if err != nil {
+				if errors.Is(err, domain.ErrNotFound) {
+					c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "account no longer exists"})
+					return
+				}
+				c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "auth lookup failed"})
 				return
 			}
-			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "auth lookup failed"})
-			return
+			u = authUserFromDomain(liveUser)
+			userCache.Put(u)
 		}
 		if !u.Enabled {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "account disabled"})
@@ -73,10 +81,103 @@ func RequireAuth(svc *auth.Service, users UserLookup) gin.HandlerFunc {
 		// RequireRole checks downstream.
 		claims.Role = u.Role
 		claims.Username = u.Username
+		claims.Source = u.Source
 		c.Set(CtxClaims, claims)
 		c.Set(CtxUserID, claims.UserID)
 		c.Next()
 	}
+}
+
+type authUserSnapshot struct {
+	ID       int64
+	Username string
+	Role     domain.Role
+	Source   domain.UserSource
+	Enabled  bool
+}
+
+type authUserEntry struct {
+	key     int64
+	value   authUserSnapshot
+	expires time.Time
+}
+
+type authUserLRU struct {
+	mu    sync.Mutex
+	max   int
+	ttl   time.Duration
+	ll    *list.List
+	items map[int64]*list.Element
+}
+
+func newAuthUserLRU(max int, ttl time.Duration) *authUserLRU {
+	return &authUserLRU{
+		max:   max,
+		ttl:   ttl,
+		ll:    list.New(),
+		items: make(map[int64]*list.Element, max),
+	}
+}
+
+func authUserFromDomain(u *domain.User) authUserSnapshot {
+	return authUserSnapshot{
+		ID:       u.ID,
+		Username: u.Username,
+		Role:     u.Role,
+		Source:   u.Source,
+		Enabled:  u.Enabled,
+	}
+}
+
+func (c *authUserLRU) Get(id int64) (authUserSnapshot, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	el := c.items[id]
+	if el == nil {
+		return authUserSnapshot{}, false
+	}
+	entry := el.Value.(*authUserEntry)
+	if time.Now().After(entry.expires) {
+		c.remove(el)
+		return authUserSnapshot{}, false
+	}
+	c.ll.MoveToFront(el)
+	return entry.value, true
+}
+
+func (c *authUserLRU) Put(u authUserSnapshot) {
+	if c.max <= 0 || c.ttl <= 0 {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if el := c.items[u.ID]; el != nil {
+		entry := el.Value.(*authUserEntry)
+		entry.value = u
+		entry.expires = time.Now().Add(c.ttl)
+		c.ll.MoveToFront(el)
+		return
+	}
+	el := c.ll.PushFront(&authUserEntry{
+		key:     u.ID,
+		value:   u,
+		expires: time.Now().Add(c.ttl),
+	})
+	c.items[u.ID] = el
+	for c.ll.Len() > c.max {
+		c.remove(c.ll.Back())
+	}
+}
+
+func (c *authUserLRU) remove(el *list.Element) {
+	if el == nil {
+		return
+	}
+	entry := el.Value.(*authUserEntry)
+	delete(c.items, entry.key)
+	c.ll.Remove(el)
 }
 
 // RequireRole short-circuits with 403 unless the claims carry one of the

@@ -205,7 +205,7 @@ func (s *Service) checkMissingOwnerships(ctx context.Context, u *domain.User, re
 			continue
 		}
 
-		email := u.ClientEmail(rules)
+		email := u.ClientEmail(n.ID, rules)
 		var expireTime int64
 		if u.ExpireAt != nil {
 			expireTime = u.ExpireAt.UnixMilli()

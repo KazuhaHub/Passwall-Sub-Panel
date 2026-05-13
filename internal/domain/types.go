@@ -49,27 +49,32 @@ func (u *User) IsExpired(t time.Time) bool {
 	return u.ExpireAt != nil && t.After(*u.ExpireAt)
 }
 
-// ClientEmail builds the 3X-UI client.email for this user. Format:
-// "u<id>@<domain>" — the same email is reused for every inbound the
-// user has access to (3X-UI's uniqueness is per-inbound).
+// ClientEmail builds the 3X-UI client.email for one (user, node) pair.
+// Format: "u<userID>-n<nodeID>@<domain>", e.g. "u42-n5@psp.local".
 //
-// Using the panel-side user ID as the local part guarantees:
+// The node ID disambiguates per inbound. Although 3X-UI's own unique
+// index is (inbound, email), several forks enforce email uniqueness
+// across the whole panel — so the same user on two different inbounds
+// of the same server would otherwise collide. Including the node ID
+// guarantees collision-free emails regardless of fork.
+//
+// Using the panel-side user ID for the user part guarantees:
 //   - uniqueness across local and SSO accounts, regardless of how the
 //     Username field is set or whether it contains '@';
-//   - stability — renaming a user does NOT change their 3X-UI email,
+//   - stability — renaming a user does NOT change their 3X-UI emails,
 //     so reconciliation never has to re-create the client;
 //   - that Entra ID's opaque persistent NameID, however garbled, never
 //     leaks into the 3X-UI client list.
 //
-// Cross-reference "u42" with the admin user list to find the human-
-// readable name. Historically-imported clients keep their original
+// Cross-reference "u42-n5" with the admin user/node lists to find the
+// human-readable names. Historically-imported clients keep their original
 // email in the ownership table and do NOT go through this helper.
-func (u *User) ClientEmail(r EmailRules) string {
+func (u *User) ClientEmail(nodeID int64, r EmailRules) string {
 	suffix := r.Domain
 	if suffix == "" {
 		suffix = "psp.local"
 	}
-	return fmt.Sprintf("u%d@%s", u.ID, suffix)
+	return fmt.Sprintf("u%d-n%d@%s", u.ID, nodeID, suffix)
 }
 
 // Group is a user grouping that defines accessible nodes and render layout.

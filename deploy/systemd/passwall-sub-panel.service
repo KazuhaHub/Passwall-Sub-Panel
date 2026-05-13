@@ -6,15 +6,15 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=passwall-sub-panel
-Group=passwall-sub-panel
-WorkingDirectory=/opt/passwall-sub-panel
+User=psp
+Group=psp
+WorkingDirectory=/opt/psp
 # Place secrets and DSN here (chmod 600):
 #   PSP_SECRET_KEY=...
 #   PSP_MYSQL_DSN=user:pass@tcp(127.0.0.1:3306)/psp?...
 #   PSP_JWT_SECRET=...
-EnvironmentFile=/opt/passwall-sub-panel/.env
-ExecStart=/opt/passwall-sub-panel/panel --config /opt/passwall-sub-panel/config.yaml
+EnvironmentFile=/opt/psp/.env
+ExecStart=/opt/psp/psp --config /opt/psp/config.yaml
 Restart=on-failure
 RestartSec=5
 LimitNOFILE=65536
@@ -23,7 +23,7 @@ LimitNOFILE=65536
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/opt/passwall-sub-panel/data
+ReadWritePaths=/opt/psp/data
 PrivateTmp=true
 PrivateDevices=true
 ProtectKernelTunables=true

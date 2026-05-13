@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { Delete, Lock, Unlock } from '@element-plus/icons-vue'
 import {
   createUser,
   deleteUser,
@@ -24,6 +25,9 @@ const pageSize = ref(50)
 const search = ref('')
 const loading = ref(false)
 const reconcileBusy = ref(false)
+const selectedUsers = ref<User[]>([])
+const batchBusy = ref<'enable' | 'disable' | 'delete' | ''>('')
+const selectedCount = computed(() => selectedUsers.value.length)
 
 const createDialog = ref(false)
 const createBusy = ref(false)
@@ -66,9 +70,18 @@ async function load() {
     })
     users.value = res.items
     total.value = res.total
+    selectedUsers.value = []
   } finally {
     loading.value = false
   }
+}
+
+function handleSelectionChange(rows: User[]) {
+  selectedUsers.value = rows
+}
+
+function canSelectUser(row: User) {
+  return row.auto_disabled_reason !== 'pending_delete'
 }
 
 async function loadGroups() {
@@ -215,6 +228,60 @@ async function toggleEnabled(row: User) {
   await load()
 }
 
+async function batchSetEnabled(enabled: boolean) {
+  if (selectedUsers.value.length === 0) return
+  const rows = selectedUsers.value.slice()
+  batchBusy.value = enabled ? 'enable' : 'disable'
+  try {
+    const results = await Promise.allSettled(rows.map((row) => setEnabled(row.id, enabled)))
+    const failed = results.filter((result) => result.status === 'rejected').length
+    if (failed > 0) {
+      ElMessage.warning(`已${enabled ? '启用' : '禁用'} ${rows.length - failed} 个用户，失败 ${failed} 个`)
+    } else {
+      ElMessage.success(`已${enabled ? '启用' : '禁用'} ${rows.length} 个用户`)
+    }
+    await load()
+  } finally {
+    batchBusy.value = ''
+  }
+}
+
+async function batchDelete() {
+  if (selectedUsers.value.length === 0) return
+  const rows = selectedUsers.value.slice()
+  const names = rows
+    .slice(0, 5)
+    .map((row) => row.display_name || row.username)
+    .join('、')
+  const suffix = rows.length > 5 ? ` 等 ${rows.length} 个用户` : ''
+  try {
+    await ElMessageBox.confirm(
+      `确定删除 ${names}${suffix}？该操作将从所有 3X-UI inbound 清除这些用户的 client。`,
+      '批量删除用户',
+      { type: 'warning' },
+    )
+  } catch {
+    return
+  }
+
+  batchBusy.value = 'delete'
+  try {
+    const results = await Promise.allSettled(rows.map((row) => deleteUser(row.id)))
+    const deletedRows = rows.filter((_, index) => results[index].status === 'fulfilled')
+    const failed = rows.length - deletedRows.length
+    users.value = users.value.filter((user) => !deletedRows.some((row) => row.id === user.id))
+    total.value = Math.max(0, total.value - deletedRows.length)
+    selectedUsers.value = []
+    if (failed > 0) {
+      ElMessage.warning(`已删除 ${deletedRows.length} 个用户，失败 ${failed} 个`)
+    } else {
+      ElMessage.success(`已删除 ${deletedRows.length} 个用户`)
+    }
+  } finally {
+    batchBusy.value = ''
+  }
+}
+
 
 
 function copyText(text: string) {
@@ -282,9 +349,39 @@ onMounted(async () => {
       >
         一键同步 (Reconcile)
       </el-button>
+      <template v-if="selectedCount > 0">
+        <el-divider direction="vertical" />
+        <span class="users-selection-count">已选 {{ selectedCount }}</span>
+        <el-button
+          :icon="Unlock"
+          :loading="batchBusy === 'enable'"
+          :disabled="batchBusy !== ''"
+          @click="batchSetEnabled(true)"
+        >
+          批量启用
+        </el-button>
+        <el-button
+          :icon="Lock"
+          :loading="batchBusy === 'disable'"
+          :disabled="batchBusy !== ''"
+          @click="batchSetEnabled(false)"
+        >
+          批量禁用
+        </el-button>
+        <el-button
+          type="danger"
+          :icon="Delete"
+          :loading="batchBusy === 'delete'"
+          :disabled="batchBusy !== ''"
+          @click="batchDelete"
+        >
+          批量删除
+        </el-button>
+      </template>
     </div>
 
-    <el-table v-loading="loading" :data="users" stripe>
+    <el-table v-loading="loading" :data="users" stripe @selection-change="handleSelectionChange">
+      <el-table-column type="selection" width="48" :selectable="canSelectUser" />
       <el-table-column label="显示名" min-width="160">
         <template #default="{ row }">{{ row.display_name || row.username }}</template>
       </el-table-column>
@@ -491,3 +588,10 @@ onMounted(async () => {
     </el-dialog>
   </div>
 </template>
+
+<style scoped>
+.users-selection-count {
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+</style>

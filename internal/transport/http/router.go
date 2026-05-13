@@ -8,6 +8,7 @@ import (
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/config"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/jwtutil"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/audit"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/auth"
@@ -46,6 +47,7 @@ type Deps struct {
 	// live via auth.Service.AccessTTL/RefreshTTL.
 	SubPerIPPerMin   int
 	LoginPerIPPerMin int
+	JWTParams        *jwtutil.ParamsCache
 }
 
 // NewRouter returns a configured *gin.Engine ready to be served.
@@ -161,7 +163,7 @@ func NewRouter(d Deps) *gin.Engine {
 		adminGroup.DELETE("/servers/:id", servers.Delete)
 		adminGroup.POST("/servers/probe", servers.Test)
 
-		settings := handler.NewAdminSettingsHandler(d.Repos.Settings)
+		settings := handler.NewAdminSettingsHandler(d.Repos.Settings, d.JWTParams)
 		adminGroup.GET("/settings/ui", settings.Get)
 		adminGroup.PUT("/settings/ui", settings.Put)
 

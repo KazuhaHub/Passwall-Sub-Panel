@@ -417,7 +417,7 @@ func (s *Service) syncExistingUsersToNode(ctx context.Context, n *domain.Node) e
 			if !u.Enabled {
 				continue
 			}
-			email := u.ClientEmail(rules)
+			email := u.ClientEmail(n.ID, rules)
 			var expireTime int64
 			if u.ExpireAt != nil {
 				expireTime = u.ExpireAt.UnixMilli()

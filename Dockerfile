@@ -20,16 +20,14 @@ COPY . .
 RUN rm -rf internal/web/dist && mkdir -p internal/web/dist
 COPY --from=web-builder /web/dist/ ./internal/web/dist/
 # Build both binaries.
-RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/panel ./cmd/panel
-RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/psp-cli ./cmd/cli
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/psp ./cmd/panel
 
 # Stage 3 — minimal runtime.
 FROM alpine:3.20
 RUN apk add --no-cache ca-certificates tzdata && \
     addgroup -S psp && adduser -S -G psp psp
 WORKDIR /app
-COPY --from=go-builder /out/panel /app/panel
-COPY --from=go-builder /out/psp-cli /app/psp-cli
+COPY --from=go-builder /out/psp /app/psp
 USER psp
 EXPOSE 8788
-ENTRYPOINT ["/app/panel"]
+ENTRYPOINT ["/app/psp"]

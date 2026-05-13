@@ -3,9 +3,11 @@ package handler
 import (
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/jwtutil"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 )
 
@@ -14,11 +16,12 @@ import (
 // rate limits, audit retention). All values are persisted in the DB; the
 // YAML config file is intentionally not consulted here.
 type AdminSettingsHandler struct {
-	repo ports.SettingsRepo
+	repo      ports.SettingsRepo
+	jwtParams *jwtutil.ParamsCache
 }
 
-func NewAdminSettingsHandler(repo ports.SettingsRepo) *AdminSettingsHandler {
-	return &AdminSettingsHandler{repo: repo}
+func NewAdminSettingsHandler(repo ports.SettingsRepo, jwtParams *jwtutil.ParamsCache) *AdminSettingsHandler {
+	return &AdminSettingsHandler{repo: repo, jwtParams: jwtParams}
 }
 
 type settingsDTO struct {
@@ -122,6 +125,11 @@ func (h *AdminSettingsHandler) Put(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+	h.jwtParams.Store(jwtutil.Params{
+		AccessTTL:  time.Duration(s.JWTAccessTTLMinutes) * time.Minute,
+		RefreshTTL: time.Duration(s.JWTRefreshTTLMinutes) * time.Minute,
+		Issuer:     s.JWTIssuer,
+	})
 	c.JSON(http.StatusOK, settingsDTO{
 		LoginMode:              s.LoginMode,
 		SiteTitle:              s.SiteTitle,
