@@ -58,7 +58,6 @@ type UserRepo interface {
 	Update(ctx context.Context, u *domain.User) error
 	Delete(ctx context.Context, id int64) error
 	GetByID(ctx context.Context, id int64) (*domain.User, error)
-	GetByUsername(ctx context.Context, username string) (*domain.User, error)
 	GetByUPN(ctx context.Context, upn string) (*domain.User, error)
 	GetBySubToken(ctx context.Context, token string) (*domain.User, error)
 	List(ctx context.Context, filter UserFilter) (items []*domain.User, total int64, err error)
@@ -175,6 +174,12 @@ type UISettings struct {
 	// SiteTitle is the brand name displayed in the sidebar, header, and
 	// login page. Defaults to "Passwall".
 	SiteTitle string `yaml:"site_title" json:"site_title"`
+	// AppTitle is the application/product name shown next to the logo in
+	// the top-left brand area and on login pages. Defaults to "Passwall".
+	AppTitle string `yaml:"app_title" json:"app_title"`
+	// IconURL is the browser tab / PWA icon URL. Empty falls back to the
+	// bundled avatar-style icon.
+	IconURL string `yaml:"icon_url" json:"icon_url"`
 	// LogoURL is a URL to a custom logo image for light backgrounds.
 	// When empty, the bundled default logo is used.
 	LogoURL string `yaml:"logo_url" json:"logo_url"`
@@ -183,7 +188,7 @@ type UISettings struct {
 	LogoURLDark string `yaml:"logo_url_dark" json:"logo_url_dark"`
 	// EmailDomain is the suffix used when building the 3X-UI client.email
 	// for every panel user (local + SSO, no distinction). Format is
-	// "<username>@<domain>". Defaults to "psp.local".
+	// "u<userID>-n<nodeID>@<domain>". Defaults to "psp.local".
 	EmailDomain string `yaml:"email_domain" json:"email_domain"`
 	// AuditRetentionDays controls automatic audit cleanup. 0 means never
 	// delete audit entries automatically.
@@ -233,6 +238,16 @@ type SettingsRepo interface {
 	Save(ctx context.Context, s UISettings) error
 }
 
+type MailRepo interface {
+	LoadSettings(ctx context.Context, defaults domain.MailSettings) (domain.MailSettings, error)
+	SaveSettings(ctx context.Context, s domain.MailSettings) error
+	ListTemplates(ctx context.Context) ([]*domain.MailTemplate, error)
+	GetTemplate(ctx context.Context, kind domain.MailReminderKind) (*domain.MailTemplate, error)
+	SaveTemplate(ctx context.Context, t *domain.MailTemplate) error
+	HasSent(ctx context.Context, userID int64, kind domain.MailReminderKind, windowKey string) (bool, error)
+	RecordSent(ctx context.Context, userID int64, kind domain.MailReminderKind, windowKey, toEmail string) error
+}
+
 // SAMLConfigRepo persists the panel's SAML/SSO configuration in the
 // relational DB so admin can edit it from the panel without shell access.
 type SAMLConfigRepo interface {
@@ -263,6 +278,7 @@ type Repos struct {
 	Template   TemplateRepo
 	XUIPanel   XUIPanelRepo
 	Settings   SettingsRepo
+	Mail       MailRepo
 	SAMLConfig SAMLConfigRepo
 	OIDCConfig OIDCConfigRepo
 }

@@ -41,9 +41,8 @@ const (
 type ClientType string
 
 const (
-	ClientClash     ClientType = "clash"
-	ClientClashMeta ClientType = "clash-meta"
-	ClientSingBox   ClientType = "sing-box"
+	ClientMihomo  ClientType = "mihomo"
+	ClientSingBox ClientType = "sing-box"
 )
 
 type SyncTaskType string

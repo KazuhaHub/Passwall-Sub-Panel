@@ -15,6 +15,8 @@ export interface AuthMethods {
   oidc: boolean
   login_mode: LoginMode
   site_title: string
+  app_title: string
+  icon_url: string
   logo_url: string
   logo_url_dark: string
 }
@@ -24,9 +26,9 @@ export async function getAuthMethods() {
   return data
 }
 
-export async function localLogin(username: string, password: string) {
+export async function localLogin(upn: string, password: string) {
   const { data } = await client.post<AuthLoginResponse>('/auth/local/login', {
-    username,
+    upn,
     password,
   })
   return data

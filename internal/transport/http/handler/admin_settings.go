@@ -27,6 +27,8 @@ func NewAdminSettingsHandler(repo ports.SettingsRepo, jwtParams *jwtutil.ParamsC
 type settingsDTO struct {
 	LoginMode                  string `json:"login_mode"`
 	SiteTitle                  string `json:"site_title"`
+	AppTitle                   string `json:"app_title"`
+	IconURL                    string `json:"icon_url"`
 	LogoURL                    string `json:"logo_url"`
 	LogoURLDark                string `json:"logo_url_dark"`
 	EmailDomain                string `json:"email_domain"`
@@ -51,6 +53,8 @@ func (h *AdminSettingsHandler) defaults() ports.UISettings {
 	return ports.UISettings{
 		LoginMode:   "dual",
 		SiteTitle:   "Passwall",
+		AppTitle:    "Passwall",
+		IconURL:     "/images/HeadPicture.png",
 		EmailDomain: "psp.local",
 	}
 }
@@ -65,6 +69,8 @@ func (h *AdminSettingsHandler) Get(c *gin.Context) {
 	c.JSON(http.StatusOK, settingsDTO{
 		LoginMode:                  mode,
 		SiteTitle:                  s.SiteTitle,
+		AppTitle:                   s.AppTitle,
+		IconURL:                    s.IconURL,
 		LogoURL:                    s.LogoURL,
 		LogoURLDark:                s.LogoURLDark,
 		EmailDomain:                s.EmailDomain,
@@ -102,6 +108,8 @@ func (h *AdminSettingsHandler) Put(c *gin.Context) {
 	s := ports.UISettings{
 		LoginMode:                  req.LoginMode,
 		SiteTitle:                  req.SiteTitle,
+		AppTitle:                   req.AppTitle,
+		IconURL:                    strings.TrimSpace(req.IconURL),
 		LogoURL:                    req.LogoURL,
 		LogoURLDark:                req.LogoURLDark,
 		EmailDomain:                strings.TrimSpace(req.EmailDomain),
@@ -142,6 +150,12 @@ func (h *AdminSettingsHandler) Put(c *gin.Context) {
 	if s.SiteTitle == "" {
 		s.SiteTitle = "Passwall"
 	}
+	if s.AppTitle == "" {
+		s.AppTitle = "Passwall"
+	}
+	if s.IconURL == "" {
+		s.IconURL = "/images/HeadPicture.png"
+	}
 	if err := h.repo.Save(c.Request.Context(), s); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -154,6 +168,8 @@ func (h *AdminSettingsHandler) Put(c *gin.Context) {
 	c.JSON(http.StatusOK, settingsDTO{
 		LoginMode:                  s.LoginMode,
 		SiteTitle:                  s.SiteTitle,
+		AppTitle:                   s.AppTitle,
+		IconURL:                    s.IconURL,
 		LogoURL:                    s.LogoURL,
 		LogoURLDark:                s.LogoURLDark,
 		EmailDomain:                s.EmailDomain,

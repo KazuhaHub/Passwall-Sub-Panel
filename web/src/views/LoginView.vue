@@ -9,11 +9,12 @@ import { homeForRole, isAdminPath } from '@/router/home'
 const router = useRouter()
 const auth = useAuthStore()
 
-const form = reactive({ username: '', password: '' })
+const form = reactive({ upn: '', password: '' })
 const loading = ref(false)
 const mode = ref<LoginMode>('dual')
-const siteTitle = ref('')
+const appTitle = ref('')
 const logoSrc = ref('/images/logo+title-circle-darkmode.png')
+const iconUrl = ref('/images/HeadPicture.png')
 const ssoEnabled = ref(false)
 const samlEnabled = ref(false)
 const oidcEnabled = ref(false)
@@ -24,7 +25,10 @@ async function probe() {
   try {
     const m = await getAuthMethods()
     mode.value = m.login_mode
-    siteTitle.value = m.site_title || ''
+    document.title = m.site_title || m.app_title || 'Passwall'
+    iconUrl.value = m.icon_url || '/images/HeadPicture.png'
+    updateIcon(iconUrl.value)
+    appTitle.value = m.app_title || 'Passwall'
     logoSrc.value = m.logo_url_dark || m.logo_url || '/images/logo+title-circle-darkmode.png'
     ssoEnabled.value = m.sso
     samlEnabled.value = !!m.saml
@@ -44,14 +48,24 @@ async function probe() {
   }
 }
 
+function updateIcon(url: string) {
+  let link = document.querySelector<HTMLLinkElement>("link[rel~='icon']")
+  if (!link) {
+    link = document.createElement('link')
+    link.rel = 'icon'
+    document.head.appendChild(link)
+  }
+  link.href = url
+}
+
 async function submit() {
-  if (!form.username || !form.password) {
-    ElMessage.warning('请输入用户名和密码')
+  if (!form.upn || !form.password) {
+    ElMessage.warning('请输入 UPN 和密码')
     return
   }
   loading.value = true
   try {
-    await auth.login(form.username, form.password)
+    await auth.login(form.upn, form.password)
     const fallback = homeForRole(auth.role)
     const requested = (router.currentRoute.value.query.return_to as string) || fallback
     const returnTo = isAdminPath(requested) && !auth.isAdmin ? fallback : requested
@@ -91,7 +105,7 @@ onMounted(probe)
     <div class="login-container" v-if="!probing">
       <div class="login-brand">
         <img class="logo" :src="logoSrc" alt="Logo" />
-        <div v-if="siteTitle" class="login-title">{{ siteTitle }}</div>
+        <div v-if="appTitle" class="login-title">{{ appTitle }}</div>
         <div class="login-subtitle">Welcome back, please sign in.</div>
       </div>
 
@@ -124,9 +138,9 @@ onMounted(probe)
         <el-form @submit.prevent="submit" class="login-form">
           <el-form-item>
             <el-input
-              v-model="form.username"
-              placeholder="用户名"
-              autocomplete="username"
+              v-model="form.upn"
+              placeholder="UPN"
+              autocomplete="email"
               size="large"
               prefix-icon="User"
             />
@@ -161,9 +175,9 @@ onMounted(probe)
         <el-form @submit.prevent="submit" class="login-form">
           <el-form-item>
             <el-input
-              v-model="form.username"
-              placeholder="用户名"
-              autocomplete="username"
+              v-model="form.upn"
+              placeholder="UPN"
+              autocomplete="email"
               size="large"
               prefix-icon="User"
             />

@@ -19,14 +19,14 @@ import (
 // adapter-internal concern, converted via to/from helpers.
 
 type userRow struct {
-	ID                 int64   `gorm:"primaryKey;autoIncrement"`
-	Username           string  `gorm:"size:64;uniqueIndex;not null"`
-	UPN                *string `gorm:"size:255;uniqueIndex"`
-	PasswordHash       string  `gorm:"size:255"`
-	Role               string  `gorm:"size:16;not null;default:user"`
-	SubToken           string  `gorm:"size:64;uniqueIndex;not null"`
-	UUID               string  `gorm:"size:36;not null"`
-	GroupID            int64   `gorm:"index;not null"`
+	ID                 int64  `gorm:"primaryKey;autoIncrement"`
+	UPN                string `gorm:"size:255;uniqueIndex;not null"`
+	Email              string `gorm:"size:255;index"`
+	PasswordHash       string `gorm:"size:255"`
+	Role               string `gorm:"size:16;not null;default:user"`
+	SubToken           string `gorm:"size:64;uniqueIndex;not null"`
+	UUID               string `gorm:"size:36;not null"`
+	GroupID            int64  `gorm:"index;not null"`
 	EnabledRuleSets    jsonStrings
 	PersonalRules      string `gorm:"type:text"`
 	ExpireAt           *time.Time
@@ -45,14 +45,10 @@ type userRow struct {
 func (userRow) TableName() string { return "users" }
 
 func (r *userRow) toDomain() *domain.User {
-	upn := ""
-	if r.UPN != nil {
-		upn = *r.UPN
-	}
 	return &domain.User{
 		ID:                 r.ID,
-		Username:           r.Username,
-		UPN:                upn,
+		UPN:                r.UPN,
+		Email:              r.Email,
 		PasswordHash:       r.PasswordHash,
 		Role:               domain.Role(r.Role),
 		SubToken:           r.SubToken,
@@ -75,14 +71,10 @@ func (r *userRow) toDomain() *domain.User {
 }
 
 func userFromDomain(u *domain.User) *userRow {
-	var upn *string
-	if u.UPN != "" {
-		upn = &u.UPN
-	}
 	return &userRow{
 		ID:                 u.ID,
-		Username:           u.Username,
-		UPN:                upn,
+		UPN:                u.UPN,
+		Email:              u.Email,
 		PasswordHash:       u.PasswordHash,
 		Role:               string(u.Role),
 		SubToken:           u.SubToken,
@@ -358,6 +350,8 @@ type uiSettingsRow struct {
 	ID                 int64  `gorm:"primaryKey"`
 	LoginMode          string `gorm:"size:32"`
 	SiteTitle          string `gorm:"size:128"`
+	AppTitle           string `gorm:"size:128"`
+	IconURL            string `gorm:"size:1024"`
 	LogoURL            string `gorm:"size:1024"`
 	LogoURLDark        string `gorm:"size:1024"`
 	EmailDomain        string `gorm:"size:255"`
@@ -394,6 +388,94 @@ type ruleSetRow struct {
 }
 
 func (ruleSetRow) TableName() string { return "rule_sets" }
+
+type mailSettingsRow struct {
+	ID                   int64 `gorm:"primaryKey"`
+	Enabled              bool
+	SMTPHost             string `gorm:"size:255"`
+	SMTPPort             int
+	SMTPUsername         string `gorm:"size:255"`
+	SMTPPassword         string `gorm:"type:text"`
+	FromEmail            string `gorm:"size:255"`
+	FromName             string `gorm:"size:128"`
+	Encryption           string `gorm:"size:16"`
+	ExpireBeforeDays     int
+	TrafficRemainPercent int
+	UpdatedAt            time.Time
+}
+
+func (mailSettingsRow) TableName() string { return "mail_settings" }
+
+func (r *mailSettingsRow) toDomain() domain.MailSettings {
+	return domain.MailSettings{
+		Enabled:              r.Enabled,
+		SMTPHost:             r.SMTPHost,
+		SMTPPort:             r.SMTPPort,
+		SMTPUsername:         r.SMTPUsername,
+		SMTPPassword:         r.SMTPPassword,
+		FromEmail:            r.FromEmail,
+		FromName:             r.FromName,
+		Encryption:           r.Encryption,
+		ExpireBeforeDays:     r.ExpireBeforeDays,
+		TrafficRemainPercent: r.TrafficRemainPercent,
+	}
+}
+
+func mailSettingsFromDomain(s domain.MailSettings) *mailSettingsRow {
+	return &mailSettingsRow{
+		ID:                   1,
+		Enabled:              s.Enabled,
+		SMTPHost:             s.SMTPHost,
+		SMTPPort:             s.SMTPPort,
+		SMTPUsername:         s.SMTPUsername,
+		SMTPPassword:         s.SMTPPassword,
+		FromEmail:            s.FromEmail,
+		FromName:             s.FromName,
+		Encryption:           s.Encryption,
+		ExpireBeforeDays:     s.ExpireBeforeDays,
+		TrafficRemainPercent: s.TrafficRemainPercent,
+	}
+}
+
+type mailTemplateRow struct {
+	Kind      string `gorm:"size:32;primaryKey"`
+	Subject   string `gorm:"size:255"`
+	Body      string `gorm:"type:text"`
+	Enabled   bool
+	UpdatedAt time.Time
+}
+
+func (mailTemplateRow) TableName() string { return "mail_templates" }
+
+func (r *mailTemplateRow) toDomain() *domain.MailTemplate {
+	return &domain.MailTemplate{
+		Kind:      domain.MailReminderKind(r.Kind),
+		Subject:   r.Subject,
+		Body:      r.Body,
+		Enabled:   r.Enabled,
+		UpdatedAt: r.UpdatedAt,
+	}
+}
+
+func mailTemplateFromDomain(t *domain.MailTemplate) *mailTemplateRow {
+	return &mailTemplateRow{
+		Kind:    string(t.Kind),
+		Subject: t.Subject,
+		Body:    t.Body,
+		Enabled: t.Enabled,
+	}
+}
+
+type mailSentRow struct {
+	ID        int64  `gorm:"primaryKey;autoIncrement"`
+	UserID    int64  `gorm:"not null;uniqueIndex:uk_mail_once,priority:1"`
+	Kind      string `gorm:"size:32;not null;uniqueIndex:uk_mail_once,priority:2"`
+	WindowKey string `gorm:"size:128;not null;uniqueIndex:uk_mail_once,priority:3"`
+	ToEmail   string `gorm:"size:255;not null"`
+	SentAt    time.Time
+}
+
+func (mailSentRow) TableName() string { return "mail_sent" }
 
 func (xuiPanelRow) TableName() string { return "xui_panels" }
 
@@ -531,6 +613,9 @@ func EnsureSchema(db *gorm.DB) error {
 		&xuiPanelRow{},
 		&uiSettingsRow{},
 		&ruleSetRow{},
+		&mailSettingsRow{},
+		&mailTemplateRow{},
+		&mailSentRow{},
 		&samlConfigRow{},
 		&oidcConfigRow{},
 	); err != nil {
@@ -539,6 +624,11 @@ func EnsureSchema(db *gorm.DB) error {
 	if db.Migrator().HasColumn(&userRow{}, "source") {
 		if err := db.Migrator().DropColumn(&userRow{}, "source"); err != nil {
 			return fmt.Errorf("drop users.source: %w", err)
+		}
+	}
+	if db.Migrator().HasColumn(&userRow{}, "username") {
+		if err := db.Migrator().DropColumn(&userRow{}, "username"); err != nil {
+			return fmt.Errorf("drop users.username: %w", err)
 		}
 	}
 	return nil

@@ -6,9 +6,9 @@ export type ResetPeriod = 'never' | 'monthly' | 'quarterly'
 
 export interface User {
   id: number
-  username: string
+  upn: string
   display_name?: string
-  upn?: string
+  email?: string
   role: Role
   group_id: number
   uuid: string
@@ -24,7 +24,8 @@ export interface User {
 }
 
 export interface CreateUserRequest {
-  username: string
+  upn: string
+  email?: string
   display_name?: string
   password?: string
   group_id: number
@@ -96,7 +97,7 @@ export interface AuthLoginResponse {
   refresh_token: string
   user: {
     id: number
-    username: string
+    upn: string
     display_name?: string
     role: Role
   }

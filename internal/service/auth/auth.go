@@ -21,11 +21,11 @@ func New(issuer *jwtutil.Issuer) *Service {
 
 // IssueTokens returns a freshly signed (access, refresh) pair.
 func (s *Service) IssueTokens(u *domain.User) (access, refresh string, err error) {
-	access, err = s.issuer.IssueAccess(u.ID, u.Username, u.Role)
+	access, err = s.issuer.IssueAccess(u.ID, u.UPN, u.Role)
 	if err != nil {
 		return "", "", err
 	}
-	refresh, err = s.issuer.IssueRefresh(u.ID, u.Username, u.Role)
+	refresh, err = s.issuer.IssueRefresh(u.ID, u.UPN, u.Role)
 	if err != nil {
 		return "", "", err
 	}

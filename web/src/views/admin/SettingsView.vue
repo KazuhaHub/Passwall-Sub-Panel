@@ -4,12 +4,19 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   getUISettings,
   putUISettings,
+  getMailSettings,
+  putMailSettings,
+  putMailTemplate,
+  sendTestMail,
+  sendMailAnnouncement,
   getSAML,
   putSAML,
   getOIDC,
   putOIDC,
   type SAMLConfig,
   type OIDCConfig,
+  type MailSettings,
+  type MailTemplate,
 } from '@/api/settings'
 import { useSiteStore } from '@/stores/site'
 import type { LoginMode } from '@/api/auth'
@@ -26,6 +33,8 @@ function copyText(text: string) {
 // ---- General Settings ----
 const loginMode = ref<LoginMode>('dual')
 const siteTitle = ref('Passwall')
+const appTitle = ref('Passwall')
+const iconUrl = ref('/images/HeadPicture.png')
 const logoUrl = ref('')
 const logoUrlDark = ref('')
 const emailDomain = ref('psp.local')
@@ -47,12 +56,125 @@ const loginPerIPPerMin = ref(5)
 const generalLoading = ref(true)
 const generalSaving = ref(false)
 
+// ---- Mail Settings ----
+const mailLoading = ref(true)
+const mailSaving = ref(false)
+const mailTesting = ref(false)
+const announcementSending = ref(false)
+const testMailTo = ref('')
+const announcementForm = reactive({
+  subject: '',
+  body: '',
+  only_enabled: true,
+})
+const mailSettings = reactive<MailSettings>({
+  enabled: false,
+  smtp_host: '',
+  smtp_port: 587,
+  smtp_username: '',
+  smtp_password: '',
+  has_smtp_password: false,
+  from_email: '',
+  from_name: '',
+  encryption: 'starttls',
+  expire_before_days: 3,
+  traffic_remain_percent: 10,
+})
+const mailTemplates = ref<MailTemplate[]>([])
+
+function templateLabel(kind: string) {
+  if (kind === 'expire_before') return '到期前提醒'
+  if (kind === 'expired') return '到期提醒'
+  if (kind === 'traffic_low') return '流量不足提醒'
+  return kind
+}
+
+async function loadMail() {
+  mailLoading.value = true
+  try {
+    const res = await getMailSettings()
+    Object.assign(mailSettings, res.settings, { smtp_password: '' })
+    mailTemplates.value = res.templates
+  } finally {
+    mailLoading.value = false
+  }
+}
+
+async function saveMail() {
+  mailSaving.value = true
+  try {
+    await putMailSettings({ ...mailSettings })
+    for (const tpl of mailTemplates.value) {
+      await putMailTemplate(tpl)
+    }
+    ElMessage.success('邮件提醒配置已保存')
+    await loadMail()
+  } finally {
+    mailSaving.value = false
+  }
+}
+
+async function testMail() {
+  if (!testMailTo.value) {
+    ElMessage.warning('请填写测试收件人')
+    return
+  }
+  mailTesting.value = true
+  try {
+    await sendTestMail(testMailTo.value)
+    ElMessage.success('测试邮件已发送')
+  } finally {
+    mailTesting.value = false
+  }
+}
+
+async function sendAnnouncement() {
+  if (!announcementForm.subject || !announcementForm.body) {
+    ElMessage.warning('请填写公告标题和正文')
+    return
+  }
+  try {
+    await ElMessageBox.confirm(
+      '将使用当前 SMTP 配置向用户发送公告邮件。发送后无法撤回，是否继续？',
+      '确认发送公告',
+      { confirmButtonText: '发送', cancelButtonText: '取消', type: 'warning' },
+    )
+  } catch {
+    return
+  }
+  announcementSending.value = true
+  try {
+    const res = await sendMailAnnouncement({
+      subject: announcementForm.subject,
+      body: announcementForm.body,
+      only_enabled: announcementForm.only_enabled,
+    })
+    if (res.failed > 0) {
+      const details = (res.errors || [])
+        .slice(0, 5)
+        .map((e) => `${e.upn || e.email}: ${e.error}`)
+        .join('<br>')
+      await ElMessageBox.alert(
+        `已发送 ${res.sent} 封，跳过 ${res.skipped} 个，失败 ${res.failed} 个。<br><br>${details}`,
+        '公告发送完成',
+        { type: 'warning', dangerouslyUseHTMLString: true },
+      )
+    } else {
+      ElMessage.success(`公告已发送 ${res.sent} 封，跳过 ${res.skipped} 个`)
+    }
+  } finally {
+    announcementSending.value = false
+  }
+}
+
 async function loadGeneral() {
   generalLoading.value = true
   try {
     const s = await getUISettings()
     loginMode.value = s.login_mode
     siteTitle.value = s.site_title || 'Passwall'
+    appTitle.value = s.app_title || 'Passwall'
+    iconUrl.value = s.icon_url === '/images/HeadPicture.png' ? '' : s.icon_url || ''
     logoUrl.value = s.logo_url || ''
     logoUrlDark.value = s.logo_url_dark || ''
     emailDomain.value = s.email_domain || 'psp.local'
@@ -82,6 +204,8 @@ async function saveGeneral() {
     await putUISettings({
       login_mode: loginMode.value,
       site_title: siteTitle.value,
+      app_title: appTitle.value,
+      icon_url: iconUrl.value,
       logo_url: logoUrl.value,
       logo_url_dark: logoUrlDark.value,
       email_domain: emailDomain.value,
@@ -101,7 +225,7 @@ async function saveGeneral() {
       sub_per_ip_per_min: subPerIPPerMin.value,
       login_per_ip_per_min: loginPerIPPerMin.value,
     })
-    useSiteStore().update(siteTitle.value, logoUrl.value, logoUrlDark.value)
+    useSiteStore().update(siteTitle.value, appTitle.value, iconUrl.value, logoUrl.value, logoUrlDark.value)
     ElMessage.success('已保存')
   } finally {
     generalSaving.value = false
@@ -281,6 +405,7 @@ async function onEnableOIDC(val: boolean) {
 
 onMounted(() => {
   loadGeneral()
+  loadMail()
   loadSAML()
   loadOIDC()
 })
@@ -297,6 +422,7 @@ onMounted(() => {
       <button
         v-for="t in [
           { key: 'general', label: '基本设置', icon: '⚙' },
+          { key: 'mail', label: '邮件提醒', icon: '✉' },
           { key: 'brand', label: '站点品牌', icon: '🎨' },
           { key: 'sso', label: 'SSO 认证', icon: '🔐' },
         ]"
@@ -336,7 +462,7 @@ onMounted(() => {
           <el-radio value="dual" class="mode-option">
             <div class="mode-title">双形态 (dual)</div>
             <div class="mode-desc">
-              SSO 按钮和本地用户名密码表单同时显示在 /login 页。默认值。
+              SSO 按钮和本地 UPN/密码表单同时显示在 /login 页。默认值。
             </div>
           </el-radio>
           <el-radio value="local_only" class="mode-option">
@@ -350,7 +476,7 @@ onMounted(() => {
         <h3 class="section-title" style="margin-top:32px;">3X-UI 客户端邮箱后缀</h3>
         <p class="section-hint">
           所有面板用户（无论本地还是 SSO）在 3X-UI 里的客户端邮箱统一为
-          <code>用户名@域名</code>。修改不会影响已存在的 3X-UI client，只影响后续新建/重同步。
+          <code>u&lt;userID&gt;-n&lt;nodeID&gt;@域名</code>。修改不会影响已存在的 3X-UI client，只影响后续新建/重同步。
         </p>
         <el-form label-position="top" style="max-width:480px">
           <el-form-item label="邮箱后缀">
@@ -468,16 +594,133 @@ onMounted(() => {
       </el-card>
     </div>
 
+    <!-- Mail Settings -->
+    <div v-show="activeTab === 'mail'" v-loading="mailLoading">
+      <el-card class="settings-card mail-settings-card">
+        <h3 class="section-title">SMTP 发件设置</h3>
+        <p class="section-hint">
+          用于自动发送到期和流量提醒。SSO 用户收件地址来自 SAML/OIDC 的 Email claim，和 UPN 分开保存。
+        </p>
+        <el-form label-position="top" style="max-width:640px">
+          <el-form-item>
+            <el-switch v-model="mailSettings.enabled" />
+            <span style="margin-left: 12px">启用邮件提醒</span>
+          </el-form-item>
+          <div class="mail-form-grid">
+            <el-form-item label="SMTP Host">
+              <el-input v-model="mailSettings.smtp_host" placeholder="smtp.example.com" />
+            </el-form-item>
+            <el-form-item label="SMTP Port">
+              <el-input-number v-model="mailSettings.smtp_port" :min="1" :max="65535" />
+            </el-form-item>
+          </div>
+          <el-form-item label="加密方式">
+            <el-select v-model="mailSettings.encryption" style="width: 220px">
+              <el-option label="STARTTLS (587)" value="starttls" />
+              <el-option label="TLS (465)" value="tls" />
+              <el-option label="None" value="none" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="SMTP 用户名">
+            <el-input v-model="mailSettings.smtp_username" />
+          </el-form-item>
+          <el-form-item :label="mailSettings.has_smtp_password ? 'SMTP 密码 - 已存在，留空保留' : 'SMTP 密码'">
+            <el-input v-model="mailSettings.smtp_password" show-password />
+          </el-form-item>
+          <div class="mail-form-grid">
+            <el-form-item label="发件邮箱">
+              <el-input v-model="mailSettings.from_email" placeholder="noreply@example.com" />
+            </el-form-item>
+            <el-form-item label="发件名称">
+              <el-input v-model="mailSettings.from_name" placeholder="Passwall" />
+            </el-form-item>
+          </div>
+
+          <h3 class="section-title" style="margin-top:24px;">提醒阈值</h3>
+          <div class="mail-form-grid">
+            <el-form-item label="到期前提醒天数">
+              <el-input-number v-model="mailSettings.expire_before_days" :min="1" :max="365" />
+            </el-form-item>
+            <el-form-item label="剩余流量百分比">
+              <el-input-number v-model="mailSettings.traffic_remain_percent" :min="1" :max="100" />
+              <span class="input-suffix">%</span>
+            </el-form-item>
+          </div>
+
+          <h3 class="section-title" style="margin-top:24px;">测试发送</h3>
+          <div class="test-mail-row">
+            <el-input v-model="testMailTo" placeholder="you@example.com" />
+            <el-button :loading="mailTesting" @click="testMail">发送测试</el-button>
+          </div>
+        </el-form>
+
+        <h3 class="section-title" style="margin-top:32px;">手动公告</h3>
+        <p class="section-hint">
+          即时发送给有收件邮箱的用户。支持 HTML 和同邮件模板一致的变量。
+        </p>
+        <el-form label-position="top" style="max-width:720px">
+          <el-form-item label="公告标题">
+            <el-input v-model="announcementForm.subject" placeholder="{{.SiteTitle}} 服务公告" />
+          </el-form-item>
+          <el-form-item label="公告正文">
+            <el-input
+              v-model="announcementForm.body"
+              type="textarea"
+              :rows="8"
+              placeholder="你好 {{.DisplayName}}，&#10;&#10;这里填写公告内容。"
+            />
+          </el-form-item>
+          <el-form-item>
+            <el-switch v-model="announcementForm.only_enabled" />
+            <span style="margin-left: 12px">仅发送给已启用用户</span>
+          </el-form-item>
+          <div class="actions">
+            <el-button type="warning" :loading="announcementSending" @click="sendAnnouncement">
+              发送公告
+            </el-button>
+          </div>
+        </el-form>
+
+        <h3 class="section-title" style="margin-top:32px;">邮件模板</h3>
+        <p class="section-hint">
+          支持 HTML。可用变量包括：SiteTitle、LogoURL、GeneratedAt、UPN、DisplayName、Email、SubURL、ExpireAt、ExpireBeforeDays、TrafficRemainPercent、PeriodUsedGB、TrafficLimitGB、TrafficRemainGB。
+        </p>
+        <div class="mail-template-list">
+          <div v-for="tpl in mailTemplates" :key="tpl.kind" class="mail-template-item">
+            <div class="mail-template-head">
+              <h4 class="sub-section-title">{{ templateLabel(tpl.kind) }}</h4>
+              <el-switch v-model="tpl.enabled" active-text="启用" />
+            </div>
+            <el-form label-position="top">
+              <el-form-item label="标题">
+                <el-input v-model="tpl.subject" />
+              </el-form-item>
+              <el-form-item label="正文">
+                <el-input v-model="tpl.body" type="textarea" :rows="7" />
+              </el-form-item>
+            </el-form>
+          </div>
+        </div>
+
+        <div class="actions">
+          <el-button type="primary" :loading="mailSaving" @click="saveMail">保存邮件设置</el-button>
+        </div>
+      </el-card>
+    </div>
+
     <!-- Brand Settings -->
     <div v-show="activeTab === 'brand'" v-loading="generalLoading">
       <el-card class="settings-card">
-        <h3 class="section-title">站点名称</h3>
+        <h3 class="section-title">名称</h3>
         <p class="section-hint">
-          显示在侧边栏、顶栏、面包屑和登录页的品牌名称。留空则使用默认值 "Passwall"。
+          站点名称用于浏览器标题、面包屑和系统语境；应用名称显示在左上角和登录页。Logo 可以带品牌名，应用名称可以保持为 Passwall。
         </p>
         <el-form label-position="top" style="max-width:480px">
-          <el-form-item label="站点标题">
+          <el-form-item label="站点名称">
             <el-input v-model="siteTitle" placeholder="Passwall" />
+          </el-form-item>
+          <el-form-item label="应用名称（左上角 / 登录页）">
+            <el-input v-model="appTitle" placeholder="Passwall" />
           </el-form-item>
         </el-form>
 
@@ -491,6 +734,16 @@ onMounted(() => {
           </el-form-item>
           <el-form-item label="Logo 地址（暗色模式）">
             <el-input v-model="logoUrlDark" placeholder="留空则跟随亮色 Logo" />
+          </el-form-item>
+        </el-form>
+
+        <h3 class="section-title" style="margin-top:32px;">Icon</h3>
+        <p class="section-hint">
+          浏览器标签页和快捷方式图标。留空使用内置默认头像图标。
+        </p>
+        <el-form label-position="top" style="max-width:480px">
+          <el-form-item label="Icon 地址">
+            <el-input v-model="iconUrl" placeholder="留空使用默认 Icon" />
           </el-form-item>
         </el-form>
 
@@ -665,7 +918,7 @@ onMounted(() => {
               </el-form-item>
 
               <h4 class="sub-section-title">Claim 映射</h4>
-              <el-form-item label="Username claim">
+              <el-form-item label="UPN claim">
                 <el-input v-model="oidc.attribute_mapping.username" placeholder="preferred_username" />
               </el-form-item>
               <el-form-item label="Email claim">
@@ -761,6 +1014,46 @@ export default { data() { return { ssoSubTab: 'saml' } } }
   border: 1px solid var(--header-border);
   background: var(--card-bg);
   max-width: 720px;
+}
+
+.mail-settings-card {
+  max-width: 880px;
+}
+
+.mail-form-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(160px, 220px);
+  gap: 16px;
+}
+
+.test-mail-row {
+  display: flex;
+  gap: 10px;
+  max-width: 520px;
+}
+
+.mail-template-list {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.mail-template-item {
+  border-top: 1px solid var(--header-border);
+  padding-top: 14px;
+}
+
+.mail-template-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.input-suffix {
+  color: var(--text-muted);
+  font-size: 13px;
+  margin-left: 10px;
 }
 
 .sso-tabs {
@@ -923,5 +1216,15 @@ export default { data() { return { ssoSubTab: 'saml' } } }
 
 .idp-info-link:hover {
   text-decoration: underline;
+}
+
+@media (max-width: 768px) {
+  .mail-form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .test-mail-row {
+    flex-direction: column;
+  }
 }
 </style>

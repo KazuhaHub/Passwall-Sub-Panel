@@ -45,7 +45,7 @@ func (h *SubHandler) Get(c *gin.Context) {
 	}
 
 	// TODO(M1): pick clientType from query param ?client= or UA detection.
-	out, err := h.render.RenderForUser(c.Request.Context(), u, domain.ClientClashMeta)
+	out, err := h.render.RenderForUser(c.Request.Context(), u, domain.ClientMihomo)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -56,7 +56,7 @@ func (h *SubHandler) Get(c *gin.Context) {
 		UserID:     u.ID,
 		IP:         c.ClientIP(),
 		UA:         c.GetHeader("User-Agent"),
-		ClientType: "clash-meta",
+		ClientType: "mihomo",
 		AccessedAt: time.Now(),
 	})
 

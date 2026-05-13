@@ -46,7 +46,7 @@
 | **核心** | 严格管理边界，**绝不**误伤非纳管资源 |
 | **核心** | 流量限额由面板主动管理，超限自动断开所有归属客户端 |
 | 次要 | 用户自助页（到期、流量、订阅 URL、改密码） |
-| 次要 | 多客户端格式（Clash / Clash Meta / Sing-box） |
+| 次要 | 多客户端格式（mihomo / Sing-box） |
 | 次要 | 流量历史曲线（日/月/永久） |
 | 次要 | 审计日志 |
 | **Future** | Canvas LMS 联动（LTI 1.3 / 外部工具） |
@@ -652,7 +652,7 @@ TrafficSvc cron 每 5min:
 ### 7.10 订阅请求
 
 ```
-GET /sub/abc123 (UA: Clash Meta)
+GET /sub/abc123 (UA: mihomo)
 
 后端:
   1. 查 users WHERE sub_token=? → user

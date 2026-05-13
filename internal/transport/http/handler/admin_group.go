@@ -161,7 +161,7 @@ func (h *AdminGroupHandler) Update(c *gin.Context) {
 		}
 		for _, m := range members {
 			if err := h.user.ResyncMembership(c.Request.Context(), m.ID); err != nil {
-				resyncErrors = append(resyncErrors, m.Username+": "+err.Error())
+				resyncErrors = append(resyncErrors, m.UPN+": "+err.Error())
 			}
 		}
 	}

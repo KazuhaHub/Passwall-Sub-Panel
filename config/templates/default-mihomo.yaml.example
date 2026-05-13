@@ -1,0 +1,100 @@
+slug: default-mihomo
+name: 默认 mihomo
+client_type: mihomo
+is_default: true
+rule_sets:
+  - default_mihomo_rules
+content: |
+  mixed-port: 7890
+  allow-lan: true
+  bind-address: '*'
+  mode: rule
+  log-level: info
+  external-controller: 127.0.0.1:46011
+  clash-for-android:
+    append-system-dns: false
+  sniffer:
+    enable: true
+    parse-pure-ip: true
+    override-destination: false
+    sniff:
+      HTTP:
+        ports:
+        - 80
+        - 8080-8880
+        override-destination: true
+      TLS:
+        ports:
+        - 443
+        - 8443
+      QUIC:
+        ports:
+        - 443
+    force-domain:
+    - +.claude.ai
+    - +.claude.com
+    - +.anthropic.com
+    - +.claudeusercontent.com
+  dns:
+    default-nameserver:
+    - 223.5.5.5
+    - 119.29.29.29
+    - 1.1.1.1
+    - 8.8.8.8
+    - 2400:3200::1
+    - '2402:4e00::'
+    - 2606:4700:4700::1111
+    - 2001:4860:4860::8888
+    direct-nameserver: []
+    direct-nameserver-follow-policy: false
+    enable: true
+    enhanced-mode: fake-ip
+    fake-ip-filter:
+    - '*.lan'
+    - '*.local'
+    - '*.arpa'
+    - time.*.com
+    - ntp.*.com
+    - time.*.com
+    - +.market.xiaomi.com
+    - localhost.ptlogin2.qq.com
+    - '*.msftncsi.com'
+    - www.msftconnecttest.com
+    fake-ip-filter-mode: blacklist
+    fake-ip-range: 198.18.0.1/16
+    fallback:
+    - https://v5brh3pn84.cloudflare-gateway.com/dns-query
+    - https://cloudflare-dns.com/dns-query
+    fallback-filter:
+      domain:
+      - +.google.com
+      - +.facebook.com
+      - +.youtube.com
+      geoip: true
+      geoip-code: CN
+      ipcidr:
+      - 240.0.0.0/4
+      - 0.0.0.0/32
+    ipv6: true
+    listen: :53
+    nameserver:
+    - https://dns.alidns.com/dns-query
+    - https://doh.pub/dns-query
+    - https://v5brh3pn84.cloudflare-gateway.com/dns-query
+    prefer-h3: false
+    proxy-server-nameserver:
+    - https://v5brh3pn84.cloudflare-gateway.com/dns-query
+    - https://cloudflare-dns.com/dns-query
+    respect-rules: false
+    use-hosts: false
+    use-system-hosts: false
+
+  proxies:
+    {{ proxies }}
+
+  proxy-groups:
+    {{ proxy_groups }}
+
+  rules:
+    {{ rules_common }}
+    {{ rules_personal }}

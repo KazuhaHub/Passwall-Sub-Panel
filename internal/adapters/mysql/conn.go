@@ -71,6 +71,7 @@ func NewRepos(db *gorm.DB) ports.Repos {
 		RuleSet:    &ruleSetRepo{db: db},
 		XUIPanel:   &xuiPanelRepo{db: db},
 		Settings:   &settingsRepo{db: db},
+		Mail:       &mailRepo{db: db},
 		SAMLConfig: &samlConfigRepo{db: db},
 		OIDCConfig: &oidcConfigRepo{db: db},
 	}

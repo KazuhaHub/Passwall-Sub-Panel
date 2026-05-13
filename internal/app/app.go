@@ -22,6 +22,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/audit"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/auth"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/group"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/mailer"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/node"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/reconcile"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/render"
@@ -43,6 +44,7 @@ type App struct {
 	user      *user.Service
 	node      *node.Service
 	audit     *audit.Service
+	mail      *mailer.Service
 	settings  ports.SettingsRepo
 	syncTasks ports.SyncTaskRepo
 	saml      *auth.SAMLService
@@ -102,12 +104,16 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 		Template:   templateRepo,
 		XUIPanel:   mysqlRepos.XUIPanel,
 		Settings:   mysqlRepos.Settings,
+		Mail:       mysqlRepos.Mail,
 		SAMLConfig: mysqlRepos.SAMLConfig,
 		OIDCConfig: mysqlRepos.OIDCConfig,
 	}
 
 	if err := initAdminIfNeeded(ctx, repos); err != nil {
 		return nil, fmt.Errorf("init admin: %w", err)
+	}
+	if err := seedRuleSetsIfEmpty(ctx, cfg.ConfigDir, repos.RuleSet); err != nil {
+		return nil, fmt.Errorf("seed rule sets: %w", err)
 	}
 
 	pool, err := xuiadapter.NewPool(ctx, repos.XUIPanel)
@@ -156,6 +162,7 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	userSvc := user.New(repos.User, repos.Group, repos.Ownership, repos.SyncTask, groupSvc, syncSvc, pool, repos.Settings)
 	nodeSvc := node.New(repos.Node, pool, syncSvc, repos.SyncTask, repos.Group, repos.User, syncSvc, repos.Settings)
 	trafficSvc := traffic.New(repos.User, repos.Ownership, repos.Traffic, pool, userSvc)
+	mailSvc := mailer.New(repos.Mail, repos.User, repos.Traffic, repos.Settings)
 	reconcileSvc := reconcile.New(repos.User, repos.Ownership, repos.Node, repos.Group, repos.Settings, repos.Audit, pool, syncSvc)
 	renderSvc := render.New(repos, pool, groupSvc)
 
@@ -174,6 +181,7 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 		Audit:            auditSvc,
 		Sync:             syncSvc,
 		Traffic:          trafficSvc,
+		Mail:             mailSvc,
 		Reconcile:        reconcileSvc,
 		SubPerIPPerMin:   sysSettings.SubPerIPPerMin,
 		LoginPerIPPerMin: sysSettings.LoginPerIPPerMin,
@@ -186,6 +194,7 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 		user:              userSvc,
 		node:              nodeSvc,
 		audit:             auditSvc,
+		mail:              mailSvc,
 		settings:          repos.Settings,
 		syncTasks:         repos.SyncTask,
 		saml:              samlSvc,
@@ -225,9 +234,29 @@ func (a *App) Run() error {
 	go a.runSyncTaskLoop(bgCtx)
 	go a.runAuditCleanupLoop(bgCtx)
 	go a.runTrafficLoop(bgCtx)
+	go a.runMailLoop(bgCtx)
 	go a.runReconcileLoop(bgCtx)
 
 	return a.server.ListenAndServe()
+}
+
+func (a *App) runMailLoop(ctx context.Context) {
+	interval := time.Hour
+	t := time.NewTicker(interval)
+	defer t.Stop()
+	log.Info("mail reminder loop started", "interval", interval.String())
+	for {
+		if a.mail != nil {
+			if err := a.mail.ProcessReminders(ctx); err != nil {
+				log.Warn("mail reminders", "err", err)
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+	}
 }
 
 func (a *App) runAuditCleanupLoop(ctx context.Context) {
@@ -398,7 +427,7 @@ func initAdminIfNeeded(ctx context.Context, repos ports.Repos) error {
 	}
 	now := time.Now()
 	u := &domain.User{
-		Username:           "admin",
+		UPN:                "admin",
 		PasswordHash:       string(hash),
 		Role:               domain.RoleAdmin,
 		SubToken:           subToken,
@@ -414,7 +443,7 @@ func initAdminIfNeeded(ctx context.Context, repos ports.Repos) error {
 	}
 
 	log.Info("bootstrap admin created",
-		"username", u.Username,
+		"upn", u.UPN,
 		"password", pw,
 		"user_id", u.ID,
 		"group", g.Slug)

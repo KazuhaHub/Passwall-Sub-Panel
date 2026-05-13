@@ -26,7 +26,7 @@ func NewAdminTrafficHandler(users ports.UserRepo, trafficSvc *traffic.Service) *
 
 type trafficRow struct {
 	UserID              int64  `json:"user_id"`
-	Username            string `json:"username"`
+	UPN                 string `json:"upn"`
 	PermanentTotalBytes int64  `json:"permanent_total_bytes"`
 	PeriodUsedBytes     int64  `json:"period_used_bytes"`
 	TodayUsedBytes      int64  `json:"today_used_bytes"`
@@ -63,7 +63,7 @@ func (h *AdminTrafficHandler) Top(c *gin.Context) {
 			}
 			rows = append(rows, trafficRow{
 				UserID:              u.ID,
-				Username:            u.Username,
+				UPN:                 u.UPN,
 				PermanentTotalBytes: report.PermanentTotalBytes,
 				PeriodUsedBytes:     report.PeriodUsedBytes,
 				TodayUsedBytes:      report.TodayUsedBytes,

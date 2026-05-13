@@ -8,7 +8,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 )
 
-func TestCreateLocalUsersWithBlankUPN(t *testing.T) {
+func TestCreateUsersWithUPN(t *testing.T) {
 	db, err := Open("sqlite", filepath.Join(t.TempDir(), "panel.db"))
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
@@ -30,7 +30,7 @@ func TestCreateLocalUsersWithBlankUPN(t *testing.T) {
 	ctx := context.Background()
 	users := []*domain.User{
 		{
-			Username:           "alice",
+			UPN:                "alice@example.test",
 			PasswordHash:       "hash",
 			Role:               domain.RoleUser,
 			SubToken:           "sub-token-alice",
@@ -40,7 +40,7 @@ func TestCreateLocalUsersWithBlankUPN(t *testing.T) {
 			Enabled:            true,
 		},
 		{
-			Username:           "bob",
+			UPN:                "bob@example.test",
 			PasswordHash:       "hash",
 			Role:               domain.RoleUser,
 			SubToken:           "sub-token-bob",
@@ -53,7 +53,7 @@ func TestCreateLocalUsersWithBlankUPN(t *testing.T) {
 
 	for _, u := range users {
 		if err := repo.Create(ctx, u); err != nil {
-			t.Fatalf("create %s: %v", u.Username, err)
+			t.Fatalf("create %s: %v", u.UPN, err)
 		}
 	}
 }

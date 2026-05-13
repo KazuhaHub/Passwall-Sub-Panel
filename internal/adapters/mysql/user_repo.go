@@ -38,14 +38,6 @@ func (r *userRepo) GetByID(ctx context.Context, id int64) (*domain.User, error) 
 	return row.toDomain(), nil
 }
 
-func (r *userRepo) GetByUsername(ctx context.Context, username string) (*domain.User, error) {
-	var row userRow
-	if err := r.db.WithContext(ctx).Where("username = ?", username).First(&row).Error; err != nil {
-		return nil, wrapNotFound(err)
-	}
-	return row.toDomain(), nil
-}
-
 func (r *userRepo) GetByUPN(ctx context.Context, upn string) (*domain.User, error) {
 	var row userRow
 	if err := r.db.WithContext(ctx).Where("upn = ?", upn).First(&row).Error; err != nil {
@@ -66,7 +58,7 @@ func (r *userRepo) List(ctx context.Context, filter ports.UserFilter) ([]*domain
 	q := r.db.WithContext(ctx).Model(&userRow{})
 	if filter.Search != "" {
 		like := "%" + filter.Search + "%"
-		q = q.Where("username LIKE ? OR upn LIKE ? OR remark LIKE ?", like, like, like)
+		q = q.Where("upn LIKE ? OR email LIKE ? OR remark LIKE ?", like, like, like)
 	}
 	if filter.GroupID != nil {
 		q = q.Where("group_id = ?", *filter.GroupID)

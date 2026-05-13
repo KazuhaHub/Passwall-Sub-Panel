@@ -7,9 +7,8 @@ import { getMyUsage, type UsageReport } from '@/api/traffic'
 
 interface MeProfile {
   id: number
-  username: string
   display_name?: string
-  upn?: string
+  upn: string
   sub_url: string
   expire_at?: string | null
   traffic_limit_bytes: number
@@ -26,25 +25,33 @@ interface MeProfile {
 }
 
 const profile = ref<MeProfile | null>(null)
-const displayName = computed(() => profile.value?.display_name || profile.value?.username || '')
+const displayName = computed(() => profile.value?.display_name || profile.value?.upn || '')
 const usage = ref<UsageReport | null>(null)
 const qrDataURL = ref<string>('')
 const passwordDialog = ref(false)
+const rulesDialog = ref(false)
 const oldPassword = ref('')
 const newPassword = ref('')
 const emergencyBusy = ref(false)
+const personalRules = ref('')
+const personalRulesSaved = ref('')
+const rulesBusy = ref(false)
 const canUseEmergency = computed(() => {
   const e = profile.value?.emergency_access
   return !!profile.value?.expire_at && !!e?.enabled && e.remaining > 0
 })
+const personalRulesDirty = computed(() => personalRules.value.trim() !== personalRulesSaved.value.trim())
 
 async function load() {
-  const [p, u] = await Promise.all([
+  const [p, u, rules] = await Promise.all([
     client.get<MeProfile>('/user/me').then((r) => r.data),
     getMyUsage().catch(() => null),
+    client.get<{ personal_rules: string }>('/user/me/rules').then((r) => r.data).catch(() => ({ personal_rules: '' })),
   ])
   profile.value = p
   usage.value = u
+  personalRules.value = rules.personal_rules || ''
+  personalRulesSaved.value = rules.personal_rules || ''
   if (p.sub_url) {
     qrDataURL.value = await QRCode.toDataURL(p.sub_url, { width: 200, margin: 2 })
   }
@@ -121,6 +128,29 @@ async function useEmergencyAccess() {
   }
 }
 
+async function savePersonalRules() {
+  rulesBusy.value = true
+  try {
+    const rules = personalRules.value.trim()
+    await client.put('/user/me/rules', { personal_rules: rules })
+    personalRules.value = rules
+    personalRulesSaved.value = rules
+    rulesDialog.value = false
+    ElMessage.success('个人规则已保存，更新客户端订阅后生效')
+  } finally {
+    rulesBusy.value = false
+  }
+}
+
+function resetPersonalRulesEditor() {
+  personalRules.value = personalRulesSaved.value
+}
+
+function openPersonalRulesDialog() {
+  personalRules.value = personalRulesSaved.value
+  rulesDialog.value = true
+}
+
 function formatBytes(n: number): string {
   if (n === 0) return '0 B'
   const units = ['B', 'KB', 'MB', 'GB', 'TB']
@@ -189,6 +219,17 @@ onMounted(load)
           </div>
         </el-card>
 
+        <el-card class="actions-card">
+          <div class="card-header-flex">
+            <h3 class="card-title">操作区</h3>
+          </div>
+          <div class="action-grid">
+            <el-button plain @click="openPersonalRulesDialog">
+              个人规则
+            </el-button>
+          </div>
+        </el-card>
+
         <!-- Expiration Card -->
         <el-card class="stat-card">
           <div class="card-header-flex">
@@ -252,7 +293,27 @@ onMounted(load)
           </div>
         </el-card>
       </div>
+
     </div>
+
+    <el-dialog v-model="rulesDialog" title="个人规则" width="720px" top="8vh">
+      <el-input
+        v-model="personalRules"
+        type="textarea"
+        :rows="14"
+        resize="vertical"
+        placeholder="- DOMAIN-SUFFIX,example.com,DIRECT"
+        class="rules-editor"
+      />
+      <p class="rules-hint">按 mihomo rules 格式填写，每行一条。保存后更新客户端订阅生效。</p>
+      <template #footer>
+        <el-button :disabled="!personalRulesDirty || rulesBusy" @click="resetPersonalRulesEditor">撤销</el-button>
+        <el-button @click="rulesDialog = false">取消</el-button>
+        <el-button type="primary" :disabled="!personalRulesDirty" :loading="rulesBusy" @click="savePersonalRules">
+          保存规则
+        </el-button>
+      </template>
+    </el-dialog>
 
     <!-- Password Dialog -->
     <el-dialog v-model="passwordDialog" title="修改密码" width="400px" class="custom-dialog">
@@ -522,6 +583,24 @@ onMounted(load)
   margin-top: auto;
 }
 
+.rules-editor :deep(textarea) {
+  font-family: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.action-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.rules-hint {
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 .w-full {
   width: 100%;
 }
@@ -536,4 +615,5 @@ onMounted(load)
 .mr-1 {
   margin-right: 4px;
 }
+
 </style>

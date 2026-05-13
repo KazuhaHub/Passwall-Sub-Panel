@@ -4,7 +4,7 @@ import type { Role } from '@/api/types'
 
 interface AuthState {
   userId: number | null
-  username: string
+  upn: string
   displayName: string
   role: Role | ''
 }
@@ -18,7 +18,7 @@ function loadFromStorage(): AuthState {
   } catch {
     // ignored
   }
-  return { userId: null, username: '', displayName: '', role: '' }
+  return { userId: null, upn: '', displayName: '', role: '' }
 }
 
 export const useAuthStore = defineStore('auth', {
@@ -26,15 +26,15 @@ export const useAuthStore = defineStore('auth', {
   getters: {
     loggedIn: (s) => !!sessionStorage.getItem('psp_access'),
     isAdmin: (s) => s.role === 'admin',
-    label: (s) => s.displayName || s.username || 'User',
+    label: (s) => s.displayName || s.upn || 'User',
   },
   actions: {
-    async login(username: string, password: string) {
-      const res = await localLogin(username, password)
+    async login(upn: string, password: string) {
+      const res = await localLogin(upn, password)
       sessionStorage.setItem('psp_access', res.access_token)
       sessionStorage.setItem('psp_refresh', res.refresh_token)
       this.userId = res.user.id
-      this.username = res.user.username
+      this.upn = res.user.upn
       this.displayName = res.user.display_name || ''
       this.role = res.user.role
       sessionStorage.setItem(STORAGE_KEY, JSON.stringify(this.$state))
@@ -44,7 +44,7 @@ export const useAuthStore = defineStore('auth', {
       sessionStorage.setItem('psp_access', res.access_token)
       sessionStorage.setItem('psp_refresh', res.refresh_token)
       this.userId = res.user.id
-      this.username = res.user.username
+      this.upn = res.user.upn
       this.displayName = res.user.display_name || ''
       this.role = res.user.role
       sessionStorage.setItem(STORAGE_KEY, JSON.stringify(this.$state))
@@ -61,7 +61,7 @@ export const useAuthStore = defineStore('auth', {
       sessionStorage.removeItem('psp_refresh')
       sessionStorage.removeItem(STORAGE_KEY)
       this.userId = null
-      this.username = ''
+      this.upn = ''
       this.displayName = ''
       this.role = ''
     },

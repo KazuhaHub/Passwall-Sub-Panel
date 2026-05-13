@@ -4,6 +4,8 @@ import type { LoginMode } from './auth'
 export interface UISettings {
   login_mode: LoginMode
   site_title: string
+  app_title: string
+  icon_url: string
   logo_url: string
   logo_url_dark: string
   email_domain: string
@@ -32,6 +34,73 @@ export async function getUISettings() {
 
 export async function putUISettings(s: UISettings) {
   const { data } = await client.put<UISettings>('/admin/settings/ui', s)
+  return data
+}
+
+// ---- Mail reminders ----
+
+export type MailReminderKind = 'expire_before' | 'expired' | 'traffic_low'
+
+export interface MailSettings {
+  enabled: boolean
+  smtp_host: string
+  smtp_port: number
+  smtp_username: string
+  smtp_password?: string
+  has_smtp_password: boolean
+  from_email: string
+  from_name: string
+  encryption: 'none' | 'starttls' | 'tls'
+  expire_before_days: number
+  traffic_remain_percent: number
+}
+
+export interface MailTemplate {
+  kind: MailReminderKind
+  subject: string
+  body: string
+  enabled: boolean
+}
+
+export async function getMailSettings() {
+  const { data } = await client.get<{ settings: MailSettings; templates: MailTemplate[] }>('/admin/settings/mail')
+  return data
+}
+
+export async function putMailSettings(s: MailSettings) {
+  const { data } = await client.put<MailSettings>('/admin/settings/mail', s)
+  return data
+}
+
+export async function putMailTemplate(t: MailTemplate) {
+  const { data } = await client.put<MailTemplate>(`/admin/settings/mail/templates/${t.kind}`, t)
+  return data
+}
+
+export async function sendTestMail(to: string) {
+  const { data } = await client.post<{ sent: boolean }>('/admin/settings/mail/test', { to })
+  return data
+}
+
+export interface MailAnnouncementResult {
+  total: number
+  sent: number
+  skipped: number
+  failed: number
+  errors?: Array<{
+    user_id: number
+    upn: string
+    email: string
+    error: string
+  }>
+}
+
+export async function sendMailAnnouncement(req: {
+  subject: string
+  body: string
+  only_enabled: boolean
+}) {
+  const { data } = await client.post<MailAnnouncementResult>('/admin/settings/mail/announcement', req)
   return data
 }
 

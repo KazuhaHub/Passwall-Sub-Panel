@@ -8,7 +8,7 @@ export interface UsageReport {
 }
 
 export interface TrafficRow extends UsageReport {
-  username: string
+  upn: string
 }
 
 export async function getMyUsage() {

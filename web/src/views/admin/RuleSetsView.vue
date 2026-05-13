@@ -8,8 +8,10 @@ import {
   saveRuleSet,
   type RuleSet,
 } from '@/api/rules'
+import { listTemplates, type Template } from '@/api/templates'
 
 const items = ref<RuleSet[]>([])
+const templates = ref<Template[]>([])
 const loading = ref(false)
 const selectedItems = ref<RuleSet[]>([])
 const batchBusy = ref<'enable' | 'disable' | 'delete' | ''>('')
@@ -27,7 +29,9 @@ const form = reactive<RuleSet>({
 async function load() {
   loading.value = true
   try {
-    items.value = await listRuleSets()
+    const [ruleSetItems, templateItems] = await Promise.all([listRuleSets(), listTemplates()])
+    items.value = ruleSetItems
+    templates.value = templateItems
     selectedItems.value = []
   } finally {
     loading.value = false
@@ -70,7 +74,11 @@ async function submit() {
 }
 
 async function confirmDelete(rs: RuleSet) {
-  await ElMessageBox.confirm(`删除规则集 ${rs.slug}？`, '确认', { type: 'warning' })
+  const usedBy = usedByTemplates(rs)
+  const usageText = usedBy.length > 0
+    ? `\n\n该规则集正在被 ${usedBy.map((tpl) => tpl.name || tpl.slug).join('、')} 引用，删除后这些配置方案会跳过该规则集。`
+    : ''
+  await ElMessageBox.confirm(`删除规则集 ${rs.slug}？${usageText}`, '确认', { type: 'warning' })
   await deleteRuleSet(rs.slug)
   ElMessage.success('已删除')
   await load()
@@ -125,13 +133,26 @@ function countLines(s: string): number {
   return s ? s.split('\n').filter((l) => l.trim()).length : 0
 }
 
+function usedByTemplates(rs: RuleSet) {
+  return templates.value.filter((tpl) => (tpl.rule_sets || []).includes(rs.slug))
+}
+
+function usageSummary(rs: RuleSet) {
+  const usedBy = usedByTemplates(rs)
+  if (usedBy.length === 0) return '未引用'
+  return usedBy.map((tpl) => tpl.name || tpl.slug).join('、')
+}
+
 onMounted(load)
 </script>
 
 <template>
   <div class="psp-page">
     <div class="psp-page-header">
-      <div class="psp-page-title">规则集</div>
+      <div>
+        <div class="psp-page-title">规则库</div>
+        <div class="psp-page-desc">规则集是可复用片段，只有绑定到配置方案后才会参与订阅渲染。</div>
+      </div>
       <el-button type="primary" @click="openCreate">新增规则集</el-button>
     </div>
 
@@ -171,6 +192,11 @@ onMounted(load)
       <el-table-column prop="sort" label="排序" width="80" />
       <el-table-column label="规则行数" width="100">
         <template #default="{ row }">{{ countLines(row.content) }}</template>
+      </el-table-column>
+      <el-table-column label="引用配置方案" min-width="220" show-overflow-tooltip>
+        <template #default="{ row }">
+          <span :class="{ muted: usedByTemplates(row).length === 0 }">{{ usageSummary(row) }}</span>
+        </template>
       </el-table-column>
       <el-table-column label="状态" width="100">
         <template #default="{ row }">
@@ -234,5 +260,15 @@ onMounted(load)
 .selection-count {
   color: var(--text-muted);
   white-space: nowrap;
+}
+
+.psp-page-desc,
+.muted {
+  color: var(--text-muted);
+}
+
+.psp-page-desc {
+  margin-top: 6px;
+  font-size: 13px;
 }
 </style>

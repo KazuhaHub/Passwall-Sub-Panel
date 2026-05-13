@@ -13,6 +13,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/audit"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/auth"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/group"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/mailer"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/node"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/reconcile"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/render"
@@ -39,6 +40,7 @@ type Deps struct {
 	Audit     *audit.Service
 	Sync      *syncsvc.Service
 	Traffic   *traffic.Service
+	Mail      *mailer.Service
 	Reconcile *reconcile.Service
 
 	// Rate-limit caps resolved from the DB settings table at startup. The
@@ -95,6 +97,8 @@ func NewRouter(d Deps) *gin.Engine {
 	{
 		userGroup.GET("", userMe.Profile)
 		userGroup.GET("/traffic", userMe.Traffic)
+		userGroup.GET("/rules", userMe.GetRules)
+		userGroup.PUT("/rules", userMe.PutRules)
 		userGroup.POST("/emergency-access", userMe.EmergencyAccess)
 		userGroup.POST("/reset-credentials", userMe.ResetCredentials)
 		userGroup.POST("/change-password", userMe.ChangePassword)
@@ -116,6 +120,8 @@ func NewRouter(d Deps) *gin.Engine {
 		adminGroup.POST("/users/:id/reset-credentials", users.ResetCredentials)
 		adminGroup.POST("/users/:id/reset-emergency-usage", users.ResetEmergencyUsage)
 		adminGroup.POST("/users/:id/set-enabled", users.SetEnabled)
+		adminGroup.GET("/users/:id/rules", users.GetRules)
+		adminGroup.PUT("/users/:id/rules", users.PutRules)
 
 		nodes := handler.NewAdminNodeHandler(d.Node, d.Sync, d.Repos.Ownership, d.Repos.XUIPanel)
 		adminGroup.GET("/nodes", nodes.List)
@@ -169,6 +175,13 @@ func NewRouter(d Deps) *gin.Engine {
 		settings := handler.NewAdminSettingsHandler(d.Repos.Settings, d.JWTParams)
 		adminGroup.GET("/settings/ui", settings.Get)
 		adminGroup.PUT("/settings/ui", settings.Put)
+
+		mail := handler.NewAdminMailHandler(d.Mail)
+		adminGroup.GET("/settings/mail", mail.Get)
+		adminGroup.PUT("/settings/mail", mail.PutSettings)
+		adminGroup.PUT("/settings/mail/templates/:kind", mail.PutTemplate)
+		adminGroup.POST("/settings/mail/test", mail.Test)
+		adminGroup.POST("/settings/mail/announcement", mail.Announcement)
 
 		samlAdmin := handler.NewAdminSAMLHandler(d.Repos.SAMLConfig, d.SAML, d.Repos.OIDCConfig, d.OIDC, d.Repos.Settings)
 		adminGroup.GET("/settings/saml", samlAdmin.Get)

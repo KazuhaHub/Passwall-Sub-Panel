@@ -17,6 +17,7 @@ export interface UpdateUserRequest {
   traffic_reset_period?: ResetPeriod
   remark?: string
   display_name?: string
+  email?: string
 }
 
 export interface UserListParams {
@@ -64,4 +65,13 @@ export async function resetEmergencyUsage(id: number) {
 
 export async function setEnabled(id: number, enabled: boolean) {
   await client.post(`/admin/users/${id}/set-enabled`, { enabled })
+}
+
+export async function getUserRules(id: number) {
+  const { data } = await client.get<{ personal_rules: string }>(`/admin/users/${id}/rules`)
+  return data.personal_rules || ''
+}
+
+export async function updateUserRules(id: number, personalRules: string) {
+  await client.put(`/admin/users/${id}/rules`, { personal_rules: personalRules })
 }

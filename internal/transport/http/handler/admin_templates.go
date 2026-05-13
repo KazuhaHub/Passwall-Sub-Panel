@@ -21,11 +21,12 @@ func NewAdminTemplatesHandler(repo ports.TemplateRepo) *AdminTemplatesHandler {
 }
 
 type templateDTO struct {
-	Slug       string `json:"slug"`
-	Name       string `json:"name"`
-	ClientType string `json:"client_type"`
-	IsDefault  bool   `json:"is_default"`
-	Content    string `json:"content"`
+	Slug       string   `json:"slug"`
+	Name       string   `json:"name"`
+	ClientType string   `json:"client_type"`
+	IsDefault  bool     `json:"is_default"`
+	RuleSets   []string `json:"rule_sets"`
+	Content    string   `json:"content"`
 }
 
 func (h *AdminTemplatesHandler) List(c *gin.Context) {
@@ -39,7 +40,8 @@ func (h *AdminTemplatesHandler) List(c *gin.Context) {
 		out[i] = templateDTO{
 			Slug: t.Slug, Name: t.Name,
 			ClientType: string(t.ClientType),
-			IsDefault:  t.IsDefault, Content: t.Content,
+			IsDefault:  t.IsDefault, RuleSets: t.RuleSets,
+			Content: t.Content,
 		}
 	}
 	c.JSON(http.StatusOK, gin.H{"items": out})
@@ -59,7 +61,8 @@ func (h *AdminTemplatesHandler) Get(c *gin.Context) {
 	c.JSON(http.StatusOK, templateDTO{
 		Slug: t.Slug, Name: t.Name,
 		ClientType: string(t.ClientType),
-		IsDefault:  t.IsDefault, Content: t.Content,
+		IsDefault:  t.IsDefault, RuleSets: t.RuleSets,
+		Content: t.Content,
 	})
 }
 
@@ -78,6 +81,7 @@ func (h *AdminTemplatesHandler) Save(c *gin.Context) {
 		Name:       req.Name,
 		ClientType: domain.ClientType(req.ClientType),
 		IsDefault:  req.IsDefault,
+		RuleSets:   req.RuleSets,
 		Content:    req.Content,
 	}); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})

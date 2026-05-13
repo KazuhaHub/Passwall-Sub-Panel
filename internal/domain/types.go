@@ -17,8 +17,8 @@ type EmailRules struct {
 // (one per authorized inbound) via the ownership table.
 type User struct {
 	ID                 int64
-	Username           string // unique for local accounts
-	UPN                string // unique for SSO users (Entra ID UPN)
+	UPN                string // unique account identifier for both local and SSO users
+	Email              string // notification recipient; SSO uses the Email claim, not UPN
 	PasswordHash       string // bcrypt; present when the account has local-password login
 	Role               Role
 	SubToken           string // 32-byte base64url, subscription URL credential
@@ -31,10 +31,10 @@ type User struct {
 	TrafficResetPeriod ResetPeriod
 	TrafficPeriodStart *time.Time
 	// DisplayName is the friendly name shown in panel UI (avatar label,
-	// header, lists). Independent of Username/UPN — those are identifiers.
+	// header, lists). Independent of UPN, which is the stable identifier.
 	// SSO users get it from the SAML displayname claim on every login; for
-	// local accounts the admin enters it on create/edit. UI falls back to
-	// Username when empty.
+	// local accounts the admin enters it on create/edit. UI falls back to UPN
+	// when empty.
 	DisplayName        string
 	Remark             string
 	Enabled            bool
@@ -50,7 +50,7 @@ func (u *User) IsExpired(t time.Time) bool {
 }
 
 // HasLocalPassword reports whether the user can authenticate through the
-// panel's local username/password flow. SSO-linked pre-created accounts keep
+// panel's local UPN/password flow. SSO-linked pre-created accounts keep
 // their password hash, so this deliberately does not mean "not SSO".
 func (u *User) HasLocalPassword() bool {
 	return u != nil && u.PasswordHash != ""
@@ -66,8 +66,7 @@ func (u *User) HasLocalPassword() bool {
 // guarantees collision-free emails regardless of fork.
 //
 // Using the panel-side user ID for the user part guarantees:
-//   - uniqueness across local and SSO accounts, regardless of how the
-//     Username field is set or whether it contains '@';
+//   - uniqueness across local and SSO accounts regardless of the UPN value;
 //   - stability — renaming a user does NOT change their 3X-UI emails,
 //     so reconciliation never has to re-create the client;
 //   - that Entra ID's opaque persistent NameID, however garbled, never
@@ -240,7 +239,8 @@ type Template struct {
 	Name       string
 	ClientType ClientType
 	IsDefault  bool
-	Content    string // contains placeholders such as {{ proxies }} and {{ rules_common }}
+	RuleSets   []string
+	Content    string // contains placeholders such as {{ proxies }}, {{ proxy_groups }}, {{ rules_common }}
 }
 
 // XUIPanel holds the connection credentials for one 3X-UI panel.
@@ -249,7 +249,36 @@ type XUIPanel struct {
 	Name     string
 	URL      string
 	APIToken string // preferred: Bearer token auth
-	Username string // fallback: username/password + cookie session
+	Username string // fallback: 3X-UI panel username/password cookie session
 	Password string
 	Remark   string
+}
+
+type MailReminderKind string
+
+const (
+	MailReminderExpireBefore MailReminderKind = "expire_before"
+	MailReminderExpired      MailReminderKind = "expired"
+	MailReminderTrafficLow   MailReminderKind = "traffic_low"
+)
+
+type MailSettings struct {
+	Enabled              bool
+	SMTPHost             string
+	SMTPPort             int
+	SMTPUsername         string
+	SMTPPassword         string
+	FromEmail            string
+	FromName             string
+	Encryption           string // none | starttls | tls
+	ExpireBeforeDays     int
+	TrafficRemainPercent int
+}
+
+type MailTemplate struct {
+	Kind      MailReminderKind
+	Subject   string
+	Body      string
+	Enabled   bool
+	UpdatedAt time.Time
 }

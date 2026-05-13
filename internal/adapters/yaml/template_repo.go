@@ -28,11 +28,12 @@ func NewTemplateRepo(configDir string) (*TemplateRepo, error) {
 }
 
 type templateFile struct {
-	Slug       string `yaml:"slug"`
-	Name       string `yaml:"name"`
-	ClientType string `yaml:"client_type"`
-	IsDefault  bool   `yaml:"is_default"`
-	Content    string `yaml:"content"`
+	Slug       string   `yaml:"slug"`
+	Name       string   `yaml:"name"`
+	ClientType string   `yaml:"client_type"`
+	IsDefault  bool     `yaml:"is_default"`
+	RuleSets   []string `yaml:"rule_sets"`
+	Content    string   `yaml:"content"`
 }
 
 func (r *TemplateRepo) List(ctx context.Context) ([]*domain.Template, error) {
@@ -100,6 +101,7 @@ func (r *TemplateRepo) Save(ctx context.Context, t *domain.Template) error {
 		Name:       t.Name,
 		ClientType: string(t.ClientType),
 		IsDefault:  t.IsDefault,
+		RuleSets:   t.RuleSets,
 		Content:    t.Content,
 	}
 	return writeYAML(r.pathOf(t.Slug), doc)
@@ -129,6 +131,7 @@ func (r *TemplateRepo) readFile(path string) (*domain.Template, error) {
 		Name:       doc.Name,
 		ClientType: domain.ClientType(doc.ClientType),
 		IsDefault:  doc.IsDefault,
+		RuleSets:   doc.RuleSets,
 		Content:    doc.Content,
 	}, nil
 }

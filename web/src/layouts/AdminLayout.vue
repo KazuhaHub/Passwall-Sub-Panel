@@ -27,8 +27,8 @@ const nav: NavItem[] = [
   { path: '/admin/servers', label: '服务器', icon: 'Cpu' },
   { path: '/admin/nodes', label: '节点管理', icon: 'Connection' },
   { path: '/admin/groups', label: '分组', icon: 'Files' },
-  { path: '/admin/rules', label: '规则集', icon: 'List' },
-  { path: '/admin/templates', label: '模板', icon: 'Document' },
+  { path: '/admin/rules', label: '规则库', icon: 'List' },
+  { path: '/admin/templates', label: '配置方案', icon: 'Document' },
   { path: '/admin/traffic', label: '流量统计', icon: 'TrendCharts' },
   { path: '/admin/sync-tasks', label: '同步任务', icon: 'Refresh' },
   { path: '/admin/audit', label: '审计日志', icon: 'Clock' },
@@ -65,7 +65,7 @@ function handleUserCommand(cmd: string) {
     <aside class="sidebar" :class="{ 'is-open': isMobileMenuOpen }">
       <div class="brand">
         <img class="brand-logo" :src="site.logoDark" alt="Logo" />
-        <span class="brand-title">{{ site.title }}</span>
+        <span class="brand-title">{{ site.appTitle }}</span>
       </div>
       <div class="nav-menu">
         <router-link
@@ -90,7 +90,7 @@ function handleUserCommand(cmd: string) {
           <el-button class="mobile-menu-btn" text circle @click="isMobileMenuOpen = true">
             <el-icon><Expand /></el-icon>
           </el-button>
-          <span class="desktop-only">{{ site.title }}</span>
+          <span class="desktop-only">{{ site.siteTitle }}</span>
           <span class="separator desktop-only">/</span>
           <span class="current">{{ currentRouteName }}</span>
         </div>
@@ -102,9 +102,9 @@ function handleUserCommand(cmd: string) {
           
           <el-dropdown trigger="click" @command="handleUserCommand">
             <div class="user-profile">
-              <div class="avatar">{{ (auth.username || 'U').charAt(0).toUpperCase() }}</div>
+              <div class="avatar">{{ auth.label.charAt(0).toUpperCase() }}</div>
               <div class="user-info">
-                <div class="user-name">{{ auth.username || 'User' }}</div>
+                <div class="user-name">{{ auth.label }}</div>
                 <div class="user-role">{{ auth.role === 'admin' ? '管理员' : '用户' }}</div>
               </div>
             </div>

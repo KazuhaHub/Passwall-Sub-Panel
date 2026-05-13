@@ -5,6 +5,7 @@ export interface Template {
   name: string
   client_type: string
   is_default: boolean
+  rule_sets: string[]
   content: string
 }
 

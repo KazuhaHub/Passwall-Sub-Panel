@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -52,6 +53,8 @@ type Service struct {
 	emergencyMu sync.Mutex
 }
 
+const maxPersonalRulesBytes = 64 * 1024
+
 func New(users ports.UserRepo, groups ports.GroupRepo, ownership ports.OwnershipRepo,
 	tasks ports.SyncTaskRepo, selector NodeSelector, syncer ClientSyncer, pool ports.XUIPool, settings ports.SettingsRepo) *Service {
 	return &Service{
@@ -85,7 +88,8 @@ func (s *Service) emailRules(ctx context.Context) domain.EmailRules {
 
 // CreateLocalInput captures the admin form fields for creating a local user.
 type CreateLocalInput struct {
-	Username           string
+	UPN                string
+	Email              string
 	DisplayName        string // friendly name shown in panel UI (optional)
 	InitialPassword    string // if empty, a random one is generated
 	GroupID            int64
@@ -104,7 +108,7 @@ type CreateLocalResult struct {
 
 // dropOrphanUser deletes a stale panel user along with any 3X-UI clients
 // recorded under their ownership. Used when EnsureSSO needs to reclaim a
-// username or clean up a "pending approval" stub from earlier policies —
+// UPN or clean up a "pending approval" stub from earlier policies —
 // the panel row alone would leave orphan ownership rows + ghost 3X-UI
 // clients. Best-effort: every step is allowed to fail without aborting
 // caller flow (the SSO login path is more important than the cleanup).
@@ -141,10 +145,11 @@ func (s *Service) HasPendingSync(ctx context.Context, userID int64) bool {
 // 3X-UI — use CreateLocalAndSync for the full "user appears on every
 // authorised inbound" flow.
 func (s *Service) CreateLocal(ctx context.Context, in CreateLocalInput) (*CreateLocalResult, error) {
-	if in.Username == "" {
-		return nil, fmt.Errorf("%w: username required", domain.ErrValidation)
+	upn := strings.TrimSpace(in.UPN)
+	if upn == "" {
+		return nil, fmt.Errorf("%w: upn required", domain.ErrValidation)
 	}
-	if _, err := s.users.GetByUsername(ctx, in.Username); err == nil {
+	if _, err := s.users.GetByUPN(ctx, upn); err == nil {
 		return nil, domain.ErrAlreadyExists
 	} else if !errors.Is(err, domain.ErrNotFound) {
 		return nil, err
@@ -176,7 +181,8 @@ func (s *Service) CreateLocal(ctx context.Context, in CreateLocalInput) (*Create
 
 	now := time.Now()
 	u := &domain.User{
-		Username:           in.Username,
+		UPN:                upn,
+		Email:              in.Email,
 		DisplayName:        in.DisplayName,
 		PasswordHash:       string(hash),
 		Role:               domain.RoleUser,
@@ -250,29 +256,9 @@ func (s *Service) EnsureSSO(ctx context.Context, in EnsureSSOInput) (*domain.Use
 			u.DisplayName = in.DisplayName
 			dirty = true
 		}
-		// Fix garbled usernames from earlier versions that stored the opaque
-		// UPN/NameID. Prefer email, then display name, then keep current.
-		// If the target name is held by a stale passwordless SSO orphan
-		// (different user), delete the orphan so the rename can proceed.
-		// Password-enabled accounts are NEVER auto-deleted — admin-created
-		// identities stay sacred.
-		betterName := ssoDisplayName(in)
-		if betterName != "" && betterName != in.UPN && u.Username == in.UPN {
-			existing, nameErr := s.users.GetByUsername(ctx, betterName)
-			switch {
-			case nameErr != nil:
-				// Name is free.
-				u.Username = betterName
-				dirty = true
-			case existing.ID != u.ID && !existing.HasLocalPassword():
-				// Stale SSO record from an earlier login cycle blocking the
-				// rename. Drop it (and any 3X-UI clients it still owns) so
-				// the rename can proceed.
-				s.dropOrphanUser(ctx, existing.ID)
-				u.Username = betterName
-				dirty = true
-			}
-			// Otherwise: a local user owns this name — leave both alone.
+		if in.Email != "" && u.Email != in.Email {
+			u.Email = in.Email
+			dirty = true
 		}
 		if dirty {
 			if err := s.users.Update(ctx, u); err != nil {
@@ -282,38 +268,7 @@ func (s *Service) EnsureSSO(ctx context.Context, in EnsureSSOInput) (*domain.Use
 		return u, nil
 	}
 
-	// No UPN match. Try to link to a pre-created account whose username equals
-	// the SSO email — supports the "admin batch-creates local users who then
-	// log in via SSO" workflow. Strictly limited to accounts that have NOT
-	// already claimed an SSO identity (UPN == ""); otherwise this would
-	// silently rebind a stranger's login to someone else's account.
-	if in.Email != "" {
-		if linked, lerr := s.users.GetByUsername(ctx, in.Email); lerr == nil {
-			switch {
-			case linked.AutoDisabledReason == domain.DisabledPendingApproval:
-				// Stale stub from the old auto-creation policy — drop both
-				// the panel row and any 3X-UI clients it still owns.
-				s.dropOrphanUser(ctx, linked.ID)
-			case linked.UPN == "":
-				// Genuine pre-created password account → claim it for this SSO id.
-				linked.UPN = in.UPN
-				if linked.Role != desiredRole {
-					linked.Role = desiredRole
-				}
-				if in.DisplayName != "" && linked.DisplayName != in.DisplayName {
-					linked.DisplayName = in.DisplayName
-				}
-				if err := s.users.Update(ctx, linked); err != nil {
-					return nil, fmt.Errorf("link sso upn: %w", err)
-				}
-				return linked, nil
-			}
-			// Otherwise the email collides with someone else's SSO-bound
-			// account — fall through to ErrSSONoAccount instead of hijacking.
-		}
-	}
-
-	// No account, no email match. Regular users are NOT auto-provisioned —
+	// No account. Regular users are NOT auto-provisioned —
 	// the caller redirects them to a "contact your administrator" page.
 	// Admins are auto-provisioned so the IdP-side admin group is enough to
 	// bootstrap a fresh panel.
@@ -342,16 +297,10 @@ func (s *Service) EnsureSSO(ctx context.Context, in EnsureSSOInput) (*domain.Use
 	if resetPeriod == "" {
 		resetPeriod = domain.ResetMonthly
 	}
-	desiredUsername := ssoDisplayName(in)
-	if desiredUsername != in.UPN {
-		if _, nameErr := s.users.GetByUsername(ctx, desiredUsername); nameErr == nil {
-			desiredUsername = in.UPN
-		}
-	}
 	now := time.Now()
 	u = &domain.User{
-		Username:           desiredUsername,
 		UPN:                in.UPN,
+		Email:              in.Email,
 		Role:               domain.RoleAdmin,
 		SubToken:           subToken,
 		UUID:               idgen.NewUUID(),
@@ -369,21 +318,9 @@ func (s *Service) EnsureSSO(ctx context.Context, in EnsureSSOInput) (*domain.Use
 	return u, nil
 }
 
-// ssoDisplayName picks the most human-readable name available from an SSO
-// login: email → display name → UPN (which may be an opaque identifier).
-func ssoDisplayName(in EnsureSSOInput) string {
-	if in.Email != "" {
-		return in.Email
-	}
-	if in.DisplayName != "" {
-		return in.DisplayName
-	}
-	return in.UPN
-}
-
-// VerifyLocalPassword returns the user if username/password match a password-enabled account.
-func (s *Service) VerifyLocalPassword(ctx context.Context, username, password string) (*domain.User, error) {
-	u, err := s.users.GetByUsername(ctx, username)
+// VerifyLocalPassword returns the user if UPN/password match a password-enabled account.
+func (s *Service) VerifyLocalPassword(ctx context.Context, upn, password string) (*domain.User, error) {
+	u, err := s.users.GetByUPN(ctx, strings.TrimSpace(upn))
 	if err != nil {
 		return nil, err
 	}
@@ -463,11 +400,11 @@ func (s *Service) ResetCredentialsAndSync(ctx context.Context, userID int64) (*R
 		}
 	}
 	if needsRetry {
-		if err := s.enqueueUserTask(ctx, domain.SyncTaskUserResync, userID, fmt.Sprintf("sync credentials for user %s", u.Username)); err != nil {
+		if err := s.enqueueUserTask(ctx, domain.SyncTaskUserResync, userID, fmt.Sprintf("sync credentials for user %s", u.UPN)); err != nil {
 			return nil, err
 		}
 	} else {
-		s.recordUserTaskSucceeded(ctx, domain.SyncTaskUserResync, userID, fmt.Sprintf("sync credentials for user %s", u.Username))
+		s.recordUserTaskSucceeded(ctx, domain.SyncTaskUserResync, userID, fmt.Sprintf("sync credentials for user %s", u.UPN))
 	}
 	return &ResetCredentialsResult{SubToken: token, UUID: newUUID}, nil
 }
@@ -492,6 +429,22 @@ func (s *Service) SetPassword(ctx context.Context, userID int64, newPassword str
 // Get returns one user or ErrNotFound.
 func (s *Service) Get(ctx context.Context, id int64) (*domain.User, error) {
 	return s.users.GetByID(ctx, id)
+}
+
+// SetPersonalRules updates only the user's subscription-only personal rule
+// fragment. It does not touch 3X-UI because the rules are rendered into the
+// YAML subscription document at request time.
+func (s *Service) SetPersonalRules(ctx context.Context, userID int64, rules string) error {
+	u, err := s.users.GetByID(ctx, userID)
+	if err != nil {
+		return err
+	}
+	rules = strings.TrimSpace(rules)
+	if len([]byte(rules)) > maxPersonalRulesBytes {
+		return fmt.Errorf("%w: personal rules too large", domain.ErrValidation)
+	}
+	u.PersonalRules = rules
+	return s.users.Update(ctx, u)
 }
 
 // GetBySubToken is used by the subscription handler.
@@ -573,11 +526,11 @@ func (s *Service) CreateLocalAndSync(ctx context.Context, in CreateLocalInput) (
 		synced++
 	}
 	if needsRetry {
-		if err := s.enqueueUserTask(ctx, domain.SyncTaskUserResync, u.ID, fmt.Sprintf("sync node membership for user %s", u.Username)); err != nil {
+		if err := s.enqueueUserTask(ctx, domain.SyncTaskUserResync, u.ID, fmt.Sprintf("sync node membership for user %s", u.UPN)); err != nil {
 			return nil, err
 		}
 	} else {
-		s.recordUserTaskSucceeded(ctx, domain.SyncTaskUserResync, u.ID, fmt.Sprintf("sync node membership for user %s", u.Username))
+		s.recordUserTaskSucceeded(ctx, domain.SyncTaskUserResync, u.ID, fmt.Sprintf("sync node membership for user %s", u.UPN))
 	}
 
 	return &CreateLocalSyncedResult{
@@ -608,7 +561,7 @@ func (s *Service) DeleteAndSync(ctx context.Context, userID int64) error {
 	// pattern applied to deletion.
 	if err := s.syncer.DelAllOwnedForUser(ctx, u.ID); err == nil {
 		if err := s.users.Delete(ctx, u.ID); err == nil {
-			s.recordUserTaskSucceeded(ctx, domain.SyncTaskUserDelete, userID, fmt.Sprintf("delete user %s", u.Username))
+			s.recordUserTaskSucceeded(ctx, domain.SyncTaskUserDelete, userID, fmt.Sprintf("delete user %s", u.UPN))
 			return nil
 		}
 	}
@@ -630,7 +583,7 @@ func (s *Service) DeleteAndSync(ctx context.Context, userID int64) error {
 		Status:     domain.SyncTaskPending,
 		TargetType: "user",
 		TargetID:   userID,
-		Summary:    fmt.Sprintf("delete user %s", u.Username),
+		Summary:    fmt.Sprintf("delete user %s", u.UPN),
 		NextRunAt:  time.Now(),
 	})
 }
@@ -642,6 +595,7 @@ func (s *Service) DeleteAndSync(ctx context.Context, userID int64) error {
 type UpdateInput struct {
 	GroupID            *int64
 	Role               *domain.Role
+	Email              *string
 	ExpireAt           *time.Time
 	ClearExpire        bool
 	TrafficLimitBytes  *int64
@@ -707,22 +661,25 @@ func (s *Service) UpdateProfile(ctx context.Context, userID int64, in UpdateInpu
 	if in.DisplayName != nil {
 		u.DisplayName = *in.DisplayName
 	}
+	if in.Email != nil {
+		u.Email = *in.Email
+	}
 	if err := s.users.Update(ctx, u); err != nil {
 		return err
 	}
 	if groupChanged {
 		if err := s.ResyncMembership(ctx, userID); err != nil {
-			return s.enqueueUserTask(ctx, domain.SyncTaskUserResync, userID, fmt.Sprintf("sync node membership for user %s", u.Username))
+			return s.enqueueUserTask(ctx, domain.SyncTaskUserResync, userID, fmt.Sprintf("sync node membership for user %s", u.UPN))
 		}
-		s.recordUserTaskSucceeded(ctx, domain.SyncTaskUserResync, userID, fmt.Sprintf("sync node membership for user %s", u.Username))
+		s.recordUserTaskSucceeded(ctx, domain.SyncTaskUserResync, userID, fmt.Sprintf("sync node membership for user %s", u.UPN))
 	}
 	// Note: ResyncMembership skips updating existing clients, so if expireChanged we
 	// must explicitly push it. We do this by calling a sync loop similar to SetEnabledAndSync.
 	if expireChanged {
 		if err := s.pushClientConfigToAll(ctx, u); err != nil {
-			return s.enqueueUserTask(ctx, domain.SyncTaskUserPushConfig, userID, fmt.Sprintf("sync enabled/expiry config for user %s", u.Username))
+			return s.enqueueUserTask(ctx, domain.SyncTaskUserPushConfig, userID, fmt.Sprintf("sync enabled/expiry config for user %s", u.UPN))
 		}
-		s.recordUserTaskSucceeded(ctx, domain.SyncTaskUserPushConfig, userID, fmt.Sprintf("sync enabled/expiry config for user %s", u.Username))
+		s.recordUserTaskSucceeded(ctx, domain.SyncTaskUserPushConfig, userID, fmt.Sprintf("sync enabled/expiry config for user %s", u.UPN))
 	}
 	return nil
 }
@@ -765,11 +722,11 @@ func (s *Service) UseEmergencyAccess(ctx context.Context, userID int64) (*Emerge
 		return nil, err
 	}
 	if err := s.pushClientConfigToAll(ctx, u); err != nil {
-		if taskErr := s.enqueueUserTask(ctx, domain.SyncTaskUserPushConfig, userID, fmt.Sprintf("sync emergency access for user %s", u.Username)); taskErr != nil {
+		if taskErr := s.enqueueUserTask(ctx, domain.SyncTaskUserPushConfig, userID, fmt.Sprintf("sync emergency access for user %s", u.UPN)); taskErr != nil {
 			return nil, taskErr
 		}
 	} else {
-		s.recordUserTaskSucceeded(ctx, domain.SyncTaskUserPushConfig, userID, fmt.Sprintf("sync emergency access for user %s", u.Username))
+		s.recordUserTaskSucceeded(ctx, domain.SyncTaskUserPushConfig, userID, fmt.Sprintf("sync emergency access for user %s", u.UPN))
 	}
 	return &EmergencyAccessResult{
 		User:          u,
@@ -812,9 +769,9 @@ func (s *Service) ChangeGroupAndSync(ctx context.Context, userID, newGroupID int
 		return err
 	}
 	if err := s.ResyncMembership(ctx, userID); err != nil {
-		return s.enqueueUserTask(ctx, domain.SyncTaskUserResync, userID, fmt.Sprintf("sync node membership for user %s", u.Username))
+		return s.enqueueUserTask(ctx, domain.SyncTaskUserResync, userID, fmt.Sprintf("sync node membership for user %s", u.UPN))
 	}
-	s.recordUserTaskSucceeded(ctx, domain.SyncTaskUserResync, userID, fmt.Sprintf("sync node membership for user %s", u.Username))
+	s.recordUserTaskSucceeded(ctx, domain.SyncTaskUserResync, userID, fmt.Sprintf("sync node membership for user %s", u.UPN))
 	return nil
 }
 
@@ -928,9 +885,9 @@ func (s *Service) SetEnabledAndSync(ctx context.Context, userID int64, enabled b
 		return err
 	}
 	if err := s.pushClientConfigToAll(ctx, u); err != nil {
-		return s.enqueueUserTask(ctx, domain.SyncTaskUserPushConfig, userID, fmt.Sprintf("sync enabled/expiry config for user %s", u.Username))
+		return s.enqueueUserTask(ctx, domain.SyncTaskUserPushConfig, userID, fmt.Sprintf("sync enabled/expiry config for user %s", u.UPN))
 	}
-	s.recordUserTaskSucceeded(ctx, domain.SyncTaskUserPushConfig, userID, fmt.Sprintf("sync enabled/expiry config for user %s", u.Username))
+	s.recordUserTaskSucceeded(ctx, domain.SyncTaskUserPushConfig, userID, fmt.Sprintf("sync enabled/expiry config for user %s", u.UPN))
 	return nil
 }
 
@@ -1122,9 +1079,9 @@ func (s *Service) ResetUUIDAndSync(ctx context.Context, userID int64) (string, e
 		}
 	}
 	if needsRetry {
-		_ = s.enqueueUserTask(ctx, domain.SyncTaskUserResync, userID, fmt.Sprintf("sync credentials for user %s", u.Username))
+		_ = s.enqueueUserTask(ctx, domain.SyncTaskUserResync, userID, fmt.Sprintf("sync credentials for user %s", u.UPN))
 	} else {
-		s.recordUserTaskSucceeded(ctx, domain.SyncTaskUserResync, userID, fmt.Sprintf("sync credentials for user %s", u.Username))
+		s.recordUserTaskSucceeded(ctx, domain.SyncTaskUserResync, userID, fmt.Sprintf("sync credentials for user %s", u.UPN))
 	}
 	return newUUID, nil
 }

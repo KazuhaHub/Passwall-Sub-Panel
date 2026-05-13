@@ -12,7 +12,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 )
 
-// emitProxy turns one (Node, Inbound, User) triple into a Clash Meta proxy
+// emitProxy turns one (Node, Inbound, User) triple into a mihomo proxy
 // block represented as map[string]any (later marshaled by yaml.v3).
 //
 // Returns (nil, nil) when the protocol is recognised but not yet supported;
@@ -143,7 +143,7 @@ func emitSSProxy(base map[string]any, method, password string) map[string]any {
 }
 
 // emitSS2022 composes the EIH password as "<server-psk>:<user-psk>" which is
-// the format Clash Meta expects for the 2022-blake3-* ciphers.
+// the format mihomo expects for the 2022-blake3-* ciphers.
 func emitSS2022(base map[string]any, method, serverPSK, userPSK string) map[string]any {
 	base["type"] = "ss"
 	base["cipher"] = method

@@ -52,7 +52,12 @@ func (h *AuthLocalHandler) localLoginDisallowedForUsers(c *gin.Context) bool {
 }
 
 func (h *AuthLocalHandler) Methods(c *gin.Context) {
-	defaults := ports.UISettings{LoginMode: "dual", SiteTitle: "Passwall"}
+	defaults := ports.UISettings{
+		LoginMode: "dual",
+		SiteTitle: "Passwall",
+		AppTitle:  "Passwall",
+		IconURL:   "/images/HeadPicture.png",
+	}
 	s, err := h.settings.Load(c.Request.Context(), defaults)
 	if err != nil {
 		s = defaults
@@ -71,13 +76,15 @@ func (h *AuthLocalHandler) Methods(c *gin.Context) {
 		"oidc":          oidcEnabled,
 		"login_mode":    mode,
 		"site_title":    s.SiteTitle,
+		"app_title":     s.AppTitle,
+		"icon_url":      s.IconURL,
 		"logo_url":      s.LogoURL,
 		"logo_url_dark": s.LogoURLDark,
 	})
 }
 
 type loginRequest struct {
-	Username string `json:"username" binding:"required"`
+	UPN      string `json:"upn" binding:"required"`
 	Password string `json:"password" binding:"required"`
 }
 
@@ -89,7 +96,7 @@ type loginResponse struct {
 
 type userBrief struct {
 	ID          int64       `json:"id"`
-	Username    string      `json:"username"`
+	UPN         string      `json:"upn"`
 	DisplayName string      `json:"display_name,omitempty"`
 	Role        domain.Role `json:"role"`
 }
@@ -100,7 +107,7 @@ func (h *AuthLocalHandler) Login(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	u, err := h.user.VerifyLocalPassword(c.Request.Context(), req.Username, req.Password)
+	u, err := h.user.VerifyLocalPassword(c.Request.Context(), req.UPN, req.Password)
 	if err != nil {
 		switch {
 		case errors.Is(err, domain.ErrNotFound), errors.Is(err, domain.ErrUnauthorized):
@@ -127,7 +134,7 @@ func (h *AuthLocalHandler) Login(c *gin.Context) {
 		AccessToken:  access,
 		RefreshToken: refresh,
 		User: userBrief{
-			ID: u.ID, Username: u.Username, DisplayName: u.DisplayName, Role: u.Role,
+			ID: u.ID, UPN: u.UPN, DisplayName: u.DisplayName, Role: u.Role,
 		},
 	})
 }

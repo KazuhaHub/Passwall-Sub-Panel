@@ -14,6 +14,8 @@ var linePlaceholderRE = regexp.MustCompile(`^(\s*)\{\{\s*([\w]+)\s*\}\}\s*$`)
 // "      - @all" or `      - "@region:TW+tag:reality"`.
 var inlineNodeRefRE = regexp.MustCompile(`^(\s+)-\s+"?@([\w:+,\-]+)"?\s*$`)
 
+var inlinePlaceholderRE = regexp.MustCompile(`\{\{\s*([\w]+)\s*\}\}`)
+
 // substituteBlockPlaceholders replaces whole-line {{ tag }} entries with
 // the supplied multi-line text, preserving the indentation of the
 // placeholder line.
@@ -43,6 +45,19 @@ func substituteBlockPlaceholders(body string, blocks map[string]string) string {
 		}
 	}
 	return strings.Join(out, "\n")
+}
+
+func substituteInlinePlaceholders(body string, values map[string]string) string {
+	return inlinePlaceholderRE.ReplaceAllStringFunc(body, func(raw string) string {
+		m := inlinePlaceholderRE.FindStringSubmatch(raw)
+		if m == nil {
+			return raw
+		}
+		if v, ok := values[m[1]]; ok {
+			return v
+		}
+		return raw
+	})
 }
 
 // expandNodeRefs walks the body looking for proxy-groups entries that

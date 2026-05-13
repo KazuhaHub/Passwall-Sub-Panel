@@ -29,7 +29,7 @@ function handleUserCommand(cmd: string) {
     <header class="header">
       <div class="brand">
         <img class="logo" :src="isDark ? site.logoDark : site.logoLight" alt="Logo" />
-        <span class="title">{{ site.title }}</span>
+        <span class="title">{{ site.appTitle }}</span>
         <span class="badge">个人中心</span>
       </div>
       
@@ -40,9 +40,9 @@ function handleUserCommand(cmd: string) {
 
         <el-dropdown trigger="click" @command="handleUserCommand">
         <div class="user-profile">
-          <div class="avatar">{{ auth.username ? auth.username.charAt(0).toUpperCase() : 'U' }}</div>
+          <div class="avatar">{{ auth.label.charAt(0).toUpperCase() }}</div>
           <div class="user-info">
-            <div class="user-name">{{ auth.username || 'User' }}</div>
+            <div class="user-name">{{ auth.label }}</div>
           </div>
         </div>
         <template #dropdown>

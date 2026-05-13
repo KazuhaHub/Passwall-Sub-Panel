@@ -29,9 +29,9 @@ func NewAdminUserHandler(userSvc *user.Service, settings ports.SettingsRepo) *Ad
 
 type userDTO struct {
 	ID                 int64                     `json:"id"`
-	Username           string                    `json:"username"`
 	DisplayName        string                    `json:"display_name,omitempty"`
-	UPN                string                    `json:"upn,omitempty"`
+	UPN                string                    `json:"upn"`
+	Email              string                    `json:"email,omitempty"`
 	Role               domain.Role               `json:"role"`
 	GroupID            int64                     `json:"group_id"`
 	UUID               string                    `json:"uuid"`
@@ -47,7 +47,8 @@ type userDTO struct {
 }
 
 type createUserRequest struct {
-	Username           string     `json:"username" binding:"required"`
+	UPN                string     `json:"upn" binding:"required"`
+	Email              string     `json:"email"`
 	DisplayName        string     `json:"display_name"`
 	Password           string     `json:"password"`
 	GroupID            int64      `json:"group_id" binding:"required"`
@@ -118,7 +119,8 @@ func (h *AdminUserHandler) Create(c *gin.Context) {
 		return
 	}
 	in := user.CreateLocalInput{
-		Username:           req.Username,
+		UPN:                req.UPN,
+		Email:              strings.TrimSpace(req.Email),
 		DisplayName:        req.DisplayName,
 		InitialPassword:    req.Password,
 		GroupID:            req.GroupID,
@@ -131,7 +133,7 @@ func (h *AdminUserHandler) Create(c *gin.Context) {
 	if err != nil {
 		switch {
 		case errors.Is(err, domain.ErrAlreadyExists):
-			c.JSON(http.StatusConflict, gin.H{"error": "username already exists"})
+			c.JSON(http.StatusConflict, gin.H{"error": "upn already exists"})
 		case errors.Is(err, domain.ErrValidation):
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		case errors.Is(err, domain.ErrNotFound):
@@ -242,9 +244,53 @@ func (h *AdminUserHandler) SetEnabled(c *gin.Context) {
 	c.Status(http.StatusNoContent)
 }
 
+func (h *AdminUserHandler) GetRules(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	u, err := h.user.Get(c.Request.Context(), id)
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"personal_rules": u.PersonalRules})
+}
+
+func (h *AdminUserHandler) PutRules(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	var req updatePersonalRulesRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if err := h.user.SetPersonalRules(c.Request.Context(), id, req.PersonalRules); err != nil {
+		switch {
+		case errors.Is(err, domain.ErrNotFound):
+			c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
+		case errors.Is(err, domain.ErrValidation):
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		}
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
 type updateUserRequest struct {
 	GroupID            *int64     `json:"group_id,omitempty"`
 	Role               *string    `json:"role,omitempty"`
+	Email              *string    `json:"email,omitempty"`
 	ExpireAt           *time.Time `json:"expire_at,omitempty"`
 	ClearExpire        bool       `json:"clear_expire,omitempty"`
 	TrafficLimitGB     *int64     `json:"traffic_limit_gb,omitempty"`
@@ -264,8 +310,13 @@ func (h *AdminUserHandler) Update(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	if req.Email != nil {
+		email := strings.TrimSpace(*req.Email)
+		req.Email = &email
+	}
 	in := user.UpdateInput{
 		GroupID:     req.GroupID,
+		Email:       req.Email,
 		ExpireAt:    req.ExpireAt,
 		ClearExpire: req.ClearExpire,
 		Remark:      req.Remark,
@@ -310,9 +361,9 @@ func (h *AdminUserHandler) Update(c *gin.Context) {
 func (h *AdminUserHandler) toDTO(ctx context.Context, u *domain.User) userDTO {
 	return userDTO{
 		ID:                 u.ID,
-		Username:           u.Username,
 		DisplayName:        u.DisplayName,
 		UPN:                u.UPN,
+		Email:              u.Email,
 		Role:               u.Role,
 		GroupID:            u.GroupID,
 		UUID:               u.UUID,

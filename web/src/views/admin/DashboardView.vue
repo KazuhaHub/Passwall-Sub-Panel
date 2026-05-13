@@ -76,7 +76,7 @@ function formatBytes(n: number): string {
       </div>
       <el-table v-if="topUsers.length" :data="topUsers" stripe>
         <el-table-column label="#" type="index" width="60" />
-        <el-table-column prop="username" label="用户名" min-width="200" />
+        <el-table-column prop="upn" label="UPN" min-width="200" />
         <el-table-column label="本周期已用" min-width="160">
           <template #default="{ row }">{{ formatBytes(row.period_used_bytes) }}</template>
         </el-table-column>

@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 
@@ -46,12 +47,12 @@ type Output struct {
 //	├── 2. resolve user group → matched nodes
 //	├── 3. apply group.Layout (sort + insert separators)
 //	├── 4. fetch each inbound, emit per-protocol Clash proxy block
-//	├── 5. substitute {{ proxies }} / {{ rules_common }} / {{ rules_personal }}
+//	├── 5. substitute {{ proxies }} / {{ proxy_groups }} / {{ rules_common }} / {{ rules_personal }}
 //	├── 6. expand @all / @region / @tag inside proxy-groups
 //	└── 7. set Subscription-Userinfo header from traffic + expire
 func (s *Service) RenderForUser(ctx context.Context, u *domain.User, ct domain.ClientType) (*Output, error) {
 	if ct == "" {
-		ct = domain.ClientClashMeta
+		ct = domain.ClientMihomo
 	}
 	tpl, err := s.repos.Template.GetDefault(ctx, ct)
 	if err != nil {
@@ -74,16 +75,22 @@ func (s *Service) RenderForUser(ctx context.Context, u *domain.User, ct domain.C
 		return nil, fmt.Errorf("marshal proxies: %w", err)
 	}
 
-	rulesCommon, err := s.resolveRulesCommon(ctx, u)
+	rulesCommon, err := s.resolveRulesCommon(ctx, tpl)
 	if err != nil {
 		return nil, fmt.Errorf("resolve rules: %w", err)
+	}
+	proxyGroupsYAML, err := buildProxyGroupsYAML(rulesCommon)
+	if err != nil {
+		return nil, fmt.Errorf("build proxy groups: %w", err)
 	}
 
 	body := substituteBlockPlaceholders(tpl.Content, map[string]string{
 		"proxies":        strings.TrimRight(string(proxiesYAML), "\n"),
+		"proxy_groups":   proxyGroupsYAML,
 		"rules_common":   strings.TrimRight(rulesCommon, "\n"),
 		"rules_personal": strings.TrimRight(u.PersonalRules, "\n"),
 	})
+	body = substituteInlinePlaceholders(body, s.profilePlaceholders(ctx, u))
 	body = expandNodeRefs(body, items)
 
 	headers := map[string]string{
@@ -99,6 +106,56 @@ func (s *Service) RenderForUser(ctx context.Context, u *domain.User, ct domain.C
 		ContentType: "text/yaml; charset=utf-8",
 		Headers:     headers,
 	}, nil
+}
+
+func (s *Service) profilePlaceholders(ctx context.Context, u *domain.User) map[string]string {
+	st, _ := s.repos.Settings.Load(ctx, ports.UISettings{
+		SiteTitle:   "Passwall",
+		LogoURL:     "/images/logo+title-circle.png",
+		LogoURLDark: "/images/logo+title-circle-darkmode.png",
+	})
+	if st.SiteTitle == "" {
+		st.SiteTitle = "Passwall"
+	}
+	if st.LogoURL == "" {
+		st.LogoURL = "/images/logo+title-circle.png"
+	}
+	if st.LogoURLDark == "" {
+		st.LogoURLDark = st.LogoURL
+	}
+	base := strings.TrimRight(st.SubBaseURL, "/")
+	logo := absoluteURL(base, st.LogoURL)
+	logoDark := absoluteURL(base, st.LogoURLDark)
+	displayName := u.DisplayName
+	if displayName == "" {
+		displayName = u.UPN
+	}
+	expireAt := "permanent"
+	if u.ExpireAt != nil {
+		expireAt = u.ExpireAt.Format("2006-01-02 15:04")
+	}
+	return map[string]string{
+		"site_title":    st.SiteTitle,
+		"logo_url":      logo,
+		"logo_url_dark": logoDark,
+		"generated_at":  time.Now().Format("2006-01-02 15:04:05"),
+		"upn":           u.UPN,
+		"display_name":  displayName,
+		"expire_at":     expireAt,
+	}
+}
+
+func absoluteURL(base, raw string) string {
+	if raw == "" || strings.HasPrefix(raw, "http://") || strings.HasPrefix(raw, "https://") || strings.HasPrefix(raw, "data:") {
+		return raw
+	}
+	if base == "" {
+		return raw
+	}
+	if strings.HasPrefix(raw, "/") {
+		return base + raw
+	}
+	return base + "/" + raw
 }
 
 func (s *Service) buildProxies(ctx context.Context, u *domain.User, items []renderItem) []map[string]any {
@@ -137,12 +194,13 @@ func (s *Service) fetchInbound(ctx context.Context, n *domain.Node) (*ports.Inbo
 	return c.GetInbound(ctx, n.InboundID)
 }
 
-func (s *Service) resolveRulesCommon(ctx context.Context, u *domain.User) (string, error) {
-	if len(u.EnabledRuleSets) == 0 {
+func (s *Service) resolveRulesCommon(ctx context.Context, tpl *domain.Template) (string, error) {
+	slugs := tpl.RuleSets
+	if len(slugs) == 0 {
 		return "", nil
 	}
-	parts := make([]string, 0, len(u.EnabledRuleSets))
-	for _, slug := range u.EnabledRuleSets {
+	parts := make([]string, 0, len(slugs))
+	for _, slug := range slugs {
 		rs, err := s.repos.RuleSet.GetBySlug(ctx, slug)
 		if err != nil {
 			log.Warn("render: skip rule_set, lookup failed", "slug", slug, "err", err)

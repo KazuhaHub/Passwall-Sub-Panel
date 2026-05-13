@@ -30,6 +30,8 @@ func (r *settingsRepo) Load(ctx context.Context, defaults ports.UISettings) (por
 	out := ports.UISettings{
 		LoginMode:                  row.LoginMode,
 		SiteTitle:                  row.SiteTitle,
+		AppTitle:                   row.AppTitle,
+		IconURL:                    row.IconURL,
 		LogoURL:                    row.LogoURL,
 		LogoURLDark:                row.LogoURLDark,
 		EmailDomain:                row.EmailDomain,
@@ -54,6 +56,15 @@ func (r *settingsRepo) Load(ctx context.Context, defaults ports.UISettings) (por
 	}
 	if out.SiteTitle == "" {
 		out.SiteTitle = defaults.SiteTitle
+	}
+	if out.AppTitle == "" {
+		out.AppTitle = defaults.AppTitle
+		if out.AppTitle == "" {
+			out.AppTitle = out.SiteTitle
+		}
+	}
+	if out.IconURL == "" {
+		out.IconURL = defaults.IconURL
 	}
 	if out.EmailDomain == "" {
 		out.EmailDomain = defaults.EmailDomain
@@ -92,6 +103,8 @@ func (r *settingsRepo) Save(ctx context.Context, s ports.UISettings) error {
 		ID:                         1,
 		LoginMode:                  s.LoginMode,
 		SiteTitle:                  s.SiteTitle,
+		AppTitle:                   s.AppTitle,
+		IconURL:                    s.IconURL,
 		LogoURL:                    s.LogoURL,
 		LogoURLDark:                s.LogoURLDark,
 		EmailDomain:                s.EmailDomain,

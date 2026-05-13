@@ -5,11 +5,13 @@ import { Clock, Delete, Lock, Unlock } from '@element-plus/icons-vue'
 import {
   createUser,
   deleteUser,
+  getUserRules,
   listUsers,
   resetCredentials,
   resetEmergencyUsage,
   setEnabled,
   updateUser,
+  updateUserRules,
 } from '@/api/users'
 import { listGroups } from '@/api/groups'
 import { runReconcile } from '@/api/reconcile'
@@ -35,7 +37,8 @@ const renewableSelectedCount = computed(() => selectedUsers.value.filter((row) =
 const createDialog = ref(false)
 const createBusy = ref(false)
 const createForm = reactive({
-  username: '',
+  upn: '',
+  email: '',
   display_name: '',
   password: '',
   group_id: undefined as number | undefined,
@@ -54,9 +57,16 @@ const editBusy = ref(false)
 const editTrafficLoading = ref(false)
 const editOriginalUsedTrafficGB = ref(0)
 const editing = ref<User | null>(null)
+const rulesDialog = ref(false)
+const rulesUser = ref<User | null>(null)
+const rulesText = ref('')
+const rulesSaved = ref('')
+const rulesBusy = ref(false)
+const rulesDirty = computed(() => rulesText.value.trim() !== rulesSaved.value.trim())
 // expireMode: 'date' = ISO date, 'permanent' = clear_expire
 const editForm = reactive({
   display_name: '',
+  email: '',
   group_id: undefined as number | undefined,
   role: 'user' as Role,
   expireMode: 'date' as 'date' | 'permanent',
@@ -100,7 +110,8 @@ async function loadGroups() {
 }
 
 function openCreate() {
-  createForm.username = ''
+  createForm.upn = ''
+  createForm.email = ''
   createForm.display_name = ''
   createForm.password = ''
   createForm.remark = ''
@@ -111,8 +122,8 @@ function openCreate() {
 }
 
 async function submitCreate() {
-  if (!createForm.username) {
-    ElMessage.warning('请填写用户名')
+  if (!createForm.upn) {
+    ElMessage.warning('请填写 UPN')
     return
   }
   if (!createForm.group_id) {
@@ -126,7 +137,8 @@ async function submitCreate() {
         ? new Date(Date.now() + createForm.expire_days * 86400000).toISOString()
         : undefined
     const res = await createUser({
-      username: createForm.username,
+      upn: createForm.upn,
+      email: createForm.email || undefined,
       display_name: createForm.display_name || undefined,
       password: createForm.password || undefined,
       group_id: createForm.group_id,
@@ -153,6 +165,7 @@ async function openEdit(row: User) {
   editing.value = row
   editForm.group_id = row.group_id
   editForm.role = row.role
+  editForm.email = row.email ?? ''
   if (row.expire_at) {
     editForm.expireMode = 'date'
     editForm.expire_at = row.expire_at
@@ -198,6 +211,7 @@ async function submitEdit() {
     }
     const req: Record<string, unknown> = {
       group_id: editForm.group_id,
+      email: editForm.email,
       traffic_limit_gb: editForm.traffic_limit_gb,
       traffic_reset_period: editForm.traffic_reset_period,
       remark: editForm.remark,
@@ -230,7 +244,7 @@ async function submitEdit() {
 async function confirmResetCredentials(row: User) {
   try {
     await ElMessageBox.confirm(
-      `重置凭证会导致 ${row.username} 的旧订阅链接立即失效，且现有连接被强制断开（需更新订阅获取新节点配置）。继续？`,
+      `重置凭证会导致 ${row.upn} 的旧订阅链接立即失效，且现有连接被强制断开（需更新订阅获取新节点配置）。继续？`,
       '重置凭证',
       { type: 'warning' },
     )
@@ -251,7 +265,7 @@ async function confirmResetEmergencyUsage(row: User) {
 async function confirmDelete(row: User) {
   try {
     await ElMessageBox.confirm(
-      `确定删除用户 ${row.username}？该操作将从所有 3X-UI inbound 清除其 client。`,
+      `确定删除用户 ${row.upn}？该操作将从所有 3X-UI inbound 清除其 client。`,
       '确认删除',
       { type: 'warning' },
     )
@@ -344,7 +358,7 @@ async function batchDelete() {
   const rows = selectedUsers.value.slice()
   const names = rows
     .slice(0, 5)
-    .map((row) => row.display_name || row.username)
+    .map((row) => row.display_name || row.upn)
     .join('、')
   const suffix = rows.length > 5 ? ` 等 ${rows.length} 个用户` : ''
   try {
@@ -412,6 +426,38 @@ function groupName(id: number): string {
   return groups.value.find((g) => g.id === id)?.name ?? String(id)
 }
 
+async function openRulesDialog(row: User) {
+  rulesUser.value = row
+  rulesBusy.value = true
+  rulesDialog.value = true
+  try {
+    const rules = await getUserRules(row.id)
+    rulesText.value = rules
+    rulesSaved.value = rules
+  } finally {
+    rulesBusy.value = false
+  }
+}
+
+function resetRulesEditor() {
+  rulesText.value = rulesSaved.value
+}
+
+async function saveUserRules() {
+  if (!rulesUser.value) return
+  rulesBusy.value = true
+  try {
+    const rules = rulesText.value.trim()
+    await updateUserRules(rulesUser.value.id, rules)
+    rulesText.value = rules
+    rulesSaved.value = rules
+    ElMessage.success('个人规则已保存')
+    rulesDialog.value = false
+  } finally {
+    rulesBusy.value = false
+  }
+}
+
 async function triggerReconcile() {
   reconcileBusy.value = true
   try {
@@ -454,7 +500,7 @@ onMounted(async () => {
     <div class="psp-toolbar">
       <el-input
         v-model="search"
-        placeholder="搜索用户名 / UPN / 备注"
+        placeholder="搜索 UPN / 邮箱 / 备注"
         style="width: 280px"
         clearable
         @change="load"
@@ -515,7 +561,7 @@ onMounted(async () => {
     <el-table v-loading="loading" :data="users" stripe @selection-change="handleSelectionChange">
       <el-table-column type="selection" width="48" :selectable="canSelectUser" />
       <el-table-column prop="id" label="UserID" min-width="100" />
-      <el-table-column prop="username" label="登录名" min-width="160" />
+      <el-table-column prop="upn" label="UPN" min-width="200" />
       <el-table-column label="分组" min-width="140">
         <template #default="{ row }">{{ groupName(row.group_id) }}</template>
       </el-table-column>
@@ -578,11 +624,14 @@ onMounted(async () => {
     <!-- Create user dialog -->
     <el-dialog v-model="createDialog" title="新增用户" width="500px">
       <el-form class="user-dialog-form" label-width="132px" :model="createForm">
-        <el-form-item label="登录名" required>
-          <el-input v-model="createForm.username" placeholder="登录用的标识，例如邮箱或自定义 id" />
+        <el-form-item label="UPN" required>
+          <el-input v-model="createForm.upn" placeholder="本地登录和 SSO 统一标识，例如 me@example.com" />
         </el-form-item>
         <el-form-item label="显示名">
-          <el-input v-model="createForm.display_name" placeholder="UI 上显示的友好名称（可留空，将回退到登录名）" />
+          <el-input v-model="createForm.display_name" placeholder="UI 上显示的友好名称（可留空，将回退到 UPN）" />
+        </el-form-item>
+        <el-form-item label="收件邮箱">
+          <el-input v-model="createForm.email" placeholder="邮件提醒收件地址；可留空使用邮箱格式 UPN" />
         </el-form-item>
         <el-form-item label="初始密码">
           <el-input
@@ -631,8 +680,8 @@ onMounted(async () => {
       <div v-if="editing">
         <!-- Read-only info -->
         <el-descriptions :column="1" border size="small" style="margin-bottom: 16px">
-          <el-descriptions-item label="用户名">{{ editing.username }}</el-descriptions-item>
-          <el-descriptions-item label="UPN" v-if="editing.upn">{{ editing.upn }}</el-descriptions-item>
+          <el-descriptions-item label="UPN">{{ editing.upn }}</el-descriptions-item>
+          <el-descriptions-item label="收件邮箱" v-if="editing.email">{{ editing.email }}</el-descriptions-item>
           <el-descriptions-item label="UUID">
             <code style="font-size: 12px">{{ editing.uuid }}</code>
           </el-descriptions-item>
@@ -647,7 +696,10 @@ onMounted(async () => {
         <!-- Editable fields -->
         <el-form class="user-dialog-form" label-width="132px" :model="editForm">
           <el-form-item label="显示名">
-            <el-input v-model="editForm.display_name" placeholder="UI 上显示的友好名称（可留空，将回退到登录名）" />
+            <el-input v-model="editForm.display_name" placeholder="UI 上显示的友好名称（可留空，将回退到 UPN）" />
+          </el-form-item>
+          <el-form-item label="收件邮箱">
+            <el-input v-model="editForm.email" placeholder="邮件提醒收件地址；SSO 登录会用 Email claim 更新" />
           </el-form-item>
           <el-form-item label="权限">
             <el-radio-group v-model="editForm.role">
@@ -704,6 +756,7 @@ onMounted(async () => {
           <div class="edit-ops-title">管理操作</div>
           <div class="edit-ops-buttons">
             <el-button size="small" @click="copyText(editing.sub_url)">复制订阅</el-button>
+            <el-button size="small" @click="openRulesDialog(editing)">个人规则</el-button>
             <el-button size="small" @click="confirmResetCredentials(editing)">重置凭证</el-button>
             <el-button size="small" @click="confirmResetEmergencyUsage(editing)">重置紧急次数</el-button>
             <el-button size="small" type="danger" :icon="Delete" @click="confirmDelete(editing)">删除用户</el-button>
@@ -716,11 +769,31 @@ onMounted(async () => {
       </template>
     </el-dialog>
 
+    <el-dialog v-model="rulesDialog" title="个人规则" width="720px" top="8vh">
+      <div v-if="rulesUser" class="rules-user">UPN: {{ rulesUser.upn }}</div>
+      <el-input
+        v-model="rulesText"
+        type="textarea"
+        :rows="14"
+        resize="vertical"
+        placeholder="- DOMAIN-SUFFIX,example.com,DIRECT"
+        class="rules-editor"
+      />
+      <p class="rules-hint">按 mihomo rules 格式填写，每行一条。只影响该用户的订阅渲染。</p>
+      <template #footer>
+        <el-button :disabled="!rulesDirty || rulesBusy" @click="resetRulesEditor">撤销</el-button>
+        <el-button @click="rulesDialog = false">取消</el-button>
+        <el-button type="primary" :disabled="!rulesDirty" :loading="rulesBusy" @click="saveUserRules">
+          保存规则
+        </el-button>
+      </template>
+    </el-dialog>
+
     <!-- Result dialog (showing initial password and sub URL) -->
     <el-dialog v-model="resultDialog" title="创建成功" width="500px">
       <div v-if="resultUser">
         <p>
-          用户 <strong>{{ resultUser.username }}</strong> 已创建。请将以下信息发给朋友：
+          用户 <strong>{{ resultUser.upn }}</strong> 已创建。请将以下信息发给朋友：
         </p>
         <el-form label-width="100px">
           <el-form-item label="初始密码">
@@ -789,5 +862,23 @@ onMounted(async () => {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.rules-user {
+  color: var(--text-muted);
+  font-size: 13px;
+  margin-bottom: 10px;
+}
+
+.rules-editor :deep(textarea) {
+  font-family: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.rules-hint {
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.5;
 }
 </style>

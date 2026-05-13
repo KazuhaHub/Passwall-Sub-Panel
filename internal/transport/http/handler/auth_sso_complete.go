@@ -46,8 +46,7 @@ func (h *AuthSSOCompleteHandler) Complete(c *gin.Context) {
 	c.SetCookie(CookieAccessToken, "", -1, "/", "", false, true)
 	c.SetCookie(CookieRefreshToken, "", -1, "/", "", false, true)
 
-	// Fetch the live user so the SPA receives the freshest display name —
-	// the JWT only carries Username/Role to keep tokens compact.
+	// Fetch the live user so the SPA receives the freshest display name.
 	liveUser, err := h.user.Get(c.Request.Context(), claims.UserID)
 	if err != nil {
 		if errors.Is(err, domain.ErrNotFound) {
@@ -63,7 +62,7 @@ func (h *AuthSSOCompleteHandler) Complete(c *gin.Context) {
 		RefreshToken: refreshToken,
 		User: userBrief{
 			ID:          claims.UserID,
-			Username:    liveUser.Username,
+			UPN:         liveUser.UPN,
 			DisplayName: liveUser.DisplayName,
 			Role:        liveUser.Role,
 		},

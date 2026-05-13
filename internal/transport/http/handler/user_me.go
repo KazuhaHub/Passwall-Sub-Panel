@@ -67,7 +67,6 @@ func (h *UserMeHandler) Profile(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"id":                   u.ID,
-		"username":             u.Username,
 		"display_name":         u.DisplayName,
 		"upn":                  u.UPN,
 		"sub_url":              h.subURL(c.Request.Context(), u.SubToken),
@@ -143,6 +142,53 @@ func (h *UserMeHandler) Traffic(c *gin.Context) {
 	})
 }
 
+func (h *UserMeHandler) GetRules(c *gin.Context) {
+	claims := middleware.ClaimsFrom(c)
+	if claims == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "no auth"})
+		return
+	}
+	u, err := h.user.Get(c.Request.Context(), claims.UserID)
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"personal_rules": u.PersonalRules})
+}
+
+type updatePersonalRulesRequest struct {
+	PersonalRules string `json:"personal_rules"`
+}
+
+func (h *UserMeHandler) PutRules(c *gin.Context) {
+	claims := middleware.ClaimsFrom(c)
+	if claims == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "no auth"})
+		return
+	}
+	var req updatePersonalRulesRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if err := h.user.SetPersonalRules(c.Request.Context(), claims.UserID, req.PersonalRules); err != nil {
+		switch {
+		case errors.Is(err, domain.ErrNotFound):
+			c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
+		case errors.Is(err, domain.ErrValidation):
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		}
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
 func (h *UserMeHandler) ResetCredentials(c *gin.Context) {
 	claims := middleware.ClaimsFrom(c)
 	if claims == nil {
@@ -200,7 +246,7 @@ func (h *UserMeHandler) ChangePassword(c *gin.Context) {
 			return
 		}
 	}
-	if _, err := h.user.VerifyLocalPassword(c.Request.Context(), u.Username, req.OldPassword); err != nil {
+	if _, err := h.user.VerifyLocalPassword(c.Request.Context(), u.UPN, req.OldPassword); err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "old password incorrect"})
 		return
 	}

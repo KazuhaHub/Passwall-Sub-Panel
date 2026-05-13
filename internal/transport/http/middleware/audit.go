@@ -25,8 +25,8 @@ func AdminAudit(auditSvc *audit.Service) gin.HandlerFunc {
 		}
 		claims := ClaimsFrom(c)
 		actor := "admin"
-		if claims != nil && claims.Username != "" {
-			actor = claims.Username
+		if claims != nil && claims.UPN != "" {
+			actor = claims.UPN
 		}
 		path := c.FullPath()
 		if path == "" {

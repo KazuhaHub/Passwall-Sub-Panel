@@ -80,7 +80,7 @@ func RequireAuth(svc *auth.Service, users UserLookup) gin.HandlerFunc {
 		// Re-bind claims to the live DB role so demotions take effect for
 		// RequireRole checks downstream.
 		claims.Role = u.Role
-		claims.Username = u.Username
+		claims.UPN = u.UPN
 		c.Set(CtxClaims, claims)
 		c.Set(CtxUserID, claims.UserID)
 		c.Next()
@@ -88,10 +88,10 @@ func RequireAuth(svc *auth.Service, users UserLookup) gin.HandlerFunc {
 }
 
 type authUserSnapshot struct {
-	ID       int64
-	Username string
-	Role     domain.Role
-	Enabled  bool
+	ID      int64
+	UPN     string
+	Role    domain.Role
+	Enabled bool
 }
 
 type authUserEntry struct {
@@ -119,10 +119,10 @@ func newAuthUserLRU(max int, ttl time.Duration) *authUserLRU {
 
 func authUserFromDomain(u *domain.User) authUserSnapshot {
 	return authUserSnapshot{
-		ID:       u.ID,
-		Username: u.Username,
-		Role:     u.Role,
-		Enabled:  u.Enabled,
+		ID:      u.ID,
+		UPN:     u.UPN,
+		Role:    u.Role,
+		Enabled: u.Enabled,
 	}
 }
 
