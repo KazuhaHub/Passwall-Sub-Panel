@@ -2,10 +2,23 @@
 
 | 字段 | 值 |
 |---|---|
-| 文档版本 | 0.2 (草案) |
-| 架构迭代 | v7 |
-| 最后更新 | 2026-05-11 |
-| 状态 | 待最终拍板（见 §14 待决策事项） |
+| 文档版本 | 0.3 |
+| 架构迭代 | v8 |
+| 最后更新 | 2026-05-14 |
+| 状态 | 活跃维护 |
+
+## 变更摘要 (v7 → v8)
+
+| 维度 | v7 | v8 |
+|---|---|---|
+| 认证 | SAML SSO | **SAML + OIDC 双 SSO 支持** |
+| 订阅客户端 | 仅 mihomo | **mihomo + sing-box，支持客户端检测与阻止** |
+| 存储 | 部分 YAML | **全部迁移到 MySQL**（xui_panels, SAML, OIDC, 设置等） |
+| 邮件通知 | 无 | **完整邮件系统**（到期提醒、停用通知、公告群发） |
+| 同步机制 | 简单同步 | **异步任务队列**（sync_tasks 表，支持重试） |
+| 日志 | 仅审计 | **审计 + 订阅访问日志** |
+| 用户自助 | 基础 | **紧急访问、凭证重置、个人规则** |
+| 品牌定制 | 无 | **站点名称、Logo、Icon、页脚文本可自定义** |
 
 ## 变更摘要 (v6 → v7)
 
@@ -14,12 +27,11 @@
 | 认证 | 本地账号 | **SAML SSO (Entra ID) 主 + 本地账号备** |
 | 业务数据存储 | YAML 文件 | **MySQL**（用户/分组/归属表/节点元数据/流量） |
 | 配置内容存储 | YAML | YAML（规则集/模板保持不变）|
-| client.email 约定 | `psp_{username}` | **SSO 用户：UPN；本地用户：`local_{username}@psp.local`** |
+| client.email 约定 | `psp_{username}` | **统一格式 `u{userID}-n{nodeID}@{domain}`** |
 | 节点管理 | 仅 3X-UI 后台 | **面板提供完整 inbound CRUD**（封装 3X-UI API） |
 | 多协议凭证 | 各协议独立 | **统一从 UUID 派生**（含 Trojan / SS / SS-2022） |
 | 流量限额 | 复用 3X-UI total_gb | **面板主动管理 + 超限自动 disable 全部归属 client** |
 | 分组结构 | tag_filter 单一过滤 | **tag_filter + layout（排序权重 + 自定义分隔符占位）** |
-| Canvas LMS 联动 | 未提及 | **标注 Future Scope** |
 
 ---
 
@@ -66,14 +78,16 @@
 | **节点 (Node)** | 一个 3X-UI inbound = 一个节点 | 3X-UI（协议参数）+ 面板（展示元数据 region/tag/sort）|
 | **客户端 (Client)** | 3X-UI inbound 内的一个 client 条目 | 3X-UI |
 | **用户 (User)** | 面板侧逻辑用户，对应 3X-UI 里多个 client | 面板 MySQL |
-| **UPN (User Principal Name)** | Entra ID 用户的唯一标识，形如 `name@tenant.onmicrosoft.com` | Entra ID |
+| **UPN (User Principal Name)** | 所有用户的唯一标识（本地用户和 SSO 用户统一） | 面板 MySQL |
 | **分组 (Group)** | 用户分组，含 tag_filter + layout | 面板 MySQL |
 | **归属表 (Ownership)** | 每个用户在 3X-UI 里拥有的 client 白名单 | 面板 MySQL |
-| **规则集 (Rule Set)** | Clash rules 分片 | 面板 YAML |
+| **规则集 (Rule Set)** | Clash/sing-box rules 分片 | 面板 MySQL |
 | **模板 (Template)** | Clash/Sing-box 配置框架 | 面板 YAML |
 | **layout** | 分组级渲染布局（节点排序 + 分隔符占位） | 面板 MySQL |
-| **IdP / SP** | 身份提供方 (Entra ID) / 服务提供方 (本面板) | - |
-| **SAML metadata** | IdP 公布的 XML，定义证书、端点、claim 映射 | Entra ID |
+| **同步任务 (Sync Task)** | 异步可重试的 3X-UI 操作 | 面板 MySQL |
+| **订阅客户端规则** | UA 检测 + 白名单过滤 | 面板 MySQL (UISettings) |
+| **IdP / SP** | 身份提供方 / 服务提供方 (本面板) | - |
+| **SAML metadata** | IdP 公布的 XML，定义证书、端点、claim 映射 | IdP |
 
 ### 2.1 唯一识别符体系
 
@@ -82,17 +96,18 @@
 | 层 | 标识符 | 类型 | 用途 |
 |---|---|---|---|
 | **面板用户** | `users.id` | INT auto | 面板内部主键 |
-| | `users.username` | VARCHAR | 本地账号唯一名 |
-| | `users.upn` | VARCHAR | SSO 用户唯一名 |
+| | `users.upn` | VARCHAR(255) UNIQUE | **所有用户的唯一标识**（本地用户和 SSO 用户统一） |
+| | `users.email` | VARCHAR(255) | 通知邮箱（SSO 用户来自 Email claim） |
+| | `users.display_name` | VARCHAR(128) | 显示名称（SSO 来自 claim，本地由管理员设置） |
 | | `users.uuid` | UUID v4 | **协议凭证**（VLESS/VMess 的 uuid；Trojan/SS 派生 password）|
 | | `users.sub_token` | 32B base64url | 订阅 URL 凭证（独立于 uuid，可单独重置）|
 | **3X-UI inbound** | `inbound.id` | INT | 3X-UI 内部主键 |
-| | `(panel_name, inbound_id)` | 元组 | 跨多个 3X-UI 面板的全局引用 |
+| | `(panel_id, inbound_id)` | 元组 | 跨多个 3X-UI 面板的全局引用 |
 | **3X-UI client** | `client.id` / `uuid` | UUID 字符串 | 协议凭证 + `updateClient/:clientId` 路径键 |
 | | `client.email` | VARCHAR | **跨 inbound 聚合流量的主键** |
 | **面板 nodes** | `nodes.id` | INT auto | 内部主键 |
-| | `(panel_name, inbound_id)` | 唯一索引 | 与 3X-UI inbound 1:1 映射 |
-| **归属表 xui_clients** | `(panel_name, inbound_id, client_email)` | 唯一索引 | 面板用户 ←→ 3X-UI client 匹配 |
+| | `(panel_id, inbound_id)` | 唯一索引 | 与 3X-UI inbound 1:1 映射 |
+| **归属表 xui_clients** | `(panel_id, inbound_id, client_email)` | 唯一索引 | 面板用户 ←→ 3X-UI client 匹配 |
 
 #### 关键设计：**email 是主匹配键，uuid 是辅助键**
 
@@ -105,11 +120,15 @@
 
 #### email 命名约定
 
-| 用户来源 | email 格式 | 例 |
-|---|---|---|
-| 本地账号 | `local_{username}@psp.local` | `local_friend_a@psp.local` |
-| SSO（Entra ID） | 直接用 UPN | `friend_a@tenant.onmicrosoft.com` |
-| §7.8 历史导入 | **保留原 email** 不强制改名 | `wxid: Hard2BeSober` |
+所有用户（本地 + SSO）统一格式：
+
+| 格式 | 例 |
+|---|---|
+| `u{userID}-n{nodeID}@{domain}` | `u42-n5@psp.local` |
+
+- `domain` 来自 UISettings.EmailDomain（默认 `psp.local`）
+- 包含 nodeID 是为了区分同一用户在不同 inbound 的 client
+- 历史导入的 client **保留原 email** 不强制改名
 
 #### 协议凭证派生表（同一 uuid 派生）
 
@@ -132,17 +151,18 @@ UUID 重置 → 所有协议密码同步刷新（封装层 `proxyPassword(user, 
 │            Vue 3 + Element Plus  管理后台 SPA             │
 │                                                           │
 │  /login          [SSO 登录] 或 [本地账号登录]              │
-│  /admin/users           用户 CRUD + 流量/到期             │
-│  /admin/nodes           节点 CRUD（封装 inbound API）     │
-│  /admin/nodes/:id       节点详情 + client 列表 + 认领     │
-│  /admin/groups          分组 CRUD + tag_filter + layout   │
-│  /admin/rules           规则集 Monaco 编辑                 │
-│  /admin/template        模板 Monaco 编辑 + 预览           │
-│  /admin/traffic         流量看板                          │
-│  /admin/panels          3X-UI 面板凭证                    │
-│  /admin/sso             SAML 配置（IdP metadata URL）     │
-│  /admin/audit           审计日志                          │
-│  /user/me               用户自助                          │
+│  /admin/dashboard        仪表盘                            │
+│  /admin/users            用户 CRUD + 流量/到期             │
+│  /admin/servers          3X-UI 服务器管理                  │
+│  /admin/nodes            节点 CRUD（封装 inbound API）     │
+│  /admin/groups           分组 CRUD + tag_filter + layout   │
+│  /admin/rules            规则集编辑                        │
+│  /admin/template         模板编辑 + 预览                   │
+│  /admin/traffic          流量看板                          │
+│  /admin/logs             日志管理（审计 + 订阅）           │
+│  /admin/sync-tasks       同步任务管理                      │
+│  /admin/settings         系统设置                          │
+│  /user/me                用户自助                          │
 └─────────────────────────────┬────────────────────────────┘
                               │ REST + JWT
                               ▼
@@ -150,46 +170,35 @@ UUID 重置 → 所有协议密码同步刷新（封装层 `proxyPassword(user, 
 │                   Go 后端 (Gin + RBAC)                   │
 │                                                           │
 │  HTTP 层：                                                 │
-│  ├─ /api/auth/saml/login     SAML AuthnRequest 发起       │
-│  ├─ /api/auth/saml/acs       SAML 回调（ACS endpoint）    │
-│  ├─ /api/auth/saml/metadata  SP metadata (供 IdP 配置)    │
-│  ├─ /api/auth/local/login    本地账号登录                  │
+│  ├─ /api/auth/*              认证（本地/SAML/OIDC）       │
 │  ├─ /api/admin/*             管理 API (role=admin)        │
 │  ├─ /api/user/me/*           用户自助 API                  │
-│  └─ /sub/:token              订阅渲染（公开，token 凭证）  │
+│  ├─ /sub/:token              订阅渲染（公开，动态路径）    │
+│  └─ /health                  健康检查                      │
 │                                                           │
 │  Service 层：                                              │
-│  ├─ AuthSvc       SAML SP 实现 + 本地账号 + JWT 签发      │
+│  ├─ AuthSvc       SAML/OIDC + 本地账号 + JWT 签发         │
 │  ├─ UserSvc       用户 CRUD、改组联动 sync                 │
 │  ├─ NodeSvc       inbound CRUD（封装 3X-UI API）          │
 │  ├─ GroupSvc      分组 CRUD（含 layout）                   │
-│  ├─ RuleSvc       规则集 CRUD                              │
-│  ├─ TmplSvc       模板 CRUD + 预览渲染                     │
-│  ├─ RenderSvc     订阅渲染                                  │
-│  ├─ XUIClient     3X-UI HTTP API 封装                     │
+│  ├─ RenderSvc     订阅渲染（mihomo / sing-box）           │
 │  ├─ SyncSvc       所有写 3X-UI 操作的统一入口 + 护栏       │
 │  ├─ TrafficSvc    cron 拉取 + 快照 + 超限自动 disable     │
+│  ├─ MailerSvc     邮件通知（到期/停用/公告）               │
 │  ├─ AuditSvc      所有写操作记审计                          │
 │  └─ ReconcileSvc  周期对账                                  │
 └──────┬─────────────────────────────────────┬────────────┘
        ▼                                     ▼
 ┌─────────────────────┐              ┌─────────────────────┐
 │       MySQL         │              │    3X-UI HTTP API   │
-│  users / groups     │              │   (N 个面板)         │
-│  nodes / xui_clients│              │                     │
-│  traffic_snapshots  │              └─────────────────────┘
-│  audit_log          │                       ▲
-│  sub_logs           │                       │
-└─────────────────────┘                       │
-       ▲                                      │
-       │                                      │
-┌──────┴───────────────────────────────────────┴──────────┐
+│  16 张表（见 §5）    │              │   (N 个面板)         │
+└─────────────────────┘              └─────────────────────┘
+       ▲
+       │
+┌──────┴───────────────────────────────────────────────────┐
 │      文件系统 (config/)                                  │
-│  config.yaml          主配置                              │
-│  xui_panels.yaml      3X-UI 凭证（AES-GCM 加密字段）      │
-│  saml.yaml            SAML IdP 配置                       │
-│  rule_sets/*.yaml     规则集                              │
-│  templates/*.yaml     模板                                │
+│  config.yaml          主配置（最小化：listen/jwt/db）    │
+│  templates/*.yaml     订阅模板                           │
 └──────────────────────────────────────────────────────────┘
 ```
 
@@ -197,9 +206,13 @@ UUID 重置 → 所有协议密码同步刷新（封装层 `proxyPassword(user, 
 
 | 数据 | 存储 | 理由 |
 |---|---|---|
-| users / groups / nodes / xui_clients / traffic / audit / sub_logs | **MySQL** | 频繁读写、需事务、需 JOIN |
-| 规则集 / 模板内容 | **YAML 文件** | 长文本，配 Monaco 编辑器适合文件式存取 |
-| 主配置 / 3X-UI 凭证 / SAML 配置 | **YAML 文件** | 启动时加载，少变更，含敏感字段加密 |
+| 业务数据（users/groups/nodes/traffic/audit 等） | **MySQL** | 频繁读写、需事务、需 JOIN |
+| 配置数据（ui_settings/saml/oidc/mail/xui_panels） | **MySQL** | 运行时可编辑，管理员通过 UI 修改 |
+| 规则集内容 | **MySQL** | 长文本，支持 Monaco 编辑器 |
+| 订阅模板 | **YAML 文件** | 部署时配置，变更较少 |
+| 主配置 (config.yaml) | **YAML 文件** | 启动时加载，最小化配置（listen/jwt/db） |
+
+**注意**：早期版本中 xui_panels、SAML 配置、规则集等存储在 YAML 文件中，现已全部迁移到 MySQL。仅 `config.yaml` 和 `templates/*.yaml` 保持文件存储。
 
 ---
 
@@ -265,104 +278,260 @@ func (s *SyncSvc) ensureInboundDeletable(inboundID int) error {
 
 ### 5.1 MySQL Schema
 
+共 16 张表，通过 GORM AutoMigrate 自动创建。
+
 ```sql
 -- 用户
 CREATE TABLE users (
-  id              BIGINT AUTO_INCREMENT PRIMARY KEY,
-  username        VARCHAR(64) UNIQUE NOT NULL,
-  upn             VARCHAR(255) UNIQUE,        -- SSO 用户的 UPN；本地用户为 NULL
-  source          ENUM('sso','local') NOT NULL,
-  password_hash   VARCHAR(255),               -- bcrypt；本地账号才有
-  role            ENUM('admin','user') NOT NULL DEFAULT 'user',
-  sub_token       VARCHAR(64) UNIQUE NOT NULL,
-  uuid            CHAR(36) NOT NULL,          -- v4
-  group_id        BIGINT NOT NULL,
-  enabled_rule_sets JSON,                     -- ["ad_block","ai",...]
-  personal_rules  TEXT,
-  expire_at       DATETIME,                   -- 面板侧维护
-  traffic_limit_bytes BIGINT DEFAULT 0,       -- 0 = 不限
-  traffic_reset_period ENUM('never','monthly','quarterly') DEFAULT 'never',
-  traffic_period_start DATETIME,              -- 当前计费周期起点
-  remark          VARCHAR(255),
-  enabled         TINYINT(1) DEFAULT 1,
-  auto_disabled_reason VARCHAR(64),           -- 'traffic_exceeded' / 'expired' / NULL
-  created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
-  updated_at      DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  KEY idx_group (group_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+  id                   BIGINT AUTO_INCREMENT PRIMARY KEY,
+  upn                  VARCHAR(255) UNIQUE NOT NULL,  -- 所有用户的唯一标识
+  email                VARCHAR(255) INDEX,             -- 通知邮箱
+  password_hash        VARCHAR(255),                   -- bcrypt；本地账号才有
+  role                 VARCHAR(16) NOT NULL DEFAULT 'user',
+  sub_token            VARCHAR(64) UNIQUE NOT NULL,
+  uuid                 CHAR(36) NOT NULL,
+  group_id             BIGINT NOT NULL INDEX,
+  enabled_rule_sets    JSON,
+  personal_rules       TEXT,
+  expire_at            DATETIME,
+  traffic_limit_bytes  BIGINT DEFAULT 0,
+  traffic_reset_period VARCHAR(16) DEFAULT 'never',
+  traffic_period_start DATETIME,
+  display_name         VARCHAR(128),
+  remark               VARCHAR(255),
+  enabled              BOOLEAN NOT NULL,
+  auto_disabled_reason VARCHAR(32),
+  disable_detail       TEXT,                           -- 停用详情
+  block_violation_count INT DEFAULT 0,                 -- 禁用客户端违规计数
+  emergency_used_count INT DEFAULT 0,                  -- 紧急访问使用次数
+  created_at           DATETIME,
+  updated_at           DATETIME
+);
 
--- 分组
-CREATE TABLE groups (
-  id              BIGINT AUTO_INCREMENT PRIMARY KEY,
-  slug            VARCHAR(64) UNIQUE NOT NULL,
-  name            VARCHAR(128) NOT NULL,
-  tag_filter      JSON NOT NULL,              -- "*" 或 ["region:TW","tag:reality"]
-  layout          JSON,                       -- 见 §5.2
-  remark          VARCHAR(255),
-  created_at      DATETIME DEFAULT CURRENT_TIMESTAMP
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+-- 分组（表名 groups_ 避免 MySQL 保留字）
+CREATE TABLE groups_ (
+  id         BIGINT AUTO_INCREMENT PRIMARY KEY,
+  slug       VARCHAR(64) UNIQUE NOT NULL,
+  name       VARCHAR(128) NOT NULL,
+  tag_filter JSON NOT NULL,
+  layout     JSON,
+  remark     VARCHAR(255),
+  created_at DATETIME
+);
 
--- 节点元数据（与 3X-UI inbound 1:1，存展示信息）
+-- 节点元数据
 CREATE TABLE nodes (
   id              BIGINT AUTO_INCREMENT PRIMARY KEY,
-  panel_name      VARCHAR(64) NOT NULL,
+  panel_id        BIGINT NOT NULL INDEX,
+  panel_name      VARCHAR(64) INDEX,
   inbound_id      INT NOT NULL,
-  display_name    VARCHAR(255) NOT NULL,      -- 订阅里 proxies[].name 用这个
-  region          VARCHAR(16) NOT NULL,       -- TW / US / CN / HK / JP / SG / ...
-  tags            JSON,                       -- ["reality","global"]
+  display_name    VARCHAR(255) NOT NULL,
+  server_address  VARCHAR(255),           -- 客户端连接的公共主机名
+  flow            VARCHAR(64),            -- VLESS flow 参数
+  region          VARCHAR(16) NOT NULL,
+  tags            JSON,
   sort_order      INT DEFAULT 0,
-  enabled         TINYINT(1) DEFAULT 1,
-  created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
-  UNIQUE KEY uk_panel_inbound (panel_name, inbound_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+  enabled         BOOLEAN DEFAULT TRUE,
+  created_at      DATETIME,
+  UNIQUE KEY uk_panel_inbound (panel_id, inbound_id)
+);
 
 -- 归属表
 CREATE TABLE xui_clients (
-  id              BIGINT AUTO_INCREMENT PRIMARY KEY,
-  user_id         BIGINT NOT NULL,
-  panel_name      VARCHAR(64) NOT NULL,
-  inbound_id      INT NOT NULL,
-  client_email    VARCHAR(255) NOT NULL,
-  client_uuid     CHAR(36) NOT NULL,
-  created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
-  UNIQUE KEY uk_inbound_email (panel_name, inbound_id, client_email),
-  KEY idx_user (user_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+  id           BIGINT AUTO_INCREMENT PRIMARY KEY,
+  user_id      BIGINT NOT NULL INDEX,
+  panel_id     BIGINT NOT NULL INDEX,
+  panel_name   VARCHAR(64) INDEX,
+  inbound_id   INT NOT NULL,
+  client_email VARCHAR(255) NOT NULL,
+  client_uuid  VARCHAR(36) NOT NULL,
+  created_at   DATETIME,
+  UNIQUE KEY uk_owner_match (panel_id, inbound_id, client_email)
+);
 
 -- 流量快照（5min 一条）
 CREATE TABLE traffic_snapshots (
-  id              BIGINT AUTO_INCREMENT PRIMARY KEY,
-  user_id         BIGINT NOT NULL,
-  up_bytes        BIGINT NOT NULL,
-  down_bytes      BIGINT NOT NULL,
-  total_bytes     BIGINT NOT NULL,
-  captured_at     DATETIME NOT NULL,
+  id          BIGINT AUTO_INCREMENT PRIMARY KEY,
+  user_id     BIGINT NOT NULL,
+  up_bytes    BIGINT,
+  down_bytes  BIGINT,
+  total_bytes BIGINT,
+  captured_at DATETIME NOT NULL,
   KEY idx_user_time (user_id, captured_at)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+);
 
 -- 订阅访问日志
 CREATE TABLE sub_logs (
-  id              BIGINT AUTO_INCREMENT PRIMARY KEY,
-  user_id         BIGINT,
-  ip              VARCHAR(64),
-  ua              VARCHAR(255),
-  client_type     VARCHAR(32),
-  accessed_at     DATETIME DEFAULT CURRENT_TIMESTAMP,
-  KEY idx_user_time (user_id, accessed_at)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+  id          BIGINT AUTO_INCREMENT PRIMARY KEY,
+  user_id     BIGINT INDEX,
+  ip          VARCHAR(64),
+  ua          VARCHAR(255),
+  client_type VARCHAR(32),
+  accessed_at DATETIME INDEX
+);
 
 -- 审计日志
 CREATE TABLE audit_log (
-  id              BIGINT AUTO_INCREMENT PRIMARY KEY,
-  actor           VARCHAR(255) NOT NULL,
-  action          VARCHAR(64) NOT NULL,
-  target          VARCHAR(255),
-  before_json     JSON,
-  after_json      JSON,
-  ip              VARCHAR(64),
-  at              DATETIME DEFAULT CURRENT_TIMESTAMP,
-  KEY idx_time (at)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+  id          BIGINT AUTO_INCREMENT PRIMARY KEY,
+  actor       VARCHAR(255) NOT NULL,
+  action      VARCHAR(64) NOT NULL,
+  target      VARCHAR(255),
+  before_json JSON,
+  after_json  JSON,
+  ip          VARCHAR(64),
+  at          DATETIME INDEX
+);
+
+-- 同步任务队列
+CREATE TABLE sync_tasks (
+  id          BIGINT AUTO_INCREMENT PRIMARY KEY,
+  type        VARCHAR(64) NOT NULL INDEX,
+  status      VARCHAR(32) NOT NULL INDEX,
+  target_type VARCHAR(64) NOT NULL,
+  target_id   BIGINT NOT NULL,
+  summary     VARCHAR(255),
+  payload     TEXT,
+  last_error  TEXT,
+  attempts    INT DEFAULT 0,
+  next_run_at DATETIME INDEX,
+  created_at  DATETIME,
+  updated_at  DATETIME,
+  finished_at DATETIME,
+  INDEX idx_task_due (type, status, next_run_at),
+  INDEX idx_task_target (target_type, target_id)
+);
+
+-- 3X-UI 面板凭证
+CREATE TABLE xui_panels (
+  id         BIGINT AUTO_INCREMENT PRIMARY KEY,
+  name       VARCHAR(128) UNIQUE NOT NULL,
+  url        VARCHAR(512) NOT NULL,
+  api_token  TEXT,
+  username   VARCHAR(255),
+  password   TEXT,
+  remark     VARCHAR(255),
+  created_at DATETIME,
+  updated_at DATETIME
+);
+
+-- 系统设置（单行）
+CREATE TABLE ui_settings (
+  id                           BIGINT PRIMARY KEY,
+  login_mode                   VARCHAR(32),
+  site_title                   VARCHAR(128),
+  app_title                    VARCHAR(128),
+  icon_url                     VARCHAR(1024),
+  logo_url                     VARCHAR(1024),
+  logo_url_dark                VARCHAR(1024),
+  email_domain                 VARCHAR(255),
+  audit_retention_days         INT,
+  sub_base_url                 VARCHAR(512),
+  cron_traffic_pull_minutes    INT,
+  cron_reconcile_minutes       INT,
+  jwt_access_ttl_minutes       INT,
+  jwt_refresh_ttl_minutes      INT,
+  jwt_issuer                   VARCHAR(128),
+  sub_per_ip_per_min           INT,
+  login_per_ip_per_min         INT,
+  sync_task_retention_days     INT,
+  disallow_user_local_login    BOOLEAN,
+  disallow_user_password_change BOOLEAN,
+  emergency_access_enabled     BOOLEAN,
+  emergency_access_hours       INT,
+  emergency_access_max_count   INT,
+  sub_path                     VARCHAR(128) DEFAULT 'sub',
+  sub_client_rules             JSON,
+  sub_import_clients           JSON,
+  sub_log_retention_days       INT DEFAULT 7,
+  sub_block_auto_disable       BOOLEAN DEFAULT FALSE,
+  sub_block_auto_disable_count INT DEFAULT 3,
+  quick_links                  JSON,
+  global_announcement          JSON,
+  footer_text                  VARCHAR(255),
+  updated_at                   DATETIME
+);
+
+-- 规则集
+CREATE TABLE rule_sets (
+  id         BIGINT AUTO_INCREMENT PRIMARY KEY,
+  slug       VARCHAR(128) UNIQUE NOT NULL,
+  name       VARCHAR(255),
+  sort       INT,
+  enabled    BOOLEAN DEFAULT TRUE,
+  content    TEXT,
+  created_at DATETIME,
+  updated_at DATETIME
+);
+
+-- 邮件设置（单行）
+CREATE TABLE mail_settings (
+  id                     BIGINT PRIMARY KEY,
+  enabled                BOOLEAN,
+  smtp_host              VARCHAR(255),
+  smtp_port              INT,
+  smtp_username          VARCHAR(255),
+  smtp_password          TEXT,
+  from_email             VARCHAR(255),
+  from_name              VARCHAR(128),
+  encryption             VARCHAR(16),
+  expire_before_days     INT,
+  traffic_remain_percent INT,
+  updated_at             DATETIME
+);
+
+-- 邮件模板
+CREATE TABLE mail_templates (
+  kind       VARCHAR(32) PRIMARY KEY,
+  subject    VARCHAR(255),
+  body       TEXT,
+  enabled    BOOLEAN,
+  updated_at DATETIME
+);
+
+-- 已发送邮件记录（去重）
+CREATE TABLE mail_sent (
+  id         BIGINT AUTO_INCREMENT PRIMARY KEY,
+  user_id    BIGINT NOT NULL,
+  kind       VARCHAR(32) NOT NULL,
+  window_key VARCHAR(128) NOT NULL,
+  to_email   VARCHAR(255) NOT NULL,
+  sent_at    DATETIME,
+  UNIQUE KEY uk_mail_once (user_id, kind, window_key)
+);
+
+-- SAML 配置（单行）
+CREATE TABLE saml_config (
+  id                BIGINT PRIMARY KEY,
+  enabled           BOOLEAN,
+  mode              VARCHAR(16),
+  sp_entity_id      VARCHAR(512),
+  sp_acs_url        VARCHAR(512),
+  sp_cert_pem       TEXT,
+  sp_key_pem        TEXT,
+  idp_metadata_url  VARCHAR(1024),
+  idp_metadata_refresh_hours INT,
+  attribute_mapping JSON,
+  admin_group_ids   JSON,
+  default_group_slug VARCHAR(64),
+  new_user_defaults JSON,
+  updated_at        DATETIME
+);
+
+-- OIDC 配置（单行）
+CREATE TABLE oidc_config (
+  id                 BIGINT PRIMARY KEY,
+  enabled            BOOLEAN,
+  issuer_url         VARCHAR(512),
+  client_id          VARCHAR(255),
+  client_secret      TEXT,
+  redirect_url       VARCHAR(512),
+  scopes             JSON,
+  attribute_mapping  JSON,
+  admin_group_ids    JSON,
+  default_group_slug VARCHAR(64),
+  new_user_defaults  JSON,
+  updated_at         DATETIME
+);
 ```
 
 ### 5.2 group.layout 字段
@@ -393,11 +562,10 @@ CREATE TABLE audit_log (
 
 | 文件 | 用途 |
 |---|---|
-| `config.yaml` | 监听端口、JWT 密钥、MySQL DSN、订阅基地址、cron 间隔 |
-| `config/xui_panels.yaml` | 3X-UI 面板凭证（`api_token` 优先，`password` 兜底；敏感字段 AES-GCM 加密）|
-| `config/saml.yaml` | IdP metadata URL、SP entity ID、admin group ID 列表、attribute 映射 |
-| `config/rule_sets/*.yaml` | 规则集分片，每文件含 slug/name/sort/content |
-| `config/templates/*.yaml` | Clash/Sing-box 模板 |
+| `config.yaml` | 监听端口、JWT 密钥、数据库 DSN、配置目录 |
+| `config/templates/*.yaml` | 订阅模板（mihomo / sing-box） |
+
+**注意**：3X-UI 面板凭证、SAML/OIDC 配置、规则集、系统设置等已迁移到 MySQL，通过管理后台 UI 配置。
 
 ---
 
@@ -407,74 +575,63 @@ CREATE TABLE audit_log (
 
 | 页面 | 列表显示 | 操作 |
 |---|---|---|
-| **用户管理** | 用户名 / 来源(SSO/本地) / 分组 / 到期 / 配额 / 已用 / 状态 | 新增（仅本地）、编辑、改组、改到期、改配额、改重置周期、重置 UUID、禁用、启用、重置 sub_token、重置密码（仅本地）、删除、批量延期、批量改组、导出 CSV |
-| **节点管理** | 显示名 / 协议 / 端口 / region / tags / 启用 / client 数（纳/未纳） | **新增 inbound**（VLESS/VMess/Trojan/SS/SS-2022 协议表单 + Reality 参数）、编辑、改 region/tag/sort、启用/禁用、删除（受护栏保护）、从 3X-UI 导入未纳管 inbound |
-| **节点详情** | 该 inbound 内全部 client（纳管/未纳管标记） | 认领未纳管 client、查看实时流量、踢出在线连接 |
-| **分组管理** | 组名 / 节点数 / 用户数 | 新增、编辑（tag_filter）、**编辑 layout（拖拽节点排序 + 加分隔符占位）**、复制、删除（无成员才允许）|
-| **规则集** | slug / 名称 / 行数 / 修改时间 | 新增、Monaco 编辑、排序、启用/禁用、删除 |
-| **模板** | 名称 / 客户端类型 / 是否默认 | Monaco 编辑、**实时预览**（选用户预览）、切默认 |
-| **3X-UI 面板** | name / URL / 状态 | 新增、编辑、测连接、删除 |
-| **SSO 配置** | IdP entity ID / metadata URL / 同步状态 | 配 metadata URL（自动拉取 + 定期刷新）、配 admin group ID、配 attribute 映射、测试登录 |
-| **流量看板** | 今日 / 本月总量 + Top 10 | 单用户折线图 30 天、按节点聚合、CSV 导出 |
-| **审计日志** | 时间 / 操作者 / 动作 / 对象 / diff | 筛选、时间范围、导出 |
-| **系统设置** | JWT 有效期 / 订阅基地址 / cron 间隔 | 编辑 |
+| **总览 (Dashboard)** | 统计概览 | - |
+| **用户管理** | UPN / 显示名 / 分组 / 到期 / 配额 / 已用 / 状态 | 新增、编辑、改组、改到期、改配额、重置 UUID、禁用(含原因)、启用(含原因)、重置 sub_token、重置密码、删除、批量延期、批量改组 |
+| **服务器** | 3X-UI 面板列表 | 新增、编辑、删除、连接测试 |
+| **节点管理** | 显示名 / 协议 / 端口 / region / tags / 启用 | 新增 inbound、编辑、改 region/tag/sort、启用/禁用、删除、导入未纳管 inbound、认领 client |
+| **分组** | 分组名 / slug / 成员数 | 新增、编辑、编辑 layout、删除 |
+| **规则库** | 规则集列表 | 新增、编辑、删除、启用/禁用 |
+| **配置方案** | 模板列表 | 新增、编辑、删除、设为默认 |
+| **订阅管理** | - | 公网基地址、订阅路径、客户端规则、导入客户端、日志保留、违规自动停用 |
+| **流量统计** | Top-N 排行 | 查看详情、手动设置用量 |
+| **日志管理** | 订阅日志 / 审计日志 | 清空、按策略清理、查看详情 |
+| **同步任务** | 任务列表 | 重试、取消、清理已完成 |
+| **系统设置** | - | 基本设置、邮件提醒、站点品牌、SSO 认证 |
 
 ### 6.2 用户自助页 (role=user)
 
 | 内容 | 操作 |
 |---|---|
-| 到期倒计时 / 流量进度条 / 订阅 URL + 二维码 | 改密码（本地账号）、重置 sub_token、切换订阅格式、查看 30 天流量曲线 |
+| 到期倒计时 / 流量进度条 / 订阅 URL + 二维码 | 改密码、重置 sub_token、紧急访问、查看订阅客户端导入 |
+| 快捷链接 | 管理员配置的外部链接（如客户端下载、教程等） |
+| 全局公告 | 管理员发布的置顶公告 |
 
 ---
 
 ## 7. 关键数据流（核心场景演练）
 
-### 7.1 SAML SSO 登录
+### 7.1 SSO 登录（SAML / OIDC）
 
 ```
-朋友访问 /login → 点 "SSO 登录"
-  ① 后端生成 SAML AuthnRequest，302 跳转 IdP
-  ② IdP (Entra ID) 完成登录，POST SAML Response 到 /api/auth/saml/acs
-  ③ 后端验签（用 IdP metadata 里的证书）
-  ④ 解析 SAML attributes：
-       upn       = "friend_a@tenant.onmicrosoft.com"
-       groups    = ["group-uuid-1","group-uuid-2",...]
-       email     = ...
-       display_name = ...
-  ⑤ 查 MySQL users WHERE upn=?:
-       - 找到 → 更新 last_login、对照 SAML groups 重算 role
-       - 未找到 → 自动建用户（source=sso, role=auto判定, group=默认组）
-  ⑥ 比对 saml.yaml 里的 admin_group_ids，命中任意 → role=admin，否则 user
-  ⑦ 签发 JWT (HS256, access 2h + refresh 7d)，HttpOnly cookie
-  ⑧ 302 跳回 /admin 或 /user/me（按 role）
-
-新用户首次 SSO 登录的同步:
-  ① UserSvc.CreateFromSSO(upn, display_name, groups)
-  ② 生成 uuid (v4)、sub_token (32B base64url)
-  ③ 默认分到 group_id = config.default_group_id
-  ④ 解析 default_group.tag_filter → 拉 inbound list → 过滤
-  ⑤ 对每个匹配 inbound 调 SyncSvc.AddClient:
-       email = upn                      ← 关键：直接用 UPN 作为 email
-       uuid = user.uuid
-       expiry_time = 0 (无限期，可后续在面板改)
-       total_gb = 0 (无限，由面板 traffic_limit 强制)
-  ⑥ 写 xui_clients 表
-  ⑦ AuditLog
+用户访问 /login → 点 "使用 SSO 登录"
+  ① 后端检测启用的 SSO 类型（SAML 或 OIDC）
+  ② SAML: 生成 AuthnRequest，302 跳转 IdP
+     OIDC: 生成 state/nonce，302 跳转授权端点
+  ③ 用户在 IdP 完成认证
+  ④ SAML: POST SAML Response 到 /api/auth/saml/acs
+     OIDC: GET 回调到 /api/auth/oidc/callback
+  ⑤ 后端验证响应，解析用户信息（UPN、email、display_name、groups）
+  ⑥ 查 MySQL users WHERE upn=?：
+     - 找到 → 更新信息
+     - 未找到 → 自动建用户（role=auto判定, group=默认组）
+  ⑦ 对比 admin_group_ids，命中 → role=admin
+  ⑧ 签发 JWT (HS256, access 2h + refresh 7d)，HttpOnly cookie
+  ⑨ 302 跳回 /admin 或 /user/me（按 role）
 ```
 
 ### 7.2 本地账号登录（备用）
 
 ```
-朋友访问 /login → "本地账号" tab → 输入用户名密码
-  ① 后端查 users WHERE source='local' AND username=?
+用户访问 /login → 输入 UPN 和密码
+  ① 后端查 users WHERE upn=?
   ② bcrypt 验证 password_hash
   ③ 签发 JWT
   ④ 跳转
 
 注：本地账号仅供以下场景：
-  - 初次启动建第一个 admin（环境变量或 CLI 工具）
+  - 初次启动建第一个 admin
   - SSO 故障 fallback
-  - 不能用 Entra ID 登录的特殊用户
+  - 不能用 SSO 登录的特殊用户
 ```
 
 ### 7.3 新建本地用户
@@ -680,7 +837,123 @@ GET /sub/abc123 (UA: mihomo)
 
 ---
 
-## 8. 订阅渲染管线
+## 8. API 端点
+
+### 8.1 公开端点
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/health` | 健康检查 |
+| GET | `/{sub_path}/:token` | 订阅渲染（动态路径，默认 /sub/） |
+
+### 8.2 认证端点 (`/api/auth`)
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/methods` | 返回可用的登录方式列表 |
+| POST | `/local/login` | 本地账号登录 |
+| GET | `/saml/login` | SAML 登录发起 |
+| POST | `/saml/acs` | SAML 断言消费 |
+| GET | `/saml/metadata` | SP metadata |
+| GET | `/oidc/login` | OIDC 登录发起 |
+| GET | `/oidc/callback` | OIDC 回调 |
+| GET | `/sso-complete` | SSO 登录完成 |
+
+### 8.3 用户自助端点 (`/api/user/me`)
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `` | 个人资料 |
+| GET | `/traffic` | 流量报告 |
+| GET | `/rules` | 个人规则 |
+| PUT | `/rules` | 更新个人规则 |
+| POST | `/emergency-access` | 紧急访问 |
+| POST | `/reset-credentials` | 重置凭证 |
+| POST | `/change-password` | 修改密码 |
+
+### 8.4 管理端点 (`/api/admin`)
+
+**用户管理：**
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/users` | 用户列表 |
+| POST | `/users` | 创建用户 |
+| GET | `/users/:id` | 用户详情 |
+| PUT | `/users/:id` | 更新用户 |
+| DELETE | `/users/:id` | 删除用户 |
+| POST | `/users/:id/reset-credentials` | 重置凭证 |
+| POST | `/users/:id/reset-emergency-usage` | 重置紧急访问计数 |
+| POST | `/users/:id/set-enabled` | 启用/禁用用户 |
+| GET | `/users/:id/rules` | 获取用户规则 |
+| PUT | `/users/:id/rules` | 更新用户规则 |
+
+**节点管理：**
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/nodes` | 节点列表 |
+| POST | `/nodes` | 创建 inbound |
+| GET | `/nodes/:id` | 节点详情 |
+| POST | `/nodes/import` | 导入现有 inbound |
+| PUT | `/nodes/:id/metadata` | 更新元数据 |
+| PUT | `/nodes/:id/inbound` | 更新 inbound 配置 |
+| POST | `/nodes/:id/set-enabled` | 启用/禁用节点 |
+| DELETE | `/nodes/:id` | 删除节点 |
+| GET | `/nodes/unmanaged` | 未纳管 inbound 列表 |
+| POST | `/nodes/:id/claim` | 认领 client |
+| POST | `/nodes/generate-reality-keypair` | 生成 Reality 密钥对 |
+
+**分组管理：**
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/groups` | 分组列表 |
+| POST | `/groups` | 创建分组 |
+| GET | `/groups/:id` | 分组详情 |
+| PUT | `/groups/:id` | 更新分组 |
+| PUT | `/groups/:id/layout` | 更新分组布局 |
+| DELETE | `/groups/:id` | 删除分组 |
+
+**其他管理：**
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/rules` | 规则集列表 |
+| GET/PUT/DELETE | `/rules/:slug` | 规则集 CRUD |
+| GET | `/templates` | 模板列表 |
+| GET/PUT/DELETE | `/templates/:slug` | 模板 CRUD |
+| GET | `/servers` | 3X-UI 服务器列表 |
+| POST/PUT/DELETE | `/servers/:id` | 服务器 CRUD |
+| POST | `/servers/probe` | 测试连接 |
+| GET | `/traffic/top` | 流量排行 |
+| GET/PUT | `/traffic/user/:id` | 用户流量报告/设置 |
+| GET | `/audit` | 审计日志 |
+| DELETE | `/audit` | 清空审计日志 |
+| GET | `/sub-logs` | 订阅日志 |
+| DELETE | `/sub-logs` | 清空订阅日志 |
+| POST | `/sub-logs/purge` | 按策略清理 |
+| GET | `/sync-tasks` | 同步任务列表 |
+| POST | `/sync-tasks/:id/retry` | 重试任务 |
+| POST | `/sync-tasks/:id/cancel` | 取消任务 |
+| POST | `/sync-tasks/purge` | 清理已完成 |
+| POST | `/reconcile/run` | 手动对账 |
+
+**系统设置：**
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET/PUT | `/settings/ui` | UI 设置 |
+| GET/PUT | `/settings/mail` | 邮件设置 |
+| PUT | `/settings/mail/templates/:kind` | 邮件模板 |
+| POST | `/settings/mail/test` | 测试邮件 |
+| POST | `/settings/mail/announcement` | 发送公告 |
+| GET/PUT | `/settings/saml` | SAML 配置 |
+| GET/PUT | `/settings/oidc` | OIDC 配置 |
+
+---
+
+## 9. 订阅渲染管线
 
 ### 8.1 模板占位符
 
@@ -1091,28 +1364,20 @@ SAML Response 验签通过 →
 
 ### 14.1 依赖
 
-- MySQL 8.0+ 实例（已存在，无需新部署）
-- 域名 + HTTPS 证书（Entra ID 要求 ACS URL 必须 HTTPS）
+- MySQL 8.0+ 或 SQLite（开发环境）
+- 域名 + HTTPS 证书（SSO 要求）
 - Linux 服务器（systemd）或 Docker 环境
 
 ### 14.2 二进制 + systemd
 
 ```
 /opt/passwall-sub-panel/
-├── panel                    # 二进制（含 web/dist）
+├── psp                      # 二进制（含 web/dist 嵌入）
 ├── config/
 │   ├── config.yaml
-│   ├── xui_panels.yaml
-│   ├── saml.yaml
-│   ├── saml-sp.crt + .key
-│   ├── rule_sets/*.yaml
 │   └── templates/*.yaml
-
-环境变量:
-  PSP_SECRET_KEY=<random-32-bytes>          # AES key
-  PSP_MYSQL_DSN=user:pass@tcp(localhost:3306)/psp?parseTime=true&charset=utf8mb4
-
-Nginx: https://sub.example.com → 127.0.0.1:8788
+├── data/
+│   └── panel.db             # SQLite 模式时使用
 ```
 
 ### 14.3 Docker
@@ -1121,32 +1386,31 @@ Nginx: https://sub.example.com → 127.0.0.1:8788
 services:
   panel:
     image: kazuha/passwall-sub-panel:latest
-    ports: ["127.0.0.1:8788:8788"]
+    ports: ["8788:8788"]
     volumes:
       - ./config:/app/config
-    environment:
-      - PSP_SECRET_KEY=${PSP_SECRET_KEY}
-      - PSP_MYSQL_DSN=user:pass@tcp(host.docker.internal:3306)/psp?...
+      - ./data:/app/data
     restart: unless-stopped
 ```
 
-### 14.4 初次启动 (Bootstrap)
+### 14.4 初次启动
 
-```bash
-# CLI 工具创建第一个 admin（本地账号）
-./panel init-admin --username kazuha --password <生成的>
-
-# 启动后通过 SSO 登录的用户若 group 命中 admin_group_ids 自动升为 admin
-```
+启动后自动创建默认 admin 账号（admin/admin），首次登录后建议修改密码。
 
 ---
 
 ## 15. 决策记录
 
-✓ 已决：
-
-| # | 决策点 | 选定 |
-|---|---|---|
+| # | 决策点 | 选定 | 状态 |
+|---|---|---|---|
+| 1 | 数据库 | MySQL 8.0 + SQLite 双驱动 | ✅ 已实现 |
+| 2 | 前端框架 | Vue 3 + Element Plus + TypeScript | ✅ 已实现 |
+| 3 | SSO 方案 | SAML + OIDC 双支持 | ✅ 已实现 |
+| 4 | 同步策略 | 异步任务队列 (sync_tasks) | ✅ 已实现 |
+| 5 | 用户标识 | UPN 统一标识（移除 username/source） | ✅ 已实现 |
+| 6 | Email 约定 | `u{userID}-n{nodeID}@{domain}` 统一格式 | ✅ 已实现 |
+| 7 | 订阅格式 | mihomo + sing-box | ✅ 已实现 |
+| 8 | 配置存储 | MySQL（运行时配置）+ YAML（模板/启动配置） | ✅ 已实现 |
 | 1 | SS-2022 密码派生 | ✓ `base64(SHA-256(uuid))` 确定性派生 |
 | 2 | 流量重置周期默认 | ✓ monthly |
 | 9 | 节点粒度 | ✓ inbound 为最小粒度，不引入 server 抽象层；同物理机多协议用 `server:xxx` tag 关联 |
@@ -1167,60 +1431,73 @@ services:
 
 ## 16. 实施路线图
 
-### M0 骨架（部分已完成）
+### M0 骨架 ✅ 已完成
 
 - [x] go.mod / 项目目录 / 主入口
 - [x] 配置加载
-- [ ] 改用 MySQL（替换 SQLite）
-- [ ] 改 model 适配 v7（含 SSO 字段、layout 字段等）
+- [x] MySQL + SQLite 双驱动
+- [x] GORM AutoMigrate
 
-### M1 本地账号 + 基础订阅
+### M1 本地账号 + 基础订阅 ✅ 已完成
 
-- [ ] 本地账号登录 + JWT
-- [ ] MySQL 迁移脚本
-- [ ] 3X-UI Client 封装
-- [ ] SyncSvc + 归属表护栏
-- [ ] 用户 CRUD API + UUID 派生多协议密码
-- [ ] 订阅渲染器（不含 layout，先用统一默认）
-- [ ] 极简前端：登录 + 用户列表 + 新增
+- [x] 本地账号登录 + JWT
+- [x] 3X-UI Client 封装
+- [x] SyncSvc + 归属表护栏
+- [x] 用户 CRUD API + UUID 派生多协议密码
+- [x] 订阅渲染器（mihomo）
+- [x] 前端：登录 + 用户列表 + 新增
 
-### M2 SSO + 节点管理
+### M2 SSO + 节点管理 ✅ 已完成
 
-- [ ] SAML SP 集成（crewjam/saml）
-- [ ] IdP metadata 自动拉取 + 刷新
-- [ ] role 由 SAML group 决定
-- [ ] 节点 CRUD（含 inbound 协议表单）
-- [ ] 节点详情页 + 未纳管 client 认领
+- [x] SAML SP 集成
+- [x] OIDC 集成
+- [x] IdP metadata 自动拉取 + 刷新
+- [x] role 由 SAML/OIDC group 决定
+- [x] 节点 CRUD（含 inbound 协议表单）
+- [x] 节点详情页 + 未纳管 client 认领
 
-### M3 分组 + 高级渲染
+### M3 分组 + 高级渲染 ✅ 已完成
 
-- [ ] 分组 CRUD
-- [ ] tag_filter 解析
-- [ ] **layout 编辑器（拖拽节点 + 加分隔符）**
-- [ ] 规则集 / 模板 Monaco 编辑
-- [ ] 用户自助页
+- [x] 分组 CRUD
+- [x] tag_filter 解析
+- [x] layout 编辑器（拖拽节点 + 加分隔符）
+- [x] 规则集 / 模板编辑
+- [x] 用户自助页
+- [x] sing-box 渲染支持
 
-### M4 流量与可观测
+### M4 流量与可观测 ✅ 已完成
 
-- [ ] TrafficSvc + 周期重置
-- [ ] 超限自动 disable
-- [ ] 流量看板（曲线 + 排行）
-- [ ] AuditSvc + 审计页
-- [ ] ReconcileSvc + 对账报告
+- [x] TrafficSvc + 周期重置
+- [x] 超限自动 disable
+- [x] 流量看板（排行）
+- [x] AuditSvc + 审计页
+- [x] ReconcileSvc + 对账报告
+- [x] 订阅日志
 
-### M5 部署与硬化
+### M5 部署与硬化 ✅ 已完成
 
-- [ ] Dockerfile + docker-compose
-- [ ] systemd unit + Nginx 反代样例
-- [ ] 凭证 AES-GCM 加密
-- [ ] 限流 + CORS 收紧
+- [x] Dockerfile + docker-compose
+- [x] systemd unit + Nginx 反代样例
+- [x] 限流 + CORS 收紧
+- [x] SSO Cookie Secure 标志
+- [x] return_to 开放重定向防护
 
-### M6 (可选)
+### M6 功能增强 ✅ 已完成
 
-- [ ] Sing-box / v2rayN 订阅格式
-- [ ] 流量历史曲线扩展
-- [ ] CSV 导出
-- [ ] 多管理员细粒度权限
+- [x] 订阅客户端检测与阻止
+- [x] 邮件通知系统（到期/停用/公告）
+- [x] 紧急访问功能
+- [x] 站点品牌定制
+- [x] 同步任务队列
+- [x] 订阅访问日志
+- [x] 品牌化订阅名称
+
+### M7 待开发
+
+- [ ] 流量统计图表（ECharts）
+- [ ] 流量历史查询 API
+- [ ] 节点状态监控
+- [ ] 多语言 i18n
 
 ---
 
