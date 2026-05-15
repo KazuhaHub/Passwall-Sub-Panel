@@ -268,6 +268,7 @@ async function saveGeneral() {
       sub_log_retention_days: current.sub_log_retention_days,
       sub_block_auto_disable: current.sub_block_auto_disable,
       sub_block_auto_disable_count: current.sub_block_auto_disable_count,
+      sub_update_interval_hours: current.sub_update_interval_hours,
       quick_links: current.quick_links || [],
       global_announcement: current.global_announcement || {
         enabled: false,
@@ -622,6 +623,7 @@ const subImportClients = ref<SubImportClient[]>([])
 const subLogRetentionDays = ref(7)
 const subBlockAutoDisable = ref(false)
 const subBlockAutoDisableCount = ref(3)
+const subUpdateIntervalHours = ref(24)
 
 // Client rule dialog state
 const dialogVisible = ref(false)
@@ -667,6 +669,7 @@ async function loadSubSettings() {
     subLogRetentionDays.value = s.sub_log_retention_days || 7
     subBlockAutoDisable.value = !!s.sub_block_auto_disable
     subBlockAutoDisableCount.value = s.sub_block_auto_disable_count || 3
+    subUpdateIntervalHours.value = s.sub_update_interval_hours || 24
   } finally {
     subLoading.value = false
   }
@@ -694,6 +697,7 @@ async function saveSubRules() {
     s.sub_log_retention_days = subLogRetentionDays.value
     s.sub_block_auto_disable = subBlockAutoDisable.value
     s.sub_block_auto_disable_count = subBlockAutoDisableCount.value
+    s.sub_update_interval_hours = subUpdateIntervalHours.value
     await putUISettings(s)
     ElMessage.success('客户端规则已保存')
   } finally {
@@ -1232,6 +1236,17 @@ onMounted(() => {
           <el-form-item v-if="subBlockAutoDisable" label="触发次数">
             <el-input-number v-model="subBlockAutoDisableCount" :min="1" :max="100" />
             <div class="form-hint">用户使用禁用客户端达到此次数后，账号将被自动停用</div>
+          </el-form-item>
+        </el-form>
+
+        <h3 class="section-title" style="margin-top:32px;">订阅更新间隔</h3>
+        <p class="section-hint">
+          控制客户端自动更新订阅的频率。设置为 0 表示使用默认值（24 小时）。
+        </p>
+        <el-form label-position="top" style="max-width:480px">
+          <el-form-item label="更新间隔（小时）">
+            <el-input-number v-model="subUpdateIntervalHours" :min="0" :max="720" />
+            <div class="form-hint">客户端将按此间隔自动更新订阅配置</div>
           </el-form-item>
         </el-form>
 

@@ -25,12 +25,12 @@ content: |
         {
           "tag": "cloudflare-gateway",
           "address": "https://v5brh3pn84.cloudflare-gateway.com/dns-query",
-          "detour": "proxy"
+          "detour": "🚀 节点选择"
         },
         {
           "tag": "cloudflare",
           "address": "https://cloudflare-dns.com/dns-query",
-          "detour": "proxy"
+          "detour": "🚀 节点选择"
         }
       ],
       "rules": [

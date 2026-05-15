@@ -59,7 +59,7 @@ func TestBuildSingBoxSelectorOutbounds(t *testing.T) {
 - DOMAIN-SUFFIX,example.com,💬 Ai平台
 - MATCH,🐟 漏网之鱼
 `
-	selectors := buildSingBoxSelectorOutbounds(raw, []string{"node-a", "node-b"})
+	selectors := buildSingBoxSelectorOutbounds(raw, []string{"node-a", "node-b"}, nil)
 	if len(selectors) != 3 {
 		t.Fatalf("selectors len = %d, want 3: %#v", len(selectors), selectors)
 	}
@@ -69,6 +69,30 @@ func TestBuildSingBoxSelectorOutbounds(t *testing.T) {
 	choices := selectors[1]["outbounds"].([]string)
 	if len(choices) != 4 || choices[0] != "🚀 节点选择" || choices[1] != "node-a" || choices[3] != "direct" {
 		t.Fatalf("ai selector choices = %#v", choices)
+	}
+}
+
+func TestBuildSingBoxSelectorOutboundsUsesManualDisplayOrder(t *testing.T) {
+	raw := `
+- DOMAIN-SUFFIX,direct.example,🎯 全球直连
+- DOMAIN-SUFFIX,ads.example,🛑 广告拦截
+- DOMAIN-SUFFIX,ai.example,💬 Ai平台
+- DOMAIN-SUFFIX,game.example,🎮 游戏平台
+- MATCH,🐟 漏网之鱼
+`
+	selectors := buildSingBoxSelectorOutbounds(raw, []string{"node-a"}, []string{"🚀 节点选择", "💬 Ai平台", "🎮 游戏平台"})
+	got := make([]string, len(selectors))
+	for i, selector := range selectors {
+		got[i] = selector["tag"].(string)
+	}
+	want := []string{"🚀 节点选择", "💬 Ai平台", "🎮 游戏平台", "🎯 全球直连", "🛑 广告拦截", "🐟 漏网之鱼"}
+	if len(got) != len(want) {
+		t.Fatalf("selectors len = %d, want %d: %#v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("selector[%d] = %q, want %q; all=%#v", i, got[i], want[i], got)
+		}
 	}
 }
 

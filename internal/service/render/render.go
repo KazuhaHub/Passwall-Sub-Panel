@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -76,14 +77,17 @@ func (s *Service) RenderForUser(ctx context.Context, u *domain.User, ct domain.C
 		return nil, fmt.Errorf("marshal proxies: %w", err)
 	}
 
-	rulesCommon, err := s.resolveRulesCommon(ctx, tpl)
+	rulesCommon, proxyGroupOrder, err := s.resolveRulesCommon(ctx, tpl)
 	if err != nil {
 		return nil, fmt.Errorf("resolve rules: %w", err)
 	}
-	if ct == domain.ClientSingBox {
-		return s.renderSingBox(ctx, u, tpl, items, rulesCommon)
+	if len(proxyGroupOrder) == 0 {
+		proxyGroupOrder = tpl.ProxyGroupOrder
 	}
-	proxyGroupsYAML, err := buildProxyGroupsYAML(strings.Join([]string{u.PersonalRules, rulesCommon}, "\n"))
+	if ct == domain.ClientSingBox {
+		return s.renderSingBox(ctx, u, tpl, items, rulesCommon, proxyGroupOrder)
+	}
+	proxyGroupsYAML, err := buildProxyGroupsYAML(strings.Join([]string{u.PersonalRules, rulesCommon}, "\n"), proxyGroupOrder)
 	if err != nil {
 		return nil, fmt.Errorf("build proxy groups: %w", err)
 	}
@@ -101,9 +105,15 @@ func (s *Service) RenderForUser(ctx context.Context, u *domain.User, ct domain.C
 	profileName := s.buildProfileName(ctx, u)
 	encodedName := url.PathEscape(profileName)
 
+	// Get update interval from settings.
+	updateInterval := 24
+	if st, err := s.repos.Settings.Load(ctx, ports.UISettings{}); err == nil && st.SubUpdateIntervalHours > 0 {
+		updateInterval = st.SubUpdateIntervalHours
+	}
+
 	headers := map[string]string{
 		"Content-Type":            "text/yaml; charset=utf-8",
-		"Profile-Update-Interval": "24",
+		"Profile-Update-Interval": strconv.Itoa(updateInterval),
 		"Content-Disposition":     `attachment; filename*=UTF-8''` + encodedName,
 		"Profile-Title":           profileName,
 	}
@@ -204,12 +214,15 @@ func (s *Service) fetchInbound(ctx context.Context, n *domain.Node) (*ports.Inbo
 	return c.GetInbound(ctx, n.InboundID)
 }
 
-func (s *Service) resolveRulesCommon(ctx context.Context, tpl *domain.Template) (string, error) {
+func (s *Service) resolveRulesCommon(ctx context.Context, tpl *domain.Template) (string, []string, error) {
 	slugs := tpl.RuleSets
 	if len(slugs) == 0 {
-		return "", nil
+		log.Debug("render: no rule_sets configured for template", "template", tpl.Slug)
+		return "", nil, nil
 	}
 	parts := make([]string, 0, len(slugs))
+	proxyGroupOrder := []string{}
+	seenOrder := map[string]bool{}
 	for _, slug := range slugs {
 		rs, err := s.repos.RuleSet.GetBySlug(ctx, slug)
 		if err != nil {
@@ -217,11 +230,28 @@ func (s *Service) resolveRulesCommon(ctx context.Context, tpl *domain.Template) 
 			continue
 		}
 		if !rs.Enabled {
+			log.Debug("render: skip disabled rule_set", "slug", slug)
 			continue
 		}
-		parts = append(parts, strings.TrimRight(rs.Content, "\n"))
+		content := strings.TrimRight(rs.Content, "\n")
+		if content == "" {
+			log.Warn("render: rule_set content is empty", "slug", slug)
+			continue
+		}
+		parts = append(parts, content)
+		for _, target := range rs.ProxyGroupOrder {
+			target = strings.TrimSpace(target)
+			if target == "" || seenOrder[target] {
+				continue
+			}
+			seenOrder[target] = true
+			proxyGroupOrder = append(proxyGroupOrder, target)
+		}
+		log.Debug("render: loaded rule_set", "slug", slug, "lines", strings.Count(content, "\n")+1)
 	}
-	return strings.Join(parts, "\n"), nil
+	result := strings.Join(parts, "\n")
+	log.Debug("render: rules_common resolved", "total_length", len(result), "rule_sets", len(parts))
+	return result, proxyGroupOrder, nil
 }
 
 // buildProfileName generates the subscription profile name used in

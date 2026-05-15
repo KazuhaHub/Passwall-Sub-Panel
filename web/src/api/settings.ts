@@ -38,6 +38,7 @@ export interface UISettings {
   sub_log_retention_days: number
   sub_block_auto_disable: boolean
   sub_block_auto_disable_count: number
+  sub_update_interval_hours: number
   // Footer
   footer_text: string
 }

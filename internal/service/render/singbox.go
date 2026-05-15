@@ -16,8 +16,8 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 )
 
-func (s *Service) renderSingBox(ctx context.Context, u *domain.User, tpl *domain.Template, items []renderItem, rulesCommon string) (*Output, error) {
-	outbounds := s.buildSingBoxOutbounds(ctx, u, items, u.PersonalRules, rulesCommon)
+func (s *Service) renderSingBox(ctx context.Context, u *domain.User, tpl *domain.Template, items []renderItem, rulesCommon string, proxyGroupOrder []string) (*Output, error) {
+	outbounds := s.buildSingBoxOutbounds(ctx, u, items, proxyGroupOrder, u.PersonalRules, rulesCommon)
 	outboundsJSON, err := marshalJSONBlock(outbounds)
 	if err != nil {
 		return nil, fmt.Errorf("marshal sing-box outbounds: %w", err)
@@ -45,9 +45,15 @@ func (s *Service) renderSingBox(ctx context.Context, u *domain.User, tpl *domain
 	profileName := s.buildProfileName(ctx, u)
 	encodedName := url.PathEscape(profileName)
 
+	// Get update interval from settings.
+	updateInterval := 24
+	if st, err := s.repos.Settings.Load(ctx, ports.UISettings{}); err == nil && st.SubUpdateIntervalHours > 0 {
+		updateInterval = st.SubUpdateIntervalHours
+	}
+
 	headers := map[string]string{
 		"Content-Type":            "application/json; charset=utf-8",
-		"Profile-Update-Interval": "24",
+		"Profile-Update-Interval": strconv.Itoa(updateInterval),
 		"Content-Disposition":     `attachment; filename*=UTF-8''` + encodedName,
 		"Profile-Title":           profileName,
 	}
@@ -62,7 +68,7 @@ func (s *Service) renderSingBox(ctx context.Context, u *domain.User, tpl *domain
 	}, nil
 }
 
-func (s *Service) buildSingBoxOutbounds(ctx context.Context, u *domain.User, items []renderItem, ruleParts ...string) []map[string]any {
+func (s *Service) buildSingBoxOutbounds(ctx context.Context, u *domain.User, items []renderItem, preferredOrder []string, ruleParts ...string) []map[string]any {
 	out := []map[string]any{
 		{"type": "direct", "tag": "direct"},
 		{"type": "block", "tag": "block"},
@@ -94,7 +100,7 @@ func (s *Service) buildSingBoxOutbounds(ctx context.Context, u *domain.User, ite
 	}
 
 	rules := strings.TrimSpace(strings.Join(ruleParts, "\n"))
-	out = append(out, buildSingBoxSelectorOutbounds(rules, nodeTags)...)
+	out = append(out, buildSingBoxSelectorOutbounds(rules, nodeTags, preferredOrder)...)
 	return out
 }
 
@@ -209,8 +215,9 @@ func applySingBoxTransport(base map[string]any, stream xuiStreamSettings) {
 	}
 }
 
-func buildSingBoxSelectorOutbounds(rules string, nodeTags []string) []map[string]any {
+func buildSingBoxSelectorOutbounds(rules string, nodeTags []string, preferredOrder []string) []map[string]any {
 	targets := withRequiredProxyGroupDependencies(ruleTargetsInOrder(rules))
+	targets = applyProxyGroupOrder(targets, preferredOrder)
 	out := make([]map[string]any, 0, len(targets))
 	for _, target := range targets {
 		choices := singBoxSelectorChoices(proxyGroupChoices(target), nodeTags)
