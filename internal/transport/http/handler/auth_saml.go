@@ -3,6 +3,7 @@ package handler
 import (
 	"errors"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -73,7 +74,7 @@ func (h *AuthSAMLHandler) ACS(c *gin.Context) {
 
 	assertion, err := h.saml.ParseACSResponse(c.Request, possibleIDs)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
+		c.Redirect(http.StatusFound, "/sso-error?error=auth_failed&description="+url.QueryEscape(err.Error()))
 		return
 	}
 
@@ -90,15 +91,17 @@ func (h *AuthSAMLHandler) ACS(c *gin.Context) {
 		return
 	}
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.Redirect(http.StatusFound, "/sso-error?error=sso_error&description="+url.QueryEscape(err.Error()))
 		return
 	}
 	if !u.Enabled {
-		msg := "account disabled"
+		errorCode := "account_disabled"
+		errorDesc := "您的账号已被停用，请联系管理员。"
 		if u.AutoDisabledReason == domain.DisabledPendingApproval {
-			msg = "account pending admin approval"
+			errorCode = "account_pending"
+			errorDesc = "您的账号正在等待管理员审核，请稍后再试。"
 		}
-		c.JSON(http.StatusForbidden, gin.H{"error": msg})
+		c.Redirect(http.StatusFound, "/sso-error?error="+errorCode+"&description="+url.QueryEscape(errorDesc))
 		return
 	}
 	access, refresh, err := h.auth.IssueTokens(u)

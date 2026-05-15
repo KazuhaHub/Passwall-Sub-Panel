@@ -20,6 +20,11 @@ const routes: RouteRecordRaw[] = [
     meta: { public: true },
   },
   {
+    path: '/sso-error',
+    component: () => import('@/views/SsoErrorView.vue'),
+    meta: { public: true },
+  },
+  {
     path: '/login/local',
     component: () => import('@/views/LoginLocalView.vue'),
     meta: { public: true },

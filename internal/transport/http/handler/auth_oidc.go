@@ -3,6 +3,7 @@ package handler
 import (
 	"errors"
 	"net/http"
+	"net/url"
 
 	"github.com/gin-gonic/gin"
 
@@ -64,24 +65,24 @@ func (h *AuthOIDCHandler) Login(c *gin.Context) {
 
 func (h *AuthOIDCHandler) Callback(c *gin.Context) {
 	if !h.oidc.Enabled() {
-		c.JSON(http.StatusNotFound, gin.H{"error": "oidc not enabled"})
+		c.Redirect(http.StatusFound, "/sso-error?error=sso_error&description=OIDC+not+enabled")
 		return
 	}
 	if errParam := c.Query("error"); errParam != "" {
 		desc := c.Query("error_description")
-		c.JSON(http.StatusUnauthorized, gin.H{"error": errParam, "description": desc})
+		c.Redirect(http.StatusFound, "/sso-error?error=auth_failed&description="+url.QueryEscape(desc))
 		return
 	}
 	state := c.Query("state")
 	wantState, _ := c.Cookie(cookieOIDCState)
 	if state == "" || state != wantState {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "oauth2 state mismatch"})
+		c.Redirect(http.StatusFound, "/sso-error?error=auth_failed&description=State+mismatch")
 		return
 	}
 	nonce, _ := c.Cookie(cookieOIDCNonce)
 	code := c.Query("code")
 	if code == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "missing authorization code"})
+		c.Redirect(http.StatusFound, "/sso-error?error=auth_failed&description=Missing+authorization+code")
 		return
 	}
 	// Clear the one-time cookies regardless of outcome.
@@ -90,7 +91,7 @@ func (h *AuthOIDCHandler) Callback(c *gin.Context) {
 
 	assertion, err := h.oidc.Exchange(c.Request.Context(), code, nonce)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
+		c.Redirect(http.StatusFound, "/sso-error?error=auth_failed&description="+url.QueryEscape(err.Error()))
 		return
 	}
 
@@ -109,15 +110,17 @@ func (h *AuthOIDCHandler) Callback(c *gin.Context) {
 		return
 	}
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.Redirect(http.StatusFound, "/sso-error?error=sso_error&description="+url.QueryEscape(err.Error()))
 		return
 	}
 	if !u.Enabled {
-		msg := "account disabled"
+		errorCode := "account_disabled"
+		errorDesc := "您的账号已被停用，请联系管理员。"
 		if u.AutoDisabledReason == domain.DisabledPendingApproval {
-			msg = "account pending admin approval"
+			errorCode = "account_pending"
+			errorDesc = "您的账号正在等待管理员审核，请稍后再试。"
 		}
-		c.JSON(http.StatusForbidden, gin.H{"error": msg})
+		c.Redirect(http.StatusFound, "/sso-error?error="+errorCode+"&description="+url.QueryEscape(errorDesc))
 		return
 	}
 	access, refresh, err := h.auth.IssueTokens(u)
