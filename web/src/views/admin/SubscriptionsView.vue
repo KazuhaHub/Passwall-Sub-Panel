@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Edit, Delete } from '@element-plus/icons-vue'
+import LineIcon from '@/components/LineIcon.vue'
 import { getUISettings, putUISettings, type SubClientRule } from '@/api/settings'
 
 const loading = ref(true)
@@ -155,7 +155,10 @@ onMounted(load)
       <template #header>
         <div class="card-header">
           <span class="card-title">客户端规则</span>
-          <el-button type="primary" :icon="Plus" @click="openAdd">添加规则</el-button>
+          <el-button type="primary" @click="openAdd">
+            <LineIcon name="plus" :size="16" />
+            添加规则
+          </el-button>
         </div>
       </template>
       <p class="section-desc">
@@ -184,8 +187,12 @@ onMounted(load)
         </el-table-column>
         <el-table-column label="操作" width="120" align="center">
           <template #default="{ $index }">
-            <el-button text type="primary" :icon="Edit" @click="openEdit($index)" />
-            <el-button text type="danger" :icon="Delete" @click="handleDelete($index)" />
+            <el-button text type="primary" @click="openEdit($index)">
+              <LineIcon name="edit" :size="16" />
+            </el-button>
+            <el-button text type="danger" @click="handleDelete($index)">
+              <LineIcon name="trash" :size="16" />
+            </el-button>
           </template>
         </el-table-column>
       </el-table>

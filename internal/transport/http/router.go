@@ -101,6 +101,7 @@ func NewRouter(d Deps) *gin.Engine {
 	{
 		userGroup.GET("", userMe.Profile)
 		userGroup.GET("/traffic", userMe.Traffic)
+		userGroup.GET("/traffic/history", userMe.TrafficHistory)
 		userGroup.GET("/rules", userMe.GetRules)
 		userGroup.PUT("/rules", userMe.PutRules)
 		userGroup.POST("/emergency-access", userMe.EmergencyAccess)
@@ -166,7 +167,10 @@ func NewRouter(d Deps) *gin.Engine {
 
 		trafficH := handler.NewAdminTrafficHandler(d.Repos.User, d.Traffic)
 		adminGroup.GET("/traffic/top", trafficH.Top)
+		adminGroup.POST("/traffic/poll", trafficH.Poll)
+		adminGroup.GET("/traffic/history", trafficH.History)
 		adminGroup.GET("/traffic/user/:id", trafficH.UserReport)
+		adminGroup.GET("/traffic/user/:id/history", trafficH.UserHistory)
 		adminGroup.PUT("/traffic/user/:id", trafficH.SetUserUsage)
 
 		servers := handler.NewAdminServersHandler(d.Repos.XUIPanel, d.Pool, d.Repos.Node, d.Repos.Ownership)

@@ -2,6 +2,7 @@
 import { onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
+import LineIcon from '@/components/LineIcon.vue'
 import { useAuthStore } from '@/stores/auth'
 import { getAuthMethods } from '@/api/auth'
 import { useTheme } from '@/composables/useTheme'
@@ -22,7 +23,7 @@ const loading = ref(false)
 
 async function submit() {
   if (!form.upn || !form.password) {
-    ElMessage.warning('请输入 UPN 和密码')
+    ElMessage.warning('请输入账号和密码')
     return
   }
   loading.value = true
@@ -68,18 +69,19 @@ function updateIcon(url: string) {
       <div class="header">
         <img class="logo" :src="isDark ? logoDark : logoLight" alt="Logo" />
         <div v-if="appTitle" class="site-title">{{ appTitle }}</div>
-        <div class="title">本地账号登录</div>
-        <div class="subtitle">使用面板管理员分配的 UPN 和密码</div>
+        <div class="title">账号登录</div>
+        <div class="subtitle">使用管理员分配的账号和密码</div>
       </div>
       <el-form @submit.prevent="submit" label-position="top">
         <el-form-item>
           <el-input
             v-model="form.upn"
-            placeholder="UPN"
+            placeholder="邮箱或用户名"
             autocomplete="email"
             size="large"
-            prefix-icon="User"
-          />
+          >
+            <template #prefix><LineIcon name="user" :size="16" /></template>
+          </el-input>
         </el-form-item>
         <el-form-item>
           <el-input
@@ -89,8 +91,9 @@ function updateIcon(url: string) {
             placeholder="密码"
             autocomplete="current-password"
             size="large"
-            prefix-icon="Lock"
-          />
+          >
+            <template #prefix><LineIcon name="lock" :size="16" /></template>
+          </el-input>
         </el-form-item>
         <el-form-item>
           <el-button
@@ -117,15 +120,20 @@ function updateIcon(url: string) {
   align-items: center;
   justify-content: center;
   min-height: 100vh;
-  background: var(--main-bg);
+  background: #eef2f7;
   padding: 20px;
 }
 
 .local-card {
   width: 400px;
-  border-radius: 16px;
-  border: 1px solid var(--header-border);
+  border-radius: 14px;
+  border: 1px solid #d5dce8;
   background: var(--card-bg);
+  box-shadow: 0 22px 60px rgba(15, 23, 42, 0.14);
+}
+
+.local-card :deep(.el-card__body) {
+  padding: 34px 30px;
 }
 
 .header {
@@ -168,5 +176,32 @@ function updateIcon(url: string) {
 
 .back-link:hover {
   color: #6366f1;
+}
+
+.local-card :deep(.el-input__wrapper) {
+  min-height: 48px;
+  border-radius: 8px;
+  border: 1px solid #cbd5e1;
+  box-shadow: inset 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+.local-card :deep(.el-input__wrapper.is-focus) {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+}
+
+@media (prefers-color-scheme: dark) {
+  .login-page {
+    background: #0b1220;
+  }
+
+  .local-card {
+    border-color: #263244;
+    box-shadow: 0 22px 60px rgba(0, 0, 0, 0.4);
+  }
+
+  .local-card :deep(.el-input__wrapper) {
+    border-color: #334155;
+  }
 }
 </style>

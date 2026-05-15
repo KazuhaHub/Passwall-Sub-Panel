@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Delete, Lock, Unlock } from '@element-plus/icons-vue'
+import LineIcon from '@/components/LineIcon.vue'
 import {
   createInbound,
   deleteNode,
@@ -997,28 +997,28 @@ onMounted(async () => {
         <div v-if="selectedManagedCount > 0" class="psp-toolbar">
           <span class="selection-count">已选 {{ selectedManagedCount }}</span>
           <el-button
-            :icon="Unlock"
             :loading="batchBusy === 'enable'"
             :disabled="batchBusy !== ''"
             @click="batchSetManagedEnabled(true)"
           >
+            <LineIcon name="unlock" :size="16" />
             批量启用
           </el-button>
           <el-button
-            :icon="Lock"
             :loading="batchBusy === 'disable'"
             :disabled="batchBusy !== ''"
             @click="batchSetManagedEnabled(false)"
           >
+            <LineIcon name="lock" :size="16" />
             批量禁用
           </el-button>
           <el-button
             type="danger"
-            :icon="Delete"
             :loading="batchBusy === 'delete'"
             :disabled="batchBusy !== ''"
             @click="batchDeleteManaged"
           >
+            <LineIcon name="trash" :size="16" />
             批量删除
           </el-button>
         </div>

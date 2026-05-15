@@ -78,3 +78,30 @@ func TestReplaceSettingsClientsPreservesCurrentClients(t *testing.T) {
 		t.Fatalf("clients not preserved: %#v", decoded.Clients)
 	}
 }
+
+func TestDecodeTrafficObjAcceptsSingleObject(t *testing.T) {
+	raw := json.RawMessage(`{"id":9,"inboundId":4,"email":"u25-n2@psp.local","up":1048576,"down":933232640,"total":934281216,"enable":true}`)
+
+	got, err := decodeTrafficObj(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("len = %d, want 1", len(got))
+	}
+	if got[0].Email != "u25-n2@psp.local" || got[0].Total != 934281216 {
+		t.Fatalf("unexpected traffic: %#v", got[0])
+	}
+}
+
+func TestDecodeTrafficObjAcceptsArray(t *testing.T) {
+	raw := json.RawMessage(`[{"id":1,"inboundId":2,"email":"a","up":1,"down":2,"total":3}]`)
+
+	got, err := decodeTrafficObj(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Total != 3 {
+		t.Fatalf("unexpected traffic: %#v", got)
+	}
+}

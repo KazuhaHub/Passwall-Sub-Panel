@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
+import LineIcon from '@/components/LineIcon.vue'
 import { listUsers } from '@/api/users'
 import { listNodes } from '@/api/nodes'
 import { listGroups } from '@/api/groups'
@@ -47,21 +48,21 @@ function formatBytes(n: number): string {
 
     <div v-loading="loading" class="stat-grid">
       <div class="stat-card variant-users">
-        <div class="stat-icon"><el-icon><User /></el-icon></div>
+        <div class="stat-icon"><LineIcon name="user" /></div>
         <div class="stat-body">
           <div class="stat-label">用户总数</div>
           <div class="stat-value">{{ userCount }}</div>
         </div>
       </div>
       <div class="stat-card variant-nodes">
-        <div class="stat-icon"><el-icon><Connection /></el-icon></div>
+        <div class="stat-icon"><LineIcon name="nodes" /></div>
         <div class="stat-body">
           <div class="stat-label">节点总数</div>
           <div class="stat-value">{{ nodeCount }}</div>
         </div>
       </div>
       <div class="stat-card variant-groups">
-        <div class="stat-icon"><el-icon><Files /></el-icon></div>
+        <div class="stat-icon"><LineIcon name="groups" /></div>
         <div class="stat-body">
           <div class="stat-label">分组总数</div>
           <div class="stat-value">{{ groupCount }}</div>

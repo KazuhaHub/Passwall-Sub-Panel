@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Edit, Delete } from '@element-plus/icons-vue'
+import LineIcon from '@/components/LineIcon.vue'
 import {
   getUISettings,
   putUISettings,
@@ -862,19 +862,19 @@ onMounted(() => {
     <div class="category-tabs">
       <button
         v-for="t in [
-          { key: 'general', label: '基本设置', icon: '⚙' },
-          { key: 'portal', label: '用户门户', icon: '🏠' },
-          { key: 'subscription', label: '订阅管理', icon: '🔗' },
-          { key: 'mail', label: '邮件提醒', icon: '✉' },
-          { key: 'brand', label: '站点品牌', icon: '🎨' },
-          { key: 'sso', label: 'SSO 认证', icon: '🔐' },
+          { key: 'general', label: '基本设置', icon: 'settings' },
+          { key: 'portal', label: '用户门户', icon: 'home' },
+          { key: 'subscription', label: '订阅管理', icon: 'link' },
+          { key: 'mail', label: '邮件提醒', icon: 'mail' },
+          { key: 'brand', label: '站点品牌', icon: 'brand' },
+          { key: 'sso', label: 'SSO 认证', icon: 'sso' },
         ]"
         :key="t.key"
         class="category-tab"
         :class="{ active: activeTab === t.key }"
         @click="activeTab = t.key"
       >
-        <span class="tab-icon">{{ t.icon }}</span>
+        <LineIcon :name="t.icon" class="tab-icon" :size="17" />
         <span>{{ t.label }}</span>
       </button>
     </div>
@@ -1033,7 +1033,10 @@ onMounted(() => {
           用户个人中心会显示这里启用的入口。适合放 Canvas 教程、工单系统、客户端说明等外部链接。
         </p>
         <div style="margin-bottom: 16px;">
-          <el-button type="primary" :icon="Plus" @click="openAddQuickLink">添加入口</el-button>
+          <el-button type="primary" @click="openAddQuickLink">
+            <LineIcon name="plus" :size="16" />
+            添加入口
+          </el-button>
         </div>
         <el-table :data="quickLinks" stripe>
           <el-table-column prop="label" label="按钮文字" min-width="140" />
@@ -1054,8 +1057,12 @@ onMounted(() => {
           <el-table-column label="操作" width="100" align="center">
             <template #default="{ $index }">
               <div style="display: flex; justify-content: center; gap: 4px;">
-                <el-button text type="primary" :icon="Edit" @click="openEditQuickLink($index)" />
-                <el-button text type="danger" :icon="Delete" @click="handleDeleteQuickLink($index)" />
+                <el-button text type="primary" @click="openEditQuickLink($index)">
+                  <LineIcon name="edit" :size="16" />
+                </el-button>
+                <el-button text type="danger" @click="handleDeleteQuickLink($index)">
+                  <LineIcon name="trash" :size="16" />
+                </el-button>
               </div>
             </template>
           </el-table-column>
@@ -1138,7 +1145,10 @@ onMounted(() => {
           UA 检测优先于 query 参数，禁用的客户端将直接返回 403。规则按顺序匹配，命中第一条即停止。
         </p>
         <div style="margin-bottom: 16px;">
-          <el-button type="primary" :icon="Plus" @click="openAddRule">添加规则</el-button>
+          <el-button type="primary" @click="openAddRule">
+            <LineIcon name="plus" :size="16" />
+            添加规则
+          </el-button>
         </div>
         <el-table :data="subClientRules" stripe>
           <el-table-column prop="name" label="名称" min-width="100" />
@@ -1166,8 +1176,12 @@ onMounted(() => {
           <el-table-column label="操作" width="100" align="center">
             <template #default="{ $index }">
               <div style="display: flex; justify-content: center; gap: 4px;">
-                <el-button text type="primary" :icon="Edit" @click="openEditRule($index)" />
-                <el-button text type="danger" :icon="Delete" @click="handleDeleteRule($index)" />
+                <el-button text type="primary" @click="openEditRule($index)">
+                  <LineIcon name="edit" :size="16" />
+                </el-button>
+                <el-button text type="danger" @click="handleDeleteRule($index)">
+                  <LineIcon name="trash" :size="16" />
+                </el-button>
               </div>
             </template>
           </el-table-column>
@@ -1180,7 +1194,10 @@ onMounted(() => {
           <code v-pre>{{ profile_name }}</code>、<code v-pre>{{ profile_name_encoded }}</code>。
         </p>
         <div style="margin-bottom: 16px;">
-          <el-button type="primary" :icon="Plus" @click="openAddImportClient">添加客户端</el-button>
+          <el-button type="primary" @click="openAddImportClient">
+            <LineIcon name="plus" :size="16" />
+            添加客户端
+          </el-button>
         </div>
         <el-table :data="subImportClients" stripe>
           <el-table-column prop="name" label="客户端" min-width="140" />
@@ -1207,8 +1224,12 @@ onMounted(() => {
           <el-table-column label="操作" width="100" align="center">
             <template #default="{ $index }">
               <div style="display: flex; justify-content: center; gap: 4px;">
-                <el-button text type="primary" :icon="Edit" @click="openEditImportClient($index)" />
-                <el-button text type="danger" :icon="Delete" @click="handleDeleteImportClient($index)" />
+                <el-button text type="primary" @click="openEditImportClient($index)">
+                  <LineIcon name="edit" :size="16" />
+                </el-button>
+                <el-button text type="danger" @click="handleDeleteImportClient($index)">
+                  <LineIcon name="trash" :size="16" />
+                </el-button>
               </div>
             </template>
           </el-table-column>
@@ -1752,7 +1773,7 @@ export default { data() { return { ssoSubTab: 'saml' } } }
 /* Category Tabs */
 .category-tabs {
   display: flex;
-  gap: 8px;
+  gap: 10px;
   margin-bottom: 24px;
   flex-wrap: wrap;
 }
@@ -1760,10 +1781,12 @@ export default { data() { return { ssoSubTab: 'saml' } } }
 .category-tab {
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 8px;
-  padding: 10px 20px;
+  min-height: 42px;
+  padding: 0 18px;
   border: 1px solid var(--header-border);
-  border-radius: 12px;
+  border-radius: var(--control-radius);
   background: var(--card-bg);
   color: var(--text-muted);
   cursor: pointer;
@@ -1773,20 +1796,22 @@ export default { data() { return { ssoSubTab: 'saml' } } }
 }
 
 .category-tab:hover {
-  color: var(--text-main);
-  border-color: #6366f1;
-  background: rgba(99, 102, 241, 0.05);
+  color: var(--color-primary);
+  border-color: var(--color-primary-border);
+  background: var(--color-primary-soft);
 }
 
 .category-tab.active {
   color: #fff;
-  background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+  background: var(--sidebar-active-bg);
   border-color: transparent;
-  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
+  box-shadow: 0 10px 24px rgba(109, 93, 252, 0.24);
 }
 
 .tab-icon {
-  font-size: 16px;
+  width: 17px;
+  height: 17px;
+  flex-shrink: 0;
 }
 
 /* Cards */

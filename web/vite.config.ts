@@ -23,5 +23,17 @@ export default defineConfig({
     // the latest assets without a copy step.
     outDir: '../internal/web/dist',
     emptyOutDir: true,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (!id.includes('node_modules')) return
+          if (id.includes('echarts')) return 'echarts'
+          if (id.includes('element-plus') || id.includes('@element-plus')) return 'element-plus'
+          if (id.includes('vue-router') || id.includes('pinia') || id.includes('vue')) return 'vue-vendor'
+          if (id.includes('qrcode')) return 'qrcode'
+          return 'vendor'
+        },
+      },
+    },
   },
 })

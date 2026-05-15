@@ -3,7 +3,11 @@
   --sidebar-bg: #0f172a;
   --sidebar-text: #94a3b8;
   --sidebar-text-active: #ffffff;
-  --sidebar-active-bg: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+  --sidebar-active-bg: #6d5dfc;
+  --color-primary: #6d5dfc;
+  --color-primary-hover: #5b4beb;
+  --color-primary-soft: rgba(109, 93, 252, 0.1);
+  --color-primary-border: rgba(109, 93, 252, 0.24);
   --main-bg: #f8fafc;
   --card-bg: #ffffff;
   --header-bg: rgba(255, 255, 255, 0.7);
@@ -12,6 +16,8 @@
   --text-muted: #64748b;
   --code-bg: #f8fafc;
   --code-border: rgba(148, 163, 184, 0.24);
+  --control-radius: 10px;
+  --control-height: 38px;
   --transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -31,6 +37,8 @@ html.dark {
   --text-muted: #94a3b8;
   --code-bg: rgba(2, 6, 23, 0.58);
   --code-border: rgba(148, 163, 184, 0.18);
+  --color-primary-soft: rgba(109, 93, 252, 0.16);
+  --color-primary-border: rgba(139, 124, 255, 0.28);
   color: var(--text-main);
   background: var(--main-bg);
 }
@@ -217,8 +225,70 @@ html.dark .el-table {
 
 /* Buttons */
 .el-button {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 8px !important;
+  border-radius: var(--control-radius) !important;
+  font-weight: 600 !important;
+  letter-spacing: 0 !important;
+  transition: background-color 0.18s ease, border-color 0.18s ease, color 0.18s ease, box-shadow 0.18s ease !important;
+}
+
+.el-button:not(.is-circle) {
+  min-height: var(--control-height) !important;
+  padding: 0 15px !important;
+}
+
+.el-button--small:not(.is-circle) {
+  min-height: 32px !important;
+  padding: 0 12px !important;
+}
+
+.el-button--large:not(.is-circle) {
+  min-height: 44px !important;
+  padding: 0 18px !important;
+}
+
+.el-button.is-circle {
+  width: var(--control-height) !important;
+  height: var(--control-height) !important;
+  padding: 0 !important;
+  border-radius: 999px !important;
+}
+
+.el-button .line-icon,
+.el-button svg {
+  width: 16px !important;
+  height: 16px !important;
+  flex-shrink: 0 !important;
+}
+
+.el-button.is-circle .line-icon,
+.el-button.is-circle svg {
+  width: 18px !important;
+  height: 18px !important;
+}
+
+.el-button--primary {
+  --el-button-bg-color: var(--color-primary) !important;
+  --el-button-border-color: var(--color-primary) !important;
+  --el-button-hover-bg-color: var(--color-primary-hover) !important;
+  --el-button-hover-border-color: var(--color-primary-hover) !important;
+  --el-button-active-bg-color: var(--color-primary-hover) !important;
+  --el-button-active-border-color: var(--color-primary-hover) !important;
+}
+
+.el-button.is-text {
+  min-height: 32px !important;
+  padding: 0 9px !important;
   border-radius: 8px !important;
-  font-weight: 500 !important;
+}
+
+.el-button.is-plain:not(.el-button--danger):not(.el-button--warning):not(.el-button--success) {
+  --el-button-hover-text-color: var(--color-primary) !important;
+  --el-button-hover-border-color: var(--color-primary-border) !important;
+  --el-button-hover-bg-color: var(--color-primary-soft) !important;
 }
 
 /* Inputs */

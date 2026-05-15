@@ -172,6 +172,37 @@ func (h *UserMeHandler) Traffic(c *gin.Context) {
 	})
 }
 
+func (h *UserMeHandler) TrafficHistory(c *gin.Context) {
+	claims := middleware.ClaimsFrom(c)
+	if claims == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "no auth"})
+		return
+	}
+	period, since, until, err := parseTrafficHistoryQuery(c)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	report, err := h.traffic.HistoryFor(c.Request.Context(), claims.UserID, period, since, until)
+	if err != nil {
+		switch {
+		case errors.Is(err, domain.ErrValidation):
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		}
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"scope":   "user",
+		"user_id": report.UserID,
+		"period":  report.Period,
+		"since":   report.Since,
+		"until":   report.Until,
+		"items":   historyItems(report.Items),
+	})
+}
+
 func (h *UserMeHandler) GetRules(c *gin.Context) {
 	claims := middleware.ClaimsFrom(c)
 	if claims == nil {

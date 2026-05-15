@@ -1,10 +1,12 @@
 <template>
   <div class="sso-error">
     <el-result
-      :icon="icon"
       :title="title"
       :sub-title="subTitle"
     >
+      <template #icon>
+        <LineIcon :name="icon" :size="64" />
+      </template>
       <template #extra>
         <el-button type="primary" @click="router.replace('/login')">返回登录</el-button>
       </template>
@@ -15,6 +17,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import LineIcon from '@/components/LineIcon.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -24,7 +27,7 @@ const description = computed(() => (route.query.description as string) || '')
 
 const icon = computed(() => {
   if (error.value === 'account_disabled') return 'warning'
-  return 'error'
+  return 'close'
 })
 
 const title = computed(() => {

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Close, Refresh } from '@element-plus/icons-vue'
+import LineIcon from '@/components/LineIcon.vue'
 import {
   cancelSyncTask,
   listSyncTasks,
@@ -198,7 +198,7 @@ onMounted(load)
       <div style="display: flex; gap: 8px;">
         <el-button type="danger" plain @click="purgeFinished">一键清空</el-button>
         <el-button type="primary" @click="load">
-          <el-icon><Refresh /></el-icon>
+          <LineIcon name="refresh" :size="16" />
           刷新
         </el-button>
       </div>
@@ -217,21 +217,21 @@ onMounted(load)
         <el-button
           type="primary"
           plain
-          :icon="Refresh"
           :loading="batchBusy === 'retry'"
           :disabled="batchBusy !== ''"
           @click="batchRetry"
         >
+          <LineIcon name="refresh" :size="16" />
           批量重试
         </el-button>
         <el-button
           type="danger"
           plain
-          :icon="Close"
           :loading="batchBusy === 'cancel'"
           :disabled="batchBusy !== ''"
           @click="batchCancel"
         >
+          <LineIcon name="close" :size="16" />
           批量中止
         </el-button>
       </template>

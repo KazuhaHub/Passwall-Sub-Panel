@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import LineIcon from '@/components/LineIcon.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useSiteStore } from '@/stores/site'
 import { useTheme } from '@/composables/useTheme'
@@ -22,17 +23,17 @@ interface NavItem {
 }
 
 const nav: NavItem[] = [
-  { path: '/admin/dashboard', label: '总览', icon: 'DataLine' },
-  { path: '/admin/users', label: '用户管理', icon: 'User' },
-  { path: '/admin/servers', label: '服务器', icon: 'Cpu' },
-  { path: '/admin/nodes', label: '节点管理', icon: 'Connection' },
-  { path: '/admin/groups', label: '分组', icon: 'Files' },
-  { path: '/admin/rules', label: '规则库', icon: 'List' },
-  { path: '/admin/templates', label: '配置方案', icon: 'Document' },
-  { path: '/admin/traffic', label: '流量统计', icon: 'TrendCharts' },
-  { path: '/admin/logs', label: '日志管理', icon: 'Notebook' },
-  { path: '/admin/sync-tasks', label: '同步任务', icon: 'Refresh' },
-  { path: '/admin/settings', label: '系统设置', icon: 'Setting' },
+  { path: '/admin/dashboard', label: '总览', icon: 'dashboard' },
+  { path: '/admin/users', label: '用户管理', icon: 'users' },
+  { path: '/admin/servers', label: '服务器', icon: 'servers' },
+  { path: '/admin/nodes', label: '节点管理', icon: 'nodes' },
+  { path: '/admin/groups', label: '分组', icon: 'groups' },
+  { path: '/admin/rules', label: '规则库', icon: 'rules' },
+  { path: '/admin/templates', label: '配置方案', icon: 'templates' },
+  { path: '/admin/traffic', label: '流量统计', icon: 'traffic' },
+  { path: '/admin/logs', label: '日志管理', icon: 'logs' },
+  { path: '/admin/sync-tasks', label: '同步任务', icon: 'sync' },
+  { path: '/admin/settings', label: '系统设置', icon: 'settings' },
 ]
 
 const currentRouteName = computed(() => {
@@ -76,7 +77,7 @@ function handleUserCommand(cmd: string) {
           active-class="active"
           @click="isMobileMenuOpen = false"
         >
-          <el-icon class="nav-icon"><component :is="n.icon" /></el-icon>
+          <LineIcon :name="n.icon" class="nav-icon" />
           {{ n.label }}
         </router-link>
       </div>
@@ -88,7 +89,7 @@ function handleUserCommand(cmd: string) {
       <header class="header">
         <div class="breadcrumbs">
           <el-button class="mobile-menu-btn" text circle @click="isMobileMenuOpen = true">
-            <el-icon><Expand /></el-icon>
+            <LineIcon name="menu" :size="20" />
           </el-button>
           <span class="desktop-only">{{ site.siteTitle }}</span>
           <span class="separator desktop-only">/</span>
@@ -97,7 +98,7 @@ function handleUserCommand(cmd: string) {
         
         <div class="header-actions">
           <el-button text circle @click="toggleTheme" style="font-size: 18px; color: var(--text-muted); margin-left: 8px;">
-            <el-icon><component :is="isDark ? 'Moon' : 'Sunny'" /></el-icon>
+            <LineIcon :name="isDark ? 'moon' : 'sun'" :size="19" />
           </el-button>
           
           <el-dropdown trigger="click" @command="handleUserCommand">
@@ -195,12 +196,14 @@ function handleUserCommand(cmd: string) {
 .nav-item {
   display: flex;
   align-items: center;
-  padding: 12px 16px;
+  gap: 12px;
+  min-height: 46px;
+  padding: 0 16px;
   color: var(--sidebar-text);
   text-decoration: none;
-  border-radius: 12px;
+  border-radius: 10px;
   margin-bottom: 8px;
-  font-weight: 500;
+  font-weight: 600;
   transition: var(--transition);
   cursor: pointer;
 }
@@ -214,13 +217,13 @@ function handleUserCommand(cmd: string) {
 .nav-item.active {
   color: var(--sidebar-text-active);
   background: var(--sidebar-active-bg);
-  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
+  box-shadow: 0 10px 24px rgba(109, 93, 252, 0.28);
 }
 
 .nav-icon {
-  font-size: 18px;
-  margin-right: 12px;
-  opacity: 0.8;
+  width: 20px;
+  height: 20px;
+  opacity: 0.82;
   transition: var(--transition);
 }
 

@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, defineAsyncComponent, onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import QRCode from 'qrcode'
+import LineIcon from '@/components/LineIcon.vue'
 import { client } from '@/api/client'
-import { getMyUsage, type UsageReport } from '@/api/traffic'
+import { getMyTrafficHistory, getMyUsage, type TrafficHistoryPeriod, type TrafficHistoryResponse, type UsageReport } from '@/api/traffic'
+
+const TrafficChart = defineAsyncComponent(() => import('@/components/TrafficChart.vue'))
 
 interface MeProfile {
   id: number
@@ -71,6 +73,10 @@ const quickLinks = computed(() => (profile.value?.quick_links || [])
   .sort((a, b) => (a.sort || 0) - (b.sort || 0)))
 const announcement = computed(() => profile.value?.global_announcement || null)
 const usage = ref<UsageReport | null>(null)
+const trafficHistory = ref<TrafficHistoryResponse | null>(null)
+const trafficHistoryLoading = ref(false)
+const trafficPeriod = ref<TrafficHistoryPeriod>('day')
+const trafficRangeDays = ref(7)
 const qrDataURL = ref<string>('')
 const showQRCode = ref(false)
 const passwordDialog = ref(false)
@@ -97,14 +103,44 @@ async function load() {
   usage.value = u
   personalRules.value = rules.personal_rules || ''
   personalRulesSaved.value = rules.personal_rules || ''
-  if (p.sub_url) {
-    qrDataURL.value = await QRCode.toDataURL(p.sub_url, { width: 200, margin: 2 })
+  window.setTimeout(() => {
+    refreshTrafficHistory().catch(() => {})
+  }, 0)
+}
+
+async function loadTrafficHistory() {
+  trafficHistoryLoading.value = true
+  try {
+    return await getMyTrafficHistory({
+      period: trafficPeriod.value,
+      since: dateString(daysAgo(trafficRangeDays.value - 1)),
+      until: dateString(new Date()),
+    })
+  } finally {
+    trafficHistoryLoading.value = false
   }
+}
+
+async function refreshTrafficHistory() {
+  trafficHistory.value = await loadTrafficHistory()
 }
 
 function copyText(s: string) {
   navigator.clipboard.writeText(s)
   ElMessage.success('已复制到剪贴板')
+}
+
+async function toggleQRCode() {
+  const next = !showQRCode.value
+  showQRCode.value = next
+  if (next && !qrDataURL.value && profile.value?.sub_url) {
+    qrDataURL.value = await generateQRCode(profile.value.sub_url)
+  }
+}
+
+async function generateQRCode(url: string) {
+  const QRCode = await import('qrcode')
+  return QRCode.toDataURL(url, { width: 200, margin: 2 })
 }
 
 function subURLFor(format: 'mihomo' | 'sing-box') {
@@ -181,7 +217,7 @@ async function confirmResetCredentials() {
       '/user/me/reset-credentials',
     )
     if (profile.value) profile.value.sub_url = data.sub_url
-    qrDataURL.value = await QRCode.toDataURL(data.sub_url, { width: 200, margin: 2 })
+    qrDataURL.value = showQRCode.value ? await generateQRCode(data.sub_url) : ''
     ElMessage.success('已重置！请务必更新您的订阅配置。')
   } catch (e: any) {
     if (e !== 'cancel') ElMessage.error('操作失败')
@@ -271,6 +307,20 @@ function formatBytes(n: number): string {
   return `${v.toFixed(2)} ${units[u]}`
 }
 
+function daysAgo(days: number): Date {
+  const d = new Date()
+  d.setHours(0, 0, 0, 0)
+  d.setDate(d.getDate() - days)
+  return d
+}
+
+function dateString(d: Date): string {
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
+
 function daysUntil(iso: string): number {
   return Math.ceil((new Date(iso).getTime() - Date.now()) / 86400000)
 }
@@ -319,6 +369,7 @@ onMounted(load)
         <div class="avatar-large">{{ displayName.charAt(0).toUpperCase() }}</div>
         <div>
           <h1 class="username">{{ displayName }}</h1>
+          <div class="identity-meta">{{ profile.upn }}</div>
           <div class="tags">
             <span class="tag status-tag" :class="statusClass">
               {{ statusText }}
@@ -328,7 +379,7 @@ onMounted(load)
       </div>
       <div class="header-actions">
         <el-button v-if="profile.can_change_password" @click="passwordDialog = true" plain>
-          <el-icon class="mr-1"><Lock /></el-icon> 修改密码
+          <LineIcon name="lock" class="mr-1" :size="16" /> 修改密码
         </el-button>
       </div>
     </div>
@@ -348,28 +399,92 @@ onMounted(load)
     <div class="dashboard-grid">
       <!-- Left Column: Stats & Usage -->
       <div class="grid-col-left">
-        <!-- Usage Card -->
-        <el-card class="stat-card">
-          <div class="card-header-flex">
-            <h3 class="card-title">流量使用情况</h3>
-            <span class="reset-period">{{ profile.traffic_reset_period === 'monthly' ? '月度重置' : profile.traffic_reset_period === 'quarterly' ? '季度重置' : '不重置' }}</span>
-          </div>
-          
-          <div v-if="usage" class="usage-stats">
-            <div class="usage-numbers">
-              <span class="used">{{ formatBytes(usage.period_used_bytes) }}</span>
-              <span class="divider">/</span>
-              <span class="limit">{{ profile.traffic_limit_bytes > 0 ? formatBytes(profile.traffic_limit_bytes) : '不限' }}</span>
+        <div class="overview-grid">
+          <!-- Usage Card -->
+          <el-card class="stat-card overview-card">
+            <div class="card-header-flex">
+              <h3 class="card-title">流量使用情况</h3>
+              <span class="reset-period">{{ profile.traffic_reset_period === 'monthly' ? '月度重置' : profile.traffic_reset_period === 'quarterly' ? '季度重置' : '不重置' }}</span>
             </div>
             
-            <el-progress
-              v-if="profile.traffic_limit_bytes > 0"
-              :percentage="Math.min(100, Math.round((usage.period_used_bytes / profile.traffic_limit_bytes) * 100))"
-              :stroke-width="12"
-              :color="[ { color: '#67c23a', percentage: 70 }, { color: '#e6a23c', percentage: 90 }, { color: '#f56c6c', percentage: 100 } ]"
-              class="usage-progress"
-            />
+            <div v-if="usage" class="usage-stats">
+              <div class="usage-numbers">
+                <span class="used">{{ formatBytes(usage.period_used_bytes) }}</span>
+                <span class="divider">/</span>
+                <span class="limit">{{ profile.traffic_limit_bytes > 0 ? formatBytes(profile.traffic_limit_bytes) : '不限' }}</span>
+              </div>
+              
+              <el-progress
+                v-if="profile.traffic_limit_bytes > 0"
+                :percentage="Math.min(100, Math.round((usage.period_used_bytes / profile.traffic_limit_bytes) * 100))"
+                :stroke-width="12"
+                :color="[ { color: '#10b981', percentage: 70 }, { color: '#f59e0b', percentage: 90 }, { color: '#ef4444', percentage: 100 } ]"
+                class="usage-progress"
+              />
+              <div class="usage-subline">今日 {{ formatBytes(usage.today_used_bytes) }} · 累计 {{ formatBytes(usage.permanent_total_bytes) }}</div>
+            </div>
+          </el-card>
+
+          <!-- Expiration Card -->
+          <el-card class="stat-card overview-card">
+            <div class="card-header-flex">
+              <h3 class="card-title">账户到期时间</h3>
+              <span v-if="profile.emergency_access.enabled" class="reset-period">
+                紧急 {{ profile.emergency_access.remaining }}/{{ profile.emergency_access.max_count }}
+              </span>
+            </div>
+            <div class="expire-stats">
+              <div v-if="profile.expire_at">
+                <div class="expire-date">{{ new Date(profile.expire_at).toLocaleDateString() }}</div>
+                <div class="expire-countdown" :class="expireClass">
+                  {{ expireText }}
+                </div>
+              </div>
+              <div v-else class="expire-date">永久有效</div>
+            </div>
+            <div v-if="profile.emergency_access.enabled && profile.expire_at" class="emergency-section">
+              <el-button
+                type="warning"
+                plain
+                class="w-full"
+                :disabled="!canUseEmergency"
+                :loading="emergencyBusy"
+                @click="useEmergencyAccess"
+              >
+                紧急使用，延长 {{ profile.emergency_access.duration_hours }} 小时
+              </el-button>
+            </div>
+          </el-card>
+        </div>
+
+        <el-card class="stat-card">
+          <div class="card-header-flex chart-card-head">
+            <h3 class="card-title">使用趋势</h3>
+            <div class="chart-controls">
+              <el-segmented
+                v-model="trafficPeriod"
+                size="small"
+                :options="[
+                  { label: '日', value: 'day' },
+                  { label: '周', value: 'week' },
+                  { label: '月', value: 'month' },
+                ]"
+                @change="refreshTrafficHistory"
+              />
+              <el-select v-model="trafficRangeDays" size="small" style="width: 112px" @change="refreshTrafficHistory">
+                <el-option label="最近 7 天" :value="7" />
+                <el-option label="最近 30 天" :value="30" />
+                <el-option label="最近 90 天" :value="90" />
+              </el-select>
+            </div>
           </div>
+          <TrafficChart
+            v-if="trafficHistory || trafficHistoryLoading"
+            :items="trafficHistory?.items || []"
+            :loading="trafficHistoryLoading"
+            :height="280"
+          />
+          <div v-else class="chart-placeholder" aria-hidden="true"></div>
         </el-card>
 
         <el-card class="actions-card">
@@ -390,51 +505,19 @@ onMounted(load)
             </el-button>
           </div>
         </el-card>
-
-        <!-- Expiration Card -->
-        <el-card class="stat-card">
-          <div class="card-header-flex">
-            <h3 class="card-title">账户到期时间</h3>
-            <span v-if="profile.emergency_access.enabled" class="reset-period">
-              紧急剩余 {{ profile.emergency_access.remaining }}/{{ profile.emergency_access.max_count }}
-            </span>
-          </div>
-          <div class="expire-stats">
-            <div v-if="profile.expire_at">
-              <div class="expire-date">{{ new Date(profile.expire_at).toLocaleDateString() }}</div>
-              <div class="expire-countdown" :class="expireClass">
-                {{ expireText }}
-              </div>
-            </div>
-            <div v-else class="expire-date">永久有效</div>
-          </div>
-          <div v-if="profile.emergency_access.enabled && profile.expire_at" class="emergency-section">
-            <el-button
-              type="warning"
-              plain
-              class="w-full"
-              :disabled="!canUseEmergency"
-              :loading="emergencyBusy"
-              @click="useEmergencyAccess"
-            >
-              紧急使用，延长 {{ profile.emergency_access.duration_hours }} 小时
-            </el-button>
-            <p class="action-hint">
-              已使用 {{ profile.emergency_access.used_count }} 次，剩余 {{ profile.emergency_access.remaining }} 次。
-            </p>
-          </div>
-        </el-card>
       </div>
 
       <!-- Right Column: Subscription -->
       <div class="grid-col-right">
         <el-card class="sub-card">
-          <h3 class="card-title text-center">快速导入订阅</h3>
+          <div class="sub-card-head">
+            <h3 class="card-title">快速导入订阅</h3>
+            <el-tag size="small" type="info">{{ platformLabel }}</el-tag>
+          </div>
 
           <div v-if="importClients.length > 0" class="client-import-section">
             <div class="section-head">
               <p class="section-label">快速导入</p>
-              <el-tag size="small" type="info">{{ platformLabel }}</el-tag>
             </div>
             <div class="client-list">
               <div v-for="item in importClients" :key="item.name" class="client-row">
@@ -456,7 +539,7 @@ onMounted(load)
           </div>
 
           <div class="qr-toggle-row">
-            <el-button plain class="qr-toggle-btn" @click="showQRCode = !showQRCode">
+            <el-button plain class="qr-toggle-btn" @click="toggleQRCode">
               {{ showQRCode ? '隐藏二维码' : '显示二维码' }}
             </el-button>
           </div>
@@ -528,7 +611,7 @@ onMounted(load)
 
 <style scoped>
 .profile-dashboard {
-  max-width: 1000px;
+  max-width: 1180px;
   margin: 0 auto;
 }
 
@@ -537,7 +620,7 @@ onMounted(load)
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 32px;
+  margin-bottom: 24px;
   flex-wrap: wrap;
   gap: 16px;
 }
@@ -565,8 +648,14 @@ onMounted(load)
 .username {
   font-size: 28px;
   font-weight: 700;
-  margin: 0 0 8px 0;
-  letter-spacing: -0.5px;
+  margin: 0 0 2px 0;
+  letter-spacing: 0;
+}
+
+.identity-meta {
+  color: var(--text-muted);
+  font-size: 13px;
+  margin-bottom: 8px;
 }
 
 .tags {
@@ -667,20 +756,30 @@ onMounted(load)
 /* Grid Layout */
 .dashboard-grid {
   display: grid;
-  grid-template-columns: 1.2fr 1fr;
+  grid-template-columns: minmax(0, 1fr) 420px;
+  grid-template-areas: "main subscription";
   gap: 24px;
-}
-
-@media (max-width: 768px) {
-  .dashboard-grid {
-    grid-template-columns: 1fr;
-  }
+  align-items: start;
 }
 
 .grid-col-left {
+  grid-area: main;
   display: flex;
   flex-direction: column;
   gap: 24px;
+  min-width: 0;
+}
+
+.grid-col-right {
+  grid-area: subscription;
+  min-width: 0;
+  align-self: start;
+}
+
+.overview-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 18px;
 }
 
 .card-title {
@@ -692,6 +791,22 @@ onMounted(load)
   letter-spacing: 0.5px;
 }
 
+.stat-card,
+.actions-card,
+.sub-card {
+  border-radius: 10px;
+}
+
+.stat-card :deep(.el-card__body),
+.actions-card :deep(.el-card__body),
+.sub-card :deep(.el-card__body) {
+  padding: 22px;
+}
+
+.overview-card {
+  min-height: 148px;
+}
+
 .card-header-flex {
   display: flex;
   justify-content: space-between;
@@ -701,6 +816,22 @@ onMounted(load)
 
 .card-header-flex .card-title {
   margin: 0;
+}
+
+.chart-card-head {
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.chart-controls {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.chart-placeholder {
+  height: 280px;
 }
 
 .reset-period {
@@ -718,10 +849,10 @@ onMounted(load)
 }
 
 .used {
-  font-size: 36px;
+  font-size: 32px;
   font-weight: 700;
   color: var(--text-main);
-  letter-spacing: -1px;
+  letter-spacing: 0;
 }
 
 .divider {
@@ -742,8 +873,14 @@ onMounted(load)
   border-radius: 10px;
 }
 
+.usage-subline {
+  color: var(--text-muted);
+  font-size: 12px;
+  margin-top: 10px;
+}
+
 .expire-date {
-  font-size: 32px;
+  font-size: 30px;
   font-weight: 700;
   color: var(--text-main);
   margin-bottom: 8px;
@@ -773,13 +910,20 @@ onMounted(load)
 
 /* Right Column (Subscription) */
 .sub-card {
-  height: 100%;
   display: flex;
   flex-direction: column;
 }
 
-.text-center {
-  text-align: center;
+.sub-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.sub-card-head .card-title {
+  margin: 0;
 }
 
 .qr-container {
@@ -890,7 +1034,7 @@ onMounted(load)
 
 .client-import-section {
   border: 1px solid var(--header-border);
-  border-radius: 10px;
+  border-radius: 8px;
   padding: 14px;
   margin-bottom: 18px;
   background: rgba(148, 163, 184, 0.035);
@@ -949,7 +1093,7 @@ onMounted(load)
 }
 
 .sub-actions {
-  margin-top: auto;
+  margin-top: 18px;
 }
 
 .rules-editor :deep(textarea) {
@@ -986,6 +1130,64 @@ onMounted(load)
 }
 
 @media (max-width: 480px) {
+  .profile-header {
+    align-items: flex-start;
+  }
+
+  .user-info-section {
+    gap: 16px;
+  }
+
+  .avatar-large {
+    width: 64px;
+    height: 64px;
+    border-radius: 18px;
+    font-size: 30px;
+  }
+
+  .username {
+    font-size: 26px;
+  }
+
+  .overview-card {
+    min-height: 0;
+  }
+
+  .overview-card :deep(.el-card__body) {
+    padding: 20px;
+  }
+
+  .overview-card .card-header-flex {
+    align-items: flex-start;
+    gap: 12px;
+  }
+
+  .overview-card .card-title {
+    font-size: 14px;
+    line-height: 1.35;
+  }
+
+  .used {
+    font-size: 30px;
+  }
+
+  .limit {
+    font-size: 18px;
+  }
+
+  .expire-date {
+    font-size: 30px;
+  }
+
+  .chart-card-head {
+    flex-direction: column;
+  }
+
+  .chart-controls {
+    justify-content: flex-start;
+    width: 100%;
+  }
+
   .client-row {
     align-items: stretch;
     flex-direction: column;
@@ -993,6 +1195,38 @@ onMounted(load)
 
   .client-actions {
     justify-content: flex-end;
+  }
+}
+
+@media (max-width: 1280px) {
+  .dashboard-grid {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .grid-col-left {
+    display: contents;
+  }
+
+  .grid-col-right {
+    order: 2;
+    align-self: stretch;
+  }
+
+  .overview-grid {
+    order: 1;
+  }
+
+  .stat-card:not(.overview-card) {
+    order: 3;
+  }
+
+  .actions-card {
+    order: 4;
+  }
+
+  .overview-grid {
+    grid-template-columns: 1fr;
   }
 }
 

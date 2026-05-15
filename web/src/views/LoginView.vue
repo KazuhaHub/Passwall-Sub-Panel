@@ -2,6 +2,7 @@
 import { onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
+import LineIcon from '@/components/LineIcon.vue'
 import { useAuthStore } from '@/stores/auth'
 import { getAuthMethods, samlLoginURL, oidcLoginURL, type LoginMode } from '@/api/auth'
 import { homeForRole, isAdminPath } from '@/router/home'
@@ -64,7 +65,7 @@ function updateIcon(url: string) {
 
 async function submit() {
   if (!form.upn || !form.password) {
-    ElMessage.warning('请输入 UPN 和密码')
+    ElMessage.warning('请输入账号和密码')
     return
   }
   loading.value = true
@@ -108,17 +109,13 @@ onMounted(probe)
         <img class="logo light-logo" :src="logoSrcLight" alt="Logo" />
         <img class="logo dark-logo" :src="logoSrc" alt="Logo" />
         <div v-if="appTitle" class="login-title">{{ appTitle }}</div>
-        <div class="login-subtitle">Welcome back, please sign in.</div>
+        <div class="login-subtitle">使用您的账号登录服务面板</div>
       </div>
 
       <!-- SSO-only modes -->
       <template v-if="mode === 'sso_redirect' || mode === 'sso_first'">
         <button v-if="ssoEnabled" class="btn btn-primary" @click="ssoLogin">
-          <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-            <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"></path>
-            <path d="m10 17 5-5-5-5"></path>
-            <path d="M15 12H3"></path>
-          </svg>
+          <LineIcon name="login" class="btn-icon" />
           <span>使用 SSO 登录</span>
         </button>
       </template>
@@ -126,11 +123,7 @@ onMounted(probe)
       <!-- Dual mode -->
       <template v-else-if="mode === 'dual'">
         <button v-if="ssoEnabled" class="btn btn-primary" @click="ssoLogin">
-          <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-            <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"></path>
-            <path d="m10 17 5-5-5-5"></path>
-            <path d="M15 12H3"></path>
-          </svg>
+          <LineIcon name="login" class="btn-icon" />
           <span>使用 SSO 登录</span>
         </button>
         <div class="divider">
@@ -140,7 +133,7 @@ onMounted(probe)
           <input
             v-model="form.upn"
             type="text"
-            placeholder="UPN"
+            placeholder="邮箱或用户名"
             autocomplete="email"
             class="input"
           />
@@ -163,7 +156,7 @@ onMounted(probe)
           <input
             v-model="form.upn"
             type="text"
-            placeholder="UPN"
+            placeholder="邮箱或用户名"
             autocomplete="email"
             class="input"
           />
@@ -188,11 +181,11 @@ onMounted(probe)
 <style scoped>
 :root {
   --brand-color: #2563eb;
-  --bg: #f6f7f9;
+  --bg: #eef2f7;
   --surface: #ffffff;
   --text: #111827;
   --text-muted: #6b7280;
-  --border: #e5e7eb;
+  --border: #cbd5e1;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -210,23 +203,33 @@ onMounted(probe)
   align-items: center;
   justify-content: center;
   min-height: 100vh;
-  background: var(--bg);
+  background: #eef2f7;
   padding: 24px 16px;
 }
 
 .login-container {
   background: var(--surface);
-  border-radius: 16px;
-  padding: 32px 28px;
+  border-radius: 14px;
+  padding: 34px 30px;
   max-width: 420px;
   width: 100%;
-  box-shadow: 0 8px 32px rgba(0,0,0,0.06);
-  border: 1px solid var(--border);
+  box-shadow: 0 22px 60px rgba(15, 23, 42, 0.14);
+  border: 1px solid #d5dce8;
 }
 
 @media (prefers-color-scheme: dark) {
+  .login-page {
+    background: #0b1220;
+  }
+
   .login-container {
-    box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+    border-color: #263244;
+    box-shadow: 0 22px 60px rgba(0,0,0,0.4);
+  }
+
+  .input {
+    background: #111827;
+    border-color: #334155;
   }
 }
 
@@ -345,15 +348,17 @@ onMounted(probe)
 .input {
   display: block;
   width: 100%;
+  min-height: 48px;
   padding: 12px 14px;
-  background: var(--bg);
+  background: #ffffff;
   color: var(--text);
-  border: 1px solid var(--border);
-  border-radius: 10px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
   font-size: 15px;
   font-family: inherit;
-  margin-bottom: 10px;
+  margin-bottom: 12px;
   box-sizing: border-box;
+  box-shadow: inset 0 1px 2px rgba(15, 23, 42, 0.04);
 }
 
 .input:focus {
@@ -363,7 +368,7 @@ onMounted(probe)
 }
 
 .input::placeholder {
-  color: var(--text-muted);
+  color: #64748b;
 }
 
 .login-form {

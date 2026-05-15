@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Delete, Refresh } from '@element-plus/icons-vue'
+import LineIcon from '@/components/LineIcon.vue'
 import {
   createServer,
   deleteServer,
@@ -285,20 +285,20 @@ onMounted(load)
     <div v-if="selectedCount > 0" class="psp-toolbar">
       <span class="selection-count">已选 {{ selectedCount }}</span>
       <el-button
-        :icon="Refresh"
         :loading="batchBusy === 'test'"
         :disabled="batchBusy !== ''"
         @click="batchRunTest"
       >
+        <LineIcon name="refresh" :size="16" />
         批量测试
       </el-button>
       <el-button
         type="danger"
-        :icon="Delete"
         :loading="batchBusy === 'delete'"
         :disabled="batchBusy !== ''"
         @click="batchDeleteServers"
       >
+        <LineIcon name="trash" :size="16" />
         批量删除
       </el-button>
     </div>

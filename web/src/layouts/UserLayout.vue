@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { useRouter } from 'vue-router'
+import LineIcon from '@/components/LineIcon.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useSiteStore } from '@/stores/site'
 import { useTheme } from '@/composables/useTheme'
@@ -35,7 +36,7 @@ function handleUserCommand(cmd: string) {
       
       <div style="display: flex; align-items: center; gap: 16px;">
         <el-button text circle @click="toggleTheme" style="font-size: 18px; color: var(--text-muted);">
-          <el-icon><component :is="isDark ? 'Moon' : 'Sunny'" /></el-icon>
+          <LineIcon :name="isDark ? 'moon' : 'sun'" :size="19" />
         </el-button>
 
         <el-dropdown trigger="click" @command="handleUserCommand">

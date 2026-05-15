@@ -313,19 +313,27 @@ func (c *Client) CopyClients(ctx context.Context, srcInboundID, dstInboundID int
 // --- Traffic ---
 
 func (c *Client) GetClientTraffic(ctx context.Context, email string) ([]ports.ClientTraffic, error) {
-	var raws []rawClientTraffic
+	var raw json.RawMessage
 	path := "/panel/api/inbounds/getClientTraffics/" + url.PathEscape(email)
-	if err := c.doJSON(ctx, http.MethodGet, path, nil, &raws); err != nil {
+	if err := c.doJSON(ctx, http.MethodGet, path, nil, &raw); err != nil {
 		return nil, err
+	}
+	raws, err := decodeTrafficObj(raw)
+	if err != nil {
+		return nil, fmt.Errorf("decode client traffic: %w", err)
 	}
 	return rawTrafficsToPorts(raws), nil
 }
 
 func (c *Client) GetInboundTraffics(ctx context.Context, id int) ([]ports.ClientTraffic, error) {
-	var raws []rawClientTraffic
+	var raw json.RawMessage
 	path := "/panel/api/inbounds/getClientTrafficsById/" + strconv.Itoa(id)
-	if err := c.doJSON(ctx, http.MethodGet, path, nil, &raws); err != nil {
+	if err := c.doJSON(ctx, http.MethodGet, path, nil, &raw); err != nil {
 		return nil, err
+	}
+	raws, err := decodeTrafficObj(raw)
+	if err != nil {
+		return nil, fmt.Errorf("decode inbound traffic: %w", err)
 	}
 	return rawTrafficsToPorts(raws), nil
 }
@@ -433,6 +441,28 @@ func rawTrafficsToPorts(raws []rawClientTraffic) []ports.ClientTraffic {
 		}
 	}
 	return out
+}
+
+func decodeTrafficObj(raw json.RawMessage) ([]rawClientTraffic, error) {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		return nil, nil
+	}
+	if trimmed[0] == '[' {
+		var raws []rawClientTraffic
+		if err := json.Unmarshal(trimmed, &raws); err != nil {
+			return nil, err
+		}
+		return raws, nil
+	}
+	var one rawClientTraffic
+	if err := json.Unmarshal(trimmed, &one); err != nil {
+		return nil, err
+	}
+	if one.Email == "" && one.ID == 0 && one.InboundID == 0 && one.Up == 0 && one.Down == 0 && one.Total == 0 {
+		return nil, nil
+	}
+	return []rawClientTraffic{one}, nil
 }
 
 func (c *Client) settingsWithCurrentClients(ctx context.Context, inboundID int, nextSettings string) (string, error) {

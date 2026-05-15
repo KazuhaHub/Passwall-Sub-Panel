@@ -61,7 +61,7 @@ func (r *trafficRepo) LastBefore(ctx context.Context, userID int64, before time.
 func (r *trafficRepo) ListByUser(ctx context.Context, userID int64, since, until time.Time) ([]*domain.TrafficSnapshot, error) {
 	var rows []trafficRow
 	err := r.db.WithContext(ctx).
-		Where("user_id = ? AND captured_at BETWEEN ? AND ?", userID, since, until).
+		Where("user_id = ? AND captured_at >= ? AND captured_at < ?", userID, since, until).
 		Order("captured_at ASC").
 		Find(&rows).Error
 	if err != nil {

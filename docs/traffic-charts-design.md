@@ -2,9 +2,10 @@
 
 | 字段 | 值 |
 |---|---|
-| 文档版本 | 1.0 |
-| 状态 | 待开发 |
+| 文档版本 | 1.1 |
+| 状态 | 开发中 |
 | 创建时间 | 2026-05-14 |
+| 最后更新 | 2026-05-15 |
 
 ---
 
@@ -57,33 +58,20 @@ CREATE TABLE traffic_snapshots (
 );
 ```
 
-### 3.2 数据聚合查询
+### 3.2 数据聚合算法
 
-**按天聚合**（从快照计算每日增量）：
-```sql
--- 方法：取每天最后一条快照与前一天最后一条快照的差值
-WITH daily AS (
-  SELECT 
-    user_id,
-    DATE(captured_at) as date,
-    MAX(total_bytes) as end_total,
-    MAX(up_bytes) as end_up,
-    MAX(down_bytes) as end_down
-  FROM traffic_snapshots
-  WHERE user_id = ? AND captured_at >= ?
-  GROUP BY user_id, DATE(captured_at)
-)
-SELECT 
-  d1.date,
-  d1.end_total - COALESCE(d2.end_total, 0) as daily_total,
-  d1.end_up - COALESCE(d2.end_up, 0) as daily_up,
-  d1.end_down - COALESCE(d2.end_down, 0) as daily_down
-FROM daily d1
-LEFT JOIN daily d2 ON d2.date = d1.date - INTERVAL 1 DAY
-ORDER BY d1.date;
-```
+聚合在 Go 代码中完成，不依赖 MySQL / SQLite 特定 SQL 语法。
 
-**注意**：此查询可在后端 Go 代码中实现，避免依赖数据库特定语法。
+核心规则：
+
+1. 查询窗口为 `[since 00:00, until+1day 00:00)`，按服务器本地时区解释日期。
+2. 额外读取 `since` 前最后一条快照作为第一段 baseline，避免第一天被当成从 0 开始。
+3. 每个 bucket（日/周/月）取该 bucket 内最后一条快照，减去上一个有效快照。
+4. 没有快照的 bucket 补 0，方便前端连续绘图。
+5. 如果差值为负，说明 3X-UI 计数被重置或发生手动修正；该 bucket 按当前 bucket 末快照值计算，并保证结果不小于 0。
+6. `week` 使用 ISO 周（周一 00:00 起），`month` 使用自然月。
+
+注意：管理员“手动设置用量”会插入 synthetic snapshot，保证总量准确；但上行/下行拆分可能不代表真实方向流量，图表应以 total 为主。
 
 ---
 
@@ -94,7 +82,7 @@ ORDER BY d1.date;
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | GET | `/api/admin/traffic/history` | 管理员流量历史（支持时间范围） |
-| GET | `/api/admin/traffic/history/:id` | 单用户流量历史 |
+| GET | `/api/admin/traffic/user/:id/history` | 单用户流量历史 |
 | GET | `/api/user/me/traffic/history` | 用户自己的流量历史 |
 
 ### 4.2 请求参数
@@ -110,10 +98,13 @@ GET /api/admin/traffic/history?user_id=1&period=day&since=2026-04-01&until=2026-
 | `since` | string | 起始日期 `YYYY-MM-DD`，默认 30 天前 |
 | `until` | string | 结束日期 `YYYY-MM-DD`，默认今天 |
 
+`since` 和 `until` 都是日期粒度，语义为包含两端日期；后端实际查询到 `until` 次日 00:00 前。
+
 ### 4.3 响应格式
 
 ```json
 {
+  "scope": "user",
   "user_id": 1,
   "period": "day",
   "since": "2026-04-01",
@@ -132,6 +123,19 @@ GET /api/admin/traffic/history?user_id=1&period=day&since=2026-04-01&until=2026-
       "total_bytes": 262144000
     }
   ]
+}
+```
+
+所有用户汇总时：
+
+```json
+{
+  "scope": "all",
+  "period": "day",
+  "since": "2026-04-01",
+  "until": "2026-05-14",
+  "users_count": 12,
+  "items": []
 }
 ```
 
@@ -224,7 +228,7 @@ echarts.use([LineChart, BarChart, GridComponent, TooltipComponent, LegendCompone
 ## 6. 实现步骤
 
 ### Phase 1：后端 API
-1. `traffic_repo.go` 新增 `AggregateByDay/Week/Month` 方法
+1. `traffic_repo.go` 复用 `ListByUser` / `LastBefore` 读取原始快照
 2. `traffic.go` 新增 `HistoryReport` 方法
 3. `admin_traffic.go` 新增 `History` handler
 4. `user_me.go` 新增 `TrafficHistory` handler
@@ -241,6 +245,7 @@ echarts.use([LineChart, BarChart, GridComponent, TooltipComponent, LegendCompone
 1. 图表响应式适配（移动端）
 2. 暗色主题适配
 3. 数据缓存（避免重复请求）
+4. 后端测试：首日 baseline、空日期补 0、负增量、周/月 bucket、用户权限隔离
 
 ---
 
@@ -254,7 +259,7 @@ echarts.use([LineChart, BarChart, GridComponent, TooltipComponent, LegendCompone
 ### 修改文件
 | 文件 | 修改内容 |
 |---|---|
-| `internal/adapters/mysql/traffic_repo.go` | 新增聚合查询方法 |
+| `internal/adapters/mysql/traffic_repo.go` | 复用快照查询；必要时优化索引 |
 | `internal/service/traffic/traffic.go` | 新增 HistoryReport 方法 |
 | `internal/transport/http/handler/admin_traffic.go` | 新增 History handler |
 | `internal/transport/http/handler/user_me.go` | 新增 TrafficHistory handler |

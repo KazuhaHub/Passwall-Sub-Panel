@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Delete } from '@element-plus/icons-vue'
+import LineIcon from '@/components/LineIcon.vue'
 import { deleteTemplate, listTemplates, saveTemplate, type Template } from '@/api/templates'
 import { listRuleSets, type RuleSet } from '@/api/rules'
 
@@ -216,10 +216,10 @@ onMounted(load)
       <span class="selection-count">已选 {{ selectedCount }}</span>
       <el-button
         type="danger"
-        :icon="Delete"
         :loading="batchBusy"
         @click="batchDelete"
       >
+        <LineIcon name="trash" :size="16" />
         批量删除
       </el-button>
     </div>

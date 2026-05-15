@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Clock, Delete, Lock, Unlock } from '@element-plus/icons-vue'
+import LineIcon from '@/components/LineIcon.vue'
 import {
   createUser,
   deleteUser,
@@ -573,27 +573,27 @@ onMounted(async () => {
         <el-divider direction="vertical" />
         <span class="users-selection-count">已选 {{ selectedCount }}</span>
         <el-button
-          :icon="Unlock"
           :loading="batchBusy === 'enable'"
           :disabled="batchBusy !== ''"
           @click="batchSetEnabled(true)"
         >
+          <LineIcon name="unlock" :size="16" />
           批量启用
         </el-button>
         <el-button
-          :icon="Lock"
           :loading="batchBusy === 'disable'"
           :disabled="batchBusy !== ''"
           @click="batchSetEnabled(false)"
         >
+          <LineIcon name="lock" :size="16" />
           批量禁用
         </el-button>
         <el-button
-          :icon="Clock"
           :loading="batchBusy === 'renew'"
           :disabled="batchBusy !== ''"
           @click="batchQuickRenew(30)"
         >
+          <LineIcon name="clock" :size="16" />
           续期30天
         </el-button>
         <el-dropdown :disabled="batchBusy !== ''" @command="batchMoreCommand">
@@ -820,7 +820,10 @@ onMounted(async () => {
             <el-button size="small" @click="openRulesDialog(editing)">个人规则</el-button>
             <el-button size="small" @click="confirmResetCredentials(editing)">重置凭证</el-button>
             <el-button size="small" @click="confirmResetEmergencyUsage(editing)">重置紧急次数</el-button>
-            <el-button size="small" type="danger" :icon="Delete" @click="confirmDelete(editing)">删除用户</el-button>
+            <el-button size="small" type="danger" @click="confirmDelete(editing)">
+              <LineIcon name="trash" :size="15" />
+              删除用户
+            </el-button>
           </div>
         </div>
       </div>
