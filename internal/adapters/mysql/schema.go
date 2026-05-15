@@ -383,9 +383,10 @@ type uiSettingsRow struct {
 	SubClientRules     jsonSubRules `gorm:"type:json"`
 	SubImportClients   jsonSubImportClients `gorm:"type:json"`
 	SubLogRetentionDays int         `gorm:"default:7"`
-	SubBlockAutoDisable bool        `gorm:"default:false"`
-	SubBlockAutoDisableCount int    `gorm:"default:3"`
-	QuickLinks         jsonQuickLinks `gorm:"type:json"`
+	SubBlockAutoDisable       bool        `gorm:"default:false"`
+	SubBlockAutoDisableCount int         `gorm:"default:3"`
+	SubUpdateIntervalHours   int         `gorm:"default:24"`
+	QuickLinks               jsonQuickLinks `gorm:"type:json"`
 	GlobalAnnouncement jsonGlobalAnnouncement `gorm:"type:json"`
 	FooterText         string       `gorm:"size:255"`
 	UpdatedAt          time.Time

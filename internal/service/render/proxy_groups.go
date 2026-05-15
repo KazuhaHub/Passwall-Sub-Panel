@@ -1,8 +1,6 @@
 package render
 
-import (
-	"strings"
-)
+import "strings"
 
 var builtInRuleTargets = map[string]bool{
 	"DIRECT":          true,
@@ -18,9 +16,10 @@ type proxyGroup struct {
 	Proxies []string `yaml:"proxies"`
 }
 
-func buildProxyGroupsYAML(rules string) (string, error) {
+func buildProxyGroupsYAML(rules string, preferredOrder []string) (string, error) {
 	targets := ruleTargetsInOrder(rules)
 	targets = withRequiredProxyGroupDependencies(targets)
+	targets = applyProxyGroupOrder(targets, preferredOrder)
 	if len(targets) == 0 {
 		return "[]", nil
 	}
@@ -37,6 +36,31 @@ func buildProxyGroupsYAML(rules string) (string, error) {
 		}
 	}
 	return strings.Join(lines, "\n"), nil
+}
+
+func applyProxyGroupOrder(targets, preferredOrder []string) []string {
+	if len(preferredOrder) == 0 {
+		return targets
+	}
+	remaining := make(map[string]bool, len(targets))
+	for _, target := range targets {
+		remaining[target] = true
+	}
+	out := make([]string, 0, len(targets))
+	for _, preferred := range preferredOrder {
+		preferred = strings.TrimSpace(preferred)
+		if !remaining[preferred] {
+			continue
+		}
+		out = append(out, preferred)
+		delete(remaining, preferred)
+	}
+	for _, target := range targets {
+		if remaining[target] {
+			out = append(out, target)
+		}
+	}
+	return out
 }
 
 func withRequiredProxyGroupDependencies(targets []string) []string {

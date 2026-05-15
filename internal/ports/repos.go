@@ -248,6 +248,9 @@ type UISettings struct {
 	SubBlockAutoDisable bool `yaml:"sub_block_auto_disable" json:"sub_block_auto_disable"`
 	// SubBlockAutoDisableCount is the number of violations before auto-disabling. Default 3.
 	SubBlockAutoDisableCount int `yaml:"sub_block_auto_disable_count" json:"sub_block_auto_disable_count"`
+	// SubUpdateIntervalHours is the subscription auto-update interval in hours.
+	// Controls the Profile-Update-Interval header. Default 24.
+	SubUpdateIntervalHours int `yaml:"sub_update_interval_hours" json:"sub_update_interval_hours"`
 	// SubImportClients defines user-facing one-click subscription import targets.
 	SubImportClients []SubImportClient `yaml:"sub_import_clients" json:"sub_import_clients"`
 	// QuickLinks defines shortcut buttons on the user self-service page.

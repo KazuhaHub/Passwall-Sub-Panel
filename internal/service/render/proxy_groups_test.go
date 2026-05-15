@@ -28,7 +28,7 @@ func TestRuleTargetsInOrder(t *testing.T) {
 }
 
 func TestBuildProxyGroupsYAML(t *testing.T) {
-	raw, err := buildProxyGroupsYAML("- DOMAIN-SUFFIX,example.com,💬 Ai平台\n- MATCH,🐟 漏网之鱼")
+	raw, err := buildProxyGroupsYAML("- DOMAIN-SUFFIX,example.com,💬 Ai平台\n- MATCH,🐟 漏网之鱼", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,5 +53,35 @@ func TestBuildProxyGroupsYAML(t *testing.T) {
 	}
 	if groups[2].Name != "🐟 漏网之鱼" {
 		t.Fatalf("third group = %q", groups[2].Name)
+	}
+}
+
+func TestBuildProxyGroupsYAMLUsesManualDisplayOrder(t *testing.T) {
+	raw, err := buildProxyGroupsYAML(`
+- DOMAIN-SUFFIX,direct.example,🎯 全球直连
+- DOMAIN-SUFFIX,ads.example,🛑 广告拦截
+- DOMAIN-SUFFIX,ai.example,💬 Ai平台
+- DOMAIN-SUFFIX,game.example,🎮 游戏平台
+- MATCH,🐟 漏网之鱼
+`, []string{"🚀 节点选择", "💬 Ai平台", "🎮 游戏平台"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var groups []proxyGroup
+	if err := yaml.Unmarshal([]byte(raw), &groups); err != nil {
+		t.Fatal(err)
+	}
+	got := make([]string, len(groups))
+	for i, group := range groups {
+		got[i] = group.Name
+	}
+	want := []string{"🚀 节点选择", "💬 Ai平台", "🎮 游戏平台", "🎯 全球直连", "🛑 广告拦截", "🐟 漏网之鱼"}
+	if len(got) != len(want) {
+		t.Fatalf("groups len = %d, want %d: %#v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("group[%d] = %q, want %q; all=%#v", i, got[i], want[i], got)
+		}
 	}
 }

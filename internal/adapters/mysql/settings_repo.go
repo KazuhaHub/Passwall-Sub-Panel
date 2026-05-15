@@ -56,6 +56,7 @@ func (r *settingsRepo) Load(ctx context.Context, defaults ports.UISettings) (por
 		SubLogRetentionDays:        row.SubLogRetentionDays,
 		SubBlockAutoDisable:        row.SubBlockAutoDisable,
 		SubBlockAutoDisableCount:   row.SubBlockAutoDisableCount,
+		SubUpdateIntervalHours:     row.SubUpdateIntervalHours,
 		QuickLinks:                 row.QuickLinks.toDomain(),
 		GlobalAnnouncement:         row.GlobalAnnouncement.toDomain(),
 		FooterText:                 row.FooterText,
@@ -118,6 +119,9 @@ func (r *settingsRepo) Load(ctx context.Context, defaults ports.UISettings) (por
 	}
 	if out.SubBlockAutoDisableCount <= 0 {
 		out.SubBlockAutoDisableCount = 3
+	}
+	if out.SubUpdateIntervalHours <= 0 {
+		out.SubUpdateIntervalHours = 24
 	}
 	if out.FooterText == "" {
 		out.FooterText = "© Passwall Sub Panel"
@@ -222,6 +226,7 @@ func (r *settingsRepo) Save(ctx context.Context, s ports.UISettings) error {
 		SubLogRetentionDays:        s.SubLogRetentionDays,
 		SubBlockAutoDisable:        s.SubBlockAutoDisable,
 		SubBlockAutoDisableCount:   s.SubBlockAutoDisableCount,
+		SubUpdateIntervalHours:     s.SubUpdateIntervalHours,
 		QuickLinks:                 jsonQuickLinksFromDomain(s.QuickLinks),
 		GlobalAnnouncement:         jsonGlobalAnnouncementFromDomain(s.GlobalAnnouncement),
 		FooterText:                 s.FooterText,

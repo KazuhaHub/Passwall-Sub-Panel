@@ -233,21 +233,23 @@ type SyncTask struct {
 
 // RuleSet is one rules shard stored in the DB.
 type RuleSet struct {
-	Slug    string
-	Name    string
-	Sort    int
-	Enabled bool
-	Content string // raw YAML rules fragment
+	Slug            string
+	Name            string
+	Sort            int
+	Enabled         bool
+	ProxyGroupOrder []string
+	Content         string // raw YAML rules fragment
 }
 
 // Template is one Clash/Sing-box config template stored under config/templates/.
 type Template struct {
-	Slug       string
-	Name       string
-	ClientType ClientType
-	IsDefault  bool
-	RuleSets   []string
-	Content    string // contains placeholders such as {{ proxies }}, {{ proxy_groups }}, {{ rules_common }}
+	Slug            string
+	Name            string
+	ClientType      ClientType
+	IsDefault       bool
+	RuleSets        []string
+	ProxyGroupOrder []string
+	Content         string // contains placeholders such as {{ proxies }}, {{ proxy_groups }}, {{ rules_common }}
 }
 
 // XUIPanel holds the connection credentials for one 3X-UI panel.

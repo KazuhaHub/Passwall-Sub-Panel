@@ -29,11 +29,12 @@ func NewRuleSetRepo(configDir string) (*RuleSetRepo, error) {
 }
 
 type ruleSetFile struct {
-	Slug    string `yaml:"slug"`
-	Name    string `yaml:"name"`
-	Sort    int    `yaml:"sort"`
-	Enabled bool   `yaml:"enabled"`
-	Content string `yaml:"content"`
+	Slug            string   `yaml:"slug"`
+	Name            string   `yaml:"name"`
+	Sort            int      `yaml:"sort"`
+	Enabled         bool     `yaml:"enabled"`
+	ProxyGroupOrder []string `yaml:"proxy_group_order"`
+	Content         string   `yaml:"content"`
 }
 
 func (r *RuleSetRepo) List(ctx context.Context) ([]*domain.RuleSet, error) {
@@ -66,11 +67,8 @@ func (r *RuleSetRepo) List(ctx context.Context) ([]*domain.RuleSet, error) {
 func (r *RuleSetRepo) GetBySlug(ctx context.Context, slug string) (*domain.RuleSet, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	p := r.pathOf(slug)
-	if _, err := os.Stat(p); err != nil {
-		if os.IsNotExist(err) {
-			return nil, domain.ErrNotFound
-		}
+	p, err := r.pathForSlug(slug)
+	if err != nil {
 		return nil, err
 	}
 	return r.readFile(p)
@@ -83,11 +81,12 @@ func (r *RuleSetRepo) Save(ctx context.Context, rs *domain.RuleSet) error {
 		return fmt.Errorf("%w: rule set slug empty", domain.ErrValidation)
 	}
 	doc := ruleSetFile{
-		Slug:    rs.Slug,
-		Name:    rs.Name,
-		Sort:    rs.Sort,
-		Enabled: rs.Enabled,
-		Content: rs.Content,
+		Slug:            rs.Slug,
+		Name:            rs.Name,
+		Sort:            rs.Sort,
+		Enabled:         rs.Enabled,
+		ProxyGroupOrder: rs.ProxyGroupOrder,
+		Content:         rs.Content,
 	}
 	return writeYAML(r.pathOf(rs.Slug), doc)
 }
@@ -95,11 +94,43 @@ func (r *RuleSetRepo) Save(ctx context.Context, rs *domain.RuleSet) error {
 func (r *RuleSetRepo) Delete(ctx context.Context, slug string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return os.Remove(r.pathOf(slug))
+	p, err := r.pathForSlug(slug)
+	if err != nil {
+		return err
+	}
+	return os.Remove(p)
 }
 
 func (r *RuleSetRepo) pathOf(slug string) string {
 	return filepath.Join(r.dir, slug+".yaml")
+}
+
+func (r *RuleSetRepo) pathForSlug(slug string) (string, error) {
+	p := r.pathOf(slug)
+	if _, err := os.Stat(p); err == nil {
+		return p, nil
+	} else if !os.IsNotExist(err) {
+		return "", err
+	}
+
+	entries, err := os.ReadDir(r.dir)
+	if err != nil {
+		return "", err
+	}
+	for _, e := range entries {
+		if e.IsDir() || filepath.Ext(e.Name()) != ".yaml" {
+			continue
+		}
+		candidate := filepath.Join(r.dir, e.Name())
+		rs, err := r.readFile(candidate)
+		if err != nil {
+			return "", fmt.Errorf("read %s: %w", e.Name(), err)
+		}
+		if rs.Slug == slug {
+			return candidate, nil
+		}
+	}
+	return "", domain.ErrNotFound
 }
 
 func (r *RuleSetRepo) readFile(path string) (*domain.RuleSet, error) {
@@ -112,10 +143,11 @@ func (r *RuleSetRepo) readFile(path string) (*domain.RuleSet, error) {
 		return nil, err
 	}
 	return &domain.RuleSet{
-		Slug:    doc.Slug,
-		Name:    doc.Name,
-		Sort:    doc.Sort,
-		Enabled: doc.Enabled,
-		Content: doc.Content,
+		Slug:            doc.Slug,
+		Name:            doc.Name,
+		Sort:            doc.Sort,
+		Enabled:         doc.Enabled,
+		ProxyGroupOrder: doc.ProxyGroupOrder,
+		Content:         doc.Content,
 	}, nil
 }

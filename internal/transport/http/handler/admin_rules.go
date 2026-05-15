@@ -20,11 +20,12 @@ func NewAdminRuleSetsHandler(repo ports.RuleSetRepo) *AdminRuleSetsHandler {
 }
 
 type ruleSetDTO struct {
-	Slug    string `json:"slug"`
-	Name    string `json:"name"`
-	Sort    int    `json:"sort"`
-	Enabled bool   `json:"enabled"`
-	Content string `json:"content"`
+	Slug            string   `json:"slug"`
+	Name            string   `json:"name"`
+	Sort            int      `json:"sort"`
+	Enabled         bool     `json:"enabled"`
+	ProxyGroupOrder []string `json:"proxy_group_order"`
+	Content         string   `json:"content"`
 }
 
 func (h *AdminRuleSetsHandler) List(c *gin.Context) {
@@ -37,7 +38,9 @@ func (h *AdminRuleSetsHandler) List(c *gin.Context) {
 	for i, r := range items {
 		out[i] = ruleSetDTO{
 			Slug: r.Slug, Name: r.Name, Sort: r.Sort,
-			Enabled: r.Enabled, Content: r.Content,
+			Enabled:         r.Enabled,
+			ProxyGroupOrder: r.ProxyGroupOrder,
+			Content:         r.Content,
 		}
 	}
 	c.JSON(http.StatusOK, gin.H{"items": out})
@@ -56,7 +59,9 @@ func (h *AdminRuleSetsHandler) Get(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, ruleSetDTO{
 		Slug: r.Slug, Name: r.Name, Sort: r.Sort,
-		Enabled: r.Enabled, Content: r.Content,
+		Enabled:         r.Enabled,
+		ProxyGroupOrder: r.ProxyGroupOrder,
+		Content:         r.Content,
 	})
 }
 
@@ -72,7 +77,9 @@ func (h *AdminRuleSetsHandler) Save(c *gin.Context) {
 	}
 	if err := h.repo.Save(c.Request.Context(), &domain.RuleSet{
 		Slug: req.Slug, Name: req.Name, Sort: req.Sort,
-		Enabled: req.Enabled, Content: req.Content,
+		Enabled:         req.Enabled,
+		ProxyGroupOrder: req.ProxyGroupOrder,
+		Content:         req.Content,
 	}); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
