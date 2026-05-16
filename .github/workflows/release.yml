@@ -1,5 +1,19 @@
 name: Release
 
+# Single pipeline that produces both the GitHub Release archives and the
+# ghcr.io multi-arch container image from one set of binaries. The previous
+# split-workflow setup compiled the web bundle three times (release + docker
+# amd64 + docker arm64 under QEMU) and the linux binaries four times. Here:
+#
+#   web         → builds the SPA once
+#   build       → cross-compiles 5 platforms natively in parallel (matrix)
+#   release     → packages tarballs/zips + checksums and publishes the Release
+#   docker      → reuses the linux/amd64 + linux/arm64 binaries to push a
+#                 multi-arch image (no compilation inside the container build)
+#
+# The binary you sha256-verify from the Release is byte-identical to the one
+# baked into the Docker image, because they come from the same artifact.
+
 on:
   push:
     tags:
@@ -13,38 +27,45 @@ on:
 
 permissions:
   contents: write
+  packages: write
 
 jobs:
-  release:
-    name: Build and publish release
+  setup:
+    name: Resolve tag
     runs-on: ubuntu-latest
-
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+      owner_lc: ${{ steps.tag.outputs.owner_lc }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Resolve release tag
-        id: release_tag
+      - name: Resolve tag and owner
+        id: tag
         shell: bash
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "tag=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+            tag="${{ inputs.tag }}"
           else
-            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+            tag="${GITHUB_REF_NAME}"
           fi
+          owner_lc=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          echo "owner_lc=${owner_lc}" >> "$GITHUB_OUTPUT"
+
+  web:
+    name: Build web assets
+    runs-on: ubuntu-latest
+    needs: setup
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: "20"
+          cache: npm
+          cache-dependency-path: web-react/package-lock.json
 
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: "1.26.x"
-          cache-dependency-path: go.mod
-
-      - name: Build web assets
+      - name: Install dependencies
         working-directory: web-react
         run: |
           if [ -f package-lock.json ]; then
@@ -52,51 +73,116 @@ jobs:
           else
             npm install
           fi
-          npm run build
 
-      - name: Download Go modules
-        run: go mod download
+      - name: Build SPA bundle
+        working-directory: web-react
+        # vite.config.ts writes to ../internal/web/dist for //go:embed.
+        run: npm run build
 
-      - name: Build release archives
+      - name: Upload web bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-dist
+          path: internal/web/dist
+          if-no-files-found: error
+          retention-days: 1
+
+  build:
+    name: Build ${{ matrix.goos }}/${{ matrix.goarch }}
+    runs-on: ubuntu-latest
+    needs: [setup, web]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { goos: linux,   goarch: amd64, ext: ""     }
+          - { goos: linux,   goarch: arm64, ext: ""     }
+          - { goos: darwin,  goarch: amd64, ext: ""     }
+          - { goos: darwin,  goarch: arm64, ext: ""     }
+          - { goos: windows, goarch: amd64, ext: ".exe" }
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.x"
+          cache-dependency-path: go.sum
+
+      - name: Download web bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: web-dist
+          path: internal/web/dist
+
+      - name: Build psp
         shell: bash
         env:
-          VERSION: ${{ steps.release_tag.outputs.tag }}
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
         run: |
           set -euo pipefail
+          mkdir -p out
+          go build -trimpath -ldflags="-s -w" -o "out/psp${{ matrix.ext }}" ./cmd/panel
 
-          mkdir -p dist
+      - name: Upload binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: psp-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: out/psp${{ matrix.ext }}
+          if-no-files-found: error
+          retention-days: 1
 
-          targets=(
-            "linux amd64"
-            "linux arm64"
-            "darwin amd64"
-            "darwin arm64"
-            "windows amd64"
-          )
+  release:
+    name: Publish GitHub Release
+    runs-on: ubuntu-latest
+    needs: [setup, build]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
 
-          for target in "${targets[@]}"; do
-            read -r goos goarch <<< "$target"
-            name="passwall-sub-panel_${VERSION}_${goos}_${goarch}"
-            outdir="build/${name}"
-            mkdir -p "$outdir"
+      - name: Download all binaries
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: psp-*
+
+      - name: Package archives
+        shell: bash
+        env:
+          VERSION: ${{ needs.setup.outputs.tag }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist build
+
+          for dir in artifacts/psp-*; do
+            name_part="${dir#artifacts/psp-}"      # e.g. linux-amd64
+            goos="${name_part%-*}"
+            goarch="${name_part##*-}"
+
+            pkgname="passwall-sub-panel_${VERSION}_${goos}_${goarch}"
+            pkgdir="build/${pkgname}"
+            mkdir -p "${pkgdir}/config"
 
             ext=""
-            if [ "$goos" = "windows" ]; then
+            if [ "${goos}" = "windows" ]; then
               ext=".exe"
             fi
 
-            CGO_ENABLED=0 GOOS="$goos" GOARCH="$goarch" go build -trimpath -ldflags="-s -w" -o "${outdir}/psp${ext}" ./cmd/panel
+            cp "${dir}/psp${ext}" "${pkgdir}/psp${ext}"
+            chmod +x "${pkgdir}/psp${ext}" || true
 
-            cp README.md "$outdir/" 2>/dev/null || true
-            cp config/config.yaml.example "$outdir/" 2>/dev/null || true
-            mkdir -p "$outdir/config"
-            cp -R config/templates "$outdir/config/" 2>/dev/null || true
-            cp -R config/rulesets "$outdir/config/" 2>/dev/null || true
+            cp README.md "${pkgdir}/" 2>/dev/null || true
+            cp config/config.yaml.example "${pkgdir}/" 2>/dev/null || true
+            cp -R config/templates "${pkgdir}/config/" 2>/dev/null || true
+            cp -R config/rulesets  "${pkgdir}/config/" 2>/dev/null || true
 
-            if [ "$goos" = "windows" ]; then
-              (cd build && zip -qr "../dist/${name}.zip" "$name")
+            if [ "${goos}" = "windows" ]; then
+              (cd build && zip -qr "../dist/${pkgname}.zip" "${pkgname}")
             else
-              tar -C build -czf "dist/${name}.tar.gz" "$name"
+              tar -C build -czf "dist/${pkgname}.tar.gz" "${pkgname}"
             fi
           done
 
@@ -105,21 +191,20 @@ jobs:
       - name: Generate release body
         shell: bash
         env:
-          VERSION: ${{ steps.release_tag.outputs.tag }}
-          OWNER: ${{ github.repository_owner }}
+          VERSION: ${{ needs.setup.outputs.tag }}
+          OWNER_LC: ${{ needs.setup.outputs.owner_lc }}
         run: |
-          OWNER_LC=$(echo "${OWNER}" | tr '[:upper:]' '[:lower:]')
           cat <<EOF > release_notes.md
           ### Docker image (ghcr.io)
-          
+
           \`\`\`shell
           docker pull ghcr.io/${OWNER_LC}/passwall-sub-panel:latest
           # Or specific version
           docker pull ghcr.io/${OWNER_LC}/passwall-sub-panel:${VERSION}
           \`\`\`
-          
+
           ### Verify
-          
+
           \`\`\`shell
           sha256sum -c SHA256SUMS.txt
           \`\`\`
@@ -128,9 +213,9 @@ jobs:
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.release_tag.outputs.tag }}
+          tag_name: ${{ needs.setup.outputs.tag }}
           target_commitish: ${{ github.sha }}
-          name: ${{ steps.release_tag.outputs.tag }}
+          name: ${{ needs.setup.outputs.tag }}
           generate_release_notes: true
           body_path: release_notes.md
           append_body: true
@@ -138,3 +223,60 @@ jobs:
             dist/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  docker:
+    name: Publish container image
+    runs-on: ubuntu-latest
+    needs: [setup, build]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download linux/amd64 binary
+        uses: actions/download-artifact@v4
+        with:
+          name: psp-linux-amd64
+          path: bin/linux-amd64
+
+      - name: Download linux/arm64 binary
+        uses: actions/download-artifact@v4
+        with:
+          name: psp-linux-arm64
+          path: bin/linux-arm64
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Generate image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ needs.setup.outputs.owner_lc }}/passwall-sub-panel
+          tags: |
+            type=raw,value=${{ needs.setup.outputs.tag }}
+            type=raw,value=latest,enable=${{ startsWith(needs.setup.outputs.tag, 'v') }}
+          labels: |
+            org.opencontainers.image.title=passwall-sub-panel
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ needs.setup.outputs.tag }}
+
+      - name: Build and push multi-arch image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.release
+          # No QEMU emulation needed: Dockerfile.release only COPYs the
+          # pre-built per-arch binary; alpine itself is multi-arch.
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          provenance: false

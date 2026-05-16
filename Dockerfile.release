@@ -1,0 +1,17 @@
+# Runtime-only image consumed by the Release workflow.
+#
+# The `psp` binary is built once per platform in the workflow's `build` job
+# (with the SPA bundle embedded via //go:embed) and downloaded as an artifact
+# before `docker buildx` runs. Each architecture's binary is dropped into
+# bin/linux-<arch>/psp, and the COPY below picks the right one via buildx's
+# automatic TARGETARCH. No Go or Node toolchain runs inside this image, which
+# is why multi-arch builds finish in a minute or two instead of needing QEMU
+# to emulate a full Go + npm pipeline.
+FROM alpine:3.20
+ARG TARGETARCH
+RUN apk add --no-cache ca-certificates tzdata
+WORKDIR /app
+COPY bin/linux-${TARGETARCH}/psp /app/psp
+RUN chmod +x /app/psp && mkdir -p /app/config /app/data
+EXPOSE 8788
+ENTRYPOINT ["/app/psp"]
