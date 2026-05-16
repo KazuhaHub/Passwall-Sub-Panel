@@ -890,6 +890,7 @@
     "title": "服务器（3X-UI）",
     "subtitle": "节点（inbound）关联到服务器。新增节点时从这里的列表选择。",
     "create": "新增服务器",
+    "test_all": "测试全部",
     "edit_title": "编辑 {{name}}",
     "selection_count": "已选 {{count}}",
     "batch_test": "批量测试",

@@ -832,6 +832,7 @@
     "title": "Servers (3X-UI)",
     "subtitle": "Inbounds (nodes) are attached to a server. New nodes pick from this list.",
     "create": "New server",
+    "test_all": "Test all",
     "edit_title": "Edit {{name}}",
     "selection_count": "{{count}} selected",
     "batch_test": "Test selected",

@@ -308,7 +308,16 @@ export default function SyncTasksView() {
         <DialogTitle sx={{ pt: 3 }}>{t('admin:sync_tasks.detail_title')} #{detail && idOf(detail)}</DialogTitle>
         <DialogContent>
           {detail && (
-            <Box component="pre" sx={{ p: 1.5, bgcolor: md.surfaceContainerHighest, borderRadius: 1.5, fontSize: 12, overflow: 'auto', maxHeight: 520, m: 0 }}>
+            <Box component="pre" sx={{
+              p: 2, bgcolor: md.surfaceContainerHighest, borderRadius: 1.5,
+              fontSize: 13, lineHeight: 1.55, color: md.onSurface,
+              // <pre> defaults to the browser's old Courier New on Windows,
+              // which looks cramped and ragged. Stack modern monospaces so we
+              // pick whatever the OS / app actually ships first.
+              fontFamily: `ui-monospace, "SF Mono", "Cascadia Code", "JetBrains Mono", Menlo, Consolas, "Liberation Mono", monospace`,
+              overflow: 'auto', maxHeight: 520, m: 0,
+              tabSize: 2,
+            }}>
               {JSON.stringify(detail, null, 2)}
             </Box>
           )}

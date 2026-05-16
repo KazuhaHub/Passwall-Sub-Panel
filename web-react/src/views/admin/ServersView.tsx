@@ -220,6 +220,20 @@ export default function ServersView() {
     }
   }
 
+  // runTestAll ignores selection and probes every server. Distinguished
+  // from batchRunTest so admins don't have to "select all" first when they
+  // just want a global sanity check.
+  async function runTestAll() {
+    if (!items.length) return
+    setBatchBusy('test')
+    try {
+      await Promise.allSettled(items.map(s => probeServer(s)))
+      pushSnack(t('admin:servers.toast.batch_tested', { count: items.length }), 'success')
+    } finally {
+      setBatchBusy('')
+    }
+  }
+
   async function batchDeleteServers() {
     const rows = items.filter(s => selected.has(s.id))
     if (!rows.length) return
@@ -309,9 +323,20 @@ export default function ServersView() {
           <Typography variant="h4">{t('admin:servers.title')}</Typography>
           <Typography variant="body2" sx={{ mt: 0.5 }}>{t('admin:servers.subtitle')}</Typography>
         </Box>
-        <Button variant="contained" startIcon={<AddIcon />} onClick={openCreate}>
-          {t('admin:servers.create')}
-        </Button>
+        <Box sx={{ display: 'flex', gap: 1 }}>
+          {/* "Test all" runs the connectivity probe across every server
+              without requiring row selection — quick sanity check after a
+              network change or panel update. */}
+          <Button variant="outlined"
+            startIcon={batchBusy === 'test' ? <CircularProgress size={14} /> : <RefreshIcon />}
+            disabled={batchBusy !== '' || items.length === 0}
+            onClick={runTestAll}>
+            {t('admin:servers.test_all', { defaultValue: '测试全部' })}
+          </Button>
+          <Button variant="contained" startIcon={<AddIcon />} onClick={openCreate}>
+            {t('admin:servers.create')}
+          </Button>
+        </Box>
       </Box>
 
       {/* Selection toolbar */}
