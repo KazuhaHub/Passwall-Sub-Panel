@@ -75,6 +75,9 @@ export interface UISettings {
   sub_block_auto_disable: boolean
   sub_block_auto_disable_count: number
   sub_update_interval_hours: number
+  /** When true, prepend the Unicode flag of the node's Region (ISO 3166-1
+   *  alpha-2) to the rendered node name in subscriptions. Off by default. */
+  sub_region_flag_prefix: boolean
   quick_links: QuickLink[]
   global_announcement: GlobalAnnouncement
   footer_text: string

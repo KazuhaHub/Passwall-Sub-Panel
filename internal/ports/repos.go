@@ -271,6 +271,11 @@ type UISettings struct {
 	// SubUpdateIntervalHours is the subscription auto-update interval in hours.
 	// Controls the Profile-Update-Interval header. Default 24.
 	SubUpdateIntervalHours int `yaml:"sub_update_interval_hours" json:"sub_update_interval_hours"`
+	// SubRegionFlagPrefix, when true, prepends the Unicode flag for a node's
+	// Region (ISO 3166-1 alpha-2 code) to the rendered node name. Off by
+	// default to avoid double-flagging existing display names that already
+	// embed a flag manually.
+	SubRegionFlagPrefix bool `yaml:"sub_region_flag_prefix" json:"sub_region_flag_prefix"`
 	// SubImportClients defines user-facing one-click subscription import targets.
 	SubImportClients []SubImportClient `yaml:"sub_import_clients" json:"sub_import_clients"`
 	// SubImportTutorialURL is an optional documentation/tutorial link shown

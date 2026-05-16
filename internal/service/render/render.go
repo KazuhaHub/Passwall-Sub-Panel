@@ -70,6 +70,12 @@ func (s *Service) RenderForUser(ctx context.Context, u *domain.User, ct domain.C
 	}
 
 	items := applyLayout(nodes, g.Layout)
+	// Region-flag prefix is a render-time knob from UISettings. We load the
+	// settings once here for the flag toggle; downstream callers do their
+	// own Load when they need other fields.
+	if st, err := s.repos.Settings.Load(ctx, ports.UISettings{}); err == nil && st.SubRegionFlagPrefix {
+		applyRegionFlagPrefix(items)
+	}
 	proxies := s.buildProxies(ctx, u, items)
 
 	proxiesYAML, err := yaml.Marshal(proxies)
@@ -202,7 +208,7 @@ func (s *Service) buildProxies(ctx context.Context, u *domain.User, items []rend
 			continue
 		}
 		userEmail := u.ClientEmail(it.node.ID, emailRules)
-		block, err := emitProxy(it.node.DisplayName, it.node, u, inb, userEmail)
+		block, err := emitProxy(it.name, it.node, u, inb, userEmail)
 		if err != nil {
 			log.Warn("render: skip node, emit failed", "node_id", it.node.ID, "err", err)
 			continue

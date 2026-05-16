@@ -484,6 +484,7 @@ type uiSettingsRow struct {
 	SubBlockAutoDisable      bool                   `gorm:"default:false"`
 	SubBlockAutoDisableCount int                    `gorm:"default:3"`
 	SubUpdateIntervalHours   int                    `gorm:"default:24"`
+	SubRegionFlagPrefix      bool                   `gorm:"default:false"`
 	QuickLinks               jsonQuickLinks         `gorm:"type:json"`
 	GlobalAnnouncement       jsonGlobalAnnouncement `gorm:"type:json"`
 	FooterText               string                 `gorm:"size:255"`

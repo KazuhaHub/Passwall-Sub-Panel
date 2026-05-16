@@ -57,6 +57,7 @@ type settingsDTO struct {
 	SubBlockAutoDisable        bool                     `json:"sub_block_auto_disable"`
 	SubBlockAutoDisableCount   int                      `json:"sub_block_auto_disable_count"`
 	SubUpdateIntervalHours     int                      `json:"sub_update_interval_hours"`
+	SubRegionFlagPrefix        bool                     `json:"sub_region_flag_prefix"`
 	QuickLinks                 []ports.QuickLink        `json:"quick_links"`
 	GlobalAnnouncement         ports.GlobalAnnouncement `json:"global_announcement"`
 	FooterText                 string                   `json:"footer_text"`
@@ -116,6 +117,7 @@ func (h *AdminSettingsHandler) Get(c *gin.Context) {
 		SubBlockAutoDisable:        s.SubBlockAutoDisable,
 		SubBlockAutoDisableCount:   s.SubBlockAutoDisableCount,
 		SubUpdateIntervalHours:     s.SubUpdateIntervalHours,
+		SubRegionFlagPrefix:        s.SubRegionFlagPrefix,
 		QuickLinks:                 s.QuickLinks,
 		GlobalAnnouncement:         s.GlobalAnnouncement,
 		FooterText:                 s.FooterText,
@@ -176,6 +178,7 @@ func (h *AdminSettingsHandler) Put(c *gin.Context) {
 		SubBlockAutoDisable:        req.SubBlockAutoDisable,
 		SubBlockAutoDisableCount:   req.SubBlockAutoDisableCount,
 		SubUpdateIntervalHours:     req.SubUpdateIntervalHours,
+		SubRegionFlagPrefix:        req.SubRegionFlagPrefix,
 		QuickLinks:                 normalizeQuickLinks(req.QuickLinks),
 		GlobalAnnouncement:         normalizeGlobalAnnouncement(req.GlobalAnnouncement, prev.GlobalAnnouncement),
 		FooterText:                 strings.TrimSpace(req.FooterText),
@@ -255,6 +258,7 @@ func (h *AdminSettingsHandler) Put(c *gin.Context) {
 		SubBlockAutoDisable:        s.SubBlockAutoDisable,
 		SubBlockAutoDisableCount:   s.SubBlockAutoDisableCount,
 		SubUpdateIntervalHours:     s.SubUpdateIntervalHours,
+		SubRegionFlagPrefix:        s.SubRegionFlagPrefix,
 		QuickLinks:                 s.QuickLinks,
 		GlobalAnnouncement:         s.GlobalAnnouncement,
 		FooterText:                 s.FooterText,

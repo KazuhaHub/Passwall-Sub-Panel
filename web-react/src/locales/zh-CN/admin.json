@@ -285,6 +285,8 @@
       "sub_import_tutorial_url": "导入教程链接（用户门户「查看教程」按钮指向；留空时按钮隐藏）",
       "sub_log_retention_days": "订阅日志保留（天）",
       "sub_update_interval_hours": "订阅自动刷新提示间隔（小时）",
+      "sub_region_flag_prefix": "节点名自动加地区国旗",
+      "sub_region_flag_prefix_hint": "开启后渲染订阅时会根据节点的 Region 字段（ISO 双字母码）在节点名前自动加国旗 emoji。如果你已经在 DisplayName 里手动加了旗子，开了会重复，请先清理。",
       "sub_block_auto_disable": "异常订阅请求自动禁用账号",
       "sub_block_auto_disable_count": "触发禁用的连续异常次数",
       "rule_table": {

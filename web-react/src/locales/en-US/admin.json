@@ -285,6 +285,8 @@
       "sub_import_tutorial_url": "Import tutorial URL (powers the 'View tutorial' button on the user portal; hidden when blank)",
       "sub_log_retention_days": "Subscription log retention (days)",
       "sub_update_interval_hours": "Subscription auto-refresh interval hint (hours)",
+      "sub_region_flag_prefix": "Prefix node names with the region's flag",
+      "sub_region_flag_prefix_hint": "When enabled, the subscription renderer prepends the Unicode flag of each node's Region (ISO 3166-1 alpha-2 code) to the node name. If you already type a flag manually in DisplayName, enabling this will double-flag — strip the manual ones first.",
       "sub_block_auto_disable": "Auto-disable account on abusive subscription requests",
       "sub_block_auto_disable_count": "Consecutive failures before auto-disable",
       "rule_table": {

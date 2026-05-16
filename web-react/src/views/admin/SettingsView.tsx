@@ -451,6 +451,14 @@ export default function SettingsView() {
                 value={settings.sub_update_interval_hours}
                 onChange={v => patch('sub_update_interval_hours', v)} />
             </Pair>
+            <FormControlLabel
+              label={t('settings.subscription.sub_region_flag_prefix')}
+              control={<Switch checked={settings.sub_region_flag_prefix}
+                onChange={(_, c) => patch('sub_region_flag_prefix', c)} />}
+              sx={{ ml: 0, '& .MuiFormControlLabel-label': { ml: 1.5 } }} />
+            <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant, mt: -1 }}>
+              {t('settings.subscription.sub_region_flag_prefix_hint')}
+            </Typography>
           </Section>
 
           <Section title={t('settings.subscription.section_protection')} md={md}>
