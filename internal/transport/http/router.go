@@ -63,6 +63,11 @@ func NewRouter(d Deps) *gin.Engine {
 		panic("invalid PSP_TRUSTED_PROXIES: " + err.Error())
 	}
 	g.Use(gin.Logger(), gin.Recovery())
+	// Audit middleware lives at the engine level so it covers admin
+	// endpoints AND the login attempt AND user self-service writes. The
+	// path/method filter inside the middleware short-circuits cheaply for
+	// everything else (static assets, sub fetches, health probes).
+	g.Use(middleware.AuditWrites(d.Audit))
 
 	// Public endpoints
 	g.GET("/health", handler.Health)
@@ -119,7 +124,8 @@ func NewRouter(d Deps) *gin.Engine {
 		middleware.RequireAuth(d.Auth, d.User),
 		middleware.RequireRole(domain.RoleAdmin),
 	)
-	adminGroup.Use(middleware.AdminAudit(d.Audit))
+	// AuditWrites is attached at the engine level above; no per-group
+	// middleware needed here.
 	{
 		users := handler.NewAdminUserHandler(d.User, d.Repos.Settings, d.Mail)
 		adminGroup.GET("/users", users.List)

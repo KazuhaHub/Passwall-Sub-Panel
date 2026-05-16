@@ -15,23 +15,30 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/audit"
 )
 
-func AdminAudit(auditSvc *audit.Service) gin.HandlerFunc {
+// AuditWrites records every write request (POST/PUT/PATCH/DELETE) that lands
+// on an audited path. Attached at the engine level so it covers admin
+// endpoints AND user-side self-service AND the local login endpoint —
+// shouldAuditPath is the gate.
+//
+// Path filter runs BEFORE the request body is read, so static asset / sub
+// fetch / health probe traffic doesn't pay the io.ReadAll cost.
+func AuditWrites(auditSvc *audit.Service) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		if auditSvc == nil || !shouldAuditPath(c.Request.URL.Path, c.Request.Method) {
+			c.Next()
+			return
+		}
 		start := time.Now()
 		reqBody := captureRequestBody(c)
 		c.Next()
-		if auditSvc == nil || !shouldAudit(c) {
-			return
-		}
-		claims := ClaimsFrom(c)
-		actor := "admin"
-		if claims != nil && claims.UPN != "" {
-			actor = claims.UPN
-		}
 		path := c.FullPath()
 		if path == "" {
 			path = c.Request.URL.Path
 		}
+		// Login attempts arrive before claims are set; pull the upn from
+		// the (redacted) request body so failed-login rows still name the
+		// attempting account. Other paths use JWT claims as usual.
+		actor := resolveAuditActor(c, path, reqBody)
 		request := map[string]any{
 			"method": c.Request.Method,
 			"path":   c.Request.URL.Path,
@@ -64,17 +71,49 @@ func AdminAudit(auditSvc *audit.Service) gin.HandlerFunc {
 	}
 }
 
-func shouldAudit(c *gin.Context) bool {
-	switch c.Request.Method {
+// shouldAuditPath decides — purely from the URL path + HTTP method, without
+// needing a matched route — whether this request should be audited. Kept as
+// a pure function so it can be unit-tested without standing up gin.
+func shouldAuditPath(path, method string) bool {
+	switch method {
 	case http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete:
 	default:
 		return false
 	}
-	path := c.FullPath()
-	if path == "" {
-		path = c.Request.URL.Path
+	switch {
+	case strings.HasPrefix(path, "/api/admin/"):
+		// Every admin write (settings, users, nodes, …) was already
+		// covered by the previous AdminAudit version; preserve that.
+		return true
+	case path == "/api/auth/local/login":
+		// Login attempts (success AND failure) — security log.
+		return true
+	case strings.HasPrefix(path, "/api/user/me"):
+		// User self-service writes: password change, sub-token reset,
+		// personal rules edit, emergency-access request.
+		return true
 	}
-	return strings.HasPrefix(path, "/api/admin/")
+	return false
+}
+
+// resolveAuditActor picks the best identity string for the audit entry.
+//   - JWT claims (set by RequireAuth) win when present.
+//   - For local login specifically we fall back to the upn the user typed,
+//     so failed-login rows still tell the admin which account was being
+//     targeted.
+//   - Otherwise "anonymous" — better than the previous "admin" default.
+func resolveAuditActor(c *gin.Context, path string, body any) string {
+	if claims := ClaimsFrom(c); claims != nil && claims.UPN != "" {
+		return claims.UPN
+	}
+	if path == "/api/auth/local/login" {
+		if m, ok := body.(map[string]any); ok {
+			if v, ok := m["upn"].(string); ok && v != "" {
+				return v
+			}
+		}
+	}
+	return "anonymous"
 }
 
 func captureRequestBody(c *gin.Context) any {
