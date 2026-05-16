@@ -32,13 +32,26 @@ type NodeSelector interface {
 // Defined here (not imported) so the user package never imports sync.
 type ClientSyncer interface {
 	AddClientToInbound(ctx context.Context, userID int64, panelID int64, inboundID int,
-		protocol domain.Protocol, userUUID, email, flow string, expireTime int64) error
+		protocol domain.Protocol, userUUID, email, flow string, expireTime, totalGB int64) error
 	DelOwnedClient(ctx context.Context, panelID int64, inboundID int, email string) error
 	SetOwnedClientEnable(ctx context.Context, panelID int64, inboundID int, email string,
-		protocol domain.Protocol, userUUID, flow string, enable bool, expireTime int64) error
+		protocol domain.Protocol, userUUID, flow string, enable bool, expireTime, totalGB int64) error
 	DelAllOwnedForUser(ctx context.Context, userID int64) error
 	RotateClientUUID(ctx context.Context, panelID int64, inboundID int, email string,
-		protocol domain.Protocol, oldUUID, newUUID, flow string, enable bool, expireTime int64) error
+		protocol domain.Protocol, oldUUID, newUUID, flow string, enable bool, expireTime, totalGB int64) error
+}
+
+// TrafficUsageReader yields the bytes a user has consumed in their current
+// traffic period. user.Service needs this to compute the per-client floor
+// it pushes into 3X-UI (TrafficFloorBytes = limit - period_used). Defined
+// as an interface so user doesn't have to import traffic — the actual
+// implementation lives in traffic.Service and is wired late in app.Build.
+//
+// nil-safe: when the reader is nil (early-start path), trafficFloor returns
+// 0 (= unlimited on the 3X-UI side) — equivalent to the historical
+// behaviour before the floor was added.
+type TrafficUsageReader interface {
+	CurrentPeriodUsage(ctx context.Context, u *domain.User) (int64, error)
 }
 
 type Service struct {
@@ -50,6 +63,10 @@ type Service struct {
 	syncer    ClientSyncer
 	pool      ports.XUIPool
 	settings  ports.SettingsRepo
+	// trafficUsage is set lazily via SetTrafficUsage after traffic.Service
+	// is constructed (traffic depends on user, so user must exist first).
+	// May be nil during early-start; trafficFloor degrades to 0 in that case.
+	trafficUsage TrafficUsageReader
 
 	emergencyMu sync.Mutex
 }
@@ -68,6 +85,33 @@ func New(users ports.UserRepo, groups ports.GroupRepo, ownership ports.Ownership
 		pool:      pool,
 		settings:  settings,
 	}
+}
+
+// SetTrafficUsage wires the late-bound traffic-usage reader. traffic.Service
+// implements TrafficUsageReader but is constructed after user.Service (it
+// takes user.Service as its disabler), so we can't pass it through New().
+// Calling SetTrafficUsage with nil disables floor computation, keeping the
+// 3X-UI side at "unlimited" on every push (the historical behaviour).
+func (s *Service) SetTrafficUsage(r TrafficUsageReader) {
+	s.trafficUsage = r
+}
+
+// trafficFloor returns the bytes value to push into 3X-UI's per-client
+// totalGB for u. 0 means "no cap on 3X-UI side" — used for unlimited
+// users, when the reader isn't wired, or on any error reading usage. Any
+// failure here MUST degrade gracefully: a poll-time hiccup must not stop
+// the rest of pushClientConfigToAll.
+func (s *Service) trafficFloor(ctx context.Context, u *domain.User) int64 {
+	if u == nil || u.TrafficLimitBytes <= 0 || s.trafficUsage == nil {
+		return 0
+	}
+	used, err := s.trafficUsage.CurrentPeriodUsage(ctx, u)
+	if err != nil {
+		log.Warn("traffic floor: usage read failed, defaulting to unlimited",
+			"user_id", u.ID, "err", err)
+		return 0
+	}
+	return TrafficFloorBytes(u.TrafficLimitBytes, used)
 }
 
 // emailRules loads the runtime-configurable email domain. Falls back to
@@ -443,6 +487,10 @@ func (s *Service) ResetCredentialsAndSync(ctx context.Context, userID int64) (*R
 	if u.ExpireAt != nil {
 		expireTime = u.ExpireAt.UnixMilli()
 	}
+	// Compute the floor once; reuse for every client we push so a slow
+	// CurrentPeriodUsage doesn't blow up to N round-trips against the
+	// snapshots table.
+	floor := s.trafficFloor(ctx, u)
 	needsRetry := false
 	for _, e := range entries {
 		info, err := s.inspectInboundByPanel(ctx, e.PanelID, e.InboundID)
@@ -454,7 +502,7 @@ func (s *Service) ResetCredentialsAndSync(ctx context.Context, userID int64) (*R
 			continue
 		}
 		if err := s.syncer.RotateClientUUID(ctx, e.PanelID, e.InboundID, e.ClientEmail,
-			info.protocol, oldUUID, newUUID, info.flow, u.Enabled, expireTime); err != nil {
+			info.protocol, oldUUID, newUUID, info.flow, u.Enabled, expireTime, floor); err != nil {
 			needsRetry = true
 		}
 	}
@@ -613,6 +661,7 @@ func (s *Service) CreateLocalAndSync(ctx context.Context, in CreateLocalInput) (
 	}
 
 	rules := s.emailRules(ctx)
+	floor := s.trafficFloor(ctx, u)
 	synced := 0
 	needsRetry := false
 	for _, n := range nodes {
@@ -630,7 +679,7 @@ func (s *Service) CreateLocalAndSync(ctx context.Context, in CreateLocalInput) (
 			expireTime = u.ExpireAt.UnixMilli()
 		}
 		if err := s.syncer.AddClientToInbound(ctx, u.ID, n.PanelID, n.InboundID,
-			info.protocol, u.UUID, email, info.flow, expireTime); err != nil {
+			info.protocol, u.UUID, email, info.flow, expireTime, floor); err != nil {
 			needsRetry = true
 			continue
 		}
@@ -1056,6 +1105,7 @@ func (s *Service) ResyncMembership(ctx context.Context, userID int64) error {
 	}
 
 	rules := s.emailRules(ctx)
+	floor := s.trafficFloor(ctx, u)
 	var firstErr error
 
 	// ADD: desired but not currently owned
@@ -1079,7 +1129,7 @@ func (s *Service) ResyncMembership(ctx context.Context, userID int64) error {
 			expireTime = u.ExpireAt.UnixMilli()
 		}
 		if err := s.syncer.AddClientToInbound(ctx, u.ID, k.panelID, k.inboundID,
-			info.protocol, u.UUID, email, info.flow, expireTime); err != nil {
+			info.protocol, u.UUID, email, info.flow, expireTime, floor); err != nil {
 			if firstErr == nil {
 				firstErr = fmt.Errorf("add to %d/%d: %w", k.panelID, k.inboundID, err)
 			}
@@ -1109,7 +1159,7 @@ func (s *Service) ResyncMembership(ctx context.Context, userID int64) error {
 			expireTime = u.ExpireAt.UnixMilli()
 		}
 		if err := s.syncer.SetOwnedClientEnable(ctx, e.PanelID, e.InboundID, e.ClientEmail,
-			info.protocol, u.UUID, info.flow, u.Enabled, expireTime); err != nil {
+			info.protocol, u.UUID, info.flow, u.Enabled, expireTime, floor); err != nil {
 			if firstErr == nil {
 				firstErr = fmt.Errorf("update %d/%d: %w", k.panelID, k.inboundID, err)
 			}
@@ -1157,8 +1207,23 @@ func (s *Service) SetEnabledAndSync(ctx context.Context, userID int64, enabled b
 	return nil
 }
 
-// pushClientConfigToAll iterates through all owned clients of the user and pushes
-// their Enable flag and ExpireAt to 3X-UI.
+// PushClientConfig is the public entry the traffic poll worker calls after
+// each successful snapshot to refresh the per-client traffic floor in
+// 3X-UI. Thin wrapper around pushClientConfigToAll so the worker doesn't
+// need access to the internal helper.
+func (s *Service) PushClientConfig(ctx context.Context, userID int64) error {
+	u, err := s.users.GetByID(ctx, userID)
+	if err != nil {
+		return err
+	}
+	return s.pushClientConfigToAll(ctx, u)
+}
+
+// pushClientConfigToAll iterates through all owned clients of the user and
+// pushes Enable + ExpireAt + the per-client traffic floor to 3X-UI. The
+// floor is the safety-net cap (limit - period_used) that lets 3X-UI cut
+// off the client when the panel is offline. Computed once per call since
+// it depends on a snapshot read that can be slow on large traffic tables.
 func (s *Service) pushClientConfigToAll(ctx context.Context, u *domain.User) error {
 	entries, err := s.ownership.ListByUser(ctx, u.ID)
 	if err != nil {
@@ -1168,6 +1233,7 @@ func (s *Service) pushClientConfigToAll(ctx context.Context, u *domain.User) err
 	if u.ExpireAt != nil {
 		expireTime = u.ExpireAt.UnixMilli()
 	}
+	floor := s.trafficFloor(ctx, u)
 	var firstErr error
 	for _, e := range entries {
 		info, err := s.inspectInboundByPanel(ctx, e.PanelID, e.InboundID)
@@ -1195,7 +1261,7 @@ func (s *Service) pushClientConfigToAll(ctx context.Context, u *domain.User) err
 			continue
 		}
 		if err := s.syncer.SetOwnedClientEnable(ctx, e.PanelID, e.InboundID, e.ClientEmail,
-			info.protocol, u.UUID, info.flow, u.Enabled, expireTime); err != nil && firstErr == nil {
+			info.protocol, u.UUID, info.flow, u.Enabled, expireTime, floor); err != nil && firstErr == nil {
 			firstErr = fmt.Errorf("push config %d/%d/%s: %w", e.PanelID, e.InboundID, e.ClientEmail, err)
 		}
 	}
@@ -1341,6 +1407,7 @@ func (s *Service) ResetUUIDAndSync(ctx context.Context, userID int64) (string, e
 	if u.ExpireAt != nil {
 		expireTime = u.ExpireAt.UnixMilli()
 	}
+	floor := s.trafficFloor(ctx, u)
 	needsRetry := false
 	for _, e := range entries {
 		info, err := s.inspectInboundByPanel(ctx, e.PanelID, e.InboundID)
@@ -1352,7 +1419,7 @@ func (s *Service) ResetUUIDAndSync(ctx context.Context, userID int64) (string, e
 			continue
 		}
 		if err := s.syncer.RotateClientUUID(ctx, e.PanelID, e.InboundID, e.ClientEmail,
-			info.protocol, oldUUID, newUUID, info.flow, u.Enabled, expireTime); err != nil {
+			info.protocol, oldUUID, newUUID, info.flow, u.Enabled, expireTime, floor); err != nil {
 			needsRetry = true
 		}
 	}

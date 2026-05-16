@@ -31,13 +31,19 @@ const (
 )
 
 // ClientSyncer is the narrow subset of sync.Service this package needs.
+// totalGB in all signatures is the per-client traffic floor (0 = unlimited).
+// reconcile only fixes drift; passing 0 here keeps the existing floor
+// intact only when 3X-UI hasn't been touched, but if reconcile rewrites a
+// client (recovery, rotation), it'll briefly drop to unlimited until the
+// next poll. Acceptable for a drift-healing path — reconcile runs every
+// 15 min; the traffic poll runs every 5 min and resets the floor.
 type ClientSyncer interface {
 	AddClientToInbound(ctx context.Context, userID int64, panelID int64, inboundID int,
-		protocol domain.Protocol, userUUID, email, flow string, expireTime int64) error
+		protocol domain.Protocol, userUUID, email, flow string, expireTime, totalGB int64) error
 	SetOwnedClientEnable(ctx context.Context, panelID int64, inboundID int, email string,
-		protocol domain.Protocol, userUUID, flow string, enable bool, expireTime int64) error
+		protocol domain.Protocol, userUUID, flow string, enable bool, expireTime, totalGB int64) error
 	RotateClientUUID(ctx context.Context, panelID int64, inboundID int, email string,
-		protocol domain.Protocol, oldUUID, newUUID, flow string, enable bool, expireTime int64) error
+		protocol domain.Protocol, oldUUID, newUUID, flow string, enable bool, expireTime, totalGB int64) error
 }
 
 type Service struct {
@@ -220,7 +226,9 @@ func (s *Service) checkMissingOwnerships(ctx context.Context, u *domain.User, re
 		// find if it already exists in 3x-ui to avoid blind overwrite (though AddClient handles duplicates in xui wrapper)
 		flow := n.Flow
 
-		err = s.syncer.AddClientToInbound(ctx, u.ID, n.PanelID, n.InboundID, protocol, u.UUID, email, flow, expireTime)
+		// Pass totalGB=0 (= 3X-UI unlimited). The next traffic-poll cycle
+		// re-pushes the proper floor; reconcile only heals drift.
+		err = s.syncer.AddClientToInbound(ctx, u.ID, n.PanelID, n.InboundID, protocol, u.UUID, email, flow, expireTime, 0)
 
 		fixed := err == nil
 		report.Issues = append(report.Issues, Issue{
@@ -294,7 +302,7 @@ func (s *Service) checkOne(ctx context.Context, u *domain.User, e *domain.XUICli
 	// Check 1: existence
 	if found == nil {
 		if err := s.syncer.AddClientToInbound(ctx, u.ID, e.PanelID, e.InboundID,
-			protocol, u.UUID, e.ClientEmail, desiredFlow, expireTime); err != nil {
+			protocol, u.UUID, e.ClientEmail, desiredFlow, expireTime, 0); err != nil {
 			return &Issue{
 				PanelID:   e.PanelID,
 				PanelName: e.PanelName, InboundID: e.InboundID, ClientEmail: e.ClientEmail,
@@ -311,7 +319,7 @@ func (s *Service) checkOne(ctx context.Context, u *domain.User, e *domain.XUICli
 	// Check 3: enable mismatch
 	if found.IsEnabled() != u.Enabled {
 		if err := s.syncer.SetOwnedClientEnable(ctx, e.PanelID, e.InboundID, e.ClientEmail,
-			protocol, u.UUID, desiredFlow, u.Enabled, expireTime); err != nil {
+			protocol, u.UUID, desiredFlow, u.Enabled, expireTime, 0); err != nil {
 			return &Issue{
 				PanelID:   e.PanelID,
 				PanelName: e.PanelName, InboundID: e.InboundID, ClientEmail: e.ClientEmail,
@@ -327,7 +335,7 @@ func (s *Service) checkOne(ctx context.Context, u *domain.User, e *domain.XUICli
 
 	if protocol == domain.ProtoVLESS && n != nil && n.Flow != "" && found.Flow != n.Flow {
 		if err := s.syncer.SetOwnedClientEnable(ctx, e.PanelID, e.InboundID, e.ClientEmail,
-			protocol, u.UUID, desiredFlow, u.Enabled, expireTime); err != nil {
+			protocol, u.UUID, desiredFlow, u.Enabled, expireTime, 0); err != nil {
 			return &Issue{
 				PanelID:   e.PanelID,
 				PanelName: e.PanelName, InboundID: e.InboundID, ClientEmail: e.ClientEmail,
@@ -349,7 +357,7 @@ func (s *Service) checkOne(ctx context.Context, u *domain.User, e *domain.XUICli
 	// the 3X-UI updateClient path key, so we pass found.ID explicitly.
 	if (protocol == domain.ProtoVLESS || protocol == domain.ProtoVMess) && found.ID != u.UUID {
 		if err := s.syncer.RotateClientUUID(ctx, e.PanelID, e.InboundID, e.ClientEmail,
-			protocol, found.ID, u.UUID, desiredFlow, u.Enabled, expireTime); err != nil {
+			protocol, found.ID, u.UUID, desiredFlow, u.Enabled, expireTime, 0); err != nil {
 			return &Issue{
 				PanelID:   e.PanelID,
 				PanelName: e.PanelName, InboundID: e.InboundID, ClientEmail: e.ClientEmail,
@@ -368,7 +376,7 @@ func (s *Service) checkOne(ctx context.Context, u *domain.User, e *domain.XUICli
 		expected := crypto.DeriveProxyPassword(u.UUID, protocol)
 		if found.Password != expected {
 			if err := s.syncer.SetOwnedClientEnable(ctx, e.PanelID, e.InboundID, e.ClientEmail,
-				protocol, u.UUID, desiredFlow, u.Enabled, expireTime); err != nil {
+				protocol, u.UUID, desiredFlow, u.Enabled, expireTime, 0); err != nil {
 				return &Issue{
 					PanelID:   e.PanelID,
 					PanelName: e.PanelName, InboundID: e.InboundID, ClientEmail: e.ClientEmail,
@@ -386,7 +394,7 @@ func (s *Service) checkOne(ctx context.Context, u *domain.User, e *domain.XUICli
 	// Check 5: mismatch on TotalGB or ExpiryTime on a panel-managed client
 	if found.TotalGB > 0 || found.ExpiryTime != expireTime {
 		if err := s.syncer.SetOwnedClientEnable(ctx, e.PanelID, e.InboundID, e.ClientEmail,
-			protocol, u.UUID, desiredFlow, u.Enabled, expireTime); err != nil {
+			protocol, u.UUID, desiredFlow, u.Enabled, expireTime, 0); err != nil {
 			return &Issue{
 				PanelID:   e.PanelID,
 				PanelName: e.PanelName, InboundID: e.InboundID, ClientEmail: e.ClientEmail,

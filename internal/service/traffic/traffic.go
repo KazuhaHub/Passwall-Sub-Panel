@@ -20,6 +20,14 @@ type UserDisabler interface {
 	SetEnabledAndSync(ctx context.Context, userID int64, enabled bool, reason domain.AutoDisabledReason, detail string) error
 }
 
+// UserConfigPusher refreshes a user's full 3X-UI client config (enable +
+// expiry + traffic floor). The traffic poll calls this after each successful
+// snapshot so the panel-managed remaining-bytes cap propagates into
+// 3X-UI on every cycle — the safety net for prolonged panel outages.
+type UserConfigPusher interface {
+	PushClientConfig(ctx context.Context, userID int64) error
+}
+
 type Service struct {
 	users       ports.UserRepo
 	ownership   ports.OwnershipRepo
@@ -32,6 +40,36 @@ type Service struct {
 	// poll can end an emergency window early when the per-window cap is hit.
 	// Nil-tolerant: when absent, emergency access is uncapped (legacy behavior).
 	settings ports.SettingsRepo
+	// configPusher is wired lazily (user.Service is the implementor and
+	// is created before traffic.Service). nil = skip floor refresh on poll.
+	configPusher UserConfigPusher
+}
+
+// SetConfigPusher wires the late-bound config pusher. Same late-binding
+// pattern as user.Service.SetTrafficUsage — needed because both services
+// have methods that reference each other.
+func (s *Service) SetConfigPusher(p UserConfigPusher) {
+	s.configPusher = p
+}
+
+// CurrentPeriodUsage returns the bytes u has consumed since the start of
+// their current traffic period. Used by user.Service to compute the per-
+// client traffic floor it pushes into 3X-UI.
+//
+// Wraps the existing periodUsage helper but loads the latest snapshot
+// itself so callers don't need to thread one in.
+func (s *Service) CurrentPeriodUsage(ctx context.Context, u *domain.User) (int64, error) {
+	if u == nil {
+		return 0, nil
+	}
+	latest, err := s.traffic.LatestForUser(ctx, u.ID)
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) || latest == nil {
+			return 0, nil
+		}
+		return 0, err
+	}
+	return s.periodUsage(ctx, u, latest)
 }
 
 type inboundKey struct {
@@ -454,6 +492,16 @@ func (s *Service) recordAndEnforce(ctx context.Context, u *domain.User, totals t
 		}
 		log.Info("auto-disabled user (traffic exceeded)",
 			"user_id", u.ID, "period_used", periodUsed, "limit", u.TrafficLimitBytes)
+		return nil
+	}
+	// Safety net: push the remaining-bytes floor into 3X-UI so the inbound
+	// itself cuts the client off if the panel is offline long enough for
+	// the user to exceed their cap between polls. Best-effort: a failed
+	// push is logged but does not stop the poll cycle for other users.
+	if s.configPusher != nil {
+		if err := s.configPusher.PushClientConfig(ctx, u.ID); err != nil {
+			log.Warn("traffic floor push failed", "user_id", u.ID, "err", err)
+		}
 	}
 	return nil
 }

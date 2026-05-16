@@ -39,8 +39,12 @@ type InboundCleaner interface {
 // ClientSyncer is the narrow subset of sync.Service used when syncing users
 // onto a newly registered node.
 type ClientSyncer interface {
+	// totalGB is the per-client traffic floor for 3X-UI (0 = unlimited).
+	// node.Service doesn't have a TrafficUsageReader to compute the real
+	// floor, so callers pass 0; the next traffic-poll cycle's
+	// pushClientConfigToAll will set the correct value.
 	AddClientToInbound(ctx context.Context, userID int64, panelID int64, inboundID int,
-		protocol domain.Protocol, userUUID, email, flow string, expireTime int64) error
+		protocol domain.Protocol, userUUID, email, flow string, expireTime, totalGB int64) error
 }
 
 type Service struct {
@@ -510,8 +514,12 @@ func (s *Service) syncExistingUsersToNode(ctx context.Context, n *domain.Node) e
 			if u.ExpireAt != nil {
 				expireTime = u.ExpireAt.UnixMilli()
 			}
+			// floor 0 = unlimited on 3X-UI side; the next traffic-poll
+			// cycle's pushClientConfigToAll will set the real floor (~5 min
+			// after node creation). Adding TrafficUsageReader to node.Service
+			// would invert the dependency graph for marginal benefit.
 			if err := s.syncer.AddClientToInbound(ctx, u.ID, n.PanelID, n.InboundID,
-				info.protocol, u.UUID, email, info.flow, expireTime); err != nil {
+				info.protocol, u.UUID, email, info.flow, expireTime, 0); err != nil {
 				log.Warn("new-node sync add client",
 					"user_id", u.ID, "node_id", n.ID, "err", err)
 				continue

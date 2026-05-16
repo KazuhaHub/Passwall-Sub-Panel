@@ -85,13 +85,13 @@ func (s *Service) EnsureInboundDeletable(ctx context.Context, panelID int64, inb
 // missing in 3X-UI but ownership still claims it, and re-creates the
 // 3X-UI side while leaving the panel-side bookkeeping in place.
 func (s *Service) AddClientToInbound(ctx context.Context, userID int64, panelID int64,
-	inboundID int, protocol domain.Protocol, userUUID, email, flow string, expireTime int64) error {
+	inboundID int, protocol domain.Protocol, userUUID, email, flow string, expireTime, totalGB int64) error {
 
 	c, err := s.pool.Get(panelID)
 	if err != nil {
 		return err
 	}
-	spec := buildClientSpec(protocol, userUUID, email, flow, expireTime)
+	spec := buildClientSpec(protocol, userUUID, email, flow, expireTime, totalGB)
 	if err := c.AddClient(ctx, inboundID, spec); err != nil {
 		return fmt.Errorf("xui addClient: %w", err)
 	}
@@ -128,7 +128,7 @@ func (s *Service) AddClientToInbound(ctx context.Context, userID int64, panelID 
 // UpdateOwnedClient updates fields of a client that the panel already owns.
 // Returns ErrClientNotOwnedByPanel if the guard rejects the call.
 func (s *Service) UpdateOwnedClient(ctx context.Context, panelID int64, inboundID int,
-	email string, protocol domain.Protocol, userUUID, flow string, enable bool, expireTime int64) error {
+	email string, protocol domain.Protocol, userUUID, flow string, enable bool, expireTime, totalGB int64) error {
 
 	if err := s.ensureClientOwned(ctx, panelID, inboundID, email); err != nil {
 		return err
@@ -137,7 +137,7 @@ func (s *Service) UpdateOwnedClient(ctx context.Context, panelID int64, inboundI
 	if err != nil {
 		return err
 	}
-	spec := buildClientSpec(protocol, userUUID, email, flow, expireTime)
+	spec := buildClientSpec(protocol, userUUID, email, flow, expireTime, totalGB)
 	spec.Enable = enable
 	return c.UpdateClient(ctx, inboundID, userUUID, spec)
 }
@@ -212,7 +212,7 @@ func findClientByEmail(clients []ports.ClientDetail, email string) (ports.Client
 // On success the ownership table is updated so subsequent operations use
 // the new uuid as the path key.
 func (s *Service) RotateClientUUID(ctx context.Context, panelID int64, inboundID int,
-	email string, protocol domain.Protocol, oldUUID, newUUID, flow string, enable bool, expireTime int64) error {
+	email string, protocol domain.Protocol, oldUUID, newUUID, flow string, enable bool, expireTime, totalGB int64) error {
 
 	if err := s.ensureClientOwned(ctx, panelID, inboundID, email); err != nil {
 		return err
@@ -221,7 +221,7 @@ func (s *Service) RotateClientUUID(ctx context.Context, panelID int64, inboundID
 	if err != nil {
 		return err
 	}
-	spec := buildClientSpec(protocol, newUUID, email, flow, expireTime)
+	spec := buildClientSpec(protocol, newUUID, email, flow, expireTime, totalGB)
 	spec.Enable = enable
 	if err := c.UpdateClient(ctx, inboundID, oldUUID, spec); err != nil {
 		return fmt.Errorf("xui rotate uuid: %w", err)
@@ -236,7 +236,7 @@ func (s *Service) RotateClientUUID(ctx context.Context, panelID int64, inboundID
 // still matches what 3X-UI has. Uuid mismatch is handled by
 // RotateClientUUID, which takes both old and new uuids.
 func (s *Service) SetOwnedClientEnable(ctx context.Context, panelID int64, inboundID int,
-	email string, protocol domain.Protocol, userUUID, flow string, enable bool, expireTime int64) error {
+	email string, protocol domain.Protocol, userUUID, flow string, enable bool, expireTime, totalGB int64) error {
 
 	if err := s.ensureClientOwned(ctx, panelID, inboundID, email); err != nil {
 		return err
@@ -245,7 +245,7 @@ func (s *Service) SetOwnedClientEnable(ctx context.Context, panelID int64, inbou
 	if err != nil {
 		return err
 	}
-	spec := buildClientSpec(protocol, userUUID, email, flow, expireTime)
+	spec := buildClientSpec(protocol, userUUID, email, flow, expireTime, totalGB)
 	spec.Enable = enable
 	return c.UpdateClient(ctx, inboundID, userUUID, spec)
 }
@@ -353,13 +353,18 @@ func IsOwnershipError(err error) bool {
 
 // buildClientSpec composes a ClientSpec by applying the protocol-specific
 // derivation rule. Caller fills in Enable as needed.
-func buildClientSpec(protocol domain.Protocol, userUUID, email, flow string, expireTime int64) ports.ClientSpec {
+//
+// totalGB is the per-client traffic floor pushed into 3X-UI (despite the
+// name, the field is bytes). 0 means unlimited on the 3X-UI side; pass the
+// output of user.TrafficFloorBytes for the safety-net behaviour.
+func buildClientSpec(protocol domain.Protocol, userUUID, email, flow string, expireTime, totalGB int64) ports.ClientSpec {
 	password := crypto.DeriveProxyPassword(userUUID, protocol)
 	spec := ports.ClientSpec{
 		Email:      email,
 		Enable:     true,
 		Flow:       flow,
 		ExpiryTime: expireTime,
+		TotalGB:    totalGB,
 	}
 	switch protocol {
 	case domain.ProtoVLESS, domain.ProtoVMess:
