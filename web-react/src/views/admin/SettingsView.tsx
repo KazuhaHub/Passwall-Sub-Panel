@@ -30,9 +30,13 @@ import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined'
 import HelpOutlineIcon from '@mui/icons-material/HelpOutline'
 import VisibilityOffIcon from '@mui/icons-material/VisibilityOff'
 import SendIcon from '@mui/icons-material/Send'
+import ContentCopyIcon from '@mui/icons-material/ContentCopy'
+import CheckCircleIcon from '@mui/icons-material/CheckCircle'
+import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline'
 import { useTranslation } from 'react-i18next'
 
 import {
+  fetchSAMLMetadata,
   getMailSettings,
   getOIDC,
   getSAML,
@@ -45,6 +49,7 @@ import {
   putSAML,
   putUISettings,
   sendTestMail,
+  type SAMLMetadataSummary,
   type MailReminderKind,
   type MailSettings,
   type MailTemplate,
@@ -1394,9 +1399,50 @@ function SamlPanel() {
   const [saving, setSaving] = useState(false)
   const [changeKey, setChangeKey] = useState(false)
   const [keyPem, setKeyPem] = useState('')
+  // IdP metadata fetch state: only meaningful in auto mode. fetchResult is
+  // a successful parse; fetchError is the user-facing failure message.
+  // Cleared whenever the URL field changes so stale verifications don't
+  // mislead the admin.
+  const [fetching, setFetching] = useState(false)
+  const [fetchResult, setFetchResult] = useState<SAMLMetadataSummary | null>(null)
+  const [fetchError, setFetchError] = useState('')
   type SamlField = 'entity_id' | 'acs_url' | 'cert_pem' | 'metadata_url'
   const [errs, setErrs] = useState<FieldErrors<SamlField>>({})
   const [groups, setGroups] = useState<Group[]>([])
+
+  // Auto mode hides SP / attribute editing because the backend auto-derives
+  // entity_id, ACS URL and a self-signed cert from sub_base_url on save,
+  // and resets the attribute mapping to the documented Entra defaults.
+  // Surfacing those fields as editable would be a UX trap — admin types in
+  // values that get silently overwritten.
+  const isAuto = cfg?.mode === 'auto'
+
+  async function copyToClipboard(text: string) {
+    try {
+      await navigator.clipboard.writeText(text)
+      pushSnack(t('settings.sso.saml.copied', { defaultValue: '已复制' }), 'success')
+    } catch {
+      pushSnack(t('settings.sso.saml.copy_failed', { defaultValue: '复制失败' }), 'warning')
+    }
+  }
+
+  async function onFetchMetadata() {
+    if (!cfg) return
+    const url = cfg.idp.metadata_url.trim()
+    if (!url) {
+      setFetchError(t('settings.sso.saml.fetch_url_required', { defaultValue: '请先填写 IdP Metadata URL' }))
+      setFetchResult(null)
+      return
+    }
+    setFetching(true); setFetchError(''); setFetchResult(null)
+    try {
+      const summary = await fetchSAMLMetadata(url)
+      setFetchResult(summary)
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      setFetchError(msg)
+    } finally { setFetching(false) }
+  }
 
   useEffect(() => { void load(); void loadGroups() }, [])
   async function loadGroups() {
@@ -1432,8 +1478,13 @@ function SamlPanel() {
   // Field-level checks only fire when SAML is enabled — typing into the
   // form while disabled would otherwise nag with required-field errors
   // before the admin has even decided to flip the switch.
+  // Auto mode: only the IdP URL is admin-provided; SP fields are derived
+  // by the backend from sub_base_url on save.
   function validateSaml(c: SAMLConfig): FieldErrors<SamlField> {
     if (!c.enabled) return {}
+    if (c.mode === 'auto') {
+      return { metadata_url: validateUrl(c.idp.metadata_url, { required: true }) }
+    }
     return {
       entity_id: validateRequired(c.sp.entity_id),
       acs_url: validateUrl(c.sp.acs_url, { required: true }),
@@ -1492,54 +1543,171 @@ function SamlPanel() {
         </Box>
       </Card>
 
-      <Section title={t('settings.sso.saml.sp_section')} md={md}>
-        <TextField fullWidth required={cfg.enabled} label={t('settings.sso.saml.sp_entity_id')} value={cfg.sp.entity_id}
-          onChange={e => patchSp('entity_id', e.target.value)}
-          error={!!errs.entity_id}
-          helperText={errs.entity_id ? t(`admin:${errs.entity_id}`) : ''} />
-        <TextField fullWidth required={cfg.enabled} label={t('settings.sso.saml.sp_acs_url')} value={cfg.sp.acs_url}
-          onChange={e => patchSp('acs_url', e.target.value)}
-          error={!!errs.acs_url}
-          helperText={errs.acs_url ? t(`admin:${errs.acs_url}`) : ''} />
-        <TextField fullWidth required={cfg.enabled} multiline minRows={4} label={t('settings.sso.saml.sp_cert')} value={cfg.sp.cert_pem}
-          onChange={e => patchSp('cert_pem', e.target.value)}
-          error={!!errs.cert_pem}
-          helperText={errs.cert_pem ? t(`admin:${errs.cert_pem}`) : ''}
-          sx={{ '& textarea': { fontSize: 12 } }} />
-        {cfg.sp.has_key_pem && !changeKey ? (
-          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1.5, height: 56, px: 1.75, borderRadius: 1.5, border: `1px solid ${md.outlineVariant}` }}>
-            <Typography variant="body2">{t('settings.sso.saml.sp_key_kept')}</Typography>
-            <Button size="small" variant="text" onClick={() => setChangeKey(true)}>{t('settings.sso.saml.sp_key_change')}</Button>
-          </Box>
-        ) : (
-          <TextField fullWidth multiline minRows={4} label={t('settings.sso.saml.sp_key')} value={keyPem}
-            onChange={e => setKeyPem(e.target.value)}
-            sx={{ '& textarea': { fontSize: 12 } }} />
-        )}
-      </Section>
-
+      {/* Identity Provider — auto mode adds a Fetch & verify button under the URL */}
       <Section title={t('settings.sso.saml.idp_section')} md={md}>
-        <TextField fullWidth required={cfg.enabled} label={t('settings.sso.saml.idp_metadata_url')} value={cfg.idp.metadata_url}
-          onChange={e => patchIdp('metadata_url', e.target.value)}
-          error={!!errs.metadata_url}
-          helperText={errs.metadata_url ? t(`admin:${errs.metadata_url}`) : ''} />
+        <Box sx={{ display: 'flex', gap: 1.5, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+          <TextField sx={{ flex: '1 1 320px' }} required={cfg.enabled}
+            label={t('settings.sso.saml.idp_metadata_url')} value={cfg.idp.metadata_url}
+            onChange={e => {
+              patchIdp('metadata_url', e.target.value)
+              // Stale verification once the URL changes — force a re-fetch.
+              if (fetchResult || fetchError) { setFetchResult(null); setFetchError('') }
+            }}
+            error={!!errs.metadata_url}
+            helperText={errs.metadata_url ? t(`admin:${errs.metadata_url}`) : ''} />
+          {isAuto && (
+            <Button variant="outlined" size="medium" onClick={onFetchMetadata}
+              disabled={fetching || !cfg.idp.metadata_url.trim()}
+              startIcon={fetching ? <CircularProgress size={14} /> : null}
+              sx={{ height: 56, whiteSpace: 'nowrap' }}>
+              {t('settings.sso.saml.fetch_verify', { defaultValue: 'Fetch & verify' })}
+            </Button>
+          )}
+        </Box>
+        {isAuto && fetchResult && (
+          <Box sx={{
+            display: 'flex', alignItems: 'center', gap: 1, p: 1.25,
+            borderRadius: 1.5, bgcolor: md.surfaceContainerLowest, border: `1px solid ${md.outlineVariant}`,
+          }}>
+            <CheckCircleIcon fontSize="small" sx={{ color: md.primary }} />
+            <Box sx={{ fontSize: 13 }}>
+              <Box>
+                {t('settings.sso.saml.fetch_ok', { defaultValue: 'Verified · entity_id={{id}}', id: fetchResult.entity_id })}
+              </Box>
+              <Box sx={{ color: md.onSurfaceVariant, fontSize: 12 }}>
+                {t('settings.sso.saml.fetch_certs', {
+                  defaultValue: '{{n}} signing certificate(s){{exp}}',
+                  n: fetchResult.num_signing_certs,
+                  exp: fetchResult.signing_cert_expires_at
+                    ? `, expires ${new Date(fetchResult.signing_cert_expires_at).toLocaleDateString()}`
+                    : '',
+                })}
+              </Box>
+            </Box>
+          </Box>
+        )}
+        {isAuto && fetchError && (
+          <Box sx={{
+            display: 'flex', alignItems: 'center', gap: 1, p: 1.25,
+            borderRadius: 1.5, bgcolor: md.surfaceContainerLowest, border: `1px solid ${md.error}`,
+          }}>
+            <ErrorOutlineIcon fontSize="small" sx={{ color: md.error }} />
+            <Typography sx={{ fontSize: 13, color: md.error }}>{fetchError}</Typography>
+          </Box>
+        )}
         <NumField label={t('settings.sso.saml.idp_refresh_hours')} value={cfg.idp.metadata_refresh_hours}
           onChange={v => patchIdp('metadata_refresh_hours', v)} />
       </Section>
 
-      <Section title={t('settings.sso.saml.attr_section')} md={md}>
-        <Pair>
-          <TextField fullWidth label={t('settings.sso.saml.attr_upn')} value={cfg.attribute_mapping.upn}
-            onChange={e => patchAttr('upn', e.target.value)} />
-          <TextField fullWidth label={t('settings.sso.saml.attr_email')} value={cfg.attribute_mapping.email}
-            onChange={e => patchAttr('email', e.target.value)} />
-        </Pair>
-        <Pair>
-          <TextField fullWidth label={t('settings.sso.saml.attr_display_name')} value={cfg.attribute_mapping.display_name}
-            onChange={e => patchAttr('display_name', e.target.value)} />
-          <TextField fullWidth label={t('settings.sso.saml.attr_groups')} value={cfg.attribute_mapping.groups}
-            onChange={e => patchAttr('groups', e.target.value)} />
-        </Pair>
+      {/* Service Provider — auto mode shows read-only values for pasting into the IdP */}
+      <Section title={t('settings.sso.saml.sp_section')} md={md}>
+        {isAuto ? (
+          <>
+            <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant }}>
+              {t('settings.sso.saml.sp_auto_hint', {
+                defaultValue: '这些字段由面板根据「公网基地址」自动生成（首次保存时生成自签名证书）。请把它们粘贴到 IdP 侧的 Service Provider 配置。',
+              })}
+            </Typography>
+            {!cfg.sp.entity_id ? (
+              <Box sx={{
+                display: 'flex', alignItems: 'center', gap: 1, p: 1.25, borderRadius: 1.5,
+                bgcolor: md.surfaceContainerLowest, border: `1px solid ${md.outlineVariant}`,
+              }}>
+                <InfoOutlinedIcon fontSize="small" sx={{ color: md.onSurfaceVariant }} />
+                <Typography sx={{ fontSize: 13 }}>
+                  {t('settings.sso.saml.sp_save_first', { defaultValue: '保存后将生成 SP 信息' })}
+                </Typography>
+              </Box>
+            ) : (
+              <>
+                <TextField fullWidth label={t('settings.sso.saml.sp_entity_id')} value={cfg.sp.entity_id}
+                  InputProps={{
+                    readOnly: true,
+                    endAdornment: (
+                      <InputAdornment position="end">
+                        <IconButton size="small" onClick={() => copyToClipboard(cfg.sp.entity_id)}>
+                          <ContentCopyIcon fontSize="small" />
+                        </IconButton>
+                      </InputAdornment>
+                    ),
+                  }} />
+                <TextField fullWidth label={t('settings.sso.saml.sp_acs_url')} value={cfg.sp.acs_url}
+                  InputProps={{
+                    readOnly: true,
+                    endAdornment: (
+                      <InputAdornment position="end">
+                        <IconButton size="small" onClick={() => copyToClipboard(cfg.sp.acs_url)}>
+                          <ContentCopyIcon fontSize="small" />
+                        </IconButton>
+                      </InputAdornment>
+                    ),
+                  }} />
+                <Box sx={{ position: 'relative' }}>
+                  <TextField fullWidth multiline minRows={4} label={t('settings.sso.saml.sp_cert')}
+                    value={cfg.sp.cert_pem}
+                    InputProps={{ readOnly: true }}
+                    sx={{ '& textarea': { fontSize: 12 } }} />
+                  <IconButton size="small"
+                    sx={{ position: 'absolute', top: 8, right: 8 }}
+                    onClick={() => copyToClipboard(cfg.sp.cert_pem)}>
+                    <ContentCopyIcon fontSize="small" />
+                  </IconButton>
+                </Box>
+              </>
+            )}
+          </>
+        ) : (
+          <>
+            <TextField fullWidth required={cfg.enabled} label={t('settings.sso.saml.sp_entity_id')} value={cfg.sp.entity_id}
+              onChange={e => patchSp('entity_id', e.target.value)}
+              error={!!errs.entity_id}
+              helperText={errs.entity_id ? t(`admin:${errs.entity_id}`) : ''} />
+            <TextField fullWidth required={cfg.enabled} label={t('settings.sso.saml.sp_acs_url')} value={cfg.sp.acs_url}
+              onChange={e => patchSp('acs_url', e.target.value)}
+              error={!!errs.acs_url}
+              helperText={errs.acs_url ? t(`admin:${errs.acs_url}`) : ''} />
+            <TextField fullWidth required={cfg.enabled} multiline minRows={4} label={t('settings.sso.saml.sp_cert')} value={cfg.sp.cert_pem}
+              onChange={e => patchSp('cert_pem', e.target.value)}
+              error={!!errs.cert_pem}
+              helperText={errs.cert_pem ? t(`admin:${errs.cert_pem}`) : ''}
+              sx={{ '& textarea': { fontSize: 12 } }} />
+            {cfg.sp.has_key_pem && !changeKey ? (
+              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1.5, height: 56, px: 1.75, borderRadius: 1.5, border: `1px solid ${md.outlineVariant}` }}>
+                <Typography variant="body2">{t('settings.sso.saml.sp_key_kept')}</Typography>
+                <Button size="small" variant="text" onClick={() => setChangeKey(true)}>{t('settings.sso.saml.sp_key_change')}</Button>
+              </Box>
+            ) : (
+              <TextField fullWidth multiline minRows={4} label={t('settings.sso.saml.sp_key')} value={keyPem}
+                onChange={e => setKeyPem(e.target.value)}
+                sx={{ '& textarea': { fontSize: 12 } }} />
+            )}
+          </>
+        )}
+      </Section>
+
+      {/* Attribute mapping — manual mode only. In auto mode the backend
+          resets the mapping to Microsoft Entra defaults (see admin_saml.go),
+          so showing editable fields would be a UX trap. */}
+      {!isAuto && (
+        <Section title={t('settings.sso.saml.attr_section')} md={md}>
+          <Pair>
+            <TextField fullWidth label={t('settings.sso.saml.attr_upn')} value={cfg.attribute_mapping.upn}
+              onChange={e => patchAttr('upn', e.target.value)} />
+            <TextField fullWidth label={t('settings.sso.saml.attr_email')} value={cfg.attribute_mapping.email}
+              onChange={e => patchAttr('email', e.target.value)} />
+          </Pair>
+          <Pair>
+            <TextField fullWidth label={t('settings.sso.saml.attr_display_name')} value={cfg.attribute_mapping.display_name}
+              onChange={e => patchAttr('display_name', e.target.value)} />
+            <TextField fullWidth label={t('settings.sso.saml.attr_groups')} value={cfg.attribute_mapping.groups}
+              onChange={e => patchAttr('groups', e.target.value)} />
+          </Pair>
+        </Section>
+      )}
+
+      {/* Group resolution — admin groups + default group are admin policy
+          (not derived from IdP metadata), so they stay editable in both modes. */}
+      <Section title={t('settings.sso.saml.group_section', { defaultValue: '分组解析' })} md={md}>
         <TextField fullWidth label={t('settings.sso.saml.admin_groups')} value={cfg.admin_group_ids.join(', ')}
           onChange={e => patch('admin_group_ids', e.target.value.split(',').map(s => s.trim()).filter(Boolean))} />
         <GroupSlugPicker

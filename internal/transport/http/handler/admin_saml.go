@@ -103,6 +103,29 @@ type samlUpdateRequest struct {
 	NewUserDefaults  samlNewUserDTO `json:"new_user_defaults"`
 }
 
+type samlFetchRequest struct {
+	URL string `json:"url" binding:"required"`
+}
+
+// FetchMetadata pulls the IdP metadata XML from the given URL and returns
+// a small summary the admin UI shows next to its input field. Pure
+// read-only — nothing is persisted. Used by the auto-mode "Fetch & verify"
+// button so admins can confirm the URL reaches the intended directory
+// before saving.
+func (h *AdminSAMLHandler) FetchMetadata(c *gin.Context) {
+	var req samlFetchRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	summary, err := auth.FetchIDPMetadataSummary(c.Request.Context(), req.URL)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, summary)
+}
+
 func (h *AdminSAMLHandler) Get(c *gin.Context) {
 	cfg, err := h.repo.Load(c.Request.Context())
 	if err != nil {

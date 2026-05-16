@@ -135,7 +135,16 @@
         "new_user_section": "New user defaults",
         "expire_days": "Default expiry (days, 0 = permanent)",
         "traffic_limit_gb": "Default traffic cap (GB, 0 = unlimited)",
-        "traffic_reset_period": "Default traffic reset period"
+        "traffic_reset_period": "Default traffic reset period",
+        "group_section": "Group resolution",
+        "fetch_verify": "Fetch & verify",
+        "fetch_ok": "Verified · entity_id={{id}}",
+        "fetch_certs": "{{n}} signing certificate(s){{exp}}",
+        "fetch_url_required": "Please fill in the IdP metadata URL first",
+        "sp_auto_hint": "These fields are auto-derived from your panel's public base URL (a self-signed cert is generated on first save). Paste them into your IdP's Service Provider configuration.",
+        "sp_save_first": "Save once to materialise the SP details",
+        "copied": "Copied",
+        "copy_failed": "Copy failed"
       },
       "oidc": {
         "enabled": "Enable OIDC / OAuth2",

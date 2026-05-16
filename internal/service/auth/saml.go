@@ -198,6 +198,61 @@ func (s *SAMLService) StartMetadataRefresh(ctx context.Context, wg ...*sync.Wait
 	}()
 }
 
+// IDPMetadataSummary is a small read-only view the admin UI uses to verify
+// that an IdP metadata URL parses and points at the intended directory.
+type IDPMetadataSummary struct {
+	EntityID         string     `json:"entity_id"`
+	NumSigningCerts  int        `json:"num_signing_certs"`
+	SigningCertExpAt *time.Time `json:"signing_cert_expires_at,omitempty"`
+}
+
+// FetchIDPMetadataSummary fetches the given URL, parses it as SAML metadata,
+// and returns a small summary suitable for an admin UI to confirm the URL
+// reaches the intended IdP. Does NOT mutate any stored configuration.
+func FetchIDPMetadataSummary(ctx context.Context, metadataURL string) (*IDPMetadataSummary, error) {
+	ed, err := fetchIDPMetadata(ctx, metadataURL)
+	if err != nil {
+		return nil, err
+	}
+	out := &IDPMetadataSummary{EntityID: ed.EntityID}
+	// Walk every IDPSSODescriptor's signing key descriptors. Pick the
+	// expiry farthest into the future so a rotation in progress (old +
+	// new cert both present) shows as healthy rather than near-expired.
+	for _, idp := range ed.IDPSSODescriptors {
+		for _, kd := range idp.KeyDescriptors {
+			if kd.Use != "" && kd.Use != "signing" {
+				continue
+			}
+			out.NumSigningCerts++
+			for _, x509 := range kd.KeyInfo.X509Data.X509Certificates {
+				if cert, err := parseX509FromBase64(x509.Data); err == nil {
+					if out.SigningCertExpAt == nil || cert.NotAfter.After(*out.SigningCertExpAt) {
+						t := cert.NotAfter
+						out.SigningCertExpAt = &t
+					}
+				}
+			}
+		}
+	}
+	return out, nil
+}
+
+func parseX509FromBase64(raw string) (*x509.Certificate, error) {
+	// IdP metadata X.509 blobs are base64 with embedded whitespace; the
+	// stdlib base64.StdEncoding rejects whitespace, so strip it first.
+	clean := strings.Map(func(r rune) rune {
+		if r == ' ' || r == '\n' || r == '\r' || r == '\t' {
+			return -1
+		}
+		return r
+	}, raw)
+	der, err := base64.StdEncoding.DecodeString(clean)
+	if err != nil {
+		return nil, err
+	}
+	return x509.ParseCertificate(der)
+}
+
 func fetchIDPMetadata(ctx context.Context, metaURL string) (*saml.EntityDescriptor, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, metaURL, nil)
 	if err != nil {

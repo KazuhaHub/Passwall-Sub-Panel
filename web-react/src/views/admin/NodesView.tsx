@@ -1994,9 +1994,15 @@ export default function NodesView() {
               onChange={e => setImportForm({ ...importForm, server_address: e.target.value })}
               error={!!importErr.server_address}
               helperText={importErr.server_address ? t(`admin:${importErr.server_address}`) : ''} />
-            <TextField fullWidth label={t('admin:nodes.import_dialog.flow')}
-              value={importForm.flow}
-              onChange={e => setImportForm({ ...importForm, flow: e.target.value })} />
+            <Box>
+              <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant, mb: 0.25 }}>
+                {t('admin:nodes.import_dialog.flow')}
+              </Typography>
+              <Select size="small" fullWidth value={importForm.flow} displayEmpty
+                onChange={e => setImportForm({ ...importForm, flow: e.target.value })}>
+                {VLESS_FLOWS.map(f => <MenuItem key={f} value={f}>{f || '—'}</MenuItem>)}
+              </Select>
+            </Box>
             <TextField required fullWidth label={t('admin:nodes.import_dialog.region')}
               value={importForm.region}
               onChange={e => setImportForm({ ...importForm, region: e.target.value })}
@@ -2037,9 +2043,15 @@ export default function NodesView() {
               onChange={e => setEditForm({ ...editForm, server_address: e.target.value })}
               error={!!editMetaErr.server_address}
               helperText={editMetaErr.server_address ? t(`admin:${editMetaErr.server_address}`) : ''} />
-            <TextField fullWidth label={t('admin:nodes.field.flow')}
-              value={editForm.flow}
-              onChange={e => setEditForm({ ...editForm, flow: e.target.value })} />
+            <Box>
+              <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant, mb: 0.25 }}>
+                {t('admin:nodes.field.flow')}
+              </Typography>
+              <Select size="small" fullWidth value={editForm.flow} displayEmpty
+                onChange={e => setEditForm({ ...editForm, flow: e.target.value })}>
+                {VLESS_FLOWS.map(f => <MenuItem key={f} value={f}>{f || '—'}</MenuItem>)}
+              </Select>
+            </Box>
             <TextField required fullWidth label={t('admin:nodes.field.region')}
               value={editForm.region}
               onChange={e => setEditForm({ ...editForm, region: e.target.value })}

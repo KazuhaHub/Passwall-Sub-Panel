@@ -200,6 +200,21 @@ export async function putSAML(req: SAMLUpdateRequest) {
   return data
 }
 
+export interface SAMLMetadataSummary {
+  entity_id: string
+  num_signing_certs: number
+  signing_cert_expires_at?: string
+}
+
+// Server-side verification of an IdP metadata URL. Returns a small summary
+// the admin UI shows under the URL input so the operator can confirm the
+// URL reaches the intended directory before saving.
+export async function fetchSAMLMetadata(url: string) {
+  const { data } = await client.post<SAMLMetadataSummary>(
+    '/admin/settings/saml/fetch', { url })
+  return data
+}
+
 // ---- OIDC ----
 export interface OIDCConfig {
   enabled: boolean

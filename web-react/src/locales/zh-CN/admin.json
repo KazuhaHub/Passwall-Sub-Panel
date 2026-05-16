@@ -135,7 +135,16 @@
         "new_user_section": "新用户默认",
         "expire_days": "默认有效期（天，0=永久）",
         "traffic_limit_gb": "默认流量上限（GB，0=无限）",
-        "traffic_reset_period": "默认流量重置周期"
+        "traffic_reset_period": "默认流量重置周期",
+        "group_section": "分组解析",
+        "fetch_verify": "获取并校验",
+        "fetch_ok": "已校验 · entity_id={{id}}",
+        "fetch_certs": "{{n}} 个签名证书{{exp}}",
+        "fetch_url_required": "请先填写 IdP Metadata URL",
+        "sp_auto_hint": "这些字段由面板根据「公网基地址」自动生成（首次保存时生成自签名证书）。请把它们粘贴到 IdP 侧的 Service Provider 配置。",
+        "sp_save_first": "保存后将生成 SP 信息",
+        "copied": "已复制",
+        "copy_failed": "复制失败"
       },
       "oidc": {
         "enabled": "启用 OIDC / OAuth2",

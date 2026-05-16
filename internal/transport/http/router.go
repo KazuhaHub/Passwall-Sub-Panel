@@ -235,6 +235,7 @@ func NewRouter(d Deps) *gin.Engine {
 		samlAdmin := handler.NewAdminSAMLHandler(d.Repos.SAMLConfig, d.SAML, d.Repos.OIDCConfig, d.OIDC, d.Repos.Settings)
 		adminGroup.GET("/settings/saml", samlAdmin.Get)
 		adminGroup.PUT("/settings/saml", samlAdmin.Put)
+		adminGroup.POST("/settings/saml/fetch", samlAdmin.FetchMetadata)
 
 		oidcAdmin := handler.NewAdminOIDCHandler(d.Repos.OIDCConfig, d.OIDC, d.Repos.SAMLConfig, d.SAML)
 		adminGroup.GET("/settings/oidc", oidcAdmin.Get)
