@@ -1330,7 +1330,7 @@ SAML Response 验签通过 →
 |---|---|
 | 误操作私人 client | §4 归属表护栏 |
 | 订阅 URL 泄漏 | sub_token 独立于密码；可重置 |
-| 本地账号密码泄漏 | bcrypt cost=10；登录限流 5/min/IP |
+| 本地账号密码泄漏 | bcrypt cost=10；登录限流 10/min/IP |
 | SAML Response 伪造 / 重放 | IdP 证书验签 + InResponseTo + NotBefore/NotOnOrAfter 校验 + ID 黑名单 |
 | 3X-UI 凭证落地 | `xui_panels` 表敏感字段 AES-GCM 加密，key 从 env 读 |
 | SAML SP 私钥泄漏 | `saml_config` 私钥字段 AES-GCM 加密；生产建议使用受控备份与最小权限访问 |

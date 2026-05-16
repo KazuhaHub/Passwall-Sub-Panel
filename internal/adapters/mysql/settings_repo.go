@@ -113,7 +113,7 @@ func applyDefaults(out, defaults ports.UISettings) ports.UISettings {
 		out.SubPerIPPerMin = 60
 	}
 	if out.LoginPerIPPerMin <= 0 {
-		out.LoginPerIPPerMin = 5
+		out.LoginPerIPPerMin = 10
 	}
 	if out.SubPath == "" {
 		out.SubPath = "sub"
