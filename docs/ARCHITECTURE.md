@@ -1396,7 +1396,8 @@ services:
       - psp-data:/app/data
     environment:
       PSP_CONFIG: /app/config/config.yaml
-      PSP_SECRET_KEY: ${PSP_SECRET_KEY}
+      PSP_JWT_SECRET: ${PSP_JWT_SECRET:-}
+      PSP_ENCRYPTION_KEY: ${PSP_ENCRYPTION_KEY:-}
       PSP_JWT_SECRET: ${PSP_JWT_SECRET}
 volumes:
   psp-data:

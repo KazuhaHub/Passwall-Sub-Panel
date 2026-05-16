@@ -15,13 +15,16 @@ services:
       - psp-data:/app/data
     environment:
       PSP_CONFIG: /app/config/config.yaml
-      # PSP_SECRET_KEY decrypts the "enc:..." fields in xui_panels.yaml.
-      # Generate with: openssl rand -hex 16
-      PSP_SECRET_KEY: ${PSP_SECRET_KEY}
-      # MySQL DSN overrides the one in config.yaml if set. Leave unset to use
+      # PSP_JWT_SECRET and PSP_ENCRYPTION_KEY override the same-named fields in
+      # config.yaml. Leave them unset and the panel auto-generates them on first
+      # launch (written back into config.yaml). Inject via env when you want to
+      # ship a config.yaml without baked-in secrets.
+      # Generate with: openssl rand -base64 36
+      PSP_JWT_SECRET: ${PSP_JWT_SECRET:-}
+      PSP_ENCRYPTION_KEY: ${PSP_ENCRYPTION_KEY:-}
+      # MySQL DSN overrides the mysql block in config.yaml. Leave unset to use
       # the embedded SQLite at /app/data/panel.db (default).
       PSP_MYSQL_DSN: ${PSP_MYSQL_DSN:-}
-      PSP_JWT_SECRET: ${PSP_JWT_SECRET}
 
 volumes:
   psp-data:

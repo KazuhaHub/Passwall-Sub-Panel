@@ -109,12 +109,17 @@ chmod +x /opt/psp/psp
 
 ### 2. 写最小启动配置
 
-`/opt/psp/config/config.yaml`：
+`/opt/psp/config/config.yaml`（首次启动会自动生成，下面是关键字段）：
 
 ```yaml
 listen: ":8788"
-# 用 openssl rand -base64 36 生成
+
+# JWT 签名密钥（用 openssl rand -base64 36 生成；首启会自动生成）
 jwt_secret: "REPLACE-ME-WITH-RANDOM-STRING"
+
+# 加密数据库里存的 3X-UI / OIDC / SAML / SMTP 等凭据（同样首启自动生成）
+# 丢了这个 key 就解不开 DB 里 enc: 前缀的密文，记得备份
+encryption_key: "REPLACE-ME-WITH-ANOTHER-RANDOM-STRING"
 
 config_dir: "/opt/psp/config"
 data_dir:   "/opt/psp/data"
@@ -129,11 +134,14 @@ data_dir:   "/opt/psp/data"
 #   database: "passwall"
 ```
 
+完整的注释化示例见 [`config/config.yaml.example`](config/config.yaml.example)。
+
 环境敏感变量放 `/opt/psp/.env`（chmod 600，systemd 会读）：
 
 ```bash
-PSP_SECRET_KEY=$(openssl rand -hex 16)
+# 可选：覆盖 config.yaml 里的 jwt_secret / encryption_key
 PSP_JWT_SECRET=$(openssl rand -base64 36)
+PSP_ENCRYPTION_KEY=$(openssl rand -base64 36)
 # 可选：用 MySQL 时覆盖 config.yaml 里的 dsn
 # PSP_MYSQL_DSN=user:pass@tcp(127.0.0.1:3306)/psp?parseTime=true&charset=utf8mb4&loc=Local
 ```
@@ -187,13 +195,15 @@ cp local-build/config.yaml.example config/config.yaml
 
 ```bash
 cat > .env <<'EOF'
-PSP_SECRET_KEY=请填 openssl rand -hex 16 的输出
 PSP_JWT_SECRET=请填 openssl rand -base64 36 的输出
+PSP_ENCRYPTION_KEY=请填 openssl rand -base64 36 的输出
 # 用 MySQL 时填这一行；用默认 SQLite 留空即可
 PSP_MYSQL_DSN=
 EOF
 chmod 600 .env
 ```
+
+> 这两个 secret 留空也能跑——首次启动会写到 `config.yaml` 里自动生成。但通过 `.env` 注入可以让 `config.yaml` 入 git / 入镜像而不带密钥。
 
 ### 3. 启动
 
@@ -233,34 +243,30 @@ services:
 
 ## 配置
 
-### config.yaml 启动配置
+### config.yaml — 启动必需
 
 `config.yaml` 只放**启动必需**的最少字段，绝大多数运维设置（公网地址、邮件、登录模式、CRON 周期、限流等）走管理后台「系统设置」存到数据库。
 
-```yaml
-listen: ":8788"           # 监听地址
-jwt_secret: "..."         # JWT 签名密钥，必填
-config_dir: "./config"    # rulesets、templates 所在目录
-data_dir:   "./data"      # SQLite 数据库与运行时数据
+**首次启动**没有 config.yaml 时会自动生成一个，里面 `jwt_secret` / `encryption_key` 都是随机的，开箱即用。手动配置时参考 [`config/config.yaml.example`](config/config.yaml.example) — 这是带完整注释的官方样板。
 
-# 不写 mysql 块 = 用 SQLite（默认）
-mysql:
-  host: "127.0.0.1"
-  port: 3306
-  user: "psp"
-  password: "..."
-  database: "passwall"
-```
+| 字段 | 必填 | 说明 |
+|---|---|---|
+| `listen` | 否 | 监听地址，默认 `:8788` |
+| `jwt_secret` | 是 | JWT 签名密钥（首启自动生成；轮换 = 让所有现有 session 失效） |
+| `encryption_key` | 是 | DB 里 3X-UI / OIDC / SAML / SMTP 凭据的 AES-GCM 加密 key；丢了无法解密 |
+| `config_dir` | 否 | rulesets、templates 所在目录，默认 `./config` |
+| `data_dir` | 否 | SQLite 数据库与运行时数据，默认 `./data` |
+| `mysql.*` | 否 | 留空 = 用嵌入 SQLite；填了即切到 MySQL |
 
-环境变量优先级（覆盖 config.yaml）：
+环境变量覆盖（优先于 config.yaml）：
 
 | 变量 | 用途 |
 |---|---|
 | `PSP_CONFIG` | 指定 config.yaml 路径 |
-| `PSP_JWT_SECRET` | JWT 签名密钥 |
-| `PSP_SECRET_KEY` | 加密 xui_panels.yaml 里 `enc:` 字段的密钥，留空则派生自 jwt_secret |
-| `PSP_MYSQL_DSN` | 整个 MySQL DSN，覆盖 mysql 块 |
-| `PSP_TRUSTED_PROXIES` | 反向代理 CIDR 白名单（默认仅 loopback） |
+| `PSP_JWT_SECRET` | 覆盖 `jwt_secret` |
+| `PSP_ENCRYPTION_KEY` | 覆盖 `encryption_key`（用于零密钥镜像部署） |
+| `PSP_MYSQL_DSN` | 整个 MySQL DSN，覆盖 `mysql` 块 |
+| `PSP_TRUSTED_PROXIES` | 反向代理 CIDR 白名单（默认仅 loopback；`none` = 忽略 X-Forwarded-For） |
 
 ### 管理后台「系统设置」
 

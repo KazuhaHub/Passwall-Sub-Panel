@@ -109,12 +109,17 @@ chmod +x /opt/psp/psp
 
 ### 2. Minimal startup config
 
-`/opt/psp/config/config.yaml`:
+`/opt/psp/config/config.yaml` (auto-generated on first launch; key fields shown):
 
 ```yaml
 listen: ":8788"
-# Generate with: openssl rand -base64 36
+
+# JWT signing key (generate with `openssl rand -base64 36`; first launch auto-generates)
 jwt_secret: "REPLACE-ME-WITH-RANDOM-STRING"
+
+# Encrypts 3X-UI / OIDC / SAML / SMTP credentials stored in the database
+# (first launch auto-generates). Losing this key prevents decrypting saved secrets.
+encryption_key: "REPLACE-ME-WITH-ANOTHER-RANDOM-STRING"
 
 config_dir: "/opt/psp/config"
 data_dir:   "/opt/psp/data"
@@ -129,12 +134,15 @@ data_dir:   "/opt/psp/data"
 #   database: "passwall"
 ```
 
+The fully annotated reference is [`config/config.yaml.example`](config/config.yaml.example).
+
 Sensitive env vars go in `/opt/psp/.env` (chmod 600; systemd reads it):
 
 ```bash
-PSP_SECRET_KEY=$(openssl rand -hex 16)
+# Optional: override jwt_secret / encryption_key from config.yaml
 PSP_JWT_SECRET=$(openssl rand -base64 36)
-# Optional: overrides config.yaml's MySQL block
+PSP_ENCRYPTION_KEY=$(openssl rand -base64 36)
+# Optional: replace the mysql block in config.yaml when using MySQL
 # PSP_MYSQL_DSN=user:pass@tcp(127.0.0.1:3306)/psp?parseTime=true&charset=utf8mb4&loc=Local
 ```
 
@@ -187,13 +195,15 @@ cp local-build/config.yaml.example config/config.yaml
 
 ```bash
 cat > .env <<'EOF'
-PSP_SECRET_KEY=put-the-output-of-openssl-rand-hex-16-here
 PSP_JWT_SECRET=put-the-output-of-openssl-rand-base64-36-here
+PSP_ENCRYPTION_KEY=put-the-output-of-openssl-rand-base64-36-here
 # Fill this line if you want MySQL; leave empty for default SQLite
 PSP_MYSQL_DSN=
 EOF
 chmod 600 .env
 ```
+
+> Both secrets can be left blank — the first launch writes random values into `config.yaml` for you. Injecting via `.env` lets you ship `config.yaml` in git / a Docker image without secrets.
 
 ### 3. Start
 
@@ -233,34 +243,30 @@ Then set the 3X-UI URL in the admin UI to `http://host.docker.internal:<3xui_por
 
 ## Configuration
 
-### config.yaml — startup config
+### config.yaml — boot-required only
 
 `config.yaml` carries only the **minimum to boot**. Almost all runtime settings (public base URL, email, login mode, CRON cadence, rate limits, etc.) live in the database and are managed via the admin "System Settings" UI.
 
-```yaml
-listen: ":8788"           # listen address
-jwt_secret: "..."         # required, JWT signing key
-config_dir: "./config"    # path holding rulesets & templates
-data_dir:   "./data"      # SQLite DB + runtime data
+**First launch**, when no config.yaml exists, the panel writes one with randomly generated `jwt_secret` and `encryption_key` — works out of the box. For manual setup, copy [`config/config.yaml.example`](config/config.yaml.example) — the fully annotated reference.
 
-# Omitting the mysql block = use SQLite (default)
-mysql:
-  host: "127.0.0.1"
-  port: 3306
-  user: "psp"
-  password: "..."
-  database: "passwall"
-```
+| Field | Required | Purpose |
+|---|---|---|
+| `listen` | no | Bind address, default `:8788` |
+| `jwt_secret` | yes | JWT signing key (auto-generated; rotating invalidates every existing session) |
+| `encryption_key` | yes | AES-GCM key for 3X-UI / OIDC / SAML / SMTP credentials stored in the DB. Loss = can't decrypt. |
+| `config_dir` | no | Path holding rulesets & templates, default `./config` |
+| `data_dir` | no | SQLite DB + runtime data, default `./data` |
+| `mysql.*` | no | Leave empty for embedded SQLite; fill it to switch to MySQL |
 
-Environment variables (override config.yaml):
+Environment-variable overrides (take precedence over config.yaml):
 
 | Variable | Purpose |
 |---|---|
 | `PSP_CONFIG` | Path to config.yaml |
-| `PSP_JWT_SECRET` | JWT signing key |
-| `PSP_SECRET_KEY` | Key that decrypts `enc:` fields in xui_panels.yaml. Derived from `jwt_secret` if unset. |
-| `PSP_MYSQL_DSN` | Full MySQL DSN, overrides the mysql block |
-| `PSP_TRUSTED_PROXIES` | Reverse-proxy CIDR allow-list (default: loopback only) |
+| `PSP_JWT_SECRET` | Override `jwt_secret` |
+| `PSP_ENCRYPTION_KEY` | Override `encryption_key` (lets you ship a key-less image) |
+| `PSP_MYSQL_DSN` | Full MySQL DSN, replaces the `mysql` block |
+| `PSP_TRUSTED_PROXIES` | Reverse-proxy CIDR allow-list (default: loopback only; `none` = ignore X-Forwarded-For) |
 
 ### Admin "System Settings"
 
