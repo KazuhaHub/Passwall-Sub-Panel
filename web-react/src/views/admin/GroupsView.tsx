@@ -330,9 +330,9 @@ export default function GroupsView() {
       <Dialog
         open={dialogOpen}
         onClose={() => !busy && setDialogOpen(false)}
-        PaperProps={{ sx: { borderRadius: 4, bgcolor: md.surfaceContainerHigh, width: 500, maxWidth: '90vw' } }}
+        PaperProps={{ sx: { borderRadius: 3, bgcolor: md.surfaceContainerHigh, width: 500, maxWidth: '90vw' } }}
       >
-        <DialogTitle sx={{ pt: 3 }}>
+        <DialogTitle>
           {editing ? t('admin:groups.edit_title') : t('admin:groups.create')}
         </DialogTitle>
         <DialogContent>
@@ -379,7 +379,7 @@ export default function GroupsView() {
             />
           </Box>
         </DialogContent>
-        <DialogActions sx={{ px: 3, pb: 2 }}>
+        <DialogActions>
           <Button onClick={() => setDialogOpen(false)} disabled={busy} variant="text">
             {t('common:actions.cancel')}
           </Button>

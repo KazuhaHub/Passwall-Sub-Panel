@@ -157,3 +157,60 @@ func TestEmergencyStatus_UsedBytesZeroWhenNoActiveWindow(t *testing.T) {
 		t.Fatalf("usedBytes = %d, want 0 (no active window, baseline must be ignored)", st.UsedBytes)
 	}
 }
+
+// Promote-only invariant: every SSO login goes through applyRoleFromSSO,
+// which must allow IdP to RAISE a non-admin to admin but never DEMOTE
+// an existing role. Without this guarantee a panel admin can't hand out
+// the operator role manually without it getting washed back to user on
+// the next SSO bounce.
+
+func TestApplyRoleFromSSO_PromotesUserToAdmin(t *testing.T) {
+	role, changed := applyRoleFromSSO(domain.RoleUser, true)
+	if role != domain.RoleAdmin || !changed {
+		t.Fatalf("user + IdP admin: got (%q, %v), want (admin, true)", role, changed)
+	}
+}
+
+func TestApplyRoleFromSSO_KeepsAdminWhenIdPStillAdmin(t *testing.T) {
+	// No-op fast path — should not trigger a DB write.
+	role, changed := applyRoleFromSSO(domain.RoleAdmin, true)
+	if role != domain.RoleAdmin || changed {
+		t.Fatalf("admin + IdP admin: got (%q, %v), want (admin, false)", role, changed)
+	}
+}
+
+func TestApplyRoleFromSSO_DoesNotDemoteAdminWhenIdPMisses(t *testing.T) {
+	// The whole point: IdP says "not admin" but the panel admin already
+	// promoted this account. Must NOT clobber.
+	role, changed := applyRoleFromSSO(domain.RoleAdmin, false)
+	if role != domain.RoleAdmin || changed {
+		t.Fatalf("admin + IdP miss: got (%q, %v), want (admin, false) — must not demote", role, changed)
+	}
+}
+
+func TestApplyRoleFromSSO_DoesNotWashOperatorToUser(t *testing.T) {
+	// The operator role lives entirely in panel-land — the IdP doesn't
+	// have a concept of it. SSO logins must leave it alone.
+	role, changed := applyRoleFromSSO(domain.RoleOperator, false)
+	if role != domain.RoleOperator || changed {
+		t.Fatalf("operator + IdP miss: got (%q, %v), want (operator, false)", role, changed)
+	}
+}
+
+func TestApplyRoleFromSSO_PromotesOperatorWhenIdPSaysAdmin(t *testing.T) {
+	// If a panel-granted operator later shows up in the IdP admin group,
+	// promotion to admin is fine — they qualify on both sides now.
+	role, changed := applyRoleFromSSO(domain.RoleOperator, true)
+	if role != domain.RoleAdmin || !changed {
+		t.Fatalf("operator + IdP admin: got (%q, %v), want (admin, true)", role, changed)
+	}
+}
+
+func TestApplyRoleFromSSO_UserUnchangedWhenIdPMisses(t *testing.T) {
+	// Regular SSO login by a non-admin — most common case, must be a
+	// no-op so we don't burn an Update round-trip every login.
+	role, changed := applyRoleFromSSO(domain.RoleUser, false)
+	if role != domain.RoleUser || changed {
+		t.Fatalf("user + IdP miss: got (%q, %v), want (user, false)", role, changed)
+	}
+}

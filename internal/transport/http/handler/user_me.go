@@ -72,6 +72,10 @@ func (h *UserMeHandler) Profile(c *gin.Context) {
 		"traffic_reset_period":    u.TrafficResetPeriod,
 		"enabled":                 u.Enabled,
 		"can_change_password":     canChangePassword,
+		// can_edit_personal_rules drives the portal's rules dialog: when
+		// false the textarea renders read-only and the Save button hides.
+		// Admins always can; for non-admins it follows the global flag.
+		"can_edit_personal_rules": u.Role == domain.RoleAdmin || (settingsErr == nil && settings.AllowUserPersonalRules),
 		"emergency_access": gin.H{
 			"enabled":         emergencyStatus.Enabled,
 			"available":       emergencyStatus.Available,
@@ -246,6 +250,14 @@ func (h *UserMeHandler) PutRules(c *gin.Context) {
 	claims := middleware.ClaimsFrom(c)
 	if claims == nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "No auth"})
+		return
+	}
+	// Global lock: when the admin has turned off the personal-rules editor
+	// the user can still GET (read) but PUT is rejected. Mirrors the
+	// DisallowUserPasswordChange gate one method below.
+	settings, sErr := h.settings.Load(c.Request.Context(), ports.UISettings{})
+	if sErr == nil && !settings.AllowUserPersonalRules {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Personal rules editing is disabled by admin"})
 		return
 	}
 	var req updatePersonalRulesRequest

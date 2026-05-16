@@ -28,6 +28,7 @@ export interface GlobalAnnouncement {
   title: string
   content: string
   level: 'info' | 'warning' | 'danger'
+  popup: boolean
   updated_at: string
 }
 
@@ -46,6 +47,7 @@ export interface MeProfile {
   traffic_reset_period: string
   enabled: boolean
   can_change_password: boolean
+  can_edit_personal_rules: boolean
   emergency_access: {
     enabled: boolean
     available: boolean

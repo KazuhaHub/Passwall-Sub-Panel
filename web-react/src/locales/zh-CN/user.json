@@ -46,11 +46,16 @@
   },
   "rules": {
     "title": "我的个人规则",
-    "placeholder": "每行一条规则。优先级高于站点规则集。",
+    "placeholder": "- DOMAIN-SUFFIX,openai.com,🚀 节点选择\n- DOMAIN-KEYWORD,github,🚀 节点选择\n- IP-CIDR,10.0.0.0/8,🎯 全球直连\n- MATCH,🐟 漏网之鱼",
+    "hint": "每行一条规则，使用 Clash / Mihomo 规则语法。默认模板中，个人规则优先于站点规则集。",
+    "insert_example": "插入示例规则",
     "saved": "已保存"
   },
   "trend": {
     "title": "流量趋势",
+    "period_day": "按天",
+    "period_week": "按周",
+    "period_month": "按月",
     "range_7": "最近 7 天",
     "range_30": "最近 30 天",
     "range_90": "最近 90 天"
@@ -97,5 +102,9 @@
     "ok": "确定",
     "cancel": "取消",
     "copied": "已复制"
+  },
+  "announce": {
+    "ack": "我知道了",
+    "mute": "不再提醒"
   }
 }

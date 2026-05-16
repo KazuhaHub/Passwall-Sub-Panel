@@ -6,6 +6,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"net"
 	"net/http"
 	"time"
 
@@ -50,6 +51,11 @@ type App struct {
 	settings  ports.SettingsRepo
 	syncTasks ports.SyncTaskRepo
 	saml      *auth.SAMLService
+	// repos kept around so Run() can call initAdminIfNeeded AFTER the
+	// listen socket is bound — that way a bind failure (port busy / TLS
+	// misconfig / EACCES) doesn't leave the user staring at a closed
+	// terminal that just printed the bootstrap admin password.
+	repos ports.Repos
 
 	// Resolved at startup from the settings DB. Loops/handlers using these
 	// see "restart required to change" semantics for the underlying setting.
@@ -118,9 +124,9 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 		OIDCConfig:  mysqlRepos.OIDCConfig,
 	}
 
-	if err := initAdminIfNeeded(ctx, repos); err != nil {
-		return nil, fmt.Errorf("init admin: %w", err)
-	}
+	// Admin bootstrap is deferred to Run() — see the comment on App.repos.
+	// We must NOT print the initial password before knowing the listen
+	// socket can actually bind; the user would lose it to a crash dump.
 
 	pool, err := xuiadapter.NewPool(ctx, repos.XUIPanel)
 	if err != nil {
@@ -215,6 +221,7 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 		health:            healthSvc,
 		settings:          repos.Settings,
 		syncTasks:         repos.SyncTask,
+		repos:             repos,
 		saml:              samlSvc,
 		trafficInterval:   time.Duration(sysSettings.CronTrafficPullMinutes) * time.Minute,
 		reconcileInterval: time.Duration(sysSettings.CronReconcileMinutes) * time.Minute,
@@ -243,9 +250,27 @@ func syncPanelNameCaches(ctx context.Context, repos ports.Repos) error {
 	return nil
 }
 
-// Run launches background workers (SAML metadata refresh, traffic poll,
-// reconciliation) and then blocks on ListenAndServe.
+// Run binds the listen socket, then bootstraps the initial admin (if
+// missing), starts background workers, and finally serves HTTP until
+// the listener stops.
+//
+// Why bind FIRST: initAdminIfNeeded prints the bootstrap admin password
+// via log.Info. If the panel exits before the user can read that line
+// (e.g., port already in use, the terminal window closes), the password
+// is lost — and the next start sees the row already there, so the
+// password is never re-printed. By binding before bootstrap we fail
+// fast on the boring errors that would otherwise eat the secret.
 func (a *App) Run() error {
+	ln, err := net.Listen("tcp", a.server.Addr)
+	if err != nil {
+		return fmt.Errorf("listen %s: %w", a.server.Addr, err)
+	}
+
+	if err := initAdminIfNeeded(context.Background(), a.repos); err != nil {
+		_ = ln.Close()
+		return fmt.Errorf("init admin: %w", err)
+	}
+
 	bgCtx, cancel := context.WithCancel(context.Background())
 	a.bgCancel = cancel
 
@@ -257,7 +282,7 @@ func (a *App) Run() error {
 	go a.runReconcileLoop(bgCtx)
 	go a.runHealthLoop(bgCtx)
 
-	return a.server.ListenAndServe()
+	return a.server.Serve(ln)
 }
 
 func (a *App) runHealthLoop(ctx context.Context) {

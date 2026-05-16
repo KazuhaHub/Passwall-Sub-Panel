@@ -107,6 +107,27 @@ export function createAppTheme({ mode, sourceColor, language }: CreateAppThemeAr
           },
         },
       },
+      // Global dialog padding. Content gets a 32dp horizontal inset so it
+      // sits comfortably away from the dialog's rounded edge. Actions match
+      // the same 32dp gutter on both sides so the right-most button's edge
+      // mirrors the content's left edge — without this, the right cluster
+      // looked glued to the wall while the title/body still had breathing
+      // room on the left, breaking the visual centering.
+      MuiDialogTitle: {
+        styleOverrides: {
+          root: { padding: '24px 32px 8px' },
+        },
+      },
+      MuiDialogContent: {
+        styleOverrides: {
+          root: { padding: '12px 32px 20px' },
+        },
+      },
+      MuiDialogActions: {
+        styleOverrides: {
+          root: { padding: '8px 32px 20px' },
+        },
+      },
       MuiCard: {
         defaultProps: { elevation: 0 },
         styleOverrides: {

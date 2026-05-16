@@ -54,7 +54,7 @@ func (h *AuthLocalHandler) localLoginDisallowedForUsers(c *gin.Context) bool {
 func (h *AuthLocalHandler) Methods(c *gin.Context) {
 	defaults := ports.UISettings{
 		LoginMode: "dual",
-		SiteTitle: "Passwall",
+		SiteTitle: "Kazuha Hub Passwall",
 		AppTitle:  "Passwall",
 		IconURL:   "/images/HeadPicture.png",
 	}

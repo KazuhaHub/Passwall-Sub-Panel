@@ -23,6 +23,13 @@ type SAMLConfig struct {
 	AdminGroupIDs    []string         `yaml:"admin_group_ids"`
 	DefaultGroupSlug string           `yaml:"default_group_slug"`
 
+	// AllowAutoCreate controls whether a non-admin SSO login may provision
+	// a fresh account. When false (the original behaviour) only IdP-admin
+	// users are auto-provisioned and everyone else is bounced to the
+	// "contact your administrator" page — handy for closed deployments
+	// where the admin invites accounts manually first.
+	AllowAutoCreate bool `yaml:"allow_auto_create"`
+
 	NewUserDefaults SAMLNewUserDefaults `yaml:"new_user_defaults"`
 }
 

@@ -4,8 +4,10 @@ package mysql
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
+	"time"
 
 	sqlitedriver "github.com/glebarez/sqlite"
 	mysqldriver "gorm.io/driver/mysql"
@@ -24,7 +26,22 @@ func Open(kind, dsn string) (*gorm.DB, error) {
 	if dsn == "" {
 		return nil, fmt.Errorf("empty database dsn")
 	}
-	cfg := &gorm.Config{Logger: logger.Default.LogMode(logger.Warn)}
+	// GORM's default logger treats `ErrRecordNotFound` as a warning and
+	// prints the full SQL to stderr. That's fine for general debugging but
+	// half this codebase calls First() with the explicit expectation that
+	// the row may be absent (settings on fresh boot, saml/oidc/mail
+	// config never set, defaults seeded on the fly). Silence that one
+	// specific case so the log isn't drowned in normal-path noise.
+	gormLogger := logger.New(
+		log.New(os.Stderr, "\r\n", log.LstdFlags),
+		logger.Config{
+			SlowThreshold:             200 * time.Millisecond,
+			LogLevel:                  logger.Warn,
+			IgnoreRecordNotFoundError: true,
+			Colorful:                  false,
+		},
+	)
+	cfg := &gorm.Config{Logger: gormLogger}
 
 	var db *gorm.DB
 	var err error

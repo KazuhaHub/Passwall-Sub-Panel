@@ -35,6 +35,10 @@ export interface GlobalAnnouncement {
   title: string
   content: string
   level: 'info' | 'warning' | 'danger'
+  /** When true, the portal shows the announcement as a modal on first
+   *  visit after `updated_at` changes. Dismissal state lives in the
+   *  browser only (localStorage), never persisted server-side. */
+  popup: boolean
   updated_at: string
 }
 
@@ -58,6 +62,7 @@ export interface UISettings {
   sync_task_retention_days: number
   disallow_user_local_login: boolean
   disallow_user_password_change: boolean
+  allow_user_personal_rules: boolean
   emergency_access_enabled: boolean
   emergency_access_hours: number
   emergency_access_max_count: number
@@ -167,6 +172,7 @@ export interface SAMLConfig {
   }
   admin_group_ids: string[]
   default_group_slug: string
+  allow_auto_create: boolean
   new_user_defaults: {
     expire_days: number
     traffic_limit_bytes: number
@@ -210,6 +216,7 @@ export interface OIDCConfig {
   }
   admin_group_ids: string[]
   default_group_slug: string
+  allow_auto_create: boolean
   new_user_defaults: {
     expire_days: number
     traffic_limit_bytes: number

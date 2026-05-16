@@ -183,7 +183,7 @@ type XUIPanelRepo interface {
 type UISettings struct {
 	LoginMode string `yaml:"login_mode" json:"login_mode"`
 	// SiteTitle is the brand name displayed in the sidebar, header, and
-	// login page. Defaults to "Passwall".
+	// login page. Defaults to "Kazuha Hub Passwall".
 	SiteTitle string `yaml:"site_title" json:"site_title"`
 	// AppTitle is the application/product name shown next to the logo in
 	// the top-left brand area and on login pages. Defaults to "Passwall".
@@ -235,6 +235,12 @@ type UISettings struct {
 	// password-change lock.
 	DisallowUserLocalLogin     bool `json:"disallow_user_local_login"`
 	DisallowUserPasswordChange bool `json:"disallow_user_password_change"`
+	// AllowUserPersonalRules controls the user-self portal's personal-rules
+	// editor. When true users can read+write their own rule fragment; when
+	// false they can still VIEW (read-only) but the save path is rejected
+	// server-side and the dialog hides edit affordances. Admins always edit
+	// (this knob is a global default; individual rule strings stay).
+	AllowUserPersonalRules bool `json:"allow_user_personal_rules"`
 
 	// Emergency access lets an enabled user extend a non-permanent account
 	// without admin intervention. Hours is the extension length per use;
@@ -275,7 +281,7 @@ type UISettings struct {
 	// GlobalAnnouncement is a single pinned notice shown to all users.
 	GlobalAnnouncement GlobalAnnouncement `yaml:"global_announcement" json:"global_announcement"`
 	// FooterText is the text displayed at the bottom of the login page.
-	// Defaults to "© Passwall Sub Panel".
+	// Defaults to "© Kazuha Hub Passwall".
 	FooterText string `yaml:"footer_text" json:"footer_text"`
 	// ThemeColor is the M3 source color (HEX, e.g. "#0061A4") used as the
 	// system-default theme for every user. Empty = fall back to the
@@ -322,11 +328,18 @@ type QuickLink struct {
 }
 
 // GlobalAnnouncement is a single pinned notice shown to all users.
+//
+// Popup: when true the portal renders the notice as a modal on first visit
+// after a content change. Dismissal state (don't-remind-again) lives in the
+// browser's localStorage keyed by the announcement's UpdatedAt — editing
+// the announcement bumps the timestamp and the popup reappears for
+// everyone, which is the desired "you have a new notice" behaviour.
 type GlobalAnnouncement struct {
 	Enabled   bool   `yaml:"enabled" json:"enabled"`
 	Title     string `yaml:"title" json:"title"`
 	Content   string `yaml:"content" json:"content"`
 	Level     string `yaml:"level" json:"level"` // info, warning, danger
+	Popup     bool   `yaml:"popup" json:"popup"`
 	UpdatedAt string `yaml:"updated_at" json:"updated_at"`
 }
 

@@ -58,7 +58,12 @@ func (r *userRepo) List(ctx context.Context, filter ports.UserFilter) ([]*domain
 	q := r.db.WithContext(ctx).Model(&userRow{})
 	if filter.Search != "" {
 		like := "%" + filter.Search + "%"
-		q = q.Where("upn LIKE ? OR email LIKE ? OR remark LIKE ?", like, like, like)
+		// Search across the user-facing identifiers admins actually scan
+		// the table for: account name, friendly display, email. Remark is
+		// intentionally out — it's free-form admin notes; matching on it
+		// surfaced "why does this user show up?" results that confused
+		// people.
+		q = q.Where("upn LIKE ? OR display_name LIKE ? OR email LIKE ?", like, like, like)
 	}
 	if filter.GroupID != nil {
 		q = q.Where("group_id = ?", *filter.GroupID)

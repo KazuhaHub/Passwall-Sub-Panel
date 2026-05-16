@@ -45,6 +45,7 @@ func (r *settingsRepo) Load(ctx context.Context, defaults ports.UISettings) (por
 		SyncTaskRetentionDays:      row.SyncTaskRetentionDays,
 		DisallowUserLocalLogin:     row.DisallowUserLocalLogin,
 		DisallowUserPasswordChange: row.DisallowUserPasswordChange,
+		AllowUserPersonalRules:     row.AllowUserPersonalRules,
 		EmergencyAccessEnabled:     row.EmergencyAccessEnabled,
 		EmergencyAccessHours:       row.EmergencyAccessHours,
 		EmergencyAccessMaxCount:    row.EmergencyAccessMaxCount,
@@ -140,7 +141,7 @@ func applyDefaults(out, defaults ports.UISettings) ports.UISettings {
 		out.SubUpdateIntervalHours = 24
 	}
 	if out.FooterText == "" {
-		out.FooterText = "© Passwall Sub Panel"
+		out.FooterText = "© Kazuha Hub Passwall"
 	}
 	return out
 }
@@ -236,6 +237,7 @@ func (r *settingsRepo) Save(ctx context.Context, s ports.UISettings) error {
 		SyncTaskRetentionDays:      s.SyncTaskRetentionDays,
 		DisallowUserLocalLogin:     s.DisallowUserLocalLogin,
 		DisallowUserPasswordChange: s.DisallowUserPasswordChange,
+		AllowUserPersonalRules:     s.AllowUserPersonalRules,
 		EmergencyAccessEnabled:     s.EmergencyAccessEnabled,
 		EmergencyAccessHours:       s.EmergencyAccessHours,
 		EmergencyAccessMaxCount:    s.EmergencyAccessMaxCount,

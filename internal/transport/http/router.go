@@ -151,6 +151,7 @@ func NewRouter(d Deps) *gin.Engine {
 		staffGroup.PUT("/users/:id", users.Update)
 		staffGroup.DELETE("/users/:id", users.Delete)
 		staffGroup.POST("/users/:id/reset-credentials", users.ResetCredentials)
+		staffGroup.POST("/users/:id/reset-password", users.ResetPassword)
 		staffGroup.POST("/users/:id/reset-emergency-usage", users.ResetEmergencyUsage)
 		staffGroup.POST("/users/:id/set-enabled", users.SetEnabled)
 		staffGroup.GET("/users/:id/rules", users.GetRules)

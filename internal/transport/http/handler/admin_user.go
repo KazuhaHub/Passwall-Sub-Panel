@@ -258,6 +258,41 @@ func (h *AdminUserHandler) ResetCredentials(c *gin.Context) {
 	})
 }
 
+// ResetPassword sets a new password for the target user and returns the
+// plaintext once. An empty body / empty password field means "server,
+// generate a random one"; otherwise the supplied value is validated and
+// stored. Separate from ResetCredentials (which rotates sub_token + UUID)
+// because the two operations serve different recovery scenarios.
+func (h *AdminUserHandler) ResetPassword(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid id"})
+		return
+	}
+	if !h.ensureOperatorAllowed(c, id) {
+		return
+	}
+	var req struct {
+		Password string `json:"password"`
+	}
+	// Empty / missing body is fine — falls through to random generation.
+	_ = c.ShouldBindJSON(&req)
+	pwd, err := h.user.AdminResetPassword(c.Request.Context(), id, req.Password)
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Not found"})
+			return
+		}
+		if errors.Is(err, domain.ErrValidation) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"password": pwd})
+}
+
 func (h *AdminUserHandler) ResetEmergencyUsage(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {

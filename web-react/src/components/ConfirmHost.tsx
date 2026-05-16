@@ -65,7 +65,7 @@ export default function ConfirmHost() {
     <Dialog
       open={state.open}
       onClose={() => close(false)}
-      PaperProps={{ sx: { borderRadius: 4, bgcolor: md.surfaceContainerHigh, minWidth: 320, maxWidth: 480 } }}
+      PaperProps={{ sx: { borderRadius: 3, bgcolor: md.surfaceContainerHigh, minWidth: 320, maxWidth: 480 } }}
     >
       <DialogTitle sx={{ display: 'flex', gap: 1.5, alignItems: 'center', pt: 3 }}>
         {destructive && (
@@ -84,7 +84,7 @@ export default function ConfirmHost() {
           {opts?.message ?? ''}
         </Typography>
       </DialogContent>
-      <DialogActions sx={{ px: 3, pb: 2 }}>
+      <DialogActions>
         <Button onClick={() => close(false)} variant="text">
           {opts?.cancelText ?? t('actions.cancel')}
         </Button>

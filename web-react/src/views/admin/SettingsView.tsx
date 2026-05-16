@@ -1,5 +1,6 @@
-import { useEffect, useState, type FormEvent } from 'react'
+import React, { useEffect, useState, type FormEvent } from 'react'
 import {
+  Autocomplete,
   Box,
   Button,
   Card,
@@ -14,6 +15,7 @@ import {
   IconButton,
   InputAdornment,
   MenuItem,
+  Popover,
   Switch,
   Tab,
   Tabs,
@@ -24,6 +26,7 @@ import {
 import SaveIcon from '@mui/icons-material/Save'
 import VisibilityIcon from '@mui/icons-material/Visibility'
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined'
+import HelpOutlineIcon from '@mui/icons-material/HelpOutline'
 import VisibilityOffIcon from '@mui/icons-material/VisibilityOff'
 import SendIcon from '@mui/icons-material/Send'
 import { useTranslation } from 'react-i18next'
@@ -56,10 +59,62 @@ import DeleteIcon from '@mui/icons-material/DeleteOutline'
 import type { LoginMode } from '@/api/types'
 import { pushSnack } from '@/components/SnackbarHost'
 import { confirm } from '@/components/ConfirmHost'
+import {
+  type FieldErrors,
+  firstError,
+  validateEmail,
+  validateHost,
+  validatePort,
+  validateRequired,
+  validateUrl,
+} from '@/utils/validators'
 import { useSiteStore } from '@/stores/site'
 import { useTabParam } from '@/hooks/useTabParam'
+import { listGroups } from '@/api/groups'
+import type { Group } from '@/api/types'
 
 type TabKey = 'general' | 'brand' | 'subscription' | 'portal' | 'mail' | 'sso'
+
+// GroupSlugPicker is a searchable dropdown over the admin's group catalogue.
+// SAML/OIDC both use it for `default_group_slug` so admins don't have to
+// remember slugs verbatim. Empty value means "no default group".
+function GroupSlugPicker(props: {
+  label: string
+  value: string
+  onChange: (slug: string) => void
+  groups: Group[]
+}) {
+  const { label, value, onChange, groups } = props
+  // Match by slug. If the stored slug isn't in the loaded list (stale or
+  // not yet loaded) we still surface the raw string so the admin sees what
+  // will be saved — losing it silently would be worse than a phantom row.
+  const selected = groups.find(g => g.slug === value) ?? null
+  return (
+    <Autocomplete
+      options={groups}
+      value={selected}
+      onChange={(_, g) => onChange(g?.slug ?? '')}
+      getOptionLabel={g => `${g.name} (${g.slug})`}
+      isOptionEqualToValue={(o, v) => o.slug === v.slug}
+      renderOption={(p, g) => (
+        <li {...p} key={g.id}>
+          <Box>
+            <Typography sx={{ fontSize: 14 }}>{g.name}</Typography>
+            <Typography sx={{ fontSize: 12, opacity: 0.7 }}>{g.slug}</Typography>
+          </Box>
+        </li>
+      )}
+      renderInput={params => (
+        <TextField {...params} label={label}
+          placeholder={value && !selected ? value : ''}
+          helperText={value && !selected ? `当前值: ${value}` : ''} />
+      )}
+      fullWidth
+      autoHighlight
+      clearOnEscape
+    />
+  )
+}
 
 export default function SettingsView() {
   const theme = useTheme()
@@ -75,10 +130,24 @@ export default function SettingsView() {
 
   useEffect(() => { void load() }, [])
 
+  // Go's `json.Marshal(nil slice)` serialises as `null`, so a fresh DB
+  // returns `quick_links: null` etc. instead of an empty array. The
+  // editors all call `.length` / `.map` on these unconditionally — defend
+  // by normalising at the load/save boundary so the rest of the
+  // component can treat them as arrays.
+  function normalize(s: UISettings): UISettings {
+    return {
+      ...s,
+      sub_client_rules: s.sub_client_rules ?? [],
+      sub_import_clients: s.sub_import_clients ?? [],
+      quick_links: s.quick_links ?? [],
+    }
+  }
+
   async function load() {
     setLoading(true)
     try {
-      const loaded = await getUISettings()
+      const loaded = normalize(await getUISettings())
       if (!loaded.sub_base_url) {
         loaded.sub_base_url = window.location.origin
       }
@@ -90,19 +159,64 @@ export default function SettingsView() {
   async function save(e?: FormEvent) {
     e?.preventDefault()
     if (!settings) return
+    // Cross-tab submit guard. Brand.sub_base_url is required because the
+    // subscription URL embeds it — saving an invalid one silently breaks
+    // every client. Emergency-access values only matter when the feature
+    // is on; off means "ignore the numbers".
+    if (settings.sub_base_url) {
+      const urlErr = validateUrl(settings.sub_base_url, { required: true })
+      if (urlErr) {
+        pushSnack(t(`admin:${urlErr}`) + ' (sub_base_url)', 'warning')
+        return
+      }
+    }
+    if (settings.emergency_access_enabled) {
+      if (!Number.isInteger(settings.emergency_access_hours) || settings.emergency_access_hours < 1) {
+        pushSnack(t('admin:validation.positive_int') + ' (emergency_access_hours)', 'warning'); return
+      }
+      if (!Number.isInteger(settings.emergency_access_max_count) || settings.emergency_access_max_count < 1) {
+        pushSnack(t('admin:validation.positive_int') + ' (emergency_access_max_count)', 'warning'); return
+      }
+      if (!Number.isInteger(settings.emergency_access_quota_gb) || settings.emergency_access_quota_gb < 0) {
+        pushSnack(t('admin:validation.non_negative_int') + ' (emergency_access_quota_gb)', 'warning'); return
+      }
+    }
+    // Announcement: if the admin enabled it but left the title or body
+    // empty, the portal would render a chrome-less notice — protect against
+    // accidental publishes.
+    if (settings.global_announcement?.enabled) {
+      if (!settings.global_announcement.title?.trim()) {
+        pushSnack(t('admin:validation.required') + ' (announcement title)', 'warning'); return
+      }
+      if (!settings.global_announcement.content?.trim()) {
+        pushSnack(t('admin:validation.required') + ' (announcement content)', 'warning'); return
+      }
+    }
+    // Quick links: each enabled row must have a valid label + URL,
+    // otherwise the portal would render an empty chip with a broken href.
+    for (const [idx, l] of settings.quick_links.entries()) {
+      if (!l.enabled) continue
+      if (!l.label.trim()) {
+        pushSnack(t('admin:validation.required') + ` (quick link #${idx + 1} label)`, 'warning'); return
+      }
+      const urlErr = validateUrl(l.url, { required: true })
+      if (urlErr) {
+        pushSnack(t(`admin:${urlErr}`) + ` (quick link #${idx + 1} URL)`, 'warning'); return
+      }
+    }
     setSaving(true)
     try {
-      const saved = await putUISettings(settings)
+      const saved = normalize(await putUISettings(settings))
       setSettings(saved)
       // Mirror brand-relevant fields into the live site store so the layout/header
       // updates immediately without a page reload.
       site.update({
-        siteTitle: saved.site_title || 'Passwall',
+        siteTitle: saved.site_title || 'Kazuha Hub Passwall',
         appTitle: saved.app_title || 'Passwall',
         logoUrl: saved.logo_url || '',
         logoUrlDark: saved.logo_url_dark || '',
         iconUrl: saved.icon_url || '',
-        footerText: saved.footer_text || '© Passwall Sub Panel',
+        footerText: saved.footer_text || '© Kazuha Hub Passwall',
         themeColor: saved.theme_color || undefined,
       })
       pushSnack(t('settings.saved'), 'success')
@@ -163,6 +277,16 @@ export default function SettingsView() {
               control={<Switch checked={settings.disallow_user_password_change}
                 onChange={(_, c) => patch('disallow_user_password_change', c)} />}
               sx={{ ml: 0, '& .MuiFormControlLabel-label': { ml: 1.5 } }} />
+            <FormControlLabel
+              label={t('settings.general.allow_user_personal_rules', { defaultValue: '允许用户编辑个人规则' })}
+              control={<Switch checked={settings.allow_user_personal_rules}
+                onChange={(_, c) => patch('allow_user_personal_rules', c)} />}
+              sx={{ ml: 0, '& .MuiFormControlLabel-label': { ml: 1.5 } }} />
+            <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant, mt: -1 }}>
+              {t('settings.general.allow_user_personal_rules_hint', {
+                defaultValue: '关闭后用户仍可在自助页查看个人规则，但无法保存修改。管理端不受影响，可继续手动为指定用户编辑。',
+              })}
+            </Typography>
           </Section>
 
           <Section title={t('settings.general.section_security')} md={md}>
@@ -230,8 +354,21 @@ export default function SettingsView() {
             </Pair>
             <TextField fullWidth label={t('settings.brand.footer_text')}
               value={settings.footer_text} onChange={e => patch('footer_text', e.target.value)} />
-            <TextField required fullWidth label={t('settings.brand.sub_base_url')}
-              value={settings.sub_base_url} onChange={e => patch('sub_base_url', e.target.value)} />
+            {(() => {
+              // Live URL check so the admin sees the format error inline
+              // instead of having to hit save and read the snack. validateUrl
+              // returns '' for valid OR empty; we mark empty as required
+              // separately so the asterisk and message agree.
+              const err = settings.sub_base_url
+                ? validateUrl(settings.sub_base_url, { required: true })
+                : 'validation.required'
+              return (
+                <TextField required fullWidth label={t('settings.brand.sub_base_url')}
+                  value={settings.sub_base_url} onChange={e => patch('sub_base_url', e.target.value)}
+                  error={!!err}
+                  helperText={err ? t(`admin:${err}`) : ''} />
+              )
+            })()}
           </Section>
 
           <Section title={t('settings.brand.section_assets')} md={md}>
@@ -347,8 +484,24 @@ export default function SettingsView() {
               control={<Switch checked={settings.global_announcement?.enabled ?? false}
                 onChange={(_, c) => patch('global_announcement', { ...settings.global_announcement, enabled: c })} />}
               sx={{ ml: 0, '& .MuiFormControlLabel-label': { ml: 1.5 } }} />
+            <FormControlLabel
+              label={t('settings.portal.announcement.popup', { defaultValue: '以弹窗形式展示（首次进入网站时弹窗）' })}
+              control={<Switch checked={settings.global_announcement?.popup ?? false}
+                disabled={!(settings.global_announcement?.enabled ?? false)}
+                onChange={(_, c) => patch('global_announcement', { ...settings.global_announcement, popup: c })} />}
+              sx={{ ml: 0, '& .MuiFormControlLabel-label': { ml: 1.5 } }} />
+            <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant, mt: -1 }}>
+              {t('settings.portal.announcement.popup_hint', {
+                defaultValue: '用户可点击"我知道了"关闭，或勾选"不再提醒"。提示状态仅保存在用户浏览器本地；公告内容更新后会再次弹出。',
+              })}
+            </Typography>
             <Pair>
-              <TextField fullWidth label={t('settings.portal.announcement.title')}
+              {/* Both fields size="small" so Title and Level land on
+                  the same baseline. Default (medium) Title was ~56px
+                  while the size="small" Level was ~40px — looked
+                  misaligned on the same row. */}
+              <TextField size="small" fullWidth required={!!settings.global_announcement?.enabled}
+                label={t('settings.portal.announcement.title')}
                 value={settings.global_announcement?.title ?? ''}
                 onChange={e => patch('global_announcement', { ...settings.global_announcement, title: e.target.value })} />
               <TextField select size="small" fullWidth label={t('settings.portal.announcement.level')}
@@ -359,7 +512,8 @@ export default function SettingsView() {
                 <MenuItem value="danger">{t('settings.portal.announcement.level_danger')}</MenuItem>
               </TextField>
             </Pair>
-            <TextField fullWidth multiline minRows={4} label={t('settings.portal.announcement.content')}
+            <TextField fullWidth multiline minRows={4} required={!!settings.global_announcement?.enabled}
+              label={t('settings.portal.announcement.content')}
               value={settings.global_announcement?.content ?? ''}
               onChange={e => patch('global_announcement', { ...settings.global_announcement, content: e.target.value })} />
           </Section>
@@ -391,6 +545,12 @@ function MailTab() {
   const [tplBusy, setTplBusy] = useState(false)
   const [previewBusy, setPreviewBusy] = useState(false)
   const [preview, setPreview] = useState<{ subject: string; body: string; kind: MailReminderKind } | null>(null)
+  // Anchor for the "可用变量" popover next to the enable switch — opens a
+  // cheat sheet so admins don't have to dig through code to remember the
+  // {{.UPN}} / {{.ExpireAt}} / {{if .DisableDetail}} syntax.
+  const [tplVarsAnchor, setTplVarsAnchor] = useState<HTMLElement | null>(null)
+  type MailField = 'smtp_host' | 'smtp_port' | 'from_email' | 'test_to'
+  const [errs, setErrs] = useState<FieldErrors<MailField>>({})
 
   useEffect(() => { void load() }, [])
 
@@ -407,9 +567,25 @@ function MailTab() {
     setMail(prev => prev ? { ...prev, [key]: value } : prev)
   }
 
+  // Same gate as SSO panels: only nag about required SMTP fields when the
+  // admin has actually flipped mail.enabled on. Until then the placeholders
+  // are aspirational and the form should stay quiet.
+  function validateMail(m: MailSettings): FieldErrors<MailField> {
+    if (!m.enabled) return {}
+    return {
+      smtp_host: validateHost(m.smtp_host, { required: true }),
+      smtp_port: validatePort(m.smtp_port, { required: true }),
+      from_email: validateEmail(m.from_email, { required: true }),
+    }
+  }
+
   async function save(e?: FormEvent) {
     e?.preventDefault()
     if (!mail) return
+    const v = validateMail(mail)
+    setErrs(v)
+    const firstKey = firstError(v)
+    if (firstKey) { pushSnack(t(`admin:${firstKey}`), 'warning'); return }
     setSaving(true)
     try {
       const payload: MailSettings = { ...mail }
@@ -424,7 +600,9 @@ function MailTab() {
   }
 
   async function test() {
-    if (!testTo) return
+    const err = validateEmail(testTo, { required: true })
+    setErrs(prev => ({ ...prev, test_to: err }))
+    if (err) { pushSnack(t(`admin:${err}`), 'warning'); return }
     setTestBusy(true)
     try {
       await sendTestMail(testTo)
@@ -507,11 +685,16 @@ function MailTab() {
         <Divider sx={{ mb: 2 }} />
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
           <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
-            <TextField fullWidth label={t('settings.mail.smtp_host')}
+            <TextField fullWidth required={mail.enabled} label={t('settings.mail.smtp_host')}
               value={mail.smtp_host} onChange={e => patchMail('smtp_host', e.target.value)}
-              sx={{ flex: '2 1 280px', '& input': {  } }} />
-            <TextField type="number" label={t('settings.mail.smtp_port')}
+              error={!!errs.smtp_host}
+              helperText={errs.smtp_host ? t(`admin:${errs.smtp_host}`) : ''}
+              sx={{ flex: '2 1 280px' }} />
+            <TextField type="number" required={mail.enabled} label={t('settings.mail.smtp_port')}
               value={mail.smtp_port} onChange={e => patchMail('smtp_port', Number(e.target.value))}
+              error={!!errs.smtp_port}
+              helperText={errs.smtp_port ? t(`admin:${errs.smtp_port}`) : ''}
+              inputProps={{ min: 1, max: 65535 }}
               sx={{ width: 120 }} />
           </Box>
           <TextField select size="small" fullWidth label={t('settings.mail.encryption')}
@@ -562,9 +745,10 @@ function MailTab() {
         <Typography sx={{ fontWeight: 500, mb: 1.5 }}>{t('settings.mail.section_sender')}</Typography>
         <Divider sx={{ mb: 2 }} />
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-          <TextField fullWidth label={t('settings.mail.from_email')}
+          <TextField fullWidth required={mail.enabled} label={t('settings.mail.from_email')}
             value={mail.from_email} onChange={e => patchMail('from_email', e.target.value)}
-            sx={{ '& input': {  } }} />
+            error={!!errs.from_email}
+            helperText={errs.from_email ? t(`admin:${errs.from_email}`) : ''} />
           <TextField fullWidth label={t('settings.mail.from_name')}
             value={mail.from_name} onChange={e => patchMail('from_name', e.target.value)} />
         </Box>
@@ -592,7 +776,9 @@ function MailTab() {
         <Divider sx={{ mb: 2 }} />
         <Box sx={{ display: 'flex', gap: 2, alignItems: 'flex-end' }}>
           <TextField fullWidth label={t('settings.mail.test_to')} type="email"
-            value={testTo} onChange={e => setTestTo(e.target.value)} />
+            value={testTo} onChange={e => setTestTo(e.target.value)}
+            error={!!errs.test_to}
+            helperText={errs.test_to ? t(`admin:${errs.test_to}`) : ''} />
           <Button variant="outlined" disabled={!testTo || testBusy} onClick={test}
             startIcon={testBusy ? <CircularProgress size={14} /> : <SendIcon />}>
             {t('settings.mail.test_send')}
@@ -621,10 +807,20 @@ function MailTab() {
         )}
         {(
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-            <FormControlLabel label={t('settings.mail.tpl_enabled')}
-              control={<Switch checked={currentTpl.enabled}
-                onChange={(_, c) => patchTpl(currentTpl.kind, { enabled: c })} />}
-              sx={{ ml: 0, '& .MuiFormControlLabel-label': { ml: 1.5 } }} />
+            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1 }}>
+              <FormControlLabel label={t('settings.mail.tpl_enabled')}
+                control={<Switch checked={currentTpl.enabled}
+                  onChange={(_, c) => patchTpl(currentTpl.kind, { enabled: c })} />}
+                sx={{ ml: 0, '& .MuiFormControlLabel-label': { ml: 1.5 } }} />
+              {/* Variable cheat sheet — most edits get the syntax wrong on
+                  first try ("{{ExpireAt}}" vs "{{.ExpireAt}}"). Inline help
+                  is faster than digging through docs. */}
+              <Button size="small" variant="text"
+                startIcon={<HelpOutlineIcon fontSize="small" />}
+                onClick={(e) => setTplVarsAnchor(e.currentTarget as HTMLElement)}>
+                {t('settings.mail.tpl_vars_button', { defaultValue: '可用变量' })}
+              </Button>
+            </Box>
             <TextField fullWidth label={t('settings.mail.tpl_subject')}
               value={currentTpl.subject}
               onChange={e => patchTpl(currentTpl.kind, { subject: e.target.value })} />
@@ -653,6 +849,57 @@ function MailTab() {
           </Box>
         )}
       </Card>
+
+      {/* Template variable cheat sheet. Triggered by the "可用变量" button
+          inside the editor; lives outside the Box so it can anchor to a
+          known DOM node without re-rendering the form. */}
+      <Popover
+        open={!!tplVarsAnchor}
+        anchorEl={tplVarsAnchor}
+        onClose={() => setTplVarsAnchor(null)}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+        transformOrigin={{ vertical: 'top', horizontal: 'right' }}
+        PaperProps={{ sx: { p: 2, maxWidth: 460, bgcolor: md.surfaceContainerHigh } }}>
+        <Typography sx={{ fontWeight: 500, mb: 1 }}>
+          {t('settings.mail.tpl_vars_title', { defaultValue: '模板可用变量' })}
+        </Typography>
+        <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant, mb: 1.5 }}>
+          {t('settings.mail.tpl_vars_hint', { defaultValue: '使用 Go template 语法 — {{.字段名}} 取值，{{if .字段名}}...{{end}} 控制是否渲染。' })}
+        </Typography>
+        <Box sx={{
+          display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '6px 12px',
+          fontSize: 12, lineHeight: 1.5,
+        }}>
+          {[
+            ['{{.UPN}}', t('settings.mail.tpl_vars.upn', { defaultValue: '登录名（邮箱）' })],
+            ['{{.DisplayName}}', t('settings.mail.tpl_vars.display_name', { defaultValue: '显示名（用于"你好 X"，无则留空）' })],
+            ['{{.Email}}', t('settings.mail.tpl_vars.email', { defaultValue: '邮箱地址' })],
+            ['{{.ExpireAt}}', t('settings.mail.tpl_vars.expire_at', { defaultValue: '到期时间（仅到期/即将到期模板）' })],
+            ['{{.ExpireBeforeDays}}', t('settings.mail.tpl_vars.expire_before_days', { defaultValue: '提前提醒天数' })],
+            ['{{.TrafficRemainPercent}}', t('settings.mail.tpl_vars.traffic_remain_percent', { defaultValue: '触发流量告警的百分比阈值' })],
+            ['{{.TrafficRemainGB}}', t('settings.mail.tpl_vars.traffic_remain_gb', { defaultValue: '剩余流量 GB' })],
+            ['{{.PeriodUsedGB}}', t('settings.mail.tpl_vars.period_used_gb', { defaultValue: '本周期已用 GB（流量耗尽模板）' })],
+            ['{{.TrafficLimitGB}}', t('settings.mail.tpl_vars.traffic_limit_gb', { defaultValue: '流量上限 GB' })],
+            ['{{.DisableDetail}}', t('settings.mail.tpl_vars.disable_detail', { defaultValue: '停用原因（可选，建议用 {{if}} 包裹）' })],
+            ['{{.EnableDetail}}', t('settings.mail.tpl_vars.enable_detail', { defaultValue: '恢复备注（可选）' })],
+            ['{{.AnnouncementTitle}}', t('settings.mail.tpl_vars.announcement_title', { defaultValue: '公告标题（仅公告模板）' })],
+            ['{{.AnnouncementBodyHTML}}', t('settings.mail.tpl_vars.announcement_body_html', { defaultValue: '公告正文 HTML（仅公告模板）' })],
+            ['{{.PanelURL}}', t('settings.mail.tpl_vars.panel_url', { defaultValue: '面板访问地址（CTA 按钮指向）' })],
+            ['{{.SiteTitle}}', t('settings.mail.tpl_vars.site_title', { defaultValue: '站点名称（用于邮件头）' })],
+            ['{{.LogoURL}}', t('settings.mail.tpl_vars.logo_url', { defaultValue: '站点 Logo（自动 dark 兜底）' })],
+            ['{{.GeneratedAt}}', t('settings.mail.tpl_vars.generated_at', { defaultValue: '邮件生成时间' })],
+          ].map(([code, desc]) => (
+            <React.Fragment key={code}>
+              <Box component="code" sx={{
+                fontFamily: 'ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace',
+                bgcolor: md.surfaceContainerHighest, px: 0.75, py: 0.25,
+                borderRadius: 0.5, whiteSpace: 'nowrap', color: md.primary,
+              }}>{code}</Box>
+              <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant, alignSelf: 'center' }}>{desc}</Typography>
+            </React.Fragment>
+          ))}
+        </Box>
+      </Popover>
 
       <Dialog open={!!preview} onClose={() => setPreview(null)} maxWidth="md" fullWidth
         PaperProps={{ sx: { bgcolor: md.surfaceContainerHigh } }}>
@@ -708,6 +955,12 @@ function QuickLinksEditor({ links, onChange, md }: { links: QuickLink[]; onChang
     ...links,
     { label: '', url: '', new_window: true, enabled: true, sort: (links.at(-1)?.sort ?? 0) + 10 },
   ])
+  // Live URL validation for each row — disabled links can stay blank, but
+  // an enabled row with a bad URL would silently 404 in the portal.
+  function urlError(l: QuickLink): string {
+    if (!l.enabled) return ''
+    return validateUrl(l.url, { required: true })
+  }
   return (
     <Card sx={{ p: 3, bgcolor: md.surfaceContainerLow, border: `1px solid ${md.outlineVariant}` }}>
       <Typography sx={{ fontWeight: 500, mb: 1.5, color: md.onSurface }}>{t('settings.portal.section_quick_links')}</Typography>
@@ -719,33 +972,48 @@ function QuickLinksEditor({ links, onChange, md }: { links: QuickLink[]; onChang
       ) : (
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
           {links.map((l, i) => (
+            // alignItems: flex-start so the URL field's helperText doesn't
+            // push the row's vertical centre — switches and the delete
+            // icon stay anchored at the input's top edge instead.
             <Box key={i} sx={{
-              display: 'flex', flexWrap: 'wrap', gap: 1.25, alignItems: 'center',
+              display: 'flex', flexWrap: 'wrap', gap: 1.25, alignItems: 'flex-start',
               p: 1.5, borderRadius: 2, border: `1px solid ${md.outlineVariant}`,
               bgcolor: md.surfaceContainerHigh,
             }}>
-              <TextField size="small" label={t('settings.portal.link_table.label')}
+              <TextField size="small" required={l.enabled} label={t('settings.portal.link_table.label')}
                 value={l.label} onChange={e => update(i, { label: e.target.value })}
+                helperText=" "
                 sx={{ flex: '1 1 160px' }} />
-              <TextField size="small" label={t('settings.portal.link_table.url')}
-                value={l.url} onChange={e => update(i, { url: e.target.value })}
-                sx={{ flex: '2 1 240px' }} />
+              {(() => {
+                const err = urlError(l)
+                return (
+                  <TextField size="small" required={l.enabled} label={t('settings.portal.link_table.url')}
+                    value={l.url} onChange={e => update(i, { url: e.target.value })}
+                    error={!!err}
+                    helperText={err ? t(`admin:${err}`) : ' '}
+                    sx={{ flex: '2 1 240px' }} />
+                )
+              })()}
               <TextField size="small" type="number" label={t('settings.portal.link_table.sort')}
                 value={l.sort} onChange={e => update(i, { sort: Number(e.target.value) })}
+                helperText=" "
                 sx={{ width: 90 }} />
+              {/* mt aligns the switches+delete icon to the TextField's
+                  visual centre instead of the row's flex-start top —
+                  size="small" inputs are ~40px tall, switches ~38px. */}
               <FormControlLabel
                 label={t('settings.portal.link_table.new_window')}
                 control={<Switch size="small" checked={l.new_window}
                   onChange={(_, c) => update(i, { new_window: c })} />}
-                sx={{ ml: 0, '& .MuiFormControlLabel-label': { ml: 1, fontSize: 13 } }}
+                sx={{ ml: 0, mt: 0.5, '& .MuiFormControlLabel-label': { ml: 1, fontSize: 13 } }}
               />
               <FormControlLabel
                 label={t('settings.portal.link_table.enabled')}
                 control={<Switch size="small" checked={l.enabled}
                   onChange={(_, c) => update(i, { enabled: c })} />}
-                sx={{ ml: 0, '& .MuiFormControlLabel-label': { ml: 1, fontSize: 13 } }}
+                sx={{ ml: 0, mt: 0.5, '& .MuiFormControlLabel-label': { ml: 1, fontSize: 13 } }}
               />
-              <IconButton size="small" onClick={() => remove(i)} sx={{ color: md.onSurfaceVariant }}>
+              <IconButton size="small" onClick={() => remove(i)} sx={{ color: md.onSurfaceVariant, mt: 0.75 }}>
                 <DeleteIcon fontSize="small" />
               </IconButton>
             </Box>
@@ -1016,11 +1284,23 @@ function SamlPanel() {
   const [saving, setSaving] = useState(false)
   const [changeKey, setChangeKey] = useState(false)
   const [keyPem, setKeyPem] = useState('')
+  type SamlField = 'entity_id' | 'acs_url' | 'cert_pem' | 'metadata_url'
+  const [errs, setErrs] = useState<FieldErrors<SamlField>>({})
+  const [groups, setGroups] = useState<Group[]>([])
 
-  useEffect(() => { void load() }, [])
+  useEffect(() => { void load(); void loadGroups() }, [])
+  async function loadGroups() {
+    try { setGroups((await listGroups()).items) } catch { /* dropdown stays empty */ }
+  }
+  // Fresh DB serialises `admin_group_ids` as null (Go nil slice -> JSON
+  // null). The editor calls `.join(', ')` unconditionally; defend at the
+  // load/save boundary so the rest of the component stays array-safe.
+  function normalizeSAML(c: SAMLConfig): SAMLConfig {
+    return { ...c, admin_group_ids: c.admin_group_ids ?? [] }
+  }
   async function load() {
     setLoading(true)
-    try { setCfg(await getSAML()) }
+    try { setCfg(normalizeSAML(await getSAML())) }
     finally { setLoading(false) }
   }
   function patch<K extends keyof SAMLConfig>(key: K, value: SAMLConfig[K]) {
@@ -1039,9 +1319,26 @@ function SamlPanel() {
     setCfg(prev => prev ? { ...prev, new_user_defaults: { ...prev.new_user_defaults, [key]: value } } : prev)
   }
 
+  // Field-level checks only fire when SAML is enabled — typing into the
+  // form while disabled would otherwise nag with required-field errors
+  // before the admin has even decided to flip the switch.
+  function validateSaml(c: SAMLConfig): FieldErrors<SamlField> {
+    if (!c.enabled) return {}
+    return {
+      entity_id: validateRequired(c.sp.entity_id),
+      acs_url: validateUrl(c.sp.acs_url, { required: true }),
+      cert_pem: validateRequired(c.sp.cert_pem),
+      metadata_url: validateUrl(c.idp.metadata_url, { required: true }),
+    }
+  }
+
   async function save(e?: FormEvent) {
     e?.preventDefault()
     if (!cfg) return
+    const v = validateSaml(cfg)
+    setErrs(v)
+    const firstKey = firstError(v)
+    if (firstKey) { pushSnack(t(`admin:${firstKey}`), 'warning'); return }
     setSaving(true)
     try {
       const res = await putSAML({
@@ -1051,7 +1348,7 @@ function SamlPanel() {
           key_pem: changeKey ? keyPem : '',
         },
       })
-      setCfg(res.config)
+      setCfg(normalizeSAML(res.config))
       setChangeKey(false); setKeyPem('')
       if (res.reload_error) pushSnack(t('settings.sso.reload_error', { error: res.reload_error }), 'warning')
       else pushSnack(t('settings.sso.saved'), 'success')
@@ -1083,12 +1380,18 @@ function SamlPanel() {
       </Card>
 
       <Section title={t('settings.sso.saml.sp_section')} md={md}>
-        <TextField fullWidth label={t('settings.sso.saml.sp_entity_id')} value={cfg.sp.entity_id}
-          onChange={e => patchSp('entity_id', e.target.value)} />
-        <TextField fullWidth label={t('settings.sso.saml.sp_acs_url')} value={cfg.sp.acs_url}
-          onChange={e => patchSp('acs_url', e.target.value)} />
-        <TextField fullWidth multiline minRows={4} label={t('settings.sso.saml.sp_cert')} value={cfg.sp.cert_pem}
+        <TextField fullWidth required={cfg.enabled} label={t('settings.sso.saml.sp_entity_id')} value={cfg.sp.entity_id}
+          onChange={e => patchSp('entity_id', e.target.value)}
+          error={!!errs.entity_id}
+          helperText={errs.entity_id ? t(`admin:${errs.entity_id}`) : ''} />
+        <TextField fullWidth required={cfg.enabled} label={t('settings.sso.saml.sp_acs_url')} value={cfg.sp.acs_url}
+          onChange={e => patchSp('acs_url', e.target.value)}
+          error={!!errs.acs_url}
+          helperText={errs.acs_url ? t(`admin:${errs.acs_url}`) : ''} />
+        <TextField fullWidth required={cfg.enabled} multiline minRows={4} label={t('settings.sso.saml.sp_cert')} value={cfg.sp.cert_pem}
           onChange={e => patchSp('cert_pem', e.target.value)}
+          error={!!errs.cert_pem}
+          helperText={errs.cert_pem ? t(`admin:${errs.cert_pem}`) : ''}
           sx={{ '& textarea': { fontSize: 12 } }} />
         {cfg.sp.has_key_pem && !changeKey ? (
           <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1.5, height: 56, px: 1.75, borderRadius: 1.5, border: `1px solid ${md.outlineVariant}` }}>
@@ -1103,8 +1406,10 @@ function SamlPanel() {
       </Section>
 
       <Section title={t('settings.sso.saml.idp_section')} md={md}>
-        <TextField fullWidth label={t('settings.sso.saml.idp_metadata_url')} value={cfg.idp.metadata_url}
-          onChange={e => patchIdp('metadata_url', e.target.value)} />
+        <TextField fullWidth required={cfg.enabled} label={t('settings.sso.saml.idp_metadata_url')} value={cfg.idp.metadata_url}
+          onChange={e => patchIdp('metadata_url', e.target.value)}
+          error={!!errs.metadata_url}
+          helperText={errs.metadata_url ? t(`admin:${errs.metadata_url}`) : ''} />
         <NumField label={t('settings.sso.saml.idp_refresh_hours')} value={cfg.idp.metadata_refresh_hours}
           onChange={v => patchIdp('metadata_refresh_hours', v)} />
       </Section>
@@ -1124,11 +1429,25 @@ function SamlPanel() {
         </Pair>
         <TextField fullWidth label={t('settings.sso.saml.admin_groups')} value={cfg.admin_group_ids.join(', ')}
           onChange={e => patch('admin_group_ids', e.target.value.split(',').map(s => s.trim()).filter(Boolean))} />
-        <TextField fullWidth label={t('settings.sso.saml.default_group')} value={cfg.default_group_slug}
-          onChange={e => patch('default_group_slug', e.target.value)} />
+        <GroupSlugPicker
+          label={t('settings.sso.saml.default_group')}
+          value={cfg.default_group_slug}
+          onChange={slug => patch('default_group_slug', slug)}
+          groups={groups}
+        />
       </Section>
 
       <Section title={t('settings.sso.saml.new_user_section')} md={md}>
+        <FormControlLabel
+          label={t('settings.sso.allow_auto_create', { defaultValue: '允许通过 SSO 自动创建账户' })}
+          control={<Switch checked={cfg.allow_auto_create}
+            onChange={(_, c) => patch('allow_auto_create', c)} />}
+          sx={{ ml: 0, '& .MuiFormControlLabel-label': { ml: 1.5 } }} />
+        <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant, mt: -1 }}>
+          {t('settings.sso.allow_auto_create_hint', {
+            defaultValue: '关闭后，未在面板中预先创建的账户首次 SSO 登录会被跳转到“联系管理员”页；IdP 管理员组不受影响。',
+          })}
+        </Typography>
         <Pair>
           <NumField label={t('settings.sso.saml.expire_days')} value={cfg.new_user_defaults.expire_days}
             onChange={v => patchDef('expire_days', v)} />
@@ -1155,11 +1474,26 @@ function OidcPanel() {
   const [saving, setSaving] = useState(false)
   const [changeSecret, setChangeSecret] = useState(false)
   const [secret, setSecret] = useState('')
+  type OidcField = 'issuer_url' | 'client_id' | 'redirect_url'
+  const [errs, setErrs] = useState<FieldErrors<OidcField>>({})
+  const [groups, setGroups] = useState<Group[]>([])
 
-  useEffect(() => { void load() }, [])
+  useEffect(() => { void load(); void loadGroups() }, [])
+  async function loadGroups() {
+    try { setGroups((await listGroups()).items) } catch { /* dropdown stays empty */ }
+  }
+  // Same null-array gotcha as SAML: scopes + admin_group_ids come back
+  // as null on a fresh DB, and the editor calls `.join` on them.
+  function normalizeOIDC(c: OIDCConfig): OIDCConfig {
+    return {
+      ...c,
+      scopes: c.scopes ?? [],
+      admin_group_ids: c.admin_group_ids ?? [],
+    }
+  }
   async function load() {
     setLoading(true)
-    try { setCfg(await getOIDC()) }
+    try { setCfg(normalizeOIDC(await getOIDC())) }
     finally { setLoading(false) }
   }
   function patch<K extends keyof OIDCConfig>(key: K, value: OIDCConfig[K]) {
@@ -1172,13 +1506,26 @@ function OidcPanel() {
     setCfg(prev => prev ? { ...prev, new_user_defaults: { ...prev.new_user_defaults, [key]: value } } : prev)
   }
 
+  function validateOidc(c: OIDCConfig): FieldErrors<OidcField> {
+    if (!c.enabled) return {}
+    return {
+      issuer_url: validateUrl(c.issuer_url, { required: true }),
+      client_id: validateRequired(c.client_id),
+      redirect_url: validateUrl(c.redirect_url, { required: true }),
+    }
+  }
+
   async function save(e?: FormEvent) {
     e?.preventDefault()
     if (!cfg) return
+    const v = validateOidc(cfg)
+    setErrs(v)
+    const firstKey = firstError(v)
+    if (firstKey) { pushSnack(t(`admin:${firstKey}`), 'warning'); return }
     setSaving(true)
     try {
       const res = await putOIDC({ ...cfg, client_secret: changeSecret ? secret : '' })
-      setCfg(res.config)
+      setCfg(normalizeOIDC(res.config))
       setChangeSecret(false); setSecret('')
       if (res.reload_error) pushSnack(t('settings.sso.reload_error', { error: res.reload_error }), 'warning')
       else pushSnack(t('settings.sso.saved'), 'success')
@@ -1203,11 +1550,14 @@ function OidcPanel() {
       </Card>
 
       <Section title={t('settings.sso.oidc.issuer_url')} md={md}>
-        <TextField fullWidth label={t('settings.sso.oidc.issuer_url')} value={cfg.issuer_url}
-          onChange={e => patch('issuer_url', e.target.value)} />
-        <TextField fullWidth label={t('settings.sso.oidc.client_id')} value={cfg.client_id}
+        <TextField fullWidth required={cfg.enabled} label={t('settings.sso.oidc.issuer_url')} value={cfg.issuer_url}
+          onChange={e => patch('issuer_url', e.target.value)}
+          error={!!errs.issuer_url}
+          helperText={errs.issuer_url ? t(`admin:${errs.issuer_url}`) : ''} />
+        <TextField fullWidth required={cfg.enabled} label={t('settings.sso.oidc.client_id')} value={cfg.client_id}
           onChange={e => patch('client_id', e.target.value)}
-          sx={{ '& input': {  } }} />
+          error={!!errs.client_id}
+          helperText={errs.client_id ? t(`admin:${errs.client_id}`) : ''} />
         {cfg.has_client_secret && !changeSecret ? (
           <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1.5, height: 56, px: 1.75, borderRadius: 1.5, border: `1px solid ${md.outlineVariant}` }}>
             <Typography variant="body2">{t('settings.sso.oidc.client_secret_kept')}</Typography>
@@ -1217,8 +1567,10 @@ function OidcPanel() {
           <TextField fullWidth type="password" label={t('settings.sso.oidc.client_secret')} value={secret}
             onChange={e => setSecret(e.target.value)} autoComplete="new-password" />
         )}
-        <TextField fullWidth label={t('settings.sso.oidc.redirect_url')} value={cfg.redirect_url}
-          onChange={e => patch('redirect_url', e.target.value)} />
+        <TextField fullWidth required={cfg.enabled} label={t('settings.sso.oidc.redirect_url')} value={cfg.redirect_url}
+          onChange={e => patch('redirect_url', e.target.value)}
+          error={!!errs.redirect_url}
+          helperText={errs.redirect_url ? t(`admin:${errs.redirect_url}`) : ''} />
         <TextField fullWidth label={t('settings.sso.oidc.scopes')} value={cfg.scopes.join(', ')}
           onChange={e => patch('scopes', e.target.value.split(',').map(s => s.trim()).filter(Boolean))} />
       </Section>
@@ -1238,11 +1590,25 @@ function OidcPanel() {
         </Pair>
         <TextField fullWidth label={t('settings.sso.oidc.admin_groups')} value={cfg.admin_group_ids.join(', ')}
           onChange={e => patch('admin_group_ids', e.target.value.split(',').map(s => s.trim()).filter(Boolean))} />
-        <TextField fullWidth label={t('settings.sso.oidc.default_group')} value={cfg.default_group_slug}
-          onChange={e => patch('default_group_slug', e.target.value)} />
+        <GroupSlugPicker
+          label={t('settings.sso.oidc.default_group')}
+          value={cfg.default_group_slug}
+          onChange={slug => patch('default_group_slug', slug)}
+          groups={groups}
+        />
       </Section>
 
       <Section title={t('settings.sso.oidc.new_user_section')} md={md}>
+        <FormControlLabel
+          label={t('settings.sso.allow_auto_create', { defaultValue: '允许通过 SSO 自动创建账户' })}
+          control={<Switch checked={cfg.allow_auto_create}
+            onChange={(_, c) => patch('allow_auto_create', c)} />}
+          sx={{ ml: 0, '& .MuiFormControlLabel-label': { ml: 1.5 } }} />
+        <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant, mt: -1 }}>
+          {t('settings.sso.allow_auto_create_hint', {
+            defaultValue: '关闭后，未在面板中预先创建的账户首次 SSO 登录会被跳转到"联系管理员"页；IdP 管理员组不受影响。',
+          })}
+        </Typography>
         <Pair>
           <NumField label={t('settings.sso.oidc.expire_days')} value={cfg.new_user_defaults.expire_days}
             onChange={v => patchDef('expire_days', v)} />

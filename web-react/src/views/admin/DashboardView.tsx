@@ -249,7 +249,7 @@ export default function DashboardView() {
         <AlertCard
           title={t('dashboard.alerts.node_health', { defaultValue: '节点健康警报' })}
           icon={<WarningAmberIcon />}
-          emptyLabel={t('dashboard.alerts.node_health_empty', { defaultValue: '所有节点工作正常 ✓' })}
+          emptyLabel={t('dashboard.alerts.node_health_empty', { defaultValue: '所有节点工作正常' })}
           empty={nodeAlerts.length === 0 && !loading}
           loading={loading}
           to="/admin/nodes"
@@ -275,7 +275,7 @@ export default function DashboardView() {
         <AlertCard
           title={t('dashboard.alerts.expiring_soon', { defaultValue: '即将到期（7 天内）' })}
           icon={<ScheduleIcon />}
-          emptyLabel={t('dashboard.alerts.expiring_empty', { defaultValue: '7 天内无到期用户 ✓' })}
+          emptyLabel={t('dashboard.alerts.expiring_empty', { defaultValue: '7 天内无到期用户' })}
           empty={stats.expiring.length === 0 && !loading}
           loading={loading}
           to="/admin/users"

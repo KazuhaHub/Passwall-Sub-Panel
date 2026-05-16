@@ -29,6 +29,10 @@ type OIDCConfig struct {
 	AdminGroupIDs    []string `yaml:"admin_group_ids" json:"admin_group_ids"`
 	DefaultGroupSlug string   `yaml:"default_group_slug" json:"default_group_slug"`
 
+	// AllowAutoCreate: see SAMLConfig.AllowAutoCreate. Off by default; only
+	// IdP-admin users are auto-provisioned until the admin opts in.
+	AllowAutoCreate bool `yaml:"allow_auto_create" json:"allow_auto_create"`
+
 	NewUserDefaults SAMLNewUserDefaults `yaml:"new_user_defaults" json:"new_user_defaults"`
 }
 

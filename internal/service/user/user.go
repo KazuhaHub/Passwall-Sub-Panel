@@ -212,26 +212,54 @@ type EnsureSSOInput struct {
 	DisplayName        string
 	Groups             []string
 	IsAdmin            bool
+	// AllowAutoCreate: when true, a non-admin first-time SSO login is
+	// auto-provisioned with the panel's default group / quota. When false
+	// (the closed-deployment default) only IdP admins get an account; every
+	// other unknown UPN is bounced to /sso-no-account.
+	AllowAutoCreate    bool
 	DefaultGroupSlug   string
 	DefaultExpireDays  int
 	DefaultLimitBytes  int64
 	DefaultResetPeriod domain.ResetPeriod
 }
 
-// EnsureSSO returns the user matching the given UPN; if absent, creates
-// one with the supplied defaults. Role is re-evaluated on every call so
-// admin group changes in the IdP take effect at the next login.
+// applyRoleFromSSO implements the promote-only role policy used at every
+// SSO login.
 //
-// On first creation the user is automatically resynced to push their
-// client into every authorised inbound — they can use the subscription
-// URL immediately.
+//   - IdP admin-group hit + current role is not admin -> promote to admin.
+//   - IdP admin-group miss                            -> role unchanged.
+//   - IdP admin-group hit + current role IS admin     -> role unchanged.
+//
+// Returns the role to persist and whether anything actually changed (so
+// the caller can skip the Update round-trip on no-ops). Extracted as a
+// pure function so the invariant — "SSO can promote but never demote" —
+// is unit-testable without standing up the whole user.Service.
+func applyRoleFromSSO(current domain.Role, idpIsAdmin bool) (domain.Role, bool) {
+	if idpIsAdmin && current != domain.RoleAdmin {
+		return domain.RoleAdmin, true
+	}
+	return current, false
+}
+
+// EnsureSSO returns the user matching the given UPN; if absent, creates
+// one with the supplied defaults.
+//
+// Role policy (promote-only):
+//   - IdP admin-group hit + current role is NOT admin -> promote to admin.
+//   - IdP admin-group miss -> role is LEFT ALONE. This protects operator
+//     or admin status that an admin granted manually in the panel from
+//     being washed back to "user" on every SSO login.
+//   - Demoting an existing admin (e.g., they left the admin group in the
+//     IdP) is therefore intentional: admin removes the role in the panel.
+//
+// On first creation (no row yet) the user is automatically resynced to
+// push their client into every authorised inbound — they can use the
+// subscription URL immediately. Auto-create still fires only when the
+// IdP marks the visitor as admin (legacy "bootstrap a fresh panel via
+// SSO admin group" behavior preserved).
 func (s *Service) EnsureSSO(ctx context.Context, in EnsureSSOInput) (*domain.User, error) {
 	if in.UPN == "" {
 		return nil, fmt.Errorf("%w: upn required", domain.ErrValidation)
-	}
-	desiredRole := domain.RoleUser
-	if in.IsAdmin {
-		desiredRole = domain.RoleAdmin
 	}
 
 	u, err := s.users.GetByUPN(ctx, in.UPN)
@@ -246,11 +274,12 @@ func (s *Service) EnsureSSO(ctx context.Context, in EnsureSSOInput) (*domain.Use
 		u = nil
 	}
 	if u != nil {
-		// Existing SSO user. Reconcile role + display name in case they
-		// changed in the IdP.
+		// Existing SSO user. Reconcile display name / email always (no
+		// privilege implications). Role only goes UP via the
+		// promote-only policy.
 		dirty := false
-		if u.Role != desiredRole {
-			u.Role = desiredRole
+		if newRole, changed := applyRoleFromSSO(u.Role, in.IsAdmin); changed {
+			u.Role = newRole
 			dirty = true
 		}
 		if in.DisplayName != "" && u.DisplayName != in.DisplayName {
@@ -269,11 +298,12 @@ func (s *Service) EnsureSSO(ctx context.Context, in EnsureSSOInput) (*domain.Use
 		return u, nil
 	}
 
-	// No account. Regular users are NOT auto-provisioned —
-	// the caller redirects them to a "contact your administrator" page.
-	// Admins are auto-provisioned so the IdP-side admin group is enough to
-	// bootstrap a fresh panel.
-	if !in.IsAdmin {
+	// No account. Provisioning matrix:
+	//   * IdP admin                       -> always create (bootstrap path).
+	//   * non-admin + AllowAutoCreate ON  -> create with default group/quota.
+	//   * non-admin + AllowAutoCreate OFF -> ErrSSONoAccount (caller redirects
+	//                                        to the "contact your admin" page).
+	if !in.IsAdmin && !in.AllowAutoCreate {
 		return nil, domain.ErrSSONoAccount
 	}
 
@@ -299,10 +329,18 @@ func (s *Service) EnsureSSO(ctx context.Context, in EnsureSSOInput) (*domain.Use
 		resetPeriod = domain.ResetMonthly
 	}
 	now := time.Now()
+	// Role assignment honours the IdP signal here: admins land on RoleAdmin
+	// (preserves the legacy "bootstrap fresh panel" flow), AllowAutoCreate
+	// users land on RoleUser (the AllowAutoCreate gate would have rejected
+	// them otherwise).
+	newRole := domain.RoleUser
+	if in.IsAdmin {
+		newRole = domain.RoleAdmin
+	}
 	u = &domain.User{
 		UPN:                in.UPN,
 		Email:              in.Email,
-		Role:               domain.RoleAdmin,
+		Role:               newRole,
 		SubToken:           subToken,
 		UUID:               idgen.NewUUID(),
 		GroupID:            groupID,
@@ -314,7 +352,7 @@ func (s *Service) EnsureSSO(ctx context.Context, in EnsureSSOInput) (*domain.Use
 		Enabled:            true,
 	}
 	if err := s.users.Create(ctx, u); err != nil {
-		return nil, fmt.Errorf("create sso admin: %w", err)
+		return nil, fmt.Errorf("create sso user: %w", err)
 	}
 	return u, nil
 }
@@ -432,6 +470,60 @@ func (s *Service) SetPassword(ctx context.Context, userID int64, newPassword str
 	}
 	u.PasswordHash = string(hash)
 	return s.users.Update(ctx, u)
+}
+
+// AdminResetPassword sets the account's local credential and returns the
+// plaintext for one-time display. When the requested password is empty a
+// random one is generated; otherwise the caller-supplied value is used
+// after a minimum-strength check.
+//
+// Unlike SetPassword, this works for SSO-only accounts too — promoting
+// them to dual-mode (the admin needs a way to hand out a fallback
+// password when the IdP is offline or the user is locked out of SSO).
+func (s *Service) AdminResetPassword(ctx context.Context, userID int64, requested string) (string, error) {
+	u, err := s.users.GetByID(ctx, userID)
+	if err != nil {
+		return "", err
+	}
+	pwd := requested
+	if pwd == "" {
+		pwd, err = idgen.NewPassword()
+		if err != nil {
+			return "", err
+		}
+	} else {
+		// Same floor as the React validator: ≥8 chars, contains a letter
+		// and a digit. Cheap server-side check so a bypass of the form
+		// doesn't seed a 1-character password into the bcrypt store.
+		if !isMinimallyStrongPassword(pwd) {
+			return "", fmt.Errorf("%w: password too weak", domain.ErrValidation)
+		}
+	}
+	hash, err := bcrypt.GenerateFromPassword([]byte(pwd), bcrypt.DefaultCost)
+	if err != nil {
+		return "", err
+	}
+	u.PasswordHash = string(hash)
+	if err := s.users.Update(ctx, u); err != nil {
+		return "", err
+	}
+	return pwd, nil
+}
+
+func isMinimallyStrongPassword(s string) bool {
+	if len(s) < 8 {
+		return false
+	}
+	var hasLetter, hasDigit bool
+	for _, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z':
+			hasLetter = true
+		case r >= '0' && r <= '9':
+			hasDigit = true
+		}
+	}
+	return hasLetter && hasDigit
 }
 
 // Get returns one user or ErrNotFound.

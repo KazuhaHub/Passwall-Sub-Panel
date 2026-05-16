@@ -47,6 +47,7 @@ type oidcConfigDTO struct {
 	AttributeMapping oidcAttrDTO    `json:"attribute_mapping"`
 	AdminGroupIDs    []string       `json:"admin_group_ids"`
 	DefaultGroupSlug string         `json:"default_group_slug"`
+	AllowAutoCreate  bool           `json:"allow_auto_create"`
 	NewUserDefaults  samlNewUserDTO `json:"new_user_defaults"`
 }
 
@@ -60,6 +61,7 @@ type oidcUpdateRequest struct {
 	AttributeMapping oidcAttrDTO    `json:"attribute_mapping"`
 	AdminGroupIDs    []string       `json:"admin_group_ids"`
 	DefaultGroupSlug string         `json:"default_group_slug"`
+	AllowAutoCreate  bool           `json:"allow_auto_create"`
 	NewUserDefaults  samlNewUserDTO `json:"new_user_defaults"`
 }
 
@@ -102,6 +104,7 @@ func (h *AdminOIDCHandler) Put(c *gin.Context) {
 		},
 		AdminGroupIDs:    req.AdminGroupIDs,
 		DefaultGroupSlug: req.DefaultGroupSlug,
+		AllowAutoCreate:  req.AllowAutoCreate,
 		NewUserDefaults: config.SAMLNewUserDefaults{
 			ExpireDays:         req.NewUserDefaults.ExpireDays,
 			TrafficLimitBytes:  req.NewUserDefaults.TrafficLimitBytes,
@@ -153,6 +156,7 @@ func toOIDCDTO(c *config.OIDCConfig) oidcConfigDTO {
 		},
 		AdminGroupIDs:    c.AdminGroupIDs,
 		DefaultGroupSlug: c.DefaultGroupSlug,
+		AllowAutoCreate:  c.AllowAutoCreate,
 		NewUserDefaults: samlNewUserDTO{
 			ExpireDays:         c.NewUserDefaults.ExpireDays,
 			TrafficLimitBytes:  c.NewUserDefaults.TrafficLimitBytes,

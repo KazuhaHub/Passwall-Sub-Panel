@@ -46,7 +46,9 @@
   },
   "rules": {
     "title": "My personal rules",
-    "placeholder": "One rule per line. Higher priority than site rule sets.",
+    "placeholder": "- DOMAIN-SUFFIX,openai.com,🚀 节点选择\n- DOMAIN-KEYWORD,github,🚀 节点选择\n- IP-CIDR,10.0.0.0/8,🎯 全球直连\n- MATCH,🐟 漏网之鱼",
+    "hint": "One rule per line, Clash / Mihomo syntax. In the default template, personal rules take priority over the site ruleset.",
+    "insert_example": "Insert example rules",
     "saved": "Saved"
   },
   "emergency": {
@@ -71,6 +73,9 @@
   },
   "trend": {
     "title": "Traffic trend",
+    "period_day": "Daily",
+    "period_week": "Weekly",
+    "period_month": "Monthly",
     "range_7": "Last 7 days",
     "range_30": "Last 30 days",
     "range_90": "Last 90 days"
@@ -97,5 +102,9 @@
     "ok": "OK",
     "cancel": "Cancel",
     "copied": "Copied"
+  },
+  "announce": {
+    "ack": "Got it",
+    "mute": "Don't show again"
   }
 }

@@ -44,6 +44,7 @@ type settingsDTO struct {
 	SyncTaskRetentionDays      int                      `json:"sync_task_retention_days"`
 	DisallowUserLocalLogin     bool                     `json:"disallow_user_local_login"`
 	DisallowUserPasswordChange bool                     `json:"disallow_user_password_change"`
+	AllowUserPersonalRules     bool                     `json:"allow_user_personal_rules"`
 	EmergencyAccessEnabled     bool                     `json:"emergency_access_enabled"`
 	EmergencyAccessHours       int                      `json:"emergency_access_hours"`
 	EmergencyAccessMaxCount    int                      `json:"emergency_access_max_count"`
@@ -65,7 +66,7 @@ type settingsDTO struct {
 func (h *AdminSettingsHandler) defaults() ports.UISettings {
 	return ports.UISettings{
 		LoginMode:   "dual",
-		SiteTitle:   "Passwall",
+		SiteTitle:   "Kazuha Hub Passwall",
 		AppTitle:    "Passwall",
 		IconURL:     "/images/HeadPicture.png",
 		EmailDomain: "psp.local",
@@ -99,6 +100,7 @@ func (h *AdminSettingsHandler) Get(c *gin.Context) {
 		SyncTaskRetentionDays:      s.SyncTaskRetentionDays,
 		DisallowUserLocalLogin:     s.DisallowUserLocalLogin,
 		DisallowUserPasswordChange: s.DisallowUserPasswordChange,
+		AllowUserPersonalRules:     s.AllowUserPersonalRules,
 		EmergencyAccessEnabled:     s.EmergencyAccessEnabled,
 		EmergencyAccessHours:       s.EmergencyAccessHours,
 		EmergencyAccessMaxCount:    s.EmergencyAccessMaxCount,
@@ -131,6 +133,13 @@ func (h *AdminSettingsHandler) Put(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Login_mode must be sso_redirect | sso_first | dual | local_only"})
 		return
 	}
+	// Load the prior state so normalizeGlobalAnnouncement can decide
+	// whether to bump UpdatedAt (only on meaningful change).
+	prev, prevErr := h.repo.Load(c.Request.Context(), h.defaults())
+	if prevErr != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": prevErr.Error()})
+		return
+	}
 	s := ports.UISettings{
 		LoginMode:                  req.LoginMode,
 		SiteTitle:                  req.SiteTitle,
@@ -151,6 +160,7 @@ func (h *AdminSettingsHandler) Put(c *gin.Context) {
 		SyncTaskRetentionDays:      req.SyncTaskRetentionDays,
 		DisallowUserLocalLogin:     req.DisallowUserLocalLogin,
 		DisallowUserPasswordChange: req.DisallowUserPasswordChange,
+		AllowUserPersonalRules:     req.AllowUserPersonalRules,
 		EmergencyAccessEnabled:     req.EmergencyAccessEnabled,
 		EmergencyAccessHours:       req.EmergencyAccessHours,
 		EmergencyAccessMaxCount:    req.EmergencyAccessMaxCount,
@@ -164,7 +174,7 @@ func (h *AdminSettingsHandler) Put(c *gin.Context) {
 		SubBlockAutoDisableCount:   req.SubBlockAutoDisableCount,
 		SubUpdateIntervalHours:     req.SubUpdateIntervalHours,
 		QuickLinks:                 normalizeQuickLinks(req.QuickLinks),
-		GlobalAnnouncement:         normalizeGlobalAnnouncement(req.GlobalAnnouncement),
+		GlobalAnnouncement:         normalizeGlobalAnnouncement(req.GlobalAnnouncement, prev.GlobalAnnouncement),
 		FooterText:                 strings.TrimSpace(req.FooterText),
 		ThemeColor:                 strings.TrimSpace(req.ThemeColor),
 	}
@@ -189,7 +199,7 @@ func (h *AdminSettingsHandler) Put(c *gin.Context) {
 		s.EmailDomain = "psp.local"
 	}
 	if s.SiteTitle == "" {
-		s.SiteTitle = "Passwall"
+		s.SiteTitle = "Kazuha Hub Passwall"
 	}
 	if s.AppTitle == "" {
 		s.AppTitle = "Passwall"
@@ -229,6 +239,7 @@ func (h *AdminSettingsHandler) Put(c *gin.Context) {
 		SyncTaskRetentionDays:      s.SyncTaskRetentionDays,
 		DisallowUserLocalLogin:     s.DisallowUserLocalLogin,
 		DisallowUserPasswordChange: s.DisallowUserPasswordChange,
+		AllowUserPersonalRules:     s.AllowUserPersonalRules,
 		EmergencyAccessEnabled:     s.EmergencyAccessEnabled,
 		EmergencyAccessHours:       s.EmergencyAccessHours,
 		EmergencyAccessMaxCount:    s.EmergencyAccessMaxCount,
@@ -261,7 +272,17 @@ func normalizeQuickLinks(links []ports.QuickLink) []ports.QuickLink {
 	return out
 }
 
-func normalizeGlobalAnnouncement(a ports.GlobalAnnouncement) ports.GlobalAnnouncement {
+// normalizeGlobalAnnouncement cleans up the incoming payload and decides
+// whether UpdatedAt needs to be bumped to "now". The bump matters because
+// the user portal uses UpdatedAt as the localStorage key for the "don't
+// remind again" dismissal — keeping the same stamp would mean a freshly
+// edited notice never re-appears for visitors who muted the previous one.
+//
+// Rule: bump UpdatedAt when any visible field (title/content/level/popup)
+// or the enabled flag changes vs the previously stored announcement. A
+// pure no-op save keeps the old timestamp so quiet "save" clicks don't
+// surprise users with a re-popup.
+func normalizeGlobalAnnouncement(a, prev ports.GlobalAnnouncement) ports.GlobalAnnouncement {
 	a.Title = strings.TrimSpace(a.Title)
 	a.Content = strings.TrimSpace(a.Content)
 	a.Level = strings.ToLower(strings.TrimSpace(a.Level))
@@ -273,8 +294,15 @@ func normalizeGlobalAnnouncement(a ports.GlobalAnnouncement) ports.GlobalAnnounc
 	if a.Title == "" && a.Content == "" {
 		a.Enabled = false
 	}
-	if a.Enabled && a.UpdatedAt == "" {
+	changed := a.Enabled != prev.Enabled ||
+		a.Title != prev.Title ||
+		a.Content != prev.Content ||
+		a.Level != prev.Level ||
+		a.Popup != prev.Popup
+	if changed && a.Enabled {
 		a.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+	} else if a.UpdatedAt == "" {
+		a.UpdatedAt = prev.UpdatedAt
 	}
 	return a
 }

@@ -1,14 +1,21 @@
 // reset-admin-password rewrites a local-account password hash directly in
-// the SQLite DB. Use it when the bootstrap admin password got lost — there
-// is no reset-from-UI flow for the admin account itself.
+// the DB. Use it when the bootstrap admin password got lost — there is no
+// reset-from-UI flow for the admin account itself.
 //
-// The panel must be stopped before running, otherwise SQLite write locking
-// will block.
+// Stop the panel before running on SQLite (write locking will otherwise
+// fight you). MySQL is fine to run live but you probably want the panel
+// down for that minute anyway so a logged-in admin session doesn't act
+// stale.
 //
 // Usage (from repo root):
 //
+//	# SQLite (default):
 //	go run ./cmd/reset-admin-password/
 //	go run ./cmd/reset-admin-password/ -upn alice -password s3cret
+//
+//	# MySQL:
+//	go run ./cmd/reset-admin-password/ -driver mysql \
+//	    -dsn 'user:pass@tcp(host:3306)/passwall?charset=utf8mb4&parseTime=true'
 package main
 
 import (
@@ -18,23 +25,21 @@ import (
 
 	"github.com/glebarez/sqlite"
 	"golang.org/x/crypto/bcrypt"
+	mysqldriver "gorm.io/driver/mysql"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 )
 
 func main() {
-	dbPath := flag.String("db", "data/panel.db", "path to panel.db (SQLite); panel's default data_dir is ./data relative to its working directory")
+	driver := flag.String("driver", "sqlite", "db driver: sqlite | mysql")
+	dbPath := flag.String("db", "data/panel.db", "SQLite db path (when -driver=sqlite); ignored for mysql")
+	dsn := flag.String("dsn", "", "MySQL DSN (required when -driver=mysql), e.g. user:pass@tcp(host:3306)/db?charset=utf8mb4&parseTime=true")
 	upn := flag.String("upn", "admin", "user UPN to reset / verify")
 	password := flag.String("password", "admin", "new password (or password to verify in -verify mode)")
 	verify := flag.Bool("verify", false, "do not modify; just compare password against the stored hash")
 	flag.Parse()
 
-	if _, err := os.Stat(*dbPath); err != nil {
-		fmt.Fprintf(os.Stderr, "db not found: %s\n", *dbPath)
-		os.Exit(1)
-	}
-
-	g, err := gorm.Open(sqlite.Open(*dbPath), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
+	g, err := openDB(*driver, *dbPath, *dsn)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "open db: %v\n", err)
 		os.Exit(1)
@@ -85,4 +90,22 @@ func main() {
 	}
 	hashPrefix := string(hash)[:12] + "..."
 	fmt.Printf("password reset OK — upn=%s, rows=%d, password=%s, hash=%s\n", *upn, res.RowsAffected, *password, hashPrefix)
+}
+
+func openDB(driver, path, dsn string) (*gorm.DB, error) {
+	cfg := &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)}
+	switch driver {
+	case "sqlite":
+		if _, err := os.Stat(path); err != nil {
+			return nil, fmt.Errorf("sqlite db not found: %s", path)
+		}
+		return gorm.Open(sqlite.Open(path), cfg)
+	case "mysql":
+		if dsn == "" {
+			return nil, fmt.Errorf("-dsn is required when -driver=mysql")
+		}
+		return gorm.Open(mysqldriver.Open(dsn), cfg)
+	default:
+		return nil, fmt.Errorf("unknown -driver %q (expected sqlite or mysql)", driver)
+	}
 }

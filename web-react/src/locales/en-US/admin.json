@@ -1,4 +1,18 @@
 {
+  "validation": {
+    "required": "Required",
+    "email": "Invalid email format",
+    "url": "Must be a valid http(s):// URL",
+    "port": "Port must be an integer 1-65535",
+    "host": "Must be a valid hostname or IP",
+    "password_strength": "At least 8 characters, with letters and digits",
+    "non_negative_int": "Must be a non-negative integer",
+    "positive_int": "Must be a positive integer",
+    "range": "Value out of allowed range",
+    "too_short": "Too short",
+    "too_long": "Too long",
+    "form_has_errors": "Please fix the highlighted fields first"
+  },
   "dashboard": {
     "title": "Dashboard",
     "metric": {
@@ -12,9 +26,9 @@
     },
     "alerts": {
       "node_health": "Node health alerts",
-      "node_health_empty": "All nodes healthy ✓",
+      "node_health_empty": "All nodes healthy",
       "expiring_soon": "Expiring soon (7 days)",
-      "expiring_empty": "No accounts expire in the next 7 days ✓",
+      "expiring_empty": "No accounts expire in the next 7 days",
       "expiring_today": "today",
       "expiring_in_days": "in {{days}}d"
     },
@@ -155,9 +169,9 @@
         "title": "Title",
         "content": "Content",
         "level": "Level",
-        "level_info": "Info",
-        "level_warning": "Warning",
-        "level_danger": "Danger"
+        "level_info": "Notice",
+        "level_warning": "Important",
+        "level_danger": "Urgent"
       }
     },
     "subscription": {
@@ -640,7 +654,7 @@
     "create": "New user",
     "edit_title": "Edit user",
     "result_title": "User created",
-    "search_placeholder": "Search UPN / email / remark…",
+    "search_placeholder": "Search UPN / display name / email…",
     "filter_group_all": "All groups",
     "refresh": "Refresh",
     "field": {
@@ -667,7 +681,12 @@
       "admin": "Admin",
       "operator": "Operator",
       "user": "User",
-      "operator_locked": "Operators cannot change roles"
+      "operator_locked": "Operators cannot change roles",
+      "help_tooltip": "Role capabilities",
+      "help_title": "Role capabilities at a glance",
+      "help_admin": "Full access: servers, SSO, mail SMTP, rule sets / templates, audit clear, can create any role.",
+      "help_operator": "Day-to-day: user CRUD, traffic, emergency access, toggle nodes, audit read, sync tasks. Cannot touch servers / system settings / SSO / mail SMTP, cannot change roles, cannot modify admin or operator accounts.",
+      "help_user": "Regular user: only the /user/me self-service portal (subscription, usage, emergency access, change password, personal rules)."
     },
     "reset_period": {
       "never": "Never",

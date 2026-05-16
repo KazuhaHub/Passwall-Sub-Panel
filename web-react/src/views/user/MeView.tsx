@@ -111,6 +111,10 @@ export default function MeView() {
   const [profile, setProfile] = useState<MeProfile | null>(null)
   const [usage, setUsage] = useState<UsageReport | null>(null)
   const [loading, setLoading] = useState(true)
+  // Announcement popup: starts hidden, opens after the profile loads
+  // unless the visitor has previously chosen "don't remind again" for
+  // this exact announcement version.
+  const [announceOpen, setAnnounceOpen] = useState(false)
 
   const [pwdOpen, setPwdOpen] = useState(false)
   const [pwdBusy, setPwdBusy] = useState(false)
@@ -141,6 +145,30 @@ export default function MeView() {
   useEffect(() => { void loadTrend()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [trendPeriod, trendDays])
+
+  // Decide whether to fire the announcement popup after the profile is
+  // fetched. We compare the visitor's stored dismissal key against the
+  // current announcement's updated_at — a fresh edit invalidates every
+  // visitor's previous "don't remind" choice automatically.
+  useEffect(() => {
+    const a = profile?.global_announcement
+    if (!a?.enabled || !a.popup || !a.title) return
+    const key = `psp.announce.dismiss`
+    try {
+      const stored = localStorage.getItem(key)
+      if (stored === (a.updated_at || a.title)) return
+    } catch { /* localStorage unavailable — fall through and show */ }
+    setAnnounceOpen(true)
+  }, [profile])
+
+  function closeAnnounce(persist: boolean) {
+    if (persist) {
+      const a = profile?.global_announcement
+      const stamp = a?.updated_at || a?.title || ''
+      try { localStorage.setItem('psp.announce.dismiss', stamp) } catch { /* ignore */ }
+    }
+    setAnnounceOpen(false)
+  }
 
   async function loadTrend() {
     setTrendBusy(true)
@@ -259,6 +287,11 @@ export default function MeView() {
   if (!profile) return null
 
   const announcement = profile.global_announcement
+  // Popup mode is gated by both an admin opt-in (announcement.popup) and
+  // per-browser dismissal state in localStorage. The dismissal key embeds
+  // updated_at so editing the announcement (which bumps the timestamp)
+  // re-shows the popup for everyone who previously dismissed.
+  const announcementPopup = !!announcement?.enabled && !!announcement.popup && !!announcement.title
   const importClients = (profile.sub_import_clients || [])
     .filter(c => c.enabled)
     .slice()
@@ -585,10 +618,10 @@ export default function MeView() {
           <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 1, mb: 1.5, flexWrap: 'wrap' }}>
             <Select size="small" value={trendPeriod}
               onChange={e => setTrendPeriod(e.target.value as TrafficHistoryPeriod)}
-              sx={{ height: 36, minWidth: 90 }}>
-              <MenuItem value="day">D</MenuItem>
-              <MenuItem value="week">W</MenuItem>
-              <MenuItem value="month">M</MenuItem>
+              sx={{ height: 36, minWidth: 110 }}>
+              <MenuItem value="day">{t('trend.period_day', { defaultValue: '按天' })}</MenuItem>
+              <MenuItem value="week">{t('trend.period_week', { defaultValue: '按周' })}</MenuItem>
+              <MenuItem value="month">{t('trend.period_month', { defaultValue: '按月' })}</MenuItem>
             </Select>
             <Select size="small" value={trendDays}
               onChange={e => setTrendDays(Number(e.target.value))}
@@ -805,10 +838,42 @@ export default function MeView() {
 
       </Box>{/* end two-col flex */}
 
+      {/* Global announcement popup (opt-in via admin settings) */}
+      {announcementPopup && (() => {
+        const s = announcementStyle(announcement.level)
+        return (
+          // Reduced borderRadius from the project default (16px) to 12px —
+          // the popup body is so short that the larger radius made it look
+          // pill-shaped. Two text buttons replace the prior checkbox: the
+          // tertiary "不再提醒" persists localStorage dismissal, the primary
+          // "我知道了" closes for this session only.
+          <Dialog open={announceOpen} onClose={() => closeAnnounce(false)}
+            PaperProps={{ sx: { borderRadius: 3, bgcolor: md.surfaceContainerHigh, width: 480, maxWidth: '90vw' } }}>
+            <DialogTitle sx={{ pt: 3, display: 'flex', alignItems: 'center', gap: 1.25 }}>
+              <s.Icon sx={{ color: s.fg }} />
+              {announcement.title}
+            </DialogTitle>
+            <DialogContent>
+              <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap' }}>
+                {announcement.content}
+              </Typography>
+            </DialogContent>
+            <DialogActions>
+              <Button variant="text" onClick={() => closeAnnounce(true)}>
+                {t('announce.mute', { defaultValue: '不再提醒' })}
+              </Button>
+              <Button variant="contained" onClick={() => closeAnnounce(false)}>
+                {t('announce.ack', { defaultValue: '我知道了' })}
+              </Button>
+            </DialogActions>
+          </Dialog>
+        )
+      })()}
+
       {/* Change password dialog */}
       <Dialog open={pwdOpen} onClose={() => !pwdBusy && setPwdOpen(false)}
-        PaperProps={{ sx: { borderRadius: 4, bgcolor: md.surfaceContainerHigh, width: 440, maxWidth: '90vw' } }}>
-        <DialogTitle sx={{ pt: 3 }}>{t('password.title')}</DialogTitle>
+        PaperProps={{ sx: { borderRadius: 3, bgcolor: md.surfaceContainerHigh, width: 440, maxWidth: '90vw' } }}>
+        <DialogTitle>{t('password.title')}</DialogTitle>
         <DialogContent>
           <Box component="form" id="pwd-form" onSubmit={submitPwd} sx={{ display: 'flex', flexDirection: 'column', gap: 2.5, pt: 1 }}>
             <TextField required fullWidth type="password" label={t('password.old')}
@@ -821,7 +886,7 @@ export default function MeView() {
               helperText={pwdConfirm.length > 0 && pwdConfirm !== pwdNew ? t('password.mismatch') : ''} />
           </Box>
         </DialogContent>
-        <DialogActions sx={{ px: 3, pb: 2 }}>
+        <DialogActions>
           <Button onClick={() => setPwdOpen(false)} disabled={pwdBusy} variant="text">{t('common.cancel')}</Button>
           <Button type="submit" form="pwd-form" variant="contained" disabled={pwdBusy}
             startIcon={pwdBusy ? <CircularProgress size={16} color="inherit" /> : null}>
@@ -832,24 +897,54 @@ export default function MeView() {
 
       {/* Personal rules dialog */}
       <Dialog open={rulesOpen} onClose={() => !rulesBusy && setRulesOpen(false)}
-        PaperProps={{ sx: { borderRadius: 4, bgcolor: md.surfaceContainerHigh, width: 600, maxWidth: '95vw' } }}>
-        <DialogTitle sx={{ pt: 3 }}>{t('rules.title')}</DialogTitle>
+        PaperProps={{ sx: { borderRadius: 3, bgcolor: md.surfaceContainerHigh, width: 600, maxWidth: '95vw' } }}>
+        <DialogTitle>{t('rules.title')}</DialogTitle>
         <DialogContent>
+          {!profile.can_edit_personal_rules && (
+            <Typography sx={{ fontSize: 13, color: md.onSurfaceVariant, mb: 1.5 }}>
+              {t('rules.readonly_hint', { defaultValue: '管理员已关闭用户自助编辑。当前仅供查看，如需修改请联系管理员。' })}
+            </Typography>
+          )}
+          {/* Format hint above the textarea — visible always so users get
+              context without having to clear the field first. */}
+          {profile.can_edit_personal_rules && (
+            <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant, mb: 1 }}>
+              {t('rules.hint')}
+            </Typography>
+          )}
           {rulesBusy
             ? <Box sx={{ display: 'grid', placeItems: 'center', py: 4 }}><CircularProgress size={24} /></Box>
             : <TextField fullWidth multiline minRows={10} maxRows={20}
                 value={rulesText} onChange={e => setRulesText(e.target.value)}
                 placeholder={t('rules.placeholder')}
-                sx={{ '& textarea': { fontSize: 13 } }} />}
+                InputProps={{ readOnly: !profile.can_edit_personal_rules }}
+                sx={{ '& textarea': { fontSize: 13, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace' } }} />}
         </DialogContent>
-        <DialogActions sx={{ px: 3, pb: 2 }}>
-          <Button onClick={() => setRulesOpen(false)} disabled={rulesBusy} variant="text">{t('common.cancel')}</Button>
-          <Button onClick={saveRules}
-            disabled={rulesBusy || rulesText.trim() === rulesSaved.trim()}
-            variant="contained"
-            startIcon={rulesBusy ? <CircularProgress size={16} color="inherit" /> : null}>
-            {t('common.ok')}
+        {/* px: 3 (24px) matches MUI's button left-padding so the "插入示例
+            规则" text aligns with the dialog content's left edge — without
+            it the button's intrinsic padding pushed the text inward and
+            looked off. */}
+        <DialogActions>
+          {/* Insert-example only when the textarea is empty AND the user
+              can edit — gives a one-click bootstrap that they can then
+              tweak instead of staring at the placeholder. */}
+          {profile.can_edit_personal_rules && !rulesText.trim() && !rulesBusy && (
+            <Button onClick={() => setRulesText(t('rules.placeholder'))}
+              variant="text" sx={{ mr: 'auto' }}>
+              {t('rules.insert_example')}
+            </Button>
+          )}
+          <Button onClick={() => setRulesOpen(false)} disabled={rulesBusy} variant="text">
+            {profile.can_edit_personal_rules ? t('common.cancel') : t('common.ok')}
           </Button>
+          {profile.can_edit_personal_rules && (
+            <Button onClick={saveRules}
+              disabled={rulesBusy || rulesText.trim() === rulesSaved.trim()}
+              variant="contained"
+              startIcon={rulesBusy ? <CircularProgress size={16} color="inherit" /> : null}>
+              {t('common.ok')}
+            </Button>
+          )}
         </DialogActions>
       </Dialog>
     </Box>

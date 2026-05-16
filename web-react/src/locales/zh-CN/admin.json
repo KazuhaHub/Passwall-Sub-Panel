@@ -1,4 +1,18 @@
 {
+  "validation": {
+    "required": "此项必填",
+    "email": "邮箱格式不正确",
+    "url": "请填入 http(s):// 开头的有效 URL",
+    "port": "端口必须是 1-65535 的整数",
+    "host": "请填入合法的主机名或 IP",
+    "password_strength": "密码至少 8 位，含字母和数字",
+    "non_negative_int": "请填入非负整数",
+    "positive_int": "请填入大于 0 的整数",
+    "range": "数值不在允许范围内",
+    "too_short": "长度太短",
+    "too_long": "长度超出限制",
+    "form_has_errors": "请先修正表单中标红的字段"
+  },
   "dashboard": {
     "title": "总览",
     "metric": {
@@ -12,9 +26,9 @@
     },
     "alerts": {
       "node_health": "节点健康警报",
-      "node_health_empty": "所有节点工作正常 ✓",
+      "node_health_empty": "所有节点工作正常",
       "expiring_soon": "即将到期（7 天内）",
-      "expiring_empty": "7 天内无到期用户 ✓",
+      "expiring_empty": "7 天内无到期用户",
       "expiring_today": "今日",
       "expiring_in_days": "{{days}} 天后"
     },
@@ -209,9 +223,9 @@
         "title": "标题",
         "content": "内容",
         "level": "级别",
-        "level_info": "信息",
-        "level_warning": "警告",
-        "level_danger": "危险"
+        "level_info": "普通通知",
+        "level_warning": "重要通知",
+        "level_danger": "紧急通知"
       }
     },
     "subscription": {
@@ -698,7 +712,7 @@
     "create": "新增用户",
     "edit_title": "编辑用户",
     "result_title": "用户已创建",
-    "search_placeholder": "搜索 UPN / 邮箱 / 备注…",
+    "search_placeholder": "搜索 UPN / 显示名 / 邮箱…",
     "filter_group_all": "全部分组",
     "refresh": "刷新",
     "field": {
@@ -725,7 +739,12 @@
       "admin": "管理员",
       "operator": "运营人员",
       "user": "普通用户",
-      "operator_locked": "运营人员不能调整角色"
+      "operator_locked": "运营人员不能调整角色",
+      "help_tooltip": "角色权限说明",
+      "help_title": "角色权限速览",
+      "help_admin": "完整权限：服务器/SSO/邮件 SMTP/规则模板/审计清空，可创建任何角色。",
+      "help_operator": "日常运营：用户 CRUD、流量、紧急访问、节点开关、审计读、同步任务。不能改服务器/系统设置/SSO/邮件 SMTP，不能调整角色，不能动 admin/operator 账号。",
+      "help_user": "普通用户：仅可访问 /user/me 自助页（订阅、用量、紧急访问、改密码、个人规则）。"
     },
     "reset_period": {
       "never": "不重置",

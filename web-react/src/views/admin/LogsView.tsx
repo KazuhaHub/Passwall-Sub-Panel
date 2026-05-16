@@ -320,8 +320,8 @@ export default function LogsView() {
 
       {/* Sub log detail */}
       <Dialog open={subDetailOpen} onClose={() => setSubDetailOpen(false)}
-        PaperProps={{ sx: { borderRadius: 4, bgcolor: md.surfaceContainerHigh, width: 600, maxWidth: '95vw' } }}>
-        <DialogTitle sx={{ pt: 3 }}>{t('admin:logs.view_detail')} #{subDetail?.id}</DialogTitle>
+        PaperProps={{ sx: { borderRadius: 3, bgcolor: md.surfaceContainerHigh, width: 600, maxWidth: '95vw' } }}>
+        <DialogTitle>{t('admin:logs.view_detail')} #{subDetail?.id}</DialogTitle>
         <DialogContent>
           {subDetail && (
             <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5, fontSize: 13 }}>
@@ -333,15 +333,15 @@ export default function LogsView() {
             </Box>
           )}
         </DialogContent>
-        <DialogActions sx={{ px: 3, pb: 2 }}>
+        <DialogActions>
           <Button variant="contained" onClick={() => setSubDetailOpen(false)}>{t('common:actions.ok')}</Button>
         </DialogActions>
       </Dialog>
 
       {/* Audit detail */}
       <Dialog open={auditDetailOpen} onClose={() => setAuditDetailOpen(false)}
-        PaperProps={{ sx: { borderRadius: 4, bgcolor: md.surfaceContainerHigh, width: 720, maxWidth: '95vw' } }}>
-        <DialogTitle sx={{ pt: 3 }}>{t('admin:logs.view_detail')} #{auditDetail?.id}</DialogTitle>
+        PaperProps={{ sx: { borderRadius: 3, bgcolor: md.surfaceContainerHigh, width: 720, maxWidth: '95vw' } }}>
+        <DialogTitle>{t('admin:logs.view_detail')} #{auditDetail?.id}</DialogTitle>
         <DialogContent>
           {auditDetail && (
             <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5, fontSize: 13 }}>
@@ -369,7 +369,7 @@ export default function LogsView() {
             </Box>
           )}
         </DialogContent>
-        <DialogActions sx={{ px: 3, pb: 2 }}>
+        <DialogActions>
           <Button variant="contained" onClick={() => setAuditDetailOpen(false)}>{t('common:actions.ok')}</Button>
         </DialogActions>
       </Dialog>

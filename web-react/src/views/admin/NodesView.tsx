@@ -51,6 +51,13 @@ import type { Node, UnmanagedInbound, User } from '@/api/types'
 import { confirm } from '@/components/ConfirmHost'
 import { pushSnack } from '@/components/SnackbarHost'
 import { useTabParam } from '@/hooks/useTabParam'
+import {
+  type FieldErrors,
+  firstError,
+  validateEmail,
+  validateHost,
+  validateName,
+} from '@/utils/validators'
 
 type CreateProtocol = 'vless' | 'ss2022'
 type VlessNetwork = 'tcp' | 'ws' | 'grpc'
@@ -787,10 +794,13 @@ export default function NodesView() {
   const [editBusy, setEditBusy] = useState(false)
   const [editing, setEditing] = useState<Node | null>(null)
   const [editForm, setEditForm] = useState<MetaForm>(EMPTY_META)
+  type MetaField = 'display_name' | 'server_address' | 'region'
+  const [editMetaErr, setEditMetaErr] = useState<FieldErrors<MetaField>>({})
 
   const [importOpen, setImportOpen] = useState(false)
   const [importBusy, setImportBusy] = useState(false)
   const [importForm, setImportForm] = useState<ImportForm>(EMPTY_IMPORT)
+  const [importErr, setImportErr] = useState<FieldErrors<MetaField>>({})
 
   const [claimOpen, setClaimOpen] = useState(false)
   const [claimBusy, setClaimBusy] = useState(false)
@@ -801,6 +811,8 @@ export default function NodesView() {
     client_email: '',
     client_uuid: '',
   })
+  type ClaimField = 'user_id' | 'client_email'
+  const [claimErr, setClaimErr] = useState<FieldErrors<ClaimField>>({})
 
   const [servers, setServers] = useState<Server[]>([])
   const [createOpen, setCreateOpen] = useState(false)
@@ -867,15 +879,25 @@ export default function NodesView() {
       tags_text: (n.tags ?? []).join(', '),
       sort_order: n.sort_order,
     })
+    setEditMetaErr({})
     setEditOpen(true)
+  }
+
+  function validateMeta(f: MetaForm): FieldErrors<MetaField> {
+    return {
+      display_name: validateName(f.display_name, { required: true, max: 64 }),
+      server_address: validateHost(f.server_address, { required: true }),
+      region: validateName(f.region, { required: true, max: 32 }),
+    }
   }
 
   async function submitEdit(e: FormEvent) {
     e.preventDefault()
     if (!editing) return
-    if (!editForm.server_address || !editForm.region) {
-      pushSnack(t('admin:nodes.validate.address_region_required'), 'warning'); return
-    }
+    const errs = validateMeta(editForm)
+    setEditMetaErr(errs)
+    const firstKey = firstError(errs)
+    if (firstKey) { pushSnack(t(`admin:${firstKey}`), 'warning'); return }
     setEditBusy(true)
     try {
       await updateNodeMetadata(editing.id, {
@@ -1194,9 +1216,17 @@ export default function NodesView() {
 
   async function submitClaim(e: FormEvent) {
     e.preventDefault()
-    if (!claimForm.user_id || !claimForm.client_email) {
-      pushSnack(t('admin:nodes.claim_dialog.validate_required'), 'warning'); return
+    const errs: FieldErrors<ClaimField> = {
+      user_id: claimForm.user_id ? '' : 'validation.required',
+      // 3X-UI uses the client_email field as a unique key per inbound, not
+      // an actual mailbox — but it still has to look like one. Reject typos
+      // (spaces, missing @) before they hit the panel and confuse downstream
+      // matching.
+      client_email: validateEmail(claimForm.client_email, { required: true }),
     }
+    setClaimErr(errs)
+    const firstKey = firstError(errs)
+    if (firstKey) { pushSnack(t(`admin:${firstKey}`), 'warning'); return }
     setClaimBusy(true)
     try {
       await claimClient({
@@ -1220,14 +1250,16 @@ export default function NodesView() {
       inbound_id: u.InboundID,
       display_name: u.Remark || `${u.Protocol}:${u.Port}`,
     })
+    setImportErr({})
     setImportOpen(true)
   }
 
   async function submitImport(e: FormEvent) {
     e.preventDefault()
-    if (!importForm.server_address || !importForm.region) {
-      pushSnack(t('admin:nodes.import_validate'), 'warning'); return
-    }
+    const errs = validateMeta(importForm)
+    setImportErr(errs)
+    const firstKey = firstError(errs)
+    if (firstKey) { pushSnack(t(`admin:${firstKey}`), 'warning'); return }
     setImportBusy(true)
     try {
       await importNode({
@@ -1420,7 +1452,7 @@ export default function NodesView() {
 
       {/* Create inbound dialog (multi-protocol) */}
       <Dialog open={createOpen} onClose={() => !createBusy && setCreateOpen(false)}
-        PaperProps={{ sx: { borderRadius: 4, bgcolor: md.surfaceContainerHigh, width: 800, maxWidth: '95vw' } }}>
+        PaperProps={{ sx: { borderRadius: 3, bgcolor: md.surfaceContainerHigh, width: 800, maxWidth: '95vw' } }}>
         <DialogTitle sx={{ pt: 2.5, pb: 1, fontSize: 18 }}>
           {t('admin:nodes.create_dialog.title_dynamic', {
             protocol: createForm.protocol === 'ss2022' ? 'SS-2022' : 'VLESS',
@@ -1437,7 +1469,7 @@ export default function NodesView() {
             />
           </Box>
         </DialogContent>
-        <DialogActions sx={{ px: 3, pb: 2 }}>
+        <DialogActions>
           <Button onClick={() => setCreateOpen(false)} disabled={createBusy} variant="text">{t('common:actions.cancel')}</Button>
           <Button type="submit" form="create-form" variant="contained" disabled={createBusy}
             startIcon={createBusy ? <CircularProgress size={16} color="inherit" /> : null}>
@@ -1448,7 +1480,7 @@ export default function NodesView() {
 
       {/* Edit Inbound config dialog (multi-protocol) */}
       <Dialog open={editInboundOpen} onClose={() => !editInboundBusy && setEditInboundOpen(false)}
-        PaperProps={{ sx: { borderRadius: 4, bgcolor: md.surfaceContainerHigh, width: 800, maxWidth: '95vw' } }}>
+        PaperProps={{ sx: { borderRadius: 3, bgcolor: md.surfaceContainerHigh, width: 800, maxWidth: '95vw' } }}>
         <DialogTitle sx={{ pt: 2.5, pb: 1, fontSize: 18 }}>
           {t('admin:nodes.edit_inbound_dialog.title')}{editingInboundNode ? ` — ${editingInboundNode.display_name}` : ''}
         </DialogTitle>
@@ -1471,7 +1503,7 @@ export default function NodesView() {
             </Box>
           )}
         </DialogContent>
-        <DialogActions sx={{ px: 3, pb: 2 }}>
+        <DialogActions>
           <Button onClick={() => setEditInboundOpen(false)} disabled={editInboundBusy} variant="text">{t('common:actions.cancel')}</Button>
           {!editInboundUnsupported && !editInboundLoading && (
             <Button type="submit" form="edit-inbound-form" variant="contained" disabled={editInboundBusy}
@@ -1484,14 +1516,15 @@ export default function NodesView() {
 
       {/* Claim existing 3X-UI client dialog */}
       <Dialog open={claimOpen} onClose={() => !claimBusy && setClaimOpen(false)}
-        PaperProps={{ sx: { borderRadius: 4, bgcolor: md.surfaceContainerHigh, width: 520, maxWidth: '90vw' } }}>
-        <DialogTitle sx={{ pt: 3 }}>{t('admin:nodes.claim_dialog.title')}</DialogTitle>
+        PaperProps={{ sx: { borderRadius: 3, bgcolor: md.surfaceContainerHigh, width: 520, maxWidth: '90vw' } }}>
+        <DialogTitle>{t('admin:nodes.claim_dialog.title')}</DialogTitle>
         <DialogContent>
           <Typography variant="body2" sx={{ mb: 2, color: md.onSurfaceVariant }}>
             {t('admin:nodes.claim_dialog.subtitle', { id: claimForm.inbound_id })}
           </Typography>
           <Box component="form" id="claim-form" onSubmit={submitClaim} sx={{ display: 'flex', flexDirection: 'column', gap: 2.5 }}>
             <Select required size="small" fullWidth value={claimForm.user_id || ''} displayEmpty
+              error={!!claimErr.user_id}
               onChange={e => setClaimForm({ ...claimForm, user_id: Number(e.target.value) })}>
               <MenuItem value="" disabled>{t('admin:nodes.claim_dialog.user')}</MenuItem>
               {claimUsers.map(u => (
@@ -1502,13 +1535,15 @@ export default function NodesView() {
             </Select>
             <TextField required fullWidth label={t('admin:nodes.claim_dialog.client_email')}
               value={claimForm.client_email}
-              onChange={e => setClaimForm({ ...claimForm, client_email: e.target.value })} />
+              onChange={e => setClaimForm({ ...claimForm, client_email: e.target.value })}
+              error={!!claimErr.client_email}
+              helperText={claimErr.client_email ? t(`admin:${claimErr.client_email}`) : ''} />
             <TextField fullWidth label={t('admin:nodes.claim_dialog.client_uuid')}
               value={claimForm.client_uuid}
               onChange={e => setClaimForm({ ...claimForm, client_uuid: e.target.value })} />
           </Box>
         </DialogContent>
-        <DialogActions sx={{ px: 3, pb: 2 }}>
+        <DialogActions>
           <Button onClick={() => setClaimOpen(false)} disabled={claimBusy} variant="text">{t('common:actions.cancel')}</Button>
           <Button type="submit" form="claim-form" variant="contained" disabled={claimBusy}
             startIcon={claimBusy ? <CircularProgress size={16} color="inherit" /> : null}>
@@ -1519,25 +1554,31 @@ export default function NodesView() {
 
       {/* Import unmanaged-inbound dialog */}
       <Dialog open={importOpen} onClose={() => !importBusy && setImportOpen(false)}
-        PaperProps={{ sx: { borderRadius: 4, bgcolor: md.surfaceContainerHigh, width: 520, maxWidth: '90vw' } }}>
-        <DialogTitle sx={{ pt: 3 }}>{t('admin:nodes.import_dialog.title')}</DialogTitle>
+        PaperProps={{ sx: { borderRadius: 3, bgcolor: md.surfaceContainerHigh, width: 520, maxWidth: '90vw' } }}>
+        <DialogTitle>{t('admin:nodes.import_dialog.title')}</DialogTitle>
         <DialogContent>
           <Typography variant="body2" sx={{ mb: 2 }}>
             {importForm.panel_name && `${importForm.panel_name} · inbound #${importForm.inbound_id}`}
           </Typography>
           <Box component="form" id="import-form" onSubmit={submitImport} sx={{ display: 'flex', flexDirection: 'column', gap: 2.5 }}>
-            <TextField fullWidth label={t('admin:nodes.import_dialog.display_name')}
+            <TextField required fullWidth label={t('admin:nodes.import_dialog.display_name')}
               value={importForm.display_name}
-              onChange={e => setImportForm({ ...importForm, display_name: e.target.value })} />
+              onChange={e => setImportForm({ ...importForm, display_name: e.target.value })}
+              error={!!importErr.display_name}
+              helperText={importErr.display_name ? t(`admin:${importErr.display_name}`) : ''} />
             <TextField required fullWidth label={t('admin:nodes.import_dialog.server_address')}
               value={importForm.server_address}
-              onChange={e => setImportForm({ ...importForm, server_address: e.target.value })} />
+              onChange={e => setImportForm({ ...importForm, server_address: e.target.value })}
+              error={!!importErr.server_address}
+              helperText={importErr.server_address ? t(`admin:${importErr.server_address}`) : ''} />
             <TextField fullWidth label={t('admin:nodes.import_dialog.flow')}
               value={importForm.flow}
               onChange={e => setImportForm({ ...importForm, flow: e.target.value })} />
             <TextField required fullWidth label={t('admin:nodes.import_dialog.region')}
               value={importForm.region}
-              onChange={e => setImportForm({ ...importForm, region: e.target.value })} />
+              onChange={e => setImportForm({ ...importForm, region: e.target.value })}
+              error={!!importErr.region}
+              helperText={importErr.region ? t(`admin:${importErr.region}`) : ''} />
             <TextField fullWidth label={t('admin:nodes.import_dialog.tags')}
               value={importForm.tags_text}
               onChange={e => setImportForm({ ...importForm, tags_text: e.target.value })} />
@@ -1546,7 +1587,7 @@ export default function NodesView() {
               onChange={e => setImportForm({ ...importForm, sort_order: Number(e.target.value) })} />
           </Box>
         </DialogContent>
-        <DialogActions sx={{ px: 3, pb: 2 }}>
+        <DialogActions>
           <Button onClick={() => setImportOpen(false)} disabled={importBusy} variant="text">{t('common:actions.cancel')}</Button>
           <Button type="submit" form="import-form" variant="contained" disabled={importBusy}
             startIcon={importBusy ? <CircularProgress size={16} color="inherit" /> : null}>
@@ -1557,24 +1598,30 @@ export default function NodesView() {
 
       {/* Metadata edit dialog */}
       <Dialog open={editOpen} onClose={() => !editBusy && setEditOpen(false)}
-        PaperProps={{ sx: { borderRadius: 4, bgcolor: md.surfaceContainerHigh, width: 520, maxWidth: '90vw' } }}>
-        <DialogTitle sx={{ pt: 3 }}>
+        PaperProps={{ sx: { borderRadius: 3, bgcolor: md.surfaceContainerHigh, width: 520, maxWidth: '90vw' } }}>
+        <DialogTitle>
           {t('admin:nodes.edit_title')} — {editing?.display_name}
         </DialogTitle>
         <DialogContent>
           <Box component="form" id="node-form" onSubmit={submitEdit} sx={{ display: 'flex', flexDirection: 'column', gap: 2.5, pt: 1 }}>
-            <TextField fullWidth label={t('admin:nodes.field.display_name')}
+            <TextField required fullWidth label={t('admin:nodes.field.display_name')}
               value={editForm.display_name}
-              onChange={e => setEditForm({ ...editForm, display_name: e.target.value })} />
+              onChange={e => setEditForm({ ...editForm, display_name: e.target.value })}
+              error={!!editMetaErr.display_name}
+              helperText={editMetaErr.display_name ? t(`admin:${editMetaErr.display_name}`) : ''} />
             <TextField required fullWidth label={t('admin:nodes.field.server_address')}
               value={editForm.server_address}
-              onChange={e => setEditForm({ ...editForm, server_address: e.target.value })} />
+              onChange={e => setEditForm({ ...editForm, server_address: e.target.value })}
+              error={!!editMetaErr.server_address}
+              helperText={editMetaErr.server_address ? t(`admin:${editMetaErr.server_address}`) : ''} />
             <TextField fullWidth label={t('admin:nodes.field.flow')}
               value={editForm.flow}
               onChange={e => setEditForm({ ...editForm, flow: e.target.value })} />
             <TextField required fullWidth label={t('admin:nodes.field.region')}
               value={editForm.region}
-              onChange={e => setEditForm({ ...editForm, region: e.target.value })} />
+              onChange={e => setEditForm({ ...editForm, region: e.target.value })}
+              error={!!editMetaErr.region}
+              helperText={editMetaErr.region ? t(`admin:${editMetaErr.region}`) : ''} />
             <TextField fullWidth label={t('admin:nodes.field.tags')}
               value={editForm.tags_text}
               onChange={e => setEditForm({ ...editForm, tags_text: e.target.value })} />
@@ -1584,7 +1631,7 @@ export default function NodesView() {
             <Box sx={{ display: 'none' }}>{alpha(md.error, 0.5)}</Box>
           </Box>
         </DialogContent>
-        <DialogActions sx={{ px: 3, pb: 2 }}>
+        <DialogActions>
           <Button onClick={() => setEditOpen(false)} disabled={editBusy} variant="text">{t('common:actions.cancel')}</Button>
           <Button type="submit" form="node-form" variant="contained" disabled={editBusy}
             startIcon={editBusy ? <CircularProgress size={16} color="inherit" /> : null}>

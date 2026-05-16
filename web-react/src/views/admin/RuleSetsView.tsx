@@ -278,8 +278,8 @@ export default function RuleSetsView() {
 
       {/* Create/Edit dialog */}
       <Dialog open={dialogOpen} onClose={() => !busy && setDialogOpen(false)}
-        PaperProps={{ sx: { borderRadius: 4, bgcolor: md.surfaceContainerHigh, width: 720, maxWidth: '95vw' } }}>
-        <DialogTitle sx={{ pt: 3 }}>
+        PaperProps={{ sx: { borderRadius: 3, bgcolor: md.surfaceContainerHigh, width: 720, maxWidth: '95vw' } }}>
+        <DialogTitle>
           {editing ? t('admin:rules.edit_title') : t('admin:rules.create')}
         </DialogTitle>
         <DialogContent>
@@ -319,7 +319,7 @@ export default function RuleSetsView() {
               sx={{ '& textarea': { fontSize: 13 } }} />
           </Box>
         </DialogContent>
-        <DialogActions sx={{ px: 3, pb: 2 }}>
+        <DialogActions>
           <Button onClick={() => setDialogOpen(false)} disabled={busy} variant="text">{t('common:actions.cancel')}</Button>
           <Button type="submit" form="rules-form" variant="contained" disabled={busy}
             startIcon={busy ? <CircularProgress size={16} color="inherit" /> : null}>

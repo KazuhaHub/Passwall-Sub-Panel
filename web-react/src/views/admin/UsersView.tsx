@@ -17,6 +17,7 @@ import {
   Menu,
   MenuItem,
   Pagination,
+  Popover,
   Select,
   Table,
   TableBody,
@@ -43,9 +44,12 @@ import VisibilityOffIcon from '@mui/icons-material/VisibilityOff'
 import ContentCopyIcon from '@mui/icons-material/ContentCopy'
 import MoreVertIcon from '@mui/icons-material/MoreVert'
 import KeyIcon from '@mui/icons-material/VpnKey'
+import LockResetIcon from '@mui/icons-material/LockReset'
+import CasinoIcon from '@mui/icons-material/Casino'
 import RuleIcon from '@mui/icons-material/Rule'
 import EmergencyIcon from '@mui/icons-material/MedicalServices'
 import SyncIcon from '@mui/icons-material/Sync'
+import HelpOutlineIcon from '@mui/icons-material/HelpOutline'
 import { useTranslation } from 'react-i18next'
 
 import {
@@ -55,6 +59,7 @@ import {
   listUsers,
   resetCredentials,
   resetEmergencyUsage,
+  resetPassword,
   setEnabled,
   updateUser,
   updateUserRules,
@@ -68,6 +73,16 @@ import type { ReconcileReport } from '@/api/reconcile'
 import { useAuthStore } from '@/stores/auth'
 import { confirm } from '@/components/ConfirmHost'
 import { pushSnack } from '@/components/SnackbarHost'
+import {
+  type FieldErrors,
+  firstError,
+  validateEmail,
+  validateGroupId,
+  validateName,
+  validateNonNegativeInt,
+  validatePassword,
+  validateRequired,
+} from '@/utils/validators'
 
 const PAGE_SIZE = 50
 
@@ -153,6 +168,8 @@ export default function UsersView() {
   const [createOpen, setCreateOpen] = useState(false)
   const [createBusy, setCreateBusy] = useState(false)
   const [createForm, setCreateForm] = useState<CreateForm>(EMPTY_CREATE)
+  type CreateField = 'upn' | 'email' | 'display_name' | 'password' | 'group_id' | 'expire_days' | 'traffic_limit_gb'
+  const [createErr, setCreateErr] = useState<FieldErrors<CreateField>>({})
 
   const [resultOpen, setResultOpen] = useState(false)
   const [resultUser, setResultUser] = useState<User | null>(null)
@@ -162,11 +179,26 @@ export default function UsersView() {
   const [editBusy, setEditBusy] = useState(false)
   const [editing, setEditing] = useState<User | null>(null)
   const [editForm, setEditForm] = useState<EditForm>(EMPTY_EDIT)
+  type EditField = 'display_name' | 'email' | 'group_id' | 'expire_at' | 'traffic_limit_gb' | 'period_used_gb'
+  const [editErr, setEditErr] = useState<FieldErrors<EditField>>({})
 
   const [reasonOpen, setReasonOpen] = useState(false)
   const [reasonUser, setReasonUser] = useState<User | null>(null)
   const [reasonText, setReasonText] = useState('')
   const [reasonBatch, setReasonBatch] = useState<{ enable: boolean } | null>(null)
+  // Reset-password dialog. Admin can either type a password or click the
+  // dice button to fill a server-style random one without hitting submit
+  // yet — that way they can copy it from the field before confirming.
+  const [pwdResetOpen, setPwdResetOpen] = useState(false)
+  const [pwdResetUser, setPwdResetUser] = useState<User | null>(null)
+  const [pwdResetValue, setPwdResetValue] = useState('')
+  const [pwdResetShow, setPwdResetShow] = useState(false)
+  const [pwdResetBusy, setPwdResetBusy] = useState(false)
+  const [pwdResetError, setPwdResetError] = useState('')
+  // Anchor for the "?" popover next to the role field. Toggled by the
+  // help icon button so admins don't have to guess what each role can
+  // actually do.
+  const [roleHelpAnchor, setRoleHelpAnchor] = useState<HTMLElement | null>(null)
 
   const [rulesOpen, setRulesOpen] = useState(false)
   const [rulesUser, setRulesUser] = useState<User | null>(null)
@@ -240,13 +272,32 @@ export default function UsersView() {
   // ---- Create ----
   function openCreate() {
     setCreateForm({ ...EMPTY_CREATE, group_id: groups[0]?.id ?? '' })
+    setCreateErr({})
     setCreateOpen(true)
+  }
+
+  function validateCreate(f: CreateForm): FieldErrors<CreateField> {
+    return {
+      // UPN doubles as login + sub-token salt — must look like an email to
+      // route password-reset and emergency-access mails correctly.
+      upn: validateEmail(f.upn, { required: true }),
+      email: validateEmail(f.email),
+      display_name: validateName(f.display_name, { max: 64 }),
+      // Initial password is optional (server auto-generates when empty), but
+      // if the admin types one in we hold it to the floor.
+      password: f.password ? validatePassword(f.password, { strong: true }) : '',
+      group_id: validateGroupId(f.group_id, { required: true }),
+      expire_days: validateNonNegativeInt(f.expire_days),
+      traffic_limit_gb: validateNonNegativeInt(f.traffic_limit_gb),
+    }
   }
 
   async function submitCreate(e: FormEvent) {
     e.preventDefault()
-    if (!createForm.upn) { pushSnack(t('admin:users.validate.upn_required'), 'warning'); return }
-    if (createForm.group_id === '') { pushSnack(t('admin:users.validate.group_required'), 'warning'); return }
+    const errs = validateCreate(createForm)
+    setCreateErr(errs)
+    const firstKey = firstError(errs)
+    if (firstKey) { pushSnack(t(`admin:${firstKey}`), 'warning'); return }
     setCreateBusy(true)
     try {
       const expireAt = createForm.expire_days > 0
@@ -257,7 +308,9 @@ export default function UsersView() {
         email: createForm.email || undefined,
         display_name: createForm.display_name || undefined,
         password: createForm.password || undefined,
-        group_id: createForm.group_id,
+        // validateGroupId above proves this is a number; the FormState type
+        // keeps the '' option for the empty-select state only.
+        group_id: createForm.group_id as number,
         expire_at: expireAt,
         traffic_limit_gb: createForm.traffic_limit_gb,
         traffic_reset_period: createForm.traffic_reset_period,
@@ -285,13 +338,29 @@ export default function UsersView() {
       period_used_initial: usedGB,
       emergency_used_count: u.emergency_used_count,
     })
+    setEditErr({})
     setEditOpen(true)
+  }
+
+  function validateEdit(f: EditForm): FieldErrors<EditField> {
+    return {
+      display_name: validateName(f.display_name, { max: 64 }),
+      email: validateEmail(f.email),
+      group_id: validateGroupId(f.group_id, { required: true }),
+      // Date mode requires a value; permanent mode skips the check entirely.
+      expire_at: f.expire_mode === 'date' ? validateRequired(f.expire_at) : '',
+      traffic_limit_gb: validateNonNegativeInt(f.traffic_limit_gb),
+      period_used_gb: validateNonNegativeInt(f.period_used_gb),
+    }
   }
 
   async function submitEdit(e: FormEvent) {
     e.preventDefault()
     if (!editing) return
-    if (editForm.group_id === '') { pushSnack(t('admin:users.validate.group_required'), 'warning'); return }
+    const errs = validateEdit(editForm)
+    setEditErr(errs)
+    const firstKey = firstError(errs)
+    if (firstKey) { pushSnack(t(`admin:${firstKey}`), 'warning'); return }
     if (editing.id === auth.userId && editing.role === 'admin' && editForm.role === 'user') {
       const ok = await confirm({
         title: t('admin:users.confirm.demote_title'),
@@ -303,7 +372,7 @@ export default function UsersView() {
     setEditBusy(true)
     try {
       const req: UpdateUserRequest = {
-        group_id: editForm.group_id, email: editForm.email,
+        group_id: editForm.group_id as number, email: editForm.email,
         traffic_limit_gb: editForm.traffic_limit_gb,
         traffic_reset_period: editForm.traffic_reset_period,
         remark: editForm.remark, display_name: editForm.display_name,
@@ -450,6 +519,48 @@ export default function UsersView() {
     const res = await resetCredentials(u.id)
     pushSnack(t('admin:users.credentials.result', { uuid: res.uuid }), 'success')
     await load()
+  }
+
+  function actionResetPassword(u: User) {
+    closeMore()
+    setPwdResetUser(u)
+    setPwdResetValue('')
+    setPwdResetShow(false)
+    setPwdResetError('')
+    setPwdResetOpen(true)
+  }
+
+  // Random-fill: client-side generator so the admin sees the value
+  // immediately and can edit it before submitting. Format mirrors the
+  // server's idgen.NewPassword (alnum, mixed case, 12 chars) so a manual
+  // edit feels consistent.
+  function genRandomPassword(): string {
+    const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789'
+    const arr = new Uint32Array(12)
+    crypto.getRandomValues(arr)
+    let out = ''
+    for (let i = 0; i < arr.length; i++) out += alphabet[arr[i] % alphabet.length]
+    return out
+  }
+
+  async function submitPwdReset() {
+    if (!pwdResetUser) return
+    const v = pwdResetValue.trim()
+    // Server validates too; mirror the rule locally for instant feedback.
+    if (v && !/^(?=.{8,})(?=.*[A-Za-z])(?=.*\d)/.test(v)) {
+      setPwdResetError(t('admin:validation.password_strength'))
+      return
+    }
+    setPwdResetBusy(true)
+    try {
+      const res = await resetPassword(pwdResetUser.id, v || undefined)
+      setPwdResetOpen(false)
+      // Surface the final password (server-echoed) in the same result
+      // dialog used by create-user so the copy + dismiss flow is identical.
+      setResultUser(pwdResetUser)
+      setResultPassword(res.password)
+      setResultOpen(true)
+    } finally { setPwdResetBusy(false) }
   }
 
   async function actionResetEmergency(u: User) {
@@ -795,6 +906,10 @@ export default function UsersView() {
           <ListItemIcon><RuleIcon fontSize="small" /></ListItemIcon>
           <ListItemText>{t('admin:users.more_menu.personal_rules')}</ListItemText>
         </MenuItem>
+        <MenuItem onClick={() => moreUser && actionResetPassword(moreUser)}>
+          <ListItemIcon><LockResetIcon fontSize="small" /></ListItemIcon>
+          <ListItemText>{t('admin:users.more_menu.reset_password', { defaultValue: '重置密码' })}</ListItemText>
+        </MenuItem>
         <MenuItem onClick={() => moreUser && actionResetCredentials(moreUser)}>
           <ListItemIcon><KeyIcon fontSize="small" /></ListItemIcon>
           <ListItemText>{t('admin:users.more_menu.reset_credentials')}</ListItemText>
@@ -807,19 +922,27 @@ export default function UsersView() {
 
       {/* Create dialog */}
       <Dialog open={createOpen} onClose={() => !createBusy && setCreateOpen(false)}
-        PaperProps={{ sx: { borderRadius: 4, bgcolor: md.surfaceContainerHigh, width: 520, maxWidth: '90vw' } }}>
-        <DialogTitle sx={{ pt: 3 }}>{t('admin:users.create')}</DialogTitle>
+        PaperProps={{ sx: { borderRadius: 3, bgcolor: md.surfaceContainerHigh, width: 520, maxWidth: '90vw' } }}>
+        <DialogTitle>{t('admin:users.create')}</DialogTitle>
         <DialogContent>
           <Box component="form" id="create-form" onSubmit={submitCreate} sx={{ display: 'flex', flexDirection: 'column', gap: 2.5, pt: 1 }}>
             <TextField required fullWidth label={t('admin:users.field.upn')}
-              value={createForm.upn} onChange={e => setCreateForm({ ...createForm, upn: e.target.value })} />
+              value={createForm.upn} onChange={e => setCreateForm({ ...createForm, upn: e.target.value })}
+              error={!!createErr.upn}
+              helperText={createErr.upn ? t(`admin:${createErr.upn}`) : ''} />
             <TextField fullWidth label={t('admin:users.field.email')}
-              value={createForm.email} onChange={e => setCreateForm({ ...createForm, email: e.target.value })} />
+              value={createForm.email} onChange={e => setCreateForm({ ...createForm, email: e.target.value })}
+              error={!!createErr.email}
+              helperText={createErr.email ? t(`admin:${createErr.email}`) : ''} />
             <TextField fullWidth label={t('admin:users.field.display_name')}
-              value={createForm.display_name} onChange={e => setCreateForm({ ...createForm, display_name: e.target.value })} />
+              value={createForm.display_name} onChange={e => setCreateForm({ ...createForm, display_name: e.target.value })}
+              error={!!createErr.display_name}
+              helperText={createErr.display_name ? t(`admin:${createErr.display_name}`) : ''} />
             <TextField fullWidth type={createForm.show_password ? 'text' : 'password'}
               label={t('admin:users.field.password')}
               value={createForm.password} onChange={e => setCreateForm({ ...createForm, password: e.target.value })}
+              error={!!createErr.password}
+              helperText={createErr.password ? t(`admin:${createErr.password}`) : ''}
               InputProps={{ endAdornment: (
                 <InputAdornment position="end">
                   <IconButton size="small" onClick={() => setCreateForm({ ...createForm, show_password: !createForm.show_password })}>
@@ -829,17 +952,23 @@ export default function UsersView() {
               ) }} />
             <TextField select required fullWidth size="small" label={t('admin:users.field.group')}
               value={createForm.group_id || ''}
-              onChange={e => setCreateForm({ ...createForm, group_id: Number(e.target.value) })}>
+              onChange={e => setCreateForm({ ...createForm, group_id: Number(e.target.value) })}
+              error={!!createErr.group_id}
+              helperText={createErr.group_id ? t(`admin:${createErr.group_id}`) : ''}>
               {groups.map(g => <MenuItem key={g.id} value={g.id}>{g.name}</MenuItem>)}
             </TextField>
             <TextField fullWidth type="number" label={t('admin:users.field.expire_days')}
               value={createForm.expire_days}
               onChange={e => setCreateForm({ ...createForm, expire_days: Number(e.target.value) })}
-              inputProps={{ min: 0 }} />
+              inputProps={{ min: 0 }}
+              error={!!createErr.expire_days}
+              helperText={createErr.expire_days ? t(`admin:${createErr.expire_days}`) : ''} />
             <TextField fullWidth type="number" label={t('admin:users.field.traffic_limit_gb')}
               value={createForm.traffic_limit_gb}
               onChange={e => setCreateForm({ ...createForm, traffic_limit_gb: Number(e.target.value) })}
-              inputProps={{ min: 0 }} />
+              inputProps={{ min: 0 }}
+              error={!!createErr.traffic_limit_gb}
+              helperText={createErr.traffic_limit_gb ? t(`admin:${createErr.traffic_limit_gb}`) : ''} />
             <TextField select size="small" fullWidth label={t('admin:users.field.traffic_reset_period')}
               value={createForm.traffic_reset_period}
               onChange={e => setCreateForm({ ...createForm, traffic_reset_period: e.target.value as ResetPeriod })}>
@@ -851,7 +980,7 @@ export default function UsersView() {
               value={createForm.remark} onChange={e => setCreateForm({ ...createForm, remark: e.target.value })} />
           </Box>
         </DialogContent>
-        <DialogActions sx={{ px: 3, pb: 2 }}>
+        <DialogActions>
           <Button onClick={() => setCreateOpen(false)} disabled={createBusy} variant="text">{t('common:actions.cancel')}</Button>
           <Button type="submit" form="create-form" variant="contained" disabled={createBusy}
             startIcon={createBusy ? <CircularProgress size={16} color="inherit" /> : null}>
@@ -860,10 +989,58 @@ export default function UsersView() {
         </DialogActions>
       </Dialog>
 
+      {/* Reset-password dialog */}
+      <Dialog open={pwdResetOpen} onClose={() => !pwdResetBusy && setPwdResetOpen(false)}
+        PaperProps={{ sx: { borderRadius: 3, bgcolor: md.surfaceContainerHigh, width: 460, maxWidth: '90vw' } }}>
+        <DialogTitle>
+          {t('admin:users.reset_password.title', { defaultValue: '重置登录密码' })}
+          {pwdResetUser ? ` — ${pwdResetUser.upn}` : ''}
+        </DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" sx={{ mb: 2, color: md.onSurfaceVariant }}>
+            {t('admin:users.reset_password.hint', {
+              defaultValue: '留空将生成随机密码；也可以点击右侧骰子按钮自动填充后再手动修改。',
+            })}
+          </Typography>
+          <TextField
+            fullWidth autoFocus
+            type={pwdResetShow ? 'text' : 'password'}
+            label={t('admin:users.reset_password.field', { defaultValue: '新密码（留空 = 随机）' })}
+            value={pwdResetValue}
+            onChange={e => { setPwdResetValue(e.target.value); if (pwdResetError) setPwdResetError('') }}
+            error={!!pwdResetError}
+            helperText={pwdResetError || ' '}
+            InputProps={{
+              endAdornment: (
+                <InputAdornment position="end">
+                  <Tooltip title={t('admin:users.reset_password.gen', { defaultValue: '随机生成' })}>
+                    <IconButton size="small" onClick={() => { setPwdResetValue(genRandomPassword()); setPwdResetShow(true); setPwdResetError('') }}>
+                      <CasinoIcon fontSize="small" />
+                    </IconButton>
+                  </Tooltip>
+                  <IconButton size="small" onClick={() => setPwdResetShow(s => !s)}>
+                    {pwdResetShow ? <VisibilityOffIcon fontSize="small" /> : <VisibilityIcon fontSize="small" />}
+                  </IconButton>
+                </InputAdornment>
+              ),
+            }}
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setPwdResetOpen(false)} disabled={pwdResetBusy} variant="text">
+            {t('common:actions.cancel')}
+          </Button>
+          <Button onClick={submitPwdReset} disabled={pwdResetBusy} variant="contained"
+            startIcon={pwdResetBusy ? <CircularProgress size={16} color="inherit" /> : null}>
+            {t('common:actions.ok')}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
       {/* Result dialog */}
       <Dialog open={resultOpen} onClose={() => setResultOpen(false)}
-        PaperProps={{ sx: { borderRadius: 4, bgcolor: md.surfaceContainerHigh, width: 520, maxWidth: '90vw' } }}>
-        <DialogTitle sx={{ pt: 3 }}>{t('admin:users.result_title')}</DialogTitle>
+        PaperProps={{ sx: { borderRadius: 3, bgcolor: md.surfaceContainerHigh, width: 520, maxWidth: '90vw' } }}>
+        <DialogTitle>{t('admin:users.result_title')}</DialogTitle>
         <DialogContent>
           <Typography variant="body2" sx={{ mb: 2 }}>
             {resultUser && t('admin:users.result.intro', { upn: resultUser.upn })}
@@ -899,38 +1076,91 @@ export default function UsersView() {
             )}
           </Box>
         </DialogContent>
-        <DialogActions sx={{ px: 3, pb: 2 }}>
+        <DialogActions>
           <Button variant="contained" onClick={() => setResultOpen(false)}>{t('common:actions.ok')}</Button>
         </DialogActions>
       </Dialog>
 
       {/* Edit dialog */}
       <Dialog open={editOpen} onClose={() => !editBusy && setEditOpen(false)}
-        PaperProps={{ sx: { borderRadius: 4, bgcolor: md.surfaceContainerHigh, width: 540, maxWidth: '90vw' } }}>
-        <DialogTitle sx={{ pt: 3 }}>{t('admin:users.edit_title')} — {editing?.upn}</DialogTitle>
+        PaperProps={{ sx: { borderRadius: 3, bgcolor: md.surfaceContainerHigh, width: 540, maxWidth: '90vw' } }}>
+        <DialogTitle>{t('admin:users.edit_title')} — {editing?.upn}</DialogTitle>
         <DialogContent>
           <Box component="form" id="edit-form" onSubmit={submitEdit} sx={{ display: 'flex', flexDirection: 'column', gap: 2.5, pt: 1 }}>
             <TextField fullWidth label={t('admin:users.field.display_name')}
-              value={editForm.display_name} onChange={e => setEditForm({ ...editForm, display_name: e.target.value })} />
+              value={editForm.display_name} onChange={e => setEditForm({ ...editForm, display_name: e.target.value })}
+              error={!!editErr.display_name}
+              helperText={editErr.display_name ? t(`admin:${editErr.display_name}`) : ''} />
             <TextField fullWidth label={t('admin:users.field.email')}
-              value={editForm.email} onChange={e => setEditForm({ ...editForm, email: e.target.value })} />
-            <TextField select size="small" fullWidth label={t('admin:users.field.group')}
+              value={editForm.email} onChange={e => setEditForm({ ...editForm, email: e.target.value })}
+              error={!!editErr.email}
+              helperText={editErr.email ? t(`admin:${editErr.email}`) : ''} />
+            <TextField select required size="small" fullWidth label={t('admin:users.field.group')}
               value={editForm.group_id}
-              onChange={e => setEditForm({ ...editForm, group_id: Number(e.target.value) })}>
+              onChange={e => setEditForm({ ...editForm, group_id: Number(e.target.value) })}
+              error={!!editErr.group_id}
+              helperText={editErr.group_id ? t(`admin:${editErr.group_id}`) : ''}>
               {groups.map(g => <MenuItem key={g.id} value={g.id}>{g.name}</MenuItem>)}
             </TextField>
-            <TextField select size="small" fullWidth label={t('admin:users.field.role')}
-              value={editForm.role}
-              // Operators can only assign role=user — backend enforces the
-              // same rule but disabling the field avoids a confusing 403
-              // after submit. Admins see all three options.
-              disabled={auth.role === 'operator'}
-              helperText={auth.role === 'operator' ? t('admin:users.role.operator_locked', { defaultValue: '运营人员不能调整角色' }) : ''}
-              onChange={e => setEditForm({ ...editForm, role: e.target.value as Role })}>
-              <MenuItem value="user">{t('admin:users.role.user')}</MenuItem>
-              <MenuItem value="operator">{t('admin:users.role.operator')}</MenuItem>
-              <MenuItem value="admin">{t('admin:users.role.admin')}</MenuItem>
-            </TextField>
+            <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1 }}>
+              <TextField select size="small" fullWidth label={t('admin:users.field.role')}
+                value={editForm.role}
+                // Operators can only assign role=user — backend enforces the
+                // same rule but disabling the field avoids a confusing 403
+                // after submit. Admins see all three options.
+                disabled={auth.role === 'operator'}
+                helperText={auth.role === 'operator' ? t('admin:users.role.operator_locked', { defaultValue: '运营人员不能调整角色' }) : ''}
+                onChange={e => setEditForm({ ...editForm, role: e.target.value as Role })}>
+                <MenuItem value="user">{t('admin:users.role.user')}</MenuItem>
+                <MenuItem value="operator">{t('admin:users.role.operator')}</MenuItem>
+                <MenuItem value="admin">{t('admin:users.role.admin')}</MenuItem>
+              </TextField>
+              {/* Help button reveals a per-role capability cheat sheet.
+                  Two roles is OK to remember; three already has admins
+                  asking "what can operator actually do?" — short table
+                  beats a wiki link. */}
+              <Tooltip title={t('admin:users.role.help_tooltip', { defaultValue: '角色权限说明' })}>
+                <IconButton size="small" sx={{ mt: 0.5 }}
+                  onClick={(e: MouseEvent<HTMLElement>) => setRoleHelpAnchor(e.currentTarget)}>
+                  <HelpOutlineIcon fontSize="small" />
+                </IconButton>
+              </Tooltip>
+              <Popover
+                open={!!roleHelpAnchor}
+                anchorEl={roleHelpAnchor}
+                onClose={() => setRoleHelpAnchor(null)}
+                anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+                transformOrigin={{ vertical: 'top', horizontal: 'right' }}
+                PaperProps={{ sx: { p: 2, maxWidth: 360, bgcolor: md.surfaceContainerHigh } }}>
+                <Typography sx={{ fontWeight: 500, mb: 1 }}>{t('admin:users.role.help_title', { defaultValue: '角色权限速览' })}</Typography>
+                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.25, fontSize: 13 }}>
+                  <Box>
+                    <Typography component="span" sx={{ fontSize: 13, fontWeight: 600, color: md.onPrimaryContainer }}>
+                      {t('admin:users.role.admin')}
+                    </Typography>
+                    <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant, mt: 0.25 }}>
+                      {t('admin:users.role.help_admin', { defaultValue: '完整权限：服务器/SSO/邮件 SMTP/规则模板/审计清空，可创建任何角色。' })}
+                    </Typography>
+                  </Box>
+                  <Box>
+                    <Typography component="span" sx={{ fontSize: 13, fontWeight: 600, color: md.onSecondaryContainer }}>
+                      {t('admin:users.role.operator')}
+                    </Typography>
+                    <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant, mt: 0.25 }}>
+                      {t('admin:users.role.help_operator', { defaultValue: '日常运营：用户 CRUD、流量、紧急访问、节点开关、审计读、同步任务。不能改服务器/系统设置/SSO/邮件 SMTP，不能调整角色，不能动 admin/operator 账号。' })}
+                    </Typography>
+                  </Box>
+                  <Box>
+                    <Typography component="span" sx={{ fontSize: 13, fontWeight: 600, color: md.onSurfaceVariant }}>
+                      {t('admin:users.role.user')}
+                    </Typography>
+                    <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant, mt: 0.25 }}>
+                      {t('admin:users.role.help_user', { defaultValue: '普通用户：仅可访问 /user/me 自助页（订阅、用量、紧急访问、改密码、个人规则）。' })}
+                    </Typography>
+                  </Box>
+                </Box>
+              </Popover>
+            </Box>
             <Box sx={{ display: 'flex', gap: 1.5, alignItems: 'flex-start' }}>
               <TextField select size="small" label={t('admin:users.field.expire_at')}
                 value={editForm.expire_mode}
@@ -940,9 +1170,11 @@ export default function UsersView() {
                 <MenuItem value="permanent">{t('admin:users.field.expire_mode_permanent')}</MenuItem>
               </TextField>
               {editForm.expire_mode === 'date' && (
-                <TextField type="date" size="small" label={t('admin:users.field.expire_at')}
+                <TextField type="date" required size="small" label={t('admin:users.field.expire_at')}
                   value={editForm.expire_at}
                   onChange={e => setEditForm({ ...editForm, expire_at: e.target.value })}
+                  error={!!editErr.expire_at}
+                  helperText={editErr.expire_at ? t(`admin:${editErr.expire_at}`) : ''}
                   sx={{ flex: 1 }} InputLabelProps={{ shrink: true }} />
               )}
             </Box>
@@ -951,11 +1183,15 @@ export default function UsersView() {
                 value={editForm.traffic_limit_gb}
                 onChange={e => setEditForm({ ...editForm, traffic_limit_gb: Number(e.target.value) })}
                 inputProps={{ min: 0, step: 1 }}
+                error={!!editErr.traffic_limit_gb}
+                helperText={editErr.traffic_limit_gb ? t(`admin:${editErr.traffic_limit_gb}`) : ''}
                 sx={{ flex: '1 1 200px' }} />
               <TextField type="number" label={t('admin:users.field.period_used_gb')}
                 value={editForm.period_used_gb}
                 onChange={e => setEditForm({ ...editForm, period_used_gb: Number(e.target.value) })}
                 inputProps={{ min: 0, step: 0.01 }}
+                error={!!editErr.period_used_gb}
+                helperText={editErr.period_used_gb ? t(`admin:${editErr.period_used_gb}`) : ''}
                 sx={{ flex: '1 1 200px' }} />
             </Box>
             <TextField select size="small" fullWidth label={t('admin:users.field.traffic_reset_period')}
@@ -1032,7 +1268,7 @@ export default function UsersView() {
               value={editForm.remark} onChange={e => setEditForm({ ...editForm, remark: e.target.value })} />
           </Box>
         </DialogContent>
-        <DialogActions sx={{ px: 3, pb: 2 }}>
+        <DialogActions>
           <Button onClick={() => setEditOpen(false)} disabled={editBusy} variant="text">{t('common:actions.cancel')}</Button>
           <Button type="submit" form="edit-form" variant="contained" disabled={editBusy}
             startIcon={editBusy ? <CircularProgress size={16} color="inherit" /> : null}>
@@ -1043,8 +1279,8 @@ export default function UsersView() {
 
       {/* Reason dialog (single + batch) */}
       <Dialog open={reasonOpen} onClose={() => setReasonOpen(false)}
-        PaperProps={{ sx: { borderRadius: 4, bgcolor: md.surfaceContainerHigh, width: 480, maxWidth: '90vw' } }}>
-        <DialogTitle sx={{ pt: 3 }}>
+        PaperProps={{ sx: { borderRadius: 3, bgcolor: md.surfaceContainerHigh, width: 480, maxWidth: '90vw' } }}>
+        <DialogTitle>
           {(reasonBatch?.enable ?? !reasonUser?.enabled)
             ? t('admin:users.reason.enable_title')
             : t('admin:users.reason.disable_title')}
@@ -1059,7 +1295,7 @@ export default function UsersView() {
                 : t('admin:users.reason.disable_placeholder')
             } />
         </DialogContent>
-        <DialogActions sx={{ px: 3, pb: 2 }}>
+        <DialogActions>
           <Button onClick={() => setReasonOpen(false)} variant="text">{t('common:actions.cancel')}</Button>
           <Button onClick={submitReason} variant="contained"
             sx={(reasonBatch?.enable ?? !reasonUser?.enabled)
@@ -1074,8 +1310,8 @@ export default function UsersView() {
 
       {/* Personal rules dialog */}
       <Dialog open={rulesOpen} onClose={() => !rulesBusy && setRulesOpen(false)}
-        PaperProps={{ sx: { borderRadius: 4, bgcolor: md.surfaceContainerHigh, width: 600, maxWidth: '95vw' } }}>
-        <DialogTitle sx={{ pt: 3 }}>
+        PaperProps={{ sx: { borderRadius: 3, bgcolor: md.surfaceContainerHigh, width: 600, maxWidth: '95vw' } }}>
+        <DialogTitle>
           {rulesUser && t('admin:users.rules.title', { upn: rulesUser.upn })}
         </DialogTitle>
         <DialogContent>
@@ -1086,7 +1322,7 @@ export default function UsersView() {
                 placeholder={t('admin:users.rules.placeholder')}
                 sx={{ '& textarea': { fontSize: 13 } }} />}
         </DialogContent>
-        <DialogActions sx={{ px: 3, pb: 2 }}>
+        <DialogActions>
           <Button onClick={() => setRulesText(rulesSaved)}
             disabled={rulesBusy || rulesText.trim() === rulesSaved.trim()} variant="text">
             {t('admin:users.rules.reset')}
@@ -1104,8 +1340,8 @@ export default function UsersView() {
 
       {/* Reconcile result dialog (only when issues exist) */}
       <Dialog open={reconcileOpen} onClose={() => setReconcileOpen(false)}
-        PaperProps={{ sx: { borderRadius: 4, bgcolor: md.surfaceContainerHigh, width: 600, maxWidth: '95vw' } }}>
-        <DialogTitle sx={{ pt: 3 }}>{t('admin:users.reconcile.result_title')}</DialogTitle>
+        PaperProps={{ sx: { borderRadius: 3, bgcolor: md.surfaceContainerHigh, width: 600, maxWidth: '95vw' } }}>
+        <DialogTitle>{t('admin:users.reconcile.result_title')}</DialogTitle>
         <DialogContent>
           {reconcileReport && (
             <>
@@ -1129,7 +1365,7 @@ export default function UsersView() {
             </>
           )}
         </DialogContent>
-        <DialogActions sx={{ px: 3, pb: 2 }}>
+        <DialogActions>
           <Button variant="contained" onClick={() => setReconcileOpen(false)}>{t('common:actions.ok')}</Button>
         </DialogActions>
       </Dialog>

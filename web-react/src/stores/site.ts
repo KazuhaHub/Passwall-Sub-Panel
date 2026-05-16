@@ -22,7 +22,7 @@ interface SiteState {
 }
 
 function applyDocumentBranding(siteTitle: string, appTitle: string, iconUrl: string) {
-  document.title = siteTitle || appTitle || 'Passwall'
+  document.title = siteTitle || appTitle || 'Kazuha Hub Passwall'
   let link = document.querySelector<HTMLLinkElement>("link[rel~='icon']")
   if (!link) {
     link = document.createElement('link')
@@ -33,12 +33,12 @@ function applyDocumentBranding(siteTitle: string, appTitle: string, iconUrl: str
 }
 
 export const useSiteStore = create<SiteState>((set, get) => ({
-  siteTitle: 'Passwall',
+  siteTitle: 'Kazuha Hub Passwall',
   appTitle: 'Passwall',
   logoUrl: '',
   logoUrlDark: '',
   iconUrl: '',
-  footerText: '© Passwall Sub Panel',
+  footerText: '© Kazuha Hub Passwall',
   themeColor: undefined,
   themeDefaultMode: undefined,
   loaded: false,
@@ -48,12 +48,12 @@ export const useSiteStore = create<SiteState>((set, get) => ({
     try {
       const m = await getAuthMethods()
       set({
-        siteTitle: m.site_title || 'Passwall',
+        siteTitle: m.site_title || 'Kazuha Hub Passwall',
         appTitle: m.app_title || 'Passwall',
         logoUrl: m.logo_url || '',
         logoUrlDark: m.logo_url_dark || '',
         iconUrl: m.icon_url || '',
-        footerText: m.footer_text || '© Passwall Sub Panel',
+        footerText: m.footer_text || '© Kazuha Hub Passwall',
         themeColor: m.theme_color,
         themeDefaultMode: m.theme_default_mode,
         loaded: true,

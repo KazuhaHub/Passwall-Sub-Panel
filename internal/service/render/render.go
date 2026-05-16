@@ -130,12 +130,12 @@ func (s *Service) RenderForUser(ctx context.Context, u *domain.User, ct domain.C
 
 func (s *Service) profilePlaceholders(ctx context.Context, u *domain.User) map[string]string {
 	st, _ := s.repos.Settings.Load(ctx, ports.UISettings{
-		SiteTitle:   "Passwall",
+		SiteTitle:   "Kazuha Hub Passwall",
 		LogoURL:     "/images/logo+title-circle.png",
 		LogoURLDark: "/images/logo+title-circle-darkmode.png",
 	})
 	if st.SiteTitle == "" {
-		st.SiteTitle = "Passwall"
+		st.SiteTitle = "Kazuha Hub Passwall"
 	}
 	if st.LogoURL == "" {
 		st.LogoURL = "/images/logo+title-circle.png"
@@ -257,10 +257,10 @@ func (s *Service) resolveRulesCommon(ctx context.Context, tpl *domain.Template) 
 // buildProfileName generates the subscription profile name used in
 // Content-Disposition header. Format: "SiteTitle - DisplayName"
 func (s *Service) buildProfileName(ctx context.Context, u *domain.User) string {
-	st, _ := s.repos.Settings.Load(ctx, ports.UISettings{SiteTitle: "Passwall"})
+	st, _ := s.repos.Settings.Load(ctx, ports.UISettings{SiteTitle: "Kazuha Hub Passwall"})
 	siteTitle := st.SiteTitle
 	if siteTitle == "" {
-		siteTitle = "Passwall"
+		siteTitle = "Kazuha Hub Passwall"
 	}
 	displayName := u.DisplayName
 	if displayName == "" {

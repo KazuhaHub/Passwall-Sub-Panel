@@ -304,8 +304,8 @@ export default function SyncTasksView() {
 
       {/* Detail dialog */}
       <Dialog open={detailOpen} onClose={() => setDetailOpen(false)}
-        PaperProps={{ sx: { borderRadius: 4, bgcolor: md.surfaceContainerHigh, width: 720, maxWidth: '95vw' } }}>
-        <DialogTitle sx={{ pt: 3 }}>{t('admin:sync_tasks.detail_title')} #{detail && idOf(detail)}</DialogTitle>
+        PaperProps={{ sx: { borderRadius: 3, bgcolor: md.surfaceContainerHigh, width: 720, maxWidth: '95vw' } }}>
+        <DialogTitle>{t('admin:sync_tasks.detail_title')} #{detail && idOf(detail)}</DialogTitle>
         <DialogContent>
           {detail && (
             <Box component="pre" sx={{
@@ -322,7 +322,7 @@ export default function SyncTasksView() {
             </Box>
           )}
         </DialogContent>
-        <DialogActions sx={{ px: 3, pb: 2 }}>
+        <DialogActions>
           <DeleteIcon sx={{ display: 'none' }} />
           <Button variant="contained" onClick={() => setDetailOpen(false)}>{t('common:actions.ok')}</Button>
         </DialogActions>

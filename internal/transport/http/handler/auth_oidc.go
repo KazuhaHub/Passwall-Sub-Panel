@@ -98,13 +98,22 @@ func (h *AuthOIDCHandler) Callback(c *gin.Context) {
 	isAdmin := h.oidc.IsAdmin(assertion.Groups)
 
 	upn := assertion.Username
-	u, err := h.user.EnsureSSO(c.Request.Context(), user.EnsureSSOInput{
+	cfg := h.oidc.Config()
+	in := user.EnsureSSOInput{
 		UPN:         upn,
 		Email:       assertion.Email,
 		DisplayName: assertion.DisplayName,
 		Groups:      assertion.Groups,
 		IsAdmin:     isAdmin,
-	})
+	}
+	if cfg != nil {
+		in.AllowAutoCreate = cfg.AllowAutoCreate
+		in.DefaultGroupSlug = cfg.DefaultGroupSlug
+		in.DefaultExpireDays = cfg.NewUserDefaults.ExpireDays
+		in.DefaultLimitBytes = cfg.NewUserDefaults.TrafficLimitBytes
+		in.DefaultResetPeriod = domain.ResetPeriod(cfg.NewUserDefaults.TrafficResetPeriod)
+	}
+	u, err := h.user.EnsureSSO(c.Request.Context(), in)
 	if errors.Is(err, domain.ErrSSONoAccount) {
 		c.Redirect(http.StatusFound, "/sso-no-account")
 		return

@@ -40,6 +40,13 @@ import {
 } from '@/api/servers'
 import { confirm } from '@/components/ConfirmHost'
 import { pushSnack } from '@/components/SnackbarHost'
+import {
+  type FieldErrors,
+  firstError,
+  validateName,
+  validateRequired,
+  validateUrl,
+} from '@/utils/validators'
 
 type ProbeStatus = 'unknown' | 'checking' | 'ok' | 'fail' | 'unconfigured'
 
@@ -88,6 +95,8 @@ export default function ServersView() {
   const [editing, setEditing] = useState<Server | null>(null)
   const [form, setForm] = useState<FormState>(EMPTY_FORM)
   const [busy, setBusy] = useState(false)
+  type ServerField = 'name' | 'url' | 'api_token' | 'password'
+  const [fieldErr, setFieldErr] = useState<FieldErrors<ServerField>>({})
 
   const selectedCount = selected.size
   const allChecked = items.length > 0 && selected.size === items.length
@@ -146,6 +155,7 @@ export default function ServersView() {
   function openCreate() {
     setEditing(null)
     setForm({ ...EMPTY_FORM, change_api_token: true, change_password: true })
+    setFieldErr({})
     setDialogOpen(true)
   }
 
@@ -158,12 +168,32 @@ export default function ServersView() {
       username: s.username ?? '',
       remark: s.remark ?? '',
     })
+    setFieldErr({})
     setDialogOpen(true)
+  }
+
+  function validateForm(f: FormState, isEdit: boolean): FieldErrors<ServerField> {
+    return {
+      name: validateName(f.name, { required: true, max: 64 }),
+      url: validateUrl(f.url, { required: true }),
+      // On create, at least one credential is required (server enforces this
+      // too — the panel won't probe without a token or login). On edit, both
+      // fields are optional unless the admin explicitly toggled "change".
+      api_token: !isEdit && !f.api_token && !f.password
+        ? validateRequired('', 'validation.required')
+        : '',
+      password: !isEdit && !f.api_token && !f.password
+        ? validateRequired('', 'validation.required')
+        : '',
+    }
   }
 
   async function submit(e: FormEvent) {
     e.preventDefault()
-    if (!form.url) { pushSnack(t('admin:servers.validate.url_required'), 'warning'); return }
+    const errs = validateForm(form, !!editing)
+    setFieldErr(errs)
+    const firstKey = firstError(errs)
+    if (firstKey) { pushSnack(t(`admin:${firstKey}`), 'warning'); return }
     setBusy(true)
     try {
       if (editing) {
@@ -178,7 +208,6 @@ export default function ServersView() {
         await updateServer(editing.id, req)
         pushSnack(t('admin:servers.toast.saved'), 'success')
       } else {
-        if (!form.name) { pushSnack(t('admin:servers.validate.name_required'), 'warning'); return }
         await createServer({
           name: form.name, url: form.url,
           api_token: form.api_token || undefined,
@@ -444,9 +473,9 @@ export default function ServersView() {
       <Dialog
         open={dialogOpen}
         onClose={() => !busy && setDialogOpen(false)}
-        PaperProps={{ sx: { borderRadius: 4, bgcolor: md.surfaceContainerHigh, width: 520, maxWidth: '90vw' } }}
+        PaperProps={{ sx: { borderRadius: 3, bgcolor: md.surfaceContainerHigh, width: 520, maxWidth: '90vw' } }}
       >
-        <DialogTitle sx={{ pt: 3 }}>
+        <DialogTitle>
           {editing ? t('admin:servers.edit_title', { name: editing.name }) : t('admin:servers.create')}
         </DialogTitle>
         <DialogContent>
@@ -458,7 +487,8 @@ export default function ServersView() {
                 placeholder={t('admin:servers.placeholder.name')}
                 value={form.name}
                 onChange={e => setForm({ ...form, name: e.target.value })}
-                helperText={t('admin:servers.hint.name')}
+                error={!!fieldErr.name}
+                helperText={fieldErr.name ? t(`admin:${fieldErr.name}`) : t('admin:servers.hint.name')}
               />
             </Box>
             <TextField
@@ -467,6 +497,8 @@ export default function ServersView() {
               placeholder={t('admin:servers.placeholder.url')}
               value={form.url}
               onChange={e => setForm({ ...form, url: e.target.value })}
+              error={!!fieldErr.url}
+              helperText={fieldErr.url ? t(`admin:${fieldErr.url}`) : ''}
               sx={{ '& input': { fontSize: 14 } }}
             />
 
@@ -513,7 +545,7 @@ export default function ServersView() {
             />
           </Box>
         </DialogContent>
-        <DialogActions sx={{ px: 3, pb: 2 }}>
+        <DialogActions>
           <Button onClick={() => setDialogOpen(false)} disabled={busy} variant="text">
             {t('common:actions.cancel')}
           </Button>

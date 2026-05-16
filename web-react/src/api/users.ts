@@ -63,6 +63,14 @@ export async function resetCredentials(id: number) {
   return data
 }
 
+export async function resetPassword(id: number, password?: string) {
+  const { data } = await client.post<{ password: string }>(
+    `/admin/users/${id}/reset-password`,
+    { password: password ?? '' },
+  )
+  return data
+}
+
 export async function resetEmergencyUsage(id: number) {
   await client.post(`/admin/users/${id}/reset-emergency-usage`)
 }

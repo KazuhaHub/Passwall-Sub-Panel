@@ -470,6 +470,7 @@ type uiSettingsRow struct {
 	SyncTaskRetentionDays      int
 	DisallowUserLocalLogin     bool
 	DisallowUserPasswordChange bool
+	AllowUserPersonalRules     bool
 	EmergencyAccessEnabled     bool
 	EmergencyAccessHours       int
 	EmergencyAccessMaxCount    int
