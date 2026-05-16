@@ -582,9 +582,14 @@ export default function UsersView() {
   }
 
   function roleBadge(role: Role) {
-    return role === 'admin'
-      ? badge(t('admin:users.role.admin'), md.primaryContainer, md.onPrimaryContainer)
-      : badge(t('admin:users.role.user'), md.surfaceContainerHighest, md.onSurfaceVariant)
+    switch (role) {
+      case 'admin':
+        return badge(t('admin:users.role.admin'), md.primaryContainer, md.onPrimaryContainer)
+      case 'operator':
+        return badge(t('admin:users.role.operator'), md.secondaryContainer, md.onSecondaryContainer)
+      default:
+        return badge(t('admin:users.role.user'), md.surfaceContainerHighest, md.onSurfaceVariant)
+    }
   }
 
   function trafficCell(u: User) {
@@ -916,8 +921,14 @@ export default function UsersView() {
             </TextField>
             <TextField select size="small" fullWidth label={t('admin:users.field.role')}
               value={editForm.role}
+              // Operators can only assign role=user — backend enforces the
+              // same rule but disabling the field avoids a confusing 403
+              // after submit. Admins see all three options.
+              disabled={auth.role === 'operator'}
+              helperText={auth.role === 'operator' ? t('admin:users.role.operator_locked', { defaultValue: '运营人员不能调整角色' }) : ''}
               onChange={e => setEditForm({ ...editForm, role: e.target.value as Role })}>
               <MenuItem value="user">{t('admin:users.role.user')}</MenuItem>
+              <MenuItem value="operator">{t('admin:users.role.operator')}</MenuItem>
               <MenuItem value="admin">{t('admin:users.role.admin')}</MenuItem>
             </TextField>
             <Box sx={{ display: 'flex', gap: 1.5, alignItems: 'flex-start' }}>

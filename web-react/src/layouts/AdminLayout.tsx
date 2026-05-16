@@ -53,12 +53,16 @@ interface NavItem {
   to: string
   labelKey: string
   Icon: typeof DashboardIcon
+  /** When true, the item only renders for admin role (operators don't
+   *  see it in the sidebar). Mirrors the backend's adminGroup vs
+   *  staffGroup split — keep these in sync. */
+  adminOnly?: boolean
 }
 
 const ADMIN_NAV: NavItem[] = [
   { to: '/admin/dashboard', labelKey: 'nav:admin.dashboard', Icon: DashboardIcon },
   { to: '/admin/users', labelKey: 'nav:admin.users', Icon: GroupIcon },
-  { to: '/admin/servers', labelKey: 'nav:admin.servers', Icon: StorageIcon },
+  { to: '/admin/servers', labelKey: 'nav:admin.servers', Icon: StorageIcon, adminOnly: true },
   { to: '/admin/nodes', labelKey: 'nav:admin.nodes', Icon: DnsIcon },
   { to: '/admin/groups', labelKey: 'nav:admin.groups', Icon: WorkspacesIcon },
   { to: '/admin/rules', labelKey: 'nav:admin.rules', Icon: RuleIcon },
@@ -66,7 +70,7 @@ const ADMIN_NAV: NavItem[] = [
   { to: '/admin/traffic', labelKey: 'nav:admin.traffic', Icon: InsightsIcon },
   { to: '/admin/logs', labelKey: 'nav:admin.logs', Icon: ReceiptLongIcon },
   { to: '/admin/sync-tasks', labelKey: 'nav:admin.sync_tasks', Icon: SyncIcon },
-  { to: '/admin/settings', labelKey: 'nav:admin.settings', Icon: SettingsIcon },
+  { to: '/admin/settings', labelKey: 'nav:admin.settings', Icon: SettingsIcon, adminOnly: true },
 ]
 
 export default function AdminLayout() {
@@ -156,7 +160,7 @@ export default function AdminLayout() {
         )}
       </Box>
       <List sx={{ flex: 1, px: railCollapsed ? 0.75 : 1.5, pt: 1 }}>
-        {ADMIN_NAV.map(item => {
+        {ADMIN_NAV.filter(item => !item.adminOnly || auth.role === 'admin').map(item => {
           const active = location.pathname === item.to || location.pathname.startsWith(item.to + '/')
           const button = (
             <ListItemButton
@@ -286,7 +290,7 @@ export default function AdminLayout() {
                 <Box>
                   <Typography sx={{ fontSize: 14, fontWeight: 500, color: md.onSurface }}>{label}</Typography>
                   <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant }}>
-                    {auth.role === 'admin' ? 'Administrator' : 'User'}
+                    {auth.role === 'admin' ? 'Administrator' : auth.role === 'operator' ? 'Operator' : 'User'}
                   </Typography>
                 </Box>
               </MenuItem>

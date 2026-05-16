@@ -2,7 +2,11 @@
 // Other DTOs are added per page when migrated. Mirrors backend handlers
 // in internal/transport/http/handler/*.go.
 
-export type Role = 'admin' | 'user'
+/** Operator can manage day-to-day user records but is locked out of
+ *  3X-UI panel credentials, system settings, mail SMTP, SAML/OIDC,
+ *  rule sets, templates, audit clear. The intent: bring in an
+ *  assistant without handing over break-glass keys. */
+export type Role = 'admin' | 'operator' | 'user'
 export type ResetPeriod = 'never' | 'monthly' | 'quarterly'
 
 export interface User {

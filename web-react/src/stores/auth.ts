@@ -83,4 +83,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 // Selectors for ergonomics.
 export const selectIsLoggedIn = () => !!sessionStorage.getItem('psp_access')
 export const selectIsAdmin = (s: AuthState) => s.role === 'admin'
+// Operators count as "staff" for nav / route gating: they can see the
+// admin SPA but their backend calls are scoped down by per-handler role
+// checks. Pure admins should always satisfy isStaff too.
+export const selectIsStaff = (s: AuthState) => s.role === 'admin' || s.role === 'operator'
 export const selectLabel = (s: AuthState) => s.displayName || s.upn || 'User'

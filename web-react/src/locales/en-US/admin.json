@@ -665,7 +665,9 @@
     },
     "role": {
       "admin": "Admin",
-      "user": "User"
+      "operator": "Operator",
+      "user": "User",
+      "operator_locked": "Operators cannot change roles"
     },
     "reset_period": {
       "never": "Never",

@@ -4,7 +4,14 @@ type Role string
 
 const (
 	RoleAdmin Role = "admin"
-	RoleUser  Role = "user"
+	// RoleOperator can do day-to-day user management (CRUD users, reset
+	// credentials, view/edit traffic, run sync tasks) but is locked out of
+	// integration credentials and system-wide settings (3X-UI panels, SMTP,
+	// SAML/OIDC, ui_settings, rule sets, templates, audit log clear). The
+	// rationale: bring in a paid-tier "助理" to manage tenants without
+	// handing over the panel's break-glass keys.
+	RoleOperator Role = "operator"
+	RoleUser     Role = "user"
 )
 
 type ResetPeriod string

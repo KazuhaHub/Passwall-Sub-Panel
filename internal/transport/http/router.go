@@ -119,74 +119,98 @@ func NewRouter(d Deps) *gin.Engine {
 		userGroup.POST("/change-password", userMe.ChangePassword)
 	}
 
-	// Admin API
+	// Admin API.
+	//
+	// The /api/admin/* tree splits into two role gates:
+	//   • staffGroup   — admin OR operator. Day-to-day work that doesn't touch
+	//                    integration credentials or system-wide config: user
+	//                    CRUD, traffic, sync tasks, sub logs, audit read,
+	//                    template/rule reads, etc.
+	//   • adminGroup   — admin only. Anything that holds passwords / API
+	//                    tokens / SSO secrets, can lock the panel out, or
+	//                    rewrites global behavior: 3X-UI panel CRUD, system
+	//                    settings, mail SMTP / templates, SAML/OIDC, rule
+	//                    set + template writes, audit clear.
+	// Both share the AuditWrites engine-level middleware.
+	staffGroup := g.Group("/api/admin",
+		middleware.RequireAuth(d.Auth, d.User),
+		middleware.RequireRole(domain.RoleAdmin, domain.RoleOperator),
+	)
 	adminGroup := g.Group("/api/admin",
 		middleware.RequireAuth(d.Auth, d.User),
 		middleware.RequireRole(domain.RoleAdmin),
 	)
-	// AuditWrites is attached at the engine level above; no per-group
-	// middleware needed here.
 	{
 		users := handler.NewAdminUserHandler(d.User, d.Repos.Settings, d.Mail)
-		adminGroup.GET("/users", users.List)
-		adminGroup.POST("/users", users.Create)
-		adminGroup.GET("/users/:id", users.Get)
-		adminGroup.PUT("/users/:id", users.Update)
-		adminGroup.DELETE("/users/:id", users.Delete)
-		adminGroup.POST("/users/:id/reset-credentials", users.ResetCredentials)
-		adminGroup.POST("/users/:id/reset-emergency-usage", users.ResetEmergencyUsage)
-		adminGroup.POST("/users/:id/set-enabled", users.SetEnabled)
-		adminGroup.GET("/users/:id/rules", users.GetRules)
-		adminGroup.PUT("/users/:id/rules", users.PutRules)
+		// User CRUD is the operator's bread and butter. Handler-level guard
+		// in users.Update prevents operators from creating/promoting other
+		// admins or modifying an existing admin's role.
+		staffGroup.GET("/users", users.List)
+		staffGroup.POST("/users", users.Create)
+		staffGroup.GET("/users/:id", users.Get)
+		staffGroup.PUT("/users/:id", users.Update)
+		staffGroup.DELETE("/users/:id", users.Delete)
+		staffGroup.POST("/users/:id/reset-credentials", users.ResetCredentials)
+		staffGroup.POST("/users/:id/reset-emergency-usage", users.ResetEmergencyUsage)
+		staffGroup.POST("/users/:id/set-enabled", users.SetEnabled)
+		staffGroup.GET("/users/:id/rules", users.GetRules)
+		staffGroup.PUT("/users/:id/rules", users.PutRules)
 
 		nodes := handler.NewAdminNodeHandler(d.Node, d.Sync, d.Repos.Ownership, d.Repos.User, d.Repos.XUIPanel)
-		adminGroup.GET("/nodes", nodes.List)
-		adminGroup.GET("/nodes/:id", nodes.Get)
+		// Reads + toggle-enabled are operator-safe; create/update/delete and
+		// the import / claim flows touch 3X-UI panels directly, admin only.
+		staffGroup.GET("/nodes", nodes.List)
+		staffGroup.GET("/nodes/:id", nodes.Get)
+		staffGroup.POST("/nodes/:id/set-enabled", nodes.SetEnabled)
+		staffGroup.GET("/nodes/unmanaged", nodes.ListUnmanaged)
 		adminGroup.POST("/nodes/import", nodes.ImportExisting)
 		adminGroup.POST("/nodes", nodes.CreateInbound)
 		adminGroup.PUT("/nodes/:id/metadata", nodes.UpdateMetadata)
 		adminGroup.PUT("/nodes/:id/inbound", nodes.UpdateInboundConfig)
-		adminGroup.POST("/nodes/:id/set-enabled", nodes.SetEnabled)
 		adminGroup.DELETE("/nodes/:id", nodes.Delete)
-		adminGroup.GET("/nodes/unmanaged", nodes.ListUnmanaged)
 		adminGroup.POST("/nodes/:id/claim", nodes.ClaimClient)
 		adminGroup.POST("/nodes/generate-reality-keypair", nodes.GenerateRealityKeypair)
 
 		groups := handler.NewAdminGroupHandler(d.Group, d.User, d.Repos.User)
-		adminGroup.GET("/groups", groups.List)
-		adminGroup.GET("/groups/:id", groups.Get)
+		// Group CRUD shapes who can see which nodes — admin-only structure.
+		// Operators need to read groups to pick one when creating a user.
+		staffGroup.GET("/groups", groups.List)
+		staffGroup.GET("/groups/:id", groups.Get)
 		adminGroup.POST("/groups", groups.Create)
 		adminGroup.PUT("/groups/:id", groups.Update)
 		adminGroup.PUT("/groups/:id/layout", groups.UpdateLayout)
 		adminGroup.DELETE("/groups/:id", groups.Delete)
 
 		rules := handler.NewAdminRuleSetsHandler(d.Repos.RuleSet)
-		adminGroup.GET("/rules", rules.List)
-		adminGroup.GET("/rules/:slug", rules.Get)
+		staffGroup.GET("/rules", rules.List)
+		staffGroup.GET("/rules/:slug", rules.Get)
 		adminGroup.PUT("/rules/:slug", rules.Save)
 		adminGroup.DELETE("/rules/:slug", rules.Delete)
 
 		templates := handler.NewAdminTemplatesHandler(d.Repos.Template)
-		adminGroup.GET("/templates", templates.List)
-		adminGroup.GET("/templates/:slug", templates.Get)
+		staffGroup.GET("/templates", templates.List)
+		staffGroup.GET("/templates/:slug", templates.Get)
 		adminGroup.PUT("/templates/:slug", templates.Save)
 		adminGroup.DELETE("/templates/:slug", templates.Delete)
 
 		auditH := handler.NewAdminAuditHandler(d.Repos.Audit)
-		adminGroup.GET("/audit", auditH.List)
+		// Read so operators can review their own actions; only admin can
+		// wipe history.
+		staffGroup.GET("/audit", auditH.List)
 		adminGroup.DELETE("/audit", auditH.Clear)
 
 		trafficH := handler.NewAdminTrafficHandler(d.Repos.User, d.Repos.Node, d.Traffic)
-		adminGroup.GET("/traffic/top", trafficH.Top)
-		adminGroup.POST("/traffic/poll", trafficH.Poll)
-		adminGroup.GET("/traffic/history", trafficH.History)
-		adminGroup.GET("/traffic/user/:id", trafficH.UserReport)
-		adminGroup.GET("/traffic/user/:id/history", trafficH.UserHistory)
-		adminGroup.PUT("/traffic/user/:id", trafficH.SetUserUsage)
-		adminGroup.GET("/traffic/nodes/top", trafficH.NodesTop)
-		adminGroup.GET("/traffic/nodes/history", trafficH.NodesHistory)
+		staffGroup.GET("/traffic/top", trafficH.Top)
+		staffGroup.POST("/traffic/poll", trafficH.Poll)
+		staffGroup.GET("/traffic/history", trafficH.History)
+		staffGroup.GET("/traffic/user/:id", trafficH.UserReport)
+		staffGroup.GET("/traffic/user/:id/history", trafficH.UserHistory)
+		staffGroup.PUT("/traffic/user/:id", trafficH.SetUserUsage)
+		staffGroup.GET("/traffic/nodes/top", trafficH.NodesTop)
+		staffGroup.GET("/traffic/nodes/history", trafficH.NodesHistory)
 
 		servers := handler.NewAdminServersHandler(d.Repos.XUIPanel, d.Pool, d.Repos.Node, d.Repos.Ownership)
+		// 3X-UI panel credentials live here — never operator.
 		adminGroup.GET("/servers", servers.List)
 		adminGroup.POST("/servers", servers.Create)
 		adminGroup.PUT("/servers/:id", servers.Update)
@@ -215,16 +239,17 @@ func NewRouter(d Deps) *gin.Engine {
 		adminGroup.PUT("/settings/oidc", oidcAdmin.Put)
 
 		recon := handler.NewAdminReconcileHandler(d.Reconcile)
+		// Reconcile rewrites 3X-UI side state — admin only.
 		adminGroup.POST("/reconcile/run", recon.Run)
 
 		tasks := handler.NewAdminSyncTasksHandler(d.Repos.SyncTask)
-		adminGroup.GET("/sync-tasks", tasks.List)
-		adminGroup.POST("/sync-tasks/:id/retry", tasks.Retry)
-		adminGroup.POST("/sync-tasks/:id/cancel", tasks.Cancel)
+		staffGroup.GET("/sync-tasks", tasks.List)
+		staffGroup.POST("/sync-tasks/:id/retry", tasks.Retry)
+		staffGroup.POST("/sync-tasks/:id/cancel", tasks.Cancel)
 		adminGroup.POST("/sync-tasks/purge", tasks.PurgeFinished)
 
 		subLogs := handler.NewAdminSubLogHandler(d.Repos.SubLog, d.Repos.Settings)
-		adminGroup.GET("/sub-logs", subLogs.List)
+		staffGroup.GET("/sub-logs", subLogs.List)
 		adminGroup.DELETE("/sub-logs", subLogs.Clear)
 		adminGroup.POST("/sub-logs/purge", subLogs.Purge)
 	}

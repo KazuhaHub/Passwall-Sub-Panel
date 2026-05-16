@@ -723,7 +723,9 @@
     },
     "role": {
       "admin": "管理员",
-      "user": "普通用户"
+      "operator": "运营人员",
+      "user": "普通用户",
+      "operator_locked": "运营人员不能调整角色"
     },
     "reset_period": {
       "never": "不重置",

@@ -15,7 +15,48 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/mailer"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/user"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/transport/http/middleware"
 )
+
+// ensureOperatorAllowed blocks an operator caller from mutating an
+// admin/operator account. Returns true when the operation may proceed
+// (caller is admin OR target is a regular user). On 403 it writes the
+// response itself; the handler should return immediately.
+//
+// Centralised here so every mutating user-handler can call it without
+// repeating the same fetch+compare four times.
+func (h *AdminUserHandler) ensureOperatorAllowed(c *gin.Context, targetID int64) bool {
+	claims := middleware.ClaimsFrom(c)
+	if claims == nil || claims.Role != domain.RoleOperator {
+		return true
+	}
+	target, err := h.user.Get(c.Request.Context(), targetID)
+	if err != nil {
+		// Let the caller handle 404/500 via its own service call.
+		return true
+	}
+	if target.Role == domain.RoleAdmin || target.Role == domain.RoleOperator {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Operators cannot modify admin or operator accounts"})
+		return false
+	}
+	return true
+}
+
+// guardOperatorRoleAssignment rejects operator callers that try to
+// create or assign a non-user role. Operators can only manage regular
+// users — letting them mint another operator/admin would be a privilege
+// escalation path.
+func guardOperatorRoleAssignment(c *gin.Context, targetRole domain.Role) bool {
+	claims := middleware.ClaimsFrom(c)
+	if claims == nil || claims.Role != domain.RoleOperator {
+		return true
+	}
+	if targetRole != "" && targetRole != domain.RoleUser {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Operators can only assign role=user"})
+		return false
+	}
+	return true
+}
 
 // AdminUserHandler exposes user CRUD under /api/admin/users.
 type AdminUserHandler struct {
@@ -172,6 +213,9 @@ func (h *AdminUserHandler) Delete(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid id"})
 		return
 	}
+	if !h.ensureOperatorAllowed(c, id) {
+		return
+	}
 	if err := h.user.DeleteAndSync(c.Request.Context(), id); err != nil {
 		if errors.Is(err, domain.ErrNotFound) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Not found"})
@@ -190,6 +234,9 @@ func (h *AdminUserHandler) ResetCredentials(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid id"})
+		return
+	}
+	if !h.ensureOperatorAllowed(c, id) {
 		return
 	}
 	res, err := h.user.ResetCredentialsAndSync(c.Request.Context(), id)
@@ -217,6 +264,9 @@ func (h *AdminUserHandler) ResetEmergencyUsage(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid id"})
 		return
 	}
+	if !h.ensureOperatorAllowed(c, id) {
+		return
+	}
 	if err := h.user.ResetEmergencyUsage(c.Request.Context(), id); err != nil {
 		if errors.Is(err, domain.ErrNotFound) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Not found"})
@@ -237,6 +287,9 @@ func (h *AdminUserHandler) SetEnabled(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid id"})
+		return
+	}
+	if !h.ensureOperatorAllowed(c, id) {
 		return
 	}
 	var req setEnabledRequest
@@ -313,6 +366,9 @@ func (h *AdminUserHandler) PutRules(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid id"})
 		return
 	}
+	if !h.ensureOperatorAllowed(c, id) {
+		return
+	}
 	var req updatePersonalRulesRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -350,9 +406,17 @@ func (h *AdminUserHandler) Update(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid id"})
 		return
 	}
+	if !h.ensureOperatorAllowed(c, id) {
+		return
+	}
 	var req updateUserRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	// Belt-and-suspenders: even if the frontend sends a role field by
+	// accident, operators can never escalate via this endpoint.
+	if req.Role != nil && !guardOperatorRoleAssignment(c, domain.Role(*req.Role)) {
 		return
 	}
 	if req.Email != nil {
