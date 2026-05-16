@@ -182,7 +182,39 @@ type Node struct {
 	LastTrafficUpBytes    int64
 	LastTrafficDownBytes  int64
 	LastTrafficTotalBytes int64
+	// Health is updated by the periodic health-check worker. Empty (zero
+	// value) until the first probe runs. Lets the admin Nodes view show a
+	// green/red dot without polling each 3X-UI live.
+	HealthState     NodeHealthState
+	HealthCheckedAt *time.Time
+	// HealthDetail carries the panel/inbound error string for the most
+	// recent failed probe; empty when healthy.
+	HealthDetail string
 }
+
+// NodeHealthState classifies the outcome of the most recent health probe.
+type NodeHealthState string
+
+const (
+	// NodeHealthUnknown is the initial value before any probe has run, and
+	// also the value used when the node is disabled (we don't waste calls
+	// on disabled nodes).
+	NodeHealthUnknown NodeHealthState = ""
+	// NodeHealthOK means the 3X-UI panel responded and the inbound exists
+	// and is enabled.
+	NodeHealthOK NodeHealthState = "ok"
+	// NodeHealthPanelUnreachable means the 3X-UI panel itself didn't
+	// respond (network, auth, or server-side error). The inbound's actual
+	// state is unknown.
+	NodeHealthPanelUnreachable NodeHealthState = "panel_unreachable"
+	// NodeHealthInboundMissing means the panel responded but the inbound
+	// ID is no longer present (deleted on the 3X-UI side).
+	NodeHealthInboundMissing NodeHealthState = "inbound_missing"
+	// NodeHealthInboundDisabled means the panel returned the inbound but
+	// it's flagged off in 3X-UI — subscriptions will render it as a dead
+	// proxy.
+	NodeHealthInboundDisabled NodeHealthState = "inbound_disabled"
+)
 
 // NodeTrafficSnapshot is the per-node analogue of TrafficSnapshot: a
 // monotonic lifetime value at one point in time. Raw inbound counters are kept

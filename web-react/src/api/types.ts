@@ -60,6 +60,12 @@ export interface Node {
   tags: string[]
   sort_order: number
   enabled: boolean
+  /** Most recent health-probe outcome. Empty before the first tick has run. */
+  health_state?: '' | 'ok' | 'panel_unreachable' | 'inbound_missing' | 'inbound_disabled'
+  /** RFC3339 timestamp of the last probe (regardless of outcome). */
+  health_checked_at?: string | null
+  /** Error string for the most recent failed probe; empty when healthy. */
+  health_detail?: string
 }
 
 export type SyncTaskStatus = 'pending' | 'running' | 'succeeded' | 'canceled'

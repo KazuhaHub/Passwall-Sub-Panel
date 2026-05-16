@@ -22,6 +22,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/audit"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/auth"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/group"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/health"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/mailer"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/node"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/reconcile"
@@ -45,6 +46,7 @@ type App struct {
 	node      *node.Service
 	audit     *audit.Service
 	mail      *mailer.Service
+	health    *health.Service
 	settings  ports.SettingsRepo
 	syncTasks ports.SyncTaskRepo
 	saml      *auth.SAMLService
@@ -53,6 +55,7 @@ type App struct {
 	// see "restart required to change" semantics for the underlying setting.
 	trafficInterval   time.Duration
 	reconcileInterval time.Duration
+	healthInterval    time.Duration
 
 	bgCancel context.CancelFunc
 }
@@ -167,6 +170,7 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	trafficSvc := traffic.New(repos.User, repos.Ownership, repos.Traffic, repos.Node, repos.NodeTraffic, pool, userSvc).WithSettings(repos.Settings)
 	mailSvc := mailer.New(repos.Mail, repos.User, repos.Traffic, repos.Settings, repos.SyncTask)
 	reconcileSvc := reconcile.New(repos.User, repos.Ownership, repos.Node, repos.Group, repos.Settings, repos.Audit, pool, syncSvc)
+	healthSvc := health.New(repos.Node, pool)
 	renderSvc := render.New(repos, pool, groupSvc)
 
 	// --- transport layer ---
@@ -190,6 +194,16 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 		LoginPerIPPerMin: sysSettings.LoginPerIPPerMin,
 	})
 
+	// Health check ticks more often than reconcile because a "node is
+	// reachable" answer goes stale fast — admins want a green dot that
+	// matches the last few minutes, not the last 15. Default 5 min; tied
+	// to the existing traffic-pull cadence since they're both "talk to
+	// 3X-UI" passes and admins set one number for the whole panel rhythm.
+	healthInterval := time.Duration(sysSettings.CronTrafficPullMinutes) * time.Minute
+	if healthInterval <= 0 {
+		healthInterval = 5 * time.Minute
+	}
+
 	return &App{
 		cfg:               cfg,
 		traffic:           trafficSvc,
@@ -198,11 +212,13 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 		node:              nodeSvc,
 		audit:             auditSvc,
 		mail:              mailSvc,
+		health:            healthSvc,
 		settings:          repos.Settings,
 		syncTasks:         repos.SyncTask,
 		saml:              samlSvc,
 		trafficInterval:   time.Duration(sysSettings.CronTrafficPullMinutes) * time.Minute,
 		reconcileInterval: time.Duration(sysSettings.CronReconcileMinutes) * time.Minute,
+		healthInterval:    healthInterval,
 		server: &http.Server{
 			Addr:              cfg.Listen,
 			Handler:           httpHandler,
@@ -239,8 +255,17 @@ func (a *App) Run() error {
 	go a.runTrafficLoop(bgCtx)
 	go a.runMailLoop(bgCtx)
 	go a.runReconcileLoop(bgCtx)
+	go a.runHealthLoop(bgCtx)
 
 	return a.server.ListenAndServe()
+}
+
+func (a *App) runHealthLoop(ctx context.Context) {
+	if a.health == nil {
+		return
+	}
+	log.Info("node health check loop started", "interval", a.healthInterval.String())
+	a.health.Loop(ctx, a.healthInterval)
 }
 
 func (a *App) runMailLoop(ctx context.Context) {

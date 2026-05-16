@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -44,6 +45,12 @@ type nodeDTO struct {
 	Tags          []string `json:"tags"`
 	SortOrder     int      `json:"sort_order"`
 	Enabled       bool     `json:"enabled"`
+	// Health surfaces the most recent probe outcome ("", "ok",
+	// "panel_unreachable", "inbound_missing", "inbound_disabled"). Empty
+	// before the first health check tick has run.
+	HealthState     string     `json:"health_state,omitempty"`
+	HealthCheckedAt *time.Time `json:"health_checked_at,omitempty"`
+	HealthDetail    string     `json:"health_detail,omitempty"`
 }
 
 type inboundDTO struct {
@@ -461,17 +468,20 @@ func (h *AdminNodeHandler) toNodeDTO(n *domain.Node, panelNames map[int64]string
 		panelName = name
 	}
 	return nodeDTO{
-		ID:            n.ID,
-		PanelID:       n.PanelID,
-		PanelName:     panelName,
-		InboundID:     n.InboundID,
-		DisplayName:   n.DisplayName,
-		ServerAddress: n.ServerAddress,
-		Flow:          n.Flow,
-		Region:        n.Region,
-		Tags:          n.Tags,
-		SortOrder:     n.SortOrder,
-		Enabled:       n.Enabled,
+		ID:              n.ID,
+		PanelID:         n.PanelID,
+		PanelName:       panelName,
+		InboundID:       n.InboundID,
+		DisplayName:     n.DisplayName,
+		ServerAddress:   n.ServerAddress,
+		Flow:            n.Flow,
+		Region:          n.Region,
+		Tags:            n.Tags,
+		SortOrder:       n.SortOrder,
+		Enabled:         n.Enabled,
+		HealthState:     string(n.HealthState),
+		HealthCheckedAt: n.HealthCheckedAt,
+		HealthDetail:    n.HealthDetail,
 	}
 }
 

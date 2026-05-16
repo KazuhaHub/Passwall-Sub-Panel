@@ -980,6 +980,41 @@ export default function NodesView() {
     )
   }
 
+  // healthDot renders a colored dot for the node's most recent probe
+  // outcome with a tooltip carrying the state label, the optional error
+  // detail, and the timestamp of the last check. Disabled nodes get a
+  // muted "—" since we don't probe them.
+  function healthDot(n: Node) {
+    if (!n.enabled) {
+      return <Typography sx={{ fontSize: 13, color: md.onSurfaceVariant }}>—</Typography>
+    }
+    const state = n.health_state || ''
+    const palette: Record<string, { bg: string; label: string }> = {
+      ok:                   { bg: '#22c55e', label: t('admin:nodes.health.ok',                   { defaultValue: '健康' }) },
+      panel_unreachable:    { bg: md.error,  label: t('admin:nodes.health.panel_unreachable',    { defaultValue: '面板不可达' }) },
+      inbound_missing:      { bg: '#f97316', label: t('admin:nodes.health.inbound_missing',      { defaultValue: 'Inbound 缺失' }) },
+      inbound_disabled:     { bg: '#9ca3af', label: t('admin:nodes.health.inbound_disabled',     { defaultValue: 'Inbound 已关闭' }) },
+      '':                   { bg: md.outlineVariant, label: t('admin:nodes.health.unknown',      { defaultValue: '尚未探测' }) },
+    }
+    const p = palette[state] ?? palette['']
+    const checkedAt = n.health_checked_at ? new Date(n.health_checked_at).toLocaleString() : t('admin:nodes.health.never', { defaultValue: '尚未运行' })
+    const tooltip = (
+      <Box sx={{ fontSize: 12, lineHeight: 1.5 }}>
+        <Box sx={{ fontWeight: 600, mb: 0.25 }}>{p.label}</Box>
+        {n.health_detail && <Box sx={{ opacity: 0.85, mb: 0.25 }}>{n.health_detail}</Box>}
+        <Box sx={{ opacity: 0.7 }}>{t('admin:nodes.health.checked_at', { time: checkedAt, defaultValue: `上次探测：${checkedAt}` })}</Box>
+      </Box>
+    )
+    return (
+      <Tooltip title={tooltip} arrow>
+        <Box sx={{
+          display: 'inline-block', width: 10, height: 10, borderRadius: '50%',
+          bgcolor: p.bg, cursor: 'help',
+        }} />
+      </Tooltip>
+    )
+  }
+
   function openCreate() {
     if (servers.length === 0) {
       pushSnack(t('admin:nodes.create_dialog.no_servers'), 'warning')
@@ -1279,18 +1314,19 @@ export default function NodesView() {
                   <TableCell>{t('admin:nodes.table.region')}</TableCell>
                   <TableCell>{t('admin:nodes.table.tags')}</TableCell>
                   <TableCell align="right">{t('admin:nodes.table.sort_order')}</TableCell>
+                  <TableCell align="center">{t('admin:nodes.table.health', { defaultValue: '健康' })}</TableCell>
                   <TableCell align="center">{t('admin:nodes.table.enabled')}</TableCell>
                   <TableCell align="right">{t('admin:nodes.table.actions')}</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
                 {loading && managed.length === 0 && (
-                  <TableRow><TableCell colSpan={10} sx={{ textAlign: 'center', py: 6 }}>
+                  <TableRow><TableCell colSpan={11} sx={{ textAlign: 'center', py: 6 }}>
                     <CircularProgress size={24} />
                   </TableCell></TableRow>
                 )}
                 {!loading && managed.length === 0 && (
-                  <TableRow><TableCell colSpan={10} sx={{ textAlign: 'center', py: 6, color: md.onSurfaceVariant }}>—</TableCell></TableRow>
+                  <TableRow><TableCell colSpan={11} sx={{ textAlign: 'center', py: 6, color: md.onSurfaceVariant }}>—</TableCell></TableRow>
                 )}
                 {managed.map(n => (
                   <TableRow key={n.id} hover sx={{
@@ -1307,6 +1343,7 @@ export default function NodesView() {
                     <TableCell sx={{ fontSize: 13 }}>{n.region}</TableCell>
                     <TableCell>{tagsCell(n.tags)}</TableCell>
                     <TableCell align="right" sx={{ fontVariantNumeric: 'tabular-nums' }}>{n.sort_order}</TableCell>
+                    <TableCell align="center">{healthDot(n)}</TableCell>
                     <TableCell align="center">
                       <Switch checked={n.enabled} onChange={() => toggleEnabled(n)} disabled={enabledBusy[n.id]} />
                     </TableCell>

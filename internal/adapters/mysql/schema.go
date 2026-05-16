@@ -173,9 +173,12 @@ type nodeRow struct {
 	LifetimeUpBytes       int64 `gorm:"default:0"`
 	LifetimeDownBytes     int64 `gorm:"default:0"`
 	LifetimeTotalBytes    int64 `gorm:"default:0"`
-	LastTrafficUpBytes    int64 `gorm:"default:0"`
-	LastTrafficDownBytes  int64 `gorm:"default:0"`
-	LastTrafficTotalBytes int64 `gorm:"default:0"`
+	LastTrafficUpBytes    int64  `gorm:"default:0"`
+	LastTrafficDownBytes  int64  `gorm:"default:0"`
+	LastTrafficTotalBytes int64  `gorm:"default:0"`
+	HealthState           string `gorm:"size:32;default:''"`
+	HealthCheckedAt       *time.Time
+	HealthDetail          string `gorm:"size:512;default:''"`
 	CreatedAt             time.Time
 }
 
@@ -200,6 +203,9 @@ func (r *nodeRow) toDomain() *domain.Node {
 		LastTrafficUpBytes:    r.LastTrafficUpBytes,
 		LastTrafficDownBytes:  r.LastTrafficDownBytes,
 		LastTrafficTotalBytes: r.LastTrafficTotalBytes,
+		HealthState:           domain.NodeHealthState(r.HealthState),
+		HealthCheckedAt:       r.HealthCheckedAt,
+		HealthDetail:          r.HealthDetail,
 		CreatedAt:             r.CreatedAt,
 	}
 }
@@ -223,6 +229,9 @@ func nodeFromDomain(n *domain.Node) *nodeRow {
 		LastTrafficUpBytes:    n.LastTrafficUpBytes,
 		LastTrafficDownBytes:  n.LastTrafficDownBytes,
 		LastTrafficTotalBytes: n.LastTrafficTotalBytes,
+		HealthState:           string(n.HealthState),
+		HealthCheckedAt:       n.HealthCheckedAt,
+		HealthDetail:          n.HealthDetail,
 		CreatedAt:             n.CreatedAt,
 	}
 }

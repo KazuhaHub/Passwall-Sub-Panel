@@ -578,8 +578,18 @@
       "tags": "Tags",
       "inbound": "Inbound",
       "sort_order": "Sort",
+      "health": "Health",
       "enabled": "Enabled",
       "actions": "Actions"
+    },
+    "health": {
+      "ok": "Healthy",
+      "panel_unreachable": "Panel unreachable",
+      "inbound_missing": "Inbound missing",
+      "inbound_disabled": "Inbound disabled",
+      "unknown": "Not probed yet",
+      "never": "never",
+      "checked_at": "Last check: {{time}}"
     },
     "field": {
       "display_name": "Display name",

@@ -636,8 +636,18 @@
       "tags": "Tags",
       "inbound": "Inbound",
       "sort_order": "排序",
+      "health": "健康",
       "enabled": "启用",
       "actions": "操作"
+    },
+    "health": {
+      "ok": "健康",
+      "panel_unreachable": "面板不可达",
+      "inbound_missing": "Inbound 缺失",
+      "inbound_disabled": "Inbound 已关闭",
+      "unknown": "尚未探测",
+      "never": "尚未运行",
+      "checked_at": "上次探测：{{time}}"
     },
     "field": {
       "display_name": "显示名",
