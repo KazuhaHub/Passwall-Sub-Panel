@@ -174,7 +174,18 @@ docker compose up -d
 docker compose logs -f psp
 ```
 
-完事。镜像从 GHCR 拉，`jwt_secret` / `encryption_key` 首启自动生成，config 和 data 都在 Docker 命名 volume 里。访问 `http://<host-ip>:8788`，首登 `admin / admin`。
+完事。首启后**当前目录会出现 `./config/`**，里面是：
+
+```
+/opt/Passwall-Sub-Panel/
+├── docker-compose.yml
+└── config/
+    ├── config.yaml          # 自动生成，含随机 secrets
+    ├── rulesets/            # Clash 分流规则集
+    └── templates/           # 订阅渲染模板
+```
+
+访问 `http://<host-ip>:8788`，首登 `admin / admin`。
 
 ### 默认行为说明
 
@@ -184,55 +195,25 @@ docker compose logs -f psp
 |---|---|---|
 | 网络模式 | `network_mode: host` | 让 PSP 容器以 `127.0.0.1:<port>` 直访同宿主机的 3X-UI，无需 `extra_hosts` |
 | 镜像 | `ghcr.io/kazuhahub/passwall-sub-panel:latest`，`pull_policy: always` | 每次 `up -d` 自动取最新 |
-| 配置 | 命名 volume `psp-config` 里的 `config.yaml`（首启自动生成）| 单文件、容器外可访问、备份只要 `docker volume` 一行 |
-| 数据 | 命名 volume `psp-data` | SQLite 数据库 + 运行时数据 |
+| 配置 | **bind mount `./config:/app/config`** | 宿主机直接 `nano` 编辑，所见即所得；首启 entrypoint 从镜像内 `/app/defaults/` 把模板/规则集种到空目录里 |
+| 数据 | 命名 volume `psp-data` | SQLite 数据库 + 运行时数据，不需要宿主机直接访问 |
 
-所有运维设置（含 secrets、MySQL DSN）都改 `config.yaml`——**不用** `.env`、**不用** 一堆 `PSP_*` 环境变量。
+所有运维设置（含 secrets、MySQL DSN）都改 `./config/config.yaml`——**不用** `.env`、**不用** 一堆 `PSP_*` 环境变量。
 
-### 改配置：编辑 config.yaml
+### 改配置：直接编辑宿主机文件
 
 ```bash
-# 查看
-docker compose exec psp cat /app/config/config.yaml
-
-# 在线编辑（alpine 镜像没自带 vim，临时装一个）
-docker compose exec psp sh -c "apk add --no-cache nano && nano /app/config/config.yaml"
-
-# 改完重启生效
-docker compose restart psp
+cd /opt/Passwall-Sub-Panel
+nano config/config.yaml          # 用任何编辑器
+nano config/templates/clash.yaml # 模板也是
+docker compose restart psp       # 改完重启生效
 ```
 
-想要在宿主机文件系统里管理 config.yaml（比如 git 备份），见下节"切回 bind mount"。
+不用 `docker compose exec`、不用进容器、不用临时装编辑器。
 
 ### 3X-UI 联通
 
 宿主机上跑着 3X-UI（比如监听 `127.0.0.1:2053`）→ 登录 PSP 后，「服务器」页面 URL 填 `http://127.0.0.1:2053`。
-
-### （可选）切回 bind mount
-
-想直接在宿主机文件系统里管理 `config/`（比如手编 templates）：
-
-```yaml
-services:
-  psp:
-    # ... 其他不变
-    volumes:
-      # - psp-config:/app/config           # 注释掉命名 volume
-      - ./config:/app/config               # 改用 bind mount（不要加 :ro，PSP 要写 config.yaml）
-      - psp-data:/app/data
-
-volumes:
-  # psp-config:                            # 也注释掉
-  psp-data:
-```
-
-第一次启动前手动建 `config/` 目录：
-
-```bash
-mkdir -p config
-docker compose up -d
-# config/config.yaml 由容器写入，rulesets/templates 会被首启复制进来
-```
 
 ### （可选）切回桥接网络
 

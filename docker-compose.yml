@@ -3,13 +3,9 @@
 #   curl -O https://raw.githubusercontent.com/KazuhaHub/Passwall-Sub-Panel/main/docker-compose.yml
 #   docker compose up -d
 #
-# Everything (secrets, MySQL DSN, rulesets, templates, SQLite DB) lives inside
-# the named Docker volumes. First launch auto-generates jwt_secret and
-# encryption_key into the config volume's config.yaml. To change settings:
-#
-#   docker compose exec psp cat /app/config/config.yaml          # inspect
-#   docker compose exec psp sh -c "apk add --no-cache nano && nano /app/config/config.yaml"
-#   docker compose restart psp
+# After first launch, ./config/ appears on the host with config.yaml +
+# templates/ + rulesets/ seeded from the image. Edit them directly with any
+# host editor, then `docker compose restart psp`.
 
 services:
   psp:
@@ -24,12 +20,13 @@ services:
     network_mode: host
 
     volumes:
-      - psp-config:/app/config   # config.yaml, rulesets, templates (seeded from image on first run)
-      - psp-data:/app/data       # SQLite panel.db, runtime data
+      - ./config:/app/config     # bind mount: edit on the host with any editor
+      - psp-data:/app/data       # named volume for SQLite + runtime data
 
     environment:
-      # Where the binary looks for config.yaml inside the container. The
-      # value here matches the named-volume mount point above.
+      # Where the binary looks for config.yaml inside the container. Matches
+      # the bind-mount target above, so the file is just ./config/config.yaml
+      # on the host.
       PSP_CONFIG: /app/config/config.yaml
 
       # Reverse-proxy CIDRs allowed to set X-Forwarded-For. Only relevant if
@@ -41,5 +38,4 @@ services:
     # build: .
 
 volumes:
-  psp-config:
   psp-data:

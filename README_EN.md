@@ -174,7 +174,18 @@ docker compose up -d
 docker compose logs -f psp
 ```
 
-That's it. The image is pulled from GHCR, `jwt_secret` / `encryption_key` are auto-generated on first launch, and both config + data live in Docker named volumes. Open `http://<host-ip>:8788`; first-time login is `admin / admin`.
+That's it. After first launch you'll see a `./config/` directory appear on the host:
+
+```
+/opt/Passwall-Sub-Panel/
+├── docker-compose.yml
+└── config/
+    ├── config.yaml          # auto-generated with random secrets
+    ├── rulesets/            # Clash routing rule fragments
+    └── templates/           # subscription render templates
+```
+
+Open `http://<host-ip>:8788`; first-time login is `admin / admin`.
 
 ### Default behavior
 
@@ -184,55 +195,25 @@ The shipped [`docker-compose.yml`](docker-compose.yml) is opinionated:
 |---|---|---|
 | Network mode | `network_mode: host` | Lets the PSP container reach a co-located 3X-UI at `127.0.0.1:<port>` without `extra_hosts` tricks |
 | Image | `ghcr.io/kazuhahub/passwall-sub-panel:latest`, `pull_policy: always` | Each `up -d` pulls the latest tag |
-| Config | `config.yaml` inside the `psp-config` named volume (auto-generated on first launch) | One file, container-accessible, easy to back up |
-| Data | named volume `psp-data` | SQLite DB + runtime data |
+| Config | **bind mount `./config:/app/config`** | Edit on the host with any editor; the entrypoint seeds templates/rulesets from `/app/defaults/` baked into the image when the directory is empty |
+| Data | named volume `psp-data` | SQLite DB + runtime data; no need for host-level access |
 
-Every operational setting (secrets, MySQL DSN) is stored in `config.yaml` — **no** `.env`, **no** sprawl of `PSP_*` environment variables.
+Every operational setting (secrets, MySQL DSN) lives in `./config/config.yaml` — **no** `.env`, **no** sprawl of `PSP_*` environment variables.
 
-### Changing settings: edit config.yaml
+### Changing settings: edit host files directly
 
 ```bash
-# Read it
-docker compose exec psp cat /app/config/config.yaml
-
-# Edit in place (alpine has no editor by default — install one temporarily)
-docker compose exec psp sh -c "apk add --no-cache nano && nano /app/config/config.yaml"
-
-# Restart to pick up changes
-docker compose restart psp
+cd /opt/Passwall-Sub-Panel
+nano config/config.yaml             # any editor works
+nano config/templates/clash.yaml    # templates too
+docker compose restart psp          # pick up changes
 ```
 
-Prefer the file on the host filesystem (e.g., for git backup)? Switch to a bind mount — see below.
+No `docker compose exec`, no entering the container, no installing editors.
 
 ### Connecting to 3X-UI
 
 If 3X-UI runs on the same host (e.g., listening on `127.0.0.1:2053`), open the PSP admin "Servers" page and set the 3X-UI URL to `http://127.0.0.1:2053`.
-
-### (Optional) Switch to a bind mount
-
-If you want `config/` to live directly on the host filesystem (e.g., to hand-edit templates):
-
-```yaml
-services:
-  psp:
-    # ... rest unchanged
-    volumes:
-      # - psp-config:/app/config           # comment out the named volume
-      - ./config:/app/config               # bind mount (don't add :ro, PSP needs to write config.yaml)
-      - psp-data:/app/data
-
-volumes:
-  # psp-config:                            # comment out as well
-  psp-data:
-```
-
-Create `config/` on the host before starting:
-
-```bash
-mkdir -p config
-docker compose up -d
-# The container writes config/config.yaml on first launch, and rulesets/templates are seeded into config/.
-```
 
 ### (Optional) Switch back to a bridge network
 

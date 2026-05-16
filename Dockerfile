@@ -19,16 +19,18 @@ COPY . .
 # Drop the SPA bundle where //go:embed expects it.
 RUN rm -rf internal/web/dist && mkdir -p internal/web/dist
 COPY --from=web-builder /web/dist/ ./internal/web/dist/
-# Build both binaries.
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/psp ./cmd/panel
 
 # Stage 3 — minimal runtime.
 FROM alpine:3.20
-RUN apk add --no-cache ca-certificates tzdata && \
-    addgroup -S psp && adduser -S -G psp psp
+RUN apk add --no-cache ca-certificates tzdata
 WORKDIR /app
 COPY --from=go-builder /out/psp /app/psp
-COPY config/ /app/config/
-USER psp
+# Baked-in defaults live in /app/defaults/ and are copied into /app/config/
+# by the entrypoint on first launch (handles the empty bind-mount case).
+COPY config/ /app/defaults/
+COPY docker-entrypoint.sh /docker-entrypoint.sh
+RUN chmod +x /docker-entrypoint.sh /app/psp && mkdir -p /app/config /app/data
 EXPOSE 8788
-ENTRYPOINT ["/app/psp"]
+ENTRYPOINT ["/docker-entrypoint.sh"]
+CMD ["/app/psp"]
