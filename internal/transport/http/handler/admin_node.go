@@ -115,6 +115,15 @@ type setNodeEnabledRequest struct {
 	Enabled bool `json:"enabled"`
 }
 
+type reorderRequestItem struct {
+	ID        int64 `json:"id" binding:"required"`
+	SortOrder int   `json:"sort_order"`
+}
+
+type reorderRequest struct {
+	Items []reorderRequestItem `json:"items" binding:"required"`
+}
+
 type claimRequest struct {
 	UserID      int64  `json:"user_id" binding:"required"`
 	PanelID     int64  `json:"panel_id" binding:"required"`
@@ -335,6 +344,26 @@ func (h *AdminNodeHandler) SetEnabled(c *gin.Context) {
 		return
 	}
 	if err := h.node.SetEnabled(c.Request.Context(), id, req.Enabled); err != nil {
+		mapNodeServiceError(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
+// Reorder accepts a bulk (node_id, sort_order) list and rewrites sort_order
+// for every listed node in one transaction. Powers drag-to-reorder in the
+// admin nodes table.
+func (h *AdminNodeHandler) Reorder(c *gin.Context) {
+	var req reorderRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	updates := make([]ports.NodeSortUpdate, len(req.Items))
+	for i, it := range req.Items {
+		updates[i] = ports.NodeSortUpdate{NodeID: it.ID, SortOrder: it.SortOrder}
+	}
+	if err := h.node.Reorder(c.Request.Context(), updates); err != nil {
 		mapNodeServiceError(c, err)
 		return
 	}

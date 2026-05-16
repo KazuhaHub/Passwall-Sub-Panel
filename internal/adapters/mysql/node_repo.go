@@ -6,6 +6,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 )
 
 type nodeRepo struct{ db *gorm.DB }
@@ -29,6 +30,27 @@ func (r *nodeRepo) UpdatePanelName(ctx context.Context, panelID int64, panelName
 		Model(&nodeRow{}).
 		Where("panel_id = ?", panelID).
 		Update("panel_name", panelName).Error
+}
+
+// BatchUpdateSortOrder rewrites sort_order for the listed nodes inside one
+// transaction. Used by the drag-to-reorder UI: the admin drags a row, the
+// frontend re-numbers the visible list in 10-step increments, and POSTs the
+// whole list back here. Doing this row-by-row outside a tx would leave the
+// table in a half-reordered state if the request was interrupted.
+func (r *nodeRepo) BatchUpdateSortOrder(ctx context.Context, updates []ports.NodeSortUpdate) error {
+	if len(updates) == 0 {
+		return nil
+	}
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		for _, u := range updates {
+			if err := tx.Model(&nodeRow{}).
+				Where("id = ?", u.NodeID).
+				Update("sort_order", u.SortOrder).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 func (r *nodeRepo) Delete(ctx context.Context, id int64) error {

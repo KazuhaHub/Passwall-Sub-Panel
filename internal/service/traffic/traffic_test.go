@@ -514,6 +514,9 @@ func (r *fakeNodeRepo) List(ctx context.Context) ([]*domain.Node, error) {
 func (r *fakeNodeRepo) ListEnabled(ctx context.Context) ([]*domain.Node, error) {
 	return r.List(ctx)
 }
+func (r *fakeNodeRepo) BatchUpdateSortOrder(ctx context.Context, updates []ports.NodeSortUpdate) error {
+	return nil
+}
 
 type fakeOwnershipRepo struct {
 	byUser map[int64][]*domain.XUIClientEntry

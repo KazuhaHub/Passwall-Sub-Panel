@@ -707,7 +707,8 @@
     "action": {
       "edit": "Edit",
       "delete": "Delete",
-      "detach": "Detach"
+      "detach": "Detach",
+      "drag_to_reorder": "Drag to reorder"
     },
     "validate": {
       "address_region_required": "Address and Region are required"
@@ -721,7 +722,9 @@
       "batch_enabled": "Enabled {{count}} nodes",
       "batch_disabled": "Disabled {{count}} nodes",
       "batch_deleted": "Deleted {{count}} nodes",
-      "batch_partial": "{{ok}} done, {{fail}} failed"
+      "batch_partial": "{{ok}} done, {{fail}} failed",
+      "reordered": "Order updated",
+      "reorder_failed": "Reorder failed"
     },
     "confirm": {
       "delete_title": "Delete node",

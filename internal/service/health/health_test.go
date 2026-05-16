@@ -86,6 +86,9 @@ func (r *fakeNodeRepo) Update(ctx context.Context, n *domain.Node) error {
 func (r *fakeNodeRepo) Create(ctx context.Context, n *domain.Node) error                       { return nil }
 func (r *fakeNodeRepo) Delete(ctx context.Context, id int64) error                             { return nil }
 func (r *fakeNodeRepo) UpdatePanelName(ctx context.Context, panelID int64, name string) error { return nil }
+func (r *fakeNodeRepo) BatchUpdateSortOrder(ctx context.Context, updates []ports.NodeSortUpdate) error {
+	return nil
+}
 
 type fakeXUIClient struct {
 	inbounds []ports.Inbound

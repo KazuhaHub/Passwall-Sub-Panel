@@ -28,6 +28,7 @@ import {
 } from '@mui/material'
 import AddIcon from '@mui/icons-material/Add'
 import DeleteIcon from '@mui/icons-material/DeleteOutline'
+import DragIndicatorIcon from '@mui/icons-material/DragIndicator'
 import EditIcon from '@mui/icons-material/EditOutlined'
 import LinkOffIcon from '@mui/icons-material/LinkOff'
 import { useTranslation } from 'react-i18next'
@@ -42,6 +43,7 @@ import {
   importNode,
   listNodes,
   listUnmanagedInbounds,
+  reorderNodes,
   setNodeEnabled,
   updateInboundConfig,
   updateNodeMetadata,
@@ -1142,6 +1144,26 @@ function InboundFormFields({ form, setForm, showMetadata, servers, onGenKeys, on
   )
 }
 
+// reorderRows produces the new list order by moving `fromIdx` to `toIdx`
+// (insertion semantics: the dragged row lands at position `toIdx` in the
+// resulting array). Pure so the same logic can later be lifted into a unit
+// test once the frontend has a test runner.
+function reorderRows<T>(rows: readonly T[], fromIdx: number, toIdx: number): T[] {
+  if (fromIdx === toIdx || fromIdx < 0 || toIdx < 0 || fromIdx >= rows.length || toIdx >= rows.length) {
+    return rows.slice()
+  }
+  const next = rows.slice()
+  const [moved] = next.splice(fromIdx, 1)
+  next.splice(toIdx, 0, moved)
+  return next
+}
+
+// renumberSortOrder assigns sort_order in 10-step increments starting at 10.
+// Gaps leave room to insert single rows later without a full re-number.
+function renumberSortOrder<T extends { id: number }>(rows: readonly T[]): { id: number; sort_order: number }[] {
+  return rows.map((r, i) => ({ id: r.id, sort_order: (i + 1) * 10 }))
+}
+
 export default function NodesView() {
   const theme = useTheme()
   const md = theme.palette.md
@@ -1182,6 +1204,12 @@ export default function NodesView() {
   const [selected, setSelected] = useState<Set<number>>(new Set())
   const [batchBusy, setBatchBusy] = useState<'enable' | 'disable' | 'delete' | ''>('')
   const [enabledBusy, setEnabledBusy] = useState<Record<number, boolean>>({})
+  // Drag-to-reorder state. `dragIndex` is the row being dragged (source) and
+  // `dropIndex` is the row the cursor is hovering over (target). Both reset
+  // on drop / dragend so the row highlights only show during an active drag.
+  const [dragIndex, setDragIndex] = useState<number | null>(null)
+  const [dropIndex, setDropIndex] = useState<number | null>(null)
+  const [reorderBusy, setReorderBusy] = useState(false)
 
   const [editOpen, setEditOpen] = useState(false)
   const [editBusy, setEditBusy] = useState(false)
@@ -1393,6 +1421,29 @@ export default function NodesView() {
         pushSnack(t('admin:nodes.toast.batch_deleted', { count: okIds.length }), 'success')
       }
     } finally { setBatchBusy('') }
+  }
+
+  // commitReorder: optimistic UI — apply the new order locally first, then
+  // push the renumbered (id, sort_order) pairs to the server. On failure
+  // revert by reloading. The 10-step renumber keeps room for future single-row
+  // inserts without a global shuffle.
+  async function commitReorder(fromIdx: number, toIdx: number) {
+    if (fromIdx === toIdx) return
+    const previous = managed
+    const next = reorderRows(previous, fromIdx, toIdx)
+    setManaged(next.map((n, i) => ({ ...n, sort_order: (i + 1) * 10 })))
+    setReorderBusy(true)
+    try {
+      await reorderNodes(renumberSortOrder(next))
+      pushSnack(t('admin:nodes.toast.reordered'), 'success')
+    } catch (err) {
+      setManaged(previous)
+      pushSnack(t('admin:nodes.toast.reorder_failed'), 'error')
+      // eslint-disable-next-line no-console
+      console.error('reorderNodes failed', err)
+    } finally {
+      setReorderBusy(false)
+    }
   }
 
   function tagsCell(tags: string[]) {
@@ -1777,6 +1828,7 @@ export default function NodesView() {
             <Table>
               <TableHead>
                 <TableRow sx={{ '& th': { color: md.onSurfaceVariant, fontWeight: 500, fontSize: 12, textTransform: 'uppercase', letterSpacing: '.5px', borderBottom: `1px solid ${md.outlineVariant}`, whiteSpace: 'nowrap' } }}>
+                  <TableCell padding="none" sx={{ width: 32 }} />
                   <TableCell padding="checkbox">
                     <Checkbox indeterminate={someChecked} checked={allChecked}
                       onChange={(_, c) => toggleAll(c)}
@@ -1796,18 +1848,57 @@ export default function NodesView() {
               </TableHead>
               <TableBody>
                 {loading && managed.length === 0 && (
-                  <TableRow><TableCell colSpan={11} sx={{ textAlign: 'center', py: 6 }}>
+                  <TableRow><TableCell colSpan={12} sx={{ textAlign: 'center', py: 6 }}>
                     <CircularProgress size={24} />
                   </TableCell></TableRow>
                 )}
                 {!loading && managed.length === 0 && (
-                  <TableRow><TableCell colSpan={11} sx={{ textAlign: 'center', py: 6, color: md.onSurfaceVariant }}>—</TableCell></TableRow>
+                  <TableRow><TableCell colSpan={12} sx={{ textAlign: 'center', py: 6, color: md.onSurfaceVariant }}>—</TableCell></TableRow>
                 )}
-                {managed.map(n => (
-                  <TableRow key={n.id} hover sx={{
-                    '& td': { borderBottom: `1px solid ${md.outlineVariant}`, whiteSpace: 'nowrap' },
-                    opacity: n.enabled ? 1 : 0.65,
-                  }}>
+                {managed.map((n, idx) => (
+                  <TableRow key={n.id} hover
+                    draggable={!reorderBusy}
+                    onDragStart={e => {
+                      setDragIndex(idx)
+                      // Required for Firefox to actually start the drag.
+                      try { e.dataTransfer.setData('text/plain', String(n.id)) } catch { /* ignore */ }
+                      e.dataTransfer.effectAllowed = 'move'
+                    }}
+                    onDragOver={e => {
+                      if (dragIndex === null) return
+                      e.preventDefault()
+                      e.dataTransfer.dropEffect = 'move'
+                      if (dropIndex !== idx) setDropIndex(idx)
+                    }}
+                    onDragLeave={() => {
+                      if (dropIndex === idx) setDropIndex(null)
+                    }}
+                    onDrop={e => {
+                      e.preventDefault()
+                      const from = dragIndex
+                      setDragIndex(null)
+                      setDropIndex(null)
+                      if (from === null || from === idx) return
+                      void commitReorder(from, idx)
+                    }}
+                    onDragEnd={() => {
+                      setDragIndex(null)
+                      setDropIndex(null)
+                    }}
+                    sx={{
+                      '& td': { borderBottom: `1px solid ${md.outlineVariant}`, whiteSpace: 'nowrap' },
+                      opacity: dragIndex === idx ? 0.4 : (n.enabled ? 1 : 0.65),
+                      cursor: reorderBusy ? 'wait' : 'default',
+                      bgcolor: dropIndex === idx && dragIndex !== null && dragIndex !== idx
+                        ? alpha(md.primary, 0.08)
+                        : 'transparent',
+                      transition: 'background-color 120ms',
+                    }}>
+                    <TableCell padding="none" sx={{ width: 32, textAlign: 'center', color: md.onSurfaceVariant, cursor: reorderBusy ? 'wait' : 'grab' }}>
+                      <Tooltip title={t('admin:nodes.action.drag_to_reorder')}>
+                        <DragIndicatorIcon fontSize="small" sx={{ verticalAlign: 'middle', opacity: 0.7 }} />
+                      </Tooltip>
+                    </TableCell>
                     <TableCell padding="checkbox">
                       <Checkbox checked={selected.has(n.id)} onChange={(_, c) => toggleOne(n.id, c)} />
                     </TableCell>

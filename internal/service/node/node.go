@@ -184,6 +184,28 @@ func (s *Service) fillPanelName(n *domain.Node) {
 
 // ---- Update flows ----
 
+// Reorder rewrites sort_order for every (node_id, sort_order) pair in one
+// transaction. Drives the admin drag-to-reorder UI: the client renumbers the
+// visible list in 10-step increments and POSTs the result back here. Empty
+// input, non-positive ids, or a duplicate id all reject the whole batch — a
+// partial reorder would leave the list in a confusing half-state.
+func (s *Service) Reorder(ctx context.Context, updates []ports.NodeSortUpdate) error {
+	if len(updates) == 0 {
+		return fmt.Errorf("%w: no updates", domain.ErrValidation)
+	}
+	seen := make(map[int64]struct{}, len(updates))
+	for _, u := range updates {
+		if u.NodeID <= 0 {
+			return fmt.Errorf("%w: node_id must be positive", domain.ErrValidation)
+		}
+		if _, dup := seen[u.NodeID]; dup {
+			return fmt.Errorf("%w: duplicate node_id %d", domain.ErrValidation, u.NodeID)
+		}
+		seen[u.NodeID] = struct{}{}
+	}
+	return s.nodes.BatchUpdateSortOrder(ctx, updates)
+}
+
 func (s *Service) UpdateMetadata(ctx context.Context, n *domain.Node) error {
 	if _, err := s.nodes.GetByID(ctx, n.ID); err != nil {
 		return err

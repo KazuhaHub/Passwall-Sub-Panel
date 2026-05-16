@@ -78,11 +78,23 @@ type NodeRepo interface {
 	Create(ctx context.Context, n *domain.Node) error
 	Update(ctx context.Context, n *domain.Node) error
 	UpdatePanelName(ctx context.Context, panelID int64, panelName string) error
+	// BatchUpdateSortOrder rewrites Node.SortOrder for every (id, sort_order)
+	// pair in a single transaction. Driven by the drag-to-reorder UI in the
+	// admin node list — a one-shot N-row update is cheaper than N round-trips
+	// of Update and keeps the table consistent if the call is interrupted
+	// mid-flight.
+	BatchUpdateSortOrder(ctx context.Context, updates []NodeSortUpdate) error
 	Delete(ctx context.Context, id int64) error
 	GetByID(ctx context.Context, id int64) (*domain.Node, error)
 	GetByPanelInbound(ctx context.Context, panelID int64, inboundID int) (*domain.Node, error)
 	List(ctx context.Context) ([]*domain.Node, error)
 	ListEnabled(ctx context.Context) ([]*domain.Node, error)
+}
+
+// NodeSortUpdate is one (node_id, sort_order) pair for BatchUpdateSortOrder.
+type NodeSortUpdate struct {
+	NodeID    int64
+	SortOrder int
 }
 
 type OwnershipRepo interface {

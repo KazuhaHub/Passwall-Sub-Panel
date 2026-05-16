@@ -711,7 +711,8 @@
     "action": {
       "edit": "编辑",
       "delete": "删除",
-      "detach": "脱离"
+      "detach": "脱离",
+      "drag_to_reorder": "拖动排序"
     },
     "validate": {
       "address_region_required": "请填写连接地址和 Region"
@@ -725,7 +726,9 @@
       "batch_enabled": "已启用 {{count}} 个节点",
       "batch_disabled": "已停用 {{count}} 个节点",
       "batch_deleted": "已删除 {{count}} 个节点",
-      "batch_partial": "已处理 {{ok}} 个，失败 {{fail}} 个"
+      "batch_partial": "已处理 {{ok}} 个，失败 {{fail}} 个",
+      "reordered": "排序已更新",
+      "reorder_failed": "排序更新失败"
     },
     "confirm": {
       "delete_title": "删除节点",

@@ -121,6 +121,15 @@ export async function detachNode(id: number) {
   await client.post(`/admin/nodes/${id}/detach`)
 }
 
+export interface NodeReorderItem {
+  id: number
+  sort_order: number
+}
+
+export async function reorderNodes(items: NodeReorderItem[]) {
+  await client.put('/admin/nodes/reorder', { items })
+}
+
 export async function listUnmanagedInbounds() {
   const { data } = await client.get<ListResponse<UnmanagedInbound>>('/admin/nodes/unmanaged')
   return data
