@@ -163,7 +163,6 @@ func (s *Service) CreateInbound(ctx context.Context, n *domain.Node, spec ports.
 	if err := s.syncExistingUsersToNode(ctx, n); err != nil {
 		log.Warn("sync users on create", "node_id", n.ID, "err", err)
 	}
-	s.recordNodeTaskSucceeded(ctx, domain.SyncTaskNodeCreate, n, fmt.Sprintf("create node %s", n.DisplayName), spec)
 	return nil
 }
 
@@ -200,7 +199,6 @@ func (s *Service) UpdateInboundConfig(ctx context.Context, id int64, spec ports.
 	if err := c.UpdateInbound(ctx, n.InboundID, spec); err != nil {
 		return s.enqueueNodeTask(ctx, domain.SyncTaskNodeUpdate, n, "update node config", spec)
 	}
-	s.recordNodeTaskSucceeded(ctx, domain.SyncTaskNodeUpdate, n, fmt.Sprintf("update node config %s", n.DisplayName), spec)
 	return nil
 }
 
@@ -226,7 +224,6 @@ func (s *Service) SetEnabled(ctx context.Context, id int64, enabled bool) error 
 		}
 		return nil
 	}
-	s.recordNodeTaskSucceeded(ctx, domain.SyncTaskNodeSetEnabled, n, fmt.Sprintf("sync node enabled state %s", n.DisplayName), map[string]bool{"enabled": enabled})
 	return nil
 }
 
@@ -462,29 +459,6 @@ func (s *Service) enqueueNodeTask(ctx context.Context, typ domain.SyncTaskType, 
 		Summary:    fmt.Sprintf("%s %s", summary, n.DisplayName),
 		Payload:    payloadJSON,
 		NextRunAt:  time.Now(),
-	})
-}
-
-func (s *Service) recordNodeTaskSucceeded(ctx context.Context, typ domain.SyncTaskType, n *domain.Node, summary string, payload any) {
-	if s.tasks == nil {
-		return
-	}
-	var payloadJSON string
-	if payload != nil {
-		if b, err := json.Marshal(payload); err == nil {
-			payloadJSON = string(b)
-		}
-	}
-	now := time.Now()
-	_ = s.tasks.Create(ctx, &domain.SyncTask{
-		Type:       typ,
-		Status:     domain.SyncTaskSucceeded,
-		TargetType: "node",
-		TargetID:   n.ID,
-		Summary:    summary,
-		Payload:    payloadJSON,
-		NextRunAt:  now,
-		FinishedAt: &now,
 	})
 }
 

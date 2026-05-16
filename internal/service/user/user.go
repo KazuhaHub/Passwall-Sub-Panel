@@ -449,8 +449,6 @@ func (s *Service) ResetCredentialsAndSync(ctx context.Context, userID int64) (*R
 		if err := s.enqueueUserTask(ctx, domain.SyncTaskUserResync, userID, fmt.Sprintf("sync credentials for user %s", u.UPN)); err != nil {
 			log.Warn("enqueue user credential resync failed", "user_id", userID, "err", err)
 		}
-	} else {
-		s.recordUserTaskSucceeded(ctx, domain.SyncTaskUserResync, userID, fmt.Sprintf("sync credentials for user %s", u.UPN))
 	}
 	return &ResetCredentialsResult{SubToken: token, UUID: newUUID}, nil
 }
@@ -629,8 +627,6 @@ func (s *Service) CreateLocalAndSync(ctx context.Context, in CreateLocalInput) (
 		if err := s.enqueueUserTask(ctx, domain.SyncTaskUserResync, u.ID, fmt.Sprintf("sync node membership for user %s", u.UPN)); err != nil {
 			return nil, err
 		}
-	} else {
-		s.recordUserTaskSucceeded(ctx, domain.SyncTaskUserResync, u.ID, fmt.Sprintf("sync node membership for user %s", u.UPN))
 	}
 
 	return &CreateLocalSyncedResult{
@@ -661,7 +657,6 @@ func (s *Service) DeleteAndSync(ctx context.Context, userID int64) error {
 	// pattern applied to deletion.
 	if err := s.syncer.DelAllOwnedForUser(ctx, u.ID); err == nil {
 		if err := s.users.Delete(ctx, u.ID); err == nil {
-			s.recordUserTaskSucceeded(ctx, domain.SyncTaskUserDelete, userID, fmt.Sprintf("delete user %s", u.UPN))
 			return nil
 		}
 	}
@@ -799,7 +794,6 @@ func (s *Service) UpdateProfile(ctx context.Context, userID int64, in UpdateInpu
 			}
 			return nil
 		}
-		s.recordUserTaskSucceeded(ctx, domain.SyncTaskUserPushConfig, userID, fmt.Sprintf("sync enabled/expiry config for user %s", u.UPN))
 	}
 	return nil
 }
@@ -866,8 +860,6 @@ func (s *Service) UseEmergencyAccess(ctx context.Context, userID int64, trafficL
 		if taskErr := s.enqueueUserTask(ctx, domain.SyncTaskUserPushConfig, userID, fmt.Sprintf("sync emergency access for user %s", u.UPN)); taskErr != nil {
 			log.Warn("enqueue emergency access sync failed", "user_id", userID, "err", taskErr)
 		}
-	} else {
-		s.recordUserTaskSucceeded(ctx, domain.SyncTaskUserPushConfig, userID, fmt.Sprintf("sync emergency access for user %s", u.UPN))
 	}
 	return &EmergencyAccessResult{
 		User:          u,
@@ -999,7 +991,6 @@ func (s *Service) ResyncMembershipOrEnqueue(ctx context.Context, userID int64, s
 	if err := s.ResyncMembership(ctx, userID); err != nil {
 		return s.enqueueUserTask(ctx, domain.SyncTaskUserResync, userID, summary)
 	}
-	s.recordUserTaskSucceeded(ctx, domain.SyncTaskUserResync, userID, summary)
 	return nil
 }
 
@@ -1150,7 +1141,6 @@ func (s *Service) SetEnabledAndSync(ctx context.Context, userID int64, enabled b
 		}
 		return nil
 	}
-	s.recordUserTaskSucceeded(ctx, domain.SyncTaskUserPushConfig, userID, fmt.Sprintf("sync enabled/expiry config for user %s", u.UPN))
 	return nil
 }
 
@@ -1313,22 +1303,6 @@ func (s *Service) enqueueUserTask(ctx context.Context, typ domain.SyncTaskType, 
 	})
 }
 
-func (s *Service) recordUserTaskSucceeded(ctx context.Context, typ domain.SyncTaskType, userID int64, summary string) {
-	if s.tasks == nil {
-		return
-	}
-	now := time.Now()
-	_ = s.tasks.Create(ctx, &domain.SyncTask{
-		Type:       typ,
-		Status:     domain.SyncTaskSucceeded,
-		TargetType: "user",
-		TargetID:   userID,
-		Summary:    summary,
-		NextRunAt:  now,
-		FinishedAt: &now,
-	})
-}
-
 // ResetUUIDAndSync rotates the user UUID and pushes the change to every
 // owned 3X-UI client via SyncSvc.RotateClientUUID.
 //
@@ -1371,8 +1345,6 @@ func (s *Service) ResetUUIDAndSync(ctx context.Context, userID int64) (string, e
 	}
 	if needsRetry {
 		_ = s.enqueueUserTask(ctx, domain.SyncTaskUserResync, userID, fmt.Sprintf("sync credentials for user %s", u.UPN))
-	} else {
-		s.recordUserTaskSucceeded(ctx, domain.SyncTaskUserResync, userID, fmt.Sprintf("sync credentials for user %s", u.UPN))
 	}
 	return newUUID, nil
 }
