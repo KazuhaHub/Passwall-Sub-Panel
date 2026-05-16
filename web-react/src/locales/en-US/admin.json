@@ -690,7 +690,8 @@
     },
     "action": {
       "edit": "Edit",
-      "delete": "Delete"
+      "delete": "Delete",
+      "detach": "Detach"
     },
     "validate": {
       "address_region_required": "Address and Region are required"
@@ -698,6 +699,7 @@
     "toast": {
       "saved": "Saved",
       "deleted": "Deleted",
+      "detached": "Detached",
       "enabled": "Enabled",
       "disabled": "Disabled",
       "batch_enabled": "Enabled {{count}} nodes",
@@ -708,6 +710,8 @@
     "confirm": {
       "delete_title": "Delete node",
       "delete_message": "Delete node {{name}}? This removes the corresponding inbound from 3X-UI.",
+      "detach_title": "Detach node",
+      "detach_message": "Detach node {{name}}? The panel will remove only the clients it created from 3X-UI, leaving the inbound itself and any unmanaged clients intact. The node record is then dropped from the panel.",
       "batch_delete_title": "Delete nodes",
       "batch_delete_message": "Delete {{count}} nodes?"
     }

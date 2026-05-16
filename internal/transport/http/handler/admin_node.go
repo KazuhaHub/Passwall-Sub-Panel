@@ -354,6 +354,24 @@ func (h *AdminNodeHandler) Delete(c *gin.Context) {
 	c.Status(http.StatusNoContent)
 }
 
+// Detach drops the node record and removes only the panel-managed clients
+// from 3X-UI; the inbound itself and any unmanaged clients are preserved.
+// Use this when an admin wants to stop managing an inbound without losing
+// the upstream resource — for example, an inbound that's also used by
+// non-panel users.
+func (h *AdminNodeHandler) Detach(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid id"})
+		return
+	}
+	if err := h.node.DetachAndSync(c.Request.Context(), id); err != nil {
+		mapNodeServiceError(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
 func (h *AdminNodeHandler) ListUnmanaged(c *gin.Context) {
 	items, err := h.node.ListUnmanagedInbounds(c.Request.Context())
 	if err != nil {

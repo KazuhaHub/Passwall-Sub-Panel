@@ -694,7 +694,8 @@
     },
     "action": {
       "edit": "编辑",
-      "delete": "删除"
+      "delete": "删除",
+      "detach": "脱离"
     },
     "validate": {
       "address_region_required": "请填写连接地址和 Region"
@@ -702,6 +703,7 @@
     "toast": {
       "saved": "已保存",
       "deleted": "已删除",
+      "detached": "已脱离",
       "enabled": "已启用",
       "disabled": "已禁用",
       "batch_enabled": "已启用 {{count}} 个节点",
@@ -712,6 +714,8 @@
     "confirm": {
       "delete_title": "删除节点",
       "delete_message": "确定删除节点 {{name}}？该操作会从 3X-UI 移除对应 inbound。",
+      "detach_title": "脱离节点",
+      "detach_message": "确定脱离节点 {{name}}？面板会从 3X-UI 移除由系统创建的 client，但保留 inbound 和原有的非纳管 client；本节点的面板记录也会被删除。",
       "batch_delete_title": "批量删除节点",
       "batch_delete_message": "确定删除 {{count}} 个节点？"
     }

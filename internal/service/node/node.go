@@ -252,6 +252,24 @@ func (s *Service) DeleteAndSync(ctx context.Context, id int64) error {
 	return s.enqueueNodeTask(ctx, domain.SyncTaskNodeDelete, n, "delete node", nil)
 }
 
+// DetachAndSync stops managing a node without deleting the upstream inbound.
+// Panel-managed clients (those tracked in the ownership table) get removed
+// from 3X-UI; the inbound itself and any unmanaged clients are left intact.
+// The node record on the panel side is dropped so subscriptions stop rendering
+// it. No EnsureInboundDeletable preflight is needed — we are not deleting
+// the inbound, so unmanaged clients don't block the operation.
+func (s *Service) DetachAndSync(ctx context.Context, id int64) error {
+	n, err := s.nodes.GetByID(ctx, id)
+	if err != nil {
+		return err
+	}
+	n.Enabled = false
+	if err := s.nodes.Update(ctx, n); err != nil {
+		return err
+	}
+	return s.enqueueNodeTask(ctx, domain.SyncTaskNodeDetach, n, "detach node", nil)
+}
+
 // ProcessDueTasks runs pending node-scoped 3X-UI write tasks.
 func (s *Service) ProcessDueTasks(ctx context.Context, limit int) error {
 	if s.tasks == nil {
@@ -264,6 +282,7 @@ func (s *Service) ProcessDueTasks(ctx context.Context, limit int) error {
 	for _, task := range tasks {
 		if task.Type != domain.SyncTaskNodeCreate &&
 			task.Type != domain.SyncTaskNodeDelete &&
+			task.Type != domain.SyncTaskNodeDetach &&
 			task.Type != domain.SyncTaskNodeSetEnabled &&
 			task.Type != domain.SyncTaskNodeUpdate {
 			continue
@@ -316,6 +335,13 @@ func (s *Service) runNodeTask(ctx context.Context, task *domain.SyncTask) error 
 		}
 		if err := s.cleaner.DeleteInbound(ctx, n.PanelID, n.InboundID); err != nil {
 			return err
+		}
+		return s.nodes.Delete(ctx, n.ID)
+	case domain.SyncTaskNodeDetach:
+		// Remove only the clients we created. Inbound + unmanaged clients
+		// stay on 3X-UI, available to whatever else is using them.
+		if err := s.cleaner.DelAllOwnedForInbound(ctx, n.PanelID, n.InboundID); err != nil {
+			return fmt.Errorf("clear owned clients: %w", err)
 		}
 		return s.nodes.Delete(ctx, n.ID)
 	case domain.SyncTaskNodeSetEnabled:

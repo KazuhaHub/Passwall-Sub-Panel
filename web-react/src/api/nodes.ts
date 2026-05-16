@@ -113,6 +113,14 @@ export async function deleteNode(id: number) {
   await client.delete(`/admin/nodes/${id}`)
 }
 
+// detachNode stops managing the node without deleting the upstream inbound.
+// Panel-created clients are removed from 3X-UI; the inbound itself and any
+// unmanaged clients are preserved. Use when an admin wants to release a
+// shared inbound back to its non-panel users.
+export async function detachNode(id: number) {
+  await client.post(`/admin/nodes/${id}/detach`)
+}
+
 export async function listUnmanagedInbounds() {
   const { data } = await client.get<ListResponse<UnmanagedInbound>>('/admin/nodes/unmanaged')
   return data

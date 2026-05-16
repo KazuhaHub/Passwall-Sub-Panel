@@ -28,12 +28,14 @@ import {
 import AddIcon from '@mui/icons-material/Add'
 import DeleteIcon from '@mui/icons-material/DeleteOutline'
 import EditIcon from '@mui/icons-material/EditOutlined'
+import LinkOffIcon from '@mui/icons-material/LinkOff'
 import { useTranslation } from 'react-i18next'
 
 import {
   claimClient,
   createInbound,
   deleteNode,
+  detachNode,
   generateRealityKeypair,
   getNode,
   importNode,
@@ -1308,6 +1310,21 @@ export default function NodesView() {
     pushSnack(t('admin:nodes.toast.deleted'), 'success')
   }
 
+  // Detach: stop managing the node but keep the upstream inbound (and any
+  // non-panel clients) untouched. Useful for inbounds shared with users
+  // outside the panel — admin reclaims their inbound without nuking it.
+  async function confirmDetach(n: Node) {
+    const ok = await confirm({
+      title: t('admin:nodes.confirm.detach_title'),
+      message: t('admin:nodes.confirm.detach_message', { name: n.display_name }),
+      confirmText: t('admin:nodes.action.detach'),
+    })
+    if (!ok) return
+    await detachNode(n.id)
+    setManaged(prev => prev.filter(x => x.id !== n.id))
+    pushSnack(t('admin:nodes.toast.detached'), 'success')
+  }
+
   async function batchSetEnabled(enable: boolean) {
     const rows = managed.filter(n => selected.has(n.id))
     if (!rows.length) return
@@ -1783,6 +1800,11 @@ export default function NodesView() {
                       <Tooltip title={t('admin:nodes.edit_inbound')}>
                         <IconButton size="small" onClick={() => openEditInbound(n)}>
                           <KeyIcon fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
+                      <Tooltip title={t('admin:nodes.action.detach')}>
+                        <IconButton size="small" onClick={() => confirmDetach(n)} sx={{ color: md.tertiary }}>
+                          <LinkOffIcon fontSize="small" />
                         </IconButton>
                       </Tooltip>
                       <Tooltip title={t('admin:nodes.action.delete')}>
