@@ -1132,10 +1132,6 @@ function InboundFormFields({ form, setForm, showMetadata, servers, onGenKeys, on
                 value={form.tags_text}
                 onChange={e => update('tags_text', e.target.value)}
                 sx={{ flex: '2 1 240px' }} />
-              <TextField size="small" type="number" label={t('admin:nodes.field.sort_order')}
-                value={form.sort_order}
-                onChange={e => update('sort_order', Number(e.target.value))}
-                sx={{ width: 110 }} />
             </Box>
           </Box>
         </Box>
@@ -1201,6 +1197,38 @@ export default function NodesView() {
       String(u.Port) === q,
     )
   }, [unmanaged, unmanagedSearch])
+
+  // Same UX on the managed tab. Drag-to-reorder is suppressed while the
+  // filter narrows the list because the visible row index no longer maps
+  // 1:1 to the full managed array — moving a row from displayed-position-3
+  // to displayed-position-5 would be ambiguous when filtered-out rows sit
+  // between them. Clearing the search re-enables the drag handles.
+  const [managedSearch, setManagedSearch] = useState('')
+
+  const managedSearchOptions = useMemo(() => {
+    const opts = new Set<string>()
+    for (const n of managed) {
+      if (n.display_name) opts.add(n.display_name)
+      if (n.panel_name) opts.add(n.panel_name)
+      if (n.region) opts.add(n.region)
+      for (const tg of n.tags ?? []) if (tg) opts.add(tg)
+    }
+    return [...opts].sort()
+  }, [managed])
+
+  const filteredManaged = useMemo(() => {
+    const q = managedSearch.trim().toLowerCase()
+    if (!q) return managed
+    return managed.filter(n =>
+      n.display_name.toLowerCase().includes(q) ||
+      n.panel_name.toLowerCase().includes(q) ||
+      n.server_address.toLowerCase().includes(q) ||
+      n.region.toLowerCase().includes(q) ||
+      (n.tags ?? []).some(tg => tg.toLowerCase().includes(q)) ||
+      String(n.id) === q,
+    )
+  }, [managed, managedSearch])
+  const managedFilterActive = managedSearch.trim().length > 0
   const [selected, setSelected] = useState<Set<number>>(new Set())
   const [batchBusy, setBatchBusy] = useState<'enable' | 'disable' | 'delete' | ''>('')
   const [enabledBusy, setEnabledBusy] = useState<Record<number, boolean>>({})
@@ -1824,6 +1852,33 @@ export default function NodesView() {
 
       <Card sx={{ bgcolor: md.surfaceContainerLow, boxShadow: '0 1px 2px rgba(0,0,0,.3),0 1px 3px 1px rgba(0,0,0,.15)', overflow: 'hidden' }}>
         {tab === 'managed' && (
+          <>
+            <Box sx={{ p: 2, display: 'flex', alignItems: 'center', gap: 1.5, borderBottom: `1px solid ${md.outlineVariant}`, flexWrap: 'wrap' }}>
+              <Autocomplete
+                freeSolo
+                size="small"
+                options={managedSearchOptions}
+                value={managedSearch}
+                inputValue={managedSearch}
+                onInputChange={(_, v) => setManagedSearch(v)}
+                onChange={(_, v) => setManagedSearch((v as string) ?? '')}
+                sx={{ width: 320, maxWidth: '100%' }}
+                renderInput={(params) => (
+                  <TextField {...params} placeholder={t('admin:nodes.managed_search_placeholder')} />
+                )}
+              />
+              <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant }}>
+                {t('admin:nodes.managed_count', {
+                  shown: filteredManaged.length,
+                  total: managed.length,
+                })}
+              </Typography>
+              {managedFilterActive && (
+                <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant, fontStyle: 'italic' }}>
+                  {t('admin:nodes.managed_search_disables_drag')}
+                </Typography>
+              )}
+            </Box>
           <TableContainer>
             <Table>
               <TableHead>
@@ -1840,7 +1895,6 @@ export default function NodesView() {
                   <TableCell>{t('admin:nodes.table.server_address')}</TableCell>
                   <TableCell>{t('admin:nodes.table.region')}</TableCell>
                   <TableCell>{t('admin:nodes.table.tags')}</TableCell>
-                  <TableCell align="right">{t('admin:nodes.table.sort_order')}</TableCell>
                   <TableCell align="center">{t('admin:nodes.table.health', { defaultValue: '健康' })}</TableCell>
                   <TableCell align="center">{t('admin:nodes.table.enabled')}</TableCell>
                   <TableCell align="right">{t('admin:nodes.table.actions')}</TableCell>
@@ -1848,16 +1902,18 @@ export default function NodesView() {
               </TableHead>
               <TableBody>
                 {loading && managed.length === 0 && (
-                  <TableRow><TableCell colSpan={12} sx={{ textAlign: 'center', py: 6 }}>
+                  <TableRow><TableCell colSpan={11} sx={{ textAlign: 'center', py: 6 }}>
                     <CircularProgress size={24} />
                   </TableCell></TableRow>
                 )}
-                {!loading && managed.length === 0 && (
-                  <TableRow><TableCell colSpan={12} sx={{ textAlign: 'center', py: 6, color: md.onSurfaceVariant }}>—</TableCell></TableRow>
+                {!loading && filteredManaged.length === 0 && (
+                  <TableRow><TableCell colSpan={11} sx={{ textAlign: 'center', py: 6, color: md.onSurfaceVariant }}>
+                    {managed.length === 0 ? '—' : t('admin:nodes.managed_filter_empty')}
+                  </TableCell></TableRow>
                 )}
-                {managed.map((n, idx) => (
+                {filteredManaged.map((n, idx) => (
                   <TableRow key={n.id} hover
-                    draggable={!reorderBusy}
+                    draggable={!reorderBusy && !managedFilterActive}
                     onDragStart={e => {
                       setDragIndex(idx)
                       // Required for Firefox to actually start the drag.
@@ -1894,7 +1950,7 @@ export default function NodesView() {
                         : 'transparent',
                       transition: 'background-color 120ms',
                     }}>
-                    <TableCell padding="none" sx={{ width: 32, textAlign: 'center', color: md.onSurfaceVariant, cursor: reorderBusy ? 'wait' : 'grab' }}>
+                    <TableCell padding="none" sx={{ width: 32, textAlign: 'center', color: md.onSurfaceVariant, cursor: reorderBusy ? 'wait' : (managedFilterActive ? 'not-allowed' : 'grab'), opacity: managedFilterActive ? 0.4 : 1 }}>
                       <Tooltip title={t('admin:nodes.action.drag_to_reorder')}>
                         <DragIndicatorIcon fontSize="small" sx={{ verticalAlign: 'middle', opacity: 0.7 }} />
                       </Tooltip>
@@ -1908,7 +1964,6 @@ export default function NodesView() {
                     <TableCell sx={{ fontSize: 13, color: md.onSurfaceVariant }}>{n.server_address}</TableCell>
                     <TableCell sx={{ fontSize: 13 }}>{n.region}</TableCell>
                     <TableCell>{tagsCell(n.tags)}</TableCell>
-                    <TableCell align="right" sx={{ fontVariantNumeric: 'tabular-nums' }}>{n.sort_order}</TableCell>
                     <TableCell align="center">{healthDot(n)}</TableCell>
                     <TableCell align="center">
                       <Switch checked={n.enabled} onChange={() => toggleEnabled(n)} disabled={enabledBusy[n.id]} />
@@ -1938,6 +1993,7 @@ export default function NodesView() {
               </TableBody>
             </Table>
           </TableContainer>
+          </>
         )}
 
         {tab === 'unmanaged' && (
@@ -2205,9 +2261,6 @@ export default function NodesView() {
             <TextField fullWidth label={t('admin:nodes.field.tags')}
               value={editForm.tags_text}
               onChange={e => setEditForm({ ...editForm, tags_text: e.target.value })} />
-            <TextField fullWidth type="number" label={t('admin:nodes.field.sort_order')}
-              value={editForm.sort_order}
-              onChange={e => setEditForm({ ...editForm, sort_order: Number(e.target.value) })} />
             <Box sx={{ display: 'none' }}>{alpha(md.error, 0.5)}</Box>
           </Box>
         </DialogContent>
