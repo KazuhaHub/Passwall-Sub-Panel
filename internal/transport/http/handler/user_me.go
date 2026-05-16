@@ -63,8 +63,12 @@ func (h *UserMeHandler) Profile(c *gin.Context) {
 		"display_name":            u.DisplayName,
 		"upn":                     u.UPN,
 		"sub_url":                 h.subURL(c.Request, u.SubToken),
-		"sub_import_clients":      enabledSubImportClients(settings.SubImportClients),
-		"sub_import_tutorial_url": settings.SubImportTutorialURL,
+		// sub_update_interval_hours surfaces the admin-configured value so
+		// import-URL templates can embed it (CMfA reads `update-interval`
+		// from the intent URI in minutes; the frontend converts on render).
+		"sub_update_interval_hours": settings.SubUpdateIntervalHours,
+		"sub_import_clients":        enabledSubImportClients(settings.SubImportClients),
+		"sub_import_tutorial_url":   settings.SubImportTutorialURL,
 		"quick_links":             enabledQuickLinks(settings.QuickLinks),
 		"global_announcement":     visibleGlobalAnnouncement(settings.GlobalAnnouncement),
 		"expire_at":               u.ExpireAt,

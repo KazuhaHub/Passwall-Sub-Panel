@@ -220,7 +220,16 @@ func (s *Service) buildProxies(ctx context.Context, u *domain.User, items []rend
 		}
 		out = append(out, block)
 	}
-	return out
+	// Fall back to a sentinel when the loop produced nothing (no nodes
+	// matched the group, every inbound fetch failed, every protocol was
+	// unsupported, …). Without this the rendered template's "proxies:"
+	// key serializes to "[]", which CMfA rejects with "profile does not
+	// contain `proxies` or `proxy-providers`". See sentinel.go.
+	if len(out) == 0 {
+		log.Warn("render: no usable proxies, injecting sentinel",
+			"user_id", u.ID, "items_considered", len(items))
+	}
+	return withSentinelIfEmpty(out)
 }
 
 func (s *Service) fetchInbound(ctx context.Context, n *domain.Node) (*ports.Inbound, error) {

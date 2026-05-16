@@ -326,12 +326,22 @@ export default function MeView() {
     // expect the URL itself to be base64-wrapped in the query.
     let subUrlB64 = ''
     try { subUrlB64 = btoa(unescape(encodeURIComponent(subUrl))) } catch { /* ignore */ }
+    // CMfA reads `update-interval` from the intent URI in MINUTES (its
+    // Profile-Update-Interval HTTP header is in hours; the URI param is
+    // a separate format chosen by the CMfA author). Default 24h when the
+    // admin hasn't set a value, matching the header fallback in render.go.
+    const intervalHours = profile?.sub_update_interval_hours && profile.sub_update_interval_hours > 0
+      ? profile.sub_update_interval_hours
+      : 24
+    const intervalMinutes = intervalHours * 60
     return c.import_url_template
       .replaceAll('{{ sub_url_encoded }}', encodeURIComponent(subUrl))
       .replaceAll('{{ sub_url_b64 }}', subUrlB64)
       .replaceAll('{{ sub_url }}', subUrl)
       .replaceAll('{{ profile_name_encoded }}', encodeURIComponent(profileName))
       .replaceAll('{{ profile_name }}', profileName)
+      .replaceAll('{{ sub_update_interval_minutes }}', String(intervalMinutes))
+      .replaceAll('{{ sub_update_interval_hours }}', String(intervalHours))
   }
 
   function emergencyStatusText(): string {

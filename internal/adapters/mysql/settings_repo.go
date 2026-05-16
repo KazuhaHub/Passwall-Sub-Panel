@@ -183,20 +183,27 @@ func defaultSubImportClients() []ports.SubImportClient {
 			RecommendedFor:    []string{"windows", "macos", "linux"},
 		},
 		{
-			Name:              "Clash Meta for Android",
-			Platforms:         []string{"android"},
-			RenderFormat:      "mihomo",
-			ImportURLTemplate: "clash://install-config?url={{ sub_url_encoded }}",
+			Name:      "Clash Meta for Android",
+			Platforms: []string{"android"},
+			RenderFormat: "mihomo",
+			// update-interval (MINUTES) comes from CMfA PR #732, distinct
+			// from the Profile-Update-Interval HTTP header (HOURS). Both
+			// units are correct per CMfA's source.
+			ImportURLTemplate: "clash://install-config?url={{ sub_url_encoded }}&update-interval={{ sub_update_interval_minutes }}",
 			InstallURL:        "https://github.com/MetaCubeX/ClashMetaForAndroid/releases",
 			Enabled:           true,
 			Sort:              20,
 			RecommendedFor:    []string{"android"},
 		},
 		{
-			Name:              "Clash Mi",
-			Platforms:         []string{"windows", "macos", "linux", "android", "ios"},
-			RenderFormat:      "mihomo",
-			ImportURLTemplate: "clash://install-config?url={{ sub_url_encoded }}",
+			Name:      "Clash Mi",
+			Platforms: []string{"windows", "macos", "linux", "android", "ios"},
+			RenderFormat: "mihomo",
+			// clashmi:// — ClashMi's iOS Info.plist registers `clash`,
+			// `clashmi`, `clashmeta` and `flclash`. Using `clashmi://`
+			// keeps iOS from offering Stash (which owns clash://) when
+			// both apps are installed.
+			ImportURLTemplate: "clashmi://install-config?url={{ sub_url_encoded }}",
 			InstallURL:        "https://github.com/KaringX/clashmi/releases",
 			Enabled:           true,
 			Sort:              25,

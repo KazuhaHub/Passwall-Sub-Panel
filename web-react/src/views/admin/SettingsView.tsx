@@ -1128,7 +1128,9 @@ const IMPORT_CLIENT_PRESETS: Array<Omit<SubImportClient, 'sort' | 'enabled'>> = 
     name: 'Clash Meta for Android',
     platforms: ['android'],
     render_format: 'mihomo',
-    import_url_template: 'clash://install-config?url={{ sub_url_encoded }}',
+    // update-interval is in MINUTES per CMfA PR #732 (deliberate units
+    // mismatch with the Profile-Update-Interval HTTP header which is hours).
+    import_url_template: 'clash://install-config?url={{ sub_url_encoded }}&update-interval={{ sub_update_interval_minutes }}',
     install_url: 'https://github.com/MetaCubeX/ClashMetaForAndroid/releases',
     recommended_for: ['android'],
   },
@@ -1136,7 +1138,10 @@ const IMPORT_CLIENT_PRESETS: Array<Omit<SubImportClient, 'sort' | 'enabled'>> = 
     name: 'Clash Mi',
     platforms: ['windows', 'macos', 'linux', 'android', 'ios'],
     render_format: 'mihomo',
-    import_url_template: 'clash://install-config?url={{ sub_url_encoded }}',
+    // ClashMi registers clashmi://, clash://, clashmeta:// and flclash://.
+    // Using `clashmi://` keeps iOS from offering Stash (which only owns
+    // clash://) when both apps are installed.
+    import_url_template: 'clashmi://install-config?url={{ sub_url_encoded }}',
     install_url: 'https://github.com/KaringX/clashmi/releases',
     recommended_for: ['ios'],
   },

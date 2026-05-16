@@ -38,6 +38,9 @@ export interface MeProfile {
   upn: string
   email?: string
   sub_url: string
+  /** Admin-configured subscription auto-update interval in hours (default 24).
+   *  Frontend converts to minutes for CMfA-style `update-interval=` URI params. */
+  sub_update_interval_hours?: number
   sub_import_clients?: SubImportClient[]
   sub_import_tutorial_url?: string
   quick_links?: QuickLink[]
