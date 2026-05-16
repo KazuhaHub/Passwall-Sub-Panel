@@ -1173,7 +1173,11 @@ const IMPORT_CLIENT_PRESETS: Array<Omit<SubImportClient, 'sort' | 'enabled'>> = 
     name: 'V2rayNG',
     platforms: ['android'],
     render_format: 'uri-list',
-    import_url_template: 'v2rayng://install-sub/?url={{ sub_url_b64 }}',
+    // V2rayNG's install-sub intent expects the `url` query param to be
+    // URL-encoded, NOT base64. Previous preset wrapped in base64 which
+    // V2rayNG would reject silently. Fragment is the subscription name.
+    // See 2dust/v2rayNG#4141.
+    import_url_template: 'v2rayng://install-sub?url={{ sub_url_encoded }}&name={{ profile_name_encoded }}',
     install_url: 'https://github.com/2dust/v2rayNG/releases',
     recommended_for: [],
   },
@@ -1183,6 +1187,17 @@ const IMPORT_CLIENT_PRESETS: Array<Omit<SubImportClient, 'sort' | 'enabled'>> = 
     render_format: 'uri-list',
     import_url_template: 'sub://{{ sub_url_b64 }}',
     install_url: 'https://apps.apple.com/app/shadowrocket/id932747118',
+    recommended_for: [],
+  },
+  {
+    // Karing is the sister app to Clash Mi from KaringX, popular alongside
+    // ClashMi on iOS. Distinct karing:// scheme so it doesn't collide with
+    // Stash. Sing-box core, so render format is sing-box.
+    name: 'Karing',
+    platforms: ['windows', 'macos', 'linux', 'android', 'ios'],
+    render_format: 'sing-box',
+    import_url_template: 'karing://install-config?url={{ sub_url_encoded }}&name={{ profile_name_encoded }}',
+    install_url: 'https://github.com/KaringX/karing/releases',
     recommended_for: [],
   },
 ]

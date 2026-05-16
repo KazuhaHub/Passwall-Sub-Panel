@@ -241,12 +241,14 @@ func defaultSubImportClients() []ports.SubImportClient {
 			Sort:              50,
 		},
 		{
-			// V2rayNG (Android) accepts a deep-link with the URL itself
-			// base64-encoded: v2rayng://install-sub/?url=BASE64.
+			// V2rayNG (Android) install-sub intent: `url` param is URL-encoded
+			// (NOT base64 — earlier preset wrapped in base64 which V2rayNG
+			// rejects silently). `name` populates the subscription label.
+			// See 2dust/v2rayNG#4141.
 			Name:              "V2rayNG",
 			Platforms:         []string{"android"},
 			RenderFormat:      "uri-list",
-			ImportURLTemplate: "v2rayng://install-sub/?url={{ sub_url_b64 }}",
+			ImportURLTemplate: "v2rayng://install-sub?url={{ sub_url_encoded }}&name={{ profile_name_encoded }}",
 			InstallURL:        "https://github.com/2dust/v2rayNG/releases",
 			Enabled:           true,
 			Sort:              55,
@@ -261,6 +263,18 @@ func defaultSubImportClients() []ports.SubImportClient {
 			InstallURL:        "https://apps.apple.com/app/shadowrocket/id932747118",
 			Enabled:           true,
 			Sort:              60,
+		},
+		{
+			// Karing is the sister sing-box app to Clash Mi from the same
+			// author (KaringX). karing:// is unique so it won't collide
+			// with other iOS proxy apps.
+			Name:              "Karing",
+			Platforms:         []string{"windows", "macos", "linux", "android", "ios"},
+			RenderFormat:      "sing-box",
+			ImportURLTemplate: "karing://install-config?url={{ sub_url_encoded }}&name={{ profile_name_encoded }}",
+			InstallURL:        "https://github.com/KaringX/karing/releases",
+			Enabled:           true,
+			Sort:              65,
 		},
 	}
 }
