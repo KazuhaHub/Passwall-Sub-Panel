@@ -898,19 +898,27 @@
       "slug": "Slug",
       "name": "名称",
       "match_all": "匹配所有节点",
-      "tags": "tag_filter",
+      "mode": "条件组合",
+      "tags": "Tag 条件",
       "remark": "备注"
     },
     "placeholder": {
       "tags": "region:TW, tag:reality"
     },
     "hint": {
-      "tags": "逗号分隔，AND 组合。支持 region:XX / tag:YY / server:ZZ"
+      "mode": "AND = 每条都要满足；OR = 任一满足即可",
+      "tags": "逗号分隔。支持 region:XX / tag:YY / server:ZZ 等前缀"
+    },
+    "mode": {
+      "all": "AND（每条都要满足）",
+      "any": "OR（任一满足即可）",
+      "all_badge": "AND",
+      "any_badge": "OR"
     },
     "table": {
       "name": "名称",
       "slug": "Slug",
-      "tag_filter": "tag_filter",
+      "tag_filter": "Tag 条件",
       "members": "成员数",
       "remark": "备注",
       "actions": "操作"

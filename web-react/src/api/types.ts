@@ -132,6 +132,9 @@ export interface ListResponse<T> {
 export interface TagFilter {
   all: boolean
   tags: string[]
+  // Conjunction over tags. "" / "all" → AND, "any" → OR. Optional in the
+  // wire shape: empty / missing serializes as omitted on legacy rows.
+  mode?: 'all' | 'any'
 }
 
 export interface Layout {

@@ -894,19 +894,27 @@
       "slug": "Slug",
       "name": "Name",
       "match_all": "Match all nodes",
-      "tags": "tag_filter",
+      "mode": "Combine conditions",
+      "tags": "Tag conditions",
       "remark": "Remark"
     },
     "placeholder": {
       "tags": "region:TW, tag:reality"
     },
     "hint": {
-      "tags": "Comma-separated, AND-combined. Supports region:XX / tag:YY / server:ZZ"
+      "mode": "AND = every condition must match; OR = at least one matches",
+      "tags": "Comma-separated. Supports prefixes like region:XX / tag:YY / server:ZZ"
+    },
+    "mode": {
+      "all": "AND (every condition matches)",
+      "any": "OR (any condition matches)",
+      "all_badge": "AND",
+      "any_badge": "OR"
     },
     "table": {
       "name": "Name",
       "slug": "Slug",
-      "tag_filter": "tag_filter",
+      "tag_filter": "Tag conditions",
       "members": "Members",
       "remark": "Remark",
       "actions": "Actions"

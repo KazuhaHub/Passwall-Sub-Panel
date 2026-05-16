@@ -11,6 +11,7 @@ import {
   DialogTitle,
   FormControlLabel,
   IconButton,
+  MenuItem,
   Switch,
   Table,
   TableBody,
@@ -37,12 +38,13 @@ interface FormState {
   slug: string
   name: string
   all: boolean
+  mode: 'all' | 'any'   // AND vs OR over tags
   tags_text: string
   remark: string
 }
 
 const EMPTY_FORM: FormState = {
-  slug: '', name: '', all: false, tags_text: '', remark: '',
+  slug: '', name: '', all: false, mode: 'all', tags_text: '', remark: '',
 }
 
 export default function GroupsView() {
@@ -91,6 +93,7 @@ export default function GroupsView() {
       slug: g.slug,
       name: g.name,
       all: g.tag_filter.all,
+      mode: g.tag_filter.mode === 'any' ? 'any' : 'all',
       tags_text: (g.tag_filter.tags || []).join(', '),
       remark: g.remark || '',
     })
@@ -105,6 +108,9 @@ export default function GroupsView() {
     try {
       const tagFilter = {
         all: form.all,
+        // Send "all" / "any" — backend treats empty as "all", but being
+        // explicit makes the wire shape self-describing.
+        mode: form.mode,
         tags: form.all
           ? []
           : form.tags_text.split(',').map(s => s.trim()).filter(Boolean),
@@ -208,14 +214,26 @@ export default function GroupsView() {
     if (!g.tag_filter.tags?.length) {
       return <Typography sx={{ fontSize: 13, color: md.onSurfaceVariant }}>—</Typography>
     }
+    // Render the mode (AND / OR) as a small badge before the tags so the
+    // admin sees at a glance whether the conditions are conjunctive or
+    // disjunctive. Defaults to AND for rows persisted before the field
+    // existed.
+    const isAny = g.tag_filter.mode === 'any'
     return (
-      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, alignItems: 'center' }}>
+        <Box sx={{
+          display: 'inline-block', px: 1.25, py: 0.25,
+          borderRadius: 1, fontSize: 11, fontWeight: 600, letterSpacing: '.5px',
+          bgcolor: isAny ? md.secondaryContainer : md.primaryContainer,
+          color: isAny ? md.onSecondaryContainer : md.onPrimaryContainer,
+        }}>
+          {isAny ? t('admin:groups.mode.any_badge') : t('admin:groups.mode.all_badge')}
+        </Box>
         {g.tag_filter.tags.map(tag => (
           <Box key={tag} sx={{
             display: 'inline-block', px: 1.25, py: 0.25,
             borderRadius: 1, fontSize: 12, fontWeight: 500,
             bgcolor: md.surfaceContainerHighest, color: md.onSurfaceVariant,
-
           }}>
             {tag}
           </Box>
@@ -359,17 +377,30 @@ export default function GroupsView() {
               sx={{ ml: 0, '& .MuiFormControlLabel-label': { ml: 1.5 } }}
             />
             {!form.all && (
-              <TextField
-                fullWidth
-                multiline
-                minRows={2}
-                label={t('admin:groups.field.tags')}
-                placeholder={t('admin:groups.placeholder.tags')}
-                helperText={t('admin:groups.hint.tags')}
-                value={form.tags_text}
-                onChange={e => setForm({ ...form, tags_text: e.target.value })}
-                sx={{ '& textarea': { fontSize: 13 } }}
-              />
+              <>
+                <TextField
+                  select
+                  fullWidth
+                  label={t('admin:groups.field.mode')}
+                  value={form.mode}
+                  onChange={e => setForm({ ...form, mode: e.target.value as 'all' | 'any' })}
+                  helperText={t('admin:groups.hint.mode')}
+                >
+                  <MenuItem value="all">{t('admin:groups.mode.all')}</MenuItem>
+                  <MenuItem value="any">{t('admin:groups.mode.any')}</MenuItem>
+                </TextField>
+                <TextField
+                  fullWidth
+                  multiline
+                  minRows={2}
+                  label={t('admin:groups.field.tags')}
+                  placeholder={t('admin:groups.placeholder.tags')}
+                  helperText={t('admin:groups.hint.tags')}
+                  value={form.tags_text}
+                  onChange={e => setForm({ ...form, tags_text: e.target.value })}
+                  sx={{ '& textarea': { fontSize: 13 } }}
+                />
+              </>
             )}
             <TextField
               fullWidth

@@ -122,12 +122,17 @@ type Group struct {
 }
 
 // TagFilter expresses a node selection rule.
-//   - All=true matches every node
-//   - otherwise Tags is an AND-combination of entries like
-//     "region:TW", "tag:reality", "server:tw-hinet"
+//   - All=true matches every node (Mode + Tags ignored)
+//   - otherwise Tags is a list of conditions like "region:TW", "tag:reality",
+//     "server:tw-hinet" combined under Mode semantics:
+//       Mode == "" or "all" → AND (every condition must match)
+//       Mode == "any"       → OR  (at least one condition must match)
 type TagFilter struct {
 	All  bool
 	Tags []string
+	// Mode is the conjunction over Tags. Empty defaults to "all" for
+	// backwards compatibility with rows persisted before OR was added.
+	Mode string
 }
 
 // Layout is the group-level render layout that controls node ordering and

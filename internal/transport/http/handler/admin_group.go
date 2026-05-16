@@ -41,6 +41,10 @@ type groupDTO struct {
 type tagFilterDTO struct {
 	All  bool     `json:"all"`
 	Tags []string `json:"tags"`
+	// Mode controls how Tags are combined. "" or "all" → AND (every cond
+	// must match); "any" → OR (at least one match). Empty serializes back
+	// as omitted on rows persisted before OR support was added.
+	Mode string `json:"mode,omitempty"`
 }
 
 type createGroupRequest struct {
@@ -106,7 +110,7 @@ func (h *AdminGroupHandler) Create(c *gin.Context) {
 	g := &domain.Group{
 		Slug:      req.Slug,
 		Name:      req.Name,
-		TagFilter: domain.TagFilter{All: req.TagFilter.All, Tags: req.TagFilter.Tags},
+		TagFilter: domain.TagFilter{All: req.TagFilter.All, Tags: req.TagFilter.Tags, Mode: req.TagFilter.Mode},
 		Layout:    req.Layout,
 		Remark:    req.Remark,
 	}
@@ -142,7 +146,7 @@ func (h *AdminGroupHandler) Update(c *gin.Context) {
 		g.Name = *req.Name
 	}
 	if req.TagFilter != nil {
-		g.TagFilter = domain.TagFilter{All: req.TagFilter.All, Tags: req.TagFilter.Tags}
+		g.TagFilter = domain.TagFilter{All: req.TagFilter.All, Tags: req.TagFilter.Tags, Mode: req.TagFilter.Mode}
 		filterChanged = true
 	}
 	if req.Remark != nil {
@@ -220,7 +224,7 @@ func toGroupDTO(g *domain.Group) groupDTO {
 		ID:        g.ID,
 		Slug:      g.Slug,
 		Name:      g.Name,
-		TagFilter: tagFilterDTO{All: g.TagFilter.All, Tags: tags},
+		TagFilter: tagFilterDTO{All: g.TagFilter.All, Tags: tags, Mode: g.TagFilter.Mode},
 		Layout:    g.Layout,
 		Remark:    g.Remark,
 	}

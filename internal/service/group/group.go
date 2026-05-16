@@ -74,7 +74,7 @@ func (s *Service) NodesFor(ctx context.Context, g *domain.Group) ([]*domain.Node
 	}
 	out := make([]*domain.Node, 0, len(all))
 	for _, n := range all {
-		if matchAll(n, g.TagFilter.Tags) {
+		if matchFilter(n, g.TagFilter) {
 			out = append(out, n)
 		}
 	}
@@ -89,7 +89,20 @@ func Matches(n *domain.Node, filter domain.TagFilter) bool {
 	if filter.All {
 		return true
 	}
-	return matchAll(n, filter.Tags)
+	return matchFilter(n, filter)
+}
+
+// matchFilter dispatches on TagFilter.Mode. Empty / "all" → AND; "any" → OR.
+// An empty Tags list under AND matches everything (vacuous truth, same as
+// the original behavior); under OR it matches nothing (no condition can be
+// satisfied) — explicit, less surprising than the AND default.
+func matchFilter(n *domain.Node, f domain.TagFilter) bool {
+	switch f.Mode {
+	case "any":
+		return matchAny(n, f.Tags)
+	default:
+		return matchAll(n, f.Tags)
+	}
 }
 
 // matchAll returns true when every condition matches. Conditions have the
@@ -102,6 +115,19 @@ func matchAll(n *domain.Node, conds []string) bool {
 		}
 	}
 	return true
+}
+
+// matchAny returns true when at least one condition matches.
+func matchAny(n *domain.Node, conds []string) bool {
+	if len(conds) == 0 {
+		return false
+	}
+	for _, c := range conds {
+		if matchOne(n, c) {
+			return true
+		}
+	}
+	return false
 }
 
 func matchOne(n *domain.Node, cond string) bool {
