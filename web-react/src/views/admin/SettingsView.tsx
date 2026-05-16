@@ -788,7 +788,8 @@ function MailTab() {
             error={!!errs.test_to}
             helperText={errs.test_to ? t(`admin:${errs.test_to}`) : ''} />
           <Button variant="outlined" disabled={!testTo || testBusy} onClick={test}
-            startIcon={testBusy ? <CircularProgress size={14} /> : <SendIcon />}>
+            startIcon={testBusy ? <CircularProgress size={14} /> : <SendIcon />}
+            sx={{ whiteSpace: 'nowrap', flexShrink: 0 }}>
             {t('settings.mail.test_send')}
           </Button>
         </Box>
