@@ -1350,18 +1350,22 @@ export default function UsersView() {
                   ? t('admin:users.reconcile.summary_fixed', { scanned: reconcileReport.scanned, fixed: reconcileReport.fixed })
                   : t('admin:users.reconcile.summary_no_fix', { scanned: reconcileReport.scanned })}
               </Typography>
-              {(reconcileReport.issues?.length ?? 0) > 0 && (
-                <>
-                  <Typography sx={{ fontWeight: 500, mb: 1 }}>{t('admin:users.reconcile.issues_title')}</Typography>
-                  <Box component="ul" sx={{ pl: 2, m: 0, '& li': { fontSize: 13, color: md.onSurfaceVariant, mb: 0.5 } }}>
-                    {reconcileReport.issues?.map((i, idx) => (
-                      <li key={idx}>
-                        {i.panel_name && <strong>[{i.panel_name}]</strong>} {i.client_email}: {i.detail}
-                      </li>
-                    ))}
-                  </Box>
-                </>
-              )}
+              {(() => {
+                const unfixed = (reconcileReport.issues ?? []).filter(i => !i.fixed)
+                if (unfixed.length === 0) return null
+                return (
+                  <>
+                    <Typography sx={{ fontWeight: 500, mb: 1 }}>{t('admin:users.reconcile.issues_title')}</Typography>
+                    <Box component="ul" sx={{ pl: 2, m: 0, '& li': { fontSize: 13, color: md.onSurfaceVariant, mb: 0.5 } }}>
+                      {unfixed.map((i, idx) => (
+                        <li key={idx}>
+                          {i.panel_name && <strong>[{i.panel_name}]</strong>} {i.client_email}{i.detail ? `: ${i.detail}` : ''}
+                        </li>
+                      ))}
+                    </Box>
+                  </>
+                )
+              })()}
             </>
           )}
         </DialogContent>
