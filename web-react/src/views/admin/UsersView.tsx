@@ -83,6 +83,7 @@ import {
   validateGroupId,
   validateName,
   validateNonNegativeInt,
+  validateNonNegativeNumber,
   validatePassword,
   validateRequired,
 } from '@/utils/validators'
@@ -147,7 +148,7 @@ function renewedExpireAt(u: User, days: number) {
   return new Date(base + days * 86400000).toISOString()
 }
 
-type BatchKind = 'enable' | 'disable' | 'renew' | 'delete' | 'emergency' | ''
+type BatchKind = 'enable' | 'disable' | 'renew' | 'delete' | 'emergency' | 'unlink_sso' | ''
 
 export default function UsersView() {
   const theme = useTheme()
@@ -296,7 +297,7 @@ export default function UsersView() {
       password: f.password ? validatePassword(f.password, { strong: true }) : '',
       group_id: validateGroupId(f.group_id, { required: true }),
       expire_days: validateNonNegativeInt(f.expire_days),
-      traffic_limit_gb: validateNonNegativeInt(f.traffic_limit_gb),
+      traffic_limit_gb: validateNonNegativeNumber(f.traffic_limit_gb),
     }
   }
 
@@ -357,8 +358,12 @@ export default function UsersView() {
       group_id: validateGroupId(f.group_id, { required: true }),
       // Date mode requires a value; permanent mode skips the check entirely.
       expire_at: f.expire_mode === 'date' ? validateRequired(f.expire_at) : '',
-      traffic_limit_gb: validateNonNegativeInt(f.traffic_limit_gb),
-      period_used_gb: validateNonNegativeInt(f.period_used_gb),
+      // GB fields persist as int64 bytes downstream, so the UI happily
+      // takes decimals (1.23 GB is the natural way to show 1320 MB of
+      // accrued usage — integer-only would reject the field whenever a
+      // real user has period usage).
+      traffic_limit_gb: validateNonNegativeNumber(f.traffic_limit_gb),
+      period_used_gb: validateNonNegativeNumber(f.period_used_gb),
     }
   }
 
@@ -475,6 +480,47 @@ export default function UsersView() {
         pushSnack(t('admin:users.toast.renewed', { days: 30 }), 'success')
       }
       await load()
+    } finally { setBatchBusy('') }
+  }
+
+  // ---- Batch unlink SSO ----
+  async function batchUnlinkSSO() {
+    setBatchMoreAnchor(null)
+    // Only SSO-bound rows are eligible — skip rows already on local so
+    // the count surfaced in the confirm dialog matches what'll actually
+    // get touched. UnlinkSSO server-side rejects local rows with
+    // ErrValidation, but we'd rather hide the noise than rely on it.
+    const eligible = selectedRows.filter(r => r.sso_provider && r.sso_provider !== 'local')
+    if (eligible.length === 0) {
+      pushSnack(t('admin:users.batch.unlink_sso_none_eligible', { defaultValue: '所选用户中没有 SSO 绑定的账号' }), 'info')
+      return
+    }
+    const names = eligible.slice(0, 5).map(r => r.display_name || r.upn).join('、')
+    const suffix = eligible.length > 5 ? ` +${eligible.length - 5}` : ''
+    const ok = await confirm({
+      title: t('admin:users.confirm.batch_unlink_sso_title'),
+      message: t('admin:users.confirm.batch_unlink_sso_message', { names, suffix, count: eligible.length }),
+      destructive: true,
+      confirmText: t('admin:users.batch.unlink_sso'),
+    })
+    if (!ok) return
+    setBatchBusy('unlink_sso')
+    try {
+      const results = await Promise.allSettled(eligible.map(r => unlinkSSO(r.id)))
+      const failed = results.filter(r => r.status === 'rejected').length
+      await load()
+      setSelected(new Set())
+      if (failed > 0) {
+        pushSnack(t('admin:users.batch.unlink_sso_partial', {
+          ok: eligible.length - failed, fail: failed,
+          defaultValue: '已解除 {{ok}} 个，{{fail}} 个失败',
+        }), 'warning')
+      } else {
+        pushSnack(t('admin:users.batch.unlink_sso_done', {
+          count: eligible.length,
+          defaultValue: '已解除 {{count}} 个 SSO 绑定',
+        }), 'success')
+      }
     } finally { setBatchBusy('') }
   }
 
@@ -853,6 +899,10 @@ export default function UsersView() {
             <MenuItem onClick={batchResetEmergency}>
               <ListItemIcon><EmergencyIcon fontSize="small" /></ListItemIcon>
               <ListItemText>{t('admin:users.more_menu.reset_emergency')}</ListItemText>
+            </MenuItem>
+            <MenuItem onClick={batchUnlinkSSO}>
+              <ListItemIcon><LinkOffIcon fontSize="small" /></ListItemIcon>
+              <ListItemText>{t('admin:users.batch.unlink_sso')}</ListItemText>
             </MenuItem>
           </Menu>
         </Box>

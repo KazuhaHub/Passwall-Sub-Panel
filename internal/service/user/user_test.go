@@ -1,6 +1,8 @@
 package user
 
 import (
+	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -28,11 +30,11 @@ func TestEmergencyStatus_ActiveWindowWinsOverRemainingZero(t *testing.T) {
 	now := time.Now()
 	until := now.Add(2 * time.Hour)
 	u := &domain.User{
-		ID:                 1,
-		Enabled:            true,
-		EmergencyUsedCount: 1, // used it once
-		EmergencyUntil:     &until,
-		LifetimeTotalBytes: 5_000_000_000,
+		ID:                     1,
+		Enabled:                true,
+		EmergencyUsedCount:     1, // used it once
+		EmergencyUntil:         &until,
+		LifetimeTotalBytes:     5_000_000_000,
 		EmergencyBaselineBytes: 1_000_000_000,
 	}
 	st := EmergencyAccessStatusForUserWithTrafficLimit(u, emSettings(), now, false)
@@ -161,3 +163,114 @@ func TestEmergencyStatus_UsedBytesZeroWhenNoActiveWindow(t *testing.T) {
 // The SSO role-policy unit tests live in the auth package now
 // (see internal/service/auth/role_test.go) because the policy moved
 // out of this package — user.EnsureSSO just calls auth.ResolveRoleForSSO.
+
+func TestEnsureSSO_FirstLoginPersistsLocalAccountBinding(t *testing.T) {
+	ctx := context.Background()
+	repo := &memoryUserRepo{
+		byID: map[int64]*domain.User{
+			2: {
+				ID:          2,
+				UPN:         "me@kazuha.org",
+				Role:        domain.RoleAdmin,
+				SSOProvider: domain.SSOProviderLocal,
+				SSOSubject:  "me@kazuha.org",
+				Enabled:     true,
+			},
+		},
+	}
+	svc := &Service{users: repo}
+
+	u, err := svc.EnsureSSO(ctx, EnsureSSOInput{
+		Provider: domain.SSOProviderSAML,
+		Subject:  "entra-subject-123",
+		UPN:      "me@kazuha.org",
+		Email:    "me@kazuha.org",
+	})
+	if err != nil {
+		t.Fatalf("EnsureSSO returned error: %v", err)
+	}
+	if u.SSOProvider != domain.SSOProviderSAML || u.SSOSubject != "entra-subject-123" {
+		t.Fatalf("returned binding = (%q, %q), want (%q, %q)",
+			u.SSOProvider, u.SSOSubject, domain.SSOProviderSAML, "entra-subject-123")
+	}
+	if repo.updateCalls != 1 {
+		t.Fatalf("Update calls = %d, want 1", repo.updateCalls)
+	}
+	stored := repo.byID[2]
+	if stored.SSOProvider != domain.SSOProviderSAML || stored.SSOSubject != "entra-subject-123" {
+		t.Fatalf("stored binding = (%q, %q), want (%q, %q)",
+			stored.SSOProvider, stored.SSOSubject, domain.SSOProviderSAML, "entra-subject-123")
+	}
+}
+
+type memoryUserRepo struct {
+	byID        map[int64]*domain.User
+	updateCalls int
+}
+
+func (r *memoryUserRepo) Create(ctx context.Context, u *domain.User) error {
+	if r.byID == nil {
+		r.byID = map[int64]*domain.User{}
+	}
+	if u.ID == 0 {
+		u.ID = int64(len(r.byID) + 1)
+	}
+	r.byID[u.ID] = cloneUser(u)
+	return nil
+}
+
+func (r *memoryUserRepo) Update(ctx context.Context, u *domain.User) error {
+	r.updateCalls++
+	r.byID[u.ID] = cloneUser(u)
+	return nil
+}
+
+func (r *memoryUserRepo) Delete(ctx context.Context, id int64) error {
+	delete(r.byID, id)
+	return nil
+}
+
+func (r *memoryUserRepo) GetByID(ctx context.Context, id int64) (*domain.User, error) {
+	if u := r.byID[id]; u != nil {
+		return cloneUser(u), nil
+	}
+	return nil, domain.ErrNotFound
+}
+
+func (r *memoryUserRepo) GetByUPN(ctx context.Context, upn string) (*domain.User, error) {
+	for _, u := range r.byID {
+		if u.UPN == upn {
+			return cloneUser(u), nil
+		}
+	}
+	return nil, domain.ErrNotFound
+}
+
+func (r *memoryUserRepo) GetBySSO(ctx context.Context, provider, subject string) (*domain.User, error) {
+	for _, u := range r.byID {
+		if u.SSOProvider == provider && u.SSOSubject == subject {
+			return cloneUser(u), nil
+		}
+	}
+	return nil, domain.ErrNotFound
+}
+
+func (r *memoryUserRepo) GetBySubToken(ctx context.Context, token string) (*domain.User, error) {
+	return nil, domain.ErrNotFound
+}
+
+func (r *memoryUserRepo) List(ctx context.Context, filter ports.UserFilter) ([]*domain.User, int64, error) {
+	return nil, 0, errors.New("not implemented")
+}
+
+func (r *memoryUserRepo) ListByGroup(ctx context.Context, groupID int64) ([]*domain.User, error) {
+	return nil, errors.New("not implemented")
+}
+
+func cloneUser(u *domain.User) *domain.User {
+	if u == nil {
+		return nil
+	}
+	cp := *u
+	return &cp
+}

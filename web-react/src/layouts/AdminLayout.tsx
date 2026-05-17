@@ -126,7 +126,11 @@ export default function AdminLayout() {
   function handleLogout() {
     setUserAnchor(null)
     auth.logout()
-    navigate('/login')
+    // /logged-out is a static landing page that does NOT auto-bounce
+    // to the IdP. /login would, under sso_redirect mode, immediately
+    // bounce the user back into the IdP session (and right back in)
+    // — defeating the logout entirely.
+    navigate('/logged-out', { replace: true })
   }
 
   function handleLanguageChange(lng: AppLanguage) {

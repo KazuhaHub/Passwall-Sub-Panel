@@ -163,6 +163,17 @@ export function validateNonNegativeInt(n: number, opts: Opts = {}): string {
   return isNonNegativeInt(n) ? '' : 'validation.non_negative_int'
 }
 
+// validateNonNegativeNumber is the decimal-friendly sibling. Use for
+// fields whose underlying unit is finer than the displayed unit — e.g.
+// "GB" inputs that ultimately persist as int64 bytes, where 1.23 GB
+// is both valid and the natural way to show 1320 MB of usage.
+export function validateNonNegativeNumber(n: number, opts: Opts = {}): string {
+  if (n === null || n === undefined || (Number.isNaN(n))) {
+    return opts.required ? 'validation.required' : ''
+  }
+  return Number.isFinite(n) && n >= 0 ? '' : 'validation.non_negative_number'
+}
+
 export function validatePositiveInt(n: number, opts: Opts = {}): string {
   if (n === null || n === undefined || (Number.isNaN(n))) {
     return opts.required ? 'validation.required' : ''

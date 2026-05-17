@@ -7,6 +7,7 @@
     "host": "请填入合法的主机名或 IP",
     "password_strength": "密码至少 8 位，含字母和数字",
     "non_negative_int": "请填入非负整数",
+    "non_negative_number": "请填入非负数",
     "positive_int": "请填入大于 0 的整数",
     "range": "数值不在允许范围内",
     "too_short": "长度太短",
@@ -156,10 +157,11 @@
         "traffic_limit_gb": "默认流量上限（GB，0=无限）",
         "traffic_reset_period": "默认流量重置周期",
         "group_section": "分组解析",
-        "fetch_verify": "获取并校验",
+        "fetch_verify": "获取、校验并保存",
         "fetch_ok": "已校验 · entity_id={{id}}",
         "fetch_certs": "{{n}} 个签名证书{{exp}}",
         "fetch_url_required": "请先填写 IdP Metadata URL",
+        "fetch_saved": "Metadata 已校验，SAML 设置已保存",
         "sp_auto_hint": "这些字段由面板根据「公网基地址」自动生成（首次保存时生成自签名证书）。请把它们粘贴到 IdP 侧的 Service Provider 配置。",
         "sp_save_first": "保存后将生成 SP 信息",
         "copied": "已复制",
@@ -888,6 +890,8 @@
       "reset_credentials_message": "重置 {{upn}} 的凭证会让旧订阅链接立即失效，现有连接被强制断开。继续？",
       "unlink_sso_title": "解除 SSO 绑定",
       "unlink_sso_message": "{{upn}} 当前绑定到 {{provider}}。解除后，下次该用户通过任意 SSO 登录会重新绑定到当前 IdP 的身份。继续？",
+      "batch_unlink_sso_title": "批量解除 SSO 绑定",
+      "batch_unlink_sso_message": "解除 {{names}}{{suffix}} 共 {{count}} 个用户的 SSO 绑定？解除后，他们下次 SSO 登录会重新绑定到当时的 IdP 身份。",
       "batch_delete_title": "批量删除用户",
       "batch_delete_message": "确定删除 {{names}}{{suffix}}？该操作将从所有 3X-UI inbound 清除这些用户的 client。"
     },
@@ -922,7 +926,11 @@
       "delete_partial": "已删除 {{ok}} 个用户，失败 {{fail}} 个",
       "deleted_count": "已删除 {{count}} 个用户",
       "emergency_partial": "已重置 {{ok}} 个用户，失败 {{fail}} 个",
-      "emergency_count": "已重置 {{count}} 个用户的紧急使用次数"
+      "emergency_count": "已重置 {{count}} 个用户的紧急使用次数",
+      "unlink_sso": "批量解除 SSO 绑定",
+      "unlink_sso_none_eligible": "所选用户中没有 SSO 绑定的账号",
+      "unlink_sso_done": "已解除 {{count}} 个 SSO 绑定",
+      "unlink_sso_partial": "已解除 {{ok}} 个，{{fail}} 个失败"
     },
     "rules": {
       "title": "{{upn}} 的个人规则",

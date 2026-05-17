@@ -1678,24 +1678,6 @@ function SamlPanel() {
     }
   }
 
-  async function onFetchMetadata() {
-    if (!cfg) return
-    const url = cfg.idp.metadata_url.trim()
-    if (!url) {
-      setFetchError(t('settings.sso.saml.fetch_url_required', { defaultValue: '请先填写 IdP Metadata URL' }))
-      setFetchResult(null)
-      return
-    }
-    setFetching(true); setFetchError(''); setFetchResult(null)
-    try {
-      const summary = await fetchSAMLMetadata(url)
-      setFetchResult(summary)
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e)
-      setFetchError(msg)
-    } finally { setFetching(false) }
-  }
-
   useEffect(() => { void load(); void loadGroups() }, [])
   async function loadGroups() {
     try { setGroups((await listGroups()).items) } catch { /* dropdown stays empty */ }
@@ -1748,30 +1730,57 @@ function SamlPanel() {
     }
   }
 
-  async function save(e?: FormEvent) {
-    e?.preventDefault()
-    if (!cfg) return
-    const v = validateSaml(cfg)
+  async function saveConfig(nextCfg: SAMLConfig, opts: { quietSuccess?: boolean } = {}) {
+    const v = validateSaml(nextCfg)
     setErrs(v)
     const firstKey = firstError(v)
-    if (firstKey) { pushSnack(t(`admin:${firstKey}`), 'warning'); return }
+    if (firstKey) { pushSnack(t(`admin:${firstKey}`), 'warning'); return null }
     setSaving(true)
     try {
       const res = await putSAML({
-        ...cfg,
+        ...nextCfg,
         sp: {
-          entity_id: cfg.sp.entity_id, acs_url: cfg.sp.acs_url, cert_pem: cfg.sp.cert_pem,
+          entity_id: nextCfg.sp.entity_id, acs_url: nextCfg.sp.acs_url, cert_pem: nextCfg.sp.cert_pem,
           // Send empty only in "keep existing" mode (there is a stored key
           // and the admin didn't click "change"). On a fresh setup keyPem
           // holds the value the admin just pasted; it must reach the backend.
-          key_pem: (cfg.sp.has_key_pem && !changeKey) ? '' : keyPem,
+          key_pem: (nextCfg.sp.has_key_pem && !changeKey) ? '' : keyPem,
         },
       })
       setCfg(normalizeSAML(res.config))
       setChangeKey(false); setKeyPem('')
       if (res.reload_error) pushSnack(t('settings.sso.reload_error', { error: res.reload_error }), 'warning')
-      else pushSnack(t('settings.sso.saved'), 'success')
+      else if (!opts.quietSuccess) pushSnack(t('settings.sso.saved'), 'success')
+      return res
     } finally { setSaving(false) }
+  }
+
+  async function onFetchMetadata() {
+    if (!cfg) return
+    const url = cfg.idp.metadata_url.trim()
+    if (!url) {
+      setFetchError(t('settings.sso.saml.fetch_url_required', { defaultValue: '请先填写 IdP Metadata URL' }))
+      setFetchResult(null)
+      return
+    }
+    setFetching(true); setFetchError(''); setFetchResult(null)
+    try {
+      const summary = await fetchSAMLMetadata(url)
+      setFetchResult(summary)
+      const res = await saveConfig({ ...cfg, idp: { ...cfg.idp, metadata_url: url } }, { quietSuccess: true })
+      if (res && !res.reload_error) {
+        pushSnack(t('settings.sso.saml.fetch_saved', { defaultValue: 'Metadata verified and SAML settings saved' }), 'success')
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      setFetchError(msg)
+    } finally { setFetching(false) }
+  }
+
+  async function save(e?: FormEvent) {
+    e?.preventDefault()
+    if (!cfg) return
+    await saveConfig(cfg)
   }
 
   if (loading || !cfg) return <Box sx={{ display: 'grid', placeItems: 'center', py: 6 }}><CircularProgress /></Box>
@@ -1812,7 +1821,7 @@ function SamlPanel() {
             helperText={errs.metadata_url ? t(`admin:${errs.metadata_url}`) : ''} />
           {isAuto && (
             <Button variant="outlined" size="medium" onClick={onFetchMetadata}
-              disabled={fetching || !cfg.idp.metadata_url.trim()}
+              disabled={fetching || saving || !cfg.idp.metadata_url.trim()}
               startIcon={fetching ? <CircularProgress size={14} /> : null}
               sx={{ height: 56, whiteSpace: 'nowrap' }}>
               {t('settings.sso.saml.fetch_verify', { defaultValue: 'Fetch & verify' })}

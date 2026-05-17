@@ -9,6 +9,7 @@ const LoginLocalView = lazy(() => import('@/views/LoginLocalView'))
 const SsoCallbackView = lazy(() => import('@/views/SsoCallbackView'))
 const SsoNoAccountView = lazy(() => import('@/views/SsoNoAccountView'))
 const SsoErrorView = lazy(() => import('@/views/SsoErrorView'))
+const LoggedOutView = lazy(() => import('@/views/LoggedOutView'))
 const AdminLayout = lazy(() => import('@/layouts/AdminLayout'))
 const UserLayout = lazy(() => import('@/layouts/UserLayout'))
 const PlaceholderView = lazy(() => import('@/views/admin/PlaceholderView'))
@@ -43,6 +44,7 @@ export const router = createBrowserRouter([
   { path: '/sso-callback', element: <SsoCallbackView /> },
   { path: '/sso-no-account', element: <SsoNoAccountView /> },
   { path: '/sso-error', element: <SsoErrorView /> },
+  { path: '/logged-out', element: <LoggedOutView /> },
   {
     path: '/admin',
     element: <RequireAuth adminOnly />,

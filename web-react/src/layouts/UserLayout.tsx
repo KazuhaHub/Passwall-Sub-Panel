@@ -48,7 +48,8 @@ export default function UserLayout() {
   function handleLogout() {
     setUserAnchor(null)
     auth.logout()
-    navigate('/login')
+    // See AdminLayout — /logged-out avoids the sso_redirect bounce-back.
+    navigate('/logged-out', { replace: true })
   }
 
   function handleLanguageChange(lng: AppLanguage) { setLanguage(lng) }

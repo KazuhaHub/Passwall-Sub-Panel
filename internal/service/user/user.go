@@ -305,7 +305,7 @@ func (s *Service) CreateLocal(ctx context.Context, in CreateLocalInput) (*Create
 		// within the local namespace without needing a separate uuid.
 		SSOProvider: domain.SSOProviderLocal,
 		SSOSubject:  upn,
-		Enabled:            true,
+		Enabled:     true,
 	}
 	if err := s.users.Create(ctx, u); err != nil {
 		return nil, err
@@ -379,11 +379,11 @@ func privilegedRuleMatch(in EnsureSSOInput) bool {
 //     SSO connection yet), upgrade it in place: write the new
 //     (provider, subject), keep PasswordHash so local login still works.
 //     This covers two cases without any one-off migration code:
-//        a) admins that originally had only a local password and are
-//           signing in via SSO for the first time;
-//        b) every legacy SSO user from before v2.3.0 — their row was
-//           seeded with sso_provider='local' on upgrade, and the first
-//           SSO login after upgrade rebinds them to the real identity.
+//     a) admins that originally had only a local password and are
+//     signing in via SSO for the first time;
+//     b) every legacy SSO user from before v2.3.0 — their row was
+//     seeded with sso_provider='local' on upgrade, and the first
+//     SSO login after upgrade rebinds them to the real identity.
 //
 //  3. Strict conflict refusal — if (2) finds a row already bound to a
 //     DIFFERENT SSO identity (linkable.sso_provider != 'local' and
@@ -395,9 +395,9 @@ func privilegedRuleMatch(in EnsureSSOInput) bool {
 //
 // Falling off the end means no matching row, in which case provisioning
 // runs:
-//   * IdP admin                       -> always create (bootstrap path).
-//   * non-admin + AllowAutoCreate ON  -> create with default group/quota.
-//   * non-admin + AllowAutoCreate OFF -> ErrSSONoAccount.
+//   - IdP admin                       -> always create (bootstrap path).
+//   - non-admin + AllowAutoCreate ON  -> create with default group/quota.
+//   - non-admin + AllowAutoCreate OFF -> ErrSSONoAccount.
 //
 // Role policy stays promote-only by default; see applyRoleFromSSO.
 func (s *Service) EnsureSSO(ctx context.Context, in EnsureSSOInput) (*domain.User, error) {
@@ -443,8 +443,6 @@ func (s *Service) EnsureSSO(ctx context.Context, in EnsureSSOInput) (*domain.Use
 		if linkable.SSOProvider != domain.SSOProviderLocal {
 			return nil, domain.ErrSSOAccountConflict
 		}
-		linkable.SSOProvider = in.Provider
-		linkable.SSOSubject = in.Subject
 		// PasswordHash is intentionally left alone so a local-admin
 		// row keeps its emergency password path after SSO is bound.
 		return s.reconcileSSOUser(ctx, linkable, in)

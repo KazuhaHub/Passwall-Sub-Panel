@@ -7,6 +7,7 @@
     "host": "Must be a valid hostname or IP",
     "password_strength": "At least 8 characters, with letters and digits",
     "non_negative_int": "Must be a non-negative integer",
+    "non_negative_number": "Must be a non-negative number",
     "positive_int": "Must be a positive integer",
     "range": "Value out of allowed range",
     "too_short": "Too short",
@@ -156,10 +157,11 @@
         "traffic_limit_gb": "Default traffic cap (GB, 0 = unlimited)",
         "traffic_reset_period": "Default traffic reset period",
         "group_section": "Group resolution",
-        "fetch_verify": "Fetch & verify",
+        "fetch_verify": "Fetch, verify & save",
         "fetch_ok": "Verified · entity_id={{id}}",
         "fetch_certs": "{{n}} signing certificate(s){{exp}}",
         "fetch_url_required": "Please fill in the IdP metadata URL first",
+        "fetch_saved": "Metadata verified and SAML settings saved",
         "sp_auto_hint": "These fields are auto-derived from your panel's public base URL (a self-signed cert is generated on first save). Paste them into your IdP's Service Provider configuration.",
         "sp_save_first": "Save once to materialise the SP details",
         "copied": "Copied",
@@ -888,6 +890,8 @@
       "reset_credentials_message": "Resetting {{upn}}'s credentials immediately invalidates the old subscription URL and forces existing connections to drop. Continue?",
       "unlink_sso_title": "Unlink SSO binding",
       "unlink_sso_message": "{{upn}} is currently bound to {{provider}}. After unlinking, the next SSO sign-in from this person re-binds the account to the IdP identity in use at that moment. Continue?",
+      "batch_unlink_sso_title": "Unlink SSO bindings",
+      "batch_unlink_sso_message": "Unlink the SSO binding for {{names}}{{suffix}} — {{count}} users in total? Their next SSO sign-in will re-bind to whatever identity the IdP returns at that moment.",
       "batch_delete_title": "Delete users",
       "batch_delete_message": "Delete {{names}}{{suffix}}? This removes their clients from every 3X-UI inbound."
     },
@@ -922,7 +926,11 @@
       "delete_partial": "Deleted {{ok}} users, {{fail}} failed",
       "deleted_count": "Deleted {{count}} users",
       "emergency_partial": "Reset {{ok}} users, {{fail}} failed",
-      "emergency_count": "Reset emergency count for {{count}} users"
+      "emergency_count": "Reset emergency count for {{count}} users",
+      "unlink_sso": "Unlink SSO bindings",
+      "unlink_sso_none_eligible": "None of the selected users are bound to an SSO identity",
+      "unlink_sso_done": "Unlinked {{count}} SSO bindings",
+      "unlink_sso_partial": "Unlinked {{ok}}, {{fail}} failed"
     },
     "rules": {
       "title": "Personal rules — {{upn}}",
