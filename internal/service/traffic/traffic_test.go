@@ -857,3 +857,77 @@ func TestRecordAndEnforceRechecksLimitAfterRolloverReenable(t *testing.T) {
 		t.Fatalf("disabler calls = %v, want re-enable then disable", disabler.calls)
 	}
 }
+
+// TestBucketStartFor_RespectsCallerLocation guards the traffic-chart
+// timezone fix: a Shanghai-zoned input and the same wall-clock moment
+// expressed in Los Angeles must bucket to different calendar days,
+// and the returned bucket boundary must carry the caller's location
+// (not silently get rewritten to server local). Without this guarantee
+// the chart bucketing would collapse to whatever timezone the panel
+// process happens to run in, the very root of the "missing today's
+// traffic" bug.
+func TestBucketStartFor_RespectsCallerLocation(t *testing.T) {
+	sh, err := time.LoadLocation("Asia/Shanghai")
+	if err != nil {
+		t.Fatalf("load Asia/Shanghai: %v", err)
+	}
+	la, err := time.LoadLocation("America/Los_Angeles")
+	if err != nil {
+		t.Fatalf("load America/Los_Angeles: %v", err)
+	}
+
+	// Same instant, two locations: 2026-05-17 02:00 Asia/Shanghai
+	// equals 2026-05-16 11:00 America/Los_Angeles equals 18:00 UTC.
+	instant := time.Date(2026, 5, 17, 2, 0, 0, 0, sh)
+
+	cases := []struct {
+		name     string
+		in       time.Time
+		want     time.Time
+		wantLoc  *time.Location
+	}{
+		{
+			name:    "shanghai puts the moment on 5/17",
+			in:      instant.In(sh),
+			want:    time.Date(2026, 5, 17, 0, 0, 0, 0, sh),
+			wantLoc: sh,
+		},
+		{
+			name:    "los_angeles puts the same moment on 5/16",
+			in:      instant.In(la),
+			want:    time.Date(2026, 5, 16, 0, 0, 0, 0, la),
+			wantLoc: la,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := bucketStartFor(tc.in, HistoryDay)
+			if !got.Equal(tc.want) {
+				t.Errorf("bucketStartFor(%v) = %v, want %v", tc.in, got, tc.want)
+			}
+			if got.Location().String() != tc.wantLoc.String() {
+				t.Errorf("bucketStartFor(%v).Location() = %q, want %q",
+					tc.in, got.Location(), tc.wantLoc)
+			}
+		})
+	}
+}
+
+// TestStartOfDay_PreservesLocation is the lower-level counterpart:
+// startOfDay must not drop the caller's location when zeroing the
+// clock, otherwise downstream bucket arithmetic silently shifts.
+func TestStartOfDay_PreservesLocation(t *testing.T) {
+	tokyo, err := time.LoadLocation("Asia/Tokyo")
+	if err != nil {
+		t.Fatalf("load Asia/Tokyo: %v", err)
+	}
+	in := time.Date(2026, 5, 17, 15, 42, 7, 0, tokyo)
+	got := startOfDay(in)
+	if got.Location().String() != "Asia/Tokyo" {
+		t.Errorf("startOfDay location = %q, want Asia/Tokyo", got.Location())
+	}
+	want := time.Date(2026, 5, 17, 0, 0, 0, 0, tokyo)
+	if !got.Equal(want) {
+		t.Errorf("startOfDay = %v, want %v", got, want)
+	}
+}

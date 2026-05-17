@@ -35,6 +35,26 @@ export interface TrafficHistoryParams {
   period?: TrafficHistoryPeriod
   since?: string
   until?: string
+  // IANA timezone name (e.g. "Asia/Shanghai", "America/Los_Angeles"). The
+  // backend uses this to parse `since` / `until` and to bucket snapshots —
+  // without it a browser in PT asking for "today" against a UTC server
+  // drops the last 7+ hours of data. Auto-injected by `withTz` below
+  // when the caller doesn't pass one, so most call sites can ignore this.
+  tz?: string
+}
+
+// browser's current IANA tz name. Reads it on demand (not at module load)
+// so the value reflects any user-level timezone changes between calls.
+function browserTz(): string {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone
+  } catch {
+    return 'UTC'
+  }
+}
+
+function withTz<T extends TrafficHistoryParams>(params: T): T {
+  return { ...params, tz: params.tz ?? browserTz() }
 }
 
 export async function topTraffic(limit = 20) {
@@ -45,12 +65,12 @@ export async function topTraffic(limit = 20) {
 }
 
 export async function trafficHistory(params: TrafficHistoryParams = {}) {
-  const { data } = await client.get<TrafficHistoryResponse>('/admin/traffic/history', { params })
+  const { data } = await client.get<TrafficHistoryResponse>('/admin/traffic/history', { params: withTz(params) })
   return data
 }
 
 export async function userTrafficHistory(userId: number, params: TrafficHistoryParams = {}) {
-  const { data } = await client.get<TrafficHistoryResponse>(`/admin/traffic/user/${userId}/history`, { params })
+  const { data } = await client.get<TrafficHistoryResponse>(`/admin/traffic/user/${userId}/history`, { params: withTz(params) })
   return data
 }
 
@@ -89,7 +109,7 @@ export async function topNodes(limit = 20) {
 }
 
 export async function nodeTrafficHistory(params: TrafficHistoryParams & { node_id?: number } = {}) {
-  const { data } = await client.get<TrafficHistoryResponse>('/admin/traffic/nodes/history', { params })
+  const { data } = await client.get<TrafficHistoryResponse>('/admin/traffic/nodes/history', { params: withTz(params) })
   return data
 }
 
@@ -99,6 +119,6 @@ export async function getMyUsage() {
 }
 
 export async function getMyTrafficHistory(params: TrafficHistoryParams = {}) {
-  const { data } = await client.get<TrafficHistoryResponse>('/user/me/traffic/history', { params })
+  const { data } = await client.get<TrafficHistoryResponse>('/user/me/traffic/history', { params: withTz(params) })
   return data
 }

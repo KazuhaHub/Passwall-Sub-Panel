@@ -2,9 +2,11 @@ package handler
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -261,8 +263,21 @@ func (h *AdminTrafficHandler) SetUserUsage(c *gin.Context) {
 }
 
 func parseTrafficHistoryQuery(c *gin.Context) (traffic.HistoryPeriod, time.Time, time.Time, error) {
-	now := time.Now()
-	defaultUntil := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	// tz lets the client express which timezone since/until are in. Without
+	// it, a browser in PT asking for "until 2026-05-16" against a UTC server
+	// would parse it as 2026-05-16 00:00 UTC, dropping post-midnight-UTC
+	// snapshots from the same wall-clock day. Falls back to server local
+	// for back-compat with older clients.
+	loc := time.Local
+	if tz := strings.TrimSpace(c.Query("tz")); tz != "" {
+		l, err := time.LoadLocation(tz)
+		if err != nil {
+			return "", time.Time{}, time.Time{}, fmt.Errorf("invalid tz %q", tz)
+		}
+		loc = l
+	}
+	now := time.Now().In(loc)
+	defaultUntil := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
 	defaultSince := defaultUntil.AddDate(0, 0, -29)
 	period := traffic.HistoryPeriod(c.DefaultQuery("period", string(traffic.HistoryDay)))
 	switch period {
@@ -271,11 +286,11 @@ func parseTrafficHistoryQuery(c *gin.Context) (traffic.HistoryPeriod, time.Time,
 		return "", time.Time{}, time.Time{}, errors.New("period must be day, week, or month")
 	}
 
-	since, err := parseDateQuery(c.Query("since"), defaultSince)
+	since, err := parseDateQuery(c.Query("since"), defaultSince, loc)
 	if err != nil {
 		return "", time.Time{}, time.Time{}, err
 	}
-	until, err := parseDateQuery(c.Query("until"), defaultUntil)
+	until, err := parseDateQuery(c.Query("until"), defaultUntil, loc)
 	if err != nil {
 		return "", time.Time{}, time.Time{}, err
 	}
@@ -288,11 +303,11 @@ func parseTrafficHistoryQuery(c *gin.Context) (traffic.HistoryPeriod, time.Time,
 	return period, since, until, nil
 }
 
-func parseDateQuery(raw string, fallback time.Time) (time.Time, error) {
+func parseDateQuery(raw string, fallback time.Time, loc *time.Location) (time.Time, error) {
 	if raw == "" {
 		return fallback, nil
 	}
-	t, err := time.ParseInLocation("2006-01-02", raw, time.Local)
+	t, err := time.ParseInLocation("2006-01-02", raw, loc)
 	if err != nil {
 		return time.Time{}, errors.New("date must use YYYY-MM-DD")
 	}
