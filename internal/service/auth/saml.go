@@ -93,6 +93,20 @@ func (s *SAMLService) buildSP(ctx context.Context) error {
 		Certificate: leaf,
 		AcsURL:      *acsURL,
 		IDPMetadata: idpMeta,
+		// crewjam/saml defaults AuthnNameIDFormat to "transient" when
+		// unset — meaning every AuthnRequest forces a random one-shot
+		// NameID. Entra honours the SP-requested format over its admin
+		// UI configuration, so the IdP-side "Email address" / source =
+		// user.userprincipalname setting is silently ignored and every
+		// login gets a fresh hash that doesn't match any user row.
+		//
+		// UnspecifiedNameIDFormat is special-cased in crewjam: it emits
+		// NO Format attribute on the NameIDPolicy element at all, which
+		// lets the IdP fall back to its admin-configured default. With
+		// Entra that means the NameID format from Attributes & Claims
+		// (typically Email Address sourced from user.userprincipalname)
+		// is what we get — a stable, human-readable UPN.
+		AuthnNameIDFormat: saml.UnspecifiedNameIDFormat,
 	}
 	return nil
 }
