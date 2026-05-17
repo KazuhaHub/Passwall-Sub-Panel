@@ -45,8 +45,11 @@ client.interceptors.response.use(
       localStorage.removeItem('psp_access')
       localStorage.removeItem('psp_refresh')
       localStorage.removeItem('psp_user')
-      const onLoginPage = location.pathname === '/login' || location.pathname.startsWith('/login/')
-      if (onLoginPage) {
+      const onAuthPublicPage =
+        location.pathname === '/login'
+        || location.pathname.startsWith('/login/')
+        || location.pathname === '/logged-out'
+      if (onAuthPublicPage) {
         pushSnack(responseErrorMessage(err), 'error')
       } else {
         location.href = '/login'
