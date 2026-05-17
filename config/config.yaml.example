@@ -61,7 +61,7 @@ data_dir: "./data"
 #   password: "your_password"
 #   database: "passwall"     # database name (must already exist)
 #   # params: ""             # extra DSN params; blank uses the safe default
-#                            # (parseTime=true&charset=utf8mb4&loc=Local)
+#                            # (parseTime=true&charset=utf8mb4&loc=UTC)
 #
 # Advanced: set dsn to a raw go-sql-driver string when discrete fields
 # don't fit (unix socket, TLS, multi-host, etc.). When set, dsn wins

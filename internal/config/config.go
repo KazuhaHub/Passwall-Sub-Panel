@@ -74,8 +74,12 @@ type MySQLConfig struct {
 	Password string `yaml:"password"`
 	Database string `yaml:"database"`
 	// go-sql-driver query string appended to the assembled DSN. Defaults to
-	// "parseTime=true&charset=utf8mb4&loc=Local" when blank — parseTime is
-	// REQUIRED or GORM hands back []byte for DATETIME columns.
+	// "parseTime=true&charset=utf8mb4&loc=UTC" when blank — parseTime is
+	// REQUIRED or GORM hands back []byte for DATETIME columns. loc=UTC is
+	// the canonical "store UTC, render local at the edges" pattern: every
+	// DATETIME column ends up holding a UTC wall-clock string regardless
+	// of where the panel runs. Pair with TZ=UTC on the panel process
+	// (Dockerfile already sets it) so Go's time.Local also matches.
 	Params string `yaml:"params"`
 }
 
@@ -157,7 +161,7 @@ data_dir: "./data"                         # SQLite panel.db lives here when no 
 #   params: ""                             # extra DSN params; blank uses the
 #                                          # safe default below — only override
 #                                          # if you know you need something else.
-#                                          # Default: parseTime=true&charset=utf8mb4&loc=Local
+#                                          # Default: parseTime=true&charset=utf8mb4&loc=UTC
 #
 # Env override: PSP_MYSQL_DSN, if set, replaces whatever this block produces.
 # Recommended for production so secrets stay out of the config file.
@@ -293,7 +297,7 @@ func (c *Config) DBDSN() string {
 		}
 		params := strings.TrimSpace(c.MySQL.Params)
 		if params == "" {
-			params = "parseTime=true&charset=utf8mb4&loc=Local"
+			params = "parseTime=true&charset=utf8mb4&loc=UTC"
 		}
 		return fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?%s",
 			c.MySQL.User, c.MySQL.Password,

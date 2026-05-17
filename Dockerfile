@@ -27,6 +27,11 @@ RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/psp ./c
 # `/app/defaults/` baking or entrypoint shim is needed.
 FROM alpine:3.20
 RUN apk add --no-cache ca-certificates tzdata
+# Pin the panel process to UTC so Go's time.Local matches the
+# DB DSN's loc=UTC. The configurable "panel timezone" (Asia/Shanghai
+# etc.) is applied per-call via paneltz.Now for business calendar
+# math; the underlying clock and stored DATETIMEs stay UTC.
+ENV TZ=UTC
 WORKDIR /app
 COPY --from=go-builder /out/psp /app/psp
 RUN chmod +x /app/psp && mkdir -p /app/config /app/data
