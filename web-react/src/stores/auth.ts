@@ -24,14 +24,14 @@ interface PersistedAuthState {
 
 function loadFromStorage(): PersistedAuthState {
   try {
-    const raw = sessionStorage.getItem(STORAGE_KEY)
+    const raw = localStorage.getItem(STORAGE_KEY)
     if (raw) return JSON.parse(raw) as PersistedAuthState
   } catch { /* ignore */ }
   return { userId: null, upn: '', displayName: '', role: '' }
 }
 
 function persist(state: PersistedAuthState) {
-  sessionStorage.setItem(STORAGE_KEY, JSON.stringify(state))
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
 }
 
 export const useAuthStore = create<AuthState>((set, get) => ({
@@ -39,8 +39,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   async login(upn, password) {
     const res = await localLogin(upn, password)
-    sessionStorage.setItem('psp_access', res.access_token)
-    sessionStorage.setItem('psp_refresh', res.refresh_token)
+    localStorage.setItem('psp_access', res.access_token)
+    localStorage.setItem('psp_refresh', res.refresh_token)
     const next: PersistedAuthState = {
       userId: res.user.id,
       upn: res.user.upn,
@@ -53,8 +53,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   async loginSSO() {
     const res = await ssoComplete()
-    sessionStorage.setItem('psp_access', res.access_token)
-    sessionStorage.setItem('psp_refresh', res.refresh_token)
+    localStorage.setItem('psp_access', res.access_token)
+    localStorage.setItem('psp_refresh', res.refresh_token)
     const next: PersistedAuthState = {
       userId: res.user.id,
       upn: res.user.upn,
@@ -73,15 +73,15 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   logout() {
-    sessionStorage.removeItem('psp_access')
-    sessionStorage.removeItem('psp_refresh')
-    sessionStorage.removeItem(STORAGE_KEY)
+    localStorage.removeItem('psp_access')
+    localStorage.removeItem('psp_refresh')
+    localStorage.removeItem(STORAGE_KEY)
     set({ userId: null, upn: '', displayName: '', role: '' })
   },
 }))
 
 // Selectors for ergonomics.
-export const selectIsLoggedIn = () => !!sessionStorage.getItem('psp_access')
+export const selectIsLoggedIn = () => !!localStorage.getItem('psp_access')
 export const selectIsAdmin = (s: AuthState) => s.role === 'admin'
 // Operators count as "staff" for nav / route gating: they can see the
 // admin SPA but their backend calls are scoped down by per-handler role

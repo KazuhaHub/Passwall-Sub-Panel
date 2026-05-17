@@ -10,7 +10,7 @@ export const client = axios.create({
 })
 
 client.interceptors.request.use((config) => {
-  const token = sessionStorage.getItem('psp_access')
+  const token = localStorage.getItem('psp_access')
   if (token && config.headers) {
     config.headers.Authorization = `Bearer ${token}`
   }
@@ -42,9 +42,9 @@ client.interceptors.response.use(
   },
   (err: AxiosError<{ error?: string }>) => {
     if (err.response?.status === 401) {
-      sessionStorage.removeItem('psp_access')
-      sessionStorage.removeItem('psp_refresh')
-      sessionStorage.removeItem('psp_user')
+      localStorage.removeItem('psp_access')
+      localStorage.removeItem('psp_refresh')
+      localStorage.removeItem('psp_user')
       const onLoginPage = location.pathname === '/login' || location.pathname.startsWith('/login/')
       if (onLoginPage) {
         pushSnack(responseErrorMessage(err), 'error')
