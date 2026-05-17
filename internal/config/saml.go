@@ -21,37 +21,21 @@ type SAMLConfig struct {
 
 	AttributeMapping SAMLAttributeMap `yaml:"attribute_mapping"`
 
-	// AdminGroupIDs is the legacy "groups in this list → admin role"
-	// shortcut. Kept for back-compat: if RoleRules is empty, the SSO
-	// login resolver synthesises equivalent rules at runtime so existing
-	// configs keep working. Admins moving to the richer model leave
-	// this field empty and use RoleRules instead.
-	AdminGroupIDs []string `yaml:"admin_group_ids"`
-
 	// RoleRules is the attribute-driven role mapping evaluated in order.
 	// The first rule whose value appears in the configured attribute
-	// decides the panel role. Empty list = no rules; in that case the
-	// resolver falls back to AdminGroupIDs synthesis. See
-	// internal/service/auth.ResolveRoleFromAssertion for the full matcher.
+	// decides the panel role. Each rule carries its own Keep flag that
+	// controls whether the role is preserved when no rule fires. See
+	// internal/service/auth.ResolveRoleForSSO for the full matcher.
 	RoleRules []SSORoleRule `yaml:"role_rules"`
 
 	DefaultGroupSlug string `yaml:"default_group_slug"`
 
-	// AllowAutoCreate controls whether a non-admin SSO login may provision
-	// a fresh account. When false (the original behaviour) only IdP-admin
-	// users are auto-provisioned and everyone else is bounced to the
-	// "contact your administrator" page — handy for closed deployments
-	// where the admin invites accounts manually first.
+	// AllowAutoCreate controls whether an unprivileged SSO login may
+	// provision a fresh account. When false (the closed-deployment
+	// default) only principals a rule promotes to admin or operator
+	// bootstrap an account; every other unknown UPN is bounced to the
+	// "contact your administrator" page.
 	AllowAutoCreate bool `yaml:"allow_auto_create"`
-
-	// KeepAdminWhenNotInGroup, when true, leaves a panel admin's role
-	// untouched on SSO login even if the IdP no longer reports them in
-	// any of the AdminGroupIDs. Default is false — IdP groups are
-	// authoritative for admin rights, both granting and revoking. Flip
-	// to true to protect panel-side manual admin grants from automatic
-	// demotion on every SSO sync. Operator role is panel-side and
-	// unaffected by this flag.
-	KeepAdminWhenNotInGroup bool `yaml:"keep_admin_when_not_in_group"`
 
 	NewUserDefaults SAMLNewUserDefaults `yaml:"new_user_defaults"`
 }

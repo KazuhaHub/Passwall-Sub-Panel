@@ -31,11 +31,9 @@ type oidcConfigRow struct {
 	AttrDisplayName string `gorm:"size:128"`
 	AttrGroups      string `gorm:"size:128"`
 
-	AdminGroupIDs           jsonStrings
-	RoleRules               jsonRoleRules
-	DefaultGroupSlug        string `gorm:"size:64"`
-	AllowAutoCreate         bool
-	KeepAdminWhenNotInGroup bool   `gorm:"default:false"`
+	RoleRules        jsonRoleRules
+	DefaultGroupSlug string `gorm:"size:64"`
+	AllowAutoCreate  bool
 
 	NewUserExpireDays         int
 	NewUserTrafficLimitBytes  int64
@@ -64,11 +62,9 @@ func (r *oidcConfigRow) toDomain() (*config.OIDCConfig, error) {
 			DisplayName: r.AttrDisplayName,
 			Groups:      r.AttrGroups,
 		},
-		AdminGroupIDs:           []string(r.AdminGroupIDs),
-		RoleRules:               []config.SSORoleRule(r.RoleRules),
-		DefaultGroupSlug:        r.DefaultGroupSlug,
-		AllowAutoCreate:         r.AllowAutoCreate,
-		KeepAdminWhenNotInGroup: r.KeepAdminWhenNotInGroup,
+		RoleRules:        []config.SSORoleRule(r.RoleRules),
+		DefaultGroupSlug: r.DefaultGroupSlug,
+		AllowAutoCreate:  r.AllowAutoCreate,
 		NewUserDefaults: config.SAMLNewUserDefaults{
 			ExpireDays:         r.NewUserExpireDays,
 			TrafficLimitBytes:  r.NewUserTrafficLimitBytes,
@@ -96,11 +92,9 @@ func oidcConfigFromDomain(c *config.OIDCConfig) (*oidcConfigRow, error) {
 		AttrEmail:                 c.AttributeMapping.Email,
 		AttrDisplayName:           c.AttributeMapping.DisplayName,
 		AttrGroups:                c.AttributeMapping.Groups,
-		AdminGroupIDs:           jsonStrings(c.AdminGroupIDs),
-		RoleRules:               jsonRoleRules(c.RoleRules),
-		DefaultGroupSlug:        c.DefaultGroupSlug,
-		AllowAutoCreate:         c.AllowAutoCreate,
-		KeepAdminWhenNotInGroup: c.KeepAdminWhenNotInGroup,
+		RoleRules:        jsonRoleRules(c.RoleRules),
+		DefaultGroupSlug: c.DefaultGroupSlug,
+		AllowAutoCreate:  c.AllowAutoCreate,
 		NewUserExpireDays:         c.NewUserDefaults.ExpireDays,
 		NewUserTrafficLimitBytes:  c.NewUserDefaults.TrafficLimitBytes,
 		NewUserTrafficResetPeriod: c.NewUserDefaults.TrafficResetPeriod,

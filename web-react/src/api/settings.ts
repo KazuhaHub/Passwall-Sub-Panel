@@ -179,17 +179,12 @@ export interface SAMLConfig {
     display_name: string
     groups: string
   }
-  admin_group_ids: string[]
   default_group_slug: string
   allow_auto_create: boolean
-  /** When true, panel admin role is PRESERVED on SSO login even if the
-   *  IdP role rule resolves to something other than admin. Default false
-   *  makes the rule output authoritative for the admin role in both
-   *  directions. Operator role is panel-side and unaffected by this flag. */
-  keep_admin_when_not_in_group: boolean
   /** Attribute-driven role mapping. Evaluated in order; first match
-   *  decides the panel role. Empty list falls back to AdminGroupIDs.
-   *  See backend ResolveRoleFromAssertion for the full matcher. */
+   *  decides the panel role. Per-rule Keep flag controls demote
+   *  behaviour when the rule doesn't fire. See backend
+   *  ResolveRoleForSSO for the full matcher. */
   role_rules: SSORoleRule[]
   new_user_defaults: {
     expire_days: number
@@ -199,14 +194,24 @@ export interface SAMLConfig {
 }
 
 /** SSORoleRule: an IdP attribute value -> panel role mapping. Shared by
- *  SAML and OIDC configs. attribute="" or "groups" is the shortcut to
- *  match against the groups attribute (whatever URN it's configured
- *  under). value is matched exactly. role is the panel role string
- *  ("admin" / "operator" / "user"). */
+ *  SAML and OIDC configs.
+ *  - attribute: empty string or "groups" matches against the groups
+ *    attribute (whatever URN it's configured under). Any other value
+ *    is the IdP attribute Name to look up exactly.
+ *  - value: matched exactly (case-sensitive, no wildcards).
+ *  - role: panel role to assign. Built-in: "admin" / "operator" /
+ *    "user". Custom strings are accepted — the panel stores them on
+ *    the user row, but middleware only grants elevated access to
+ *    admin / operator until the role enum is extended.
+ *  - keep: when true, preserve the user's existing panel role on
+ *    logins where THIS rule does NOT fire (admin remains admin even
+ *    if their group attribute happens to miss this time). Defaults
+ *    to false = rule is authoritative both ways. */
 export interface SSORoleRule {
   attribute: string
   value: string
   role: string
+  keep: boolean
 }
 
 export interface SAMLUpdateRequest extends Omit<SAMLConfig, 'sp'> {
@@ -258,13 +263,8 @@ export interface OIDCConfig {
     display_name: string
     groups: string
   }
-  admin_group_ids: string[]
   default_group_slug: string
   allow_auto_create: boolean
-  /** See SAMLConfig.keep_admin_when_not_in_group — when true, preserves a
-   *  panel admin's role even after the role-rule output isn't admin.
-   *  Default false = role rules authoritative (promote + demote). */
-  keep_admin_when_not_in_group: boolean
   /** Attribute-driven role mapping. See SAMLConfig.role_rules. */
   role_rules: SSORoleRule[]
   new_user_defaults: {

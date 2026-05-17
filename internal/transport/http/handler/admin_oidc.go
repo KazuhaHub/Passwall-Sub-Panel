@@ -44,12 +44,10 @@ type oidcConfigDTO struct {
 	RedirectURL               string         `json:"redirect_url"`
 	Scopes                    []string       `json:"scopes"`
 	AttributeMapping          oidcAttrDTO    `json:"attribute_mapping"`
-	AdminGroupIDs           []string             `json:"admin_group_ids"`
-	RoleRules               []config.SSORoleRule `json:"role_rules"`
-	DefaultGroupSlug        string               `json:"default_group_slug"`
-	AllowAutoCreate         bool                 `json:"allow_auto_create"`
-	KeepAdminWhenNotInGroup bool                 `json:"keep_admin_when_not_in_group"`
-	NewUserDefaults         samlNewUserDTO       `json:"new_user_defaults"`
+	RoleRules        []config.SSORoleRule `json:"role_rules"`
+	DefaultGroupSlug string               `json:"default_group_slug"`
+	AllowAutoCreate  bool                 `json:"allow_auto_create"`
+	NewUserDefaults  samlNewUserDTO       `json:"new_user_defaults"`
 }
 
 type oidcUpdateRequest struct {
@@ -60,12 +58,10 @@ type oidcUpdateRequest struct {
 	RedirectURL               string         `json:"redirect_url"`
 	Scopes                    []string       `json:"scopes"`
 	AttributeMapping          oidcAttrDTO    `json:"attribute_mapping"`
-	AdminGroupIDs           []string             `json:"admin_group_ids"`
-	RoleRules               []config.SSORoleRule `json:"role_rules"`
-	DefaultGroupSlug        string               `json:"default_group_slug"`
-	AllowAutoCreate         bool                 `json:"allow_auto_create"`
-	KeepAdminWhenNotInGroup bool                 `json:"keep_admin_when_not_in_group"`
-	NewUserDefaults         samlNewUserDTO       `json:"new_user_defaults"`
+	RoleRules        []config.SSORoleRule `json:"role_rules"`
+	DefaultGroupSlug string               `json:"default_group_slug"`
+	AllowAutoCreate  bool                 `json:"allow_auto_create"`
+	NewUserDefaults  samlNewUserDTO       `json:"new_user_defaults"`
 }
 
 func (h *AdminOIDCHandler) Get(c *gin.Context) {
@@ -105,11 +101,9 @@ func (h *AdminOIDCHandler) Put(c *gin.Context) {
 			DisplayName: req.AttributeMapping.DisplayName,
 			Groups:      req.AttributeMapping.Groups,
 		},
-		AdminGroupIDs:           req.AdminGroupIDs,
-		RoleRules:               req.RoleRules,
-		DefaultGroupSlug:          req.DefaultGroupSlug,
-		AllowAutoCreate:           req.AllowAutoCreate,
-		KeepAdminWhenNotInGroup:   req.KeepAdminWhenNotInGroup,
+		RoleRules:        req.RoleRules,
+		DefaultGroupSlug: req.DefaultGroupSlug,
+		AllowAutoCreate:  req.AllowAutoCreate,
 		NewUserDefaults: config.SAMLNewUserDefaults{
 			ExpireDays:         req.NewUserDefaults.ExpireDays,
 			TrafficLimitBytes:  req.NewUserDefaults.TrafficLimitBytes,
@@ -148,11 +142,9 @@ func toOIDCDTO(c *config.OIDCConfig) oidcConfigDTO {
 			DisplayName: c.AttributeMapping.DisplayName,
 			Groups:      c.AttributeMapping.Groups,
 		},
-		AdminGroupIDs:           c.AdminGroupIDs,
-		RoleRules:               c.RoleRules,
-		DefaultGroupSlug:        c.DefaultGroupSlug,
-		AllowAutoCreate:         c.AllowAutoCreate,
-		KeepAdminWhenNotInGroup: c.KeepAdminWhenNotInGroup,
+		RoleRules:        c.RoleRules,
+		DefaultGroupSlug: c.DefaultGroupSlug,
+		AllowAutoCreate:  c.AllowAutoCreate,
 		NewUserDefaults: samlNewUserDTO{
 			ExpireDays:         c.NewUserDefaults.ExpireDays,
 			TrafficLimitBytes:  c.NewUserDefaults.TrafficLimitBytes,

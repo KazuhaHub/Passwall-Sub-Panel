@@ -15,12 +15,14 @@ import (
 
 	"golang.org/x/crypto/bcrypt"
 
+	"github.com/KazuhaHub/passwall-sub-panel/internal/config"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/crypto"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/idgen"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/log"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/paneltz"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/auth"
 )
 
 // NodeSelector resolves a group's tag_filter into a concrete node list.
@@ -323,78 +325,46 @@ type EnsureSSOInput struct {
 	// Subject is the IdP-side stable identifier that survives UPN/email
 	// renames (SAML <NameID>, OIDC sub). Together with Provider it's the
 	// composite SSO identity used to look up the panel row.
-	Subject string
-	UPN     string
-	Email   string
+	Subject     string
+	UPN         string
+	Email       string
 	DisplayName string
 	Groups      []string
-	// IdPRole is the panel role the role-rule matcher derived from the
-	// assertion (RoleUser when no rule fired). Replaces the pre-v2.4.0
-	// boolean IsAdmin signal so an admin can map any IdP attribute
-	// value to admin / operator / user.
-	IdPRole domain.Role
-	// IdPRoleMatched reports whether a configured rule actually fired
-	// (as opposed to "no rules configured" or "no rule matched"). The
-	// reconcile path uses this to leave the existing panel role
-	// untouched when SSO has nothing to say — preserving panel-side
-	// manual grants in deployments that haven't moved to RoleRules yet
-	// (and have no AdminGroupIDs either).
-	IdPRoleMatched bool
+	// Attributes is the full IdP attribute set (every <Attribute Name>
+	// in SAML, or every claim in OIDC's ID token) flattened to
+	// map[string][]string. Threaded through so the role matcher can
+	// look up arbitrary attributes per RoleRule, not just groups.
+	Attributes map[string][]string
+	// Rules + GroupsAttrName are the SSO config snapshot used to map
+	// IdP attribute values to panel roles. Threaded in so EnsureSSO
+	// can apply the per-rule Keep policy against the user's current
+	// role in one place instead of splitting it between handler and
+	// service.
+	Rules          []config.SSORoleRule
+	GroupsAttrName string
 	// AllowAutoCreate: when true, a non-admin first-time SSO login is
-	// auto-provisioned with the panel's default group / quota. When false
-	// (the closed-deployment default) only IdP-promoted users (RoleAdmin
-	// / RoleOperator from rules) get an account; every other unknown UPN
-	// is bounced to /sso-no-account.
-	AllowAutoCreate bool
-	// KeepAdminOnLogin: when true, a panel admin whose IdP-derived role
-	// is NOT admin keeps the admin role on this login. Default false makes
-	// the role-rule output authoritative for the admin role in both
-	// directions. See applyRoleFromSSO for the full role-policy matrix.
-	KeepAdminOnLogin bool
+	// auto-provisioned with the panel's default group / quota. When
+	// false (the closed-deployment default) only IdP-promoted users
+	// (admin / operator output by a rule) get an account; every other
+	// unknown UPN is bounced to /sso-no-account.
+	AllowAutoCreate    bool
 	DefaultGroupSlug   string
 	DefaultExpireDays  int
 	DefaultLimitBytes  int64
 	DefaultResetPeriod domain.ResetPeriod
 }
 
-// applyRoleFromSSO computes the role to persist after an SSO login.
-//
-// When the role-rule matcher fired (idpMatched=true), idpRole is
-// authoritative for the panel role in both directions — promotes a
-// user/operator to admin, demotes an admin back to user, swaps
-// between operator and user, etc.
-//
-// keepAdmin=true is the admin-only opt-out: an existing admin who'd
-// be demoted by the matched rule stays admin instead. Protects
-// panel-side manual admin grants in mixed deployments where some
-// admins aren't in any IdP group at all.
-//
-// When no rule fired (idpMatched=false), the existing panel role is
-// left untouched. This is the "SSO has nothing to say about roles"
-// branch — applicable to RoleRules-less deployments without
-// AdminGroupIDs, where the panel UI is the only source of role.
-//
-// Returns the role to persist and whether anything actually changed.
-func applyRoleFromSSO(current, idpRole domain.Role, idpMatched, keepAdmin bool) (domain.Role, bool) {
-	if !idpMatched {
-		return current, false
+// privilegedRuleMatch reports whether the SSO rules fired and elevated
+// this principal to admin or operator. Used by the AllowAutoCreate
+// gate — privileged rule output bypasses the gate the same way the
+// pre-v2.4 IsAdmin signal did, so an IdP admin can bootstrap a fresh
+// panel without flipping auto-create on.
+func privilegedRuleMatch(in EnsureSSOInput) bool {
+	role, matched := auth.MatchFirstRule(in.Rules, in.GroupsAttrName, in.Attributes, in.Groups)
+	if !matched {
+		return false
 	}
-	if keepAdmin && current == domain.RoleAdmin && idpRole != domain.RoleAdmin {
-		return current, false
-	}
-	if current == idpRole {
-		return current, false
-	}
-	return idpRole, true
-}
-
-// isPrivilegedSSORole reports whether a role-rule output should be
-// treated as "the IdP affirmatively elevated this user" — i.e. enough
-// to bypass the AllowAutoCreate gate on first-time SSO provisioning.
-// Matches the pre-v2.4.0 behaviour where only IdP-admin could
-// bootstrap a fresh account when auto-create was off.
-func isPrivilegedSSORole(r domain.Role) bool {
-	return r == domain.RoleAdmin || r == domain.RoleOperator
+	return role == domain.RoleAdmin || role == domain.RoleOperator
 }
 
 // EnsureSSO resolves the panel user for a successful SSO assertion in
@@ -484,8 +454,7 @@ func (s *Service) EnsureSSO(ctx context.Context, in EnsureSSOInput) (*domain.Use
 	// output (admin / operator) bypasses AllowAutoCreate the same way
 	// the old IsAdmin signal did: the IdP affirmatively elevated this
 	// principal, so the panel trusts it enough to bootstrap an account.
-	privileged := in.IdPRoleMatched && isPrivilegedSSORole(in.IdPRole)
-	if !privileged && !in.AllowAutoCreate {
+	if !privilegedRuleMatch(in) && !in.AllowAutoCreate {
 		return nil, domain.ErrSSONoAccount
 	}
 
@@ -516,13 +485,15 @@ func (s *Service) EnsureSSO(ctx context.Context, in EnsureSSOInput) (*domain.Use
 		resetPeriod = domain.ResetMonthly
 	}
 	now := time.Now()
-	// Single source of truth for SSO -> role mapping: feed the role-policy
-	// helper a fresh RoleUser baseline. IdP-admin promotes to RoleAdmin
-	// (which preserves the legacy "bootstrap fresh panel" flow), non-admin
-	// stays RoleUser (we've already passed the AllowAutoCreate gate).
-	// Reusing applyRoleFromSSO keeps the role policy in one place for the
-	// linked / first-time-link / brand-new paths.
-	newRole, _ := applyRoleFromSSO(domain.RoleUser, in.IdPRole, in.IdPRoleMatched, in.KeepAdminOnLogin)
+	// New row: there is no current role to preserve, so the brand-new
+	// path just takes whichever role the first rule matched. RoleUser
+	// is the default when no rule fires; that's harmless because we
+	// already passed the AllowAutoCreate gate above.
+	matchedRole, ruleMatched := auth.MatchFirstRule(in.Rules, in.GroupsAttrName, in.Attributes, in.Groups)
+	newRole := domain.RoleUser
+	if ruleMatched {
+		newRole = matchedRole
+	}
 	u = &domain.User{
 		UPN:                in.UPN,
 		Email:              in.Email,
@@ -559,7 +530,10 @@ func (s *Service) reconcileSSOUser(ctx context.Context, u *domain.User, in Ensur
 		u.SSOSubject = in.Subject
 		dirty = true
 	}
-	if newRole, changed := applyRoleFromSSO(u.Role, in.IdPRole, in.IdPRoleMatched, in.KeepAdminOnLogin); changed {
+	// Role resolution: ResolveRoleForSSO encapsulates the per-rule
+	// Keep policy plus the "panel-managed role" carve-out (when no
+	// rule outputs the user's current role, SSO leaves it alone).
+	if newRole, ssoAuthoritative := auth.ResolveRoleForSSO(in.Rules, u.Role, in.GroupsAttrName, in.Attributes, in.Groups); ssoAuthoritative && newRole != u.Role {
 		u.Role = newRole
 		dirty = true
 	}

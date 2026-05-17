@@ -191,30 +191,6 @@ func (s *OIDCService) Exchange(ctx context.Context, code, expectedNonce string) 
 	return out, nil
 }
 
-// IsAdmin reports whether the user's group set intersects the configured
-// admin group IDs.
-func (s *OIDCService) IsAdmin(groups []string) bool {
-	if s == nil {
-		return false
-	}
-	s.mu.RLock()
-	cfg := s.cfg
-	s.mu.RUnlock()
-	if cfg == nil {
-		return false
-	}
-	admins := make(map[string]struct{}, len(cfg.AdminGroupIDs))
-	for _, g := range cfg.AdminGroupIDs {
-		admins[g] = struct{}{}
-	}
-	for _, g := range groups {
-		if _, ok := admins[g]; ok {
-			return true
-		}
-	}
-	return false
-}
-
 // RandomState returns a 32-byte base64url string suitable for the OAuth2
 // state parameter / OIDC nonce.
 func RandomState() (string, error) {

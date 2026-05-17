@@ -510,31 +510,7 @@ func (s *SAMLService) ParseACSResponse(r *http.Request, possibleRequestIDs []str
 		"display_name", out.DisplayName,
 		"groups", out.Groups,
 		"group_attr_name", cfg.AttributeMapping.Groups,
-		"admin_group_ids", cfg.AdminGroupIDs,
+		"role_rules", len(cfg.RoleRules),
 	)
 	return out, nil
-}
-
-// IsAdmin reports whether the user's group set intersects the configured
-// admin group IDs.
-func (s *SAMLService) IsAdmin(groups []string) bool {
-	if s == nil {
-		return false
-	}
-	s.mu.RLock()
-	cfg := s.cfg
-	s.mu.RUnlock()
-	if cfg == nil {
-		return false
-	}
-	admins := make(map[string]struct{}, len(cfg.AdminGroupIDs))
-	for _, g := range cfg.AdminGroupIDs {
-		admins[g] = struct{}{}
-	}
-	for _, g := range groups {
-		if _, ok := admins[g]; ok {
-			return true
-		}
-	}
-	return false
 }

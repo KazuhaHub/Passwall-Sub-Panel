@@ -101,16 +101,11 @@ func (h *AuthOIDCHandler) Callback(c *gin.Context) {
 	var (
 		groupsAttr string
 		rules      []config.SSORoleRule
-		legacyGIDs []string
 	)
 	if cfg != nil {
 		groupsAttr = cfg.AttributeMapping.Groups
 		rules = cfg.RoleRules
-		legacyGIDs = cfg.AdminGroupIDs
 	}
-	idpRole, roleMatched := auth.ResolveRoleFromAssertion(
-		rules, legacyGIDs, groupsAttr, assertion.Attributes, assertion.Groups,
-	)
 	in := user.EnsureSSOInput{
 		Provider:       domain.SSOProviderOIDC,
 		Subject:        assertion.Subject,
@@ -118,12 +113,12 @@ func (h *AuthOIDCHandler) Callback(c *gin.Context) {
 		Email:          assertion.Email,
 		DisplayName:    assertion.DisplayName,
 		Groups:         assertion.Groups,
-		IdPRole:        idpRole,
-		IdPRoleMatched: roleMatched,
+		Attributes:     assertion.Attributes,
+		Rules:          rules,
+		GroupsAttrName: groupsAttr,
 	}
 	if cfg != nil {
 		in.AllowAutoCreate = cfg.AllowAutoCreate
-		in.KeepAdminOnLogin = cfg.KeepAdminWhenNotInGroup
 		in.DefaultGroupSlug = cfg.DefaultGroupSlug
 		in.DefaultExpireDays = cfg.NewUserDefaults.ExpireDays
 		in.DefaultLimitBytes = cfg.NewUserDefaults.TrafficLimitBytes

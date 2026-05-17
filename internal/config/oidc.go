@@ -26,24 +26,17 @@ type OIDCConfig struct {
 
 	AttributeMapping OIDCAttributeMap `yaml:"attribute_mapping" json:"attribute_mapping"`
 
-	// AdminGroupIDs: see SAMLConfig — legacy "groups in this list →
-	// admin" shortcut. Empty + RoleRules-set is the recommended path.
-	AdminGroupIDs []string `yaml:"admin_group_ids" json:"admin_group_ids"`
-
 	// RoleRules: see SAMLConfig — attribute-driven panel role mapping
-	// evaluated in order; the first matching rule wins.
+	// evaluated in order; the first matching rule wins, each rule has
+	// its own Keep flag for the "no match" branch.
 	RoleRules []SSORoleRule `yaml:"role_rules" json:"role_rules"`
 
 	DefaultGroupSlug string `yaml:"default_group_slug" json:"default_group_slug"`
 
-	// AllowAutoCreate: see SAMLConfig.AllowAutoCreate. Off by default; only
-	// IdP-admin users are auto-provisioned until the admin opts in.
+	// AllowAutoCreate: see SAMLConfig.AllowAutoCreate. Off by default;
+	// only principals a rule promotes to admin / operator bootstrap an
+	// account when this is off.
 	AllowAutoCreate bool `yaml:"allow_auto_create" json:"allow_auto_create"`
-
-	// KeepAdminWhenNotInGroup: see SAMLConfig docs — when true, panel
-	// admin role is preserved even after the IdP stops reporting them
-	// in any AdminGroupID. Default false = IdP groups authoritative.
-	KeepAdminWhenNotInGroup bool `yaml:"keep_admin_when_not_in_group" json:"keep_admin_when_not_in_group"`
 
 	NewUserDefaults SAMLNewUserDefaults `yaml:"new_user_defaults" json:"new_user_defaults"`
 }

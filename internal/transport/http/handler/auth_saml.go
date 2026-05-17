@@ -81,20 +81,13 @@ func (h *AuthSAMLHandler) ACS(c *gin.Context) {
 
 	cfg := h.saml.Config()
 	var (
-		idpRole    domain.Role
-		roleMatched bool
-		groupsAttr  string
-		rules       []config.SSORoleRule
-		legacyGIDs  []string
+		groupsAttr string
+		rules      []config.SSORoleRule
 	)
 	if cfg != nil {
 		groupsAttr = cfg.AttributeMapping.Groups
 		rules = cfg.RoleRules
-		legacyGIDs = cfg.AdminGroupIDs
 	}
-	idpRole, roleMatched = auth.ResolveRoleFromAssertion(
-		rules, legacyGIDs, groupsAttr, assertion.Attributes, assertion.Groups,
-	)
 	in := user.EnsureSSOInput{
 		Provider:       domain.SSOProviderSAML,
 		Subject:        assertion.Subject,
@@ -102,12 +95,12 @@ func (h *AuthSAMLHandler) ACS(c *gin.Context) {
 		Email:          assertion.Email,
 		DisplayName:    assertion.DisplayName,
 		Groups:         assertion.Groups,
-		IdPRole:        idpRole,
-		IdPRoleMatched: roleMatched,
+		Attributes:     assertion.Attributes,
+		Rules:          rules,
+		GroupsAttrName: groupsAttr,
 	}
 	if cfg != nil {
 		in.AllowAutoCreate = cfg.AllowAutoCreate
-		in.KeepAdminOnLogin = cfg.KeepAdminWhenNotInGroup
 		in.DefaultGroupSlug = cfg.DefaultGroupSlug
 		in.DefaultExpireDays = cfg.NewUserDefaults.ExpireDays
 		in.DefaultLimitBytes = cfg.NewUserDefaults.TrafficLimitBytes

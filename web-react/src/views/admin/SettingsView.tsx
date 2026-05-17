@@ -21,6 +21,7 @@ import {
   Tab,
   Tabs,
   TextField,
+  Tooltip,
   Typography,
   useTheme,
 } from '@mui/material'
@@ -1469,9 +1470,11 @@ function Pair({ children }: { children: React.ReactNode }) {
 }
 
 // RoleRulesEditor: attribute-driven role mapping. Each row maps an IdP
-// attribute value to a panel role. Empty Attribute is the "groups"
-// shortcut documented on the backend SSORoleRule type. Reused by both
-// SAML and OIDC config sections so the wire format stays identical.
+// attribute value to a panel role plus a per-rule Keep switch. Panel
+// role accepts arbitrary strings (free-form Autocomplete) so admins
+// can plan for custom roles before the backend recognises them.
+const builtinRoleSuggestions = ['admin', 'operator', 'user']
+
 function RoleRulesEditor({ value, onChange, md }: {
   value: SSORoleRule[]
   onChange: (rules: SSORoleRule[]) => void
@@ -1483,7 +1486,7 @@ function RoleRulesEditor({ value, onChange, md }: {
     onChange(rules.map((r, i) => i === idx ? { ...r, ...patch } : r))
   }
   function addRule() {
-    onChange([...rules, { attribute: '', value: '', role: 'admin' }])
+    onChange([...rules, { attribute: '', value: '', role: 'admin', keep: false }])
   }
   function removeRule(idx: number) {
     onChange(rules.filter((_, i) => i !== idx))
@@ -1499,7 +1502,7 @@ function RoleRulesEditor({ value, onChange, md }: {
         </Typography>
       )}
       {rules.map((r, i) => (
-        <Box key={i} sx={{ display: 'flex', gap: 1, alignItems: 'center', mb: 1 }}>
+        <Box key={i} sx={{ display: 'flex', gap: 1, alignItems: 'center', flexWrap: 'wrap', mb: 1 }}>
           <TextField size="small" sx={{ flex: '2 1 200px' }}
             label={t('settings.sso.role_rules_attribute')}
             placeholder={t('settings.sso.role_rules_attribute_placeholder')}
@@ -1509,14 +1512,23 @@ function RoleRulesEditor({ value, onChange, md }: {
             label={t('settings.sso.role_rules_value')}
             value={r.value}
             onChange={e => patchRule(i, { value: e.target.value })} />
-          <TextField select size="small" sx={{ flex: '1 1 110px' }}
-            label={t('settings.sso.role_rules_role')}
+          <Autocomplete
+            size="small" freeSolo disableClearable
+            sx={{ flex: '1 1 140px' }}
+            options={builtinRoleSuggestions}
             value={r.role}
-            onChange={e => patchRule(i, { role: e.target.value })}>
-            <MenuItem value="admin">{t('users.role.admin')}</MenuItem>
-            <MenuItem value="operator">{t('users.role.operator')}</MenuItem>
-            <MenuItem value="user">{t('users.role.user')}</MenuItem>
-          </TextField>
+            onChange={(_, v) => patchRule(i, { role: typeof v === 'string' ? v : '' })}
+            onInputChange={(_, v) => patchRule(i, { role: v })}
+            renderInput={(params) => (
+              <TextField {...params} label={t('settings.sso.role_rules_role')} />
+            )} />
+          <Tooltip title={t('settings.sso.role_rules_keep_hint') as string}>
+            <FormControlLabel
+              sx={{ ml: 0, '& .MuiFormControlLabel-label': { fontSize: 12, ml: 0.5 } }}
+              control={<Switch size="small" checked={!!r.keep}
+                onChange={(_, c) => patchRule(i, { keep: c })} />}
+              label={t('settings.sso.role_rules_keep')} />
+          </Tooltip>
           <IconButton size="small" onClick={() => removeRule(i)}
             aria-label={t('settings.sso.role_rules_remove')}>
             <DeleteIcon fontSize="small" />
@@ -1631,7 +1643,6 @@ function SamlPanel() {
   function normalizeSAML(c: SAMLConfig): SAMLConfig {
     return {
       ...c,
-      admin_group_ids: c.admin_group_ids ?? [],
       role_rules: c.role_rules ?? [],
     }
   }
@@ -1895,17 +1906,6 @@ function SamlPanel() {
           onChange={rules => patch('role_rules', rules)}
           md={md}
         />
-        <TextField fullWidth label={t('settings.sso.saml.admin_groups')} value={cfg.admin_group_ids.join(', ')}
-          onChange={e => patch('admin_group_ids', e.target.value.split(',').map(s => s.trim()).filter(Boolean))}
-          helperText={t('settings.sso.admin_groups_legacy_hint')} />
-        <FormControlLabel
-          label={t('settings.sso.keep_admin_when_not_in_group')}
-          control={<Switch checked={cfg.keep_admin_when_not_in_group}
-            onChange={(_, c) => patch('keep_admin_when_not_in_group', c)} />}
-          sx={{ ml: 0, '& .MuiFormControlLabel-label': { ml: 1.5 } }} />
-        <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant, mt: -1 }}>
-          {t('settings.sso.keep_admin_when_not_in_group_hint')}
-        </Typography>
         <GroupSlugPicker
           label={t('settings.sso.saml.default_group')}
           value={cfg.default_group_slug}
@@ -1965,7 +1965,6 @@ function OidcPanel() {
     return {
       ...c,
       scopes: c.scopes ?? [],
-      admin_group_ids: c.admin_group_ids ?? [],
       role_rules: c.role_rules ?? [],
     }
   }
@@ -2077,17 +2076,6 @@ function OidcPanel() {
           onChange={rules => patch('role_rules', rules)}
           md={md}
         />
-        <TextField fullWidth label={t('settings.sso.oidc.admin_groups')} value={cfg.admin_group_ids.join(', ')}
-          onChange={e => patch('admin_group_ids', e.target.value.split(',').map(s => s.trim()).filter(Boolean))}
-          helperText={t('settings.sso.admin_groups_legacy_hint')} />
-        <FormControlLabel
-          label={t('settings.sso.keep_admin_when_not_in_group')}
-          control={<Switch checked={cfg.keep_admin_when_not_in_group}
-            onChange={(_, c) => patch('keep_admin_when_not_in_group', c)} />}
-          sx={{ ml: 0, '& .MuiFormControlLabel-label': { ml: 1.5 } }} />
-        <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant, mt: -1 }}>
-          {t('settings.sso.keep_admin_when_not_in_group_hint')}
-        </Typography>
         <GroupSlugPicker
           label={t('settings.sso.oidc.default_group')}
           value={cfg.default_group_slug}
