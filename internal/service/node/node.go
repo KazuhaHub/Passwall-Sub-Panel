@@ -112,6 +112,30 @@ func (s *Service) List(ctx context.Context) ([]*domain.Node, error) {
 // panel management. No 3X-UI inbound-level write happens; only metadata is
 // persisted, and clients are synced for any matching groups so newly
 // added users immediately see this node in their subscriptions.
+// CreateSeparator inserts a layout-only node that renders as a DIRECT
+// proxy in subscriptions. Doesn't touch 3X-UI, doesn't enqueue sync
+// tasks. PanelID is fixed at 0 and InboundID is generated from the
+// current nanosecond timestamp (truncated to a positive int then
+// negated) so the existing (panel_id, inbound_id) uniqueIndex never
+// rejects multiple separators — each gets a distinct negative
+// inbound_id. Region/Tags are admin-optional metadata used by
+// tag_filter matching so admins can stash a separator into specific
+// groups (e.g. only show "---- TW ----" inside the TW user's group).
+func (s *Service) CreateSeparator(ctx context.Context, n *domain.Node) error {
+	if n == nil || strings.TrimSpace(n.DisplayName) == "" {
+		return fmt.Errorf("%w: display_name is required", domain.ErrValidation)
+	}
+	n.Kind = domain.NodeKindSeparator
+	n.PanelID = 0
+	// A signed-int32 negative value derived from the nanosecond clock.
+	// Collisions require two CreateSeparator calls within the same
+	// nanosecond — DB unique constraint catches the (vanishingly rare)
+	// case and the admin sees a normal duplicate error.
+	n.InboundID = -int(time.Now().UnixNano() & 0x7fffffff)
+	n.Enabled = true
+	return s.nodes.Create(ctx, n)
+}
+
 func (s *Service) ImportExisting(ctx context.Context, n *domain.Node) error {
 	if n.DisplayName == "" || n.Region == "" {
 		return fmt.Errorf("%w: display_name and region required", domain.ErrValidation)
@@ -259,6 +283,11 @@ func (s *Service) DeleteAndSync(ctx context.Context, id int64) error {
 	n, err := s.nodes.GetByID(ctx, id)
 	if err != nil {
 		return err
+	}
+	if n.IsSeparator() {
+		// Layout-only row: no 3X-UI inbound to delete, no clients to
+		// reclaim, no sync task to enqueue. Drop the panel-side record.
+		return s.nodes.Delete(ctx, id)
 	}
 	if err := s.cleaner.EnsureInboundDeletable(ctx, n.PanelID, n.InboundID); err != nil {
 		if errors.Is(err, domain.ErrInboundHasUnmanagedClients) {

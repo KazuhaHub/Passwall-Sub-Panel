@@ -119,3 +119,73 @@ func TestReorder_RepoErrorPropagates(t *testing.T) {
 		t.Fatalf("err = %v, want %v wrapped", err, want)
 	}
 }
+
+// captureNodeRepo records Node creates so CreateSeparator tests can
+// inspect the row that would have been written. Inherits fakeNodeRepo
+// stubs for the rest of the NodeRepo surface.
+type captureNodeRepo struct {
+	fakeNodeRepo
+	created []*domain.Node
+}
+
+func (r *captureNodeRepo) Create(_ context.Context, n *domain.Node) error {
+	cp := *n
+	r.created = append(r.created, &cp)
+	n.ID = int64(len(r.created))
+	return nil
+}
+
+func TestCreateSeparator_StampsKindAndUniqueInboundID(t *testing.T) {
+	repo := &captureNodeRepo{}
+	svc := &Service{nodes: repo}
+	n := &domain.Node{DisplayName: "---- Taiwan HiNet ----", Region: "TW", SortOrder: 50}
+	if err := svc.CreateSeparator(context.Background(), n); err != nil {
+		t.Fatalf("CreateSeparator = %v", err)
+	}
+	if len(repo.created) != 1 {
+		t.Fatalf("got %d Create calls, want 1", len(repo.created))
+	}
+	got := repo.created[0]
+	if got.Kind != domain.NodeKindSeparator {
+		t.Errorf("Kind = %q, want separator", got.Kind)
+	}
+	if got.PanelID != 0 {
+		t.Errorf("PanelID = %d, want 0 (separator has no panel binding)", got.PanelID)
+	}
+	if got.InboundID >= 0 {
+		t.Errorf("InboundID = %d, want a negative value so the (panel_id, inbound_id) uniqueIndex never collides across separators", got.InboundID)
+	}
+	if !got.Enabled {
+		t.Errorf("new separator should default to enabled=true so it shows up in subscriptions immediately")
+	}
+	if got.DisplayName != "---- Taiwan HiNet ----" {
+		t.Errorf("DisplayName = %q, want preserved verbatim", got.DisplayName)
+	}
+	if got.SortOrder != 50 {
+		t.Errorf("SortOrder = %d, want admin-supplied value preserved", got.SortOrder)
+	}
+}
+
+func TestCreateSeparator_RejectsBlankDisplayName(t *testing.T) {
+	cases := []struct {
+		name string
+		in   *domain.Node
+	}{
+		{"nil node", nil},
+		{"empty display_name", &domain.Node{DisplayName: ""}},
+		{"whitespace display_name", &domain.Node{DisplayName: "   "}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := &captureNodeRepo{}
+			svc := &Service{nodes: repo}
+			err := svc.CreateSeparator(context.Background(), tc.in)
+			if !errors.Is(err, domain.ErrValidation) {
+				t.Errorf("err = %v, want ErrValidation", err)
+			}
+			if len(repo.created) != 0 {
+				t.Errorf("repo Create touched on validation failure (got %d calls)", len(repo.created))
+			}
+		})
+	}
+}

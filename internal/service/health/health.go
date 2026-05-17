@@ -39,11 +39,14 @@ func (s *Service) CheckOnce(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("list nodes: %w", err)
 	}
-	// Group enabled nodes by panel so one ListInbounds call covers every
-	// node on that panel.
+	// Group enabled real nodes by panel so one ListInbounds call covers
+	// every node on that panel. Separator nodes are layout-only entries
+	// with no 3X-UI inbound to probe — including them here would always
+	// fail the lookup against the panel's inbound list and surface a
+	// "missing" health badge for what's actually working as intended.
 	byPanel := make(map[int64][]*domain.Node, len(allNodes))
 	for _, n := range allNodes {
-		if !n.Enabled {
+		if !n.Enabled || n.IsSeparator() {
 			continue
 		}
 		byPanel[n.PanelID] = append(byPanel[n.PanelID], n)

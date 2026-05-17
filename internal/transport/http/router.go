@@ -171,6 +171,7 @@ func NewRouter(d Deps) *gin.Engine {
 		staffGroup.POST("/nodes/:id/set-enabled", nodes.SetEnabled)
 		staffGroup.GET("/nodes/unmanaged", nodes.ListUnmanaged)
 		adminGroup.POST("/nodes/import", nodes.ImportExisting)
+		adminGroup.POST("/nodes/separator", nodes.CreateSeparator)
 		adminGroup.POST("/nodes", nodes.CreateInbound)
 		adminGroup.PUT("/nodes/reorder", nodes.Reorder)
 		adminGroup.PUT("/nodes/:id/metadata", nodes.UpdateMetadata)

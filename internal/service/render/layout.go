@@ -28,6 +28,17 @@ func applyLayout(nodes []*domain.Node, layout domain.Layout) []renderItem {
 
 	items := make([]renderItem, 0, len(sorted)+len(layout.Separators))
 	for _, n := range sorted {
+		// Node-kind separators participate in normal sort + tag_filter
+		// matching (so admins drag them into place from the Nodes page),
+		// but emit as isSeparator items so buildProxies / urilist /
+		// singbox render them through emitSeparator instead of fetching
+		// an inbound. The existing group-level Layout.Separators below
+		// still works in parallel for admins who'd rather configure
+		// dividers per-group.
+		if n.IsSeparator() {
+			items = append(items, renderItem{isSeparator: true, name: n.DisplayName})
+			continue
+		}
 		items = append(items, renderItem{node: n, name: n.DisplayName})
 	}
 

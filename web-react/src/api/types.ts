@@ -64,6 +64,10 @@ export interface Node {
   tags: string[]
   sort_order: number
   enabled: boolean
+  /** "real" (3X-UI-backed, default for legacy rows) or "separator" (layout-only).
+   *  Separator rows render as a DIRECT proxy in subscriptions and don't have
+   *  server/inbound/health metadata. */
+  kind?: 'real' | 'separator'
   /** Most recent health-probe outcome. Empty before the first tick has run. */
   health_state?: '' | 'ok' | 'panel_unreachable' | 'inbound_missing' | 'inbound_disabled'
   /** RFC3339 timestamp of the last probe (regardless of outcome). */

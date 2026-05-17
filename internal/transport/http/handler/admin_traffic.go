@@ -357,6 +357,9 @@ func (h *AdminTrafficHandler) NodesTop(c *gin.Context) {
 	}
 	rows := make([]nodeTrafficRow, 0, len(nodes))
 	for _, node := range nodes {
+		if node.IsSeparator() {
+			continue // layout-only rows have no traffic
+		}
 		report, rerr := h.traffic.NodeReportFor(c.Request.Context(), node.ID)
 		if rerr != nil || report == nil {
 			continue
@@ -424,6 +427,9 @@ func (h *AdminTrafficHandler) NodesHistory(c *gin.Context) {
 	items := []trafficHistoryItem{}
 	nodesCount := 0
 	for _, node := range nodes {
+		if node.IsSeparator() {
+			continue // layout-only rows have no traffic
+		}
 		report, herr := h.traffic.NodeHistoryFor(c.Request.Context(), node.ID, period, since, until)
 		if herr != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": herr.Error()})

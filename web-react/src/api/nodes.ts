@@ -86,6 +86,21 @@ export async function importNode(req: ImportNodeRequest) {
   return data
 }
 
+/** Request body for POST /admin/nodes/separator. Separator nodes are
+ *  layout-only entries: no panel/inbound binding, no server address,
+ *  optional region/tags (used by group tag_filter matching). */
+export interface CreateSeparatorRequest {
+  display_name: string
+  region?: string
+  tags?: string[]
+  sort_order?: number
+}
+
+export async function createSeparatorNode(req: CreateSeparatorRequest) {
+  const { data } = await client.post<Node>('/admin/nodes/separator', req)
+  return data
+}
+
 export async function createInbound(req: CreateInboundRequest) {
   const { data } = await client.post<Node | { queued: true }>('/admin/nodes', req)
   return data

@@ -165,6 +165,28 @@ type SortEntry struct {
 // ServerAddress is the public hostname that clients dial. 3X-UI inbounds
 // don't carry this on their own (their `listen` is a bind interface), so
 // the panel records it explicitly here. Required for subscription rendering.
+// NodeKind discriminates "real" 3X-UI-backed nodes from "separator"
+// decoration entries the admin adds to visually group the subscription
+// list (e.g. an entry titled "---- Taiwan HiNet ----"). Separators
+// render as DIRECT proxies in client configs and never participate in
+// traffic accounting or health probing — they exist purely for layout.
+// Empty value is treated as NodeKindReal so existing rows in the DB
+// stay valid without a backfill.
+type NodeKind string
+
+const (
+	NodeKindReal      NodeKind = "real"
+	NodeKindSeparator NodeKind = "separator"
+)
+
+// IsSeparator reports whether the Node is the decoration variant. Calls
+// that need to skip layout-only rows (traffic poll, health probe,
+// 3X-UI client sync) should gate on this rather than string-compare
+// Kind directly.
+func (n *Node) IsSeparator() bool {
+	return n != nil && n.Kind == NodeKindSeparator
+}
+
 type Node struct {
 	ID            int64
 	PanelID       int64
@@ -177,6 +199,7 @@ type Node struct {
 	Tags          []string
 	SortOrder     int
 	Enabled       bool
+	Kind          NodeKind
 	CreatedAt     time.Time
 	// LifetimeUpBytes / LifetimeDownBytes / LifetimeTotalBytes accumulate
 	// monotonically across 3X-UI counter resets, mirroring the user-level

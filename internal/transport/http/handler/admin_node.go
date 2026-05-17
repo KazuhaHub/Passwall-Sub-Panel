@@ -45,6 +45,11 @@ type nodeDTO struct {
 	Tags          []string `json:"tags"`
 	SortOrder     int      `json:"sort_order"`
 	Enabled       bool     `json:"enabled"`
+	// Kind is "real" for 3X-UI-backed nodes (default for legacy rows) and
+	// "separator" for layout-only entries the admin uses to group the
+	// subscription list. Frontend uses it to style separator rows and
+	// hide irrelevant fields (server, panel, health).
+	Kind string `json:"kind"`
 	// Health surfaces the most recent probe outcome ("", "ok",
 	// "panel_unreachable", "inbound_missing", "inbound_disabled"). Empty
 	// before the first health check tick has run.
@@ -199,6 +204,37 @@ func (h *AdminNodeHandler) Get(c *gin.Context) {
 		out["inbound_error"] = inboundErr.Error()
 	}
 	c.JSON(http.StatusOK, out)
+}
+
+// CreateSeparator inserts a layout-only node. No 3X-UI write side, so
+// the request body is far simpler than ImportExisting / CreateInbound —
+// just display name + optional region/tags/sort_order so the admin can
+// embed the row inside the correct group via tag_filter.
+type createSeparatorRequest struct {
+	DisplayName string   `json:"display_name" binding:"required"`
+	Region      string   `json:"region"`
+	Tags        []string `json:"tags"`
+	SortOrder   int      `json:"sort_order"`
+}
+
+func (h *AdminNodeHandler) CreateSeparator(c *gin.Context) {
+	var req createSeparatorRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	n := &domain.Node{
+		DisplayName: req.DisplayName,
+		Region:      req.Region,
+		Tags:        req.Tags,
+		SortOrder:   req.SortOrder,
+	}
+	if err := h.node.CreateSeparator(c.Request.Context(), n); err != nil {
+		mapNodeServiceError(c, err)
+		return
+	}
+	panelNames := h.loadPanelNames(c.Request.Context())
+	c.JSON(http.StatusCreated, h.toNodeDTO(n, panelNames))
 }
 
 func (h *AdminNodeHandler) ImportExisting(c *gin.Context) {
@@ -529,6 +565,7 @@ func (h *AdminNodeHandler) toNodeDTO(n *domain.Node, panelNames map[int64]string
 		HealthState:     string(n.HealthState),
 		HealthCheckedAt: n.HealthCheckedAt,
 		HealthDetail:    n.HealthDetail,
+		Kind:            string(n.Kind),
 	}
 }
 

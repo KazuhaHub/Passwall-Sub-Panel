@@ -168,8 +168,13 @@ type nodeRow struct {
 	Flow                  string `gorm:"size:64"`
 	Region                string `gorm:"size:16;not null"`
 	Tags                  jsonStrings
-	SortOrder             int   `gorm:"default:0"`
-	Enabled               bool  `gorm:"default:true"`
+	SortOrder             int    `gorm:"default:0"`
+	Enabled               bool   `gorm:"default:true"`
+	// Kind discriminates real 3X-UI-backed nodes from layout-only
+	// separator entries. Empty (the default for rows written before this
+	// column existed) is treated as "real" by the toDomain mapping so
+	// AutoMigrate alone is enough — no backfill needed.
+	Kind                  string `gorm:"size:16;default:'real'"`
 	LifetimeUpBytes       int64 `gorm:"default:0"`
 	LifetimeDownBytes     int64 `gorm:"default:0"`
 	LifetimeTotalBytes    int64 `gorm:"default:0"`
@@ -185,6 +190,10 @@ type nodeRow struct {
 func (nodeRow) TableName() string { return "nodes" }
 
 func (r *nodeRow) toDomain() *domain.Node {
+	kind := domain.NodeKind(r.Kind)
+	if kind == "" {
+		kind = domain.NodeKindReal
+	}
 	return &domain.Node{
 		ID:                    r.ID,
 		PanelID:               r.PanelID,
@@ -197,6 +206,7 @@ func (r *nodeRow) toDomain() *domain.Node {
 		Tags:                  []string(r.Tags),
 		SortOrder:             r.SortOrder,
 		Enabled:               r.Enabled,
+		Kind:                  kind,
 		LifetimeUpBytes:       r.LifetimeUpBytes,
 		LifetimeDownBytes:     r.LifetimeDownBytes,
 		LifetimeTotalBytes:    r.LifetimeTotalBytes,
@@ -211,6 +221,10 @@ func (r *nodeRow) toDomain() *domain.Node {
 }
 
 func nodeFromDomain(n *domain.Node) *nodeRow {
+	kind := n.Kind
+	if kind == "" {
+		kind = domain.NodeKindReal
+	}
 	return &nodeRow{
 		ID:                    n.ID,
 		PanelID:               n.PanelID,
@@ -223,6 +237,7 @@ func nodeFromDomain(n *domain.Node) *nodeRow {
 		Tags:                  jsonStrings(n.Tags),
 		SortOrder:             n.SortOrder,
 		Enabled:               n.Enabled,
+		Kind:                  string(kind),
 		LifetimeUpBytes:       n.LifetimeUpBytes,
 		LifetimeDownBytes:     n.LifetimeDownBytes,
 		LifetimeTotalBytes:    n.LifetimeTotalBytes,

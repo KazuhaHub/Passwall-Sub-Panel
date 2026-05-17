@@ -36,6 +36,7 @@ import { useTranslation } from 'react-i18next'
 import {
   claimClient,
   createInbound,
+  createSeparatorNode,
   deleteNode,
   detachNode,
   generateRealityKeypair,
@@ -1283,6 +1284,35 @@ export default function NodesView() {
   const [importForm, setImportForm] = useState<ImportForm>(EMPTY_IMPORT)
   const [importErr, setImportErr] = useState<FieldErrors<MetaField>>({})
 
+  // Separator-node dialog: layout-only rows the admin drops into the node
+  // list as visual dividers (e.g. "---- Taiwan HiNet ----"). They render
+  // as DIRECT proxies in subscriptions and skip traffic / health probes.
+  const [separatorOpen, setSeparatorOpen] = useState(false)
+  const [separatorBusy, setSeparatorBusy] = useState(false)
+  const [separatorForm, setSeparatorForm] = useState({
+    display_name: '', region: '', tags_text: '', sort_order: 100,
+  })
+  async function submitSeparator() {
+    if (!separatorForm.display_name.trim()) {
+      pushSnack(t('admin:nodes.create_dialog.validate_required'), 'warning')
+      return
+    }
+    setSeparatorBusy(true)
+    try {
+      const tags = separatorForm.tags_text.split(',').map(s => s.trim()).filter(Boolean)
+      await createSeparatorNode({
+        display_name: separatorForm.display_name.trim(),
+        region: separatorForm.region.trim() || undefined,
+        tags: tags.length > 0 ? tags : undefined,
+        sort_order: separatorForm.sort_order,
+      })
+      pushSnack(t('admin:nodes.toast.separator_created', { defaultValue: '分隔标题已创建' }), 'success')
+      setSeparatorOpen(false)
+      setSeparatorForm({ display_name: '', region: '', tags_text: '', sort_order: 100 })
+      await load()
+    } catch { /* axios interceptor toasted */ } finally { setSeparatorBusy(false) }
+  }
+
   const [claimOpen, setClaimOpen] = useState(false)
   const [claimBusy, setClaimBusy] = useState(false)
   const [claimUsers, setClaimUsers] = useState<User[]>([])
@@ -1842,9 +1872,14 @@ export default function NodesView() {
           <Typography variant="h4">{t('admin:nodes.title')}</Typography>
           <Typography variant="body2" sx={{ mt: 0.5 }}>{t('admin:nodes.subtitle')}</Typography>
         </Box>
-        <Button variant="contained" startIcon={<AddIcon />} onClick={openCreate}>
-          {t('admin:nodes.create')}
-        </Button>
+        <Box sx={{ display: 'flex', gap: 1 }}>
+          <Button variant="outlined" startIcon={<AddIcon />} onClick={() => setSeparatorOpen(true)}>
+            {t('admin:nodes.create_separator', { defaultValue: '新增分隔标题' })}
+          </Button>
+          <Button variant="contained" startIcon={<AddIcon />} onClick={openCreate}>
+            {t('admin:nodes.create')}
+          </Button>
+        </Box>
       </Box>
 
       <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ mt: 2, mb: 2, borderBottom: `1px solid ${md.outlineVariant}` }}>
@@ -1949,7 +1984,9 @@ export default function NodesView() {
                     {managed.length === 0 ? '—' : t('admin:nodes.managed_filter_empty')}
                   </TableCell></TableRow>
                 )}
-                {filteredManaged.map((n, idx) => (
+                {filteredManaged.map((n, idx) => {
+                  const isSep = n.kind === 'separator'
+                  return (
                   <TableRow key={n.id} hover
                     draggable={!reorderBusy && !managedFilterActive}
                     onDragStart={e => {
@@ -1997,37 +2034,52 @@ export default function NodesView() {
                       <Checkbox checked={selected.has(n.id)} onChange={(_, c) => toggleOne(n.id, c)} />
                     </TableCell>
                     <TableCell sx={{ fontSize: 13, color: md.onSurfaceVariant }}>{n.id}</TableCell>
-                    <TableCell sx={{ fontWeight: 500 }}>{n.display_name}</TableCell>
-                    <TableCell sx={{ fontSize: 13 }}>{n.panel_name}</TableCell>
-                    <TableCell sx={{ fontSize: 13, color: md.onSurfaceVariant }}>{n.server_address}</TableCell>
-                    <TableCell sx={{ fontSize: 13 }}>{n.region}</TableCell>
-                    <TableCell>{tagsCell(n.tags)}</TableCell>
-                    <TableCell align="center">{healthDot(n)}</TableCell>
+                    <TableCell sx={{ fontWeight: 500, fontStyle: isSep ? 'italic' : 'normal', color: isSep ? md.primary : 'inherit' }}>
+                      {n.display_name}
+                    </TableCell>
+                    <TableCell sx={{ fontSize: 13 }}>{isSep ? '—' : n.panel_name}</TableCell>
+                    <TableCell sx={{ fontSize: 13, color: md.onSurfaceVariant }}>{isSep ? '—' : n.server_address}</TableCell>
+                    <TableCell sx={{ fontSize: 13 }}>{isSep && !n.region ? '—' : n.region}</TableCell>
+                    <TableCell>{isSep && (!n.tags || n.tags.length === 0) ? '—' : tagsCell(n.tags)}</TableCell>
+                    <TableCell align="center">{isSep ? '—' : healthDot(n)}</TableCell>
                     <TableCell align="center">
                       <Switch checked={n.enabled} onChange={() => toggleEnabled(n)} disabled={enabledBusy[n.id]} />
                     </TableCell>
                     <TableCell align="right">
-                      <Tooltip title={t('admin:nodes.action.edit')}>
-                        <IconButton size="small" onClick={() => openEdit(n)}><EditIcon fontSize="small" /></IconButton>
-                      </Tooltip>
-                      <Tooltip title={t('admin:nodes.edit_inbound')}>
-                        <IconButton size="small" onClick={() => openEditInbound(n)}>
-                          <KeyIcon fontSize="small" />
-                        </IconButton>
-                      </Tooltip>
-                      <Tooltip title={t('admin:nodes.action.detach')}>
-                        <IconButton size="small" onClick={() => confirmDetach(n)} sx={{ color: md.tertiary }}>
-                          <LinkOffIcon fontSize="small" />
-                        </IconButton>
-                      </Tooltip>
-                      <Tooltip title={t('admin:nodes.action.delete')}>
-                        <IconButton size="small" onClick={() => confirmDelete(n)} sx={{ color: md.error }}>
-                          <DeleteIcon fontSize="small" />
-                        </IconButton>
-                      </Tooltip>
+                      {isSep ? (
+                        // Separators don't have inbound config / 3X-UI binding /
+                        // detach semantics — only delete is meaningful.
+                        <Tooltip title={t('admin:nodes.action.delete')}>
+                          <IconButton size="small" onClick={() => confirmDelete(n)} sx={{ color: md.error }}>
+                            <DeleteIcon fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                      ) : (
+                        <>
+                          <Tooltip title={t('admin:nodes.action.edit')}>
+                            <IconButton size="small" onClick={() => openEdit(n)}><EditIcon fontSize="small" /></IconButton>
+                          </Tooltip>
+                          <Tooltip title={t('admin:nodes.edit_inbound')}>
+                            <IconButton size="small" onClick={() => openEditInbound(n)}>
+                              <KeyIcon fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                          <Tooltip title={t('admin:nodes.action.detach')}>
+                            <IconButton size="small" onClick={() => confirmDetach(n)} sx={{ color: md.tertiary }}>
+                              <LinkOffIcon fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                          <Tooltip title={t('admin:nodes.action.delete')}>
+                            <IconButton size="small" onClick={() => confirmDelete(n)} sx={{ color: md.error }}>
+                              <DeleteIcon fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                        </>
+                      )}
                     </TableCell>
                   </TableRow>
-                ))}
+                  )
+                })}
               </TableBody>
             </Table>
           </TableContainer>
@@ -2312,6 +2364,40 @@ export default function NodesView() {
           <Button onClick={() => setEditOpen(false)} disabled={editBusy} variant="text">{t('common:actions.cancel')}</Button>
           <Button type="submit" form="node-form" variant="contained" disabled={editBusy}
             startIcon={editBusy ? <CircularProgress size={16} color="inherit" /> : null}>
+            {t('common:actions.ok')}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Separator dialog: layout-only node, no server/inbound/protocol. */}
+      <Dialog open={separatorOpen} onClose={() => !separatorBusy && setSeparatorOpen(false)}
+        PaperProps={{ sx: { borderRadius: 3, bgcolor: md.surfaceContainerHigh, width: 480, maxWidth: '90vw' } }}>
+        <DialogTitle>{t('admin:nodes.create_separator_dialog.title', { defaultValue: '新增分隔标题' })}</DialogTitle>
+        <DialogContent>
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, pt: 1 }}>
+            <Typography sx={{ fontSize: 13, color: md.onSurfaceVariant }}>
+              {t('admin:nodes.create_separator_dialog.hint', {
+                defaultValue: '分隔标题以 DIRECT 形式出现在客户端的节点列表中，仅用于视觉分组，不参与 3X-UI、流量统计、健康检查。可用区域/标签控制它出现在哪些用户的订阅里。',
+              })}
+            </Typography>
+            <TextField required fullWidth label={t('admin:nodes.field.display_name')}
+              value={separatorForm.display_name}
+              onChange={e => setSeparatorForm({ ...separatorForm, display_name: e.target.value })}
+              placeholder="---- Taiwan HiNet ----" />
+            <TextField fullWidth label={t('admin:nodes.field.region')}
+              value={separatorForm.region}
+              onChange={e => setSeparatorForm({ ...separatorForm, region: e.target.value })}
+              helperText={t('admin:nodes.create_separator_dialog.region_hint', { defaultValue: '可留空。如果分组按 region 过滤，填上才会在对应分组里出现。' })} />
+            <TextField fullWidth label={t('admin:nodes.field.tags')}
+              value={separatorForm.tags_text}
+              onChange={e => setSeparatorForm({ ...separatorForm, tags_text: e.target.value })}
+              helperText={t('admin:nodes.create_separator_dialog.tags_hint', { defaultValue: '可留空，多个标签用英文逗号分隔。tag_filter 匹配会让该分隔出现在对应分组里。' })} />
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setSeparatorOpen(false)} disabled={separatorBusy} variant="text">{t('common:actions.cancel')}</Button>
+          <Button onClick={submitSeparator} disabled={separatorBusy} variant="contained"
+            startIcon={separatorBusy ? <CircularProgress size={16} color="inherit" /> : null}>
             {t('common:actions.ok')}
           </Button>
         </DialogActions>
