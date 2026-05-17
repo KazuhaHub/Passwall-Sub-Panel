@@ -475,30 +475,10 @@ func (s *SAMLService) ParseACSResponse(r *http.Request, possibleRequestIDs []str
 		return nil, fmt.Errorf("SAML response missing UPN claim %q — add the matching attribute on the IdP side (or set the UPN source to \"nameid\" if your IdP carries it in <Subject><NameID>)", cfg.AttributeMapping.UPN)
 	}
 
-	// DisplayName fallback: the configured AttributeMapping.DisplayName URN
-	// must exactly match what the IdP sends, and Entra's admin UI makes it
-	// easy to end up with a slightly-off URL (custom namespace + name combos
-	// produce variants like ".../displayname/displayname"). If the configured
-	// URN didn't match anything, do a second pass that recognises any claim
-	// whose name ends in "displayname" or "display_name" — covers the common
-	// Entra / OIDC-style variants without hardcoding URLs.
-	if out.DisplayName == "" {
-	dnFallback:
-		for _, stmt := range assertion.AttributeStatements {
-			for _, attr := range stmt.Attributes {
-				lname := strings.ToLower(attr.Name)
-				if !strings.HasSuffix(lname, "displayname") && !strings.HasSuffix(lname, "display_name") {
-					continue
-				}
-				for _, v := range attr.Values {
-					if v.Value != "" {
-						out.DisplayName = v.Value
-						break dnFallback
-					}
-				}
-			}
-		}
-	}
+	// DisplayName missing is fine — empty string flows through to the
+	// user record. No suffix-matching fallback even here: an admin who
+	// configures a specific URN expects that URN, not "whatever claim
+	// happens to end with displayname".
 	log.Info("saml: assertion parsed",
 		"upn", out.UPN,
 		"email", out.Email,
