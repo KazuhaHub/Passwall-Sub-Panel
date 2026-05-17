@@ -582,6 +582,10 @@
     "unmanaged_search_placeholder": "搜索面板 / 协议 / 备注 / 端口 / ID…",
     "unmanaged_count": "显示 {{shown}} / 共 {{total}} 个",
     "unmanaged_filter_empty": "没有匹配的结果",
+    "search_group": {
+      "protocol": "协议",
+      "remark": "备注"
+    },
     "create": "新增节点",
     "edit_title": "编辑节点",
     "import": "纳管",

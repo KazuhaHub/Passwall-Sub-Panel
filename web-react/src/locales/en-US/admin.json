@@ -578,6 +578,10 @@
     "unmanaged_search_placeholder": "Search panel / protocol / remark / port / ID…",
     "unmanaged_count": "Showing {{shown}} of {{total}}",
     "unmanaged_filter_empty": "No entries match the filter",
+    "search_group": {
+      "protocol": "Protocol",
+      "remark": "Remark"
+    },
     "create": "New node",
     "edit_title": "Edit node",
     "import": "Import",

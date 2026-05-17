@@ -1140,6 +1140,25 @@ function InboundFormFields({ form, setForm, showMetadata, servers, onGenKeys, on
   )
 }
 
+// SearchOption tags a free-text Autocomplete suggestion with the field it
+// came from so MUI's `groupBy` renders headers like "Region" / "Tags" above
+// the values from that field. Without the tag the suggestion menu mixes all
+// fields into one alphabetical blob and the operator can't tell whether
+// "Premium" is a tag, a region, or somebody's display name.
+type SearchOption = { label: string; group: string }
+
+// bucketsToOptions flattens a list of (group-name, value-set) pairs into the
+// SearchOption[] shape Autocomplete consumes. Values are sorted within each
+// group; groups stay in caller-defined order (which is the visual order MUI
+// renders them when `groupBy` is used).
+function bucketsToOptions(buckets: Array<readonly [string, Set<string>]>): SearchOption[] {
+  const out: SearchOption[] = []
+  for (const [group, set] of buckets) {
+    for (const label of [...set].sort()) out.push({ label, group })
+  }
+  return out
+}
+
 // reorderRows produces the new list order by moving `fromIdx` to `toIdx`
 // (insertion semantics: the dragged row lands at position `toIdx` in the
 // resulting array). Pure so the same logic can later be lifted into a unit
@@ -1174,17 +1193,25 @@ export default function NodesView() {
   const [unmanagedSearch, setUnmanagedSearch] = useState('')
   const [loading, setLoading] = useState(false)
 
-  // Distinct values surfaced as Autocomplete suggestions. Picking one is
-  // equivalent to typing it — both flow into unmanagedSearch.
-  const unmanagedSearchOptions = useMemo(() => {
-    const opts = new Set<string>()
+  // Distinct values surfaced as Autocomplete suggestions, tagged by source
+  // field so MUI's groupBy can render them under section headers like
+  // "Server" / "Protocol" / "Remark". Without grouping the menu mixes all
+  // fields into one alphabetical blob — e.g. "Premium" (tag) sits next to
+  // "HiNet-PQS-Static" (server) and the operator can't tell which field
+  // they'd be filtering on. Picking still flows into the same search string.
+  const unmanagedSearchOptions = useMemo<SearchOption[]>(() => {
+    const buckets: Array<[string, Set<string>]> = [
+      [t('admin:nodes.table.panel_name'), new Set()],
+      [t('admin:nodes.search_group.protocol'), new Set()],
+      [t('admin:nodes.search_group.remark'), new Set()],
+    ]
     for (const u of unmanaged) {
-      if (u.PanelName) opts.add(u.PanelName)
-      if (u.Protocol) opts.add(u.Protocol)
-      if (u.Remark) opts.add(u.Remark)
+      if (u.PanelName) buckets[0][1].add(u.PanelName)
+      if (u.Protocol) buckets[1][1].add(u.Protocol)
+      if (u.Remark) buckets[2][1].add(u.Remark)
     }
-    return [...opts].sort()
-  }, [unmanaged])
+    return bucketsToOptions(buckets)
+  }, [unmanaged, t])
 
   const filteredUnmanaged = useMemo(() => {
     const q = unmanagedSearch.trim().toLowerCase()
@@ -1205,16 +1232,21 @@ export default function NodesView() {
   // between them. Clearing the search re-enables the drag handles.
   const [managedSearch, setManagedSearch] = useState('')
 
-  const managedSearchOptions = useMemo(() => {
-    const opts = new Set<string>()
+  const managedSearchOptions = useMemo<SearchOption[]>(() => {
+    const buckets: Array<[string, Set<string>]> = [
+      [t('admin:nodes.table.display_name'), new Set()],
+      [t('admin:nodes.table.panel_name'), new Set()],
+      [t('admin:nodes.table.region'), new Set()],
+      [t('admin:nodes.table.tags'), new Set()],
+    ]
     for (const n of managed) {
-      if (n.display_name) opts.add(n.display_name)
-      if (n.panel_name) opts.add(n.panel_name)
-      if (n.region) opts.add(n.region)
-      for (const tg of n.tags ?? []) if (tg) opts.add(tg)
+      if (n.display_name) buckets[0][1].add(n.display_name)
+      if (n.panel_name) buckets[1][1].add(n.panel_name)
+      if (n.region) buckets[2][1].add(n.region)
+      for (const tg of n.tags ?? []) if (tg) buckets[3][1].add(tg)
     }
-    return [...opts].sort()
-  }, [managed])
+    return bucketsToOptions(buckets)
+  }, [managed, t])
 
   const filteredManaged = useMemo(() => {
     const q = managedSearch.trim().toLowerCase()
@@ -1858,10 +1890,16 @@ export default function NodesView() {
                 freeSolo
                 size="small"
                 options={managedSearchOptions}
+                groupBy={(o) => o.group}
+                getOptionLabel={(o) => typeof o === 'string' ? o : o.label}
                 value={managedSearch}
                 inputValue={managedSearch}
                 onInputChange={(_, v) => setManagedSearch(v)}
-                onChange={(_, v) => setManagedSearch((v as string) ?? '')}
+                onChange={(_, v) => {
+                  if (v == null) setManagedSearch('')
+                  else if (typeof v === 'string') setManagedSearch(v)
+                  else setManagedSearch(v.label)
+                }}
                 sx={{ width: 320, maxWidth: '100%' }}
                 renderInput={(params) => (
                   <TextField {...params} placeholder={t('admin:nodes.managed_search_placeholder')} />
@@ -2003,10 +2041,16 @@ export default function NodesView() {
                 freeSolo
                 size="small"
                 options={unmanagedSearchOptions}
+                groupBy={(o) => o.group}
+                getOptionLabel={(o) => typeof o === 'string' ? o : o.label}
                 value={unmanagedSearch}
                 inputValue={unmanagedSearch}
                 onInputChange={(_, v) => setUnmanagedSearch(v)}
-                onChange={(_, v) => setUnmanagedSearch((v as string) ?? '')}
+                onChange={(_, v) => {
+                  if (v == null) setUnmanagedSearch('')
+                  else if (typeof v === 'string') setUnmanagedSearch(v)
+                  else setUnmanagedSearch(v.label)
+                }}
                 sx={{ width: 320, maxWidth: '100%' }}
                 renderInput={(params) => (
                   <TextField {...params} placeholder={t('admin:nodes.unmanaged_search_placeholder')} />
