@@ -194,13 +194,17 @@ func (h *AdminSAMLHandler) Put(c *gin.Context) {
 	// base URL (sub_base_url) and auto-generate a self-signed SP keypair
 	// the first time SAML is enabled — admin should not have to fill those
 	// fields by hand.
+	//
+	// Attribute mapping is NOT reset here: auto mode only takes care of
+	// "things derivable from the IdP metadata + panel base URL". Claim
+	// URNs are policy decisions per deployment (an admin's Entra tenant
+	// may emit a custom-namespace UPN claim, etc.) and must remain
+	// admin-editable. ApplySAMLDefaults still seeds the four well-known
+	// claim URLs when the admin leaves a field blank.
 	if cfg.Mode == "auto" {
 		base := resolveSubBaseForRequest(c.Request.Context(), h.settings, c.Request)
 		cfg.SP.EntityID = base + "/api/auth/saml/metadata"
 		cfg.SP.ACSURL = base + "/api/auth/saml/acs"
-		// Reset attribute mapping to documented defaults (ApplySAMLDefaults
-		// fills them in when blank).
-		cfg.AttributeMapping = config.SAMLAttributeMap{}
 		if cfg.SP.CertPEM == "" || cfg.SP.KeyPEM == "" {
 			cert, key, err := samlkey.GenerateSelfSigned(cfg.SP.EntityID)
 			if err != nil {

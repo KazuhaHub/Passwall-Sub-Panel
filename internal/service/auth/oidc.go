@@ -169,21 +169,16 @@ func (s *OIDCService) Exchange(ctx context.Context, code, expectedNonce string) 
 	}
 	out := &OIDCAssertion{Subject: idTok.Subject}
 	out.Username = claimString(claims, cfg.AttributeMapping.Username)
-	if out.Username == "" {
-		out.Username = claimString(claims, "preferred_username")
-	}
 	out.Email = claimString(claims, cfg.AttributeMapping.Email)
 	out.DisplayName = claimString(claims, cfg.AttributeMapping.DisplayName)
 	out.Groups = claimStringSlice(claims, cfg.AttributeMapping.Groups)
-	// Email is deliberately NOT a fallback for the username — see the
-	// matching note in saml.go. Email is a mailing contact, not an
-	// identity; OIDC's `sub` is the canonical stable identifier when no
-	// preferred_username / configured claim is available.
-	if out.Username == "" && out.Subject != "" {
-		out.Username = out.Subject
-	}
+	// Identity = the configured username claim, period. No fallback to
+	// `sub`, `preferred_username`, or email-local-part — see saml.go for
+	// the rationale. If the IdP doesn't emit the claim the admin asked
+	// for, fail loudly rather than mint an identity from whatever's
+	// handy.
 	if out.Username == "" {
-		return nil, fmt.Errorf("oidc id_token has no username/subject")
+		return nil, fmt.Errorf("oidc id_token missing username claim %q", cfg.AttributeMapping.Username)
 	}
 	return out, nil
 }

@@ -1799,25 +1799,25 @@ function SamlPanel() {
         )}
       </Section>
 
-      {/* Attribute mapping — manual mode only. In auto mode the backend
-          resets the mapping to Microsoft Entra defaults (see admin_saml.go),
-          so showing editable fields would be a UX trap. */}
-      {!isAuto && (
-        <Section title={t('settings.sso.saml.attr_section')} md={md}>
-          <Pair>
-            <TextField fullWidth label={t('settings.sso.saml.attr_upn')} value={cfg.attribute_mapping.upn}
-              onChange={e => patchAttr('upn', e.target.value)} />
-            <TextField fullWidth label={t('settings.sso.saml.attr_email')} value={cfg.attribute_mapping.email}
-              onChange={e => patchAttr('email', e.target.value)} />
-          </Pair>
-          <Pair>
-            <TextField fullWidth label={t('settings.sso.saml.attr_display_name')} value={cfg.attribute_mapping.display_name}
-              onChange={e => patchAttr('display_name', e.target.value)} />
-            <TextField fullWidth label={t('settings.sso.saml.attr_groups')} value={cfg.attribute_mapping.groups}
-              onChange={e => patchAttr('groups', e.target.value)} />
-          </Pair>
-        </Section>
-      )}
+      {/* Attribute mapping is admin policy in both modes — auto mode
+          only derives SP / IdP wiring from metadata. Defaults are
+          prefilled by ApplySAMLDefaults on the backend, but the admin
+          must be able to override per-tenant claim URNs (e.g. a custom
+          Entra namespace for the UPN claim). */}
+      <Section title={t('settings.sso.saml.attr_section')} md={md}>
+        <Pair>
+          <TextField fullWidth label={t('settings.sso.saml.attr_upn')} value={cfg.attribute_mapping.upn}
+            onChange={e => patchAttr('upn', e.target.value)} />
+          <TextField fullWidth label={t('settings.sso.saml.attr_email')} value={cfg.attribute_mapping.email}
+            onChange={e => patchAttr('email', e.target.value)} />
+        </Pair>
+        <Pair>
+          <TextField fullWidth label={t('settings.sso.saml.attr_display_name')} value={cfg.attribute_mapping.display_name}
+            onChange={e => patchAttr('display_name', e.target.value)} />
+          <TextField fullWidth label={t('settings.sso.saml.attr_groups')} value={cfg.attribute_mapping.groups}
+            onChange={e => patchAttr('groups', e.target.value)} />
+        </Pair>
+      </Section>
 
       {/* Group resolution — admin groups + default group are admin policy
           (not derived from IdP metadata), so they stay editable in both modes. */}
