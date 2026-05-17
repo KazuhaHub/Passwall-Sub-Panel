@@ -435,24 +435,27 @@ func (s *SAMLService) ParseACSResponse(r *http.Request, possibleRequestIDs []str
 			}
 		}
 	}
-	// Fallback chain for the stable subject identifier (UPN field):
-	//   1. The configured UPN claim — defaults to Entra's objectidentifier
-	//      (the user's Object ID GUID; rock-solid stable).
-	//   2. The email claim — stable for any IdP where the user's email
-	//      doesn't churn, which is the common case.
-	//   3. NameID — last resort. Avoid relying on this; IdPs are free to
-	//      put a per-SP hash here (Entra's "Persistent" format) which
-	//      changes whenever the SP identity changes.
-	if out.UPN == "" {
-		out.UPN = out.Email
-	}
+	// Fallback chain for the stable subject identifier (UPN field).
+	// Email is DELIBERATELY not in this chain — email is a contact address,
+	// not an identity. Letting a missing UPN claim silently degrade to
+	// email-as-identity has bitten this deployment (Entra's default SAML
+	// app emits user.mail under the emailaddress claim but puts the real
+	// user.userprincipalname in NameID; an empty UPN attribute would then
+	// land on the mailbox address and break account lookups whenever the
+	// admin changes a user's primary email).
+	//
+	//   1. The configured UPN claim — admin-controlled, takes precedence.
+	//   2. NameID — Entra's default SAML app sets the NameID source to
+	//      user.userprincipalname, so this is the right fallback for the
+	//      out-of-the-box Entra wiring. IdPs that use a per-SP persistent
+	//      hash should configure a UPN claim explicitly to override.
 	if out.UPN == "" {
 		if assertion.Subject != nil && assertion.Subject.NameID != nil {
 			out.UPN = assertion.Subject.NameID.Value
 		}
 	}
 	if out.UPN == "" {
-		return nil, fmt.Errorf("SAML response missing stable subject identifier (configure the objectidentifier claim in Entra)")
+		return nil, fmt.Errorf("SAML response missing UPN claim and NameID — configure a UPN attribute (e.g. user.userprincipalname) on the IdP side")
 	}
 
 	// DisplayName fallback: the configured AttributeMapping.DisplayName URN

@@ -175,13 +175,12 @@ func (s *OIDCService) Exchange(ctx context.Context, code, expectedNonce string) 
 	out.Email = claimString(claims, cfg.AttributeMapping.Email)
 	out.DisplayName = claimString(claims, cfg.AttributeMapping.DisplayName)
 	out.Groups = claimStringSlice(claims, cfg.AttributeMapping.Groups)
-	if out.Username == "" {
-		// Last-resort: derive from email local-part, then from subject.
-		if i := strings.IndexByte(out.Email, '@'); i > 0 {
-			out.Username = out.Email[:i]
-		} else if out.Subject != "" {
-			out.Username = out.Subject
-		}
+	// Email is deliberately NOT a fallback for the username — see the
+	// matching note in saml.go. Email is a mailing contact, not an
+	// identity; OIDC's `sub` is the canonical stable identifier when no
+	// preferred_username / configured claim is available.
+	if out.Username == "" && out.Subject != "" {
+		out.Username = out.Subject
 	}
 	if out.Username == "" {
 		return nil, fmt.Errorf("oidc id_token has no username/subject")
