@@ -8,6 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/jwtutil"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/paneltz"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 )
 
@@ -202,6 +203,14 @@ func (h *AdminSettingsHandler) Put(c *gin.Context) {
 	}
 	if s.EmergencyAccessEnabled && (s.EmergencyAccessHours <= 0 || s.EmergencyAccessMaxCount <= 0) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Emergency access hours and max count must be > 0 when enabled"})
+		return
+	}
+	// Validate timezone up front so admin gets immediate feedback if the
+	// IANA name the browser offered isn't in the panel's Go tzdata. Without
+	// this, save succeeds silently and paneltz.Location falls back to
+	// time.Local at use time — admin can't tell their pick was rejected.
+	if err := paneltz.Validate(s.Timezone); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Unknown timezone " + s.Timezone + " — panel can't resolve this IANA name"})
 		return
 	}
 	if s.EmailDomain == "" {

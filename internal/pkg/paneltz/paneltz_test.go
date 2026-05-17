@@ -73,3 +73,30 @@ func TestNow_RespectsLocation(t *testing.T) {
 		t.Errorf("Now().Location() = %q, want Asia/Tokyo", loc.Location())
 	}
 }
+
+// TestValidate_Accepts: every IANA name the binary's tzdata can resolve
+// (plus empty, which we explicitly allow as "use server local") must
+// pass validation. Without this guarantee, save-time validation would
+// reject perfectly valid picks.
+func TestValidate_Accepts(t *testing.T) {
+	for _, tz := range []string{"", "  ", "UTC", "Asia/Shanghai", "America/Los_Angeles", "Europe/London"} {
+		t.Run(tz, func(t *testing.T) {
+			if err := Validate(tz); err != nil {
+				t.Errorf("Validate(%q) returned error: %v", tz, err)
+			}
+		})
+	}
+}
+
+// TestValidate_Rejects: typos and bogus IANA names must be flagged so
+// the admin settings PUT handler can return a clear 400 instead of
+// silently accepting and falling back to time.Local at use time.
+func TestValidate_Rejects(t *testing.T) {
+	for _, tz := range []string{"Not/A/Real/Zone", "Asia/Shanghaii", "GMT+8"} {
+		t.Run(tz, func(t *testing.T) {
+			if err := Validate(tz); err == nil {
+				t.Errorf("Validate(%q) accepted a bogus tz", tz)
+			}
+		})
+	}
+}

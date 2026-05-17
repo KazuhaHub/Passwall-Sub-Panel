@@ -38,3 +38,17 @@ func Location(ctx context.Context, settings ports.SettingsRepo) *time.Location {
 func Now(ctx context.Context, settings ports.SettingsRepo) time.Time {
 	return time.Now().In(Location(ctx, settings))
 }
+
+// Validate checks that a tz string is something this binary's tzdata can
+// resolve. Empty is allowed (it means "use server local"). Used by the
+// admin settings PUT handler to reject saves the browser offered but Go
+// can't actually load — otherwise the save succeeds silently and
+// Location's fallback path leaves the admin thinking their pick stuck.
+func Validate(tz string) error {
+	tz = strings.TrimSpace(tz)
+	if tz == "" {
+		return nil
+	}
+	_, err := time.LoadLocation(tz)
+	return err
+}
