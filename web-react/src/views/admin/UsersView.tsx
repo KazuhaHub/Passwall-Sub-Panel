@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type FormEvent, type MouseEvent } from 'react'
 import {
+  Autocomplete,
   Box,
   Button,
   Card,
@@ -950,13 +951,18 @@ export default function UsersView() {
                   </IconButton>
                 </InputAdornment>
               ) }} />
-            <TextField select required fullWidth size="small" label={t('admin:users.field.group')}
-              value={createForm.group_id || ''}
-              onChange={e => setCreateForm({ ...createForm, group_id: Number(e.target.value) })}
-              error={!!createErr.group_id}
-              helperText={createErr.group_id ? t(`admin:${createErr.group_id}`) : ''}>
-              {groups.map(g => <MenuItem key={g.id} value={g.id}>{g.name}</MenuItem>)}
-            </TextField>
+            <Autocomplete
+              size="small" fullWidth
+              options={groups}
+              getOptionLabel={(g) => g.name}
+              isOptionEqualToValue={(a, b) => a.id === b.id}
+              value={groups.find(g => g.id === createForm.group_id) ?? null}
+              onChange={(_, v) => setCreateForm({ ...createForm, group_id: v ? v.id : '' })}
+              renderInput={(params) => (
+                <TextField {...params} required label={t('admin:users.field.group')}
+                  error={!!createErr.group_id}
+                  helperText={createErr.group_id ? t(`admin:${createErr.group_id}`) : ''} />
+              )} />
             <TextField fullWidth type="number" label={t('admin:users.field.expire_days')}
               value={createForm.expire_days}
               onChange={e => setCreateForm({ ...createForm, expire_days: Number(e.target.value) })}
@@ -1095,13 +1101,18 @@ export default function UsersView() {
               value={editForm.email} onChange={e => setEditForm({ ...editForm, email: e.target.value })}
               error={!!editErr.email}
               helperText={editErr.email ? t(`admin:${editErr.email}`) : ''} />
-            <TextField select required size="small" fullWidth label={t('admin:users.field.group')}
-              value={editForm.group_id}
-              onChange={e => setEditForm({ ...editForm, group_id: Number(e.target.value) })}
-              error={!!editErr.group_id}
-              helperText={editErr.group_id ? t(`admin:${editErr.group_id}`) : ''}>
-              {groups.map(g => <MenuItem key={g.id} value={g.id}>{g.name}</MenuItem>)}
-            </TextField>
+            <Autocomplete
+              size="small" fullWidth
+              options={groups}
+              getOptionLabel={(g) => g.name}
+              isOptionEqualToValue={(a, b) => a.id === b.id}
+              value={groups.find(g => g.id === editForm.group_id) ?? null}
+              onChange={(_, v) => setEditForm({ ...editForm, group_id: v ? v.id : '' })}
+              renderInput={(params) => (
+                <TextField {...params} required label={t('admin:users.field.group')}
+                  error={!!editErr.group_id}
+                  helperText={editErr.group_id ? t(`admin:${editErr.group_id}`) : ''} />
+              )} />
             <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1 }}>
               <TextField select size="small" fullWidth label={t('admin:users.field.role')}
                 value={editForm.role}
