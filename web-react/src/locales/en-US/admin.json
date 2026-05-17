@@ -899,7 +899,11 @@
       "result_title": "Reconcile result",
       "summary_no_fix": "Scanned {{scanned}} nodes/users — everything is consistent.",
       "summary_fixed": "Scanned {{scanned}} nodes/users, auto-fixed {{fixed}} issues.",
-      "issues_title": "Unresolved issues"
+      "issues_title": "Unresolved issues",
+      "show_details": "Show details",
+      "hide_details": "Hide details",
+      "fixed_section": "Fixed",
+      "unfixed_section": "Unresolved"
     },
     "credentials": {
       "result": "Reset OK! New UUID: {{uuid}}",

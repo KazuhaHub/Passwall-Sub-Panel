@@ -187,6 +187,39 @@ func (n *Node) IsSeparator() bool {
 	return n != nil && n.Kind == NodeKindSeparator
 }
 
+// PushExpireTime returns the 3X-UI expire_time (ms since epoch) that
+// should be transmitted for u — i.e. MAX(ExpireAt, EmergencyUntil) so
+// an active emergency-access window can extend the wall-clock expiry
+// without panel having to mutate u.ExpireAt itself. Returns 0 ("no
+// expiry") only when BOTH ExpireAt and EmergencyUntil are nil, which
+// preserves the "permanent user" contract that 3X-UI uses for clients
+// that never expire.
+//
+// Defined on *User in the domain package so every push path
+// (user.pushClientConfigToAll, reconcile.checkOne, sync recovery
+// flows) shares one source of truth — the v2.2.4 / v2.2.5 history
+// taught that splitting this calculation across packages drifts and
+// causes reconcile to fight traffic poll over the same field.
+func (u *User) PushExpireTime() int64 {
+	if u == nil {
+		return 0
+	}
+	var effective time.Time
+	has := false
+	if u.ExpireAt != nil {
+		effective = *u.ExpireAt
+		has = true
+	}
+	if u.EmergencyUntil != nil && u.EmergencyUntil.After(effective) {
+		effective = *u.EmergencyUntil
+		has = true
+	}
+	if !has {
+		return 0
+	}
+	return effective.UnixMilli()
+}
+
 type Node struct {
 	ID            int64
 	PanelID       int64

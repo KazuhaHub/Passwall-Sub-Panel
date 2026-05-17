@@ -383,10 +383,13 @@ func (s *Service) checkOne(ctx context.Context, u *domain.User, e *domain.XUICli
 		desiredFlow = n.Flow
 	}
 
-	var expireTime int64
-	if u.ExpireAt != nil {
-		expireTime = u.ExpireAt.UnixMilli()
-	}
+	// Single source of truth for "what expire_time should 3X-UI see for
+	// this user" — same helper user.pushClientConfigToAll uses. Crucially
+	// includes the EmergencyUntil extension; without this, reconcile and
+	// the traffic poll fight over the same field (poll pushes the
+	// emergency-extended time, reconcile would push the raw ExpireAt
+	// back, poll pushes again, ad infinitum).
+	expireTime := u.PushExpireTime()
 
 	// Check 1: existence
 	if found == nil {
@@ -480,20 +483,30 @@ func (s *Service) checkOne(ctx context.Context, u *domain.User, e *domain.XUICli
 		}
 	}
 
-	// Check 5: mismatch on TotalGB or ExpiryTime on a panel-managed client
-	if found.TotalGB > 0 || found.ExpiryTime != expireTime {
+	// Check 5: mismatch on ExpiryTime only. TotalGB is the per-client
+	// traffic floor managed by user.Service/traffic.PollOnce as the
+	// panel-offline safety net (a NON-ZERO byte count = remaining quota,
+	// see fad13a3). Reconcile must NOT check TotalGB or it'll fight the
+	// poll cycle every run: poll pushes floor=remaining, reconcile sees
+	// "TotalGB > 0 = drift" and clears it to 0, poll re-pushes, and so
+	// on — manifested as "auto-fixed 10 issues" every single reconcile
+	// click. The drift-healing path that does fire here (expire only)
+	// reuses the existing SetOwnedClientEnable signature; we pass totalGB=0
+	// only because the helper requires it — the per-client floor is
+	// re-asserted by the very next traffic poll regardless.
+	if found.ExpiryTime != expireTime {
 		if err := s.syncer.SetOwnedClientEnable(ctx, e.PanelID, e.InboundID, e.ClientEmail,
 			protocol, u.UUID, desiredFlow, u.Enabled, expireTime, 0); err != nil {
 			return &Issue{
 				PanelID:   e.PanelID,
 				PanelName: e.PanelName, InboundID: e.InboundID, ClientEmail: e.ClientEmail,
-				Code: "extra_field_fix_failed", Detail: err.Error(),
+				Code: "expire_mismatch_fix_failed", Detail: err.Error(),
 			}, false
 		}
 		return &Issue{
 			PanelID:   e.PanelID,
 			PanelName: e.PanelName, InboundID: e.InboundID, ClientEmail: e.ClientEmail,
-			Code: "extra_field_fixed",
+			Code: "expire_mismatch_fixed",
 		}, true
 	}
 

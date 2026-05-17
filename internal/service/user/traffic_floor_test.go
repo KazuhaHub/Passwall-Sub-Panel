@@ -208,10 +208,11 @@ func TestTrafficFloor_EmergencyActive_SettingsLoadErrorDefaultsUnlimited(t *test
 	}
 }
 
-// --- pushExpireTime: 3X-UI expire_time that respects emergency ---
+// --- domain.User.PushExpireTime: 3X-UI expire_time that respects emergency ---
 
 func TestPushExpireTime_NilUserReturnsZero(t *testing.T) {
-	if got := pushExpireTime(nil); got != 0 {
+	var u *domain.User
+	if got := u.PushExpireTime(); got != 0 {
 		t.Fatalf("nil user → got %d, want 0", got)
 	}
 }
@@ -219,7 +220,7 @@ func TestPushExpireTime_NilUserReturnsZero(t *testing.T) {
 func TestPushExpireTime_PermanentUserReturnsZero(t *testing.T) {
 	// Neither ExpireAt nor EmergencyUntil set — "permanent" user, push
 	// 0 ms so 3X-UI treats it as "no expiry".
-	if got := pushExpireTime(&domain.User{}); got != 0 {
+	if got := (&domain.User{}).PushExpireTime(); got != 0 {
 		t.Fatalf("permanent user → got %d, want 0", got)
 	}
 }
@@ -227,7 +228,7 @@ func TestPushExpireTime_PermanentUserReturnsZero(t *testing.T) {
 func TestPushExpireTime_NormalExpiryOnly(t *testing.T) {
 	expire := time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC)
 	u := &domain.User{ExpireAt: &expire}
-	if got := pushExpireTime(u); got != expire.UnixMilli() {
+	if got := u.PushExpireTime(); got != expire.UnixMilli() {
 		t.Fatalf("expire-only → got %d, want %d", got, expire.UnixMilli())
 	}
 }
@@ -238,7 +239,7 @@ func TestPushExpireTime_EmergencyLaterThanExpiry(t *testing.T) {
 	expire := time.Date(2026, 5, 17, 12, 0, 0, 0, time.UTC)
 	emergency := time.Date(2026, 5, 18, 0, 0, 0, 0, time.UTC)
 	u := &domain.User{ExpireAt: &expire, EmergencyUntil: &emergency}
-	if got := pushExpireTime(u); got != emergency.UnixMilli() {
+	if got := u.PushExpireTime(); got != emergency.UnixMilli() {
 		t.Fatalf("emergency-extends-expiry → got %d, want %d", got, emergency.UnixMilli())
 	}
 }
@@ -249,7 +250,7 @@ func TestPushExpireTime_EmergencyEarlierThanExpiry(t *testing.T) {
 	expire := time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC)
 	emergency := time.Date(2026, 5, 18, 0, 0, 0, 0, time.UTC)
 	u := &domain.User{ExpireAt: &expire, EmergencyUntil: &emergency}
-	if got := pushExpireTime(u); got != expire.UnixMilli() {
+	if got := u.PushExpireTime(); got != expire.UnixMilli() {
 		t.Fatalf("stale emergency → got %d, want %d (expire wins)", got, expire.UnixMilli())
 	}
 }
@@ -259,7 +260,7 @@ func TestPushExpireTime_EmergencyOnly(t *testing.T) {
 	// emergency time so 3X-UI knows when to flip off.
 	emergency := time.Date(2026, 5, 18, 0, 0, 0, 0, time.UTC)
 	u := &domain.User{EmergencyUntil: &emergency}
-	if got := pushExpireTime(u); got != emergency.UnixMilli() {
+	if got := u.PushExpireTime(); got != emergency.UnixMilli() {
 		t.Fatalf("emergency-only → got %d, want %d", got, emergency.UnixMilli())
 	}
 }

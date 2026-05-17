@@ -899,7 +899,11 @@
       "result_title": "巡检结果",
       "summary_no_fix": "巡检完成！共扫描 {{scanned}} 个节点/用户，所有数据均一致。",
       "summary_fixed": "巡检完成！共扫描 {{scanned}} 个节点/用户，自动修复 {{fixed}} 个问题。",
-      "issues_title": "未修复问题"
+      "issues_title": "未修复问题",
+      "show_details": "显示详情",
+      "hide_details": "隐藏详情",
+      "fixed_section": "已修复",
+      "unfixed_section": "未能修复"
     },
     "credentials": {
       "result": "已重置！新 UUID: {{uuid}}",

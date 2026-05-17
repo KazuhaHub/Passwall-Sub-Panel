@@ -209,6 +209,11 @@ export default function UsersView() {
 
   const [reconcileOpen, setReconcileOpen] = useState(false)
   const [reconcileReport, setReconcileReport] = useState<ReconcileReport | null>(null)
+  // Collapsed by default — the summary "Scanned N, fixed M" sits at the
+  // top of the result dialog and admin can expand the per-issue list via
+  // a "show details" button left of OK. Mirrors the spec from v2.2.5:
+  // detail toggle lives in DialogActions, not the body.
+  const [reconcileDetailsOpen, setReconcileDetailsOpen] = useState(false)
 
   // Per-row More menu
   const [moreAnchor, setMoreAnchor] = useState<HTMLElement | null>(null)
@@ -613,12 +618,14 @@ export default function UsersView() {
     try {
       const report = await runReconcile()
       setReconcileReport(report)
-      if (report.issues && report.issues.length > 0) {
+      setReconcileDetailsOpen(false) // reset every run; admin reveals via button
+      if ((report.fixed ?? 0) > 0 || (report.issues?.length ?? 0) > 0) {
+        // Show dialog whenever something happened (fix OR unfixed issue),
+        // not just when there are unfixed issues — admin wants to see
+        // "what got fixed" in the detail view, not just leftovers.
         setReconcileOpen(true)
       } else {
-        const msg = report.fixed > 0
-          ? t('admin:users.reconcile.summary_fixed', { scanned: report.scanned, fixed: report.fixed })
-          : t('admin:users.reconcile.summary_no_fix', { scanned: report.scanned })
+        const msg = t('admin:users.reconcile.summary_no_fix', { scanned: report.scanned })
         pushSnack(msg, 'success')
       }
       await load()
@@ -1351,7 +1358,7 @@ export default function UsersView() {
 
       {/* Reconcile result dialog (only when issues exist) */}
       <Dialog open={reconcileOpen} onClose={() => setReconcileOpen(false)}
-        PaperProps={{ sx: { borderRadius: 3, bgcolor: md.surfaceContainerHigh, width: 600, maxWidth: '95vw' } }}>
+        PaperProps={{ sx: { borderRadius: 3, bgcolor: md.surfaceContainerHigh, width: 640, maxWidth: '95vw' } }}>
         <DialogTitle>{t('admin:users.reconcile.result_title')}</DialogTitle>
         <DialogContent>
           {reconcileReport && (
@@ -1361,26 +1368,53 @@ export default function UsersView() {
                   ? t('admin:users.reconcile.summary_fixed', { scanned: reconcileReport.scanned, fixed: reconcileReport.fixed })
                   : t('admin:users.reconcile.summary_no_fix', { scanned: reconcileReport.scanned })}
               </Typography>
-              {(() => {
+              {reconcileDetailsOpen && (reconcileReport.issues?.length ?? 0) > 0 && (() => {
+                const fixed = (reconcileReport.issues ?? []).filter(i => i.fixed)
                 const unfixed = (reconcileReport.issues ?? []).filter(i => !i.fixed)
-                if (unfixed.length === 0) return null
+                const renderItem = (i: { panel_name?: string; client_email?: string; code?: string; detail?: string }, key: number) => (
+                  <li key={key}>
+                    {i.panel_name && <strong>[{i.panel_name}]</strong>} {i.client_email || '(node)'}
+                    {' — '}
+                    <code style={{ fontSize: 12 }}>{i.code}</code>
+                    {i.detail ? `: ${i.detail}` : ''}
+                  </li>
+                )
                 return (
-                  <>
-                    <Typography sx={{ fontWeight: 500, mb: 1 }}>{t('admin:users.reconcile.issues_title')}</Typography>
-                    <Box component="ul" sx={{ pl: 2, m: 0, '& li': { fontSize: 13, color: md.onSurfaceVariant, mb: 0.5 } }}>
-                      {unfixed.map((i, idx) => (
-                        <li key={idx}>
-                          {i.panel_name && <strong>[{i.panel_name}]</strong>} {i.client_email}{i.detail ? `: ${i.detail}` : ''}
-                        </li>
-                      ))}
-                    </Box>
-                  </>
+                  <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+                    {fixed.length > 0 && (
+                      <Box>
+                        <Typography sx={{ fontWeight: 500, mb: 0.5, fontSize: 13 }}>
+                          {t('admin:users.reconcile.fixed_section', { defaultValue: '已修复' })}（{fixed.length}）
+                        </Typography>
+                        <Box component="ul" sx={{ pl: 2, m: 0, '& li': { fontSize: 12, color: md.onSurfaceVariant, mb: 0.5 } }}>
+                          {fixed.map((i, idx) => renderItem(i, idx))}
+                        </Box>
+                      </Box>
+                    )}
+                    {unfixed.length > 0 && (
+                      <Box>
+                        <Typography sx={{ fontWeight: 500, mb: 0.5, fontSize: 13, color: md.error }}>
+                          {t('admin:users.reconcile.unfixed_section', { defaultValue: '未能修复' })}（{unfixed.length}）
+                        </Typography>
+                        <Box component="ul" sx={{ pl: 2, m: 0, '& li': { fontSize: 12, color: md.onSurfaceVariant, mb: 0.5 } }}>
+                          {unfixed.map((i, idx) => renderItem(i, idx))}
+                        </Box>
+                      </Box>
+                    )}
+                  </Box>
                 )
               })()}
             </>
           )}
         </DialogContent>
         <DialogActions>
+          {reconcileReport && (reconcileReport.issues?.length ?? 0) > 0 && (
+            <Button variant="text" onClick={() => setReconcileDetailsOpen(v => !v)}>
+              {reconcileDetailsOpen
+                ? t('admin:users.reconcile.hide_details', { defaultValue: '隐藏详情' })
+                : t('admin:users.reconcile.show_details', { defaultValue: '显示详情' })}
+            </Button>
+          )}
           <Button variant="contained" onClick={() => setReconcileOpen(false)}>{t('common:actions.ok')}</Button>
         </DialogActions>
       </Dialog>
