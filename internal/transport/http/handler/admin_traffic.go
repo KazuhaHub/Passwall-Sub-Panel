@@ -12,6 +12,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/paneltz"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/traffic"
 )
@@ -19,13 +20,14 @@ import (
 // AdminTrafficHandler exposes /api/admin/traffic — aggregate usage views
 // (Top-N this period) and per-user / per-node lookups.
 type AdminTrafficHandler struct {
-	users   ports.UserRepo
-	nodes   ports.NodeRepo
-	traffic *traffic.Service
+	users    ports.UserRepo
+	nodes    ports.NodeRepo
+	traffic  *traffic.Service
+	settings ports.SettingsRepo
 }
 
-func NewAdminTrafficHandler(users ports.UserRepo, nodes ports.NodeRepo, trafficSvc *traffic.Service) *AdminTrafficHandler {
-	return &AdminTrafficHandler{users: users, nodes: nodes, traffic: trafficSvc}
+func NewAdminTrafficHandler(users ports.UserRepo, nodes ports.NodeRepo, trafficSvc *traffic.Service, settings ports.SettingsRepo) *AdminTrafficHandler {
+	return &AdminTrafficHandler{users: users, nodes: nodes, traffic: trafficSvc, settings: settings}
 }
 
 type trafficRow struct {
@@ -95,7 +97,7 @@ func (h *AdminTrafficHandler) Top(c *gin.Context) {
 }
 
 func (h *AdminTrafficHandler) History(c *gin.Context) {
-	period, since, until, err := parseTrafficHistoryQuery(c)
+	period, since, until, err := parseTrafficHistoryQuery(c, paneltz.Location(c.Request.Context(), h.settings))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -165,7 +167,7 @@ func (h *AdminTrafficHandler) UserHistory(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid id"})
 		return
 	}
-	period, since, until, err := parseTrafficHistoryQuery(c)
+	period, since, until, err := parseTrafficHistoryQuery(c, paneltz.Location(c.Request.Context(), h.settings))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -262,13 +264,17 @@ func (h *AdminTrafficHandler) SetUserUsage(c *gin.Context) {
 	})
 }
 
-func parseTrafficHistoryQuery(c *gin.Context) (traffic.HistoryPeriod, time.Time, time.Time, error) {
+func parseTrafficHistoryQuery(c *gin.Context, defaultLoc *time.Location) (traffic.HistoryPeriod, time.Time, time.Time, error) {
 	// tz lets the client express which timezone since/until are in. Without
-	// it, a browser in PT asking for "until 2026-05-16" against a UTC server
-	// would parse it as 2026-05-16 00:00 UTC, dropping post-midnight-UTC
-	// snapshots from the same wall-clock day. Falls back to server local
-	// for back-compat with older clients.
-	loc := time.Local
+	// it we fall back to the caller-supplied defaultLoc (panel timezone for
+	// admin handlers, user-side handlers too — both share this helper).
+	// Without any of this a browser in PT asking for "until 2026-05-16"
+	// against a UTC server would parse it as 2026-05-16 00:00 UTC, dropping
+	// post-midnight-UTC snapshots from the same wall-clock day.
+	loc := defaultLoc
+	if loc == nil {
+		loc = time.Local
+	}
 	if tz := strings.TrimSpace(c.Query("tz")); tz != "" {
 		l, err := time.LoadLocation(tz)
 		if err != nil {
@@ -378,7 +384,7 @@ func (h *AdminTrafficHandler) NodesTop(c *gin.Context) {
 // NodesHistory returns aggregate per-bucket history across all nodes (or a
 // single node when ?node_id= is passed).
 func (h *AdminTrafficHandler) NodesHistory(c *gin.Context) {
-	period, since, until, err := parseTrafficHistoryQuery(c)
+	period, since, until, err := parseTrafficHistoryQuery(c, paneltz.Location(c.Request.Context(), h.settings))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return

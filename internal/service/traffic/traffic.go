@@ -11,6 +11,7 @@ import (
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/log"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/paneltz"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 )
 
@@ -94,6 +95,12 @@ func New(users ports.UserRepo, ownership ports.OwnershipRepo, traffic ports.Traf
 func (s *Service) WithSettings(settings ports.SettingsRepo) *Service {
 	s.settings = settings
 	return s
+}
+
+// panelNow is a thin wrapper over paneltz.Now so the existing call sites
+// here don't need to thread the settings repo at each call.
+func (s *Service) panelNow(ctx context.Context) time.Time {
+	return paneltz.Now(ctx, s.settings)
 }
 
 // PollOnce walks every user, pulls aggregated traffic, writes a snapshot,
@@ -333,7 +340,7 @@ func (s *Service) recordClientStats(ctx context.Context, userID int64, panelID i
 }
 
 func (s *Service) recordAndEnforce(ctx context.Context, u *domain.User, totals trafficTotals) error {
-	now := time.Now()
+	now := s.panelNow(ctx)
 
 	// Skip the snapshot entirely when 3X-UI returned no matching client rows.
 	// Inserting a zero would corrupt subsequent today/period delta math.
@@ -607,7 +614,7 @@ func (s *Service) NodeReportFor(ctx context.Context, nodeID int64) (*NodeReport,
 		report.PermanentTotalBytes = latest.TotalBytes
 	}
 
-	now := time.Now()
+	now := s.panelNow(ctx)
 	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
 	if base, err := s.nodeTraffic.LastBefore(ctx, nodeID, todayStart); err == nil && base != nil {
 		report.TodayUsedBytes = monotonicDelta(latest.TotalBytes, base.TotalBytes)
@@ -813,7 +820,7 @@ func (s *Service) ReportFor(ctx context.Context, userID int64) (*UsageReport, er
 		report.PermanentTotalBytes = latest.TotalBytes
 	}
 
-	now := time.Now()
+	now := s.panelNow(ctx)
 	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
 	if base, err := s.traffic.LastBefore(ctx, userID, todayStart); err == nil && base != nil {
 		report.TodayUsedBytes = monotonicDelta(latest.TotalBytes, base.TotalBytes)

@@ -19,6 +19,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/crypto"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/idgen"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/log"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/paneltz"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 )
 
@@ -378,7 +379,12 @@ func (s *Service) EnsureSSO(ctx context.Context, in EnsureSSOInput) (*domain.Use
 	}
 	var expire *time.Time
 	if in.DefaultExpireDays > 0 {
-		t := time.Now().AddDate(0, 0, in.DefaultExpireDays)
+		// AddDate the "days from now" offset in the panel's timezone so the
+		// expiry wall-clock day matches what the admin intended when picking
+		// e.g. "30 days" — the resulting instant is the same UTC moment but
+		// the calendar arithmetic is now consistent with the panel's day
+		// boundary (relevant near DST transitions / off-by-one hour cases).
+		t := paneltz.Now(ctx, s.settings).AddDate(0, 0, in.DefaultExpireDays)
 		expire = &t
 	}
 	resetPeriod := in.DefaultResetPeriod

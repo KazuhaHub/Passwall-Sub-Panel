@@ -10,6 +10,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/paneltz"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/traffic"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/user"
@@ -203,7 +204,7 @@ func (h *UserMeHandler) TrafficHistory(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "No auth"})
 		return
 	}
-	period, since, until, err := parseTrafficHistoryQuery(c)
+	period, since, until, err := parseTrafficHistoryQuery(c, paneltz.Location(c.Request.Context(), h.settings))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
