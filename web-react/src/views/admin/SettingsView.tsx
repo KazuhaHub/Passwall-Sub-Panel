@@ -1807,7 +1807,8 @@ function SamlPanel() {
       <Section title={t('settings.sso.saml.attr_section')} md={md}>
         <Pair>
           <TextField fullWidth label={t('settings.sso.saml.attr_upn')} value={cfg.attribute_mapping.upn}
-            onChange={e => patchAttr('upn', e.target.value)} />
+            onChange={e => patchAttr('upn', e.target.value)}
+            helperText={t('settings.sso.saml.attr_upn_hint')} />
           <TextField fullWidth label={t('settings.sso.saml.attr_email')} value={cfg.attribute_mapping.email}
             onChange={e => patchAttr('email', e.target.value)} />
         </Pair>

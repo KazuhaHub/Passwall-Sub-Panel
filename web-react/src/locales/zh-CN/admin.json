@@ -134,6 +134,7 @@
         "idp_refresh_hours": "Metadata 刷新间隔（小时）",
         "attr_section": "属性映射",
         "attr_upn": "UPN 属性名",
+        "attr_upn_hint": "填 IdP 发送 UPN 的 attribute Name URN；或填 nameid 直接从 <Subject><NameID> 读（Okta / Google / Keycloak / ADFS 默认走这条）",
         "attr_email": "Email 属性名",
         "attr_display_name": "Display Name 属性名",
         "attr_groups": "Groups 属性名",

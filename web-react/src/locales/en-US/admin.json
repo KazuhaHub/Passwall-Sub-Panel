@@ -134,6 +134,7 @@
         "idp_refresh_hours": "Metadata refresh interval (hours)",
         "attr_section": "Attribute mapping",
         "attr_upn": "UPN attribute",
+        "attr_upn_hint": "Attribute Name URN that carries the UPN, or \"nameid\" to read from <Subject><NameID> (default for Okta / Google / Keycloak / ADFS)",
         "attr_email": "Email attribute",
         "attr_display_name": "Display name attribute",
         "attr_groups": "Groups attribute",

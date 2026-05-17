@@ -427,12 +427,31 @@ func (s *SAMLService) ParseACSResponse(r *http.Request, possibleRequestIDs []str
 		return nil, fmt.Errorf("parse SAML response: %w", err)
 	}
 	out := &SAMLAssertion{}
+	// Subject identifier source is an admin policy decision. Two
+	// supported values:
+	//   * "nameid" (case-insensitive) — read from <Subject><NameID>.
+	//     This is the SAML-spec-canonical location, default for Okta,
+	//     Google Workspace, Keycloak, ADFS, OneLogin, etc.
+	//   * any other value — treat as an Attribute Name URN and match
+	//     it in <AttributeStatement>. Required for Microsoft Entra,
+	//     whose default NameID is an opaque pairwise hash; admins on
+	//     Entra add a UPN attribute claim and point this field at its
+	//     URN.
+	// Both paths are EXPLICIT — there is no implicit fallback from one
+	// to the other. A misconfiguration fails the login with the exact
+	// missing identifier in the error.
+	upnFromNameID := strings.EqualFold(strings.TrimSpace(cfg.AttributeMapping.UPN), "nameid")
+	if upnFromNameID {
+		if assertion.Subject != nil && assertion.Subject.NameID != nil {
+			out.UPN = assertion.Subject.NameID.Value
+		}
+	}
 	for _, stmt := range assertion.AttributeStatements {
 		for _, attr := range stmt.Attributes {
 			for _, v := range attr.Values {
 				switch attr.Name {
 				case cfg.AttributeMapping.UPN:
-					if out.UPN == "" {
+					if !upnFromNameID && out.UPN == "" {
 						out.UPN = v.Value
 					}
 				case cfg.AttributeMapping.Email:
@@ -449,15 +468,11 @@ func (s *SAMLService) ParseACSResponse(r *http.Request, possibleRequestIDs []str
 			}
 		}
 	}
-	// UPN is identity — no fallback to email, NameID, or fuzzy attribute-
-	// name suffix matching. Each of those silently turns a misconfigured
-	// claim into a different user identifier and (when the mapping shifts
-	// later) maps the same real-world user to a brand new panel account.
-	// If the configured UPN attribute URN isn't in the assertion, fail
-	// loudly so the admin fixes the IdP side instead of the panel inventing
-	// an identity for them.
 	if out.UPN == "" {
-		return nil, fmt.Errorf("SAML response missing UPN claim %q — add the matching attribute on the IdP side (source: user.userprincipalname)", cfg.AttributeMapping.UPN)
+		if upnFromNameID {
+			return nil, fmt.Errorf("SAML response missing <Subject><NameID> — the UPN source is configured as \"nameid\" but the IdP did not send one")
+		}
+		return nil, fmt.Errorf("SAML response missing UPN claim %q — add the matching attribute on the IdP side (or set the UPN source to \"nameid\" if your IdP carries it in <Subject><NameID>)", cfg.AttributeMapping.UPN)
 	}
 
 	// DisplayName fallback: the configured AttributeMapping.DisplayName URN
