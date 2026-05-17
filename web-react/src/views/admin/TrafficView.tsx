@@ -42,30 +42,24 @@ import { pushSnack } from '@/components/SnackbarHost'
 import { useTabParam } from '@/hooks/useTabParam'
 import { useSiteStore } from '@/stores/site'
 
-// Suggested tz options on the chart toolbar. Browser tz is always pinned
-// first (so the admin's natural "today" is one click away); panel tz comes
-// next when set (so the admin can match what the rest of the panel reports
-// against). The rest is a small set of common deployments to avoid making
-// admins type IANA names by hand — freeSolo on the Autocomplete still lets
-// them type any IANA name LoadLocation accepts.
-const COMMON_CHART_TIMEZONES: string[] = [
-  'UTC',
-  'Asia/Shanghai',
-  'Asia/Hong_Kong',
-  'Asia/Taipei',
-  'Asia/Tokyo',
-  'Asia/Seoul',
-  'Asia/Singapore',
-  'America/Los_Angeles',
-  'America/Denver',
-  'America/Chicago',
-  'America/New_York',
-  'Europe/London',
-  'Europe/Paris',
-  'Europe/Berlin',
-  'Europe/Moscow',
-  'Australia/Sydney',
-]
+// All tz options on the chart toolbar. Pulls from the browser's IANA
+// database (Intl.supportedValuesOf) so the list covers everything go's
+// time.LoadLocation can resolve — ~400 entries on modern engines, no
+// manual upkeep. Browser tz + panel tz are pinned to the top of the
+// dropdown by buildTzOptions below. Old browsers (no
+// supportedValuesOf) fall back to a short hand-rolled list.
+const COMMON_CHART_TIMEZONES: string[] = (() => {
+  try {
+    const fn = (Intl as unknown as { supportedValuesOf?: (k: string) => string[] }).supportedValuesOf
+    if (typeof fn === 'function') return fn('timeZone')
+  } catch { /* fall through */ }
+  return [
+    'UTC', 'America/Los_Angeles', 'America/Denver', 'America/Chicago',
+    'America/New_York', 'Asia/Shanghai', 'Asia/Hong_Kong', 'Asia/Taipei',
+    'Asia/Tokyo', 'Asia/Seoul', 'Asia/Singapore', 'Europe/London',
+    'Europe/Paris', 'Europe/Berlin', 'Europe/Moscow', 'Australia/Sydney',
+  ]
+})()
 
 function browserTz(): string {
   try { return Intl.DateTimeFormat().resolvedOptions().timeZone } catch { return 'UTC' }

@@ -82,30 +82,26 @@ import type { Group } from '@/api/types'
 
 type TabKey = 'general' | 'brand' | 'subscription' | 'portal' | 'mail' | 'sso'
 
-// COMMON_TIMEZONES is the suggested set in the Settings → 面板时区 picker.
-// freeSolo on the Autocomplete lets admins type any IANA name the backend
-// can LoadLocation — these are just suggestions to save typing for the
-// most common deployments (mainland CN / TW / HK / KR / JP / SG, the US
-// and major EU capitals, AU). Empty (the panel's default) falls back to
-// the server process's time.Local on the backend.
-const COMMON_TIMEZONES: string[] = [
-  'UTC',
-  'Asia/Shanghai',
-  'Asia/Hong_Kong',
-  'Asia/Taipei',
-  'Asia/Tokyo',
-  'Asia/Seoul',
-  'Asia/Singapore',
-  'America/Los_Angeles',
-  'America/Denver',
-  'America/Chicago',
-  'America/New_York',
-  'Europe/London',
-  'Europe/Paris',
-  'Europe/Berlin',
-  'Europe/Moscow',
-  'Australia/Sydney',
-]
+// COMMON_TIMEZONES is the option set in the Settings → 面板时区 picker.
+// Uses the browser's own IANA database via Intl.supportedValuesOf, which
+// returns ~400 entries on modern Chromium/Firefox/Safari — covers every
+// timezone go's time.LoadLocation can resolve, with zero manual upkeep.
+// freeSolo on the Autocomplete still lets admins type names verbatim.
+// Falls back to a tiny hand-rolled list on browsers that don't support
+// the API (pre-2022 builds) so the picker never collapses to "no
+// options".
+const COMMON_TIMEZONES: string[] = (() => {
+  try {
+    const fn = (Intl as unknown as { supportedValuesOf?: (k: string) => string[] }).supportedValuesOf
+    if (typeof fn === 'function') return fn('timeZone')
+  } catch { /* fall through */ }
+  return [
+    'UTC', 'America/Los_Angeles', 'America/Denver', 'America/Chicago',
+    'America/New_York', 'Asia/Shanghai', 'Asia/Hong_Kong', 'Asia/Taipei',
+    'Asia/Tokyo', 'Asia/Seoul', 'Asia/Singapore', 'Europe/London',
+    'Europe/Paris', 'Europe/Berlin', 'Europe/Moscow', 'Australia/Sydney',
+  ]
+})()
 
 // GroupSlugPicker is a searchable dropdown over the admin's group catalogue.
 // SAML/OIDC both use it for `default_group_slug` so admins don't have to
