@@ -13,6 +13,7 @@ package reconcile
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
@@ -106,9 +107,25 @@ func (s *Service) RunOnce(ctx context.Context, level Level) (*Report, error) {
 	rules := s.emailRules(ctx)
 	allNodes, _ := s.nodes.List(ctx)
 	nodeByInbound := make(map[inboundCacheKey]*domain.Node, len(allNodes))
+	uniquePanels := make(map[int64]struct{})
 	for _, n := range allNodes {
+		if n.IsSeparator() {
+			continue
+		}
 		nodeByInbound[inboundCacheKey{panelID: n.PanelID, inboundID: n.InboundID}] = n
+		uniquePanels[n.PanelID] = struct{}{}
 	}
+
+	// Prefetch every panel's inbound list in parallel and seed the
+	// shared cache. Before this, RunOnce did per-inbound c.GetInbound
+	// calls inside the user loop: N ownership rows = N serial network
+	// round-trips against 3X-UI (~200ms each), driving a single-digit
+	// reconcile to multi-second wall-clock. Now one ListInbounds per
+	// panel runs concurrently and downstream loadInbound calls become
+	// cache hits — saved time is proportional to panel × inbound count.
+	// Errors here aren't fatal: per-inbound loadInbound stays as the
+	// fallback if a particular ListInbounds failed.
+	prefetchInbounds(ctx, s.pool, uniquePanels, cache)
 
 	page := 1
 	const pageSize = 100
@@ -242,6 +259,78 @@ func (s *Service) checkMissingOwnerships(ctx context.Context, u *domain.User, re
 		})
 		if fixed {
 			report.Fixed++
+		}
+	}
+}
+
+// maxPanelConcurrency caps fan-out when prefetching ListInbounds across
+// many panels in parallel. Picked to be larger than typical home / small
+// SMB deployments (1-5 panels) but small enough that a 50-panel setup
+// can't slam 3X-UI with 50 simultaneous requests and exhaust its worker
+// pool. Tune up if reconcile reports become significantly bound by
+// network latency on large deployments.
+const maxPanelConcurrency = 8
+
+// prefetchInbounds pulls ListInbounds from every supplied panel in
+// parallel (bounded by maxPanelConcurrency) and seeds the shared
+// inboundCache. Errors per panel are non-fatal: the user loop's
+// per-inbound loadInbound is left as a fallback if a particular panel
+// failed here. Concurrency is bounded by a buffered-channel semaphore
+// so 50-panel deployments don't fan-out to 50 simultaneous network
+// calls — that would both overload 3X-UI's worker pool and burn an
+// unnecessary number of goroutines on the panel side.
+func prefetchInbounds(ctx context.Context, pool ports.XUIPool,
+	panels map[int64]struct{},
+	cache map[inboundCacheKey]*inboundCacheEntry) {
+
+	if len(panels) == 0 {
+		return
+	}
+	type result struct {
+		panelID  int64
+		inbounds []ports.Inbound
+		err      error
+	}
+	results := make(chan result, len(panels))
+	sem := make(chan struct{}, maxPanelConcurrency)
+	var wg sync.WaitGroup
+	for pid := range panels {
+		wg.Add(1)
+		go func(p int64) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			c, err := pool.Get(p)
+			if err != nil {
+				results <- result{panelID: p, err: err}
+				return
+			}
+			list, lerr := c.ListInbounds(ctx)
+			results <- result{panelID: p, inbounds: list, err: lerr}
+		}(pid)
+	}
+	wg.Wait()
+	close(results)
+
+	for r := range results {
+		if r.err != nil {
+			log.Warn("reconcile prefetch inbounds", "panel_id", r.panelID, "err", r.err)
+			continue
+		}
+		for i := range r.inbounds {
+			inb := &r.inbounds[i]
+			settings, perr := xrayspec.ParseSettings(inb.Settings)
+			if perr != nil {
+				log.Warn("reconcile prefetch parse settings",
+					"panel_id", r.panelID, "inbound_id", inb.ID, "err", perr)
+				continue
+			}
+			cache[inboundCacheKey{panelID: r.panelID, inboundID: inb.ID}] = &inboundCacheEntry{
+				inbound: inb,
+				clients: settings.Clients,
+				method:  settings.Method,
+				flow:    firstClientFlow(settings.Clients),
+			}
 		}
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
@@ -103,6 +104,14 @@ func (s *Service) panelNow(ctx context.Context) time.Time {
 	return paneltz.Now(ctx, s.settings)
 }
 
+// maxPanelConcurrency caps the fan-out when fetching ListInbounds in
+// parallel across panels. 8 is a generous ceiling for the typical 1-5
+// panel deployment but small enough that a 50-panel admin can't flood
+// 3X-UI workers (or the local goroutine scheduler) with simultaneous
+// HTTP requests. Tune upward only when measurements show the poll
+// becoming network-latency bound on large deployments.
+const maxPanelConcurrency = 8
+
 // PollOnce walks every user, pulls aggregated traffic, writes a snapshot,
 // and enforces quotas + period resets.
 //
@@ -113,6 +122,21 @@ func (s *Service) PollOnce(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+
+	// Load runtime settings + the resolved panel location ONCE per poll
+	// and share them across the inner loops. Before this each user's
+	// recordAndEnforce path did two settings.Load calls — one inside
+	// panelNow (via paneltz.Location) and one for the emergency-quota
+	// check — so N users meant 2N DB roundtrips even though the data
+	// is identical for the whole cycle. With N users + reasonable
+	// snapshot count that adds up.
+	pollCfg := ports.UISettings{}
+	if s.settings != nil {
+		if loaded, err := s.settings.Load(ctx, ports.UISettings{}); err == nil {
+			pollCfg = loaded
+		}
+	}
+	pollLoc := paneltz.Location(ctx, s.settings)
 
 	byInbound := make(map[inboundKey][]ownershipRef)
 	totals := make(map[int64]trafficTotals, len(users))
@@ -142,26 +166,72 @@ func (s *Service) PollOnce(ctx context.Context) error {
 	}
 
 	log.Info("traffic poll start", "users", len(users), "panels", len(byPanel), "inbounds_to_query", len(byInbound))
+
+	// Phase 1 — parallel ListInbounds across every panel, bounded by a
+	// semaphore so a 50-panel deployment can't fan out into 50
+	// simultaneous HTTP requests against 3X-UI workers. Serial calls
+	// were turning "Poll Now" into a multi-second wait with even 3
+	// panels (each request is 100-500ms network-bound); concurrent
+	// calls drop the wall-clock to roughly one ListInbounds time
+	// regardless of panel count, while the cap prevents tail-end
+	// regressions when admins eventually attach many panels.
+	type panelListResult struct {
+		stats map[int]([]ports.ClientTraffic)
+		err   error
+	}
+	panelData := make(map[int64]panelListResult, len(byPanel))
+	var panelMu sync.Mutex
+	var panelWG sync.WaitGroup
+	panelSem := make(chan struct{}, maxPanelConcurrency)
+	for panelID := range byPanel {
+		panelWG.Add(1)
+		go func(pid int64) {
+			defer panelWG.Done()
+			panelSem <- struct{}{}
+			defer func() { <-panelSem }()
+			c, err := s.pool.Get(pid)
+			if err != nil {
+				panelMu.Lock()
+				panelData[pid] = panelListResult{err: err}
+				panelMu.Unlock()
+				return
+			}
+			listed, lerr := c.ListInbounds(ctx)
+			stats := make(map[int][]ports.ClientTraffic, len(listed))
+			for _, inb := range listed {
+				stats[inb.ID] = inb.ClientStats
+			}
+			panelMu.Lock()
+			panelData[pid] = panelListResult{stats: stats, err: lerr}
+			panelMu.Unlock()
+		}(panelID)
+	}
+	panelWG.Wait()
+
+	// Phase 2 — per-panel sequential processing. ListInbounds results
+	// are already in panelData; only the per-inbound fallback (for 3X-UI
+	// builds that drop clientStats from the list endpoint) is still
+	// network-bound and stays serial inside the panel scope.
 	for panelID, inbounds := range byPanel {
-		c, err := s.pool.Get(panelID)
-		if err != nil {
-			log.Warn("traffic poll panel", "panel_id", panelID, "err", err)
+		pd := panelData[panelID]
+		if pd.err != nil {
+			log.Warn("traffic poll panel", "panel_id", panelID, "err", pd.err)
 			for _, refs := range inbounds {
 				markSkippedUsers(skipUsers, refs)
 			}
 			continue
 		}
-		// One list call per panel. Returns inbounds with their clientStats
-		// populated — same data 3X-UI's own UI uses.
-		listed, lerr := c.ListInbounds(ctx)
-		statsByInbound := make(map[int][]ports.ClientTraffic, len(listed))
-		if lerr != nil {
-			log.Warn("traffic poll list inbounds", "panel_id", panelID, "err", lerr)
-		} else {
-			for _, inb := range listed {
-				statsByInbound[inb.ID] = inb.ClientStats
+		c, err := s.pool.Get(panelID)
+		if err != nil {
+			// Pool entry vanished between phases — treat like a fresh
+			// fetch failure rather than panic.
+			log.Warn("traffic poll panel re-resolve", "panel_id", panelID, "err", err)
+			for _, refs := range inbounds {
+				markSkippedUsers(skipUsers, refs)
 			}
+			continue
 		}
+		statsByInbound := pd.stats
 
 		for inboundID, refs := range inbounds {
 			traffics := statsByInbound[inboundID]
@@ -250,7 +320,7 @@ func (s *Service) PollOnce(ctx context.Context) error {
 			log.Warn("traffic poll user skipped due to inbound fetch failure", "user_id", u.ID)
 			continue
 		}
-		if err := s.recordAndEnforce(ctx, u, totals[u.ID]); err != nil {
+		if err := s.recordAndEnforceWith(ctx, u, totals[u.ID], pollCfg, pollLoc); err != nil {
 			log.Warn("traffic poll user", "user_id", u.ID, "err", err)
 		}
 	}
@@ -339,8 +409,28 @@ func (s *Service) recordClientStats(ctx context.Context, userID int64, panelID i
 	return delta, nil
 }
 
+// recordAndEnforce is the back-compat entry preserved for tests and any
+// caller that doesn't have pre-loaded poll context. Production PollOnce
+// goes through recordAndEnforceWith directly so it only touches the
+// settings repo once per cycle instead of once per user.
 func (s *Service) recordAndEnforce(ctx context.Context, u *domain.User, totals trafficTotals) error {
-	now := s.panelNow(ctx)
+	cfg := ports.UISettings{}
+	if s.settings != nil {
+		if loaded, err := s.settings.Load(ctx, ports.UISettings{}); err == nil {
+			cfg = loaded
+		}
+	}
+	return s.recordAndEnforceWith(ctx, u, totals, cfg, paneltz.Location(ctx, s.settings))
+}
+
+// recordAndEnforceWith takes pre-loaded poll-scoped config + location so
+// we don't have to re-fetch settings on every user. The PollOnce loop
+// loads both ONCE at the top and threads them in here for every user.
+func (s *Service) recordAndEnforceWith(ctx context.Context, u *domain.User, totals trafficTotals, cfg ports.UISettings, loc *time.Location) error {
+	if loc == nil {
+		loc = time.Local
+	}
+	now := time.Now().In(loc)
 
 	// Skip the snapshot entirely when 3X-UI returned no matching client rows.
 	// Inserting a zero would corrupt subsequent today/period delta math.
@@ -470,20 +560,18 @@ func (s *Service) recordAndEnforce(ctx context.Context, u *domain.User, totals t
 	// check below will then auto-disable them (they're still over their period
 	// limit, which is why they were granted emergency access in the first
 	// place).
-	if emergencyActive && s.settings != nil {
-		if st, serr := s.settings.Load(ctx, ports.UISettings{}); serr == nil && st.EmergencyAccessQuotaGB > 0 {
-			quotaBytes := int64(st.EmergencyAccessQuotaGB) * 1024 * 1024 * 1024
-			used := u.LifetimeTotalBytes - u.EmergencyBaselineBytes
-			if used >= quotaBytes {
-				log.Info("emergency access quota exhausted",
-					"user_id", u.ID, "used_bytes", used, "quota_bytes", quotaBytes)
-				u.EmergencyUntil = nil
-				u.EmergencyBaselineBytes = 0
-				if err := s.users.Update(ctx, u); err != nil {
-					log.Warn("emergency quota clear update", "user_id", u.ID, "err", err)
-				}
-				emergencyActive = false
+	if emergencyActive && cfg.EmergencyAccessQuotaGB > 0 {
+		quotaBytes := int64(cfg.EmergencyAccessQuotaGB) * 1024 * 1024 * 1024
+		used := u.LifetimeTotalBytes - u.EmergencyBaselineBytes
+		if used >= quotaBytes {
+			log.Info("emergency access quota exhausted",
+				"user_id", u.ID, "used_bytes", used, "quota_bytes", quotaBytes)
+			u.EmergencyUntil = nil
+			u.EmergencyBaselineBytes = 0
+			if err := s.users.Update(ctx, u); err != nil {
+				log.Warn("emergency quota clear update", "user_id", u.ID, "err", err)
 			}
+			emergencyActive = false
 		}
 	}
 	if u.TrafficLimitBytes <= 0 || !u.Enabled || !wroteSnap || emergencyActive {
