@@ -4,9 +4,38 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 )
+
+// fakeFloorSettingsRepo is the tiniest SettingsRepo stub: only Load is
+// exercised by trafficFloor. Other methods return zero values so the
+// type still satisfies the interface.
+type fakeFloorSettingsRepo struct {
+	cfg ports.UISettings
+	err error
+}
+
+func (r *fakeFloorSettingsRepo) Load(_ context.Context, _ ports.UISettings) (ports.UISettings, error) {
+	if r.err != nil {
+		return ports.UISettings{}, r.err
+	}
+	return r.cfg, nil
+}
+
+func (r *fakeFloorSettingsRepo) Save(_ context.Context, _ ports.UISettings) error { return nil }
+
+func futureTime(offsetHours int) *time.Time {
+	t := time.Now().Add(time.Duration(offsetHours) * time.Hour)
+	return &t
+}
+
+func pastTime(offsetHours int) *time.Time {
+	t := time.Now().Add(-time.Duration(offsetHours) * time.Hour)
+	return &t
+}
 
 // fakeUsageReader is the smallest possible TrafficUsageReader stub: lets a
 // test pin "current period usage" without standing up the traffic service.
@@ -71,6 +100,111 @@ func TestTrafficFloor_AtOrPastLimitReturnsOne(t *testing.T) {
 	u := &domain.User{ID: 1, TrafficLimitBytes: 10_000}
 	if got := s.trafficFloor(context.Background(), u); got != 1 {
 		t.Fatalf("limit==used → got %d, want 1", got)
+	}
+}
+
+// --- Emergency-access interplay ---
+//
+// These tests pin the invariant that the floor pushed to 3X-UI honors
+// an active emergency window. Without these checks, the floor reverts
+// to the over-limit sentinel (1 byte) and 3X-UI disables the user on
+// its next traffic tick, silently undoing the panel-side emergency
+// grant — the bug introduced when fad13a3 first added the floor.
+
+func TestTrafficFloor_EmergencyActive_UnlimitedQuotaReturnsZero(t *testing.T) {
+	// Admin configured "emergency window is the only cap, no extra
+	// byte cap on top" (EmergencyAccessQuotaGB == 0). Floor should
+	// match: 0 (unlimited on 3X-UI side) so the user can actually use
+	// the window the panel just opened.
+	s := &Service{
+		trafficUsage: &fakeUsageReader{used: 999_999},
+		settings:     &fakeFloorSettingsRepo{cfg: ports.UISettings{EmergencyAccessQuotaGB: 0}},
+	}
+	u := &domain.User{
+		ID: 1, TrafficLimitBytes: 10_000, // already over
+		EmergencyUntil: futureTime(2),
+	}
+	if got := s.trafficFloor(context.Background(), u); got != 0 {
+		t.Fatalf("emergency active + quota=0 → got %d, want 0 (unlimited)", got)
+	}
+}
+
+func TestTrafficFloor_EmergencyActive_QuotaRemainingReturnsRemaining(t *testing.T) {
+	// 5 GB quota window, user has burned 2 GB inside the window.
+	// Expect 3 GB pushed to 3X-UI as the floor so 3X-UI itself will
+	// flip the user off after another 3 GB of use even if the panel
+	// goes offline.
+	quotaGB := 5
+	usedSinceWindowOpened := int64(2) * 1024 * 1024 * 1024
+	s := &Service{
+		trafficUsage: &fakeUsageReader{used: 999_999_999_999}, // poisoned, must not be consulted
+		settings:     &fakeFloorSettingsRepo{cfg: ports.UISettings{EmergencyAccessQuotaGB: quotaGB}},
+	}
+	u := &domain.User{
+		ID:                     1,
+		TrafficLimitBytes:      10_000,
+		EmergencyUntil:         futureTime(2),
+		LifetimeTotalBytes:     usedSinceWindowOpened, // baseline is 0
+		EmergencyBaselineBytes: 0,
+	}
+	want := int64(quotaGB)*1024*1024*1024 - usedSinceWindowOpened
+	if got := s.trafficFloor(context.Background(), u); got != want {
+		t.Fatalf("emergency active + 5GB quota + 2GB used → got %d, want %d", got, want)
+	}
+}
+
+func TestTrafficFloor_EmergencyActive_QuotaExhaustedReturnsSentinel(t *testing.T) {
+	// User crossed the in-window quota. Floor flips to 1 (the same
+	// "you're over, disable" sentinel the over-limit path uses). The
+	// traffic poll's own quota check will tear down EmergencyUntil
+	// shortly after; until then 3X-UI doing it locally is fine.
+	quotaGB := 5
+	exhausted := int64(quotaGB)*1024*1024*1024 + 100
+	s := &Service{
+		settings: &fakeFloorSettingsRepo{cfg: ports.UISettings{EmergencyAccessQuotaGB: quotaGB}},
+	}
+	u := &domain.User{
+		ID:                     1,
+		TrafficLimitBytes:      10_000,
+		EmergencyUntil:         futureTime(2),
+		LifetimeTotalBytes:     exhausted,
+		EmergencyBaselineBytes: 0,
+	}
+	if got := s.trafficFloor(context.Background(), u); got != 1 {
+		t.Fatalf("emergency active + quota exhausted → got %d, want 1", got)
+	}
+}
+
+func TestTrafficFloor_EmergencyExpired_FallsBackToNormalMath(t *testing.T) {
+	// EmergencyUntil is in the past — treat as ordinary over-limit
+	// user: TrafficFloorBytes(limit, used) wins.
+	s := &Service{
+		trafficUsage: &fakeUsageReader{used: 12_000}, // over limit
+		settings:     &fakeFloorSettingsRepo{cfg: ports.UISettings{EmergencyAccessQuotaGB: 5}},
+	}
+	u := &domain.User{
+		ID: 1, TrafficLimitBytes: 10_000,
+		EmergencyUntil: pastTime(1), // already lapsed
+	}
+	if got := s.trafficFloor(context.Background(), u); got != 1 {
+		t.Fatalf("emergency expired → expected fallback to over-limit sentinel 1, got %d", got)
+	}
+}
+
+func TestTrafficFloor_EmergencyActive_SettingsLoadErrorDefaultsUnlimited(t *testing.T) {
+	// Settings load hiccup while emergency is open: fail OPEN, not
+	// closed — silently re-disabling a user the admin just granted
+	// access to would be the worse of the two errors. The traffic
+	// poll independently re-checks the quota each cycle so the cap
+	// gets re-enforced server-side regardless.
+	s := &Service{
+		settings: &fakeFloorSettingsRepo{err: errors.New("db down")},
+	}
+	u := &domain.User{
+		ID: 1, TrafficLimitBytes: 10_000, EmergencyUntil: futureTime(2),
+	}
+	if got := s.trafficFloor(context.Background(), u); got != 0 {
+		t.Fatalf("emergency + settings err → got %d, want 0 (fail open)", got)
 	}
 }
 

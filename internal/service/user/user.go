@@ -102,8 +102,28 @@ func (s *Service) SetTrafficUsage(r TrafficUsageReader) {
 // users, when the reader isn't wired, or on any error reading usage. Any
 // failure here MUST degrade gracefully: a poll-time hiccup must not stop
 // the rest of pushClientConfigToAll.
+//
+// Emergency access takes precedence over the normal limit math: while
+// EmergencyUntil is in the future, the panel has intentionally let the
+// user keep going past their period limit, so pushing floor=1 (the
+// "you're over, disable yourself" sentinel) to 3X-UI would silently
+// undo the grant — 3X-UI's local counter would trip the disable on its
+// next tick. Instead, when emergency is active, the floor reflects the
+// per-window EmergencyAccessQuotaGB (or 0 for unlimited when admin has
+// it set to 0). The poll loop in service/traffic already short-circuits
+// the auto-disable check during emergency, so the two layers agree.
 func (s *Service) trafficFloor(ctx context.Context, u *domain.User) int64 {
-	if u == nil || u.TrafficLimitBytes <= 0 || s.trafficUsage == nil {
+	if u == nil || u.TrafficLimitBytes <= 0 {
+		return 0
+	}
+	// Emergency check sits BEFORE the trafficUsage nil-guard because
+	// the emergency branch only consults settings + user fields and
+	// stays useful even on the early-start path where the usage reader
+	// hasn't been wired yet.
+	if u.EmergencyUntil != nil && time.Now().Before(*u.EmergencyUntil) {
+		return s.emergencyFloor(ctx, u)
+	}
+	if s.trafficUsage == nil {
 		return 0
 	}
 	used, err := s.trafficUsage.CurrentPeriodUsage(ctx, u)
@@ -113,6 +133,43 @@ func (s *Service) trafficFloor(ctx context.Context, u *domain.User) int64 {
 		return 0
 	}
 	return TrafficFloorBytes(u.TrafficLimitBytes, used)
+}
+
+// emergencyFloor computes the 3X-UI floor for a user inside an active
+// emergency window. Three cases:
+//   - admin set EmergencyAccessQuotaGB == 0 → unlimited inside the
+//     window (matches the "the time bound is enough" config choice)
+//   - quota > 0, user hasn't burned it → remaining bytes
+//   - quota > 0 and exhausted → 1 (matching the over-limit sentinel)
+//
+// settings load errors degrade to 0 (unlimited) because failing closed
+// would silently re-disable a user the admin just granted access to —
+// the worse of two errors. The traffic poll has its own quota check
+// (traffic.go::recordAndEnforce) that runs every cycle, so the cap is
+// re-enforced server-side regardless of what 3X-UI sees.
+func (s *Service) emergencyFloor(ctx context.Context, u *domain.User) int64 {
+	if s.settings == nil {
+		return 0
+	}
+	st, err := s.settings.Load(ctx, ports.UISettings{})
+	if err != nil {
+		log.Warn("traffic floor: emergency settings load failed, defaulting to unlimited",
+			"user_id", u.ID, "err", err)
+		return 0
+	}
+	if st.EmergencyAccessQuotaGB <= 0 {
+		return 0
+	}
+	quotaBytes := int64(st.EmergencyAccessQuotaGB) * 1024 * 1024 * 1024
+	used := u.LifetimeTotalBytes - u.EmergencyBaselineBytes
+	if used < 0 {
+		used = 0
+	}
+	remaining := quotaBytes - used
+	if remaining <= 0 {
+		return 1
+	}
+	return remaining
 }
 
 // emailRules loads the runtime-configurable email domain. Falls back to
