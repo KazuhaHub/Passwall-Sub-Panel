@@ -139,7 +139,7 @@ type SubLogRepo interface {
 	Insert(ctx context.Context, log *domain.SubLog) error
 	List(ctx context.Context, filter SubLogFilter) (items []*domain.SubLog, total int64, err error)
 	Clear(ctx context.Context) error
-	DeleteBefore(ctx context.Context, cutoff int64) (int64, error)
+	DeleteBefore(ctx context.Context, cutoff time.Time) (int64, error)
 }
 
 type SyncTaskRepo interface {

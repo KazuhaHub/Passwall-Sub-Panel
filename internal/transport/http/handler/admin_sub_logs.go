@@ -68,7 +68,7 @@ func (h *AdminSubLogHandler) Purge(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"deleted": 0})
 		return
 	}
-	cutoff := time.Now().AddDate(0, 0, -s.SubLogRetentionDays).Unix()
+	cutoff := time.Now().AddDate(0, 0, -s.SubLogRetentionDays)
 	deleted, err := h.repo.DeleteBefore(c.Request.Context(), cutoff)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})

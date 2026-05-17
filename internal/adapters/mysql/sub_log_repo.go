@@ -108,7 +108,11 @@ func (r *subLogRepo) Clear(ctx context.Context) error {
 	return r.db.WithContext(ctx).Where("1 = 1").Delete(&subLogRow{}).Error
 }
 
-func (r *subLogRepo) DeleteBefore(ctx context.Context, cutoff int64) (int64, error) {
+func (r *subLogRepo) DeleteBefore(ctx context.Context, cutoff time.Time) (int64, error) {
+	// accessed_at is a DATETIME column; passing a raw Unix int64 here makes
+	// MySQL try to parse the integer as a DATETIME literal and fail with
+	// 1292 (22007) "Incorrect datetime value". GORM serializes time.Time
+	// into the right DATETIME representation automatically.
 	result := r.db.WithContext(ctx).Where("accessed_at < ?", cutoff).Delete(&subLogRow{})
 	return result.RowsAffected, result.Error
 }
