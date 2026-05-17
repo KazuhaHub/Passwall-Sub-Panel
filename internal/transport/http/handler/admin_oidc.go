@@ -16,18 +16,17 @@ import (
 // never returned in plaintext; an empty string in the PUT body means
 // "keep existing".
 //
-// Mutual exclusion: enabling OIDC disables SAML (and vice versa) — SSO
-// providers can only run one at a time.
+// SAML and OIDC can both be enabled from v2.3.2 onwards — the SSO
+// identity model keys accounts on (provider, subject) tuples so the
+// protocol namespaces don't collide. The login page surfaces a button
+// per enabled provider.
 type AdminOIDCHandler struct {
-	repo     ports.OIDCConfigRepo
-	oidc     *auth.OIDCService
-	samlRepo ports.SAMLConfigRepo
-	saml     *auth.SAMLService
+	repo ports.OIDCConfigRepo
+	oidc *auth.OIDCService
 }
 
-func NewAdminOIDCHandler(repo ports.OIDCConfigRepo, oidcSvc *auth.OIDCService,
-	samlRepo ports.SAMLConfigRepo, samlSvc *auth.SAMLService) *AdminOIDCHandler {
-	return &AdminOIDCHandler{repo: repo, oidc: oidcSvc, samlRepo: samlRepo, saml: samlSvc}
+func NewAdminOIDCHandler(repo ports.OIDCConfigRepo, oidcSvc *auth.OIDCService) *AdminOIDCHandler {
+	return &AdminOIDCHandler{repo: repo, oidc: oidcSvc}
 }
 
 type oidcAttrDTO struct {
@@ -119,17 +118,6 @@ func (h *AdminOIDCHandler) Put(c *gin.Context) {
 	if err := h.repo.Save(c.Request.Context(), cfg); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
-	}
-
-	// Mutual exclusion — if we just enabled OIDC, disable SAML.
-	if cfg.Enabled && h.samlRepo != nil {
-		if samlCfg, err := h.samlRepo.Load(c.Request.Context()); err == nil && samlCfg.Enabled {
-			samlCfg.Enabled = false
-			_ = h.samlRepo.Save(c.Request.Context(), samlCfg)
-			if h.saml != nil {
-				_ = h.saml.Reload(c.Request.Context(), samlCfg)
-			}
-		}
 	}
 
 	if err := h.oidc.Reload(c.Request.Context(), cfg); err != nil {

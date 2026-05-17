@@ -866,7 +866,8 @@
       "disabled": "Disabled",
       "renewed": "Renewed by {{days}} days",
       "renew_permanent_skip": "Permanent accounts don't need quick renewal; edit the user to set an expiry first.",
-      "copied": "Copied"
+      "copied": "Copied",
+      "sso_unlinked": "SSO binding cleared"
     },
     "confirm": {
       "delete_title": "Delete user",
@@ -874,14 +875,24 @@
       "demote_title": "Confirm demotion",
       "reset_credentials_title": "Reset credentials",
       "reset_credentials_message": "Resetting {{upn}}'s credentials immediately invalidates the old subscription URL and forces existing connections to drop. Continue?",
+      "unlink_sso_title": "Unlink SSO binding",
+      "unlink_sso_message": "{{upn}} is currently bound to {{provider}}. After unlinking, the next SSO sign-in from this person re-binds the account to the IdP identity in use at that moment. Continue?",
       "batch_delete_title": "Delete users",
       "batch_delete_message": "Delete {{names}}{{suffix}}? This removes their clients from every 3X-UI inbound."
     },
     "more_menu": {
       "copy_sub": "Copy subscription URL",
       "personal_rules": "Personal rules",
+      "reset_password": "Reset password",
       "reset_credentials": "Reset credentials",
-      "reset_emergency": "Reset emergency-access count"
+      "reset_emergency": "Reset emergency-access count",
+      "unlink_sso": "Unlink SSO binding"
+    },
+    "reset_password": {
+      "title": "Reset login password",
+      "hint": "Leave blank to generate a random password, or use the dice button to auto-fill then edit.",
+      "field": "New password (blank = random)",
+      "gen": "Generate random"
     },
     "batch": {
       "selected": "{{count}} selected",

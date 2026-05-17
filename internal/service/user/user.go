@@ -487,14 +487,13 @@ func (s *Service) EnsureSSO(ctx context.Context, in EnsureSSOInput) (*domain.Use
 		resetPeriod = domain.ResetMonthly
 	}
 	now := time.Now()
-	// Role assignment honours the IdP signal here: admins land on RoleAdmin
-	// (preserves the legacy "bootstrap fresh panel" flow), AllowAutoCreate
-	// users land on RoleUser (the AllowAutoCreate gate would have rejected
-	// them otherwise).
-	newRole := domain.RoleUser
-	if in.IsAdmin {
-		newRole = domain.RoleAdmin
-	}
+	// Single source of truth for SSO -> role mapping: feed the role-policy
+	// helper a fresh RoleUser baseline. IdP-admin promotes to RoleAdmin
+	// (which preserves the legacy "bootstrap fresh panel" flow), non-admin
+	// stays RoleUser (we've already passed the AllowAutoCreate gate).
+	// Reusing applyRoleFromSSO keeps the role policy in one place for the
+	// linked / first-time-link / brand-new paths.
+	newRole, _ := applyRoleFromSSO(domain.RoleUser, in.IsAdmin, in.KeepAdminOnLogin)
 	u = &domain.User{
 		UPN:                in.UPN,
 		Email:              in.Email,
@@ -574,6 +573,28 @@ func (s *Service) VerifyLocalPassword(ctx context.Context, upn, password string)
 
 func emergencySelfServiceAllowedReason(reason domain.AutoDisabledReason) bool {
 	return reason == domain.DisabledTrafficExceeded || reason == domain.DisabledExpired
+}
+
+// UnlinkSSO clears the user's SSO binding, dropping them back to local.
+// SSOProvider goes to 'local', SSOSubject is rewritten to UPN so the
+// composite key stays in the local namespace. PasswordHash is preserved
+// — an admin can immediately give the user a password (or the user can
+// just SSO again to re-link). Returns ErrValidation when the row isn't
+// SSO-bound, so the admin UI can disable the action.
+func (s *Service) UnlinkSSO(ctx context.Context, userID int64) error {
+	u, err := s.users.GetByID(ctx, userID)
+	if err != nil {
+		return err
+	}
+	if u.SSOProvider == "" || u.SSOProvider == domain.SSOProviderLocal {
+		return fmt.Errorf("%w: account is not bound to any SSO identity", domain.ErrValidation)
+	}
+	u.SSOProvider = domain.SSOProviderLocal
+	u.SSOSubject = u.UPN
+	if err := s.users.Update(ctx, u); err != nil {
+		return fmt.Errorf("unlink sso: %w", err)
+	}
+	return nil
 }
 
 // ResetSubToken issues a new subscription token, invalidating the old URL.

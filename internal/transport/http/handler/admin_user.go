@@ -76,6 +76,13 @@ type userDTO struct {
 	DisplayName        string                    `json:"display_name,omitempty"`
 	UPN                string                    `json:"upn"`
 	Email              string                    `json:"email,omitempty"`
+	// SSOProvider + SSOSubject expose the SSO identity binding so the
+	// admin UI can show "this account signs in via saml:default with
+	// NameID=alice@example.com" and offer an Unlink action. Read-only —
+	// /unlink-sso is the only path to mutate them, and successful SSO
+	// logins overwrite them.
+	SSOProvider        string                    `json:"sso_provider"`
+	SSOSubject         string                    `json:"sso_subject,omitempty"`
 	Role               domain.Role               `json:"role"`
 	GroupID            int64                     `json:"group_id"`
 	UUID               string                    `json:"uuid"`
@@ -291,6 +298,34 @@ func (h *AdminUserHandler) ResetPassword(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"password": pwd})
+}
+
+// UnlinkSSO clears the SSO binding on a user, dropping them back to a
+// local row. The next SSO login by the same person will re-bind via
+// EnsureSSO's first-time-linking path. Admin uses this to force a
+// rebind after rotating IdP tenants or recycling a UPN.
+func (h *AdminUserHandler) UnlinkSSO(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid id"})
+		return
+	}
+	if !h.ensureOperatorAllowed(c, id) {
+		return
+	}
+	if err := h.user.UnlinkSSO(c.Request.Context(), id); err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Not found"})
+			return
+		}
+		if errors.Is(err, domain.ErrValidation) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.Status(http.StatusNoContent)
 }
 
 func (h *AdminUserHandler) ResetEmergencyUsage(c *gin.Context) {
@@ -525,6 +560,8 @@ func (h *AdminUserHandler) toDTO(r *http.Request, u *domain.User) userDTO {
 		DisplayName:         u.DisplayName,
 		UPN:                 u.UPN,
 		Email:               u.Email,
+		SSOProvider:         u.SSOProvider,
+		SSOSubject:          u.SSOSubject,
 		Role:                u.Role,
 		GroupID:             u.GroupID,
 		UUID:                u.UUID,

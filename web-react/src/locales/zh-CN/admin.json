@@ -866,7 +866,8 @@
       "disabled": "已禁用",
       "renewed": "已续期 {{days}} 天",
       "renew_permanent_skip": "永久账号无需快捷续期；如需改成限时账号请进入编辑设置到期时间",
-      "copied": "已复制"
+      "copied": "已复制",
+      "sso_unlinked": "已解除 SSO 绑定"
     },
     "confirm": {
       "delete_title": "删除用户",
@@ -874,14 +875,24 @@
       "demote_title": "确认降级",
       "reset_credentials_title": "重置凭证",
       "reset_credentials_message": "重置 {{upn}} 的凭证会让旧订阅链接立即失效，现有连接被强制断开。继续？",
+      "unlink_sso_title": "解除 SSO 绑定",
+      "unlink_sso_message": "{{upn}} 当前绑定到 {{provider}}。解除后，下次该用户通过任意 SSO 登录会重新绑定到当前 IdP 的身份。继续？",
       "batch_delete_title": "批量删除用户",
       "batch_delete_message": "确定删除 {{names}}{{suffix}}？该操作将从所有 3X-UI inbound 清除这些用户的 client。"
     },
     "more_menu": {
       "copy_sub": "复制订阅 URL",
       "personal_rules": "个人规则",
+      "reset_password": "重置密码",
       "reset_credentials": "重置凭证",
-      "reset_emergency": "重置紧急访问次数"
+      "reset_emergency": "重置紧急访问次数",
+      "unlink_sso": "解除 SSO 绑定"
+    },
+    "reset_password": {
+      "title": "重置登录密码",
+      "hint": "留空将生成随机密码；也可以点击右侧骰子按钮自动填充后再手动修改。",
+      "field": "新密码（留空 = 随机）",
+      "gen": "随机生成"
     },
     "batch": {
       "selected": "已选 {{count}}",

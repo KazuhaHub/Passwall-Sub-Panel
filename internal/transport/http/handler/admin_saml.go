@@ -20,26 +20,21 @@ import (
 // The GET response carries a "has_sp_key" boolean instead; the admin
 // re-pastes the key only when actually changing it.
 //
-// Mutual exclusion: enabling SAML disables OIDC (and vice versa) because
-// SSO providers can only run one at a time. The handler enforces this on
-// save by toggling the other provider's stored "enabled" flag and
-// reloading its live service.
+// SAML and OIDC can run side-by-side from v2.3.2 onwards — the SSO
+// identity model keys accounts on (provider, subject) tuples, so the
+// two protocols have disjoint namespaces and no longer need to be
+// mutually exclusive at the config level.
 type AdminSAMLHandler struct {
 	repo     ports.SAMLConfigRepo
 	saml     *auth.SAMLService
-	oidcRepo ports.OIDCConfigRepo
-	oidc     *auth.OIDCService
 	settings ports.SettingsRepo
 }
 
 func NewAdminSAMLHandler(repo ports.SAMLConfigRepo, samlSvc *auth.SAMLService,
-	oidcRepo ports.OIDCConfigRepo, oidcSvc *auth.OIDCService,
 	settings ports.SettingsRepo) *AdminSAMLHandler {
 	return &AdminSAMLHandler{
 		repo:     repo,
 		saml:     samlSvc,
-		oidcRepo: oidcRepo,
-		oidc:     oidcSvc,
 		settings: settings,
 	}
 }
@@ -221,17 +216,6 @@ func (h *AdminSAMLHandler) Put(c *gin.Context) {
 	if err := h.repo.Save(c.Request.Context(), cfg); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
-	}
-
-	// Mutual exclusion — if we just enabled SAML, disable OIDC.
-	if cfg.Enabled && h.oidcRepo != nil {
-		if oidcCfg, err := h.oidcRepo.Load(c.Request.Context()); err == nil && oidcCfg.Enabled {
-			oidcCfg.Enabled = false
-			_ = h.oidcRepo.Save(c.Request.Context(), oidcCfg)
-			if h.oidc != nil {
-				_ = h.oidc.Reload(c.Request.Context(), oidcCfg)
-			}
-		}
 	}
 
 	// Best-effort live reload: persistence already succeeded, so a bad SP

@@ -159,6 +159,7 @@ func NewRouter(d Deps) *gin.Engine {
 		staffGroup.POST("/users/:id/reset-credentials", users.ResetCredentials)
 		staffGroup.POST("/users/:id/reset-password", users.ResetPassword)
 		staffGroup.POST("/users/:id/reset-emergency-usage", users.ResetEmergencyUsage)
+		staffGroup.POST("/users/:id/unlink-sso", users.UnlinkSSO)
 		staffGroup.POST("/users/:id/set-enabled", users.SetEnabled)
 		staffGroup.GET("/users/:id/rules", users.GetRules)
 		staffGroup.PUT("/users/:id/rules", users.PutRules)
@@ -240,12 +241,12 @@ func NewRouter(d Deps) *gin.Engine {
 		adminGroup.POST("/settings/mail/test", mail.Test)
 		adminGroup.POST("/settings/mail/announcement", mail.Announcement)
 
-		samlAdmin := handler.NewAdminSAMLHandler(d.Repos.SAMLConfig, d.SAML, d.Repos.OIDCConfig, d.OIDC, d.Repos.Settings)
+		samlAdmin := handler.NewAdminSAMLHandler(d.Repos.SAMLConfig, d.SAML, d.Repos.Settings)
 		adminGroup.GET("/settings/saml", samlAdmin.Get)
 		adminGroup.PUT("/settings/saml", samlAdmin.Put)
 		adminGroup.POST("/settings/saml/fetch", samlAdmin.FetchMetadata)
 
-		oidcAdmin := handler.NewAdminOIDCHandler(d.Repos.OIDCConfig, d.OIDC, d.Repos.SAMLConfig, d.SAML)
+		oidcAdmin := handler.NewAdminOIDCHandler(d.Repos.OIDCConfig, d.OIDC)
 		adminGroup.GET("/settings/oidc", oidcAdmin.Get)
 		adminGroup.PUT("/settings/oidc", oidcAdmin.Put)
 

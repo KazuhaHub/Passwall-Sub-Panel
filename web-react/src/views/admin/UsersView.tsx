@@ -49,6 +49,7 @@ import LockResetIcon from '@mui/icons-material/LockReset'
 import CasinoIcon from '@mui/icons-material/Casino'
 import RuleIcon from '@mui/icons-material/Rule'
 import EmergencyIcon from '@mui/icons-material/MedicalServices'
+import LinkOffIcon from '@mui/icons-material/LinkOff'
 import SyncIcon from '@mui/icons-material/Sync'
 import HelpOutlineIcon from '@mui/icons-material/HelpOutline'
 import { useTranslation } from 'react-i18next'
@@ -62,6 +63,7 @@ import {
   resetEmergencyUsage,
   resetPassword,
   setEnabled,
+  unlinkSSO,
   updateUser,
   updateUserRules,
 } from '@/api/users'
@@ -527,6 +529,22 @@ export default function UsersView() {
     await load()
   }
 
+  async function actionUnlinkSSO(u: User) {
+    closeMore()
+    const ok = await confirm({
+      title: t('admin:users.confirm.unlink_sso_title'),
+      message: t('admin:users.confirm.unlink_sso_message', {
+        upn: u.upn, provider: u.sso_provider,
+      }),
+      destructive: true,
+      confirmText: t('admin:users.more_menu.unlink_sso'),
+    })
+    if (!ok) return
+    await unlinkSSO(u.id)
+    pushSnack(t('admin:users.toast.sso_unlinked'), 'success')
+    await load()
+  }
+
   function actionResetPassword(u: User) {
     closeMore()
     setPwdResetUser(u)
@@ -711,6 +729,30 @@ export default function UsersView() {
     }
   }
 
+  // SSO binding chip: "saml" / "oidc" / hidden for local. Tooltip carries
+  // the full provider + subject so admins can verify which IdP / NameID
+  // the row is bound to before clicking Unlink.
+  function ssoBadge(u: User) {
+    const provider = u.sso_provider || 'local'
+    if (provider === 'local') return null
+    const protocol = provider.split(':', 1)[0]
+    const label = protocol.toUpperCase()
+    const tooltip = `${provider}${u.sso_subject ? `  (${u.sso_subject})` : ''}`
+    return (
+      <Tooltip title={tooltip}>
+        <Box component="span" sx={{
+          display: 'inline-block',
+          px: 0.75, py: 0,
+          borderRadius: 999,
+          fontSize: 10, fontWeight: 600,
+          letterSpacing: 0.4,
+          bgcolor: md.tertiaryContainer,
+          color: md.onTertiaryContainer,
+        }}>{label}</Box>
+      </Tooltip>
+    )
+  }
+
   function trafficCell(u: User) {
     const limitGB = bytesToGB(u.traffic_limit_bytes)
     const usedGB = bytesToGB(usageMap.get(u.id)?.period_used_bytes ?? 0)
@@ -855,7 +897,12 @@ export default function UsersView() {
                     <Checkbox checked={selected.has(u.id)} disabled={!canSelect(u)}
                       onChange={(_, c) => toggleOne(u.id, c)} />
                   </TableCell>
-                  <TableCell sx={{ fontWeight: 500 }}>{u.upn}</TableCell>
+                  <TableCell sx={{ fontWeight: 500 }}>
+                    <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.75 }}>
+                      <span>{u.upn}</span>
+                      {ssoBadge(u)}
+                    </Box>
+                  </TableCell>
                   <TableCell sx={{ color: md.onSurfaceVariant, fontSize: 13 }}>{u.display_name || '—'}</TableCell>
                   <TableCell sx={{ fontSize: 13 }}>{groupNameMap.get(u.group_id) || u.group_id}</TableCell>
                   <TableCell>{roleBadge(u.role)}</TableCell>
@@ -925,6 +972,12 @@ export default function UsersView() {
         <MenuItem onClick={() => moreUser && actionResetEmergency(moreUser)}>
           <ListItemIcon><EmergencyIcon fontSize="small" /></ListItemIcon>
           <ListItemText>{t('admin:users.more_menu.reset_emergency')}</ListItemText>
+        </MenuItem>
+        <MenuItem
+          onClick={() => moreUser && actionUnlinkSSO(moreUser)}
+          disabled={!moreUser || !moreUser.sso_provider || moreUser.sso_provider === 'local'}>
+          <ListItemIcon><LinkOffIcon fontSize="small" /></ListItemIcon>
+          <ListItemText>{t('admin:users.more_menu.unlink_sso')}</ListItemText>
         </MenuItem>
       </Menu>
 

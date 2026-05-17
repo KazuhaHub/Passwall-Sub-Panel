@@ -75,6 +75,10 @@ export async function resetEmergencyUsage(id: number) {
   await client.post(`/admin/users/${id}/reset-emergency-usage`)
 }
 
+export async function unlinkSSO(id: number) {
+  await client.post(`/admin/users/${id}/unlink-sso`)
+}
+
 export async function getUserRules(id: number) {
   const { data } = await client.get<{ personal_rules: string }>(`/admin/users/${id}/rules`)
   return data.personal_rules || ''

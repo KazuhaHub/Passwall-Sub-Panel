@@ -14,6 +14,13 @@ export interface User {
   upn: string
   display_name?: string
   email?: string
+  /** SSO connection this account is bound to. "local" for password-only
+   *  accounts; "saml:<name>" / "oidc:<name>" once linked. UI shows it as
+   *  a badge and offers Unlink when not local. */
+  sso_provider: string
+  /** IdP-side stable identifier (SAML NameID / OIDC sub). Matches UPN
+   *  for local rows. Read-only display. */
+  sso_subject?: string
   role: Role
   group_id: number
   uuid: string

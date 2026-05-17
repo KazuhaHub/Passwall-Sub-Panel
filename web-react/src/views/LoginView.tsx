@@ -114,10 +114,10 @@ export default function LoginView() {
     }
   }
 
-  function ssoLogin() {
-    // SAML wins when both providers are configured (matches the
-    // sso_redirect auto-bounce path so behaviour is consistent).
-    const url = methods?.saml ? samlLoginURL(returnTo ?? '/user/me') : oidcLoginURL(returnTo ?? '/user/me')
+  function ssoLogin(provider: 'saml' | 'oidc') {
+    const url = provider === 'saml'
+      ? samlLoginURL(returnTo ?? '/user/me')
+      : oidcLoginURL(returnTo ?? '/user/me')
     setManualSsoRedirect(true)
     // Brief intermediate so the user sees what's happening before the
     // browser hands off to the IdP. 3s matches the sso_redirect path.
@@ -179,10 +179,18 @@ export default function LoginView() {
 
   const ssoBlock = (samlEnabled || oidcEnabled) && (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-      <Button variant={ssoFirst ? 'contained' : 'outlined'} fullWidth size="large" onClick={ssoLogin}
-        startIcon={<OpenInNewIcon />}>
-        {t('auth:sso_login')}
-      </Button>
+      {samlEnabled && (
+        <Button variant={ssoFirst ? 'contained' : 'outlined'} fullWidth size="large"
+          onClick={() => ssoLogin('saml')} startIcon={<OpenInNewIcon />}>
+          {t(oidcEnabled ? 'auth:saml_login' : 'auth:sso_login')}
+        </Button>
+      )}
+      {oidcEnabled && (
+        <Button variant={ssoFirst && !samlEnabled ? 'contained' : 'outlined'} fullWidth size="large"
+          onClick={() => ssoLogin('oidc')} startIcon={<OpenInNewIcon />}>
+          {t(samlEnabled ? 'auth:oidc_login' : 'auth:sso_login')}
+        </Button>
+      )}
     </Box>
   )
 
