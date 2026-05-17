@@ -1083,12 +1083,20 @@ function QuickLinksEditor({ links, onChange, md }: { links: QuickLink[]; onChang
                     value={l.url} onChange={e => update(i, { url: e.target.value })}
                     error={!!err}
                     helperText={err ? t(`admin:${err}`) : undefined}
-                    sx={{ flex: '2 1 240px' }} />
+                    sx={{
+                      flex: '2 1 240px',
+                      // Float the helperText absolutely so it doesn't push
+                      // the surrounding switches / delete button downward
+                      // when validation triggers — the row keeps its
+                      // alignItems: center geometry and the error text
+                      // simply hangs under the URL input.
+                      '& .MuiFormHelperText-root': {
+                        position: 'absolute', top: '100%', left: 0,
+                        marginTop: '2px', marginLeft: 0,
+                      },
+                    }} />
                 )
               })()}
-              <TextField size="small" type="number" label={t('settings.portal.link_table.sort')}
-                value={l.sort} onChange={e => update(i, { sort: Number(e.target.value) })}
-                sx={{ width: 90 }} />
               <FormControlLabel
                 label={t('settings.portal.link_table.new_window')}
                 control={<Switch size="small" checked={l.new_window}
