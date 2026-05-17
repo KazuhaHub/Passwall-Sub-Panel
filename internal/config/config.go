@@ -23,9 +23,31 @@ type Config struct {
 	EncryptionKey string `yaml:"encryption_key"`
 
 	MySQL MySQLConfig `yaml:"mysql"`
+	HTTP  HTTPConfig  `yaml:"http"`
 
 	ConfigDir string `yaml:"config_dir"`
 	DataDir   string `yaml:"data_dir"`
+}
+
+// HTTPConfig groups reverse-proxy-aware request-handling settings.
+//
+// Default behavior is "zero-config behind any reverse proxy": the panel
+// trusts all upstream IPs and reads the real client IP from
+// CF-Connecting-IP / X-Real-IP / X-Forwarded-For (in that order). This
+// matches the common case — panel sits behind nginx / caddy / traefik on
+// the same machine OR behind a CDN like Cloudflare — without forcing the
+// admin to enumerate CIDRs.
+//
+// The implicit assumption is that the panel's listen port is NOT directly
+// exposed to the public internet. If you do expose it, set TrustedProxies
+// to an explicit list (e.g. "127.0.0.1,::1") so attackers connecting
+// directly can't forge X-Forwarded-For to hide their real IP.
+type HTTPConfig struct {
+	// TrustedProxies controls which upstream IPs Gin will believe when
+	// computing ClientIP. Comma-separated CIDRs or IPs. Special tokens:
+	//   ""      → defaults to "0.0.0.0/0,::/0" (trust everything; zero-config)
+	//   "none"  → trust nothing, always use the raw TCP peer
+	TrustedProxies string `yaml:"trusted_proxies"`
 }
 
 // MySQLConfig is the database selection block. Two ways to configure:
@@ -101,6 +123,22 @@ jwt_secret: "%s"
 # Env override: PSP_ENCRYPTION_KEY.
 encryption_key: "%s"
 
+# ---- Reverse proxy / real client IP ----
+# Default behavior is zero-config: the panel trusts all upstream IPs and
+# reads the real client IP from CF-Connecting-IP / X-Real-IP /
+# X-Forwarded-For (in that order). Works out-of-the-box behind nginx /
+# caddy / traefik / Cloudflare.
+#
+# Only set this if you intentionally expose the panel's listen port to the
+# public internet (rare). Otherwise leaving it unset is correct and
+# simpler.
+#
+# http:
+#   trusted_proxies: "127.0.0.1,::1"     # restrict to local reverse proxy
+#   # trusted_proxies: "none"            # trust nothing; use raw TCP peer
+#
+# Env override: PSP_TRUSTED_PROXIES.
+
 # ---- Filesystem ----
 config_dir: "./config"                     # runtime configs (templates, etc.)
 data_dir: "./data"                         # SQLite panel.db lives here when no MySQL is set
@@ -173,6 +211,9 @@ func Load(path string) (*Config, error) {
 	}
 	if key := os.Getenv("PSP_ENCRYPTION_KEY"); key != "" {
 		c.EncryptionKey = key
+	}
+	if tp := os.Getenv("PSP_TRUSTED_PROXIES"); tp != "" {
+		c.HTTP.TrustedProxies = tp
 	}
 
 	if err := c.validate(); err != nil {

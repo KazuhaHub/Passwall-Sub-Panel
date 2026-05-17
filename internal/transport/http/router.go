@@ -3,7 +3,6 @@ package http
 
 import (
 	"context"
-	"os"
 	"strings"
 	"sync"
 	"time"
@@ -59,9 +58,16 @@ type Deps struct {
 // NewRouter returns a configured *gin.Engine ready to be served.
 func NewRouter(d Deps) *gin.Engine {
 	g := gin.New()
-	if err := g.SetTrustedProxies(trustedProxies()); err != nil {
-		panic("invalid PSP_TRUSTED_PROXIES: " + err.Error())
+	if err := g.SetTrustedProxies(trustedProxies(d.Cfg.HTTP.TrustedProxies)); err != nil {
+		panic("invalid trusted proxies: " + err.Error())
 	}
+	// Real client IP discovery — zero-config defaults that work behind any
+	// common reverse proxy without admin tuning. Order matters: CDN-specific
+	// single-IP headers come first so they win over the standard XFF chain.
+	// Gin's validateHeader short-circuits on the leftmost IP regardless of
+	// the trust list, so the original client survives even when
+	// trustedProxies is wide-open (the zero-config default).
+	g.RemoteIPHeaders = []string{"CF-Connecting-IP", "X-Real-IP", "X-Forwarded-For"}
 	g.Use(gin.Logger(), gin.Recovery())
 	// Audit middleware lives at the engine level so it covers admin
 	// endpoints AND the login attempt AND user self-service writes. The
@@ -277,10 +283,20 @@ func NewRouter(d Deps) *gin.Engine {
 	return g
 }
 
-func trustedProxies() []string {
-	raw := strings.TrimSpace(os.Getenv("PSP_TRUSTED_PROXIES"))
+// trustedProxies resolves the SetTrustedProxies argument from the
+// http.trusted_proxies config value (or PSP_TRUSTED_PROXIES env override,
+// applied earlier during config load). The empty / unset default is
+// "trust everything": this is the zero-config setting that works behind
+// any reverse proxy or CDN. The implicit assumption is the panel's listen
+// port is NOT publicly reachable — if you expose it directly, lock the
+// trust list to your reverse proxy's IP(s) so attackers connecting
+// directly can't forge X-Forwarded-For to mask their real address.
+// The special token "none" disables the trust list entirely, making
+// Gin's ClientIP always return the raw TCP peer.
+func trustedProxies(raw string) []string {
+	raw = strings.TrimSpace(raw)
 	if raw == "" {
-		return []string{"127.0.0.1", "::1"}
+		return []string{"0.0.0.0/0", "::/0"}
 	}
 	if strings.EqualFold(raw, "none") {
 		return nil
