@@ -1287,11 +1287,34 @@ export default function NodesView() {
   // Separator-node dialog: layout-only rows the admin drops into the node
   // list as visual dividers (e.g. "---- Taiwan HiNet ----"). They render
   // as DIRECT proxies in subscriptions and skip traffic / health probes.
+  // separatorEditingId distinguishes the two modes the same dialog covers:
+  //   null  → POST /admin/nodes/separator (create)
+  //   > 0   → PUT  /admin/nodes/:id/metadata (edit existing row)
+  // Reusing one dialog for both keeps the layout-only "minimal field set"
+  // (display_name / region / tags / sort_order) as the single contract
+  // so an existing separator can never have its server_address / inbound
+  // accidentally edited like a real node.
   const [separatorOpen, setSeparatorOpen] = useState(false)
   const [separatorBusy, setSeparatorBusy] = useState(false)
+  const [separatorEditingId, setSeparatorEditingId] = useState<number | null>(null)
   const [separatorForm, setSeparatorForm] = useState({
     display_name: '', region: '', tags_text: '', sort_order: 100,
   })
+  function openSeparatorCreate() {
+    setSeparatorEditingId(null)
+    setSeparatorForm({ display_name: '', region: '', tags_text: '', sort_order: 100 })
+    setSeparatorOpen(true)
+  }
+  function openSeparatorEdit(n: Node) {
+    setSeparatorEditingId(n.id)
+    setSeparatorForm({
+      display_name: n.display_name,
+      region: n.region || '',
+      tags_text: (n.tags || []).join(', '),
+      sort_order: n.sort_order || 100,
+    })
+    setSeparatorOpen(true)
+  }
   async function submitSeparator() {
     if (!separatorForm.display_name.trim()) {
       pushSnack(t('admin:nodes.create_dialog.validate_required'), 'warning')
@@ -1300,14 +1323,27 @@ export default function NodesView() {
     setSeparatorBusy(true)
     try {
       const tags = separatorForm.tags_text.split(',').map(s => s.trim()).filter(Boolean)
-      await createSeparatorNode({
-        display_name: separatorForm.display_name.trim(),
-        region: separatorForm.region.trim() || undefined,
-        tags: tags.length > 0 ? tags : undefined,
-        sort_order: separatorForm.sort_order,
-      })
-      pushSnack(t('admin:nodes.toast.separator_created', { defaultValue: '分隔标题已创建' }), 'success')
+      if (separatorEditingId !== null) {
+        await updateNodeMetadata(separatorEditingId, {
+          display_name: separatorForm.display_name.trim(),
+          server_address: '',
+          flow: '',
+          region: separatorForm.region.trim(),
+          tags,
+          sort_order: separatorForm.sort_order,
+        })
+        pushSnack(t('admin:nodes.toast.separator_updated', { defaultValue: '分隔标题已更新' }), 'success')
+      } else {
+        await createSeparatorNode({
+          display_name: separatorForm.display_name.trim(),
+          region: separatorForm.region.trim() || undefined,
+          tags: tags.length > 0 ? tags : undefined,
+          sort_order: separatorForm.sort_order,
+        })
+        pushSnack(t('admin:nodes.toast.separator_created', { defaultValue: '分隔标题已创建' }), 'success')
+      }
       setSeparatorOpen(false)
+      setSeparatorEditingId(null)
       setSeparatorForm({ display_name: '', region: '', tags_text: '', sort_order: 100 })
       await load()
     } catch { /* axios interceptor toasted */ } finally { setSeparatorBusy(false) }
@@ -1873,7 +1909,7 @@ export default function NodesView() {
           <Typography variant="body2" sx={{ mt: 0.5 }}>{t('admin:nodes.subtitle')}</Typography>
         </Box>
         <Box sx={{ display: 'flex', gap: 1 }}>
-          <Button variant="outlined" startIcon={<AddIcon />} onClick={() => setSeparatorOpen(true)}>
+          <Button variant="outlined" startIcon={<AddIcon />} onClick={openSeparatorCreate}>
             {t('admin:nodes.create_separator', { defaultValue: '新增分隔标题' })}
           </Button>
           <Button variant="contained" startIcon={<AddIcon />} onClick={openCreate}>
@@ -2048,12 +2084,22 @@ export default function NodesView() {
                     <TableCell align="right">
                       {isSep ? (
                         // Separators don't have inbound config / 3X-UI binding /
-                        // detach semantics — only delete is meaningful.
-                        <Tooltip title={t('admin:nodes.action.delete')}>
-                          <IconButton size="small" onClick={() => confirmDelete(n)} sx={{ color: md.error }}>
-                            <DeleteIcon fontSize="small" />
-                          </IconButton>
-                        </Tooltip>
+                        // detach semantics — only edit + delete are meaningful.
+                        // Edit routes through openSeparatorEdit so the dialog
+                        // shows only the layout-relevant fields rather than the
+                        // full real-node edit form.
+                        <>
+                          <Tooltip title={t('admin:nodes.action.edit')}>
+                            <IconButton size="small" onClick={() => openSeparatorEdit(n)}>
+                              <EditIcon fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                          <Tooltip title={t('admin:nodes.action.delete')}>
+                            <IconButton size="small" onClick={() => confirmDelete(n)} sx={{ color: md.error }}>
+                              <DeleteIcon fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                        </>
                       ) : (
                         <>
                           <Tooltip title={t('admin:nodes.action.edit')}>
@@ -2372,7 +2418,11 @@ export default function NodesView() {
       {/* Separator dialog: layout-only node, no server/inbound/protocol. */}
       <Dialog open={separatorOpen} onClose={() => !separatorBusy && setSeparatorOpen(false)}
         PaperProps={{ sx: { borderRadius: 3, bgcolor: md.surfaceContainerHigh, width: 480, maxWidth: '90vw' } }}>
-        <DialogTitle>{t('admin:nodes.create_separator_dialog.title', { defaultValue: '新增分隔标题' })}</DialogTitle>
+        <DialogTitle>
+          {separatorEditingId !== null
+            ? t('admin:nodes.edit_separator_dialog.title', { defaultValue: '编辑分隔标题' })
+            : t('admin:nodes.create_separator_dialog.title', { defaultValue: '新增分隔标题' })}
+        </DialogTitle>
         <DialogContent>
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, pt: 1 }}>
             <Typography sx={{ fontSize: 13, color: md.onSurfaceVariant }}>

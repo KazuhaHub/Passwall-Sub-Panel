@@ -603,6 +603,9 @@
       "region_hint": "可留空。如果分组按 region 过滤，填上才会在对应分组里出现。",
       "tags_hint": "可留空，多个标签用英文逗号分隔。tag_filter 匹配会让该分隔出现在对应分组里。"
     },
+    "edit_separator_dialog": {
+      "title": "编辑分隔标题"
+    },
     "edit_inbound": "编辑 Inbound 配置",
     "edit_inbound_dialog": {
       "title": "编辑 Inbound 配置",
@@ -749,7 +752,8 @@
       "batch_partial": "已处理 {{ok}} 个，失败 {{fail}} 个",
       "reordered": "排序已更新",
       "reorder_failed": "排序更新失败",
-      "separator_created": "分隔标题已创建"
+      "separator_created": "分隔标题已创建",
+      "separator_updated": "分隔标题已更新"
     },
     "confirm": {
       "delete_title": "删除节点",

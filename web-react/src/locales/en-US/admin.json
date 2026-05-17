@@ -603,6 +603,9 @@
       "region_hint": "Optional. When a group filters by region, only matching separators are emitted.",
       "tags_hint": "Optional, comma-separated. tag_filter matches make the separator appear inside the corresponding group."
     },
+    "edit_separator_dialog": {
+      "title": "Edit separator"
+    },
     "claim": "Claim",
     "claim_dialog": {
       "title": "Claim existing client",
@@ -749,7 +752,8 @@
       "batch_partial": "{{ok}} done, {{fail}} failed",
       "reordered": "Order updated",
       "reorder_failed": "Reorder failed",
-      "separator_created": "Separator created"
+      "separator_created": "Separator created",
+      "separator_updated": "Separator updated"
     },
     "confirm": {
       "delete_title": "Delete node",

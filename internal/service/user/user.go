@@ -1280,37 +1280,138 @@ func (s *Service) pushClientConfigToAll(ctx context.Context, u *domain.User) err
 	if err != nil {
 		return err
 	}
+	if len(entries) == 0 {
+		return nil
+	}
 	expireTime := u.PushExpireTime()
 	floor := s.trafficFloor(ctx, u)
-	var firstErr error
+
+	// Resolve concurrency cap once. The setting is shared with the
+	// traffic poll and reconcile fan-out (v2.2.7 admin tunable) so an
+	// admin moving one slider controls every 3X-UI fan-out in the panel.
+	cfg, _ := s.settings.Load(ctx, ports.UISettings{})
+	concurrency := paneltz.ResolveMaxPanelConcurrency(cfg.MaxPanelConcurrency)
+
+	// Phase 1 — prefetch ListInbounds for every panel referenced by the
+	// user's ownership rows in parallel. Replaces the previous
+	// per-ownership inspectInboundByPanel loop (N serial GetInbound
+	// round-trips, ~200ms each) with at most one ListInbounds per panel.
+	// For the typical single-panel deployment with 10 ownership rows
+	// that's 10×~200ms → 1×~200ms before the write phase even starts.
+	uniquePanels := make(map[int64]struct{})
 	for _, e := range entries {
-		info, err := s.inspectInboundByPanel(ctx, e.PanelID, e.InboundID)
-		if err != nil {
-			// 3X-UI returned "not found" — the inbound was deleted on the
-			// remote side, so this ownership row is stale. Drop it from our
-			// DB and skip; otherwise SetEnabledAndSync would queue an endless
-			// retry task for an inbound that will never come back.
-			if isInboundNotFoundErr(err) {
-				if rmErr := s.ownership.RemoveByMatch(ctx, e.PanelID, e.InboundID, e.ClientEmail); rmErr != nil {
-					log.Warn("stale ownership cleanup failed",
-						"panel_id", e.PanelID, "inbound_id", e.InboundID, "email", e.ClientEmail, "err", rmErr)
-				} else {
-					log.Info("removed stale ownership (3X-UI inbound deleted)",
-						"panel_id", e.PanelID, "inbound_id", e.InboundID, "email", e.ClientEmail)
-				}
-				continue
+		uniquePanels[e.PanelID] = struct{}{}
+	}
+	type panelData struct {
+		byInbound map[int]*ports.Inbound
+		err       error
+	}
+	panelMap := make(map[int64]panelData, len(uniquePanels))
+	var prefetchMu sync.Mutex
+	var prefetchWG sync.WaitGroup
+	prefetchSem := make(chan struct{}, concurrency)
+	for pid := range uniquePanels {
+		prefetchWG.Add(1)
+		go func(p int64) {
+			defer prefetchWG.Done()
+			prefetchSem <- struct{}{}
+			defer func() { <-prefetchSem }()
+			c, err := s.pool.Get(p)
+			if err != nil {
+				prefetchMu.Lock()
+				panelMap[p] = panelData{err: err}
+				prefetchMu.Unlock()
+				return
 			}
-			if firstErr == nil {
-				firstErr = fmt.Errorf("inspect %d/%d/%s: %w", e.PanelID, e.InboundID, e.ClientEmail, err)
+			list, lerr := c.ListInbounds(ctx)
+			idx := make(map[int]*ports.Inbound, len(list))
+			for i := range list {
+				idx[list[i].ID] = &list[i]
 			}
+			prefetchMu.Lock()
+			panelMap[p] = panelData{byInbound: idx, err: lerr}
+			prefetchMu.Unlock()
+		}(pid)
+	}
+	prefetchWG.Wait()
+
+	// Phase 2 — concurrent SetOwnedClientEnable across entries, capped
+	// by the same sema. Ownership-table writes (stale cleanup) and
+	// firstErr collection happen sequentially after the fan-out so we
+	// don't race the repo or get nondeterministic error reporting.
+	type pushOutcome struct {
+		entry        *domain.XUIClientEntry
+		err          error
+		staleInbound bool
+		panelErr     error // separate so we can distinguish "panel down" from "per-entry error"
+	}
+	outcomes := make(chan pushOutcome, len(entries))
+	var pushWG sync.WaitGroup
+	pushSem := make(chan struct{}, concurrency)
+	for _, e := range entries {
+		pd, ok := panelMap[e.PanelID]
+		if !ok || pd.err != nil {
+			perr := fmt.Errorf("panel %d not reachable", e.PanelID)
+			if ok && pd.err != nil {
+				perr = pd.err
+			}
+			outcomes <- pushOutcome{entry: e, panelErr: perr}
 			continue
 		}
+		inb, found := pd.byInbound[e.InboundID]
+		if !found {
+			// ListInbounds returned the panel's inbound set, but our
+			// row points to an ID that's no longer there. Same
+			// semantics as the old isInboundNotFoundErr branch: the
+			// inbound was deleted on the 3X-UI side; the ownership
+			// row is stale and should be dropped.
+			outcomes <- pushOutcome{entry: e, staleInbound: true}
+			continue
+		}
+		info := inboundInfo{
+			ssMethod: extractSSMethod(inb.Settings),
+			flow:     extractDefaultFlow(inb.Settings),
+		}
+		info.protocol = crypto.DetectProtocol(inb.Protocol, info.ssMethod)
 		if info.protocol == "" {
+			outcomes <- pushOutcome{entry: e}
 			continue
 		}
-		if err := s.syncer.SetOwnedClientEnable(ctx, e.PanelID, e.InboundID, e.ClientEmail,
-			info.protocol, u.UUID, info.flow, u.Enabled, expireTime, floor); err != nil && firstErr == nil {
-			firstErr = fmt.Errorf("push config %d/%d/%s: %w", e.PanelID, e.InboundID, e.ClientEmail, err)
+		pushWG.Add(1)
+		entry := e
+		infoCopy := info
+		go func() {
+			defer pushWG.Done()
+			pushSem <- struct{}{}
+			defer func() { <-pushSem }()
+			perr := s.syncer.SetOwnedClientEnable(ctx, entry.PanelID, entry.InboundID, entry.ClientEmail,
+				infoCopy.protocol, u.UUID, infoCopy.flow, u.Enabled, expireTime, floor)
+			outcomes <- pushOutcome{entry: entry, err: perr}
+		}()
+	}
+	pushWG.Wait()
+	close(outcomes)
+
+	// Collect serially: ownership.RemoveByMatch isn't goroutine-safe to
+	// race, and firstErr should be deterministic.
+	var firstErr error
+	for o := range outcomes {
+		if o.staleInbound {
+			if rmErr := s.ownership.RemoveByMatch(ctx, o.entry.PanelID, o.entry.InboundID, o.entry.ClientEmail); rmErr != nil {
+				log.Warn("stale ownership cleanup failed",
+					"panel_id", o.entry.PanelID, "inbound_id", o.entry.InboundID, "email", o.entry.ClientEmail, "err", rmErr)
+			} else {
+				log.Info("removed stale ownership (3X-UI inbound deleted)",
+					"panel_id", o.entry.PanelID, "inbound_id", o.entry.InboundID, "email", o.entry.ClientEmail)
+			}
+			continue
+		}
+		if o.panelErr != nil && firstErr == nil {
+			firstErr = fmt.Errorf("inspect %d/%d/%s: %w", o.entry.PanelID, o.entry.InboundID, o.entry.ClientEmail, o.panelErr)
+			continue
+		}
+		if o.err != nil && firstErr == nil {
+			firstErr = fmt.Errorf("push config %d/%d/%s: %w", o.entry.PanelID, o.entry.InboundID, o.entry.ClientEmail, o.err)
 		}
 	}
 	return firstErr
