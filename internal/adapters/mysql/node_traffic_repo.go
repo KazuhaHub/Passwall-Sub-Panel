@@ -11,6 +11,26 @@ import (
 
 type nodeTrafficRepo struct{ db *gorm.DB }
 
+// InsertBatch packs all supplied node snapshots into one SQL roundtrip
+// per batchSize chunk. Mirrors trafficRepo.InsertBatch — used by
+// PollOnce's end-of-cycle flush.
+func (r *nodeTrafficRepo) InsertBatch(ctx context.Context, snaps []*domain.NodeTrafficSnapshot) error {
+	if len(snaps) == 0 {
+		return nil
+	}
+	rows := make([]nodeTrafficRow, len(snaps))
+	for i, s := range snaps {
+		rows[i] = nodeTrafficRow{
+			NodeID:     s.NodeID,
+			UpBytes:    s.UpBytes,
+			DownBytes:  s.DownBytes,
+			TotalBytes: s.TotalBytes,
+			CapturedAt: s.CapturedAt,
+		}
+	}
+	return r.db.WithContext(ctx).CreateInBatches(&rows, batchSize).Error
+}
+
 func (r *nodeTrafficRepo) Insert(ctx context.Context, s *domain.NodeTrafficSnapshot) error {
 	row := nodeTrafficRow{
 		NodeID:     s.NodeID,

@@ -126,6 +126,16 @@ func (r *fakeTrafficRepo) InsertClient(ctx context.Context, s *domain.ClientTraf
 	return nil
 }
 
+func (r *fakeTrafficRepo) InsertBatch(ctx context.Context, snaps []*domain.TrafficSnapshot) error {
+	r.snapshots = append(r.snapshots, snaps...)
+	return nil
+}
+
+func (r *fakeTrafficRepo) InsertClientBatch(ctx context.Context, snaps []*domain.ClientTrafficSnapshot) error {
+	r.clientSnapshots = append(r.clientSnapshots, snaps...)
+	return nil
+}
+
 func (r *fakeTrafficRepo) LatestForClient(ctx context.Context, userID int64, panelID int64, inboundID int, email string) (*domain.ClientTrafficSnapshot, error) {
 	var latest *domain.ClientTrafficSnapshot
 	for _, s := range r.clientSnapshots {
@@ -353,7 +363,7 @@ func TestRecordClientStatsHandlesOneClientReset(t *testing.T) {
 	}}
 	svc := New(nil, nil, repo, nil, nil, nil, nil)
 
-	delta, err := svc.recordClientStats(context.Background(), 1, 10, 20, "a@example.test", 50, 70)
+	delta, err := svc.recordClientStats(context.Background(), 1, 10, 20, "a@example.test", 50, 70, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -425,6 +435,10 @@ type fakeNodeTrafficRepo struct {
 
 func (r *fakeNodeTrafficRepo) Insert(ctx context.Context, s *domain.NodeTrafficSnapshot) error {
 	r.snapshots = append(r.snapshots, s)
+	return nil
+}
+func (r *fakeNodeTrafficRepo) InsertBatch(ctx context.Context, snaps []*domain.NodeTrafficSnapshot) error {
+	r.snapshots = append(r.snapshots, snaps...)
 	return nil
 }
 func (r *fakeNodeTrafficRepo) LatestForNode(ctx context.Context, nodeID int64) (*domain.NodeTrafficSnapshot, error) {

@@ -130,6 +130,17 @@ func (s *Service) PollOnce(ctx context.Context) error {
 	}
 	pollLoc := paneltz.Location(ctx, s.settings)
 
+	// Sink collects every snapshot write across the user loop so we can
+	// flush them in three GORM CreateInBatches calls at the end of the
+	// cycle instead of N + M individual INSERTs. The per-user / per-node
+	// processing stays single-goroutine so no locking is needed on the
+	// sink slices — they're just append targets owned by this poll.
+	sink := &pollSink{
+		userSnaps:   make([]*domain.TrafficSnapshot, 0, len(users)),
+		clientSnaps: make([]*domain.ClientTrafficSnapshot, 0, len(users)*4),
+		nodeSnaps:   make([]*domain.NodeTrafficSnapshot, 0),
+	}
+
 	byInbound := make(map[inboundKey][]ownershipRef)
 	totals := make(map[int64]trafficTotals, len(users))
 	skipUsers := make(map[int64]bool)
@@ -255,7 +266,7 @@ func (s *Service) PollOnce(ctx context.Context) error {
 				total.up += t.Up
 				total.down += t.Down
 				total.hits++
-				delta, derr := s.recordClientStats(ctx, ref.userID, panelID, inboundID, ref.email, t.Up, t.Down)
+				delta, derr := s.recordClientStats(ctx, ref.userID, panelID, inboundID, ref.email, t.Up, t.Down, sink)
 				if derr != nil {
 					log.Warn("traffic poll client snapshot",
 						"user_id", ref.userID,
@@ -299,7 +310,7 @@ func (s *Service) PollOnce(ctx context.Context) error {
 			// clients is both more reliable and matches the dashboard contract
 			// that only panel-managed clients are counted.
 			if matched > 0 {
-				if err := s.recordNodeStats(ctx, panelID, inboundID, nodeUp, nodeDown); err != nil {
+				if err := s.recordNodeStats(ctx, panelID, inboundID, nodeUp, nodeDown, sink); err != nil {
 					log.Warn("traffic poll node snapshot",
 						"panel_id", panelID, "inbound_id", inboundID, "err", err)
 				}
@@ -312,8 +323,29 @@ func (s *Service) PollOnce(ctx context.Context) error {
 			log.Warn("traffic poll user skipped due to inbound fetch failure", "user_id", u.ID)
 			continue
 		}
-		if err := s.recordAndEnforceWith(ctx, u, totals[u.ID], pollCfg, pollLoc); err != nil {
+		if err := s.recordAndEnforceWith(ctx, u, totals[u.ID], pollCfg, pollLoc, sink); err != nil {
 			log.Warn("traffic poll user", "user_id", u.ID, "err", err)
+		}
+	}
+
+	// Drain the sink in three batched INSERTs. Order doesn't matter — the
+	// snapshots are independent — but client first so the most numerous
+	// table lands while the connection is hot. Failures are logged and
+	// the poll continues; losing one batch is preferable to crashing the
+	// scheduler (subsequent polls will resnapshot).
+	if len(sink.clientSnaps) > 0 {
+		if err := s.traffic.InsertClientBatch(ctx, sink.clientSnaps); err != nil {
+			log.Warn("traffic poll flush client snapshots", "count", len(sink.clientSnaps), "err", err)
+		}
+	}
+	if len(sink.userSnaps) > 0 {
+		if err := s.traffic.InsertBatch(ctx, sink.userSnaps); err != nil {
+			log.Warn("traffic poll flush user snapshots", "count", len(sink.userSnaps), "err", err)
+		}
+	}
+	if len(sink.nodeSnaps) > 0 && s.nodeTraffic != nil {
+		if err := s.nodeTraffic.InsertBatch(ctx, sink.nodeSnaps); err != nil {
+			log.Warn("traffic poll flush node snapshots", "count", len(sink.nodeSnaps), "err", err)
 		}
 	}
 	return nil
@@ -367,7 +399,19 @@ type bootstrapClientDelta struct {
 	createdAt time.Time
 }
 
-func (s *Service) recordClientStats(ctx context.Context, userID int64, panelID int64, inboundID int, email string, up, down int64) (trafficDelta, error) {
+// pollSink collects per-poll snapshot writes so PollOnce can flush them
+// in batch at the end of the cycle rather than per-event. Non-nil while
+// the poll cycle owns it; record* helpers fall back to single-row
+// Insert when sink is nil so non-poll callers (tests, ad-hoc) keep
+// working without a sink object. Sink is poll-scoped + accessed
+// sequentially by the user loop, no locking needed.
+type pollSink struct {
+	userSnaps   []*domain.TrafficSnapshot
+	clientSnaps []*domain.ClientTrafficSnapshot
+	nodeSnaps   []*domain.NodeTrafficSnapshot
+}
+
+func (s *Service) recordClientStats(ctx context.Context, userID int64, panelID int64, inboundID int, email string, up, down int64, sink *pollSink) (trafficDelta, error) {
 	totalBytes := up + down
 	prev, err := s.traffic.LatestForClient(ctx, userID, panelID, inboundID, email)
 	if err != nil && !errors.Is(err, domain.ErrNotFound) {
@@ -386,7 +430,7 @@ func (s *Service) recordClientStats(ctx context.Context, userID int64, panelID i
 		}
 	}
 
-	if err := s.traffic.InsertClient(ctx, &domain.ClientTrafficSnapshot{
+	snap := &domain.ClientTrafficSnapshot{
 		UserID:      userID,
 		PanelID:     panelID,
 		InboundID:   inboundID,
@@ -395,7 +439,12 @@ func (s *Service) recordClientStats(ctx context.Context, userID int64, panelID i
 		DownBytes:   down,
 		TotalBytes:  totalBytes,
 		CapturedAt:  time.Now(),
-	}); err != nil {
+	}
+	if sink != nil {
+		sink.clientSnaps = append(sink.clientSnaps, snap)
+		return delta, nil
+	}
+	if err := s.traffic.InsertClient(ctx, snap); err != nil {
 		return trafficDelta{}, fmt.Errorf("insert client snapshot: %w", err)
 	}
 	return delta, nil
@@ -412,13 +461,15 @@ func (s *Service) recordAndEnforce(ctx context.Context, u *domain.User, totals t
 			cfg = loaded
 		}
 	}
-	return s.recordAndEnforceWith(ctx, u, totals, cfg, paneltz.Location(ctx, s.settings))
+	return s.recordAndEnforceWith(ctx, u, totals, cfg, paneltz.Location(ctx, s.settings), nil)
 }
 
 // recordAndEnforceWith takes pre-loaded poll-scoped config + location so
 // we don't have to re-fetch settings on every user. The PollOnce loop
 // loads both ONCE at the top and threads them in here for every user.
-func (s *Service) recordAndEnforceWith(ctx context.Context, u *domain.User, totals trafficTotals, cfg ports.UISettings, loc *time.Location) error {
+// sink (nullable) defers snapshot INSERT to PollOnce's end-of-cycle
+// batch flush; non-poll callers pass nil for immediate insert.
+func (s *Service) recordAndEnforceWith(ctx context.Context, u *domain.User, totals trafficTotals, cfg ports.UISettings, loc *time.Location, sink *pollSink) error {
 	if loc == nil {
 		loc = time.Local
 	}
@@ -507,7 +558,9 @@ func (s *Service) recordAndEnforceWith(ctx context.Context, u *domain.User, tota
 			TotalBytes: u.LifetimeTotalBytes,
 			CapturedAt: now,
 		}
-		if err := s.traffic.Insert(ctx, snap); err != nil {
+		if sink != nil {
+			sink.userSnaps = append(sink.userSnaps, snap)
+		} else if err := s.traffic.Insert(ctx, snap); err != nil {
 			return fmt.Errorf("insert snapshot: %w", err)
 		}
 		wroteSnap = true
@@ -608,7 +661,7 @@ func monotonicDelta(current, previous int64) int64 {
 // panel and updates the node's monotonic lifetime counters. Mirrors the
 // per-user logic in recordAndEnforce: counter resets (latest < prev) collapse
 // to "delta = current value", and only non-zero deltas trigger an Update.
-func (s *Service) recordNodeStats(ctx context.Context, panelID int64, inboundID int, up, down int64) error {
+func (s *Service) recordNodeStats(ctx context.Context, panelID int64, inboundID int, up, down int64, sink *pollSink) error {
 	if s.nodes == nil || s.nodeTraffic == nil {
 		return nil
 	}
@@ -645,13 +698,16 @@ func (s *Service) recordNodeStats(ctx context.Context, panelID int64, inboundID 
 	node.LastTrafficDownBytes = down
 	node.LastTrafficTotalBytes = totalBytes
 
-	if err := s.nodeTraffic.Insert(ctx, &domain.NodeTrafficSnapshot{
+	nodeSnap := &domain.NodeTrafficSnapshot{
 		NodeID:     node.ID,
 		UpBytes:    node.LifetimeUpBytes,
 		DownBytes:  node.LifetimeDownBytes,
 		TotalBytes: node.LifetimeTotalBytes,
 		CapturedAt: time.Now(),
-	}); err != nil {
+	}
+	if sink != nil {
+		sink.nodeSnaps = append(sink.nodeSnaps, nodeSnap)
+	} else if err := s.nodeTraffic.Insert(ctx, nodeSnap); err != nil {
 		return fmt.Errorf("insert node snapshot: %w", err)
 	}
 

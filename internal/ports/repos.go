@@ -119,6 +119,12 @@ type TrafficRepo interface {
 	ListByUser(ctx context.Context, userID int64, since, until time.Time) ([]*domain.TrafficSnapshot, error)
 	InsertClient(ctx context.Context, s *domain.ClientTrafficSnapshot) error
 	LatestForClient(ctx context.Context, userID int64, panelID int64, inboundID int, email string) (*domain.ClientTrafficSnapshot, error)
+	// InsertBatch / InsertClientBatch consolidate per-poll snapshot writes
+	// into a single SQL roundtrip (GORM CreateInBatches). Used by
+	// PollOnce's end-of-cycle flush; per-event callers stay on the
+	// single-row Insert/InsertClient methods.
+	InsertBatch(ctx context.Context, snaps []*domain.TrafficSnapshot) error
+	InsertClientBatch(ctx context.Context, snaps []*domain.ClientTrafficSnapshot) error
 }
 
 type NodeTrafficRepo interface {
@@ -126,6 +132,9 @@ type NodeTrafficRepo interface {
 	LatestForNode(ctx context.Context, nodeID int64) (*domain.NodeTrafficSnapshot, error)
 	LastBefore(ctx context.Context, nodeID int64, before time.Time) (*domain.NodeTrafficSnapshot, error)
 	ListByNode(ctx context.Context, nodeID int64, since, until time.Time) ([]*domain.NodeTrafficSnapshot, error)
+	// InsertBatch consolidates per-poll node snapshot writes; mirrors the
+	// TrafficRepo equivalent.
+	InsertBatch(ctx context.Context, snaps []*domain.NodeTrafficSnapshot) error
 }
 
 type AuditRepo interface {
