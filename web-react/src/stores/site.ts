@@ -14,10 +14,13 @@ interface SiteState {
   footerText: string
   themeColor: string | undefined
   themeDefaultMode: 'light' | 'dark' | undefined
+  // panel timezone (IANA name). Empty = backend hasn't been configured, so
+  // the frontend falls back to the browser tz for any display.
+  timezone: string
   loaded: boolean
   load: () => Promise<void>
   update: (patch: Partial<Pick<SiteState,
-    'siteTitle' | 'appTitle' | 'logoUrl' | 'logoUrlDark' | 'iconUrl' | 'footerText' | 'themeColor' | 'themeDefaultMode'
+    'siteTitle' | 'appTitle' | 'logoUrl' | 'logoUrlDark' | 'iconUrl' | 'footerText' | 'themeColor' | 'themeDefaultMode' | 'timezone'
   >>) => void
 }
 
@@ -41,6 +44,7 @@ export const useSiteStore = create<SiteState>((set, get) => ({
   footerText: '© Kazuha Hub Passwall',
   themeColor: undefined,
   themeDefaultMode: undefined,
+  timezone: '',
   loaded: false,
 
   async load() {
@@ -56,6 +60,7 @@ export const useSiteStore = create<SiteState>((set, get) => ({
         footerText: m.footer_text || '© Kazuha Hub Passwall',
         themeColor: m.theme_color,
         themeDefaultMode: m.theme_default_mode,
+        timezone: m.timezone || '',
         loaded: true,
       })
     } catch {

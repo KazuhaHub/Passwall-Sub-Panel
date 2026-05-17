@@ -52,6 +52,9 @@ export interface UISettings {
   email_domain: string
   audit_retention_days: number
   sub_base_url: string
+  /** IANA timezone name used for system-level time math (traffic resets,
+   *  expire_at, default chart bucketing). Empty falls back to server local. */
+  timezone: string
   cron_traffic_pull_minutes: number
   cron_reconcile_minutes: number
   jwt_access_ttl_minutes: number

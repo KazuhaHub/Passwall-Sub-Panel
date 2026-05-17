@@ -82,6 +82,31 @@ import type { Group } from '@/api/types'
 
 type TabKey = 'general' | 'brand' | 'subscription' | 'portal' | 'mail' | 'sso'
 
+// COMMON_TIMEZONES is the suggested set in the Settings → 面板时区 picker.
+// freeSolo on the Autocomplete lets admins type any IANA name the backend
+// can LoadLocation — these are just suggestions to save typing for the
+// most common deployments (mainland CN / TW / HK / KR / JP / SG, the US
+// and major EU capitals, AU). Empty (the panel's default) falls back to
+// the server process's time.Local on the backend.
+const COMMON_TIMEZONES: string[] = [
+  'UTC',
+  'Asia/Shanghai',
+  'Asia/Hong_Kong',
+  'Asia/Taipei',
+  'Asia/Tokyo',
+  'Asia/Seoul',
+  'Asia/Singapore',
+  'America/Los_Angeles',
+  'America/Denver',
+  'America/Chicago',
+  'America/New_York',
+  'Europe/London',
+  'Europe/Paris',
+  'Europe/Berlin',
+  'Europe/Moscow',
+  'Australia/Sydney',
+]
+
 // GroupSlugPicker is a searchable dropdown over the admin's group catalogue.
 // SAML/OIDC both use it for `default_group_slug` so admins don't have to
 // remember slugs verbatim. Empty value means "no default group".
@@ -148,6 +173,7 @@ export default function SettingsView() {
       sub_client_rules: s.sub_client_rules ?? [],
       sub_import_clients: s.sub_import_clients ?? [],
       quick_links: s.quick_links ?? [],
+      timezone: s.timezone ?? '',
     }
   }
 
@@ -316,6 +342,21 @@ export default function SettingsView() {
           </Section>
 
           <Section title={t('settings.general.section_runtime')} md={md}>
+            <Autocomplete
+              freeSolo
+              size="small"
+              options={COMMON_TIMEZONES}
+              value={settings.timezone || ''}
+              inputValue={settings.timezone || ''}
+              onInputChange={(_, v) => patch('timezone', v)}
+              onChange={(_, v) => patch('timezone', (v as string) ?? '')}
+              fullWidth
+              renderInput={(params) => (
+                <TextField {...params}
+                  label={t('settings.general.timezone')}
+                  placeholder={t('settings.general.timezone_placeholder', { defaultValue: '例如 Asia/Shanghai' })}
+                  helperText={t('settings.general.timezone_hint')} />
+              )} />
             <Pair>
               <NumField label={t('settings.general.cron_traffic_pull_minutes')} value={settings.cron_traffic_pull_minutes}
                 onChange={v => patch('cron_traffic_pull_minutes', v)} />

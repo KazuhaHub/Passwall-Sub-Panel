@@ -182,4 +182,7 @@ export interface AuthMethods {
   // Until then, the panel returns undefined and the frontend falls back.
   theme_color?: string
   theme_default_mode?: 'light' | 'dark'
+  // IANA timezone for system-level calculations (traffic resets, expire_at,
+  // default for the admin traffic chart). Empty falls back to server local.
+  timezone?: string
 }
