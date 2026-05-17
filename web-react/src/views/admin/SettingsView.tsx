@@ -354,7 +354,7 @@ export default function SettingsView() {
               renderInput={(params) => (
                 <TextField {...params}
                   label={t('settings.general.timezone')}
-                  placeholder={t('settings.general.timezone_placeholder', { defaultValue: '例如 Asia/Shanghai' })}
+                  placeholder={t('settings.general.timezone_placeholder', { defaultValue: '例如 America/Los_Angeles' })}
                   helperText={t('settings.general.timezone_hint')} />
               )} />
             <Pair>

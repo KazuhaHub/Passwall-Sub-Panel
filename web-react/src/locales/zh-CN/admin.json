@@ -75,7 +75,7 @@
       "sub_per_ip_per_min": "订阅请求限流（次/分钟/IP）",
       "login_per_ip_per_min": "登录限流（次/分钟/IP）",
       "timezone": "面板时区",
-      "timezone_placeholder": "例如 Asia/Shanghai（留空使用服务器时区）",
+      "timezone_placeholder": "例如 America/Los_Angeles（留空使用服务器时区）",
       "timezone_hint": "用于流量重置、用户到期日计算、图表默认时区。订阅页和用户自助页始终使用浏览器时区。",
       "cron_traffic_pull_minutes": "流量采集间隔（分钟）",
       "cron_reconcile_minutes": "Reconcile 间隔（分钟）",

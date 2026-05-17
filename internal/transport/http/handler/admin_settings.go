@@ -34,6 +34,7 @@ type settingsDTO struct {
 	EmailDomain                string                   `json:"email_domain"`
 	AuditRetentionDays         int                      `json:"audit_retention_days"`
 	SubBaseURL                 string                   `json:"sub_base_url"`
+	Timezone                   string                   `json:"timezone"`
 	CronTrafficPullMinutes     int                      `json:"cron_traffic_pull_minutes"`
 	CronReconcileMinutes       int                      `json:"cron_reconcile_minutes"`
 	JWTAccessTTLMinutes        int                      `json:"jwt_access_ttl_minutes"`
@@ -94,6 +95,7 @@ func (h *AdminSettingsHandler) Get(c *gin.Context) {
 		EmailDomain:                s.EmailDomain,
 		AuditRetentionDays:         s.AuditRetentionDays,
 		SubBaseURL:                 s.SubBaseURL,
+		Timezone:                   s.Timezone,
 		CronTrafficPullMinutes:     s.CronTrafficPullMinutes,
 		CronReconcileMinutes:       s.CronReconcileMinutes,
 		JWTAccessTTLMinutes:        s.JWTAccessTTLMinutes,
@@ -155,6 +157,7 @@ func (h *AdminSettingsHandler) Put(c *gin.Context) {
 		EmailDomain:                strings.TrimSpace(req.EmailDomain),
 		AuditRetentionDays:         req.AuditRetentionDays,
 		SubBaseURL:                 strings.TrimRight(strings.TrimSpace(req.SubBaseURL), "/"),
+		Timezone:                   strings.TrimSpace(req.Timezone),
 		CronTrafficPullMinutes:     req.CronTrafficPullMinutes,
 		CronReconcileMinutes:       req.CronReconcileMinutes,
 		JWTAccessTTLMinutes:        req.JWTAccessTTLMinutes,
@@ -235,6 +238,7 @@ func (h *AdminSettingsHandler) Put(c *gin.Context) {
 		EmailDomain:                s.EmailDomain,
 		AuditRetentionDays:         s.AuditRetentionDays,
 		SubBaseURL:                 s.SubBaseURL,
+		Timezone:                   s.Timezone,
 		CronTrafficPullMinutes:     s.CronTrafficPullMinutes,
 		CronReconcileMinutes:       s.CronReconcileMinutes,
 		JWTAccessTTLMinutes:        s.JWTAccessTTLMinutes,
