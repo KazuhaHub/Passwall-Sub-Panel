@@ -31,9 +31,10 @@ type oidcConfigRow struct {
 	AttrDisplayName string `gorm:"size:128"`
 	AttrGroups      string `gorm:"size:128"`
 
-	AdminGroupIDs             jsonStrings
-	DefaultGroupSlug          string `gorm:"size:64"`
-	AllowAutoCreate           bool
+	AdminGroupIDs           jsonStrings
+	RoleRules               jsonRoleRules
+	DefaultGroupSlug        string `gorm:"size:64"`
+	AllowAutoCreate         bool
 	KeepAdminWhenNotInGroup bool   `gorm:"default:false"`
 
 	NewUserExpireDays         int
@@ -63,9 +64,10 @@ func (r *oidcConfigRow) toDomain() (*config.OIDCConfig, error) {
 			DisplayName: r.AttrDisplayName,
 			Groups:      r.AttrGroups,
 		},
-		AdminGroupIDs:             []string(r.AdminGroupIDs),
-		DefaultGroupSlug:          r.DefaultGroupSlug,
-		AllowAutoCreate:           r.AllowAutoCreate,
+		AdminGroupIDs:           []string(r.AdminGroupIDs),
+		RoleRules:               []config.SSORoleRule(r.RoleRules),
+		DefaultGroupSlug:        r.DefaultGroupSlug,
+		AllowAutoCreate:         r.AllowAutoCreate,
 		KeepAdminWhenNotInGroup: r.KeepAdminWhenNotInGroup,
 		NewUserDefaults: config.SAMLNewUserDefaults{
 			ExpireDays:         r.NewUserExpireDays,
@@ -94,9 +96,10 @@ func oidcConfigFromDomain(c *config.OIDCConfig) (*oidcConfigRow, error) {
 		AttrEmail:                 c.AttributeMapping.Email,
 		AttrDisplayName:           c.AttributeMapping.DisplayName,
 		AttrGroups:                c.AttributeMapping.Groups,
-		AdminGroupIDs:             jsonStrings(c.AdminGroupIDs),
-		DefaultGroupSlug:          c.DefaultGroupSlug,
-		AllowAutoCreate:           c.AllowAutoCreate,
+		AdminGroupIDs:           jsonStrings(c.AdminGroupIDs),
+		RoleRules:               jsonRoleRules(c.RoleRules),
+		DefaultGroupSlug:        c.DefaultGroupSlug,
+		AllowAutoCreate:         c.AllowAutoCreate,
 		KeepAdminWhenNotInGroup: c.KeepAdminWhenNotInGroup,
 		NewUserExpireDays:         c.NewUserDefaults.ExpireDays,
 		NewUserTrafficLimitBytes:  c.NewUserDefaults.TrafficLimitBytes,

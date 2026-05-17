@@ -182,16 +182,31 @@ export interface SAMLConfig {
   admin_group_ids: string[]
   default_group_slug: string
   allow_auto_create: boolean
-  /** When true, panel admin role is PRESERVED on SSO login even if the IdP
-   *  no longer reports the user in any admin group. Default false makes IdP
-   *  admin-group membership authoritative for the admin role — promote AND
-   *  demote. Operator role is panel-side and unaffected by this flag. */
+  /** When true, panel admin role is PRESERVED on SSO login even if the
+   *  IdP role rule resolves to something other than admin. Default false
+   *  makes the rule output authoritative for the admin role in both
+   *  directions. Operator role is panel-side and unaffected by this flag. */
   keep_admin_when_not_in_group: boolean
+  /** Attribute-driven role mapping. Evaluated in order; first match
+   *  decides the panel role. Empty list falls back to AdminGroupIDs.
+   *  See backend ResolveRoleFromAssertion for the full matcher. */
+  role_rules: SSORoleRule[]
   new_user_defaults: {
     expire_days: number
     traffic_limit_bytes: number
     traffic_reset_period: string
   }
+}
+
+/** SSORoleRule: an IdP attribute value -> panel role mapping. Shared by
+ *  SAML and OIDC configs. attribute="" or "groups" is the shortcut to
+ *  match against the groups attribute (whatever URN it's configured
+ *  under). value is matched exactly. role is the panel role string
+ *  ("admin" / "operator" / "user"). */
+export interface SSORoleRule {
+  attribute: string
+  value: string
+  role: string
 }
 
 export interface SAMLUpdateRequest extends Omit<SAMLConfig, 'sp'> {
@@ -247,9 +262,11 @@ export interface OIDCConfig {
   default_group_slug: string
   allow_auto_create: boolean
   /** See SAMLConfig.keep_admin_when_not_in_group — when true, preserves a
-   *  panel admin's role even after the IdP drops them from every admin
-   *  group. Default false = IdP groups authoritative (promote + demote). */
+   *  panel admin's role even after the role-rule output isn't admin.
+   *  Default false = role rules authoritative (promote + demote). */
   keep_admin_when_not_in_group: boolean
+  /** Attribute-driven role mapping. See SAMLConfig.role_rules. */
+  role_rules: SSORoleRule[]
   new_user_defaults: {
     expire_days: number
     traffic_limit_bytes: number

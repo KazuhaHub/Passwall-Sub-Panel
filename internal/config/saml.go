@@ -20,8 +20,22 @@ type SAMLConfig struct {
 	IDP     IDPConf `yaml:"idp"`
 
 	AttributeMapping SAMLAttributeMap `yaml:"attribute_mapping"`
-	AdminGroupIDs    []string         `yaml:"admin_group_ids"`
-	DefaultGroupSlug string           `yaml:"default_group_slug"`
+
+	// AdminGroupIDs is the legacy "groups in this list → admin role"
+	// shortcut. Kept for back-compat: if RoleRules is empty, the SSO
+	// login resolver synthesises equivalent rules at runtime so existing
+	// configs keep working. Admins moving to the richer model leave
+	// this field empty and use RoleRules instead.
+	AdminGroupIDs []string `yaml:"admin_group_ids"`
+
+	// RoleRules is the attribute-driven role mapping evaluated in order.
+	// The first rule whose value appears in the configured attribute
+	// decides the panel role. Empty list = no rules; in that case the
+	// resolver falls back to AdminGroupIDs synthesis. See
+	// internal/service/auth.ResolveRoleFromAssertion for the full matcher.
+	RoleRules []SSORoleRule `yaml:"role_rules"`
+
+	DefaultGroupSlug string `yaml:"default_group_slug"`
 
 	// AllowAutoCreate controls whether a non-admin SSO login may provision
 	// a fresh account. When false (the original behaviour) only IdP-admin

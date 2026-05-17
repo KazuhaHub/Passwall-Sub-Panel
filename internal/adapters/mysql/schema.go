@@ -9,6 +9,7 @@ import (
 
 	"gorm.io/gorm"
 
+	"github.com/KazuhaHub/passwall-sub-panel/internal/config"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 )
@@ -901,6 +902,40 @@ func (j *jsonStrings) Scan(value any) error {
 		b = []byte(v)
 	default:
 		return fmt.Errorf("unsupported scan type for jsonStrings: %T", value)
+	}
+	if len(b) == 0 {
+		*j = nil
+		return nil
+	}
+	return json.Unmarshal(b, j)
+}
+
+// jsonRoleRules persists []config.SSORoleRule as a JSON blob in the
+// saml_config / oidc_config table. Same shape as jsonStrings — Value()
+// returns "[]" for nil so the DB column stays NOT NULL.
+type jsonRoleRules []config.SSORoleRule
+
+func (j jsonRoleRules) Value() (driver.Value, error) {
+	if j == nil {
+		return "[]", nil
+	}
+	b, err := json.Marshal(j)
+	return string(b), err
+}
+
+func (j *jsonRoleRules) Scan(value any) error {
+	if value == nil {
+		*j = nil
+		return nil
+	}
+	var b []byte
+	switch v := value.(type) {
+	case []byte:
+		b = v
+	case string:
+		b = []byte(v)
+	default:
+		return fmt.Errorf("unsupported scan type for jsonRoleRules: %T", value)
 	}
 	if len(b) == 0 {
 		*j = nil

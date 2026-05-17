@@ -158,88 +158,79 @@ func TestEmergencyStatus_UsedBytesZeroWhenNoActiveWindow(t *testing.T) {
 	}
 }
 
-// applyRoleFromSSO must always honour two invariants:
-//   - Promote a non-admin to admin when the IdP says they're admin.
-//   - Never touch the operator role from the SSO path — it lives in panel-land.
-// The revoke-admin flag adds a third opt-in arm: demote a panel admin back
-// to user when the IdP says they're no longer in any admin group.
+// applyRoleFromSSO invariants under the v2.4.0 role-rule semantics:
+//   - When a rule fires (matched=true), idpRole is authoritative — the
+//     panel role is overwritten in both directions (promote and demote).
+//   - keepAdmin=true is an admin-only opt-out: an existing admin who'd
+//     be demoted by the matched rule stays admin.
+//   - When no rule fired (matched=false), the panel role is left
+//     untouched regardless of idpRole or keepAdmin — RoleRules-less
+//     deployments must not have SSO clobber panel-side grants.
 
 func TestApplyRoleFromSSO_PromotesUserToAdmin(t *testing.T) {
-	role, changed := applyRoleFromSSO(domain.RoleUser, true, false)
+	role, changed := applyRoleFromSSO(domain.RoleUser, domain.RoleAdmin, true, false)
 	if role != domain.RoleAdmin || !changed {
-		t.Fatalf("user + IdP admin: got (%q, %v), want (admin, true)", role, changed)
+		t.Fatalf("user + rule=admin: got (%q, %v), want (admin, true)", role, changed)
 	}
 }
 
-func TestApplyRoleFromSSO_KeepsAdminWhenIdPStillAdmin(t *testing.T) {
-	role, changed := applyRoleFromSSO(domain.RoleAdmin, true, false)
+func TestApplyRoleFromSSO_NoChangeWhenAdminMatchedAdmin(t *testing.T) {
+	role, changed := applyRoleFromSSO(domain.RoleAdmin, domain.RoleAdmin, true, false)
 	if role != domain.RoleAdmin || changed {
-		t.Fatalf("admin + IdP admin: got (%q, %v), want (admin, false)", role, changed)
+		t.Fatalf("admin + rule=admin: got (%q, %v), want (admin, false)", role, changed)
 	}
 }
 
-func TestApplyRoleFromSSO_DemotesAdminWhenIdPMissesByDefault(t *testing.T) {
-	// Default keepAdmin = false → admin loses the role on the next SSO
-	// login when IdP no longer reports them in any admin group. IdP is
-	// authoritative for the admin role in both directions.
-	role, changed := applyRoleFromSSO(domain.RoleAdmin, false, false)
+func TestApplyRoleFromSSO_DemotesAdminToUserByDefault(t *testing.T) {
+	// Matched rule resolved to user → admin is demoted (keepAdmin=false).
+	role, changed := applyRoleFromSSO(domain.RoleAdmin, domain.RoleUser, true, false)
 	if role != domain.RoleUser || !changed {
-		t.Fatalf("admin + IdP miss + keep off: got (%q, %v), want (user, true)", role, changed)
+		t.Fatalf("admin + rule=user + keep off: got (%q, %v), want (user, true)", role, changed)
 	}
 }
 
-func TestApplyRoleFromSSO_KeepsAdminWhenKeepEnabled(t *testing.T) {
-	// Opt-out: admin keeps the role even when IdP misses, for panel-side
-	// manual admin grants that don't have IdP-group backing.
-	role, changed := applyRoleFromSSO(domain.RoleAdmin, false, true)
+func TestApplyRoleFromSSO_KeepAdminBlocksDemote(t *testing.T) {
+	// keepAdmin=true preserves admin against a rule-driven demote.
+	role, changed := applyRoleFromSSO(domain.RoleAdmin, domain.RoleUser, true, true)
 	if role != domain.RoleAdmin || changed {
-		t.Fatalf("admin + IdP miss + keep on: got (%q, %v), want (admin, false)", role, changed)
+		t.Fatalf("admin + rule=user + keep on: got (%q, %v), want (admin, false)", role, changed)
 	}
 }
 
-func TestApplyRoleFromSSO_KeepsAdminWhenKeepEnabledAndIdPStillAdmin(t *testing.T) {
-	// Sanity check: keepAdmin doesn't interfere with normal "IdP says admin"
-	// flow — the row was already admin, so no change.
-	role, changed := applyRoleFromSSO(domain.RoleAdmin, true, true)
-	if role != domain.RoleAdmin || changed {
-		t.Fatalf("admin + IdP admin + keep on: got (%q, %v), want (admin, false)", role, changed)
-	}
-}
-
-func TestApplyRoleFromSSO_DoesNotWashOperatorToUserOnDefault(t *testing.T) {
-	// Operator role is panel-only — IdP-group sync (default keepAdmin=false)
-	// must NOT demote it. Only admin role is touched by the demote path.
-	role, changed := applyRoleFromSSO(domain.RoleOperator, false, false)
-	if role != domain.RoleOperator || changed {
-		t.Fatalf("operator + IdP miss + keep off: got (%q, %v), want (operator, false)", role, changed)
-	}
-}
-
-func TestApplyRoleFromSSO_DoesNotWashOperatorToUser(t *testing.T) {
-	role, changed := applyRoleFromSSO(domain.RoleOperator, false, false)
-	if role != domain.RoleOperator || changed {
-		t.Fatalf("operator + IdP miss: got (%q, %v), want (operator, false)", role, changed)
-	}
-}
-
-func TestApplyRoleFromSSO_PromotesOperatorWhenIdPSaysAdmin(t *testing.T) {
-	role, changed := applyRoleFromSSO(domain.RoleOperator, true, false)
+func TestApplyRoleFromSSO_PromotesOperatorToAdmin(t *testing.T) {
+	role, changed := applyRoleFromSSO(domain.RoleOperator, domain.RoleAdmin, true, false)
 	if role != domain.RoleAdmin || !changed {
-		t.Fatalf("operator + IdP admin: got (%q, %v), want (admin, true)", role, changed)
+		t.Fatalf("operator + rule=admin: got (%q, %v), want (admin, true)", role, changed)
 	}
 }
 
-func TestApplyRoleFromSSO_UserUnchangedWhenIdPMisses(t *testing.T) {
-	role, changed := applyRoleFromSSO(domain.RoleUser, false, false)
-	if role != domain.RoleUser || changed {
-		t.Fatalf("user + IdP miss: got (%q, %v), want (user, false)", role, changed)
+func TestApplyRoleFromSSO_RuleCanAssignOperator(t *testing.T) {
+	// New in v2.4.0: a rule can map to operator, so IdP becomes the
+	// source of truth for that role too when the admin opts in.
+	role, changed := applyRoleFromSSO(domain.RoleUser, domain.RoleOperator, true, false)
+	if role != domain.RoleOperator || !changed {
+		t.Fatalf("user + rule=operator: got (%q, %v), want (operator, true)", role, changed)
 	}
 }
 
-func TestApplyRoleFromSSO_UserUnchangedWhenIdPMissesWithRevoke(t *testing.T) {
-	// Vacuous: no admin to revoke.
-	role, changed := applyRoleFromSSO(domain.RoleUser, false, true)
+func TestApplyRoleFromSSO_NoMatchLeavesAdminAlone(t *testing.T) {
+	// Matched=false: SSO had nothing to say. Existing panel role wins.
+	role, changed := applyRoleFromSSO(domain.RoleAdmin, domain.RoleUser, false, false)
+	if role != domain.RoleAdmin || changed {
+		t.Fatalf("admin + no match: got (%q, %v), want (admin, false)", role, changed)
+	}
+}
+
+func TestApplyRoleFromSSO_NoMatchLeavesOperatorAlone(t *testing.T) {
+	role, changed := applyRoleFromSSO(domain.RoleOperator, domain.RoleUser, false, false)
+	if role != domain.RoleOperator || changed {
+		t.Fatalf("operator + no match: got (%q, %v), want (operator, false)", role, changed)
+	}
+}
+
+func TestApplyRoleFromSSO_NoMatchLeavesUserAlone(t *testing.T) {
+	role, changed := applyRoleFromSSO(domain.RoleUser, domain.RoleAdmin, false, false)
 	if role != domain.RoleUser || changed {
-		t.Fatalf("user + IdP miss + revoke on: got (%q, %v), want (user, false)", role, changed)
+		t.Fatalf("user + no match (would-be-admin ignored): got (%q, %v), want (user, false)", role, changed)
 	}
 }

@@ -7,6 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/KazuhaHub/passwall-sub-panel/internal/config"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/auth"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/user"
@@ -95,18 +96,30 @@ func (h *AuthOIDCHandler) Callback(c *gin.Context) {
 		return
 	}
 
-	isAdmin := h.oidc.IsAdmin(assertion.Groups)
-
 	upn := assertion.Username
 	cfg := h.oidc.Config()
+	var (
+		groupsAttr string
+		rules      []config.SSORoleRule
+		legacyGIDs []string
+	)
+	if cfg != nil {
+		groupsAttr = cfg.AttributeMapping.Groups
+		rules = cfg.RoleRules
+		legacyGIDs = cfg.AdminGroupIDs
+	}
+	idpRole, roleMatched := auth.ResolveRoleFromAssertion(
+		rules, legacyGIDs, groupsAttr, assertion.Attributes, assertion.Groups,
+	)
 	in := user.EnsureSSOInput{
-		Provider:    domain.SSOProviderOIDC,
-		Subject:     assertion.Subject,
-		UPN:         upn,
-		Email:       assertion.Email,
-		DisplayName: assertion.DisplayName,
-		Groups:      assertion.Groups,
-		IsAdmin:     isAdmin,
+		Provider:       domain.SSOProviderOIDC,
+		Subject:        assertion.Subject,
+		UPN:            upn,
+		Email:          assertion.Email,
+		DisplayName:    assertion.DisplayName,
+		Groups:         assertion.Groups,
+		IdPRole:        idpRole,
+		IdPRoleMatched: roleMatched,
 	}
 	if cfg != nil {
 		in.AllowAutoCreate = cfg.AllowAutoCreate

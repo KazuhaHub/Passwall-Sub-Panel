@@ -328,17 +328,28 @@ type EnsureSSOInput struct {
 	Email   string
 	DisplayName string
 	Groups      []string
-	IsAdmin     bool
+	// IdPRole is the panel role the role-rule matcher derived from the
+	// assertion (RoleUser when no rule fired). Replaces the pre-v2.4.0
+	// boolean IsAdmin signal so an admin can map any IdP attribute
+	// value to admin / operator / user.
+	IdPRole domain.Role
+	// IdPRoleMatched reports whether a configured rule actually fired
+	// (as opposed to "no rules configured" or "no rule matched"). The
+	// reconcile path uses this to leave the existing panel role
+	// untouched when SSO has nothing to say — preserving panel-side
+	// manual grants in deployments that haven't moved to RoleRules yet
+	// (and have no AdminGroupIDs either).
+	IdPRoleMatched bool
 	// AllowAutoCreate: when true, a non-admin first-time SSO login is
 	// auto-provisioned with the panel's default group / quota. When false
-	// (the closed-deployment default) only IdP admins get an account; every
-	// other unknown UPN is bounced to /sso-no-account.
+	// (the closed-deployment default) only IdP-promoted users (RoleAdmin
+	// / RoleOperator from rules) get an account; every other unknown UPN
+	// is bounced to /sso-no-account.
 	AllowAutoCreate bool
-	// KeepAdminOnLogin: when true, a panel admin who is NOT in any IdP
-	// admin group is LEFT as admin on this login. Default false makes IdP
-	// admin-group membership authoritative for the admin role (both
-	// promotion and demotion). See applyRoleFromSSO for the full
-	// role-policy matrix.
+	// KeepAdminOnLogin: when true, a panel admin whose IdP-derived role
+	// is NOT admin keeps the admin role on this login. Default false makes
+	// the role-rule output authoritative for the admin role in both
+	// directions. See applyRoleFromSSO for the full role-policy matrix.
 	KeepAdminOnLogin bool
 	DefaultGroupSlug   string
 	DefaultExpireDays  int
@@ -348,28 +359,42 @@ type EnsureSSOInput struct {
 
 // applyRoleFromSSO computes the role to persist after an SSO login.
 //
-// Default policy (keepAdmin = false): IdP groups are authoritative for the
-// admin role in BOTH directions.
-//   - IdP admin-group hit  + current role is not admin -> promote to admin.
-//   - IdP admin-group miss + current role IS admin     -> demote to user.
+// When the role-rule matcher fired (idpMatched=true), idpRole is
+// authoritative for the panel role in both directions — promotes a
+// user/operator to admin, demotes an admin back to user, swaps
+// between operator and user, etc.
 //
-// Opt-out (keepAdmin = true): only promote, never demote. Protects panel-
-// side manual admin grants (e.g. an admin who isn't reflected in the IdP
-// directory at all) from being washed back to user on every SSO sync.
+// keepAdmin=true is the admin-only opt-out: an existing admin who'd
+// be demoted by the matched rule stays admin instead. Protects
+// panel-side manual admin grants in mixed deployments where some
+// admins aren't in any IdP group at all.
 //
-// Operator role is panel-side and is never touched here — the IdP has no
-// concept of it.
+// When no rule fired (idpMatched=false), the existing panel role is
+// left untouched. This is the "SSO has nothing to say about roles"
+// branch — applicable to RoleRules-less deployments without
+// AdminGroupIDs, where the panel UI is the only source of role.
 //
-// Returns the role to persist and whether anything actually changed (so the
-// caller can skip the Update round-trip on no-ops).
-func applyRoleFromSSO(current domain.Role, idpIsAdmin, keepAdmin bool) (domain.Role, bool) {
-	if idpIsAdmin && current != domain.RoleAdmin {
-		return domain.RoleAdmin, true
+// Returns the role to persist and whether anything actually changed.
+func applyRoleFromSSO(current, idpRole domain.Role, idpMatched, keepAdmin bool) (domain.Role, bool) {
+	if !idpMatched {
+		return current, false
 	}
-	if !idpIsAdmin && !keepAdmin && current == domain.RoleAdmin {
-		return domain.RoleUser, true
+	if keepAdmin && current == domain.RoleAdmin && idpRole != domain.RoleAdmin {
+		return current, false
 	}
-	return current, false
+	if current == idpRole {
+		return current, false
+	}
+	return idpRole, true
+}
+
+// isPrivilegedSSORole reports whether a role-rule output should be
+// treated as "the IdP affirmatively elevated this user" — i.e. enough
+// to bypass the AllowAutoCreate gate on first-time SSO provisioning.
+// Matches the pre-v2.4.0 behaviour where only IdP-admin could
+// bootstrap a fresh account when auto-create was off.
+func isPrivilegedSSORole(r domain.Role) bool {
+	return r == domain.RoleAdmin || r == domain.RoleOperator
 }
 
 // EnsureSSO resolves the panel user for a successful SSO assertion in
@@ -455,8 +480,12 @@ func (s *Service) EnsureSSO(ctx context.Context, in EnsureSSOInput) (*domain.Use
 		return s.reconcileSSOUser(ctx, linkable, in)
 	}
 
-	// Brand new identity — provisioning gates.
-	if !in.IsAdmin && !in.AllowAutoCreate {
+	// Brand new identity — provisioning gates. Privileged role-rule
+	// output (admin / operator) bypasses AllowAutoCreate the same way
+	// the old IsAdmin signal did: the IdP affirmatively elevated this
+	// principal, so the panel trusts it enough to bootstrap an account.
+	privileged := in.IdPRoleMatched && isPrivilegedSSORole(in.IdPRole)
+	if !privileged && !in.AllowAutoCreate {
 		return nil, domain.ErrSSONoAccount
 	}
 
@@ -493,7 +522,7 @@ func (s *Service) EnsureSSO(ctx context.Context, in EnsureSSOInput) (*domain.Use
 	// stays RoleUser (we've already passed the AllowAutoCreate gate).
 	// Reusing applyRoleFromSSO keeps the role policy in one place for the
 	// linked / first-time-link / brand-new paths.
-	newRole, _ := applyRoleFromSSO(domain.RoleUser, in.IsAdmin, in.KeepAdminOnLogin)
+	newRole, _ := applyRoleFromSSO(domain.RoleUser, in.IdPRole, in.IdPRoleMatched, in.KeepAdminOnLogin)
 	u = &domain.User{
 		UPN:                in.UPN,
 		Email:              in.Email,
@@ -530,7 +559,7 @@ func (s *Service) reconcileSSOUser(ctx context.Context, u *domain.User, in Ensur
 		u.SSOSubject = in.Subject
 		dirty = true
 	}
-	if newRole, changed := applyRoleFromSSO(u.Role, in.IsAdmin, in.KeepAdminOnLogin); changed {
+	if newRole, changed := applyRoleFromSSO(u.Role, in.IdPRole, in.IdPRoleMatched, in.KeepAdminOnLogin); changed {
 		u.Role = newRole
 		dirty = true
 	}

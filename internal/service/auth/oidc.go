@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -134,6 +135,13 @@ type OIDCAssertion struct {
 	Email       string
 	DisplayName string
 	Groups      []string
+	// Attributes carries every ID-token claim flattened to []string so
+	// role-rule matching can target any claim, not just the four
+	// well-known fields above. Mirrors SAMLAssertion.Attributes.
+	// Numbers, bools, and other scalars are stringified; arrays of
+	// scalars become multiple values; nested objects are skipped (no
+	// sensible string projection).
+	Attributes map[string][]string
 }
 
 // Exchange swaps the authorization code for tokens, verifies the ID token,
@@ -167,7 +175,7 @@ func (s *OIDCService) Exchange(ctx context.Context, code, expectedNonce string) 
 	if err := idTok.Claims(&claims); err != nil {
 		return nil, fmt.Errorf("decode id_token claims: %w", err)
 	}
-	out := &OIDCAssertion{Subject: idTok.Subject}
+	out := &OIDCAssertion{Subject: idTok.Subject, Attributes: flattenClaims(claims)}
 	out.Username = claimString(claims, cfg.AttributeMapping.Username)
 	out.Email = claimString(claims, cfg.AttributeMapping.Email)
 	out.DisplayName = claimString(claims, cfg.AttributeMapping.DisplayName)
@@ -255,6 +263,66 @@ func claimStringSlice(claims map[string]any, key string) []string {
 		return strings.Fields(x)
 	}
 	return nil
+}
+
+// flattenClaims projects an ID-token claims map into the same
+// map[string][]string shape SAMLAssertion.Attributes uses, so the
+// role-rule matcher can run one implementation against either
+// protocol. Strings become single-element slices; arrays of scalars
+// become multi-element slices; numbers / booleans are stringified.
+// Nested objects (rare in ID tokens) are dropped — they have no
+// sensible string projection and would surprise rule authors.
+func flattenClaims(claims map[string]any) map[string][]string {
+	out := make(map[string][]string, len(claims))
+	for k, v := range claims {
+		switch x := v.(type) {
+		case string:
+			if x != "" {
+				out[k] = []string{x}
+			}
+		case []any:
+			for _, e := range x {
+				if s := scalarToString(e); s != "" {
+					out[k] = append(out[k], s)
+				}
+			}
+		case []string:
+			for _, e := range x {
+				if e != "" {
+					out[k] = append(out[k], e)
+				}
+			}
+		default:
+			if s := scalarToString(v); s != "" {
+				out[k] = []string{s}
+			}
+		}
+	}
+	return out
+}
+
+func scalarToString(v any) string {
+	switch x := v.(type) {
+	case string:
+		return x
+	case bool:
+		if x {
+			return "true"
+		}
+		return "false"
+	case float64:
+		// json.Unmarshal default for numbers — render without scientific
+		// notation when integer-valued to keep rule strings predictable.
+		if x == float64(int64(x)) {
+			return strconv.FormatInt(int64(x), 10)
+		}
+		return strconv.FormatFloat(x, 'f', -1, 64)
+	case int:
+		return strconv.Itoa(x)
+	case int64:
+		return strconv.FormatInt(x, 10)
+	}
+	return ""
 }
 
 func deDup(in []string, skip string) []string {

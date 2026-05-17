@@ -338,6 +338,11 @@ type SAMLAssertion struct {
 	Email       string
 	DisplayName string
 	Groups      []string
+	// Attributes carries every <Attribute Name=...> in the assertion,
+	// indexed by Name with the full value list. Lets the role-rule
+	// matcher resolve a panel role from any IdP-emitted attribute (not
+	// just groups) without the parser knowing about it ahead of time.
+	Attributes map[string][]string
 }
 
 // samlStatusEnvelope is a minimal struct to extract the StatusCode and
@@ -434,7 +439,7 @@ func (s *SAMLService) ParseACSResponse(r *http.Request, possibleRequestIDs []str
 		}
 		return nil, fmt.Errorf("parse SAML response: %w", err)
 	}
-	out := &SAMLAssertion{}
+	out := &SAMLAssertion{Attributes: map[string][]string{}}
 	// Subject = NameID, always. This is the panel-side immutable
 	// identity key used for SSO account lookup, independent of how
 	// the admin chose to source the human-readable UPN below.
@@ -463,6 +468,12 @@ func (s *SAMLService) ParseACSResponse(r *http.Request, possibleRequestIDs []str
 	for _, stmt := range assertion.AttributeStatements {
 		for _, attr := range stmt.Attributes {
 			for _, v := range attr.Values {
+				// Record every attribute by its raw Name so role-rules
+				// can match arbitrary IdP claims, not just the four
+				// well-known fields below.
+				if v.Value != "" {
+					out.Attributes[attr.Name] = append(out.Attributes[attr.Name], v.Value)
+				}
 				switch attr.Name {
 				case cfg.AttributeMapping.UPN:
 					if !upnFromNameID && out.UPN == "" {

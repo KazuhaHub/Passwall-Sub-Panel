@@ -26,8 +26,15 @@ type OIDCConfig struct {
 
 	AttributeMapping OIDCAttributeMap `yaml:"attribute_mapping" json:"attribute_mapping"`
 
-	AdminGroupIDs    []string `yaml:"admin_group_ids" json:"admin_group_ids"`
-	DefaultGroupSlug string   `yaml:"default_group_slug" json:"default_group_slug"`
+	// AdminGroupIDs: see SAMLConfig — legacy "groups in this list →
+	// admin" shortcut. Empty + RoleRules-set is the recommended path.
+	AdminGroupIDs []string `yaml:"admin_group_ids" json:"admin_group_ids"`
+
+	// RoleRules: see SAMLConfig — attribute-driven panel role mapping
+	// evaluated in order; the first matching rule wins.
+	RoleRules []SSORoleRule `yaml:"role_rules" json:"role_rules"`
+
+	DefaultGroupSlug string `yaml:"default_group_slug" json:"default_group_slug"`
 
 	// AllowAutoCreate: see SAMLConfig.AllowAutoCreate. Off by default; only
 	// IdP-admin users are auto-provisioned until the admin opts in.

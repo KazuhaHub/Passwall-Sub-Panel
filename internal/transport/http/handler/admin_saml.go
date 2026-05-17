@@ -65,16 +65,17 @@ type samlNewUserDTO struct {
 }
 
 type samlConfigDTO struct {
-	Enabled                   bool           `json:"enabled"`
-	Mode                      string         `json:"mode"`
-	SP                        samlSPDTO      `json:"sp"`
-	IDP                       samlIDPDTO     `json:"idp"`
-	AttributeMapping          samlAttrDTO    `json:"attribute_mapping"`
-	AdminGroupIDs             []string       `json:"admin_group_ids"`
-	DefaultGroupSlug          string         `json:"default_group_slug"`
-	AllowAutoCreate           bool           `json:"allow_auto_create"`
-	KeepAdminWhenNotInGroup   bool           `json:"keep_admin_when_not_in_group"`
-	NewUserDefaults           samlNewUserDTO `json:"new_user_defaults"`
+	Enabled                 bool                 `json:"enabled"`
+	Mode                    string               `json:"mode"`
+	SP                      samlSPDTO            `json:"sp"`
+	IDP                     samlIDPDTO           `json:"idp"`
+	AttributeMapping        samlAttrDTO          `json:"attribute_mapping"`
+	AdminGroupIDs           []string             `json:"admin_group_ids"`
+	RoleRules               []config.SSORoleRule `json:"role_rules"`
+	DefaultGroupSlug        string               `json:"default_group_slug"`
+	AllowAutoCreate         bool                 `json:"allow_auto_create"`
+	KeepAdminWhenNotInGroup bool                 `json:"keep_admin_when_not_in_group"`
+	NewUserDefaults         samlNewUserDTO       `json:"new_user_defaults"`
 }
 
 // samlUpdateRequest is the same shape as samlConfigDTO but SP.KeyPEM is an
@@ -92,12 +93,13 @@ type samlUpdateRequest struct {
 		MetadataURL          string `json:"metadata_url"`
 		MetadataRefreshHours int    `json:"metadata_refresh_hours"`
 	} `json:"idp"`
-	AttributeMapping          samlAttrDTO    `json:"attribute_mapping"`
-	AdminGroupIDs             []string       `json:"admin_group_ids"`
-	DefaultGroupSlug          string         `json:"default_group_slug"`
-	AllowAutoCreate           bool           `json:"allow_auto_create"`
-	KeepAdminWhenNotInGroup   bool           `json:"keep_admin_when_not_in_group"`
-	NewUserDefaults           samlNewUserDTO `json:"new_user_defaults"`
+	AttributeMapping        samlAttrDTO          `json:"attribute_mapping"`
+	AdminGroupIDs           []string             `json:"admin_group_ids"`
+	RoleRules               []config.SSORoleRule `json:"role_rules"`
+	DefaultGroupSlug        string               `json:"default_group_slug"`
+	AllowAutoCreate         bool                 `json:"allow_auto_create"`
+	KeepAdminWhenNotInGroup bool                 `json:"keep_admin_when_not_in_group"`
+	NewUserDefaults         samlNewUserDTO       `json:"new_user_defaults"`
 }
 
 type samlFetchRequest struct {
@@ -174,10 +176,11 @@ func (h *AdminSAMLHandler) Put(c *gin.Context) {
 			DisplayName: req.AttributeMapping.DisplayName,
 			Groups:      req.AttributeMapping.Groups,
 		},
-		AdminGroupIDs:             req.AdminGroupIDs,
-		DefaultGroupSlug:          req.DefaultGroupSlug,
-		AllowAutoCreate:           req.AllowAutoCreate,
-		KeepAdminWhenNotInGroup:   req.KeepAdminWhenNotInGroup,
+		AdminGroupIDs:           req.AdminGroupIDs,
+		RoleRules:               req.RoleRules,
+		DefaultGroupSlug:        req.DefaultGroupSlug,
+		AllowAutoCreate:         req.AllowAutoCreate,
+		KeepAdminWhenNotInGroup: req.KeepAdminWhenNotInGroup,
 		NewUserDefaults: config.SAMLNewUserDefaults{
 			ExpireDays:         req.NewUserDefaults.ExpireDays,
 			TrafficLimitBytes:  req.NewUserDefaults.TrafficLimitBytes,
@@ -259,10 +262,11 @@ func toSAMLDTO(c *config.SAMLConfig) samlConfigDTO {
 			DisplayName: c.AttributeMapping.DisplayName,
 			Groups:      c.AttributeMapping.Groups,
 		},
-		AdminGroupIDs:             c.AdminGroupIDs,
-		DefaultGroupSlug:          c.DefaultGroupSlug,
-		AllowAutoCreate:           c.AllowAutoCreate,
-		KeepAdminWhenNotInGroup:   c.KeepAdminWhenNotInGroup,
+		AdminGroupIDs:           c.AdminGroupIDs,
+		RoleRules:               c.RoleRules,
+		DefaultGroupSlug:        c.DefaultGroupSlug,
+		AllowAutoCreate:         c.AllowAutoCreate,
+		KeepAdminWhenNotInGroup: c.KeepAdminWhenNotInGroup,
 		NewUserDefaults: samlNewUserDTO{
 			ExpireDays:         c.NewUserDefaults.ExpireDays,
 			TrafficLimitBytes:  c.NewUserDefaults.TrafficLimitBytes,
