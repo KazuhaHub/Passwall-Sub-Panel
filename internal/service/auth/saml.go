@@ -439,16 +439,37 @@ func (s *SAMLService) ParseACSResponse(r *http.Request, possibleRequestIDs []str
 	// Email is DELIBERATELY not in this chain — email is a contact address,
 	// not an identity. Letting a missing UPN claim silently degrade to
 	// email-as-identity has bitten this deployment (Entra's default SAML
-	// app emits user.mail under the emailaddress claim but puts the real
-	// user.userprincipalname in NameID; an empty UPN attribute would then
-	// land on the mailbox address and break account lookups whenever the
-	// admin changes a user's primary email).
+	// app emits user.mail under the emailaddress claim, so an empty UPN
+	// attribute would land on the mailbox address and break lookups any
+	// time the admin changes a user's primary email).
 	//
-	//   1. The configured UPN claim — admin-controlled, takes precedence.
-	//   2. NameID — Entra's default SAML app sets the NameID source to
-	//      user.userprincipalname, so this is the right fallback for the
-	//      out-of-the-box Entra wiring. IdPs that use a per-SP persistent
-	//      hash should configure a UPN claim explicitly to override.
+	//   1. The configured UPN claim URN — admin-controlled, takes precedence.
+	//   2. Any attribute whose name ends with "upn" / "userprincipalname"
+	//      (case-insensitive). This is the same shape as the DisplayName
+	//      fallback below and catches the common Entra case: admin adds a
+	//      claim with source user.userprincipalname but a slightly
+	//      different namespace than our default URN.
+	//   3. NameID — last resort. NOT reliable on Entra when the SAML app's
+	//      NameID format is set to Persistent (Entra then emits a per-SP
+	//      base64 hash regardless of the source attribute); use only as a
+	//      fallback for IdPs where NameID is genuinely the UPN.
+	if out.UPN == "" {
+	upnFallback:
+		for _, stmt := range assertion.AttributeStatements {
+			for _, attr := range stmt.Attributes {
+				lname := strings.ToLower(attr.Name)
+				if !strings.HasSuffix(lname, "upn") && !strings.HasSuffix(lname, "userprincipalname") {
+					continue
+				}
+				for _, v := range attr.Values {
+					if v.Value != "" {
+						out.UPN = v.Value
+						break upnFallback
+					}
+				}
+			}
+		}
+	}
 	if out.UPN == "" {
 		if assertion.Subject != nil && assertion.Subject.NameID != nil {
 			out.UPN = assertion.Subject.NameID.Value
