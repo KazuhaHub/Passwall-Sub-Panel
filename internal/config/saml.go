@@ -78,13 +78,16 @@ func ApplySAMLDefaults(c *SAMLConfig) {
 	if c.IDP.MetadataRefreshInterval == 0 {
 		c.IDP.MetadataRefreshInterval = 24 * time.Hour
 	}
-	// UPN claim. Entra typically doesn't send this exact URL by default,
-	// so the panel's fallback chain (UPN claim → email claim → NameID)
-	// usually lands on the email claim — which gives a stable, readable
-	// "me@kazuha.org" subject for an Entra tenant whose NameID format is
-	// "Email address" with source user.userprincipalname.
+	// UPN source. Default to "nameid" because SAML 2.0's <Subject><NameID>
+	// is the spec-canonical location for the authenticated subject and
+	// every major IdP except Microsoft Entra populates it by default
+	// (Okta, Google Workspace, Keycloak, ADFS, OneLogin, Auth0...).
+	// Entra admins switch this field to a UPN attribute Name URN (e.g.
+	// http://schemas.xmlsoap.org/ws/2005/05/identity/claims/upn) and
+	// add the matching claim on the IdP side — see saml.go ParseACSResponse
+	// for the two supported source forms.
 	if c.AttributeMapping.UPN == "" {
-		c.AttributeMapping.UPN = "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/upn"
+		c.AttributeMapping.UPN = "nameid"
 	}
 	if c.AttributeMapping.Email == "" {
 		c.AttributeMapping.Email = "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress"
