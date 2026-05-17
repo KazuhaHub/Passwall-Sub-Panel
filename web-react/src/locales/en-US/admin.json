@@ -115,8 +115,8 @@
       "reload_error": "Saved to the database, but reloading the live service failed: {{error}}",
       "allow_auto_create": "Allow accounts to be auto-created on first SSO login",
       "allow_auto_create_hint": "When disabled, an SSO sign-in for a UPN that hasn't been pre-created in the panel is redirected to a \"contact your administrator\" page. IdP admin groups are unaffected.",
-      "revoke_admin_when_not_in_group": "Revoke admin when removed from the IdP admin groups",
-      "revoke_admin_when_not_in_group_hint": "When on, the next SSO login of a panel admin who is no longer reported in any of the admin groups above is automatically downgraded to a regular user. Operator role is a panel-side concept and is unaffected.",
+      "keep_admin_when_not_in_group": "Keep admin even when removed from the IdP admin groups",
+      "keep_admin_when_not_in_group_hint": "Default off: IdP admin groups are authoritative — every SSO login syncs the admin role in both directions (promote and demote). Turn on to preserve panel-side manual admin grants from SSO-driven demotion. Operator role is panel-side and is unaffected.",
       "saml": {
         "enabled": "Enable SAML 2.0",
         "mode": "Configuration mode",

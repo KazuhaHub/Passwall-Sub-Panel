@@ -30,13 +30,14 @@ type SAMLConfig struct {
 	// where the admin invites accounts manually first.
 	AllowAutoCreate bool `yaml:"allow_auto_create"`
 
-	// RevokeAdminWhenNotInGroup downgrades a panel admin back to a regular
-	// user on SSO login when the IdP no longer reports them in any of the
-	// AdminGroupIDs. Off by default — the historical behaviour is
-	// promote-only (the admin removes the role manually). Turn on to make
-	// the IdP authoritative for admin rights. Operator role is unaffected;
-	// it's panel-side and not derived from IdP groups.
-	RevokeAdminWhenNotInGroup bool `yaml:"revoke_admin_when_not_in_group"`
+	// KeepAdminWhenNotInGroup, when true, leaves a panel admin's role
+	// untouched on SSO login even if the IdP no longer reports them in
+	// any of the AdminGroupIDs. Default is false — IdP groups are
+	// authoritative for admin rights, both granting and revoking. Flip
+	// to true to protect panel-side manual admin grants from automatic
+	// demotion on every SSO sync. Operator role is panel-side and
+	// unaffected by this flag.
+	KeepAdminWhenNotInGroup bool `yaml:"keep_admin_when_not_in_group"`
 
 	NewUserDefaults SAMLNewUserDefaults `yaml:"new_user_defaults"`
 }

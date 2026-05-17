@@ -33,9 +33,10 @@ type OIDCConfig struct {
 	// IdP-admin users are auto-provisioned until the admin opts in.
 	AllowAutoCreate bool `yaml:"allow_auto_create" json:"allow_auto_create"`
 
-	// RevokeAdminWhenNotInGroup: see SAMLConfig docs — downgrades a panel
-	// admin to user when the IdP stops reporting them in any AdminGroupID.
-	RevokeAdminWhenNotInGroup bool `yaml:"revoke_admin_when_not_in_group" json:"revoke_admin_when_not_in_group"`
+	// KeepAdminWhenNotInGroup: see SAMLConfig docs — when true, panel
+	// admin role is preserved even after the IdP stops reporting them
+	// in any AdminGroupID. Default false = IdP groups authoritative.
+	KeepAdminWhenNotInGroup bool `yaml:"keep_admin_when_not_in_group" json:"keep_admin_when_not_in_group"`
 
 	NewUserDefaults SAMLNewUserDefaults `yaml:"new_user_defaults" json:"new_user_defaults"`
 }

@@ -178,36 +178,40 @@ func TestApplyRoleFromSSO_KeepsAdminWhenIdPStillAdmin(t *testing.T) {
 	}
 }
 
-func TestApplyRoleFromSSO_DoesNotDemoteAdminWhenIdPMissesByDefault(t *testing.T) {
-	// Default revokeAdmin = false → admin stays admin even when IdP misses.
+func TestApplyRoleFromSSO_DemotesAdminWhenIdPMissesByDefault(t *testing.T) {
+	// Default keepAdmin = false → admin loses the role on the next SSO
+	// login when IdP no longer reports them in any admin group. IdP is
+	// authoritative for the admin role in both directions.
 	role, changed := applyRoleFromSSO(domain.RoleAdmin, false, false)
-	if role != domain.RoleAdmin || changed {
-		t.Fatalf("admin + IdP miss + revoke off: got (%q, %v), want (admin, false)", role, changed)
-	}
-}
-
-func TestApplyRoleFromSSO_DemotesAdminWhenRevokeEnabled(t *testing.T) {
-	// Opt-in: admin loses the role on the next SSO login if IdP no longer
-	// reports them in any admin group.
-	role, changed := applyRoleFromSSO(domain.RoleAdmin, false, true)
 	if role != domain.RoleUser || !changed {
-		t.Fatalf("admin + IdP miss + revoke on: got (%q, %v), want (user, true)", role, changed)
+		t.Fatalf("admin + IdP miss + keep off: got (%q, %v), want (user, true)", role, changed)
 	}
 }
 
-func TestApplyRoleFromSSO_KeepsAdminWhenRevokeEnabledButIdPStillAdmin(t *testing.T) {
-	// Promote-take-precedence: even with revoke on, an IdP-admin stays admin.
+func TestApplyRoleFromSSO_KeepsAdminWhenKeepEnabled(t *testing.T) {
+	// Opt-out: admin keeps the role even when IdP misses, for panel-side
+	// manual admin grants that don't have IdP-group backing.
+	role, changed := applyRoleFromSSO(domain.RoleAdmin, false, true)
+	if role != domain.RoleAdmin || changed {
+		t.Fatalf("admin + IdP miss + keep on: got (%q, %v), want (admin, false)", role, changed)
+	}
+}
+
+func TestApplyRoleFromSSO_KeepsAdminWhenKeepEnabledAndIdPStillAdmin(t *testing.T) {
+	// Sanity check: keepAdmin doesn't interfere with normal "IdP says admin"
+	// flow — the row was already admin, so no change.
 	role, changed := applyRoleFromSSO(domain.RoleAdmin, true, true)
 	if role != domain.RoleAdmin || changed {
-		t.Fatalf("admin + IdP admin + revoke on: got (%q, %v), want (admin, false)", role, changed)
+		t.Fatalf("admin + IdP admin + keep on: got (%q, %v), want (admin, false)", role, changed)
 	}
 }
 
-func TestApplyRoleFromSSO_DoesNotWashOperatorToUserEvenWithRevoke(t *testing.T) {
-	// Operator role is panel-only — revoke-admin must NOT touch it.
-	role, changed := applyRoleFromSSO(domain.RoleOperator, false, true)
+func TestApplyRoleFromSSO_DoesNotWashOperatorToUserOnDefault(t *testing.T) {
+	// Operator role is panel-only — IdP-group sync (default keepAdmin=false)
+	// must NOT demote it. Only admin role is touched by the demote path.
+	role, changed := applyRoleFromSSO(domain.RoleOperator, false, false)
 	if role != domain.RoleOperator || changed {
-		t.Fatalf("operator + IdP miss + revoke on: got (%q, %v), want (operator, false)", role, changed)
+		t.Fatalf("operator + IdP miss + keep off: got (%q, %v), want (operator, false)", role, changed)
 	}
 }
 

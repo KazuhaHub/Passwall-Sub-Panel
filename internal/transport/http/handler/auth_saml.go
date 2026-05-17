@@ -91,7 +91,7 @@ func (h *AuthSAMLHandler) ACS(c *gin.Context) {
 	}
 	if cfg != nil {
 		in.AllowAutoCreate = cfg.AllowAutoCreate
-		in.RevokeAdminOnLogin = cfg.RevokeAdminWhenNotInGroup
+		in.KeepAdminOnLogin = cfg.KeepAdminWhenNotInGroup
 		in.DefaultGroupSlug = cfg.DefaultGroupSlug
 		in.DefaultExpireDays = cfg.NewUserDefaults.ExpireDays
 		in.DefaultLimitBytes = cfg.NewUserDefaults.TrafficLimitBytes

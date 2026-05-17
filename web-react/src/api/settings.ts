@@ -182,10 +182,11 @@ export interface SAMLConfig {
   admin_group_ids: string[]
   default_group_slug: string
   allow_auto_create: boolean
-  /** When true, demote a panel admin back to user on the next SSO login if
-   *  the IdP no longer reports them in any admin group. Operator role is
-   *  unaffected. Off by default. */
-  revoke_admin_when_not_in_group: boolean
+  /** When true, panel admin role is PRESERVED on SSO login even if the IdP
+   *  no longer reports the user in any admin group. Default false makes IdP
+   *  admin-group membership authoritative for the admin role — promote AND
+   *  demote. Operator role is panel-side and unaffected by this flag. */
+  keep_admin_when_not_in_group: boolean
   new_user_defaults: {
     expire_days: number
     traffic_limit_bytes: number
@@ -245,9 +246,10 @@ export interface OIDCConfig {
   admin_group_ids: string[]
   default_group_slug: string
   allow_auto_create: boolean
-  /** See SAMLConfig.revoke_admin_when_not_in_group — same opt-in demote
-   *  policy when the IdP no longer reports the user in any admin group. */
-  revoke_admin_when_not_in_group: boolean
+  /** See SAMLConfig.keep_admin_when_not_in_group — when true, preserves a
+   *  panel admin's role even after the IdP drops them from every admin
+   *  group. Default false = IdP groups authoritative (promote + demote). */
+  keep_admin_when_not_in_group: boolean
   new_user_defaults: {
     expire_days: number
     traffic_limit_bytes: number

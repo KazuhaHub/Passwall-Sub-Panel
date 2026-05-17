@@ -78,7 +78,7 @@ type samlConfigDTO struct {
 	AdminGroupIDs             []string       `json:"admin_group_ids"`
 	DefaultGroupSlug          string         `json:"default_group_slug"`
 	AllowAutoCreate           bool           `json:"allow_auto_create"`
-	RevokeAdminWhenNotInGroup bool           `json:"revoke_admin_when_not_in_group"`
+	KeepAdminWhenNotInGroup   bool           `json:"keep_admin_when_not_in_group"`
 	NewUserDefaults           samlNewUserDTO `json:"new_user_defaults"`
 }
 
@@ -101,7 +101,7 @@ type samlUpdateRequest struct {
 	AdminGroupIDs             []string       `json:"admin_group_ids"`
 	DefaultGroupSlug          string         `json:"default_group_slug"`
 	AllowAutoCreate           bool           `json:"allow_auto_create"`
-	RevokeAdminWhenNotInGroup bool           `json:"revoke_admin_when_not_in_group"`
+	KeepAdminWhenNotInGroup   bool           `json:"keep_admin_when_not_in_group"`
 	NewUserDefaults           samlNewUserDTO `json:"new_user_defaults"`
 }
 
@@ -182,7 +182,7 @@ func (h *AdminSAMLHandler) Put(c *gin.Context) {
 		AdminGroupIDs:             req.AdminGroupIDs,
 		DefaultGroupSlug:          req.DefaultGroupSlug,
 		AllowAutoCreate:           req.AllowAutoCreate,
-		RevokeAdminWhenNotInGroup: req.RevokeAdminWhenNotInGroup,
+		KeepAdminWhenNotInGroup:   req.KeepAdminWhenNotInGroup,
 		NewUserDefaults: config.SAMLNewUserDefaults{
 			ExpireDays:         req.NewUserDefaults.ExpireDays,
 			TrafficLimitBytes:  req.NewUserDefaults.TrafficLimitBytes,
@@ -278,7 +278,7 @@ func toSAMLDTO(c *config.SAMLConfig) samlConfigDTO {
 		AdminGroupIDs:             c.AdminGroupIDs,
 		DefaultGroupSlug:          c.DefaultGroupSlug,
 		AllowAutoCreate:           c.AllowAutoCreate,
-		RevokeAdminWhenNotInGroup: c.RevokeAdminWhenNotInGroup,
+		KeepAdminWhenNotInGroup:   c.KeepAdminWhenNotInGroup,
 		NewUserDefaults: samlNewUserDTO{
 			ExpireDays:         c.NewUserDefaults.ExpireDays,
 			TrafficLimitBytes:  c.NewUserDefaults.TrafficLimitBytes,

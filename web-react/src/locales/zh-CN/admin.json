@@ -115,8 +115,8 @@
       "reload_error": "已保存到数据库，但重新加载失败：{{error}}",
       "allow_auto_create": "允许通过 SSO 自动创建账户",
       "allow_auto_create_hint": "关闭后，未在面板中预先创建的账户首次 SSO 登录会被跳转到\"联系管理员\"页；IdP 管理员组不受影响。",
-      "revoke_admin_when_not_in_group": "IdP 移除管理员组时自动撤销 Admin",
-      "revoke_admin_when_not_in_group_hint": "打开后，下次 SSO 登录时如果该账号不在上面任一管理员组里，会从 Admin 自动降级为 User。Operator 角色为面板侧独立概念，不受影响。",
+      "keep_admin_when_not_in_group": "IdP 移除管理员组时仍保留 Admin",
+      "keep_admin_when_not_in_group_hint": "默认关闭：IdP 管理员组为权威来源，每次 SSO 登录会自动同步 Admin（既提升也撤销）。打开后，面板侧手动给的 Admin 不会被 SSO 同步撤销。Operator 角色为面板侧独立概念，不受影响。",
       "saml": {
         "enabled": "启用 SAML 2.0",
         "mode": "配置模式",

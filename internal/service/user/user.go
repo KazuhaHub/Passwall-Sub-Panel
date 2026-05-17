@@ -334,10 +334,12 @@ type EnsureSSOInput struct {
 	// (the closed-deployment default) only IdP admins get an account; every
 	// other unknown UPN is bounced to /sso-no-account.
 	AllowAutoCreate bool
-	// RevokeAdminOnLogin: when true, a panel admin who is NOT in any IdP
-	// admin group is demoted back to user on this login. Off by default.
-	// See applyRoleFromSSO for the full role-policy matrix.
-	RevokeAdminOnLogin bool
+	// KeepAdminOnLogin: when true, a panel admin who is NOT in any IdP
+	// admin group is LEFT as admin on this login. Default false makes IdP
+	// admin-group membership authoritative for the admin role (both
+	// promotion and demotion). See applyRoleFromSSO for the full
+	// role-policy matrix.
+	KeepAdminOnLogin bool
 	DefaultGroupSlug   string
 	DefaultExpireDays  int
 	DefaultLimitBytes  int64
@@ -346,26 +348,25 @@ type EnsureSSOInput struct {
 
 // applyRoleFromSSO computes the role to persist after an SSO login.
 //
-// Promotion (always on):
-//   - IdP admin-group hit + current role is not admin -> promote to admin.
+// Default policy (keepAdmin = false): IdP groups are authoritative for the
+// admin role in BOTH directions.
+//   - IdP admin-group hit  + current role is not admin -> promote to admin.
+//   - IdP admin-group miss + current role IS admin     -> demote to user.
 //
-// Revocation (gated by revokeAdmin):
-//   - IdP admin-group miss + current role IS admin + revokeAdmin -> demote to user.
-//     Lets admins make IdP membership authoritative for admin rights. Operator
-//     is never demoted by this path — it's a panel-only role and the IdP has
-//     no concept of it.
+// Opt-out (keepAdmin = true): only promote, never demote. Protects panel-
+// side manual admin grants (e.g. an admin who isn't reflected in the IdP
+// directory at all) from being washed back to user on every SSO sync.
 //
-// Default (revokeAdmin = false, historical behaviour):
-//   - IdP admin-group miss -> role unchanged. Protects operator / admin
-//     status granted manually inside the panel from being clobbered.
+// Operator role is panel-side and is never touched here — the IdP has no
+// concept of it.
 //
 // Returns the role to persist and whether anything actually changed (so the
 // caller can skip the Update round-trip on no-ops).
-func applyRoleFromSSO(current domain.Role, idpIsAdmin, revokeAdmin bool) (domain.Role, bool) {
+func applyRoleFromSSO(current domain.Role, idpIsAdmin, keepAdmin bool) (domain.Role, bool) {
 	if idpIsAdmin && current != domain.RoleAdmin {
 		return domain.RoleAdmin, true
 	}
-	if !idpIsAdmin && revokeAdmin && current == domain.RoleAdmin {
+	if !idpIsAdmin && !keepAdmin && current == domain.RoleAdmin {
 		return domain.RoleUser, true
 	}
 	return current, false
@@ -530,7 +531,7 @@ func (s *Service) reconcileSSOUser(ctx context.Context, u *domain.User, in Ensur
 		u.SSOSubject = in.Subject
 		dirty = true
 	}
-	if newRole, changed := applyRoleFromSSO(u.Role, in.IsAdmin, in.RevokeAdminOnLogin); changed {
+	if newRole, changed := applyRoleFromSSO(u.Role, in.IsAdmin, in.KeepAdminOnLogin); changed {
 		u.Role = newRole
 		dirty = true
 	}
