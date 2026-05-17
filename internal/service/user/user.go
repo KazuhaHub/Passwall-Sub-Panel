@@ -97,6 +97,37 @@ func (s *Service) SetTrafficUsage(r TrafficUsageReader) {
 	s.trafficUsage = r
 }
 
+// pushExpireTime returns the 3X-UI expire_time (ms since epoch) that
+// should be sent in any client push for u. Resolves to the LATER of
+// u.ExpireAt and an active EmergencyUntil — without this, an emergency
+// window that overlaps the user's normal expiry tells panel-side
+// "user enabled until X" but 3X-UI still kills the client at the
+// earlier ExpireAt the moment its local clock crosses it, silently
+// undoing the grant just like the traffic-floor bug above.
+//
+// Returns 0 ("no expiry") only when BOTH ExpireAt and EmergencyUntil
+// are nil — preserves the "permanent user" semantics of the prior
+// per-callsite `if u.ExpireAt != nil` gate.
+func pushExpireTime(u *domain.User) int64 {
+	if u == nil {
+		return 0
+	}
+	var effective time.Time
+	has := false
+	if u.ExpireAt != nil {
+		effective = *u.ExpireAt
+		has = true
+	}
+	if u.EmergencyUntil != nil && u.EmergencyUntil.After(effective) {
+		effective = *u.EmergencyUntil
+		has = true
+	}
+	if !has {
+		return 0
+	}
+	return effective.UnixMilli()
+}
+
 // trafficFloor returns the bytes value to push into 3X-UI's per-client
 // totalGB for u. 0 means "no cap on 3X-UI side" — used for unlimited
 // users, when the reader isn't wired, or on any error reading usage. Any
@@ -546,10 +577,7 @@ func (s *Service) ResetCredentialsAndSync(ctx context.Context, userID int64) (*R
 	if err := s.users.Update(ctx, u); err != nil {
 		return nil, err
 	}
-	var expireTime int64
-	if u.ExpireAt != nil {
-		expireTime = u.ExpireAt.UnixMilli()
-	}
+	expireTime := pushExpireTime(u)
 	// Compute the floor once; reuse for every client we push so a slow
 	// CurrentPeriodUsage doesn't blow up to N round-trips against the
 	// snapshots table.
@@ -737,10 +765,7 @@ func (s *Service) CreateLocalAndSync(ctx context.Context, in CreateLocalInput) (
 			continue // unrecognised protocol — skip rather than fail the whole create
 		}
 		email := u.ClientEmail(n.ID, rules)
-		var expireTime int64
-		if u.ExpireAt != nil {
-			expireTime = u.ExpireAt.UnixMilli()
-		}
+		expireTime := pushExpireTime(u)
 		if err := s.syncer.AddClientToInbound(ctx, u.ID, n.PanelID, n.InboundID,
 			info.protocol, u.UUID, email, info.flow, expireTime, floor); err != nil {
 			needsRetry = true
@@ -1187,10 +1212,7 @@ func (s *Service) ResyncMembership(ctx context.Context, userID int64) error {
 			continue
 		}
 		email := u.ClientEmail(n.ID, rules)
-		var expireTime int64
-		if u.ExpireAt != nil {
-			expireTime = u.ExpireAt.UnixMilli()
-		}
+		expireTime := pushExpireTime(u)
 		if err := s.syncer.AddClientToInbound(ctx, u.ID, k.panelID, k.inboundID,
 			info.protocol, u.UUID, email, info.flow, expireTime, floor); err != nil {
 			if firstErr == nil {
@@ -1217,10 +1239,7 @@ func (s *Service) ResyncMembership(ctx context.Context, userID int64) error {
 		if info.protocol == "" {
 			continue
 		}
-		var expireTime int64
-		if u.ExpireAt != nil {
-			expireTime = u.ExpireAt.UnixMilli()
-		}
+		expireTime := pushExpireTime(u)
 		if err := s.syncer.SetOwnedClientEnable(ctx, e.PanelID, e.InboundID, e.ClientEmail,
 			info.protocol, u.UUID, info.flow, u.Enabled, expireTime, floor); err != nil {
 			if firstErr == nil {
@@ -1292,10 +1311,7 @@ func (s *Service) pushClientConfigToAll(ctx context.Context, u *domain.User) err
 	if err != nil {
 		return err
 	}
-	var expireTime int64
-	if u.ExpireAt != nil {
-		expireTime = u.ExpireAt.UnixMilli()
-	}
+	expireTime := pushExpireTime(u)
 	floor := s.trafficFloor(ctx, u)
 	var firstErr error
 	for _, e := range entries {
@@ -1466,10 +1482,7 @@ func (s *Service) ResetUUIDAndSync(ctx context.Context, userID int64) (string, e
 	if err != nil {
 		return newUUID, err
 	}
-	var expireTime int64
-	if u.ExpireAt != nil {
-		expireTime = u.ExpireAt.UnixMilli()
-	}
+	expireTime := pushExpireTime(u)
 	floor := s.trafficFloor(ctx, u)
 	needsRetry := false
 	for _, e := range entries {

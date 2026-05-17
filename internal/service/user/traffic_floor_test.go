@@ -208,6 +208,62 @@ func TestTrafficFloor_EmergencyActive_SettingsLoadErrorDefaultsUnlimited(t *test
 	}
 }
 
+// --- pushExpireTime: 3X-UI expire_time that respects emergency ---
+
+func TestPushExpireTime_NilUserReturnsZero(t *testing.T) {
+	if got := pushExpireTime(nil); got != 0 {
+		t.Fatalf("nil user → got %d, want 0", got)
+	}
+}
+
+func TestPushExpireTime_PermanentUserReturnsZero(t *testing.T) {
+	// Neither ExpireAt nor EmergencyUntil set — "permanent" user, push
+	// 0 ms so 3X-UI treats it as "no expiry".
+	if got := pushExpireTime(&domain.User{}); got != 0 {
+		t.Fatalf("permanent user → got %d, want 0", got)
+	}
+}
+
+func TestPushExpireTime_NormalExpiryOnly(t *testing.T) {
+	expire := time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC)
+	u := &domain.User{ExpireAt: &expire}
+	if got := pushExpireTime(u); got != expire.UnixMilli() {
+		t.Fatalf("expire-only → got %d, want %d", got, expire.UnixMilli())
+	}
+}
+
+func TestPushExpireTime_EmergencyLaterThanExpiry(t *testing.T) {
+	// User's normal expiry falls inside an active emergency window:
+	// push the LATER value so 3X-UI doesn't kill the client mid-grant.
+	expire := time.Date(2026, 5, 17, 12, 0, 0, 0, time.UTC)
+	emergency := time.Date(2026, 5, 18, 0, 0, 0, 0, time.UTC)
+	u := &domain.User{ExpireAt: &expire, EmergencyUntil: &emergency}
+	if got := pushExpireTime(u); got != emergency.UnixMilli() {
+		t.Fatalf("emergency-extends-expiry → got %d, want %d", got, emergency.UnixMilli())
+	}
+}
+
+func TestPushExpireTime_EmergencyEarlierThanExpiry(t *testing.T) {
+	// Stale EmergencyUntil from a closed window is older than ExpireAt
+	// — must NOT shorten the push value.
+	expire := time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC)
+	emergency := time.Date(2026, 5, 18, 0, 0, 0, 0, time.UTC)
+	u := &domain.User{ExpireAt: &expire, EmergencyUntil: &emergency}
+	if got := pushExpireTime(u); got != expire.UnixMilli() {
+		t.Fatalf("stale emergency → got %d, want %d (expire wins)", got, expire.UnixMilli())
+	}
+}
+
+func TestPushExpireTime_EmergencyOnly(t *testing.T) {
+	// User has no ExpireAt but has an emergency grant. Push the
+	// emergency time so 3X-UI knows when to flip off.
+	emergency := time.Date(2026, 5, 18, 0, 0, 0, 0, time.UTC)
+	u := &domain.User{EmergencyUntil: &emergency}
+	if got := pushExpireTime(u); got != emergency.UnixMilli() {
+		t.Fatalf("emergency-only → got %d, want %d", got, emergency.UnixMilli())
+	}
+}
+
 func TestTrafficFloorBytes(t *testing.T) {
 	cases := []struct {
 		name        string
