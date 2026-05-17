@@ -23,6 +23,8 @@ export default function SsoErrorView() {
       titleKey = 'error_account_disabled_title'; messageKey = 'error_account_disabled_message'; break
     case 'account_pending':
       titleKey = 'error_account_pending_title'; messageKey = 'error_account_pending_message'; break
+    case 'sso_conflict':
+      titleKey = 'error_sso_conflict_title'; messageKey = 'error_sso_conflict_message'; break
     case 'sso_error':
       titleKey = 'error_sso_title'; messageKey = 'error_sso_message'; break
   }

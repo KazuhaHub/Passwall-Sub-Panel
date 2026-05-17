@@ -500,6 +500,8 @@ func initAdminIfNeeded(ctx context.Context, repos ports.Repos) error {
 		TrafficPeriodStart: &now,
 		Enabled:            true,
 		Remark:             "bootstrap admin",
+		SSOProvider:        domain.SSOProviderLocal,
+		SSOSubject:         "admin",
 	}
 	if err := repos.User.Create(ctx, u); err != nil {
 		return err

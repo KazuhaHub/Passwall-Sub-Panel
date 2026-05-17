@@ -100,6 +100,8 @@ func (h *AuthOIDCHandler) Callback(c *gin.Context) {
 	upn := assertion.Username
 	cfg := h.oidc.Config()
 	in := user.EnsureSSOInput{
+		Provider:    domain.SSOProviderOIDC,
+		Subject:     assertion.Subject,
 		UPN:         upn,
 		Email:       assertion.Email,
 		DisplayName: assertion.DisplayName,
@@ -117,6 +119,10 @@ func (h *AuthOIDCHandler) Callback(c *gin.Context) {
 	u, err := h.user.EnsureSSO(c.Request.Context(), in)
 	if errors.Is(err, domain.ErrSSONoAccount) {
 		c.Redirect(http.StatusFound, "/sso-no-account")
+		return
+	}
+	if errors.Is(err, domain.ErrSSOAccountConflict) {
+		c.Redirect(http.StatusFound, "/sso-error?error=sso_conflict&description="+url.QueryEscape(err.Error()))
 		return
 	}
 	if err != nil {

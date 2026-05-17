@@ -13,13 +13,44 @@ type EmailRules struct {
 	Domain string // e.g. "passwall.kazuhahub.com"
 }
 
+// SSO connection identifiers. Format is "<protocol>:<connection_name>" so
+// the panel can grow into multiple SAML / OIDC tenants without a schema
+// change — when that happens, connection_name comes from the saml/oidc
+// config row and these constants stay only as defaults / local marker.
+const (
+	SSOProviderLocal      = "local"
+	SSOProviderSAMLPrefix = "saml:"
+	SSOProviderOIDCPrefix = "oidc:"
+	SSOConnectionDefault  = "default"
+)
+
+// SSOProviderSAML / SSOProviderOIDC are the current well-known values for
+// the single-connection deployment we ship today. EnsureSSO callers should
+// build the string through these so changing the format later (e.g. swapping
+// "default" for an admin-named connection) only touches the producer side.
+const (
+	SSOProviderSAML = SSOProviderSAMLPrefix + SSOConnectionDefault
+	SSOProviderOIDC = SSOProviderOIDCPrefix + SSOConnectionDefault
+)
+
 // User is the panel-side logical user. One User maps to multiple 3X-UI clients
 // (one per authorized inbound) via the ownership table.
 type User struct {
 	ID                 int64
-	UPN                string // unique account identifier for both local and SSO users
+	UPN                string // display + local-login username; not used as SSO lookup key anymore
 	Email              string // notification recipient; SSO uses the Email claim, not UPN
 	PasswordHash       string // bcrypt; present when the account has local-password login
+	// SSOProvider is the SSO connection this account is bound to. "local"
+	// for local-password accounts; "saml:<name>" / "oidc:<name>" once a
+	// first-time SSO login has linked the row to an external identity.
+	// Paired with SSOSubject as a composite uniqueness key so a UPN
+	// rename in the IdP never re-maps a user to a different panel row.
+	SSOProvider string
+	// SSOSubject is the IdP-side stable identifier: SAML <NameID> for
+	// SAML, the `sub` claim for OIDC. For local accounts we store the
+	// UPN here so the (provider, subject) composite remains unique
+	// across local rows too — no NULL handling needed.
+	SSOSubject string
 	Role               Role
 	SubToken           string // 32-byte base64url, subscription URL credential
 	UUID               string // v4, used as the derivation seed for proxy passwords

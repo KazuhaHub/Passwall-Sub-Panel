@@ -326,6 +326,14 @@ func (s *SAMLService) BuildAuthnURL(returnURL string) (string, error) {
 
 // SAMLAssertion captures the subset of SAML attributes the user store cares about.
 type SAMLAssertion struct {
+	// Subject is the IdP-side immutable identifier — always the value of
+	// <Subject><NameID>. The user store keys SSO accounts on this (not
+	// UPN), so a UPN rename in the IdP doesn't reroute the assertion to a
+	// different panel row. For deployments where the admin chose
+	// `nameid` as the UPN source, Subject and UPN happen to be the
+	// same string; otherwise Subject is the NameID (often a per-SP
+	// pairwise hash for Entra, or the email/UPN for Okta/Google).
+	Subject     string
 	UPN         string
 	Email       string
 	DisplayName string
@@ -427,6 +435,12 @@ func (s *SAMLService) ParseACSResponse(r *http.Request, possibleRequestIDs []str
 		return nil, fmt.Errorf("parse SAML response: %w", err)
 	}
 	out := &SAMLAssertion{}
+	// Subject = NameID, always. This is the panel-side immutable
+	// identity key used for SSO account lookup, independent of how
+	// the admin chose to source the human-readable UPN below.
+	if assertion.Subject != nil && assertion.Subject.NameID != nil {
+		out.Subject = assertion.Subject.NameID.Value
+	}
 	// Subject identifier source is an admin policy decision. Two
 	// supported values:
 	//   * "nameid" (case-insensitive) — read from <Subject><NameID>.

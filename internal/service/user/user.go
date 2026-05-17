@@ -297,6 +297,12 @@ func (s *Service) CreateLocal(ctx context.Context, in CreateLocalInput) (*Create
 		TrafficResetPeriod: resetPeriod,
 		TrafficPeriodStart: &now,
 		Remark:             in.Remark,
+		// Seed the SSO identity columns so a first-time SSO login can
+		// later overwrite them (see EnsureSSO linking path). Pinning
+		// sso_subject to UPN keeps the (provider, subject) tuple unique
+		// within the local namespace without needing a separate uuid.
+		SSOProvider: domain.SSOProviderLocal,
+		SSOSubject:  upn,
 		Enabled:            true,
 	}
 	if err := s.users.Create(ctx, u); err != nil {
@@ -305,20 +311,29 @@ func (s *Service) CreateLocal(ctx context.Context, in CreateLocalInput) (*Create
 	return &CreateLocalResult{User: u, InitialPassword: pwd}, nil
 }
 
-// EnsureSSOInput carries the SAML-derived facts a successful SSO login
-// brings back, plus the defaults the panel should apply when auto-
+// EnsureSSOInput carries the SAML/OIDC-derived facts a successful SSO
+// login brings back, plus the defaults the panel should apply when auto-
 // provisioning a new SSO user.
 type EnsureSSOInput struct {
-	UPN                string
-	Email              string
-	DisplayName        string
-	Groups             []string
-	IsAdmin            bool
+	// Provider names the SSO connection this login came through. Format
+	// is "<protocol>:<connection_name>" — currently "saml:default" or
+	// "oidc:default"; the namespace leaves room for multiple SAML/OIDC
+	// connections without a schema change.
+	Provider string
+	// Subject is the IdP-side stable identifier that survives UPN/email
+	// renames (SAML <NameID>, OIDC sub). Together with Provider it's the
+	// composite SSO identity used to look up the panel row.
+	Subject string
+	UPN     string
+	Email   string
+	DisplayName string
+	Groups      []string
+	IsAdmin     bool
 	// AllowAutoCreate: when true, a non-admin first-time SSO login is
 	// auto-provisioned with the panel's default group / quota. When false
 	// (the closed-deployment default) only IdP admins get an account; every
 	// other unknown UPN is bounced to /sso-no-account.
-	AllowAutoCreate    bool
+	AllowAutoCreate bool
 	// RevokeAdminOnLogin: when true, a panel admin who is NOT in any IdP
 	// admin group is demoted back to user on this login. Off by default.
 	// See applyRoleFromSSO for the full role-policy matrix.
@@ -356,68 +371,90 @@ func applyRoleFromSSO(current domain.Role, idpIsAdmin, revokeAdmin bool) (domain
 	return current, false
 }
 
-// EnsureSSO returns the user matching the given UPN; if absent, creates
-// one with the supplied defaults.
+// EnsureSSO resolves the panel user for a successful SSO assertion in
+// three layered passes:
 //
-// Role policy (promote-only):
-//   - IdP admin-group hit + current role is NOT admin -> promote to admin.
-//   - IdP admin-group miss -> role is LEFT ALONE. This protects operator
-//     or admin status that an admin granted manually in the panel from
-//     being washed back to "user" on every SSO login.
-//   - Demoting an existing admin (e.g., they left the admin group in the
-//     IdP) is therefore intentional: admin removes the role in the panel.
+//  1. Composite SSO lookup — match on (provider, subject). This is the
+//     steady-state path once an account is bound to an external identity.
+//     UPN renames in the IdP don't reroute lookups: subject is immutable.
 //
-// On first creation (no row yet) the user is automatically resynced to
-// push their client into every authorised inbound — they can use the
-// subscription URL immediately. Auto-create still fires only when the
-// IdP marks the visitor as admin (legacy "bootstrap a fresh panel via
-// SSO admin group" behavior preserved).
+//  2. First-time linking — if (1) misses, look up by UPN. If a row exists
+//     and is still on the local provider (i.e. hasn't been bound to any
+//     SSO connection yet), upgrade it in place: write the new
+//     (provider, subject), keep PasswordHash so local login still works.
+//     This covers two cases without any one-off migration code:
+//        a) admins that originally had only a local password and are
+//           signing in via SSO for the first time;
+//        b) every legacy SSO user from before v2.3.0 — their row was
+//           seeded with sso_provider='local' on upgrade, and the first
+//           SSO login after upgrade rebinds them to the real identity.
+//
+//  3. Strict conflict refusal — if (2) finds a row already bound to a
+//     DIFFERENT SSO identity (linkable.sso_provider != 'local' and
+//     (provider, subject) doesn't match the row), refuse the login with
+//     ErrSSOAccountConflict. This is the GitLab / Mattermost / Sentry
+//     policy: an IdP can't silently rebind a UPN to a new external
+//     subject. Admin must clear sso_provider/sso_subject (DB-level for
+//     now) before the new identity can take over.
+//
+// Falling off the end means no matching row, in which case provisioning
+// runs:
+//   * IdP admin                       -> always create (bootstrap path).
+//   * non-admin + AllowAutoCreate ON  -> create with default group/quota.
+//   * non-admin + AllowAutoCreate OFF -> ErrSSONoAccount.
+//
+// Role policy stays promote-only by default; see applyRoleFromSSO.
 func (s *Service) EnsureSSO(ctx context.Context, in EnsureSSOInput) (*domain.User, error) {
+	if in.Provider == "" {
+		return nil, fmt.Errorf("%w: sso provider required", domain.ErrValidation)
+	}
+	if in.Subject == "" {
+		return nil, fmt.Errorf("%w: sso subject required", domain.ErrValidation)
+	}
 	if in.UPN == "" {
 		return nil, fmt.Errorf("%w: upn required", domain.ErrValidation)
 	}
 
-	u, err := s.users.GetByUPN(ctx, in.UPN)
+	// Pass 1: already-linked row.
+	u, err := s.users.GetBySSO(ctx, in.Provider, in.Subject)
 	if err != nil && !errors.Is(err, domain.ErrNotFound) {
 		return nil, err
 	}
-	// Stale auto-creations from the previous "pending approval" policy are
-	// treated as if no account exists: drop their 3X-UI clients and the
-	// panel row so the caller falls through to the fresh-login path.
 	if u != nil && u.AutoDisabledReason == domain.DisabledPendingApproval {
+		// Stale auto-creation from the old "pending approval" policy —
+		// scrub the row + 3X-UI clients so the linking / create path
+		// can produce a clean account.
 		s.dropOrphanUser(ctx, u.ID)
 		u = nil
 	}
 	if u != nil {
-		// Existing SSO user. Reconcile display name / email always (no
-		// privilege implications). Role only goes UP via the
-		// promote-only policy.
-		dirty := false
-		if newRole, changed := applyRoleFromSSO(u.Role, in.IsAdmin, in.RevokeAdminOnLogin); changed {
-			u.Role = newRole
-			dirty = true
-		}
-		if in.DisplayName != "" && u.DisplayName != in.DisplayName {
-			u.DisplayName = in.DisplayName
-			dirty = true
-		}
-		if in.Email != "" && u.Email != in.Email {
-			u.Email = in.Email
-			dirty = true
-		}
-		if dirty {
-			if err := s.users.Update(ctx, u); err != nil {
-				return nil, fmt.Errorf("update sso user: %w", err)
-			}
-		}
-		return u, nil
+		return s.reconcileSSOUser(ctx, u, in)
 	}
 
-	// No account. Provisioning matrix:
-	//   * IdP admin                       -> always create (bootstrap path).
-	//   * non-admin + AllowAutoCreate ON  -> create with default group/quota.
-	//   * non-admin + AllowAutoCreate OFF -> ErrSSONoAccount (caller redirects
-	//                                        to the "contact your admin" page).
+	// Pass 2: first-time linking by UPN.
+	linkable, err := s.users.GetByUPN(ctx, in.UPN)
+	if err != nil && !errors.Is(err, domain.ErrNotFound) {
+		return nil, err
+	}
+	if linkable != nil && linkable.AutoDisabledReason == domain.DisabledPendingApproval {
+		s.dropOrphanUser(ctx, linkable.ID)
+		linkable = nil
+	}
+	if linkable != nil {
+		// Pass 3: strict conflict refusal — only local rows are
+		// eligible for first-time linking. Anything already bound to a
+		// different SSO identity stays bound.
+		if linkable.SSOProvider != domain.SSOProviderLocal {
+			return nil, domain.ErrSSOAccountConflict
+		}
+		linkable.SSOProvider = in.Provider
+		linkable.SSOSubject = in.Subject
+		// PasswordHash is intentionally left alone so a local-admin
+		// row keeps its emergency password path after SSO is bound.
+		return s.reconcileSSOUser(ctx, linkable, in)
+	}
+
+	// Brand new identity — provisioning gates.
 	if !in.IsAdmin && !in.AllowAutoCreate {
 		return nil, domain.ErrSSONoAccount
 	}
@@ -470,9 +507,45 @@ func (s *Service) EnsureSSO(ctx context.Context, in EnsureSSOInput) (*domain.Use
 		TrafficPeriodStart: &now,
 		DisplayName:        in.DisplayName,
 		Enabled:            true,
+		SSOProvider:        in.Provider,
+		SSOSubject:         in.Subject,
 	}
 	if err := s.users.Create(ctx, u); err != nil {
 		return nil, fmt.Errorf("create sso user: %w", err)
+	}
+	return u, nil
+}
+
+// reconcileSSOUser folds the per-login mutable signals (role / display name /
+// email + linking columns) into an existing row. Shared between the linked
+// (pass 1) and first-time-linking (pass 2) code paths so the role-policy
+// and dirty-tracking stay in one place.
+func (s *Service) reconcileSSOUser(ctx context.Context, u *domain.User, in EnsureSSOInput) (*domain.User, error) {
+	dirty := false
+	if u.SSOProvider != in.Provider {
+		u.SSOProvider = in.Provider
+		dirty = true
+	}
+	if u.SSOSubject != in.Subject {
+		u.SSOSubject = in.Subject
+		dirty = true
+	}
+	if newRole, changed := applyRoleFromSSO(u.Role, in.IsAdmin, in.RevokeAdminOnLogin); changed {
+		u.Role = newRole
+		dirty = true
+	}
+	if in.DisplayName != "" && u.DisplayName != in.DisplayName {
+		u.DisplayName = in.DisplayName
+		dirty = true
+	}
+	if in.Email != "" && u.Email != in.Email {
+		u.Email = in.Email
+		dirty = true
+	}
+	if dirty {
+		if err := s.users.Update(ctx, u); err != nil {
+			return nil, fmt.Errorf("update sso user: %w", err)
+		}
 	}
 	return u, nil
 }

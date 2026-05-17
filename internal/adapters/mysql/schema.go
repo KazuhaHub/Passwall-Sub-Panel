@@ -20,8 +20,18 @@ import (
 // adapter-internal concern, converted via to/from helpers.
 
 type userRow struct {
-	ID                  int64  `gorm:"primaryKey;autoIncrement"`
-	UPN                 string `gorm:"size:255;uniqueIndex;not null"`
+	ID  int64  `gorm:"primaryKey;autoIncrement"`
+	UPN string `gorm:"size:255;uniqueIndex;not null"`
+	// SSOProvider + SSOSubject form the SSO identity. Local accounts
+	// carry ('local', UPN); SSO accounts carry
+	// ('saml:<name>'|'oidc:<name>', NameID|sub). idx_user_sso is a
+	// non-unique composite index for GetBySSO lookups — uniqueness is
+	// guarded by EnsureSSO's GetBySSO-first + strict-conflict policy,
+	// not by a DB constraint, so a legacy install upgrading from
+	// pre-v2.3.0 (every row defaulting to ('local','')) doesn't fail
+	// AutoMigrate; first-time SSO login backfills sso_subject on demand.
+	SSOProvider         string `gorm:"size:64;not null;default:local;index:idx_user_sso,priority:1"`
+	SSOSubject          string `gorm:"size:255;not null;default:'';index:idx_user_sso,priority:2"`
 	Email               string `gorm:"size:255;index"`
 	PasswordHash        string `gorm:"size:255"`
 	Role                string `gorm:"size:16;not null;default:user"`
@@ -57,6 +67,8 @@ func (r *userRow) toDomain() *domain.User {
 	return &domain.User{
 		ID:                  r.ID,
 		UPN:                 r.UPN,
+		SSOProvider:         r.SSOProvider,
+		SSOSubject:          r.SSOSubject,
 		Email:               r.Email,
 		PasswordHash:        r.PasswordHash,
 		Role:                domain.Role(r.Role),
@@ -91,6 +103,8 @@ func userFromDomain(u *domain.User) *userRow {
 	return &userRow{
 		ID:                  u.ID,
 		UPN:                 u.UPN,
+		SSOProvider:         u.SSOProvider,
+		SSOSubject:          u.SSOSubject,
 		Email:               u.Email,
 		PasswordHash:        u.PasswordHash,
 		Role:                string(u.Role),

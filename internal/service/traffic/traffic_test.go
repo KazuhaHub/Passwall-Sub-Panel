@@ -37,6 +37,9 @@ func (r *fakeUserRepo) Delete(ctx context.Context, id int64) error       { retur
 func (r *fakeUserRepo) GetByUPN(ctx context.Context, upn string) (*domain.User, error) {
 	return nil, nil
 }
+func (r *fakeUserRepo) GetBySSO(ctx context.Context, provider, subject string) (*domain.User, error) {
+	return nil, nil
+}
 func (r *fakeUserRepo) GetBySubToken(ctx context.Context, t string) (*domain.User, error) {
 	return nil, nil
 }

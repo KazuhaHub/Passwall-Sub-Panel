@@ -81,6 +81,8 @@ func (h *AuthSAMLHandler) ACS(c *gin.Context) {
 	isAdmin := h.saml.IsAdmin(assertion.Groups)
 	cfg := h.saml.Config()
 	in := user.EnsureSSOInput{
+		Provider:    domain.SSOProviderSAML,
+		Subject:     assertion.Subject,
 		UPN:         assertion.UPN,
 		Email:       assertion.Email,
 		DisplayName: assertion.DisplayName,
@@ -98,6 +100,10 @@ func (h *AuthSAMLHandler) ACS(c *gin.Context) {
 	u, err := h.user.EnsureSSO(c.Request.Context(), in)
 	if errors.Is(err, domain.ErrSSONoAccount) {
 		c.Redirect(http.StatusFound, "/sso-no-account")
+		return
+	}
+	if errors.Is(err, domain.ErrSSOAccountConflict) {
+		c.Redirect(http.StatusFound, "/sso-error?error=sso_conflict&description="+url.QueryEscape(err.Error()))
 		return
 	}
 	if err != nil {

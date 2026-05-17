@@ -46,6 +46,19 @@ func (r *userRepo) GetByUPN(ctx context.Context, upn string) (*domain.User, erro
 	return row.toDomain(), nil
 }
 
+func (r *userRepo) GetBySSO(ctx context.Context, provider, subject string) (*domain.User, error) {
+	if provider == "" || subject == "" {
+		return nil, domain.ErrNotFound
+	}
+	var row userRow
+	if err := r.db.WithContext(ctx).
+		Where("sso_provider = ? AND sso_subject = ?", provider, subject).
+		First(&row).Error; err != nil {
+		return nil, wrapNotFound(err)
+	}
+	return row.toDomain(), nil
+}
+
 func (r *userRepo) GetBySubToken(ctx context.Context, token string) (*domain.User, error) {
 	var row userRow
 	if err := r.db.WithContext(ctx).Where("sub_token = ?", token).First(&row).Error; err != nil {

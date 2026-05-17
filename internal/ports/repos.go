@@ -59,6 +59,12 @@ type UserRepo interface {
 	Delete(ctx context.Context, id int64) error
 	GetByID(ctx context.Context, id int64) (*domain.User, error)
 	GetByUPN(ctx context.Context, upn string) (*domain.User, error)
+	// GetBySSO is the lookup the SSO login path uses — composite match on
+	// (sso_provider, sso_subject). Decoupled from GetByUPN so an admin
+	// changing a user's UPN in the IdP can never reroute the SSO
+	// assertion to a different panel row. Returns domain.ErrNotFound
+	// when no row carries the requested external identity.
+	GetBySSO(ctx context.Context, provider, subject string) (*domain.User, error)
 	GetBySubToken(ctx context.Context, token string) (*domain.User, error)
 	List(ctx context.Context, filter UserFilter) (items []*domain.User, total int64, err error)
 	ListByGroup(ctx context.Context, groupID int64) ([]*domain.User, error)
