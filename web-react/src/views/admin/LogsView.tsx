@@ -36,13 +36,26 @@ import { getUISettings, putUISettings } from '@/api/settings'
 import { confirm } from '@/components/ConfirmHost'
 import { pushSnack } from '@/components/SnackbarHost'
 import { useTabParam } from '@/hooks/useTabParam'
+import { useSiteStore } from '@/stores/site'
 
 const PAGE_SIZE = 50
 
-function formatDate(s?: string) {
+// formatDualTz renders the timestamp in the panel timezone first (the
+// "system view" everything else in the panel reports against) with the
+// browser-local rendering in parentheses. Falls back to a single value
+// when the two timezones happen to be identical or panel tz is unset.
+function formatDualTz(s: string | undefined, panelTz: string): string {
   if (!s) return '-'
   const d = new Date(s)
-  return Number.isNaN(d.getTime()) ? '-' : d.toLocaleString()
+  if (Number.isNaN(d.getTime())) return '-'
+  let bz = ''
+  try { bz = Intl.DateTimeFormat().resolvedOptions().timeZone } catch { bz = '' }
+  const panelStr = panelTz
+    ? d.toLocaleString(undefined, { timeZone: panelTz })
+    : d.toLocaleString()
+  if (!panelTz || panelTz === bz) return panelStr
+  const browserStr = d.toLocaleString()
+  return `${panelStr} (${browserStr})`
 }
 
 function formatJson(s?: string) {
@@ -54,6 +67,7 @@ export default function LogsView() {
   const theme = useTheme()
   const md = theme.palette.md
   const { t } = useTranslation(['admin', 'common'])
+  const panelTz = useSiteStore(s => s.timezone)
 
   const [tab, setTab] = useTabParam<'sub' | 'audit'>('tab', 'sub', ['sub', 'audit'])
 
@@ -223,7 +237,7 @@ export default function LogsView() {
                       <TableCell sx={{ fontSize: 13 }}>{r.ip}</TableCell>
                       <TableCell sx={{ fontSize: 13 }}>{r.client_type}</TableCell>
                       <TableCell sx={{ fontSize: 12, color: md.onSurfaceVariant, maxWidth: 320, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.ua}</TableCell>
-                      <TableCell sx={{ fontSize: 13, whiteSpace: 'nowrap' }}>{formatDate(r.accessed_at)}</TableCell>
+                      <TableCell sx={{ fontSize: 13, whiteSpace: 'nowrap' }}>{formatDualTz(r.accessed_at, panelTz)}</TableCell>
                       <TableCell align="right">
                         <Tooltip title={t('admin:logs.view_detail')}>
                           <IconButton size="small" onClick={() => { setSubDetail(r); setSubDetailOpen(true) }}>
@@ -296,7 +310,7 @@ export default function LogsView() {
                       <TableCell sx={{ fontSize: 13 }}>{r.action}</TableCell>
                       <TableCell sx={{ fontSize: 13 }}>{r.target}</TableCell>
                       <TableCell sx={{ fontSize: 13 }}>{r.ip}</TableCell>
-                      <TableCell sx={{ fontSize: 13, whiteSpace: 'nowrap' }}>{formatDate(r.at)}</TableCell>
+                      <TableCell sx={{ fontSize: 13, whiteSpace: 'nowrap' }}>{formatDualTz(r.at, panelTz)}</TableCell>
                       <TableCell align="right">
                         <Tooltip title={t('admin:logs.view_detail')}>
                           <IconButton size="small" onClick={() => { setAuditDetail(r); setAuditDetailOpen(true) }}>
@@ -329,7 +343,7 @@ export default function LogsView() {
               <Row label="IP" value={subDetail.ip} mono md={md} />
               <Row label="Client" value={subDetail.client_type} md={md} />
               <Row label="UA" value={subDetail.ua} mono md={md} />
-              <Row label="At" value={formatDate(subDetail.accessed_at)} md={md} />
+              <Row label="At" value={formatDualTz(subDetail.accessed_at, panelTz)} md={md} />
             </Box>
           )}
         </DialogContent>
@@ -349,7 +363,7 @@ export default function LogsView() {
               <Row label="Action" value={auditDetail.action} mono md={md} />
               <Row label="Target" value={auditDetail.target} md={md} />
               <Row label="IP" value={auditDetail.ip} mono md={md} />
-              <Row label="At" value={formatDate(auditDetail.at)} md={md} />
+              <Row label="At" value={formatDualTz(auditDetail.at, panelTz)} md={md} />
               {auditDetail.before_json && (
                 <Box>
                   <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant, mb: 0.5 }}>{t('admin:logs.detail.before')}</Typography>

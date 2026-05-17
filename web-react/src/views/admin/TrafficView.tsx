@@ -40,6 +40,47 @@ import {
 import type { Node, User } from '@/api/types'
 import { pushSnack } from '@/components/SnackbarHost'
 import { useTabParam } from '@/hooks/useTabParam'
+import { useSiteStore } from '@/stores/site'
+
+// Suggested tz options on the chart toolbar. Browser tz is always pinned
+// first (so the admin's natural "today" is one click away); panel tz comes
+// next when set (so the admin can match what the rest of the panel reports
+// against). The rest is a small set of common deployments to avoid making
+// admins type IANA names by hand — freeSolo on the Autocomplete still lets
+// them type any IANA name LoadLocation accepts.
+const COMMON_CHART_TIMEZONES: string[] = [
+  'UTC',
+  'Asia/Shanghai',
+  'Asia/Hong_Kong',
+  'Asia/Taipei',
+  'Asia/Tokyo',
+  'Asia/Seoul',
+  'Asia/Singapore',
+  'America/Los_Angeles',
+  'America/Denver',
+  'America/Chicago',
+  'America/New_York',
+  'Europe/London',
+  'Europe/Paris',
+  'Europe/Berlin',
+  'Europe/Moscow',
+  'Australia/Sydney',
+]
+
+function browserTz(): string {
+  try { return Intl.DateTimeFormat().resolvedOptions().timeZone } catch { return 'UTC' }
+}
+
+function buildTzOptions(panelTz: string): string[] {
+  const bz = browserTz()
+  // Browser first, panel tz second when distinct and non-empty, then
+  // common IANA names with both already-pinned entries removed so the
+  // list isn't visually duplicated.
+  const head = [bz]
+  if (panelTz && panelTz !== bz) head.push(panelTz)
+  const tail = COMMON_CHART_TIMEZONES.filter(t => !head.includes(t))
+  return [...head, ...tail]
+}
 
 const TrafficChart = lazy(() => import('@/components/TrafficChart'))
 
@@ -86,6 +127,19 @@ export default function TrafficView() {
   const [selectedNodeId, setSelectedNodeId] = useState<number>(0)
   const [period, setPeriod] = useState<TrafficHistoryPeriod>('day')
   const [rangeDays, setRangeDays] = useState(30)
+  // Admin's effective chart timezone. Defaults to the panel-configured tz
+  // (so the chart aligns with the rest of the panel's calendar math by
+  // default) and falls back to the browser tz when panel tz is unset.
+  // Not persisted across reloads — the admin reselects per session if they
+  // want a non-default view, matching the spec's "don't remember" rule.
+  const panelTz = useSiteStore(s => s.timezone)
+  const [selectedTz, setSelectedTz] = useState<string>(() => panelTz || browserTz())
+  // When panel tz finishes loading (site store is async), realign the
+  // default once. Skip when admin has already typed something distinct.
+  useEffect(() => {
+    if (!panelTz) return
+    setSelectedTz(prev => (prev === '' || prev === browserTz()) ? panelTz : prev)
+  }, [panelTz])
 
   const historyItems = history?.items ?? []
   const summary = useMemo(() => {
@@ -105,7 +159,7 @@ export default function TrafficView() {
 
   useEffect(() => { void loadHistory()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scope, selectedUserId, selectedNodeId, period, rangeDays])
+  }, [scope, selectedUserId, selectedNodeId, period, rangeDays, selectedTz])
 
   async function loadRank() {
     setLoading(true)
@@ -132,6 +186,7 @@ export default function TrafficView() {
     try {
       const params = {
         period, since: dateString(daysAgo(rangeDays - 1)), until: dateString(new Date()),
+        tz: selectedTz || undefined,
       }
       let res: TrafficHistoryResponse
       if (scope === 'node') {
@@ -326,6 +381,16 @@ export default function TrafficView() {
               <MenuItem value={30}>{t('traffic.trend.range_30')}</MenuItem>
               <MenuItem value={90}>{t('traffic.trend.range_90')}</MenuItem>
             </Select>
+            <Autocomplete freeSolo size="small"
+              options={buildTzOptions(panelTz)}
+              value={selectedTz}
+              inputValue={selectedTz}
+              onInputChange={(_, v) => setSelectedTz(v)}
+              onChange={(_, v) => setSelectedTz((v as string) ?? '')}
+              sx={{ width: 220 }}
+              renderInput={(params) => (
+                <TextField {...params} label={t('traffic.trend.timezone', { defaultValue: '时区' })} />
+              )} />
             <Button variant="outlined" onClick={loadHistory} disabled={chartLoading}>{t('traffic.refresh')}</Button>
           </Box>
 
