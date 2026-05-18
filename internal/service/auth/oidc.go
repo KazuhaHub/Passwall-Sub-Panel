@@ -167,7 +167,16 @@ func (s *OIDCService) Exchange(ctx context.Context, code, expectedNonce string) 
 	if err != nil {
 		return nil, fmt.Errorf("verify id_token: %w", err)
 	}
-	if expectedNonce != "" && idTok.Nonce != expectedNonce {
+	// Nonce is hard-required: the Login handler always sets a nonce
+	// cookie, so an empty expectedNonce at this point means the cookie
+	// vanished between auth-redirect and callback (cleared by user,
+	// jar pressure, cross-tab race, …). Treating that as a pass would
+	// silently weaken the OIDC replay protection that the cookie is
+	// there for. Fail closed instead.
+	if expectedNonce == "" {
+		return nil, fmt.Errorf("oidc nonce cookie missing — cannot validate id_token replay protection")
+	}
+	if idTok.Nonce != expectedNonce {
 		return nil, fmt.Errorf("nonce mismatch")
 	}
 

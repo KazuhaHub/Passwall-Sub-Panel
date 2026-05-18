@@ -173,6 +173,14 @@ func (s *SAMLService) StartMetadataRefresh(ctx context.Context, wg ...*sync.Wait
 			if cfg != nil && cfg.IDP.MetadataRefreshInterval > 0 {
 				interval = cfg.IDP.MetadataRefreshInterval
 			}
+			// Floor at 1 minute so a misconfigured tiny interval (or a
+			// finger-slip in the admin UI) can't turn the panel into an
+			// IdP metadata DoSer. Real-world IdP metadata changes maybe
+			// once on a cert rotation; 1m is already way more eager
+			// than necessary and a comfortable lower bound.
+			if interval < time.Minute {
+				interval = time.Minute
+			}
 			select {
 			case <-ctx.Done():
 				return
