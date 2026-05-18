@@ -336,6 +336,11 @@ export default function ServersView() {
         display: 'inline-block', px: 1.25, py: 0.25,
         borderRadius: 1, fontSize: 12, fontWeight: 500,
         bgcolor: bg, color: fg,
+        // whiteSpace: nowrap stops the chip wrapping "Connected" / "(N)"
+        // onto two lines when the column is narrow. The column itself
+        // sets nowrap below so the chip width drives the cell width
+        // rather than the other way around.
+        whiteSpace: 'nowrap',
       }}>
         {label}
       </Box>
@@ -442,9 +447,20 @@ export default function ServersView() {
                       onChange={(_, c) => toggleOne(s.id, c)}
                     />
                   </TableCell>
-                  <TableCell sx={{ fontWeight: 500 }}>{s.name}</TableCell>
-                  <TableCell sx={{ fontSize: 13, color: md.onSurfaceVariant }}>{s.url}</TableCell>
-                  <TableCell>{statusBadge(s)}</TableCell>
+                  <TableCell sx={{ fontWeight: 500, whiteSpace: 'nowrap' }}>{s.name}</TableCell>
+                  {/* URL is the admin's reference, not subscription-critical
+                      — clip aggressively so the table stays scannable and
+                      keeps space for status / actions. Full URL shows in a
+                      tooltip on hover for verification. */}
+                  <TableCell sx={{
+                    fontSize: 13, color: md.onSurfaceVariant,
+                    maxWidth: 240, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                  }}>
+                    <Tooltip title={s.url} placement="top">
+                      <span>{s.url}</span>
+                    </Tooltip>
+                  </TableCell>
+                  <TableCell sx={{ whiteSpace: 'nowrap' }}>{statusBadge(s)}</TableCell>
                   <TableCell sx={{ color: md.onSurfaceVariant, fontSize: 13 }}>{s.remark || '—'}</TableCell>
                   <TableCell align="right" sx={{ whiteSpace: 'nowrap' }}>
                     <Button
