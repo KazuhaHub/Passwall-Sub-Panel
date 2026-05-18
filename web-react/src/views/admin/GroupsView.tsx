@@ -1,9 +1,11 @@
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import {
+  Autocomplete,
   Box,
   Button,
   Card,
   Checkbox,
+  Chip,
   CircularProgress,
   Dialog,
   DialogActions,
@@ -30,7 +32,8 @@ import EditIcon from '@mui/icons-material/EditOutlined'
 import { useTranslation } from 'react-i18next'
 
 import { createGroup, deleteGroup, listGroups, updateGroup } from '@/api/groups'
-import type { Group } from '@/api/types'
+import { listNodes } from '@/api/nodes'
+import type { Group, Node } from '@/api/types'
 import { confirm } from '@/components/ConfirmHost'
 import { pushSnack } from '@/components/SnackbarHost'
 
@@ -61,6 +64,29 @@ export default function GroupsView() {
   const [editing, setEditing] = useState<Group | null>(null)
   const [form, setForm] = useState<FormState>(EMPTY_FORM)
   const [busy, setBusy] = useState(false)
+
+  // Tag filter conditions accept "region:XX" / "tag:YY" / a bare tag. Build
+  // the dropdown suggestions by scanning every managed node — regions get a
+  // `region:` prefix, tags get a `tag:` prefix so admins discover both forms
+  // and the matcher's special-key dispatch works as expected. The Autocomplete
+  // stays freeSolo so admins can still type custom conditions (e.g. a tag
+  // that doesn't exist yet but will after they save it on a node).
+  const [allNodes, setAllNodes] = useState<Node[]>([])
+  useEffect(() => {
+    void listNodes().then(setAllNodes).catch(() => { /* leave empty */ })
+  }, [])
+  const tagFilterOptions = useMemo(() => {
+    const regions = new Set<string>()
+    const tags = new Set<string>()
+    for (const n of allNodes) {
+      if (n.region) regions.add(n.region)
+      for (const tg of n.tags ?? []) if (tg) tags.add(tg)
+    }
+    const out: string[] = []
+    for (const r of Array.from(regions).sort()) out.push(`region:${r}`)
+    for (const tg of Array.from(tags).sort()) out.push(`tag:${tg}`)
+    return out
+  }, [allNodes])
 
   // Only groups with zero members are eligible for selection (delete needs empty group).
   const selectableIds = items.filter(g => g.members === 0).map(g => g.id)
@@ -389,16 +415,38 @@ export default function GroupsView() {
                   <MenuItem value="all">{t('admin:groups.mode.all')}</MenuItem>
                   <MenuItem value="any">{t('admin:groups.mode.any')}</MenuItem>
                 </TextField>
-                <TextField
-                  fullWidth
-                  multiline
-                  minRows={2}
-                  label={t('admin:groups.field.tags')}
-                  placeholder={t('admin:groups.placeholder.tags')}
-                  helperText={t('admin:groups.hint.tags')}
-                  value={form.tags_text}
-                  onChange={e => setForm({ ...form, tags_text: e.target.value })}
-                  sx={{ '& textarea': { fontSize: 13 } }}
+                <Autocomplete
+                  multiple
+                  freeSolo
+                  options={tagFilterOptions}
+                  value={form.tags_text
+                    ? form.tags_text.split(',').map(s => s.trim()).filter(Boolean)
+                    : []}
+                  onChange={(_, v) => {
+                    const seen = new Set<string>()
+                    const cleaned: string[] = []
+                    for (const raw of v as string[]) {
+                      const s = raw.trim()
+                      if (!s || seen.has(s)) continue
+                      seen.add(s)
+                      cleaned.push(s)
+                    }
+                    setForm({ ...form, tags_text: cleaned.join(', ') })
+                  }}
+                  renderTags={(value, getTagProps) =>
+                    value.map((option, index) => {
+                      const tagProps = getTagProps({ index })
+                      return <Chip {...tagProps} key={option} label={option} size="small" />
+                    })
+                  }
+                  renderInput={(params) => (
+                    <TextField
+                      {...params}
+                      label={t('admin:groups.field.tags')}
+                      placeholder={t('admin:groups.placeholder.tags')}
+                      helperText={t('admin:groups.hint.tags')}
+                    />
+                  )}
                 />
               </>
             )}

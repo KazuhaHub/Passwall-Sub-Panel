@@ -622,7 +622,7 @@
       "title": "New separator",
       "hint": "Separators render as a DIRECT proxy in client node lists for visual grouping only. They don't participate in 3X-UI, traffic accounting, or health checks. Use Region / Tags to control which user subscriptions they appear in.",
       "region_hint": "Optional. When a group filters by region, only matching separators are emitted.",
-      "tags_hint": "Optional, comma-separated. tag_filter matches make the separator appear inside the corresponding group."
+      "tags_hint": "Pick from existing tags, or type a new tag and hit Enter. tag_filter matches make the separator appear inside the corresponding group."
     },
     "edit_separator_dialog": {
       "title": "Edit separator"
@@ -645,7 +645,7 @@
       "server_address": "Address",
       "flow": "Flow (optional)",
       "region": "Region",
-      "tags": "Tags (comma-separated)",
+      "tags": "Tags",
       "sort_order": "Sort weight"
     },
     "edit_inbound": "Edit inbound config",
@@ -749,7 +749,7 @@
       "server_address": "Address",
       "flow": "Flow (optional)",
       "region": "Region",
-      "tags": "Tags (comma-separated)",
+      "tags": "Tags",
       "sort_order": "Sort weight"
     },
     "action": {
@@ -977,11 +977,11 @@
       "remark": "Remark"
     },
     "placeholder": {
-      "tags": "region:TW, tag:reality"
+      "tags": "Pick region:XX / tag:YY from the dropdown, or type custom"
     },
     "hint": {
       "mode": "AND = every condition must match; OR = at least one matches",
-      "tags": "Comma-separated. Supports prefixes like region:XX / tag:YY / server:ZZ"
+      "tags": "Pick existing regions/tags from the dropdown, or type a custom condition (e.g. server:foo)."
     },
     "mode": {
       "all": "AND (every condition matches)",

@@ -5,6 +5,7 @@ import {
   Button,
   Card,
   Checkbox,
+  Chip,
   CircularProgress,
   Dialog,
   DialogActions,
@@ -77,6 +78,56 @@ type SS2022Method = '2022-blake3-aes-128-gcm' | '2022-blake3-aes-256-gcm' | '202
 // dispatcher to gate REALITY/flow/encryption knobs.
 function usesVlessStream(p: CreateProtocol): boolean {
   return p === 'vless' || p === 'vmess' || p === 'trojan'
+}
+
+// TagsAutocomplete is the shared tag input used by the create/edit/import/
+// separator dialogs. Wraps a freeSolo multi-select Autocomplete around the
+// form's `tags_text` comma-joined string so admins pick from existing tags
+// (suggestion dropdown) but can still introduce new ones by typing + Enter.
+// Form state stays as a comma-joined string for backend compatibility —
+// the split/join happens here, not in submit logic.
+function TagsAutocomplete(props: {
+  label: string
+  value: string
+  options: string[]
+  onChange: (next: string) => void
+  helperText?: string
+}) {
+  const tags = props.value
+    ? props.value.split(',').map(s => s.trim()).filter(Boolean)
+    : []
+  return (
+    <Autocomplete
+      multiple
+      freeSolo
+      size="medium"
+      options={props.options}
+      value={tags}
+      onChange={(_, v) => {
+        // de-dup + drop empties so two passes through this onChange can't
+        // create "Premium,Premium" / trailing commas. Sort is NOT applied
+        // so user-controlled ordering survives.
+        const seen = new Set<string>()
+        const cleaned: string[] = []
+        for (const raw of v as string[]) {
+          const s = raw.trim()
+          if (!s || seen.has(s)) continue
+          seen.add(s)
+          cleaned.push(s)
+        }
+        props.onChange(cleaned.join(', '))
+      }}
+      renderTags={(value, getTagProps) =>
+        value.map((option, index) => {
+          const tagProps = getTagProps({ index })
+          return <Chip {...tagProps} key={option} label={option} size="small" />
+        })
+      }
+      renderInput={(params) => (
+        <TextField {...params} label={props.label} helperText={props.helperText} />
+      )}
+    />
+  )
 }
 
 interface MetaForm {
@@ -1249,6 +1300,18 @@ export default function NodesView() {
     return bucketsToOptions(buckets)
   }, [managed, t])
 
+  // Distinct tag pool across all managed nodes, sorted alphabetically.
+  // Feeds the Autocomplete dropdowns on the create/edit/import/separator
+  // dialogs so admins pick from the existing tag set instead of having to
+  // re-type (and risk typo-fragmenting the namespace). freeSolo on the
+  // Autocomplete still lets them introduce a brand-new tag — the dropdown
+  // is suggestion, not constraint.
+  const allTags = useMemo(() => {
+    const set = new Set<string>()
+    for (const n of managed) for (const tg of n.tags ?? []) if (tg) set.add(tg)
+    return Array.from(set).sort((a, b) => a.localeCompare(b))
+  }, [managed])
+
   const filteredManaged = useMemo(() => {
     const q = managedSearch.trim().toLowerCase()
     if (!q) return managed
@@ -2351,9 +2414,11 @@ export default function NodesView() {
               onChange={e => setImportForm({ ...importForm, region: e.target.value })}
               error={!!importErr.region}
               helperText={importErr.region ? t(`admin:${importErr.region}`) : ''} />
-            <TextField fullWidth label={t('admin:nodes.import_dialog.tags')}
+            <TagsAutocomplete
+              label={t('admin:nodes.import_dialog.tags')}
               value={importForm.tags_text}
-              onChange={e => setImportForm({ ...importForm, tags_text: e.target.value })} />
+              options={allTags}
+              onChange={v => setImportForm({ ...importForm, tags_text: v })} />
             <TextField fullWidth type="number" label={t('admin:nodes.import_dialog.sort_order')}
               value={importForm.sort_order}
               onChange={e => setImportForm({ ...importForm, sort_order: Number(e.target.value) })} />
@@ -2400,9 +2465,11 @@ export default function NodesView() {
               onChange={e => setEditForm({ ...editForm, region: e.target.value })}
               error={!!editMetaErr.region}
               helperText={editMetaErr.region ? t(`admin:${editMetaErr.region}`) : ''} />
-            <TextField fullWidth label={t('admin:nodes.field.tags')}
+            <TagsAutocomplete
+              label={t('admin:nodes.field.tags')}
               value={editForm.tags_text}
-              onChange={e => setEditForm({ ...editForm, tags_text: e.target.value })} />
+              options={allTags}
+              onChange={v => setEditForm({ ...editForm, tags_text: v })} />
             <Box sx={{ display: 'none' }}>{alpha(md.error, 0.5)}</Box>
           </Box>
         </DialogContent>
@@ -2438,10 +2505,12 @@ export default function NodesView() {
               value={separatorForm.region}
               onChange={e => setSeparatorForm({ ...separatorForm, region: e.target.value })}
               helperText={t('admin:nodes.create_separator_dialog.region_hint', { defaultValue: '可留空。如果分组按 region 过滤，填上才会在对应分组里出现。' })} />
-            <TextField fullWidth label={t('admin:nodes.field.tags')}
+            <TagsAutocomplete
+              label={t('admin:nodes.field.tags')}
               value={separatorForm.tags_text}
-              onChange={e => setSeparatorForm({ ...separatorForm, tags_text: e.target.value })}
-              helperText={t('admin:nodes.create_separator_dialog.tags_hint', { defaultValue: '可留空，多个标签用英文逗号分隔。tag_filter 匹配会让该分隔出现在对应分组里。' })} />
+              options={allTags}
+              onChange={v => setSeparatorForm({ ...separatorForm, tags_text: v })}
+              helperText={t('admin:nodes.create_separator_dialog.tags_hint', { defaultValue: '从已有标签里选，或输入新标签后按回车。tag_filter 匹配会让该分隔出现在对应分组里。' })} />
           </Box>
         </DialogContent>
         <DialogActions>

@@ -622,7 +622,7 @@
       "title": "新增分隔标题",
       "hint": "分隔标题以 DIRECT 形式出现在客户端的节点列表中，仅用于视觉分组，不参与 3X-UI、流量统计、健康检查。可用区域/标签控制它出现在哪些用户的订阅里。",
       "region_hint": "可留空。如果分组按 region 过滤，填上才会在对应分组里出现。",
-      "tags_hint": "可留空，多个标签用英文逗号分隔。tag_filter 匹配会让该分隔出现在对应分组里。"
+      "tags_hint": "从已有标签里选，或输入新标签后按回车。tag_filter 匹配会让该分隔出现在对应分组里。"
     },
     "edit_separator_dialog": {
       "title": "编辑分隔标题"
@@ -714,7 +714,7 @@
       "server_address": "连接地址",
       "flow": "Flow（可选）",
       "region": "Region",
-      "tags": "Tags（逗号分隔）",
+      "tags": "Tags",
       "sort_order": "排序权重"
     },
     "feature_pending": "功能迁移中（下个版本）",
@@ -749,7 +749,7 @@
       "server_address": "连接地址",
       "flow": "Flow（可选）",
       "region": "Region",
-      "tags": "Tags（逗号分隔）",
+      "tags": "Tags",
       "sort_order": "排序权重"
     },
     "action": {
@@ -977,11 +977,11 @@
       "remark": "备注"
     },
     "placeholder": {
-      "tags": "region:TW, tag:reality"
+      "tags": "从下拉选 region:XX / tag:YY，或自由输入"
     },
     "hint": {
       "mode": "AND = 每条都要满足；OR = 任一满足即可",
-      "tags": "逗号分隔。支持 region:XX / tag:YY / server:ZZ 等前缀"
+      "tags": "从下拉选已有 region / tag，或输入自定义条件（如 server:foo）。"
     },
     "mode": {
       "all": "AND（每条都要满足）",
