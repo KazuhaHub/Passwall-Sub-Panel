@@ -370,7 +370,8 @@
       "summary_up": "上行",
       "summary_down": "下行",
       "summary_range": "范围",
-      "chart_note": "图表基于累计快照差值生成。"
+      "chart_note": "图表基于累计快照差值生成。",
+      "timezone": "时区"
     }
   },
   "templates": {

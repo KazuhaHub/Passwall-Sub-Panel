@@ -370,7 +370,8 @@
       "summary_up": "Up",
       "summary_down": "Down",
       "summary_range": "Range",
-      "chart_note": "Chart is derived from cumulative snapshot deltas."
+      "chart_note": "Chart is derived from cumulative snapshot deltas.",
+      "timezone": "Timezone"
     }
   },
   "templates": {

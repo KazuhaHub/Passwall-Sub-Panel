@@ -383,7 +383,7 @@ export default function TrafficView() {
               onChange={(_, v) => setSelectedTz((v as string) ?? '')}
               sx={{ width: 220 }}
               renderInput={(params) => (
-                <TextField {...params} label={t('traffic.trend.timezone', { defaultValue: '时区' })} />
+                <TextField {...params} label={t('traffic.trend.timezone')} />
               )} />
             <Button variant="outlined" onClick={loadHistory} disabled={chartLoading}>{t('traffic.refresh')}</Button>
           </Box>
