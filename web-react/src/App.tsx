@@ -23,6 +23,7 @@ function systemPrefersDarkNow(): boolean {
 export default function App() {
   const mode = useAppearanceStore(s => s.mode)
   const sourceColor = useAppearanceStore(selectEffectiveColor)
+  const density = useAppearanceStore(s => s.density)
   const { i18n } = useTranslation()
   const [language, setLanguageState] = useState<AppLanguage>(currentLanguage)
   const [systemDark, setSystemDark] = useState(systemPrefersDarkNow)
@@ -57,8 +58,8 @@ export default function App() {
   const effectiveMode = resolveEffectiveMode(mode, systemDark)
 
   const theme = useMemo(
-    () => createAppTheme({ mode: effectiveMode, sourceColor, language }),
-    [effectiveMode, sourceColor, language],
+    () => createAppTheme({ mode: effectiveMode, sourceColor, language, density }),
+    [effectiveMode, sourceColor, language, density],
   )
 
   return (

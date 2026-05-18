@@ -37,6 +37,7 @@ import SettingsIcon from '@mui/icons-material/Settings'
 import LogoutIcon from '@mui/icons-material/Logout'
 
 import AppearanceMenu from '@/components/AppearanceMenu'
+import DensityToggle from '@/components/DensityToggle'
 import LanguageMenu from '@/components/LanguageMenu'
 import BrandLogo from '@/components/BrandLogo'
 import { useAuthStore, selectLabel } from '@/stores/auth'
@@ -263,6 +264,7 @@ export default function AdminLayout() {
             </Typography>
             <Box sx={{ flex: 1 }} />
             <LanguageMenu value={currentLanguage()} onChange={handleLanguageChange} />
+            <DensityToggle />
             <AppearanceMenu
               state={{ systemColor: appearance.systemColor, userColor: appearance.userColor, mode: appearance.mode }}
               onChange={(patch) => {

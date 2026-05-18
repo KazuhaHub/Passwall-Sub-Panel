@@ -19,15 +19,22 @@ const MUI_LOCALE_MAP: Record<AppLanguage, object> = {
   'en-US': muiLocales.enUS,
 }
 
+// Density modes mirror what stores/appearance.ts exposes. The theme
+// reads it once at creation time; toggling re-creates the theme via
+// App.tsx's useMemo dependency.
+export type Density = 'comfortable' | 'compact'
+
 export interface CreateAppThemeArgs {
   mode: 'light' | 'dark'
   sourceColor: string
   language: AppLanguage
+  density?: Density
 }
 
-export function createAppTheme({ mode, sourceColor, language }: CreateAppThemeArgs): Theme {
+export function createAppTheme({ mode, sourceColor, language, density = 'comfortable' }: CreateAppThemeArgs): Theme {
   const t = tokensFromSource(sourceColor, mode)
   const muiLocale = MUI_LOCALE_MAP[language] ?? muiLocales.enUS
+  const compact = density === 'compact'
 
   return createTheme({
     palette: {
@@ -46,7 +53,13 @@ export function createAppTheme({ mode, sourceColor, language }: CreateAppThemeAr
       // system fallbacks. The two Google fonts are designed together so
       // CJK / Latin mixes don't look mismatched.
       fontFamily: '"Roboto","Noto Sans SC","PingFang SC","Microsoft YaHei",-apple-system,"Segoe UI",sans-serif',
-      h4: { fontWeight: 400, fontSize: 28, lineHeight: '36px' },
+      // Compact knocks h4 down from page-poster size to something that
+      // sits closer to the table beneath it — admin pages have a lot
+      // of vertical content competing for attention, the title doesn't
+      // need to dominate.
+      h4: compact
+        ? { fontWeight: 600, fontSize: 20, lineHeight: '28px' }
+        : { fontWeight: 400, fontSize: 28, lineHeight: '36px' },
       h6: { fontWeight: 500, fontSize: 20 },
       button: { textTransform: 'none', fontWeight: 500, letterSpacing: 0.1 },
       body2: { fontSize: 13, color: t.onSurfaceVariant },
@@ -71,11 +84,11 @@ export function createAppTheme({ mode, sourceColor, language }: CreateAppThemeAr
         styleOverrides: {
           root: {
             borderRadius: 9999,
-            minHeight: 40,
-            paddingLeft: 24,
-            paddingRight: 24,
+            minHeight: compact ? 34 : 40,
+            paddingLeft: compact ? 18 : 24,
+            paddingRight: compact ? 18 : 24,
           },
-          sizeSmall: { minHeight: 32, paddingLeft: 14, paddingRight: 14 },
+          sizeSmall: { minHeight: compact ? 28 : 32, paddingLeft: 14, paddingRight: 14 },
           containedPrimary: {
             backgroundColor: t.primary,
             color: t.onPrimary,
@@ -115,17 +128,23 @@ export function createAppTheme({ mode, sourceColor, language }: CreateAppThemeAr
       // room on the left, breaking the visual centering.
       MuiDialogTitle: {
         styleOverrides: {
-          root: { padding: '24px 32px 8px' },
+          root: compact
+            ? { padding: '16px 24px 4px', fontSize: 18, fontWeight: 600 }
+            : { padding: '24px 32px 8px' },
         },
       },
       MuiDialogContent: {
         styleOverrides: {
-          root: { padding: '12px 32px 20px' },
+          root: compact
+            ? { padding: '8px 24px 12px' }
+            : { padding: '12px 32px 20px' },
         },
       },
       MuiDialogActions: {
         styleOverrides: {
-          root: { padding: '8px 32px 20px' },
+          root: compact
+            ? { padding: '4px 24px 14px' }
+            : { padding: '8px 32px 20px' },
         },
       },
       MuiCard: {
@@ -205,6 +224,41 @@ export function createAppTheme({ mode, sourceColor, language }: CreateAppThemeAr
           root: { borderRadius: 12 },
         },
       },
+      // Compact-only: smaller default size on the components admins
+      // see most. Comfortable mode lets MUI defaults apply unchanged.
+      ...(compact && {
+        MuiTextField: {
+          defaultProps: { size: 'small' as const },
+        },
+        MuiTable: {
+          defaultProps: { size: 'small' as const },
+        },
+        MuiTableCell: {
+          styleOverrides: {
+            // size="small" already trims height — this just polishes the
+            // horizontal rhythm so checkbox / icon cells don't feel
+            // crammed.
+            root: { paddingTop: 6, paddingBottom: 6 },
+            sizeSmall: { paddingLeft: 12, paddingRight: 12 },
+          },
+        },
+        MuiTab: {
+          styleOverrides: {
+            root: { minHeight: 38, padding: '6px 12px', fontSize: 13 },
+          },
+        },
+        MuiTabs: {
+          styleOverrides: {
+            root: { minHeight: 38 },
+          },
+        },
+        MuiAutocomplete: {
+          defaultProps: { size: 'small' as const },
+        },
+        MuiSelect: {
+          defaultProps: { size: 'small' as const },
+        },
+      }),
       MuiPaper: {
         styleOverrides: {
           root: { backgroundImage: 'none' },

@@ -3,8 +3,17 @@ import { DEFAULT_PRESET_HEX } from '@/theme'
 
 const USER_COLOR_KEY = 'psp-user-theme-color'
 const USER_MODE_KEY = 'psp-user-theme-mode'
+const USER_DENSITY_KEY = 'psp-user-density'
 
 export type ThemeMode = 'light' | 'dark' | 'auto'
+// Density controls how tightly MUI components pack their content.
+//   - comfortable: MUI defaults (current pre-beta.13 behaviour) — taller
+//     inputs, larger buttons, 56px+ table rows.
+//   - compact: Cloudreve-style trim — size="small" inputs/tables,
+//     43-50px rows, 36px tabs, tighter dialog padding, smaller h4.
+// Choice persists in localStorage. Default for new visitors is
+// "comfortable" so existing users don't see a sudden layout shift.
+export type Density = 'comfortable' | 'compact'
 
 interface AppearanceState {
   // System default — populated from /auth/methods on app boot.
@@ -16,10 +25,12 @@ interface AppearanceState {
   // / 'dark' force the corresponding mode regardless of OS. Default for
   // new visitors is 'auto'.
   mode: ThemeMode
+  density: Density
 
   setSystemColor: (hex: string | undefined) => void
   setUserColor: (hex: string | null) => void
   setMode: (mode: ThemeMode) => void
+  setDensity: (density: Density) => void
 }
 
 function loadUserColor(): string | null {
@@ -36,10 +47,17 @@ function loadUserMode(): ThemeMode {
   return 'auto'
 }
 
+function loadUserDensity(): Density {
+  const v = localStorage.getItem(USER_DENSITY_KEY)
+  if (v === 'comfortable' || v === 'compact') return v
+  return 'comfortable'
+}
+
 export const useAppearanceStore = create<AppearanceState>((set) => ({
   systemColor: DEFAULT_PRESET_HEX,
   userColor: loadUserColor(),
   mode: loadUserMode(),
+  density: loadUserDensity(),
 
   setSystemColor(hex) {
     if (!hex || !/^#[0-9a-fA-F]{6}$/.test(hex)) return
@@ -61,6 +79,11 @@ export const useAppearanceStore = create<AppearanceState>((set) => ({
   setMode(mode) {
     localStorage.setItem(USER_MODE_KEY, mode)
     set({ mode })
+  },
+
+  setDensity(density) {
+    localStorage.setItem(USER_DENSITY_KEY, density)
+    set({ density })
   },
 }))
 
