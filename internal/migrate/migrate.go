@@ -494,7 +494,7 @@ func copyMailSettings(ctx context.Context, src, dst *gorm.DB) error {
 		"from_email":    legacy.FromEmail,
 		"from_name":     legacy.FromName,
 		"encryption":    legacy.Encryption,
-		"updated_at":    legacy.UpdatedAt,
+		"updated_at":    parseLegacyTimestamp(legacy.UpdatedAt),
 	}
 	return dst.WithContext(ctx).Table("mail_settings").Create(row).Error
 }
@@ -528,7 +528,7 @@ func copySAMLConfig(ctx context.Context, src, dst *gorm.DB) error {
 		"new_user_expire_days":          legacy.NewUserExpireDays,
 		"new_user_traffic_limit_bytes":  legacy.NewUserTrafficLimitBytes,
 		"new_user_traffic_reset_period": legacy.NewUserTrafficResetPeriod,
-		"updated_at":                    legacy.UpdatedAt,
+		"updated_at":                    parseLegacyTimestamp(legacy.UpdatedAt),
 	}
 	return dst.WithContext(ctx).Table("saml_settings").Create(row).Error
 }
@@ -560,7 +560,7 @@ func copyOIDCConfig(ctx context.Context, src, dst *gorm.DB) error {
 		"new_user_expire_days":          legacy.NewUserExpireDays,
 		"new_user_traffic_limit_bytes":  legacy.NewUserTrafficLimitBytes,
 		"new_user_traffic_reset_period": legacy.NewUserTrafficResetPeriod,
-		"updated_at":                    legacy.UpdatedAt,
+		"updated_at":                    parseLegacyTimestamp(legacy.UpdatedAt),
 	}
 	return dst.WithContext(ctx).Table("oidc_settings").Create(row).Error
 }
@@ -679,4 +679,38 @@ func coalesceJSON(s string) string {
 		return "null"
 	}
 	return s
+}
+
+// parseLegacyTimestamp converts a legacy `updated_at` string back into a
+// time.Time the destination driver will accept. Legacy struct fields are
+// declared as `string` (see legacy_schema.go) to dodge the SQLite TEXT-
+// vs-DATETIME parse mismatch on read; but MySQL strict mode rejects
+// ISO-8601 strings like "2026-05-16T10:44:22.662Z" when inserting into a
+// DATETIME column. Parse it back to a real time.Time here so GORM's
+// driver layer can format it correctly per destination dialect.
+//
+// Falls back to time.Now() on any parse failure — for these single-row
+// config tables (mail_settings / saml_settings / oidc_settings) the
+// updated_at is informational only ("when was this saved"), so the
+// migration timestamp is a defensible substitute.
+func parseLegacyTimestamp(s string) time.Time {
+	if s == "" {
+		return time.Now()
+	}
+	// Try formats in rough order of likelihood for a panel that has been
+	// running across multiple Go versions and driver configs.
+	formats := []string{
+		time.RFC3339Nano,
+		time.RFC3339,
+		"2006-01-02T15:04:05.999999999Z",
+		"2006-01-02 15:04:05.999999999",
+		"2006-01-02 15:04:05",
+		"2006-01-02T15:04:05",
+	}
+	for _, layout := range formats {
+		if t, err := time.Parse(layout, s); err == nil {
+			return t
+		}
+	}
+	return time.Now()
 }
