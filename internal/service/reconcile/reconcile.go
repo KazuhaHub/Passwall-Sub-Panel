@@ -20,6 +20,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/crypto"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/log"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/paneltz"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/safego"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/xrayspec"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/group"
@@ -323,6 +324,7 @@ func prefetchInbounds(ctx context.Context, pool ports.XUIPool,
 	for pid := range panels {
 		wg.Add(1)
 		go func(p int64) {
+			defer safego.Recover("reconcile.prefetchInbounds")
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()

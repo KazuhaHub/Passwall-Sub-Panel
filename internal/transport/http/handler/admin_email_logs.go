@@ -50,7 +50,7 @@ func (h *AdminEmailLogHandler) List(c *gin.Context) {
 	}
 	items, total, err := h.repo.ListSent(c.Request.Context(), filter)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"items": items, "total": total})
@@ -58,7 +58,7 @@ func (h *AdminEmailLogHandler) List(c *gin.Context) {
 
 func (h *AdminEmailLogHandler) Clear(c *gin.Context) {
 	if err := h.repo.ClearSent(c.Request.Context()); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 	c.Status(http.StatusNoContent)
@@ -67,7 +67,7 @@ func (h *AdminEmailLogHandler) Clear(c *gin.Context) {
 func (h *AdminEmailLogHandler) Purge(c *gin.Context) {
 	s, err := h.settings.Load(c.Request.Context(), ports.UISettings{})
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 	if s.MailSentRetentionDays <= 0 {
@@ -77,7 +77,7 @@ func (h *AdminEmailLogHandler) Purge(c *gin.Context) {
 	cutoff := time.Now().AddDate(0, 0, -s.MailSentRetentionDays)
 	deleted, err := h.repo.DeleteSentBefore(c.Request.Context(), cutoff)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"deleted": deleted})

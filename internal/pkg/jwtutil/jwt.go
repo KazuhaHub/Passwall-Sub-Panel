@@ -17,6 +17,13 @@ type Claims struct {
 	UserID int64       `json:"uid"`
 	UPN    string      `json:"upn"`
 	Role   domain.Role `json:"r"`
+	// TokenVersion mirrors User.TokenVersion at issue time. Auth
+	// middleware compares this against the live row and 401s on
+	// mismatch, so admin disable / role demote / password change
+	// revoke every JWT signed before the bump. Omitted from JSON when
+	// zero so legacy tokens (issued before this field existed) still
+	// pass the default user.TokenVersion == 0 check after upgrade.
+	TokenVersion int `json:"tv,omitempty"`
 	jwt.RegisteredClaims
 }
 
@@ -101,23 +108,24 @@ func (i *Issuer) AccessTTL() time.Duration  { return i.params().AccessTTL }
 func (i *Issuer) RefreshTTL() time.Duration { return i.params().RefreshTTL }
 
 // IssueAccess signs and returns an access token.
-func (i *Issuer) IssueAccess(uid int64, upn string, role domain.Role) (string, error) {
+func (i *Issuer) IssueAccess(uid int64, upn string, role domain.Role, tokenVersion int) (string, error) {
 	p := i.params()
-	return i.issue(uid, upn, role, SubjectAccess, p.AccessTTL, p.Issuer)
+	return i.issue(uid, upn, role, tokenVersion, SubjectAccess, p.AccessTTL, p.Issuer)
 }
 
 // IssueRefresh signs and returns a refresh token.
-func (i *Issuer) IssueRefresh(uid int64, upn string, role domain.Role) (string, error) {
+func (i *Issuer) IssueRefresh(uid int64, upn string, role domain.Role, tokenVersion int) (string, error) {
 	p := i.params()
-	return i.issue(uid, upn, role, SubjectRefresh, p.RefreshTTL, p.Issuer)
+	return i.issue(uid, upn, role, tokenVersion, SubjectRefresh, p.RefreshTTL, p.Issuer)
 }
 
-func (i *Issuer) issue(uid int64, upn string, role domain.Role, sub string, ttl time.Duration, iss string) (string, error) {
+func (i *Issuer) issue(uid int64, upn string, role domain.Role, tokenVersion int, sub string, ttl time.Duration, iss string) (string, error) {
 	now := time.Now()
 	claims := Claims{
-		UserID: uid,
-		UPN:    upn,
-		Role:   role,
+		UserID:       uid,
+		UPN:          upn,
+		Role:         role,
+		TokenVersion: tokenVersion,
 		RegisteredClaims: jwt.RegisteredClaims{
 			Issuer:    iss,
 			Subject:   sub,

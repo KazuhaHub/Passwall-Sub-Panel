@@ -63,10 +63,11 @@ type AdminUserHandler struct {
 	user     *user.Service
 	settings ports.SettingsRepo
 	mailer   *mailer.Service
+	async    AsyncDispatcher
 }
 
-func NewAdminUserHandler(userSvc *user.Service, settings ports.SettingsRepo, mailerSvc *mailer.Service) *AdminUserHandler {
-	return &AdminUserHandler{user: userSvc, settings: settings, mailer: mailerSvc}
+func NewAdminUserHandler(userSvc *user.Service, settings ports.SettingsRepo, mailerSvc *mailer.Service, async AsyncDispatcher) *AdminUserHandler {
+	return &AdminUserHandler{user: userSvc, settings: settings, mailer: mailerSvc, async: async}
 }
 
 // ---- DTOs ----
@@ -145,7 +146,7 @@ func (h *AdminUserHandler) List(c *gin.Context) {
 	}
 	items, total, err := h.user.List(c.Request.Context(), filter)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 	out := make([]userDTO, len(items))
@@ -167,7 +168,7 @@ func (h *AdminUserHandler) Get(c *gin.Context) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Not found"})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, h.toDTO(c.Request, u))
@@ -200,7 +201,7 @@ func (h *AdminUserHandler) Create(c *gin.Context) {
 		case errors.Is(err, domain.ErrNotFound):
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		default:
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			respondError(c, err)
 		}
 		return
 	}
@@ -228,7 +229,7 @@ func (h *AdminUserHandler) Delete(c *gin.Context) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Not found"})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 	if h.user.HasPendingSync(c.Request.Context(), id) {
@@ -252,7 +253,7 @@ func (h *AdminUserHandler) ResetCredentials(c *gin.Context) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Not found"})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 	if h.user.HasPendingSync(c.Request.Context(), id) {
@@ -294,7 +295,7 @@ func (h *AdminUserHandler) ResetPassword(c *gin.Context) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"password": pwd})
@@ -322,7 +323,7 @@ func (h *AdminUserHandler) UnlinkSSO(c *gin.Context) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 	c.Status(http.StatusNoContent)
@@ -342,7 +343,7 @@ func (h *AdminUserHandler) ResetEmergencyUsage(c *gin.Context) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Not found"})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 	c.Status(http.StatusNoContent)
@@ -374,36 +375,37 @@ func (h *AdminUserHandler) SetEnabled(c *gin.Context) {
 		detail = req.Reason
 	}
 	if err := h.user.SetEnabledAndSync(c.Request.Context(), id, req.Enabled, reason, detail); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 
-	// Send notification email (async).
-	if h.mailer != nil {
-		// Use background context since request context will be cancelled after response.
-		go func(userID int64, enabled bool, reasonText, detailText string) {
-			ctx := context.Background()
+	// Send notification email (async). Dispatched through the panel-wide
+	// AsyncDispatcher so the post-response goroutine is recover-shielded
+	// and gets drained by App.Shutdown instead of running on an orphan
+	// context.Background().
+	if h.mailer != nil && h.async != nil {
+		userID := id
+		enabled := req.Enabled
+		reasonText := detail
+		if reasonText == "" {
+			if enabled {
+				reasonText = "管理员手动恢复"
+			} else {
+				reasonText = "管理员手动停用"
+			}
+		}
+		detailText := detail
+		h.async.Go("admin-user.toggle-email", func(ctx context.Context) {
 			if !enabled {
 				if err := h.mailer.SendAccountDisabledToUser(ctx, userID, reasonText, detailText); err != nil {
 					log.Warn("failed to send disable notification", "user_id", userID, "err", err)
 				}
-			} else {
-				if err := h.mailer.SendAccountEnabledToUser(ctx, userID, reasonText, detailText); err != nil {
-					log.Warn("failed to send enable notification", "user_id", userID, "err", err)
-				}
+				return
 			}
-		}(id, req.Enabled, func() string {
-			if !req.Enabled {
-				if detail != "" {
-					return detail
-				}
-				return "管理员手动停用"
+			if err := h.mailer.SendAccountEnabledToUser(ctx, userID, reasonText, detailText); err != nil {
+				log.Warn("failed to send enable notification", "user_id", userID, "err", err)
 			}
-			if detail != "" {
-				return detail
-			}
-			return "管理员手动恢复"
-		}(), detail)
+		})
 	}
 
 	if h.user.HasPendingSync(c.Request.Context(), id) {
@@ -424,7 +426,7 @@ func (h *AdminUserHandler) GetRules(c *gin.Context) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Not found"})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"personal_rules": u.PersonalRules})
@@ -451,7 +453,7 @@ func (h *AdminUserHandler) PutRules(c *gin.Context) {
 		case errors.Is(err, domain.ErrValidation):
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		default:
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			respondError(c, err)
 		}
 		return
 	}
@@ -520,13 +522,13 @@ func (h *AdminUserHandler) Update(c *gin.Context) {
 		case errors.Is(err, domain.ErrValidation):
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		default:
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			respondError(c, err)
 		}
 		return
 	}
 	u, err := h.user.Get(c.Request.Context(), id)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 	if h.user.HasPendingSync(c.Request.Context(), id) {

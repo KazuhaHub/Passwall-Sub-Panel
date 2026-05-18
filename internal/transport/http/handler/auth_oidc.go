@@ -26,10 +26,11 @@ type AuthOIDCHandler struct {
 }
 
 const (
-	cookieOIDCState = "psp_oidc_state"
-	cookieOIDCNonce = "psp_oidc_nonce"
-	cookieOIDCRet   = "psp_oidc_return"
-	oidcCookieTTL   = 300 // seconds
+	cookieOIDCState    = "psp_oidc_state"
+	cookieOIDCNonce    = "psp_oidc_nonce"
+	cookieOIDCRet      = "psp_oidc_return"
+	cookieOIDCVerifier = "psp_oidc_pkce"
+	oidcCookieTTL      = 300 // seconds
 )
 
 func NewAuthOIDCHandler(oidcSvc *auth.OIDCService, authSvc *auth.Service, userSvc *user.Service) *AuthOIDCHandler {
@@ -43,17 +44,25 @@ func (h *AuthOIDCHandler) Login(c *gin.Context) {
 	}
 	state, err := auth.RandomState()
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 	nonce, err := auth.RandomState()
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
-	url, err := h.oidc.AuthCodeURL(state, nonce)
+	// PKCE verifier — RFC 7636 S256 path. Defence-in-depth on top of
+	// state+nonce against an attacker who can read the redirect-URI's
+	// `code` parameter but not our HttpOnly cookie.
+	verifier, err := auth.RandomState()
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, err)
+		return
+	}
+	url, err := h.oidc.AuthCodeURL(state, nonce, verifier)
+	if err != nil {
+		respondError(c, err)
 		return
 	}
 	returnTo := sanitizeReturnTo(c.Query("return_to"), "/user/me")
@@ -66,6 +75,7 @@ func (h *AuthOIDCHandler) Login(c *gin.Context) {
 	c.SetSameSite(http.SameSiteLaxMode)
 	c.SetCookie(cookieOIDCState, state, oidcCookieTTL, "/", "", secure, true)
 	c.SetCookie(cookieOIDCNonce, nonce, oidcCookieTTL, "/", "", secure, true)
+	c.SetCookie(cookieOIDCVerifier, verifier, oidcCookieTTL, "/", "", secure, true)
 	c.SetCookie(cookieOIDCRet, returnTo, oidcCookieTTL, "/", "", secure, true)
 	c.Redirect(http.StatusFound, url)
 }
@@ -99,8 +109,10 @@ func (h *AuthOIDCHandler) Callback(c *gin.Context) {
 	secure := isHTTPS(c)
 	c.SetCookie(cookieOIDCState, "", -1, "/", "", secure, true)
 	c.SetCookie(cookieOIDCNonce, "", -1, "/", "", secure, true)
+	pkceVerifier, _ := c.Cookie(cookieOIDCVerifier)
+	c.SetCookie(cookieOIDCVerifier, "", -1, "/", "", secure, true)
 
-	assertion, err := h.oidc.Exchange(c.Request.Context(), code, nonce)
+	assertion, err := h.oidc.Exchange(c.Request.Context(), code, nonce, pkceVerifier)
 	if err != nil {
 		c.Redirect(http.StatusFound, "/sso-error?error=auth_failed&description="+url.QueryEscape(err.Error()))
 		return
@@ -159,7 +171,7 @@ func (h *AuthOIDCHandler) Callback(c *gin.Context) {
 	}
 	access, refresh, err := h.auth.IssueTokens(u)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 

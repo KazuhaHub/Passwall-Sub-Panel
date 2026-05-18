@@ -44,7 +44,7 @@ func (h *AdminSubLogHandler) List(c *gin.Context) {
 	}
 	items, total, err := h.repo.List(c.Request.Context(), filter)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"items": items, "total": total})
@@ -52,7 +52,7 @@ func (h *AdminSubLogHandler) List(c *gin.Context) {
 
 func (h *AdminSubLogHandler) Clear(c *gin.Context) {
 	if err := h.repo.Clear(c.Request.Context()); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 	c.Status(http.StatusNoContent)
@@ -61,7 +61,7 @@ func (h *AdminSubLogHandler) Clear(c *gin.Context) {
 func (h *AdminSubLogHandler) Purge(c *gin.Context) {
 	s, err := h.settings.Load(c.Request.Context(), ports.UISettings{})
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 	if s.SubLogRetentionDays <= 0 {
@@ -71,7 +71,7 @@ func (h *AdminSubLogHandler) Purge(c *gin.Context) {
 	cutoff := time.Now().AddDate(0, 0, -s.SubLogRetentionDays)
 	deleted, err := h.repo.DeleteBefore(c.Request.Context(), cutoff)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"deleted": deleted})

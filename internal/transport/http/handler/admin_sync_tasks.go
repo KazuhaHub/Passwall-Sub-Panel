@@ -38,7 +38,7 @@ func (h *AdminSyncTasksHandler) List(c *gin.Context) {
 		Type:       typ,
 	})
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"items": items, "total": total})
@@ -55,11 +55,11 @@ func (h *AdminSyncTasksHandler) Retry(c *gin.Context) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Not found"})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 	if err := h.repo.RetryNow(c.Request.Context(), id); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 	c.Status(http.StatusNoContent)
@@ -70,7 +70,7 @@ func (h *AdminSyncTasksHandler) Retry(c *gin.Context) {
 func (h *AdminSyncTasksHandler) PurgeFinished(c *gin.Context) {
 	n, err := h.repo.DeleteFinished(c.Request.Context())
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"deleted": n})
@@ -87,11 +87,11 @@ func (h *AdminSyncTasksHandler) Cancel(c *gin.Context) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Not found"})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 	if err := h.repo.Cancel(c.Request.Context(), id); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 	c.Status(http.StatusNoContent)

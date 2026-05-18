@@ -142,7 +142,7 @@ type claimRequest struct {
 func (h *AdminNodeHandler) List(c *gin.Context) {
 	nodes, err := h.node.List(c.Request.Context())
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 	// Batch load panel names to avoid N+1 queries.
@@ -166,7 +166,7 @@ func (h *AdminNodeHandler) Get(c *gin.Context) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Not found"})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 
@@ -532,7 +532,7 @@ func (h *AdminNodeHandler) Detach(c *gin.Context) {
 func (h *AdminNodeHandler) ListUnmanaged(c *gin.Context) {
 	items, err := h.node.ListUnmanagedInbounds(c.Request.Context())
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"items": items})
@@ -544,12 +544,12 @@ func (h *AdminNodeHandler) ListUnmanaged(c *gin.Context) {
 func (h *AdminNodeHandler) GenerateRealityKeypair(c *gin.Context) {
 	priv, pub, err := realitykey.GenerateKeypair()
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 	shortID, err := realitykey.GenerateShortID()
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{
@@ -570,7 +570,7 @@ func (h *AdminNodeHandler) ClaimClient(c *gin.Context) {
 	}
 	preExisting, err := h.ownership.ListByUser(c.Request.Context(), req.UserID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 	claimedUUID, err := h.sync.ClaimClient(c.Request.Context(), req.UserID, req.PanelID, req.InboundID, req.ClientEmail, req.ClientUUID)
@@ -579,7 +579,7 @@ func (h *AdminNodeHandler) ClaimClient(c *gin.Context) {
 			c.JSON(http.StatusConflict, gin.H{"error": "Client already managed"})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 	if claimedUUID != "" {
@@ -588,7 +588,7 @@ func (h *AdminNodeHandler) ClaimClient(c *gin.Context) {
 				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 				return
 			}
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			respondError(c, err)
 			return
 		}
 	}
@@ -689,6 +689,6 @@ func mapNodeServiceError(c *gin.Context, err error) {
 	case errors.Is(err, domain.ErrInboundHasUnmanagedClients):
 		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
 	default:
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, err)
 	}
 }

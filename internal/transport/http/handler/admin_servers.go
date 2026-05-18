@@ -66,7 +66,7 @@ type serverUpdateRequest struct {
 func (h *AdminServersHandler) List(c *gin.Context) {
 	panels, err := h.repo.List(c.Request.Context())
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 	out := make([]serverDTO, len(panels))
@@ -86,7 +86,7 @@ func (h *AdminServersHandler) Create(c *gin.Context) {
 		c.JSON(http.StatusConflict, gin.H{"error": "Server name already exists"})
 		return
 	} else if !errors.Is(err, domain.ErrNotFound) {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 	p := &domain.XUIPanel{
@@ -203,7 +203,7 @@ func (h *AdminServersHandler) Delete(c *gin.Context) {
 	// Refuse if any node still references this server.
 	all, err := h.nodes.List(c.Request.Context())
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 	for _, n := range all {
@@ -243,6 +243,6 @@ func mapServerError(c *gin.Context, err error) {
 	case errors.Is(err, domain.ErrValidation):
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 	default:
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, err)
 	}
 }

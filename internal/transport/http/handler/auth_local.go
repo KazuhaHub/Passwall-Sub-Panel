@@ -130,6 +130,61 @@ type userBrief struct {
 	Role        domain.Role `json:"role"`
 }
 
+// Refresh issues a new (access, refresh) pair from a still-valid
+// refresh JWT. Used by the SPA's 401 interceptor so a user who left a
+// tab open past the access TTL doesn't lose their session — and any
+// half-typed form — to a hard bounce back to /login.
+//
+// Reads the live user row again so a role change / disable that
+// happened during the access-token lifetime takes effect immediately
+// on the next refresh (a 7-day refresh window otherwise outruns admin
+// actions). Disabled accounts get a 401 — same shape as Login() so
+// the interceptor can fall through to the logout path.
+type refreshRequest struct {
+	RefreshToken string `json:"refresh_token" binding:"required"`
+}
+
+func (h *AuthLocalHandler) Refresh(c *gin.Context) {
+	var req refreshRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "missing refresh token"})
+		return
+	}
+	claims, err := h.auth.VerifyRefresh(req.RefreshToken)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid or expired refresh token"})
+		return
+	}
+	u, err := h.user.Get(c.Request.Context(), claims.UserID)
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Account no longer exists"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "auth lookup failed"})
+		return
+	}
+	if !u.Enabled {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"error":  disabledReasonMessage(u.AutoDisabledReason),
+			"reason": string(u.AutoDisabledReason),
+		})
+		return
+	}
+	access, refresh, err := h.auth.IssueTokens(u)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "token reissue failed"})
+		return
+	}
+	c.JSON(http.StatusOK, loginResponse{
+		AccessToken:  access,
+		RefreshToken: refresh,
+		User: userBrief{
+			ID: u.ID, UPN: u.UPN, DisplayName: u.DisplayName, Role: u.Role,
+		},
+	})
+}
+
 func (h *AuthLocalHandler) Login(c *gin.Context) {
 	var req loginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -154,7 +209,7 @@ func (h *AuthLocalHandler) Login(c *gin.Context) {
 				"reason": string(reason),
 			})
 		default:
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			respondError(c, err)
 		}
 		return
 	}
@@ -166,7 +221,7 @@ func (h *AuthLocalHandler) Login(c *gin.Context) {
 	}
 	access, refresh, err := h.auth.IssueTokens(u)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, loginResponse{

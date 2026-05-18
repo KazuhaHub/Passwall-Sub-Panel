@@ -27,10 +27,11 @@ type SubHandler struct {
 	settings ports.SettingsRepo
 	users    ports.UserRepo
 	mailer   *mailer.Service
+	async    AsyncDispatcher
 }
 
-func NewSubHandler(userSvc *user.Service, renderSvc *render.Service, subLogs ports.SubLogRepo, settings ports.SettingsRepo, users ports.UserRepo, mailerSvc *mailer.Service) *SubHandler {
-	return &SubHandler{user: userSvc, render: renderSvc, subLogs: subLogs, settings: settings, users: users, mailer: mailerSvc}
+func NewSubHandler(userSvc *user.Service, renderSvc *render.Service, subLogs ports.SubLogRepo, settings ports.SettingsRepo, users ports.UserRepo, mailerSvc *mailer.Service, async AsyncDispatcher) *SubHandler {
+	return &SubHandler{user: userSvc, render: renderSvc, subLogs: subLogs, settings: settings, users: users, mailer: mailerSvc, async: async}
 }
 
 func (h *SubHandler) Get(c *gin.Context) {
@@ -46,7 +47,7 @@ func (h *SubHandler) Get(c *gin.Context) {
 	// Load settings to get client rules.
 	settings, err := h.settings.Load(c.Request.Context(), ports.UISettings{})
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 
@@ -78,7 +79,7 @@ clientCheckDone:
 			c.String(http.StatusNotFound, "")
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 	now := time.Now()
@@ -127,13 +128,13 @@ clientCheckDone:
 			u.AutoDisabledReason = domain.DisabledBlockedClient
 
 			// Send account disabled notification email (async).
-			if h.mailer != nil {
-				go func(userCopy *domain.User) {
-					ctx := context.Background()
+			if h.mailer != nil && h.async != nil {
+				userCopy := u
+				h.async.Go("sub.disabled-email", func(ctx context.Context) {
 					if err := h.mailer.SendAccountDisabledNotification(ctx, userCopy, "使用被禁止的客户端", userCopy.DisableDetail); err != nil {
 						log.Warn("failed to send disable notification", "user_id", userCopy.ID, "err", err)
 					}
-				}(u)
+				})
 			}
 
 			c.String(http.StatusForbidden, "account disabled due to repeated use of blocked client")
@@ -159,7 +160,7 @@ clientCheckDone:
 	// Render subscription.
 	out, err := h.render.RenderForUser(c.Request.Context(), u, ct)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 

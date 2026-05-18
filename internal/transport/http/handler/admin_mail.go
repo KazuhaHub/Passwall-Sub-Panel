@@ -44,12 +44,12 @@ type mailTemplateDTO struct {
 func (h *AdminMailHandler) Get(c *gin.Context) {
 	settings, err := h.mail.LoadSettings(c.Request.Context())
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 	templates, err := h.mail.ListTemplates(c.Request.Context())
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 	outTemplates := make([]mailTemplateDTO, len(templates))
@@ -70,7 +70,7 @@ func (h *AdminMailHandler) Get(c *gin.Context) {
 func (h *AdminMailHandler) PutSettings(c *gin.Context) {
 	current, err := h.mail.LoadSettings(c.Request.Context())
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 	var req mailSettingsDTO
@@ -97,7 +97,7 @@ func (h *AdminMailHandler) PutSettings(c *gin.Context) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 	saved, _ := h.mail.LoadSettings(c.Request.Context())
@@ -122,7 +122,7 @@ func (h *AdminMailHandler) PutTemplate(c *gin.Context) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, mailTemplateDTO{
@@ -151,7 +151,7 @@ func (h *AdminMailHandler) PreviewTemplate(c *gin.Context) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, preview)
@@ -172,7 +172,7 @@ func (h *AdminMailHandler) ResetTemplate(c *gin.Context) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, mailTemplateDTO{
@@ -198,7 +198,7 @@ func (h *AdminMailHandler) Test(c *gin.Context) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"sent": true})
@@ -226,7 +226,7 @@ func (h *AdminMailHandler) Announcement(c *gin.Context) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, result)

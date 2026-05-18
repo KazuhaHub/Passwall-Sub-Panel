@@ -106,6 +106,12 @@ type User struct {
 	// zero implicitly when EmergencyUntil is cleared (rollover, admin reset,
 	// natural expiry).
 	EmergencyBaselineBytes int64
+	// TokenVersion is a monotonic counter the JWT issuer embeds in every
+	// access/refresh token. Increment it to revoke every JWT issued
+	// before "now" — used when admin disables the account, demotes the
+	// role, or the user changes password. Middleware.RequireAuth compares
+	// the claim against the live row and 401s on mismatch.
+	TokenVersion int
 	CreatedAt           time.Time
 	UpdatedAt           time.Time
 }

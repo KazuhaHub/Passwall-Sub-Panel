@@ -44,7 +44,7 @@ func (h *AuthSAMLHandler) Login(c *gin.Context) {
 	returnTo := sanitizeReturnTo(c.Query("return_to"), "/user/me")
 	redirectURL, err := h.saml.BuildAuthnURL(returnTo)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 	c.Redirect(http.StatusFound, redirectURL)
@@ -131,7 +131,7 @@ func (h *AuthSAMLHandler) ACS(c *gin.Context) {
 	}
 	access, refresh, err := h.auth.IssueTokens(u)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 
@@ -158,7 +158,7 @@ func (h *AuthSAMLHandler) Metadata(c *gin.Context) {
 	}
 	xml, err := h.saml.SPMetadataXML()
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 	c.Data(http.StatusOK, "application/samlmetadata+xml", xml)

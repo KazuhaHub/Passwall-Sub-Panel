@@ -77,6 +77,15 @@ func RequireAuth(svc *auth.Service, users UserLookup) gin.HandlerFunc {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Account disabled"})
 			return
 		}
+		// TokenVersion gate: a JWT whose tv claim is older than the live
+		// row's value has been revoked (admin disable / role demote /
+		// password change all bump the version). The cache TTL caps how
+		// long a stale token can survive past the bump — same 5 s window
+		// as the role-demote story above.
+		if u.TokenVersion != claims.TokenVersion {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Session revoked, please sign in again"})
+			return
+		}
 		// Re-bind claims to the live DB role so demotions take effect for
 		// RequireRole checks downstream.
 		claims.Role = u.Role
@@ -93,6 +102,7 @@ type authUserSnapshot struct {
 	Role               domain.Role
 	Enabled            bool
 	AutoDisabledReason domain.AutoDisabledReason
+	TokenVersion       int
 }
 
 type authUserEntry struct {
@@ -125,6 +135,7 @@ func authUserFromDomain(u *domain.User) authUserSnapshot {
 		Role:               u.Role,
 		Enabled:            u.Enabled,
 		AutoDisabledReason: u.AutoDisabledReason,
+		TokenVersion:       u.TokenVersion,
 	}
 }
 

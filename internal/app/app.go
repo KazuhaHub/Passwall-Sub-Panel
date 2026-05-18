@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/adapters/mysql"
@@ -18,6 +19,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/idgen"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/jwtutil"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/log"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/safego"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/audit"
@@ -35,6 +37,27 @@ import (
 	httptransport "github.com/KazuhaHub/passwall-sub-panel/internal/transport/http"
 	"golang.org/x/crypto/bcrypt"
 )
+
+// asyncDispatcher implements httptransport.AsyncDispatcher in terms of
+// App's background context + WaitGroup. Constructed during Build so
+// handlers receive the live channels at wiring time.
+type asyncDispatcher struct {
+	ctx context.Context
+	wg  *sync.WaitGroup
+}
+
+func (a *asyncDispatcher) Context() context.Context { return a.ctx }
+
+func (a *asyncDispatcher) Go(name string, fn func(ctx context.Context)) {
+	if a == nil || fn == nil {
+		return
+	}
+	ctx := a.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	safego.GoTracked(a.wg, name, func() { fn(ctx) })
+}
 
 // App holds everything assembled for serving. Run() blocks on
 // ListenAndServe and runs the background workers in goroutines; Shutdown
@@ -70,7 +93,9 @@ type App struct {
 	reconcileInterval time.Duration
 	healthInterval    time.Duration
 
-	bgCancel context.CancelFunc
+	bgCancel  context.CancelFunc
+	bgRootCtx context.Context
+	bgWG      sync.WaitGroup
 }
 
 // Build assembles the App from the loaded Config. It does NOT start any
@@ -85,6 +110,10 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 		return nil, fmt.Errorf("db schema: %w", err)
 	}
 	mysql.ConfigureSecretKey(cfg.SecretKeyMaterial())
+	// Boot-time secrets audit: walk the rows that hold encrypted creds
+	// and WARN if any are still plaintext. Catches the silent-downgrade
+	// case where ConfigureSecretKey("") makes encryptSecret a no-op.
+	mysql.AuditSecretsAtRest(db)
 	mysqlRepos := mysql.NewRepos(db)
 	if err := mysqlRepos.SyncTask.ResetRunning(ctx); err != nil {
 		return nil, fmt.Errorf("reset sync tasks: %w", err)
@@ -193,8 +222,27 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	healthSvc := health.New(repos.Node, pool)
 	renderSvc := render.New(repos, pool, groupSvc)
 
+	// --- async dispatcher for handler-spawned background work ---
+	//
+	// Built BEFORE the HTTP layer so handlers can capture the panel-wide
+	// background context and WaitGroup at construction time. Cancel-side
+	// is owned by Shutdown; the dispatcher only exposes the read-only
+	// context plus a recover-safe Go() helper. The fields point into the
+	// final *App allocated below — pre-allocating the context + WaitGroup
+	// here keeps the dispatcher closure live the moment a handler is hit
+	// (e.g. an admin POST after Build but before Run), and Shutdown will
+	// fire bgCancel even if Run never started.
+	bgCtx, cancel := context.WithCancel(context.Background())
+	a := &App{
+		cfg:       cfg,
+		bgCancel:  cancel,
+		bgRootCtx: bgCtx,
+	}
+	dispatcher := &asyncDispatcher{ctx: bgCtx, wg: &a.bgWG}
+
 	// --- transport layer ---
 	httpHandler := httptransport.NewRouter(httptransport.Deps{
+		Async:            dispatcher,
 		Cfg:              cfg,
 		Repos:            repos,
 		Pool:             pool,
@@ -224,31 +272,43 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 		healthInterval = 5 * time.Minute
 	}
 
-	return &App{
-		cfg:               cfg,
-		traffic:           trafficSvc,
-		reconcile:         reconcileSvc,
-		user:              userSvc,
-		node:              nodeSvc,
-		audit:             auditSvc,
-		mail:              mailSvc,
-		health:            healthSvc,
-		settings:          repos.Settings,
-		syncTasks:         repos.SyncTask,
-		trafficRepo:       repos.Traffic,
-		nodeTraffic:       repos.NodeTraffic,
-		rollup:            rollup.New(db),
-		repos:             repos,
-		saml:              samlSvc,
-		trafficInterval:   time.Duration(sysSettings.CronTrafficPullMinutes) * time.Minute,
-		reconcileInterval: time.Duration(sysSettings.CronReconcileMinutes) * time.Minute,
-		healthInterval:    healthInterval,
-		server: &http.Server{
-			Addr:              cfg.Listen,
-			Handler:           httpHandler,
-			ReadHeaderTimeout: 10 * time.Second,
-		},
-	}, nil
+	a.traffic = trafficSvc
+	a.reconcile = reconcileSvc
+	a.user = userSvc
+	a.node = nodeSvc
+	a.audit = auditSvc
+	a.mail = mailSvc
+	a.health = healthSvc
+	a.settings = repos.Settings
+	a.syncTasks = repos.SyncTask
+	a.trafficRepo = repos.Traffic
+	a.nodeTraffic = repos.NodeTraffic
+	a.rollup = rollup.New(db)
+	a.repos = repos
+	a.saml = samlSvc
+	a.trafficInterval = time.Duration(sysSettings.CronTrafficPullMinutes) * time.Minute
+	a.reconcileInterval = time.Duration(sysSettings.CronReconcileMinutes) * time.Minute
+	a.healthInterval = healthInterval
+	a.server = &http.Server{
+		Addr:    cfg.Listen,
+		Handler: httpHandler,
+		// ReadHeaderTimeout caps slow-header attacks (Slowloris on the
+		// header phase); ReadTimeout caps slow-body attacks; WriteTimeout
+		// caps slow-consumer attacks on the response side. IdleTimeout
+		// closes leaked keep-alive sockets.
+		//
+		// WriteTimeout is intentionally generous (5 min) because rendered
+		// subscriptions for users with many nodes + a regenerated rule_set
+		// can serialise into a 500 KB+ YAML/Clash blob on a slow uplink.
+		// Sub render itself is bounded by 3X-UI HTTP timeouts + the
+		// render pipeline; 5 min is a safety net, not a steady-state.
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      5 * time.Minute,
+		IdleTimeout:       2 * time.Minute,
+		MaxHeaderBytes:    1 << 20, // 1 MiB
+	}
+	return a, nil
 }
 
 // Run binds the listen socket, then bootstraps the initial admin (if
@@ -272,16 +332,19 @@ func (a *App) Run() error {
 		return fmt.Errorf("init admin: %w", err)
 	}
 
-	bgCtx, cancel := context.WithCancel(context.Background())
-	a.bgCancel = cancel
+	bgCtx := a.bgRootCtx
 
-	a.saml.StartMetadataRefresh(bgCtx)
-	go a.runSyncTaskLoop(bgCtx)
-	go a.runAuditCleanupLoop(bgCtx)
-	go a.runTrafficLoop(bgCtx)
-	go a.runMailLoop(bgCtx)
-	go a.runReconcileLoop(bgCtx)
-	go a.runHealthLoop(bgCtx)
+	// Every background worker runs under safego.GoTracked: the *recover*
+	// shield keeps a single nil-deref / map race in a 3X-UI response from
+	// tearing the panel down, and the WaitGroup lets Shutdown drain them
+	// before the process exits.
+	a.saml.StartMetadataRefresh(bgCtx, &a.bgWG)
+	safego.GoTracked(&a.bgWG, "sync-task-loop", func() { a.runSyncTaskLoop(bgCtx) })
+	safego.GoTracked(&a.bgWG, "audit-cleanup-loop", func() { a.runAuditCleanupLoop(bgCtx) })
+	safego.GoTracked(&a.bgWG, "traffic-loop", func() { a.runTrafficLoop(bgCtx) })
+	safego.GoTracked(&a.bgWG, "mail-loop", func() { a.runMailLoop(bgCtx) })
+	safego.GoTracked(&a.bgWG, "reconcile-loop", func() { a.runReconcileLoop(bgCtx) })
+	safego.GoTracked(&a.bgWG, "health-loop", func() { a.runHealthLoop(bgCtx) })
 
 	return a.server.Serve(ln)
 }
@@ -333,6 +396,7 @@ func (a *App) runAuditCleanupLoop(ctx context.Context) {
 		a.pruneSyncTasks(ctx)
 		a.pruneTrafficSnapshots(ctx)
 		a.pruneMailSent(ctx)
+		a.pruneSubLogs(ctx)
 		select {
 		case <-ctx.Done():
 			return
@@ -461,6 +525,33 @@ func (a *App) pruneMailSent(ctx context.Context) {
 	}
 }
 
+// pruneSubLogs deletes sub_logs rows older than SubLogRetentionDays.
+// The admin UI has its own manual purge button, but a long-running
+// instance without periodic prune accumulates one row per subscription
+// fetch (every client refresh hits this) — unbounded growth otherwise.
+func (a *App) pruneSubLogs(ctx context.Context) {
+	if a.settings == nil || a.repos.SubLog == nil {
+		return
+	}
+	settings, err := a.settings.Load(ctx, ports.UISettings{})
+	if err != nil {
+		log.Warn("sub log cleanup load settings", "err", err)
+		return
+	}
+	if settings.SubLogRetentionDays <= 0 {
+		return
+	}
+	cutoff := time.Now().AddDate(0, 0, -settings.SubLogRetentionDays)
+	deleted, err := a.repos.SubLog.DeleteBefore(ctx, cutoff)
+	if err != nil {
+		log.Warn("sub log cleanup", "err", err)
+		return
+	}
+	if deleted > 0 {
+		log.Info("sub log cleanup", "deleted", deleted, "retention_days", settings.SubLogRetentionDays)
+	}
+}
+
 func (a *App) pruneAudit(ctx context.Context) {
 	if a.audit == nil || a.settings == nil {
 		return
@@ -504,12 +595,33 @@ func (a *App) runSyncTaskLoop(ctx context.Context) {
 	}
 }
 
-// Shutdown stops background workers and gracefully closes the HTTP server.
+// Shutdown stops background workers and gracefully closes the HTTP
+// server. Cancellation order:
+//  1. cancel bgRootCtx — every loop sees ctx.Done() and exits its select
+//  2. server.Shutdown(ctx) — stop accepting new requests, drain in-flight
+//  3. wait for bgWG up to the caller-supplied deadline — guarantees a
+//     stuck SMTP / 3X-UI HTTP call doesn't leave a half-committed
+//     transaction or leaked connection behind
+//
+// The caller controls the overall deadline through ctx; if the workers
+// don't return in time we log and continue rather than block forever.
 func (a *App) Shutdown(ctx context.Context) error {
 	if a.bgCancel != nil {
 		a.bgCancel()
 	}
-	return a.server.Shutdown(ctx)
+	httpErr := a.server.Shutdown(ctx)
+
+	done := make(chan struct{})
+	go func() {
+		a.bgWG.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-ctx.Done():
+		log.Warn("shutdown: background workers did not exit before deadline")
+	}
+	return httpErr
 }
 
 func (a *App) runTrafficLoop(ctx context.Context) {

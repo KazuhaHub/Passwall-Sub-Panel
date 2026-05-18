@@ -40,7 +40,7 @@ func (h *AdminAuditHandler) List(c *gin.Context) {
 	}
 	items, total, err := h.repo.List(c.Request.Context(), filter)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"items": items, "total": total})
@@ -48,7 +48,7 @@ func (h *AdminAuditHandler) List(c *gin.Context) {
 
 func (h *AdminAuditHandler) Clear(c *gin.Context) {
 	if err := h.repo.Clear(c.Request.Context()); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 	c.Status(http.StatusNoContent)

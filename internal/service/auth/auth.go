@@ -21,11 +21,11 @@ func New(issuer *jwtutil.Issuer) *Service {
 
 // IssueTokens returns a freshly signed (access, refresh) pair.
 func (s *Service) IssueTokens(u *domain.User) (access, refresh string, err error) {
-	access, err = s.issuer.IssueAccess(u.ID, u.UPN, u.Role)
+	access, err = s.issuer.IssueAccess(u.ID, u.UPN, u.Role, u.TokenVersion)
 	if err != nil {
 		return "", "", err
 	}
-	refresh, err = s.issuer.IssueRefresh(u.ID, u.UPN, u.Role)
+	refresh, err = s.issuer.IssueRefresh(u.ID, u.UPN, u.Role, u.TokenVersion)
 	if err != nil {
 		return "", "", err
 	}
@@ -35,6 +35,13 @@ func (s *Service) IssueTokens(u *domain.User) (access, refresh string, err error
 // Verify parses and validates an access token.
 func (s *Service) Verify(tokenStr string) (*jwtutil.Claims, error) {
 	return s.issuer.ParseAccess(tokenStr)
+}
+
+// VerifyRefresh parses and validates a refresh token. The refresh
+// endpoint uses this to confirm the caller actually holds an unexpired
+// refresh JWT before minting a new access pair.
+func (s *Service) VerifyRefresh(tokenStr string) (*jwtutil.Claims, error) {
+	return s.issuer.ParseRefresh(tokenStr)
 }
 
 // AccessTTL / RefreshTTL expose the issuer's live TTL values for SSO

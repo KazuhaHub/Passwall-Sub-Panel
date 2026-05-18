@@ -13,6 +13,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/log"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/paneltz"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/safego"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 )
 
@@ -28,6 +29,12 @@ type UserDisabler interface {
 // 3X-UI on every cycle — the safety net for prolonged panel outages.
 type UserConfigPusher interface {
 	PushClientConfig(ctx context.Context, userID int64) error
+	// WithEmergencyLock runs fn while holding user.Service's
+	// per-process emergency-access mutex. Used here when the poll
+	// clears EmergencyUntil / EmergencyBaselineBytes on period
+	// rollover or quota exhaustion — otherwise a concurrent
+	// UseEmergencyAccess on the same user would race the write.
+	WithEmergencyLock(fn func())
 }
 
 type Service struct {
@@ -196,6 +203,7 @@ func (s *Service) PollOnce(ctx context.Context) error {
 	for panelID := range byPanel {
 		panelWG.Add(1)
 		go func(pid int64) {
+			defer safego.Recover("traffic.PollOnce.panelFetch")
 			defer panelWG.Done()
 			panelSem <- struct{}{}
 			defer func() { <-panelSem }()
@@ -645,8 +653,21 @@ func (s *Service) recordAndEnforceWith(ctx context.Context, u *domain.User, tota
 		// user from the DB, so anything we change in memory after Update() is
 		// lost. Without this, periodStart never actually moves and rollover
 		// fires on every poll forever.
-		if err := s.users.Update(ctx, u); err != nil {
-			log.Warn("traffic period start update", "user_id", u.ID, "err", err)
+		//
+		// Holding the emergency lock for the whole "load → mutate → write"
+		// here closes the race with UseEmergencyAccess: previously the user
+		// could request emergency access between us clearing the fields in
+		// memory and us writing the row, and the Update would clobber their
+		// grant.
+		updatePeriodStart := func() {
+			if err := s.users.Update(ctx, u); err != nil {
+				log.Warn("traffic period start update", "user_id", u.ID, "err", err)
+			}
+		}
+		if s.configPusher != nil {
+			s.configPusher.WithEmergencyLock(updatePeriodStart)
+		} else {
+			updatePeriodStart()
 		}
 		// If they were traffic-disabled (including an active emergency access
 		// window), the new period gives them quota back.
@@ -674,10 +695,20 @@ func (s *Service) recordAndEnforceWith(ctx context.Context, u *domain.User, tota
 		if used >= quotaBytes {
 			log.Info("emergency access quota exhausted",
 				"user_id", u.ID, "used_bytes", used, "quota_bytes", quotaBytes)
-			u.EmergencyUntil = nil
-			u.EmergencyBaselineBytes = 0
-			if err := s.users.Update(ctx, u); err != nil {
-				log.Warn("emergency quota clear update", "user_id", u.ID, "err", err)
+			// Same race story as the period-rollover path above — hold the
+			// emergency lock while we clear and write so a concurrent
+			// UseEmergencyAccess can't bring the window back to life.
+			clearEmergency := func() {
+				u.EmergencyUntil = nil
+				u.EmergencyBaselineBytes = 0
+				if err := s.users.Update(ctx, u); err != nil {
+					log.Warn("emergency quota clear update", "user_id", u.ID, "err", err)
+				}
+			}
+			if s.configPusher != nil {
+				s.configPusher.WithEmergencyLock(clearEmergency)
+			} else {
+				clearEmergency()
 			}
 			emergencyActive = false
 		}

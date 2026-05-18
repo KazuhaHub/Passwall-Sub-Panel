@@ -61,6 +61,27 @@ func (r *xuiPanelRepo) Save(ctx context.Context, p *domain.XUIPanel) error {
 	return nil
 }
 
+// Delete removes a panel row, but refuses the operation when any nodes
+// or owned client rows still point at it. AutoMigrate doesn't emit FK
+// constraints, so without this app-level guard a delete would leave
+// `nodes.panel_id` / `user_xui_clients.panel_id` pointing at a non-
+// existent row — every subsequent traffic poll / pool.Get on that
+// dangling reference panics on nil. Caller is expected to clean the
+// referencing rows (or reassign them) first.
 func (r *xuiPanelRepo) Delete(ctx context.Context, id int64) error {
+	var nodeRefs int64
+	if err := r.db.WithContext(ctx).Model(&nodeRow{}).Where("panel_id = ?", id).Count(&nodeRefs).Error; err != nil {
+		return err
+	}
+	if nodeRefs > 0 {
+		return fmt.Errorf("%w: panel still has %d node(s); remove or reassign them first", domain.ErrValidation, nodeRefs)
+	}
+	var clientRefs int64
+	if err := r.db.WithContext(ctx).Model(&ownershipRow{}).Where("panel_id = ?", id).Count(&clientRefs).Error; err != nil {
+		return err
+	}
+	if clientRefs > 0 {
+		return fmt.Errorf("%w: panel still owns %d user client row(s); detach them first", domain.ErrValidation, clientRefs)
+	}
 	return r.db.WithContext(ctx).Delete(&xuiPanelRow{}, id).Error
 }

@@ -22,6 +22,7 @@ import (
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/log"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/safego"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/web"
 )
@@ -1069,6 +1070,7 @@ func sendSMTP(ctx context.Context, settings domain.MailSettings, to, subject, bo
 	}
 	ch := make(chan dialResult, 1)
 	go func() {
+		defer safego.Recover("mailer.sendSMTP.dial")
 		if settings.Encryption == "tls" {
 			conn, err := tls.DialWithDialer(&dialer, "tcp", addr, &tls.Config{ServerName: settings.SMTPHost, MinVersion: tls.VersionTLS12})
 			ch <- dialResult{conn: conn, err: err}
@@ -1080,6 +1082,17 @@ func sendSMTP(ctx context.Context, settings domain.MailSettings, to, subject, bo
 	var result dialResult
 	select {
 	case <-ctx.Done():
+		// Reaper: the dial goroutine may still be in-flight. Receive its
+		// result in the background and close any successfully-opened conn
+		// so we don't leak an established TCP/TLS session on every
+		// timed-out send.
+		go func() {
+			defer safego.Recover("mailer.sendSMTP.dial.reap")
+			leaked := <-ch
+			if leaked.conn != nil {
+				_ = leaked.conn.Close()
+			}
+		}()
 		return ctx.Err()
 	case result = <-ch:
 	}

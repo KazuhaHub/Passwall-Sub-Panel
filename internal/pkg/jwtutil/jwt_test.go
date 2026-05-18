@@ -16,11 +16,11 @@ func TestTokenSubjectsAreEnforced(t *testing.T) {
 		}
 	})
 
-	access, err := issuer.IssueAccess(1, "alice", domain.RoleUser)
+	access, err := issuer.IssueAccess(1, "alice", domain.RoleUser, 0)
 	if err != nil {
 		t.Fatalf("IssueAccess: %v", err)
 	}
-	refresh, err := issuer.IssueRefresh(1, "alice", domain.RoleUser)
+	refresh, err := issuer.IssueRefresh(1, "alice", domain.RoleUser, 0)
 	if err != nil {
 		t.Fatalf("IssueRefresh: %v", err)
 	}

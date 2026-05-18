@@ -67,7 +67,7 @@ type oidcUpdateRequest struct {
 func (h *AdminOIDCHandler) Get(c *gin.Context) {
 	cfg, err := h.repo.Load(c.Request.Context())
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, toOIDCDTO(cfg))
@@ -81,7 +81,7 @@ func (h *AdminOIDCHandler) Put(c *gin.Context) {
 	}
 	existing, err := h.repo.Load(c.Request.Context())
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 	secret := req.ClientSecret
@@ -113,7 +113,7 @@ func (h *AdminOIDCHandler) Put(c *gin.Context) {
 	config.ApplyOIDCDefaults(cfg)
 
 	if err := h.repo.Save(c.Request.Context(), cfg); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 

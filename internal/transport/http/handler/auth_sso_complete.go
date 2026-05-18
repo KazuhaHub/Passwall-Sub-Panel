@@ -42,9 +42,18 @@ func (h *AuthSSOCompleteHandler) Complete(c *gin.Context) {
 		return
 	}
 
-	// Clear the HttpOnly cookies — ownership transfers to the SPA's sessionStorage.
-	c.SetCookie(CookieAccessToken, "", -1, "/", "", false, true)
-	c.SetCookie(CookieRefreshToken, "", -1, "/", "", false, true)
+	// Clear the HttpOnly cookies — ownership transfers to the SPA's
+	// sessionStorage.
+	//
+	// secure MUST match the value used when the cookie was set
+	// (auth_saml.ACS / auth_oidc.Callback use isHTTPS(c)). Cookies are
+	// keyed on (name, path, domain, secure); if secure flips between
+	// set and delete the browser keeps the old cookie alive until its
+	// natural TTL, so a logged-out user is still authenticated under
+	// the HttpOnly cookie path for the remaining 120 min access TTL.
+	secure := isHTTPS(c)
+	c.SetCookie(CookieAccessToken, "", -1, "/", "", secure, true)
+	c.SetCookie(CookieRefreshToken, "", -1, "/", "", secure, true)
 
 	// Fetch the live user so the SPA receives the freshest display name.
 	liveUser, err := h.user.Get(c.Request.Context(), claims.UserID)

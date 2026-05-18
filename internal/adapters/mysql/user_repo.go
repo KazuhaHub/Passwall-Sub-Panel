@@ -2,6 +2,7 @@ package mysql
 
 import (
 	"context"
+	"strings"
 
 	"gorm.io/gorm"
 
@@ -70,7 +71,12 @@ func (r *userRepo) GetBySubToken(ctx context.Context, token string) (*domain.Use
 func (r *userRepo) List(ctx context.Context, filter ports.UserFilter) ([]*domain.User, int64, error) {
 	q := r.db.WithContext(ctx).Model(&userRow{})
 	if filter.Search != "" {
-		like := "%" + filter.Search + "%"
+		// Escape LIKE wildcards before wrapping so a search string like
+		// "%" doesn't turn into a full-table scan, and "_" doesn't match
+		// every single-character UPN. Order matters: replace backslash
+		// first so the subsequent escapes don't double-up.
+		s := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(filter.Search)
+		like := "%" + s + "%"
 		// Search across the user-facing identifiers admins actually scan
 		// the table for: account name, friendly display, email. Remark is
 		// intentionally out — it's free-form admin notes; matching on it

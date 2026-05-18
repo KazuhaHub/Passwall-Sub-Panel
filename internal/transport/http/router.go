@@ -27,6 +27,21 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/transport/http/middleware"
 )
 
+// AsyncDispatcher launches handler-spawned background work under the
+// panel's lifecycle: ctx fires Done when the panel is shutting down so
+// post-response goroutines stop reaching for cancelled DB / SMTP / 3X-UI
+// calls, and the WaitGroup behind Go() lets App.Shutdown drain in-flight
+// work before the process exits. The implementation lives in
+// internal/app to avoid a dependency cycle.
+type AsyncDispatcher interface {
+	// Context returns the panel's background context. It is cancelled
+	// at the start of Shutdown.
+	Context() context.Context
+	// Go runs fn in a new goroutine tracked by the panel's WaitGroup
+	// and shielded by safego.Recover. name is used as the log label.
+	Go(name string, fn func(ctx context.Context))
+}
+
 // Deps bundles every dependency the HTTP layer needs. App-startup wiring
 // populates this and passes it to NewRouter.
 type Deps struct {
@@ -45,6 +60,7 @@ type Deps struct {
 	Traffic   *traffic.Service
 	Mail      *mailer.Service
 	Reconcile *reconcile.Service
+	Async     AsyncDispatcher
 
 	// Rate-limit caps resolved from the DB settings table at startup. The
 	// middleware uses fixed buckets so admin edits require a restart for
@@ -69,6 +85,14 @@ func NewRouter(d Deps) *gin.Engine {
 	// trustedProxies is wide-open (the zero-config default).
 	g.RemoteIPHeaders = []string{"CF-Connecting-IP", "X-Real-IP", "X-Forwarded-For"}
 	g.Use(gin.Logger(), gin.Recovery())
+	// Security headers (HSTS / X-Frame-Options / X-Content-Type-Options /
+	// Referrer-Policy / CSP). Mounted early so every later handler — SPA
+	// fallback, SAML metadata, sub render — picks them up by default.
+	g.Use(middleware.SecurityHeaders())
+	// 1 MiB body cap. Covers every admin write + the typical SAMLResponse
+	// (which is ~80 KiB). Audit middleware later does io.ReadAll(body) —
+	// without this cap that's a memory-exhaustion vector.
+	g.Use(middleware.BodyLimit(1 << 20))
 	// Audit middleware lives at the engine level so it covers admin
 	// endpoints AND the login attempt AND user self-service writes. The
 	// path/method filter inside the middleware short-circuits cheaply for
@@ -77,10 +101,11 @@ func NewRouter(d Deps) *gin.Engine {
 
 	// Public endpoints
 	g.GET("/health", handler.Health)
+	g.GET("/api/version", handler.Version)
 
 	// Subscription handler — uses dynamic path from settings.
 	// The actual route is registered via NoRoute handler for dynamic path support.
-	subHandler := handler.NewSubHandler(d.User, d.Render, d.Repos.SubLog, d.Repos.Settings, d.Repos.User, d.Mail)
+	subHandler := handler.NewSubHandler(d.User, d.Render, d.Repos.SubLog, d.Repos.Settings, d.Repos.User, d.Mail, d.Async)
 	subLimiter := middleware.NewPerIPLimiter(d.SubPerIPPerMin, time.Minute)
 	subPathCache := newSubPathCache(d.Repos.Settings)
 
@@ -91,6 +116,9 @@ func NewRouter(d Deps) *gin.Engine {
 	{
 		authGroup.GET("/methods", authLocal.Methods)
 		authGroup.POST("/local/login", loginLimiter.Handler(), authLocal.Login)
+		// Refresh shares the login limiter — refresh storms from a misbehaving
+		// client should be throttled just like brute-force login attempts.
+		authGroup.POST("/refresh", loginLimiter.Handler(), authLocal.Refresh)
 		// SAML endpoints stay registered even when SSO is currently
 		// disabled — the underlying service rejects calls until admin
 		// re-enables it. That way an admin who flips SSO on in the panel
@@ -147,7 +175,7 @@ func NewRouter(d Deps) *gin.Engine {
 		middleware.RequireRole(domain.RoleAdmin),
 	)
 	{
-		users := handler.NewAdminUserHandler(d.User, d.Repos.Settings, d.Mail)
+		users := handler.NewAdminUserHandler(d.User, d.Repos.Settings, d.Mail, d.Async)
 		// User CRUD is the operator's bread and butter. Handler-level guard
 		// in users.Update prevents operators from creating/promoting other
 		// admins or modifying an existing admin's role.

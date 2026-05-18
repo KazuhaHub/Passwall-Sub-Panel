@@ -21,6 +21,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/idgen"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/log"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/paneltz"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/safego"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/auth"
 )
@@ -679,11 +680,18 @@ func (s *Service) SetPassword(ctx context.Context, userID int64, newPassword str
 	if !u.HasLocalPassword() {
 		return fmt.Errorf("%w: account has no local password", domain.ErrValidation)
 	}
+	if !isMinimallyStrongPassword(newPassword) {
+		return fmt.Errorf("%w: password too weak (need ≥8 chars with at least one letter and one digit)", domain.ErrValidation)
+	}
 	hash, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
 	if err != nil {
 		return err
 	}
 	u.PasswordHash = string(hash)
+	// Bump TokenVersion to revoke any other live session for this user
+	// (e.g. a stolen browser cookie). The caller will receive a fresh
+	// JWT on their next 401 → refresh cycle.
+	u.TokenVersion++
 	return s.users.Update(ctx, u)
 }
 
@@ -719,6 +727,10 @@ func (s *Service) AdminResetPassword(ctx context.Context, userID int64, requeste
 		return "", err
 	}
 	u.PasswordHash = string(hash)
+	// Bump TokenVersion so every JWT issued before the password reset
+	// stops working immediately — otherwise a stolen access token
+	// outlives the password change for the remainder of the access TTL.
+	u.TokenVersion++
 	if err := s.users.Update(ctx, u); err != nil {
 		return "", err
 	}
@@ -970,6 +982,10 @@ func (s *Service) UpdateProfile(ctx context.Context, userID int64, in UpdateInpu
 		default:
 			return fmt.Errorf("%w: invalid role", domain.ErrValidation)
 		}
+		// Role change → bump TokenVersion so any previously-issued JWT
+		// with the old role can't keep accessing routes guarded by
+		// RequireRole on the new role boundary.
+		u.TokenVersion++
 	}
 	if in.ClearExpire && u.ExpireAt != nil {
 		u.ExpireAt = nil
@@ -1011,6 +1027,18 @@ func (s *Service) UpdateProfile(ctx context.Context, userID int64, in UpdateInpu
 		}
 	}
 	return nil
+}
+
+// WithEmergencyLock runs fn while holding the emergency-access mutex.
+// The traffic poll uses this when it clears EmergencyUntil /
+// EmergencyBaselineBytes (period rollover, quota exhaustion) so the
+// write doesn't race a concurrent UseEmergencyAccess on the same user.
+// Caller-supplied fn typically loads the user, mutates the emergency
+// fields, and calls users.Update — all under the lock.
+func (s *Service) WithEmergencyLock(fn func()) {
+	s.emergencyMu.Lock()
+	defer s.emergencyMu.Unlock()
+	fn()
 }
 
 func (s *Service) UseEmergencyAccess(ctx context.Context, userID int64, trafficLimitExceeded bool) (*EmergencyAccessResult, error) {
@@ -1342,6 +1370,12 @@ func (s *Service) SetEnabledAndSync(ctx context.Context, userID int64, enabled b
 	u.Enabled = enabled
 	u.AutoDisabledReason = reason
 	u.DisableDetail = detail
+	// On disable, bump TokenVersion so any JWT in flight stops working
+	// immediately for protected endpoints (self-service /api/user/me is
+	// still allowed for quota/expired disables; see RequireAuth).
+	if !enabled {
+		u.TokenVersion++
+	}
 	if err := s.users.Update(ctx, u); err != nil {
 		return err
 	}
@@ -1409,6 +1443,7 @@ func (s *Service) pushClientConfigToAll(ctx context.Context, u *domain.User) err
 	for pid := range uniquePanels {
 		prefetchWG.Add(1)
 		go func(p int64) {
+			defer safego.Recover("user.pushClientConfigToAll.prefetch")
 			defer prefetchWG.Done()
 			prefetchSem <- struct{}{}
 			defer func() { <-prefetchSem }()
@@ -1477,6 +1512,7 @@ func (s *Service) pushClientConfigToAll(ctx context.Context, u *domain.User) err
 		entry := e
 		infoCopy := info
 		go func() {
+			defer safego.Recover("user.pushClientConfigToAll.push")
 			defer pushWG.Done()
 			pushSem <- struct{}{}
 			defer func() { <-pushSem }()

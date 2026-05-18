@@ -70,7 +70,7 @@ type updateLayoutRequest struct {
 func (h *AdminGroupHandler) List(c *gin.Context) {
 	groups, err := h.group.List(c.Request.Context())
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 	out := make([]groupDTO, len(groups))
@@ -241,6 +241,6 @@ func mapGroupServiceError(c *gin.Context, err error) {
 	case errors.Is(err, domain.ErrConflict):
 		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
 	default:
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, err)
 	}
 }

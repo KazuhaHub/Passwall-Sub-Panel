@@ -16,6 +16,7 @@ import (
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/log"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/safego"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 )
 
@@ -229,16 +230,25 @@ func (s *Service) buildProxies(ctx context.Context, u *domain.User, items []rend
 	// node), so the rules can be reused across the loop.
 	st, _ := s.repos.Settings.Load(ctx, ports.UISettings{})
 	emailRules := domain.EmailRules{Domain: st.EmailDomain}
+
+	// Batch-prefetch inbounds: bucket nodes by panel, do one
+	// ListInbounds per panel instead of one GetInbound per node. A
+	// 10-node user previously triggered 10 separate 3X-UI HTTP round
+	// trips on every subscription refresh — now it's bounded by the
+	// number of distinct panels (typically 1-3 for a Kazuha-style
+	// deployment).
+	inboundByNode := s.prefetchInboundsForRender(ctx, items)
+
 	out := make([]map[string]any, 0, len(items))
 	for _, it := range items {
 		if it.isSeparator {
 			out = append(out, emitSeparator(it.name))
 			continue
 		}
-		inb, err := s.fetchInbound(ctx, it.node)
-		if err != nil {
-			log.Warn("render: skip node, fetch inbound failed",
-				"node_id", it.node.ID, "panel_id", it.node.PanelID, "inbound_id", it.node.InboundID, "err", err)
+		inb := inboundByNode[it.node.ID]
+		if inb == nil {
+			log.Warn("render: skip node, inbound not found in panel listing",
+				"node_id", it.node.ID, "panel_id", it.node.PanelID, "inbound_id", it.node.InboundID)
 			continue
 		}
 		userEmail := u.ClientEmail(it.node.ID, emailRules)
@@ -272,6 +282,88 @@ func (s *Service) fetchInbound(ctx context.Context, n *domain.Node) (*ports.Inbo
 		return nil, err
 	}
 	return c.GetInbound(ctx, n.InboundID)
+}
+
+// prefetchInboundsForRender pulls every inbound the proxy-block builder
+// will need in one ListInbounds call per panel, then returns a node→
+// inbound map. This collapses the previous "fetchInbound on every node"
+// N+1 pattern: for a 10-node user spread across 2 panels, render now
+// makes 2 ListInbounds calls instead of 10 GetInbound calls. Failures
+// (panel unreachable, inbound deleted server-side) leave the affected
+// entries absent from the map; the caller logs and skips them, matching
+// the prior fall-through behaviour.
+func (s *Service) prefetchInboundsForRender(ctx context.Context, items []renderItem) map[int64]*ports.Inbound {
+	// Bucket node IDs by their owning panel so each panel is touched once.
+	panelInboundIDs := map[int64]map[int]struct{}{}
+	for _, it := range items {
+		if it.isSeparator || it.node == nil {
+			continue
+		}
+		ids, ok := panelInboundIDs[it.node.PanelID]
+		if !ok {
+			ids = map[int]struct{}{}
+			panelInboundIDs[it.node.PanelID] = ids
+		}
+		ids[it.node.InboundID] = struct{}{}
+	}
+	if len(panelInboundIDs) == 0 {
+		return nil
+	}
+
+	// One ListInbounds per panel. Errors degrade gracefully — affected
+	// inbounds just don't appear in the result, and the caller treats
+	// "missing" as "skip this node + warn", same as the old fetchInbound
+	// failure path.
+	type panelResult struct {
+		panelID    int64
+		byInboundID map[int]*ports.Inbound
+		err        error
+	}
+	resultsCh := make(chan panelResult, len(panelInboundIDs))
+	for pid := range panelInboundIDs {
+		go func(p int64) {
+			defer safego.Recover("render.prefetchInbounds")
+			c, err := s.pool.Get(p)
+			if err != nil {
+				resultsCh <- panelResult{panelID: p, err: err}
+				return
+			}
+			list, lerr := c.ListInbounds(ctx)
+			if lerr != nil {
+				resultsCh <- panelResult{panelID: p, err: lerr}
+				return
+			}
+			idx := make(map[int]*ports.Inbound, len(list))
+			for i := range list {
+				idx[list[i].ID] = &list[i]
+			}
+			resultsCh <- panelResult{panelID: p, byInboundID: idx}
+		}(pid)
+	}
+
+	byPanel := make(map[int64]map[int]*ports.Inbound, len(panelInboundIDs))
+	for i := 0; i < len(panelInboundIDs); i++ {
+		r := <-resultsCh
+		if r.err != nil {
+			log.Warn("render: panel inbound prefetch failed",
+				"panel_id", r.panelID, "err", r.err)
+			continue
+		}
+		byPanel[r.panelID] = r.byInboundID
+	}
+
+	out := make(map[int64]*ports.Inbound, len(items))
+	for _, it := range items {
+		if it.isSeparator || it.node == nil {
+			continue
+		}
+		if panel, ok := byPanel[it.node.PanelID]; ok {
+			if inb, found := panel[it.node.InboundID]; found {
+				out[it.node.ID] = inb
+			}
+		}
+	}
+	return out
 }
 
 func (s *Service) resolveRulesCommon(ctx context.Context, tpl *domain.Template) (string, []string, error) {

@@ -19,7 +19,7 @@ func NewAdminReconcileHandler(recon *reconcile.Service) *AdminReconcileHandler {
 func (h *AdminReconcileHandler) Run(c *gin.Context) {
 	report, err := h.recon.RunOnce(c.Request.Context(), reconcile.LevelFull)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, report)

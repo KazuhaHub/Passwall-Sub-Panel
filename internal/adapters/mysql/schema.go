@@ -61,8 +61,14 @@ type userRow struct {
 	EmergencyUsedCount     int
 	EmergencyUntil         *time.Time
 	EmergencyBaselineBytes int64 `gorm:"default:0"`
-	CreatedAt              time.Time
-	UpdatedAt              time.Time
+	// TokenVersion bumps invalidate every JWT issued before the bump
+	// (admin disable / role demote / password change). Auth middleware
+	// rejects a token whose tv claim doesn't match the live row's
+	// value. Default 0 so existing rows simply pass the check on a
+	// row that hasn't been bumped yet.
+	TokenVersion int `gorm:"default:0;not null"`
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
 }
 
 func (userRow) TableName() string { return "users" }
@@ -99,6 +105,7 @@ func (r *userRow) toDomain() *domain.User {
 		EmergencyUsedCount:     r.EmergencyUsedCount,
 		EmergencyUntil:         r.EmergencyUntil,
 		EmergencyBaselineBytes: r.EmergencyBaselineBytes,
+		TokenVersion:           r.TokenVersion,
 		CreatedAt:              r.CreatedAt,
 		UpdatedAt:              r.UpdatedAt,
 	}
@@ -136,6 +143,7 @@ func userFromDomain(u *domain.User) *userRow {
 		EmergencyUsedCount:     u.EmergencyUsedCount,
 		EmergencyUntil:         u.EmergencyUntil,
 		EmergencyBaselineBytes: u.EmergencyBaselineBytes,
+		TokenVersion:           u.TokenVersion,
 		CreatedAt:              u.CreatedAt,
 		UpdatedAt:              u.UpdatedAt,
 	}

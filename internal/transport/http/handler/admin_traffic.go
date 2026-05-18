@@ -16,6 +16,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/paneltz"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/traffic"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/transport/http/middleware"
 )
 
 // AdminTrafficHandler exposes /api/admin/traffic — aggregate usage views
@@ -86,7 +87,7 @@ func (h *AdminTrafficHandler) Top(c *gin.Context) {
 			Pagination: ports.Pagination{Page: page, PageSize: pageSize},
 		})
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			respondError(c, err)
 			return
 		}
 		for _, u := range users {
@@ -141,13 +142,13 @@ func (h *AdminTrafficHandler) History(c *gin.Context) {
 			Pagination: ports.Pagination{Page: page, PageSize: pageSize},
 		})
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			respondError(c, err)
 			return
 		}
 		for _, u := range users {
 			report, err := h.traffic.HistoryFor(c.Request.Context(), u.ID, period, since, until)
 			if err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				respondError(c, err)
 				return
 			}
 			if len(items) == 0 {
@@ -202,7 +203,7 @@ func (h *AdminTrafficHandler) historyForUser(c *gin.Context, userID int64, perio
 		case errors.Is(err, domain.ErrValidation):
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		default:
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			respondError(c, err)
 		}
 		return
 	}
@@ -225,7 +226,7 @@ func (h *AdminTrafficHandler) UserReport(c *gin.Context) {
 	}
 	report, err := h.traffic.ReportFor(c.Request.Context(), id)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{
@@ -238,7 +239,7 @@ func (h *AdminTrafficHandler) UserReport(c *gin.Context) {
 
 func (h *AdminTrafficHandler) Poll(c *gin.Context) {
 	if err := h.traffic.PollOnce(c.Request.Context()); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"status": "ok"})
@@ -249,6 +250,16 @@ func (h *AdminTrafficHandler) SetUserUsage(c *gin.Context) {
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid id"})
 		return
+	}
+	// Operator-scope guard: operators can manage user traffic but
+	// can't reach into admin / operator accounts (incl. their own
+	// admin's quota — that'd be a privilege-laundering path).
+	if claims := middleware.ClaimsFrom(c); claims != nil && claims.Role == domain.RoleOperator {
+		target, terr := h.users.GetByID(c.Request.Context(), id)
+		if terr == nil && (target.Role == domain.RoleAdmin || target.Role == domain.RoleOperator) {
+			c.JSON(http.StatusForbidden, gin.H{"error": "Operators cannot modify admin or operator accounts"})
+			return
+		}
 	}
 	var req setUserTrafficRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -267,13 +278,13 @@ func (h *AdminTrafficHandler) SetUserUsage(c *gin.Context) {
 		case errors.Is(err, domain.ErrValidation):
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		default:
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			respondError(c, err)
 		}
 		return
 	}
 	report, err := h.traffic.ReportFor(c.Request.Context(), id)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{
@@ -372,7 +383,7 @@ func (h *AdminTrafficHandler) NodesTop(c *gin.Context) {
 	}
 	nodes, err := h.nodes.List(c.Request.Context())
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 	panelNames := h.loadPanelNames(c.Request.Context())
@@ -425,7 +436,7 @@ func (h *AdminTrafficHandler) NodesHistory(c *gin.Context) {
 			case errors.Is(err, domain.ErrValidation):
 				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			default:
-				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				respondError(c, err)
 			}
 			return
 		}
@@ -442,7 +453,7 @@ func (h *AdminTrafficHandler) NodesHistory(c *gin.Context) {
 
 	nodes, err := h.nodes.List(c.Request.Context())
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 	items := []trafficHistoryItem{}

@@ -111,9 +111,16 @@ func (s *OIDCService) Reload(ctx context.Context, cfg *config.OIDCConfig) error 
 }
 
 // AuthCodeURL returns the IdP authorize URL with a generated state.
-// The caller persists `state` (and `nonce` if used) in a short-lived
-// HttpOnly cookie to verify on the callback.
-func (s *OIDCService) AuthCodeURL(state, nonce string) (string, error) {
+// The caller persists `state` (and `nonce` and `pkceVerifier` if used)
+// in short-lived HttpOnly cookies to verify on the callback.
+//
+// When pkceVerifier is non-empty, the SHA-256 challenge derived from it
+// is attached to the authorize request and the IdP will require the
+// verifier on the token exchange. Defence-in-depth on top of
+// state+nonce; covers the case where a malicious app on the same host
+// reads the auth code from the redirect_uri and tries to exchange it
+// without holding the verifier.
+func (s *OIDCService) AuthCodeURL(state, nonce, pkceVerifier string) (string, error) {
 	s.mu.RLock()
 	cfg := s.oauth2
 	s.mu.RUnlock()
@@ -123,6 +130,9 @@ func (s *OIDCService) AuthCodeURL(state, nonce string) (string, error) {
 	opts := []oauth2.AuthCodeOption{}
 	if nonce != "" {
 		opts = append(opts, oidc.Nonce(nonce))
+	}
+	if pkceVerifier != "" {
+		opts = append(opts, oauth2.S256ChallengeOption(pkceVerifier))
 	}
 	return cfg.AuthCodeURL(state, opts...), nil
 }
@@ -145,8 +155,10 @@ type OIDCAssertion struct {
 }
 
 // Exchange swaps the authorization code for tokens, verifies the ID token,
-// and extracts the configured attribute claims.
-func (s *OIDCService) Exchange(ctx context.Context, code, expectedNonce string) (*OIDCAssertion, error) {
+// and extracts the configured attribute claims. pkceVerifier (when
+// non-empty) is sent alongside the code; the IdP rejects the exchange
+// unless its S256 hash matches the challenge sent during AuthCodeURL.
+func (s *OIDCService) Exchange(ctx context.Context, code, expectedNonce, pkceVerifier string) (*OIDCAssertion, error) {
 	s.mu.RLock()
 	oauthCfg := s.oauth2
 	verifier := s.verifier
@@ -155,7 +167,11 @@ func (s *OIDCService) Exchange(ctx context.Context, code, expectedNonce string) 
 	if oauthCfg == nil || verifier == nil || cfg == nil {
 		return nil, fmt.Errorf("oidc not initialised")
 	}
-	tok, err := oauthCfg.Exchange(ctx, code)
+	exchangeOpts := []oauth2.AuthCodeOption{}
+	if pkceVerifier != "" {
+		exchangeOpts = append(exchangeOpts, oauth2.VerifierOption(pkceVerifier))
+	}
+	tok, err := oauthCfg.Exchange(ctx, code, exchangeOpts...)
 	if err != nil {
 		return nil, fmt.Errorf("oauth2 exchange: %w", err)
 	}

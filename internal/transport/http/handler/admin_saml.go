@@ -124,7 +124,7 @@ func (h *AdminSAMLHandler) FetchMetadata(c *gin.Context) {
 func (h *AdminSAMLHandler) Get(c *gin.Context) {
 	cfg, err := h.repo.Load(c.Request.Context())
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, toSAMLDTO(cfg))
@@ -139,7 +139,7 @@ func (h *AdminSAMLHandler) Put(c *gin.Context) {
 
 	existing, err := h.repo.Load(c.Request.Context())
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 
@@ -211,7 +211,7 @@ func (h *AdminSAMLHandler) Put(c *gin.Context) {
 	config.ApplySAMLDefaults(cfg)
 
 	if err := h.repo.Save(c.Request.Context(), cfg); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 

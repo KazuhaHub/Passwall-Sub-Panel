@@ -88,7 +88,7 @@ func (h *AdminSettingsHandler) defaults() ports.UISettings {
 func (h *AdminSettingsHandler) Get(c *gin.Context) {
 	s, err := h.repo.Load(c.Request.Context(), h.defaults())
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 	mode := s.LoginMode
@@ -245,7 +245,7 @@ func (h *AdminSettingsHandler) Put(c *gin.Context) {
 		s.SubPath = "sub"
 	}
 	if err := h.repo.Save(c.Request.Context(), s); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 	h.jwtParams.Store(jwtutil.Params{

@@ -41,7 +41,7 @@ func (h *UserMeHandler) Profile(c *gin.Context) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 	// Server-side derived: hide the "change password" affordance for SSO
@@ -136,7 +136,7 @@ func (h *UserMeHandler) EmergencyAccess(c *gin.Context) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 	res, err := h.user.UseEmergencyAccess(c.Request.Context(), claims.UserID, h.trafficLimitExceeded(c.Request.Context(), u))
@@ -149,7 +149,7 @@ func (h *UserMeHandler) EmergencyAccess(c *gin.Context) {
 		case errors.Is(err, domain.ErrValidation):
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		default:
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			respondError(c, err)
 		}
 		return
 	}
@@ -187,7 +187,7 @@ func (h *UserMeHandler) Traffic(c *gin.Context) {
 	}
 	report, err := h.traffic.ReportFor(c.Request.Context(), claims.UserID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{
@@ -215,7 +215,7 @@ func (h *UserMeHandler) TrafficHistory(c *gin.Context) {
 		case errors.Is(err, domain.ErrValidation):
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		default:
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			respondError(c, err)
 		}
 		return
 	}
@@ -241,7 +241,7 @@ func (h *UserMeHandler) GetRules(c *gin.Context) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"personal_rules": u.PersonalRules})
@@ -277,7 +277,7 @@ func (h *UserMeHandler) PutRules(c *gin.Context) {
 		case errors.Is(err, domain.ErrValidation):
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		default:
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			respondError(c, err)
 		}
 		return
 	}
@@ -296,7 +296,7 @@ func (h *UserMeHandler) ResetCredentials(c *gin.Context) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{
@@ -324,7 +324,7 @@ func (h *UserMeHandler) ChangePassword(c *gin.Context) {
 	}
 	u, err := h.user.Get(c.Request.Context(), claims.UserID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 	if !u.HasLocalPassword() {
@@ -346,7 +346,7 @@ func (h *UserMeHandler) ChangePassword(c *gin.Context) {
 		return
 	}
 	if err := h.user.SetPassword(c.Request.Context(), claims.UserID, req.NewPassword); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, err)
 		return
 	}
 	c.Status(http.StatusNoContent)

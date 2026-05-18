@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/xml"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -18,6 +19,7 @@ import (
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/config"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/log"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/safego"
 )
 
 // SAMLService is a thin wrapper around crewjam/saml's ServiceProvider that
@@ -31,6 +33,12 @@ type SAMLService struct {
 	cfg *config.SAMLConfig
 	mu  sync.RWMutex
 	sp  *saml.ServiceProvider
+	// replay tracks Assertion IDs we've already accepted in the recent
+	// past so a stolen SAMLResponse can't be replayed inside its
+	// signature-validity window. crewjam/saml validates NotBefore /
+	// NotOnOrAfter and the signature, but does not maintain a
+	// consumed-ID set.
+	replay assertionReplayCache
 }
 
 // NewSAML constructs the service. If cfg.Enabled is false, the returned
@@ -162,6 +170,7 @@ func (s *SAMLService) StartMetadataRefresh(ctx context.Context, wg ...*sync.Wait
 		wg[0].Add(1)
 	}
 	go func() {
+		defer safego.Recover("saml.metadataRefresh")
 		if len(wg) > 0 && wg[0] != nil {
 			defer wg[0].Done()
 		}
@@ -275,12 +284,27 @@ func parseX509FromBase64(raw string) (*x509.Certificate, error) {
 	return x509.ParseCertificate(der)
 }
 
+// metadataMaxBytes caps how much XML we'll buffer from an admin-supplied
+// IdP metadata URL. Real-world IdP metadata is ≤ ~80 KiB even with a
+// dozen certs; 4 MiB gives generous margin while still neutralising a
+// hostile / runaway URL that streams gigabytes.
+const metadataMaxBytes = 4 << 20
+
+// metadataHTTPClient is the dedicated HTTP client used for IdP metadata
+// fetches. Has a hard 15 s timeout (independent of ctx, so a hung server
+// can never wedge the metadata-refresh goroutine for the panel's
+// uptime). The transport stays close to net/http defaults — we don't
+// pin TLS or block private IPs here because the admin explicitly types
+// the URL into the SAML settings page; SSRF protection is a deployment
+// concern (firewall the panel away from internal services).
+var metadataHTTPClient = &http.Client{Timeout: 15 * time.Second}
+
 func fetchIDPMetadata(ctx context.Context, metaURL string) (*saml.EntityDescriptor, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, metaURL, nil)
 	if err != nil {
 		return nil, err
 	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := metadataHTTPClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -288,8 +312,11 @@ func fetchIDPMetadata(ctx context.Context, metaURL string) (*saml.EntityDescript
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("unexpected status %s fetching idp metadata", resp.Status)
 	}
+	// Wrap the body in a size-capped reader so a 10 GiB blob can't OOM
+	// the panel through a misconfigured / hostile metadata URL.
+	body := io.LimitReader(resp.Body, metadataMaxBytes+1)
 	var ed saml.EntityDescriptor
-	if err := xml.NewDecoder(resp.Body).Decode(&ed); err != nil {
+	if err := xml.NewDecoder(body).Decode(&ed); err != nil {
 		return nil, err
 	}
 	return &ed, nil
@@ -447,6 +474,21 @@ func (s *SAMLService) ParseACSResponse(r *http.Request, possibleRequestIDs []str
 		}
 		return nil, fmt.Errorf("parse SAML response: %w", err)
 	}
+	// Replay guard: refuse a SAMLResponse whose Assertion ID we have
+	// already accepted within its NotOnOrAfter window. Done AFTER the
+	// signature/NotOnOrAfter check so we only spend the map slot on
+	// genuinely-valid assertions, never on attacker noise.
+	if assertion.ID != "" {
+		exp := assertion.IssueInstant.Add(10 * time.Minute) // generous fallback
+		if assertion.Conditions != nil && !assertion.Conditions.NotOnOrAfter.IsZero() {
+			exp = assertion.Conditions.NotOnOrAfter
+		}
+		if s.replay.SeenOrAdd(assertion.ID, exp, time.Now()) {
+			log.Warn("saml: assertion replay detected", "assertion_id", assertion.ID)
+			return nil, fmt.Errorf("SAML assertion already consumed")
+		}
+	}
+
 	out := &SAMLAssertion{Attributes: map[string][]string{}}
 	// Subject = NameID, always. This is the panel-side immutable
 	// identity key used for SSO account lookup, independent of how
