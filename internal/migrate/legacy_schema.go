@@ -1,6 +1,6 @@
-package main
+package migrate
 
-// Minimal GORM struct definitions matching the v2 (pre-refactor) schema.
+// Minimal GORM struct definitions matching the legacy (≤ v2.5.x) schema.
 // They live in this cmd-local package so the main panel program stays clean
 // of any old-schema knowledge — this file gets deleted along with the rest
 // of cmd/migrate-db-v2/ once the migration is signed off.

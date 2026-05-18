@@ -1444,7 +1444,43 @@ volumes:
 
 ---
 
-## 16. 实施路线图
+## 16. 版本升级政策
+
+### 16.1 大版本升级路径
+
+**不支持跨大版本跳级升级**。例如 v3.x → v5.x 必须先升级到 v4.x 再升级到 v5.x，每次只跨一个主版本（major）。
+
+每个 major 版本的二进制只携带 **N-1 → N** 的迁移逻辑。例：
+
+| 当前安装 | 目标 | 升级路径 |
+|---|---|---|
+| v2.5.x | v3.0.0 | 直接 `psp migrate`（v3.0.0 携带 ≤ v2.5.x → v3 迁移逻辑） |
+| v2.5.x | v5.0.0 | v2.5.x → **v3 → v4 → v5**，三步，每步分别跑该版本的 `psp migrate` |
+| v3.2.x | v4.0.0 | 直接 `psp migrate`（v4 携带 v3.x → v4 迁移逻辑） |
+| v3.2.x | v6.0.0 | v3.2.x → v4 → v5 → v6，三步 |
+
+minor / patch 内升级**不需要**跑 migrate（按 [[feedback_semver]] 规则 minor 只加功能、patch 只修 bug，DB schema 不变）。
+
+### 16.2 设计依据
+
+- **代码体积可控**：迁移代码一直累加会让二进制无限膨胀；只保留 N-1 让每次发版的迁移代码量稳定在数百行级别
+- **测试矩阵可控**：迁移路径只有"上一个 major → 当前"一条，CI 验证成本线性 O(1)；如果支持任意跨版本，覆盖矩阵是 O(N²)
+- **每次迁移都被充分实战检验**：用户被迫逐步升级 → 每条迁移路径都被大量真实部署跑过，长尾边界 case 在升级链条中被早发现
+- **同行业惯例**：PostgreSQL（pg_upgrade 只支持 N-1）、MariaDB（major→major 必须逐级）、MongoDB（major version 必须线性）、Cloudreve 都是这个政策
+
+### 16.3 实现位置
+
+- 迁移逻辑作为主程序的 `migrate` 子命令：`psp migrate --src=<旧库> --dst=<新库>`
+- 代码位置：[internal/migrate/](../internal/migrate/) —— `runner.go` 暴露 `Run([]string) int`，被 [cmd/panel/main.go](../cmd/panel/main.go) 在 `os.Args[1] == "migrate"` 时调用
+- 运行时安全：normal panel 启动路径（`psp` 无参 / `psp --config=...`）**不会** import 也不会调用 migrate 包的任何 runtime 逻辑 —— 编译期 import 但运行期零开销
+- 当下一个 major（vN+1）发版时：
+  - vN+1 二进制**删除** vN-1 → vN 的迁移（即本仓库的 legacy_schema.go + migrate.go）
+  - vN+1 二进制**新增** vN → vN+1 的迁移
+  - 在 ARCHITECTURE.md 增补一节"vN → vN+1 schema 变更"
+
+---
+
+## 17. 实施路线图
 
 ### M0 骨架 ✅ 已完成
 
@@ -1516,9 +1552,9 @@ volumes:
 
 ---
 
-## 17. Future Scope
+## 18. Future Scope
 
-### 17.1 Canvas LMS 联动
+### 18.1 Canvas LMS 联动
 
 | 形式 | 方向 |
 |---|---|
@@ -1530,7 +1566,7 @@ volumes:
 - AuthSvc 接口设计成 pluggable（SAML / OIDC / LTI 各自实现 Provider）
 - 用户表 source 字段已支持 `'sso' | 'local'`，未来扩展 `'lti'`
 
-### 17.2 其他候选
+### 18.2 其他候选
 
 - 节点健康巡检 + 自动剔除
 - 订阅 URL 二维码邮件 / Slack / Telegram 通知
@@ -1538,7 +1574,7 @@ volumes:
 
 ---
 
-## 18. 术语表
+## 19. 术语表
 
 | 术语 | 含义 |
 |---|---|

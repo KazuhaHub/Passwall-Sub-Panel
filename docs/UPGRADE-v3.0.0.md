@@ -2,9 +2,20 @@
 
 > v3.0.0 是一次破坏性的数据库 schema 重构（KV `settings` 主表、`xui_clients` 改名为 `user_xui_clients`、`panel_name` 冗余列删除、新增 `lifetime/last_raw/period_baseline` 字段等）。**v3.0.0 主程序只识别新 schema**，不会原地升级旧库。
 >
-> 升级方式：**side-by-side 新库**（参考 Cloudreve `drive → drive_v2` 升级模式）—— 旧库**永远不被新版主程序触碰**，可作为永久 backup；迁移由独立的 `cmd/migrate-db-v2/` 一次性程序完成；admin 在 `config.yaml` 改一行 `database` 字段切换。
+> 升级方式：**side-by-side 新库**（参考 Cloudreve `drive → drive_v2` 升级模式）—— 旧库**永远不被新版主程序触碰**，可作为永久 backup；迁移由 v3.0.0 主程序自带的 `psp migrate` 子命令完成；admin 在 `config.yaml` 改一行 `database` 字段切换。
 
 适用版本：**当前 ≤ v2.5.x → v3.0.0+**
+
+## 跨大版本升级须知
+
+按本项目的版本升级政策（详见 [docs/ARCHITECTURE.md §16](ARCHITECTURE.md)）：**不支持跨大版本跳级**。
+
+- 当前 ≤ v2.5.x → v3.0.0：本文档适用，一步完成
+- 当前 ≤ v2.5.x → v4.0.0：必须先按本文档升到 v3.0.0，再按 v4.0.0 文档升到 v4
+- 当前 v3.0.0 → v3.x.x（minor / patch）：直接换二进制，**不用跑 migrate**
+- 当前 v3.x.x → v4.0.0：跑 v4 的 `psp migrate`（届时由 v4 文档说明）
+
+minor / patch 升级不变 schema，按 [[feedback_semver]] 规则。
 
 ---
 
@@ -14,7 +25,7 @@
 
 2. **旧库零修改**。迁移程序只读旧库 → 写新库。旧库一行都不动，理论上随时可以切回旧版主程序。
 
-3. **迁移程序跑完就删**。`cmd/migrate-db-v2/` 是一次性工具，git history 是它的审计轨迹。
+3. **迁移代码在主二进制里只保留到下一个 major 发版**。v3.x 二进制全程携带 `migrate` 子命令；v4.0.0 发版时该子命令被替换为 v3.x → v4 的迁移逻辑（不再支持 ≤ v2.5.x → v4 跳级，必须先升 v3）。详见 [docs/ARCHITECTURE.md §16](ARCHITECTURE.md)。
 
 4. **新库名 admin 自己定**。下面示例用 `psp_v3`（或 SQLite `panel_v3.db`），你可以叫任何名字；迁移程序通过 `--src` / `--dst` 参数接收。
 
@@ -56,23 +67,23 @@ docker exec psp grep '^jwt_secret' /app/config/config.yaml
 
 适用：直接跑 `psp` 二进制（systemd 或裸跑），数据存 SQLite 或 MySQL。
 
-### 2.1 编译新二进制 + 迁移工具
+### 2.1 编译新二进制
 
-在 v3.0.0 代码 checkout 出来的工作机上：
+迁移工具已内置为主程序的 `migrate` 子命令，**只需要一个二进制**：
 
 ```bash
 cd /path/to/Passwall-Sub-Panel
 go build -o psp ./cmd/panel/
-go build -o migrate-db-v2 ./cmd/migrate-db-v2/
 ```
 
-把这两个二进制 `scp` 到生产机。
+`scp` 到生产机。
 
-### 2.2 停旧版主程序
+### 2.2 停旧版主程序 + 替换二进制
 
 ```bash
-sudo systemctl stop psp
-# 或裸跑：kill 掉对应进程
+sudo systemctl stop psp                  # 或裸跑：kill 进程
+mv /opt/psp/psp /opt/psp/psp.bak         # 备份旧二进制以备回滚
+cp ./psp /opt/psp/psp
 ```
 
 ### 2.3 跑迁移
@@ -81,7 +92,7 @@ sudo systemctl stop psp
 
 ```bash
 cd /opt/psp
-./migrate-db-v2 --driver=sqlite \
+./psp migrate --driver=sqlite \
   --src=./data/panel.db \
   --dst=./data/panel_v3.db
 ```
@@ -95,23 +106,18 @@ mysql -u root -p -e 'CREATE DATABASE psp_v3 CHARACTER SET utf8mb4 COLLATE utf8mb
 然后跑迁移：
 
 ```bash
-./migrate-db-v2 --driver=mysql \
+./psp migrate --driver=mysql \
   --src='user:pw@tcp(127.0.0.1:3306)/passwall?charset=utf8mb4&parseTime=true' \
   --dst='user:pw@tcp(127.0.0.1:3306)/psp_v3?charset=utf8mb4&parseTime=true'
 ```
 
-迁移程序会打印 plan + 每张表的进度 + `Migration complete`。如果 mid-way 失败，按提示 DROP 目标库重跑（迁移程序首步会写一个 `_migration` sentinel 行，重跑会被 guard 拦住直到 DROP）。
+迁移会打印 plan + 每张表的进度 + `Migration complete`。如果 mid-way 失败，按提示 DROP 目标库重跑（迁移首步会写一个 `_migration` sentinel 行，重跑会被 guard 拦住直到 DROP）。
 
 > 也可以加 `--dry-run` 看每张表行数，不实际写入。
 
-### 2.4 替换二进制 + 改 config.yaml
+### 2.4 改 config.yaml 指向新库
 
 ```bash
-# 备份旧二进制（保留以备紧急回滚）
-mv /opt/psp/psp /opt/psp/psp.bak
-cp ./psp /opt/psp/psp
-
-# 修改 config.yaml 指向新库
 sudo -u psp vi /opt/psp/config/config.yaml
 ```
 
@@ -170,45 +176,30 @@ docker compose stop psp
 
 ### 3.3 跑迁移
 
-**迁移工具不包含在 release image 里**（设计上 release image 只含新版主程序）。最简单的做法是在 host 上跑 Go 二进制：
+**迁移工具内置在 v3.0.0 image 里**作为主程序的 `migrate` 子命令，直接 `docker compose run` 即可 —— 不需要 host 上编译 Go，不需要 volume 桥接。
 
-```bash
-cd /path/to/Passwall-Sub-Panel
-go build -o migrate-db-v2 ./cmd/migrate-db-v2/
-```
-
-然后按 DB 类型操作：
+> 用 `docker compose run --rm` 而不是 `docker exec`，因为容器已经 stop 了。`--rm` 跑完即删 ephemeral 容器；volume 共享 image 的卷挂载（compose 自动处理）。
 
 **SQLite + named volume（默认 compose 配置）**：
 
-SQLite 文件在 Docker 命名卷 `psp-data` 里。容器停了之后，把卷挂出来跑迁移：
-
 ```bash
-# 创建临时挂载容器复制 SQLite 文件到 host 工作目录
-docker run --rm -v psp-data:/data -v "$PWD":/work alpine \
-  cp /data/panel.db /work/panel.db
-
-# host 上跑迁移
-./migrate-db-v2 --driver=sqlite \
-  --src=./panel.db --dst=./panel_v3.db
-
-# 把新库写回命名卷
-docker run --rm -v psp-data:/data -v "$PWD":/work alpine \
-  cp /work/panel_v3.db /data/panel_v3.db
+docker compose run --rm psp migrate --driver=sqlite \
+  --src=/app/data/panel.db \
+  --dst=/app/data/panel_v3.db
 ```
 
-**MySQL（外部数据库）**：
+容器内 `/app/data/` 对应 host 的 `psp-data` 命名卷，所以新旧 SQLite 文件都进同一个卷，主程序起来后能直接读到。
 
-跟二进制场景一样，先建空库：
+**MySQL（外部数据库）**：先建空库：
 
 ```bash
 mysql -u root -p -e 'CREATE DATABASE psp_v3 CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;'
 ```
 
-host 上跑迁移（DSN 用 host 视角的连接串）：
+然后从容器内跑迁移（DSN 用容器视角的连接串 —— compose 用了 `network_mode: host`，所以 `127.0.0.1` 直接可达）：
 
 ```bash
-./migrate-db-v2 --driver=mysql \
+docker compose run --rm psp migrate --driver=mysql \
   --src='user:pw@tcp(127.0.0.1:3306)/passwall?charset=utf8mb4&parseTime=true' \
   --dst='user:pw@tcp(127.0.0.1:3306)/psp_v3?charset=utf8mb4&parseTime=true'
 ```
@@ -332,6 +323,6 @@ A: 新版从 in-memory pool 现查 panel name，pool 在主程序启动时初始
 
 A: 正常 —— 迁移会保留旧的 `traffic_snapshots` 历史 + 用户的 `lifetime_total_bytes`，但 `client_traffic_snapshots`（per-client 级历史）不复制（新版把它的 raw counter 信息收纳进了 `user_xui_clients.last_raw_*_bytes`）。所以**节点 / 用户级**累计曲线连续，**per-client** 级看板从升级时刻起重建。
 
-**Q: 升级前后 `cmd/migrate-db-v2/` 删除时机**
+**Q: 迁移代码什么时候从代码库里删除？**
 
-A: 你升级完、稳定运行一段时间确认无问题后，在下一个 commit 里把 `cmd/migrate-db-v2/` 整个目录删了 + commit message 注明 "v3.0.0 migration ran on YYYY-MM-DD, removing one-shot tool"。git history 是这次重构的审计记录。
+A: v3.x 二进制全程保留 `migrate` 子命令。等 v4.0.0 准备发版时，把 [internal/migrate/](../internal/migrate/) 里 ≤ v2.5.x → v3 的迁移逻辑替换为 v3.x → v4 的迁移逻辑（git history 是审计轨迹）。已经升级到 v3 的用户，从 v3 升级到 v4 时跑的是 v4 二进制里的新 migrate；想从 v2.5.x 跳到 v4 的用户必须先升 v3。

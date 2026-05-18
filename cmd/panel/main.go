@@ -17,6 +17,7 @@ import (
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/app"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/config"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/migrate"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/seed"
 )
 
@@ -31,6 +32,19 @@ func ensureDirs(cfg *config.Config) {
 const defaultConfigPath = "config.yaml"
 
 func main() {
+	// Subcommand dispatch. Currently only `migrate` is intercepted so a
+	// `psp` invocation with no args (or with --config) still falls through
+	// to the normal panel boot. Keeping this BEFORE config load / flag
+	// parsing means `migrate`'s own FlagSet owns its argv and doesn't
+	// collide with the panel's --config flag.
+	//
+	// Upgrade policy (see docs/ARCHITECTURE.md §16): the embedded migrator
+	// only handles the immediately previous major version → current. Older
+	// installs upgrade through each major in turn (vN-2 → vN-1 → vN).
+	if len(os.Args) > 1 && os.Args[1] == "migrate" {
+		os.Exit(migrate.Run(os.Args[2:]))
+	}
+
 	if os.Getenv("GIN_MODE") == "" {
 		gin.SetMode(gin.ReleaseMode)
 	}
