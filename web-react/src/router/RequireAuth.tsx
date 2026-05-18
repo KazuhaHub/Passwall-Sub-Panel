@@ -12,8 +12,11 @@ interface Props {
 export default function RequireAuth({ adminOnly }: Props) {
   const location = useLocation()
   const role = useAuthStore(s => s.role)
+  // Subscribe to hasToken so a cross-tab logout (storage event) bounces
+  // this tab out on the next render instead of waiting for an API 401.
+  const loggedIn = useAuthStore(selectIsLoggedIn)
 
-  if (!selectIsLoggedIn()) {
+  if (!loggedIn) {
     return <Navigate to="/login" state={{ returnTo: location.pathname + location.search }} replace />
   }
   if (adminOnly) {

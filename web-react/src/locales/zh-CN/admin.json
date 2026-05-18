@@ -757,7 +757,11 @@
       "server_address": "连接地址",
       "flow": "Flow（可选）",
       "region": "Region",
-      "tags": "Tags"
+      "tags": "Tags",
+      "enabled": "启用",
+      "separator_show_in_all": "在所有分组中显示",
+      "separator_groups": "仅在这些分组中显示",
+      "separator_groups_hint": "「在所有分组中显示」开启时此项被忽略。两项都不填会让分隔标题不出现在任何分组中。"
     },
     "action": {
       "edit": "编辑",

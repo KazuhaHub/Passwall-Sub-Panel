@@ -24,7 +24,13 @@
     "body": "This page hasn't been moved from the Vue version to React + MUI yet. Current path:"
   },
   "errors": {
-    "sync_pending": "3X-UI temporarily unreachable; the sync task has been queued (auto-retry every minute)."
+    "sync_pending": "3X-UI temporarily unreachable; the sync task has been queued (auto-retry every minute).",
+    "network": "Network error — please check your connection and try again.",
+    "timeout": "Request timed out, please try again later.",
+    "server": "Server error — please try again later.",
+    "rate_limited": "Too many requests; please wait a moment and try again.",
+    "copy_failed": "Copy failed; please select the text and press Ctrl+C.",
+    "copied": "Copied to clipboard."
   },
   "auth": {
     "logout": "Sign out"

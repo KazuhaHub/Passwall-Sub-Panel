@@ -24,7 +24,13 @@
     "body": "此页面尚未从 Vue 版本迁移到 React + MUI。当前路径："
   },
   "errors": {
-    "sync_pending": "3X-UI 暂时不可达，同步任务已加入后台队列（每分钟自动重试）"
+    "sync_pending": "3X-UI 暂时不可达，同步任务已加入后台队列（每分钟自动重试）",
+    "network": "网络异常，请检查连接后重试",
+    "timeout": "请求超时，请稍后重试",
+    "server": "服务器异常，请稍后重试",
+    "rate_limited": "请求过于频繁，请稍后再试",
+    "copy_failed": "复制失败，请手动选中后按 Ctrl+C",
+    "copied": "已复制到剪贴板"
   },
   "auth": {
     "logout": "退出登录"

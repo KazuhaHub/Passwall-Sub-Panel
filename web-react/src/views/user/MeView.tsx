@@ -66,6 +66,7 @@ import {
 const TrafficChart = lazy(() => import('@/components/TrafficChart'))
 import { confirm } from '@/components/ConfirmHost'
 import { pushSnack } from '@/components/SnackbarHost'
+import { copyToClipboard } from '@/utils/clipboard'
 
 function bytesToHuman(n: number) {
   if (n === 0) return '0'
@@ -240,8 +241,9 @@ export default function MeView() {
   }
 
   async function copy(text: string) {
-    try { await navigator.clipboard.writeText(text); pushSnack(t('common.copied'), 'success') }
-    catch { /* ignore */ }
+    // copyToClipboard handles its own toast (success / fallback /
+    // failure) so callers don't need to wrap the call.
+    await copyToClipboard(text)
   }
 
   async function reset() {
