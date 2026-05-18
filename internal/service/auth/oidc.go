@@ -189,24 +189,29 @@ func (s *OIDCService) Exchange(ctx context.Context, code, expectedNonce string) 
 	out.Email = claimString(claims, cfg.AttributeMapping.Email)
 	out.DisplayName = claimString(claims, cfg.AttributeMapping.DisplayName)
 	out.Groups = claimStringSlice(claims, cfg.AttributeMapping.Groups)
-	// all_claim_names is the list of top-level keys actually present in
-	// the ID token this round. Names only — values may carry PII. Mirrors
-	// saml.go so admins can diff "what I configured" vs "what the IdP
-	// sent" without logging into the IdP console.
-	claimNames := make([]string, 0, len(claims))
-	for k := range claims {
-		claimNames = append(claimNames, k)
-	}
+	// Per-login INFO: short audit-style line. Mirrors saml.go's slim
+	// format so log volume is comparable across protocols.
 	log.Info("oidc: id_token verified",
 		"sub", out.Subject,
 		"username", out.Username,
 		"email", out.Email,
 		"display_name", out.DisplayName,
-		"groups", out.Groups,
-		"groups_attr_name", cfg.AttributeMapping.Groups,
+		"groups_count", len(out.Groups),
 		"role_rules", len(cfg.RoleRules),
-		"all_claim_names", claimNames,
 	)
+	// Self-diagnostic: if admin configured an attribute mapping but the
+	// IdP didn't send a value, dump the claim names so admin can match
+	// it up. Only fires on misconfig, not every login.
+	if out.DisplayName == "" && strings.TrimSpace(cfg.AttributeMapping.DisplayName) != "" {
+		claimNames := make([]string, 0, len(claims))
+		for k := range claims {
+			claimNames = append(claimNames, k)
+		}
+		log.Warn("oidc: display_name claim not found in id_token",
+			"configured_claim_name", cfg.AttributeMapping.DisplayName,
+			"idp_sent_claim_names", claimNames,
+		)
+	}
 	// Identity = the configured username claim, period. No fallback to
 	// `sub`, `preferred_username`, or email-local-part — see saml.go for
 	// the rationale. If the IdP doesn't emit the claim the admin asked

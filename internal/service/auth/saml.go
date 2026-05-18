@@ -508,28 +508,30 @@ func (s *SAMLService) ParseACSResponse(r *http.Request, possibleRequestIDs []str
 		return nil, fmt.Errorf("SAML response missing UPN claim %q — add the matching attribute on the IdP side (or set the UPN source to \"nameid\" if your IdP carries it in <Subject><NameID>)", cfg.AttributeMapping.UPN)
 	}
 
-	// DisplayName missing is fine — empty string flows through to the
-	// user record. No suffix-matching fallback even here: an admin who
-	// configures a specific URN expects that URN, not "whatever claim
-	// happens to end with displayname".
-	//
-	// all_attr_names is the list of Attribute Names actually emitted by
-	// the IdP this round. Only names, never values — values may carry
-	// PII (groups, employee IDs, etc.) so they stay out of the log.
-	// Lets an admin diff "what I configured" vs "what the IdP sent"
-	// without logging into the IdP console.
-	attrNames := make([]string, 0, len(out.Attributes))
-	for k := range out.Attributes {
-		attrNames = append(attrNames, k)
-	}
+	// Per-login INFO: short audit-style line. Counts instead of full
+	// group lists — names go in audit_log if admin needs them, no point
+	// duplicating into stdout on every single SSO bounce.
 	log.Info("saml: assertion parsed",
 		"upn", out.UPN,
 		"email", out.Email,
 		"display_name", out.DisplayName,
-		"groups", out.Groups,
-		"group_attr_name", cfg.AttributeMapping.Groups,
+		"groups_count", len(out.Groups),
 		"role_rules", len(cfg.RoleRules),
-		"all_attr_names", attrNames,
 	)
+	// Self-diagnostic: if the admin asked for an attribute but the IdP
+	// didn't deliver one, emit a one-time WARN with the full list of
+	// Attribute Names the IdP actually sent. This is the "fix your
+	// config" hint that all_attr_names used to provide — but only when
+	// it's actually needed, not on every login.
+	if out.DisplayName == "" && strings.TrimSpace(cfg.AttributeMapping.DisplayName) != "" {
+		attrNames := make([]string, 0, len(out.Attributes))
+		for k := range out.Attributes {
+			attrNames = append(attrNames, k)
+		}
+		log.Warn("saml: display_name attribute not found in assertion",
+			"configured_attr_name", cfg.AttributeMapping.DisplayName,
+			"idp_sent_attr_names", attrNames,
+		)
+	}
 	return out, nil
 }
