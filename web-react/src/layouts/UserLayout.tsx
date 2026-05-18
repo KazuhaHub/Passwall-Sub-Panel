@@ -1,8 +1,9 @@
-import { useEffect, useState, type MouseEvent } from 'react'
+import { Suspense, useEffect, useState, type MouseEvent } from 'react'
 import {
   AppBar,
   Avatar,
   Box,
+  CircularProgress,
   IconButton,
   ListItemIcon,
   ListItemText,
@@ -91,7 +92,15 @@ export default function UserLayout() {
         </Toolbar>
       </AppBar>
       <Box component="main" sx={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
-        <Outlet />
+        {/* Local Suspense so route-chunk loads don't unmount the topbar.
+            See the matching note in AdminLayout. */}
+        <Suspense fallback={
+          <Box sx={{ height: '100%', display: 'grid', placeItems: 'center', py: 6 }}>
+            <CircularProgress size={28} />
+          </Box>
+        }>
+          <Outlet />
+        </Suspense>
       </Box>
       {site.footerText && (
         <Box component="footer" sx={{

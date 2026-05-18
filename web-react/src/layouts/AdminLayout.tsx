@@ -1,8 +1,9 @@
-import { useEffect, useState, type MouseEvent } from 'react'
+import { Suspense, useEffect, useState, type MouseEvent } from 'react'
 import {
   AppBar,
   Avatar,
   Box,
+  CircularProgress,
   Drawer,
   IconButton,
   List,
@@ -315,7 +316,18 @@ export default function AdminLayout() {
         </AppBar>
 
         <Box component="main" sx={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
-          <Outlet />
+          {/* Per-route Suspense boundary. Lives INSIDE the layout so that
+              switching sidebar items only swaps the main content area — the
+              outer App-level Suspense would unmount the whole layout (and
+              its mount-time effects) on every cross-section navigation,
+              which felt like a noticeable lag/flash. */}
+          <Suspense fallback={
+            <Box sx={{ height: '100%', display: 'grid', placeItems: 'center', py: 6 }}>
+              <CircularProgress size={28} />
+            </Box>
+          }>
+            <Outlet />
+          </Suspense>
         </Box>
       </Box>
     </Box>
