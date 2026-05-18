@@ -666,6 +666,8 @@ export default function MeView() {
               <MenuItem value={7}>{t('trend.range_7')}</MenuItem>
               {trendPeriod !== 'hour' && <MenuItem value={30}>{t('trend.range_30')}</MenuItem>}
               {trendPeriod !== 'hour' && <MenuItem value={90}>{t('trend.range_90')}</MenuItem>}
+              {trendPeriod !== 'hour' && <MenuItem value={180}>{t('trend.range_180', { defaultValue: '最近半年' })}</MenuItem>}
+              {trendPeriod !== 'hour' && <MenuItem value={365}>{t('trend.range_365', { defaultValue: '最近一年' })}</MenuItem>}
             </Select>
           </Box>
           <Suspense fallback={<Box sx={{ height: 280, display: 'grid', placeItems: 'center' }}><CircularProgress size={24} /></Box>}>

@@ -134,14 +134,14 @@ export default function TrafficView() {
     }).catch(() => { /* leave default */ })
   }, [])
 
-  // Range options: [7, 30, 90] filtered by retention. Hour granularity is
-  // additionally capped to the raw retention window (7 days during beta.6 —
-  // the chart still reads raw, and rollup-backed Hour queries land in
-  // beta.7). Keeping the cap on the frontend avoids the user staring at a
-  // mostly-empty chart for "30-day hourly".
+  // Range options filtered by retention. Hour granularity is additionally
+  // capped to the raw retention window (7 days during beta.6 — the chart
+  // still reads raw, and rollup-backed Hour queries land in beta.7).
+  // Keeping the cap on the frontend avoids the user staring at a mostly-
+  // empty chart for "30-day hourly".
   const rawRetentionDays = 7
   const rangeOptions = useMemo(() => {
-    const all = [7, 30, 90]
+    const all = [7, 30, 90, 180, 365]
     const cap = period === 'hour' ? Math.min(historyDays, rawRetentionDays) : historyDays
     return all.filter(d => d <= cap)
   }, [period, historyDays])
@@ -408,6 +408,8 @@ export default function TrafficView() {
               {rangeOptions.includes(7) && <MenuItem value={7}>{t('traffic.trend.range_7')}</MenuItem>}
               {rangeOptions.includes(30) && <MenuItem value={30}>{t('traffic.trend.range_30')}</MenuItem>}
               {rangeOptions.includes(90) && <MenuItem value={90}>{t('traffic.trend.range_90')}</MenuItem>}
+              {rangeOptions.includes(180) && <MenuItem value={180}>{t('traffic.trend.range_180')}</MenuItem>}
+              {rangeOptions.includes(365) && <MenuItem value={365}>{t('traffic.trend.range_365')}</MenuItem>}
             </Select>
             <Autocomplete freeSolo size="small"
               options={buildTzOptions(panelTz)}

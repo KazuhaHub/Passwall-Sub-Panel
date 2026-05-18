@@ -367,6 +367,8 @@
       "range_7": "最近 7 天",
       "range_30": "最近 30 天",
       "range_90": "最近 90 天",
+      "range_180": "最近半年",
+      "range_365": "最近一年",
       "summary_total": "范围总计",
       "summary_up": "上行",
       "summary_down": "下行",

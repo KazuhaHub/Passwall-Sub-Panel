@@ -367,6 +367,8 @@
       "range_7": "Last 7 days",
       "range_30": "Last 30 days",
       "range_90": "Last 90 days",
+      "range_180": "Last 6 months",
+      "range_365": "Last year",
       "summary_total": "Total",
       "summary_up": "Up",
       "summary_down": "Down",
