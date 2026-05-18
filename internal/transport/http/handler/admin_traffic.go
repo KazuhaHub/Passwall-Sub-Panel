@@ -307,9 +307,9 @@ func parseTrafficHistoryQuery(c *gin.Context, defaultLoc *time.Location) (traffi
 	defaultSince := defaultUntil.AddDate(0, 0, -29)
 	period := traffic.HistoryPeriod(c.DefaultQuery("period", string(traffic.HistoryDay)))
 	switch period {
-	case traffic.HistoryDay, traffic.HistoryWeek, traffic.HistoryMonth:
+	case traffic.HistoryHour, traffic.HistoryDay, traffic.HistoryWeek, traffic.HistoryMonth:
 	default:
-		return "", time.Time{}, time.Time{}, errors.New("period must be day, week, or month")
+		return "", time.Time{}, time.Time{}, errors.New("period must be hour, day, week, or month")
 	}
 
 	since, err := parseDateQuery(c.Query("since"), defaultSince, loc)
