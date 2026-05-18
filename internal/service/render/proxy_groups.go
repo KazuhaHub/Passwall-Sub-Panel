@@ -154,6 +154,11 @@ func proxyGroupChoices(name string) []string {
 	case strings.Contains(name, "漏网之鱼"):
 		return []string{"🚀 节点选择", "DIRECT", "@all"}
 	default:
-		return []string{"🚀 节点选择", "@all", "DIRECT"}
+		// Conservative default for user-defined groups that don't match
+		// any predefined case: DIRECT first, so an unrecognized group
+		// (e.g. "家里" / "公司 VPN") doesn't silently route traffic
+		// through proxies. Users can switch to 🚀 节点选择 or a specific
+		// node from the Clash UI when they actually want to proxy.
+		return []string{"DIRECT", "🚀 节点选择", "@all"}
 	}
 }

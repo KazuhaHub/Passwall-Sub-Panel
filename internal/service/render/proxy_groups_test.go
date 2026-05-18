@@ -56,6 +56,39 @@ func TestBuildProxyGroupsYAML(t *testing.T) {
 	}
 }
 
+func TestBuildProxyGroupsYAMLCustomGroupDefaultsToDirect(t *testing.T) {
+	raw, err := buildProxyGroupsYAML(`
+- IP-CIDR,fd00::/8,🏠 家里,no-resolve
+- MATCH,🐟 漏网之鱼
+`, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var groups []proxyGroup
+	if err := yaml.Unmarshal([]byte(raw), &groups); err != nil {
+		t.Fatal(err)
+	}
+	var custom *proxyGroup
+	for i := range groups {
+		if groups[i].Name == "🏠 家里" {
+			custom = &groups[i]
+			break
+		}
+	}
+	if custom == nil {
+		t.Fatalf("custom group not present in output: %#v", groups)
+	}
+	want := []string{"DIRECT", "🚀 节点选择", "@all"}
+	if len(custom.Proxies) != len(want) {
+		t.Fatalf("custom group proxies = %#v, want %#v", custom.Proxies, want)
+	}
+	for i := range want {
+		if custom.Proxies[i] != want[i] {
+			t.Fatalf("custom group proxies[%d] = %q, want %q (full=%#v)", i, custom.Proxies[i], want[i], custom.Proxies)
+		}
+	}
+}
+
 func TestBuildProxyGroupsYAMLDomesticServiceGroupHasNodeSelector(t *testing.T) {
 	raw, err := buildProxyGroupsYAML(`
 - DOMAIN-SUFFIX,bing.com,Ⓜ️ 微软Bing
