@@ -565,12 +565,12 @@ type MailTemplate struct {
 // The (user_id, kind, window_key) trio comes from mail_sent's unique
 // index so the same notification window only ever produces one log row.
 type EmailLog struct {
-	ID          int64
-	UserID      int64
-	UserUPN     string
-	UserDisplay string
-	ToEmail     string
-	Kind        MailReminderKind
-	WindowKey   string
-	SentAt      time.Time
+	ID          int64            `json:"id"`
+	UserID      int64            `json:"user_id"`
+	UserUPN     string           `json:"user_upn,omitempty"`
+	UserDisplay string           `json:"user_display,omitempty"`
+	ToEmail     string           `json:"to_email"`
+	Kind        MailReminderKind `json:"kind"`
+	WindowKey   string           `json:"window_key"`
+	SentAt      time.Time        `json:"sent_at"`
 }

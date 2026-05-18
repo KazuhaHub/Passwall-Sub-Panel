@@ -145,17 +145,19 @@ func matchOne(n *domain.Node, cond string) bool {
 			return strings.EqualFold(n.Region, val)
 		case "tag":
 			return n.HasTag(val)
-		case "node", "server":
+		case "node":
 			// node:<address> matches the node's ServerAddress — the
-			// hostname clients connect to. "server" is the legacy alias
-			// (the field was named "Server" in the admin UI before
-			// v3.0.0-beta.11) kept here so any group stored under the
-			// old prefix keeps working without a one-shot rewrite.
+			// hostname clients connect to. Added in v3.0.0-beta.11 when
+			// the admin UI's "Server" picker was renamed "Node" and
+			// rewired to surface server_address values.
 			return strings.EqualFold(n.ServerAddress, val)
 		default:
-			// vendor:gcp / any unknown custom key — stored as a tag
-			// verbatim. Reassemble from the trimmed parts so
-			// "vendor: gcp" still matches a stored "vendor:gcp".
+			// server:xxx / vendor:yyy / any unknown custom key — stored
+			// as a tag verbatim. Reassemble from the trimmed parts so
+			// "server: foo" still matches a stored "server:foo".
+			// `server:` stays as a literal tag lookup (not ServerAddress)
+			// for backward compatibility with any pre-beta.11 groups —
+			// admins who want ServerAddress matching use `node:`.
 			return n.HasTag(key + ":" + val)
 		}
 	}
