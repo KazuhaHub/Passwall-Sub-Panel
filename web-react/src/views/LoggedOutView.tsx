@@ -1,7 +1,9 @@
+import { useEffect } from 'react'
 import { Box, Button, Typography, useTheme } from '@mui/material'
 import LogoutIcon from '@mui/icons-material/Logout'
 import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
+import { useSiteStore } from '@/stores/site'
 
 // LoggedOutView is the landing page after a successful logout. The
 // reason this exists at all: when login_mode = sso_redirect the
@@ -17,6 +19,9 @@ export default function LoggedOutView() {
   const md = theme.palette.md
   const { t } = useTranslation('auth')
   const navigate = useNavigate()
+  const site = useSiteStore()
+
+  useEffect(() => { void site.load() }, [site])
 
   return (
     <Box sx={{ position: 'fixed', inset: 0, display: 'grid', placeItems: 'center', bgcolor: md.surface, p: 3 }}>
