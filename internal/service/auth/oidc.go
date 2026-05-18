@@ -180,6 +180,24 @@ func (s *OIDCService) Exchange(ctx context.Context, code, expectedNonce string) 
 	out.Email = claimString(claims, cfg.AttributeMapping.Email)
 	out.DisplayName = claimString(claims, cfg.AttributeMapping.DisplayName)
 	out.Groups = claimStringSlice(claims, cfg.AttributeMapping.Groups)
+	// all_claim_names is the list of top-level keys actually present in
+	// the ID token this round. Names only — values may carry PII. Mirrors
+	// saml.go so admins can diff "what I configured" vs "what the IdP
+	// sent" without logging into the IdP console.
+	claimNames := make([]string, 0, len(claims))
+	for k := range claims {
+		claimNames = append(claimNames, k)
+	}
+	log.Info("oidc: id_token verified",
+		"sub", out.Subject,
+		"username", out.Username,
+		"email", out.Email,
+		"display_name", out.DisplayName,
+		"groups", out.Groups,
+		"groups_attr_name", cfg.AttributeMapping.Groups,
+		"role_rules", len(cfg.RoleRules),
+		"all_claim_names", claimNames,
+	)
 	// Identity = the configured username claim, period. No fallback to
 	// `sub`, `preferred_username`, or email-local-part — see saml.go for
 	// the rationale. If the IdP doesn't emit the claim the admin asked

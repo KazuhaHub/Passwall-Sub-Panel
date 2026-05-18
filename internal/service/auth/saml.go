@@ -504,6 +504,16 @@ func (s *SAMLService) ParseACSResponse(r *http.Request, possibleRequestIDs []str
 	// user record. No suffix-matching fallback even here: an admin who
 	// configures a specific URN expects that URN, not "whatever claim
 	// happens to end with displayname".
+	//
+	// all_attr_names is the list of Attribute Names actually emitted by
+	// the IdP this round. Only names, never values — values may carry
+	// PII (groups, employee IDs, etc.) so they stay out of the log.
+	// Lets an admin diff "what I configured" vs "what the IdP sent"
+	// without logging into the IdP console.
+	attrNames := make([]string, 0, len(out.Attributes))
+	for k := range out.Attributes {
+		attrNames = append(attrNames, k)
+	}
 	log.Info("saml: assertion parsed",
 		"upn", out.UPN,
 		"email", out.Email,
@@ -511,6 +521,7 @@ func (s *SAMLService) ParseACSResponse(r *http.Request, possibleRequestIDs []str
 		"groups", out.Groups,
 		"group_attr_name", cfg.AttributeMapping.Groups,
 		"role_rules", len(cfg.RoleRules),
+		"all_attr_names", attrNames,
 	)
 	return out, nil
 }

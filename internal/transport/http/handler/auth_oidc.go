@@ -57,10 +57,16 @@ func (h *AuthOIDCHandler) Login(c *gin.Context) {
 		return
 	}
 	returnTo := sanitizeReturnTo(c.Query("return_to"), "/user/me")
+	// Match the Secure-flag policy used for the JWT session cookies below:
+	// when the panel is reached over HTTPS (directly or behind a TLS-
+	// terminating proxy), the one-time OIDC cookies should also be Secure
+	// so they can't leak over a downgrade. HttpOnly+SameSite=Lax already
+	// give CSRF protection; Secure closes the network-layer hole.
+	secure := isHTTPS(c)
 	c.SetSameSite(http.SameSiteLaxMode)
-	c.SetCookie(cookieOIDCState, state, oidcCookieTTL, "/", "", false, true)
-	c.SetCookie(cookieOIDCNonce, nonce, oidcCookieTTL, "/", "", false, true)
-	c.SetCookie(cookieOIDCRet, returnTo, oidcCookieTTL, "/", "", false, true)
+	c.SetCookie(cookieOIDCState, state, oidcCookieTTL, "/", "", secure, true)
+	c.SetCookie(cookieOIDCNonce, nonce, oidcCookieTTL, "/", "", secure, true)
+	c.SetCookie(cookieOIDCRet, returnTo, oidcCookieTTL, "/", "", secure, true)
 	c.Redirect(http.StatusFound, url)
 }
 
@@ -86,9 +92,13 @@ func (h *AuthOIDCHandler) Callback(c *gin.Context) {
 		c.Redirect(http.StatusFound, "/sso-error?error=auth_failed&description=Missing+authorization+code")
 		return
 	}
-	// Clear the one-time cookies regardless of outcome.
-	c.SetCookie(cookieOIDCState, "", -1, "/", "", false, true)
-	c.SetCookie(cookieOIDCNonce, "", -1, "/", "", false, true)
+	// Clear the one-time cookies regardless of outcome. Secure flag must
+	// match the one used when setting them; otherwise some browsers
+	// won't recognize the deletion and the stale cookie lingers. Declared
+	// once at this point so the later JWT cookie sets reuse it.
+	secure := isHTTPS(c)
+	c.SetCookie(cookieOIDCState, "", -1, "/", "", secure, true)
+	c.SetCookie(cookieOIDCNonce, "", -1, "/", "", secure, true)
 
 	assertion, err := h.oidc.Exchange(c.Request.Context(), code, nonce)
 	if err != nil {
@@ -153,13 +163,12 @@ func (h *AuthOIDCHandler) Callback(c *gin.Context) {
 		return
 	}
 
-	secure := isHTTPS(c)
 	c.SetSameSite(http.SameSiteLaxMode)
 	c.SetCookie(CookieAccessToken, access, int(h.auth.AccessTTL().Seconds()), "/", "", secure, true)
 	c.SetCookie(CookieRefreshToken, refresh, int(h.auth.RefreshTTL().Seconds()), "/", "", secure, true)
 
 	returnTo, _ := c.Cookie(cookieOIDCRet)
-	c.SetCookie(cookieOIDCRet, "", -1, "/", "", false, true)
+	c.SetCookie(cookieOIDCRet, "", -1, "/", "", secure, true)
 	if returnTo == "" {
 		returnTo = "/user/me"
 	}
