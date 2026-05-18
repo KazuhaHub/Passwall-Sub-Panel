@@ -19,16 +19,37 @@ Restart=on-failure
 RestartSec=5
 LimitNOFILE=65536
 
+# Logs go to the systemd journal; view with `journalctl -u passwall-sub-panel -f`.
+StandardOutput=journal
+StandardError=journal
+
+# Resource caps. Defaults are fine for self-hosted scale; bump if your
+# panel manages a large fleet and you see OOMs in `systemctl status`.
+MemoryMax=512M
+TasksMax=4096
+
 # Hardening
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/opt/psp/data
+# /opt/psp/config: first-launch writes a generated config.yaml here when
+# none exists, and the panel rewrites the YAML on settings edits unless
+# you have switched fully to the DB-backed settings_kv path. Without this
+# path being writable the panel will refuse to start (read-only fs).
+# /opt/psp/data: SQLite snapshot dumps, exported reports, etc.
+ReadWritePaths=/opt/psp/config /opt/psp/data
 PrivateTmp=true
 PrivateDevices=true
 ProtectKernelTunables=true
 ProtectKernelModules=true
 ProtectControlGroups=true
+# Restrict the syscall surface to the typical Go binary set; drop @debug
+# / @raw-io / @reboot / @swap / @mount which we never need.
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictRealtime=true
+LockPersonality=true
 
 [Install]
 WantedBy=multi-user.target

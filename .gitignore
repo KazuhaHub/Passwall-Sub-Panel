@@ -47,8 +47,16 @@ internal/web/dist/*
 
 # Reference YAML containing real credentials - never commit.
 user_*.yaml
+# Local-only reference / scratch space for real configs; never committed.
 samples/
 private/
+
+# Standalone build artifacts in the repo root (we only ship binaries
+# under local-build/ or from CI). Catches stray reset-admin-password.exe
+# / migrate-db-v2.exe etc. — the broader *.exe rule above misses files
+# without the .exe suffix on non-Windows hosts.
+/migrate-db-v2*
+/reset-admin-password*
 
 # Editor/IDE
 .idea/

@@ -19,6 +19,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/config"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/migrate"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/seed"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/version"
 )
 
 func ensureDirs(cfg *config.Config) {
@@ -43,6 +44,15 @@ func main() {
 	// installs upgrade through each major in turn (vN-2 → vN-1 → vN).
 	if len(os.Args) > 1 && os.Args[1] == "migrate" {
 		os.Exit(migrate.Run(os.Args[2:]))
+	}
+	// `psp version` prints the version then exits — useful in scripts /
+	// CI to confirm the deployed binary matches the release tag.
+	if len(os.Args) > 1 && (os.Args[1] == "version" || os.Args[1] == "--version" || os.Args[1] == "-v") {
+		log.Printf("%s", version.String())
+		if version.BuildDate != "" {
+			log.Printf("built %s", version.BuildDate)
+		}
+		return
 	}
 
 	if os.Getenv("GIN_MODE") == "" {
@@ -73,7 +83,7 @@ func main() {
 
 	errCh := make(chan error, 1)
 	go func() {
-		log.Printf("Passwall-Sub-Panel listening on %s", cfg.Listen)
+		log.Printf("Passwall-Sub-Panel %s listening on %s", version.String(), cfg.Listen)
 		if err := a.Run(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			errCh <- err
 		}
