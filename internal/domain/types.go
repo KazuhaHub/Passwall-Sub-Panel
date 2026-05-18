@@ -558,3 +558,19 @@ type MailTemplate struct {
 	Enabled   bool
 	UpdatedAt time.Time
 }
+
+// EmailLog is a row from the mail_sent table joined with the recipient
+// user — surfaced to admin's Logs → Email tab so an outgoing reminder
+// has a verifiable audit trail (matches the SubLog / AuditEntry pattern).
+// The (user_id, kind, window_key) trio comes from mail_sent's unique
+// index so the same notification window only ever produces one log row.
+type EmailLog struct {
+	ID          int64
+	UserID      int64
+	UserUPN     string
+	UserDisplay string
+	ToEmail     string
+	Kind        MailReminderKind
+	WindowKey   string
+	SentAt      time.Time
+}

@@ -495,6 +495,7 @@
     "title": "日志管理",
     "tab_sub": "订阅日志",
     "tab_audit": "审计日志",
+    "tab_email": "邮件日志",
     "retention_label": "订阅日志保留天数",
     "retention_save": "保存",
     "retention_saved": "保留天数已更新",
@@ -518,6 +519,13 @@
       "ip": "IP",
       "at": "时间"
     },
+    "email_table": {
+      "id": "ID",
+      "user": "用户",
+      "to": "收件人",
+      "kind": "类型",
+      "at": "发送时间"
+    },
     "filter": {
       "actor": "操作者",
       "action": "动作"
@@ -530,7 +538,9 @@
       "clear_sub_title": "清空订阅日志",
       "clear_sub_message": "确定清空所有订阅日志？此操作不可恢复。",
       "clear_audit_title": "清空审计日志",
-      "clear_audit_message": "确定清空所有审计日志？此操作不可恢复。"
+      "clear_audit_message": "确定清空所有审计日志？此操作不可恢复。",
+      "clear_email_title": "清空邮件日志",
+      "clear_email_message": "确定清空所有邮件日志？此操作不可恢复。"
     },
     "toast": {
       "cleared": "已清空",
@@ -620,9 +630,7 @@
     "import_validate": "请填写连接地址和 Region",
     "create_separator_dialog": {
       "title": "新增分隔标题",
-      "hint": "分隔标题以 DIRECT 形式出现在客户端的节点列表中，仅用于视觉分组，不参与 3X-UI、流量统计、健康检查。可用区域/标签控制它出现在哪些用户的订阅里。",
-      "region_hint": "可留空。如果分组按 region 过滤，填上才会在对应分组里出现。",
-      "tags_hint": "从已有标签里选，或输入新标签后按回车。tag_filter 匹配会让该分隔出现在对应分组里。"
+      "hint": "分隔标题以 DIRECT 形式出现在客户端的节点列表中，仅用于视觉分组，不参与 3X-UI、流量统计、健康检查。在哪些分组里显示由下方\"显示在所有分组\"开关 + 分组选择决定，跟节点的 tag_filter 无关。"
     },
     "edit_separator_dialog": {
       "title": "编辑分隔标题"
@@ -976,7 +984,7 @@
       "tags": "Tag 条件",
       "region": "Region",
       "tag": "Tag",
-      "server": "Server",
+      "node": "Node",
       "custom_conditions": "自定义条件",
       "remark": "备注"
     },

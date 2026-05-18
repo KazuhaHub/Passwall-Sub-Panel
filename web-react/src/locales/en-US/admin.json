@@ -495,6 +495,7 @@
     "title": "Logs",
     "tab_sub": "Subscription logs",
     "tab_audit": "Audit logs",
+    "tab_email": "Email logs",
     "retention_label": "Subscription log retention (days)",
     "retention_save": "Save",
     "retention_saved": "Retention updated",
@@ -518,6 +519,13 @@
       "ip": "IP",
       "at": "Time"
     },
+    "email_table": {
+      "id": "ID",
+      "user": "User",
+      "to": "Recipient",
+      "kind": "Kind",
+      "at": "Sent at"
+    },
     "filter": {
       "actor": "Actor",
       "action": "Action"
@@ -530,7 +538,9 @@
       "clear_sub_title": "Clear subscription logs",
       "clear_sub_message": "Clear all subscription logs? This cannot be undone.",
       "clear_audit_title": "Clear audit logs",
-      "clear_audit_message": "Clear all audit logs? This cannot be undone."
+      "clear_audit_message": "Clear all audit logs? This cannot be undone.",
+      "clear_email_title": "Clear email logs",
+      "clear_email_message": "Clear all email logs? This cannot be undone."
     },
     "toast": {
       "cleared": "Cleared",
@@ -620,9 +630,7 @@
     "import_validate": "Address and Region are required",
     "create_separator_dialog": {
       "title": "New separator",
-      "hint": "Separators render as a DIRECT proxy in client node lists for visual grouping only. They don't participate in 3X-UI, traffic accounting, or health checks. Use Region / Tags to control which user subscriptions they appear in.",
-      "region_hint": "Optional. When a group filters by region, only matching separators are emitted.",
-      "tags_hint": "Pick from existing tags, or type a new tag and hit Enter. tag_filter matches make the separator appear inside the corresponding group."
+      "hint": "Separators render as a DIRECT proxy in client node lists for visual grouping only. They don't participate in 3X-UI, traffic accounting, or health checks. Which groups display them is controlled by the \"Show in all groups\" toggle + group picker below — not by node tag_filter."
     },
     "edit_separator_dialog": {
       "title": "Edit separator"
@@ -750,7 +758,12 @@
       "flow": "Flow (optional)",
       "region": "Region",
       "tags": "Tags",
-      "sort_order": "Sort weight"
+      "sort_order": "Sort weight",
+      "sort_order_hint": "Shares one ordering scale with real nodes; on a tie the separator sits above the node it labels.",
+      "enabled": "Enabled",
+      "separator_show_in_all": "Show in all groups",
+      "separator_groups": "Show in these groups",
+      "separator_groups_hint": "Ignored when \"Show in all groups\" is on. Leaving this empty (with the toggle off) hides the separator from every group."
     },
     "action": {
       "edit": "Edit",
@@ -976,7 +989,7 @@
       "tags": "Tag conditions",
       "region": "Region",
       "tag": "Tag",
-      "server": "Server",
+      "node": "Node",
       "custom_conditions": "Custom conditions",
       "remark": "Remark"
     },

@@ -32,6 +32,7 @@ import { useTranslation } from 'react-i18next'
 
 import { clearAudit, listAudit, type AuditEntry } from '@/api/audit'
 import { clearSubLogs, getSubLogs, purgeSubLogs, type SubLog } from '@/api/subLogs'
+import { clearEmailLogs, getEmailLogs, purgeEmailLogs, type EmailLog } from '@/api/emailLogs'
 import { getUISettings, putUISettings } from '@/api/settings'
 import { confirm } from '@/components/ConfirmHost'
 import { pushSnack } from '@/components/SnackbarHost'
@@ -69,7 +70,7 @@ export default function LogsView() {
   const { t } = useTranslation(['admin', 'common'])
   const panelTz = useSiteStore(s => s.timezone)
 
-  const [tab, setTab] = useTabParam<'sub' | 'audit'>('tab', 'sub', ['sub', 'audit'])
+  const [tab, setTab] = useTabParam<'sub' | 'audit' | 'email'>('tab', 'sub', ['sub', 'audit', 'email'])
 
   // Sub logs
   const [subItems, setSubItems] = useState<SubLog[]>([])
@@ -113,11 +114,45 @@ export default function LogsView() {
   const [auditDetailOpen, setAuditDetailOpen] = useState(false)
   const [auditDetail, setAuditDetail] = useState<AuditEntry | null>(null)
 
+  // Email logs — successful outbound notifications recorded by the
+  // mailer service (mail_sent table). Same pagination + clear/purge
+  // pattern as sub logs; retention is admin-tunable separately under
+  // notify settings (MailSentRetentionDays, default 30 days).
+  const [emailItems, setEmailItems] = useState<EmailLog[]>([])
+  const [emailTotal, setEmailTotal] = useState(0)
+  const [emailPage, setEmailPage] = useState(1)
+  const [emailLoading, setEmailLoading] = useState(false)
+  const [emailDetailOpen, setEmailDetailOpen] = useState(false)
+  const [emailDetail, setEmailDetail] = useState<EmailLog | null>(null)
+  const [emailRetentionDays, setEmailRetentionDays] = useState<number | null>(null)
+  const [emailRetentionSavedDays, setEmailRetentionSavedDays] = useState<number | null>(null)
+  const [emailRetentionSaving, setEmailRetentionSaving] = useState(false)
+  useEffect(() => {
+    void (async () => {
+      try {
+        const s = await getUISettings()
+        setEmailRetentionDays(s.mail_sent_retention_days)
+        setEmailRetentionSavedDays(s.mail_sent_retention_days)
+      } catch { /* toasted */ }
+    })()
+  }, [])
+  async function saveEmailRetention() {
+    if (emailRetentionDays === null) return
+    setEmailRetentionSaving(true)
+    try {
+      const s = await getUISettings()
+      const updated = await putUISettings({ ...s, mail_sent_retention_days: emailRetentionDays })
+      setEmailRetentionSavedDays(updated.mail_sent_retention_days)
+      pushSnack(t('admin:logs.retention_saved'), 'success')
+    } finally { setEmailRetentionSaving(false) }
+  }
+
   useEffect(() => {
     if (tab === 'sub') void loadSub()
-    else void loadAudit()
+    else if (tab === 'audit') void loadAudit()
+    else void loadEmail()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab, subPage, auditPage])
+  }, [tab, subPage, auditPage, emailPage])
 
   async function loadSub() {
     setSubLoading(true)
@@ -172,8 +207,36 @@ export default function LogsView() {
 
   function onAuditFilter(e: FormEvent) { e.preventDefault(); setAuditPage(1); void loadAudit() }
 
+  async function loadEmail() {
+    setEmailLoading(true)
+    try {
+      const res = await getEmailLogs({ page: emailPage, page_size: PAGE_SIZE })
+      setEmailItems(res.items); setEmailTotal(res.total)
+    } finally { setEmailLoading(false) }
+  }
+
+  async function clearEmailAll() {
+    const ok = await confirm({
+      title: t('admin:logs.confirm.clear_email_title'),
+      message: t('admin:logs.confirm.clear_email_message'),
+      destructive: true,
+      confirmText: t('admin:logs.clear_all'),
+    })
+    if (!ok) return
+    await clearEmailLogs()
+    pushSnack(t('admin:logs.toast.cleared'), 'success')
+    await loadEmail()
+  }
+
+  async function purgeEmailOld() {
+    const r = await purgeEmailLogs()
+    pushSnack(t('admin:logs.toast.purged', { count: r.deleted }), 'success')
+    await loadEmail()
+  }
+
   const subPages = Math.max(1, Math.ceil(subTotal / PAGE_SIZE))
   const auditPages = Math.max(1, Math.ceil(auditTotal / PAGE_SIZE))
+  const emailPages = Math.max(1, Math.ceil(emailTotal / PAGE_SIZE))
 
   return (
     <Box sx={{ p: 3 }}>
@@ -181,6 +244,7 @@ export default function LogsView() {
       <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ mb: 2, borderBottom: `1px solid ${md.outlineVariant}` }}>
         <Tab value="sub" label={t('admin:logs.tab_sub')} />
         <Tab value="audit" label={t('admin:logs.tab_audit')} />
+        <Tab value="email" label={t('admin:logs.tab_email')} />
       </Tabs>
 
       {tab === 'sub' && (
@@ -331,6 +395,101 @@ export default function LogsView() {
           </Card>
         </>
       )}
+
+      {tab === 'email' && (
+        <>
+          <Box sx={{ display: 'flex', gap: 1, mb: 2, alignItems: 'center', flexWrap: 'wrap' }}>
+            <Button variant="outlined" startIcon={<CleaningIcon />} onClick={purgeEmailOld}>
+              {t('admin:logs.purge_old')}
+            </Button>
+            <Button variant="outlined" color="error" startIcon={<DeleteIcon />} onClick={clearEmailAll}>
+              {t('admin:logs.clear_all')}
+            </Button>
+            <Box sx={{ flex: 1 }} />
+            <TextField
+              type="number" size="small"
+              label={t('admin:logs.retention_label')}
+              value={emailRetentionDays ?? ''}
+              onChange={(e: ChangeEvent<HTMLInputElement>) => setEmailRetentionDays(e.target.value === '' ? null : Number(e.target.value))}
+              inputProps={{ min: 0 }}
+              sx={{ width: 200 }}
+            />
+            <Button variant="contained"
+              disabled={emailRetentionSaving || emailRetentionDays === null || emailRetentionDays === emailRetentionSavedDays}
+              onClick={saveEmailRetention}>
+              {t('admin:logs.retention_save')}
+            </Button>
+          </Box>
+          <Typography variant="body2" sx={{ mb: 2, color: md.onSurfaceVariant, fontSize: 12 }}>
+            {t('admin:logs.retention_hint')}
+          </Typography>
+          <Card sx={{ bgcolor: md.surfaceContainerLow, boxShadow: '0 1px 2px rgba(0,0,0,.3),0 1px 3px 1px rgba(0,0,0,.15)', overflow: 'hidden' }}>
+            <TableContainer>
+              <Table>
+                <TableHead>
+                  <TableRow sx={{ '& th': { color: md.onSurfaceVariant, fontWeight: 500, fontSize: 12, textTransform: 'uppercase', letterSpacing: '.5px', borderBottom: `1px solid ${md.outlineVariant}`, whiteSpace: 'nowrap' } }}>
+                    <TableCell>{t('admin:logs.email_table.id')}</TableCell>
+                    <TableCell>{t('admin:logs.email_table.user')}</TableCell>
+                    <TableCell>{t('admin:logs.email_table.to')}</TableCell>
+                    <TableCell>{t('admin:logs.email_table.kind')}</TableCell>
+                    <TableCell>{t('admin:logs.email_table.at')}</TableCell>
+                    <TableCell align="right" />
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {emailLoading && emailItems.length === 0 && (
+                    <TableRow><TableCell colSpan={6} sx={{ textAlign: 'center', py: 6 }}><CircularProgress size={24} /></TableCell></TableRow>
+                  )}
+                  {!emailLoading && emailItems.length === 0 && (
+                    <TableRow><TableCell colSpan={6} sx={{ textAlign: 'center', py: 6, color: md.onSurfaceVariant }}>—</TableCell></TableRow>
+                  )}
+                  {emailItems.map(r => (
+                    <TableRow key={r.id} hover sx={{ '& td': { borderBottom: `1px solid ${md.outlineVariant}` } }}>
+                      <TableCell sx={{ fontSize: 13, color: md.onSurfaceVariant }}>{r.id}</TableCell>
+                      <TableCell sx={{ fontWeight: 500 }}>{r.user_upn || `#${r.user_id}`}</TableCell>
+                      <TableCell sx={{ fontSize: 13 }}>{r.to_email}</TableCell>
+                      <TableCell sx={{ fontSize: 13 }}>{r.kind}</TableCell>
+                      <TableCell sx={{ fontSize: 13, whiteSpace: 'nowrap' }}>{formatDualTz(r.sent_at, panelTz)}</TableCell>
+                      <TableCell align="right">
+                        <Tooltip title={t('admin:logs.view_detail')}>
+                          <IconButton size="small" onClick={() => { setEmailDetail(r); setEmailDetailOpen(true) }}>
+                            <VisibilityIcon fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </TableContainer>
+            {emailPages > 1 && (
+              <Box sx={{ display: 'flex', justifyContent: 'center', py: 2, borderTop: `1px solid ${md.outlineVariant}` }}>
+                <Pagination count={emailPages} page={emailPage} onChange={(_, p) => setEmailPage(p)} shape="rounded" color="primary" />
+              </Box>
+            )}
+          </Card>
+        </>
+      )}
+
+      {/* Email log detail */}
+      <Dialog open={emailDetailOpen} onClose={() => setEmailDetailOpen(false)}
+        PaperProps={{ sx: { borderRadius: 3, bgcolor: md.surfaceContainerHigh, width: 600, maxWidth: '95vw' } }}>
+        <DialogTitle>{t('admin:logs.view_detail')} #{emailDetail?.id}</DialogTitle>
+        <DialogContent>
+          {emailDetail && (
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5, fontSize: 13 }}>
+              <Row label="User" value={emailDetail.user_upn || `#${emailDetail.user_id}`} md={md} />
+              <Row label="To" value={emailDetail.to_email} mono md={md} />
+              <Row label="Kind" value={emailDetail.kind} md={md} />
+              <Row label="Window" value={emailDetail.window_key} mono md={md} />
+              <Row label="Sent at" value={formatDualTz(emailDetail.sent_at, panelTz)} md={md} />
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button variant="contained" onClick={() => setEmailDetailOpen(false)}>{t('common:actions.ok')}</Button>
+        </DialogActions>
+      </Dialog>
 
       {/* Sub log detail */}
       <Dialog open={subDetailOpen} onClose={() => setSubDetailOpen(false)}

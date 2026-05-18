@@ -358,6 +358,11 @@ type UISettings struct {
 	// SubLogRetentionDays controls automatic subscription log cleanup.
 	// 0 means never delete logs automatically. Default 7.
 	SubLogRetentionDays int `yaml:"sub_log_retention_days" json:"sub_log_retention_days"`
+	// MailSentRetentionDays controls automatic email-log (mail_sent) cleanup.
+	// 0 means never delete. Default 30 — short enough that the audit trail
+	// stays compact, long enough to investigate "did I get the renewal
+	// reminder last month?".
+	MailSentRetentionDays int `yaml:"mail_sent_retention_days" json:"mail_sent_retention_days"`
 	// SubBlockAutoDisable enables automatic account disabling when user uses blocked clients.
 	SubBlockAutoDisable bool `yaml:"sub_block_auto_disable" json:"sub_block_auto_disable"`
 	// SubBlockAutoDisableCount is the number of violations before auto-disabling. Default 3.
@@ -463,6 +468,22 @@ type MailRepo interface {
 	SaveTemplate(ctx context.Context, t *domain.MailTemplate) error
 	HasSent(ctx context.Context, userID int64, kind domain.MailReminderKind, windowKey string) (bool, error)
 	RecordSent(ctx context.Context, userID int64, kind domain.MailReminderKind, windowKey, toEmail string) error
+	// Audit-style readers over the same mail_sent table — surfaced to
+	// admin's Logs → Email tab. ListSent / ClearSent / DeleteSentBefore
+	// mirror the SubLogRepo verb names so the handler / cron code uses
+	// the same shape across log tables.
+	ListSent(ctx context.Context, filter EmailLogFilter) ([]*domain.EmailLog, int64, error)
+	ClearSent(ctx context.Context) error
+	DeleteSentBefore(ctx context.Context, cutoff time.Time) (int64, error)
+}
+
+// EmailLogFilter mirrors SubLogFilter — pagination + optional narrowing
+// by user_id / time range. Used by the admin Email logs tab.
+type EmailLogFilter struct {
+	Pagination
+	UserID *int64
+	Since  *time.Time
+	Until  *time.Time
 }
 
 // SAMLConfigRepo persists the panel's SAML/SSO configuration in the

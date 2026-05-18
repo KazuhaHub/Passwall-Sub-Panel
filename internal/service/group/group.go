@@ -145,10 +145,17 @@ func matchOne(n *domain.Node, cond string) bool {
 			return strings.EqualFold(n.Region, val)
 		case "tag":
 			return n.HasTag(val)
+		case "node", "server":
+			// node:<address> matches the node's ServerAddress — the
+			// hostname clients connect to. "server" is the legacy alias
+			// (the field was named "Server" in the admin UI before
+			// v3.0.0-beta.11) kept here so any group stored under the
+			// old prefix keeps working without a one-shot rewrite.
+			return strings.EqualFold(n.ServerAddress, val)
 		default:
-			// server:xxx / vendor:yyy / any custom key — stored as a tag
-			// verbatim. Reassemble from the trimmed parts so "server: foo"
-			// still matches a stored "server:foo".
+			// vendor:gcp / any unknown custom key — stored as a tag
+			// verbatim. Reassemble from the trimmed parts so
+			// "vendor: gcp" still matches a stored "vendor:gcp".
 			return n.HasTag(key + ":" + val)
 		}
 	}

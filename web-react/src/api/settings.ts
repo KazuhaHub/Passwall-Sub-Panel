@@ -99,6 +99,9 @@ export interface UISettings {
    *  everything. Renamed from traffic_snapshot_retention_days in
    *  v3.0.0-beta.6 when the rollup pipeline landed. */
   traffic_history_days: number
+  /** Auto-prune cutoff for the mail_sent table (Logs → Email tab).
+   *  0 disables auto-prune. Default 30. */
+  mail_sent_retention_days: number
 }
 
 export async function getUISettings() {

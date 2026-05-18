@@ -58,6 +58,7 @@ type settingsDTO struct {
 	SubImportClients           []ports.SubImportClient  `json:"sub_import_clients"`
 	SubImportTutorialURL       string                   `json:"sub_import_tutorial_url"`
 	SubLogRetentionDays        int                      `json:"sub_log_retention_days"`
+	MailSentRetentionDays      int                      `json:"mail_sent_retention_days"`
 	SubBlockAutoDisable        bool                     `json:"sub_block_auto_disable"`
 	SubBlockAutoDisableCount   int                      `json:"sub_block_auto_disable_count"`
 	SubUpdateIntervalHours     int                      `json:"sub_update_interval_hours"`
@@ -124,6 +125,7 @@ func (h *AdminSettingsHandler) Get(c *gin.Context) {
 		SubImportClients:           s.SubImportClients,
 		SubImportTutorialURL:       s.SubImportTutorialURL,
 		SubLogRetentionDays:        s.SubLogRetentionDays,
+		MailSentRetentionDays:      s.MailSentRetentionDays,
 		SubBlockAutoDisable:        s.SubBlockAutoDisable,
 		SubBlockAutoDisableCount:   s.SubBlockAutoDisableCount,
 		SubUpdateIntervalHours:     s.SubUpdateIntervalHours,
@@ -190,6 +192,7 @@ func (h *AdminSettingsHandler) Put(c *gin.Context) {
 		SubImportClients:           normalizeSubImportClients(req.SubImportClients),
 		SubImportTutorialURL:       strings.TrimSpace(req.SubImportTutorialURL),
 		SubLogRetentionDays:        req.SubLogRetentionDays,
+		MailSentRetentionDays:      req.MailSentRetentionDays,
 		SubBlockAutoDisable:        req.SubBlockAutoDisable,
 		SubBlockAutoDisableCount:   req.SubBlockAutoDisableCount,
 		SubUpdateIntervalHours:     req.SubUpdateIntervalHours,
@@ -283,6 +286,7 @@ func (h *AdminSettingsHandler) Put(c *gin.Context) {
 		SubImportClients:           s.SubImportClients,
 		SubImportTutorialURL:       s.SubImportTutorialURL,
 		SubLogRetentionDays:        s.SubLogRetentionDays,
+		MailSentRetentionDays:      s.MailSentRetentionDays,
 		SubBlockAutoDisable:        s.SubBlockAutoDisable,
 		SubBlockAutoDisableCount:   s.SubBlockAutoDisableCount,
 		SubUpdateIntervalHours:     s.SubUpdateIntervalHours,

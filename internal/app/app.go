@@ -332,6 +332,7 @@ func (a *App) runAuditCleanupLoop(ctx context.Context) {
 		a.pruneAudit(ctx)
 		a.pruneSyncTasks(ctx)
 		a.pruneTrafficSnapshots(ctx)
+		a.pruneMailSent(ctx)
 		select {
 		case <-ctx.Done():
 			return
@@ -430,6 +431,33 @@ func (a *App) pruneTrafficSnapshots(ctx context.Context) {
 				log.Info("node traffic hourly cleanup", "deleted", nodeHourlyDeleted, "retention_days", settings.TrafficHistoryDays)
 			}
 		}
+	}
+}
+
+// pruneMailSent deletes mail_sent rows older than MailSentRetentionDays.
+// The table doubles as both a "already sent, don't resend" dedup key and
+// an admin-facing email audit log (Logs → Email tab), so retention is
+// admin-tunable in the notify settings rather than hardcoded.
+func (a *App) pruneMailSent(ctx context.Context) {
+	if a.settings == nil || a.repos.Mail == nil {
+		return
+	}
+	settings, err := a.settings.Load(ctx, ports.UISettings{})
+	if err != nil {
+		log.Warn("mail sent cleanup load settings", "err", err)
+		return
+	}
+	if settings.MailSentRetentionDays <= 0 {
+		return
+	}
+	cutoff := time.Now().AddDate(0, 0, -settings.MailSentRetentionDays)
+	deleted, err := a.repos.Mail.DeleteSentBefore(ctx, cutoff)
+	if err != nil {
+		log.Warn("mail sent cleanup", "err", err)
+		return
+	}
+	if deleted > 0 {
+		log.Info("mail sent cleanup", "deleted", deleted, "retention_days", settings.MailSentRetentionDays)
 	}
 }
 

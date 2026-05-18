@@ -63,8 +63,13 @@ const EMPTY_FORM: FormState = {
 
 // parseTagConditions splits a stored tag_filter.tags array into the four
 // buckets the UI exposes. The backend's matchOne dispatch handles
-// region:/tag:/server: prefixes specially, anything else (including bare
+// region:/tag:/node: prefixes specially, anything else (including bare
 // strings) is treated as a literal tag lookup — see internal/service/group.
+//
+// `server:` is the legacy spelling of `node:` (renamed in v3.0.0-beta.11
+// when the UI label moved from "Server" to "Node"). Existing stored
+// conditions read into the same bucket; on save they're rewritten to the
+// new prefix so the legacy form drains out naturally.
 function parseTagConditions(conds: string[]): {
   regions: string[]
   tags: string[]
@@ -81,7 +86,7 @@ function parseTagConditions(conds: string[]): {
       const val = s.slice(i + 1).trim()
       if (key === 'region') { out.regions.push(val); continue }
       if (key === 'tag') { out.tags.push(val); continue }
-      if (key === 'server') { out.servers.push(val); continue }
+      if (key === 'node' || key === 'server') { out.servers.push(val); continue }
     }
     out.custom.push(s)
   }
@@ -94,7 +99,7 @@ function buildTagConditions(f: FormState): string[] {
   const conds: string[] = []
   for (const r of f.regions) { const v = r.trim(); if (v) conds.push(`region:${v}`) }
   for (const tg of f.tags) { const v = tg.trim(); if (v) conds.push(`tag:${v}`) }
-  for (const sv of f.servers) { const v = sv.trim(); if (v) conds.push(`server:${v}`) }
+  for (const sv of f.servers) { const v = sv.trim(); if (v) conds.push(`node:${v}`) }
   for (const raw of f.custom_text.split(',')) {
     const v = raw.trim()
     if (v) conds.push(v)
@@ -529,7 +534,7 @@ export default function GroupsView() {
                   onChange={v => setForm({ ...form, tags: v })}
                 />
                 <MultiPicker
-                  label={t('admin:groups.field.server')}
+                  label={t('admin:groups.field.node')}
                   options={serverOptions}
                   value={form.servers}
                   onChange={v => setForm({ ...form, servers: v })}

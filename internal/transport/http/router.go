@@ -270,6 +270,11 @@ func NewRouter(d Deps) *gin.Engine {
 		staffGroup.GET("/sub-logs", subLogs.List)
 		adminGroup.DELETE("/sub-logs", subLogs.Clear)
 		adminGroup.POST("/sub-logs/purge", subLogs.Purge)
+
+		emailLogs := handler.NewAdminEmailLogHandler(d.Repos.Mail, d.Repos.Settings)
+		staffGroup.GET("/email-logs", emailLogs.List)
+		adminGroup.DELETE("/email-logs", emailLogs.Clear)
+		adminGroup.POST("/email-logs/purge", emailLogs.Purge)
 	}
 
 	// Static SPA bundle (embedded). Must be registered last so /api and

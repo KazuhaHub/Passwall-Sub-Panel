@@ -161,12 +161,21 @@ func (s *Service) rollupUser(ctx context.Context, cutoff time.Time) (int64, erro
 
 	rows := make([]map[string]any, 0, len(buckets))
 	for k, b := range buckets {
+		up, down, total := b.maxUp-b.minUp, b.maxDown-b.minDown, b.maxTotal-b.minTotal
+		// Skip "no traffic this hour" buckets — they'd be a row of zeros
+		// per (entity, hour) for every idle hour, which on a quiet panel
+		// can dominate the table without contributing to charts. Chart
+		// query treats missing buckets as zero, so dropping them is
+		// lossless.
+		if up == 0 && down == 0 && total == 0 {
+			continue
+		}
 		rows = append(rows, map[string]any{
 			"user_id":      k.UserID,
 			"bucket_start": k.BucketStart,
-			"up_bytes":     b.maxUp - b.minUp,
-			"down_bytes":   b.maxDown - b.minDown,
-			"total_bytes":  b.maxTotal - b.minTotal,
+			"up_bytes":     up,
+			"down_bytes":   down,
+			"total_bytes":  total,
 		})
 	}
 	return s.upsert(ctx, "traffic_snapshots_hourly", []string{"user_id", "bucket_start"}, rows)
@@ -255,15 +264,19 @@ func (s *Service) rollupClient(ctx context.Context, cutoff time.Time) (int64, er
 
 	rows := make([]map[string]any, 0, len(buckets))
 	for k, b := range buckets {
+		up, down, total := b.maxUp-b.minUp, b.maxDown-b.minDown, b.maxTotal-b.minTotal
+		if up == 0 && down == 0 && total == 0 {
+			continue
+		}
 		rows = append(rows, map[string]any{
 			"user_id":      b.userID,
 			"panel_id":     k.PanelID,
 			"inbound_id":   k.InboundID,
 			"client_email": k.ClientEmail,
 			"bucket_start": k.BucketStart,
-			"up_bytes":     b.maxUp - b.minUp,
-			"down_bytes":   b.maxDown - b.minDown,
-			"total_bytes":  b.maxTotal - b.minTotal,
+			"up_bytes":     up,
+			"down_bytes":   down,
+			"total_bytes":  total,
 		})
 	}
 	return s.upsert(ctx, "client_traffic_snapshots_hourly",
@@ -342,12 +355,16 @@ func (s *Service) rollupNode(ctx context.Context, cutoff time.Time) (int64, erro
 
 	rows := make([]map[string]any, 0, len(buckets))
 	for k, b := range buckets {
+		up, down, total := b.maxUp-b.minUp, b.maxDown-b.minDown, b.maxTotal-b.minTotal
+		if up == 0 && down == 0 && total == 0 {
+			continue
+		}
 		rows = append(rows, map[string]any{
 			"node_id":      k.NodeID,
 			"bucket_start": k.BucketStart,
-			"up_bytes":     b.maxUp - b.minUp,
-			"down_bytes":   b.maxDown - b.minDown,
-			"total_bytes":  b.maxTotal - b.minTotal,
+			"up_bytes":     up,
+			"down_bytes":   down,
+			"total_bytes":  total,
 		})
 	}
 	return s.upsert(ctx, "node_traffic_snapshots_hourly", []string{"node_id", "bucket_start"}, rows)

@@ -162,6 +162,7 @@ func settingDescriptors(s *ports.UISettings) []settingDescriptor {
 		boolField("sub", "sub_block_auto_disable", &s.SubBlockAutoDisable),
 		intField("sub", "sub_block_auto_disable_count", &s.SubBlockAutoDisableCount),
 		intField("sub", "sub_log_retention_days", &s.SubLogRetentionDays),
+		intField("notify", "mail_sent_retention_days", &s.MailSentRetentionDays),
 		strField("sub", "sub_import_tutorial_url", &s.SubImportTutorialURL),
 		jsonField("sub", "sub_client_rules", &s.SubClientRules),
 		jsonField("sub", "sub_import_clients", &s.SubImportClients),
@@ -308,6 +309,9 @@ func applyUISettingsDefaults(out, defaults ports.UISettings) ports.UISettings {
 	}
 	if out.SubLogRetentionDays <= 0 {
 		out.SubLogRetentionDays = 7
+	}
+	if out.MailSentRetentionDays <= 0 {
+		out.MailSentRetentionDays = 30
 	}
 	if out.AuditRetentionDays <= 0 {
 		out.AuditRetentionDays = 30

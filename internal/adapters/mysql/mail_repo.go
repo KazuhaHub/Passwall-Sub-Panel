@@ -9,6 +9,7 @@ import (
 	"gorm.io/gorm/clause"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 )
 
 type mailRepo struct{ db *gorm.DB }
@@ -84,4 +85,93 @@ func (r *mailRepo) RecordSent(ctx context.Context, userID int64, kind domain.Mai
 		SentAt:    time.Now(),
 	}
 	return r.db.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(row).Error
+}
+
+// ListSent paginates over mail_sent joined with users so admin's Logs →
+// Email tab can show "who got what kind of reminder". Same shape as
+// subLogRepo.List — filter on user_id / since / until, ORDER BY sent_at
+// DESC, pre-counted total for pagination.
+func (r *mailRepo) ListSent(ctx context.Context, filter ports.EmailLogFilter) ([]*domain.EmailLog, int64, error) {
+	if filter.PageSize <= 0 {
+		filter.PageSize = 50
+	}
+	if filter.Page < 1 {
+		filter.Page = 1
+	}
+
+	countQ := r.db.WithContext(ctx).Model(&mailSentRow{})
+	if filter.UserID != nil {
+		countQ = countQ.Where("user_id = ?", *filter.UserID)
+	}
+	if filter.Since != nil {
+		countQ = countQ.Where("sent_at >= ?", *filter.Since)
+	}
+	if filter.Until != nil {
+		countQ = countQ.Where("sent_at <= ?", *filter.Until)
+	}
+	var total int64
+	if err := countQ.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	type mailSentWithUser struct {
+		ID          int64
+		UserID      int64
+		Kind        string
+		WindowKey   string
+		ToEmail     string
+		SentAt      time.Time
+		UserUPN     string
+		UserDisplay string
+	}
+
+	q := r.db.WithContext(ctx).
+		Table("mail_sent").
+		Select("mail_sent.*, users.upn as user_upn, users.display_name as user_display").
+		Joins("LEFT JOIN users ON users.id = mail_sent.user_id")
+
+	if filter.UserID != nil {
+		q = q.Where("mail_sent.user_id = ?", *filter.UserID)
+	}
+	if filter.Since != nil {
+		q = q.Where("mail_sent.sent_at >= ?", *filter.Since)
+	}
+	if filter.Until != nil {
+		q = q.Where("mail_sent.sent_at <= ?", *filter.Until)
+	}
+
+	var rows []mailSentWithUser
+	if err := q.Order("mail_sent.sent_at DESC").
+		Limit(filter.PageSize).
+		Offset((filter.Page - 1) * filter.PageSize).
+		Find(&rows).Error; err != nil {
+		return nil, 0, err
+	}
+
+	out := make([]*domain.EmailLog, len(rows))
+	for i, row := range rows {
+		out[i] = &domain.EmailLog{
+			ID:          row.ID,
+			UserID:      row.UserID,
+			UserUPN:     row.UserUPN,
+			UserDisplay: row.UserDisplay,
+			ToEmail:     row.ToEmail,
+			Kind:        domain.MailReminderKind(row.Kind),
+			WindowKey:   row.WindowKey,
+			SentAt:      row.SentAt,
+		}
+	}
+	return out, total, nil
+}
+
+func (r *mailRepo) ClearSent(ctx context.Context) error {
+	return r.db.WithContext(ctx).Where("1 = 1").Delete(&mailSentRow{}).Error
+}
+
+// DeleteSentBefore prunes mail_sent rows older than cutoff. Mirrors
+// subLogRepo.DeleteBefore — driven by the MailSentRetentionDays setting,
+// runs in the same hourly maintenance loop as the other retention crons.
+func (r *mailRepo) DeleteSentBefore(ctx context.Context, cutoff time.Time) (int64, error) {
+	result := r.db.WithContext(ctx).Where("sent_at < ?", cutoff).Delete(&mailSentRow{})
+	return result.RowsAffected, result.Error
 }
