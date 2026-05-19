@@ -1148,8 +1148,29 @@ function QuickLinksEditor({ links, onChange, md }: { links: QuickLink[]; onChang
   )
 }
 
+// CLIENT_RULE_PRESETS mirrors defaultSubClientRules() in the Go side —
+// keep them in sync. The render_format choices follow that audit: clients
+// whose native subscription format is a base64 URI list (V2rayN-style)
+// land on "uri-list" even when the project's de-facto config language
+// is a Surge/Loon .conf, because uri-list at least gets nodes in. The
+// only mihomo-on-non-Clash mapping that stays is Quantumult X, whose
+// [server_remote] block does accept Clash YAML.
+const CLIENT_RULE_PRESETS: SubClientRule[] = [
+  { name: 'Clash / mihomo', keywords: ['clash', 'mihomo', 'meta'], render_format: 'mihomo', enabled: true },
+  { name: 'sing-box', keywords: ['sing-box'], render_format: 'sing-box', enabled: true },
+  { name: 'Surge', keywords: ['surge'], render_format: 'uri-list', enabled: true },
+  { name: 'Shadowrocket', keywords: ['shadowrocket'], render_format: 'uri-list', enabled: true },
+  { name: 'Loon', keywords: ['loon'], render_format: 'uri-list', enabled: true },
+  { name: 'Quantumult X', keywords: ['quantumult x', 'quantumultx'], render_format: 'mihomo', enabled: true },
+  { name: 'V2RayN', keywords: ['v2rayn', 'v2ray'], render_format: 'uri-list', enabled: true },
+  { name: 'Passwall (OpenWrt)', keywords: ['passwall'], render_format: 'uri-list', enabled: true },
+  { name: 'Stash', keywords: ['stash'], render_format: 'mihomo', enabled: true },
+  { name: 'Surfboard', keywords: ['surfboard'], render_format: 'mihomo', enabled: true },
+]
+
 function ClientRulesEditor({ rules, onChange, md }: { rules: SubClientRule[]; onChange: (v: SubClientRule[]) => void; md: MdShape }) {
   const { t } = useTranslation('admin')
+  const [presetAnchor, setPresetAnchor] = useState<HTMLElement | null>(null)
   const update = (i: number, patch: Partial<SubClientRule>) =>
     onChange(rules.map((r, idx) => idx === i ? { ...r, ...patch } : r))
   const remove = (i: number) => onChange(rules.filter((_, idx) => idx !== i))
@@ -1157,6 +1178,10 @@ function ClientRulesEditor({ rules, onChange, md }: { rules: SubClientRule[]; on
     ...rules,
     { name: '', keywords: [], render_format: 'mihomo', enabled: true },
   ])
+  const addPreset = (p: SubClientRule) => {
+    onChange([...rules, { ...p, keywords: [...p.keywords] }])
+    setPresetAnchor(null)
+  }
   return (
     <Card sx={{ p: 3, bgcolor: md.surfaceContainerLow, border: `1px solid ${md.outlineVariant}` }}>
       <Typography sx={{ fontWeight: 500, mb: 1.5, color: md.onSurface }}>{t('settings.subscription.section_clients')}</Typography>
@@ -1201,10 +1226,32 @@ function ClientRulesEditor({ rules, onChange, md }: { rules: SubClientRule[]; on
           ))}
         </Box>
       )}
-      <Box sx={{ mt: 2 }}>
+      <Box sx={{ mt: 2, display: 'flex', gap: 1.25 }}>
         <Button variant="outlined" size="small" startIcon={<AddIcon />} onClick={add}>
           {t('settings.subscription.add_rule')}
         </Button>
+        <Button variant="text" size="small" onClick={e => setPresetAnchor(e.currentTarget)}>
+          {t('settings.subscription.add_preset')}
+        </Button>
+        <Menu anchorEl={presetAnchor} open={!!presetAnchor} onClose={() => setPresetAnchor(null)}
+          PaperProps={{ sx: { maxHeight: 360 } }}>
+          {CLIENT_RULE_PRESETS.map(p => {
+            // Existence check by name to avoid double-adding. Disabled
+            // MenuItem still shows the row but won't re-trigger addPreset.
+            const exists = rules.some(r => r.name === p.name)
+            return (
+              <MenuItem key={p.name} disabled={exists} onClick={() => addPreset(p)}>
+                <Box>
+                  <Typography sx={{ fontSize: 14 }}>{p.name}</Typography>
+                  <Typography sx={{ fontSize: 12, opacity: 0.7 }}>
+                    {p.keywords.join(', ')} · {p.render_format}
+                    {exists ? ` · ${t('settings.subscription.preset_exists', { defaultValue: '已存在' })}` : ''}
+                  </Typography>
+                </Box>
+              </MenuItem>
+            )
+          })}
+        </Menu>
       </Box>
     </Card>
   )
