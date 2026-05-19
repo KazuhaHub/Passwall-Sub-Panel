@@ -36,7 +36,15 @@ func (s *Service) renderURIList(ctx context.Context, u *domain.User, items []ren
 	lines := make([]string, 0, len(items))
 	for _, it := range items {
 		if it.isSeparator {
-			continue // URI list has no concept of section dividers
+			// URI list has no native concept of section dividers, but
+			// every V2rayN-family client renders each URI's #fragment
+			// as the displayed node name. Emit a fake ss:// at
+			// 127.0.0.1:1 — same trick mihomo's emitSeparator uses —
+			// so the separator shows up as a labeled (non-connectable)
+			// row in the client's server list, preserving the visual
+			// grouping admins configured.
+			lines = append(lines, buildSeparatorURI(it.name))
+			continue
 		}
 		inb, err := s.fetchInbound(ctx, it.node)
 		if err != nil {
@@ -266,6 +274,15 @@ func buildTrojanURI(name, host string, port int, password string, stream xuiStre
 func buildSSURI(name, host string, port int, method, password string) string {
 	creds := base64.RawURLEncoding.EncodeToString([]byte(method + ":" + password))
 	return "ss://" + creds + "@" + joinHostPort(host, port) + "#" + url.PathEscape(name)
+}
+
+// buildSeparatorURI mirrors protocols.go's emitSeparator for the URI list
+// format: a fake Shadowsocks entry pointing at 127.0.0.1:1 so it shows up
+// in V2rayN/NG/Shadowrocket's node list as a labeled, non-connectable
+// row. Credentials match emitSeparator exactly so admins debugging the
+// two outputs see consistent values.
+func buildSeparatorURI(name string) string {
+	return buildSSURI(name, "127.0.0.1", 1, "chacha20-ietf-poly1305", "psp-separator")
 }
 
 // hysteria2Opts carries the optional knobs that influence the URI's
