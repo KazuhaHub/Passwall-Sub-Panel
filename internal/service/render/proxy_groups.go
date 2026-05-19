@@ -136,27 +136,27 @@ func proxyGroupChoices(name string) []string {
 	case strings.Contains(name, "中国大陆") ||
 		strings.Contains(name, "国内媒体") ||
 		strings.Contains(name, "哔哩哔哩") ||
-		strings.Contains(name, "谷歌FCM") ||
-		strings.Contains(name, "微软Bing") ||
 		strings.Contains(name, "微软云盘") ||
 		strings.Contains(name, "微软服务") ||
 		strings.Contains(name, "苹果服务") ||
-		strings.Contains(name, "网易音乐") ||
-		strings.Contains(name, "电报消息"):
+		strings.Contains(name, "网易音乐"):
 		return []string{"DIRECT", "🚀 节点选择", "@all"}
 	case strings.Contains(name, "国外媒体") ||
 		strings.Contains(name, "奈飞视频") ||
 		strings.Contains(name, "油管视频") ||
 		strings.Contains(name, "巴哈姆特") ||
 		strings.Contains(name, "游戏平台") ||
-		strings.Contains(name, "Ai平台"):
+		strings.Contains(name, "Ai平台") ||
+		strings.Contains(name, "电报消息") ||
+		strings.Contains(name, "微软Bing") ||
+		strings.Contains(name, "谷歌FCM"):
 		return []string{"🚀 节点选择", "@all", "DIRECT"}
 	case strings.Contains(name, "漏网之鱼"):
 		return []string{"🚀 节点选择", "DIRECT", "@all"}
 	default:
 		// Conservative default for user-defined groups that don't match
 		// any predefined case: DIRECT first, so an unrecognized group
-		// (e.g. "家里" / "公司 VPN") doesn't silently route traffic
+		// (e.g. "Home" / "Company VPN") doesn't silently route traffic
 		// through proxies. Users can switch to 🚀 节点选择 or a specific
 		// node from the Clash UI when they actually want to proxy.
 		return []string{"DIRECT", "🚀 节点选择", "@all"}

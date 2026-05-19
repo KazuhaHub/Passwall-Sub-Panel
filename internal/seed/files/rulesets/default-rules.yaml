@@ -4,6 +4,10 @@ sort: 10
 enabled: true
 proxy_group_order:
   - '🚀 节点选择'
+  # Pulled up under the main selector by user preference even though
+  # it still defaults to DIRECT — visual proximity to 🚀 节点选择
+  # matters more here than grouping strictly by default-target.
+  - '🇨🇳 中国大陆'
   # Default: 🚀 节点选择
   - '💬 Ai平台'
   - '📹 油管视频'
@@ -11,13 +15,12 @@ proxy_group_order:
   - '📺 巴哈姆特'
   - '🌍 国外媒体'
   - '🎮 游戏平台'
-  # Default: DIRECT
   - '📲 电报消息'
-  - '🇨🇳 中国大陆'
+  - 'Ⓜ️ 微软Bing'
+  - '📢 谷歌FCM'
+  # Default: DIRECT
   - '🌏 国内媒体'
   - '📺 哔哩哔哩'
-  - '📢 谷歌FCM'
-  - 'Ⓜ️ 微软Bing'
   - 'Ⓜ️ 微软云盘'
   - 'Ⓜ️ 微软服务'
   - '🍎 苹果服务'
