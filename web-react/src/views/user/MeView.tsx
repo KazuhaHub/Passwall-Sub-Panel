@@ -353,6 +353,13 @@ export default function MeView() {
     const intervalMinutes = intervalHours * 60
     return c.import_url_template
       .replaceAll('{{ sub_url_encoded }}', encodeURIComponent(subUrl))
+      // sub_url_b64 is raw base64 — fine for opaque schemes like sub://<b64>
+      // where the whole rest of the URL is the payload. sub_url_b64_url_encoded
+      // wraps it with encodeURIComponent so it can safely live inside a URL
+      // path segment (e.g. shadowrocket://add/sub/<b64>?remark=...): standard
+      // base64 contains '/' and '+', which would otherwise split the path
+      // or be misread as a literal space.
+      .replaceAll('{{ sub_url_b64_url_encoded }}', encodeURIComponent(subUrlB64))
       .replaceAll('{{ sub_url_b64 }}', subUrlB64)
       .replaceAll('{{ sub_url }}', subUrl)
       .replaceAll('{{ profile_name_encoded }}', encodeURIComponent(profileName))

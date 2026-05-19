@@ -487,11 +487,15 @@ func defaultSubImportClients() []ports.SubImportClient {
 			// documented via 3x-ui, Marzban, and other major panels.
 			// The bare sub:// scheme also works on Shadowrocket but
 			// can't carry a name, so prefer the explicit variant for
-			// our one-click import.
+			// our one-click import. sub_url_b64_url_encoded (not raw
+			// sub_url_b64) is required because standard base64 may
+			// contain '/', which the URL parser would interpret as a
+			// path separator — Shadowrocket then receives a truncated
+			// b64 payload and silently fails the import.
 			Name:              "Shadowrocket",
 			Platforms:         []string{"ios"},
 			RenderFormat:      "uri-list",
-			ImportURLTemplate: "shadowrocket://add/sub/{{ sub_url_b64 }}?remark={{ profile_name_encoded }}",
+			ImportURLTemplate: "shadowrocket://add/sub/{{ sub_url_b64_url_encoded }}?remark={{ profile_name_encoded }}",
 			InstallURL:        "https://apps.apple.com/app/shadowrocket/id932747118",
 			Enabled:           true,
 			Sort:              60,

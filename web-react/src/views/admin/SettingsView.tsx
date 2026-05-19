@@ -1358,7 +1358,9 @@ const IMPORT_CLIENT_PRESETS: Array<Omit<SubImportClient, 'sort' | 'enabled'>> = 
     // shadowrocket://add/sub/<b64-url>?remark=<name> is the documented
     // form (per 3x-ui / Marzban panels) that carries the profile name.
     // The bare sub://<b64> still works but can't communicate a name.
-    import_url_template: 'shadowrocket://add/sub/{{ sub_url_b64 }}?remark={{ profile_name_encoded }}',
+    // sub_url_b64_url_encoded percent-encodes the base64 so '/' (which
+    // would otherwise break path parsing) stays inside the segment.
+    import_url_template: 'shadowrocket://add/sub/{{ sub_url_b64_url_encoded }}?remark={{ profile_name_encoded }}',
     install_url: 'https://apps.apple.com/app/shadowrocket/id932747118',
     recommended_for: [],
   },
