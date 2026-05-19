@@ -277,6 +277,7 @@
       "section_imports": "One-click import clients",
       "add_rule": "Add rule",
       "add_client": "Add client",
+      "add_preset": "Add from preset…",
       "delete_row": "Delete",
       "no_rules": "No rules yet — click below to add one.",
       "no_clients": "No clients yet — click below to add one.",

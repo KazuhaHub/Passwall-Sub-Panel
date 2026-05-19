@@ -277,6 +277,7 @@
       "section_imports": "一键导入客户端",
       "add_rule": "新增规则",
       "add_client": "新增客户端",
+      "add_preset": "从预设添加…",
       "delete_row": "删除",
       "no_rules": "暂无规则，点击下方按钮添加。",
       "no_clients": "暂无客户端，点击下方按钮添加。",
