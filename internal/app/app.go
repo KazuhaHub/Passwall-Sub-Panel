@@ -146,6 +146,7 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 		User:        mysqlRepos.User,
 		Group:       mysqlRepos.Group,
 		Node:        mysqlRepos.Node,
+		Separator:   mysqlRepos.Separator,
 		Ownership:   mysqlRepos.Ownership,
 		Traffic:     mysqlRepos.Traffic,
 		NodeTraffic: mysqlRepos.NodeTraffic,
