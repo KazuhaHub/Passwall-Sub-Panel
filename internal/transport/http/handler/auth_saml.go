@@ -20,6 +20,20 @@ import (
 const (
 	CookieAccessToken  = "psp_access"
 	CookieRefreshToken = "psp_refresh"
+	// CookieAuthPath scopes every auth cookie set by this package to the
+	// /api/ tree. The old Path=/ value caused two real problems behind
+	// Cloudflare: the cookie was sent on /assets/* requests, which trips
+	// CF's "skip cache for requests with cookies" default and turned every
+	// hashed bundle into a MISS, and it also broadcast the JWT to any
+	// future non-API surface mounted at the root. Only handlers under
+	// /api/auth/* read these cookies, so /api is the narrowest path that
+	// still works for every auth flow.
+	//
+	// Cookies are keyed on (name, path, domain, secure) — if the path
+	// drifts between set and clear sites the browser keeps the original
+	// cookie alive until its natural TTL. Keep every SetCookie / clearing
+	// SetCookie call routed through this constant.
+	CookieAuthPath = "/api"
 )
 
 // AuthSAMLHandler exposes /api/auth/saml/{login,acs,metadata}.
@@ -137,8 +151,8 @@ func (h *AuthSAMLHandler) ACS(c *gin.Context) {
 
 	secure := isHTTPS(c)
 	c.SetSameSite(http.SameSiteLaxMode)
-	c.SetCookie(CookieAccessToken, access, int(h.auth.AccessTTL().Seconds()), "/", "", secure, true)
-	c.SetCookie(CookieRefreshToken, refresh, int(h.auth.RefreshTTL().Seconds()), "/", "", secure, true)
+	c.SetCookie(CookieAccessToken, access, int(h.auth.AccessTTL().Seconds()), CookieAuthPath, "", secure, true)
+	c.SetCookie(CookieRefreshToken, refresh, int(h.auth.RefreshTTL().Seconds()), CookieAuthPath, "", secure, true)
 
 	if returnTo == "" {
 		returnTo = "/user/me"

@@ -73,10 +73,10 @@ func (h *AuthOIDCHandler) Login(c *gin.Context) {
 	// give CSRF protection; Secure closes the network-layer hole.
 	secure := isHTTPS(c)
 	c.SetSameSite(http.SameSiteLaxMode)
-	c.SetCookie(cookieOIDCState, state, oidcCookieTTL, "/", "", secure, true)
-	c.SetCookie(cookieOIDCNonce, nonce, oidcCookieTTL, "/", "", secure, true)
-	c.SetCookie(cookieOIDCVerifier, verifier, oidcCookieTTL, "/", "", secure, true)
-	c.SetCookie(cookieOIDCRet, returnTo, oidcCookieTTL, "/", "", secure, true)
+	c.SetCookie(cookieOIDCState, state, oidcCookieTTL, CookieAuthPath, "", secure, true)
+	c.SetCookie(cookieOIDCNonce, nonce, oidcCookieTTL, CookieAuthPath, "", secure, true)
+	c.SetCookie(cookieOIDCVerifier, verifier, oidcCookieTTL, CookieAuthPath, "", secure, true)
+	c.SetCookie(cookieOIDCRet, returnTo, oidcCookieTTL, CookieAuthPath, "", secure, true)
 	c.Redirect(http.StatusFound, url)
 }
 
@@ -107,10 +107,10 @@ func (h *AuthOIDCHandler) Callback(c *gin.Context) {
 	// won't recognize the deletion and the stale cookie lingers. Declared
 	// once at this point so the later JWT cookie sets reuse it.
 	secure := isHTTPS(c)
-	c.SetCookie(cookieOIDCState, "", -1, "/", "", secure, true)
-	c.SetCookie(cookieOIDCNonce, "", -1, "/", "", secure, true)
+	c.SetCookie(cookieOIDCState, "", -1, CookieAuthPath, "", secure, true)
+	c.SetCookie(cookieOIDCNonce, "", -1, CookieAuthPath, "", secure, true)
 	pkceVerifier, _ := c.Cookie(cookieOIDCVerifier)
-	c.SetCookie(cookieOIDCVerifier, "", -1, "/", "", secure, true)
+	c.SetCookie(cookieOIDCVerifier, "", -1, CookieAuthPath, "", secure, true)
 
 	assertion, err := h.oidc.Exchange(c.Request.Context(), code, nonce, pkceVerifier)
 	if err != nil {
@@ -176,11 +176,11 @@ func (h *AuthOIDCHandler) Callback(c *gin.Context) {
 	}
 
 	c.SetSameSite(http.SameSiteLaxMode)
-	c.SetCookie(CookieAccessToken, access, int(h.auth.AccessTTL().Seconds()), "/", "", secure, true)
-	c.SetCookie(CookieRefreshToken, refresh, int(h.auth.RefreshTTL().Seconds()), "/", "", secure, true)
+	c.SetCookie(CookieAccessToken, access, int(h.auth.AccessTTL().Seconds()), CookieAuthPath, "", secure, true)
+	c.SetCookie(CookieRefreshToken, refresh, int(h.auth.RefreshTTL().Seconds()), CookieAuthPath, "", secure, true)
 
 	returnTo, _ := c.Cookie(cookieOIDCRet)
-	c.SetCookie(cookieOIDCRet, "", -1, "/", "", secure, true)
+	c.SetCookie(cookieOIDCRet, "", -1, CookieAuthPath, "", secure, true)
 	if returnTo == "" {
 		returnTo = "/user/me"
 	}

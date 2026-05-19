@@ -52,8 +52,8 @@ func (h *AuthSSOCompleteHandler) Complete(c *gin.Context) {
 	// natural TTL, so a logged-out user is still authenticated under
 	// the HttpOnly cookie path for the remaining 120 min access TTL.
 	secure := isHTTPS(c)
-	c.SetCookie(CookieAccessToken, "", -1, "/", "", secure, true)
-	c.SetCookie(CookieRefreshToken, "", -1, "/", "", secure, true)
+	c.SetCookie(CookieAccessToken, "", -1, CookieAuthPath, "", secure, true)
+	c.SetCookie(CookieRefreshToken, "", -1, CookieAuthPath, "", secure, true)
 
 	// Fetch the live user so the SPA receives the freshest display name.
 	liveUser, err := h.user.Get(c.Request.Context(), claims.UserID)
