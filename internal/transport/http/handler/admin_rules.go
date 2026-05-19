@@ -95,6 +95,13 @@ func (h *AdminRuleSetsHandler) Save(c *gin.Context) {
 
 func (h *AdminRuleSetsHandler) Delete(c *gin.Context) {
 	slug := c.Param("slug")
+	// Seeded rulesets are protected for the same reason as seeded
+	// templates — deletion would orphan a canonical default and the
+	// Reset button can't recover from a deleted slug.
+	if seed.HasSeededSlug("rulesets", slug) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Seeded ruleset cannot be deleted; use Reset to restore it instead"})
+		return
+	}
 	if err := h.repo.Delete(c.Request.Context(), slug); err != nil {
 		if errors.Is(err, domain.ErrValidation) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})

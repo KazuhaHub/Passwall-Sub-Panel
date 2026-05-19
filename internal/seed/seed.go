@@ -52,6 +52,16 @@ func RestoreBySlug(configDir, subdir, slug string) error {
 	return nil
 }
 
+// HasSeededSlug reports whether the binary carries an embedded YAML in
+// files/<subdir>/ whose slug: field matches the requested slug. Used by
+// admin write paths (Delete) to refuse mutations that would orphan a
+// canonical default — the Reset button only works as a recovery when
+// the slug still exists.
+func HasSeededSlug(subdir, slug string) bool {
+	_, _, err := findEmbedBySlug(subdir, slug)
+	return err == nil
+}
+
 // findEmbedBySlug returns (file body, file basename) for the entry in
 // files/<subdir>/ whose YAML `slug:` matches. ErrSeedNotFound when no
 // match is found.

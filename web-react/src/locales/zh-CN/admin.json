@@ -449,7 +449,9 @@
       "batch_delete_title": "批量删除配置方案",
       "batch_delete_message": "确定删除 {{count}} 个配置方案？"
     },
-    "reset_to_default": "恢复内置默认"
+    "reset_to_default": "恢复内置默认",
+    "cannot_delete_seeded": "内置默认配置方案不可删除，使用「恢复内置默认」可还原",
+    "duplicate": "复制为新的配置方案"
   },
   "sync_tasks": {
     "title": "同步任务",
@@ -623,7 +625,9 @@
       "batch_delete_title": "批量删除规则集",
       "batch_delete_message": "确定删除 {{count}} 个规则集？"
     },
-    "reset_to_default": "恢复内置默认"
+    "reset_to_default": "恢复内置默认",
+    "cannot_delete_seeded": "内置默认规则集不可删除，使用「恢复内置默认」可还原",
+    "duplicate": "复制为新的规则集"
   },
   "nodes": {
     "title": "节点管理",

@@ -449,7 +449,9 @@
       "batch_delete_title": "Delete templates",
       "batch_delete_message": "Delete {{count}} templates?"
     },
-    "reset_to_default": "Restore seeded default"
+    "reset_to_default": "Restore seeded default",
+    "cannot_delete_seeded": "Seeded templates can't be deleted — use Restore to recover the default content",
+    "duplicate": "Duplicate as a new template"
   },
   "sync_tasks": {
     "title": "Sync tasks",
@@ -623,7 +625,9 @@
       "batch_delete_title": "Delete rule sets",
       "batch_delete_message": "Delete {{count}} rule sets?"
     },
-    "reset_to_default": "Restore seeded default"
+    "reset_to_default": "Restore seeded default",
+    "cannot_delete_seeded": "Seeded rule sets can't be deleted — use Restore to recover the default content",
+    "duplicate": "Duplicate as a new rule set"
   },
   "nodes": {
     "title": "Nodes",

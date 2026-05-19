@@ -31,6 +31,7 @@ import {
   useTheme,
 } from '@mui/material'
 import AddIcon from '@mui/icons-material/Add'
+import ContentCopyIcon from '@mui/icons-material/ContentCopyOutlined'
 import DeleteIcon from '@mui/icons-material/DeleteOutline'
 import EditIcon from '@mui/icons-material/EditOutlined'
 import RestartAltIcon from '@mui/icons-material/RestartAlt'
@@ -134,6 +135,22 @@ export default function TemplatesView() {
   function openEdit(tpl: Template) {
     setEditing(true)
     setForm({ ...tpl, rule_sets: tpl.rule_sets ? [...tpl.rule_sets] : [] })
+    setDialogOpen(true)
+  }
+  // Duplicate clones the row into the create flow so the admin can
+  // tweak the slug + name before saving. is_default is forced off so
+  // the new copy doesn't fight the original for the per-client-type
+  // default — and so the seeded original keeps its protection /
+  // canonical-default semantics.
+  function openDuplicate(tpl: Template) {
+    setEditing(false)
+    setForm({
+      ...tpl,
+      slug: tpl.slug + '-copy',
+      name: tpl.name + ' (Copy)',
+      is_default: false,
+      rule_sets: tpl.rule_sets ? [...tpl.rule_sets] : [],
+    })
     setDialogOpen(true)
   }
 
@@ -310,7 +327,8 @@ export default function TemplatesView() {
               {items.map(tpl => (
                 <TableRow key={tpl.slug} hover sx={{ '& td': { borderBottom: `1px solid ${md.outlineVariant}`, whiteSpace: 'nowrap' } }}>
                   <TableCell padding="checkbox">
-                    <Checkbox checked={selected.has(tpl.slug)} disabled={tpl.is_default}
+                    <Checkbox checked={selected.has(tpl.slug)}
+                      disabled={tpl.is_default || SEEDED_TEMPLATE_SLUGS.includes(tpl.slug)}
                       onChange={(_, c) => toggleOne(tpl.slug, c)} />
                   </TableCell>
                   <TableCell sx={{ fontSize: 13 }}>{tpl.slug}</TableCell>
@@ -327,6 +345,12 @@ export default function TemplatesView() {
                     <Tooltip title={t('admin:templates.field.is_default')}>
                       <IconButton size="small" onClick={() => openEdit(tpl)}><EditIcon fontSize="small" /></IconButton>
                     </Tooltip>
+                    <Tooltip title={t('admin:templates.duplicate')}>
+                      <IconButton size="small" onClick={() => openDuplicate(tpl)}
+                        sx={{ color: md.onSurfaceVariant }}>
+                        <ContentCopyIcon fontSize="small" />
+                      </IconButton>
+                    </Tooltip>
                     {SEEDED_TEMPLATE_SLUGS.includes(tpl.slug) && (
                       <Tooltip title={t('admin:templates.reset_to_default')}>
                         <IconButton size="small" onClick={() => confirmReset(tpl)}
@@ -335,9 +359,12 @@ export default function TemplatesView() {
                         </IconButton>
                       </Tooltip>
                     )}
-                    <Tooltip title={t('admin:templates.batch_delete')}>
+                    <Tooltip title={SEEDED_TEMPLATE_SLUGS.includes(tpl.slug)
+                      ? t('admin:templates.cannot_delete_seeded')
+                      : t('admin:templates.batch_delete')}>
                       <span>
-                        <IconButton size="small" onClick={() => confirmDelete(tpl)} disabled={tpl.is_default}
+                        <IconButton size="small" onClick={() => confirmDelete(tpl)}
+                          disabled={tpl.is_default || SEEDED_TEMPLATE_SLUGS.includes(tpl.slug)}
                           sx={{ color: md.error }}>
                           <DeleteIcon fontSize="small" />
                         </IconButton>

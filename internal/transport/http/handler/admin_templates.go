@@ -104,6 +104,15 @@ func (h *AdminTemplatesHandler) Save(c *gin.Context) {
 
 func (h *AdminTemplatesHandler) Delete(c *gin.Context) {
 	slug := c.Param("slug")
+	// Seeded templates are protected — deletion would orphan a canonical
+	// default and break renders for users who never explicitly chose a
+	// different template. The "Reset to seeded default" button only
+	// works as recovery when the slug still exists, so a delete here
+	// would put the panel into an unrecoverable state.
+	if seed.HasSeededSlug("templates", slug) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Seeded template cannot be deleted; use Reset to restore it instead"})
+		return
+	}
 	if err := h.repo.Delete(c.Request.Context(), slug); err != nil {
 		if errors.Is(err, domain.ErrValidation) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})

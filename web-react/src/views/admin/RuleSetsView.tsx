@@ -24,6 +24,7 @@ import {
   useTheme,
 } from '@mui/material'
 import AddIcon from '@mui/icons-material/Add'
+import ContentCopyIcon from '@mui/icons-material/ContentCopyOutlined'
 import DeleteIcon from '@mui/icons-material/DeleteOutline'
 import RestartAltIcon from '@mui/icons-material/RestartAlt'
 import EditIcon from '@mui/icons-material/EditOutlined'
@@ -86,6 +87,20 @@ export default function RuleSetsView() {
   }
   function openEdit(rs: RuleSet) {
     setEditing(true); setForm({ ...rs })
+    setProxyGroupText((rs.proxy_group_order || []).join('\n'))
+    setDialogOpen(true)
+  }
+  // Duplicate clones the row into the create flow with a -copy suffix so
+  // admins can derive a custom variant without touching the original
+  // (especially useful for seeded rule sets that are now non-deletable
+  // and would lose customizations on Restore).
+  function openDuplicate(rs: RuleSet) {
+    setEditing(false)
+    setForm({
+      ...rs,
+      slug: rs.slug + '-copy',
+      name: rs.name + ' (Copy)',
+    })
     setProxyGroupText((rs.proxy_group_order || []).join('\n'))
     setDialogOpen(true)
   }
@@ -257,7 +272,9 @@ export default function RuleSetsView() {
                     opacity: rs.enabled ? 1 : 0.65,
                   }}>
                     <TableCell padding="checkbox">
-                      <Checkbox checked={selected.has(rs.slug)} onChange={(_, c) => toggleOne(rs.slug, c)} />
+                      <Checkbox checked={selected.has(rs.slug)}
+                        disabled={SEEDED_RULESET_SLUGS.includes(rs.slug)}
+                        onChange={(_, c) => toggleOne(rs.slug, c)} />
                     </TableCell>
                     <TableCell sx={{ fontSize: 13 }}>{rs.slug}</TableCell>
                     <TableCell sx={{ fontWeight: 500 }}>{rs.name}</TableCell>
@@ -275,6 +292,12 @@ export default function RuleSetsView() {
                       <Tooltip title={t('admin:rules.field.enabled')}>
                         <IconButton size="small" onClick={() => openEdit(rs)}><EditIcon fontSize="small" /></IconButton>
                       </Tooltip>
+                      <Tooltip title={t('admin:rules.duplicate')}>
+                        <IconButton size="small" onClick={() => openDuplicate(rs)}
+                          sx={{ color: md.onSurfaceVariant }}>
+                          <ContentCopyIcon fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
                       {SEEDED_RULESET_SLUGS.includes(rs.slug) && (
                         <Tooltip title={t('admin:rules.reset_to_default')}>
                           <IconButton size="small" onClick={() => confirmReset(rs)}
@@ -283,10 +306,16 @@ export default function RuleSetsView() {
                           </IconButton>
                         </Tooltip>
                       )}
-                      <Tooltip title={t('admin:rules.batch_delete')}>
-                        <IconButton size="small" onClick={() => confirmDelete(rs)} sx={{ color: md.error }}>
-                          <DeleteIcon fontSize="small" />
-                        </IconButton>
+                      <Tooltip title={SEEDED_RULESET_SLUGS.includes(rs.slug)
+                        ? t('admin:rules.cannot_delete_seeded')
+                        : t('admin:rules.batch_delete')}>
+                        <span>
+                          <IconButton size="small" onClick={() => confirmDelete(rs)}
+                            disabled={SEEDED_RULESET_SLUGS.includes(rs.slug)}
+                            sx={{ color: md.error }}>
+                            <DeleteIcon fontSize="small" />
+                          </IconButton>
+                        </span>
                       </Tooltip>
                     </TableCell>
                   </TableRow>
