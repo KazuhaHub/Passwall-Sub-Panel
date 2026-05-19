@@ -46,6 +46,7 @@ import { useSiteStore, selectIcon } from '@/stores/site'
 import { useAppearanceStore } from '@/stores/appearance'
 import { setLanguage, currentLanguage } from '@/i18n'
 import { DEFAULT_PRESET_HEX, type AppLanguage } from '@/theme'
+import { getVersion, type VersionInfo } from '@/api/version'
 
 // Sidebar widths follow the global density setting: compact trims the
 // expanded rail to give admin pages another ~50px of horizontal room
@@ -96,6 +97,7 @@ export default function AdminLayout() {
 
   const [mobileOpen, setMobileOpen] = useState(false)
   const [userAnchor, setUserAnchor] = useState<HTMLElement | null>(null)
+  const [versionInfo, setVersionInfo] = useState<VersionInfo | null>(null)
   // Collapsed-rail state. Persisted to localStorage so the choice survives
   // refresh. Mobile (temporary drawer) ignores this — it always shows the
   // full sidebar when opened.
@@ -119,6 +121,17 @@ export default function AdminLayout() {
 
   // Load site branding once on mount.
   useEffect(() => { void site.load() }, [site])
+
+  // Fetch build identity once on mount. Endpoint is public and the
+  // sidebar badge silently no-ops if the call fails (no point toasting
+  // for a missing version string).
+  useEffect(() => {
+    let cancelled = false
+    getVersion()
+      .then(info => { if (!cancelled) setVersionInfo(info) })
+      .catch(() => { /* leave badge hidden */ })
+    return () => { cancelled = true }
+  }, [])
 
   // Re-sync system theme color from settings once site is loaded. Empty
   // theme_color falls back to the compiled default. We pull the setter via
@@ -205,6 +218,39 @@ export default function AdminLayout() {
             : button
         })}
       </List>
+      {/* Build identity — populated by the /api/version call on mount.
+          ldflags-stamped Version/Commit/BuildDate are surfaced here so an
+          admin can confirm at a glance which release the panel is running.
+          Hidden when the fetch hasn't resolved (or failed). */}
+      {versionInfo && (
+        <Tooltip
+          placement="right"
+          title={
+            <Box sx={{ fontSize: 11, lineHeight: 1.5 }}>
+              <Box>{versionInfo.version || 'dev'}</Box>
+              {versionInfo.commit && <Box>commit: {versionInfo.commit}</Box>}
+              {versionInfo.build_date && <Box>built: {versionInfo.build_date}</Box>}
+            </Box>
+          }
+        >
+          <Box sx={{
+            px: railCollapsed ? 0 : 2,
+            py: 0.75,
+            textAlign: 'center',
+            color: md.onSurfaceVariant,
+            fontSize: 11,
+            fontFamily: 'monospace',
+            opacity: 0.7,
+            whiteSpace: 'nowrap',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            userSelect: 'none',
+            cursor: 'default',
+          }}>
+            {versionInfo.version || 'dev'}
+          </Box>
+        </Tooltip>
+      )}
       {/* Collapse toggle — desktop only; mobile drawer is dismissed by tapping outside */}
       {!isMobile && (
         <Box sx={{
