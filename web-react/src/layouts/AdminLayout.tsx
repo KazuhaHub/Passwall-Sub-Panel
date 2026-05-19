@@ -58,6 +58,13 @@ const DRAWER_WIDTH_EXPANDED_COMPACT = 208
 const DRAWER_WIDTH_COLLAPSED = 76
 const COLLAPSED_STORAGE_KEY = 'psp-sidebar-collapsed'
 
+// Sidebar version badge is on by default; operators who don't want it
+// can suppress it at SPA build time with `VITE_SHOW_VERSION=0 npm run
+// build`. Intentionally not a runtime/admin-settings toggle — the
+// choice belongs to whoever ships the binary, not to admins clicking
+// around in the UI.
+const SHOW_VERSION = import.meta.env.VITE_SHOW_VERSION !== '0'
+
 interface NavItem {
   to: string
   labelKey: string
@@ -124,8 +131,10 @@ export default function AdminLayout() {
 
   // Fetch build identity once on mount. Endpoint is public and the
   // sidebar badge silently no-ops if the call fails (no point toasting
-  // for a missing version string).
+  // for a missing version string). Skipped entirely when the badge is
+  // disabled at build time.
   useEffect(() => {
+    if (!SHOW_VERSION) return
     let cancelled = false
     getVersion()
       .then(info => { if (!cancelled) setVersionInfo(info) })
@@ -221,8 +230,11 @@ export default function AdminLayout() {
       {/* Build identity — populated by the /api/version call on mount.
           ldflags-stamped Version/Commit/BuildDate are surfaced here so an
           admin can confirm at a glance which release the panel is running.
-          Hidden when the fetch hasn't resolved (or failed). */}
-      {versionInfo && (
+          Hidden when the fetch hasn't resolved (or failed). Collapsed rail
+          (76 px) can only fit ~6 monospace chars at 11 px, so we strip the
+          pre-release suffix there ("v3.0.0-rc.6" → "v3.0.0") and rely on
+          the tooltip for the full string + commit + build date. */}
+      {SHOW_VERSION && versionInfo && (
         <Tooltip
           placement="right"
           title={
@@ -247,7 +259,12 @@ export default function AdminLayout() {
             userSelect: 'none',
             cursor: 'default',
           }}>
-            {versionInfo.version || 'dev'}
+            {(() => {
+              const full = versionInfo.version || 'dev'
+              if (!railCollapsed) return full
+              const dash = full.indexOf('-')
+              return dash === -1 ? full : full.slice(0, dash)
+            })()}
           </Box>
         </Tooltip>
       )}
