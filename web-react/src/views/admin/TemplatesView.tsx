@@ -33,9 +33,10 @@ import {
 import AddIcon from '@mui/icons-material/Add'
 import DeleteIcon from '@mui/icons-material/DeleteOutline'
 import EditIcon from '@mui/icons-material/EditOutlined'
+import RestartAltIcon from '@mui/icons-material/RestartAlt'
 import { useTranslation } from 'react-i18next'
 
-import { deleteTemplate, listTemplates, saveTemplate, type Template } from '@/api/templates'
+import { deleteTemplate, listTemplates, resetTemplate, saveTemplate, SEEDED_TEMPLATE_SLUGS, type Template } from '@/api/templates'
 import { listRuleSets, type RuleSet } from '@/api/rules'
 import { confirm } from '@/components/ConfirmHost'
 import { pushSnack } from '@/components/SnackbarHost'
@@ -159,6 +160,18 @@ export default function TemplatesView() {
     if (!ok) return
     await deleteTemplate(tpl.slug)
     pushSnack(t('admin:templates.toast.deleted'), 'success')
+    await load()
+  }
+
+  async function confirmReset(tpl: Template) {
+    const ok = await confirm({
+      title: t('admin:templates.confirm.reset_title'),
+      message: t('admin:templates.confirm.reset_message', { slug: tpl.slug }),
+      destructive: true,
+    })
+    if (!ok) return
+    await resetTemplate(tpl.slug)
+    pushSnack(t('admin:templates.toast.reset'), 'success')
     await load()
   }
 
@@ -314,6 +327,14 @@ export default function TemplatesView() {
                     <Tooltip title={t('admin:templates.field.is_default')}>
                       <IconButton size="small" onClick={() => openEdit(tpl)}><EditIcon fontSize="small" /></IconButton>
                     </Tooltip>
+                    {SEEDED_TEMPLATE_SLUGS.includes(tpl.slug) && (
+                      <Tooltip title={t('admin:templates.reset_to_default')}>
+                        <IconButton size="small" onClick={() => confirmReset(tpl)}
+                          sx={{ color: md.onSurfaceVariant }}>
+                          <RestartAltIcon fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
+                    )}
                     <Tooltip title={t('admin:templates.batch_delete')}>
                       <span>
                         <IconButton size="small" onClick={() => confirmDelete(tpl)} disabled={tpl.is_default}

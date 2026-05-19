@@ -27,3 +27,17 @@ export async function saveTemplate(t: Template) {
 export async function deleteTemplate(slug: string) {
   await client.delete(`/admin/templates/${slug}`)
 }
+
+// resetTemplate overwrites the on-disk yaml with the binary's embedded
+// seed copy. 404 means the slug is admin-created (no canonical fallback)
+// — the UI should hide the reset affordance in that case to avoid the
+// pointless round-trip. The backend stores templates as one yaml file
+// per slug under <ConfigDir>/templates/.
+export async function resetTemplate(slug: string) {
+  await client.post(`/admin/templates/${slug}/reset`)
+}
+
+// SEEDED_TEMPLATE_SLUGS mirrors internal/seed/files/templates/. Keep in
+// sync with the Go side — the only known seeds today, no need to round-
+// trip the binary to learn the list.
+export const SEEDED_TEMPLATE_SLUGS = ['default-mihomo', 'default-sing-box']

@@ -437,15 +437,19 @@
     "toast": {
       "saved": "已保存",
       "deleted": "已删除",
+      "reset": "已恢复为内置默认",
       "batch_deleted": "已删除 {{count}} 个配置方案",
       "batch_partial": "已删除 {{ok}} 个，失败 {{fail}} 个"
     },
     "confirm": {
       "delete_title": "删除配置方案",
       "delete_message": "删除配置方案 {{slug}}？",
+      "reset_title": "恢复为内置默认？",
+      "reset_message": "将磁盘上的 {{slug}} 内容覆盖为当前 binary 内嵌的默认版本，自定义修改会丢失。",
       "batch_delete_title": "批量删除配置方案",
       "batch_delete_message": "确定删除 {{count}} 个配置方案？"
-    }
+    },
+    "reset_to_default": "恢复内置默认"
   },
   "sync_tasks": {
     "title": "同步任务",
@@ -604,6 +608,7 @@
     "toast": {
       "saved": "已保存",
       "deleted": "已删除",
+      "reset": "已恢复为内置默认",
       "batch_enabled": "已启用 {{count}} 个规则集",
       "batch_disabled": "已停用 {{count}} 个规则集",
       "batch_deleted": "已删除 {{count}} 个规则集",
@@ -613,9 +618,12 @@
       "delete_title": "删除规则集",
       "delete_message": "删除规则集 {{slug}}？{{usage}}",
       "delete_used_suffix": "\n\n该规则集正在被 {{names}} 引用，删除后这些配置方案会跳过它。",
+      "reset_title": "恢复为内置默认？",
+      "reset_message": "将磁盘上的 {{slug}} 内容覆盖为当前 binary 内嵌的默认版本，自定义修改会丢失。",
       "batch_delete_title": "批量删除规则集",
       "batch_delete_message": "确定删除 {{count}} 个规则集？"
-    }
+    },
+    "reset_to_default": "恢复内置默认"
   },
   "nodes": {
     "title": "节点管理",

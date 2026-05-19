@@ -26,3 +26,14 @@ export async function saveRuleSet(rs: RuleSet) {
 export async function deleteRuleSet(slug: string) {
   await client.delete(`/admin/rules/${slug}`)
 }
+
+// resetRuleSet overwrites the on-disk yaml with the binary's embedded
+// seed copy. 404 means the slug is admin-created and has no canonical
+// fallback — UI hides the affordance in that case.
+export async function resetRuleSet(slug: string) {
+  await client.post(`/admin/rules/${slug}/reset`)
+}
+
+// SEEDED_RULESET_SLUGS mirrors internal/seed/files/rulesets/. Keep in
+// sync with the Go side.
+export const SEEDED_RULESET_SLUGS = ['default_rules']

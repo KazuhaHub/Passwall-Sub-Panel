@@ -8,15 +8,17 @@ import (
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/seed"
 )
 
 // AdminRuleSetsHandler exposes CRUD for rule sets under /api/admin/rules.
 type AdminRuleSetsHandler struct {
-	repo ports.RuleSetRepo
+	repo      ports.RuleSetRepo
+	configDir string
 }
 
-func NewAdminRuleSetsHandler(repo ports.RuleSetRepo) *AdminRuleSetsHandler {
-	return &AdminRuleSetsHandler{repo: repo}
+func NewAdminRuleSetsHandler(repo ports.RuleSetRepo, configDir string) *AdminRuleSetsHandler {
+	return &AdminRuleSetsHandler{repo: repo, configDir: configDir}
 }
 
 type ruleSetDTO struct {
@@ -96,6 +98,22 @@ func (h *AdminRuleSetsHandler) Delete(c *gin.Context) {
 	if err := h.repo.Delete(c.Request.Context(), slug); err != nil {
 		if errors.Is(err, domain.ErrValidation) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		respondError(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
+// Reset overwrites the on-disk ruleset file with the binary's embedded
+// seed copy. Same pattern as AdminTemplatesHandler.Reset. 404 when the
+// slug has no embedded counterpart.
+func (h *AdminRuleSetsHandler) Reset(c *gin.Context) {
+	slug := c.Param("slug")
+	if err := seed.Restore(h.configDir, "rulesets/"+slug+".yaml"); err != nil {
+		if errors.Is(err, seed.ErrSeedNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "No embedded default for this slug"})
 			return
 		}
 		respondError(c, err)

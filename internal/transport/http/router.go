@@ -227,17 +227,19 @@ func NewRouter(d Deps) *gin.Engine {
 		adminGroup.PUT("/groups/:id/layout", groups.UpdateLayout)
 		adminGroup.DELETE("/groups/:id", groups.Delete)
 
-		rules := handler.NewAdminRuleSetsHandler(d.Repos.RuleSet)
+		rules := handler.NewAdminRuleSetsHandler(d.Repos.RuleSet, d.Cfg.ConfigDir)
 		staffGroup.GET("/rules", rules.List)
 		staffGroup.GET("/rules/:slug", rules.Get)
 		adminGroup.PUT("/rules/:slug", rules.Save)
 		adminGroup.DELETE("/rules/:slug", rules.Delete)
+		adminGroup.POST("/rules/:slug/reset", rules.Reset)
 
-		templates := handler.NewAdminTemplatesHandler(d.Repos.Template)
+		templates := handler.NewAdminTemplatesHandler(d.Repos.Template, d.Cfg.ConfigDir)
 		staffGroup.GET("/templates", templates.List)
 		staffGroup.GET("/templates/:slug", templates.Get)
 		adminGroup.PUT("/templates/:slug", templates.Save)
 		adminGroup.DELETE("/templates/:slug", templates.Delete)
+		adminGroup.POST("/templates/:slug/reset", templates.Reset)
 
 		auditH := handler.NewAdminAuditHandler(d.Repos.Audit)
 		// Read so operators can review their own actions; only admin can

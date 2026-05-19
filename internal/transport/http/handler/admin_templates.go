@@ -8,16 +8,18 @@ import (
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/seed"
 )
 
 // AdminTemplatesHandler exposes CRUD for the YAML-backed config templates
 // under /api/admin/templates. One file per slug.
 type AdminTemplatesHandler struct {
-	repo ports.TemplateRepo
+	repo      ports.TemplateRepo
+	configDir string
 }
 
-func NewAdminTemplatesHandler(repo ports.TemplateRepo) *AdminTemplatesHandler {
-	return &AdminTemplatesHandler{repo: repo}
+func NewAdminTemplatesHandler(repo ports.TemplateRepo, configDir string) *AdminTemplatesHandler {
+	return &AdminTemplatesHandler{repo: repo, configDir: configDir}
 }
 
 type templateDTO struct {
@@ -105,6 +107,25 @@ func (h *AdminTemplatesHandler) Delete(c *gin.Context) {
 	if err := h.repo.Delete(c.Request.Context(), slug); err != nil {
 		if errors.Is(err, domain.ErrValidation) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		respondError(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
+// Reset overwrites the on-disk template file with the binary's embedded
+// seed copy. Used by the admin "Reset to default" affordance for slugs
+// that originated from the seed bundle (default-mihomo, default-sing-box).
+// 404 when the slug has no embedded counterpart, so user-authored
+// templates can't accidentally trigger a destructive write that has
+// nothing to restore.
+func (h *AdminTemplatesHandler) Reset(c *gin.Context) {
+	slug := c.Param("slug")
+	if err := seed.Restore(h.configDir, "templates/"+slug+".yaml"); err != nil {
+		if errors.Is(err, seed.ErrSeedNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "No embedded default for this slug"})
 			return
 		}
 		respondError(c, err)

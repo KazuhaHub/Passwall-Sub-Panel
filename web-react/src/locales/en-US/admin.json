@@ -437,15 +437,19 @@
     "toast": {
       "saved": "Saved",
       "deleted": "Deleted",
+      "reset": "Restored to the seeded default",
       "batch_deleted": "Deleted {{count}} templates",
       "batch_partial": "Deleted {{ok}}, {{fail}} failed"
     },
     "confirm": {
       "delete_title": "Delete template",
       "delete_message": "Delete template {{slug}}?",
+      "reset_title": "Restore seeded default?",
+      "reset_message": "Overwrite the on-disk content of {{slug}} with the version embedded in this build. Any customizations will be lost.",
       "batch_delete_title": "Delete templates",
       "batch_delete_message": "Delete {{count}} templates?"
-    }
+    },
+    "reset_to_default": "Restore seeded default"
   },
   "sync_tasks": {
     "title": "Sync tasks",
@@ -604,6 +608,7 @@
     "toast": {
       "saved": "Saved",
       "deleted": "Deleted",
+      "reset": "Restored to the seeded default",
       "batch_enabled": "Enabled {{count}} rule sets",
       "batch_disabled": "Disabled {{count}} rule sets",
       "batch_deleted": "Deleted {{count}} rule sets",
@@ -613,9 +618,12 @@
       "delete_title": "Delete rule set",
       "delete_message": "Delete rule set {{slug}}?{{usage}}",
       "delete_used_suffix": "\n\nThis rule set is referenced by {{names}}. After deletion those templates will skip it.",
+      "reset_title": "Restore seeded default?",
+      "reset_message": "Overwrite the on-disk content of {{slug}} with the version embedded in this build. Any customizations will be lost.",
       "batch_delete_title": "Delete rule sets",
       "batch_delete_message": "Delete {{count}} rule sets?"
-    }
+    },
+    "reset_to_default": "Restore seeded default"
   },
   "nodes": {
     "title": "Nodes",

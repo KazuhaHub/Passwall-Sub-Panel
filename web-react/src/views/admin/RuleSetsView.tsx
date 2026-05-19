@@ -25,12 +25,13 @@ import {
 } from '@mui/material'
 import AddIcon from '@mui/icons-material/Add'
 import DeleteIcon from '@mui/icons-material/DeleteOutline'
+import RestartAltIcon from '@mui/icons-material/RestartAlt'
 import EditIcon from '@mui/icons-material/EditOutlined'
 import LockIcon from '@mui/icons-material/Lock'
 import LockOpenIcon from '@mui/icons-material/LockOpen'
 import { useTranslation } from 'react-i18next'
 
-import { deleteRuleSet, listRuleSets, saveRuleSet, type RuleSet } from '@/api/rules'
+import { deleteRuleSet, listRuleSets, resetRuleSet, saveRuleSet, SEEDED_RULESET_SLUGS, type RuleSet } from '@/api/rules'
 import { listTemplates, type Template } from '@/api/templates'
 import { confirm } from '@/components/ConfirmHost'
 import { pushSnack } from '@/components/SnackbarHost'
@@ -121,6 +122,18 @@ export default function RuleSetsView() {
     if (!ok) return
     await deleteRuleSet(rs.slug)
     pushSnack(t('admin:rules.toast.deleted'), 'success')
+    await load()
+  }
+
+  async function confirmReset(rs: RuleSet) {
+    const ok = await confirm({
+      title: t('admin:rules.confirm.reset_title'),
+      message: t('admin:rules.confirm.reset_message', { slug: rs.slug }),
+      destructive: true,
+    })
+    if (!ok) return
+    await resetRuleSet(rs.slug)
+    pushSnack(t('admin:rules.toast.reset'), 'success')
     await load()
   }
 
@@ -262,6 +275,14 @@ export default function RuleSetsView() {
                       <Tooltip title={t('admin:rules.field.enabled')}>
                         <IconButton size="small" onClick={() => openEdit(rs)}><EditIcon fontSize="small" /></IconButton>
                       </Tooltip>
+                      {SEEDED_RULESET_SLUGS.includes(rs.slug) && (
+                        <Tooltip title={t('admin:rules.reset_to_default')}>
+                          <IconButton size="small" onClick={() => confirmReset(rs)}
+                            sx={{ color: md.onSurfaceVariant }}>
+                            <RestartAltIcon fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                      )}
                       <Tooltip title={t('admin:rules.batch_delete')}>
                         <IconButton size="small" onClick={() => confirmDelete(rs)} sx={{ color: md.error }}>
                           <DeleteIcon fontSize="small" />
