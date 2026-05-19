@@ -54,6 +54,7 @@ import {
   useEmergencyAccess,
   type MeProfile,
 } from '@/api/me'
+import { useSiteStore } from '@/stores/site'
 import type { M3Tokens } from '@/theme'
 import {
   getMyTrafficHistory,
@@ -108,6 +109,12 @@ export default function MeView() {
   const theme = useTheme()
   const md = theme.palette.md
   const { t } = useTranslation('user')
+  // siteTitle feeds the "<site> - <user>" profile name baked into the
+  // one-click import deep links. UserLayout already pre-loads the site
+  // store on mount, so the value is the resolved one by the time the
+  // user clicks an import button — even on first render the hardcoded
+  // default ("Kazuha Hub Passwall") is a reasonable fallback.
+  const siteTitle = useSiteStore(s => s.siteTitle)
 
   const [profile, setProfile] = useState<MeProfile | null>(null)
   const [usage, setUsage] = useState<UsageReport | null>(null)
@@ -330,7 +337,16 @@ export default function MeView() {
 
   function buildImportURL(c: { import_url_template: string }): string {
     const subUrl = profile?.sub_url || ''
-    const profileName = profile?.display_name || profile?.upn || 'Passwall'
+    // Profile name format mirrors render.go's buildProfileName so the
+    // remark a client lands with (when it honors &name=) matches the
+    // Content-Disposition / Profile-Title strings the subscription
+    // response itself carries: "<site title> - <user>". Falls back to
+    // bare site title if the user has neither display name nor UPN,
+    // and to the literal "Passwall" if even site title is empty.
+    const userName = profile?.display_name || profile?.upn || ''
+    const profileName = userName
+      ? `${siteTitle || 'Passwall'} - ${userName}`
+      : (siteTitle || 'Passwall')
     // btoa requires latin-1; the sub URL is ASCII so unescape(encodeURIComponent())
     // pre-encodes safely. Used by V2rayNG / Shadowrocket deep links which
     // expect the URL itself to be base64-wrapped in the query.
