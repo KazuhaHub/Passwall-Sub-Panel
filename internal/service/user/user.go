@@ -659,7 +659,7 @@ func (s *Service) ResetCredentialsAndSync(ctx context.Context, userID int64) (*R
 			continue
 		}
 		if err := s.syncer.RotateClientUUID(ctx, e.PanelID, e.InboundID, e.ClientEmail,
-			info.protocol, oldUUID, newUUID, info.flow, u.Enabled, expireTime, floor); err != nil {
+			info.protocol, oldUUID, newUUID, info.flow, u.EffectiveEnabled(time.Now()), expireTime, floor); err != nil {
 			needsRetry = true
 		}
 	}
@@ -1334,7 +1334,7 @@ func (s *Service) ResyncMembership(ctx context.Context, userID int64) error {
 		}
 		expireTime := u.PushExpireTime()
 		if err := s.syncer.SetOwnedClientEnable(ctx, e.PanelID, e.InboundID, e.ClientEmail,
-			info.protocol, u.UUID, info.flow, u.Enabled, expireTime, floor); err != nil {
+			info.protocol, u.UUID, info.flow, u.EffectiveEnabled(time.Now()), expireTime, floor); err != nil {
 			if firstErr == nil {
 				firstErr = fmt.Errorf("update %d/%d: %w", k.panelID, k.inboundID, err)
 			}
@@ -1517,7 +1517,7 @@ func (s *Service) pushClientConfigToAll(ctx context.Context, u *domain.User) err
 			pushSem <- struct{}{}
 			defer func() { <-pushSem }()
 			perr := s.syncer.SetOwnedClientEnable(ctx, entry.PanelID, entry.InboundID, entry.ClientEmail,
-				infoCopy.protocol, u.UUID, infoCopy.flow, u.Enabled, expireTime, floor)
+				infoCopy.protocol, u.UUID, infoCopy.flow, u.EffectiveEnabled(time.Now()), expireTime, floor)
 			outcomes <- pushOutcome{entry: entry, err: perr}
 		}()
 	}
@@ -1697,7 +1697,7 @@ func (s *Service) ResetUUIDAndSync(ctx context.Context, userID int64) (string, e
 			continue
 		}
 		if err := s.syncer.RotateClientUUID(ctx, e.PanelID, e.InboundID, e.ClientEmail,
-			info.protocol, oldUUID, newUUID, info.flow, u.Enabled, expireTime, floor); err != nil {
+			info.protocol, oldUUID, newUUID, info.flow, u.EffectiveEnabled(time.Now()), expireTime, floor); err != nil {
 			needsRetry = true
 		}
 	}

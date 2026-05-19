@@ -418,6 +418,11 @@ func (s *Service) checkOne(ctx context.Context, u *domain.User, e *domain.XUICli
 	// emergency-extended time, reconcile would push the raw ExpireAt
 	// back, poll pushes again, ad infinitum).
 	expireTime := u.PushExpireTime()
+	// Effective enable folds expiry + emergency into the admin's u.Enabled
+	// toggle, matching what 3X-UI itself derives from (enable + expiry_time)
+	// — without this, an expired-but-Enabled user gets stuck in a "panel
+	// pushes enable=true, 3X-UI's cron flips it back" loop on every cycle.
+	desiredEnable := u.EffectiveEnabled(time.Now())
 
 	// Check 1: existence
 	if found == nil {
@@ -437,9 +442,9 @@ func (s *Service) checkOne(ctx context.Context, u *domain.User, e *domain.XUICli
 	}
 
 	// Check 3: enable mismatch
-	if found.IsEnabled() != u.Enabled {
+	if found.IsEnabled() != desiredEnable {
 		if err := s.syncer.SetOwnedClientEnable(ctx, e.PanelID, e.InboundID, e.ClientEmail,
-			protocol, u.UUID, desiredFlow, u.Enabled, expireTime, 0); err != nil {
+			protocol, u.UUID, desiredFlow, desiredEnable, expireTime, 0); err != nil {
 			return &Issue{
 				PanelID:   e.PanelID,
 				PanelName: s.panelNameOf(e.PanelID), InboundID: e.InboundID, ClientEmail: e.ClientEmail,
@@ -455,7 +460,7 @@ func (s *Service) checkOne(ctx context.Context, u *domain.User, e *domain.XUICli
 
 	if protocol == domain.ProtoVLESS && n != nil && n.Flow != "" && found.Flow != n.Flow {
 		if err := s.syncer.SetOwnedClientEnable(ctx, e.PanelID, e.InboundID, e.ClientEmail,
-			protocol, u.UUID, desiredFlow, u.Enabled, expireTime, 0); err != nil {
+			protocol, u.UUID, desiredFlow, desiredEnable, expireTime, 0); err != nil {
 			return &Issue{
 				PanelID:   e.PanelID,
 				PanelName: s.panelNameOf(e.PanelID), InboundID: e.InboundID, ClientEmail: e.ClientEmail,
@@ -477,7 +482,7 @@ func (s *Service) checkOne(ctx context.Context, u *domain.User, e *domain.XUICli
 	// the 3X-UI updateClient path key, so we pass found.ID explicitly.
 	if (protocol == domain.ProtoVLESS || protocol == domain.ProtoVMess) && found.ID != u.UUID {
 		if err := s.syncer.RotateClientUUID(ctx, e.PanelID, e.InboundID, e.ClientEmail,
-			protocol, found.ID, u.UUID, desiredFlow, u.Enabled, expireTime, 0); err != nil {
+			protocol, found.ID, u.UUID, desiredFlow, desiredEnable, expireTime, 0); err != nil {
 			return &Issue{
 				PanelID:   e.PanelID,
 				PanelName: s.panelNameOf(e.PanelID), InboundID: e.InboundID, ClientEmail: e.ClientEmail,
@@ -496,7 +501,7 @@ func (s *Service) checkOne(ctx context.Context, u *domain.User, e *domain.XUICli
 		expected := crypto.DeriveProxyPassword(u.UUID, protocol)
 		if found.Password != expected {
 			if err := s.syncer.SetOwnedClientEnable(ctx, e.PanelID, e.InboundID, e.ClientEmail,
-				protocol, u.UUID, desiredFlow, u.Enabled, expireTime, 0); err != nil {
+				protocol, u.UUID, desiredFlow, desiredEnable, expireTime, 0); err != nil {
 				return &Issue{
 					PanelID:   e.PanelID,
 					PanelName: s.panelNameOf(e.PanelID), InboundID: e.InboundID, ClientEmail: e.ClientEmail,
@@ -524,7 +529,7 @@ func (s *Service) checkOne(ctx context.Context, u *domain.User, e *domain.XUICli
 	// re-asserted by the very next traffic poll regardless.
 	if found.ExpiryTime != expireTime {
 		if err := s.syncer.SetOwnedClientEnable(ctx, e.PanelID, e.InboundID, e.ClientEmail,
-			protocol, u.UUID, desiredFlow, u.Enabled, expireTime, 0); err != nil {
+			protocol, u.UUID, desiredFlow, desiredEnable, expireTime, 0); err != nil {
 			return &Issue{
 				PanelID:   e.PanelID,
 				PanelName: s.panelNameOf(e.PanelID), InboundID: e.InboundID, ClientEmail: e.ClientEmail,

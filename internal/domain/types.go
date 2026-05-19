@@ -139,6 +139,34 @@ func (u *User) IsExpired(t time.Time) bool {
 	return u.ExpireAt != nil && t.After(*u.ExpireAt)
 }
 
+// EffectiveEnabled is the value the panel should publish to 3X-UI for the
+// `enable` field. Distinct from the raw u.Enabled toggle because expiry
+// gates effective access independently of the admin's enable intent:
+//
+//   - admin disabled                    → false (admin overrides everything)
+//   - permanent user (no ExpireAt)      → u.Enabled
+//   - ExpireAt in future                → u.Enabled
+//   - ExpireAt in past, no emergency    → false (expired + no extension)
+//   - ExpireAt in past, emergency live  → u.Enabled (emergency extends)
+//
+// Without this gate, an expired-but-Enabled user would push enable=true,
+// 3X-UI's own cron would re-disable on the past expiry timestamp, and the
+// reconcile loop would keep "fixing" the same enable_mismatch every cycle
+// (see the bug log on the v3.0.0-beta.20 release notes).
+func (u *User) EffectiveEnabled(t time.Time) bool {
+	if u == nil || !u.Enabled {
+		return false
+	}
+	if !u.IsExpired(t) {
+		return true
+	}
+	// Expired — honor emergency-access extension if still live.
+	if u.EmergencyUntil != nil && u.EmergencyUntil.After(t) {
+		return true
+	}
+	return false
+}
+
 // HasLocalPassword reports whether the user can authenticate through the
 // panel's local UPN/password flow. SSO-linked pre-created accounts keep
 // their password hash, so this deliberately does not mean "not SSO".

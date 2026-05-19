@@ -1,6 +1,47 @@
 package domain
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
+
+// TestUserEffectiveEnabled pins the truth table for the value the panel
+// publishes to 3X-UI's enable field. Each case is one row of the matrix in
+// the EffectiveEnabled doc comment; the bug that motivated this method was
+// the (Enabled=true, ExpireAt=past, no emergency) row pushing enable=true
+// and getting stuck in a reconcile <-> 3X-UI tug-of-war.
+func TestUserEffectiveEnabled(t *testing.T) {
+	now := time.Date(2026, 5, 18, 12, 0, 0, 0, time.UTC)
+	past := now.Add(-24 * time.Hour)
+	future := now.Add(24 * time.Hour)
+
+	cases := []struct {
+		name      string
+		enabled   bool
+		expireAt  *time.Time
+		emergency *time.Time
+		want      bool
+	}{
+		{name: "admin disabled, permanent", enabled: false, want: false},
+		{name: "admin disabled, expired", enabled: false, expireAt: &past, want: false},
+		{name: "enabled permanent", enabled: true, want: true},
+		{name: "enabled, expire_at in future", enabled: true, expireAt: &future, want: true},
+		{name: "enabled, expire_at in past, no emergency — THE BUG ROW", enabled: true, expireAt: &past, want: false},
+		{name: "enabled, expired, emergency live", enabled: true, expireAt: &past, emergency: &future, want: true},
+		{name: "enabled, expired, emergency also expired", enabled: true, expireAt: &past, emergency: &past, want: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			u := &User{Enabled: tc.enabled, ExpireAt: tc.expireAt, EmergencyUntil: tc.emergency}
+			if got := u.EffectiveEnabled(now); got != tc.want {
+				t.Errorf("EffectiveEnabled = %v, want %v", got, tc.want)
+			}
+		})
+	}
+	if (*User)(nil).EffectiveEnabled(now) {
+		t.Error("nil receiver should return false")
+	}
+}
 
 // TestUserPeriodUsed pins the O(1) formula that mailer and traffic poll both
 // depend on. Negative-result clamping is the load-bearing safety net here:
