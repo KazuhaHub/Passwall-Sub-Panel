@@ -53,14 +53,18 @@ func respondError(c *gin.Context, err error) {
 	case errors.Is(err, domain.ErrSSOAccountConflict):
 		c.JSON(http.StatusConflict, gin.H{"error": "SSO identity conflicts with an existing account"})
 	default:
-		// Internal error — log full detail server-side, return a stable
-		// generic message client-side. Includes the request path so
-		// log readers can correlate without a header dump.
+		// Internal error — log full detail server-side AND return the
+		// underlying message to the caller. Originally this masked the
+		// real string to dodge GORM/SMTP leakage to users, but every
+		// route that uses respondError is admin/operator/staff-only:
+		// they need the diagnostic message to file a useful bug
+		// report. Public-facing endpoints (sub handler, login) write
+		// their own sanitised responses without going through here.
 		path := c.FullPath()
 		if path == "" && c.Request != nil {
 			path = c.Request.URL.Path
 		}
 		log.Warn("handler internal error", "path", path, "err", err.Error())
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 	}
 }
