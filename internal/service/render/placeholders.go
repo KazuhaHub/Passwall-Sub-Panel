@@ -6,9 +6,13 @@ import (
 	"strings"
 )
 
-// linePlaceholderRE matches a whole line whose only content is a placeholder
-// like "{{ proxies }}", capturing the indentation.
-var linePlaceholderRE = regexp.MustCompile(`^(\s*)\{\{\s*([\w]+)\s*\}\}\s*$`)
+// linePlaceholderRE matches a line whose only meaningful content is a
+// placeholder like "{{ proxies }}". The third capture absorbs any trailing
+// punctuation/whitespace ("," / ", "), which gets appended to the LAST
+// substituted line so the surrounding structure (JSON, YAML, …) stays
+// well-formed. The sing-box template needs this — its `{{ outbounds }},`
+// line must keep the comma after the expanded array.
+var linePlaceholderRE = regexp.MustCompile(`^(\s*)\{\{\s*([\w]+)\s*\}\}(\s*[^\s\w].*)?\s*$`)
 
 // inlineNodeRefRE matches a proxy-groups entry referencing a node-set:
 // "      - @all" or `      - "@region:TW+tag:reality"`.
@@ -28,7 +32,7 @@ func substituteBlockPlaceholders(body string, blocks map[string]string) string {
 			out = append(out, ln)
 			continue
 		}
-		indent, tag := m[1], m[2]
+		indent, tag, trailer := m[1], m[2], m[3]
 		replacement, ok := blocks[tag]
 		if !ok {
 			// Leave unknown placeholders intact so YAML stays valid-ish and
@@ -36,12 +40,21 @@ func substituteBlockPlaceholders(body string, blocks map[string]string) string {
 			out = append(out, ln)
 			continue
 		}
-		for _, rl := range strings.Split(strings.TrimRight(replacement, "\n"), "\n") {
+		rls := strings.Split(strings.TrimRight(replacement, "\n"), "\n")
+		for i, rl := range rls {
+			suffix := ""
+			// Trailer (e.g. ",") attaches to the LAST replacement line so the
+			// outer structure's separator survives the substitution.
+			if i == len(rls)-1 && trailer != "" {
+				suffix = strings.TrimRightFunc(trailer, func(r rune) bool {
+					return r == ' ' || r == '\t'
+				})
+			}
 			if rl == "" {
 				out = append(out, "")
 				continue
 			}
-			out = append(out, indent+rl)
+			out = append(out, indent+rl+suffix)
 		}
 	}
 	return strings.Join(out, "\n")
