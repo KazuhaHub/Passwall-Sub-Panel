@@ -19,7 +19,19 @@ COPY . .
 # Drop the SPA bundle where //go:embed expects it.
 RUN rm -rf internal/web/dist && mkdir -p internal/web/dist
 COPY --from=web-builder /web/dist/ ./internal/web/dist/
-RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/psp ./cmd/panel
+# Build identity — passed in by CI (or `docker build --build-arg`). Defaults
+# keep manual builds working but leave the binary visibly "dev" so a stray
+# build is easy to spot. `internal/version.Version` is the lookup the
+# /api/version handler and the SPA About badge read.
+ARG VERSION=dev
+ARG COMMIT=""
+ARG BUILD_DATE=""
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath \
+    -ldflags="-s -w \
+      -X github.com/KazuhaHub/passwall-sub-panel/internal/version.Version=${VERSION} \
+      -X github.com/KazuhaHub/passwall-sub-panel/internal/version.Commit=${COMMIT} \
+      -X github.com/KazuhaHub/passwall-sub-panel/internal/version.BuildDate=${BUILD_DATE}" \
+    -o /out/psp ./cmd/panel
 
 # Stage 3 — minimal runtime.
 # Default rulesets and templates are embedded into the binary (see

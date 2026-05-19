@@ -123,10 +123,18 @@ jobs:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: "0"
+          VERSION: ${{ needs.setup.outputs.tag }}
+          COMMIT: ${{ github.sha }}
         run: |
           set -euo pipefail
           mkdir -p out
-          go build -trimpath -ldflags="-s -w" -o "out/psp${{ matrix.ext }}" ./cmd/panel
+          short_sha="${COMMIT:0:7}"
+          build_date="$(date -u +%FT%TZ)"
+          ldflags="-s -w"
+          ldflags+=" -X github.com/KazuhaHub/passwall-sub-panel/internal/version.Version=${VERSION}"
+          ldflags+=" -X github.com/KazuhaHub/passwall-sub-panel/internal/version.Commit=${short_sha}"
+          ldflags+=" -X github.com/KazuhaHub/passwall-sub-panel/internal/version.BuildDate=${build_date}"
+          go build -trimpath -ldflags="${ldflags}" -o "out/psp${{ matrix.ext }}" ./cmd/panel
 
       - name: Upload binary
         uses: actions/upload-artifact@v4
