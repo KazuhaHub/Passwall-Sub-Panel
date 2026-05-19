@@ -13,23 +13,32 @@ content: |
     "dns": {
       "servers": [
         {
+          "tag": "bootstrap",
+          "address": "223.5.5.5",
+          "detour": "direct"
+        },
+        {
           "tag": "alidns",
           "address": "https://dns.alidns.com/dns-query",
+          "address_resolver": "bootstrap",
           "detour": "direct"
         },
         {
           "tag": "dnspod",
           "address": "https://doh.pub/dns-query",
+          "address_resolver": "bootstrap",
           "detour": "direct"
         },
         {
           "tag": "cloudflare-gateway",
           "address": "https://v5brh3pn84.cloudflare-gateway.com/dns-query",
+          "address_resolver": "bootstrap",
           "detour": "🚀 节点选择"
         },
         {
           "tag": "cloudflare",
           "address": "https://cloudflare-dns.com/dns-query",
+          "address_resolver": "bootstrap",
           "detour": "🚀 节点选择"
         }
       ],
