@@ -38,5 +38,10 @@
   "nav": {
     "collapse": "Collapse menu",
     "expand": "Expand menu"
+  },
+  "error_boundary": {
+    "title": "Something went wrong",
+    "body": "An unexpected error broke this page. Refreshing usually fixes it. If the problem keeps coming back, copy the technical detail below and let the admin know.",
+    "refresh": "Refresh page"
   }
 }

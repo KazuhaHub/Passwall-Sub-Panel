@@ -10,6 +10,7 @@ import { SUPPORTED_LANGUAGES, currentLanguage } from '@/i18n'
 import { useAppearanceStore, selectEffectiveColor, resolveEffectiveMode } from '@/stores/appearance'
 import SnackbarHost from '@/components/SnackbarHost'
 import ConfirmHost from '@/components/ConfirmHost'
+import ErrorBoundary from '@/components/ErrorBoundary'
 import { router } from '@/router'
 
 // Snapshot of prefers-color-scheme. SSR-safe defaults to "light" so
@@ -65,9 +66,14 @@ export default function App() {
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />
-      <Suspense fallback={<RouteFallback />}>
-        <RouterProvider router={router} />
-      </Suspense>
+      {/* SnackbarHost / ConfirmHost stay OUTSIDE the boundary so a
+          render crash inside a route can still surface as a snack or
+          confirm dialog if anything in cleanup tries to push one. */}
+      <ErrorBoundary>
+        <Suspense fallback={<RouteFallback />}>
+          <RouterProvider router={router} />
+        </Suspense>
+      </ErrorBoundary>
       <SnackbarHost />
       <ConfirmHost />
     </ThemeProvider>
