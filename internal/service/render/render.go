@@ -439,7 +439,11 @@ func (s *Service) buildProfileName(ctx context.Context, u *domain.User) string {
 
 // buildSubInfo produces the Subscription-Userinfo header value. Bytes are
 // taken from the most recent traffic snapshot; total reflects the user's
-// configured cap (0 = unlimited); expire is unix seconds or 0.
+// configured cap (0 = unlimited); expire is appended ONLY when the user
+// has a real expiry — both ClashMi and ClashMetaForAndroid parse a literal
+// "expire=0" as the Unix epoch (1969/1970 in negative-offset timezones)
+// rather than as "no expiry", so the field must be absent entirely when
+// there's nothing to communicate.
 //
 // Format spec: https://github.com/Dreamacro/clash/wiki/managing-providers
 func (s *Service) buildSubInfo(ctx context.Context, u *domain.User) string {
@@ -448,10 +452,9 @@ func (s *Service) buildSubInfo(ctx context.Context, u *domain.User) string {
 		up = snap.UpBytes
 		down = snap.DownBytes
 	}
-	var expire int64
-	if u.ExpireAt != nil {
-		expire = u.ExpireAt.Unix()
+	out := fmt.Sprintf("upload=%d; download=%d; total=%d", up, down, u.TrafficLimitBytes)
+	if u.ExpireAt != nil && !u.ExpireAt.IsZero() {
+		out += fmt.Sprintf("; expire=%d", u.ExpireAt.Unix())
 	}
-	return fmt.Sprintf("upload=%d; download=%d; total=%d; expire=%d",
-		up, down, u.TrafficLimitBytes, expire)
+	return out
 }
