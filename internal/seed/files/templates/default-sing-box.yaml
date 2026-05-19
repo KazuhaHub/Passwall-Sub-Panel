@@ -21,15 +21,13 @@ content: |
           "tag": "alidns",
           "type": "https",
           "server": "dns.alidns.com",
-          "domain_resolver": "bootstrap",
-          "detour": "direct"
+          "domain_resolver": "bootstrap"
         },
         {
           "tag": "dnspod",
           "type": "https",
           "server": "doh.pub",
-          "domain_resolver": "bootstrap",
-          "detour": "direct"
+          "domain_resolver": "bootstrap"
         },
         {
           "tag": "cloudflare-gateway",
