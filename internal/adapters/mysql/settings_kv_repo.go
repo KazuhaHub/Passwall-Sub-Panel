@@ -352,9 +352,24 @@ func defaultSubClientRules() []ports.SubClientRule {
 	return []ports.SubClientRule{
 		{Name: "Clash / mihomo", Keywords: []string{"clash", "mihomo", "meta"}, RenderFormat: "mihomo", Enabled: true},
 		{Name: "sing-box", Keywords: []string{"sing-box"}, RenderFormat: "sing-box", Enabled: true},
-		{Name: "Surge", Keywords: []string{"surge"}, RenderFormat: "mihomo", Enabled: true},
-		{Name: "Shadowrocket", Keywords: []string{"shadowrocket"}, RenderFormat: "mihomo", Enabled: true},
-		{Name: "Loon", Keywords: []string{"loon"}, RenderFormat: "mihomo", Enabled: true},
+		// Surge uses its own .conf format and does NOT parse Clash YAML
+		// as a subscription (the panel previously mapped it to mihomo,
+		// which produced unimportable output). URI list is the
+		// least-bad fallback — Surge can at least consume individual
+		// proxy URIs even though it can't apply rules/groups from it.
+		{Name: "Surge", Keywords: []string{"surge"}, RenderFormat: "uri-list", Enabled: true},
+		// Shadowrocket's native subscription format is the V2RayN
+		// base64-encoded URI list. It does NOT parse Clash YAML.
+		// The panel's own one-click import uses shadowrocket://add/sub/<b64>
+		// which is precisely the URI list scheme.
+		{Name: "Shadowrocket", Keywords: []string{"shadowrocket"}, RenderFormat: "uri-list", Enabled: true},
+		// Loon is Surge-derived (.conf format, no Clash YAML parser).
+		// Same uri-list fallback rationale as Surge.
+		{Name: "Loon", Keywords: []string{"loon"}, RenderFormat: "uri-list", Enabled: true},
+		// Quantumult X DOES accept Clash YAML in its [server_remote]
+		// block (per the official sample.conf and Sub-Store docs),
+		// so mihomo is acceptable here — rules/policies are dropped
+		// but nodes import cleanly.
 		{Name: "Quantumult X", Keywords: []string{"quantumult x", "quantumultx"}, RenderFormat: "mihomo", Enabled: true},
 		// V2rayN consumes the base64 URI list as its native subscription format
 		// (it parses each vless://, vmess://, trojan://, ss:// line). Earlier
