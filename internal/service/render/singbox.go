@@ -81,6 +81,22 @@ func (s *Service) buildSingBoxOutbounds(ctx context.Context, u *domain.User, ite
 	nodeTags := make([]string, 0, len(items))
 	for _, it := range items {
 		if it.isSeparator {
+			// Same trick as mihomo's emitSeparator + uri-list's
+			// buildSeparatorURI: emit a fake shadowsocks outbound at
+			// 127.0.0.1:1 so the separator surfaces as a labeled
+			// (non-connectable) entry in sing-box's selector
+			// dropdown — preserving the visual grouping admins
+			// configured. Tag goes into nodeTags so @all-style
+			// selector expansions include it in the right order.
+			out = append(out, map[string]any{
+				"type":        "shadowsocks",
+				"tag":         it.name,
+				"server":      "127.0.0.1",
+				"server_port": 1,
+				"method":      "chacha20-ietf-poly1305",
+				"password":    "psp-separator",
+			})
+			nodeTags = append(nodeTags, it.name)
 			continue
 		}
 		inb, err := s.fetchInbound(ctx, it.node)

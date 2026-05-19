@@ -14,31 +14,35 @@ content: |
       "servers": [
         {
           "tag": "bootstrap",
-          "address": "223.5.5.5",
-          "detour": "direct"
+          "type": "udp",
+          "server": "223.5.5.5"
         },
         {
           "tag": "alidns",
-          "address": "https://dns.alidns.com/dns-query",
-          "address_resolver": "bootstrap",
+          "type": "https",
+          "server": "dns.alidns.com",
+          "domain_resolver": "bootstrap",
           "detour": "direct"
         },
         {
           "tag": "dnspod",
-          "address": "https://doh.pub/dns-query",
-          "address_resolver": "bootstrap",
+          "type": "https",
+          "server": "doh.pub",
+          "domain_resolver": "bootstrap",
           "detour": "direct"
         },
         {
           "tag": "cloudflare-gateway",
-          "address": "https://v5brh3pn84.cloudflare-gateway.com/dns-query",
-          "address_resolver": "bootstrap",
+          "type": "https",
+          "server": "v5brh3pn84.cloudflare-gateway.com",
+          "domain_resolver": "bootstrap",
           "detour": "🚀 节点选择"
         },
         {
           "tag": "cloudflare",
-          "address": "https://cloudflare-dns.com/dns-query",
-          "address_resolver": "bootstrap",
+          "type": "https",
+          "server": "cloudflare-dns.com",
+          "domain_resolver": "bootstrap",
           "detour": "🚀 节点选择"
         }
       ],
@@ -79,6 +83,7 @@ content: |
       "rules":
         {{ route_rules }},
       "final": {{ final_outbound }},
+      "default_domain_resolver": "bootstrap",
       "auto_detect_interface": true
     }
   }
