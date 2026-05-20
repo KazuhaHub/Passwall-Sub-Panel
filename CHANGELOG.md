@@ -4,14 +4,14 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
-## v3.2.1-beta.2 — 2026-05-20
+## v3.2.1-beta.3 — 2026-05-20
 
-beta.1 实测反馈的收尾修复。
+beta.1 实测反馈的收尾修复（beta.2 因「账户状态」开关样式突兀立即由本版的下拉替代）。
 
 ### Added
-- 用户编辑弹窗加入「账户状态」开关：可在编辑表单内直接启用 / 停用账户（走
-  既有 setEnabled 接口，仅在状态变化时下发），停用时显示自动停用原因。为防自锁，
-  禁止在此停用自己的账户。
+- 用户编辑弹窗加入「账户状态」下拉（启用 / 停用）：可在编辑表单内直接切换账户状态
+  （走既有 setEnabled 接口，仅在状态变化时下发），停用时显示自动停用原因。样式与
+  分组 / 角色 / 重置周期下拉一致；为防自锁，禁止在此停用自己的账户。
 
 ### Fixed
 - 邮件 Logo 在实际收件箱裂图（预览正常）：此前未配置 Logo 时回退为内嵌
