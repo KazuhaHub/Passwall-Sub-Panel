@@ -690,7 +690,7 @@ func (s *Service) recordAndEnforceWith(ctx context.Context, u *domain.User, tota
 	// limit, which is why they were granted emergency access in the first
 	// place).
 	if emergencyActive && cfg.EmergencyAccessQuotaGB > 0 {
-		quotaBytes := int64(cfg.EmergencyAccessQuotaGB) * 1024 * 1024 * 1024
+		quotaBytes := int64(cfg.EmergencyAccessQuotaGB * 1024 * 1024 * 1024)
 		used := u.LifetimeTotalBytes - u.EmergencyBaselineBytes
 		if used >= quotaBytes {
 			log.Info("emergency access quota exhausted",

@@ -913,6 +913,14 @@
       "quarterly": "每季",
       "yearly": "每年"
     },
+    "detail": {
+      "usage": "流量用量",
+      "period_used": "本周期已用",
+      "limit": "上限",
+      "unlimited": "不限",
+      "lifetime": "Lifetime 总量",
+      "created_at": "创建于"
+    },
     "table": {
       "upn": "UPN",
       "display_name": "显示名",

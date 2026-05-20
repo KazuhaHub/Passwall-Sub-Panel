@@ -134,7 +134,7 @@ func TestTrafficFloor_EmergencyActive_QuotaRemainingReturnsRemaining(t *testing.
 	// Expect 3 GB pushed to 3X-UI as the floor so 3X-UI itself will
 	// flip the user off after another 3 GB of use even if the panel
 	// goes offline.
-	quotaGB := 5
+	quotaGB := 5.0
 	usedSinceWindowOpened := int64(2) * 1024 * 1024 * 1024
 	s := &Service{
 		trafficUsage: &fakeUsageReader{used: 999_999_999_999}, // poisoned, must not be consulted
@@ -158,7 +158,7 @@ func TestTrafficFloor_EmergencyActive_QuotaExhaustedReturnsSentinel(t *testing.T
 	// "you're over, disable" sentinel the over-limit path uses). The
 	// traffic poll's own quota check will tear down EmergencyUntil
 	// shortly after; until then 3X-UI doing it locally is fine.
-	quotaGB := 5
+	quotaGB := 5.0
 	exhausted := int64(quotaGB)*1024*1024*1024 + 100
 	s := &Service{
 		settings: &fakeFloorSettingsRepo{cfg: ports.UISettings{EmergencyAccessQuotaGB: quotaGB}},

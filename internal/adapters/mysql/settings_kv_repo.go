@@ -177,7 +177,7 @@ func settingDescriptors(s *ports.UISettings) []settingDescriptor {
 		boolField("security", "emergency_access_enabled", &s.EmergencyAccessEnabled),
 		intField("security", "emergency_access_hours", &s.EmergencyAccessHours),
 		intField("security", "emergency_access_max_count", &s.EmergencyAccessMaxCount),
-		intField("security", "emergency_access_quota_gb", &s.EmergencyAccessQuotaGB),
+		floatField("security", "emergency_access_quota_gb", &s.EmergencyAccessQuotaGB),
 
 		// runtime --- cron / performance / tz / global toggles
 		strField("runtime", "timezone", &s.Timezone),
@@ -215,6 +215,24 @@ func intField(typ, name string, dst *int) settingDescriptor {
 				return nil
 			}
 			v, err := strconv.Atoi(raw)
+			if err != nil {
+				return err
+			}
+			*dst = v
+			return nil
+		},
+	}
+}
+
+func floatField(typ, name string, dst *float64) settingDescriptor {
+	return settingDescriptor{
+		Type: typ, Name: name,
+		Marshal: func() (string, error) { return strconv.FormatFloat(*dst, 'f', -1, 64), nil },
+		Unmarshal: func(raw string) error {
+			if raw == "" {
+				return nil
+			}
+			v, err := strconv.ParseFloat(raw, 64)
 			if err != nil {
 				return err
 			}

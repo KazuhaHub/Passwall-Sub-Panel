@@ -97,6 +97,11 @@ type userDTO struct {
 	// the browser's or 3X-UI server's timezone. Empty for permanent users.
 	ExpireDate string `json:"expire_date,omitempty"`
 	TrafficLimitBytes  int64                     `json:"traffic_limit_bytes"`
+	// Lifetime counters (never reset by period rolls) — surfaced read-only in
+	// the admin edit dialog's detail block.
+	LifetimeUpBytes    int64                     `json:"lifetime_up_bytes"`
+	LifetimeDownBytes  int64                     `json:"lifetime_down_bytes"`
+	LifetimeTotalBytes int64                     `json:"lifetime_total_bytes"`
 	TrafficResetPeriod domain.ResetPeriod        `json:"traffic_reset_period"`
 	Remark             string                    `json:"remark,omitempty"`
 	Enabled            bool                      `json:"enabled"`
@@ -126,7 +131,7 @@ type createUserRequest struct {
 	// the panel timezone and wins over ExpireAt. Preferred over ExpireAt for
 	// calendar-date expiry so the day can't drift with the caller's timezone.
 	ExpireDate         string     `json:"expire_date"`
-	TrafficLimitGB     int64      `json:"traffic_limit_gb"`
+	TrafficLimitGB     float64    `json:"traffic_limit_gb"` // fractional GB allowed (e.g. 0.3)
 	TrafficResetPeriod string     `json:"traffic_reset_period"`
 	Remark             string     `json:"remark"`
 }
@@ -230,7 +235,7 @@ func (h *AdminUserHandler) Create(c *gin.Context) {
 		InitialPassword:    req.Password,
 		GroupID:            req.GroupID,
 		ExpireAt:           expireAt,
-		TrafficLimitBytes:  req.TrafficLimitGB * 1024 * 1024 * 1024,
+		TrafficLimitBytes:  int64(req.TrafficLimitGB * 1024 * 1024 * 1024),
 		TrafficResetPeriod: domain.ResetPeriod(req.TrafficResetPeriod),
 		Remark:             req.Remark,
 	}
@@ -513,7 +518,7 @@ type updateUserRequest struct {
 	// this; permanent-mode sends ClearExpire instead.
 	ExpireDate         *string    `json:"expire_date,omitempty"`
 	ClearExpire        bool       `json:"clear_expire,omitempty"`
-	TrafficLimitGB     *int64     `json:"traffic_limit_gb,omitempty"`
+	TrafficLimitGB     *float64   `json:"traffic_limit_gb,omitempty"` // fractional GB allowed
 	TrafficResetPeriod *string    `json:"traffic_reset_period,omitempty"`
 	Remark             *string    `json:"remark,omitempty"`
 	DisplayName        *string    `json:"display_name,omitempty"`
@@ -576,7 +581,7 @@ func (h *AdminUserHandler) Update(c *gin.Context) {
 		in.Role = &role
 	}
 	if req.TrafficLimitGB != nil {
-		bytes := *req.TrafficLimitGB * 1024 * 1024 * 1024
+		bytes := int64(*req.TrafficLimitGB * 1024 * 1024 * 1024)
 		in.TrafficLimitBytes = &bytes
 	}
 	if req.TrafficResetPeriod != nil {
@@ -639,7 +644,7 @@ func (h *AdminUserHandler) toDTO(r *http.Request, u *domain.User) userDTO {
 	loc := time.Local
 	if h.settings != nil {
 		if st, err := h.settings.Load(r.Context(), ports.UISettings{}); err == nil {
-			quotaBytes = int64(st.EmergencyAccessQuotaGB) * 1024 * 1024 * 1024
+			quotaBytes = int64(st.EmergencyAccessQuotaGB * 1024 * 1024 * 1024)
 			loc = paneltz.LocationOf(st.Timezone)
 		}
 	}
@@ -661,6 +666,9 @@ func (h *AdminUserHandler) toDTO(r *http.Request, u *domain.User) userDTO {
 		ExpireAt:            u.ExpireAt,
 		ExpireDate:          expireDate,
 		TrafficLimitBytes:   u.TrafficLimitBytes,
+		LifetimeUpBytes:     u.LifetimeUpBytes,
+		LifetimeDownBytes:   u.LifetimeDownBytes,
+		LifetimeTotalBytes:  u.LifetimeTotalBytes,
 		TrafficResetPeriod:  u.TrafficResetPeriod,
 		Remark:              u.Remark,
 		Enabled:             u.Enabled,

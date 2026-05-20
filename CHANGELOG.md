@@ -4,6 +4,20 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## v3.2.1-beta.1 — 2026-05-20
+
+### Added
+- 用户编辑界面重做为 Cloudreve 风格的左右双栏：左栏聚合身份信息（头像 / 角色 /
+  SSO / 状态徽章、ID/UUID、流量用量条 + 本周期已用 / 上限 / Lifetime 总量及上下行
+  明细、创建时间、复制订阅），右栏为可编辑表单网格。用户列表 DTO 新增
+  `lifetime_{up,down,total}_bytes`（只读，永不被周期重置清零）。
+
+### Fixed
+- 流量上限与紧急访问每窗口配额现在接受小数 GB（>=0，如 0.3）。此前后端
+  `TrafficLimitGB` / `EmergencyAccessQuotaGB` 是整型，提交 0.3 之类的值会被
+  JSON 解析直接拒掉；改为 `float64` 并在转字节时 `int64()` 截断，KV 设置用
+  `floatField` 序列化，前端数字输入框 `step="any"` 且校验放宽为仅「>=0」。
+
 ## v3.2.0 — 2026-05-20
 
 正式版。汇总 v3.2.0-beta.1 → rc.2 的全部改动（PostgreSQL 支持、到期日按面板

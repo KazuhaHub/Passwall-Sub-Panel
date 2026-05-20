@@ -163,7 +163,7 @@ func (s *Service) emergencyFloor(ctx context.Context, u *domain.User) int64 {
 	if st.EmergencyAccessQuotaGB <= 0 {
 		return 0
 	}
-	quotaBytes := int64(st.EmergencyAccessQuotaGB) * 1024 * 1024 * 1024
+	quotaBytes := int64(st.EmergencyAccessQuotaGB * 1024 * 1024 * 1024)
 	used := u.LifetimeTotalBytes - u.EmergencyBaselineBytes
 	if used < 0 {
 		used = 0
@@ -1133,7 +1133,7 @@ func EmergencyAccessStatusForUserWithTrafficLimit(u *domain.User, settings ports
 		Enabled:       settings.EmergencyAccessEnabled,
 		DurationHours: settings.EmergencyAccessHours,
 		MaxCount:      settings.EmergencyAccessMaxCount,
-		QuotaBytes:    int64(settings.EmergencyAccessQuotaGB) * 1024 * 1024 * 1024,
+		QuotaBytes:    int64(settings.EmergencyAccessQuotaGB * 1024 * 1024 * 1024),
 	}
 	if u != nil {
 		st.UsedCount = u.EmergencyUsedCount

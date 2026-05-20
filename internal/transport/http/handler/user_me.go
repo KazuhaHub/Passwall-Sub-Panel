@@ -179,7 +179,7 @@ func (h *UserMeHandler) EmergencyAccess(c *gin.Context) {
 		"used_count":      res.UsedCount,
 		"max_count":       res.MaxCount,
 		"remaining":       res.Remaining,
-		"quota_bytes":     int64(settings.EmergencyAccessQuotaGB) * 1024 * 1024 * 1024,
+		"quota_bytes":     int64(settings.EmergencyAccessQuotaGB * 1024 * 1024 * 1024),
 		"used_bytes":      int64(0), // window just opened — UsedBytes is always 0 right after grant
 		"sync_pending":    h.user.HasPendingSync(c.Request.Context(), claims.UserID),
 	})

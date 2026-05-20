@@ -52,7 +52,7 @@ type settingsDTO struct {
 	EmergencyAccessEnabled     bool                     `json:"emergency_access_enabled"`
 	EmergencyAccessHours       int                      `json:"emergency_access_hours"`
 	EmergencyAccessMaxCount    int                      `json:"emergency_access_max_count"`
-	EmergencyAccessQuotaGB     int                      `json:"emergency_access_quota_gb"`
+	EmergencyAccessQuotaGB     float64                  `json:"emergency_access_quota_gb"`
 	SubPath                    string                   `json:"sub_path"`
 	SubClientRules             []ports.SubClientRule    `json:"sub_client_rules"`
 	SubImportClients           []ports.SubImportClient  `json:"sub_import_clients"`

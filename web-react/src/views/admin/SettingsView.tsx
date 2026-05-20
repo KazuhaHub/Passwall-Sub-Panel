@@ -209,8 +209,8 @@ export default function SettingsView() {
       if (!Number.isInteger(settings.emergency_access_max_count) || settings.emergency_access_max_count < 1) {
         pushSnack(t('admin:validation.positive_int') + ' (emergency_access_max_count)', 'warning'); return
       }
-      if (!Number.isInteger(settings.emergency_access_quota_gb) || settings.emergency_access_quota_gb < 0) {
-        pushSnack(t('admin:validation.non_negative_int') + ' (emergency_access_quota_gb)', 'warning'); return
+      if (settings.emergency_access_quota_gb < 0) {
+        pushSnack(t('admin:validation.non_negative_number') + ' (emergency_access_quota_gb)', 'warning'); return
       }
     }
     // Announcement: if the admin enabled it but left the title or body
@@ -408,6 +408,7 @@ export default function SettingsView() {
             <NumField label={t('settings.general.emergency_access_quota_gb')}
               value={settings.emergency_access_quota_gb}
               onChange={v => patch('emergency_access_quota_gb', v)}
+              step="any"
               helperText={t('settings.general.emergency_access_quota_gb_hint')} />
           </Section>
         </Box>
@@ -1725,11 +1726,13 @@ function RoleRulesEditor({ value, onChange, md }: {
   )
 }
 
-function NumField({ label, value, onChange, helperText }: { label: string; value: number; onChange: (v: number) => void; helperText?: string }) {
+function NumField({ label, value, onChange, helperText, step }: { label: string; value: number; onChange: (v: number) => void; helperText?: string; step?: number | string }) {
+  // step defaults to 1 (integer fields: hours, count, ports, days). Pass
+  // step="any" for fields that accept fractional values (e.g. GB quotas).
   return (
     <TextField fullWidth type="number" label={label}
       value={value} onChange={e => onChange(Number(e.target.value))}
-      inputProps={{ min: 0 }} helperText={helperText} />
+      inputProps={{ min: 0, step: step ?? 1 }} helperText={helperText} />
   )
 }
 

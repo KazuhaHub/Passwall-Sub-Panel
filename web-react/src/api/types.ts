@@ -32,6 +32,10 @@ export interface User {
    *  set, independent of the browser's timezone. Empty for permanent users. */
   expire_date?: string
   traffic_limit_bytes: number
+  /** Lifetime counters (never reset by period rolls). Read-only detail. */
+  lifetime_up_bytes?: number
+  lifetime_down_bytes?: number
+  lifetime_total_bytes?: number
   traffic_reset_period: ResetPeriod
   remark?: string
   enabled: boolean

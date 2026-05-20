@@ -913,6 +913,14 @@
       "quarterly": "Quarterly",
       "yearly": "Yearly"
     },
+    "detail": {
+      "usage": "Traffic usage",
+      "period_used": "Period used",
+      "limit": "Limit",
+      "unlimited": "Unlimited",
+      "lifetime": "Lifetime total",
+      "created_at": "Created"
+    },
     "table": {
       "upn": "UPN",
       "display_name": "Display name",

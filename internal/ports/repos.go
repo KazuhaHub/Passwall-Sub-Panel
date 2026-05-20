@@ -370,7 +370,8 @@ type UISettings struct {
 	// can consume on top of the user's already-exceeded period. 0 = unlimited
 	// (only the time/count limits apply). When the user crosses the quota, the
 	// traffic poll ends the emergency window early and re-runs auto-disable.
-	EmergencyAccessQuotaGB int `json:"emergency_access_quota_gb"`
+	// Fractional GB allowed (e.g. 0.12). Stored as a float string in the KV.
+	EmergencyAccessQuotaGB float64 `json:"emergency_access_quota_gb"`
 
 	// ---- Subscription settings ----
 	// SubPath is the URL path prefix for subscription endpoints.

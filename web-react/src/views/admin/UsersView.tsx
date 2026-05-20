@@ -151,6 +151,14 @@ const EMPTY_EDIT: EditForm = {
 }
 
 function bytesToGB(b: number) { return Math.round((b / 1024 / 1024 / 1024) * 100) / 100 }
+
+// avatarColor maps a seed (UPN) to a stable HSL so each user's initial block
+// gets a consistent, distinct color in the details dialog.
+function avatarColor(seed: string): string {
+  let h = 0
+  for (const c of seed) h = (h + c.charCodeAt(0) * 7) % 360
+  return `hsl(${h} 42% 42%)`
+}
 function isExpired(u: User) { return !!u.expire_at && new Date(u.expire_at).getTime() < Date.now() }
 function canQuickRenew(u: User) { return !!u.expire_at && u.auto_disabled_reason !== 'pending_delete' }
 function canSelect(u: User) { return u.auto_disabled_reason !== 'pending_delete' }
@@ -1127,7 +1135,7 @@ export default function UsersView() {
             <TextField fullWidth type="number" label={t('admin:users.field.traffic_limit_gb')}
               value={createForm.traffic_limit_gb}
               onChange={e => setCreateForm({ ...createForm, traffic_limit_gb: Number(e.target.value) })}
-              inputProps={{ min: 0 }}
+              inputProps={{ min: 0, step: 'any' }}
               error={!!createErr.traffic_limit_gb}
               helperText={createErr.traffic_limit_gb ? t(`admin:${createErr.traffic_limit_gb}`) : ''} />
             <TextField select size="small" fullWidth label={t('admin:users.field.traffic_reset_period')}
@@ -1245,10 +1253,74 @@ export default function UsersView() {
 
       {/* Edit dialog */}
       <Dialog open={editOpen} onClose={() => !editBusy && setEditOpen(false)}
-        PaperProps={{ sx: { borderRadius: 3, bgcolor: md.surfaceContainerHigh, width: 540, maxWidth: '90vw' } }}>
+        PaperProps={{ sx: { borderRadius: 3, bgcolor: md.surfaceContainerHigh, width: 860, maxWidth: '94vw' } }}>
         <DialogTitle>{t('admin:users.edit_title')} — {editing?.upn}</DialogTitle>
         <DialogContent>
-          <Box component="form" id="edit-form" onSubmit={submitEdit} sx={{ display: 'flex', flexDirection: 'column', gap: 2.5, pt: 1 }}>
+          <Box sx={{ display: 'flex', gap: 3, pt: 1, flexWrap: 'wrap', alignItems: 'flex-start' }}>
+            {/* LEFT — identity + traffic usage (read-only) */}
+            <Box sx={{ width: 300, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
+              <Box sx={{ display: 'flex', gap: 1.5, alignItems: 'center' }}>
+                <Box sx={{ width: 48, height: 48, borderRadius: 2, flexShrink: 0,
+                  bgcolor: avatarColor(editing?.upn || ''), color: '#fff',
+                  display: 'grid', placeItems: 'center', fontSize: 22, fontWeight: 600 }}>
+                  {(editing?.display_name || editing?.upn || '?').trim().charAt(0).toUpperCase()}
+                </Box>
+                <Box sx={{ minWidth: 0 }}>
+                  <Typography noWrap sx={{ fontWeight: 600 }}>{editing?.display_name || editing?.upn}</Typography>
+                  <Typography noWrap sx={{ fontSize: 12, color: md.onSurfaceVariant }}>{editing?.upn}</Typography>
+                </Box>
+              </Box>
+              <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap' }}>
+                {editing && roleBadge(editing.role)}
+                {editing && ssoBadge(editing)}
+                {editing && statusBadge(editing)}
+              </Box>
+              <Box sx={{ fontSize: 12, color: md.onSurfaceVariant, fontVariantNumeric: 'tabular-nums' }}>
+                <div>ID&nbsp;&nbsp;{editing?.id}</div>
+                <div style={{ wordBreak: 'break-all' }}>UUID&nbsp;&nbsp;{editing?.uuid}</div>
+              </Box>
+              {/* traffic usage: period used vs limit + lifetime counters */}
+              <Box>
+                <Typography sx={{ fontSize: 12, fontWeight: 600, mb: 0.75 }}>
+                  {t('admin:users.detail.usage', { defaultValue: '流量用量' })}
+                </Typography>
+                <Box sx={{ height: 8, borderRadius: 9999, bgcolor: md.surfaceContainerHighest, overflow: 'hidden' }}>
+                  <Box sx={{ height: '100%', bgcolor: md.primary,
+                    width: `${editForm.traffic_limit_gb > 0 ? Math.min(100, (editForm.period_used_gb / editForm.traffic_limit_gb) * 100) : 0}%` }} />
+                </Box>
+                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5, mt: 1, fontSize: 12, color: md.onSurfaceVariant, fontVariantNumeric: 'tabular-nums' }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
+                    <Box sx={{ width: 8, height: 8, borderRadius: 9999, bgcolor: md.primary }} />
+                    <span style={{ flex: 1 }}>{t('admin:users.detail.period_used', { defaultValue: '本周期已用' })}</span>
+                    <span>{editForm.period_used_gb} GB</span>
+                  </Box>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
+                    <Box sx={{ width: 8, height: 8, borderRadius: 9999, bgcolor: md.tertiary }} />
+                    <span style={{ flex: 1 }}>{t('admin:users.detail.limit', { defaultValue: '上限' })}</span>
+                    <span>{editForm.traffic_limit_gb > 0 ? `${editForm.traffic_limit_gb} GB` : t('admin:users.detail.unlimited', { defaultValue: '不限' })}</span>
+                  </Box>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
+                    <Box sx={{ width: 8, height: 8, borderRadius: 9999, bgcolor: md.secondary }} />
+                    <span style={{ flex: 1 }}>{t('admin:users.detail.lifetime', { defaultValue: 'Lifetime 总量' })}</span>
+                    <span>{bytesToGB(editing?.lifetime_total_bytes ?? 0)} GB</span>
+                  </Box>
+                  <Typography sx={{ pl: 2.25, fontSize: 11, color: md.onSurfaceVariant }}>
+                    ↑ {bytesToGB(editing?.lifetime_up_bytes ?? 0)} GB&nbsp;·&nbsp;↓ {bytesToGB(editing?.lifetime_down_bytes ?? 0)} GB
+                  </Typography>
+                </Box>
+              </Box>
+              <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant }}>
+                {t('admin:users.detail.created_at', { defaultValue: '创建于' })} {editing?.created_at ? new Date(editing.created_at).toLocaleString() : '—'}
+              </Typography>
+              <Button size="small" variant="outlined" startIcon={<ContentCopyIcon fontSize="small" />}
+                onClick={() => editing && copy(editing.sub_url)}>
+                {t('admin:users.more_menu.copy_sub')}
+              </Button>
+            </Box>
+
+            {/* RIGHT — editable fields */}
+            <Box component="form" id="edit-form" onSubmit={submitEdit}
+              sx={{ flex: '1 1 360px', minWidth: 300, display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 2, alignItems: 'flex-start' }}>
             <TextField fullWidth label={t('admin:users.field.display_name')}
               value={editForm.display_name} onChange={e => setEditForm({ ...editForm, display_name: e.target.value })}
               error={!!editErr.display_name}
@@ -1328,7 +1400,7 @@ export default function UsersView() {
                 </Box>
               </Popover>
             </Box>
-            <Box sx={{ display: 'flex', gap: 1.5, alignItems: 'flex-start' }}>
+            <Box sx={{ gridColumn: '1 / -1', display: 'flex', gap: 1.5, alignItems: 'flex-start' }}>
               <TextField select size="small" label={t('admin:users.field.expire_at')}
                 value={editForm.expire_mode}
                 onChange={e => setEditForm({ ...editForm, expire_mode: e.target.value as 'date' | 'permanent' })}
@@ -1347,11 +1419,11 @@ export default function UsersView() {
                   sx={{ flex: 1 }} InputLabelProps={{ shrink: true }} />
               )}
             </Box>
-            <Box sx={{ display: 'flex', gap: 1.5, flexWrap: 'wrap' }}>
+            <Box sx={{ gridColumn: '1 / -1', display: 'flex', gap: 1.5, flexWrap: 'wrap' }}>
               <TextField type="number" label={t('admin:users.field.traffic_limit_gb')}
                 value={editForm.traffic_limit_gb}
                 onChange={e => setEditForm({ ...editForm, traffic_limit_gb: Number(e.target.value) })}
-                inputProps={{ min: 0, step: 1 }}
+                inputProps={{ min: 0, step: 'any' }}
                 error={!!editErr.traffic_limit_gb}
                 helperText={editErr.traffic_limit_gb ? t(`admin:${editErr.traffic_limit_gb}`) : ''}
                 sx={{ flex: '1 1 200px' }} />
@@ -1384,6 +1456,7 @@ export default function UsersView() {
               const quotaBytes = editing?.emergency_quota_bytes ?? 0
               return (
                 <Box sx={{
+                  gridColumn: '1 / -1',
                   display: 'flex', flexDirection: 'column', gap: 1,
                   p: 1.5, borderRadius: 2,
                   border: `1px solid ${md.outlineVariant}`,
@@ -1436,6 +1509,7 @@ export default function UsersView() {
             })()}
             <TextField fullWidth label={t('admin:users.field.remark')}
               value={editForm.remark} onChange={e => setEditForm({ ...editForm, remark: e.target.value })} />
+            </Box>
           </Box>
         </DialogContent>
         <DialogActions>
