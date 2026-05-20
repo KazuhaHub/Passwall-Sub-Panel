@@ -578,7 +578,16 @@ func (h *AdminNodeHandler) Detach(c *gin.Context) {
 }
 
 func (h *AdminNodeHandler) ListUnmanaged(c *gin.Context) {
-	items, err := h.node.ListUnmanagedInbounds(c.Request.Context())
+	// The unmanaged list is scoped to one server: the admin picks a panel and
+	// only that panel is queried. Without an explicit panel_id we return an
+	// empty list rather than scanning every panel (which would block on the
+	// slowest / dead one).
+	panelID, err := strconv.ParseInt(c.Query("panel_id"), 10, 64)
+	if err != nil || panelID <= 0 {
+		c.JSON(http.StatusOK, gin.H{"items": []any{}})
+		return
+	}
+	items, err := h.node.ListUnmanagedInbounds(c.Request.Context(), panelID)
 	if err != nil {
 		respondError(c, err)
 		return

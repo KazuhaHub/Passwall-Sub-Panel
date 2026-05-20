@@ -744,45 +744,64 @@ type UnmanagedInbound struct {
 	ClientCount int
 }
 
-func (s *Service) ListUnmanagedInbounds(ctx context.Context) ([]*UnmanagedInbound, error) {
+// ListUnmanagedInbounds returns the inbounds on a single panel that aren't yet
+// managed by a node. Scoping to one panel (rather than scanning the whole
+// fleet) keeps the call bounded: exactly one 3X-UI round trip, and a slow or
+// unreachable panel only affects the server the admin actually selected
+// instead of failing the entire list.
+func (s *Service) ListUnmanagedInbounds(ctx context.Context, panelID int64) ([]*UnmanagedInbound, error) {
+	c, err := s.pool.Get(panelID)
+	if err != nil {
+		return nil, fmt.Errorf("xui panel %d: %w", panelID, err)
+	}
+	panelName := ""
+	for _, p := range s.pool.List() {
+		if p.ID == panelID {
+			panelName = p.Name
+			break
+		}
+	}
+	// Build the set of already-managed inbound IDs for this panel in one DB
+	// read, then test membership in O(1) — avoids a GetByPanelInbound round
+	// trip per inbound (the old per-inbound query was the N×M cost).
+	managed, err := s.nodes.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	claimed := make(map[int]struct{})
+	for _, n := range managed {
+		if n.PanelID == panelID && !n.IsSeparator() {
+			claimed[n.InboundID] = struct{}{}
+		}
+	}
+	inbounds, err := c.ListInbounds(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list inbounds for panel %d: %w", panelID, err)
+	}
 	out := []*UnmanagedInbound{}
-	for _, panel := range s.pool.List() {
-		c, err := s.pool.Get(panel.ID)
-		if err != nil {
+	for i := range inbounds {
+		inb := &inbounds[i]
+		if _, ok := claimed[inb.ID]; ok {
 			continue
 		}
-		inbounds, err := c.ListInbounds(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("list inbounds for panel %d: %w", panel.ID, err)
+		// Skip protocols the panel can't actually manage (wireguard, socks,
+		// dokodemo-door, http, etc.). The admin UI offers Claim / Import
+		// against this list, and both flows require a Protocol the
+		// subscription renderer + 3X-UI client adapter understand. Listing
+		// unsupported inbounds here would just produce errors at import time.
+		if crypto.DetectProtocol(inb.Protocol, "") == "" {
+			continue
 		}
-		for i := range inbounds {
-			inb := &inbounds[i]
-			_, err := s.nodes.GetByPanelInbound(ctx, panel.ID, inb.ID)
-			if err == nil {
-				continue
-			}
-			if !errors.Is(err, domain.ErrNotFound) {
-				return nil, err
-			}
-			// Skip protocols the panel can't actually manage (wireguard, socks,
-			// dokodemo-door, http, etc.). The admin UI offers Claim / Import
-			// against this list, and both flows require a Protocol the
-			// subscription renderer + 3X-UI client adapter understand. Listing
-			// unsupported inbounds here would just produce errors at import time.
-			if crypto.DetectProtocol(inb.Protocol, "") == "" {
-				continue
-			}
-			out = append(out, &UnmanagedInbound{
-				PanelID:     panel.ID,
-				PanelName:   panel.Name,
-				InboundID:   inb.ID,
-				Protocol:    inb.Protocol,
-				Port:        inb.Port,
-				Remark:      inb.Remark,
-				Enable:      inb.Enable,
-				ClientCount: len(inb.ClientStats),
-			})
-		}
+		out = append(out, &UnmanagedInbound{
+			PanelID:     panelID,
+			PanelName:   panelName,
+			InboundID:   inb.ID,
+			Protocol:    inb.Protocol,
+			Port:        inb.Port,
+			Remark:      inb.Remark,
+			Enable:      inb.Enable,
+			ClientCount: len(inb.ClientStats),
+		})
 	}
 	return out, nil
 }

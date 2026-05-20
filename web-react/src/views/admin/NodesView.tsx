@@ -1666,6 +1666,12 @@ export default function NodesView() {
   // group_ids to node_ids, so the dialog picks from `managed` instead
   // and the groups state itself is no longer read.
   const [unmanaged, setUnmanaged] = useState<UnmanagedInbound[]>([])
+  // The unmanaged tab is scoped to one server: nothing is fetched until the
+  // admin picks a panel. null = no selection yet (shows the empty prompt).
+  const [unmanagedPanelId, setUnmanagedPanelId] = useState<number | null>(null)
+  // Last error from loading the selected panel's inbounds (e.g. panel
+  // unreachable) — surfaced inline with a Retry instead of failing silently.
+  const [unmanagedError, setUnmanagedError] = useState<string | null>(null)
   // Free-text filter on the unmanaged-inbound tab. Matches against panel
   // name, protocol, remark, port and inbound ID so the operator can find a
   // specific inbound by whatever piece they remember.
@@ -1678,16 +1684,17 @@ export default function NodesView() {
   // fields into one alphabetical blob — e.g. "Premium" (tag) sits next to
   // "HiNet-PQS-Static" (server) and the operator can't tell which field
   // they'd be filtering on. Picking still flows into the same search string.
+  // The unmanaged list is already scoped to one panel, so the search no
+  // longer offers a panel-name dimension — only protocol / remark within
+  // the selected server's inbounds.
   const unmanagedSearchOptions = useMemo<SearchOption[]>(() => {
     const buckets: Array<[string, Set<string>]> = [
-      [t('admin:nodes.table.panel_name'), new Set()],
       [t('admin:nodes.search_group.protocol'), new Set()],
       [t('admin:nodes.search_group.remark'), new Set()],
     ]
     for (const u of unmanaged) {
-      if (u.PanelName) buckets[0][1].add(u.PanelName)
-      if (u.Protocol) buckets[1][1].add(u.Protocol)
-      if (u.Remark) buckets[2][1].add(u.Remark)
+      if (u.Protocol) buckets[0][1].add(u.Protocol)
+      if (u.Remark) buckets[1][1].add(u.Remark)
     }
     return bucketsToOptions(buckets)
   }, [unmanaged, t])
@@ -1696,7 +1703,6 @@ export default function NodesView() {
     const q = unmanagedSearch.trim().toLowerCase()
     if (!q) return unmanaged
     return unmanaged.filter(u =>
-      u.PanelName.toLowerCase().includes(q) ||
       u.Protocol.toLowerCase().includes(q) ||
       (u.Remark || '').toLowerCase().includes(q) ||
       String(u.InboundID) === q ||
@@ -1925,27 +1931,58 @@ export default function NodesView() {
   }
 
   async function load() {
+    // Unmanaged is scoped to the picked panel and manages its own loading
+    // state, so don't run the managed-tab spinner path for it.
+    if (tab === 'unmanaged') {
+      await loadUnmanaged(unmanagedPanelId)
+      return
+    }
     setLoading(true)
     try {
-      if (tab === 'managed') {
-        // Pull nodes + separators in parallel — the table interleaves
-        // them but they live on independent endpoints. Group list is
-        // also refreshed so the separator dialog's "Show in groups"
-        // picker reflects whatever the admin just added in Groups view.
-        const [n, s] = await Promise.all([
-          listNodes(),
-          listSeparators().catch(() => [] as Separator[]),
-        ])
-        setManaged(n)
-        setSeparators(s)
-        setSelected(new Set())
-      } else {
-        const res = await listUnmanagedInbounds()
-        setUnmanaged(res.items)
-      }
+      // Pull nodes + separators in parallel — the table interleaves
+      // them but they live on independent endpoints. Group list is
+      // also refreshed so the separator dialog's "Show in groups"
+      // picker reflects whatever the admin just added in Groups view.
+      const [n, s] = await Promise.all([
+        listNodes(),
+        listSeparators().catch(() => [] as Separator[]),
+      ])
+      setManaged(n)
+      setSeparators(s)
+      setSelected(new Set())
     } finally {
       setLoading(false)
     }
+  }
+
+  // loadUnmanaged fetches the selected panel's unmanaged inbounds. With no
+  // panel chosen it just clears the list (the UI shows a "pick a server"
+  // prompt). A fetch failure (e.g. panel unreachable) is captured for the
+  // inline error + Retry affordance.
+  async function loadUnmanaged(panelId: number | null) {
+    setUnmanagedError(null)
+    if (panelId == null) {
+      setUnmanaged([])
+      return
+    }
+    setLoading(true)
+    try {
+      const res = await listUnmanagedInbounds(panelId)
+      setUnmanaged(res.items)
+    } catch (e) {
+      setUnmanaged([])
+      const msg = (e as { response?: { data?: { error?: string } } })?.response?.data?.error
+        || (e as Error)?.message || String(e)
+      setUnmanagedError(msg)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  function selectUnmanagedPanel(panelId: number | null) {
+    setUnmanagedPanelId(panelId)
+    setUnmanagedSearch('')
+    void loadUnmanaged(panelId)
   }
 
   function toggleAll(checked: boolean) {
@@ -2730,79 +2767,119 @@ export default function NodesView() {
         {tab === 'unmanaged' && (
           <>
             <Box sx={{ p: 2, display: 'flex', alignItems: 'center', gap: 1.5, borderBottom: `1px solid ${md.outlineVariant}`, flexWrap: 'wrap' }}>
+              {/* Server picker drives the whole tab: only the chosen panel is
+                  queried. Type-to-filter via Autocomplete for many servers. */}
               <Autocomplete
-                freeSolo
                 size="small"
-                options={unmanagedSearchOptions}
-                groupBy={(o) => o.group}
-                getOptionLabel={(o) => typeof o === 'string' ? o : o.label}
-                value={unmanagedSearch}
-                inputValue={unmanagedSearch}
-                onInputChange={(_, v) => setUnmanagedSearch(v)}
-                onChange={(_, v) => {
-                  if (v == null) setUnmanagedSearch('')
-                  else if (typeof v === 'string') setUnmanagedSearch(v)
-                  else setUnmanagedSearch(v.label)
-                }}
-                sx={{ width: 320, maxWidth: '100%' }}
+                options={servers}
+                getOptionLabel={(o) => o.name}
+                isOptionEqualToValue={(a, b) => a.id === b.id}
+                value={servers.find(s => s.id === unmanagedPanelId) ?? null}
+                onChange={(_, v) => selectUnmanagedPanel(v ? v.id : null)}
+                sx={{ width: 280, maxWidth: '100%' }}
                 renderInput={(params) => (
-                  <TextField {...params} placeholder={t('admin:nodes.unmanaged_search_placeholder')} />
+                  <TextField {...params} label={t('admin:nodes.unmanaged_server_label', { defaultValue: '服务器' })}
+                    placeholder={t('admin:nodes.unmanaged_server_placeholder', { defaultValue: '选择服务器…' })} />
                 )}
               />
-              <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant }}>
-                {t('admin:nodes.unmanaged_count', {
-                  shown: filteredUnmanaged.length,
-                  total: unmanaged.length,
-                })}
-              </Typography>
+              {unmanagedPanelId != null && !unmanagedError && (
+                <>
+                  <Autocomplete
+                    freeSolo
+                    size="small"
+                    options={unmanagedSearchOptions}
+                    groupBy={(o) => o.group}
+                    getOptionLabel={(o) => typeof o === 'string' ? o : o.label}
+                    value={unmanagedSearch}
+                    inputValue={unmanagedSearch}
+                    onInputChange={(_, v) => setUnmanagedSearch(v)}
+                    onChange={(_, v) => {
+                      if (v == null) setUnmanagedSearch('')
+                      else if (typeof v === 'string') setUnmanagedSearch(v)
+                      else setUnmanagedSearch(v.label)
+                    }}
+                    sx={{ width: 280, maxWidth: '100%' }}
+                    renderInput={(params) => (
+                      <TextField {...params} placeholder={t('admin:nodes.unmanaged_search_placeholder')} />
+                    )}
+                  />
+                  <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant }}>
+                    {t('admin:nodes.unmanaged_count', {
+                      shown: filteredUnmanaged.length,
+                      total: unmanaged.length,
+                    })}
+                  </Typography>
+                </>
+              )}
             </Box>
-            <TableContainer>
-              <Table>
-                <TableHead>
-                  <TableRow sx={{ '& th': { color: md.onSurfaceVariant, fontWeight: 500, fontSize: 12, textTransform: 'uppercase', letterSpacing: '.5px', borderBottom: `1px solid ${md.outlineVariant}`, whiteSpace: 'nowrap' } }}>
-                    <TableCell>{t('admin:nodes.table.panel_name')}</TableCell>
-                    <TableCell>Inbound ID</TableCell>
-                    <TableCell>Protocol</TableCell>
-                    <TableCell align="right">Port</TableCell>
-                    <TableCell>Remark</TableCell>
-                    <TableCell align="right">Clients</TableCell>
-                    <TableCell align="right">{t('admin:nodes.table.actions')}</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {loading && unmanaged.length === 0 && (
-                    <TableRow><TableCell colSpan={7} sx={{ textAlign: 'center', py: 6 }}>
-                      <CircularProgress size={24} />
-                    </TableCell></TableRow>
-                  )}
-                  {!loading && filteredUnmanaged.length === 0 && (
-                    <TableRow><TableCell colSpan={7} sx={{ textAlign: 'center', py: 6, color: md.onSurfaceVariant }}>
-                      {unmanaged.length === 0 ? '—' : t('admin:nodes.unmanaged_filter_empty')}
-                    </TableCell></TableRow>
-                  )}
-                  {filteredUnmanaged.map((u, idx) => (
-                    <TableRow key={`${u.PanelID}-${u.InboundID}-${idx}`} hover sx={{ '& td': { borderBottom: `1px solid ${md.outlineVariant}`, whiteSpace: 'nowrap' } }}>
-                      <TableCell sx={{ fontWeight: 500 }}>{u.PanelName}</TableCell>
-                      <TableCell sx={{ fontSize: 13 }}>{u.InboundID}</TableCell>
-                      <TableCell sx={{ fontSize: 13 }}>{u.Protocol}</TableCell>
-                      <TableCell align="right" sx={{ fontSize: 13 }}>{u.Port}</TableCell>
-                      <TableCell sx={{ fontSize: 13 }}>{u.Remark}</TableCell>
-                      <TableCell align="right" sx={{ fontVariantNumeric: 'tabular-nums' }}>{u.ClientCount}</TableCell>
-                      <TableCell align="right" sx={{ whiteSpace: 'nowrap' }}>
-                        {u.ClientCount > 0 && (
-                          <Button size="small" variant="text" onClick={() => startClaim(u)} sx={{ mr: 1 }}>
-                            {t('admin:nodes.claim')}
-                          </Button>
-                        )}
-                        <Button size="small" variant="outlined" onClick={() => startImport(u)}>
-                          {t('admin:nodes.import')}
-                        </Button>
-                      </TableCell>
+
+            {/* No server picked yet — prompt instead of scanning every panel. */}
+            {unmanagedPanelId == null && (
+              <Box sx={{ textAlign: 'center', py: 8, color: md.onSurfaceVariant }}>
+                {t('admin:nodes.unmanaged_pick_server', { defaultValue: '选择一个服务器以查看其未托管的 inbound' })}
+              </Box>
+            )}
+
+            {/* Selected panel failed to load (e.g. unreachable) — scoped to
+                this server, so it never blocks the rest of the UI. */}
+            {unmanagedPanelId != null && unmanagedError && !loading && (
+              <Box sx={{ textAlign: 'center', py: 8, color: md.onSurfaceVariant, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1.5 }}>
+                <Typography sx={{ color: md.error }}>
+                  {t('admin:nodes.unmanaged_load_failed', { defaultValue: '加载该服务器的 inbound 失败' })}：{unmanagedError}
+                </Typography>
+                <Button size="small" variant="outlined" onClick={() => void loadUnmanaged(unmanagedPanelId)}>
+                  {t('common:actions.retry', { defaultValue: '重试' })}
+                </Button>
+              </Box>
+            )}
+
+            {unmanagedPanelId != null && !unmanagedError && (
+              <TableContainer>
+                <Table>
+                  <TableHead>
+                    <TableRow sx={{ '& th': { color: md.onSurfaceVariant, fontWeight: 500, fontSize: 12, textTransform: 'uppercase', letterSpacing: '.5px', borderBottom: `1px solid ${md.outlineVariant}`, whiteSpace: 'nowrap' } }}>
+                      <TableCell>Inbound ID</TableCell>
+                      <TableCell>Protocol</TableCell>
+                      <TableCell align="right">Port</TableCell>
+                      <TableCell>Remark</TableCell>
+                      <TableCell align="right">Clients</TableCell>
+                      <TableCell align="right">{t('admin:nodes.table.actions')}</TableCell>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </TableContainer>
+                  </TableHead>
+                  <TableBody>
+                    {loading && (
+                      <TableRow><TableCell colSpan={6} sx={{ textAlign: 'center', py: 6 }}>
+                        <CircularProgress size={24} />
+                      </TableCell></TableRow>
+                    )}
+                    {!loading && filteredUnmanaged.length === 0 && (
+                      <TableRow><TableCell colSpan={6} sx={{ textAlign: 'center', py: 6, color: md.onSurfaceVariant }}>
+                        {unmanaged.length === 0 ? '—' : t('admin:nodes.unmanaged_filter_empty')}
+                      </TableCell></TableRow>
+                    )}
+                    {!loading && filteredUnmanaged.map((u, idx) => (
+                      <TableRow key={`${u.PanelID}-${u.InboundID}-${idx}`} hover sx={{ '& td': { borderBottom: `1px solid ${md.outlineVariant}`, whiteSpace: 'nowrap' } }}>
+                        <TableCell sx={{ fontSize: 13 }}>{u.InboundID}</TableCell>
+                        <TableCell sx={{ fontSize: 13 }}>{u.Protocol}</TableCell>
+                        <TableCell align="right" sx={{ fontSize: 13 }}>{u.Port}</TableCell>
+                        <TableCell sx={{ fontSize: 13 }}>{u.Remark}</TableCell>
+                        <TableCell align="right" sx={{ fontVariantNumeric: 'tabular-nums' }}>{u.ClientCount}</TableCell>
+                        <TableCell align="right" sx={{ whiteSpace: 'nowrap' }}>
+                          {u.ClientCount > 0 && (
+                            <Button size="small" variant="text" onClick={() => startClaim(u)} sx={{ mr: 1 }}>
+                              {t('admin:nodes.claim')}
+                            </Button>
+                          )}
+                          <Button size="small" variant="outlined" onClick={() => startImport(u)}>
+                            {t('admin:nodes.import')}
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+            )}
           </>
         )}
       </Card>
