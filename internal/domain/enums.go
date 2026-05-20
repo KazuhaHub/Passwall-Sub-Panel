@@ -20,6 +20,7 @@ const (
 	ResetNever     ResetPeriod = "never"
 	ResetMonthly   ResetPeriod = "monthly"
 	ResetQuarterly ResetPeriod = "quarterly"
+	ResetYearly    ResetPeriod = "yearly"
 )
 
 type AutoDisabledReason string

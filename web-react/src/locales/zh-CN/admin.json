@@ -85,7 +85,7 @@
       "audit_retention_days": "审计日志保留（天）",
       "sync_task_retention_days": "同步任务保留（天）",
       "traffic_history_days": "流量历史保留（天）",
-      "traffic_history_days_hint": "图表能往回看多少天。超过自动清理。raw 5 分钟原始数据固定保留 7 天用于今天实时刷新；这个值控制 hourly 滚动表的保留长度。0 = 永不清理。默认 365。",
+      "traffic_history_days_hint": "图表能往回看多少天。超过自动清理。raw 5 分钟原始数据固定保留 7 天用于今天实时刷新；这个值控制 hourly 滚动表的保留长度。0 = 永不清理。默认 730（两年，给\"最近一年\"留一倍 buffer）。",
       "expire_before_days": "到期前 N 天发邮件提醒",
       "expire_before_days_hint": "账号到期前多少天向用户发送邮件提醒。",
       "traffic_remain_percent": "剩余流量 < N% 时发邮件提醒",
@@ -375,6 +375,7 @@
       "period_day": "日",
       "period_week": "周",
       "period_month": "月",
+      "range_1": "今天",
       "range_7": "最近 7 天",
       "range_30": "最近 30 天",
       "range_90": "最近 90 天",
@@ -886,7 +887,8 @@
     "reset_period": {
       "never": "不重置",
       "monthly": "每月",
-      "quarterly": "每季"
+      "quarterly": "每季",
+      "yearly": "每年"
     },
     "table": {
       "upn": "UPN",

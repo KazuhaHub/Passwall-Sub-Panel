@@ -1081,3 +1081,42 @@ func TestStartOfDay_PreservesLocation(t *testing.T) {
 		t.Errorf("startOfDay = %v, want %v", got, want)
 	}
 }
+
+func TestShouldRollPeriodYearly(t *testing.T) {
+	loc := time.UTC
+	cases := []struct {
+		name        string
+		periodStart time.Time
+		now         time.Time
+		want        bool
+	}{
+		{"same year mid-year", time.Date(2026, 3, 4, 0, 0, 0, 0, loc), time.Date(2026, 11, 30, 23, 59, 59, 0, loc), false},
+		{"year rollover by one second", time.Date(2026, 12, 31, 23, 59, 59, 0, loc), time.Date(2027, 1, 1, 0, 0, 0, 0, loc), true},
+		{"multi-year gap", time.Date(2024, 6, 1, 0, 0, 0, 0, loc), time.Date(2026, 1, 1, 0, 0, 0, 0, loc), true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := shouldRollPeriod(tc.now, tc.periodStart, domain.ResetYearly); got != tc.want {
+				t.Errorf("shouldRollPeriod(yearly) = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestCurrentPeriodStartYearly(t *testing.T) {
+	tokyo, err := time.LoadLocation("Asia/Tokyo")
+	if err != nil {
+		t.Fatalf("load Asia/Tokyo: %v", err)
+	}
+	// Yearly boundary must snap to Jan 1 00:00 in the input's own location —
+	// otherwise the period_baseline rolls a few hours late for non-UTC tz.
+	now := time.Date(2026, 7, 4, 15, 30, 0, 0, tokyo)
+	got := currentPeriodStart(now, domain.ResetYearly)
+	want := time.Date(2026, 1, 1, 0, 0, 0, 0, tokyo)
+	if !got.Equal(want) {
+		t.Errorf("currentPeriodStart(yearly) = %v, want %v", got, want)
+	}
+	if got.Location().String() != tokyo.String() {
+		t.Errorf("currentPeriodStart(yearly) location = %q, want %q", got.Location(), tokyo)
+	}
+}

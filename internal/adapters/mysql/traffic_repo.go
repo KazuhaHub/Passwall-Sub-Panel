@@ -170,7 +170,7 @@ func (r *trafficRepo) PruneBefore(ctx context.Context, cutoff time.Time) (int64,
 // PruneHourlyBefore deletes rolled-up hourly rows from both
 // traffic_snapshots_hourly and client_traffic_snapshots_hourly with
 // bucket_start strictly before cutoff. Driven by TrafficHistoryDays (admin-
-// tunable; default 365). idx_traffic_hourly_bucket / idx_client_hourly_bucket
+// tunable; default 730). idx_traffic_hourly_bucket / idx_client_hourly_bucket
 // cover the range delete.
 func (r *trafficRepo) PruneHourlyBefore(ctx context.Context, cutoff time.Time) (int64, error) {
 	userRes := r.db.WithContext(ctx).

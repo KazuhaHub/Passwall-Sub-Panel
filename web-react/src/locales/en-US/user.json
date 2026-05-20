@@ -17,7 +17,8 @@
     "reset_period": {
       "never": "Never",
       "monthly": "Monthly",
-      "quarterly": "Quarterly"
+      "quarterly": "Quarterly",
+      "yearly": "Yearly"
     }
   },
   "sub": {
@@ -77,6 +78,7 @@
     "period_day": "Daily",
     "period_week": "Weekly",
     "period_month": "Monthly",
+    "range_1": "Today",
     "range_7": "Last 7 days",
     "range_30": "Last 30 days",
     "range_90": "Last 90 days",

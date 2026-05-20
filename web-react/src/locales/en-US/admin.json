@@ -85,7 +85,7 @@
       "audit_retention_days": "Audit log retention (days)",
       "sync_task_retention_days": "Sync task retention (days)",
       "traffic_history_days": "Traffic history retention (days)",
-      "traffic_history_days_hint": "How far back the chart can render. Older data is auto-pruned. Raw 5-min snapshots are kept for a fixed 7-day window for \"today\" live refresh; this knob controls the hourly rollup table's retention. 0 = never prune. Default 365.",
+      "traffic_history_days_hint": "How far back the chart can render. Older data is auto-pruned. Raw 5-min snapshots are kept for a fixed 7-day window for \"today\" live refresh; this knob controls the hourly rollup table's retention. 0 = never prune. Default 730 (2y, gives \"last 1 year\" 1× buffer).",
       "expire_before_days": "Notify N days before account expires",
       "expire_before_days_hint": "Email the user this many days before their account's expire_at.",
       "traffic_remain_percent": "Notify when remaining traffic < N%",
@@ -375,6 +375,7 @@
       "period_day": "Day",
       "period_week": "Week",
       "period_month": "Month",
+      "range_1": "Today",
       "range_7": "Last 7 days",
       "range_30": "Last 30 days",
       "range_90": "Last 90 days",
@@ -886,7 +887,8 @@
     "reset_period": {
       "never": "Never",
       "monthly": "Monthly",
-      "quarterly": "Quarterly"
+      "quarterly": "Quarterly",
+      "yearly": "Yearly"
     },
     "table": {
       "upn": "UPN",

@@ -968,6 +968,8 @@ func shouldRollPeriod(now, periodStart time.Time, period domain.ResetPeriod) boo
 		nowQ := (int(now.Month()) - 1) / 3
 		psQ := (int(periodStart.Month()) - 1) / 3
 		return now.Year() != periodStart.Year() || nowQ != psQ
+	case domain.ResetYearly:
+		return now.Year() != periodStart.Year()
 	}
 	return false
 }
@@ -979,6 +981,8 @@ func currentPeriodStart(now time.Time, period domain.ResetPeriod) time.Time {
 	case domain.ResetQuarterly:
 		month := time.Month(((int(now.Month())-1)/3)*3 + 1)
 		return time.Date(now.Year(), month, 1, 0, 0, 0, 0, now.Location())
+	case domain.ResetYearly:
+		return time.Date(now.Year(), time.January, 1, 0, 0, 0, 0, now.Location())
 	default:
 		return now
 	}

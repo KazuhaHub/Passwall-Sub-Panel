@@ -1091,6 +1091,7 @@ export default function UsersView() {
               <MenuItem value="never">{t('admin:users.reset_period.never')}</MenuItem>
               <MenuItem value="monthly">{t('admin:users.reset_period.monthly')}</MenuItem>
               <MenuItem value="quarterly">{t('admin:users.reset_period.quarterly')}</MenuItem>
+              <MenuItem value="yearly">{t('admin:users.reset_period.yearly')}</MenuItem>
             </TextField>
             <TextField fullWidth label={t('admin:users.field.remark')}
               value={createForm.remark} onChange={e => setCreateForm({ ...createForm, remark: e.target.value })} />
@@ -1321,6 +1322,7 @@ export default function UsersView() {
               <MenuItem value="never">{t('admin:users.reset_period.never')}</MenuItem>
               <MenuItem value="monthly">{t('admin:users.reset_period.monthly')}</MenuItem>
               <MenuItem value="quarterly">{t('admin:users.reset_period.quarterly')}</MenuItem>
+              <MenuItem value="yearly">{t('admin:users.reset_period.yearly')}</MenuItem>
             </TextField>
             {(() => {
               // Compute active-window details (only meaningful when the user

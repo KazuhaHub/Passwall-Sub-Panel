@@ -83,6 +83,12 @@ func (h *UserMeHandler) Profile(c *gin.Context) {
 		"expire_at":               u.ExpireAt,
 		"traffic_limit_bytes":     u.TrafficLimitBytes,
 		"traffic_reset_period":    u.TrafficResetPeriod,
+		// Exposed so the user portal's traffic chart can hide range options
+		// that exceed retention (e.g. don't offer "last 1 year" when the
+		// admin has set TrafficHistoryDays to 90). Mirrors the admin chart's
+		// rangeOptions filter; 0 means "no retention cap" (chart treats it
+		// as unlimited).
+		"traffic_history_days":    settings.TrafficHistoryDays,
 		"enabled":                 u.Enabled,
 		"can_change_password":     canChangePassword,
 		// can_edit_personal_rules drives the portal's rules dialog: when

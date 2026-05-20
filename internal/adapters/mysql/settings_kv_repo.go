@@ -321,7 +321,11 @@ func applyUISettingsDefaults(out, defaults ports.UISettings) ports.UISettings {
 		out.SyncTaskRetentionDays = 30
 	}
 	if out.TrafficHistoryDays <= 0 {
-		out.TrafficHistoryDays = 365
+		// 730 (2y) gives the chart's "last 1 year" range a full year of
+		// breathing room — querying exactly N days back when retention is
+		// also N days lets the rollup prune trim a day off the front edge
+		// and produce a blank-ish bucket. 2x the longest range avoids that.
+		out.TrafficHistoryDays = 730
 	}
 	if out.SubClientRules == nil {
 		out.SubClientRules = defaultSubClientRules()

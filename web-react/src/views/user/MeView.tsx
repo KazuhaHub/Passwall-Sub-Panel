@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useState, type FormEvent, type MouseEvent } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useState, type FormEvent, type MouseEvent } from 'react'
 import {
   Accordion,
   AccordionDetails,
@@ -132,14 +132,34 @@ export default function MeView() {
   const [trendBusy, setTrendBusy] = useState(false)
   const [trendPeriod, setTrendPeriod] = useState<TrafficHistoryPeriod>('day')
   const [trendDays, setTrendDays] = useState(7)
-  // Hourly granularity is only meaningful within the raw retention window
-  // (7 days during beta.6 — chart still reads raw, the rollup-backed query
-  // path lands in beta.7). When the user switches to Hour, snap any wider
-  // range selection back to 7 days so they don't get a chart full of empty
-  // buckets older than retention.
+  // Range options filtered by admin-configured TrafficHistoryDays (mirrors
+  // the admin chart's logic so a retention=90 panel hides "last 1 year"
+  // here too). 1d is always available — even a 1-day retention covers it
+  // — and only renders Hour granularity. Hour granularity itself is
+  // additionally capped to the 7-day raw retention window (the chart
+  // currently reads from raw snapshots, not the hourly rollup).
+  const rawRetentionDays = 7
+  const trendRangeOptions = useMemo(() => {
+    const all = [1, 7, 30, 90, 180, 365]
+    const retention = profile?.traffic_history_days
+    const historyDays = retention && retention > 0 ? retention : Number.POSITIVE_INFINITY
+    const cap = trendPeriod === 'hour' ? Math.min(historyDays, rawRetentionDays) : historyDays
+    return all.filter(d => d <= cap || d === 1)
+  }, [trendPeriod, profile?.traffic_history_days])
+  // Clamp trendDays whenever the option set changes: largest available
+  // option that isn't bigger than the current selection.
   useEffect(() => {
-    if (trendPeriod === 'hour' && trendDays > 7) setTrendDays(7)
-  }, [trendPeriod, trendDays])
+    if (trendRangeOptions.length === 0) return
+    if (!trendRangeOptions.includes(trendDays)) {
+      setTrendDays(trendRangeOptions[trendRangeOptions.length - 1])
+    }
+  }, [trendRangeOptions, trendDays])
+  // Period ↔ Range coupling: 1d locks Period to Hour; ≥30d forbids Hour.
+  // Snap rather than disable so the chart never queries an invalid combo.
+  useEffect(() => {
+    if (trendDays === 1 && trendPeriod !== 'hour') setTrendPeriod('hour')
+    else if (trendDays >= 30 && trendPeriod === 'hour') setTrendPeriod('day')
+  }, [trendDays, trendPeriod])
 
   const [emergencyBusy, setEmergencyBusy] = useState(false)
   const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null)
@@ -690,22 +710,29 @@ export default function MeView() {
         </AccordionSummary>
         <AccordionDetails sx={{ px: { xs: 2.5, sm: 3 }, pt: 0, pb: { xs: 2.5, sm: 3 } }}>
           <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 1, mb: 1.5, flexWrap: 'wrap' }}>
-            <Select size="small" value={trendPeriod}
-              onChange={e => setTrendPeriod(e.target.value as TrafficHistoryPeriod)}
-              sx={{ height: 36, minWidth: 110 }}>
-              <MenuItem value="hour">{t('trend.period_hour', { defaultValue: '按小时' })}</MenuItem>
-              <MenuItem value="day">{t('trend.period_day', { defaultValue: '按天' })}</MenuItem>
-              <MenuItem value="week">{t('trend.period_week', { defaultValue: '按周' })}</MenuItem>
-              <MenuItem value="month">{t('trend.period_month', { defaultValue: '按月' })}</MenuItem>
-            </Select>
+            {/* Range first, granularity second — pick the time window before
+                deciding zoom level. 1d (Today) forces Hour; ≥30d hides Hour
+                (raw retention is only 7 days, so longer windows have no
+                hourly data to render). */}
             <Select size="small" value={trendDays}
               onChange={e => setTrendDays(Number(e.target.value))}
               sx={{ height: 36, minWidth: 130 }}>
-              <MenuItem value={7}>{t('trend.range_7')}</MenuItem>
-              {trendPeriod !== 'hour' && <MenuItem value={30}>{t('trend.range_30')}</MenuItem>}
-              {trendPeriod !== 'hour' && <MenuItem value={90}>{t('trend.range_90')}</MenuItem>}
-              {trendPeriod !== 'hour' && <MenuItem value={180}>{t('trend.range_180', { defaultValue: '最近半年' })}</MenuItem>}
-              {trendPeriod !== 'hour' && <MenuItem value={365}>{t('trend.range_365', { defaultValue: '最近一年' })}</MenuItem>}
+              {trendRangeOptions.includes(1) && <MenuItem value={1}>{t('trend.range_1', { defaultValue: '今天' })}</MenuItem>}
+              {trendRangeOptions.includes(7) && <MenuItem value={7}>{t('trend.range_7')}</MenuItem>}
+              {trendRangeOptions.includes(30) && <MenuItem value={30}>{t('trend.range_30')}</MenuItem>}
+              {trendRangeOptions.includes(90) && <MenuItem value={90}>{t('trend.range_90')}</MenuItem>}
+              {trendRangeOptions.includes(180) && <MenuItem value={180}>{t('trend.range_180', { defaultValue: '最近半年' })}</MenuItem>}
+              {trendRangeOptions.includes(365) && <MenuItem value={365}>{t('trend.range_365', { defaultValue: '最近一年' })}</MenuItem>}
+            </Select>
+            <Select size="small" value={trendPeriod}
+              onChange={e => setTrendPeriod(e.target.value as TrafficHistoryPeriod)}
+              sx={{ height: 36, minWidth: 110 }}>
+              {trendDays <= 7 && (
+                <MenuItem value="hour">{t('trend.period_hour', { defaultValue: '按小时' })}</MenuItem>
+              )}
+              <MenuItem value="day" disabled={trendDays === 1}>{t('trend.period_day', { defaultValue: '按天' })}</MenuItem>
+              <MenuItem value="week" disabled={trendDays === 1}>{t('trend.period_week', { defaultValue: '按周' })}</MenuItem>
+              <MenuItem value="month" disabled={trendDays === 1}>{t('trend.period_month', { defaultValue: '按月' })}</MenuItem>
             </Select>
           </Box>
           <Suspense fallback={<Box sx={{ height: 280, display: 'grid', placeItems: 'center' }}><CircularProgress size={24} /></Box>}>
@@ -807,6 +834,7 @@ export default function MeView() {
         limitBytes={profile.traffic_limit_bytes}
         usage={usage}
         expireAt={profile.expire_at ?? null}
+        resetPeriod={profile.traffic_reset_period}
         md={md}
       />
       </Box>{/* end usage order wrapper */}
@@ -1044,10 +1072,14 @@ interface UsagePanelProps {
   limitBytes: number
   usage: UsageReport | null
   expireAt: string | null
+  // Reset cadence (never/monthly/quarterly/yearly). Shown as a small caption
+  // beside "本周期已用" so the user understands when the counter rolls back —
+  // without it, "Period used" alone is ambiguous (which period?).
+  resetPeriod: string
   md: M3Tokens
 }
 
-function UsagePanel({ limitBytes, usage, expireAt, md }: UsagePanelProps) {
+function UsagePanel({ limitBytes, usage, expireAt, resetPeriod, md }: UsagePanelProps) {
   const { t } = useTranslation('user')
   const limitGB = limitBytes / 1024 / 1024 / 1024
   const usedBytes = usage?.period_used_bytes ?? 0
@@ -1088,6 +1120,11 @@ function UsagePanel({ limitBytes, usage, expireAt, md }: UsagePanelProps) {
         <Box sx={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', mb: 1 }}>
           <Typography sx={{ fontSize: 13, color: md.onSurfaceVariant }}>
             {t('profile.traffic_used')}
+            {resetPeriod && resetPeriod !== 'never' && (
+              <Typography component="span" sx={{ fontSize: 12, color: md.onSurfaceVariant, opacity: 0.7, ml: 0.75 }}>
+                · {t(`reset_period.${resetPeriod}`)}
+              </Typography>
+            )}
           </Typography>
           <Typography sx={{ fontSize: 13, color: md.onSurfaceVariant, fontVariantNumeric: 'tabular-nums' }}>
             {isUnlimited

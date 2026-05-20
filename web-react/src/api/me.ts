@@ -53,6 +53,10 @@ export interface MeProfile {
   expire_at?: string | null
   traffic_limit_bytes: number
   traffic_reset_period: string
+  /** Admin-configured TrafficHistoryDays. Drives which traffic-chart range
+   *  options the portal exposes (a 90-day retention hides "last 6 months"
+   *  / "last 1 year"). 0 = no cap. */
+  traffic_history_days?: number
   enabled: boolean
   can_change_password: boolean
   can_edit_personal_rules: boolean

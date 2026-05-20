@@ -1741,6 +1741,7 @@ function ResetPeriodField({ value, onChange }: { value: string; onChange: (v: st
       <MenuItem value="never">{t('users.reset_period.never')}</MenuItem>
       <MenuItem value="monthly">{t('users.reset_period.monthly')}</MenuItem>
       <MenuItem value="quarterly">{t('users.reset_period.quarterly')}</MenuItem>
+      <MenuItem value="yearly">{t('users.reset_period.yearly')}</MenuItem>
     </TextField>
   )
 }

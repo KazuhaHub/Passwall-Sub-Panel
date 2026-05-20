@@ -7,7 +7,7 @@
  *  rule sets, templates, audit clear. The intent: bring in an
  *  assistant without handing over break-glass keys. */
 export type Role = 'admin' | 'operator' | 'user'
-export type ResetPeriod = 'never' | 'monthly' | 'quarterly'
+export type ResetPeriod = 'never' | 'monthly' | 'quarterly' | 'yearly'
 
 export interface User {
   id: number

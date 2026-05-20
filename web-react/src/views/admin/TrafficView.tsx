@@ -139,11 +139,14 @@ export default function TrafficView() {
   // still reads raw, and rollup-backed Hour queries land in beta.7).
   // Keeping the cap on the frontend avoids the user staring at a mostly-
   // empty chart for "30-day hourly".
+  //
+  // "Today" (1d) is always available regardless of retention — even a
+  // 1-day retention covers it — and only renders Hour granularity.
   const rawRetentionDays = 7
   const rangeOptions = useMemo(() => {
-    const all = [7, 30, 90, 180, 365]
+    const all = [1, 7, 30, 90, 180, 365]
     const cap = period === 'hour' ? Math.min(historyDays, rawRetentionDays) : historyDays
-    return all.filter(d => d <= cap)
+    return all.filter(d => d <= cap || d === 1)
   }, [period, historyDays])
   // Clamp rangeDays whenever the option set changes: pick the largest
   // available option that isn't bigger than the current selection.
@@ -154,6 +157,14 @@ export default function TrafficView() {
       setRangeDays(fallback)
     }
   }, [rangeOptions, rangeDays])
+  // Period ↔ Range coupling: range=1d forces Hour; range≥30d forbids Hour.
+  // Snap to the closest valid Period when the user picks a Range that the
+  // current Period doesn't support, so the chart never queries an invalid
+  // combo (which would otherwise show empty or duplicate data).
+  useEffect(() => {
+    if (rangeDays === 1 && period !== 'hour') setPeriod('hour')
+    else if (rangeDays >= 30 && period === 'hour') setPeriod('day')
+  }, [rangeDays, period])
   // Admin's effective chart timezone. Defaults to the panel-configured tz
   // (so the chart aligns with the rest of the panel's calendar math by
   // default) and falls back to the browser tz when panel tz is unset.
@@ -395,22 +406,30 @@ export default function TrafficView() {
                 )
               })()
             )}
-            <ToggleButtonGroup value={period} exclusive size="small"
-              onChange={(_, v) => v && setPeriod(v as TrafficHistoryPeriod)}
-              sx={{ '& .MuiToggleButton-root': { px: 2, height: 40 } }}>
-              <ToggleButton value="hour">{t('traffic.trend.period_hour')}</ToggleButton>
-              <ToggleButton value="day">{t('traffic.trend.period_day')}</ToggleButton>
-              <ToggleButton value="week">{t('traffic.trend.period_week')}</ToggleButton>
-              <ToggleButton value="month">{t('traffic.trend.period_month')}</ToggleButton>
-            </ToggleButtonGroup>
             <Select size="small" value={rangeDays} onChange={e => setRangeDays(Number(e.target.value))}
               sx={{ width: 140, height: 40 }}>
+              {rangeOptions.includes(1) && <MenuItem value={1}>{t('traffic.trend.range_1')}</MenuItem>}
               {rangeOptions.includes(7) && <MenuItem value={7}>{t('traffic.trend.range_7')}</MenuItem>}
               {rangeOptions.includes(30) && <MenuItem value={30}>{t('traffic.trend.range_30')}</MenuItem>}
               {rangeOptions.includes(90) && <MenuItem value={90}>{t('traffic.trend.range_90')}</MenuItem>}
               {rangeOptions.includes(180) && <MenuItem value={180}>{t('traffic.trend.range_180')}</MenuItem>}
               {rangeOptions.includes(365) && <MenuItem value={365}>{t('traffic.trend.range_365')}</MenuItem>}
             </Select>
+            <ToggleButtonGroup value={period} exclusive size="small"
+              onChange={(_, v) => v && setPeriod(v as TrafficHistoryPeriod)}
+              sx={{ '& .MuiToggleButton-root': { px: 2, height: 40 } }}>
+              {/* Hour only meaningful within the raw retention window (≤7d).
+                  For Today (1d) it's the *only* sensible granularity, and
+                  for ≥30d ranges the raw table doesn't hold enough buckets,
+                  so we hide the button entirely instead of disabling it —
+                  fewer dead UI affordances. */}
+              {rangeDays <= 7 && (
+                <ToggleButton value="hour">{t('traffic.trend.period_hour')}</ToggleButton>
+              )}
+              <ToggleButton value="day" disabled={rangeDays === 1}>{t('traffic.trend.period_day')}</ToggleButton>
+              <ToggleButton value="week" disabled={rangeDays === 1}>{t('traffic.trend.period_week')}</ToggleButton>
+              <ToggleButton value="month" disabled={rangeDays === 1}>{t('traffic.trend.period_month')}</ToggleButton>
+            </ToggleButtonGroup>
             <Autocomplete freeSolo size="small"
               options={buildTzOptions(panelTz)}
               value={selectedTz}

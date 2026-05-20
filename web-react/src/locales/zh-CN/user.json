@@ -17,7 +17,8 @@
     "reset_period": {
       "never": "不重置",
       "monthly": "每月",
-      "quarterly": "每季"
+      "quarterly": "每季",
+      "yearly": "每年"
     }
   },
   "sub": {
@@ -57,6 +58,7 @@
     "period_day": "按天",
     "period_week": "按周",
     "period_month": "按月",
+    "range_1": "今天",
     "range_7": "最近 7 天",
     "range_30": "最近 30 天",
     "range_90": "最近 90 天",
