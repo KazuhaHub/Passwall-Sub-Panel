@@ -954,20 +954,75 @@ function InboundFormFields({ form, setForm, showMetadata, servers, onGenKeys, on
     />
   )
 
+  const protocolLabel = PROTOCOL_OPTIONS.find(o => o.value === form.protocol)?.label ?? form.protocol
+
+  // TLS certificate source picker, shared by the VLESS-stream TLS section and
+  // the Hysteria 2 section (both emit tlsSettings.certificates). File-paths is
+  // the production default; inline is for one-off deploys without ACME on the
+  // 3X-UI host; empty keeps certificates: [] (REALITY / bring-your-own-root).
+  const tlsCertFields = () => (
+    <>
+      <TextField select size="small"
+        label={t('admin:nodes.create_dialog.tls_cert_mode')}
+        value={form.tls_cert_mode}
+        onChange={e => update('tls_cert_mode', e.target.value as InboundFormState['tls_cert_mode'])}
+        sx={{ alignSelf: 'flex-start', minWidth: 240 }}>
+        <MenuItem value="">{t('admin:nodes.create_dialog.tls_cert_none')}</MenuItem>
+        <MenuItem value="file">{t('admin:nodes.create_dialog.tls_cert_file')}</MenuItem>
+        <MenuItem value="inline">{t('admin:nodes.create_dialog.tls_cert_inline')}</MenuItem>
+      </TextField>
+      {form.tls_cert_mode === 'file' && (
+        <Box sx={{ display: 'flex', gap: 1.5, flexWrap: 'wrap' }}>
+          <TextField size="small" fullWidth
+            label={t('admin:nodes.create_dialog.tls_cert_file_path', { defaultValue: 'Certificate file path' })}
+            placeholder="/etc/letsencrypt/live/example.com/fullchain.pem"
+            value={form.tls_cert_file}
+            onChange={e => update('tls_cert_file', e.target.value)}
+            sx={{ flex: '1 1 320px' }} />
+          <TextField size="small" fullWidth
+            label={t('admin:nodes.create_dialog.tls_key_file_path', { defaultValue: 'Private key file path' })}
+            placeholder="/etc/letsencrypt/live/example.com/privkey.pem"
+            value={form.tls_key_file}
+            onChange={e => update('tls_key_file', e.target.value)}
+            sx={{ flex: '1 1 320px' }} />
+        </Box>
+      )}
+      {form.tls_cert_mode === 'inline' && (
+        <Box sx={{ display: 'flex', gap: 1.5, flexWrap: 'wrap' }}>
+          <TextField size="small" multiline minRows={4} maxRows={10}
+            label={t('admin:nodes.create_dialog.tls_cert_pem', { defaultValue: 'Certificate (PEM)' })}
+            placeholder={'-----BEGIN CERTIFICATE-----\n…\n-----END CERTIFICATE-----'}
+            value={form.tls_cert_pem}
+            onChange={e => update('tls_cert_pem', e.target.value)}
+            sx={{ flex: '1 1 320px', '& textarea': { fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace', fontSize: 12 } }} />
+          <TextField size="small" multiline minRows={4} maxRows={10}
+            label={t('admin:nodes.create_dialog.tls_key_pem', { defaultValue: 'Private key (PEM)' })}
+            placeholder={'-----BEGIN PRIVATE KEY-----\n…\n-----END PRIVATE KEY-----'}
+            value={form.tls_key_pem}
+            onChange={e => update('tls_key_pem', e.target.value)}
+            sx={{ flex: '1 1 320px', '& textarea': { fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace', fontSize: 12 } }} />
+        </Box>
+      )}
+    </>
+  )
+
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.75 }}>
       {/* Target + protocol + listening (combined header). The advanced
           toggle lives on the right so it's visible regardless of which
           mode we're in. */}
       <Box>
-        <Box sx={{ display: 'flex', alignItems: 'center', mb: 0.75 }}>
-          <Box sx={{ flex: 1 }}>{sectionTitle(t('admin:nodes.create_dialog.section_inbound'))}</Box>
+        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 0.75 }}>
+          <Typography sx={{
+            fontWeight: 500, fontSize: 11,
+            color: md.primary, textTransform: 'uppercase', letterSpacing: '.6px',
+          }}>{t('admin:nodes.create_dialog.section_inbound')}</Typography>
           {onSetAdvanced && (
             <FormControlLabel
               label={t('admin:nodes.create_dialog.advanced', { defaultValue: '高级 (JSON)' })}
               control={<Switch size="small" checked={!!advanced}
                 onChange={(_, c) => toggleAdvanced(c)} />}
-              sx={{ ml: 0, '& .MuiFormControlLabel-label': { ml: 1, fontSize: 13 } }}
+              sx={{ ml: 0, mr: 0, '& .MuiFormControlLabel-label': { ml: 1, fontSize: 13 } }}
             />
           )}
         </Box>
@@ -985,7 +1040,21 @@ function InboundFormFields({ form, setForm, showMetadata, servers, onGenKeys, on
             {fieldLabel(t('admin:nodes.create_dialog.protocol'))}
             <Select size="small" fullWidth value={form.protocol}
               disabled={protocolReadonly || !!advanced}
-              onChange={e => update('protocol', e.target.value as CreateProtocol)}>
+              onChange={e => {
+                const p = e.target.value as CreateProtocol
+                // Normalise security so the per-protocol sections render
+                // correctly. The default form security is 'reality', which
+                // is VLESS-only — without this, switching to Trojan (must be
+                // TLS) or VMess (no REALITY) would leave security='reality'
+                // and hide BOTH the TLS and Reality sections, so the inbound
+                // gets no security config at all.
+                setForm(prev => {
+                  let sec = prev.vless_security
+                  if (p === 'trojan') sec = 'tls'
+                  else if (p === 'vmess' && sec === 'reality') sec = 'tls'
+                  return { ...prev, protocol: p, vless_security: sec }
+                })
+              }}>
               {PROTOCOL_OPTIONS.map(o => <MenuItem key={o.value} value={o.value}>{o.label}</MenuItem>)}
             </Select>
           </Box>
@@ -1042,7 +1111,9 @@ function InboundFormFields({ form, setForm, showMetadata, servers, onGenKeys, on
       {!advanced && usesVlessStream(form.protocol) && (
         <>
           <Box>
-            {sectionTitle(t('admin:nodes.create_dialog.section_vless'))}
+            {/* Shared transport section — header reflects the actual protocol
+                (VLESS / VMess / Trojan) instead of hardcoding "VLESS". */}
+            {sectionTitle(protocolLabel)}
             <Box sx={{ display: 'flex', gap: 1.5, flexWrap: 'wrap' }}>
               <Box sx={{ flex: '1 1 180px', minWidth: 140 }}>
                 {fieldLabel(t('admin:nodes.create_dialog.vless_network'))}
@@ -1068,9 +1139,11 @@ function InboundFormFields({ form, setForm, showMetadata, servers, onGenKeys, on
                     })
                   }}>
                   {VLESS_SECURITIES
-                    // VMess doesn't speak REALITY (client-side support never
-                    // landed), so hide it to prevent invalid combinations.
-                    .filter(o => !(form.protocol === 'vmess' && o.value === 'reality'))
+                    // REALITY is VLESS-only in practice — VMess clients never
+                    // shipped support, and Trojan is forced to TLS. Show it
+                    // for VLESS alone so the dropdown can't offer an invalid
+                    // protocol/security combination.
+                    .filter(o => !(o.value === 'reality' && form.protocol !== 'vless'))
                     .map(o => <MenuItem key={o.value} value={o.value}>{o.label}</MenuItem>)}
                 </Select>
               </Box>
@@ -1232,52 +1305,7 @@ function InboundFormFields({ form, setForm, showMetadata, servers, onGenKeys, on
                     form.tls_reject_unknown_sni,
                     c => update('tls_reject_unknown_sni', c))}
                 </Box>
-                {/* Certificate source. File-paths is the production
-                    default; inline is for one-off / test deploys
-                    without ACME on the 3X-UI host. Empty mode keeps
-                    certificates: [] (REALITY / clients that bring
-                    their own root). */}
-                <TextField select size="small"
-                  label={t('admin:nodes.create_dialog.tls_cert_mode')}
-                  value={form.tls_cert_mode}
-                  onChange={e => update('tls_cert_mode', e.target.value as InboundFormState['tls_cert_mode'])}
-                  sx={{ alignSelf: 'flex-start', minWidth: 240 }}>
-                  <MenuItem value="">{t('admin:nodes.create_dialog.tls_cert_none')}</MenuItem>
-                  <MenuItem value="file">{t('admin:nodes.create_dialog.tls_cert_file')}</MenuItem>
-                  <MenuItem value="inline">{t('admin:nodes.create_dialog.tls_cert_inline')}</MenuItem>
-                </TextField>
-                {form.tls_cert_mode === 'file' && (
-                  <Box sx={{ display: 'flex', gap: 1.5, flexWrap: 'wrap' }}>
-                    <TextField size="small" fullWidth
-                      label={t('admin:nodes.create_dialog.tls_cert_file_path', { defaultValue: 'Certificate file path' })}
-                      placeholder="/etc/letsencrypt/live/example.com/fullchain.pem"
-                      value={form.tls_cert_file}
-                      onChange={e => update('tls_cert_file', e.target.value)}
-                      sx={{ flex: '1 1 320px' }} />
-                    <TextField size="small" fullWidth
-                      label={t('admin:nodes.create_dialog.tls_key_file_path', { defaultValue: 'Private key file path' })}
-                      placeholder="/etc/letsencrypt/live/example.com/privkey.pem"
-                      value={form.tls_key_file}
-                      onChange={e => update('tls_key_file', e.target.value)}
-                      sx={{ flex: '1 1 320px' }} />
-                  </Box>
-                )}
-                {form.tls_cert_mode === 'inline' && (
-                  <Box sx={{ display: 'flex', gap: 1.5, flexWrap: 'wrap' }}>
-                    <TextField size="small" multiline minRows={4} maxRows={10}
-                      label={t('admin:nodes.create_dialog.tls_cert_pem', { defaultValue: 'Certificate (PEM)' })}
-                      placeholder={'-----BEGIN CERTIFICATE-----\n…\n-----END CERTIFICATE-----'}
-                      value={form.tls_cert_pem}
-                      onChange={e => update('tls_cert_pem', e.target.value)}
-                      sx={{ flex: '1 1 320px', '& textarea': { fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace', fontSize: 12 } }} />
-                    <TextField size="small" multiline minRows={4} maxRows={10}
-                      label={t('admin:nodes.create_dialog.tls_key_pem', { defaultValue: 'Private key (PEM)' })}
-                      placeholder={'-----BEGIN PRIVATE KEY-----\n…\n-----END PRIVATE KEY-----'}
-                      value={form.tls_key_pem}
-                      onChange={e => update('tls_key_pem', e.target.value)}
-                      sx={{ flex: '1 1 320px', '& textarea': { fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace', fontSize: 12 } }} />
-                  </Box>
-                )}
+                {tlsCertFields()}
               </Box>
             </Box>
           )}
@@ -1367,16 +1395,16 @@ function InboundFormFields({ form, setForm, showMetadata, servers, onGenKeys, on
                 <Select size="small" fullWidth value={form.hy2_masquerade_type} displayEmpty
                   onChange={e => update('hy2_masquerade_type', e.target.value as InboundFormState['hy2_masquerade_type'])}>
                   <MenuItem value="">{t('admin:nodes.create_dialog.hy2_masquerade_none', { defaultValue: '不启用' })}</MenuItem>
-                  <MenuItem value="proxy">proxy (反代到 URL)</MenuItem>
-                  <MenuItem value="file">file (返回静态目录)</MenuItem>
-                  <MenuItem value="string">string (返回固定内容)</MenuItem>
+                  <MenuItem value="proxy">{t('admin:nodes.create_dialog.hy2_masquerade_proxy', { defaultValue: 'proxy（反代到 URL）' })}</MenuItem>
+                  <MenuItem value="file">{t('admin:nodes.create_dialog.hy2_masquerade_file', { defaultValue: 'file（返回静态目录）' })}</MenuItem>
+                  <MenuItem value="string">{t('admin:nodes.create_dialog.hy2_masquerade_string', { defaultValue: 'string（返回固定内容）' })}</MenuItem>
                 </Select>
               </Box>
               <Box sx={{ flex: '2 1 280px' }}>
                 {fieldLabel(
-                  form.hy2_masquerade_type === 'proxy' ? 'Upstream URL'
-                  : form.hy2_masquerade_type === 'file' ? 'Directory'
-                  : form.hy2_masquerade_type === 'string' ? 'Response body'
+                  form.hy2_masquerade_type === 'proxy' ? t('admin:nodes.create_dialog.hy2_masquerade_content_proxy', { defaultValue: 'Upstream URL' })
+                  : form.hy2_masquerade_type === 'file' ? t('admin:nodes.create_dialog.hy2_masquerade_content_file', { defaultValue: 'Directory' })
+                  : form.hy2_masquerade_type === 'string' ? t('admin:nodes.create_dialog.hy2_masquerade_content_string', { defaultValue: 'Response body' })
                   : t('admin:nodes.create_dialog.hy2_masquerade_content', { defaultValue: '内容 / URL / 目录' })
                 )}
                 <TextField size="small" fullWidth
@@ -1385,11 +1413,11 @@ function InboundFormFields({ form, setForm, showMetadata, servers, onGenKeys, on
                   disabled={!form.hy2_masquerade_type} />
               </Box>
             </Box>
-            <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant }}>
-              {t('admin:nodes.create_dialog.hy2_cert_hint', {
-                defaultValue: '证书 / 私钥请在 3X-UI 面板侧配置；或切换"高级 (JSON)"在 streamSettings.tlsSettings.certificates 中粘贴。',
-              })}
-            </Typography>
+            {/* TLS certificate — Hysteria 2 emits tlsSettings.certificates the
+                same way the VLESS stream does (see buildStreamSettings), so the
+                shared cert picker wires up directly instead of punting to the
+                3X-UI side. */}
+            {tlsCertFields()}
           </Box>
         </Box>
       )}
@@ -2732,7 +2760,7 @@ export default function NodesView() {
         PaperProps={{ sx: { borderRadius: 3, bgcolor: md.surfaceContainerHigh, width: 800, maxWidth: '95vw' } }}>
         <DialogTitle sx={{ pt: 2.5, pb: 1, fontSize: 18 }}>
           {t('admin:nodes.create_dialog.title_dynamic', {
-            protocol: createForm.protocol === 'ss2022' ? 'SS-2022' : 'VLESS',
+            protocol: PROTOCOL_OPTIONS.find(o => o.value === createForm.protocol)?.label ?? createForm.protocol,
           })}
         </DialogTitle>
         <DialogContent sx={{ pt: 1 }}>
