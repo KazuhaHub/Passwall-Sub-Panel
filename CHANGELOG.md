@@ -4,9 +4,10 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
-## v3.2.1-beta.3 — 2026-05-20
+## v3.2.1-beta.4 — 2026-05-20
 
-beta.1 实测反馈的收尾修复（beta.2 因「账户状态」开关样式突兀立即由本版的下拉替代）。
+beta.1 实测反馈的收尾修复（beta.2 的「账户状态」开关样式突兀，已由下拉替代；
+beta.3 后又补入个人规则提示的 i18n 修复）。
 
 ### Added
 - 用户编辑弹窗加入「账户状态」下拉（启用 / 停用）：可在编辑表单内直接切换账户状态
