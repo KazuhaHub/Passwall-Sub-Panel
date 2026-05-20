@@ -4,7 +4,13 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
-## v3.1.1-rc.1 — 2026-05-19
+## v3.1.1-rc.2 — 2026-05-19
+
+### Added
+- 新建节点 / 导入 inbound 弹窗的 `Address` 字段现在按所属 3X-UI 服务器的
+  URL 主机名预填（仅取 hostname，丢弃 scheme / 管理端口 / 路径）。这是
+  可编辑的默认值——切换服务器时若地址未被手动改过会跟着更新，手动改过则
+  保留。
 
 ### Fixed
 - 订阅 URI 列表里 SS-2022（`2022-blake3-*`）的 `ss://` 链接拼接修正为
@@ -21,6 +27,10 @@ small improvement).
 - 导入 inbound 弹窗：`Flow` 选择器仅在源 inbound 为 VLESS 时显示，
   SS / VMess / Trojan / Hysteria2 不再出现该字段，提交时也不会为非 VLESS
   协议写入 flow。
+
+### Maintenance
+- `go mod tidy`：`coreos/go-oidc/v3`、`golang.org/x/oauth2` 从 `// indirect`
+  归类为直接依赖（它们被 OIDC 登录代码直接 import），消除 go.mod 过期标记。
 
 ## v3.0.0 — 2026-05-18
 

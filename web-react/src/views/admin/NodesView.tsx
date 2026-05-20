@@ -389,6 +389,23 @@ const VLESS_SECURITIES: { value: VlessSecurity; label: string }[] = [
 ]
 const FINGERPRINTS = ['chrome', 'firefox', 'safari', 'ios', 'android', 'edge', '360', 'qq', 'random', 'randomized']
 const VLESS_FLOWS = ['', 'xtls-rprx-vision', 'xtls-rprx-vision-udp443']
+
+// hostFromURL extracts just the hostname from a 3X-UI panel URL so it can
+// pre-fill a node's Address. The panel URL is a management endpoint
+// (scheme + admin port + path, e.g. https://1.2.3.4:54321/xyz) — we keep
+// only the host since the proxy port comes from the inbound and the path /
+// admin port are irrelevant to clients. Best-effort: prepends a scheme when
+// the stored URL omits one, and returns "" on anything unparseable so the
+// caller just leaves the field blank.
+function hostFromURL(raw: string): string {
+  if (!raw) return ''
+  try {
+    const u = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(raw) ? raw : `https://${raw}`)
+    return u.hostname
+  } catch {
+    return ''
+  }
+}
 const TCP_HEADER_TYPES = ['none', 'http']
 const TLS_VERSIONS = ['', '1.0', '1.1', '1.2', '1.3']
 const SS2022_METHODS: { value: SS2022Method; bytes: number }[] = [
@@ -1045,7 +1062,20 @@ function InboundFormFields({ form, setForm, showMetadata, servers, onGenKeys, on
                 getOptionLabel={o => o.name}
                 isOptionEqualToValue={(a, b) => a.id === b.id}
                 value={servers.find(s => s.id === form.panel_id) ?? servers[0]}
-                onChange={(_, v) => { if (v) update('panel_id', v.id) }}
+                onChange={(_, v) => {
+                  if (!v) return
+                  // Switch panel and re-derive the Address default — but only
+                  // when the field is still untouched (empty, or equal to the
+                  // previously-selected server's host). A manual edit wins.
+                  setForm(prev => {
+                    const prevHost = hostFromURL(servers.find(s => s.id === prev.panel_id)?.url ?? '')
+                    const next = { ...prev, panel_id: v.id }
+                    if (!prev.server_address || prev.server_address === prevHost) {
+                      next.server_address = hostFromURL(v.url)
+                    }
+                    return next
+                  })
+                }}
                 renderInput={(params) => (
                   <TextField {...params} placeholder={t('admin:nodes.create_dialog.panel_search_placeholder', { defaultValue: '搜索 / 选择服务器' })} />
                 )}
@@ -2191,7 +2221,7 @@ export default function NodesView() {
       pushSnack(t('admin:nodes.create_dialog.no_servers'), 'warning')
       return
     }
-    setCreateForm({ ...EMPTY_INBOUND, panel_id: servers[0].id })
+    setCreateForm({ ...EMPTY_INBOUND, panel_id: servers[0].id, server_address: hostFromURL(servers[0].url) })
     setCreateAdvanced(false)
     setCreateOpen(true)
   }
@@ -2429,6 +2459,9 @@ export default function NodesView() {
       inbound_id: u.InboundID,
       protocol: (u.Protocol || '').toLowerCase(),
       display_name: u.Remark || `${u.Protocol}:${u.Port}`,
+      // Pre-fill Address with the source panel's host (editable default —
+      // proxy host usually equals the 3X-UI host, but admins can override).
+      server_address: hostFromURL(servers.find(s => s.id === u.PanelID)?.url ?? ''),
     })
     setImportErr({})
     setImportOpen(true)
