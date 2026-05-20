@@ -51,7 +51,9 @@
     "placeholder": "- DOMAIN-SUFFIX,openai.com,🚀 节点选择\n- DOMAIN-KEYWORD,github,🚀 节点选择\n- IP-CIDR,10.0.0.0/8,🎯 全球直连\n- MATCH,🐟 漏网之鱼",
     "hint": "One rule per line, Clash / Mihomo syntax. In the default template, personal rules take priority over the site ruleset.",
     "insert_example": "Insert example rules",
-    "saved": "Saved"
+    "saved": "Saved",
+    "disabled_toast": "Personal rules editing is disabled by admin",
+    "save_failed": "Save failed, please try again"
   },
   "emergency": {
     "title": "Emergency access",

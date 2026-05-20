@@ -51,7 +51,9 @@
     "placeholder": "- DOMAIN-SUFFIX,openai.com,🚀 节点选择\n- DOMAIN-KEYWORD,github,🚀 节点选择\n- IP-CIDR,10.0.0.0/8,🎯 全球直连\n- MATCH,🐟 漏网之鱼",
     "hint": "每行一条规则，使用 Clash / Mihomo 规则语法。默认模板中，个人规则优先于站点规则集。",
     "insert_example": "插入示例规则",
-    "saved": "已保存"
+    "saved": "已保存",
+    "disabled_toast": "管理员已关闭个人规则编辑",
+    "save_failed": "保存失败，请稍后重试"
   },
   "trend": {
     "title": "流量趋势",

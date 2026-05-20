@@ -311,6 +311,11 @@ export default function MeView() {
       setRulesText(text); setRulesSaved(text)
       pushSnack(t('rules.saved'), 'success')
       setRulesOpen(false)
+    } catch (e) {
+      // 403 = admin turned off self-service rule editing. Localize it here
+      // since the backend returns a hardcoded English string.
+      const status = (e as { response?: { status?: number } })?.response?.status
+      pushSnack(status === 403 ? t('rules.disabled_toast') : t('rules.save_failed'), 'error')
     } finally { setRulesBusy(false) }
   }
 

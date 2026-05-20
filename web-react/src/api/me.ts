@@ -110,7 +110,9 @@ export async function getMyRules() {
 }
 
 export async function updateMyRules(personalRules: string) {
-  await client.put('/user/me/rules', { personal_rules: personalRules })
+  // Skip the global error toast: saveRules() localizes the failure itself
+  // (the backend's "disabled by admin" string is hardcoded English).
+  await client.put('/user/me/rules', { personal_rules: personalRules }, { _skipErrorToast: true })
 }
 
 export async function resetMyCredentials() {
