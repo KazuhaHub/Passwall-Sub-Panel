@@ -141,7 +141,9 @@ func (r *mailRepo) ListSent(ctx context.Context, filter ports.EmailLogFilter) ([
 	}
 
 	var rows []mailSentWithUser
-	if err := q.Order("mail_sent.sent_at DESC").
+	// mail_sent.id DESC breaks ties on the non-unique sent_at so pagination is
+	// stable on Postgres (mails sent in one pass share a near-identical sent_at).
+	if err := q.Order("mail_sent.sent_at DESC, mail_sent.id DESC").
 		Limit(filter.PageSize).
 		Offset((filter.Page - 1) * filter.PageSize).
 		Find(&rows).Error; err != nil {

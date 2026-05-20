@@ -82,7 +82,9 @@ func (r *nodeTrafficRepo) ListByNode(ctx context.Context, nodeID int64, since, u
 	var rows []nodeTrafficRow
 	err := r.db.WithContext(ctx).
 		Where("node_id = ? AND captured_at >= ? AND captured_at < ?", nodeID, since, until).
-		Order("captured_at ASC").
+		// id ASC makes "last row in a chart bucket" deterministic on ties (see
+		// trafficRepo.ListByUser) so Postgres can't shift bucket deltas.
+		Order("captured_at ASC, id ASC").
 		Find(&rows).Error
 	if err != nil {
 		return nil, err

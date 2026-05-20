@@ -58,7 +58,10 @@ func (r *auditRepo) List(ctx context.Context, filter ports.AuditFilter) ([]*doma
 	if filter.Page < 1 {
 		filter.Page = 1
 	}
-	q = q.Order("at DESC").Limit(filter.PageSize).Offset((filter.Page - 1) * filter.PageSize)
+	// id DESC is a deterministic tiebreaker: `at` is a non-unique timestamp,
+	// and Postgres gives no stable order for equal-key rows across LIMIT/OFFSET
+	// pages (so a burst of same-`at` entries could repeat/skip while paging).
+	q = q.Order("at DESC, id DESC").Limit(filter.PageSize).Offset((filter.Page - 1) * filter.PageSize)
 
 	var rows []auditRow
 	if err := q.Find(&rows).Error; err != nil {

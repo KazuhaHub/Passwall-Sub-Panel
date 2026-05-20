@@ -115,7 +115,10 @@ func (r *trafficRepo) ListByUser(ctx context.Context, userID int64, since, until
 	var rows []trafficRow
 	err := r.db.WithContext(ctx).
 		Where("user_id = ? AND captured_at >= ? AND captured_at < ?", userID, since, until).
-		Order("captured_at ASC").
+		// id ASC makes "last row in a chart bucket" deterministic when two
+		// snapshots share captured_at — otherwise Postgres could pick either,
+		// shifting the bucket's cumulative-counter delta run-to-run.
+		Order("captured_at ASC, id ASC").
 		Find(&rows).Error
 	if err != nil {
 		return nil, err

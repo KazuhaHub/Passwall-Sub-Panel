@@ -70,9 +70,18 @@ func Open(kind, dsn string) (*gorm.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	// SQLite is happy with much smaller pools; MySQL tolerates these defaults.
-	sqlDB.SetMaxIdleConns(10)
-	sqlDB.SetMaxOpenConns(50)
+	// SQLite serializes writes, so a multi-connection pool just invites
+	// "database is locked" when the traffic poll and an HTTP request write
+	// concurrently. Cap it at a single connection — the database driver then
+	// queues writers instead of failing them. MySQL/Postgres handle real
+	// concurrency and get a proper pool.
+	if kind == "sqlite" {
+		sqlDB.SetMaxOpenConns(1)
+		sqlDB.SetMaxIdleConns(1)
+	} else {
+		sqlDB.SetMaxIdleConns(10)
+		sqlDB.SetMaxOpenConns(50)
+	}
 	return db, nil
 }
 

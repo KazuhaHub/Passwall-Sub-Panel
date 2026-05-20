@@ -80,7 +80,9 @@ func (r *subLogRepo) List(ctx context.Context, filter ports.SubLogFilter) ([]*do
 	}
 
 	var rows []subLogWithUser
-	if err := q.Order("sub_logs.accessed_at DESC").
+	// sub_logs.id DESC breaks ties on the non-unique accessed_at so pagination
+	// is stable on Postgres (equal-timestamp rows otherwise reorder per page).
+	if err := q.Order("sub_logs.accessed_at DESC, sub_logs.id DESC").
 		Limit(filter.PageSize).
 		Offset((filter.Page - 1) * filter.PageSize).
 		Find(&rows).Error; err != nil {
