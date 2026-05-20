@@ -73,6 +73,7 @@
     "intro": "选择你的客户端，点击「导入」会通过 URL Scheme 自动配置；如果没装客户端可以点「安装」。",
     "import": "导入",
     "install": "安装",
+    "invalid_url": "无效的导入链接",
     "platform_windows": "Windows",
     "platform_macos": "macOS",
     "platform_linux": "Linux",
@@ -81,7 +82,8 @@
     "platform_other": "其他"
   },
   "links": {
-    "title": "快捷链接"
+    "title": "快捷链接",
+    "invalid_url": "链接无效（仅支持 http/https）"
   },
   "emergency": {
     "title": "紧急访问",

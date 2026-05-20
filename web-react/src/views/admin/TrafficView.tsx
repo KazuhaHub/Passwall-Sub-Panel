@@ -171,12 +171,19 @@ export default function TrafficView() {
   // Not persisted across reloads — the admin reselects per session if they
   // want a non-default view, matching the spec's "don't remember" rule.
   const panelTz = useSiteStore(s => s.timezone)
+  // selectedTz is the COMMITTED timezone the chart fetch depends on; tzInput
+  // is the live text in the Autocomplete. Keeping them separate stops a
+  // fetch firing on every keystroke — the committed value only changes on
+  // select / Enter / blur.
   const [selectedTz, setSelectedTz] = useState<string>(() => panelTz || browserTz())
+  const [tzInput, setTzInput] = useState<string>(() => panelTz || browserTz())
   // When panel tz finishes loading (site store is async), realign the
   // default once. Skip when admin has already typed something distinct.
   useEffect(() => {
     if (!panelTz) return
-    setSelectedTz(prev => (prev === '' || prev === browserTz()) ? panelTz : prev)
+    const realign = (prev: string) => (prev === '' || prev === browserTz()) ? panelTz : prev
+    setSelectedTz(realign)
+    setTzInput(realign)
   }, [panelTz])
 
   const historyItems = history?.items ?? []
@@ -433,12 +440,13 @@ export default function TrafficView() {
             <Autocomplete freeSolo size="small"
               options={buildTzOptions(panelTz)}
               value={selectedTz}
-              inputValue={selectedTz}
-              onInputChange={(_, v) => setSelectedTz(v)}
-              onChange={(_, v) => setSelectedTz((v as string) ?? '')}
+              inputValue={tzInput}
+              onInputChange={(_, v) => setTzInput(v)}
+              onChange={(_, v) => { const tz = (v as string) ?? ''; setTzInput(tz); setSelectedTz(tz) }}
               sx={{ width: 220 }}
               renderInput={(params) => (
-                <TextField {...params} label={t('traffic.trend.timezone')} />
+                <TextField {...params} label={t('traffic.trend.timezone')}
+                  onBlur={() => setSelectedTz(tzInput)} />
               )} />
             <Button variant="outlined" onClick={loadHistory} disabled={chartLoading}>{t('traffic.refresh')}</Button>
           </Box>

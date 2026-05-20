@@ -93,6 +93,7 @@
     "intro": "Pick your client and tap Import — it'll auto-configure via URL Scheme. Tap Install if you don't have the client yet.",
     "import": "Import",
     "install": "Install",
+    "invalid_url": "Invalid import link",
     "platform_windows": "Windows",
     "platform_macos": "macOS",
     "platform_linux": "Linux",
@@ -101,7 +102,8 @@
     "platform_other": "Other"
   },
   "links": {
-    "title": "Quick links"
+    "title": "Quick links",
+    "invalid_url": "Invalid link (http/https only)"
   },
   "common": {
     "ok": "OK",

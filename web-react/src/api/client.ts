@@ -150,11 +150,12 @@ client.interceptors.response.use(
     // --- 401 with a not-yet-retried request → attempt silent refresh.
     if (err.response?.status === 401 && cfg && !cfg._skipRefresh && !cfg._retried) {
       if (!refreshInFlight) {
-        refreshInFlight = performRefresh().finally(() => {
-          // Hold the flight slot a beat so concurrent callers all
-          // resolve through the same promise; clear AFTER they read it.
-          setTimeout(() => { refreshInFlight = null }, 0)
-        })
+        // Clear the slot synchronously once the refresh settles. Concurrent
+        // 401s that captured this promise still await the same result; a 401
+        // arriving afterwards correctly starts a fresh refresh. (The previous
+        // setTimeout(0) clear was racy — a late 401 could reuse an
+        // already-failed promise.)
+        refreshInFlight = performRefresh().finally(() => { refreshInFlight = null })
       }
       const newAccess = await refreshInFlight
       if (newAccess) {

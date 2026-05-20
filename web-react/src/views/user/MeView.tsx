@@ -409,7 +409,27 @@ export default function MeView() {
       await copyToClipboard(url)
       return
     }
+    // Custom app scheme (clash://, karing://, ...). Block script-capable
+    // pseudo-schemes so a malformed/hostile import template can't execute
+    // code in the user's origin via navigation.
+    const scheme = (url.match(/^([a-z][a-z0-9+.-]*):/i)?.[1] ?? '').toLowerCase()
+    const dangerous = ['javascript', 'data', 'vbscript', 'blob', 'file']
+    if (!scheme || dangerous.includes(scheme)) {
+      pushSnack(t('import.invalid_url', { defaultValue: '无效的导入链接' }), 'error')
+      return
+    }
     window.location.href = url
+  }
+
+  // Quick links are admin-configured web URLs. Require http(s) so a hostile
+  // config can't smuggle a javascript:/data: URL that runs on click.
+  function openQuickLink(l: { url: string; new_window: boolean }) {
+    if (!/^https?:\/\//i.test(l.url)) {
+      pushSnack(t('links.invalid_url', { defaultValue: '链接无效（仅支持 http/https）' }), 'error')
+      return
+    }
+    if (l.new_window) window.open(l.url, '_blank', 'noopener,noreferrer')
+    else window.location.href = l.url
   }
 
   function emergencyStatusText(): string {
@@ -539,7 +559,7 @@ export default function MeView() {
               </Button>
               <Button size={isMobile ? 'medium' : 'large'} variant="outlined"
                 startIcon={<DownloadIcon />}
-                onClick={() => window.open(hero.install_url, '_blank')}
+                onClick={() => window.open(hero.install_url, '_blank', 'noopener,noreferrer')}
                 sx={{ borderColor: md.onPrimaryContainer, color: md.onPrimaryContainer,
                   '&:hover': { borderColor: md.onPrimaryContainer, bgcolor: 'rgba(0,0,0,.06)' } }}>
                 {t('import.install')}
@@ -808,7 +828,7 @@ export default function MeView() {
                         {t('import.import')}
                       </Button>
                       <Button size="small" variant="outlined"
-                        onClick={() => window.open(c.install_url, '_blank')}>
+                        onClick={() => window.open(c.install_url, '_blank', 'noopener,noreferrer')}>
                         {t('import.install')}
                       </Button>
                     </Box>
@@ -852,7 +872,7 @@ export default function MeView() {
           <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
             {quickLinks.map(l => (
               <Button key={l.url} size="small" variant="outlined"
-                onClick={() => l.new_window ? window.open(l.url, '_blank') : (window.location.href = l.url)}>
+                onClick={() => openQuickLink(l)}>
                 {l.label}
               </Button>
             ))}

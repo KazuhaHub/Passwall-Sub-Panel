@@ -19,16 +19,31 @@ export function pushSnack(message: string, severity: Severity = 'info') {
 }
 
 export default function SnackbarHost() {
+  // Queue events and show them one at a time (MUI "consecutive snackbars"
+  // pattern). A burst of distinct errors — e.g. a Promise.allSettled batch —
+  // no longer clobbers all-but-the-last toast.
+  const [queue, setQueue] = useState<SnackEvent[]>([])
   const [current, setCurrent] = useState<SnackEvent | null>(null)
   const [open, setOpen] = useState(false)
 
   useEffect(() => {
-    listener = (evt) => {
-      setCurrent(evt)
-      setOpen(true)
-    }
+    listener = (evt) => setQueue(q => [...q, evt])
     return () => { listener = null }
   }, [])
+
+  useEffect(() => {
+    if (queue.length === 0) return
+    if (!current) {
+      // Idle → show the next queued snack.
+      setCurrent(queue[0])
+      setQueue(q => q.slice(1))
+      setOpen(true)
+    } else if (open) {
+      // A new snack arrived while one is showing → close it so the
+      // onExited handler drains the next.
+      setOpen(false)
+    }
+  }, [queue, current, open])
 
   return (
     <Snackbar
@@ -36,6 +51,7 @@ export default function SnackbarHost() {
       open={open}
       autoHideDuration={4000}
       onClose={(_, reason) => { if (reason !== 'clickaway') setOpen(false) }}
+      TransitionProps={{ onExited: () => setCurrent(null) }}
       anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
     >
       {current ? (
