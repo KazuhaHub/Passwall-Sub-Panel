@@ -193,6 +193,10 @@ type nodeRow struct {
 	DisplayName           string `gorm:"size:255;not null"`
 	ServerAddress         string `gorm:"size:255"`
 	Flow                  string `gorm:"size:64"`
+	// Protocol caches the upstream inbound's protocol so the UI can gate
+	// protocol-specific fields without a live 3X-UI fetch. Empty for rows
+	// written before this column existed; AutoMigrate adds it, no backfill.
+	Protocol              string `gorm:"size:32;default:''"`
 	Region                string `gorm:"size:16;not null"`
 	Tags                  jsonStrings
 	SortOrder             int    `gorm:"default:0"`
@@ -228,6 +232,7 @@ func (r *nodeRow) toDomain() *domain.Node {
 		DisplayName:           r.DisplayName,
 		ServerAddress:         r.ServerAddress,
 		Flow:                  r.Flow,
+		Protocol:              r.Protocol,
 		Region:                r.Region,
 		Tags:                  []string(r.Tags),
 		SortOrder:             r.SortOrder,
@@ -258,6 +263,7 @@ func nodeFromDomain(n *domain.Node) *nodeRow {
 		DisplayName:           n.DisplayName,
 		ServerAddress:         n.ServerAddress,
 		Flow:                  n.Flow,
+		Protocol:              n.Protocol,
 		Region:                n.Region,
 		Tags:                  jsonStrings(n.Tags),
 		SortOrder:             n.SortOrder,

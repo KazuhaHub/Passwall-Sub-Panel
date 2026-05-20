@@ -318,6 +318,12 @@ type Node struct {
 	DisplayName   string
 	ServerAddress string
 	Flow          string
+	// Protocol caches the upstream inbound's protocol (vless / vmess /
+	// trojan / shadowsocks / hysteria2, lowercased) so the UI can gate
+	// protocol-specific fields (e.g. Flow is VLESS-only) without a live
+	// 3X-UI fetch. Populated on import / create / inbound edit; empty for
+	// rows written before this column existed (treated as "unknown").
+	Protocol      string
 	Region        string
 	Tags          []string
 	SortOrder     int

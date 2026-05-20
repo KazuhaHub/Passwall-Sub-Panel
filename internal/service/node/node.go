@@ -327,6 +327,16 @@ func (s *Service) UpdateInboundConfig(ctx context.Context, id int64, spec ports.
 	if err != nil {
 		return err
 	}
+	// Keep the cached protocol in sync with the inbound being written. This
+	// also opportunistically backfills rows imported before the protocol
+	// column existed, so the UI's protocol-specific gating self-heals the
+	// next time an admin edits the inbound.
+	if p := strings.ToLower(spec.Protocol); p != "" && p != n.Protocol {
+		n.Protocol = p
+		if err := s.nodes.Update(ctx, n); err != nil {
+			log.Warn("persist node protocol on inbound update", "node_id", n.ID, "err", err)
+		}
+	}
 	c, err := s.pool.Get(n.PanelID)
 	if err != nil {
 		return s.enqueueNodeTask(ctx, domain.SyncTaskNodeUpdate, n, "update node config", spec)

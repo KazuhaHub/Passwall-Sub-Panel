@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -41,6 +42,10 @@ type nodeDTO struct {
 	DisplayName   string   `json:"display_name"`
 	ServerAddress string   `json:"server_address"`
 	Flow          string   `json:"flow,omitempty"`
+	// Protocol caches the upstream inbound protocol so the UI can gate
+	// protocol-specific fields (e.g. Flow is VLESS-only). Empty for rows
+	// imported before this column existed.
+	Protocol      string   `json:"protocol,omitempty"`
 	Region        string   `json:"region"`
 	Tags          []string `json:"tags"`
 	SortOrder     int      `json:"sort_order"`
@@ -78,6 +83,9 @@ type importNodeRequest struct {
 	DisplayName   string   `json:"display_name" binding:"required"`
 	ServerAddress string   `json:"server_address" binding:"required"`
 	Flow          string   `json:"flow"`
+	// Protocol of the source inbound (lowercased), cached on the node so the
+	// UI can gate protocol-specific fields. Optional for backward compat.
+	Protocol      string   `json:"protocol"`
 	Region        string   `json:"region" binding:"required"`
 	Tags          []string `json:"tags"`
 	SortOrder     int      `json:"sort_order"`
@@ -379,6 +387,7 @@ func (h *AdminNodeHandler) ImportExisting(c *gin.Context) {
 		DisplayName:   req.DisplayName,
 		ServerAddress: req.ServerAddress,
 		Flow:          req.Flow,
+		Protocol:      strings.ToLower(req.Protocol),
 		Region:        req.Region,
 		Tags:          req.Tags,
 		SortOrder:     req.SortOrder,
@@ -402,6 +411,7 @@ func (h *AdminNodeHandler) CreateInbound(c *gin.Context) {
 		DisplayName:   req.DisplayName,
 		ServerAddress: req.ServerAddress,
 		Flow:          req.Flow,
+		Protocol:      strings.ToLower(req.Inbound.Protocol),
 		Region:        req.Region,
 		Tags:          req.Tags,
 		SortOrder:     req.SortOrder,
@@ -689,6 +699,7 @@ func (h *AdminNodeHandler) toNodeDTO(n *domain.Node, panelNames map[int64]string
 		DisplayName:     n.DisplayName,
 		ServerAddress:   n.ServerAddress,
 		Flow:            n.Flow,
+		Protocol:        n.Protocol,
 		Region:          n.Region,
 		Tags:            n.Tags,
 		SortOrder:       n.SortOrder,

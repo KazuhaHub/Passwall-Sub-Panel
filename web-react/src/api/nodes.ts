@@ -21,6 +21,9 @@ export interface ImportNodeRequest {
   display_name: string
   server_address: string
   flow?: string
+  /** Source inbound protocol (lowercased), cached on the node for
+   *  protocol-specific UI gating. */
+  protocol?: string
   region: string
   tags?: string[]
   sort_order?: number

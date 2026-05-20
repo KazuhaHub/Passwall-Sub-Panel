@@ -4,6 +4,15 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## v3.1.1-rc.3 — 2026-05-19
+
+### Fixed
+- 编辑节点弹窗的 `Flow` 字段现在仅对 VLESS 节点显示（此前对 SS / VMess /
+  Trojan / Hysteria2 也显示）。为支持这点，节点新增缓存 `protocol`（schema
+  加列，AutoMigrate 自动添加、无需 backfill）：import / create 时写入，编辑
+  inbound 时回填，列表 / 详情 API 带出。已有旧节点 protocol 为空时按「未知」
+  处理、仍显示 Flow，下次重新 import 或编辑 inbound 会自愈。
+
 ## v3.1.1-rc.2 — 2026-05-19
 
 ### Added

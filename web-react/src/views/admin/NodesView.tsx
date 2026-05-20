@@ -2480,6 +2480,7 @@ export default function NodesView() {
         inbound_id: importForm.inbound_id,
         display_name: importForm.display_name,
         server_address: importForm.server_address,
+        protocol: importForm.protocol || undefined,
         // Flow only applies to VLESS; never persist it for other protocols.
         flow: importForm.protocol === 'vless' ? (importForm.flow || undefined) : undefined,
         region: importForm.region,
@@ -2987,15 +2988,21 @@ export default function NodesView() {
               onChange={e => setEditForm({ ...editForm, server_address: e.target.value })}
               error={!!editMetaErr.server_address}
               helperText={editMetaErr.server_address ? t(`admin:${editMetaErr.server_address}`) : ''} />
-            <Box>
-              <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant, mb: 0.25 }}>
-                {t('admin:nodes.field.flow')}
-              </Typography>
-              <Select size="small" fullWidth value={editForm.flow} displayEmpty
-                onChange={e => setEditForm({ ...editForm, flow: e.target.value })}>
-                {VLESS_FLOWS.map(f => <MenuItem key={f} value={f}>{f || '—'}</MenuItem>)}
-              </Select>
-            </Box>
+            {/* Flow is VLESS-only. Hide it for known non-VLESS protocols;
+                show it when the protocol is VLESS or unknown (rows imported
+                before the protocol column existed — they self-heal on the
+                next inbound edit / re-import). */}
+            {(!editing?.protocol || editing.protocol === 'vless') && (
+              <Box>
+                <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant, mb: 0.25 }}>
+                  {t('admin:nodes.field.flow')}
+                </Typography>
+                <Select size="small" fullWidth value={editForm.flow} displayEmpty
+                  onChange={e => setEditForm({ ...editForm, flow: e.target.value })}>
+                  {VLESS_FLOWS.map(f => <MenuItem key={f} value={f}>{f || '—'}</MenuItem>)}
+                </Select>
+              </Box>
+            )}
             <TextField required fullWidth label={t('admin:nodes.field.region')}
               value={editForm.region}
               onChange={e => setEditForm({ ...editForm, region: e.target.value })}
