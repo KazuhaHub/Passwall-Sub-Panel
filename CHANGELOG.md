@@ -29,8 +29,11 @@ beta.3 后又补入个人规则提示的 i18n 修复）。
 - 用户门户保存个人规则失败时的提示混语言：管理员关闭自助编辑时后端返回硬编码
   英文串，被全局错误 toast 原样弹出。改为该请求跳过全局 toast，由前端按语言渲染
   （403 → 「管理员已关闭个人规则编辑」，其余 → 通用保存失败）。
-
-## v3.2.1-beta.1 — 2026-05-20
+- SMTP 发送：以发件域名（而非 net/smtp 默认的 `localhost`）作为 EHLO/HELO
+  名称——更严格的中继（尤其是 Google Workspace 的 smtp-relay.gmail.com）会对
+  非 FQDN 的 HELO 直接断开连接，表现为测试邮件报「EOF」。同时给各阶段错误加上
+  前缀（`smtp greeting/helo/starttls/auth/...`），不再只弹一个无信息量的 EOF，
+  便于定位是握手、STARTTLS 还是认证环节失败。
 
 ### Added
 - 用户编辑界面重做为 Cloudreve 风格的左右双栏：左栏聚合身份信息（头像 / 角色 /

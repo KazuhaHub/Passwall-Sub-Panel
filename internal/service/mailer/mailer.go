@@ -1088,38 +1088,65 @@ func sendSMTP(ctx context.Context, settings domain.MailSettings, to, subject, bo
 	c, err := smtp.NewClient(result.conn, settings.SMTPHost)
 	if err != nil {
 		_ = result.conn.Close()
-		return err
+		// Reading the server greeting failed. A bare io.EOF here means the
+		// server accepted the TCP connection then closed it — commonly a
+		// wrong port (implicit-TLS server reached without "tls" encryption),
+		// or an IP/relay that isn't allowed to connect.
+		return fmt.Errorf("smtp greeting: %w", err)
 	}
 	defer c.Close()
+	// Announce ourselves with a real FQDN rather than net/smtp's default
+	// "localhost". Stricter relays (Google Workspace's smtp-relay.gmail.com
+	// in particular) drop the connection on a non-FQDN HELO, which surfaces
+	// downstream as a bare EOF. Hello() must precede StartTLS/Auth; it sets
+	// the name reused for the post-TLS re-EHLO too.
+	if name := heloName(settings.FromEmail, settings.SMTPHost); name != "" {
+		if err := c.Hello(name); err != nil {
+			return fmt.Errorf("smtp helo: %w", err)
+		}
+	}
 	if settings.Encryption == "starttls" {
 		if err := c.StartTLS(&tls.Config{ServerName: settings.SMTPHost, MinVersion: tls.VersionTLS12}); err != nil {
-			return err
+			return fmt.Errorf("smtp starttls: %w", err)
 		}
 	}
 	if settings.SMTPUsername != "" {
 		if err := c.Auth(smtp.PlainAuth("", settings.SMTPUsername, settings.SMTPPassword, settings.SMTPHost)); err != nil {
-			return err
+			return fmt.Errorf("smtp auth: %w", err)
 		}
 	}
 	if err := c.Mail(settings.FromEmail); err != nil {
-		return err
+		return fmt.Errorf("smtp mail-from: %w", err)
 	}
 	if err := c.Rcpt(to); err != nil {
-		return err
+		return fmt.Errorf("smtp rcpt-to: %w", err)
 	}
 	w, err := c.Data()
 	if err != nil {
-		return err
+		return fmt.Errorf("smtp data: %w", err)
 	}
 	msg := buildMessage(fromAddr.String(), to, subject, body)
 	if _, err := w.Write([]byte(msg)); err != nil {
 		_ = w.Close()
-		return err
+		return fmt.Errorf("smtp write: %w", err)
 	}
 	if err := w.Close(); err != nil {
-		return err
+		return fmt.Errorf("smtp data-close: %w", err)
 	}
 	return c.Quit()
+}
+
+// heloName derives the FQDN to announce in EHLO/HELO. The sender domain is
+// the most defensible choice (it matches MAIL FROM); the SMTP host is a
+// fallback. Returns "" only when neither yields a usable name, in which case
+// net/smtp falls back to "localhost".
+func heloName(fromEmail, smtpHost string) string {
+	if at := strings.LastIndex(fromEmail, "@"); at >= 0 {
+		if domain := strings.TrimSpace(fromEmail[at+1:]); domain != "" {
+			return domain
+		}
+	}
+	return strings.TrimSpace(smtpHost)
 }
 
 func buildMessage(from, to, subject, body string) string {

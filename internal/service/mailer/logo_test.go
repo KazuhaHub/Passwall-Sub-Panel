@@ -2,6 +2,28 @@ package mailer
 
 import "testing"
 
+// heloName must announce a real FQDN (sender domain preferred, SMTP host as
+// fallback) so stricter relays don't drop the connection on a "localhost"
+// HELO — a failure that otherwise surfaces as a bare EOF.
+func TestHeloName(t *testing.T) {
+	cases := []struct {
+		name, fromEmail, smtpHost, want string
+	}{
+		{"sender domain preferred", "no-reply@kazuha.org", "smtp-relay.gmail.com", "kazuha.org"},
+		{"falls back to smtp host", "no-reply", "smtp.example.com", "smtp.example.com"},
+		{"empty from uses host", "", "smtp.example.com", "smtp.example.com"},
+		{"trailing-at falls back to host", "broken@", "smtp.example.com", "smtp.example.com"},
+		{"nothing usable yields empty", "", "", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := heloName(tc.fromEmail, tc.smtpHost); got != tc.want {
+				t.Fatalf("heloName(%q, %q) = %q, want %q", tc.fromEmail, tc.smtpHost, got, tc.want)
+			}
+		})
+	}
+}
+
 // resolveLogoURL must only ever yield an absolute http(s) URL (or empty) for
 // email <img> src. data: URIs render in the in-panel preview but are blocked
 // by Gmail and most webmail clients, and relative paths can't be fetched at
