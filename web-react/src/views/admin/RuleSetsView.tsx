@@ -31,6 +31,7 @@ import EditIcon from '@mui/icons-material/EditOutlined'
 import LockIcon from '@mui/icons-material/Lock'
 import LockOpenIcon from '@mui/icons-material/LockOpen'
 import { useTranslation } from 'react-i18next'
+import { useCan } from '@/utils/permissions'
 
 import { deleteRuleSet, listRuleSets, resetRuleSet, saveRuleSet, SEEDED_RULESET_SLUGS, type RuleSet } from '@/api/rules'
 import { listTemplates, type Template } from '@/api/templates'
@@ -45,6 +46,7 @@ export default function RuleSetsView() {
   const theme = useTheme()
   const md = theme.palette.md
   const { t } = useTranslation(['admin', 'common'])
+  const canConfig = useCan('config.write')
 
   const [items, setItems] = useState<RuleSet[]>([])
   const [templates, setTemplates] = useState<Template[]>([])
@@ -205,12 +207,12 @@ export default function RuleSetsView() {
           <Typography variant="h4">{t('admin:rules.title')}</Typography>
           <Typography variant="body2" sx={{ mt: 0.5 }}>{t('admin:rules.subtitle')}</Typography>
         </Box>
-        <Button variant="contained" startIcon={<AddIcon />} onClick={openCreate}>
+        {canConfig && <Button variant="contained" startIcon={<AddIcon />} onClick={openCreate}>
           {t('admin:rules.create')}
-        </Button>
+        </Button>}
       </Box>
 
-      {selected.size > 0 && (
+      {selected.size > 0 && canConfig && (
         <Box sx={{
           display: 'flex', alignItems: 'center', gap: 1, mt: 2, mb: 1, px: 2, py: 1,
           borderRadius: 9999, bgcolor: md.secondaryContainer, color: md.onSecondaryContainer,
@@ -289,6 +291,7 @@ export default function RuleSetsView() {
                         : badge(t('admin:rules.status.disabled'), md.surfaceContainerHighest, md.onSurfaceVariant)}
                     </TableCell>
                     <TableCell align="right">
+                      {canConfig && <>
                       <Tooltip title={t('admin:rules.field.enabled')}>
                         <IconButton size="small" onClick={() => openEdit(rs)}><EditIcon fontSize="small" /></IconButton>
                       </Tooltip>
@@ -317,6 +320,7 @@ export default function RuleSetsView() {
                           </IconButton>
                         </span>
                       </Tooltip>
+                      </>}
                     </TableCell>
                   </TableRow>
                 )

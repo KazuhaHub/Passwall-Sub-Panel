@@ -30,6 +30,7 @@ import CloseIcon from '@mui/icons-material/Close'
 import ReplayIcon from '@mui/icons-material/Replay'
 import CleaningIcon from '@mui/icons-material/CleaningServices'
 import { useTranslation } from 'react-i18next'
+import { useCan } from '@/utils/permissions'
 
 import {
   cancelSyncTask,
@@ -73,6 +74,7 @@ export default function SyncTasksView() {
   const theme = useTheme()
   const md = theme.palette.md
   const { t } = useTranslation(['admin', 'common'])
+  const canConfig = useCan('config.write')
 
   const [items, setItems] = useState<SyncTask[]>([])
   const [total, setTotal] = useState(0)
@@ -189,7 +191,7 @@ export default function SyncTasksView() {
           </Typography>
         </Box>
         <Box sx={{ display: 'flex', gap: 1 }}>
-          <Button variant="outlined" color="error" startIcon={<CleaningIcon />} onClick={purge}>{t('admin:sync_tasks.purge')}</Button>
+          {canConfig && <Button variant="outlined" color="error" startIcon={<CleaningIcon />} onClick={purge}>{t('admin:sync_tasks.purge')}</Button>}
           <Button variant="contained" startIcon={<RefreshIcon />} onClick={() => load()}>
             {t('admin:sync_tasks.refresh')}
           </Button>

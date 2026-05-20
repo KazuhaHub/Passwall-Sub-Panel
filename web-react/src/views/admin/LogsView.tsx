@@ -29,6 +29,7 @@ import VisibilityIcon from '@mui/icons-material/Visibility'
 import CleaningIcon from '@mui/icons-material/CleaningServices'
 import SearchIcon from '@mui/icons-material/Search'
 import { useTranslation } from 'react-i18next'
+import { useCan } from '@/utils/permissions'
 
 import { clearAudit, listAudit, type AuditEntry } from '@/api/audit'
 import { clearSubLogs, getSubLogs, purgeSubLogs, type SubLog } from '@/api/subLogs'
@@ -68,6 +69,7 @@ export default function LogsView() {
   const theme = useTheme()
   const md = theme.palette.md
   const { t } = useTranslation(['admin', 'common'])
+  const canConfig = useCan('config.write')
   const panelTz = useSiteStore(s => s.timezone)
 
   const [tab, setTab] = useTabParam<'sub' | 'audit' | 'email'>('tab', 'sub', ['sub', 'audit', 'email'])
@@ -250,25 +252,29 @@ export default function LogsView() {
       {tab === 'sub' && (
         <>
           <Box sx={{ display: 'flex', gap: 1, mb: 2, alignItems: 'center', flexWrap: 'wrap' }}>
-            <Button variant="outlined" startIcon={<CleaningIcon />} onClick={purgeSubOld}>
-              {t('admin:logs.purge_old')}
-            </Button>
-            <Button variant="outlined" color="error" startIcon={<DeleteIcon />} onClick={clearSubAll}>
-              {t('admin:logs.clear_all')}
-            </Button>
+            {canConfig && <>
+              <Button variant="outlined" startIcon={<CleaningIcon />} onClick={purgeSubOld}>
+                {t('admin:logs.purge_old')}
+              </Button>
+              <Button variant="outlined" color="error" startIcon={<DeleteIcon />} onClick={clearSubAll}>
+                {t('admin:logs.clear_all')}
+              </Button>
+            </>}
             <Box sx={{ flex: 1 }} />
-            <TextField
-              type="number" size="small"
-              label={t('admin:logs.retention_label')}
-              value={retentionDays ?? ''}
-              onChange={(e: ChangeEvent<HTMLInputElement>) => setRetentionDays(e.target.value === '' ? null : Number(e.target.value))}
-              inputProps={{ min: 0 }}
-              sx={{ width: 200 }}
-            />
-            <Button variant="contained" disabled={retentionSaving || retentionDays === null || retentionDays === retentionSavedDays}
-              onClick={saveRetention}>
-              {t('admin:logs.retention_save')}
-            </Button>
+            {canConfig && <>
+              <TextField
+                type="number" size="small"
+                label={t('admin:logs.retention_label')}
+                value={retentionDays ?? ''}
+                onChange={(e: ChangeEvent<HTMLInputElement>) => setRetentionDays(e.target.value === '' ? null : Number(e.target.value))}
+                inputProps={{ min: 0 }}
+                sx={{ width: 200 }}
+              />
+              <Button variant="contained" disabled={retentionSaving || retentionDays === null || retentionDays === retentionSavedDays}
+                onClick={saveRetention}>
+                {t('admin:logs.retention_save')}
+              </Button>
+            </>}
           </Box>
           <Typography variant="body2" sx={{ mb: 2, color: md.onSurfaceVariant, fontSize: 12 }}>
             {t('admin:logs.retention_hint')}
@@ -342,9 +348,9 @@ export default function LogsView() {
             </Box>
             <Button type="submit" variant="outlined">{t('common:search.placeholder')}</Button>
             <Box sx={{ flex: 1 }} />
-            <Button variant="outlined" color="error" startIcon={<DeleteIcon />} onClick={clearAuditAll}>
+            {canConfig && <Button variant="outlined" color="error" startIcon={<DeleteIcon />} onClick={clearAuditAll}>
               {t('admin:logs.clear_all')}
-            </Button>
+            </Button>}
           </Box>
           <Card sx={{ bgcolor: md.surfaceContainerLow, boxShadow: '0 1px 2px rgba(0,0,0,.3),0 1px 3px 1px rgba(0,0,0,.15)', overflow: 'hidden' }}>
             <TableContainer>
@@ -399,26 +405,30 @@ export default function LogsView() {
       {tab === 'email' && (
         <>
           <Box sx={{ display: 'flex', gap: 1, mb: 2, alignItems: 'center', flexWrap: 'wrap' }}>
-            <Button variant="outlined" startIcon={<CleaningIcon />} onClick={purgeEmailOld}>
-              {t('admin:logs.purge_old')}
-            </Button>
-            <Button variant="outlined" color="error" startIcon={<DeleteIcon />} onClick={clearEmailAll}>
-              {t('admin:logs.clear_all')}
-            </Button>
+            {canConfig && <>
+              <Button variant="outlined" startIcon={<CleaningIcon />} onClick={purgeEmailOld}>
+                {t('admin:logs.purge_old')}
+              </Button>
+              <Button variant="outlined" color="error" startIcon={<DeleteIcon />} onClick={clearEmailAll}>
+                {t('admin:logs.clear_all')}
+              </Button>
+            </>}
             <Box sx={{ flex: 1 }} />
-            <TextField
-              type="number" size="small"
-              label={t('admin:logs.retention_label')}
-              value={emailRetentionDays ?? ''}
-              onChange={(e: ChangeEvent<HTMLInputElement>) => setEmailRetentionDays(e.target.value === '' ? null : Number(e.target.value))}
-              inputProps={{ min: 0 }}
-              sx={{ width: 200 }}
-            />
-            <Button variant="contained"
-              disabled={emailRetentionSaving || emailRetentionDays === null || emailRetentionDays === emailRetentionSavedDays}
-              onClick={saveEmailRetention}>
-              {t('admin:logs.retention_save')}
-            </Button>
+            {canConfig && <>
+              <TextField
+                type="number" size="small"
+                label={t('admin:logs.retention_label')}
+                value={emailRetentionDays ?? ''}
+                onChange={(e: ChangeEvent<HTMLInputElement>) => setEmailRetentionDays(e.target.value === '' ? null : Number(e.target.value))}
+                inputProps={{ min: 0 }}
+                sx={{ width: 200 }}
+              />
+              <Button variant="contained"
+                disabled={emailRetentionSaving || emailRetentionDays === null || emailRetentionDays === emailRetentionSavedDays}
+                onClick={saveEmailRetention}>
+                {t('admin:logs.retention_save')}
+              </Button>
+            </>}
           </Box>
           <Typography variant="body2" sx={{ mb: 2, color: md.onSurfaceVariant, fontSize: 12 }}>
             {t('admin:logs.retention_hint')}

@@ -36,6 +36,7 @@ import DeleteIcon from '@mui/icons-material/DeleteOutline'
 import EditIcon from '@mui/icons-material/EditOutlined'
 import RestartAltIcon from '@mui/icons-material/RestartAlt'
 import { useTranslation } from 'react-i18next'
+import { useCan } from '@/utils/permissions'
 
 import { deleteTemplate, listTemplates, resetTemplate, saveTemplate, SEEDED_TEMPLATE_SLUGS, type Template } from '@/api/templates'
 import { listRuleSets, type RuleSet } from '@/api/rules'
@@ -92,6 +93,7 @@ export default function TemplatesView() {
   const theme = useTheme()
   const md = theme.palette.md
   const { t } = useTranslation(['admin', 'common'])
+  const canConfig = useCan('config.write')
 
   const [items, setItems] = useState<Template[]>([])
   const [ruleSets, setRuleSets] = useState<RuleSet[]>([])
@@ -275,12 +277,12 @@ export default function TemplatesView() {
           <Typography variant="h4">{t('admin:templates.title')}</Typography>
           <Typography variant="body2" sx={{ mt: 0.5 }}>{t('admin:templates.subtitle')}</Typography>
         </Box>
-        <Button variant="contained" startIcon={<AddIcon />} onClick={openCreate}>
+        {canConfig && <Button variant="contained" startIcon={<AddIcon />} onClick={openCreate}>
           {t('admin:templates.create')}
-        </Button>
+        </Button>}
       </Box>
 
-      {selected.size > 0 && (
+      {selected.size > 0 && canConfig && (
         <Box sx={{
           display: 'flex', alignItems: 'center', gap: 1, mt: 2, mb: 1, px: 2, py: 1,
           borderRadius: 9999, bgcolor: md.secondaryContainer, color: md.onSecondaryContainer,
@@ -342,6 +344,7 @@ export default function TemplatesView() {
                     {tpl.is_default && badge(t('admin:templates.status.default'), md.primaryContainer, md.onPrimaryContainer)}
                   </TableCell>
                   <TableCell align="right">
+                    {canConfig && <>
                     <Tooltip title={t('admin:templates.field.is_default')}>
                       <IconButton size="small" onClick={() => openEdit(tpl)}><EditIcon fontSize="small" /></IconButton>
                     </Tooltip>
@@ -370,6 +373,7 @@ export default function TemplatesView() {
                         </IconButton>
                       </span>
                     </Tooltip>
+                    </>}
                   </TableCell>
                 </TableRow>
               ))}

@@ -33,6 +33,7 @@ import DragIndicatorIcon from '@mui/icons-material/DragIndicator'
 import EditIcon from '@mui/icons-material/EditOutlined'
 import LinkOffIcon from '@mui/icons-material/LinkOff'
 import { useTranslation } from 'react-i18next'
+import { useCan } from '@/utils/permissions'
 
 import {
   claimClient,
@@ -1651,6 +1652,7 @@ export default function NodesView() {
   const theme = useTheme()
   const md = theme.palette.md
   const { t } = useTranslation(['admin', 'common'])
+  const canConfig = useCan('config.write')
 
   const [tab, setTab] = useTabParam<'managed' | 'unmanaged'>('tab', 'managed', ['managed', 'unmanaged'])
   const [managed, setManaged] = useState<Node[]>([])
@@ -2541,12 +2543,14 @@ export default function NodesView() {
           <Typography variant="body2" sx={{ mt: 0.5 }}>{t('admin:nodes.subtitle')}</Typography>
         </Box>
         <Box sx={{ display: 'flex', gap: 1 }}>
+          {canConfig && <>
           <Button variant="outlined" startIcon={<AddIcon />} onClick={openSeparatorCreate}>
             {t('admin:nodes.create_separator', { defaultValue: '新增分隔标题' })}
           </Button>
           <Button variant="contained" startIcon={<AddIcon />} onClick={openCreate}>
             {t('admin:nodes.create')}
           </Button>
+          </>}
         </Box>
       </Box>
 
@@ -2576,12 +2580,12 @@ export default function NodesView() {
             onClick={() => batchSetEnabled(false)}>
             {t('admin:nodes.batch_disable')}
           </Button>
-          <Button size="small" variant="text" color="error"
+          {canConfig && <Button size="small" variant="text" color="error"
             disabled={batchBusy !== ''}
             startIcon={batchBusy === 'delete' ? <CircularProgress size={14} /> : <DeleteIcon />}
             onClick={batchDelete}>
             {t('admin:nodes.batch_delete')}
-          </Button>
+          </Button>}
         </Box>
       )}
 
@@ -2714,7 +2718,7 @@ export default function NodesView() {
                       <Switch checked={n.enabled} onChange={() => toggleEnabled(n)} disabled={enabledBusy[n.id]} />
                     </TableCell>
                     <TableCell align="right">
-                      {isSep ? (
+                      {canConfig && (isSep ? (
                         // Separators don't have inbound config / 3X-UI binding /
                         // detach semantics — only edit + delete are meaningful.
                         // Edit routes through openSeparatorEdit so the dialog
@@ -2753,7 +2757,7 @@ export default function NodesView() {
                             </IconButton>
                           </Tooltip>
                         </>
-                      )}
+                      ))}
                     </TableCell>
                   </TableRow>
                   )
@@ -2865,6 +2869,7 @@ export default function NodesView() {
                         <TableCell sx={{ fontSize: 13 }}>{u.Remark}</TableCell>
                         <TableCell align="right" sx={{ fontVariantNumeric: 'tabular-nums' }}>{u.ClientCount}</TableCell>
                         <TableCell align="right" sx={{ whiteSpace: 'nowrap' }}>
+                          {canConfig && <>
                           {u.ClientCount > 0 && (
                             <Button size="small" variant="text" onClick={() => startClaim(u)} sx={{ mr: 1 }}>
                               {t('admin:nodes.claim')}
@@ -2873,6 +2878,7 @@ export default function NodesView() {
                           <Button size="small" variant="outlined" onClick={() => startImport(u)}>
                             {t('admin:nodes.import')}
                           </Button>
+                          </>}
                         </TableCell>
                       </TableRow>
                     ))}

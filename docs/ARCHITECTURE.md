@@ -616,6 +616,28 @@ rules:
 | 快捷链接 | 管理员配置的外部链接（如客户端下载、教程等） |
 | 全局公告 | 管理员发布的置顶公告 |
 
+### 6.3 operator 角色 + 权限扩展点（预留接口，勿绕过）
+
+**operator（日常运营）** 是介于 admin 与 user 之间的受限管理角色：
+
+- **能做**：登录后台；普通用户（role=user）CRUD；流量查看 / 手动设用量 / 紧急访问；节点启用/禁用；同步任务重试/取消；查看分组 / 规则库 / 配置方案 / 日志 / 审计。
+- **不能做**：3X-UI 服务器（面板凭据）、系统设置、邮件 SMTP、SSO（SAML/OIDC）；节点 / 分组 / 规则库 / 配置方案 / 分隔符的增改删；日志清空与保留期；同步任务清理；操作 admin/operator 账户或分配 admin/operator 角色。
+
+**授权实现（四处，必须保持一致）：**
+
+| 层 | 位置 | 机制 |
+|---|---|---|
+| 后端路由 | `internal/transport/http/router.go` | `staffGroup`（admin+operator）vs `adminGroup`（仅 admin）两组；`middleware.RequireRole(...)` 按角色放行 |
+| 后端 handler | `internal/transport/http/handler/admin_user.go` | `ensureOperatorAllowed`（operator 不可动 admin/operator 账户）、`guardOperatorRoleAssignment`（operator 只能分配 role=user） |
+| 前端路由 | `web-react/src/router/RequireAuth.tsx` + `router/home.ts` `ADMIN_ONLY_ROUTES` | servers / settings 对非 admin 重定向到 dashboard |
+| 前端按钮 | `web-react/src/utils/permissions.ts` | **能力层** `useCan('config.write' \| 'users.elevate' \| ...)`，各 View 按能力隐藏操作按钮 |
+
+**预留扩展点 —— 自定义角色 / 细粒度权限（重点，别忘）：**
+
+- **前端所有操作门控只走能力层** `utils/permissions.ts`：调用点一律 `useCan(capability)`，**绝不内联 `role === 'admin'`**。将来支持自定义角色或后端下发权限集时，**只改 `permissions.ts` 的 `ROLE_CAPS` / `roleCan`**（例如改为按角色名查后端返回的权限表），所有 `useCan(...)` 调用点保持不变 —— 这就是"留好的口，不把路封死"。
+- **后端**新增角色：在 `domain.Role` 加枚举值，并纳入 `router.go` 的 staffGroup/adminGroup（或将来更细的分组）；`ensureOperatorAllowed` 这类守卫按需推广为基于能力的检查。
+- **前后端能力定义必须对齐**：`permissions.ts` 的 `ROLE_CAPS` 与 `router.go` 的路由分组是同一套规则的两端，改一处要同步另一处。
+
 ---
 
 ## 7. 关键数据流（核心场景演练）

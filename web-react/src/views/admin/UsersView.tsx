@@ -74,6 +74,7 @@ import { setUserTraffic, topTraffic, type TrafficRow } from '@/api/traffic'
 import type { Group, ResetPeriod, Role, User } from '@/api/types'
 import type { ReconcileReport } from '@/api/reconcile'
 import { useAuthStore } from '@/stores/auth'
+import { useCan } from '@/utils/permissions'
 import { useSiteStore } from '@/stores/site'
 import { confirm } from '@/components/ConfirmHost'
 import { pushSnack } from '@/components/SnackbarHost'
@@ -173,6 +174,11 @@ export default function UsersView() {
   const browserTz = (() => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone } catch { return '' } })()
   const expireTzDiffers = !!panelTz && panelTz !== browserTz
   const auth = useAuthStore()
+  // Elevated user actions (act on admin/operator accounts) are admin-only;
+  // operators may only manage role=user targets. canManageUser mirrors the
+  // backend's ensureOperatorAllowed guard so we don't show buttons that 403.
+  const canElevate = useCan('users.elevate')
+  const canManageUser = (target: User) => canElevate || target.role === 'user'
 
   const [items, setItems] = useState<User[]>([])
   const [total, setTotal] = useState(0)
@@ -994,6 +1000,7 @@ export default function UsersView() {
                         </IconButton>
                       </span>
                     </Tooltip>
+                    {canManageUser(u) && <>
                     <Tooltip title={t(u.enabled ? 'admin:users.action.disable' : 'admin:users.action.enable')}>
                       <IconButton size="small" onClick={() => openReason(u)}>
                         {u.enabled
@@ -1009,6 +1016,7 @@ export default function UsersView() {
                     <IconButton size="small" onClick={(e) => openMore(e, u)}>
                       <MoreVertIcon fontSize="small" />
                     </IconButton>
+                    </>}
                   </TableCell>
                 </TableRow>
               ))}

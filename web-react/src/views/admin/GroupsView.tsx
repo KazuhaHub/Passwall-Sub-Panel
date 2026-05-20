@@ -32,6 +32,7 @@ import SearchIcon from '@mui/icons-material/Search'
 import DeleteIcon from '@mui/icons-material/DeleteOutline'
 import EditIcon from '@mui/icons-material/EditOutlined'
 import { useTranslation } from 'react-i18next'
+import { useCan } from '@/utils/permissions'
 
 import { createGroup, deleteGroup, listGroups, updateGroup } from '@/api/groups'
 import { listNodes } from '@/api/nodes'
@@ -153,6 +154,7 @@ export default function GroupsView() {
   const theme = useTheme()
   const md = theme.palette.md
   const { t } = useTranslation(['admin', 'common'])
+  const canConfig = useCan('config.write')
 
   const [items, setItems] = useState<Group[]>([])
   const [search, setSearch] = useState('')
@@ -400,12 +402,12 @@ export default function GroupsView() {
     <Box sx={{ p: 3 }}>
       <Box sx={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', flexWrap: 'wrap', gap: 2, mb: 1 }}>
         <Typography variant="h4">{t('admin:groups.title')}</Typography>
-        <Button variant="contained" startIcon={<AddIcon />} onClick={openCreate}>
+        {canConfig && <Button variant="contained" startIcon={<AddIcon />} onClick={openCreate}>
           {t('admin:groups.create')}
-        </Button>
+        </Button>}
       </Box>
 
-      {selectedCount > 0 && (
+      {selectedCount > 0 && canConfig && (
         <Box sx={{
           display: 'flex', alignItems: 'center', gap: 1, mt: 2, mb: 1,
           px: 2, py: 1, borderRadius: 9999,
@@ -501,17 +503,19 @@ export default function GroupsView() {
                     <TableCell align="right" sx={{ fontVariantNumeric: 'tabular-nums' }}>{g.members}</TableCell>
                     <TableCell sx={{ color: md.onSurfaceVariant, fontSize: 13 }}>{g.remark || '—'}</TableCell>
                     <TableCell align="right" sx={{ whiteSpace: 'nowrap' }}>
-                      <IconButton size="small" onClick={() => openEdit(g)} aria-label={t('admin:groups.action.edit')}>
-                        <EditIcon fontSize="small" />
-                      </IconButton>
-                      <IconButton
-                        size="small"
-                        onClick={() => confirmDelete(g)}
-                        aria-label={t('admin:groups.action.delete')}
-                        sx={{ color: md.error, '&.Mui-disabled': { color: alpha(md.error, 0.4) } }}
-                      >
-                        <DeleteIcon fontSize="small" />
-                      </IconButton>
+                      {canConfig && <>
+                        <IconButton size="small" onClick={() => openEdit(g)} aria-label={t('admin:groups.action.edit')}>
+                          <EditIcon fontSize="small" />
+                        </IconButton>
+                        <IconButton
+                          size="small"
+                          onClick={() => confirmDelete(g)}
+                          aria-label={t('admin:groups.action.delete')}
+                          sx={{ color: md.error, '&.Mui-disabled': { color: alpha(md.error, 0.4) } }}
+                        >
+                          <DeleteIcon fontSize="small" />
+                        </IconButton>
+                      </>}
                     </TableCell>
                   </TableRow>
                 )

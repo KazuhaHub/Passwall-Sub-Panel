@@ -11,6 +11,15 @@ small improvement).
 统一、Hysteria2 多用户同步、依赖 CVE 升级等），并在 rc.2 之后补入下列收尾修复。
 完整逐项见下方各 pre-release 段落。
 
+### Security
+- operator 角色的前端按钮门控收口：operator 能进的页面（节点 / 分组 / 规则库 /
+  配置方案 / 日志 / 同步任务）上，admin-only 的写操作按钮（新建 / 编辑 / 删除 /
+  导入 / 认领 / 清空 / 清理保留期 / 清理任务）以及对 admin/operator 账户的删除 /
+  启停 / 重置 / 解绑等，现在对 operator **直接隐藏**，不再"有按钮、一点报错"。
+  保留 operator 实际有权的操作（普通用户 CRUD、流量、节点启停、任务重试/取消）。
+  新增前端能力层 `web-react/src/utils/permissions.ts`（`useCan(capability)`）作为
+  自定义角色 / 细粒度权限的预留扩展点；详见 docs/ARCHITECTURE.md §6.3。
+
 ### Fixed
 - TLS `allowInsecure` 现在会渲染进客户端配置：Clash 的 `skip-cert-verify`、
   sing-box 的 `insecure`、URI 的 `allowInsecure=1`，Hysteria2 也接上。此前面板
