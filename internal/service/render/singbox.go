@@ -248,6 +248,7 @@ func applySingBoxTLS(base map[string]any, stream xuiStreamSettings) {
 		tls := map[string]any{"enabled": true}
 		if stream.TLSSettings != nil {
 			tls["server_name"] = stream.TLSSettings.ServerName
+			tls["insecure"] = stream.TLSSettings.AllowInsecure
 		}
 		base["tls"] = tls
 	}

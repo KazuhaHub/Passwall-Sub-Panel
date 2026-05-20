@@ -91,6 +91,29 @@ func TestEmitVLESS_FlowVerbatim(t *testing.T) {
 	}
 }
 
+// TestEmitTLS_AllowInsecure pins that tlsSettings.allowInsecure flows into
+// the client config's skip-cert-verify (Clash) for VLESS, VMess and Trojan.
+func TestEmitTLS_AllowInsecure(t *testing.T) {
+	tls := xuiStreamSettings{Network: "tcp", Security: "tls",
+		TLSSettings: &xuiTLSSettings{ServerName: "x", AllowInsecure: true}}
+
+	if got := emitVLESS(map[string]any{"name": "n"}, "uuid", tls, ""); got["skip-cert-verify"] != true {
+		t.Fatalf("vless skip-cert-verify = %v, want true", got["skip-cert-verify"])
+	}
+	if got := emitVMess(map[string]any{"name": "n"}, "uuid", tls); got["skip-cert-verify"] != true {
+		t.Fatalf("vmess skip-cert-verify = %v, want true", got["skip-cert-verify"])
+	}
+	if got := emitTrojan(map[string]any{"name": "n"}, "pw", tls); got["skip-cert-verify"] != true {
+		t.Fatalf("trojan skip-cert-verify = %v, want true", got["skip-cert-verify"])
+	}
+
+	// Default (allowInsecure absent) stays false.
+	safe := xuiStreamSettings{Network: "tcp", Security: "tls", TLSSettings: &xuiTLSSettings{ServerName: "x"}}
+	if got := emitVLESS(map[string]any{"name": "n"}, "uuid", safe, ""); got["skip-cert-verify"] != false {
+		t.Fatalf("vless skip-cert-verify = %v, want false", got["skip-cert-verify"])
+	}
+}
+
 // TestParseHysteria2Opts maps 3X-UI's actual inbound JSON onto the
 // shared hysteria2Opts struct. As documented in
 // frontend/src/models/inbound.js, 3X-UI stores salamander obfs under

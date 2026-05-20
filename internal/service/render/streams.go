@@ -51,8 +51,12 @@ type xuiRealitySettings struct {
 }
 
 type xuiTLSSettings struct {
-	ServerName string   `json:"serverName"`
+	ServerName string `json:"serverName"`
 	ALPN       []string `json:"alpn"`
+	// AllowInsecure mirrors 3X-UI's tlsSettings.allowInsecure — when true the
+	// client must skip cert verification (self-signed / mismatched SNI). Maps
+	// to skip-cert-verify (Clash), insecure (sing-box), allowInsecure (URI).
+	AllowInsecure bool `json:"allowInsecure"`
 }
 
 type xuiWSSettings struct {

@@ -180,6 +180,9 @@ func buildVLESSURI(name, host string, port int, uuid string, stream xuiStreamSet
 			if len(stream.TLSSettings.ALPN) > 0 {
 				q.Set("alpn", strings.Join(stream.TLSSettings.ALPN, ","))
 			}
+			if stream.TLSSettings.AllowInsecure {
+				q.Set("allowInsecure", "1")
+			}
 		}
 	}
 	applyTransportQuery(q, stream)
@@ -253,6 +256,9 @@ func buildTrojanURI(name, host string, port int, password string, stream xuiStre
 		}
 		if len(stream.TLSSettings.ALPN) > 0 {
 			q.Set("alpn", strings.Join(stream.TLSSettings.ALPN, ","))
+		}
+		if stream.TLSSettings.AllowInsecure {
+			q.Set("allowInsecure", "1")
 		}
 	}
 	q.Set("type", defaultStr(stream.Network, "tcp"))

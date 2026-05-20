@@ -116,6 +116,7 @@ func emitVLESS(base map[string]any, uuid string, stream xuiStreamSettings, flow 
 		base["tls"] = true
 		if stream.TLSSettings != nil {
 			base["servername"] = stream.TLSSettings.ServerName
+			base["skip-cert-verify"] = stream.TLSSettings.AllowInsecure
 		}
 	}
 	applyTransportOpts(base, stream)
@@ -132,6 +133,7 @@ func emitVMess(base map[string]any, uuid string, stream xuiStreamSettings) map[s
 		base["tls"] = true
 		if stream.TLSSettings != nil {
 			base["servername"] = stream.TLSSettings.ServerName
+			base["skip-cert-verify"] = stream.TLSSettings.AllowInsecure
 		}
 	} else {
 		base["tls"] = false
@@ -143,9 +145,11 @@ func emitVMess(base map[string]any, uuid string, stream xuiStreamSettings) map[s
 func emitTrojan(base map[string]any, password string, stream xuiStreamSettings) map[string]any {
 	base["type"] = "trojan"
 	base["password"] = password
-	base["skip-cert-verify"] = false
 	if stream.TLSSettings != nil {
 		base["sni"] = stream.TLSSettings.ServerName
+		base["skip-cert-verify"] = stream.TLSSettings.AllowInsecure
+	} else {
+		base["skip-cert-verify"] = false
 	}
 	applyTransportOpts(base, stream)
 	return base
@@ -183,6 +187,7 @@ func parseHysteria2Opts(_settingsJSON, streamJSON string) hysteria2Opts {
 	}
 	if stream.TLSSettings != nil {
 		opts.SNI = stream.TLSSettings.ServerName
+		opts.Insecure = stream.TLSSettings.AllowInsecure
 		if len(stream.TLSSettings.ALPN) > 0 {
 			opts.ALPN = stream.TLSSettings.ALPN
 		}
