@@ -291,13 +291,11 @@ func parseX509FromBase64(raw string) (*x509.Certificate, error) {
 const metadataMaxBytes = 4 << 20
 
 // metadataHTTPClient is the dedicated HTTP client used for IdP metadata
-// fetches. Has a hard 15 s timeout (independent of ctx, so a hung server
-// can never wedge the metadata-refresh goroutine for the panel's
-// uptime). The transport stays close to net/http defaults — we don't
-// pin TLS or block private IPs here because the admin explicitly types
-// the URL into the SAML settings page; SSRF protection is a deployment
-// concern (firewall the panel away from internal services).
-var metadataHTTPClient = &http.Client{Timeout: 15 * time.Second}
+// fetches. Hard 15 s timeout (independent of ctx, so a hung server can't
+// wedge the metadata-refresh goroutine), and a dialer that blocks
+// loopback/link-local/metadata-endpoint targets (newSafeHTTPClient) as
+// SSRF defense-in-depth on the admin-supplied URL.
+var metadataHTTPClient = newSafeHTTPClient(15 * time.Second)
 
 func fetchIDPMetadata(ctx context.Context, metaURL string) (*saml.EntityDescriptor, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, metaURL, nil)

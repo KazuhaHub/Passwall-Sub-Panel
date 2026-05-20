@@ -556,12 +556,22 @@ func (s *Service) reconcileSSOUser(ctx context.Context, u *domain.User, in Ensur
 // account. On ErrForbidden the user pointer is still returned (non-nil) so the
 // caller can surface a reason-specific error message — for any other error the
 // pointer is nil.
+// dummyBcryptHash is compared against on the user-not-found / no-local-
+// password paths so those responses take roughly the same time as a real
+// password check, closing a UPN-enumeration timing oracle. Generated once at
+// the same cost real hashes use (bcrypt.DefaultCost).
+var dummyBcryptHash, _ = bcrypt.GenerateFromPassword([]byte("timing-equalizer"), bcrypt.DefaultCost)
+
 func (s *Service) VerifyLocalPassword(ctx context.Context, upn, password string) (*domain.User, error) {
 	u, err := s.users.GetByUPN(ctx, strings.TrimSpace(upn))
 	if err != nil {
+		// Burn a bcrypt comparison so an unknown UPN doesn't return
+		// measurably faster than a wrong password on a real account.
+		_ = bcrypt.CompareHashAndPassword(dummyBcryptHash, []byte(password))
 		return nil, err
 	}
 	if !u.HasLocalPassword() {
+		_ = bcrypt.CompareHashAndPassword(dummyBcryptHash, []byte(password))
 		return nil, domain.ErrUnauthorized
 	}
 	if !u.Enabled && !emergencySelfServiceAllowedReason(u.AutoDisabledReason) {

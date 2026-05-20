@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/coreos/go-oidc/v3/oidc"
 	"golang.org/x/oauth2"
@@ -55,6 +56,9 @@ func (s *OIDCService) build(ctx context.Context) error {
 	if cfg.IssuerURL == "" || cfg.ClientID == "" || cfg.RedirectURL == "" {
 		return fmt.Errorf("oidc: issuer_url, client_id and redirect_url are required")
 	}
+	// Block loopback/link-local/metadata-endpoint targets on the
+	// admin-supplied issuer URL during discovery (SSRF defense-in-depth).
+	ctx = oidc.ClientContext(ctx, newSafeHTTPClient(15*time.Second))
 	provider, err := oidc.NewProvider(ctx, strings.TrimRight(cfg.IssuerURL, "/"))
 	if err != nil {
 		return fmt.Errorf("oidc discovery: %w", err)

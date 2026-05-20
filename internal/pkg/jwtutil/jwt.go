@@ -159,7 +159,15 @@ func (i *Issuer) parse(tokenStr, expectedSubject string) (*Claims, error) {
 			return nil, errors.New("unexpected signing method")
 		}
 		return i.secret, nil
-	})
+	},
+		// Belt-and-suspenders alg pinning at the library level (the keyfunc
+		// already rejects non-HMAC), require an exp claim, and bind the
+		// token to our issuer. Changing the Issuer in Admin Settings
+		// intentionally invalidates previously-issued tokens.
+		jwt.WithValidMethods([]string{"HS256"}),
+		jwt.WithExpirationRequired(),
+		jwt.WithIssuer(i.params().Issuer),
+	)
 	if err != nil {
 		return nil, err
 	}
