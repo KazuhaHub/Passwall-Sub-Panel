@@ -100,13 +100,19 @@ func (r *userRepo) List(ctx context.Context, filter ports.UserFilter) ([]*domain
 		// every single-character UPN. Order matters: replace backslash
 		// first so the subsequent escapes don't double-up.
 		s := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(filter.Search)
-		like := "%" + s + "%"
+		// Lowercase the pattern and LOWER() the columns so search is
+		// case-insensitive on every backend. SQLite and MySQL LIKE already
+		// ignore ASCII case, but Postgres LIKE is case-sensitive (it reserves
+		// ILIKE for that) — without this, "john" would miss "John" on PG.
+		// These columns are matched with a leading-% pattern that can't use a
+		// B-tree index anyway, so wrapping them in LOWER() costs nothing.
+		like := "%" + strings.ToLower(s) + "%"
 		// Search across the user-facing identifiers admins actually scan
 		// the table for: account name, friendly display, email. Remark is
 		// intentionally out — it's free-form admin notes; matching on it
 		// surfaced "why does this user show up?" results that confused
 		// people.
-		q = q.Where("upn LIKE ? OR display_name LIKE ? OR email LIKE ?", like, like, like)
+		q = q.Where("LOWER(upn) LIKE ? OR LOWER(display_name) LIKE ? OR LOWER(email) LIKE ?", like, like, like)
 	}
 	if filter.GroupID != nil {
 		q = q.Where("group_id = ?", *filter.GroupID)

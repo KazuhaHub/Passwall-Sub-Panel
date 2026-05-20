@@ -486,8 +486,13 @@ type auditRow struct {
 	Actor      string    `gorm:"size:255;not null"`
 	Action     string    `gorm:"size:64;not null"`
 	Target     string    `gorm:"size:255"`
-	BeforeJSON string    `gorm:"type:json"`
-	AfterJSON  string    `gorm:"type:json"`
+	// Stored as plain text, not a JSON column: these hold opaque serialized
+	// snapshots that are never queried with JSON operators, and the audit
+	// helpers legitimately write "" (e.g. a create has no before-state).
+	// Postgres' json type rejects the empty string, so text is the portable
+	// choice across sqlite / mysql / postgres.
+	BeforeJSON string    `gorm:"type:text"`
+	AfterJSON  string    `gorm:"type:text"`
 	IP         string    `gorm:"size:64"`
 	At         time.Time `gorm:"index"`
 }

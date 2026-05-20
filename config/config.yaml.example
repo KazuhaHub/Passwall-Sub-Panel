@@ -69,3 +69,22 @@ data_dir: "./data"
 #   dsn: "user:pw@unix(/tmp/mysql.sock)/db?parseTime=true"
 #
 # Env override: PSP_MYSQL_DSN replaces everything in this block.
+
+# To use PostgreSQL, uncomment and fill in the postgres block below (same
+# discrete-field style as mysql). Setting postgres.host or postgres.dsn
+# selects the PG driver.
+#
+# postgres:
+#   host: "127.0.0.1"        # PostgreSQL server hostname or IP
+#   port: 5432               # TCP port (default 5432)
+#   user: "psp"              # PG role
+#   password: "your_password"
+#   database: "passwall"     # database name (must already exist)
+#   sslmode: "disable"       # disable | require | verify-full | ... (default disable)
+#   # params: ""             # extra &k=v query params (e.g. connect_timeout=10)
+#
+# Advanced: set dsn to a raw connection string (URL "postgres://…" or libpq
+# keyword form) when discrete fields don't fit. When set, dsn wins.
+#   dsn: "postgres://psp:pw@127.0.0.1:5432/passwall?sslmode=disable"
+#
+# Env override: PSP_POSTGRES_DSN replaces everything in the postgres block.

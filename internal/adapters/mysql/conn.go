@@ -11,6 +11,7 @@ import (
 
 	sqlitedriver "github.com/glebarez/sqlite"
 	mysqldriver "gorm.io/driver/mysql"
+	postgresdriver "gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 
@@ -18,8 +19,9 @@ import (
 )
 
 // Open builds a GORM connection. kind picks the driver:
-//   - "mysql":  dsn is a standard go-sql-driver MySQL DSN.
-//   - "sqlite": dsn is a filesystem path; parent dirs are created if missing.
+//   - "mysql":    dsn is a standard go-sql-driver MySQL DSN.
+//   - "postgres": dsn is a pq/pgx connection string (URL or keyword form).
+//   - "sqlite":   dsn is a filesystem path; parent dirs are created if missing.
 //
 // Call EnsureSchema(db) separately to create the required tables.
 func Open(kind, dsn string) (*gorm.DB, error) {
@@ -55,6 +57,8 @@ func Open(kind, dsn string) (*gorm.DB, error) {
 		db, err = gorm.Open(sqlitedriver.Open(dsn), cfg)
 	case "mysql":
 		db, err = gorm.Open(mysqldriver.Open(dsn), cfg)
+	case "postgres":
+		db, err = gorm.Open(postgresdriver.Open(dsn), cfg)
 	default:
 		return nil, fmt.Errorf("unknown db kind: %q", kind)
 	}

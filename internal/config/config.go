@@ -6,8 +6,11 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"net"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -22,8 +25,9 @@ type Config struct {
 	JWTSecret     string `yaml:"jwt_secret"`
 	EncryptionKey string `yaml:"encryption_key"`
 
-	MySQL MySQLConfig `yaml:"mysql"`
-	HTTP  HTTPConfig  `yaml:"http"`
+	MySQL    MySQLConfig    `yaml:"mysql"`
+	Postgres PostgresConfig `yaml:"postgres"`
+	HTTP     HTTPConfig     `yaml:"http"`
 
 	ConfigDir string `yaml:"config_dir"`
 	DataDir   string `yaml:"data_dir"`
@@ -81,6 +85,75 @@ type MySQLConfig struct {
 	// of where the panel runs. Pair with TZ=UTC on the panel process
 	// (Dockerfile already sets it) so Go's time.Local also matches.
 	Params string `yaml:"params"`
+}
+
+// PostgresConfig is the PostgreSQL selection block, parallel to MySQLConfig
+// but assembling a "postgres://" URL DSN instead of a go-sql-driver one.
+// Two ways to configure:
+//
+//  1. Discrete fields (Host/Port/User/Password/Database/SSLMode/Params):
+//     readable YAML; the panel assembles the URL for you.
+//  2. DSN: a raw connection string (URL "postgres://…" or libpq keyword
+//     form), which overrides the discrete fields entirely.
+//
+// Setting either DSN or Host here selects the Postgres driver. Env
+// PSP_POSTGRES_DSN, when set, replaces whatever this block produces.
+type PostgresConfig struct {
+	// Raw DSN escape hatch. Empty unless you need a form the discrete fields
+	// don't model. Accepts both the URL and libpq keyword styles (pgx reads
+	// either).
+	DSN string `yaml:"dsn"`
+
+	Host     string `yaml:"host"`
+	Port     int    `yaml:"port"`
+	User     string `yaml:"user"`
+	Password string `yaml:"password"`
+	Database string `yaml:"database"`
+	// SSLMode maps to the libpq sslmode query param. Blank defaults to
+	// "disable" — the pragmatic choice for a panel reusing a PG instance on
+	// localhost / a trusted LAN. Set "require" / "verify-full" when the DB is
+	// reached over an untrusted network.
+	SSLMode string `yaml:"sslmode"`
+	// Params is an extra "k=v&k2=v2" query string merged into the assembled
+	// URL (e.g. "connect_timeout=10"). sslmode here is overridden by SSLMode.
+	Params string `yaml:"params"`
+}
+
+// assembleDSN builds a "postgres://user:pass@host:port/db?sslmode=…" URL from
+// the discrete fields. net/url handles percent-encoding so passwords with
+// special characters survive intact.
+func (p PostgresConfig) assembleDSN() string {
+	port := p.Port
+	if port <= 0 {
+		port = 5432
+	}
+	sslmode := strings.TrimSpace(p.SSLMode)
+	if sslmode == "" {
+		sslmode = "disable"
+	}
+	q := url.Values{}
+	if extra := strings.TrimSpace(p.Params); extra != "" {
+		if vals, err := url.ParseQuery(extra); err == nil {
+			for k, vs := range vals {
+				for _, v := range vs {
+					q.Add(k, v)
+				}
+			}
+		}
+	}
+	q.Set("sslmode", sslmode) // SSLMode wins over any sslmode in Params
+	userInfo := url.User(strings.TrimSpace(p.User))
+	if p.Password != "" {
+		userInfo = url.UserPassword(strings.TrimSpace(p.User), p.Password)
+	}
+	u := url.URL{
+		Scheme:   "postgres",
+		User:     userInfo,
+		Host:     net.JoinHostPort(strings.TrimSpace(p.Host), strconv.Itoa(port)),
+		Path:     "/" + strings.TrimSpace(p.Database),
+		RawQuery: q.Encode(),
+	}
+	return u.String()
 }
 
 // LoadOrGenerate loads config from path. If the file does not exist a default
@@ -171,9 +244,27 @@ data_dir: "./data"                         # SQLite panel.db lives here when no 
 # dsn wins over the discrete fields above.
 #   dsn: "user:pw@unix(/tmp/mysql.sock)/db?parseTime=true"
 #
-# Dev/single-user fallback: leave the entire mysql block commented out and
-# the panel uses embedded SQLite at <data_dir>/panel.db. You can also force
-# a specific SQLite path via dsn:
+# PostgreSQL: use the postgres: block below instead (discrete fields, same
+# style as mysql:). Setting postgres.host or postgres.dsn selects the PG
+# driver. Default port 5432; sslmode defaults to "disable" (set "require" /
+# "verify-full" when the DB is reached over an untrusted network).
+#
+# postgres:
+#   host: "127.0.0.1"                      # PostgreSQL server hostname or IP
+#   port: 5432                             # PG TCP port (5432 by default)
+#   user: "psp"                            # PG role
+#   password: "CHANGE_ME"                  # PG password — keep this file 0600
+#   database: "passwall"                   # database name (must already exist)
+#   sslmode: "disable"                     # disable | require | verify-full | ...
+#   # params: "connect_timeout=10"         # extra &k=v query params (optional)
+#   # dsn: "postgres://psp:pw@127.0.0.1:5432/passwall?sslmode=disable"  # raw override
+#
+# Env override: PSP_POSTGRES_DSN, if set, replaces whatever the postgres block
+# produces. Recommended for production so secrets stay out of the config file.
+#
+# Dev/single-user fallback: leave the mysql and postgres blocks commented out
+# and the panel uses embedded SQLite at <data_dir>/panel.db. You can also force
+# a specific SQLite path via the mysql dsn field:
 #   dsn: "sqlite:./data/panel.db"
 `
 	encKey, err := randomBase64(32)
@@ -209,6 +300,9 @@ func Load(path string) (*Config, error) {
 	// env overrides
 	if dsn := os.Getenv("PSP_MYSQL_DSN"); dsn != "" {
 		c.MySQL.DSN = dsn
+	}
+	if dsn := os.Getenv("PSP_POSTGRES_DSN"); dsn != "" {
+		c.Postgres.DSN = dsn
 	}
 	if sec := os.Getenv("PSP_JWT_SECRET"); sec != "" {
 		c.JWTSecret = sec
@@ -256,30 +350,44 @@ func (c *Config) validate() error {
 	return nil
 }
 
-// DBKind returns the active database driver: "mysql" or "sqlite".
+// DBKind returns the active database driver: "mysql", "postgres" or
+// "sqlite".
 //
 // Selection rules, in order:
-//  1. DSN with "sqlite:" prefix → sqlite
-//  2. Any other non-empty DSN → mysql
-//  3. Host is set → mysql (discrete fields)
-//  4. Otherwise → sqlite (embedded zero-config fallback)
+//  1. mysql.dsn with "sqlite:" prefix → sqlite
+//  2. mysql.dsn with "postgres://" / "postgresql://" prefix → postgres
+//  3. Any other non-empty mysql.dsn → mysql
+//  4. postgres.dsn or postgres.host set → postgres (discrete fields)
+//  5. mysql.host set → mysql (discrete fields)
+//  6. Otherwise → sqlite (embedded zero-config fallback)
+//
+// The mysql.dsn field doubles as the universal raw-DSN escape hatch (it also
+// carries sqlite: / postgres:// strings and the PSP_MYSQL_DSN env override),
+// so it is checked before the discrete postgres block. If you populate both
+// the postgres and mysql discrete blocks, postgres wins.
 func (c *Config) DBKind() string {
 	dsn := strings.TrimSpace(c.MySQL.DSN)
-	if strings.HasPrefix(dsn, "sqlite:") {
+	switch {
+	case strings.HasPrefix(dsn, "sqlite:"):
+		return "sqlite"
+	case strings.HasPrefix(dsn, "postgres://"), strings.HasPrefix(dsn, "postgresql://"):
+		return "postgres"
+	case dsn != "":
+		return "mysql"
+	case strings.TrimSpace(c.Postgres.DSN) != "" || strings.TrimSpace(c.Postgres.Host) != "":
+		return "postgres"
+	case strings.TrimSpace(c.MySQL.Host) != "":
+		return "mysql"
+	default:
 		return "sqlite"
 	}
-	if dsn != "" {
-		return "mysql"
-	}
-	if strings.TrimSpace(c.MySQL.Host) != "" {
-		return "mysql"
-	}
-	return "sqlite"
 }
 
 // DBDSN returns the driver-specific connection string:
 //   - For SQLite, a filesystem path (config "sqlite:..." prefix stripped, or
 //     <DataDir>/panel.db when unset).
+//   - For Postgres, the raw "postgres://..." URL passed through unchanged
+//     (GORM's pgx driver consumes it directly).
 //   - For MySQL, either the raw DSN or one assembled from the discrete
 //     Host/Port/User/Password/Database/Params fields.
 func (c *Config) DBDSN() string {
@@ -288,7 +396,14 @@ func (c *Config) DBDSN() string {
 		return strings.TrimPrefix(dsn, "sqlite:")
 	}
 	if dsn != "" {
+		// Raw mysql DSN, or a postgres:// URL passed through unchanged.
 		return dsn
+	}
+	if pgDSN := strings.TrimSpace(c.Postgres.DSN); pgDSN != "" {
+		return pgDSN
+	}
+	if strings.TrimSpace(c.Postgres.Host) != "" {
+		return c.Postgres.assembleDSN()
 	}
 	if strings.TrimSpace(c.MySQL.Host) != "" {
 		port := c.MySQL.Port
