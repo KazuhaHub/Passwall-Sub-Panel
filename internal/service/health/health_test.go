@@ -83,6 +83,12 @@ func (r *fakeNodeRepo) Update(ctx context.Context, n *domain.Node) error {
 	r.updates = append(r.updates, &cp)
 	return nil
 }
+func (r *fakeNodeRepo) UpdateHealth(ctx context.Context, n *domain.Node) error {
+	cp := *n
+	r.updates = append(r.updates, &cp)
+	return nil
+}
+func (r *fakeNodeRepo) UpdateTrafficCounters(ctx context.Context, n *domain.Node) error { return nil }
 func (r *fakeNodeRepo) Create(ctx context.Context, n *domain.Node) error                       { return nil }
 func (r *fakeNodeRepo) Delete(ctx context.Context, id int64) error                             { return nil }
 func (r *fakeNodeRepo) BatchUpdateSortOrder(ctx context.Context, updates []ports.NodeSortUpdate) error {

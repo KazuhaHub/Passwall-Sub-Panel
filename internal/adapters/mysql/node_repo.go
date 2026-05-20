@@ -2,6 +2,7 @@ package mysql
 
 import (
 	"context"
+	"fmt"
 
 	"gorm.io/gorm"
 
@@ -23,6 +24,44 @@ func (r *nodeRepo) Create(ctx context.Context, n *domain.Node) error {
 
 func (r *nodeRepo) Update(ctx context.Context, n *domain.Node) error {
 	return r.db.WithContext(ctx).Save(nodeFromDomain(n)).Error
+}
+
+// UpdateTrafficCounters writes only the lifetime + last-raw counter columns.
+// The traffic poll and the health checker run on separate goroutines and both
+// loaded-mutated-Saved the same node row; a full-row Save from one would
+// revert the other's columns (health flapping, or counters resetting and
+// producing a bogus delta next poll). Narrow writes let them coexist.
+func (r *nodeRepo) UpdateTrafficCounters(ctx context.Context, n *domain.Node) error {
+	if n == nil || n.ID == 0 {
+		return fmt.Errorf("UpdateTrafficCounters requires a non-zero node ID; got %+v", n)
+	}
+	return r.db.WithContext(ctx).
+		Model(&nodeRow{}).
+		Where("id = ?", n.ID).
+		Updates(map[string]any{
+			"lifetime_up_bytes":        n.LifetimeUpBytes,
+			"lifetime_down_bytes":      n.LifetimeDownBytes,
+			"lifetime_total_bytes":     n.LifetimeTotalBytes,
+			"last_traffic_up_bytes":    n.LastTrafficUpBytes,
+			"last_traffic_down_bytes":  n.LastTrafficDownBytes,
+			"last_traffic_total_bytes": n.LastTrafficTotalBytes,
+		}).Error
+}
+
+// UpdateHealth writes only the health-probe columns (see UpdateTrafficCounters
+// for why this is column-scoped rather than a full-row Save).
+func (r *nodeRepo) UpdateHealth(ctx context.Context, n *domain.Node) error {
+	if n == nil || n.ID == 0 {
+		return fmt.Errorf("UpdateHealth requires a non-zero node ID; got %+v", n)
+	}
+	return r.db.WithContext(ctx).
+		Model(&nodeRow{}).
+		Where("id = ?", n.ID).
+		Updates(map[string]any{
+			"health_state":      string(n.HealthState),
+			"health_detail":     n.HealthDetail,
+			"health_checked_at": n.HealthCheckedAt,
+		}).Error
 }
 
 // BatchUpdateSortOrder rewrites sort_order for the listed nodes inside one

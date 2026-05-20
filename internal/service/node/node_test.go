@@ -17,7 +17,9 @@ type fakeNodeRepo struct {
 }
 
 func (r *fakeNodeRepo) Create(ctx context.Context, n *domain.Node) error { return nil }
-func (r *fakeNodeRepo) Update(ctx context.Context, n *domain.Node) error { return nil }
+func (r *fakeNodeRepo) Update(ctx context.Context, n *domain.Node) error                 { return nil }
+func (r *fakeNodeRepo) UpdateTrafficCounters(ctx context.Context, n *domain.Node) error  { return nil }
+func (r *fakeNodeRepo) UpdateHealth(ctx context.Context, n *domain.Node) error           { return nil }
 func (r *fakeNodeRepo) BatchUpdateSortOrder(ctx context.Context, updates []ports.NodeSortUpdate) error {
 	if r.err != nil {
 		return r.err

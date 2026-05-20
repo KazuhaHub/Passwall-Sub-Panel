@@ -625,7 +625,7 @@ func (s *Service) recordAndEnforceWith(ctx context.Context, u *domain.User, tota
 		}
 		wroteSnap = true
 
-		if err := s.users.Update(ctx, u); err != nil {
+		if err := s.users.UpdateTrafficState(ctx, u); err != nil {
 			log.Warn("traffic lifetime update", "user_id", u.ID, "err", err)
 		}
 	}
@@ -660,7 +660,7 @@ func (s *Service) recordAndEnforceWith(ctx context.Context, u *domain.User, tota
 		// memory and us writing the row, and the Update would clobber their
 		// grant.
 		updatePeriodStart := func() {
-			if err := s.users.Update(ctx, u); err != nil {
+			if err := s.users.UpdateTrafficState(ctx, u); err != nil {
 				log.Warn("traffic period start update", "user_id", u.ID, "err", err)
 			}
 		}
@@ -701,7 +701,7 @@ func (s *Service) recordAndEnforceWith(ctx context.Context, u *domain.User, tota
 			clearEmergency := func() {
 				u.EmergencyUntil = nil
 				u.EmergencyBaselineBytes = 0
-				if err := s.users.Update(ctx, u); err != nil {
+				if err := s.users.UpdateTrafficState(ctx, u); err != nil {
 					log.Warn("emergency quota clear update", "user_id", u.ID, "err", err)
 				}
 			}
@@ -805,7 +805,7 @@ func (s *Service) recordNodeStats(ctx context.Context, panelID int64, inboundID 
 		return fmt.Errorf("insert node snapshot: %w", err)
 	}
 
-	if err := s.nodes.Update(ctx, node); err != nil {
+	if err := s.nodes.UpdateTrafficCounters(ctx, node); err != nil {
 		log.Warn("node traffic lifetime update", "node_id", node.ID, "err", err)
 	}
 	return nil

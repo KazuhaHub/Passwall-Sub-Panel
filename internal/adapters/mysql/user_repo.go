@@ -2,6 +2,7 @@ package mysql
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"gorm.io/gorm"
@@ -25,6 +26,29 @@ func (r *userRepo) Create(ctx context.Context, u *domain.User) error {
 
 func (r *userRepo) Update(ctx context.Context, u *domain.User) error {
 	return r.db.WithContext(ctx).Save(userFromDomain(u)).Error
+}
+
+// UpdateTrafficState writes only the columns the traffic poll owns, via a
+// map so zero-values (e.g. clearing emergency_until to NULL, resetting
+// period_baseline_bytes to 0) are persisted. Keeps a slow poll cycle from
+// clobbering concurrent admin / self-service edits to other columns.
+func (r *userRepo) UpdateTrafficState(ctx context.Context, u *domain.User) error {
+	if u == nil || u.ID == 0 {
+		return fmt.Errorf("UpdateTrafficState requires a non-zero user ID; got %+v", u)
+	}
+	return r.db.WithContext(ctx).
+		Model(&userRow{}).
+		Where("id = ?", u.ID).
+		Updates(map[string]any{
+			"lifetime_up_bytes":        u.LifetimeUpBytes,
+			"lifetime_down_bytes":      u.LifetimeDownBytes,
+			"lifetime_total_bytes":     u.LifetimeTotalBytes,
+			"period_baseline_bytes":    u.PeriodBaselineBytes,
+			"lifetime_baseline_at":     u.LifetimeBaselineAt,
+			"traffic_period_start":     u.TrafficPeriodStart,
+			"emergency_until":          u.EmergencyUntil,
+			"emergency_baseline_bytes": u.EmergencyBaselineBytes,
+		}).Error
 }
 
 func (r *userRepo) Delete(ctx context.Context, id int64) error {

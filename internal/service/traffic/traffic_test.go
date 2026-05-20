@@ -22,6 +22,25 @@ func (r *fakeUserRepo) Update(ctx context.Context, u *domain.User) error {
 	return nil
 }
 
+// UpdateTrafficState mirrors the production narrow write: only the
+// traffic-owned columns are persisted onto the stored row, so the test
+// also exercises that the poll touches nothing else.
+func (r *fakeUserRepo) UpdateTrafficState(ctx context.Context, u *domain.User) error {
+	cur, ok := r.users[u.ID]
+	if !ok {
+		return nil
+	}
+	cur.LifetimeUpBytes = u.LifetimeUpBytes
+	cur.LifetimeDownBytes = u.LifetimeDownBytes
+	cur.LifetimeTotalBytes = u.LifetimeTotalBytes
+	cur.PeriodBaselineBytes = u.PeriodBaselineBytes
+	cur.LifetimeBaselineAt = u.LifetimeBaselineAt
+	cur.TrafficPeriodStart = u.TrafficPeriodStart
+	cur.EmergencyUntil = u.EmergencyUntil
+	cur.EmergencyBaselineBytes = u.EmergencyBaselineBytes
+	return nil
+}
+
 func (r *fakeUserRepo) GetByID(ctx context.Context, id int64) (*domain.User, error) {
 	u, ok := r.users[id]
 	if !ok {
@@ -625,6 +644,31 @@ func (r *fakeNodeRepo) Delete(ctx context.Context, id int64) error       { retur
 func (r *fakeNodeRepo) Update(ctx context.Context, n *domain.Node) error {
 	cp := *n
 	r.nodes[n.ID] = &cp
+	return nil
+}
+func (r *fakeNodeRepo) UpdateTrafficCounters(ctx context.Context, n *domain.Node) error {
+	cur, ok := r.nodes[n.ID]
+	if !ok {
+		cp := *n
+		r.nodes[n.ID] = &cp
+		return nil
+	}
+	cur.LifetimeUpBytes = n.LifetimeUpBytes
+	cur.LifetimeDownBytes = n.LifetimeDownBytes
+	cur.LifetimeTotalBytes = n.LifetimeTotalBytes
+	cur.LastTrafficUpBytes = n.LastTrafficUpBytes
+	cur.LastTrafficDownBytes = n.LastTrafficDownBytes
+	cur.LastTrafficTotalBytes = n.LastTrafficTotalBytes
+	return nil
+}
+func (r *fakeNodeRepo) UpdateHealth(ctx context.Context, n *domain.Node) error {
+	cur, ok := r.nodes[n.ID]
+	if !ok {
+		return nil
+	}
+	cur.HealthState = n.HealthState
+	cur.HealthDetail = n.HealthDetail
+	cur.HealthCheckedAt = n.HealthCheckedAt
 	return nil
 }
 func (r *fakeNodeRepo) GetByID(ctx context.Context, id int64) (*domain.Node, error) {

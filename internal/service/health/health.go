@@ -107,7 +107,7 @@ func (s *Service) persist(ctx context.Context, n *domain.Node, state domain.Node
 	n.HealthState = state
 	n.HealthDetail = detail
 	n.HealthCheckedAt = &at
-	if err := s.nodes.Update(ctx, n); err != nil {
+	if err := s.nodes.UpdateHealth(ctx, n); err != nil {
 		// Don't propagate — one stuck node row mustn't block updates for
 		// the rest of the fleet.
 		log.Warn("health checker persist", "node_id", n.ID, "err", err)

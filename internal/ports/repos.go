@@ -56,6 +56,13 @@ type SyncTaskFilter struct {
 type UserRepo interface {
 	Create(ctx context.Context, u *domain.User) error
 	Update(ctx context.Context, u *domain.User) error
+	// UpdateTrafficState persists ONLY the traffic-poll-owned columns
+	// (lifetime counters, period baseline/start, emergency window). The
+	// traffic poll loads every user at cycle start and writes them back many
+	// seconds later; a full-row Update would clobber any concurrent admin /
+	// self-service edit (password, group, role, expiry, sub_token) made in
+	// that window. This narrow write touches only the columns the poll owns.
+	UpdateTrafficState(ctx context.Context, u *domain.User) error
 	Delete(ctx context.Context, id int64) error
 	GetByID(ctx context.Context, id int64) (*domain.User, error)
 	GetByUPN(ctx context.Context, upn string) (*domain.User, error)
@@ -83,6 +90,12 @@ type GroupRepo interface {
 type NodeRepo interface {
 	Create(ctx context.Context, n *domain.Node) error
 	Update(ctx context.Context, n *domain.Node) error
+	// UpdateTrafficCounters / UpdateHealth are column-scoped writes used by
+	// the traffic poll and the health checker respectively. They run on
+	// separate goroutines against the same row, so each must touch only its
+	// own columns instead of a full-row Save that would clobber the other.
+	UpdateTrafficCounters(ctx context.Context, n *domain.Node) error
+	UpdateHealth(ctx context.Context, n *domain.Node) error
 	// BatchUpdateSortOrder rewrites Node.SortOrder for every (id, sort_order)
 	// pair in a single transaction. Driven by the drag-to-reorder UI in the
 	// admin node list — a one-shot N-row update is cheaper than N round-trips

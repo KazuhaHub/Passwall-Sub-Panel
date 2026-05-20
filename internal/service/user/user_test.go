@@ -225,6 +225,22 @@ func (r *memoryUserRepo) Update(ctx context.Context, u *domain.User) error {
 	return nil
 }
 
+func (r *memoryUserRepo) UpdateTrafficState(ctx context.Context, u *domain.User) error {
+	cur, ok := r.byID[u.ID]
+	if !ok {
+		return nil
+	}
+	cur.LifetimeUpBytes = u.LifetimeUpBytes
+	cur.LifetimeDownBytes = u.LifetimeDownBytes
+	cur.LifetimeTotalBytes = u.LifetimeTotalBytes
+	cur.PeriodBaselineBytes = u.PeriodBaselineBytes
+	cur.LifetimeBaselineAt = u.LifetimeBaselineAt
+	cur.TrafficPeriodStart = u.TrafficPeriodStart
+	cur.EmergencyUntil = u.EmergencyUntil
+	cur.EmergencyBaselineBytes = u.EmergencyBaselineBytes
+	return nil
+}
+
 func (r *memoryUserRepo) Delete(ctx context.Context, id int64) error {
 	delete(r.byID, id)
 	return nil
