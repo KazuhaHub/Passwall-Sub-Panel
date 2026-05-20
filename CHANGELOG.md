@@ -7,6 +7,8 @@ small improvement).
 ## v3.2.1-beta.5 — 2026-05-20
 
 ### Fixed
+- 邮件设置「发送测试邮件」的按钮与输入框未对齐：行改为顶端对齐、按钮高度与输入框
+  （56px）一致，不再被校验提示挤偏。
 - SMTP 发送：以发件域名（而非 net/smtp 默认的 `localhost`）作为 EHLO/HELO
   名称——更严格的中继（尤其是 Google Workspace 的 smtp-relay.gmail.com）会对
   非 FQDN 的 HELO 直接断开连接，表现为测试邮件报「EOF」。同时给各阶段错误加上
