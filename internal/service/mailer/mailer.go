@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,7 +15,6 @@ import (
 	"net/smtp"
 	"strconv"
 	"strings"
-	"sync"
 	"text/template"
 	"time"
 
@@ -24,7 +22,6 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/log"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/safego"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
-	"github.com/KazuhaHub/passwall-sub-panel/internal/web"
 )
 
 type Service struct {
@@ -964,53 +961,42 @@ func absoluteURL(base, raw string) string {
 	return base + "/" + raw
 }
 
-func isAbsoluteURL(raw string) bool {
-	return strings.HasPrefix(raw, "http://") || strings.HasPrefix(raw, "https://") || strings.HasPrefix(raw, "data:")
+func isHTTPURL(raw string) bool {
+	return strings.HasPrefix(raw, "http://") || strings.HasPrefix(raw, "https://")
 }
 
-// defaultLogoDataURL returns the embedded brand logo as a base64 data URL so
-// emails always render the logo regardless of SubBaseURL configuration. Mail
-// clients (Gmail/Outlook/etc) cannot resolve relative paths, so any
-// non-absolute LogoURL would otherwise produce a broken image.
+// emailLogoAssetPath points at the embedded brand logo, which the SPA static
+// handler serves publicly (no auth) under /images/. The email header has a
+// dark background (#0f172a), so the dark-mode variant is used. The "+" is a
+// literal path character (RFC 3986) — only query strings treat it as a space —
+// so it's sent as-is; Gmail's image proxy fetches the exact path.
+const emailLogoAssetPath = "/images/logo+title-circle-darkmode.png"
+
+// resolveLogoURL produces an <img> src that mail clients can actually fetch.
+// Gmail and most webmail clients block "data:" URIs and cannot resolve
+// relative paths, so the result must be an absolute http(s) URL. Preference:
+//  1. the admin's configured dark logo, then light logo — but only when it
+//     resolves to an absolute http(s) URL (data: / relative candidates are
+//     skipped: they render in the in-panel preview yet break in real email).
+//  2. the embedded brand logo served publicly at {base}/images/... — works
+//     with no logo configured as long as the panel base URL is known.
 //
-// Computed once on first call from the SPA's embedded /images/ asset.
-var (
-	defaultLogoOnce sync.Once
-	defaultLogoData string
-)
-
-func defaultLogoDataURL() string {
-	defaultLogoOnce.Do(func() {
-		// Email header has a dark background (#0f172a), so use the dark-mode
-		// variant of the logo (light text/strokes on dark).
-		raw, err := web.DistFS.ReadFile("dist/images/logo+title-circle-darkmode.png")
-		if err != nil {
-			// Asset missing (dev build without `npm run build`?) — fall back to
-			// empty so the template `{{if}}` skips the img tag entirely.
-			log.Warn("mailer default logo not embedded", "err", err)
-			return
-		}
-		defaultLogoData = "data:image/png;base64," + base64.StdEncoding.EncodeToString(raw)
-	})
-	return defaultLogoData
-}
-
-// resolveLogoURL applies the fallback chain so emails never carry a broken
-// <img> src. The email header has a dark background, so the dark variant is
-// preferred. Chain: admin's LogoURLDark → admin's LogoURL → embedded
-// darkmode default as a data URL. Each candidate is dropped if it can't be
-// made into an absolute URL (relative paths won't load in mail clients).
+// When no base URL is configured there is no fetchable URL to offer, so an
+// empty string is returned and the template skips the <img> rather than
+// shipping a broken image.
 func resolveLogoURL(base, lightConfigured, darkConfigured string) string {
 	for _, candidate := range []string{darkConfigured, lightConfigured} {
-		if candidate == "" {
+		if candidate == "" || strings.HasPrefix(candidate, "data:") {
 			continue
 		}
-		resolved := absoluteURL(base, candidate)
-		if isAbsoluteURL(resolved) {
+		if resolved := absoluteURL(base, candidate); isHTTPURL(resolved) {
 			return resolved
 		}
 	}
-	return defaultLogoDataURL()
+	if base != "" {
+		return base + emailLogoAssetPath
+	}
+	return ""
 }
 
 // periodUsage now defers to domain.User.PeriodUsed — the per-cycle lifetime

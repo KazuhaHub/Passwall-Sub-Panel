@@ -134,13 +134,13 @@ func (h *AuthSAMLHandler) ACS(c *gin.Context) {
 		return
 	}
 	if !u.Enabled && !allowDisabledEmergencyLogin(u.AutoDisabledReason) {
+		// No description: the SPA renders a localized message for these
+		// recognized codes. Passing a hardcoded string would override i18n.
 		errorCode := "account_disabled"
-		errorDesc := "您的账号已被停用，请联系管理员。"
 		if u.AutoDisabledReason == domain.DisabledPendingApproval {
 			errorCode = "account_pending"
-			errorDesc = "您的账号正在等待管理员审核，请稍后再试。"
 		}
-		c.Redirect(http.StatusFound, "/sso-error?error="+errorCode+"&description="+url.QueryEscape(errorDesc))
+		c.Redirect(http.StatusFound, "/sso-error?error="+errorCode)
 		return
 	}
 	access, refresh, err := h.auth.IssueTokens(u)
