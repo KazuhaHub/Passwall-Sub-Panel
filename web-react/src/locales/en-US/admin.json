@@ -642,6 +642,10 @@
     "unmanaged_search_placeholder": "Search panel / protocol / remark / port / ID…",
     "unmanaged_count": "Showing {{shown}} of {{total}}",
     "unmanaged_filter_empty": "No entries match the filter",
+    "unmanaged_server_label": "Server",
+    "unmanaged_server_placeholder": "Select a server…",
+    "unmanaged_pick_server": "Select a server to view its unmanaged inbounds",
+    "unmanaged_load_failed": "Failed to load this server's inbounds",
     "search_group": {
       "protocol": "Protocol",
       "remark": "Remark"

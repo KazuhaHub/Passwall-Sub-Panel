@@ -4,6 +4,13 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## v3.2.0-beta.2 — 2026-05-19
+
+### Fixed
+- 节点「未纳管」标签页的服务器选择标签 / 占位、空状态提示、加载失败提示在
+  英文界面下显示为中文：相关 i18n 键此前 zh-CN / en-US 都缺失，退回了中文
+  兜底。已补齐两个 locale。
+
 ## v3.2.0-beta.1 — 2026-05-19
 
 ### Added
