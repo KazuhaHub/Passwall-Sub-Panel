@@ -164,28 +164,18 @@ func (s *Service) DelOwnedClient(ctx context.Context, panelID int64, inboundID i
 	if err != nil {
 		return fmt.Errorf("xui list clients: %w", err)
 	}
-	current, ok := findClientByEmail(clients, email)
-	if !ok {
+	if _, ok := findClientByEmail(clients, email); !ok {
+		// Already absent upstream — desired end-state ("client gone") reached.
 		return s.ownership.RemoveByMatch(ctx, panelID, inboundID, email)
 	}
-	if current.ID != "" {
-		if err := c.DelClient(ctx, inboundID, current.ID); err != nil {
-			// Some inbounds (notably Shadowsocks) make 3X-UI reject
-			// delClient-by-id with "Client Not Found In Inbound For ID" even
-			// when the client is present — those protocols key delClient by
-			// email, not the settings `id`. Fall back to delClientByEmail
-			// before giving up, otherwise the resync DEL retries forever.
-			if delErr := c.DelClientByEmail(ctx, inboundID, email); delErr == nil {
-				return s.ownership.RemoveByMatch(ctx, panelID, inboundID, email)
-			}
-			if missing, vErr := s.clientMissingByEmail(ctx, c, inboundID, entry.ClientEmail); vErr == nil && missing {
-				return s.ownership.RemoveByMatch(ctx, panelID, inboundID, email)
-			}
-			return fmt.Errorf("xui delClient: %w", err)
-		}
-		return s.ownership.RemoveByMatch(ctx, panelID, inboundID, email)
-	}
+	// Always delete by email. Per 3X-UI's API, delClient/:clientId takes the
+	// client's UUID or password — so it matches VLESS/VMess by UUID and Trojan
+	// by password, but NOT Shadowsocks (keyed by email) or Hysteria2 (keyed by
+	// auth). That's why deleting an SS client by its stored UUID fails with
+	// "Client Not Found In Inbound For ID". delClientByEmail is the one path
+	// 3X-UI documents as working for every protocol, so we always use it.
 	if err := c.DelClientByEmail(ctx, inboundID, email); err != nil {
+		// Treat "already gone" as success so a stale resync DEL doesn't loop.
 		if missing, vErr := s.clientMissingByEmail(ctx, c, inboundID, entry.ClientEmail); vErr == nil && missing {
 			return s.ownership.RemoveByMatch(ctx, panelID, inboundID, email)
 		}
