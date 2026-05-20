@@ -19,6 +19,8 @@ import {
   Select,
   MenuItem,
   TextField,
+  ToggleButton,
+  ToggleButtonGroup,
   Typography,
   useMediaQuery,
   useTheme,
@@ -724,16 +726,19 @@ export default function MeView() {
               {trendRangeOptions.includes(180) && <MenuItem value={180}>{t('trend.range_180', { defaultValue: '最近半年' })}</MenuItem>}
               {trendRangeOptions.includes(365) && <MenuItem value={365}>{t('trend.range_365', { defaultValue: '最近一年' })}</MenuItem>}
             </Select>
-            <Select size="small" value={trendPeriod}
-              onChange={e => setTrendPeriod(e.target.value as TrafficHistoryPeriod)}
-              sx={{ height: 36, minWidth: 110 }}>
+            {/* Segmented granularity toggle, matching the admin traffic
+                chart. Hour only shows for ≤7d ranges; day/week/month are
+                disabled on the 1d (Today) range. */}
+            <ToggleButtonGroup value={trendPeriod} exclusive size="small"
+              onChange={(_, v) => v && setTrendPeriod(v as TrafficHistoryPeriod)}
+              sx={{ '& .MuiToggleButton-root': { px: 2, height: 36 } }}>
               {trendDays <= 7 && (
-                <MenuItem value="hour">{t('trend.period_hour', { defaultValue: '按小时' })}</MenuItem>
+                <ToggleButton value="hour">{t('trend.period_hour', { defaultValue: '按小时' })}</ToggleButton>
               )}
-              <MenuItem value="day" disabled={trendDays === 1}>{t('trend.period_day', { defaultValue: '按天' })}</MenuItem>
-              <MenuItem value="week" disabled={trendDays === 1}>{t('trend.period_week', { defaultValue: '按周' })}</MenuItem>
-              <MenuItem value="month" disabled={trendDays === 1}>{t('trend.period_month', { defaultValue: '按月' })}</MenuItem>
-            </Select>
+              <ToggleButton value="day" disabled={trendDays === 1}>{t('trend.period_day', { defaultValue: '按天' })}</ToggleButton>
+              <ToggleButton value="week" disabled={trendDays === 1}>{t('trend.period_week', { defaultValue: '按周' })}</ToggleButton>
+              <ToggleButton value="month" disabled={trendDays === 1}>{t('trend.period_month', { defaultValue: '按月' })}</ToggleButton>
+            </ToggleButtonGroup>
           </Box>
           <Suspense fallback={<Box sx={{ height: 280, display: 'grid', placeItems: 'center' }}><CircularProgress size={24} /></Box>}>
             {trendBusy
