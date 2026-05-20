@@ -13,6 +13,7 @@ import {
   DialogTitle,
   FormControlLabel,
   IconButton,
+  InputAdornment,
   MenuItem,
   Switch,
   Table,
@@ -27,6 +28,7 @@ import {
   useTheme,
 } from '@mui/material'
 import AddIcon from '@mui/icons-material/Add'
+import SearchIcon from '@mui/icons-material/Search'
 import DeleteIcon from '@mui/icons-material/DeleteOutline'
 import EditIcon from '@mui/icons-material/EditOutlined'
 import { useTranslation } from 'react-i18next'
@@ -153,6 +155,7 @@ export default function GroupsView() {
   const { t } = useTranslation(['admin', 'common'])
 
   const [items, setItems] = useState<Group[]>([])
+  const [search, setSearch] = useState('')
   const [loading, setLoading] = useState(false)
   const [selected, setSelected] = useState<Set<number>>(new Set())
   const [batchBusy, setBatchBusy] = useState(false)
@@ -192,11 +195,24 @@ export default function GroupsView() {
     return Array.from(s).sort((a, b) => a.localeCompare(b))
   }, [allNodes])
 
-  // Only groups with zero members are eligible for selection (delete needs empty group).
-  const selectableIds = items.filter(g => g.members === 0).map(g => g.id)
+  // Free-text filter on name / slug (the two identifiers). Remark is left
+  // out — it's a human-readable note, not something to match on.
+  const filteredItems = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    if (!q) return items
+    return items.filter(g =>
+      g.name.toLowerCase().includes(q) ||
+      g.slug.toLowerCase().includes(q),
+    )
+  }, [items, search])
+
+  // Only groups with zero members are eligible for selection (delete needs
+  // empty group). Scoped to the visible (filtered) rows so the header
+  // checkbox reflects what's on screen.
+  const selectableIds = filteredItems.filter(g => g.members === 0).map(g => g.id)
   const selectedCount = selected.size
   const allChecked = selectableIds.length > 0 && selectableIds.every(id => selected.has(id))
-  const someChecked = selected.size > 0 && !allChecked
+  const someChecked = selectableIds.some(id => selected.has(id)) && !allChecked
 
   useEffect(() => { void load() }, [])
 
@@ -320,7 +336,13 @@ export default function GroupsView() {
   }
 
   function toggleAll(checked: boolean) {
-    setSelected(checked ? new Set(selectableIds) : new Set())
+    // Flip only the visible selectable rows; preserve selection of rows
+    // hidden by the active search filter.
+    setSelected(prev => {
+      const next = new Set(prev)
+      selectableIds.forEach(id => { if (checked) next.add(id); else next.delete(id) })
+      return next
+    })
   }
 
   function toggleOne(id: number, checked: boolean) {
@@ -404,6 +426,23 @@ export default function GroupsView() {
         </Box>
       )}
 
+      <Box sx={{ mt: 2 }}>
+        <TextField
+          size="small"
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          placeholder={t('admin:groups.search_placeholder', { defaultValue: '搜索名称 / slug' })}
+          sx={{ width: 320, maxWidth: '100%' }}
+          InputProps={{
+            startAdornment: (
+              <InputAdornment position="start">
+                <SearchIcon fontSize="small" sx={{ color: md.onSurfaceVariant }} />
+              </InputAdornment>
+            ),
+          }}
+        />
+      </Box>
+
       <Card sx={{ mt: 2, bgcolor: md.surfaceContainerLow, boxShadow: '0 1px 2px rgba(0,0,0,.3),0 1px 3px 1px rgba(0,0,0,.15)', overflow: 'hidden' }}>
         <TableContainer>
           <Table>
@@ -436,7 +475,12 @@ export default function GroupsView() {
                   —
                 </TableCell></TableRow>
               )}
-              {items.map(g => {
+              {!loading && items.length > 0 && filteredItems.length === 0 && (
+                <TableRow><TableCell colSpan={7} sx={{ textAlign: 'center', py: 6, color: md.onSurfaceVariant }}>
+                  {t('admin:groups.no_match', { defaultValue: '没有匹配的分组' })}
+                </TableCell></TableRow>
+              )}
+              {filteredItems.map(g => {
                 const canSelect = g.members === 0
                 return (
                   <TableRow

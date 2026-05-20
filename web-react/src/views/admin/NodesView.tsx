@@ -1030,10 +1030,23 @@ function InboundFormFields({ form, setForm, showMetadata, servers, onGenKeys, on
           {servers && (
             <Box sx={{ flex: '2 1 240px', minWidth: 200 }}>
               {fieldLabel(t('admin:nodes.create_dialog.panel'))}
-              <Select size="small" fullWidth value={form.panel_id}
-                onChange={e => update('panel_id', Number(e.target.value))}>
-                {servers.map(s => <MenuItem key={s.id} value={s.id}>{s.name}</MenuItem>)}
-              </Select>
+              {/* Autocomplete (not Select) so the operator can type to filter
+                  when there are many 3X-UI servers. fieldLabel-on-top with a
+                  label-less input keeps it aligned with the Protocol Select
+                  beside it. */}
+              <Autocomplete
+                size="small"
+                fullWidth
+                disableClearable
+                options={servers}
+                getOptionLabel={o => o.name}
+                isOptionEqualToValue={(a, b) => a.id === b.id}
+                value={servers.find(s => s.id === form.panel_id) ?? servers[0]}
+                onChange={(_, v) => { if (v) update('panel_id', v.id) }}
+                renderInput={(params) => (
+                  <TextField {...params} placeholder={t('admin:nodes.create_dialog.panel_search_placeholder', { defaultValue: '搜索 / 选择服务器' })} />
+                )}
+              />
             </Box>
           )}
           <Box sx={{ flex: '1 1 160px', minWidth: 140 }}>
@@ -1312,11 +1325,13 @@ function InboundFormFields({ form, setForm, showMetadata, servers, onGenKeys, on
 
           {form.protocol === 'vless' && form.vless_security === 'reality' && (
             <Box>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                <Box sx={{ flex: 1 }}>{sectionTitle(t('admin:nodes.create_dialog.section_reality'))}</Box>
+              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1, mb: 1 }}>
+                <Typography sx={{
+                  fontWeight: 500, fontSize: 11,
+                  color: md.primary, textTransform: 'uppercase', letterSpacing: '.6px',
+                }}>{t('admin:nodes.create_dialog.section_reality')}</Typography>
                 <Button size="small" variant="outlined" onClick={() => onGenKeys()} disabled={genKeysBusy}
-                  startIcon={genKeysBusy ? <CircularProgress size={14} /> : <KeyIcon />}
-                  sx={{ mb: 0.75 }}>
+                  startIcon={genKeysBusy ? <CircularProgress size={14} /> : <KeyIcon />}>
                   {t('admin:nodes.create_dialog.gen_keys')}
                 </Button>
               </Box>
@@ -1332,13 +1347,12 @@ function InboundFormFields({ form, setForm, showMetadata, servers, onGenKeys, on
                     sx={{ flex: '1 1 240px' }} />
                 </Box>
                 <Box sx={{ display: 'flex', gap: 1.5, flexWrap: 'wrap' }}>
-                  <Box sx={{ flex: '1 1 180px', minWidth: 140 }}>
-                    {fieldLabel(t('admin:nodes.create_dialog.reality_fingerprint'))}
-                    <Select size="small" fullWidth value={form.reality_fingerprint}
-                      onChange={e => update('reality_fingerprint', e.target.value)}>
-                      {FINGERPRINTS.map(fp => <MenuItem key={fp} value={fp}>{fp}</MenuItem>)}
-                    </Select>
-                  </Box>
+                  <TextField select size="small" label={t('admin:nodes.create_dialog.reality_fingerprint')}
+                    value={form.reality_fingerprint}
+                    onChange={e => update('reality_fingerprint', e.target.value)}
+                    sx={{ flex: '1 1 180px', minWidth: 140 }}>
+                    {FINGERPRINTS.map(fp => <MenuItem key={fp} value={fp}>{fp}</MenuItem>)}
+                  </TextField>
                   <TextField size="small" label={t('admin:nodes.create_dialog.reality_spider_x')}
                     value={form.reality_spider_x}
                     onChange={e => update('reality_spider_x', e.target.value)}
@@ -1427,13 +1441,12 @@ function InboundFormFields({ form, setForm, showMetadata, servers, onGenKeys, on
           {sectionTitle(t('admin:nodes.create_dialog.section_ss2022'))}
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.25 }}>
             <Box sx={{ display: 'flex', gap: 1.5, flexWrap: 'wrap' }}>
-              <Box sx={{ flex: '2 1 280px' }}>
-                {fieldLabel(t('admin:nodes.create_dialog.ss_method'))}
-                <Select size="small" fullWidth value={form.ss_method}
-                  onChange={e => update('ss_method', e.target.value as SS2022Method)}>
-                  {SS2022_METHODS.map(m => <MenuItem key={m.value} value={m.value}>{m.value}</MenuItem>)}
-                </Select>
-              </Box>
+              <TextField select size="small" label={t('admin:nodes.create_dialog.ss_method')}
+                value={form.ss_method}
+                onChange={e => update('ss_method', e.target.value as SS2022Method)}
+                sx={{ flex: '2 1 280px' }}>
+                {SS2022_METHODS.map(m => <MenuItem key={m.value} value={m.value}>{m.value}</MenuItem>)}
+              </TextField>
               <TextField size="small" label={t('admin:nodes.create_dialog.ss_network')}
                 value={form.ss_network}
                 onChange={e => update('ss_network', e.target.value)}
