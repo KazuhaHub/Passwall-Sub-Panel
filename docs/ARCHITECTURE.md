@@ -534,7 +534,7 @@ CREATE TABLE oidc_settings (
 |---|---|---|
 | `site` | 站点品牌 | site_title, app_title, logo_url, footer_text, theme_color, email_domain, sub_base_url |
 | `auth` | JWT + 登录策略 | login_mode, jwt_issuer, jwt_access_ttl_minutes, disallow_user_local_login |
-| `sub` | 订阅渲染 | sub_path, sub_client_rules (JSON), sub_import_clients (JSON), sub_update_interval_hours |
+| `sub` | 订阅渲染 | sub_path, sub_clients (JSON, 检测族→导入App 两层注册表；v3.2.2 合并自 sub_client_rules + sub_import_clients，旧字段一次性迁移代码 sub_clients_legacy.go 计划 v3.3.0 删), sub_update_interval_hours |
 | `security` | 限流 / 留存 / 应急 | sub_per_ip_per_min, audit_retention_days, **traffic_snapshot_retention_days** (v3.0.0 新增), emergency_access_* |
 | `runtime` | Cron / 性能 / 时区 | timezone, cron_traffic_pull_minutes, cron_reconcile_minutes, max_panel_concurrency |
 | `notice` | 用户视图 | quick_links (JSON), global_announcement (JSON) |

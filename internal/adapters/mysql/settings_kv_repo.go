@@ -165,8 +165,9 @@ func settingDescriptors(s *ports.UISettings) []settingDescriptor {
 		intField("sub", "sub_log_retention_days", &s.SubLogRetentionDays),
 		intField("notify", "mail_sent_retention_days", &s.MailSentRetentionDays),
 		strField("sub", "sub_import_tutorial_url", &s.SubImportTutorialURL),
-		jsonField("sub", "sub_client_rules", &s.SubClientRules),
-		jsonField("sub", "sub_import_clients", &s.SubImportClients),
+		jsonField("sub", "sub_client_rules", &s.SubClientRules),     // legacy, read-only for one-time migration (v3.2.2 → drop v3.3.0)
+		jsonField("sub", "sub_import_clients", &s.SubImportClients), // legacy, read-only for one-time migration (v3.2.2 → drop v3.3.0)
+		jsonField("sub", "sub_clients", &s.SubClients),
 
 		// security --- rate limits, retentions, emergency access
 		intField("security", "sub_per_ip_per_min", &s.SubPerIPPerMin),
@@ -345,11 +346,16 @@ func applyUISettingsDefaults(out, defaults ports.UISettings) ports.UISettings {
 		// and produce a blank-ish bucket. 2x the longest range avoids that.
 		out.TrafficHistoryDays = 730
 	}
-	if out.SubClientRules == nil {
-		out.SubClientRules = defaultSubClientRules()
-	}
-	if out.SubImportClients == nil {
-		out.SubImportClients = defaultSubImportClients()
+	// Unified client registry (v3.2.2). When absent, either migrate the legacy
+	// two-table config (sub_client_rules + sub_import_clients) in place — a
+	// one-time best-effort fold, see sub_clients_legacy.go — or seed fresh
+	// defaults. The legacy fields above stay readable solely for this.
+	if out.SubClients == nil {
+		if migrated := migrateLegacySubClients(out.SubClientRules, out.SubImportClients); migrated != nil {
+			out.SubClients = migrated
+		} else {
+			out.SubClients = defaultSubClients()
+		}
 	}
 	if out.SubBlockAutoDisableCount <= 0 {
 		out.SubBlockAutoDisableCount = 3
@@ -369,179 +375,119 @@ func applyUISettingsDefaults(out, defaults ports.UISettings) ports.UISettings {
 	return out
 }
 
-// defaultSubClientRules returns the default subscription client detection rules.
-func defaultSubClientRules() []ports.SubClientRule {
-	return []ports.SubClientRule{
-		{Name: "Clash / mihomo", Keywords: []string{"clash", "mihomo", "meta"}, RenderFormat: "mihomo", Enabled: true},
-		{Name: "sing-box", Keywords: []string{"sing-box"}, RenderFormat: "sing-box", Enabled: true},
-		// Surge uses its own .conf format and does NOT parse Clash YAML
-		// as a subscription (the panel previously mapped it to mihomo,
-		// which produced unimportable output). URI list is the
-		// least-bad fallback — Surge can at least consume individual
-		// proxy URIs even though it can't apply rules/groups from it.
+// defaultSubClients returns the unified client registry seeded on first run:
+// detection families (UA keywords + render format) each owning the import apps
+// shown in the portal. Apps don't repeat the render format — it's the
+// family's, served by UA. The deep-link / install strings are the audited
+// values carried over from the previous import-client defaults. (v3.2.2)
+func defaultSubClients() []ports.SubClientFamily {
+	return []ports.SubClientFamily{
+		{
+			Name: "Clash / mihomo", Keywords: []string{"clash", "mihomo", "meta"}, RenderFormat: "mihomo", Enabled: true,
+			Apps: []ports.SubClientApp{
+				{
+					Name:              "Clash Verge Rev",
+					Platforms:         []string{"windows", "macos", "linux"},
+					ImportURLTemplate: "clash://install-config?url={{ sub_url_encoded }}&name={{ profile_name_encoded }}",
+					InstallURL:        "https://github.com/clash-verge-rev/clash-verge-rev/releases",
+					Enabled:           true, Sort: 10, RecommendedFor: []string{"windows", "macos", "linux"},
+				},
+				{
+					Name:              "Clash Meta for Android",
+					Platforms:         []string{"android"},
+					ImportURLTemplate: "clash://install-config?url={{ sub_url_encoded }}&name={{ profile_name_encoded }}&update-interval={{ sub_update_interval_minutes }}",
+					InstallURL:        "https://github.com/MetaCubeX/ClashMetaForAndroid/releases",
+					Enabled:           true, Sort: 20, RecommendedFor: []string{"android"},
+				},
+				{
+					Name:              "Clash Mi",
+					Platforms:         []string{"windows", "macos", "linux", "android", "ios"},
+					ImportURLTemplate: "clashmi://install-config?url={{ sub_url_encoded }}&name={{ profile_name_encoded }}",
+					InstallURL:        "https://github.com/KaringX/clashmi/releases",
+					Enabled:           true, Sort: 25, RecommendedFor: []string{"ios"},
+				},
+			},
+		},
+		{
+			// "karing" keyword so the Karing app (sing-box engine) is detected
+			// as sing-box rather than falling through to "other".
+			Name: "sing-box", Keywords: []string{"sing-box", "karing"}, RenderFormat: "sing-box", Enabled: true,
+			Apps: []ports.SubClientApp{
+				{
+					Name:              "sing-box",
+					Platforms:         []string{"ios", "macos", "android"},
+					ImportURLTemplate: "sing-box://import-remote-profile?url={{ sub_url_encoded }}#{{ profile_name_encoded }}",
+					InstallURL:        "https://sing-box.sagernet.org/clients/",
+					Enabled:           true, Sort: 40,
+				},
+				{
+					Name:              "Karing",
+					Platforms:         []string{"windows", "macos", "linux", "android", "ios"},
+					ImportURLTemplate: "karing://install-config?url={{ sub_url_encoded }}&name={{ profile_name_encoded }}",
+					InstallURL:        "https://github.com/KaringX/karing/releases",
+					Enabled:           true, Sort: 65,
+				},
+			},
+		},
+		// Surge / Loon use their own .conf format (no Clash YAML parser);
+		// uri-list is the least-bad fallback. No bundled importer.
 		{Name: "Surge", Keywords: []string{"surge"}, RenderFormat: "uri-list", Enabled: true},
-		// Shadowrocket's native subscription format is the V2RayN
-		// base64-encoded URI list. It does NOT parse Clash YAML.
-		// The panel's own one-click import uses shadowrocket://add/sub/<b64>
-		// which is precisely the URI list scheme.
-		{Name: "Shadowrocket", Keywords: []string{"shadowrocket"}, RenderFormat: "uri-list", Enabled: true},
-		// Loon is Surge-derived (.conf format, no Clash YAML parser).
-		// Same uri-list fallback rationale as Surge.
+		{
+			Name: "Shadowrocket", Keywords: []string{"shadowrocket"}, RenderFormat: "uri-list", Enabled: true,
+			Apps: []ports.SubClientApp{
+				{
+					Name:              "Shadowrocket",
+					Platforms:         []string{"ios"},
+					ImportURLTemplate: "shadowrocket://add/sub://{{ sub_url_b64_url_safe }}?remark={{ profile_name_encoded }}",
+					InstallURL:        "https://apps.apple.com/app/shadowrocket/id932747118",
+					Enabled:           true, Sort: 60,
+				},
+			},
+		},
 		{Name: "Loon", Keywords: []string{"loon"}, RenderFormat: "uri-list", Enabled: true},
-		// Quantumult X DOES accept Clash YAML in its [server_remote]
-		// block (per the official sample.conf and Sub-Store docs),
-		// so mihomo is acceptable here — rules/policies are dropped
-		// but nodes import cleanly.
+		// Quantumult X accepts Clash YAML in its [server_remote] block, so
+		// mihomo imports cleanly (rules/policies dropped). No bundled importer.
 		{Name: "Quantumult X", Keywords: []string{"quantumult x", "quantumultx"}, RenderFormat: "mihomo", Enabled: true},
-		// V2rayNG (Android) — UA "v2rayNG/<ver>". Placed BEFORE V2RayN so
-		// the more specific "v2rayng" keyword wins substring matching;
-		// otherwise V2rayN's "v2rayn" keyword would eat V2rayNG too and
-		// the two apps couldn't be enabled/disabled independently.
-		{Name: "V2rayNG", Keywords: []string{"v2rayng"}, RenderFormat: "uri-list", Enabled: true},
-		// V2rayN (Windows desktop) — UA "v2rayN/<ver>". Both consume the
-		// base64 URI list (vless:// / vmess:// / trojan:// / ss:// lines).
-		{Name: "V2RayN", Keywords: []string{"v2rayn", "v2ray"}, RenderFormat: "uri-list", Enabled: true},
-		// OpenWrt Passwall plugin subscriber. Same base64 URI list format —
-		// Passwall's UA contains "Passwall" verbatim.
+		{
+			// V2rayNG before V2RayN: the more specific "v2rayng" must win
+			// substring matching, else "v2rayn" would eat it.
+			Name: "V2rayNG", Keywords: []string{"v2rayng"}, RenderFormat: "uri-list", Enabled: true,
+			Apps: []ports.SubClientApp{
+				{
+					Name:              "V2rayNG",
+					Platforms:         []string{"android"},
+					ImportURLTemplate: "v2rayng://install-sub?url={{ sub_url_encoded }}#{{ profile_name_encoded }}",
+					InstallURL:        "https://github.com/2dust/v2rayNG/releases",
+					Enabled:           true, Sort: 55,
+				},
+			},
+		},
+		{
+			Name: "V2RayN", Keywords: []string{"v2rayn", "v2ray"}, RenderFormat: "uri-list", Enabled: true,
+			Apps: []ports.SubClientApp{
+				{
+					Name:              "V2rayN",
+					Platforms:         []string{"windows"},
+					ImportURLTemplate: "{{ sub_url }}?remarks={{ profile_name_encoded }}",
+					InstallURL:        "https://github.com/2dust/v2rayN/releases",
+					Enabled:           true, Sort: 50,
+				},
+			},
+		},
 		{Name: "Passwall (OpenWrt)", Keywords: []string{"passwall"}, RenderFormat: "uri-list", Enabled: true},
-		{Name: "Stash", Keywords: []string{"stash"}, RenderFormat: "mihomo", Enabled: true},
+		{
+			Name: "Stash", Keywords: []string{"stash"}, RenderFormat: "mihomo", Enabled: true,
+			Apps: []ports.SubClientApp{
+				{
+					Name:              "Stash",
+					Platforms:         []string{"ios"},
+					ImportURLTemplate: "stash://install-config?url={{ sub_url_encoded }}",
+					InstallURL:        "https://apps.apple.com/app/stash-rule-based-proxy/id1596063349",
+					Enabled:           true, Sort: 30,
+				},
+			},
+		},
 		{Name: "Surfboard", Keywords: []string{"surfboard"}, RenderFormat: "mihomo", Enabled: true},
-	}
-}
-
-// defaultSubImportClients returns user-facing one-click import targets.
-func defaultSubImportClients() []ports.SubImportClient {
-	return []ports.SubImportClient{
-		{
-			Name:         "Clash Verge Rev",
-			Platforms:    []string{"windows", "macos", "linux"},
-			RenderFormat: "mihomo",
-			// scheme.rs reads `name=` first, then falls back to
-			// Content-Disposition.filename* (which we already send).
-			// Setting both means the name is known before the response
-			// is fetched and there's no round-trip dependency.
-			ImportURLTemplate: "clash://install-config?url={{ sub_url_encoded }}&name={{ profile_name_encoded }}",
-			InstallURL:        "https://github.com/clash-verge-rev/clash-verge-rev/releases",
-			Enabled:           true,
-			Sort:              10,
-			RecommendedFor:    []string{"windows", "macos", "linux"},
-		},
-		{
-			Name:         "Clash Meta for Android",
-			Platforms:    []string{"android"},
-			RenderFormat: "mihomo",
-			// update-interval (MINUTES) comes from CMfA PR #732, distinct from
-			// the Profile-Update-Interval HTTP header (HOURS). Both units are
-			// correct per CMfA's source. &name= is read by ExternalControlActivity
-			// and used as the profile remark — CMfA doesn't parse Profile-Title
-			// or Content-Disposition, so this is the ONLY way the panel can
-			// influence the imported name.
-			ImportURLTemplate: "clash://install-config?url={{ sub_url_encoded }}&name={{ profile_name_encoded }}&update-interval={{ sub_update_interval_minutes }}",
-			InstallURL:        "https://github.com/MetaCubeX/ClashMetaForAndroid/releases",
-			Enabled:           true,
-			Sort:              20,
-			RecommendedFor:    []string{"android"},
-		},
-		{
-			Name:         "Clash Mi",
-			Platforms:    []string{"windows", "macos", "linux", "android", "ios"},
-			RenderFormat: "mihomo",
-			// clashmi:// — ClashMi's iOS Info.plist registers `clash`, `clashmi`,
-			// `clashmeta` and `flclash`. Using `clashmi://` keeps iOS from
-			// offering Stash (which owns clash://) when both apps are installed.
-			//
-			// &name=... is read by SchemeHandler in lib/screens/scheme_handler.dart
-			// and passed as the `remark` into ProfileManager.addRemote — without
-			// it ClashMi falls back to scraping the panel root's HTML <title>,
-			// which is the same string for every user and visually collides with
-			// the URL-hashCode-based on-disk filename ClashMi shows below it.
-			ImportURLTemplate: "clashmi://install-config?url={{ sub_url_encoded }}&name={{ profile_name_encoded }}",
-			InstallURL:        "https://github.com/KaringX/clashmi/releases",
-			Enabled:           true,
-			Sort:              25,
-			RecommendedFor:    []string{"ios"},
-		},
-		{
-			Name:              "Stash",
-			Platforms:         []string{"ios"},
-			RenderFormat:      "mihomo",
-			ImportURLTemplate: "stash://install-config?url={{ sub_url_encoded }}",
-			InstallURL:        "https://apps.apple.com/app/stash-rule-based-proxy/id1596063349",
-			Enabled:           true,
-			Sort:              30,
-		},
-		{
-			Name:              "sing-box",
-			Platforms:         []string{"ios", "macos", "android"},
-			RenderFormat:      "sing-box",
-			ImportURLTemplate: "sing-box://import-remote-profile?url={{ sub_url_encoded }}#{{ profile_name_encoded }}",
-			InstallURL:        "https://sing-box.sagernet.org/clients/",
-			Enabled:           true,
-			Sort:              40,
-		},
-		{
-			// V2rayN (Windows) has no URL scheme — the panel UI copies
-			// the template to clipboard and the user pastes into the
-			// "Add subscription from clipboard" dialog. AddSubItem
-			// (ConfigHandler.cs:1920) reads `?remarks=` from the URL's
-			// query string and uses it as the subscription Remarks;
-			// fragment / JSON / `name|url` forms are all ignored. Sub
-			// URLs don't carry other query params, so a bare
-			// `?remarks=` is safe — no `&` ambiguity.
-			Name:              "V2rayN",
-			Platforms:         []string{"windows"},
-			RenderFormat:      "uri-list",
-			ImportURLTemplate: "{{ sub_url }}?remarks={{ profile_name_encoded }}",
-			InstallURL:        "https://github.com/2dust/v2rayN/releases",
-			Enabled:           true,
-			Sort:              50,
-		},
-		{
-			// V2rayNG (Android) install-sub intent: `url` param is URL-encoded
-			// (NOT base64 — base64 forms are silently rejected). The remark
-			// comes from the OUTER URL's #fragment, not a `name=` query param
-			// — UrlSchemeActivity.kt reads uri.fragment, not
-			// getQueryParameter("name"). Setting `&name=` is a no-op (every
-			// pre-2026 panel that ships that form has silently been losing
-			// the remark for years). See 2dust/v2rayNG@master and
-			// EZ_THEME/MiSub/ppanel-web for the convergent fragment form.
-			Name:              "V2rayNG",
-			Platforms:         []string{"android"},
-			RenderFormat:      "uri-list",
-			ImportURLTemplate: "v2rayng://install-sub?url={{ sub_url_encoded }}#{{ profile_name_encoded }}",
-			InstallURL:        "https://github.com/2dust/v2rayNG/releases",
-			Enabled:           true,
-			Sort:              55,
-		},
-		{
-			// Shadowrocket (iOS). The dominant production form (Xboard /
-			// v2board themes / EZ_THEME / MiSub) is
-			//   shadowrocket://add/sub://<b64>?remark=<name>
-			// where the inner sub:// is a NESTED URI scheme, not a path
-			// segment, and <b64> is URL-safe base64 with padding
-			// stripped. Path-form `add/sub/<b64>` (rare; 3x-ui-only)
-			// silently no-ops on real Shadowrocket builds — confirmed
-			// by user testing.
-			Name:              "Shadowrocket",
-			Platforms:         []string{"ios"},
-			RenderFormat:      "uri-list",
-			ImportURLTemplate: "shadowrocket://add/sub://{{ sub_url_b64_url_safe }}?remark={{ profile_name_encoded }}",
-			InstallURL:        "https://apps.apple.com/app/shadowrocket/id932747118",
-			Enabled:           true,
-			Sort:              60,
-		},
-		{
-			// Karing is the sister sing-box app to Clash Mi from the same
-			// author (KaringX). karing:// is unique so it won't collide with
-			// other iOS proxy apps.
-			Name:              "Karing",
-			Platforms:         []string{"windows", "macos", "linux", "android", "ios"},
-			RenderFormat:      "sing-box",
-			ImportURLTemplate: "karing://install-config?url={{ sub_url_encoded }}&name={{ profile_name_encoded }}",
-			InstallURL:        "https://github.com/KaringX/karing/releases",
-			Enabled:           true,
-			Sort:              65,
-		},
 	}
 }
 

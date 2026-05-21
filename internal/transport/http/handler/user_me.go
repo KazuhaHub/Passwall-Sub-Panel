@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -76,7 +77,7 @@ func (h *UserMeHandler) Profile(c *gin.Context) {
 		// import-URL templates can embed it (CMfA reads `update-interval`
 		// from the intent URI in minutes; the frontend converts on render).
 		"sub_update_interval_hours": settings.SubUpdateIntervalHours,
-		"sub_import_clients":        enabledSubImportClients(settings.SubImportClients),
+		"sub_import_clients":        enabledImportApps(settings.SubClients),
 		"sub_import_tutorial_url":   settings.SubImportTutorialURL,
 		"quick_links":             enabledQuickLinks(settings.QuickLinks),
 		"global_announcement":     visibleGlobalAnnouncement(settings.GlobalAnnouncement),
@@ -111,13 +112,23 @@ func (h *UserMeHandler) Profile(c *gin.Context) {
 	})
 }
 
-func enabledSubImportClients(clients []ports.SubImportClient) []ports.SubImportClient {
-	out := make([]ports.SubImportClient, 0, len(clients))
-	for _, c := range clients {
-		if c.Enabled {
-			out = append(out, c)
+// enabledImportApps flattens the unified client registry into the flat list
+// the portal expects: every app whose family AND itself are enabled, ordered
+// by Sort. Deriving visibility from the family's Enabled flag is what
+// guarantees a blocked client is never advertised for one-click import.
+func enabledImportApps(families []ports.SubClientFamily) []ports.SubClientApp {
+	out := make([]ports.SubClientApp, 0)
+	for _, fam := range families {
+		if !fam.Enabled {
+			continue
+		}
+		for _, app := range fam.Apps {
+			if app.Enabled {
+				out = append(out, app)
+			}
 		}
 	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].Sort < out[j].Sort })
 	return out
 }
 

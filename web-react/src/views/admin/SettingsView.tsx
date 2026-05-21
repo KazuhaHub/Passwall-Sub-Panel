@@ -59,8 +59,10 @@ import {
   type QuickLink,
   type SAMLConfig,
   type SSORoleRule,
-  type SubClientRule,
-  type SubImportClient,
+  type SubClientApp,
+  type SubClientFamily,
+  type SubPlatform,
+  type SubRenderFormat,
   type UISettings,
 } from '@/api/settings'
 import AddIcon from '@mui/icons-material/Add'
@@ -169,8 +171,7 @@ export default function SettingsView() {
   function normalize(s: UISettings): UISettings {
     return {
       ...s,
-      sub_client_rules: s.sub_client_rules ?? [],
-      sub_import_clients: s.sub_import_clients ?? [],
+      sub_clients: s.sub_clients ?? [],
       quick_links: s.quick_links ?? [],
       timezone: s.timezone ?? '',
     }
@@ -543,15 +544,9 @@ export default function SettingsView() {
               onChange={v => patch('sub_block_auto_disable_count', v)} />
           </Section>
 
-          <ClientRulesEditor
-            rules={settings.sub_client_rules}
-            onChange={v => patch('sub_client_rules', v)}
-            md={md}
-          />
-
-          <ImportClientsEditor
-            clients={settings.sub_import_clients}
-            onChange={v => patch('sub_import_clients', v)}
+          <ClientRegistryEditor
+            families={settings.sub_clients}
+            onChange={v => patch('sub_clients', v)}
             md={md}
           />
         </Box>
@@ -1154,266 +1149,79 @@ function QuickLinksEditor({ links, onChange, md }: { links: QuickLink[]; onChang
   )
 }
 
-// CLIENT_RULE_PRESETS mirrors defaultSubClientRules() in the Go side —
-// keep them in sync. The render_format choices follow that audit: clients
-// whose native subscription format is a base64 URI list (V2rayN-style)
-// land on "uri-list" even when the project's de-facto config language
-// is a Surge/Loon .conf, because uri-list at least gets nodes in. The
-// only mihomo-on-non-Clash mapping that stays is Quantumult X, whose
-// [server_remote] block does accept Clash YAML.
-const CLIENT_RULE_PRESETS: SubClientRule[] = [
-  { name: 'Clash / mihomo', keywords: ['clash', 'mihomo', 'meta'], render_format: 'mihomo', enabled: true },
-  { name: 'sing-box', keywords: ['sing-box'], render_format: 'sing-box', enabled: true },
-  { name: 'Surge', keywords: ['surge'], render_format: 'uri-list', enabled: true },
-  { name: 'Shadowrocket', keywords: ['shadowrocket'], render_format: 'uri-list', enabled: true },
-  { name: 'Loon', keywords: ['loon'], render_format: 'uri-list', enabled: true },
-  { name: 'Quantumult X', keywords: ['quantumult x', 'quantumultx'], render_format: 'mihomo', enabled: true },
-  // V2rayNG MUST sit before V2RayN so its more specific keyword
-  // wins substring matching — otherwise V2RayN's "v2rayn" would
-  // claim V2rayNG UAs too and the two apps couldn't be toggled
-  // independently.
-  { name: 'V2rayNG', keywords: ['v2rayng'], render_format: 'uri-list', enabled: true },
-  { name: 'V2RayN', keywords: ['v2rayn', 'v2ray'], render_format: 'uri-list', enabled: true },
-  { name: 'Passwall (OpenWrt)', keywords: ['passwall'], render_format: 'uri-list', enabled: true },
-  { name: 'Stash', keywords: ['stash'], render_format: 'mihomo', enabled: true },
-  { name: 'Surfboard', keywords: ['surfboard'], render_format: 'mihomo', enabled: true },
+
+// CLIENT_PRESETS mirrors defaultSubClients() on the Go side — keep them in
+// sync. Each family carries its UA keywords + render format and the import apps
+// nested under it. "Add preset" appends a whole family; "reset" rebuilds the
+// registry from this list.
+const CLIENT_PRESETS: SubClientFamily[] = [
+  {
+    name: 'Clash / mihomo', keywords: ['clash', 'mihomo', 'meta'], render_format: 'mihomo', enabled: true,
+    apps: [
+      { name: 'Clash Verge Rev', platforms: ['windows', 'macos', 'linux'], import_url_template: 'clash://install-config?url={{ sub_url_encoded }}&name={{ profile_name_encoded }}', install_url: 'https://github.com/clash-verge-rev/clash-verge-rev/releases', enabled: true, sort: 10, recommended_for: ['windows', 'macos', 'linux'] },
+      { name: 'Clash Meta for Android', platforms: ['android'], import_url_template: 'clash://install-config?url={{ sub_url_encoded }}&name={{ profile_name_encoded }}&update-interval={{ sub_update_interval_minutes }}', install_url: 'https://github.com/MetaCubeX/ClashMetaForAndroid/releases', enabled: true, sort: 20, recommended_for: ['android'] },
+      { name: 'Clash Mi', platforms: ['windows', 'macos', 'linux', 'android', 'ios'], import_url_template: 'clashmi://install-config?url={{ sub_url_encoded }}&name={{ profile_name_encoded }}', install_url: 'https://github.com/KaringX/clashmi/releases', enabled: true, sort: 25, recommended_for: ['ios'] },
+    ],
+  },
+  {
+    name: 'sing-box', keywords: ['sing-box', 'karing'], render_format: 'sing-box', enabled: true,
+    apps: [
+      { name: 'sing-box', platforms: ['ios', 'macos', 'android'], import_url_template: 'sing-box://import-remote-profile?url={{ sub_url_encoded }}#{{ profile_name_encoded }}', install_url: 'https://sing-box.sagernet.org/clients/', enabled: true, sort: 40, recommended_for: [] },
+      { name: 'Karing', platforms: ['windows', 'macos', 'linux', 'android', 'ios'], import_url_template: 'karing://install-config?url={{ sub_url_encoded }}&name={{ profile_name_encoded }}', install_url: 'https://github.com/KaringX/karing/releases', enabled: true, sort: 65, recommended_for: [] },
+    ],
+  },
+  { name: 'Surge', keywords: ['surge'], render_format: 'uri-list', enabled: true, apps: [] },
+  {
+    name: 'Shadowrocket', keywords: ['shadowrocket'], render_format: 'uri-list', enabled: true,
+    apps: [
+      { name: 'Shadowrocket', platforms: ['ios'], import_url_template: 'shadowrocket://add/sub://{{ sub_url_b64_url_safe }}?remark={{ profile_name_encoded }}', install_url: 'https://apps.apple.com/app/shadowrocket/id932747118', enabled: true, sort: 60, recommended_for: [] },
+    ],
+  },
+  { name: 'Loon', keywords: ['loon'], render_format: 'uri-list', enabled: true, apps: [] },
+  { name: 'Quantumult X', keywords: ['quantumult x', 'quantumultx'], render_format: 'mihomo', enabled: true, apps: [] },
+  {
+    name: 'V2rayNG', keywords: ['v2rayng'], render_format: 'uri-list', enabled: true,
+    apps: [
+      { name: 'V2rayNG', platforms: ['android'], import_url_template: 'v2rayng://install-sub?url={{ sub_url_encoded }}#{{ profile_name_encoded }}', install_url: 'https://github.com/2dust/v2rayNG/releases', enabled: true, sort: 55, recommended_for: [] },
+    ],
+  },
+  {
+    name: 'V2RayN', keywords: ['v2rayn', 'v2ray'], render_format: 'uri-list', enabled: true,
+    apps: [
+      { name: 'V2rayN', platforms: ['windows'], import_url_template: '{{ sub_url }}?remarks={{ profile_name_encoded }}', install_url: 'https://github.com/2dust/v2rayN/releases', enabled: true, sort: 50, recommended_for: [] },
+    ],
+  },
+  { name: 'Passwall (OpenWrt)', keywords: ['passwall'], render_format: 'uri-list', enabled: true, apps: [] },
+  {
+    name: 'Stash', keywords: ['stash'], render_format: 'mihomo', enabled: true,
+    apps: [
+      { name: 'Stash', platforms: ['ios'], import_url_template: 'stash://install-config?url={{ sub_url_encoded }}', install_url: 'https://apps.apple.com/app/stash-rule-based-proxy/id1596063349', enabled: true, sort: 30, recommended_for: [] },
+    ],
+  },
+  { name: 'Surfboard', keywords: ['surfboard'], render_format: 'mihomo', enabled: true, apps: [] },
 ]
 
-function ClientRulesEditor({ rules, onChange, md }: { rules: SubClientRule[]; onChange: (v: SubClientRule[]) => void; md: MdShape }) {
-  const { t } = useTranslation('admin')
-  const [presetAnchor, setPresetAnchor] = useState<HTMLElement | null>(null)
-  const update = (i: number, patch: Partial<SubClientRule>) =>
-    onChange(rules.map((r, idx) => idx === i ? { ...r, ...patch } : r))
-  const remove = (i: number) => onChange(rules.filter((_, idx) => idx !== i))
-  const add = () => onChange([
-    ...rules,
-    { name: '', keywords: [], render_format: 'mihomo', enabled: true },
-  ])
-  const addPreset = (p: SubClientRule) => {
-    onChange([...rules, { ...p, keywords: [...p.keywords] }])
-    setPresetAnchor(null)
-  }
-  async function resetToPresets() {
-    if (!(await confirm({
-      title: t('settings.subscription.reset_rules_confirm_title'),
-      message: t('settings.subscription.reset_rules_confirm_body'),
-      confirmText: t('settings.subscription.reset_rules_confirm_ok'),
-      destructive: true,
-    }))) return
-    // Deep-copy keywords so future mutations on one row don't bleed
-    // into the others via the shared PRESETS reference.
-    onChange(CLIENT_RULE_PRESETS.map(p => ({ ...p, keywords: [...p.keywords] })))
-  }
-  return (
-    <Card sx={{ p: 3, bgcolor: md.surfaceContainerLow, border: `1px solid ${md.outlineVariant}` }}>
-      <Typography sx={{ fontWeight: 500, mb: 1.5, color: md.onSurface }}>{t('settings.subscription.section_clients')}</Typography>
-      <Divider sx={{ mb: 2 }} />
-      {rules.length === 0 ? (
-        <Typography sx={{ fontSize: 13, color: md.onSurfaceVariant, py: 2, textAlign: 'center' }}>
-          {t('settings.subscription.no_rules')}
-        </Typography>
-      ) : (
-        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
-          {rules.map((r, i) => (
-            <Box key={i} sx={{
-              display: 'flex', flexWrap: 'wrap', gap: 1.25, alignItems: 'center',
-              p: 1.5, borderRadius: 2, border: `1px solid ${md.outlineVariant}`,
-              bgcolor: md.surfaceContainerHigh,
-            }}>
-              <TextField size="small" label={t('settings.subscription.rule_field.name')}
-                value={r.name} onChange={e => update(i, { name: e.target.value })}
-                sx={{ flex: '1 1 160px' }} />
-              <TextField size="small" label={t('settings.subscription.rule_field.keywords')}
-                value={r.keywords.join(', ')}
-                onChange={e => update(i, { keywords: e.target.value.split(',').map(s => s.trim()).filter(Boolean) })}
-                sx={{ flex: '2 1 240px' }} />
-              <TextField select size="small" label={t('settings.subscription.rule_field.render_format')}
-                value={r.render_format}
-                onChange={e => update(i, { render_format: e.target.value as 'mihomo' | 'sing-box' | 'uri-list' })}
-                sx={{ width: 150 }}>
-                <MenuItem value="mihomo">mihomo</MenuItem>
-                <MenuItem value="sing-box">sing-box</MenuItem>
-                <MenuItem value="uri-list">URI 列表 (V2rayN / Passwall)</MenuItem>
-              </TextField>
-              <FormControlLabel
-                label={t('settings.subscription.rule_field.enabled')}
-                control={<Switch size="small" checked={r.enabled}
-                  onChange={(_, c) => update(i, { enabled: c })} />}
-                sx={{ ml: 0, '& .MuiFormControlLabel-label': { ml: 1, fontSize: 13 } }}
-              />
-              <IconButton size="small" onClick={() => remove(i)} sx={{ color: md.onSurfaceVariant }}>
-                <DeleteIcon fontSize="small" />
-              </IconButton>
-            </Box>
-          ))}
-        </Box>
-      )}
-      <Box sx={{ mt: 2, display: 'flex', gap: 1.25, flexWrap: 'wrap' }}>
-        <Button variant="outlined" size="small" startIcon={<AddIcon />} onClick={add}>
-          {t('settings.subscription.add_rule')}
-        </Button>
-        <Button variant="text" size="small" onClick={e => setPresetAnchor(e.currentTarget)}>
-          {t('settings.subscription.add_preset')}
-        </Button>
-        <Button variant="text" size="small" color="warning" onClick={resetToPresets}>
-          {t('settings.subscription.reset_to_presets')}
-        </Button>
-        <Menu anchorEl={presetAnchor} open={!!presetAnchor} onClose={() => setPresetAnchor(null)}
-          PaperProps={{ sx: { maxHeight: 360 } }}>
-          {CLIENT_RULE_PRESETS.map(p => {
-            // Existence check by name to avoid double-adding. Disabled
-            // MenuItem still shows the row but won't re-trigger addPreset.
-            const exists = rules.some(r => r.name === p.name)
-            return (
-              <MenuItem key={p.name} disabled={exists} onClick={() => addPreset(p)}>
-                <Box>
-                  <Typography sx={{ fontSize: 14 }}>{p.name}</Typography>
-                  <Typography sx={{ fontSize: 12, opacity: 0.7 }}>
-                    {p.keywords.join(', ')} · {p.render_format}
-                    {exists ? ` · ${t('settings.subscription.preset_exists', { defaultValue: '已存在' })}` : ''}
-                  </Typography>
-                </Box>
-              </MenuItem>
-            )
-          })}
-        </Menu>
-      </Box>
-    </Card>
-  )
+const PLATFORM_OPTIONS: SubPlatform[] = ['windows', 'macos', 'linux', 'android', 'ios', 'other']
+
+function clonePreset(p: SubClientFamily): SubClientFamily {
+  return JSON.parse(JSON.stringify(p)) as SubClientFamily
 }
 
-// IMPORT_CLIENT_PRESETS is the known-client cheat sheet for the
-// "Add preset" menu. Each entry mirrors the shape an admin would type in
-// by hand; clicking it appends a fully-configured row that they can then
-// tweak (re-order, rename, toggle off, etc).
-//
-// Sort defaults to 100; the add handler bumps it based on the current
-// tail position so freshly-added presets always land at the bottom.
-const IMPORT_CLIENT_PRESETS: Array<Omit<SubImportClient, 'sort' | 'enabled'>> = [
-  {
-    name: 'Clash Verge Rev',
-    platforms: ['windows', 'macos', 'linux'],
-    render_format: 'mihomo',
-    // scheme.rs reads &name= first, then falls back to Content-Disposition.
-    // Setting both means the name is known before the response fetch lands.
-    import_url_template: 'clash://install-config?url={{ sub_url_encoded }}&name={{ profile_name_encoded }}',
-    install_url: 'https://github.com/clash-verge-rev/clash-verge-rev/releases',
-    recommended_for: ['windows', 'macos', 'linux'],
-  },
-  {
-    name: 'Clash Meta for Android',
-    platforms: ['android'],
-    render_format: 'mihomo',
-    // update-interval is in MINUTES per CMfA PR #732 (deliberate units
-    // mismatch with the Profile-Update-Interval HTTP header which is hours).
-    // &name= is the only lever for the imported remark — CMfA never reads
-    // Profile-Title or Content-Disposition.
-    import_url_template: 'clash://install-config?url={{ sub_url_encoded }}&name={{ profile_name_encoded }}&update-interval={{ sub_update_interval_minutes }}',
-    install_url: 'https://github.com/MetaCubeX/ClashMetaForAndroid/releases',
-    recommended_for: ['android'],
-  },
-  {
-    name: 'Clash Mi',
-    platforms: ['windows', 'macos', 'linux', 'android', 'ios'],
-    render_format: 'mihomo',
-    // ClashMi registers clashmi://, clash://, clashmeta:// and flclash://.
-    // Using `clashmi://` keeps iOS from offering Stash (which only owns
-    // clash://) when both apps are installed. &name=... is read by
-    // SchemeHandler.handle and becomes the profile remark; without it
-    // ClashMi falls back to scraping the panel root <title> for every
-    // user.
-    import_url_template: 'clashmi://install-config?url={{ sub_url_encoded }}&name={{ profile_name_encoded }}',
-    install_url: 'https://github.com/KaringX/clashmi/releases',
-    recommended_for: ['ios'],
-  },
-  {
-    name: 'Stash',
-    platforms: ['ios'],
-    render_format: 'mihomo',
-    import_url_template: 'stash://install-config?url={{ sub_url_encoded }}',
-    install_url: 'https://apps.apple.com/app/stash-rule-based-proxy/id1596063349',
-    recommended_for: [],
-  },
-  {
-    name: 'sing-box',
-    platforms: ['ios', 'macos', 'android'],
-    render_format: 'sing-box',
-    import_url_template: 'sing-box://import-remote-profile?url={{ sub_url_encoded }}#{{ profile_name_encoded }}',
-    install_url: 'https://sing-box.sagernet.org/clients/',
-    recommended_for: [],
-  },
-  {
-    name: 'V2rayN',
-    platforms: ['windows'],
-    render_format: 'uri-list',
-    // V2rayN has no URL scheme — UI copies this to clipboard.
-    // AddSubItem reads ?remarks= as the Remarks field; fragment
-    // / JSON / pipe-syntax are all ignored.
-    import_url_template: '{{ sub_url }}?remarks={{ profile_name_encoded }}',
-    install_url: 'https://github.com/2dust/v2rayN/releases',
-    recommended_for: [],
-  },
-  {
-    name: 'V2rayNG',
-    platforms: ['android'],
-    render_format: 'uri-list',
-    // V2rayNG's install-sub intent expects `url=` URL-encoded (NOT
-    // base64). The profile remark comes from the OUTER URL's
-    // #fragment — UrlSchemeActivity reads uri.fragment, never a
-    // `name=` query param. Production panels (EZ_THEME, MiSub,
-    // ppanel-web) all converged on the fragment form; panels still
-    // shipping `&name=...` have been silently dropping remarks for
-    // years.
-    import_url_template: 'v2rayng://install-sub?url={{ sub_url_encoded }}#{{ profile_name_encoded }}',
-    install_url: 'https://github.com/2dust/v2rayNG/releases',
-    recommended_for: [],
-  },
-  {
-    name: 'Shadowrocket',
-    platforms: ['ios'],
-    render_format: 'uri-list',
-    // shadowrocket://add/sub://<b64>?remark=<name> — the dominant
-    // form in Xboard/v2board themes, EZ_THEME, MiSub, etc. Inner
-    // `sub://` is a nested URI scheme, not a path. b64 is URL-safe
-    // with padding stripped. 3x-ui's bare `add/sub/<b64>` (without
-    // the nested ://) silently no-ops on real Shadowrocket builds.
-    import_url_template: 'shadowrocket://add/sub://{{ sub_url_b64_url_safe }}?remark={{ profile_name_encoded }}',
-    install_url: 'https://apps.apple.com/app/shadowrocket/id932747118',
-    recommended_for: [],
-  },
-  {
-    // Karing is the sister app to Clash Mi from KaringX, popular alongside
-    // ClashMi on iOS. Distinct karing:// scheme so it doesn't collide with
-    // Stash. Sing-box core, so render format is sing-box.
-    name: 'Karing',
-    platforms: ['windows', 'macos', 'linux', 'android', 'ios'],
-    render_format: 'sing-box',
-    import_url_template: 'karing://install-config?url={{ sub_url_encoded }}&name={{ profile_name_encoded }}',
-    install_url: 'https://github.com/KaringX/karing/releases',
-    recommended_for: [],
-  },
-]
-
-function ImportClientsEditor({ clients, onChange, md }: { clients: SubImportClient[]; onChange: (v: SubImportClient[]) => void; md: MdShape }) {
+// ClientRegistryEditor is the unified detection-family → import-app editor
+// (v3.2.2). Each family owns UA keywords + render format + an enabled gate;
+// nested apps are the portal's one-click import targets and inherit the
+// family's format. Disabling a family blocks its UA AND hides its apps, so the
+// portal can never advertise a client that's actually blocked.
+function ClientRegistryEditor({ families, onChange, md }: { families: SubClientFamily[]; onChange: (v: SubClientFamily[]) => void; md: MdShape }) {
   const { t } = useTranslation('admin')
   const [presetAnchor, setPresetAnchor] = useState<HTMLElement | null>(null)
-  const update = (i: number, patch: Partial<SubImportClient>) =>
-    onChange(clients.map((c, idx) => idx === i ? { ...c, ...patch } : c))
-  const remove = (i: number) => onChange(clients.filter((_, idx) => idx !== i))
-  const add = () => onChange([
-    ...clients,
-    {
-      name: '', platforms: [], render_format: 'mihomo',
-      import_url_template: '', install_url: '', enabled: true,
-      sort: (clients.at(-1)?.sort ?? 0) + 10,
-      recommended_for: [],
-    },
-  ])
-  function addPreset(preset: Omit<SubImportClient, 'sort' | 'enabled'>) {
-    onChange([
-      ...clients,
-      { ...preset, sort: (clients.at(-1)?.sort ?? 0) + 10, enabled: true },
-    ])
+
+  const updateFamily = (fi: number, patch: Partial<SubClientFamily>) =>
+    onChange(families.map((f, i) => i === fi ? { ...f, ...patch } : f))
+  const removeFamily = (fi: number) => onChange(families.filter((_, i) => i !== fi))
+  const addFamily = () => onChange([...families, { name: '', keywords: [], render_format: 'mihomo', enabled: true, apps: [] }])
+  const addPresetFamily = (p: SubClientFamily) => {
+    onChange([...families, clonePreset(p)])
     setPresetAnchor(null)
   }
   async function resetToPresets() {
@@ -1423,132 +1231,141 @@ function ImportClientsEditor({ clients, onChange, md }: { clients: SubImportClie
       confirmText: t('settings.subscription.reset_clients_confirm_ok'),
       destructive: true,
     }))) return
-    // Stamp sort in 10-step increments by preset order so the rail
-    // lays them out the same as a fresh install. Spread platform /
-    // recommended_for arrays so future per-row edits don't leak
-    // through the shared PRESETS reference.
-    onChange(IMPORT_CLIENT_PRESETS.map((p, i) => ({
-      ...p,
-      platforms: [...p.platforms],
-      recommended_for: [...(p.recommended_for ?? [])],
-      enabled: true,
-      sort: (i + 1) * 10,
-    })))
+    onChange(CLIENT_PRESETS.map(clonePreset))
   }
-  const PLATFORM_OPTIONS: Array<SubImportClient['platforms'][number]> = ['windows', 'macos', 'linux', 'android', 'ios', 'other']
+
+  const updateApp = (fi: number, ai: number, patch: Partial<SubClientApp>) =>
+    onChange(families.map((f, i) => i !== fi ? f : { ...f, apps: f.apps.map((a, j) => j === ai ? { ...a, ...patch } : a) }))
+  const removeApp = (fi: number, ai: number) =>
+    onChange(families.map((f, i) => i !== fi ? f : { ...f, apps: f.apps.filter((_, j) => j !== ai) }))
+  const addApp = (fi: number) =>
+    onChange(families.map((f, i) => i !== fi ? f : {
+      ...f,
+      apps: [...f.apps, { name: '', platforms: [], import_url_template: '', install_url: '', enabled: true, sort: (f.apps.at(-1)?.sort ?? fi * 10) + 10, recommended_for: [] }],
+    }))
+
   return (
     <Card sx={{ p: 3, bgcolor: md.surfaceContainerLow, border: `1px solid ${md.outlineVariant}` }}>
-      <Typography sx={{ fontWeight: 500, mb: 1.5, color: md.onSurface }}>{t('settings.subscription.section_imports')}</Typography>
+      <Typography sx={{ fontWeight: 500, mb: 0.5, color: md.onSurface }}>{t('settings.subscription.section_clients')}</Typography>
+      <Typography sx={{ fontSize: 13, color: md.onSurfaceVariant, mb: 1.5 }}>
+        {t('settings.subscription.registry_hint', { defaultValue: '检测族按 UA 决定订阅格式；族下的 App 是门户的一键导入项。关闭某个族会同时拦截该族客户端拉取、并在门户隐藏其全部导入项，因此不会出现「已禁用却仍展示」。' })}
+      </Typography>
       <Divider sx={{ mb: 2 }} />
-      {clients.length === 0 ? (
+      {families.length === 0 ? (
         <Typography sx={{ fontSize: 13, color: md.onSurfaceVariant, py: 2, textAlign: 'center' }}>
-          {t('settings.subscription.no_clients')}
+          {t('settings.subscription.no_rules')}
         </Typography>
       ) : (
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-          {clients.map((c, i) => (
-            <Box key={i} sx={{
-              display: 'flex', flexDirection: 'column', gap: 1.25,
-              p: 2, borderRadius: 2, border: `1px solid ${md.outlineVariant}`,
-              bgcolor: md.surfaceContainerHigh,
-            }}>
+          {families.map((f, fi) => (
+            <Box key={fi} sx={{ p: 2, borderRadius: 2, border: `1px solid ${md.outlineVariant}`, bgcolor: md.surfaceContainerHigh, opacity: f.enabled ? 1 : 0.6 }}>
               <Box sx={{ display: 'flex', gap: 1.25, flexWrap: 'wrap', alignItems: 'center' }}>
-                <TextField size="small" label={t('settings.subscription.client_field.name')}
-                  value={c.name} onChange={e => update(i, { name: e.target.value })}
-                  sx={{ flex: '1 1 200px' }} />
-                <TextField select size="small" label={t('settings.subscription.client_field.render_format')}
-                  value={c.render_format}
-                  onChange={e => update(i, { render_format: e.target.value as 'mihomo' | 'sing-box' | 'uri-list' })}
-                  sx={{ width: 180 }}>
+                <TextField size="small" label={t('settings.subscription.rule_field.name')}
+                  value={f.name} onChange={e => updateFamily(fi, { name: e.target.value })} sx={{ flex: '1 1 160px' }} />
+                <TextField size="small" label={t('settings.subscription.rule_field.keywords')}
+                  value={f.keywords.join(', ')}
+                  onChange={e => updateFamily(fi, { keywords: e.target.value.split(',').map(s => s.trim()).filter(Boolean) })}
+                  sx={{ flex: '2 1 220px' }} />
+                <TextField select size="small" label={t('settings.subscription.rule_field.render_format')}
+                  value={f.render_format}
+                  onChange={e => updateFamily(fi, { render_format: e.target.value as SubRenderFormat })}
+                  sx={{ width: 150 }}>
                   <MenuItem value="mihomo">mihomo</MenuItem>
                   <MenuItem value="sing-box">sing-box</MenuItem>
-                  <MenuItem value="uri-list">URI 列表</MenuItem>
+                  <MenuItem value="uri-list">URI 列表 (V2rayN / Passwall)</MenuItem>
                 </TextField>
-                <TextField size="small" type="number" label={t('settings.subscription.client_field.sort')}
-                  value={c.sort} onChange={e => update(i, { sort: Number(e.target.value) })}
-                  sx={{ width: 100 }} />
-                <FormControlLabel
-                  label={t('settings.subscription.client_field.enabled')}
-                  control={<Switch size="small" checked={c.enabled}
-                    onChange={(_, ck) => update(i, { enabled: ck })} />}
-                  sx={{ ml: 0, '& .MuiFormControlLabel-label': { ml: 1, fontSize: 13 } }}
-                />
+                <FormControlLabel label={t('settings.subscription.rule_field.enabled')}
+                  control={<Switch size="small" checked={f.enabled} onChange={(_, c) => updateFamily(fi, { enabled: c })} />}
+                  sx={{ ml: 0, '& .MuiFormControlLabel-label': { ml: 1, fontSize: 13 } }} />
                 <Box sx={{ flex: 1 }} />
-                <IconButton size="small" onClick={() => remove(i)} sx={{ color: md.onSurfaceVariant }}>
+                <IconButton size="small" onClick={() => removeFamily(fi)} sx={{ color: md.onSurfaceVariant }}>
                   <DeleteIcon fontSize="small" />
                 </IconButton>
               </Box>
-              <Box>
-                <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant, mb: 0.75 }}>
-                  {t('settings.subscription.client_field.platforms', { defaultValue: '支持的平台' })}
-                </Typography>
-                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.75 }}>
-                  {PLATFORM_OPTIONS.map(p => {
-                    const selected = c.platforms.includes(p)
-                    return (
-                      <Chip key={p}
-                        size="small"
-                        label={t(`settings.subscription.platform.${p}`, { defaultValue: p })}
-                        color={selected ? 'primary' : 'default'}
-                        variant={selected ? 'filled' : 'outlined'}
-                        onClick={() => {
-                          const cur = c.platforms
-                          const nextPlatforms = selected ? cur.filter(x => x !== p) : [...cur, p]
-                          // Removing a platform should also drop it from
-                          // recommended_for — otherwise the backend silently
-                          // strips it on save and the admin would wonder why
-                          // the highlight chip disappeared mid-edit.
-                          const nextRec = (c.recommended_for ?? []).filter(x => nextPlatforms.includes(x))
-                          update(i, {
-                            platforms: nextPlatforms as SubImportClient['platforms'],
-                            recommended_for: nextRec as SubImportClient['recommended_for'],
-                          })
-                        }} />
-                    )
-                  })}
+              <Box sx={{ mt: 1.5, pl: { xs: 0, sm: 2 }, borderLeft: { sm: `2px solid ${md.outlineVariant}` }, display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+                {f.apps.length === 0 && (
+                  <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant, fontStyle: 'italic' }}>
+                    {t('settings.subscription.no_apps', { defaultValue: '该族暂无导入 App（仅用于检测）' })}
+                  </Typography>
+                )}
+                {f.apps.map((a, ai) => (
+                  <Box key={ai} sx={{ p: 1.5, borderRadius: 2, border: `1px solid ${md.outlineVariant}`, bgcolor: md.surfaceContainerLow, display: 'flex', flexDirection: 'column', gap: 1.25 }}>
+                    <Box sx={{ display: 'flex', gap: 1.25, flexWrap: 'wrap', alignItems: 'center' }}>
+                      <TextField size="small" label={t('settings.subscription.client_field.name')}
+                        value={a.name} onChange={e => updateApp(fi, ai, { name: e.target.value })} sx={{ flex: '1 1 180px' }} />
+                      <TextField size="small" type="number" label={t('settings.subscription.client_field.sort')}
+                        value={a.sort} onChange={e => updateApp(fi, ai, { sort: Number(e.target.value) })} sx={{ width: 100 }} />
+                      <FormControlLabel label={t('settings.subscription.client_field.enabled')}
+                        control={<Switch size="small" checked={a.enabled} onChange={(_, c) => updateApp(fi, ai, { enabled: c })} />}
+                        sx={{ ml: 0, '& .MuiFormControlLabel-label': { ml: 1, fontSize: 13 } }} />
+                      <Box sx={{ flex: 1 }} />
+                      <IconButton size="small" onClick={() => removeApp(fi, ai)} sx={{ color: md.onSurfaceVariant }}>
+                        <DeleteIcon fontSize="small" />
+                      </IconButton>
+                    </Box>
+                    <Box>
+                      <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant, mb: 0.75 }}>
+                        {t('settings.subscription.client_field.platforms', { defaultValue: '支持的平台' })}
+                      </Typography>
+                      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.75 }}>
+                        {PLATFORM_OPTIONS.map(p => {
+                          const selected = a.platforms.includes(p)
+                          return (
+                            <Chip key={p} size="small"
+                              label={t(`settings.subscription.platform.${p}`, { defaultValue: p })}
+                              color={selected ? 'primary' : 'default'} variant={selected ? 'filled' : 'outlined'}
+                              onClick={() => {
+                                const next = selected ? a.platforms.filter(x => x !== p) : [...a.platforms, p]
+                                const nextRec = (a.recommended_for ?? []).filter(x => next.includes(x))
+                                updateApp(fi, ai, { platforms: next, recommended_for: nextRec })
+                              }} />
+                          )
+                        })}
+                      </Box>
+                    </Box>
+                    <Box>
+                      <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant, mb: 0.75 }}>
+                        {t('settings.subscription.client_field.recommended_for', { defaultValue: '在哪些平台作为推荐客户端' })}
+                      </Typography>
+                      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.75 }}>
+                        {PLATFORM_OPTIONS.filter(p => a.platforms.includes(p)).map(p => {
+                          const selected = (a.recommended_for ?? []).includes(p)
+                          return (
+                            <Chip key={p} size="small"
+                              label={t(`settings.subscription.platform.${p}`, { defaultValue: p })}
+                              color={selected ? 'primary' : 'default'} variant={selected ? 'filled' : 'outlined'}
+                              onClick={() => {
+                                const cur = a.recommended_for ?? []
+                                updateApp(fi, ai, { recommended_for: selected ? cur.filter(x => x !== p) : [...cur, p] })
+                              }} />
+                          )
+                        })}
+                        {a.platforms.length === 0 && (
+                          <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant, fontStyle: 'italic' }}>
+                            {t('settings.subscription.client_field.recommended_for_empty', { defaultValue: '请先选择支持的平台' })}
+                          </Typography>
+                        )}
+                      </Box>
+                    </Box>
+                    <TextField size="small" fullWidth label={t('settings.subscription.client_field.import_url_template')}
+                      value={a.import_url_template} onChange={e => updateApp(fi, ai, { import_url_template: e.target.value })} />
+                    <TextField size="small" fullWidth label={t('settings.subscription.client_field.install_url')}
+                      value={a.install_url} onChange={e => updateApp(fi, ai, { install_url: e.target.value })} />
+                  </Box>
+                ))}
+                <Box>
+                  <Button variant="text" size="small" startIcon={<AddIcon />} onClick={() => addApp(fi)}>
+                    {t('settings.subscription.add_app', { defaultValue: '添加 App' })}
+                  </Button>
                 </Box>
               </Box>
-              <Box>
-                <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant, mb: 0.75 }}>
-                  {t('settings.subscription.client_field.recommended_for', { defaultValue: '在哪些平台作为推荐客户端' })}
-                </Typography>
-                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.75 }}>
-                  {PLATFORM_OPTIONS.filter(p => c.platforms.includes(p)).map(p => {
-                    const selected = (c.recommended_for ?? []).includes(p)
-                    return (
-                      <Chip key={p}
-                        size="small"
-                        label={t(`settings.subscription.platform.${p}`, { defaultValue: p })}
-                        color={selected ? 'primary' : 'default'}
-                        variant={selected ? 'filled' : 'outlined'}
-                        onClick={() => {
-                          const cur = c.recommended_for ?? []
-                          update(i, {
-                            recommended_for: selected ? cur.filter(x => x !== p) : [...cur, p],
-                          })
-                        }} />
-                    )
-                  })}
-                  {c.platforms.length === 0 && (
-                    <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant, fontStyle: 'italic' }}>
-                      {t('settings.subscription.client_field.recommended_for_empty', { defaultValue: '请先选择支持的平台' })}
-                    </Typography>
-                  )}
-                </Box>
-              </Box>
-              <TextField size="small" fullWidth label={t('settings.subscription.client_field.import_url_template')}
-                value={c.import_url_template}
-                onChange={e => update(i, { import_url_template: e.target.value })} />
-              <TextField size="small" fullWidth label={t('settings.subscription.client_field.install_url')}
-                value={c.install_url}
-                onChange={e => update(i, { install_url: e.target.value })} />
             </Box>
           ))}
         </Box>
       )}
       <Box sx={{ mt: 2, display: 'flex', gap: 1.25, flexWrap: 'wrap' }}>
-        <Button variant="outlined" size="small" startIcon={<AddIcon />} onClick={add}>
-          {t('settings.subscription.add_client')}
+        <Button variant="outlined" size="small" startIcon={<AddIcon />} onClick={addFamily}>
+          {t('settings.subscription.add_family', { defaultValue: '添加检测族' })}
         </Button>
         <Button variant="text" size="small" onClick={e => setPresetAnchor(e.currentTarget)}>
           {t('settings.subscription.add_preset')}
@@ -1556,19 +1373,15 @@ function ImportClientsEditor({ clients, onChange, md }: { clients: SubImportClie
         <Button variant="text" size="small" color="warning" onClick={resetToPresets}>
           {t('settings.subscription.reset_to_presets')}
         </Button>
-        <Menu anchorEl={presetAnchor} open={!!presetAnchor} onClose={() => setPresetAnchor(null)}
-          PaperProps={{ sx: { maxHeight: 360 } }}>
-          {IMPORT_CLIENT_PRESETS.map(p => {
-            // Existence check helps the admin avoid double-adding the
-            // same client by accident — disabled MenuItems show the
-            // entry but don't re-add.
-            const exists = clients.some(c => c.name === p.name)
+        <Menu anchorEl={presetAnchor} open={!!presetAnchor} onClose={() => setPresetAnchor(null)} PaperProps={{ sx: { maxHeight: 360 } }}>
+          {CLIENT_PRESETS.map(p => {
+            const exists = families.some(f => f.name === p.name)
             return (
-              <MenuItem key={p.name} disabled={exists} onClick={() => addPreset(p)}>
+              <MenuItem key={p.name} disabled={exists} onClick={() => addPresetFamily(p)}>
                 <Box>
                   <Typography sx={{ fontSize: 14 }}>{p.name}</Typography>
                   <Typography sx={{ fontSize: 12, opacity: 0.7 }}>
-                    {p.platforms.join(', ')} · {p.render_format}
+                    {p.keywords.join(', ')} · {p.render_format} · {p.apps.length} app{p.apps.length === 1 ? '' : 's'}
                     {exists ? ` · ${t('settings.subscription.preset_exists', { defaultValue: '已存在' })}` : ''}
                   </Typography>
                 </Box>

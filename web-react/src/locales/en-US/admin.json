@@ -273,8 +273,12 @@
     "subscription": {
       "section_basic": "Basic",
       "section_protection": "Abuse protection",
-      "section_clients": "Client detection rules",
+      "section_clients": "Clients",
       "section_imports": "One-click import clients",
+      "registry_hint": "Detection families pick the subscription format by User-Agent; the apps under a family are the portal's one-click import targets. Disabling a family blocks that client from fetching AND hides all its import apps, so a blocked client is never still advertised.",
+      "no_apps": "No import apps in this family (detection only)",
+      "add_app": "Add app",
+      "add_family": "Add detection family",
       "add_rule": "Add rule",
       "add_client": "Add client",
       "add_preset": "Add from preset…",

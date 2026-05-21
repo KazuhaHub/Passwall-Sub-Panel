@@ -54,8 +54,7 @@ type settingsDTO struct {
 	EmergencyAccessMaxCount    int                      `json:"emergency_access_max_count"`
 	EmergencyAccessQuotaGB     float64                  `json:"emergency_access_quota_gb"`
 	SubPath                    string                   `json:"sub_path"`
-	SubClientRules             []ports.SubClientRule    `json:"sub_client_rules"`
-	SubImportClients           []ports.SubImportClient  `json:"sub_import_clients"`
+	SubClients                 []ports.SubClientFamily  `json:"sub_clients"`
 	SubImportTutorialURL       string                   `json:"sub_import_tutorial_url"`
 	SubLogRetentionDays        int                      `json:"sub_log_retention_days"`
 	MailSentRetentionDays      int                      `json:"mail_sent_retention_days"`
@@ -122,8 +121,7 @@ func (h *AdminSettingsHandler) Get(c *gin.Context) {
 		EmergencyAccessMaxCount:    s.EmergencyAccessMaxCount,
 		EmergencyAccessQuotaGB:     s.EmergencyAccessQuotaGB,
 		SubPath:                    s.SubPath,
-		SubClientRules:             s.SubClientRules,
-		SubImportClients:           s.SubImportClients,
+		SubClients:                 s.SubClients,
 		SubImportTutorialURL:       s.SubImportTutorialURL,
 		SubLogRetentionDays:        s.SubLogRetentionDays,
 		MailSentRetentionDays:      s.MailSentRetentionDays,
@@ -190,8 +188,7 @@ func (h *AdminSettingsHandler) Put(c *gin.Context) {
 		EmergencyAccessMaxCount:    req.EmergencyAccessMaxCount,
 		EmergencyAccessQuotaGB:     req.EmergencyAccessQuotaGB,
 		SubPath:                    strings.TrimSpace(req.SubPath),
-		SubClientRules:             req.SubClientRules,
-		SubImportClients:           normalizeSubImportClients(req.SubImportClients),
+		SubClients:                 normalizeSubClients(req.SubClients),
 		SubImportTutorialURL:       strings.TrimSpace(req.SubImportTutorialURL),
 		SubLogRetentionDays:        req.SubLogRetentionDays,
 		MailSentRetentionDays:      req.MailSentRetentionDays,
@@ -285,8 +282,7 @@ func (h *AdminSettingsHandler) Put(c *gin.Context) {
 		EmergencyAccessMaxCount:    s.EmergencyAccessMaxCount,
 		EmergencyAccessQuotaGB:     s.EmergencyAccessQuotaGB,
 		SubPath:                    s.SubPath,
-		SubClientRules:             s.SubClientRules,
-		SubImportClients:           s.SubImportClients,
+		SubClients:                 s.SubClients,
 		SubImportTutorialURL:       s.SubImportTutorialURL,
 		SubLogRetentionDays:        s.SubLogRetentionDays,
 		MailSentRetentionDays:      s.MailSentRetentionDays,
@@ -352,16 +348,59 @@ func normalizeGlobalAnnouncement(a, prev ports.GlobalAnnouncement) ports.GlobalA
 	return a
 }
 
-func normalizeSubImportClients(clients []ports.SubImportClient) []ports.SubImportClient {
-	out := make([]ports.SubImportClient, 0, len(clients))
-	for _, c := range clients {
-		c.Name = strings.TrimSpace(c.Name)
-		c.RenderFormat = strings.TrimSpace(c.RenderFormat)
-		c.ImportURLTemplate = strings.TrimSpace(c.ImportURLTemplate)
-		c.InstallURL = strings.TrimSpace(c.InstallURL)
-		platforms := make([]string, 0, len(c.Platforms))
+// normalizeSubClients cleans the unified client registry from the admin form:
+// each family gets a trimmed/deduped keyword set and a valid render format;
+// each app gets normalized platforms / recommended-for and incomplete apps are
+// dropped. Families with an empty name are dropped; a family with no apps is
+// kept (detection-only, e.g. Surge).
+func normalizeSubClients(families []ports.SubClientFamily) []ports.SubClientFamily {
+	out := make([]ports.SubClientFamily, 0, len(families))
+	for _, fam := range families {
+		fam.Name = strings.TrimSpace(fam.Name)
+		if fam.Name == "" {
+			continue
+		}
+		fam.RenderFormat = normalizeRenderFormat(fam.RenderFormat)
+		kws := make([]string, 0, len(fam.Keywords))
+		seenKw := map[string]bool{}
+		for _, kw := range fam.Keywords {
+			kw = strings.TrimSpace(kw)
+			low := strings.ToLower(kw)
+			if kw == "" || seenKw[low] {
+				continue
+			}
+			seenKw[low] = true
+			kws = append(kws, kw)
+		}
+		fam.Keywords = kws
+		fam.Apps = normalizeSubClientApps(fam.Apps)
+		out = append(out, fam)
+	}
+	return out
+}
+
+// normalizeRenderFormat clamps a free-form render-format string to one of the
+// three the renderer understands; anything unrecognized defaults to mihomo.
+func normalizeRenderFormat(f string) string {
+	switch strings.TrimSpace(strings.ToLower(f)) {
+	case "sing-box":
+		return "sing-box"
+	case "uri-list":
+		return "uri-list"
+	default:
+		return "mihomo"
+	}
+}
+
+func normalizeSubClientApps(apps []ports.SubClientApp) []ports.SubClientApp {
+	out := make([]ports.SubClientApp, 0, len(apps))
+	for _, a := range apps {
+		a.Name = strings.TrimSpace(a.Name)
+		a.ImportURLTemplate = strings.TrimSpace(a.ImportURLTemplate)
+		a.InstallURL = strings.TrimSpace(a.InstallURL)
+		platforms := make([]string, 0, len(a.Platforms))
 		seen := map[string]bool{}
-		for _, p := range c.Platforms {
+		for _, p := range a.Platforms {
 			p = strings.ToLower(strings.TrimSpace(p))
 			switch p {
 			case "windows", "macos", "linux", "ios", "android", "other":
@@ -371,32 +410,25 @@ func normalizeSubImportClients(clients []ports.SubImportClient) []ports.SubImpor
 				}
 			}
 		}
-		c.Platforms = platforms
-		// RecommendedFor must be a subset of the client's own Platforms — it
-		// makes no sense to recommend an Android-only client for desktop
-		// visitors. Silently drop any platform that isn't in the client's
-		// declared support list; dedupe and clamp to allowed values.
-		recFor := make([]string, 0, len(c.RecommendedFor))
+		a.Platforms = platforms
+		// RecommendedFor must be a subset of the app's own Platforms — it makes
+		// no sense to hero an Android-only app to desktop visitors. Drop any
+		// platform not in the support list; dedupe.
+		recFor := make([]string, 0, len(a.RecommendedFor))
 		recSeen := map[string]bool{}
-		for _, p := range c.RecommendedFor {
+		for _, p := range a.RecommendedFor {
 			p = strings.ToLower(strings.TrimSpace(p))
-			if !seen[p] {
-				continue
-			}
-			if recSeen[p] {
+			if !seen[p] || recSeen[p] {
 				continue
 			}
 			recSeen[p] = true
 			recFor = append(recFor, p)
 		}
-		c.RecommendedFor = recFor
-		if c.Name == "" || c.ImportURLTemplate == "" || len(c.Platforms) == 0 {
+		a.RecommendedFor = recFor
+		if a.Name == "" || a.ImportURLTemplate == "" || len(a.Platforms) == 0 {
 			continue
 		}
-		if c.RenderFormat != "sing-box" {
-			c.RenderFormat = "mihomo"
-		}
-		out = append(out, c)
+		out = append(out, a)
 	}
 	return out
 }

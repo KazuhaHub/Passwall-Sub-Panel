@@ -56,16 +56,16 @@ func (h *SubHandler) Get(c *gin.Context) {
 
 	// Detect client from User-Agent (primary, for access control).
 	ua := c.GetHeader("User-Agent")
-	detected := clientdetect.Detect(ua, settings.SubClientRules)
+	detected := clientdetect.Detect(ua, settings.SubClients)
 
-	// Check if the detected client is allowed.
+	// Check if the detected client's family is allowed (same first-match order
+	// as Detect, so we read the Enabled flag off the family that matched).
 	clientBlocked := false
 	if detected.Matched {
-		// Find the matched rule to check if it's enabled.
-		for _, rule := range settings.SubClientRules {
-			for _, kw := range rule.Keywords {
-				if strings.Contains(strings.ToLower(ua), strings.ToLower(kw)) {
-					if !rule.Enabled {
+		for _, fam := range settings.SubClients {
+			for _, kw := range fam.Keywords {
+				if kw != "" && strings.Contains(strings.ToLower(ua), strings.ToLower(kw)) {
+					if !fam.Enabled {
 						clientBlocked = true
 					}
 					goto clientCheckDone

@@ -4,6 +4,27 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## v3.2.2-beta.1 — 2026-05-21
+
+### Changed
+- 订阅客户端配置由两张独立表（检测规则 `sub_client_rules` + 一键导入
+  `sub_import_clients`）合并为统一的「检测族 → 导入 App」两层注册表（KV
+  `sub_clients`）。检测族持有 UA 关键词、渲染格式与启用开关；族下的 App 是门户
+  一键导入项并继承族的格式。**门户是否展示某 App 由「App 启用 且 所属族启用」
+  派生**——关闭一个族会同时拦截该族客户端拉取、并在门户隐藏其全部导入项，彻底
+  杜绝「已禁用某客户端、门户却仍展示」的不一致。后台两个编辑器合并为一个嵌套
+  编辑器（族下折叠 App）。
+- 导入 App 不再单独存渲染格式（此前是冗余且未被前端使用的字段）——格式只在族上
+  设一次，服务端按 UA 下发，二者天然一致。
+- sing-box 族默认新增 `karing` 关键词：Karing 客户端拉取时被正确识别为 sing-box，
+  不再落到默认 mihomo。
+
+### Migration
+- 升级时若仅存在旧的 `sub_client_rules` / `sub_import_clients`，首次加载会**自动**
+  折叠为 `sub_clients`（检测规则建族、导入项按渲染格式 + 名字归到对应族），自定义
+  配置不丢失。该一次性兼容代码隔离在 `internal/adapters/mysql/sub_clients_legacy.go`，
+  连同两个 deprecated 字段计划在 **v3.3.0 删除**。
+
 ## v3.2.1-beta.6 — 2026-05-20
 
 ### Fixed

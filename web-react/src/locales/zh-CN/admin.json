@@ -273,8 +273,12 @@
     "subscription": {
       "section_basic": "基本",
       "section_protection": "异常保护",
-      "section_clients": "客户端识别规则",
+      "section_clients": "客户端",
       "section_imports": "一键导入客户端",
+      "registry_hint": "检测族按 UA 决定订阅格式；族下的 App 是门户的一键导入项。关闭某个族会同时拦截该族客户端拉取、并在门户隐藏其全部导入项，因此不会出现「已禁用却仍展示」。",
+      "no_apps": "该族暂无导入 App（仅用于检测）",
+      "add_app": "添加 App",
+      "add_family": "添加检测族",
       "add_rule": "新增规则",
       "add_client": "新增客户端",
       "add_preset": "从预设添加…",

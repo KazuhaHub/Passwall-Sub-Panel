@@ -1,25 +1,33 @@
 import { client } from './client'
 import type { LoginMode } from './types'
 
-export interface SubClientRule {
-  name: string
-  keywords: string[]
-  render_format: 'mihomo' | 'sing-box' | 'uri-list'
-  enabled: boolean
-}
+export type SubPlatform = 'windows' | 'macos' | 'linux' | 'ios' | 'android' | 'other'
+export type SubRenderFormat = 'mihomo' | 'sing-box' | 'uri-list'
 
-export interface SubImportClient {
+/** One import app nested under a SubClientFamily (v3.2.2). No render_format —
+ *  it's the family's, served by UA at fetch time. */
+export interface SubClientApp {
   name: string
-  platforms: Array<'windows' | 'macos' | 'linux' | 'ios' | 'android' | 'other'>
-  render_format: 'mihomo' | 'sing-box' | 'uri-list'
+  platforms: SubPlatform[]
   import_url_template: string
   install_url: string
   enabled: boolean
   sort: number
-  /** Per-platform hero recommendation: the user portal detects the visitor's
-   *  device and shows the first enabled client whose recommended_for includes
-   *  that platform. Empty = never hero (just appears under "更多客户端"). */
-  recommended_for?: Array<'windows' | 'macos' | 'linux' | 'ios' | 'android' | 'other'>
+  /** Per-platform hero recommendation: the portal detects the visitor's device
+   *  and shows the first enabled app whose recommended_for includes that
+   *  platform. Empty = never hero (just appears under "更多客户端"). */
+  recommended_for?: SubPlatform[]
+}
+
+/** A UA-detection family in the unified client registry (v3.2.2): keywords +
+ *  render format + an enabled gate, owning the import apps shown in the portal.
+ *  An app is offered iff its family is enabled AND the app is enabled. */
+export interface SubClientFamily {
+  name: string
+  keywords: string[]
+  render_format: SubRenderFormat
+  enabled: boolean
+  apps: SubClientApp[]
 }
 
 export interface QuickLink {
@@ -74,8 +82,7 @@ export interface UISettings {
   emergency_access_max_count: number
   emergency_access_quota_gb: number
   sub_path: string
-  sub_client_rules: SubClientRule[]
-  sub_import_clients: SubImportClient[]
+  sub_clients: SubClientFamily[]
   sub_import_tutorial_url: string
   sub_log_retention_days: number
   sub_block_auto_disable: boolean

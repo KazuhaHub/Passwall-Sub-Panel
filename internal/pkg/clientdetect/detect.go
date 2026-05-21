@@ -18,21 +18,22 @@ type Result struct {
 	Matched bool
 }
 
-// Detect identifies the subscription client from the User-Agent and optional
-// query parameter. The rules are evaluated in order; the first matching rule
-// wins. If no rule matches, the default result (mihomo, allowed) is returned.
+// Detect identifies the subscription client from the User-Agent by matching it
+// against the detection families' keywords. Families are evaluated in order;
+// the first whose keyword is a substring of the UA wins. If none match, the
+// default result (mihomo, allowed) is returned.
 //
-// Priority: UA detection only (query param is used later to override render
-// format, not for access control).
-func Detect(userAgent string, rules []ports.SubClientRule) Result {
+// Priority: UA detection only (the ?client= query param overrides the render
+// format later, not access control).
+func Detect(userAgent string, families []ports.SubClientFamily) Result {
 	ua := strings.ToLower(userAgent)
 
-	for _, rule := range rules {
-		for _, kw := range rule.Keywords {
-			if strings.Contains(ua, strings.ToLower(kw)) {
+	for _, fam := range families {
+		for _, kw := range fam.Keywords {
+			if kw != "" && strings.Contains(ua, strings.ToLower(kw)) {
 				return Result{
-					ClientName:   rule.Name,
-					RenderFormat: rule.RenderFormat,
+					ClientName:   fam.Name,
+					RenderFormat: fam.RenderFormat,
 					Matched:      true,
 				}
 			}

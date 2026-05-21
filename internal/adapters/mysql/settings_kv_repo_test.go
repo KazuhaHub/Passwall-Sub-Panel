@@ -196,11 +196,22 @@ func TestKVSettingsDefaultsOnEmpty(t *testing.T) {
 	if out.FooterText == "" {
 		t.Errorf("FooterText must default to non-empty")
 	}
-	if out.SubClientRules == nil {
-		t.Errorf("SubClientRules must default to a non-nil slice")
+	// v3.2.2: defaults now seed the unified registry (SubClients), not the
+	// deprecated SubClientRules / SubImportClients.
+	if len(out.SubClients) == 0 {
+		t.Errorf("SubClients must default to a non-empty registry")
 	}
-	if out.SubImportClients == nil {
-		t.Errorf("SubImportClients must default to a non-nil slice")
+	hasApps := false
+	for _, fam := range out.SubClients {
+		if fam.Name == "" || fam.RenderFormat == "" {
+			t.Errorf("default family missing name/render_format: %+v", fam)
+		}
+		if len(fam.Apps) > 0 {
+			hasApps = true
+		}
+	}
+	if !hasApps {
+		t.Errorf("default registry should include families with import apps")
 	}
 }
 

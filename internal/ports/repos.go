@@ -377,9 +377,16 @@ type UISettings struct {
 	// SubPath is the URL path prefix for subscription endpoints.
 	// Defaults to "sub". Dynamic, no restart required.
 	SubPath string `yaml:"sub_path" json:"sub_path"`
-	// SubClientRules defines allowed clients and their detection rules.
-	// Empty means all clients are allowed. Dynamic, no restart required.
+	// Deprecated: superseded by SubClients (v3.2.2). Retained only so the KV
+	// loader can read legacy rows and migrate them once; no longer exposed via
+	// the admin API. Remove in v3.3.0 together with sub_clients_legacy.go.
 	SubClientRules []SubClientRule `yaml:"sub_client_rules" json:"sub_client_rules"`
+	// SubClients is the unified client registry (v3.2.2): detection families
+	// (UA keywords + render format + enabled gate), each owning the import
+	// "apps" shown in the user portal. An app is advertised to users iff its
+	// family is enabled AND the app is enabled — so a blocked client can never
+	// still be offered for import. Replaces SubClientRules + SubImportClients.
+	SubClients []SubClientFamily `yaml:"sub_clients" json:"sub_clients"`
 	// SubLogRetentionDays controls automatic subscription log cleanup.
 	// 0 means never delete logs automatically. Default 7.
 	SubLogRetentionDays int `yaml:"sub_log_retention_days" json:"sub_log_retention_days"`
@@ -411,7 +418,7 @@ type UISettings struct {
 	// default to avoid double-flagging existing display names that already
 	// embed a flag manually.
 	SubRegionFlagPrefix bool `yaml:"sub_region_flag_prefix" json:"sub_region_flag_prefix"`
-	// SubImportClients defines user-facing one-click subscription import targets.
+	// Deprecated: superseded by SubClients (v3.2.2). See SubClientRules.
 	SubImportClients []SubImportClient `yaml:"sub_import_clients" json:"sub_import_clients"`
 	// SubImportTutorialURL is an optional documentation/tutorial link shown
 	// next to the one-click import section on the user portal.
@@ -463,6 +470,37 @@ type SubImportClient struct {
 	// Lets admins pick a different recommended client per OS without
 	// fiddling with priorities — e.g., Clash Verge Rev for desktops, Clash
 	// Meta for Android, Stash for iOS.
+	RecommendedFor []string `yaml:"recommended_for" json:"recommended_for"`
+}
+
+// SubClientFamily is one UA-detection group in the unified client registry
+// (v3.2.2). Detection matches a request's User-Agent against Keywords to pick
+// RenderFormat; Enabled gates both fetch access and whether this family's apps
+// are advertised in the portal. Apps are the per-platform import targets that
+// belong to the family — they inherit the family's render format (the server
+// serves it by UA), so individual apps carry no format of their own.
+type SubClientFamily struct {
+	Name         string         `yaml:"name" json:"name"`
+	Keywords     []string       `yaml:"keywords" json:"keywords"`
+	RenderFormat string         `yaml:"render_format" json:"render_format"`
+	Enabled      bool           `yaml:"enabled" json:"enabled"`
+	Apps         []SubClientApp `yaml:"apps" json:"apps"`
+}
+
+// SubClientApp is a user-facing one-click import target nested under a
+// SubClientFamily (v3.2.2). It carries no render format — the format is the
+// family's, resolved by UA at fetch time.
+type SubClientApp struct {
+	Name              string   `yaml:"name" json:"name"`
+	Platforms         []string `yaml:"platforms" json:"platforms"`
+	ImportURLTemplate string   `yaml:"import_url_template" json:"import_url_template"`
+	InstallURL        string   `yaml:"install_url" json:"install_url"`
+	Enabled           bool     `yaml:"enabled" json:"enabled"`
+	Sort              int      `yaml:"sort" json:"sort"`
+	// RecommendedFor lists the platforms for which this app is the highlighted
+	// "hero" pick on the portal — the portal detects the visitor's device and
+	// renders the first enabled app whose RecommendedFor contains it. Empty =
+	// never the hero (only listed under "more clients").
 	RecommendedFor []string `yaml:"recommended_for" json:"recommended_for"`
 }
 
