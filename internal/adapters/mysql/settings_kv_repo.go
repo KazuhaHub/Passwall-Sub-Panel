@@ -429,9 +429,11 @@ func defaultSubClients() []ports.SubClientFamily {
 				},
 			},
 		},
-		// Surge / Loon use their own .conf format (no Clash YAML parser);
-		// uri-list is the least-bad fallback. No bundled importer.
-		{Name: "Surge", Keywords: []string{"surge"}, RenderFormat: "uri-list", Enabled: true},
+		// NOTE: Surge / Loon / Surfboard are intentionally NOT seeded. They only
+		// consume Surge's proprietary .conf, which the panel doesn't emit, so
+		// they can't use our subscription at all (verified against official
+		// docs). An unmatched UA falls back to mihomo in Detect and is never
+		// blocked, so leaving them out costs those clients nothing.
 		{
 			Name: "Shadowrocket", Keywords: []string{"shadowrocket"}, RenderFormat: "uri-list", Enabled: true,
 			Apps: []ports.SubClientApp{
@@ -444,7 +446,6 @@ func defaultSubClients() []ports.SubClientFamily {
 				},
 			},
 		},
-		{Name: "Loon", Keywords: []string{"loon"}, RenderFormat: "uri-list", Enabled: true},
 		// Quantumult X accepts Clash YAML in its [server_remote] block, so
 		// mihomo imports cleanly (rules/policies dropped). No bundled importer.
 		{Name: "Quantumult X", Keywords: []string{"quantumult x", "quantumultx"}, RenderFormat: "mihomo", Enabled: true},
@@ -487,7 +488,6 @@ func defaultSubClients() []ports.SubClientFamily {
 				},
 			},
 		},
-		{Name: "Surfboard", Keywords: []string{"surfboard"}, RenderFormat: "mihomo", Enabled: true},
 	}
 }
 

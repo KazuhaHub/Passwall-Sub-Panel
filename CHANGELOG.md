@@ -4,6 +4,31 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## v3.2.2-beta.3 — 2026-05-21
+
+### Added
+- 全局错误页:页面级渲染崩溃此前会落到 react-router 的内置开发错误页（白底 + 堆栈
+  + 英文提示）。现在根路由挂 `errorElement`，复用 ErrorBoundary 的友好界面，并加可
+  折叠的「查看详情」（完整 message + stack + 组件栈）与一键复制，方便朋友截图反馈。
+  App 级 React ErrorBoundary 保留，兜住非路由错误。
+
+### Removed
+- 默认检测族移除 Surge / Loon / Surfboard:经核对官方文档，这三个 Surge 系客户端
+  只认 Surge 专有 `.conf` 格式，而面板只产 mihomo / sing-box / uri-list——它们
+  **根本无法消费面板订阅**（一键导入或手动粘贴订阅链接都拿到无法解析的格式）。与其
+  在后台列一堆「其实不支持」的客户端，不如直接移除；未识别的 UA 由 `Detect` 内置
+  兜底为 mihomo 且不拦截，移除对这些客户端无任何影响。Quantumult X 暂保留（其
+  `[server_remote]` 可能接受 Clash YAML，走 mihomo），其 `add-resource` 一键导入
+  scheme 需 URL 编码的 JSON、性价比低，暂不纳入。
+
+## v3.2.2-beta.2 — 2026-05-21
+
+### Fixed
+- 修复客户端注册表编辑器在「仅检测、无 App」的族（Surge/Loon 等）上崩溃:这类族的
+  `apps` 序列化为 JSON `null`（Go nil slice），编辑器 `.length`/`.map` 读到 null
+  抛错。载入设置进表单时把 apps / keywords / platforms / recommended_for 一律规整
+  为 `[]`。
+
 ## v3.2.2-beta.1 — 2026-05-21
 
 ### Changed

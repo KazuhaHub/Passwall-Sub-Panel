@@ -1170,14 +1170,12 @@ const CLIENT_PRESETS: SubClientFamily[] = [
       { name: 'Karing', platforms: ['windows', 'macos', 'linux', 'android', 'ios'], import_url_template: 'karing://install-config?url={{ sub_url_encoded }}&name={{ profile_name_encoded }}', install_url: 'https://github.com/KaringX/karing/releases', enabled: true, sort: 65, recommended_for: [] },
     ],
   },
-  { name: 'Surge', keywords: ['surge'], render_format: 'uri-list', enabled: true, apps: [] },
   {
     name: 'Shadowrocket', keywords: ['shadowrocket'], render_format: 'uri-list', enabled: true,
     apps: [
       { name: 'Shadowrocket', platforms: ['ios'], import_url_template: 'shadowrocket://add/sub://{{ sub_url_b64_url_safe }}?remark={{ profile_name_encoded }}', install_url: 'https://apps.apple.com/app/shadowrocket/id932747118', enabled: true, sort: 60, recommended_for: [] },
     ],
   },
-  { name: 'Loon', keywords: ['loon'], render_format: 'uri-list', enabled: true, apps: [] },
   { name: 'Quantumult X', keywords: ['quantumult x', 'quantumultx'], render_format: 'mihomo', enabled: true, apps: [] },
   {
     name: 'V2rayNG', keywords: ['v2rayng'], render_format: 'uri-list', enabled: true,
@@ -1198,7 +1196,6 @@ const CLIENT_PRESETS: SubClientFamily[] = [
       { name: 'Stash', platforms: ['ios'], import_url_template: 'stash://install-config?url={{ sub_url_encoded }}', install_url: 'https://apps.apple.com/app/stash-rule-based-proxy/id1596063349', enabled: true, sort: 30, recommended_for: [] },
     ],
   },
-  { name: 'Surfboard', keywords: ['surfboard'], render_format: 'mihomo', enabled: true, apps: [] },
 ]
 
 const PLATFORM_OPTIONS: SubPlatform[] = ['windows', 'macos', 'linux', 'android', 'ios', 'other']
