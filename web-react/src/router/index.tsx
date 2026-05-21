@@ -1,5 +1,6 @@
-import { createBrowserRouter, Navigate } from 'react-router-dom'
+import { createBrowserRouter, Navigate, useRouteError, isRouteErrorResponse } from 'react-router-dom'
 import { lazy } from 'react'
+import { ErrorFallback } from '@/components/ErrorBoundary'
 import RequireAuth from './RequireAuth'
 import { homeForRole } from './home'
 import { useAuthStore } from '@/stores/auth'
@@ -34,11 +35,29 @@ function RootRedirect() {
   return <Navigate to={homeForRole(role)} replace />
 }
 
+// RouteError renders the shared crash UI for errors react-router catches at
+// the route level (a routed component's render throws, loader errors, 404
+// Responses). Reuses ErrorFallback so a page-level crash looks the same as the
+// app-level ErrorBoundary instead of react-router's built-in dev page.
+function RouteError() {
+  const err = useRouteError()
+  const error = err instanceof Error
+    ? err
+    : new Error(isRouteErrorResponse(err) ? `${err.status} ${err.statusText}` : String(err))
+  return <ErrorFallback error={error} onReload={() => window.location.reload()} />
+}
+
 export const router = createBrowserRouter([
   {
-    path: '/',
-    element: <RootRedirect />,
-  },
+    // Root layout route: its errorElement catches render errors thrown by any
+    // routed component. react-router intercepts those at the route level, so
+    // without an errorElement here it would show its built-in dev error page.
+    errorElement: <RouteError />,
+    children: [
+      {
+        path: '/',
+        element: <RootRedirect />,
+      },
   { path: '/login', element: <LoginView /> },
   { path: '/login/local', element: <LoginLocalView /> },
   { path: '/sso-callback', element: <SsoCallbackView /> },
@@ -82,6 +101,8 @@ export const router = createBrowserRouter([
       },
     ],
   },
-  // Catch-all: any unknown URL bounces to the role-based home.
-  { path: '*', element: <RootRedirect /> },
+      // Catch-all: any unknown URL bounces to the role-based home.
+      { path: '*', element: <RootRedirect /> },
+    ],
+  },
 ])

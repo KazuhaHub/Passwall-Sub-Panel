@@ -1,11 +1,14 @@
-import { Component, type ErrorInfo, type ReactNode } from 'react'
-import { Box, Button, Card, Typography, useTheme } from '@mui/material'
+import { Component, useState, type ErrorInfo, type ReactNode } from 'react'
+import { Box, Button, Card, Collapse, Typography, useTheme } from '@mui/material'
 import RefreshIcon from '@mui/icons-material/Refresh'
 import ReportProblemOutlinedIcon from '@mui/icons-material/ReportProblemOutlined'
+import ContentCopyIcon from '@mui/icons-material/ContentCopy'
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import { useTranslation } from 'react-i18next'
 
 interface State {
   error: Error | null
+  componentStack: string | null
 }
 
 interface Props {
@@ -19,22 +22,27 @@ interface Props {
 // those are handled by the global axios error interceptor + the
 // SnackbarHost, not here.
 //
+// NOTE: this React boundary does NOT catch errors thrown inside routed
+// components — react-router's createBrowserRouter intercepts those at the
+// route level and renders the route's `errorElement`. The router wires its
+// own errorElement to <RouteError/>, which reuses ErrorFallback below, so
+// page-level crashes get the same UI as this boundary.
+//
 // Boundaries MUST be class components because the hook surface (which
 // can read context, translate strings, theme, etc.) is unavailable
 // inside getDerivedStateFromError / componentDidCatch. The render path
 // hands off to a function component as soon as the error is captured.
 export default class ErrorBoundary extends Component<Props, State> {
-  state: State = { error: null }
+  state: State = { error: null, componentStack: null }
 
-  static getDerivedStateFromError(error: Error): State {
+  static getDerivedStateFromError(error: Error): Partial<State> {
     return { error }
   }
 
   componentDidCatch(error: Error, info: ErrorInfo) {
+    this.setState({ componentStack: info.componentStack ?? null })
     // Stash to console with the component stack so developers debugging
-    // a customer report can copy the trace out of the browser. The
-    // backend has no /api/client-errors endpoint today; if we add one
-    // later this is the right place to ship the report.
+    // a customer report can copy the trace out of the browser.
     // eslint-disable-next-line no-console
     console.error('Unhandled render error', error, info.componentStack)
   }
@@ -42,20 +50,48 @@ export default class ErrorBoundary extends Component<Props, State> {
   handleReload = () => {
     // Full reload rather than setState({error: null}) — the broken
     // component might have torn state we can't recover from in-process.
-    // Refresh is the contract the user actually wants.
     window.location.reload()
   }
 
   render() {
     if (!this.state.error) return this.props.children
-    return <ErrorFallback error={this.state.error} onReload={this.handleReload} />
+    return (
+      <ErrorFallback
+        error={this.state.error}
+        onReload={this.handleReload}
+        componentStack={this.state.componentStack ?? undefined}
+      />
+    )
   }
 }
 
-function ErrorFallback({ error, onReload }: { error: Error; onReload: () => void }) {
+// ErrorFallback is the shared crash UI, reused by both this React boundary
+// and the router's <RouteError/>. The "view details" section is kept even in
+// production: this is a self-hosted panel for a small group, so being able to
+// ask a friend to expand + copy the trace beats hiding it.
+export function ErrorFallback({ error, onReload, componentStack }: {
+  error: Error
+  onReload: () => void
+  componentStack?: string
+}) {
   const theme = useTheme()
   const md = theme.palette.md
   const { t } = useTranslation('common')
+  const [showDetails, setShowDetails] = useState(false)
+  const [copied, setCopied] = useState(false)
+
+  const detail = [error.message, error.stack, componentStack].filter(Boolean).join('\n\n')
+
+  async function copyDetail() {
+    try {
+      await navigator.clipboard.writeText(detail)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    } catch {
+      /* clipboard blocked (insecure context / denied) — no-op */
+    }
+  }
+
   return (
     <Box sx={{
       position: 'fixed', inset: 0,
@@ -63,7 +99,7 @@ function ErrorFallback({ error, onReload }: { error: Error; onReload: () => void
       bgcolor: md.surface, p: 3, overflow: 'auto',
     }}>
       <Card sx={{
-        maxWidth: 520, width: '100%',
+        maxWidth: 560, width: '100%',
         p: { xs: 3, sm: 4 },
         bgcolor: md.surfaceContainer,
         borderRadius: 4,
@@ -80,20 +116,41 @@ function ErrorFallback({ error, onReload }: { error: Error; onReload: () => void
         <Button variant="contained" size="large" startIcon={<RefreshIcon />} onClick={onReload}>
           {t('error_boundary.refresh')}
         </Button>
-        {error.message && (
-          <Box sx={{
-            mt: 3, p: 1.5,
-            borderRadius: 2,
-            bgcolor: md.surfaceContainerHighest,
-            textAlign: 'left',
-          }}>
-            <Typography sx={{
-              fontSize: 11, color: md.onSurfaceVariant,
-              fontFamily: 'monospace', wordBreak: 'break-word',
-              whiteSpace: 'pre-wrap',
-            }}>
-              {error.message}
-            </Typography>
+
+        {detail && (
+          <Box sx={{ mt: 3, textAlign: 'left' }}>
+            <Button
+              size="small"
+              variant="text"
+              onClick={() => setShowDetails(v => !v)}
+              endIcon={<ExpandMoreIcon sx={{ transform: showDetails ? 'rotate(180deg)' : 'none', transition: 'transform .2s' }} />}
+              sx={{ color: md.onSurfaceVariant }}>
+              {t('error_boundary.details', { defaultValue: '查看详情' })}
+            </Button>
+            <Collapse in={showDetails}>
+              <Box sx={{
+                mt: 1, p: 1.5,
+                borderRadius: 2,
+                bgcolor: md.surfaceContainerHighest,
+                position: 'relative',
+                maxHeight: 280, overflow: 'auto',
+              }}>
+                <Button
+                  size="small"
+                  startIcon={<ContentCopyIcon sx={{ fontSize: 14 }} />}
+                  onClick={copyDetail}
+                  sx={{ position: 'absolute', top: 4, right: 4, fontSize: 11, minWidth: 0 }}>
+                  {copied ? t('error_boundary.copied', { defaultValue: '已复制' }) : t('error_boundary.copy', { defaultValue: '复制' })}
+                </Button>
+                <Typography component="pre" sx={{
+                  m: 0, fontSize: 11, color: md.onSurfaceVariant,
+                  fontFamily: 'monospace', wordBreak: 'break-word',
+                  whiteSpace: 'pre-wrap',
+                }}>
+                  {detail}
+                </Typography>
+              </Box>
+            </Collapse>
           </Box>
         )}
       </Card>
