@@ -196,7 +196,7 @@ func TestKVSettingsDefaultsOnEmpty(t *testing.T) {
 	if out.FooterText == "" {
 		t.Errorf("FooterText must default to non-empty")
 	}
-	// v3.2.2: defaults now seed the unified registry (SubClients), not the
+	// v3.3.0: defaults now seed the unified registry (SubClients), not the
 	// deprecated SubClientRules / SubImportClients.
 	if len(out.SubClients) == 0 {
 		t.Errorf("SubClients must default to a non-empty registry")

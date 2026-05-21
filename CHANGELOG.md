@@ -4,68 +4,52 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
-## v3.2.2-beta.4 — 2026-05-21
+## v3.3.0-beta.1 — 2026-05-21
 
-### Fixed
-- Quantumult X 检测关键词修正:其真实 UA 是 `Quantumult%20X/...`（空格是 `%20`），
-  而旧关键词 `quantumult x` / `quantumultx` **都匹配不到**——QX 实际从未被正确
-  识别。改为单个 `quantumult`（已核对 subconverter 的 UA 匹配表）。注:此为默认值
-  修正,线上已有配置需在后台把 QX 关键词手动改为 `quantumult`（或重置默认）。
+把订阅客户端配置重构为统一的「检测族 → 导入 App」两层注册表，并在其上补齐错误页、
+滥用保护的黑/白名单与若干修复（汇总自前期 4 个内部迭代）。
 
 ### Added
-- Abuse protection 新增「客户端过滤模式」(黑名单 / 白名单)+ 问号说明:
-  - **黑名单**(默认,= 原行为):只拦截被「禁用」的客户端族,未识别客户端放行;
-  - **白名单**:只放行「已知且启用」的族,未识别 / 未启用一律拦截（计入异常次数、
-    可能触发自动停用)——「其他/未识别」自动被拦,无需显式列出。
-  封禁判断抽成纯函数 `clientdetect.ClientBlocked(mode, result)`,单测覆盖两种模式
-  × 匹配 / 禁用 / 未知;`Detect` 的 `Result` 现在带上匹配族的 `Enabled`,sub.go
-  直接复用(去掉一段重复的 UA 二次扫描)。
-
-## v3.2.2-beta.3 — 2026-05-21
-
-### Added
-- 全局错误页:页面级渲染崩溃此前会落到 react-router 的内置开发错误页（白底 + 堆栈
-  + 英文提示）。现在根路由挂 `errorElement`，复用 ErrorBoundary 的友好界面，并加可
-  折叠的「查看详情」（完整 message + stack + 组件栈）与一键复制，方便朋友截图反馈。
-  App 级 React ErrorBoundary 保留，兜住非路由错误。
-
-### Removed
-- 默认检测族移除 Surge / Loon / Surfboard:经核对官方文档，这三个 Surge 系客户端
-  只认 Surge 专有 `.conf` 格式，而面板只产 mihomo / sing-box / uri-list——它们
-  **根本无法消费面板订阅**（一键导入或手动粘贴订阅链接都拿到无法解析的格式）。与其
-  在后台列一堆「其实不支持」的客户端，不如直接移除；未识别的 UA 由 `Detect` 内置
-  兜底为 mihomo 且不拦截，移除对这些客户端无任何影响。Quantumult X 暂保留（其
-  `[server_remote]` 可能接受 Clash YAML，走 mihomo），其 `add-resource` 一键导入
-  scheme 需 URL 编码的 JSON、性价比低，暂不纳入。
-
-## v3.2.2-beta.2 — 2026-05-21
-
-### Fixed
-- 修复客户端注册表编辑器在「仅检测、无 App」的族（Surge/Loon 等）上崩溃:这类族的
-  `apps` 序列化为 JSON `null`（Go nil slice），编辑器 `.length`/`.map` 读到 null
-  抛错。载入设置进表单时把 apps / keywords / platforms / recommended_for 一律规整
-  为 `[]`。
-
-## v3.2.2-beta.1 — 2026-05-21
+- **订阅客户端统一注册表**:两张独立表（检测规则 `sub_client_rules` + 一键导入
+  `sub_import_clients`）合并为「检测族 → 导入 App」两层注册表（KV `sub_clients`）。
+  检测族持有 UA 关键词、渲染格式与启用开关;族下的 App 是门户一键导入项并继承族的
+  格式。**门户是否展示某 App 由「App 启用 且 所属族启用」派生**——关闭一个族会同时
+  拦截该族拉取并隐藏其全部导入项,杜绝「已禁用却仍展示」。后台两个编辑器合并为一个
+  嵌套编辑器（族下折叠 App）。
+- **Abuse protection 客户端过滤模式（黑/白名单）+ 问号说明**:黑名单（默认 = 原
+  行为）只拦被「禁用」的族、未识别放行;白名单只放行「已知且启用」的族、未识别 /
+  未启用一律拦截（计入异常次数、可能触发自动停用),「其他」自动被拦无需显式列。
+  封禁判断抽成纯函数 `clientdetect.ClientBlocked(mode, result)` 并单测覆盖。
+- **全局错误页**:页面级渲染崩溃不再落到 react-router 内置开发页;根路由挂
+  `errorElement` 复用友好界面,带可折叠「查看详情」(完整 message + stack + 组件栈)
+  与一键复制。App 级 React ErrorBoundary 保留兜非路由错误。
 
 ### Changed
-- 订阅客户端配置由两张独立表（检测规则 `sub_client_rules` + 一键导入
-  `sub_import_clients`）合并为统一的「检测族 → 导入 App」两层注册表（KV
-  `sub_clients`）。检测族持有 UA 关键词、渲染格式与启用开关；族下的 App 是门户
-  一键导入项并继承族的格式。**门户是否展示某 App 由「App 启用 且 所属族启用」
-  派生**——关闭一个族会同时拦截该族客户端拉取、并在门户隐藏其全部导入项，彻底
-  杜绝「已禁用某客户端、门户却仍展示」的不一致。后台两个编辑器合并为一个嵌套
-  编辑器（族下折叠 App）。
-- 导入 App 不再单独存渲染格式（此前是冗余且未被前端使用的字段）——格式只在族上
-  设一次，服务端按 UA 下发，二者天然一致。
-- sing-box 族默认新增 `karing` 关键词：Karing 客户端拉取时被正确识别为 sing-box，
-  不再落到默认 mihomo。
+- 导入 App 不再单独存渲染格式（冗余且前端未用）——格式只在族上设一次、服务端按 UA
+  下发,二者天然一致。
+- sing-box 族默认新增 `karing` 关键词。
+
+### Fixed
+- **Quantumult X 检测**:真实 UA 是 `Quantumult%20X/...`（空格是 `%20`），旧关键词
+  `quantumult x` / `quantumultx` **都匹配不到**,QX 从未被正确识别;改为单个
+  `quantumult`（已核对 subconverter 的 UA 匹配表）。注:此为默认值修正,线上已有
+  配置需在后台把 QX 关键词手动改为 `quantumult`（或重置默认）。
+- 客户端注册表编辑器在「仅检测、无 App」的族（Surge/Loon 等）上崩溃:`apps` 序列化
+  为 JSON `null`（Go nil slice）,编辑器 `.length`/`.map` 抛错;载入设置时把 apps /
+  keywords / platforms / recommended_for 一律规整为 `[]`。
+
+### Removed
+- 默认检测族移除 Surge / Loon / Surfboard:经核对官方文档,这三个 Surge 系客户端
+  只认 Surge 专有 `.conf` 格式、面板不产该格式,**根本无法消费面板订阅**（一键导入
+  或手动粘贴订阅链接都拿到无法解析的格式）;保留只会误导。未识别 UA 由 `Detect`
+  兜底为 mihomo 且不拦截,移除无副作用。Quantumult X 保留（吃 Clash YAML、走
+  mihomo）。
 
 ### Migration
-- 升级时若仅存在旧的 `sub_client_rules` / `sub_import_clients`，首次加载会**自动**
+- 升级时若仅存在旧的 `sub_client_rules` / `sub_import_clients`,首次加载会**自动**
   折叠为 `sub_clients`（检测规则建族、导入项按渲染格式 + 名字归到对应族），自定义
-  配置不丢失。该一次性兼容代码隔离在 `internal/adapters/mysql/sub_clients_legacy.go`，
-  连同两个 deprecated 字段计划在 **v3.3.0 删除**。
+  配置不丢失。该一次性兼容代码隔离在 `internal/adapters/mysql/sub_clients_legacy.go`,
+  连同两个 deprecated 字段计划在**下一个大版本（v4.0.0）删除**。
 
 ## v3.2.1-beta.6 — 2026-05-20
 

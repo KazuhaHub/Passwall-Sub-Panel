@@ -377,11 +377,11 @@ type UISettings struct {
 	// SubPath is the URL path prefix for subscription endpoints.
 	// Defaults to "sub". Dynamic, no restart required.
 	SubPath string `yaml:"sub_path" json:"sub_path"`
-	// Deprecated: superseded by SubClients (v3.2.2). Retained only so the KV
+	// Deprecated: superseded by SubClients (v3.3.0). Retained only so the KV
 	// loader can read legacy rows and migrate them once; no longer exposed via
-	// the admin API. Remove in v3.3.0 together with sub_clients_legacy.go.
+	// the admin API. Remove in the next major (v4.0.0) together with sub_clients_legacy.go.
 	SubClientRules []SubClientRule `yaml:"sub_client_rules" json:"sub_client_rules"`
-	// SubClients is the unified client registry (v3.2.2): detection families
+	// SubClients is the unified client registry (v3.3.0): detection families
 	// (UA keywords + render format + enabled gate), each owning the import
 	// "apps" shown in the user portal. An app is advertised to users iff its
 	// family is enabled AND the app is enabled — so a blocked client can never
@@ -423,7 +423,7 @@ type UISettings struct {
 	// default to avoid double-flagging existing display names that already
 	// embed a flag manually.
 	SubRegionFlagPrefix bool `yaml:"sub_region_flag_prefix" json:"sub_region_flag_prefix"`
-	// Deprecated: superseded by SubClients (v3.2.2). See SubClientRules.
+	// Deprecated: superseded by SubClients (v3.3.0). See SubClientRules.
 	SubImportClients []SubImportClient `yaml:"sub_import_clients" json:"sub_import_clients"`
 	// SubImportTutorialURL is an optional documentation/tutorial link shown
 	// next to the one-click import section on the user portal.
@@ -479,7 +479,7 @@ type SubImportClient struct {
 }
 
 // SubClientFamily is one UA-detection group in the unified client registry
-// (v3.2.2). Detection matches a request's User-Agent against Keywords to pick
+// (v3.3.0). Detection matches a request's User-Agent against Keywords to pick
 // RenderFormat; Enabled gates both fetch access and whether this family's apps
 // are advertised in the portal. Apps are the per-platform import targets that
 // belong to the family — they inherit the family's render format (the server
@@ -493,7 +493,7 @@ type SubClientFamily struct {
 }
 
 // SubClientApp is a user-facing one-click import target nested under a
-// SubClientFamily (v3.2.2). It carries no render format — the format is the
+// SubClientFamily (v3.3.0). It carries no render format — the format is the
 // family's, resolved by UA at fetch time.
 type SubClientApp struct {
 	Name              string   `yaml:"name" json:"name"`

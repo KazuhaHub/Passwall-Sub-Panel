@@ -4,7 +4,7 @@ import type { LoginMode } from './types'
 export type SubPlatform = 'windows' | 'macos' | 'linux' | 'ios' | 'android' | 'other'
 export type SubRenderFormat = 'mihomo' | 'sing-box' | 'uri-list'
 
-/** One import app nested under a SubClientFamily (v3.2.2). No render_format —
+/** One import app nested under a SubClientFamily (v3.3.0). No render_format —
  *  it's the family's, served by UA at fetch time. */
 export interface SubClientApp {
   name: string
@@ -19,7 +19,7 @@ export interface SubClientApp {
   recommended_for?: SubPlatform[]
 }
 
-/** A UA-detection family in the unified client registry (v3.2.2): keywords +
+/** A UA-detection family in the unified client registry (v3.3.0): keywords +
  *  render format + an enabled gate, owning the import apps shown in the portal.
  *  An app is offered iff its family is enabled AND the app is enabled. */
 export interface SubClientFamily {

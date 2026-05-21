@@ -1,9 +1,9 @@
 package mysql
 
 // ─────────────────────────────────────────────────────────────────────────
-// ONE-TIME BACKWARD COMPATIBILITY — REMOVE IN v3.3.0
+// ONE-TIME BACKWARD COMPATIBILITY — Remove in the next major (v4.0.0)
 //
-// v3.2.2 unified the two legacy subscription-client settings tables
+// v3.3.0 unified the two legacy subscription-client settings tables
 // (`sub_client_rules` + `sub_import_clients`) into a single nested registry
 // (`sub_clients`, the "family → app" model). Panels upgrading from <= v3.2.1
 // have data only under the old keys. This file folds that legacy data into

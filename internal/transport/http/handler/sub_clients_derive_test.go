@@ -6,7 +6,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 )
 
-// TestEnabledImportApps is the core consistency guarantee of the v3.2.2 model:
+// TestEnabledImportApps is the core consistency guarantee of the v3.3.0 model:
 // an app surfaces in the portal iff BOTH its family and the app itself are
 // enabled, ordered by Sort. A blocked family hides all its apps even when the
 // apps are individually enabled — so a disallowed client can never still be

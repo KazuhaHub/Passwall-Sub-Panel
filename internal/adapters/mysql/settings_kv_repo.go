@@ -165,8 +165,8 @@ func settingDescriptors(s *ports.UISettings) []settingDescriptor {
 		intField("sub", "sub_log_retention_days", &s.SubLogRetentionDays),
 		intField("notify", "mail_sent_retention_days", &s.MailSentRetentionDays),
 		strField("sub", "sub_import_tutorial_url", &s.SubImportTutorialURL),
-		jsonField("sub", "sub_client_rules", &s.SubClientRules),     // legacy, read-only for one-time migration (v3.2.2 → drop v3.3.0)
-		jsonField("sub", "sub_import_clients", &s.SubImportClients), // legacy, read-only for one-time migration (v3.2.2 → drop v3.3.0)
+		jsonField("sub", "sub_client_rules", &s.SubClientRules),     // legacy, read-only for one-time migration (v3.3.0 → drop v4.0.0)
+		jsonField("sub", "sub_import_clients", &s.SubImportClients), // legacy, read-only for one-time migration (v3.3.0 → drop v4.0.0)
 		jsonField("sub", "sub_clients", &s.SubClients),
 		strField("sub", "sub_client_filter_mode", &s.SubClientFilterMode),
 
@@ -347,7 +347,7 @@ func applyUISettingsDefaults(out, defaults ports.UISettings) ports.UISettings {
 		// and produce a blank-ish bucket. 2x the longest range avoids that.
 		out.TrafficHistoryDays = 730
 	}
-	// Unified client registry (v3.2.2). When absent, either migrate the legacy
+	// Unified client registry (v3.3.0). When absent, either migrate the legacy
 	// two-table config (sub_client_rules + sub_import_clients) in place — a
 	// one-time best-effort fold, see sub_clients_legacy.go — or seed fresh
 	// defaults. The legacy fields above stay readable solely for this.
@@ -383,7 +383,7 @@ func applyUISettingsDefaults(out, defaults ports.UISettings) ports.UISettings {
 // detection families (UA keywords + render format) each owning the import apps
 // shown in the portal. Apps don't repeat the render format — it's the
 // family's, served by UA. The deep-link / install strings are the audited
-// values carried over from the previous import-client defaults. (v3.2.2)
+// values carried over from the previous import-client defaults. (v3.3.0)
 func defaultSubClients() []ports.SubClientFamily {
 	return []ports.SubClientFamily{
 		{

@@ -1240,7 +1240,7 @@ function normalizeRegistry(fams?: SubClientFamily[] | null): SubClientFamily[] {
 }
 
 // ClientRegistryEditor is the unified detection-family → import-app editor
-// (v3.2.2). Each family owns UA keywords + render format + an enabled gate;
+// (v3.3.0). Each family owns UA keywords + render format + an enabled gate;
 // nested apps are the portal's one-click import targets and inherit the
 // family's format. Disabling a family blocks its UA AND hides its apps, so the
 // portal can never advertise a client that's actually blocked.
