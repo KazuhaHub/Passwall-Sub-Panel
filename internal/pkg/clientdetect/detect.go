@@ -14,8 +14,10 @@ type Result struct {
 	ClientName string
 	// RenderFormat is "mihomo" or "sing-box".
 	RenderFormat string
-	// Matched indicates whether a rule was matched.
+	// Matched indicates whether a family was matched.
 	Matched bool
+	// Enabled is the matched family's enabled flag (false when no match).
+	Enabled bool
 }
 
 // Detect identifies the subscription client from the User-Agent by matching it
@@ -35,6 +37,7 @@ func Detect(userAgent string, families []ports.SubClientFamily) Result {
 					ClientName:   fam.Name,
 					RenderFormat: fam.RenderFormat,
 					Matched:      true,
+					Enabled:      fam.Enabled,
 				}
 			}
 		}
@@ -60,4 +63,23 @@ func NormalizeRenderFormat(client string) string {
 	default:
 		return "mihomo"
 	}
+}
+
+// Filter modes for the subscription client gate.
+const (
+	FilterBlacklist = "blacklist"
+	FilterWhitelist = "whitelist"
+)
+
+// ClientBlocked decides whether a subscription request should be blocked, given
+// the configured filter mode and the UA detection result:
+//   - blacklist (default): block only a client that matched a DISABLED family;
+//     unknown / unmatched clients pass through.
+//   - whitelist: block anything that isn't a matched AND enabled family, so
+//     unknown clients are blocked too (no need for an explicit "other" family).
+func ClientBlocked(mode string, r Result) bool {
+	if mode == FilterWhitelist {
+		return !(r.Matched && r.Enabled)
+	}
+	return r.Matched && !r.Enabled
 }

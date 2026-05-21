@@ -46,7 +46,37 @@ func TestDetect(t *testing.T) {
 // block it.
 func TestDetectMatchesDisabledFamily(t *testing.T) {
 	got := Detect("v2rayN/6.0", testFamilies())
-	if !got.Matched || got.ClientName != "V2RayN" {
-		t.Fatalf("disabled family should still match by UA: got %+v", got)
+	if !got.Matched || got.ClientName != "V2RayN" || got.Enabled {
+		t.Fatalf("disabled family should match by UA with Enabled=false: got %+v", got)
+	}
+}
+
+// TestClientBlocked covers the two filter modes. Blacklist (default) blocks
+// only a matched-but-disabled family and lets unknown clients through;
+// whitelist blocks anything that isn't matched-and-enabled, unknown included.
+func TestClientBlocked(t *testing.T) {
+	matchedEnabled := Result{Matched: true, Enabled: true}
+	matchedDisabled := Result{Matched: true, Enabled: false}
+	unknown := Result{Matched: false}
+	cases := []struct {
+		name, mode string
+		r          Result
+		want       bool
+	}{
+		{"blacklist: enabled passes", FilterBlacklist, matchedEnabled, false},
+		{"blacklist: disabled blocked", FilterBlacklist, matchedDisabled, true},
+		{"blacklist: unknown passes", FilterBlacklist, unknown, false},
+		{"empty mode defaults to blacklist (disabled blocked)", "", matchedDisabled, true},
+		{"empty mode defaults to blacklist (unknown passes)", "", unknown, false},
+		{"whitelist: enabled passes", FilterWhitelist, matchedEnabled, false},
+		{"whitelist: disabled blocked", FilterWhitelist, matchedDisabled, true},
+		{"whitelist: unknown blocked", FilterWhitelist, unknown, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := ClientBlocked(tc.mode, tc.r); got != tc.want {
+				t.Fatalf("ClientBlocked(%q, %+v) = %v, want %v", tc.mode, tc.r, got, tc.want)
+			}
+		})
 	}
 }

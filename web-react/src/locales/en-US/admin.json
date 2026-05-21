@@ -326,6 +326,10 @@
       "sub_profile_name_template_hint": "Server-rendered string used for the Content-Disposition / Profile-Title response headers and for the &name= deep-link param. Placeholders: {{ site_title }}, {{ app_title }}, {{ display_name }}, {{ upn }}, {{ user }} (display_name with UPN fallback). Empty falls back to {{ site_title }} - {{ user }}.",
       "sub_region_flag_prefix": "Prefix node names with the region's flag",
       "sub_region_flag_prefix_hint": "When enabled, the subscription renderer prepends the Unicode flag of each node's Region (ISO 3166-1 alpha-2 code) to the node name. If you already type a flag manually in DisplayName, enabling this will double-flag — strip the manual ones first.",
+      "filter_mode": "Client filter mode",
+      "filter_mode_blacklist": "Blacklist (allow by default, block disabled)",
+      "filter_mode_whitelist": "Whitelist (block by default, allow known only)",
+      "filter_mode_help": "Blacklist (default): only clients you explicitly disable are blocked; unknown clients pass through (served mihomo as fallback).\n\nWhitelist: only known + enabled client families are allowed; anything unknown or disabled is blocked and counts as an abuse strike (may trigger auto-disable). Use for strict abuse protection.",
       "sub_block_auto_disable": "Auto-disable account on abusive subscription requests",
       "sub_block_auto_disable_count": "Consecutive failures before auto-disable",
       "rule_table": {

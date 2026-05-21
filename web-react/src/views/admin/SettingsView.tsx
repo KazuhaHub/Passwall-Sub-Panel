@@ -172,6 +172,7 @@ export default function SettingsView() {
     return {
       ...s,
       sub_clients: normalizeRegistry(s.sub_clients),
+      sub_client_filter_mode: s.sub_client_filter_mode ?? 'blacklist',
       quick_links: s.quick_links ?? [],
       timezone: s.timezone ?? '',
     }
@@ -535,6 +536,24 @@ export default function SettingsView() {
           </Section>
 
           <Section title={t('settings.subscription.section_protection')} md={md}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+              <TextField select size="small" label={t('settings.subscription.filter_mode', { defaultValue: '客户端过滤模式' })}
+                value={settings.sub_client_filter_mode}
+                onChange={e => patch('sub_client_filter_mode', e.target.value as 'blacklist' | 'whitelist')}
+                sx={{ minWidth: 260 }}>
+                <MenuItem value="blacklist">{t('settings.subscription.filter_mode_blacklist', { defaultValue: '黑名单（默认放行，仅拦禁用项）' })}</MenuItem>
+                <MenuItem value="whitelist">{t('settings.subscription.filter_mode_whitelist', { defaultValue: '白名单（默认拦截，仅放行已知）' })}</MenuItem>
+              </TextField>
+              <Tooltip arrow placement="right" title={
+                <Box sx={{ whiteSpace: 'pre-line', fontSize: 12, p: 0.5, maxWidth: 320 }}>
+                  {t('settings.subscription.filter_mode_help', { defaultValue: '黑名单（默认）：只拦截你明确「禁用」的客户端族，未识别的客户端放行（按 mihomo 兜底）。\n\n白名单：只放行「已知且启用」的客户端族，未识别 / 未启用的一律拦截，并计入异常次数（达到阈值可能触发自动停用）。适合严格防滥用。' })}
+                </Box>
+              }>
+                <IconButton size="small" sx={{ color: md.onSurfaceVariant }}>
+                  <HelpOutlineIcon fontSize="small" />
+                </IconButton>
+              </Tooltip>
+            </Box>
             <FormControlLabel label={t('settings.subscription.sub_block_auto_disable')}
               control={<Switch checked={settings.sub_block_auto_disable}
                 onChange={(_, c) => patch('sub_block_auto_disable', c)} />}
@@ -1176,7 +1195,7 @@ const CLIENT_PRESETS: SubClientFamily[] = [
       { name: 'Shadowrocket', platforms: ['ios'], import_url_template: 'shadowrocket://add/sub://{{ sub_url_b64_url_safe }}?remark={{ profile_name_encoded }}', install_url: 'https://apps.apple.com/app/shadowrocket/id932747118', enabled: true, sort: 60, recommended_for: [] },
     ],
   },
-  { name: 'Quantumult X', keywords: ['quantumult x', 'quantumultx'], render_format: 'mihomo', enabled: true, apps: [] },
+  { name: 'Quantumult X', keywords: ['quantumult'], render_format: 'mihomo', enabled: true, apps: [] },
   {
     name: 'V2rayNG', keywords: ['v2rayng'], render_format: 'uri-list', enabled: true,
     apps: [

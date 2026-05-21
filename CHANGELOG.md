@@ -4,6 +4,23 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## v3.2.2-beta.4 — 2026-05-21
+
+### Fixed
+- Quantumult X 检测关键词修正:其真实 UA 是 `Quantumult%20X/...`（空格是 `%20`），
+  而旧关键词 `quantumult x` / `quantumultx` **都匹配不到**——QX 实际从未被正确
+  识别。改为单个 `quantumult`（已核对 subconverter 的 UA 匹配表）。注:此为默认值
+  修正,线上已有配置需在后台把 QX 关键词手动改为 `quantumult`（或重置默认）。
+
+### Added
+- Abuse protection 新增「客户端过滤模式」(黑名单 / 白名单)+ 问号说明:
+  - **黑名单**(默认,= 原行为):只拦截被「禁用」的客户端族,未识别客户端放行;
+  - **白名单**:只放行「已知且启用」的族,未识别 / 未启用一律拦截（计入异常次数、
+    可能触发自动停用)——「其他/未识别」自动被拦,无需显式列出。
+  封禁判断抽成纯函数 `clientdetect.ClientBlocked(mode, result)`,单测覆盖两种模式
+  × 匹配 / 禁用 / 未知;`Detect` 的 `Result` 现在带上匹配族的 `Enabled`,sub.go
+  直接复用(去掉一段重复的 UA 二次扫描)。
+
 ## v3.2.2-beta.3 — 2026-05-21
 
 ### Added

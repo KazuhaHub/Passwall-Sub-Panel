@@ -58,22 +58,10 @@ func (h *SubHandler) Get(c *gin.Context) {
 	ua := c.GetHeader("User-Agent")
 	detected := clientdetect.Detect(ua, settings.SubClients)
 
-	// Check if the detected client's family is allowed (same first-match order
-	// as Detect, so we read the Enabled flag off the family that matched).
-	clientBlocked := false
-	if detected.Matched {
-		for _, fam := range settings.SubClients {
-			for _, kw := range fam.Keywords {
-				if kw != "" && strings.Contains(strings.ToLower(ua), strings.ToLower(kw)) {
-					if !fam.Enabled {
-						clientBlocked = true
-					}
-					goto clientCheckDone
-				}
-			}
-		}
-	}
-clientCheckDone:
+	// Blacklist (default) blocks only a matched-but-disabled family; whitelist
+	// blocks anything that isn't matched-and-enabled (so unknown clients are
+	// blocked too). See clientdetect.ClientBlocked.
+	clientBlocked := clientdetect.ClientBlocked(settings.SubClientFilterMode, detected)
 
 	// Look up user by token.
 	u, err := h.user.GetBySubToken(c.Request.Context(), token)

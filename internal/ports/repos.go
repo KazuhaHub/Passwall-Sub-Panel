@@ -387,6 +387,11 @@ type UISettings struct {
 	// family is enabled AND the app is enabled — so a blocked client can never
 	// still be offered for import. Replaces SubClientRules + SubImportClients.
 	SubClients []SubClientFamily `yaml:"sub_clients" json:"sub_clients"`
+	// SubClientFilterMode controls how the client gate treats detection
+	// families: "blacklist" (default) blocks only a matched-but-disabled
+	// family and lets unknown clients through; "whitelist" blocks anything
+	// that isn't a matched + enabled family (unknown clients included).
+	SubClientFilterMode string `yaml:"sub_client_filter_mode" json:"sub_client_filter_mode"`
 	// SubLogRetentionDays controls automatic subscription log cleanup.
 	// 0 means never delete logs automatically. Default 7.
 	SubLogRetentionDays int `yaml:"sub_log_retention_days" json:"sub_log_retention_days"`

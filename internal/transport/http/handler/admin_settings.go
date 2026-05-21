@@ -55,6 +55,7 @@ type settingsDTO struct {
 	EmergencyAccessQuotaGB     float64                  `json:"emergency_access_quota_gb"`
 	SubPath                    string                   `json:"sub_path"`
 	SubClients                 []ports.SubClientFamily  `json:"sub_clients"`
+	SubClientFilterMode        string                   `json:"sub_client_filter_mode"`
 	SubImportTutorialURL       string                   `json:"sub_import_tutorial_url"`
 	SubLogRetentionDays        int                      `json:"sub_log_retention_days"`
 	MailSentRetentionDays      int                      `json:"mail_sent_retention_days"`
@@ -122,6 +123,7 @@ func (h *AdminSettingsHandler) Get(c *gin.Context) {
 		EmergencyAccessQuotaGB:     s.EmergencyAccessQuotaGB,
 		SubPath:                    s.SubPath,
 		SubClients:                 s.SubClients,
+		SubClientFilterMode:        s.SubClientFilterMode,
 		SubImportTutorialURL:       s.SubImportTutorialURL,
 		SubLogRetentionDays:        s.SubLogRetentionDays,
 		MailSentRetentionDays:      s.MailSentRetentionDays,
@@ -189,6 +191,7 @@ func (h *AdminSettingsHandler) Put(c *gin.Context) {
 		EmergencyAccessQuotaGB:     req.EmergencyAccessQuotaGB,
 		SubPath:                    strings.TrimSpace(req.SubPath),
 		SubClients:                 normalizeSubClients(req.SubClients),
+		SubClientFilterMode:        normalizeFilterMode(req.SubClientFilterMode),
 		SubImportTutorialURL:       strings.TrimSpace(req.SubImportTutorialURL),
 		SubLogRetentionDays:        req.SubLogRetentionDays,
 		MailSentRetentionDays:      req.MailSentRetentionDays,
@@ -283,6 +286,7 @@ func (h *AdminSettingsHandler) Put(c *gin.Context) {
 		EmergencyAccessQuotaGB:     s.EmergencyAccessQuotaGB,
 		SubPath:                    s.SubPath,
 		SubClients:                 s.SubClients,
+		SubClientFilterMode:        s.SubClientFilterMode,
 		SubImportTutorialURL:       s.SubImportTutorialURL,
 		SubLogRetentionDays:        s.SubLogRetentionDays,
 		MailSentRetentionDays:      s.MailSentRetentionDays,
@@ -346,6 +350,15 @@ func normalizeGlobalAnnouncement(a, prev ports.GlobalAnnouncement) ports.GlobalA
 		a.UpdatedAt = prev.UpdatedAt
 	}
 	return a
+}
+
+// normalizeFilterMode clamps the client filter mode to the two valid values;
+// anything unrecognized falls back to blacklist (the safe, non-breaking default).
+func normalizeFilterMode(m string) string {
+	if m == "whitelist" {
+		return "whitelist"
+	}
+	return "blacklist"
 }
 
 // normalizeSubClients cleans the unified client registry from the admin form:

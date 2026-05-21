@@ -83,6 +83,9 @@ export interface UISettings {
   emergency_access_quota_gb: number
   sub_path: string
   sub_clients: SubClientFamily[]
+  /** Client gate mode: "blacklist" (block only disabled families, unknown
+   *  passes) or "whitelist" (only matched+enabled passes, unknown blocked). */
+  sub_client_filter_mode: 'blacklist' | 'whitelist'
   sub_import_tutorial_url: string
   sub_log_retention_days: number
   sub_block_auto_disable: boolean

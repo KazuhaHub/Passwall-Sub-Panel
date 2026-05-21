@@ -168,6 +168,7 @@ func settingDescriptors(s *ports.UISettings) []settingDescriptor {
 		jsonField("sub", "sub_client_rules", &s.SubClientRules),     // legacy, read-only for one-time migration (v3.2.2 → drop v3.3.0)
 		jsonField("sub", "sub_import_clients", &s.SubImportClients), // legacy, read-only for one-time migration (v3.2.2 → drop v3.3.0)
 		jsonField("sub", "sub_clients", &s.SubClients),
+		strField("sub", "sub_client_filter_mode", &s.SubClientFilterMode),
 
 		// security --- rate limits, retentions, emergency access
 		intField("security", "sub_per_ip_per_min", &s.SubPerIPPerMin),
@@ -357,6 +358,9 @@ func applyUISettingsDefaults(out, defaults ports.UISettings) ports.UISettings {
 			out.SubClients = defaultSubClients()
 		}
 	}
+	if out.SubClientFilterMode == "" {
+		out.SubClientFilterMode = "blacklist"
+	}
 	if out.SubBlockAutoDisableCount <= 0 {
 		out.SubBlockAutoDisableCount = 3
 	}
@@ -448,7 +452,10 @@ func defaultSubClients() []ports.SubClientFamily {
 		},
 		// Quantumult X accepts Clash YAML in its [server_remote] block, so
 		// mihomo imports cleanly (rules/policies dropped). No bundled importer.
-		{Name: "Quantumult X", Keywords: []string{"quantumult x", "quantumultx"}, RenderFormat: "mihomo", Enabled: true},
+		// Its UA is "Quantumult%20X/..." (the space is %20), so the keyword has
+		// to be the bare "quantumult" — "quantumult x" / "quantumultx" never
+		// match the encoded UA (verified against subconverter's UA table).
+		{Name: "Quantumult X", Keywords: []string{"quantumult"}, RenderFormat: "mihomo", Enabled: true},
 		{
 			// V2rayNG before V2RayN: the more specific "v2rayng" must win
 			// substring matching, else "v2rayn" would eat it.
