@@ -171,7 +171,7 @@ export default function SettingsView() {
   function normalize(s: UISettings): UISettings {
     return {
       ...s,
-      sub_clients: s.sub_clients ?? [],
+      sub_clients: normalizeRegistry(s.sub_clients),
       quick_links: s.quick_links ?? [],
       timezone: s.timezone ?? '',
     }
@@ -1205,6 +1205,22 @@ const PLATFORM_OPTIONS: SubPlatform[] = ['windows', 'macos', 'linux', 'android',
 
 function clonePreset(p: SubClientFamily): SubClientFamily {
   return JSON.parse(JSON.stringify(p)) as SubClientFamily
+}
+
+// normalizeRegistry guards against null array fields from the server: a
+// detection-only family serializes apps as JSON null (Go nil slice), and
+// keyword / platform / recommended_for arrays can be null too. Coerce them all
+// to [] on the way into form state so the editor's .map/.length never see null.
+function normalizeRegistry(fams?: SubClientFamily[] | null): SubClientFamily[] {
+  return (fams ?? []).map(f => ({
+    ...f,
+    keywords: f.keywords ?? [],
+    apps: (f.apps ?? []).map(a => ({
+      ...a,
+      platforms: a.platforms ?? [],
+      recommended_for: a.recommended_for ?? [],
+    })),
+  }))
 }
 
 // ClientRegistryEditor is the unified detection-family → import-app editor
