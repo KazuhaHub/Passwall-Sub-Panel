@@ -4,6 +4,16 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## v3.4.0-beta.4 — 2026-05-22
+
+### Changed
+- **概览两列重新配平**:流量 / 客户端搬走后,概览左列只剩订阅链接、右列偏长,左右不齐。
+  把「快捷链接」从右列移到左列(订阅链接之下),变成 左=订阅链接+快捷链接 / 右=用量+
+  应急,高度大致配平。移动端顺序不变(`order` 保留)。
+- **流量 / 客户端标签去掉折叠**:两者各自独占一个标签后,可折叠的 Accordion 没有意义,
+  改成普通 Card 直接展示(无展开箭头)。客户端标签现在也常显教程链接(原先它挂在概览的
+  推荐客户端卡上)。
+
 ## v3.4.0-beta.3 — 2026-05-21
 
 ### Changed

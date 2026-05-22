@@ -1,8 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState, type FormEvent, type MouseEvent } from 'react'
 import {
-  Accordion,
-  AccordionDetails,
-  AccordionSummary,
   Avatar,
   Box,
   Button,
@@ -39,7 +36,6 @@ import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined'
 import WarningAmberIcon from '@mui/icons-material/WarningAmber'
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline'
 import MoreVertIcon from '@mui/icons-material/MoreVert'
-import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import LaunchIcon from '@mui/icons-material/Launch'
 import DownloadIcon from '@mui/icons-material/Download'
 import StarIcon from '@mui/icons-material/Star'
@@ -813,28 +809,32 @@ export default function MeView() {
       </Box>
       )}{/* end sub url order wrapper */}
 
+      {tab === 'overview' && (
+      <Box sx={{ order: { xs: 3, md: 0 }, width: { xs: '100%', md: 'auto' } }}>
+      {/* Quick links — moved into the left column so the overview's two
+          columns stay balanced (left: sub URL + quick links; right: usage +
+          emergency). order:3 keeps the mobile sequence unchanged. */}
+      {quickLinks.length > 0 && (
+        <Card sx={{ p: { xs: 2.5, sm: 3 }, bgcolor: md.surfaceContainerLow, border: `1px solid ${md.outlineVariant}` }}>
+          <Typography sx={{ fontWeight: 500, mb: 1.5 }}>{t('links.title')}</Typography>
+          <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+            {quickLinks.map(l => (
+              <Button key={l.url} size="small" variant="outlined"
+                onClick={() => openQuickLink(l)}>
+                {l.label}
+              </Button>
+            ))}
+          </Box>
+        </Card>
+      )}
+      </Box>
+      )}{/* end quick links order wrapper */}
+
       {tab === 'traffic' && (
       <Box sx={{ order: { xs: 5, md: 0 }, width: { xs: '100%', md: 'auto' } }}>
-      {/* Traffic trend chart — open by default so the user sees their usage
-          shape without an extra click. Click the row to collapse. */}
-      <Accordion defaultExpanded sx={{
-        bgcolor: md.surfaceContainerLow,
-        border: `1px solid ${md.outlineVariant}`,
-        borderRadius: '12px !important',
-        '&:before': { display: 'none' },
-        boxShadow: 'none',
-        // MUI default adds 16px top/bottom margin when the Accordion is
-        // expanded (its built-in spacing assumption). That fights the
-        // parent flex's `gap: 3`, making left col (which has 2 Accordions)
-        // look more spaced than right col (pure Cards). Force margin: 0
-        // so spacing is owned entirely by the column's gap.
-        m: '0 !important',
-        '&.Mui-expanded': { m: '0 !important' },
-      }}>
-        <AccordionSummary expandIcon={<ExpandMoreIcon />} sx={{ px: { xs: 2.5, sm: 3 }, py: 1 }}>
-          <Typography sx={{ fontWeight: 500 }}>{t('trend.title')}</Typography>
-        </AccordionSummary>
-        <AccordionDetails sx={{ px: { xs: 2.5, sm: 3 }, pt: 0, pb: { xs: 2.5, sm: 3 } }}>
+      {/* Traffic trend chart — its own tab now, so a plain Card (no collapse). */}
+      <Card sx={{ p: { xs: 2.5, sm: 3 }, bgcolor: md.surfaceContainerLow, border: `1px solid ${md.outlineVariant}` }}>
+        <Typography sx={{ fontWeight: 500, mb: 1.5 }}>{t('trend.title')}</Typography>
           <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 1, mb: 1.5, flexWrap: 'wrap' }}>
             {/* Range first, granularity second — pick the time window before
                 deciding zoom level. 1d (Today) forces Hour; ≥30d hides Hour
@@ -869,8 +869,7 @@ export default function MeView() {
               ? <Box sx={{ height: 280, display: 'grid', placeItems: 'center' }}><CircularProgress size={24} /></Box>
               : <TrafficChart items={trendItems} height={280} />}
           </Suspense>
-        </AccordionDetails>
-      </Accordion>
+      </Card>
       </Box>
       )}{/* end trend order wrapper */}
 
@@ -887,37 +886,21 @@ export default function MeView() {
         const others = heroName ? importClients.filter(c => c.name !== heroName) : importClients
         if (others.length === 0) return null
         return (
-          // Collapsed by default — the hero card above already gives most
-          // users what they need; "更多客户端" is a fallback they only open
-          // when they want a different client.
-          <Accordion sx={{
-            bgcolor: md.surfaceContainerLow,
-            border: `1px solid ${md.outlineVariant}`,
-            borderRadius: '12px !important',
-            '&:before': { display: 'none' },
-            boxShadow: 'none',
-          }}>
-            <AccordionSummary expandIcon={<ExpandMoreIcon />} sx={{ px: { xs: 2.5, sm: 3 }, py: 1 }}>
-              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2, flexWrap: 'wrap', width: '100%' }}>
-                <Typography sx={{ fontWeight: 500 }}>
-                  {heroName ? t('import.others_title', { defaultValue: '更多客户端' }) : t('import.title')}
-                </Typography>
-                {/* Tutorial link only shown here when there's no hero card —
-                    otherwise it's already in the hero so we don't double up.
-                    stopPropagation so the Accordion doesn't toggle when the
-                    button is clicked. */}
-                {!heroName && profile.sub_import_tutorial_url && (
-                  <Button size="small" variant="outlined"
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      window.open(profile.sub_import_tutorial_url, '_blank', 'noopener,noreferrer')
-                    }}>
-                    {t('import.tutorial')}
-                  </Button>
-                )}
-              </Box>
-            </AccordionSummary>
-            <AccordionDetails sx={{ px: { xs: 2.5, sm: 3 }, pt: 0, pb: { xs: 2.5, sm: 3 } }}>
+          // Its own "客户端" tab now — plain Card, no collapse. The tutorial
+          // link lives here too (the hero card that used to carry it is over
+          // in 概览).
+          <Card sx={{ p: { xs: 2.5, sm: 3 }, bgcolor: md.surfaceContainerLow, border: `1px solid ${md.outlineVariant}` }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2, flexWrap: 'wrap', mb: 1 }}>
+              <Typography sx={{ fontWeight: 500 }}>
+                {heroName ? t('import.others_title', { defaultValue: '更多客户端' }) : t('import.title')}
+              </Typography>
+              {profile.sub_import_tutorial_url && (
+                <Button size="small" variant="outlined"
+                  onClick={() => window.open(profile.sub_import_tutorial_url, '_blank', 'noopener,noreferrer')}>
+                  {t('import.tutorial')}
+                </Button>
+              )}
+            </Box>
               {!heroName && (
                 <Typography variant="body2" sx={{ mb: 2 }}>{t('import.intro')}</Typography>
               )}
@@ -941,8 +924,7 @@ export default function MeView() {
                   </Box>
                 ))}
               </Box>
-            </AccordionDetails>
-          </Accordion>
+          </Card>
         )
       })()}
       </Box>
@@ -971,23 +953,6 @@ export default function MeView() {
         md={md}
       />
       </Box>{/* end usage order wrapper */}
-
-      <Box sx={{ order: { xs: 3, md: 0 }, width: { xs: '100%', md: 'auto' } }}>
-      {/* Quick links */}
-      {quickLinks.length > 0 && (
-        <Card sx={{ p: { xs: 2.5, sm: 3 }, bgcolor: md.surfaceContainerLow, border: `1px solid ${md.outlineVariant}` }}>
-          <Typography sx={{ fontWeight: 500, mb: 1.5 }}>{t('links.title')}</Typography>
-          <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
-            {quickLinks.map(l => (
-              <Button key={l.url} size="small" variant="outlined"
-                onClick={() => openQuickLink(l)}>
-                {l.label}
-              </Button>
-            ))}
-          </Box>
-        </Card>
-      )}
-      </Box>{/* end quick links order wrapper */}
 
       <Box sx={{ order: { xs: 4, md: 0 }, width: { xs: '100%', md: 'auto' } }}>
       {/* Emergency access */}
