@@ -16,13 +16,18 @@ listen: ":8788"
 # X-Forwarded-For (in that order). Works out of the box behind nginx /
 # caddy / traefik / Cloudflare without enumerating any CIDRs.
 #
-# The implicit assumption is the panel's listen port is NOT publicly
-# reachable. Set the explicit list below ONLY if you intentionally expose
-# the listen port to the public internet.
+# RECOMMENDED for any real deployment: set trusted_proxies to your reverse
+# proxy's IP. The panel then verifies the TCP peer IS that proxy before it
+# trusts X-Forwarded-For — so an attacker who can reach the listen port
+# directly can't forge XFF to spoof their IP and bypass the per-IP rate
+# limiter (/login, /sub abuse protection) or poison the IP in audit /
+# subscription logs. Leaving it unset is only safe if the listen port is
+# unreachable except through your proxy.
 #
 # http:
-#   trusted_proxies: "127.0.0.1,::1"     # only your local reverse proxy
-#   # trusted_proxies: "none"            # disable forwarded-IP trust entirely
+#   trusted_proxies: "127.0.0.1,::1"     # your reverse proxy (same host)
+#   # trusted_proxies: "10.0.0.0/8"      # or the proxy's subnet / CDN range
+#   # trusted_proxies: "none"            # no proxy at all: use raw TCP peer
 #
 # Env override: PSP_TRUSTED_PROXIES.
 

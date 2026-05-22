@@ -42,10 +42,15 @@ type Config struct {
 // the same machine OR behind a CDN like Cloudflare — without forcing the
 // admin to enumerate CIDRs.
 //
-// The implicit assumption is that the panel's listen port is NOT directly
-// exposed to the public internet. If you do expose it, set TrustedProxies
-// to an explicit list (e.g. "127.0.0.1,::1") so attackers connecting
-// directly can't forge X-Forwarded-For to hide their real IP.
+// The zero-config default trusts ALL upstreams, which is only safe while the
+// listen port isn't directly reachable. RECOMMENDED for any real deployment:
+// set TrustedProxies to your reverse proxy's IP (e.g. "127.0.0.1,::1"). Then
+// Gin verifies the TCP peer IS that proxy before believing X-Forwarded-For —
+// so a direct attacker can't forge XFF to spoof their IP and thereby bypass
+// the per-IP rate limiter (/login, /sub abuse protection) or poison the IP
+// recorded in audit / subscription logs. (This is stricter than what Gin's
+// TrustedPlatform single-header approach can express, since it pins the
+// proxy by address, not just by which header it sets.)
 type HTTPConfig struct {
 	// TrustedProxies controls which upstream IPs Gin will believe when
 	// computing ClientIP. Comma-separated CIDRs or IPs. Special tokens:
@@ -201,18 +206,20 @@ jwt_secret: "%s"
 encryption_key: "%s"
 
 # ---- Reverse proxy / real client IP ----
-# Default behavior is zero-config: the panel trusts all upstream IPs and
-# reads the real client IP from CF-Connecting-IP / X-Real-IP /
-# X-Forwarded-For (in that order). Works out-of-the-box behind nginx /
-# caddy / traefik / Cloudflare.
+# Default (unset): zero-config — trust all upstreams and read the real client
+# IP from CF-Connecting-IP / X-Real-IP / X-Forwarded-For (in that order).
+# Works out-of-the-box behind nginx / caddy / traefik / Cloudflare.
 #
-# Only set this if you intentionally expose the panel's listen port to the
-# public internet (rare). Otherwise leaving it unset is correct and
-# simpler.
+# RECOMMENDED for any real deployment: set this to your reverse proxy's IP.
+# Gin then verifies the TCP peer IS that proxy before trusting X-Forwarded-For,
+# so a direct attacker can't forge XFF to spoof their IP and bypass the per-IP
+# rate limiter (/login, /sub) or poison audit / subscription log IPs. Leaving
+# it unset is only safe if the listen port is unreachable except via the proxy.
 #
 # http:
-#   trusted_proxies: "127.0.0.1,::1"     # restrict to local reverse proxy
-#   # trusted_proxies: "none"            # trust nothing; use raw TCP peer
+#   trusted_proxies: "127.0.0.1,::1"     # your reverse proxy (same host)
+#   # trusted_proxies: "10.0.0.0/8"      # or the proxy's subnet / CDN range
+#   # trusted_proxies: "none"            # no proxy at all: use raw TCP peer
 #
 # Env override: PSP_TRUSTED_PROXIES.
 
