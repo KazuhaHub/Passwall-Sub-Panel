@@ -530,6 +530,33 @@ func (s *Service) runNodeCreateTask(ctx context.Context, task *domain.SyncTask) 
 	}
 	inboundID, err := c.AddInbound(ctx, p.Spec)
 	if err != nil {
+		// Orphan recovery: if AddInbound returned "port already exists",
+		// the first attempt may have succeeded on 3X-UI but its response was
+		// lost (network blip, panel restart, timeout). Without recovery the
+		// task is cancelled as permanent and the operator is left with an
+		// inbound on 3X-UI that no node row points at. Check for an inbound
+		// matching our spec on the same panel; if one exists and isn't owned
+		// by some other PSP node, adopt it instead of giving up.
+		if isPortAlreadyExistsError(err) {
+			if adopted, lookupErr := s.tryAdoptOrphan(ctx, c, n.PanelID, p.Spec); lookupErr == nil && adopted != nil {
+				n.InboundID = adopted.ID
+				n.Enabled = true
+				inboundcfg.Capture(&n, adopted)
+				if err := s.nodes.Create(ctx, &n); err != nil {
+					return err
+				}
+				if err := s.syncExistingUsersToNode(ctx, &n); err != nil {
+					log.Warn("sync users on adopted-create", "node_id", n.ID, "err", err)
+				}
+				log.Info("create node: adopted existing inbound (recovery from lost AddInbound response)",
+					"panel_id", n.PanelID, "inbound_id", adopted.ID, "port", adopted.Port)
+				return nil
+			}
+			// Genuine port conflict (different protocol on same port, or
+			// another PSP node already owns the matching inbound). Bail out
+			// permanently so the operator sees the failure.
+			return permanentInboundCreateError(err)
+		}
 		if permanentErr := permanentInboundCreateError(err); permanentErr != nil {
 			return permanentErr
 		}
@@ -546,6 +573,45 @@ func (s *Service) runNodeCreateTask(ctx context.Context, task *domain.SyncTask) 
 		log.Warn("sync users on queued create", "node_id", n.ID, "err", err)
 	}
 	return nil
+}
+
+// tryAdoptOrphan searches the panel's live inbound list for one matching
+// `spec` (port + protocol + listen) that no other PSP node already owns,
+// and returns it for adoption. Returns (nil, nil) if no match — caller
+// should treat that as a genuine port conflict. Strict matching (not just
+// port) keeps the false-adoption risk low when an operator happens to
+// have a different inbound on the same port.
+func (s *Service) tryAdoptOrphan(ctx context.Context, c ports.XUIClient, panelID int64, spec ports.InboundSpec) (*ports.Inbound, error) {
+	inbs, err := c.ListInbounds(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for i := range inbs {
+		inb := &inbs[i]
+		if inb.Port != spec.Port {
+			continue
+		}
+		if !strings.EqualFold(inb.Protocol, spec.Protocol) {
+			continue
+		}
+		if inb.Listen != spec.Listen {
+			continue
+		}
+		if existing, _ := s.nodes.GetByPanelInbound(ctx, panelID, inb.ID); existing != nil {
+			// Another PSP node already claimed this inbound — likely a
+			// concurrent create won. Don't double-adopt.
+			continue
+		}
+		return inb, nil
+	}
+	return nil, nil
+}
+
+func isPortAlreadyExistsError(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "port already exists")
 }
 
 func (s *Service) enqueueNodeCreateTask(ctx context.Context, n *domain.Node, spec ports.InboundSpec, cause error) error {

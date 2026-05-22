@@ -13,8 +13,12 @@ import (
 
 type recNodeRepo struct {
 	ports.NodeRepo
-	nodes       []*domain.Node
+	nodes []*domain.Node
+	// Separate slices so tests can pin which writer path the service took.
+	// updates = full-row Save (Update); updatesCfg = column-scoped snapshot
+	// writer (UpdateInboundConfig — the v3.5 path snapshot writes must use).
 	updates     []*domain.Node
+	updatesCfg  []*domain.Node
 	getOverride func(int64) (*domain.Node, error)
 }
 
@@ -25,12 +29,13 @@ func (r *recNodeRepo) Update(_ context.Context, n *domain.Node) error {
 	return nil
 }
 
-// UpdateInboundConfig is the column-scoped v3.5 snapshot writer; tests treat it
-// the same as Update for assertion purposes — both indicate the node was
-// persisted.
+// UpdateInboundConfig is the column-scoped v3.5 snapshot writer. Recording
+// separately from Update lets tests catch regressions where a snapshot write
+// accidentally takes the full-row Save path (which would race with the health
+// pass).
 func (r *recNodeRepo) UpdateInboundConfig(_ context.Context, n *domain.Node) error {
 	cp := *n
-	r.updates = append(r.updates, &cp)
+	r.updatesCfg = append(r.updatesCfg, &cp)
 	return nil
 }
 
@@ -112,10 +117,16 @@ func TestCheckNodes_BackfillsMissingConfig(t *testing.T) {
 	report := &Report{}
 	svc.checkNodes(context.Background(), report, cacheFromInbounds(1, live))
 
-	if len(repo.updates) != 1 {
-		t.Fatalf("want 1 node update (backfill), got %d", len(repo.updates))
+	// Snapshot writes MUST take the column-scoped path (UpdateInboundConfig)
+	// to coexist with the concurrent health-pass writer. A full-row Save
+	// here would race against UpdateHealth — that bug shipped in beta.1.
+	if len(repo.updates) != 0 {
+		t.Fatalf("backfill must use UpdateInboundConfig, not Update; got %d full-row writes", len(repo.updates))
 	}
-	got := repo.updates[0]
+	if len(repo.updatesCfg) != 1 {
+		t.Fatalf("want 1 column-scoped snapshot write (backfill), got %d", len(repo.updatesCfg))
+	}
+	got := repo.updatesCfg[0]
 	if got.ConfigSyncedAt == nil || got.StreamSettings != `{"network":"tcp","security":"reality"}` {
 		t.Fatalf("config not captured into node: %+v", got)
 	}
@@ -199,8 +210,9 @@ func TestCheckNodes_StaleReadDoesNotRevertAdminEdit(t *testing.T) {
 	if len(client.updated) != 0 {
 		t.Fatalf("stale reconcile must NOT push to 3X-UI when admin row advanced; got %d pushes", len(client.updated))
 	}
-	if len(repo.updates) != 0 {
-		t.Fatalf("stale reconcile must NOT write back to DB; got %d updates", len(repo.updates))
+	if len(repo.updates)+len(repo.updatesCfg) != 0 {
+		t.Fatalf("stale reconcile must NOT write back to DB; got %d full-row + %d snapshot updates",
+			len(repo.updates), len(repo.updatesCfg))
 	}
 	if report.Fixed != 0 {
 		t.Fatalf("stale reconcile must not mark Fixed; got %d", report.Fixed)
@@ -231,8 +243,9 @@ func TestCheckNodes_InSync_NoOp(t *testing.T) {
 	report := &Report{}
 	svc.checkNodes(context.Background(), report, cacheFromInbounds(1, []ports.Inbound{live}))
 
-	if len(client.updated) != 0 || len(repo.updates) != 0 {
-		t.Fatalf("in-sync node must be a no-op: pushes=%d updates=%d", len(client.updated), len(repo.updates))
+	if len(client.updated) != 0 || len(repo.updates)+len(repo.updatesCfg) != 0 {
+		t.Fatalf("in-sync node must be a no-op: pushes=%d full-row=%d snapshot=%d",
+			len(client.updated), len(repo.updates), len(repo.updatesCfg))
 	}
 	if report.Fixed != 0 {
 		t.Fatalf("want report.Fixed=0, got %d", report.Fixed)

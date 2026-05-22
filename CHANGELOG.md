@@ -4,6 +4,47 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## v3.5.0-beta.4 — 2026-05-22
+
+### Fixed
+
+- **创建 inbound 时丢失 3X-UI 响应会产生孤儿 inbound**:`CreateInbound` 调用
+  `AddInbound` 成功但响应被掐(网络抖动 / 面板重启 / 超时),客户端只看到错误,
+  任务入队重试。下一轮 `AddInbound` 会收到 "port already exists",旧代码直接
+  归类为永久失败、任务被 cancel —— 结果 3X-UI 上有一个真实 inbound,PSP 这边
+  却没有 node 行指向它,管理员需要手动到 3X-UI 清理。新增 `tryAdoptOrphan`:
+  retry 看到 port-exists 错误时先 `ListInbounds`,找到一个与 spec 严格匹配
+  (port + protocol + listen 全等)且**不被任何其它 PSP 节点拥有**的 inbound,
+  当作上一次"丢响应"的产物吸收过来(`Capture` live 配置 + 创建本地 node 行)。
+  严格匹配 + 排除已有 owner 双重保险,几乎不可能误吸非 PSP 的 inbound。真正
+  的端口冲突(另一个 protocol 占用同端口、或同 inbound 已被别的 PSP node 占)
+  仍然走原来的永久失败路径。
+
+### Internal / 测试
+
+- **reconcile / node 测试 fake 区分 `Update` 和 `UpdateInboundConfig` 调用**:
+  之前 fake 把全行 `Save` 和 column-scoped 快照写入都记到同一个 slice,
+  无法断言生产代码用了正确的 writer(snapshot 写应该走列级 `UpdateInboundConfig`,
+  否则跟 `UpdateHealth` 列级竞争)。fake 拆成两个 counter,reconcile axis-A
+  的 backfill / stale-read 用例现在显式断言 "用列级写入 + 不用全行 Save"
+  —— 防 v3.5.0-beta.1 那个 bug 再回归。
+- **新增节点 inbound_settings / stream_settings 加密 round-trip 集成测试**:
+  `TestNodeRepo_InboundSecretsRoundTripEncrypted` 用 sqlite 端到端跑一遍,
+  写一条带 SS-2022 server PSK 和 Reality privateKey 的节点 → 读回 verify
+  解密 = 原文 + 直接读 raw 列 verify 有 `enc:v1:` 前缀 + 原文密钥**不出现**
+  在 stored row 里。第二步用 `UpdateInboundConfig` 改 PSK 重测,保证 column-
+  scoped writer 也走加密。再加 `..._LegacyPlaintextStillReads` 锁定"pre-v3.5
+  明文行读回不变"的软迁移契约。
+
+### Changed (documentation)
+
+- **`inboundcfg.ApplySpec` / `InboundFromNode` / `StripClients` 注释补足**:
+  把之前 review 提到的"接受的 trade-off"白纸黑字写进 godoc:partial-PATCH
+  会把无条件字段(Listen/Remark/Sniffing/Allocate/ExpiryTime)零化、Port
+  与 Protocol 的 zero-guard 是有意的不对称、`Enable` 由 PSP 独占跟 3X-UI
+  可能分歧(健康探测 + reconcile 兜底)、`StripClients` 路径在有 clients[]
+  时会重 marshal(语义对比即可)、`ports.Inbound.Tag` 不进 round-trip。
+
 ## v3.5.0-beta.3 — 2026-05-22
 
 ### Fixed
