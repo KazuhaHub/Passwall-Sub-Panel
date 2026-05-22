@@ -4,6 +4,25 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## v3.3.0-beta.7 — 2026-05-21
+
+### Fixed
+- **流量历史小时桶随时间静默缩水**:raw 快照按 `now-7d`(非整点)删除,某小时桶横跨
+  删除点时会先被删掉最早的几条原始行;而 rollup 每轮全表重扫 + 无条件 upsert
+  覆盖(`MAX-MIN`),于是下一轮用残留行算出偏小的 delta 覆盖掉已正确的 hourly 值——
+  超过 7 天的历史小时每个少算约「一个 5 分钟快照间隔」的量。改为把 raw 删除点
+  **按 UTC 整点对齐**(`hourAlignedCutoff`),整小时删除、永不残缺,rollup 始终算完整
+  小时,delta 稳定。只影响长周期流量图,不影响计费 / 配额(那些走 user 行 lifetime
+  计数)。有单测覆盖。
+
+### 复查留档(本版未改,经只读核实)
+- **限流 IP 来源**:`http.trusted_proxies` 空配置默认信任所有代理(`0.0.0.0/0`)——
+  **若面板端口直接对公网暴露**,`X-Forwarded-For` 可被伪造以绕过 per-IP 限流并污染
+  审计 / 订阅日志的 IP。属注释写明的「假设端口不公开直达」的零配置默认。**部署建议**:
+  把 `http.trusted_proxies` 设为反代 IP(无反代则设 `none`)。
+- 前端认证刷新(单飞 + 防递归重放)、sync-task 重试(单 goroutine、崩溃靠
+  `ResetRunning` 回收、每目标至多一个活跃任务)经核实无并发 / 风暴问题。
+
 ## v3.3.0-beta.6 — 2026-05-21
 
 针对节点 / 邮件 / 流量三块「易出问题」子系统的一次深度复查后的修复(多 agent 审查

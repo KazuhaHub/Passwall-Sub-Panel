@@ -458,6 +458,14 @@ const rawTrafficRetentionDays = 7
 //
 // Mirrors pruneAudit / pruneSyncTasks: load settings, compute cutoffs,
 // call repo prune helpers, log non-zero deletions.
+// hourAlignedCutoff returns the start of the UTC hour containing
+// (now - retentionDays). Raw snapshot pruning uses it so deletes land on
+// whole-hour boundaries (see pruneTrafficSnapshots for why).
+func hourAlignedCutoff(now time.Time, retentionDays int) time.Time {
+	c := now.AddDate(0, 0, -retentionDays).UTC()
+	return time.Date(c.Year(), c.Month(), c.Day(), c.Hour(), 0, 0, 0, time.UTC)
+}
+
 func (a *App) pruneTrafficSnapshots(ctx context.Context) {
 	if a.settings == nil || a.trafficRepo == nil {
 		return
@@ -468,7 +476,14 @@ func (a *App) pruneTrafficSnapshots(ctx context.Context) {
 		return
 	}
 
-	rawCutoff := time.Now().AddDate(0, 0, -rawTrafficRetentionDays)
+	// Hour-align the cutoff so a prune only ever deletes WHOLE UTC hours of raw
+	// snapshots. Rollup buckets by hourFloor(captured_at) and re-scans every
+	// surviving raw row each cycle with an unconditional upsert; if a prune
+	// removed only the earliest rows of an hour that still has later rows, the
+	// next rollup would recompute a smaller MAX-MIN delta and overwrite the
+	// already-correct hourly bucket (silent history regression). Whole-hour
+	// deletes keep every surviving hour complete, so its delta stays stable.
+	rawCutoff := hourAlignedCutoff(time.Now(), rawTrafficRetentionDays)
 	deleted, err := a.trafficRepo.PruneBefore(ctx, rawCutoff)
 	if err != nil {
 		log.Warn("traffic snapshot cleanup", "err", err)
