@@ -411,6 +411,12 @@ type UISettings struct {
 	SubBlockAutoDisable bool `yaml:"sub_block_auto_disable" json:"sub_block_auto_disable"`
 	// SubBlockAutoDisableCount is the number of violations before auto-disabling. Default 3.
 	SubBlockAutoDisableCount int `yaml:"sub_block_auto_disable_count" json:"sub_block_auto_disable_count"`
+	// SubBlockNotifyUser, when true, emails the user a "you used a blocked
+	// client" warning on a blocked subscription fetch that hasn't yet hit the
+	// auto-disable threshold. Off by default. Capped at SubBlockNotifyMaxPerDay
+	// emails/day per user so a polling client can't trigger a mail storm.
+	SubBlockNotifyUser      bool `yaml:"sub_block_notify_user" json:"sub_block_notify_user"`
+	SubBlockNotifyMaxPerDay int  `yaml:"sub_block_notify_max_per_day" json:"sub_block_notify_max_per_day"`
 	// SubUpdateIntervalHours is the subscription auto-update interval in hours.
 	// Controls the Profile-Update-Interval header. Default 24.
 	SubUpdateIntervalHours int `yaml:"sub_update_interval_hours" json:"sub_update_interval_hours"`
@@ -554,6 +560,10 @@ type MailRepo interface {
 	SaveTemplate(ctx context.Context, t *domain.MailTemplate) error
 	HasSent(ctx context.Context, userID int64, kind domain.MailReminderKind, windowKey string) (bool, error)
 	RecordSent(ctx context.Context, userID int64, kind domain.MailReminderKind, windowKey, toEmail string) error
+	// CountSentInWindow counts mail_sent rows for (user, kind) whose window_key
+	// starts with the given prefix. Lets soft notifications (e.g. the
+	// blocked-client warning) cap at N per day by passing the date as prefix.
+	CountSentInWindow(ctx context.Context, userID int64, kind domain.MailReminderKind, windowKeyPrefix string) (int64, error)
 	// Audit-style readers over the same mail_sent table — surfaced to
 	// admin's Logs → Email tab. ListSent / ClearSent / DeleteSentBefore
 	// mirror the SubLogRepo verb names so the handler / cron code uses

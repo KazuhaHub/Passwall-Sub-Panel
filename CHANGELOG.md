@@ -4,6 +4,17 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## v3.3.0-beta.3 — 2026-05-21
+
+### Added
+- 滥用保护新增「被禁客户端邮件提醒」:当用户用被禁 / 不受支持的客户端拉订阅、但
+  尚未触发自动停用阈值时,给用户发一封提醒邮件(告知换用推荐客户端)。**默认关**;
+  开启后受「每天最多 X 条 / 用户」上限约束(默认 1),避免客户端轮询导致邮件轰炸;
+  与自动停用互斥(达到阈值时只发停用邮件)。新增可编辑 / 预览的 `blocked_client`
+  邮件模板(`ListTemplates` 对缺失 kind 用内置默认兜底,已有部署无需迁移即可用);
+  去重用 mail_sent 的 windowKey(`日期#序号`)+ 新增 `CountSentInWindow` 计数,
+  有单测覆盖。
+
 ## v3.3.0-beta.2 — 2026-05-21
 
 ### Added

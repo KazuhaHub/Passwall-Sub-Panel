@@ -231,6 +231,16 @@ func DefaultTemplates() []*domain.MailTemplate {
 				loginRow+emailRow("公告时间", "{{.GeneratedAt}}", true),
 			),
 		},
+		{
+			Kind:    domain.MailReminderBlockedClient,
+			Enabled: true,
+			Subject: "检测到不被允许的客户端",
+			Body: defaultHTMLTemplate(
+				"客户端不被允许",
+				"我们检测到你在使用不被允许 / 不受支持的客户端「{{.ClientName}}」拉取订阅，本次请求已被拒绝。请改用推荐的客户端；若反复使用被禁客户端，账号可能会被临时停用。",
+				loginRow+emailRow("客户端", "{{.ClientName}}", false)+emailRow("时间", "{{.GeneratedAt}}", true),
+			),
+		},
 	}
 }
 
@@ -392,7 +402,7 @@ func (s *Service) PreviewTemplate(ctx context.Context, tpl *domain.MailTemplate)
 
 func validateTemplateKind(kind domain.MailReminderKind) error {
 	switch kind {
-	case domain.MailReminderExpireBefore, domain.MailReminderExpired, domain.MailReminderTrafficLow, domain.MailReminderTrafficExhausted, domain.MailReminderAccountDisable, domain.MailReminderAccountEnable, domain.MailReminderAnnouncement:
+	case domain.MailReminderExpireBefore, domain.MailReminderExpired, domain.MailReminderTrafficLow, domain.MailReminderTrafficExhausted, domain.MailReminderAccountDisable, domain.MailReminderAccountEnable, domain.MailReminderAnnouncement, domain.MailReminderBlockedClient:
 		return nil
 	default:
 		return fmt.Errorf("%w: invalid template kind", domain.ErrValidation)
@@ -547,6 +557,70 @@ func (s *Service) SendAccountEnabledToUser(ctx context.Context, userID int64, en
 		return err
 	}
 	return s.SendAccountEnabledNotification(ctx, u, enableReason, enableDetail)
+}
+
+// SendBlockedClientWarning emails the user that they used a blocked /
+// unsupported client, when the admin enabled SubBlockNotifyUser. Capped at
+// SubBlockNotifyMaxPerDay per user per day (windowKey = "YYYY-MM-DD#seq") so a
+// polling client can't trigger a mail storm. Best-effort: NOT enqueued for
+// retry — it's a soft notice and the client re-fetches on its own schedule, so
+// a retry queue would just amplify the storm we're trying to avoid.
+func (s *Service) SendBlockedClientWarning(ctx context.Context, u *domain.User, clientName string) error {
+	settings, err := s.LoadSettings(ctx)
+	if err != nil || !settings.Enabled {
+		return err
+	}
+	uiCfg, err := s.settings.Load(ctx, ports.UISettings{})
+	if err != nil {
+		return err
+	}
+	if !uiCfg.SubBlockNotifyUser {
+		return nil
+	}
+	maxPerDay := uiCfg.SubBlockNotifyMaxPerDay
+	if maxPerDay <= 0 {
+		maxPerDay = 1
+	}
+	to := reminderAddress(u)
+	if to == "" {
+		return nil
+	}
+	today := time.Now().Format("2006-01-02")
+	sent, err := s.repo.CountSentInWindow(ctx, u.ID, domain.MailReminderBlockedClient, today)
+	if err != nil {
+		return err
+	}
+	if sent >= int64(maxPerDay) {
+		return nil // daily cap already reached
+	}
+	var tpl *domain.MailTemplate
+	templates, err := s.ListTemplates(ctx)
+	if err != nil {
+		return err
+	}
+	for _, t := range templates {
+		if t.Kind == domain.MailReminderBlockedClient && t.Enabled {
+			tpl = t
+			break
+		}
+	}
+	if tpl == nil {
+		return nil
+	}
+	data := s.templateData(ctx, settings, uiCfg, u)
+	data["ClientName"] = clientName
+	subject, err := renderTemplate("blocked_client_subject", tpl.Subject, data)
+	if err != nil {
+		return err
+	}
+	body, err := renderTemplate("blocked_client_body", tpl.Body, data)
+	if err != nil {
+		return err
+	}
+	if err := sendSMTP(ctx, settings, to, subject, body); err != nil {
+		return err
+	}
+	return s.repo.RecordSent(ctx, u.ID, domain.MailReminderBlockedClient, today+"#"+strconv.FormatInt(sent, 10), to)
 }
 
 type AnnouncementInput struct {
@@ -928,6 +1002,7 @@ func (s *Service) previewTemplateData(ctx context.Context, settings domain.MailS
 		"EnableDetail":         enableDetail,
 		"AnnouncementTitle":    announcementTitle,
 		"AnnouncementBodyHTML": announcementBody,
+		"ClientName":           "Clash 示例客户端",
 	}
 	var configuredLogo, configuredLogoDark, base string
 	if s != nil && s.settings != nil {

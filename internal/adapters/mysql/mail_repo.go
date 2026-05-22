@@ -88,6 +88,14 @@ func (r *mailRepo) RecordSent(ctx context.Context, userID int64, kind domain.Mai
 	return r.db.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(row).Error
 }
 
+func (r *mailRepo) CountSentInWindow(ctx context.Context, userID int64, kind domain.MailReminderKind, windowKeyPrefix string) (int64, error) {
+	var count int64
+	err := r.db.WithContext(ctx).Model(&mailSentRow{}).
+		Where("user_id = ? AND kind = ? AND window_key LIKE ?", userID, string(kind), windowKeyPrefix+"%").
+		Count(&count).Error
+	return count, err
+}
+
 // ListSent paginates over mail_sent joined with users so admin's Logs →
 // Email tab can show "who got what kind of reminder". Same shape as
 // subLogRepo.List — filter on user_id / since / until, ORDER BY sent_at

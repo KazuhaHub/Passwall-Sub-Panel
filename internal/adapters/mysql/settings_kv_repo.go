@@ -162,6 +162,8 @@ func settingDescriptors(s *ports.UISettings) []settingDescriptor {
 		boolField("sub", "sub_region_flag_prefix", &s.SubRegionFlagPrefix),
 		boolField("sub", "sub_block_auto_disable", &s.SubBlockAutoDisable),
 		intField("sub", "sub_block_auto_disable_count", &s.SubBlockAutoDisableCount),
+		boolField("sub", "sub_block_notify_user", &s.SubBlockNotifyUser),
+		intField("sub", "sub_block_notify_max_per_day", &s.SubBlockNotifyMaxPerDay),
 		intField("sub", "sub_log_retention_days", &s.SubLogRetentionDays),
 		intField("notify", "mail_sent_retention_days", &s.MailSentRetentionDays),
 		strField("sub", "sub_import_tutorial_url", &s.SubImportTutorialURL),
@@ -363,6 +365,9 @@ func applyUISettingsDefaults(out, defaults ports.UISettings) ports.UISettings {
 	}
 	if out.SubBlockAutoDisableCount <= 0 {
 		out.SubBlockAutoDisableCount = 3
+	}
+	if out.SubBlockNotifyMaxPerDay <= 0 {
+		out.SubBlockNotifyMaxPerDay = 1
 	}
 	if out.SubUpdateIntervalHours <= 0 {
 		out.SubUpdateIntervalHours = 24

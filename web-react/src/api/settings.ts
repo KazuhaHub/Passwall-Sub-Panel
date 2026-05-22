@@ -90,6 +90,11 @@ export interface UISettings {
   sub_log_retention_days: number
   sub_block_auto_disable: boolean
   sub_block_auto_disable_count: number
+  /** Email the user a warning when they fetch with a blocked client (before
+   *  hitting the auto-disable threshold). Off by default. */
+  sub_block_notify_user: boolean
+  /** Per-user/day cap on the blocked-client warning email. Default 1. */
+  sub_block_notify_max_per_day: number
   sub_update_interval_hours: number
   /** Template applied server-side to produce the profile name baked into
    *  Content-Disposition / Profile-Title response headers and the
@@ -132,7 +137,7 @@ export async function putUISettings(s: UISettings) {
 }
 
 // ---- Mail reminders ----
-export type MailReminderKind = 'expire_before' | 'expired' | 'traffic_low' | 'traffic_exhausted' | 'account_disabled' | 'account_enabled' | 'announcement'
+export type MailReminderKind = 'expire_before' | 'expired' | 'traffic_low' | 'traffic_exhausted' | 'account_disabled' | 'account_enabled' | 'announcement' | 'blocked_client'
 
 export interface MailSettings {
   enabled: boolean

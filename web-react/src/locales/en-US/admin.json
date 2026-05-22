@@ -224,7 +224,8 @@
         "traffic_exhausted": "Traffic exhausted",
         "account_disabled": "Account disabled",
         "account_enabled": "Account enabled",
-        "announcement": "Global announcement"
+        "announcement": "Global announcement",
+        "blocked_client": "Blocked client warning"
       },
       "tpl_subject": "Subject",
       "tpl_body": "Body",
@@ -332,6 +333,8 @@
       "filter_mode_help": "Blacklist (default): only clients you explicitly disable are blocked; unknown clients pass through (served mihomo as fallback).\n\nWhitelist: only known + enabled client families are allowed; anything unknown or disabled is blocked and counts as an abuse strike (may trigger auto-disable). Use for strict abuse protection.",
       "sub_block_auto_disable": "Auto-disable account on abusive subscription requests",
       "sub_block_auto_disable_count": "Consecutive failures before auto-disable",
+      "sub_block_notify_user": "Email the user when a blocked client is used",
+      "sub_block_notify_max_per_day": "Max emails per day",
       "rule_table": {
         "name": "Name",
         "keywords": "Keywords",

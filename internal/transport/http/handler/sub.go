@@ -138,6 +138,20 @@ func (h *SubHandler) Get(c *gin.Context) {
 			log.Warn("failed to update violation count", "user_id", u.ID, "err", err)
 		}
 
+		// Soft notice (async): tell the user they used a blocked client, before
+		// they hit the auto-disable threshold. SendBlockedClientWarning no-ops
+		// when SubBlockNotifyUser is off and is per-day capped inside the
+		// mailer, so calling it unconditionally here is safe.
+		if h.mailer != nil && h.async != nil {
+			userCopy := u
+			clientName := detected.ClientName
+			h.async.Go("sub.blocked-client-warning", func(ctx context.Context) {
+				if err := h.mailer.SendBlockedClientWarning(ctx, userCopy, clientName); err != nil {
+					log.Warn("failed to send blocked-client warning", "user_id", userCopy.ID, "err", err)
+				}
+			})
+		}
+
 		c.String(http.StatusForbidden, "client not allowed")
 		return
 	}

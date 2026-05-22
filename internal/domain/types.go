@@ -604,6 +604,7 @@ const (
 	MailReminderAccountDisable   MailReminderKind = "account_disabled"
 	MailReminderAccountEnable    MailReminderKind = "account_enabled"
 	MailReminderAnnouncement     MailReminderKind = "announcement"
+	MailReminderBlockedClient    MailReminderKind = "blocked_client"
 )
 
 type MailSettings struct {

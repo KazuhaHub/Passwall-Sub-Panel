@@ -61,6 +61,8 @@ type settingsDTO struct {
 	MailSentRetentionDays      int                      `json:"mail_sent_retention_days"`
 	SubBlockAutoDisable        bool                     `json:"sub_block_auto_disable"`
 	SubBlockAutoDisableCount   int                      `json:"sub_block_auto_disable_count"`
+	SubBlockNotifyUser         bool                     `json:"sub_block_notify_user"`
+	SubBlockNotifyMaxPerDay    int                      `json:"sub_block_notify_max_per_day"`
 	SubUpdateIntervalHours     int                      `json:"sub_update_interval_hours"`
 	SubProfileNameTemplate     string                   `json:"sub_profile_name_template"`
 	SubRegionFlagPrefix        bool                     `json:"sub_region_flag_prefix"`
@@ -129,6 +131,8 @@ func (h *AdminSettingsHandler) Get(c *gin.Context) {
 		MailSentRetentionDays:      s.MailSentRetentionDays,
 		SubBlockAutoDisable:        s.SubBlockAutoDisable,
 		SubBlockAutoDisableCount:   s.SubBlockAutoDisableCount,
+		SubBlockNotifyUser:         s.SubBlockNotifyUser,
+		SubBlockNotifyMaxPerDay:    s.SubBlockNotifyMaxPerDay,
 		SubUpdateIntervalHours:     s.SubUpdateIntervalHours,
 		SubProfileNameTemplate:     s.SubProfileNameTemplate,
 		SubRegionFlagPrefix:        s.SubRegionFlagPrefix,
@@ -197,6 +201,8 @@ func (h *AdminSettingsHandler) Put(c *gin.Context) {
 		MailSentRetentionDays:      req.MailSentRetentionDays,
 		SubBlockAutoDisable:        req.SubBlockAutoDisable,
 		SubBlockAutoDisableCount:   req.SubBlockAutoDisableCount,
+		SubBlockNotifyUser:         req.SubBlockNotifyUser,
+		SubBlockNotifyMaxPerDay:    req.SubBlockNotifyMaxPerDay,
 		SubUpdateIntervalHours:     req.SubUpdateIntervalHours,
 		SubProfileNameTemplate:     strings.TrimSpace(req.SubProfileNameTemplate),
 		SubRegionFlagPrefix:        req.SubRegionFlagPrefix,
@@ -292,6 +298,8 @@ func (h *AdminSettingsHandler) Put(c *gin.Context) {
 		MailSentRetentionDays:      s.MailSentRetentionDays,
 		SubBlockAutoDisable:        s.SubBlockAutoDisable,
 		SubBlockAutoDisableCount:   s.SubBlockAutoDisableCount,
+		SubBlockNotifyUser:         s.SubBlockNotifyUser,
+		SubBlockNotifyMaxPerDay:    s.SubBlockNotifyMaxPerDay,
 		SubUpdateIntervalHours:     s.SubUpdateIntervalHours,
 		SubProfileNameTemplate:     s.SubProfileNameTemplate,
 		SubRegionFlagPrefix:        s.SubRegionFlagPrefix,

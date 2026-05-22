@@ -561,6 +561,15 @@ export default function SettingsView() {
             <NumField label={t('settings.subscription.sub_block_auto_disable_count')}
               value={settings.sub_block_auto_disable_count}
               onChange={v => patch('sub_block_auto_disable_count', v)} />
+            <FormControlLabel label={t('settings.subscription.sub_block_notify_user', { defaultValue: '被禁客户端时邮件提醒用户' })}
+              control={<Switch checked={settings.sub_block_notify_user}
+                onChange={(_, c) => patch('sub_block_notify_user', c)} />}
+              sx={{ ml: 0, '& .MuiFormControlLabel-label': { ml: 1.5 } }} />
+            {settings.sub_block_notify_user && (
+              <NumField label={t('settings.subscription.sub_block_notify_max_per_day', { defaultValue: '每天最多发送（条）' })}
+                value={settings.sub_block_notify_max_per_day}
+                onChange={v => patch('sub_block_notify_max_per_day', v)} />
+            )}
           </Section>
 
           <ClientRegistryEditor
@@ -752,7 +761,7 @@ function MailTab() {
     return <Box sx={{ display: 'grid', placeItems: 'center', py: 6 }}><CircularProgress /></Box>
   }
 
-  const TPL_KINDS: MailReminderKind[] = ['expire_before', 'expired', 'traffic_low', 'traffic_exhausted', 'account_disabled', 'account_enabled', 'announcement']
+  const TPL_KINDS: MailReminderKind[] = ['expire_before', 'expired', 'traffic_low', 'traffic_exhausted', 'account_disabled', 'account_enabled', 'announcement', 'blocked_client']
   // Fall back to a synthesized empty template if the backend response doesn't
   // include the active kind (e.g., user is on a pre-update binary that doesn't
   // know about `traffic_exhausted` yet). Without this, switching to such a tab

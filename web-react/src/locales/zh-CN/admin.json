@@ -224,7 +224,8 @@
         "traffic_exhausted": "流量耗尽",
         "account_disabled": "账号停用",
         "account_enabled": "账号启用",
-        "announcement": "全站公告"
+        "announcement": "全站公告",
+        "blocked_client": "被禁客户端提醒"
       },
       "tpl_subject": "主题",
       "tpl_body": "正文",
@@ -332,6 +333,8 @@
       "filter_mode_help": "黑名单（默认）：只拦截你明确「禁用」的客户端族，未识别的客户端放行（按 mihomo 兜底）。\n\n白名单：只放行「已知且启用」的客户端族，未识别 / 未启用的一律拦截，并计入异常次数（达到阈值可能触发自动停用）。适合严格防滥用。",
       "sub_block_auto_disable": "异常订阅请求自动禁用账号",
       "sub_block_auto_disable_count": "触发禁用的连续异常次数",
+      "sub_block_notify_user": "被禁客户端时邮件提醒用户",
+      "sub_block_notify_max_per_day": "每天最多发送（条）",
       "rule_table": {
         "name": "名称",
         "keywords": "关键词",
