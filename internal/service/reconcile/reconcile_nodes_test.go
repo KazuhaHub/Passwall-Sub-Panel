@@ -148,12 +148,14 @@ func TestCheckNodes_DriftPushed(t *testing.T) {
 		Port:            443,
 		StreamSettings:  `{"network":"ws","security":"tls"}`, // PSP's truth
 		InboundSettings: `{"decryption":"none"}`,
+		InboundRemark:   "psp-stored", // stale vs the operator's live rename below
 		ConfigSyncedAt:  &now,
 	}
 	live := ports.Inbound{
 		ID: 3, Protocol: "vless", Port: 443,
 		StreamSettings: `{"network":"tcp","security":"none"}`, // drifted on 3X-UI
 		Settings:       `{"decryption":"none","clients":[{"id":"x"}]}`,
+		Remark:         "operator-renamed", // renamed directly in 3X-UI
 	}
 	client := &recClient{inbounds: []ports.Inbound{live}, getResp: &live}
 	repo := &recNodeRepo{nodes: []*domain.Node{node}}
@@ -167,6 +169,11 @@ func TestCheckNodes_DriftPushed(t *testing.T) {
 	}
 	if client.updated[0].StreamSettings != `{"network":"ws","security":"tls"}` {
 		t.Fatalf("push must carry PSP's config, got %s", client.updated[0].StreamSettings)
+	}
+	// remark is operator-owned: the drift push must carry the LIVE remark, not
+	// PSP's stale stored one, so a direct-in-3X-UI rename survives the push.
+	if client.updated[0].Remark != "operator-renamed" {
+		t.Fatalf("drift push must preserve the operator's live remark, got %q", client.updated[0].Remark)
 	}
 	if report.Fixed != 1 {
 		t.Fatalf("want report.Fixed=1, got %d", report.Fixed)

@@ -180,9 +180,11 @@ func InSync(n *domain.Node, live *ports.Inbound) bool {
 	if n.InboundListen != live.Listen {
 		return false
 	}
-	if n.InboundRemark != live.Remark {
-		return false
-	}
+	// InboundRemark is intentionally NOT compared: it's a cosmetic label, and
+	// enforcing it would make reconcile revert an admin's direct 3X-UI rename
+	// every cycle. The remark still rides along in SpecFromNode, so a push
+	// triggered by a real config drift carries PSP's remark, but a remark-only
+	// change never triggers one. See docs/inbound-ownership.md.
 	if n.InboundExpiryTime != live.ExpiryTime {
 		return false
 	}
@@ -204,20 +206,52 @@ func markSynced(n *domain.Node) {
 	n.ConfigSyncState = "synced"
 }
 
-// jsonEqual compares two JSON strings semantically. Blank strings are treated
-// as equal to each other. When either side isn't parseable JSON, it falls back
-// to a trimmed string comparison.
+// jsonEqual compares two JSON strings semantically: key ordering and whitespace
+// don't matter. All "effectively empty" forms — "", "null", "{}", "[]" — compare
+// equal to each other, so the asymmetry between a stored snapshot normalised to
+// "{}" and a live value 3X-UI returns as "" / null can't register as perpetual
+// drift. Unparseable input on either side (and not a blank) falls back to a
+// trimmed string comparison.
 func jsonEqual(a, b string) bool {
 	a, b = strings.TrimSpace(a), strings.TrimSpace(b)
 	if a == b {
 		return true
 	}
-	var av, bv any
-	if err := json.Unmarshal([]byte(a), &av); err != nil {
+	av, aok := parseJSONLoose(a)
+	bv, bok := parseJSONLoose(b)
+	if !aok || !bok {
 		return false
 	}
-	if err := json.Unmarshal([]byte(b), &bv); err != nil {
-		return false
+	if isEmptyJSON(av) && isEmptyJSON(bv) {
+		return true
 	}
 	return reflect.DeepEqual(av, bv)
+}
+
+// parseJSONLoose unmarshals s, treating a blank string as JSON null (rather than
+// a parse error) so blank/"null" normalise together.
+func parseJSONLoose(s string) (any, bool) {
+	if s == "" {
+		return nil, true
+	}
+	var v any
+	if err := json.Unmarshal([]byte(s), &v); err != nil {
+		return nil, false
+	}
+	return v, true
+}
+
+// isEmptyJSON reports whether v carries no meaningful config: JSON null, an
+// empty object, or an empty array.
+func isEmptyJSON(v any) bool {
+	switch t := v.(type) {
+	case nil:
+		return true
+	case map[string]any:
+		return len(t) == 0
+	case []any:
+		return len(t) == 0
+	default:
+		return false
+	}
 }

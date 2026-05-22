@@ -34,18 +34,9 @@ func (s *Service) renderURIList(ctx context.Context, u *domain.User, items []ren
 	st, _ := s.repos.Settings.Load(ctx, ports.UISettings{})
 	emailRules := domain.EmailRules{Domain: st.EmailDomain}
 
-	// v3.5 fallback prefetch: same as mihomo's buildProxies. Un-captured nodes
-	// share one ListInbounds per panel instead of one GetInbound per node.
-	var fallbackItems []renderItem
-	for _, it := range items {
-		if !it.isSeparator && !nodeHasLocalConfig(it.node) {
-			fallbackItems = append(fallbackItems, it)
-		}
-	}
-	var fetched map[int64]*ports.Inbound
-	if len(fallbackItems) > 0 {
-		fetched = s.prefetchInboundsForRender(ctx, fallbackItems)
-	}
+	// Local snapshot for captured nodes, one batched ListInbounds per panel for
+	// the un-captured transition-window remainder. See resolveInbounds.
+	inboundByNode := s.resolveInbounds(ctx, items)
 
 	lines := make([]string, 0, len(items))
 	for _, it := range items {
@@ -60,12 +51,7 @@ func (s *Service) renderURIList(ctx context.Context, u *domain.User, items []ren
 			lines = append(lines, buildSeparatorURI(it.name))
 			continue
 		}
-		var inb *ports.Inbound
-		if nodeHasLocalConfig(it.node) {
-			inb = inboundFromNode(it.node)
-		} else {
-			inb = fetched[it.node.ID]
-		}
+		inb := inboundByNode[it.node.ID]
 		if inb == nil {
 			log.Warn("uri-list: skip node, inbound config unavailable (no local snapshot and live fetch failed)",
 				"node_id", it.node.ID)
@@ -396,4 +382,3 @@ func joinHostPort(host string, port int) string {
 	}
 	return host + ":" + strconv.Itoa(port)
 }
-

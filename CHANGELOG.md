@@ -4,6 +4,16 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## v3.5.0-beta.5 — 2026-05-22
+
+### Changed
+- **承接 beta.1 inbound 配置本地化的去重 + 健壮性收尾**(除下述 remark 一项外,无对外行为变化):
+  - **渲染取 inbound 配置去重**:三种订阅格式(mihomo / sing-box / URI-list)各自重复的"本地快照优先、未捕获节点按 panel 批量回源"逻辑收敛为单个 `resolveInbounds`;删除已无生产调用的 `inboundForNodeRender` 死代码。
+  - **inbound `remark` 完全归运维,reconcile 不再碰它**(撤销 beta.3 的 "InSync covers remark"):remark 是展示用标签,强制它会让管理员在 3X-UI 直接改名后每轮被 reconcile 改回。现在 ① `InSync` 不因 remark 判漂移;② 即便因真实连接配置漂移触发下发,也用 live 的 remark 而非 PSP 存的(保住运维改名,推后 re-capture 再把运维值同步进快照)。仅 PSP 主动新建 / 编辑 inbound 时按表单写 remark。
+  - **`jsonEqual` 空值等价**:`""` / `null` / `{}` / `[]` 视作等价,消除"存储侧归一成 `{}`、3X-UI 侧返回 `""`"被误判为永久漂移、反复死推的潜在脆弱点。
+  - **reconcile 稳态零额外读库**:已捕获且 in-sync 的节点直接跳过,不再为每个节点做一次防陈旧重读(`GetByID`);只有待回填 / 漂移节点才付重读代价。
+  - 本轮触及文件统一 `gofmt`。
+
 ## v3.5.0-beta.4 — 2026-05-22
 
 ### Fixed

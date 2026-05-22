@@ -147,13 +147,37 @@ func TestInSync(t *testing.T) {
 		t.Fatalf("expected drift when port differs")
 	}
 
-	// Remark change is drift — PSP owns the inbound's display name on 3X-UI,
-	// so operator-side edits to remark should be pushed back.
-	drift3 := *n
-	drift3.InboundRemark = "psp-managed"
-	liveWithRemark := *live
-	liveWithRemark.Remark = "manual-rename"
-	if InSync(&drift3, &liveWithRemark) {
-		t.Fatalf("expected drift when remark differs")
+	// Remark is NOT enforced (cosmetic): a remark-only difference must read as
+	// in-sync, so reconcile never reverts an admin's direct 3X-UI rename.
+	noDrift := *n
+	noDrift.InboundRemark = "psp-managed"
+	liveRenamed := *live
+	liveRenamed.Remark = "manual-rename"
+	if !InSync(&noDrift, &liveRenamed) {
+		t.Fatalf("remark-only difference must NOT register as drift")
+	}
+}
+
+// TestJSONEqualEmptyEquivalence locks the #4 insurance: every "effectively
+// empty" JSON form compares equal, so a snapshot normalised to "{}" never
+// perpetually drifts against a live "" / null the way a naive string/parse
+// compare would.
+func TestJSONEqualEmptyEquivalence(t *testing.T) {
+	empties := []string{"", "   ", "null", "{}", "[]"}
+	for _, a := range empties {
+		for _, b := range empties {
+			if !jsonEqual(a, b) {
+				t.Fatalf("jsonEqual(%q, %q) = false, want true (empty-equivalent)", a, b)
+			}
+		}
+	}
+	if jsonEqual(`{"network":"ws"}`, "{}") {
+		t.Fatalf("non-empty object must differ from empty")
+	}
+	if !jsonEqual(`{"a":1,"b":2}`, `{"b":2,"a":1}`) {
+		t.Fatalf("key order must not matter")
+	}
+	if jsonEqual(`{bad`, `{}`) {
+		t.Fatalf("unparseable input must not equal empty")
 	}
 }

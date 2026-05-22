@@ -243,23 +243,11 @@ func (s *Service) buildProxies(ctx context.Context, u *domain.User, items []rend
 	st, _ := s.repos.Settings.Load(ctx, ports.UISettings{})
 	emailRules := domain.EmailRules{Domain: st.EmailDomain}
 
-	// v3.5: nodes with a captured config snapshot render purely from the
-	// local DB (zero 3X-UI calls), so a subscription still renders while
-	// 3X-UI is unreachable. Only nodes never captured (ConfigSyncedAt==nil
-	// — freshly imported, or a pre-v3.5 row before the first poll) fall
-	// back to a live ListInbounds; that transient cost disappears once a poll
-	// backfills them. When every node has local config the pool is never
-	// touched.
-	var fallbackItems []renderItem
-	for _, it := range items {
-		if !it.isSeparator && !nodeHasLocalConfig(it.node) {
-			fallbackItems = append(fallbackItems, it)
-		}
-	}
-	var fetched map[int64]*ports.Inbound
-	if len(fallbackItems) > 0 {
-		fetched = s.prefetchInboundsForRender(ctx, fallbackItems)
-	}
+	// Captured nodes render from the local snapshot (zero 3X-UI calls), so a
+	// subscription still renders while 3X-UI is unreachable; un-captured nodes
+	// (transition window) batch into one ListInbounds per panel. See
+	// resolveInbounds.
+	inboundByNode := s.resolveInbounds(ctx, items)
 
 	out := make([]map[string]any, 0, len(items))
 	for _, it := range items {
@@ -267,12 +255,7 @@ func (s *Service) buildProxies(ctx context.Context, u *domain.User, items []rend
 			out = append(out, emitSeparator(it.name))
 			continue
 		}
-		var inb *ports.Inbound
-		if nodeHasLocalConfig(it.node) {
-			inb = inboundFromNode(it.node)
-		} else {
-			inb = fetched[it.node.ID]
-		}
+		inb := inboundByNode[it.node.ID]
 		if inb == nil {
 			log.Warn("render: skip node, inbound config unavailable (no local snapshot and live fetch failed)",
 				"node_id", it.node.ID, "panel_id", it.node.PanelID, "inbound_id", it.node.InboundID)
@@ -342,9 +325,9 @@ func (s *Service) prefetchInboundsForRender(ctx context.Context, items []renderI
 	// "missing" as "skip this node + warn", same as the old fetchInbound
 	// failure path.
 	type panelResult struct {
-		panelID    int64
+		panelID     int64
 		byInboundID map[int]*ports.Inbound
-		err        error
+		err         error
 	}
 	resultsCh := make(chan panelResult, len(panelInboundIDs))
 	for pid := range panelInboundIDs {

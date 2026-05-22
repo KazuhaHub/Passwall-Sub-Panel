@@ -30,35 +30,35 @@ type userRow struct {
 	// not by a DB constraint, so a legacy install upgrading from
 	// pre-v2.3.0 (every row defaulting to ('local','')) doesn't fail
 	// AutoMigrate; first-time SSO login backfills sso_subject on demand.
-	SSOProvider         string `gorm:"size:64;not null;default:local;index:idx_user_sso,priority:1"`
-	SSOSubject          string `gorm:"size:255;not null;default:'';index:idx_user_sso,priority:2"`
-	Email               string `gorm:"size:255;index"`
-	PasswordHash        string `gorm:"size:255"`
-	Role                string `gorm:"size:16;not null;default:user"`
-	SubToken            string `gorm:"size:64;uniqueIndex;not null"`
-	UUID                string `gorm:"size:36;not null"`
-	GroupID             int64  `gorm:"index;not null"`
-	EnabledRuleSets     jsonStrings
-	PersonalRules       string `gorm:"type:text"`
-	ExpireAt            *time.Time
-	TrafficLimitBytes   int64
-	TrafficResetPeriod  string `gorm:"size:16;default:never"`
-	TrafficPeriodStart  *time.Time
-	LifetimeUpBytes     int64 `gorm:"default:0"`
-	LifetimeDownBytes   int64 `gorm:"default:0"`
-	LifetimeTotalBytes  int64 `gorm:"default:0"`
+	SSOProvider        string `gorm:"size:64;not null;default:local;index:idx_user_sso,priority:1"`
+	SSOSubject         string `gorm:"size:255;not null;default:'';index:idx_user_sso,priority:2"`
+	Email              string `gorm:"size:255;index"`
+	PasswordHash       string `gorm:"size:255"`
+	Role               string `gorm:"size:16;not null;default:user"`
+	SubToken           string `gorm:"size:64;uniqueIndex;not null"`
+	UUID               string `gorm:"size:36;not null"`
+	GroupID            int64  `gorm:"index;not null"`
+	EnabledRuleSets    jsonStrings
+	PersonalRules      string `gorm:"type:text"`
+	ExpireAt           *time.Time
+	TrafficLimitBytes  int64
+	TrafficResetPeriod string `gorm:"size:16;default:never"`
+	TrafficPeriodStart *time.Time
+	LifetimeUpBytes    int64 `gorm:"default:0"`
+	LifetimeDownBytes  int64 `gorm:"default:0"`
+	LifetimeTotalBytes int64 `gorm:"default:0"`
 	// PeriodBaselineBytes: LifetimeTotalBytes at the start of the current
 	// period. periodUsage simplifies to lifetime - baseline (O(1)). Pre-v3
 	// derived from a LastBefore(period_start) snapshot query on every read.
-	PeriodBaselineBytes int64 `gorm:"default:0"`
-	LifetimeBaselineAt  *time.Time
-	DisplayName         string `gorm:"size:128"`
-	Remark              string `gorm:"size:255"`
-	Enabled             bool   `gorm:"not null"`
-	AutoDisabledReason  string `gorm:"size:32"`
-	DisableDetail       string `gorm:"type:text"`
-	BlockViolationCount  int `gorm:"default:0"`
-	LastBlockViolationAt *time.Time
+	PeriodBaselineBytes    int64 `gorm:"default:0"`
+	LifetimeBaselineAt     *time.Time
+	DisplayName            string `gorm:"size:128"`
+	Remark                 string `gorm:"size:255"`
+	Enabled                bool   `gorm:"not null"`
+	AutoDisabledReason     string `gorm:"size:32"`
+	DisableDetail          string `gorm:"type:text"`
+	BlockViolationCount    int    `gorm:"default:0"`
+	LastBlockViolationAt   *time.Time
 	EmergencyUsedCount     int
 	EmergencyUntil         *time.Time
 	EmergencyBaselineBytes int64 `gorm:"default:0"`
@@ -76,32 +76,32 @@ func (userRow) TableName() string { return "users" }
 
 func (r *userRow) toDomain() *domain.User {
 	return &domain.User{
-		ID:                  r.ID,
-		UPN:                 r.UPN,
-		SSOProvider:         r.SSOProvider,
-		SSOSubject:          r.SSOSubject,
-		Email:               r.Email,
-		PasswordHash:        r.PasswordHash,
-		Role:                domain.Role(r.Role),
-		SubToken:            r.SubToken,
-		UUID:                r.UUID,
-		GroupID:             r.GroupID,
-		EnabledRuleSets:     []string(r.EnabledRuleSets),
-		PersonalRules:       r.PersonalRules,
-		ExpireAt:            r.ExpireAt,
-		TrafficLimitBytes:   r.TrafficLimitBytes,
-		TrafficResetPeriod:  domain.ResetPeriod(r.TrafficResetPeriod),
-		TrafficPeriodStart:  r.TrafficPeriodStart,
-		LifetimeUpBytes:     r.LifetimeUpBytes,
-		LifetimeDownBytes:   r.LifetimeDownBytes,
-		LifetimeTotalBytes:  r.LifetimeTotalBytes,
-		LifetimeBaselineAt:  r.LifetimeBaselineAt,
-		PeriodBaselineBytes: r.PeriodBaselineBytes,
-		DisplayName:         r.DisplayName,
-		Remark:              r.Remark,
-		Enabled:             r.Enabled,
-		AutoDisabledReason:  domain.AutoDisabledReason(r.AutoDisabledReason),
-		DisableDetail:       r.DisableDetail,
+		ID:                     r.ID,
+		UPN:                    r.UPN,
+		SSOProvider:            r.SSOProvider,
+		SSOSubject:             r.SSOSubject,
+		Email:                  r.Email,
+		PasswordHash:           r.PasswordHash,
+		Role:                   domain.Role(r.Role),
+		SubToken:               r.SubToken,
+		UUID:                   r.UUID,
+		GroupID:                r.GroupID,
+		EnabledRuleSets:        []string(r.EnabledRuleSets),
+		PersonalRules:          r.PersonalRules,
+		ExpireAt:               r.ExpireAt,
+		TrafficLimitBytes:      r.TrafficLimitBytes,
+		TrafficResetPeriod:     domain.ResetPeriod(r.TrafficResetPeriod),
+		TrafficPeriodStart:     r.TrafficPeriodStart,
+		LifetimeUpBytes:        r.LifetimeUpBytes,
+		LifetimeDownBytes:      r.LifetimeDownBytes,
+		LifetimeTotalBytes:     r.LifetimeTotalBytes,
+		LifetimeBaselineAt:     r.LifetimeBaselineAt,
+		PeriodBaselineBytes:    r.PeriodBaselineBytes,
+		DisplayName:            r.DisplayName,
+		Remark:                 r.Remark,
+		Enabled:                r.Enabled,
+		AutoDisabledReason:     domain.AutoDisabledReason(r.AutoDisabledReason),
+		DisableDetail:          r.DisableDetail,
 		BlockViolationCount:    r.BlockViolationCount,
 		LastBlockViolationAt:   r.LastBlockViolationAt,
 		EmergencyUsedCount:     r.EmergencyUsedCount,
@@ -115,32 +115,32 @@ func (r *userRow) toDomain() *domain.User {
 
 func userFromDomain(u *domain.User) *userRow {
 	return &userRow{
-		ID:                  u.ID,
-		UPN:                 u.UPN,
-		SSOProvider:         u.SSOProvider,
-		SSOSubject:          u.SSOSubject,
-		Email:               u.Email,
-		PasswordHash:        u.PasswordHash,
-		Role:                string(u.Role),
-		SubToken:            u.SubToken,
-		UUID:                u.UUID,
-		GroupID:             u.GroupID,
-		EnabledRuleSets:     jsonStrings(u.EnabledRuleSets),
-		PersonalRules:       u.PersonalRules,
-		ExpireAt:            u.ExpireAt,
-		TrafficLimitBytes:   u.TrafficLimitBytes,
-		TrafficResetPeriod:  string(u.TrafficResetPeriod),
-		TrafficPeriodStart:  u.TrafficPeriodStart,
-		LifetimeUpBytes:     u.LifetimeUpBytes,
-		LifetimeDownBytes:   u.LifetimeDownBytes,
-		LifetimeTotalBytes:  u.LifetimeTotalBytes,
-		LifetimeBaselineAt:  u.LifetimeBaselineAt,
-		PeriodBaselineBytes: u.PeriodBaselineBytes,
-		DisplayName:         u.DisplayName,
-		Remark:              u.Remark,
-		Enabled:             u.Enabled,
-		AutoDisabledReason:  string(u.AutoDisabledReason),
-		DisableDetail:       u.DisableDetail,
+		ID:                     u.ID,
+		UPN:                    u.UPN,
+		SSOProvider:            u.SSOProvider,
+		SSOSubject:             u.SSOSubject,
+		Email:                  u.Email,
+		PasswordHash:           u.PasswordHash,
+		Role:                   string(u.Role),
+		SubToken:               u.SubToken,
+		UUID:                   u.UUID,
+		GroupID:                u.GroupID,
+		EnabledRuleSets:        jsonStrings(u.EnabledRuleSets),
+		PersonalRules:          u.PersonalRules,
+		ExpireAt:               u.ExpireAt,
+		TrafficLimitBytes:      u.TrafficLimitBytes,
+		TrafficResetPeriod:     string(u.TrafficResetPeriod),
+		TrafficPeriodStart:     u.TrafficPeriodStart,
+		LifetimeUpBytes:        u.LifetimeUpBytes,
+		LifetimeDownBytes:      u.LifetimeDownBytes,
+		LifetimeTotalBytes:     u.LifetimeTotalBytes,
+		LifetimeBaselineAt:     u.LifetimeBaselineAt,
+		PeriodBaselineBytes:    u.PeriodBaselineBytes,
+		DisplayName:            u.DisplayName,
+		Remark:                 u.Remark,
+		Enabled:                u.Enabled,
+		AutoDisabledReason:     string(u.AutoDisabledReason),
+		DisableDetail:          u.DisableDetail,
 		BlockViolationCount:    u.BlockViolationCount,
 		LastBlockViolationAt:   u.LastBlockViolationAt,
 		EmergencyUsedCount:     u.EmergencyUsedCount,
@@ -190,31 +190,31 @@ func groupFromDomain(g *domain.Group) *groupRow {
 }
 
 type nodeRow struct {
-	ID                    int64 `gorm:"primaryKey;autoIncrement"`
-	PanelID               int64 `gorm:"not null;index;uniqueIndex:uk_panel_inbound,priority:1"`
-	InboundID             int   `gorm:"not null;uniqueIndex:uk_panel_inbound,priority:2"`
-	DisplayName           string `gorm:"size:255;not null"`
-	ServerAddress         string `gorm:"size:255"`
-	Flow                  string `gorm:"size:64"`
+	ID            int64  `gorm:"primaryKey;autoIncrement"`
+	PanelID       int64  `gorm:"not null;index;uniqueIndex:uk_panel_inbound,priority:1"`
+	InboundID     int    `gorm:"not null;uniqueIndex:uk_panel_inbound,priority:2"`
+	DisplayName   string `gorm:"size:255;not null"`
+	ServerAddress string `gorm:"size:255"`
+	Flow          string `gorm:"size:64"`
 	// Protocol caches the upstream inbound's protocol so the UI can gate
 	// protocol-specific fields without a live 3X-UI fetch. Empty for rows
 	// written before this column existed; AutoMigrate adds it, no backfill.
-	Protocol              string `gorm:"size:32;default:''"`
+	Protocol string `gorm:"size:32;default:''"`
 	// Port caches the inbound's listen port for the health TCP/UDP probe.
 	// AutoMigrate adds it; the health pass backfills it from the inbound.
-	Port                  int    `gorm:"default:0"`
-	Region                string `gorm:"size:16;not null"`
-	Tags                  jsonStrings
-	SortOrder             int    `gorm:"default:0"`
-	Enabled               bool   `gorm:"default:true"`
+	Port      int    `gorm:"default:0"`
+	Region    string `gorm:"size:16;not null"`
+	Tags      jsonStrings
+	SortOrder int  `gorm:"default:0"`
+	Enabled   bool `gorm:"default:true"`
 	// Kind discriminates real 3X-UI-backed nodes from layout-only
 	// separator entries. Empty (the default for rows written before this
 	// column existed) is treated as "real" by the toDomain mapping so
 	// AutoMigrate alone is enough — no backfill needed.
 	Kind                  string `gorm:"size:16;default:'real'"`
-	LifetimeUpBytes       int64 `gorm:"default:0"`
-	LifetimeDownBytes     int64 `gorm:"default:0"`
-	LifetimeTotalBytes    int64 `gorm:"default:0"`
+	LifetimeUpBytes       int64  `gorm:"default:0"`
+	LifetimeDownBytes     int64  `gorm:"default:0"`
+	LifetimeTotalBytes    int64  `gorm:"default:0"`
 	LastTrafficUpBytes    int64  `gorm:"default:0"`
 	LastTrafficDownBytes  int64  `gorm:"default:0"`
 	LastTrafficTotalBytes int64  `gorm:"default:0"`
@@ -236,7 +236,7 @@ type nodeRow struct {
 	InboundExpiryTime int64  `gorm:"default:0"`
 	ConfigSyncedAt    *time.Time
 	ConfigSyncState   string `gorm:"size:32;default:''"`
-	CreatedAt             time.Time
+	CreatedAt         time.Time
 }
 
 func (nodeRow) TableName() string { return "nodes" }
@@ -345,10 +345,10 @@ func nodeFromDomain(n *domain.Node) (*nodeRow, error) {
 }
 
 type ownershipRow struct {
-	ID          int64 `gorm:"primaryKey;autoIncrement"`
-	UserID      int64 `gorm:"index;not null"`
-	PanelID     int64 `gorm:"not null;index;uniqueIndex:uk_owner_match,priority:1"`
-	InboundID   int   `gorm:"not null;uniqueIndex:uk_owner_match,priority:2"`
+	ID          int64  `gorm:"primaryKey;autoIncrement"`
+	UserID      int64  `gorm:"index;not null"`
+	PanelID     int64  `gorm:"not null;index;uniqueIndex:uk_owner_match,priority:1"`
+	InboundID   int    `gorm:"not null;uniqueIndex:uk_owner_match,priority:2"`
 	ClientEmail string `gorm:"size:255;not null;uniqueIndex:uk_owner_match,priority:3"`
 	ClientUUID  string `gorm:"size:36;not null"`
 	CreatedAt   time.Time
@@ -530,10 +530,10 @@ type nodeTrafficHourlyRow struct {
 func (nodeTrafficHourlyRow) TableName() string { return "node_traffic_snapshots_hourly" }
 
 type auditRow struct {
-	ID         int64     `gorm:"primaryKey;autoIncrement"`
-	Actor      string    `gorm:"size:255;not null"`
-	Action     string    `gorm:"size:64;not null"`
-	Target     string    `gorm:"size:255"`
+	ID     int64  `gorm:"primaryKey;autoIncrement"`
+	Actor  string `gorm:"size:255;not null"`
+	Action string `gorm:"size:64;not null"`
+	Target string `gorm:"size:255"`
 	// Stored as plain text, not a JSON column: these hold opaque serialized
 	// snapshots that are never queried with JSON operators, and the audit
 	// helpers legitimately write "" (e.g. a create has no before-state).
@@ -634,7 +634,6 @@ type xuiPanelRow struct {
 	CreatedAt time.Time
 	UpdatedAt time.Time
 }
-
 
 type mailSettingsRow struct {
 	ID           int64 `gorm:"primaryKey"`

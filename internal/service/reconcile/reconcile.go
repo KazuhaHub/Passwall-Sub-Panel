@@ -627,12 +627,20 @@ func (s *Service) checkNodes(ctx context.Context, report *Report, cache map[inbo
 //     is overwritten — never a client. We then re-capture the post-push live
 //     config so a JSON normalisation by 3X-UI converges instead of looping.
 func (s *Service) reconcileInboundConfig(ctx context.Context, n *domain.Node, live *ports.Inbound, report *Report) {
-	// Stale-read guard. checkNodes pulled `n` from List() at the top of the
-	// cycle; admin write paths (CreateInbound / ImportExisting /
-	// UpdateInboundConfig) may have stored a fresh snapshot since then. If we
-	// pushed our stale copy now, the admin's edit would be silently reverted
-	// on both 3X-UI and (after re-capture) locally. Skip this node on any
-	// version mismatch — the next reconcile cycle will see the fresh row.
+	// Steady state — captured AND already in sync — is the overwhelmingly
+	// common case: do nothing, and notably skip the stale-read guard's extra
+	// DB round-trip. Only un-captured (backfill) or drifted nodes fall through
+	// to a mutation below.
+	if n.ConfigSyncedAt != nil && inboundcfg.InSync(n, live) {
+		return
+	}
+
+	// We're about to mutate. checkNodes pulled `n` from List() at the top of
+	// the cycle; an admin write path (CreateInbound / ImportExisting /
+	// UpdateInboundConfig) may have stored a fresh snapshot since. If we pushed
+	// our stale copy now, the admin's edit would be silently reverted on both
+	// 3X-UI and (after re-capture) locally. Re-read and bail on any version
+	// mismatch — the next reconcile cycle will see the fresh row.
 	fresh, err := s.nodes.GetByID(ctx, n.ID)
 	if err != nil || fresh == nil {
 		return
@@ -660,14 +668,22 @@ func (s *Service) reconcileInboundConfig(ctx context.Context, n *domain.Node, li
 		})
 		return
 	}
-	if inboundcfg.InSync(n, live) {
-		return
-	}
+
+	// Captured but drifted (the early in-sync check above already ruled out the
+	// no-op case, and the stamp guard confirmed `n` is fresh) → push PSP's
+	// config back over the server-side drift.
 	c, err := s.pool.Get(n.PanelID)
 	if err != nil {
 		return
 	}
-	if err := c.UpdateInbound(ctx, n.InboundID, inboundcfg.SpecFromNode(n)); err != nil {
+	spec := inboundcfg.SpecFromNode(n)
+	// remark is operator-owned: an axis-A drift push must never overwrite a
+	// rename made directly in 3X-UI (InSync already ignores remark, so a
+	// remark-only change isn't even why we're here). Carry the live remark
+	// rather than PSP's stored one; the post-push re-capture below then syncs
+	// the operator's value back into the snapshot.
+	spec.Remark = live.Remark
+	if err := c.UpdateInbound(ctx, n.InboundID, spec); err != nil {
 		report.Issues = append(report.Issues, Issue{
 			PanelID: n.PanelID, PanelName: s.panelNameOf(n.PanelID), InboundID: n.InboundID,
 			Code: "inbound_config_push_failed", Detail: err.Error(),

@@ -35,17 +35,31 @@ func nodeHasLocalConfig(n *domain.Node) bool {
 	}
 }
 
-// inboundForNodeRender returns the node's local config snapshot, or live-fetches
-// it when the node hasn't been captured yet (transition window).
-//
-// All three production render paths (mihomo / sing-box / URI-list) now bucket
-// un-captured nodes by panel and call prefetchInboundsForRender once per
-// render — one ListInbounds per panel instead of one GetInbound per node.
-// This helper survives for unit tests that need to exercise the decision
-// in isolation; new render code should prefer the bulk path.
-func (s *Service) inboundForNodeRender(ctx context.Context, n *domain.Node) (*ports.Inbound, error) {
-	if nodeHasLocalConfig(n) {
-		return inboundFromNode(n), nil
+// resolveInbounds returns a node-id → inbound map covering every real
+// (non-separator) node in items. Captured nodes are served from their local
+// config snapshot (zero 3X-UI calls); un-captured nodes — the post-upgrade /
+// freshly-imported transition window — are batched into a single ListInbounds
+// per panel via prefetchInboundsForRender. A node absent from the result (its
+// panel was unreachable on the fallback path) is skipped + warned by the
+// caller. All three render paths (mihomo / sing-box / URI-list) share this, so
+// the local-first + bulk-fallback policy lives in exactly one place.
+func (s *Service) resolveInbounds(ctx context.Context, items []renderItem) map[int64]*ports.Inbound {
+	out := make(map[int64]*ports.Inbound, len(items))
+	var fallback []renderItem
+	for _, it := range items {
+		if it.isSeparator || it.node == nil {
+			continue
+		}
+		if nodeHasLocalConfig(it.node) {
+			out[it.node.ID] = inboundFromNode(it.node)
+		} else {
+			fallback = append(fallback, it)
+		}
 	}
-	return s.fetchInbound(ctx, n)
+	if len(fallback) > 0 {
+		for id, inb := range s.prefetchInboundsForRender(ctx, fallback) {
+			out[id] = inb
+		}
+	}
+	return out
 }

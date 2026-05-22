@@ -133,25 +133,27 @@ func TestBuildProxies_LocalConfig_ZeroFetch(t *testing.T) {
 	}
 }
 
-// TestInboundForNodeRender covers the shared local-first decision used by the
-// sing-box and URI-list paths: a captured node never touches the pool; an
-// un-captured one live-fetches.
-func TestInboundForNodeRender(t *testing.T) {
-	// Local snapshot present → panicPool proves zero fetch.
+// TestResolveInbounds covers the shared local-first + bulk-fallback decision
+// used by all three render paths: captured nodes resolve from the local
+// snapshot without touching the pool; un-captured ones fall back to a fetch.
+func TestResolveInbounds(t *testing.T) {
+	// Captured node → served from the local snapshot, pool never touched
+	// (panicPool would crash the test on any access).
 	s := &Service{pool: panicPool{}}
-	inb, err := s.inboundForNodeRender(context.Background(), vlessRealityNode(true))
-	if err != nil || inb == nil || inb.Protocol != "vless" {
-		t.Fatalf("local-config path = (%+v, %v), want vless inbound, no fetch", inb, err)
+	got := s.resolveInbounds(context.Background(), []renderItem{{name: "US-1", node: vlessRealityNode(true)}})
+	if inb := got[7]; inb == nil || inb.Protocol != "vless" {
+		t.Fatalf("captured node should resolve from local snapshot: %#v", got)
 	}
 
-	// No snapshot → falls back to the pool.
+	// Un-captured node → fallback fetch; unreachable panel → absent from map.
 	pool := &recordingPool{}
 	s2 := &Service{pool: pool}
-	if _, err := s2.inboundForNodeRender(context.Background(), vlessRealityNode(false)); err == nil {
-		t.Fatalf("expected fetch error from unreachable pool")
-	}
+	got2 := s2.resolveInbounds(context.Background(), []renderItem{{name: "US-1", node: vlessRealityNode(false)}})
 	if !pool.got.Load() {
-		t.Fatalf("un-captured node should trigger a live fetch")
+		t.Fatalf("un-captured node should trigger a fallback fetch")
+	}
+	if _, ok := got2[7]; ok {
+		t.Fatalf("unreachable panel → node must be absent from the resolved map")
 	}
 }
 

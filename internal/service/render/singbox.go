@@ -79,19 +79,9 @@ func (s *Service) buildSingBoxOutbounds(ctx context.Context, u *domain.User, ite
 	st, _ := s.repos.Settings.Load(ctx, ports.UISettings{})
 	emailRules := domain.EmailRules{Domain: st.EmailDomain}
 
-	// v3.5 fallback prefetch: bucket all un-captured nodes by panel so the
-	// transition window only costs one ListInbounds per panel, not one
-	// GetInbound per node (mihomo's buildProxies does the same).
-	var fallbackItems []renderItem
-	for _, it := range items {
-		if !it.isSeparator && !nodeHasLocalConfig(it.node) {
-			fallbackItems = append(fallbackItems, it)
-		}
-	}
-	var fetched map[int64]*ports.Inbound
-	if len(fallbackItems) > 0 {
-		fetched = s.prefetchInboundsForRender(ctx, fallbackItems)
-	}
+	// Local snapshot for captured nodes, one batched ListInbounds per panel for
+	// the un-captured transition-window remainder. See resolveInbounds.
+	inboundByNode := s.resolveInbounds(ctx, items)
 
 	nodeTags := make([]string, 0, len(items))
 	for _, it := range items {
@@ -114,12 +104,7 @@ func (s *Service) buildSingBoxOutbounds(ctx context.Context, u *domain.User, ite
 			nodeTags = append(nodeTags, it.name)
 			continue
 		}
-		var inb *ports.Inbound
-		if nodeHasLocalConfig(it.node) {
-			inb = inboundFromNode(it.node)
-		} else {
-			inb = fetched[it.node.ID]
-		}
+		inb := inboundByNode[it.node.ID]
 		if inb == nil {
 			log.Warn("render: skip node, inbound config unavailable (no local snapshot and live fetch failed)",
 				"node_id", it.node.ID, "panel_id", it.node.PanelID, "inbound_id", it.node.InboundID)
