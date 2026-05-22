@@ -461,6 +461,15 @@ func (s *Service) SendAccountDisabledNotification(ctx context.Context, u *domain
 	if to == "" {
 		return nil // No email address.
 	}
+	// Throttle: a disable can be triggered from several places (admin toggle,
+	// traffic poll, blocked-client) and a double-click or a quick retry could
+	// re-fire for the same event. Dedup per (user, reason, minute) so genuine
+	// later state changes still notify but accidental duplicates don't. Window
+	// is minute-grained so an SMTP-failure retry (minutes later) still sends.
+	windowKey := eventWindowKey(disableReason)
+	if already, _ := s.repo.HasSent(ctx, u.ID, domain.MailReminderAccountDisable, windowKey); already {
+		return nil
+	}
 	uiCfg, uiErr := s.settings.Load(ctx, ports.UISettings{})
 	if uiErr != nil {
 		// Log and proceed with zero-value uiCfg — templateData has
@@ -484,7 +493,16 @@ func (s *Service) SendAccountDisabledNotification(ctx context.Context, u *domain
 		s.enqueueMailNotify(ctx, u.ID, "account_disabled", disableReason, disableDetail)
 		return err
 	}
+	_ = s.repo.RecordSent(ctx, u.ID, domain.MailReminderAccountDisable, windowKey, to)
 	return nil
+}
+
+// eventWindowKey builds a per-minute dedup key for event-driven (non-periodic)
+// notifications like account disable/enable. The reason prefix keeps distinct
+// causes (traffic vs blocked-client vs admin) from masking one another, and the
+// minute bucket lets a legitimate later state change re-notify.
+func eventWindowKey(reason string) string {
+	return reason + "@" + time.Now().UTC().Format("2006-01-02T15:04")
 }
 
 // SendAccountDisabledToUser is a convenience wrapper for sending disable notification.
@@ -524,6 +542,11 @@ func (s *Service) SendAccountEnabledNotification(ctx context.Context, u *domain.
 	if to == "" {
 		return nil // No email address.
 	}
+	// Same per-minute dedup as the disable path (see eventWindowKey).
+	windowKey := eventWindowKey(enableReason)
+	if already, _ := s.repo.HasSent(ctx, u.ID, domain.MailReminderAccountEnable, windowKey); already {
+		return nil
+	}
 	uiCfg, uiErr := s.settings.Load(ctx, ports.UISettings{})
 	if uiErr != nil {
 		// Log and proceed with zero-value uiCfg — templateData has
@@ -547,6 +570,7 @@ func (s *Service) SendAccountEnabledNotification(ctx context.Context, u *domain.
 		s.enqueueMailNotify(ctx, u.ID, "account_enabled", enableReason, enableDetail)
 		return err
 	}
+	_ = s.repo.RecordSent(ctx, u.ID, domain.MailReminderAccountEnable, windowKey, to)
 	return nil
 }
 

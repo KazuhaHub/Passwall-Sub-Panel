@@ -64,12 +64,23 @@ type UserRepo interface {
 	Create(ctx context.Context, u *domain.User) error
 	Update(ctx context.Context, u *domain.User) error
 	// UpdateTrafficState persists ONLY the traffic-poll-owned columns
-	// (lifetime counters, period baseline/start, emergency window). The
-	// traffic poll loads every user at cycle start and writes them back many
-	// seconds later; a full-row Update would clobber any concurrent admin /
-	// self-service edit (password, group, role, expiry, sub_token) made in
-	// that window. This narrow write touches only the columns the poll owns.
+	// (lifetime counters, period baseline/start). The traffic poll loads every
+	// user at cycle start and writes them back many seconds later; a full-row
+	// Update would clobber any concurrent admin / self-service edit (password,
+	// group, role, expiry, sub_token) made in that window. This narrow write
+	// touches only the columns the poll owns.
+	//
+	// Deliberately does NOT write the emergency-access columns: those are owned
+	// by the emergency subsystem (UseEmergencyAccess grants, ClearEmergencyAccess
+	// clears). Writing them here from the poll's stale snapshot would silently
+	// revoke an emergency window granted concurrently mid-cycle.
 	UpdateTrafficState(ctx context.Context, u *domain.User) error
+	// ClearEmergencyAccess nulls emergency_until and zeroes
+	// emergency_baseline_bytes for one user via a targeted write. The traffic
+	// poll calls it (under user.Service's emergency lock) when a period
+	// rollover or quota-exhaustion ends the window, so it doesn't have to go
+	// through UpdateTrafficState (which no longer owns those columns).
+	ClearEmergencyAccess(ctx context.Context, userID int64) error
 	Delete(ctx context.Context, id int64) error
 	GetByID(ctx context.Context, id int64) (*domain.User, error)
 	GetByUPN(ctx context.Context, upn string) (*domain.User, error)

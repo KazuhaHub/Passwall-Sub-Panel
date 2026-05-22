@@ -37,6 +37,15 @@ type UserConfigPusher interface {
 	WithEmergencyLock(fn func())
 }
 
+// MailNotifier lets the poll email the user when it auto-disables them on
+// quota exhaustion or auto-re-enables them on period rollover. Optional /
+// nil-tolerant and late-bound (mailer.Service implements it but is wired up
+// after traffic.Service). Calls are fired async so SMTP can't stall the poll.
+type MailNotifier interface {
+	SendAccountDisabledToUser(ctx context.Context, userID int64, reason, detail string) error
+	SendAccountEnabledToUser(ctx context.Context, userID int64, reason, detail string) error
+}
+
 type Service struct {
 	users       ports.UserRepo
 	ownership   ports.OwnershipRepo
@@ -52,6 +61,37 @@ type Service struct {
 	// configPusher is wired lazily (user.Service is the implementor and
 	// is created before traffic.Service). nil = skip floor refresh on poll.
 	configPusher UserConfigPusher
+	// mailer is optional/late-bound. nil = no quota/rollover emails.
+	mailer MailNotifier
+}
+
+// SetMailNotifier wires the late-bound mailer used for auto-disable /
+// auto-re-enable emails. Same late-binding rationale as SetConfigPusher.
+func (s *Service) SetMailNotifier(m MailNotifier) { s.mailer = m }
+
+// notifyDisabled / notifyEnabled fire the quota-event email off the poll's
+// hot path. Background context (the poll's ctx may be cancelled mid-cycle)
+// and a panic-shielded goroutine; best-effort, errors are logged not surfaced.
+func (s *Service) notifyDisabled(userID int64, reason, detail string) {
+	if s.mailer == nil {
+		return
+	}
+	safego.Go("traffic.disabled-email", func() {
+		if err := s.mailer.SendAccountDisabledToUser(context.Background(), userID, reason, detail); err != nil {
+			log.Warn("traffic disabled email", "user_id", userID, "err", err)
+		}
+	})
+}
+
+func (s *Service) notifyEnabled(userID int64, reason, detail string) {
+	if s.mailer == nil {
+		return
+	}
+	safego.Go("traffic.enabled-email", func() {
+		if err := s.mailer.SendAccountEnabledToUser(context.Background(), userID, reason, detail); err != nil {
+			log.Warn("traffic enabled email", "user_id", userID, "err", err)
+		}
+	})
 }
 
 // SetConfigPusher wires the late-bound config pusher. Same late-binding
@@ -645,7 +685,8 @@ func (s *Service) recordAndEnforceWith(ctx context.Context, u *domain.User, tota
 		if u.PeriodBaselineBytes < 0 {
 			u.PeriodBaselineBytes = 0
 		}
-		if u.AutoDisabledReason == domain.DisabledTrafficExceeded {
+		clearedEmergency := u.AutoDisabledReason == domain.DisabledTrafficExceeded
+		if clearedEmergency {
 			u.EmergencyUntil = nil
 			u.EmergencyBaselineBytes = 0
 		}
@@ -654,20 +695,25 @@ func (s *Service) recordAndEnforceWith(ctx context.Context, u *domain.User, tota
 		// lost. Without this, periodStart never actually moves and rollover
 		// fires on every poll forever.
 		//
-		// Holding the emergency lock for the whole "load → mutate → write"
-		// here closes the race with UseEmergencyAccess: previously the user
-		// could request emergency access between us clearing the fields in
-		// memory and us writing the row, and the Update would clobber their
-		// grant.
-		updatePeriodStart := func() {
+		// UpdateTrafficState no longer writes the emergency columns, so this
+		// period write can't clobber a window granted concurrently mid-cycle.
+		// When THIS rollover ends the window (the user was traffic-disabled and
+		// the new period hands quota back), clear it explicitly under the
+		// emergency lock so we don't race a concurrent UseEmergencyAccess.
+		persistRollover := func() {
 			if err := s.users.UpdateTrafficState(ctx, u); err != nil {
 				log.Warn("traffic period start update", "user_id", u.ID, "err", err)
 			}
+			if clearedEmergency {
+				if err := s.users.ClearEmergencyAccess(ctx, u.ID); err != nil {
+					log.Warn("traffic clear emergency (rollover)", "user_id", u.ID, "err", err)
+				}
+			}
 		}
 		if s.configPusher != nil {
-			s.configPusher.WithEmergencyLock(updatePeriodStart)
+			s.configPusher.WithEmergencyLock(persistRollover)
 		} else {
-			updatePeriodStart()
+			persistRollover()
 		}
 		// If they were traffic-disabled (including an active emergency access
 		// window), the new period gives them quota back.
@@ -678,6 +724,8 @@ func (s *Service) recordAndEnforceWith(ctx context.Context, u *domain.User, tota
 				u.Enabled = true
 				u.AutoDisabledReason = domain.DisabledNone
 				u.DisableDetail = ""
+				// Tell the user their quota reset and access is back (async).
+				s.notifyEnabled(u.ID, "traffic_reset", "new traffic period")
 			}
 		}
 	}
@@ -701,8 +749,8 @@ func (s *Service) recordAndEnforceWith(ctx context.Context, u *domain.User, tota
 			clearEmergency := func() {
 				u.EmergencyUntil = nil
 				u.EmergencyBaselineBytes = 0
-				if err := s.users.UpdateTrafficState(ctx, u); err != nil {
-					log.Warn("emergency quota clear update", "user_id", u.ID, "err", err)
+				if err := s.users.ClearEmergencyAccess(ctx, u.ID); err != nil {
+					log.Warn("emergency quota clear", "user_id", u.ID, "err", err)
 				}
 			}
 			if s.configPusher != nil {
@@ -726,6 +774,11 @@ func (s *Service) recordAndEnforceWith(ctx context.Context, u *domain.User, tota
 		}
 		log.Info("auto-disabled user (traffic exceeded)",
 			"user_id", u.ID, "period_used", periodUsed, "limit", u.TrafficLimitBytes)
+		// Notify the user (async — SMTP must not stall the poll). This is the
+		// only path that produces the traffic_exhausted email; SetEnabledAndSync
+		// itself never mails. Edge-triggered: the next poll short-circuits on
+		// !u.Enabled, so this fires once per disable, not every cycle.
+		s.notifyDisabled(u.ID, string(domain.DisabledTrafficExceeded), "traffic limit exceeded")
 		return nil
 	}
 	// Safety net: push the remaining-bytes floor into 3X-UI so the inbound
@@ -1283,6 +1336,15 @@ func (s *Service) SetPeriodUsage(ctx context.Context, userID int64, usedBytes in
 	// between the admin override and the next poll would be classified
 	// against an out-of-date baseline.
 	u.LifetimeBaselineAt = &now
+	// v3 period usage is PeriodUsed() = LifetimeTotalBytes - PeriodBaselineBytes
+	// (periodUsage no longer reads snapshots). Set the baseline so the admin's
+	// chosen usedBytes is what the dashboard shows AND what the next poll's
+	// auto-disable check sees — otherwise the next poll recomputes against the
+	// stale baseline and can flip the enable state we just set below.
+	u.PeriodBaselineBytes = u.LifetimeTotalBytes - usedBytes
+	if u.PeriodBaselineBytes < 0 {
+		u.PeriodBaselineBytes = 0
+	}
 	if err := s.users.Update(ctx, u); err != nil {
 		return err
 	}

@@ -36,8 +36,14 @@ func (r *fakeUserRepo) UpdateTrafficState(ctx context.Context, u *domain.User) e
 	cur.PeriodBaselineBytes = u.PeriodBaselineBytes
 	cur.LifetimeBaselineAt = u.LifetimeBaselineAt
 	cur.TrafficPeriodStart = u.TrafficPeriodStart
-	cur.EmergencyUntil = u.EmergencyUntil
-	cur.EmergencyBaselineBytes = u.EmergencyBaselineBytes
+	return nil
+}
+
+func (r *fakeUserRepo) ClearEmergencyAccess(ctx context.Context, userID int64) error {
+	if cur, ok := r.users[userID]; ok {
+		cur.EmergencyUntil = nil
+		cur.EmergencyBaselineBytes = 0
+	}
 	return nil
 }
 
@@ -291,6 +297,42 @@ func TestHistoryForWeekAndMonthLabels(t *testing.T) {
 	if got := monthly.Items[0].Date; got != "2026-05" {
 		t.Fatalf("month label = %s, want 2026-05", got)
 	}
+}
+
+// TestSetPeriodUsageSetsBaseline pins the v3.3.0-beta.6 fix: after an admin
+// sets this period's usage to X, PeriodUsed() (= lifetime - PeriodBaselineBytes,
+// the value the dashboard and the next poll's auto-disable check both read)
+// must equal X. Before the fix PeriodBaselineBytes was left stale, so the next
+// poll recomputed a wrong usage and could flip the enable state.
+func TestSetPeriodUsageSetsBaseline(t *testing.T) {
+	const gb = int64(1) << 30
+	t.Run("from zero lifetime", func(t *testing.T) {
+		users := &fakeUserRepo{users: map[int64]*domain.User{
+			1: {ID: 1, Enabled: true, TrafficLimitBytes: 10 * gb, PeriodBaselineBytes: 999, LifetimeTotalBytes: 0},
+		}}
+		svc := New(users, nil, &fakeTrafficRepo{}, nil, nil, nil, &fakeDisabler{})
+		if err := svc.SetPeriodUsage(context.Background(), 1, 3*gb); err != nil {
+			t.Fatal(err)
+		}
+		if got := users.users[1].PeriodUsed(); got != 3*gb {
+			t.Fatalf("PeriodUsed() = %d, want %d (=usedBytes)", got, 3*gb)
+		}
+	})
+	t.Run("with existing higher lifetime", func(t *testing.T) {
+		users := &fakeUserRepo{users: map[int64]*domain.User{
+			1: {ID: 1, Enabled: true, TrafficLimitBytes: 10 * gb, PeriodBaselineBytes: 0, LifetimeTotalBytes: 10 * gb},
+		}}
+		repo := &fakeTrafficRepo{snapshots: []*domain.TrafficSnapshot{
+			{UserID: 1, TotalBytes: 10 * gb, UpBytes: 4 * gb, CapturedAt: time.Now()},
+		}}
+		svc := New(users, nil, repo, nil, nil, nil, &fakeDisabler{})
+		if err := svc.SetPeriodUsage(context.Background(), 1, 2*gb); err != nil {
+			t.Fatal(err)
+		}
+		if got := users.users[1].PeriodUsed(); got != 2*gb {
+			t.Fatalf("PeriodUsed() = %d, want %d (=usedBytes)", got, 2*gb)
+		}
+	})
 }
 
 func TestRecordAndEnforceLifetimeMonotonicAcrossCounterReset(t *testing.T) {

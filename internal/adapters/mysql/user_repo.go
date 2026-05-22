@@ -29,9 +29,10 @@ func (r *userRepo) Update(ctx context.Context, u *domain.User) error {
 }
 
 // UpdateTrafficState writes only the columns the traffic poll owns, via a
-// map so zero-values (e.g. clearing emergency_until to NULL, resetting
-// period_baseline_bytes to 0) are persisted. Keeps a slow poll cycle from
-// clobbering concurrent admin / self-service edits to other columns.
+// map so zero-values (e.g. resetting period_baseline_bytes to 0) are persisted.
+// Keeps a slow poll cycle from clobbering concurrent admin / self-service edits
+// to other columns. The emergency-access columns are intentionally NOT written
+// here — see ClearEmergencyAccess and the interface doc.
 func (r *userRepo) UpdateTrafficState(ctx context.Context, u *domain.User) error {
 	if u == nil || u.ID == 0 {
 		return fmt.Errorf("UpdateTrafficState requires a non-zero user ID; got %+v", u)
@@ -40,14 +41,29 @@ func (r *userRepo) UpdateTrafficState(ctx context.Context, u *domain.User) error
 		Model(&userRow{}).
 		Where("id = ?", u.ID).
 		Updates(map[string]any{
-			"lifetime_up_bytes":        u.LifetimeUpBytes,
-			"lifetime_down_bytes":      u.LifetimeDownBytes,
-			"lifetime_total_bytes":     u.LifetimeTotalBytes,
-			"period_baseline_bytes":    u.PeriodBaselineBytes,
-			"lifetime_baseline_at":     u.LifetimeBaselineAt,
-			"traffic_period_start":     u.TrafficPeriodStart,
-			"emergency_until":          u.EmergencyUntil,
-			"emergency_baseline_bytes": u.EmergencyBaselineBytes,
+			"lifetime_up_bytes":     u.LifetimeUpBytes,
+			"lifetime_down_bytes":   u.LifetimeDownBytes,
+			"lifetime_total_bytes":  u.LifetimeTotalBytes,
+			"period_baseline_bytes": u.PeriodBaselineBytes,
+			"lifetime_baseline_at":  u.LifetimeBaselineAt,
+			"traffic_period_start":  u.TrafficPeriodStart,
+		}).Error
+}
+
+// ClearEmergencyAccess nulls the emergency window for one user via a targeted
+// write (map so the zero/NULL values land). Used by the traffic poll under the
+// emergency lock; keeps emergency clearing out of UpdateTrafficState's stale
+// per-cycle write.
+func (r *userRepo) ClearEmergencyAccess(ctx context.Context, userID int64) error {
+	if userID == 0 {
+		return fmt.Errorf("ClearEmergencyAccess requires a non-zero user ID")
+	}
+	return r.db.WithContext(ctx).
+		Model(&userRow{}).
+		Where("id = ?", userID).
+		Updates(map[string]any{
+			"emergency_until":          nil,
+			"emergency_baseline_bytes": 0,
 		}).Error
 }
 

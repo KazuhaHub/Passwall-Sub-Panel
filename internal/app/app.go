@@ -219,6 +219,10 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	userSvc.SetTrafficUsage(trafficSvc)
 	trafficSvc.SetConfigPusher(userSvc)
 	mailSvc := mailer.New(repos.Mail, repos.User, repos.Traffic, repos.Settings, repos.SyncTask)
+	// Late-bind the mailer into the traffic poll so quota-exhaustion disables
+	// and period-rollover re-enables actually email the user (the only path
+	// that produces those notifications).
+	trafficSvc.SetMailNotifier(mailSvc)
 	reconcileSvc := reconcile.New(repos.User, repos.Ownership, repos.Node, repos.Group, repos.Settings, repos.Audit, pool, syncSvc)
 	healthSvc := health.New(repos.Node, pool)
 	renderSvc := render.New(repos, pool, groupSvc)

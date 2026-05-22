@@ -4,7 +4,44 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
-## v3.3.0-beta.5 — 2026-05-21
+## v3.3.0-beta.6 — 2026-05-21
+
+针对节点 / 邮件 / 流量三块「易出问题」子系统的一次深度复查后的修复(多 agent 审查
++ 逐条人工核实,纠正了 agent 的几处过度结论)。
+
+### Fixed
+- **流量自动停用 / 周期自动恢复不发邮件**:traffic poll 跑满配额自动停用、新周期
+  自动恢复都只调 `SetEnabledAndSync`,而它从不发信——导致精心准备的
+  `traffic_exhausted`(流量用完)和自动 `account_enabled`(周期恢复)两套模板形同
+  虚设,用户全程收不到通知。把 mailer 以接口(`MailNotifier`,late-bound)接进
+  traffic poll 的这两个转换点,异步发信(SMTP 不阻塞轮询),边沿触发(每次转换发
+  一封,不会每轮重发)。
+- **`SetPeriodUsage` 漏写 `PeriodBaselineBytes`**:管理员「设定本期已用流量=X」后,
+  v3 的 `PeriodUsed()=Lifetime-PeriodBaselineBytes` 不等于 X,导致仪表盘显示和
+  **下一轮 poll 的自动封禁判定**都用错值(会推翻它当场设的启用状态)。补设
+  `PeriodBaselineBytes = Lifetime - X`(夹 ≥0)。
+- **每个 poll 周期可能误清并发授予的应急访问**:`UpdateTrafficState` 之前连
+  `emergency_until` / `emergency_baseline_bytes` 一起写,而 poll 用的是周期开头加载
+  的旧用户快照——任意一轮普通 poll(非仅月度重置)都可能用旧值覆盖掉用户刚通过
+  `UseEmergencyAccess` 并发授予的应急窗口(还白扣一次次数)。把这两列从
+  `UpdateTrafficState` 移除(poll 不拥有它们),新增 `ClearEmergencyAccess` 由重置 /
+  配额耗尽路径在应急锁内显式调用。有 SQLite 集成单测覆盖「旧 poll 写不再覆盖应急」
+  与「显式清理生效」。
+
+### Changed
+- **同一 inbound 的并发 read-modify-write 加进程内写锁**:`UpdateClient` /
+  `UpdateInbound` 是「GET 整个 inbound → 改 clients[] → 整体 POST 回」;traffic poll
+  与 reconcile 直接并发调用时,两者基于同一快照写回会丢失对方的修改(lost update,
+  下一轮自愈,但表现为「刚改的没立刻生效」)。给 `xui.Client` 加 per-inbound 写锁串
+  行化(`AddClient` 走服务端 merge 端点,不受影响、无需加锁)。
+- **`account_disabled` / `account_enabled` 邮件加分钟级去重**:这两类原先无任何幂等,
+  双击 / 快速重试会重发。按 `(用户, 原因, 分钟)` 去重,既挡掉意外重复,又让真正的后续
+  状态变更仍能通知;SMTP 失败的重试(分钟之后)照常发送。
+
+### 复查纠正(留档)
+- 子 agent 称「邮件正文 `text/template` 渲染 + `ClientName` 来自 User-Agent = HTML 注入
+  面」——经核实 `ClientName` 是**管理员配置的检测族名**(或字面量 `other`),非原始
+  UA,**无匿名注入面**;仅属「该用 html/template / 转义」的卫生项,本版未改。
 
 一次借助多个子 agent + 外部规范核查的全量复查,只查出一条实锤功能 bug。
 

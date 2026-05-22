@@ -236,8 +236,14 @@ func (r *memoryUserRepo) UpdateTrafficState(ctx context.Context, u *domain.User)
 	cur.PeriodBaselineBytes = u.PeriodBaselineBytes
 	cur.LifetimeBaselineAt = u.LifetimeBaselineAt
 	cur.TrafficPeriodStart = u.TrafficPeriodStart
-	cur.EmergencyUntil = u.EmergencyUntil
-	cur.EmergencyBaselineBytes = u.EmergencyBaselineBytes
+	return nil
+}
+
+func (r *memoryUserRepo) ClearEmergencyAccess(ctx context.Context, userID int64) error {
+	if cur, ok := r.byID[userID]; ok {
+		cur.EmergencyUntil = nil
+		cur.EmergencyBaselineBytes = 0
+	}
 	return nil
 }
 

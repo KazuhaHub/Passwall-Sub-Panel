@@ -41,6 +41,15 @@ type Client struct {
 	mu     sync.Mutex
 	jar    http.CookieJar
 	authed bool
+
+	// inboundWriteLocks serializes read-modify-write inbound updates per
+	// inbound ID within this process. UpdateClient/UpdateInbound GET the whole
+	// inbound, mutate settings.clients[], and POST it back; two concurrent
+	// writers on the same inbound (e.g. traffic poll and reconcile) would each
+	// act on the same snapshot and the later POST would silently drop the
+	// earlier change. inboundWriteMu guards the map itself.
+	inboundWriteMu    sync.Mutex
+	inboundWriteLocks map[int]*sync.Mutex
 }
 
 // New constructs a Client for the given 3X-UI panel.
@@ -59,8 +68,23 @@ func New(p *domain.XUIPanel) (*Client, error) {
 			Timeout: 30 * time.Second,
 			Jar:     jar,
 		},
-		jar: jar,
+		jar:               jar,
+		inboundWriteLocks: make(map[int]*sync.Mutex),
 	}, nil
+}
+
+// lockInbound serializes read-modify-write updates to one inbound within this
+// process and returns the unlock func. Use as: defer c.lockInbound(id)().
+func (c *Client) lockInbound(id int) func() {
+	c.inboundWriteMu.Lock()
+	mu, ok := c.inboundWriteLocks[id]
+	if !ok {
+		mu = &sync.Mutex{}
+		c.inboundWriteLocks[id] = mu
+	}
+	c.inboundWriteMu.Unlock()
+	mu.Lock()
+	return mu.Unlock
 }
 
 // --- Auth ---
@@ -223,6 +247,7 @@ func (c *Client) AddInbound(ctx context.Context, spec ports.InboundSpec) (int, e
 }
 
 func (c *Client) UpdateInbound(ctx context.Context, id int, spec ports.InboundSpec) error {
+	defer c.lockInbound(id)()
 	mergedSpec := spec
 	settings, err := c.settingsWithCurrentClients(ctx, id, spec.Settings)
 	if err != nil {
@@ -267,6 +292,7 @@ func (c *Client) AddClient(ctx context.Context, inboundID int, spec ports.Client
 // UpdateClient replaces the client identified by clientUUID with the values
 // in spec. clientUUID is the value of client.id / uuid.
 func (c *Client) UpdateClient(ctx context.Context, inboundID int, clientUUID string, spec ports.ClientSpec) error {
+	defer c.lockInbound(inboundID)()
 	inb, err := c.GetInbound(ctx, inboundID)
 	if err != nil {
 		return err
