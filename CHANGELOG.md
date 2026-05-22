@@ -4,6 +4,13 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## v3.4.0-beta.2 — 2026-05-21
+
+### Fixed
+- **服务器状态 / 用户页标签的英文缺失**:新加的标签与状态文案只写了 `defaultValue`
+  中文兜底、没在 i18n 语言文件里加 key,所以切到英文仍显示中文。补上 `user` 命名空间的
+  `tabs.*` / `status.*` 的中英文翻译。
+
 ## v3.4.0-beta.1 — 2026-05-21
 
 v3.4.0 的首个 beta。此前未发布稳定版的 `v3.3.0-beta.1 ~ beta.9` 开发线整体提升为

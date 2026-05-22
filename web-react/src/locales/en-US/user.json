@@ -1,4 +1,17 @@
 {
+  "tabs": {
+    "overview": "Overview",
+    "server_status": "Server status"
+  },
+  "status": {
+    "title": "Server status",
+    "summary": "{{ok}}/{{total}} up",
+    "ok": "Up",
+    "down": "Down",
+    "unknown": "Unknown",
+    "empty": "No nodes to show",
+    "checked_at": "Last checked: {{time}}"
+  },
   "profile": {
     "title": "My subscription",
     "usage_section": "My usage",
