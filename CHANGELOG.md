@@ -4,6 +4,16 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## v3.4.0-beta.7 — 2026-05-22
+
+### Fixed
+- **改 Group 的 tag_filter 后保存很慢**:保存请求里**同步**地对该组每个成员逐一做完整
+  3X-UI 重同步(每人多次面板往返),成员多 / 面板慢就一直卡到全部同步完才返回。改为
+  **只入队** per-member 重同步任务后立即返回(几次快速 DB 操作,按目标去重),由后台
+  sync-task 处理器 + reconcile 在后台对最新的组定义 propagate——与项目「写 3X-UI 走异步
+  队列、不阻塞请求」的设计一致。代价:成员的节点变更不再即时生效,最多滞后一个 sync-task
+  周期(~30s),reconcile 兜底。
+
 ## v3.4.0-beta.6 — 2026-05-22
 
 ### Fixed

@@ -1247,6 +1247,16 @@ func (s *Service) ResyncMembershipOrEnqueue(ctx context.Context, userID int64, s
 	return nil
 }
 
+// EnqueueMembershipResync queues a membership resync for one user WITHOUT
+// attempting the inline (3X-UI-bound, potentially slow) sync first. Used by the
+// group editor's filter-change path: a group with many members would otherwise
+// block the save request on N sequential per-member resyncs. Enqueuing is a
+// couple of fast DB ops (deduped per target); the sync-task worker + reconcile
+// propagate to 3X-UI in the background against the latest group definition.
+func (s *Service) EnqueueMembershipResync(ctx context.Context, userID int64, summary string) error {
+	return s.enqueueUserTask(ctx, domain.SyncTaskUserResync, userID, summary)
+}
+
 // ResyncMembership recomputes a user's 3X-UI client memberships against
 // the CURRENT group definition (after potential changes) and applies the
 // diff via SyncSvc.
