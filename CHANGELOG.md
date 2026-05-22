@@ -4,6 +4,18 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## v3.4.0-beta.6 — 2026-05-22
+
+### Fixed
+- **后台快捷链接编辑器:图标改为单一控件**:原先「图标」自由文本框 + 「内置图标」下拉是
+  两个控件编辑同一字段,易混淆/冲突。合并为一个图标框——文本框(emoji / 图片 URL /
+  `mui:`)+ 框内「选内置图标」按钮(弹菜单选,写回同一字段),一个字段一个真相。
+- **编辑器新增字段缺英文**:图标 / 分组 / 描述 / 突出 等只有中文兜底,补 `admin` 命名空间
+  的 `link_table.*` 中英文。
+- **门户快捷链接:纯标签时不再空荡靠左**:当所有链接都没有图标 / 描述 / 分组时,渲染回
+  原来的紧凑按钮排(不再是文字贴左、右侧大片留白的宽卡片);有图标 / 描述 / 分组才用卡片
+  网格。卡片模式下无图标的链接回退一个通用链接图标,保持整排对齐。
+
 ## v3.4.0-beta.5 — 2026-05-22
 
 ### Added

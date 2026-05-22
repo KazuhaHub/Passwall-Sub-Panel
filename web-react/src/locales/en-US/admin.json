@@ -255,6 +255,12 @@
       "link_table": {
         "label": "Label",
         "url": "URL",
+        "icon": "Icon",
+        "group": "Group",
+        "description": "Description",
+        "highlight": "Highlight",
+        "icon_pick": "Pick a built-in icon",
+        "icon_none": "None",
         "new_window": "New window",
         "enabled": "Enabled",
         "sort": "Sort"

@@ -202,15 +202,16 @@ function QuickLinkGrid({ links, md, onOpen }: {
               transition: 'border-color .15s, background .15s',
               '&:hover': { borderColor: md.primary },
             }}>
-            {l.icon && (
-              <Box sx={{
-                flexShrink: 0, width: 32, height: 32, display: 'grid', placeItems: 'center',
-                borderRadius: 1.5,
-                bgcolor: hl ? 'rgba(255,255,255,0.16)' : md.surfaceContainerHighest,
-              }}>
-                <QuickLinkIcon icon={l.icon} size={20} />
-              </Box>
-            )}
+            <Box sx={{
+              flexShrink: 0, width: 32, height: 32, display: 'grid', placeItems: 'center',
+              borderRadius: 1.5,
+              bgcolor: hl ? 'rgba(255,255,255,0.16)' : md.surfaceContainerHighest,
+              color: hl ? 'inherit' : md.onSurfaceVariant,
+            }}>
+              {/* Fall back to a generic link glyph when this card has no icon,
+                  so a mixed grid (some with icons, some without) stays aligned. */}
+              <QuickLinkIcon icon={l.icon || 'mui:Link'} size={20} />
+            </Box>
             <Box sx={{ minWidth: 0, flex: 1 }}>
               <Typography sx={{ fontWeight: 500, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {l.label}
@@ -869,9 +870,24 @@ export default function MeView() {
         <Card sx={{ p: { xs: 2.5, sm: 3 }, bgcolor: md.surfaceContainerLow, border: `1px solid ${md.outlineVariant}` }}>
           <Typography sx={{ fontWeight: 500, mb: 1.5 }}>{t('links.title')}</Typography>
           {(() => {
-            // Group by `group`; preserve first-seen order, ungrouped ('') first.
-            // When no link has a group, render a single flat grid (no headers).
+            // Adaptive: when every link is just a plain label (no icon, no
+            // description, no group), the rich card grid would render as wide
+            // cards with the text hugging the left edge and lots of empty space.
+            // Fall back to the original compact button row in that case; switch
+            // to cards only once there's icon / description / group content.
+            const anyRich = quickLinks.some(l => (l.icon || '').trim() || (l.description || '').trim())
             const hasGroups = quickLinks.some(l => (l.group || '').trim() !== '')
+            if (!anyRich && !hasGroups) {
+              return (
+                <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+                  {quickLinks.map((l, i) => (
+                    <Button key={`${l.url}-${i}`} size="small" variant="outlined" onClick={() => openQuickLink(l)}>
+                      {l.label}
+                    </Button>
+                  ))}
+                </Box>
+              )
+            }
             if (!hasGroups) return <QuickLinkGrid links={quickLinks} md={md} onOpen={openQuickLink} />
             const order: string[] = []
             const byGroup = new Map<string, QuickLink[]>()

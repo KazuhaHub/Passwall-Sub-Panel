@@ -68,6 +68,7 @@ import {
 import AddIcon from '@mui/icons-material/Add'
 import DeleteIcon from '@mui/icons-material/DeleteOutline'
 import DragIndicatorIcon from '@mui/icons-material/DragIndicator'
+import AppsIcon from '@mui/icons-material/Apps'
 import type { LoginMode } from '@/api/types'
 import { pushSnack } from '@/components/SnackbarHost'
 import { confirm } from '@/components/ConfirmHost'
@@ -1054,6 +1055,51 @@ type MdShape = {
   primary: string
 }
 
+// IconField is the single source of truth for a quick link's icon: a text
+// field (emoji / image URL / "mui:Name") with a live preview, plus a built-in
+// icon picker that just writes "mui:Name" into the same field — so there's no
+// separate "type" to conflict with the typed value.
+function IconField({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const { t } = useTranslation('admin')
+  const [anchor, setAnchor] = useState<HTMLElement | null>(null)
+  return (
+    <>
+      <TextField size="small" label={t('settings.portal.link_table.icon', { defaultValue: '图标' })}
+        value={value} onChange={e => onChange(e.target.value)}
+        placeholder="😀 / https://… / mui:"
+        InputProps={{
+          startAdornment: value ? (
+            <Box sx={{ display: 'flex', alignItems: 'center', mr: 0.75 }}>
+              <QuickLinkIcon icon={value} size={18} />
+            </Box>
+          ) : undefined,
+          endAdornment: (
+            <IconButton size="small" edge="end"
+              title={t('settings.portal.link_table.icon_pick', { defaultValue: '选择内置图标' })}
+              onClick={e => setAnchor(e.currentTarget)}>
+              <AppsIcon fontSize="small" />
+            </IconButton>
+          ),
+        }}
+        sx={{ flex: '1 1 200px' }} />
+      <Menu open={!!anchor} anchorEl={anchor} onClose={() => setAnchor(null)}
+        PaperProps={{ sx: { maxHeight: 360 } }}>
+        <MenuItem onClick={() => { onChange(''); setAnchor(null) }}>
+          {t('settings.portal.link_table.icon_none', { defaultValue: '无' })}
+        </MenuItem>
+        {QUICK_LINK_ICONS.map(ic => (
+          <MenuItem key={ic.key} selected={value === `mui:${ic.key}`}
+            onClick={() => { onChange(`mui:${ic.key}`); setAnchor(null) }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.25 }}>
+              <ic.Icon fontSize="small" />{ic.label}
+            </Box>
+          </MenuItem>
+        ))}
+      </Menu>
+    </>
+  )
+}
+
 function QuickLinksEditor({ links, onChange, md }: { links: QuickLink[]; onChange: (v: QuickLink[]) => void; md: MdShape }) {
   const { t } = useTranslation('admin')
   const update = (i: number, patch: Partial<QuickLink>) =>
@@ -1150,26 +1196,7 @@ function QuickLinksEditor({ links, onChange, md }: { links: QuickLink[]; onChang
                     }} />
                 )
               })()}
-              <TextField size="small" label={t('settings.portal.link_table.icon', { defaultValue: '图标' })}
-                value={l.icon} onChange={e => update(i, { icon: e.target.value })}
-                placeholder="😀 / https://… / mui:"
-                InputProps={l.icon ? { startAdornment: (
-                  <Box sx={{ display: 'flex', alignItems: 'center', mr: 0.75 }}>
-                    <QuickLinkIcon icon={l.icon} size={18} />
-                  </Box>
-                ) } : undefined}
-                sx={{ flex: '1 1 150px' }} />
-              <TextField size="small" select label={t('settings.portal.link_table.icon_pick', { defaultValue: '内置图标' })}
-                value={(l.icon || '').startsWith('mui:') ? l.icon.slice(4) : ''}
-                onChange={e => update(i, { icon: e.target.value ? `mui:${e.target.value}` : '' })}
-                sx={{ flex: '0 1 130px' }}>
-                <MenuItem value="">—</MenuItem>
-                {QUICK_LINK_ICONS.map(ic => (
-                  <MenuItem key={ic.key} value={ic.key}>
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}><ic.Icon fontSize="small" />{ic.label}</Box>
-                  </MenuItem>
-                ))}
-              </TextField>
+              <IconField value={l.icon} onChange={v => update(i, { icon: v })} />
               <TextField size="small" label={t('settings.portal.link_table.group', { defaultValue: '分组' })}
                 value={l.group} onChange={e => update(i, { group: e.target.value })}
                 sx={{ flex: '1 1 110px' }} />
