@@ -4,6 +4,13 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## v3.4.0-beta.10 — 2026-05-22
+
+### Fixed
+- **快捷链接卡片:无描述时文字未垂直居中**:卡片行固定 `flex-start`,只有标签(无描述)
+  的卡里单行文字顶对齐、与 32px 图标框不齐。改为无描述时整行居中,有描述时才顶对齐
+  (让图标对齐第一行)。
+
 ## v3.4.0-beta.9 — 2026-05-22
 
 ### Changed

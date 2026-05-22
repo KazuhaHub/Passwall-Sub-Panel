@@ -194,7 +194,10 @@ function QuickLinkGrid({ links, md, onOpen }: {
         return (
           <Box key={`${l.url}-${i}`} onClick={() => onOpen(l)}
             sx={{
-              display: 'flex', gap: 1.25, alignItems: 'flex-start', cursor: 'pointer',
+              // Center the row when it's just a label; only top-align when a
+              // description gives the card a second line (so the icon lines up
+              // with the label, not the vertical middle of two lines).
+              display: 'flex', gap: 1.25, alignItems: l.description ? 'flex-start' : 'center', cursor: 'pointer',
               p: 1.5, borderRadius: 2,
               border: `1px solid ${hl ? 'transparent' : md.outlineVariant}`,
               bgcolor: hl ? md.primaryContainer : md.surface,
