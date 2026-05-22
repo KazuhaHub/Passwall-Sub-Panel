@@ -375,4 +375,8 @@ GET                 /api/admin/sync-tasks
 
 ## 许可证
 
-MIT License
+本项目采用 [GNU AGPL v3](LICENSE) 许可证。
+
+这是带有"网络条款"的强 copyleft 协议:任何人修改本项目后，无论是分发二进制还是**部署成对外的网络服务**，都必须向使用者提供完整的对应源码。详见根目录 [LICENSE](LICENSE) 全文。
+
+Copyright (C) 2026 Kazuha Mo

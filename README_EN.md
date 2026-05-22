@@ -349,4 +349,8 @@ Full route list lives in [`internal/transport/http/router.go`](internal/transpor
 
 ## License
 
-MIT License
+Licensed under the [GNU AGPL v3](LICENSE).
+
+This is a strong copyleft license with a network clause: anyone who modifies this project must make the complete corresponding source available to its users — whether they distribute a binary or **run it as a network service**. See the full [LICENSE](LICENSE) at the repository root.
+
+Copyright (C) 2026 Kazuha Mo
