@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
@@ -43,11 +44,16 @@ func (r *captureNodeRepo) UpdateInboundConfig(_ context.Context, n *domain.Node)
 type stubXUIClient struct {
 	ports.XUIClient
 	updated *ports.InboundSpec
+	getResp *ports.Inbound
 }
 
 func (c *stubXUIClient) UpdateInbound(_ context.Context, _ int, spec ports.InboundSpec) error {
 	c.updated = &spec
 	return nil
+}
+
+func (c *stubXUIClient) GetInbound(_ context.Context, _ int) (*ports.Inbound, error) {
+	return c.getResp, nil
 }
 
 type stubXUIPool struct {
@@ -117,6 +123,49 @@ func TestUpdateInboundConfig_PushFails_StillStoredLocally(t *testing.T) {
 type errPanelDown struct{}
 
 func (errPanelDown) Error() string { return "panel unreachable" }
+
+// ---- GetInboundConfig reads the local snapshot (v3.5 source-of-truth) ----
+
+// A captured node's edit dialog must read the local snapshot, never live 3X-UI,
+// so the form, render and reconcile all agree. The pool errors here to prove it
+// is never consulted.
+func TestGetInboundConfig_LocalSnapshot(t *testing.T) {
+	now := time.Now()
+	repo := &captureNodeRepo{node: &domain.Node{
+		ID: 1, PanelID: 1, InboundID: 3,
+		Protocol:        "vless",
+		Port:            443,
+		StreamSettings:  `{"network":"ws"}`,
+		InboundSettings: `{"decryption":"none"}`,
+		ConfigSyncedAt:  &now,
+		ConfigSyncState: "synced",
+	}}
+	svc := &Service{nodes: repo, pool: stubXUIPool{err: errPanelDown{}}}
+
+	inb, err := svc.GetInboundConfig(context.Background(), 1)
+	if err != nil {
+		t.Fatalf("GetInboundConfig (local) = %v, want nil (must not hit the pool)", err)
+	}
+	if inb.Protocol != "vless" || inb.Port != 443 || inb.StreamSettings != `{"network":"ws"}` {
+		t.Fatalf("expected the local snapshot, got %+v", inb)
+	}
+}
+
+// A never-captured node (pre-v3.5 / freshly imported before backfill) falls
+// back to a live fetch.
+func TestGetInboundConfig_FallbackLiveWhenUncaptured(t *testing.T) {
+	repo := &captureNodeRepo{node: &domain.Node{ID: 1, PanelID: 1, InboundID: 3}} // ConfigSyncedAt nil
+	client := &stubXUIClient{getResp: &ports.Inbound{Protocol: "trojan", Port: 8443}}
+	svc := &Service{nodes: repo, pool: stubXUIPool{c: client}}
+
+	inb, err := svc.GetInboundConfig(context.Background(), 1)
+	if err != nil {
+		t.Fatalf("GetInboundConfig (fallback) = %v, want nil", err)
+	}
+	if inb.Protocol != "trojan" || inb.Port != 8443 {
+		t.Fatalf("un-captured node must live-fetch; got %+v", inb)
+	}
+}
 
 // ---- Orphan-recovery for CreateInbound (lost AddInbound response) ----
 

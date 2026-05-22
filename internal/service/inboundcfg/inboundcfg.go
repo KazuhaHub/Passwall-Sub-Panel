@@ -134,6 +134,26 @@ func SpecFromNode(n *domain.Node) ports.InboundSpec {
 	}
 }
 
+// HasLocalConfig reports whether a node carries a usable local config snapshot,
+// i.e. callers (the renderer, the admin edit dialog) can read it instead of
+// live-fetching from 3X-UI. The single definition of "captured" so render, the
+// edit form and reconcile never disagree on which nodes are PSP-owned.
+//
+// False for never-captured nodes (ConfigSyncedAt nil: pre-v3.5 rows, or freshly
+// imported before reconcile backfills) and for any non-"synced" state a future
+// writer might set to gate reads off (today only "" / "synced" are written).
+func HasLocalConfig(n *domain.Node) bool {
+	if n == nil || n.ConfigSyncedAt == nil {
+		return false
+	}
+	switch n.ConfigSyncState {
+	case "", "synced":
+		return true
+	default:
+		return false
+	}
+}
+
 // InboundFromNode reconstructs a ports.Inbound for the renderer from the node
 // snapshot. clients[] is intentionally absent: render derives each user's
 // credential from user.uuid and never consults the inbound client list.

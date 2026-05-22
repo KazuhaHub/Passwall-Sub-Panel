@@ -16,23 +16,10 @@ func inboundFromNode(n *domain.Node) *ports.Inbound {
 }
 
 // nodeHasLocalConfig reports whether render can build this node's proxy block
-// from the local snapshot (zero 3X-UI calls). False for:
-//   - never captured (pre-v3.5 row before reconcile backfills it, or freshly
-//     imported before the capture step ran) — ConfigSyncedAt is nil
-//   - explicitly marked non-synced (future states like "broken" / "needs-attention"
-//     that a writer wants to gate render off of) — state is non-empty and not
-//     "synced". Today markSynced is the only writer and always sets "synced",
-//     so this branch is only forward-compat insurance.
+// from the local snapshot (zero 3X-UI calls). Thin alias for the canonical
+// definition in inboundcfg, shared with the admin edit dialog.
 func nodeHasLocalConfig(n *domain.Node) bool {
-	if n == nil || n.ConfigSyncedAt == nil {
-		return false
-	}
-	switch n.ConfigSyncState {
-	case "", "synced":
-		return true
-	default:
-		return false
-	}
+	return inboundcfg.HasLocalConfig(n)
 }
 
 // resolveInbounds returns a node-id → inbound map covering every real

@@ -4,6 +4,12 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## v3.5.0-beta.6 — 2026-05-22
+
+### Fixed
+- **编辑 inbound 对话框改读本地快照,不再实时拉 3X-UI**(承接 beta.1 的 source-of-truth 一致性):`GetInboundConfig`(编辑框数据源)之前 live-fetch 3X-UI,而 render / reconcile 都以本地快照为真相源。若本地与 3X-UI 已漂移,编辑框会显示 3X-UI 的漂移值,管理员一保存就把 PSP 本该强制的配置悄悄丢了(被 live 预填→写回本地+3X-UI)。现在已捕获节点(`ConfigSyncedAt != nil`)编辑框读本地快照,与渲染 / 对账三者一致;仅未捕获节点(pre-v3.5 / 刚导入未回填)才回源。节点详情页的 client 列表仍走 `ListClientsOfInbound`(始终 live),不受影响。
+- "节点是否有本地配置"的判断统一收进 `inboundcfg.HasLocalConfig`,render 与编辑框共用一份定义,杜绝两处判定漂移。
+
 ## v3.5.0-beta.5 — 2026-05-22
 
 ### Changed

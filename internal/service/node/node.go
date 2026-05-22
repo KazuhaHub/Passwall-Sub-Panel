@@ -94,10 +94,21 @@ func (s *Service) Get(ctx context.Context, id int64) (*domain.Node, error) {
 	return s.nodes.GetByID(ctx, id)
 }
 
+// GetInboundConfig returns the inbound's connection config for the admin edit
+// dialog. v3.5: PSP owns the config, so serve the local snapshot when present —
+// the same source render and reconcile treat as truth, so the edit form, the
+// rendered subscription and drift enforcement can't disagree (editing a node
+// no longer silently adopts whatever an operator changed in 3X-UI). Falls back
+// to a live fetch only for never-captured nodes (pre-v3.5 / freshly imported
+// before the first reconcile backfill). The detail page's client list comes
+// from ListClientsOfInbound (always live), so stripping clients here is fine.
 func (s *Service) GetInboundConfig(ctx context.Context, id int64) (*ports.Inbound, error) {
 	n, err := s.nodes.GetByID(ctx, id)
 	if err != nil {
 		return nil, err
+	}
+	if inboundcfg.HasLocalConfig(n) {
+		return inboundcfg.InboundFromNode(n), nil
 	}
 	c, err := s.pool.Get(n.PanelID)
 	if err != nil {
