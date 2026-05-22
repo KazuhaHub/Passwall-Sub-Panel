@@ -29,15 +29,11 @@ JWT(算法固定 / TokenVersion 撤销)、SAML/OIDC(签名 / replay / nonce / st
 已知 CVE 影响。
 
 ### 已知 / 待办(非本版改动)
-- **3X-UI v3.0.2 兼容性(已据官方 v3.0.2 API 文档核实,更正前一版的判断)**:v3.0.2
-  的 client/inbound 操作仍在 `/panel/api/inbounds/*`,与本面板 xui adapter 用的端点
-  **完全一致,不会 404**(此前误信 upstream `main` 分支的实验改动)。v3.x 的唯一相关
-  变化是新增 CSRF 中间件:cookie 模式的 POST 在浏览器会话下需带 `X-CSRF-Token`,本
-  面板 cookie 模式不发该头(Go 客户端无 Origin/Referer,通常被当非浏览器放行)。最
-  稳的对接方式是用 v3.0.2 新增的「API Tokens」——adapter 已支持 Bearer,填了 token
-  即跳过 CSRF。
 - 默认客户端关键词里 V2RayN 族的裸 `v2ray` 子串偏宽(会顺带匹配 `v2rayA`/`v2rayU`
   等),低优,暂不动。
+
+> 注:复查中一度记入的「3X-UI v3.x 重构 API 致本面板 404」为误报——生产环境本就
+> 跑 v3.x 且 adapter 正常工作,已据官方 v3.0.2 API 文档核实端点一致,特此更正。
 
 ## v3.3.0-beta.4 — 2026-05-21
 
