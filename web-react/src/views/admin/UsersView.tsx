@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent, type MouseEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type FormEvent, type MouseEvent } from 'react'
 import {
   Autocomplete,
   Box,
@@ -280,7 +280,14 @@ export default function UsersView() {
     try { const res = await listGroups(); setGroups(res.items) } catch { /* toast */ }
   }
 
+  // Last-wins guard: paging / group-filter / search submit can fire
+  // overlapping loads; a slow earlier one must not overwrite the newer page.
+  // Also gates the trailing usageMap fetch so it can't pair stale usage with a
+  // newer page's items.
+  const loadSeq = useRef(0)
+
   async function load() {
+    const seq = ++loadSeq.current
     setLoading(true)
     try {
       const res = await listUsers({
@@ -288,6 +295,7 @@ export default function UsersView() {
         search: search || undefined,
         group_id: groupFilter === '' ? undefined : groupFilter,
       })
+      if (seq !== loadSeq.current) return
       setItems(res.items)
       setTotal(res.total)
       setSelected(new Set())
@@ -296,10 +304,10 @@ export default function UsersView() {
       // gives us "used bytes" for everyone in one round-trip.
       try {
         const rows = await topTraffic(1000)
-        setUsageMap(new Map(rows.map(r => [r.user_id, r])))
+        if (seq === loadSeq.current) setUsageMap(new Map(rows.map(r => [r.user_id, r])))
       } catch { /* table just won't show usage; not fatal */ }
     } finally {
-      setLoading(false)
+      if (seq === loadSeq.current) setLoading(false)
     }
   }
 
@@ -450,6 +458,13 @@ export default function UsersView() {
       if (editing.id === auth.userId) auth.setDisplayName(editForm.display_name || '')
       pushSnack(t('admin:users.toast.saved'), 'success')
       setEditOpen(false)
+      await load()
+    } catch {
+      // The save is several sequential calls (update → traffic → enable); if a
+      // later one fails the earlier ones already persisted. The client
+      // interceptor already toasted the error — resync the table so the row
+      // reflects the true post-failure state instead of the stale pre-edit
+      // values, and keep the dialog open so the admin can retry.
       await load()
     } finally { setEditBusy(false) }
   }

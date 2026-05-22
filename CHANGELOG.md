@@ -4,6 +4,30 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## v3.3.0-beta.8 — 2026-05-21
+
+前端复查后的一致性修复(后端经审查确认无授权/IDOR/审计泄密问题,无需改动)。
+
+### Fixed
+- **前端列表/图表请求竞态(stale-render)**:除 DashboardView 外,TrafficView /
+  UsersView / LogsView / MeView / NodesView 的数据加载都没有 abort / 序号守卫——快速
+  切 tab、翻页、改筛选、联动 snap 时,慢的旧请求后到会盖掉新结果,界面显示与当前
+  选项对不上(下次交互自愈,不损坏数据)。给每个独立 loader 加 `useRef` 序号「last-
+  wins」守卫(对 effect 与事件处理器都生效),只接受最新一次请求的结果。涉及
+  TrafficView(rank/history)、UsersView(列表 + usageMap)、LogsView(sub/audit/email
+  三个 tab)、MeView(trend)、NodesView(unmanaged 切面板)。
+- **UsersView 编辑提交部分失败后不刷新**:保存是 `updateUser → setUserTraffic →
+  setEnabled` 串行,中途失败则前面已落库、报错但表格不刷新,显示停留在编辑前的旧值。
+  改为失败时也 `load()` 重新拉取,让行反映真实的「部分成功」状态,对话框保持打开可重试。
+
+### 复查留档
+- 后端授权分组(adminGroup vs staffGroup)、普通用户自助端点(无 IDOR,全用 JWT 的
+  user id)、审计中间件(只记请求体不记响应体、递归脱敏覆盖 password/token/uuid/
+  key_pem 等)、安全头、body-limit、group/config/seed/migrate 均经审查确认无问题。
+- 已知小项(未改):LogsView 的保留天数保存是「读取全量 settings → 整体回写」,已在
+  保存前 re-fetch 缓解,残留一个极小的并发写窗口;彻底消除需后端加一个仅更新该字段
+  的局部端点。
+
 ## v3.3.0-beta.7 — 2026-05-21
 
 ### Fixed

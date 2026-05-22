@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Autocomplete,
   Box,
@@ -206,15 +206,24 @@ export default function TrafficView() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scope, selectedUserId, selectedNodeId, period, rangeDays, selectedTz])
 
+  // Last-wins guards: rapid scope/filter/range changes fire overlapping
+  // requests; without a sequence check a slow earlier response can land after
+  // a newer one and paint stale data under the current selection.
+  const rankSeq = useRef(0)
+  const historySeq = useRef(0)
+
   async function loadRank() {
+    const seq = ++rankSeq.current
     setLoading(true)
     try {
       if (scope === 'node') {
-        setNodeItems(await topNodes(limit))
+        const res = await topNodes(limit)
+        if (seq === rankSeq.current) setNodeItems(res)
       } else {
-        setItems(await topTraffic(limit))
+        const res = await topTraffic(limit)
+        if (seq === rankSeq.current) setItems(res)
       }
-    } finally { setLoading(false) }
+    } finally { if (seq === rankSeq.current) setLoading(false) }
   }
 
   async function loadUsers() {
@@ -227,6 +236,7 @@ export default function TrafficView() {
   }
 
   async function loadHistory() {
+    const seq = ++historySeq.current
     setChartLoading(true)
     try {
       const params = {
@@ -241,8 +251,8 @@ export default function TrafficView() {
           ? await userTrafficHistory(selectedUserId, params)
           : await trafficHistory(params)
       }
-      setHistory(res)
-    } finally { setChartLoading(false) }
+      if (seq === historySeq.current) setHistory(res)
+    } finally { if (seq === historySeq.current) setChartLoading(false) }
   }
 
   async function pollNow() {

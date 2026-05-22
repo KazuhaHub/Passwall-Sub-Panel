@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent, type Dispatch, type SetStateAction } from 'react'
+import { useEffect, useMemo, useRef, useState, type FormEvent, type Dispatch, type SetStateAction } from 'react'
 import {
   Autocomplete,
   Box,
@@ -1961,7 +1961,13 @@ export default function NodesView() {
   // panel chosen it just clears the list (the UI shows a "pick a server"
   // prompt). A fetch failure (e.g. panel unreachable) is captured for the
   // inline error + Retry affordance.
+  // Last-wins guard: switching panels fires a new fetch; a slow earlier
+  // panel's response must not overwrite the list/error for the panel now
+  // selected.
+  const unmanagedSeq = useRef(0)
+
   async function loadUnmanaged(panelId: number | null) {
+    const seq = ++unmanagedSeq.current
     setUnmanagedError(null)
     if (panelId == null) {
       setUnmanaged([])
@@ -1970,14 +1976,16 @@ export default function NodesView() {
     setLoading(true)
     try {
       const res = await listUnmanagedInbounds(panelId)
-      setUnmanaged(res.items)
+      if (seq === unmanagedSeq.current) setUnmanaged(res.items)
     } catch (e) {
-      setUnmanaged([])
-      const msg = (e as { response?: { data?: { error?: string } } })?.response?.data?.error
-        || (e as Error)?.message || String(e)
-      setUnmanagedError(msg)
+      if (seq === unmanagedSeq.current) {
+        setUnmanaged([])
+        const msg = (e as { response?: { data?: { error?: string } } })?.response?.data?.error
+          || (e as Error)?.message || String(e)
+        setUnmanagedError(msg)
+      }
     } finally {
-      setLoading(false)
+      if (seq === unmanagedSeq.current) setLoading(false)
     }
   }
 

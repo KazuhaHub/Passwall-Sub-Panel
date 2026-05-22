@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent, type ChangeEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent, type ChangeEvent } from 'react'
 import {
   Box,
   Button,
@@ -163,23 +163,33 @@ export default function LogsView() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, subPage, auditPage, emailPage, subAppliedSearch, auditAppliedSearch, emailAppliedSearch])
 
+  // Last-wins guards: connecting Pagination / filter submit fires overlapping
+  // loads within one tab; a slow earlier page must not overwrite the newer one.
+  const subSeq = useRef(0)
+  const auditSeq = useRef(0)
+  const emailSeq = useRef(0)
+
   async function loadSub() {
+    const seq = ++subSeq.current
     setSubLoading(true)
     try {
       const res = await getSubLogs({ page: subPage, page_size: PAGE_SIZE, search: subAppliedSearch || undefined })
+      if (seq !== subSeq.current) return
       setSubItems(res.items); setSubTotal(res.total)
-    } finally { setSubLoading(false) }
+    } finally { if (seq === subSeq.current) setSubLoading(false) }
   }
 
   async function loadAudit() {
+    const seq = ++auditSeq.current
     setAuditLoading(true)
     try {
       const res = await listAudit({
         page: auditPage, page_size: PAGE_SIZE,
         search: auditAppliedSearch || undefined,
       })
+      if (seq !== auditSeq.current) return
       setAuditItems(res.items); setAuditTotal(res.total)
-    } finally { setAuditLoading(false) }
+    } finally { if (seq === auditSeq.current) setAuditLoading(false) }
   }
 
   async function clearSubAll() {
@@ -221,11 +231,13 @@ export default function LogsView() {
   function onEmailFilter(e: FormEvent) { e.preventDefault(); setEmailPage(1); setEmailAppliedSearch(emailSearch) }
 
   async function loadEmail() {
+    const seq = ++emailSeq.current
     setEmailLoading(true)
     try {
       const res = await getEmailLogs({ page: emailPage, page_size: PAGE_SIZE, search: emailAppliedSearch || undefined })
+      if (seq !== emailSeq.current) return
       setEmailItems(res.items); setEmailTotal(res.total)
-    } finally { setEmailLoading(false) }
+    } finally { if (seq === emailSeq.current) setEmailLoading(false) }
   }
 
   async function clearEmailAll() {

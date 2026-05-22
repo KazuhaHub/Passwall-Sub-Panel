@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useState, type FormEvent, type MouseEvent } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useRef, useState, type FormEvent, type MouseEvent } from 'react'
 import {
   Accordion,
   AccordionDetails,
@@ -202,7 +202,12 @@ export default function MeView() {
     setAnnounceOpen(false)
   }
 
+  // Last-wins guard: period/range changes snap-and-reload (see below), so
+  // rapid toggling can overlap; only the latest response should paint.
+  const trendSeq = useRef(0)
+
   async function loadTrend() {
+    const seq = ++trendSeq.current
     setTrendBusy(true)
     try {
       const since = new Date()
@@ -212,9 +217,9 @@ export default function MeView() {
       const today = new Date()
       const untilStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
       const res = await getMyTrafficHistory({ period: trendPeriod, since: sinceStr, until: untilStr })
-      setTrendItems(res.items)
+      if (seq === trendSeq.current) setTrendItems(res.items)
     } catch { /* ignore */ }
-    finally { setTrendBusy(false) }
+    finally { if (seq === trendSeq.current) setTrendBusy(false) }
   }
 
   async function tryEmergency() {
