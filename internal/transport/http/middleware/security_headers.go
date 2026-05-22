@@ -11,7 +11,10 @@ import "github.com/gin-gonic/gin"
 //   - Referrer-Policy:      no-referrer (don't leak panel URLs)
 //   - Content-Security-Policy: minimal self-only baseline; the SPA bundle
 //     uses inline styles for MUI's emotion runtime so 'unsafe-inline'
-//     is allowed for style-src only. Images: self + data: (favicons).
+//     is allowed for style-src only. Images: self + data: + blob: + any
+//     https: origin — the last one so admin-configured quick-link icons can
+//     point at an external favicon/image URL. (script-src stays 'self', so
+//     this only widens where <img> may load from, not code execution.)
 //     No script 'unsafe-inline' / 'unsafe-eval': React's bundled JS does
 //     not need them.
 //
@@ -21,7 +24,7 @@ func SecurityHeaders() gin.HandlerFunc {
 	const csp = "default-src 'self'; " +
 		"script-src 'self'; " +
 		"style-src 'self' 'unsafe-inline'; " +
-		"img-src 'self' data: blob:; " +
+		"img-src 'self' data: blob: https:; " +
 		"font-src 'self' data:; " +
 		"connect-src 'self'; " +
 		"frame-ancestors 'none'; " +

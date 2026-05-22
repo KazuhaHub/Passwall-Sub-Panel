@@ -4,6 +4,14 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## v3.4.0-beta.11 — 2026-05-22
+
+### Fixed
+- **快捷链接的 URL 图片图标不显示**:面板 CSP 的 `img-src` 只允许 `'self' data: blob:`,
+  外部图片(如填了某站 favicon 的 URL)被浏览器按 CSP 拦掉、触发 `<img>` 的 onError 而
+  隐藏。`img-src` 放行 `https:`,外部 HTTPS 图标即可加载。`script-src` 仍锁 `'self'`,只是
+  放宽 `<img>` 的来源、不影响代码执行。(需重新部署二进制 + 浏览器刷新生效。)
+
 ## v3.4.0-beta.10 — 2026-05-22
 
 ### Fixed
