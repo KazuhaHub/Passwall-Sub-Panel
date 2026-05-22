@@ -1247,14 +1247,28 @@ func (s *Service) ResyncMembershipOrEnqueue(ctx context.Context, userID int64, s
 	return nil
 }
 
-// EnqueueMembershipResync queues a membership resync for one user WITHOUT
-// attempting the inline (3X-UI-bound, potentially slow) sync first. Used by the
-// group editor's filter-change path: a group with many members would otherwise
-// block the save request on N sequential per-member resyncs. Enqueuing is a
-// couple of fast DB ops (deduped per target); the sync-task worker + reconcile
-// propagate to 3X-UI in the background against the latest group definition.
-func (s *Service) EnqueueMembershipResync(ctx context.Context, userID int64, summary string) error {
-	return s.enqueueUserTask(ctx, domain.SyncTaskUserResync, userID, summary)
+// ResyncGroupMembersInBackground recomputes every member's 3X-UI memberships
+// after a group's tag_filter changed. It runs immediately (sync-first, falling
+// back to the async task queue per member on failure — same as
+// ResyncMembershipOrEnqueue) but OFF the request thread, so saving the group
+// returns at once instead of blocking on N sequential per-member 3X-UI
+// round-trips. Uses a fresh context because the caller's request context is
+// cancelled once the save response is written; anything left unsynced if the
+// process stops mid-run is healed by the next reconcile pass.
+func (s *Service) ResyncGroupMembersInBackground(groupID int64) {
+	safego.Go("user.resync-group-members", func() {
+		ctx := context.Background()
+		members, err := s.users.ListByGroup(ctx, groupID)
+		if err != nil {
+			log.Warn("resync group members: list", "group_id", groupID, "err", err)
+			return
+		}
+		for _, m := range members {
+			if err := s.ResyncMembershipOrEnqueue(ctx, m.ID, "sync node membership for user "+m.UPN); err != nil {
+				log.Warn("resync group member", "group_id", groupID, "user_id", m.ID, "err", err)
+			}
+		}
+	})
 }
 
 // ResyncMembership recomputes a user's 3X-UI client memberships against

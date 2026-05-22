@@ -158,30 +158,14 @@ func (h *AdminGroupHandler) Update(c *gin.Context) {
 	}
 
 	// On a filter change every member's 3X-UI memberships must be recomputed.
-	// Do NOT sync inline — a populous group would block this save on N
-	// sequential per-member 3X-UI resyncs. Just enqueue a resync task per
-	// member (fast, deduped DB ops); the sync-task worker + reconcile apply the
-	// diff in the background against the now-saved group definition.
-	resyncErrors := []string{}
-	queued := 0
+	// Run it immediately but OFF the request thread (sync-first, async fallback
+	// per member) so a populous group / slow panel doesn't block the save on N
+	// sequential 3X-UI round-trips. The save returns at once; reconcile heals
+	// anything the background pass can't finish.
 	if filterChanged {
-		members, err := h.users.ListByGroup(c.Request.Context(), id)
-		if err != nil {
-			resyncErrors = append(resyncErrors, "list members: "+err.Error())
-		}
-		for _, m := range members {
-			if err := h.user.EnqueueMembershipResync(c.Request.Context(), m.ID, "sync node membership for user "+m.UPN); err != nil {
-				resyncErrors = append(resyncErrors, m.UPN+": "+err.Error())
-			} else {
-				queued++
-			}
-		}
+		h.user.ResyncGroupMembersInBackground(id)
 	}
-	resp := gin.H{"group": toGroupDTO(g), "resync_queued": queued}
-	if len(resyncErrors) > 0 {
-		resp["resync_errors"] = resyncErrors
-	}
-	c.JSON(http.StatusOK, resp)
+	c.JSON(http.StatusOK, gin.H{"group": toGroupDTO(g)})
 }
 
 func (h *AdminGroupHandler) UpdateLayout(c *gin.Context) {
