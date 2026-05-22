@@ -4,6 +4,17 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## v3.3.0-beta.2 — 2026-05-21
+
+### Added
+- 日志三个标签页(审计 / 订阅访问 / 邮件)各加一个模糊搜索框:
+  - 审计原来的「操作者 / 动作」两个**精确匹配**框合并为一个关键词框,模糊匹配
+    操作者 / 动作 / 对象;
+  - 订阅访问搜 IP / UA / 客户端 / 用户(UPN / 显示名);
+  - 邮件搜 收件人 / 类型 / 用户。
+  后端 filter 加 `Search`(不区分大小写的跨列 `LOWER(...) LIKE`,join users 以搜
+  UPN / 显示名,SQLite / PostgreSQL / MySQL 通用),audit repo 搜索有单测覆盖。
+
 ## v3.3.0-beta.1 — 2026-05-21
 
 把订阅客户端配置重构为统一的「检测族 → 导入 App」两层注册表，并在其上补齐错误页、
