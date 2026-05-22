@@ -186,7 +186,7 @@ export default function MeView() {
   const md = theme.palette.md
   const { t } = useTranslation('user')
 
-  const [tab, setTab] = useTabParam<'overview' | 'status'>('tab', 'overview', ['overview', 'status'])
+  const [tab, setTab] = useTabParam<'overview' | 'traffic' | 'clients' | 'status'>('tab', 'overview', ['overview', 'traffic', 'clients', 'status'])
   const [profile, setProfile] = useState<MeProfile | null>(null)
   const [usage, setUsage] = useState<UsageReport | null>(null)
   const [loading, setLoading] = useState(true)
@@ -606,9 +606,12 @@ export default function MeView() {
 
       {/* Section tabs — keep the page navigable as it grows. Server status is
           its own tab so it doesn't pile onto the already-long overview. */}
-      <Tabs value={tab} onChange={(_, v) => setTab(v as 'overview' | 'status')}
+      <Tabs value={tab} onChange={(_, v) => setTab(v as 'overview' | 'traffic' | 'clients' | 'status')}
+        variant="scrollable" scrollButtons="auto"
         sx={{ mb: { xs: 2, sm: 3 }, minHeight: 40 }}>
         <Tab value="overview" label={t('tabs.overview', { defaultValue: '概览' })} sx={{ minHeight: 40 }} />
+        <Tab value="traffic" label={t('tabs.traffic', { defaultValue: '流量' })} sx={{ minHeight: 40 }} />
+        <Tab value="clients" label={t('tabs.clients', { defaultValue: '客户端' })} sx={{ minHeight: 40 }} />
         <Tab value="status" label={t('tabs.server_status', { defaultValue: '服务器状态' })} sx={{ minHeight: 40 }} />
       </Tabs>
 
@@ -677,6 +680,7 @@ export default function MeView() {
           </Card>
         )
       })()}
+      </>)}
 
       {/* Two-column layout below the hero. Each column is an independent
           flex stack so a tall card on one side doesn't open a gap on the
@@ -714,6 +718,7 @@ export default function MeView() {
         minWidth: 0,
         width: { xs: '100%', md: 'auto' },
       }}>
+      {tab === 'overview' && (
       <Box sx={{ order: { xs: 1, md: 0 }, width: { xs: '100%', md: 'auto' } }}>
       {/* Sub URL — masked by default for screenshot/screen-share safety.
           Click the eye icon to reveal both the URL text AND the QR code.
@@ -805,8 +810,10 @@ export default function MeView() {
           </Box>
         </Box>
       </Card>
-      </Box>{/* end sub url order wrapper */}
+      </Box>
+      )}{/* end sub url order wrapper */}
 
+      {tab === 'traffic' && (
       <Box sx={{ order: { xs: 5, md: 0 }, width: { xs: '100%', md: 'auto' } }}>
       {/* Traffic trend chart — open by default so the user sees their usage
           shape without an extra click. Click the row to collapse. */}
@@ -864,8 +871,10 @@ export default function MeView() {
           </Suspense>
         </AccordionDetails>
       </Accordion>
-      </Box>{/* end trend order wrapper */}
+      </Box>
+      )}{/* end trend order wrapper */}
 
+      {tab === 'clients' && (
       <Box sx={{ order: { xs: 6, md: 0 }, width: { xs: '100%', md: 'auto' } }}>
       {/* Other clients (excludes the hero, which is shown above). When no
           client matches the visitor's platform, this falls back to the full
@@ -936,11 +945,13 @@ export default function MeView() {
           </Accordion>
         )
       })()}
-      </Box>{/* end other clients order wrapper */}
+      </Box>
+      )}{/* end other clients order wrapper */}
 
       </Box>{/* end left col */}
 
       {/* Right column */}
+      {tab === 'overview' && (
       <Box sx={{
         display: { xs: 'contents', md: 'flex' },
         flexDirection: 'column',
@@ -1073,10 +1084,10 @@ export default function MeView() {
       })()}
       </Box>{/* end emergency order wrapper */}
 
-      </Box>{/* end right col */}
+      </Box>
+      )}{/* end right col */}
 
       </Box>{/* end two-col flex */}
-      </>)}
 
       {/* Global announcement popup (opt-in via admin settings) */}
       {announcementPopup && (() => {

@@ -1,6 +1,8 @@
 {
   "tabs": {
     "overview": "概览",
+    "traffic": "流量",
+    "clients": "客户端",
     "server_status": "服务器状态"
   },
   "status": {

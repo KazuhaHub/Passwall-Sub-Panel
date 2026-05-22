@@ -4,6 +4,15 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## v3.4.0-beta.3 — 2026-05-21
+
+### Changed
+- **用户页拆成 4 个标签**:在「概览 / 服务器状态」基础上,把**流量曲线**和**其他客户端
+  (一键导入)**各拆为独立标签——概览(订阅链接 + 用量摘要 + 推荐客户端 + 快捷链接 +
+  应急)/ 流量 / 客户端 / 服务器状态。实现上用「就地按标签门控」:概览仍是原两栏响应式
+  布局,非概览标签时右列不渲染、左列单卡自然撑满全宽,没有搬动那套精细排版。中英文标签
+  齐全。
+
 ## v3.4.0-beta.2 — 2026-05-21
 
 ### Fixed
