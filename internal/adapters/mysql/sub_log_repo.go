@@ -2,6 +2,7 @@ package mysql
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -35,23 +36,34 @@ func (r *subLogRepo) List(ctx context.Context, filter ports.SubLogFilter) ([]*do
 		filter.Page = 1
 	}
 
-	// Build base query for count
-	countQ := r.db.WithContext(ctx).Model(&subLogRow{})
-	if filter.UserID != nil {
-		countQ = countQ.Where("user_id = ?", *filter.UserID)
+	// applyFilters constrains a sub_logs query, joined to users so search can
+	// also hit upn / display_name. Reused for both the count and page query so
+	// the total stays consistent with the rows returned.
+	applyFilters := func(q *gorm.DB) *gorm.DB {
+		q = q.Joins("LEFT JOIN users ON users.id = sub_logs.user_id")
+		if filter.UserID != nil {
+			q = q.Where("sub_logs.user_id = ?", *filter.UserID)
+		}
+		if filter.Since != nil {
+			q = q.Where("sub_logs.accessed_at >= ?", *filter.Since)
+		}
+		if filter.Until != nil {
+			q = q.Where("sub_logs.accessed_at <= ?", *filter.Until)
+		}
+		if s := strings.TrimSpace(filter.Search); s != "" {
+			kw := "%" + strings.ToLower(s) + "%"
+			q = q.Where(
+				"LOWER(sub_logs.ip) LIKE ? OR LOWER(sub_logs.ua) LIKE ? OR LOWER(sub_logs.client_type) LIKE ? OR LOWER(COALESCE(users.upn, '')) LIKE ? OR LOWER(COALESCE(users.display_name, '')) LIKE ?",
+				kw, kw, kw, kw, kw)
+		}
+		return q
 	}
-	if filter.Since != nil {
-		countQ = countQ.Where("accessed_at >= ?", *filter.Since)
-	}
-	if filter.Until != nil {
-		countQ = countQ.Where("accessed_at <= ?", *filter.Until)
-	}
+
 	var total int64
-	if err := countQ.Count(&total).Error; err != nil {
+	if err := applyFilters(r.db.WithContext(ctx).Table("sub_logs")).Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
 
-	// Query with user join
 	type subLogWithUser struct {
 		ID          int64
 		UserID      int64
@@ -64,20 +76,8 @@ func (r *subLogRepo) List(ctx context.Context, filter ports.SubLogFilter) ([]*do
 		UserGroupID int64
 	}
 
-	q := r.db.WithContext(ctx).
-		Table("sub_logs").
-		Select("sub_logs.*, users.upn as user_upn, users.display_name as user_display, users.group_id as user_group_id").
-		Joins("LEFT JOIN users ON users.id = sub_logs.user_id")
-
-	if filter.UserID != nil {
-		q = q.Where("sub_logs.user_id = ?", *filter.UserID)
-	}
-	if filter.Since != nil {
-		q = q.Where("sub_logs.accessed_at >= ?", *filter.Since)
-	}
-	if filter.Until != nil {
-		q = q.Where("sub_logs.accessed_at <= ?", *filter.Until)
-	}
+	q := applyFilters(r.db.WithContext(ctx).Table("sub_logs")).
+		Select("sub_logs.*, users.upn as user_upn, users.display_name as user_display, users.group_id as user_group_id")
 
 	var rows []subLogWithUser
 	// sub_logs.id DESC breaks ties on the non-unique accessed_at so pagination

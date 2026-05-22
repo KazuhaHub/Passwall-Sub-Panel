@@ -34,6 +34,10 @@ type AuditFilter struct {
 	Pagination
 	Actor  string
 	Action string
+	// Search is a case-insensitive substring matched across actor / action /
+	// target. When set it's the only text filter the UI sends (Actor/Action
+	// stay for API back-compat / programmatic callers).
+	Search string
 	Since  *time.Time
 	Until  *time.Time
 }
@@ -41,6 +45,9 @@ type AuditFilter struct {
 type SubLogFilter struct {
 	Pagination
 	UserID *int64
+	// Search: case-insensitive substring across ip / ua / client_type and the
+	// joined user's upn / display_name.
+	Search string
 	Since  *time.Time
 	Until  *time.Time
 }
@@ -561,6 +568,9 @@ type MailRepo interface {
 type EmailLogFilter struct {
 	Pagination
 	UserID *int64
+	// Search: case-insensitive substring across to_email / kind and the joined
+	// user's upn / display_name.
+	Search string
 	Since  *time.Time
 	Until  *time.Time
 }

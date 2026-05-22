@@ -27,6 +27,7 @@ func (h *AdminAuditHandler) List(c *gin.Context) {
 		Pagination: ports.Pagination{Page: page, PageSize: pageSize},
 		Actor:      c.Query("actor"),
 		Action:     c.Query("action"),
+		Search:     c.Query("search"),
 	}
 	if v := c.Query("since"); v != "" {
 		if t, err := time.Parse(time.RFC3339, v); err == nil {

@@ -24,6 +24,8 @@ export interface EmailLogFilter {
   page?: number
   page_size?: number
   user_id?: number
+  /** Case-insensitive substring across to_email / kind / upn / display. */
+  search?: string
   since?: string
   until?: string
 }

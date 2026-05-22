@@ -21,6 +21,8 @@ export interface SubLogFilter {
   page?: number
   page_size?: number
   user_id?: number
+  /** Case-insensitive substring across ip / ua / client_type / upn / display. */
+  search?: string
   since?: string
   until?: string
 }

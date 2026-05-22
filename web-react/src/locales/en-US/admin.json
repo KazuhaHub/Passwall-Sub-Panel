@@ -553,8 +553,9 @@
       "at": "Sent at"
     },
     "filter": {
-      "actor": "Actor",
-      "action": "Action"
+      "audit_search": "Search actor / action / target",
+      "sub_search": "Search user / IP / UA / client",
+      "email_search": "Search user / recipient / kind"
     },
     "detail": {
       "before": "Before",

@@ -14,8 +14,8 @@ export interface AuditEntry {
 export interface AuditFilter {
   page?: number
   page_size?: number
-  actor?: string
-  action?: string
+  /** Case-insensitive substring matched across actor / action / target. */
+  search?: string
   since?: string
   until?: string
 }

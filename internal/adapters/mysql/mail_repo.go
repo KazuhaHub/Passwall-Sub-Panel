@@ -3,6 +3,7 @@ package mysql
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -99,18 +100,30 @@ func (r *mailRepo) ListSent(ctx context.Context, filter ports.EmailLogFilter) ([
 		filter.Page = 1
 	}
 
-	countQ := r.db.WithContext(ctx).Model(&mailSentRow{})
-	if filter.UserID != nil {
-		countQ = countQ.Where("user_id = ?", *filter.UserID)
+	// applyFilters constrains a mail_sent query, joined to users so search can
+	// also hit upn / display_name. Reused for count + page query.
+	applyFilters := func(q *gorm.DB) *gorm.DB {
+		q = q.Joins("LEFT JOIN users ON users.id = mail_sent.user_id")
+		if filter.UserID != nil {
+			q = q.Where("mail_sent.user_id = ?", *filter.UserID)
+		}
+		if filter.Since != nil {
+			q = q.Where("mail_sent.sent_at >= ?", *filter.Since)
+		}
+		if filter.Until != nil {
+			q = q.Where("mail_sent.sent_at <= ?", *filter.Until)
+		}
+		if s := strings.TrimSpace(filter.Search); s != "" {
+			kw := "%" + strings.ToLower(s) + "%"
+			q = q.Where(
+				"LOWER(mail_sent.to_email) LIKE ? OR LOWER(mail_sent.kind) LIKE ? OR LOWER(COALESCE(users.upn, '')) LIKE ? OR LOWER(COALESCE(users.display_name, '')) LIKE ?",
+				kw, kw, kw, kw)
+		}
+		return q
 	}
-	if filter.Since != nil {
-		countQ = countQ.Where("sent_at >= ?", *filter.Since)
-	}
-	if filter.Until != nil {
-		countQ = countQ.Where("sent_at <= ?", *filter.Until)
-	}
+
 	var total int64
-	if err := countQ.Count(&total).Error; err != nil {
+	if err := applyFilters(r.db.WithContext(ctx).Table("mail_sent")).Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
 
@@ -125,20 +138,8 @@ func (r *mailRepo) ListSent(ctx context.Context, filter ports.EmailLogFilter) ([
 		UserDisplay string
 	}
 
-	q := r.db.WithContext(ctx).
-		Table("mail_sent").
-		Select("mail_sent.*, users.upn as user_upn, users.display_name as user_display").
-		Joins("LEFT JOIN users ON users.id = mail_sent.user_id")
-
-	if filter.UserID != nil {
-		q = q.Where("mail_sent.user_id = ?", *filter.UserID)
-	}
-	if filter.Since != nil {
-		q = q.Where("mail_sent.sent_at >= ?", *filter.Since)
-	}
-	if filter.Until != nil {
-		q = q.Where("mail_sent.sent_at <= ?", *filter.Until)
-	}
+	q := applyFilters(r.db.WithContext(ctx).Table("mail_sent")).
+		Select("mail_sent.*, users.upn as user_upn, users.display_name as user_display")
 
 	var rows []mailSentWithUser
 	// mail_sent.id DESC breaks ties on the non-unique sent_at so pagination is

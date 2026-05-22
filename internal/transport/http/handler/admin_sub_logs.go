@@ -26,6 +26,7 @@ func (h *AdminSubLogHandler) List(c *gin.Context) {
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "50"))
 	filter := ports.SubLogFilter{
 		Pagination: ports.Pagination{Page: page, PageSize: pageSize},
+		Search:     c.Query("search"),
 	}
 	if v := c.Query("user_id"); v != "" {
 		if id, err := strconv.ParseInt(v, 10, 64); err == nil {

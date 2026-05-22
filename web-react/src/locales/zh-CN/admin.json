@@ -553,8 +553,9 @@
       "at": "发送时间"
     },
     "filter": {
-      "actor": "操作者",
-      "action": "动作"
+      "audit_search": "搜索 操作者 / 动作 / 对象",
+      "sub_search": "搜索 用户 / IP / UA / 客户端",
+      "email_search": "搜索 用户 / 收件人 / 类型"
     },
     "detail": {
       "before": "操作前",

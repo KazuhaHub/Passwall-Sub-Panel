@@ -79,6 +79,7 @@ export default function LogsView() {
   const [subTotal, setSubTotal] = useState(0)
   const [subPage, setSubPage] = useState(1)
   const [subLoading, setSubLoading] = useState(false)
+  const [subSearch, setSubSearch] = useState('')
   const [subDetailOpen, setSubDetailOpen] = useState(false)
   const [subDetail, setSubDetail] = useState<SubLog | null>(null)
 
@@ -111,8 +112,7 @@ export default function LogsView() {
   const [auditTotal, setAuditTotal] = useState(0)
   const [auditPage, setAuditPage] = useState(1)
   const [auditLoading, setAuditLoading] = useState(false)
-  const [actorFilter, setActorFilter] = useState('')
-  const [actionFilter, setActionFilter] = useState('')
+  const [auditSearch, setAuditSearch] = useState('')
   const [auditDetailOpen, setAuditDetailOpen] = useState(false)
   const [auditDetail, setAuditDetail] = useState<AuditEntry | null>(null)
 
@@ -124,6 +124,7 @@ export default function LogsView() {
   const [emailTotal, setEmailTotal] = useState(0)
   const [emailPage, setEmailPage] = useState(1)
   const [emailLoading, setEmailLoading] = useState(false)
+  const [emailSearch, setEmailSearch] = useState('')
   const [emailDetailOpen, setEmailDetailOpen] = useState(false)
   const [emailDetail, setEmailDetail] = useState<EmailLog | null>(null)
   const [emailRetentionDays, setEmailRetentionDays] = useState<number | null>(null)
@@ -159,7 +160,7 @@ export default function LogsView() {
   async function loadSub() {
     setSubLoading(true)
     try {
-      const res = await getSubLogs({ page: subPage, page_size: PAGE_SIZE })
+      const res = await getSubLogs({ page: subPage, page_size: PAGE_SIZE, search: subSearch || undefined })
       setSubItems(res.items); setSubTotal(res.total)
     } finally { setSubLoading(false) }
   }
@@ -169,7 +170,7 @@ export default function LogsView() {
     try {
       const res = await listAudit({
         page: auditPage, page_size: PAGE_SIZE,
-        actor: actorFilter || undefined, action: actionFilter || undefined,
+        search: auditSearch || undefined,
       })
       setAuditItems(res.items); setAuditTotal(res.total)
     } finally { setAuditLoading(false) }
@@ -208,11 +209,13 @@ export default function LogsView() {
   }
 
   function onAuditFilter(e: FormEvent) { e.preventDefault(); setAuditPage(1); void loadAudit() }
+  function onSubFilter(e: FormEvent) { e.preventDefault(); setSubPage(1); void loadSub() }
+  function onEmailFilter(e: FormEvent) { e.preventDefault(); setEmailPage(1); void loadEmail() }
 
   async function loadEmail() {
     setEmailLoading(true)
     try {
-      const res = await getEmailLogs({ page: emailPage, page_size: PAGE_SIZE })
+      const res = await getEmailLogs({ page: emailPage, page_size: PAGE_SIZE, search: emailSearch || undefined })
       setEmailItems(res.items); setEmailTotal(res.total)
     } finally { setEmailLoading(false) }
   }
@@ -251,6 +254,16 @@ export default function LogsView() {
 
       {tab === 'sub' && (
         <>
+          <Box component="form" onSubmit={onSubFilter} sx={{ display: 'flex', gap: 1.5, mb: 2, alignItems: 'center', flexWrap: 'wrap' }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, height: 40, px: 2, borderRadius: 9999,
+              bgcolor: md.surfaceContainer, color: md.onSurfaceVariant, width: 320, maxWidth: '100%' }}>
+              <SearchIcon sx={{ fontSize: 18 }} />
+              <InputBase placeholder={t('admin:logs.filter.sub_search', { defaultValue: '搜索 用户 / IP / UA / 客户端' })} value={subSearch}
+                onChange={e => setSubSearch(e.target.value)}
+                sx={{ flex: 1, fontSize: 14, color: md.onSurface }} />
+            </Box>
+            <Button type="submit" variant="outlined">{t('common:search.placeholder')}</Button>
+          </Box>
           <Box sx={{ display: 'flex', gap: 1, mb: 2, alignItems: 'center', flexWrap: 'wrap' }}>
             {canConfig && <>
               <Button variant="outlined" startIcon={<CleaningIcon />} onClick={purgeSubOld}>
@@ -333,17 +346,10 @@ export default function LogsView() {
         <>
           <Box component="form" onSubmit={onAuditFilter} sx={{ display: 'flex', gap: 1.5, mb: 2, flexWrap: 'wrap', alignItems: 'center' }}>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, height: 40, px: 2, borderRadius: 9999,
-              bgcolor: md.surfaceContainer, color: md.onSurfaceVariant, width: 220 }}>
+              bgcolor: md.surfaceContainer, color: md.onSurfaceVariant, width: 320, maxWidth: '100%' }}>
               <SearchIcon sx={{ fontSize: 18 }} />
-              <InputBase placeholder={t('admin:logs.filter.actor')} value={actorFilter}
-                onChange={e => setActorFilter(e.target.value)}
-                sx={{ flex: 1, fontSize: 14, color: md.onSurface }} />
-            </Box>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, height: 40, px: 2, borderRadius: 9999,
-              bgcolor: md.surfaceContainer, color: md.onSurfaceVariant, width: 220 }}>
-              <SearchIcon sx={{ fontSize: 18 }} />
-              <InputBase placeholder={t('admin:logs.filter.action')} value={actionFilter}
-                onChange={e => setActionFilter(e.target.value)}
+              <InputBase placeholder={t('admin:logs.filter.audit_search', { defaultValue: '搜索 操作者 / 动作 / 对象' })} value={auditSearch}
+                onChange={e => setAuditSearch(e.target.value)}
                 sx={{ flex: 1, fontSize: 14, color: md.onSurface }} />
             </Box>
             <Button type="submit" variant="outlined">{t('common:search.placeholder')}</Button>
@@ -404,6 +410,16 @@ export default function LogsView() {
 
       {tab === 'email' && (
         <>
+          <Box component="form" onSubmit={onEmailFilter} sx={{ display: 'flex', gap: 1.5, mb: 2, alignItems: 'center', flexWrap: 'wrap' }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, height: 40, px: 2, borderRadius: 9999,
+              bgcolor: md.surfaceContainer, color: md.onSurfaceVariant, width: 320, maxWidth: '100%' }}>
+              <SearchIcon sx={{ fontSize: 18 }} />
+              <InputBase placeholder={t('admin:logs.filter.email_search', { defaultValue: '搜索 用户 / 收件人 / 类型' })} value={emailSearch}
+                onChange={e => setEmailSearch(e.target.value)}
+                sx={{ flex: 1, fontSize: 14, color: md.onSurface }} />
+            </Box>
+            <Button type="submit" variant="outlined">{t('common:search.placeholder')}</Button>
+          </Box>
           <Box sx={{ display: 'flex', gap: 1, mb: 2, alignItems: 'center', flexWrap: 'wrap' }}>
             {canConfig && <>
               <Button variant="outlined" startIcon={<CleaningIcon />} onClick={purgeEmailOld}>

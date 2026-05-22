@@ -2,6 +2,7 @@ package mysql
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -40,6 +41,10 @@ func (r *auditRepo) List(ctx context.Context, filter ports.AuditFilter) ([]*doma
 	}
 	if filter.Action != "" {
 		q = q.Where("action = ?", filter.Action)
+	}
+	if s := strings.TrimSpace(filter.Search); s != "" {
+		kw := "%" + strings.ToLower(s) + "%"
+		q = q.Where("LOWER(actor) LIKE ? OR LOWER(action) LIKE ? OR LOWER(target) LIKE ?", kw, kw, kw)
 	}
 	if filter.Since != nil {
 		q = q.Where("at >= ?", *filter.Since)
