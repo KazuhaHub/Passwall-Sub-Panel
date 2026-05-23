@@ -65,13 +65,18 @@ func (recPool) Remove(int64) error                   { return nil }
 
 type recClient struct {
 	ports.XUIClient
-	inbounds []ports.Inbound
-	getResp  *ports.Inbound
-	updated  []ports.InboundSpec
+	inbounds  []ports.Inbound
+	getResp   *ports.Inbound
+	updated   []ports.InboundSpec
+	updateErr error // when set, UpdateInbound returns it (drift-push fail)
+	getErr    error // when set, GetInbound returns it (recapture fail)
 }
 
 func (c *recClient) ListInbounds(context.Context) ([]ports.Inbound, error) { return c.inbounds, nil }
 func (c *recClient) GetInbound(_ context.Context, id int) (*ports.Inbound, error) {
+	if c.getErr != nil {
+		return nil, c.getErr
+	}
 	if c.getResp != nil {
 		return c.getResp, nil
 	}
@@ -84,6 +89,31 @@ func (c *recClient) GetInbound(_ context.Context, id int) (*ports.Inbound, error
 }
 func (c *recClient) UpdateInbound(_ context.Context, _ int, spec ports.InboundSpec) error {
 	c.updated = append(c.updated, spec)
+	return c.updateErr
+}
+
+// recAudit captures AuditEntry inserts so observability tests can assert that
+// reconcile axis-A fires per-inbound rows (alongside the cycle-wide aggregate
+// RunOnce writes). Embeds AuditRepo so the methods we don't drive panic if
+// accidentally called — the same idiom the other fakes use.
+type recAudit struct {
+	ports.AuditRepo
+	entries []*domain.AuditEntry
+}
+
+func (a *recAudit) Insert(_ context.Context, e *domain.AuditEntry) error {
+	cp := *e
+	a.entries = append(a.entries, &cp)
+	return nil
+}
+
+// findAuditByAction returns the first captured audit entry whose Action matches.
+func (a *recAudit) findAuditByAction(action string) *domain.AuditEntry {
+	for _, e := range a.entries {
+		if e.Action == action {
+			return e
+		}
+	}
 	return nil
 }
 
@@ -258,3 +288,130 @@ func TestCheckNodes_InSync_NoOp(t *testing.T) {
 		t.Fatalf("want report.Fixed=0, got %d", report.Fixed)
 	}
 }
+
+// ---- A: per-event audit + ConfigSyncState pending on failure ----
+
+// Backfill emits an audit row so the admin / dashboard can see which nodes were
+// captured in this cycle (in addition to the cycle-aggregate row).
+func TestCheckNodes_BackfillEmitsAudit(t *testing.T) {
+	node := &domain.Node{ID: 1, PanelID: 1, InboundID: 3, Enabled: true} // never captured
+	live := []ports.Inbound{{ID: 3, Protocol: "vless", Port: 443, StreamSettings: `{"network":"tcp"}`, Settings: `{"decryption":"none","clients":[{"id":"x"}]}`}}
+	client := &recClient{inbounds: live}
+	repo := &recNodeRepo{nodes: []*domain.Node{node}}
+	audit := &recAudit{}
+	svc := &Service{nodes: repo, pool: recPool{c: client}, audit: audit}
+
+	svc.checkNodes(context.Background(), &Report{}, cacheFromInbounds(1, live))
+
+	if got := audit.findAuditByAction("inbound_config_backfilled"); got == nil {
+		t.Fatalf("expected per-inbound backfill audit, got entries=%+v", audit.entries)
+	}
+}
+
+// Drift-push emits an audit row and leaves the snapshot in synced (Capture sets
+// it from the post-push re-capture).
+func TestCheckNodes_DriftPushedEmitsAudit(t *testing.T) {
+	now := time.Now()
+	node := &domain.Node{
+		ID: 1, PanelID: 1, InboundID: 3, Enabled: true,
+		Protocol: "vless", Port: 443,
+		StreamSettings:  `{"network":"ws"}`,
+		InboundSettings: `{"decryption":"none"}`,
+		ConfigSyncedAt:  &now, ConfigSyncState: "synced",
+	}
+	live := ports.Inbound{ID: 3, Protocol: "vless", Port: 443, StreamSettings: `{"network":"tcp"}`, Settings: `{"decryption":"none","clients":[]}`}
+	client := &recClient{inbounds: []ports.Inbound{live}, getResp: &live}
+	repo := &recNodeRepo{nodes: []*domain.Node{node}}
+	audit := &recAudit{}
+	svc := &Service{nodes: repo, pool: recPool{c: client}, audit: audit}
+
+	svc.checkNodes(context.Background(), &Report{}, cacheFromInbounds(1, []ports.Inbound{live}))
+
+	if got := audit.findAuditByAction("inbound_config_drift_pushed"); got == nil {
+		t.Fatalf("expected per-inbound drift-push audit, got entries=%+v", audit.entries)
+	}
+	// Post-push Capture must leave the snapshot synced (not pending).
+	last := repo.updatesCfg[len(repo.updatesCfg)-1]
+	if last.ConfigSyncState != "synced" {
+		t.Fatalf("after successful drift push the snapshot must read synced, got %q", last.ConfigSyncState)
+	}
+}
+
+// Push failure: snapshot flips to pending so the UI can surface "PSP wants
+// this config but couldn't deliver it", and the failure is auditable.
+func TestCheckNodes_PushFailMarksPendingAndAudits(t *testing.T) {
+	now := time.Now()
+	node := &domain.Node{
+		ID: 1, PanelID: 1, InboundID: 3, Enabled: true,
+		Protocol: "vless", Port: 443,
+		StreamSettings:  `{"network":"ws"}`,
+		InboundSettings: `{"decryption":"none"}`,
+		ConfigSyncedAt:  &now, ConfigSyncState: "synced",
+	}
+	live := ports.Inbound{ID: 3, Protocol: "vless", Port: 443, StreamSettings: `{"network":"tcp"}`, Settings: `{"decryption":"none","clients":[]}`}
+	client := &recClient{inbounds: []ports.Inbound{live}, getResp: &live, updateErr: errPushFail{}}
+	repo := &recNodeRepo{nodes: []*domain.Node{node}}
+	audit := &recAudit{}
+	svc := &Service{nodes: repo, pool: recPool{c: client}, audit: audit}
+
+	svc.checkNodes(context.Background(), &Report{}, cacheFromInbounds(1, []ports.Inbound{live}))
+
+	if got := audit.findAuditByAction("inbound_config_push_failed"); got == nil {
+		t.Fatalf("expected push-failed audit, got entries=%+v", audit.entries)
+	}
+	// markConfigSyncStatePending must write through to the snapshot column.
+	var sawPending bool
+	for _, u := range repo.updatesCfg {
+		if u.ConfigSyncState == "pending" {
+			sawPending = true
+			break
+		}
+	}
+	if !sawPending {
+		t.Fatalf("push fail must flip ConfigSyncState to pending; snapshot writes=%+v", repo.updatesCfg)
+	}
+}
+
+// Re-capture failure: push went through but the converging GetInbound failed.
+// Same pending-state + audit treatment (and we don't loop on the next cycle —
+// the in-sync compare on stale data still triggers another push, but it's
+// idempotent; the user sees the pending state until 3X-UI is reachable again).
+func TestCheckNodes_RecaptureFailMarksPendingAndAudits(t *testing.T) {
+	now := time.Now()
+	node := &domain.Node{
+		ID: 1, PanelID: 1, InboundID: 3, Enabled: true,
+		Protocol: "vless", Port: 443,
+		StreamSettings:  `{"network":"ws"}`,
+		InboundSettings: `{"decryption":"none"}`,
+		ConfigSyncedAt:  &now, ConfigSyncState: "synced",
+	}
+	live := ports.Inbound{ID: 3, Protocol: "vless", Port: 443, StreamSettings: `{"network":"tcp"}`, Settings: `{"decryption":"none","clients":[]}`}
+	client := &recClient{inbounds: []ports.Inbound{live}, getErr: errRecaptureFail{}}
+	repo := &recNodeRepo{nodes: []*domain.Node{node}}
+	audit := &recAudit{}
+	svc := &Service{nodes: repo, pool: recPool{c: client}, audit: audit}
+
+	svc.checkNodes(context.Background(), &Report{}, cacheFromInbounds(1, []ports.Inbound{live}))
+
+	if got := audit.findAuditByAction("inbound_config_recapture_failed"); got == nil {
+		t.Fatalf("expected recapture-failed audit, got entries=%+v", audit.entries)
+	}
+	var sawPending bool
+	for _, u := range repo.updatesCfg {
+		if u.ConfigSyncState == "pending" {
+			sawPending = true
+			break
+		}
+	}
+	if !sawPending {
+		t.Fatalf("recapture fail must flip ConfigSyncState to pending; snapshot writes=%+v", repo.updatesCfg)
+	}
+}
+
+type errPushFail struct{}
+
+func (errPushFail) Error() string { return "panel returned 5xx" }
+
+type errRecaptureFail struct{}
+
+func (errRecaptureFail) Error() string { return "panel went away post-push" }

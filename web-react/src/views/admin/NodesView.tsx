@@ -107,7 +107,7 @@ function TagsAutocomplete(props: {
     <Autocomplete
       multiple
       freeSolo
-      size="medium"
+      size="small"
       options={props.options}
       value={tags}
       onChange={(_, v) => {

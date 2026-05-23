@@ -10,10 +10,12 @@
 //     connectionless, so this is "open|filtered" — we only call it down when
 //     the OS surfaces an ICMP port-unreachable; otherwise it's treated as up.
 //
-// The port is read from the inbound (one ListInbounds per panel) and cached on
-// the Node, so a probe still runs from the cache when the panel's admin API is
-// temporarily down. Disabled inbounds aren't special-cased — their port simply
-// isn't listening, so the probe fails and the node shows down on its own.
+// v3.5: port / protocol are read directly from the Node row — they're written
+// by the inbound write-through paths (CreateInbound / ImportExisting /
+// UpdateInboundConfig) and kept aligned by reconcile axis A (see
+// docs/inbound-ownership.md). Health no longer calls 3X-UI at all; cutting the
+// per-cycle ListInbounds also means a panel-API outage no longer affects the
+// data-plane probe. Inbound-existence drift is covered by reconcile §9.4.3 #6.
 package health
 
 import (
@@ -42,14 +44,13 @@ const (
 
 type Service struct {
 	nodes ports.NodeRepo
-	pool  ports.XUIPool
 	// probe reports whether the proxy port is open. network is "tcp" or "udp".
 	// Injectable so tests drive the up/down branches without real sockets.
 	probe func(ctx context.Context, network, host string, port int) error
 }
 
-func New(nodes ports.NodeRepo, pool ports.XUIPool) *Service {
-	return &Service{nodes: nodes, pool: pool, probe: portOpen}
+func New(nodes ports.NodeRepo) *Service {
+	return &Service{nodes: nodes, probe: portOpen}
 }
 
 // isUDPProtocol reports whether a proxy protocol carries its traffic over UDP
@@ -100,13 +101,6 @@ func (s *Service) CheckOnce(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("list nodes: %w", err)
 	}
-	byPanel := make(map[int64][]*domain.Node, len(allNodes))
-	for _, n := range allNodes {
-		if !n.Enabled || n.IsSeparator() {
-			continue
-		}
-		byPanel[n.PanelID] = append(byPanel[n.PanelID], n)
-	}
 
 	now := time.Now()
 	type target struct {
@@ -116,50 +110,26 @@ func (s *Service) CheckOnce(ctx context.Context) error {
 	}
 	var targets []target
 
-	for panelID, nodes := range byPanel {
-		// Learn the live port/protocol from the panel when reachable; otherwise
-		// fall back to whatever we cached on the node last time.
-		var byInbound map[int]ports.Inbound
-		var panelErr string
-		if c, err := s.pool.Get(panelID); err != nil {
-			panelErr = err.Error()
-		} else if listed, err := c.ListInbounds(ctx); err != nil {
-			panelErr = err.Error()
-		} else {
-			byInbound = make(map[int]ports.Inbound, len(listed))
-			for _, inb := range listed {
-				byInbound[inb.ID] = inb
-			}
+	for _, n := range allNodes {
+		if !n.Enabled || n.IsSeparator() {
+			continue
 		}
-
-		for _, n := range nodes {
-			port, proto := n.Port, n.Protocol // cached fallback
-			if byInbound != nil {
-				if inb, ok := byInbound[n.InboundID]; ok {
-					port, proto = inb.Port, strings.ToLower(inb.Protocol)
-				} else if port <= 0 {
-					s.persist(ctx, n, port, proto, domain.NodeHealthInboundMissing,
-						fmt.Sprintf("inbound %d not present on panel", n.InboundID), now)
-					continue
-				}
-			}
-			if n.ServerAddress == "" || port <= 0 {
-				state, detail := domain.NodeHealthUnreachable, "no known port to probe"
-				if panelErr != "" {
-					state, detail = domain.NodeHealthPanelUnreachable, "panel unreachable: "+panelErr
-				}
-				s.persist(ctx, n, port, proto, state, detail, now)
-				continue
-			}
-			network := "tcp"
-			if isUDPProtocol(proto) {
-				network = "udp"
-			}
-			// Cache the (possibly refreshed) probe target onto the node so a
-			// later pass can probe even if the panel API is down by then.
-			n.Port, n.Protocol = port, proto
-			targets = append(targets, target{n: n, host: n.ServerAddress, network: network})
+		// v3.5: port / protocol are the node row's own authoritative columns
+		// — populated by the inbound write-through paths and aligned by
+		// reconcile axis A. No ListInbounds, no per-panel grouping needed.
+		if n.ServerAddress == "" || n.Port <= 0 {
+			// Pre-v3.5 row that never got its port captured, or a freshly-
+			// imported node before reconcile backfills it. Report unreachable
+			// so the UI surfaces "no signal" rather than a stale green dot.
+			s.persist(ctx, n, n.Port, n.Protocol, domain.NodeHealthUnreachable,
+				"no known port to probe (awaiting inbound config capture)", now)
+			continue
 		}
+		network := "tcp"
+		if isUDPProtocol(n.Protocol) {
+			network = "udp"
+		}
+		targets = append(targets, target{n: n, host: n.ServerAddress, network: network})
 	}
 
 	sem := make(chan struct{}, healthProbeConcurrency)

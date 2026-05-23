@@ -24,6 +24,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/crypto"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/log"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/safego"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/group"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/inboundcfg"
@@ -273,9 +274,7 @@ func (s *Service) ImportExisting(ctx context.Context, n *domain.Node) error {
 	if err := s.nodes.Create(ctx, n); err != nil {
 		return err
 	}
-	if err := s.syncExistingUsersToNode(ctx, n); err != nil {
-		log.Warn("sync users on import", "node_id", n.ID, "err", err)
-	}
+	s.syncExistingUsersToNodeInBackground(n)
 	return nil
 }
 
@@ -306,9 +305,7 @@ func (s *Service) CreateInbound(ctx context.Context, n *domain.Node, spec ports.
 		_ = c.DelInbound(context.Background(), inboundID)
 		return err
 	}
-	if err := s.syncExistingUsersToNode(ctx, n); err != nil {
-		log.Warn("sync users on create", "node_id", n.ID, "err", err)
-	}
+	s.syncExistingUsersToNodeInBackground(n)
 	return nil
 }
 
@@ -359,12 +356,32 @@ func (s *Service) UpdateInboundConfig(ctx context.Context, id int64, spec ports.
 	}
 	c, err := s.pool.Get(n.PanelID)
 	if err != nil {
+		s.markConfigPending(ctx, n)
 		return s.enqueueNodeTask(ctx, domain.SyncTaskNodeUpdate, n, "update node config", spec)
 	}
 	if err := c.UpdateInbound(ctx, n.InboundID, spec); err != nil {
+		s.markConfigPending(ctx, n)
 		return s.enqueueNodeTask(ctx, domain.SyncTaskNodeUpdate, n, "update node config", spec)
 	}
 	return nil
+}
+
+// markConfigPending flips the snapshot's sync-state column to "pending" so the
+// UI surfaces "PSP wants this config but couldn't deliver it" while the retry
+// task is in flight. Mirrors reconcile.markConfigSyncStatePending — kept inline
+// here because the node service can't import reconcile (would cycle). The next
+// successful push (via runNodeTask below, or a later reconcile cycle) flips it
+// back to "synced" via ApplySpec / Capture / the runNodeTask success path.
+// Best-effort: a DB failure here is logged-only, the same edit will re-trigger
+// on the next admin save or the reconcile that comes after.
+func (s *Service) markConfigPending(ctx context.Context, n *domain.Node) {
+	if n.ConfigSyncState == "pending" {
+		return
+	}
+	n.ConfigSyncState = "pending"
+	if err := s.nodes.UpdateInboundConfig(ctx, n); err != nil {
+		log.Warn("mark config pending failed", "node_id", n.ID, "err", err)
+	}
 }
 
 func (s *Service) SetEnabled(ctx context.Context, id int64, enabled bool) error {
@@ -517,7 +534,18 @@ func (s *Service) runNodeTask(ctx context.Context, task *domain.SyncTask) error 
 		// edits stacked between enqueue and run (or if dedup collapsed them
 		// onto this one task). Pushing the captured-at-enqueue payload could
 		// regress 3X-UI to a superseded spec.
-		return c.UpdateInbound(ctx, n.InboundID, inboundcfg.SpecFromNode(n))
+		if err := c.UpdateInbound(ctx, n.InboundID, inboundcfg.SpecFromNode(n)); err != nil {
+			return err
+		}
+		// Push succeeded — clear any "pending" the original enqueue set so the
+		// UI flips back to synced. The local snapshot already matches what we
+		// just pushed (built via SpecFromNode), so a column-only state write is
+		// all that's needed.
+		if n.ConfigSyncState != "synced" {
+			n.ConfigSyncState = "synced"
+			_ = s.nodes.UpdateInboundConfig(ctx, n)
+		}
+		return nil
 	default:
 		return nil
 	}
@@ -556,9 +584,7 @@ func (s *Service) runNodeCreateTask(ctx context.Context, task *domain.SyncTask) 
 				if err := s.nodes.Create(ctx, &n); err != nil {
 					return err
 				}
-				if err := s.syncExistingUsersToNode(ctx, &n); err != nil {
-					log.Warn("sync users on adopted-create", "node_id", n.ID, "err", err)
-				}
+				s.syncExistingUsersToNodeInBackground(&n)
 				log.Info("create node: adopted existing inbound (recovery from lost AddInbound response)",
 					"panel_id", n.PanelID, "inbound_id", adopted.ID, "port", adopted.Port)
 				return nil
@@ -580,9 +606,7 @@ func (s *Service) runNodeCreateTask(ctx context.Context, task *domain.SyncTask) 
 		_ = c.DelInbound(context.Background(), inboundID)
 		return err
 	}
-	if err := s.syncExistingUsersToNode(ctx, &n); err != nil {
-		log.Warn("sync users on queued create", "node_id", n.ID, "err", err)
-	}
+	s.syncExistingUsersToNodeInBackground(&n)
 	return nil
 }
 
@@ -704,6 +728,27 @@ func nodeTaskBackoff(_ int) time.Duration {
 }
 
 // ---- New-node user sync ----
+
+// syncExistingUsersToNodeInBackground runs syncExistingUsersToNode off the
+// request thread. CreateInbound / ImportExisting (and their task-replay
+// equivalents) call this so the admin save returns at once — pushing N user
+// clients sequentially to 3X-UI would otherwise block the response on N
+// HTTP round-trips, which gets painful for groups with many members.
+//
+// Uses a fresh context (the request context is cancelled when the response
+// is written) and a value-copy of n (the caller may mutate / drop the
+// pointer before the goroutine runs). Anything the goroutine can't finish —
+// process restart, panel down, transient failure — is healed by reconcile
+// axis B's checkMissingOwnerships within the next full cycle. Mirrors
+// user.ResyncGroupMembersInBackground (beta.7).
+func (s *Service) syncExistingUsersToNodeInBackground(n *domain.Node) {
+	snap := *n
+	safego.Go("node.sync-existing-users", func() {
+		if err := s.syncExistingUsersToNode(context.Background(), &snap); err != nil {
+			log.Warn("sync existing users (background)", "node_id", snap.ID, "err", err)
+		}
+	})
+}
 
 // syncExistingUsersToNode walks every group; for groups whose tag_filter would
 // include this node, every enabled member gets a client pushed via the

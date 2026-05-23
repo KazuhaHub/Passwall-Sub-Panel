@@ -137,6 +137,9 @@ func TestUpdateInboundConfig_WriteThrough_PushOK(t *testing.T) {
 
 // Push fails (panel unreachable) but the local snapshot must still be written —
 // local-first means render reflects the new config even while 3X-UI is down.
+// And the state column flips to "pending" so the UI / dashboard can show
+// "PSP wants this config but couldn't deliver it" instead of misleadingly
+// reading "synced" (which was the bug before this assertion landed).
 func TestUpdateInboundConfig_PushFails_StillStoredLocally(t *testing.T) {
 	repo := &captureNodeRepo{node: &domain.Node{ID: 1, PanelID: 1, InboundID: 3}}
 	svc := &Service{nodes: repo, pool: stubXUIPool{err: errPanelDown{}}}
@@ -146,6 +149,37 @@ func TestUpdateInboundConfig_PushFails_StillStoredLocally(t *testing.T) {
 	}
 	if repo.updateCfg == nil || repo.updateCfg.StreamSettings == "" {
 		t.Fatalf("config must be persisted locally even when the push fails")
+	}
+	if repo.updateCfg.ConfigSyncState != "pending" {
+		t.Fatalf("push fail must mark ConfigSyncState=pending, got %q", repo.updateCfg.ConfigSyncState)
+	}
+}
+
+// The SyncTaskNodeUpdate retry path must flip the snapshot back to "synced"
+// when the deferred push finally lands — otherwise the UI shows pending
+// forever even after 3X-UI is reconciled.
+func TestRunNodeTask_UpdateSuccessClearsPending(t *testing.T) {
+	now := time.Now()
+	repo := &captureNodeRepo{node: &domain.Node{
+		ID: 1, PanelID: 1, InboundID: 3,
+		Protocol:        "vless",
+		Port:            443,
+		StreamSettings:  `{"network":"ws"}`,
+		InboundSettings: `{"decryption":"none"}`,
+		ConfigSyncedAt:  &now,
+		ConfigSyncState: "pending", // left over from the original push-fail
+	}}
+	client := &stubXUIClient{}
+	svc := &Service{nodes: repo, pool: stubXUIPool{c: client}}
+
+	if err := svc.runNodeTask(context.Background(), &domain.SyncTask{Type: domain.SyncTaskNodeUpdate, TargetID: 1}); err != nil {
+		t.Fatalf("runNodeTask = %v, want nil", err)
+	}
+	if client.updated == nil {
+		t.Fatalf("retry must push to 3X-UI")
+	}
+	if repo.updateCfg == nil || repo.updateCfg.ConfigSyncState != "synced" {
+		t.Fatalf("retry success must flip ConfigSyncState back to synced, got %+v", repo.updateCfg)
 	}
 }
 
@@ -194,6 +228,70 @@ func TestCreateInbound_WriteThrough(t *testing.T) {
 	if strings.Contains(got.InboundSettings, "clients") {
 		t.Fatalf("stored settings must drop clients[]: %s", got.InboundSettings)
 	}
+}
+
+// CreateInbound must return at once even when the post-create user-sync would
+// otherwise block on N sequential 3X-UI round-trips. We prove it: pin
+// groups.List inside the user-sync to a channel and verify CreateInbound
+// returns BEFORE we release it — the sync has to be off the request thread.
+func TestCreateInbound_SyncRunsInBackground(t *testing.T) {
+	repo := &captureNodeRepo{}
+	client := &stubXUIClient{addID: 7, getResp: &ports.Inbound{Protocol: "vless", Settings: `{"decryption":"none"}`}}
+	syncReached := make(chan struct{}, 1)
+	release := make(chan struct{})
+	svc := &Service{
+		nodes: repo,
+		pool:  stubXUIPool{c: client},
+		groups: blockingGroups{
+			called:  syncReached,
+			release: release,
+		},
+		settings: settingsStub{},
+	}
+	n := &domain.Node{DisplayName: "X", Region: "us", PanelID: 1}
+	spec := ports.InboundSpec{Protocol: "vless", Port: 443, StreamSettings: `{"network":"ws"}`}
+
+	done := make(chan error, 1)
+	go func() { done <- svc.CreateInbound(context.Background(), n, spec) }()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("CreateInbound = %v, want nil", err)
+		}
+	case <-time.After(500 * time.Millisecond):
+		close(release)
+		t.Fatal("CreateInbound blocked waiting on user-sync; sync must run off the request thread")
+	}
+
+	// And the background sync did kick off.
+	select {
+	case <-syncReached:
+	case <-time.After(2 * time.Second):
+		close(release)
+		t.Fatal("background user-sync never reached groups.List")
+	}
+	close(release)
+}
+
+// blockingGroups gates the post-create user-sync inside groups.List so the
+// async test can prove CreateInbound returns without waiting.
+type blockingGroups struct {
+	ports.GroupRepo
+	called  chan<- struct{}
+	release <-chan struct{}
+}
+
+func (b blockingGroups) List(ctx context.Context) ([]*domain.Group, error) {
+	select {
+	case b.called <- struct{}{}:
+	default:
+	}
+	select {
+	case <-b.release:
+	case <-ctx.Done():
+	}
+	return nil, nil
 }
 
 // ImportExisting = take ownership: capture the live inbound's config into the

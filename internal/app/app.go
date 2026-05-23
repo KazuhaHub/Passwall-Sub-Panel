@@ -79,8 +79,8 @@ type App struct {
 	// poll-cycle concern), so app.go reaches into the repos directly.
 	trafficRepo ports.TrafficRepo
 	nodeTraffic ports.NodeTrafficRepo
-	rollup    *rollup.Service
-	saml      *auth.SAMLService
+	rollup      *rollup.Service
+	saml        *auth.SAMLService
 	// repos kept around so Run() can call initAdminIfNeeded AFTER the
 	// listen socket is bound — that way a bind failure (port busy / TLS
 	// misconfig / EACCES) doesn't leave the user staring at a closed
@@ -224,7 +224,7 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	// that produces those notifications).
 	trafficSvc.SetMailNotifier(mailSvc)
 	reconcileSvc := reconcile.New(repos.User, repos.Ownership, repos.Node, repos.Group, repos.Settings, repos.Audit, pool, syncSvc)
-	healthSvc := health.New(repos.Node, pool)
+	healthSvc := health.New(repos.Node)
 	renderSvc := render.New(repos, pool, groupSvc)
 
 	// --- async dispatcher for handler-spawned background work ---

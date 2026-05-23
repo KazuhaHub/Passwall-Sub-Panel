@@ -174,10 +174,11 @@ render 生成 proxy 块（[protocols.go `emitProxy`](../internal/service/render/
 - [x] **无快照（含存量回填）**：`inboundcfg.Capture` 从 live 拉进 node（pull），不下发。
 - [x] **有快照且漂移**：`InSync` 比对（语义 JSON、忽略 clients[]/键序）→ `UpdateInbound` 下发 `SpecFromNode`，**RMW 保留全部 client**；推后 `GetInbound` 回采收敛。
 - [x] **轴 B（旧）**：client 检查项 #1–#5 完全不动。
-- [ ] *TODO*：ConfigSyncState 写 `drift`/`pending` 的细分（当前只写 `synced`，UI 提示用）；audit 条目用现有 reconcile 汇总，未单列 inbound_config_* code。
+- [x] ConfigSyncState `"pending"` 状态（beta.7）：reconcile 推送 / 回采失败时落盘 `"pending"`，下一轮成功时由 `Capture` 复位为 `"synced"`；每条 `inbound_config_*` 事件单独写 `audit_log`，actor=`reconcile`、target 含 `node/panel/inbound` id。
 
-### 阶段 5 · 顺带优化（非必须，未做）
-- [ ] health 仍为拿 Port 去 `ListInbounds`（Port 现已是 DB 权威，可省一次拉取——留作后续优化）；traffic poll 仍拉流量计数（流量属 xray，搬不走）。
+### 阶段 5 · 顺带优化
+- [x] health 改读本地 Port/Protocol（beta.7）：不再 `ListInbounds`，控制面 / 数据面解耦（3X-UI 控制 API 挂掉时 health 仍能跑）。`panel_unreachable` / `inbound_missing` 两个旧状态在 health 不再写入（前者已无意义，后者由 reconcile §9.4.3 #6 兜底）；`health.Service.pool` 字段一并去除。
+- traffic poll 仍拉流量计数（流量属 xray，搬不走）。
 
 ### 阶段 6 · 文档与版本
 - [x] CHANGELOG（中文，v3.5.0-beta.1）。

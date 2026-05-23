@@ -655,17 +655,10 @@ func (s *Service) reconcileInboundConfig(ctx context.Context, n *domain.Node, li
 		// Column-scoped write: a concurrent health pass writes port/protocol
 		// from the same probe target, full-row Save would race with it.
 		if err := s.nodes.UpdateInboundConfig(ctx, n); err != nil {
-			report.Issues = append(report.Issues, Issue{
-				PanelID: n.PanelID, PanelName: s.panelNameOf(n.PanelID), InboundID: n.InboundID,
-				Code: "inbound_config_backfill_failed", Detail: err.Error(),
-			})
+			s.recordInboundConfigEvent(ctx, report, n, "inbound_config_backfill_failed", err.Error(), false)
 			return
 		}
-		report.Fixed++
-		report.Issues = append(report.Issues, Issue{
-			PanelID: n.PanelID, PanelName: s.panelNameOf(n.PanelID), InboundID: n.InboundID,
-			Code: "inbound_config_backfilled", Detail: fmt.Sprintf("node id=%d", n.ID), Fixed: true,
-		})
+		s.recordInboundConfigEvent(ctx, report, n, "inbound_config_backfilled", fmt.Sprintf("node id=%d", n.ID), true)
 		return
 	}
 
@@ -684,10 +677,8 @@ func (s *Service) reconcileInboundConfig(ctx context.Context, n *domain.Node, li
 	// the operator's value back into the snapshot.
 	spec.Remark = live.Remark
 	if err := c.UpdateInbound(ctx, n.InboundID, spec); err != nil {
-		report.Issues = append(report.Issues, Issue{
-			PanelID: n.PanelID, PanelName: s.panelNameOf(n.PanelID), InboundID: n.InboundID,
-			Code: "inbound_config_push_failed", Detail: err.Error(),
-		})
+		s.markConfigSyncStatePending(ctx, n)
+		s.recordInboundConfigEvent(ctx, report, n, "inbound_config_push_failed", err.Error(), false)
 		return
 	}
 	// Converge the local snapshot to whatever 3X-UI actually persisted (it may
@@ -696,25 +687,60 @@ func (s *Service) reconcileInboundConfig(ctx context.Context, n *domain.Node, li
 	// was — otherwise we'd loop forever pushing the same drifted spec.
 	freshLive, ferr := c.GetInbound(ctx, n.InboundID)
 	if ferr != nil {
-		report.Issues = append(report.Issues, Issue{
-			PanelID: n.PanelID, PanelName: s.panelNameOf(n.PanelID), InboundID: n.InboundID,
-			Code: "inbound_config_recapture_failed", Detail: ferr.Error(),
-		})
+		s.markConfigSyncStatePending(ctx, n)
+		s.recordInboundConfigEvent(ctx, report, n, "inbound_config_recapture_failed", ferr.Error(), false)
 		return
 	}
 	inboundcfg.Capture(n, freshLive)
 	if err := s.nodes.UpdateInboundConfig(ctx, n); err != nil {
-		report.Issues = append(report.Issues, Issue{
-			PanelID: n.PanelID, PanelName: s.panelNameOf(n.PanelID), InboundID: n.InboundID,
-			Code: "inbound_config_recapture_failed", Detail: err.Error(),
-		})
+		s.markConfigSyncStatePending(ctx, n)
+		s.recordInboundConfigEvent(ctx, report, n, "inbound_config_recapture_failed", err.Error(), false)
 		return
 	}
-	report.Fixed++
+	s.recordInboundConfigEvent(ctx, report, n, "inbound_config_drift_pushed", fmt.Sprintf("node id=%d", n.ID), true)
+}
+
+// recordInboundConfigEvent appends one Issue to the report (mirroring the prior
+// per-event behaviour) AND writes a single audit_log row so the per-inbound
+// outcome of every axis-A reconcile cycle is retrievable. The aggregate
+// reconcile_full / reconcile_light audit row written by RunOnce still captures
+// the cycle-wide summary; these per-event rows give the per-inbound provenance
+// the admin / dashboard needs (was this node ever drifted? when? what failed?).
+func (s *Service) recordInboundConfigEvent(ctx context.Context, report *Report, n *domain.Node, code, detail string, fixed bool) {
+	if fixed {
+		report.Fixed++
+	}
 	report.Issues = append(report.Issues, Issue{
-		PanelID: n.PanelID, PanelName: s.panelNameOf(n.PanelID), InboundID: n.InboundID,
-		Code: "inbound_config_drift_pushed", Detail: fmt.Sprintf("node id=%d", n.ID), Fixed: true,
+		PanelID:   n.PanelID,
+		PanelName: s.panelNameOf(n.PanelID),
+		InboundID: n.InboundID,
+		Code:      code,
+		Detail:    detail,
+		Fixed:     fixed,
 	})
+	if s.audit == nil {
+		return
+	}
+	_ = s.audit.Insert(ctx, &domain.AuditEntry{
+		Actor:     "reconcile",
+		Action:    code,
+		Target:    fmt.Sprintf("node=%d panel=%d inbound=%d", n.ID, n.PanelID, n.InboundID),
+		AfterJSON: detail,
+		At:        time.Now(),
+	})
+}
+
+// markConfigSyncStatePending flips the snapshot's sync-state column to
+// "pending" so the UI can surface "PSP wants this config but couldn't push it
+// yet"; the next successful drift-push or capture flips it back to "synced"
+// via inboundcfg.Capture / markSynced. Best-effort: a DB failure here doesn't
+// matter — the same condition will re-trigger next cycle.
+func (s *Service) markConfigSyncStatePending(ctx context.Context, n *domain.Node) {
+	if n.ConfigSyncState == "pending" {
+		return
+	}
+	n.ConfigSyncState = "pending"
+	_ = s.nodes.UpdateInboundConfig(ctx, n)
 }
 
 // sameSyncStamp compares two ConfigSyncedAt pointers by value. Used as a row

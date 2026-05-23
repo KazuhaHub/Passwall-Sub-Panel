@@ -4,6 +4,25 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## v3.5.0-beta.7 — 2026-05-23
+
+### Changed
+- **新建 / 导入节点不再阻塞在"逐个推 client 到 3X-UI"**:`CreateInbound` / `ImportExisting`(以及两条 task 重放路径)的 `syncExistingUsersToNode` 改为 `safego.Go` 后台跑——保存请求一返回就成功,N 个用户的 client 推送在 goroutine 里继续。一个 100 人的 group 之前要等 ~20s,现在秒回;goroutine 失败 / 进程重启没推完的,reconcile 轴 B 的 `checkMissingOwnerships`(15min 内)兜底重建。沿用 beta.7 早些时候 `user.ResyncGroupMembersInBackground` 的同款 immediate + reconcile-fallback 模式。
+- **health 不再调 3X-UI**(承接 v3.5 本地化):port / protocol 直接读 `nodes` 行(write-through + reconcile 轴 A 维持),不再每 5 分钟每 panel 一次 `ListInbounds`。控制面 / 数据面彻底解耦——3X-UI 控制 API 挂掉时 health 仍照常跑。`panel_unreachable` / `inbound_missing` 两个旧状态在 health 内不再写入(数据面探测失败统一报 `unreachable`;inbound 存在性由 reconcile §9.4.3 #6 兜底)。`Service.pool` 字段一并去掉,`health.New` 签名收缩为 `(nodes ports.NodeRepo)`。
+
+### Fixed
+- **新增节点对话框的 Tags 输入框比 Region 高一截**:`TagsAutocomplete` 写死 `size="medium"`,而周围 TextField(含 Region)都是 `size="small"`,同一行视觉错位。改成 `size="small"` 后,创建 / 编辑 / 导入 / 分隔符四处共用的 Tags 输入都和邻居字段对齐(里面的 Chip 本就是 small)。
+- **admin 编辑路径推送失败时 `ConfigSyncState` 正确置 `pending`**(节点管理审查发现):之前 `node.UpdateInboundConfig` 在 `c.UpdateInbound` 失败 / panel 不可达时只入异步重试队列、本地 state 仍写 `synced`(误报"已同步");现已和 reconcile axis A 对齐——置 `pending` 并落盘,`SyncTaskNodeUpdate` 重试成功后再复位 `synced`。UI / 监控现在能正确反映"PSP 想推但还没推上去"。
+
+### Added
+- **reconcile 轴 A 可观测性**(beta.1 inbound 本地化收尾):
+  - 每条 inbound 级配置事件单独写一条 `audit_log`(`inbound_config_backfilled` / `_drift_pushed` / `_push_failed` / `_recapture_failed` / `_backfill_failed`),actor=`reconcile`、target=`node=N panel=P inbound=I`。原有的 cycle-aggregate 汇总行(`reconcile_full` / `reconcile_light`)仍写,这是其上的 per-inbound 流水。
+  - **`ConfigSyncState` 新增 `"pending"` 状态**:reconcile 下发推送失败 / 推后回采失败时由 `markConfigSyncStatePending` 写入 `nodes.config_sync_state`,UI / 监控可区分"已同步" vs "PSP 想推但推不上"。下一轮成功推送 / 回采时由 `inboundcfg.Capture` 复位为 `"synced"`。
+
+### Docs
+- ARCHITECTURE.md 正文回写为 v3.5 现实:§3.2 / §9.3 / §9.4.3(#7 改写 + 新增 #8 轴 A 配置漂移) / §9.4.5 🚫 / §9.5.1 导入接管,撤销旧"3X-UI 是 inbound 协议参数单源真相"表述,均交叉引用 `docs/inbound-ownership.md`。
+- 补 `CreateInbound` / `ImportExisting` write-through 集成测试,以及 `inboundcfg.HasLocalConfig` 单测;`UpdateInboundConfig` 落盘加密往返已有覆盖(beta.2)。
+
 ## v3.5.0-beta.6 — 2026-05-22
 
 ### Fixed
