@@ -50,6 +50,44 @@ func (r *userRepo) UpdateTrafficState(ctx context.Context, u *domain.User) error
 		}).Error
 }
 
+// BatchUpdateTrafficState runs N UpdateTrafficState writes wrapped in one
+// transaction. The win is SQLite-specific: each per-row UPDATE in auto-commit
+// mode is its own ~5–10ms WAL fsync, so PollOnce's hot loop (one write per
+// user, plus per-client BatchUpdateCounters below) used to spend most of its
+// wall time waiting on commits rather than doing real work. Wrapping the N
+// statements in a single transaction collapses them to a single commit at
+// the end. MySQL/Postgres get the smaller round-trip win.
+//
+// Column scope and emergency-column skip are identical to UpdateTrafficState;
+// see that method's doc for the rationale on why the narrow write matters.
+// No-op on an empty slice so callers don't need to guard the no-users path.
+func (r *userRepo) BatchUpdateTrafficState(ctx context.Context, users []*domain.User) error {
+	if len(users) == 0 {
+		return nil
+	}
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		for _, u := range users {
+			if u == nil || u.ID == 0 {
+				return fmt.Errorf("BatchUpdateTrafficState requires a non-zero user ID; got %+v", u)
+			}
+			err := tx.Model(&userRow{}).
+				Where("id = ?", u.ID).
+				Updates(map[string]any{
+					"lifetime_up_bytes":     u.LifetimeUpBytes,
+					"lifetime_down_bytes":   u.LifetimeDownBytes,
+					"lifetime_total_bytes":  u.LifetimeTotalBytes,
+					"period_baseline_bytes": u.PeriodBaselineBytes,
+					"lifetime_baseline_at":  u.LifetimeBaselineAt,
+					"traffic_period_start":  u.TrafficPeriodStart,
+				}).Error
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
 // ClearEmergencyAccess nulls the emergency window for one user via a targeted
 // write (map so the zero/NULL values land). Used by the traffic poll under the
 // emergency lock; keeps emergency clearing out of UpdateTrafficState's stale

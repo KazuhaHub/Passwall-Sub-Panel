@@ -4,6 +4,19 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## v3.5.0-beta.9 — 2026-05-23
+
+### Changed
+- **traffic poll 末尾批量 flush,手动"Poll Now"从 ~10s 降到亚秒级**:`PollOnce` 的 Phase 1(拉 3X-UI 数据)早已并行,瓶颈一直在 Phase 2 串行的 per-user / per-client 本地 DB 写——尤其 SQLite WAL 每次 commit ~5–10ms。N 用户 × M client 一轮 poll 是 `N + N×M` 次自动提交;100×8 ≈ 900 次,刚好对得上用户实测的 ~10s。本轮把热路径 3 个动作改成"循环里只入 sink,循环结束统一一次 flush":
+  - 新增 `OwnershipRepo.BatchUpdateCounters` / `UserRepo.BatchUpdateTrafficState`:GORM 事务包 N 条 UPDATE,SQLite 下 N 次 commit 合并为 1 次;MySQL/PG 也省掉 N − 1 次 round-trip。列范围、emergency-column 跳过、零 ID 拒绝等约束与原单行方法逐项一致(`TestBatchUpdateTrafficState` / `TestOwnershipBatchUpdateCounters` 覆盖了空输入 no-op + zero-ID 整批回滚 + emergency 不被覆盖三条不变量)。
+  - 新增 `TrafficRepo.LatestForUsers(ids)`:子查询 + IN 一次拿全部用户的最新 snapshot,替代每用户一次的 `LatestForUser` SELECT。`MAX(id)` 作 tie-breaker,与单用户路径 `Order("id DESC").Limit(1)` 语义一致(`TestLatestForUsers` 显式比对单用户结果)。
+  - `recordClientStats` / `recordAndEnforceWith` 改为 sink-aware:有 sink 入队,无 sink 走原 inline(非 poll 调用者 / 测试 / `recordAndEnforce` 回退路径不变)。rollover 分支的两次 user UPDATE 通过 sink `map[int64]*User` 去重,确保一个用户每轮只写一行;`ClearEmergencyAccess` 仍 inline 在 emergency lock 内,沿用 v3.3.0-beta.6 不让 stale 写吃掉 live grant 的约束。
+  - PollOnce 末尾在现有 3 个 `InsertBatch` 之后追加 `BatchUpdateCounters` + `BatchUpdateTrafficState` 两次调用。一轮 N × M 写场景的预期总 DB 操作:`1 LatestForUsers + 3 InsertBatch + 1 BatchUpdateCounters + 1 BatchUpdateTrafficState = 6 次`,与用户体量基本解耦。`TestPollOnceBatchesPerCycleWrites`(3 用户 × 4 client)断言这三个 batch 调用各恰好一次。
+
+### Internal / 测试
+- `internal/service/sync/sync_test.go` + `internal/service/user/user_test.go` 的 fake repo 各补一个新方法 stub,保持 `ports` 接口实现完整(否则全量 `go vet` / 包级测试编译失败)。
+- 计划文档:`docs/poll-perf-optimization.md` 是本轮实现前的方案稿(问题定位、热路径表、跨方言策略、落地清单),保留作为后续回看用。
+
 ## v3.5.0-beta.8 — 2026-05-23
 
 ### Changed

@@ -79,6 +79,44 @@ func (r *trafficRepo) Insert(ctx context.Context, s *domain.TrafficSnapshot) err
 	return nil
 }
 
+// LatestForUsers returns the latest snapshot row for every userID in one SQL
+// roundtrip. The poll calls it ONCE at the top of PollOnce, replacing N
+// per-user LatestForUser SELECTs in the inner loop. Users with no prior
+// snapshot are simply absent from the returned map — callers should treat
+// absence the same as the single-user form's ErrNotFound. Returns an empty
+// map for an empty input so callers don't need to gate the no-users path.
+//
+// Implementation: inner SELECT picks MAX(id) per user (id is monotonically
+// increasing, so this matches LatestForUser's `Order("id DESC").Limit(1)`
+// tie-breaker exactly — picking by MAX(captured_at) could split-tie if two
+// snapshots ever share a timestamp). The outer SELECT pulls the full row
+// for each chosen id. IN ? and INNER JOIN are portable across SQLite, MySQL,
+// and Postgres.
+func (r *trafficRepo) LatestForUsers(ctx context.Context, userIDs []int64) (map[int64]*domain.TrafficSnapshot, error) {
+	if len(userIDs) == 0 {
+		return map[int64]*domain.TrafficSnapshot{}, nil
+	}
+	var rows []trafficRow
+	err := r.db.WithContext(ctx).Raw(`
+		SELECT t.* FROM traffic_snapshots t
+		INNER JOIN (
+			SELECT user_id, MAX(id) AS mid
+			FROM traffic_snapshots
+			WHERE user_id IN ?
+			GROUP BY user_id
+		) m ON t.id = m.mid
+	`, userIDs).Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[int64]*domain.TrafficSnapshot, len(rows))
+	for i := range rows {
+		d := rows[i].toDomain()
+		out[d.UserID] = d
+	}
+	return out, nil
+}
+
 func (r *trafficRepo) LatestForUser(ctx context.Context, userID int64) (*domain.TrafficSnapshot, error) {
 	var row trafficRow
 	tx := r.db.WithContext(ctx).

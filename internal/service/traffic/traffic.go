@@ -184,16 +184,38 @@ func (s *Service) PollOnce(ctx context.Context) error {
 	}
 	pollLoc := paneltz.Location(ctx, s.settings)
 
-	// Sink collects every snapshot write across the user loop so we can
-	// flush them in three GORM CreateInBatches calls at the end of the
-	// cycle instead of N + M individual INSERTs. The per-user / per-node
-	// processing stays single-goroutine so no locking is needed on the
-	// sink slices — they're just append targets owned by this poll.
+	// Sink collects every snapshot write + every per-row counter update
+	// across the user loop so we can flush them in batched calls at the
+	// end of the cycle instead of N + M individual statements. The per-
+	// user / per-node processing stays single-goroutine so no locking is
+	// needed on the sink fields — they're just append targets owned by
+	// this poll.
 	sink := &pollSink{
-		userSnaps:   make([]*domain.TrafficSnapshot, 0, len(users)),
-		clientSnaps: make([]*domain.ClientTrafficSnapshot, 0, len(users)*4),
-		nodeSnaps:   make([]*domain.NodeTrafficSnapshot, 0),
+		userSnaps:        make([]*domain.TrafficSnapshot, 0, len(users)),
+		clientSnaps:      make([]*domain.ClientTrafficSnapshot, 0, len(users)*4),
+		nodeSnaps:        make([]*domain.NodeTrafficSnapshot, 0),
+		ownershipUpdates: make([]*domain.XUIClientEntry, 0, len(users)*4),
+		userUpdates:      make(map[int64]*domain.User, len(users)),
 	}
+
+	// Pre-fetch every user's latest snapshot in ONE batched read. Replaces
+	// what used to be a per-user LatestForUser SELECT inside
+	// recordAndEnforceWith — at N users that's N round-trips reduced to 1.
+	// Absence in the returned map means "no prior snapshot", matching
+	// LatestForUser's ErrNotFound semantics so the caller can map-index it
+	// without a nil-or-err two-arm guard.
+	allUserIDs := make([]int64, 0, len(users))
+	for _, u := range users {
+		allUserIDs = append(allUserIDs, u.ID)
+	}
+	latestByUser, lerr := s.traffic.LatestForUsers(ctx, allUserIDs)
+	if lerr != nil {
+		// Non-fatal: fall back to per-user fetch inside recordAndEnforceWith.
+		// One bad batched SELECT shouldn't kill the whole cycle.
+		log.Warn("traffic poll latest pre-fetch failed; falling back to per-user", "users", len(allUserIDs), "err", lerr)
+		latestByUser = nil
+	}
+	sink.latestByUser = latestByUser
 
 	byInbound := make(map[inboundKey][]ownershipRef)
 	totals := make(map[int64]trafficTotals, len(users))
@@ -403,6 +425,30 @@ func (s *Service) PollOnce(ctx context.Context) error {
 			log.Warn("traffic poll flush node snapshots", "count", len(sink.nodeSnaps), "err", err)
 		}
 	}
+	// v3.5.0-beta.9: collapse per-row counter / state UPDATEs into one
+	// transaction-wrapped batch each. On SQLite this is the difference
+	// between N + N×M ~5–10ms WAL commits and two single commits —
+	// "Poll Now" wall time drops by an order of magnitude on a panel
+	// with non-trivial scale. MySQL/Postgres get the round-trip win.
+	//
+	// Failure semantics match the snapshot flushes above: log + continue.
+	// A skipped flush means this cycle's counters / state aren't persisted,
+	// the next cycle re-derives them (LastRawXxx untouched, so monotonicDelta
+	// still produces the right increment) and writes again.
+	if len(sink.ownershipUpdates) > 0 {
+		if err := s.ownership.BatchUpdateCounters(ctx, sink.ownershipUpdates); err != nil {
+			log.Warn("traffic poll flush ownership counters", "count", len(sink.ownershipUpdates), "err", err)
+		}
+	}
+	if len(sink.userUpdates) > 0 {
+		users := make([]*domain.User, 0, len(sink.userUpdates))
+		for _, u := range sink.userUpdates {
+			users = append(users, u)
+		}
+		if err := s.users.BatchUpdateTrafficState(ctx, users); err != nil {
+			log.Warn("traffic poll flush user traffic state", "count", len(users), "err", err)
+		}
+	}
 	return nil
 }
 
@@ -460,10 +506,33 @@ type bootstrapClientDelta struct {
 // Insert when sink is nil so non-poll callers (tests, ad-hoc) keep
 // working without a sink object. Sink is poll-scoped + accessed
 // sequentially by the user loop, no locking needed.
+//
+// v3.5.0-beta.9 added the ownership / user update buckets + the pre-fetched
+// latestByUser map. The per-cycle DB write count used to be O(N users + N×M
+// clients) inline UPDATEs (each its own ~5–10ms SQLite WAL commit); the sink
+// reduces it to two end-of-cycle BatchUpdate calls plus the snapshot inserts
+// — at "100 users × 8 clients = 900 ops" scale, ~10s → ~200ms.
 type pollSink struct {
 	userSnaps   []*domain.TrafficSnapshot
 	clientSnaps []*domain.ClientTrafficSnapshot
 	nodeSnaps   []*domain.NodeTrafficSnapshot
+	// ownershipUpdates buffers per-client counter writes; flushed via
+	// BatchUpdateCounters at end-of-cycle. Each XUIClientEntry has a
+	// unique ID so no dedup is needed — the slice is one append per
+	// client that produced a non-zero delta this cycle.
+	ownershipUpdates []*domain.XUIClientEntry
+	// userUpdates buffers per-user traffic-state writes; flushed via
+	// BatchUpdateTrafficState at end-of-cycle. Keyed by user ID so the
+	// snapshot path and the rollover path (which both mutate u and would
+	// otherwise both append) collapse into ONE write per user — the latest
+	// pointer state at flush time wins.
+	userUpdates map[int64]*domain.User
+	// latestByUser is the per-cycle pre-fetched latest snapshot per user,
+	// loaded ONCE via TrafficRepo.LatestForUsers at the top of PollOnce.
+	// recordAndEnforceWith reads this map instead of issuing a per-user
+	// LatestForUser SELECT. Absence means "no prior snapshot" (same
+	// semantics as LatestForUser returning ErrNotFound).
+	latestByUser map[int64]*domain.TrafficSnapshot
 }
 
 // recordClientStats reconciles one client's raw 3X-UI counter against the
@@ -526,7 +595,13 @@ func (s *Service) recordClientStats(ctx context.Context, ownership *domain.XUICl
 	ownership.LastRawUpBytes = up
 	ownership.LastRawDownBytes = down
 	ownership.LastRawTotalBytes = totalBytes
-	if err := s.ownership.UpdateCounters(ctx, ownership); err != nil {
+	// Sink-aware write: PollOnce collects per-client counter updates into the
+	// sink and flushes them as ONE BatchUpdateCounters at end-of-cycle. The
+	// nil-sink path keeps the inline single-row write for non-poll callers
+	// (tests, ad-hoc) so this helper stays usable outside the poll loop.
+	if sink != nil {
+		sink.ownershipUpdates = append(sink.ownershipUpdates, ownership)
+	} else if err := s.ownership.UpdateCounters(ctx, ownership); err != nil {
 		return trafficDelta{}, fmt.Errorf("update ownership counters: %w", err)
 	}
 
@@ -585,10 +660,22 @@ func (s *Service) recordAndEnforceWith(ctx context.Context, u *domain.User, tota
 		// User lifetime must be based on per-client deltas. If one inbound's
 		// counter resets while another keeps growing, a delta on the aggregate
 		// raw total would be wrong.
-		prev, perr := s.traffic.LatestForUser(ctx, u.ID)
-		if perr != nil && !errors.Is(perr, domain.ErrNotFound) {
-			log.Warn("traffic poll latest snapshot lookup", "user_id", u.ID, "err", perr)
-			prev = nil
+		//
+		// Hot-path read: prefer the sink's pre-fetched latestByUser map
+		// populated ONCE at the top of PollOnce. Absence in the map = no
+		// prior snapshot (same semantics as LatestForUser's ErrNotFound).
+		// Non-poll callers pass a nil sink (or one with no pre-fetch) and
+		// fall back to the per-user SELECT.
+		var prev *domain.TrafficSnapshot
+		if sink != nil && sink.latestByUser != nil {
+			prev = sink.latestByUser[u.ID]
+		} else {
+			p, perr := s.traffic.LatestForUser(ctx, u.ID)
+			if perr != nil && !errors.Is(perr, domain.ErrNotFound) {
+				log.Warn("traffic poll latest snapshot lookup", "user_id", u.ID, "err", perr)
+			} else {
+				prev = p
+			}
 		}
 		// Decide which bootstrap deltas (clients with no per-client snapshot
 		// yet) we should fold into lifetime. The cutoff comes from
@@ -665,7 +752,13 @@ func (s *Service) recordAndEnforceWith(ctx context.Context, u *domain.User, tota
 		}
 		wroteSnap = true
 
-		if err := s.users.UpdateTrafficState(ctx, u); err != nil {
+		// Sink-aware write: PollOnce drains userUpdates as ONE
+		// BatchUpdateTrafficState at end-of-cycle. Keyed by user ID so this
+		// path and the rollover-path append (below) dedupe — same pointer,
+		// last-write-wins, exactly one row write per user per cycle.
+		if sink != nil {
+			sink.userUpdates[u.ID] = u
+		} else if err := s.users.UpdateTrafficState(ctx, u); err != nil {
 			log.Warn("traffic lifetime update", "user_id", u.ID, "err", err)
 		}
 	}
@@ -701,7 +794,18 @@ func (s *Service) recordAndEnforceWith(ctx context.Context, u *domain.User, tota
 		// the new period hands quota back), clear it explicitly under the
 		// emergency lock so we don't race a concurrent UseEmergencyAccess.
 		persistRollover := func() {
-			if err := s.users.UpdateTrafficState(ctx, u); err != nil {
+			// UpdateTrafficState writes the SAME column set as the main-path
+			// write above (lifetime + period_baseline + traffic_period_start +
+			// lifetime_baseline_at). With sink active both code paths mutate
+			// the same *User pointer, so the map collapses them into ONE batch
+			// row — the rolled-over state (this branch ran second) wins.
+			//
+			// ClearEmergencyAccess writes a different column set and MUST stay
+			// inline under the emergency lock so a concurrent UseEmergencyAccess
+			// can't race the clear (the original v3.3.0-beta.6 invariant).
+			if sink != nil {
+				sink.userUpdates[u.ID] = u
+			} else if err := s.users.UpdateTrafficState(ctx, u); err != nil {
 				log.Warn("traffic period start update", "user_id", u.ID, "err", err)
 			}
 			if clearedEmergency {

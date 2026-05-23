@@ -239,6 +239,15 @@ func (r *memoryUserRepo) UpdateTrafficState(ctx context.Context, u *domain.User)
 	return nil
 }
 
+func (r *memoryUserRepo) BatchUpdateTrafficState(ctx context.Context, users []*domain.User) error {
+	for _, u := range users {
+		if err := r.UpdateTrafficState(ctx, u); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (r *memoryUserRepo) ClearEmergencyAccess(ctx context.Context, userID int64) error {
 	if cur, ok := r.byID[userID]; ok {
 		cur.EmergencyUntil = nil

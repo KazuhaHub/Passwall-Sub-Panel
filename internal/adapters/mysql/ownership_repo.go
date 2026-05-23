@@ -100,6 +100,39 @@ func (r *ownershipRepo) UpdateCounters(ctx context.Context, e *domain.XUIClientE
 		}).Error
 }
 
+// BatchUpdateCounters is the per-poll batched form of UpdateCounters: one
+// transaction wraps N per-row UPDATEs so SQLite collapses N WAL commits
+// (~5–10ms each) into one. Same per-row column scope and zero-ID guard as
+// the single-row UpdateCounters — see that method's doc.
+//
+// Empty input is a no-op so callers don't need to gate the no-clients path.
+func (r *ownershipRepo) BatchUpdateCounters(ctx context.Context, items []*domain.XUIClientEntry) error {
+	if len(items) == 0 {
+		return nil
+	}
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		for _, e := range items {
+			if e == nil || e.ID == 0 {
+				return fmt.Errorf("ownership BatchUpdateCounters requires a non-zero ID; got %+v", e)
+			}
+			err := tx.Model(&ownershipRow{}).
+				Where("id = ?", e.ID).
+				Updates(map[string]any{
+					"lifetime_up_bytes":    e.LifetimeUpBytes,
+					"lifetime_down_bytes":  e.LifetimeDownBytes,
+					"lifetime_total_bytes": e.LifetimeTotalBytes,
+					"last_raw_up_bytes":    e.LastRawUpBytes,
+					"last_raw_down_bytes":  e.LastRawDownBytes,
+					"last_raw_total_bytes": e.LastRawTotalBytes,
+				}).Error
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
 func (r *ownershipRepo) Exists(ctx context.Context, panelID int64, inboundID int, email string) (bool, error) {
 	var n int64
 	err := r.db.WithContext(ctx).Model(&ownershipRow{}).

@@ -39,6 +39,84 @@ func TestTrafficSnapshotsReturnNotFoundWhenEmpty(t *testing.T) {
 	}
 }
 
+// TestLatestForUsers pins the v3.5.0-beta.9 batched read PollOnce now uses to
+// pre-fetch every user's most-recent snapshot in one SQL call instead of
+// N per-user LatestForUser SELECTs. Three properties matter:
+//   1. tie-breaking matches LatestForUser exactly (the highest-id row wins,
+//      so the batched form can't silently pick a different row when two
+//      snapshots ever share a captured_at)
+//   2. users with no snapshots are absent from the map (caller treats absence
+//      as ErrNotFound)
+//   3. empty input returns an empty map, not nil — so the caller can map-index
+//      it without a nil guard
+func TestLatestForUsers(t *testing.T) {
+	db, err := Open("sqlite", filepath.Join(t.TempDir(), "panel.db"))
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	if err := EnsureSchema(db); err != nil {
+		t.Fatalf("schema: %v", err)
+	}
+	sqlDB, _ := db.DB()
+	defer sqlDB.Close()
+
+	repo := NewRepos(db).Traffic
+	ctx := context.Background()
+
+	// User 1 — two snapshots, second is newer.
+	if err := repo.Insert(ctx, &domain.TrafficSnapshot{UserID: 1, TotalBytes: 100, CapturedAt: time.Now().Add(-time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Insert(ctx, &domain.TrafficSnapshot{UserID: 1, TotalBytes: 200, CapturedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	// User 2 — tie-breaker case: two snapshots sharing captured_at. The
+	// higher-id row must win, matching LatestForUser's `Order("id DESC")
+	// .Limit(1)`. A naive MAX(captured_at) JOIN would return both.
+	tied := time.Now().Add(-30 * time.Minute)
+	if err := repo.Insert(ctx, &domain.TrafficSnapshot{UserID: 2, TotalBytes: 300, CapturedAt: tied}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Insert(ctx, &domain.TrafficSnapshot{UserID: 2, TotalBytes: 400, CapturedAt: tied}); err != nil {
+		t.Fatal(err)
+	}
+	// User 3 — never seen, must be absent from the result map.
+
+	got, err := repo.LatestForUsers(ctx, []int64{1, 2, 3})
+	if err != nil {
+		t.Fatalf("LatestForUsers: %v", err)
+	}
+	if got[1] == nil || got[1].TotalBytes != 200 {
+		t.Errorf("user 1 latest = %+v, want TotalBytes 200", got[1])
+	}
+	if got[2] == nil || got[2].TotalBytes != 400 {
+		t.Errorf("user 2 latest = %+v, want TotalBytes 400 (highest-id tie-break)", got[2])
+	}
+	if _, ok := got[3]; ok {
+		t.Errorf("user 3 should be absent from the map (no prior snapshot), got %+v", got[3])
+	}
+	// Cross-check against the single-user form for user 1 — they must agree.
+	one, err := repo.LatestForUser(ctx, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got[1].ID != one.ID {
+		t.Errorf("batch picked id %d for user 1, single picked id %d — semantics drift", got[1].ID, one.ID)
+	}
+
+	// Empty input — empty map, no nil deref, no error.
+	empty, err := repo.LatestForUsers(ctx, nil)
+	if err != nil {
+		t.Fatalf("empty input: %v", err)
+	}
+	if empty == nil {
+		t.Fatal("empty input returned nil map; callers will panic on map-index")
+	}
+	if len(empty) != 0 {
+		t.Errorf("empty input map size = %d, want 0", len(empty))
+	}
+}
+
 // TestTrafficPruneBefore covers the v3.0.0 retention DELETE — guards against
 // indexing regressions (the captured_at single-column index is what makes
 // this query a range-scan instead of full-table). Verifies that both

@@ -2,6 +2,7 @@ package traffic
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"testing"
 	"time"
@@ -14,6 +15,11 @@ import (
 
 type fakeUserRepo struct {
 	users map[int64]*domain.User
+	// batchTrafficStateCalls counts BatchUpdateTrafficState invocations so the
+	// v3.5.0-beta.9 perf-behavior test can assert PollOnce now flushes user
+	// traffic state ONCE per cycle instead of N times. Inline UpdateTrafficState
+	// calls don't bump this — that's the whole point.
+	batchTrafficStateCalls int
 }
 
 func (r *fakeUserRepo) Update(ctx context.Context, u *domain.User) error {
@@ -36,6 +42,19 @@ func (r *fakeUserRepo) UpdateTrafficState(ctx context.Context, u *domain.User) e
 	cur.PeriodBaselineBytes = u.PeriodBaselineBytes
 	cur.LifetimeBaselineAt = u.LifetimeBaselineAt
 	cur.TrafficPeriodStart = u.TrafficPeriodStart
+	return nil
+}
+
+// BatchUpdateTrafficState mirrors production: apply the narrow per-row write
+// to every entry, bump the call counter so perf-behavior tests can assert the
+// poll flushes ONCE per cycle (not N times).
+func (r *fakeUserRepo) BatchUpdateTrafficState(ctx context.Context, users []*domain.User) error {
+	r.batchTrafficStateCalls++
+	for _, u := range users {
+		if err := r.UpdateTrafficState(ctx, u); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -97,6 +116,9 @@ func (d *fakeDisabler) SetEnabledAndSync(ctx context.Context, userID int64, enab
 type fakeTrafficRepo struct {
 	snapshots       []*domain.TrafficSnapshot
 	clientSnapshots []*domain.ClientTrafficSnapshot
+	// latestForUsersCalls counts the batched pre-fetch so the perf-behavior
+	// test can assert PollOnce now reads via the batch path (ONCE per cycle).
+	latestForUsersCalls int
 }
 
 func (r *fakeTrafficRepo) Insert(ctx context.Context, s *domain.TrafficSnapshot) error {
@@ -118,6 +140,23 @@ func (r *fakeTrafficRepo) LatestForUser(ctx context.Context, userID int64) (*dom
 		return nil, domain.ErrNotFound
 	}
 	return latest, nil
+}
+
+// LatestForUsers mirrors the mysql batched read: one call returns every
+// listed user's most-recent snapshot, omitting users with no rows. Reuses
+// the single-user logic so its semantics stay in lockstep.
+func (r *fakeTrafficRepo) LatestForUsers(ctx context.Context, userIDs []int64) (map[int64]*domain.TrafficSnapshot, error) {
+	r.latestForUsersCalls++
+	out := make(map[int64]*domain.TrafficSnapshot, len(userIDs))
+	for _, id := range userIDs {
+		s, err := r.LatestForUser(ctx, id)
+		if err != nil {
+			// ErrNotFound — omit from the map (caller treats absence as "no prev").
+			continue
+		}
+		out[id] = s
+	}
+	return out, nil
 }
 
 func (r *fakeTrafficRepo) LastBefore(ctx context.Context, userID int64, before time.Time) (*domain.TrafficSnapshot, error) {
@@ -746,6 +785,9 @@ func (r *fakeNodeRepo) BatchUpdateSortOrder(ctx context.Context, updates []ports
 
 type fakeOwnershipRepo struct {
 	byUser map[int64][]*domain.XUIClientEntry
+	// batchUpdateCountersCalls counts batched flushes for the v3.5.0-beta.9
+	// PollOnce perf-behavior test (ONCE per cycle instead of N×M times).
+	batchUpdateCountersCalls int
 }
 
 func (r *fakeOwnershipRepo) Add(ctx context.Context, e *domain.XUIClientEntry) error { return nil }
@@ -784,6 +826,19 @@ func (r *fakeOwnershipRepo) UpdateCounters(ctx context.Context, e *domain.XUICli
 				entries[i] = &cp
 				return nil
 			}
+		}
+	}
+	return nil
+}
+
+// BatchUpdateCounters mirrors UpdateCounters for every item in the slice;
+// bumps the call counter so perf-behavior tests can assert this is the only
+// counter-write path PollOnce takes per cycle.
+func (r *fakeOwnershipRepo) BatchUpdateCounters(ctx context.Context, items []*domain.XUIClientEntry) error {
+	r.batchUpdateCountersCalls++
+	for _, e := range items {
+		if err := r.UpdateCounters(ctx, e); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -1012,6 +1067,90 @@ func TestNodeReportForNilNodesRepoDoesNotPanic(t *testing.T) {
 	}
 	if rep == nil {
 		t.Fatal("report nil")
+	}
+}
+
+// TestPollOnceBatchesPerCycleWrites pins the v3.5.0-beta.9 perf contract:
+// regardless of user count N or per-user client count M, ONE PollOnce cycle
+// must produce ONE BatchUpdateCounters + ONE BatchUpdateTrafficState +
+// ONE LatestForUsers call. Before the refactor each user × client pair
+// produced its own UpdateCounters / UpdateTrafficState / LatestForUser
+// statement, which is what made "Poll Now" take ~10s on a SQLite panel.
+//
+// This is a BEHAVIOR test (not a wall-clock benchmark): it asserts the
+// poll takes the batched code path at all, which is what makes the
+// SQLite-commit-count math work out to a single-digit-percent of the
+// pre-refactor cost.
+func TestPollOnceBatchesPerCycleWrites(t *testing.T) {
+	// 3 users × 4 clients = 12 ownership rows. Pre-refactor this would
+	// produce 12 UpdateCounters + 3 UpdateTrafficState + 3 LatestForUser
+	// inline calls. Post-refactor: exactly 1 + 1 + 1.
+	const userCount = 3
+	const clientsPerUser = 4
+
+	users := &fakeUserRepo{users: map[int64]*domain.User{}}
+	ownershipByUser := map[int64][]*domain.XUIClientEntry{}
+	inboundStats := []ports.ClientTraffic{}
+	nextOwnershipID := int64(0)
+	for uid := int64(1); uid <= userCount; uid++ {
+		users.users[uid] = &domain.User{ID: uid, Enabled: true}
+		entries := make([]*domain.XUIClientEntry, 0, clientsPerUser)
+		for c := 0; c < clientsPerUser; c++ {
+			nextOwnershipID++
+			email := fmt.Sprintf("u%d-c%d@example.test", uid, c)
+			entries = append(entries, &domain.XUIClientEntry{
+				ID: nextOwnershipID, UserID: uid,
+				PanelID: 10, InboundID: 20,
+				ClientEmail: email,
+				CreatedAt:   time.Now(),
+			})
+			// Non-zero traffic so the inner loop actually exercises the
+			// counter-write path (zero-delta short-circuits skip the write).
+			inboundStats = append(inboundStats, ports.ClientTraffic{
+				Email: email,
+				Up:    int64(100 + c),
+				Down:  int64(200 + c),
+			})
+		}
+		ownershipByUser[uid] = entries
+	}
+	ownership := &fakeOwnershipRepo{byUser: ownershipByUser}
+	repo := &fakeTrafficRepo{}
+	pool := &fakeXUIPool{clients: map[int64]ports.XUIClient{
+		10: &fakeXUIClient{inbounds: []ports.Inbound{{ID: 20, ClientStats: inboundStats}}},
+	}}
+	svc := New(users, ownership, repo, nil, nil, pool, &fakeDisabler{})
+
+	if err := svc.PollOnce(context.Background()); err != nil {
+		t.Fatalf("PollOnce: %v", err)
+	}
+
+	// One BatchUpdateCounters covering all 12 ownership rows, instead of 12
+	// inline UpdateCounters.
+	if ownership.batchUpdateCountersCalls != 1 {
+		t.Errorf("ownership.BatchUpdateCounters calls = %d, want 1 (one end-of-cycle flush)", ownership.batchUpdateCountersCalls)
+	}
+	// One BatchUpdateTrafficState covering all 3 users, instead of 3 inline
+	// UpdateTrafficState.
+	if users.batchTrafficStateCalls != 1 {
+		t.Errorf("users.BatchUpdateTrafficState calls = %d, want 1 (one end-of-cycle flush)", users.batchTrafficStateCalls)
+	}
+	// One LatestForUsers pre-fetch up front, instead of 3 inline LatestForUser.
+	if repo.latestForUsersCalls != 1 {
+		t.Errorf("traffic.LatestForUsers calls = %d, want 1 (single pre-fetch)", repo.latestForUsersCalls)
+	}
+
+	// Sanity: the batched writes actually moved the data, not just the call
+	// counters. Every user's lifetime should reflect the per-client traffic
+	// (4 clients each contributing 100+c up + 200+c down → sum is uid-invariant).
+	wantPerUser := int64(0)
+	for c := 0; c < clientsPerUser; c++ {
+		wantPerUser += int64(100+c) + int64(200+c)
+	}
+	for uid := int64(1); uid <= userCount; uid++ {
+		if got := users.users[uid].LifetimeTotalBytes; got != wantPerUser {
+			t.Errorf("user %d LifetimeTotalBytes = %d, want %d (batch flush did not land)", uid, got, wantPerUser)
+		}
 	}
 }
 

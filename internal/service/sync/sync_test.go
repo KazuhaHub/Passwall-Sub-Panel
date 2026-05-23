@@ -134,6 +134,9 @@ func (r *fakeOwnership) UpdateUUID(ctx context.Context, panelID int64, inboundID
 func (r *fakeOwnership) UpdateCounters(ctx context.Context, e *domain.XUIClientEntry) error {
 	return nil
 }
+func (r *fakeOwnership) BatchUpdateCounters(ctx context.Context, items []*domain.XUIClientEntry) error {
+	return nil
+}
 
 type fakeXUIClient struct {
 	ports.XUIClient

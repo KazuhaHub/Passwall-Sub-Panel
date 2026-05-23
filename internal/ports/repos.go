@@ -75,6 +75,15 @@ type UserRepo interface {
 	// clears). Writing them here from the poll's stale snapshot would silently
 	// revoke an emergency window granted concurrently mid-cycle.
 	UpdateTrafficState(ctx context.Context, u *domain.User) error
+	// BatchUpdateTrafficState runs N UpdateTrafficState writes in one
+	// transaction. The traffic poll calls it ONCE at end-of-cycle instead
+	// of issuing N inline UPDATEs while it walks the user list. On SQLite
+	// each row write is its own ~5–10ms commit (WAL fsync) so collapsing
+	// N commits into one is what cuts manual "Poll Now" from ~10s to
+	// sub-second at modest scale. MySQL/Postgres get the smaller win of
+	// fewer round-trips. Same column scope and emergency-column skip as
+	// the single-row UpdateTrafficState — see that doc.
+	BatchUpdateTrafficState(ctx context.Context, users []*domain.User) error
 	// ClearEmergencyAccess nulls emergency_until and zeroes
 	// emergency_baseline_bytes for one user via a targeted write. The traffic
 	// poll calls it (under user.Service's emergency lock) when a period
@@ -185,11 +194,23 @@ type OwnershipRepo interface {
 	// the next cycle's monotonicDelta has a fresh baseline. Updates only the
 	// counter columns to keep the write narrow.
 	UpdateCounters(ctx context.Context, e *domain.XUIClientEntry) error
+	// BatchUpdateCounters runs N UpdateCounters writes in one transaction
+	// for the traffic poll's end-of-cycle flush. Same SQLite-commit
+	// collapsing rationale as UserRepo.BatchUpdateTrafficState; same
+	// per-row column scope as the single-row UpdateCounters.
+	BatchUpdateCounters(ctx context.Context, items []*domain.XUIClientEntry) error
 }
 
 type TrafficRepo interface {
 	Insert(ctx context.Context, s *domain.TrafficSnapshot) error
 	LatestForUser(ctx context.Context, userID int64) (*domain.TrafficSnapshot, error)
+	// LatestForUsers is the batched form of LatestForUser. Pre-fetched
+	// ONCE at the top of PollOnce so the per-user inner loop's prev-
+	// snapshot lookup is a map[int64] read instead of N SELECTs. The
+	// returned map omits users with no prior snapshot (the caller treats
+	// absence the same as LatestForUser's ErrNotFound). Single SQL
+	// statement; relies on the (user_id, captured_at) composite index.
+	LatestForUsers(ctx context.Context, userIDs []int64) (map[int64]*domain.TrafficSnapshot, error)
 	LastBefore(ctx context.Context, userID int64, before time.Time) (*domain.TrafficSnapshot, error)
 	ListByUser(ctx context.Context, userID int64, since, until time.Time) ([]*domain.TrafficSnapshot, error)
 	InsertClient(ctx context.Context, s *domain.ClientTrafficSnapshot) error
