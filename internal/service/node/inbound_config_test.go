@@ -23,6 +23,15 @@ type captureNodeRepo struct {
 	// snapshot path; update is everything else.
 	updateCfg *domain.Node
 	update    *domain.Node
+	created   *domain.Node
+}
+
+func (r *captureNodeRepo) Create(_ context.Context, n *domain.Node) error {
+	r.created = n
+	if n.ID == 0 {
+		n.ID = 1 // mimic the DB assigning an autoincrement id
+	}
+	return nil
 }
 
 func (r *captureNodeRepo) GetByID(_ context.Context, _ int64) (*domain.Node, error) {
@@ -45,6 +54,8 @@ type stubXUIClient struct {
 	ports.XUIClient
 	updated *ports.InboundSpec
 	getResp *ports.Inbound
+	addID   int
+	added   *ports.InboundSpec
 }
 
 func (c *stubXUIClient) UpdateInbound(_ context.Context, _ int, spec ports.InboundSpec) error {
@@ -55,6 +66,24 @@ func (c *stubXUIClient) UpdateInbound(_ context.Context, _ int, spec ports.Inbou
 func (c *stubXUIClient) GetInbound(_ context.Context, _ int) (*ports.Inbound, error) {
 	return c.getResp, nil
 }
+
+func (c *stubXUIClient) AddInbound(_ context.Context, spec ports.InboundSpec) (int, error) {
+	c.added = &spec
+	return c.addID, nil
+}
+
+// minimal deps so CreateInbound / ImportExisting can run syncExistingUsersToNode
+// without panicking; an empty group list makes the per-group loop a no-op.
+type emptyGroups struct{ ports.GroupRepo }
+
+func (emptyGroups) List(context.Context) ([]*domain.Group, error) { return nil, nil }
+
+type settingsStub struct{}
+
+func (settingsStub) Load(_ context.Context, _ ports.UISettings) (ports.UISettings, error) {
+	return ports.UISettings{EmailDomain: "kazuha.org"}, nil
+}
+func (settingsStub) Save(_ context.Context, _ ports.UISettings) error { return nil }
 
 type stubXUIPool struct {
 	c   ports.XUIClient
@@ -123,6 +152,89 @@ func TestUpdateInboundConfig_PushFails_StillStoredLocally(t *testing.T) {
 type errPanelDown struct{}
 
 func (errPanelDown) Error() string { return "panel unreachable" }
+
+// ---- Create / Import write-through: config captured into the node row ----
+
+// CreateInbound must persist the just-pushed config into the local snapshot so
+// the node renders without a live fetch from its first subscription.
+func TestCreateInbound_WriteThrough(t *testing.T) {
+	repo := &captureNodeRepo{}
+	// getResp feeds inspectInbound (protocol detection) inside the post-create
+	// user sync; addID is the inbound id 3X-UI "returns".
+	client := &stubXUIClient{addID: 7, getResp: &ports.Inbound{Protocol: "vless", Settings: `{"decryption":"none"}`}}
+	svc := &Service{
+		nodes:    repo,
+		pool:     stubXUIPool{c: client},
+		groups:   emptyGroups{},
+		settings: settingsStub{},
+	}
+	n := &domain.Node{DisplayName: "US-1", Region: "us", PanelID: 1}
+	spec := ports.InboundSpec{
+		Protocol:       "vless",
+		Port:           443,
+		StreamSettings: `{"network":"ws","security":"tls"}`,
+		Settings:       `{"decryption":"none","clients":[{"id":"x","email":"e"}]}`,
+	}
+	if err := svc.CreateInbound(context.Background(), n, spec); err != nil {
+		t.Fatalf("CreateInbound = %v, want nil", err)
+	}
+	if repo.created == nil {
+		t.Fatalf("node not created")
+	}
+	got := repo.created
+	if got.InboundID != 7 {
+		t.Fatalf("inbound id from AddInbound not recorded: %+v", got)
+	}
+	if got.ConfigSyncedAt == nil {
+		t.Fatalf("config snapshot not captured on create (ConfigSyncedAt nil)")
+	}
+	if got.StreamSettings != `{"network":"ws","security":"tls"}` || got.Port != 443 {
+		t.Fatalf("create did not store the inbound config: %+v", got)
+	}
+	if strings.Contains(got.InboundSettings, "clients") {
+		t.Fatalf("stored settings must drop clients[]: %s", got.InboundSettings)
+	}
+}
+
+// ImportExisting = take ownership: capture the live inbound's config into the
+// node so render reads it locally and reconcile can keep 3X-UI aligned.
+func TestImportExisting_TakesOwnership(t *testing.T) {
+	repo := &captureNodeRepo{}
+	live := &ports.Inbound{
+		Protocol:       "shadowsocks",
+		Port:           8388,
+		Listen:         "127.0.0.1",
+		StreamSettings: `{"network":"tcp"}`,
+		Settings:       `{"method":"aes-128-gcm","clients":[{"email":"old-friend"}]}`,
+	}
+	client := &stubXUIClient{getResp: live}
+	svc := &Service{
+		nodes:    repo,
+		pool:     stubXUIPool{c: client},
+		groups:   emptyGroups{},
+		settings: settingsStub{},
+	}
+	n := &domain.Node{DisplayName: "imported", Region: "us", PanelID: 1, InboundID: 3}
+	if err := svc.ImportExisting(context.Background(), n); err != nil {
+		t.Fatalf("ImportExisting = %v, want nil", err)
+	}
+	if repo.created == nil {
+		t.Fatalf("node not created on import")
+	}
+	got := repo.created
+	if got.ConfigSyncedAt == nil {
+		t.Fatalf("import must capture the live config (ConfigSyncedAt nil)")
+	}
+	if got.Protocol != "shadowsocks" || got.Port != 8388 || got.InboundListen != "127.0.0.1" {
+		t.Fatalf("import did not capture live config: %+v", got)
+	}
+	if strings.Contains(got.InboundSettings, "clients") {
+		t.Fatalf("captured settings must drop clients[]: %s", got.InboundSettings)
+	}
+	if !strings.Contains(got.InboundSettings, "aes-128-gcm") {
+		t.Fatalf("ss method must survive the clients strip: %s", got.InboundSettings)
+	}
+}
 
 // ---- GetInboundConfig reads the local snapshot (v3.5 source-of-truth) ----
 

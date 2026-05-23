@@ -4,10 +4,31 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 )
+
+func TestHasLocalConfig(t *testing.T) {
+	now := time.Now()
+	cases := []struct {
+		name string
+		node *domain.Node
+		want bool
+	}{
+		{"nil node", nil, false},
+		{"never captured", &domain.Node{}, false},
+		{"captured, synced", &domain.Node{ConfigSyncedAt: &now, ConfigSyncState: "synced"}, true},
+		{"captured, empty state", &domain.Node{ConfigSyncedAt: &now, ConfigSyncState: ""}, true},
+		{"captured but gated off", &domain.Node{ConfigSyncedAt: &now, ConfigSyncState: "drift"}, false},
+	}
+	for _, c := range cases {
+		if got := HasLocalConfig(c.node); got != c.want {
+			t.Fatalf("%s: HasLocalConfig = %v, want %v", c.name, got, c.want)
+		}
+	}
+}
 
 func TestStripClients(t *testing.T) {
 	// SS-2022: method + server PSK live alongside clients[] and MUST survive.

@@ -181,7 +181,7 @@ render 生成 proxy 块（[protocols.go `emitProxy`](../internal/service/render/
 
 ### 阶段 6 · 文档与版本
 - [x] CHANGELOG（中文，v3.5.0-beta.1）。
-- [ ] *TODO*：ARCHITECTURE.md §3.2 / §9.3 / §9.4.5 / §9.5.1 正文仍写"3X-UI 是配置单源真相"——已被本特性 supersede，待回写（本文 §3 已列对照表）。
+- [x] ARCHITECTURE.md 正文回写：§3.2 / §9.3 / §9.4.3（#7 改写 + 新增 #8 轴 A 配置漂移）/ §9.4.5 / §9.5.1 已改为 v3.5 现实（PSP 为 inbound 配置真相源），并标注撤销旧表述。
 - [ ] *TODO*：`internal/migrate/` 改写为 v3.x→v4.0.0 的迁移逻辑等到真正切下个 major 时再做（本特性非破坏性、增量发布）。
 - [x] 编辑对话框 `GetInboundConfig` 改读本地快照（beta.6）：已捕获节点读本地、与 render/reconcile 一致，未捕获才回源；"是否有本地配置"统一为 `inboundcfg.HasLocalConfig`。
 - [ ] *TODO*：前端可选——节点列表展示 `ConfigSyncState`。

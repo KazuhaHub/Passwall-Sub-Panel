@@ -240,8 +240,8 @@ UUID 重置 → 所有协议密码同步刷新（封装层 `proxyPassword(user, 
 | 修改用户启用、到期、分组 | 先更新 `users` / `groups` | 逐节点同步；失败进入 `user_push_config` 或 `user_resync` |
 | 紧急访问、重置订阅/协议凭证 | 先写新凭证或新到期时间 | 推 3X-UI 失败时进入 `user_resync` |
 | 节点元数据启停 | 先更新 `nodes.enabled` 等本地字段 | 推 inbound enable 失败时进入节点同步任务 |
-| 新建 inbound | 需要先拿到 3X-UI 返回的 `inbound_id` | 远端创建失败时仅保留 `node_create` 任务，不创建无法映射的本地节点 |
-| 修改 inbound 协议参数 | 本地只保存展示元数据 | 协议参数以 3X-UI 为真相源，远端失败进入 `node_update` |
+| 新建 inbound | 需要先拿到 3X-UI 返回的 `inbound_id`，随后把整份连接配置写入本地快照 | 远端创建失败时仅保留 `node_create` 任务，不创建无法映射的本地节点 |
+| 修改 inbound 连接配置 | **先写本地配置快照（`nodes` 的 inbound 配置列），local-first** | 再推 3X-UI；失败进入 `node_update`。**v3.5 起 PSP 是 inbound 连接配置的真相源**（端口/TLS/Reality/stream 等存本地、render 只读本地、reconcile 反向下发覆盖漂移），详见 [inbound-ownership.md](inbound-ownership.md)；本表以下 §9.3 / §9.4 / §9.5 中"3X-UI 是协议参数单源真相"的旧表述均已被其取代 |
 
 ---
 
@@ -1138,13 +1138,16 @@ func (c *Client) Login(ctx) error
 
 | 字段 | 存储位置 | 理由 |
 |---|---|---|
-| 协议、地址、端口、TLS/Reality 参数 | 3X-UI（面板调 API 读写） | 复用 3X-UI 真相能力 |
+| 协议、端口、TLS/Reality、stream/sniffing/allocate（inbound 连接配置） | **面板 `nodes` 配置列（v3.5）**；`inbound_settings` / `stream_settings` 落盘 AES-GCM 加密 | PSP 为真相源；render 只读本地（零回源）、reconcile 反向下发，详见 [inbound-ownership.md](inbound-ownership.md) |
+| server_address（客户端拨号地址） | 面板 `nodes.server_address` | 公网地址，proxy 块的 `server:` 字段 |
 | display_name | 面板 `nodes.display_name` | 与 3X-UI remark 解耦 |
 | region | 面板 `nodes.region` | 面板侧分类 |
 | tags | 面板 `nodes.tags` | 灵活组合过滤（含 `server:xxx` 表达"同物理机"） |
 | sort_order | 面板 `nodes.sort_order` | 全局默认排序，可被 group.layout 覆盖 |
 
 **v6 的 `#region:` `#tag:` remark 约定取消**。所有展示元数据存面板 MySQL，不再依赖 3X-UI remark。
+
+**v3.5 变更**：inbound 连接配置不再以 3X-UI 为单源真相——整份配置（去 `clients[]`）镜像进 `nodes` 表，PSP 成为真相源。clients 仍由归属表管理、`clients[]` 不入快照（下发时 RMW 合并保留所有 live client）。inbound 的 `remark` 归运维（reconcile 不强制，详见 §9.4 / §9.5）。
 
 ### 9.4 分层对账（详细）
 
@@ -1184,7 +1187,8 @@ L2 只跑 #1、#3；L1/L3/L4 跑全部。
 | # | 检查项 | 漂移场景 | 修复动作 |
 |---|---|---|---|
 | 6 | **inbound 存在性** | 面板 `nodes` 表有记录，3X-UI 找不到对应 inbound | 标记 `nodes.enabled=false` + 写告警到 dashboard。**不删 nodes 行**（等管理员决定是不是真的删了 / 改了 ID） |
-| 7 | **inbound 启用状态** | 面板 `nodes.enabled=true` 但 3X-UI `inbound.enable=false` | 不修复，只记录（3X-UI 是协议参数真相源，inbound 启用状态由那边决定）|
+| 7 | **inbound 启用状态** | 面板 `nodes.enabled=true` 但 3X-UI `inbound.enable=false` | 不在轴-A 配置对账里强制（`InSync` 不含 enable 位）；inbound 启停由节点 enable 路径单独驱动（§3.2"节点元数据启停"）|
+| 8 | **inbound 连接配置漂移（v3.5 轴 A）** | 已捕获节点的本地快照 ≠ 3X-UI live（端口 / TLS / Reality / stream / sniffing / allocate；语义 JSON 比较，忽略 `clients[]` / 键序 / remark）| `UpdateInbound` 下发 PSP 版本（read-modify-write **保留全部 live client**）、推后 `GetInbound` 回采收敛；从未捕获的节点则改为从 live **回填捕获**（pull，不下发）。详见 [inbound-ownership.md](inbound-ownership.md) |
 
 #### 9.4.4 输出
 
@@ -1194,7 +1198,7 @@ L2 只跑 #1、#3；L1/L3/L4 跑全部。
 #### 9.4.5 绝对不做的事 🚫
 
 - ❌ **删除任何 3X-UI client**（即使归属表外的私人 client 也不动；即使归属表内"面板已删但 3X-UI 残留"也不在对账里删 —— 那种情况由 §7.X 的"延迟清理"独立机制处理 + 管理员确认）
-- ❌ **修改 inbound 协议参数**（addr / port / TLS / Reality / settings 都是 3X-UI 单源真相）
+- ⚠️ **inbound 连接配置**（port / TLS / Reality / stream / settings）——**v3.5 起改为 PSP 真相源，reconcile 会下发覆盖 3X-UI 上的漂移**（§9.4.3 #8，撤销了旧版"3X-UI 单源真相、绝不改"）。但下发走 read-modify-write，**`clients[]` 全程原样保留**——配置层覆盖与 client 层"绝不误伤"是两条独立的轴，互不影响。inbound 的 `remark` 不在强制之列（运维可在 3X-UI 自由改名）
 - ❌ **新建 inbound**（管理员显式动作）
 - ❌ **重命名 client.email**（即使发现命名不符合 §2.1 约定也不改 —— 老朋友导入时保留原 email 是有意为之）
 
@@ -1202,11 +1206,13 @@ L2 只跑 #1、#3；L1/L3/L4 跑全部。
 
 面板默认假设 3X-UI 里**已经有现成的 inbound** 在跑（且内部混杂着维护者私人 client 和朋友 client）。"不冲突 + 复用现有 inbound" 靠下面三个机制：
 
-#### 9.5.1 inbound 协议参数零变更
+#### 9.5.1 导入 = 接管配置，但不扰动运行中的 inbound（v3.5）
 
-§7.5.1 导入路径**只写面板侧** `nodes` 表的展示元数据（display_name / region / tags / sort_order），**完全不调 3X-UI 任何写 API**。inbound 的协议、端口、TLS、Reality、`settings.clients[]` 全部保持原样。
+§7.5.1 导入路径除了写面板侧 `nodes` 展示元数据（display_name / region / tags / sort_order），**v3.5 起还会把该 inbound 的整份连接配置（去 `clients[]`）捕获进 `nodes` 的配置列**——即"接管"，此后 PSP 是其配置真相源。
 
-维护者已经分发出去的旧 yaml 中朋友配置 → 继续生效，无需任何客户端侧改动。
+导入这一步**本身仍不调 3X-UI 任何写 API**：只 `GET` 读取一次。inbound 的协议、端口、TLS、Reality、以及 `settings.clients[]` 在导入时一字不动；维护者已分发出去的旧 yaml 朋友配置继续生效，无需客户端侧改动。
+
+接管之后，该 inbound 的连接配置由 reconcile 轴 A 维持（§9.4.3 #8）：若被人在 3X-UI 直接改，下一轮会按 PSP 快照下发回去（RMW 保留全部 client）。**这是 v3.5 与旧版"协议参数以 3X-UI 为准、绝不改"的根本区别**——连接配置归 PSP，client 仍绝不误伤。
 
 #### 9.5.2 addClient 是"追加"语义，不是"替换"
 
