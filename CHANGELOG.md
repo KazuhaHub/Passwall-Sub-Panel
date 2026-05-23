@@ -4,6 +4,14 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## v3.5.0-beta.16 — 2026-05-23
+
+### Added
+- **`log_level` 加进 `config.yaml`**:beta.14/15 已有 `PSP_LOG_LEVEL` env + `--debug` flag,这次补 config 文件这一层,让"长期开 debug"(比如 dev 部署)不用每次启动都靠 env/flag。完整优先级链:**`--debug` flag > `PSP_LOG_LEVEL` env > `log_level` config > 默认 (info)**。三个口子各管各的使用场景——flag 一次性、env 注入/临时、config 持久化部署默认。
+  - 为什么 log_level 不能走 settings 表(跟 cron / JWT TTL 那批不同):它必须在 DB 加载完成前就生效,而 settings 表本身得 DB 起来才能读——boot 早期诊断 log(比如 config load 失败)需要的就是这种"在 DB 之前可控"的能力。
+  - main.go 拆出 `parseLogLevel` + `applyEarlyLogLevel`:env/flag 在 config 加载之前 apply(保证 config-load 错误本身就受调级),config.LogLevel 在加载后作为兜底(仅在 env/flag 都没显式设过时生效)。
+  - 默认 config 模板加 Logging 段注释(写在 Filesystem 前面,跟 listen/secrets 同属"全局基础"那一档),含完整优先级说明 + 注释掉的示例。已有 config.yaml **不受影响**——新字段空缺时模板默认行为(info)。
+
 ## v3.5.0-beta.15 — 2026-05-23
 
 ### Added

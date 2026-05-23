@@ -31,6 +31,14 @@ type Config struct {
 
 	ConfigDir string `yaml:"config_dir"`
 	DataDir   string `yaml:"data_dir"`
+
+	// LogLevel sets the global slog level (debug / info / warn / error,
+	// case-insensitive). Lives in the boot config because it has to take
+	// effect BEFORE the DB is reachable — settings-table edits would be
+	// useless for early-boot diagnostics like PollOnce per-stage timing.
+	// Empty = keep the default (info). Override order: --debug flag >
+	// PSP_LOG_LEVEL env > this field > default.
+	LogLevel string `yaml:"log_level"`
 }
 
 // HTTPConfig groups reverse-proxy-aware request-handling settings.
@@ -222,6 +230,18 @@ encryption_key: "%s"
 #   # trusted_proxies: "none"            # no proxy at all: use raw TCP peer
 #
 # Env override: PSP_TRUSTED_PROXIES.
+
+# ---- Logging ----
+# Global log level. Empty (or unset) keeps the default of "info".
+# Has to live here (or env/flag) because it takes effect BEFORE the DB is
+# reachable — anything controlled by the settings table can't help diagnose
+# boot-time problems. Setting "debug" unlocks the per-stage timing markers
+# in PollOnce and similar diagnostic logs; leave commented for production.
+#
+# Override priority (most specific wins):
+#   --debug flag > PSP_LOG_LEVEL env > log_level (this field) > default (info)
+#
+# log_level: "debug"                       # debug | info | warn | error
 
 # ---- Filesystem ----
 config_dir: "./config"                     # runtime configs (templates, etc.)

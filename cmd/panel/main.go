@@ -25,22 +25,42 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/version"
 )
 
-// applyLogLevelFromEnv honors PSP_LOG_LEVEL (debug / info / warn / error,
-// case-insensitive) and adjusts the global slog level before the panel does
-// any logging worth filtering. Unrecognized / empty values leave the default
-// Info baseline alone. Mostly used to unlock the per-stage timing in
-// PollOnce on demand (see traffic.Service.PollOnce / beta.14 changelog).
-func applyLogLevelFromEnv() {
-	switch strings.ToLower(strings.TrimSpace(os.Getenv("PSP_LOG_LEVEL"))) {
+// parseLogLevel returns (level, true) for known names (case-insensitive);
+// returns (LevelInfo, false) for empty / unknown. Used by both the early-boot
+// env/flag pass and the post-config-load fallback so the priority chain stays
+// consistent.
+func parseLogLevel(s string) (stdlog.Level, bool) {
+	switch strings.ToLower(strings.TrimSpace(s)) {
 	case "debug":
-		pkglog.SetLevel(stdlog.LevelDebug)
+		return stdlog.LevelDebug, true
 	case "info":
-		pkglog.SetLevel(stdlog.LevelInfo)
+		return stdlog.LevelInfo, true
 	case "warn", "warning":
-		pkglog.SetLevel(stdlog.LevelWarn)
+		return stdlog.LevelWarn, true
 	case "error":
-		pkglog.SetLevel(stdlog.LevelError)
+		return stdlog.LevelError, true
 	}
+	return stdlog.LevelInfo, false
+}
+
+// applyEarlyLogLevel applies --debug or PSP_LOG_LEVEL NOW (before config.Load
+// runs) so that boot-time logs — including the config load itself, if it
+// errors — are filtered at the verbosity the operator asked for. Returns true
+// if either source set the level; main then knows whether the config.LogLevel
+// field (loaded later) should kick in. Priority within this function: flag
+// wins over env.
+func applyEarlyLogLevel(debugFlag bool) bool {
+	if debugFlag {
+		pkglog.SetLevel(stdlog.LevelDebug)
+		return true
+	}
+	if env := os.Getenv("PSP_LOG_LEVEL"); env != "" {
+		if lvl, ok := parseLogLevel(env); ok {
+			pkglog.SetLevel(lvl)
+			return true
+		}
+	}
+	return false
 }
 
 func ensureDirs(cfg *config.Config) {
@@ -87,15 +107,21 @@ func main() {
 	if os.Getenv("GIN_MODE") == "" {
 		gin.SetMode(gin.ReleaseMode)
 	}
-	applyLogLevelFromEnv()
-	if *debugFlag {
-		pkglog.SetLevel(stdlog.LevelDebug)
-	}
+	// Log level priority: --debug flag > PSP_LOG_LEVEL env > config.log_level
+	// > default (info). Flag/env apply NOW so any config-load error logs at
+	// the right verbosity; the config-file fallback kicks in only if neither
+	// flag nor env set anything explicit.
+	earlyLevelSet := applyEarlyLogLevel(*debugFlag)
 
 	cfgPath := resolveConfigPath(*cfgPathFlag)
 	cfg, err := config.LoadOrGenerate(cfgPath)
 	if err != nil {
 		log.Fatalf("load config %s: %v", cfgPath, err)
+	}
+	if !earlyLevelSet && cfg.LogLevel != "" {
+		if lvl, ok := parseLogLevel(cfg.LogLevel); ok {
+			pkglog.SetLevel(lvl)
+		}
 	}
 	ensureDirs(cfg)
 
