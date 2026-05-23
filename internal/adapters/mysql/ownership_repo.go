@@ -54,6 +54,37 @@ func (r *ownershipRepo) ListByUser(ctx context.Context, userID int64) ([]*domain
 	return out, nil
 }
 
+// ListByUsers fetches every ownership row whose user_id is in the input
+// list, in ONE SQL roundtrip, and buckets by user_id. PollOnce uses it
+// once per cycle instead of N per-user SELECTs.
+//
+// Absolute win is modest on a localhost SQLite / MySQL / Postgres (where
+// per-query overhead is sub-ms anyway), more visible on remote DBs where
+// each round-trip carries 5–30ms of network latency. Same cross-dialect
+// shape as the other v3.5.0-beta.9/15 batch reads — GORM's `IN ?` clause
+// expands portably across all three backends.
+//
+// Users with no ownership rows are absent from the returned map (not
+// nil-valued, not zero-length); an empty input returns an empty non-nil
+// map so callers don't need a guard.
+func (r *ownershipRepo) ListByUsers(ctx context.Context, userIDs []int64) (map[int64][]*domain.XUIClientEntry, error) {
+	if len(userIDs) == 0 {
+		return map[int64][]*domain.XUIClientEntry{}, nil
+	}
+	var rows []ownershipRow
+	if err := r.db.WithContext(ctx).
+		Where("user_id IN ?", userIDs).
+		Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	out := make(map[int64][]*domain.XUIClientEntry, len(userIDs))
+	for i := range rows {
+		d := rows[i].toDomain()
+		out[d.UserID] = append(out[d.UserID], d)
+	}
+	return out, nil
+}
+
 func (r *ownershipRepo) ListByInbound(ctx context.Context, panelID int64, inboundID int) ([]*domain.XUIClientEntry, error) {
 	var rows []ownershipRow
 	err := r.db.WithContext(ctx).

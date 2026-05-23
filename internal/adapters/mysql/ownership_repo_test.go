@@ -100,6 +100,85 @@ func TestOwnershipBatchUpdateCounters(t *testing.T) {
 	})
 }
 
+// TestOwnershipListByUsers pins the v3.5.0-beta.15 batched-read shape:
+// one SQL roundtrip buckets every requested user's ownership rows, users
+// without rows are absent (not nil-valued), and empty input returns an
+// empty non-nil map so callers don't need a guard.
+func TestOwnershipListByUsers(t *testing.T) {
+	db, err := Open("sqlite", filepath.Join(t.TempDir(), "panel.db"))
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	if err := EnsureSchema(db); err != nil {
+		t.Fatalf("schema: %v", err)
+	}
+	t.Cleanup(func() {
+		if sqlDB, _ := db.DB(); sqlDB != nil {
+			_ = sqlDB.Close()
+		}
+	})
+
+	repo := NewRepos(db).Ownership
+	ctx := context.Background()
+
+	mk := func(uid int64, email string) *domain.XUIClientEntry {
+		return &domain.XUIClientEntry{
+			UserID: uid, PanelID: 10, InboundID: 20,
+			ClientEmail: email,
+			ClientUUID:  "00000000-0000-0000-0000-000000000000",
+		}
+	}
+	// user 1 → 2 rows, user 2 → 1 row, user 3 → 0 rows
+	entries := []*domain.XUIClientEntry{
+		mk(1, "u1-c0@example.test"),
+		mk(1, "u1-c1@example.test"),
+		mk(2, "u2-c0@example.test"),
+	}
+	for _, e := range entries {
+		if err := repo.Add(ctx, e); err != nil {
+			t.Fatalf("add %s: %v", e.ClientEmail, err)
+		}
+	}
+
+	t.Run("buckets rows by user_id; absent users omitted", func(t *testing.T) {
+		got, err := repo.ListByUsers(ctx, []int64{1, 2, 3})
+		if err != nil {
+			t.Fatalf("ListByUsers: %v", err)
+		}
+		if len(got[1]) != 2 {
+			t.Errorf("user 1 rows = %d, want 2", len(got[1]))
+		}
+		if len(got[2]) != 1 {
+			t.Errorf("user 2 rows = %d, want 1", len(got[2]))
+		}
+		if _, ok := got[3]; ok {
+			t.Errorf("user 3 should be absent from the map (no rows), got %+v", got[3])
+		}
+		// Cross-check against the single-user form for user 1 — same shape.
+		single, err := repo.ListByUser(ctx, 1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(single) != len(got[1]) {
+			t.Errorf("single ListByUser returned %d rows, batch returned %d — semantics drift",
+				len(single), len(got[1]))
+		}
+	})
+
+	t.Run("empty input returns empty non-nil map", func(t *testing.T) {
+		got, err := repo.ListByUsers(ctx, nil)
+		if err != nil {
+			t.Fatalf("nil input: %v", err)
+		}
+		if got == nil {
+			t.Fatal("nil-input returned nil map; callers will panic on map-index")
+		}
+		if len(got) != 0 {
+			t.Errorf("nil-input map size = %d, want 0", len(got))
+		}
+	})
+}
+
 // lookupEmail maps a (ID-only) update entry back to its stored row's email
 // by walking the originals. Lets the happy-path loop use GetByMatch instead
 // of inventing a GetByID on the ownership repo.

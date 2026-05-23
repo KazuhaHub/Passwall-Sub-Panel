@@ -4,6 +4,19 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## v3.5.0-beta.15 — 2026-05-23
+
+### Added
+- **`--debug` 启动 flag**:跟 `PSP_LOG_LEVEL=debug` 等价但更顺手,直接 `./psp --debug` 起进程即可启用 debug 级日志(含 PollOnce 那 7 段 timing)。env 仍然支持;两者并存时 flag 优先(env 先生效、flag 后覆盖)。
+
+### Changed
+- **`PollOnce` 起步阶段的 ownership 读改为 batched**:新增 `OwnershipRepo.ListByUsers(ctx, userIDs)` 一次 SQL 把所有 user 的 ownership 行按 user_id 桶分类返回,替代原来 `for _, u := range users { ListByUser(u.ID) }` 的 N+1 read。**跨方言**:GORM `Where("user_id IN ?", ids)` 在 SQLite / MySQL / Postgres 三个 backend 都原生支持(本仓库 KV / Ownership 一直跨这三方言)。失败时 fallback 回原 per-user loop——一次 batched 读出问题不至于让整轮 poll 崩。
+- 收益面:本地 DB 部署(sub-ms per query)~5–10ms 量级,几乎不可感知;远程 DB(每次 round-trip 5–30ms)就明显了,从 N 次降到 1 次。是 N+1 source 的纯代码工艺清理,跟 beta.9 的 `LatestForUsers` / `BatchUpdateXxx` 三件套保持一致风格——traffic poll 现在没有任何 per-user inline DB read/write 残留。
+
+### Internal / 测试
+- mysql: `TestOwnershipListByUsers` 覆盖 bucket-by-user_id 行为 + absent-user-omitted + empty-input-empty-map 三条不变量。
+- fake repo(`internal/service/traffic/traffic_test.go` 镜像生产 batched 行为,`internal/service/sync/sync_test.go` 加 stub 保证编译)。
+
 ## v3.5.0-beta.14 — 2026-05-23
 
 ### Changed

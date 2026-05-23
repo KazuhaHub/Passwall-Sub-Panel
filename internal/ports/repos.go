@@ -183,6 +183,13 @@ type OwnershipRepo interface {
 	RemoveByMatch(ctx context.Context, panelID int64, inboundID int, email string) error
 	GetByMatch(ctx context.Context, panelID int64, inboundID int, email string) (*domain.XUIClientEntry, error)
 	ListByUser(ctx context.Context, userID int64) ([]*domain.XUIClientEntry, error)
+	// ListByUsers is the batched form of ListByUser. PollOnce calls it once
+	// at the top of each cycle to bucket every user's ownership rows in a
+	// single SQL roundtrip instead of N. Mirrors TrafficRepo.LatestForUsers's
+	// shape (input slice, output map keyed by lookup key) — users absent from
+	// the result map have no ownership rows. Empty input returns an empty
+	// non-nil map so callers don't need a nil guard.
+	ListByUsers(ctx context.Context, userIDs []int64) (map[int64][]*domain.XUIClientEntry, error)
 	ListByInbound(ctx context.Context, panelID int64, inboundID int) ([]*domain.XUIClientEntry, error)
 	Exists(ctx context.Context, panelID int64, inboundID int, email string) (bool, error)
 	// UpdateUUID rewrites client_uuid for the row identified by the unique

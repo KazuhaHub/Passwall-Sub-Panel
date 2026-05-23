@@ -119,6 +119,9 @@ func (r *fakeOwnership) RemoveByMatch(ctx context.Context, panelID int64, inboun
 func (r *fakeOwnership) GetByMatch(ctx context.Context, panelID int64, inboundID int, email string) (*domain.XUIClientEntry, error) {
 	return r.entry, nil
 }
+func (r *fakeOwnership) ListByUsers(ctx context.Context, userIDs []int64) (map[int64][]*domain.XUIClientEntry, error) {
+	return map[int64][]*domain.XUIClientEntry{}, nil
+}
 func (r *fakeOwnership) ListByUser(ctx context.Context, userID int64) ([]*domain.XUIClientEntry, error) {
 	return nil, nil
 }

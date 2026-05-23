@@ -807,6 +807,22 @@ func (r *fakeOwnershipRepo) ListByUser(ctx context.Context, userID int64) ([]*do
 	}
 	return out, nil
 }
+func (r *fakeOwnershipRepo) ListByUsers(ctx context.Context, userIDs []int64) (map[int64][]*domain.XUIClientEntry, error) {
+	out := make(map[int64][]*domain.XUIClientEntry, len(userIDs))
+	for _, id := range userIDs {
+		entries := r.byUser[id]
+		if len(entries) == 0 {
+			continue // absent users omitted, matches mysql behavior
+		}
+		cps := make([]*domain.XUIClientEntry, len(entries))
+		for i, e := range entries {
+			cp := *e
+			cps[i] = &cp
+		}
+		out[id] = cps
+	}
+	return out, nil
+}
 func (r *fakeOwnershipRepo) ListByInbound(ctx context.Context, panelID int64, inboundID int) ([]*domain.XUIClientEntry, error) {
 	return nil, nil
 }

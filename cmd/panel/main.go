@@ -76,12 +76,23 @@ func main() {
 		return
 	}
 
+	// Main panel flags. Subcommands above (migrate / version) own their own
+	// argv so flag.Parse() here only sees the panel boot path. --debug is a
+	// shortcut equivalent to setting PSP_LOG_LEVEL=debug; both are honored
+	// (env first, flag last — flag wins on conflict).
+	cfgPathFlag := flag.String("config", "", "main config path")
+	debugFlag := flag.Bool("debug", false, "enable debug-level logging (equivalent to PSP_LOG_LEVEL=debug); unlocks per-stage timing in PollOnce and similar diagnostic logs")
+	flag.Parse()
+
 	if os.Getenv("GIN_MODE") == "" {
 		gin.SetMode(gin.ReleaseMode)
 	}
 	applyLogLevelFromEnv()
+	if *debugFlag {
+		pkglog.SetLevel(stdlog.LevelDebug)
+	}
 
-	cfgPath := configPath()
+	cfgPath := resolveConfigPath(*cfgPathFlag)
 	cfg, err := config.LoadOrGenerate(cfgPath)
 	if err != nil {
 		log.Fatalf("load config %s: %v", cfgPath, err)
@@ -127,11 +138,11 @@ func main() {
 	}
 }
 
-func configPath() string {
-	cfgPath := flag.String("config", "", "main config path")
-	flag.Parse()
-	if *cfgPath != "" {
-		return *cfgPath
+// resolveConfigPath picks the panel's config path with --config > PSP_CONFIG >
+// the bundled default. flag parsing happens in main() so this stays argv-free.
+func resolveConfigPath(flagVal string) string {
+	if flagVal != "" {
+		return flagVal
 	}
 	if v := os.Getenv("PSP_CONFIG"); v != "" {
 		return v

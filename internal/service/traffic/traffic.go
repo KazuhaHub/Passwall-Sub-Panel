@@ -256,22 +256,40 @@ func (s *Service) PollOnce(ctx context.Context) error {
 	sink.latestByUser = latestByUser
 	mark("LatestForUsers prefetch")
 
+	// One batched read instead of the N+1 ListByUser-per-user loop. Small
+	// absolute win on MySQL/Postgres localhost (~1ms each → ~10ms total at
+	// modest scale collapses to a single SELECT), more visible on remote DB.
+	// Cross-dialect via GORM's IN clause. Falls back to the per-user loop on
+	// error so a hiccup on this read can't take the whole cycle down. v3.5.0-beta.15.
 	byInbound := make(map[inboundKey][]ownershipRef)
 	totals := make(map[int64]trafficTotals, len(users))
 	skipUsers := make(map[int64]bool)
 	for _, u := range users {
 		totals[u.ID] = trafficTotals{}
-		entries, err := s.ownership.ListByUser(ctx, u.ID)
-		if err != nil {
-			log.Warn("traffic poll ownership", "user_id", u.ID, "err", err)
-			continue
+	}
+	entriesByUser, oerr := s.ownership.ListByUsers(ctx, allUserIDs)
+	if oerr != nil {
+		log.Warn("traffic poll ownership batched read failed; falling back to per-user", "users", len(allUserIDs), "err", oerr)
+		entriesByUser = nil
+	}
+	for _, u := range users {
+		var entries []*domain.XUIClientEntry
+		if entriesByUser != nil {
+			entries = entriesByUser[u.ID]
+		} else {
+			perUser, err := s.ownership.ListByUser(ctx, u.ID)
+			if err != nil {
+				log.Warn("traffic poll ownership", "user_id", u.ID, "err", err)
+				continue
+			}
+			entries = perUser
 		}
 		for _, e := range entries {
 			key := inboundKey{panelID: e.PanelID, inboundID: e.InboundID}
 			byInbound[key] = append(byInbound[key], ownershipRef{entry: e, userID: u.ID, email: e.ClientEmail, createdAt: e.CreatedAt})
 		}
 	}
-	mark("ownership.ListByUser per-user loop")
+	mark("ownership.ListByUsers batched read")
 
 	// Group queries per panel, fetch full inbound list once (it embeds
 	// clientStats — the dedicated /getClientTrafficsById endpoint is empty
