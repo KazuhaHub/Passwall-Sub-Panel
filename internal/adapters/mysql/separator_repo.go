@@ -59,6 +59,33 @@ func (r *separatorRepo) List(ctx context.Context) ([]*domain.SeparatorEntry, err
 	return out, nil
 }
 
+var separatorSortAllowlist = map[string]string{
+	"id":           "id",
+	"display_name": "display_name",
+	"sort_order":   "sort_order",
+	"created_at":   "created_at",
+}
+
+func (r *separatorRepo) ListPaged(ctx context.Context, p ports.Pagination) ([]*domain.SeparatorEntry, int64, error) {
+	q := r.db.WithContext(ctx).Model(&separatorRow{})
+	if like := keywordLike(p.Keyword); like != "" {
+		q = q.Where("LOWER(display_name) LIKE ?", like)
+	}
+	var total int64
+	if err := q.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	var rows []separatorRow
+	if err := applyPagination(q, p, separatorSortAllowlist, "sort_order").Find(&rows).Error; err != nil {
+		return nil, 0, err
+	}
+	out := make([]*domain.SeparatorEntry, 0, len(rows))
+	for i := range rows {
+		out = append(out, rows[i].toDomain())
+	}
+	return out, total, nil
+}
+
 // BatchUpdateSortOrder rewrites sort_order for every listed separator
 // in one transaction. Mirrors nodeRepo.BatchUpdateSortOrder so the
 // admin drag-to-reorder bar can update both tables atomically (the

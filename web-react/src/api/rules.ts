@@ -1,4 +1,5 @@
 import { client } from './client'
+import type { ListResponse } from './types'
 
 export interface RuleSet {
   slug: string
@@ -9,9 +10,18 @@ export interface RuleSet {
   content: string
 }
 
-export async function listRuleSets() {
-  const { data } = await client.get<{ items: RuleSet[] }>('/admin/rules')
-  return data.items
+export interface RuleSetListParams {
+  page?: number
+  page_size?: number
+  keyword?: string
+  sort_by?: string
+  sort_dir?: 'asc' | 'desc'
+}
+
+export async function listRuleSets(params: RuleSetListParams = {}, signal?: AbortSignal) {
+  const merged = { page: 1, page_size: 200, ...params }
+  const { data } = await client.get<ListResponse<RuleSet>>('/admin/rules', { params: merged, signal })
+  return data
 }
 
 export async function getRuleSet(slug: string) {

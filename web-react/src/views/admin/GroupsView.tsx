@@ -39,6 +39,7 @@ import { listNodes } from '@/api/nodes'
 import type { Group, Node } from '@/api/types'
 import { confirm } from '@/components/ConfirmHost'
 import { pushSnack } from '@/components/SnackbarHost'
+import { PagedTableFooter } from '@/components/PagedTableFooter'
 
 interface FormState {
   slug: string
@@ -175,7 +176,9 @@ export default function GroupsView() {
   // that doesn't exist yet but will after they save it on a node).
   const [allNodes, setAllNodes] = useState<Node[]>([])
   useEffect(() => {
-    void listNodes().then(setAllNodes).catch(() => { /* leave empty */ })
+    void listNodes({ page: 1, page_size: 500 })
+      .then(res => setAllNodes(res.items))
+      .catch(() => { /* leave empty */ })
   }, [])
   // Separate option pools per dropdown — the UI splits the prefix-based
   // conditions into three dedicated fields (Region / Tag / Server) so
@@ -207,6 +210,27 @@ export default function GroupsView() {
       g.slug.toLowerCase().includes(q),
     )
   }, [items, search])
+
+  // Client-side pagination — group lists are tiny but the footer keeps
+  // the UX consistent across every admin table.
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState<number>(() => {
+    try {
+      const raw = localStorage.getItem('psp_page_size')
+      const n = raw ? parseInt(raw, 10) : 25
+      return Number.isFinite(n) && n > 0 ? n : 25
+    } catch { return 25 }
+  })
+  function changePageSize(n: number) {
+    setPageSize(n)
+    try { localStorage.setItem('psp_page_size', String(n)) } catch { /* ignore */ }
+    setPage(1)
+  }
+  useEffect(() => { setPage(1) }, [search])
+  const pagedItems = useMemo(
+    () => filteredItems.slice((page - 1) * pageSize, page * pageSize),
+    [filteredItems, page, pageSize],
+  )
 
   // Only groups with zero members are eligible for selection (delete needs
   // empty group). Scoped to the visible (filtered) rows so the header
@@ -482,7 +506,7 @@ export default function GroupsView() {
                   {t('admin:groups.no_match', { defaultValue: '没有匹配的分组' })}
                 </TableCell></TableRow>
               )}
-              {filteredItems.map(g => {
+              {pagedItems.map(g => {
                 const canSelect = g.members === 0
                 return (
                   <TableRow
@@ -523,6 +547,10 @@ export default function GroupsView() {
             </TableBody>
           </Table>
         </TableContainer>
+        <PagedTableFooter
+          total={filteredItems.length} page={page} pageSize={pageSize}
+          onPageChange={setPage} onPageSizeChange={changePageSize}
+        />
       </Card>
 
       <Dialog

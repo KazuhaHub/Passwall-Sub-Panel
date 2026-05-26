@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import {
   Box,
   Button,
@@ -37,6 +37,7 @@ import { deleteRuleSet, listRuleSets, resetRuleSet, saveRuleSet, SEEDED_RULESET_
 import { listTemplates, type Template } from '@/api/templates'
 import { confirm } from '@/components/ConfirmHost'
 import { pushSnack } from '@/components/SnackbarHost'
+import { PagedTableFooter } from '@/components/PagedTableFooter'
 
 const EMPTY: RuleSet = {
   slug: '', name: '', sort: 100, enabled: true, proxy_group_order: [], content: '',
@@ -60,7 +61,27 @@ export default function RuleSetsView() {
   const [proxyGroupText, setProxyGroupText] = useState('')
   const [busy, setBusy] = useState(false)
 
-  const allChecked = items.length > 0 && items.every(i => selected.has(i.slug))
+  // Client-side pagination — rule-set lists are tiny but the footer
+  // gives the admin a per-page selector consistent with other tables.
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState<number>(() => {
+    try {
+      const raw = localStorage.getItem('psp_page_size')
+      const n = raw ? parseInt(raw, 10) : 25
+      return Number.isFinite(n) && n > 0 ? n : 25
+    } catch { return 25 }
+  })
+  function changePageSize(n: number) {
+    setPageSize(n)
+    try { localStorage.setItem('psp_page_size', String(n)) } catch { /* ignore */ }
+    setPage(1)
+  }
+  const pagedItems = useMemo(
+    () => items.slice((page - 1) * pageSize, page * pageSize),
+    [items, page, pageSize],
+  )
+
+  const allChecked = pagedItems.length > 0 && pagedItems.every(i => selected.has(i.slug))
   const someChecked = selected.size > 0 && !allChecked
 
   useEffect(() => { void load() }, [])
@@ -69,12 +90,18 @@ export default function RuleSetsView() {
     setLoading(true)
     try {
       const [rules, tpls] = await Promise.all([listRuleSets(), listTemplates()])
-      setItems(rules); setTemplates(tpls); setSelected(new Set())
+      setItems(rules.items); setTemplates(tpls.items); setSelected(new Set())
     } finally { setLoading(false) }
   }
 
   function toggleAll(checked: boolean) {
-    setSelected(checked ? new Set(items.map(i => i.slug)) : new Set())
+    // Affect only currently-visible page rows so admin's "select all"
+    // can't accidentally pick up rule sets hidden behind paging.
+    setSelected(prev => {
+      const next = new Set(prev)
+      pagedItems.forEach(i => { if (checked) next.add(i.slug); else next.delete(i.slug) })
+      return next
+    })
   }
   function toggleOne(slug: string, checked: boolean) {
     setSelected(prev => {
@@ -266,7 +293,7 @@ export default function RuleSetsView() {
               {!loading && items.length === 0 && (
                 <TableRow><TableCell colSpan={8} sx={{ textAlign: 'center', py: 6, color: md.onSurfaceVariant }}>—</TableCell></TableRow>
               )}
-              {items.map(rs => {
+              {pagedItems.map(rs => {
                 const used = usedByTemplates(rs)
                 return (
                   <TableRow key={rs.slug} hover sx={{
@@ -328,6 +355,10 @@ export default function RuleSetsView() {
             </TableBody>
           </Table>
         </TableContainer>
+        <PagedTableFooter
+          total={items.length} page={page} pageSize={pageSize}
+          onPageChange={setPage} onPageSizeChange={changePageSize}
+        />
       </Card>
 
       {/* Create/Edit dialog */}

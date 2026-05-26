@@ -63,6 +63,7 @@ import { MenuItem, Select, FormControlLabel } from '@mui/material'
 import KeyIcon from '@mui/icons-material/VpnKey'
 import type { Node, UnmanagedInbound, User } from '@/api/types'
 import { confirm } from '@/components/ConfirmHost'
+import { PagedTableFooter } from '@/components/PagedTableFooter'
 import { pushSnack } from '@/components/SnackbarHost'
 import { useTabParam } from '@/hooks/useTabParam'
 import {
@@ -1789,6 +1790,24 @@ export default function NodesView() {
     return out
   }, [managed, separatorRows])
 
+  // Client-side pagination state for the managed table. Server-side
+  // would break drag-to-reorder (positions are computed across the
+  // full ordering), so we keep the full set in memory and slice in
+  // render. Page-size choice persists to localStorage via the shared
+  // PSP_PAGE_SIZE convention.
+  const [managedPage, setManagedPage] = useState(1)
+  const [managedPageSize, setManagedPageSize] = useState<number>(() => {
+    try {
+      const raw = localStorage.getItem('psp_page_size')
+      const n = raw ? parseInt(raw, 10) : 25
+      return Number.isFinite(n) && n > 0 ? n : 25
+    } catch { return 25 }
+  })
+  function changeManagedPageSize(n: number) {
+    setManagedPageSize(n)
+    try { localStorage.setItem('psp_page_size', String(n)) } catch { /* ignore */ }
+    setManagedPage(1)
+  }
   const filteredManaged = useMemo(() => {
     const q = managedSearch.trim().toLowerCase()
     if (!q) return managedCombined
@@ -1802,6 +1821,16 @@ export default function NodesView() {
     )
   }, [managedCombined, managedSearch])
   const managedFilterActive = managedSearch.trim().length > 0
+  // Resliced view that the table actually renders. The drag handlers
+  // still operate on absolute indices into filteredManaged, so we
+  // translate the page-local index inside onDrop/onDragOver.
+  const managedPaged = useMemo(() => {
+    const start = (managedPage - 1) * managedPageSize
+    return filteredManaged.slice(start, start + managedPageSize)
+  }, [filteredManaged, managedPage, managedPageSize])
+  // When the filter changes the previous page may be past the new
+  // last_page — snap back to 1.
+  useEffect(() => { setManagedPage(1) }, [managedSearch])
   const [selected, setSelected] = useState<Set<number>>(new Set())
   const [batchBusy, setBatchBusy] = useState<'enable' | 'disable' | 'delete' | ''>('')
   const [enabledBusy, setEnabledBusy] = useState<Record<number, boolean>>({})
@@ -1934,8 +1963,13 @@ export default function NodesView() {
   useEffect(() => { void loadServers() }, [])
 
   async function loadServers() {
-    try { setServers(await listServers()) }
-    catch { /* toast */ }
+    // For the picker dropdown we want every panel. Request a large
+    // page_size that the backend will clamp to 200, which is plenty
+    // for an individual deployment.
+    try {
+      const res = await listServers({ page: 1, page_size: 200 })
+      setServers(res.items)
+    } catch { /* toast */ }
   }
 
   async function load() {
@@ -1952,10 +1986,14 @@ export default function NodesView() {
       // also refreshed so the separator dialog's "Show in groups"
       // picker reflects whatever the admin just added in Groups view.
       const [n, s] = await Promise.all([
-        listNodes(),
+        // Drag-to-reorder spans the full set, so fetch all nodes here.
+        // Large fleets paginate the visible *table* via filteredManaged
+        // slicing below but the drag handler still computes positions
+        // against the complete ordering.
+        listNodes({ page: 1, page_size: 500 }),
         listSeparators().catch(() => [] as Separator[]),
       ])
-      setManaged(n)
+      setManaged(n.items)
       setSeparators(s)
       setSelected(new Set())
     } finally {
@@ -2670,7 +2708,8 @@ export default function NodesView() {
                     {managed.length === 0 ? '—' : t('admin:nodes.managed_filter_empty')}
                   </TableCell></TableRow>
                 )}
-                {filteredManaged.map((n, idx) => {
+                {managedPaged.map((n, pageIdx) => {
+                  const idx = (managedPage - 1) * managedPageSize + pageIdx
                   const isSep = n.kind === 'separator'
                   return (
                   <TableRow key={isSep ? `sep-${n.id}` : `node-${n.id}`} hover
@@ -2779,6 +2818,13 @@ export default function NodesView() {
               </TableBody>
             </Table>
           </TableContainer>
+          <PagedTableFooter
+            total={filteredManaged.length}
+            page={managedPage}
+            pageSize={managedPageSize}
+            onPageChange={setManagedPage}
+            onPageSizeChange={changeManagedPageSize}
+          />
           </>
         )}
 

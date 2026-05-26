@@ -148,7 +148,8 @@ type claimRequest struct {
 // ---- Handlers ----
 
 func (h *AdminNodeHandler) List(c *gin.Context) {
-	nodes, err := h.node.List(c.Request.Context())
+	p := parsePagination(c)
+	nodes, total, err := h.node.ListPaged(c.Request.Context(), p)
 	if err != nil {
 		respondError(c, err)
 		return
@@ -159,7 +160,7 @@ func (h *AdminNodeHandler) List(c *gin.Context) {
 	for i, n := range nodes {
 		out[i] = h.toNodeDTO(n, panelNames)
 	}
-	c.JSON(http.StatusOK, gin.H{"items": out})
+	c.JSON(http.StatusOK, pagedEnvelope(out, total, p))
 }
 
 func (h *AdminNodeHandler) Get(c *gin.Context) {
@@ -316,7 +317,8 @@ func (h *AdminNodeHandler) ReorderSeparators(c *gin.Context) {
 }
 
 func (h *AdminNodeHandler) ListSeparators(c *gin.Context) {
-	items, err := h.node.ListSeparators(c.Request.Context())
+	p := parsePagination(c)
+	items, total, err := h.node.ListSeparatorsPaged(c.Request.Context(), p)
 	if err != nil {
 		mapNodeServiceError(c, err)
 		return
@@ -325,7 +327,7 @@ func (h *AdminNodeHandler) ListSeparators(c *gin.Context) {
 	for _, e := range items {
 		out = append(out, toSeparatorDTO(e))
 	}
-	c.JSON(http.StatusOK, gin.H{"items": out})
+	c.JSON(http.StatusOK, pagedEnvelope(out, total, p))
 }
 
 func (h *AdminNodeHandler) CreateSeparator(c *gin.Context) {

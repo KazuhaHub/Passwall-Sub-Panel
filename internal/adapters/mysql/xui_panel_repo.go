@@ -8,6 +8,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 )
 
 type xuiPanelRepo struct{ db *gorm.DB }
@@ -26,6 +27,41 @@ func (r *xuiPanelRepo) List(ctx context.Context) ([]*domain.XUIPanel, error) {
 		out[i] = panel
 	}
 	return out, nil
+}
+
+var xuiPanelSortAllowlist = map[string]string{
+	"id":            "id",
+	"name":          "name",
+	"url":           "url",
+	"panel_version": "panel_version",
+	"created_at":    "created_at",
+}
+
+func (r *xuiPanelRepo) ListPaged(ctx context.Context, p ports.Pagination) ([]*domain.XUIPanel, int64, error) {
+	q := r.db.WithContext(ctx).Model(&xuiPanelRow{})
+	if like := keywordLike(p.Keyword); like != "" {
+		q = q.Where(
+			"LOWER(name) LIKE ? OR LOWER(url) LIKE ? OR LOWER(remark) LIKE ? OR LOWER(username) LIKE ?",
+			like, like, like, like,
+		)
+	}
+	var total int64
+	if err := q.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	var rows []xuiPanelRow
+	if err := applyPagination(q, p, xuiPanelSortAllowlist, "id").Find(&rows).Error; err != nil {
+		return nil, 0, err
+	}
+	out := make([]*domain.XUIPanel, len(rows))
+	for i := range rows {
+		panel, err := rows[i].toDomain()
+		if err != nil {
+			return nil, 0, err
+		}
+		out[i] = panel
+	}
+	return out, total, nil
 }
 
 func (r *xuiPanelRepo) GetByID(ctx context.Context, id int64) (*domain.XUIPanel, error) {

@@ -126,14 +126,14 @@ export default function DashboardView() {
         // we should add a dedicated /dashboard summary endpoint.
         const [u, n, g, top] = await Promise.all([
           listUsers({ page: 1, page_size: 500 }),
-          listNodes(),
+          listNodes({ page: 1, page_size: 500 }),
           listGroups(),
           topTraffic(5).catch(() => []),
         ])
         if (cancelled) return
         setUsers(u.items)
         setUserTotal(u.total)
-        setNodes(n)
+        setNodes(n.items)
         setGroupCount(g.items.length)
         setTopUsers(top)
       } finally {

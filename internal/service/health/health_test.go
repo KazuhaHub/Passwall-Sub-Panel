@@ -45,6 +45,9 @@ func (r *fakeNodeRepo) ListEnabled(ctx context.Context) ([]*domain.Node, error) 
 	}
 	return out, nil
 }
+func (r *fakeNodeRepo) ListPaged(ctx context.Context, _ ports.Pagination) ([]*domain.Node, int64, error) {
+	return r.nodes, int64(len(r.nodes)), nil
+}
 func (r *fakeNodeRepo) GetByID(ctx context.Context, id int64) (*domain.Node, error) {
 	for _, n := range r.nodes {
 		if n.ID == id {

@@ -26,13 +26,18 @@ export interface UpdateUserRequest {
 export interface UserListParams {
   page?: number
   page_size?: number
+  /** Legacy alias; new callers should pass `keyword`. The handler
+   * coalesces the two server-side. */
   search?: string
+  keyword?: string
+  sort_by?: string
+  sort_dir?: 'asc' | 'desc'
   group_id?: number
   enabled?: boolean
 }
 
-export async function listUsers(params: UserListParams = {}) {
-  const { data } = await client.get<ListResponse<User>>('/admin/users', { params })
+export async function listUsers(params: UserListParams = {}, signal?: AbortSignal) {
+  const { data } = await client.get<ListResponse<User>>('/admin/users', { params, signal })
   return data
 }
 

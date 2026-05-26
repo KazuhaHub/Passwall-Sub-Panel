@@ -212,16 +212,8 @@ func (r *userRepo) List(ctx context.Context, filter ports.UserFilter) ([]*domain
 		return nil, 0, err
 	}
 
-	if filter.PageSize <= 0 {
-		filter.PageSize = 50
-	}
-	if filter.Page < 1 {
-		filter.Page = 1
-	}
-	q = q.Order("id DESC").Limit(filter.PageSize).Offset((filter.Page - 1) * filter.PageSize)
-
 	var rows []userRow
-	if err := q.Find(&rows).Error; err != nil {
+	if err := applyPagination(q, filter.Pagination, userSortAllowlist, "id").Find(&rows).Error; err != nil {
 		return nil, 0, err
 	}
 	out := make([]*domain.User, len(rows))
@@ -229,6 +221,19 @@ func (r *userRepo) List(ctx context.Context, filter ports.UserFilter) ([]*domain
 		out[i] = rows[i].toDomain()
 	}
 	return out, total, nil
+}
+
+var userSortAllowlist = map[string]string{
+	"id":             "id",
+	"upn":            "upn",
+	"email":          "email",
+	"display_name":   "display_name",
+	"role":           "role",
+	"group_id":       "group_id",
+	"enabled":        "enabled",
+	"created_at":     "created_at",
+	"expire_at":      "expire_at",
+	"last_online_at": "last_online_at",
 }
 
 func (r *userRepo) ListByGroup(ctx context.Context, groupID int64) ([]*domain.User, error) {

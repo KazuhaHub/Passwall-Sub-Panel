@@ -1,4 +1,5 @@
 import { client } from './client'
+import type { ListResponse } from './types'
 
 export interface Template {
   slug: string
@@ -10,9 +11,18 @@ export interface Template {
   content: string
 }
 
-export async function listTemplates() {
-  const { data } = await client.get<{ items: Template[] }>('/admin/templates')
-  return data.items
+export interface TemplateListParams {
+  page?: number
+  page_size?: number
+  keyword?: string
+  sort_by?: string
+  sort_dir?: 'asc' | 'desc'
+}
+
+export async function listTemplates(params: TemplateListParams = {}, signal?: AbortSignal) {
+  const merged = { page: 1, page_size: 200, ...params }
+  const { data } = await client.get<ListResponse<Template>>('/admin/templates', { params: merged, signal })
+  return data
 }
 
 export async function getTemplate(slug: string) {

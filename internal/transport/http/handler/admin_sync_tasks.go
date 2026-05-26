@@ -20,8 +20,7 @@ func NewAdminSyncTasksHandler(repo ports.SyncTaskRepo) *AdminSyncTasksHandler {
 }
 
 func (h *AdminSyncTasksHandler) List(c *gin.Context) {
-	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
-	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "50"))
+	p := parsePagination(c)
 	var status *domain.SyncTaskStatus
 	if v := c.Query("status"); v != "" {
 		s := domain.SyncTaskStatus(v)
@@ -33,7 +32,7 @@ func (h *AdminSyncTasksHandler) List(c *gin.Context) {
 		typ = &t
 	}
 	items, total, err := h.repo.List(c.Request.Context(), ports.SyncTaskFilter{
-		Pagination: ports.Pagination{Page: page, PageSize: pageSize},
+		Pagination: p,
 		Status:     status,
 		Type:       typ,
 	})
@@ -41,7 +40,7 @@ func (h *AdminSyncTasksHandler) List(c *gin.Context) {
 		respondError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"items": items, "total": total})
+	c.JSON(http.StatusOK, pagedEnvelope(items, total, p))
 }
 
 func (h *AdminSyncTasksHandler) Retry(c *gin.Context) {

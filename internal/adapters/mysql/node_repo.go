@@ -172,6 +172,44 @@ func (r *nodeRepo) List(ctx context.Context) ([]*domain.Node, error) {
 	return out, nil
 }
 
+var nodeSortAllowlist = map[string]string{
+	"id":           "id",
+	"display_name": "display_name",
+	"sort_order":   "sort_order",
+	"created_at":   "created_at",
+	"panel_id":     "panel_id",
+	"region":       "region",
+}
+
+func (r *nodeRepo) ListPaged(ctx context.Context, p ports.Pagination) ([]*domain.Node, int64, error) {
+	q := r.db.WithContext(ctx).Model(&nodeRow{})
+	if like := keywordLike(p.Keyword); like != "" {
+		// tags is a JSON-encoded text column; the LIKE on it gives "any
+		// tag substring matches" which is what admin expects.
+		q = q.Where(
+			"LOWER(display_name) LIKE ? OR LOWER(server_address) LIKE ? OR LOWER(region) LIKE ? OR LOWER(tags) LIKE ?",
+			like, like, like, like,
+		)
+	}
+	var total int64
+	if err := q.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	var rows []nodeRow
+	if err := applyPagination(q, p, nodeSortAllowlist, "sort_order").Find(&rows).Error; err != nil {
+		return nil, 0, err
+	}
+	out := make([]*domain.Node, len(rows))
+	for i := range rows {
+		n, err := rows[i].toDomain()
+		if err != nil {
+			return nil, 0, err
+		}
+		out[i] = n
+	}
+	return out, total, nil
+}
+
 func (r *nodeRepo) ListEnabled(ctx context.Context) ([]*domain.Node, error) {
 	var rows []nodeRow
 	err := r.db.WithContext(ctx).

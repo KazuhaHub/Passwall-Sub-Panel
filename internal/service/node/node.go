@@ -122,6 +122,10 @@ func (s *Service) List(ctx context.Context) ([]*domain.Node, error) {
 	return s.nodes.List(ctx)
 }
 
+func (s *Service) ListPaged(ctx context.Context, p ports.Pagination) ([]*domain.Node, int64, error) {
+	return s.nodes.ListPaged(ctx, p)
+}
+
 // ---- Create flows ----
 
 // ---- Separator CRUD --------------------------------------------------------
@@ -142,6 +146,13 @@ func (s *Service) ListSeparators(ctx context.Context) ([]*domain.SeparatorEntry,
 		return nil, nil
 	}
 	return s.separators.List(ctx)
+}
+
+func (s *Service) ListSeparatorsPaged(ctx context.Context, p ports.Pagination) ([]*domain.SeparatorEntry, int64, error) {
+	if s.separators == nil {
+		return nil, 0, nil
+	}
+	return s.separators.ListPaged(ctx, p)
 }
 
 func (s *Service) CreateSeparator(ctx context.Context, e *domain.SeparatorEntry) error {

@@ -150,21 +150,19 @@ type createUserResponse struct {
 // ---- Handlers ----
 
 func (h *AdminUserHandler) List(c *gin.Context) {
-	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
-	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "50"))
-	// Clamp to sane bounds: a caller-supplied negative/zero or absurdly large
-	// page_size would otherwise drive a huge allocation / DB scan.
-	if page < 1 {
-		page = 1
-	}
-	if pageSize < 1 {
-		pageSize = 50
-	} else if pageSize > 200 {
-		pageSize = 200
+	p := parsePagination(c)
+	// Sensible default ordering: newest first. Frontend overrides via
+	// sort_by/sort_dir on column-header click. Keep the historical
+	// behavior for callers that don't pass either.
+	if p.SortBy == "" {
+		p.SortBy = "id"
+		p.SortDir = "desc"
 	}
 	filter := ports.UserFilter{
-		Pagination: ports.Pagination{Page: page, PageSize: pageSize},
-		Search:     c.Query("search"),
+		Pagination: p,
+		// `search` retained as legacy alias so older callers / bookmarked
+		// URLs keep working; new code sends `keyword` directly.
+		Search: firstNonEmpty(p.Keyword, c.Query("search")),
 	}
 	if v := c.Query("enabled"); v != "" {
 		enabled := v == "true" || v == "1"
@@ -184,7 +182,7 @@ func (h *AdminUserHandler) List(c *gin.Context) {
 	for i, u := range items {
 		out[i] = h.toDTO(c.Request, u)
 	}
-	c.JSON(http.StatusOK, gin.H{"items": out, "total": total})
+	c.JSON(http.StatusOK, pagedEnvelope(out, total, p))
 }
 
 func (h *AdminUserHandler) Get(c *gin.Context) {

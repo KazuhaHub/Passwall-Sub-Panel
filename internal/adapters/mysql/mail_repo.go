@@ -167,11 +167,13 @@ func (r *mailRepo) ListSent(ctx context.Context, filter ports.EmailLogFilter) ([
 		Select("mail_sent.*, users.upn as user_upn, users.display_name as user_display")
 
 	var rows []mailSentWithUser
+	if filter.SortDir == "" {
+		filter.SortDir = "desc"
+	}
 	// mail_sent.id DESC breaks ties on the non-unique sent_at so pagination is
 	// stable on Postgres (mails sent in one pass share a near-identical sent_at).
-	if err := q.Order("mail_sent.sent_at DESC, mail_sent.id DESC").
-		Limit(filter.PageSize).
-		Offset((filter.Page - 1) * filter.PageSize).
+	if err := applyPagination(q, filter.Pagination, mailSentSortAllowlist, "mail_sent.sent_at").
+		Order("mail_sent.id DESC").
 		Find(&rows).Error; err != nil {
 		return nil, 0, err
 	}
@@ -190,6 +192,13 @@ func (r *mailRepo) ListSent(ctx context.Context, filter ports.EmailLogFilter) ([
 		}
 	}
 	return out, total, nil
+}
+
+var mailSentSortAllowlist = map[string]string{
+	"sent_at":  "mail_sent.sent_at",
+	"id":       "mail_sent.id",
+	"kind":     "mail_sent.kind",
+	"to_email": "mail_sent.to_email",
 }
 
 func (r *mailRepo) ClearSent(ctx context.Context) error {

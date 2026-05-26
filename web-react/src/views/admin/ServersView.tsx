@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent, type MouseEvent } from 'react'
+import { useCallback, useEffect, useState, type FormEvent, type MouseEvent } from 'react'
 import {
   Badge,
   Box,
@@ -54,6 +54,9 @@ import {
 } from '@/api/servers'
 import { confirm } from '@/components/ConfirmHost'
 import { pushSnack } from '@/components/SnackbarHost'
+import { PagedTableFooter } from '@/components/PagedTableFooter'
+import { SortableTableCell } from '@/components/SortableTableCell'
+import { usePaged } from '@/hooks/usePaged'
 import {
   type FieldErrors,
   firstError,
@@ -98,9 +101,7 @@ export default function ServersView() {
   const md = theme.palette.md
   const { t } = useTranslation(['admin', 'common'])
 
-  const [items, setItems] = useState<Server[]>([])
   const [search, setSearch] = useState('')
-  const [loading, setLoading] = useState(false)
   const [probeStates, setProbeStates] = useState<Record<number, ProbeState>>({})
   const [selected, setSelected] = useState<Set<number>>(new Set())
   const [batchBusy, setBatchBusy] = useState<'test' | 'delete' | 'upgrade_xray' | ''>('')
@@ -128,38 +129,44 @@ export default function ServersView() {
   type ServerField = 'name' | 'url' | 'api_token' | 'password'
   const [fieldErr, setFieldErr] = useState<FieldErrors<ServerField>>({})
 
-  // Free-text filter on name / URL. Small list, so a plain case-insensitive
-  // substring match is enough. Remark is intentionally excluded — it's a
-  // human-readable note, not an identifier worth searching on.
-  const filteredItems = useMemo(() => {
-    const q = search.trim().toLowerCase()
-    if (!q) return items
-    return items.filter(s =>
-      s.name.toLowerCase().includes(q) ||
-      s.url.toLowerCase().includes(q),
-    )
-  }, [items, search])
+  // Paged server list. Substring search now lives on the backend
+  // (matches name/url/remark/username case-insensitively).
+  const fetchServers = useCallback(
+    async (req: { page: number; page_size: number; keyword: string; sort_by: string; sort_dir: 'asc' | 'desc' }, signal: AbortSignal) => {
+      const res = await listServers({
+        page: req.page,
+        page_size: req.page_size,
+        keyword: req.keyword || undefined,
+        sort_by: req.sort_by || undefined,
+        sort_dir: req.sort_dir,
+      }, signal)
+      return {
+        items: res.items,
+        total: res.total,
+        page: res.page ?? req.page,
+        page_size: res.page_size ?? req.page_size,
+      }
+    },
+    [],
+  )
+  const paged = usePaged<Server>(fetchServers, { defaultSortBy: 'id', defaultSortDir: 'asc' })
+  const { items, total, loading, page, pageSize, sortBy, sortDir, setPage, setPageSize, setKeyword, setSort, refresh, mutateItems } = paged
+  // Each time the visible page changes, fire-and-forget probe every
+  // row so the status badge populates.
+  useEffect(() => {
+    void Promise.allSettled(items.map(s => probeServer(s)))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items])
+  // Reset selection on page change — selection state is per-id and
+  // shouldn't carry batch actions onto rows admin can no longer see.
+  useEffect(() => { setSelected(new Set()) }, [items])
 
   const selectedCount = selected.size
-  // Header checkbox reflects the *visible* (filtered) rows so it can't claim
-  // "all selected" while filtered-out rows sit unselected behind the search.
-  const allChecked = filteredItems.length > 0 && filteredItems.every(s => selected.has(s.id))
-  const someChecked = filteredItems.some(s => selected.has(s.id)) && !allChecked
+  // Header checkbox reflects the *visible* page only.
+  const allChecked = items.length > 0 && items.every(s => selected.has(s.id))
+  const someChecked = items.some(s => selected.has(s.id)) && !allChecked
 
-  useEffect(() => { void load() }, [])
-
-  async function load() {
-    setLoading(true)
-    try {
-      const list = await listServers()
-      setItems(list)
-      setSelected(new Set())
-      // Fire-and-forget probe of all items.
-      void Promise.allSettled(list.map(s => probeServer(s)))
-    } finally {
-      setLoading(false)
-    }
-  }
+  function load() { refresh() }
 
   function stateFor(s: Server): ProbeState {
     return probeStates[s.id] ?? { status: credentialsConfigured(s) ? 'unknown' : 'unconfigured' }
@@ -181,7 +188,7 @@ export default function ServersView() {
         // top-of-page compat banner reflect the fresh probe without a
         // full list reload.
         if (r.panel_version !== undefined || r.compat_status) {
-          setItems(prev => prev.map(it => it.id === s.id ? {
+          mutateItems(prev => prev.map(it => it.id === s.id ? {
             ...it,
             panel_version: r.panel_version ?? it.panel_version,
             xray_version: r.xray_version ?? it.xray_version,
@@ -526,24 +533,24 @@ export default function ServersView() {
       const results = await Promise.allSettled(rows.map(r => deleteServer(r.id)))
       const okIds = rows.filter((_, i) => results[i].status === 'fulfilled').map(r => r.id)
       const failed = rows.length - okIds.length
-      setItems(prev => prev.filter(s => !okIds.includes(s.id)))
       setSelected(new Set())
       if (failed > 0) {
         pushSnack(t('admin:servers.toast.batch_partial', { ok: okIds.length, fail: failed }), 'warning')
       } else {
         pushSnack(t('admin:servers.toast.batch_deleted', { count: okIds.length }), 'success')
       }
+      refresh()
     } finally {
       setBatchBusy('')
     }
   }
 
   function toggleAll(checked: boolean) {
-    // Only flip the currently-visible rows; preserve selection of rows
-    // hidden by the active search filter.
+    // Only flips the currently-visible page; selection on other pages
+    // (preserved on page change) is not affected.
     setSelected(prev => {
       const next = new Set(prev)
-      filteredItems.forEach(s => { if (checked) next.add(s.id); else next.delete(s.id) })
+      items.forEach(s => { if (checked) next.add(s.id); else next.delete(s.id) })
       return next
     })
   }
@@ -626,14 +633,11 @@ export default function ServersView() {
   // visual treatment (error vs warning container) reinforces the
   // distinction. "unknown" stays out — usually "never probed" or a
   // transient probe failure, not a real compat issue.
-  const panelsTooOld = useMemo(
-    () => items.filter(s => s.compat_status === 'too_old'),
-    [items],
-  )
-  const panelsUntested = useMemo(
-    () => items.filter(s => s.compat_status === 'untested'),
-    [items],
-  )
+  // Compat banners filter on the current page only — surfacing rows
+  // from invisible pages would be misleading. Banners only fire when
+  // the admin's current view contains an offending row.
+  const panelsTooOld = items.filter(s => s.compat_status === 'too_old')
+  const panelsUntested = items.filter(s => s.compat_status === 'untested')
   // Reused for both banners — render "name (vX.Y.Z)" joined with 、
   // so admin can see exactly which panels triggered the warning without
   // a separate hover.
@@ -799,12 +803,15 @@ export default function ServersView() {
         </Box>
       )}
 
-      {/* Search */}
-      <Box sx={{ mt: 2 }}>
+      {/* Search — Enter to commit so admin can type without firing a
+          request per keystroke. */}
+      <Box component="form" onSubmit={(e: FormEvent) => { e.preventDefault(); setKeyword(search) }}
+        sx={{ mt: 2 }}>
         <TextField
           size="small"
           value={search}
           onChange={e => setSearch(e.target.value)}
+          onBlur={() => setKeyword(search)}
           placeholder={t('admin:servers.search_placeholder', { defaultValue: '搜索名称 / URL' })}
           sx={{ width: 320, maxWidth: '100%' }}
           InputProps={{
@@ -830,10 +837,16 @@ export default function ServersView() {
                     onChange={(_, c) => toggleAll(c)}
                   />
                 </TableCell>
-                <TableCell>{t('admin:servers.table.name')}</TableCell>
-                <TableCell>{t('admin:servers.table.url')}</TableCell>
+                <SortableTableCell column="name" activeColumn={sortBy} activeDir={sortDir} onSort={setSort}>
+                  {t('admin:servers.table.name')}
+                </SortableTableCell>
+                <SortableTableCell column="url" activeColumn={sortBy} activeDir={sortDir} onSort={setSort}>
+                  {t('admin:servers.table.url')}
+                </SortableTableCell>
                 <TableCell>{t('admin:servers.table.status')}</TableCell>
-                <TableCell>{t('admin:servers.table.version', { defaultValue: '版本' })}</TableCell>
+                <SortableTableCell column="panel_version" activeColumn={sortBy} activeDir={sortDir} onSort={setSort}>
+                  {t('admin:servers.table.version', { defaultValue: '版本' })}
+                </SortableTableCell>
                 <TableCell>{t('admin:servers.table.remark')}</TableCell>
                 <TableCell align="right">{t('admin:servers.table.actions')}</TableCell>
               </TableRow>
@@ -849,12 +862,7 @@ export default function ServersView() {
                   —
                 </TableCell></TableRow>
               )}
-              {!loading && items.length > 0 && filteredItems.length === 0 && (
-                <TableRow><TableCell colSpan={7} sx={{ textAlign: 'center', py: 6, color: md.onSurfaceVariant }}>
-                  {t('admin:servers.no_match', { defaultValue: '没有匹配的服务器' })}
-                </TableCell></TableRow>
-              )}
-              {filteredItems.map(s => (
+              {items.map(s => (
                 <TableRow
                   key={s.id}
                   hover
@@ -939,6 +947,10 @@ export default function ServersView() {
             </TableBody>
           </Table>
         </TableContainer>
+        <PagedTableFooter
+          total={total} page={page} pageSize={pageSize}
+          onPageChange={setPage} onPageSizeChange={setPageSize}
+        />
       </Card>
 
       {/* Per-row kebab menu — hosts destructive remote-upgrade actions

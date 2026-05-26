@@ -17,9 +17,31 @@ import (
 
 // ---- Common filter types ----
 
+// Pagination is the common slice + sort + keyword parameters carried by
+// every list endpoint. Embedded into per-resource Filter structs so each
+// repo can layer its own typed predicates (Role, Status, etc.) on top
+// without redefining the slice/sort fields. Empty values mean "no
+// constraint" — SortBy="" defers to each repo's default order
+// (typically id ASC or captured_at DESC). SortDir is lower-case
+// "asc"/"desc"; any other value is treated as "asc".
+//
+// PageSize <= 0 means "no slice; return everything within the keyword
+// + sort scope" — used by internal callers (reconcile, traffic poll)
+// that want every row. Admin API handlers always clamp to a finite
+// page_size before constructing the filter, so the unbounded path is
+// never reachable through HTTP.
 type Pagination struct {
 	Page     int
 	PageSize int
+	// Keyword is a case-insensitive substring matched per repo. Each
+	// repo's implementation documents which columns participate. Empty
+	// = no filter.
+	Keyword string
+	// SortBy names a column or virtual sort key the repo recognizes.
+	// Unrecognized values fall back to the repo's default order so a
+	// stale frontend can't force an "ORDER BY <admin input>" injection.
+	SortBy  string
+	SortDir string // "asc" | "desc"
 }
 
 type UserFilter struct {
@@ -117,7 +139,15 @@ type GroupRepo interface {
 	Delete(ctx context.Context, id int64) error
 	GetByID(ctx context.Context, id int64) (*domain.Group, error)
 	GetBySlug(ctx context.Context, slug string) (*domain.Group, error)
+	// List returns every group unordered-but-stable (typically id ASC).
+	// Kept for the many internal callers that need the full set —
+	// render, group-aware reconcile, etc. Admin API uses ListPaged.
 	List(ctx context.Context) ([]*domain.Group, error)
+	// ListPaged is the admin-API entry point: paged + keyword + sort.
+	// Keyword matches slug / name (case-insensitive substring).
+	// SortBy recognizes "id" / "name" / "slug" / "created_at"; anything
+	// else falls back to "id".
+	ListPaged(ctx context.Context, p Pagination) (items []*domain.Group, total int64, err error)
 	CountMembers(ctx context.Context, id int64) (int64, error)
 }
 
@@ -148,6 +178,11 @@ type NodeRepo interface {
 	GetByPanelInbound(ctx context.Context, panelID int64, inboundID int) (*domain.Node, error)
 	List(ctx context.Context) ([]*domain.Node, error)
 	ListEnabled(ctx context.Context) ([]*domain.Node, error)
+	// ListPaged is the admin-API entry point. Keyword matches
+	// display_name / server_address / region / one of the tags (case-
+	// insensitive substring). SortBy recognizes "id" / "display_name" /
+	// "sort_order" / "created_at" / "panel_id"; default "sort_order".
+	ListPaged(ctx context.Context, p Pagination) (items []*domain.Node, total int64, err error)
 }
 
 // NodeSortUpdate is one (node_id, sort_order) pair for BatchUpdateSortOrder.
@@ -167,6 +202,10 @@ type SeparatorRepo interface {
 	Delete(ctx context.Context, id int64) error
 	GetByID(ctx context.Context, id int64) (*domain.SeparatorEntry, error)
 	List(ctx context.Context) ([]*domain.SeparatorEntry, error)
+	// ListPaged is the admin-API entry point. Keyword matches
+	// display_name; SortBy recognizes "id" / "display_name" /
+	// "sort_order" / "created_at"; default "sort_order".
+	ListPaged(ctx context.Context, p Pagination) (items []*domain.SeparatorEntry, total int64, err error)
 	// ListEnabled is the render-time hot path: returns rows with
 	// enabled=true sorted by sort_order ascending. The render layer
 	// filters per-group on top via SeparatorEntry.VisibleForNodes.
@@ -303,6 +342,9 @@ type SyncTaskRepo interface {
 
 type RuleSetRepo interface {
 	List(ctx context.Context) ([]*domain.RuleSet, error)
+	// ListPaged is the admin-API entry point. Keyword matches slug /
+	// name; SortBy recognizes "slug" / "name" / "sort"; default "sort".
+	ListPaged(ctx context.Context, p Pagination) (items []*domain.RuleSet, total int64, err error)
 	GetBySlug(ctx context.Context, slug string) (*domain.RuleSet, error)
 	Save(ctx context.Context, r *domain.RuleSet) error
 	Delete(ctx context.Context, slug string) error
@@ -310,6 +352,10 @@ type RuleSetRepo interface {
 
 type TemplateRepo interface {
 	List(ctx context.Context) ([]*domain.Template, error)
+	// ListPaged is the admin-API entry point. Keyword matches slug /
+	// name / client_type; SortBy recognizes "slug" / "name" /
+	// "client_type"; default "slug".
+	ListPaged(ctx context.Context, p Pagination) (items []*domain.Template, total int64, err error)
 	GetBySlug(ctx context.Context, slug string) (*domain.Template, error)
 	GetDefault(ctx context.Context, clientType domain.ClientType) (*domain.Template, error)
 	Save(ctx context.Context, t *domain.Template) error
@@ -318,6 +364,10 @@ type TemplateRepo interface {
 
 type XUIPanelRepo interface {
 	List(ctx context.Context) ([]*domain.XUIPanel, error)
+	// ListPaged is the admin-API entry point. Keyword matches name /
+	// url / remark / username; SortBy recognizes "id" / "name" /
+	// "url" / "panel_version" / "created_at"; default "id".
+	ListPaged(ctx context.Context, p Pagination) (items []*domain.XUIPanel, total int64, err error)
 	GetByID(ctx context.Context, id int64) (*domain.XUIPanel, error)
 	GetByName(ctx context.Context, name string) (*domain.XUIPanel, error)
 	Save(ctx context.Context, panel *domain.XUIPanel) error

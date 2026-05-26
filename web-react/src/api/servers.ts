@@ -65,9 +65,19 @@ export interface TestResult {
   update_available?: boolean
 }
 
-export async function listServers() {
-  const { data } = await client.get<{ items: Server[] }>('/admin/servers')
-  return data.items
+export interface ServerListParams {
+  page?: number
+  page_size?: number
+  keyword?: string
+  sort_by?: string
+  sort_dir?: 'asc' | 'desc'
+}
+
+export async function listServers(params: ServerListParams = {}, signal?: AbortSignal) {
+  const { data } = await client.get<{ items: Server[]; total: number; page?: number; page_size?: number }>(
+    '/admin/servers', { params, signal },
+  )
+  return data
 }
 
 export async function createServer(req: CreateServerRequest) {

@@ -28,11 +28,10 @@ func NewAdminEmailLogHandler(repo ports.MailRepo, settings ports.SettingsRepo) *
 }
 
 func (h *AdminEmailLogHandler) List(c *gin.Context) {
-	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
-	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "50"))
+	p := parsePagination(c)
 	filter := ports.EmailLogFilter{
-		Pagination: ports.Pagination{Page: page, PageSize: pageSize},
-		Search:     c.Query("search"),
+		Pagination: p,
+		Search:     firstNonEmpty(p.Keyword, c.Query("search")),
 	}
 	if v := c.Query("user_id"); v != "" {
 		if id, err := strconv.ParseInt(v, 10, 64); err == nil {
@@ -54,7 +53,7 @@ func (h *AdminEmailLogHandler) List(c *gin.Context) {
 		respondError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"items": items, "total": total})
+	c.JSON(http.StatusOK, pagedEnvelope(items, total, p))
 }
 
 func (h *AdminEmailLogHandler) Clear(c *gin.Context) {

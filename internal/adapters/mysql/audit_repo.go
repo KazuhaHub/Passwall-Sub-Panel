@@ -57,19 +57,19 @@ func (r *auditRepo) List(ctx context.Context, filter ports.AuditFilter) ([]*doma
 	if err := q.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
-	if filter.PageSize <= 0 {
-		filter.PageSize = 50
+	// `at` is non-unique (admin actions can land within the same ms on a
+	// busy panel), so applyPagination's single-column ORDER BY would let
+	// rows shift between pages on equal-key bursts. Pre-pin "at, id" as
+	// the user's primary intent, then apply pagination on top.
+	if filter.SortBy == "" {
+		filter.SortBy = "at"
 	}
-	if filter.Page < 1 {
-		filter.Page = 1
+	if filter.SortDir == "" {
+		filter.SortDir = "desc"
 	}
-	// id DESC is a deterministic tiebreaker: `at` is a non-unique timestamp,
-	// and Postgres gives no stable order for equal-key rows across LIMIT/OFFSET
-	// pages (so a burst of same-`at` entries could repeat/skip while paging).
-	q = q.Order("at DESC, id DESC").Limit(filter.PageSize).Offset((filter.Page - 1) * filter.PageSize)
 
 	var rows []auditRow
-	if err := q.Find(&rows).Error; err != nil {
+	if err := applyPagination(q, filter.Pagination, auditSortAllowlist, "at").Order("id DESC").Find(&rows).Error; err != nil {
 		return nil, 0, err
 	}
 	out := make([]*domain.AuditEntry, len(rows))
@@ -77,6 +77,13 @@ func (r *auditRepo) List(ctx context.Context, filter ports.AuditFilter) ([]*doma
 		out[i] = rows[i].toDomain()
 	}
 	return out, total, nil
+}
+
+var auditSortAllowlist = map[string]string{
+	"at":     "at",
+	"id":     "id",
+	"actor":  "actor",
+	"action": "action",
 }
 
 func (r *auditRepo) Clear(ctx context.Context) error {

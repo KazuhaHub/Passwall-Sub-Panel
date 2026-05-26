@@ -37,6 +37,9 @@ func (r *fakeNodeRepo) GetByPanelInbound(ctx context.Context, panelID int64, inb
 }
 func (r *fakeNodeRepo) List(ctx context.Context) ([]*domain.Node, error)        { return nil, nil }
 func (r *fakeNodeRepo) ListEnabled(ctx context.Context) ([]*domain.Node, error) { return nil, nil }
+func (r *fakeNodeRepo) ListPaged(ctx context.Context, _ ports.Pagination) ([]*domain.Node, int64, error) {
+	return nil, 0, nil
+}
 
 func newReorderSvc(repo ports.NodeRepo) *Service {
 	return &Service{nodes: repo}
@@ -140,6 +143,9 @@ func (r *captureSeparatorRepo) GetByID(context.Context, int64) (*domain.Separato
 }
 func (r *captureSeparatorRepo) List(context.Context) ([]*domain.SeparatorEntry, error) {
 	return nil, nil
+}
+func (r *captureSeparatorRepo) ListPaged(context.Context, ports.Pagination) ([]*domain.SeparatorEntry, int64, error) {
+	return nil, 0, nil
 }
 func (r *captureSeparatorRepo) ListEnabled(context.Context) ([]*domain.SeparatorEntry, error) {
 	return nil, nil

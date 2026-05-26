@@ -789,6 +789,13 @@ func (r *fakeNodeRepo) List(ctx context.Context) ([]*domain.Node, error) {
 func (r *fakeNodeRepo) ListEnabled(ctx context.Context) ([]*domain.Node, error) {
 	return r.List(ctx)
 }
+func (r *fakeNodeRepo) ListPaged(ctx context.Context, _ ports.Pagination) ([]*domain.Node, int64, error) {
+	items, err := r.List(ctx)
+	if err != nil {
+		return nil, 0, err
+	}
+	return items, int64(len(items)), nil
+}
 func (r *fakeNodeRepo) BatchUpdateSortOrder(ctx context.Context, updates []ports.NodeSortUpdate) error {
 	return nil
 }

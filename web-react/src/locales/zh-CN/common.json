@@ -19,6 +19,10 @@
   "search": {
     "placeholder": "搜索…"
   },
+  "pagination": {
+    "rows_per_page": "每页：",
+    "range": "{{from}}–{{to}} / 共 {{count}}"
+  },
   "placeholder": {
     "title": "页面待迁移",
     "body": "此页面尚未从 Vue 版本迁移到 React + MUI。当前路径："

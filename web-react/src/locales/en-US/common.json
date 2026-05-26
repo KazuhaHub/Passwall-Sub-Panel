@@ -19,6 +19,10 @@
   "search": {
     "placeholder": "Search…"
   },
+  "pagination": {
+    "rows_per_page": "Per page:",
+    "range": "{{from}}–{{to}} of {{count}}"
+  },
   "placeholder": {
     "title": "Page not yet migrated",
     "body": "This page hasn't been moved from the Vue version to React + MUI yet. Current path:"

@@ -232,7 +232,10 @@ export default function TrafficView() {
   }
 
   async function loadNodes() {
-    try { setNodes(await listNodes()) } catch { /* toasted by client */ }
+    try {
+      const res = await listNodes({ page: 1, page_size: 500 })
+      setNodes(res.items)
+    } catch { /* toasted by client */ }
   }
 
   async function loadHistory() {

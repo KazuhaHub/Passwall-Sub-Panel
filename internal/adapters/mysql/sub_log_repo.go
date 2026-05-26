@@ -28,12 +28,29 @@ func (r *subLogRepo) Insert(ctx context.Context, l *domain.SubLog) error {
 	return nil
 }
 
+// subLogSortAllowlist maps API names to the joined-table column names
+// the query needs. The "sub_logs." prefix is required because every
+// query carries a LEFT JOIN users — a bare "accessed_at" would be
+// ambiguous on Postgres.
+var subLogSortAllowlist = map[string]string{
+	"accessed_at": "sub_logs.accessed_at",
+	"id":          "sub_logs.id",
+	"ip":          "sub_logs.ip",
+	"client_type": "sub_logs.client_type",
+}
+
 func (r *subLogRepo) List(ctx context.Context, filter ports.SubLogFilter) ([]*domain.SubLog, int64, error) {
 	if filter.PageSize <= 0 {
 		filter.PageSize = 50
 	}
 	if filter.Page < 1 {
 		filter.Page = 1
+	}
+	if filter.SortBy == "" {
+		filter.SortBy = "accessed_at"
+	}
+	if filter.SortDir == "" {
+		filter.SortDir = "desc"
 	}
 
 	// applyFilters constrains a sub_logs query, joined to users so search can
@@ -82,9 +99,8 @@ func (r *subLogRepo) List(ctx context.Context, filter ports.SubLogFilter) ([]*do
 	var rows []subLogWithUser
 	// sub_logs.id DESC breaks ties on the non-unique accessed_at so pagination
 	// is stable on Postgres (equal-timestamp rows otherwise reorder per page).
-	if err := q.Order("sub_logs.accessed_at DESC, sub_logs.id DESC").
-		Limit(filter.PageSize).
-		Offset((filter.Page - 1) * filter.PageSize).
+	if err := applyPagination(q, filter.Pagination, subLogSortAllowlist, "sub_logs.accessed_at").
+		Order("sub_logs.id DESC").
 		Find(&rows).Error; err != nil {
 		return nil, 0, err
 	}

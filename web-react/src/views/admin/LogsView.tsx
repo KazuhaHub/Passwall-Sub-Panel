@@ -10,7 +10,6 @@ import {
   DialogTitle,
   IconButton,
   InputBase,
-  Pagination,
   Tab,
   Table,
   TableBody,
@@ -37,10 +36,23 @@ import { clearEmailLogs, getEmailLogs, purgeEmailLogs, type EmailLog } from '@/a
 import { getUISettings, putUISettings } from '@/api/settings'
 import { confirm } from '@/components/ConfirmHost'
 import { pushSnack } from '@/components/SnackbarHost'
+import { PagedTableFooter } from '@/components/PagedTableFooter'
 import { useTabParam } from '@/hooks/useTabParam'
 import { useSiteStore } from '@/stores/site'
 
-const PAGE_SIZE = 50
+// Initial page size pulled from the shared psp_page_size key so the
+// admin's "100/page" preference set on Users carries to the Logs tabs
+// too. Per-tab pageSize state below tracks runtime changes.
+function initialPageSize(): number {
+  try {
+    const raw = localStorage.getItem('psp_page_size')
+    const n = raw ? parseInt(raw, 10) : 25
+    return Number.isFinite(n) && n > 0 ? n : 25
+  } catch { return 25 }
+}
+function persistPageSize(n: number) {
+  try { localStorage.setItem('psp_page_size', String(n)) } catch { /* ignore */ }
+}
 
 // formatDualTz renders the timestamp in the panel timezone first (the
 // "system view" everything else in the panel reports against) with the
@@ -78,6 +90,8 @@ export default function LogsView() {
   const [subItems, setSubItems] = useState<SubLog[]>([])
   const [subTotal, setSubTotal] = useState(0)
   const [subPage, setSubPage] = useState(1)
+  const [subPageSize, setSubPageSize] = useState<number>(initialPageSize)
+  function setSubPageSizePersist(n: number) { setSubPageSize(n); persistPageSize(n); setSubPage(1) }
   const [subLoading, setSubLoading] = useState(false)
   const [subSearch, setSubSearch] = useState('')
   // appliedSearch is what loads/pagination key off; subSearch is just the live
@@ -115,6 +129,8 @@ export default function LogsView() {
   const [auditItems, setAuditItems] = useState<AuditEntry[]>([])
   const [auditTotal, setAuditTotal] = useState(0)
   const [auditPage, setAuditPage] = useState(1)
+  const [auditPageSize, setAuditPageSize] = useState<number>(initialPageSize)
+  function setAuditPageSizePersist(n: number) { setAuditPageSize(n); persistPageSize(n); setAuditPage(1) }
   const [auditLoading, setAuditLoading] = useState(false)
   const [auditSearch, setAuditSearch] = useState('')
   const [auditAppliedSearch, setAuditAppliedSearch] = useState('')
@@ -128,6 +144,8 @@ export default function LogsView() {
   const [emailItems, setEmailItems] = useState<EmailLog[]>([])
   const [emailTotal, setEmailTotal] = useState(0)
   const [emailPage, setEmailPage] = useState(1)
+  const [emailPageSize, setEmailPageSize] = useState<number>(initialPageSize)
+  function setEmailPageSizePersist(n: number) { setEmailPageSize(n); persistPageSize(n); setEmailPage(1) }
   const [emailLoading, setEmailLoading] = useState(false)
   const [emailSearch, setEmailSearch] = useState('')
   const [emailAppliedSearch, setEmailAppliedSearch] = useState('')
@@ -161,7 +179,11 @@ export default function LogsView() {
     else if (tab === 'audit') void loadAudit()
     else void loadEmail()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab, subPage, auditPage, emailPage, subAppliedSearch, auditAppliedSearch, emailAppliedSearch])
+  }, [tab,
+    subPage, subPageSize, subAppliedSearch,
+    auditPage, auditPageSize, auditAppliedSearch,
+    emailPage, emailPageSize, emailAppliedSearch,
+  ])
 
   // Last-wins guards: connecting Pagination / filter submit fires overlapping
   // loads within one tab; a slow earlier page must not overwrite the newer one.
@@ -173,7 +195,7 @@ export default function LogsView() {
     const seq = ++subSeq.current
     setSubLoading(true)
     try {
-      const res = await getSubLogs({ page: subPage, page_size: PAGE_SIZE, search: subAppliedSearch || undefined })
+      const res = await getSubLogs({ page: subPage, page_size: subPageSize, search: subAppliedSearch || undefined })
       if (seq !== subSeq.current) return
       setSubItems(res.items); setSubTotal(res.total)
     } finally { if (seq === subSeq.current) setSubLoading(false) }
@@ -184,7 +206,7 @@ export default function LogsView() {
     setAuditLoading(true)
     try {
       const res = await listAudit({
-        page: auditPage, page_size: PAGE_SIZE,
+        page: auditPage, page_size: auditPageSize,
         search: auditAppliedSearch || undefined,
       })
       if (seq !== auditSeq.current) return
@@ -234,7 +256,7 @@ export default function LogsView() {
     const seq = ++emailSeq.current
     setEmailLoading(true)
     try {
-      const res = await getEmailLogs({ page: emailPage, page_size: PAGE_SIZE, search: emailAppliedSearch || undefined })
+      const res = await getEmailLogs({ page: emailPage, page_size: emailPageSize, search: emailAppliedSearch || undefined })
       if (seq !== emailSeq.current) return
       setEmailItems(res.items); setEmailTotal(res.total)
     } finally { if (seq === emailSeq.current) setEmailLoading(false) }
@@ -258,10 +280,6 @@ export default function LogsView() {
     pushSnack(t('admin:logs.toast.purged', { count: r.deleted }), 'success')
     await loadEmail()
   }
-
-  const subPages = Math.max(1, Math.ceil(subTotal / PAGE_SIZE))
-  const auditPages = Math.max(1, Math.ceil(auditTotal / PAGE_SIZE))
-  const emailPages = Math.max(1, Math.ceil(emailTotal / PAGE_SIZE))
 
   return (
     <Box sx={{ p: 3 }}>
@@ -353,11 +371,10 @@ export default function LogsView() {
                 </TableBody>
               </Table>
             </TableContainer>
-            {subPages > 1 && (
-              <Box sx={{ display: 'flex', justifyContent: 'center', py: 2, borderTop: `1px solid ${md.outlineVariant}` }}>
-                <Pagination count={subPages} page={subPage} onChange={(_, p) => setSubPage(p)} shape="rounded" color="primary" />
-              </Box>
-            )}
+            <PagedTableFooter
+              total={subTotal} page={subPage} pageSize={subPageSize}
+              onPageChange={setSubPage} onPageSizeChange={setSubPageSizePersist}
+            />
           </Card>
         </>
       )}
@@ -419,11 +436,10 @@ export default function LogsView() {
                 </TableBody>
               </Table>
             </TableContainer>
-            {auditPages > 1 && (
-              <Box sx={{ display: 'flex', justifyContent: 'center', py: 2, borderTop: `1px solid ${md.outlineVariant}` }}>
-                <Pagination count={auditPages} page={auditPage} onChange={(_, p) => setAuditPage(p)} shape="rounded" color="primary" />
-              </Box>
-            )}
+            <PagedTableFooter
+              total={auditTotal} page={auditPage} pageSize={auditPageSize}
+              onPageChange={setAuditPage} onPageSizeChange={setAuditPageSizePersist}
+            />
           </Card>
         </>
       )}
@@ -508,11 +524,10 @@ export default function LogsView() {
                 </TableBody>
               </Table>
             </TableContainer>
-            {emailPages > 1 && (
-              <Box sx={{ display: 'flex', justifyContent: 'center', py: 2, borderTop: `1px solid ${md.outlineVariant}` }}>
-                <Pagination count={emailPages} page={emailPage} onChange={(_, p) => setEmailPage(p)} shape="rounded" color="primary" />
-              </Box>
-            )}
+            <PagedTableFooter
+              total={emailTotal} page={emailPage} pageSize={emailPageSize}
+              onPageChange={setEmailPage} onPageSizeChange={setEmailPageSizePersist}
+            />
           </Card>
         </>
       )}

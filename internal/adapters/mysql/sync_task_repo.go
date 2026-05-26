@@ -80,14 +80,11 @@ func (r *syncTaskRepo) List(ctx context.Context, filter ports.SyncTaskFilter) ([
 	if err := q.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
-	if filter.PageSize <= 0 {
-		filter.PageSize = 50
-	}
-	if filter.Page < 1 {
-		filter.Page = 1
+	if filter.SortDir == "" {
+		filter.SortDir = "desc"
 	}
 	var rows []syncTaskRow
-	if err := q.Order("id DESC").Limit(filter.PageSize).Offset((filter.Page - 1) * filter.PageSize).Find(&rows).Error; err != nil {
+	if err := applyPagination(q, filter.Pagination, syncTaskSortAllowlist, "id").Find(&rows).Error; err != nil {
 		return nil, 0, err
 	}
 	out := make([]*domain.SyncTask, len(rows))
@@ -95,6 +92,15 @@ func (r *syncTaskRepo) List(ctx context.Context, filter ports.SyncTaskFilter) ([
 		out[i] = rows[i].toDomain()
 	}
 	return out, total, nil
+}
+
+var syncTaskSortAllowlist = map[string]string{
+	"id":          "id",
+	"type":        "type",
+	"status":      "status",
+	"attempts":    "attempts",
+	"next_run_at": "next_run_at",
+	"created_at":  "created_at",
 }
 
 func (r *syncTaskRepo) ListDue(ctx context.Context, now time.Time, limit int) ([]*domain.SyncTask, error) {

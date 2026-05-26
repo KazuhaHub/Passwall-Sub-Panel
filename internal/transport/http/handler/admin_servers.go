@@ -92,16 +92,17 @@ type serverUpdateRequest struct {
 }
 
 func (h *AdminServersHandler) List(c *gin.Context) {
-	panels, err := h.repo.List(c.Request.Context())
+	p := parsePagination(c)
+	panels, total, err := h.repo.ListPaged(c.Request.Context(), p)
 	if err != nil {
 		respondError(c, err)
 		return
 	}
 	out := make([]serverDTO, len(panels))
-	for i, p := range panels {
-		out[i] = toServerDTO(p)
+	for i, panel := range panels {
+		out[i] = toServerDTO(panel)
 	}
-	c.JSON(http.StatusOK, gin.H{"items": out})
+	c.JSON(http.StatusOK, pagedEnvelope(out, total, p))
 }
 
 func (h *AdminServersHandler) Create(c *gin.Context) {

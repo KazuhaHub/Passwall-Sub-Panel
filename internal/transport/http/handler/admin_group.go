@@ -68,7 +68,8 @@ type updateLayoutRequest struct {
 // ---- Handlers ----
 
 func (h *AdminGroupHandler) List(c *gin.Context) {
-	groups, err := h.group.List(c.Request.Context())
+	p := parsePagination(c)
+	groups, total, err := h.group.ListPaged(c.Request.Context(), p)
 	if err != nil {
 		respondError(c, err)
 		return
@@ -80,7 +81,7 @@ func (h *AdminGroupHandler) List(c *gin.Context) {
 			out[i].Members = cnt
 		}
 	}
-	c.JSON(http.StatusOK, gin.H{"items": out})
+	c.JSON(http.StatusOK, pagedEnvelope(out, total, p))
 }
 
 func (h *AdminGroupHandler) Get(c *gin.Context) {

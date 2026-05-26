@@ -161,6 +161,12 @@ export interface UnmanagedInbound {
 export interface ListResponse<T> {
   items: T[]
   total: number
+  // page + page_size land in every paged response from v3.6.1; legacy
+  // callers that don't pass page params still get back these fields
+  // (defaulting to page=1, the backend-clamped page_size). Optional
+  // because not every caller cares to thread them through.
+  page?: number
+  page_size?: number
 }
 
 export interface TagFilter {

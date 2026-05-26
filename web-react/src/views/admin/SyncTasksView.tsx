@@ -11,7 +11,6 @@ import {
   DialogTitle,
   IconButton,
   MenuItem,
-  Pagination,
   Select,
   Table,
   TableBody,
@@ -42,8 +41,15 @@ import {
 import type { SyncTask, SyncTaskStatus, SyncTaskType } from '@/api/types'
 import { confirm } from '@/components/ConfirmHost'
 import { pushSnack } from '@/components/SnackbarHost'
+import { PagedTableFooter } from '@/components/PagedTableFooter'
 
-const PAGE_SIZE = 50
+function initialPageSize(): number {
+  try {
+    const raw = localStorage.getItem('psp_page_size')
+    const n = raw ? parseInt(raw, 10) : 25
+    return Number.isFinite(n) && n > 0 ? n : 25
+  } catch { return 25 }
+}
 
 const STATUSES: SyncTaskStatus[] = ['pending', 'running', 'succeeded', 'canceled']
 const TYPES: SyncTaskType[] = [
@@ -79,6 +85,12 @@ export default function SyncTasksView() {
   const [items, setItems] = useState<SyncTask[]>([])
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState<number>(initialPageSize)
+  function setPageSizePersist(n: number) {
+    setPageSize(n)
+    try { localStorage.setItem('psp_page_size', String(n)) } catch { /* ignore */ }
+    setPage(1)
+  }
   const [loading, setLoading] = useState(false)
   const [statusFilter, setStatusFilter] = useState<SyncTaskStatus | ''>('')
   const [typeFilter, setTypeFilter] = useState<SyncTaskType | ''>('')
@@ -88,17 +100,16 @@ export default function SyncTasksView() {
   const [detailOpen, setDetailOpen] = useState(false)
   const [detail, setDetail] = useState<SyncTask | null>(null)
 
-  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
   const pendingCount = useMemo(() => items.filter(r => statusOf(r) === 'pending').length, [items])
 
   useEffect(() => { void load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, statusFilter, typeFilter])
+  }, [page, pageSize, statusFilter, typeFilter])
 
   async function load() {
     setLoading(true)
     try {
-      const params: SyncTaskListParams = { page, page_size: PAGE_SIZE }
+      const params: SyncTaskListParams = { page, page_size: pageSize }
       if (statusFilter) params.status = statusFilter
       if (typeFilter) params.type = typeFilter
       const res = await listSyncTasks(params)
@@ -298,11 +309,10 @@ export default function SyncTasksView() {
             </TableBody>
           </Table>
         </TableContainer>
-        {totalPages > 1 && (
-          <Box sx={{ display: 'flex', justifyContent: 'center', py: 2, borderTop: `1px solid ${md.outlineVariant}` }}>
-            <Pagination count={totalPages} page={page} onChange={(_, p) => setPage(p)} shape="rounded" color="primary" />
-          </Box>
-        )}
+        <PagedTableFooter
+          total={total} page={page} pageSize={pageSize}
+          onPageChange={setPage} onPageSizeChange={setPageSizePersist}
+        />
       </Card>
 
       {/* Detail dialog */}

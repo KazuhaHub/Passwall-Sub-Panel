@@ -42,6 +42,7 @@ import { deleteTemplate, listTemplates, resetTemplate, saveTemplate, SEEDED_TEMP
 import { listRuleSets, type RuleSet } from '@/api/rules'
 import { confirm } from '@/components/ConfirmHost'
 import { pushSnack } from '@/components/SnackbarHost'
+import { PagedTableFooter } from '@/components/PagedTableFooter'
 
 const EMPTY: Template = {
   slug: '', name: '', client_type: 'mihomo', is_default: false, rule_sets: [], content: '',
@@ -106,7 +107,27 @@ export default function TemplatesView() {
   const [form, setForm] = useState<Template>(EMPTY)
   const [busy, setBusy] = useState(false)
 
-  const selectableSlugs = items.filter(i => !i.is_default).map(i => i.slug)
+  // Client-side pagination — template lists are small but consistent
+  // UX wants the same footer everywhere.
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState<number>(() => {
+    try {
+      const raw = localStorage.getItem('psp_page_size')
+      const n = raw ? parseInt(raw, 10) : 25
+      return Number.isFinite(n) && n > 0 ? n : 25
+    } catch { return 25 }
+  })
+  function changePageSize(n: number) {
+    setPageSize(n)
+    try { localStorage.setItem('psp_page_size', String(n)) } catch { /* ignore */ }
+    setPage(1)
+  }
+  const pagedItems = useMemo(
+    () => items.slice((page - 1) * pageSize, page * pageSize),
+    [items, page, pageSize],
+  )
+
+  const selectableSlugs = pagedItems.filter(i => !i.is_default).map(i => i.slug)
   const allChecked = selectableSlugs.length > 0 && selectableSlugs.every(s => selected.has(s))
   const someChecked = selected.size > 0 && !allChecked
 
@@ -118,7 +139,7 @@ export default function TemplatesView() {
     setLoading(true)
     try {
       const [tpls, rules] = await Promise.all([listTemplates(), listRuleSets()])
-      setItems(tpls); setRuleSets(rules); setSelected(new Set())
+      setItems(tpls.items); setRuleSets(rules.items); setSelected(new Set())
     } finally { setLoading(false) }
   }
 
@@ -326,7 +347,7 @@ export default function TemplatesView() {
               {!loading && items.length === 0 && (
                 <TableRow><TableCell colSpan={8} sx={{ textAlign: 'center', py: 6, color: md.onSurfaceVariant }}>—</TableCell></TableRow>
               )}
-              {items.map(tpl => (
+              {pagedItems.map(tpl => (
                 <TableRow key={tpl.slug} hover sx={{ '& td': { borderBottom: `1px solid ${md.outlineVariant}`, whiteSpace: 'nowrap' } }}>
                   <TableCell padding="checkbox">
                     <Checkbox checked={selected.has(tpl.slug)}
@@ -380,6 +401,10 @@ export default function TemplatesView() {
             </TableBody>
           </Table>
         </TableContainer>
+        <PagedTableFooter
+          total={items.length} page={page} pageSize={pageSize}
+          onPageChange={setPage} onPageSizeChange={changePageSize}
+        />
       </Card>
 
       {/* Create/Edit dialog */}

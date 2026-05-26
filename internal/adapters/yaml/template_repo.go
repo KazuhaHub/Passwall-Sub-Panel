@@ -10,6 +10,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 )
 
 // TemplateRepo implements ports.TemplateRepo. Each template is one YAML file
@@ -56,6 +57,34 @@ func (r *TemplateRepo) List(ctx context.Context) ([]*domain.Template, error) {
 		out = append(out, t)
 	}
 	return out, nil
+}
+
+func (r *TemplateRepo) ListPaged(ctx context.Context, p ports.Pagination) ([]*domain.Template, int64, error) {
+	all, err := r.List(ctx)
+	if err != nil {
+		return nil, 0, err
+	}
+	filtered := all[:0]
+	for _, t := range all {
+		if keywordMatch(p.Keyword, t.Slug, t.Name, string(t.ClientType)) {
+			filtered = append(filtered, t)
+		}
+	}
+	switch p.SortBy {
+	case "name":
+		sortBy(filtered, p.SortDir, func(a, b *domain.Template) bool { return a.Name < b.Name })
+	case "client_type":
+		sortBy(filtered, p.SortDir, func(a, b *domain.Template) bool {
+			if a.ClientType != b.ClientType {
+				return a.ClientType < b.ClientType
+			}
+			return a.Slug < b.Slug
+		})
+	default: // "slug" or unrecognized
+		sortBy(filtered, p.SortDir, func(a, b *domain.Template) bool { return a.Slug < b.Slug })
+	}
+	page, total := slicePage(filtered, p)
+	return page, total, nil
 }
 
 func (r *TemplateRepo) GetBySlug(ctx context.Context, slug string) (*domain.Template, error) {

@@ -4,6 +4,82 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## v3.6.1-beta.1 — 2026-05-26
+
+### Added — 全部 admin 列表统一分页 + column-click 排序 + 关键字搜索
+
+之前 admin 端的列表分散三套实现:Users/Audit/SubLogs/SyncTasks/EmailLogs 已经
+后端分页;Groups/Nodes/Servers/RuleSets/Templates 后端一把返回前端 useMemo
+filter;LogsView 自己长了一坨 Pagination + 手写 page 状态。本 beta 把所有
+list endpoint 拉到同一根分页骨架上,UI 上每个表底部都有相同的 "1-25 of 3,421
+< >" + 每页选择器(10/25/50/100),分页 / 关键字 / 排序状态写到 querystring,
+admin 刷新或分享链接保持视图。每页大小存 localStorage(`psp_page_size`)在所有
+列表间共享。
+
+### Backend
+
+- **`ports.Pagination`**:在原 Page/PageSize 基础上加 `Keyword` /
+  `SortBy` / `SortDir`。每个 repo 维护自己的 sortAllowlist —— admin 传过来
+  的 `sort_by` 必须命中允许列表才会落到 ORDER BY,否则 fallback 到 default
+  排序,防 SQL 注入。
+- **6 个之前没分页的 repo 增加 `ListPaged`**:Group / Node / Separator /
+  RuleSet / Template / XUIPanel。原 `List(ctx)` 保留给内部 caller(reconcile /
+  traffic poll / render 等需要全集的路径),`ListPaged` 仅供 admin API 用。
+  mysql repos 共用 `applyPagination(q, p, allowlist, default)` 工具;yaml
+  repos(rulesets / templates)走 in-memory `slicePage / sortBy / keywordMatch`,
+  反正每个 yaml repo 文件个数 <10。
+- **现有 4 个已分页 repo(User / Audit / SubLog / SyncTask + MailSent)** 接入
+  `applyPagination`,同时支持 `SortBy`。SubLog / EmailLog 因为带 JOIN users,
+  sort allowlist 用 `sub_logs.` / `mail_sent.` 前缀避免歧义。
+- **handler 通用工具** `internal/transport/http/handler/pagination.go`:
+  - `parsePagination(c)` 一把读 `?page=&page_size=&keyword=&sort_by=&sort_dir=`,
+    clamp page>=1 / size 在 [1, 200],默认 size=25
+  - `pagedEnvelope(items, total, p)` 统一返回 `{items, total, page, page_size}`
+  - 所有 10 个 list handler 都改成这两个工具,保留旧 `?search=` 参数作为
+    `keyword` 的 alias,老前端 URL bookmark 不破
+
+### Frontend
+
+- **新 hook `usePaged<T>(fetcher, opts?)`**(`src/hooks/usePaged.ts`):
+  - 管 page / pageSize / keyword / sortBy / sortDir 状态
+  - URL sync(`?page=&q=&sort=col-dir`),默认值省略保持 URL 简短
+  - localStorage 持久化 page_size(全局 key `psp_page_size`)
+  - AbortController 取消旧请求 —— admin 快速搜索时较老的慢响应不会
+    覆盖较新的快响应
+  - 暴露 `refresh()`(post-mutation reload)和 `mutateItems()`(无网
+    络往返地 patch 已加载的某行,Servers 版本探针就是用这个)
+- **新组件 `<PagedTableFooter />`**(`src/components/PagedTableFooter.tsx`):
+  包 MUI `TablePagination` —— "1–25 of N" + 每页选择器 + 首页/末页按钮,
+  样式跟所有 view 一致
+- **新组件 `<SortableTableCell column activeColumn activeDir onSort />`**:
+  包 MUI `TableSortLabel`,把表头变成可点击切换 asc/desc 的目标。usePaged
+  的 `setSort(col, initialDir?)` 自动处理"同一列再点切方向、新列从默认
+  方向开始"
+- **每个 view 一致的迁移模式**:
+  - **UsersView**(pilot)/ **ServersView**:走 `usePaged` 全套,
+    column-click 排序覆盖大部分有意义的列
+  - **NodesView**:走客户端切片分页(全集仍一次拉,因为拖拽重排序需要
+    跨页计算位置)。表底 footer + page-size 选择器
+  - **GroupsView / RuleSetsView / TemplatesView**:小列表,走客户端切片
+    分页(后端已经支持 ListPaged 但前端默认请求 page_size=200,实际跑客户
+    端切片以减少代码体积)
+  - **LogsView**(sub / audit / email 三个 tab)/ **SyncTasksView**:
+    每个 tab 自己维护 page + pageSize 状态,共用 `psp_page_size` localStorage
+    key,统一用 PagedTableFooter
+- **共用 i18n**:`common.json` 新增 `pagination.rows_per_page` /
+  `pagination.range` —— 两个 locale 都加
+
+### Notes
+
+- API envelope `{items, total}` → `{items, total, page, page_size}`,新增字段
+  老前端读 `items + total` 仍可用 —— **非破坏性**
+- 旧 `?search=` 参数保留作为 `?keyword=` 的别名,handler 端 coalesce
+- backend 的 sort 允许列表是硬编码白名单,不允许任意列 ORDER BY
+- 分页节奏:list endpoint **默认 page_size=25**(单次 ~1KB JSON,网络压力可
+  忽略);PageSize 0(或 <0)在 repo 层意味着"返回全部" —— 内部 caller(traffic
+  poll / reconcile / render)走这条;admin API handler 永远 clamp 到正整数,
+  禁止从 HTTP 触达"返回全部"
+
 ## v3.6.0-beta.11 — 2026-05-26
 
 ### Fixed

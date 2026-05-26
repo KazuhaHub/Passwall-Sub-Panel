@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent, type MouseEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type MouseEvent } from 'react'
 import {
   Autocomplete,
   Box,
@@ -17,7 +17,6 @@ import {
   ListItemText,
   Menu,
   MenuItem,
-  Pagination,
   Popover,
   Select,
   Table,
@@ -78,6 +77,9 @@ import { useCan } from '@/utils/permissions'
 import { useSiteStore } from '@/stores/site'
 import { confirm } from '@/components/ConfirmHost'
 import { pushSnack } from '@/components/SnackbarHost'
+import { PagedTableFooter } from '@/components/PagedTableFooter'
+import { SortableTableCell } from '@/components/SortableTableCell'
+import { usePaged } from '@/hooks/usePaged'
 import {
   type FieldErrors,
   firstError,
@@ -88,8 +90,6 @@ import {
   validatePassword,
   validateRequired,
 } from '@/utils/validators'
-
-const PAGE_SIZE = 50
 
 interface CreateForm {
   upn: string
@@ -220,14 +220,37 @@ export default function UsersView() {
   const canElevate = useCan('users.elevate')
   const canManageUser = (target: User) => canElevate || target.role === 'user'
 
-  const [items, setItems] = useState<User[]>([])
-  const [total, setTotal] = useState(0)
-  const [page, setPage] = useState(1)
+  // Local controlled value for the search input (committed to the
+  // hook's keyword on submit, so admin can type without firing a
+  // request per keystroke).
   const [search, setSearch] = useState('')
   const [groupFilter, setGroupFilter] = useState<number | ''>('')
   const [groups, setGroups] = useState<Group[]>([])
-  const [loading, setLoading] = useState(false)
   const [reconcileBusy, setReconcileBusy] = useState(false)
+  // Paged user list. The fetcher closes over groupFilter so changing
+  // the group filter triggers a re-fetch through the hook's normal
+  // dep tracking.
+  const fetchUsers = useCallback(
+    async (req: { page: number; page_size: number; keyword: string; sort_by: string; sort_dir: 'asc' | 'desc' }, signal: AbortSignal) => {
+      const res = await listUsers({
+        page: req.page,
+        page_size: req.page_size,
+        keyword: req.keyword || undefined,
+        sort_by: req.sort_by || undefined,
+        sort_dir: req.sort_dir,
+        group_id: groupFilter === '' ? undefined : groupFilter,
+      }, signal)
+      return {
+        items: res.items,
+        total: res.total,
+        page: res.page ?? req.page,
+        page_size: res.page_size ?? req.page_size,
+      }
+    },
+    [groupFilter],
+  )
+  const paged = usePaged<User>(fetchUsers, { defaultSortBy: 'id', defaultSortDir: 'desc' })
+  const { items, total, loading, page, pageSize, sortBy, sortDir, setPage, setPageSize, setKeyword, setSort, refresh } = paged
 
   const [selected, setSelected] = useState<Set<number>>(new Set())
   const [batchBusy, setBatchBusy] = useState<BatchKind>('')
@@ -292,7 +315,6 @@ export default function UsersView() {
   // /admin/traffic/top so each row can display "used / limit".
   const [usageMap, setUsageMap] = useState<Map<number, TrafficRow>>(new Map())
 
-  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
   const groupNameMap = useMemo(() => new Map(groups.map(g => [g.id, g.name])), [groups])
   const selectableIds = items.filter(canSelect).map(u => u.id)
   const allChecked = selectableIds.length > 0 && selectableIds.every(id => selected.has(id))
@@ -300,46 +322,32 @@ export default function UsersView() {
   const selectedRows = items.filter(u => selected.has(u.id))
 
   useEffect(() => { void loadGroups() }, [])
-  useEffect(() => { void load()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, groupFilter])
+  // Reset row selection whenever the visible page changes — selection
+  // state is per-id, but admin scrolling away from rows they had
+  // checked shouldn't carry the action forward.
+  useEffect(() => { setSelected(new Set()) }, [items])
+  // Best-effort fetch of per-user current-period usage. Re-fires each
+  // time the items list changes (any page / sort / search). loadSeq
+  // pins the usageMap to the most recent successful response so a slow
+  // earlier fetch can't pair stale usage with a newer page's rows.
+  const usageSeq = useRef(0)
+  useEffect(() => {
+    const seq = ++usageSeq.current
+    void topTraffic(1000)
+      .then(rows => { if (seq === usageSeq.current) setUsageMap(new Map(rows.map(r => [r.user_id, r]))) })
+      .catch(() => { /* table just won't show usage; not fatal */ })
+  }, [items])
 
   async function loadGroups() {
     try { const res = await listGroups(); setGroups(res.items) } catch { /* toast */ }
   }
 
-  // Last-wins guard: paging / group-filter / search submit can fire
-  // overlapping loads; a slow earlier one must not overwrite the newer page.
-  // Also gates the trailing usageMap fetch so it can't pair stale usage with a
-  // newer page's items.
-  const loadSeq = useRef(0)
+  // load() is the post-mutation reload entry (create / delete / batch
+  // edit etc). Delegates to usePaged.refresh so it re-runs the current
+  // query with the same page/sort/keyword.
+  function load() { refresh() }
 
-  async function load() {
-    const seq = ++loadSeq.current
-    setLoading(true)
-    try {
-      const res = await listUsers({
-        page, page_size: PAGE_SIZE,
-        search: search || undefined,
-        group_id: groupFilter === '' ? undefined : groupFilter,
-      })
-      if (seq !== loadSeq.current) return
-      setItems(res.items)
-      setTotal(res.total)
-      setSelected(new Set())
-      // Best-effort fetch of current-period usage for each user. The traffic
-      // top endpoint already iterates every user, so requesting a large limit
-      // gives us "used bytes" for everyone in one round-trip.
-      try {
-        const rows = await topTraffic(1000)
-        if (seq === loadSeq.current) setUsageMap(new Map(rows.map(r => [r.user_id, r])))
-      } catch { /* table just won't show usage; not fatal */ }
-    } finally {
-      if (seq === loadSeq.current) setLoading(false)
-    }
-  }
-
-  function onSearchSubmit(e: FormEvent) { e.preventDefault(); setPage(1); void load() }
+  function onSearchSubmit(e: FormEvent) { e.preventDefault(); setKeyword(search) }
 
   function toggleAll(checked: boolean) { setSelected(checked ? new Set(selectableIds) : new Set()) }
   function toggleOne(id: number, checked: boolean) {
@@ -507,9 +515,8 @@ export default function UsersView() {
     })
     if (!ok) return
     await deleteUser(u.id)
-    setItems(prev => prev.filter(x => x.id !== u.id))
-    setTotal(t => Math.max(0, t - 1))
     pushSnack(t('admin:users.toast.deleted'), 'success')
+    refresh()
   }
 
   // ---- Toggle enabled (single + batch) ----
@@ -632,11 +639,10 @@ export default function UsersView() {
       const results = await Promise.allSettled(rows.map(r => deleteUser(r.id)))
       const okIds = rows.filter((_, i) => results[i].status === 'fulfilled').map(r => r.id)
       const failed = rows.length - okIds.length
-      setItems(prev => prev.filter(x => !okIds.includes(x.id)))
-      setTotal(t => Math.max(0, t - okIds.length))
       setSelected(new Set())
       if (failed > 0) pushSnack(t('admin:users.batch.delete_partial', { ok: okIds.length, fail: failed }), 'warning')
       else pushSnack(t('admin:users.batch.deleted_count', { count: okIds.length }), 'success')
+      refresh()
     } finally { setBatchBusy('') }
   }
 
@@ -962,7 +968,7 @@ export default function UsersView() {
             sx={{ flex: 1, fontSize: 14, color: md.onSurface }} />
         </Box>
         <Select size="small" value={groupFilter} displayEmpty
-          onChange={e => { setGroupFilter(e.target.value as number | ''); setPage(1) }}
+          onChange={e => { setGroupFilter(e.target.value as number | '') }}
           sx={{ minWidth: 160, height: 40, '& .MuiSelect-select': { py: 1 } }}>
           <MenuItem value="">{t('admin:users.filter_group_all')}</MenuItem>
           {groups.map(g => <MenuItem key={g.id} value={g.id}>{g.name}</MenuItem>)}
@@ -1032,14 +1038,28 @@ export default function UsersView() {
                     onChange={(_, c) => toggleAll(c)}
                     disabled={selectableIds.length === 0} />
                 </TableCell>
-                <TableCell>{t('admin:users.table.upn')}</TableCell>
-                <TableCell>{t('admin:users.table.display_name')}</TableCell>
-                <TableCell>{t('admin:users.table.group')}</TableCell>
-                <TableCell>{t('admin:users.table.role')}</TableCell>
+                <SortableTableCell column="upn" activeColumn={sortBy} activeDir={sortDir} onSort={setSort}>
+                  {t('admin:users.table.upn')}
+                </SortableTableCell>
+                <SortableTableCell column="display_name" activeColumn={sortBy} activeDir={sortDir} onSort={setSort}>
+                  {t('admin:users.table.display_name')}
+                </SortableTableCell>
+                <SortableTableCell column="group_id" activeColumn={sortBy} activeDir={sortDir} onSort={setSort}>
+                  {t('admin:users.table.group')}
+                </SortableTableCell>
+                <SortableTableCell column="role" activeColumn={sortBy} activeDir={sortDir} onSort={setSort}>
+                  {t('admin:users.table.role')}
+                </SortableTableCell>
                 <TableCell>{t('admin:users.table.traffic')}</TableCell>
-                <TableCell>{t('admin:users.table.expire')}</TableCell>
-                <TableCell>{t('admin:users.table.status')}</TableCell>
-                <TableCell>{t('admin:users.table.last_online', { defaultValue: '最近活跃' })}</TableCell>
+                <SortableTableCell column="expire_at" activeColumn={sortBy} activeDir={sortDir} onSort={setSort}>
+                  {t('admin:users.table.expire')}
+                </SortableTableCell>
+                <SortableTableCell column="enabled" activeColumn={sortBy} activeDir={sortDir} onSort={setSort}>
+                  {t('admin:users.table.status')}
+                </SortableTableCell>
+                <SortableTableCell column="last_online_at" activeColumn={sortBy} activeDir={sortDir} onSort={setSort} initialDir="desc">
+                  {t('admin:users.table.last_online', { defaultValue: '最近活跃' })}
+                </SortableTableCell>
                 <TableCell align="right">{t('admin:users.table.actions')}</TableCell>
               </TableRow>
             </TableHead>
@@ -1109,11 +1129,10 @@ export default function UsersView() {
           </Table>
         </TableContainer>
 
-        {totalPages > 1 && (
-          <Box sx={{ display: 'flex', justifyContent: 'center', py: 2, borderTop: `1px solid ${md.outlineVariant}` }}>
-            <Pagination count={totalPages} page={page} onChange={(_, p) => setPage(p)} shape="rounded" color="primary" />
-          </Box>
-        )}
+        <PagedTableFooter
+          total={total} page={page} pageSize={pageSize}
+          onPageChange={setPage} onPageSizeChange={setPageSize}
+        />
       </Card>
 
       {/* Per-row More menu */}

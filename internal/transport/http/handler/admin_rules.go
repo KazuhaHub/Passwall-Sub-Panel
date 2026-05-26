@@ -31,7 +31,8 @@ type ruleSetDTO struct {
 }
 
 func (h *AdminRuleSetsHandler) List(c *gin.Context) {
-	items, err := h.repo.List(c.Request.Context())
+	p := parsePagination(c)
+	items, total, err := h.repo.ListPaged(c.Request.Context(), p)
 	if err != nil {
 		respondError(c, err)
 		return
@@ -45,7 +46,7 @@ func (h *AdminRuleSetsHandler) List(c *gin.Context) {
 			Content:         r.Content,
 		}
 	}
-	c.JSON(http.StatusOK, gin.H{"items": out})
+	c.JSON(http.StatusOK, pagedEnvelope(out, total, p))
 }
 
 func (h *AdminRuleSetsHandler) Get(c *gin.Context) {

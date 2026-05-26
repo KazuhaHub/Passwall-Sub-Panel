@@ -31,6 +31,10 @@ func (s *Service) List(ctx context.Context) ([]*domain.Group, error) {
 	return s.groups.List(ctx)
 }
 
+func (s *Service) ListPaged(ctx context.Context, p ports.Pagination) ([]*domain.Group, int64, error) {
+	return s.groups.ListPaged(ctx, p)
+}
+
 // CountMembers exposes the repo-level member count for display in the
 // admin UI without leaking the repo abstraction.
 func (s *Service) CountMembers(ctx context.Context, id int64) (int64, error) {

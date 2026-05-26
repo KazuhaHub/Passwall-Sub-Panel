@@ -11,6 +11,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 )
 
 // RuleSetRepo implements ports.RuleSetRepo. Each shared rule set is one YAML
@@ -62,6 +63,36 @@ func (r *RuleSetRepo) List(ctx context.Context) ([]*domain.RuleSet, error) {
 		return out[i].Slug < out[j].Slug
 	})
 	return out, nil
+}
+
+func (r *RuleSetRepo) ListPaged(ctx context.Context, p ports.Pagination) ([]*domain.RuleSet, int64, error) {
+	all, err := r.List(ctx)
+	if err != nil {
+		return nil, 0, err
+	}
+	// Filter by keyword (slug / name).
+	filtered := all[:0]
+	for _, rs := range all {
+		if keywordMatch(p.Keyword, rs.Slug, rs.Name) {
+			filtered = append(filtered, rs)
+		}
+	}
+	// Sort. Default "sort" mirrors the List() default ordering.
+	switch p.SortBy {
+	case "slug":
+		sortBy(filtered, p.SortDir, func(a, b *domain.RuleSet) bool { return a.Slug < b.Slug })
+	case "name":
+		sortBy(filtered, p.SortDir, func(a, b *domain.RuleSet) bool { return a.Name < b.Name })
+	default: // "sort" or unrecognized
+		sortBy(filtered, p.SortDir, func(a, b *domain.RuleSet) bool {
+			if a.Sort != b.Sort {
+				return a.Sort < b.Sort
+			}
+			return a.Slug < b.Slug
+		})
+	}
+	page, total := slicePage(filtered, p)
+	return page, total, nil
 }
 
 func (r *RuleSetRepo) GetBySlug(ctx context.Context, slug string) (*domain.RuleSet, error) {

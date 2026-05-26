@@ -68,9 +68,17 @@ export interface RealityKeypair {
   short_id: string
 }
 
-export async function listNodes() {
-  const { data } = await client.get<{ items: Node[] }>('/admin/nodes')
-  return data.items
+export interface NodeListParams {
+  page?: number
+  page_size?: number
+  keyword?: string
+  sort_by?: string
+  sort_dir?: 'asc' | 'desc'
+}
+
+export async function listNodes(params: NodeListParams = {}, signal?: AbortSignal): Promise<ListResponse<Node>> {
+  const { data } = await client.get<ListResponse<Node>>('/admin/nodes', { params, signal })
+  return data
 }
 
 export async function getNode(id: number) {
@@ -116,8 +124,14 @@ export interface SeparatorRequest {
   node_ids?: number[]
 }
 
-export async function listSeparators() {
-  const { data } = await client.get<{ items: Separator[] }>('/admin/nodes/separator')
+export async function listSeparators(): Promise<Separator[]> {
+  // Always loaded in full — typical fleets have a handful of separator
+  // entries that interleave into the node list by sort_order. Request a
+  // page_size large enough to cover any realistic count; the backend
+  // clamps to 200.
+  const { data } = await client.get<ListResponse<Separator>>(
+    '/admin/nodes/separator', { params: { page: 1, page_size: 200 } },
+  )
   return data.items
 }
 

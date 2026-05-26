@@ -2,7 +2,6 @@ package handler
 
 import (
 	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -21,13 +20,12 @@ func NewAdminAuditHandler(repo ports.AuditRepo) *AdminAuditHandler {
 }
 
 func (h *AdminAuditHandler) List(c *gin.Context) {
-	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
-	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "50"))
+	p := parsePagination(c)
 	filter := ports.AuditFilter{
-		Pagination: ports.Pagination{Page: page, PageSize: pageSize},
+		Pagination: p,
 		Actor:      c.Query("actor"),
 		Action:     c.Query("action"),
-		Search:     c.Query("search"),
+		Search:     firstNonEmpty(p.Keyword, c.Query("search")),
 	}
 	if v := c.Query("since"); v != "" {
 		if t, err := time.Parse(time.RFC3339, v); err == nil {
@@ -44,7 +42,7 @@ func (h *AdminAuditHandler) List(c *gin.Context) {
 		respondError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"items": items, "total": total})
+	c.JSON(http.StatusOK, pagedEnvelope(items, total, p))
 }
 
 func (h *AdminAuditHandler) Clear(c *gin.Context) {

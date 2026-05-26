@@ -1,8 +1,20 @@
 import { client } from './client'
 import type { Group, Layout, ListResponse, TagFilter } from './types'
 
-export async function listGroups() {
-  const { data } = await client.get<ListResponse<Group>>('/admin/groups')
+export interface GroupListParams {
+  page?: number
+  page_size?: number
+  keyword?: string
+  sort_by?: string
+  sort_dir?: 'asc' | 'desc'
+}
+
+export async function listGroups(params: GroupListParams = {}, signal?: AbortSignal) {
+  // Callers that don't pass page params want "everything visible" —
+  // small lists are the typical case. Default to a generous page_size
+  // that the backend will clamp to 200.
+  const merged = { page: 1, page_size: 200, ...params }
+  const { data } = await client.get<ListResponse<Group>>('/admin/groups', { params: merged, signal })
   return data
 }
 
