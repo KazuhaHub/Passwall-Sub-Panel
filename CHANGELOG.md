@@ -4,6 +4,72 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## v3.6.0-beta.7 — 2026-05-25
+
+### Changed (dynamic compat schema 升级到 v2 ── per-major 分文件 + 范围表达)
+
+针对 v3.6.0-beta.5 的 dynamic compat 设计,采纳两条 maintenance-friendly 改进:
+
+- **`docs/compat/xui-compat.json` 拆分成 per-major 文件** ── 旧的单文件随 PSP 版本
+  线性增长(每个 minor 加一行,迟早 50+ 行);新设计每个 PSP major 一个独立 JSON
+  文件(`docs/compat/v3.json` 服务所有 v3.x 部署,未来 `v4.json` 服务 v4.x,以此类推)。
+  - **每文件自然封顶**:一个 major 内 minor 数量有上限(~10),文件永远不会膨胀
+  - **maintainer 心智轻**:只 active 一个文件,其它 major 文件物理不动 / frozen
+  - **大版本切换零混淆**:发 v4 时只新建 `v4.json`,`v3.json` 自动停留在 v3 收尾状态;
+    跑 v3 的部署仍正常拉自己那个文件
+  - **prune 自动化**:老 major 不再 EOL 后整个文件可以从仓库删,跑老 major 的部署
+    fetch 失败 → CompatUnknown → admin force override 仍可用(graceful degradation)
+  - PSP 启动时:从 `version.Version` 抽 major(`v3.6.0-beta.7` → `3`)→ 拼 URL
+    `https://raw.githubusercontent.com/.../docs/compat/v3.json` → fetch
+  - 自校验:JSON 内 `major` 字段必须等于 PSP 自身 major,防 admin 不小心 push
+    错文件到错路径
+
+- **range 用 `psp_min` / `psp_max` 两个独立字段表达,支持 patch 级精度** ── 旧的
+  map key `"v3.6"` 隐式代表 "v3.6.x 全系列",语义靠 doc 解释;新设计 entries 数组,
+  每条 entry 用 `psp_min: "v3.6.0"` + `psp_max: "v3.6.99"` 显式两端点,支持
+  patch 级 / 跨 minor 区间(例:`v3.5.9-v3.6.1` 一个范围)。
+  - **JSON-schema 友好**:每个字段一个值,可以 JSON Schema 校验,无 string parser
+  - **无 `-beta.x` 歧义**:不需要切 `"v3.5.1-beta.5-v3.5.5"` 这种字符串(端点
+    规约只写 stable semver `vX.Y.Z`)
+  - **first-match-wins** 匹配语义:`entries` 数组顺序就是优先级,admin 把
+    narrower / 更新的 entry 放前面;broader baseline 兜底
+  - **闭区间**:`[psp_min, psp_max]` 含两端
+  - **PSP pre-release 归一化**:`v3.6.0-beta.7` 比对时丢 `-beta.7` 当 `v3.6.0`,
+    符合 admin 心智("beta 算属于那个 minor")
+
+- **新 JSON schema (v2)**:
+  ```json
+  {
+    "schema_version": 2,
+    "major": 3,
+    "updated_at": "2026-05-25",
+    "entries": [
+      { "psp_min": "v3.6.0", "psp_max": "v3.6.99",
+        "min_xui": "3.1.0", "max_tested_xui": "3.1.0", "notes": "..." }
+    ]
+  }
+  ```
+  跟 v1 不兼容,但反正只发了 beta.5 / beta.6,JSON 在仓库还没被实际用上,无迁移成本
+  ── 直接切。
+
+### Internal
+
+- `compat_remote.go` `remoteCompatPayload` map → slice;新 `pspMajor()` helper
+  抽 PSP major;新 `defaultURLForCurrentVersion()` 拼 per-major URL;
+  `lookupForPSPVersion` 改成遍历 entries + cmpSemver 区间比对(first-match-wins)。
+  约 60 行净改动。
+- `compat_test.go` `TestLookupForPSPVersion_RangeMatchAndFirstWins` 覆盖 11 条 case:
+  narrower 在前胜出 + 跨 minor 区间 + 上下界包含 + range 之间空隙 + pre-release
+  归一化 + dev/garbage edge。
+- `docs/3xui-compat.md` 加 "维护 SOP" 段落:何时改 / 改什么 + entries 数组语义 +
+  PSP 拉不到时的故障容错说明。
+
+### Migration
+
+- 删除 `docs/compat/xui-compat.json`,新建 `docs/compat/v3.json`
+- maintainer 以后改 v3.x 兼容数据只编辑 `v3.json` 的 `entries` 数组
+- 未来发 v4 时新建 `v4.json` 即可,无需再动 `v3.json`
+
 ## v3.6.0-beta.6 — 2026-05-25
 
 ### Fixed (v3.6 系列代码审计发现的 5 个 bug + 1 个 perf 优化)

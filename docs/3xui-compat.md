@@ -57,24 +57,51 @@ PSP `rawInbound` 这四个字段定义为 Go `string`,`json.Unmarshal` 一个 ob
 2. PSP 这边: 走 patch 版本(v3.5.x) 修复兼容性,**同时更新兼容矩阵的"最低 3X-UI"**
 3. 更新 `reference_xui_v3_api_break` memory(项目 memory 系统),把"这次踩坑 + 修复方式"沉淀
 
-## v3.6.0 路线图: PSP 自动感知 3X-UI 版本
+## 维护 `docs/compat/v<MAJOR>.json` 的 SOP
 
-分 3 个 beta 渐进交付:
+每个 PSP major 一个 JSON 文件(v3.x 都拉 `docs/compat/v3.json`,v4.x 都拉 `v4.json`)。
+这是 v3.6.0-beta.7 引入的 per-major 分文件设计,理由见 ARCHITECTURE.md。
 
-- **v3.6.0-beta.1 (后端基础设施)** ── `xui_panels` 表加 `panel_version` / `xray_version` /
-  `version_checked_at` 三列(3X-UI 是 panel 实例,版本是 panel 级属性,**不是** node 级);
-  adapter 新增 `GetServerStatus(ctx)` 调 `/panel/api/server/status`(此端点直接返回
-  `panelVersion` + `xray.version`,比 `/getPanelUpdateInfo` 更全面,一次调用拿全);PSP
-  启动时同步探测所有 panel 一次,写库 + 比对兼容范围,超出范围的写 `log.Warn` 告警。
-  零额外后台 loop,零干扰 health/reconcile/traffic poll(继续 v3.5 解耦原则)。
-  兼容范围 hardcode 在 `internal/version/compat.go`,声明 `MinXUI` / `MaxTested` 常量。
+### 何时改 / 改什么
 
-- **v3.6.0-beta.2 (admin 操作面)** ── Servers 页加版本列展示;手动"刷新版本"按钮;
-  admin UI 顶部红条 banner(版本超出兼容范围时);新增"远程升级 3X-UI / Xray" 按钮
-  + 二次确认 + 升级后 smoke probe(立即调 `GetServerStatus` + `ListInbounds` 看 panel
-  是否回来且 schema 没崩)。
+- **新 3X-UI 出 patch 版本(无 API 改动)** ── 在当前 active major 的 JSON 里把
+  覆盖你 PSP 版本那条 entry 的 `max_tested_xui` 改成新版本号,顺手更新 `updated_at`
+  和 `notes`。commit + push 到 main → 所有该 major 的 PSP 部署 60 秒内自动感知。
+- **PSP 发新 minor (比如 v3.6 → v3.7)** ── 在当前 major 的 JSON 加新 entry,
+  `psp_min: "v3.7.0"`, `psp_max: "v3.7.99"`,把新 entry 放在 `entries` 数组**最前**
+  (first-match-wins 让新版优先匹配)。
+- **PSP 发新 major (比如 v3.x → v4.0)** ── 新建 `docs/compat/v4.json`,内部 `major: 4`,
+  entries 从只覆盖 v4.0 的 baseline 开始。`v3.json` 保持不动 — 仍跑 v3.x 的部署继续从
+  那个文件拿数据。
+- **patch 级精度区间(罕见)** ── 比如 v3.6.5-v3.6.8 单独验过 3.2.0,其它 v3.6.x
+  还是 3.1.0:在 entries 数组前面插入一条更窄的 entry(narrower 在前 = first-match
+  生效),broader 的 baseline 在后面兜底。
 
-- **v3.6.0-beta.3 (`lastOnline` 集成)** ── 3.1.0 `clientStats[*]` 已经免费带 `lastOnline`,
-  PSP 顺手解到 `rawClientTraffic` + 写入 traffic snapshot,admin 用户列表加"最近活跃"列。
+### entries 数组语义
+
+- 每个 entry 是 PSP 版本的**闭区间** `[psp_min, psp_max]`(含两端)
+- `psp_min` / `psp_max` 端点**只写 stable semver** `vX.Y.Z`,**不带** pre-release suffix
+  (PSP 比对时会丢自己 version 的 `-beta.x` 后缀,把 `v3.6.0-beta.7` 当成 `v3.6.0` 匹配)
+- **first-match-wins** ── 数组顺序就是优先级,narrower / 更新的 entry 放前
+- 重叠 OK,顺序决定胜出
+
+### PSP 拉不到时的行为(故障容错)
+
+PSP 启动时先读本地 cache(`<DataDir>/compat-cache.json`)装入上次成功 fetch 的范围;
+然后 admin 打开 Servers 页(或手动点 Test)触发 RefreshRemoteCompat。任何一步失败
+(网络挂 / JSON 解析错 / major 不匹配 / 没匹配 entry)只是让 CheckXUI 返回 Unknown
+状态,admin 仍可通过 upgrade-panel 的 `force` 按钮强制升级 — 不是 hard wall。
+
+## v3.6.0 路线图: PSP 自动感知 3X-UI 版本 ── 已完成
+
+| beta | 内容 |
+|---|---|
+| beta.1 | xui_panels 加 panel_version / xray_version / version_checked_at 三列;adapter GetServerStatus;app.go boot probe + traffic-loop piggyback |
+| beta.2 | Servers 页 Version 列 + compat banner + Test 按钮顺手刷版本 |
+| beta.3 | 远程升级 3X-UI / Xray 按钮 + smoke probe + 跨大版本 migrate 政策修订 |
+| beta.4 | lastOnline 集成到 admin 用户列表"最近活跃"列 |
+| beta.5 | dynamic compat (GitHub raw 单文件) + admin force override |
+| beta.6 | 5 个 audit 发现 bug 修复 + local compat cache 兜底 |
+| beta.7 | dynamic compat schema v2: per-major 分文件 + entries 数组 + psp_min/psp_max 范围 |
 
 这样下次类似 3.1.0 这种破坏可以在 admin UI 提前看到,而不是 traffic poll 静默失败才察觉。

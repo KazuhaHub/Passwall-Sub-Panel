@@ -1,0 +1,15 @@
+{
+  "_doc": "PSP × 3X-UI compatibility ranges for the v3.x PSP series. PSP pulls THIS file (docs/compat/v3.json) on demand from any v3.x build because it parses its own version, extracts major=3, and fetches the matching v<MAJOR>.json. Per-major split (v3.6.0-beta.7) keeps each file naturally bounded — when PSP ships v4.0, create v4.json and leave this file frozen. Inside one file, entries is an ordered list and matching is FIRST-MATCH-WINS, so put narrower / newer ranges earlier. Bumping max_tested_xui here ships PSP a wider tested range with zero PSP release. See docs/3xui-compat.md for the human procedure when validating a new 3X-UI release.",
+  "schema_version": 2,
+  "major": 3,
+  "updated_at": "2026-05-25",
+  "entries": [
+    {
+      "psp_min": "v3.6.0",
+      "psp_max": "v3.6.99",
+      "min_xui": "3.1.0",
+      "max_tested_xui": "3.1.0",
+      "notes": "v3.6 baseline — verified against 3X-UI 3.1.0. Bump max_tested_xui as newer 3X-UI releases are validated."
+    }
+  ]
+}

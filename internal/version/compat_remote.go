@@ -8,71 +8,89 @@ import (
 	"io"
 	"net/http"
 	"regexp"
+	"strconv"
 	"sync"
 	"time"
 )
 
-// DefaultRemoteCompatURL is the GitHub raw URL of the canonical compat JSON.
-// Self-hosted forks running their own validations can ship a different URL
-// in settings (admin-tunable in a future patch); for now this is hardcoded
-// since the upstream repo is the single source of truth.
-const DefaultRemoteCompatURL = "https://raw.githubusercontent.com/KazuhaHub/passwall-sub-panel/main/docs/compat/xui-compat.json"
+// defaultRemoteCompatURLBase is the GitHub raw path under which per-major
+// compat JSON files live. Each PSP build pulls the file matching its own
+// major (v3.x → v3.json, v4.x → v4.json) — the major number is appended
+// at fetch time. Per-major split (v3.6.0-beta.7) replaces the v3.6.0-beta.5
+// single-file model: each file is naturally bounded by "how many minors
+// a single major ships" (~10), maintainers only ever edit the active-
+// major file, and bumping to a new major (v4) is just "create v4.json,
+// leave v3.json frozen".
+const defaultRemoteCompatURLBase = "https://raw.githubusercontent.com/KazuhaHub/passwall-sub-panel/main/docs/compat/"
 
 // remoteFetchThrottle gates how often RefreshRemoteCompat actually hits the
 // network. The Test handler triggers a refresh on every "test connection"
 // click; when admin opens the Servers page the frontend fires N parallel
 // testServer calls (one per panel) — without throttling all N would hit
-// GitHub raw simultaneously. 60s is well under the lifetime of an admin
-// session and lets one fetch serve every panel on a page open.
+// GitHub raw simultaneously. 60s lets one fetch serve every panel on a
+// page open and is well under the lifetime of an admin session.
 const remoteFetchThrottle = 60 * time.Second
 
 // httpFetchTimeout caps each remote fetch so a slow / hanging GitHub raw
 // can never block the Test handler's response path for long.
 const httpFetchTimeout = 8 * time.Second
 
-// pspMajorMinorRe extracts the "v3.6" key from PSP's own version.Version
-// (which carries forms like "v3.6.0", "v3.6.0-beta.5", "dev"). The remote
-// JSON keys are per major.minor — a v3.6.0-beta.x dev/RC and a v3.6.0
-// stable share the same compat row.
-var pspMajorMinorRe = regexp.MustCompile(`^v?(\d+)\.(\d+)`)
+// pspMajorRe extracts the major number from PSP's own version.Version
+// (forms: "v3.6.0", "v3.6.0-beta.7", "3.6.99", "dev"). Used to pick which
+// per-major JSON file to fetch and to validate the file's `major` field.
+var pspMajorRe = regexp.MustCompile(`^v?(\d+)\.`)
 
-// remoteCompatPayload mirrors docs/compat/xui-compat.json. Schema version 1:
+// schemaVersion is what the on-disk JSON files must carry. Bumped to 2
+// when the v3.6.0-beta.7 redesign switched from a single-file map keyed
+// by "vX.Y" to per-major files + entries array + psp_min/psp_max range
+// per row. A future PSP that wants to support a newer schema can still
+// read v2 by branching on this field.
+const schemaVersion = 2
+
+// remoteCompatPayload mirrors docs/compat/v<MAJOR>.json (schema_version 2):
 //
 //	{
-//	  "schema_version": 1,
+//	  "schema_version": 2,
+//	  "major": 3,
 //	  "updated_at": "...",
-//	  "psp_compat": {
-//	    "v3.6": { "min_xui": "3.1.0", "max_tested_xui": "3.1.0" },
-//	    "v3.7": { "min_xui": "3.1.0", "max_tested_xui": "4.0.0" }
-//	  }
+//	  "entries": [
+//	    {
+//	      "psp_min": "v3.6.0",
+//	      "psp_max": "v3.6.99",
+//	      "min_xui": "3.1.0",
+//	      "max_tested_xui": "3.1.0",
+//	      "notes": "..."
+//	    }
+//	  ]
 //	}
 //
-// Future fields land here as additive options; unknown fields are tolerated
-// (Go json default) so an old PSP can still consume a newer JSON.
+// Unknown fields are tolerated (Go json default) so an old PSP can still
+// consume a newer JSON as long as the v2 essentials are present.
 type remoteCompatPayload struct {
-	SchemaVersion int                            `json:"schema_version"`
-	UpdatedAt     string                         `json:"updated_at"`
-	PSPCompat     map[string]remoteCompatPSPEntry `json:"psp_compat"`
+	SchemaVersion int                    `json:"schema_version"`
+	Major         int                    `json:"major"`
+	UpdatedAt     string                 `json:"updated_at"`
+	Entries       []remoteCompatPSPEntry `json:"entries"`
 }
 
+// remoteCompatPSPEntry covers one PSP version range. psp_min / psp_max
+// are closed-interval semver endpoints (stable form: "vX.Y.Z", no
+// pre-release suffix — matching the convention that pre-release builds
+// fall into the same row as the stable they target).
 type remoteCompatPSPEntry struct {
-	MinXUI        string `json:"min_xui"`         // floor (must equal or exceed code-level MinXUI const)
-	MaxTestedXUI  string `json:"max_tested_xui"`  // ceiling — the one we actually install
-	Notes         string `json:"notes,omitempty"` // free-form, surfaced in logs only
+	PSPMin       string `json:"psp_min"`
+	PSPMax       string `json:"psp_max"`
+	MinXUI       string `json:"min_xui"`
+	MaxTestedXUI string `json:"max_tested_xui"`
+	Notes        string `json:"notes,omitempty"`
 }
 
-// refreshState is the goroutine-shared throttle / single-flight gate.
-//
-// Two distinct mechanisms protect the upstream:
-//   - refreshInflight: classic single-flight — at most one fetch in
-//     progress at any time. N parallel testServers from one Servers-page
-//     open collapse to one network call.
-//   - refreshLastAt: 60s throttle, but ONLY advanced on a SUCCESSFUL
-//     fetch. A failed fetch leaves refreshLastAt unchanged so the next
-//     caller (e.g. admin's next "test" click after a brief network blip)
-//     can immediately retry. v3.6.0-beta.5 advanced lastAt on failure
-//     too, which produced a 60s lock-out whenever GitHub was briefly
-//     unreachable — fixed in v3.6.0-beta.6.
+// refreshState — two distinct concurrency mechanisms:
+//   - refreshInflight: classic single-flight, at most one fetch in flight.
+//     N parallel callers (Servers-page open) collapse to one network call.
+//   - refreshLastAt: 60s throttle, ONLY advanced on success. A failed
+//     fetch leaves it unchanged so the next caller can immediately retry
+//     instead of waiting out the throttle.
 var (
 	refreshMu        sync.Mutex
 	refreshLastAt    time.Time
@@ -80,27 +98,30 @@ var (
 	refreshInflight  bool
 )
 
-// RefreshRemoteCompat fetches the compat JSON, finds the row matching this
-// PSP build's major.minor (e.g. "v3.6"), and installs it via
-// SetActiveMaxTestedXUI. Returns nil on a successful fetch OR when
-// short-circuited by single-flight / throttle. Returns a non-nil error
-// only when this call actually attempted the fetch and it failed.
-func RefreshRemoteCompat(ctx context.Context, url string) error {
+// RefreshRemoteCompat fetches the per-major compat JSON for THIS PSP build,
+// finds the entry containing the current version, and installs its
+// max_tested_xui via SetActiveMaxTestedXUI. Returns nil on success OR
+// when short-circuited by single-flight / throttle. Returns a non-nil
+// error only when this call actually attempted the fetch and it failed.
+//
+// urlOverride is for tests / admin override; "" uses the default per-major
+// URL computed from version.Version.
+func RefreshRemoteCompat(ctx context.Context, urlOverride string) error {
+	url := urlOverride
 	if url == "" {
-		url = DefaultRemoteCompatURL
+		var err error
+		url, err = defaultURLForCurrentVersion()
+		if err != nil {
+			return err
+		}
 	}
 
 	refreshMu.Lock()
 	if refreshInflight {
-		// Another goroutine is currently fetching. Skip — its result
-		// will land in refreshLastError and be visible to subsequent
-		// callers (via LastRefreshError). The current admin click
-		// doesn't need to block waiting for it.
 		refreshMu.Unlock()
 		return nil
 	}
 	if !refreshLastAt.IsZero() && time.Since(refreshLastAt) < remoteFetchThrottle {
-		// Recent success within throttle window — short-circuit.
 		refreshMu.Unlock()
 		return nil
 	}
@@ -113,9 +134,6 @@ func RefreshRemoteCompat(ctx context.Context, url string) error {
 	refreshInflight = false
 	refreshLastError = err
 	if err == nil {
-		// Only advance on success so a failed fetch doesn't lock
-		// retries out for the throttle window. Failure → next caller
-		// (still single-flight protected) can immediately retry.
 		refreshLastAt = time.Now()
 	}
 	refreshMu.Unlock()
@@ -123,20 +141,46 @@ func RefreshRemoteCompat(ctx context.Context, url string) error {
 }
 
 // LastRefreshError returns whatever the most recent fetch produced (nil on
-// success, fetch/parse error otherwise). Used by admin UI / health docs
-// to surface "remote compat fetch failed last time at <last_at>".
+// success, fetch/parse error otherwise). Surfaces to admin UI / docs.
 func LastRefreshError() error {
 	refreshMu.Lock()
 	defer refreshMu.Unlock()
 	return refreshLastError
 }
 
-// LastRefreshAt returns the wall-clock of the most recent attempt
-// (success or failure). Zero value if never attempted.
+// LastRefreshAt returns the wall-clock of the most recent SUCCESSFUL fetch
+// (zero value when never attempted or only failures so far).
 func LastRefreshAt() time.Time {
 	refreshMu.Lock()
 	defer refreshMu.Unlock()
 	return refreshLastAt
+}
+
+// defaultURLForCurrentVersion returns the GitHub raw URL of the per-major
+// JSON file matching THIS PSP build's major. "dev" / unparseable PSP
+// version → error (RefreshRemoteCompat surfaces it; dev builds get
+// CompatUnknown until admin uses force override, which is the documented
+// trade-off).
+func defaultURLForCurrentVersion() (string, error) {
+	major, ok := pspMajor(Version)
+	if !ok {
+		return "", fmt.Errorf("cannot derive PSP major from version %q (dev build?) — compat refresh disabled, use force override to upgrade panels", Version)
+	}
+	return defaultRemoteCompatURLBase + "v" + strconv.Itoa(major) + ".json", nil
+}
+
+// pspMajor extracts the integer major from PSP's own version string.
+// Returns 0/false for "dev" or anything else parseSemver-incompatible.
+func pspMajor(v string) (int, bool) {
+	m := pspMajorRe.FindStringSubmatch(v)
+	if len(m) < 2 {
+		return 0, false
+	}
+	n, err := strconv.Atoi(m[1])
+	if err != nil || n <= 0 {
+		return 0, false
+	}
+	return n, true
 }
 
 func fetchAndApply(ctx context.Context, url string) error {
@@ -163,37 +207,64 @@ func fetchAndApply(ctx context.Context, url string) error {
 	if err := json.Unmarshal(body, &payload); err != nil {
 		return fmt.Errorf("decode JSON: %w", err)
 	}
-	entry, key, ok := lookupForPSPVersion(payload, Version)
+	if payload.SchemaVersion != schemaVersion {
+		return fmt.Errorf("compat JSON schema_version %d, this PSP build only supports %d", payload.SchemaVersion, schemaVersion)
+	}
+	currentMajor, ok := pspMajor(Version)
 	if !ok {
-		return fmt.Errorf("no compat entry for PSP %q (looked for key %q in %d entries)",
-			Version, key, len(payload.PSPCompat))
+		return fmt.Errorf("cannot derive PSP major from version %q", Version)
+	}
+	if payload.Major != currentMajor {
+		// Self-validation: PSP fetched v<currentMajor>.json but the
+		// file's `major` field says something else. Either GitHub
+		// served a wrong file or admin accidentally pushed v3.json
+		// content to v4.json. Refuse to apply so we don't install
+		// the wrong major's range.
+		return fmt.Errorf("compat JSON declares major=%d but this PSP is major=%d (wrong file at URL?)", payload.Major, currentMajor)
+	}
+	entry, ok := lookupForPSPVersion(payload, Version)
+	if !ok {
+		return fmt.Errorf("no compat entry covers PSP %q in %d entries (range gap — bump the JSON)",
+			Version, len(payload.Entries))
 	}
 	if _, ok := parseSemver(entry.MaxTestedXUI); !ok {
-		return fmt.Errorf("compat entry %q has unparseable max_tested_xui %q", key, entry.MaxTestedXUI)
+		return fmt.Errorf("compat entry [%s..%s] has unparseable max_tested_xui %q",
+			entry.PSPMin, entry.PSPMax, entry.MaxTestedXUI)
 	}
 	SetActiveMaxTestedXUI(entry.MaxTestedXUI)
-	// Persist the just-fetched range so the next PSP boot starts with it
-	// without requiring network. Best-effort — a cache write failure is
-	// not worth failing the whole refresh, the in-memory state is already
-	// installed.
 	_ = saveCompatCache(entry.MaxTestedXUI)
 	return nil
 }
 
-// lookupForPSPVersion extracts "v<major>.<minor>" from pspVersion and looks
-// it up in payload. Returns the key it tried so error messages stay
-// debuggable when no row matches.
-func lookupForPSPVersion(payload remoteCompatPayload, pspVersion string) (remoteCompatPSPEntry, string, bool) {
-	m := pspMajorMinorRe.FindStringSubmatch(pspVersion)
-	if len(m) < 3 {
-		return remoteCompatPSPEntry{}, "", false
+// lookupForPSPVersion iterates entries in document order and returns the
+// FIRST one whose [psp_min, psp_max] closed interval contains pspVersion.
+// "First match wins" is the documented semantics — admin authoring the
+// JSON puts narrower / newer ranges earlier so a more-specific entry
+// shadows a broader one.
+func lookupForPSPVersion(payload remoteCompatPayload, pspVersion string) (remoteCompatPSPEntry, bool) {
+	pv, ok := parseSemver(pspVersion)
+	if !ok {
+		return remoteCompatPSPEntry{}, false
 	}
-	key := "v" + m[1] + "." + m[2]
-	entry, ok := payload.PSPCompat[key]
-	return entry, key, ok
+	for _, e := range payload.Entries {
+		lo, lok := parseSemver(e.PSPMin)
+		hi, hok := parseSemver(e.PSPMax)
+		if !lok || !hok {
+			// Malformed entry — skip rather than fail the whole
+			// lookup so one bad row doesn't black out the file.
+			continue
+		}
+		if cmpSemver(lo, hi) > 0 {
+			// Inverted range (psp_min > psp_max) — admin error, skip.
+			continue
+		}
+		if cmpSemver(pv, lo) >= 0 && cmpSemver(pv, hi) <= 0 {
+			return e, true
+		}
+	}
+	return remoteCompatPSPEntry{}, false
 }
 
-// errNoRefreshYet is returned for callers that want to distinguish "no
-// refresh ever attempted" from "last refresh succeeded but produced no
-// override" — unused for now but reserved.
+// errNoRefreshYet reserved for future callers that want to distinguish
+// "never refreshed" from "refreshed but no override active".
 var errNoRefreshYet = errors.New("remote compat not yet fetched")

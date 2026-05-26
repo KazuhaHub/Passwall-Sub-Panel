@@ -166,32 +166,43 @@ func TestCompatMessage_UnknownDistinguishesNoRemoteFromBadInput(t *testing.T) {
 	}
 }
 
-func TestLookupForPSPVersion_ExtractsMajorMinor(t *testing.T) {
+func TestLookupForPSPVersion_RangeMatchAndFirstWins(t *testing.T) {
+	// Schema v2: array of entries, each carries [psp_min, psp_max] closed
+	// interval. first-match-wins is the documented semantics so admin
+	// puts narrower / newer ranges earlier; the test guards that.
 	payload := remoteCompatPayload{
-		PSPCompat: map[string]remoteCompatPSPEntry{
-			"v3.6": {MinXUI: "3.1.0", MaxTestedXUI: "3.5.0"},
-			"v3.7": {MinXUI: "3.1.0", MaxTestedXUI: "4.0.0"},
+		SchemaVersion: 2,
+		Major:         3,
+		Entries: []remoteCompatPSPEntry{
+			// narrower entry first — wins over the broader one below
+			{PSPMin: "v3.6.5", PSPMax: "v3.6.8", MinXUI: "3.1.0", MaxTestedXUI: "3.2.0", Notes: "narrow hotfix"},
+			// broader baseline
+			{PSPMin: "v3.6.0", PSPMax: "v3.6.99", MinXUI: "3.1.0", MaxTestedXUI: "3.1.0", Notes: "v3.6 baseline"},
+			{PSPMin: "v3.5.0", PSPMax: "v3.5.99", MinXUI: "3.1.0", MaxTestedXUI: "3.0.5"},
 		},
 	}
 	cases := []struct {
 		pspVer  string
-		wantKey string
 		wantMax string
 		wantOK  bool
 	}{
-		{"v3.6.0", "v3.6", "3.5.0", true},
-		{"v3.6.0-beta.5", "v3.6", "3.5.0", true},
-		{"3.6.99", "v3.6", "3.5.0", true},
-		{"v3.7.0", "v3.7", "4.0.0", true},
-		{"v3.8.0", "v3.8", "", false}, // not in table
-		{"dev", "", "", false},
-		{"garbage", "", "", false},
+		{"v3.6.0", "3.1.0", true},              // hits broader v3.6 baseline
+		{"v3.6.0-beta.7", "3.1.0", true},       // pre-release counted as the stable it targets
+		{"v3.6.5", "3.2.0", true},              // hits the narrow hotfix entry (first match wins)
+		{"v3.6.8", "3.2.0", true},              // upper bound inclusive
+		{"v3.6.9", "3.1.0", true},              // just past hotfix → falls back to baseline
+		{"v3.6.99", "3.1.0", true},             // upper bound of baseline inclusive
+		{"v3.5.0", "3.0.5", true},              // separate range
+		{"v3.4.99", "", false},                 // no entry covers it
+		{"v3.7.0", "", false},                  // no entry covers it
+		{"dev", "", false},                     // unparseable
+		{"garbage", "", false},                 // unparseable
 	}
 	for _, c := range cases {
-		entry, key, ok := lookupForPSPVersion(payload, c.pspVer)
-		if ok != c.wantOK || key != c.wantKey {
-			t.Fatalf("lookupForPSPVersion(%q): key=%q ok=%v, want key=%q ok=%v",
-				c.pspVer, key, ok, c.wantKey, c.wantOK)
+		entry, ok := lookupForPSPVersion(payload, c.pspVer)
+		if ok != c.wantOK {
+			t.Fatalf("lookupForPSPVersion(%q): ok=%v, want ok=%v",
+				c.pspVer, ok, c.wantOK)
 		}
 		if ok && entry.MaxTestedXUI != c.wantMax {
 			t.Fatalf("lookupForPSPVersion(%q): max=%q, want %q",
