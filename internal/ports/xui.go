@@ -36,6 +36,21 @@ type XUIClient interface {
 	// needs the uuid associated with a particular email before recording
 	// ownership.
 	GetInboundClients(ctx context.Context, inboundID int) ([]ClientDetail, error)
+
+	// GetServerStatus hits /panel/api/server/status. PSP only consumes the
+	// version-identity subset (panel/xray) for compatibility checks; the rest
+	// of the rich status payload (cpu/mem/etc.) is intentionally not surfaced
+	// to keep the cross-process contract narrow.
+	GetServerStatus(ctx context.Context) (*ServerStatus, error)
+}
+
+// ServerStatus is the version-identity subset of /panel/api/server/status.
+// 3X-UI 3.1.0 status payload reports panelVersion as "3.1.0" (no leading "v")
+// and xray.version as the bare semver of the xray-core binary.
+type ServerStatus struct {
+	PanelVersion string
+	XrayVersion  string
+	XrayState    string // "running" / "stop" / "error"
 }
 
 // ClientDetail is a normalised view of one inbound.settings.clients[] entry.

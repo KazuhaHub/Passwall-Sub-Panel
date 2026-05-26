@@ -315,6 +315,15 @@ type XUIPanelRepo interface {
 	GetByName(ctx context.Context, name string) (*domain.XUIPanel, error)
 	Save(ctx context.Context, panel *domain.XUIPanel) error
 	Delete(ctx context.Context, id int64) error
+
+	// UpdateVersion writes only the version-identity snapshot columns,
+	// not the full row — so a boot-time or admin-triggered version probe
+	// doesn't race with an admin editing credentials in another tab and
+	// silently revert their save. Mirrors nodes.UpdateHealth in
+	// scope-by-column style. checkedAt = nil clears the timestamp
+	// (treat as "never probed"); empty version strings carry through
+	// untouched so callers can record a failed probe.
+	UpdateVersion(ctx context.Context, panelID int64, panelVersion, xrayVersion string, checkedAt *time.Time) error
 }
 
 // UISettings holds runtime-editable UI preferences. They live in the DB so

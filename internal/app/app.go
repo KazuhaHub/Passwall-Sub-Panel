@@ -35,6 +35,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/traffic"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/user"
 	httptransport "github.com/KazuhaHub/passwall-sub-panel/internal/transport/http"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/version"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -96,6 +97,12 @@ type App struct {
 	bgCancel  context.CancelFunc
 	bgRootCtx context.Context
 	bgWG      sync.WaitGroup
+
+	// xuiPool kept so Run() can fire a one-shot boot version probe across
+	// every configured 3X-UI panel — services already hold their own
+	// pool reference for their hot paths, this field is just for the
+	// app-level lifecycle hook.
+	xuiPool ports.XUIPool
 }
 
 // Build assembles the App from the loaded Config. It does NOT start any
@@ -292,6 +299,7 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	a.rollup = rollup.New(db)
 	a.repos = repos
 	a.saml = samlSvc
+	a.xuiPool = pool
 	a.trafficInterval = time.Duration(sysSettings.CronTrafficPullMinutes) * time.Minute
 	a.reconcileInterval = time.Duration(sysSettings.CronReconcileMinutes) * time.Minute
 	a.healthInterval = healthInterval
@@ -345,6 +353,12 @@ func (a *App) Run() error {
 	// tearing the panel down, and the WaitGroup lets Shutdown drain them
 	// before the process exits.
 	a.saml.StartMetadataRefresh(bgCtx, &a.bgWG)
+	// Boot-time 3X-UI compat probe: fire once on startup so an unexpected
+	// version surfaces in boot logs immediately rather than waiting for
+	// the first traffic-poll cycle. Subsequent re-probes piggyback the
+	// traffic poll loop (see runTrafficLoop) — no independent ticker, the
+	// cadence naturally matches "PSP is talking to every panel anyway".
+	safego.GoTracked(&a.bgWG, "boot-version-probe", func() { a.probePanelVersionsOnce(bgCtx) })
 	safego.GoTracked(&a.bgWG, "sync-task-loop", func() { a.runSyncTaskLoop(bgCtx) })
 	safego.GoTracked(&a.bgWG, "audit-cleanup-loop", func() { a.runAuditCleanupLoop(bgCtx) })
 	safego.GoTracked(&a.bgWG, "traffic-loop", func() { a.runTrafficLoop(bgCtx) })
@@ -361,6 +375,74 @@ func (a *App) runHealthLoop(ctx context.Context) {
 	}
 	log.Info("node health check loop started", "interval", a.healthInterval.String())
 	a.health.Loop(ctx, a.healthInterval)
+}
+
+// probePanelVersionsOnce hits /panel/api/server/status on every configured
+// panel sequentially, records the version snapshot via UpdateVersion, and
+// logs Warn for any compat mismatch. Sequential rather than parallel — there
+// are typically only a handful of panels; parallelism would complicate
+// per-panel timeout handling without a meaningful win. Failures are tolerated:
+// an unreachable panel just gets its versions cleared and a Warn line, the
+// remaining panels continue.
+func (a *App) probePanelVersionsOnce(ctx context.Context) {
+	if a.xuiPool == nil || a.repos.XUIPanel == nil {
+		return
+	}
+	panels, err := a.repos.XUIPanel.List(ctx)
+	if err != nil {
+		log.Warn("compat probe: list panels", "err", err)
+		return
+	}
+	if len(panels) == 0 {
+		return
+	}
+	log.Debug("compat probe tick", "panel_count", len(panels))
+	for _, p := range panels {
+		if ctx.Err() != nil {
+			return
+		}
+		c, err := a.xuiPool.Get(p.ID)
+		if err != nil {
+			log.Warn("compat probe: pool get", "panel_id", p.ID, "panel_name", p.Name, "err", err)
+			continue
+		}
+		probeCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		status, err := c.GetServerStatus(probeCtx)
+		cancel()
+		now := time.Now()
+		if err != nil {
+			log.Warn("compat probe failed", "panel_id", p.ID, "panel_name", p.Name, "err", err)
+			// Record the failed attempt so the UI can show "probe failed
+			// at <time>" instead of silently stale data.
+			if uerr := a.repos.XUIPanel.UpdateVersion(ctx, p.ID, "", "", &now); uerr != nil {
+				log.Warn("compat probe: write empty version", "panel_id", p.ID, "err", uerr)
+			}
+			continue
+		}
+		compatStatus := version.CheckXUI(status.PanelVersion)
+		switch compatStatus {
+		case version.CompatSupported:
+			// Supported is the steady state on every 10-min tick; keep it
+			// at Debug so a healthy fleet doesn't fill logs. Admin who
+			// wants to see "yes, the probe ran ok" can flip PSP_LOG_LEVEL.
+			log.Debug("panel version ok",
+				"panel_id", p.ID, "panel_name", p.Name,
+				"panel_version", status.PanelVersion,
+				"xray_version", status.XrayVersion,
+				"xray_state", status.XrayState)
+		default:
+			log.Warn("panel compat warning",
+				"panel_id", p.ID, "panel_name", p.Name,
+				"panel_version", status.PanelVersion,
+				"xray_version", status.XrayVersion,
+				"xray_state", status.XrayState,
+				"compat", compatStatus.String(),
+				"detail", version.CompatMessage(status.PanelVersion, compatStatus))
+		}
+		if uerr := a.repos.XUIPanel.UpdateVersion(ctx, p.ID, status.PanelVersion, status.XrayVersion, &now); uerr != nil {
+			log.Warn("compat probe: write version", "panel_id", p.ID, "err", uerr)
+		}
+	}
 }
 
 func (a *App) runMailLoop(ctx context.Context) {
@@ -658,6 +740,13 @@ func (a *App) runTrafficLoop(ctx context.Context) {
 			if err := a.traffic.PollOnce(ctx); err != nil {
 				log.Warn("traffic poll", "err", err)
 			}
+			// Piggyback the 3X-UI compat re-probe onto the traffic poll
+			// cadence — PSP is already in a "talk to every panel" cycle,
+			// adding one /server/status call per panel is cheap (~10ms
+			// each) and avoids an independent ticker. Boot fires its own
+			// one-shot probe so admins don't wait a full poll interval
+			// for first-impression version info (see Run).
+			a.probePanelVersionsOnce(ctx)
 		}
 	}
 }

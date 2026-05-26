@@ -385,6 +385,28 @@ func (c *Client) ResetClientTraffic(ctx context.Context, inboundID int, email st
 	return c.doJSON(ctx, http.MethodPost, path, nil, nil)
 }
 
+// GetServerStatus hits /panel/api/server/status and returns the
+// version-identity subset (panel + xray). 3X-UI 3.1.0 reports panelVersion
+// as "3.1.0" while /panel/api/server/getPanelUpdateInfo reports the same
+// release as "v3.1.0"; version.parseSemver tolerates both forms.
+func (c *Client) GetServerStatus(ctx context.Context) (*ports.ServerStatus, error) {
+	var raw struct {
+		PanelVersion string `json:"panelVersion"`
+		Xray         struct {
+			Version string `json:"version"`
+			State   string `json:"state"`
+		} `json:"xray"`
+	}
+	if err := c.doJSON(ctx, http.MethodGet, "/panel/api/server/status", nil, &raw); err != nil {
+		return nil, err
+	}
+	return &ports.ServerStatus{
+		PanelVersion: raw.PanelVersion,
+		XrayVersion:  raw.Xray.Version,
+		XrayState:    raw.Xray.State,
+	}, nil
+}
+
 // GetInboundClients fetches the inbound and decodes settings.clients[] into
 // a normalised slice. Returns empty if the inbound has no clients defined.
 func (c *Client) GetInboundClients(ctx context.Context, inboundID int) ([]ports.ClientDetail, error) {

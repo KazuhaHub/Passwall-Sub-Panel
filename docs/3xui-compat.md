@@ -57,11 +57,24 @@ PSP `rawInbound` 这四个字段定义为 Go `string`,`json.Unmarshal` 一个 ob
 2. PSP 这边: 走 patch 版本(v3.5.x) 修复兼容性,**同时更新兼容矩阵的"最低 3X-UI"**
 3. 更新 `reference_xui_v3_api_break` memory(项目 memory 系统),把"这次踩坑 + 修复方式"沉淀
 
-## 远期: PSP 自动版本探测(规划中,v3.6.0)
+## v3.6.0 路线图: PSP 自动感知 3X-UI 版本
 
-计划在 v3.6.0 引入:
-- `nodes` 表加 `xui_version` 列,health 时记录每台 panel 的 3X-UI 版本(来自 `/panel/api/server/getPanelUpdateInfo`)
-- PSP 启动 / reconcile 时比对版本范围,超出本 PSP 版本的"已实测通过"范围 → admin UI 红条告警
-- Servers 页加"远程升级 3X-UI / Xray"按钮,集中触发 + 二次确认 + 升级后 smoke probe(立即调 ListInbounds 看 schema 没崩)
+分 3 个 beta 渐进交付:
+
+- **v3.6.0-beta.1 (后端基础设施)** ── `xui_panels` 表加 `panel_version` / `xray_version` /
+  `version_checked_at` 三列(3X-UI 是 panel 实例,版本是 panel 级属性,**不是** node 级);
+  adapter 新增 `GetServerStatus(ctx)` 调 `/panel/api/server/status`(此端点直接返回
+  `panelVersion` + `xray.version`,比 `/getPanelUpdateInfo` 更全面,一次调用拿全);PSP
+  启动时同步探测所有 panel 一次,写库 + 比对兼容范围,超出范围的写 `log.Warn` 告警。
+  零额外后台 loop,零干扰 health/reconcile/traffic poll(继续 v3.5 解耦原则)。
+  兼容范围 hardcode 在 `internal/version/compat.go`,声明 `MinXUI` / `MaxTested` 常量。
+
+- **v3.6.0-beta.2 (admin 操作面)** ── Servers 页加版本列展示;手动"刷新版本"按钮;
+  admin UI 顶部红条 banner(版本超出兼容范围时);新增"远程升级 3X-UI / Xray" 按钮
+  + 二次确认 + 升级后 smoke probe(立即调 `GetServerStatus` + `ListInbounds` 看 panel
+  是否回来且 schema 没崩)。
+
+- **v3.6.0-beta.3 (`lastOnline` 集成)** ── 3.1.0 `clientStats[*]` 已经免费带 `lastOnline`,
+  PSP 顺手解到 `rawClientTraffic` + 写入 traffic snapshot,admin 用户列表加"最近活跃"列。
 
 这样下次类似 3.1.0 这种破坏可以在 admin UI 提前看到,而不是 traffic poll 静默失败才察觉。

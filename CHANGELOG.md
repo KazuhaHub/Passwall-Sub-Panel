@@ -4,6 +4,68 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## v3.6.0-beta.1 — 2026-05-25
+
+### Added (PSP 主动感知 3X-UI 版本 —— Phase 2 第一刀)
+
+- **PSP 启动时一次性探测每个 panel 的 3X-UI / Xray 版本,超出兼容范围即写 Warn**
+  日志,后续 beta 在此基础上做 UI 红条 + Servers 页版本列 + 远程升级按钮。
+  - 新增 `internal/version/compat.go`,声明本 PSP 构建支持的 3X-UI 版本范围:
+    常量 `MinXUI = "3.1.0"`, `MaxTestedXUI = "3.1.0"`(hardcode 在源码,admin
+    不能从 settings 表松绑——这是约束的本意:新 3X-UI 可能像 3.1.0 那样改
+    schema,见 [docs/3xui-compat.md](docs/3xui-compat.md))。`CheckXUI(ver)`
+    返回 `CompatSupported / CompatTooOld / CompatUntested / CompatUnknown`
+    四态;`parseSemver` 容忍 `v` 前缀 / pre-release 后缀(3X-UI 的 status
+    端点报 "3.1.0",getPanelUpdateInfo 报 "v3.1.0",同一发布两种写法)。
+  - xui adapter 新增 `Client.GetServerStatus(ctx) -> *ports.ServerStatus`,
+    一次调用拿全 `panelVersion / xrayVersion / xrayState`(实测 3.1.0 的
+    `/panel/api/server/status` 直接返回这三个,**比** `/getPanelUpdateInfo`
+    **更全面**——PDF 没明说这点,实测发现)。**只解版本子集**,cpu/mem 等
+    rich payload 字段不进 ports 接口,保持跨进程契约窄。
+  - `xui_panels` 表新增三列 `panel_version` / `xray_version` /
+    `version_checked_at`(GORM AutoMigrate 跨方言自动加,SQLite / MySQL /
+    PostgreSQL 同样安全);domain.XUIPanel 同步加字段。`XUIPanelRepo.UpdateVersion`
+    新增,**列级写**(只 update 三个版本列),避免与 admin 同时编辑 credentials
+    的 Save 互相覆盖——跟 `nodes.UpdateHealth` 一个思路。
+  - **触发策略**:① `app.go` Run() 启动时 fire 一次 `boot-version-probe`
+    goroutine(panic-shielded,WaitGroup 跟踪),让 first-impression 版本信息
+    立即落日志,admin 不用等首轮 traffic poll 才看到;② 后续 re-probe **piggyback
+    traffic poll 周期**——`runTrafficLoop` 每轮 PollOnce 之后顺手再跑一次
+    `probePanelVersionsOnce`,PSP 反正已经在"打每个 panel" 的节奏里,加一个
+    `/server/status`(~10ms/panel)零额外 ticker、零额外 cadence 设定。
+    panel 升级后 PSP 在下一个 traffic poll(默认 5 min)内自然感知,完全符合
+    自用规模的实时性需求。每个 probe 自带 10s timeout,unreachable panel
+    不拖累 poll 主路径。
+  - 日志策略:supported 走 Debug(steady-state,don't spam),non-supported /
+    probe-failed 走 Warn 并带详细 message,运维 grep `compat warning` /
+    `compat probe failed` 即可定位"哪台 panel 出问题"。
+  - 零额外周期 loop,零干扰 health / reconcile / traffic poll 内部逻辑(继续
+    v3.5 解耦原则)。`xui_panels.version_checked_at` 给后续 beta 的"上次探测于
+    XX 分钟前"UI 提示用。beta.2 将加 admin Servers 页"测试连接"按钮顺手
+    触发即时探测,作为 traffic poll 自然节奏之外的手动 refresh 通道。
+  - 单测覆盖:`TestParseSemver_*` 四条(strip v 前缀 / 丢 pre-release 后缀 /
+    两段版本 / 拒非法)、`TestCheckXUI_*` 四条(边界 supported / TooOld /
+    Untested / Unknown)、`TestCompatMessage_*` 一条(message 含关键事实);
+    端到端用真实 3.1.0 panel(`/server/status`)跑通 `GetServerStatus` →
+    解码 → CheckXUI → CompatMessage 全链路验证。
+
+### Internal / 性能
+
+- **顺手清掉 v3.5.1-beta.2 升级 sub_logs 索引时残留的两个旧单列 idx**:
+  GORM AutoMigrate 只 add 新索引、不 drop 旧索引,所以
+  `idx_sub_logs_user_id` + `idx_sub_logs_accessed_at` 跟新建的复合
+  `idx_sub_user_time` + 独立 `idx_sub_accessed` 并存,每次 sub_logs INSERT
+  写 4 个索引(本该 2 个),拖累 `/sub/:token` 这条公开端点的写入吞吐。
+  `cleanupLegacyState` 加幂等 drop 块,GORM Migrator `HasIndex` + `DropIndex`
+  跨方言安全。Best-effort:DropIndex 失败 → log Warn 不 abort(redundant
+  index 只是 perf wart,不是 correctness 问题)。
+
+### Docs
+
+- `docs/3xui-compat.md` 更新"远期规划"段落:把 v3.6.0 拆成 3 个 beta 渐进交付,
+  各 beta 内容明确;同时修正之前那条"`nodes` 表加 xui_version" 的字段位置
+  错误——3X-UI 版本是 panel 级实例属性,应该挂在 `xui_panels` 表上。
+
 ## v3.5.1-beta.2 — 2026-05-25
 
 ### Performance / Internal

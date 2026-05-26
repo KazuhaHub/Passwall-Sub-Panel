@@ -3,6 +3,7 @@ package mysql
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"gorm.io/gorm"
 
@@ -84,4 +85,21 @@ func (r *xuiPanelRepo) Delete(ctx context.Context, id int64) error {
 		return fmt.Errorf("%w: panel still owns %d user client row(s); detach them first", domain.ErrValidation, clientRefs)
 	}
 	return r.db.WithContext(ctx).Delete(&xuiPanelRow{}, id).Error
+}
+
+// UpdateVersion writes only panel_version / xray_version / version_checked_at
+// — never the credential columns. Concurrent admin edits to Name/URL/APIToken
+// stay safe even if a version probe lands mid-edit. Cross-dialect safe:
+// db.Model().Where().Updates(map) translates to a column-scoped UPDATE on
+// SQLite / MySQL / Postgres alike.
+func (r *xuiPanelRepo) UpdateVersion(ctx context.Context, panelID int64, panelVersion, xrayVersion string, checkedAt *time.Time) error {
+	if panelID == 0 {
+		return fmt.Errorf("%w: panel id required", domain.ErrValidation)
+	}
+	updates := map[string]any{
+		"panel_version":      panelVersion,
+		"xray_version":       xrayVersion,
+		"version_checked_at": checkedAt,
+	}
+	return r.db.WithContext(ctx).Model(&xuiPanelRow{}).Where("id = ?", panelID).Updates(updates).Error
 }

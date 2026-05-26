@@ -927,6 +927,9 @@ func (c *fakeXUIClient) ResetClientTraffic(ctx context.Context, inboundID int, e
 func (c *fakeXUIClient) GetInboundClients(ctx context.Context, inboundID int) ([]ports.ClientDetail, error) {
 	return nil, nil
 }
+func (c *fakeXUIClient) GetServerStatus(ctx context.Context) (*ports.ServerStatus, error) {
+	return &ports.ServerStatus{PanelVersion: "3.1.0", XrayVersion: "26.5.9", XrayState: "running"}, nil
+}
 
 // When snapshots have been wiped but the user still carries a non-zero
 // LifetimeTotalBytes, bootstrap deltas for ownerships created AFTER the

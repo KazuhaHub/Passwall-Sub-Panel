@@ -633,6 +633,17 @@ type XUIPanel struct {
 	Username string // fallback: 3X-UI panel username/password cookie session
 	Password string
 	Remark   string
+
+	// Version-identity snapshot, written by the boot-time compat probe
+	// (v3.6.0-beta.1) and refreshed on demand from admin actions. Empty
+	// strings / nil mean "never probed" or "last probe failed" — version.CheckXUI
+	// treats that as CompatUnknown rather than a hard error. PanelVersion is
+	// the 3X-UI release ("3.1.0"); XrayVersion is the xray-core binary
+	// ("26.5.9"); VersionCheckedAt is the timestamp of the last successful
+	// probe.
+	PanelVersion     string
+	XrayVersion      string
+	VersionCheckedAt *time.Time
 }
 
 type MailReminderKind string
