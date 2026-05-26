@@ -234,6 +234,7 @@ func (s *Service) PollOnce(ctx context.Context) error {
 		nodeSnaps:        make([]*domain.NodeTrafficSnapshot, 0),
 		ownershipUpdates: make([]*domain.XUIClientEntry, 0, len(users)*4),
 		userUpdates:      make(map[int64]*domain.User, len(users)),
+		lastOnlineMs:     make(map[int64]int64, len(users)),
 	}
 
 	// Pre-fetch every user's latest snapshot in ONE batched read. Replaces
@@ -398,6 +399,14 @@ func (s *Service) PollOnce(ctx context.Context) error {
 				matched++
 				nodeUp += t.Up
 				nodeDown += t.Down
+				// Take the max across all of this user's clients —
+				// "last online anywhere" is what powers the admin
+				// "最近活跃" column. 3X-UI < 3.1.0 panels report 0
+				// (json default for missing field); Go map zero
+				// value naturally skips those since 0 > 0 is false.
+				if t.LastOnline > sink.lastOnlineMs[ref.userID] {
+					sink.lastOnlineMs[ref.userID] = t.LastOnline
+				}
 				total := totals[ref.userID]
 				total.up += t.Up
 				total.down += t.Down
@@ -514,7 +523,26 @@ func (s *Service) PollOnce(ctx context.Context) error {
 			log.Warn("traffic poll flush user traffic state", "count", len(pending), "err", err)
 		}
 	}
-	mark("sink flush (5 batches)")
+	// v3.6.0-beta.4: convert per-user ms-since-epoch → time.Time on the way
+	// to the repo so callers don't need to know 3X-UI's wire unit. Done as
+	// its own batch (rather than folding into BatchUpdateTrafficState) so
+	// the per-cycle behaviour stays orthogonal: a panel running pre-3.1.0
+	// 3X-UI reports 0 lastOnline for everyone → sink.lastOnlineMs stays
+	// empty → no UPDATE issued → existing last_online_at survives.
+	if len(sink.lastOnlineMs) > 0 {
+		toWrite := make(map[int64]time.Time, len(sink.lastOnlineMs))
+		for uid, ms := range sink.lastOnlineMs {
+			if ms > 0 {
+				toWrite[uid] = time.UnixMilli(ms)
+			}
+		}
+		if len(toWrite) > 0 {
+			if err := s.users.BatchUpdateLastOnline(ctx, toWrite); err != nil {
+				log.Warn("traffic poll flush last_online_at", "count", len(toWrite), "err", err)
+			}
+		}
+	}
+	mark("sink flush (6 batches)")
 	return nil
 }
 
@@ -601,6 +629,14 @@ type pollSink struct {
 	// LatestForUser SELECT. Absence means "no prior snapshot" (same
 	// semantics as LatestForUser returning ErrNotFound).
 	latestByUser map[int64]*domain.TrafficSnapshot
+	// lastOnlineMs holds the per-user max(clientStats.lastOnline) across
+	// every owned client seen this cycle, in 3X-UI's unit (unix ms).
+	// Flushed end-of-cycle via BatchUpdateLastOnline. Map keying naturally
+	// dedups multiple appends for the same user across panels — we always
+	// keep the max. Zero values are never inserted (3X-UI reports 0 for
+	// "never seen", which has no useful UI signal — the panel just shows
+	// "—" / "未活跃" in that case).
+	lastOnlineMs map[int64]int64
 }
 
 // recordClientStats reconciles one client's raw 3X-UI counter against the

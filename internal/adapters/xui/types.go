@@ -39,6 +39,13 @@ type rawClientTraffic struct {
 	Enable     bool   `json:"enable"`
 	ExpiryTime int64  `json:"expiryTime"`
 	Reset      int    `json:"reset"`
+	// LastOnline is the unix-MILLISECONDS timestamp of the last time 3X-UI
+	// observed traffic from this client. New in 3X-UI 3.1.0 (the
+	// "clientStats enriched with lastOnline" feature). Zero = never seen
+	// or pre-3.1.0 panel (Go json drops unknown keys silently). Stored as
+	// int64 ms so callers can compare/diff without floating-point and
+	// convert to time.Time via time.UnixMilli at display sites.
+	LastOnline int64 `json:"lastOnline"`
 }
 
 // genericResponse is the envelope used by most 3X-UI endpoints.

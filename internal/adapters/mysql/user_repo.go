@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"gorm.io/gorm"
 
@@ -81,6 +82,34 @@ func (r *userRepo) BatchUpdateTrafficState(ctx context.Context, users []*domain.
 					"traffic_period_start":  u.TrafficPeriodStart,
 				}).Error
 			if err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+// BatchUpdateLastOnline writes per-user last_online_at via a single
+// transaction with N column-scoped UPDATEs — same batching rationale as
+// BatchUpdateTrafficState. Each entry overwrites the row's last_online_at
+// unconditionally; on a transient panel outage where the new max may be
+// older than what we previously stored, this can produce a brief backward
+// step until the next poll cycle re-reads the missing panel. Acceptable
+// for an advisory "last seen" display at self-hosted scale; if the value
+// ever drives policy (auto-disable on inactivity etc.) revisit and add a
+// "WHERE last_online_at IS NULL OR last_online_at < ?" guard.
+func (r *userRepo) BatchUpdateLastOnline(ctx context.Context, lastOnline map[int64]time.Time) error {
+	if len(lastOnline) == 0 {
+		return nil
+	}
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		for uid, ts := range lastOnline {
+			if uid == 0 {
+				return fmt.Errorf("BatchUpdateLastOnline requires non-zero user IDs; got %d", uid)
+			}
+			if err := tx.Model(&userRow{}).
+				Where("id = ?", uid).
+				Updates(map[string]any{"last_online_at": ts}).Error; err != nil {
 				return err
 			}
 		}

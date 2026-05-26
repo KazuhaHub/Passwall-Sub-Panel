@@ -4,6 +4,50 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## v3.6.0-beta.4 — 2026-05-25
+
+### Added (`lastOnline` 集成 ── Phase 2 第四刀,免费红利落地)
+
+- **admin 用户列表新增"最近活跃"列**:每个用户基于跨所有 owned 3X-UI client 的
+  `max(clientStats.lastOnline)` 显示相对时间(`刚刚` / `5 分钟前` / `2 小时前` /
+  `3 天前`),悬停 tooltip 显示绝对时间戳;超 30 天则显示 `YYYY-MM-DD` 防止
+  "9999天前" 这种没意义的标签;**永未活跃**或对接的全是 3X-UI < 3.1.0 panel
+  (没这个字段)的用户显示 `—`(static muted dash,不刷屏)。
+- **traffic poll 顺手聚合**:在 Phase 2 处理 ClientStats 时,对每个 user 取
+  `max(t.LastOnline)` 进 sink,end-of-cycle 通过新 `BatchUpdateLastOnline`
+  一次 transaction 写完;**零额外网络/3X-UI 调用**(完全 piggyback 已有的
+  clientStats fetch)。每个 panel 在线探测对 PSP 是免费红利。
+- **数据建模**:
+  - `xui/rawClientTraffic` + `ports.ClientTraffic` 加 `LastOnline int64`
+    (3X-UI 的 wire 单位是 unix-MILLISECONDS,13 位时间戳;实测确认,见
+    docs/3xui-compat.md "3.1.0 附带发现")
+  - `users.last_online_at` 新增列(`*time.Time`,nil = 从未活跃);
+    `domain.User.LastOnlineAt` 同步;GORM AutoMigrate 跨方言自动加列
+  - `UserRepo.BatchUpdateLastOnline(map[int64]time.Time)` 新方法,column-scoped
+    UPDATE wrapped in transaction(同 `BatchUpdateTrafficState` 的批写思路)
+  - 转换在 traffic poll 落地时一次完成(`time.UnixMilli(ms)`),其它路径不
+    需要知道 wire 单位
+- **回滚保护**:lastOnline 为 0 不入 sink、不入 UPDATE → 对接 3X-UI < 3.1.0 panel
+  的旧部署 `last_online_at` 字段一直保持 nil 也不会被错误地写成 epoch 0。
+
+### Frontend
+
+- `UsersView` 表头新增 `users.table.last_online` 列,放在 status 与 actions 之间。
+- 新增 `formatRelativeTimeShort(diffMs, t)` helper:5 档分桶(刚刚 / N 分钟前 /
+  N 小时前 / N 天前 / YYYY-MM-DD long-ago fallback),每档独立 i18n key 让翻译者
+  完全控制单复数(EN: `5m ago` / `1h ago` / `2d ago`)。
+- `User` interface(api/types.ts)加 `last_online_at?: string | null`,与后端
+  `userDTO.LastOnlineAt` 对齐。
+- i18n 同步 zh-CN / en-US:`users.table.last_online` + `users.relative_time.{
+  just_now,minutes_ago,hours_ago,days_ago}`。
+
+### Internal
+
+- `pollSink` 加 `lastOnlineMs map[int64]int64`(per-user max,natural dedup);
+  flush 阶段从 5 个 batch 升到 6 个(`mark("sink flush (6 batches)")`)。
+- traffic + user service 各自的 `fake` repo 补 `BatchUpdateLastOnline` stub,
+  保持 `ports.UserRepo` 实现完整。
+
 ## v3.6.0-beta.3 — 2026-05-25
 
 ### Added (远程升级 3X-UI / Xray ── Phase 2 第三刀,最危险的一刀)

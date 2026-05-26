@@ -163,6 +163,10 @@ type ClientSpec struct {
 }
 
 // ClientTraffic is the per-client traffic entry returned by 3X-UI.
+//
+// LastOnline is unix-MILLISECONDS (3X-UI 3.1.0+ enrichment; zero on older
+// panels). Kept as int64 so callers don't need to thread a time.Time
+// through every aggregation pass — converted at display/storage sites only.
 type ClientTraffic struct {
 	ID         int
 	InboundID  int
@@ -173,6 +177,7 @@ type ClientTraffic struct {
 	Enable     bool
 	ExpiryTime int64
 	Reset      int
+	LastOnline int64
 }
 
 // XUIPool routes write/read calls to the appropriate 3X-UI client by stable

@@ -58,6 +58,16 @@ func (r *fakeUserRepo) BatchUpdateTrafficState(ctx context.Context, users []*dom
 	return nil
 }
 
+func (r *fakeUserRepo) BatchUpdateLastOnline(ctx context.Context, lastOnline map[int64]time.Time) error {
+	for uid, ts := range lastOnline {
+		if cur, ok := r.users[uid]; ok {
+			t := ts
+			cur.LastOnlineAt = &t
+		}
+	}
+	return nil
+}
+
 func (r *fakeUserRepo) ClearEmergencyAccess(ctx context.Context, userID int64) error {
 	if cur, ok := r.users[userID]; ok {
 		cur.EmergencyUntil = nil

@@ -48,6 +48,12 @@ export interface User {
   /** Per-window traffic cap in bytes (0 = unlimited). Comes from system settings. */
   emergency_quota_bytes?: number
   created_at: string
+  /** RFC3339 timestamp of the most recent moment any owned 3X-UI client
+   *  reported activity (max(clientStats.lastOnline) per traffic poll).
+   *  Absent / null = never seen, or every panel is still on 3X-UI < 3.1.0
+   *  (where the lastOnline field doesn't exist). UI renders missing as
+   *  "—" rather than a 1970 date. */
+  last_online_at?: string | null
 }
 
 export interface CreateUserRequest {

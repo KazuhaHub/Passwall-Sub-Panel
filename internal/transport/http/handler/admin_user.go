@@ -118,6 +118,11 @@ type userDTO struct {
 	// second round-trip to settings.
 	EmergencyQuotaBytes int64     `json:"emergency_quota_bytes"`
 	CreatedAt           time.Time `json:"created_at"`
+	// LastOnlineAt is the most recent moment any owned 3X-UI client
+	// reported activity, written by the traffic poll (v3.6.0-beta.4).
+	// nil = never seen / panel still on 3X-UI < 3.1.0; UI renders that as
+	// "—" rather than a literal "1970-01-01".
+	LastOnlineAt *time.Time `json:"last_online_at,omitempty"`
 }
 
 type createUserRequest struct {
@@ -678,6 +683,7 @@ func (h *AdminUserHandler) toDTO(r *http.Request, u *domain.User) userDTO {
 		EmergencyUsedBytes:  usedBytes,
 		EmergencyQuotaBytes: quotaBytes,
 		CreatedAt:           u.CreatedAt,
+		LastOnlineAt:        u.LastOnlineAt,
 	}
 }
 

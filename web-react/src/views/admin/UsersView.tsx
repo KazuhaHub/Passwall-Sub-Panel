@@ -164,6 +164,34 @@ function avatarColor(seed: string): string {
   return `hsl(${h} 42% 42%)`
 }
 function isExpired(u: User) { return !!u.expire_at && new Date(u.expire_at).getTime() < Date.now() }
+
+// formatRelativeTimeShort renders a "X 分钟前" / "X 小时前" / "X 天前" style
+// label. Chunked rather than using Intl.RelativeTimeFormat directly because we
+// want a single integer pick per call (no auto-pluralization in EN that adds
+// "(s)"), and i18n keys give translators full control of the phrase. Buckets:
+//   < 1m  : just now
+//   < 1h  : minutes_ago
+//   < 1d  : hours_ago
+//   < 30d : days_ago
+//   ≥ 30d : long_ago_date (fall back to YYYY-MM-DD so the tooltip still has
+//           the exact timestamp but the column doesn't shout "9999天前")
+function formatRelativeTimeShort(diffMs: number, t: (k: string, opts?: Record<string, unknown>) => string): string {
+  if (diffMs < 0) diffMs = 0
+  const sec = Math.floor(diffMs / 1000)
+  if (sec < 60) return t('admin:users.relative_time.just_now', { defaultValue: '刚刚' })
+  const min = Math.floor(sec / 60)
+  if (min < 60) return t('admin:users.relative_time.minutes_ago', { count: min, defaultValue: '{{count}} 分钟前' })
+  const hr = Math.floor(min / 60)
+  if (hr < 24) return t('admin:users.relative_time.hours_ago', { count: hr, defaultValue: '{{count}} 小时前' })
+  const day = Math.floor(hr / 24)
+  if (day < 30) return t('admin:users.relative_time.days_ago', { count: day, defaultValue: '{{count}} 天前' })
+  // Long ago — emit YYYY-MM-DD instead of a relative label.
+  const d = new Date(Date.now() - diffMs)
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const dd = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${dd}`
+}
 function canQuickRenew(u: User) { return !!u.expire_at && u.auto_disabled_reason !== 'pending_delete' }
 function canSelect(u: User) { return u.auto_disabled_reason !== 'pending_delete' }
 function renewedExpireAt(u: User, days: number) {
@@ -779,6 +807,26 @@ export default function UsersView() {
     return <Typography sx={{ fontSize: 13, color: md.onSurface, fontVariantNumeric: 'tabular-nums' }}>{u.expire_date ?? expire.toLocaleDateString()}</Typography>
   }
 
+  // lastOnlineCell renders a compact relative-time label (e.g. "5 分钟前" /
+  // "2 天前") for the user's most recent observed activity across any owned
+  // 3X-UI client. The exact RFC3339 timestamp is in the tooltip for admins
+  // who want precision. Falls back to "—" for never-seen users (fresh
+  // accounts, or every panel still on 3X-UI < 3.1.0 where lastOnline isn't
+  // populated). Subtle muted color so a wall of "—" doesn't draw attention.
+  function lastOnlineCell(u: User) {
+    if (!u.last_online_at) {
+      return <Typography sx={{ fontSize: 13, color: md.onSurfaceVariant }}>—</Typography>
+    }
+    const ts = new Date(u.last_online_at)
+    const diffMs = Date.now() - ts.getTime()
+    const rel = formatRelativeTimeShort(diffMs, t)
+    return (
+      <Tooltip title={ts.toLocaleString()} placement="top">
+        <Typography sx={{ fontSize: 13, color: md.onSurface, whiteSpace: 'nowrap' }}>{rel}</Typography>
+      </Tooltip>
+    )
+  }
+
   function statusBadge(u: User) {
     // Highest priority: active emergency window. The user is technically
     // enabled but in a special "burning the emergency budget" state — admins
@@ -991,17 +1039,18 @@ export default function UsersView() {
                 <TableCell>{t('admin:users.table.traffic')}</TableCell>
                 <TableCell>{t('admin:users.table.expire')}</TableCell>
                 <TableCell>{t('admin:users.table.status')}</TableCell>
+                <TableCell>{t('admin:users.table.last_online', { defaultValue: '最近活跃' })}</TableCell>
                 <TableCell align="right">{t('admin:users.table.actions')}</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
               {loading && items.length === 0 && (
-                <TableRow><TableCell colSpan={9} sx={{ textAlign: 'center', py: 6 }}>
+                <TableRow><TableCell colSpan={10} sx={{ textAlign: 'center', py: 6 }}>
                   <CircularProgress size={24} />
                 </TableCell></TableRow>
               )}
               {!loading && items.length === 0 && (
-                <TableRow><TableCell colSpan={9} sx={{ textAlign: 'center', py: 6, color: md.onSurfaceVariant }}>—</TableCell></TableRow>
+                <TableRow><TableCell colSpan={10} sx={{ textAlign: 'center', py: 6, color: md.onSurfaceVariant }}>—</TableCell></TableRow>
               )}
               {items.map(u => (
                 <TableRow key={u.id} hover sx={{
@@ -1024,6 +1073,7 @@ export default function UsersView() {
                   <TableCell>{trafficCell(u)}</TableCell>
                   <TableCell>{expireBadge(u)}</TableCell>
                   <TableCell>{statusBadge(u)}</TableCell>
+                  <TableCell>{lastOnlineCell(u)}</TableCell>
                   <TableCell align="right">
                     <Tooltip title={t('admin:users.action.edit')}>
                       <IconButton size="small" onClick={() => openEdit(u)}><EditIcon fontSize="small" /></IconButton>

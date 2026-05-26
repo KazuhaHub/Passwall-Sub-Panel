@@ -117,6 +117,13 @@ type User struct {
 	// role, or the user changes password. Middleware.RequireAuth compares
 	// the claim against the live row and 401s on mismatch.
 	TokenVersion int
+	// LastOnlineAt is the most recent moment any of the user's owned 3X-UI
+	// clients reported activity, derived from max(clientStats.lastOnline)
+	// across panels each traffic-poll cycle. Nil = never seen (fresh user,
+	// or every panel still on 3X-UI < 3.1.0 where the lastOnline field
+	// doesn't exist). Pointer so "never seen" is distinguishable from
+	// "seen at unix epoch 0".
+	LastOnlineAt *time.Time
 	CreatedAt           time.Time
 	UpdatedAt           time.Time
 }

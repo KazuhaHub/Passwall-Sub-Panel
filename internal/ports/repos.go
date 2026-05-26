@@ -84,6 +84,13 @@ type UserRepo interface {
 	// fewer round-trips. Same column scope and emergency-column skip as
 	// the single-row UpdateTrafficState — see that doc.
 	BatchUpdateTrafficState(ctx context.Context, users []*domain.User) error
+	// BatchUpdateLastOnline writes per-user last_online_at via a single
+	// transaction (same batching rationale as BatchUpdateTrafficState).
+	// Called by the traffic poll once per cycle with the per-user max of
+	// 3X-UI clientStats.lastOnline. Drives the admin Users list "最近活跃"
+	// column. Map keying mirrors how the poll aggregates the values —
+	// callers don't need a slice rebuild.
+	BatchUpdateLastOnline(ctx context.Context, lastOnline map[int64]time.Time) error
 	// ClearEmergencyAccess nulls emergency_until and zeroes
 	// emergency_baseline_bytes for one user via a targeted write. The traffic
 	// poll calls it (under user.Service's emergency lock) when a period

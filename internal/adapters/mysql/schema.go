@@ -68,6 +68,13 @@ type userRow struct {
 	// value. Default 0 so existing rows simply pass the check on a
 	// row that hasn't been bumped yet.
 	TokenVersion int `gorm:"default:0;not null"`
+	// LastOnlineAt is the most recent moment any of the user's owned
+	// 3X-UI clients reported activity (max(clientStats.lastOnline)
+	// across panels). Refreshed by the traffic poll. Nil = never seen
+	// online (fresh user or panels still on 3X-UI < 3.1.0 where the
+	// lastOnline field doesn't exist). Pointer so "never seen" is
+	// distinguishable from "seen at unix epoch 0".
+	LastOnlineAt *time.Time
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
 }
@@ -108,6 +115,7 @@ func (r *userRow) toDomain() *domain.User {
 		EmergencyUntil:         r.EmergencyUntil,
 		EmergencyBaselineBytes: r.EmergencyBaselineBytes,
 		TokenVersion:           r.TokenVersion,
+		LastOnlineAt:           r.LastOnlineAt,
 		CreatedAt:              r.CreatedAt,
 		UpdatedAt:              r.UpdatedAt,
 	}
@@ -147,6 +155,7 @@ func userFromDomain(u *domain.User) *userRow {
 		EmergencyUntil:         u.EmergencyUntil,
 		EmergencyBaselineBytes: u.EmergencyBaselineBytes,
 		TokenVersion:           u.TokenVersion,
+		LastOnlineAt:           u.LastOnlineAt,
 		CreatedAt:              u.CreatedAt,
 		UpdatedAt:              u.UpdatedAt,
 	}

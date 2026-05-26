@@ -949,7 +949,14 @@
       "traffic": "Traffic",
       "expire": "Expires",
       "status": "Status",
+      "last_online": "Last online",
       "actions": "Actions"
+    },
+    "relative_time": {
+      "just_now": "just now",
+      "minutes_ago": "{{count}}m ago",
+      "hours_ago": "{{count}}h ago",
+      "days_ago": "{{count}}d ago"
     },
     "status": {
       "enabled": "Enabled",

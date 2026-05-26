@@ -562,6 +562,7 @@ func rawTrafficsToPorts(raws []rawClientTraffic) []ports.ClientTraffic {
 			Enable:     r.Enable,
 			ExpiryTime: r.ExpiryTime,
 			Reset:      r.Reset,
+			LastOnline: r.LastOnline,
 		}
 	}
 	return out

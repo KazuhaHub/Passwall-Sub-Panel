@@ -949,7 +949,14 @@
       "traffic": "流量",
       "expire": "到期",
       "status": "状态",
+      "last_online": "最近活跃",
       "actions": "操作"
+    },
+    "relative_time": {
+      "just_now": "刚刚",
+      "minutes_ago": "{{count}} 分钟前",
+      "hours_ago": "{{count}} 小时前",
+      "days_ago": "{{count}} 天前"
     },
     "status": {
       "enabled": "启用",
