@@ -1202,7 +1202,11 @@
     "action": {
       "test": "测试连接",
       "edit": "编辑",
-      "delete": "删除"
+      "delete": "删除",
+      "more": "更多操作",
+      "upgrade": "升级",
+      "upgrade_panel": "升级 3X-UI 面板",
+      "upgrade_xray": "升级 Xray (最新)"
     },
     "validate": {
       "url_required": "URL 必填",
@@ -1216,13 +1220,20 @@
       "test_ok": "连接 OK，3X-UI 有 {{count}} 个 inbound",
       "batch_tested": "已检测 {{count}} 台服务器",
       "batch_deleted": "已删除 {{count}} 台服务器",
-      "batch_partial": "已删除 {{ok}} 台服务器，失败 {{fail}} 台"
+      "batch_partial": "已删除 {{ok}} 台服务器，失败 {{fail}} 台",
+      "upgrade_panel_started": "已发起 3X-UI 升级到 {{target}}，约 60 秒后 PSP 跑 smoke probe，结果写入 audit log",
+      "upgrade_panel_blocked": "拒绝升级：目标版本 {{latest}} 超出 PSP 支持范围（max {{max}}），请先升级 PSP",
+      "upgrade_xray_ok": "Xray 已升级到 {{version}}"
     },
     "confirm": {
       "delete_title": "删除服务器",
       "delete_message": "删除服务器 {{name}}？该服务器必须没有节点引用才能删除。",
       "batch_delete_title": "批量删除服务器",
-      "batch_delete_message": "确定删除 {{names}}{{suffix}}？这些服务器必须没有节点引用才能删除。"
+      "batch_delete_message": "确定删除 {{names}}{{suffix}}？这些服务器必须没有节点引用才能删除。",
+      "upgrade_panel_title": "升级 3X-UI 面板",
+      "upgrade_panel_message": "PSP 将先检查目标版本是否在已测试范围内，在范围内才会触发 {{name}} 的自升级。面板会重启，约 60 秒后 PSP 跑 smoke probe 验证。是否继续？",
+      "upgrade_xray_title": "升级 Xray (最新版)",
+      "upgrade_xray_message": "在 {{name}} 上安装最新版 xray-core 二进制。面板自身不重启，只重启 xray 子进程。是否继续？"
     }
   }
 }

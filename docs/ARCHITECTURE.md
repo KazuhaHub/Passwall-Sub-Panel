@@ -1504,6 +1504,7 @@ minor / patch 内升级**不需要**跑 migrate（按 [[feedback_semver]] 规则
 - 当下一个 major（vN+1）发版时：
   - vN+1 二进制**删除** vN-1 → vN 的迁移（即本仓库的 legacy_schema.go + migrate.go）
   - vN+1 二进制**新增** vN → vN+1 的迁移
+  - vN+1 二进制的 migrate 子命令**额外内嵌** vN 全部 `cleanupLegacyState` 段（见 [§16.4](#164-同-major-内部演进cleanuplegacystate)），让"任意 vN.x → vN+1" 不再要求 admin 先升到 vN 最新版
   - 在 ARCHITECTURE.md 增补一节"vN → vN+1 schema 变更"
 
 ### 16.4 同 major 内部演进：cleanupLegacyState
@@ -1519,28 +1520,39 @@ minor / patch 内升级**不需要**跑 migrate（按 [[feedback_semver]] 规则
 3. **严格 curated，绝不"自动 DROP 不认识的表"**：admin 可能自己建了分析视图 / 缓存表 / 第三方集成中间表，自动 DROP 等于销毁用户数据
 4. **打 log**：每次实际命中了清理逻辑（有行被改/删）就 `log.Warn` 一条，让 admin 在 docker logs 里能看到"哦它确实清了什么"
 
-**大版本节点回收规则**：
+**大版本节点回收规则（v3.6.0 修订）**：
 
-vN+1 发版时，**`cleanupLegacyState` 里所有 vN.x 标签的段全部删除**。理由：
-- vN-1 → vN 升级路径强制走 `psp migrate`（[§16.1](#161-大版本升级路径) 政策）
-- 所以任何到达 vN+1 的部署，必然先在 vN 的某个版本上跑过那些清理段（因为 `EnsureSchema` 每次启动都跑）
-- vN+1 binary 不再会遇到任何 vN.x 之前的 legacy 状态 → 那些 cleanup 段是死代码，删
+vN+1 发版时，`cleanupLegacyState` 里所有 vN.x 标签的段从 `EnsureSchema` 里**移除**，但**搬进 vN+1 的 `psp migrate` 子命令**，作为 vN→vN+1 迁移流程的必跑前序步骤。
 
-这条规则同时给了 `cleanupLegacyState` 一个**自然的尺寸上限**：最多累积一个 major 内的演进，约 10 段以内 / 100 行内。不会无限增长。
+为什么这样改：
+
+- **admin 不再被迫先升到 vN 最新版**：旧规则隐含要求 "任意 vN.x → vN+1 之前必须先升到 vN.last,把 cleanup 都跑过"——operationally 麻烦,跨度大。新规则允许 admin 从 vN.0 / vN.5 / vN.99 任意一个 minor 直接升 vN+1,所有 vN 内的 cleanup 由 vN+1 migrate 子命令补跑
+- **EnsureSchema 仍然保持自然尺寸上限**：vN+1 binary 启动只见 vN+1 自身累积的 cleanup 段（约 10 段以内 / 100 行内）, 不带 vN 历史 → AutoMigrate 后的每次启动都很轻
+- **migrate 命令容积也有上限**：按 [§16.1](#161-大版本升级路径) 链式升级政策, vN+1 的 migrate 只需要兼容**上一个 major**(vN.x), 不需要追溯 vN-1 及更早 → migrate 内嵌的 cleanup 历史最多就是一个 major 的累积
+
+vN+1 migrate 子命令的执行顺序：
+
+1. 跑全部"原 vN.x 的 cleanupLegacyState 段"（从 vN binary 搬过来的那批；幂等,跑过的再跑无害）
+2. 跑 vN → vN+1 的 schema 显式转换（如果有）
+3. 落到 `EnsureSchema`,AutoMigrate 把 schema 推到 vN+1 最新
+
+这条规则同时保证了 `cleanupLegacyState` 函数本身的**自然尺寸上限**:最多累积一个 major 内的演进,约 10 段以内 / 100 行内。不会无限增长。
 
 **记录每一段**：当你在 `cleanupLegacyState` 里加新段时，**同时在 [`docs/CHANGELOG.md`](CHANGELOG.md) 对应版本下记一笔"legacy cleanup: ..."**（人话描述清的是什么），这样回看历史不用读代码。
 
 ### 16.4.1 当前 cleanupLegacyState 段位 (registry)
 
-下次 major 发版（v4.0.0）时**整张表清空**，对应代码段从 `cleanupLegacyState` 全部删除。维护这张表是 §16.4 "记录每一段" 的集中版本（CHANGELOG 是流水账，这是当前快照）。
+下次 major 发版（v4.0.0）时**整张表清空**——这些段从 `cleanupLegacyState` 移除,**搬进 v4 的 `psp migrate` 子命令** 作为 v3.x → v4 迁移的必跑前序步骤(见 [§16.4](#164-同-major-内部演进cleanuplegacystate) 新规则)。维护这张表是 §16.4 "记录每一段" 的集中版本（CHANGELOG 是流水账,这里是当前快照）。
 
-| 段标签 | 引入版本 | 解决的问题 | evict-by |
+| 段标签 | 引入版本 | 解决的问题 | 搬迁到 |
 |---|---|---|---|
-| separator 表迁移 | v3.0.0-beta.7 | `nodes` 表里 `kind='separator'` 的行迁到独立 `nodes_separator` 表;旧行残留会被 UI 渲染成"幽灵 separator" | v4.0.0 |
-| separator visibility 模型重塑 | v3.0.0-rc.4 | 把 `show_in_all_groups` (bool) + `group_ids` 替换成 `mode` (string) + `node_ids`;legacy 列残留浪费存储 | v4.0.0 |
-| sub_logs 旧单列索引清理 | v3.6.0-beta.1 | v3.5.1-beta.2 把 `sub_logs` 索引从两个独立单列升级到一个复合 + 一个独立;AutoMigrate 不会自动 drop 旧索引,残留增加每行 INSERT 写入开销 | v4.0.0 |
+| separator 表迁移 | v3.0.0-beta.7 | `nodes` 表里 `kind='separator'` 的行迁到独立 `nodes_separator` 表;旧行残留会被 UI 渲染成"幽灵 separator" | v4.0.0 migrate |
+| separator visibility 模型重塑 | v3.0.0-rc.4 | 把 `show_in_all_groups` (bool) + `group_ids` 替换成 `mode` (string) + `node_ids`;legacy 列残留浪费存储 | v4.0.0 migrate |
+| sub_logs 旧单列索引清理 | v3.6.0-beta.1 | v3.5.1-beta.2 把 `sub_logs` 索引从两个独立单列升级到一个复合 + 一个独立;AutoMigrate 不会自动 drop 旧索引,残留增加每行 INSERT 写入开销 | v4.0.0 migrate |
 
-**操作员视角**：每段都会在 PSP 启动时自动跑（幂等），新升级的部署看到对应 `[cleanupLegacyState]` 行就说明命中了；旧部署再启动就什么都不做。**不需要手动操作 DB**。
+**操作员视角**：每段都会在 PSP 启动时自动跑(幂等),新升级的部署看到对应 `[cleanupLegacyState]` 行就说明命中了;旧部署再启动就什么都不做。**不需要手动操作 DB**。
+
+**v4.0.0 实施者视角**:发 v4 时把上面这几段代码从 [schema.go `cleanupLegacyState`](../internal/adapters/mysql/schema.go) 移除,原样复制进 [`internal/migrate/`](../internal/migrate/) 的 v3→v4 迁移流程开头(顺序: 先跑搬过来的 cleanup, 再跑 v3→v4 schema 显式转换, 最后让 v4 的 `EnsureSchema` AutoMigrate 收尾)。已经在 v3.5+ 跑过这些 cleanup 的部署再次执行也是无害的(幂等性已经在原 cleanup 写入时保证)。
 
 ---
 

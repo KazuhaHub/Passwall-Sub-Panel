@@ -930,6 +930,11 @@ func (c *fakeXUIClient) GetInboundClients(ctx context.Context, inboundID int) ([
 func (c *fakeXUIClient) GetServerStatus(ctx context.Context) (*ports.ServerStatus, error) {
 	return &ports.ServerStatus{PanelVersion: "3.1.0", XrayVersion: "26.5.9", XrayState: "running"}, nil
 }
+func (c *fakeXUIClient) GetPanelUpdateInfo(ctx context.Context) (*ports.PanelUpdateInfo, error) {
+	return &ports.PanelUpdateInfo{CurrentVersion: "3.1.0", LatestVersion: "v3.1.0", UpdateAvailable: false}, nil
+}
+func (c *fakeXUIClient) UpdatePanel(ctx context.Context) error            { return nil }
+func (c *fakeXUIClient) InstallXray(ctx context.Context, v string) error { return nil }
 
 // When snapshots have been wiped but the user still carries a non-zero
 // LifetimeTotalBytes, bootstrap deltas for ownerships created AFTER the

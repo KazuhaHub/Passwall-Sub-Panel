@@ -1202,7 +1202,11 @@
     "action": {
       "test": "Test",
       "edit": "Edit",
-      "delete": "Delete"
+      "delete": "Delete",
+      "more": "More actions",
+      "upgrade": "Upgrade",
+      "upgrade_panel": "Upgrade 3X-UI panel",
+      "upgrade_xray": "Upgrade Xray (latest)"
     },
     "validate": {
       "url_required": "URL is required",
@@ -1216,13 +1220,20 @@
       "test_ok": "Connected. 3X-UI has {{count}} inbound(s).",
       "batch_tested": "Tested {{count}} servers",
       "batch_deleted": "Deleted {{count}} servers",
-      "batch_partial": "Deleted {{ok}} servers, {{fail}} failed"
+      "batch_partial": "Deleted {{ok}} servers, {{fail}} failed",
+      "upgrade_panel_started": "3X-UI upgrade to {{target}} initiated; PSP will run a smoke probe in ~60s and log success/failure to the audit trail.",
+      "upgrade_panel_blocked": "Upgrade refused: target {{latest}} is outside PSP's supported range (max {{max}}); upgrade PSP first.",
+      "upgrade_xray_ok": "Xray upgraded to {{version}}"
     },
     "confirm": {
       "delete_title": "Delete server",
       "delete_message": "Delete server {{name}}? The server must have no nodes referencing it.",
       "batch_delete_title": "Delete servers",
-      "batch_delete_message": "Delete {{names}}{{suffix}}? These servers must have no nodes referencing them."
+      "batch_delete_message": "Delete {{names}}{{suffix}}? These servers must have no nodes referencing them.",
+      "upgrade_panel_title": "Upgrade 3X-UI panel",
+      "upgrade_panel_message": "PSP will check the target version first and only fire the upgrade on {{name}} if it's within the tested range. The panel will restart; PSP runs a smoke probe ~60s later. Continue?",
+      "upgrade_xray_title": "Upgrade Xray (latest)",
+      "upgrade_xray_message": "Install the latest xray-core on {{name}}. The panel itself stays up; only the xray child process restarts. Continue?"
     }
   }
 }

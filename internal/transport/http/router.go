@@ -258,13 +258,15 @@ func NewRouter(d Deps) *gin.Engine {
 		staffGroup.GET("/traffic/nodes/top", trafficH.NodesTop)
 		staffGroup.GET("/traffic/nodes/history", trafficH.NodesHistory)
 
-		servers := handler.NewAdminServersHandler(d.Repos.XUIPanel, d.Pool, d.Repos.Node, d.Repos.Ownership)
+		servers := handler.NewAdminServersHandler(d.Repos.XUIPanel, d.Pool, d.Repos.Node, d.Repos.Ownership, d.Repos.Audit, d.Async)
 		// 3X-UI panel credentials live here — never operator.
 		adminGroup.GET("/servers", servers.List)
 		adminGroup.POST("/servers", servers.Create)
 		adminGroup.PUT("/servers/:id", servers.Update)
 		adminGroup.DELETE("/servers/:id", servers.Delete)
 		adminGroup.POST("/servers/probe", servers.Test)
+			adminGroup.POST("/servers/:id/upgrade-panel", servers.UpgradePanel)
+			adminGroup.POST("/servers/:id/upgrade-xray", servers.UpgradeXray)
 
 		settings := handler.NewAdminSettingsHandler(d.Repos.Settings, d.JWTParams)
 		adminGroup.GET("/settings/ui", settings.Get)

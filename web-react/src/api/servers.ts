@@ -78,3 +78,43 @@ export async function testServer(id: number) {
   const { data } = await client.post<TestResult>('/admin/servers/probe', { id })
   return data
 }
+
+// UpgradePanelResult mirrors the backend's gin.H response from
+// AdminServersHandler.UpgradePanel:
+//   - 202 success: { ok: true, started: true, target_version, message }
+//   - 409 conflict (target untested): { ok: false, reason: "untested_target",
+//       latest_version, psp_min_xui, psp_max_xui, message }
+//   - 502 bad gateway (call failed mid-fire): { ok: false, error }
+// Axios surfaces non-2xx via the throw path so we read the same shape from
+// AxiosError.response.data in the catch site.
+export interface UpgradePanelResult {
+  ok: boolean
+  started?: boolean
+  target_version?: string
+  message?: string
+  reason?: string
+  latest_version?: string
+  psp_min_xui?: string
+  psp_max_xui?: string
+  error?: string
+}
+
+export async function upgradePanel(id: number) {
+  const { data } = await client.post<UpgradePanelResult>(`/admin/servers/${id}/upgrade-panel`)
+  return data
+}
+
+export interface UpgradeXrayResult {
+  ok: boolean
+  version?: string
+  message?: string
+  error?: string
+}
+
+// upgradeXray defaults version to "latest" on the backend when the field is
+// empty / missing — pass undefined for the common "give me latest" case.
+export async function upgradeXray(id: number, version?: string) {
+  const body = version ? { version } : {}
+  const { data } = await client.post<UpgradeXrayResult>(`/admin/servers/${id}/upgrade-xray`, body)
+  return data
+}

@@ -407,6 +407,64 @@ func (c *Client) GetServerStatus(ctx context.Context) (*ports.ServerStatus, erro
 	}, nil
 }
 
+// GetPanelUpdateInfo hits /panel/api/server/getPanelUpdateInfo. Returns the
+// panel's current version, the latest 3X-UI tag reachable on GitHub, and
+// whether an update is available. CurrentVersion is reported without a "v"
+// prefix ("3.1.0") while LatestVersion typically carries one ("v3.1.0").
+// PSP normalizes both via version.parseSemver.
+func (c *Client) GetPanelUpdateInfo(ctx context.Context) (*ports.PanelUpdateInfo, error) {
+	var raw struct {
+		CurrentVersion  string `json:"currentVersion"`
+		LatestVersion   string `json:"latestVersion"`
+		UpdateAvailable bool   `json:"updateAvailable"`
+	}
+	if err := c.doJSON(ctx, http.MethodGet, "/panel/api/server/getPanelUpdateInfo", nil, &raw); err != nil {
+		return nil, err
+	}
+	return &ports.PanelUpdateInfo{
+		CurrentVersion:  raw.CurrentVersion,
+		LatestVersion:   raw.LatestVersion,
+		UpdateAvailable: raw.UpdateAvailable,
+	}, nil
+}
+
+// UpdatePanel triggers /panel/api/server/updatePanel. The 3X-UI panel
+// self-updates to the latest GitHub release and restarts. The HTTP
+// connection drops mid-call as the panel binary exits — that is the
+// expected success path, NOT an error. We swallow EOF / connection-reset
+// errors here so the caller (admin handler) sees a clean nil and can
+// proceed straight to scheduling the post-upgrade smoke probe.
+func (c *Client) UpdatePanel(ctx context.Context) error {
+	err := c.doJSON(ctx, http.MethodPost, "/panel/api/server/updatePanel", nil, nil)
+	if err == nil {
+		return nil
+	}
+	// A panel that already started its restart returns EOF / "connection
+	// reset" / "unexpected end of JSON input" — that's the success
+	// signature. Treat anything that looks like a transport-side close
+	// after a successful POST as ok.
+	msg := err.Error()
+	if strings.Contains(msg, "EOF") ||
+		strings.Contains(msg, "connection reset") ||
+		strings.Contains(msg, "broken pipe") ||
+		strings.Contains(msg, "empty response body") ||
+		strings.Contains(msg, "unexpected end of JSON") {
+		return nil
+	}
+	return err
+}
+
+// InstallXray triggers /panel/api/server/installXray/:version. Pass "latest"
+// for the newest xray-core release. Unlike UpdatePanel, the 3X-UI panel
+// itself keeps running across this call; only the xray-core child process
+// is restarted, so the HTTP response comes back normally.
+func (c *Client) InstallXray(ctx context.Context, version string) error {
+	if version == "" {
+		version = "latest"
+	}
+	return c.doJSON(ctx, http.MethodPost, "/panel/api/server/installXray/"+url.PathEscape(version), nil, nil)
+}
+
 // GetInboundClients fetches the inbound and decodes settings.clients[] into
 // a normalised slice. Returns empty if the inbound has no clients defined.
 func (c *Client) GetInboundClients(ctx context.Context, inboundID int) ([]ports.ClientDetail, error) {

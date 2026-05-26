@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useState, type FormEvent, type MouseEvent } from 'react'
 import {
   Box,
   Button,
@@ -11,6 +11,8 @@ import {
   DialogTitle,
   IconButton,
   InputAdornment,
+  Menu,
+  MenuItem,
   Table,
   TableBody,
   TableCell,
@@ -32,6 +34,8 @@ import VisibilityOffIcon from '@mui/icons-material/VisibilityOff'
 import { useTranslation } from 'react-i18next'
 
 import WarningAmberIcon from '@mui/icons-material/WarningAmber'
+import MoreVertIcon from '@mui/icons-material/MoreVert'
+import UpgradeIcon from '@mui/icons-material/Upgrade'
 
 import {
   createServer,
@@ -39,6 +43,8 @@ import {
   listServers,
   testServer,
   updateServer,
+  upgradePanel,
+  upgradeXray,
   type Server,
 } from '@/api/servers'
 import { confirm } from '@/components/ConfirmHost'
@@ -94,6 +100,13 @@ export default function ServersView() {
   const [selected, setSelected] = useState<Set<number>>(new Set())
   const [batchBusy, setBatchBusy] = useState<'test' | 'delete' | ''>('')
   const [singleTesting, setSingleTesting] = useState<number | null>(null)
+  // Upgrade action state. menuAnchor + menuTarget power the kebab-menu
+  // overlay (one global menu re-anchored per row). upgrading marks a panel
+  // whose upgrade-panel / upgrade-xray request is in flight so we can
+  // disable the corresponding menu item.
+  const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null)
+  const [menuTarget, setMenuTarget] = useState<Server | null>(null)
+  const [upgrading, setUpgrading] = useState<number | null>(null)
 
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editing, setEditing] = useState<Server | null>(null)
@@ -182,6 +195,102 @@ export default function ServersView() {
     setSingleTesting(s.id)
     try { await probeServer(s, true) }
     finally { setSingleTesting(null) }
+  }
+
+  function openMenu(e: MouseEvent<HTMLElement>, s: Server) {
+    setMenuAnchor(e.currentTarget)
+    setMenuTarget(s)
+  }
+
+  function closeMenu() {
+    setMenuAnchor(null)
+    setMenuTarget(null)
+  }
+
+  async function runUpgradePanel(s: Server) {
+    closeMenu()
+    const ok = await confirm({
+      title: t('admin:servers.confirm.upgrade_panel_title', { defaultValue: '升级 3X-UI 面板' }),
+      message: t('admin:servers.confirm.upgrade_panel_message', {
+        name: s.name,
+        defaultValue: 'PSP 将先检查目标版本是否在已测试范围内,在范围内才会触发 {{name}} 的自升级。面板会重启,约 60 秒后 PSP 跑 smoke probe 验证。是否继续?',
+      }),
+      confirmText: t('admin:servers.action.upgrade', { defaultValue: '升级' }),
+    })
+    if (!ok) return
+    setUpgrading(s.id)
+    try {
+      const r = await upgradePanel(s.id)
+      // 202 success path
+      pushSnack(
+        t('admin:servers.toast.upgrade_panel_started', {
+          target: r.target_version ?? '?',
+          defaultValue: '已发起 3X-UI 升级到 {{target}},约 60 秒后 PSP 跑 smoke probe,结果写入 audit log',
+        }),
+        'success',
+      )
+    } catch (err) {
+      // 409 = pre-check blocked (target untested), 502 = call failed.
+      // Both surface a structured body the axios interceptor doesn't
+      // know how to format — we render the most actionable message here.
+      const resp = (err as { response?: { status?: number; data?: {
+        reason?: string
+        latest_version?: string
+        psp_max_xui?: string
+        error?: string
+        message?: string
+      } } }).response
+      const body = resp?.data
+      if (resp?.status === 409 && body?.reason === 'untested_target') {
+        pushSnack(
+          t('admin:servers.toast.upgrade_panel_blocked', {
+            latest: body.latest_version ?? '?',
+            max: body.psp_max_xui ?? '?',
+            defaultValue: '拒绝升级: 目标版本 {{latest}} 超出 PSP 支持范围 (max {{max}}),请先升级 PSP',
+          }),
+          'warning',
+        )
+      } else {
+        const msg = body?.error ?? body?.message ?? (err as { message?: string }).message ?? 'unknown'
+        pushSnack(msg, 'error')
+      }
+    } finally {
+      setUpgrading(null)
+    }
+  }
+
+  async function runUpgradeXray(s: Server) {
+    closeMenu()
+    const ok = await confirm({
+      title: t('admin:servers.confirm.upgrade_xray_title', { defaultValue: '升级 Xray (最新版)' }),
+      message: t('admin:servers.confirm.upgrade_xray_message', {
+        name: s.name,
+        defaultValue: '在 {{name}} 上安装最新版 xray-core 二进制。面板自身不重启,只重启 xray 子进程。是否继续?',
+      }),
+      confirmText: t('admin:servers.action.upgrade', { defaultValue: '升级' }),
+    })
+    if (!ok) return
+    setUpgrading(s.id)
+    try {
+      const r = await upgradeXray(s.id)
+      pushSnack(
+        t('admin:servers.toast.upgrade_xray_ok', {
+          version: r.version ?? 'latest',
+          defaultValue: 'Xray 已升级到 {{version}}',
+        }),
+        'success',
+      )
+      // The backend already refreshed UpdateVersion server-side, so
+      // pull the row again so the Version column reflects new xray ver.
+      void probeServer(s)
+    } catch (err) {
+      const msg = (err as { response?: { data?: { error?: string } }; message?: string }).response?.data?.error
+        ?? (err as { message?: string }).message
+        ?? 'unknown'
+      pushSnack(msg, 'error')
+    } finally {
+      setUpgrading(null)
+    }
   }
 
   function openCreate() {
@@ -639,6 +748,18 @@ export default function ServersView() {
                     <IconButton size="small" onClick={() => confirmDelete(s)} aria-label={t('admin:servers.action.delete')} sx={{ color: md.error }}>
                       <DeleteIcon fontSize="small" />
                     </IconButton>
+                    {/* Kebab menu hosts the destructive remote-upgrade
+                        actions — kept out of the always-visible row
+                        actions so an accidental click can't fire
+                        something that restarts the remote panel. */}
+                    <IconButton
+                      size="small"
+                      onClick={e => openMenu(e, s)}
+                      disabled={upgrading === s.id}
+                      aria-label={t('admin:servers.action.more', { defaultValue: '更多操作' })}
+                    >
+                      {upgrading === s.id ? <CircularProgress size={14} /> : <MoreVertIcon fontSize="small" />}
+                    </IconButton>
                   </TableCell>
                 </TableRow>
               ))}
@@ -646,6 +767,27 @@ export default function ServersView() {
           </Table>
         </TableContainer>
       </Card>
+
+      {/* Per-row kebab menu — hosts destructive remote-upgrade actions
+          (panel + xray) so a stray click on the always-visible row
+          buttons can't trigger a 3X-UI restart. Re-anchored per row,
+          one global Menu component. */}
+      <Menu
+        anchorEl={menuAnchor}
+        open={!!menuAnchor && !!menuTarget}
+        onClose={closeMenu}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+        transformOrigin={{ vertical: 'top', horizontal: 'right' }}
+      >
+        <MenuItem onClick={() => menuTarget && runUpgradePanel(menuTarget)}>
+          <UpgradeIcon fontSize="small" sx={{ mr: 1 }} />
+          {t('admin:servers.action.upgrade_panel', { defaultValue: '升级 3X-UI 面板' })}
+        </MenuItem>
+        <MenuItem onClick={() => menuTarget && runUpgradeXray(menuTarget)}>
+          <UpgradeIcon fontSize="small" sx={{ mr: 1 }} />
+          {t('admin:servers.action.upgrade_xray', { defaultValue: '升级 Xray (最新)' })}
+        </MenuItem>
+      </Menu>
 
       {/* Create/Edit dialog */}
       <Dialog

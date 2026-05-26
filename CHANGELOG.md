@@ -4,6 +4,82 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## v3.6.0-beta.3 — 2026-05-25
+
+### Added (远程升级 3X-UI / Xray ── Phase 2 第三刀,最危险的一刀)
+
+- **Servers 页 ⋮ kebab 菜单新增"升级 3X-UI 面板" / "升级 Xray (最新)" 两项**:
+  destructive 操作藏在 kebab 里(不放进常驻 Actions 按钮),避免误点;每项点击
+  先弹 confirm dialog 二次确认,确认后才发请求。
+- **`POST /api/admin/servers/:id/upgrade-panel`** ── 远程升级 3X-UI 面板。
+  关键设计:**PSP 先 pre-check 目标版本**:
+  - 调 `GetPanelUpdateInfo` 拿 3X-UI 准备升级到的 `latestVersion`(GitHub 上的最新)
+  - 用 `version.CheckXUI(latestVersion)` 对照 PSP `MaxTestedXUI`
+  - **超出范围直接拒绝**(409 + `reason: "untested_target"` + 详细 message)
+  - 在范围内才调 `UpdatePanel` 触发自升级
+  - 写 `panel_upgrade_initiated` / `panel_upgrade_blocked` audit 行
+  这就是用户提的"升级到固定版本,而不是最新版"在当前 3X-UI API 限制下的落地——
+  3X-UI 的 `/updatePanel` **没有版本参数**(只能 latest),所以 PSP 没法主动指定;
+  但 PSP 可以**主动拒绝**升级到未测试版本,让 admin "先升 PSP 再升 3X-UI"。
+- **后台 post-upgrade smoke probe** ── `UpdatePanel` 触发后,后端 fire 一个
+  `safego.GoTracked` goroutine:
+  1. 等 60s 让 3X-UI 完成自升级 + 重启
+  2. 每 10s 调 `GetServerStatus`,最多重试 12 次(共 2 min 额外窗口)
+  3. `/status` 一旦回 → 立刻调 `ListInbounds` 验证 schema 没崩(就是 2026-05-23
+     的 3.1.0 schema-break 模式)
+  4. 全部 ok → 写 `panel_upgrade_succeeded` audit + 刷新 `xui_panels` 版本快照
+  5. 任何阶段失败 → 写 `panel_upgrade_failed` 或 `panel_upgrade_schema_break`
+     audit(后者专门对应"panel 回来了但响应 schema 崩了"的情况,grep
+     `schema_break` 立即定位)
+  Admin 在响应里立即拿到 202 + "已发起",真正的成败 60-180s 后 audit 显形。
+- **`POST /api/admin/servers/:id/upgrade-xray`** ── 远程升级 xray-core 二进制。
+  body 可选 `{version: "latest" | "v25.x.x"}`,缺省 `"latest"`。**不做 pre-check**
+  ── xray 跟 PSP 兼容性低耦合(PSP 只调 3X-UI panel,不直接调 xray API),admin
+  自由升级。**不调 smoke probe** ── 3X-UI panel 自身不重启,只重启 xray 子进程,
+  请求同步返回结果。完成后立即刷新 `xui_panels.xray_version` 让 UI 反映新版本。
+- 全部 upgrade 路径写 audit:`actor` = admin upn(在线请求)/ `"upgrade-smoke"`
+  (后台 smoke probe);`target` = `panel=<id> name=<name> target=<version>`;
+  `after_json` 携带详细 message(成功/失败原因)。
+
+### Frontend
+
+- ServersView 每行 Actions 列新增 ⋮ `MoreVertIcon` 按钮,展开后是
+  "升级 3X-UI 面板" / "升级 Xray (最新)" 两项,各自带 `UpgradeIcon` 指示。
+- 升级面板拒绝时(409 + `untested_target`)弹 **warning** toast:"拒绝升级:
+  目标版本 X 超出 PSP 支持范围 (max Y),请先升级 PSP",而不是 generic error。
+- Xray 升级成功后顺手再 `probeServer(s)` 一次,刷新 Version 列里的 Xray
+  版本号(后端虽然已 UpdateVersion,但前端 items 还要 merge 才能立即显示)。
+- i18n 同步 zh-CN / en-US:`servers.action.{more,upgrade,upgrade_panel,upgrade_xray}`
+  + `servers.toast.upgrade_panel_{started,blocked}` / `servers.toast.upgrade_xray_ok`
+  + `servers.confirm.upgrade_{panel,xray}_{title,message}`。
+
+### Docs (跨大版本升级政策修订)
+
+- **ARCHITECTURE §16.4 改写**:之前"vN+1 发版时所有 vN.x cleanup 段直接删除"
+  改成"**搬进 vN+1 的 `psp migrate` 子命令**作为必跑前序"。这样 admin 不再被迫
+  先升到 vN 最新版才能升 vN+1 —— 从任意 vN.x(包括 vN.0 / vN.5 / vN.99)直接
+  升 vN+1.0 都 OK,所有 vN 内 cleanup 由 vN+1 migrate 补跑。
+- migrate 容积仍有上限:vN+1 migrate 只**链式兼容**上一个 major(vN.x),不追溯
+  vN-1 及更早。admin 跨多 major(比如 v3.x → v5.x)必须分段升(v3 → v4 → v5),
+  每步分别跑该版本的 migrate。
+- §16.4.1 registry 表新增 "搬迁到" 列(原 "evict-by"),为 v4.0.0 实施者列了
+  v3 当前 3 段 cleanupLegacyState 需要原样复制进 v4 migrate 流程。
+
+### Internal
+
+- `traffic_test.go` fake xui client 补 3 个新方法 stub(`GetPanelUpdateInfo` /
+  `UpdatePanel` / `InstallXray`)以维持 `ports.XUIClient` 实现完整。
+- `AdminServersHandler` 构造函数加 `audit ports.AuditRepo` + `async AsyncDispatcher`
+  两个新依赖;router 同步更新 wiring。
+
+### 已验证 / 未验证
+
+- **已验证**:`GetPanelUpdateInfo` 端到端真实 3.1.0 panel 跑通(`current=3.1.0
+  latest=v3.1.0 available=false`,compat=supported,会允许升级)。
+- **未真实跑** `UpdatePanel` / `InstallXray` 是 destructive 操作,会真重启 3X-UI
+  / Xray;按设计假定它们工作,发版后 admin 第一次触发时实地验证(失败有 audit
+  痕迹 + 详细错误,可定位修复)。
+
 ## v3.6.0-beta.2 — 2026-05-25
 
 ### Added (admin 操作面 ──​ Phase 2 第二刀)

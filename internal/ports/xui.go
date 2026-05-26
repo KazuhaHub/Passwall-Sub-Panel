@@ -42,6 +42,43 @@ type XUIClient interface {
 	// of the rich status payload (cpu/mem/etc.) is intentionally not surfaced
 	// to keep the cross-process contract narrow.
 	GetServerStatus(ctx context.Context) (*ServerStatus, error)
+
+	// GetPanelUpdateInfo hits /panel/api/server/getPanelUpdateInfo —
+	// returns the panel's current version + the latest 3X-UI release tag
+	// reachable on GitHub + a "is there an update" flag. PSP uses
+	// LatestVersion as the pre-flight gate before triggering UpdatePanel:
+	// if the latest version exceeds PSP's MaxTestedXUI, the upgrade is
+	// refused (admin needs to upgrade PSP first). 3X-UI's /updatePanel
+	// has no version-selection knob — it always pulls latest — so this
+	// is the only sane way to avoid auto-upgrading into a schema break
+	// like the 2026-05-23 v3.1.0 inbound serialization change.
+	GetPanelUpdateInfo(ctx context.Context) (*PanelUpdateInfo, error)
+
+	// UpdatePanel triggers /panel/api/server/updatePanel — 3X-UI self-
+	// updates to the latest GitHub release and restarts. The HTTP
+	// connection drops mid-call as the panel binary exits; that is
+	// normal, not an error. Callers should expect a network-side EOF /
+	// reset and treat it as "upgrade initiated, verify reachability
+	// after grace period". No version parameter — 3X-UI only knows how
+	// to pull latest.
+	UpdatePanel(ctx context.Context) error
+
+	// InstallXray triggers /panel/api/server/installXray/:version. Pass
+	// "latest" for the newest published xray-core release, or a specific
+	// tag like "v25.10.31". 3X-UI restarts xray after install but does
+	// NOT restart the panel itself, so unlike UpdatePanel this call
+	// returns normally with the panel still running.
+	InstallXray(ctx context.Context, version string) error
+}
+
+// PanelUpdateInfo is the version pair returned by
+// /panel/api/server/getPanelUpdateInfo. CurrentVersion is reported without a
+// leading "v" ("3.1.0"); LatestVersion typically carries one ("v3.1.0"). Both
+// go through version.parseSemver so the difference is normalized away.
+type PanelUpdateInfo struct {
+	CurrentVersion  string
+	LatestVersion   string
+	UpdateAvailable bool
 }
 
 // ServerStatus is the version-identity subset of /panel/api/server/status.

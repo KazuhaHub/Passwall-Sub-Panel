@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strconv"
@@ -21,15 +22,21 @@ import (
 //
 // Mutations keep the DB and the in-memory XUIPool in lockstep so changes
 // take effect immediately without restarting the panel binary.
+//
+// audit + async are used by the upgrade-panel / upgrade-xray handlers
+// (v3.6.0-beta.3) to write audit-trail rows and to schedule the post-upgrade
+// smoke probe; they're optional for the CRUD/Test flows.
 type AdminServersHandler struct {
 	repo      ports.XUIPanelRepo
 	pool      ports.XUIPool
 	nodes     ports.NodeRepo
 	ownership ports.OwnershipRepo
+	audit     ports.AuditRepo
+	async     AsyncDispatcher
 }
 
-func NewAdminServersHandler(repo ports.XUIPanelRepo, pool ports.XUIPool, nodes ports.NodeRepo, ownership ports.OwnershipRepo) *AdminServersHandler {
-	return &AdminServersHandler{repo: repo, pool: pool, nodes: nodes, ownership: ownership}
+func NewAdminServersHandler(repo ports.XUIPanelRepo, pool ports.XUIPool, nodes ports.NodeRepo, ownership ports.OwnershipRepo, audit ports.AuditRepo, async AsyncDispatcher) *AdminServersHandler {
+	return &AdminServersHandler{repo: repo, pool: pool, nodes: nodes, ownership: ownership, audit: audit, async: async}
 }
 
 // serverDTO is the API representation. Sensitive fields (api_token /
@@ -231,6 +238,264 @@ func (h *AdminServersHandler) Test(c *gin.Context) {
 		log.Warn("admin test: version probe", "panel_id", req.ID, "err", perr)
 	}
 	c.JSON(http.StatusOK, resp)
+}
+
+// UpgradePanel triggers a remote 3X-UI panel self-upgrade after a
+// pre-flight compat check: PSP refuses to fire the upgrade if the
+// remote panel's reported "latest available" version falls outside
+// this PSP build's tested 3X-UI range. The whole point of the gate is
+// to prevent admin from accidentally pulling a future schema-breaking
+// release (e.g. the 2026-05-23 v3.1.0 inbound serialization change
+// that v3.5.1 had to special-case).
+//
+// 3X-UI's /updatePanel has no version-selection knob — it always
+// pulls latest from GitHub. So PSP can't "downgrade" or "pin" the
+// target; it can only refuse to invoke the endpoint when latest is
+// out of range. Admin in that case needs to upgrade PSP first, then
+// retry.
+//
+// On success: a "panel_upgrade_initiated" audit row is written, the
+// post-upgrade smoke probe is scheduled via async dispatcher, and the
+// handler returns 202 Accepted immediately (the panel restart drops
+// the connection mid-call anyway — the adapter swallows the
+// resulting EOF). The smoke probe writes a follow-up
+// "panel_upgrade_succeeded" / "panel_upgrade_failed" audit row when
+// it eventually concludes.
+func (h *AdminServersHandler) UpgradePanel(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid id"})
+		return
+	}
+	panel, err := h.repo.GetByID(c.Request.Context(), id)
+	if err != nil {
+		mapServerError(c, err)
+		return
+	}
+	client, err := h.pool.Get(id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Server not registered in pool: " + err.Error()})
+		return
+	}
+	// Pre-flight: ask the panel what version it would upgrade TO.
+	info, err := client.GetPanelUpdateInfo(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": "Failed to query 3X-UI update info: " + err.Error()})
+		return
+	}
+	compat := version.CheckXUI(info.LatestVersion)
+	if compat != version.CompatSupported {
+		// Refuse: latest is outside PSP's tested range. Audit the
+		// rejection so the trail shows admin tried + got blocked.
+		h.writeUpgradeAudit(c, "panel_upgrade_blocked", panel, info.LatestVersion,
+			"target latest version "+info.LatestVersion+" outside PSP tested range ["+version.MinXUI+", "+version.MaxTestedXUI+"]")
+		c.JSON(http.StatusConflict, gin.H{
+			"ok":             false,
+			"reason":         "untested_target",
+			"latest_version": info.LatestVersion,
+			"psp_min_xui":    version.MinXUI,
+			"psp_max_xui":    version.MaxTestedXUI,
+			"message":        version.CompatMessage(info.LatestVersion, compat) + " — upgrade PSP first, then retry the panel upgrade",
+		})
+		return
+	}
+	// Fire the upgrade. The adapter swallows the EOF/reset that the
+	// panel restart produces, so a nil err here means "upgrade signal
+	// accepted; panel is restarting".
+	if err := client.UpdatePanel(c.Request.Context()); err != nil {
+		h.writeUpgradeAudit(c, "panel_upgrade_failed", panel, info.LatestVersion, err.Error())
+		c.JSON(http.StatusBadGateway, gin.H{"ok": false, "error": "updatePanel call failed: " + err.Error()})
+		return
+	}
+	h.writeUpgradeAudit(c, "panel_upgrade_initiated", panel, info.LatestVersion, "")
+	// Schedule the smoke probe — runs in the panel-wide background
+	// context so it survives this request returning. async + audit
+	// must be present for the smoke to run; if either is nil this
+	// gracefully degrades to "fire and forget, no follow-up audit".
+	if h.async != nil {
+		panelID := id
+		panelName := panel.Name
+		targetVersion := info.LatestVersion
+		h.async.Go("upgrade-panel.smoke", func(bg context.Context) {
+			h.runPostUpgradeSmoke(bg, panelID, panelName, targetVersion)
+		})
+	}
+	c.JSON(http.StatusAccepted, gin.H{
+		"ok":             true,
+		"started":        true,
+		"target_version": info.LatestVersion,
+		"message":        "3X-UI upgrade initiated; the panel is restarting. PSP will run a smoke probe in ~60s and log success or failure to the audit trail.",
+	})
+}
+
+// UpgradeXray triggers a remote xray-core install. xray-core compatibility
+// with PSP is low-coupling (PSP only talks to the 3X-UI panel, never
+// directly to xray), and 3X-UI's installXray accepts an explicit version
+// tag, so we DON'T pre-check against any PSP-side range — admin can pull
+// "latest" or pin a specific tag freely. Unlike UpdatePanel, the 3X-UI
+// panel itself keeps running across this call (only xray-core restarts),
+// so there's no smoke probe — the handler returns the underlying API
+// result synchronously.
+type upgradeXrayRequest struct {
+	Version string `json:"version"`
+}
+
+func (h *AdminServersHandler) UpgradeXray(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid id"})
+		return
+	}
+	panel, err := h.repo.GetByID(c.Request.Context(), id)
+	if err != nil {
+		mapServerError(c, err)
+		return
+	}
+	client, err := h.pool.Get(id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Server not registered in pool: " + err.Error()})
+		return
+	}
+	var req upgradeXrayRequest
+	// Body is optional — empty/missing means "latest".
+	_ = c.ShouldBindJSON(&req)
+	if req.Version == "" {
+		req.Version = "latest"
+	}
+	if err := client.InstallXray(c.Request.Context(), req.Version); err != nil {
+		h.writeUpgradeAudit(c, "xray_upgrade_failed", panel, req.Version, err.Error())
+		c.JSON(http.StatusBadGateway, gin.H{"ok": false, "error": "installXray failed: " + err.Error()})
+		return
+	}
+	h.writeUpgradeAudit(c, "xray_upgrade_completed", panel, req.Version, "")
+	// Refresh version snapshot — installXray triggers an xray restart
+	// so the panel's reported xray.version field updates immediately.
+	if status, perr := client.GetServerStatus(c.Request.Context()); perr == nil {
+		now := time.Now()
+		_ = h.repo.UpdateVersion(c.Request.Context(), id, status.PanelVersion, status.XrayVersion, &now)
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"ok":      true,
+		"version": req.Version,
+		"message": "Xray upgrade completed.",
+	})
+}
+
+// runPostUpgradeSmoke waits for the panel to come back after a
+// /updatePanel restart, then verifies both that /server/status returns
+// 200 (panel is alive) and that /inbounds/list decodes (schema didn't
+// silently break, à la the v3.1.0 incident). Records the outcome via
+// audit. Runs in the panel-wide background context so it survives the
+// admin's HTTP request returning.
+//
+// Timing: 60s initial grace (3X-UI usually takes ~10-15s to come back
+// up; 60s gives broad headroom), then poll every 10s for up to 2 minutes
+// of additional retries (12 attempts). If status comes back but
+// /inbounds/list errors with a JSON decode failure, that's the v3.1.0
+// pattern — flagged explicitly so admin grep on "schema_break" finds it.
+func (h *AdminServersHandler) runPostUpgradeSmoke(ctx context.Context, panelID int64, panelName, targetVersion string) {
+	const initialGrace = 60 * time.Second
+	const probeInterval = 10 * time.Second
+	const maxAttempts = 12
+
+	select {
+	case <-time.After(initialGrace):
+	case <-ctx.Done():
+		return
+	}
+	client, err := h.pool.Get(panelID)
+	if err != nil {
+		h.writeSmokeAudit(ctx, "panel_upgrade_failed", panelID, panelName, targetVersion,
+			"pool lost panel client: "+err.Error())
+		return
+	}
+	var lastErr error
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		if ctx.Err() != nil {
+			return
+		}
+		probeCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		status, serr := client.GetServerStatus(probeCtx)
+		cancel()
+		if serr != nil {
+			lastErr = serr
+			log.Debug("upgrade smoke: panel still down", "panel_id", panelID, "attempt", attempt, "err", serr)
+			select {
+			case <-time.After(probeInterval):
+			case <-ctx.Done():
+				return
+			}
+			continue
+		}
+		// /status came back — second probe: schema-decode of
+		// /inbounds/list. If decoding errors, that's the schema-break
+		// signature (the v3.1.0 incident shape).
+		listCtx, lcancel := context.WithTimeout(ctx, 15*time.Second)
+		_, lerr := client.ListInbounds(listCtx)
+		lcancel()
+		if lerr != nil {
+			h.writeSmokeAudit(ctx, "panel_upgrade_schema_break", panelID, panelName, targetVersion,
+				"panel reachable but /inbounds/list decode failed: "+lerr.Error())
+			return
+		}
+		// All good — refresh the cached version snapshot too so the
+		// Servers UI immediately reflects the post-upgrade version.
+		now := time.Now()
+		_ = h.repo.UpdateVersion(ctx, panelID, status.PanelVersion, status.XrayVersion, &now)
+		h.writeSmokeAudit(ctx, "panel_upgrade_succeeded", panelID, panelName, targetVersion,
+			"panel back online at "+status.PanelVersion+" (xray "+status.XrayVersion+"), inbounds decode ok")
+		return
+	}
+	if lastErr == nil {
+		lastErr = errors.New("unknown")
+	}
+	h.writeSmokeAudit(ctx, "panel_upgrade_failed", panelID, panelName, targetVersion,
+		"panel still unreachable after "+initialGrace.String()+" grace + "+(probeInterval*maxAttempts).String()+" of retries: "+lastErr.Error())
+}
+
+// writeUpgradeAudit is the in-request audit writer. detail is opaque text
+// stored in the after_json column (audit table reuses it as a free-form
+// field for non-CRUD events).
+func (h *AdminServersHandler) writeUpgradeAudit(c *gin.Context, action string, panel *domain.XUIPanel, targetVersion, detail string) {
+	if h.audit == nil {
+		return
+	}
+	target := "panel=" + strconv.FormatInt(panel.ID, 10) + " name=" + panel.Name + " target=" + targetVersion
+	_ = h.audit.Insert(c.Request.Context(), &domain.AuditEntry{
+		Actor:     actorFromGin(c),
+		Action:    action,
+		Target:    target,
+		AfterJSON: detail,
+		IP:        c.ClientIP(),
+		At:        time.Now(),
+	})
+}
+
+// writeSmokeAudit is the smoke-probe audit writer. Runs in the background
+// context (no gin.Context), so actor is hardcoded to "upgrade-smoke".
+func (h *AdminServersHandler) writeSmokeAudit(ctx context.Context, action string, panelID int64, panelName, targetVersion, detail string) {
+	if h.audit == nil {
+		return
+	}
+	target := "panel=" + strconv.FormatInt(panelID, 10) + " name=" + panelName + " target=" + targetVersion
+	_ = h.audit.Insert(ctx, &domain.AuditEntry{
+		Actor:     "upgrade-smoke",
+		Action:    action,
+		Target:    target,
+		AfterJSON: detail,
+		At:        time.Now(),
+	})
+}
+
+// actorFromGin extracts the admin username from gin context (set by auth
+// middleware). Falls back to "admin" if not present.
+func actorFromGin(c *gin.Context) string {
+	if v, ok := c.Get("upn"); ok {
+		if s, ok := v.(string); ok && s != "" {
+			return s
+		}
+	}
+	return "admin"
 }
 
 func (h *AdminServersHandler) Delete(c *gin.Context) {
