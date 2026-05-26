@@ -444,11 +444,11 @@ func rawToInbound(r *rawInbound) ports.Inbound {
 		Listen:         r.Listen,
 		Port:           r.Port,
 		Protocol:       r.Protocol,
-		Settings:       r.Settings,
-		StreamSettings: r.StreamSettings,
+		Settings:       string(r.Settings),
+		StreamSettings: string(r.StreamSettings),
 		Tag:            r.Tag,
-		Sniffing:       r.Sniffing,
-		Allocate:       r.Allocate,
+		Sniffing:       string(r.Sniffing),
+		Allocate:       string(r.Allocate),
 		ClientStats:    rawTrafficsToPorts(r.ClientStats),
 	}
 }

@@ -4,6 +4,29 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## v3.5.1-beta.1 — 2026-05-25
+
+### Fixed
+
+- **适配 3X-UI 3.1.0 的 `/inbounds/list` 响应格式变化**:3.1.0(2026-05-23 发布)把
+  `settings` / `streamSettings` / `sniffing` / `allocate` 四个字段从 escaped string
+  改成了 nested JSON object/array(`allocate` 改成 `null`)。PSP adapter 把这些字段
+  声明为 Go `string`,直接 `json.Unmarshal` 一个 object 进去会报
+  `cannot unmarshal object into Go struct field of type string` —— 任何升级到 3.1.0
+  的 panel 一旦被 PSP 接入,traffic poll Phase 1 fetch 会**整轮失败 → 所有 user skip**。
+  实测确认问题真实存在(用 PowerShell `Invoke-RestMethod` 探一台 3.1.0 panel 的
+  list 响应,settings 三个字段都是 nested object)。修复:新增 `flexJSON` 类型,
+  `UnmarshalJSON` 把 nested object/array 原样收下、`null` 归一化为空字符串;
+  `rawInbound.Settings/StreamSettings/Sniffing/Allocate` 全部切到 `flexJSON`,
+  下游 `rawToInbound` 转回 `string(...)` 喂给 `ports.Inbound`(外部接口零变化)。
+  写端不动 —— 3.1.0 仍接受 escaped string 写法。**最低版本要求改为 3X-UI ≥ 3.1.0**
+  (README §环境要求 已同步)。回归覆盖:`TestFlexJSON_*` 四条(nested object /
+  nested array / null / 字段缺失);端到端用一台真实 3.1.0 panel 跑 `ListInbounds`
+  → `json.Unmarshal(inb.Settings)` round-trip 全 ok。
+  - 顺带观察(暂不动):3.1.0 `clientStats[*]` 多了 `uuid` / `subId` / `lastOnline`
+    三个字段,Go `encoding/json` 默认忽略未知字段,我们 `rawClientTraffic` 不受影响。
+    `lastOnline` 是免费的"用户最近活跃时间"素材,以后做"在线徽章"可以用上。
+
 ## v3.5.0 — 2026-05-25
 
 正式版。汇总 v3.5.0-beta.1 → beta.16 全部改动，beta.16 内容直发为正式版定稿

@@ -5,22 +5,27 @@ import "encoding/json"
 
 // rawInbound mirrors one item of the JSON array returned by
 // /panel/api/inbounds/list. Field names follow the 3X-UI backend exactly.
+//
+// settings/streamSettings/sniffing/allocate use flexJSON because 3X-UI 3.1.0
+// returns them as nested JSON objects while ≤ 3.0.x returns escaped strings.
+// flexJSON normalises both into the canonical unescaped JSON text that
+// downstream parsers (xrayspec.ParseSettings, extractSSMethod, ...) expect.
 type rawInbound struct {
-	ID             int               `json:"id"`
-	Up             int64             `json:"up"`
-	Down           int64             `json:"down"`
-	Total          int64             `json:"total"`
-	Remark         string            `json:"remark"`
-	Enable         bool              `json:"enable"`
-	ExpiryTime     int64             `json:"expiryTime"`
-	Listen         string            `json:"listen"`
-	Port           int               `json:"port"`
-	Protocol       string            `json:"protocol"`
-	Settings       string            `json:"settings"`
-	StreamSettings string            `json:"streamSettings"`
-	Tag            string            `json:"tag"`
-	Sniffing       string            `json:"sniffing"`
-	Allocate       string            `json:"allocate"`
+	ID             int                `json:"id"`
+	Up             int64              `json:"up"`
+	Down           int64              `json:"down"`
+	Total          int64              `json:"total"`
+	Remark         string             `json:"remark"`
+	Enable         bool               `json:"enable"`
+	ExpiryTime     int64              `json:"expiryTime"`
+	Listen         string             `json:"listen"`
+	Port           int                `json:"port"`
+	Protocol       string             `json:"protocol"`
+	Settings       flexJSON           `json:"settings"`
+	StreamSettings flexJSON           `json:"streamSettings"`
+	Tag            string             `json:"tag"`
+	Sniffing       flexJSON           `json:"sniffing"`
+	Allocate       flexJSON           `json:"allocate"`
 	ClientStats    []rawClientTraffic `json:"clientStats"`
 }
 
