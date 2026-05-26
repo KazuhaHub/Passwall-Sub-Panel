@@ -207,21 +207,22 @@ export default function ServersView() {
     setMenuTarget(null)
   }
 
-  async function runUpgradePanel(s: Server) {
-    closeMenu()
-    const ok = await confirm({
-      title: t('admin:servers.confirm.upgrade_panel_title', { defaultValue: '升级 3X-UI 面板' }),
-      message: t('admin:servers.confirm.upgrade_panel_message', {
-        name: s.name,
-        defaultValue: 'PSP 将先检查目标版本是否在已测试范围内,在范围内才会触发 {{name}} 的自升级。面板会重启,约 60 秒后 PSP 跑 smoke probe 验证。是否继续?',
-      }),
-      confirmText: t('admin:servers.action.upgrade', { defaultValue: '升级' }),
-    })
-    if (!ok) return
+  async function runUpgradePanel(s: Server, force = false) {
+    if (!force) {
+      closeMenu()
+      const ok = await confirm({
+        title: t('admin:servers.confirm.upgrade_panel_title', { defaultValue: '升级 3X-UI 面板' }),
+        message: t('admin:servers.confirm.upgrade_panel_message', {
+          name: s.name,
+          defaultValue: 'PSP 将先检查目标版本是否在已测试范围内,在范围内才会触发 {{name}} 的自升级。面板会重启,约 60 秒后 PSP 跑 smoke probe 验证。是否继续?',
+        }),
+        confirmText: t('admin:servers.action.upgrade', { defaultValue: '升级' }),
+      })
+      if (!ok) return
+    }
     setUpgrading(s.id)
     try {
-      const r = await upgradePanel(s.id)
-      // 202 success path
+      const r = await upgradePanel(s.id, { force })
       pushSnack(
         t('admin:servers.toast.upgrade_panel_started', {
           target: r.target_version ?? '?',
@@ -230,30 +231,44 @@ export default function ServersView() {
         'success',
       )
     } catch (err) {
-      // 409 = pre-check blocked (target untested), 502 = call failed.
-      // Both surface a structured body the axios interceptor doesn't
-      // know how to format — we render the most actionable message here.
       const resp = (err as { response?: { status?: number; data?: {
         reason?: string
         latest_version?: string
+        compat_status?: string
         psp_max_xui?: string
+        can_force?: boolean
         error?: string
         message?: string
       } } }).response
       const body = resp?.data
-      if (resp?.status === 409 && body?.reason === 'untested_target') {
-        pushSnack(
-          t('admin:servers.toast.upgrade_panel_blocked', {
+      // 409 + reason:"untested_target" → admin can override. Pop a
+      // second confirmation that spells out the risk before resending
+      // with force=true. The structure matches PSP's two-step gate:
+      // the first call gives admin a chance to see *why* it was
+      // blocked; the second is the explicit "I accept the risk".
+      if (resp?.status === 409 && body?.reason === 'untested_target' && body?.can_force && !force) {
+        const proceed = await confirm({
+          title: t('admin:servers.confirm.upgrade_force_title', { defaultValue: '目标版本超出已测试范围' }),
+          message: t('admin:servers.confirm.upgrade_force_message', {
             latest: body.latest_version ?? '?',
-            max: body.psp_max_xui ?? '?',
-            defaultValue: '拒绝升级: 目标版本 {{latest}} 超出 PSP 支持范围 (max {{max}}),请先升级 PSP',
+            max: body.psp_max_xui || t('admin:servers.compat.not_loaded', { defaultValue: '未加载' }),
+            status: body.compat_status ?? 'unknown',
+            defaultValue: '目标版本 {{latest}} 状态为 {{status}}（PSP 当前测试最高 {{max}}）。强制升级可能因 schema 变更导致 PSP traffic poll 失败 —— PSP v3.5.1 修复的 v3.1.0 break 就是这类问题。确认强制升级吗?',
           }),
-          'warning',
-        )
-      } else {
-        const msg = body?.error ?? body?.message ?? (err as { message?: string }).message ?? 'unknown'
-        pushSnack(msg, 'error')
+          destructive: true,
+          confirmText: t('admin:servers.action.force_upgrade', { defaultValue: '强制升级' }),
+        })
+        if (proceed) {
+          // Resend with force=true — recursive call lets the success
+          // / error branches stay shared instead of duplicating them.
+          return runUpgradePanel(s, true)
+        }
+        // admin declined → nothing further
+        return
       }
+      // Other errors (502 panel unreachable, etc.) — generic toast.
+      const msg = body?.error ?? body?.message ?? (err as { message?: string }).message ?? 'unknown'
+      pushSnack(msg, 'error')
     } finally {
       setUpgrading(null)
     }

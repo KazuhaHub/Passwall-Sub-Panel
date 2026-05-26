@@ -94,13 +94,24 @@ export interface UpgradePanelResult {
   message?: string
   reason?: string
   latest_version?: string
+  compat_status?: CompatStatus
   psp_min_xui?: string
   psp_max_xui?: string
+  /** When true, the rejection is recoverable via a second call with
+   *  {force: true}. False / absent means the rejection is structural
+   *  (e.g. panel unreachable) and force won't help. */
+  can_force?: boolean
   error?: string
 }
 
-export async function upgradePanel(id: number) {
-  const { data } = await client.post<UpgradePanelResult>(`/admin/servers/${id}/upgrade-panel`)
+// upgradePanel optionally takes a force flag. When the first (non-force)
+// call is rejected with 409 reason:"untested_target", the frontend can
+// re-send with force=true after admin acknowledges the risk. The backend
+// audits forced upgrades under a distinct action (panel_upgrade_forced)
+// so the trail makes it obvious which upgrades bypassed the gate.
+export async function upgradePanel(id: number, opts?: { force?: boolean }) {
+  const body = opts?.force ? { force: true } : {}
+  const { data } = await client.post<UpgradePanelResult>(`/admin/servers/${id}/upgrade-panel`, body)
   return data
 }
 

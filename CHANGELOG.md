@@ -4,6 +4,76 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## v3.6.0-beta.5 — 2026-05-25
+
+### Added (dynamic compat ── Phase 2 第五刀,bug 防御的最后一公里)
+
+- **3X-UI 兼容范围改为 GitHub raw 远程下发**:之前 `MaxTestedXUI` 是 hardcode
+  在 `internal/version/compat.go` 的常量,意味着 3X-UI 出 patch 版本(API 不变)
+  PSP 也得发新版才能放宽兼容范围 —— 没意义。改为:
+  - **删除** `MaxTestedXUI` const(完全 dynamic)
+  - **保留** `MinXUI` const(代码级硬要求:PSP 调的端点在 3.1.0 以下不存在,不是
+    "fallback" 是 protocol floor)
+  - 新增 [`docs/compat/xui-compat.json`](docs/compat/xui-compat.json) 作为 single
+    source of truth,key 按 PSP major.minor 分行(`"v3.6": {min_xui, max_tested_xui,
+    notes}`,future-proof additive schema_version=1)
+  - PSP 通过 `version.RefreshRemoteCompat(ctx, url)` 拉 raw URL,从 JSON 找匹配自己
+    major.minor 的行,通过 `SetActiveMaxTestedXUI` 写入 atomic.Value
+  - `version.CheckXUI` / `CompatMessage` 改读 `ActiveMinXUI() / ActiveMaxTestedXUI()`
+    函数访问器,运行时立即生效
+  - 默认 URL `https://raw.githubusercontent.com/KazuhaHub/passwall-sub-panel/main/docs/compat/xui-compat.json`
+- **触发策略 ── 按需 + lazy,零后台 ticker**(按用户定调):
+  - **不**在 boot 时 refresh,**不**piggyback traffic poll
+  - admin 打开 Servers 页时,前端 batch 发 N 个 `testServer` 调用,后端
+    `AdminServersHandler.Test` **入口**先调 `RefreshRemoteCompat`(8s HTTP timeout)
+  - 内置 **60s throttle** 防 N 个并发 testServer 触发 N 次 GitHub fetch(N → 1 次)
+  - admin 手动点单个 "测试连接" 同样路径
+  - PSP 启动后 admin 不去 Servers 页则永远不刷 compat(其它路径不依赖 compat 数据,
+    没影响)
+  - 失败静默 fallback 到"未加载",CheckXUI 对所有 panel 返回 Unknown,
+    `CompatMessage` 给出"open Servers / click Test to refresh"提示
+- **admin 手动 override(force flag)** ── compat 数据未加载/目标超 tested 范围
+  也允许 admin 强行升级:
+  - `POST /api/admin/servers/:id/upgrade-panel` body 接受 `{force?: bool}`(缺省
+    false = 旧行为,pre-check + 拒绝)
+  - 拒绝响应 409 body 加 `can_force: true` 字段提示"二次确认可强制"
+  - 强制路径走 audit action `panel_upgrade_forced`(区别于普通 `panel_upgrade_initiated`),
+    `after_json` 写明 "compat=<status> (out of active tested range), admin overrode the gate"
+
+### Frontend
+
+- `upgradePanel(id, {force?})` API client 接 force 参数;`UpgradePanelResult` 加
+  `compat_status` / `can_force` 字段
+- ServersView `runUpgradePanel(s, force=false)`:
+  1. 第一次走普通 confirm + POST(无 force)
+  2. 收到 409 + `reason: "untested_target"` + `can_force: true` → 弹**第二个**
+     confirm modal(destructive 风格红色按钮),消息明确"强制升级可能因 schema 变更
+     导致 PSP traffic poll 失败 —— PSP v3.5.1 修复的 v3.1.0 break 就是这类问题",
+     confirm 后递归调用自身 `force=true` 重发
+  3. admin 也可拒绝 → 无操作返回
+- i18n 同步 zh-CN / en-US:`servers.action.force_upgrade` + `servers.confirm.upgrade_force_{title,
+  message}` + `servers.compat.not_loaded`
+
+### Internal / 测试
+
+- 14 个新 unit test(compat_test.go 全重写):覆盖 `parseSemver` 4 条 + `CheckXUI`
+  6 条(含 "no remote loaded → Unknown" / "override widens range" / "boundary
+  exact match" 三条新关键路径)+ `ActiveMinXUI` 不变性 + `CompatMessage` 2 条
+  (含 "no remote loaded" vs "garbage input" 的 Unknown message 区分)+
+  `lookupForPSPVersion` 1 条(PSP version 提取 + JSON lookup,含 dev/garbage edge)
+- `resetCompatForTest(t)` helper 让每个 test case 从干净 atomic state 起,避免
+  override leak
+
+### Why
+
+PSP v3.5.1 那次 3X-UI 3.1.0 schema break 暴露的问题: hardcoded 兼容范围只能靠发
+PSP 新版来同步,反应迟钝。这次彻底拆开:
+- **协议下界**(MinXUI)留 const ── 这是 code-level 真实要求,改它要改调用代码
+- **测试上界**(MaxTested)走 GitHub JSON ── 仓库 maintainer 验过新 3X-UI 后改一行
+  JSON push 到 main,所有 PSP 部署 60s 后(打开 Servers 时)自动放宽,**零 PSP 发版**
+- **admin 仍能 override** ── 即使远程 JSON 没拉到 / 目标版本未测试,二次确认即可
+  强制升级,operator 真的知道自己在做什么时不被门槛挡住
+
 ## v3.6.0-beta.4 — 2026-05-25
 
 ### Added (`lastOnline` 集成 ── Phase 2 第四刀,免费红利落地)

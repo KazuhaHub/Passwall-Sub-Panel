@@ -1,0 +1,12 @@
+{
+  "_doc": "PSP × 3X-UI compatibility ranges. PSP pulls this file from GitHub raw on demand (Servers page open / Test click; 60s throttle) and uses the row matching its own major.minor version to gate remote 3X-UI upgrades. Bumping max_tested_xui here ships PSP a wider tested range with zero PSP release — useful when 3X-UI patches its panel without breaking the API (the most common case). Schema kept simple on purpose; future fields land additively. See docs/3xui-compat.md for the human procedure when validating a new 3X-UI release.",
+  "schema_version": 1,
+  "updated_at": "2026-05-25",
+  "psp_compat": {
+    "v3.6": {
+      "min_xui": "3.1.0",
+      "max_tested_xui": "3.1.0",
+      "notes": "Initial v3.6 baseline. PSP v3.6.0 was verified against 3X-UI 3.1.0; bump max_tested_xui as new 3X-UI releases are validated."
+    }
+  }
+}

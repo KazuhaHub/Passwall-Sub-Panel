@@ -1204,7 +1204,8 @@
       "banner_title": "{{count}} 台服务器的 3X-UI 版本超出 PSP 兼容范围",
       "too_old": "版本过低",
       "untested": "未测试",
-      "unknown": "无法识别"
+      "unknown": "无法识别",
+      "not_loaded": "未加载"
     },
     "action": {
       "test": "测试连接",
@@ -1212,6 +1213,7 @@
       "delete": "删除",
       "more": "更多操作",
       "upgrade": "升级",
+      "force_upgrade": "强制升级",
       "upgrade_panel": "升级 3X-UI 面板",
       "upgrade_xray": "升级 Xray (最新)"
     },
@@ -1239,6 +1241,8 @@
       "batch_delete_message": "确定删除 {{names}}{{suffix}}？这些服务器必须没有节点引用才能删除。",
       "upgrade_panel_title": "升级 3X-UI 面板",
       "upgrade_panel_message": "PSP 将先检查目标版本是否在已测试范围内，在范围内才会触发 {{name}} 的自升级。面板会重启，约 60 秒后 PSP 跑 smoke probe 验证。是否继续？",
+      "upgrade_force_title": "目标版本超出已测试范围",
+      "upgrade_force_message": "目标版本 {{latest}} 状态为 {{status}}（PSP 当前测试最高 {{max}}）。强制升级可能因 schema 变更导致 PSP traffic poll 失败 —— PSP v3.5.1 修复的 v3.1.0 break 就是这类问题。确认强制升级吗？",
       "upgrade_xray_title": "升级 Xray (最新版)",
       "upgrade_xray_message": "在 {{name}} 上安装最新版 xray-core 二进制。面板自身不重启，只重启 xray 子进程。是否继续？"
     }

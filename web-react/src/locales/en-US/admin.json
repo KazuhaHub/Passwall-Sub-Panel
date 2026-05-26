@@ -1204,7 +1204,8 @@
       "banner_title": "{{count}} server(s) running an out-of-range 3X-UI version",
       "too_old": "Too old",
       "untested": "Untested",
-      "unknown": "Unknown"
+      "unknown": "Unknown",
+      "not_loaded": "not loaded"
     },
     "action": {
       "test": "Test",
@@ -1212,6 +1213,7 @@
       "delete": "Delete",
       "more": "More actions",
       "upgrade": "Upgrade",
+      "force_upgrade": "Force upgrade",
       "upgrade_panel": "Upgrade 3X-UI panel",
       "upgrade_xray": "Upgrade Xray (latest)"
     },
@@ -1239,6 +1241,8 @@
       "batch_delete_message": "Delete {{names}}{{suffix}}? These servers must have no nodes referencing them.",
       "upgrade_panel_title": "Upgrade 3X-UI panel",
       "upgrade_panel_message": "PSP will check the target version first and only fire the upgrade on {{name}} if it's within the tested range. The panel will restart; PSP runs a smoke probe ~60s later. Continue?",
+      "upgrade_force_title": "Target version is outside the tested range",
+      "upgrade_force_message": "Target version {{latest}} is {{status}} (PSP's highest tested 3X-UI is {{max}}). Forcing the upgrade risks the same kind of schema-break PSP v3.5.1 had to fix for v3.1.0. Force the upgrade anyway?",
       "upgrade_xray_title": "Upgrade Xray (latest)",
       "upgrade_xray_message": "Install the latest xray-core on {{name}}. The panel itself stays up; only the xray child process restarts. Continue?"
     }

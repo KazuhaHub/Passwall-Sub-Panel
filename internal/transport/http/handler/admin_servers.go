@@ -199,6 +199,17 @@ func (h *AdminServersHandler) Test(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"ok": false, "error": err.Error()})
 		return
 	}
+	// Piggyback the remote-compat refresh on every Test click — admin
+	// opening the Servers page fires N parallel testServers, but the
+	// 60s throttle inside RefreshRemoteCompat collapses them to at most
+	// one actual GitHub fetch. Errors here are non-blocking; an
+	// unreachable raw.githubusercontent.com just means CheckXUI keeps
+	// returning Unknown until the next attempt. Logged at Warn so the
+	// operator can correlate "compat suddenly stale" with a network
+	// blip in the logs.
+	if rerr := version.RefreshRemoteCompat(c.Request.Context(), ""); rerr != nil {
+		log.Warn("admin test: refresh remote compat", "panel_id", req.ID, "err", rerr)
+	}
 	client, err := h.pool.Get(req.ID)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"ok": false, "error": "Server not registered in pool: " + err.Error()})
@@ -242,25 +253,33 @@ func (h *AdminServersHandler) Test(c *gin.Context) {
 
 // UpgradePanel triggers a remote 3X-UI panel self-upgrade after a
 // pre-flight compat check: PSP refuses to fire the upgrade if the
-// remote panel's reported "latest available" version falls outside
-// this PSP build's tested 3X-UI range. The whole point of the gate is
-// to prevent admin from accidentally pulling a future schema-breaking
-// release (e.g. the 2026-05-23 v3.1.0 inbound serialization change
-// that v3.5.1 had to special-case).
+// remote panel's reported "latest available" version falls outside the
+// currently-loaded tested range (driven by docs/compat/xui-compat.json
+// via RefreshRemoteCompat). The gate prevents admin from accidentally
+// pulling a future schema-breaking release (e.g. the 2026-05-23 v3.1.0
+// inbound serialization change that v3.5.1 had to special-case).
 //
-// 3X-UI's /updatePanel has no version-selection knob — it always
-// pulls latest from GitHub. So PSP can't "downgrade" or "pin" the
-// target; it can only refuse to invoke the endpoint when latest is
-// out of range. Admin in that case needs to upgrade PSP first, then
-// retry.
+// Admin can bypass the gate with body {"force": true} — that path is
+// the explicit "I know it's untested, do it anyway" escape hatch and is
+// audited separately as panel_upgrade_forced so the trail is obvious.
+// Force is also the only way to recover when remote-compat JSON has
+// never been fetched (CheckXUI returns Unknown for everything, normal
+// path always refuses).
 //
-// On success: a "panel_upgrade_initiated" audit row is written, the
-// post-upgrade smoke probe is scheduled via async dispatcher, and the
-// handler returns 202 Accepted immediately (the panel restart drops
-// the connection mid-call anyway — the adapter swallows the
-// resulting EOF). The smoke probe writes a follow-up
-// "panel_upgrade_succeeded" / "panel_upgrade_failed" audit row when
-// it eventually concludes.
+// 3X-UI's /updatePanel has no version-selection knob — it always pulls
+// latest from GitHub. So PSP can't "downgrade" or "pin" the target; it
+// can only refuse the call when latest is out of range, or be forced.
+//
+// On success: a panel_upgrade_initiated (or _forced) audit row is
+// written, the post-upgrade smoke probe is scheduled, and the handler
+// returns 202 Accepted immediately (the panel restart drops the
+// connection mid-call; the adapter swallows the resulting EOF). The
+// smoke probe writes a follow-up panel_upgrade_succeeded / _failed
+// audit row when it eventually concludes.
+type upgradePanelRequest struct {
+	Force bool `json:"force"`
+}
+
 func (h *AdminServersHandler) UpgradePanel(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
@@ -277,6 +296,8 @@ func (h *AdminServersHandler) UpgradePanel(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Server not registered in pool: " + err.Error()})
 		return
 	}
+	var req upgradePanelRequest
+	_ = c.ShouldBindJSON(&req) // body optional; missing → force=false
 	// Pre-flight: ask the panel what version it would upgrade TO.
 	info, err := client.GetPanelUpdateInfo(c.Request.Context())
 	if err != nil {
@@ -284,18 +305,22 @@ func (h *AdminServersHandler) UpgradePanel(c *gin.Context) {
 		return
 	}
 	compat := version.CheckXUI(info.LatestVersion)
-	if compat != version.CompatSupported {
-		// Refuse: latest is outside PSP's tested range. Audit the
-		// rejection so the trail shows admin tried + got blocked.
+	if compat != version.CompatSupported && !req.Force {
+		// Refuse: latest is outside the currently-loaded tested range
+		// (or compat data isn't loaded yet → everything is Unknown).
+		// Audit the rejection so the trail shows admin tried + got
+		// blocked + can retry with force.
 		h.writeUpgradeAudit(c, "panel_upgrade_blocked", panel, info.LatestVersion,
-			"target latest version "+info.LatestVersion+" outside PSP tested range ["+version.MinXUI+", "+version.MaxTestedXUI+"]")
+			"target latest version "+info.LatestVersion+" outside PSP active tested range ["+version.ActiveMinXUI()+", "+version.ActiveMaxTestedXUI()+"] (compat="+compat.String()+")")
 		c.JSON(http.StatusConflict, gin.H{
 			"ok":             false,
 			"reason":         "untested_target",
 			"latest_version": info.LatestVersion,
-			"psp_min_xui":    version.MinXUI,
-			"psp_max_xui":    version.MaxTestedXUI,
-			"message":        version.CompatMessage(info.LatestVersion, compat) + " — upgrade PSP first, then retry the panel upgrade",
+			"compat_status":  compat.String(),
+			"psp_min_xui":    version.ActiveMinXUI(),
+			"psp_max_xui":    version.ActiveMaxTestedXUI(),
+			"message":        version.CompatMessage(info.LatestVersion, compat) + " — upgrade PSP first, or resend with {force: true} to override at your own risk",
+			"can_force":      true,
 		})
 		return
 	}
@@ -307,7 +332,16 @@ func (h *AdminServersHandler) UpgradePanel(c *gin.Context) {
 		c.JSON(http.StatusBadGateway, gin.H{"ok": false, "error": "updatePanel call failed: " + err.Error()})
 		return
 	}
-	h.writeUpgradeAudit(c, "panel_upgrade_initiated", panel, info.LatestVersion, "")
+	// Distinguish "normal initiate" vs "forced through gate" in the
+	// audit trail — both are admin-initiated but forced carries an
+	// implicit "operator accepted the untested-target risk" context.
+	action := "panel_upgrade_initiated"
+	detail := ""
+	if req.Force && compat != version.CompatSupported {
+		action = "panel_upgrade_forced"
+		detail = "compat=" + compat.String() + " (out of active tested range), admin overrode the gate"
+	}
+	h.writeUpgradeAudit(c, action, panel, info.LatestVersion, detail)
 	// Schedule the smoke probe — runs in the panel-wide background
 	// context so it survives this request returning. async + audit
 	// must be present for the smoke to run; if either is nil this
