@@ -4,6 +4,81 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## v3.6.0-beta.9 — 2026-05-25
+
+### Changed — "latest 3X-UI 版本" 检测改成 Passwall Panel 自己一次性查
+
+beta.8 的"⋮ 红点 badge"用的是 N-fanout 模型:每台 panel 各自调 `GetPanelUpdateInfo`,
+3X-UI 内部各自查一次 GitHub。本 beta 改成 Passwall Panel 直接一次性查 GitHub release-
+latest,所有 panel 共用同一份结果。理由:
+
+- "最新 3X-UI tag 是什么"是**全局事实**,跟具体 panel 无关 → 一次查询足以驱动所有
+  panel 的 badge
+- N-fanout 把 GitHub 查询成本均摊到每台 panel,扩到几十台机房就开始没意义,且各
+  panel 缓存周期不同步,UI 上同一时刻不同 row 的 badge 状态可能矛盾
+- 真正触发升级时(admin 点"升级 3X-UI 面板"),仍走 3X-UI 自己的 `/getPanelUpdateInfo`
+  做权威 pre-check —— 升级目标必须由 3X-UI 自己定(`/updatePanel` endpoint 也是
+  3X-UI 自己从 GitHub 拉,Passwall Panel 没有 inject 能力)
+
+### Added
+
+- **`internal/version/latest_xui.go`**:`RefreshLatestXUI(ctx)` 直查
+  `https://api.github.com/repos/MHSanaei/3x-ui/releases/latest`,30 分钟节流 +
+  single-flight,确保 N 台 panel 的 Test 风暴只会触发一次 GitHub 查询。`LatestXUI()`
+  accessor 返回当前缓存 tag;`IsXUIUpdateAvailable(panelVersion)` 做 semver 比较。
+- **本地缓存 `<DataDir>/latest-xui-cache.json`**:跟 compat-cache.json 同目录,boot
+  时 `LoadLatestXUICache()` 先恢复上次拿到的 tag,冷启动无网络时 badge 仍能渲染。
+  原子 temp+rename 写入,避免并发读到半成品。
+
+### Changed
+
+- **Boot probe 改一次性触发**:`probePanelVersionsOnce` 进入 panel 列表前先调
+  `RefreshLatestXUI(ctx)` 一次,然后循环里只关注 `GetServerStatus` 探当前版本 —
+  去掉了 per-panel 的 `GetPanelUpdateInfo` 调用。
+- **Test handler 同样一次性触发**:`Test()` 在 `RefreshRemoteCompat` 之后追加一次
+  `RefreshLatestXUI`,返回的 `latest_xui_version` / `update_available` 改成现场
+  derive(`version.LatestXUI()` vs `status.PanelVersion`),不再从 DB 读 per-panel 列。
+- **`toServerDTO` 现场 derive badge 状态**:`update_available` 不再从 DB 拿,改成
+  `version.IsXUIUpdateAvailable(p.PanelVersion)`;`latest_xui_version` 同样从
+  `version.LatestXUI()` 拿。一份全局 snapshot 驱动所有 row,绝不会出现"一半 row 显示
+  badge 一半不显示"的不一致状态。
+- **Xray 升级文案去掉"最新"后缀** —— 既然下拉里可以选具体版本,菜单项
+  `升级 Xray（最新）` 改成 `升级 Xray`;对话框标题 `升级 Xray（最新版）` 改成
+  `升级 Xray`;对话框正文重写为"安装 xray-core。可在下方选择目标版本(默认最新)"。
+  3X-UI 升级那条保留"（最新）"/`(Latest)`,因为 `/updatePanel` 真没有版本参数。
+
+### Fixed
+
+- **EN 模式下 Xray 对话框 `目标版本` / `latest（最新版）` 没有翻译**:根因不是缺
+  翻译,是 i18n key 被错位放进了 `placeholder` 块,但 [ServersView.tsx:921](web-react/src/views/admin/ServersView.tsx#L921)
+  读的是 `field.xray_version` → 找不到回退到 defaultValue 的中文。en-US.json 和
+  zh-CN.json 都把 `xray_version` / `xray_version_latest` / `xray_version_loading`
+  三个 key 从 `placeholder` 移回 `field`。中文模式下因为 defaultValue 恰好也是中文,
+  bug 视觉上看不出来。
+
+### Removed
+
+- **`xui_panels.latest_xui_version` / `update_available` 两列退役**:DB 里残留
+  不动(自用项目无迁移原则),domain.XUIPanel 删掉对应字段,GORM row + repo 接口
+  `UpdateLatestXUIVersion` 一并删。新代码完全不再读写这两列。
+- **`client.GetPanelUpdateInfo` 在 boot probe + Test handler 中的引用退役**(仅在
+  `UpgradePanel` 升级 pre-check 路径保留 —— 那里需要 3X-UI 给出权威升级目标版本)。
+
+### Internal
+
+- **触发时机汇总**(beta.9 之后):
+  - PSP 直查 GitHub release-latest:**boot probe 开始 + Servers 页 Test 点击**
+    (两个时机都走 `RefreshLatestXUI`,30 分钟节流 + single-flight)
+  - PSP 查 GitHub raw compat JSON:**Servers 页 Test 点击**(`RefreshRemoteCompat`,
+    60 秒节流)
+  - PSP 探每台 3X-UI 当前版本(`GetServerStatus`):**boot 一次 + admin Test 时**
+  - 3X-UI 查 GitHub(`/getPanelUpdateInfo`):**admin 点"升级 3X-UI 面板"时**
+    (一次,做 pre-flight check)
+  - 3X-UI 列 xray 版本(`/getXrayVersion`):**admin 打开"升级 Xray"对话框时**
+    (lazy load)
+- traffic poll loop 每 5 分钟那一圈对 3X-UI **只调** `/inbounds/list` +
+  `/clientTraffics/:email`(查流量),**不**碰任何 GitHub / 版本类 endpoint。
+
 ## v3.6.0-beta.8 — 2026-05-25
 
 ### Added

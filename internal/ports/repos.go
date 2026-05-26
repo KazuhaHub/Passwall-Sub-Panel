@@ -340,14 +340,6 @@ type XUIPanelRepo interface {
 	// probe would wipe the cached version snapshot and downgrade admin
 	// UI to "never probed" until the next successful probe.
 	UpdateVersionCheckedAt(ctx context.Context, panelID int64, checkedAt time.Time) error
-	// UpdateLatestXUIVersion writes only the upstream-update-info columns
-	// (latest_xui_version + update_available). Called by the probe paths
-	// after GetPanelUpdateInfo returns — fed to the Servers UI's ⋮ kebab
-	// badge so admin sees "new version available" without opening 3X-UI
-	// directly. Column-scoped so it doesn't race admin credential edits
-	// or other UpdateVersion paths (the two writers touch disjoint
-	// columns).
-	UpdateLatestXUIVersion(ctx context.Context, panelID int64, latestVersion string, updateAvailable bool) error
 }
 
 // UISettings holds runtime-editable UI preferences. They live in the DB so

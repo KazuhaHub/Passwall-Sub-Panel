@@ -118,6 +118,13 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	if err := version.LoadCompatCache(); err != nil {
 		log.Warn("load compat cache (will recover on first refresh)", "err", err)
 	}
+	// Same boot pattern for the centralized "latest 3X-UI release tag"
+	// snapshot: cold-boot off the cache so the ⋮ kebab "update available"
+	// badge can render immediately, then the first RefreshLatestXUI call
+	// (boot probe / Servers Test piggyback) overwrites it from upstream.
+	if err := version.LoadLatestXUICache(); err != nil {
+		log.Warn("load latest-xui cache (will recover on first refresh)", "err", err)
+	}
 
 	// --- adapter layer ---
 	db, err := mysql.Open(cfg.DBKind(), cfg.DBDSN())
@@ -408,6 +415,18 @@ func (a *App) probePanelVersionsOnce(ctx context.Context) {
 		return
 	}
 	log.Debug("compat probe tick", "panel_count", len(panels))
+	// Single PSP-wide GitHub query for the latest 3X-UI release tag —
+	// drives the ⋮ kebab "update available" badge for every panel.
+	// Centralized here so we don't fan one /getPanelUpdateInfo call out
+	// per panel: with N panels that would be N GitHub queries (each
+	// 3X-UI panel proxies through GitHub for its own probe). Single-
+	// flight + throttle inside RefreshLatestXUI means the boot tick +
+	// any concurrent Servers-page open still collapse to one call.
+	refreshCtx, refreshCancel := context.WithTimeout(ctx, 10*time.Second)
+	if rerr := version.RefreshLatestXUI(refreshCtx); rerr != nil {
+		log.Debug("compat probe: refresh latest 3X-UI failed (offline / rate limited?)", "err", rerr)
+	}
+	refreshCancel()
 	for _, p := range panels {
 		if ctx.Err() != nil {
 			return
@@ -455,20 +474,6 @@ func (a *App) probePanelVersionsOnce(ctx context.Context) {
 		}
 		if uerr := a.repos.XUIPanel.UpdateVersion(ctx, p.ID, status.PanelVersion, status.XrayVersion, &now); uerr != nil {
 			log.Warn("compat probe: write version", "panel_id", p.ID, "err", uerr)
-		}
-		// v3.6.0-beta.8: also fetch upstream-update info so the Servers
-		// ⋮ kebab can show "new XUI version available" badge. 3X-UI's
-		// /getPanelUpdateInfo hits GitHub once and caches internally;
-		// failure is non-fatal — admin can still Test manually and the
-		// existing version snapshot above remains valid.
-		updCtx, ucancel := context.WithTimeout(ctx, 10*time.Second)
-		updInfo, uerr := c.GetPanelUpdateInfo(updCtx)
-		ucancel()
-		if uerr != nil {
-			log.Debug("compat probe: update-info fetch failed (panel offline / GitHub rate limit?)",
-				"panel_id", p.ID, "err", uerr)
-		} else if uerr := a.repos.XUIPanel.UpdateLatestXUIVersion(ctx, p.ID, updInfo.LatestVersion, updInfo.UpdateAvailable); uerr != nil {
-			log.Warn("compat probe: write update-info", "panel_id", p.ID, "err", uerr)
 		}
 	}
 }

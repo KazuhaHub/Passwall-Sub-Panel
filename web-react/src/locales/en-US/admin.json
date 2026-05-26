@@ -1169,17 +1169,17 @@
       "api_token": "API Token",
       "username": "Username",
       "password": "Password",
-      "remark": "Remark"
+      "remark": "Remark",
+      "xray_version": "Target version",
+      "xray_version_latest": "latest",
+      "xray_version_loading": "Loading available versions…"
     },
     "placeholder": {
       "name": "default / us-west / ...",
       "url": "https://3x-ui.example.com:54321",
       "api_token": "3X-UI API Token (recommended)",
       "username": "admin (only when using password login)",
-      "password": "API Token preferred; password as fallback",
-      "xray_version": "Target version",
-      "xray_version_latest": "latest",
-      "xray_version_loading": "Loading available versions…"
+      "password": "API Token preferred; password as fallback"
     },
     "update_available_tooltip": "3X-UI {{latest}} is available (currently {{current}})",
     "hint": {
@@ -1222,7 +1222,7 @@
       "upgrade": "Upgrade",
       "force_upgrade": "Force upgrade",
       "upgrade_panel": "Upgrade 3X-UI panel (Latest)",
-      "upgrade_xray": "Upgrade Xray (Latest)"
+      "upgrade_xray": "Upgrade Xray"
     },
     "validate": {
       "url_required": "URL is required",
@@ -1250,8 +1250,8 @@
       "upgrade_panel_message": "Passwall Panel will check the target version first and only fire the upgrade on {{name}} if it's within the tested range. The panel will restart; Passwall Panel runs a smoke probe ~60s later. Continue?",
       "upgrade_force_title": "Target version not verified by Passwall Panel",
       "upgrade_force_message": "About to upgrade to {{latest}}. Passwall Panel's highest verified 3X-UI version is {{max}}. Forcing the upgrade may cause traffic poll, reconcile, and other critical flows to fail due to protocol or field changes. Recommend upgrading Passwall Panel to a release that supports this 3X-UI version first. Force upgrade anyway?",
-      "upgrade_xray_title": "Upgrade Xray (Latest)",
-      "upgrade_xray_message": "Install the latest xray-core on {{name}}. The panel itself stays up; only the xray child process restarts. Continue?"
+      "upgrade_xray_title": "Upgrade Xray",
+      "upgrade_xray_message": "Install xray-core on {{name}}. Pick a target version below (defaults to latest). The panel itself stays up; only the xray child process restarts."
     }
   }
 }

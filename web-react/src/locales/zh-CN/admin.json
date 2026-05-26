@@ -1169,17 +1169,17 @@
       "api_token": "API Token",
       "username": "用户名",
       "password": "密码",
-      "remark": "备注"
+      "remark": "备注",
+      "xray_version": "目标版本",
+      "xray_version_latest": "latest（最新版）",
+      "xray_version_loading": "正在加载可用版本…"
     },
     "placeholder": {
       "name": "default / us-west / ...",
       "url": "https://3x-ui.example.com:54321",
       "api_token": "3X-UI API Token（推荐）",
       "username": "admin（仅在用密码登录时）",
-      "password": "API Token 优先；填密码作为兜底",
-      "xray_version": "目标版本",
-      "xray_version_latest": "latest（最新版）",
-      "xray_version_loading": "正在加载可用版本…"
+      "password": "API Token 优先；填密码作为兜底"
     },
     "update_available_tooltip": "3X-UI 新版本 {{latest}} 可用（当前 {{current}}）",
     "hint": {
@@ -1222,7 +1222,7 @@
       "upgrade": "升级",
       "force_upgrade": "强制升级",
       "upgrade_panel": "升级 3X-UI 面板（最新）",
-      "upgrade_xray": "升级 Xray（最新）"
+      "upgrade_xray": "升级 Xray"
     },
     "validate": {
       "url_required": "URL 必填",
@@ -1250,8 +1250,8 @@
       "upgrade_panel_message": "Passwall Panel 将先检查目标版本是否在已测试范围内，在范围内才会触发 {{name}} 的自升级。面板会重启，约 60 秒后 Passwall Panel 跑 smoke probe 验证。是否继续？",
       "upgrade_force_title": "目标版本未通过 Passwall Panel 验证",
       "upgrade_force_message": "即将升级到 {{latest}}。当前 Passwall Panel 已验证的最高 3X-UI 版本为 {{max}}。强制升级可能因协议或字段变更导致 traffic poll、reconcile 等关键流程失败。建议先升级 Passwall Panel 至支持该 3X-UI 版本的发行，再升级面板。是否仍要强制升级？",
-      "upgrade_xray_title": "升级 Xray（最新版）",
-      "upgrade_xray_message": "在 {{name}} 上安装最新版 xray-core 二进制。面板自身不重启，只重启 xray 子进程。是否继续？"
+      "upgrade_xray_title": "升级 Xray",
+      "upgrade_xray_message": "在 {{name}} 上安装 xray-core。可在下方选择目标版本（默认最新）。面板自身不重启，只重启 xray 子进程。"
     }
   }
 }

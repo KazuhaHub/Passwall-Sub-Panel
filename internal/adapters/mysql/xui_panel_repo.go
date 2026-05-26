@@ -119,21 +119,3 @@ func (r *xuiPanelRepo) UpdateVersionCheckedAt(ctx context.Context, panelID int64
 		Updates(map[string]any{"version_checked_at": checkedAt}).Error
 }
 
-// UpdateLatestXUIVersion writes only the upstream-update snapshot columns
-// (latest_xui_version + update_available). Cross-dialect safe via the same
-// Updates(map) idiom as the other column-scoped writers; explicitly disjoint
-// from UpdateVersion's column set so concurrent probe paths can't fight
-// each other on the same fields. The boolean is included as a stored
-// column rather than recomputed from semver comparison so the UI doesn't
-// need to know how 3X-UI compares its own versions (which has historically
-// been inconsistent across "3.1.0" vs "v3.1.0").
-func (r *xuiPanelRepo) UpdateLatestXUIVersion(ctx context.Context, panelID int64, latestVersion string, updateAvailable bool) error {
-	if panelID == 0 {
-		return fmt.Errorf("%w: panel id required", domain.ErrValidation)
-	}
-	return r.db.WithContext(ctx).Model(&xuiPanelRow{}).Where("id = ?", panelID).
-		Updates(map[string]any{
-			"latest_xui_version": latestVersion,
-			"update_available":   updateAvailable,
-		}).Error
-}

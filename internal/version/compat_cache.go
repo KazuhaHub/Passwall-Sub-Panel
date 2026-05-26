@@ -82,6 +82,75 @@ func LoadCompatCache() error {
 	return nil
 }
 
+// latestXUICacheFile is the on-disk cache for the global 3X-UI latest
+// release tag. Separate file from compat-cache.json because the tag is
+// PSP-version-independent — it only depends on what's been published
+// upstream — so the PSP-version mismatch check that invalidates
+// compat-cache across PSP upgrades would needlessly nuke this one too.
+const latestXUICacheFile = "latest-xui-cache.json"
+
+type latestXUICachePayload struct {
+	Tag      string    `json:"tag"`
+	CachedAt time.Time `json:"cached_at"`
+}
+
+// LoadLatestXUICache reads the on-disk latest-XUI cache (if any) and
+// installs the cached tag via SetLatestXUI. Boot path calls this BEFORE
+// any RefreshLatestXUI so Passwall Panel starts with the last-known tag
+// even when offline (admin can still see the "update available" badge
+// based on the cached snapshot, rather than waiting for the first
+// network round-trip). Missing file is not an error.
+func LoadLatestXUICache() error {
+	dir := getCacheDir()
+	if dir == "" {
+		return nil
+	}
+	b, err := os.ReadFile(filepath.Join(dir, latestXUICacheFile))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("read latest-xui cache: %w", err)
+	}
+	var p latestXUICachePayload
+	if err := json.Unmarshal(b, &p); err != nil {
+		return fmt.Errorf("decode latest-xui cache: %w", err)
+	}
+	if _, ok := parseSemver(p.Tag); !ok {
+		return fmt.Errorf("cached 3X-UI tag %q is unparseable", p.Tag)
+	}
+	SetLatestXUI(p.Tag)
+	return nil
+}
+
+// saveLatestXUICache persists the just-fetched tag to disk. Same
+// atomic-temp-rename idiom as saveCompatCache so a concurrent boot
+// loader never sees a half-written file.
+func saveLatestXUICache(tag string) error {
+	dir := getCacheDir()
+	if dir == "" {
+		return nil
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("ensure cache dir: %w", err)
+	}
+	payload := latestXUICachePayload{Tag: tag, CachedAt: time.Now()}
+	b, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		return fmt.Errorf("encode cache: %w", err)
+	}
+	target := filepath.Join(dir, latestXUICacheFile)
+	tmp := target + ".tmp"
+	if err := os.WriteFile(tmp, b, 0o644); err != nil {
+		return fmt.Errorf("write tmp cache: %w", err)
+	}
+	if err := os.Rename(tmp, target); err != nil {
+		_ = os.Remove(tmp)
+		return fmt.Errorf("rename cache: %w", err)
+	}
+	return nil
+}
+
 // saveCompatCache writes the just-fetched range to disk. Atomic via
 // temp+rename so a concurrent reader never sees a half-written file. No-op
 // when no cache dir is registered. Called from fetchAndApply on success.

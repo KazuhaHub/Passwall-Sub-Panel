@@ -62,11 +62,11 @@ type serverDTO struct {
 	VersionCheckedAt *time.Time `json:"version_checked_at,omitempty"`
 	CompatStatus     string     `json:"compat_status,omitempty"`  // "supported" | "too_old" | "untested" | "unknown"
 	CompatMessage    string     `json:"compat_message,omitempty"` // human-readable, for tooltip / banner
-	// v3.6.0-beta.8: upstream-update snapshot from 3X-UI's
-	// /getPanelUpdateInfo. LatestXUIVersion is the GitHub-side latest tag
-	// (carries "v" prefix typically); UpdateAvailable is the panel's own
-	// boolean — both empty / false when never probed. Drives the ⋮ kebab
-	// "update available" badge in the Servers UI.
+	// LatestXUIVersion / UpdateAvailable are derived per-request from the
+	// PSP-wide version.LatestXUI() snapshot (one GitHub query feeds every
+	// row) compared against this panel's PanelVersion. NOT persisted per
+	// panel — the latest tag is panel-independent and storing it per row
+	// would just be N copies of the same string going stale together.
 	LatestXUIVersion string `json:"latest_xui_version,omitempty"`
 	UpdateAvailable  bool   `json:"update_available,omitempty"`
 }
@@ -222,6 +222,16 @@ func (h *AdminServersHandler) Test(c *gin.Context) {
 	if rerr := version.RefreshRemoteCompat(context.Background(), ""); rerr != nil {
 		log.Warn("admin test: refresh remote compat", "panel_id", req.ID, "err", rerr)
 	}
+	// Same piggyback for the centralized latest-3X-UI tag fetch — one
+	// PSP-wide GitHub query drives every panel's "update available"
+	// badge. The 30-minute throttle inside RefreshLatestXUI means
+	// page-refresh churn never reaches GitHub more than twice per hour
+	// regardless of how many panels admin has. Background ctx for the
+	// same reason as RefreshRemoteCompat (admin navigating away
+	// shouldn't cancel the in-flight network call).
+	if rerr := version.RefreshLatestXUI(context.Background()); rerr != nil {
+		log.Debug("admin test: refresh latest 3X-UI failed", "err", rerr)
+	}
 	client, err := h.pool.Get(req.ID)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"ok": false, "error": "Server not registered in pool: " + err.Error()})
@@ -257,18 +267,14 @@ func (h *AdminServersHandler) Test(c *gin.Context) {
 		resp["compat_status"] = compatStatus.String()
 		resp["compat_message"] = version.CompatMessage(status.PanelVersion, compatStatus)
 		resp["version_checked_at"] = now
-		// v3.6.0-beta.8: piggyback upstream-update info. Admin clicking
-		// Test wants "the current truth" and is fine paying an extra
-		// ~200ms for it (3X-UI internally queries GitHub release API).
-		// Best-effort: failure doesn't degrade the connection-test result.
-		if updInfo, uerr := client.GetPanelUpdateInfo(c.Request.Context()); uerr == nil {
-			if werr := h.repo.UpdateLatestXUIVersion(c.Request.Context(), req.ID, updInfo.LatestVersion, updInfo.UpdateAvailable); werr != nil {
-				log.Warn("admin test: write update-info", "panel_id", req.ID, "err", werr)
-			}
-			resp["latest_xui_version"] = updInfo.LatestVersion
-			resp["update_available"] = updInfo.UpdateAvailable
-		} else {
-			log.Debug("admin test: update-info fetch failed", "panel_id", req.ID, "err", uerr)
+		// Carry the centralized "latest 3X-UI tag" snapshot back so the
+		// UI refreshes its ⋮ kebab badge in lockstep with the probed
+		// panel version. The latest tag itself is panel-independent
+		// (one PSP-wide value), but UpdateAvailable becomes meaningful
+		// only when paired with this specific panel's version.
+		if latest := version.LatestXUI(); latest != "" {
+			resp["latest_xui_version"] = latest
+			resp["update_available"] = version.IsXUIUpdateAvailable(status.PanelVersion)
 		}
 	} else {
 		log.Warn("admin test: version probe", "panel_id", req.ID, "err", perr)
@@ -642,8 +648,6 @@ func toServerDTO(p *domain.XUIPanel) serverDTO {
 		PanelVersion:     p.PanelVersion,
 		XrayVersion:      p.XrayVersion,
 		VersionCheckedAt: p.VersionCheckedAt,
-		LatestXUIVersion: p.LatestXUIVersion,
-		UpdateAvailable:  p.UpdateAvailable,
 	}
 	// Only compute compat fields when there's actually a probed version —
 	// "never probed" panels stay blank rather than displaying a meaningless
@@ -652,6 +656,13 @@ func toServerDTO(p *domain.XUIPanel) serverDTO {
 		status := version.CheckXUI(p.PanelVersion)
 		dto.CompatStatus = status.String()
 		dto.CompatMessage = version.CompatMessage(p.PanelVersion, status)
+	}
+	// Derive the "update available" indicator from the PSP-wide latest
+	// tag rather than a per-panel column. Same snapshot drives every
+	// panel's badge, so the kebab dots flip in lockstep with one fetch.
+	if latest := version.LatestXUI(); latest != "" && p.PanelVersion != "" {
+		dto.LatestXUIVersion = latest
+		dto.UpdateAvailable = version.IsXUIUpdateAvailable(p.PanelVersion)
 	}
 	return dto
 }
