@@ -4,11 +4,14 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/log"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/version"
 )
 
 // AdminServersHandler exposes CRUD for 3X-UI server connections under
@@ -33,14 +36,25 @@ func NewAdminServersHandler(repo ports.XUIPanelRepo, pool ports.XUIPool, nodes p
 // password) are NEVER returned in plaintext — the response carries only
 // "has_api_token" / "has_password" booleans. The edit dialog re-enters
 // secrets when changing them.
+//
+// Version-identity fields (panel_version / xray_version / version_checked_at /
+// compat_status / compat_message) reflect the last successful probe via the
+// boot probe + traffic-poll-piggyback path (v3.6.0-beta.1) or the manual
+// "test connection" trigger (Test handler, refreshes these on every click).
+// Empty version strings + nil checked_at = "never probed" (UI shows ⋯).
 type serverDTO struct {
-	ID          int64  `json:"id"`
-	Name        string `json:"name"`
-	URL         string `json:"url"`
-	Username    string `json:"username,omitempty"`
-	Remark      string `json:"remark,omitempty"`
-	HasAPIToken bool   `json:"has_api_token"`
-	HasPassword bool   `json:"has_password"`
+	ID               int64      `json:"id"`
+	Name             string     `json:"name"`
+	URL              string     `json:"url"`
+	Username         string     `json:"username,omitempty"`
+	Remark           string     `json:"remark,omitempty"`
+	HasAPIToken      bool       `json:"has_api_token"`
+	HasPassword      bool       `json:"has_password"`
+	PanelVersion     string     `json:"panel_version,omitempty"`
+	XrayVersion      string     `json:"xray_version,omitempty"`
+	VersionCheckedAt *time.Time `json:"version_checked_at,omitempty"`
+	CompatStatus     string     `json:"compat_status,omitempty"`  // "supported" | "too_old" | "untested" | "unknown"
+	CompatMessage    string     `json:"compat_message,omitempty"` // human-readable, for tooltip / banner
 }
 
 type serverCreateRequest struct {
@@ -188,10 +202,35 @@ func (h *AdminServersHandler) Test(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"ok": false, "error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{
+
+	// Connection works — piggyback a version probe so the admin's "test
+	// connection" click doubles as a manual version refresh. This is the
+	// out-of-band manual trigger that complements the boot probe +
+	// traffic-poll-piggyback re-probe (see app.go) — admin gets immediate
+	// feedback after a 3X-UI upgrade instead of waiting for the next poll
+	// tick. Best-effort: if the version probe fails for any reason we
+	// still report the connection test result; the "ok: true" semantics
+	// is about the panel being reachable + credentials valid.
+	resp := gin.H{
 		"ok":            true,
 		"inbound_count": len(inbounds),
-	})
+	}
+	if status, perr := client.GetServerStatus(c.Request.Context()); perr == nil {
+		now := time.Now()
+		if uerr := h.repo.UpdateVersion(c.Request.Context(), req.ID, status.PanelVersion, status.XrayVersion, &now); uerr != nil {
+			log.Warn("admin test: write version", "panel_id", req.ID, "err", uerr)
+		}
+		compatStatus := version.CheckXUI(status.PanelVersion)
+		resp["panel_version"] = status.PanelVersion
+		resp["xray_version"] = status.XrayVersion
+		resp["xray_state"] = status.XrayState
+		resp["compat_status"] = compatStatus.String()
+		resp["compat_message"] = version.CompatMessage(status.PanelVersion, compatStatus)
+		resp["version_checked_at"] = now
+	} else {
+		log.Warn("admin test: version probe", "panel_id", req.ID, "err", perr)
+	}
+	c.JSON(http.StatusOK, resp)
 }
 
 func (h *AdminServersHandler) Delete(c *gin.Context) {
@@ -225,15 +264,27 @@ func (h *AdminServersHandler) Delete(c *gin.Context) {
 // ---- helpers ----
 
 func toServerDTO(p *domain.XUIPanel) serverDTO {
-	return serverDTO{
-		ID:          p.ID,
-		Name:        p.Name,
-		URL:         p.URL,
-		Username:    p.Username,
-		Remark:      p.Remark,
-		HasAPIToken: p.APIToken != "",
-		HasPassword: p.Password != "",
+	dto := serverDTO{
+		ID:               p.ID,
+		Name:             p.Name,
+		URL:              p.URL,
+		Username:         p.Username,
+		Remark:           p.Remark,
+		HasAPIToken:      p.APIToken != "",
+		HasPassword:      p.Password != "",
+		PanelVersion:     p.PanelVersion,
+		XrayVersion:      p.XrayVersion,
+		VersionCheckedAt: p.VersionCheckedAt,
 	}
+	// Only compute compat fields when there's actually a probed version —
+	// "never probed" panels stay blank rather than displaying a meaningless
+	// "unknown" badge that admins would have to dismiss.
+	if p.PanelVersion != "" {
+		status := version.CheckXUI(p.PanelVersion)
+		dto.CompatStatus = status.String()
+		dto.CompatMessage = version.CompatMessage(p.PanelVersion, status)
+	}
+	return dto
 }
 
 func mapServerError(c *gin.Context, err error) {

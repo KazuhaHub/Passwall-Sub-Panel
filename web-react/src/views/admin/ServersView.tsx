@@ -31,6 +31,8 @@ import VisibilityIcon from '@mui/icons-material/Visibility'
 import VisibilityOffIcon from '@mui/icons-material/VisibilityOff'
 import { useTranslation } from 'react-i18next'
 
+import WarningAmberIcon from '@mui/icons-material/WarningAmber'
+
 import {
   createServer,
   deleteServer,
@@ -148,6 +150,20 @@ export default function ServersView() {
       const r = await testServer(s.id)
       if (r.ok) {
         setProbeStates(p => ({ ...p, [s.id]: { status: 'ok', inbound_count: r.inbound_count } }))
+        // Test piggybacks a version probe (v3.6.0-beta.2). Merge any returned
+        // version fields back into the row so the Version column and the
+        // top-of-page compat banner reflect the fresh probe without a
+        // full list reload.
+        if (r.panel_version !== undefined || r.compat_status) {
+          setItems(prev => prev.map(it => it.id === s.id ? {
+            ...it,
+            panel_version: r.panel_version ?? it.panel_version,
+            xray_version: r.xray_version ?? it.xray_version,
+            version_checked_at: r.version_checked_at ?? it.version_checked_at,
+            compat_status: r.compat_status ?? it.compat_status,
+            compat_message: r.compat_message ?? it.compat_message,
+          } : it))
+        }
         if (notify) pushSnack(t('admin:servers.toast.test_ok', { count: r.inbound_count ?? 0 }), 'success')
       } else {
         setProbeStates(p => ({ ...p, [s.id]: { status: 'fail', error: r.error ?? 'unknown' } }))
@@ -326,6 +342,78 @@ export default function ServersView() {
     })
   }
 
+  // versionCell renders the 3X-UI + Xray version pair plus a compat badge
+  // when the panel's reported version falls outside PSP's supported range.
+  // Empty state ("never probed") shows an em-dash so it's visually distinct
+  // from "probed and ok". Compat colors mirror Material's container roles
+  // for consistency with statusBadge.
+  function versionCell(s: Server) {
+    if (!s.panel_version) {
+      return <Typography sx={{ fontSize: 13, color: md.onSurfaceVariant }}>—</Typography>
+    }
+    let bg = md.tertiaryContainer
+    let fg = md.onTertiaryContainer
+    let label: string | null = null
+    switch (s.compat_status) {
+      case 'supported':
+        // No badge — clean state. The version text alone suffices.
+        break
+      case 'too_old':
+        bg = md.errorContainer
+        fg = md.onErrorContainer
+        label = t('admin:servers.compat.too_old', { defaultValue: '版本过低' })
+        break
+      case 'untested':
+        bg = md.secondaryContainer
+        fg = md.onSecondaryContainer
+        label = t('admin:servers.compat.untested', { defaultValue: '未测试' })
+        break
+      case 'unknown':
+      default:
+        bg = md.surfaceContainerHighest
+        fg = md.onSurfaceVariant
+        label = t('admin:servers.compat.unknown', { defaultValue: '无法识别' })
+    }
+    const versionText = (
+      <Box sx={{ display: 'flex', flexDirection: 'column', lineHeight: 1.3 }}>
+        <Typography sx={{ fontSize: 13, fontWeight: 500 }}>3X-UI {s.panel_version}</Typography>
+        {s.xray_version && (
+          <Typography sx={{ fontSize: 11, color: md.onSurfaceVariant }}>
+            Xray {s.xray_version}
+          </Typography>
+        )}
+      </Box>
+    )
+    const badge = label && (
+      <Box sx={{
+        display: 'inline-block', px: 1, py: 0.125,
+        borderRadius: 1, fontSize: 11, fontWeight: 500,
+        bgcolor: bg, color: fg, whiteSpace: 'nowrap', mt: 0.25,
+      }}>
+        {label}
+      </Box>
+    )
+    const stacked = (
+      <Box>
+        {versionText}
+        {badge}
+      </Box>
+    )
+    if (s.compat_message) {
+      return <Tooltip title={s.compat_message} placement="top"><span>{stacked}</span></Tooltip>
+    }
+    return stacked
+  }
+
+  // incompatibleServers powers the top banner. We surface only panels with
+  // a definitive non-supported status — "unknown" stays out of the banner
+  // because it usually means "never probed" or "probe failed transiently",
+  // not a real compat issue worth a red banner.
+  const incompatibleServers = useMemo(
+    () => items.filter(s => s.compat_status === 'too_old' || s.compat_status === 'untested'),
+    [items],
+  )
+
   function statusBadge(s: Server) {
     const st = stateFor(s)
     let label: string
@@ -395,6 +483,33 @@ export default function ServersView() {
         </Box>
       </Box>
 
+      {/* Compat warning banner — only shown when at least one server's
+          3X-UI version falls outside the supported range. "Unknown" panels
+          (never probed / probe failing) deliberately stay out of this
+          banner since they usually aren't a real compat issue. */}
+      {incompatibleServers.length > 0 && (
+        <Box sx={{
+          mt: 2, p: 1.75, borderRadius: 2,
+          bgcolor: md.errorContainer, color: md.onErrorContainer,
+          display: 'flex', gap: 1.5, alignItems: 'flex-start',
+        }}>
+          <WarningAmberIcon fontSize="small" sx={{ mt: 0.25 }} />
+          <Box>
+            <Typography sx={{ fontSize: 13, fontWeight: 600 }}>
+              {t('admin:servers.compat.banner_title', {
+                count: incompatibleServers.length,
+                defaultValue: '{{count}} 台服务器的 3X-UI 版本超出 PSP 兼容范围',
+              })}
+            </Typography>
+            <Typography sx={{ fontSize: 12, mt: 0.25 }}>
+              {incompatibleServers
+                .map(s => `${s.name} (${s.panel_version ?? '?'}, ${s.compat_status ?? 'unknown'})`)
+                .join('; ')}
+            </Typography>
+          </Box>
+        </Box>
+      )}
+
       {/* Selection toolbar */}
       {selectedCount > 0 && (
         <Box sx={{
@@ -460,23 +575,24 @@ export default function ServersView() {
                 <TableCell>{t('admin:servers.table.name')}</TableCell>
                 <TableCell>{t('admin:servers.table.url')}</TableCell>
                 <TableCell>{t('admin:servers.table.status')}</TableCell>
+                <TableCell>{t('admin:servers.table.version', { defaultValue: '版本' })}</TableCell>
                 <TableCell>{t('admin:servers.table.remark')}</TableCell>
                 <TableCell align="right">{t('admin:servers.table.actions')}</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
               {loading && items.length === 0 && (
-                <TableRow><TableCell colSpan={6} sx={{ textAlign: 'center', py: 6 }}>
+                <TableRow><TableCell colSpan={7} sx={{ textAlign: 'center', py: 6 }}>
                   <CircularProgress size={24} />
                 </TableCell></TableRow>
               )}
               {!loading && items.length === 0 && (
-                <TableRow><TableCell colSpan={6} sx={{ textAlign: 'center', py: 6, color: md.onSurfaceVariant }}>
+                <TableRow><TableCell colSpan={7} sx={{ textAlign: 'center', py: 6, color: md.onSurfaceVariant }}>
                   —
                 </TableCell></TableRow>
               )}
               {!loading && items.length > 0 && filteredItems.length === 0 && (
-                <TableRow><TableCell colSpan={6} sx={{ textAlign: 'center', py: 6, color: md.onSurfaceVariant }}>
+                <TableRow><TableCell colSpan={7} sx={{ textAlign: 'center', py: 6, color: md.onSurfaceVariant }}>
                   {t('admin:servers.no_match', { defaultValue: '没有匹配的服务器' })}
                 </TableCell></TableRow>
               )}
@@ -506,6 +622,7 @@ export default function ServersView() {
                     </Tooltip>
                   </TableCell>
                   <TableCell sx={{ whiteSpace: 'nowrap' }}>{statusBadge(s)}</TableCell>
+                  <TableCell sx={{ whiteSpace: 'nowrap' }}>{versionCell(s)}</TableCell>
                   <TableCell sx={{ color: md.onSurfaceVariant, fontSize: 13 }}>{s.remark || '—'}</TableCell>
                   <TableCell align="right" sx={{ whiteSpace: 'nowrap' }}>
                     <Button

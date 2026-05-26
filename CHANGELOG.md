@@ -4,6 +4,45 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## v3.6.0-beta.2 — 2026-05-25
+
+### Added (admin 操作面 ──​ Phase 2 第二刀)
+
+- **Servers 页"测试连接"现在顺手当版本刷新用**:admin 点 ⟳ "测试连接"
+  按钮后,后端 `AdminServersHandler.Test` 在 `ListInbounds` 成功后再调一次
+  `GetServerStatus`(beta.1 的 adapter 方法)→ 写回 `xui_panels.UpdateVersion`
+  → 把 `panel_version` / `xray_version` / `compat_status` / `compat_message`
+  / `version_checked_at` 一并回到响应里。前端 `probeServer` 把这些字段 merge
+  回 `items`,Version 列 + 顶部 banner 立即刷新。**没有新加 endpoint**——
+  "测试连接"按钮就是 manual refresh 入口,符合你定的"在 Server 页面测试的
+  时候手动触发"。Best-effort:版本探测失败不影响"测试连接"本身的 ok/fail
+  判定(版本是次要信号,可达性是主信号)。
+- **`GET /api/admin/servers` 响应增加版本字段**:`serverDTO` 加
+  `panel_version` / `xray_version` / `version_checked_at` /
+  `compat_status` ("supported" / "too_old" / "untested" / "unknown") /
+  `compat_message`(human-readable)。`compat_status` 只在 panel 已经被
+  探测过(`panel_version != ""`)时填充,"从未探测"的 panel 字段全空——
+  避免 UI 显示一个意义模糊的 "unknown" 徽章让 admin 误以为有问题。
+
+### Frontend
+
+- **Servers 页新增 "版本" 列**:展示 `3X-UI <ver>` + `Xray <ver>`(两行栈式
+  布局),supported 状态无徽章(干净),其它三态各自带色块徽章(error /
+  secondary / surface)+ tooltip 显示 compat_message。"从未探测" 显示 "—"。
+- **顶部告警 banner**:任意 panel 处于 `too_old` 或 `untested` 状态时,
+  Servers 页顶部出现红色 banner(`md.errorContainer`)+ ⚠ 图标 + panel 列表
+  (name + version + status)。"unknown" 故意排除——通常意味着"刚启动还没
+  探测完"/"网络瞬时失败",不算真实的兼容性问题,不刷红条。
+- i18n key 同步:`servers.table.version` + `servers.compat.{banner_title,
+  too_old, untested, unknown}` 都加进 zh-CN / en-US。
+
+### Internal
+
+- `web-react/src/api/servers.ts` 新增 `CompatStatus` 类型(`'supported' |
+  'too_old' | 'untested' | 'unknown'`),跟 `internal/version.CompatStatus.String()`
+  对齐 —— 任一边改了对方也要改。`Server` + `TestResult` interface 同步加版本
+  字段。
+
 ## v3.6.0-beta.1 — 2026-05-25
 
 ### Added (PSP 主动感知 3X-UI 版本 —— Phase 2 第一刀)

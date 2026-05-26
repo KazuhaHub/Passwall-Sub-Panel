@@ -1,5 +1,9 @@
 import { client } from './client'
 
+// CompatStatus mirrors internal/version.CompatStatus.String() — keep in
+// sync if either side changes.
+export type CompatStatus = 'supported' | 'too_old' | 'untested' | 'unknown'
+
 export interface Server {
   id: number
   name: string
@@ -8,6 +12,14 @@ export interface Server {
   remark?: string
   has_api_token: boolean
   has_password: boolean
+  // Version-identity snapshot from the last successful probe (boot probe
+  // + traffic-poll piggyback + admin "test connection" trigger). Empty
+  // strings + missing version_checked_at == "never probed".
+  panel_version?: string
+  xray_version?: string
+  version_checked_at?: string
+  compat_status?: CompatStatus
+  compat_message?: string
 }
 
 export interface CreateServerRequest {
@@ -32,6 +44,15 @@ export interface TestResult {
   ok: boolean
   error?: string
   inbound_count?: number
+  // Version probe piggybacks on a successful test (admin "test connection"
+  // doubles as a manual refresh). Absent on a probe failure or pre-v3.6
+  // backend.
+  panel_version?: string
+  xray_version?: string
+  xray_state?: string
+  compat_status?: CompatStatus
+  compat_message?: string
+  version_checked_at?: string
 }
 
 export async function listServers() {

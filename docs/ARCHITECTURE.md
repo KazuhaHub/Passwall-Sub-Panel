@@ -1530,6 +1530,18 @@ vN+1 发版时，**`cleanupLegacyState` 里所有 vN.x 标签的段全部删除*
 
 **记录每一段**：当你在 `cleanupLegacyState` 里加新段时，**同时在 [`docs/CHANGELOG.md`](CHANGELOG.md) 对应版本下记一笔"legacy cleanup: ..."**（人话描述清的是什么），这样回看历史不用读代码。
 
+### 16.4.1 当前 cleanupLegacyState 段位 (registry)
+
+下次 major 发版（v4.0.0）时**整张表清空**，对应代码段从 `cleanupLegacyState` 全部删除。维护这张表是 §16.4 "记录每一段" 的集中版本（CHANGELOG 是流水账，这是当前快照）。
+
+| 段标签 | 引入版本 | 解决的问题 | evict-by |
+|---|---|---|---|
+| separator 表迁移 | v3.0.0-beta.7 | `nodes` 表里 `kind='separator'` 的行迁到独立 `nodes_separator` 表;旧行残留会被 UI 渲染成"幽灵 separator" | v4.0.0 |
+| separator visibility 模型重塑 | v3.0.0-rc.4 | 把 `show_in_all_groups` (bool) + `group_ids` 替换成 `mode` (string) + `node_ids`;legacy 列残留浪费存储 | v4.0.0 |
+| sub_logs 旧单列索引清理 | v3.6.0-beta.1 | v3.5.1-beta.2 把 `sub_logs` 索引从两个独立单列升级到一个复合 + 一个独立;AutoMigrate 不会自动 drop 旧索引,残留增加每行 INSERT 写入开销 | v4.0.0 |
+
+**操作员视角**：每段都会在 PSP 启动时自动跑（幂等），新升级的部署看到对应 `[cleanupLegacyState]` 行就说明命中了；旧部署再启动就什么都不做。**不需要手动操作 DB**。
+
 ---
 
 ## 17. 实施路线图

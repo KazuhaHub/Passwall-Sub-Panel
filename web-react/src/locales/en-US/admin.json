@@ -1181,6 +1181,7 @@
       "name": "Server name",
       "url": "URL",
       "status": "Status",
+      "version": "Version",
       "remark": "Remark",
       "actions": "Actions"
     },
@@ -1191,6 +1192,12 @@
       "fail": "Connection failed",
       "unconfigured": "No credentials",
       "unknown": "Not checked"
+    },
+    "compat": {
+      "banner_title": "{{count}} server(s) running an out-of-range 3X-UI version",
+      "too_old": "Too old",
+      "untested": "Untested",
+      "unknown": "Unknown"
     },
     "action": {
       "test": "Test",

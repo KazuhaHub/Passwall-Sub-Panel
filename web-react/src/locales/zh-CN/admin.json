@@ -1181,6 +1181,7 @@
       "name": "服务器名称",
       "url": "URL",
       "status": "状态",
+      "version": "版本",
       "remark": "备注",
       "actions": "操作"
     },
@@ -1191,6 +1192,12 @@
       "fail": "连接失败",
       "unconfigured": "未配置凭据",
       "unknown": "未检测"
+    },
+    "compat": {
+      "banner_title": "{{count}} 台服务器的 3X-UI 版本超出 PSP 兼容范围",
+      "too_old": "版本过低",
+      "untested": "未测试",
+      "unknown": "无法识别"
     },
     "action": {
       "test": "测试连接",
