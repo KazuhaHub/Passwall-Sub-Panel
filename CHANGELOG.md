@@ -4,6 +4,45 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## v3.5.0 — 2026-05-25
+
+正式版。汇总 v3.5.0-beta.1 → beta.16 全部改动，beta.16 内容直发为正式版定稿
+（自 beta.16 起无追加修复）。完整逐项见下方各 pre-release 段落，下面只列本次
+release 的核心叙事。
+
+### 主要变化（叙事性总述）
+
+- **inbound 配置本地化（架构主线，beta.1 起一路收尾到 beta.7）**:
+  render / reconcile / 节点编辑对话框 / health 全部不再回源 3X-UI 拉 inbound
+  协议参数，统一以 `nodes` 行里的本地快照为真相源。3X-UI 控制 API 短暂挂掉
+  时，订阅生成、健康探测、漂移对账都照常跑;reconcile 轴 A 反向把本地配置
+  下发到 3X-UI 保证最终一致;`ConfigSyncState` 新增 `pending` 状态把"PSP 想推
+  但还没推上去"在 UI 上显出来。详见 `docs/inbound-ownership.md`。
+- **traffic poll 性能,手动 "Poll Now" 从 ~10s 降到亚秒级**:
+  Phase 2 串行 per-user / per-client 本地写改成"循环入 sink、末尾一次 batch
+  flush"(beta.9);safety-net floor push 从热路径里移出去异步化(beta.12);
+  `OwnershipRepo.ListByUsers` batched read 把 N+1 reads 收成一次(beta.15)。
+  12 user × 5 panel × 9 inbound 实测从用户体感 6–10s 压到 234ms,瓶颈彻底回到
+  Phase 1 跨区 `ListInbounds` 的网络物理下限。
+- **默认安全姿态收紧**:
+  `jwt_access_ttl_minutes` 默认 120 → 60(beta.8);
+  `jwt_refresh_ttl_minutes` 默认 10080 → 1440(beta.11)。
+  Sliding Refresh 保留,日常活跃用户不感知;只压"完全不活跃"的绝对窗口,事实上
+  把 access/refresh 万一被偷的有效窗口从 2h/7d 压到 1h/1d。已有部署不受影响
+  (settings 表里存过的值优先于默认值)。
+- **日志分级三层入口**:
+  `--debug` 启动 flag(beta.15) + `PSP_LOG_LEVEL` 环境变量(beta.14) +
+  `log_level` config 字段(beta.16),优先级 **flag > env > config > 默认(info)**。
+  其中 log_level 故意不进 settings 表——它得在 DB 加载之前生效,boot 早期诊断
+  (比如 config load 失败)需要的就是"DB 起来之前可控"。
+- **零散修复与健壮性**(节选,完整看下方):创建 inbound 丢响应产生的孤儿
+  recovery(beta.4)、reconcile drift push 可能清空 3X-UI 全部 client 的两层
+  防御(beta.2)、admin 编辑被 reconcile 静默撤销(beta.2)、`UpdateInboundConfig`
+  4xx 无限重试(beta.3)、inbound 协议密钥(SS-2022 PSK / Reality privateKey)的
+  AES-GCM at-rest 加密(beta.4)、新建/导入节点不再阻塞在批量 client 推送
+  (beta.7)、Tags 输入框尺寸对齐(beta.7)、health 改 port-open 探测、render 取
+  inbound 去重、`InSync` 不再碰 remark(beta.5)。
+
 ## v3.5.0-beta.16 — 2026-05-23
 
 ### Added
