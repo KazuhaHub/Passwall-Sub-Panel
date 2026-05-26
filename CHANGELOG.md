@@ -4,6 +4,45 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## v3.6.0-beta.10 — 2026-05-26
+
+### Fixed
+
+- **CompatUnknown 出现在新装/刚升级后第一次打开 Servers 页**:根因有两层 ——
+  1. boot probe 漏调 `RefreshRemoteCompat`(beta.9 加 `RefreshLatestXUI` 时只补
+     了一半)。结果 boot 完成时 compat JSON 还没拉到,UI 上每台 panel 都显示
+     `Unknown` + 提示 "compat data not loaded yet"直到 admin 手动 Test。修复:
+     `probePanelVersionsOnce` 进 panel 循环前 RefreshRemoteCompat / RefreshLatestXUI
+     两个一起跑(各自 10s 超时,失败不阻塞)。
+  2. `LoadCompatCache` 严格要求缓存文件的 `psp_version` 跟当前一致,否则整个
+     丢弃 → 每次升一个 beta 都会让 cache 失效,boot 网络不通时 admin 看到的就是
+     `Unknown`。修复:放宽该检查,旧 PSP 版本写的 cache 当 stale-but-usable 启动
+     值用(boot 的 RefreshRemoteCompat 会在几秒内覆盖)。最坏情况是 admin 看到
+     几秒钟旧的 compat 范围,而不是空白。
+
+### Added
+
+- **Servers 页批量选中后,工具栏新增「批量升级 Xray」按钮**:固定升 latest,不
+  允许指定版本。理由:不同 panel 的 3X-UI 看到的可装 xray-core 版本列表可能不
+  一致(取决于 3X-UI 自己的 GitHub 缓存),"全部锁同一个 tag"未必每台都能满足。
+  共同的高频诉求是"把所有节点的 xray-core 都升新",这条单一语义直接做。Admin
+  真要 pin 具体 tag 还是走单台的"升级 Xray"对话框。
+  - 行为:`Promise.allSettled` 并行 fanout 到选中的 N 台 → 每台 `installXray("latest")`
+    → 完成后并行 probe 拉回新版本号刷 UI → 整体结果 toast(全部成功 / 部分失败,
+    带计数)
+  - 风险:Xray 重启会让该节点的代理流量短暂断开(秒级),面板自身不重启;批量同时
+    打 N 台等于让 N 台节点同时短暂不可用。admin 自行选时间窗
+
+### Internal
+
+- **触发时机最终汇总**(beta.10 之后,跟 README/docs 对齐):
+  - PSP 直查 GitHub 的两类(compat JSON + release-latest):**boot probe 开始 +
+    Servers 页 Test 点击**,两个时机各自做(节流自带去重,N 台 panel 同时打也只
+    一次外网)
+  - 不存在 background tick —— admin 不动手就没必要去问 GitHub 有没有新东西
+- `internal/transport/http/handler/admin_servers.go` 没改;批量逻辑全在前端用现成
+  的 `upgradeXray(id)` 单台 API fanout 完成,backend 无需新增 endpoint。
+
 ## v3.6.0-beta.9 — 2026-05-25
 
 ### Changed — "latest 3X-UI 版本" 检测改成 Passwall Panel 自己一次性查

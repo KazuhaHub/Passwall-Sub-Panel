@@ -1163,6 +1163,7 @@
     "selection_count": "{{count}} selected",
     "batch_test": "Test selected",
     "batch_delete": "Delete selected",
+    "batch_upgrade_xray": "Upgrade Xray on selected",
     "field": {
       "name": "Server name",
       "url": "URL",
@@ -1239,13 +1240,17 @@
       "batch_partial": "Deleted {{ok}} servers, {{fail}} failed",
       "upgrade_panel_started": "3X-UI upgrade to {{target}} initiated; Passwall Panel will run a smoke probe in ~60s and log success/failure to the audit trail.",
       "upgrade_panel_blocked": "Upgrade refused: target {{latest}} is outside Passwall Panel's tested range (highest {{max}}). Upgrade Passwall Panel first.",
-      "upgrade_xray_ok": "Xray upgraded to {{version}}"
+      "upgrade_xray_ok": "Xray upgraded to {{version}}",
+      "batch_upgrade_xray_ok": "Upgraded Xray on {{count}} server(s) to latest",
+      "batch_upgrade_xray_partial": "Upgraded Xray on {{ok}} server(s); {{fail}} failed"
     },
     "confirm": {
       "delete_title": "Delete server",
       "delete_message": "Delete server {{name}}? The server must have no nodes referencing it.",
       "batch_delete_title": "Delete servers",
       "batch_delete_message": "Delete {{names}}{{suffix}}? These servers must have no nodes referencing them.",
+      "batch_upgrade_xray_title": "Upgrade Xray on selected servers",
+      "batch_upgrade_xray_message": "Install the latest xray-core on {{count}} server(s) in parallel. Each 3X-UI resolves its own latest tag, so versions may differ by a patch. The panel itself stays up; only the xray child process restarts. Continue?",
       "upgrade_panel_title": "Upgrade 3X-UI panel",
       "upgrade_panel_message": "Passwall Panel will check the target version first and only fire the upgrade on {{name}} if it's within the tested range. The panel will restart; Passwall Panel runs a smoke probe ~60s later. Continue?",
       "upgrade_force_title": "Target version not verified by Passwall Panel",

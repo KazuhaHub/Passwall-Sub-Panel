@@ -1163,6 +1163,7 @@
     "selection_count": "已选 {{count}}",
     "batch_test": "批量测试",
     "batch_delete": "批量删除",
+    "batch_upgrade_xray": "批量升级 Xray",
     "field": {
       "name": "服务器名称",
       "url": "URL",
@@ -1239,13 +1240,17 @@
       "batch_partial": "已删除 {{ok}} 台服务器，失败 {{fail}} 台",
       "upgrade_panel_started": "已发起 3X-UI 升级到 {{target}}，约 60 秒后 Passwall Panel 跑 smoke probe，结果写入 audit log",
       "upgrade_panel_blocked": "拒绝升级：目标版本 {{latest}} 超出 Passwall Panel 测试范围（最高 {{max}}），请先升级 Passwall Panel",
-      "upgrade_xray_ok": "Xray 已升级到 {{version}}"
+      "upgrade_xray_ok": "Xray 已升级到 {{version}}",
+      "batch_upgrade_xray_ok": "已升级 {{count}} 台 Xray 到最新版",
+      "batch_upgrade_xray_partial": "已升级 {{ok}} 台 Xray，失败 {{fail}} 台"
     },
     "confirm": {
       "delete_title": "删除服务器",
       "delete_message": "删除服务器 {{name}}？该服务器必须没有节点引用才能删除。",
       "batch_delete_title": "批量删除服务器",
       "batch_delete_message": "确定删除 {{names}}{{suffix}}？这些服务器必须没有节点引用才能删除。",
+      "batch_upgrade_xray_title": "批量升级 Xray",
+      "batch_upgrade_xray_message": "在 {{count}} 台服务器上同时安装最新版 xray-core。每台 3X-UI 各自解析自己的最新版本，可能存在小幅差异。面板自身不重启，只重启 xray 子进程。是否继续？",
       "upgrade_panel_title": "升级 3X-UI 面板",
       "upgrade_panel_message": "Passwall Panel 将先检查目标版本是否在已测试范围内，在范围内才会触发 {{name}} 的自升级。面板会重启，约 60 秒后 Passwall Panel 跑 smoke probe 验证。是否继续？",
       "upgrade_force_title": "目标版本未通过 Passwall Panel 验证",

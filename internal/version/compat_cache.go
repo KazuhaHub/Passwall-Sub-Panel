@@ -70,14 +70,20 @@ func LoadCompatCache() error {
 	if err := json.Unmarshal(b, &p); err != nil {
 		return fmt.Errorf("decode compat cache: %w", err)
 	}
-	if p.PSPVersion != Version {
-		// Cache from a different PSP build — don't trust the cached
-		// range. RefreshRemoteCompat will replace it on first call.
-		return fmt.Errorf("cache PSP version %q != current %q (ignored)", p.PSPVersion, Version)
-	}
 	if _, ok := parseSemver(p.MaxTestedXUI); !ok {
 		return fmt.Errorf("cached max_tested_xui %q is unparseable", p.MaxTestedXUI)
 	}
+	// Apply the cached range regardless of whether p.PSPVersion matches
+	// the current binary. Reason: across PSP minor/patch upgrades the
+	// cached value is almost always still close to right (active range
+	// rarely shrinks across point releases), and the alternative —
+	// "ignore the cache" — leaves admin staring at CompatUnknown for
+	// every panel until the first network fetch lands. The boot probe
+	// fires RefreshRemoteCompat seconds later and overwrites this with
+	// the authoritative value, so worst-case admin sees stale-but-
+	// plausible compat for a few seconds after a PSP upgrade instead of
+	// blank "Unknown" tags. The PSPVersion field is kept in the file
+	// for future diagnostics.
 	SetActiveMaxTestedXUI(p.MaxTestedXUI)
 	return nil
 }

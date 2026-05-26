@@ -103,7 +103,7 @@ export default function ServersView() {
   const [loading, setLoading] = useState(false)
   const [probeStates, setProbeStates] = useState<Record<number, ProbeState>>({})
   const [selected, setSelected] = useState<Set<number>>(new Set())
-  const [batchBusy, setBatchBusy] = useState<'test' | 'delete' | ''>('')
+  const [batchBusy, setBatchBusy] = useState<'test' | 'delete' | 'upgrade_xray' | ''>('')
   const [singleTesting, setSingleTesting] = useState<number | null>(null)
   // Upgrade action state. menuAnchor + menuTarget power the kebab-menu
   // overlay (one global menu re-anchored per row). upgrading marks a panel
@@ -455,6 +455,60 @@ export default function ServersView() {
     }
   }
 
+  // batchUpgradeXray fires installXray("latest") in parallel across the
+  // selected panels. Latest-only by design — per-panel version pinning
+  // stays in the single-row Upgrade Xray dialog because different
+  // panels may surface different version lists, and admin asking for
+  // "v25.10.31 on all" can't always be satisfied. Each panel's 3X-UI
+  // resolves "latest" independently, so the post-upgrade xray versions
+  // may differ by a patch but all sit at each panel's known latest.
+  async function batchUpgradeXray() {
+    const rows = items.filter(s => selected.has(s.id))
+    if (!rows.length) return
+    const ok = await confirm({
+      title: t('admin:servers.confirm.batch_upgrade_xray_title', { defaultValue: '批量升级 Xray' }),
+      message: t('admin:servers.confirm.batch_upgrade_xray_message', {
+        count: rows.length,
+        defaultValue: '在 {{count}} 台服务器上同时安装最新版 xray-core。每台 3X-UI 各自解析自己的最新版本，可能存在小幅差异。面板自身不重启，只重启 xray 子进程。是否继续？',
+      }),
+      confirmText: t('admin:servers.action.upgrade', { defaultValue: '升级' }),
+    })
+    if (!ok) return
+    setBatchBusy('upgrade_xray')
+    try {
+      const results = await Promise.allSettled(rows.map(r => upgradeXray(r.id)))
+      const success = results.filter(r => r.status === 'fulfilled').length
+      const failed = rows.length - success
+      // Refresh version snapshots for the rows that succeeded so the
+      // Version column reflects the new xray-core tag without admin
+      // having to click Test individually.
+      void Promise.allSettled(
+        rows
+          .filter((_, i) => results[i].status === 'fulfilled')
+          .map(s => probeServer(s)),
+      )
+      if (failed > 0) {
+        pushSnack(
+          t('admin:servers.toast.batch_upgrade_xray_partial', {
+            ok: success, fail: failed,
+            defaultValue: '已升级 {{ok}} 台 Xray，失败 {{fail}} 台',
+          }),
+          'warning',
+        )
+      } else {
+        pushSnack(
+          t('admin:servers.toast.batch_upgrade_xray_ok', {
+            count: success,
+            defaultValue: '已升级 {{count}} 台 Xray 到最新版',
+          }),
+          'success',
+        )
+      }
+    } finally {
+      setBatchBusy('')
+    }
+  }
+
   async function batchDeleteServers() {
     const rows = items.filter(s => selected.has(s.id))
     if (!rows.length) return
@@ -724,6 +778,15 @@ export default function ServersView() {
             sx={{ color: 'inherit' }}
           >
             {t('admin:servers.batch_test')}
+          </Button>
+          <Button
+            size="small" variant="text"
+            startIcon={batchBusy === 'upgrade_xray' ? <CircularProgress size={14} /> : <SystemUpdateIcon />}
+            disabled={batchBusy !== ''}
+            onClick={batchUpgradeXray}
+            sx={{ color: 'inherit' }}
+          >
+            {t('admin:servers.batch_upgrade_xray', { defaultValue: '批量升级 Xray' })}
           </Button>
           <Button
             size="small" variant="text" color="error"

@@ -415,18 +415,26 @@ func (a *App) probePanelVersionsOnce(ctx context.Context) {
 		return
 	}
 	log.Debug("compat probe tick", "panel_count", len(panels))
-	// Single PSP-wide GitHub query for the latest 3X-UI release tag —
-	// drives the ⋮ kebab "update available" badge for every panel.
-	// Centralized here so we don't fan one /getPanelUpdateInfo call out
-	// per panel: with N panels that would be N GitHub queries (each
-	// 3X-UI panel proxies through GitHub for its own probe). Single-
-	// flight + throttle inside RefreshLatestXUI means the boot tick +
-	// any concurrent Servers-page open still collapse to one call.
-	refreshCtx, refreshCancel := context.WithTimeout(ctx, 10*time.Second)
-	if rerr := version.RefreshLatestXUI(refreshCtx); rerr != nil {
+	// Pull both GitHub-backed snapshots BEFORE iterating panels:
+	//   - RefreshRemoteCompat: per-major compat JSON → drives the tested
+	//     range used by CheckXUI. Without this, every panel's compat
+	//     status renders as Unknown until admin clicks Test (and the
+	//     "compat data not loaded" tooltip appears in the version cell).
+	//   - RefreshLatestXUI: the latest 3X-UI release tag → drives the
+	//     ⋮ kebab "update available" badge.
+	// Both are single-flight + throttled internally, so the boot tick
+	// plus a concurrent Servers-page open collapse to one call each.
+	// 10 s budget per call: GitHub raw + API are both usually sub-second.
+	compatCtx, compatCancel := context.WithTimeout(ctx, 10*time.Second)
+	if rerr := version.RefreshRemoteCompat(compatCtx, ""); rerr != nil {
+		log.Debug("compat probe: refresh remote compat failed (offline / rate limited?)", "err", rerr)
+	}
+	compatCancel()
+	latestCtx, latestCancel := context.WithTimeout(ctx, 10*time.Second)
+	if rerr := version.RefreshLatestXUI(latestCtx); rerr != nil {
 		log.Debug("compat probe: refresh latest 3X-UI failed (offline / rate limited?)", "err", rerr)
 	}
-	refreshCancel()
+	latestCancel()
 	for _, p := range panels {
 		if ctx.Err() != nil {
 			return
