@@ -80,6 +80,15 @@ type Service struct {
 	// "fire and forget without tracking" (legacy behaviour, kept so unit
 	// tests that don't care about shutdown don't have to wire a WG).
 	bgWG *sync.WaitGroup
+
+	// pollCfgMu + pollCfgCache hold the most recent successfully-loaded
+	// UISettings so a transient settings.Load failure inside PollOnce
+	// falls back to the previous value instead of silently degrading to
+	// zero (which disables the per-window EmergencyAccessQuotaGB cap
+	// without surfacing anything to admin). Updated on every successful
+	// load; read on every cycle even when the load fails.
+	pollCfgMu    sync.RWMutex
+	pollCfgCache ports.UISettings
 }
 
 // SetMailNotifier wires the late-bound mailer used for auto-disable /
@@ -227,10 +236,25 @@ func (s *Service) PollOnce(ctx context.Context) error {
 	// check — so N users meant 2N DB roundtrips even though the data
 	// is identical for the whole cycle. With N users + reasonable
 	// snapshot count that adds up.
+	// Load runtime settings, but fall back to the previously-cached
+	// value on failure rather than letting pollCfg degrade to zero. A
+	// zero pollCfg silently disables EmergencyAccessQuotaGB / the
+	// auto-disable cadence flags etc., which produces wrong behaviour
+	// for an entire cycle with no log line for admin to grep on. The
+	// cache is updated in lockstep on every successful load.
 	pollCfg := ports.UISettings{}
 	if s.settings != nil {
-		if loaded, err := s.settings.Load(ctx, ports.UISettings{}); err == nil {
+		if loaded, lerr := s.settings.Load(ctx, ports.UISettings{}); lerr == nil {
+			s.pollCfgMu.Lock()
+			s.pollCfgCache = loaded
+			s.pollCfgMu.Unlock()
 			pollCfg = loaded
+		} else {
+			s.pollCfgMu.RLock()
+			pollCfg = s.pollCfgCache
+			s.pollCfgMu.RUnlock()
+			log.Warn("traffic poll: settings.Load failed, using cached config",
+				"err", lerr)
 		}
 	}
 	pollLoc := paneltz.Location(ctx, s.settings)

@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/adapters/mysql"
@@ -97,6 +98,14 @@ type App struct {
 	bgCancel  context.CancelFunc
 	bgRootCtx context.Context
 	bgWG      sync.WaitGroup
+
+	// compatProbeInflight guards probePanelVersionsOnce so two ticks
+	// can't run the per-panel loop concurrently — if cycle N's probe
+	// is still walking (e.g. one panel is timing out at 10s each), the
+	// next traffic tick should skip enqueuing another rather than pile
+	// up. Atomic-bool flip via CompareAndSwap; the loser logs Debug and
+	// returns immediately.
+	compatProbeInflight atomic.Bool
 
 	// xuiPool kept so Run() can fire a one-shot boot version probe across
 	// every configured 3X-UI panel — services already hold their own
@@ -788,10 +797,23 @@ func (a *App) runTrafficLoop(ctx context.Context) {
 			// Piggyback the 3X-UI compat re-probe onto the traffic poll
 			// cadence — PSP is already in a "talk to every panel" cycle,
 			// adding one /server/status call per panel is cheap (~10ms
-			// each) and avoids an independent ticker. Boot fires its own
-			// one-shot probe so admins don't wait a full poll interval
-			// for first-impression version info (see Run).
-			a.probePanelVersionsOnce(ctx)
+			// each) and avoids an independent ticker.
+			//
+			// Run it in its OWN goroutine: a single unreachable panel
+			// adds 10s of `GetServerStatus` wait per probe call, and
+			// with N down panels the inline-version-probe used to push
+			// the next traffic tick past its interval (the ticker just
+			// keeps firing, but the loop is single-threaded so it misses
+			// cycles entirely). Decoupling means probe slowness can't
+			// starve traffic. Tracked via bgWG so Shutdown still drains.
+			safego.GoTracked(&a.bgWG, "compat-reprobe", func() {
+				if !a.compatProbeInflight.CompareAndSwap(false, true) {
+					log.Debug("compat probe skipped (previous still running)")
+					return
+				}
+				defer a.compatProbeInflight.Store(false)
+				a.probePanelVersionsOnce(ctx)
+			})
 		}
 	}
 }

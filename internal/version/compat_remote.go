@@ -191,7 +191,11 @@ func fetchAndApply(ctx context.Context, url string) error {
 		return fmt.Errorf("build request: %w", err)
 	}
 	req.Header.Set("Accept", "application/json")
-	resp, err := http.DefaultClient.Do(req)
+	// Reuses the shared safehttp-guarded client declared in
+	// latest_xui.go (same package). Pre-v3.6.1-beta.3 this used
+	// http.DefaultClient, which would happily follow an admin-supplied
+	// urlOverride into loopback / link-local addresses.
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("fetch %s: %w", url, err)
 	}

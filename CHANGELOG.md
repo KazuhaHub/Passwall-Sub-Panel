@@ -4,6 +4,66 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## v3.6.1-beta.3 — 2026-05-26
+
+第二批审计后续修复 —— 行为 bug 4 项 + 安全加固 2 项。最贵的 render.Settings.Load
+缓存(audit #8)留到 beta.4 单独 ship 配合测试。
+
+### Security
+
+- **SSRF dialer guard 拉到共享 `internal/pkg/safehttp` 包,xui adapter +
+  GitHub 抓取共用** ── pre-beta.3 的 3X-UI 客户端 + `latest_xui` /
+  `compat_remote` 都用 `http.DefaultClient`,没有 dialer 防御:
+  - 3X-UI panel URL 是 admin-supplied DB content,被改成 `http://127.0.0.1:...`
+    后,面板会被骗去代理打内网未授权 endpoint
+  - GitHub fetch 的 `RefreshRemoteCompat(ctx, urlOverride)` 收 admin
+    override,虽然今天只内部调,但日后挂 UI 就是 SSRF 入口
+
+  共享 `safehttp.NewClient()` 装 `BlockNonPublicDial`:拒绝 loopback / link-local
+  (含 `169.254.169.254` cloud metadata)/ unspecified 地址,**保留** 10/8 /
+  172.16/12 / 192.168/16 私网(自部署 3X-UI 合法地址段)。auth 包里早期那份
+  `ssrf.go` 暂留(SAML/OIDC 路径在跑,不在本 beta scope),后续合并
+- **`/sub/:token` 错误码统一到 opaque 404 杀掉 enumeration oracle** ── pre-
+  beta.3 unknown token 返 404,disabled / expired / emergency_expired / auto-
+  disabled-by-blocked-client 全返 403 + 详细 body。匿名探针扫随机 token 只需
+  看 status 就知道哪些是真实用户(`403 = valid token, account suspended`)。
+  现在 4 个"valid token but blocked"分支都收敛到跟 unknown token 一样的
+  `404 + 空 body`,server 端 `log.Info` 仍带具体 reason 供 admin 排查
+  - 唯一保留 `403 + body` 的是 `client not allowed`(用户用了不在 whitelist
+    的客户端,需要换 app —— 这条对用户必须可见)
+
+### Bug fixes
+
+- **compat re-probe 不再阻塞 traffic poll tick** ── 之前 `probePanelVersionsOnce`
+  inline 跑在 `runTrafficLoop` 内,N 台不可达 panel × 10s timeout 就会把下一个
+  traffic tick 推迟若干分钟。现在 fan 进独立 `safego.GoTracked` goroutine,
+  外加 `atomic.Bool` single-flight guard 防止前一个 cycle 还在跑时下一个 tick
+  再叠加(同 panel 并行 N 次 GetServerStatus)
+- **`traffic.PollOnce` settings.Load 失败保留上次 cached pollCfg + WARN** ──
+  原行为是失败就把 `pollCfg` 静默归零,导致 `EmergencyAccessQuotaGB`/自动禁用
+  阈值等整个 cycle 失效,admin 没有任何 log 可 grep。改成 Service 持有
+  `pollCfgCache`(RWMutex 保护),失败时回退到上次成功值 + Warn log
+- **`/sub` 写 `sub_logs` 改成异步入队** ── 之前每次 sub 请求同步 INSERT,
+  fsync-bound 写入挂在请求路径上;polling client 5 分钟一次 × N 用户的写率是
+  公网端点最高的表。新加 `SubHandler.logSubAsync` helper 走 `h.async.Go`,请
+  求当场 return,row 在后台落库
+- **keyword search LIKE 转义统一到 `keywordLike()` helper** ── audit /
+  sub_log / mail / user 4 个 repo 之前各自拼 LIKE pattern,user_repo 转义了
+  `%`/`_`/`\` 三个 meta,其余 3 个没转义 → admin 在搜索框输入 `_` 会触发
+  unexpected substring match + 全表扫描(非 SQL 注入,但 UX + 性能问题)。
+  全部归一到 `keywordLike()` —— escape + lowercase + 加 `%...%` wrap 一步到位
+
+### Notes
+
+- 单 flight guard `compatProbeInflight` 用 `sync/atomic` 而非 mutex,因为只是
+  布尔旗标 + CompareAndSwap fast path,锁本身的等待比 probe 慢得多
+- traffic 的 `pollCfgCache` 在第一次 settings.Load 之前是零值;只有当第一次
+  load 就失败时才会用零值跑一次。pre-beta.3 是每次失败都用零值,beta.3 后是
+  只有第一次失败用零值
+- safehttp 包未 export 一个 `metadataClient` 等 shorthand —— SAML/OIDC 那边
+  自己有 15s timeout 偏好,xui 30s,version 30s,直接传 timeout 比 shorthand
+  灵活
+
 ## v3.6.1-beta.2 — 2026-05-26
 
 ### Fixed

@@ -84,29 +84,42 @@ func (h *SubHandler) Get(c *gin.Context) {
 		return
 	}
 	now := time.Now()
-	if u.EmergencyUntil != nil && now.After(*u.EmergencyUntil) && u.AutoDisabledReason == domain.DisabledTrafficExceeded {
-		c.String(http.StatusForbidden, "emergency access expired")
+	// "Valid token but the subscription can't be served right now"
+	// (disabled / expired / emergency-window-expired) is collapsed to
+	// the same opaque 404 + empty body the unknown-token branch above
+	// uses. Pre-v3.6.1-beta.3 each reason returned a distinct 403 + body
+	// — an unauthenticated probe could enumerate valid tokens by status
+	// alone (404 = no such token; 403 = real user, just suspended). The
+	// real reason is preserved in the log line so admin can still
+	// diagnose, and the legitimate user's proxy client surfaces
+	// "subscription unavailable" generic enough that they'll contact
+	// admin (who has the audit / users page for the real cause).
+	switch {
+	case u.EmergencyUntil != nil && now.After(*u.EmergencyUntil) && u.AutoDisabledReason == domain.DisabledTrafficExceeded:
+		log.Info("sub: blocked", "user_id", u.ID, "reason", "emergency_expired")
+		c.String(http.StatusNotFound, "")
 		return
-	}
-	if !u.Enabled {
-		c.String(http.StatusForbidden, "disabled")
+	case !u.Enabled:
+		log.Info("sub: blocked", "user_id", u.ID, "reason", "disabled",
+			"auto_reason", string(u.AutoDisabledReason))
+		c.String(http.StatusNotFound, "")
 		return
-	}
-	if u.IsExpired(now) {
-		c.String(http.StatusForbidden, "expired")
+	case u.IsExpired(now):
+		log.Info("sub: blocked", "user_id", u.ID, "reason", "expired")
+		c.String(http.StatusNotFound, "")
 		return
 	}
 
 	// If client is blocked, handle violation tracking and potential auto-disable.
 	if clientBlocked {
-		// Log the violation (best-effort).
-		_ = h.subLogs.Insert(c.Request.Context(), &domain.SubLog{
-			UserID:     u.ID,
-			IP:         c.ClientIP(),
-			UA:         ua,
-			ClientType: detected.ClientName,
-			AccessedAt: time.Now(),
-		})
+		// Log the violation off the hot path. sub_logs is the
+		// highest-write-rate table on the public endpoint — every
+		// active client polls every few minutes; with N users a
+		// synchronous INSERT here means N×(fsync wall-clock) added to
+		// the request budget. async.Go defers the write to a tracked
+		// background goroutine and returns the request right away;
+		// drops on shutdown are acceptable (best-effort log).
+		h.logSubAsync(u.ID, c.ClientIP(), ua, detected.ClientName)
 
 		// Dedup: only advance the count once per window so a polling client
 		// can't auto-disable a passive user. When skipped we also skip the
@@ -147,7 +160,13 @@ func (h *SubHandler) Get(c *gin.Context) {
 				})
 			}
 
-			c.String(http.StatusForbidden, "account disabled due to repeated use of blocked client")
+			// Same 404-collapse as the other "account exists but suspended"
+			// branches above — once auto-disable fires the account is in
+			// the same logical state as admin-disabled, so the response
+			// shouldn't leak that distinction either.
+			log.Info("sub: blocked", "user_id", u.ID, "reason", "auto_disabled_blocked_client",
+				"violations", u.BlockViolationCount)
+			c.String(http.StatusNotFound, "")
 			return
 		}
 
@@ -207,16 +226,11 @@ func (h *SubHandler) Get(c *gin.Context) {
 	c.Header("ETag", etag)
 	c.Header("Cache-Control", "private, no-cache")
 
-	// Log access (best-effort). Record original UA without modification.
-	// 304 still counts as a fetch — admins reading sub_logs would otherwise
-	// see an active polling client appear dormant.
-	_ = h.subLogs.Insert(c.Request.Context(), &domain.SubLog{
-		UserID:     u.ID,
-		IP:         c.ClientIP(),
-		UA:         ua,
-		ClientType: detected.ClientName,
-		AccessedAt: time.Now(),
-	})
+	// Log access off the hot path (best-effort). Record original UA
+	// without modification. 304 still counts as a fetch — admins
+	// reading sub_logs would otherwise see an active polling client
+	// appear dormant.
+	h.logSubAsync(u.ID, c.ClientIP(), ua, detected.ClientName)
 
 	// Subscription-Userinfo et al. carry live traffic / expiry data — they
 	// must be written on both 200 and 304 so a revalidating client still
@@ -231,6 +245,40 @@ func (h *SubHandler) Get(c *gin.Context) {
 	}
 
 	c.Data(http.StatusOK, out.ContentType, out.Body)
+}
+
+// logSubAsync defers the sub_logs INSERT off the request thread via
+// the async dispatcher. Pre-v3.6.1-beta.3 this was a synchronous Insert
+// inside the request — every active proxy client polls every few
+// minutes so the table's write rate is the highest on the public
+// endpoint, and an fsync-bound INSERT on the hot path dominated the
+// per-request budget. Best-effort: when async or the repo is nil (test
+// harness) the call no-ops; failed inserts log Warn server-side and
+// are swallowed for the caller. Values are captured at call time
+// (NOT inside the goroutine) so a request-context cancel can't race a
+// gin.Context method call after the request returned.
+func (h *SubHandler) logSubAsync(userID int64, ip, ua, clientType string) {
+	if h.subLogs == nil {
+		return
+	}
+	entry := &domain.SubLog{
+		UserID:     userID,
+		IP:         ip,
+		UA:         ua,
+		ClientType: clientType,
+		AccessedAt: time.Now(),
+	}
+	if h.async == nil {
+		// Test harness or other no-async wiring: fall back to a
+		// best-effort synchronous write so the row still lands.
+		_ = h.subLogs.Insert(context.Background(), entry)
+		return
+	}
+	h.async.Go("sub.log-insert", func(ctx context.Context) {
+		if err := h.subLogs.Insert(ctx, entry); err != nil {
+			log.Warn("sub: log insert failed", "user_id", userID, "err", err)
+		}
+	})
 }
 
 // computeWeakETag returns a weak ETag derived from the response body. 16 hex

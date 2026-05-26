@@ -3,7 +3,6 @@ package mysql
 import (
 	"context"
 	"errors"
-	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -138,8 +137,7 @@ func (r *mailRepo) ListSent(ctx context.Context, filter ports.EmailLogFilter) ([
 		if filter.Until != nil {
 			q = q.Where("mail_sent.sent_at <= ?", *filter.Until)
 		}
-		if s := strings.TrimSpace(filter.Search); s != "" {
-			kw := "%" + strings.ToLower(s) + "%"
+		if kw := keywordLike(filter.Search); kw != "" {
 			q = q.Where(
 				"LOWER(mail_sent.to_email) LIKE ? OR LOWER(mail_sent.kind) LIKE ? OR LOWER(COALESCE(users.upn, '')) LIKE ? OR LOWER(COALESCE(users.display_name, '')) LIKE ?",
 				kw, kw, kw, kw)

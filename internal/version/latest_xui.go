@@ -9,7 +9,18 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/safehttp"
 )
+
+// httpClient is the SSRF-guarded *http.Client every fetch in this file
+// uses (vs http.DefaultClient pre-v3.6.1-beta.3). The URL is currently
+// the hardcoded MHSanaei/3x-ui GitHub endpoint, but RefreshRemoteCompat
+// in the sibling file takes a urlOverride that is admin-callable; a
+// shared safe transport keeps the policy uniform across both fetches.
+// 30 s overall timeout matches the per-call latestXUIFetchTimeout
+// (request-level deadline is the stricter of the two).
+var httpClient = safehttp.NewClient(30 * time.Second)
 
 // latestXUIURL is the GitHub release-latest endpoint Passwall Panel queries
 // to learn the most recent 3X-UI tag. Centralized here so the "update
@@ -115,7 +126,7 @@ func fetchLatestXUI(ctx context.Context) error {
 		return fmt.Errorf("build request: %w", err)
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("fetch latest 3X-UI release: %w", err)
 	}

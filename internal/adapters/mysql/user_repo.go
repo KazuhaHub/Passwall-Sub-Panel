@@ -3,7 +3,6 @@ package mysql
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -196,19 +195,7 @@ func (r *userRepo) GetBySubToken(ctx context.Context, token string) (*domain.Use
 
 func (r *userRepo) List(ctx context.Context, filter ports.UserFilter) ([]*domain.User, int64, error) {
 	q := r.db.WithContext(ctx).Model(&userRow{})
-	if filter.Search != "" {
-		// Escape LIKE wildcards before wrapping so a search string like
-		// "%" doesn't turn into a full-table scan, and "_" doesn't match
-		// every single-character UPN. Order matters: replace backslash
-		// first so the subsequent escapes don't double-up.
-		s := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(filter.Search)
-		// Lowercase the pattern and LOWER() the columns so search is
-		// case-insensitive on every backend. SQLite and MySQL LIKE already
-		// ignore ASCII case, but Postgres LIKE is case-sensitive (it reserves
-		// ILIKE for that) — without this, "john" would miss "John" on PG.
-		// These columns are matched with a leading-% pattern that can't use a
-		// B-tree index anyway, so wrapping them in LOWER() costs nothing.
-		like := "%" + strings.ToLower(s) + "%"
+	if like := keywordLike(filter.Search); like != "" {
 		// Search across the user-facing identifiers admins actually scan
 		// the table for: account name, friendly display, email. Remark is
 		// intentionally out — it's free-form admin notes; matching on it

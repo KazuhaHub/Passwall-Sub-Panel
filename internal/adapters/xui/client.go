@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/safehttp"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 )
 
@@ -53,21 +54,29 @@ type Client struct {
 }
 
 // New constructs a Client for the given 3X-UI panel.
+//
+// The transport is built via safehttp.NewClient so the dialer refuses
+// to connect to loopback / link-local / unspecified addresses (notably
+// the 169.254.169.254 cloud-metadata endpoint). The panel URL is
+// admin-supplied DB content; without the guard a compromised admin
+// account or a stored XSS could point the "panel" at internal services
+// and trick PSP into proxying unauthenticated GETs/POSTs there. Private
+// LAN ranges (10/8, 172.16/12, 192.168/16) remain reachable because
+// legitimate self-hosted 3X-UI deployments live there.
 func New(p *domain.XUIPanel) (*Client, error) {
 	jar, err := cookiejar.New(nil)
 	if err != nil {
 		return nil, err
 	}
+	httpClient := safehttp.NewClient(30 * time.Second)
+	httpClient.Jar = jar
 	return &Client{
-		panelName: p.Name,
-		baseURL:   strings.TrimRight(p.URL, "/"),
-		apiToken:  p.APIToken,
-		username:  p.Username,
-		password:  p.Password,
-		http: &http.Client{
-			Timeout: 30 * time.Second,
-			Jar:     jar,
-		},
+		panelName:         p.Name,
+		baseURL:           strings.TrimRight(p.URL, "/"),
+		apiToken:          p.APIToken,
+		username:          p.Username,
+		password:          p.Password,
+		http:              httpClient,
 		jar:               jar,
 		inboundWriteLocks: make(map[int]*sync.Mutex),
 	}, nil

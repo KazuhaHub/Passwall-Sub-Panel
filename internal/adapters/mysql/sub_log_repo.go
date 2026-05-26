@@ -2,7 +2,6 @@ package mysql
 
 import (
 	"context"
-	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -67,8 +66,7 @@ func (r *subLogRepo) List(ctx context.Context, filter ports.SubLogFilter) ([]*do
 		if filter.Until != nil {
 			q = q.Where("sub_logs.accessed_at <= ?", *filter.Until)
 		}
-		if s := strings.TrimSpace(filter.Search); s != "" {
-			kw := "%" + strings.ToLower(s) + "%"
+		if kw := keywordLike(filter.Search); kw != "" {
 			q = q.Where(
 				"LOWER(sub_logs.ip) LIKE ? OR LOWER(sub_logs.ua) LIKE ? OR LOWER(sub_logs.client_type) LIKE ? OR LOWER(COALESCE(users.upn, '')) LIKE ? OR LOWER(COALESCE(users.display_name, '')) LIKE ?",
 				kw, kw, kw, kw, kw)
