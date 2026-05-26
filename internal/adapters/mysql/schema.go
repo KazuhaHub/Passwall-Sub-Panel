@@ -561,12 +561,18 @@ func (r *auditRow) toDomain() *domain.AuditEntry {
 }
 
 type subLogRow struct {
-	ID         int64     `gorm:"primaryKey;autoIncrement"`
-	UserID     int64     `gorm:"index"`
-	IP         string    `gorm:"size:64"`
-	UA         string    `gorm:"size:255"`
-	ClientType string    `gorm:"size:32"`
-	AccessedAt time.Time `gorm:"index"`
+	ID     int64 `gorm:"primaryKey;autoIncrement"`
+	UserID int64 `gorm:"index:idx_sub_user_time,priority:1"`
+	IP     string `gorm:"size:64"`
+	UA     string `gorm:"size:255"`
+	ClientType string `gorm:"size:32"`
+	// idx_sub_user_time (user_id, accessed_at) covers the dominant admin
+	// query "WHERE user_id = ? ORDER BY accessed_at DESC LIMIT N" with a
+	// single index scan — etag-revalidating polls land here frequently.
+	// idx_sub_accessed (accessed_at alone) serves the retention DELETE
+	// (WHERE accessed_at < cutoff); leading-column user_id in the composite
+	// idx can't, same rationale as traffic_snapshots.
+	AccessedAt time.Time `gorm:"index:idx_sub_user_time,priority:2;index:idx_sub_accessed"`
 }
 
 type syncTaskRow struct {

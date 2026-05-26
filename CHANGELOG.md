@@ -4,6 +4,38 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## v3.5.1-beta.2 — 2026-05-25
+
+### Performance / Internal
+
+- **订阅端点接入 HTTP ETag / 304 协议**:`/sub/:token` 在 render 后用 `sha256(body)`
+  前 8 字节构造 weak ETag(`W/"xxxxxxxxxxxxxxxx"`),响应头同时写 ETag +
+  `Cache-Control: private, no-cache`(强制每次 revalidate)。客户端带 `If-None-Match`
+  且匹配 → 返回 304(约 100 字节)+ 流量/到期 header(`Subscription-Userinfo` 等
+  仍每次重算,因为是动态数据)。**这是纯下行带宽优化**——render 本身仍然跑(给
+  ETag 算 hash 用),但客户端轮询时 90%+ 的请求会返回 304 跳过 mihomo YAML / sing-box
+  config 几十 KB 的下行流量。朋友圈 50 用户 × Clash 默认 10 分钟轮询 ≈ 300 次/小时
+  的订阅 fetch 直接受益。`sub_logs` audit 行 304 仍然写入(304 是"客户端来过"
+  的事实)。`If-None-Match` 比对支持 RFC 9110 §13.1.2 的关键场景:`*` 通配符 /
+  逗号分隔的多 ETag / weak-strong 宽松比较(只发 weak,但接受客户端 strip 了 `W/`
+  前缀重发回来)。回归覆盖:`TestComputeWeakETag_*` 三条 + `TestETagMatches_*` 六条。
+
+- **`sub_logs` 索引升级为复合**:原来是 `user_id(index)` + `accessed_at(index)`
+  两个独立单列 idx;主查询 `WHERE user_id = ? ORDER BY accessed_at DESC LIMIT N`
+  没法在一个 idx 内同时完成等值过滤 + 排序。改成复合 `idx_sub_user_time(user_id,
+  accessed_at)` 服务主查询 + 保留独立 `idx_sub_accessed(accessed_at)` 服务 retention
+  DELETE(`WHERE accessed_at < cutoff`)——跟 [[traffic_snapshots]] 的设计原则一致
+  (复合 idx 的 leading column 不能服务非 leading-column 的 range query)。AutoMigrate
+  在升级时会自动建索引;sub_logs 表数据量大的话**首次启动会扫表建索引**,可能短暂
+  锁表/慢启动,自用规模下可忽略。
+
+### Docs
+
+- **新增 [docs/3xui-compat.md](docs/3xui-compat.md)**:维护 PSP 版本 ↔ 3X-UI 版本
+  兼容矩阵,沉淀 v3.5.1 那次"3X-UI 3.1.0 改 list 序列化把 PSP 打挂"的踩坑记录,以及
+  升级 3X-UI 前应该走的检查流程。配合下一版 v3.6.0 计划的"PSP 自动版本探测 + Servers 页
+  远程升级按钮",建立 PSP 对 3X-UI 升级的主动防御能力。
+
 ## v3.5.1-beta.1 — 2026-05-25
 
 ### Fixed

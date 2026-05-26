@@ -2,6 +2,8 @@ package handler
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"net/http"
@@ -191,7 +193,23 @@ func (h *SubHandler) Get(c *gin.Context) {
 		return
 	}
 
+	// ETag is computed off the rendered body so it tracks any change in the
+	// generated config — node enable flag, ownership, template, rules, the
+	// user's UUID, etc. all flow through render output. Weak form is used
+	// because future transport-level transforms (gzip etc.) should not break
+	// revalidation: HTTP-semantic equivalence is what we care about.
+	etag := computeWeakETag(out.Body)
+
+	// Always advertise the ETag + Cache-Control so the client knows it may
+	// revalidate. "no-cache" makes the client always hit us with
+	// If-None-Match — we still want the audit-log row, blocked-client check,
+	// and traffic-userinfo header refresh on every fetch.
+	c.Header("ETag", etag)
+	c.Header("Cache-Control", "private, no-cache")
+
 	// Log access (best-effort). Record original UA without modification.
+	// 304 still counts as a fetch — admins reading sub_logs would otherwise
+	// see an active polling client appear dormant.
 	_ = h.subLogs.Insert(c.Request.Context(), &domain.SubLog{
 		UserID:     u.ID,
 		IP:         c.ClientIP(),
@@ -200,10 +218,52 @@ func (h *SubHandler) Get(c *gin.Context) {
 		AccessedAt: time.Now(),
 	})
 
+	// Subscription-Userinfo et al. carry live traffic / expiry data — they
+	// must be written on both 200 and 304 so a revalidating client still
+	// learns the current usage numbers.
 	for k, v := range out.Headers {
 		c.Header(k, v)
 	}
+
+	if ifNoneMatch := c.GetHeader("If-None-Match"); etagMatches(ifNoneMatch, etag) {
+		c.Status(http.StatusNotModified)
+		return
+	}
+
 	c.Data(http.StatusOK, out.ContentType, out.Body)
+}
+
+// computeWeakETag returns a weak ETag derived from the response body. 16 hex
+// chars (8 bytes of SHA-256) is collision-safe enough for revalidation —
+// HTTP caching is best-effort; the worst case of a collision is a stale
+// subscription delivered to one client for one revalidation window.
+func computeWeakETag(body []byte) string {
+	sum := sha256.Sum256(body)
+	return `W/"` + hex.EncodeToString(sum[:8]) + `"`
+}
+
+// etagMatches honors the RFC 9110 §13.1.2 rules just enough for our use:
+// a comma-separated list of candidates, plus the "*" wildcard. Weak/strong
+// markers compare equal (weak comparison) since we only ever emit weak ETags.
+func etagMatches(header, current string) bool {
+	header = strings.TrimSpace(header)
+	if header == "" {
+		return false
+	}
+	if header == "*" {
+		return true
+	}
+	cur := stripETagWeakPrefix(current)
+	for _, raw := range strings.Split(header, ",") {
+		if stripETagWeakPrefix(strings.TrimSpace(raw)) == cur {
+			return true
+		}
+	}
+	return false
+}
+
+func stripETagWeakPrefix(s string) string {
+	return strings.TrimPrefix(s, "W/")
 }
 
 // extractToken extracts the subscription token from the URL path.
