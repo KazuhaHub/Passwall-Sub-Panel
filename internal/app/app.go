@@ -108,6 +108,17 @@ type App struct {
 // Build assembles the App from the loaded Config. It does NOT start any
 // goroutines or listeners; call Run() for that.
 func Build(ctx context.Context, cfg *config.Config) (*App, error) {
+	// Wire the version-compat on-disk cache to PSP's DataDir BEFORE any
+	// RefreshRemoteCompat could fire, so the first refresh persists to
+	// the right place and a same-process load picks up the cached
+	// snapshot. LoadCompatCache here means a cold boot with no network
+	// still has a sane active range to work from — admins won't be
+	// stuck staring at "compat unknown" until the first manual Test.
+	version.SetCacheDir(cfg.DataDir)
+	if err := version.LoadCompatCache(); err != nil {
+		log.Warn("load compat cache (will recover on first refresh)", "err", err)
+	}
+
 	// --- adapter layer ---
 	db, err := mysql.Open(cfg.DBKind(), cfg.DBDSN())
 	if err != nil {
@@ -412,10 +423,13 @@ func (a *App) probePanelVersionsOnce(ctx context.Context) {
 		now := time.Now()
 		if err != nil {
 			log.Warn("compat probe failed", "panel_id", p.ID, "panel_name", p.Name, "err", err)
-			// Record the failed attempt so the UI can show "probe failed
-			// at <time>" instead of silently stale data.
-			if uerr := a.repos.XUIPanel.UpdateVersion(ctx, p.ID, "", "", &now); uerr != nil {
-				log.Warn("compat probe: write empty version", "panel_id", p.ID, "err", uerr)
+			// Record only the timestamp — preserves the last-known-good
+			// panel_version / xray_version so a transient probe failure
+			// (network blip, panel restart in progress) doesn't wipe
+			// the UI's stale-but-useful snapshot. UI consults
+			// version_checked_at to display freshness.
+			if uerr := a.repos.XUIPanel.UpdateVersionCheckedAt(ctx, p.ID, now); uerr != nil {
+				log.Warn("compat probe: write checked-at", "panel_id", p.ID, "err", uerr)
 			}
 			continue
 		}

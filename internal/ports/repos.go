@@ -331,6 +331,15 @@ type XUIPanelRepo interface {
 	// (treat as "never probed"); empty version strings carry through
 	// untouched so callers can record a failed probe.
 	UpdateVersion(ctx context.Context, panelID int64, panelVersion, xrayVersion string, checkedAt *time.Time) error
+	// UpdateVersionCheckedAt updates ONLY the timestamp column, leaving
+	// panel_version / xray_version untouched. Used by the probe paths
+	// when the probe fails: we want to record "we tried at <time>" for
+	// the UI's freshness indicator, WITHOUT clobbering a previously-
+	// observed valid version with empty strings. Fixes the v3.6.0-beta.6
+	// data-loss bug where a transient panel outage during a piggyback
+	// probe would wipe the cached version snapshot and downgrade admin
+	// UI to "never probed" until the next successful probe.
+	UpdateVersionCheckedAt(ctx context.Context, panelID int64, checkedAt time.Time) error
 }
 
 // UISettings holds runtime-editable UI preferences. They live in the DB so

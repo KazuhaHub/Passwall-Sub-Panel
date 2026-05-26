@@ -61,49 +61,63 @@ type remoteCompatPSPEntry struct {
 	Notes         string `json:"notes,omitempty"` // free-form, surfaced in logs only
 }
 
-// refreshState is the goroutine-shared throttle / inflight gate. atomic
-// would suffice for lastAt alone but inflight needs single-flight semantics
-// so we use a sync.Mutex.
+// refreshState is the goroutine-shared throttle / single-flight gate.
+//
+// Two distinct mechanisms protect the upstream:
+//   - refreshInflight: classic single-flight — at most one fetch in
+//     progress at any time. N parallel testServers from one Servers-page
+//     open collapse to one network call.
+//   - refreshLastAt: 60s throttle, but ONLY advanced on a SUCCESSFUL
+//     fetch. A failed fetch leaves refreshLastAt unchanged so the next
+//     caller (e.g. admin's next "test" click after a brief network blip)
+//     can immediately retry. v3.6.0-beta.5 advanced lastAt on failure
+//     too, which produced a 60s lock-out whenever GitHub was briefly
+//     unreachable — fixed in v3.6.0-beta.6.
 var (
 	refreshMu        sync.Mutex
 	refreshLastAt    time.Time
 	refreshLastError error
+	refreshInflight  bool
 )
 
 // RefreshRemoteCompat fetches the compat JSON, finds the row matching this
 // PSP build's major.minor (e.g. "v3.6"), and installs it via
-// SetActiveMaxTestedXUI. Returns nil when a successful refresh ran OR
-// when throttled (caller doesn't care which — both mean "active state
-// is current enough"). Returns a non-nil error only on a real
-// fetch/parse/lookup failure.
-//
-// Concurrency: single-flight + 60s throttle. N parallel callers (typical:
-// admin opens Servers page → N testServer requests all trigger this)
-// produce at most one fetch; the rest see "throttled, you're fine".
+// SetActiveMaxTestedXUI. Returns nil on a successful fetch OR when
+// short-circuited by single-flight / throttle. Returns a non-nil error
+// only when this call actually attempted the fetch and it failed.
 func RefreshRemoteCompat(ctx context.Context, url string) error {
 	if url == "" {
 		url = DefaultRemoteCompatURL
 	}
 
 	refreshMu.Lock()
-	if time.Since(refreshLastAt) < remoteFetchThrottle {
+	if refreshInflight {
+		// Another goroutine is currently fetching. Skip — its result
+		// will land in refreshLastError and be visible to subsequent
+		// callers (via LastRefreshError). The current admin click
+		// doesn't need to block waiting for it.
 		refreshMu.Unlock()
-		// Surface the last fetch's error rather than masking it: a
-		// stale-but-failing state should still be observable from the
-		// throttled path so the operator can see *why* compat is unset.
 		return nil
 	}
-	// Mark the attempt time NOW (under the lock) so a concurrent caller
-	// inside the same window short-circuits even before this one finishes.
-	// On failure refreshLastAt still advances — we don't want a broken
-	// upstream to hammer the network with retries every Test click.
-	refreshLastAt = time.Now()
+	if !refreshLastAt.IsZero() && time.Since(refreshLastAt) < remoteFetchThrottle {
+		// Recent success within throttle window — short-circuit.
+		refreshMu.Unlock()
+		return nil
+	}
+	refreshInflight = true
 	refreshMu.Unlock()
 
 	err := fetchAndApply(ctx, url)
 
 	refreshMu.Lock()
+	refreshInflight = false
 	refreshLastError = err
+	if err == nil {
+		// Only advance on success so a failed fetch doesn't lock
+		// retries out for the throttle window. Failure → next caller
+		// (still single-flight protected) can immediately retry.
+		refreshLastAt = time.Now()
+	}
 	refreshMu.Unlock()
 	return err
 }
@@ -158,6 +172,11 @@ func fetchAndApply(ctx context.Context, url string) error {
 		return fmt.Errorf("compat entry %q has unparseable max_tested_xui %q", key, entry.MaxTestedXUI)
 	}
 	SetActiveMaxTestedXUI(entry.MaxTestedXUI)
+	// Persist the just-fetched range so the next PSP boot starts with it
+	// without requiring network. Best-effort — a cache write failure is
+	// not worth failing the whole refresh, the in-memory state is already
+	// installed.
+	_ = saveCompatCache(entry.MaxTestedXUI)
 	return nil
 }
 

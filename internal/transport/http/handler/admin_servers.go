@@ -201,13 +201,18 @@ func (h *AdminServersHandler) Test(c *gin.Context) {
 	}
 	// Piggyback the remote-compat refresh on every Test click — admin
 	// opening the Servers page fires N parallel testServers, but the
-	// 60s throttle inside RefreshRemoteCompat collapses them to at most
-	// one actual GitHub fetch. Errors here are non-blocking; an
-	// unreachable raw.githubusercontent.com just means CheckXUI keeps
-	// returning Unknown until the next attempt. Logged at Warn so the
-	// operator can correlate "compat suddenly stale" with a network
-	// blip in the logs.
-	if rerr := version.RefreshRemoteCompat(c.Request.Context(), ""); rerr != nil {
+	// single-flight + throttle inside RefreshRemoteCompat collapses
+	// them to at most one actual GitHub fetch. Errors here are
+	// non-blocking; an unreachable raw.githubusercontent.com just means
+	// CheckXUI keeps returning Unknown until the next attempt.
+	//
+	// Uses background context (not c.Request.Context()) so an admin
+	// navigating away mid-fetch doesn't cancel the in-flight GitHub
+	// request — that cancel previously combined with v3.6.0-beta.5's
+	// "advance lastAt on failure" bug to lock the throttle for 60s
+	// after a single client disconnect. compat_remote.go enforces its
+	// own 8s timeout internally so background ctx can't leak forever.
+	if rerr := version.RefreshRemoteCompat(context.Background(), ""); rerr != nil {
 		log.Warn("admin test: refresh remote compat", "panel_id", req.ID, "err", rerr)
 	}
 	client, err := h.pool.Get(req.ID)
@@ -247,6 +252,13 @@ func (h *AdminServersHandler) Test(c *gin.Context) {
 		resp["version_checked_at"] = now
 	} else {
 		log.Warn("admin test: version probe", "panel_id", req.ID, "err", perr)
+		// Record the attempt time without touching the stored
+		// versions (preserve last-known-good). Mirrors the boot/
+		// piggyback probe's failure-path semantics so the UI's
+		// "checked X minutes ago" indicator stays accurate.
+		if uerr := h.repo.UpdateVersionCheckedAt(c.Request.Context(), req.ID, time.Now()); uerr != nil {
+			log.Warn("admin test: write checked-at", "panel_id", req.ID, "err", uerr)
+		}
 	}
 	c.JSON(http.StatusOK, resp)
 }
@@ -435,6 +447,13 @@ func (h *AdminServersHandler) runPostUpgradeSmoke(ctx context.Context, panelID i
 	select {
 	case <-time.After(initialGrace):
 	case <-ctx.Done():
+		// PSP shutting down before the grace period elapsed. Record
+		// the abort with a background ctx (the caller's ctx is already
+		// cancelled, so audit.Insert on it would fail) so the audit
+		// trail doesn't dead-end at panel_upgrade_initiated and admin
+		// can see the upgrade never got its smoke probe.
+		h.writeSmokeAudit(context.Background(),"panel_upgrade_aborted", panelID, panelName, targetVersion,
+			"smoke probe cancelled (PSP shutdown?) during initial grace window — admin should manually verify the panel via test/Servers page")
 		return
 	}
 	client, err := h.pool.Get(panelID)
@@ -446,6 +465,8 @@ func (h *AdminServersHandler) runPostUpgradeSmoke(ctx context.Context, panelID i
 	var lastErr error
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		if ctx.Err() != nil {
+			h.writeSmokeAudit(context.Background(),"panel_upgrade_aborted", panelID, panelName, targetVersion,
+				"smoke probe cancelled (PSP shutdown?) during retry loop on attempt "+strconv.Itoa(attempt)+" — admin should manually verify")
 			return
 		}
 		probeCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
@@ -457,6 +478,8 @@ func (h *AdminServersHandler) runPostUpgradeSmoke(ctx context.Context, panelID i
 			select {
 			case <-time.After(probeInterval):
 			case <-ctx.Done():
+				h.writeSmokeAudit(context.Background(), "panel_upgrade_aborted", panelID, panelName, targetVersion,
+					"smoke probe cancelled during retry sleep on attempt "+strconv.Itoa(attempt)+" — admin should manually verify")
 				return
 			}
 			continue

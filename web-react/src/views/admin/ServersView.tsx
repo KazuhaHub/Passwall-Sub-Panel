@@ -208,20 +208,25 @@ export default function ServersView() {
   }
 
   async function runUpgradePanel(s: Server, force = false) {
-    if (!force) {
-      closeMenu()
-      const ok = await confirm({
-        title: t('admin:servers.confirm.upgrade_panel_title', { defaultValue: '升级 3X-UI 面板' }),
-        message: t('admin:servers.confirm.upgrade_panel_message', {
-          name: s.name,
-          defaultValue: 'PSP 将先检查目标版本是否在已测试范围内,在范围内才会触发 {{name}} 的自升级。面板会重启,约 60 秒后 PSP 跑 smoke probe 验证。是否继续?',
-        }),
-        confirmText: t('admin:servers.action.upgrade', { defaultValue: '升级' }),
-      })
-      if (!ok) return
-    }
+    // Set BEFORE the await confirm() so the kebab menu's
+    // `disabled={upgrading === s.id}` immediately blocks a double-click
+    // from stacking two confirm dialogs. Pre-v3.6.0-beta.6 the set
+    // happened after the await — admin double-clicking ⋮ → "升级面板"
+    // during the confirm modal could fire two upgrade POSTs.
     setUpgrading(s.id)
     try {
+      if (!force) {
+        closeMenu()
+        const ok = await confirm({
+          title: t('admin:servers.confirm.upgrade_panel_title', { defaultValue: '升级 3X-UI 面板' }),
+          message: t('admin:servers.confirm.upgrade_panel_message', {
+            name: s.name,
+            defaultValue: 'PSP 将先检查目标版本是否在已测试范围内,在范围内才会触发 {{name}} 的自升级。面板会重启,约 60 秒后 PSP 跑 smoke probe 验证。是否继续?',
+          }),
+          confirmText: t('admin:servers.action.upgrade', { defaultValue: '升级' }),
+        })
+        if (!ok) return // finally clears setUpgrading
+      }
       const r = await upgradePanel(s.id, { force })
       pushSnack(
         t('admin:servers.toast.upgrade_panel_started', {
@@ -275,18 +280,20 @@ export default function ServersView() {
   }
 
   async function runUpgradeXray(s: Server) {
-    closeMenu()
-    const ok = await confirm({
-      title: t('admin:servers.confirm.upgrade_xray_title', { defaultValue: '升级 Xray (最新版)' }),
-      message: t('admin:servers.confirm.upgrade_xray_message', {
-        name: s.name,
-        defaultValue: '在 {{name}} 上安装最新版 xray-core 二进制。面板自身不重启,只重启 xray 子进程。是否继续?',
-      }),
-      confirmText: t('admin:servers.action.upgrade', { defaultValue: '升级' }),
-    })
-    if (!ok) return
+    // Same double-click guard as runUpgradePanel: set before the
+    // confirm await so the menu's disabled prop fires immediately.
     setUpgrading(s.id)
     try {
+      closeMenu()
+      const ok = await confirm({
+        title: t('admin:servers.confirm.upgrade_xray_title', { defaultValue: '升级 Xray (最新版)' }),
+        message: t('admin:servers.confirm.upgrade_xray_message', {
+          name: s.name,
+          defaultValue: '在 {{name}} 上安装最新版 xray-core 二进制。面板自身不重启,只重启 xray 子进程。是否继续?',
+        }),
+        confirmText: t('admin:servers.action.upgrade', { defaultValue: '升级' }),
+      })
+      if (!ok) return
       const r = await upgradeXray(s.id)
       pushSnack(
         t('admin:servers.toast.upgrade_xray_ok', {

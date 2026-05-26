@@ -4,6 +4,71 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## v3.6.0-beta.6 — 2026-05-25
+
+### Fixed (v3.6 系列代码审计发现的 5 个 bug + 1 个 perf 优化)
+
+- **#1 data loss: probe 失败时清空已存版本号导致 UI 误显"从未探测"** ──
+  `app.go probePanelVersionsOnce` 在 GetServerStatus 失败时调
+  `UpdateVersion(panelID, "", "", &now)`,把 panel_version / xray_version 写空字符串。
+  panel 之前探到的 `3.1.0` 因为一次 30 秒网络抖动就被擦掉,admin UI 显示 `—`
+  直到下一轮成功探测才恢复。**修复**:`ports.XUIPanelRepo` 新增 `UpdateVersionCheckedAt(panelID, t)`
+  方法,只 column-scoped 写 `version_checked_at` 一列,保留 panel_version / xray_version
+  原值;probe 失败路径(app.go boot probe + traffic poll piggyback + Test handler
+  失败分支)三处都改用新方法。UI 现在能正确显示"3.1.0 (上次探测 12 分钟前)"
+  而不是丢数据。
+
+- **#2 RefreshRemoteCompat 失败也 advance lastAt → 60s 锁死重试** ──
+  `compat_remote.go RefreshRemoteCompat` 之前在 throttle 窗口决策**之前**就写
+  `refreshLastAt = time.Now()`,意图是"防 N 个并发 hammer GitHub";结果 fetch 失败
+  也算 advance,接下来 60 秒内 admin 任何 Test 点击都被 throttle 短路。**修复**:
+  分离两个机制 — `refreshInflight bool` 做 single-flight(防 N 并发同时 fire),
+  `refreshLastAt` 只在**成功**时 advance(失败立即可重试)。N 并发现在只触发 1 次
+  fetch,失败后下一次 Test 点击立即 retry。
+
+- **#3 setUpgrading 时机晚 → 双击 ⋮ 弹两个 confirm dialog** ──
+  ServersView `runUpgradePanel` / `runUpgradeXray` 之前在 `await confirm()` **之后**
+  才 `setUpgrading(s.id)`,期间 ⋮ 按钮的 `disabled={upgrading === s.id}` 还是 false。
+  admin 快速双击 → 两个 confirm dialog 堆叠 → 都点确认 → 两次 POST upgrade。
+  **修复**:`setUpgrading(s.id)` 移到函数最开头,`await confirm()` 在 try 块内
+  (cancel 时 finally 自动 setUpgrading(null))。两个 handler 同时修。
+
+- **#4 Test handler 用 c.Request.Context() 调 RefreshRemoteCompat → admin
+  导航走会取消 GitHub fetch + 配合 #2 把 throttle 锁死** ── admin 打开 Servers
+  页 → 触发 testServer → 不耐烦切到别的 tab → 浏览器 cancel 请求 → ctx cancel →
+  RefreshRemoteCompat 失败 → 加上 #2 60s 锁死。**修复**:改用 `context.Background()`,
+  compat_remote.go 内部已有 8s timeout,不会泄露。#2 + #4 联手解决"compat 一直
+  unknown"这个最难 debug 的状态。
+
+- **#5 smoke probe ctx.Done 时不写"被中止"audit → upgrade inflight 时 PSP
+  关闭后 audit trail 不完整** ── `runPostUpgradeSmoke` 在 PSP shutdown 时三个 ctx.Done
+  路径(initial grace / retry loop entry / retry sleep)全部直接 return,audit log
+  只剩 `panel_upgrade_initiated` 没有收尾行。admin 之后看 audit 以为升级还在进行。
+  **修复**:三个路径各加一行 `panel_upgrade_aborted` audit,actor=`upgrade-smoke`,
+  detail 写明在哪个阶段被中止 + 提示 admin 手动验证。audit context 用
+  `context.Background()` 因为传入 ctx 已 cancel(就是这个 ctx 触发了 abort)。
+
+### Performance / Robustness
+
+- **Phase B: local compat cache 文件 → PSP 冷启动 + 离线立即有可用 compat 数据** ──
+  之前 PSP 启动后到 admin 第一次打开 Servers 页期间, ActiveMaxTestedXUI = "",
+  所有 panel 显示 Unknown。如果 GitHub 不可达 / 启动时机网络还没起,这段时间
+  可能很长。**新增** `internal/version/compat_cache.go`:
+  - PSP 启动时 `app.Build` 调 `LoadCompatCache()` 读 `<DataDir>/compat-cache.json`
+    把上次成功 fetch 的 max_tested_xui 装回 active state
+  - `RefreshRemoteCompat` 成功后调 `saveCompatCache()` 原子写(temp + rename
+    防 corrupt)持久化到同一文件
+  - PSP 版本不匹配(cache 是 v3.6.x 的, PSP 现在是 v3.7.x)→ 忽略 cache,等
+    第一次 fetch 替换 — 防跨 major MinXUI 改变引入的不一致
+  - 失败完全 best-effort:cache 读失败 / 写失败仅 log.Warn,不阻断启动流程
+
+### Internal
+
+- `XUIPanelRepo.UpdateVersionCheckedAt` 是新接口方法,fakes(traffic_test.go /
+  user_test.go)不需要补 stub(没 traffic 测试直接持有 XUIPanelRepo)。
+- compat_remote.go 注释更新解释 single-flight + throttle 分离的设计;
+  compat_cache.go 注释解释 PSP-version-mismatch 跳过策略的理由。
+
 ## v3.6.0-beta.5 — 2026-05-25
 
 ### Added (dynamic compat ── Phase 2 第五刀,bug 防御的最后一公里)

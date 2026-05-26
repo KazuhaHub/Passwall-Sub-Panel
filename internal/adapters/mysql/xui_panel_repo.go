@@ -103,3 +103,18 @@ func (r *xuiPanelRepo) UpdateVersion(ctx context.Context, panelID int64, panelVe
 	}
 	return r.db.WithContext(ctx).Model(&xuiPanelRow{}).Where("id = ?", panelID).Updates(updates).Error
 }
+
+// UpdateVersionCheckedAt updates ONLY version_checked_at, preserving any
+// previously-recorded panel_version / xray_version. Used by probe paths
+// to log "we attempted a probe at <time>" when the probe FAILED — clobbering
+// the version columns with empty strings (the old behavior) was a real data-
+// loss path: a transient network blip during the piggyback probe would wipe
+// the last-known-good snapshot and admin UI would display "—" instead of
+// "3.1.0 (stale: 12m ago)".
+func (r *xuiPanelRepo) UpdateVersionCheckedAt(ctx context.Context, panelID int64, checkedAt time.Time) error {
+	if panelID == 0 {
+		return fmt.Errorf("%w: panel id required", domain.ErrValidation)
+	}
+	return r.db.WithContext(ctx).Model(&xuiPanelRow{}).Where("id = ?", panelID).
+		Updates(map[string]any{"version_checked_at": checkedAt}).Error
+}
