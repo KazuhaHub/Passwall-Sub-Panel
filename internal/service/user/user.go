@@ -1604,6 +1604,24 @@ func (s *Service) ProcessDueTasks(ctx context.Context, limit int) error {
 			return err
 		}
 		if err := s.runUserTask(ctx, task); err != nil {
+			// Cap retries at maxUserTaskAttempts. At 1-minute backoff this
+			// is ~1.5 hours of trying — long enough for any realistic
+			// transient outage, short enough that a permanently broken
+			// task (e.g. 3X-UI rejecting a stale inbound config that the
+			// admin has since deleted) doesn't loop forever burning CPU +
+			// 3X-UI quota. The task is cancelled with the last error
+			// preserved so admin can see WHY it gave up in the Sync Tasks
+			// view; manual "Retry" still works as the explicit override.
+			if task.Attempts+1 >= maxUserTaskAttempts {
+				log.Warn("user task gave up after max attempts",
+					"task_id", task.ID, "type", task.Type,
+					"target_id", task.TargetID, "attempts", task.Attempts+1,
+					"last_err", err.Error())
+				if markErr := s.tasks.Cancel(ctx, task.ID); markErr != nil {
+					return markErr
+				}
+				continue
+			}
 			next := time.Now().Add(deleteTaskBackoff(task.Attempts + 1))
 			if markErr := s.tasks.MarkRetry(ctx, task.ID, err.Error(), next); markErr != nil {
 				return markErr
@@ -1663,6 +1681,16 @@ func (s *Service) runUserDeleteTask(ctx context.Context, task *domain.SyncTask) 
 func deleteTaskBackoff(_ int) time.Duration {
 	return time.Minute
 }
+
+// maxUserTaskAttempts caps how many times a user-scoped sync task will
+// retry before ProcessDueTasks cancels it. At deleteTaskBackoff's flat
+// 1-minute cadence this gives a task ~1.5 hours of recovery window —
+// well past any plausible transient 3X-UI outage but bounded so a
+// permanently broken task (e.g. an inbound the admin has since deleted
+// upstream, a credential change that ResyncMembership can't authenticate
+// against) doesn't hammer the panel forever. Admin can still hit
+// "Retry" in Sync Tasks for an explicit override.
+const maxUserTaskAttempts = 100
 
 func (s *Service) enqueueUserTask(ctx context.Context, typ domain.SyncTaskType, userID int64, summary string) error {
 	if s.tasks == nil {

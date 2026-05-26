@@ -1,6 +1,5 @@
-import { useCallback, useEffect, useState, type FormEvent, type MouseEvent } from 'react'
+import { useCallback, useEffect, useMemo, useState, type FormEvent, type MouseEvent } from 'react'
 import {
-  Badge,
   Box,
   Button,
   Card,
@@ -151,15 +150,22 @@ export default function ServersView() {
   )
   const paged = usePaged<Server>(fetchServers, { defaultSortBy: 'id', defaultSortDir: 'asc' })
   const { items, total, loading, page, pageSize, sortBy, sortDir, setPage, setPageSize, setKeyword, setSort, refresh, mutateItems } = paged
-  // Each time the visible page changes, fire-and-forget probe every
-  // row so the status badge populates.
+  // pageIdsKey is a stable string keyed off the set of row IDs on the
+  // current page. Crucial guard for the side-effect hooks below: each
+  // probe response calls mutateItems() to merge fresh version data
+  // back into the row, which produces a new `items` reference — if the
+  // effect depended on `items` directly we'd loop forever (probe →
+  // mutate → effect → probe → ...). Deriving from IDs only means
+  // content updates don't retrigger us; the effect fires exactly once
+  // per page / search / sort change, which is what we want.
+  const pageIdsKey = useMemo(() => items.map(s => s.id).join('|'), [items])
   useEffect(() => {
     void Promise.allSettled(items.map(s => probeServer(s)))
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [items])
+  }, [pageIdsKey])
   // Reset selection on page change — selection state is per-id and
   // shouldn't carry batch actions onto rows admin can no longer see.
-  useEffect(() => { setSelected(new Set()) }, [items])
+  useEffect(() => { setSelected(new Set()) }, [pageIdsKey])
 
   const selectedCount = selected.size
   // Header checkbox reflects the *visible* page only.
@@ -614,10 +620,29 @@ export default function ServersView() {
         {label}
       </Box>
     )
+    // Update-available chip lives inside the Version column so the
+    // target version is visible at a glance (the previous red-dot on
+    // the ⋮ kebab told admin "something is new" but they had to hover
+    // to learn what — too vague to act on). Tertiary-container coloring
+    // keeps it informational, not alarming.
+    const updateChip = s.update_available && s.latest_xui_version && (
+      <Box sx={{
+        display: 'inline-block', px: 1, py: 0.125,
+        borderRadius: 1, fontSize: 11, fontWeight: 500,
+        bgcolor: md.tertiaryContainer, color: md.onTertiaryContainer,
+        whiteSpace: 'nowrap', mt: 0.25, ml: badge ? 0.5 : 0,
+      }}>
+        {t('admin:servers.update_available_chip', {
+          latest: s.latest_xui_version,
+          defaultValue: '可升级 → {{latest}}',
+        })}
+      </Box>
+    )
     const stacked = (
       <Box>
         {versionText}
         {badge}
+        {updateChip}
       </Box>
     )
     if (s.compat_message) {
@@ -908,39 +933,18 @@ export default function ServersView() {
                     {/* Kebab menu hosts the destructive remote-upgrade
                         actions — kept out of the always-visible row
                         actions so an accidental click can't fire
-                        something that restarts the remote panel.
-                        Badge fires a red dot when 3X-UI itself reports
-                        update_available, drawing admin's eye without
-                        forcing a dialog. Tooltip names the target
-                        version so admin knows what's on offer before
-                        opening the menu. */}
-                    <Tooltip
-                      title={s.update_available && s.latest_xui_version
-                        ? t('admin:servers.update_available_tooltip', {
-                            latest: s.latest_xui_version,
-                            current: s.panel_version ?? '?',
-                            defaultValue: '3X-UI 新版本 {{latest}} 可用（当前 {{current}}）',
-                          })
-                        : ''}
-                      placement="top"
-                      arrow
+                        something that restarts the remote panel. The
+                        "update available" hint lives in the Version
+                        column (see versionCell), not on this button,
+                        so the kebab stays neutral. */}
+                    <IconButton
+                      size="small"
+                      onClick={e => openMenu(e, s)}
+                      disabled={upgrading === s.id}
+                      aria-label={t('admin:servers.action.more', { defaultValue: '更多操作' })}
                     >
-                      <Badge
-                        color="error"
-                        variant="dot"
-                        invisible={!s.update_available}
-                        overlap="circular"
-                      >
-                        <IconButton
-                          size="small"
-                          onClick={e => openMenu(e, s)}
-                          disabled={upgrading === s.id}
-                          aria-label={t('admin:servers.action.more', { defaultValue: '更多操作' })}
-                        >
-                          {upgrading === s.id ? <CircularProgress size={14} /> : <MoreVertIcon fontSize="small" />}
-                        </IconButton>
-                      </Badge>
-                    </Tooltip>
+                      {upgrading === s.id ? <CircularProgress size={14} /> : <MoreVertIcon fontSize="small" />}
+                    </IconButton>
                   </TableCell>
                 </TableRow>
               ))}

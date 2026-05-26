@@ -73,11 +73,24 @@ type Service struct {
 	// cycle's pushes are still draining when a new cycle queues more, the
 	// new ones wait on the same sem instead of doubling the load on 3X-UI.
 	pushSem chan struct{}
+	// bgWG is the app-level WaitGroup the background goroutines (floor
+	// push, quota-event email) attach to so App.Shutdown drains them
+	// before the process exits. Late-bound via SetBgWG because the WG
+	// lives on App, which Build() constructs AFTER the services. nil =
+	// "fire and forget without tracking" (legacy behaviour, kept so unit
+	// tests that don't care about shutdown don't have to wire a WG).
+	bgWG *sync.WaitGroup
 }
 
 // SetMailNotifier wires the late-bound mailer used for auto-disable /
 // auto-re-enable emails. Same late-binding rationale as SetConfigPusher.
 func (s *Service) SetMailNotifier(m MailNotifier) { s.mailer = m }
+
+// SetBgWG wires the app-level WaitGroup the background goroutines
+// (floor push, quota-event email) register with so App.Shutdown can
+// drain them before the process exits. nil is tolerated and degrades
+// to "fire and forget" — same semantics as before this method existed.
+func (s *Service) SetBgWG(wg *sync.WaitGroup) { s.bgWG = wg }
 
 // notifyDisabled / notifyEnabled fire the quota-event email off the poll's
 // hot path. Background context (the poll's ctx may be cancelled mid-cycle)
@@ -86,7 +99,7 @@ func (s *Service) notifyDisabled(userID int64, reason, detail string) {
 	if s.mailer == nil {
 		return
 	}
-	safego.Go("traffic.disabled-email", func() {
+	safego.GoTracked(s.bgWG, "traffic.disabled-email", func() {
 		if err := s.mailer.SendAccountDisabledToUser(context.Background(), userID, reason, detail); err != nil {
 			log.Warn("traffic disabled email", "user_id", userID, "err", err)
 		}
@@ -97,7 +110,7 @@ func (s *Service) notifyEnabled(userID int64, reason, detail string) {
 	if s.mailer == nil {
 		return
 	}
-	safego.Go("traffic.enabled-email", func() {
+	safego.GoTracked(s.bgWG, "traffic.enabled-email", func() {
 		if err := s.mailer.SendAccountEnabledToUser(context.Background(), userID, reason, detail); err != nil {
 			log.Warn("traffic enabled email", "user_id", userID, "err", err)
 		}
@@ -1029,7 +1042,7 @@ func (s *Service) recordAndEnforceWith(ctx context.Context, u *domain.User, tota
 		return nil
 	}
 	uid := u.ID
-	safego.Go("traffic.floor-push", func() {
+	safego.GoTracked(s.bgWG, "traffic.floor-push", func() {
 		s.pushSem <- struct{}{}
 		defer func() { <-s.pushSem }()
 		if err := s.configPusher.PushClientConfig(context.Background(), uid); err != nil {

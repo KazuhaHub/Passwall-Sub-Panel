@@ -1182,7 +1182,7 @@
       "username": "admin（仅在用密码登录时）",
       "password": "API Token 优先；填密码作为兜底"
     },
-    "update_available_tooltip": "3X-UI 新版本 {{latest}} 可用（当前 {{current}}）",
+    "update_available_chip": "可升级 → {{latest}}",
     "hint": {
       "name": "显示名称，可修改；内部关联使用数据库 ID",
       "configured": "已配置（保持不变）",

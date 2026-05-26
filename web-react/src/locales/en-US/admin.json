@@ -1182,7 +1182,7 @@
       "username": "admin (only when using password login)",
       "password": "API Token preferred; password as fallback"
     },
-    "update_available_tooltip": "3X-UI {{latest}} is available (currently {{current}})",
+    "update_available_chip": "Update → {{latest}}",
     "hint": {
       "name": "Display name; the internal reference uses the database ID.",
       "configured": "Configured (kept unchanged)",

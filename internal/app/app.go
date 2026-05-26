@@ -270,6 +270,10 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 		bgRootCtx: bgCtx,
 	}
 	dispatcher := &asyncDispatcher{ctx: bgCtx, wg: &a.bgWG}
+	// Wire traffic.Service into the panel-wide WaitGroup. Its async
+	// floor-push + quota-event email goroutines (`safego.GoTracked`)
+	// now register with bgWG so App.Shutdown drains them before exit.
+	trafficSvc.SetBgWG(&a.bgWG)
 
 	// --- transport layer ---
 	httpHandler := httptransport.NewRouter(httptransport.Deps{

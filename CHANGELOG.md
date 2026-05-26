@@ -4,6 +4,64 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## v3.6.1-beta.2 — 2026-05-26
+
+### Fixed
+
+- **ServersView 探针无限循环（beta.1 引入）** ── 页面打开后 `useEffect([items])`
+  里跑 `Promise.allSettled(items.map(probeServer))`，而 `probeServer` 拿到 Test
+  返回后会 `mutateItems()` 把版本字段合并回行，新 items 引用 → effect 再次触发
+  → 再 probe → 死循环。Network panel 累积 2000+ pending 请求，整页不可用。
+  修：派生 `pageIdsKey = items.map(id).join('|')` 作为 effect 依赖，IDs 集合稳定
+  时 effect 不触发，只在真正换页/搜索/排序时跑一次 probe。同样的依赖也修了
+  选择状态被每次 mutate 清空的小 bug。
+- **Servers 列表「可升级」红点改成 Version 列内联 chip** ── beta.8 加的 ⋮ 按钮
+  上红点 Badge + tooltip 太弱（admin 必须 hover 才能知道目标版本是什么、是否
+  值得点开）。换成 Version 列里直接显示 `可升级 → vX.Y.Z` 的 tertiary-container
+  chip，target version 一眼可见，视觉也从「报警红」降级成「信息」级别。⋮ 按
+  钮上的 Badge + Tooltip 同时移除，按钮回归纯粹"更多操作"语义。
+
+### Security
+
+- **`trusted_proxies` 默认值改为 loopback-only**（之前是 `0.0.0.0/0` + `::/0`,
+  即"信任全网"）。原默认下,如果面板监听端口直暴在公网,任何匿名 client 都
+  能伪造 `CF-Connecting-IP` / `X-Forwarded-For` 头 → `c.ClientIP()` 拿到伪造的
+  IP → 绕过订阅限流、登录限流、audit log IP 追溯。新默认是 fail-secure
+  (`127.0.0.1/32`, `::1/128`),只接受 loopback 来的代理头。
+  - **配置 token 调整**:不再有"零配置信任所有"的入口
+    - `""`(空 / 未设置)→ loopback only(新默认)
+    - `"all"` / `"*"` → 信任全网(显式 opt-in,适用 Docker 内网监听等场景)
+    - `"none"` → 完全禁用 trust list(用 raw TCP peer 作为 client IP)
+    - `"<cidr>[,<cidr>]"` → 信任列出的网段(推荐生产值)
+  - **boot 时会 WARN** 如果配置成 `all`,提醒 admin 这个模式只能在监听端口不
+    可公网直达的拓扑下安全
+  - **breaking**:跑在 reverse proxy / CDN 后面但没显式设置 `trusted_proxies`
+    的部署,client IP 现在会显示成 proxy 的 IP。修复:把 proxy / CDN 的 IP 段
+    填到 `http.trusted_proxies` 或 `PSP_TRUSTED_PROXIES`(Cloudflare 用户可直
+    接列出 Cloudflare IP 段)
+
+### Bug fixes
+
+- **`userRepo.Update` 不再用 `Save()` 写整行**:加 `.Omit(pollOwnedColumns...)`
+  排除 traffic poll 拥有的 6 列(lifetime_up/down/total_bytes,
+  period_baseline_bytes, lifetime_baseline_at, traffic_period_start)+
+  last_online_at。原行为下,admin 在 Users 页编辑某个用户(load → mutate →
+  Save)的过程中如果 traffic poll 刚好跑完,admin 的 stale snapshot 会把
+  lifetime 计数器回退几兆/几十兆。emergency 列暂保留在 Update 范围内,因为
+  `UseEmergencyAccess` 也走 Update;那条 race 由 service 层 `emergencyMu` 收窄,
+  窗口比 traffic poll 窄得多。
+- **traffic.Service 的 floor-push + 邮件 fan-out goroutines 接入 bgWG 追踪**:
+  原 `safego.Go("traffic.floor-push", ...)` / `traffic.disabled-email` /
+  `traffic.enabled-email` 都不在 `App.bgWG` 里,`App.Shutdown` 返回时它们可能
+  还在跑(违反"in-flight drain"契约 → 进程退出可能丢失最后一次配置 push 或
+  邮件发送)。改成 `safego.GoTracked(s.bgWG, ...)`,新加 `SetBgWG` setter,
+  Build() 里把 `&a.bgWG` 注入 traffic.Service。
+- **user 同步任务重试上限**:`ProcessDueTasks` 在 task.Attempts ≥ 100 时改成
+  Cancel 而非 MarkRetry,避免一个永久失败的任务(例:admin 删除了上游 inbound
+  但本地 client config push 还在排队)每分钟一次永久 hammer 3X-UI。100 attempts
+  × 1 min ≈ 1.5 小时,远超任何合理 transient outage;admin 仍可在 Sync Tasks
+  里手动点 Retry。
+
 ## v3.6.1-beta.1 — 2026-05-26
 
 ### Added — 全部 admin 列表统一分页 + column-click 排序 + 关键字搜索

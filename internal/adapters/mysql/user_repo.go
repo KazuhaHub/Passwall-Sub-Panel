@@ -25,8 +25,27 @@ func (r *userRepo) Create(ctx context.Context, u *domain.User) error {
 	return nil
 }
 
+// pollOwnedColumns lists user columns owned by a non-Update writer that
+// runs concurrently with admin edits — traffic poll's
+// BatchUpdateTrafficState (lifetime counters + period baseline) and
+// BatchUpdateLastOnline (last_online_at). Update() loads the row, the
+// admin mutates fields in a dialog, then Save() writes the whole row
+// back; if those columns aren't omitted the admin's stale snapshot
+// rolls lifetime back or stomps a last-online value the poll just
+// wrote 50ms ago. Emergency-access columns are intentionally NOT in
+// this list — UseEmergencyAccess goes through Update too, and the
+// race with admin editing the SAME user concurrently is narrowed by
+// emergencyMu at the service layer rather than the repo guard.
+var pollOwnedColumns = []string{
+	// BatchUpdateTrafficState / UpdateTrafficState
+	"lifetime_up_bytes", "lifetime_down_bytes", "lifetime_total_bytes",
+	"period_baseline_bytes", "lifetime_baseline_at", "traffic_period_start",
+	// BatchUpdateLastOnline
+	"last_online_at",
+}
+
 func (r *userRepo) Update(ctx context.Context, u *domain.User) error {
-	return r.db.WithContext(ctx).Save(userFromDomain(u)).Error
+	return r.db.WithContext(ctx).Omit(pollOwnedColumns...).Save(userFromDomain(u)).Error
 }
 
 // UpdateTrafficState writes only the columns the traffic poll owns, via a

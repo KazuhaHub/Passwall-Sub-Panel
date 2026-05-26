@@ -12,6 +12,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/config"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/jwtutil"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/log"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/audit"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/auth"
@@ -74,8 +75,20 @@ type Deps struct {
 // NewRouter returns a configured *gin.Engine ready to be served.
 func NewRouter(d Deps) *gin.Engine {
 	g := gin.New()
-	if err := g.SetTrustedProxies(trustedProxies(d.Cfg.HTTP.TrustedProxies)); err != nil {
+	tp := trustedProxies(d.Cfg.HTTP.TrustedProxies)
+	if err := g.SetTrustedProxies(tp); err != nil {
 		panic("invalid trusted proxies: " + err.Error())
+	}
+	// WARN when the trust list is wide-open: every proxy header
+	// (CF-Connecting-IP, X-Forwarded-For, etc.) is honored from any
+	// source, so a direct connection can spoof a client IP and bypass
+	// per-IP rate limiters. Only safe when the listen port isn't
+	// publicly reachable (Docker network, UNIX socket, etc.).
+	for _, cidr := range tp {
+		if cidr == "0.0.0.0/0" || cidr == "::/0" {
+			log.Warn("trusted_proxies trusts all sources — proxy headers (CF-Connecting-IP / X-Forwarded-For) can be spoofed by direct connections; lock to your proxy/CDN IP ranges or set trusted_proxies=none when listening directly")
+			break
+		}
 	}
 	// Real client IP discovery — zero-config defaults that work behind any
 	// common reverse proxy without admin tuning. Order matters: CDN-specific
@@ -332,18 +345,43 @@ func NewRouter(d Deps) *gin.Engine {
 }
 
 // trustedProxies resolves the SetTrustedProxies argument from the
-// http.trusted_proxies config value (or PSP_TRUSTED_PROXIES env override,
-// applied earlier during config load). The empty / unset default is
-// "trust everything": this is the zero-config setting that works behind
-// any reverse proxy or CDN. The implicit assumption is the panel's listen
-// port is NOT publicly reachable — if you expose it directly, lock the
-// trust list to your reverse proxy's IP(s) so attackers connecting
-// directly can't forge X-Forwarded-For to mask their real address.
-// The special token "none" disables the trust list entirely, making
-// Gin's ClientIP always return the raw TCP peer.
+// http.trusted_proxies config value (or PSP_TRUSTED_PROXIES env
+// override, applied earlier during config load). The fail-secure
+// default — empty / unset — trusts ONLY the loopback range. This
+// matters because Gin honors CF-Connecting-IP / X-Real-IP /
+// X-Forwarded-For from any trusted proxy when computing
+// `c.ClientIP()`, and several middlewares key on that IP (per-IP
+// sub-rate-limit, per-IP login-rate-limit, audit log IP column). A
+// wide-open trust list lets a direct attacker spoof any header to
+// bypass those limits.
+//
+// Admin tokens for this knob:
+//
+//	(unset)           → loopback only (127.0.0.1/32, ::1/128). Safe
+//	                    default for direct listen; behind a proxy/CDN
+//	                    every client looks like the proxy's IP — fix
+//	                    by setting the value below.
+//	"all" / "*"       → trust every source (the pre-v3.6.1-beta.2
+//	                    default). Use only when the listen port is
+//	                    NOT publicly reachable (Docker network, UNIX
+//	                    socket, etc.) — direct connections cannot
+//	                    spoof in that topology. Boot logs WARN when
+//	                    this mode is active.
+//	"none"            → disable the trust list entirely. Gin's
+//	                    ClientIP returns the raw TCP peer; proxy
+//	                    headers are ignored regardless of source.
+//	"<cidr>[,<cidr>]" → trust only the listed networks. The
+//	                    recommended production form: name your
+//	                    Cloudflare/Caddy/Nginx IP ranges explicitly.
 func trustedProxies(raw string) []string {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
+		// Loopback-only: safe default when admin hasn't configured
+		// anything. Catches the "exposed to internet without a proxy
+		// in front" footgun the old default left wide-open.
+		return []string{"127.0.0.1/32", "::1/128"}
+	}
+	if strings.EqualFold(raw, "all") || raw == "*" {
 		return []string{"0.0.0.0/0", "::/0"}
 	}
 	if strings.EqualFold(raw, "none") {
