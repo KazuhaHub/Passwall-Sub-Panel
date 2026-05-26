@@ -69,6 +69,13 @@ type XUIClient interface {
 	// NOT restart the panel itself, so unlike UpdatePanel this call
 	// returns normally with the panel still running.
 	InstallXray(ctx context.Context, version string) error
+
+	// GetXrayVersionList hits /panel/api/server/getXrayVersion and returns
+	// the xray-core tags the panel knows it can install (e.g. ["v25.10.31",
+	// "v25.9.15", ...] — typically the recent N releases plus "latest").
+	// Lets the admin Upgrade-Xray dialog populate a version dropdown so
+	// admin can pin a specific tag instead of always taking "latest".
+	GetXrayVersionList(ctx context.Context) ([]string, error)
 }
 
 // PanelUpdateInfo is the version pair returned by

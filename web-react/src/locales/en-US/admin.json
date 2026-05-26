@@ -880,7 +880,7 @@
       "delete_title": "Delete node",
       "delete_message": "Delete node {{name}}? This removes the corresponding inbound from 3X-UI.",
       "detach_title": "Detach node",
-      "detach_message": "Detach node {{name}}? The panel will drop the node record and forget its clients locally — 3X-UI will NOT be contacted. Any clients PSP previously created on this inbound stay on 3X-UI for you to clean up there. Use this when the upstream server is offline or decommissioned; otherwise use Delete.",
+      "detach_message": "Detach node {{name}}? The panel will drop the node record and forget its clients locally — 3X-UI will NOT be contacted. Any clients Passwall Panel previously created on this inbound stay on 3X-UI for you to clean up there. Use this when the upstream server is offline or decommissioned; otherwise use Delete.",
       "batch_delete_title": "Delete nodes",
       "batch_delete_message": "Delete {{count}} nodes?"
     }
@@ -1176,8 +1176,12 @@
       "url": "https://3x-ui.example.com:54321",
       "api_token": "3X-UI API Token (recommended)",
       "username": "admin (only when using password login)",
-      "password": "API Token preferred; password as fallback"
+      "password": "API Token preferred; password as fallback",
+      "xray_version": "Target version",
+      "xray_version_latest": "latest",
+      "xray_version_loading": "Loading available versions…"
     },
+    "update_available_tooltip": "3X-UI {{latest}} is available (currently {{current}})",
     "hint": {
       "name": "Display name; the internal reference uses the database ID.",
       "configured": "Configured (kept unchanged)",
@@ -1201,7 +1205,10 @@
       "unknown": "Not checked"
     },
     "compat": {
-      "banner_title": "{{count}} server(s) running an out-of-range 3X-UI version",
+      "banner_title_too_old": "{{count}} server(s) running a 3X-UI version below Passwall Panel's minimum requirement",
+      "banner_body_too_old": "Affected servers: {{panels}}. Please upgrade these servers as soon as possible to restore traffic poll, reconcile, and other core functions.",
+      "banner_title_untested": "{{count}} server(s) running a 3X-UI version outside Passwall Panel's tested range",
+      "banner_body_untested": "Affected servers: {{panels}}. These servers may work normally, or may fail unexpectedly on schema incompatibility. Check whether Passwall Panel has a newer release, or open an issue in the repository to request validation of this 3X-UI version.",
       "too_old": "Too old",
       "untested": "Untested",
       "unknown": "Unknown",
@@ -1214,8 +1221,8 @@
       "more": "More actions",
       "upgrade": "Upgrade",
       "force_upgrade": "Force upgrade",
-      "upgrade_panel": "Upgrade 3X-UI panel",
-      "upgrade_xray": "Upgrade Xray (latest)"
+      "upgrade_panel": "Upgrade 3X-UI panel (Latest)",
+      "upgrade_xray": "Upgrade Xray (Latest)"
     },
     "validate": {
       "url_required": "URL is required",
@@ -1230,8 +1237,8 @@
       "batch_tested": "Tested {{count}} servers",
       "batch_deleted": "Deleted {{count}} servers",
       "batch_partial": "Deleted {{ok}} servers, {{fail}} failed",
-      "upgrade_panel_started": "3X-UI upgrade to {{target}} initiated; PSP will run a smoke probe in ~60s and log success/failure to the audit trail.",
-      "upgrade_panel_blocked": "Upgrade refused: target {{latest}} is outside PSP's supported range (max {{max}}); upgrade PSP first.",
+      "upgrade_panel_started": "3X-UI upgrade to {{target}} initiated; Passwall Panel will run a smoke probe in ~60s and log success/failure to the audit trail.",
+      "upgrade_panel_blocked": "Upgrade refused: target {{latest}} is outside Passwall Panel's tested range (highest {{max}}). Upgrade Passwall Panel first.",
       "upgrade_xray_ok": "Xray upgraded to {{version}}"
     },
     "confirm": {
@@ -1240,10 +1247,10 @@
       "batch_delete_title": "Delete servers",
       "batch_delete_message": "Delete {{names}}{{suffix}}? These servers must have no nodes referencing them.",
       "upgrade_panel_title": "Upgrade 3X-UI panel",
-      "upgrade_panel_message": "PSP will check the target version first and only fire the upgrade on {{name}} if it's within the tested range. The panel will restart; PSP runs a smoke probe ~60s later. Continue?",
-      "upgrade_force_title": "Target version is outside the tested range",
-      "upgrade_force_message": "Target version {{latest}} is {{status}} (PSP's highest tested 3X-UI is {{max}}). Forcing the upgrade risks the same kind of schema-break PSP v3.5.1 had to fix for v3.1.0. Force the upgrade anyway?",
-      "upgrade_xray_title": "Upgrade Xray (latest)",
+      "upgrade_panel_message": "Passwall Panel will check the target version first and only fire the upgrade on {{name}} if it's within the tested range. The panel will restart; Passwall Panel runs a smoke probe ~60s later. Continue?",
+      "upgrade_force_title": "Target version not verified by Passwall Panel",
+      "upgrade_force_message": "About to upgrade to {{latest}}. Passwall Panel's highest verified 3X-UI version is {{max}}. Forcing the upgrade may cause traffic poll, reconcile, and other critical flows to fail due to protocol or field changes. Recommend upgrading Passwall Panel to a release that supports this 3X-UI version first. Force upgrade anyway?",
+      "upgrade_xray_title": "Upgrade Xray (Latest)",
       "upgrade_xray_message": "Install the latest xray-core on {{name}}. The panel itself stays up; only the xray child process restarts. Continue?"
     }
   }

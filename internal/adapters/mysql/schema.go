@@ -654,6 +654,16 @@ type xuiPanelRow struct {
 	PanelVersion     string `gorm:"size:32;default:''"`
 	XrayVersion      string `gorm:"size:32;default:''"`
 	VersionCheckedAt *time.Time
+	// ---- Upstream update-info snapshot (v3.6.0-beta.8) ----
+	// LatestXUIVersion is what 3X-UI's /getPanelUpdateInfo reports as the
+	// latest tag available on GitHub (the panel itself queries upstream;
+	// Passwall Panel doesn't talk to GitHub directly for this). Drives
+	// the ⋮ kebab "update available" badge in the Servers UI. Empty /
+	// NULL = never probed or probe failed. UpdateAvailable mirrors the
+	// boolean 3X-UI returned alongside, kept as its own column so the UI
+	// doesn't have to parse semver to decide whether to show the badge.
+	LatestXUIVersion string `gorm:"size:32;default:''"`
+	UpdateAvailable  bool   `gorm:"default:false"`
 	CreatedAt        time.Time
 	UpdatedAt        time.Time
 }
@@ -770,6 +780,8 @@ func (r *xuiPanelRow) toDomain() (*domain.XUIPanel, error) {
 		PanelVersion:     r.PanelVersion,
 		XrayVersion:      r.XrayVersion,
 		VersionCheckedAt: r.VersionCheckedAt,
+		LatestXUIVersion: r.LatestXUIVersion,
+		UpdateAvailable:  r.UpdateAvailable,
 	}, nil
 }
 
@@ -793,6 +805,8 @@ func xuiPanelFromDomain(p *domain.XUIPanel) (*xuiPanelRow, error) {
 		PanelVersion:     p.PanelVersion,
 		XrayVersion:      p.XrayVersion,
 		VersionCheckedAt: p.VersionCheckedAt,
+		LatestXUIVersion: p.LatestXUIVersion,
+		UpdateAvailable:  p.UpdateAvailable,
 	}, nil
 }
 

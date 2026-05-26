@@ -456,6 +456,20 @@ func (a *App) probePanelVersionsOnce(ctx context.Context) {
 		if uerr := a.repos.XUIPanel.UpdateVersion(ctx, p.ID, status.PanelVersion, status.XrayVersion, &now); uerr != nil {
 			log.Warn("compat probe: write version", "panel_id", p.ID, "err", uerr)
 		}
+		// v3.6.0-beta.8: also fetch upstream-update info so the Servers
+		// ⋮ kebab can show "new XUI version available" badge. 3X-UI's
+		// /getPanelUpdateInfo hits GitHub once and caches internally;
+		// failure is non-fatal — admin can still Test manually and the
+		// existing version snapshot above remains valid.
+		updCtx, ucancel := context.WithTimeout(ctx, 10*time.Second)
+		updInfo, uerr := c.GetPanelUpdateInfo(updCtx)
+		ucancel()
+		if uerr != nil {
+			log.Debug("compat probe: update-info fetch failed (panel offline / GitHub rate limit?)",
+				"panel_id", p.ID, "err", uerr)
+		} else if uerr := a.repos.XUIPanel.UpdateLatestXUIVersion(ctx, p.ID, updInfo.LatestVersion, updInfo.UpdateAvailable); uerr != nil {
+			log.Warn("compat probe: write update-info", "panel_id", p.ID, "err", uerr)
+		}
 	}
 }
 

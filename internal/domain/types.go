@@ -651,6 +651,13 @@ type XUIPanel struct {
 	PanelVersion     string
 	XrayVersion      string
 	VersionCheckedAt *time.Time
+	// Upstream update-info snapshot (v3.6.0-beta.8). LatestXUIVersion is
+	// what 3X-UI's /getPanelUpdateInfo reports as the latest tag on GitHub
+	// (the panel itself queries upstream — Passwall Panel doesn't touch
+	// GitHub for this). UpdateAvailable mirrors 3X-UI's same-response
+	// boolean. Empty / false = never probed / no update available.
+	LatestXUIVersion string
+	UpdateAvailable  bool
 }
 
 type MailReminderKind string

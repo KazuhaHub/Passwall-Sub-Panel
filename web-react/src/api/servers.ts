@@ -20,6 +20,11 @@ export interface Server {
   version_checked_at?: string
   compat_status?: CompatStatus
   compat_message?: string
+  // Upstream-update snapshot (v3.6.0-beta.8). 3X-UI itself queries GitHub
+  // and returns these via /getPanelUpdateInfo — Passwall Panel doesn't
+  // touch GitHub for this. Drives the ⋮ kebab "new version" badge.
+  latest_xui_version?: string
+  update_available?: boolean
 }
 
 export interface CreateServerRequest {
@@ -53,6 +58,11 @@ export interface TestResult {
   compat_status?: CompatStatus
   compat_message?: string
   version_checked_at?: string
+  // v3.6.0-beta.8: upstream update info piggybacked on the same Test
+  // click. Absent on GetPanelUpdateInfo failure (3X-UI can't reach
+  // GitHub, etc.) — UI keeps the previously-cached values in items.
+  latest_xui_version?: string
+  update_available?: boolean
 }
 
 export async function listServers() {
@@ -123,9 +133,19 @@ export interface UpgradeXrayResult {
 }
 
 // upgradeXray defaults version to "latest" on the backend when the field is
-// empty / missing — pass undefined for the common "give me latest" case.
+// empty / missing — pass undefined for the common "give me latest" case,
+// or a specific tag like "v25.10.31" to pin a release.
 export async function upgradeXray(id: number, version?: string) {
   const body = version ? { version } : {}
   const { data } = await client.post<UpgradeXrayResult>(`/admin/servers/${id}/upgrade-xray`, body)
   return data
+}
+
+// listXrayVersions returns the xray-core tags 3X-UI knows it can install
+// on this panel. Used by the Upgrade Xray dialog to populate its version
+// dropdown. Failure is recoverable — UI falls back to a single "latest"
+// option so admin can still upgrade without browsing tags.
+export async function listXrayVersions(id: number) {
+  const { data } = await client.get<{ versions: string[] }>(`/admin/servers/${id}/xray-versions`)
+  return data.versions ?? []
 }

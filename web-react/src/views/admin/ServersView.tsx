@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type FormEvent, type MouseEvent } from 'react'
 import {
+  Badge,
   Box,
   Button,
   Card,
@@ -9,10 +10,13 @@ import {
   DialogActions,
   DialogContent,
   DialogTitle,
+  FormControl,
   IconButton,
   InputAdornment,
+  InputLabel,
   Menu,
   MenuItem,
+  Select,
   Table,
   TableBody,
   TableCell,
@@ -35,12 +39,13 @@ import { useTranslation } from 'react-i18next'
 
 import WarningAmberIcon from '@mui/icons-material/WarningAmber'
 import MoreVertIcon from '@mui/icons-material/MoreVert'
-import UpgradeIcon from '@mui/icons-material/Upgrade'
+import SystemUpdateIcon from '@mui/icons-material/SystemUpdateAlt'
 
 import {
   createServer,
   deleteServer,
   listServers,
+  listXrayVersions,
   testServer,
   updateServer,
   upgradePanel,
@@ -107,6 +112,14 @@ export default function ServersView() {
   const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null)
   const [menuTarget, setMenuTarget] = useState<Server | null>(null)
   const [upgrading, setUpgrading] = useState<number | null>(null)
+  // Xray upgrade dialog state. Opened from the kebab menu's "升级 Xray"
+  // item; the dialog lazy-loads the version list from
+  // GET /admin/servers/:id/xray-versions on mount. xrayVersionPick = "" means
+  // "use latest" (also the default before the list resolves).
+  const [xrayDialogTarget, setXrayDialogTarget] = useState<Server | null>(null)
+  const [xrayVersionPick, setXrayVersionPick] = useState<string>('')
+  const [xrayVersions, setXrayVersions] = useState<string[]>([])
+  const [xrayLoadingVersions, setXrayLoadingVersions] = useState(false)
 
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editing, setEditing] = useState<Server | null>(null)
@@ -279,32 +292,48 @@ export default function ServersView() {
     }
   }
 
-  async function runUpgradeXray(s: Server) {
-    // Same double-click guard as runUpgradePanel: set before the
-    // confirm await so the menu's disabled prop fires immediately.
+  // openXrayDialog replaces the v3.6.0-beta.7 simple confirm flow. The
+  // dialog hosts a version dropdown so admin can pin a specific xray-core
+  // tag (or keep "latest"); version list is lazy-loaded from the panel's
+  // own /server/getXrayVersion the moment the dialog opens.
+  async function openXrayDialog(s: Server) {
+    closeMenu()
+    setXrayDialogTarget(s)
+    setXrayVersionPick('') // "" = latest
+    setXrayVersions([])
+    setXrayLoadingVersions(true)
+    try {
+      const versions = await listXrayVersions(s.id)
+      setXrayVersions(versions)
+    } catch {
+      // Panel unreachable / endpoint failed — dialog still opens with
+      // just the "latest" pseudo-option so admin can still upgrade.
+      setXrayVersions([])
+    } finally {
+      setXrayLoadingVersions(false)
+    }
+  }
+
+  function closeXrayDialog() {
+    setXrayDialogTarget(null)
+  }
+
+  async function submitXrayUpgrade() {
+    const s = xrayDialogTarget
+    if (!s) return
     setUpgrading(s.id)
     try {
-      closeMenu()
-      const ok = await confirm({
-        title: t('admin:servers.confirm.upgrade_xray_title', { defaultValue: '升级 Xray (最新版)' }),
-        message: t('admin:servers.confirm.upgrade_xray_message', {
-          name: s.name,
-          defaultValue: '在 {{name}} 上安装最新版 xray-core 二进制。面板自身不重启,只重启 xray 子进程。是否继续?',
-        }),
-        confirmText: t('admin:servers.action.upgrade', { defaultValue: '升级' }),
-      })
-      if (!ok) return
-      const r = await upgradeXray(s.id)
+      // Empty string means "latest" — backend treats undefined/empty
+      // identically and falls back to the latest xray-core release.
+      const r = await upgradeXray(s.id, xrayVersionPick || undefined)
       pushSnack(
-        t('admin:servers.toast.upgrade_xray_ok', {
-          version: r.version ?? 'latest',
-          defaultValue: 'Xray 已升级到 {{version}}',
-        }),
+        t('admin:servers.toast.upgrade_xray_ok', { version: r.version ?? 'latest' }),
         'success',
       )
-      // The backend already refreshed UpdateVersion server-side, so
-      // pull the row again so the Version column reflects new xray ver.
+      // Backend already refreshed UpdateVersion server-side; probe to
+      // pull the latest snapshot into the items list.
       void probeServer(s)
+      closeXrayDialog()
     } catch (err) {
       const msg = (err as { response?: { data?: { error?: string } }; message?: string }).response?.data?.error
         ?? (err as { message?: string }).message
@@ -536,14 +565,27 @@ export default function ServersView() {
     return stacked
   }
 
-  // incompatibleServers powers the top banner. We surface only panels with
-  // a definitive non-supported status — "unknown" stays out of the banner
-  // because it usually means "never probed" or "probe failed transiently",
-  // not a real compat issue worth a red banner.
-  const incompatibleServers = useMemo(
-    () => items.filter(s => s.compat_status === 'too_old' || s.compat_status === 'untested'),
+  // Compat-warning banners split by KIND because the operator's next
+  // action differs: too_old means "upgrade the panel ASAP" (panel can
+  // no longer be talked to reliably); untested means "Passwall Panel
+  // hasn't verified this 3X-UI version yet — may work, may not". Same
+  // visual treatment (error vs warning container) reinforces the
+  // distinction. "unknown" stays out — usually "never probed" or a
+  // transient probe failure, not a real compat issue.
+  const panelsTooOld = useMemo(
+    () => items.filter(s => s.compat_status === 'too_old'),
     [items],
   )
+  const panelsUntested = useMemo(
+    () => items.filter(s => s.compat_status === 'untested'),
+    [items],
+  )
+  // Reused for both banners — render "name (vX.Y.Z)" joined with 、
+  // so admin can see exactly which panels triggered the warning without
+  // a separate hover.
+  function panelsList(panels: Server[]): string {
+    return panels.map(s => `${s.name} (v${s.panel_version ?? '?'})`).join('、')
+  }
 
   function statusBadge(s: Server) {
     const st = stateFor(s)
@@ -614,11 +656,13 @@ export default function ServersView() {
         </Box>
       </Box>
 
-      {/* Compat warning banner — only shown when at least one server's
-          3X-UI version falls outside the supported range. "Unknown" panels
-          (never probed / probe failing) deliberately stay out of this
-          banner since they usually aren't a real compat issue. */}
-      {incompatibleServers.length > 0 && (
+      {/* Compat banners — split by severity (too_old = error, can't be
+          relied on; untested = warning, may still work). "Unknown" panels
+          (never probed / probe failing transiently) stay out of both
+          banners because they usually aren't a real compat issue. */}
+      {/* too_old banner ── error severity. Panel can't be relied on,
+          admin action is "upgrade the panel ASAP". */}
+      {panelsTooOld.length > 0 && (
         <Box sx={{
           mt: 2, p: 1.75, borderRadius: 2,
           bgcolor: md.errorContainer, color: md.onErrorContainer,
@@ -627,15 +671,35 @@ export default function ServersView() {
           <WarningAmberIcon fontSize="small" sx={{ mt: 0.25 }} />
           <Box>
             <Typography sx={{ fontSize: 13, fontWeight: 600 }}>
-              {t('admin:servers.compat.banner_title', {
-                count: incompatibleServers.length,
-                defaultValue: '{{count}} 台服务器的 3X-UI 版本超出 PSP 兼容范围',
+              {t('admin:servers.compat.banner_title_too_old', { count: panelsTooOld.length })}
+            </Typography>
+            <Typography sx={{ fontSize: 12, mt: 0.5, lineHeight: 1.5 }}>
+              {t('admin:servers.compat.banner_body_too_old', {
+                panels: panelsList(panelsTooOld),
               })}
             </Typography>
-            <Typography sx={{ fontSize: 12, mt: 0.25 }}>
-              {incompatibleServers
-                .map(s => `${s.name} (${s.panel_version ?? '?'}, ${s.compat_status ?? 'unknown'})`)
-                .join('; ')}
+          </Box>
+        </Box>
+      )}
+
+      {/* untested banner ── warning severity. Panel may work, may not;
+          admin action is "check if Passwall Panel has a newer release,
+          or report the new 3X-UI version for verification". */}
+      {panelsUntested.length > 0 && (
+        <Box sx={{
+          mt: 2, p: 1.75, borderRadius: 2,
+          bgcolor: md.secondaryContainer, color: md.onSecondaryContainer,
+          display: 'flex', gap: 1.5, alignItems: 'flex-start',
+        }}>
+          <WarningAmberIcon fontSize="small" sx={{ mt: 0.25 }} />
+          <Box>
+            <Typography sx={{ fontSize: 13, fontWeight: 600 }}>
+              {t('admin:servers.compat.banner_title_untested', { count: panelsUntested.length })}
+            </Typography>
+            <Typography sx={{ fontSize: 12, mt: 0.5, lineHeight: 1.5 }}>
+              {t('admin:servers.compat.banner_body_untested', {
+                panels: panelsList(panelsUntested),
+              })}
             </Typography>
           </Box>
         </Box>
@@ -773,15 +837,39 @@ export default function ServersView() {
                     {/* Kebab menu hosts the destructive remote-upgrade
                         actions — kept out of the always-visible row
                         actions so an accidental click can't fire
-                        something that restarts the remote panel. */}
-                    <IconButton
-                      size="small"
-                      onClick={e => openMenu(e, s)}
-                      disabled={upgrading === s.id}
-                      aria-label={t('admin:servers.action.more', { defaultValue: '更多操作' })}
+                        something that restarts the remote panel.
+                        Badge fires a red dot when 3X-UI itself reports
+                        update_available, drawing admin's eye without
+                        forcing a dialog. Tooltip names the target
+                        version so admin knows what's on offer before
+                        opening the menu. */}
+                    <Tooltip
+                      title={s.update_available && s.latest_xui_version
+                        ? t('admin:servers.update_available_tooltip', {
+                            latest: s.latest_xui_version,
+                            current: s.panel_version ?? '?',
+                            defaultValue: '3X-UI 新版本 {{latest}} 可用（当前 {{current}}）',
+                          })
+                        : ''}
+                      placement="top"
+                      arrow
                     >
-                      {upgrading === s.id ? <CircularProgress size={14} /> : <MoreVertIcon fontSize="small" />}
-                    </IconButton>
+                      <Badge
+                        color="error"
+                        variant="dot"
+                        invisible={!s.update_available}
+                        overlap="circular"
+                      >
+                        <IconButton
+                          size="small"
+                          onClick={e => openMenu(e, s)}
+                          disabled={upgrading === s.id}
+                          aria-label={t('admin:servers.action.more', { defaultValue: '更多操作' })}
+                        >
+                          {upgrading === s.id ? <CircularProgress size={14} /> : <MoreVertIcon fontSize="small" />}
+                        </IconButton>
+                      </Badge>
+                    </Tooltip>
                   </TableCell>
                 </TableRow>
               ))}
@@ -802,14 +890,74 @@ export default function ServersView() {
         transformOrigin={{ vertical: 'top', horizontal: 'right' }}
       >
         <MenuItem onClick={() => menuTarget && runUpgradePanel(menuTarget)}>
-          <UpgradeIcon fontSize="small" sx={{ mr: 1 }} />
-          {t('admin:servers.action.upgrade_panel', { defaultValue: '升级 3X-UI 面板' })}
+          <SystemUpdateIcon fontSize="small" sx={{ mr: 1 }} />
+          {t('admin:servers.action.upgrade_panel', { defaultValue: '升级 3X-UI 面板（最新）' })}
         </MenuItem>
-        <MenuItem onClick={() => menuTarget && runUpgradeXray(menuTarget)}>
-          <UpgradeIcon fontSize="small" sx={{ mr: 1 }} />
-          {t('admin:servers.action.upgrade_xray', { defaultValue: '升级 Xray (最新)' })}
+        <MenuItem onClick={() => menuTarget && openXrayDialog(menuTarget)}>
+          <SystemUpdateIcon fontSize="small" sx={{ mr: 1 }} />
+          {t('admin:servers.action.upgrade_xray', { defaultValue: '升级 Xray（最新）' })}
         </MenuItem>
       </Menu>
+
+      {/* Upgrade Xray dialog — pinning a specific xray-core version. The
+          version list comes from the panel's /server/getXrayVersion at
+          dialog-open time; if that fetch failed (xrayVersions is empty),
+          the dropdown still offers "latest" so admin can proceed. Empty
+          string in the Select value carries "use latest" semantics. */}
+      <Dialog
+        open={!!xrayDialogTarget}
+        onClose={() => upgrading === null && closeXrayDialog()}
+        PaperProps={{ sx: { borderRadius: 3, bgcolor: md.surfaceContainerHigh, width: 480, maxWidth: '90vw' } }}
+      >
+        <DialogTitle>{t('admin:servers.confirm.upgrade_xray_title')}</DialogTitle>
+        <DialogContent>
+          {xrayDialogTarget && (
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, pt: 1 }}>
+              <Typography variant="body2">
+                {t('admin:servers.confirm.upgrade_xray_message', { name: xrayDialogTarget.name })}
+              </Typography>
+              <FormControl fullWidth size="small" disabled={xrayLoadingVersions || upgrading !== null}>
+                <InputLabel id="xray-version-select">
+                  {t('admin:servers.field.xray_version', { defaultValue: '目标版本' })}
+                </InputLabel>
+                <Select
+                  labelId="xray-version-select"
+                  value={xrayVersionPick}
+                  label={t('admin:servers.field.xray_version', { defaultValue: '目标版本' })}
+                  onChange={e => setXrayVersionPick(e.target.value)}
+                >
+                  {/* The "latest" pseudo-option is always present so admin
+                      can upgrade even if version list fetch failed. */}
+                  <MenuItem value="">
+                    {t('admin:servers.field.xray_version_latest', { defaultValue: 'latest（最新版）' })}
+                  </MenuItem>
+                  {xrayVersions.map(v => (
+                    <MenuItem key={v} value={v}>{v}</MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+              {xrayLoadingVersions && (
+                <Typography variant="caption" sx={{ color: md.onSurfaceVariant }}>
+                  {t('admin:servers.field.xray_version_loading', { defaultValue: '正在加载可用版本…' })}
+                </Typography>
+              )}
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={closeXrayDialog} disabled={upgrading !== null} variant="text">
+            {t('common:actions.cancel')}
+          </Button>
+          <Button
+            onClick={submitXrayUpgrade}
+            variant="contained"
+            disabled={upgrading !== null}
+            startIcon={upgrading !== null ? <CircularProgress size={16} color="inherit" /> : null}
+          >
+            {t('admin:servers.action.upgrade', { defaultValue: '升级' })}
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       {/* Create/Edit dialog */}
       <Dialog

@@ -465,6 +465,19 @@ func (c *Client) InstallXray(ctx context.Context, version string) error {
 	return c.doJSON(ctx, http.MethodPost, "/panel/api/server/installXray/"+url.PathEscape(version), nil, nil)
 }
 
+// GetXrayVersionList hits /panel/api/server/getXrayVersion. 3X-UI returns
+// the obj field as a JSON array of tag strings, populated from the panel's
+// known-good xray-core releases. Order is upstream's (typically newest
+// first). Empty / missing → empty slice + nil error (panel rebooted into
+// a state without the list yet — admin can still type "latest" by hand).
+func (c *Client) GetXrayVersionList(ctx context.Context) ([]string, error) {
+	var versions []string
+	if err := c.doJSON(ctx, http.MethodGet, "/panel/api/server/getXrayVersion", nil, &versions); err != nil {
+		return nil, err
+	}
+	return versions, nil
+}
+
 // GetInboundClients fetches the inbound and decodes settings.clients[] into
 // a normalised slice. Returns empty if the inbound has no clients defined.
 func (c *Client) GetInboundClients(ctx context.Context, inboundID int) ([]ports.ClientDetail, error) {

@@ -62,6 +62,13 @@ type serverDTO struct {
 	VersionCheckedAt *time.Time `json:"version_checked_at,omitempty"`
 	CompatStatus     string     `json:"compat_status,omitempty"`  // "supported" | "too_old" | "untested" | "unknown"
 	CompatMessage    string     `json:"compat_message,omitempty"` // human-readable, for tooltip / banner
+	// v3.6.0-beta.8: upstream-update snapshot from 3X-UI's
+	// /getPanelUpdateInfo. LatestXUIVersion is the GitHub-side latest tag
+	// (carries "v" prefix typically); UpdateAvailable is the panel's own
+	// boolean — both empty / false when never probed. Drives the ⋮ kebab
+	// "update available" badge in the Servers UI.
+	LatestXUIVersion string `json:"latest_xui_version,omitempty"`
+	UpdateAvailable  bool   `json:"update_available,omitempty"`
 }
 
 type serverCreateRequest struct {
@@ -250,6 +257,19 @@ func (h *AdminServersHandler) Test(c *gin.Context) {
 		resp["compat_status"] = compatStatus.String()
 		resp["compat_message"] = version.CompatMessage(status.PanelVersion, compatStatus)
 		resp["version_checked_at"] = now
+		// v3.6.0-beta.8: piggyback upstream-update info. Admin clicking
+		// Test wants "the current truth" and is fine paying an extra
+		// ~200ms for it (3X-UI internally queries GitHub release API).
+		// Best-effort: failure doesn't degrade the connection-test result.
+		if updInfo, uerr := client.GetPanelUpdateInfo(c.Request.Context()); uerr == nil {
+			if werr := h.repo.UpdateLatestXUIVersion(c.Request.Context(), req.ID, updInfo.LatestVersion, updInfo.UpdateAvailable); werr != nil {
+				log.Warn("admin test: write update-info", "panel_id", req.ID, "err", werr)
+			}
+			resp["latest_xui_version"] = updInfo.LatestVersion
+			resp["update_available"] = updInfo.UpdateAvailable
+		} else {
+			log.Debug("admin test: update-info fetch failed", "panel_id", req.ID, "err", uerr)
+		}
 	} else {
 		log.Warn("admin test: version probe", "panel_id", req.ID, "err", perr)
 		// Record the attempt time without touching the stored
@@ -372,6 +392,31 @@ func (h *AdminServersHandler) UpgradePanel(c *gin.Context) {
 		"target_version": info.LatestVersion,
 		"message":        "3X-UI upgrade initiated; the panel is restarting. PSP will run a smoke probe in ~60s and log success or failure to the audit trail.",
 	})
+}
+
+// ListXrayVersions returns the xray-core tags the 3X-UI panel knows it
+// can install. Drives the Upgrade-Xray dialog's version dropdown so admin
+// can pin a specific tag instead of always taking "latest". GET so it's
+// cacheable / browser-prefetchable and clearly read-only.
+func (h *AdminServersHandler) ListXrayVersions(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid id"})
+		return
+	}
+	client, err := h.pool.Get(id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Server not registered in pool: " + err.Error()})
+		return
+	}
+	versions, err := client.GetXrayVersionList(c.Request.Context())
+	if err != nil {
+		// Frontend falls back to a single "latest" option when this 502s,
+		// so an upstream failure is recoverable without admin intervention.
+		c.JSON(http.StatusBadGateway, gin.H{"error": "GetXrayVersion failed: " + err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"versions": versions})
 }
 
 // UpgradeXray triggers a remote xray-core install. xray-core compatibility
@@ -597,6 +642,8 @@ func toServerDTO(p *domain.XUIPanel) serverDTO {
 		PanelVersion:     p.PanelVersion,
 		XrayVersion:      p.XrayVersion,
 		VersionCheckedAt: p.VersionCheckedAt,
+		LatestXUIVersion: p.LatestXUIVersion,
+		UpdateAvailable:  p.UpdateAvailable,
 	}
 	// Only compute compat fields when there's actually a probed version —
 	// "never probed" panels stay blank rather than displaying a meaningless

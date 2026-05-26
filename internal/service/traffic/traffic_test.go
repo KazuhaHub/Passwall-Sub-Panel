@@ -945,6 +945,9 @@ func (c *fakeXUIClient) GetPanelUpdateInfo(ctx context.Context) (*ports.PanelUpd
 }
 func (c *fakeXUIClient) UpdatePanel(ctx context.Context) error            { return nil }
 func (c *fakeXUIClient) InstallXray(ctx context.Context, v string) error { return nil }
+func (c *fakeXUIClient) GetXrayVersionList(ctx context.Context) ([]string, error) {
+	return []string{"v26.5.9", "v26.5.8"}, nil
+}
 
 // When snapshots have been wiped but the user still carries a non-zero
 // LifetimeTotalBytes, bootstrap deltas for ownerships created AFTER the

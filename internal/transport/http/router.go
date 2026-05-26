@@ -267,6 +267,7 @@ func NewRouter(d Deps) *gin.Engine {
 		adminGroup.POST("/servers/probe", servers.Test)
 			adminGroup.POST("/servers/:id/upgrade-panel", servers.UpgradePanel)
 			adminGroup.POST("/servers/:id/upgrade-xray", servers.UpgradeXray)
+			adminGroup.GET("/servers/:id/xray-versions", servers.ListXrayVersions)
 
 		settings := handler.NewAdminSettingsHandler(d.Repos.Settings, d.JWTParams)
 		adminGroup.GET("/settings/ui", settings.Get)

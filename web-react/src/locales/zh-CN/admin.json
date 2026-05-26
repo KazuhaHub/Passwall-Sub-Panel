@@ -880,7 +880,7 @@
       "delete_title": "删除节点",
       "delete_message": "确定删除节点 {{name}}？该操作会从 3X-UI 移除对应 inbound。",
       "detach_title": "脱离节点",
-      "detach_message": "确定脱离节点 {{name}}？面板只会删除本地节点记录并清空本地 ownership 白名单，**不会**联系 3X-UI；之前由 PSP 创建的 client 会留在 3X-UI 上，需要的话请到 3X-UI 自行清理。建议仅在上游服务器已下线 / 面板不可达时使用，否则请用「删除」。",
+      "detach_message": "确定脱离节点 {{name}}？面板只会删除本地节点记录并清空本地 ownership 白名单，**不会**联系 3X-UI；之前由 Passwall Panel 创建的 client 会留在 3X-UI 上，需要的话请到 3X-UI 自行清理。建议仅在上游服务器已下线 / 面板不可达时使用，否则请用「删除」。",
       "batch_delete_title": "批量删除节点",
       "batch_delete_message": "确定删除 {{count}} 个节点？"
     }
@@ -1176,8 +1176,12 @@
       "url": "https://3x-ui.example.com:54321",
       "api_token": "3X-UI API Token（推荐）",
       "username": "admin（仅在用密码登录时）",
-      "password": "API Token 优先；填密码作为兜底"
+      "password": "API Token 优先；填密码作为兜底",
+      "xray_version": "目标版本",
+      "xray_version_latest": "latest（最新版）",
+      "xray_version_loading": "正在加载可用版本…"
     },
+    "update_available_tooltip": "3X-UI 新版本 {{latest}} 可用（当前 {{current}}）",
     "hint": {
       "name": "显示名称，可修改；内部关联使用数据库 ID",
       "configured": "已配置（保持不变）",
@@ -1201,7 +1205,10 @@
       "unknown": "未检测"
     },
     "compat": {
-      "banner_title": "{{count}} 台服务器的 3X-UI 版本超出 PSP 兼容范围",
+      "banner_title_too_old": "{{count}} 台服务器的 3X-UI 版本低于 Passwall Panel 最低要求",
+      "banner_body_too_old": "受影响的服务器：{{panels}}。请尽快升级这些服务器，以恢复 traffic poll 与 reconcile 等核心功能。",
+      "banner_title_untested": "{{count}} 台服务器运行的 3X-UI 版本超出 Passwall Panel 测试范围",
+      "banner_body_untested": "受影响的服务器：{{panels}}。这些服务器可能正常工作，也可能在 schema 不兼容时出现非预期失败。建议检查 Passwall Panel 是否有新版本，或在仓库提交 issue 报告该 3X-UI 版本待验证。",
       "too_old": "版本过低",
       "untested": "未测试",
       "unknown": "无法识别",
@@ -1214,8 +1221,8 @@
       "more": "更多操作",
       "upgrade": "升级",
       "force_upgrade": "强制升级",
-      "upgrade_panel": "升级 3X-UI 面板",
-      "upgrade_xray": "升级 Xray (最新)"
+      "upgrade_panel": "升级 3X-UI 面板（最新）",
+      "upgrade_xray": "升级 Xray（最新）"
     },
     "validate": {
       "url_required": "URL 必填",
@@ -1230,8 +1237,8 @@
       "batch_tested": "已检测 {{count}} 台服务器",
       "batch_deleted": "已删除 {{count}} 台服务器",
       "batch_partial": "已删除 {{ok}} 台服务器，失败 {{fail}} 台",
-      "upgrade_panel_started": "已发起 3X-UI 升级到 {{target}}，约 60 秒后 PSP 跑 smoke probe，结果写入 audit log",
-      "upgrade_panel_blocked": "拒绝升级：目标版本 {{latest}} 超出 PSP 支持范围（max {{max}}），请先升级 PSP",
+      "upgrade_panel_started": "已发起 3X-UI 升级到 {{target}}，约 60 秒后 Passwall Panel 跑 smoke probe，结果写入 audit log",
+      "upgrade_panel_blocked": "拒绝升级：目标版本 {{latest}} 超出 Passwall Panel 测试范围（最高 {{max}}），请先升级 Passwall Panel",
       "upgrade_xray_ok": "Xray 已升级到 {{version}}"
     },
     "confirm": {
@@ -1240,10 +1247,10 @@
       "batch_delete_title": "批量删除服务器",
       "batch_delete_message": "确定删除 {{names}}{{suffix}}？这些服务器必须没有节点引用才能删除。",
       "upgrade_panel_title": "升级 3X-UI 面板",
-      "upgrade_panel_message": "PSP 将先检查目标版本是否在已测试范围内，在范围内才会触发 {{name}} 的自升级。面板会重启，约 60 秒后 PSP 跑 smoke probe 验证。是否继续？",
-      "upgrade_force_title": "目标版本超出已测试范围",
-      "upgrade_force_message": "目标版本 {{latest}} 状态为 {{status}}（PSP 当前测试最高 {{max}}）。强制升级可能因 schema 变更导致 PSP traffic poll 失败 —— PSP v3.5.1 修复的 v3.1.0 break 就是这类问题。确认强制升级吗？",
-      "upgrade_xray_title": "升级 Xray (最新版)",
+      "upgrade_panel_message": "Passwall Panel 将先检查目标版本是否在已测试范围内，在范围内才会触发 {{name}} 的自升级。面板会重启，约 60 秒后 Passwall Panel 跑 smoke probe 验证。是否继续？",
+      "upgrade_force_title": "目标版本未通过 Passwall Panel 验证",
+      "upgrade_force_message": "即将升级到 {{latest}}。当前 Passwall Panel 已验证的最高 3X-UI 版本为 {{max}}。强制升级可能因协议或字段变更导致 traffic poll、reconcile 等关键流程失败。建议先升级 Passwall Panel 至支持该 3X-UI 版本的发行，再升级面板。是否仍要强制升级？",
+      "upgrade_xray_title": "升级 Xray（最新版）",
       "upgrade_xray_message": "在 {{name}} 上安装最新版 xray-core 二进制。面板自身不重启，只重启 xray 子进程。是否继续？"
     }
   }

@@ -4,6 +4,75 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## v3.6.0-beta.8 — 2026-05-25
+
+### Added
+
+- **⋮ 按钮新增"有新版本可用"红点 badge** ── 3X-UI panel 自己已经在查 GitHub 看是否
+  有新版,Passwall Panel 现在通过 `GetPanelUpdateInfo` adapter 顺手把这个信息
+  存进 `xui_panels.latest_xui_version` + `update_available` 两列,前端 ⋮ 按钮
+  外层用 MUI `Badge variant="dot"` 渲染红点,hover tooltip 显示"3X-UI 新版本
+  vX.Y.Z 可用（当前 vA.B.C）"。admin 一眼看到哪台 panel 该升级了,不用进
+  3X-UI 自查。
+- **Xray 升级支持指定版本（下拉选择）** ── 之前升 Xray 固定 "latest";现在
+  Servers 页 ⋮ 选"升级 Xray"弹专用 Dialog,内含版本下拉:
+  - 打开时 lazy 拉 `GET /admin/servers/:id/xray-versions` (新增 backend route,
+    封装 3X-UI 的 `/server/getXrayVersion`),列出 panel 已知的可装版本
+  - 下拉永远包含 "latest（最新版）" pseudo-option,即使版本列表 fetch 失败也能
+    照常升 latest (graceful degradation)
+  - admin 可 pin 具体 tag(`v25.10.31` 等)避免被动跟最新
+- **顶部 compat banner 按 kind 拆分** ── 原单个 banner 现在拆成两个独立段落,
+  视觉 severity 也分级:
+  - **`too_old`(red banner)**: panel 跑的 3X-UI 低于 Passwall Panel 最低要求
+    (违反 protocol floor),admin 必须升级 panel
+  - **`untested`(amber banner)**: panel 跑的 3X-UI 超出 Passwall Panel 已测试
+    范围,可能正常可能 silently 失败,建议升级 Passwall Panel 或仓库提 issue
+    报告该 3X-UI 版本待验证
+  - `unknown` 状态(从未探测 / probe 失败 transient) 仍排除在 banner 外避免噪音
+
+### Changed
+
+- **i18n 全面清理"PSP"缩写 → "Passwall Panel"全称**:11 处现有 i18n key
+  (servers / nodes 两个段落)+ 本 beta 新加 keys 一并统一。理由:对 user-facing
+  文案,缩写 admin 不一定立即识别,全称更专业 + 跟 README / docs 字面一致。
+- **中文 i18n 用全角括号 `（）`**:之前 `升级 Xray (最新)` 这种半角括号在中文
+  段落里不规范,统一改成 `升级 Xray（最新）` 系列。`{{count}}` 等 i18next 占位
+  符的 `{{}}` 不动(模板语法)。
+- **menu item 两个升级动作命名对称**:之前"升级 3X-UI 面板"+"升级 Xray（最新）"
+  不对称(panel 那条没标"最新"),实际两者底层都是升 latest(3X-UI `/updatePanel`
+  无版本参数,Xray 默认 latest)。改成两个都加"（最新）":"升级 3X-UI 面板（最新）"
+  + "升级 Xray（最新）"。
+- **升级 force-confirm 文案重写为正式版**:去掉"参见 PSP v3.5.1 修复 v3.1.0
+  兼容性事件"这种历史 reference(admin 不需要懂这段历史),改成事实导向:
+  *"即将升级到 X。当前 Passwall Panel 已验证的最高 3X-UI 版本为 Y。强制升级
+  可能因协议或字段变更导致 traffic poll、reconcile 等关键流程失败。建议先升级
+  Passwall Panel 至支持该 3X-UI 版本的发行,再升级面板。"*
+
+### Internal
+
+- **触发时机决策**: `GetPanelUpdateInfo` 在 boot probe + admin Test 两个时机
+  piggyback,**不**在 traffic loop 每 5min 跑(避免 3X-UI 内部每 5min hit
+  一次 GitHub API)。boot 给一个 baseline;admin 主动 Test 时拿"现在最新"。
+  最久数据滞后 = admin 上次打开 Servers 页之后的时间窗。
+- Schema: `xui_panels.latest_xui_version` (size:32) + `update_available` (bool)
+  两列;`UpdateLatestXUIVersion` repo 方法 column-scoped,跟 `UpdateVersion`
+  写入字段完全 disjoint,概念上两个 writer 不会互相覆盖。
+- Adapter: `XUIClient.GetXrayVersionList(ctx) []string` 新方法;
+  `serverDTO` 加 `latest_xui_version` + `update_available`。
+- Frontend: `MoreVertIcon` 用 MUI `Badge` 包裹 + Tooltip,`overlap="circular"`
+  让红点贴在 IconButton 圆形角落而不是方形外延。Upgrade Xray 改用专用 Dialog
+  组件(MUI Select 下拉,FormControl + InputLabel + MenuItem),取代之前的
+  `confirm()`。banner 拆分用 `useMemo` 各算一组 panels,渲染两个独立 Box。
+- 图标 `UpgradeIcon` → `SystemUpdateIcon` (Material `SystemUpdateAlt`),
+  方块带下箭头,跟手机系统升级图标视觉一致,比之前的 ↑ 加号样更直观。
+
+### Migration
+
+- AutoMigrate 自动加 `xui_panels.latest_xui_version` + `update_available` 两列,
+  跨方言安全(SQLite / MySQL / PostgreSQL)。
+- 首次启动后 admin 打开 Servers 页触发 testServer batch → 每个 panel 走 Test
+  handler → 顺手调 GetPanelUpdateInfo → badge 立即生效。无需手动操作。
+
 ## v3.6.0-beta.7 — 2026-05-25
 
 ### Changed (dynamic compat schema 升级到 v2 ── per-major 分文件 + 范围表达)
