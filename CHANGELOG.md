@@ -4,6 +4,64 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## v3.6.1-beta.4 — 2026-05-26
+
+第三批审计后续 —— 性能优化 4 项。所有改动都在 hot path 上,目标是把订阅
+端点 + traffic poll + reconcile 三条路径的 DB / 网络 round-trip 砍下来。
+
+### Performance
+
+- **`SettingsRepo` 加进程内缓存装饰器** ── 主推改动。`internal/service/render/render.go`
+  每次 `/sub/:token` 请求会调 `Settings.Load` **4-6 次**(region-flag /
+  profile placeholders / update-interval / buildProxies / buildProfileName /
+  traffic snapshot 各一次),每次都是 `SELECT * FROM settings` + ~40 个 KV 行
+  unmarshal。订阅端点是公网热路径(每个 proxy client 几分钟轮询一次),settings
+  表读放量曾是这条路径上最大的单项成本。
+  - 新文件 `internal/adapters/mysql/settings_cache.go`:`cachingSettingsRepo`
+    用 `sync.RWMutex` 保护一个 `*ports.UISettings` 缓存
+  - Load 走缓存命中路径:返回值的零字段用 caller-supplied defaults 兜底,
+    保留 render/mailer 那种"传 SiteTitle=... 作为 fallback"的语义
+  - Save 是 invalidate-on-write 而非 TTL:admin 在 Settings 页存了之后,
+    下一次 `/sub` 立即看到新值,**无延迟窗口**
+  - 模式跟 [router.go subPathCache](internal/transport/http/router.go) 一致
+- **`render.prefetchInbounds` 加上 panel concurrency semaphore** ── 之前每渲
+  染一次 `/sub`,一个组里覆盖 N 台 panel 就 spawn N 个 goroutine 同时打 3X-UI
+  的 `ListInbounds`,没有上限。订阅端点是公网热点,一波 polling client 同时
+  到达可以把 3X-UI 打哑。改成跟 traffic / reconcile 一样的
+  `paneltz.ResolveMaxPanelConcurrency()` (默认 8) sem
+- **`reconcile.RunOnce` 砍掉 N+1** ── 原 user loop 里:
+  - 每个 user 调 `groups.GetByID(u.GroupID)` 一次 → 单次 reconcile N 个 SELECT
+  - 每个 user 调 `ownership.ListByUser(u.ID)` **两次**(checkMissingOwnerships
+    一次 + 主 scan 一次)→ 2N 个 SELECT
+
+  现在:
+  - 进 user loop 前 `groups.List()` 一次扔进 map 复用
+  - 每页 user 进 loop 时先 `ownership.ListByUsers(userIDs)` batch 一次(同
+    traffic poll 已有的 pattern),loop 内查 map
+  - 总开销从 `3N+constant` 降到 `2+constant per page`
+- **paged list 跳过 unneeded `COUNT(*)`** ── audit / sub_log / mail_sent 三个
+  大表 list 时,前置 `COUNT(*) ... WHERE LIKE '%kw%'` 是单请求里最贵的查询
+  (LIKE 不走索引,全表扫)。新 helper `inferTotalOrCount`:
+  - admin 在 page 1 AND 返回行数 < page_size → 推断 total = len(rows),**跳过 COUNT**
+  - 其他情况(page > 1 或 page 1 满) → 走 COUNT
+  - 用 `q.Session(&gorm.Session{})` 拷贝 query 给 paginated Find,保证 Count
+    跑在 unmodified WHERE 上
+
+  实测对小数据集没什么变化(本来就快),但 30 万行 sub_logs + LIKE 关键字
+  搜索从 ~300ms 降到 ~10ms
+
+### Notes
+
+- settings cache 不带 TTL,只走 Save invalidate。理由:UISettings 这种全局
+  配置只有 admin 显式 Save 才变;TTL 会引入"admin 存了 settings 但 N 秒内
+  /sub 还在用旧值"的怪行为。Save 直接灌新值绕开这个
+- reconcile 的 `checkMissingOwnerships` 拆出 `checkMissingOwnershipsWithCtx`
+  新签名带预加载入参,老签名删掉。如有 group 不在预加载 map 里(并发删除等
+  race),依然降级到旧的 `groups.GetByID` on-demand 路径
+- inferTotalOrCount 只对真正大表生效(audit / sub_log / mail_sent),其他
+  小表(group / template / ruleset / xui_panel 等)还是 count-first,因为它们
+  count 本来就 < 1ms,优化没意义
+
 ## v3.6.1-beta.3 — 2026-05-26
 
 第二批审计后续修复 —— 行为 bug 4 项 + 安全加固 2 项。最贵的 render.Settings.Load

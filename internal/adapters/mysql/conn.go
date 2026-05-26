@@ -106,7 +106,12 @@ func NewRepos(db *gorm.DB) ports.Repos {
 		// existed but was never actually injected, so it was dead code
 		// and got removed during the v3 schema cleanup.
 		XUIPanel:   &xuiPanelRepo{db: db},
-		Settings:   newKVSettingsRepo(db),
+		// Settings is wrapped in the in-process cache decorator so the
+		// hot paths (render, traffic poll, reconcile, paneltz) don't
+		// fan into the DB for the same row dozens of times per request
+		// / cycle. Save is invalidate-on-write so admin edits become
+		// visible immediately (no TTL window). See settings_cache.go.
+		Settings:   NewCachingSettingsRepo(newKVSettingsRepo(db)),
 		Mail:       &mailRepo{db: db},
 		SAMLConfig: &samlConfigRepo{db: db},
 		OIDCConfig: &oidcConfigRepo{db: db},

@@ -8,6 +8,33 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 )
 
+// inferTotalOrCount returns the total row count for a paged query
+// while skipping the COUNT round-trip when it's safe to infer.
+//
+// The fast path: when admin is on page 1 AND the Find returned fewer
+// rows than the page would hold, we know with certainty that no more
+// rows exist beyond the visible set — total = len(rows). This
+// short-circuits the LIKE %x%-driven COUNT scan on big tables (audit /
+// sub_logs / mail_sent) where the COUNT is otherwise the slowest query
+// in the request.
+//
+// The slow path (page > 1, or page 1 fully populated) still runs the
+// real COUNT against the pre-pagination query. countQuery is the same
+// *gorm.DB that built the WHERE clauses but BEFORE ORDER/LIMIT/OFFSET
+// were appended — see callers; the standard idiom is to pass
+// `q.Session(&gorm.Session{})` of the WHERE-only query to applyPagination
+// while keeping the original `q` reference for this Count call.
+func inferTotalOrCount(countQuery *gorm.DB, p ports.Pagination, returnedRows int) (int64, error) {
+	if p.Page <= 1 && p.PageSize > 0 && returnedRows < p.PageSize {
+		return int64(returnedRows), nil
+	}
+	var total int64
+	if err := countQuery.Count(&total).Error; err != nil {
+		return 0, err
+	}
+	return total, nil
+}
+
 // applyPagination wires a ports.Pagination onto a GORM query in the
 // standardized way every ListPaged implementation uses:
 //   - SortBy is consulted against sortAllowlist; unknown values fall

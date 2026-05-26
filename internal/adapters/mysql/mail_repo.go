@@ -145,11 +145,6 @@ func (r *mailRepo) ListSent(ctx context.Context, filter ports.EmailLogFilter) ([
 		return q
 	}
 
-	var total int64
-	if err := applyFilters(r.db.WithContext(ctx).Table("mail_sent")).Count(&total).Error; err != nil {
-		return nil, 0, err
-	}
-
 	type mailSentWithUser struct {
 		ID          int64
 		UserID      int64
@@ -170,9 +165,13 @@ func (r *mailRepo) ListSent(ctx context.Context, filter ports.EmailLogFilter) ([
 	}
 	// mail_sent.id DESC breaks ties on the non-unique sent_at so pagination is
 	// stable on Postgres (mails sent in one pass share a near-identical sent_at).
-	if err := applyPagination(q, filter.Pagination, mailSentSortAllowlist, "mail_sent.sent_at").
+	if err := applyPagination(q.Session(&gorm.Session{}), filter.Pagination, mailSentSortAllowlist, "mail_sent.sent_at").
 		Order("mail_sent.id DESC").
 		Find(&rows).Error; err != nil {
+		return nil, 0, err
+	}
+	total, err := inferTotalOrCount(applyFilters(r.db.WithContext(ctx).Table("mail_sent")), filter.Pagination, len(rows))
+	if err != nil {
 		return nil, 0, err
 	}
 

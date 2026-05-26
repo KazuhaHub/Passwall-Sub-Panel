@@ -16,6 +16,7 @@ import (
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/log"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/paneltz"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/safego"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 )
@@ -329,10 +330,24 @@ func (s *Service) prefetchInboundsForRender(ctx context.Context, items []renderI
 		byInboundID map[int]*ports.Inbound
 		err         error
 	}
+	// Bound the per-render fan-out with the same semaphore size every
+	// other panel-touching loop uses (traffic.PollOnce, reconcile.RunOnce
+	// — default 8 from MaxPanelConcurrency). Pre-v3.6.1-beta.4 this
+	// loop spawned ONE goroutine per panel with no cap, so a group
+	// spanning N panels triggered N concurrent ListInbounds against
+	// 3X-UI per /sub render — and /sub is the only public endpoint, so
+	// a coordinated polling fleet could effectively DoS 3X-UI from
+	// inside PSP. With the cap the worst-case concurrent panel hits
+	// match what the background loops already established as the
+	// reasonable 3X-UI load ceiling.
+	maxConcurrency := paneltz.ResolveMaxPanelConcurrency(0)
+	sem := make(chan struct{}, maxConcurrency)
 	resultsCh := make(chan panelResult, len(panelInboundIDs))
 	for pid := range panelInboundIDs {
 		go func(p int64) {
 			defer safego.Recover("render.prefetchInbounds")
+			sem <- struct{}{}
+			defer func() { <-sem }()
 			c, err := s.pool.Get(p)
 			if err != nil {
 				resultsCh <- panelResult{panelID: p, err: err}

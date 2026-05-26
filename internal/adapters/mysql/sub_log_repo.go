@@ -74,11 +74,6 @@ func (r *subLogRepo) List(ctx context.Context, filter ports.SubLogFilter) ([]*do
 		return q
 	}
 
-	var total int64
-	if err := applyFilters(r.db.WithContext(ctx).Table("sub_logs")).Count(&total).Error; err != nil {
-		return nil, 0, err
-	}
-
 	type subLogWithUser struct {
 		ID          int64
 		UserID      int64
@@ -94,12 +89,21 @@ func (r *subLogRepo) List(ctx context.Context, filter ports.SubLogFilter) ([]*do
 	q := applyFilters(r.db.WithContext(ctx).Table("sub_logs")).
 		Select("sub_logs.*, users.upn as user_upn, users.display_name as user_display, users.group_id as user_group_id")
 
+	// Find first, then conditionally Count via inferTotalOrCount —
+	// sub_logs is the highest-write-rate table, the COUNT-on-LIKE that
+	// preceded every list was the most expensive single query in the
+	// admin panel at scale. The session clone keeps q's WHERE/JOIN
+	// reusable for Count without inheriting ORDER/LIMIT/OFFSET.
 	var rows []subLogWithUser
 	// sub_logs.id DESC breaks ties on the non-unique accessed_at so pagination
 	// is stable on Postgres (equal-timestamp rows otherwise reorder per page).
-	if err := applyPagination(q, filter.Pagination, subLogSortAllowlist, "sub_logs.accessed_at").
+	if err := applyPagination(q.Session(&gorm.Session{}), filter.Pagination, subLogSortAllowlist, "sub_logs.accessed_at").
 		Order("sub_logs.id DESC").
 		Find(&rows).Error; err != nil {
+		return nil, 0, err
+	}
+	total, err := inferTotalOrCount(applyFilters(r.db.WithContext(ctx).Table("sub_logs")), filter.Pagination, len(rows))
+	if err != nil {
 		return nil, 0, err
 	}
 

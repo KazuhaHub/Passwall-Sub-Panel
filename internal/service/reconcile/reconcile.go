@@ -161,6 +161,17 @@ func (s *Service) RunOnce(ctx context.Context, level Level) (*Report, error) {
 	// ListInbounds failed.
 	prefetchInbounds(ctx, s.pool, uniquePanels, cache, concurrency)
 
+	// Preload every group once into a map so checkMissingOwnerships
+	// can look up by ID instead of issuing one SELECT per user. Groups
+	// rarely number more than ~10 at self-host scale; the cost is
+	// trivial and replaces N round-trips with one List + map walk.
+	groupByID := map[int64]*domain.Group{}
+	if allGroups, gerr := s.groups.List(ctx); gerr == nil {
+		for _, g := range allGroups {
+			groupByID[g.ID] = g
+		}
+	}
+
 	page := 1
 	const pageSize = 100
 	for {
@@ -170,14 +181,35 @@ func (s *Service) RunOnce(ctx context.Context, level Level) (*Report, error) {
 		if err != nil {
 			return nil, err
 		}
+		// Batch ownership for the entire page in one round-trip rather
+		// than 2N SELECTs (one in checkMissingOwnerships, one in the
+		// scan loop below) — same batching shape traffic.PollOnce
+		// already uses for ownership.ListByUsers.
+		userIDs := make([]int64, 0, len(users))
+		for _, u := range users {
+			userIDs = append(userIDs, u.ID)
+		}
+		ownershipByUser, oerr := s.ownership.ListByUsers(ctx, userIDs)
+		if oerr != nil {
+			log.Warn("reconcile: batch list ownership", "err", oerr)
+			ownershipByUser = nil
+		}
 		for _, u := range users {
 			if level == LevelFull {
-				s.checkMissingOwnerships(ctx, u, report, cache, rules, allNodes)
+				s.checkMissingOwnershipsWithCtx(ctx, u, report, cache, rules, allNodes,
+					groupByID[u.GroupID], ownershipByUser[u.ID])
 			}
-			entries, err := s.ownership.ListByUser(ctx, u.ID)
-			if err != nil {
-				log.Warn("reconcile: list ownership", "user_id", u.ID, "err", err)
-				continue
+			entries, ok := ownershipByUser[u.ID]
+			if !ok {
+				// Fall back to per-user lookup if the batch returned no
+				// entry (shouldn't happen, but defensive — better to
+				// reconcile slowly than skip a user).
+				var lerr error
+				entries, lerr = s.ownership.ListByUser(ctx, u.ID)
+				if lerr != nil {
+					log.Warn("reconcile: list ownership", "user_id", u.ID, "err", lerr)
+					continue
+				}
 			}
 			for _, e := range entries {
 				report.Scanned++
@@ -229,15 +261,39 @@ func (s *Service) emailRules(ctx context.Context) domain.EmailRules {
 	return domain.EmailRules{}
 }
 
-func (s *Service) checkMissingOwnerships(ctx context.Context, u *domain.User, report *Report, cache map[inboundCacheKey]*inboundCacheEntry, rules domain.EmailRules, nodes []*domain.Node) {
+// checkMissingOwnershipsWithCtx is the batched form RunOnce now uses:
+// the caller passes the user's group (already loaded from the page-
+// level groupByID map) and ownership entries (already loaded from the
+// page-level ListByUsers batch). Kills 2 of the original N+1 round
+// trips per user — at 100 users/page, ~200 fewer SELECTs per reconcile
+// cycle.
+func (s *Service) checkMissingOwnershipsWithCtx(
+	ctx context.Context,
+	u *domain.User,
+	report *Report,
+	cache map[inboundCacheKey]*inboundCacheEntry,
+	rules domain.EmailRules,
+	nodes []*domain.Node,
+	g *domain.Group,
+	preloadedEntries []*domain.XUIClientEntry,
+) {
 	if !u.Enabled {
 		return
 	}
-	g, err := s.groups.GetByID(ctx, u.GroupID)
-	if err != nil {
-		return
+	if g == nil {
+		// Fall back to the on-demand fetch — preserves the old behavior
+		// when a group can't be found in the preloaded map (race with
+		// admin deleting the group mid-cycle, etc.).
+		var err error
+		g, err = s.groups.GetByID(ctx, u.GroupID)
+		if err != nil {
+			return
+		}
 	}
-	entries, _ := s.ownership.ListByUser(ctx, u.ID)
+	entries := preloadedEntries
+	if entries == nil {
+		entries, _ = s.ownership.ListByUser(ctx, u.ID)
+	}
 	type nodeKey struct {
 		panelID int64
 		id      int

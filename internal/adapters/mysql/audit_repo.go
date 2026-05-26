@@ -51,10 +51,6 @@ func (r *auditRepo) List(ctx context.Context, filter ports.AuditFilter) ([]*doma
 		q = q.Where("at <= ?", *filter.Until)
 	}
 
-	var total int64
-	if err := q.Count(&total).Error; err != nil {
-		return nil, 0, err
-	}
 	// `at` is non-unique (admin actions can land within the same ms on a
 	// busy panel), so applyPagination's single-column ORDER BY would let
 	// rows shift between pages on equal-key bursts. Pre-pin "at, id" as
@@ -66,8 +62,16 @@ func (r *auditRepo) List(ctx context.Context, filter ports.AuditFilter) ([]*doma
 		filter.SortDir = "desc"
 	}
 
+	// Find first, then conditionally Count. The session clone lets us
+	// reuse q's WHERE clauses for the Count without inheriting the
+	// ORDER/LIMIT/OFFSET applyPagination just appended.
+	pagedQ := applyPagination(q.Session(&gorm.Session{}), filter.Pagination, auditSortAllowlist, "at").Order("id DESC")
 	var rows []auditRow
-	if err := applyPagination(q, filter.Pagination, auditSortAllowlist, "at").Order("id DESC").Find(&rows).Error; err != nil {
+	if err := pagedQ.Find(&rows).Error; err != nil {
+		return nil, 0, err
+	}
+	total, err := inferTotalOrCount(q, filter.Pagination, len(rows))
+	if err != nil {
 		return nil, 0, err
 	}
 	out := make([]*domain.AuditEntry, len(rows))
