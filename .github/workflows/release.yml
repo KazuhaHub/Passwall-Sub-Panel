@@ -56,12 +56,12 @@ jobs:
     needs: setup
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
-          node-version: "20"
+          node-version: "24"
           cache: npm
           cache-dependency-path: web-react/package-lock.json
 
@@ -80,7 +80,7 @@ jobs:
         run: npm run build
 
       - name: Upload web bundle
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: web-dist
           path: internal/web/dist
@@ -103,16 +103,16 @@ jobs:
           - { goos: windows, goarch: arm64, ext: ".exe" }
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version: "1.26.x"
           cache-dependency-path: go.sum
 
       - name: Download web bundle
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           name: web-dist
           path: internal/web/dist
@@ -137,7 +137,7 @@ jobs:
           go build -trimpath -ldflags="${ldflags}" -o "out/psp${{ matrix.ext }}" ./cmd/panel
 
       - name: Upload binary
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: psp-${{ matrix.goos }}-${{ matrix.goarch }}
           path: out/psp${{ matrix.ext }}
@@ -150,10 +150,10 @@ jobs:
     needs: [setup, build]
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Download all binaries
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           path: artifacts
           pattern: psp-*
@@ -239,16 +239,16 @@ jobs:
     needs: [setup, build]
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Download linux/amd64 binary
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           name: psp-linux-amd64
           path: bin/linux-amd64
 
       - name: Download linux/arm64 binary
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           name: psp-linux-arm64
           path: bin/linux-arm64
