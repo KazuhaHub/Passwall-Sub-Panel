@@ -73,6 +73,28 @@ func (r *userRepo) UpdateBlockViolation(ctx context.Context, userID int64, count
 		}).Error
 }
 
+// ClearBlockViolation resets the blocked-client tracking columns when a
+// user is re-enabled. Without this, a user who was auto-disabled at the
+// SubBlockAutoDisableCount threshold (default 5) keeps their count at
+// 5 across the admin's manual re-enable — the very next /sub fetch
+// with a blocked client increments past the threshold and re-disables
+// instantly, trapping the account in an unrecoverable loop.
+// Column-scoped because pollOwnedColumns omits these from the regular
+// userRepo.Update path (to protect sub.go's concurrent increment).
+func (r *userRepo) ClearBlockViolation(ctx context.Context, userID int64) error {
+	if userID == 0 {
+		return fmt.Errorf("ClearBlockViolation requires a non-zero user ID")
+	}
+	return r.db.WithContext(ctx).
+		Model(&userRow{}).
+		Where("id = ?", userID).
+		Updates(map[string]any{
+			"block_violation_count":   0,
+			"last_block_violation_at": nil,
+			"disable_detail":          "",
+		}).Error
+}
+
 // UpdateTrafficState writes only the columns the traffic poll owns, via a
 // map so zero-values (e.g. resetting period_baseline_bytes to 0) are persisted.
 // Keeps a slow poll cycle from clobbering concurrent admin / self-service edits

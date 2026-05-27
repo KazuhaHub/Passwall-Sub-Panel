@@ -4,7 +4,30 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
-## v3.6.1-beta.9 — 2026-05-26
+## v3.6.1-beta.10 — 2026-05-27
+
+用户问 "blocked-client auto-disable 之后,admin 解封,下次违规还会被封吗"
+—— 答案是会,而且会立刻封,因为解封路径根本不清 violation 计数。bug
+存在很久了,beta.8 把 BlockViolation 列加进 pollOwnedColumns(防 admin
+Save 时回滚 sub.go 并发写)后变得更难绕过 —— 即使 SetEnabledAndSync 想
+在 domain 层手动 set 0,Update() 也 Omit 不写。
+
+### Fixed
+
+- **`SetEnabledAndSync` 解封时不清 BlockViolationCount** ── 用户被
+  `SubBlockAutoDisableCount`(默认 5)封了之后,DB 里 `block_violation_count=5`。
+  Admin 在 UI 点"启用",原代码只翻 `enabled=true` + 改 `disable_detail`,
+  计数原样保留。用户下一次再用被禁客户端拉 /sub,count++ → 6 → 立刻
+  `>= 5` 阈值 → 再次 auto-disable。账户被困死,admin 没办法不打开数据库
+  就让他逃出循环。
+  修法:加 `UserRepo.ClearBlockViolation(userID)` 窄列写
+  (count=0, last_block_violation_at=NULL, disable_detail=""),
+  `SetEnabledAndSync` 在 `enabled=true` 分支调一次。必须走窄列写因为
+  beta.8 起 pollOwnedColumns 把这三列从 `Update()` 的 Save 里 Omit 了
+  (防 admin Save 跟 sub.go 并发增计数撞车)。失败只 log 不挡解封 ——
+  解封比计数 reset 更重要。
+
+
 
 beta.8 发出去之后两条用户反馈:① "click Users 还是弹 Network error
 toast"(DevTools 显示挂的是 `/api/admin/users` 主请求本身);

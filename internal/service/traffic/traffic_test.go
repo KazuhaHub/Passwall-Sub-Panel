@@ -41,6 +41,15 @@ func (r *fakeUserRepo) UpdateBlockViolation(ctx context.Context, userID int64, c
 	return nil
 }
 
+func (r *fakeUserRepo) ClearBlockViolation(ctx context.Context, userID int64) error {
+	if cur, ok := r.users[userID]; ok {
+		cur.BlockViolationCount = 0
+		cur.LastBlockViolationAt = nil
+		cur.DisableDetail = ""
+	}
+	return nil
+}
+
 func (r *fakeUserRepo) UpdateTrafficState(ctx context.Context, u *domain.User) error {
 	cur, ok := r.users[u.ID]
 	if !ok {

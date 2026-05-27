@@ -1418,6 +1418,21 @@ func (s *Service) SetEnabledAndSync(ctx context.Context, userID int64, enabled b
 	if err := s.users.Update(ctx, u); err != nil {
 		return err
 	}
+	// On re-enable, clear the blocked-client tracking columns. Without
+	// this, a user who was auto-disabled at SubBlockAutoDisableCount
+	// (say, 5 violations) keeps block_violation_count=5 across the
+	// admin's manual re-enable, and the very next /sub fetch with a
+	// blocked client increments past the threshold and re-disables
+	// instantly — admin has no way to break the loop without an SQL
+	// edit. Column-scoped write because pollOwnedColumns omits these
+	// columns from the regular Update path above. Best-effort: log
+	// instead of failing the whole re-enable.
+	if enabled {
+		if err := s.users.ClearBlockViolation(ctx, userID); err != nil {
+			log.Warn("SetEnabledAndSync: ClearBlockViolation failed; user re-enabled but violation counter not reset",
+				"user_id", userID, "err", err)
+		}
+	}
 	if err := s.pushClientConfigToAll(ctx, u); err != nil {
 		if taskErr := s.enqueueUserTask(ctx, domain.SyncTaskUserPushConfig, userID, fmt.Sprintf("sync enabled/expiry config for user %s", u.UPN)); taskErr != nil {
 			log.Warn("enqueue user config push failed", "user_id", userID, "err", taskErr)

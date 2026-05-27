@@ -105,6 +105,12 @@ type UserRepo interface {
 	// UpdateTrafficState / UpdateHealth: narrow the touched columns so
 	// concurrent admin edits aren't clobbered and writes stay cheap.
 	UpdateBlockViolation(ctx context.Context, userID int64, count int, lastAt time.Time, detail string) error
+	// ClearBlockViolation resets the blocked-client tracking columns
+	// (count, last-at, disable-detail) — called when admin re-enables
+	// a user, to prevent the auto-disable threshold from re-triggering
+	// instantly on the next /sub fetch (the count would otherwise still
+	// be at the threshold value when re-enabled).
+	ClearBlockViolation(ctx context.Context, userID int64) error
 	// BatchUpdateTrafficState runs N UpdateTrafficState writes in one
 	// transaction. The traffic poll calls it ONCE at end-of-cycle instead
 	// of issuing N inline UPDATEs while it walks the user list. On SQLite
