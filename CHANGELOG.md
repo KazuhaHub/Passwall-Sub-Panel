@@ -4,13 +4,11 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
-## v3.6.1-beta.8 — 2026-05-26
+## v3.6.1-beta.9 — 2026-05-26
 
-beta.7 之后再做一轮 2-agent 回归审计,找出 1 个 HIGH + 2 个 MED + 几个
-LOW。HIGH 是 beta.6 引入的真 bug。期间用户反馈 "click Users 还是弹
-Network error toast",定位到 `client.ts` 的 axios 拦截器把
-`AbortController` cancel 误判成网络错误 —— 这是个一直存在的 bug,被
-beta.5 加进 usePaged 的 AbortController 触发。
+beta.8 发出去之后两条用户反馈:① "click Users 还是弹 Network error
+toast"(DevTools 显示挂的是 `/api/admin/users` 主请求本身);
+② console 里 Cloudflare beacon 被 panel CSP 拦了。
 
 ### Fixed (root cause of user-reported toast)
 
@@ -25,8 +23,24 @@ beta.5 加进 usePaged 的 AbortController 触发。
   加 `if (axios.isCancel(err) || err.code === 'ERR_CANCELED') return
   Promise.reject(err)`,跳过 toast。Cancel 是客户端主动信号,不该弹
   错。这就是用户反馈 "Users 页面列表加载正常但底部弹 Network error"
-  的真正根因 —— topTraffic silent 修复治标(挡住一个特定来源),这个
-  isCancel 修复治本(挡住所有 cancel 路径)。
+  的真正根因 —— beta.8 的 topTraffic silent 修复治标(挡住一个特定
+  来源),这个 isCancel 治本(挡住所有 cancel 路径)。
+
+### Changed
+
+- **CSP 默认放行 Cloudflare Web Analytics beacon** ── CF 前置的部署里
+  Web Analytics 会注入 `<script src=".../beacon.min.js">`
+  + POST 到 `cloudflareinsights.com/cdn-cgi/rum`,被原 `script-src 'self'`
+  + `connect-src 'self'` 全拦了。两个域名都是 Cloudflare 自家的(信任
+  增量等于"用 Cloudflare 前置"本身),`script-src` 加
+  `https://static.cloudflareinsights.com`,`connect-src` 加
+  `https://cloudflareinsights.com`。非 CF 部署不受影响。
+
+## v3.6.1-beta.8 — 2026-05-26
+
+beta.7 之后再做一轮 2-agent 回归审计,找出 1 个 HIGH + 2 个 MED + 几个
+LOW。HIGH 是 beta.6 引入的真 bug,MED 中有一个直接对应到用户实际反馈
+的 "click Users 报 Network error" toast。
 
 ### Fixed (real bugs)
 

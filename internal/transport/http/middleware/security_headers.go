@@ -13,20 +13,31 @@ import "github.com/gin-gonic/gin"
 //     uses inline styles for MUI's emotion runtime so 'unsafe-inline'
 //     is allowed for style-src only. Images: self + data: + blob: + any
 //     https: origin — the last one so admin-configured quick-link icons can
-//     point at an external favicon/image URL. (script-src stays 'self', so
-//     this only widens where <img> may load from, not code execution.)
+//     point at an external favicon/image URL. (script-src is 'self' plus
+//     the Cloudflare Web Analytics beacon — see below — so this only widens
+//     where <img> may load from, not code execution beyond that.)
 //     No script 'unsafe-inline' / 'unsafe-eval': React's bundled JS does
 //     not need them.
+//
+// Cloudflare allow-list: deployments behind Cloudflare typically have Web
+// Analytics enabled, which injects a beacon `<script src=".../beacon.min.js">`
+// from `static.cloudflareinsights.com` and POSTs aggregates back to
+// `cloudflareinsights.com/cdn-cgi/rum`. Both domains are Cloudflare-
+// owned so the trust delta is the same as fronting the site with
+// Cloudflare in the first place. Allowed by default so admins behind
+// CF don't need to either edit this file or disable CF Web Analytics —
+// either of which surprised the wrong people. Self-hosted (non-CF)
+// deployments get no observable effect from the extra allow-list entries.
 //
 // HSTS is harmless on HTTP-only deployments (browsers ignore it without
 // TLS) and protects HTTPS deployments behind a reverse proxy.
 func SecurityHeaders() gin.HandlerFunc {
 	const csp = "default-src 'self'; " +
-		"script-src 'self'; " +
+		"script-src 'self' https://static.cloudflareinsights.com; " +
 		"style-src 'self' 'unsafe-inline'; " +
 		"img-src 'self' data: blob: https:; " +
 		"font-src 'self' data:; " +
-		"connect-src 'self'; " +
+		"connect-src 'self' https://cloudflareinsights.com; " +
 		"frame-ancestors 'none'; " +
 		"base-uri 'self'; " +
 		"form-action 'self'"
