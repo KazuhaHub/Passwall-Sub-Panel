@@ -7,8 +7,26 @@ small improvement).
 ## v3.6.1-beta.8 — 2026-05-26
 
 beta.7 之后再做一轮 2-agent 回归审计,找出 1 个 HIGH + 2 个 MED + 几个
-LOW。HIGH 是 beta.6 引入的真 bug,MED 中有一个直接对应到用户实际反馈
-的 "click Users 报 Network error" toast。
+LOW。HIGH 是 beta.6 引入的真 bug。期间用户反馈 "click Users 还是弹
+Network error toast",定位到 `client.ts` 的 axios 拦截器把
+`AbortController` cancel 误判成网络错误 —— 这是个一直存在的 bug,被
+beta.5 加进 usePaged 的 AbortController 触发。
+
+### Fixed (root cause of user-reported toast)
+
+- **axios 拦截器把 `AbortController` cancel 误判成 "Network error"** ──
+  [client.ts:94-101](web-react/src/api/client.ts#L94-L101) 的 `categoriseError`
+  只检查 `ECONNABORTED`(timeout)和 `!err.response`(network),但
+  AbortController 抛的错误是 `err.code === 'ERR_CANCELED'` 且
+  `err.response === undefined` —— 直接掉进 "network" 分支弹 toast。
+  `usePaged` 的 effect cleanup `return () => ac.abort()` 在 deps 变化 /
+  组件 unmount / StrictMode 双 mount 时都会 abort 老请求,这些 cancel
+  全部错误地变成"网络异常"toast。修法:在 response error 拦截器最前面
+  加 `if (axios.isCancel(err) || err.code === 'ERR_CANCELED') return
+  Promise.reject(err)`,跳过 toast。Cancel 是客户端主动信号,不该弹
+  错。这就是用户反馈 "Users 页面列表加载正常但底部弹 Network error"
+  的真正根因 —— topTraffic silent 修复治标(挡住一个特定来源),这个
+  isCancel 修复治本(挡住所有 cancel 路径)。
 
 ### Fixed (real bugs)
 

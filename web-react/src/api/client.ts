@@ -146,6 +146,21 @@ client.interceptors.response.use(
     return res
   },
   async (err: AxiosError<{ error?: string }>) => {
+    // --- request was cancelled (AbortController). Do NOT surface a
+    // toast — cancellation is an intentional client-side signal (route
+    // change, dep change in usePaged, component unmount), not an
+    // error condition. Pre-fix categoriseError treated it as "no
+    // response → network error", so every usePaged dep-change /
+    // navigation away mid-fetch fired a spurious "Network error"
+    // toast even though the next request landed fine. This is the
+    // root cause of the user-reported "click Users → Network error
+    // toast even though the list loaded" symptom — when the URL→state
+    // sync briefly re-runs the fetch effect (or React StrictMode
+    // double-mounts in dev), the first fetch is cancelled and its
+    // CanceledError propagates here.
+    if (axios.isCancel(err) || err.code === 'ERR_CANCELED') {
+      return Promise.reject(err)
+    }
     const cfg = err.config as InternalAxiosRequestConfig | undefined
     // --- 401 with a not-yet-retried request → attempt silent refresh.
     if (err.response?.status === 401 && cfg && !cfg._skipRefresh && !cfg._retried) {
