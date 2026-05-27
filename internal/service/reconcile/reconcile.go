@@ -190,26 +190,37 @@ func (s *Service) RunOnce(ctx context.Context, level Level) (*Report, error) {
 			userIDs = append(userIDs, u.ID)
 		}
 		ownershipByUser, oerr := s.ownership.ListByUsers(ctx, userIDs)
-		if oerr != nil {
+		// batchOK separates "batch errored, must fall back per-user"
+		// from "batch succeeded, this user simply has no rows". The
+		// latter is a legitimate state (new account with no
+		// memberships yet); without this distinction every such user
+		// triggered a wasted per-user ListByUser SELECT every cycle,
+		// partially defeating the N+1 fix the batch was supposed to
+		// land.
+		batchOK := oerr == nil
+		if !batchOK {
 			log.Warn("reconcile: batch list ownership", "err", oerr)
 			ownershipByUser = nil
 		}
 		for _, u := range users {
-			if level == LevelFull {
-				s.checkMissingOwnershipsWithCtx(ctx, u, report, cache, rules, allNodes,
-					groupByID[u.GroupID], ownershipByUser[u.ID])
-			}
-			entries, ok := ownershipByUser[u.ID]
-			if !ok {
-				// Fall back to per-user lookup if the batch returned no
-				// entry (shouldn't happen, but defensive — better to
-				// reconcile slowly than skip a user).
+			entries, present := ownershipByUser[u.ID]
+			if !present && !batchOK {
+				// Batch failed for the whole page — fall back to the
+				// per-user SELECT so this user still gets scanned.
 				var lerr error
 				entries, lerr = s.ownership.ListByUser(ctx, u.ID)
 				if lerr != nil {
 					log.Warn("reconcile: list ownership", "user_id", u.ID, "err", lerr)
 					continue
 				}
+			}
+			// entries may legitimately be nil (zero ownership rows for
+			// this user) — that's fine; checkMissingOwnerships needs
+			// the nil to add the missing rows below, and the scan loop
+			// just does nothing for a user with no rows.
+			if level == LevelFull {
+				s.checkMissingOwnershipsWithCtx(ctx, u, report, cache, rules, allNodes,
+					groupByID[u.GroupID], entries, batchOK)
 			}
 			for _, e := range entries {
 				report.Scanned++
@@ -267,6 +278,13 @@ func (s *Service) emailRules(ctx context.Context) domain.EmailRules {
 // page-level ListByUsers batch). Kills 2 of the original N+1 round
 // trips per user — at 100 users/page, ~200 fewer SELECTs per reconcile
 // cycle.
+//
+// batchOK communicates whether `preloadedEntries` came from a
+// successful batch load (true → trust nil-or-empty as "user truly has
+// no rows") or a failed batch (false → preloadedEntries is nil for
+// every user, so fall back to on-demand ListByUser). Without this
+// distinction every zero-ownership user used to trigger a wasted
+// SELECT per cycle.
 func (s *Service) checkMissingOwnershipsWithCtx(
 	ctx context.Context,
 	u *domain.User,
@@ -276,6 +294,7 @@ func (s *Service) checkMissingOwnershipsWithCtx(
 	nodes []*domain.Node,
 	g *domain.Group,
 	preloadedEntries []*domain.XUIClientEntry,
+	batchOK bool,
 ) {
 	if !u.Enabled {
 		return
@@ -291,7 +310,10 @@ func (s *Service) checkMissingOwnershipsWithCtx(
 		}
 	}
 	entries := preloadedEntries
-	if entries == nil {
+	if entries == nil && !batchOK {
+		// Batch failed for this page; recover per-user. When batch
+		// succeeded a nil/empty preloadedEntries means "this user
+		// genuinely has zero rows" — no SELECT needed.
 		entries, _ = s.ownership.ListByUser(ctx, u.ID)
 	}
 	type nodeKey struct {

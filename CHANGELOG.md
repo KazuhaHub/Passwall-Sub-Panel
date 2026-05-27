@@ -4,6 +4,68 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## v3.6.1-beta.5 — 2026-05-26
+
+beta.1-4 改动后的回归 audit 找到 8 项 —— 真 bug 4、行为不一致 4。全部一起修。
+
+### Fixed (real bugs)
+
+- **UsersView 切组下拉不刷新列表** ── beta.1 把 UsersView 接到 `usePaged`,
+  fetcher 用 `useCallback([groupFilter])` 在 closure 里捕获 groupFilter,但
+  `usePaged` 把 fetcher 存 ref 里、effect deps 只盯
+  page/pageSize/keyword/sort —— 切换组下拉时 closure 更新了但不触发 refetch,
+  admin 看到的是上一组的用户列表。加 `useEffect([groupFilter])` 调
+  `paged.refresh()`。
+- **Settings cache Save 并发可能让 cache 跟 DB 不同步** ── beta.4 装饰器在
+  `inner.Save` 之后用 `mu.Lock` 写 cache,两步不原子:Save(A) + Save(B) 同时跑,
+  DB 落在 (A,B) 顺序、cache 落在 (B,A) 顺序时 → DB=vB / cache=vA 一直撑到下次
+  Save。改成 invalidate-on-success(`cached=nil`)而非 overwrite —— 下一次
+  Load 强制走 inner 重读 DB,逻辑上保证 cache 永远是 DB truth 的子集或为空,
+  不可能保留 stale 数据。代价是每次 Save 后多一次 inner.Load(rare event,影响
+  可忽略)。
+- **TemplatesView 全选抹掉所有 page 的选择** ── beta.1 的 toggleAll
+  `setSelected(checked ? new Set(selectableSlugs) : new Set())` 直接替换整个
+  Set,跟 ServersView / RuleSetsView / GroupsView 的 per-page 模型不一致。改成
+  union/delete 当前页 IDs 的写法,跨页选择保持。
+- **trusted_proxies 文档反向引导** ── beta.2 把默认从"信任所有"改成
+  loopback-only,但 [internal/config/config.go](internal/config/config.go) 和
+  [config/config.yaml.example](config/config.yaml.example) 的注释还写着
+  *"Default (unset): zero-config — trust all upstreams"*。Cloudflare / nginx
+  后面的部署者照着 example 留空,真实 client IP 会全部退化成 proxy host。两个
+  文件的注释全部重写,加上 `all` / `*` / `none` / cidr list 四个 token 的说明
+  + boot WARN 提示。
+
+### Fixed (behavior consistency)
+
+- **GroupsView header checkbox 跨页操作** ── beta.1 把 `selectableIds` /
+  `allChecked` / `toggleAll` 接到 `filteredItems`(全 filtered 集合)而非
+  `pagedItems`(当前页),admin 在 page 1 点"全选"会静默勾上其他 page 上的
+  行(屏幕外看不到)。改 `selectableIds = pagedItems.filter(...)`,行为跟其他
+  view 的 per-page 一致。
+- **usePaged 浏览器 Back/Forward URL 不更新 state** ── 原 hook 只在 mount 时
+  读一次 URL params,后续 history navigation 改了地址栏但 state 不跟,UI 显
+  示和 URL 不一致(`?q=tw` 但表里没过滤)。新加反向 `useEffect([params])`
+  把 URL → state 推回去,React 的 same-value setState bail-out 保证不会跟现
+  有的 state → URL effect 形成循环。
+- **render.prefetchInbounds 没读 admin 的 MaxPanelConcurrency** ── beta.4 加
+  semaphore 时硬编码 `paneltz.ResolveMaxPanelConcurrency(0)`,忽略 admin 在
+  Settings 里配的值 —— 跟 traffic.PollOnce / reconcile.RunOnce 不一致。借助
+  beta.4 的 settings cache(读已经免费了),Load 一次取 `cfg.MaxPanelConcurrency`
+  喂进去。
+- **reconcile fallback 区分 batch-error vs empty-rows** ── beta.4 把
+  `ownership.ListByUsers` batch 加进 RunOnce,但 fallback 条件用
+  `entries, ok := ownershipByUser[u.ID]; if !ok { ... ListByUser }`,把"用户
+  本来就没 ownership 行"也当成 batch miss → 每个零行用户每 cycle 一次额外
+  SELECT,部分抵消了 N+1 修复的收益。引入 `batchOK bool`,只在 batch 失败
+  时 fallback;成功 + 用户无行的正常状态直接跳过。
+
+### Test fix
+
+- `render_test.go`'s nil-Settings fixture would panic on the new
+  `s.repos.Settings.Load(...)`. Nil-guard added in
+  `prefetchInboundsForRender` (settings.Load failures already gracefully
+  degrade to the default concurrency cap; nil repo behaves the same).
+
 ## v3.6.1-beta.4 — 2026-05-26
 
 第三批审计后续 —— 性能优化 4 项。所有改动都在 hot path 上,目标是把订阅

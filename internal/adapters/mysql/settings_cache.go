@@ -93,14 +93,17 @@ func (r *cachingSettingsRepo) Save(ctx context.Context, s ports.UISettings) erro
 		// fall back to whatever the DB actually holds.
 		return err
 	}
-	// Refresh from the just-saved value. The Save path doesn't return a
-	// "what was persisted" struct, but our contract is that Save writes
-	// every field; the in-memory value is therefore an accurate post-
-	// save snapshot. Admin edits become visible to /sub on the next
-	// Load without waiting for a TTL window.
+	// Invalidate rather than overwrite. Pre-v3.6.1-beta.5 we wrote `s`
+	// into the cache directly, but `inner.Save` and the cache write are
+	// two unsynchronized steps: concurrent Save(A) + Save(B) could land
+	// at the DB in (A, B) order but at the cache in (B, A) order,
+	// leaving DB=vB / cache=vA persistently. Setting cached=nil forces
+	// the next Load to round-trip the DB and re-populate from truth.
+	// Admin edits remain visible immediately (same TTL=0 semantic) —
+	// the cost is one extra Load per Save, which is fine because Save
+	// is rare and Load is the path we want fast.
 	r.mu.Lock()
-	cp := s
-	r.cached = &cp
+	r.cached = nil
 	r.mu.Unlock()
 	return nil
 }

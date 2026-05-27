@@ -331,16 +331,23 @@ func (s *Service) prefetchInboundsForRender(ctx context.Context, items []renderI
 		err         error
 	}
 	// Bound the per-render fan-out with the same semaphore size every
-	// other panel-touching loop uses (traffic.PollOnce, reconcile.RunOnce
-	// — default 8 from MaxPanelConcurrency). Pre-v3.6.1-beta.4 this
-	// loop spawned ONE goroutine per panel with no cap, so a group
-	// spanning N panels triggered N concurrent ListInbounds against
-	// 3X-UI per /sub render — and /sub is the only public endpoint, so
-	// a coordinated polling fleet could effectively DoS 3X-UI from
-	// inside PSP. With the cap the worst-case concurrent panel hits
-	// match what the background loops already established as the
-	// reasonable 3X-UI load ceiling.
-	maxConcurrency := paneltz.ResolveMaxPanelConcurrency(0)
+	// other panel-touching loop uses. Reads the admin-configured
+	// MaxPanelConcurrency through the (now cached) settings repo so
+	// raising the knob in Settings affects render the same way it
+	// affects traffic.PollOnce / reconcile.RunOnce. Falls back to the
+	// builtin default (8) if settings.Load fails — never panic on a
+	// transient DB hiccup, just degrade to the safe ceiling. /sub is
+	// the only public endpoint, so a coordinated polling fleet could
+	// otherwise pile up N concurrent ListInbounds against 3X-UI per
+	// render; the cap matches the background loops' established load
+	// ceiling.
+	configuredConcurrency := 0
+	if s.repos.Settings != nil {
+		if cfg, err := s.repos.Settings.Load(ctx, ports.UISettings{}); err == nil {
+			configuredConcurrency = cfg.MaxPanelConcurrency
+		}
+	}
+	maxConcurrency := paneltz.ResolveMaxPanelConcurrency(configuredConcurrency)
 	sem := make(chan struct{}, maxConcurrency)
 	resultsCh := make(chan panelResult, len(panelInboundIDs))
 	for pid := range panelInboundIDs {

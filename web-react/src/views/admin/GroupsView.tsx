@@ -233,9 +233,11 @@ export default function GroupsView() {
   )
 
   // Only groups with zero members are eligible for selection (delete needs
-  // empty group). Scoped to the visible (filtered) rows so the header
-  // checkbox reflects what's on screen.
-  const selectableIds = filteredItems.filter(g => g.members === 0).map(g => g.id)
+  // empty group). Scoped to the CURRENTLY VISIBLE page (pagedItems) so the
+  // header checkbox + toggleAll act on rows admin can actually see. Pre-
+  // beta.5 this used filteredItems (the full filtered set), which meant
+  // header "select all" silently flipped rows on hidden pages.
+  const selectableIds = pagedItems.filter(g => g.members === 0).map(g => g.id)
   const selectedCount = selected.size
   const allChecked = selectableIds.length > 0 && selectableIds.every(id => selected.has(id))
   const someChecked = selectableIds.some(id => selected.has(id)) && !allChecked

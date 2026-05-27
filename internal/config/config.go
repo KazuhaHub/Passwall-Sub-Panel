@@ -62,8 +62,19 @@ type Config struct {
 type HTTPConfig struct {
 	// TrustedProxies controls which upstream IPs Gin will believe when
 	// computing ClientIP. Comma-separated CIDRs or IPs. Special tokens:
-	//   ""      → defaults to "0.0.0.0/0,::/0" (trust everything; zero-config)
-	//   "none"  → trust nothing, always use the raw TCP peer
+	//   ""        → loopback only (127.0.0.1/32, ::1/128). Safe default
+	//               for a direct listen. Behind a reverse proxy / CDN
+	//               every request looks like the proxy's IP — fix by
+	//               setting one of the explicit values below.
+	//   "all"/"*" → trust every source (pre-v3.6.1-beta.2 default).
+	//               Use ONLY when the listen port can't be reached
+	//               from outside (Docker network, UNIX socket, etc.).
+	//               Boot logs WARN when this mode is active.
+	//   "none"    → disable the trust list entirely; ClientIP returns
+	//               the raw TCP peer.
+	//   "<cidr>[,<cidr>]" → trust only the listed networks. Recommended
+	//                       for production behind Cloudflare / nginx /
+	//                       Caddy — name the proxy's IP ranges.
 	TrustedProxies string `yaml:"trusted_proxies"`
 }
 
@@ -214,20 +225,30 @@ jwt_secret: "%s"
 encryption_key: "%s"
 
 # ---- Reverse proxy / real client IP ----
-# Default (unset): zero-config — trust all upstreams and read the real client
-# IP from CF-Connecting-IP / X-Real-IP / X-Forwarded-For (in that order).
-# Works out-of-the-box behind nginx / caddy / traefik / Cloudflare.
+# Default (unset): loopback only (127.0.0.1/32, ::1/128). Safe default
+# for a direct listen — proxy headers (CF-Connecting-IP /
+# X-Forwarded-For etc.) are accepted only from loopback. Behind a real
+# proxy this means every client looks like the proxy's IP; fix by
+# setting one of the values below.
 #
-# RECOMMENDED for any real deployment: set this to your reverse proxy's IP.
-# Gin then verifies the TCP peer IS that proxy before trusting X-Forwarded-For,
-# so a direct attacker can't forge XFF to spoof their IP and bypass the per-IP
-# rate limiter (/login, /sub) or poison audit / subscription log IPs. Leaving
-# it unset is only safe if the listen port is unreachable except via the proxy.
+# Tokens:
+#   trusted_proxies: "127.0.0.1,::1"      # your reverse proxy (same host)
+#   trusted_proxies: "10.0.0.0/8"         # the proxy's subnet / CDN range
+#   trusted_proxies: "173.245.48.0/20,..." # Cloudflare-style explicit list
+#   trusted_proxies: "all"                # trust every source — ONLY when the
+#                                         # listen port is unreachable from
+#                                         # outside (Docker network, UNIX
+#                                         # socket). Boot logs WARN in this mode.
+#   trusted_proxies: "none"               # disable trust list entirely; the
+#                                         # raw TCP peer is the client IP.
+#
+# Gin verifies the TCP peer IS in the trust list before believing
+# X-Forwarded-For etc., so a direct attacker can't forge XFF to spoof
+# their IP and bypass the per-IP rate limiter (/login, /sub) or poison
+# audit / subscription log IPs.
 #
 # http:
-#   trusted_proxies: "127.0.0.1,::1"     # your reverse proxy (same host)
-#   # trusted_proxies: "10.0.0.0/8"      # or the proxy's subnet / CDN range
-#   # trusted_proxies: "none"            # no proxy at all: use raw TCP peer
+#   trusted_proxies: "127.0.0.1,::1"
 #
 # Env override: PSP_TRUSTED_PROXIES.
 

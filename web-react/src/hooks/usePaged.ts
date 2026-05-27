@@ -153,6 +153,30 @@ export function usePaged<T>(
     }, { replace: true })
   }, [page, keyword, sortBy, sortDir, keyOf, setParams])
 
+  // Reverse URL → state sync. Pre-v3.6.1-beta.5 the hook only read
+  // URL params at mount, so the browser Back / Forward button moved
+  // the address bar without updating the table state (admin sees a
+  // ?q=tw URL but no keyword filter applied). This effect listens
+  // for URL changes (whether from history navigation or another tab-
+  // local component editing search params) and pulls them back into
+  // state. setState bails out when the value is unchanged, so the
+  // outgoing URL-sync effect above won't loop with this one.
+  useEffect(() => {
+    const urlPage = Math.max(1, parseInt(params.get(keyOf('page')) || '1', 10) || 1)
+    const urlKeyword = params.get(keyOf('q')) || ''
+    const sortRawNow = params.get(keyOf('sort')) || ''
+    const sortPartsNow = sortRawNow.split('-')
+    const urlSortBy = sortRawNow ? sortPartsNow[0] : (opts.defaultSortBy ?? '')
+    const urlSortDir: 'asc' | 'desc' = sortRawNow
+      ? (sortPartsNow[1] === 'asc' ? 'asc' : 'desc')
+      : (opts.defaultSortDir ?? 'desc')
+    setPageState(urlPage)
+    setKeywordState(urlKeyword)
+    setSortBy(urlSortBy)
+    setSortDir(urlSortDir)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [params, keyOf])
+
   // Fetch on any dep change. AbortController cancels in-flight requests
   // so a slow earlier response can't clobber a fast later one.
   const fetcherRef = useRef(fetcher)

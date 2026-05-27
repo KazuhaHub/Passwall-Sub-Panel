@@ -251,6 +251,15 @@ export default function UsersView() {
   )
   const paged = usePaged<User>(fetchUsers, { defaultSortBy: 'id', defaultSortDir: 'desc' })
   const { items, total, loading, page, pageSize, sortBy, sortDir, setPage, setPageSize, setKeyword, setSort, refresh } = paged
+  // groupFilter is captured by fetchUsers' useCallback closure but the
+  // hook's fetch effect deps are page/pageSize/keyword/sort — NOT the
+  // fetcher itself (which lives in a ref). Without this effect, picking
+  // a different group from the dropdown silently leaves the table
+  // showing the previous group's users. paged.refresh() reuses the same
+  // pagination state but re-invokes the fetcher.
+  useEffect(() => { refresh()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [groupFilter])
 
   const [selected, setSelected] = useState<Set<number>>(new Set())
   const [batchBusy, setBatchBusy] = useState<BatchKind>('')

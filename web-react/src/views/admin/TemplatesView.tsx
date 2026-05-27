@@ -144,7 +144,16 @@ export default function TemplatesView() {
   }
 
   function toggleAll(checked: boolean) {
-    setSelected(checked ? new Set(selectableSlugs) : new Set())
+    // Per-page semantics matching ServersView / RuleSetsView /
+    // GroupsView: only flip the currently visible page's selectable
+    // rows. Pre-v3.6.1-beta.5 the box wiped or replaced the entire
+    // cross-page selection, which surprised admins who had checked
+    // rows on a different page.
+    setSelected(prev => {
+      const next = new Set(prev)
+      selectableSlugs.forEach(s => { if (checked) next.add(s); else next.delete(s) })
+      return next
+    })
   }
   function toggleOne(slug: string, checked: boolean) {
     setSelected(prev => {
