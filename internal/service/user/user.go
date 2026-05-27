@@ -1545,6 +1545,19 @@ func (s *Service) pushClientConfigToAll(ctx context.Context, u *domain.User) err
 			// semantics as the old isInboundNotFoundErr branch: the
 			// inbound was deleted on the 3X-UI side; the ownership
 			// row is stale and should be dropped.
+			//
+			// Defensive guard: if the panel returned ZERO inbounds
+			// total (rare but seen during 3X-UI restarts / momentary
+			// state corruption), treat it as a soft "skip this cycle"
+			// instead of mass-deleting every ownership row on the
+			// panel. The next reconcile cycle can confirm + clean up
+			// for real if the inbounds really are gone.
+			if len(pd.byInbound) == 0 {
+				log.Warn("user.pushClientConfigToAll: panel returned empty inbound list; skipping ownership without deletion",
+					"panel_id", e.PanelID, "inbound_id", e.InboundID, "email", e.ClientEmail)
+				outcomes <- pushOutcome{entry: e}
+				continue
+			}
 			outcomes <- pushOutcome{entry: e, staleInbound: true}
 			continue
 		}

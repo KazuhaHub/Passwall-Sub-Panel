@@ -4,7 +4,10 @@ export interface DashboardExpiringRow {
   id: number
   upn: string
   display_name?: string
-  expire_at?: string
+  // Always present — backend filters out users with nil ExpireAt
+  // before appending to this list. Declared non-optional so the
+  // DashboardView call sites don't need non-null assertions.
+  expire_at: string
 }
 
 export interface DashboardNodeAlert {

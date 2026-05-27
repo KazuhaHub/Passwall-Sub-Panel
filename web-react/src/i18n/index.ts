@@ -121,13 +121,27 @@ export const i18nReady = (async () => {
   return i18n
 })()
 
-export async function setLanguage(lang: AppLanguage) {
+export async function setLanguage(lang: AppLanguage): Promise<void> {
   // Lazy-load on first switch — subsequent toggles hit i18next's in-memory
   // cache (hasResourceBundle) so they're free.
+  //
+  // The Promise.all over per-namespace dynamic imports CAN reject (stale
+  // build chunks after a deploy + an open tab clicks language switch =
+  // 404 on a missing chunk). Callers (UserLayout / AdminLayout /
+  // LoginView*) fire-and-forget; without this try/catch the rejection
+  // surfaces as an unhandled promise + the UI silently stays on the
+  // old language. Log it and leave changeLanguage uncalled so i18next's
+  // resolvedLanguage stays consistent with what t() actually returns.
   if (!i18n.hasResourceBundle(lang, 'common')) {
-    const resources = await loadLanguageResources(lang)
-    for (const [ns, bundle] of Object.entries(resources)) {
-      i18n.addResourceBundle(lang, ns, bundle, true, true)
+    try {
+      const resources = await loadLanguageResources(lang)
+      for (const [ns, bundle] of Object.entries(resources)) {
+        i18n.addResourceBundle(lang, ns, bundle, true, true)
+      }
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn('setLanguage: failed to load resources for', lang, err)
+      return
     }
   }
   await i18n.changeLanguage(lang)

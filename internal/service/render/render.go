@@ -390,14 +390,28 @@ func (s *Service) prefetchInboundsForRender(ctx context.Context, items []renderI
 	}
 
 	byPanel := make(map[int64]map[int]*ports.Inbound, len(panelInboundIDs))
+recv:
 	for i := 0; i < len(panelInboundIDs); i++ {
-		r := <-resultsCh
-		if r.err != nil {
-			log.Warn("render: panel inbound prefetch failed",
-				"panel_id", r.panelID, "err", r.err)
-			continue
+		// Select on ctx.Done so a shutdown during a slow ListInbounds
+		// (dead 3X-UI panel, 30s HTTP timeout) doesn't block the
+		// receiver indefinitely. Goroutines already in flight will
+		// finish on their own; abandoning their late results is
+		// acceptable — partial byPanel flows into the flatten step
+		// below, missing panels fall through as "skip + warn", same
+		// path as a real prefetch error.
+		select {
+		case <-ctx.Done():
+			log.Warn("render: prefetch cancelled, returning partial inbound map",
+				"received", i, "expected", len(panelInboundIDs), "err", ctx.Err())
+			break recv
+		case r := <-resultsCh:
+			if r.err != nil {
+				log.Warn("render: panel inbound prefetch failed",
+					"panel_id", r.panelID, "err", r.err)
+				continue
+			}
+			byPanel[r.panelID] = r.byInboundID
 		}
-		byPanel[r.panelID] = r.byInboundID
 	}
 
 	out := make(map[int64]*ports.Inbound, len(items))

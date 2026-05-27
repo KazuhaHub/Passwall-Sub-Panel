@@ -354,9 +354,16 @@ export default function UsersView() {
   const usageSeq = useRef(0)
   useEffect(() => {
     const seq = ++usageSeq.current
-    void topTraffic(Math.max(pageSize, 25))
+    // silent: usage column is best-effort enrichment. Without this flag
+    // a topTraffic blip would surface a "Network error" toast on the
+    // Users page (whose primary list already loaded fine) — exactly
+    // the user-visible bug reported during the beta.7 → beta.8 review.
+    void topTraffic(Math.max(pageSize, 25), { silent: true })
       .then(rows => { if (seq === usageSeq.current) setUsageMap(new Map(rows.map(r => [r.user_id, r]))) })
-      .catch(() => { /* table just won't show usage; not fatal */ })
+      .catch(err => {
+        // eslint-disable-next-line no-console
+        console.warn('UsersView: topTraffic failed', err)
+      })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [items])
 

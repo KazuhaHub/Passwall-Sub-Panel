@@ -27,20 +27,27 @@ func (r *userRepo) Create(ctx context.Context, u *domain.User) error {
 // pollOwnedColumns lists user columns owned by a non-Update writer that
 // runs concurrently with admin edits — traffic poll's
 // BatchUpdateTrafficState (lifetime counters + period baseline) and
-// BatchUpdateLastOnline (last_online_at). Update() loads the row, the
-// admin mutates fields in a dialog, then Save() writes the whole row
-// back; if those columns aren't omitted the admin's stale snapshot
-// rolls lifetime back or stomps a last-online value the poll just
-// wrote 50ms ago. Emergency-access columns are intentionally NOT in
-// this list — UseEmergencyAccess goes through Update too, and the
-// race with admin editing the SAME user concurrently is narrowed by
-// emergencyMu at the service layer rather than the repo guard.
+// BatchUpdateLastOnline (last_online_at), plus sub.go's
+// UpdateBlockViolation. Update() loads the row, the admin mutates
+// fields in a dialog, then Save() writes the whole row back; if those
+// columns aren't omitted the admin's stale snapshot rolls lifetime
+// back, stomps a last-online value the poll just wrote 50ms ago, OR
+// rewinds the blocked-client violation counter to whatever it was
+// when the dialog opened (defeating the auto-disable threshold —
+// admin "save profile" between a violation increment and the next
+// /sub poll resets the counter to its pre-violation value).
+// Emergency-access columns are intentionally NOT in this list —
+// UseEmergencyAccess goes through Update too, and the race with admin
+// editing the SAME user concurrently is narrowed by emergencyMu at
+// the service layer rather than the repo guard.
 var pollOwnedColumns = []string{
 	// BatchUpdateTrafficState / UpdateTrafficState
 	"lifetime_up_bytes", "lifetime_down_bytes", "lifetime_total_bytes",
 	"period_baseline_bytes", "lifetime_baseline_at", "traffic_period_start",
 	// BatchUpdateLastOnline
 	"last_online_at",
+	// UpdateBlockViolation (sub.go blocked-client path)
+	"block_violation_count", "last_block_violation_at", "disable_detail",
 }
 
 func (r *userRepo) Update(ctx context.Context, u *domain.User) error {

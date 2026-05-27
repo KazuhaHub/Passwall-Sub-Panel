@@ -43,10 +43,12 @@ const expiringWindowDays = 7
 // small — the dashboard never renders sub_url / lifetime counters /
 // emergency state / sso bindings.
 type dashboardExpiringRow struct {
-	ID          int64      `json:"id"`
-	UPN         string     `json:"upn"`
-	DisplayName string     `json:"display_name,omitempty"`
-	ExpireAt    *time.Time `json:"expire_at,omitempty"`
+	ID          int64  `json:"id"`
+	UPN         string `json:"upn"`
+	DisplayName string `json:"display_name,omitempty"`
+	// Always emitted — handler filters out users with nil ExpireAt
+	// before appending. Frontend types it non-optional.
+	ExpireAt *time.Time `json:"expire_at"`
 }
 
 // dashboardNodeAlert is the per-row shape for the "node health alerts"
@@ -75,12 +77,30 @@ type dashboardSummaryResponse struct {
 func (h *AdminDashboardHandler) Summary(c *gin.Context) {
 	ctx := c.Request.Context()
 
-	users, _, err := h.users.List(ctx, ports.UserFilter{
-		Pagination: ports.Pagination{Page: 1, PageSize: 100_000},
-	})
-	if err != nil {
-		respondError(c, err)
-		return
+	// Walk every user in pages — applyPagination clamps PageSize to
+	// 200, so a single fat call silently truncated counts + the
+	// expiring list on installs with >200 users (v3.6.1-beta.6 +
+	// beta.7 both shipped with that bug). Loop in 200-row chunks
+	// instead. A dedicated count-query path would scale better; for
+	// the panel's typical self-use scale this is correct and simple.
+	var allUsers []*domain.User
+	var userTotal int64
+	page := 1
+	const pageSize = 200
+	for {
+		items, total, err := h.users.List(ctx, ports.UserFilter{
+			Pagination: ports.Pagination{Page: page, PageSize: pageSize},
+		})
+		if err != nil {
+			respondError(c, err)
+			return
+		}
+		userTotal = total
+		allUsers = append(allUsers, items...)
+		if int64(len(allUsers)) >= total || len(items) == 0 {
+			break
+		}
+		page++
 	}
 	nodes, err := h.nodes.List(ctx)
 	if err != nil {
@@ -94,13 +114,13 @@ func (h *AdminDashboardHandler) Summary(c *gin.Context) {
 	}
 
 	resp := dashboardSummaryResponse{
-		UserTotal:  len(users),
+		UserTotal:  int(userTotal),
 		GroupCount: len(groups),
 	}
 	now := time.Now()
 	windowEnd := now.Add(expiringWindowDays * 24 * time.Hour)
 	expiring := make([]*domain.User, 0)
-	for _, u := range users {
+	for _, u := range allUsers {
 		if u.Enabled {
 			resp.UserEnabled++
 		} else {
@@ -143,6 +163,24 @@ func (h *AdminDashboardHandler) Summary(c *gin.Context) {
 			alerts = append(alerts, n)
 		}
 	}
+	// Sort BEFORE truncating to 5 — pre-fix the surfaced alerts were
+	// just "first 5 in nodes.List order" (id ASC), so among 10
+	// unhealthy nodes admin saw 5 essentially-random ones. Sort most-
+	// recently-checked first so the dashboard surfaces the freshest
+	// signal; nodes with no HealthCheckedAt fall to the end.
+	sort.Slice(alerts, func(i, j int) bool {
+		ai, bi := alerts[i].HealthCheckedAt, alerts[j].HealthCheckedAt
+		if ai == nil && bi == nil {
+			return alerts[i].ID < alerts[j].ID
+		}
+		if ai == nil {
+			return false
+		}
+		if bi == nil {
+			return true
+		}
+		return ai.After(*bi)
+	})
 	if len(alerts) > 5 {
 		alerts = alerts[:5]
 	}

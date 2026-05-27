@@ -16,9 +16,11 @@ export default defineConfig({
             '/sub': { target: 'http://localhost:8788', changeOrigin: true },
         },
         fs: {
-            // Allow Vite to serve files from the parent repo (npm hoisted some
-            // packages — including @fontsource/noto-sans-sc — into the repo-root
-            // node_modules instead of web-react/node_modules).
+            // Allow Vite to serve files from the parent repo (npm hoisting
+            // can place some packages in the repo-root node_modules instead
+            // of web-react/node_modules). Kept defensive even though the
+            // specific @fontsource/noto-sans-sc case that motivated this
+            // is gone.
             allow: ['..'],
         },
     },

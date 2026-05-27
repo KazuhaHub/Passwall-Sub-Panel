@@ -4,6 +4,79 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## v3.6.1-beta.8 — 2026-05-26
+
+beta.7 之后再做一轮 2-agent 回归审计,找出 1 个 HIGH + 2 个 MED + 几个
+LOW。HIGH 是 beta.6 引入的真 bug,MED 中有一个直接对应到用户实际反馈
+的 "click Users 报 Network error" toast。
+
+### Fixed (real bugs)
+
+- **Dashboard summary `PageSize: 100_000` 被 applyPagination 静默截到 200**
+  ── beta.6 加的 `/admin/dashboard/summary` 端点用一次大 List 调用拉所
+  有用户做 in-memory 聚合,但 [applyPagination](internal/adapters/mysql/pagination.go) 把
+  PageSize > 200 的全部 clamp 到 200。装了 250+ 用户的实例上 UserTotal /
+  UserEnabled / UserDisabled / UserEmergency 全错,排序 ID 在 200 之后的
+  即将到期用户也永远不会出现在 dashboard 上。改成 200/页迭代,正确性
+  恢复;长远改用 dedicated count 查询单独立项。
+- **`pollOwnedColumns` 没包含 blocked-violation 列** ── beta.6 加了
+  column-scoped `UpdateBlockViolation`(/sub 热路径只写 3 列),但
+  `userRepo.Update`(Admin 编辑保存路径)用的 `Omit(pollOwnedColumns)`
+  里这 3 列不在。admin 在 /sub 违规增长跟下一次 poll 之间点保存,
+  block_violation_count 会被回退到 dialog 打开时的值 → auto-disable 阈值
+  永远触发不了。把 `block_violation_count` / `last_block_violation_at` /
+  `disable_detail` 三列补进 pollOwnedColumns。
+- **`topTraffic` 失败弹全局 "Network error" toast** ── 这是用户实际反馈
+  的 bug:打开 Users 页面、列表加载完全正常,但底部弹个 "Network error
+  — please check your connection and try again" toast。根因是 UsersView /
+  DashboardView 把 `topTraffic` 当 best-effort 补充字段调用,JS 层用
+  `.catch()` 吞了 promise rejection —— 但 axios 的全局 response 拦截器在
+  `.catch` **之前**就根据 ERR_NETWORK 弹了 toast。修法:给
+  `topTraffic` 加 `opts: { silent?: boolean }`,silent=true 时通过
+  `_skipErrorToast: true` 关掉全局 toast。Dashboard / UsersView 两处的
+  best-effort 调用都改成 `topTraffic(N, { silent: true })`,辅助
+  console.warn 留 trail。
+
+### Fixed (lower severity)
+
+- **Dashboard node alerts 截断前没排序** ── 10 个不健康节点里,beta.6 是
+  按 nodes.List 的 ID ASC 顺序取前 5 个 = 实际是 "ID 最小的 5 个" 而非
+  "最近失败的 5 个"。改成按 HealthCheckedAt 倒序(最近失败排前),
+  HealthCheckedAt 为 nil 的排末尾。
+- **render.prefetchInboundsForRender 不响应 ctx 取消** ── shutdown 时,
+  如果某条 ListInbounds 正卡在 30s 的 HTTP timeout(死的 3X-UI panel),
+  接收循环用 counter-based `for ... <-resultsCh` 会傻等到那条 timeout
+  超完。改成 `select { case <-ctx.Done(): break recv; case r := <-resultsCh: ... }`,
+  shutdown 时立刻返回 partial map,后面的 flatten 步骤自然处理缺失 panel。
+- **pushClientConfigToAll 在 panel 返回空 inbound 列表时清光 ownership**
+  ── ListInbounds 成功但返回 `[]`(3X-UI 重启时偶尔会这样),Phase 2 会把每
+  个 entry 都标 staleInbound → `ownership.RemoveByMatch` 全删。加防御:
+  panel byInbound 长度为 0 + 无 err 时,这一轮 entry 全部 skip 不删,等
+  reconcile 真确认了再清。
+- **mailer maybeSend 已经在 beta.7 改过 render-first** —— 此版没动。
+- **setLanguage 抛 promise rejection 不被处理** ── 部署新版本后老 tab 切
+  语言时,如果 lazy chunk 拿不到(404),loadLanguageResources 的
+  Promise.all 直接 reject;UserLayout / LoginView / LoginLocalView 都没
+  `.catch`,UI 静默卡在原语言。setLanguage 内部加 try/catch:加载失败
+  console.warn 后直接 return,不调 changeLanguage,语言状态保持一致。
+- **Dashboard "0 / 0 健康" 文案** ── 零节点的全新面板会显示 "0 / 0 健康",
+  读起来像坏了。`enabledNodeCount === 0` 时不渲染 subtitle。
+- **删 `@fontsource/noto-sans-sc` 依赖** ── beta.6 已经把这个包的 import
+  都删了,但 package.json 里 dep 还留着,clone + npm install 时还会
+  下载 260KB 的字体文件到 node_modules。`npm uninstall` 干净。
+- **`dashboardExpiringRow.expire_at` 类型对齐** ── 后端 always 写,前端
+  类型却标了 optional,导致 DashboardView 里两处 `u.expire_at!` non-null
+  assertion。后端去掉 `omitempty`,前端类型去 `?`,assertion 全部干掉。
+
+### Verified clean (no action)
+
+beta.7 几个 fix 都经独立 review 验证过没引入新问题:render.prefetch
+panic-safe defer 顺序正确;mailer render-first 顺序正确;static
+loadStaticAssets 的 sync.Once + log.Warn 行为正确;HIGH-2 dashboard
+window 改 7 跟 UI 对齐没遗漏其他 14 引用;HIGH-3 font-family 去
+"Noto Sans SC" 没有别处遗留;HIGH-1 D1 revert 干净,WithNodes / nodes
+field / inboundcfg import 都清掉了。
+
 ## v3.6.1-beta.7 — 2026-05-26
 
 beta.6 perf 批之后的回归 audit —— 2 个并行 review agent(后端 + 前端)找到

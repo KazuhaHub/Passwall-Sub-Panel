@@ -121,7 +121,14 @@ export default function DashboardView() {
         // node lists were downloaded on every dashboard open.
         const [s, top] = await Promise.all([
           dashboardSummary(),
-          topTraffic(5).catch(() => []),
+          // silent: best-effort enrichment, axios global toast off so
+          // a transient failure here doesn't surface "Network error"
+          // on a dashboard whose primary data loaded fine.
+          topTraffic(5, { silent: true }).catch(err => {
+            // eslint-disable-next-line no-console
+            console.warn('DashboardView: topTraffic(5) failed', err)
+            return []
+          }),
         ])
         if (cancelled) return
         setSummary(s)
@@ -188,7 +195,10 @@ export default function DashboardView() {
         <MetricCard
           labelKey="dashboard.metric.nodes"
           value={enabledNodeCount}
-          subtitle={loading ? undefined : t('dashboard.metric.nodes_breakdown', {
+          // Suppress the breakdown subtitle when there are zero enabled
+          // nodes — otherwise a fresh panel reads "0 / 0 健康" which is
+          // technically true but reads as a broken or buggy state.
+          subtitle={loading || enabledNodeCount === 0 ? undefined : t('dashboard.metric.nodes_breakdown', {
             healthy: healthyCount,
             total: enabledNodeCount,
             defaultValue: `${healthyCount} / ${enabledNodeCount} 健康`,
@@ -256,7 +266,7 @@ export default function DashboardView() {
           md={md}
         >
           {stats.expiring.map(u => {
-            const diffDays = Math.ceil((new Date(u.expire_at!).getTime() - Date.now()) / 86400000)
+            const diffDays = Math.ceil((new Date(u.expire_at).getTime() - Date.now()) / 86400000)
             const chipColor = diffDays <= 1 ? md.error : diffDays <= 3 ? md.tertiary : md.onSurfaceVariant
             return (
               <Box key={u.id} sx={{
@@ -269,7 +279,7 @@ export default function DashboardView() {
                     {u.display_name || u.upn}
                   </Typography>
                   <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant }}>
-                    {new Date(u.expire_at!).toLocaleDateString()}
+                    {new Date(u.expire_at).toLocaleDateString()}
                   </Typography>
                 </Box>
                 <Chip

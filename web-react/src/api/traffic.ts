@@ -57,9 +57,15 @@ function withTz<T extends TrafficHistoryParams>(params: T): T {
   return { ...params, tz: params.tz ?? browserTz() }
 }
 
-export async function topTraffic(limit = 20) {
+export async function topTraffic(limit = 20, opts: { silent?: boolean } = {}) {
+  // `silent` flips the axios global error toast off for callers that
+  // treat this as best-effort enrichment (DashboardView's top-5 widget,
+  // UsersView's per-row usage column). Without it, a transient failure
+  // on these auxiliary fetches surfaces "Network error" toasts on
+  // pages whose primary data loaded fine, confusing the admin.
   const { data } = await client.get<{ items: TrafficRow[] }>('/admin/traffic/top', {
     params: { limit },
+    _skipErrorToast: opts.silent,
   })
   return data.items
 }
