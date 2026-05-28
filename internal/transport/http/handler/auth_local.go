@@ -157,6 +157,18 @@ func (h *AuthLocalHandler) Refresh(c *gin.Context) {
 		})
 		return
 	}
+	// TokenVersion gate — mirror middleware/auth.go's access-token check on the
+	// refresh path. TokenVersion is bumped on local password change, admin
+	// password reset, role change, and disable; without this check a refresh
+	// token issued before the bump would keep minting valid access+refresh
+	// pairs for the full refresh TTL (default 7d), defeating the documented
+	// "password change revokes other sessions" guarantee. (Disable is already
+	// caught by the !u.Enabled branch above; this closes the password/role
+	// rotation hole.)
+	if u.TokenVersion != claims.TokenVersion {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Session revoked, please sign in again"})
+		return
+	}
 	access, refresh, err := h.auth.IssueTokens(u)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "token reissue failed"})
