@@ -4,6 +4,60 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## v3.6.2-beta.2 — 2026-05-28
+
+多 agent 审计(覆盖迁移 + 鉴权 / `/sub` 热路径 / 数据层等)后的修复批。每条都经
+对抗验证 + 补了单测。本批含 2 个与迁移无关的 HIGH(审计顺带挖出)。
+
+### Fixed (security, high)
+
+- **refresh 端点不校验 TokenVersion,会话撤销可被绕过** ──
+  [auth_local.go](internal/transport/http/handler/auth_local.go) `Refresh` reload
+  用户后只查 `!u.Enabled`,从不比对 `claims.TokenVersion`。而改密码 / 管理员重置
+  密码 / 改角色都靠 bump `TokenVersion` 撤销会话(`RequireAuth` 对 access token
+  有这道闸,refresh 路径没有)。后果:偷到的 refresh token 在受害者改密码后仍能
+  换出全新有效 token,直到 refresh TTL(默认 7 天)耗尽 —— 打穿"改密码踢掉其它
+  会话"的承诺。修:reload 后加一道 `u.TokenVersion != claims.TokenVersion → 401`,
+  与 `middleware/auth.go` 的 access-token 闸对齐。
+- **SQLite 上 LIKE 转义静默失效,含 `_`/`%`/`\` 的关键字搜不到** ──
+  [pagination.go](internal/adapters/mysql/pagination.go) `keywordLike` 用反斜杠转义了
+  LIKE 元字符,但 8 个搜索端点的 `LOWER(col) LIKE ?` 都没带 `ESCAPE '\'` 子句。
+  SQLite(零配置默认后端)没有默认 LIKE 转义符 → 注入的反斜杠被当字面量、`%`/`_`
+  仍是通配 → 搜 `u_5@x.org` 这类(下划线在邮箱 / 用户名里极常见)静默 0 命中或错配,
+  影响用户 / 节点 / 分组 / 面板 / 分隔符 / 审计 / 订阅日志 / 邮件日志全部列表。
+  MySQL / Postgres 默认反斜杠转义所以不受影响。修:抽出 `likeCols(exprs...)` 集中
+  给每个谓词加 `ESCAPE '\'`(三库通用),8 个站点统一改用。补下划线字面匹配单测。
+
+### Fixed (3.2.0 migration hardening)
+
+- **`/clients/add` 重复 email、`/clients/update`·`del` 的 "client not found" 被当
+  可重试错误,重试到上限** ── 3X-UI 把这类永久性 client 级拒绝以 HTTP 200 +
+  `{success:false}` 返回,绕过了 `doJSON` 的 4xx→`ErrValidation` 包装,被 sync-task
+  runner 当瞬时错误重试到 ~100 次(~1.5h)。修:`doJSON` 的 `success:false` 分支识别
+  permanent 文案(duplicate / already exist / client not found)包成 `ErrValidation`
+  快速失败,对齐 node.go "port already exists" 的处理;并修正 reconcile.go 一条
+  "AddClient handles duplicates" 的假注释。
+- **reconcile 轴 A 反向推送在 3.2.0 一等公民模型下未验证,默认关闭** ──
+  `reconcileInboundConfig` 的 drift-push 走 `UpdateInbound` 读改写、会重注入
+  `settings.clients[]`;在 3.2.0(clients 表为真相源、`settings.clients` 是派生投影)
+  下这次写入行为未验证,可能孤儿 / 重复 PSP 托管的 client(见
+  `docs/3xui-3.2-clients-migration.md` §4.3 / P2)。新增 `axisAReversePush` 开关,
+  **默认关**:漂移时改为**采纳**(把 live 配置 capture 进快照、对 inbound 零写入),
+  render 跟随 live 仍正确;代价是面板侧直接改动被跟随而非回退。P2 live 验证后置回
+  `true` 即恢复反向推送(push 代码保留、仍有测试覆盖)。
+
+### Fixed (frontend, low)
+
+- **升级 3X-UI 的"已测范围外"409 网关会多弹一个原始红色 toast** ──
+  `upgradePanel` / `upgradeXray`([servers.ts](web-react/src/api/servers.ts))未设
+  `_skipErrorToast`,全局拦截器在**预期内**的 `untested_target` 409 上弹
+  "Request failed with status code 409",与单条的强制确认弹窗、批量的"已拦截"汇总
+  打架。修:两个调用都加 `_skipErrorToast`,由组件自己负责提示(单条 + 批量、
+  含 submitXrayUpgrade 的重复 toast 一并消除)。
+- **批量升级 3X-UI 后不清选中** ── 面板升级会重启面板(断连所有用户),完成后
+  清空选中以防误触再次触发(与批量删除一致;批量测试 / 批量升级 Xray 因无破坏性
+  保持选中)。
+
 ## v3.6.2-beta.1 — 2026-05-28
 
 适配 3X-UI 3.2.0。3.2.0 把客户端管理从 inbound 作用域端点整体迁到一等公民
