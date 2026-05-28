@@ -4,6 +4,58 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## v3.6.1 — 2026-05-28
+
+正式版。汇总 v3.6.1-beta.1 → beta.10 全部改动，beta.10 内容直发为正式版定稿
+（自 beta.10 起无追加修复）。本次是 patch release：v3.6.0「PSP 自动感知 3X-UI
+版本」之上的统一分页骨架 + 两批全栈性能审计 + 安全加固 + 多轮回归修复，无
+schema 破坏性变更。完整逐项见下方各 pre-release 段落，下面只列核心叙事。
+
+### 主要变化（叙事性总述）
+
+- **全部 admin 列表统一分页 + 列点击排序 + 关键字搜索（beta.1）**:
+  Groups / Nodes / Servers / RuleSets / Templates 从「前端一把拉全集再 useMemo
+  filter」拉到跟 Users / Audit / SubLogs 一样的分页骨架；新增 `usePaged` hook +
+  `PagedTableFooter` / `SortableTableCell` 组件，分页 / 关键字 / 排序写
+  querystring（刷新、分享链接保持视图），每页大小存 localStorage 跨列表共享。
+  6 个 repo 补 `ListPaged` + 硬编码 sort 白名单防注入；`List(ctx)` 全集路径保留
+  给 reconcile / traffic / render 内部调用。envelope 加 `page` / `page_size`
+  字段，旧前端读 `items + total` 不破。
+- **两批全栈性能审计（beta.4 + beta.6）**:
+  热路径 settings 读放量是 `/sub` 公网端点最大单项成本 —— 加 `SettingsRepo`
+  进程内缓存装饰器（invalidate-on-write，admin 存了立即生效无延迟窗口）、YAML
+  template / ruleset 的 mtime-keyed 缓存、render 顶层一次性 `loadRenderSettings`
+  穿透所有 helper。消 N+1：新增 `/admin/dashboard/summary` 聚合端点（不再下载
+  全量 user / node 行）、admin list 的 settings.Load 提到循环外、group member 数
+  改一次 `GROUP BY`、user ServerStatus 改 List 一次再内存索引、dashboard traffic
+  Top 批量化（200+ round-trip → 2）。审计中间件改异步写（响应不等 fsync）、静态
+  SPA 资源 init 时预读进 map、auth user cache TTL 5s → 60s。前端：vite vendor
+  拆包（主 bundle 700KB → 165KB / gzip 48KB）、i18n lazy 加载、删 noto-sans-sc
+  静态字体（392 文件 + 260KB CSS）、zustand per-field 订阅收紧重渲。traffic poll
+  push 优先走 v3.5 本地快照（常态全 captured 时零 HTTP）。
+- **安全姿态收紧（beta.2 + beta.3）**:
+  `trusted_proxies` 默认从「信任全网」改成 loopback-only（fail-secure）—— 防公网
+  直暴时匿名 client 伪造 `CF-Connecting-IP` / `X-Forwarded-For` 绕限流 / 污染
+  audit IP；新增 `all` / `*` / `none` / cidr 四 token + boot WARN（**breaking**：
+  反代 / CDN 后部署需显式填 proxy IP 段）。SSRF dialer guard 提到共享
+  `internal/pkg/safehttp`，3X-UI 客户端 + GitHub compat 抓取共用，拒 loopback /
+  link-local（含 `169.254.169.254` metadata）/ unspecified、保留私网段。
+  `/sub/:token` 把 disabled / expired / blocked 等分支错误码统一收敛到 opaque
+  `404 + 空 body`，杀掉匿名探针的 token 枚举 oracle（server 端仍 log 具体
+  reason）；keyword LIKE 转义统一到 `keywordLike()`。
+- **多轮回归审计修复（beta.2 / 3 / 5 / 7 / 8 / 9 / 10）**:
+  每批改动后跑并行 review agent 修引入的回归。关键项：解封用户不清
+  `BlockViolationCount` 导致账户被反复 auto-disable 困死（beta.10）；axios 拦截器
+  把 `AbortController` cancel 误判成「网络异常」toast（beta.9）；CSP 默认放行
+  Cloudflare Web Analytics beacon（beta.9）；dashboard summary 的
+  `PageSize: 100000` 被 `applyPagination` 静默 clamp 到 200、250+ 用户实例 counter
+  全错（beta.8）；`pollOwnedColumns` 漏 block-violation 三列致 admin 保存与 /sub
+  计数互撞（beta.8）；beta.6 的本地快照 push fast-path 撞 `StripClients` 契约致每个
+  captured node 推送全失败、彻底撤回（beta.7）；render prefetch goroutine panic
+  导致 /sub 死锁（beta.7）；ServersView 版本探针无限循环（beta.2）；user 同步任务
+  重试上限 100 防永久失败任务每分钟 hammer 3X-UI（beta.2）；前端分页 / 排序 /
+  跨页选择一致性一组修复（beta.5）。
+
 ## v3.6.1-beta.10 — 2026-05-27
 
 ### Fixed
