@@ -61,3 +61,44 @@ func TestAuditRepoSearch(t *testing.T) {
 		})
 	}
 }
+
+// TestAuditRepoSearchEscapesLikeMeta locks the SQLite LIKE-escape fix
+// (likeCols' ESCAPE '\' clause): a keyword containing an underscore must match
+// the LITERAL underscore, not act as a single-char wildcard. Without ESCAPE,
+// SQLite (the default backend) ignores keywordLike's backslash-escaping, so
+// "user_5" would ALSO match "userX5" — returning 2 rows instead of 1. The
+// other 7 keyword-search repos share the same likeCols construction.
+func TestAuditRepoSearchEscapesLikeMeta(t *testing.T) {
+	db, err := Open("sqlite", filepath.Join(t.TempDir(), "panel.db"))
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	t.Cleanup(func() {
+		if sqlDB, _ := db.DB(); sqlDB != nil {
+			_ = sqlDB.Close()
+		}
+	})
+	if err := EnsureSchema(db); err != nil {
+		t.Fatalf("schema: %v", err)
+	}
+	repo := &auditRepo{db: db}
+	ctx := context.Background()
+	for _, e := range []*domain.AuditEntry{
+		{Actor: "user_5@x.org", Action: "login", Target: "t1"},
+		{Actor: "userX5@x.org", Action: "login", Target: "t2"},
+	} {
+		if err := repo.Insert(ctx, e); err != nil {
+			t.Fatalf("insert: %v", err)
+		}
+	}
+	got, total, err := repo.List(ctx, ports.AuditFilter{Search: "user_5"})
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if total != 1 || len(got) != 1 {
+		t.Fatalf("search 'user_5': got total=%d len=%d, want exactly 1 — underscore must be literal, not a wildcard", total, len(got))
+	}
+	if got[0].Actor != "user_5@x.org" {
+		t.Fatalf("matched the wrong row: %q", got[0].Actor)
+	}
+}

@@ -70,7 +70,7 @@ var groupSortAllowlist = map[string]string{
 func (r *groupRepo) ListPaged(ctx context.Context, p ports.Pagination) ([]*domain.Group, int64, error) {
 	q := r.db.WithContext(ctx).Model(&groupRow{})
 	if like := keywordLike(p.Keyword); like != "" {
-		q = q.Where("LOWER(slug) LIKE ? OR LOWER(name) LIKE ?", like, like)
+		q = q.Where(likeCols("slug", "name"), like, like)
 	}
 	var total int64
 	if err := q.Count(&total).Error; err != nil {

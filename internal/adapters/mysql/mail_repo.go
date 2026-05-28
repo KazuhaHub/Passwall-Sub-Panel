@@ -139,7 +139,7 @@ func (r *mailRepo) ListSent(ctx context.Context, filter ports.EmailLogFilter) ([
 		}
 		if kw := keywordLike(filter.Search); kw != "" {
 			q = q.Where(
-				"LOWER(mail_sent.to_email) LIKE ? OR LOWER(mail_sent.kind) LIKE ? OR LOWER(COALESCE(users.upn, '')) LIKE ? OR LOWER(COALESCE(users.display_name, '')) LIKE ?",
+				likeCols("mail_sent.to_email", "mail_sent.kind", "COALESCE(users.upn, '')", "COALESCE(users.display_name, '')"),
 				kw, kw, kw, kw)
 		}
 		return q

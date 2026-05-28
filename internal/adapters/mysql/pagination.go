@@ -100,3 +100,24 @@ func keywordLike(k string) string {
 	}
 	return "%" + likeEscaper.Replace(strings.ToLower(k)) + "%"
 }
+
+// likeCols builds the case-insensitive substring-match predicate every
+// keyword search uses, OR-joined across the given column expressions, each
+// with the `ESCAPE '\'` clause that makes keywordLike's backslash-escaping
+// actually take effect. This is REQUIRED on SQLite (the zero-config default
+// backend): SQLite has no default LIKE escape character, so without an
+// explicit ESCAPE the backslash keywordLike injects is treated as a literal
+// pattern char while `%`/`_` stay wildcards — a search for "u_5@x.org"
+// silently matches nothing / the wrong rows. MySQL and Postgres default to
+// backslash-as-escape, so the clause is a harmless no-op there.
+//
+// Each expr is wrapped as LOWER(<expr>) LIKE ? ESCAPE '\', so callers pass
+// the inner column or expression (e.g. "upn" or "COALESCE(users.upn, ”)")
+// and supply one bound keywordLike value per expr.
+func likeCols(exprs ...string) string {
+	parts := make([]string, len(exprs))
+	for i, e := range exprs {
+		parts[i] = "LOWER(" + e + ") LIKE ? ESCAPE '\\'"
+	}
+	return strings.Join(parts, " OR ")
+}

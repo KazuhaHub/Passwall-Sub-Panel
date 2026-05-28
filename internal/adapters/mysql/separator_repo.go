@@ -69,7 +69,7 @@ var separatorSortAllowlist = map[string]string{
 func (r *separatorRepo) ListPaged(ctx context.Context, p ports.Pagination) ([]*domain.SeparatorEntry, int64, error) {
 	q := r.db.WithContext(ctx).Model(&separatorRow{})
 	if like := keywordLike(p.Keyword); like != "" {
-		q = q.Where("LOWER(display_name) LIKE ?", like)
+		q = q.Where(likeCols("display_name"), like)
 	}
 	var total int64
 	if err := q.Count(&total).Error; err != nil {

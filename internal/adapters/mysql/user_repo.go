@@ -249,7 +249,7 @@ func (r *userRepo) List(ctx context.Context, filter ports.UserFilter) ([]*domain
 		// intentionally out — it's free-form admin notes; matching on it
 		// surfaced "why does this user show up?" results that confused
 		// people.
-		q = q.Where("LOWER(upn) LIKE ? OR LOWER(display_name) LIKE ? OR LOWER(email) LIKE ?", like, like, like)
+		q = q.Where(likeCols("upn", "display_name", "email"), like, like, like)
 	}
 	if filter.GroupID != nil {
 		q = q.Where("group_id = ?", *filter.GroupID)

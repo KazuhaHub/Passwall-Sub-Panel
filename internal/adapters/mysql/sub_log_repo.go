@@ -68,7 +68,7 @@ func (r *subLogRepo) List(ctx context.Context, filter ports.SubLogFilter) ([]*do
 		}
 		if kw := keywordLike(filter.Search); kw != "" {
 			q = q.Where(
-				"LOWER(sub_logs.ip) LIKE ? OR LOWER(sub_logs.ua) LIKE ? OR LOWER(sub_logs.client_type) LIKE ? OR LOWER(COALESCE(users.upn, '')) LIKE ? OR LOWER(COALESCE(users.display_name, '')) LIKE ?",
+				likeCols("sub_logs.ip", "sub_logs.ua", "sub_logs.client_type", "COALESCE(users.upn, '')", "COALESCE(users.display_name, '')"),
 				kw, kw, kw, kw, kw)
 		}
 		return q

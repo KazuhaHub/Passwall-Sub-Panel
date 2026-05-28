@@ -187,7 +187,7 @@ func (r *nodeRepo) ListPaged(ctx context.Context, p ports.Pagination) ([]*domain
 		// tags is a JSON-encoded text column; the LIKE on it gives "any
 		// tag substring matches" which is what admin expects.
 		q = q.Where(
-			"LOWER(display_name) LIKE ? OR LOWER(server_address) LIKE ? OR LOWER(region) LIKE ? OR LOWER(tags) LIKE ?",
+			likeCols("display_name", "server_address", "region", "tags"),
 			like, like, like, like,
 		)
 	}

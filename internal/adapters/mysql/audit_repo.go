@@ -42,7 +42,7 @@ func (r *auditRepo) List(ctx context.Context, filter ports.AuditFilter) ([]*doma
 		q = q.Where("action = ?", filter.Action)
 	}
 	if kw := keywordLike(filter.Search); kw != "" {
-		q = q.Where("LOWER(actor) LIKE ? OR LOWER(action) LIKE ? OR LOWER(target) LIKE ?", kw, kw, kw)
+		q = q.Where(likeCols("actor", "action", "target"), kw, kw, kw)
 	}
 	if filter.Since != nil {
 		q = q.Where("at >= ?", *filter.Since)

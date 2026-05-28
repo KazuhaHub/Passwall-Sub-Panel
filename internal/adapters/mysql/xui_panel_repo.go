@@ -41,7 +41,7 @@ func (r *xuiPanelRepo) ListPaged(ctx context.Context, p ports.Pagination) ([]*do
 	q := r.db.WithContext(ctx).Model(&xuiPanelRow{})
 	if like := keywordLike(p.Keyword); like != "" {
 		q = q.Where(
-			"LOWER(name) LIKE ? OR LOWER(url) LIKE ? OR LOWER(remark) LIKE ? OR LOWER(username) LIKE ?",
+			likeCols("name", "url", "remark", "username"),
 			like, like, like, like,
 		)
 	}
