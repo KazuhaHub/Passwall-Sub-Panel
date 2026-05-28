@@ -18,25 +18,20 @@ type XUIClient interface {
 	DelInbound(ctx context.Context, id int) error
 	SetInboundEnable(ctx context.Context, id int, enable bool) error
 
-	// Client CRUD. Implementations use a read-modify-write strategy
-	// internally so existing clients in the inbound are preserved.
+	// Client CRUD. Backed by 3X-UI 3.2.0's first-class /clients/* API, which
+	// keys clients by their panel-wide unique email. inboundID / clientUUID
+	// args are retained for source-compatibility but are vestigial — PSP's
+	// per-node-unique email (u{userID}-n{nodeID}@domain) is the real key. See
+	// docs/3xui-3.2-clients-migration.md.
 	AddClient(ctx context.Context, inboundID int, spec ClientSpec) error
 	UpdateClient(ctx context.Context, inboundID int, clientUUID string, spec ClientSpec) error
-	// UpdateClientWithInbound is UpdateClient with a pre-fetched Inbound
-	// supplied by the caller — skips the per-call GetInbound that
-	// UpdateClient runs to read the inbound's other clients. Used by
-	// the traffic poll's push phase and reconcile, where the inbound
-	// has already been fetched via ListInbounds; saves one HTTP
-	// round-trip per push. inb must NOT be nil.
+	// UpdateClientWithInbound predates 3.2.0, when it saved a GetInbound
+	// round-trip for the read-modify-write update path. 3.2.0 updates clients
+	// by email with no inbound read, so it now just delegates to UpdateClient;
+	// the pre-fetched inb is unused. Kept so the traffic-poll push phase and
+	// reconcile call sites don't churn. inb must NOT be nil.
 	UpdateClientWithInbound(ctx context.Context, inb *Inbound, clientUUID string, spec ClientSpec) error
-	DelClient(ctx context.Context, inboundID int, clientUUID string) error
 	DelClientByEmail(ctx context.Context, inboundID int, email string) error
-	CopyClients(ctx context.Context, srcInboundID, dstInboundID int, emails []string) error
-
-	// Traffic
-	GetClientTraffic(ctx context.Context, email string) ([]ClientTraffic, error) // aggregated across inbounds
-	GetInboundTraffics(ctx context.Context, id int) ([]ClientTraffic, error)
-	ResetClientTraffic(ctx context.Context, inboundID int, email string) error
 
 	// GetInboundClients returns the parsed client list from inbound.settings.
 	// Useful for the "claim existing client" admin flow where the panel

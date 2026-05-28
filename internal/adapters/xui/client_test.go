@@ -4,59 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 )
-
-func TestUpdateClientInSettingsMatchesByEmailWhenIDIsEmpty(t *testing.T) {
-	settings := `{
-		"method": "2022-blake3-aes-256-gcm",
-		"password": "server-psk",
-		"network": "tcp,udp",
-		"clients": [
-			{"id": "", "email": "u24-n7@example.test", "enable": true, "password": "old", "expiryTime": 0, "comment": "keep"}
-		]
-	}`
-
-	got, err := updateClientInSettings(settings, "340c1b7e-8434-4cd3-a6bf-5a44a9751f36", ports.ClientSpec{
-		ID:         "340c1b7e-8434-4cd3-a6bf-5a44a9751f36",
-		Email:      "u24-n7@example.test",
-		Enable:     false,
-		Password:   "derived",
-		ExpiryTime: 1770000000000,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	var decoded struct {
-		Method  string           `json:"method"`
-		Clients []map[string]any `json:"clients"`
-	}
-	if err := json.Unmarshal([]byte(got), &decoded); err != nil {
-		t.Fatal(err)
-	}
-	if decoded.Method != "2022-blake3-aes-256-gcm" {
-		t.Fatalf("method = %q", decoded.Method)
-	}
-	client := decoded.Clients[0]
-	if client["id"] != "340c1b7e-8434-4cd3-a6bf-5a44a9751f36" {
-		t.Fatalf("id = %#v", client["id"])
-	}
-	if client["enable"] != false {
-		t.Fatalf("enable = %#v", client["enable"])
-	}
-	if client["password"] != "derived" {
-		t.Fatalf("password = %#v", client["password"])
-	}
-	if client["comment"] != "keep" {
-		t.Fatalf("existing field was not preserved: %#v", client)
-	}
-}
 
 func TestReplaceSettingsClientsPreservesCurrentClients(t *testing.T) {
 	next := `{"method":"2022-blake3-aes-256-gcm","clients":[]}`
@@ -148,29 +104,102 @@ func TestReplaceSettingsClientsHandlesEmptyNext(t *testing.T) {
 	}
 }
 
-func TestDecodeTrafficObjAcceptsSingleObject(t *testing.T) {
-	raw := json.RawMessage(`{"id":9,"inboundId":4,"email":"u25-n2@psp.local","up":1048576,"down":933232640,"total":934281216,"enable":true}`)
+// --- 3.2.0 first-class /clients/* adapter contract ---
 
-	got, err := decodeTrafficObj(raw)
-	if err != nil {
+type capturedReq struct {
+	method, path, query, body string
+}
+
+// captureReq spins up a one-shot server that records the method, decoded path,
+// raw query, and body of the request it receives, then replies with the given
+// JSON envelope. Returns a Client wired to it.
+func captureReq(t *testing.T, reply string, got *capturedReq) *Client {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		got.method, got.path, got.query, got.body = r.Method, r.URL.Path, r.URL.RawQuery, string(b)
+		_, _ = w.Write([]byte(reply))
+	}))
+	t.Cleanup(srv.Close)
+	return &Client{baseURL: srv.URL, http: srv.Client(), apiToken: "t"}
+}
+
+func TestAddClientPostsToClientsAdd(t *testing.T) {
+	var got capturedReq
+	c := captureReq(t, `{"success":true}`, &got)
+	if err := c.AddClient(context.Background(), 7, ports.ClientSpec{ID: "uuid-1", Email: "u3-n9@psp.local"}); err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 1 {
-		t.Fatalf("len = %d, want 1", len(got))
+	if got.method != http.MethodPost || got.path != "/panel/api/clients/add" {
+		t.Fatalf("method/path = %s %s", got.method, got.path)
 	}
-	if got[0].Email != "u25-n2@psp.local" || got[0].Total != 934281216 {
-		t.Fatalf("unexpected traffic: %#v", got[0])
+	var body struct {
+		Client     map[string]any `json:"client"`
+		InboundIDs []int          `json:"inboundIds"`
+	}
+	if err := json.Unmarshal([]byte(got.body), &body); err != nil {
+		t.Fatalf("body not JSON: %v (%s)", err, got.body)
+	}
+	if len(body.InboundIDs) != 1 || body.InboundIDs[0] != 7 {
+		t.Fatalf("inboundIds = %#v", body.InboundIDs)
+	}
+	if body.Client["email"] != "u3-n9@psp.local" || body.Client["id"] != "uuid-1" {
+		t.Fatalf("client = %#v", body.Client)
 	}
 }
 
-func TestDecodeTrafficObjAcceptsArray(t *testing.T) {
-	raw := json.RawMessage(`[{"id":1,"inboundId":2,"email":"a","up":1,"down":2,"total":3}]`)
-
-	got, err := decodeTrafficObj(raw)
-	if err != nil {
+func TestUpdateClientPostsToClientsUpdateByEmail(t *testing.T) {
+	var got capturedReq
+	c := captureReq(t, `{"success":true}`, &got)
+	// old uuid in the (now vestigial) arg; new uuid rides in spec.ID under the
+	// unchanged email key.
+	if err := c.UpdateClient(context.Background(), 7, "old-uuid", ports.ClientSpec{ID: "new-uuid", Email: "u3-n9@psp.local", Enable: true}); err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 1 || got[0].Total != 3 {
-		t.Fatalf("unexpected traffic: %#v", got)
+	if got.method != http.MethodPost || got.path != "/panel/api/clients/update/u3-n9@psp.local" {
+		t.Fatalf("method/path = %s %s", got.method, got.path)
+	}
+	// Body is the flat client object, NOT wrapped in {client:...} like /add.
+	var client map[string]any
+	if err := json.Unmarshal([]byte(got.body), &client); err != nil {
+		t.Fatalf("body not JSON: %v (%s)", err, got.body)
+	}
+	if _, wrapped := client["client"]; wrapped {
+		t.Fatalf("update body must not wrap client: %s", got.body)
+	}
+	if client["email"] != "u3-n9@psp.local" || client["id"] != "new-uuid" {
+		t.Fatalf("client = %#v", client)
+	}
+}
+
+func TestUpdateClientRequiresEmail(t *testing.T) {
+	c := &Client{baseURL: "http://unused", apiToken: "t"}
+	if err := c.UpdateClient(context.Background(), 7, "uuid", ports.ClientSpec{Email: ""}); err == nil {
+		t.Fatal("UpdateClient with empty email must error before any HTTP call")
+	}
+}
+
+func TestDelClientByEmailPostsToClientsDel(t *testing.T) {
+	var got capturedReq
+	c := captureReq(t, `{"success":true}`, &got)
+	if err := c.DelClientByEmail(context.Background(), 7, "u3-n9@psp.local"); err != nil {
+		t.Fatal(err)
+	}
+	if got.method != http.MethodPost || got.path != "/panel/api/clients/del/u3-n9@psp.local" {
+		t.Fatalf("method/path = %s %s", got.method, got.path)
+	}
+	if got.query != "keepTraffic=0" {
+		t.Fatalf("query = %q, want keepTraffic=0", got.query)
+	}
+}
+
+// Failure path: a 200 envelope with success:false must surface as an error so
+// the sync-task runner retries / marks the task failed.
+func TestUpdateClientSurfacesPanelError(t *testing.T) {
+	var got capturedReq
+	c := captureReq(t, `{"success":false,"msg":"client not found"}`, &got)
+	err := c.UpdateClient(context.Background(), 7, "uuid", ports.ClientSpec{Email: "x@psp.local"})
+	if err == nil || !strings.Contains(err.Error(), "client not found") {
+		t.Fatalf("want error containing panel msg, got %v", err)
 	}
 }

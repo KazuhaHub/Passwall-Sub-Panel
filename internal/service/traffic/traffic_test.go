@@ -979,27 +979,7 @@ func (c *fakeXUIClient) UpdateClient(ctx context.Context, inboundID int, clientU
 func (c *fakeXUIClient) UpdateClientWithInbound(ctx context.Context, inb *ports.Inbound, clientUUID string, spec ports.ClientSpec) error {
 	return nil
 }
-func (c *fakeXUIClient) DelClient(ctx context.Context, inboundID int, clientUUID string) error {
-	return nil
-}
 func (c *fakeXUIClient) DelClientByEmail(ctx context.Context, inboundID int, email string) error {
-	return nil
-}
-func (c *fakeXUIClient) CopyClients(ctx context.Context, srcInboundID, dstInboundID int, emails []string) error {
-	return nil
-}
-func (c *fakeXUIClient) GetClientTraffic(ctx context.Context, email string) ([]ports.ClientTraffic, error) {
-	return nil, nil
-}
-func (c *fakeXUIClient) GetInboundTraffics(ctx context.Context, id int) ([]ports.ClientTraffic, error) {
-	for _, inb := range c.inbounds {
-		if inb.ID == id {
-			return inb.ClientStats, nil
-		}
-	}
-	return nil, nil
-}
-func (c *fakeXUIClient) ResetClientTraffic(ctx context.Context, inboundID int, email string) error {
 	return nil
 }
 func (c *fakeXUIClient) GetInboundClients(ctx context.Context, inboundID int) ([]ports.ClientDetail, error) {
@@ -1011,7 +991,7 @@ func (c *fakeXUIClient) GetServerStatus(ctx context.Context) (*ports.ServerStatu
 func (c *fakeXUIClient) GetPanelUpdateInfo(ctx context.Context) (*ports.PanelUpdateInfo, error) {
 	return &ports.PanelUpdateInfo{CurrentVersion: "3.1.0", LatestVersion: "v3.1.0", UpdateAvailable: false}, nil
 }
-func (c *fakeXUIClient) UpdatePanel(ctx context.Context) error            { return nil }
+func (c *fakeXUIClient) UpdatePanel(ctx context.Context) error           { return nil }
 func (c *fakeXUIClient) InstallXray(ctx context.Context, v string) error { return nil }
 func (c *fakeXUIClient) GetXrayVersionList(ctx context.Context) ([]string, error) {
 	return []string{"v26.5.9", "v26.5.8"}, nil
@@ -1463,10 +1443,10 @@ func TestBucketStartFor_RespectsCallerLocation(t *testing.T) {
 	instant := time.Date(2026, 5, 17, 2, 0, 0, 0, sh)
 
 	cases := []struct {
-		name     string
-		in       time.Time
-		want     time.Time
-		wantLoc  *time.Location
+		name    string
+		in      time.Time
+		want    time.Time
+		wantLoc *time.Location
 	}{
 		{
 			name:    "shanghai puts the moment on 5/17",

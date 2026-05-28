@@ -4,6 +4,54 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## v3.6.2-beta.1 — 2026-05-28
+
+适配 3X-UI 3.2.0。3.2.0 把客户端管理从 inbound 作用域端点整体迁到一等公民
+`/panel/api/clients/*`，删除了 PSP 在用的 `addClient` / `delClientByEmail` /
+`getClientTraffics*` / `resetClientTraffic` / `delClient` / `copyClients`。
+**硬切：v3.6.2 起要求 3X-UI ≥ 3.2.0**（沿用 v3.5.1「硬切 ≥3.1.0」先例，自用项目可控
+对接版本）。设计与逐项映射见 `docs/3xui-3.2-clients-migration.md`。
+
+### Changed
+
+- **xui adapter 迁到 `/clients/*`**（`ports.XUIClient` 接口签名不变，服务层零改动 ——
+  新 API 按 email 寻址，而 PSP 的 `u{userID}-n{nodeID}@domain` 本就每节点唯一，天然对得上）：
+  - `AddClient` → `POST /clients/add`，body `{client, inboundIds:[id]}`。
+  - `UpdateClient` / `UpdateClientWithInbound` → `POST /clients/update/{email}`
+    （按 email、整行替换；不再读改写 inbound，`UpdateClientWithInbound` 的 GetInbound
+    优化随之失效，降级为委托 `UpdateClient`）。
+  - `DelClientByEmail` → `POST /clients/del/{email}?keepTraffic=0`。`/clients/del` 是
+    全局删，但 PSP email 每节点唯一 → 实际等价单 inbound 删；ownership 守卫在 sync 层、
+    调用前已生效，不受影响。
+  - 删除生产零调用的死方法 `DelClient` / `CopyClients` / `GetClientTraffic` /
+    `ResetClientTraffic` 及只剩 fallback 用途的 `GetInboundTraffics`，同步从
+    `ports.XUIClient`、adapter、test fake 移除。
+- **traffic poll 去掉 per-inbound fallback**：`getClientTrafficsById` 已被 3.2.0 删除；
+  `ListInbounds().clientStats` 稳定返回每 inbound 的 per-client 计数，作为唯一来源，
+  Phase 2 全程无 3X-UI 网络调用（顺手移除仅为 fallback 存在的 `pool.Get` 重解析块）。
+- **compat 矩阵 `min_xui` / `max_tested_xui` 提到 3.2.0**（`docs/compat/v3.json` 新增
+  `v3.6.2` 区间 entry，narrower-first；`v3.6.0`–`v3.6.1` 仍走 3.1.0 baseline，并标注
+  不要拿旧 PSP 对接 3.2.0）。
+
+### Added
+
+- **Servers 页「批量升级 3X-UI / Upgrade 3X-UI on selected」**：选中多台面板一键触发
+  3X-UI 自升级（镜像已有的「批量升级 Xray」，复用单端点 `POST /servers/:id/upgrade-panel`，
+  后端零改动）。**尊重版本门禁、不批量强制** —— 目标版本超出已测范围的面板被 gate 拦下
+  并计入汇总（`已发起 X / 拦截 Y / 失败 Z`），强制仍保留在单台 ⋮ 菜单逐台确认。配重启
+  警告 confirm（每台面板重启、其上用户断连 ~30–60s，各自 smoke probe）。
+  - 正确用法：先部署 v3.6.2（max_tested 提到 3.2.0）→ 全选 3.1.0 面板 → 一键升级，
+    gate 放行无需 force。
+
+### Notes
+
+- `/clients/update` 是**整行替换**（非合并）：`buildClientJSON` 已带 PSP 管理的全部字段，
+  但面板上手动加的 `comment` 等 PSP 不设的字段在更新时不再保留（PSP 托管的 client 不预期
+  有手工字段）。
+- reconcile 轴 A 的 inbound 配置回推仍走 `/inbounds/update`（读改写）；在一等公民模型下
+  「写 `settings.clients` 是否被 clients 表二次投影覆盖」需在真实 3.2.0 面板 live 验证
+  （设计文档 §4.3），本 beta 未改动该路径。
+
 ## v3.6.1 — 2026-05-28
 
 正式版。汇总 v3.6.1-beta.1 → beta.10 全部改动，beta.10 内容直发为正式版定稿

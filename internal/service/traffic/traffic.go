@@ -385,10 +385,9 @@ func (s *Service) PollOnce(ctx context.Context) error {
 	panelWG.Wait()
 	mark("Phase 1 parallel ListInbounds")
 
-	// Phase 2 — per-panel sequential processing. ListInbounds results
-	// are already in panelData; only the per-inbound fallback (for 3X-UI
-	// builds that drop clientStats from the list endpoint) is still
-	// network-bound and stays serial inside the panel scope.
+	// Phase 2 — per-panel sequential processing. ListInbounds results are
+	// already in panelData (Phase 1); Phase 2 is pure in-memory attribution of
+	// clientStats to owned clients — no further 3X-UI network calls.
 	for panelID, inbounds := range byPanel {
 		pd := panelData[panelID]
 		if pd.err != nil {
@@ -398,30 +397,14 @@ func (s *Service) PollOnce(ctx context.Context) error {
 			}
 			continue
 		}
-		c, err := s.pool.Get(panelID)
-		if err != nil {
-			// Pool entry vanished between phases — treat like a fresh
-			// fetch failure rather than panic.
-			log.Warn("traffic poll panel re-resolve", "panel_id", panelID, "err", err)
-			for _, refs := range inbounds {
-				markSkippedUsers(skipUsers, refs)
-			}
-			continue
-		}
 		statsByInbound := pd.stats
 
 		for inboundID, refs := range inbounds {
 			traffics := statsByInbound[inboundID]
-			// Per-inbound fallback if list didn't return data for this inbound.
-			if len(traffics) == 0 {
-				t, ferr := c.GetInboundTraffics(ctx, inboundID)
-				if ferr != nil {
-					log.Warn("traffic poll inbound fallback",
-						"panel_id", panelID, "inbound_id", inboundID, "err", ferr)
-				} else {
-					traffics = t
-				}
-			}
+			// 3X-UI 3.2.0 removed the per-inbound getClientTrafficsById
+			// fallback; ListInbounds clientStats (Phase 1) is the sole source
+			// and reliably carries every inbound's per-client counters. An
+			// inbound with no traffic simply yields an empty slice here.
 			trafficByEmail := make(map[string]ports.ClientTraffic, len(traffics))
 			for _, t := range traffics {
 				trafficByEmail[t.Email] = t

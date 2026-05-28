@@ -44,11 +44,13 @@ type Client struct {
 	authed bool
 
 	// inboundWriteLocks serializes read-modify-write inbound updates per
-	// inbound ID within this process. UpdateClient/UpdateInbound GET the whole
-	// inbound, mutate settings.clients[], and POST it back; two concurrent
-	// writers on the same inbound (e.g. traffic poll and reconcile) would each
+	// inbound ID within this process. UpdateInbound GETs the whole inbound,
+	// re-injects settings.clients[], and POSTs it back; two concurrent writers
+	// on the same inbound (e.g. reconcile axis-A and a node edit) would each
 	// act on the same snapshot and the later POST would silently drop the
-	// earlier change. inboundWriteMu guards the map itself.
+	// earlier change. inboundWriteMu guards the map itself. (Client writes no
+	// longer use this — 3.2.0's /clients/* endpoints are email-keyed and need
+	// no inbound read-modify-write.)
 	inboundWriteMu    sync.Mutex
 	inboundWriteLocks map[int]*sync.Mutex
 }
@@ -289,123 +291,69 @@ func (c *Client) SetInboundEnable(ctx context.Context, id int, enable bool) erro
 	return c.doJSON(ctx, http.MethodPost, "/panel/api/inbounds/setEnable/"+strconv.Itoa(id), body, nil)
 }
 
-// --- Client (read-modify-write) ---
+// --- Client (3X-UI 3.2.0 first-class /clients/* API) ---
+//
+// 3.2.0 removed the inbound-scoped per-client endpoints (addClient,
+// delClient*, copyClients, getClientTraffics*, resetClientTraffic) and made
+// clients first-class entities keyed by their panel-wide unique email. PSP's
+// u{userID}-n{nodeID}@domain scheme keeps that email unique per (panel,
+// inbound), so the inboundID / clientUUID arguments below are vestigial —
+// retained only for source-compatibility with existing callers. See
+// docs/3xui-3.2-clients-migration.md.
 
-// AddClient appends spec to inbound.settings.clients[] without disturbing any
-// existing entry. The 3X-UI /addClient endpoint accepts an Inbound object
-// whose settings.clients[] contains only the rows to be added; the server
-// merges them into the live config.
+// AddClient creates a first-class client and attaches it to inboundID in one
+// call (POST /clients/add, body {client, inboundIds}). Per-protocol secrets
+// present in spec are sent verbatim; the panel generates any omitted ones.
 func (c *Client) AddClient(ctx context.Context, inboundID int, spec ports.ClientSpec) error {
 	clientJSON, err := buildClientJSON(spec)
 	if err != nil {
 		return err
 	}
-	settings := map[string]any{
-		"clients": []json.RawMessage{clientJSON},
-	}
-	settingsJSON, _ := json.Marshal(settings)
 	body := map[string]any{
-		"id":       inboundID,
-		"settings": string(settingsJSON),
+		"client":     json.RawMessage(clientJSON),
+		"inboundIds": []int{inboundID},
 	}
-	return c.doJSON(ctx, http.MethodPost, "/panel/api/inbounds/addClient", body, nil)
+	return c.doJSON(ctx, http.MethodPost, "/panel/api/clients/add", body, nil)
 }
 
-// UpdateClient replaces the client identified by clientUUID with the values
-// in spec. clientUUID is the value of client.id / uuid.
+// UpdateClient replaces the client keyed by spec.Email (POST
+// /clients/update/{email}); the change propagates to every inbound the client
+// is attached to. Full-replace semantics: the body carries the complete
+// intended state (buildClientJSON emits every field PSP manages), so fields
+// PSP does not set — e.g. a manually-added comment — are not preserved. A
+// UUID rotation is simply a new "id" under the unchanged email, so the old
+// clientUUID argument is unused.
 func (c *Client) UpdateClient(ctx context.Context, inboundID int, clientUUID string, spec ports.ClientSpec) error {
-	defer c.lockInbound(inboundID)()
-	inb, err := c.GetInbound(ctx, inboundID)
+	if spec.Email == "" {
+		return fmt.Errorf("UpdateClient: spec.Email is required (3.2.0 keys clients by email)")
+	}
+	clientJSON, err := buildClientJSON(spec)
 	if err != nil {
 		return err
 	}
-	return c.updateClientWithInboundLocked(ctx, inb, clientUUID, spec)
+	path := "/panel/api/clients/update/" + url.PathEscape(spec.Email)
+	return c.doJSON(ctx, http.MethodPost, path, json.RawMessage(clientJSON), nil)
 }
 
-// UpdateClientWithInbound is UpdateClient with a pre-fetched inbound —
-// saves the GetInbound round-trip when the caller already has the
-// inbound in hand (e.g. traffic-poll push phase, reconcile drift fix).
+// UpdateClientWithInbound delegated to a read-modify-write of the inbound in
+// the ≤3.1.x era to save a GetInbound round-trip. 3.2.0 updates clients by
+// email with no inbound read, so the pre-fetched inbound is unused; this
+// delegates to UpdateClient. Kept for caller source-compatibility.
 func (c *Client) UpdateClientWithInbound(ctx context.Context, inb *ports.Inbound, clientUUID string, spec ports.ClientSpec) error {
 	if inb == nil {
 		return fmt.Errorf("UpdateClientWithInbound: inb is nil")
 	}
-	defer c.lockInbound(inb.ID)()
-	return c.updateClientWithInboundLocked(ctx, inb, clientUUID, spec)
+	return c.UpdateClient(ctx, inb.ID, clientUUID, spec)
 }
 
-func (c *Client) updateClientWithInboundLocked(ctx context.Context, inb *ports.Inbound, clientUUID string, spec ports.ClientSpec) error {
-	settings, err := updateClientInSettings(inb.Settings, clientUUID, spec)
-	if err != nil {
-		return err
-	}
-	inboundSpec := ports.InboundSpec{
-		Remark:         inb.Remark,
-		Enable:         inb.Enable,
-		Listen:         inb.Listen,
-		Port:           inb.Port,
-		Protocol:       inb.Protocol,
-		Settings:       settings,
-		StreamSettings: inb.StreamSettings,
-		Sniffing:       inb.Sniffing,
-		Allocate:       inb.Allocate,
-		ExpiryTime:     inb.ExpiryTime,
-	}
-	body := specToRaw(&inboundSpec, inb.ID)
-	return c.doJSON(ctx, http.MethodPost, "/panel/api/inbounds/update/"+strconv.Itoa(inb.ID), body, nil)
-}
-
-func (c *Client) DelClient(ctx context.Context, inboundID int, clientUUID string) error {
-	path := fmt.Sprintf("/panel/api/inbounds/%d/delClient/%s", inboundID, clientUUID)
-	return c.doJSON(ctx, http.MethodPost, path, nil, nil)
-}
-
+// DelClientByEmail deletes the client by its panel-wide email key (POST
+// /clients/del/{email}). This removes the client from every inbound it is
+// attached to — for PSP that is exactly one, since the email encodes the
+// node. keepTraffic=0 drops the xray traffic row too; PSP keeps its own
+// accounting. The ownership guard in sync.DelOwnedClient runs before this, so
+// only PSP-managed clients ever reach here.
 func (c *Client) DelClientByEmail(ctx context.Context, inboundID int, email string) error {
-	path := fmt.Sprintf("/panel/api/inbounds/%d/delClientByEmail/%s", inboundID, url.PathEscape(email))
-	return c.doJSON(ctx, http.MethodPost, path, nil, nil)
-}
-
-func (c *Client) CopyClients(ctx context.Context, srcInboundID, dstInboundID int, emails []string) error {
-	body := map[string]any{
-		"sourceInboundId": srcInboundID,
-		// 3X-UI's copyClients reads the email list from "clientEmails" (an
-		// empty list means "copy all"). The field used to be "emails", which
-		// 3X-UI ignored — so a selective copy silently became a copy-all.
-		"clientEmails": emails,
-	}
-	path := fmt.Sprintf("/panel/api/inbounds/%d/copyClients", dstInboundID)
-	return c.doJSON(ctx, http.MethodPost, path, body, nil)
-}
-
-// --- Traffic ---
-
-func (c *Client) GetClientTraffic(ctx context.Context, email string) ([]ports.ClientTraffic, error) {
-	var raw json.RawMessage
-	path := "/panel/api/inbounds/getClientTraffics/" + url.PathEscape(email)
-	if err := c.doJSON(ctx, http.MethodGet, path, nil, &raw); err != nil {
-		return nil, err
-	}
-	raws, err := decodeTrafficObj(raw)
-	if err != nil {
-		return nil, fmt.Errorf("decode client traffic: %w", err)
-	}
-	return rawTrafficsToPorts(raws), nil
-}
-
-func (c *Client) GetInboundTraffics(ctx context.Context, id int) ([]ports.ClientTraffic, error) {
-	var raw json.RawMessage
-	path := "/panel/api/inbounds/getClientTrafficsById/" + strconv.Itoa(id)
-	if err := c.doJSON(ctx, http.MethodGet, path, nil, &raw); err != nil {
-		return nil, err
-	}
-	raws, err := decodeTrafficObj(raw)
-	if err != nil {
-		return nil, fmt.Errorf("decode inbound traffic: %w", err)
-	}
-	return rawTrafficsToPorts(raws), nil
-}
-
-func (c *Client) ResetClientTraffic(ctx context.Context, inboundID int, email string) error {
-	path := fmt.Sprintf("/panel/api/inbounds/%d/resetClientTraffic/%s", inboundID, url.PathEscape(email))
+	path := "/panel/api/clients/del/" + url.PathEscape(email) + "?keepTraffic=0"
 	return c.doJSON(ctx, http.MethodPost, path, nil, nil)
 }
 
@@ -605,28 +553,6 @@ func rawTrafficsToPorts(raws []rawClientTraffic) []ports.ClientTraffic {
 	return out
 }
 
-func decodeTrafficObj(raw json.RawMessage) ([]rawClientTraffic, error) {
-	trimmed := bytes.TrimSpace(raw)
-	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
-		return nil, nil
-	}
-	if trimmed[0] == '[' {
-		var raws []rawClientTraffic
-		if err := json.Unmarshal(trimmed, &raws); err != nil {
-			return nil, err
-		}
-		return raws, nil
-	}
-	var one rawClientTraffic
-	if err := json.Unmarshal(trimmed, &one); err != nil {
-		return nil, err
-	}
-	if one.Email == "" && one.ID == 0 && one.InboundID == 0 && one.Up == 0 && one.Down == 0 && one.Total == 0 {
-		return nil, nil
-	}
-	return []rawClientTraffic{one}, nil
-}
-
 func (c *Client) settingsWithCurrentClients(ctx context.Context, inboundID int, nextSettings string) (string, error) {
 	// Empty/blank input would previously short-circuit and reach 3X-UI as a
 	// literal empty settings — which can wipe every live client. Treat it as
@@ -662,48 +588,6 @@ func replaceSettingsClients(nextSettings, currentSettings string) (string, error
 	return string(b), nil
 }
 
-func updateClientInSettings(settingsJSON, clientUUID string, spec ports.ClientSpec) (string, error) {
-	var settings map[string]any
-	if err := json.Unmarshal([]byte(settingsJSON), &settings); err != nil {
-		return "", fmt.Errorf("decode inbound settings: %w", err)
-	}
-	clients, err := clientsFromSettings(settingsJSON)
-	if err != nil {
-		return "", err
-	}
-	if len(clients) == 0 {
-		return "", fmt.Errorf("client not found in inbound settings: email=%s id=%s", spec.Email, clientUUID)
-	}
-	clientJSON, err := buildClientJSON(spec)
-	if err != nil {
-		return "", err
-	}
-	var nextClient map[string]any
-	if err := json.Unmarshal(clientJSON, &nextClient); err != nil {
-		return "", err
-	}
-	for i, existing := range clients {
-		if !clientMatches(existing, clientUUID, spec.Email) {
-			continue
-		}
-		merged := make(map[string]any, len(existing)+len(nextClient))
-		for k, v := range existing {
-			merged[k] = v
-		}
-		for k, v := range nextClient {
-			merged[k] = v
-		}
-		clients[i] = merged
-		settings["clients"] = clients
-		b, err := json.Marshal(settings)
-		if err != nil {
-			return "", err
-		}
-		return string(b), nil
-	}
-	return "", fmt.Errorf("client not found in inbound settings: email=%s id=%s", spec.Email, clientUUID)
-}
-
 func clientsFromSettings(settingsJSON string) ([]map[string]any, error) {
 	if strings.TrimSpace(settingsJSON) == "" {
 		return nil, nil
@@ -715,22 +599,6 @@ func clientsFromSettings(settingsJSON string) ([]map[string]any, error) {
 		return nil, fmt.Errorf("decode inbound settings: %w", err)
 	}
 	return settings.Clients, nil
-}
-
-func clientMatches(client map[string]any, id, email string) bool {
-	if id != "" && stringValue(client["id"]) == id {
-		return true
-	}
-	return email != "" && stringValue(client["email"]) == email
-}
-
-func stringValue(v any) string {
-	switch x := v.(type) {
-	case string:
-		return x
-	default:
-		return fmt.Sprint(x)
-	}
 }
 
 // buildClientJSON serializes a ClientSpec into the JSON shape 3X-UI expects.
