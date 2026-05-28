@@ -576,6 +576,12 @@ export default function ServersView() {
           'warning',
         )
       }
+      // Panel upgrade restarts each selected panel (disruptive — drops every
+      // user on it). Clear the selection on completion so an accidental
+      // immediate re-click can't re-fire it without fresh intent, mirroring
+      // batchDeleteServers. (batchUpgradeXray/batchRunTest keep their selection
+      // — they're non-disruptive and re-running them is harmless.)
+      setSelected(new Set())
     } finally {
       setBatchBusy('')
     }

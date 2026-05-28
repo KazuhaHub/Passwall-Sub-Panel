@@ -131,7 +131,12 @@ export interface UpgradePanelResult {
 // so the trail makes it obvious which upgrades bypassed the gate.
 export async function upgradePanel(id: number, opts?: { force?: boolean }) {
   const body = opts?.force ? { force: true } : {}
-  const { data } = await client.post<UpgradePanelResult>(`/admin/servers/${id}/upgrade-panel`, body)
+  // _skipErrorToast: the callers (runUpgradePanel's two-step gate +
+  // batchUpgradePanel's aggregate summary) own all messaging. Without this the
+  // global interceptor fires a raw "Request failed with status code 409" toast
+  // on the EXPECTED untested_target gate — clashing with the intentional
+  // confirm dialog / the batch's "blocked" summary.
+  const { data } = await client.post<UpgradePanelResult>(`/admin/servers/${id}/upgrade-panel`, body, { _skipErrorToast: true })
   return data
 }
 
@@ -147,7 +152,10 @@ export interface UpgradeXrayResult {
 // or a specific tag like "v25.10.31" to pin a release.
 export async function upgradeXray(id: number, version?: string) {
   const body = version ? { version } : {}
-  const { data } = await client.post<UpgradeXrayResult>(`/admin/servers/${id}/upgrade-xray`, body)
+  // _skipErrorToast: submitXrayUpgrade and batchUpgradeXray own their own
+  // toasts (a single-row catch + an aggregate summary); the global interceptor
+  // would otherwise double-toast each failure.
+  const { data } = await client.post<UpgradeXrayResult>(`/admin/servers/${id}/upgrade-xray`, body, { _skipErrorToast: true })
   return data
 }
 
