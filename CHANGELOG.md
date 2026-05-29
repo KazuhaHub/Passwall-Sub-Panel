@@ -4,6 +4,28 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## v3.6.2-beta.3 — 2026-05-28
+
+审计后续:对 3 个 critic 标出的 HIGH 做对抗验证 —— 2 个证伪、1 个确认(降为 MEDIUM)并修复。
+证伪的两个:pool 凭据轮换 `Remove`+`Add` 非原子(窗口亚毫秒且良性,`xui.New()` 不做校验 /
+网络 IO,坏凭据不会让 `Add` 失败,所谓"永久注销"前提不成立);`psp migrate` 不支持 Postgres
+(不可达 —— migrator 只做 ≤v2.5.x→v3.0.0,而 PG 支持比 v3.0.0 晚两天落地,不存在 legacy PG 源库)。
+
+### Fixed
+
+- **被取消的同步任务仍会执行 3X-UI 副作用**(MEDIUM)── `MarkRunning` 用
+  `.Updates(...).Error` 丢弃 `RowsAffected`,GORM 命中 0 行不报错。admin 在
+  `ListDue`(选 Pending)→ `MarkRunning`(置 Running WHERE Pending)的窗口里点"取消",
+  `MarkRunning` 实际 0 行却返回 nil,循环照样跑 `runUserTask` / `runNodeTask` /
+  `processMailTask`,把 admin 刚取消的不可逆远程操作(删 inbound / 推配置 / 启停 / 发信)
+  执行掉。修:`MarkRunning` 改返回 `(claimed bool, err)`(用 `RowsAffected`),user / node /
+  mailer 三个 ProcessDueTasks 循环在 `!claimed` 时 `continue` 跳过副作用。补 repo 单测
+  (Pending → claimed;Canceled → not-claimed 且不复活)。
+- **单个任务记账 DB 出错会停掉整批 due task**(健壮性)── 三个循环里
+  `MarkRunning` / `Cancel` / `MarkRetry` / `MarkSucceeded` 任一出错原本 `return` 整批退出,
+  一次瞬时 DB 抖动就跳过本 tick 其余所有到期任务。改成 log + `continue`:出错的任务保持
+  Pending、下个 tick(30s)重试,不连累同批其它任务。
+
 ## v3.6.2-beta.2 — 2026-05-28
 
 多 agent 审计(覆盖迁移 + 鉴权 / `/sub` 热路径 / 数据层等)后的修复批。每条都经
