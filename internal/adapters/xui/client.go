@@ -632,6 +632,13 @@ func clientsFromSettings(settingsJSON string) ([]map[string]any, error) {
 // Field names follow the 3X-UI XrayClient model:
 // id / email / enable / flow / limitIp / totalGB / expiryTime / subId / tgId / reset / password / method
 func buildClientJSON(s ports.ClientSpec) (json.RawMessage, error) {
+	// 3X-UI 3.2.0 types tgId as int64 and rejects a JSON string ("cannot
+	// unmarshal string into ... tgId of type int64"), so /clients/add and
+	// /clients/update fail outright if tgId is sent as a string. PSP never
+	// uses 3X-UI's Telegram integration, so emit the numeric form (0 when
+	// unset; parse defensively for any non-empty value). Verified against a
+	// live 3.2.0 panel — see docs/3xui-3.2-clients-migration.md §P2.
+	tgID, _ := strconv.Atoi(s.TgID)
 	obj := map[string]any{
 		"email":      s.Email,
 		"enable":     s.Enable,
@@ -639,7 +646,7 @@ func buildClientJSON(s ports.ClientSpec) (json.RawMessage, error) {
 		"totalGB":    s.TotalGB,
 		"expiryTime": s.ExpiryTime,
 		"subId":      s.SubID,
-		"tgId":       s.TgID,
+		"tgId":       tgID,
 		"reset":      s.Reset,
 	}
 	if s.ID != "" {

@@ -146,6 +146,12 @@ func TestAddClientPostsToClientsAdd(t *testing.T) {
 	if body.Client["email"] != "u3-n9@psp.local" || body.Client["id"] != "uuid-1" {
 		t.Fatalf("client = %#v", body.Client)
 	}
+	// tgId MUST serialize as a JSON number, not a string — 3X-UI 3.2.0 rejects
+	// a string with "cannot unmarshal string into ... tgId of type int64",
+	// which would fail every add/update. (Verified live against 3.2.0.)
+	if _, isStr := body.Client["tgId"].(string); isStr {
+		t.Fatalf("tgId must be a JSON number, not a string: %#v", body.Client["tgId"])
+	}
 }
 
 func TestUpdateClientPostsToClientsUpdateByEmail(t *testing.T) {
