@@ -1240,12 +1240,14 @@
       "batch_deleted": "已删除 {{count}} 台服务器",
       "batch_partial": "已删除 {{ok}} 台服务器，失败 {{fail}} 台",
       "upgrade_panel_started": "已发起 3X-UI 升级到 {{target}}，约 60 秒后 Passwall Panel 跑 smoke probe，结果写入 audit log",
+      "upgrade_panel_already_latest": "已是最新版（{{version}}），无需升级",
       "upgrade_panel_blocked": "拒绝升级：目标版本 {{latest}} 超出 Passwall Panel 测试范围（最高 {{max}}），请先升级 Passwall Panel",
       "upgrade_xray_ok": "Xray 已升级到 {{version}}",
       "batch_upgrade_xray_ok": "已升级 {{count}} 台 Xray 到最新版",
       "batch_upgrade_xray_partial": "已升级 {{ok}} 台 Xray，失败 {{fail}} 台",
       "batch_upgrade_panel_ok": "已发起 {{count}} 台 3X-UI 升级，约 60 秒后各自跑 smoke probe（结果见 audit log）",
-      "batch_upgrade_panel_partial": "已发起 {{ok}} 台；{{blocked}} 台目标超出已测范围被拦截（可逐台强制）；{{fail}} 台失败"
+      "batch_upgrade_panel_ok_latest": "已发起 {{count}} 台 3X-UI 升级；{{latest}} 台已是最新、跳过",
+      "batch_upgrade_panel_partial": "已发起 {{ok}} 台；{{latest}} 台已是最新；{{blocked}} 台超出已测范围被拦截（可逐台强制）；{{fail}} 台失败"
     },
     "confirm": {
       "delete_title": "删除服务器",

@@ -1240,12 +1240,14 @@
       "batch_deleted": "Deleted {{count}} servers",
       "batch_partial": "Deleted {{ok}} servers, {{fail}} failed",
       "upgrade_panel_started": "3X-UI upgrade to {{target}} initiated; Passwall Panel will run a smoke probe in ~60s and log success/failure to the audit trail.",
+      "upgrade_panel_already_latest": "Already on the latest version ({{version}}); nothing to upgrade.",
       "upgrade_panel_blocked": "Upgrade refused: target {{latest}} is outside Passwall Panel's tested range (highest {{max}}). Upgrade Passwall Panel first.",
       "upgrade_xray_ok": "Xray upgraded to {{version}}",
       "batch_upgrade_xray_ok": "Upgraded Xray on {{count}} server(s) to latest",
       "batch_upgrade_xray_partial": "Upgraded Xray on {{ok}} server(s); {{fail}} failed",
       "batch_upgrade_panel_ok": "Initiated 3X-UI upgrade on {{count}} server(s); each runs a smoke probe in ~60s (results in the audit log)",
-      "batch_upgrade_panel_partial": "Initiated {{ok}}; {{blocked}} blocked (target outside tested range — force per-panel); {{fail}} failed"
+      "batch_upgrade_panel_ok_latest": "Initiated 3X-UI upgrade on {{count}} server(s); {{latest}} already on the latest version (skipped)",
+      "batch_upgrade_panel_partial": "Initiated {{ok}}; {{latest}} already latest; {{blocked}} blocked (target outside tested range — force per-panel); {{fail}} failed"
     },
     "confirm": {
       "delete_title": "Delete server",

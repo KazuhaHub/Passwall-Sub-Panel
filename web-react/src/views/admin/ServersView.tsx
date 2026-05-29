@@ -255,13 +255,23 @@ export default function ServersView() {
         if (!ok) return // finally clears setUpgrading
       }
       const r = await upgradePanel(s.id, { force })
-      pushSnack(
-        t('admin:servers.toast.upgrade_panel_started', {
-          target: r.target_version ?? '?',
-          defaultValue: '已发起 3X-UI 升级到 {{target}}，约 60 秒后 Passwall Panel 跑 smoke probe，结果写入 audit log',
-        }),
-        'success',
-      )
+      if (r.already_latest) {
+        pushSnack(
+          t('admin:servers.toast.upgrade_panel_already_latest', {
+            version: r.current_version ?? '',
+            defaultValue: '已是最新版（{{version}}），无需升级',
+          }),
+          'success',
+        )
+      } else {
+        pushSnack(
+          t('admin:servers.toast.upgrade_panel_started', {
+            target: r.target_version ?? '?',
+            defaultValue: '已发起 3X-UI 升级到 {{target}}，约 60 秒后 Passwall Panel 跑 smoke probe，结果写入 audit log',
+          }),
+          'success',
+        )
+      }
     } catch (err) {
       const resp = (err as { response?: { status?: number; data?: {
         reason?: string
@@ -551,27 +561,37 @@ export default function ServersView() {
     try {
       const results = await Promise.allSettled(rows.map(r => upgradePanel(r.id)))
       let initiated = 0
+      let alreadyLatest = 0
       let blocked = 0
       let failed = 0
       results.forEach(res => {
-        if (res.status === 'fulfilled') { initiated++; return }
+        if (res.status === 'fulfilled') {
+          if (res.value?.already_latest) alreadyLatest++
+          else initiated++
+          return
+        }
         const resp = (res.reason as { response?: { status?: number; data?: { reason?: string } } }).response
         if (resp?.status === 409 && resp.data?.reason === 'untested_target') blocked++
         else failed++
       })
       if (blocked === 0 && failed === 0) {
         pushSnack(
-          t('admin:servers.toast.batch_upgrade_panel_ok', {
-            count: initiated,
-            defaultValue: '已发起 {{count}} 台 3X-UI 升级，约 60 秒后各自跑 smoke probe（结果见 audit log）',
-          }),
+          alreadyLatest > 0
+            ? t('admin:servers.toast.batch_upgrade_panel_ok_latest', {
+                count: initiated, latest: alreadyLatest,
+                defaultValue: '已发起 {{count}} 台 3X-UI 升级；{{latest}} 台已是最新、跳过',
+              })
+            : t('admin:servers.toast.batch_upgrade_panel_ok', {
+                count: initiated,
+                defaultValue: '已发起 {{count}} 台 3X-UI 升级，约 60 秒后各自跑 smoke probe（结果见 audit log）',
+              }),
           'success',
         )
       } else {
         pushSnack(
           t('admin:servers.toast.batch_upgrade_panel_partial', {
-            ok: initiated, blocked, fail: failed,
-            defaultValue: '已发起 {{ok}} 台；{{blocked}} 台目标超出已测范围被拦截（可逐台强制）；{{fail}} 台失败',
+            ok: initiated, latest: alreadyLatest, blocked, fail: failed,
+            defaultValue: '已发起 {{ok}} 台；{{latest}} 台已是最新；{{blocked}} 台超出已测范围被拦截（可逐台强制）；{{fail}} 台失败',
           }),
           'warning',
         )

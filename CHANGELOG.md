@@ -4,6 +4,27 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## v3.6.2-beta.8 — 2026-05-28
+
+### Fixed
+
+- **MySQL 部署上所有关键词搜索报 1064 语法错误**(日志 / 用户 / 节点 / 分组 / 面板等全部失效)──
+  keyword 搜索统一用的 `likeCols` 生成了 `LIKE ? ESCAPE '\'`,而反斜杠在 MySQL 字符串字面量里是
+  转义符,`'\'` 把闭合引号转义掉 → 整条 SQL 语法错误;SQLite / Postgres 把反斜杠当字面量,所以
+  本地默认 SQLite 后端从没暴露。把 LIKE 转义字符从 `\` 换成 `!`(三种方言里都是普通字面量),一处
+  `likeEscapeChar` 跨所有后端通用,8 个搜索仓库自动跟修。补单测直接断言生成的 SQL 不含反斜杠、用
+  `ESCAPE '!'`,挡住未来误改回去。
+- **3X-UI < 3.2.0 的面板不报 too_old 警告** ── v3.6.2 把 client 适配硬切到 3.2.0 的 `/clients/*`
+  API,但运行时最低版本其实从没抬到 3.2.0:`docs/compat/v3.json` 的 `min_xui` 改了却没接入运行时,
+  代码里的 `MinXUI` const 也漏改(还停在 3.1.0),于是 3.1.0 面板被当 supported、无警告。修:`MinXUI`
+  抬到 3.2.0,并把 JSON 的 `min_xui` 接入运行时(`ActiveMinXUI() = max(const, JSON)` 作安全网,只升
+  不降);新增 `TestMinXUIConstMatchesCompatJSON` 一致性测试 —— const 与 JSON 的 `min_xui` 一旦 drift
+  就让 `go test` 红,杜绝"改一处忘另一处"。
+- **批量 / 单台远程升级 3X-UI 时,已是最新版的面板被算作"失败"** ── `UpgradePanel` 对
+  `updateAvailable=false` 的面板仍调用 `updatePanel`,3X-UI 无更新可做 → 报错,前端 toast 把它计入
+  "N failed"(一台已在 3.2.0 的面板就会触发)。`UpgradePanel` 在 `!info.UpdateAvailable` 时直接短路
+  返回 `already_latest`;前端单台显示"已是最新版",批量把"已最新"单独计数,不再混进失败数。
+
 ## v3.6.2-beta.7 — 2026-05-28
 
 审计 LOW 收尾(选定 3 项;其余 nit / 不可达的跳过)。

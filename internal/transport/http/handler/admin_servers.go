@@ -343,6 +343,21 @@ func (h *AdminServersHandler) UpgradePanel(c *gin.Context) {
 		c.JSON(http.StatusBadGateway, gin.H{"error": "Failed to query 3X-UI update info: " + err.Error()})
 		return
 	}
+	if !info.UpdateAvailable {
+		// Already on the latest release — fire nothing. /server/updatePanel on
+		// an up-to-date panel is a no-op that 3X-UI reports as an error, which
+		// otherwise surfaces as a spurious "upgrade failed" (the common
+		// select-all-and-upgrade case for a panel already at the target). No
+		// audit row: nothing happened.
+		c.JSON(http.StatusOK, gin.H{
+			"ok":              true,
+			"already_latest":  true,
+			"current_version": info.CurrentVersion,
+			"latest_version":  info.LatestVersion,
+			"message":         "Panel is already on the latest version (" + info.CurrentVersion + "); nothing to upgrade.",
+		})
+		return
+	}
 	compat := version.CheckXUI(info.LatestVersion)
 	if compat != version.CompatSupported && !req.Force {
 		// Refuse: latest is outside the currently-loaded tested range
@@ -504,7 +519,7 @@ func (h *AdminServersHandler) runPostUpgradeSmoke(ctx context.Context, panelID i
 		// cancelled, so audit.Insert on it would fail) so the audit
 		// trail doesn't dead-end at panel_upgrade_initiated and admin
 		// can see the upgrade never got its smoke probe.
-		h.writeSmokeAudit(context.Background(),"panel_upgrade_aborted", panelID, panelName, targetVersion,
+		h.writeSmokeAudit(context.Background(), "panel_upgrade_aborted", panelID, panelName, targetVersion,
 			"smoke probe cancelled (PSP shutdown?) during initial grace window — admin should manually verify the panel via test/Servers page")
 		return
 	}
@@ -517,7 +532,7 @@ func (h *AdminServersHandler) runPostUpgradeSmoke(ctx context.Context, panelID i
 	var lastErr error
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		if ctx.Err() != nil {
-			h.writeSmokeAudit(context.Background(),"panel_upgrade_aborted", panelID, panelName, targetVersion,
+			h.writeSmokeAudit(context.Background(), "panel_upgrade_aborted", panelID, panelName, targetVersion,
 				"smoke probe cancelled (PSP shutdown?) during retry loop on attempt "+strconv.Itoa(attempt)+" — admin should manually verify")
 			return
 		}

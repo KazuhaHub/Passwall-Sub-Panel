@@ -110,6 +110,11 @@ export async function testServer(id: number) {
 export interface UpgradePanelResult {
   ok: boolean
   started?: boolean
+  // already_latest: the panel was already on the newest release, so nothing
+  // was fired (200, not a failure). Lets the UI report "already latest"
+  // instead of counting it as initiated/failed.
+  already_latest?: boolean
+  current_version?: string
   target_version?: string
   message?: string
   reason?: string
