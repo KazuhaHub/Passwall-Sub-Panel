@@ -36,10 +36,10 @@ const (
 // User is the panel-side logical user. One User maps to multiple 3X-UI clients
 // (one per authorized inbound) via the ownership table.
 type User struct {
-	ID                 int64
-	UPN                string // display + local-login username; not used as SSO lookup key anymore
-	Email              string // notification recipient; SSO uses the Email claim, not UPN
-	PasswordHash       string // bcrypt; present when the account has local-password login
+	ID           int64
+	UPN          string // display + local-login username; not used as SSO lookup key anymore
+	Email        string // notification recipient; SSO uses the Email claim, not UPN
+	PasswordHash string // bcrypt; present when the account has local-password login
 	// SSOProvider is the SSO connection this account is bound to. "local"
 	// for local-password accounts; "saml:<name>" / "oidc:<name>" once a
 	// first-time SSO login has linked the row to an external identity.
@@ -50,7 +50,7 @@ type User struct {
 	// SAML, the `sub` claim for OIDC. For local accounts we store the
 	// UPN here so the (provider, subject) composite remains unique
 	// across local rows too — no NULL handling needed.
-	SSOSubject string
+	SSOSubject         string
 	Role               Role
 	SubToken           string // 32-byte base64url, subscription URL credential
 	UUID               string // v4, used as the derivation seed for proxy passwords
@@ -103,7 +103,7 @@ type User struct {
 	// acted. The sub handler counts at most one violation per dedup window.
 	LastBlockViolationAt *time.Time
 	EmergencyUsedCount   int
-	EmergencyUntil      *time.Time
+	EmergencyUntil       *time.Time
 	// EmergencyBaselineBytes snapshots LifetimeTotalBytes at the moment an
 	// emergency-access window was granted. The traffic poll uses it to compute
 	// "bytes consumed during this emergency window" and ends the window early
@@ -124,8 +124,8 @@ type User struct {
 	// doesn't exist). Pointer so "never seen" is distinguishable from
 	// "seen at unix epoch 0".
 	LastOnlineAt *time.Time
-	CreatedAt           time.Time
-	UpdatedAt           time.Time
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
 }
 
 // IsExpired reports whether ExpireAt is non-nil and earlier than t.
@@ -149,6 +149,24 @@ func (u *User) PeriodUsed() int64 {
 
 func (u *User) IsExpired(t time.Time) bool {
 	return u.ExpireAt != nil && t.After(*u.ExpireAt)
+}
+
+// EmergencyQuotaExhausted reports whether the user is inside an ACTIVE
+// emergency-access window (granted after a traffic-exceeded auto-disable) yet
+// has already spent the per-window quota. quotaBytes <= 0 means "no per-window
+// cap" → never exhausted. The time-expired case (t >= EmergencyUntil) returns
+// false here — that's handled separately as window-expiry. This mirrors the
+// traffic-poll teardown / emergencyFloor math (used = LifetimeTotalBytes -
+// EmergencyBaselineBytes, exhausted when used >= quotaBytes) so the /sub gate
+// and the poll can't drift.
+func (u *User) EmergencyQuotaExhausted(quotaBytes int64, t time.Time) bool {
+	if quotaBytes <= 0 || u.EmergencyUntil == nil || !t.Before(*u.EmergencyUntil) {
+		return false
+	}
+	if u.AutoDisabledReason != DisabledTrafficExceeded {
+		return false
+	}
+	return u.LifetimeTotalBytes-u.EmergencyBaselineBytes >= quotaBytes
 }
 
 // EffectiveEnabled is the value the panel should publish to 3X-UI for the
@@ -335,18 +353,18 @@ type Node struct {
 	// protocol-specific fields (e.g. Flow is VLESS-only) without a live
 	// 3X-UI fetch. Populated on import / create / inbound edit; empty for
 	// rows written before this column existed (treated as "unknown").
-	Protocol      string
+	Protocol string
 	// Port caches the upstream inbound's listen port so the health checker can
 	// TCP-probe ServerAddress:Port without a live 3X-UI lookup (and still
 	// probe when the panel's admin API is temporarily down). Refreshed from
 	// the inbound on each health pass. 0 = not yet learned.
-	Port          int
-	Region        string
-	Tags          []string
-	SortOrder     int
-	Enabled       bool
-	Kind          NodeKind
-	CreatedAt     time.Time
+	Port      int
+	Region    string
+	Tags      []string
+	SortOrder int
+	Enabled   bool
+	Kind      NodeKind
+	CreatedAt time.Time
 	// LifetimeUpBytes / LifetimeDownBytes / LifetimeTotalBytes accumulate
 	// monotonically across 3X-UI counter resets, mirroring the user-level
 	// fields. Updated by the traffic poll worker.

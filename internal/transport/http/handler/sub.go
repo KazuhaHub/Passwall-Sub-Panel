@@ -99,6 +99,15 @@ func (h *SubHandler) Get(c *gin.Context) {
 		log.Info("sub: blocked", "user_id", u.ID, "reason", "emergency_expired")
 		c.String(http.StatusNotFound, "")
 		return
+	case u.EmergencyQuotaExhausted(int64(settings.EmergencyAccessQuotaGB*1024*1024*1024), now):
+		// Emergency window still time-valid, but the per-window quota is spent.
+		// The traffic poll only tears the window down on its next cycle (up to
+		// minutes away); without this gate /sub keeps serving a working config
+		// in that gap. The predicate mirrors user.emergencyFloor / the poll
+		// teardown so the two enforcement layers can't drift.
+		log.Info("sub: blocked", "user_id", u.ID, "reason", "emergency_quota_exhausted")
+		c.String(http.StatusNotFound, "")
+		return
 	case !u.Enabled:
 		log.Info("sub: blocked", "user_id", u.ID, "reason", "disabled",
 			"auto_reason", string(u.AutoDisabledReason))
