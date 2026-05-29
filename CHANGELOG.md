@@ -4,6 +4,33 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## v3.6.2-beta.6 — 2026-05-28
+
+对审计 critic 标出的 4 个 MEDIUM 做对抗验证:Shutdown 派发竞态、rollup 全表读内存均**证伪**
+(impact 前提不可达);secret-key 复用 jwt_secret **确认**(MEDIUM)、启动版本探测 single-flight
+**确认**(nit),两个真的都修了。
+
+### Fixed
+
+- **轮换 jwt_secret 会让落盘密钥启动时解不开、且报错误导**(MEDIUM,审计发现)── legacy 配置
+  (无独立 `encryption_key`)下 `jwt_secret` 兼作 at-rest 加密 key,而生成的 config 注释还鼓励轮换
+  `jwt_secret`、没提这个副作用。轮换后 SAML/OIDC/SMTP/3X-UI 落盘密钥 GCM 解密失败 → 启动中止,报
+  "decrypt database secret" 这种不指向恢复路径的错。修:`decryptSecret` 解密失败时报错明确给出
+  恢复提示(轮换了就恢复旧 `jwt_secret` / 把 `encryption_key` 设成它);生成的 config.yaml 在
+  `jwt_secret` 注释里警告 legacy 配置轮换会 brick。补单测断言报错含恢复提示。(consequence 2
+  "空 key 静默明文" 未动 —— `validate()` 已硬拦空 `jwt_secret`,生产不可达。)
+- **启动版本探测未纳入 single-flight 守卫**(nit,审计发现)── boot probe 直接调
+  `probePanelVersionsOnce`、不设 `compatProbeInflight`;boot 探测慢(多个不可达面板 × 10s)还在跑
+  时,第一个 traffic tick 的 reprobe 会并发再走一遍 per-panel walk。幂等(读 `/server/status` + 写
+  相同版本)、无损,但与守卫"不重叠"的文档意图矛盾。boot probe 纳入同一 `CompareAndSwap` 守卫。
+
+### Notes
+
+- Shutdown 派发竞态、rollup 全表读内存经对抗验证均为**误报**:Shutdown 顺序保证 handler 的
+  `bgWG.Add` happens-before `Wait`;rollup 的 OOM 需"prune 停摆但 rollup 继续"的非对称失败,而 DB
+  挂则两者一起挂、raw 又硬上限 7 天。各遗留一个 LOW 优化点(rollup 三处 `Find` 可加 `WHERE
+  captured_at < cutoff` / SQL 聚合省内存),本批不修。
+
 ## v3.6.2-beta.5 — 2026-05-28
 
 ### Fixed
