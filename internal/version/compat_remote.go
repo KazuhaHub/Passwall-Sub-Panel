@@ -235,7 +235,17 @@ func fetchAndApply(ctx context.Context, url string) error {
 		return fmt.Errorf("compat entry [%s..%s] has unparseable max_tested_xui %q",
 			entry.PSPMin, entry.PSPMax, entry.MaxTestedXUI)
 	}
+	// min_xui is optional in the entry; when present it must parse. It feeds
+	// the OPERATIONAL floor — ActiveMinXUI clamps it so it can only raise the
+	// floor above the compiled MinXUI backstop, never lower it (see compat.go).
+	if entry.MinXUI != "" {
+		if _, ok := parseSemver(entry.MinXUI); !ok {
+			return fmt.Errorf("compat entry [%s..%s] has unparseable min_xui %q",
+				entry.PSPMin, entry.PSPMax, entry.MinXUI)
+		}
+	}
 	SetActiveMaxTestedXUI(entry.MaxTestedXUI)
+	SetActiveMinXUI(entry.MinXUI) // "" → ActiveMinXUI falls back to the compiled backstop
 	_ = saveCompatCache(entry.MaxTestedXUI)
 	return nil
 }

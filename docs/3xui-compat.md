@@ -9,10 +9,14 @@ PSP 通过 `/panel/api/*` 对接 3X-UI 面板。本文档维护两件事：
 
 | PSP 版本 | 最低 3X-UI | 已实测通过 | 备注 |
 |---|---|---|---|
-| **v3.5.1+** | **3.1.0** | 3.1.0 | `/inbounds/list` 把 settings 等改成 nested object,见下文 |
+| **v3.6.2+** | **3.2.0** | 3.2.0 | client 适配迁到一级 `/clients/*` API,**硬切 ≥ 3.2.0**,见下文 |
+| v3.6.0 – v3.6.1 | 3.1.0 | 3.1.0 | 仍走 inbound-scoped 端点;别跑在 3.2.0 上,先升 PSP 到 v3.6.2 |
+| v3.5.1 – v3.5.x | 3.1.0 | 3.1.0 | `/inbounds/list` 把 settings 等改成 nested object,见下文 |
 | v3.5.0 | 3.0.x | 3.0.x | 跨 3.1.0 升级会破坏 traffic poll |
 | v3.4.x | 3.0.x | 3.0.x | 同上 |
 | ≤ v3.3.x | 2.x – 3.0.x | 3.0.x | 历史兼容性见 CHANGELOG |
+
+> 这张表是人看的速查；运行时真相源是 `docs/compat/v3.json`。`min_xui` 和 `max_tested_xui` 两个字段**都已接入运行时**(PSP 按需拉取并据此判 too_old / untested)。
 
 **规则**:
 - "最低 3X-UI" = 该 PSP 版本能正常工作的最早 3X-UI 版本(低于这个会破)
@@ -76,6 +80,13 @@ PSP `rawInbound` 这四个字段定义为 Go `string`,`json.Unmarshal` 一个 ob
 - **patch 级精度区间(罕见)** ── 比如 v3.6.5-v3.6.8 单独验过 3.2.0,其它 v3.6.x
   还是 3.1.0:在 entries 数组前面插入一条更窄的 entry(narrower 在前 = first-match
   生效),broader 的 baseline 在后面兜底。
+- **抬高最低版本(硬切)** ── entry 的 `min_xui` **已接入运行时**(PSP 拉到后按它判
+  too_old),但它和代码里的 `version.MinXUI` const **是同一个下限的两处表述,必须相等**:
+  `TestMinXUIConstMatchesCompatJSON` 会读这个 JSON 断言"覆盖最新版本那条 entry 的
+  `min_xui` == const",**drift 直接让 `go test` 红**——所以改下限时**两处一起改**,忘了
+  哪处提交前测试就拦住你(这正是 v3.6.2 漏掉 const、3.1.0 面板没警告那个坑的防忘闸)。
+  运行时 `ActiveMinXUI() = max(MinXUI, JSON min_xui)` 只是安全网:正常发版两者相等、max
+  是空操作;万一某次 drift 漏过测试发了版,取较高值兜底,下限永远不会被错误降低。
 
 ### entries 数组语义
 

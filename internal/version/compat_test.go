@@ -11,6 +11,7 @@ import (
 func resetCompatForTest(t *testing.T) {
 	t.Helper()
 	SetActiveMaxTestedXUI("")
+	SetActiveMinXUI("")
 	refreshMu.Lock()
 	refreshLastAt = time.Time{}
 	refreshLastError = nil
@@ -65,31 +66,34 @@ func TestCheckXUI_UnknownWhenNoRemoteLoaded(t *testing.T) {
 
 func TestCheckXUI_SupportedExactlyAtBoundary(t *testing.T) {
 	resetCompatForTest(t)
-	SetActiveMaxTestedXUI("3.1.0")
-	if got := CheckXUI("3.1.0"); got != CompatSupported {
-		t.Fatalf("3.1.0 with max=3.1.0 should be Supported, got %s", got)
+	SetActiveMaxTestedXUI("3.2.0")
+	if got := CheckXUI("3.2.0"); got != CompatSupported {
+		t.Fatalf("3.2.0 with min=max=3.2.0 should be Supported, got %s", got)
 	}
-	if got := CheckXUI("v3.1.0"); got != CompatSupported {
-		t.Fatalf("v3.1.0 with max=3.1.0 should be Supported, got %s", got)
+	if got := CheckXUI("v3.2.0"); got != CompatSupported {
+		t.Fatalf("v3.2.0 with min=max=3.2.0 should be Supported, got %s", got)
 	}
 }
 
 func TestCheckXUI_TooOldBelowMin(t *testing.T) {
 	resetCompatForTest(t)
-	SetActiveMaxTestedXUI("3.1.0")
-	for _, v := range []string{"3.0.0", "3.0.2", "2.5.5", "1.0.0"} {
+	SetActiveMaxTestedXUI("3.2.0")
+	// 3.1.x is now below the v3.6.2 floor (3.2.0) — the migration dropped the
+	// inbound-scoped client endpoints those panels rely on, so they must read
+	// as TooOld (this is the case the user hit: a 3.1.0 panel with no warning).
+	for _, v := range []string{"3.1.0", "3.1.5", "3.0.2", "2.5.5", "1.0.0"} {
 		if got := CheckXUI(v); got != CompatTooOld {
-			t.Fatalf("%s should be TooOld, got %s", v, got)
+			t.Fatalf("%s should be TooOld (min=%s), got %s", v, MinXUI, got)
 		}
 	}
 }
 
 func TestCheckXUI_UntestedAboveMax(t *testing.T) {
 	resetCompatForTest(t)
-	SetActiveMaxTestedXUI("3.1.0")
-	for _, v := range []string{"3.1.1", "3.2.0", "4.0.0"} {
+	SetActiveMaxTestedXUI("3.2.0")
+	for _, v := range []string{"3.2.1", "3.3.0", "4.0.0"} {
 		if got := CheckXUI(v); got != CompatUntested {
-			t.Fatalf("%s should be Untested, got %s", v, got)
+			t.Fatalf("%s should be Untested (max=3.2.0), got %s", v, got)
 		}
 	}
 }
@@ -119,11 +123,37 @@ func TestCheckXUI_UnknownOnUnparseable(t *testing.T) {
 	}
 }
 
-func TestActiveMinXUI_AlwaysReturnsConst(t *testing.T) {
-	// MinXUI is a code-level requirement; no remote-override path should
-	// be able to budge it. Sanity-check the accessor.
+func TestActiveMinXUI_BackstopWhenNotLoaded(t *testing.T) {
+	// With no JSON min loaded, ActiveMinXUI returns the compiled backstop.
+	resetCompatForTest(t)
 	if ActiveMinXUI() != MinXUI {
-		t.Fatalf("ActiveMinXUI = %q, want const MinXUI = %q", ActiveMinXUI(), MinXUI)
+		t.Fatalf("ActiveMinXUI = %q, want compiled backstop %q", ActiveMinXUI(), MinXUI)
+	}
+}
+
+func TestActiveMinXUI_JSONRaisesFloorButCannotLowerIt(t *testing.T) {
+	resetCompatForTest(t)
+	// A JSON min AT or BELOW the backstop is clamped — a stale/wrong JSON
+	// must not be able to lower PSP's floor below what its code can speak.
+	for _, below := range []string{"3.0.0", "3.1.0", MinXUI, "garbage", ""} {
+		SetActiveMinXUI(below)
+		if got := ActiveMinXUI(); got != MinXUI {
+			t.Fatalf("min_xui %q (<= backstop) must clamp to %q, got %q", below, MinXUI, got)
+		}
+	}
+	// A JSON min ABOVE the backstop raises the operational floor — an
+	// operational hard-cut shipped via the JSON alone, no PSP rebuild.
+	SetActiveMinXUI("3.5.0")
+	if got := ActiveMinXUI(); got != "3.5.0" {
+		t.Fatalf("min_xui above backstop should raise floor to 3.5.0, got %q", got)
+	}
+	// CheckXUI honours the raised floor.
+	SetActiveMaxTestedXUI("3.6.0")
+	if got := CheckXUI("3.4.0"); got != CompatTooOld {
+		t.Fatalf("3.4.0 with raised min=3.5.0 should be TooOld, got %s", got)
+	}
+	if got := CheckXUI("3.5.0"); got != CompatSupported {
+		t.Fatalf("3.5.0 at the raised floor should be Supported, got %s", got)
 	}
 }
 
@@ -186,17 +216,17 @@ func TestLookupForPSPVersion_RangeMatchAndFirstWins(t *testing.T) {
 		wantMax string
 		wantOK  bool
 	}{
-		{"v3.6.0", "3.1.0", true},              // hits broader v3.6 baseline
-		{"v3.6.0-beta.7", "3.1.0", true},       // pre-release counted as the stable it targets
-		{"v3.6.5", "3.2.0", true},              // hits the narrow hotfix entry (first match wins)
-		{"v3.6.8", "3.2.0", true},              // upper bound inclusive
-		{"v3.6.9", "3.1.0", true},              // just past hotfix → falls back to baseline
-		{"v3.6.99", "3.1.0", true},             // upper bound of baseline inclusive
-		{"v3.5.0", "3.0.5", true},              // separate range
-		{"v3.4.99", "", false},                 // no entry covers it
-		{"v3.7.0", "", false},                  // no entry covers it
-		{"dev", "", false},                     // unparseable
-		{"garbage", "", false},                 // unparseable
+		{"v3.6.0", "3.1.0", true},        // hits broader v3.6 baseline
+		{"v3.6.0-beta.7", "3.1.0", true}, // pre-release counted as the stable it targets
+		{"v3.6.5", "3.2.0", true},        // hits the narrow hotfix entry (first match wins)
+		{"v3.6.8", "3.2.0", true},        // upper bound inclusive
+		{"v3.6.9", "3.1.0", true},        // just past hotfix → falls back to baseline
+		{"v3.6.99", "3.1.0", true},       // upper bound of baseline inclusive
+		{"v3.5.0", "3.0.5", true},        // separate range
+		{"v3.4.99", "", false},           // no entry covers it
+		{"v3.7.0", "", false},            // no entry covers it
+		{"dev", "", false},               // unparseable
+		{"garbage", "", false},           // unparseable
 	}
 	for _, c := range cases {
 		entry, ok := lookupForPSPVersion(payload, c.pspVer)

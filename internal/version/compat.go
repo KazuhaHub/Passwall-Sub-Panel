@@ -7,28 +7,35 @@ import (
 	"sync/atomic"
 )
 
-// MinXUI is the absolute lower bound this PSP build can work with. NOT a
-// "fallback" — it's a code-level requirement: PSP calls endpoints
-// (/server/getPanelUpdateInfo, the nested-JSON form of /inbounds/list,
-// etc.) that don't exist or behave differently on older 3X-UI. Bumping
-// MinXUI requires shipping a new PSP binary because the change is in
-// the call sites, not just in a number. There's no "remote override
-// can widen this" semantic — admin can't make PSP suddenly speak to a
-// 3X-UI version whose API surface PSP wasn't compiled against.
+// MinXUI is the compiled SAFETY BACKSTOP for the lower bound — the lowest
+// 3X-UI version this binary's code can actually speak. It's a code-level
+// fact, not a tunable: PSP calls endpoints (3.2.0's /clients/* API; the
+// inbound-scoped per-client endpoints are gone) that simply don't exist on
+// older panels, so the binary literally can't manage a < MinXUI panel.
+// v3.6.2 raised it 3.1.0 → 3.2.0 with that /clients/* migration.
 //
-// MaxTestedXUI deliberately has NO const counterpart: the upper bound is
-// fully dynamic, owned by docs/compat/xui-compat.json in the repo. A
-// hardcoded ceiling would go stale the moment 3X-UI ships a verified
-// patch release, and forcing a PSP re-release for every such case
-// defeats the purpose. Admin can also opt to bypass the gate entirely
-// via the upgrade-panel "force" flag (see AdminServersHandler), so even
-// a panel beyond the remote-published tested range isn't a hard wall.
+// docs/compat/v3.json's per-entry min_xui describes the SAME floor and MUST
+// stay equal to this const — TestMinXUIConstMatchesCompatJSON fails the build
+// the moment they drift, so you can't edit the JSON and forget the const (the
+// v3.6.2 footgun: JSON bumped, runtime floor not, 3.1.0 panels un-flagged).
+// Edit BOTH together when the floor changes.
 //
-// Versions are compared numerically (semver-style major.minor.patch).
-// Any leading "v" is tolerated when parsing — 3X-UI's /server/status
-// emits "3.1.0" while /getPanelUpdateInfo emits "v3.1.0" for the same
-// release.
-const MinXUI = "3.1.0"
+// At runtime ActiveMinXUI returns max(MinXUI, JSON min) — NOT to let the JSON
+// widen the floor, but as a safety net: the test keeps them equal, so the max
+// is a no-op in a correct release; if a drift ever slips past the test (or a
+// stale cache serves an older min), the higher value wins and the floor is
+// never wrongly LOWERED below what this binary's code can actually speak.
+//
+// MaxTestedXUI has NO const counterpart at all: the upper bound is fully
+// dynamic, owned by the same JSON. A hardcoded ceiling would go stale the
+// moment 3X-UI ships a verified patch release. Admin can also bypass the
+// gate via the upgrade-panel "force" flag (see AdminServersHandler), so a
+// panel beyond the published tested range isn't a hard wall.
+//
+// Versions compare numerically (major.minor.patch). A leading "v" is
+// tolerated — 3X-UI's /server/status emits "3.1.0" while /getPanelUpdateInfo
+// emits "v3.1.0" for the same release.
+const MinXUI = "3.2.0"
 
 // activeMaxTestedXUI holds the runtime-effective upper bound, loaded
 // from docs/compat/xui-compat.json via RefreshRemoteCompat. Empty string
@@ -37,6 +44,12 @@ const MinXUI = "3.1.0"
 // because RefreshRemoteCompat writes from a background goroutine while
 // every CheckXUI caller reads concurrently.
 var activeMaxTestedXUI atomic.Value // string
+
+// activeMinXUI holds the operational lower bound loaded from the compat
+// JSON's per-entry min_xui (RefreshRemoteCompat). ActiveMinXUI clamps it so
+// it can only RAISE the floor above the compiled MinXUI backstop. Empty =
+// not loaded yet (ActiveMinXUI then returns the compiled backstop).
+var activeMinXUI atomic.Value // string
 
 // ActiveMaxTestedXUI returns the upper bound currently in effect, or ""
 // when the remote-compat JSON has never been successfully fetched. Empty
@@ -49,12 +62,28 @@ func ActiveMaxTestedXUI() string {
 	return ""
 }
 
-// ActiveMinXUI returns the lower bound currently in effect. Always the
-// hardcoded MinXUI const — exposed as a function for symmetry with
-// ActiveMaxTestedXUI so callers don't have to remember which bound is
-// dynamic and which is fixed.
+// ActiveMinXUI returns the lower bound currently in effect: the HIGHER of the
+// compiled MinXUI backstop and the operational min_xui loaded from the compat
+// JSON (RefreshRemoteCompat). The JSON can only RAISE the floor above the
+// backstop, never lower it below what this binary's code can speak — so
+// whichever of the two is bumped the effective floor rises, and forgetting to
+// sync the other is safe. An empty / unparseable dynamic value falls back to
+// the backstop.
 func ActiveMinXUI() string {
-	return MinXUI
+	floor := MinXUI
+	dyn, _ := activeMinXUI.Load().(string)
+	if dyn == "" {
+		return floor
+	}
+	dv, ok := parseSemver(dyn)
+	if !ok {
+		return floor
+	}
+	fv, _ := parseSemver(floor)
+	if cmpSemver(dv, fv) > 0 {
+		return dyn
+	}
+	return floor
 }
 
 // SetActiveMaxTestedXUI installs the remote-loaded upper bound. Pass ""
@@ -64,6 +93,15 @@ func ActiveMinXUI() string {
 // PSP in an unparseable state.
 func SetActiveMaxTestedXUI(v string) {
 	activeMaxTestedXUI.Store(v)
+}
+
+// SetActiveMinXUI installs the JSON-loaded operational floor. Pass "" to clear
+// (ActiveMinXUI then returns the compiled MinXUI backstop). Like
+// SetActiveMaxTestedXUI the value isn't validated here — RefreshRemoteCompat
+// parse-checks before installing, and ActiveMinXUI defensively ignores an
+// unparseable value.
+func SetActiveMinXUI(v string) {
+	activeMinXUI.Store(v)
 }
 
 // CompatStatus is the result of comparing a panel's reported 3X-UI version
