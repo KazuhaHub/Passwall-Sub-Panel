@@ -624,7 +624,8 @@
       "no_usage": "Unused"
     },
     "validate": {
-      "slug_name_required": "Slug and name are required"
+      "slug_name_required": "Slug and name are required",
+      "slug_exists": "A rule set with slug \"{{slug}}\" already exists — choose a different slug"
     },
     "toast": {
       "saved": "Saved",

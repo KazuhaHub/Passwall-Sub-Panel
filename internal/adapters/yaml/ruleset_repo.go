@@ -2,6 +2,7 @@ package yaml
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -122,7 +123,18 @@ func (r *RuleSetRepo) Save(ctx context.Context, rs *domain.RuleSet) error {
 	if rs.Slug == "" {
 		return fmt.Errorf("%w: rule set slug empty", domain.ErrValidation)
 	}
-	p, err := r.pathOf(rs.Slug)
+	// Resolve the target file the SAME way GetBySlug/Delete do (pathForSlug):
+	// an existing rule set with this slug is overwritten in place even when its
+	// filename differs from the slug. The seeded default ships as
+	// default-rules.yaml but carries slug "default_rules"; resolving by slug
+	// alone (pathOf -> default_rules.yaml) wrote a SECOND file next to the seed,
+	// so the list surfaced two rows sharing slug "default_rules". One slug now
+	// maps to exactly one file. ErrNotFound = genuinely new slug -> create
+	// <slug>.yaml via pathOf.
+	p, err := r.pathForSlug(rs.Slug)
+	if errors.Is(err, domain.ErrNotFound) {
+		p, err = r.pathOf(rs.Slug)
+	}
 	if err != nil {
 		return err
 	}

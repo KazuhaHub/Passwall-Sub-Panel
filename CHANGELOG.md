@@ -4,6 +4,20 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## v3.6.2-beta.9 — 2026-05-28
+
+### Fixed
+
+- **编辑默认规则集会冒出两条同 slug 的重复行** ── 种子默认规则的文件名是 `default-rules.yaml`(连字符),
+  但文件里的 `slug` 是 `default_rules`(下划线)。读取 / 删除按文件内容里的 `slug` 字段找文件(能命中
+  种子文件),唯独 `RuleSetRepo.Save` 直接用 slug 拼文件名(`default_rules.yaml`),于是一编辑 / 保存默认
+  规则,内容写进了一个**新文件**,种子文件原封不动 → 列表里出现两条一模一样的 `default_rules`。修:`Save`
+  改成与读取 / 删除一致(按文档 slug 解析),一个 slug 永远只对应一个文件,编辑即干净覆盖、不再产生重复;
+  新 slug 才回退到按文件名新建。前端"新建 / 复制"时另加一道 slug 重复校验(编辑态 slug 锁定不受影响),
+  防止用已存在的 slug 静默覆盖原规则集。补 repo 单测锁定此行为。
+  - 已经踩出重复行的部署需手动清理一次:`<ConfigDir>/rulesets/` 下保留一个文件即可(想留改动就把
+    `default_rules.yaml` 的内容并回 `default-rules.yaml` 再删前者;想要纯净默认就删掉多出来的那个)。
+
 ## v3.6.2-beta.8 — 2026-05-28
 
 ### Fixed

@@ -624,7 +624,8 @@
       "no_usage": "未引用"
     },
     "validate": {
-      "slug_name_required": "slug 和 name 必填"
+      "slug_name_required": "slug 和 name 必填",
+      "slug_exists": "已存在 slug 为“{{slug}}”的规则集 —— 请换一个 slug"
     },
     "toast": {
       "saved": "已保存",

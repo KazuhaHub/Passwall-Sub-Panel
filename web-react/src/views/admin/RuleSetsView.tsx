@@ -139,6 +139,13 @@ export default function RuleSetsView() {
     if (!form.slug || !form.name) {
       pushSnack(t('admin:rules.validate.slug_name_required'), 'warning'); return
     }
+    // Creating/duplicating (not editing) with an existing slug would silently
+    // overwrite that rule set server-side (Save is a slug-keyed upsert). Block
+    // it with a clear error so a copy can't clobber the original — the slug is
+    // locked when editing, so this only fires on the create/duplicate flow.
+    if (!editing && items.some(rs => rs.slug === form.slug)) {
+      pushSnack(t('admin:rules.validate.slug_exists', { slug: form.slug }), 'warning'); return
+    }
     setBusy(true)
     try {
       const proxyOrder = proxyGroupText.split('\n').map(s => s.trim()).filter(Boolean)

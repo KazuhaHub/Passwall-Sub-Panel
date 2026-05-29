@@ -98,6 +98,66 @@ content: |
 	}
 }
 
+// TestRuleSetRepoSaveOverwritesMismatchedFilename locks the beta.8+ fix for the
+// duplicate-default-rules bug: the seeded default ships as default-rules.yaml
+// (hyphen) but carries slug "default_rules" (underscore). Save used to resolve
+// by slug -> filename only, writing a SECOND file default_rules.yaml next to the
+// seed, so the list surfaced two rows sharing slug "default_rules". Save must now
+// resolve like GetBySlug/Delete (by document slug) and overwrite the SAME file.
+func TestRuleSetRepoSaveOverwritesMismatchedFilename(t *testing.T) {
+	ctx := context.Background()
+	repo, err := NewRuleSetRepo(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	raw := []byte("slug: default_rules\nname: Default Rules\nsort: 10\nenabled: true\ncontent: |\n  - MATCH,DIRECT\n")
+	if err := os.WriteFile(filepath.Join(repo.dir, "default-rules.yaml"), raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Edit the seeded default (same slug).
+	if err := repo.Save(ctx, &domain.RuleSet{
+		Slug:    "default_rules",
+		Name:    "Default Rules (edited)",
+		Sort:    10,
+		Enabled: true,
+		Content: "- MATCH,REJECT",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Exactly one file remains, and it is the original default-rules.yaml — no
+	// stray default_rules.yaml was created.
+	entries, err := os.ReadDir(repo.dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, e := range entries {
+		names = append(names, e.Name())
+	}
+	if len(names) != 1 || names[0] != "default-rules.yaml" {
+		t.Fatalf("after editing seeded default: files = %v, want exactly [default-rules.yaml] (no duplicate)", names)
+	}
+
+	// List shows one row; the edit landed in default-rules.yaml.
+	items, err := repo.List(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("List len = %d, want 1 (no duplicate-slug rows)", len(items))
+	}
+	got, err := repo.GetBySlug(ctx, "default_rules")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Name != "Default Rules (edited)" {
+		t.Fatalf("edit not applied to the resolved file: %#v", got)
+	}
+}
+
 func TestRuleSetRepoRejectsUnsafeSlug(t *testing.T) {
 	ctx := context.Background()
 	repo, err := NewRuleSetRepo(t.TempDir())
