@@ -49,7 +49,14 @@ func decryptSecret(stored string) (string, error) {
 	}
 	plaintext, err := pspcrypto.DecryptString(dbSecretKey, strings.TrimPrefix(stored, secretPrefix))
 	if err != nil {
-		return "", fmt.Errorf("decrypt database secret: %w", err)
+		// A GCM auth failure here almost always means the encryption key
+		// changed since this value was written. The most common cause is a
+		// legacy config (no separate encryption_key) where jwt_secret doubles
+		// as the at-rest key and the operator rotated jwt_secret — surface the
+		// recovery path rather than a cryptic decrypt error that aborts boot.
+		return "", fmt.Errorf("decrypt database secret: %w — the encryption key changed since this was stored; "+
+			"if you rotated jwt_secret on a config without a separate encryption_key, restore the previous jwt_secret "+
+			"(or set encryption_key to it) and restart", err)
 	}
 	return plaintext, nil
 }

@@ -132,4 +132,11 @@ func TestEncryptSecretRoundTripDifferentKey(t *testing.T) {
 	if err == nil {
 		t.Fatalf("decrypt with wrong key should error, got %q", got)
 	}
+	// The boot path (SAML/OIDC/SMTP Load) aborts on this error, so it must
+	// guide recovery — the classic cause is rotating jwt_secret on a legacy
+	// config where it doubles as the at-rest key. Assert the hint is present
+	// rather than a cryptic GCM failure.
+	if !strings.Contains(err.Error(), "jwt_secret") {
+		t.Fatalf("decrypt-with-wrong-key error must guide recovery (mention jwt_secret), got: %v", err)
+	}
 }

@@ -217,11 +217,17 @@ listen: ":8788"                            # bind address; ":port" listens on al
 # ---- Secrets ----
 # JWT signing key. Generated randomly on first run. Rotate by replacing the
 # value (invalidates every existing session). Env override: PSP_JWT_SECRET.
+# WARNING: on a legacy config that has NO encryption_key below, jwt_secret also
+# doubles as the at-rest encryption key — rotating it then makes stored 3X-UI /
+# SAML / OIDC / SMTP secrets undecryptable and boot fails. If encryption_key is
+# present (new installs always have it), the two are independent and you can
+# rotate jwt_secret freely.
 jwt_secret: "%s"
 
 # Database secret encryption key. Generated randomly on first run. It protects
 # 3X-UI credentials, SAML/OIDC secrets, and SMTP passwords at rest.
-# Env override: PSP_ENCRYPTION_KEY.
+# Env override: PSP_ENCRYPTION_KEY. Keep this stable — changing it makes every
+# already-stored secret undecryptable.
 encryption_key: "%s"
 
 # ---- Reverse proxy / real client IP ----

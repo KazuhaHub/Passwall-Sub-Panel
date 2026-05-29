@@ -389,7 +389,18 @@ func (a *App) Run() error {
 	// the first traffic-poll cycle. Subsequent re-probes piggyback the
 	// traffic poll loop (see runTrafficLoop) — no independent ticker, the
 	// cadence naturally matches "PSP is talking to every panel anyway".
-	safego.GoTracked(&a.bgWG, "boot-version-probe", func() { a.probePanelVersionsOnce(bgCtx) })
+	safego.GoTracked(&a.bgWG, "boot-version-probe", func() {
+		// Share the single-flight guard with the traffic-loop reprobe: a slow
+		// boot probe (many unreachable panels × 10s GetServerStatus) could still
+		// be walking when the first traffic tick fires and launch a second
+		// concurrent per-panel walk. Benign (idempotent reads + writes) but the
+		// guard's documented intent is "no overlapping probes".
+		if !a.compatProbeInflight.CompareAndSwap(false, true) {
+			return
+		}
+		defer a.compatProbeInflight.Store(false)
+		a.probePanelVersionsOnce(bgCtx)
+	})
 	safego.GoTracked(&a.bgWG, "sync-task-loop", func() { a.runSyncTaskLoop(bgCtx) })
 	safego.GoTracked(&a.bgWG, "audit-cleanup-loop", func() { a.runAuditCleanupLoop(bgCtx) })
 	safego.GoTracked(&a.bgWG, "traffic-loop", func() { a.runTrafficLoop(bgCtx) })
