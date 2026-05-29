@@ -4,6 +4,26 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## v3.6.2-beta.7 — 2026-05-28
+
+审计 LOW 收尾(选定 3 项;其余 nit / 不可达的跳过)。
+
+### Fixed
+
+- **`POST /api/auth/refresh` 不进审计日志**(LOW,审计发现)── 登录有审计,但等价的"换发凭据"
+  refresh 没有 —— 事后排查(如被盗 refresh token 持续续期)看不到这条。`shouldAuditPath` 加上该
+  路径(body 里的 `refresh_token` 已被 `isSensitiveKey` 脱敏)。
+- **`DelAllOwnedForInbound` 吞掉 per-client 删除错误 → 节点删除可能遗留孤儿 ownership 行**(LOW,
+  审计发现)── 它原本 `_ =` 丢弃每个 `DelOwnedClient` 的错误、永远返回 nil,使 node-delete 任务里
+  的错误检查形同虚设:某 client 删除瞬时失败时 ownership 行未移除,任务却继续 `DeleteInbound`(连带
+  删掉 client)→ 留下指向已删 inbound 的孤儿行。改为返回 firstErr(同 `DelAllOwnedForUser`):失败
+  即中止 `DeleteInbound`,任务下个 tick 重试收敛。
+- **block-violation 计数读改写竞态(丢增量 / 重复 auto-disable)**(LOW,审计发现)── `/sub` 原来
+  在请求加载的 stale user 快照上 `count++` 再以绝对值写回;两个并发 blocked 请求都读到 N、都写
+  N+1(丢增量),且可能都跨阈值、各触发一次 auto-disable + 停用邮件。新增原子 `AdvanceBlockViolation`
+  repo 方法:dedup 窗口放进 UPDATE 的 WHERE,自增 + 打时间戳一步完成,并发只有一个能推进
+  (RowsAffected==1)→ 不丢增量、不双触发。替换原 `UpdateBlockViolation`,补 repo 单测(窗口门控)。
+
 ## v3.6.2-beta.6 — 2026-05-28
 
 对审计 critic 标出的 4 个 MEDIUM 做对抗验证:Shutdown 派发竞态、rollup 全表读内存均**证伪**
