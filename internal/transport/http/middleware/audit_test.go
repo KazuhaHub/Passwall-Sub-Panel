@@ -37,6 +37,12 @@ func TestShouldAuditPath_LoginAttempt(t *testing.T) {
 	}
 }
 
+func TestShouldAuditPath_TokenRefresh(t *testing.T) {
+	if !shouldAuditPath("/api/auth/refresh", "POST") {
+		t.Fatal("token refresh POST must audit — it mints fresh access+refresh credentials (the re-issuance event a post-incident review needs alongside login)")
+	}
+}
+
 func TestShouldAuditPath_UserSelfServiceWrites(t *testing.T) {
 	cases := []struct {
 		method, path string
@@ -63,7 +69,7 @@ func TestShouldAuditPath_NonAuditedTraffic(t *testing.T) {
 		"/sub/abc123",
 		"/health",
 		"/assets/index.js",
-		"/admin",   // SPA routes — embedded UI, not API
+		"/admin", // SPA routes — embedded UI, not API
 		"/",
 	}
 	for _, path := range cases {

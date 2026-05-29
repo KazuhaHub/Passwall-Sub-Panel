@@ -118,6 +118,12 @@ func shouldAuditPath(path, method string) bool {
 		// User self-service writes: password change, sub-token reset,
 		// personal rules edit, emergency-access request.
 		return true
+	case path == "/api/auth/refresh":
+		// Token refresh mints a fresh access+refresh pair — the
+		// credential-re-issuance event a post-incident review needs
+		// alongside login (e.g. a stolen refresh token kept alive). The
+		// refresh_token in the body is already redacted by isSensitiveKey.
+		return true
 	}
 	return false
 }
