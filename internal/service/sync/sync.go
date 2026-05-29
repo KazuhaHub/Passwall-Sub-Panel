@@ -300,10 +300,18 @@ func (s *Service) DelAllOwnedForInbound(ctx context.Context, panelID int64, inbo
 	if err != nil {
 		return err
 	}
+	// Return the first per-client error (mirror DelAllOwnedForUser) instead of
+	// swallowing it. The node-delete task checks this error and aborts before
+	// DeleteInbound — so a transient delete failure can't leave the inbound
+	// removed while an ownership row survives pointing at a now-gone inbound
+	// (the task retries next tick and converges).
+	var firstErr error
 	for _, e := range entries {
-		_ = s.DelOwnedClient(ctx, e.PanelID, e.InboundID, e.ClientEmail)
+		if err := s.DelOwnedClient(ctx, e.PanelID, e.InboundID, e.ClientEmail); err != nil && firstErr == nil {
+			firstErr = fmt.Errorf("%d/%d/%s: %w", e.PanelID, e.InboundID, e.ClientEmail, err)
+		}
 	}
-	return nil
+	return firstErr
 }
 
 // UnclaimAllForInbound drops every ownership row for the given inbound
