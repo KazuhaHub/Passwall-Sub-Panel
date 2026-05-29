@@ -210,11 +210,12 @@ func TestCheckNodes_DriftPushed(t *testing.T) {
 	}
 }
 
-// With axis-A reverse-push DISABLED (the 3.2.0 default, pending §4.3
-// verification), a drifted captured inbound is ADOPTED: PSP captures the live
-// config into the snapshot and writes NOTHING to the 3X-UI inbound. Note the
-// svc deliberately omits axisAReversePush (defaults false) — the inverse of
-// the *_DriftPushed tests above.
+// Exercises the adopt fallback (axisAReversePush kill-switch off). P2 verified
+// reverse-push is safe on 3.2.0 so New() enables it by default; when the
+// kill-switch is off, a drifted captured inbound is ADOPTED instead — PSP
+// captures the live config into the snapshot and writes NOTHING to the inbound.
+// The svc here deliberately omits axisAReversePush (defaults false) to drive
+// that fallback — the inverse of the *_DriftPushed tests above.
 func TestCheckNodes_DriftAdoptedWhenReversePushDisabled(t *testing.T) {
 	now := time.Now()
 	node := &domain.Node{

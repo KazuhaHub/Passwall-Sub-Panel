@@ -61,15 +61,15 @@ type Service struct {
 	syncer    ClientSyncer
 
 	// axisAReversePush gates the v3.5 "PSP pushes its config back over 3X-UI
-	// drift" behavior in reconcileInboundConfig. Disabled (false) on the 3.2.0
-	// hard-cut: the push uses XUIClient.UpdateInbound, whose read-modify-write
-	// re-injects the live settings.clients[] array, and that write's effect on
-	// 3.2.0's first-class client model (clients table authoritative,
-	// settings.clients a derived projection) is unverified — it could
-	// orphan/duplicate PSP-managed clients. See
-	// docs/3xui-3.2-clients-migration.md §4.3 (P2/P3). While false, drift is
-	// ADOPTED (live config captured into the snapshot, nothing written to the
-	// inbound). Flip true once §4.3 is live-verified to restore reverse-push.
+	// drift" behavior in reconcileInboundConfig (the push uses
+	// XUIClient.UpdateInbound, whose read-modify-write re-injects the live
+	// settings.clients[] array). It was gated OFF on the 3.2.0 hard-cut while
+	// the effect of that re-injection on 3.2.0's first-class client model was
+	// unverified. P2 live verification (2026-05-28, docs/3xui-3.2-clients-
+	// migration.md §P2) confirmed it preserves the clients table intact (no
+	// orphan / no duplicate), so New() now ENABLES it (true). When false, drift
+	// is ADOPTED instead (live config captured into the snapshot, nothing
+	// written to the inbound) — retained as a kill-switch + exercised by tests.
 	axisAReversePush bool
 }
 
@@ -78,6 +78,7 @@ func New(users ports.UserRepo, ownership ports.OwnershipRepo, nodes ports.NodeRe
 	return &Service{
 		users: users, ownership: ownership, nodes: nodes, groups: groups, settings: settings,
 		audit: audit, pool: pool, syncer: syncer,
+		axisAReversePush: true,
 	}
 }
 
