@@ -28,17 +28,22 @@ func (r *fakeUserRepo) Update(ctx context.Context, u *domain.User) error {
 	return nil
 }
 
-// UpdateTrafficState mirrors the production narrow write: only the
-// traffic-owned columns are persisted onto the stored row, so the test
-// also exercises that the poll touches nothing else.
-func (r *fakeUserRepo) UpdateBlockViolation(ctx context.Context, userID int64, count int, lastAt time.Time, detail string) error {
-	if cur, ok := r.users[userID]; ok {
-		cur.BlockViolationCount = count
-		la := lastAt
-		cur.LastBlockViolationAt = &la
-		cur.DisableDetail = detail
+// AdvanceBlockViolation: gated-increment fake mirroring the production atomic
+// write (dedup window honored). Not exercised by the traffic tests — present
+// only to satisfy ports.UserRepo.
+func (r *fakeUserRepo) AdvanceBlockViolation(ctx context.Context, userID int64, notBefore, at time.Time, detail string) (int, bool, error) {
+	cur, ok := r.users[userID]
+	if !ok {
+		return 0, false, nil
 	}
-	return nil
+	if cur.LastBlockViolationAt != nil && !cur.LastBlockViolationAt.Before(notBefore) {
+		return cur.BlockViolationCount, false, nil
+	}
+	cur.BlockViolationCount++
+	la := at
+	cur.LastBlockViolationAt = &la
+	cur.DisableDetail = detail
+	return cur.BlockViolationCount, true, nil
 }
 
 func (r *fakeUserRepo) ClearBlockViolation(ctx context.Context, userID int64) error {

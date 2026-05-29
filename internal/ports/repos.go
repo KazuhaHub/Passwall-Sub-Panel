@@ -97,14 +97,17 @@ type UserRepo interface {
 	// clears). Writing them here from the poll's stale snapshot would silently
 	// revoke an emergency window granted concurrently mid-cycle.
 	UpdateTrafficState(ctx context.Context, u *domain.User) error
-	// UpdateBlockViolation persists ONLY the blocked-client tracking
-	// columns. /sub is the hottest write path on the public endpoint —
-	// pre-fix every violation triggered a full-row Update that rewrote
-	// ~30 columns plus their secondary indexes (upn / sub_token / sso
-	// composite / group_id). The same write-amplification concern as
-	// UpdateTrafficState / UpdateHealth: narrow the touched columns so
-	// concurrent admin edits aren't clobbered and writes stay cheap.
-	UpdateBlockViolation(ctx context.Context, userID int64, count int, lastAt time.Time, detail string) error
+	// AdvanceBlockViolation atomically advances the blocked-client violation
+	// count in ONE gated UPDATE: it increments block_violation_count and
+	// stamps last_block_violation_at / disable_detail only when the row's
+	// last_block_violation_at is null or older than notBefore (the dedup
+	// window). Returns the resulting count and advanced=true iff a row was
+	// updated. Putting the dedup window inside the WHERE makes concurrent /sub
+	// fetches safe — only one advances per window, so no lost increment and no
+	// double-fire of auto-disable. Narrow-column write (same write-amplification
+	// concern as UpdateTrafficState / UpdateHealth — /sub is the hottest public
+	// write path, and concurrent admin edits must not be clobbered).
+	AdvanceBlockViolation(ctx context.Context, userID int64, notBefore, at time.Time, detail string) (count int, advanced bool, err error)
 	// ClearBlockViolation resets the blocked-client tracking columns
 	// (count, last-at, disable-detail) — called when admin re-enables
 	// a user, to prevent the auto-disable threshold from re-triggering

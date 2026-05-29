@@ -54,23 +54,36 @@ func (r *userRepo) Update(ctx context.Context, u *domain.User) error {
 	return r.db.WithContext(ctx).Omit(pollOwnedColumns...).Save(userFromDomain(u)).Error
 }
 
-// UpdateBlockViolation writes only the blocked-client tracking columns
-// in one targeted UPDATE. The /sub endpoint hits this on every violation;
-// pre-fix this path ran the full-row Update which rewrote ~30 columns and
-// touched every secondary index on each call — significant write
-// amplification on the highest-RPS public write path.
-func (r *userRepo) UpdateBlockViolation(ctx context.Context, userID int64, count int, lastAt time.Time, detail string) error {
+// AdvanceBlockViolation atomically advances the blocked-client violation count
+// (see the ports.UserRepo doc). The dedup window lives in the WHERE clause so
+// two concurrent /sub requests can't both advance: the first stamps
+// last_block_violation_at=at, and the second's "older than notBefore"
+// predicate is then false so it updates 0 rows. RowsAffected==1 => advanced;
+// the resulting count is read back for the threshold check.
+func (r *userRepo) AdvanceBlockViolation(ctx context.Context, userID int64, notBefore, at time.Time, detail string) (int, bool, error) {
 	if userID == 0 {
-		return fmt.Errorf("UpdateBlockViolation requires a non-zero user ID")
+		return 0, false, fmt.Errorf("AdvanceBlockViolation requires a non-zero user ID")
 	}
-	return r.db.WithContext(ctx).
+	res := r.db.WithContext(ctx).
 		Model(&userRow{}).
-		Where("id = ?", userID).
+		Where("id = ? AND (last_block_violation_at IS NULL OR last_block_violation_at < ?)", userID, notBefore).
 		Updates(map[string]any{
-			"block_violation_count":   count,
-			"last_block_violation_at": lastAt,
+			"block_violation_count":   gorm.Expr("block_violation_count + 1"),
+			"last_block_violation_at": at,
 			"disable_detail":          detail,
-		}).Error
+		})
+	if res.Error != nil {
+		return 0, false, res.Error
+	}
+	if res.RowsAffected == 0 {
+		return 0, false, nil // inside the dedup window (or no such user) — not advanced
+	}
+	var count int
+	if err := r.db.WithContext(ctx).Model(&userRow{}).Where("id = ?", userID).
+		Pluck("block_violation_count", &count).Error; err != nil {
+		return 0, true, err
+	}
+	return count, true, nil
 }
 
 // ClearBlockViolation resets the blocked-client tracking columns when a

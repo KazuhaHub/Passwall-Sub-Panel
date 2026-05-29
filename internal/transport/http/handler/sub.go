@@ -130,63 +130,43 @@ func (h *SubHandler) Get(c *gin.Context) {
 		// drops on shutdown are acceptable (best-effort log).
 		h.logSubAsync(u.ID, c.ClientIP(), ua, detected.ClientName)
 
-		// Dedup: only advance the count once per window so a polling client
-		// can't auto-disable a passive user. When skipped we also skip the
-		// DB write below — the whole point is to cut churn on the hot path.
-		countViolation := u.LastBlockViolationAt == nil ||
-			now.Sub(*u.LastBlockViolationAt) >= blockViolationDedupWindow
-
-		if countViolation {
-			u.BlockViolationCount++
-			u.LastBlockViolationAt = &now
-			u.DisableDetail = fmt.Sprintf("last blocked client: %s", detected.ClientName)
+		// Advance the violation count atomically, with the dedup window gated
+		// INSIDE the UPDATE: only one request per window advances, so concurrent
+		// /sub fetches can't lose an increment or double-fire auto-disable.
+		// advanced=false means we're inside the window (or the row vanished) —
+		// the UPDATE wrote nothing, so no hot-path churn and no threshold check.
+		detail := fmt.Sprintf("last blocked client: %s", detected.ClientName)
+		count, advanced, err := h.users.AdvanceBlockViolation(c.Request.Context(), u.ID,
+			now.Add(-blockViolationDedupWindow), now, detail)
+		if err != nil {
+			log.Warn("failed to advance blocked-client violation count", "user_id", u.ID, "err", err)
 		}
 
-		// Check if auto-disable is enabled and threshold reached. Only a counted
-		// violation can newly cross the threshold.
-		if countViolation && settings.SubBlockAutoDisable && u.BlockViolationCount >= settings.SubBlockAutoDisableCount {
-			detail := fmt.Sprintf("auto-disabled after %d violations, last client: %s", u.BlockViolationCount, detected.ClientName)
-			u.DisableDetail = detail
-
-			// Persist via the column-scoped UpdateBlockViolation — pre-fix
-			// this was h.users.Update (full-row Save) which rewrote ~30
-			// columns + every secondary index, on the highest-RPS write
-			// path the public sub endpoint owns.
-			if err := h.users.UpdateBlockViolation(c.Request.Context(), u.ID, u.BlockViolationCount, now, detail); err != nil {
-				log.Warn("failed to update blocked-client violation count", "user_id", u.ID, "err", err)
-			}
-			if err := h.user.SetEnabledAndSync(c.Request.Context(), u.ID, false, domain.DisabledBlockedClient, detail); err != nil {
+		// Auto-disable when this newly-counted violation crosses the threshold.
+		if advanced && settings.SubBlockAutoDisable && count >= settings.SubBlockAutoDisableCount {
+			disableDetail := fmt.Sprintf("auto-disabled after %d violations, last client: %s", count, detected.ClientName)
+			if err := h.user.SetEnabledAndSync(c.Request.Context(), u.ID, false, domain.DisabledBlockedClient, disableDetail); err != nil {
 				log.Warn("failed to auto-disable user", "user_id", u.ID, "err", err)
 			}
-			u.Enabled = false
-			u.AutoDisabledReason = domain.DisabledBlockedClient
 
 			// Send account disabled notification email (async).
 			if h.mailer != nil && h.async != nil {
 				userCopy := u
+				dd := disableDetail
 				h.async.Go("sub.disabled-email", func(ctx context.Context) {
-					if err := h.mailer.SendAccountDisabledNotification(ctx, userCopy, "使用被禁止的客户端", userCopy.DisableDetail); err != nil {
+					if err := h.mailer.SendAccountDisabledNotification(ctx, userCopy, "使用被禁止的客户端", dd); err != nil {
 						log.Warn("failed to send disable notification", "user_id", userCopy.ID, "err", err)
 					}
 				})
 			}
 
 			// Same 404-collapse as the other "account exists but suspended"
-			// branches above — once auto-disable fires the account is in
-			// the same logical state as admin-disabled, so the response
-			// shouldn't leak that distinction either.
-			log.Info("sub: blocked", "user_id", u.ID, "reason", "auto_disabled_blocked_client",
-				"violations", u.BlockViolationCount)
+			// branches above — once auto-disable fires the account is in the
+			// same logical state as admin-disabled, so the response shouldn't
+			// leak that distinction either.
+			log.Info("sub: blocked", "user_id", u.ID, "reason", "auto_disabled_blocked_client", "violations", count)
 			c.String(http.StatusNotFound, "")
 			return
-		}
-
-		// Save updated violation count (only when we actually advanced
-		// it). Column-scoped UpdateBlockViolation — see comment above.
-		if countViolation {
-			if err := h.users.UpdateBlockViolation(c.Request.Context(), u.ID, u.BlockViolationCount, now, u.DisableDetail); err != nil {
-				log.Warn("failed to update violation count", "user_id", u.ID, "err", err)
-			}
 		}
 
 		// Soft notice (async): tell the user they used a blocked client, before

@@ -225,14 +225,19 @@ func (r *memoryUserRepo) Update(ctx context.Context, u *domain.User) error {
 	return nil
 }
 
-func (r *memoryUserRepo) UpdateBlockViolation(ctx context.Context, userID int64, count int, lastAt time.Time, detail string) error {
-	if cur, ok := r.byID[userID]; ok {
-		cur.BlockViolationCount = count
-		la := lastAt
-		cur.LastBlockViolationAt = &la
-		cur.DisableDetail = detail
+func (r *memoryUserRepo) AdvanceBlockViolation(ctx context.Context, userID int64, notBefore, at time.Time, detail string) (int, bool, error) {
+	cur, ok := r.byID[userID]
+	if !ok {
+		return 0, false, nil
 	}
-	return nil
+	if cur.LastBlockViolationAt != nil && !cur.LastBlockViolationAt.Before(notBefore) {
+		return cur.BlockViolationCount, false, nil
+	}
+	cur.BlockViolationCount++
+	la := at
+	cur.LastBlockViolationAt = &la
+	cur.DisableDetail = detail
+	return cur.BlockViolationCount, true, nil
 }
 
 func (r *memoryUserRepo) ClearBlockViolation(ctx context.Context, userID int64) error {
