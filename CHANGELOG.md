@@ -4,6 +4,18 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## v3.6.3-beta.6 — 2026-06-01
+
+修 beta.5 的认证日志接口 500;规则集编辑器换 CodeMirror,修编辑大规则集卡顿。
+
+### Fixed
+
+- **`/api/admin/auth-events` 一律 500（认证日志页 + 用户「最近登录」面板崩溃）** —— app.go 用字段逐个拷贝重新拼装 `ports.Repos`，漏拷了 beta.5 新加的 `AuthEvent` → 该仓储为 nil → handler 对 nil 接口调方法 panic（空 body 500）；同时登录发射因 nil-guard 静默不记（认证日志一直为空）。改为 `repos := mysqlRepos` 派生 + 仅覆盖两个 YAML 仓储（规则集/模板），从根上消除"漏拷新仓储"这类 drift；新增 `TestNewReposPopulatesEveryDBRepo` 反射守门（任何 DB 仓储漏接线即 `go test` 红）+ auth-events handler 端到端测试。
+
+### Changed
+
+- **规则集内容编辑器换成 CodeMirror（修卡顿）** —— 原 MUI `multiline` 自增高 textarea 每次按键都 O(内容长度) 重测高度，上千行规则集打字卡顿。换成 CodeMirror 6（`@uiw/react-codemirror` + `@codemirror/lang-yaml`：虚拟化、行号、YAML 高亮）。**懒加载**：重依赖独立成 ~142KB(gz) chunk，仅在打开规则集编辑弹窗时拉取，**首屏 bundle 零影响**。`proxy_group_order` 仍用普通字段（内容很小）。
+
 ## v3.6.3-beta.5 — 2026-06-01
 
 新增「认证日志」（一等公民登录审计），并把 beta.4 的 Docker 跑 root 改回非 root（su-exec 降权）。无破坏性变更：新增一张 `auth_events` 表 + 一个 KV 设置，AutoMigrate 自动处理。
