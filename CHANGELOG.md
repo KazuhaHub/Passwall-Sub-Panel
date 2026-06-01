@@ -4,6 +4,24 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## v3.6.3-beta.3 — 2026-06-01
+
+beta.2 后的修复:geo「立即更新」一直 502 的根因 + 该板块在英文界面没有翻译。无 schema 变更。
+
+### Fixed
+
+- **geo「立即更新」一直返回 502、且看不到真实原因** ── 端点原先在 HTTP 请求内**同步下载**整个数据库
+  (MaxMind `.tar.gz` 最长 3 分钟),下载失败/超时就回 502;面板自身又复用 502 当「外部库失败」错误码,
+  与前置反向代理的网关 502 撞车 —— 前端拿到的往往是反代的 HTML 错误页(没有 JSON `error` 体),只能显示
+  通用的 `AxiosError ... 502`,真实原因(密钥错、下载源不可达等)被吞掉。改为:`POST .../update` 立即返回
+  `202` 并在**后台**跑下载,把 `{updating,last_error,last_file,last_at}` 通过既有 `GET .../status` 暴露;
+  前端触发后**轮询状态**直到完成,直接显示后端返回的真实成功/错误,反代再也无法吞掉错误。手动「立即更新」
+  与 12h 自动更新现在共用同一单飞守卫(`StartUpdate`),消除了两者同时写 `.part` 临时文件的竞态。
+- **「IP 地区显示(访问日志)」整块在英文界面仍是中文** ── 该板块全部用 `t(…, {defaultValue:'中文'})`,
+  但两个语言包里**从未补 `settings.geo.*` 键**,英文模式只能回退到中文 defaultValue;另有 3 个「更新来源」
+  下拉项压根没套 `t()`。补齐 en-US / zh-CN 的 `settings.geo.*`(26 键)与访问日志的 `logs.region_hint`,
+  并把 3 个硬编码下拉项接入 i18n。
+
 ## v3.6.3-beta.2 — 2026-06-01
 
 beta.1 发布后的逐行复查批次:1 个用户可见 bug + 流量图表精度/写入修复 + 两个 geo 健壮性小修。全部带回归 / drift 测试。无 schema 变更。

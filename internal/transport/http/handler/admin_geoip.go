@@ -29,19 +29,21 @@ func (h *AdminGeoIPHandler) Status(c *gin.Context) {
 	c.JSON(http.StatusOK, h.geo.Status(c.Request.Context()))
 }
 
-// Update triggers an immediate download/refresh of the configured source's
-// database (no user IPs involved — only a public DB is fetched).
+// Update kicks off an immediate download/refresh of the configured source's
+// database (no user IPs involved — only a public DB is fetched) and returns
+// right away. The download runs in the background because it can take minutes —
+// doing it inline made a reverse proxy time out and answer 502 before the panel
+// could reply. The client polls GET /settings/geoip/status for progress and the
+// result (status.update.{updating,last_error,last_file}).
 func (h *AdminGeoIPHandler) Update(c *gin.Context) {
 	if h.geo == nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Geo service not available"})
 		return
 	}
-	file, err := h.geo.Update(c.Request.Context())
-	if err != nil {
-		// Upstream/config failure (bad token, network, invalid file) — surface
-		// the reason so the admin can fix it. 502: we depend on an external DB.
-		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+	if err := h.geo.StartUpdate(); err != nil {
+		// Only failure here is "already running" — a benign conflict.
+		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"file": file})
+	c.JSON(http.StatusAccepted, gin.H{"status": "started"})
 }

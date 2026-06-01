@@ -25,6 +25,68 @@ const (
 	geoMaxDownloadBytes = 256 << 20 // cap; GeoLite2-City .mmdb is ~70 MiB
 )
 
+// UpdateState reports the background updater's status for the admin UI: whether
+// a download is in flight and the result of the last completed run.
+type UpdateState struct {
+	Updating bool   `json:"updating"`
+	LastErr  string `json:"last_error,omitempty"`
+	LastFile string `json:"last_file,omitempty"`
+	LastAt   int64  `json:"last_at,omitempty"` // unix seconds of last completion, 0 = never
+}
+
+// StartUpdate kicks off a database refresh in the background and returns at
+// once, so the HTTP "update now" request doesn't sit through a multi-minute
+// download — a reverse proxy in front of the panel would otherwise cut that off
+// with a 502. The admin UI polls Status to watch progress and read the result
+// (success file or error). Returns an error only if an update is already
+// running; both the manual trigger and the 12h auto-update go through here, so
+// they serialise and can't race on the .part temp file. The download runs on a
+// detached context (not the request's) so finishing the HTTP call can't cancel
+// it.
+func (s *Service) StartUpdate() error {
+	if s == nil {
+		return fmt.Errorf("geo service not configured")
+	}
+	s.upMu.Lock()
+	if s.updating {
+		s.upMu.Unlock()
+		return fmt.Errorf("an update is already running")
+	}
+	s.updating = true
+	s.upMu.Unlock()
+
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), geoDownloadTimeout+30*time.Second)
+		defer cancel()
+		file, err := s.Update(ctx)
+		s.upMu.Lock()
+		s.updating = false
+		s.lastAt = time.Now()
+		if err != nil {
+			s.lastErr = err.Error()
+			log.Warn("geo: update failed", "err", err)
+		} else {
+			s.lastErr, s.lastFile = "", file
+		}
+		s.upMu.Unlock()
+	}()
+	return nil
+}
+
+// UpdateState returns a snapshot of the background updater's status.
+func (s *Service) UpdateState() UpdateState {
+	if s == nil {
+		return UpdateState{}
+	}
+	s.upMu.Lock()
+	defer s.upMu.Unlock()
+	st := UpdateState{Updating: s.updating, LastErr: s.lastErr, LastFile: s.lastFile}
+	if !s.lastAt.IsZero() {
+		st.LastAt = s.lastAt.Unix()
+	}
+	return st
+}
+
 // Update downloads the configured source's database, validates it as a real
 // .mmdb, atomically replaces the active file in the geoip dir, and hot-reloads.
 // The panel only ever downloads a PUBLIC database — no user IPs are involved.

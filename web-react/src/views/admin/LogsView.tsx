@@ -360,7 +360,7 @@ export default function LogsView() {
                         {r.ip}
                         {formatRegion(r.region) && (
                           <Box sx={{ fontSize: 11, color: md.onSurfaceVariant, mt: 0.25 }}
-                            title="地区由离线 IP 库估算；城市级仅供参考">{formatRegion(r.region)}</Box>
+                            title={t('logs.region_hint', { defaultValue: '地区由离线 IP 库估算；城市级仅供参考' })}>{formatRegion(r.region)}</Box>
                         )}
                       </TableCell>
                       <TableCell sx={{ fontSize: 13 }}>{r.client_type}</TableCell>
@@ -433,7 +433,7 @@ export default function LogsView() {
                         {r.ip}
                         {formatRegion(r.region) && (
                           <Box sx={{ fontSize: 11, color: md.onSurfaceVariant, mt: 0.25 }}
-                            title="地区由离线 IP 库估算；城市级仅供参考">{formatRegion(r.region)}</Box>
+                            title={t('logs.region_hint', { defaultValue: '地区由离线 IP 库估算；城市级仅供参考' })}>{formatRegion(r.region)}</Box>
                         )}
                       </TableCell>
                       <TableCell sx={{ fontSize: 13, whiteSpace: 'nowrap' }}>{formatDualTz(r.at, panelTz)}</TableCell>

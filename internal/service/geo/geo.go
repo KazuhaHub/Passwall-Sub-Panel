@@ -32,6 +32,16 @@ type Service struct {
 	reader     *geoip.Reader
 	activePath string
 	activeMod  time.Time
+
+	// Async-update state, guarded by upMu (NOT mu — Update takes mu during the
+	// file swap, and the admin polls UpdateState while that runs). A manual
+	// "update now" and the 12h auto-update both go through StartUpdate, so only
+	// one download runs at a time and they can't race on the .part temp file.
+	upMu     sync.Mutex
+	updating bool
+	lastErr  string    // last completed update's error ("" on success)
+	lastFile string    // last successfully written database filename
+	lastAt   time.Time // when the last update completed (zero = never run)
 }
 
 // New creates the service and ensures the geoip dir exists so admins have a
@@ -182,10 +192,11 @@ type DBStatus struct {
 
 // Status reports the geo config + every database present, for the admin view.
 type Status struct {
-	Enabled   bool       `json:"enabled"`
-	Dir       string     `json:"dir"`
-	Active    string     `json:"active"` // active filename, "" if none
-	Available []DBStatus `json:"available"`
+	Enabled   bool        `json:"enabled"`
+	Dir       string      `json:"dir"`
+	Active    string      `json:"active"` // active filename, "" if none
+	Available []DBStatus  `json:"available"`
+	Update    UpdateState `json:"update"` // background-update progress + last result
 }
 
 // Status scans the geoip dir and reports each database's metadata + which is
@@ -197,7 +208,7 @@ func (s *Service) Status(ctx context.Context) Status {
 	if activePath != "" {
 		activeName = filepath.Base(activePath)
 	}
-	st := Status{Enabled: set.GeoIPEnabled, Dir: s.dir, Active: activeName, Available: []DBStatus{}}
+	st := Status{Enabled: set.GeoIPEnabled, Dir: s.dir, Active: activeName, Available: []DBStatus{}, Update: s.UpdateState()}
 	for _, name := range s.listMMDB() {
 		row := DBStatus{File: name, Active: name == activeName}
 		if r, err := geoip.Open(filepath.Join(s.dir, name)); err == nil {

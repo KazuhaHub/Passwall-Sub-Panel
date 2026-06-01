@@ -567,10 +567,13 @@ func (a *App) runGeoUpdateLoop(ctx context.Context) {
 	for {
 		set, err := a.settings.Load(ctx, ports.UISettings{})
 		if err == nil && set.GeoIPEnabled && set.GeoIPAutoUpdate {
-			if file, uerr := a.geo.Update(ctx); uerr != nil {
-				log.Warn("geo auto-update", "err", uerr)
-			} else {
-				log.Info("geo auto-update ok", "file", file)
+			// StartUpdate runs the download in the background and shares the
+			// updater's single-flight guard with the manual "update now" button,
+			// so the two can't race on the .part temp file. Success/failure is
+			// logged inside StartUpdate; "already running" just means a manual
+			// refresh is in flight, so skip this tick.
+			if uerr := a.geo.StartUpdate(); uerr != nil {
+				log.Info("geo auto-update skipped", "reason", uerr)
 			}
 		}
 		select {

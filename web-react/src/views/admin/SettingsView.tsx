@@ -174,14 +174,31 @@ export default function SettingsView() {
     try { setGeoStatus(await getGeoIPStatus()) } catch { /* non-fatal: section still renders */ }
   }
 
-  // runGeoUpdate triggers an immediate DB download/refresh, then re-reads the
-  // status so the active-file dropdown + build dates reflect the new file.
+  // runGeoUpdate triggers a DB refresh. The download runs server-side off the
+  // request (it can take minutes — doing it inline made the reverse proxy
+  // answer 502 before the panel could reply), so we kick it off then poll the
+  // status until it finishes, refreshing the active-file dropdown + build dates
+  // as we go and surfacing the real success/error from the backend.
   async function runGeoUpdate() {
     setGeoBusy(true)
     try {
-      const { file } = await updateGeoIPNow()
-      pushSnack(t('settings.geo.update_ok', { defaultValue: '数据库已更新：' }) + file, 'success')
-      await loadGeoStatus()
+      await updateGeoIPNow() // 202: download now runs in the background
+      const deadline = Date.now() + 5 * 60 * 1000
+      while (Date.now() < deadline) {
+        await new Promise(r => setTimeout(r, 2000))
+        const st = await getGeoIPStatus()
+        setGeoStatus(st)
+        if (!st.update.updating) {
+          if (st.update.last_error) {
+            pushSnack(st.update.last_error, 'warning')
+          } else {
+            pushSnack(t('settings.geo.update_ok', { defaultValue: '数据库已更新：' }) + (st.update.last_file || ''), 'success')
+          }
+          return
+        }
+      }
+      // Still running after the wait window — it keeps going server-side.
+      pushSnack(t('settings.geo.update_running', { defaultValue: '更新仍在后台进行，稍后刷新查看结果。' }), 'info')
     } catch (e) {
       const msg = (e as { response?: { data?: { error?: string } } })?.response?.data?.error || String(e)
       pushSnack(msg, 'warning')
@@ -479,9 +496,9 @@ export default function SettingsView() {
               <TextField select fullWidth size="small" label={t('settings.geo.source', { defaultValue: '更新来源' })}
                 value={settings.geo_ip_update_source || 'maxmind'}
                 onChange={e => patch('geo_ip_update_source', e.target.value as UISettings['geo_ip_update_source'])}>
-                <MenuItem value="maxmind">MaxMind GeoLite2（城市级，推荐）</MenuItem>
-                <MenuItem value="dbip">DB-IP City Lite（城市级，免账号）</MenuItem>
-                <MenuItem value="ipinfo">IPinfo Lite（仅国家 + ASN）</MenuItem>
+                <MenuItem value="maxmind">{t('settings.geo.source_maxmind', { defaultValue: 'MaxMind GeoLite2（城市级，推荐）' })}</MenuItem>
+                <MenuItem value="dbip">{t('settings.geo.source_dbip', { defaultValue: 'DB-IP City Lite（城市级，免账号）' })}</MenuItem>
+                <MenuItem value="ipinfo">{t('settings.geo.source_ipinfo', { defaultValue: 'IPinfo Lite（仅国家 + ASN）' })}</MenuItem>
                 <MenuItem value="custom">{t('settings.geo.source_custom', { defaultValue: '自定义 URL' })}</MenuItem>
               </TextField>
               {settings.geo_ip_update_source === 'maxmind' && (

@@ -173,11 +173,21 @@ export interface GeoDBStatus {
   error?: string
 }
 
+// Background-updater status. The download runs server-side off the request, so
+// the UI triggers it then polls getGeoIPStatus() and watches `update`.
+export interface GeoUpdateState {
+  updating: boolean
+  last_error?: string
+  last_file?: string
+  last_at?: number // unix seconds of last completion
+}
+
 export interface GeoIPStatus {
   enabled: boolean
   dir: string
   active: string
   available: GeoDBStatus[]
+  update: GeoUpdateState
 }
 
 export async function getGeoIPStatus() {
@@ -185,9 +195,13 @@ export async function getGeoIPStatus() {
   return data
 }
 
-/** Trigger an immediate download/refresh of the configured source's database. */
+/**
+ * Kick off a background download/refresh of the configured source's database.
+ * Returns immediately (202); poll getGeoIPStatus() and read `update` for the
+ * result. A 409 means an update is already running.
+ */
 export async function updateGeoIPNow() {
-  const { data } = await client.post<{ file: string }>('/admin/settings/geoip/update')
+  const { data } = await client.post<{ status: string }>('/admin/settings/geoip/update')
   return data
 }
 
