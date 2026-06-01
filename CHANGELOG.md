@@ -4,6 +4,22 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## v3.6.3-beta.5 — 2026-06-01
+
+新增「认证日志」（一等公民登录审计），并把 beta.4 的 Docker 跑 root 改回非 root（su-exec 降权）。无破坏性变更：新增一张 `auth_events` 表 + 一个 KV 设置，AutoMigrate 自动处理。
+
+### Added
+
+- **一等公民认证日志（`auth_events`）** —— 记录所有登录尝试（**本地 / SAML / OIDC，成功 + 失败**），含用户、方法、结果、失败原因码、IP、UA、时间；IP 地区在查看时离线解析（与审计/订阅日志一致）。
+  - **闭合「SSO 登录不留痕」的硬缺口**：此前只有本地登录（经通用审计）留痕，SAML/OIDC 登录完全不记 —— 企业普遍用 SSO，这是合规盲区。现在三种方法在各自认证判定点统一记录（成功、`invalid_credentials`/`disabled`/`token_error`、SSO 的 `sso_no_account`/`sso_conflict`/断言或交换失败/`oidc_idp_error` 等）。
+  - 后台 **Logs →「认证日志」** tab：按方法/结果/用户/时间/关键词筛，成功/失败高亮，带 IP+地区。用户编辑弹窗新增**「最近登录」面板**查看单用户登录历史。staff 可读 `GET /api/admin/auth-events`。
+  - 登录从通用审计（`shouldAuditPath`）移除、改由 `auth_events` 唯一权威记录（token refresh 仍留审计），避免双记。
+  - 独立保留期 `auth_event_retention_days`（默认 90，floor 90，同 `traffic_history_days`），每小时清理循环 prune。
+
+### Changed
+
+- **Docker 改回非 root（su-exec 降权 + PUID/PGID）** —— beta.4 为修绑定挂载写入而改成跑 root；按开源产品（小团队~企业）视角,非 root（k8s `runAsNonRoot` / 镜像扫描 / 合规）是正经诉求,故改用 postgres/redis/gitea 同款：容器以 root 启动 → entrypoint `chown` 挂载 → `su-exec` 降到非 root（默认 UID 10001，可经 `PUID`/`PGID` 对齐宿主机用户以免 sudo 编辑 `./config`）→ 长期进程非 root。fresh 与升级部署都自愈、无需手动 chown。`Dockerfile` 与 `Dockerfile.release`（发布的多架构镜像）同步修改；新增 `.gitattributes` 锁 `*.sh` 为 LF（防 CRLF shebang 破坏 entrypoint）。
+
 ## v3.6.3-beta.4 — 2026-06-01
 
 beta.3 后的 geo 设置完善 + 设置页 UX 修复，外加一处 Docker 部署权限修复。无 schema 变更。
