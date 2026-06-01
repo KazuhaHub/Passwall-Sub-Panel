@@ -222,6 +222,7 @@ func settingDescriptors(s *ports.UISettings) []settingDescriptor {
 		encStrField("geo", "geo_ip_update_token", &s.GeoIPUpdateToken), // encrypted at rest
 		strField("geo", "geo_ip_update_url", &s.GeoIPUpdateURL),
 		strField("geo", "geo_ip_update_edition", &s.GeoIPUpdateEdition),
+		intField("geo", "geo_ip_update_interval_hours", &s.GeoIPUpdateIntervalHours),
 	}
 }
 
@@ -405,6 +406,11 @@ func applyUISettingsDefaults(out, defaults ports.UISettings) ports.UISettings {
 	if out.GeoIPUpdateEdition == "" {
 		out.GeoIPUpdateEdition = "GeoLite2-City"
 	}
+	if out.GeoIPUpdateIntervalHours < 1 {
+		// Floor at 1h so a stray 0 (or a careless setting) can't turn the
+		// updater into a tight loop against MaxMind / DB-IP. 12h default.
+		out.GeoIPUpdateIntervalHours = 12
+	}
 	// Unified client registry (v3.3.0). When absent, either migrate the legacy
 	// two-table config (sub_client_rules + sub_import_clients) in place — a
 	// one-time best-effort fold, see sub_clients_legacy.go — or seed fresh
@@ -558,4 +564,3 @@ func defaultSubClients() []ports.SubClientFamily {
 		},
 	}
 }
-

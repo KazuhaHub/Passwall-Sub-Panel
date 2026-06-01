@@ -146,7 +146,12 @@ export interface UISettings {
   /** Updater source. maxmind (GeoLite2-City, recommended) / dbip / ipinfo / custom. */
   geo_ip_update_source: 'maxmind' | 'dbip' | 'ipinfo' | 'custom' | ''
   geo_ip_update_url: string
+  /** Database identifier for the chosen source: MaxMind edition id
+   *  (GeoLite2-City / paid GeoIP2-City) or IPinfo database stem (ipinfo_lite /
+   *  a paid product). Cleared on source change so each source's default applies. */
   geo_ip_update_edition: string
+  /** Auto-update cadence in hours (default 12, floored at 1). */
+  geo_ip_update_interval_hours: number
   /** Write-only: sent on PUT (empty = keep existing), never returned. The
    *  presence flag below reports whether one is stored. */
   geo_ip_update_token?: string

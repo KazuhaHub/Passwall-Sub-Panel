@@ -4,6 +4,23 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## v3.6.3-beta.4 — 2026-06-01
+
+beta.3 后的 geo 设置完善 + 设置页 UX 修复。无 schema 变更。
+
+### Added
+
+- **地区显示细化为「国家 · 州/省 · 城市」** —— 访问日志的 IP 地区由原来的「国旗 + 国家 + 城市/省其一」改为国家、州/省、城市三级（城市与州/省相同时去重）。数据后端早已抽取（subdivisions[0] + city），纯展示层改动。
+- **自动更新间隔可配** —— 新增 `geo_ip_update_interval_hours`（默认 12，最小 1h），设置页可调；更新循环每轮重读，改动无需重启即生效（原为写死的 12h）。
+- **IPinfo / MaxMind 可指定其他版本（付费）** —— MaxMind edition、IPinfo 数据库各为一个自由文本框：IPinfo 按填写的产品名拼 `ipinfo.io/data/<名>.mmdb`（免费默认 `ipinfo_lite`，付费可填如 `standard_location`，PathEscape 防注入），MaxMind 付费可填 `GeoIP2-City`。切换来源时自动清空版本字段，避免把一家的版本名带到另一家。
+
+### Fixed
+
+- **设置页「激活数据库」下拉选「自动」显示空白** —— 加 `displayEmpty`，现正常显示「（自动：按文件名第一个）」标签。
+- **License Key / Token 字段改用 SMTP 密码同款「已保存（保持不变）」** —— 已存有凭据时显示只读条 + 「更改」，避免保存时误清空（空值=保持不变的语义后端早已支持）。
+- **「立即更新」按钮现在先自动保存设置再下载** —— 不必再手动先点保存；校验失败或网络错会正确中断。
+- **geoip 目录建不出来时不再静默** —— 启动若无法创建该目录会打 WARN（常见于 Docker 下配置目录权限问题）；手动更新失败的 mkdir 报错带上路径与可操作提示。
+
 ## v3.6.3-beta.3 — 2026-06-01
 
 beta.2 后的修复:geo「立即更新」一直 502 的根因 + 该板块在英文界面没有翻译。无 schema 变更。

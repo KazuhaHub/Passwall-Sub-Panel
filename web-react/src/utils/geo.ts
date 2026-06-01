@@ -24,13 +24,19 @@ export function countryName(g?: GeoLocation): string {
   }
 }
 
-/** formatRegion renders a compact "🇭🇰 Hong Kong · Central" label. City (or
- * region) is the least-reliable part for free DBs — callers should present it
- * as approximate. Returns '' when there's nothing to show. */
+/** formatRegion renders a "🇨🇳 China · Guangdong · Shenzhen" label —
+ * country · state/province (region) · city, each shown when present. Region
+ * and city often coincide in free DBs, so a city equal to the region is
+ * dropped to avoid "Shanghai · Shanghai". City/region are the least-reliable
+ * parts for free DBs — callers should present them as approximate. Returns ''
+ * when there's nothing to show. */
 export function formatRegion(g?: GeoLocation): string {
   if (!g || (!g.country_code && !g.country)) return ''
   const flag = countryFlag(g.country_code)
   const name = countryName(g)
-  const place = g.city || g.region
-  return [flag, name, place ? `· ${place}` : ''].filter(Boolean).join(' ')
+  const tail: string[] = []
+  if (g.region) tail.push(g.region)
+  if (g.city && g.city !== g.region) tail.push(g.city)
+  const head = [flag, name].filter(Boolean).join(' ')
+  return tail.length ? `${head} · ${tail.join(' · ')}` : head
 }

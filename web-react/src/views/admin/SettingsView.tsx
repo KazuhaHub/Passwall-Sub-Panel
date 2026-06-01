@@ -167,6 +167,9 @@ export default function SettingsView() {
   const [saving, setSaving] = useState(false)
   const [geoStatus, setGeoStatus] = useState<GeoIPStatus | null>(null)
   const [geoBusy, setGeoBusy] = useState(false)
+  // changeGeoToken mirrors the SMTP-password "kept unchanged" pattern: when a
+  // token is already stored, show a read-only chip until the admin clicks Change.
+  const [changeGeoToken, setChangeGeoToken] = useState(false)
 
   useEffect(() => { void load(); void loadGeoStatus() }, [])
 
@@ -182,6 +185,11 @@ export default function SettingsView() {
   async function runGeoUpdate() {
     setGeoBusy(true)
     try {
+      // Persist current settings first (token / source / edition / interval) so
+      // the admin doesn't have to click Save separately — the backend update
+      // reads the STORED token, not the in-memory form. Bail if validation failed
+      // (save already surfaced why); a network error throws into the catch below.
+      if (!(await save(undefined, { quiet: true }))) return
       await updateGeoIPNow() // 202: download now runs in the background
       const deadline = Date.now() + 5 * 60 * 1000
       while (Date.now() < deadline) {
@@ -232,9 +240,13 @@ export default function SettingsView() {
     finally { setLoading(false) }
   }
 
-  async function save(e?: FormEvent) {
+  // save persists the whole settings object. Returns true on success, false on
+  // a validation failure (already surfaced via snack), and throws on a network
+  // error — so callers like runGeoUpdate can gate on the boolean. opts.quiet
+  // suppresses the "saved" snack when save is a side-effect of another action.
+  async function save(e?: FormEvent, opts: { quiet?: boolean } = {}): Promise<boolean> {
     e?.preventDefault()
-    if (!settings) return
+    if (!settings) return false
     // Cross-tab submit guard. Brand.sub_base_url is required because the
     // subscription URL embeds it — saving an invalid one silently breaks
     // every client. Emergency-access values only matter when the feature
@@ -243,18 +255,18 @@ export default function SettingsView() {
       const urlErr = validateUrl(settings.sub_base_url, { required: true })
       if (urlErr) {
         pushSnack(t(`admin:${urlErr}`) + ' (sub_base_url)', 'warning')
-        return
+        return false
       }
     }
     if (settings.emergency_access_enabled) {
       if (!Number.isInteger(settings.emergency_access_hours) || settings.emergency_access_hours < 1) {
-        pushSnack(t('admin:validation.positive_int') + ' (emergency_access_hours)', 'warning'); return
+        pushSnack(t('admin:validation.positive_int') + ' (emergency_access_hours)', 'warning'); return false
       }
       if (!Number.isInteger(settings.emergency_access_max_count) || settings.emergency_access_max_count < 1) {
-        pushSnack(t('admin:validation.positive_int') + ' (emergency_access_max_count)', 'warning'); return
+        pushSnack(t('admin:validation.positive_int') + ' (emergency_access_max_count)', 'warning'); return false
       }
       if (settings.emergency_access_quota_gb < 0) {
-        pushSnack(t('admin:validation.non_negative_number') + ' (emergency_access_quota_gb)', 'warning'); return
+        pushSnack(t('admin:validation.non_negative_number') + ' (emergency_access_quota_gb)', 'warning'); return false
       }
     }
     // Announcement: if the admin enabled it but left the title or body
@@ -262,10 +274,10 @@ export default function SettingsView() {
     // accidental publishes.
     if (settings.global_announcement?.enabled) {
       if (!settings.global_announcement.title?.trim()) {
-        pushSnack(t('admin:validation.required') + ' (announcement title)', 'warning'); return
+        pushSnack(t('admin:validation.required') + ' (announcement title)', 'warning'); return false
       }
       if (!settings.global_announcement.content?.trim()) {
-        pushSnack(t('admin:validation.required') + ' (announcement content)', 'warning'); return
+        pushSnack(t('admin:validation.required') + ' (announcement content)', 'warning'); return false
       }
     }
     // Quick links: each enabled row must have a valid label + URL,
@@ -273,11 +285,11 @@ export default function SettingsView() {
     for (const [idx, l] of settings.quick_links.entries()) {
       if (!l.enabled) continue
       if (!l.label.trim()) {
-        pushSnack(t('admin:validation.required') + ` (quick link #${idx + 1} label)`, 'warning'); return
+        pushSnack(t('admin:validation.required') + ` (quick link #${idx + 1} label)`, 'warning'); return false
       }
       const urlErr = validateUrl(l.url, { required: true })
       if (urlErr) {
-        pushSnack(t(`admin:${urlErr}`) + ` (quick link #${idx + 1} URL)`, 'warning'); return
+        pushSnack(t(`admin:${urlErr}`) + ` (quick link #${idx + 1} URL)`, 'warning'); return false
       }
     }
     setSaving(true)
@@ -295,7 +307,9 @@ export default function SettingsView() {
         footerText: saved.footer_text || '© Kazuha Hub Passwall',
         themeColor: saved.theme_color || undefined,
       })
-      pushSnack(t('settings.saved'), 'success')
+      setChangeGeoToken(false)
+      if (!opts.quiet) pushSnack(t('settings.saved'), 'success')
+      return true
     } finally { setSaving(false) }
   }
 
@@ -467,8 +481,9 @@ export default function SettingsView() {
             </Typography>
 
             <TextField select fullWidth size="small" label={t('settings.geo.active_db', { defaultValue: '激活数据库' })}
-              value={settings.geo_ip_db_file}
+              value={settings.geo_ip_db_file ?? ''}
               onChange={e => patch('geo_ip_db_file', e.target.value)}
+              SelectProps={{ displayEmpty: true }}
               helperText={t('settings.geo.active_db_hint', { defaultValue: '存在多个库时选用哪个（留空=按名取第一个）。只有一个激活源——不合并、无冲突。' })}>
               <MenuItem value="">{t('settings.geo.auto', { defaultValue: '（自动：按文件名第一个）' })}</MenuItem>
               {(geoStatus?.available || []).map(db => (
@@ -489,22 +504,37 @@ export default function SettingsView() {
                 ))}
             </Box>
 
-            <FormControlLabel label={t('settings.geo.auto_update', { defaultValue: '自动更新数据库（每 12 小时）' })}
+            <FormControlLabel label={t('settings.geo.auto_update', { defaultValue: '自动更新数据库' })}
               control={<Switch checked={settings.geo_ip_auto_update} onChange={(_, c) => patch('geo_ip_auto_update', c)} />}
               sx={{ ml: 0, '& .MuiFormControlLabel-label': { ml: 1.5 } }} />
+            <TextField type="number" size="small" sx={{ maxWidth: 260 }}
+              label={t('settings.geo.update_interval_hours', { defaultValue: '自动更新间隔（小时）' })}
+              value={settings.geo_ip_update_interval_hours || 12}
+              onChange={e => patch('geo_ip_update_interval_hours', Math.max(1, Math.floor(Number(e.target.value) || 12)))}
+              inputProps={{ min: 1, step: 1 }}
+              disabled={!settings.geo_ip_auto_update}
+              helperText={t('settings.geo.update_interval_hint', { defaultValue: '最小 1 小时；修改后无需重启即生效。' })} />
             <Pair>
               <TextField select fullWidth size="small" label={t('settings.geo.source', { defaultValue: '更新来源' })}
                 value={settings.geo_ip_update_source || 'maxmind'}
-                onChange={e => patch('geo_ip_update_source', e.target.value as UISettings['geo_ip_update_source'])}>
+                onChange={e => {
+                  // Switching source clears the edition so each source's own
+                  // default applies — a leftover MaxMind edition would break IPinfo.
+                  patch('geo_ip_update_source', e.target.value as UISettings['geo_ip_update_source'])
+                  patch('geo_ip_update_edition', '')
+                }}>
                 <MenuItem value="maxmind">{t('settings.geo.source_maxmind', { defaultValue: 'MaxMind GeoLite2（城市级，推荐）' })}</MenuItem>
                 <MenuItem value="dbip">{t('settings.geo.source_dbip', { defaultValue: 'DB-IP City Lite（城市级，免账号）' })}</MenuItem>
                 <MenuItem value="ipinfo">{t('settings.geo.source_ipinfo', { defaultValue: 'IPinfo Lite（仅国家 + ASN）' })}</MenuItem>
                 <MenuItem value="custom">{t('settings.geo.source_custom', { defaultValue: '自定义 URL' })}</MenuItem>
               </TextField>
-              {settings.geo_ip_update_source === 'maxmind' && (
-                <TextField fullWidth size="small" label={t('settings.geo.edition', { defaultValue: 'MaxMind edition' })}
+              {(settings.geo_ip_update_source === 'maxmind' || settings.geo_ip_update_source === 'ipinfo') && (
+                <TextField fullWidth size="small"
+                  label={settings.geo_ip_update_source === 'ipinfo'
+                    ? t('settings.geo.edition_ipinfo', { defaultValue: 'IPinfo 数据库（付费可填其他产品）' })
+                    : t('settings.geo.edition', { defaultValue: 'MaxMind edition（付费可填 GeoIP2-City）' })}
                   value={settings.geo_ip_update_edition} onChange={e => patch('geo_ip_update_edition', e.target.value)}
-                  placeholder="GeoLite2-City" />
+                  placeholder={settings.geo_ip_update_source === 'ipinfo' ? 'ipinfo_lite' : 'GeoLite2-City'} />
               )}
               {settings.geo_ip_update_source === 'custom' && (
                 <TextField fullWidth size="small" label={t('settings.geo.url', { defaultValue: '下载 URL（.mmdb / .gz / .tar.gz）' })}
@@ -512,17 +542,35 @@ export default function SettingsView() {
                   placeholder="https://…/db.mmdb" />
               )}
             </Pair>
-            {settings.geo_ip_update_source !== 'dbip' && (
-              <TextField fullWidth size="small" type="password" autoComplete="new-password"
-                label={settings.geo_ip_update_source === 'maxmind'
-                  ? t('settings.geo.token_maxmind', { defaultValue: 'MaxMind License Key' })
-                  : settings.geo_ip_update_source === 'ipinfo'
-                    ? t('settings.geo.token_ipinfo', { defaultValue: 'IPinfo Token' })
-                    : t('settings.geo.token_custom', { defaultValue: 'Token / 凭据（可选）' })}
-                value={settings.geo_ip_update_token ?? ''}
-                onChange={e => patch('geo_ip_update_token', e.target.value)}
-                placeholder={settings.has_geo_ip_update_token ? t('settings.geo.token_set', { defaultValue: '已设置（留空则保持不变）' }) : ''} />
-            )}
+            {settings.geo_ip_update_source !== 'dbip' && (() => {
+              const tokenLabel = settings.geo_ip_update_source === 'maxmind'
+                ? t('settings.geo.token_maxmind', { defaultValue: 'MaxMind License Key' })
+                : settings.geo_ip_update_source === 'ipinfo'
+                  ? t('settings.geo.token_ipinfo', { defaultValue: 'IPinfo Token' })
+                  : t('settings.geo.token_custom', { defaultValue: 'Token / 凭据（可选）' })
+              // Kept-unchanged pattern (mirrors the SMTP password field): a stored
+              // token shows as a read-only chip + Change, so saving never wipes it.
+              return settings.has_geo_ip_update_token && !changeGeoToken ? (
+                <Box>
+                  <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant, mb: 0.5 }}>{tokenLabel}</Typography>
+                  <Box sx={{
+                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                    gap: 1.5, minHeight: 40, px: 1.75, py: 0.5,
+                    borderRadius: 1.5, border: `1px solid ${md.outlineVariant}`,
+                  }}>
+                    <Typography variant="body2">{t('settings.geo.token_kept', { defaultValue: '已保存（保持不变）' })}</Typography>
+                    <Button size="small" variant="text" onClick={() => setChangeGeoToken(true)}>
+                      {t('settings.geo.token_change', { defaultValue: '更改' })}
+                    </Button>
+                  </Box>
+                </Box>
+              ) : (
+                <TextField fullWidth size="small" type="password" autoComplete="new-password"
+                  label={tokenLabel}
+                  value={settings.geo_ip_update_token ?? ''}
+                  onChange={e => patch('geo_ip_update_token', e.target.value)} />
+              )
+            })()}
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap' }}>
               <Button variant="outlined" size="small" disabled={geoBusy} onClick={runGeoUpdate}
                 startIcon={geoBusy ? <CircularProgress size={14} color="inherit" /> : undefined}>

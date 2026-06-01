@@ -75,8 +75,13 @@ func TestCandidateURLs(t *testing.T) {
 		t.Fatal("ipinfo without token must error")
 	}
 	urls, target, _ = candidateURLs(ports.UISettings{GeoIPUpdateSource: "ipinfo", GeoIPUpdateToken: "tok"})
-	if len(urls) != 1 || !strings.Contains(urls[0], "ipinfo.io/data/ipinfo_lite.mmdb") || target != "ipinfo-lite.mmdb" {
+	if len(urls) != 1 || !strings.Contains(urls[0], "ipinfo.io/data/ipinfo_lite.mmdb") || target != "ipinfo_lite.mmdb" {
 		t.Fatalf("ipinfo url/target = %v / %q", urls, target)
+	}
+	// Paid IPinfo product via the edition field → URL + target follow it.
+	urls, target, _ = candidateURLs(ports.UISettings{GeoIPUpdateSource: "ipinfo", GeoIPUpdateToken: "tok", GeoIPUpdateEdition: "standard_location"})
+	if len(urls) != 1 || !strings.Contains(urls[0], "ipinfo.io/data/standard_location.mmdb") || target != "standard_location.mmdb" {
+		t.Fatalf("ipinfo paid url/target = %v / %q", urls, target)
 	}
 
 	// dbip returns current + previous month (month-stamped, no stable latest).

@@ -121,7 +121,11 @@ func (s *Service) Update(ctx context.Context) (string, error) {
 	}
 
 	if err := os.MkdirAll(s.dir, 0o755); err != nil {
-		return "", err
+		// Most common cause in Docker: the config dir is a bind mount owned by
+		// root (or the host user) while the panel runs as the non-root container
+		// user (UID 10001), so it can't create this subdir. Fix on the host by
+		// chowning the config dir to 10001.
+		return "", fmt.Errorf("create geoip dir %s (in Docker, make the config dir writable by the container user, e.g. `chown -R 10001 <config-dir>`): %w", s.dir, err)
 	}
 	tmp := filepath.Join(s.dir, target+".part")
 	if err := os.WriteFile(tmp, mmdb, 0o644); err != nil {
@@ -203,7 +207,16 @@ func candidateURLs(set ports.UISettings) (urls []string, target string, err erro
 		if token == "" {
 			return nil, "", fmt.Errorf("ipinfo update requires a token")
 		}
-		return []string{"https://ipinfo.io/data/ipinfo_lite.mmdb?token=" + url.QueryEscape(token)}, "ipinfo-lite.mmdb", nil
+		// db is the IPinfo database filename stem: "ipinfo_lite" (free,
+		// country+ASN) or a paid product (e.g. "standard_location" for
+		// city-level). It goes in the URL path, so PathEscape it; filepath.Base
+		// on the target blocks traversal into the geoip dir.
+		db := strings.TrimSpace(set.GeoIPUpdateEdition)
+		if db == "" {
+			db = "ipinfo_lite"
+		}
+		u := "https://ipinfo.io/data/" + url.PathEscape(db) + ".mmdb?token=" + url.QueryEscape(token)
+		return []string{u}, filepath.Base(db) + ".mmdb", nil
 	case "dbip":
 		now := time.Now()
 		return []string{dbipURL(now), dbipURL(prevMonthOf(now))}, "dbip-city-lite.mmdb", nil

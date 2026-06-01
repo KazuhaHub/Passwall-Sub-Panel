@@ -574,8 +574,16 @@ type UISettings struct {
 	GeoIPUpdateToken string `json:"geo_ip_update_token,omitempty"`
 	// GeoIPUpdateURL is the direct download URL for the "custom" source.
 	GeoIPUpdateURL string `json:"geo_ip_update_url"`
-	// GeoIPUpdateEdition is the MaxMind edition id (e.g. GeoLite2-City).
+	// GeoIPUpdateEdition is the database identifier for the chosen source:
+	// the MaxMind edition id (e.g. GeoLite2-City / paid GeoIP2-City) or the
+	// IPinfo database filename stem (e.g. ipinfo_lite / a paid product). The
+	// frontend clears it when the source changes so each source's default
+	// applies; candidateURLs interprets it per-source.
 	GeoIPUpdateEdition string `json:"geo_ip_update_edition"`
+	// GeoIPUpdateIntervalHours is the auto-update cadence in hours. Default 12,
+	// floored at 1 so the panel can't hammer the upstream DB hosts. The update
+	// loop re-reads this each cycle, so changes take effect without a restart.
+	GeoIPUpdateIntervalHours int `json:"geo_ip_update_interval_hours"`
 
 	// ---- Subscription settings ----
 	// SubPath is the URL path prefix for subscription endpoints.

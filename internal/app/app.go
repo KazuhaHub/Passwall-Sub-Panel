@@ -549,20 +549,24 @@ func (a *App) runMailLoop(ctx context.Context) {
 
 // runGeoUpdateLoop keeps the offline geo database current when auto-update is
 // enabled. Required for MaxMind's 30-day EULA. Checks at startup (after a short
-// delay so boot isn't blocked on an external download) then every 12h; each
-// pass only downloads a PUBLIC database — no user IPs are involved.
+// delay so boot isn't blocked on an external download) then on the admin-
+// configured interval (geo_ip_update_interval_hours, re-read each cycle so a
+// change takes effect without a restart); each pass only downloads a PUBLIC
+// database — no user IPs are involved.
 func (a *App) runGeoUpdateLoop(ctx context.Context) {
 	if a.geo == nil {
 		return
 	}
-	const interval = 12 * time.Hour
 	// Small initial delay so a fresh boot serves quickly before the first fetch.
 	select {
 	case <-ctx.Done():
 		return
 	case <-time.After(30 * time.Second):
 	}
-	t := time.NewTicker(interval)
+	// The ticker interval is Reset from settings each cycle (the loader floors
+	// the value at 1h); the initial value here is irrelevant since we Reset
+	// before the first wait below.
+	t := time.NewTicker(time.Hour)
 	defer t.Stop()
 	for {
 		set, err := a.settings.Load(ctx, ports.UISettings{})
@@ -576,6 +580,11 @@ func (a *App) runGeoUpdateLoop(ctx context.Context) {
 				log.Info("geo auto-update skipped", "reason", uerr)
 			}
 		}
+		interval := 12 * time.Hour
+		if err == nil && set.GeoIPUpdateIntervalHours >= 1 {
+			interval = time.Duration(set.GeoIPUpdateIntervalHours) * time.Hour
+		}
+		t.Reset(interval)
 		select {
 		case <-ctx.Done():
 			return

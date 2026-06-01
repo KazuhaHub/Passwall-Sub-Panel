@@ -48,7 +48,13 @@ type Service struct {
 // place to drop a .mmdb (or the auto-updater can write one).
 func New(settings ports.SettingsRepo, configDir string) *Service {
 	s := &Service{settings: settings, dir: filepath.Join(configDir, "geoip")}
-	_ = os.MkdirAll(s.dir, 0o755)
+	if err := os.MkdirAll(s.dir, 0o755); err != nil {
+		// Non-fatal — the feature just can't store/serve a database until the
+		// dir exists. Surface it at boot rather than only when an update later
+		// fails. The usual cause is a Docker bind-mounted config dir not
+		// writable by the non-root container user (UID 10001); see Update.
+		log.Warn("geo: cannot create database dir (IP region display unavailable until fixed)", "dir", s.dir, "err", err)
+	}
 	return s
 }
 
