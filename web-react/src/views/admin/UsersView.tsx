@@ -1442,6 +1442,7 @@ export default function UsersView() {
                 onClick={() => editing && copy(editing.sub_url)}>
                 {t('admin:users.more_menu.copy_sub')}
               </Button>
+              {editing && <UserActivity userId={editing.id} />}
             </Box>
 
             {/* RIGHT — editable fields */}
@@ -1649,7 +1650,6 @@ export default function UsersView() {
             })()}
             <TextField fullWidth label={t('admin:users.field.remark')}
               value={editForm.remark} onChange={e => setEditForm({ ...editForm, remark: e.target.value })} />
-            {editing && <UserActivity userId={editing.id} />}
             </Box>
           </Box>
         </DialogContent>

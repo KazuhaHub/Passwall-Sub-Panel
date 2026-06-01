@@ -34,19 +34,24 @@ export function UserActivity({ userId }: { userId: number }) {
         </Typography>
       )}
       {items !== null && items.length > 0 && (
-        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
+        <Box sx={{ display: 'flex', flexDirection: 'column' }}>
           {items.map(r => (
-            <Box key={r.id} sx={{ display: 'flex', alignItems: 'baseline', gap: 1, fontSize: 12, flexWrap: 'wrap' }}>
-              <Box component="span" sx={{ fontWeight: 600, color: r.outcome === 'success' ? '#1b5e20' : '#b00020' }}>
-                {r.outcome === 'success'
-                  ? t('users.activity.ok', { defaultValue: '成功' })
-                  : t('users.activity.fail', { defaultValue: '失败' })}
+            <Box key={r.id} sx={{ fontSize: 12, display: 'flex', flexDirection: 'column', gap: 0.25, py: 0.5, borderTop: `1px solid ${md.outlineVariant}` }}>
+              <Box sx={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 1 }}>
+                <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 0.75, minWidth: 0 }}>
+                  <Box component="span" sx={{ fontWeight: 600, color: r.outcome === 'success' ? '#1b5e20' : '#b00020' }}>
+                    {r.outcome === 'success'
+                      ? t('users.activity.ok', { defaultValue: '成功' })
+                      : t('users.activity.fail', { defaultValue: '失败' })}
+                  </Box>
+                  <Box component="span" sx={{ textTransform: 'uppercase', color: md.onSurfaceVariant, fontSize: 11 }}>{r.method}</Box>
+                </Box>
+                <Box component="span" sx={{ color: md.onSurfaceVariant, whiteSpace: 'nowrap', fontSize: 11 }}>
+                  {new Date(r.at).toLocaleString()}
+                </Box>
               </Box>
-              <Box component="span" sx={{ textTransform: 'uppercase', color: md.onSurfaceVariant }}>{r.method}</Box>
-              <Box component="span">{r.ip}{formatRegion(r.region) ? ` · ${formatRegion(r.region)}` : ''}</Box>
-              {r.reason ? <Box component="span" sx={{ color: md.onSurfaceVariant }}>({r.reason})</Box> : null}
-              <Box component="span" sx={{ ml: 'auto', color: md.onSurfaceVariant, whiteSpace: 'nowrap' }}>
-                {new Date(r.at).toLocaleString()}
+              <Box component="span" sx={{ color: md.onSurfaceVariant, wordBreak: 'break-all' }}>
+                {r.ip}{formatRegion(r.region) ? ` · ${formatRegion(r.region)}` : ''}{r.reason ? ` · ${r.reason}` : ''}
               </Box>
             </Box>
           ))}

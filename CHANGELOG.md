@@ -4,6 +4,12 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## v3.6.3-beta.7 — 2026-06-01
+
+### Changed
+
+- **用户弹窗的「最近登录」面板移到左侧只读信息栏** —— 它本是只读信息(同流量用量/创建时间/订阅 URL),beta.6 误放进右侧可编辑表单的 2 列网格里、挤在备注旁显得突兀。移到左栏并改成每条两行的紧凑布局(结果+方法+时间 / IP·地区·原因),适配窄列。
+
 ## v3.6.3-beta.6 — 2026-06-01
 
 修 beta.5 的认证日志接口 500;规则集编辑器换 CodeMirror,修编辑大规则集卡顿。
