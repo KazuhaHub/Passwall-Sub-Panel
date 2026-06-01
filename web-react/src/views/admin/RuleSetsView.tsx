@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useState, type FormEvent } from 'react'
 import {
   Box,
   Button,
@@ -38,6 +38,10 @@ import { listTemplates, type Template } from '@/api/templates'
 import { confirm } from '@/components/ConfirmHost'
 import { pushSnack } from '@/components/SnackbarHost'
 import { PagedTableFooter } from '@/components/PagedTableFooter'
+
+// Lazy-load the CodeMirror editor so its (heavy) deps stay out of the initial
+// SPA bundle — fetched only when a rule-set editor dialog opens.
+const CodeEditor = lazy(() => import('@/components/CodeEditor'))
 
 const EMPTY: RuleSet = {
   slug: '', name: '', sort: 100, enabled: true, proxy_group_order: [], content: '',
@@ -403,12 +407,20 @@ export default function RuleSetsView() {
               value={proxyGroupText}
               onChange={e => setProxyGroupText(e.target.value)}
               sx={{ '& textarea': { fontSize: 13 } }} />
-            <TextField fullWidth multiline minRows={10} maxRows={20}
-              label={t('admin:rules.field.content')}
-              placeholder={t('admin:rules.placeholder.content')}
-              value={form.content}
-              onChange={e => setForm({ ...form, content: e.target.value })}
-              sx={{ '& textarea': { fontSize: 13 } }} />
+            <Box>
+              <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant, mb: 0.5 }}>
+                {t('admin:rules.field.content')}
+              </Typography>
+              <Box sx={{ border: `1px solid ${md.outlineVariant}`, borderRadius: 2, overflow: 'hidden' }}>
+                <Suspense fallback={<Box sx={{ height: 380, display: 'grid', placeItems: 'center' }}><CircularProgress size={22} /></Box>}>
+                  <CodeEditor
+                    value={form.content}
+                    onChange={v => setForm({ ...form, content: v })}
+                    dark={theme.palette.mode === 'dark'}
+                  />
+                </Suspense>
+              </Box>
+            </Box>
           </Box>
         </DialogContent>
         <DialogActions>
