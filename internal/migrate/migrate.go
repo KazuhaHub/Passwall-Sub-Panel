@@ -619,7 +619,12 @@ func copySettingsKV(ctx context.Context, src, dst *gorm.DB) error {
 				kv{"security", "audit_retention_days", strconv.Itoa(ui.AuditRetentionDays)},
 				kv{"security", "sync_task_retention_days", strconv.Itoa(ui.SyncTaskRetentionDays)},
 				// New in v3 — seed the documented default since v2 had no equivalent.
-				kv{"security", "traffic_snapshot_retention_days", "180"},
+				// Key is traffic_history_days (NOT the earlier-draft name
+				// traffic_snapshot_retention_days, which v3's settingDescriptors no
+				// longer reads — writing it stranded the value on a dead key). The
+				// drift guard in migrate_settings_test.go pins this against the live
+				// descriptor set.
+				kv{"security", "traffic_history_days", "180"},
 				kv{"security", "emergency_access_enabled", boolToStr(ui.EmergencyAccessEnabled)},
 				kv{"security", "emergency_access_hours", strconv.Itoa(ui.EmergencyAccessHours)},
 				kv{"security", "emergency_access_max_count", strconv.Itoa(ui.EmergencyAccessMaxCount)},

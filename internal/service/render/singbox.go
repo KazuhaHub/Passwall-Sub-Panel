@@ -421,8 +421,17 @@ func singBoxRouteRule(kind, value string) map[string]any {
 	case "PROCESS-NAME":
 		return map[string]any{"process_name": []string{value}}
 	case "DST-PORT":
-		if strings.Contains(value, "-") {
-			return map[string]any{"port_range": []string{value}}
+		if before, after, isRange := strings.Cut(value, "-"); isRange {
+			// sing-box port_range uses colon syntax ("8000:9000"), NOT Clash's
+			// hyphen ("8000-9000") — emitting the hyphen made sing-box reject the
+			// rule. Convert, and validate both bounds parse as ints.
+			lo, hi := strings.TrimSpace(before), strings.TrimSpace(after)
+			if _, e1 := strconv.Atoi(lo); e1 == nil {
+				if _, e2 := strconv.Atoi(hi); e2 == nil {
+					return map[string]any{"port_range": []string{lo + ":" + hi}}
+				}
+			}
+			return nil
 		}
 		if port, err := strconv.Atoi(value); err == nil {
 			return map[string]any{"port": []int{port}}

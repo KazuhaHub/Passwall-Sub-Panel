@@ -112,6 +112,21 @@ func (r *nodeRepo) UpdateInboundConfig(ctx context.Context, n *domain.Node) erro
 		}).Error
 }
 
+// UpdateEnabled writes only the `enabled` column (see UpdateHealth for the
+// column-scoping rationale). SetEnabled, DeleteAndSync, and reconcile's
+// disappeared-inbound branch flip enabled on a node snapshot read at cycle
+// start; a full-row Save there would revert health/traffic/config columns the
+// concurrent loops write.
+func (r *nodeRepo) UpdateEnabled(ctx context.Context, id int64, enabled bool) error {
+	if id == 0 {
+		return fmt.Errorf("UpdateEnabled requires a non-zero node ID")
+	}
+	return r.db.WithContext(ctx).
+		Model(&nodeRow{}).
+		Where("id = ?", id).
+		Update("enabled", enabled).Error
+}
+
 // BatchUpdateSortOrder rewrites sort_order for the listed nodes inside one
 // transaction. Used by the drag-to-reorder UI: the admin drags a row, the
 // frontend re-numbers the visible list in 10-step increments, and POSTs the

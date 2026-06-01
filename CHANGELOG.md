@@ -4,6 +4,111 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## v3.6.3 — 2026-05-31
+
+全面审计（19 维度 / 对抗式验证）后的修复批次。patch release:1 个 HIGH（进程崩溃路径）
++ 9 个 MEDIUM + 一组高性价比 LOW，无 schema 破坏性变更，全部补了回归 / drift 测试。
+另含一项流量图表 / 存储管线的修复（见下方独立小节）。
+
+### 流量图表 / 存储管线（修好一个没做完的迁移）
+
+- **流量历史图表超过 ~7 天就静默渲染成一长串平 0**(HIGH 修复)── beta.6 建好了
+  raw 5-min → hourly rollup 这套机器(本意是 hourly 表存长周期、按 `TrafficHistoryDays`
+  保留),但 `HistoryFor`/`NodeHistoryFor` 的读取**从没切过去**,仍读固定 7 天保留的原始
+  5-min 表。于是管理端默认的 30 天视图、以及 UI 提供的 90/180/365 天范围,超过 7 天的桶
+  全部返回 `{0,0,0}`(200 OK、无报错)。改:`HistoryFor`/`NodeHistoryFor` 改读
+  hourly rollup —— 每个图表桶 = 落在其内的 UTC 小时 delta 之和(delta 可加,不再做
+  累计计数器跨桶串接);新增 `ListHourlyByUser`/`ListHourlyByNode`(查询用 UTC 边界,
+  规避 SQLite 时区字符串排序)。day/周/月图表现在真实覆盖到 `TrafficHistoryDays`。
+  hourly 以 UTC 存储、按本地天求和 —— 整数偏移时区(如 +8)完全精确;半小时偏移时区
+  在天边界至多错配 1 小时(hourly 粒度的固有取舍,rollup 一贯设计)。
+- **hourly rollup 三表里 `client_*_hourly` 是只写不读的死存储**(存储修复)── 没有任何
+  按客户端的历史图表读它(图表只有 user/node 两种),而它是最大的表。停止 roll up
+  client 层(`rollupClient` 移除),只 roll up 被图表读的 user/node;已有的 client hourly
+  行随保留期老化退场。这才是真正的存储节省 —— 被图表读的 user/node hourly 表本就很小,
+  730 天保留也无压力,故默认保留期不变。
+- **图表“今天”保持实时**:rollup 现在把当前未封口的 UTC 小时也纳入(幂等重跑),并在
+  每次流量轮询后立即跑一次 `RollupOnce`(client 移除后开销很小),hourly 因此与原始
+  5-min 轮询一样新鲜;每小时清理循环仍保留 rollup-先于-prune 的兜底。
+- **文档订正**:`TrafficHistoryDays` 注释原称“0 keeps everything”,实际 `Load` 把 `<=0`
+  统一强制成 730 天(无“永久保留”模式),prune 的 `> 0` 守卫永远见不到 0 —— 注释改为
+  如实说明。前端两处“图表读原始表 / beta.7”的过时注释一并订正:Hour 粒度仍只在近 7 天
+  可选(几千个小时点不可读),day/周/月已覆盖完整保留窗口。
+
+### Fixed
+
+- **3X-UI cookie 认证客户端的 401 重认证无界递归会拖垮整个进程**(HIGH)── cookie 模式下遇到
+  401 会丢会话→重登→**直接重新调用 `doJSON`,无任何深度守卫**。当面板 `/login` 成功但受保护
+  API 持续 401(反代路径级鉴权 / webBasePath 不匹配 / 会话密钥已轮换)时,非尾递归把 goroutine
+  栈撑爆,以 fatal stack-overflow 终止进程 —— 这是 runtime-fatal 而非 panic,`safego` 的 recover
+  拦不住,且 `doJSON` 是 `ListInbounds` 的咽喉(流量轮询 / reconcile 每周期对每个面板都跑),一个
+  坏面板就能杀死整个 PSP。改为最多重认证一次:第二次连续 401 返回普通 auth 错误交由任务级
+  退避处理。补 persistent-401 回归测试。
+- **`SetPeriodUsage` 写入非单调快照,永久污染该小时流量 rollup 桶**(MEDIUM)── 管理员手动设
+  本期用量时会写一条 total 低于当前小时已有快照的"base"行,成为桶 MIN,而 rollup 按 MAX-MIN
+  计算,把整段周期用量算进这一小时;7 天后原始行被裁剪即无法纠正。改为只写当前值、本期用量
+  仅靠 `PeriodBaselineBytes` 承载(`PeriodUsed()` 读它),不再写下界行。补回归测试。
+- **inbound 上游已被删时 node-delete 任务永远循环、PSP 节点行永不删除**(MEDIUM)── 这是"管理员
+  在 3X-UI 里直接删了 inbound"的常见孤儿场景:删除守卫返回的 `record not found` 不算永久错误 →
+  1 分钟定速无限重试,`nodes.Delete` 永不可达。改为检测到 inbound 已不存在时跳过上游删除、清掉
+  本地 ownership 行、删 PSP 节点(把 client-delete 的"已不存在=成功"幂等推广到 inbound)。
+- **node 同步任务处理器缺最大尝试次数上限**(MEDIUM)── 非永久错误一律 1 分钟定速重试、无天花板。
+  补 `maxNodeTaskAttempts=100`,镜像 user 处理器:超限即取消、保留末次错误供 Sync Tasks 查看,
+  管理员手动 Retry 仍可覆盖。
+- **`checkNodes`/`SetEnabled`/`DeleteAndSync` 用全行 Save,回退并发的 health/traffic/config 列写入**
+  (MEDIUM)── 这三处对周期初读到的节点快照做全行 Save,会清掉并发循环刚写的列。新增列级写入器
+  `UpdateEnabled`(只写 `enabled` 列),三处改用之,补 reconcile 断言测试。
+- **两条"恢复缺失 client"路径对 VLESS flow 算法不一致,经 axis-B 恢复的 Reality 客户端 flow 为空
+  且永不自愈**(MEDIUM)── axis B 用 `n.Flow` 直传,axis A 基于探测到的 `ce.flow` 再以 `n.Flow`
+  覆盖。导入的 VLESS+Reality inbound 若 `Node.Flow` 留空,axis B 重建出 `flow=""` 的断连客户端,
+  且 flow healer 因门控也永不纠正。抽出共享 `resolveFlow` helper 供三处复用,补单测。
+- **SMTP 会话在 dial 之后无 I/O 截止时间,挂死的服务器会冻结整个串行提醒 / 公告循环**(MEDIUM)──
+  `ctx` 只在 dial 的 select 里看,握手后整段对话无 deadline。dial 成功后对连接设
+  `SetDeadline`(60s)覆盖 greeting→Quit。
+- **拼装的 MySQL DSN 对 IPv6 主机字面量损坏**(MEDIUM)── 裸 `fmt.Sprintf` 无 IPv6 加括号,
+  `::1` 被解析成 `[::1:3306]:3306` 连不上。改用驱动自带 `mysql.Config.FormatDSN`(经
+  `net.JoinHostPort` 构造地址、对库名 PathEscape),与 Postgres 路径对齐,顺带修了库名含 `/`
+  的转义问题。补 DSN round-trip 测试。
+- **v3 迁移器写了已废弃的设置键名 `traffic_snapshot_retention_days`**(MEDIUM)── 该键在 v3
+  已重命名为 `traffic_history_days`,迁移器仍写旧名,值被弃在死键上。改写为现行键名;新增
+  `mysql.KnownSettingNames()` + 迁移器 drift-guard 测试(实跑 `copySettingsKV` against SQLite,
+  断言写出的每个键都在现行 `settingDescriptors()` 集合内),给此前零覆盖的迁移器补上首个端到端测试。
+- **sing-box DST-PORT 范围用了连字符格式被 sing-box 拒绝**(LOW)── Clash 的 `8000-9000` 直传成了
+  sing-box 的 `port_range`,但后者要冒号语法 `8000:9000`。转换并校验两端为整数。补单测。
+- **`oidc_settings.client_secret` 列是 `size:512` 却存加密 blob**(LOW)── 长 client secret 会截断
+  (非严格 MySQL)/ 拒绝(PG / 严格 MySQL),损坏密文使下次 Load GCM 校验失败、SSO 启动中止。改
+  `type:text`,与其他加密列一致,AutoMigrate 原地扩容。
+- **`tryAdoptOrphan` 吞掉 `GetByPanelInbound` 的错误**(LOW)── 瞬时 DB 错误被当成"未被占用",可能
+  误领已属他节点的 inbound。改为区分 `ErrNotFound` 与真实错误,后者上抛。
+- **`Pool.Add` 直接存调用方指针,留下"别再动这个指针"的隐式契约**(LOW)── 改存防御性拷贝,
+  消除与 `List()` 无锁字段读的潜在竞态。
+
+### Security
+
+- **审计中间件把非 JSON 请求体原样存档、不脱敏**(MEDIUM)── `/api/auth/local/login` 等审计路径上,
+  form 编码的 `upn=x&password=...` 即便后续 400,明文密码也落进 operator 可读的审计表。改为:JSON 体
+  照旧脱敏;form 体解析后跑同一套 key 脱敏;其余非 JSON 体只记形状(`{"unparsed_body":true,"len":N}`),
+  绝不存原文。补三个回归测试。
+- **SAML ACS 用未净化、可被攻击者控制的 `RelayState` 作登录后跳转目标**(LOW,防御纵深)── `RelayState`
+  经 IdP 往返完全可控,ACS 此前未重新净化即拼进 `next=`。改为重跑 `sanitizeReturnTo` + `url.QueryEscape`;
+  OIDC 回调同样补上 QueryEscape;`sanitizeReturnTo` 额外拒绝反斜杠。
+- **空 `Value` 的 SSO 角色规则会空匹配**(LOW,提权脚枪)── 角色规则 `Value` 留空时会匹配 groups 属性里
+  的空字符串元素,在授予 admin/operator 的规则上是提权隐患。`ruleMatches` 对空 `Value` 直接返回不匹配。补单测。
+- **operator 提供的弱 / 耦合密钥材料无任何提示**(LOW)── 启动时对过短的 `jwt_secret`/`encryption_key`
+  (< 16 字符)及"`encryption_key` 为空、复用 `jwt_secret` 作落盘密钥"两种情况打 WARN(`SecurityWarnings()`,
+  纯函数、可单测),提醒耦合密钥下轮换 `jwt_secret` 会让落盘凭据全部解不开。
+
+### Changed
+
+- **容器以非 root 用户运行**(LOW,防御纵深)── 两个 Dockerfile 都新增 UID 10001 的 `psp` 用户、
+  chown `/app` 后 `USER psp`(面板监听 8788 > 1024,不需特权端口)。绑定挂载的 config/data 卷需对该 UID 可写。
+- **发布归档此前不含默认 rulesets / templates**── 打包步骤从 git-ignored 的 `config/{templates,rulesets}`
+  拷贝(clean checkout 下不存在,失败被 `2>/dev/null||true` 吞),改从已提交的 `internal/seed/files/`
+  拷贝(与二进制内嵌、首启释放的同源),并去掉 README / config 示例拷贝的静默吞错。
+- **提交 `internal/web/dist/.gitkeep`**── 此前 `.gitignore` 的 `!internal/web/dist/.gitkeep` 否定规则指向
+  一个并不存在的占位文件,导致全新 clone 下 `internal/web/dist/` 不存在、`go build ./cmd/panel` 因
+  `go:embed all:dist` 直接失败。补上占位文件,前端未构建时后端也能编译。
+
 ## v3.6.2 — 2026-05-31
 
 正式版。汇总 v3.6.2-beta.1 → beta.9 全部改动,beta.9 内容直发为正式版定稿。本次是

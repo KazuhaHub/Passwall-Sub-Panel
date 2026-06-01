@@ -73,5 +73,10 @@ func sanitizeReturnTo(returnTo string, fallback string) string {
 	if strings.HasPrefix(returnTo, "//") {
 		return fallback
 	}
+	// Reject backslashes — some browsers normalize "\" to "/", so "/\evil.com"
+	// or "\\evil.com" could slip past the "//" check and resolve off-origin.
+	if strings.Contains(returnTo, "\\") {
+		return fallback
+	}
 	return returnTo
 }

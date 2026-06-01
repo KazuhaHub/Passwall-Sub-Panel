@@ -19,6 +19,7 @@ type recNodeRepo struct {
 	// writer (UpdateInboundConfig — the v3.5 path snapshot writes must use).
 	updates     []*domain.Node
 	updatesCfg  []*domain.Node
+	enabledSets []bool // column-scoped UpdateEnabled calls
 	getOverride func(int64) (*domain.Node, error)
 }
 
@@ -36,6 +37,13 @@ func (r *recNodeRepo) Update(_ context.Context, n *domain.Node) error {
 func (r *recNodeRepo) UpdateInboundConfig(_ context.Context, n *domain.Node) error {
 	cp := *n
 	r.updatesCfg = append(r.updatesCfg, &cp)
+	return nil
+}
+
+// UpdateEnabled is the column-scoped enabled writer. Recorded separately from
+// Update so the disappeared-inbound branch can be pinned to the narrow writer.
+func (r *recNodeRepo) UpdateEnabled(_ context.Context, _ int64, enabled bool) error {
+	r.enabledSets = append(r.enabledSets, enabled)
 	return nil
 }
 
@@ -162,6 +170,63 @@ func TestCheckNodes_BackfillsMissingConfig(t *testing.T) {
 	}
 	if len(client.updated) != 0 {
 		t.Fatalf("backfill must not push to 3X-UI, got %d pushes", len(client.updated))
+	}
+	if report.Fixed != 1 {
+		t.Fatalf("want report.Fixed=1, got %d", report.Fixed)
+	}
+}
+
+// resolveFlow must be the single source of truth shared by axis A, axis B, and
+// the flow healer. The critical case: a VLESS+Reality inbound (detected flow
+// xtls-rprx-vision) whose Node.Flow is blank must still resolve to vision — the
+// axis-B bug recreated such clients with an empty flow that never self-healed.
+func TestResolveFlow(t *testing.T) {
+	vision := "xtls-rprx-vision"
+	cases := []struct {
+		name     string
+		protocol domain.Protocol
+		nodeFlow string
+		ceFlow   string
+		want     string
+	}{
+		{"reality blank node flow falls back to inbound flow", domain.ProtoVLESS, "", vision, vision},
+		{"node flow overrides", domain.ProtoVLESS, "xtls-rprx-direct", vision, "xtls-rprx-direct"},
+		{"plain vless no flow", domain.ProtoVLESS, "", "", ""},
+		{"non-vless carries no flow", domain.ProtoTrojan, "ignored", vision, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			n := &domain.Node{Flow: tc.nodeFlow}
+			ce := &inboundCacheEntry{flow: tc.ceFlow}
+			if got := resolveFlow(tc.protocol, n, ce); got != tc.want {
+				t.Fatalf("resolveFlow(%s, node.Flow=%q, ce.flow=%q) = %q, want %q",
+					tc.protocol, tc.nodeFlow, tc.ceFlow, got, tc.want)
+			}
+		})
+	}
+}
+
+// Regression: when an inbound has disappeared upstream (operator deleted it
+// directly in 3X-UI) the node is disabled — but via the column-scoped
+// UpdateEnabled, NOT a full-row Save of the cycle-start snapshot, which would
+// revert the health/traffic/config columns the concurrent loops have written.
+func TestCheckNodes_DisappearedInboundDisablesViaColumnWriter(t *testing.T) {
+	node := &domain.Node{ID: 1, PanelID: 1, InboundID: 3, Enabled: true}
+	// Panel reachable (another inbound is present in the cache) but the node's
+	// own inbound (id 3) is absent → the "disappeared" branch.
+	other := []ports.Inbound{{ID: 99, Protocol: "vless", Port: 8443}}
+	client := &recClient{inbounds: other}
+	repo := &recNodeRepo{nodes: []*domain.Node{node}}
+	svc := &Service{nodes: repo, pool: recPool{c: client}, axisAReversePush: true}
+
+	report := &Report{}
+	svc.checkNodes(context.Background(), report, cacheFromInbounds(1, other))
+
+	if len(repo.updates) != 0 {
+		t.Fatalf("disable must use the column-scoped UpdateEnabled, not a full-row Save; got %d full-row writes", len(repo.updates))
+	}
+	if len(repo.enabledSets) != 1 || repo.enabledSets[0] != false {
+		t.Fatalf("want exactly one UpdateEnabled(false), got %v", repo.enabledSets)
 	}
 	if report.Fixed != 1 {
 		t.Fatalf("want report.Fixed=1, got %d", report.Fixed)

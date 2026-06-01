@@ -181,8 +181,9 @@ func (h *AuthOIDCHandler) Callback(c *gin.Context) {
 
 	returnTo, _ := c.Cookie(cookieOIDCRet)
 	c.SetCookie(cookieOIDCRet, "", -1, CookieAuthPath, "", secure, true)
-	if returnTo == "" {
-		returnTo = "/user/me"
-	}
-	c.Redirect(http.StatusFound, "/sso-callback?next="+returnTo)
+	// The return target came from a sanitized HttpOnly cookie, but re-sanitize +
+	// QueryEscape anyway so this path matches the SAML ACS hardening and never
+	// emits an unescaped next= value.
+	returnTo = sanitizeReturnTo(returnTo, "/user/me")
+	c.Redirect(http.StatusFound, "/sso-callback?next="+url.QueryEscape(returnTo))
 }

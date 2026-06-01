@@ -153,6 +153,30 @@ func (r *nodeTrafficRepo) ListByNode(ctx context.Context, nodeID int64, since, u
 	return out, nil
 }
 
+// ListHourlyByNode returns the node's rolled-up hourly delta buckets whose
+// bucket_start is in [since, until). See trafficRepo.ListHourlyByUser for why
+// bounds are forced to UTC. Long-window source for NodeHistoryFor.
+func (r *nodeTrafficRepo) ListHourlyByNode(ctx context.Context, nodeID int64, since, until time.Time) ([]domain.HourlyTraffic, error) {
+	var rows []nodeTrafficHourlyRow
+	err := r.db.WithContext(ctx).
+		Where("node_id = ? AND bucket_start >= ? AND bucket_start < ?", nodeID, since.UTC(), until.UTC()).
+		Order("bucket_start ASC").
+		Find(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	out := make([]domain.HourlyTraffic, len(rows))
+	for i := range rows {
+		out[i] = domain.HourlyTraffic{
+			BucketStart: rows[i].BucketStart,
+			UpBytes:     rows[i].UpBytes,
+			DownBytes:   rows[i].DownBytes,
+			TotalBytes:  rows[i].TotalBytes,
+		}
+	}
+	return out, nil
+}
+
 // PruneBefore deletes node_traffic_snapshots rows captured strictly before
 // cutoff. Idx_node_time supports the range delete. See trafficRepo.PruneBefore
 // for the retention rationale.

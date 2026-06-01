@@ -183,10 +183,17 @@ jobs:
             cp "${dir}/psp${ext}" "${pkgdir}/psp${ext}"
             chmod +x "${pkgdir}/psp${ext}" || true
 
-            cp README.md "${pkgdir}/" 2>/dev/null || true
-            cp config/config.yaml.example "${pkgdir}/" 2>/dev/null || true
-            cp -R config/templates "${pkgdir}/config/" 2>/dev/null || true
-            cp -R config/rulesets  "${pkgdir}/config/" 2>/dev/null || true
+            # README + example config are tracked — copy without swallowing
+            # errors so a genuinely missing file fails the release loudly.
+            cp README.md "${pkgdir}/"
+            cp config/config.yaml.example "${pkgdir}/"
+            # Bundle DEFAULT rulesets/templates from the committed seed dir.
+            # config/templates and config/rulesets are git-ignored (runtime,
+            # absent on a clean checkout), so copying from there silently
+            # shipped archives WITHOUT defaults. internal/seed/files/ is the
+            # same source the binary embeds and releases on first boot.
+            cp -R internal/seed/files/templates "${pkgdir}/config/"
+            cp -R internal/seed/files/rulesets  "${pkgdir}/config/"
 
             if [ "${goos}" = "windows" ]; then
               (cd build && zip -qr "../dist/${pkgname}.zip" "${pkgname}")

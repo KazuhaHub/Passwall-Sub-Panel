@@ -199,6 +199,33 @@ func (r *trafficRepo) ListByUser(ctx context.Context, userID int64, since, until
 	return out, nil
 }
 
+// ListHourlyByUser returns the user's rolled-up hourly delta buckets whose
+// bucket_start falls in [since, until). Bounds are converted to UTC because
+// bucket_start is stored UTC (hourFloor) and the SQLite driver compares times
+// as TZ-bearing strings — UTC-vs-UTC keeps the lexicographic order semantically
+// correct (MySQL/Postgres compare as real datetimes regardless). This is the
+// long-window source for HistoryFor (raw is only kept 7 days).
+func (r *trafficRepo) ListHourlyByUser(ctx context.Context, userID int64, since, until time.Time) ([]domain.HourlyTraffic, error) {
+	var rows []trafficHourlyRow
+	err := r.db.WithContext(ctx).
+		Where("user_id = ? AND bucket_start >= ? AND bucket_start < ?", userID, since.UTC(), until.UTC()).
+		Order("bucket_start ASC").
+		Find(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	out := make([]domain.HourlyTraffic, len(rows))
+	for i := range rows {
+		out[i] = domain.HourlyTraffic{
+			BucketStart: rows[i].BucketStart,
+			UpBytes:     rows[i].UpBytes,
+			DownBytes:   rows[i].DownBytes,
+			TotalBytes:  rows[i].TotalBytes,
+		}
+	}
+	return out, nil
+}
+
 func (r *trafficRepo) InsertClient(ctx context.Context, s *domain.ClientTrafficSnapshot) error {
 	row := clientTrafficRow{
 		UserID:      s.UserID,

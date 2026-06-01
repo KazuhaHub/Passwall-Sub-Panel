@@ -20,9 +20,15 @@ type oidcConfigRow struct {
 	ID      int64 `gorm:"primaryKey"`
 	Enabled bool
 
-	IssuerURL    string `gorm:"size:255"`
-	ClientID     string `gorm:"size:255"`
-	ClientSecret string `gorm:"size:512"`
+	IssuerURL string `gorm:"size:255"`
+	ClientID  string `gorm:"size:255"`
+	// ClientSecret holds an AES-GCM blob (enc:v1:base64(nonce||ct||tag)), which
+	// for a long plaintext secret can exceed 512 chars — a size:512 column
+	// silently truncated it (non-strict MySQL) or rejected the insert
+	// (Postgres/strict MySQL), corrupting the ciphertext so the next Load failed
+	// GCM auth and aborted SSO. type:text matches every other encrypted-secret
+	// column (sp_private_key, smtp_password, api_token); AutoMigrate widens it.
+	ClientSecret string `gorm:"type:text"`
 	RedirectURL  string `gorm:"size:255"`
 	Scopes       jsonStrings
 

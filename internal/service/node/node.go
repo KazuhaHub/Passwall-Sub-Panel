@@ -401,7 +401,9 @@ func (s *Service) SetEnabled(ctx context.Context, id int64, enabled bool) error 
 		return err
 	}
 	n.Enabled = enabled
-	if err := s.nodes.Update(ctx, n); err != nil {
+	// Column-scoped write: a full-row Save here would revert the health/traffic/
+	// config columns the concurrent poll/health/reconcile loops are writing.
+	if err := s.nodes.UpdateEnabled(ctx, n.ID, enabled); err != nil {
 		return err
 	}
 	c, err := s.pool.Get(n.PanelID)
@@ -441,7 +443,9 @@ func (s *Service) DeleteAndSync(ctx context.Context, id int64) error {
 		log.Warn("node delete preflight failed; queueing guarded delete", "node_id", n.ID, "err", err)
 	}
 	n.Enabled = false
-	if err := s.nodes.Update(ctx, n); err != nil {
+	// Column-scoped write (see SetEnabled): don't clobber concurrent
+	// health/traffic/config column writes with a stale full-row Save.
+	if err := s.nodes.UpdateEnabled(ctx, n.ID, false); err != nil {
 		return err
 	}
 	return s.enqueueNodeTask(ctx, domain.SyncTaskNodeDelete, n, "delete node", nil)
@@ -503,6 +507,21 @@ func (s *Service) ProcessDueTasks(ctx context.Context, limit int) error {
 				}
 				continue
 			}
+			// Cap retries the same way the user processor does (maxUserTaskAttempts):
+			// a transiently-classified but permanently-broken node task otherwise
+			// retries every minute forever, burning CPU + 3X-UI quota. Cancel after
+			// the cap with the last error preserved for the Sync Tasks view; admin's
+			// explicit "Retry" still overrides.
+			if task.Attempts+1 >= maxNodeTaskAttempts {
+				log.Warn("node task gave up after max attempts",
+					"task_id", task.ID, "type", task.Type,
+					"target_id", task.TargetID, "attempts", task.Attempts+1,
+					"last_err", err.Error())
+				if markErr := s.tasks.Cancel(ctx, task.ID); markErr != nil {
+					log.Warn("node task cancel (max attempts)", "task_id", task.ID, "err", markErr)
+				}
+				continue
+			}
 			next := time.Now().Add(nodeTaskBackoff(task.Attempts + 1))
 			if markErr := s.tasks.MarkRetry(ctx, task.ID, err.Error(), next); markErr != nil {
 				log.Warn("node task mark-retry", "task_id", task.ID, "err", markErr)
@@ -533,6 +552,22 @@ func (s *Service) runNodeTask(ctx context.Context, task *domain.SyncTask) error 
 	}
 	switch task.Type {
 	case domain.SyncTaskNodeDelete:
+		// If the inbound is already gone upstream (operator deleted it directly
+		// in 3X-UI — the common orphan case), the clients went with it: skip the
+		// guard and per-client deletes (which would each fail "record not found"
+		// and the task would retry forever, never reaching nodes.Delete). Just
+		// drop the local ownership rows and the PSP node row. Mirrors
+		// DelOwnedClient's "already absent upstream → done" idempotency, lifted
+		// to the inbound level.
+		if _, err := c.GetInbound(ctx, n.InboundID); err != nil {
+			if isInboundGoneError(err) {
+				if err := s.cleaner.UnclaimAllForInbound(ctx, n.PanelID, n.InboundID); err != nil {
+					return fmt.Errorf("unclaim owned clients: %w", err)
+				}
+				return s.nodes.Delete(ctx, n.ID)
+			}
+			return err
+		}
 		if err := s.cleaner.EnsureInboundDeletable(ctx, n.PanelID, n.InboundID); err != nil {
 			return err
 		}
@@ -540,6 +575,11 @@ func (s *Service) runNodeTask(ctx context.Context, task *domain.SyncTask) error 
 			return fmt.Errorf("clear owned clients: %w", err)
 		}
 		if err := s.cleaner.DeleteInbound(ctx, n.PanelID, n.InboundID); err != nil {
+			// Lost the race: inbound disappeared between our GetInbound and the
+			// delete. Treat as done rather than retrying forever.
+			if isInboundGoneError(err) {
+				return s.nodes.Delete(ctx, n.ID)
+			}
 			return err
 		}
 		return s.nodes.Delete(ctx, n.ID)
@@ -652,7 +692,14 @@ func (s *Service) tryAdoptOrphan(ctx context.Context, c ports.XUIClient, panelID
 		if inb.Listen != spec.Listen {
 			continue
 		}
-		if existing, _ := s.nodes.GetByPanelInbound(ctx, panelID, inb.ID); existing != nil {
+		existing, err := s.nodes.GetByPanelInbound(ctx, panelID, inb.ID)
+		if err != nil && !errors.Is(err, domain.ErrNotFound) {
+			// A real DB error (not "unclaimed") — surface it rather than
+			// treating the inbound as free and risking a double-adopt that the
+			// uk_panel_inbound index would then reject as a confusing failure.
+			return nil, err
+		}
+		if existing != nil {
 			// Another PSP node already claimed this inbound — likely a
 			// concurrent create won. Don't double-adopt.
 			continue
@@ -745,6 +792,27 @@ func (s *Service) enqueueNodeTask(ctx context.Context, typ domain.SyncTaskType, 
 // as deleteTaskBackoff in user.go.
 func nodeTaskBackoff(_ int) time.Duration {
 	return time.Minute
+}
+
+// maxNodeTaskAttempts caps node-scoped sync-task retries, mirroring
+// maxUserTaskAttempts. At the flat 1-minute backoff this is ~1.5h of recovery —
+// past any plausible transient 3X-UI outage but bounded so a permanently-broken
+// task (e.g. a panel that keeps 401ing, an inbound config 3X-UI rejects)
+// doesn't loop forever burning CPU + 3X-UI quota. Admin "Retry" overrides.
+const maxNodeTaskAttempts = 100
+
+// isInboundGoneError reports whether err from a GetInbound/DeleteInbound call
+// means the inbound no longer exists upstream — the common case where an
+// operator deleted the inbound directly in 3X-UI. 3X-UI answers a missing
+// inbound with HTTP 200 {success:false, msg:"...record not found..."} (or a
+// 404 for an unknown id), neither of which isPermanentNodeTaskError classifies,
+// so without this the node-delete task retries to the attempt cap and the ghost
+// PSP node row is never dropped.
+func isInboundGoneError(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "not found")
 }
 
 // ---- New-node user sync ----

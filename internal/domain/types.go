@@ -570,6 +570,17 @@ type TrafficSnapshot struct {
 	CapturedAt time.Time
 }
 
+// HourlyTraffic is one (entity, UTC-hour) delta bucket read from a *_hourly
+// rollup table — already the consumed up/down/total within that hour (not a
+// cumulative counter). BucketStart is the UTC hour start. Shared by the user
+// and node hourly readers that back the traffic charts.
+type HourlyTraffic struct {
+	BucketStart time.Time
+	UpBytes     int64
+	DownBytes   int64
+	TotalBytes  int64
+}
+
 // ClientTrafficSnapshot captures the raw cumulative counters for one managed
 // 3X-UI client. User-level lifetime snapshots are derived from per-client
 // deltas so a reset on one inbound cannot hide traffic on another inbound.

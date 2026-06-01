@@ -1255,47 +1255,16 @@ func (s *Service) NodeHistoryFor(ctx context.Context, nodeID int64, period Histo
 	}
 	untilExclusive := until.AddDate(0, 0, 1)
 
-	var (
-		snapshots []*domain.NodeTrafficSnapshot
-		prev      *domain.NodeTrafficSnapshot
-	)
+	// Served from the node hourly rollup (see HistoryFor for the tier/TZ rationale).
+	var hourly []domain.HourlyTraffic
 	if s.nodeTraffic != nil {
 		var lerr error
-		snapshots, lerr = s.nodeTraffic.ListByNode(ctx, nodeID, since, untilExclusive)
+		hourly, lerr = s.nodeTraffic.ListHourlyByNode(ctx, nodeID, since, untilExclusive)
 		if lerr != nil {
 			return nil, lerr
 		}
-		prev, _ = s.nodeTraffic.LastBefore(ctx, nodeID, since)
 	}
-	prevUp, prevDown, prevTotal := nodeSnapshotCounters(prev)
-
-	items := make([]HistoryItem, 0)
-	idx := 0
-	for bucketStart := bucketStartFor(since, period); bucketStart.Before(untilExclusive); bucketStart = nextBucketStart(bucketStart, period) {
-		bucketEnd := nextBucketStart(bucketStart, period)
-		if bucketEnd.After(untilExclusive) {
-			bucketEnd = untilExclusive
-		}
-
-		var lastInBucket *domain.NodeTrafficSnapshot
-		for idx < len(snapshots) && snapshots[idx].CapturedAt.Before(bucketEnd) {
-			if !snapshots[idx].CapturedAt.Before(since) {
-				lastInBucket = snapshots[idx]
-			}
-			idx++
-		}
-
-		item := HistoryItem{Date: bucketLabel(bucketStart, period)}
-		if lastInBucket != nil {
-			item.UpBytes = deltaCounter(lastInBucket.UpBytes, prevUp)
-			item.DownBytes = deltaCounter(lastInBucket.DownBytes, prevDown)
-			item.TotalBytes = deltaCounter(lastInBucket.TotalBytes, prevTotal)
-			prevUp = lastInBucket.UpBytes
-			prevDown = lastInBucket.DownBytes
-			prevTotal = lastInBucket.TotalBytes
-		}
-		items = append(items, item)
-	}
+	items := bucketizeHourly(hourly, period, since, untilExclusive)
 
 	return &NodeHistoryReport{
 		NodeID: nodeID,
@@ -1304,13 +1273,6 @@ func (s *Service) NodeHistoryFor(ctx context.Context, nodeID int64, period Histo
 		Until:  until.Format("2006-01-02"),
 		Items:  items,
 	}, nil
-}
-
-func nodeSnapshotCounters(s *domain.NodeTrafficSnapshot) (up, down, total int64) {
-	if s == nil {
-		return 0, 0, 0
-	}
-	return s.UpBytes, s.DownBytes, s.TotalBytes
 }
 
 // periodUsage returns bytes used since the user's current period start.
@@ -1500,43 +1462,13 @@ func (s *Service) HistoryFor(ctx context.Context, userID int64, period HistoryPe
 	}
 	untilExclusive := until.AddDate(0, 0, 1)
 
-	snapshots, err := s.traffic.ListByUser(ctx, userID, since, untilExclusive)
+	// Charts are served from the hourly rollup, NOT the raw 5-min table (raw is
+	// kept only ~7 days; hourly out to TrafficHistoryDays). Each hourly row is
+	// the consumed up/down/total within a UTC hour, so a chart bucket's traffic
+	// is the SUM of the hourly deltas whose UTC start falls inside it.
+	hourly, err := s.traffic.ListHourlyByUser(ctx, userID, since, untilExclusive)
 	if err != nil {
 		return nil, err
-	}
-
-	var prev *domain.TrafficSnapshot
-	if base, err := s.traffic.LastBefore(ctx, userID, since); err == nil && base != nil {
-		prev = base
-	}
-	prevUp, prevDown, prevTotal := snapshotCounters(prev)
-
-	items := make([]HistoryItem, 0)
-	idx := 0
-	for bucketStart := bucketStartFor(since, period); bucketStart.Before(untilExclusive); bucketStart = nextBucketStart(bucketStart, period) {
-		bucketEnd := nextBucketStart(bucketStart, period)
-		if bucketEnd.After(untilExclusive) {
-			bucketEnd = untilExclusive
-		}
-
-		var lastInBucket *domain.TrafficSnapshot
-		for idx < len(snapshots) && snapshots[idx].CapturedAt.Before(bucketEnd) {
-			if !snapshots[idx].CapturedAt.Before(since) {
-				lastInBucket = snapshots[idx]
-			}
-			idx++
-		}
-
-		item := HistoryItem{Date: bucketLabel(bucketStart, period)}
-		if lastInBucket != nil {
-			item.UpBytes = deltaCounter(lastInBucket.UpBytes, prevUp)
-			item.DownBytes = deltaCounter(lastInBucket.DownBytes, prevDown)
-			item.TotalBytes = deltaCounter(lastInBucket.TotalBytes, prevTotal)
-			prevUp = lastInBucket.UpBytes
-			prevDown = lastInBucket.DownBytes
-			prevTotal = lastInBucket.TotalBytes
-		}
-		items = append(items, item)
 	}
 
 	return &HistoryReport{
@@ -1544,8 +1476,43 @@ func (s *Service) HistoryFor(ctx context.Context, userID int64, period HistoryPe
 		Period: period,
 		Since:  since.Format("2006-01-02"),
 		Until:  until.Format("2006-01-02"),
-		Items:  items,
+		Items:  bucketizeHourly(hourly, period, since, untilExclusive),
 	}, nil
+}
+
+// bucketizeHourly folds pre-aggregated hourly delta rows (sorted by UTC
+// bucket_start ASC) into the chart's [since, untilExclusive) buckets at the
+// requested period granularity. Buckets are computed in the since/until
+// location (the caller's TZ), and each hourly row is attributed to the chart
+// bucket whose [start,end) contains its UTC start instant — summing additive
+// deltas, no cumulative threading. TZ-correct for integer-offset zones; a
+// half-hour-offset zone can mis-attribute at most one hour at a day boundary
+// (inherent to hourly storage, the documented rollup trade-off).
+func bucketizeHourly(hourly []domain.HourlyTraffic, period HistoryPeriod, since, untilExclusive time.Time) []HistoryItem {
+	items := make([]HistoryItem, 0)
+	idx := 0
+	for bucketStart := bucketStartFor(since, period); bucketStart.Before(untilExclusive); bucketStart = nextBucketStart(bucketStart, period) {
+		bucketEnd := nextBucketStart(bucketStart, period)
+		if bucketEnd.After(untilExclusive) {
+			bucketEnd = untilExclusive
+		}
+		var up, down, total int64
+		for idx < len(hourly) && hourly[idx].BucketStart.Before(bucketEnd) {
+			if !hourly[idx].BucketStart.Before(bucketStart) {
+				up += hourly[idx].UpBytes
+				down += hourly[idx].DownBytes
+				total += hourly[idx].TotalBytes
+			}
+			idx++
+		}
+		items = append(items, HistoryItem{
+			Date:       bucketLabel(bucketStart, period),
+			UpBytes:    up,
+			DownBytes:  down,
+			TotalBytes: total,
+		})
+	}
+	return items
 }
 
 func normalizeHistoryPeriod(period HistoryPeriod) (HistoryPeriod, error) {
@@ -1602,23 +1569,6 @@ func bucketLabel(t time.Time, period HistoryPeriod) string {
 	return t.Format("2006-01-02")
 }
 
-func snapshotCounters(s *domain.TrafficSnapshot) (up, down, total int64) {
-	if s == nil {
-		return 0, 0, 0
-	}
-	return s.UpBytes, s.DownBytes, s.TotalBytes
-}
-
-func deltaCounter(current, previous int64) int64 {
-	delta := current - previous
-	if delta < 0 {
-		delta = current
-	}
-	if delta < 0 {
-		return 0
-	}
-	return delta
-}
 
 // SetPeriodUsage adjusts the current billing-period usage by moving the
 // user's period baseline to "now". This keeps future 3X-UI poll results
@@ -1638,16 +1588,28 @@ func (s *Service) SetPeriodUsage(ctx context.Context, userID int64, usedBytes in
 		latestTotal = latest.TotalBytes
 		latestUp = latest.UpBytes
 	}
-	baseTotal := latestTotal - usedBytes
-	if baseTotal < 0 {
-		baseTotal = 0
+	// currentTotal is the cumulative total recorded at the re-baseline moment.
+	// In the normal case (latestTotal >= usedBytes) it equals latestTotal, so
+	// the snapshot we write matches the latest real poll value and does NOT
+	// perturb the current hour's rollup bucket. When the admin sets usage ABOVE
+	// the current cumulative it rises to usedBytes — a deliberate upward
+	// adjustment that stays monotonic.
+	//
+	// We deliberately do NOT write a second "base" snapshot below the existing
+	// in-hour poll snapshots: the hourly rollup derives each (entity, hour)
+	// bucket as MAX(total)-MIN(total) and relies on intra-hour snapshots being
+	// monotonic-increasing. A below-baseline row became the bucket MIN and
+	// inflated that hour by the whole re-baseline amount — permanently, once the
+	// 7-day raw rows were pruned. Period usage is carried by PeriodBaselineBytes
+	// (set below), which PeriodUsed() reads — it never needed a synthetic
+	// snapshot below the baseline.
+	currentTotal := latestTotal
+	if usedBytes > currentTotal {
+		currentTotal = usedBytes
 	}
-	currentTotal := baseTotal + usedBytes
-	// Preserve the up/down ratio from the latest real snapshot so HistoryFor's
-	// per-direction bucket math doesn't see synthetic rows where Up jumps from
-	// 0 to its full cumulative value in one tick. When no prior data is
-	// available, fall back to an even split — better than dumping everything
-	// onto Down.
+	// Preserve the up/down ratio from the latest real snapshot so the chart's
+	// per-direction split stays sensible; fall back to an even split when no
+	// prior data exists.
 	splitUpDown := func(total int64) (up, down int64) {
 		if total <= 0 {
 			return 0, 0
@@ -1661,21 +1623,10 @@ func (s *Service) SetPeriodUsage(ctx context.Context, userID int64, usedBytes in
 		down = total - up
 		return up, down
 	}
-	baseUp, baseDown := splitUpDown(baseTotal)
 	currentUp, currentDown := splitUpDown(currentTotal)
 	now := time.Now()
 	periodStart := now
-	baseAt := now.Add(-time.Millisecond)
 
-	if err := s.traffic.Insert(ctx, &domain.TrafficSnapshot{
-		UserID:     userID,
-		UpBytes:    baseUp,
-		DownBytes:  baseDown,
-		TotalBytes: baseTotal,
-		CapturedAt: baseAt,
-	}); err != nil {
-		return err
-	}
 	if err := s.traffic.Insert(ctx, &domain.TrafficSnapshot{
 		UserID:     userID,
 		UpBytes:    currentUp,

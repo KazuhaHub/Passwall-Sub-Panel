@@ -129,6 +129,22 @@ type settingDescriptor struct {
 	Unmarshal func(raw string) error
 }
 
+// KnownSettingNames returns the set of KV `name`s the live settings layer
+// recognizes (one per settingDescriptor). Exported so out-of-package writers
+// that seed the settings table — notably the v3 migrator's copySettingsKV — can
+// be drift-tested against the canonical key set, catching a key that was
+// renamed in settingDescriptors but not in the writer (which would silently
+// strand the value on a dead key).
+func KnownSettingNames() map[string]bool {
+	var s ports.UISettings
+	descs := settingDescriptors(&s)
+	out := make(map[string]bool, len(descs))
+	for _, d := range descs {
+		out[d.Name] = true
+	}
+	return out
+}
+
 // settingDescriptors returns the full mapping between UISettings fields and
 // (type, name) KV cells. The order is the documented type-grouping order
 // from docs/db-refactor-plan.md §3.2 so SQL browsers display them by
@@ -352,10 +368,13 @@ func applyUISettingsDefaults(out, defaults ports.UISettings) ports.UISettings {
 		out.SyncTaskRetentionDays = 30
 	}
 	if out.TrafficHistoryDays <= 0 {
-		// 730 (2y) gives the chart's "last 1 year" range a full year of
-		// breathing room — querying exactly N days back when retention is
-		// also N days lets the rollup prune trim a day off the front edge
-		// and produce a blank-ish bucket. 2x the longest range avoids that.
+		// 730 (2y) gives the chart's longest "last 1 year" range a full year of
+		// breathing room — querying exactly N days back when retention is also N
+		// days lets the prune trim a day off the front edge and produce a
+		// blank-ish bucket. 2x the longest range avoids that. Cheap to keep: the
+		// only charted tiers (user/node hourly) are small at this scale; the
+		// large per-client tier is no longer rolled up at all. 0 is coerced here
+		// (no "keep forever" mode), so the prune's `> 0` guard never sees a 0.
 		out.TrafficHistoryDays = 730
 	}
 	// Unified client registry (v3.3.0). When absent, either migrate the legacy

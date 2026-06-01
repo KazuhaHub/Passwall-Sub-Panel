@@ -1,9 +1,15 @@
 // Package rollup downsamples the raw 5-minute traffic snapshot tables
-// into per-hour UTC delta buckets. The hourly tables power the admin /
-// user traffic charts; raw is kept only as a short window (7 days) so
-// "today" can still be rendered live, while long-window history lives on
-// the *_hourly tables and is gated by the admin-tunable TrafficHistoryDays
-// setting.
+// into per-hour UTC delta buckets. The hourly tables are the SOLE source
+// for the admin / user traffic charts (HistoryFor / NodeHistoryFor read
+// them directly); raw is kept only as a short 7-day window feeding this
+// rollup (and the live quota math), while long-window history lives on the
+// *_hourly tables, gated by the admin-tunable TrafficHistoryDays setting.
+//
+// Only the USER and NODE tiers are rolled up — those are the only tiers any
+// chart reads. The per-client tier was previously rolled up too but nothing
+// ever read client_traffic_snapshots_hourly, so it was pure write-only dead
+// storage (the largest table by far); that rollup was removed. Existing
+// client_*_hourly rows age out via PruneHourlyBefore.
 //
 // Why per-hour-UTC + group-in-Go-by-local-TZ at query time (rather than
 // pre-bucketing per panel TZ): industry-standard pattern (Prometheus,
@@ -26,9 +32,13 @@
 //     handles the very first run after upgrade — it just sees more
 //     un-rolled-up raw rows and processes them all in one batch. Raw is
 //     bounded to a small window (~7 days) so the cost stays trivial.
-//   - Boundary: we only roll up rows captured strictly before the *current*
-//     hour's UTC start. The current hour is still being filled by 3X-UI
-//     polls; locking it down too early would produce a wrong (low) delta.
+//   - Boundary: we roll up through the CURRENT UTC hour (including the
+//     partial, still-filling hour). Because every write is an idempotent
+//     upsert and RollupOnce runs each traffic-poll cycle, the current hour's
+//     bucket simply grows toward its final delta on each pass — so the chart's
+//     "today" stays live (≤ one poll interval stale) instead of waiting for
+//     the hour to close. The whole-hour-aligned raw prune (7d) never touches
+//     the current hour, so re-rolling it stays correct until it closes.
 package rollup
 
 import (
@@ -52,21 +62,19 @@ func New(db *gorm.DB) *Service {
 	return &Service{db: db}
 }
 
-// RollupOnce aggregates every completed UTC hour in the raw tables into the
-// *_hourly tables. Called by the hourly cron in internal/app.
+// RollupOnce aggregates the raw user/node tables into their *_hourly tables,
+// through the current UTC hour. Idempotent (upsert), so it is called both on
+// every traffic-poll cycle (for chart freshness) and in the hourly cleanup
+// loop (rollup-before-prune ordering).
 func (s *Service) RollupOnce(ctx context.Context) error {
-	cutoff := hourFloor(time.Now())
+	// Include the current, still-filling hour: rows captured up to now. The
+	// idempotent upsert + per-poll cadence keep the open hour's bucket current.
+	cutoff := time.Now()
 
 	if userRows, err := s.rollupUser(ctx, cutoff); err != nil {
 		return fmt.Errorf("user rollup: %w", err)
 	} else if userRows > 0 {
 		log.Info("traffic rollup (user)", "buckets_upserted", userRows)
-	}
-
-	if clientRows, err := s.rollupClient(ctx, cutoff); err != nil {
-		return fmt.Errorf("client rollup: %w", err)
-	} else if clientRows > 0 {
-		log.Info("traffic rollup (client)", "buckets_upserted", clientRows)
 	}
 
 	if nodeRows, err := s.rollupNode(ctx, cutoff); err != nil {
@@ -179,108 +187,6 @@ func (s *Service) rollupUser(ctx context.Context, cutoff time.Time) (int64, erro
 		})
 	}
 	return s.upsert(ctx, "traffic_snapshots_hourly", []string{"user_id", "bucket_start"}, rows)
-}
-
-// ---- client-level rollup --------------------------------------------------
-
-type clientRawRow struct {
-	UserID      int64
-	PanelID     int64
-	InboundID   int
-	ClientEmail string
-	UpBytes     int64
-	DownBytes   int64
-	TotalBytes  int64
-	CapturedAt  time.Time
-}
-
-type clientHourlyKey struct {
-	PanelID     int64
-	InboundID   int
-	ClientEmail string
-	BucketStart time.Time
-}
-
-func (s *Service) rollupClient(ctx context.Context, cutoff time.Time) (int64, error) {
-	var raws []clientRawRow
-	if err := s.db.WithContext(ctx).
-		Table("client_traffic_snapshots").
-		Select("user_id, panel_id, inbound_id, client_email, up_bytes, down_bytes, total_bytes, captured_at").
-		Find(&raws).Error; err != nil {
-		return 0, err
-	}
-	if len(raws) == 0 {
-		return 0, nil
-	}
-
-	type agg struct {
-		userID                                             int64 // any row's user_id; client identity is panel+inbound+email
-		minUp, maxUp, minDown, maxDown, minTotal, maxTotal int64
-		seen                                               bool
-	}
-	// See rollupUser for why cutoff filtering happens in Go, not SQL.
-	buckets := make(map[clientHourlyKey]*agg, len(raws)/4+1)
-	for _, r := range raws {
-		if !r.CapturedAt.Before(cutoff) {
-			continue
-		}
-		k := clientHourlyKey{
-			PanelID:     r.PanelID,
-			InboundID:   r.InboundID,
-			ClientEmail: r.ClientEmail,
-			BucketStart: hourFloor(r.CapturedAt),
-		}
-		b, ok := buckets[k]
-		if !ok {
-			b = &agg{userID: r.UserID}
-			buckets[k] = b
-		}
-		if !b.seen {
-			b.minUp, b.maxUp = r.UpBytes, r.UpBytes
-			b.minDown, b.maxDown = r.DownBytes, r.DownBytes
-			b.minTotal, b.maxTotal = r.TotalBytes, r.TotalBytes
-			b.seen = true
-			continue
-		}
-		if r.UpBytes < b.minUp {
-			b.minUp = r.UpBytes
-		}
-		if r.UpBytes > b.maxUp {
-			b.maxUp = r.UpBytes
-		}
-		if r.DownBytes < b.minDown {
-			b.minDown = r.DownBytes
-		}
-		if r.DownBytes > b.maxDown {
-			b.maxDown = r.DownBytes
-		}
-		if r.TotalBytes < b.minTotal {
-			b.minTotal = r.TotalBytes
-		}
-		if r.TotalBytes > b.maxTotal {
-			b.maxTotal = r.TotalBytes
-		}
-	}
-
-	rows := make([]map[string]any, 0, len(buckets))
-	for k, b := range buckets {
-		up, down, total := b.maxUp-b.minUp, b.maxDown-b.minDown, b.maxTotal-b.minTotal
-		if up == 0 && down == 0 && total == 0 {
-			continue
-		}
-		rows = append(rows, map[string]any{
-			"user_id":      b.userID,
-			"panel_id":     k.PanelID,
-			"inbound_id":   k.InboundID,
-			"client_email": k.ClientEmail,
-			"bucket_start": k.BucketStart,
-			"up_bytes":     up,
-			"down_bytes":   down,
-			"total_bytes":  total,
-		})
-	}
-	return s.upsert(ctx, "client_traffic_snapshots_hourly",
-		[]string{"panel_id", "inbound_id", "client_email", "bucket_start"}, rows)
 }
 
 // ---- node-level rollup ----------------------------------------------------

@@ -108,6 +108,14 @@ func ResolveRoleForSSO(
 }
 
 func ruleMatches(r config.SSORoleRule, groupsAttrName string, attrs map[string][]string, groups []string) bool {
+	// An empty rule Value must never match. Empty strings legitimately reach the
+	// values slice (an []any groups claim, an empty SAML <AttributeValue/>), so
+	// without this guard a rule with a blank Value — an easy admin mistake on a
+	// role-granting rule — would match any login whose groups attribute carries
+	// an empty element, a privilege-escalation footgun.
+	if r.Value == "" {
+		return false
+	}
 	values := lookupRuleValues(r.Attribute, groupsAttrName, attrs, groups)
 	for _, v := range values {
 		if v == r.Value {

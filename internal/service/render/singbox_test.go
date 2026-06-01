@@ -92,6 +92,35 @@ func TestBuildSingBoxRouteRules(t *testing.T) {
 	}
 }
 
+// DST-PORT ranges must be emitted with sing-box's colon syntax ("8000:9000"),
+// not Clash's hyphen ("8000-9000") which sing-box rejects as an invalid
+// port_range. Single ports still go to `port`.
+func TestBuildSingBoxRouteRules_DSTPortRangeUsesColon(t *testing.T) {
+	rules, _ := buildSingBoxRouteRules(`
+- DST-PORT,8000-9000,🚀 节点选择
+- DST-PORT,443,🎯 全球直连
+`)
+	var rangeRule, singleRule map[string]any
+	for _, r := range rules {
+		if _, ok := r["port_range"]; ok {
+			rangeRule = r
+		}
+		if _, ok := r["port"]; ok {
+			singleRule = r
+		}
+	}
+	if rangeRule == nil {
+		t.Fatalf("no port_range rule emitted: %#v", rules)
+	}
+	pr, ok := rangeRule["port_range"].([]string)
+	if !ok || len(pr) != 1 || pr[0] != "8000:9000" {
+		t.Fatalf("port_range = %#v, want [8000:9000] (colon, not hyphen)", rangeRule["port_range"])
+	}
+	if singleRule == nil {
+		t.Fatalf("single DST-PORT must use `port`: %#v", rules)
+	}
+}
+
 func TestBuildSingBoxRouteRulesPersonalRulesFirst(t *testing.T) {
 	personal := `
 - DOMAIN-SUFFIX,example.com,💬 Ai平台

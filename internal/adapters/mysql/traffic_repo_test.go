@@ -42,13 +42,13 @@ func TestTrafficSnapshotsReturnNotFoundWhenEmpty(t *testing.T) {
 // TestLatestForUsers pins the v3.5.0-beta.9 batched read PollOnce now uses to
 // pre-fetch every user's most-recent snapshot in one SQL call instead of
 // N per-user LatestForUser SELECTs. Three properties matter:
-//   1. tie-breaking matches LatestForUser exactly (the highest-id row wins,
-//      so the batched form can't silently pick a different row when two
-//      snapshots ever share a captured_at)
-//   2. users with no snapshots are absent from the map (caller treats absence
-//      as ErrNotFound)
-//   3. empty input returns an empty map, not nil — so the caller can map-index
-//      it without a nil guard
+//  1. tie-breaking matches LatestForUser exactly (the highest-id row wins,
+//     so the batched form can't silently pick a different row when two
+//     snapshots ever share a captured_at)
+//  2. users with no snapshots are absent from the map (caller treats absence
+//     as ErrNotFound)
+//  3. empty input returns an empty map, not nil — so the caller can map-index
+//     it without a nil guard
 func TestLatestForUsers(t *testing.T) {
 	db, err := Open("sqlite", filepath.Join(t.TempDir(), "panel.db"))
 	if err != nil {
@@ -151,8 +151,8 @@ func TestTrafficPruneBefore(t *testing.T) {
 	}
 
 	mustInsert(t, &domain.TrafficSnapshot{UserID: 1, TotalBytes: 100, CapturedAt: cutoff.Add(-48 * time.Hour)}) // prune
-	mustInsert(t, &domain.TrafficSnapshot{UserID: 1, TotalBytes: 200, CapturedAt: cutoff})                     // keep (strict <)
-	mustInsert(t, &domain.TrafficSnapshot{UserID: 1, TotalBytes: 300, CapturedAt: cutoff.Add(48 * time.Hour)}) // keep
+	mustInsert(t, &domain.TrafficSnapshot{UserID: 1, TotalBytes: 200, CapturedAt: cutoff})                      // keep (strict <)
+	mustInsert(t, &domain.TrafficSnapshot{UserID: 1, TotalBytes: 300, CapturedAt: cutoff.Add(48 * time.Hour)})  // keep
 
 	mustInsertClient(t, &domain.ClientTrafficSnapshot{UserID: 1, PanelID: 10, InboundID: 1, ClientEmail: "a@x", TotalBytes: 10, CapturedAt: cutoff.Add(-time.Hour)}) // prune
 	mustInsertClient(t, &domain.ClientTrafficSnapshot{UserID: 1, PanelID: 10, InboundID: 1, ClientEmail: "a@x", TotalBytes: 20, CapturedAt: cutoff.Add(time.Hour)})  // keep
@@ -177,3 +177,84 @@ func TestTrafficPruneBefore(t *testing.T) {
 	}
 }
 
+// TestListHourlyByUserAndNode covers the v3.6.x hourly chart readers: range
+// filtering ([since, until) on the UTC bucket_start), ascending order, and
+// that the wrong user/node and out-of-range buckets are excluded. These are
+// the SOLE source for HistoryFor / NodeHistoryFor.
+func TestListHourlyByUserAndNode(t *testing.T) {
+	db, err := Open("sqlite", filepath.Join(t.TempDir(), "panel.db"))
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	if err := EnsureSchema(db); err != nil {
+		t.Fatalf("schema: %v", err)
+	}
+	sqlDB, _ := db.DB()
+	defer sqlDB.Close()
+
+	ctx := context.Background()
+	h := func(s string) time.Time {
+		ts, perr := time.Parse(time.RFC3339, s)
+		if perr != nil {
+			t.Fatalf("parse %q: %v", s, perr)
+		}
+		return ts.UTC()
+	}
+	// Seed user-hourly buckets directly (rollup is the real writer).
+	for _, r := range []struct {
+		uid             int64
+		at              string
+		up, down, total int64
+	}{
+		{1, "2026-05-10T08:00:00Z", 10, 20, 30},
+		{1, "2026-05-10T12:00:00Z", 5, 5, 10},
+		{1, "2026-05-12T00:00:00Z", 1, 1, 2},     // outside [10th,11th) query range
+		{2, "2026-05-10T09:00:00Z", 99, 99, 198}, // wrong user
+	} {
+		if err := db.Table("traffic_snapshots_hourly").Create(map[string]any{
+			"user_id": r.uid, "bucket_start": h(r.at), "up_bytes": r.up, "down_bytes": r.down, "total_bytes": r.total,
+		}).Error; err != nil {
+			t.Fatalf("seed user hourly: %v", err)
+		}
+	}
+
+	repo := NewRepos(db).Traffic
+	// [10th 00:00, 11th 00:00) — only user 1's two May-10 buckets, ascending.
+	got, err := repo.ListHourlyByUser(ctx, 1, h("2026-05-10T00:00:00Z"), h("2026-05-11T00:00:00Z"))
+	if err != nil {
+		t.Fatalf("ListHourlyByUser: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("user hourly rows = %d, want 2 (range + user filter)", len(got))
+	}
+	if !got[0].BucketStart.Before(got[1].BucketStart) {
+		t.Fatalf("rows not ascending by bucket_start: %v", got)
+	}
+	if got[0].TotalBytes != 30 || got[1].TotalBytes != 10 {
+		t.Fatalf("totals = %d,%d want 30,10", got[0].TotalBytes, got[1].TotalBytes)
+	}
+
+	// Node tier.
+	nrepo := NewRepos(db).NodeTraffic
+	for _, r := range []struct {
+		nid             int64
+		at              string
+		up, down, total int64
+	}{
+		{7, "2026-05-10T08:00:00Z", 40, 60, 100},
+		{7, "2026-05-20T08:00:00Z", 1, 1, 2}, // out of range
+	} {
+		if err := db.Table("node_traffic_snapshots_hourly").Create(map[string]any{
+			"node_id": r.nid, "bucket_start": h(r.at), "up_bytes": r.up, "down_bytes": r.down, "total_bytes": r.total,
+		}).Error; err != nil {
+			t.Fatalf("seed node hourly: %v", err)
+		}
+	}
+	ngot, err := nrepo.ListHourlyByNode(ctx, 7, h("2026-05-10T00:00:00Z"), h("2026-05-11T00:00:00Z"))
+	if err != nil {
+		t.Fatalf("ListHourlyByNode: %v", err)
+	}
+	if len(ngot) != 1 || ngot[0].TotalBytes != 100 {
+		t.Fatalf("node hourly = %+v, want 1 row total 100 (range filter excludes May-20)", ngot)
+	}
+}

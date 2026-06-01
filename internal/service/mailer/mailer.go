@@ -1168,6 +1168,12 @@ func gb(bytes int64) string {
 	return strconv.FormatFloat(float64(bytes)/1024/1024/1024, 'f', 2, 64)
 }
 
+// smtpConversationTimeout bounds the whole SMTP exchange after a successful
+// dial (the dialer's own Timeout only covers connect). Generous enough for a
+// slow-but-alive relay, finite so one hung server can't freeze the serial
+// reminder/announcement loop forever.
+const smtpConversationTimeout = 60 * time.Second
+
 func sendSMTP(ctx context.Context, settings domain.MailSettings, to, subject, body string) error {
 	if settings.SMTPHost == "" || settings.FromEmail == "" {
 		return fmt.Errorf("%w: smtp host and from email are required", domain.ErrValidation)
@@ -1213,6 +1219,13 @@ func sendSMTP(ctx context.Context, settings domain.MailSettings, to, subject, bo
 	if result.err != nil {
 		return result.err
 	}
+	// Bound the entire SMTP conversation. dialer.Timeout covers only TCP/TLS
+	// connect; without a conn deadline, a server that completes the handshake
+	// then stalls (no greeting, mid-DATA hang, network black-hole) blocks this
+	// goroutine indefinitely and wedges the serial reminder/announcement loop
+	// (and ctx is only consulted during the dial select, never after). One
+	// absolute deadline covers greeting→Hello→StartTLS→Auth→Mail→Rcpt→Data→Quit.
+	_ = result.conn.SetDeadline(time.Now().Add(smtpConversationTimeout))
 	c, err := smtp.NewClient(result.conn, settings.SMTPHost)
 	if err != nil {
 		_ = result.conn.Close()

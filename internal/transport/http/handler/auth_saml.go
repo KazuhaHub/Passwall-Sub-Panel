@@ -154,10 +154,12 @@ func (h *AuthSAMLHandler) ACS(c *gin.Context) {
 	c.SetCookie(CookieAccessToken, access, int(h.auth.AccessTTL().Seconds()), CookieAuthPath, "", secure, true)
 	c.SetCookie(CookieRefreshToken, refresh, int(h.auth.RefreshTTL().Seconds()), CookieAuthPath, "", secure, true)
 
-	if returnTo == "" {
-		returnTo = "/user/me"
-	}
-	c.Redirect(http.StatusFound, "/sso-callback?next="+returnTo)
+	// RelayState round-trips through the IdP and is fully attacker-controllable
+	// in a crafted / IdP-initiated POST (Login sanitized only the SP-initiated
+	// value). Re-sanitize here and QueryEscape into the next= param — server-side
+	// hardening must not depend on the SPA's navigate() neutralizing it.
+	returnTo = sanitizeReturnTo(returnTo, "/user/me")
+	c.Redirect(http.StatusFound, "/sso-callback?next="+url.QueryEscape(returnTo))
 }
 
 func allowDisabledEmergencyLogin(reason domain.AutoDisabledReason) bool {

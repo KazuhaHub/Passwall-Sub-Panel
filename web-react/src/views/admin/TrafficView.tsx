@@ -134,18 +134,18 @@ export default function TrafficView() {
     }).catch(() => { /* leave default */ })
   }, [])
 
-  // Range options filtered by retention. Hour granularity is additionally
-  // capped to the raw retention window (7 days during beta.6 — the chart
-  // still reads raw, and rollup-backed Hour queries land in beta.7).
-  // Keeping the cap on the frontend avoids the user staring at a mostly-
-  // empty chart for "30-day hourly".
+  // Range options filtered by retention. Day/Week/Month read the hourly
+  // rollup (HistoryFor), so those ranges work out to the full
+  // traffic_history_days (historyDays). Hour granularity is additionally
+  // capped to a short recent window: thousands of hourly points (e.g. 30d×24)
+  // are unreadable, and hour-level detail is only useful for recent inspection.
   //
-  // "Today" (1d) is always available regardless of retention — even a
-  // 1-day retention covers it — and only renders Hour granularity.
-  const rawRetentionDays = 7
+  // "Today" (1d) is always available regardless of retention and only renders
+  // Hour granularity.
+  const hourGranularityMaxDays = 7
   const rangeOptions = useMemo(() => {
     const all = [1, 7, 30, 90, 180, 365]
-    const cap = period === 'hour' ? Math.min(historyDays, rawRetentionDays) : historyDays
+    const cap = period === 'hour' ? Math.min(historyDays, hourGranularityMaxDays) : historyDays
     return all.filter(d => d <= cap || d === 1)
   }, [period, historyDays])
   // Clamp rangeDays whenever the option set changes: pick the largest

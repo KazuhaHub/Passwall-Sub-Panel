@@ -371,7 +371,12 @@ func (s *Service) checkMissingOwnershipsWithCtx(
 		// missing), /clients/add returns a duplicate error wrapped as
 		// ErrValidation and this pass logs the failure; the next pass's
 		// UUID/enable healers below converge it.
-		flow := n.Flow
+		//
+		// Resolve flow the same way axis A does (resolveFlow): base on the
+		// inbound's detected flow, override with n.Flow only when set. Using
+		// n.Flow alone here recreated VLESS+Reality clients with an empty flow
+		// whenever Node.Flow was blank — a broken xtls-rprx-vision connection.
+		flow := resolveFlow(protocol, n, ce)
 
 		// Pass totalGB=0 (= 3X-UI unlimited). The next traffic-poll cycle
 		// re-pushes the proper floor; reconcile only heals drift.
@@ -498,15 +503,36 @@ func firstClientFlow(clients []xrayspec.InboundClient) string {
 	return ""
 }
 
+// resolveFlow returns the VLESS flow PSP should push for a client on this
+// inbound: the inbound's own detected flow (ce.flow — e.g. xtls-rprx-vision on
+// a Reality inbound) by default, overridden by the node's explicit Flow only
+// when the admin set one. Non-VLESS protocols carry no flow.
+//
+// Single source of truth so axis A (checkOne), axis B (checkMissingOwnerships)
+// and the flow healer can't drift: axis B previously used n.Flow alone, which
+// recreated Reality clients with an EMPTY flow whenever Node.Flow was blank
+// (the common imported-inbound case), and the healer — gated on n.Flow != "" —
+// then never corrected it, leaving the client permanently broken.
+func resolveFlow(protocol domain.Protocol, n *domain.Node, ce *inboundCacheEntry) string {
+	if protocol != domain.ProtoVLESS {
+		return ""
+	}
+	flow := ""
+	if ce != nil {
+		flow = ce.flow
+	}
+	if n != nil && n.Flow != "" {
+		flow = n.Flow
+	}
+	return flow
+}
+
 func (s *Service) checkOne(ctx context.Context, u *domain.User, e *domain.XUIClientEntry,
 	ce *inboundCacheEntry, n *domain.Node, level Level) (*Issue, bool) {
 
 	protocol := crypto.DetectProtocol(ce.inbound.Protocol, ce.method)
 	found := xrayspec.FindClient(ce.clients, e.ClientEmail)
-	desiredFlow := ce.flow
-	if protocol == domain.ProtoVLESS && n != nil && n.Flow != "" {
-		desiredFlow = n.Flow
-	}
+	desiredFlow := resolveFlow(protocol, n, ce)
 
 	// Single source of truth for "what expire_time should 3X-UI see for
 	// this user" — same helper user.pushClientConfigToAll uses. Crucially
@@ -555,7 +581,12 @@ func (s *Service) checkOne(ctx context.Context, u *domain.User, e *domain.XUICli
 		}, true
 	}
 
-	if protocol == domain.ProtoVLESS && n != nil && n.Flow != "" && found.Flow != n.Flow {
+	// Heal a flow mismatch toward the resolved desired flow. Gated on a
+	// non-empty desiredFlow so we only ever push a concrete flow (never clear
+	// one), but unlike the old `n.Flow != ""` gate this now also fixes a Reality
+	// client that lost its xtls-rprx-vision flow when Node.Flow is blank
+	// (desiredFlow then comes from the inbound's own detected flow).
+	if protocol == domain.ProtoVLESS && desiredFlow != "" && found.Flow != desiredFlow {
 		if err := s.syncer.SetOwnedClientEnable(ctx, e.PanelID, e.InboundID, e.ClientEmail,
 			protocol, ce.method, u.UUID, desiredFlow, desiredEnable, expireTime, 0); err != nil {
 			return &Issue{
@@ -694,7 +725,10 @@ func (s *Service) checkNodes(ctx context.Context, report *Report, cache map[inbo
 		if !present {
 			if n.Enabled {
 				n.Enabled = false
-				if err := s.nodes.Update(ctx, n); err == nil {
+				// Column-scoped write: n is a snapshot read at cycle start, so a
+				// full-row Save would revert the health/traffic/config columns the
+				// concurrent poll/health loops have since written.
+				if err := s.nodes.UpdateEnabled(ctx, n.ID, false); err == nil {
 					report.Issues = append(report.Issues, Issue{
 						PanelID:   n.PanelID,
 						PanelName: s.panelNameOf(n.PanelID), InboundID: n.InboundID,

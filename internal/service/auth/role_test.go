@@ -32,6 +32,20 @@ func TestResolveRoleForSSO_FirstMatchWins(t *testing.T) {
 	}
 }
 
+// An empty rule Value must never match — even against a groups attribute that
+// contains an empty-string element. Otherwise a blank Value on an admin-granting
+// rule (an easy admin typo) would elevate any such login (privilege-escalation
+// footgun).
+func TestResolveRoleForSSO_EmptyRuleValueNeverMatches(t *testing.T) {
+	rules := []config.SSORoleRule{
+		{Attribute: "", Value: "", Role: "admin"}, // blank Value
+	}
+	role, _ := ResolveRoleForSSO(rules, domain.RoleUser, "groups", nil, groupsOf("", "some-group"))
+	if role == domain.RoleAdmin {
+		t.Fatalf("blank-Value rule must not elevate to admin; got %q", role)
+	}
+}
+
 func TestResolveRoleForSSO_CustomAttributeMatch(t *testing.T) {
 	// Non-empty attribute name → exact attribute lookup, not groups.
 	rules := []config.SSORoleRule{

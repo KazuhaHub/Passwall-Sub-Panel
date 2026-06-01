@@ -140,6 +140,19 @@ func (c *Client) loginLocked(ctx context.Context) error {
 }
 
 func (c *Client) doJSON(ctx context.Context, method, path string, body any, out any) error {
+	return c.doJSONRetry(ctx, method, path, body, out, false)
+}
+
+// doJSONRetry issues the request and, in cookie-auth mode, transparently
+// re-authenticates and retries EXACTLY ONCE on a 401. The retried flag bounds
+// the work to two requests per call. Without it, a panel whose /login returns
+// success but whose protected API path keeps answering 401 (reverse-proxy
+// path-scoped auth, webBasePath mismatch, rotated session secret) drives
+// unbounded non-tail recursion → a fatal stack overflow that safego's
+// recover() cannot shield, taking the whole process down. On a second
+// consecutive 401 we surface a normal auth error the task/probe paths already
+// handle instead of recursing.
+func (c *Client) doJSONRetry(ctx context.Context, method, path string, body any, out any, retried bool) error {
 	if err := c.ensureAuth(ctx); err != nil {
 		return err
 	}
@@ -167,15 +180,24 @@ func (c *Client) doJSON(ctx context.Context, method, path string, body any, out 
 	}
 	defer resp.Body.Close()
 
-	// On 401 in cookie mode, drop the cached session and retry once.
+	// On 401 in cookie mode, drop the cached session and retry exactly once.
 	if resp.StatusCode == http.StatusUnauthorized && c.apiToken == "" {
+		if retried {
+			// Re-auth already happened and the path is still 401 — stop here.
+			// Returning a plain (transient-classified) error lets the bounded
+			// task-level retry/backoff handle it instead of recursing forever.
+			return fmt.Errorf("%s %s: still HTTP 401 after re-authentication — "+
+				"login succeeds but the API path stays unauthorized "+
+				"(check reverse-proxy path auth, webBasePath, or a rotated session secret)",
+				method, path)
+		}
 		c.mu.Lock()
 		c.authed = false
 		c.mu.Unlock()
 		if err := c.ensureAuth(ctx); err != nil {
 			return err
 		}
-		return c.doJSON(ctx, method, path, body, out)
+		return c.doJSONRetry(ctx, method, path, body, out, true)
 	}
 
 	b, _ := io.ReadAll(resp.Body)

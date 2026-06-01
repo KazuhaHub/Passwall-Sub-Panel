@@ -263,16 +263,17 @@ export default function MeView() {
   const [trendDays, setTrendDays] = useState(7)
   // Range options filtered by admin-configured TrafficHistoryDays (mirrors
   // the admin chart's logic so a retention=90 panel hides "last 1 year"
-  // here too). 1d is always available — even a 1-day retention covers it
-  // — and only renders Hour granularity. Hour granularity itself is
-  // additionally capped to the 7-day raw retention window (the chart
-  // currently reads from raw snapshots, not the hourly rollup).
-  const rawRetentionDays = 7
+  // here too). Day/Week/Month read the hourly rollup, so those ranges work
+  // out to the full retention window. 1d is always available and only renders
+  // Hour granularity. Hour granularity itself is additionally capped to a
+  // short recent window — thousands of hourly points are unreadable, and
+  // hour-level detail is only useful for recent inspection.
+  const hourGranularityMaxDays = 7
   const trendRangeOptions = useMemo(() => {
     const all = [1, 7, 30, 90, 180, 365]
     const retention = profile?.traffic_history_days
     const historyDays = retention && retention > 0 ? retention : Number.POSITIVE_INFINITY
-    const cap = trendPeriod === 'hour' ? Math.min(historyDays, rawRetentionDays) : historyDays
+    const cap = trendPeriod === 'hour' ? Math.min(historyDays, hourGranularityMaxDays) : historyDays
     return all.filter(d => d <= cap || d === 1)
   }, [trendPeriod, profile?.traffic_history_days])
   // Clamp trendDays whenever the option set changes: largest available
@@ -925,8 +926,8 @@ export default function MeView() {
           <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 1, mb: 1.5, flexWrap: 'wrap' }}>
             {/* Range first, granularity second — pick the time window before
                 deciding zoom level. 1d (Today) forces Hour; ≥30d hides Hour
-                (raw retention is only 7 days, so longer windows have no
-                hourly data to render). */}
+                (hour-level detail over long windows is too dense to read; use
+                Day/Week/Month, which cover the full retention window). */}
             <Select size="small" value={trendDays}
               onChange={e => setTrendDays(Number(e.target.value))}
               sx={{ height: 36, minWidth: 130 }}>

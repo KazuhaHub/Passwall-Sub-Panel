@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 
+	gomysql "github.com/go-sql-driver/mysql"
 	"gopkg.in/yaml.v3"
 )
 
@@ -384,6 +385,32 @@ func (c *Config) SecretKeyMaterial() string {
 	return c.JWTSecret
 }
 
+// minSecretKeyLen is the advisory floor for operator-supplied key material
+// (~128 bits when the input is random base64). ConfigureSecretKey SHA-256s
+// whatever it is given into a 32-byte AES key, which hides — but does not fix —
+// a short/guessable key, so we surface a boot WARN rather than reject (a legacy
+// hand-edited config may carry a shorter value).
+const minSecretKeyLen = 16
+
+// SecurityWarnings returns advisory boot warnings about weak or coupled key
+// material. It is returned rather than logged so the config package stays free
+// of a logging dependency and the checks stay unit-testable; the boot sequence
+// (app.Build) logs each one. The auto-generated default config is always
+// healthy, so a non-empty result means a hand-edited config or a short env
+// override.
+func (c *Config) SecurityWarnings() []string {
+	var w []string
+	if n := len(strings.TrimSpace(c.JWTSecret)); n > 0 && n < minSecretKeyLen {
+		w = append(w, fmt.Sprintf("jwt_secret is only %d chars — use >= %d (the auto-generated default is 32 random bytes)", n, minSecretKeyLen))
+	}
+	if ek := strings.TrimSpace(c.EncryptionKey); ek == "" {
+		w = append(w, "encryption_key is empty — jwt_secret is being reused as the at-rest encryption key; add a dedicated encryption_key so the two can rotate independently (rotating jwt_secret otherwise makes every stored credential undecryptable and aborts boot)")
+	} else if len(ek) < minSecretKeyLen {
+		w = append(w, fmt.Sprintf("encryption_key is only %d chars — use >= %d; SHA-256 expansion hides a weak at-rest key but does not strengthen it", len(ek), minSecretKeyLen))
+	}
+	return w
+}
+
 func (c *Config) applyDefaults() {
 	if c.Listen == "" {
 		c.Listen = ":8788"
@@ -468,10 +495,32 @@ func (c *Config) DBDSN() string {
 		if params == "" {
 			params = "parseTime=true&charset=utf8mb4&loc=UTC"
 		}
-		return fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?%s",
-			c.MySQL.User, c.MySQL.Password,
-			strings.TrimSpace(c.MySQL.Host), port,
-			strings.TrimSpace(c.MySQL.Database), params)
+		// Build the DSN via the driver's own Config + FormatDSN rather than a raw
+		// fmt.Sprintf. FormatDSN writes the address verbatim (so we feed it
+		// net.JoinHostPort → an IPv6 host literal like ::1 is correctly bracketed
+		// instead of mis-parsed as "[::1:3306]:3306") and url.PathEscapes the
+		// DBName (so a name containing '/' round-trips). Mirrors the Postgres path
+		// which already uses net.JoinHostPort. NewConfig's defaults (UTC loc, false
+		// parseTime, native passwords) are left at their implicit values so they
+		// are not double-emitted — every supplied param rides through Params and
+		// FormatDSN serializes it once.
+		cfg := gomysql.NewConfig()
+		cfg.User = c.MySQL.User
+		cfg.Passwd = c.MySQL.Password
+		cfg.Net = "tcp"
+		cfg.Addr = net.JoinHostPort(strings.TrimSpace(c.MySQL.Host), strconv.Itoa(port))
+		cfg.DBName = strings.TrimSpace(c.MySQL.Database)
+		if vals, err := url.ParseQuery(params); err == nil && len(vals) > 0 {
+			cfg.Params = make(map[string]string, len(vals))
+			for k, vs := range vals {
+				if len(vs) > 0 {
+					cfg.Params[k] = vs[0]
+				} else {
+					cfg.Params[k] = ""
+				}
+			}
+		}
+		return cfg.FormatDSN()
 	}
 	return filepath.Join(c.DataDir, "panel.db")
 }

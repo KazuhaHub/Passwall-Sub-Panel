@@ -49,6 +49,7 @@ func (r *captureNodeRepo) UpdateInboundConfig(_ context.Context, n *domain.Node)
 	r.updateCfg = n
 	return nil
 }
+func (r *captureNodeRepo) UpdateEnabled(_ context.Context, _ int64, _ bool) error { return nil }
 
 type stubXUIClient struct {
 	ports.XUIClient

@@ -3,8 +3,58 @@ package config
 import (
 	"net/url"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	gomysql "github.com/go-sql-driver/mysql"
 )
+
+// Regression (M8 / low54): the discrete MySQL block must assemble a DSN that
+// round-trips through the driver's own parser with the correct address and DB
+// name. The old raw fmt.Sprintf mis-encoded an IPv6 host literal (::1 →
+// "[::1:3306]:3306") and broke on a '/'-containing DB name.
+func TestMySQLDiscreteBlockHandlesIPv6AndSlashDBName(t *testing.T) {
+	cfg := Config{MySQL: MySQLConfig{
+		Host: "::1", Port: 3306, User: "psp", Password: "pw:secret", Database: "db/with/slash",
+	}}
+	cfg.applyDefaults()
+
+	if got := cfg.DBKind(); got != "mysql" {
+		t.Fatalf("DBKind() = %q, want mysql", got)
+	}
+	dsn := cfg.DBDSN()
+	parsed, err := gomysql.ParseDSN(dsn)
+	if err != nil {
+		t.Fatalf("driver cannot parse assembled DSN %q: %v", dsn, err)
+	}
+	if parsed.Addr != "[::1]:3306" {
+		t.Fatalf("IPv6 addr = %q, want [::1]:3306 (raw Sprintf produced [::1:3306]:3306)", parsed.Addr)
+	}
+	if parsed.DBName != "db/with/slash" {
+		t.Fatalf("DBName = %q, want db/with/slash (must survive '/')", parsed.DBName)
+	}
+	if parsed.User != "psp" || parsed.Passwd != "pw:secret" {
+		t.Fatalf("creds mangled: user=%q passwd=%q", parsed.User, parsed.Passwd)
+	}
+	if !parsed.ParseTime {
+		t.Fatalf("default params should set parseTime=true; got DSN %q", dsn)
+	}
+}
+
+func TestSecurityWarnings(t *testing.T) {
+	healthy := Config{JWTSecret: strings.Repeat("a", 32), EncryptionKey: strings.Repeat("b", 32)}
+	if w := healthy.SecurityWarnings(); len(w) != 0 {
+		t.Fatalf("healthy config produced warnings: %v", w)
+	}
+	coupled := Config{JWTSecret: strings.Repeat("a", 32)}
+	if w := coupled.SecurityWarnings(); len(w) != 1 || !strings.Contains(w[0], "encryption_key is empty") {
+		t.Fatalf("want one coupled-key warning, got %v", w)
+	}
+	weak := Config{JWTSecret: "short", EncryptionKey: "x"}
+	if w := weak.SecurityWarnings(); len(w) != 2 {
+		t.Fatalf("want 2 weak-key warnings, got %v", w)
+	}
+}
 
 func TestDatabaseDefaultsToSQLiteWhenMySQLUnset(t *testing.T) {
 	cfg := Config{DataDir: "./data"}

@@ -144,6 +144,11 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 		return nil, fmt.Errorf("db schema: %w", err)
 	}
 	mysql.ConfigureSecretKey(cfg.SecretKeyMaterial())
+	// Surface advisory key-material warnings (weak jwt_secret/encryption_key,
+	// or the coupled-key fallback where jwt_secret doubles as the at-rest key).
+	for _, w := range cfg.SecurityWarnings() {
+		log.Warn("config security", "warning", w)
+	}
 	// Boot-time secrets audit: walk the rows that hold encrypted creds
 	// and WARN if any are still plaintext. Catches the silent-downgrade
 	// case where ConfigureSecretKey("") makes encryptSecret a no-op.
@@ -805,6 +810,12 @@ func (a *App) runTrafficLoop(ctx context.Context) {
 			if err := a.traffic.PollOnce(ctx); err != nil {
 				log.Warn("traffic poll", "err", err)
 			}
+			// Roll up immediately after the poll so the hourly tables (the sole
+			// source for the traffic charts) reflect this cycle's snapshots —
+			// including the still-open current hour — keeping the chart's "today"
+			// as live as the raw poll. Idempotent + small (user+node only), and
+			// the hourly cleanup loop still runs its own rollup-before-prune pass.
+			a.runRollup(ctx)
 			// Piggyback the 3X-UI compat re-probe onto the traffic poll
 			// cadence — PSP is already in a "talk to every panel" cycle,
 			// adding one /server/status call per panel is cheap (~10ms

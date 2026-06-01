@@ -1,11 +1,79 @@
 package middleware
 
 import (
+	"encoding/json"
 	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
 )
+
+// captureBodyFor builds a test gin.Context around a request with the given
+// content type + raw body and returns what captureRequestBody records.
+func captureBodyFor(t *testing.T, contentType, body string) any {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/local/login", strings.NewReader(body))
+	if contentType != "" {
+		req.Header.Set("Content-Type", contentType)
+	}
+	c.Request = req
+	return captureRequestBody(c)
+}
+
+func mustJSON(t *testing.T, v any) string {
+	t.Helper()
+	b, err := json.Marshal(v)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	return string(b)
+}
+
+// Regression (M2): a non-JSON request body must never be stored verbatim in the
+// operator-readable audit log. A form-encoded login carries upn+password to the
+// unauthenticated /api/auth/local/login; the password must be redacted.
+func TestCaptureRequestBody_FormEncodedRedactsPassword(t *testing.T) {
+	got := captureBodyFor(t, "application/x-www-form-urlencoded", "upn=alice@example.com&password=hunter2")
+	s := mustJSON(t, got)
+	if strings.Contains(s, "hunter2") {
+		t.Fatalf("plaintext password leaked into audit body: %s", s)
+	}
+	if !strings.Contains(s, "[REDACTED]") {
+		t.Fatalf("password key must be redacted, got %s", s)
+	}
+	if !strings.Contains(s, "alice@example.com") {
+		t.Fatalf("non-sensitive upn should be visible for the audit trail, got %s", s)
+	}
+}
+
+// A non-JSON, non-form body (e.g. malformed JSON with a trailing comma) must
+// fall back to a shape-only placeholder, never the raw bytes.
+func TestCaptureRequestBody_MalformedJSONNotStoredRaw(t *testing.T) {
+	got := captureBodyFor(t, "application/json", `{"password":"hunter2",}`)
+	s := mustJSON(t, got)
+	if strings.Contains(s, "hunter2") {
+		t.Fatalf("malformed-JSON body stored raw, leaking secret: %s", s)
+	}
+	if !strings.Contains(s, "unparsed_body") {
+		t.Fatalf("want shape-only placeholder, got %s", s)
+	}
+}
+
+// Valid JSON keeps the existing key-redaction behavior.
+func TestCaptureRequestBody_ValidJSONRedacts(t *testing.T) {
+	got := captureBodyFor(t, "application/json", `{"upn":"bob","password":"hunter2"}`)
+	s := mustJSON(t, got)
+	if strings.Contains(s, "hunter2") {
+		t.Fatalf("JSON password not redacted: %s", s)
+	}
+	if !strings.Contains(s, "bob") {
+		t.Fatalf("non-sensitive field dropped: %s", s)
+	}
+}
 
 func TestShouldAuditPath_AdminWrites(t *testing.T) {
 	cases := []struct {

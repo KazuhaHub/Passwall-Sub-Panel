@@ -77,7 +77,13 @@ func (p *Pool) Add(panel *domain.XUIPanel) error {
 		return fmt.Errorf("init xui client %s: %w", panel.Name, err)
 	}
 	p.clients[panel.ID] = c
-	p.panels[panel.ID] = panel
+	// Store a defensive copy, not the caller's pointer: List() reads p.panels
+	// under RLock and copies the struct, which is only safe while the stored
+	// value is never mutated. Copying here removes the implicit "never touch
+	// this pointer again" contract and prevents a data race if an admin-CRUD
+	// path edits the same struct in place after registering it.
+	cp := *panel
+	p.panels[panel.ID] = &cp
 	return nil
 }
 

@@ -119,30 +119,35 @@ func TestRollupUserDeltaWithinBucket(t *testing.T) {
 	}
 }
 
-// TestRollupOnlyCompletedHours: a raw row captured in the CURRENT hour
-// must NOT be rolled up (would produce a wrong-low partial delta).
-func TestRollupOnlyCompletedHours(t *testing.T) {
+// TestRollupIncludesCurrentHourExcludesFuture: the still-filling CURRENT UTC
+// hour IS rolled up (idempotent re-runs keep the chart's "today" live), while a
+// row stamped in a FUTURE hour (clock skew) is excluded.
+func TestRollupIncludesCurrentHourExcludesFuture(t *testing.T) {
 	svc, g := newServiceFromTest(t)
 	ctx := context.Background()
 
-	insertUserSnap(t, g, 1, h14.Add(5*time.Minute), 100, 50, 150)
-	insertUserSnap(t, g, 1, h14.Add(55*time.Minute), 500, 250, 750)
-	insertUserSnap(t, g, 1, h15.Add(10*time.Minute), 600, 300, 900)
-	insertUserSnap(t, g, 1, h15.Add(50*time.Minute), 800, 400, 1200)
-	// "Current hour" — captured AFTER hourFloor(now), so cutoff < captured_at.
-	insertUserSnap(t, g, 1, time.Now().Add(time.Hour), 9999, 9999, 9999)
+	nowHour := hourFloor(time.Now())
+	// Two rows in the current (partial) hour — a 100→500 ramp. nowHour <= now
+	// always; the second is stamped at now (before the rollup's now cutoff).
+	insertUserSnap(t, g, 1, nowHour, 100, 50, 150)
+	insertUserSnap(t, g, 1, time.Now(), 500, 250, 750)
+	// A future-hour row must be excluded.
+	insertUserSnap(t, g, 1, time.Now().Add(2*time.Hour), 9999, 9999, 9999)
 
 	if err := svc.RollupOnce(ctx); err != nil {
 		t.Fatalf("rollup: %v", err)
 	}
 
+	var got struct{ UpBytes int64 }
+	scanOne(t, g, &got,
+		"SELECT up_bytes FROM traffic_snapshots_hourly WHERE user_id = ? AND bucket_start = ?", 1, nowHour)
+	if got.UpBytes != 400 {
+		t.Fatalf("current-hour bucket should roll up live: up delta = %d, want 400", got.UpBytes)
+	}
 	if n := countRows(t, g,
 		"SELECT COUNT(*) FROM traffic_snapshots_hourly WHERE user_id = ? AND bucket_start = ?",
-		1, hourFloor(time.Now().Add(time.Hour))); n != 0 {
-		t.Fatalf("future-hour row should not be rolled up, found %d hourly rows", n)
-	}
-	if n := countRows(t, g, "SELECT COUNT(*) FROM traffic_snapshots_hourly WHERE user_id = ?", 1); n != 2 {
-		t.Fatalf("expected 2 completed hour buckets (14h + 15h), got %d", n)
+		1, hourFloor(time.Now().Add(2*time.Hour))); n != 0 {
+		t.Fatalf("future-hour row must not be rolled up, found %d hourly rows", n)
 	}
 }
 
@@ -173,10 +178,11 @@ func TestRollupIdempotent(t *testing.T) {
 	}
 }
 
-// TestRollupClientAndNode: the client and node code paths use a wider
-// unique-key shape (panel_id, inbound_id, client_email, bucket_start)
-// vs (node_id, bucket_start). Make sure both rollup correctly.
-func TestRollupClientAndNode(t *testing.T) {
+// TestRollupNodeAndSkipsClient: the node tier rolls up (node_id, bucket_start),
+// but the client tier is intentionally NOT rolled up anymore — client_*_hourly
+// was write-only dead storage (no chart reads it), so even with raw client
+// snapshots present, no client hourly row is produced.
+func TestRollupNodeAndSkipsClient(t *testing.T) {
 	svc, g := newServiceFromTest(t)
 	ctx := context.Background()
 
@@ -192,16 +198,14 @@ func TestRollupClientAndNode(t *testing.T) {
 
 	var got struct{ UpBytes int64 }
 	scanOne(t, g, &got,
-		"SELECT up_bytes FROM client_traffic_snapshots_hourly WHERE panel_id=? AND inbound_id=? AND client_email=?",
-		10, 2, "alice@ex.com")
-	if got.UpBytes != 400 {
-		t.Fatalf("client delta = %d, want 400", got.UpBytes)
-	}
-
-	scanOne(t, g, &got,
 		"SELECT up_bytes FROM node_traffic_snapshots_hourly WHERE node_id=?", 7)
 	if got.UpBytes != 400 {
 		t.Fatalf("node delta = %d, want 400", got.UpBytes)
+	}
+
+	// Client tier must NOT be rolled up anymore.
+	if n := countRows(t, g, "SELECT COUNT(*) FROM client_traffic_snapshots_hourly"); n != 0 {
+		t.Fatalf("client rollup was removed; expected 0 client hourly rows, got %d", n)
 	}
 }
 

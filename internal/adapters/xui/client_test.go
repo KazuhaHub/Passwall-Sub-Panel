@@ -84,6 +84,44 @@ func TestDoJSON_TransientCodesStayRaw(t *testing.T) {
 	}
 }
 
+// Regression: a panel whose /login keeps succeeding but whose API path keeps
+// returning 401 (reverse-proxy path-scoped auth, webBasePath mismatch, rotated
+// session secret) must NOT drive unbounded re-auth recursion. Before the fix
+// doJSON re-authenticated and re-called itself with no depth guard, growing the
+// goroutine stack until a fatal stack overflow that recover() cannot shield —
+// crashing the whole process. The retry must be bounded to exactly one re-auth
+// (two API hits) and then surface a normal error.
+func TestDoJSON_Persistent401CookieAuthDoesNotRecurseForever(t *testing.T) {
+	var apiHits, loginHits int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/login" {
+			loginHits++
+			_, _ = w.Write([]byte(`{"success":true}`))
+			return
+		}
+		apiHits++
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer srv.Close()
+	// Cookie mode: empty apiToken, username/password set so loginLocked succeeds.
+	c := &Client{baseURL: srv.URL, http: srv.Client(), username: "u", password: "p"}
+
+	err := c.doJSON(context.Background(), http.MethodGet, "/panel/api/inbounds/list", nil, nil)
+	if err == nil {
+		t.Fatal("persistent 401 must surface an error, not loop")
+	}
+	if !strings.Contains(err.Error(), "after re-authentication") {
+		t.Fatalf("want a bounded re-auth error, got: %v", err)
+	}
+	// Exactly one retry: the original API hit + one post-re-auth hit.
+	if apiHits != 2 {
+		t.Fatalf("API path hit %d times, want exactly 2 (one retry only)", apiHits)
+	}
+	if loginHits != 2 {
+		t.Fatalf("login hit %d times, want exactly 2 (initial + one re-auth)", loginHits)
+	}
+}
+
 func TestReplaceSettingsClientsHandlesEmptyNext(t *testing.T) {
 	current := `{"method":"aes-128-gcm","clients":[{"id":"a","email":"a@example.test"},{"id":"b","email":"b@example.test"}]}`
 

@@ -189,6 +189,12 @@ type NodeRepo interface {
 	// capture) must not clobber the health probe's port/HealthState/
 	// HealthCheckedAt columns it may be writing concurrently.
 	UpdateInboundConfig(ctx context.Context, n *domain.Node) error
+	// UpdateEnabled writes only the `enabled` column. Same column-scoped
+	// rationale as the writers above: SetEnabled / DeleteAndSync / reconcile's
+	// disappeared-inbound branch flip enabled on a snapshot loaded at cycle
+	// start, and a full-row Save there would revert the health/traffic/config
+	// columns the concurrent loops are writing.
+	UpdateEnabled(ctx context.Context, id int64, enabled bool) error
 	// BatchUpdateSortOrder rewrites Node.SortOrder for every (id, sort_order)
 	// pair in a single transaction. Driven by the drag-to-reorder UI in the
 	// admin node list — a one-shot N-row update is cheaper than N round-trips
@@ -294,6 +300,10 @@ type TrafficRepo interface {
 	// Single SQL query with the same MAX(id) pattern LatestForUsers uses.
 	LastBeforeForUsers(ctx context.Context, userIDs []int64, before time.Time) (map[int64]*domain.TrafficSnapshot, error)
 	ListByUser(ctx context.Context, userID int64, since, until time.Time) ([]*domain.TrafficSnapshot, error)
+	// ListHourlyByUser returns the user's rolled-up hourly delta buckets in
+	// [since, until). This is the long-window source for the traffic chart —
+	// raw is kept only ~7 days, the hourly table out to TrafficHistoryDays.
+	ListHourlyByUser(ctx context.Context, userID int64, since, until time.Time) ([]domain.HourlyTraffic, error)
 	InsertClient(ctx context.Context, s *domain.ClientTrafficSnapshot) error
 	// InsertBatch / InsertClientBatch consolidate per-poll snapshot writes
 	// into a single SQL roundtrip (GORM CreateInBatches). Used by
@@ -324,6 +334,9 @@ type NodeTrafficRepo interface {
 	LastBefore(ctx context.Context, nodeID int64, before time.Time) (*domain.NodeTrafficSnapshot, error)
 	LastBeforeForNodes(ctx context.Context, nodeIDs []int64, before time.Time) (map[int64]*domain.NodeTrafficSnapshot, error)
 	ListByNode(ctx context.Context, nodeID int64, since, until time.Time) ([]*domain.NodeTrafficSnapshot, error)
+	// ListHourlyByNode returns the node's rolled-up hourly delta buckets in
+	// [since, until) — the long-window source for NodeHistoryFor.
+	ListHourlyByNode(ctx context.Context, nodeID int64, since, until time.Time) ([]domain.HourlyTraffic, error)
 	// InsertBatch consolidates per-poll node snapshot writes; mirrors the
 	// TrafficRepo equivalent.
 	InsertBatch(ctx context.Context, snaps []*domain.NodeTrafficSnapshot) error
@@ -501,10 +514,12 @@ type UISettings struct {
 	SyncTaskRetentionDays int `json:"sync_task_retention_days"`
 
 	// TrafficHistoryDays controls how far back the traffic chart can render
-	// AND the hourly rollup table's retention. raw 5-min snapshots are kept
-	// for a fixed-internal window (covers "today" + a small buffer) and are
-	// not configurable here. Range queries beyond this window return empty
-	// buckets. 0 keeps everything.
+	// AND the user/node hourly rollup tables' retention (the chart's SOLE
+	// source — HistoryFor/NodeHistoryFor read the *_hourly tables; the raw
+	// 5-min tables are kept only ~7 days, feeding the rollup). Range queries
+	// beyond this window return empty buckets, so it must comfortably exceed
+	// the UI's longest range (365 days). It is coerced to a default of 730
+	// (2y) when <= 0 — there is no "keep forever" option; 0 is NOT honored.
 	//
 	// Replaces the v3.0.0-beta.5 setting `traffic_snapshot_retention_days`,
 	// which was raw-only and tied to a single 5-min table; v3.0.0-beta.6+

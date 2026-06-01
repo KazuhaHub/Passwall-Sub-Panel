@@ -1,0 +1,4 @@
+# Keeps internal/web/dist/ present on a fresh clone so `go:embed all:dist`
+# (internal/web/web.go) has a non-empty directory and `go build ./cmd/panel`
+# compiles before the SPA is built. The real bundle (npm run build) lands here
+# and is git-ignored; only this placeholder is tracked (see .gitignore).

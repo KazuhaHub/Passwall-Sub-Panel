@@ -149,6 +149,7 @@ func (d *fakeDisabler) SetEnabledAndSync(ctx context.Context, userID int64, enab
 
 type fakeTrafficRepo struct {
 	snapshots       []*domain.TrafficSnapshot
+	hourly          []domain.HourlyTraffic // rolled-up hourly deltas, source for HistoryFor
 	clientSnapshots []*domain.ClientTrafficSnapshot
 	// latestForUsersCalls counts the batched pre-fetch so the perf-behavior
 	// test can assert PollOnce now reads via the batch path (ONCE per cycle).
@@ -222,6 +223,16 @@ func (r *fakeTrafficRepo) LastBefore(ctx context.Context, userID int64, before t
 		return nil, domain.ErrNotFound
 	}
 	return latest, nil
+}
+
+func (r *fakeTrafficRepo) ListHourlyByUser(ctx context.Context, userID int64, since, until time.Time) ([]domain.HourlyTraffic, error) {
+	out := []domain.HourlyTraffic{}
+	for _, h := range r.hourly {
+		if !h.BucketStart.Before(since.UTC()) && h.BucketStart.Before(until.UTC()) {
+			out = append(out, h)
+		}
+	}
+	return out, nil
 }
 
 func (r *fakeTrafficRepo) ListByUser(ctx context.Context, userID int64, since, until time.Time) ([]*domain.TrafficSnapshot, error) {
@@ -303,11 +314,30 @@ func day(date string) time.Time {
 	return t
 }
 
-func TestHistoryForUsesBaselineBeforeSince(t *testing.T) {
-	repo := &fakeTrafficRepo{snapshots: []*domain.TrafficSnapshot{
-		snap(1, "2026-04-30 23:55", 40, 60),
-		snap(1, "2026-05-01 12:00", 70, 100),
-		snap(1, "2026-05-02 12:00", 90, 130),
+// hbucket builds a rolled-up hourly delta row whose UTC bucket_start is the
+// UTC-hour-floor of the given local time (mirroring rollup.hourFloor). A
+// mid-day local time keeps it unambiguously inside that local day for any
+// realistic TZ offset.
+func hbucket(at string, up, down int64) domain.HourlyTraffic {
+	t, err := time.ParseInLocation("2006-01-02 15:04", at, time.Local)
+	if err != nil {
+		panic(err)
+	}
+	return domain.HourlyTraffic{
+		BucketStart: t.UTC().Truncate(time.Hour),
+		UpBytes:     up,
+		DownBytes:   down,
+		TotalBytes:  up + down,
+	}
+}
+
+// A day bucket is the SUM of that day's hourly deltas (additive — no cumulative
+// baseline threading like the old raw-snapshot path).
+func TestHistoryForSumsDailyHourlyDeltas(t *testing.T) {
+	repo := &fakeTrafficRepo{hourly: []domain.HourlyTraffic{
+		hbucket("2026-05-01 08:00", 30, 40), // day1
+		hbucket("2026-05-01 15:00", 10, 10), // day1 → 90 total
+		hbucket("2026-05-02 09:00", 20, 30), // day2 → 50 total
 	}}
 	svc := New(nil, nil, repo, nil, nil, nil, nil)
 
@@ -318,18 +348,18 @@ func TestHistoryForUsesBaselineBeforeSince(t *testing.T) {
 	if len(report.Items) != 2 {
 		t.Fatalf("items len = %d, want 2", len(report.Items))
 	}
-	if got := report.Items[0].TotalBytes; got != 70 {
-		t.Fatalf("first day total = %d, want 70", got)
+	if got := report.Items[0].TotalBytes; got != 90 {
+		t.Fatalf("day1 total = %d, want 90 (sum of two hourly deltas)", got)
 	}
 	if got := report.Items[1].TotalBytes; got != 50 {
-		t.Fatalf("second day total = %d, want 50", got)
+		t.Fatalf("day2 total = %d, want 50", got)
 	}
 }
 
 func TestHistoryForFillsEmptyBuckets(t *testing.T) {
-	repo := &fakeTrafficRepo{snapshots: []*domain.TrafficSnapshot{
-		snap(1, "2026-05-01 12:00", 10, 20),
-		snap(1, "2026-05-03 12:00", 30, 60),
+	repo := &fakeTrafficRepo{hourly: []domain.HourlyTraffic{
+		hbucket("2026-05-01 12:00", 10, 20), // day1: 30
+		hbucket("2026-05-03 12:00", 30, 60), // day3: 90
 	}}
 	svc := New(nil, nil, repo, nil, nil, nil, nil)
 
@@ -340,33 +370,22 @@ func TestHistoryForFillsEmptyBuckets(t *testing.T) {
 	if len(report.Items) != 3 {
 		t.Fatalf("items len = %d, want 3", len(report.Items))
 	}
+	if got := report.Items[0].TotalBytes; got != 30 {
+		t.Fatalf("day1 total = %d, want 30", got)
+	}
 	if got := report.Items[1].TotalBytes; got != 0 {
-		t.Fatalf("empty day total = %d, want 0", got)
+		t.Fatalf("empty day total = %d, want 0 (rollup drops idle hours)", got)
 	}
-	if got := report.Items[2].TotalBytes; got != 60 {
-		t.Fatalf("third day total = %d, want 60", got)
-	}
-}
-
-func TestHistoryForHandlesCounterReset(t *testing.T) {
-	repo := &fakeTrafficRepo{snapshots: []*domain.TrafficSnapshot{
-		snap(1, "2026-04-30 23:55", 200, 300),
-		snap(1, "2026-05-01 12:00", 20, 30),
-	}}
-	svc := New(nil, nil, repo, nil, nil, nil, nil)
-
-	report, err := svc.HistoryFor(context.Background(), 1, HistoryDay, day("2026-05-01"), day("2026-05-01"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := report.Items[0].TotalBytes; got != 50 {
-		t.Fatalf("reset day total = %d, want 50", got)
+	if got := report.Items[2].TotalBytes; got != 90 {
+		t.Fatalf("day3 total = %d, want 90", got)
 	}
 }
 
+// Week/month buckets sum the daily hourly deltas they contain, and carry the
+// expected period labels.
 func TestHistoryForWeekAndMonthLabels(t *testing.T) {
-	repo := &fakeTrafficRepo{snapshots: []*domain.TrafficSnapshot{
-		snap(1, "2026-05-15 12:00", 10, 20),
+	repo := &fakeTrafficRepo{hourly: []domain.HourlyTraffic{
+		hbucket("2026-05-15 12:00", 10, 20),
 	}}
 	svc := New(nil, nil, repo, nil, nil, nil, nil)
 
@@ -377,6 +396,9 @@ func TestHistoryForWeekAndMonthLabels(t *testing.T) {
 	if got := weekly.Items[0].Date; got != "2026-05-11" {
 		t.Fatalf("week label = %s, want 2026-05-11", got)
 	}
+	if got := weekly.Items[0].TotalBytes; got != 30 {
+		t.Fatalf("week total = %d, want 30", got)
+	}
 
 	monthly, err := svc.HistoryFor(context.Background(), 1, HistoryMonth, day("2026-05-15"), day("2026-05-15"))
 	if err != nil {
@@ -384,6 +406,9 @@ func TestHistoryForWeekAndMonthLabels(t *testing.T) {
 	}
 	if got := monthly.Items[0].Date; got != "2026-05" {
 		t.Fatalf("month label = %s, want 2026-05", got)
+	}
+	if got := monthly.Items[0].TotalBytes; got != 30 {
+		t.Fatalf("month total = %d, want 30", got)
 	}
 }
 
@@ -421,6 +446,38 @@ func TestSetPeriodUsageSetsBaseline(t *testing.T) {
 			t.Fatalf("PeriodUsed() = %d, want %d (=usedBytes)", got, 2*gb)
 		}
 	})
+}
+
+// Regression (M1): SetPeriodUsage must NOT insert a snapshot whose total is
+// below the latest existing in-hour snapshot. The hourly rollup buckets traffic
+// as MAX(total)-MIN(total) and assumes intra-hour monotonicity; a below-baseline
+// "base" row became the bucket MIN and permanently inflated that hour by the
+// whole re-baseline amount. Every snapshot SetPeriodUsage writes must stay >=
+// the prior latest total.
+func TestSetPeriodUsage_DoesNotWriteBelowBaselineSnapshot(t *testing.T) {
+	const gb = int64(1) << 30
+	priorLatest := 10 * gb
+	users := &fakeUserRepo{users: map[int64]*domain.User{
+		1: {ID: 1, Enabled: true, TrafficLimitBytes: 100 * gb, LifetimeTotalBytes: priorLatest},
+	}}
+	repo := &fakeTrafficRepo{snapshots: []*domain.TrafficSnapshot{
+		{UserID: 1, TotalBytes: priorLatest, UpBytes: 4 * gb, CapturedAt: time.Now().Add(-time.Minute)},
+	}}
+	svc := New(users, nil, repo, nil, nil, nil, &fakeDisabler{})
+
+	if err := svc.SetPeriodUsage(context.Background(), 1, 2*gb); err != nil {
+		t.Fatal(err)
+	}
+	// Inspect only the rows SetPeriodUsage added (after the seeded one).
+	for _, s := range repo.snapshots[1:] {
+		if s.TotalBytes < priorLatest {
+			t.Fatalf("SetPeriodUsage wrote a below-baseline snapshot total=%d (< prior latest %d) — corrupts the hourly rollup bucket", s.TotalBytes, priorLatest)
+		}
+	}
+	// And PeriodUsed() must still reflect the admin's chosen value.
+	if got := users.users[1].PeriodUsed(); got != 2*gb {
+		t.Fatalf("PeriodUsed() = %d, want %d", got, 2*gb)
+	}
 }
 
 func TestRecordAndEnforceLifetimeMonotonicAcrossCounterReset(t *testing.T) {
@@ -690,6 +747,17 @@ func TestRecordAndEnforcePersistsRolloverBeforeDisablerCall(t *testing.T) {
 // fakeNodeTrafficRepo lets us hit NodeHistoryFor / NodeReportFor in unit tests.
 type fakeNodeTrafficRepo struct {
 	snapshots []*domain.NodeTrafficSnapshot
+	hourly    []domain.HourlyTraffic // rolled-up hourly deltas, source for NodeHistoryFor
+}
+
+func (r *fakeNodeTrafficRepo) ListHourlyByNode(ctx context.Context, nodeID int64, since, until time.Time) ([]domain.HourlyTraffic, error) {
+	out := []domain.HourlyTraffic{}
+	for _, h := range r.hourly {
+		if !h.BucketStart.Before(since.UTC()) && h.BucketStart.Before(until.UTC()) {
+			out = append(out, h)
+		}
+	}
+	return out, nil
 }
 
 func (r *fakeNodeTrafficRepo) Insert(ctx context.Context, s *domain.NodeTrafficSnapshot) error {
@@ -826,6 +894,9 @@ func (r *fakeNodeRepo) UpdateHealth(ctx context.Context, n *domain.Node) error {
 	return nil
 }
 func (r *fakeNodeRepo) UpdateInboundConfig(ctx context.Context, n *domain.Node) error { return nil }
+func (r *fakeNodeRepo) UpdateEnabled(ctx context.Context, id int64, enabled bool) error {
+	return nil
+}
 func (r *fakeNodeRepo) GetByID(ctx context.Context, id int64) (*domain.Node, error) {
 	n, ok := r.nodes[id]
 	if !ok {
@@ -1398,7 +1469,12 @@ func TestPollOnceRecordsNodeTrafficFromMatchedClientStats(t *testing.T) {
 }
 
 func TestRecordAndEnforceRechecksLimitAfterRolloverReenable(t *testing.T) {
-	oldStart := time.Now().AddDate(0, -1, 0)
+	// Anchor to the first of the previous month, NOT time.Now().AddDate(0,-1,0):
+	// on a 31st (e.g. May 31) AddDate normalizes April-31 → May 1, landing back
+	// in the current month so shouldRollPeriod (month-equality) never fires and
+	// the test silently passed only because Go cached an earlier-dated run.
+	now := time.Now()
+	oldStart := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location()).AddDate(0, -1, 0)
 	users := &fakeUserRepo{users: map[int64]*domain.User{
 		1: {
 			ID:                 1,

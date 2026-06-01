@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -165,7 +166,35 @@ func captureRequestBody(c *gin.Context) any {
 	if err := json.Unmarshal(body, &v); err == nil {
 		return redact(v)
 	}
-	return truncateString(string(body), 8192)
+	// Non-JSON body. It may still carry credentials — e.g. a non-SPA client or a
+	// login-form probe POSTing `upn=x&password=hunter2` to the unauthenticated
+	// /api/auth/local/login, or a JSON body with a BOM/trailing comma the handler
+	// later 400s. Capture runs at engine level BEFORE the handler, and the audit
+	// log is operator-readable, so we must NOT store the raw body verbatim.
+	// Form-encoded bodies are parsed and run through the same key redaction;
+	// anything else is recorded as shape only.
+	if isFormContentType(c.ContentType()) {
+		if vals, err := url.ParseQuery(string(body)); err == nil && len(vals) > 0 {
+			out := make(map[string]any, len(vals))
+			for k, vs := range vals {
+				if isSensitiveKey(k) {
+					out[k] = "[REDACTED]"
+					continue
+				}
+				if len(vs) == 1 {
+					out[k] = vs[0]
+				} else {
+					out[k] = vs
+				}
+			}
+			return out
+		}
+	}
+	return map[string]any{"unparsed_body": true, "len": len(body)}
+}
+
+func isFormContentType(ct string) bool {
+	return ct == "application/x-www-form-urlencoded"
 }
 
 func paramsMap(c *gin.Context) map[string]string {

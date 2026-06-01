@@ -19,8 +19,15 @@ func TestPerIPLimiterAllowsUpToLimit(t *testing.T) {
 
 func TestPerIPLimiterIndependentBuckets(t *testing.T) {
 	l := NewPerIPLimiter(2, time.Minute)
-	if !l.Allow("1.1.1.1") || !l.Allow("1.1.1.1") {
-		t.Fatal("first IP should burn through its allowance cleanly")
+	// Consume both of IP 1.1.1.1's allowance slots (limit=2); each call must
+	// pass. Two explicit statements rather than `Allow(..) || Allow(..)` — the
+	// `||` short-circuits, so a failing first call would skip the second (only
+	// one slot consumed) and it reads as a copy-paste bug to staticcheck (SA4000).
+	if !l.Allow("1.1.1.1") {
+		t.Fatal("first IP, 1st request should be allowed")
+	}
+	if !l.Allow("1.1.1.1") {
+		t.Fatal("first IP, 2nd request should be allowed")
 	}
 	if l.Allow("1.1.1.1") {
 		t.Fatal("first IP should now be limited")
