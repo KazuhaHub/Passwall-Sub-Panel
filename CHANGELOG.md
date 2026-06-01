@@ -6,7 +6,7 @@ small improvement).
 
 ## v3.6.3-beta.4 — 2026-06-01
 
-beta.3 后的 geo 设置完善 + 设置页 UX 修复。无 schema 变更。
+beta.3 后的 geo 设置完善 + 设置页 UX 修复，外加一处 Docker 部署权限修复。无 schema 变更。
 
 ### Added
 
@@ -20,6 +20,10 @@ beta.3 后的 geo 设置完善 + 设置页 UX 修复。无 schema 变更。
 - **License Key / Token 字段改用 SMTP 密码同款「已保存（保持不变）」** —— 已存有凭据时显示只读条 + 「更改」，避免保存时误清空（空值=保持不变的语义后端早已支持）。
 - **「立即更新」按钮现在先自动保存设置再下载** —— 不必再手动先点保存；校验失败或网络错会正确中断。
 - **geoip 目录建不出来时不再静默** —— 启动若无法创建该目录会打 WARN（常见于 Docker 下配置目录权限问题）；手动更新失败的 mkdir 报错带上路径与可操作提示。
+
+### Docker
+
+- **容器改为以 root 运行（去掉 `USER psp`）** —— 容器原以非 root（UID 10001）运行，但 docker-compose 绑定挂载的 `./config` 被 Docker 自动创建为 root 属主（从旧 root 时代镜像升级也遗留 root 属主），非 root 进程无法写入：**全新部署首次生成 config.yaml 即崩溃重启**，升级后也无法创建新目录（如 geoip）。改为 root 后绑定挂载始终可写，与 3X-UI / Cloudreve 的做法一致；`Dockerfile` 与 `Dockerfile.release`（发布的多架构镜像）同步修改，命名卷数据目录不受影响。代价：宿主机看到的 `./config` 文件为 root 属主（手动编辑需 sudo），但面板设置基本走 UI——此举回退了 v3.6.3 引入的非 root 加固（审计 LOW 项），换取开箱即用的部署。
 
 ## v3.6.3-beta.3 — 2026-06-01
 

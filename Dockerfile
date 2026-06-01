@@ -38,8 +38,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build -trimpath \
 # internal/seed/) and released into /app/config on first start, so no
 # `/app/defaults/` baking or entrypoint shim is needed.
 FROM alpine:3.20
-RUN apk add --no-cache ca-certificates tzdata \
- && adduser -D -H -u 10001 psp
+RUN apk add --no-cache ca-certificates tzdata
 # Pin the panel process to UTC so Go's time.Local matches the
 # DB DSN's loc=UTC. The configurable "panel timezone" (Asia/Shanghai
 # etc.) is applied per-call via paneltz.Now for business calendar
@@ -47,10 +46,10 @@ RUN apk add --no-cache ca-certificates tzdata \
 ENV TZ=UTC
 WORKDIR /app
 COPY --from=go-builder /out/psp /app/psp
-RUN chmod +x /app/psp && mkdir -p /app/config /app/data && chown -R psp:psp /app
+RUN chmod +x /app/psp && mkdir -p /app/config /app/data
 EXPOSE 8788
-# Run as non-root (the panel listens on 8788 > 1024, so no privileged port is
-# needed). A bind-mounted /app/config or /app/data volume must be writable by
-# UID 10001.
-USER psp
+# Runs as root (no USER directive) so a bind-mounted /app/config — which Docker
+# auto-creates root-owned, and which the host owns — is always writable for
+# config.yaml generation, seed release, and the geoip dir. Same approach as the
+# 3X-UI / Cloudreve images. Keep this runtime stage in sync with Dockerfile.release.
 ENTRYPOINT ["/app/psp"]
