@@ -183,25 +183,15 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 		return nil, fmt.Errorf("load oidc config: %w", err)
 	}
 
-	repos := ports.Repos{
-		User:        mysqlRepos.User,
-		Group:       mysqlRepos.Group,
-		Node:        mysqlRepos.Node,
-		Separator:   mysqlRepos.Separator,
-		Ownership:   mysqlRepos.Ownership,
-		Traffic:     mysqlRepos.Traffic,
-		NodeTraffic: mysqlRepos.NodeTraffic,
-		Audit:       mysqlRepos.Audit,
-		SubLog:      mysqlRepos.SubLog,
-		SyncTask:    mysqlRepos.SyncTask,
-		RuleSet:     ruleSetRepo,
-		Template:    templateRepo,
-		XUIPanel:    mysqlRepos.XUIPanel,
-		Settings:    mysqlRepos.Settings,
-		Mail:        mysqlRepos.Mail,
-		SAMLConfig:  mysqlRepos.SAMLConfig,
-		OIDCConfig:  mysqlRepos.OIDCConfig,
-	}
+	// Start from the full mysql repo set and override only the two YAML-backed
+	// repos (rule sets / templates live in config/*.yaml, not the DB). The old
+	// field-by-field copy here was a second source of truth that silently
+	// dropped a newly-added repo — AuthEvent ended up nil, so the auth-events
+	// handler panicked (nil-interface method call) and login emit no-op'd.
+	// Deriving from mysqlRepos makes that whole class of omission impossible.
+	repos := mysqlRepos
+	repos.RuleSet = ruleSetRepo
+	repos.Template = templateRepo
 
 	// Admin bootstrap is deferred to Run() — see the comment on App.repos.
 	// We must NOT print the initial password before knowing the listen
