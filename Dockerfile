@@ -35,10 +35,18 @@ RUN CGO_ENABLED=0 GOOS=linux go build -trimpath \
 
 # Stage 3 — minimal runtime.
 # Default rulesets and templates are embedded into the binary (see
-# internal/seed/) and released into /app/config on first start, so no
-# `/app/defaults/` baking or entrypoint shim is needed.
+# internal/seed/) and released into /app/config on first start.
+#
+# The image STARTS as root and docker-entrypoint.sh self-heals ownership of the
+# bind-mounted /app/config (Docker never chowns a bind mount, so a fresh or
+# upgrade-leftover root-owned ./config would otherwise make the non-root UID
+# crash-loop), then drops to non-root via su-exec before exec'ing the panel.
+# su-exec is Alpine's ~10KB gosu equivalent; PUID/PGID (default 10001) align the
+# runtime UID with the host owner so ./config stays host-editable.
+# NOTE: keep this runtime stage in sync with Dockerfile.release (drift guard).
 FROM alpine:3.20
-RUN apk add --no-cache ca-certificates tzdata
+RUN apk add --no-cache ca-certificates tzdata su-exec \
+ && adduser -D -H -u 10001 psp
 # Pin the panel process to UTC so Go's time.Local matches the
 # DB DSN's loc=UTC. The configurable "panel timezone" (Asia/Shanghai
 # etc.) is applied per-call via paneltz.Now for business calendar
@@ -46,10 +54,12 @@ RUN apk add --no-cache ca-certificates tzdata
 ENV TZ=UTC
 WORKDIR /app
 COPY --from=go-builder /out/psp /app/psp
-RUN chmod +x /app/psp && mkdir -p /app/config /app/data
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /app/psp /usr/local/bin/docker-entrypoint.sh \
+ && mkdir -p /app/config /app/data && chown -R psp:psp /app
 EXPOSE 8788
-# Runs as root (no USER directive) so a bind-mounted /app/config — which Docker
-# auto-creates root-owned, and which the host owns — is always writable for
-# config.yaml generation, seed release, and the geoip dir. Same approach as the
-# 3X-UI / Cloudreve images. Keep this runtime stage in sync with Dockerfile.release.
-ENTRYPOINT ["/app/psp"]
+# The long-lived process runs non-root (UID 10001 by default; override via
+# PUID/PGID). The entrypoint starts as root only to chown the mounts, then
+# su-exec drops privileges. Set PUID/PGID to your host `id -u`/`id -g` for
+# sudo-free host edits of ./config.
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]

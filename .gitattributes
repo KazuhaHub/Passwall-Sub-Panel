@@ -1,0 +1,4 @@
+# Shell scripts MUST stay LF — they run inside Linux containers, and a CRLF
+# shebang (`#!/bin/sh\r`) makes the kernel fail to find the interpreter.
+*.sh text eol=lf
+docker-entrypoint.sh text eol=lf

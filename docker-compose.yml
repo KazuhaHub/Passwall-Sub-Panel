@@ -29,6 +29,14 @@ services:
       # on the host.
       PSP_CONFIG: /app/config/config.yaml
 
+      # The container starts as root, self-heals ownership of ./config (so no
+      # manual chown is needed on fresh OR upgrade deploys), then drops to this
+      # UID/GID for the actual panel process (default 10001 = non-root). Set
+      # these to your host `id -u` / `id -g` so ./config files end up owned by
+      # YOU and stay editable on the host without sudo:
+      # PUID: "1000"
+      # PGID: "1000"
+
       # Reverse-proxy CIDRs allowed to set X-Forwarded-For. Only relevant if
       # PSP sits behind Nginx/Caddy on a non-loopback address. Default below
       # covers a local reverse proxy; uncomment and override for other setups.
