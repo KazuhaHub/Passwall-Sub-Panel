@@ -4,10 +4,12 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
-## v3.7.0-beta.1 — 2026-06-01
+## v3.6.3-beta.1 — 2026-06-01
 
-minor 版首个 beta:新增「访问日志 IP 地区显示」功能。本 beta 同时含尚未单独发布的
-v3.6.3 审计修复批次(见下方 v3.6.3 段)—— 自 v3.6.2 以来的全部改动都在这一个 beta 里。
+自 v3.6.2 以来的全部改动打包进这个 beta:① 新功能「访问日志 IP 地区显示」(离线 mmdb);
+② 全面审计(19 维度 / 对抗式验证)后的修复批次 —— 1 个 HIGH(进程崩溃路径)+ 9 个 MEDIUM
++ 一组高性价比 LOW,全部补了回归 / drift 测试;③ 流量图表 / 存储管线的修复(下方小节)。
+无 schema 破坏性变更。
 
 ### Added
 
@@ -28,12 +30,6 @@ v3.6.3 审计修复批次(见下方 v3.6.3 段)—— 自 v3.6.2 以来的全部
     ~99% 全球),城市级一般、亚洲最差**,且代理出口 IP 会解析到机房——UI 把城市标为"仅供参考",
     国家/省作权威。各数据源的署名要求在设置页注明。
   - 新增依赖 `oschwald/maxminddb-golang`(纯 Go,无 CGO)。
-
-## v3.6.3 — 2026-05-31
-
-全面审计（19 维度 / 对抗式验证）后的修复批次。patch release:1 个 HIGH（进程崩溃路径）
-+ 9 个 MEDIUM + 一组高性价比 LOW，无 schema 破坏性变更，全部补了回归 / drift 测试。
-另含一项流量图表 / 存储管线的修复（见下方独立小节）。
 
 ### 流量图表 / 存储管线（修好一个没做完的迁移）
 
