@@ -12,6 +12,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/log"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/transport/http/middleware"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/version"
 )
 
@@ -611,13 +612,13 @@ func (h *AdminServersHandler) writeSmokeAudit(ctx context.Context, action string
 	})
 }
 
-// actorFromGin extracts the admin username from gin context (set by auth
-// middleware). Falls back to "admin" if not present.
+// actorFromGin extracts the acting admin's UPN from the request's JWT claims
+// for the audit trail. The auth middleware sets the parsed Claims (not a bare
+// "upn" context key — reading that always missed and logged everyone as
+// "admin"), so go through ClaimsFrom like the audit middleware does.
 func actorFromGin(c *gin.Context) string {
-	if v, ok := c.Get("upn"); ok {
-		if s, ok := v.(string); ok && s != "" {
-			return s
-		}
+	if claims := middleware.ClaimsFrom(c); claims != nil && claims.UPN != "" {
+		return claims.UPN
 	}
 	return "admin"
 }

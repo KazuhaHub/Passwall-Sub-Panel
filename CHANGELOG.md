@@ -4,6 +4,17 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## v3.6.3-beta.14 — 2026-06-02
+
+全量 review backlog LOW 清扫(清晰、低风险项),全程 TDD。
+
+### Fixed
+
+- **operator 越权看到 admin/operator 账号用量** —— `/api/admin/traffic/top`(Top-N 用量)未按角色过滤,把 admin/operator 账号的 UPN + 用量泄给 operator(单用户接口早有 `operatorMayView` 防护,这个列表漏了)。operator 调用时跳过 admin/operator 行(用已加载的角色判断,无额外查询)。
+- **升级/服务器审计 actor 永远记成 "admin"** —— `actorFromGin` 读了认证中间件从不设置的 `c.Get("upn")` → 总是 fallback "admin",审计追溯不到真实操作者。改为经 `ClaimsFrom(c)` 取 `claims.UPN`(同审计中间件)。
+- **每次启动全表重写流量计数** —— `backfillTrafficCounterNulls` 的 UPDATE 无 WHERE → 每次 boot 重写 users + nodes 全表(写放大,随部署规模增长)。加 `WHERE ... IS NULL`,首次回填后即 no-op。
+- **disable/enable 邮件 RecordSent 错误被吞** —— 去重依据该行,静默失败会导致同一去重窗口内重复发信。改为记 WARN 日志。
+
 ## v3.6.3-beta.13 — 2026-06-02
 
 全量 review backlog 第四批(同步 / 并发 / 越权防护),全程 TDD。

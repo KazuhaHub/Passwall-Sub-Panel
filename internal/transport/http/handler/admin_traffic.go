@@ -77,6 +77,13 @@ func (h *AdminTrafficHandler) Top(c *gin.Context) {
 		n = 20
 	}
 
+	// Operators may not see admin/operator accounts (mirrors operatorMayView on
+	// the single-user endpoints — without this, the Top list leaks those
+	// accounts' UPN + usage to an operator). Checked once via the caller's role;
+	// the per-user role comes from the already-loaded rows, so no extra queries.
+	claims := middleware.ClaimsFrom(c)
+	hideStaff := claims != nil && claims.Role == domain.RoleOperator
+
 	// Walk every user in pages, but batch the per-page report fetch
 	// through traffic.ReportForUsers — one LatestForUsers +
 	// one LastBeforeForUsers per page instead of 2 SELECTs per user.
@@ -93,6 +100,9 @@ func (h *AdminTrafficHandler) Top(c *gin.Context) {
 		}
 		reports := h.traffic.ReportForUsers(c.Request.Context(), users)
 		for _, u := range users {
+			if hideStaff && (u.Role == domain.RoleAdmin || u.Role == domain.RoleOperator) {
+				continue
+			}
 			report := reports[u.ID]
 			if report == nil {
 				continue

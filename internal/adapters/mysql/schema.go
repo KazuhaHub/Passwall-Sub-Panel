@@ -1193,6 +1193,11 @@ func cleanupLegacyState(db *gorm.DB) error {
 	return nil
 }
 
+// backfillTrafficCounterNulls zeroes any NULL traffic counters left by columns
+// that were added before they had a default. The WHERE clauses make this a
+// no-op once every row is non-NULL (the common case) — without them the UPDATE
+// rewrote EVERY users + nodes row on every single boot (pure write amplification
+// that grows with the deployment).
 func backfillTrafficCounterNulls(db *gorm.DB) error {
 	if err := db.Exec(`
 UPDATE users
@@ -1200,6 +1205,7 @@ SET
 	lifetime_up_bytes = COALESCE(lifetime_up_bytes, 0),
 	lifetime_down_bytes = COALESCE(lifetime_down_bytes, 0),
 	lifetime_total_bytes = COALESCE(lifetime_total_bytes, 0)
+WHERE lifetime_up_bytes IS NULL OR lifetime_down_bytes IS NULL OR lifetime_total_bytes IS NULL
 `).Error; err != nil {
 		return err
 	}
@@ -1212,6 +1218,8 @@ SET
 	last_traffic_up_bytes = COALESCE(last_traffic_up_bytes, 0),
 	last_traffic_down_bytes = COALESCE(last_traffic_down_bytes, 0),
 	last_traffic_total_bytes = COALESCE(last_traffic_total_bytes, 0)
+WHERE lifetime_up_bytes IS NULL OR lifetime_down_bytes IS NULL OR lifetime_total_bytes IS NULL
+	OR last_traffic_up_bytes IS NULL OR last_traffic_down_bytes IS NULL OR last_traffic_total_bytes IS NULL
 `).Error; err != nil {
 		return err
 	}

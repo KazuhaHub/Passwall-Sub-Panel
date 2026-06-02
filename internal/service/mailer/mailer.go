@@ -502,7 +502,12 @@ func (s *Service) SendAccountDisabledNotification(ctx context.Context, u *domain
 		s.enqueueMailNotify(ctx, u.ID, "account_disabled", disableReason, disableDetail)
 		return err
 	}
-	_ = s.repo.RecordSent(ctx, u.ID, domain.MailReminderAccountDisable, windowKey, to)
+	// Log a RecordSent failure instead of swallowing it: the HasSent dedup guard
+	// keys off this row, so a silent failure lets the same disable/enable mail
+	// resend within the dedup window.
+	if err := s.repo.RecordSent(ctx, u.ID, domain.MailReminderAccountDisable, windowKey, to); err != nil {
+		log.Warn("mail record-sent", "user_id", u.ID, "kind", domain.MailReminderAccountDisable, "err", err)
+	}
 	return nil
 }
 
@@ -579,7 +584,9 @@ func (s *Service) SendAccountEnabledNotification(ctx context.Context, u *domain.
 		s.enqueueMailNotify(ctx, u.ID, "account_enabled", enableReason, enableDetail)
 		return err
 	}
-	_ = s.repo.RecordSent(ctx, u.ID, domain.MailReminderAccountEnable, windowKey, to)
+	if err := s.repo.RecordSent(ctx, u.ID, domain.MailReminderAccountEnable, windowKey, to); err != nil {
+		log.Warn("mail record-sent", "user_id", u.ID, "kind", domain.MailReminderAccountEnable, "err", err)
+	}
 	return nil
 }
 
