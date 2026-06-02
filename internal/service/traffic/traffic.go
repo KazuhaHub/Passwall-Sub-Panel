@@ -379,7 +379,10 @@ func (s *Service) PollOnce(ctx context.Context) error {
 				panelMu.Unlock()
 				return
 			}
-			listed, lerr := c.ListInbounds(ctx)
+			// Slim list: the poll only consumes clientStats, so it skips the
+			// per-client settings blobs (uuid/flow/password) the full /list
+			// carries — a big win on panels with thousands of clients.
+			listed, lerr := c.ListInboundsSlim(ctx)
 			stats := make(map[int][]ports.ClientTraffic, len(listed))
 			for _, inb := range listed {
 				stats[inb.ID] = inb.ClientStats

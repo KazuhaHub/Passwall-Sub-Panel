@@ -290,8 +290,24 @@ func snippet(s string, n int) string {
 // --- Inbound ---
 
 func (c *Client) ListInbounds(ctx context.Context) ([]ports.Inbound, error) {
+	return c.listInbounds(ctx, "/panel/api/inbounds/list")
+}
+
+// ListInboundsSlim hits /panel/api/inbounds/list/slim — identical per-inbound
+// shape (and full clientStats: up/down/total/email/lastOnline/...) but with
+// settings.clients[] trimmed to {email,enable} and clientStats not enriched
+// with uuid/subId. The traffic poll only reads clientStats, so the slim
+// payload carries everything it needs while dropping the per-client settings
+// blobs that dominate the response on panels with thousands of clients. The
+// slim route is live-verified present on the min_xui=3.2.0 floor, so there's
+// no version fallback (consistent with PSP's hard-cut compat model).
+func (c *Client) ListInboundsSlim(ctx context.Context) ([]ports.Inbound, error) {
+	return c.listInbounds(ctx, "/panel/api/inbounds/list/slim")
+}
+
+func (c *Client) listInbounds(ctx context.Context, path string) ([]ports.Inbound, error) {
 	var raws []rawInbound
-	if err := c.doJSON(ctx, http.MethodGet, "/panel/api/inbounds/list", nil, &raws); err != nil {
+	if err := c.doJSON(ctx, http.MethodGet, path, nil, &raws); err != nil {
 		return nil, err
 	}
 	out := make([]ports.Inbound, len(raws))
@@ -406,6 +422,63 @@ func (c *Client) DelClientByEmail(ctx context.Context, inboundID int, email stri
 	return c.doJSON(ctx, http.MethodPost, path, nil, nil)
 }
 
+// BulkAddToInbound creates many clients on one inbound via POST
+// /panel/api/clients/bulkCreate. The body is a JSON array of {client,
+// inboundIds} items (the same per-item shape /clients/add accepts); the panel
+// processes them sequentially, restarts xray at most once, and returns
+// {created, skipped:[{email,reason}]}. Per-protocol secrets follow the same
+// rules as AddClient (buildClientJSON). An empty specs slice is a no-op.
+func (c *Client) BulkAddToInbound(ctx context.Context, inboundID int, specs []ports.ClientSpec) (ports.BulkAddResult, error) {
+	if len(specs) == 0 {
+		return ports.BulkAddResult{}, nil
+	}
+	items := make([]map[string]any, 0, len(specs))
+	for _, s := range specs {
+		clientJSON, err := buildClientJSON(s)
+		if err != nil {
+			return ports.BulkAddResult{}, err
+		}
+		items = append(items, map[string]any{
+			"client":     json.RawMessage(clientJSON),
+			"inboundIds": []int{inboundID},
+		})
+	}
+	var out struct {
+		Created int `json:"created"`
+		Skipped []struct {
+			Email  string `json:"email"`
+			Reason string `json:"reason"`
+		} `json:"skipped"`
+	}
+	if err := c.doJSON(ctx, http.MethodPost, "/panel/api/clients/bulkCreate", items, &out); err != nil {
+		return ports.BulkAddResult{}, err
+	}
+	res := ports.BulkAddResult{Created: out.Created}
+	for _, s := range out.Skipped {
+		res.Skipped = append(res.Skipped, ports.BulkSkip{Email: s.Email, Reason: s.Reason})
+	}
+	return res, nil
+}
+
+// BulkDelByEmail deletes many clients by email via POST
+// /panel/api/clients/bulkDel. The body is {emails, keepTraffic:false} (a bare
+// array is rejected — the panel decodes into a struct). Emails already absent
+// upstream are silently skipped (not counted). Returns the panel-reported
+// deleted count. An empty emails slice is a no-op.
+func (c *Client) BulkDelByEmail(ctx context.Context, emails []string) (int, error) {
+	if len(emails) == 0 {
+		return 0, nil
+	}
+	body := map[string]any{"emails": emails, "keepTraffic": false}
+	var out struct {
+		Deleted int `json:"deleted"`
+	}
+	if err := c.doJSON(ctx, http.MethodPost, "/panel/api/clients/bulkDel", body, &out); err != nil {
+		return 0, err
+	}
+	return out.Deleted, nil
+}
+
 // GetServerStatus hits /panel/api/server/status and returns the
 // version-identity subset (panel + xray). 3X-UI 3.1.0 reports panelVersion
 // as "3.1.0" while /panel/api/server/getPanelUpdateInfo reports the same
@@ -499,19 +572,21 @@ func (c *Client) GetXrayVersionList(ctx context.Context) ([]string, error) {
 	return versions, nil
 }
 
-// GetInboundClients fetches the inbound and decodes settings.clients[] into
-// a normalised slice. Returns empty if the inbound has no clients defined.
-func (c *Client) GetInboundClients(ctx context.Context, inboundID int) ([]ports.ClientDetail, error) {
-	inb, err := c.GetInbound(ctx, inboundID)
-	if err != nil {
-		return nil, err
+// GetClient fetches one client by its panel-wide email via GET
+// /panel/api/clients/get/{email}. The obj is {client:{...}, inboundIds:[...]}.
+// Returns (nil, nil) when no such client exists — 3.2.x answers HTTP 200 +
+// {success:false, msg:" (record not found)", obj:null}, which doJSON surfaces
+// as a plain error; we recognise the not-found shape and report absence as a
+// clean nil so callers (presence checks, claim-by-email) don't treat it as a
+// transport failure. ClientDetail.ID is mapped from client.uuid (the xray
+// client id), NOT client.id (the numeric DB row id).
+func (c *Client) GetClient(ctx context.Context, email string) (*ports.ClientDetail, error) {
+	if email == "" {
+		return nil, fmt.Errorf("GetClient: email is required")
 	}
-	if inb.Settings == "" {
-		return nil, nil
-	}
-	var s struct {
-		Clients []struct {
-			ID         string `json:"id"`
+	var out struct {
+		Client struct {
+			UUID       string `json:"uuid"`
 			Email      string `json:"email"`
 			Enable     *bool  `json:"enable"`
 			Flow       string `json:"flow"`
@@ -519,29 +594,42 @@ func (c *Client) GetInboundClients(ctx context.Context, inboundID int) ([]ports.
 			Auth       string `json:"auth"`
 			ExpiryTime int64  `json:"expiryTime"`
 			TotalGB    int64  `json:"totalGB"`
-		} `json:"clients"`
+		} `json:"client"`
+		InboundIDs []int `json:"inboundIds"`
 	}
-	if err := json.Unmarshal([]byte(inb.Settings), &s); err != nil {
-		return nil, fmt.Errorf("decode inbound settings: %w", err)
-	}
-	out := make([]ports.ClientDetail, len(s.Clients))
-	for i, src := range s.Clients {
-		enable := true
-		if src.Enable != nil {
-			enable = *src.Enable
+	path := "/panel/api/clients/get/" + url.PathEscape(email)
+	if err := c.doJSON(ctx, http.MethodGet, path, nil, &out); err != nil {
+		if isClientNotFoundMsg(err.Error()) {
+			return nil, nil
 		}
-		out[i] = ports.ClientDetail{
-			ID:         src.ID,
-			Email:      src.Email,
-			Enable:     enable,
-			Flow:       src.Flow,
-			Password:   src.Password,
-			Auth:       src.Auth,
-			ExpiryTime: src.ExpiryTime,
-			TotalGB:    src.TotalGB,
-		}
+		return nil, err
 	}
-	return out, nil
+	enable := true
+	if out.Client.Enable != nil {
+		enable = *out.Client.Enable
+	}
+	return &ports.ClientDetail{
+		ID:         out.Client.UUID,
+		Email:      out.Client.Email,
+		Enable:     enable,
+		Flow:       out.Client.Flow,
+		Password:   out.Client.Password,
+		Auth:       out.Client.Auth,
+		ExpiryTime: out.Client.ExpiryTime,
+		TotalGB:    out.Client.TotalGB,
+	}, nil
+}
+
+// isClientNotFoundMsg reports whether a 3X-UI error message describes a
+// missing client. /clients/get answers a missing email with GORM's sentinel
+// " (record not found)"; update/del report "client not found" / "not found in
+// inbound". Substring match mirrors isPermanentPanelMsg — fragile across
+// locales/versions, but it's the only signal the panel gives.
+func isClientNotFoundMsg(s string) bool {
+	m := strings.ToLower(s)
+	return strings.Contains(m, "record not found") ||
+		strings.Contains(m, "client not found") ||
+		strings.Contains(m, "not found in inbound")
 }
 
 // --- helpers ---

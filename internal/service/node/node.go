@@ -48,6 +48,11 @@ type ClientSyncer interface {
 	// pushClientConfigToAll will set the correct value.
 	AddClientToInbound(ctx context.Context, userID int64, panelID int64, inboundID int,
 		protocol domain.Protocol, ssMethod, userUUID, email, flow string, expireTime, totalGB int64) error
+	// BulkAddClientsToInbound adds many clients to ONE inbound in a single
+	// 3X-UI bulkCreate call (one Xray restart instead of N) and records
+	// ownership for each, preserving the duplicate-adopt rule. Used when
+	// attaching a node and enrolling every eligible group member at once.
+	BulkAddClientsToInbound(ctx context.Context, panelID int64, inboundID int, reqs []ports.BulkClientAdd) (int, error)
 }
 
 type Service struct {
@@ -861,7 +866,16 @@ func (s *Service) syncExistingUsersToNode(ctx context.Context, n *domain.Node) e
 	}
 
 	rules := s.emailRules(ctx)
-	pushed, considered := 0, 0
+	// Collect one request per eligible member, deduped by email (a user can be
+	// in more than one matching group), then enroll the whole set in a single
+	// bulkCreate — one Xray restart instead of one per member. floor 0 =
+	// unlimited on the 3X-UI side; the next traffic-poll cycle's
+	// pushClientConfigToAll sets the real floor (~5 min after node creation).
+	// Adding TrafficUsageReader to node.Service would invert the dependency
+	// graph for marginal benefit.
+	seen := make(map[string]bool)
+	var reqs []ports.BulkClientAdd
+	considered := 0
 	for _, g := range groups {
 		if !group.Matches(n, g.TagFilter) {
 			continue
@@ -877,22 +891,32 @@ func (s *Service) syncExistingUsersToNode(ctx context.Context, n *domain.Node) e
 				continue
 			}
 			email := u.ClientEmail(n.ID, rules)
+			if seen[email] {
+				continue
+			}
+			seen[email] = true
 			var expireTime int64
 			if u.ExpireAt != nil {
 				expireTime = u.ExpireAt.UnixMilli()
 			}
-			// floor 0 = unlimited on 3X-UI side; the next traffic-poll
-			// cycle's pushClientConfigToAll will set the real floor (~5 min
-			// after node creation). Adding TrafficUsageReader to node.Service
-			// would invert the dependency graph for marginal benefit.
-			if err := s.syncer.AddClientToInbound(ctx, u.ID, n.PanelID, n.InboundID,
-				info.protocol, info.ssMethod, u.UUID, email, info.flow, expireTime, 0); err != nil {
-				log.Warn("new-node sync add client",
-					"user_id", u.ID, "node_id", n.ID, "err", err)
-				continue
-			}
-			pushed++
+			reqs = append(reqs, ports.BulkClientAdd{
+				UserID:     u.ID,
+				Protocol:   info.protocol,
+				SSMethod:   info.ssMethod,
+				UserUUID:   u.UUID,
+				Email:      email,
+				Flow:       info.flow,
+				ExpireTime: expireTime,
+				TotalGB:    0,
+			})
 		}
+	}
+	pushed, err := s.syncer.BulkAddClientsToInbound(ctx, n.PanelID, n.InboundID, reqs)
+	if err != nil {
+		// Per-member adopt/skip detail is logged inside the syncer; here we
+		// only note the batch didn't fully land. Reconcile axis-B heals any
+		// member left unenrolled within the next cycle.
+		log.Warn("new-node sync bulk add", "node_id", n.ID, "err", err)
 	}
 	log.Info("synced existing users on node", "node_id", n.ID,
 		"considered_members", considered, "pushed", pushed)

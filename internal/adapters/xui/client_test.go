@@ -259,3 +259,164 @@ func TestAddClientDuplicateIsErrValidation(t *testing.T) {
 		t.Fatalf("duplicate add must wrap ErrValidation (fail-fast), got %v", err)
 	}
 }
+
+// --- 3.2.x slim list / clients-get / bulk adapter contract ---
+
+func TestListInboundsSlimHitsSlimPath(t *testing.T) {
+	var got capturedReq
+	c := captureReq(t, `{"success":true,"obj":[]}`, &got)
+	if _, err := c.ListInboundsSlim(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got.method != http.MethodGet || got.path != "/panel/api/inbounds/list/slim" {
+		t.Fatalf("method/path = %s %s, want GET /panel/api/inbounds/list/slim", got.method, got.path)
+	}
+}
+
+// GetClient maps the {client:{...},inboundIds:[]} envelope: ID comes from
+// client.uuid (the xray client id), NOT client.id (the numeric DB row id).
+func TestGetClientParsesNestedClientUUID(t *testing.T) {
+	var got capturedReq
+	reply := `{"success":true,"obj":{"client":{"id":42,"uuid":"the-uuid","email":"u3-n9@psp.local","enable":true,"flow":"xtls-rprx-vision","password":"pw","auth":"au","expiryTime":111,"totalGB":222},"inboundIds":[1]}}`
+	c := captureReq(t, reply, &got)
+	cd, err := c.GetClient(context.Background(), "u3-n9@psp.local")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.method != http.MethodGet || got.path != "/panel/api/clients/get/u3-n9@psp.local" {
+		t.Fatalf("method/path = %s %s", got.method, got.path)
+	}
+	if cd == nil {
+		t.Fatal("want a client, got nil")
+	}
+	if cd.ID != "the-uuid" {
+		t.Fatalf("ID = %q, want the uuid (not the numeric DB id)", cd.ID)
+	}
+	if cd.Email != "u3-n9@psp.local" || !cd.Enable || cd.Flow != "xtls-rprx-vision" ||
+		cd.Password != "pw" || cd.Auth != "au" || cd.ExpiryTime != 111 || cd.TotalGB != 222 {
+		t.Fatalf("client fields not mapped: %#v", *cd)
+	}
+}
+
+// A missing email comes back as HTTP 200 + {success:false," (record not
+// found)"}; GetClient must report it as (nil, nil), not an error.
+func TestGetClientNotFoundReturnsNilNil(t *testing.T) {
+	var got capturedReq
+	c := captureReq(t, `{"success":false,"msg":" (record not found)","obj":null}`, &got)
+	cd, err := c.GetClient(context.Background(), "ghost@psp.local")
+	if err != nil {
+		t.Fatalf("not-found must be (nil,nil), got err %v", err)
+	}
+	if cd != nil {
+		t.Fatalf("not-found must be (nil,nil), got %#v", cd)
+	}
+}
+
+func TestGetClientEmptyEmailErrorsBeforeHTTP(t *testing.T) {
+	var got capturedReq
+	c := captureReq(t, `{"success":true}`, &got)
+	if _, err := c.GetClient(context.Background(), ""); err == nil {
+		t.Fatal("empty email must error before any HTTP call")
+	}
+	if got.method != "" {
+		t.Fatalf("no HTTP call expected, got %s %s", got.method, got.path)
+	}
+}
+
+// bulkCreate body is a JSON array of {client,inboundIds}; the result parses
+// created + skipped[{email,reason}].
+func TestBulkAddToInboundPostsArrayAndParsesResult(t *testing.T) {
+	var got capturedReq
+	reply := `{"success":true,"obj":{"created":1,"skipped":[{"email":"dup@psp.local","reason":"email already in use: dup@psp.local"}]}}`
+	c := captureReq(t, reply, &got)
+	res, err := c.BulkAddToInbound(context.Background(), 7, []ports.ClientSpec{
+		{ID: "uuid-1", Email: "new@psp.local"},
+		{ID: "uuid-2", Email: "dup@psp.local"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.method != http.MethodPost || got.path != "/panel/api/clients/bulkCreate" {
+		t.Fatalf("method/path = %s %s", got.method, got.path)
+	}
+	var items []struct {
+		Client     map[string]any `json:"client"`
+		InboundIDs []int          `json:"inboundIds"`
+	}
+	if err := json.Unmarshal([]byte(got.body), &items); err != nil {
+		t.Fatalf("body is not a JSON array: %v (%s)", err, got.body)
+	}
+	if len(items) != 2 || len(items[0].InboundIDs) != 1 || items[0].InboundIDs[0] != 7 {
+		t.Fatalf("items = %#v", items)
+	}
+	if items[0].Client["email"] != "new@psp.local" {
+		t.Fatalf("item[0] client = %#v", items[0].Client)
+	}
+	if res.Created != 1 {
+		t.Fatalf("Created = %d, want 1", res.Created)
+	}
+	if len(res.Skipped) != 1 || res.Skipped[0].Email != "dup@psp.local" ||
+		!strings.Contains(res.Skipped[0].Reason, "already in use") {
+		t.Fatalf("Skipped = %#v", res.Skipped)
+	}
+}
+
+func TestBulkAddToInboundEmptyIsNoop(t *testing.T) {
+	var got capturedReq
+	c := captureReq(t, `{"success":true}`, &got)
+	res, err := c.BulkAddToInbound(context.Background(), 7, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.method != "" {
+		t.Fatalf("empty specs must not hit the API, got %s %s", got.method, got.path)
+	}
+	if res.Created != 0 || len(res.Skipped) != 0 {
+		t.Fatalf("want zero result, got %#v", res)
+	}
+}
+
+// bulkDel body must be {emails,keepTraffic} (a bare array is rejected by the
+// panel); keepTraffic is false so xray traffic rows are dropped.
+func TestBulkDelByEmailPostsEmailsObject(t *testing.T) {
+	var got capturedReq
+	c := captureReq(t, `{"success":true,"obj":{"deleted":2}}`, &got)
+	n, err := c.BulkDelByEmail(context.Background(), []string{"a@psp.local", "b@psp.local"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.method != http.MethodPost || got.path != "/panel/api/clients/bulkDel" {
+		t.Fatalf("method/path = %s %s", got.method, got.path)
+	}
+	var body struct {
+		Emails      []string `json:"emails"`
+		KeepTraffic bool     `json:"keepTraffic"`
+	}
+	if err := json.Unmarshal([]byte(got.body), &body); err != nil {
+		t.Fatalf("body not JSON object: %v (%s)", err, got.body)
+	}
+	if len(body.Emails) != 2 || body.Emails[0] != "a@psp.local" {
+		t.Fatalf("emails = %#v", body.Emails)
+	}
+	if body.KeepTraffic {
+		t.Fatal("keepTraffic must be false (drop traffic rows)")
+	}
+	if n != 2 {
+		t.Fatalf("deleted = %d, want 2", n)
+	}
+}
+
+func TestBulkDelByEmailEmptyIsNoop(t *testing.T) {
+	var got capturedReq
+	c := captureReq(t, `{"success":true}`, &got)
+	n, err := c.BulkDelByEmail(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.method != "" {
+		t.Fatalf("empty emails must not hit the API, got %s %s", got.method, got.path)
+	}
+	if n != 0 {
+		t.Fatalf("deleted = %d, want 0", n)
+	}
+}

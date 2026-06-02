@@ -12,6 +12,14 @@ import (
 type XUIClient interface {
 	// Inbound CRUD
 	ListInbounds(ctx context.Context) ([]Inbound, error)
+	// ListInboundsSlim hits /panel/api/inbounds/list/slim — same per-inbound
+	// shape and full clientStats (up/down/total/email/lastOnline/...) but with
+	// settings.clients[] stripped to {email,enable} and clientStats not enriched
+	// with uuid/subId. The traffic poll only consumes clientStats, so it uses
+	// this to keep the response small on panels with thousands of clients. Do
+	// NOT use it where settings.clients[] (uuid/flow/password) is needed —
+	// ListInbounds returns the full payload for those callers.
+	ListInboundsSlim(ctx context.Context) ([]Inbound, error)
 	GetInbound(ctx context.Context, id int) (*Inbound, error)
 	AddInbound(ctx context.Context, spec InboundSpec) (int, error)
 	UpdateInbound(ctx context.Context, id int, spec InboundSpec) error
@@ -33,11 +41,31 @@ type XUIClient interface {
 	UpdateClientWithInbound(ctx context.Context, inb *Inbound, clientUUID string, spec ClientSpec) error
 	DelClientByEmail(ctx context.Context, inboundID int, email string) error
 
-	// GetInboundClients returns the parsed client list from inbound.settings.
-	// Useful for the "claim existing client" admin flow where the panel
-	// needs the uuid associated with a particular email before recording
-	// ownership.
-	GetInboundClients(ctx context.Context, inboundID int) ([]ClientDetail, error)
+	// GetClient fetches one client by its panel-wide unique email via
+	// /panel/api/clients/get/{email}. Returns (nil, nil) when the panel has no
+	// such client (3.2.x answers HTTP 200 + success:false + " (record not
+	// found)"), so callers can treat absence as a normal end-state without an
+	// error. ClientDetail.ID carries the client's uuid (the xray client id),
+	// NOT the numeric DB row id. Replaces the old GetInboundClients +
+	// scan-by-email: PSP's email is unique within a panel (it encodes the node),
+	// so a by-email fetch is both sufficient and far cheaper than pulling a
+	// whole inbound's client list to find one entry.
+	GetClient(ctx context.Context, email string) (*ClientDetail, error)
+
+	// BulkAddToInbound creates many clients on one inbound in a single
+	// /panel/api/clients/bulkCreate call (one Xray restart instead of N). The
+	// panel processes items sequentially and returns how many were created plus
+	// per-email skip reasons — a duplicate email lands in Skipped with reason
+	// "email already in use", which the caller adopts (mirrors the single-add
+	// orphan-adoption path) rather than treating as a hard failure.
+	BulkAddToInbound(ctx context.Context, inboundID int, specs []ClientSpec) (BulkAddResult, error)
+
+	// BulkDelByEmail deletes many clients by their panel-wide email key in a
+	// single /panel/api/clients/bulkDel call (one Xray restart instead of N).
+	// keepTraffic is false — the xray traffic rows are dropped, matching
+	// DelClientByEmail; PSP keeps its own accounting. Emails already absent
+	// upstream are no-ops. Returns the count the panel reports as deleted.
+	BulkDelByEmail(ctx context.Context, emails []string) (int, error)
 
 	// GetServerStatus hits /panel/api/server/status. PSP only consumes the
 	// version-identity subset (panel/xray) for compatibility checks; the rest
@@ -99,8 +127,10 @@ type ServerStatus struct {
 	XrayState    string // "running" / "stop" / "error"
 }
 
-// ClientDetail is a normalised view of one inbound.settings.clients[] entry.
-// Fields not applicable to the underlying protocol come back zero.
+// ClientDetail is a normalised view of one client. ID carries the uuid (the
+// xray client id used by VLESS/VMess and as the path key elsewhere), NOT the
+// panel's numeric DB row id. Fields not applicable to the underlying protocol
+// come back zero.
 type ClientDetail struct {
 	ID         string // uuid (VLESS / VMess) or empty for SS
 	Email      string
@@ -109,6 +139,37 @@ type ClientDetail struct {
 	Password   string // Trojan / SS / SS-2022 user PSK
 	Auth       string // Hysteria2 per-client credential
 	ExpiryTime int64
+	TotalGB    int64
+}
+
+// BulkAddResult is the parsed obj of /panel/api/clients/bulkCreate. Created is
+// the number of brand-new clients; Skipped lists the items the panel did not
+// create, each with its reason (a duplicate email reports "email already in
+// use"). The two together account for every requested item.
+type BulkAddResult struct {
+	Created int
+	Skipped []BulkSkip
+}
+
+// BulkSkip is one entry the panel declined to create in a bulk call.
+type BulkSkip struct {
+	Email  string
+	Reason string
+}
+
+// BulkClientAdd is one client to create-and-own in a batched enrollment (e.g.
+// attaching a node and adding every eligible group member to its inbound). It
+// lives in ports so the node service can describe a bulk request without
+// importing the sync service. The protocol-specific secret is derived from
+// UserUUID by the sync layer; callers only supply the universal fields.
+type BulkClientAdd struct {
+	UserID     int64
+	Protocol   domain.Protocol
+	SSMethod   string
+	UserUUID   string
+	Email      string
+	Flow       string
+	ExpireTime int64
 	TotalGB    int64
 }
 

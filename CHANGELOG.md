@@ -4,6 +4,22 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## v3.6.3-beta.15 — 2026-06-02
+
+3X-UI 3.2.6 兼容性复核(已测上限 3.2.0→3.2.6),并采纳 3.2.x 新增的更省端点降低面板负载与 xray 重启次数。全程 TDD(slim / 批量加用户为严格 test-first)。
+
+### Changed
+
+- **兼容矩阵已测上限 3.2.0 → 3.2.6** —— 拿真实 3.2.6 面板复核 + live 写 smoke-test(add/update/del + bulkCreate/bulkDel),PSP 触及的全部 3X-UI 端点形状未变:`/inbounds/list` 仍返回 nested-object 的 settings(`flexJSON` 兼容),clientStats 仍带 `lastOnline` 等全字段,Bearer POST 不受 3.2.x 新增 CSRF 约束。3.2.5 的「unique subId per client」对 PSP 无影响——PSP 从不自带 subId,由面板服务端生成唯一值。只改 `docs/compat/v3.json` 的 `max_tested_xui`(`min_xui` 仍 3.2.0,硬切下限不动);该文件运行时从 `main` 按需拉取,**无需发版即对存量部署生效**,3.2.1–3.2.6 面板不再被误判为 untested。详见 [docs/3xui-compat.md](docs/3xui-compat.md)。
+
+### Improved
+
+- **流量轮询改用 `/inbounds/list/slim`** —— 轮询只消费 `clientStats`,slim 端点保留全部流量字段(`up/down/total/email/lastOnline/...`)却把 `settings.clients[]` 砍到 `{email,enable}`、不再下发每个客户端的 uuid/flow/password。面板有上千客户端时响应体显著变小,轮询更快。共享的 `ListInbounds`(render / reconcile / node 仍需完整 settings)不动,新增独立 `ListInboundsSlim` 只给轮询用。
+
+> **3.2.0 下限兼容性已在真实 3.2.0 面板(panelVersion 3.2.0、xray 26.5.9)端到端实测确认**:这四个新端点(`/inbounds/list/slim`、`/clients/get`、`/clients/bulkCreate`、`/clients/bulkDel`)在 3.2.0 均存在(slim 实测 HTTP 200),且 body/响应/not-found 文案与 3.2.6 逐字节一致。`min_xui` 保持 3.2.0,沿用硬切模型不加版本兜底。
+- **按 email 取单客户端走 `/clients/get/{email}`** —— `DelOwnedClient` / claim 流程原先拉整个 inbound 的 client 列表再线性扫一个 email;PSP 的 email 在面板内唯一(编码了 node),改为按 email 直接取单条,大 inbound 上省掉整列表拉取。缺失时面板回 `(record not found)`,适配层识别为「不存在」返回 `(nil,nil)`,调用方按正常的「已不在」处理。
+- **批量删/加客户端收成单次调用,xray 只重启一次** —— 删节点(`DelAllOwnedForInbound`)和删用户(`DelAllOwnedForUser`,按面板分组)原先逐个 `del` = N 次网络调用 + 最多 N 次 xray 重启,改走 `/clients/bulkDel` 一次完成;挂节点批量拉群成员(`syncExistingUsersToNode`)原先逐个 `add`,改走 `/clients/bulkCreate` 一次完成。bulkCreate 保留单条新增的「重复即收养」语义(面板把重复 email 报在 `skipped` 且 reason 含 "already in use",据此 upsert 归属而非失败);bulk 失败时不动归属行,任务重试整批收敛。
+
 ## v3.6.3-beta.14 — 2026-06-02
 
 全量 review backlog LOW 清扫(清晰、低风险项),全程 TDD。

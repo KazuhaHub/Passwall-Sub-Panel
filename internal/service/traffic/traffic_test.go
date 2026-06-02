@@ -1082,9 +1082,17 @@ func (p *fakeXUIPool) Remove(panelID int64) error       { return nil }
 
 type fakeXUIClient struct {
 	inbounds []ports.Inbound
+	// call counters so tests can assert which list endpoint the poll used.
+	listFullCalled int
+	listSlimCalled int
 }
 
 func (c *fakeXUIClient) ListInbounds(ctx context.Context) ([]ports.Inbound, error) {
+	c.listFullCalled++
+	return c.inbounds, nil
+}
+func (c *fakeXUIClient) ListInboundsSlim(ctx context.Context) ([]ports.Inbound, error) {
+	c.listSlimCalled++
 	return c.inbounds, nil
 }
 func (c *fakeXUIClient) GetInbound(ctx context.Context, id int) (*ports.Inbound, error) {
@@ -1112,8 +1120,14 @@ func (c *fakeXUIClient) UpdateClientWithInbound(ctx context.Context, inb *ports.
 func (c *fakeXUIClient) DelClientByEmail(ctx context.Context, inboundID int, email string) error {
 	return nil
 }
-func (c *fakeXUIClient) GetInboundClients(ctx context.Context, inboundID int) ([]ports.ClientDetail, error) {
+func (c *fakeXUIClient) GetClient(ctx context.Context, email string) (*ports.ClientDetail, error) {
 	return nil, nil
+}
+func (c *fakeXUIClient) BulkAddToInbound(ctx context.Context, inboundID int, specs []ports.ClientSpec) (ports.BulkAddResult, error) {
+	return ports.BulkAddResult{}, nil
+}
+func (c *fakeXUIClient) BulkDelByEmail(ctx context.Context, emails []string) (int, error) {
+	return 0, nil
 }
 func (c *fakeXUIClient) GetServerStatus(ctx context.Context) (*ports.ServerStatus, error) {
 	return &ports.ServerStatus{PanelVersion: "3.1.0", XrayVersion: "26.5.9", XrayState: "running"}, nil
@@ -1467,6 +1481,32 @@ func TestPollOnceBatchesPerCycleWrites(t *testing.T) {
 		if got := users.users[uid].LifetimeTotalBytes; got != wantPerUser {
 			t.Errorf("user %d LifetimeTotalBytes = %d, want %d (batch flush did not land)", uid, got, wantPerUser)
 		}
+	}
+}
+
+// PollOnce must fetch traffic via the slim list endpoint — clientStats is the
+// only thing it consumes, and the full /list payload's settings.clients[]
+// blobs are dead weight on panels with thousands of clients.
+func TestPollOnceUsesSlimList(t *testing.T) {
+	email := "u1-c0@example.test"
+	users := &fakeUserRepo{users: map[int64]*domain.User{1: {ID: 1, Enabled: true}}}
+	ownership := &fakeOwnershipRepo{byUser: map[int64][]*domain.XUIClientEntry{
+		1: {{ID: 1, UserID: 1, PanelID: 10, InboundID: 20, ClientEmail: email, CreatedAt: time.Now()}},
+	}}
+	client := &fakeXUIClient{inbounds: []ports.Inbound{
+		{ID: 20, ClientStats: []ports.ClientTraffic{{Email: email, Up: 1, Down: 2}}},
+	}}
+	pool := &fakeXUIPool{clients: map[int64]ports.XUIClient{10: client}}
+	svc := New(users, ownership, &fakeTrafficRepo{}, nil, nil, pool, &fakeDisabler{})
+
+	if err := svc.PollOnce(context.Background()); err != nil {
+		t.Fatalf("PollOnce: %v", err)
+	}
+	if client.listSlimCalled == 0 {
+		t.Fatalf("PollOnce must fetch traffic via ListInboundsSlim, slim calls = %d", client.listSlimCalled)
+	}
+	if client.listFullCalled != 0 {
+		t.Fatalf("PollOnce must NOT use the full ListInbounds (slim is enough), full calls = %d", client.listFullCalled)
 	}
 }
 

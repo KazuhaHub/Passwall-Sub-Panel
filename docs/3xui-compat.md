@@ -9,7 +9,7 @@ PSP 通过 `/panel/api/*` 对接 3X-UI 面板。本文档维护两件事：
 
 | PSP 版本 | 最低 3X-UI | 已实测通过 | 备注 |
 |---|---|---|---|
-| **v3.6.2+** | **3.2.0** | 3.2.0 | client 适配迁到一级 `/clients/*` API,**硬切 ≥ 3.2.0**,见下文 |
+| **v3.6.2+** | **3.2.0** | 3.2.6 | client 适配迁到一级 `/clients/*` API,**硬切 ≥ 3.2.0**;已测上限 2026-06-02 抬到 3.2.6,见下文 |
 | v3.6.0 – v3.6.1 | 3.1.0 | 3.1.0 | 仍走 inbound-scoped 端点;别跑在 3.2.0 上,先升 PSP 到 v3.6.2 |
 | v3.5.1 – v3.5.x | 3.1.0 | 3.1.0 | `/inbounds/list` 把 settings 等改成 nested object,见下文 |
 | v3.5.0 | 3.0.x | 3.0.x | 跨 3.1.0 升级会破坏 traffic poll |
@@ -24,6 +24,42 @@ PSP 通过 `/panel/api/*` 对接 3X-UI 面板。本文档维护两件事：
 - 任何高于"已实测通过"的 3X-UI 版本都属于**未知风险**——升级前先在一台 panel 上小流量验证
 
 ## 历史兼容性事件
+
+### 2026-06-02 / 3X-UI 3.2.6 复核 → 已测上限 3.2.0 抬到 3.2.6
+
+**背景**: 上游 3X-UI 在 3.2.0 之后又出了 3.2.5 / 3.2.6,拿到一台真实 3.2.6 面板复核 PSP 是否需要适配。
+
+**复核结论(代码零改动)**: PSP 触及的整个 3X-UI 面 = `internal/adapters/xui/client.go` 里那 15 个端点
+(`/login`、`/panel/api/inbounds/{list,get,add,update,del,setEnable}`、`/panel/api/clients/{add,update,del}`、
+`/panel/api/server/{status,getPanelUpdateInfo,updatePanel,installXray,getXrayVersion}`),在 3.2.6 **全部仍在、形状未变**。
+逐项实测/核对:
+
+- **序列化**: `/inbounds/list` 仍把 `settings` / `streamSettings` / `sniffing` 返回为 nested object(`allocate` 直接省略),
+  `flexJSON` 原样吞下,下游解析器无感。3.1.0 那次破坏不会重演。
+- **clientStats**: 仍返回 `email/up/down/total/enable/expiryTime/reset/lastOnline/uuid/subId`,流量轮询所需字段齐全。
+- **subId(3.2.5「enforced unique subId per client」)**: 对 PSP 是**非问题**。PSP 构造 `ClientSpec` 时从不设 `SubID`(`sync.go`),
+  面板服务端自动生成唯一值——实测一台面板 24 个 client 的 subId 全部互不相同,且每 user 的多 client 共享同一 uuid、各自独立 subId。
+- **CSRF(3.2.x 新增)**: Bearer(API token)模式不受 CSRF 约束(实测 Bearer POST = HTTP 200)。
+  **注意**: cookie(用户名/密码)模式下 3.2.x 对不安全方法要求 `X-CSRF-Token`——PSP 的 username/password 回退模式**未在 3.2.x 上验证**,
+  生产请优先用 API token 模式(PSP 本就 token 优先)。
+- **tgId / keepTraffic**: `tgId` 早已按 int64 发(v3.6.2 修);`/clients/del?keepTraffic=0` 与文档「不传 keepTraffic=1 即清流量」一致。
+
+**写路径已实测**: 在 3.2.6 实机上跑了 client add→get→update→del 与 bulkCreate/bulkDel 的一次性 smoke-test(临时 client,测完自清理),全部 `success:true`、删后 get 回 `(record not found)`。配合读路径(traffic poll 的 `/inbounds/list`),3.2.6 端到端验证通过。
+
+**顺带采纳 3.2.x 更省端点(v3.6.3-beta.15)**: traffic poll 改用 `/inbounds/list/slim`(只要 clientStats,丢掉 settings.clients 大字段);按 email 取单 client 走 `/clients/get/{email}`(替代拉整 inbound 再扫);删节点/删用户走 `/clients/bulkDel`、挂节点批量加用户走 `/clients/bulkCreate`(N 次网络调用+N 次 xray 重启收成 1 次)。bulkCreate 的重复项由面板报在 `skipped`(reason 含 "already in use"),据此收养归属。
+
+**这几个新端点对 `min_xui=3.2.0` 下限仍兼容 —— 已在真实 3.2.0 面板(panelVersion 3.2.0、xray 26.5.9)端到端实测确认(2026-06-02)**:
+- `/inbounds/list/slim`:3.2.0 **HTTP 200**(存在),clientStats 字段集与 3.2.6 逐字节一致。
+- `/clients/get/{email}`:存在,existing→`{client,inboundIds}`,缺失→`" (record not found)"`(与 3.2.6 同,`isClientNotFoundMsg` 命中)。
+- `/clients/bulkCreate`:`[{client,inboundIds}]` → `{created,skipped:[{email,reason}]}`,重复项 reason 含 "already in use"(M5 收养命中)。
+- `/clients/bulkDel`:裸数组被拒、`{emails,keepTraffic}` → `{deleted:N}`(与 3.2.6 同)。
+- 单条 add→get→update→del 全通,subId 仍服务端自动生成。
+
+故 `min_xui=3.2.0` 是诚实的:存在性 + 契约形状都在真实 3.2.0 上验过,不只是「假定一致」。slim 在 3.2.0 即 HTTP 200,故 `ListInboundsSlim` 不加版本兜底(沿用本项目硬切下限、不维护兼容 shim 的一贯做法)。
+
+**另需留意 — 3X-UI 原生多节点(Nodes 功能)**: 3.2.x 起 3X-UI 自带「central panel + 子节点」聚合,会按 email 跨节点聚合客户端流量。
+PSP 自己就做多面板聚合(Node = 单个 inbound),若把 PSP 指向一台已配子节点的 central panel,clientStats 会是跨节点聚合值 →
+与 PSP 的「一 inbound 一 node」模型冲突。**部署建议**:PSP 对接的 3X-UI 保持单机,不要再套 3X-UI 自己的 node 聚合。
 
 ### 2026-05-23 / 3X-UI 3.1.0 → PSP v3.5.0 破坏
 

@@ -149,6 +149,101 @@ func (s *Service) AddClientToInbound(ctx context.Context, userID int64, panelID 
 	return nil
 }
 
+// BulkAddClientsToInbound creates many clients on one (panel, inbound) in a
+// single 3X-UI bulkCreate call and records ownership for each — one Xray
+// restart instead of N. It preserves the single-add orphan-adoption rule (M5):
+// a duplicate email (already in 3X-UI, possibly without an ownership row) is
+// reported by the panel under skipped with reason "already in use" and is
+// ADOPTED (ownership upserted) rather than failing. Any other skip reason
+// means the client was NOT created, so no ownership row is recorded for it.
+// Returns how many clients are now owned (created + adopted) and the first
+// hard error; per-item failures don't abort the rest.
+//
+// Unlike AddClientToInbound there is no per-client rollback when the ownership
+// write fails after the 3X-UI client was created: the client is left in place
+// and self-heals (the next enrollment/reconcile re-adds → duplicate → adopt).
+func (s *Service) BulkAddClientsToInbound(ctx context.Context, panelID int64, inboundID int, reqs []ports.BulkClientAdd) (int, error) {
+	if len(reqs) == 0 {
+		return 0, nil
+	}
+	c, err := s.pool.Get(panelID)
+	if err != nil {
+		return 0, err
+	}
+	specs := make([]ports.ClientSpec, len(reqs))
+	for i, r := range reqs {
+		spec := buildClientSpec(r.Protocol, r.SSMethod, r.UserUUID, r.Email, r.Flow, r.ExpireTime, r.TotalGB)
+		specs[i] = spec
+	}
+	res, err := c.BulkAddToInbound(ctx, inboundID, specs)
+	if err != nil {
+		return 0, fmt.Errorf("xui bulkCreate: %w", err)
+	}
+	skipReason := make(map[string]string, len(res.Skipped))
+	for _, sk := range res.Skipped {
+		skipReason[sk.Email] = sk.Reason
+	}
+	owned := 0
+	var firstErr error
+	for _, r := range reqs {
+		if reason, skipped := skipReason[r.Email]; skipped && !isDuplicateReason(reason) {
+			// Not created (bad spec, etc.) — do NOT record ownership for a
+			// client that doesn't exist upstream.
+			if firstErr == nil {
+				firstErr = fmt.Errorf("bulk add %s skipped: %s", r.Email, strings.TrimSpace(reason))
+			}
+			continue
+		}
+		// Created, or duplicate → adopt: upsert ownership.
+		if err := s.upsertOwnership(ctx, r.UserID, panelID, inboundID, r.Email, r.UserUUID); err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		owned++
+	}
+	return owned, firstErr
+}
+
+// upsertOwnership records or refreshes the ownership row for a client that now
+// exists in 3X-UI: present → refresh uuid (credential reset / adopt); absent →
+// insert. Mirrors the ownership bookkeeping tail of AddClientToInbound, minus
+// the single-client rollback (the bulk caller can't roll back one item of a
+// batch — see BulkAddClientsToInbound).
+func (s *Service) upsertOwnership(ctx context.Context, userID, panelID int64, inboundID int, email, userUUID string) error {
+	exists, err := s.ownership.Exists(ctx, panelID, inboundID, email)
+	if err != nil {
+		return fmt.Errorf("ownership exists check: %w", err)
+	}
+	if exists {
+		if err := s.ownership.UpdateUUID(ctx, panelID, inboundID, email, userUUID); err != nil {
+			return fmt.Errorf("ownership update uuid: %w", err)
+		}
+		return nil
+	}
+	entry := &domain.XUIClientEntry{
+		UserID:      userID,
+		PanelID:     panelID,
+		InboundID:   inboundID,
+		ClientEmail: email,
+		ClientUUID:  userUUID,
+	}
+	if err := s.ownership.Add(ctx, entry); err != nil {
+		return fmt.Errorf("ownership add: %w", err)
+	}
+	return nil
+}
+
+// isDuplicateReason reports whether a bulkCreate skip reason means the client
+// already existed (so it should be adopted, not treated as a failure).
+func isDuplicateReason(reason string) bool {
+	m := strings.ToLower(reason)
+	return strings.Contains(m, "already in use") ||
+		strings.Contains(m, "duplicate") ||
+		strings.Contains(m, "already exist")
+}
+
 // UpdateOwnedClient updates fields of a client that the panel already owns.
 // Returns ErrClientNotOwnedByPanel if the guard rejects the call.
 func (s *Service) UpdateOwnedClient(ctx context.Context, panelID int64, inboundID int,
@@ -185,11 +280,11 @@ func (s *Service) DelOwnedClient(ctx context.Context, panelID int64, inboundID i
 		return err
 	}
 
-	clients, err := c.GetInboundClients(ctx, inboundID)
+	cl, err := c.GetClient(ctx, email)
 	if err != nil {
-		return fmt.Errorf("xui list clients: %w", err)
+		return fmt.Errorf("xui get client: %w", err)
 	}
-	if _, ok := findClientByEmail(clients, email); !ok {
+	if cl == nil {
 		// Already absent upstream — desired end-state ("client gone") reached.
 		return s.ownership.RemoveByMatch(ctx, panelID, inboundID, email)
 	}
@@ -201,7 +296,7 @@ func (s *Service) DelOwnedClient(ctx context.Context, panelID int64, inboundID i
 	// 3X-UI documents as working for every protocol, so we always use it.
 	if err := c.DelClientByEmail(ctx, inboundID, email); err != nil {
 		// Treat "already gone" as success so a stale resync DEL doesn't loop.
-		if missing, vErr := s.clientMissingByEmail(ctx, c, inboundID, entry.ClientEmail); vErr == nil && missing {
+		if missing, vErr := s.clientMissingByEmail(ctx, c, entry.ClientEmail); vErr == nil && missing {
 			return s.ownership.RemoveByMatch(ctx, panelID, inboundID, email)
 		}
 		return fmt.Errorf("xui delClientByEmail: %w", err)
@@ -209,22 +304,12 @@ func (s *Service) DelOwnedClient(ctx context.Context, panelID int64, inboundID i
 	return s.ownership.RemoveByMatch(ctx, panelID, inboundID, email)
 }
 
-func (s *Service) clientMissingByEmail(ctx context.Context, c ports.XUIClient, inboundID int, email string) (bool, error) {
-	clients, err := c.GetInboundClients(ctx, inboundID)
+func (s *Service) clientMissingByEmail(ctx context.Context, c ports.XUIClient, email string) (bool, error) {
+	cl, err := c.GetClient(ctx, email)
 	if err != nil {
 		return false, err
 	}
-	_, ok := findClientByEmail(clients, email)
-	return !ok, nil
-}
-
-func findClientByEmail(clients []ports.ClientDetail, email string) (ports.ClientDetail, bool) {
-	for _, cl := range clients {
-		if cl.Email == email {
-			return cl, true
-		}
-	}
-	return ports.ClientDetail{}, false
+	return cl == nil, nil
 }
 
 // RotateClientUUID rewrites a panel-owned client's UUID. 3X-UI's
@@ -297,43 +382,82 @@ func (s *Service) SetOwnedClientEnableWithInbound(ctx context.Context, panelID i
 	return c.UpdateClientWithInbound(ctx, inb, userUUID, spec)
 }
 
-// DelAllOwnedForUser removes every 3X-UI client recorded under userID.
-// Returns the first per-client error so the caller (admin user-delete)
-// can surface it rather than orphaning 3X-UI clients. Successful deletes
-// up to the failure point are real — the ownership table reflects that.
+// DelAllOwnedForUser removes every 3X-UI client recorded under userID,
+// batched into one bulkDel per panel. A user's clients can span several
+// panels; each panel's deletes (and Xray restarts) collapse into a single
+// call. Returns the first error so the caller (admin user-delete) can surface
+// it rather than orphaning 3X-UI clients; panels that error keep their
+// ownership rows for the next retry.
 func (s *Service) DelAllOwnedForUser(ctx context.Context, userID int64) error {
 	entries, err := s.ownership.ListByUser(ctx, userID)
 	if err != nil {
 		return err
 	}
-	var firstErr error
+	byPanel := make(map[int64][]*domain.XUIClientEntry)
 	for _, e := range entries {
-		if err := s.DelOwnedClient(ctx, e.PanelID, e.InboundID, e.ClientEmail); err != nil {
+		byPanel[e.PanelID] = append(byPanel[e.PanelID], e)
+	}
+	var firstErr error
+	for panelID, es := range byPanel {
+		c, err := s.pool.Get(panelID)
+		if err != nil {
 			if firstErr == nil {
-				firstErr = fmt.Errorf("%d/%d/%s: %w", e.PanelID, e.InboundID, e.ClientEmail, err)
+				firstErr = err
 			}
+			continue
+		}
+		if err := s.bulkDelOwned(ctx, c, es); err != nil && firstErr == nil {
+			firstErr = err
 		}
 	}
 	return firstErr
 }
 
 // DelAllOwnedForInbound removes every panel-owned client living inside the
-// given inbound. Used by node deletion before the inbound itself can be
-// removed (the inbound delete guard requires no unmanaged clients remain).
+// given inbound in a single bulkDel call. Used by node deletion before the
+// inbound itself can be removed (the inbound delete guard requires no
+// unmanaged clients remain). Collapsing N per-client deletes into one means
+// one Xray restart instead of N when tearing down a busy node. The node-delete
+// task checks this error and aborts before DeleteInbound — so a transient
+// failure can't leave the inbound removed while an ownership row survives
+// pointing at a now-gone inbound (the task retries next tick and converges).
 func (s *Service) DelAllOwnedForInbound(ctx context.Context, panelID int64, inboundID int) error {
 	entries, err := s.ownership.ListByInbound(ctx, panelID, inboundID)
 	if err != nil {
 		return err
 	}
-	// Return the first per-client error (mirror DelAllOwnedForUser) instead of
-	// swallowing it. The node-delete task checks this error and aborts before
-	// DeleteInbound — so a transient delete failure can't leave the inbound
-	// removed while an ownership row survives pointing at a now-gone inbound
-	// (the task retries next tick and converges).
+	if len(entries) == 0 {
+		return nil
+	}
+	c, err := s.pool.Get(panelID)
+	if err != nil {
+		return err
+	}
+	return s.bulkDelOwned(ctx, c, entries)
+}
+
+// bulkDelOwned deletes the given owned clients on ONE panel via a single
+// /clients/bulkDel call, then drops their ownership rows. Every entry here
+// comes from the ownership table, so they are all panel-managed; emails
+// already gone upstream are no-ops on the panel side. On a bulk-delete failure
+// it removes no ownership rows and returns the error so the caller's task
+// retries the whole batch (idempotent on retry). Otherwise it returns the
+// first ownership-removal error, leaving the rest removed.
+func (s *Service) bulkDelOwned(ctx context.Context, c ports.XUIClient, entries []*domain.XUIClientEntry) error {
+	if len(entries) == 0 {
+		return nil
+	}
+	emails := make([]string, len(entries))
+	for i, e := range entries {
+		emails[i] = e.ClientEmail
+	}
+	if _, err := c.BulkDelByEmail(ctx, emails); err != nil {
+		return fmt.Errorf("xui bulkDel: %w", err)
+	}
 	var firstErr error
 	for _, e := range entries {
-		if err := s.DelOwnedClient(ctx, e.PanelID, e.InboundID, e.ClientEmail); err != nil && firstErr == nil {
-			firstErr = fmt.Errorf("%d/%d/%s: %w", e.PanelID, e.InboundID, e.ClientEmail, err)
+		if err := s.ownership.RemoveByMatch(ctx, e.PanelID, e.InboundID, e.ClientEmail); err != nil && firstErr == nil {
+			firstErr = err
 		}
 	}
 	return firstErr
@@ -370,12 +494,11 @@ func (s *Service) ClaimClient(ctx context.Context, userID int64, panelID int64, 
 	if err != nil {
 		return "", err
 	}
-	clients, err := c.GetInboundClients(ctx, inboundID)
+	current, err := c.GetClient(ctx, email)
 	if err != nil {
-		return "", fmt.Errorf("xui list clients: %w", err)
+		return "", fmt.Errorf("xui get client: %w", err)
 	}
-	current, ok := findClientByEmail(clients, email)
-	if !ok {
+	if current == nil {
 		return "", fmt.Errorf("%w: client email %s not found in panel_id=%d inbound=%d", domain.ErrNotFound, email, panelID, inboundID)
 	}
 	if clientUUID == "" {
