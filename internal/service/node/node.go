@@ -348,7 +348,10 @@ func (s *Service) UpdateMetadata(ctx context.Context, n *domain.Node) error {
 	if _, err := s.nodes.GetByID(ctx, n.ID); err != nil {
 		return err
 	}
-	return s.nodes.Update(ctx, n)
+	// Column-scoped: a full-row Update here would roll back the poll-owned
+	// columns (traffic counters / health / inbound-config snapshot) to the
+	// stale values the edit dialog loaded.
+	return s.nodes.UpdateMetadata(ctx, n)
 }
 
 func (s *Service) UpdateInboundConfig(ctx context.Context, id int64, spec ports.InboundSpec) error {

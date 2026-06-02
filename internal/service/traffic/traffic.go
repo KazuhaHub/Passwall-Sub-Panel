@@ -1807,7 +1807,15 @@ func (s *Service) SetPeriodUsage(ctx context.Context, userID int64, usedBytes in
 			return 0, 0
 		}
 		if latestTotal > 0 {
-			up = total * latestUp / latestTotal
+			// float64 keeps the proportion overflow-safe: total*latestUp as
+			// int64 overflows for multi-GB users (e.g. 8GiB*4GiB > maxint64),
+			// wrapping `up` negative/zero. Byte-level rounding is invisible.
+			up = int64(float64(total) * float64(latestUp) / float64(latestTotal))
+			if up < 0 {
+				up = 0
+			} else if up > total {
+				up = total
+			}
 			down = total - up
 			return up, down
 		}
@@ -1855,7 +1863,12 @@ func (s *Service) SetPeriodUsage(ctx context.Context, userID int64, usedBytes in
 	if u.PeriodBaselineBytes < 0 {
 		u.PeriodBaselineBytes = 0
 	}
-	if err := s.users.Update(ctx, u); err != nil {
+	// Must be UpdateTrafficState, NOT Update: userRepo.Update does
+	// Omit(pollOwnedColumns...) which skips exactly the columns we just set
+	// (lifetime_*, period_baseline_bytes, lifetime_baseline_at,
+	// traffic_period_start) so the whole override would silently no-op in
+	// production. UpdateTrafficState is the column-scoped writer for these.
+	if err := s.users.UpdateTrafficState(ctx, u); err != nil {
 		return err
 	}
 	// Keep the per-node usage breakdown consistent with the period total we

@@ -18,6 +18,7 @@ type fakeNodeRepo struct {
 
 func (r *fakeNodeRepo) Create(ctx context.Context, n *domain.Node) error { return nil }
 func (r *fakeNodeRepo) Update(ctx context.Context, n *domain.Node) error                 { return nil }
+func (r *fakeNodeRepo) UpdateMetadata(ctx context.Context, n *domain.Node) error         { return nil }
 func (r *fakeNodeRepo) UpdateTrafficCounters(ctx context.Context, n *domain.Node) error  { return nil }
 func (r *fakeNodeRepo) UpdateHealth(ctx context.Context, n *domain.Node) error           { return nil }
 func (r *fakeNodeRepo) UpdateInboundConfig(ctx context.Context, n *domain.Node) error    { return nil }

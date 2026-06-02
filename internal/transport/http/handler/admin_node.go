@@ -16,6 +16,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/node"
 	syncsvc "github.com/KazuhaHub/passwall-sub-panel/internal/service/sync"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/transport/http/middleware"
 )
 
 // AdminNodeHandler exposes node CRUD, the import-existing flow, and the
@@ -180,6 +181,9 @@ func (h *AdminNodeHandler) Get(c *gin.Context) {
 	}
 
 	inbound, inboundErr := h.node.GetInboundConfig(c.Request.Context(), id)
+	// Operators may read node metadata but not the inbound's raw Settings /
+	// StreamSettings (client creds + Reality privateKey) — strip them unless admin.
+	isAdmin := callerIsAdmin(c)
 
 	// Load panel name for this node.
 	panelNames := h.loadPanelNames(c.Request.Context())
@@ -194,7 +198,7 @@ func (h *AdminNodeHandler) Get(c *gin.Context) {
 			"clients_error": err.Error(),
 		}
 		if inbound != nil {
-			out["inbound"] = toInboundDTO(inbound)
+			out["inbound"] = redactInboundForRole(toInboundDTO(inbound), isAdmin)
 		}
 		if inboundErr != nil {
 			out["inbound_error"] = inboundErr.Error()
@@ -207,7 +211,7 @@ func (h *AdminNodeHandler) Get(c *gin.Context) {
 		"clients": clients,
 	}
 	if inbound != nil {
-		out["inbound"] = toInboundDTO(inbound)
+		out["inbound"] = redactInboundForRole(toInboundDTO(inbound), isAdmin)
 	}
 	if inboundErr != nil {
 		out["inbound_error"] = inboundErr.Error()
@@ -735,6 +739,29 @@ func toInboundDTO(inb *ports.Inbound) inboundDTO {
 		Allocate:       inb.Allocate,
 		ExpiryTime:     inb.ExpiryTime,
 	}
+}
+
+// redactInboundForRole blanks the two secret-bearing raw config blobs for
+// non-admin callers: Settings holds every client's UUID (which derives all
+// protocol credentials) and SS/Trojan passwords; StreamSettings holds the
+// Reality privateKey / inline TLS keys. The node-detail GET is on staffGroup
+// (admin+operator), but operators are low-trust and every node WRITE path is
+// already admin-only — so an operator reading these would be a credential-
+// disclosure hole. Non-secret fields (protocol/port/listen/remark/…) stay so
+// the operator's read-only detail view still works.
+func redactInboundForRole(dto inboundDTO, isAdmin bool) inboundDTO {
+	if isAdmin {
+		return dto
+	}
+	dto.Settings = ""
+	dto.StreamSettings = ""
+	return dto
+}
+
+// callerIsAdmin reports whether the request's JWT claims carry the admin role.
+func callerIsAdmin(c *gin.Context) bool {
+	claims := middleware.ClaimsFrom(c)
+	return claims != nil && claims.Role == domain.RoleAdmin
 }
 
 func mapNodeServiceError(c *gin.Context, err error) {

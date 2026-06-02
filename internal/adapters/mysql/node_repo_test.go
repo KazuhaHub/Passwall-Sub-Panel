@@ -25,6 +25,59 @@ func newNodeTestRepo(t *testing.T) (*nodeRepo, context.Context) {
 	return &nodeRepo{db: db}, context.Background()
 }
 
+// TestNodeRepo_UpdateMetadataPreservesPollColumns pins the column-scoped
+// node-edit write: changing identity fields must NOT roll back poll-owned
+// columns (traffic counters, health) to the stale snapshot the edit dialog
+// loaded. A full-row Save would zero them — this is the regression guard.
+func TestNodeRepo_UpdateMetadataPreservesPollColumns(t *testing.T) {
+	repo, ctx := newNodeTestRepo(t)
+
+	n := &domain.Node{PanelID: 1, InboundID: 2, DisplayName: "Old", Region: "TW", Tags: []string{"a"}}
+	if err := repo.Create(ctx, n); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	// Poll/health writers advance these out-of-band.
+	n.LifetimeUpBytes, n.LifetimeDownBytes, n.LifetimeTotalBytes = 100, 200, 300
+	n.LastTrafficTotalBytes = 300
+	if err := repo.UpdateTrafficCounters(ctx, n); err != nil {
+		t.Fatalf("counters: %v", err)
+	}
+	n.HealthState, n.HealthDetail = "healthy", "ok"
+	if err := repo.UpdateHealth(ctx, n); err != nil {
+		t.Fatalf("health: %v", err)
+	}
+
+	// Admin edits the name from a stale dialog snapshot that carries ZERO
+	// counters/health (as the edit form would).
+	edit := &domain.Node{
+		ID: n.ID, PanelID: 1, InboundID: 2,
+		DisplayName: "New", ServerAddress: "n.example.com", Region: "HK", Tags: []string{"b", "c"}, SortOrder: 7,
+		// Lifetime*/Health* deliberately zero — must not be persisted.
+	}
+	if err := repo.UpdateMetadata(ctx, edit); err != nil {
+		t.Fatalf("update metadata: %v", err)
+	}
+
+	got, err := repo.GetByID(ctx, n.ID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	// Identity fields updated.
+	if got.DisplayName != "New" || got.Region != "HK" || got.ServerAddress != "n.example.com" || got.SortOrder != 7 {
+		t.Errorf("identity not updated: %+v", got)
+	}
+	if len(got.Tags) != 2 || got.Tags[0] != "b" {
+		t.Errorf("tags not updated: %v", got.Tags)
+	}
+	// Poll-owned columns preserved (NOT clobbered to the edit's zeros).
+	if got.LifetimeTotalBytes != 300 || got.LastTrafficTotalBytes != 300 {
+		t.Errorf("traffic counters clobbered: lifetime=%d last=%d, want 300/300", got.LifetimeTotalBytes, got.LastTrafficTotalBytes)
+	}
+	if got.HealthState != "healthy" {
+		t.Errorf("health clobbered: %q, want healthy", got.HealthState)
+	}
+}
+
 // TestNodeRepo_ProtocolRoundTrips verifies the protocol column is migrated
 // and survives Create → GetByID, and that Update can change it. This is the
 // value the UI relies on to gate VLESS-only fields (e.g. Flow) without a

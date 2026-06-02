@@ -261,6 +261,48 @@ func TestSetPeriodUsageReseedsClientBaselines(t *testing.T) {
 	}
 }
 
+// TestSetPeriodUsageUpDownNoOverflow guards the int64 overflow in the up/down
+// split: total*latestUp can exceed maxint64 for multi-GB users, wrapping the
+// up byte count negative and writing garbage into the snapshot. With a 4GiB/8GiB
+// latest split and an 8GiB override, the product 8GiB*4GiB overflows int64.
+func TestSetPeriodUsageUpDownNoOverflow(t *testing.T) {
+	const giB = int64(1) << 30
+	past := time.Now().Add(-time.Hour)
+	users := &fakeUserRepo{users: map[int64]*domain.User{
+		1: {ID: 1, Enabled: true, TrafficResetPeriod: domain.ResetMonthly,
+			LifetimeUpBytes: 4 * giB, LifetimeDownBytes: 4 * giB, LifetimeTotalBytes: 8 * giB},
+	}}
+	repo := &fakeTrafficRepo{snapshots: []*domain.TrafficSnapshot{
+		{UserID: 1, UpBytes: 4 * giB, DownBytes: 4 * giB, TotalBytes: 8 * giB, CapturedAt: past},
+	}}
+	svc := New(users, &fakeOwnershipRepo{byUser: map[int64][]*domain.XUIClientEntry{}}, repo, nil, nil, nil, &fakeDisabler{})
+
+	if err := svc.SetPeriodUsage(context.Background(), 1, 8*giB); err != nil {
+		t.Fatalf("SetPeriodUsage: %v", err)
+	}
+
+	// The newest snapshot is the one SetPeriodUsage just wrote.
+	var snap *domain.TrafficSnapshot
+	for _, s := range repo.snapshots {
+		if snap == nil || s.CapturedAt.After(snap.CapturedAt) {
+			snap = s
+		}
+	}
+	if snap == nil {
+		t.Fatal("no snapshot written")
+	}
+	if snap.UpBytes < 0 || snap.DownBytes < 0 {
+		t.Fatalf("overflow: up=%d down=%d (both must be >= 0)", snap.UpBytes, snap.DownBytes)
+	}
+	if snap.UpBytes+snap.DownBytes != snap.TotalBytes {
+		t.Errorf("up+down=%d != total=%d", snap.UpBytes+snap.DownBytes, snap.TotalBytes)
+	}
+	// 4GiB/8GiB split → up should be ~4GiB, not a wrapped value.
+	if snap.UpBytes != 4*giB {
+		t.Errorf("up=%d, want %d (preserve the 50%% up ratio)", snap.UpBytes, 4*giB)
+	}
+}
+
 // TestPollOnceBootstrapBeforeCutoffRolloverInvariant guards a narrow edge of
 // the rollover reseed: a bootstrap client (LastRaw all 0 → hadPrev=false)
 // created BEFORE the user's LifetimeBaselineAt cutoff, transmitting for the

@@ -33,6 +33,29 @@ func (r *nodeRepo) Update(ctx context.Context, n *domain.Node) error {
 	return r.db.WithContext(ctx).Save(row).Error
 }
 
+// UpdateMetadata writes ONLY the admin-editable identity columns, leaving the
+// poll-owned columns untouched: traffic counters (poll), health (health probe),
+// and the inbound-config snapshot + sync-state (reconcile/write-through). A
+// full-row Save here would roll those back to whatever stale values the edit
+// dialog loaded — double-counted/lost traffic, flapping health. Same
+// column-scoped rationale as UpdateTrafficCounters / UpdateHealth.
+func (r *nodeRepo) UpdateMetadata(ctx context.Context, n *domain.Node) error {
+	if n == nil || n.ID == 0 {
+		return fmt.Errorf("UpdateMetadata requires a non-zero node ID; got %+v", n)
+	}
+	return r.db.WithContext(ctx).
+		Model(&nodeRow{}).
+		Where("id = ?", n.ID).
+		Updates(map[string]any{
+			"display_name":   n.DisplayName,
+			"server_address": n.ServerAddress,
+			"flow":           n.Flow,
+			"region":         n.Region,
+			"tags":           jsonStrings(n.Tags),
+			"sort_order":     n.SortOrder,
+		}).Error
+}
+
 // UpdateTrafficCounters writes only the lifetime + last-raw counter columns.
 // The traffic poll and the health checker run on separate goroutines and both
 // loaded-mutated-Saved the same node row; a full-row Save from one would

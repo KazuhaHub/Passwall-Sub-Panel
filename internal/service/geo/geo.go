@@ -72,7 +72,22 @@ func (s *Service) Lookup(ctx context.Context, ips []string) map[string]domain.Ge
 	if err != nil || !set.GeoIPEnabled {
 		return out
 	}
-	r := s.ensureReader(set.GeoIPDBFile)
+	// Make the active reader current (ensureReader manages its own locking),
+	// THEN hold the read lock for the entire lookup loop and use s.reader under
+	// it — do NOT keep using ensureReader's returned pointer outside the lock.
+	//
+	// Why: geoip.Open mmaps the .mmdb file and Reader.Close() munmaps it. The
+	// auto-updater / hot-reload Close() the old reader under s.mu (write lock).
+	// A Lookup running on a captured pointer outside the lock could dereference
+	// into a region that was just munmapped → SIGSEGV that recover/safego can't
+	// catch, taking the whole single-binary panel down. Holding RLock across the
+	// loop makes any concurrent Close wait until we finish. RLock is shared, so
+	// concurrent Lookups don't contend; only the rare reload (every few hours)
+	// briefly waits.
+	s.ensureReader(set.GeoIPDBFile)
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	r := s.reader
 	if r == nil {
 		return out
 	}

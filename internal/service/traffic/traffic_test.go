@@ -24,6 +24,23 @@ type fakeUserRepo struct {
 
 func (r *fakeUserRepo) Update(ctx context.Context, u *domain.User) error {
 	cp := *u
+	// Mirror the production userRepo.Update's Omit(pollOwnedColumns...): the
+	// regular Update path does NOT persist poll-owned columns (lifetime /
+	// period baseline / period start / last-online / block-violation). A test
+	// using Update to write those silently no-ops in prod — pin that here so
+	// SetPeriodUsage (which must use UpdateTrafficState) can't regress to Update.
+	if prev, ok := r.users[u.ID]; ok {
+		cp.LifetimeUpBytes = prev.LifetimeUpBytes
+		cp.LifetimeDownBytes = prev.LifetimeDownBytes
+		cp.LifetimeTotalBytes = prev.LifetimeTotalBytes
+		cp.PeriodBaselineBytes = prev.PeriodBaselineBytes
+		cp.LifetimeBaselineAt = prev.LifetimeBaselineAt
+		cp.TrafficPeriodStart = prev.TrafficPeriodStart
+		cp.LastOnlineAt = prev.LastOnlineAt
+		cp.BlockViolationCount = prev.BlockViolationCount
+		cp.LastBlockViolationAt = prev.LastBlockViolationAt
+		cp.DisableDetail = prev.DisableDetail
+	}
 	r.users[u.ID] = &cp
 	return nil
 }
@@ -905,6 +922,19 @@ func (r *fakeNodeRepo) UpdateHealth(ctx context.Context, n *domain.Node) error {
 	cur.HealthState = n.HealthState
 	cur.HealthDetail = n.HealthDetail
 	cur.HealthCheckedAt = n.HealthCheckedAt
+	return nil
+}
+func (r *fakeNodeRepo) UpdateMetadata(ctx context.Context, n *domain.Node) error {
+	// Column-scoped: touch only the editable identity fields, preserving the
+	// stored node's poll-owned counters/health (mirrors the real repo).
+	if cur, ok := r.nodes[n.ID]; ok {
+		cur.DisplayName = n.DisplayName
+		cur.ServerAddress = n.ServerAddress
+		cur.Flow = n.Flow
+		cur.Region = n.Region
+		cur.Tags = n.Tags
+		cur.SortOrder = n.SortOrder
+	}
 	return nil
 }
 func (r *fakeNodeRepo) UpdateInboundConfig(ctx context.Context, n *domain.Node) error { return nil }

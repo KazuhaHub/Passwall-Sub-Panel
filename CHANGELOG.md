@@ -4,6 +4,22 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## v3.6.3-beta.10 — 2026-06-01
+
+全量 review 确认项的第一批修复(2 高危 + 4 正确性中危),全程 TDD。
+
+### Security
+
+- **operator 越权读取节点密钥** —— `GET /api/admin/nodes/:id` 挂在 staffGroup(admin+operator),返回的 inbound DTO 原样带 `settings`(全部客户端 UUID,可派生所有协议凭据 + Trojan/SS 密码)和 `stream_settings`(VLESS Reality `privateKey` / 内联 TLS 私钥)。所有节点**写**路径早已锁 admin,唯独这个读路径漏了。现非 admin 调用时剥离这两个机密字段(非机密字段如协议/端口仍保留,只读详情页照常用)。
+- **geo mmdb use-after-munmap 崩整进程** —— `geoip.Open` 内存映射(mmap).mmdb,`Reader.Close()` 会 munmap;`geo.Lookup` 此前在锁外循环 `reader.Lookup`,而 12h 自动更新 / 「立即更新」/ 热重载在写锁下 `Close()` 旧 reader。in-flight 的 Lookup 撞上 munmap → SIGSEGV,Go 的 recover/safego 拦不住,整个单二进制面板崩(触发:管理员翻审计/访问/订阅日志批量解析 IP 时正好撞上更新)。修:`Lookup` 全程持读锁并在锁内使用 `s.reader`,让并发 `Close` 等待;读锁共享,并发查询不互斥,只有罕见的重载会短暂等待。
+
+### Fixed
+
+- **「设置本期用量」在生产里静默失效** —— `SetPeriodUsage` 把 `period_baseline_bytes` / `traffic_period_start` / `lifetime_*` 写到用户行后调 `userRepo.Update`,但后者 `Omit(pollOwnedColumns…)` 恰好跳过这些列 → 覆盖完全不落库;`PeriodUsed()=Lifetime−PeriodBaseline` 读到旧值,放行后下个 poll 又因用量没变 ≥limit 立刻再封。改走列级 `UpdateTrafficState`。单测此前假绿(fake 的 Update 不镜像 Omit)—— 现已让 fake 镜像 Omit,顺带钉住该类回归。
+- **up/down 拆分 int64 溢出** —— `SetPeriodUsage` 的 `total*latestUp/latestTotal` 中间积对多 GB 用户超过 maxint64,方向列被写成负数/0 进快照、rollup、lifetime。改 float64 计算 + 夹取。
+- **编辑节点元数据回滚后台列** —— `node.UpdateMetadata` 走整行 `Save`,把流量计数 / 健康状态 / inbound 配置快照回滚成编辑弹窗加载时的旧值(双计/丢量、健康抖动)。新增列级 `nodeRepo.UpdateMetadata`,只写 6 个可编辑字段。
+- **渲染 YAML 引号策略漏判 → Clash 配置坏** —— 名为 `null`/`~`/纯数字/`yes`/`off`/带前后空格 等的节点/分组名未加引号,被 YAML 解析成 nil/数字/布尔/截断,proxy-group 引用错位。`needsQuoting` 改为以真实 YAML 解析器做权威 round-trip 判定(不再和语法漂移)+ 显式引用 YAML 1.1 布尔词(yes/no/on/off);附逐名 round-trip drift 测试。
+
 ## v3.6.3-beta.9 — 2026-06-01
 
 新增「按节点用量」:用户编辑弹窗左侧只读栏新增一张表,展示该用户在每个节点的 **累计 / 本周期 / 今日** 用量(各拆 ↑上行 / ↓下行)。无破坏性变更——`user_xui_clients` 加 3 个 baseline 列,AutoMigrate 自动处理。

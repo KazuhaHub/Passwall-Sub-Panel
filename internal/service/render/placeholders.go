@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+
+	yaml "gopkg.in/yaml.v3"
 )
 
 // linePlaceholderRE matches a line whose only meaningful content is a
@@ -175,15 +177,27 @@ func needsQuoting(s string) bool {
 	if s == "" {
 		return true
 	}
-	switch s[0] {
-	case '-', '?', ':', '*', '&', '!', '%', '@', '`', '#', '|', '>', '\'', '"':
+	// YAML 1.1 boolean words: yaml.v3 (1.2 core) treats these as plain strings,
+	// but Clash and other 1.1 parsers read them as booleans. The round-trip
+	// check below uses yaml.v3 so it would NOT flag them — quote defensively so
+	// a node literally named "off" can't become the boolean false downstream.
+	switch strings.ToLower(s) {
+	case "yes", "no", "on", "off", "y", "n":
 		return true
 	}
-	for _, c := range s {
-		switch c {
-		case ':', '#', '\n', '\t', '"':
-			return true
-		}
+	// Definitive arbiter: emit the bare scalar as a mapping value and require it
+	// to parse back to EXACTLY s. This catches YAML reserved words (null/~/true/
+	// false → non-string), numeric-looking names (→ int/float/hex/octal/inf/nan),
+	// flow & indicator leads (* & ! { [ ...), ": "/"#"/quote hazards, and
+	// leading/trailing whitespace (the parser strips it, so the result differs).
+	// Delegating to the real parser is what stops this from drifting from the
+	// grammar. Render is not a hot path; one tiny parse per name is negligible.
+	var probe struct {
+		V any `yaml:"v"`
 	}
-	return false
+	if err := yaml.Unmarshal([]byte("v: "+s), &probe); err != nil {
+		return true
+	}
+	sv, ok := probe.V.(string)
+	return !ok || sv != s
 }
