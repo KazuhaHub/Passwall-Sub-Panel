@@ -364,6 +364,13 @@ func Load(path string) (*Config, error) {
 	}
 	if key := os.Getenv("PSP_ENCRYPTION_KEY"); key != "" {
 		c.EncryptionKey = key
+	} else if key := os.Getenv("PSP_SECRET_KEY_MATERIAL"); key != "" {
+		// Documented alias: deploy/systemd/env.example and the secrets-audit
+		// boot WARN both tell operators to set PSP_SECRET_KEY_MATERIAL, but
+		// nothing ever read it (only PSP_ENCRYPTION_KEY) — so following the docs
+		// set a no-op var and credentials silently fell back to jwt_secret.
+		// Honor it as a fallback so the documented variable actually works.
+		c.EncryptionKey = key
 	}
 	if tp := os.Getenv("PSP_TRUSTED_PROXIES"); tp != "" {
 		c.HTTP.TrustedProxies = tp

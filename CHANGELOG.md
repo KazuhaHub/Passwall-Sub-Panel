@@ -4,6 +4,19 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## v3.6.3-beta.11 — 2026-06-01
+
+全量 review backlog 第二批(设置 / 认证 / 生命周期正确性),全程 TDD。
+
+### Fixed
+
+- **「0 = 永不清理」被静默改写** —— `traffic_history_days` / `sub_log_retention_days` 的 UI 提示明写 0=永久,prune 也尊重 ≤0,但 `applyUISettingsDefaults` 无条件把 0 floor 成 730/7 → 管理员想永久保留的数据照删。`applyUISettingsDefaults` 无法区分"未设"与"显式 0"(都是 int 零);改为在 Load 里用 key 是否存在来判定:仅 key 从未写入时才填默认,显式 0 得以保留=永久。
+- **token 刷新接口踢掉限额/到期用户** —— `/api/auth/local/refresh` 对 `!u.Enabled` 硬 401,没给登录路径那套自助豁免 → 流量超限 / 已过期但可走紧急访问自救的用户,每个 access-TTL 被踢回登录页。新增 `domain.SelfServiceDisableReason` 作单一真相源(登录与刷新共用,防 drift),刷新路径放行这两类。
+- **删用户后残留的 resync 同步任务无限重试** —— 用户在入队与执行之间被删除时,`SyncTaskUserResync` 直接返回 `ResyncMembership` 的 `ErrNotFound` → 任务失败、每 15min 重试约 100 次。改为 ErrNotFound 即视为完成(对齐 `SyncTaskUserPushConfig` 的处理)。
+- **紧急访问覆盖用户真实到期时间** —— 给已过期用户授予紧急访问时,会把真实 `ExpireAt` 覆盖成紧急窗口结束时刻 → 永久丢失原到期,窗口结束后用户"到期时间"错乱。其实下发到 3X-UI 的有效到期本就是 `MAX(ExpireAt, EmergencyUntil)`(`User.PushExpireTime`),该覆盖既冗余又有害,删除。
+- **关机先 cancel 后 drain 丢最后一批审计/订阅日志** —— `Shutdown` 先 `bgCancel()` 再 `server.Shutdown` → drain 期间 in-flight 请求派发的审计 / sub-log 异步写拿到已取消的 `bgRootCtx`,从一开始就被打掉。改为先 `server.Shutdown`(让请求在 ctx 存活时派发写)再 `bgCancel`,再 drain。
+- **`PSP_SECRET_KEY_MATERIAL` 文档变量实际无人读** —— 部署文档 / 启动 WARN 一直让运维设 `PSP_SECRET_KEY_MATERIAL`,但代码只读 `PSP_ENCRYPTION_KEY` → 照文档设的人其实在设空操作变量,凭据静默回退到 jwt_secret 派生。现把它认作 `PSP_ENCRYPTION_KEY` 的 fallback 别名(后者仍优先),让文档变量真正生效、不破坏既有部署。
+
 ## v3.6.3-beta.10 — 2026-06-01
 
 全量 review 确认项的第一批修复(2 高危 + 4 正确性中危),全程 TDD。

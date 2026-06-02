@@ -2,6 +2,7 @@ package config
 
 import (
 	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -38,6 +39,38 @@ func TestMySQLDiscreteBlockHandlesIPv6AndSlashDBName(t *testing.T) {
 	}
 	if !parsed.ParseTime {
 		t.Fatalf("default params should set parseTime=true; got DSN %q", dsn)
+	}
+}
+
+// TestEncryptionKeyEnvAlias pins that PSP_SECRET_KEY_MATERIAL — the variable
+// the deploy docs / boot WARN have always told operators to set — actually
+// feeds the encryption key (as a fallback for PSP_ENCRYPTION_KEY). It used to
+// be a no-op, so docs-following operators silently fell back to jwt_secret.
+func TestEncryptionKeyEnvAlias(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, []byte("jwt_secret: \""+strings.Repeat("a", 32)+"\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("PSP_ENCRYPTION_KEY", "")
+	t.Setenv("PSP_SECRET_KEY_MATERIAL", strings.Repeat("k", 32))
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.SecretKeyMaterial() != strings.Repeat("k", 32) {
+		t.Errorf("PSP_SECRET_KEY_MATERIAL not honored: SecretKeyMaterial()=%q", cfg.SecretKeyMaterial())
+	}
+
+	// PSP_ENCRYPTION_KEY still wins when both are set.
+	t.Setenv("PSP_ENCRYPTION_KEY", strings.Repeat("e", 32))
+	cfg2, err := Load(path)
+	if err != nil {
+		t.Fatalf("load2: %v", err)
+	}
+	if cfg2.SecretKeyMaterial() != strings.Repeat("e", 32) {
+		t.Errorf("PSP_ENCRYPTION_KEY should win over the alias: got %q", cfg2.SecretKeyMaterial())
 	}
 }
 

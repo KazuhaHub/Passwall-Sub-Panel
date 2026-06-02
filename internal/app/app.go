@@ -856,20 +856,27 @@ func (a *App) runSyncTaskLoop(ctx context.Context) {
 }
 
 // Shutdown stops background workers and gracefully closes the HTTP
-// server. Cancellation order:
-//  1. cancel bgRootCtx — every loop sees ctx.Done() and exits its select
-//  2. server.Shutdown(ctx) — stop accepting new requests, drain in-flight
+// server. Order matters:
+//  1. server.Shutdown(ctx) — stop accepting new requests, drain in-flight.
+//     Request handlers dispatch their audit / sub-log writes asynchronously
+//     via asyncDispatcher.Go(bgRootCtx); draining FIRST lets those writes be
+//     dispatched while bgRootCtx is still alive. Cancelling before the drain
+//     (the old order) handed every drained request's write an already-
+//     cancelled context, so the last batch of audit/sub-log rows was dropped.
+//  2. cancel bgRootCtx — every loop sees ctx.Done() and exits its select.
 //  3. wait for bgWG up to the caller-supplied deadline — guarantees a
 //     stuck SMTP / 3X-UI HTTP call doesn't leave a half-committed
-//     transaction or leaked connection behind
+//     transaction or leaked connection behind, and lets the just-dispatched
+//     audit writes finish.
 //
 // The caller controls the overall deadline through ctx; if the workers
 // don't return in time we log and continue rather than block forever.
 func (a *App) Shutdown(ctx context.Context) error {
+	httpErr := a.server.Shutdown(ctx)
+
 	if a.bgCancel != nil {
 		a.bgCancel()
 	}
-	httpErr := a.server.Shutdown(ctx)
 
 	done := make(chan struct{})
 	go func() {

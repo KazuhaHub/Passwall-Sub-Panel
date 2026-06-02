@@ -9,6 +9,48 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 )
 
+// TestKVSettings_ZeroRetentionMeansForever pins the UI contract that 0 =
+// "keep forever" for the two retention fields whose hints say so
+// (traffic_history_days, sub_log_retention_days). A fresh install (key never
+// written) must still get the bounded default; only an EXPLICIT 0 means forever.
+// applyUISettingsDefaults can't tell those apart on its own, so Load must.
+func TestKVSettings_ZeroRetentionMeansForever(t *testing.T) {
+	db, err := Open("sqlite", filepath.Join(t.TempDir(), "panel.db"))
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	t.Cleanup(func() { sqlDB, _ := db.DB(); _ = sqlDB.Close() })
+	if err := EnsureSchema(db); err != nil {
+		t.Fatalf("schema: %v", err)
+	}
+	repo := newKVSettingsRepo(db)
+	ctx := context.Background()
+
+	// Fresh: nothing saved → bounded defaults.
+	fresh, _ := repo.Load(ctx, ports.UISettings{})
+	if fresh.TrafficHistoryDays != 730 {
+		t.Errorf("fresh traffic_history_days = %d, want 730 default", fresh.TrafficHistoryDays)
+	}
+	if fresh.SubLogRetentionDays != 7 {
+		t.Errorf("fresh sub_log_retention_days = %d, want 7 default", fresh.SubLogRetentionDays)
+	}
+
+	// Admin explicitly sets 0 ("keep forever").
+	s := fresh
+	s.TrafficHistoryDays = 0
+	s.SubLogRetentionDays = 0
+	if err := repo.Save(ctx, s); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	got, _ := repo.Load(ctx, ports.UISettings{})
+	if got.TrafficHistoryDays != 0 {
+		t.Errorf("explicit traffic_history_days=0 came back %d; 0 must persist as keep-forever", got.TrafficHistoryDays)
+	}
+	if got.SubLogRetentionDays != 0 {
+		t.Errorf("explicit sub_log_retention_days=0 came back %d; 0 must persist as keep-forever", got.SubLogRetentionDays)
+	}
+}
+
 // TestKVSettingsRoundtrip walks the v3.0.0 KV repo end-to-end: Save → SELECT
 // against the raw schema → Load → check that every descriptor's typed
 // field survives the round trip. This is the only test that exercises the

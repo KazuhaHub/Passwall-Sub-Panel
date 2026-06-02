@@ -589,7 +589,9 @@ func (s *Service) VerifyLocalPassword(ctx context.Context, upn, password string)
 }
 
 func emergencySelfServiceAllowedReason(reason domain.AutoDisabledReason) bool {
-	return reason == domain.DisabledTrafficExceeded || reason == domain.DisabledExpired
+	// Delegate to the domain helper so the login path and the token-refresh
+	// path share one definition (see domain.SelfServiceDisableReason).
+	return domain.SelfServiceDisableReason(reason)
 }
 
 // UnlinkSSO clears the user's SSO binding, dropping them back to local.
@@ -1086,9 +1088,12 @@ func (s *Service) UseEmergencyAccess(ctx context.Context, userID int64, trafficL
 
 	from := now
 	until := from.Add(time.Duration(settings.EmergencyAccessHours) * time.Hour)
-	if u.ExpireAt != nil && !u.ExpireAt.After(now) {
-		u.ExpireAt = &until
-	}
+	// Do NOT mutate ExpireAt here. The effective expiry pushed to 3X-UI is
+	// MAX(ExpireAt, EmergencyUntil) via User.PushExpireTime, so the window below
+	// already extends access without touching the stored expiry. Overwriting a
+	// past ExpireAt with `until` permanently lost the user's real expiry date —
+	// after the window the poll clears EmergencyUntil and they'd appear to
+	// expire at the (long-gone) window end instead of re-expiring correctly.
 	if !u.Enabled && (u.AutoDisabledReason == domain.DisabledTrafficExceeded || u.AutoDisabledReason == domain.DisabledExpired) {
 		u.Enabled = true
 		if u.AutoDisabledReason == domain.DisabledTrafficExceeded {
@@ -1698,7 +1703,16 @@ func (s *Service) runUserTask(ctx context.Context, task *domain.SyncTask) error 
 	case domain.SyncTaskUserDelete:
 		return s.runUserDeleteTask(ctx, task)
 	case domain.SyncTaskUserResync:
-		return s.ResyncMembership(ctx, task.TargetID)
+		if err := s.ResyncMembership(ctx, task.TargetID); err != nil {
+			// User deleted between enqueue and run → nothing to resync, task is
+			// done. Without this the task fails and retries ~100x. Mirrors the
+			// SyncTaskUserPushConfig ErrNotFound handling below.
+			if errors.Is(err, domain.ErrNotFound) {
+				return nil
+			}
+			return err
+		}
+		return nil
 	case domain.SyncTaskUserPushConfig:
 		u, err := s.users.GetByID(ctx, task.TargetID)
 		if errors.Is(err, domain.ErrNotFound) {

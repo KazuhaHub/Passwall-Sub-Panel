@@ -77,8 +77,27 @@ func (r *kvSettingsRepo) Load(ctx context.Context, defaults ports.UISettings) (p
 		}
 	}
 
+	// 0 = "keep forever" for these two retention fields (their UI hints say so),
+	// so the bounded default applies ONLY when the key was never written — an
+	// explicit 0 must survive. Key-presence is the only way to distinguish unset
+	// from an explicit 0 (both are the int zero); applyUISettingsDefaults can't.
+	// Guarded on out.X==0 so a non-zero caller default still wins for an unset key.
+	if _, ok := byKey["security.traffic_history_days"]; !ok && out.TrafficHistoryDays == 0 {
+		out.TrafficHistoryDays = defaultTrafficHistoryDays
+	}
+	if _, ok := byKey["sub.sub_log_retention_days"]; !ok && out.SubLogRetentionDays == 0 {
+		out.SubLogRetentionDays = defaultSubLogRetentionDays
+	}
+
 	return applyUISettingsDefaults(out, defaults), nil
 }
+
+// Defaults for the two "0 = keep forever" retention fields, applied by Load
+// only when the key is absent (see Load).
+const (
+	defaultTrafficHistoryDays  = 730 // 2y: 2x the longest "last 1 year" chart range
+	defaultSubLogRetentionDays = 7
+)
 
 func (r *kvSettingsRepo) Save(ctx context.Context, s ports.UISettings) error {
 	now := time.Now()
@@ -376,9 +395,12 @@ func applyUISettingsDefaults(out, defaults ports.UISettings) ports.UISettings {
 	if out.SubPath == "" {
 		out.SubPath = "sub"
 	}
-	if out.SubLogRetentionDays <= 0 {
-		out.SubLogRetentionDays = 7
-	}
+	// NOTE: SubLogRetentionDays and TrafficHistoryDays are NOT floored here.
+	// Their UI hints promise "0 = keep forever", and a floor can't tell an
+	// explicit 0 from an unset field (both are the int zero). Load resolves
+	// their default by key-presence instead (see Load); an explicit 0 must
+	// survive so the prune's `> 0` / `<= 0` guards skip pruning. 730 (2y) for
+	// traffic gives the longest "last 1 year" chart range a full year of buffer.
 	if out.MailSentRetentionDays <= 0 {
 		out.MailSentRetentionDays = 30
 	}
@@ -387,16 +409,6 @@ func applyUISettingsDefaults(out, defaults ports.UISettings) ports.UISettings {
 	}
 	if out.SyncTaskRetentionDays <= 0 {
 		out.SyncTaskRetentionDays = 30
-	}
-	if out.TrafficHistoryDays <= 0 {
-		// 730 (2y) gives the chart's longest "last 1 year" range a full year of
-		// breathing room — querying exactly N days back when retention is also N
-		// days lets the prune trim a day off the front edge and produce a
-		// blank-ish bucket. 2x the longest range avoids that. Cheap to keep: the
-		// only charted tiers (user/node hourly) are small at this scale; the
-		// large per-client tier is no longer rolled up at all. 0 is coerced here
-		// (no "keep forever" mode), so the prune's `> 0` guard never sees a 0.
-		out.TrafficHistoryDays = 730
 	}
 	if out.GeoIPUpdateSource == "" {
 		// MaxMind GeoLite2-City is the recommended default: best free global

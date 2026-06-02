@@ -151,7 +151,12 @@ func (h *AuthLocalHandler) Refresh(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "auth lookup failed"})
 		return
 	}
-	if !u.Enabled {
+	// Mirror the login path's self-service exemption: a traffic-exceeded or
+	// expired user must still be able to refresh so their session survives long
+	// enough to reach the self-service emergency-access page. Without this they
+	// get bounced to the login screen every access-TTL. Other disable reasons
+	// (admin / pending / blocked) stay hard-blocked.
+	if !u.Enabled && !domain.SelfServiceDisableReason(u.AutoDisabledReason) {
 		c.JSON(http.StatusUnauthorized, gin.H{
 			"error":  disabledReasonMessage(u.AutoDisabledReason),
 			"reason": string(u.AutoDisabledReason),

@@ -35,6 +35,18 @@ const (
 	DisabledBlockedClient   AutoDisabledReason = "blocked_client"
 )
 
+// SelfServiceDisableReason reports whether an auto-disabled user with this
+// reason may still authenticate (log in AND refresh tokens) so they can reach
+// the self-service emergency-access page and rescue themselves. Only
+// traffic-exceeded and expired qualify; admin-disabled / pending / blocked
+// users stay locked out. Single source of truth for the login path
+// (user.VerifyLocalPassword) and the token-refresh path (auth handler) so they
+// can't drift — a refresh that's stricter than login bounces these users back
+// to the login screen every access-TTL.
+func SelfServiceDisableReason(r AutoDisabledReason) bool {
+	return r == DisabledTrafficExceeded || r == DisabledExpired
+}
+
 // Protocol identifies a 3X-UI inbound's protocol family.
 // Used by pkg/crypto.DeriveProxyPassword to pick the right derivation rule.
 type Protocol string

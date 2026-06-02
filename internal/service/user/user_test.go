@@ -164,6 +164,19 @@ func TestEmergencyStatus_UsedBytesZeroWhenNoActiveWindow(t *testing.T) {
 // (see internal/service/auth/role_test.go) because the policy moved
 // out of this package — user.EnsureSSO just calls auth.ResolveRoleForSSO.
 
+// TestRunUserResyncTask_DeletedUserIsDone pins that a resync task for a
+// since-deleted user completes (nil) instead of failing with ErrNotFound and
+// being retried ~100x by the task processor.
+func TestRunUserResyncTask_DeletedUserIsDone(t *testing.T) {
+	svc := &Service{users: &memoryUserRepo{byID: map[int64]*domain.User{}}} // user 999 absent
+	err := svc.runUserTask(context.Background(), &domain.SyncTask{
+		Type: domain.SyncTaskUserResync, TargetID: 999,
+	})
+	if err != nil {
+		t.Fatalf("resync of a deleted user should be a no-op, got %v", err)
+	}
+}
+
 func TestEnsureSSO_FirstLoginPersistsLocalAccountBinding(t *testing.T) {
 	ctx := context.Background()
 	repo := &memoryUserRepo{
