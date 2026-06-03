@@ -4,6 +4,40 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## v3.6.3 — 2026-06-02
+
+正式版。汇总 v3.6.3-beta.1 → beta.15 全部改动,beta.15 内容直发为正式版定稿。本次在 v3.6.x
+线内同时带来三个新功能(访问日志 IP 地区显示 / 一等公民认证日志 / 按节点用量明细)、一轮全面
+审计后的修复批次,以及对 3X-UI 3.2.6 的兼容复核与端点提效,无 schema 破坏性变更。完整逐项见
+下方各 pre-release 段落,下面只列核心叙事。
+
+### 主要变化（叙事性总述）
+
+- **访问日志 IP 地区显示,完全离线(beta.1,beta.2–4 细化、beta.8 三类日志统一)**:订阅 / 审计 /
+  认证日志的每条记录在 IP 下方显示来源地区(国旗 + 国家 · 州/省 · 城市),用本地 `.mmdb` 库做内存
+  查询——不外呼、不缓存、不落库,用户真实 IP 不离开服务器。可选自动更新(maxmind 默认 / dbip /
+  ipinfo / custom,走 SSRF 防护、只下公共库),设置页可配激活库与来源。诚实标注免费库"国家级可靠、
+  城市级仅供参考、代理出口 IP 会落到机房"。
+- **一等公民认证日志 `auth_events`(beta.5)**:本地 / SAML / OIDC 三种登录的成功 + 失败,统一在
+  各自认证判定点留痕(用户 / 方法 / 结果 / 失败原因码 / IP+地区 / UA / 时间),闭合此前"SSO 登录
+  完全不留痕"的合规盲区。后台「认证日志」tab + 用户弹窗「最近登录」面板,独立保留期。
+- **按节点用量明细(beta.9)**:用户编辑弹窗展示该用户在每个节点的 累计 / 本周期 / 今日 用量(各
+  拆上下行)。新增 per-client 周期 baseline,保证 Σ每节点本周期 == 用户本周期。
+- **全面审计 + 全量 review backlog 修复(beta.1 的 19 维度审计 + beta.10–14 五批,全程 TDD)**:关键
+  项——3X-UI cookie 认证 401 重认证无界递归会 fatal stack-overflow 拖垮整个进程(HIGH)、geo mmdb
+  use-after-munmap 崩进程(HIGH)、operator 越权读节点密钥 / 看 admin 用量、邮件正文 HTML 注入、
+  SAML 空 Assertion-ID 绕过防重放、OIDC token 交换无 SSRF 防护、「0=永不清理」被静默改写、可把最后
+  一个 admin 降级锁死后台等。每批改动后跑并行 review agent + 对抗验证,逐项补回归 / drift 测试。
+- **3X-UI 3.2.6 兼容复核 + 端点提效(beta.15,全程 TDD)**:在真实 3.2.0 + 3.2.6 面板端到端实测,
+  已测上限 3.2.0→3.2.6(`min_xui` 仍 3.2.0)。采纳 3.2.x 更省端点降负载 / 少重启:流量轮询改
+  `/inbounds/list/slim`、按 email 取单 client 走 `/clients/get`、删节点 / 删用户走 `bulkDel`、挂
+  节点批量加用户走 `bulkCreate`(N 次网络 + N 次 xray 重启收成 1 次,保「重复即收养」语义)。
+- **流量图表 / 存储管线(beta.1,beta.2 精度)**:超过 ~7 天的历史图表此前静默渲染成平 0(读取从没
+  切到 hourly rollup),改读 rollup 后真实覆盖到保留窗口;停掉只写不读的 client hourly 死存储;修
+  跨小时边界系统性少算 ~8%、rollup 写放大等。
+- **部署 / 编辑器(beta.5 / beta.6)**:Docker 改回非 root(su-exec 降权 + PUID/PGID,镜像扫描 / 合规
+  友好);规则集内容编辑器换 CodeMirror(懒加载,修上千行规则集打字卡顿、首屏 bundle 零影响)。
+
 ## v3.6.3-beta.15 — 2026-06-02
 
 3X-UI 3.2.6 兼容性复核(已测上限 3.2.0→3.2.6),并采纳 3.2.x 新增的更省端点降低面板负载与 xray 重启次数。全程 TDD(slim / 批量加用户为严格 test-first)。
