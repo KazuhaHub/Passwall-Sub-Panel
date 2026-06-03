@@ -4,6 +4,15 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## v3.6.3-beta.16 — 2026-06-02
+
+认证日志保留改为自由可配;「按节点用量」从用户编辑弹窗搬到 Traffic 页。
+
+### Changed
+
+- **认证日志保留天数改为自由可配(默认 90,0 = 永不清理),后端 TDD** —— 原先 loader 把 `<=0` 硬 floor 成 90、又没有「0=永久」逃生口,UI 写「最小 90」但显式小值其实前后端都没拦(名不副实)。改为和 `traffic_history_days` 一致:默认 90 仅在「键从未写过」时由 key-presence 补(`settings_kv_repo.Load`);显式 0 = 永不清理(`pruneAuthEvents` 的 `<=0` 守卫此后是 load-bearing 的);任意正数照单全收(删掉 `applyUISettingsDefaults` 的硬 floor)。前端 hint「最小 90」→「0=永不清理,默认 90」。新增 `TestKVSettings_AuthEventRetentionFreelyEditable`(默认 / 0=永久 / 显式值三态)。
+- **「按节点用量」从用户编辑弹窗搬到 Traffic 页** —— 节点越来越多时,编辑弹窗左栏那张 per-node 表越拉越长会撑爆弹窗。改为:`Traffic → Trend` 选中**某个具体用户**时,在图表下方显示该用户的按节点 累计 / 本周期 / 今日 明细;选「所有用户」或 By node 时不显示。编辑弹窗里换成一行「查看用量 →」深链(`/admin/traffic?tab=trend&scope=user&user=<id>`),点了跳 Traffic 并预选该用户。复用现成 `UserNodeUsage` 组件,后端接口零改动;`tsc -b` 通过。
+
 ## v3.6.3 — 2026-06-02
 
 正式版。汇总 v3.6.3-beta.1 → beta.15 全部改动,beta.15 内容直发为正式版定稿。本次在 v3.6.x

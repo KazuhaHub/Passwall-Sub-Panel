@@ -77,8 +77,8 @@ func (r *kvSettingsRepo) Load(ctx context.Context, defaults ports.UISettings) (p
 		}
 	}
 
-	// 0 = "keep forever" for these two retention fields (their UI hints say so),
-	// so the bounded default applies ONLY when the key was never written — an
+	// 0 = "keep forever" for these retention fields (their UI hints say so), so
+	// the bounded default applies ONLY when the key was never written — an
 	// explicit 0 must survive. Key-presence is the only way to distinguish unset
 	// from an explicit 0 (both are the int zero); applyUISettingsDefaults can't.
 	// Guarded on out.X==0 so a non-zero caller default still wins for an unset key.
@@ -88,15 +88,19 @@ func (r *kvSettingsRepo) Load(ctx context.Context, defaults ports.UISettings) (p
 	if _, ok := byKey["sub.sub_log_retention_days"]; !ok && out.SubLogRetentionDays == 0 {
 		out.SubLogRetentionDays = defaultSubLogRetentionDays
 	}
+	if _, ok := byKey["security.auth_event_retention_days"]; !ok && out.AuthEventRetentionDays == 0 {
+		out.AuthEventRetentionDays = defaultAuthEventRetentionDays
+	}
 
 	return applyUISettingsDefaults(out, defaults), nil
 }
 
-// Defaults for the two "0 = keep forever" retention fields, applied by Load
-// only when the key is absent (see Load).
+// Defaults for the "0 = keep forever" retention fields, applied by Load only
+// when the key is absent (see Load).
 const (
-	defaultTrafficHistoryDays  = 730 // 2y: 2x the longest "last 1 year" chart range
-	defaultSubLogRetentionDays = 7
+	defaultTrafficHistoryDays     = 730 // 2y: 2x the longest "last 1 year" chart range
+	defaultSubLogRetentionDays    = 7
+	defaultAuthEventRetentionDays = 90 // compliance-friendly default; admin may lower or set 0=forever
 )
 
 func (r *kvSettingsRepo) Save(ctx context.Context, s ports.UISettings) error {
@@ -395,12 +399,13 @@ func applyUISettingsDefaults(out, defaults ports.UISettings) ports.UISettings {
 	if out.SubPath == "" {
 		out.SubPath = "sub"
 	}
-	// NOTE: SubLogRetentionDays and TrafficHistoryDays are NOT floored here.
-	// Their UI hints promise "0 = keep forever", and a floor can't tell an
-	// explicit 0 from an unset field (both are the int zero). Load resolves
-	// their default by key-presence instead (see Load); an explicit 0 must
-	// survive so the prune's `> 0` / `<= 0` guards skip pruning. 730 (2y) for
-	// traffic gives the longest "last 1 year" chart range a full year of buffer.
+	// NOTE: SubLogRetentionDays, TrafficHistoryDays and AuthEventRetentionDays
+	// are NOT floored here. Their UI hints promise "0 = keep forever" and the
+	// admin may freely lower them; a floor can't tell an explicit 0 from an
+	// unset field (both are the int zero). Load resolves their default by
+	// key-presence instead (see Load); an explicit 0 must survive so the prune's
+	// `> 0` / `<= 0` guards skip pruning. 730 (2y) for traffic gives the longest
+	// "last 1 year" chart range a full year of buffer; auth defaults to 90.
 	if out.MailSentRetentionDays <= 0 {
 		out.MailSentRetentionDays = 30
 	}
@@ -423,11 +428,6 @@ func applyUISettingsDefaults(out, defaults ports.UISettings) ports.UISettings {
 		// Floor at 1h so a stray 0 (or a careless setting) can't turn the
 		// updater into a tight loop against MaxMind / DB-IP. 12h default.
 		out.GeoIPUpdateIntervalHours = 12
-	}
-	if out.AuthEventRetentionDays <= 0 {
-		// Floor to 90d (like traffic_history_days) so the auth log stays
-		// bounded; enterprises wanting longer retention set a larger value.
-		out.AuthEventRetentionDays = 90
 	}
 	// Unified client registry (v3.3.0). When absent, either migrate the legacy
 	// two-table config (sub_client_rules + sub_import_clients) in place — a

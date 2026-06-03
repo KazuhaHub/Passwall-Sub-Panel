@@ -809,9 +809,10 @@ func (a *App) pruneAudit(ctx context.Context) {
 }
 
 // pruneAuthEvents trims the first-class authentication-event log on its own
-// retention (auth_event_retention_days, floored to 90 by the loader, so the
-// <=0 guard is defensive). Uses the repo directly — there's no auth-event
-// service, just the data layer + handler.
+// retention (auth_event_retention_days; default 90, but admin may set 0 =
+// keep forever, so the <=0 guard below is load-bearing, not defensive). Uses
+// the repo directly — there's no auth-event service, just the data layer +
+// handler.
 func (a *App) pruneAuthEvents(ctx context.Context) {
 	if a.repos.AuthEvent == nil || a.settings == nil {
 		return

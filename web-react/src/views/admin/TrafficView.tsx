@@ -38,6 +38,7 @@ import {
   type TrafficRow,
 } from '@/api/traffic'
 import type { Node, User } from '@/api/types'
+import { UserNodeUsage } from './UserNodeUsage'
 import { getUISettings } from '@/api/settings'
 import { pushSnack } from '@/components/SnackbarHost'
 import { useTabParam } from '@/hooks/useTabParam'
@@ -118,7 +119,13 @@ export default function TrafficView() {
   const [pollLoading, setPollLoading] = useState(false)
 
   const [limit, setLimit] = useState(20)
-  const [selectedUserId, setSelectedUserId] = useState<number>(0)
+  // Pre-select a user from the deep-link (?user=N) the user-edit dialog opens —
+  // "View usage" jumps here with that user already chosen. One-shot read on
+  // mount; 0 = all users.
+  const [selectedUserId, setSelectedUserId] = useState<number>(() => {
+    const u = Number(new URLSearchParams(window.location.search).get('user'))
+    return Number.isFinite(u) && u > 0 ? u : 0
+  })
   const [selectedNodeId, setSelectedNodeId] = useState<number>(0)
   const [period, setPeriod] = useState<TrafficHistoryPeriod>('day')
   const [rangeDays, setRangeDays] = useState(30)
@@ -484,6 +491,16 @@ export default function TrafficView() {
               {t('traffic.trend.chart_note')}
             </Typography>
           </Card>
+
+          {/* Per-node usage breakdown — only when ONE specific user is
+              selected (not "all users", and not the by-node scope). Moved here
+              from the user-edit dialog so a growing node list can't bloat the
+              modal. */}
+          {scope === 'user' && selectedUserId !== 0 && (
+            <Card sx={{ bgcolor: md.surfaceContainerLow, boxShadow: '0 1px 2px rgba(0,0,0,.3),0 1px 3px 1px rgba(0,0,0,.15)', p: 2, mt: 2 }}>
+              <UserNodeUsage userId={selectedUserId} />
+            </Card>
+          )}
         </>
       )}
     </Box>

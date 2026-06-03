@@ -51,6 +51,52 @@ func TestKVSettings_ZeroRetentionMeansForever(t *testing.T) {
 	}
 }
 
+// TestKVSettings_AuthEventRetentionFreelyEditable pins that
+// auth_event_retention_days behaves like the other retention fields: 90 is only
+// the DEFAULT (applied when the key was never written), an explicit 0 persists
+// as keep-forever, and any explicit positive value is honored as-is (not floored
+// up to 90). Previously the loader hard-floored <=0 to 90, so admins could not
+// set a shorter retention or keep-forever.
+func TestKVSettings_AuthEventRetentionFreelyEditable(t *testing.T) {
+	db, err := Open("sqlite", filepath.Join(t.TempDir(), "panel.db"))
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	t.Cleanup(func() { sqlDB, _ := db.DB(); _ = sqlDB.Close() })
+	if err := EnsureSchema(db); err != nil {
+		t.Fatalf("schema: %v", err)
+	}
+	repo := newKVSettingsRepo(db)
+	ctx := context.Background()
+
+	// Fresh: never saved → 90 default.
+	fresh, _ := repo.Load(ctx, ports.UISettings{})
+	if fresh.AuthEventRetentionDays != 90 {
+		t.Errorf("fresh auth_event_retention_days = %d, want 90 default", fresh.AuthEventRetentionDays)
+	}
+
+	// Explicit 0 = keep forever — must survive, not be floored to 90.
+	s := fresh
+	s.AuthEventRetentionDays = 0
+	if err := repo.Save(ctx, s); err != nil {
+		t.Fatalf("save 0: %v", err)
+	}
+	got, _ := repo.Load(ctx, ports.UISettings{})
+	if got.AuthEventRetentionDays != 0 {
+		t.Errorf("explicit auth_event_retention_days=0 came back %d; 0 must persist as keep-forever", got.AuthEventRetentionDays)
+	}
+
+	// Explicit positive below the old floor is honored as-is.
+	s.AuthEventRetentionDays = 45
+	if err := repo.Save(ctx, s); err != nil {
+		t.Fatalf("save 45: %v", err)
+	}
+	got, _ = repo.Load(ctx, ports.UISettings{})
+	if got.AuthEventRetentionDays != 45 {
+		t.Errorf("explicit auth_event_retention_days=45 came back %d; admin value must be honored, not floored to 90", got.AuthEventRetentionDays)
+	}
+}
+
 // TestKVSettingsRoundtrip walks the v3.0.0 KV repo end-to-end: Save → SELECT
 // against the raw schema → Load → check that every descriptor's typed
 // field survives the round trip. This is the only test that exercises the

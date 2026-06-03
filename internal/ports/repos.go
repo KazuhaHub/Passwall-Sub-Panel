@@ -623,8 +623,10 @@ type UISettings struct {
 
 	// AuthEventRetentionDays bounds how long the authentication-event log is
 	// kept — separate from AuditRetentionDays so logins can be retained on their
-	// own (e.g. longer for compliance) schedule. Default 90; the loader floors
-	// <=0 to 90 (mirrors traffic_history_days) so the log stays bounded.
+	// own (e.g. longer for compliance) schedule. Freely editable like
+	// traffic_history_days: default 90 (applied only when the key was never set,
+	// by key-presence in Load); an explicit 0 = keep forever and any positive
+	// value is honored as-is (not floored).
 	AuthEventRetentionDays int `json:"auth_event_retention_days"`
 
 	// ---- Subscription settings ----

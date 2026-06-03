@@ -84,7 +84,7 @@
       "max_panel_concurrency_hint": "并发拉取每个 3X-UI 面板入站数据的上限。0 = 使用默认值 8。单面板部署调高无意义；多面板（5+）且 3X-UI 服务器空闲时可调到 16-32。> 64 会被自动夹回 64。",
       "audit_retention_days": "审计日志保留（天）",
       "auth_event_retention_days": "认证日志保留（天）",
-      "auth_event_retention_days_hint": "登录日志（含失败）的保留天数；最小 90。",
+      "auth_event_retention_days_hint": "登录日志（含失败）的保留天数。0 = 永不清理。默认 90（合规友好）。",
       "sync_task_retention_days": "同步任务保留（天）",
       "traffic_history_days": "流量历史保留（天）",
       "traffic_history_days_hint": "图表能往回看多少天。超过自动清理。raw 5 分钟原始数据固定保留 7 天用于今天实时刷新；这个值控制 hourly 滚动表的保留长度。0 = 永不清理。默认 730（两年，给\"最近一年\"留一倍 buffer）。",
@@ -983,6 +983,7 @@
       "limit": "上限",
       "unlimited": "不限",
       "lifetime": "Lifetime 总量",
+      "view_usage": "查看用量",
       "created_at": "创建于"
     },
     "table": {

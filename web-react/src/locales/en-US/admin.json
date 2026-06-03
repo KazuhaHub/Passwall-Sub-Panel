@@ -84,7 +84,7 @@
       "max_panel_concurrency_hint": "Maximum parallel ListInbounds fan-out across 3X-UI panels. 0 uses the built-in default of 8. Raising it does nothing for single-panel deployments; useful only with 5+ panels where 3X-UI has spare CPU. Values above 64 clamp down.",
       "audit_retention_days": "Audit log retention (days)",
       "auth_event_retention_days": "Auth log retention (days)",
-      "auth_event_retention_days_hint": "How long login events (including failures) are kept; minimum 90.",
+      "auth_event_retention_days_hint": "How long login events (including failures) are kept. 0 = never prune. Default 90 (compliance-friendly).",
       "sync_task_retention_days": "Sync task retention (days)",
       "traffic_history_days": "Traffic history retention (days)",
       "traffic_history_days_hint": "How far back the chart can render. Older data is auto-pruned. Raw 5-min snapshots are kept for a fixed 7-day window for \"today\" live refresh; this knob controls the hourly rollup table's retention. 0 = never prune. Default 730 (2y, gives \"last 1 year\" 1× buffer).",
@@ -983,6 +983,7 @@
       "limit": "Limit",
       "unlimited": "Unlimited",
       "lifetime": "Lifetime total",
+      "view_usage": "View usage",
       "created_at": "Created"
     },
     "table": {
