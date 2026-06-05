@@ -42,6 +42,8 @@ import { confirm } from '@/components/ConfirmHost'
 import { pushSnack } from '@/components/SnackbarHost'
 import { PagedTableFooter } from '@/components/PagedTableFooter'
 import { useTabParam } from '@/hooks/useTabParam'
+import { formatDualTz } from '@/utils/datetime'
+import CertEventsTab from './CertEventsTab'
 import { useSiteStore } from '@/stores/site'
 
 // Initial page size pulled from the shared psp_page_size key so the
@@ -58,23 +60,6 @@ function persistPageSize(n: number) {
   try { localStorage.setItem('psp_page_size', String(n)) } catch { /* ignore */ }
 }
 
-// formatDualTz renders the timestamp in the panel timezone first (the
-// "system view" everything else in the panel reports against) with the
-// browser-local rendering in parentheses. Falls back to a single value
-// when the two timezones happen to be identical or panel tz is unset.
-function formatDualTz(s: string | undefined, panelTz: string): string {
-  if (!s) return '-'
-  const d = new Date(s)
-  if (Number.isNaN(d.getTime())) return '-'
-  let bz = ''
-  try { bz = Intl.DateTimeFormat().resolvedOptions().timeZone } catch { bz = '' }
-  const panelStr = panelTz
-    ? d.toLocaleString(undefined, { timeZone: panelTz })
-    : d.toLocaleString()
-  if (!panelTz || panelTz === bz) return panelStr
-  const browserStr = d.toLocaleString()
-  return `${panelStr} (${browserStr})`
-}
 
 function formatJson(s?: string) {
   if (!s) return ''
@@ -88,7 +73,7 @@ export default function LogsView() {
   const canConfig = useCan('config.write')
   const panelTz = useSiteStore(s => s.timezone)
 
-  const [tab, setTab] = useTabParam<'sub' | 'audit' | 'auth' | 'email'>('tab', 'sub', ['sub', 'audit', 'auth', 'email'])
+  const [tab, setTab] = useTabParam<'sub' | 'audit' | 'auth' | 'email' | 'certs'>('tab', 'sub', ['sub', 'audit', 'auth', 'email', 'certs'])
 
   // Sub logs
   const [subItems, setSubItems] = useState<SubLog[]>([])
@@ -324,6 +309,7 @@ export default function LogsView() {
         <Tab value="audit" label={t('admin:logs.tab_audit')} />
         <Tab value="auth" label={t('admin:logs.tab_auth', { defaultValue: '认证日志' })} />
         <Tab value="email" label={t('admin:logs.tab_email')} />
+        <Tab value="certs" label={t('admin:logs.tab_certs')} />
       </Tabs>
 
       {tab === 'sub' && (
@@ -663,6 +649,8 @@ export default function LogsView() {
           </Card>
         </>
       )}
+
+      {tab === 'certs' && <CertEventsTab />}
 
       {/* Email log detail */}
       <Dialog open={emailDetailOpen} onClose={() => setEmailDetailOpen(false)}

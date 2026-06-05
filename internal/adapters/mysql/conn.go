@@ -128,5 +128,6 @@ func NewRepos(db *gorm.DB) ports.Repos {
 		Certificate:   &certificateRepo{db: db},
 		DNSCredential: &dnsCredentialRepo{db: db},
 		ACMEAccount:   &acmeAccountRepo{db: db},
+		CertEvent:     &certEventRepo{db: db},
 	}
 }

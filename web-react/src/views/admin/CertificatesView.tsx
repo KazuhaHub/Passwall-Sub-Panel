@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import {
   Autocomplete,
   Box,
@@ -10,6 +10,7 @@ import {
   DialogActions,
   DialogContent,
   DialogTitle,
+  Divider,
   FormControl,
   FormControlLabel,
   IconButton,
@@ -34,6 +35,9 @@ import AddIcon from '@mui/icons-material/Add'
 import DeleteIcon from '@mui/icons-material/DeleteOutline'
 import EditIcon from '@mui/icons-material/EditOutlined'
 import AutorenewIcon from '@mui/icons-material/Autorenew'
+import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined'
+import DownloadIcon from '@mui/icons-material/Download'
+import ContentCopyIcon from '@mui/icons-material/ContentCopy'
 import { useTranslation } from 'react-i18next'
 
 import {
@@ -41,19 +45,26 @@ import {
   createDNSCred,
   deleteCert,
   deleteDNSCred,
+  downloadCert,
+  getCertDetail,
   listCerts,
   listDNSCreds,
   listDNSProviders,
   renewCert,
   updateDNSCred,
   type Cert,
+  type CertTask,
   type DNSCredential,
   type DNSProviderInfo,
 } from '@/api/certs'
 import { getUISettings, putUISettings, type UISettings } from '@/api/settings'
 import PageHeader from '@/components/PageHeader'
+import { PagedTableFooter } from '@/components/PagedTableFooter'
 import { confirm } from '@/components/ConfirmHost'
 import { pushSnack } from '@/components/SnackbarHost'
+import { copyToClipboard } from '@/utils/clipboard'
+import { formatDualTz } from '@/utils/datetime'
+import { useSiteStore } from '@/stores/site'
 
 const LE_PROD = 'https://acme-v02.api.letsencrypt.org/directory'
 const LE_STAGING = 'https://acme-staging-v02.api.letsencrypt.org/directory'
@@ -64,27 +75,37 @@ function statusColor(md: Record<string, string>, status: string): string {
       return md.primary
     case 'failed':
       return md.error
-    default: // pending / renewing
+    case 'expired':
+      return '#c98a2b' // amber — a valid cert past its expiry, needs renewal
+    default: // pending (issuing)
       return md.onSurfaceVariant
   }
 }
 
-function fmtDate(iso: string | null): string {
-  if (!iso) return '—'
-  const d = new Date(iso)
-  return isNaN(d.getTime()) ? '—' : d.toLocaleDateString()
+function DetailRow({ md, label, children }: { md: Record<string, string>; label: string; children: ReactNode }) {
+  return (
+    <Box sx={{ display: 'flex', gap: 2, alignItems: 'flex-start' }}>
+      <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant, minWidth: 96, pt: 0.25 }}>{label}</Typography>
+      <Box sx={{ fontSize: 13, flex: 1, minWidth: 0 }}>{children}</Box>
+    </Box>
+  )
 }
 
 export default function CertificatesView() {
   const theme = useTheme()
   const md = theme.palette.md as unknown as Record<string, string>
   const { t } = useTranslation(['admin', 'common'])
+  const panelTz = useSiteStore(s => s.timezone)
 
   const [tab, setTab] = useState(0)
   const [certs, setCerts] = useState<Cert[]>([])
   const [creds, setCreds] = useState<DNSCredential[]>([])
   const [providers, setProviders] = useState<DNSProviderInfo[]>([])
   const [loading, setLoading] = useState(true)
+  const [certPage, setCertPage] = useState(1)
+  const [certPageSize, setCertPageSize] = useState(25)
+  const [credPage, setCredPage] = useState(1)
+  const [credPageSize, setCredPageSize] = useState(25)
 
   const reload = useCallback(async () => {
     setLoading(true)
@@ -163,12 +184,73 @@ export default function CertificatesView() {
       title: t('admin:certs.delete_title'),
       message: t('admin:certs.delete_confirm', { name: c.name }),
       destructive: true,
-      confirmText: t('common:delete'),
+      confirmText: t('common:actions.delete'),
     })
     if (!ok) return
     await deleteCert(c.id)
     pushSnack(t('admin:certs.deleted'), 'success')
     reload()
+  }
+
+  // ---- cert detail dialog ----
+  const [detailOpen, setDetailOpen] = useState(false)
+  const [detailCert, setDetailCert] = useState<Cert | null>(null)
+  const [detailTask, setDetailTask] = useState<CertTask | null>(null)
+  const [detailLoading, setDetailLoading] = useState(false)
+  const [downloading, setDownloading] = useState(false)
+
+  async function openDetail(c: Cert) {
+    setDetailCert(c)
+    setDetailTask(null)
+    setDetailOpen(true)
+    setDetailLoading(true)
+    try {
+      const d = await getCertDetail(c.id)
+      setDetailCert(d.cert)
+      setDetailTask(d.task ?? null)
+    } catch {
+      /* error toast via the axios interceptor */
+    } finally {
+      setDetailLoading(false)
+    }
+  }
+
+  function triggerDownload(filename: string, content: string) {
+    const blob = new Blob([content], { type: 'application/x-pem-file' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = filename
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    URL.revokeObjectURL(url)
+  }
+
+  async function onCopyCert(id: number) {
+    setDownloading(true)
+    try {
+      const pem = await downloadCert(id)
+      await copyToClipboard(pem.cert_pem)
+    } catch {
+      /* toast */
+    } finally {
+      setDownloading(false)
+    }
+  }
+
+  async function onDownloadPEM(id: number, which: 'cert' | 'key') {
+    setDownloading(true)
+    try {
+      const pem = await downloadCert(id)
+      const base = (pem.name || 'cert').replace(/[^a-zA-Z0-9._-]/g, '_')
+      if (which === 'cert') triggerDownload(`${base}.fullchain.pem`, pem.cert_pem)
+      else triggerDownload(`${base}.key.pem`, pem.key_pem)
+    } catch {
+      /* toast */
+    } finally {
+      setDownloading(false)
+    }
   }
 
   // ---- DNS credential dialog ----
@@ -261,7 +343,7 @@ export default function CertificatesView() {
       title: t('admin:certs.cred_delete_title'),
       message: t('admin:certs.cred_delete_confirm', { name: c.name }),
       destructive: true,
-      confirmText: t('common:delete'),
+      confirmText: t('common:actions.delete'),
     })
     if (!ok) return
     await deleteDNSCred(c.id)
@@ -320,92 +402,109 @@ export default function CertificatesView() {
           {creds.length === 0 && (
             <Typography sx={{ fontSize: 13, color: md.onSurfaceVariant, mb: 1.5 }}>{t('admin:certs.need_cred_first')}</Typography>
           )}
-          <TableContainer>
-            <Table size="small">
-              <TableHead>
-                <TableRow>
-                  <TableCell>{t('admin:certs.col_name')}</TableCell>
-                  <TableCell>{t('admin:certs.col_domains')}</TableCell>
-                  <TableCell>{t('admin:certs.col_status')}</TableCell>
-                  <TableCell>{t('admin:certs.col_expiry')}</TableCell>
-                  <TableCell align="right">{t('common:actions')}</TableCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {loading && (
-                  <TableRow>
-                    <TableCell colSpan={5} align="center">
-                      <CircularProgress size={22} />
-                    </TableCell>
+          <Card sx={{ bgcolor: md.surfaceContainerLow, boxShadow: '0 1px 2px rgba(0,0,0,.3),0 1px 3px 1px rgba(0,0,0,.15)', overflow: 'hidden' }}>
+            <TableContainer>
+              <Table>
+                <TableHead>
+                  <TableRow sx={{ '& th': { color: md.onSurfaceVariant, fontWeight: 500, fontSize: 12, textTransform: 'uppercase', letterSpacing: '.5px', borderBottom: `1px solid ${md.outlineVariant}` } }}>
+                    <TableCell>{t('admin:certs.col_name')}</TableCell>
+                    <TableCell>{t('admin:certs.col_domains')}</TableCell>
+                    <TableCell>{t('admin:certs.col_status')}</TableCell>
+                    <TableCell>{t('admin:certs.col_expiry')}</TableCell>
+                    <TableCell align="right">{t('admin:certs.col_actions')}</TableCell>
                   </TableRow>
-                )}
-                {!loading && certs.length === 0 && (
-                  <TableRow>
-                    <TableCell colSpan={5} align="center" sx={{ color: md.onSurfaceVariant }}>
-                      {t('common:empty')}
-                    </TableCell>
-                  </TableRow>
-                )}
-                {certs.map(c => (
-                  <TableRow key={c.id} hover>
-                    <TableCell>{c.name}</TableCell>
-                    <TableCell sx={{ fontFamily: 'monospace', fontSize: 12 }}>{c.domains.join(', ')}</TableCell>
-                    <TableCell>
-                      <Tooltip title={c.last_error || ''} disableHoverListener={!c.last_error}>
-                        <Chip
-                          label={t(`admin:certs.status.${c.status}`, { defaultValue: c.status })}
-                          size="small"
-                          sx={{ bgcolor: statusColor(md, c.status), color: md.surface ?? '#fff', height: 22 }}
-                        />
-                      </Tooltip>
-                    </TableCell>
-                    <TableCell>{fmtDate(c.not_after)}</TableCell>
-                    <TableCell align="right">
-                      <Tooltip title={t('admin:certs.renew')}>
-                        <IconButton size="small" onClick={() => onRenew(c)}>
-                          <AutorenewIcon fontSize="small" />
-                        </IconButton>
-                      </Tooltip>
-                      <Tooltip title={t('common:delete')}>
-                        <IconButton size="small" onClick={() => onDeleteCert(c)}>
-                          <DeleteIcon fontSize="small" />
-                        </IconButton>
-                      </Tooltip>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </TableContainer>
+                </TableHead>
+                <TableBody>
+                  {loading && (
+                    <TableRow>
+                      <TableCell colSpan={5} align="center">
+                        <CircularProgress size={22} />
+                      </TableCell>
+                    </TableRow>
+                  )}
+                  {!loading && certs.length === 0 && (
+                    <TableRow>
+                      <TableCell colSpan={5} align="center" sx={{ color: md.onSurfaceVariant }}>
+                        {t('common:empty')}
+                      </TableCell>
+                    </TableRow>
+                  )}
+                  {certs.slice((certPage - 1) * certPageSize, certPage * certPageSize).map(c => (
+                    <TableRow key={c.id} hover>
+                      <TableCell>{c.name}</TableCell>
+                      <TableCell sx={{ fontFamily: 'monospace', fontSize: 12 }}>{c.domains.join(', ')}</TableCell>
+                      <TableCell>
+                        <Tooltip title={c.last_error || ''} disableHoverListener={!c.last_error}>
+                          <Chip
+                            label={t(`admin:certs.status.${c.status}`, { defaultValue: c.status })}
+                            size="small"
+                            sx={{ bgcolor: statusColor(md, c.status), color: md.surface ?? '#fff', height: 22 }}
+                          />
+                        </Tooltip>
+                      </TableCell>
+                      <TableCell sx={{ whiteSpace: 'nowrap', fontSize: 13 }}>{formatDualTz(c.not_after, panelTz)}</TableCell>
+                      <TableCell align="right" sx={{ whiteSpace: 'nowrap' }}>
+                        <Tooltip title={t('admin:certs.detail_title')}>
+                          <IconButton size="small" onClick={() => openDetail(c)}>
+                            <InfoOutlinedIcon fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                        <Tooltip title={t('admin:certs.renew')}>
+                          <IconButton size="small" onClick={() => onRenew(c)}>
+                            <AutorenewIcon fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                        <Tooltip title={t('common:actions.delete')}>
+                          <IconButton size="small" onClick={() => onDeleteCert(c)}>
+                            <DeleteIcon fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </TableContainer>
+            <PagedTableFooter
+              total={certs.length} page={certPage} pageSize={certPageSize}
+              onPageChange={setCertPage} onPageSizeChange={s => { setCertPageSize(s); setCertPage(1) }}
+            />
+          </Card>
         </>
       )}
 
       {/* ---- Tab 1: DNS credentials ---- */}
       {tab === 1 && (
-        <>
+        <Card sx={{ bgcolor: md.surfaceContainerLow, boxShadow: '0 1px 2px rgba(0,0,0,.3),0 1px 3px 1px rgba(0,0,0,.15)', overflow: 'hidden' }}>
           <TableContainer>
-            <Table size="small">
+            <Table>
               <TableHead>
-                <TableRow>
+                <TableRow sx={{ '& th': { color: md.onSurfaceVariant, fontWeight: 500, fontSize: 12, textTransform: 'uppercase', letterSpacing: '.5px', borderBottom: `1px solid ${md.outlineVariant}` } }}>
                   <TableCell>{t('admin:certs.col_name')}</TableCell>
                   <TableCell>{t('admin:certs.cred_provider')}</TableCell>
                   <TableCell>{t('admin:certs.cred_keys')}</TableCell>
-                  <TableCell align="right">{t('common:actions')}</TableCell>
+                  <TableCell align="right">{t('admin:certs.col_actions')}</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
-                {creds.map(c => (
+                {creds.slice((credPage - 1) * credPageSize, credPage * credPageSize).map(c => (
                   <TableRow key={c.id} hover>
                     <TableCell>{c.name}</TableCell>
                     <TableCell sx={{ fontFamily: 'monospace', fontSize: 12 }}>{c.provider}</TableCell>
-                    <TableCell sx={{ fontFamily: 'monospace', fontSize: 12, color: md.onSurfaceVariant }}>{c.keys.join(', ')}</TableCell>
+                    <TableCell>
+                      <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap' }}>
+                        {c.keys.map(k => (
+                          <Chip key={k} label={k} size="small" variant="outlined" sx={{ fontFamily: 'monospace', fontSize: 11, height: 22 }} />
+                        ))}
+                      </Box>
+                    </TableCell>
                     <TableCell align="right">
-                      <Tooltip title={t('common:edit')}>
+                      <Tooltip title={t('common:actions.edit')}>
                         <IconButton size="small" onClick={() => openCred(c)}>
                           <EditIcon fontSize="small" />
                         </IconButton>
                       </Tooltip>
-                      <Tooltip title={t('common:delete')}>
+                      <Tooltip title={t('common:actions.delete')}>
                         <IconButton size="small" onClick={() => onDeleteCred(c)}>
                           <DeleteIcon fontSize="small" />
                         </IconButton>
@@ -423,7 +522,11 @@ export default function CertificatesView() {
               </TableBody>
             </Table>
           </TableContainer>
-        </>
+          <PagedTableFooter
+            total={creds.length} page={credPage} pageSize={credPageSize}
+            onPageChange={setCredPage} onPageSizeChange={s => { setCredPageSize(s); setCredPage(1) }}
+          />
+        </Card>
       )}
 
       {/* ---- Tab 2: ACME settings ---- */}
@@ -478,7 +581,7 @@ export default function CertificatesView() {
               </Box>
               <Box>
                 <Button variant="contained" onClick={saveACME} disabled={acmeBusy}>
-                  {acmeBusy ? <CircularProgress size={20} /> : t('common:save')}
+                  {acmeBusy ? <CircularProgress size={20} /> : t('common:actions.save')}
                 </Button>
               </Box>
             </Box>
@@ -486,10 +589,87 @@ export default function CertificatesView() {
         </Card>
       )}
 
+      {/* cert detail dialog */}
+      <Dialog open={detailOpen} onClose={() => setDetailOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>{t('admin:certs.detail_title')}{detailCert ? ` — ${detailCert.name}` : ''}</DialogTitle>
+        <DialogContent>
+          {detailLoading || !detailCert ? (
+            <Box sx={{ display: 'grid', placeItems: 'center', py: 3 }}><CircularProgress size={24} /></Box>
+          ) : (
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5, pt: 1 }}>
+              <DetailRow md={md} label={t('admin:certs.col_status')}>
+                <Chip
+                  label={t(`admin:certs.status.${detailCert.status}`, { defaultValue: detailCert.status })}
+                  size="small"
+                  sx={{ bgcolor: statusColor(md, detailCert.status), color: md.surface ?? '#fff', height: 22 }}
+                />
+              </DetailRow>
+              <DetailRow md={md} label={t('admin:certs.col_domains')}>
+                <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap' }}>
+                  {detailCert.domains.map(d => (
+                    <Chip key={d} label={d} size="small" variant="outlined" sx={{ fontFamily: 'monospace', fontSize: 11, height: 22 }} />
+                  ))}
+                </Box>
+              </DetailRow>
+              <DetailRow md={md} label={t('admin:certs.not_before')}>{formatDualTz(detailCert.not_before, panelTz)}</DetailRow>
+              <DetailRow md={md} label={t('admin:certs.col_expiry')}>{formatDualTz(detailCert.not_after, panelTz)}</DetailRow>
+              {detailCert.fingerprint && (
+                <DetailRow md={md} label={t('admin:certs.fingerprint')}>
+                  <Typography sx={{ fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all', color: md.onSurfaceVariant }}>{detailCert.fingerprint}</Typography>
+                </DetailRow>
+              )}
+
+              {detailCert.status === 'failed' && detailCert.last_error && (
+                <Box sx={{ p: 1.5, borderRadius: 2, border: `1px solid ${md.error}` }}>
+                  <Typography sx={{ fontSize: 12, fontWeight: 600, mb: 0.5, color: md.error }}>{t('admin:certs.failure_reason')}</Typography>
+                  <Typography sx={{ fontSize: 12, fontFamily: 'monospace', wordBreak: 'break-word', color: md.onSurfaceVariant }}>{detailCert.last_error}</Typography>
+                </Box>
+              )}
+
+              {detailCert.status === 'pending' && (
+                <Box sx={{ p: 1.5, borderRadius: 2, bgcolor: md.surfaceContainerHigh ?? 'rgba(255,255,255,.04)' }}>
+                  <Typography sx={{ fontSize: 12, fontWeight: 600, mb: 0.5 }}>{t('admin:certs.progress')}</Typography>
+                  {detailTask ? (
+                    <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant }}>
+                      {t('admin:certs.progress_task', { status: detailTask.status, attempts: detailTask.attempts })}
+                      {detailTask.next_run_at ? ` · ${t('admin:certs.next_retry')}: ${formatDualTz(detailTask.next_run_at, panelTz)}` : ''}
+                      {detailTask.last_error ? ` · ${detailTask.last_error}` : ''}
+                    </Typography>
+                  ) : (
+                    <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant }}>{t('admin:certs.progress_queued')}</Typography>
+                  )}
+                </Box>
+              )}
+
+              {detailCert.fingerprint && (
+                <>
+                  <Divider sx={{ my: 0.5 }} />
+                  <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+                    <Button size="small" variant="outlined" startIcon={<ContentCopyIcon />} disabled={downloading} onClick={() => onCopyCert(detailCert.id)}>
+                      {t('admin:certs.copy_cert')}
+                    </Button>
+                    <Button size="small" variant="outlined" startIcon={<DownloadIcon />} disabled={downloading} onClick={() => onDownloadPEM(detailCert.id, 'cert')}>
+                      {t('admin:certs.download_cert')}
+                    </Button>
+                    <Button size="small" variant="outlined" startIcon={<DownloadIcon />} disabled={downloading} onClick={() => onDownloadPEM(detailCert.id, 'key')} sx={{ color: md.error, borderColor: md.error }}>
+                      {t('admin:certs.download_key')}
+                    </Button>
+                  </Box>
+                </>
+              )}
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDetailOpen(false)}>{t('common:actions.close')}</Button>
+        </DialogActions>
+      </Dialog>
+
       {/* create-cert dialog */}
       <Dialog open={certOpen} onClose={() => setCertOpen(false)} maxWidth="sm" fullWidth>
         <DialogTitle>{t('admin:certs.new')}</DialogTitle>
-        <DialogContent sx={{ display: 'flex', flexDirection: 'column', gap: 2, pt: 2 }}>
+        <DialogContent>
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5, pt: 1 }}>
           <TextField label={t('admin:certs.col_name')} value={certName} onChange={e => setCertName(e.target.value)} size="small" autoFocus />
           <TextField
             label={t('admin:certs.col_domains')}
@@ -512,19 +692,21 @@ export default function CertificatesView() {
             </Select>
           </FormControl>
           <FormControlLabel control={<Switch checked={certAutoRenew} onChange={e => setCertAutoRenew(e.target.checked)} />} label={t('admin:certs.auto_renew')} />
+          </Box>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setCertOpen(false)}>{t('common:cancel')}</Button>
+          <Button onClick={() => setCertOpen(false)}>{t('common:actions.cancel')}</Button>
           <Button variant="contained" onClick={submitCert} disabled={certBusy}>
-            {certBusy ? <CircularProgress size={20} /> : t('common:create')}
+            {certBusy ? <CircularProgress size={20} /> : t('common:actions.create')}
           </Button>
         </DialogActions>
       </Dialog>
 
       {/* create/edit DNS credential dialog */}
       <Dialog open={credOpen} onClose={() => setCredOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>{credEditing ? t('common:edit') : t('admin:certs.cred_new')}</DialogTitle>
-        <DialogContent sx={{ display: 'flex', flexDirection: 'column', gap: 2, pt: 2 }}>
+        <DialogTitle>{credEditing ? t('common:actions.edit') : t('admin:certs.cred_new')}</DialogTitle>
+        <DialogContent>
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5, pt: 1 }}>
           <TextField label={t('admin:certs.col_name')} value={credName} onChange={e => setCredName(e.target.value)} size="small" autoFocus />
           <Autocomplete
             freeSolo
@@ -575,11 +757,12 @@ export default function CertificatesView() {
               </Button>
             </>
           )}
+          </Box>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setCredOpen(false)}>{t('common:cancel')}</Button>
+          <Button onClick={() => setCredOpen(false)}>{t('common:actions.cancel')}</Button>
           <Button variant="contained" onClick={submitCred} disabled={credBusy}>
-            {credBusy ? <CircularProgress size={20} /> : t('common:save')}
+            {credBusy ? <CircularProgress size={20} /> : t('common:actions.save')}
           </Button>
         </DialogActions>
       </Dialog>

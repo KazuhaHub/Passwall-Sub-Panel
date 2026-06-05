@@ -38,11 +38,27 @@ type certDTO struct {
 }
 
 func toCertDTO(c *domain.TLSCertificate) certDTO {
+	status := string(c.Status)
+	// Derived display state: an active cert past its NotAfter shows as expired
+	// (never stored — purely a presentation status).
+	if c.Status == domain.CertStatusActive && c.NotAfter != nil && c.NotAfter.Before(time.Now()) {
+		status = string(domain.CertStatusExpired)
+	}
 	return certDTO{
-		ID: c.ID, Name: c.Name, Domains: c.Domains, Status: string(c.Status),
+		ID: c.ID, Name: c.Name, Domains: c.Domains, Status: status,
 		DNSCredentialID: c.DNSCredentialID, NotBefore: c.NotBefore, NotAfter: c.NotAfter,
 		Fingerprint: c.Fingerprint, AutoRenew: c.AutoRenew, LastError: c.LastError, CreatedAt: c.CreatedAt,
 	}
+}
+
+// certTaskDTO is the in-flight issue/renew sync-task surfaced on a pending cert's
+// detail view as its "progress" (the closest thing to progress, since lego's
+// Obtain is a single blocking call).
+type certTaskDTO struct {
+	Status    string     `json:"status"` // pending / running
+	Attempts  int        `json:"attempts"`
+	NextRunAt *time.Time `json:"next_run_at"`
+	LastError string     `json:"last_error"`
 }
 
 func (h *AdminCertHandler) List(c *gin.Context) {
@@ -69,7 +85,14 @@ func (h *AdminCertHandler) Get(c *gin.Context) {
 		mapServerError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"cert": toCertDTO(x)})
+	resp := gin.H{"cert": toCertDTO(x)}
+	// Surface the in-flight issue/renew task so the UI can show "in progress"
+	// detail (state / attempts / next retry / last error) for a pending cert.
+	if task, terr := h.cert.ActiveTask(c.Request.Context(), id); terr == nil && task != nil {
+		nr := task.NextRunAt
+		resp["task"] = certTaskDTO{Status: string(task.Status), Attempts: task.Attempts, NextRunAt: &nr, LastError: task.LastError}
+	}
+	c.JSON(http.StatusOK, resp)
 }
 
 type createCertRequest struct {
@@ -120,6 +143,60 @@ func (h *AdminCertHandler) Renew(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
+// Download returns the full certificate chain + private key PEM so an admin can
+// deploy the managed cert elsewhere. AdminGroup-only and an EXPLICIT action — the
+// list and detail DTOs never carry PEM material; this dedicated endpoint is the
+// single place a private key leaves PSP.
+func (h *AdminCertHandler) Download(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	x, err := h.cert.GetCert(c.Request.Context(), id)
+	if err != nil {
+		mapServerError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"name": x.Name, "cert_pem": x.CertPEM, "key_pem": x.KeyPEM})
+}
+
+type certEventDTO struct {
+	ID        int64     `json:"id"`
+	CertID    int64     `json:"cert_id"`
+	CertName  string    `json:"cert_name"`
+	Kind      string    `json:"kind"`
+	Success   bool      `json:"success"`
+	Message   string    `json:"message"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// ListEvents returns the paginated cert issuance/renewal activity log (newest
+// first) for the Logs page's Certificates tab.
+func (h *AdminCertHandler) ListEvents(c *gin.Context) {
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "50"))
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 || pageSize > 200 {
+		pageSize = 50
+	}
+	events, total, err := h.cert.ListEvents(c.Request.Context(), pageSize, (page-1)*pageSize)
+	if err != nil {
+		mapServerError(c, err)
+		return
+	}
+	out := make([]certEventDTO, 0, len(events))
+	for _, e := range events {
+		out = append(out, certEventDTO{
+			ID: e.ID, CertID: e.CertID, CertName: e.CertName, Kind: string(e.Kind),
+			Success: e.Success, Message: e.Message, CreatedAt: e.CreatedAt,
+		})
+	}
+	c.JSON(http.StatusOK, gin.H{"events": out, "total": total})
 }
 
 // ---- DNS credentials ----

@@ -8,7 +8,10 @@
     "close": "Close",
     "reset": "Reset",
     "ok": "OK",
-    "cancel": "Cancel"
+    "cancel": "Cancel",
+    "save": "Save",
+    "edit": "Edit",
+    "delete": "Delete"
   },
   "status": {
     "online": "Online",

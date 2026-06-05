@@ -275,6 +275,7 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	// Late-bind the mailer so cert issuance/renewal failures email admins
 	// (deduped per cert/day), mirroring the dashboard cert-failure alert.
 	certSvc.SetAlerter(mailSvc)
+	certSvc.SetEventRepo(repos.CertEvent)
 
 	// --- async dispatcher for handler-spawned background work ---
 	//
@@ -661,6 +662,7 @@ func (a *App) runAuditCleanupLoop(ctx context.Context) {
 		a.pruneTrafficSnapshots(ctx)
 		a.pruneMailSent(ctx)
 		a.pruneSubLogs(ctx)
+		a.pruneCertEvents(ctx)
 		select {
 		case <-ctx.Done():
 			return
@@ -842,6 +844,24 @@ func (a *App) pruneSubLogs(ctx context.Context) {
 	}
 	if deleted > 0 {
 		log.Info("sub log cleanup", "deleted", deleted, "retention_days", settings.SubLogRetentionDays)
+	}
+}
+
+// pruneCertEvents trims the cert issuance/renewal activity log. It's low-volume
+// (a few rows per cert per renewal cycle), so a fixed 180-day window keeps a
+// useful history without needing an admin-tunable retention knob.
+func (a *App) pruneCertEvents(ctx context.Context) {
+	if a.repos.CertEvent == nil {
+		return
+	}
+	cutoff := time.Now().AddDate(0, 0, -180)
+	deleted, err := a.repos.CertEvent.PruneOlderThan(ctx, cutoff)
+	if err != nil {
+		log.Warn("cert event cleanup", "err", err)
+		return
+	}
+	if deleted > 0 {
+		log.Info("cert event cleanup", "deleted", deleted)
 	}
 }
 

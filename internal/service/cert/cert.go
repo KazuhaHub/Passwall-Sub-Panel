@@ -14,7 +14,14 @@ import (
 )
 
 const (
-	maxCertTaskAttempts = 100
+	// A few quick retries absorb a transient blip (DNS propagation hiccup, ACME
+	// server 5xx); after that the cert is marked failed and the renewal scan
+	// re-enqueues it at the next check interval — so the effective retry cadence
+	// for a persistently-failing cert is the admin's check interval, not a fast
+	// loop that would burn the ACME failed-validation rate limit. Deploy
+	// resilience is unaffected: the inline push runs as a separate node sync-task
+	// with its own retry budget.
+	maxCertTaskAttempts = 3
 	certTaskBackoff     = time.Minute
 	certTargetType      = "cert"
 )
@@ -50,6 +57,7 @@ type Service struct {
 	tasks    ports.SyncTaskRepo
 	pusher   NodeConfigPusher
 	alerter  AdminAlerter
+	events   ports.CertEventRepo // optional cert activity log
 
 	directoryURL string // default ACME directory (LE prod/staging)
 	email        string // ACME account contact
@@ -87,6 +95,54 @@ func (s *Service) SetRenewBeforeDays(d int) {
 // SetAlerter wires the optional admin-failure mailer in (late-bound like the
 // other cross-service notifiers in app.go).
 func (s *Service) SetAlerter(a AdminAlerter) { s.alerter = a }
+
+// SetEventRepo wires the optional cert activity log in (late-bound like SetAlerter).
+func (s *Service) SetEventRepo(r ports.CertEventRepo) { s.events = r }
+
+// recordCertEvent appends one terminal issue/renew outcome to the activity log.
+// Best-effort — a logging failure never affects the issuance result. Deploy is
+// NOT recorded here (it runs as a node sync-task, visible on the Sync Tasks page).
+func (s *Service) recordCertEvent(ctx context.Context, certID int64, taskType domain.SyncTaskType, success bool, message string) {
+	if s.events == nil {
+		return
+	}
+	kind := domain.CertEventRenew
+	if taskType == domain.SyncTaskCertIssue {
+		kind = domain.CertEventIssue
+	}
+	name := ""
+	if c, err := s.certs.GetByID(ctx, certID); err == nil && c != nil {
+		name = c.Name
+	}
+	if err := s.events.Create(ctx, &domain.CertEvent{
+		CertID: certID, CertName: name, Kind: kind, Success: success, Message: message,
+	}); err != nil {
+		log.Warn("cert event record", "cert_id", certID, "err", err)
+	}
+}
+
+// ListEvents returns the cert activity log (newest first) plus the total count.
+func (s *Service) ListEvents(ctx context.Context, limit, offset int) ([]*domain.CertEvent, int64, error) {
+	if s.events == nil {
+		return nil, 0, nil
+	}
+	return s.events.ListPaged(ctx, limit, offset)
+}
+
+// ActiveTask returns the in-flight issue/renew sync-task for a cert (drives the
+// detail view's "in progress" indicator), or (nil, nil) when none is queued.
+func (s *Service) ActiveTask(ctx context.Context, certID int64) (*domain.SyncTask, error) {
+	for _, typ := range []domain.SyncTaskType{domain.SyncTaskCertIssue, domain.SyncTaskCertRenew} {
+		t, err := s.tasks.GetActiveByTarget(ctx, typ, certTargetType, certID)
+		if err == nil {
+			return t, nil
+		}
+		if !errors.Is(err, domain.ErrNotFound) {
+			return nil, err
+		}
+	}
+	return nil, nil
+}
 
 func (s *Service) renewThreshold() int {
 	s.mu.RLock()
@@ -215,6 +271,7 @@ func (s *Service) ProcessDueTasks(ctx context.Context, limit int) error {
 			if isPermanentCertError(err) || task.Attempts+1 >= maxCertTaskAttempts {
 				log.Warn("cert task gave up", "task_id", task.ID, "cert_id", task.TargetID, "attempts", task.Attempts+1, "err", err.Error())
 				s.markCertFailed(ctx, task.TargetID, err)
+				s.recordCertEvent(ctx, task.TargetID, task.Type, false, err.Error())
 				if cerr := s.tasks.Cancel(ctx, task.ID); cerr != nil {
 					log.Warn("cert task cancel", "task_id", task.ID, "err", cerr)
 				}
@@ -229,6 +286,7 @@ func (s *Service) ProcessDueTasks(ctx context.Context, limit int) error {
 		if err := s.tasks.MarkSucceeded(ctx, task.ID); err != nil {
 			log.Warn("cert task mark-succeeded", "task_id", task.ID, "err", err)
 		}
+		s.recordCertEvent(ctx, task.TargetID, task.Type, true, "")
 	}
 	return nil
 }

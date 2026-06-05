@@ -375,3 +375,74 @@ func TestScanDueRenewalsEnqueuesOnlyDue(t *testing.T) {
 		t.Fatalf("wrong task type: %s", tasks.created[0].Type)
 	}
 }
+
+type fakeCertEventRepo struct{ events []*domain.CertEvent }
+
+func (r *fakeCertEventRepo) Create(_ context.Context, e *domain.CertEvent) error {
+	cp := *e
+	r.events = append(r.events, &cp)
+	return nil
+}
+func (r *fakeCertEventRepo) ListPaged(_ context.Context, _, _ int) ([]*domain.CertEvent, int64, error) {
+	return r.events, int64(len(r.events)), nil
+}
+func (r *fakeCertEventRepo) PruneOlderThan(_ context.Context, _ time.Time) (int64, error) { return 0, nil }
+
+func TestRunCertTaskRecordsSuccessEvent(t *testing.T) {
+	certs := newFakeCertRepo()
+	c := &domain.TLSCertificate{Name: "w", Domains: []string{"x.com"}, DNSCredentialID: 7, Status: domain.CertStatusPending}
+	certs.Create(context.Background(), c)
+	dns := &fakeDNSRepo{creds: map[int64]*domain.DNSCredential{7: {ID: 7, Provider: "cloudflare", Credentials: map[string]string{"CF_DNS_API_TOKEN": "t"}}}}
+	na := time.Now().Add(80 * 24 * time.Hour)
+	issuer := &fakeIssuer{result: ports.ACMEResult{CertPEM: "CERT", KeyPEM: "KEY", Fingerprint: "fp", NotAfter: na, NotBefore: time.Now()}}
+	node := &domain.Node{ID: 11, PanelID: 1, InboundID: 2, StreamSettings: `{"security":"tls","tlsSettings":{}}`}
+	nodes := &fakeNodeRepo{byCert: map[int64][]*domain.Node{c.ID: {node}}, byID: map[int64]*domain.Node{11: node}}
+	tasks := &fakeTaskRepo{due: []*domain.SyncTask{{ID: 1, Type: domain.SyncTaskCertIssue, TargetType: certTargetType, TargetID: c.ID}}}
+	s := newTestService(certs, dns, &fakeAccountRepo{}, issuer, nodes, tasks, &fakePusher{})
+	events := &fakeCertEventRepo{}
+	s.SetEventRepo(events)
+
+	if err := s.ProcessDueTasks(context.Background(), 10); err != nil {
+		t.Fatal(err)
+	}
+	if len(events.events) != 1 || !events.events[0].Success || events.events[0].Kind != domain.CertEventIssue {
+		t.Fatalf("want 1 success issue event, got %#v", events.events)
+	}
+}
+
+func TestRunCertTaskRecordsFailEvent(t *testing.T) {
+	certs := newFakeCertRepo()
+	c := &domain.TLSCertificate{Name: "w", Domains: []string{"x.com"}, DNSCredentialID: 99, Status: domain.CertStatusPending}
+	certs.Create(context.Background(), c)
+	tasks := &fakeTaskRepo{due: []*domain.SyncTask{{ID: 1, Type: domain.SyncTaskCertIssue, TargetType: certTargetType, TargetID: c.ID}}}
+	s := newTestService(certs, &fakeDNSRepo{creds: map[int64]*domain.DNSCredential{}}, &fakeAccountRepo{}, &fakeIssuer{}, &fakeNodeRepo{}, tasks, &fakePusher{})
+	events := &fakeCertEventRepo{}
+	s.SetEventRepo(events)
+
+	if err := s.ProcessDueTasks(context.Background(), 10); err != nil {
+		t.Fatal(err)
+	}
+	if len(events.events) != 1 || events.events[0].Success || events.events[0].Message == "" {
+		t.Fatalf("want 1 fail event with a message, got %#v", events.events)
+	}
+}
+
+// Failed certs (auto-renew on) are re-enqueued each scan so they retry at the
+// check interval; a failed cert with auto-renew off is left alone.
+func TestScanDueRenewalsRetriesFailedCerts(t *testing.T) {
+	certs := newFakeCertRepo()
+	certs.Create(context.Background(), &domain.TLSCertificate{Name: "broken", Domains: []string{"x"}, Status: domain.CertStatusFailed, AutoRenew: true})
+	certs.Create(context.Background(), &domain.TLSCertificate{Name: "off", Domains: []string{"y"}, Status: domain.CertStatusFailed, AutoRenew: false})
+	tasks := &fakeTaskRepo{}
+	s := newTestService(certs, &fakeDNSRepo{}, &fakeAccountRepo{}, &fakeIssuer{}, &fakeNodeRepo{}, tasks, &fakePusher{})
+
+	if err := s.ScanDueRenewals(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(tasks.created) != 1 {
+		t.Fatalf("want exactly 1 retry task (only the auto-renew failed cert), got %d: %#v", len(tasks.created), tasks.created)
+	}
+	if tasks.created[0].Type != domain.SyncTaskCertIssue {
+		t.Fatalf("a failed never-issued cert should re-issue, got %s", tasks.created[0].Type)
+	}
+}

@@ -935,12 +935,15 @@ interface FieldsProps {
   // Existing tags across all nodes, surfaced as the Tags autocomplete's
   // suggestion list (same as the edit/import dialogs).
   allTags?: string[]
-  // The node being edited, or null when creating. Gates the psp_managed cert
-  // binding (which needs a node id to deploy the certificate to).
+  // The node being edited, or null when creating. In edit mode an in-form Apply
+  // button binds the picked psp_managed cert directly (it deploys to the live
+  // inbound). In create mode there's no node yet, so the picked cert id is
+  // reported up via onManagedCertChange and bound right after the node is made.
   nodeId?: number | null
+  onManagedCertChange?: (certId: number) => void
 }
 
-function InboundFormFields({ form, setForm, showMetadata, servers, onGenKeys, onGenSSPassword, genKeysBusy, protocolReadonly, advanced, onSetAdvanced, allTags, nodeId }: FieldsProps) {
+function InboundFormFields({ form, setForm, showMetadata, servers, onGenKeys, onGenSSPassword, genKeysBusy, protocolReadonly, advanced, onSetAdvanced, allTags, nodeId, onManagedCertChange }: FieldsProps) {
   const theme = useTheme()
   const md = theme.palette.md
   const { t } = useTranslation(['admin', 'common'])
@@ -1047,18 +1050,21 @@ function InboundFormFields({ form, setForm, showMetadata, servers, onGenKeys, on
         <Button size="small" variant="outlined" disabled={!form.panel_id || fetchingPanelCert} onClick={fetchFromPanel}>
           {fetchingPanelCert ? <CircularProgress size={16} /> : t('admin:nodes.cert_source.from_panel')}
         </Button>
+        <Select
+          size="small"
+          value={boundCertId}
+          onChange={e => { const v = Number(e.target.value); setBoundCertId(v); onManagedCertChange?.(v) }}
+          sx={{ minWidth: 200 }}
+        >
+          <MenuItem value={0}><em>{t('admin:nodes.cert_source.pick_managed')}</em></MenuItem>
+          {managedCerts.filter(c => c.status === 'active').map(c => (
+            <MenuItem key={c.id} value={c.id}>{c.name}</MenuItem>
+          ))}
+        </Select>
         {nodeId != null && (
-          <>
-            <Select size="small" value={boundCertId} onChange={e => setBoundCertId(Number(e.target.value))} sx={{ minWidth: 200 }}>
-              <MenuItem value={0}><em>{t('admin:nodes.cert_source.pick_managed')}</em></MenuItem>
-              {managedCerts.filter(c => c.status === 'active').map(c => (
-                <MenuItem key={c.id} value={c.id}>{c.name}</MenuItem>
-              ))}
-            </Select>
-            <Button size="small" variant="contained" disabled={boundCertId === 0 || bindingCert} onClick={applyManagedCert}>
-              {bindingCert ? <CircularProgress size={16} /> : t('admin:nodes.cert_source.apply_managed')}
-            </Button>
-          </>
+          <Button size="small" variant="contained" disabled={boundCertId === 0 || bindingCert} onClick={applyManagedCert}>
+            {bindingCert ? <CircularProgress size={16} /> : t('admin:nodes.cert_source.apply_managed')}
+          </Button>
         )}
       </Box>
       <TextField select size="small"
@@ -2024,6 +2030,9 @@ export default function NodesView() {
   // (it doesn't persist to backend). Tracked separately so opening edit
   // doesn't carry the create dialog's mode.
   const [createAdvanced, setCreateAdvanced] = useState(false)
+  // PSP-managed cert the operator picked in the create form (0 = none). Bound to
+  // the new node right after it's created (see submitCreate).
+  const [createBoundCertId, setCreateBoundCertId] = useState(0)
   const [editAdvanced, setEditAdvanced] = useState(false)
 
   const selectableIds = managed.map(n => n.id)
@@ -2388,6 +2397,7 @@ export default function NodesView() {
     }
     setCreateForm({ ...EMPTY_INBOUND, panel_id: servers[0].id, server_address: hostFromURL(servers[0].url) })
     setCreateAdvanced(false)
+    setCreateBoundCertId(0)
     setCreateOpen(true)
   }
 
@@ -2461,6 +2471,16 @@ export default function NodesView() {
           expiry_time: 0,
         },
       })
+      // If a PSP-managed cert was picked, bind + deploy it now that the node and
+      // its live inbound exist. Best-effort: a binding failure doesn't undo the
+      // successful node creation (the operator can retry from the edit dialog).
+      // Only possible for a synchronously-created node (the queued path has no id
+      // yet — those bind later via the edit dialog).
+      if (!('queued' in res) && createBoundCertId !== 0) {
+        try {
+          await setNodeCertSource(res.id, 'psp_managed', createBoundCertId)
+        } catch { /* binding error surfaces via the axios interceptor */ }
+      }
       pushSnack(
         'queued' in res
           ? t('admin:nodes.create_dialog.queued')
@@ -3039,6 +3059,7 @@ export default function NodesView() {
               advanced={createAdvanced}
               onSetAdvanced={setCreateAdvanced}
               allTags={allTags}
+              onManagedCertChange={setCreateBoundCertId}
             />
           </Box>
         </DialogContent>

@@ -1107,6 +1107,7 @@ func EnsureSchema(db *gorm.DB) error {
 		&dnsCredentialRow{},
 		&acmeAccountRow{},
 		&tlsCertificateRow{},
+		&certEventRow{},
 	); err != nil {
 		return err
 	}

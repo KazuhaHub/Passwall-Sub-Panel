@@ -59,5 +59,28 @@ func (s *Service) ScanDueRenewals(ctx context.Context) error {
 			}
 		}
 	}
+
+	// Failed certs retry on the same cadence: re-enqueue each auto-renew failed
+	// cert so a transient blip or a just-fixed config (e.g. corrected DNS creds)
+	// gets another attempt at the next check interval instead of staying dead
+	// until a manual retry. enqueueCertTask dedups, so a cert already queued or
+	// running isn't piled on. A cert that ever obtained a leaf renews; one that
+	// never issued (re)issues.
+	failed, err := s.certs.ListByStatus(ctx, domain.CertStatusFailed)
+	if err != nil {
+		return err
+	}
+	for _, c := range failed {
+		if !c.AutoRenew {
+			continue
+		}
+		typ, summary := domain.SyncTaskCertIssue, "retry issue certificate "+c.Name
+		if c.CertPEM != "" {
+			typ, summary = domain.SyncTaskCertRenew, "retry renew certificate "+c.Name
+		}
+		if err := s.enqueueCertTask(ctx, typ, c.ID, summary); err != nil {
+			log.Warn("enqueue cert retry", "cert_id", c.ID, "err", err)
+		}
+	}
 	return nil
 }

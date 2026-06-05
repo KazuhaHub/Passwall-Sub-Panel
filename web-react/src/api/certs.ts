@@ -60,6 +60,57 @@ export async function renewCert(id: number): Promise<void> {
   await client.post(`/admin/certs/${id}/renew`)
 }
 
+// CertTask is the in-flight issue/renew sync-task surfaced on a pending cert's
+// detail view (the closest thing to "progress" — lego's Obtain is one blocking
+// call). null/absent when nothing is queued.
+export interface CertTask {
+  status: string // pending | running
+  attempts: number
+  next_run_at: string | null
+  last_error: string
+}
+
+export interface CertDetail {
+  cert: Cert
+  task?: CertTask
+}
+
+export async function getCertDetail(id: number): Promise<CertDetail> {
+  const { data } = await client.get<CertDetail>(`/admin/certs/${id}`)
+  return data
+}
+
+// CertPEM is returned ONLY by the explicit per-cert download endpoint — it
+// carries the full chain + private key. The list/detail DTOs never include PEMs.
+export interface CertPEM {
+  name: string
+  cert_pem: string
+  key_pem: string
+}
+
+export async function downloadCert(id: number): Promise<CertPEM> {
+  const { data } = await client.get<CertPEM>(`/admin/certs/${id}/download`)
+  return data
+}
+
+// CertEvent is one cert issuance/renewal activity entry (Logs → Certificates).
+export interface CertEvent {
+  id: number
+  cert_id: number
+  cert_name: string
+  kind: string // issue | renew
+  success: boolean
+  message: string
+  created_at: string
+}
+
+export async function listCertEvents(page: number, pageSize: number): Promise<{ events: CertEvent[]; total: number }> {
+  const { data } = await client.get<{ events: CertEvent[]; total: number }>('/admin/cert-events', {
+    params: { page, page_size: pageSize },
+  })
+  return data
+}
+
 export async function listDNSCreds(): Promise<DNSCredential[]> {
   const { data } = await client.get<{ credentials: DNSCredential[] }>('/admin/dns-credentials')
   return data.credentials

@@ -760,10 +760,10 @@ type XUIPanel struct {
 type CertStatus string
 
 const (
-	CertStatusPending  CertStatus = "pending"  // created; issuance not yet completed
-	CertStatusActive   CertStatus = "active"   // issued and currently valid
-	CertStatusFailed   CertStatus = "failed"   // last issuance/renewal attempt failed
-	CertStatusRenewing CertStatus = "renewing" // renewal in flight
+	CertStatusPending CertStatus = "pending" // created; issuance not yet completed
+	CertStatusActive  CertStatus = "active"  // issued and currently valid
+	CertStatusFailed  CertStatus = "failed"  // last issuance/renewal attempt failed
+	CertStatusExpired CertStatus = "expired" // DERIVED for display: active but past NotAfter (never stored)
 )
 
 // CertSource discriminates how a node's inbound TLS certificate is provisioned.
@@ -796,6 +796,29 @@ type TLSCertificate struct {
 	AutoRenew       bool
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
+}
+
+// CertEventKind is the lifecycle action a CertEvent records.
+type CertEventKind string
+
+const (
+	CertEventIssue CertEventKind = "issue" // initial / from-pending issuance
+	CertEventRenew CertEventKind = "renew" // renewal of an existing cert
+)
+
+// CertEvent is one terminal outcome of a cert issuance/renewal attempt, kept as
+// an append-only activity log (surfaced in the Logs page). Deploy is NOT recorded
+// here — it runs as a node sync-task and is visible on the Sync Tasks page.
+// CertName is snapshotted so the log survives the cert being deleted. A CertEvent
+// NEVER carries PEM material.
+type CertEvent struct {
+	ID        int64
+	CertID    int64
+	CertName  string
+	Kind      CertEventKind
+	Success   bool
+	Message   string // empty on success; the error on failure
+	CreatedAt time.Time
 }
 
 // DNSCredential is a DNS-provider credential set used to solve ACME DNS-01

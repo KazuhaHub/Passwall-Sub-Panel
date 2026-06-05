@@ -560,6 +560,15 @@ type ACMEAccountRepo interface {
 	Save(ctx context.Context, a *domain.ACMEAccount) error
 }
 
+// CertEventRepo is the append-only cert issuance/renewal activity log surfaced
+// on the Logs page.
+type CertEventRepo interface {
+	Create(ctx context.Context, e *domain.CertEvent) error
+	// ListPaged returns events newest-first plus the total count.
+	ListPaged(ctx context.Context, limit, offset int) ([]*domain.CertEvent, int64, error)
+	PruneOlderThan(ctx context.Context, cutoff time.Time) (int64, error)
+}
+
 // UISettings holds runtime-editable UI preferences. They live in the DB so
 // admin edits don't touch infrastructure fields.
 type UISettings struct {
@@ -988,4 +997,5 @@ type Repos struct {
 	Certificate   CertificateRepo
 	DNSCredential DNSCredentialRepo
 	ACMEAccount   ACMEAccountRepo
+	CertEvent     CertEventRepo
 }
