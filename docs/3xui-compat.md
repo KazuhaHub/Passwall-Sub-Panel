@@ -143,12 +143,25 @@ PSP `rawInbound` 这四个字段定义为 Go `string`,`json.Unmarshal` 一个 ob
 - **first-match-wins** ── 数组顺序就是优先级,narrower / 更新的 entry 放前
 - 重叠 OK,顺序决定胜出
 
-### PSP 拉不到时的行为(故障容错)
+### compat 范围的拉取时机(reactive)+ 拉不到的故障容错
 
-PSP 启动时先读本地 cache(`<DataDir>/compat-cache.json`)装入上次成功 fetch 的范围;
-然后 admin 打开 Servers 页(或手动点 Test)触发 RefreshRemoteCompat。任何一步失败
-(网络挂 / JSON 解析错 / major 不匹配 / 没匹配 entry)只是让 CheckXUI 返回 Unknown
-状态,admin 仍可通过 upgrade-panel 的 `force` 按钮强制升级 — 不是 hard wall。
+PSP 启动时先读本地 cache(`<DataDir>/compat-cache.json`)装入上次成功 fetch 的范围,
+之后**不主动周期性拉 GitHub**。compat JSON(`docs/compat/v3.json`)只在**探测到某面板版本
+对不上当前缓存范围**时才拉(reactive,v3.7.0):
+
+- 版本探测(boot / 每 10 分钟 tick / Servers 页 Test)算出 `CheckXUI(panelVersion) != Supported`
+  时才 `RefreshRemoteCompat`(60s 节流——同一 tick 多台对不上合并成一次)再重判;
+- upgrade-panel 闸门**强制**拉一次(force,跳节流),保证"是否支持"判定不吃旧缓存。
+
+所以**全兼容的机群对 GitHub 零 compat 流量**;一台太新的面板,等维护者 bump 了 `max_tested`,
+PSP 下一次 tick 会自动重拉、自动转 Supported(无需重启/翻页)。
+
+> "有新版可升级"角标是另一条——`RefreshLatestXUI` 查 GitHub release tag,**仍主动** + 30 分钟节流,
+> 因为本地没有任何信号能告诉你"上游出了新版本",天生没法 reactive。
+
+任何一步失败(网络挂 / JSON 解析错 / major 不匹配 / 没匹配 entry)只是让 CheckXUI 返回 Unknown,
+admin 仍可通过 upgrade-panel 的 `force` 按钮强制升级 — 不是 hard wall。(Unknown 本身也算"对不上",
+所以下次探测会自动再尝试拉。)
 
 ## v3.6.0 路线图: PSP 自动感知 3X-UI 版本 ── 已完成
 
