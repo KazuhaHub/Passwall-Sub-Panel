@@ -40,6 +40,7 @@ import {
 import type { Node, User } from '@/api/types'
 import { UserNodeUsage } from './UserNodeUsage'
 import { getUISettings } from '@/api/settings'
+import PageHeader from '@/components/PageHeader'
 import { pushSnack } from '@/components/SnackbarHost'
 import { useTabParam } from '@/hooks/useTabParam'
 import { useSiteStore } from '@/stores/site'
@@ -284,13 +285,15 @@ export default function TrafficView() {
 
   return (
     <Box sx={{ p: 3 }}>
-      <Box sx={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', flexWrap: 'wrap', gap: 2, mb: 1 }}>
-        <Typography variant="h4">{t('traffic.title')}</Typography>
-        <Button variant="contained" disabled={pollLoading} onClick={pollNow}
-          startIcon={pollLoading ? <CircularProgress size={14} color="inherit" /> : null}>
-          {t('traffic.poll_now')}
-        </Button>
-      </Box>
+      <PageHeader
+        title={t('traffic.title')}
+        actions={
+          <Button variant="contained" disabled={pollLoading} onClick={pollNow}
+            startIcon={pollLoading ? <CircularProgress size={14} color="inherit" /> : null}>
+            {t('traffic.poll_now')}
+          </Button>
+        }
+      />
 
       <Box sx={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', flexWrap: 'wrap', gap: 1, mt: 2, mb: 2, borderBottom: `1px solid ${md.outlineVariant}` }}>
         <Tabs value={tab} onChange={(_, v) => setTab(v)}>

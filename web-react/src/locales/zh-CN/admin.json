@@ -1210,6 +1210,8 @@
     "tab_certs": "证书",
     "tab_creds": "DNS 凭据",
     "tab_acme": "ACME 设置",
+    "page_title": "证书",
+    "page_subtitle": "通过 ACME DNS-01 签发并自动续期通配符 TLS 证书。",
     "optional": "可选",
     "acme_title": "ACME 证书自动化",
     "acme_subtitle": "PSP 托管证书的账户与续期设置。",

@@ -53,6 +53,7 @@ import {
   type Server,
 } from '@/api/servers'
 import { confirm } from '@/components/ConfirmHost'
+import PageHeader from '@/components/PageHeader'
 import { pushSnack } from '@/components/SnackbarHost'
 import { PagedTableFooter } from '@/components/PagedTableFooter'
 import { SortableTableCell } from '@/components/SortableTableCell'
@@ -803,26 +804,26 @@ export default function ServersView() {
   return (
     <Box sx={{ p: 3 }}>
       {/* Header */}
-      <Box sx={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', flexWrap: 'wrap', gap: 2, mb: 1 }}>
-        <Box>
-          <Typography variant="h4">{t('admin:servers.title')}</Typography>
-          <Typography variant="body2" sx={{ mt: 0.5 }}>{t('admin:servers.subtitle')}</Typography>
-        </Box>
-        <Box sx={{ display: 'flex', gap: 1 }}>
-          {/* "Test all" runs the connectivity probe across every server
-              without requiring row selection — quick sanity check after a
-              network change or panel update. */}
-          <Button variant="outlined"
-            startIcon={batchBusy === 'test' ? <CircularProgress size={14} /> : <RefreshIcon />}
-            disabled={batchBusy !== '' || items.length === 0}
-            onClick={runTestAll}>
-            {t('admin:servers.test_all', { defaultValue: '测试全部' })}
-          </Button>
-          <Button variant="contained" startIcon={<AddIcon />} onClick={openCreate}>
-            {t('admin:servers.create')}
-          </Button>
-        </Box>
-      </Box>
+      <PageHeader
+        title={t('admin:servers.title')}
+        subtitle={t('admin:servers.subtitle')}
+        actions={
+          <>
+            {/* "Test all" runs the connectivity probe across every server
+                without requiring row selection — quick sanity check after a
+                network change or panel update. */}
+            <Button variant="outlined"
+              startIcon={batchBusy === 'test' ? <CircularProgress size={14} /> : <RefreshIcon />}
+              disabled={batchBusy !== '' || items.length === 0}
+              onClick={runTestAll}>
+              {t('admin:servers.test_all', { defaultValue: '测试全部' })}
+            </Button>
+            <Button variant="contained" startIcon={<AddIcon />} onClick={openCreate}>
+              {t('admin:servers.create')}
+            </Button>
+          </>
+        }
+      />
 
       {/* Compat banners — split by severity (too_old = error, can't be
           relied on; untested = warning, may still work). "Unknown" panels

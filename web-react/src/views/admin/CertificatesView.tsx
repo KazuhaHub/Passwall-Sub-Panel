@@ -51,6 +51,7 @@ import {
   type DNSProviderInfo,
 } from '@/api/certs'
 import { getUISettings, putUISettings, type UISettings } from '@/api/settings'
+import PageHeader from '@/components/PageHeader'
 import { confirm } from '@/components/ConfirmHost'
 import { pushSnack } from '@/components/SnackbarHost'
 
@@ -291,8 +292,23 @@ export default function CertificatesView() {
   }
 
   return (
-    <Box>
-      <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ mb: 2.5 }}>
+    <Box sx={{ p: 3 }}>
+      <PageHeader
+        title={t('admin:certs.page_title')}
+        subtitle={t('admin:certs.page_subtitle')}
+        actions={
+          tab === 0 ? (
+            <Button startIcon={<AddIcon />} variant="contained" disabled={creds.length === 0} onClick={openCert}>
+              {t('admin:certs.new')}
+            </Button>
+          ) : tab === 1 ? (
+            <Button startIcon={<AddIcon />} variant="contained" onClick={() => openCred()}>
+              {t('admin:certs.cred_new')}
+            </Button>
+          ) : undefined
+        }
+      />
+      <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ mb: 2, borderBottom: `1px solid ${md.outlineVariant}` }}>
         <Tab label={t('admin:certs.tab_certs')} />
         <Tab label={t('admin:certs.tab_creds')} />
         <Tab label={t('admin:certs.tab_acme')} />
@@ -300,15 +316,9 @@ export default function CertificatesView() {
 
       {/* ---- Tab 0: Certificates ---- */}
       {tab === 0 && (
-        <Card sx={{ p: 2, border: 1, borderColor: md.outlineVariant, borderRadius: 3 }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', mb: 1.5 }}>
-            <Typography sx={{ fontSize: 18, fontWeight: 600, flex: 1 }}>{t('admin:certs.title')}</Typography>
-            <Button startIcon={<AddIcon />} variant="contained" size="small" disabled={creds.length === 0} onClick={openCert}>
-              {t('admin:certs.new')}
-            </Button>
-          </Box>
+        <>
           {creds.length === 0 && (
-            <Typography sx={{ fontSize: 13, color: md.onSurfaceVariant, mb: 1 }}>{t('admin:certs.need_cred_first')}</Typography>
+            <Typography sx={{ fontSize: 13, color: md.onSurfaceVariant, mb: 1.5 }}>{t('admin:certs.need_cred_first')}</Typography>
           )}
           <TableContainer>
             <Table size="small">
@@ -367,18 +377,12 @@ export default function CertificatesView() {
               </TableBody>
             </Table>
           </TableContainer>
-        </Card>
+        </>
       )}
 
       {/* ---- Tab 1: DNS credentials ---- */}
       {tab === 1 && (
-        <Card sx={{ p: 2, border: 1, borderColor: md.outlineVariant, borderRadius: 3 }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', mb: 1.5 }}>
-            <Typography sx={{ fontSize: 18, fontWeight: 600, flex: 1 }}>{t('admin:certs.cred_title')}</Typography>
-            <Button startIcon={<AddIcon />} variant="contained" size="small" onClick={() => openCred()}>
-              {t('admin:certs.cred_new')}
-            </Button>
-          </Box>
+        <>
           <TableContainer>
             <Table size="small">
               <TableHead>
@@ -419,12 +423,12 @@ export default function CertificatesView() {
               </TableBody>
             </Table>
           </TableContainer>
-        </Card>
+        </>
       )}
 
       {/* ---- Tab 2: ACME settings ---- */}
       {tab === 2 && (
-        <Card sx={{ p: 2, border: 1, borderColor: md.outlineVariant, borderRadius: 3, maxWidth: 720 }}>
+        <Card sx={{ p: 3, maxWidth: 720, bgcolor: md.surfaceContainerLow, border: `1px solid ${md.outlineVariant}` }}>
           <Typography sx={{ fontSize: 18, fontWeight: 600, mb: 0.5 }}>{t('admin:certs.acme_title')}</Typography>
           <Typography sx={{ fontSize: 13, color: md.onSurfaceVariant, mb: 2 }}>{t('admin:certs.acme_subtitle')}</Typography>
           {!settings ? (

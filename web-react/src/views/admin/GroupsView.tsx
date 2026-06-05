@@ -40,6 +40,7 @@ import type { Group, Node } from '@/api/types'
 import { confirm } from '@/components/ConfirmHost'
 import { pushSnack } from '@/components/SnackbarHost'
 import { PagedTableFooter } from '@/components/PagedTableFooter'
+import PageHeader from '@/components/PageHeader'
 
 interface FormState {
   slug: string
@@ -426,12 +427,12 @@ export default function GroupsView() {
 
   return (
     <Box sx={{ p: 3 }}>
-      <Box sx={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', flexWrap: 'wrap', gap: 2, mb: 1 }}>
-        <Typography variant="h4">{t('admin:groups.title')}</Typography>
-        {canConfig && <Button variant="contained" startIcon={<AddIcon />} onClick={openCreate}>
+      <PageHeader
+        title={t('admin:groups.title')}
+        actions={canConfig && <Button variant="contained" startIcon={<AddIcon />} onClick={openCreate}>
           {t('admin:groups.create')}
         </Button>}
-      </Box>
+      />
 
       {selectedCount > 0 && canConfig && (
         <Box sx={{

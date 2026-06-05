@@ -31,6 +31,7 @@ import SearchIcon from '@mui/icons-material/Search'
 import { useTranslation } from 'react-i18next'
 import { useCan } from '@/utils/permissions'
 
+import PageHeader from '@/components/PageHeader'
 import { clearAudit, listAudit, type AuditEntry } from '@/api/audit'
 import { listAuthEvents, type AuthEvent } from '@/api/authEvents'
 import { clearSubLogs, getSubLogs, purgeSubLogs, type SubLog } from '@/api/subLogs'
@@ -317,7 +318,7 @@ export default function LogsView() {
 
   return (
     <Box sx={{ p: 3 }}>
-      <Typography variant="h4" sx={{ mb: 2 }}>{t('admin:logs.title')}</Typography>
+      <PageHeader title={t('admin:logs.title')} />
       <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ mb: 2, borderBottom: `1px solid ${md.outlineVariant}` }}>
         <Tab value="sub" label={t('admin:logs.tab_sub')} />
         <Tab value="audit" label={t('admin:logs.tab_audit')} />

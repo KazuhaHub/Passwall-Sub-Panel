@@ -38,6 +38,7 @@ import { listTemplates, type Template } from '@/api/templates'
 import { confirm } from '@/components/ConfirmHost'
 import { pushSnack } from '@/components/SnackbarHost'
 import { PagedTableFooter } from '@/components/PagedTableFooter'
+import PageHeader from '@/components/PageHeader'
 
 // Lazy-load the CodeMirror editor so its (heavy) deps stay out of the initial
 // SPA bundle — fetched only when a rule-set editor dialog opens.
@@ -240,15 +241,13 @@ export default function RuleSetsView() {
 
   return (
     <Box sx={{ p: 3 }}>
-      <Box sx={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', flexWrap: 'wrap', gap: 2, mb: 1 }}>
-        <Box>
-          <Typography variant="h4">{t('admin:rules.title')}</Typography>
-          <Typography variant="body2" sx={{ mt: 0.5 }}>{t('admin:rules.subtitle')}</Typography>
-        </Box>
-        {canConfig && <Button variant="contained" startIcon={<AddIcon />} onClick={openCreate}>
+      <PageHeader
+        title={t('admin:rules.title')}
+        subtitle={t('admin:rules.subtitle')}
+        actions={canConfig && <Button variant="contained" startIcon={<AddIcon />} onClick={openCreate}>
           {t('admin:rules.create')}
         </Button>}
-      </Box>
+      />
 
       {selected.size > 0 && canConfig && (
         <Box sx={{

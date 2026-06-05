@@ -64,6 +64,7 @@ import { MenuItem, Select, FormControlLabel } from '@mui/material'
 import KeyIcon from '@mui/icons-material/VpnKey'
 import type { Node, UnmanagedInbound, User } from '@/api/types'
 import { confirm } from '@/components/ConfirmHost'
+import PageHeader from '@/components/PageHeader'
 import { PagedTableFooter } from '@/components/PagedTableFooter'
 import { pushSnack } from '@/components/SnackbarHost'
 import { useTabParam } from '@/hooks/useTabParam'
@@ -2662,22 +2663,18 @@ export default function NodesView() {
 
   return (
     <Box sx={{ p: 3 }}>
-      <Box sx={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', flexWrap: 'wrap', gap: 2, mb: 1 }}>
-        <Box>
-          <Typography variant="h4">{t('admin:nodes.title')}</Typography>
-          <Typography variant="body2" sx={{ mt: 0.5 }}>{t('admin:nodes.subtitle')}</Typography>
-        </Box>
-        <Box sx={{ display: 'flex', gap: 1 }}>
-          {canConfig && <>
+      <PageHeader
+        title={t('admin:nodes.title')}
+        subtitle={t('admin:nodes.subtitle')}
+        actions={canConfig && <>
           <Button variant="outlined" startIcon={<AddIcon />} onClick={openSeparatorCreate}>
             {t('admin:nodes.create_separator', { defaultValue: '新增分隔标题' })}
           </Button>
           <Button variant="contained" startIcon={<AddIcon />} onClick={openCreate}>
             {t('admin:nodes.create')}
           </Button>
-          </>}
-        </Box>
-      </Box>
+        </>}
+      />
 
       <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ mt: 2, mb: 2, borderBottom: `1px solid ${md.outlineVariant}` }}>
         <Tab value="managed" label={t('admin:nodes.tab_managed')} />

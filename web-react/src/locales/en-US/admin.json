@@ -1210,6 +1210,8 @@
     "tab_certs": "Certificates",
     "tab_creds": "DNS credentials",
     "tab_acme": "ACME settings",
+    "page_title": "Certificates",
+    "page_subtitle": "Issue and auto-renew wildcard TLS certificates via ACME DNS-01.",
     "optional": "optional",
     "acme_title": "ACME certificate automation",
     "acme_subtitle": "Account and renewal settings for PSP-managed certificates.",

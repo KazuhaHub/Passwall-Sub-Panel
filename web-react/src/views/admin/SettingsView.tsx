@@ -73,6 +73,7 @@ import DeleteIcon from '@mui/icons-material/DeleteOutline'
 import DragIndicatorIcon from '@mui/icons-material/DragIndicator'
 import AppsIcon from '@mui/icons-material/Apps'
 import type { LoginMode } from '@/api/types'
+import PageHeader from '@/components/PageHeader'
 import { pushSnack } from '@/components/SnackbarHost'
 import { confirm } from '@/components/ConfirmHost'
 import { QuickLinkIcon, QUICK_LINK_ICONS } from '@/components/QuickLinkIcon'
@@ -341,7 +342,7 @@ export default function SettingsView() {
 
   return (
     <Box sx={{ p: 3 }}>
-      <Typography variant="h4" sx={{ mb: 1 }}>{t('settings.title')}</Typography>
+      <PageHeader title={t('settings.title')} />
 
       <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ mt: 2, mb: 3, borderBottom: `1px solid ${md.outlineVariant}` }}>
         {tabs.map(tb => <Tab key={tb.key} value={tb.key} label={t(tb.labelKey)} />)}

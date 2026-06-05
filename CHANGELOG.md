@@ -4,6 +4,15 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## v3.6.4-beta.3 — 2026-06-05
+
+统一所有管理页的页头（标题高度 / 间距一致），并修正证书页布局。本地 `tsc -b` / `npm run build` 通过。
+
+### Changed
+
+- **统一各管理页页头（抽出共享 `PageHeader` 组件）** —— 此前各页标题各写各的：`mb` 有的 1 有的 2 有的 3、有的是裸标题有的是 flex 头，导致「Dashboard 标题比 Users 高」之类的不齐。抽出共享 `PageHeader`（标题 h4 + 可选副标题 + 右侧操作区，统一间距 `mb:2`），铺到全部 12 个导航页（Dashboard / Users / Servers / Nodes / Groups / Rule sets / Templates / Traffic / Logs / Sync tasks / Settings / Certificates），标题大小与高度从此一致；各页原有的操作按钮 / 副标题 / 权限条件（如 `canConfig`）原样保留。
+- **证书页布局修正** —— 原先整页无标题页头，且「证书」「DNS 凭据」两块重边框卡片直接堆叠贴边，与其他页风格不一致。改为标准结构：`PageHeader`（标题 + 副标题 + 随当前 Tab 切换的「新建」按钮）+ 带底部分隔线的子 Tab + 表格平铺（不再套重边框卡），ACME 设置 Tab 用与「设置」页一致的 Section 卡片样式。
+
 ## v3.6.4-beta.2 — 2026-06-04
 
 证书页 UI 重构（子 Tab + 具名凭据字段 + 更多 DNS 厂商）、限流配置改热生效、外加一批 PSP→3X-UI API 取数效率优化（去掉全量回拉）。本地 `go build` / `go vet` / `go test ./...` / `tsc -b` 全通过。

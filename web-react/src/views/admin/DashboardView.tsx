@@ -26,6 +26,7 @@ import CheckCircleIcon from '@mui/icons-material/CheckCircle'
 
 import { dashboardSummary, type DashboardSummary } from '@/api/dashboard'
 import { topTraffic, trafficHistory, type TrafficHistoryItem, type TrafficRow } from '@/api/traffic'
+import PageHeader from '@/components/PageHeader'
 import type { M3Tokens } from '@/theme'
 
 const TrafficChart = lazy(() => import('@/components/TrafficChart'))
@@ -172,7 +173,7 @@ export default function DashboardView() {
 
   return (
     <Box sx={{ p: { xs: 2, sm: 3 } }}>
-      <Typography variant="h4" sx={{ mb: 3 }}>{t('dashboard.title')}</Typography>
+      <PageHeader title={t('dashboard.title')} />
 
       {/* Stat tiles — bigger numbers now carry a subtitle (e.g., 健康/总数) so
           a glance tells the admin "everything fine" vs "8/12 healthy". */}

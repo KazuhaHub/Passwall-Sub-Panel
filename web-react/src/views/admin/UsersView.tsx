@@ -78,6 +78,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useCan } from '@/utils/permissions'
 import { useSiteStore } from '@/stores/site'
 import { confirm } from '@/components/ConfirmHost'
+import PageHeader from '@/components/PageHeader'
 import { pushSnack } from '@/components/SnackbarHost'
 import { PagedTableFooter } from '@/components/PagedTableFooter'
 import { SortableTableCell } from '@/components/SortableTableCell'
@@ -975,9 +976,9 @@ export default function UsersView() {
   return (
     <Box sx={{ p: 3 }}>
       {/* Header */}
-      <Box sx={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', flexWrap: 'wrap', gap: 2, mb: 2 }}>
-        <Typography variant="h4">{t('admin:users.title')}</Typography>
-        <Box sx={{ display: 'flex', gap: 1 }}>
+      <PageHeader
+        title={t('admin:users.title')}
+        actions={<>
           <Button variant="outlined" startIcon={reconcileBusy ? <CircularProgress size={14} /> : <SyncIcon />}
             onClick={triggerReconcile} disabled={reconcileBusy}>
             {t('admin:users.reconcile.trigger')}
@@ -985,8 +986,8 @@ export default function UsersView() {
           <Button variant="contained" startIcon={<AddIcon />} onClick={openCreate}>
             {t('admin:users.create')}
           </Button>
-        </Box>
-      </Box>
+        </>}
+      />
 
       {/* Toolbar */}
       <Box sx={{ display: 'flex', gap: 1.5, mb: 2, flexWrap: 'wrap', alignItems: 'center' }}>

@@ -42,6 +42,7 @@ import type { SyncTask, SyncTaskStatus, SyncTaskType } from '@/api/types'
 import { confirm } from '@/components/ConfirmHost'
 import { pushSnack } from '@/components/SnackbarHost'
 import { PagedTableFooter } from '@/components/PagedTableFooter'
+import PageHeader from '@/components/PageHeader'
 
 function initialPageSize(): number {
   try {
@@ -194,20 +195,19 @@ export default function SyncTasksView() {
 
   return (
     <Box sx={{ p: 3 }}>
-      <Box sx={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', flexWrap: 'wrap', gap: 2, mb: 1 }}>
-        <Box>
-          <Typography variant="h4">{t('admin:sync_tasks.title')}</Typography>
-          <Typography variant="body2" sx={{ mt: 0.5 }}>
-            {t('admin:sync_tasks.pending_count', { count: pendingCount })}
-          </Typography>
-        </Box>
-        <Box sx={{ display: 'flex', gap: 1 }}>
-          {canConfig && <Button variant="outlined" color="error" startIcon={<CleaningIcon />} onClick={purge}>{t('admin:sync_tasks.purge')}</Button>}
-          <Button variant="contained" startIcon={<RefreshIcon />} onClick={() => load()}>
-            {t('admin:sync_tasks.refresh')}
-          </Button>
-        </Box>
-      </Box>
+      <PageHeader
+        title={t('admin:sync_tasks.title')}
+        subtitle={t('admin:sync_tasks.pending_count', { count: pendingCount })}
+        actions={
+          <>
+            {canConfig && <Button variant="outlined" color="error" startIcon={<CleaningIcon />} onClick={purge}>{t('admin:sync_tasks.purge')}</Button>}
+            <Button variant="contained" startIcon={<RefreshIcon />} onClick={() => load()}>
+              {t('admin:sync_tasks.refresh')}
+            </Button>
+          </>
+        }
+      />
+
 
       <Box sx={{ display: 'flex', gap: 1.5, mb: 2, flexWrap: 'wrap', alignItems: 'center' }}>
         <Select size="small" value={statusFilter} displayEmpty

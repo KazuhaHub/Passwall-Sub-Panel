@@ -43,6 +43,7 @@ import { listRuleSets, type RuleSet } from '@/api/rules'
 import { confirm } from '@/components/ConfirmHost'
 import { pushSnack } from '@/components/SnackbarHost'
 import { PagedTableFooter } from '@/components/PagedTableFooter'
+import PageHeader from '@/components/PageHeader'
 
 const EMPTY: Template = {
   slug: '', name: '', client_type: 'mihomo', is_default: false, rule_sets: [], content: '',
@@ -302,15 +303,13 @@ export default function TemplatesView() {
 
   return (
     <Box sx={{ p: 3 }}>
-      <Box sx={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', flexWrap: 'wrap', gap: 2, mb: 1 }}>
-        <Box>
-          <Typography variant="h4">{t('admin:templates.title')}</Typography>
-          <Typography variant="body2" sx={{ mt: 0.5 }}>{t('admin:templates.subtitle')}</Typography>
-        </Box>
-        {canConfig && <Button variant="contained" startIcon={<AddIcon />} onClick={openCreate}>
+      <PageHeader
+        title={t('admin:templates.title')}
+        subtitle={t('admin:templates.subtitle')}
+        actions={canConfig && <Button variant="contained" startIcon={<AddIcon />} onClick={openCreate}>
           {t('admin:templates.create')}
         </Button>}
-      </Box>
+      />
 
       {selected.size > 0 && canConfig && (
         <Box sx={{
