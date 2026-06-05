@@ -570,8 +570,8 @@ func copyOIDCConfig(ctx context.Context, src, dst *gorm.DB) error {
 
 // copySettingsKV flattens the wide legacy ui_settings row into the v3
 // `settings` KV table, then appends the two notify thresholds pulled out
-// of legacy mail_settings. Field grouping (`type`) matches the layout
-// documented in docs/db-refactor-plan.md §3.2.
+// of legacy mail_settings. Field grouping (`type`) follows the type-grouping
+// order so a SQL browser shows the rows by category.
 //
 // The row order here mirrors settingDescriptors() in
 // internal/adapters/mysql/settings_kv_repo.go — keep them in sync if a

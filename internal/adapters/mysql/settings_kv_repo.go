@@ -169,10 +169,9 @@ func KnownSettingNames() map[string]bool {
 }
 
 // settingDescriptors returns the full mapping between UISettings fields and
-// (type, name) KV cells. The order is the documented type-grouping order
-// from docs/db-refactor-plan.md §3.2 so SQL browsers display them by
-// category. To add a new field: declare it on UISettings, then add one
-// line in this list.
+// (type, name) KV cells. The order groups rows by `type` so a SQL browser
+// displays them by category. To add a new field: declare it on UISettings,
+// then add one line in this list.
 func settingDescriptors(s *ports.UISettings) []settingDescriptor {
 	return []settingDescriptor{
 		// site --- branding / domain
