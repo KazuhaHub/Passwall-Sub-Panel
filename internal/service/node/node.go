@@ -805,6 +805,22 @@ func (s *Service) enqueueNodeTask(ctx context.Context, typ domain.SyncTaskType, 
 	})
 }
 
+// EnqueueConfigPush schedules an async push of a node's current local inbound
+// config to 3X-UI via the retryable SyncTaskNodeUpdate path (which re-reads the
+// live snapshot and pushes it, retrying transient failures). The cert service
+// calls this after writing a managed certificate into the node's StreamSettings
+// so the inline cert is delivered through the same machinery — a transient push
+// failure retries the push, NEVER re-issuing the certificate (which would burn
+// the ACME rate limit). nil payload: SyncTaskNodeUpdate ignores it and pushes
+// the latest snapshot.
+func (s *Service) EnqueueConfigPush(ctx context.Context, nodeID int64) error {
+	n, err := s.nodes.GetByID(ctx, nodeID)
+	if err != nil {
+		return err
+	}
+	return s.enqueueNodeTask(ctx, domain.SyncTaskNodeUpdate, n, "deploy managed certificate", nil)
+}
+
 // nodeTaskBackoff returns a flat 1-minute retry interval — same rationale
 // as deleteTaskBackoff in user.go.
 func nodeTaskBackoff(_ int) time.Duration {

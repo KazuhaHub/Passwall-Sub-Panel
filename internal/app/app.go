@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/KazuhaHub/passwall-sub-panel/internal/adapters/acme"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/adapters/mysql"
 	xuiadapter "github.com/KazuhaHub/passwall-sub-panel/internal/adapters/xui"
 	yamladapter "github.com/KazuhaHub/passwall-sub-panel/internal/adapters/yaml"
@@ -25,6 +26,7 @@ import (
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/audit"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/auth"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/cert"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/geo"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/group"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/health"
@@ -72,6 +74,7 @@ type App struct {
 	reconcile *reconcile.Service
 	user      *user.Service
 	node      *node.Service
+	cert      *cert.Service
 	audit     *audit.Service
 	mail      *mailer.Service
 	health    *health.Service
@@ -263,6 +266,16 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	// enabled/active-file live from settings and hot-reloads the DB on change.
 	geoSvc := geo.New(repos.Settings, cfg.ConfigDir)
 
+	// PSP-managed certificate lifecycle (v3.6.4): lego-backed ACME issuer + the
+	// cert service. nodeSvc is the deploy pusher — the cert service writes the
+	// inline cert into the node snapshot then enqueues a node-update push, so a
+	// deploy retry never re-issues (which would burn the ACME rate limit).
+	acmeIssuer := acme.NewIssuer()
+	certSvc := cert.New(repos.Certificate, repos.DNSCredential, repos.ACMEAccount, acmeIssuer, repos.Node, repos.SyncTask, nodeSvc, sysSettings.ACMEDirectoryURL, sysSettings.ACMEEmail, sysSettings.CertRenewBeforeDays)
+	// Late-bind the mailer so cert issuance/renewal failures email admins
+	// (deduped per cert/day), mirroring the dashboard cert-failure alert.
+	certSvc.SetAlerter(mailSvc)
+
 	// --- async dispatcher for handler-spawned background work ---
 	//
 	// Built BEFORE the HTTP layer so handlers can capture the panel-wide
@@ -300,6 +313,7 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 		User:             userSvc,
 		Group:            groupSvc,
 		Node:             nodeSvc,
+		Cert:             certSvc,
 		Render:           renderSvc,
 		Audit:            auditSvc,
 		Sync:             syncSvc,
@@ -325,6 +339,7 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	a.reconcile = reconcileSvc
 	a.user = userSvc
 	a.node = nodeSvc
+	a.cert = certSvc
 	a.audit = auditSvc
 	a.mail = mailSvc
 	a.health = healthSvc
@@ -416,6 +431,7 @@ func (a *App) Run() error {
 	safego.GoTracked(&a.bgWG, "mail-loop", func() { a.runMailLoop(bgCtx) })
 	safego.GoTracked(&a.bgWG, "reconcile-loop", func() { a.runReconcileLoop(bgCtx) })
 	safego.GoTracked(&a.bgWG, "health-loop", func() { a.runHealthLoop(bgCtx) })
+	safego.GoTracked(&a.bgWG, "cert-renewal-loop", func() { a.runCertRenewalLoop(bgCtx) })
 
 	return a.server.Serve(ln)
 }
@@ -578,6 +594,45 @@ func (a *App) runGeoUpdateLoop(ctx context.Context) {
 		interval := 12 * time.Hour
 		if err == nil && set.GeoIPUpdateIntervalHours >= 1 {
 			interval = time.Duration(set.GeoIPUpdateIntervalHours) * time.Hour
+		}
+		t.Reset(interval)
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+	}
+}
+
+// runCertRenewalLoop periodically scans PSP-managed certificates and enqueues a
+// renewal (cert_renew sync-task) for any that have crossed the hybrid threshold.
+// The heavy ACME work runs in the sync-task processor; this loop only scans +
+// enqueues. Interval (and the renew-before-days threshold) are re-read from
+// settings each cycle, so cadence changes take effect without a restart.
+func (a *App) runCertRenewalLoop(ctx context.Context) {
+	if a.cert == nil {
+		return
+	}
+	// Brief initial delay so a fresh boot serves quickly before the first scan.
+	select {
+	case <-ctx.Done():
+		return
+	case <-time.After(30 * time.Second):
+	}
+	t := time.NewTicker(time.Hour) // Reset from settings below before the first wait.
+	defer t.Stop()
+	log.Info("cert renewal loop started")
+	for {
+		set, err := a.settings.Load(ctx, ports.UISettings{})
+		if err == nil {
+			a.cert.SetRenewBeforeDays(set.CertRenewBeforeDays)
+			if serr := a.cert.ScanDueRenewals(ctx); serr != nil {
+				log.Warn("cert renewal scan", "err", serr)
+			}
+		}
+		interval := 12 * time.Hour
+		if err == nil && set.CertRenewCheckIntervalHours >= 1 {
+			interval = time.Duration(set.CertRenewCheckIntervalHours) * time.Hour
 		}
 		t.Reset(interval)
 		select {
@@ -852,6 +907,11 @@ func (a *App) runSyncTaskLoop(ctx context.Context) {
 		}
 		if err := a.node.ProcessDueTasks(ctx, 20); err != nil {
 			log.Warn("node sync tasks", "err", err)
+		}
+		if a.cert != nil {
+			if err := a.cert.ProcessDueTasks(ctx, 20); err != nil {
+				log.Warn("cert sync tasks", "err", err)
+			}
 		}
 		select {
 		case <-ctx.Done():

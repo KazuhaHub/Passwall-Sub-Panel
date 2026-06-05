@@ -16,6 +16,7 @@ const UserLayout = lazy(() => import('@/layouts/UserLayout'))
 const PlaceholderView = lazy(() => import('@/views/admin/PlaceholderView'))
 const DashboardView = lazy(() => import('@/views/admin/DashboardView'))
 const ServersView = lazy(() => import('@/views/admin/ServersView'))
+const CertificatesView = lazy(() => import('@/views/admin/CertificatesView'))
 const GroupsView = lazy(() => import('@/views/admin/GroupsView'))
 const UsersView = lazy(() => import('@/views/admin/UsersView'))
 const NodesView = lazy(() => import('@/views/admin/NodesView'))
@@ -74,6 +75,7 @@ export const router = createBrowserRouter([
           { index: true, element: <Navigate to="dashboard" replace /> },
           { path: 'dashboard', element: <DashboardView /> },
           { path: 'servers', element: <ServersView /> },
+          { path: 'certs', element: <CertificatesView /> },
           { path: 'groups', element: <GroupsView /> },
           { path: 'users', element: <UsersView /> },
           { path: 'nodes', element: <NodesView /> },

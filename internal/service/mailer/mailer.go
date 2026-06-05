@@ -737,6 +737,54 @@ type AnnouncementError struct {
 	Error  string `json:"error"`
 }
 
+// AlertAdmins emails every enabled admin a one-off subject/body, deduped per
+// (admin, kind, windowKey) via mail_sent so a persistently-failing job doesn't
+// spam. No-op when mail is disabled. Used by the cert service to notify admins
+// of certificate issuance/renewal failures.
+func (s *Service) AlertAdmins(ctx context.Context, kind domain.MailReminderKind, windowKey, subject, body string) (int, error) {
+	settings, err := s.LoadSettings(ctx)
+	if err != nil {
+		return 0, err
+	}
+	if !settings.Enabled {
+		return 0, nil
+	}
+	ctx = context.WithoutCancel(ctx)
+	sent := 0
+	page := 1
+	const pageSize = 100
+	for {
+		users, total, err := s.users.List(ctx, ports.UserFilter{Pagination: ports.Pagination{Page: page, PageSize: pageSize}})
+		if err != nil {
+			return sent, err
+		}
+		for _, u := range users {
+			if u.Role != domain.RoleAdmin || !u.Enabled {
+				continue
+			}
+			to := reminderAddress(u)
+			if to == "" {
+				continue
+			}
+			// Atomic at-most-once per (admin, kind, windowKey).
+			won, rerr := s.repo.ReserveSentSlot(ctx, u.ID, kind, windowKey, to)
+			if rerr != nil || !won {
+				continue
+			}
+			if serr := sendSMTP(ctx, settings, to, subject, body); serr != nil {
+				log.Warn("alert admins send", "user_id", u.ID, "err", serr)
+				continue
+			}
+			sent++
+		}
+		if int64(page*pageSize) >= total {
+			break
+		}
+		page++
+	}
+	return sent, nil
+}
+
 func (s *Service) SendAnnouncement(ctx context.Context, in AnnouncementInput) (*AnnouncementResult, error) {
 	settings, err := s.LoadSettings(ctx)
 	if err != nil {

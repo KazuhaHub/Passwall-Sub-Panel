@@ -250,7 +250,12 @@ type nodeRow struct {
 	InboundExpiryTime int64  `gorm:"default:0"`
 	ConfigSyncedAt    *time.Time
 	ConfigSyncState   string `gorm:"size:32;default:''"`
-	CreatedAt         time.Time
+	// Managed certificate binding (v3.6.4): cert_source discriminates the TLS
+	// cert provisioning mode; cert_id points to tls_certificates when
+	// cert_source='psp_managed'. AutoMigrate adds them; empty/0 = unmanaged.
+	CertSource string `gorm:"size:16;default:''"`
+	CertID     int64  `gorm:"default:0;index"`
+	CreatedAt  time.Time
 }
 
 func (nodeRow) TableName() string { return "nodes" }
@@ -305,6 +310,8 @@ func (r *nodeRow) toDomain() (*domain.Node, error) {
 		InboundExpiryTime:     r.InboundExpiryTime,
 		ConfigSyncedAt:        r.ConfigSyncedAt,
 		ConfigSyncState:       r.ConfigSyncState,
+		CertSource:            domain.CertSource(r.CertSource),
+		CertID:                r.CertID,
 		CreatedAt:             r.CreatedAt,
 	}, nil
 }
@@ -354,6 +361,8 @@ func nodeFromDomain(n *domain.Node) (*nodeRow, error) {
 		InboundExpiryTime:     n.InboundExpiryTime,
 		ConfigSyncedAt:        n.ConfigSyncedAt,
 		ConfigSyncState:       n.ConfigSyncState,
+		CertSource:            string(n.CertSource),
+		CertID:                n.CertID,
 		CreatedAt:             n.CreatedAt,
 	}, nil
 }
@@ -1095,6 +1104,9 @@ func EnsureSchema(db *gorm.DB) error {
 		&mailSentRow{},
 		&samlConfigRow{},
 		&oidcConfigRow{},
+		&dnsCredentialRow{},
+		&acmeAccountRow{},
+		&tlsCertificateRow{},
 	); err != nil {
 		return err
 	}

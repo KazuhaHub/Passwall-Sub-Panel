@@ -1062,6 +1062,12 @@ func (r *fakeNodeRepo) GetByPanelInbound(ctx context.Context, panelID int64, inb
 	}
 	return r.GetByID(ctx, id)
 }
+func (r *fakeNodeRepo) UpdateCertBinding(_ context.Context, _ int64, _ domain.CertSource, _ int64) error {
+	return nil
+}
+func (r *fakeNodeRepo) ListByCertID(_ context.Context, _ int64) ([]*domain.Node, error) {
+	return nil, nil
+}
 func (r *fakeNodeRepo) List(ctx context.Context) ([]*domain.Node, error) {
 	r.listCalls++
 	out := make([]*domain.Node, 0, len(r.nodes))
@@ -1236,6 +1242,9 @@ func (c *fakeXUIClient) UpdatePanel(ctx context.Context) error           { retur
 func (c *fakeXUIClient) InstallXray(ctx context.Context, v string) error { return nil }
 func (c *fakeXUIClient) GetXrayVersionList(ctx context.Context) ([]string, error) {
 	return []string{"v26.5.9", "v26.5.8"}, nil
+}
+func (c *fakeXUIClient) GetWebCertFiles(ctx context.Context) (*ports.WebCertFiles, error) {
+	return nil, nil
 }
 
 // When snapshots have been wiped but the user still carries a non-zero

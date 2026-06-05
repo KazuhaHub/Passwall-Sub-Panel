@@ -219,6 +219,15 @@ func (c *Client) doJSONRetry(ctx context.Context, method, path string, body any,
 			resp.StatusCode != http.StatusUnauthorized &&
 			resp.StatusCode != http.StatusRequestTimeout &&
 			resp.StatusCode != http.StatusTooManyRequests {
+			// A 404 means the route isn't registered on this panel — a
+			// version-gated endpoint (e.g. getWebCertFiles, added in 3X-UI
+			// 3.2.7) called against an older panel. Mark it
+			// ErrXUIEndpointUnsupported IN ADDITION to the permanent-failure
+			// ErrValidation so callers can errors.Is and degrade gracefully
+			// instead of surfacing a generic validation error.
+			if resp.StatusCode == http.StatusNotFound {
+				return fmt.Errorf("%w: %w: %s", domain.ErrValidation, ports.ErrXUIEndpointUnsupported, base.Error())
+			}
 			return fmt.Errorf("%w: %s", domain.ErrValidation, base.Error())
 		}
 		return base
@@ -570,6 +579,26 @@ func (c *Client) GetXrayVersionList(ctx context.Context) ([]string, error) {
 		return nil, err
 	}
 	return versions, nil
+}
+
+// GetWebCertFiles hits GET /panel/api/server/getWebCertFiles and returns the
+// panel's own web TLS certificate + key file PATHS (not the PEM bytes). The
+// endpoint was added in 3X-UI 3.2.7; older panels have no such route and answer
+// HTTP 404, which doJSON marks as ports.ErrXUIEndpointUnsupported so the caller
+// can degrade (grey out "fetch cert from panel"). Backs cert_source=from_panel:
+// fill a node-assigned inbound with file-mode paths that exist on the node.
+func (c *Client) GetWebCertFiles(ctx context.Context) (*ports.WebCertFiles, error) {
+	var raw struct {
+		WebCertFile string `json:"webCertFile"`
+		WebKeyFile  string `json:"webKeyFile"`
+	}
+	if err := c.doJSON(ctx, http.MethodGet, "/panel/api/server/getWebCertFiles", nil, &raw); err != nil {
+		return nil, err
+	}
+	return &ports.WebCertFiles{
+		CertFile: raw.WebCertFile,
+		KeyFile:  raw.WebKeyFile,
+	}, nil
 }
 
 // GetClient fetches one client by its panel-wide email via GET

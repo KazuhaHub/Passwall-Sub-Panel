@@ -4,6 +4,21 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## v3.6.4-beta.1 — 2026-06-04
+
+PSP 托管的 TLS 证书自动化：内置 ACME（`go-acme/lego`，DNS-01）自动签发**通配符**证书、内联部署到 3X-UI 入站、自动续期，外加失败告警。核心（签发链路）已真机验证 —— 对**真实 Let's Encrypt staging + 真实 Cloudflare DNS-01** 成功签出通配符 + 多 SAN 证书。本地 `go build` / `go vet` / `go test ./...` / `tsc -b` 全通过。
+
+### Added
+
+- **证书自动化（ACME 签发 + 内联部署 + 自动续期）** —— 新增顶级「证书」页：配 DNS 凭据 → 签发通配符证书 → 自动部署到节点入站 → 到期前自动续期；设计稿见 [docs/v3.6.4-cert-automation.md](docs/v3.6.4-cert-automation.md)。
+  - **签发**：PSP 自持 ACME 账户，用 `go-acme/lego` 走 **DNS-01**（唯一支持通配符、且不依赖节点侧端口可达性的挑战方式）。精选 ~20 家常用 DNS 厂商（Cloudflare / 阿里 / DNSPod / Route53 / GCP / Azure / DigitalOcean / Vultr / Hetzner / …）显式注册 + `exec`/`httpreq` 通用兜底，**不**引入 lego 全量 provider 的云 SDK（控二进制体积）。账户按 email+directory 复用，证书/私钥/DNS 凭据/账户 key 全 AES-GCM 加密落库。
+  - **部署（API-only 约束下的唯一可行路径）**：PSP 只能经 3X-UI HTTP API 操作节点、够不着节点磁盘，故把证书 PEM **内联**写进入站 `streamSettings.tlsSettings.certificates[]`，经现有 inbound-update + 异步可重试 sync-task 推送。**签发与部署解耦**：部署失败只重试推送，绝不重新签发（不撞 ACME 限额）。内容 diff 门控：同证书不重复下发，免无谓 Xray 重启。
+  - **续期**：后台 worker 按**混合阈值**扫描入队 —— 默认「到期前 N 天」；若 N 超过证书总寿命的 2/3（短效证书），自动落到「剩 <1/3 寿命」兜底，适配 Let's Encrypt 证书有效期 90→64→45 天缩短的趋势。续期完按 `cert_id` 反查绑定节点重新下发。
+  - **节点证书来源三选一**（节点入站表单）：`manual`（手填路径 / 内联 PEM）、`from_panel`（一键拉取面板自身 web 证书路径，需 3X-UI **3.2.7+**，旧版按钮置灰 + 提示）、`psp_managed`（绑定一张托管证书，绑定即部署）。
+  - **失败可见性**：签发 / 续期失败并入首页 Node alerts（复用 `tls_certificates.status=failed`，不新建表）+ 邮件管理员（按「证书 / 天」去重；临期且失败升级标注）。
+  - **可配设置**：设置页新增「ACME 证书自动化」分区 —— 账户邮箱、ACME 目录（LE 生产 / staging）、到期前 N 天续期、续期检查间隔。
+  - 三张新表（`tls_certificates` / `dns_credentials` / `acme_accounts`）经 AutoMigrate 建表，敏感列加密；节点表加 `cert_source` / `cert_id` 绑定列。新增 PSP 侧封装 `GET /admin/servers/:id/web-cert`（代理 3X-UI 3.2.7 的 `getWebCertFiles`，404 → 优雅降级）。
+
 ## v3.6.3-beta.19 — 2026-06-03
 
 全代码库审计后的修复批次(31 项,0 critical),外加流量「每小时」统计改用时间比例分摊(RRDtool 式插值)。本地 `go build` / `go vet` / `go test ./...` / `go test -race` / `npm run build` 全通过。

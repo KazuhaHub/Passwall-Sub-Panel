@@ -691,6 +691,15 @@
     "duplicate": "Duplicate as a new rule set"
   },
   "nodes": {
+    "cert_source": {
+      "from_panel": "Fetch cert paths from panel",
+      "from_panel_filled": "Filled in the panel's cert paths",
+      "from_panel_unsupported": "Panel too old (needs 3X-UI 3.2.7+); fill the paths manually",
+      "no_panel": "Pick a server (panel) first",
+      "pick_managed": "Pick a PSP-managed certificate…",
+      "apply_managed": "Apply & deploy",
+      "bound": "Bound the managed certificate and deployed it"
+    },
     "title": "Nodes",
     "subtitle": "Manage 3X-UI inbounds; subscription rendering follows the enabled state set here.",
     "tab_managed": "Managed",
@@ -1196,6 +1205,35 @@
       "batch_delete_title": "Delete groups",
       "batch_delete_message": "Delete {{names}}{{suffix}}?"
     }
+  },
+  "certs": {
+    "title": "Certificates",
+    "new": "New certificate",
+    "need_cred_first": "Add a DNS credential below before you can issue a certificate.",
+    "col_name": "Name",
+    "col_domains": "Domains",
+    "col_status": "Status",
+    "col_expiry": "Expires",
+    "renew": "Renew now",
+    "deleted": "Deleted",
+    "delete_title": "Delete certificate",
+    "delete_confirm": "Delete certificate \"{{name}}\"?",
+    "validation_required": "Please fill in the required fields",
+    "validation_secret_required": "Every credential value must be filled in",
+    "create_queued": "Issuance queued; processing in the background",
+    "renew_queued": "Renewal queued",
+    "domains_help": "One domain per line / comma-separated; wildcards like *.example.com are supported",
+    "auto_renew": "Auto-renew",
+    "status": { "pending": "Issuing", "active": "Active", "failed": "Failed", "renewing": "Renewing" },
+    "cred_title": "DNS credentials",
+    "cred_new": "New credential",
+    "cred_provider": "DNS provider",
+    "cred_keys": "Credential keys",
+    "cred_delete_title": "Delete credential",
+    "cred_delete_confirm": "Delete credential \"{{name}}\"?",
+    "provider_help": "Pick a DNS provider (searchable), e.g. cloudflare / alidns / dnspod; use exec / httpreq for others",
+    "cred_kv_help": "Enter the env vars from the provider's lego docs, e.g. Cloudflare: CF_DNS_API_TOKEN",
+    "cred_add_field": "Add field"
   },
   "servers": {
     "title": "Servers (3X-UI)",

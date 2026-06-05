@@ -225,6 +225,37 @@ func (r *nodeRepo) GetByPanelInbound(ctx context.Context, panelID int64, inbound
 	return row.toDomain()
 }
 
+func (r *nodeRepo) UpdateCertBinding(ctx context.Context, nodeID int64, source domain.CertSource, certID int64) error {
+	if nodeID == 0 {
+		return fmt.Errorf("UpdateCertBinding requires a non-zero node ID")
+	}
+	return r.db.WithContext(ctx).
+		Model(&nodeRow{}).
+		Where("id = ?", nodeID).
+		Updates(map[string]any{
+			"cert_source": string(source),
+			"cert_id":     certID,
+		}).Error
+}
+
+func (r *nodeRepo) ListByCertID(ctx context.Context, certID int64) ([]*domain.Node, error) {
+	var rows []nodeRow
+	if err := r.db.WithContext(ctx).
+		Where("cert_id = ? AND cert_source = ?", certID, string(domain.CertSourceManaged)).
+		Order("id ASC").Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	out := make([]*domain.Node, len(rows))
+	for i := range rows {
+		n, err := rows[i].toDomain()
+		if err != nil {
+			return nil, err
+		}
+		out[i] = n
+	}
+	return out, nil
+}
+
 func (r *nodeRepo) List(ctx context.Context) ([]*domain.Node, error) {
 	var rows []nodeRow
 	if err := r.db.WithContext(ctx).Order("sort_order ASC, id ASC").Find(&rows).Error; err != nil {

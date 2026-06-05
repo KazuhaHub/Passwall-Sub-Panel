@@ -2,9 +2,17 @@ package ports
 
 import (
 	"context"
+	"errors"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 )
+
+// ErrXUIEndpointUnsupported is returned when a 3X-UI endpoint a client calls
+// doesn't exist on the target panel's version (the route 404s) — e.g. a
+// version-gated endpoint like getWebCertFiles (3.2.7+) against an older panel.
+// Callers use errors.Is to degrade gracefully instead of surfacing a generic
+// validation failure.
+var ErrXUIEndpointUnsupported = errors.New("3X-UI endpoint unsupported on this panel version")
 
 // XUIClient is the abstract HTTP client for a single 3X-UI panel. The service
 // layer never instantiates this directly — it routes through XUIPool by
@@ -106,6 +114,13 @@ type XUIClient interface {
 	// Lets the admin Upgrade-Xray dialog populate a version dropdown so
 	// admin can pin a specific tag instead of always taking "latest".
 	GetXrayVersionList(ctx context.Context) ([]string, error)
+
+	// GetWebCertFiles hits /panel/api/server/getWebCertFiles — the panel's own
+	// web TLS cert/key file PATHS (never the PEM bytes). 3X-UI 3.2.7+ only;
+	// older panels have no such route and 404, which the adapter surfaces as
+	// ErrXUIEndpointUnsupported. Backs the cert_source=from_panel flow: fill a
+	// node-assigned inbound with file-mode paths that exist on the node.
+	GetWebCertFiles(ctx context.Context) (*WebCertFiles, error)
 }
 
 // PanelUpdateInfo is the version pair returned by
@@ -125,6 +140,15 @@ type ServerStatus struct {
 	PanelVersion string
 	XrayVersion  string
 	XrayState    string // "running" / "stop" / "error"
+}
+
+// WebCertFiles is the obj of /panel/api/server/getWebCertFiles — filesystem
+// PATHS on the panel host (e.g. /opt/1panel/secret/server.crt), never the
+// certificate bytes. The cert must already exist on the node; PSP only learns
+// where it lives so a node-assigned inbound can reference it in file mode.
+type WebCertFiles struct {
+	CertFile string // webCertFile
+	KeyFile  string // webKeyFile
 }
 
 // ClientDetail is a normalised view of one client. ID carries the uuid (the

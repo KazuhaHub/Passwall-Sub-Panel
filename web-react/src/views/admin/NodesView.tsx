@@ -58,6 +58,7 @@ import {
   updateSeparator,
 } from '@/api/nodes'
 import { listUsers } from '@/api/users'
+import { fetchPanelWebCert, listCerts, setNodeCertSource, type Cert } from '@/api/certs'
 import { listServers, type Server } from '@/api/servers'
 import { MenuItem, Select, FormControlLabel } from '@mui/material'
 import KeyIcon from '@mui/icons-material/VpnKey'
@@ -933,15 +934,69 @@ interface FieldsProps {
   // Existing tags across all nodes, surfaced as the Tags autocomplete's
   // suggestion list (same as the edit/import dialogs).
   allTags?: string[]
+  // The node being edited, or null when creating. Gates the psp_managed cert
+  // binding (which needs a node id to deploy the certificate to).
+  nodeId?: number | null
 }
 
-function InboundFormFields({ form, setForm, showMetadata, servers, onGenKeys, onGenSSPassword, genKeysBusy, protocolReadonly, advanced, onSetAdvanced, allTags }: FieldsProps) {
+function InboundFormFields({ form, setForm, showMetadata, servers, onGenKeys, onGenSSPassword, genKeysBusy, protocolReadonly, advanced, onSetAdvanced, allTags, nodeId }: FieldsProps) {
   const theme = useTheme()
   const md = theme.palette.md
   const { t } = useTranslation(['admin', 'common'])
 
   const update = <K extends keyof InboundFormState>(key: K, value: InboundFormState[K]) => {
     setForm(prev => ({ ...prev, [key]: value }))
+  }
+
+  // --- Certificate source helpers (v3.6.4) ---
+  // from_panel: pull the panel's own web-cert PATHS into the file-mode fields.
+  // psp_managed: bind a PSP-managed cert to this node (the backend deploys it).
+  const [managedCerts, setManagedCerts] = useState<Cert[]>([])
+  const [boundCertId, setBoundCertId] = useState(0)
+  const [fetchingPanelCert, setFetchingPanelCert] = useState(false)
+  const [bindingCert, setBindingCert] = useState(false)
+  useEffect(() => {
+    listCerts().then(setManagedCerts).catch(() => {})
+  }, [])
+  // MUI keeps the dialog mounted, so the bound-cert selection survives across
+  // opens — clear it whenever the dialog targets a different inbound to avoid
+  // applying a stale cert to the wrong node.
+  useEffect(() => {
+    setBoundCertId(0)
+  }, [nodeId])
+
+  async function fetchFromPanel() {
+    if (!form.panel_id) {
+      pushSnack(t('admin:nodes.cert_source.no_panel'), 'warning')
+      return
+    }
+    setFetchingPanelCert(true)
+    try {
+      const r = await fetchPanelWebCert(form.panel_id)
+      if (!r.supported) {
+        pushSnack(t('admin:nodes.cert_source.from_panel_unsupported'), 'warning')
+        return
+      }
+      setForm(prev => ({ ...prev, tls_cert_mode: 'file', tls_cert_file: r.cert_file ?? '', tls_key_file: r.key_file ?? '' }))
+      pushSnack(t('admin:nodes.cert_source.from_panel_filled'), 'success')
+    } catch {
+      /* error toast via the axios interceptor */
+    } finally {
+      setFetchingPanelCert(false)
+    }
+  }
+
+  async function applyManagedCert() {
+    if (nodeId == null || boundCertId === 0) return
+    setBindingCert(true)
+    try {
+      await setNodeCertSource(nodeId, 'psp_managed', boundCertId)
+      pushSnack(t('admin:nodes.cert_source.bound'), 'success')
+    } catch {
+      /* toast */
+    } finally {
+      setBindingCert(false)
+    }
   }
 
   // Toggling into advanced mode snapshots the structured form's current
@@ -987,6 +1042,24 @@ function InboundFormFields({ form, setForm, showMetadata, servers, onGenKeys, on
   // 3X-UI host; empty keeps certificates: [] (REALITY / bring-your-own-root).
   const tlsCertFields = () => (
     <>
+      <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', alignItems: 'center' }}>
+        <Button size="small" variant="outlined" disabled={!form.panel_id || fetchingPanelCert} onClick={fetchFromPanel}>
+          {fetchingPanelCert ? <CircularProgress size={16} /> : t('admin:nodes.cert_source.from_panel')}
+        </Button>
+        {nodeId != null && (
+          <>
+            <Select size="small" value={boundCertId} onChange={e => setBoundCertId(Number(e.target.value))} sx={{ minWidth: 200 }}>
+              <MenuItem value={0}><em>{t('admin:nodes.cert_source.pick_managed')}</em></MenuItem>
+              {managedCerts.filter(c => c.status === 'active').map(c => (
+                <MenuItem key={c.id} value={c.id}>{c.name}</MenuItem>
+              ))}
+            </Select>
+            <Button size="small" variant="contained" disabled={boundCertId === 0 || bindingCert} onClick={applyManagedCert}>
+              {bindingCert ? <CircularProgress size={16} /> : t('admin:nodes.cert_source.apply_managed')}
+            </Button>
+          </>
+        )}
+      </Box>
       <TextField select size="small"
         label={t('admin:nodes.create_dialog.tls_cert_mode')}
         value={form.tls_cert_mode}
@@ -2960,7 +3033,7 @@ export default function NodesView() {
         </DialogTitle>
         <DialogContent sx={{ pt: 1 }}>
           <Box component="form" id="create-form" onSubmit={submitCreate}>
-            <InboundFormFields form={createForm} setForm={setCreateForm}
+            <InboundFormFields form={createForm} setForm={setCreateForm} nodeId={null}
               showMetadata
               servers={servers}
               onGenKeys={genKeys}
@@ -2996,7 +3069,7 @@ export default function NodesView() {
             </Typography>
           ) : (
             <Box component="form" id="edit-inbound-form" onSubmit={submitEditInbound}>
-              <InboundFormFields form={editInboundForm} setForm={setEditInboundForm}
+              <InboundFormFields form={editInboundForm} setForm={setEditInboundForm} nodeId={editingInboundNode?.id ?? null}
                 showMetadata={false}
                 onGenKeys={genKeysForEdit}
                 onGenSSPassword={genSSPasswordEdit}

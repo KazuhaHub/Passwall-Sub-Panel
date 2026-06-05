@@ -249,6 +249,13 @@ type NodeRepo interface {
 	// start, and a full-row Save there would revert the health/traffic/config
 	// columns the concurrent loops are writing.
 	UpdateEnabled(ctx context.Context, id int64, enabled bool) error
+	// UpdateCertBinding writes only the managed-cert binding columns
+	// (cert_source, cert_id). Column-scoped like UpdateHealth so the node-edit
+	// cert selection never rolls back poll/health/config columns.
+	UpdateCertBinding(ctx context.Context, nodeID int64, source domain.CertSource, certID int64) error
+	// ListByCertID returns the psp_managed nodes bound to the given certificate
+	// — the reverse lookup the renewal worker uses to re-deploy a renewed cert.
+	ListByCertID(ctx context.Context, certID int64) ([]*domain.Node, error)
 	// BatchUpdateSortOrder rewrites Node.SortOrder for every (id, sort_order)
 	// pair in a single transaction. Driven by the drag-to-reorder UI in the
 	// admin node list — a one-shot N-row update is cheaper than N round-trips
@@ -518,6 +525,41 @@ type XUIPanelRepo interface {
 	UpdateVersionCheckedAt(ctx context.Context, panelID int64, checkedAt time.Time) error
 }
 
+// CertificateRepo persists PSP-managed ACME certificates (cert_source=psp_managed).
+type CertificateRepo interface {
+	Create(ctx context.Context, c *domain.TLSCertificate) error
+	// Update writes the full row — admin-owned fields (name / domains /
+	// auto_renew / binding). Do NOT call it from the issuance/renewal worker;
+	// use UpdateIssued so a concurrent admin edit isn't reverted.
+	Update(ctx context.Context, c *domain.TLSCertificate) error
+	// UpdateIssued writes ONLY the issuance-owned columns (cert_pem / key_pem /
+	// status / not_before / not_after / fingerprint / last_error). Column-scoped
+	// like nodes.UpdateHealth and xui_panels.UpdateVersion so the worker never
+	// rolls back an admin edit that landed after it loaded its snapshot.
+	UpdateIssued(ctx context.Context, c *domain.TLSCertificate) error
+	Delete(ctx context.Context, id int64) error
+	GetByID(ctx context.Context, id int64) (*domain.TLSCertificate, error)
+	List(ctx context.Context) ([]*domain.TLSCertificate, error)
+	ListByStatus(ctx context.Context, status domain.CertStatus) ([]*domain.TLSCertificate, error)
+}
+
+// DNSCredentialRepo persists DNS-provider credentials for ACME DNS-01.
+type DNSCredentialRepo interface {
+	Create(ctx context.Context, c *domain.DNSCredential) error
+	Update(ctx context.Context, c *domain.DNSCredential) error
+	Delete(ctx context.Context, id int64) error
+	GetByID(ctx context.Context, id int64) (*domain.DNSCredential, error)
+	List(ctx context.Context) ([]*domain.DNSCredential, error)
+}
+
+// ACMEAccountRepo persists ACME accounts, keyed by (email, directory).
+type ACMEAccountRepo interface {
+	// GetByEmailDirectory returns (nil, nil) when no account is registered for
+	// the pair — callers treat absence as "register on first obtain".
+	GetByEmailDirectory(ctx context.Context, email, directory string) (*domain.ACMEAccount, error)
+	Save(ctx context.Context, a *domain.ACMEAccount) error
+}
+
 // UISettings holds runtime-editable UI preferences. They live in the DB so
 // admin edits don't touch infrastructure fields.
 type UISettings struct {
@@ -660,6 +702,18 @@ type UISettings struct {
 	// floored at 1 so the panel can't hammer the upstream DB hosts. The update
 	// loop re-reads this each cycle, so changes take effect without a restart.
 	GeoIPUpdateIntervalHours int `json:"geo_ip_update_interval_hours"`
+
+	// cert --- PSP-managed ACME certificate automation (v3.6.4). ACMEEmail is
+	// the ACME account contact; ACMEDirectoryURL selects the CA (Let's Encrypt
+	// prod by default; switch to the staging directory for testing).
+	// CertRenewBeforeDays is the renewal threshold (hybrid: the renewal scan
+	// falls back to a lifetime fraction for short-lived certs). The renewal loop
+	// re-reads CertRenewCheckIntervalHours each cycle, so cadence changes take
+	// effect without a restart.
+	CertRenewBeforeDays         int    `json:"cert_renew_before_days"`
+	CertRenewCheckIntervalHours int    `json:"cert_renew_check_interval_hours"`
+	ACMEEmail                   string `json:"acme_email"`
+	ACMEDirectoryURL            string `json:"acme_directory_url"`
 
 	// AuthEventRetentionDays bounds how long the authentication-event log is
 	// kept — separate from AuditRetentionDays so logins can be retained on their
@@ -930,4 +984,8 @@ type Repos struct {
 	Mail        MailRepo
 	SAMLConfig  SAMLConfigRepo
 	OIDCConfig  OIDCConfigRepo
+
+	Certificate   CertificateRepo
+	DNSCredential DNSCredentialRepo
+	ACMEAccount   ACMEAccountRepo
 }

@@ -27,6 +27,7 @@ import ChevronRightIcon from '@mui/icons-material/ChevronRight'
 import DashboardIcon from '@mui/icons-material/Dashboard'
 import GroupIcon from '@mui/icons-material/Group'
 import StorageIcon from '@mui/icons-material/Storage'
+import HttpsIcon from '@mui/icons-material/Https'
 import DnsIcon from '@mui/icons-material/Dns'
 import WorkspacesIcon from '@mui/icons-material/Workspaces'
 import RuleIcon from '@mui/icons-material/Rule'
@@ -79,6 +80,7 @@ const ADMIN_NAV: NavItem[] = [
   { to: '/admin/dashboard', labelKey: 'nav:admin.dashboard', Icon: DashboardIcon },
   { to: '/admin/users', labelKey: 'nav:admin.users', Icon: GroupIcon },
   { to: '/admin/servers', labelKey: 'nav:admin.servers', Icon: StorageIcon, adminOnly: true },
+  { to: '/admin/certs', labelKey: 'nav:admin.certs', Icon: HttpsIcon, adminOnly: true },
   { to: '/admin/nodes', labelKey: 'nav:admin.nodes', Icon: DnsIcon },
   { to: '/admin/groups', labelKey: 'nav:admin.groups', Icon: WorkspacesIcon },
   { to: '/admin/rules', labelKey: 'nav:admin.rules', Icon: RuleIcon },

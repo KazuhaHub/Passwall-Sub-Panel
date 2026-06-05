@@ -80,6 +80,10 @@ func (r *fakeNodeRepo) BatchUpdateTrafficCounters(ctx context.Context, nodes []*
 }
 func (r *fakeNodeRepo) UpdateInboundConfig(ctx context.Context, n *domain.Node) error   { return nil }
 func (r *fakeNodeRepo) UpdateEnabled(ctx context.Context, id int64, enabled bool) error { return nil }
+func (r *fakeNodeRepo) UpdateCertBinding(_ context.Context, _ int64, _ domain.CertSource, _ int64) error {
+	return nil
+}
+func (r *fakeNodeRepo) ListByCertID(_ context.Context, _ int64) ([]*domain.Node, error) { return nil, nil }
 func (r *fakeNodeRepo) Create(ctx context.Context, n *domain.Node) error                { return nil }
 func (r *fakeNodeRepo) Delete(ctx context.Context, id int64) error                      { return nil }
 func (r *fakeNodeRepo) BatchUpdateSortOrder(ctx context.Context, updates []ports.NodeSortUpdate) error {

@@ -41,6 +41,10 @@ func (r *fakeNodeRepo) GetByPanelInbound(ctx context.Context, panelID int64, inb
 	return nil, domain.ErrNotFound
 }
 func (r *fakeNodeRepo) List(ctx context.Context) ([]*domain.Node, error)        { return nil, nil }
+func (r *fakeNodeRepo) UpdateCertBinding(_ context.Context, _ int64, _ domain.CertSource, _ int64) error {
+	return nil
+}
+func (r *fakeNodeRepo) ListByCertID(_ context.Context, _ int64) ([]*domain.Node, error) { return nil, nil }
 func (r *fakeNodeRepo) ListEnabled(ctx context.Context) ([]*domain.Node, error) { return nil, nil }
 func (r *fakeNodeRepo) ListPaged(ctx context.Context, _ ports.Pagination) ([]*domain.Node, int64, error) {
 	return nil, 0, nil

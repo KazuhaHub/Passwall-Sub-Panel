@@ -16,6 +16,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/audit"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/auth"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/cert"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/geo"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/group"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/mailer"
@@ -56,6 +57,7 @@ type Deps struct {
 	User      *user.Service
 	Group     *group.Service
 	Node      *node.Service
+	Cert      *cert.Service
 	Render    *render.Service
 	Audit     *audit.Service
 	Sync      *syncsvc.Service
@@ -244,6 +246,21 @@ func NewRouter(d Deps) *gin.Engine {
 		adminGroup.POST("/nodes/:id/claim", nodes.ClaimClient)
 		adminGroup.POST("/nodes/generate-reality-keypair", nodes.GenerateRealityKeypair)
 
+		// PSP-managed certificates + DNS credentials (v3.6.4). adminGroup only —
+		// these touch ACME private keys and DNS provider secrets.
+		certs := handler.NewAdminCertHandler(d.Cert)
+		adminGroup.GET("/certs", certs.List)
+		adminGroup.GET("/certs/:id", certs.Get)
+		adminGroup.POST("/certs", certs.Create)
+		adminGroup.POST("/certs/:id/renew", certs.Renew)
+		adminGroup.DELETE("/certs/:id", certs.Delete)
+		adminGroup.GET("/dns-credentials", certs.ListDNSCreds)
+		adminGroup.POST("/dns-credentials", certs.CreateDNSCred)
+		adminGroup.PUT("/dns-credentials/:id", certs.UpdateDNSCred)
+		adminGroup.DELETE("/dns-credentials/:id", certs.DeleteDNSCred)
+		adminGroup.GET("/dns-providers", certs.ListProviders)
+		adminGroup.PUT("/nodes/:id/cert-source", certs.SetNodeCertSource)
+
 		groups := handler.NewAdminGroupHandler(d.Group, d.User, d.Repos.User)
 		// Group CRUD shapes who can see which nodes — admin-only structure.
 		// Operators need to read groups to pick one when creating a user.
@@ -279,7 +296,7 @@ func NewRouter(d Deps) *gin.Engine {
 		authEventsH := handler.NewAdminAuthEventsHandler(d.Repos.AuthEvent, d.Geo)
 		staffGroup.GET("/auth-events", authEventsH.List)
 
-		dashboard := handler.NewAdminDashboardHandler(d.Repos.User, d.Repos.Node, d.Repos.Group, d.Repos.XUIPanel)
+		dashboard := handler.NewAdminDashboardHandler(d.Repos.User, d.Repos.Node, d.Repos.Group, d.Repos.XUIPanel, d.Repos.Certificate)
 		staffGroup.GET("/dashboard/summary", dashboard.Summary)
 
 		trafficH := handler.NewAdminTrafficHandler(d.Repos.User, d.Repos.Node, d.Repos.XUIPanel, d.Traffic, d.Repos.Settings)
@@ -303,6 +320,7 @@ func NewRouter(d Deps) *gin.Engine {
 		adminGroup.POST("/servers/:id/upgrade-panel", servers.UpgradePanel)
 		adminGroup.POST("/servers/:id/upgrade-xray", servers.UpgradeXray)
 		adminGroup.GET("/servers/:id/xray-versions", servers.ListXrayVersions)
+		adminGroup.GET("/servers/:id/web-cert", servers.WebCert)
 
 		settings := handler.NewAdminSettingsHandler(d.Repos.Settings, d.JWTParams)
 		adminGroup.GET("/settings/ui", settings.Get)

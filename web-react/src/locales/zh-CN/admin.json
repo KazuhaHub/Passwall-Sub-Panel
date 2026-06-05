@@ -691,6 +691,15 @@
     "duplicate": "复制为新的规则集"
   },
   "nodes": {
+    "cert_source": {
+      "from_panel": "从面板获取证书路径",
+      "from_panel_filled": "已填入面板证书路径",
+      "from_panel_unsupported": "该面板版本过低（需 3X-UI 3.2.7+），不支持自动获取，请手填路径",
+      "no_panel": "请先选择服务器（面板）",
+      "pick_managed": "选 PSP 托管证书…",
+      "apply_managed": "应用并部署",
+      "bound": "已绑定托管证书并部署"
+    },
     "title": "节点管理",
     "subtitle": "管理 3X-UI 入站，订阅生成基于此处的启用状态",
     "tab_managed": "已管理",
@@ -1196,6 +1205,35 @@
       "batch_delete_title": "批量删除分组",
       "batch_delete_message": "确定删除 {{names}}{{suffix}}？"
     }
+  },
+  "certs": {
+    "title": "证书",
+    "new": "新建证书",
+    "need_cred_first": "请先在下方添加一个 DNS 凭据，才能签发证书。",
+    "col_name": "名称",
+    "col_domains": "域名",
+    "col_status": "状态",
+    "col_expiry": "到期",
+    "renew": "立即续期",
+    "deleted": "已删除",
+    "delete_title": "删除证书",
+    "delete_confirm": "确定删除证书「{{name}}」？",
+    "validation_required": "请填写必填项",
+    "validation_secret_required": "每个凭据值都必须填写",
+    "create_queued": "已提交签发，后台处理中",
+    "renew_queued": "已提交续期",
+    "domains_help": "每行/逗号分隔一个域名，支持通配符 *.example.com",
+    "auto_renew": "自动续期",
+    "status": { "pending": "签发中", "active": "有效", "failed": "失败", "renewing": "续期中" },
+    "cred_title": "DNS 凭据",
+    "cred_new": "新建凭据",
+    "cred_provider": "DNS 厂商",
+    "cred_keys": "凭据字段",
+    "cred_delete_title": "删除凭据",
+    "cred_delete_confirm": "确定删除凭据「{{name}}」？",
+    "provider_help": "选 DNS 厂商（可搜索），如 cloudflare / alidns / dnspod；长尾用 exec / httpreq",
+    "cred_kv_help": "按所选厂商的 lego 文档填环境变量，如 Cloudflare：CF_DNS_API_TOKEN",
+    "cred_add_field": "添加字段"
   },
   "servers": {
     "title": "服务器（3X-UI）",

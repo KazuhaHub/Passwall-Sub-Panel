@@ -3,6 +3,7 @@
     "dashboard": "总览",
     "users": "用户管理",
     "servers": "服务器",
+    "certs": "证书",
     "nodes": "节点管理",
     "groups": "分组",
     "rules": "规则库",

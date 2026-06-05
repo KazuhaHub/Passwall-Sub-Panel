@@ -420,3 +420,72 @@ func TestBulkDelByEmailEmptyIsNoop(t *testing.T) {
 		t.Fatalf("deleted = %d, want 0", n)
 	}
 }
+
+// --- v3.6.4 getWebCertFiles (cert_source=from_panel) ---
+
+// GetWebCertFiles maps the {webCertFile,webKeyFile} obj into ports.WebCertFiles.
+// These are filesystem PATHS on the panel host, never the certificate bytes.
+func TestGetWebCertFilesParsesPaths(t *testing.T) {
+	var got capturedReq
+	reply := `{"success":true,"obj":{"webCertFile":"/opt/1panel/secret/server.crt","webKeyFile":"/opt/1panel/secret/server.key"}}`
+	c := captureReq(t, reply, &got)
+	wc, err := c.GetWebCertFiles(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.method != http.MethodGet || got.path != "/panel/api/server/getWebCertFiles" {
+		t.Fatalf("method/path = %s %s", got.method, got.path)
+	}
+	if wc == nil || wc.CertFile != "/opt/1panel/secret/server.crt" || wc.KeyFile != "/opt/1panel/secret/server.key" {
+		t.Fatalf("WebCertFiles not mapped: %#v", wc)
+	}
+}
+
+// A panel older than 3X-UI 3.2.7 has no getWebCertFiles route → HTTP 404.
+// GetWebCertFiles must surface ports.ErrXUIEndpointUnsupported so the handler
+// degrades gracefully (grey out "fetch cert from panel") instead of treating
+// it as a generic validation failure.
+func TestGetWebCertFiles404IsUnsupported(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte("404 page not found"))
+	}))
+	defer srv.Close()
+	c := &Client{baseURL: srv.URL, http: srv.Client(), apiToken: "t"}
+	_, err := c.GetWebCertFiles(context.Background())
+	if err == nil {
+		t.Fatal("404 must error")
+	}
+	if !errors.Is(err, ports.ErrXUIEndpointUnsupported) {
+		t.Fatalf("want errors.Is(err, ErrXUIEndpointUnsupported), got %v", err)
+	}
+}
+
+// The 404→unsupported marking lives in doJSON so any version-gated endpoint
+// benefits. It must NOT disturb the existing 404→ErrValidation invariant
+// (sync-task runners rely on 404 being a permanent failure), and other 4xx
+// must NOT be marked endpoint-unsupported.
+func TestDoJSON_404MarksEndpointUnsupportedButStaysValidation(t *testing.T) {
+	srv404 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv404.Close()
+	c := &Client{baseURL: srv404.URL, http: srv404.Client(), apiToken: "t"}
+	err := c.doJSON(context.Background(), http.MethodGet, "/panel/api/server/getWebCertFiles", nil, nil)
+	if !errors.Is(err, domain.ErrValidation) {
+		t.Fatalf("404 must still be ErrValidation (permanent), got %v", err)
+	}
+	if !errors.Is(err, ports.ErrXUIEndpointUnsupported) {
+		t.Fatalf("404 must also be ErrXUIEndpointUnsupported, got %v", err)
+	}
+
+	srv400 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+	}))
+	defer srv400.Close()
+	c2 := &Client{baseURL: srv400.URL, http: srv400.Client(), apiToken: "t"}
+	err2 := c2.doJSON(context.Background(), http.MethodGet, "/x", nil, nil)
+	if errors.Is(err2, ports.ErrXUIEndpointUnsupported) {
+		t.Fatalf("400 must NOT be marked endpoint-unsupported, got %v", err2)
+	}
+}

@@ -3,6 +3,7 @@
     "dashboard": "Dashboard",
     "users": "Users",
     "servers": "Servers",
+    "certs": "Certificates",
     "nodes": "Nodes",
     "groups": "Groups",
     "rules": "Rule sets",

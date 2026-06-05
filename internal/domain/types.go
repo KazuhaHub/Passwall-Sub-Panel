@@ -408,6 +408,13 @@ type Node struct {
 	ConfigSyncedAt *time.Time
 	// ConfigSyncState: "" (never captured) / "synced" / "drift" / "pending".
 	ConfigSyncState string
+	// ---- Managed certificate binding (v3.6.4) ----
+	// CertSource discriminates how this inbound's TLS certificate is
+	// provisioned; CertID points to the tls_certificates row when CertSource is
+	// psp_managed. Empty/0 = unmanaged (manual / historical). The renewal worker
+	// reverse-looks-up nodes by CertID to re-deploy a renewed certificate.
+	CertSource CertSource
+	CertID     int64
 }
 
 // SeparatorMode controls how a SeparatorEntry decides whether to appear
@@ -748,6 +755,75 @@ type XUIPanel struct {
 	VersionCheckedAt *time.Time
 }
 
+// CertStatus is the lifecycle state of a PSP-managed TLS certificate
+// (cert_source=psp_managed).
+type CertStatus string
+
+const (
+	CertStatusPending  CertStatus = "pending"  // created; issuance not yet completed
+	CertStatusActive   CertStatus = "active"   // issued and currently valid
+	CertStatusFailed   CertStatus = "failed"   // last issuance/renewal attempt failed
+	CertStatusRenewing CertStatus = "renewing" // renewal in flight
+)
+
+// CertSource discriminates how a node's inbound TLS certificate is provisioned.
+type CertSource string
+
+const (
+	CertSourceUnset     CertSource = ""            // historical / hand-managed (default)
+	CertSourceManual    CertSource = "manual"      // admin hand-filled file path or inline PEM
+	CertSourceFromPanel CertSource = "from_panel"  // file paths pulled from the panel's getWebCertFiles (3.2.7+)
+	CertSourceManaged   CertSource = "psp_managed" // a PSP-managed ACME cert, inlined on deploy
+)
+
+// TLSCertificate is a PSP-managed ACME certificate. PSP owns its full lifecycle
+// (DNS-01 issuance, renewal, and inline deploy into bound inbounds). CertPEM and
+// KeyPEM are encrypted at rest. Domains is the SAN list and may include a
+// wildcard (e.g. "*.example.com"), which DNS-01 supports.
+type TLSCertificate struct {
+	ID              int64
+	Name            string
+	Domains         []string
+	ACMEAccountID   int64
+	DNSCredentialID int64
+	CertPEM         string // fullchain (leaf + issuer)
+	KeyPEM          string // private key
+	Status          CertStatus
+	LastError       string
+	NotBefore       *time.Time
+	NotAfter        *time.Time // leaf expiry — drives the renewal threshold
+	Fingerprint     string     // leaf SHA-256, for content-diff-gated redeploy
+	AutoRenew       bool
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+}
+
+// DNSCredential is a DNS-provider credential set used to solve ACME DNS-01
+// challenges. Provider is the lego provider code (e.g. "cloudflare", "alidns").
+// Credentials is the provider-specific key/value set (e.g.
+// {"CF_DNS_API_TOKEN": "..."}) and is encrypted at rest.
+type DNSCredential struct {
+	ID          int64
+	Name        string
+	Provider    string
+	Credentials map[string]string
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+}
+
+// ACMEAccount is a registered ACME account, reused across every certificate
+// that shares an (Email, Directory). AccountKey (PEM) is encrypted at rest;
+// Registration is the lego registration resource JSON (carries the account URI).
+type ACMEAccount struct {
+	ID           int64
+	Email        string
+	Directory    string
+	AccountKey   string
+	Registration string
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+}
+
 type MailReminderKind string
 
 const (
@@ -759,6 +835,7 @@ const (
 	MailReminderAccountEnable    MailReminderKind = "account_enabled"
 	MailReminderAnnouncement     MailReminderKind = "announcement"
 	MailReminderBlockedClient    MailReminderKind = "blocked_client"
+	MailReminderCertFailure      MailReminderKind = "cert_failure"
 )
 
 type MailSettings struct {

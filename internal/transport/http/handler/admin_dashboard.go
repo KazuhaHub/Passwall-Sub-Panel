@@ -24,10 +24,11 @@ type AdminDashboardHandler struct {
 	nodes  ports.NodeRepo
 	groups ports.GroupRepo
 	panels ports.XUIPanelRepo
+	certs  ports.CertificateRepo
 }
 
-func NewAdminDashboardHandler(users ports.UserRepo, nodes ports.NodeRepo, groups ports.GroupRepo, panels ports.XUIPanelRepo) *AdminDashboardHandler {
-	return &AdminDashboardHandler{users: users, nodes: nodes, groups: groups, panels: panels}
+func NewAdminDashboardHandler(users ports.UserRepo, nodes ports.NodeRepo, groups ports.GroupRepo, panels ports.XUIPanelRepo, certs ports.CertificateRepo) *AdminDashboardHandler {
+	return &AdminDashboardHandler{users: users, nodes: nodes, groups: groups, panels: panels, certs: certs}
 }
 
 // expiringWindowDays mirrors the frontend's EXPIRING_WINDOW_DAYS so the
@@ -60,6 +61,16 @@ type dashboardNodeAlert struct {
 	HealthState domain.NodeHealthState `json:"health_state"`
 }
 
+// dashboardCertAlert surfaces a PSP-managed certificate whose last issuance or
+// renewal failed, so the admin landing page shows cert problems alongside node
+// health alerts.
+type dashboardCertAlert struct {
+	ID        int64  `json:"id"`
+	Name      string `json:"name"`
+	Status    string `json:"status"`
+	LastError string `json:"last_error"`
+}
+
 type dashboardSummaryResponse struct {
 	UserTotal     int                    `json:"user_total"`
 	UserEnabled   int                    `json:"user_enabled"`
@@ -71,6 +82,7 @@ type dashboardSummaryResponse struct {
 	GroupCount    int                    `json:"group_count"`
 	ExpiringUsers []dashboardExpiringRow `json:"expiring_users"`
 	NodeAlerts    []dashboardNodeAlert   `json:"node_alerts"`
+	CertAlerts    []dashboardCertAlert   `json:"cert_alerts"`
 }
 
 // Summary returns the aggregate values the admin dashboard renders.
@@ -160,6 +172,20 @@ func (h *AdminDashboardHandler) Summary(c *gin.Context) {
 		resp.NodeAlerts = append(resp.NodeAlerts, dashboardNodeAlert{
 			ID: n.ID, DisplayName: n.DisplayName, PanelName: panelNames[n.PanelID], HealthState: n.HealthState,
 		})
+	}
+
+	// PSP-managed certificates whose last issuance/renewal failed (v3.6.4) —
+	// surfaced alongside node health alerts. The cert row itself is the alert
+	// source (status=failed + last_error), so no separate alerts table.
+	resp.CertAlerts = make([]dashboardCertAlert, 0)
+	if h.certs != nil {
+		if failed, ferr := h.certs.ListByStatus(ctx, domain.CertStatusFailed); ferr == nil {
+			for _, cert := range failed {
+				resp.CertAlerts = append(resp.CertAlerts, dashboardCertAlert{
+					ID: cert.ID, Name: cert.Name, Status: string(cert.Status), LastError: cert.LastError,
+				})
+			}
+		}
 	}
 
 	c.JSON(http.StatusOK, resp)

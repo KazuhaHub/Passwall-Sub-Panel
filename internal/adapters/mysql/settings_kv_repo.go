@@ -247,6 +247,12 @@ func settingDescriptors(s *ports.UISettings) []settingDescriptor {
 		strField("geo", "geo_ip_update_url", &s.GeoIPUpdateURL),
 		strField("geo", "geo_ip_update_edition", &s.GeoIPUpdateEdition),
 		intField("geo", "geo_ip_update_interval_hours", &s.GeoIPUpdateIntervalHours),
+
+		// cert --- PSP-managed ACME certificate automation (v3.6.4)
+		intField("cert", "cert_renew_before_days", &s.CertRenewBeforeDays),
+		intField("cert", "cert_renew_check_interval_hours", &s.CertRenewCheckIntervalHours),
+		strField("cert", "acme_email", &s.ACMEEmail),
+		strField("cert", "acme_directory_url", &s.ACMEDirectoryURL),
 	}
 }
 
@@ -428,6 +434,19 @@ func applyUISettingsDefaults(out, defaults ports.UISettings) ports.UISettings {
 		// Floor at 1h so a stray 0 (or a careless setting) can't turn the
 		// updater into a tight loop against MaxMind / DB-IP. 12h default.
 		out.GeoIPUpdateIntervalHours = 12
+	}
+	if out.CertRenewBeforeDays <= 0 {
+		out.CertRenewBeforeDays = 30
+	}
+	if out.CertRenewCheckIntervalHours < 1 {
+		// 12h default; the renewal scan is cheap (a DB read + threshold check).
+		out.CertRenewCheckIntervalHours = 12
+	}
+	if out.ACMEDirectoryURL == "" {
+		// Let's Encrypt production. Switch to the staging directory
+		// (https://acme-staging-v02.api.letsencrypt.org/directory) while testing
+		// to avoid prod rate limits.
+		out.ACMEDirectoryURL = "https://acme-v02.api.letsencrypt.org/directory"
 	}
 	// Unified client registry (v3.3.0). When absent, either migrate the legacy
 	// two-table config (sub_client_rules + sub_import_clients) in place — a

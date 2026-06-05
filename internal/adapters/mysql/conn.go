@@ -124,5 +124,9 @@ func NewRepos(db *gorm.DB) ports.Repos {
 		Mail:       &mailRepo{db: db},
 		SAMLConfig: &samlConfigRepo{db: db},
 		OIDCConfig: &oidcConfigRepo{db: db},
+
+		Certificate:   &certificateRepo{db: db},
+		DNSCredential: &dnsCredentialRepo{db: db},
+		ACMEAccount:   &acmeAccountRepo{db: db},
 	}
 }

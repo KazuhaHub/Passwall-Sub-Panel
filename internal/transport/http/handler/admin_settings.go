@@ -87,6 +87,11 @@ type settingsDTO struct {
 	// never echoed on GET. HasGeoIPUpdateToken reports whether one is set.
 	GeoIPUpdateToken    string `json:"geo_ip_update_token,omitempty"`
 	HasGeoIPUpdateToken bool   `json:"has_geo_ip_update_token"`
+	// PSP-managed certificate automation (v3.6.4).
+	CertRenewBeforeDays         int    `json:"cert_renew_before_days"`
+	CertRenewCheckIntervalHours int    `json:"cert_renew_check_interval_hours"`
+	ACMEEmail                   string `json:"acme_email"`
+	ACMEDirectoryURL            string `json:"acme_directory_url"`
 }
 
 func (h *AdminSettingsHandler) defaults() ports.UISettings {
@@ -164,6 +169,10 @@ func (h *AdminSettingsHandler) Get(c *gin.Context) {
 		GeoIPUpdateURL:             s.GeoIPUpdateURL,
 		GeoIPUpdateEdition:         s.GeoIPUpdateEdition,
 		GeoIPUpdateIntervalHours:   s.GeoIPUpdateIntervalHours,
+		CertRenewBeforeDays:         s.CertRenewBeforeDays,
+		CertRenewCheckIntervalHours: s.CertRenewCheckIntervalHours,
+		ACMEEmail:                   s.ACMEEmail,
+		ACMEDirectoryURL:            s.ACMEDirectoryURL,
 		// Update token masked: never echoed, only presence reported.
 		HasGeoIPUpdateToken: strings.TrimSpace(s.GeoIPUpdateToken) != "",
 	})
@@ -244,6 +253,10 @@ func (h *AdminSettingsHandler) Put(c *gin.Context) {
 		GeoIPUpdateURL:             strings.TrimSpace(req.GeoIPUpdateURL),
 		GeoIPUpdateEdition:         strings.TrimSpace(req.GeoIPUpdateEdition),
 		GeoIPUpdateIntervalHours:   req.GeoIPUpdateIntervalHours,
+		CertRenewBeforeDays:         req.CertRenewBeforeDays,
+		CertRenewCheckIntervalHours: req.CertRenewCheckIntervalHours,
+		ACMEEmail:                   req.ACMEEmail,
+		ACMEDirectoryURL:            req.ACMEDirectoryURL,
 		// GeoIPUpdateToken resolved below ("empty = keep existing").
 	}
 	// Update token is write-only: a blank field on save means the admin didn't
@@ -369,6 +382,10 @@ func (h *AdminSettingsHandler) Put(c *gin.Context) {
 		GeoIPUpdateURL:             s.GeoIPUpdateURL,
 		GeoIPUpdateEdition:         s.GeoIPUpdateEdition,
 		GeoIPUpdateIntervalHours:   s.GeoIPUpdateIntervalHours,
+		CertRenewBeforeDays:         s.CertRenewBeforeDays,
+		CertRenewCheckIntervalHours: s.CertRenewCheckIntervalHours,
+		ACMEEmail:                   s.ACMEEmail,
+		ACMEDirectoryURL:            s.ACMEDirectoryURL,
 		// Update token masked: never echoed, only presence reported.
 		HasGeoIPUpdateToken: strings.TrimSpace(s.GeoIPUpdateToken) != "",
 	})

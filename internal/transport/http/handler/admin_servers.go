@@ -454,6 +454,38 @@ func (h *AdminServersHandler) ListXrayVersions(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"versions": versions})
 }
 
+// WebCert proxies GET /panel/api/server/getWebCertFiles on the panel and
+// returns that panel's own web TLS cert/key file PATHS (not the PEM bytes).
+// Panel-scoped: the cert is identical for every inbound on the panel, and this
+// serves both the create- and edit-node forms (each carries a panel_id).
+// Backs cert_source=from_panel. A pre-3.2.7 panel has no such route, which the
+// xui adapter surfaces as ports.ErrXUIEndpointUnsupported → reported here as
+// 200 {"supported":false} so the node form greys out the "fetch from panel"
+// button WITHOUT firing the global error toast a 4xx/5xx would trigger. A
+// genuine upstream failure still 502s so the normal error path applies.
+func (h *AdminServersHandler) WebCert(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid id"})
+		return
+	}
+	client, err := h.pool.Get(id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Server not registered in pool: " + err.Error()})
+		return
+	}
+	wc, err := client.GetWebCertFiles(c.Request.Context())
+	if err != nil {
+		if errors.Is(err, ports.ErrXUIEndpointUnsupported) {
+			c.JSON(http.StatusOK, gin.H{"supported": false})
+			return
+		}
+		c.JSON(http.StatusBadGateway, gin.H{"error": "getWebCertFiles failed: " + err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"supported": true, "cert_file": wc.CertFile, "key_file": wc.KeyFile})
+}
+
 // UpgradeXray triggers a remote xray-core install. xray-core compatibility
 // with PSP is low-coupling (PSP only talks to the 3X-UI panel, never
 // directly to xray), and 3X-UI's installXray accepts an explicit version

@@ -474,6 +474,30 @@ export default function SettingsView() {
               helperText={t('settings.general.emergency_access_quota_gb_hint')} />
           </Section>
 
+          <Section title={t('settings.cert.section', { defaultValue: 'ACME 证书自动化' })} md={md}>
+            <Pair>
+              <TextField fullWidth size="small"
+                label={t('settings.cert.acme_email', { defaultValue: 'ACME 账户邮箱' })}
+                value={settings.acme_email || ''}
+                onChange={e => patch('acme_email', e.target.value)}
+                placeholder="you@example.com"
+                helperText={t('settings.cert.acme_email_hint', { defaultValue: "Let's Encrypt 账户联系邮箱（用于到期通知，可留空）" })} />
+              <TextField fullWidth size="small"
+                label={t('settings.cert.acme_directory', { defaultValue: 'ACME 目录 URL' })}
+                value={settings.acme_directory_url || ''}
+                onChange={e => patch('acme_directory_url', e.target.value)}
+                helperText={t('settings.cert.acme_directory_hint', { defaultValue: '默认 LE 生产；测试改 staging（…/acme-staging-v02…）避免限额' })} />
+            </Pair>
+            <Pair>
+              <NumField label={t('settings.cert.renew_before_days', { defaultValue: '到期前 N 天续期' })}
+                value={settings.cert_renew_before_days}
+                onChange={v => patch('cert_renew_before_days', v)} />
+              <NumField label={t('settings.cert.renew_check_hours', { defaultValue: '续期检查间隔（小时）' })}
+                value={settings.cert_renew_check_interval_hours}
+                onChange={v => patch('cert_renew_check_interval_hours', v)} />
+            </Pair>
+          </Section>
+
           <Section title={t('settings.geo.section', { defaultValue: 'IP 地区显示（访问日志）' })} md={md}>
             <FormControlLabel label={t('settings.geo.enabled', { defaultValue: '启用 IP 地区显示' })}
               control={<Switch checked={settings.geo_ip_enabled} onChange={(_, c) => patch('geo_ip_enabled', c)} />}
