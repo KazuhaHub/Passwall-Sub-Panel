@@ -220,29 +220,17 @@ func (h *AdminServersHandler) Test(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"ok": false, "error": err.Error()})
 		return
 	}
-	// Piggyback the remote-compat refresh on every Test click — admin
-	// opening the Servers page fires N parallel testServers, but the
-	// single-flight + throttle inside RefreshRemoteCompat collapses
-	// them to at most one actual GitHub fetch. Errors here are
-	// non-blocking; an unreachable raw.githubusercontent.com just means
-	// CheckXUI keeps returning Unknown until the next attempt.
+	// The compat (v3.json) tested range is fetched REACTIVELY — not here, but
+	// only if the panel probed below turns out to sit outside the cached range
+	// (see the CheckXUI block). A supported fleet makes zero GitHub compat calls.
 	//
-	// Uses background context (not c.Request.Context()) so an admin
-	// navigating away mid-fetch doesn't cancel the in-flight GitHub
-	// request — that cancel previously combined with v3.6.0-beta.5's
-	// "advance lastAt on failure" bug to lock the throttle for 60s
-	// after a single client disconnect. compat_remote.go enforces its
-	// own 8s timeout internally so background ctx can't leak forever.
-	if rerr := version.RefreshRemoteCompat(context.Background(), "", false); rerr != nil {
-		log.Warn("admin test: refresh remote compat", "panel_id", req.ID, "err", rerr)
-	}
-	// Same piggyback for the centralized latest-3X-UI tag fetch — one
-	// PSP-wide GitHub query drives every panel's "update available"
-	// badge. The 30-minute throttle inside RefreshLatestXUI means
-	// page-refresh churn never reaches GitHub more than twice per hour
-	// regardless of how many panels admin has. Background ctx for the
-	// same reason as RefreshRemoteCompat (admin navigating away
-	// shouldn't cancel the in-flight network call).
+	// The centralized latest-3X-UI tag fetch IS proactive: one PSP-wide query
+	// drives every panel's "update available" badge, and there's no local
+	// signal that a new upstream release exists to react to. The 30-minute
+	// throttle inside RefreshLatestXUI keeps page-refresh churn under twice/hour.
+	// Background ctx (not c.Request.Context()) so an admin navigating away
+	// mid-fetch doesn't cancel the call; RefreshLatestXUI enforces its own 8s
+	// timeout so the background ctx can't leak.
 	if rerr := version.RefreshLatestXUI(context.Background()); rerr != nil {
 		log.Debug("admin test: refresh latest 3X-UI failed", "err", rerr)
 	}
@@ -275,6 +263,16 @@ func (h *AdminServersHandler) Test(c *gin.Context) {
 			log.Warn("admin test: write version", "panel_id", req.ID, "err", uerr)
 		}
 		compatStatus := version.CheckXUI(status.PanelVersion)
+		if compatStatus != version.CompatSupported {
+			// Reactive compat fetch: this panel's version isn't in the cached
+			// tested range — the published range may have been bumped to cover
+			// it. Pull the manifest (throttled) and re-check before reporting.
+			// Background ctx so navigating away can't 60s-lock the throttle.
+			if rerr := version.RefreshRemoteCompat(context.Background(), "", false); rerr != nil {
+				log.Debug("admin test: reactive compat refresh", "panel_id", req.ID, "err", rerr)
+			}
+			compatStatus = version.CheckXUI(status.PanelVersion)
+		}
 		resp["panel_version"] = status.PanelVersion
 		resp["xray_version"] = status.XrayVersion
 		resp["xray_state"] = status.XrayState

@@ -465,21 +465,16 @@ func (a *App) probePanelVersionsOnce(ctx context.Context) {
 		return
 	}
 	log.Debug("compat probe tick", "panel_count", len(panels))
-	// Pull both GitHub-backed snapshots BEFORE iterating panels:
-	//   - RefreshRemoteCompat: per-major compat JSON → drives the tested
-	//     range used by CheckXUI. Without this, every panel's compat
-	//     status renders as Unknown until admin clicks Test (and the
-	//     "compat data not loaded" tooltip appears in the version cell).
-	//   - RefreshLatestXUI: the latest 3X-UI release tag → drives the
-	//     ⋮ kebab "update available" badge.
-	// Both are single-flight + throttled internally, so the boot tick
-	// plus a concurrent Servers-page open collapse to one call each.
-	// 10 s budget per call: GitHub raw + API are both usually sub-second.
-	compatCtx, compatCancel := context.WithTimeout(ctx, 10*time.Second)
-	if rerr := version.RefreshRemoteCompat(compatCtx, "", false); rerr != nil {
-		log.Debug("compat probe: refresh remote compat failed (offline / rate limited?)", "err", rerr)
-	}
-	compatCancel()
+	// The latest-3X-UI tag IS fetched proactively here: one PSP-wide GitHub
+	// query drives every panel's ⋮ "update available" badge, and nothing local
+	// signals that a new upstream release exists to react to. Single-flight + a
+	// 30-min throttle keep it cheap. 10 s budget; GitHub API is sub-second.
+	//
+	// The compat (v3.json) tested range is NOT fetched here — it's REACTIVE:
+	// only a panel whose probed version falls outside the cached range pulls the
+	// manifest (see the per-panel CheckXUI block below). A supported fleet makes
+	// zero GitHub compat calls; the active range comes from the on-disk compat
+	// cache loaded at boot.
 	latestCtx, latestCancel := context.WithTimeout(ctx, 10*time.Second)
 	if rerr := version.RefreshLatestXUI(latestCtx); rerr != nil {
 		log.Debug("compat probe: refresh latest 3X-UI failed (offline / rate limited?)", "err", rerr)
@@ -511,6 +506,20 @@ func (a *App) probePanelVersionsOnce(ctx context.Context) {
 			continue
 		}
 		compatStatus := version.CheckXUI(status.PanelVersion)
+		if compatStatus != version.CompatSupported {
+			// Reactive compat fetch: this panel isn't in the cached tested
+			// range — the published range may have been bumped to cover it.
+			// Pull the manifest (throttled, so multiple mismatched panels in one
+			// tick collapse to a single GitHub fetch) and re-evaluate before we
+			// log a warning. Steady state (all panels supported) never gets here,
+			// so a healthy fleet makes zero compat fetches.
+			rc, rcCancel := context.WithTimeout(ctx, 10*time.Second)
+			if rerr := version.RefreshRemoteCompat(rc, "", false); rerr != nil {
+				log.Debug("compat probe: reactive refresh failed (offline / rate limited?)", "err", rerr)
+			}
+			rcCancel()
+			compatStatus = version.CheckXUI(status.PanelVersion)
+		}
 		switch compatStatus {
 		case version.CompatSupported:
 			// Supported is the steady state on every 10-min tick; keep it
