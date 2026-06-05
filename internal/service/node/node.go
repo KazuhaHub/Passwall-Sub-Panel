@@ -693,8 +693,14 @@ func (s *Service) runNodeCreateTask(ctx context.Context, task *domain.SyncTask) 
 // should treat that as a genuine port conflict. Strict matching (not just
 // port) keeps the false-adoption risk low when an operator happens to
 // have a different inbound on the same port.
+//
+// Uses ListInboundsSlim, not ListInbounds: matching only reads
+// port/protocol/listen and Capture strips settings.clients[] anyway, so
+// pulling every inbound's full client list (uuid/flow/password) would be
+// wasted transfer on a large panel — slim returns the identical shape minus
+// clients[].
 func (s *Service) tryAdoptOrphan(ctx context.Context, c ports.XUIClient, panelID int64, spec ports.InboundSpec) (*ports.Inbound, error) {
-	inbs, err := c.ListInbounds(ctx)
+	inbs, err := c.ListInboundsSlim(ctx)
 	if err != nil {
 		return nil, err
 	}

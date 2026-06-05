@@ -2,6 +2,7 @@ package node
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -380,15 +381,22 @@ func TestGetInboundConfig_FallbackLiveWhenUncaptured(t *testing.T) {
 
 // ---- Orphan-recovery for CreateInbound (lost AddInbound response) ----
 
-// listInboundsClient returns the configured list from ListInbounds; AddInbound
-// is irrelevant here because tryAdoptOrphan only inspects the live list.
-type listInboundsClient struct {
+// slimInboundsClient serves the live inbound list via ListInboundsSlim — the
+// endpoint tryAdoptOrphan must use, since it only matches on port/protocol/listen
+// and Capture strips clients[] anyway. ListInbounds is wired to FAIL so a
+// regression back to the heavy full-list pull (every inbound with full
+// settings.clients[]) is caught here instead of silently wasting transfer.
+type slimInboundsClient struct {
 	ports.XUIClient
 	live []ports.Inbound
 }
 
-func (c *listInboundsClient) ListInbounds(context.Context) ([]ports.Inbound, error) {
+func (c *slimInboundsClient) ListInboundsSlim(context.Context) ([]ports.Inbound, error) {
 	return c.live, nil
+}
+
+func (c *slimInboundsClient) ListInbounds(context.Context) ([]ports.Inbound, error) {
+	return nil, errors.New("tryAdoptOrphan must use ListInboundsSlim, not ListInbounds (avoids pulling every client)")
 }
 
 // orphanRecoveryRepo lets a test seed which (panel_id, inbound_id) pairs are
@@ -411,7 +419,7 @@ func TestTryAdoptOrphan_AdoptsExactMatchWhenUnowned(t *testing.T) {
 		ID: 5, Port: 443, Protocol: "vless", Listen: "0.0.0.0",
 		StreamSettings: `{"network":"tcp","security":"reality"}`,
 	}}
-	client := &listInboundsClient{live: live}
+	client := &slimInboundsClient{live: live}
 	repo := &orphanRecoveryRepo{}
 	svc := &Service{nodes: repo, pool: stubXUIPool{c: client}}
 
@@ -430,7 +438,7 @@ func TestTryAdoptOrphan_RefusesIfAlreadyOwnedByAnotherNode(t *testing.T) {
 	live := []ports.Inbound{{
 		ID: 5, Port: 443, Protocol: "vless", Listen: "0.0.0.0",
 	}}
-	client := &listInboundsClient{live: live}
+	client := &slimInboundsClient{live: live}
 	repo := &orphanRecoveryRepo{owned: map[int64]map[int]bool{1: {5: true}}}
 	svc := &Service{nodes: repo, pool: stubXUIPool{c: client}}
 
@@ -451,7 +459,7 @@ func TestTryAdoptOrphan_RefusesOnProtocolMismatch(t *testing.T) {
 	live := []ports.Inbound{{
 		ID: 5, Port: 443, Protocol: "trojan", Listen: "0.0.0.0",
 	}}
-	client := &listInboundsClient{live: live}
+	client := &slimInboundsClient{live: live}
 	repo := &orphanRecoveryRepo{}
 	svc := &Service{nodes: repo, pool: stubXUIPool{c: client}}
 
