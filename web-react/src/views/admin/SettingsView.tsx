@@ -473,6 +473,26 @@ export default function SettingsView() {
                 </Pair>
               </>
             )}
+            <Divider sx={{ my: 0.5, borderColor: md.outlineVariant }} />
+            {/* Self-service password recovery */}
+            <FormControlLabel label={t('settings.general.password_recovery_enabled', { defaultValue: '允许邮箱找回密码' })}
+              control={<Switch checked={settings.password_recovery_enabled}
+                onChange={(_, c) => patch('password_recovery_enabled', c)} />}
+              sx={{ ml: 0, '& .MuiFormControlLabel-label': { ml: 1.5 } }} />
+            {settings.password_recovery_enabled && (
+              <>
+                <TextField select fullWidth size="small"
+                  label={t('settings.general.password_recovery_delivery', { defaultValue: '投递方式' })}
+                  value={settings.password_recovery_delivery || 'link'}
+                  onChange={e => patch('password_recovery_delivery', e.target.value as UISettings['password_recovery_delivery'])}>
+                  <MenuItem value="link">{t('settings.general.password_recovery_delivery_link', { defaultValue: '重置链接' })}</MenuItem>
+                  <MenuItem value="otp">{t('settings.general.password_recovery_delivery_otp', { defaultValue: '验证码（OTP）' })}</MenuItem>
+                </TextField>
+                <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant, mt: -1 }}>
+                  {t('settings.general.password_recovery_hint', { defaultValue: '需先配置 SMTP 邮件；仅对有邮箱且本地密码的账号生效，SSO 账号不受影响。' })}
+                </Typography>
+              </>
+            )}
           </Section>
 
           <Section title={t('settings.general.section_security')} md={md}>

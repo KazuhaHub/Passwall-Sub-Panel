@@ -1094,6 +1094,7 @@ func EnsureSchema(db *gorm.DB) error {
 		&nodeTrafficHourlyRow{},
 		&auditRow{},
 		&authEventRow{},
+		&authTokenRow{},
 		&subLogRow{},
 		&syncTaskRow{},
 		&xuiPanelRow{},

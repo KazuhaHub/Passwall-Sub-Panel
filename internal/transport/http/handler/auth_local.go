@@ -95,6 +95,10 @@ func (h *AuthLocalHandler) Methods(c *gin.Context) {
 		"captcha_provider": captchaProvider,
 		"captcha_site_key": s.CaptchaSiteKey,
 		"captcha_required": s.CaptchaEnabled && s.CaptchaTrigger == "always",
+		// Self-service password recovery (v3.7.0): drives the "Forgot password?"
+		// link + which reset form (link vs OTP) the reset page renders.
+		"password_recovery_enabled":  s.PasswordRecoveryEnabled,
+		"password_recovery_delivery": s.PasswordRecoveryDelivery,
 	})
 }
 

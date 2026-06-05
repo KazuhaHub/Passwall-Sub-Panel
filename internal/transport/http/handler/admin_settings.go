@@ -108,6 +108,9 @@ type settingsDTO struct {
 	LockoutWindowMinutes   int    `json:"lockout_window_minutes"`
 	LockoutDurationMinutes int    `json:"lockout_duration_minutes"`
 	LockoutScope           string `json:"lockout_scope"`
+	// Self-service password recovery (v3.7.0).
+	PasswordRecoveryEnabled  bool   `json:"password_recovery_enabled"`
+	PasswordRecoveryDelivery string `json:"password_recovery_delivery"`
 }
 
 func (h *AdminSettingsHandler) defaults() ports.UISettings {
@@ -203,6 +206,8 @@ func (h *AdminSettingsHandler) Get(c *gin.Context) {
 		LockoutWindowMinutes:   s.LockoutWindowMinutes,
 		LockoutDurationMinutes: s.LockoutDurationMinutes,
 		LockoutScope:           s.LockoutScope,
+		PasswordRecoveryEnabled:  s.PasswordRecoveryEnabled,
+		PasswordRecoveryDelivery: s.PasswordRecoveryDelivery,
 	})
 }
 
@@ -295,6 +300,8 @@ func (h *AdminSettingsHandler) Put(c *gin.Context) {
 		LockoutWindowMinutes:        req.LockoutWindowMinutes,
 		LockoutDurationMinutes:      req.LockoutDurationMinutes,
 		LockoutScope:                strings.ToLower(strings.TrimSpace(req.LockoutScope)),
+		PasswordRecoveryEnabled:     req.PasswordRecoveryEnabled,
+		PasswordRecoveryDelivery:    strings.ToLower(strings.TrimSpace(req.PasswordRecoveryDelivery)),
 		// GeoIPUpdateToken / CaptchaSecretKey resolved below ("empty = keep existing").
 	}
 	// Update token is write-only: a blank field on save means the admin didn't
@@ -326,6 +333,19 @@ func (h *AdminSettingsHandler) Put(c *gin.Context) {
 	}
 	if s.LockoutScope != "" && s.LockoutScope != "ip" && s.LockoutScope != "ip_upn" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Lockout_scope must be ip or ip_upn"})
+		return
+	}
+	if s.PasswordRecoveryDelivery != "" && s.PasswordRecoveryDelivery != "link" && s.PasswordRecoveryDelivery != "otp" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Password_recovery_delivery must be link or otp"})
+		return
+	}
+	// Link-delivery recovery emails a reset URL, which we build only from the
+	// configured canonical base URL (never the request Host header, to avoid
+	// reset-link poisoning). So that combination requires sub_base_url to be set
+	// — reject it up front instead of silently never sending. (OTP delivery
+	// emails a code and needs no URL, so it's exempt.)
+	if s.PasswordRecoveryEnabled && s.PasswordRecoveryDelivery != "otp" && strings.TrimSpace(s.SubBaseURL) == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Password recovery with link delivery requires the subscription base URL (sub_base_url) to be set first"})
 		return
 	}
 	if s.CaptchaFailThreshold < 0 || s.LockoutThreshold < 0 ||
@@ -483,6 +503,8 @@ func (h *AdminSettingsHandler) Put(c *gin.Context) {
 		LockoutWindowMinutes:   s.LockoutWindowMinutes,
 		LockoutDurationMinutes: s.LockoutDurationMinutes,
 		LockoutScope:           s.LockoutScope,
+		PasswordRecoveryEnabled:  s.PasswordRecoveryEnabled,
+		PasswordRecoveryDelivery: s.PasswordRecoveryDelivery,
 	})
 }
 

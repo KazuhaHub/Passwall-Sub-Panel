@@ -27,6 +27,10 @@ data/
 
 # Environment and private config
 .env
+# Root config.yaml: the binary auto-generates it in the CWD on first run (the
+# documented run dir is the repo root), so it lands here with jwt_secret + the
+# AES-GCM encryption key. Must never be committed.
+/config.yaml
 config/config.yaml
 config/users.yaml
 config/xui_panels.yaml

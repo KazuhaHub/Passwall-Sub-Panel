@@ -37,6 +37,26 @@ export async function ssoComplete(): Promise<AuthLoginResponse> {
   return data
 }
 
+// requestPasswordReset asks the panel to email a reset to the named account.
+// Always resolves on a 2xx regardless of whether the account exists (the
+// backend deliberately doesn't reveal that). Skips the shared error toast.
+export async function requestPasswordReset(ident: string) {
+  const { data } = await client.post('/auth/forgot-password', { ident }, { _skipErrorToast: true })
+  return data
+}
+
+// resetPassword applies a new password. Link delivery passes token; OTP delivery
+// passes ident + code. Errors propagate so the reset page can show the reason.
+export async function resetPassword(input: {
+  token?: string
+  ident?: string
+  code?: string
+  new_password: string
+}) {
+  const { data } = await client.post('/auth/reset-password', input, { _skipErrorToast: true })
+  return data
+}
+
 export function samlLoginURL(returnTo: string = '/user/me'): string {
   return `/api/auth/saml/login?return_to=${encodeURIComponent(returnTo)}`
 }

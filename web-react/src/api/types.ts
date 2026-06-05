@@ -237,6 +237,11 @@ export interface AuthMethods {
   captcha_provider?: CaptchaProvider
   captcha_site_key?: string
   captcha_required?: boolean
+  // Self-service password recovery (v3.7.0). When enabled, the login page shows
+  // a "Forgot password?" link; delivery decides whether the reset page expects
+  // a token (from the email link) or an OTP code the user types.
+  password_recovery_enabled?: boolean
+  password_recovery_delivery?: 'link' | 'otp'
 }
 
 export type CaptchaProvider = 'image' | 'turnstile' | 'recaptcha' | 'hcaptcha'

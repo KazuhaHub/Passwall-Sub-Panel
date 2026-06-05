@@ -450,6 +450,25 @@ type AuthEventRepo interface {
 	CountByReasonSince(ctx context.Context, reason string, since time.Time) (int64, error)
 }
 
+// AuthTokenRepo stores one-time hashed credentials for self-service auth flows
+// (password recovery, email verification). Tokens are single-use: Consume*
+// atomically marks the row used so it can't be replayed.
+type AuthTokenRepo interface {
+	Create(ctx context.Context, t *domain.AuthToken) error
+	// ConsumeByTokenHash matches a still-valid link token by (purpose,
+	// token_hash), marks it used, and returns it. domain.ErrNotFound if none /
+	// already used / expired.
+	ConsumeByTokenHash(ctx context.Context, purpose, tokenHash string, now time.Time) (*domain.AuthToken, error)
+	// ConsumeByUserCode is the OTP equivalent, scoped to a user so a short code
+	// can only be guessed against one account.
+	ConsumeByUserCode(ctx context.Context, purpose string, userID int64, codeHash string, now time.Time) (*domain.AuthToken, error)
+	// DeleteByUserPurpose drops a user's outstanding tokens for a purpose so a
+	// freshly-issued one invalidates earlier ones.
+	DeleteByUserPurpose(ctx context.Context, userID int64, purpose string) error
+	// DeleteExpired prunes expired or already-used rows (retention).
+	DeleteExpired(ctx context.Context, cutoff time.Time) (int64, error)
+}
+
 type SubLogRepo interface {
 	Insert(ctx context.Context, log *domain.SubLog) error
 	List(ctx context.Context, filter SubLogFilter) (items []*domain.SubLog, total int64, err error)
@@ -729,6 +748,16 @@ type UISettings struct {
 	LockoutWindowMinutes   int    `json:"lockout_window_minutes"`
 	LockoutDurationMinutes int    `json:"lockout_duration_minutes"`
 	LockoutScope           string `json:"lockout_scope"`
+
+	// ---- Self-service local-password recovery (v3.7.0) ----
+	// PasswordRecoveryEnabled gates the forgot-password / reset-password flow.
+	// Default off; needs SMTP configured to actually deliver. Only ever applies
+	// to accounts with a local password AND an email on file (SSO-only accounts
+	// are unaffected). PasswordRecoveryDelivery picks the email shape: "link" (a
+	// one-time reset URL) or "otp" (a short numeric code the user types on the
+	// reset page).
+	PasswordRecoveryEnabled  bool   `json:"password_recovery_enabled"`
+	PasswordRecoveryDelivery string `json:"password_recovery_delivery"`
 
 	// ---- IP geolocation (access-log region display, offline .mmdb) ----
 	// Resolution is fully offline against a local .mmdb in <ConfigDir>/geoip/;
@@ -1034,6 +1063,7 @@ type Repos struct {
 	NodeTraffic NodeTrafficRepo
 	Audit       AuditRepo
 	AuthEvent   AuthEventRepo
+	AuthToken   AuthTokenRepo
 	SubLog      SubLogRepo
 	SyncTask    SyncTaskRepo
 	RuleSet     RuleSetRepo

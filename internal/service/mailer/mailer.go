@@ -281,7 +281,43 @@ func DefaultTemplates() []*domain.MailTemplate {
 				loginRow+emailRow("客户端", "{{.ClientName}}", false)+emailRow("时间", "{{.GeneratedAt}}", true),
 			),
 		},
+		{
+			Kind:    domain.MailReminderPasswordReset,
+			Enabled: true,
+			Subject: "重置你的密码",
+			Body:    defaultPasswordResetTemplate(),
+		},
 	}
+}
+
+// defaultPasswordResetTemplate renders either a reset-link button (link
+// delivery) or a prominent OTP code (otp delivery) depending on which template
+// variable is populated. Built separately from defaultHTMLTemplate because its
+// call-to-action is the reset action, not the generic "open panel" button.
+func defaultPasswordResetTemplate() string {
+	return `<!doctype html>
+<html>
+<body style="margin:0;background:#f4f6fb;padding:32px 16px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;color:#111827;">
+  <div style="max-width:640px;margin:0 auto;background:#ffffff;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden;">
+    <div style="padding:28px 32px;border-bottom:1px solid #eef2f7;background:#0f172a;">
+      {{if .LogoURL}}<img src="{{.LogoURL}}" alt="{{.SiteTitle}}" style="height:42px;max-width:220px;object-fit:contain;display:block;margin-bottom:18px;">{{end}}
+      <div style="font-size:13px;color:#94a3b8;letter-spacing:.08em;text-transform:uppercase;">{{.SiteTitle}}</div>
+      <h1 style="margin:8px 0 0;font-size:24px;line-height:1.3;color:#ffffff;font-weight:700;">重置密码</h1>
+    </div>
+    <div style="padding:30px 32px;">
+      <p style="margin:0 0 16px;font-size:15px;line-height:1.7;color:#374151;">{{if .DisplayName}}你好 {{.DisplayName}}，{{else}}你好，{{end}}</p>
+      <p style="margin:0 0 24px;font-size:15px;line-height:1.7;color:#374151;">我们收到了重置你账号密码的请求。{{if .ResetLink}}点击下方按钮即可设置新密码。{{else}}请在重置页面输入下面的验证码以设置新密码。{{end}}此请求 {{.ExpireMinutes}} 分钟内有效。</p>
+      {{if .ResetLink}}
+      <a href="{{.ResetLink}}" style="display:inline-block;background:#2563eb;color:#ffffff;text-decoration:none;border-radius:8px;padding:12px 18px;font-size:14px;font-weight:700;">重置密码</a>
+      <p style="margin:24px 0 0;font-size:12px;line-height:1.6;color:#6b7280;">如果按钮无法打开，请复制以下链接：<br><span style="word-break:break-all;color:#374151;">{{.ResetLink}}</span></p>
+      {{else}}
+      <div style="margin:0 0 8px;font-size:32px;font-weight:700;letter-spacing:.3em;color:#111827;background:#f8fafc;border:1px solid #e5e7eb;border-radius:10px;padding:18px 0;text-align:center;">{{.OTPCode}}</div>
+      {{end}}
+      <p style="margin:24px 0 0;font-size:12px;line-height:1.6;color:#6b7280;">如果这不是你本人的操作，请忽略此邮件，你的密码不会被更改。</p>
+    </div>
+  </div>
+</body>
+</html>`
 }
 
 // emailRow builds one <tr> for the metric table at the bottom of each email.
@@ -444,7 +480,7 @@ func (s *Service) PreviewTemplate(ctx context.Context, tpl *domain.MailTemplate)
 
 func validateTemplateKind(kind domain.MailReminderKind) error {
 	switch kind {
-	case domain.MailReminderExpireBefore, domain.MailReminderExpired, domain.MailReminderTrafficLow, domain.MailReminderTrafficExhausted, domain.MailReminderAccountDisable, domain.MailReminderAccountEnable, domain.MailReminderAnnouncement, domain.MailReminderBlockedClient:
+	case domain.MailReminderExpireBefore, domain.MailReminderExpired, domain.MailReminderTrafficLow, domain.MailReminderTrafficExhausted, domain.MailReminderAccountDisable, domain.MailReminderAccountEnable, domain.MailReminderAnnouncement, domain.MailReminderBlockedClient, domain.MailReminderPasswordReset:
 		return nil
 	default:
 		return fmt.Errorf("%w: invalid template kind", domain.ErrValidation)
@@ -710,6 +746,67 @@ func (s *Service) SendBlockedClientWarning(ctx context.Context, u *domain.User, 
 		return err
 	}
 	body, err := renderHTMLTemplate("blocked_client_body", tpl.Body, data)
+	if err != nil {
+		return err
+	}
+	return sendSMTP(ctx, settings, to, subject, body)
+}
+
+// SendPasswordReset delivers a self-service password-reset email. Exactly one of
+// link / code is non-empty (the recovery service picks per the delivery
+// setting). Returns an error when SMTP isn't configured so the caller can log
+// it; the recovery flow itself stays silent to the end user (no enumeration).
+func (s *Service) SendPasswordReset(ctx context.Context, to, displayName, link, code string, expireMinutes int) error {
+	settings, err := s.LoadSettings(ctx)
+	if err != nil {
+		return err
+	}
+	if !settings.Enabled {
+		return fmt.Errorf("%w: smtp not configured", domain.ErrValidation)
+	}
+	to = strings.TrimSpace(to)
+	if to == "" {
+		return fmt.Errorf("%w: recipient required", domain.ErrValidation)
+	}
+	// password_reset is transactional and gated by PasswordRecoveryEnabled, so
+	// it ignores the template's Enabled flag — ListTemplates always surfaces it
+	// (DefaultTemplates merge), with the admin's edits if any.
+	var tpl *domain.MailTemplate
+	templates, err := s.ListTemplates(ctx)
+	if err != nil {
+		return err
+	}
+	for _, t := range templates {
+		if t.Kind == domain.MailReminderPasswordReset {
+			tpl = t
+			break
+		}
+	}
+	if tpl == nil {
+		return fmt.Errorf("password_reset template unavailable")
+	}
+	uiCfg, _ := s.settings.Load(ctx, ports.UISettings{})
+	appTitle := uiCfg.AppTitle
+	if appTitle == "" {
+		appTitle = "Passwall"
+	}
+	base := strings.TrimRight(uiCfg.SubBaseURL, "/")
+	data := map[string]any{
+		"DisplayName":   displayName,
+		"Email":         to,
+		"SiteTitle":     appTitle,
+		"LogoURL":       resolveLogoURL(base, uiCfg.LogoURL, uiCfg.LogoURLDark),
+		"PanelURL":      base,
+		"ResetLink":     link,
+		"OTPCode":       code,
+		"ExpireMinutes": expireMinutes,
+		"GeneratedAt":   time.Now().Format("2006-01-02 15:04"),
+	}
+	subject, err := renderTemplate("password_reset_subject", tpl.Subject, data)
+	if err != nil {
+		return err
+	}
+	body, err := renderHTMLTemplate("password_reset_body", tpl.Body, data)
 	if err != nil {
 		return err
 	}

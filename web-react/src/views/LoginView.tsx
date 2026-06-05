@@ -6,13 +6,14 @@ import {
   Card,
   CircularProgress,
   Divider,
+  Link as MuiLink,
   TextField,
   Typography,
   useTheme,
 } from '@mui/material'
 import LoginIcon from '@mui/icons-material/Login'
 import OpenInNewIcon from '@mui/icons-material/OpenInNew'
-import { useLocation, useNavigate } from 'react-router-dom'
+import { Link as RouterLink, useLocation, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import type { AxiosError } from 'axios'
 
@@ -203,6 +204,14 @@ export default function LoginView() {
         />
       )}
       {lockedMsg && <Alert severity="warning" sx={{ py: 0 }}>{lockedMsg}</Alert>}
+      {methods?.password_recovery_enabled && (
+        <Box sx={{ textAlign: 'right', mt: -0.5 }}>
+          <MuiLink component={RouterLink} to="/forgot-password" variant="body2"
+            onClick={(e) => { e.preventDefault(); navigate('/forgot-password') }}>
+            {t('auth:forgot_password')}
+          </MuiLink>
+        </Box>
+      )}
       <Button type="submit" variant={ssoFirst ? 'outlined' : 'contained'} fullWidth size="large"
         disabled={busy}
         startIcon={busy ? <CircularProgress size={16} color="inherit" /> : <LoginIcon />}

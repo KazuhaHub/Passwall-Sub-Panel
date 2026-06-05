@@ -754,6 +754,12 @@ func (s *Service) AdminResetPassword(ctx context.Context, userID int64, requeste
 	return pwd, nil
 }
 
+// IsMinimallyStrongPassword reports whether pwd meets the panel's local-password
+// floor (>=8 chars, at least one letter and one digit). Exported so sibling
+// services (e.g. password recovery) enforce the SAME policy before mutating a
+// password, instead of each re-deriving the rule.
+func IsMinimallyStrongPassword(pwd string) bool { return isMinimallyStrongPassword(pwd) }
+
 func isMinimallyStrongPassword(s string) bool {
 	if len(s) < 8 {
 		return false

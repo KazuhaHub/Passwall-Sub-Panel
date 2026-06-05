@@ -667,6 +667,7 @@ func (a *App) runAuditCleanupLoop(ctx context.Context) {
 		a.runRollup(ctx)
 		a.pruneAudit(ctx)
 		a.pruneAuthEvents(ctx)
+		a.pruneAuthTokens(ctx)
 		a.pruneSyncTasks(ctx)
 		a.pruneTrafficSnapshots(ctx)
 		a.pruneMailSent(ctx)
@@ -902,6 +903,24 @@ func (a *App) pruneAudit(ctx context.Context) {
 // keep forever, so the <=0 guard below is load-bearing, not defensive). Uses
 // the repo directly — there's no auth-event service, just the data layer +
 // handler.
+// pruneAuthTokens drops expired or already-used self-service auth tokens
+// (password recovery, email verification). These are short-lived and single-use
+// by design, so there's no admin retention knob — prune everything that's dead
+// on every hourly tick.
+func (a *App) pruneAuthTokens(ctx context.Context) {
+	if a.repos.AuthToken == nil {
+		return
+	}
+	deleted, err := a.repos.AuthToken.DeleteExpired(ctx, time.Now())
+	if err != nil {
+		log.Warn("auth token cleanup", "err", err)
+		return
+	}
+	if deleted > 0 {
+		log.Info("auth token cleanup", "deleted", deleted)
+	}
+}
+
 func (a *App) pruneAuthEvents(ctx context.Context) {
 	if a.repos.AuthEvent == nil || a.settings == nil {
 		return

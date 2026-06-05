@@ -107,6 +107,7 @@ func NewRepos(db *gorm.DB) ports.Repos {
 		NodeTraffic: &nodeTrafficRepo{db: db},
 		Audit:       &auditRepo{db: db},
 		AuthEvent:   &authEventRepo{db: db},
+		AuthToken:   &authTokenRepo{db: db},
 		SubLog:      &subLogRepo{db: db},
 		SyncTask:    &syncTaskRepo{db: db},
 		// RuleSet is intentionally absent here: production wires the

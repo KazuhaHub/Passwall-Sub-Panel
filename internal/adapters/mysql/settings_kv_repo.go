@@ -235,6 +235,9 @@ func settingDescriptors(s *ports.UISettings) []settingDescriptor {
 		intField("security", "lockout_window_minutes", &s.LockoutWindowMinutes),
 		intField("security", "lockout_duration_minutes", &s.LockoutDurationMinutes),
 		strField("security", "lockout_scope", &s.LockoutScope),
+		// security --- self-service password recovery (v3.7.0)
+		boolField("security", "password_recovery_enabled", &s.PasswordRecoveryEnabled),
+		strField("security", "password_recovery_delivery", &s.PasswordRecoveryDelivery),
 
 		// runtime --- cron / performance / tz / global toggles
 		strField("runtime", "timezone", &s.Timezone),
@@ -483,6 +486,12 @@ func applyUISettingsDefaults(out, defaults ports.UISettings) ports.UISettings {
 		// Lock the IP+username pair, not the bare IP: knowing a victim's
 		// username can't then be weaponised to lock them out from elsewhere.
 		out.LockoutScope = "ip_upn"
+	}
+	if out.PasswordRecoveryDelivery == "" {
+		// A clickable reset link is the smoothest default; admins can switch to
+		// OTP codes for environments where link-rewriting/preview bots would
+		// otherwise auto-consume a one-time link.
+		out.PasswordRecoveryDelivery = "link"
 	}
 	if out.ACMEDirectoryURL == "" {
 		// Let's Encrypt production. Switch to the staging directory

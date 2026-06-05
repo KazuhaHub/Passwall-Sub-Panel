@@ -4,6 +4,24 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## v3.7.0-beta.3 — 2026-06-05
+
+「账号安全」专题第三块：**本地账号邮箱找回密码**。用户用账号名发起找回，收到邮件（一次性**重置链接**或**验证码 OTP**，按管理员配置），凭它设新密码。全程 TDD（仓储/服务各自先红后绿）+ 真机端到端验（设置往返、`/auth/methods` 暴露、forgot 对存在/不存在账号都 200 不泄露枚举、错误令牌 401、弱密码 400）。`go test ./...` / `go vet` / `tsc` / `npm build` 全绿。
+
+### Added
+
+- **一次性令牌底座 `auth_tokens`（新表，AutoMigrate）** —— 哈希存储、带 TTL、单次使用的自助认证令牌（现服务找回，后续复用于注册邮箱验证）。一行携带**链接长 token**（`token_hash`）或**短 OTP**（`code_hash`）之一，都只存 SHA-256；`purpose` 区分 `password_reset`/`email_verify`。新增 `AuthTokenRepo`：`Consume*` **原子标记已用**（条件 UPDATE 防并发重放）、`DeleteByUserPurpose`（发新令牌即失效旧的）、`DeleteExpired`（hourly 清理已挂，过期/已用即清）。
+- **找回服务 `internal/service/recovery`** —— `RequestReset(ident)`：按账号名查（**email 非唯一不作查找键，仅作投递通道**），仅对「有本地密码 + 有邮箱 + 找回已开」的账号发信，**无论是否命中一律对外成功**（零账号枚举）；生成令牌→存→发信，内部失败只记日志。`Reset`：**先校验密码强度再消费令牌**（弱密码不烧掉一次性令牌），令牌有效→复用 `user.Service.SetPassword`（bcrypt + bump TokenVersion 踢其它会话）。重置链接基址**优先取管理员配置的 `SubBaseURL`**，仅在未配时回退请求 Host —— 杜绝伪造 Host 头的「密码重置投毒」。
+- **找回邮件 + 可编辑模板** —— mailer 新增 `SendPasswordReset` + `password_reset` 模板类型（link/OTP 条件渲染，`html/template` 上下文转义），随 `ListTemplates` 自动出现在管理端「邮件模板」可编辑/可重置。
+- **管理端开关 + 前端找回/重置页** —— 「设置→登录安全」新增「允许邮箱找回密码」开关 + 投递方式（链接/OTP）；登录页据 `/auth/methods` 显示「忘记密码？」；新增找回页（输账号→提示查收）与重置页（链接模式读 URL token；OTP 模式输账号+验证码；新密码+确认+强度校验）。中英 i18n 齐。两个公开端点均挂登录限流器。
+
+### 安全加固（26-agent 对抗审查后）
+
+- **OTP 每令牌猜测上限** —— 6 位 OTP 搜索空间小，纯靠 per-IP 限流挡不住分布式（多 IP）爆破。新增 `auth_tokens.attempts` 列：单个 OTP 令牌累计 **5 次错误即烧毁**（之后只能重新发起，受限流约束），与 IP 数量无关地封死分布式猜测窗口。
+- **找回邮件改异步发送** —— 原同步发 SMTP 让「存在的账号」请求明显更慢，构成账号枚举**计时旁路**。现把发信放到脱离请求上下文的后台协程（panic 防护），响应恒定快（实测 8ms），同时避免慢 SMTP 拖住响应。
+- **重置链接基址只信任配置** —— 链接投递的重置 URL **只用管理员配置的 `SubBaseURL`**，绝不回退请求 `Host` 头（伪造 Host → 给受害者发指向攻击者域名的链接 = 经典「密码重置投毒」）。未配 `SubBaseURL` 时拒发；管理端保存「找回+链接投递」也会校验要求先配 `SubBaseURL`。
+- **管理员停用的账号不发找回信** —— 手动停用/待审/封禁的账号本就无法登录，找回对其无意义且徒增一个存在性信号；自助停用原因（流量超额/到期，仍可登录自救）保留找回。
+
 ## v3.7.0-beta.2 — 2026-06-05
 
 「账号安全」专题的第二条工作流：**统一通知中心**。把原本散在首页 dashboard、各写各的多类告警收敛成**一个派生式 Alert 抽象 + 单一 feed + 顶栏铃铛**，并新增「面板可升级（仅已测支持）」与「近期登录锁定」两类告警。TDD（仓储/服务/handler 各自先红后绿）+ 真机端到端验（建一个即将到期用户 → feed 立刻出现 `user_expiring`，删则消失）。`go test ./...` / `go vet` / `tsc` / `npm run build` 全绿。

@@ -190,6 +190,12 @@ export interface UISettings {
   lockout_duration_minutes: number
   /** "ip" or "ip_upn" (recommended — lock the IP+username pair). */
   lockout_scope: 'ip' | 'ip_upn' | ''
+
+  // ---- Self-service password recovery (v3.7.0) ----
+  /** Master toggle for the forgot-password / reset flow. Needs SMTP configured. */
+  password_recovery_enabled: boolean
+  /** "link" (a one-time reset URL) or "otp" (a short code the user types). */
+  password_recovery_delivery: 'link' | 'otp' | ''
 }
 
 export async function getUISettings() {

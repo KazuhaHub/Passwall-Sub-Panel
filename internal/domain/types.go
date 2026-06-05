@@ -693,6 +693,29 @@ type AuthEvent struct {
 	At      time.Time   `json:"at"`
 }
 
+// AuthToken is a one-time, hashed, TTL-bounded credential for self-service auth
+// flows — password recovery now, email verification later. A row carries either
+// a long random link token (TokenHash) OR a short OTP code (CodeHash) depending
+// on the configured delivery, never the raw value. Single-use: UsedAt is
+// stamped the moment it's consumed.
+type AuthToken struct {
+	ID        int64
+	UserID    int64  // 0 when not yet tied to a user (email_verify pre-account)
+	Purpose   string // AuthTokenPurpose*
+	TokenHash string // sha256 hex of the link token; "" for OTP delivery
+	CodeHash  string // sha256 hex of the OTP code; "" for link delivery
+	Email     string // recipient address the token was sent to
+	ExpiresAt time.Time
+	UsedAt    *time.Time
+	CreatedAt time.Time
+}
+
+// AuthToken purposes.
+const (
+	AuthTokenPurposePasswordReset = "password_reset"
+	AuthTokenPurposeEmailVerify   = "email_verify"
+)
+
 // GeoLocation is a resolved geolocation for an IP. Empty fields mean
 // "unknown" (private/reserved IP, lookup disabled, or provider failure).
 // CountryCode is ISO 3166-1 alpha-2 (e.g. "HK"); the frontend renders the
@@ -874,6 +897,7 @@ const (
 	MailReminderAnnouncement     MailReminderKind = "announcement"
 	MailReminderBlockedClient    MailReminderKind = "blocked_client"
 	MailReminderCertFailure      MailReminderKind = "cert_failure"
+	MailReminderPasswordReset    MailReminderKind = "password_reset"
 )
 
 type MailSettings struct {

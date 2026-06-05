@@ -25,6 +25,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/mailer"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/node"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/reconcile"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/recovery"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/render"
 	syncsvc "github.com/KazuhaHub/passwall-sub-panel/internal/service/sync"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/traffic"
@@ -157,6 +158,18 @@ func NewRouter(d Deps) *gin.Engine {
 		// Refresh shares the login limiter — refresh storms from a misbehaving
 		// client should be throttled just like brute-force login attempts.
 		authGroup.POST("/refresh", loginLimiter.Handler(), authLocal.Refresh)
+		// Self-service password recovery (v3.7.0). Both share the login limiter:
+		// forgot is the email-bombing throttle, reset is the token-guessing one.
+		recoverySvc := recovery.New(recovery.Deps{
+			Users:       d.Repos.User,
+			Tokens:      d.Repos.AuthToken,
+			Mail:        d.Mail,
+			Settings:    d.Repos.Settings,
+			SetPassword: d.User.SetPassword,
+		})
+		recoveryH := handler.NewAuthRecoveryHandler(recoverySvc)
+		authGroup.POST("/forgot-password", loginLimiter.Handler(), recoveryH.Forgot)
+		authGroup.POST("/reset-password", loginLimiter.Handler(), recoveryH.Reset)
 		// SAML endpoints stay registered even when SSO is currently
 		// disabled — the underlying service rejects calls until admin
 		// re-enables it. That way an admin who flips SSO on in the panel
