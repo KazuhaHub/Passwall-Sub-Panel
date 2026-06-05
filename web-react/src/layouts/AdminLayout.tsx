@@ -41,6 +41,7 @@ import LogoutIcon from '@mui/icons-material/Logout'
 import AppearanceMenu from '@/components/AppearanceMenu'
 import DensityToggle from '@/components/DensityToggle'
 import LanguageMenu from '@/components/LanguageMenu'
+import NotificationBell from '@/components/NotificationBell'
 import BrandLogo from '@/components/BrandLogo'
 import { useAuthStore, selectLabel } from '@/stores/auth'
 import { useSiteStore, selectIcon } from '@/stores/site'
@@ -358,6 +359,7 @@ export default function AdminLayout() {
               {siteTitle}
             </Typography>
             <Box sx={{ flex: 1 }} />
+            <NotificationBell />
             <LanguageMenu value={currentLanguage()} onChange={handleLanguageChange} />
             <DensityToggle />
             <AppearanceMenu

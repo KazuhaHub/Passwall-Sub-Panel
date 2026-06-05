@@ -1,4 +1,17 @@
 {
+  "alerts": {
+    "bell_title": "Notifications",
+    "empty": "Nothing needs attention",
+    "title": {
+      "node_health": "Node {{name}} is unhealthy",
+      "cert_failed": "Certificate {{name}} failed",
+      "cert_expiring": "Certificate {{name}} is expiring",
+      "cert_expired": "Certificate {{name}} has expired",
+      "panel_upgrade": "{{name}}: 3X-UI {{version}} available",
+      "user_expiring": "User {{name}} is expiring",
+      "login_security": "{{count}} login lockouts recently"
+    }
+  },
   "validation": {
     "required": "Required",
     "email": "Invalid email format",

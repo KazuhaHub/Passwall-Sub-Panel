@@ -167,3 +167,52 @@ func TestAuthEventRecentFailures(t *testing.T) {
 		t.Fatalf("no-match = (%d, %v, %v), want (0, zero, nil)", count, lastAt, err)
 	}
 }
+
+// TestAuthEventCountByReasonSince pins the query the notification center's
+// login_security alert relies on: how many events with a given reason landed
+// since a cutoff (e.g. recent locked_out rejections = an active brute-force).
+func TestAuthEventCountByReasonSince(t *testing.T) {
+	db, err := Open("sqlite", filepath.Join(t.TempDir(), "panel.db"))
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	if err := EnsureSchema(db); err != nil {
+		t.Fatalf("schema: %v", err)
+	}
+	t.Cleanup(func() {
+		if sqlDB, derr := db.DB(); derr == nil {
+			_ = sqlDB.Close()
+		}
+	})
+	repo := NewRepos(db).AuthEvent
+	ctx := context.Background()
+	now := time.Now()
+
+	fail := func(reason string, at time.Time) *domain.AuthEvent {
+		return &domain.AuthEvent{
+			UPN: "x@x", Method: domain.AuthMethodLocal,
+			Outcome: domain.AuthOutcomeFailure, Reason: reason, IP: "1.1.1.1", At: at,
+		}
+	}
+	for _, e := range []*domain.AuthEvent{
+		fail(domain.AuthReasonLockedOut, now.Add(-5*time.Minute)),
+		fail(domain.AuthReasonLockedOut, now.Add(-1*time.Minute)),
+		fail(domain.AuthReasonLockedOut, now.Add(-2*time.Hour)),            // outside window
+		fail(domain.AuthReasonInvalidCredentials, now.Add(-1*time.Minute)), // other reason
+	} {
+		if err := repo.Insert(ctx, e); err != nil {
+			t.Fatalf("insert: %v", err)
+		}
+	}
+
+	since := now.Add(-15 * time.Minute)
+	if got, err := repo.CountByReasonSince(ctx, domain.AuthReasonLockedOut, since); err != nil || got != 2 {
+		t.Fatalf("locked_out since = %d (err %v), want 2", got, err)
+	}
+	if got, err := repo.CountByReasonSince(ctx, domain.AuthReasonInvalidCredentials, since); err != nil || got != 1 {
+		t.Fatalf("invalid_credentials since = %d (err %v), want 1", got, err)
+	}
+	if got, err := repo.CountByReasonSince(ctx, domain.AuthReasonLockedOut, now.Add(-3*time.Hour)); err != nil || got != 3 {
+		t.Fatalf("locked_out wide window = %d (err %v), want 3", got, err)
+	}
+}

@@ -14,6 +14,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/jwtutil"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/log"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/alert"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/audit"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/auth"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/captcha"
@@ -30,6 +31,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/user"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/transport/http/handler"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/transport/http/middleware"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/version"
 )
 
 // AsyncDispatcher launches handler-spawned background work under the
@@ -308,6 +310,31 @@ func NewRouter(d Deps) *gin.Engine {
 
 		dashboard := handler.NewAdminDashboardHandler(d.Repos.User, d.Repos.Node, d.Repos.Group, d.Repos.XUIPanel, d.Repos.Certificate)
 		staffGroup.GET("/dashboard/summary", dashboard.Summary)
+
+		// Unified notification center: a single derived-alert feed the top-bar
+		// bell consumes. UpgradeFor reads version state already in memory (latest
+		// 3X-UI tag + the cached tested range), so panel_upgrade makes zero new
+		// GitHub calls; CheckXUI(latest)==Supported ensures we only nudge toward
+		// upgrades PSP has actually verified.
+		alertSvc := alert.New(alert.Deps{
+			Nodes:    d.Repos.Node,
+			Panels:   d.Repos.XUIPanel,
+			Certs:    d.Repos.Certificate,
+			Users:    d.Repos.User,
+			Events:   d.Repos.AuthEvent,
+			Settings: d.Repos.Settings,
+			UpgradeFor: func(current string) (string, bool) {
+				if !version.IsXUIUpdateAvailable(current) {
+					return "", false
+				}
+				latest := version.LatestXUI()
+				if version.CheckXUI(latest) != version.CompatSupported {
+					return "", false
+				}
+				return latest, true
+			},
+		})
+		staffGroup.GET("/alerts", handler.NewAdminAlertsHandler(alertSvc).List)
 
 		trafficH := handler.NewAdminTrafficHandler(d.Repos.User, d.Repos.Node, d.Repos.XUIPanel, d.Traffic, d.Repos.Settings)
 		staffGroup.GET("/traffic/top", trafficH.Top)

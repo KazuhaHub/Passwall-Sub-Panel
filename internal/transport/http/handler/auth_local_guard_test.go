@@ -37,6 +37,9 @@ func (f *stubEvents) List(context.Context, ports.AuthEventFilter) ([]*domain.Aut
 	return nil, 0, nil
 }
 func (f *stubEvents) DeleteBefore(context.Context, time.Time) (int64, error) { return 0, nil }
+func (f *stubEvents) CountByReasonSince(context.Context, string, time.Time) (int64, error) {
+	return 0, nil
+}
 
 func loginCtx(body string) (*gin.Context, *httptest.ResponseRecorder) {
 	gin.SetMode(gin.TestMode)

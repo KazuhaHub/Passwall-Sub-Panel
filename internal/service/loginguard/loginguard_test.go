@@ -31,6 +31,9 @@ func (f *fakeEvents) List(context.Context, ports.AuthEventFilter) ([]*domain.Aut
 	return nil, 0, nil
 }
 func (f *fakeEvents) DeleteBefore(context.Context, time.Time) (int64, error) { return 0, nil }
+func (f *fakeEvents) CountByReasonSince(context.Context, string, time.Time) (int64, error) {
+	return 0, nil
+}
 
 func guardAt(f *fakeEvents, now time.Time) *Guard {
 	g := New(f)

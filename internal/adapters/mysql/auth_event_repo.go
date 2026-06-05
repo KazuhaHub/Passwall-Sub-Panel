@@ -124,3 +124,14 @@ func (r *authEventRepo) RecentAuthFailures(ctx context.Context, ip, upn string, 
 	}
 	return count, newest.At, nil
 }
+
+// CountByReasonSince counts auth events with the given reason at or after
+// `since`. Used by the notification center's login_security alert.
+func (r *authEventRepo) CountByReasonSince(ctx context.Context, reason string, since time.Time) (int64, error) {
+	var count int64
+	err := r.db.WithContext(ctx).Model(&authEventRow{}).
+		Where("reason = ?", reason).
+		Where("at >= ?", since).
+		Count(&count).Error
+	return count, err
+}

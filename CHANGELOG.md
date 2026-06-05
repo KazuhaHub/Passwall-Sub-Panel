@@ -4,6 +4,18 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## v3.7.0-beta.2 — 2026-06-05
+
+「账号安全」专题的第二条工作流：**统一通知中心**。把原本散在首页 dashboard、各写各的多类告警收敛成**一个派生式 Alert 抽象 + 单一 feed + 顶栏铃铛**，并新增「面板可升级（仅已测支持）」与「近期登录锁定」两类告警。TDD（仓储/服务/handler 各自先红后绿）+ 真机端到端验（建一个即将到期用户 → feed 立刻出现 `user_expiring`，删则消失）。`go test ./...` / `go vet` / `tsc` / `npm run build` 全绿。
+
+### Added
+
+- **统一告警服务 `internal/service/alert`（派生式，无事件表）** —— 每次请求实时从当前状态派生 6 类告警：`node_health`（节点不健康）/ `cert_failed`（证书签发失败）/ `cert_expiring`（active 证书临近到期或已过期，到期前天数取 `CertRenewBeforeDays`）/ `panel_upgrade`（面板可升级到已测支持的新版）/ `user_expiring`（7 天内到期用户）/ `login_security`（近期 `locked_out` 拒绝次数）。条件消失告警即消失，无生命周期管理。复用 dashboard 同款查询（`NodeRepo.List` / `CertificateRepo.ListByStatus` / `UserRepo.ListExpiringBetween`），用窄接口（interface segregation）注入、best-effort（单源失败只记日志不致盲整个 feed）。
+- **`GET /api/admin/alerts` 单一 feed** —— 返回 `{alerts, counts}`，counts 为按 severity（error/warning/info）的计数，驱动铃铛角标。**operator 看不到 admin-only 页的告警**（cert / servers 是 admin-only，避免给 operator 死链）：handler 按角色过滤 `cert_*`/`panel_upgrade` 并重算 counts。
+- **`panel_upgrade` 零新 GitHub 请求** —— 读已在内存的 `LatestXUI()`（boot+流量轮询周期主动拉、30min 节流）+ 面板已周期探测写入的 `XUIPanel.PanelVersion`，只在 `IsXUIUpdateAvailable(current) && CheckXUI(latest)==Supported` 时报，绝不怂恿升进未测版本。管理员**绕过 PSP 直接升级 3X-UI** 也能被周期版本探测（搭流量轮询 ~5min）捕获 → 告警随之刷新/消失。
+- **顶栏通知铃铛 + 角标 + 下拉** —— AdminLayout 顶栏新增铃铛：角标数 = 活跃告警数、颜色 = 最高 severity；下拉按 severity 排序列出，每条按类型图标 + 深链跳对应页（node→节点 / cert→证书 / upgrade→服务器 / user→用户 / login_security→日志）；60s 轮询 + 打开即刷新。新增 `AuthEventRepo.CountByReasonSince` 支撑 login_security。
+- **dashboard 防 drift 测试** —— dashboard「即将到期」卡片与铃铛的到期窗口必须一致（否则同一用户在一处出现、另一处不出现）；新增 go 测试钉死 `expiringWindowDays == alert.UserExpiringWindowDays` 与「dashboard 用到的告警类 ⊆ AlertService 产出」，改一处忘改另一处即 go test 红。
+
 ## v3.7.0-beta.1 — 2026-06-05
 
 「账号安全」专题首个 beta：本地登录的**验证码 + 失败锁定**两道闸门（两者都可配、默认关，仅作用于本地账号；SSO 由 IdP 负责，不叠加）。全程 TDD（仓储/守卫/验证码服务/handler 集成各自先红后绿），并起真实二进制端到端验：启用图形验证码后 `/api/auth/captcha` 真签发 data-URL 挑战、`/api/auth/methods` 暴露公开配置、设置往返脱敏正确。`go build` / `go vet` / `go test ./...` / `tsc` / `npm run build` 全绿。

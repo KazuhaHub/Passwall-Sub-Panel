@@ -1,4 +1,17 @@
 {
+  "alerts": {
+    "bell_title": "通知",
+    "empty": "暂无需要处理的通知",
+    "title": {
+      "node_health": "节点 {{name}} 异常",
+      "cert_failed": "证书 {{name}} 签发失败",
+      "cert_expiring": "证书 {{name}} 即将到期",
+      "cert_expired": "证书 {{name}} 已过期",
+      "panel_upgrade": "{{name}}：3X-UI {{version}} 可升级",
+      "user_expiring": "用户 {{name}} 即将到期",
+      "login_security": "近期发生 {{count}} 次登录锁定"
+    }
+  },
   "validation": {
     "required": "此项必填",
     "email": "邮箱格式不正确",
