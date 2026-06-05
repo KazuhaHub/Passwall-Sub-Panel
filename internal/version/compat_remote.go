@@ -98,6 +98,20 @@ var (
 	refreshInflight  bool
 )
 
+// shouldFetchCompat decides whether RefreshRemoteCompat proceeds to the network,
+// given the last SUCCESSFUL fetch time, the current time, and the force flag.
+// force ignores the 60s throttle — the panel-upgrade gate passes force=true so
+// its "is this 3X-UI version supported?" check reflects the freshest published
+// tested range, not a possibly-stale cache from boot or the last Servers-page
+// open. Without force, a fetch within the throttle window is skipped (reuse the
+// active state) so a Servers-page open firing N parallel tests hits GitHub once.
+func shouldFetchCompat(lastAt, now time.Time, force bool) bool {
+	if force || lastAt.IsZero() {
+		return true
+	}
+	return now.Sub(lastAt) >= remoteFetchThrottle
+}
+
 // RefreshRemoteCompat fetches the per-major compat JSON for THIS PSP build,
 // finds the entry containing the current version, and installs its
 // max_tested_xui via SetActiveMaxTestedXUI. Returns nil on success OR
@@ -105,8 +119,10 @@ var (
 // error only when this call actually attempted the fetch and it failed.
 //
 // urlOverride is for tests / admin override; "" uses the default per-major
-// URL computed from version.Version.
-func RefreshRemoteCompat(ctx context.Context, urlOverride string) error {
+// URL computed from version.Version. force bypasses the 60s throttle (but not
+// single-flight) — used by the panel-upgrade pre-flight so the support gate
+// never decides on a stale cache.
+func RefreshRemoteCompat(ctx context.Context, urlOverride string, force bool) error {
 	url := urlOverride
 	if url == "" {
 		var err error
@@ -121,7 +137,7 @@ func RefreshRemoteCompat(ctx context.Context, urlOverride string) error {
 		refreshMu.Unlock()
 		return nil
 	}
-	if !refreshLastAt.IsZero() && time.Since(refreshLastAt) < remoteFetchThrottle {
+	if !shouldFetchCompat(refreshLastAt, time.Now(), force) {
 		refreshMu.Unlock()
 		return nil
 	}

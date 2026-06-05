@@ -233,7 +233,7 @@ func (h *AdminServersHandler) Test(c *gin.Context) {
 	// "advance lastAt on failure" bug to lock the throttle for 60s
 	// after a single client disconnect. compat_remote.go enforces its
 	// own 8s timeout internally so background ctx can't leak forever.
-	if rerr := version.RefreshRemoteCompat(context.Background(), ""); rerr != nil {
+	if rerr := version.RefreshRemoteCompat(context.Background(), "", false); rerr != nil {
 		log.Warn("admin test: refresh remote compat", "panel_id", req.ID, "err", rerr)
 	}
 	// Same piggyback for the centralized latest-3X-UI tag fetch — one
@@ -370,6 +370,15 @@ func (h *AdminServersHandler) UpgradePanel(c *gin.Context) {
 			"message":         "Panel is already on the latest version (" + info.CurrentVersion + "); nothing to upgrade.",
 		})
 		return
+	}
+	// Force a FRESH compat-JSON fetch right before the support gate. The active
+	// tested range is otherwise only as new as boot or the last Servers-page
+	// open (≤ once/60s), so a just-published bump (e.g. max_tested → 3.2.8)
+	// wouldn't be seen and the upgrade could be wrongly blocked on a stale
+	// cache. force=true bypasses the 60s throttle; best-effort — if GitHub is
+	// unreachable we fall back to the current active range (same as before).
+	if rerr := version.RefreshRemoteCompat(context.Background(), "", true); rerr != nil {
+		log.Warn("upgrade-panel: force-refresh remote compat", "panel_id", id, "err", rerr)
 	}
 	compat := version.CheckXUI(info.LatestVersion)
 	if compat != version.CompatSupported && !req.Force {

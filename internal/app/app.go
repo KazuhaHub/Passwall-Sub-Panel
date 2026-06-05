@@ -476,7 +476,7 @@ func (a *App) probePanelVersionsOnce(ctx context.Context) {
 	// plus a concurrent Servers-page open collapse to one call each.
 	// 10 s budget per call: GitHub raw + API are both usually sub-second.
 	compatCtx, compatCancel := context.WithTimeout(ctx, 10*time.Second)
-	if rerr := version.RefreshRemoteCompat(compatCtx, ""); rerr != nil {
+	if rerr := version.RefreshRemoteCompat(compatCtx, "", false); rerr != nil {
 		log.Debug("compat probe: refresh remote compat failed (offline / rate limited?)", "err", rerr)
 	}
 	compatCancel()
