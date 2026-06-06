@@ -4,6 +4,15 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## v3.7.0-beta.7 — 2026-06-06
+
+修复 beta.5 引入的 **MySQL 迁移崩溃**（SQLite/Postgres 不受影响，故早测未抓到）。
+
+### Fixed
+
+- **`totp_secret` 列在 MySQL 上 AutoMigrate 失败** —— 该列写成了 `type:text;default:''`，而 **MySQL 不允许给 TEXT/BLOB/JSON 列设默认值**（Error 1101 `BLOB, TEXT, GEOMETRY or JSON column 'totp_secret' can't have a default value`），导致 `ALTER TABLE users ADD totp_secret` 失败、`build app: db schema` 报错、服务在 MySQL 上**起不来**（SQLite/Postgres 接受 text 默认值所以本地测试与那两类部署正常）。该列是加到既有 `users` 表上、需要非空回填，而跨三方言唯一能带 `DEFAULT` 的是 varchar——改为 `size:255;not null;default:''`（加密后的 TOTP 种子约 90 字符，255 充裕）。已失败的 MySQL 库重启即自动补齐迁移（AutoMigrate 幂等）。
+- **新增 schema 漂移闸测试** —— `TestSchemaNoDefaultOnTextColumns` 反射遍历 AutoMigrate 的全部 row 结构（抽出 `schemaModels` 单一真相源供迁移器与测试共用），凡 TEXT/BLOB/JSON 类型列又带 `default:` 即 `go test` 红——本类「SQLite 容忍、MySQL 拒绝」的跨方言坑今后在纯静态测试（无需起 DB）即被拦下。
+
 ## v3.7.0-beta.6 — 2026-06-06
 
 「账号安全」专题第六块（收官功能）：**通行密钥 / Passkey（WebAuthn）**（可配，默认关，仅本地密码账号）。用户在「我的账号」用设备指纹/面容或安全密钥绑定 passkey，绑定后可在登录页**一键免密登录**（无需输入用户名，discoverable/usernameless）。SSO 账号不叠加（交由 IdP）。后端 `go-webauthn` + 前端 `@simplewebauthn/browser`。RP 标识严格由「订阅基础 URL」派生（绝不信任请求 Host，防 RP-ID 投毒）；挑战服务端单次使用；凭据整条 JSON 存库以保证重验/防克隆有效。全程 TDD（仓储/服务各自先红后绿）+ 连线 smoke（设置往返、`/auth/methods` 暴露、profile 字段、begin 端点、**无基础 URL 时硬失败**8 检全过；WebAuthn 浏览器 ceremony 留真机验）。`go test ./...` / `go vet` / `tsc` / `npm build` 全绿。

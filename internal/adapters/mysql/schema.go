@@ -75,11 +75,16 @@ type userRow struct {
 	// row that hasn't been bumped yet.
 	TokenVersion int `gorm:"default:0;not null"`
 	// 2FA / TOTP (v3.7.0). totp_secret is the base32 seed, AES-GCM encrypted at
-	// rest (enc:v1: prefix). recovery_codes is a JSON array of SHA-256 hashes of
-	// one-time backup codes. All three are written ONLY via the column-scoped
-	// TOTP repo methods and are in pollOwnedColumns, so the generic Update never
-	// touches (or clobbers) them.
-	TOTPSecret    string `gorm:"column:totp_secret;type:text;default:''"`
+	// rest (enc:v1: prefix) — the encrypted form is ~90 chars, so varchar(255) is
+	// ample. It is varchar (NOT text) deliberately: this column is ADDED to the
+	// existing users table, so it needs a non-null backfill, and only varchar can
+	// carry a DEFAULT across all three dialects (MySQL forbids a default on TEXT;
+	// Postgres rejects NOT-NULL-without-default on a populated table). recovery_codes
+	// is a JSON array of SHA-256 hashes of one-time backup codes (jsonStrings.Scan
+	// tolerates NULL, so it needs no default). All three are written ONLY via the
+	// column-scoped TOTP repo methods and are in pollOwnedColumns, so the generic
+	// Update never touches (or clobbers) them.
+	TOTPSecret    string `gorm:"column:totp_secret;size:255;not null;default:''"`
 	TOTPEnabled   bool   `gorm:"column:totp_enabled;not null;default:false"`
 	RecoveryCodes jsonStrings `gorm:"column:recovery_codes"`
 	// LastOnlineAt is the most recent moment any of the user's owned
@@ -1089,40 +1094,46 @@ func (j *jsonLayout) Scan(value any) error {
 
 // ---- Schema ----
 
+// schemaModels is every row struct AutoMigrate manages — the single source of
+// truth for both the migrator and the schema_guard_test (which reflects over it
+// to catch cross-dialect-incompatible column definitions before they reach a
+// real MySQL/Postgres).
+var schemaModels = []any{
+	&userRow{},
+	&groupRow{},
+	&nodeRow{},
+	&ownershipRow{},
+	&trafficRow{},
+	&clientTrafficRow{},
+	&nodeTrafficRow{},
+	&trafficHourlyRow{},
+	&clientTrafficHourlyRow{},
+	&nodeTrafficHourlyRow{},
+	&auditRow{},
+	&authEventRow{},
+	&authTokenRow{},
+	&webauthnCredentialRow{},
+	&subLogRow{},
+	&syncTaskRow{},
+	&xuiPanelRow{},
+	&separatorRow{},
+	&settingRow{},
+	&mailSettingsRow{},
+	&mailTemplateRow{},
+	&mailSentRow{},
+	&samlConfigRow{},
+	&oidcConfigRow{},
+	&dnsCredentialRow{},
+	&acmeAccountRow{},
+	&tlsCertificateRow{},
+	&certEventRow{},
+}
+
 // EnsureSchema keeps the database schema aligned with the current row structs.
 // Keep schema changes centralized here instead of adding one-off schema update
 // helpers for every new field.
 func EnsureSchema(db *gorm.DB) error {
-	if err := db.AutoMigrate(
-		&userRow{},
-		&groupRow{},
-		&nodeRow{},
-		&ownershipRow{},
-		&trafficRow{},
-		&clientTrafficRow{},
-		&nodeTrafficRow{},
-		&trafficHourlyRow{},
-		&clientTrafficHourlyRow{},
-		&nodeTrafficHourlyRow{},
-		&auditRow{},
-		&authEventRow{},
-		&authTokenRow{},
-		&webauthnCredentialRow{},
-		&subLogRow{},
-		&syncTaskRow{},
-		&xuiPanelRow{},
-		&separatorRow{},
-		&settingRow{},
-		&mailSettingsRow{},
-		&mailTemplateRow{},
-		&mailSentRow{},
-		&samlConfigRow{},
-		&oidcConfigRow{},
-		&dnsCredentialRow{},
-		&acmeAccountRow{},
-		&tlsCertificateRow{},
-		&certEventRow{},
-	); err != nil {
+	if err := db.AutoMigrate(schemaModels...); err != nil {
 		return err
 	}
 	if err := backfillTrafficCounterNulls(db); err != nil {
