@@ -45,6 +45,46 @@ export async function verify2FA(pendingToken: string, code: string): Promise<Aut
   return data
 }
 
+// send2FAEmail asks the panel to email a one-time login code for the
+// email-as-2FA alternative. Requires a valid pending token. Pre-session, so it
+// skips the refresh interceptor; errors propagate so the UI can show them.
+export async function send2FAEmail(pendingToken: string): Promise<void> {
+  await client.post(
+    '/auth/2fa/email/send',
+    { pending_token: pendingToken },
+    { _skipErrorToast: true, _skipRefresh: true },
+  )
+}
+
+// passkey2FABegin requests an allow-listed assertion (scoped to the pending
+// user's credentials) to use a passkey as the SECOND factor.
+export async function passkey2FABegin(pendingToken: string): Promise<{
+  session_id: string
+  publicKey: PublicKeyCredentialRequestOptionsJSON
+}> {
+  const { data } = await client.post(
+    '/auth/2fa/passkey/begin',
+    { pending_token: pendingToken },
+    { _skipErrorToast: true, _skipRefresh: true },
+  )
+  return data
+}
+
+// passkey2FAFinish posts the assertion (body) with the pending token + session id
+// in the query and returns a full session on success.
+export async function passkey2FAFinish(
+  pendingToken: string,
+  sessionId: string,
+  assertion: AuthenticationResponseJSON,
+): Promise<AuthLoginResponse> {
+  const { data } = await client.post<AuthLoginResponse>(
+    `/auth/2fa/passkey/finish?pending_token=${encodeURIComponent(pendingToken)}&session=${encodeURIComponent(sessionId)}`,
+    assertion,
+    { _skipErrorToast: true, _skipRefresh: true },
+  )
+  return data
+}
+
 // refreshTokens trades a refresh JWT for a fresh (access, refresh) pair.
 // Skips the shared axios interceptor's 401 handling via _skipRefresh so a
 // refresh-token rejection cleanly falls through to the logout path
@@ -92,9 +132,10 @@ export async function ssoComplete(): Promise<AuthLoginResponse> {
 
 // requestPasswordReset asks the panel to email a reset to the named account.
 // Always resolves on a 2xx regardless of whether the account exists (the
-// backend deliberately doesn't reveal that). Skips the shared error toast.
-export async function requestPasswordReset(ident: string) {
-  const { data } = await client.post('/auth/forgot-password', { ident }, { _skipErrorToast: true })
+// backend deliberately doesn't reveal that). A captcha proof is included when the
+// admin enabled captcha for the recovery context. Skips the shared error toast.
+export async function requestPasswordReset(ident: string, captcha?: LoginCaptcha) {
+  const { data } = await client.post('/auth/forgot-password', { ident, ...captcha }, { _skipErrorToast: true })
   return data
 }
 
@@ -117,6 +158,9 @@ export async function registerUser(input: {
   email: string
   password: string
   display_name?: string
+  captcha_id?: string
+  captcha_answer?: string
+  captcha_token?: string
 }): Promise<{ ok: boolean; requires_verification: boolean }> {
   const { data } = await client.post('/auth/register', input, { _skipErrorToast: true })
   return data

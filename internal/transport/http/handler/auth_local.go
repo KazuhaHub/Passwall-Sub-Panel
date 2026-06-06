@@ -8,11 +8,14 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/jwtutil"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/log"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/auth"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/captcha"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/login2fa"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/loginguard"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/passkey"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/twofa"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/user"
 )
@@ -29,10 +32,12 @@ type AuthLocalHandler struct {
 	guard      *loginguard.Guard
 	captcha    *captcha.Service
 	twofa      *twofa.Service
+	passkey    *passkey.Service
+	login2fa   *login2fa.Service
 }
 
-func NewAuthLocalHandler(authSvc *auth.Service, userSvc *user.Service, samlSvc *auth.SAMLService, oidcSvc *auth.OIDCService, settings ports.SettingsRepo, authEvents ports.AuthEventRepo, guard *loginguard.Guard, captchaSvc *captcha.Service, twofaSvc *twofa.Service) *AuthLocalHandler {
-	return &AuthLocalHandler{auth: authSvc, user: userSvc, saml: samlSvc, oidc: oidcSvc, settings: settings, authEvents: authEvents, guard: guard, captcha: captchaSvc, twofa: twofaSvc}
+func NewAuthLocalHandler(authSvc *auth.Service, userSvc *user.Service, samlSvc *auth.SAMLService, oidcSvc *auth.OIDCService, settings ports.SettingsRepo, authEvents ports.AuthEventRepo, guard *loginguard.Guard, captchaSvc *captcha.Service, twofaSvc *twofa.Service, passkeySvc *passkey.Service, login2faSvc *login2fa.Service) *AuthLocalHandler {
+	return &AuthLocalHandler{auth: authSvc, user: userSvc, saml: samlSvc, oidc: oidcSvc, settings: settings, authEvents: authEvents, guard: guard, captcha: captchaSvc, twofa: twofaSvc, passkey: passkeySvc, login2fa: login2faSvc}
 }
 
 // localLoginDisallowedForUsers reports whether non-admin accounts should be
@@ -97,6 +102,10 @@ func (h *AuthLocalHandler) Methods(c *gin.Context) {
 		"captcha_provider": captchaProvider,
 		"captcha_site_key": s.CaptchaSiteKey,
 		"captcha_required": s.CaptchaEnabled && s.CaptchaTrigger == "always",
+		// Per-context captcha (v3.7.0): the register / forgot forms each gate their
+		// widget on these (always-on when the admin enables that context).
+		"captcha_register_required": s.CaptchaRegisterEnabled,
+		"captcha_forgot_required":   s.CaptchaForgotEnabled,
 		// Self-service password recovery (v3.7.0): drives the "Forgot password?"
 		// link + which reset form (link vs OTP) the reset page renders.
 		"password_recovery_enabled":  s.PasswordRecoveryEnabled,
@@ -115,13 +124,15 @@ func (h *AuthLocalHandler) Methods(c *gin.Context) {
 	})
 }
 
-// Captcha issues a fresh image-captcha challenge for the login form. Only
-// meaningful for the self-hosted "image" provider; token providers render
-// client-side from the site key (so this returns enabled:false for them and
-// when captcha is off). Shares the login rate limiter.
+// Captcha issues a fresh image-captcha challenge for any form that needs one
+// (login / register / forgot). Only meaningful for the self-hosted "image"
+// provider; token providers render client-side from the site key (so this returns
+// enabled:false for them and when no context uses captcha). Shares the login
+// rate limiter. The image store is shared, so a challenge issued here verifies on
+// any of the three forms.
 func (h *AuthLocalHandler) Captcha(c *gin.Context) {
 	s, err := h.settings.Load(c.Request.Context(), ports.UISettings{})
-	if err != nil || !s.CaptchaEnabled {
+	if err != nil || !(s.CaptchaEnabled || s.CaptchaRegisterEnabled || s.CaptchaForgotEnabled) {
 		c.JSON(http.StatusOK, gin.H{"enabled": false})
 		return
 	}
@@ -354,13 +365,14 @@ func (h *AuthLocalHandler) Login(c *gin.Context) {
 	// first factor. Hand back a short-lived pending token (not a real session) and
 	// require /auth/2fa/verify to complete the login.
 	if u.TOTPEnabled {
-		pending, perr := h.auth.IssuePending(u)
+		pending, perr := h.auth.IssuePending(u, jwtutil.FirstFactorPassword)
 		if perr != nil {
 			recordAuthEvent(c, h.authEvents, domain.AuthMethodLocal, domain.AuthOutcomeFailure, u.ID, u.UPN, "token_error")
 			respondError(c, perr)
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{"status": "2fa_required", "pending_token": pending})
+		methods := availableTwoFAMethods(c.Request.Context(), u, jwtutil.FirstFactorPassword, s, h.passkey)
+		c.JSON(http.StatusOK, gin.H{"status": "2fa_required", "pending_token": pending, "methods": methods})
 		return
 	}
 	access, refresh, err := h.auth.IssueTokens(u)
@@ -379,9 +391,55 @@ func (h *AuthLocalHandler) Login(c *gin.Context) {
 	})
 }
 
-// TwoFAVerify completes a 2FA login: it exchanges a pending token + a TOTP (or
-// recovery) code for a real session. It sits behind the same login rate-limiter
-// as /login so the code can't be brute-forced.
+// resolvePendingUser verifies a 2fa_pending token and returns the live user,
+// re-gating against the account the same way Refresh does — the token lives up to
+// 5 minutes, during which an admin may disable/demote it. On any failure it writes
+// the response and returns ok=false.
+func (h *AuthLocalHandler) resolvePendingUser(c *gin.Context, pendingToken string) (*domain.User, *jwtutil.Claims, bool) {
+	claims, err := h.auth.VerifyPending(pendingToken)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid or expired 2FA session; please log in again"})
+		return nil, nil, false
+	}
+	u, err := h.user.Get(c.Request.Context(), claims.UserID)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid or expired 2FA session; please log in again"})
+		return nil, nil, false
+	}
+	if !u.Enabled && !domain.SelfServiceDisableReason(u.AutoDisabledReason) {
+		recordAuthEvent(c, h.authEvents, domain.AuthMethodLocal, domain.AuthOutcomeFailure, u.ID, u.UPN, "disabled:"+string(u.AutoDisabledReason))
+		c.JSON(http.StatusForbidden, gin.H{"error": disabledReasonMessage(u.AutoDisabledReason), "reason": string(u.AutoDisabledReason)})
+		return nil, nil, false
+	}
+	if u.TokenVersion != claims.TokenVersion {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid or expired 2FA session; please log in again"})
+		return nil, nil, false
+	}
+	return u, claims, true
+}
+
+// completeLogin issues the real session pair for a user who has cleared 2FA.
+func (h *AuthLocalHandler) completeLogin(c *gin.Context, u *domain.User, via string) {
+	access, refresh, err := h.auth.IssueTokens(u)
+	if err != nil {
+		recordAuthEvent(c, h.authEvents, domain.AuthMethodLocal, domain.AuthOutcomeFailure, u.ID, u.UPN, "token_error")
+		respondError(c, err)
+		return
+	}
+	recordAuthEvent(c, h.authEvents, domain.AuthMethodLocal, domain.AuthOutcomeSuccess, u.ID, u.UPN, via)
+	c.JSON(http.StatusOK, loginResponse{
+		AccessToken:  access,
+		RefreshToken: refresh,
+		User: userBrief{
+			ID: u.ID, UPN: u.UPN, DisplayName: u.DisplayName, Role: u.Role,
+		},
+	})
+}
+
+// TwoFAVerify completes a 2FA login: it exchanges a pending token + a code for a
+// real session. The code may be a TOTP, a one-time recovery code, or (if the
+// admin enabled it) an emailed login code — the user picks which on the screen.
+// Behind the same login rate-limiter as /login so codes can't be brute-forced.
 func (h *AuthLocalHandler) TwoFAVerify(c *gin.Context) {
 	var req struct {
 		PendingToken string `json:"pending_token"`
@@ -391,56 +449,117 @@ func (h *AuthLocalHandler) TwoFAVerify(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request"})
 		return
 	}
-	claims, err := h.auth.VerifyPending(req.PendingToken)
-	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid or expired 2FA session; please log in again"})
+	u, _, ok := h.resolvePendingUser(c, req.PendingToken)
+	if !ok {
 		return
 	}
-	u, err := h.user.Get(c.Request.Context(), claims.UserID)
-	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid or expired 2FA session; please log in again"})
-		return
-	}
-	// Re-gate against the live account before completing the login — the pending
-	// token lives up to 5 minutes, during which an admin may disable the account,
-	// reset its password, or change its role. Mirror the Refresh path so /2fa/verify
-	// is not the one login-completion path that mints a session for an account the
-	// system has already revoked. (Disable is the security-relevant case; the
-	// self-service-disable reasons stay loginable, matching Login/Refresh.)
-	if !u.Enabled && !domain.SelfServiceDisableReason(u.AutoDisabledReason) {
-		recordAuthEvent(c, h.authEvents, domain.AuthMethodLocal, domain.AuthOutcomeFailure, u.ID, u.UPN, "disabled:"+string(u.AutoDisabledReason))
-		c.JSON(http.StatusForbidden, gin.H{
-			"error":  disabledReasonMessage(u.AutoDisabledReason),
-			"reason": string(u.AutoDisabledReason),
-		})
-		return
-	}
-	if u.TokenVersion != claims.TokenVersion {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid or expired 2FA session; please log in again"})
-		return
-	}
-	ok, err := h.twofa.VerifyLogin(c.Request.Context(), u.ID, req.Code)
+	verified, err := h.twofa.VerifyLogin(c.Request.Context(), u.ID, req.Code)
 	if err != nil {
 		respondError(c, err)
 		return
 	}
-	if !ok {
+	if !verified && h.login2fa != nil {
+		// Only accept an emailed code while email-as-2FA is enabled, so flipping
+		// the admin toggle off invalidates outstanding codes immediately.
+		if s, serr := h.settings.Load(c.Request.Context(), ports.UISettings{}); serr == nil && s.TwoFAAllowEmail {
+			if emailOK, eerr := h.login2fa.VerifyCode(c.Request.Context(), u.ID, req.Code); eerr == nil && emailOK {
+				verified = true
+			}
+		}
+	}
+	if !verified {
 		recordAuthEvent(c, h.authEvents, domain.AuthMethodLocal, domain.AuthOutcomeFailure, u.ID, u.UPN, "2fa_invalid")
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid 2FA code"})
 		return
 	}
-	access, refresh, err := h.auth.IssueTokens(u)
-	if err != nil {
-		recordAuthEvent(c, h.authEvents, domain.AuthMethodLocal, domain.AuthOutcomeFailure, u.ID, u.UPN, "token_error")
+	h.completeLogin(c, u, "2fa")
+}
+
+// TwoFAEmailSend emails a one-time code for the email-as-2FA alternative. Requires
+// a valid pending token; rate-limited like the other 2FA endpoints.
+func (h *AuthLocalHandler) TwoFAEmailSend(c *gin.Context) {
+	var req struct {
+		PendingToken string `json:"pending_token"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request"})
+		return
+	}
+	u, _, ok := h.resolvePendingUser(c, req.PendingToken)
+	if !ok {
+		return
+	}
+	if h.login2fa == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Email verification is not available"})
+		return
+	}
+	if err := h.login2fa.SendCode(c.Request.Context(), u); err != nil {
 		respondError(c, err)
 		return
 	}
-	recordAuthEvent(c, h.authEvents, domain.AuthMethodLocal, domain.AuthOutcomeSuccess, u.ID, u.UPN, "2fa")
-	c.JSON(http.StatusOK, loginResponse{
-		AccessToken:  access,
-		RefreshToken: refresh,
-		User: userBrief{
-			ID: u.ID, UPN: u.UPN, DisplayName: u.DisplayName, Role: u.Role,
-		},
-	})
+	c.JSON(http.StatusOK, gin.H{"sent": true})
+}
+
+// passkeyTwoFAAllowed enforces the passkey-as-2FA preconditions, writing the
+// response and returning false if not met: passkey feature + admin toggle on, and
+// the first factor was a password (a passkey login can't re-use a passkey as 2FA).
+func (h *AuthLocalHandler) passkeyTwoFAAllowed(c *gin.Context, claims *jwtutil.Claims) bool {
+	if h.passkey == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Passkey verification is not available"})
+		return false
+	}
+	if claims.FirstFactor != jwtutil.FirstFactorPassword {
+		c.JSON(http.StatusForbidden, gin.H{"error": "A passkey can't be the second factor for a passkey login"})
+		return false
+	}
+	s, err := h.settings.Load(c.Request.Context(), ports.UISettings{})
+	if err != nil || !s.TwoFAAllowPasskey || !s.PasskeyEnabled {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Passkey is not an enabled verification method"})
+		return false
+	}
+	return true
+}
+
+// TwoFAPasskeyBegin starts a passkey assertion as the 2FA factor (allow-listed to
+// the pending user's credentials).
+func (h *AuthLocalHandler) TwoFAPasskeyBegin(c *gin.Context) {
+	var req struct {
+		PendingToken string `json:"pending_token"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request"})
+		return
+	}
+	u, claims, ok := h.resolvePendingUser(c, req.PendingToken)
+	if !ok {
+		return
+	}
+	if !h.passkeyTwoFAAllowed(c, claims) {
+		return
+	}
+	opts, sessionID, err := h.passkey.BeginLoginForUser(c.Request.Context(), u.ID)
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"session_id": sessionID, "publicKey": opts})
+}
+
+// TwoFAPasskeyFinish verifies the passkey assertion and completes the login. The
+// assertion JSON is in the body (read by the webauthn library), so the pending
+// token + session id come via the query string.
+func (h *AuthLocalHandler) TwoFAPasskeyFinish(c *gin.Context) {
+	u, claims, ok := h.resolvePendingUser(c, c.Query("pending_token"))
+	if !ok {
+		return
+	}
+	if !h.passkeyTwoFAAllowed(c, claims) {
+		return
+	}
+	if err := h.passkey.FinishLoginForUser(c.Request.Context(), u.ID, c.Query("session"), c.Request); err != nil {
+		recordAuthEvent(c, h.authEvents, domain.AuthMethodPasskey, domain.AuthOutcomeFailure, u.ID, u.UPN, "2fa_passkey_invalid")
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Passkey verification failed"})
+		return
+	}
+	h.completeLogin(c, u, "2fa_passkey")
 }

@@ -184,6 +184,17 @@ export async function disable2FA(code: string) {
   await client.post('/user/me/2fa/disable', { code }, { _skipErrorToast: true })
 }
 
+// regenerate2FARecovery rotates the user's recovery codes (requires a current
+// TOTP or recovery code as step-up proof) and returns the fresh set to show ONCE.
+export async function regenerate2FARecovery(code: string) {
+  const { data } = await client.post<{ recovery_codes: string[] }>(
+    '/user/me/2fa/recovery/regenerate',
+    { code },
+    { _skipErrorToast: true },
+  )
+  return data.recovery_codes
+}
+
 // ---- Passkeys (WebAuthn) self-service ----
 
 export async function beginPasskeyEnroll(): Promise<{

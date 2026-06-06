@@ -9,6 +9,7 @@ package ports
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/config"
@@ -652,6 +653,7 @@ type UISettings struct {
 	// AppTitle is the application/product name shown next to the logo in
 	// the top-left brand area and on login pages. Defaults to "Passwall".
 	AppTitle string `yaml:"app_title" json:"app_title"`
+	// (BrandName, below, derives the human-facing brand string from these.)
 	// IconURL is the browser tab / PWA icon URL. Empty falls back to the
 	// bundled avatar-style icon.
 	IconURL string `yaml:"icon_url" json:"icon_url"`
@@ -772,6 +774,13 @@ type UISettings struct {
 	CaptchaFailThreshold int    `json:"captcha_fail_threshold"`
 	CaptchaSiteKey       string `json:"captcha_site_key"`
 	CaptchaSecretKey     string `json:"captcha_secret_key,omitempty"`
+	// Per-context captcha (v3.7.0): CaptchaEnabled gates the LOGIN form (with the
+	// CaptchaTrigger always/after_failures semantics). These two extend the same
+	// provider/site-key/secret to the public self-service forms, always-on when
+	// true (no per-account failure history exists pre-account). Both default off
+	// → existing installs keep login-only captcha unchanged.
+	CaptchaRegisterEnabled bool `json:"captcha_register_enabled"`
+	CaptchaForgotEnabled   bool `json:"captcha_forgot_enabled"`
 
 	// ---- Login protection: account lockout / failed-attempt backoff (v3.6.5) ----
 	// Complements the captcha (which stops automation): a temporary lock stops
@@ -839,6 +848,19 @@ type UISettings struct {
 	// factor. Both default off; SSO-only accounts can't enroll (no local password).
 	PasskeyEnabled      bool `json:"passkey_enabled"`
 	PasskeyPasswordless bool `json:"passkey_passwordless"`
+
+	// ---- Alternative 2FA verification methods (v3.7.0) ----
+	// At the login 2FA challenge the user always gets TOTP + one-time recovery
+	// codes. These two toggles let the admin additionally offer (opt-in, both
+	// default off):
+	//   TwoFAAllowPasskey — assert an enrolled passkey instead of a TOTP code,
+	//     but ONLY when the first factor was a password (so a passwordless
+	//     passkey login can't satisfy 2FA with the same factor twice).
+	//   TwoFAAllowEmail — receive a one-time code by email. A weaker factor
+	//     (whoever holds the password+inbox passes), hence default off; it is
+	//     rate-limited and the code is single-use with a short TTL.
+	TwoFAAllowPasskey bool `json:"twofa_allow_passkey"`
+	TwoFAAllowEmail   bool `json:"twofa_allow_email"`
 
 	// ---- IP geolocation (access-log region display, offline .mmdb) ----
 	// Resolution is fully offline against a local .mmdb in <ConfigDir>/geoip/;
@@ -973,6 +995,22 @@ type UISettings struct {
 	// triggers; SMTP credentials stay in domain.MailSettings.
 	ExpireBeforeDays     int `yaml:"expire_before_days" json:"expire_before_days"`
 	TrafficRemainPercent int `yaml:"traffic_remain_percent" json:"traffic_remain_percent"`
+}
+
+// BrandName returns the human-facing brand name used on surfaces that show a
+// product identity outside the panel chrome: the TOTP issuer in authenticator
+// apps, the WebAuthn RP display name, and email headers. It prefers SiteTitle
+// (the full brand, e.g. "Kazuha Hub Passwall"), falls back to AppTitle (the
+// short product name), and finally to "Passwall". Centralising this keeps the
+// three call sites from drifting.
+func (s UISettings) BrandName() string {
+	if v := strings.TrimSpace(s.SiteTitle); v != "" {
+		return v
+	}
+	if v := strings.TrimSpace(s.AppTitle); v != "" {
+		return v
+	}
+	return "Passwall"
 }
 
 // SubClientRule defines a subscription client detection rule.

@@ -55,7 +55,7 @@ func loginCtx(body string) (*gin.Context, *httptest.ResponseRecorder) {
 // services are never touched on these paths — nil is safe and keeps the test
 // focused on the guard wiring.
 func newGuardHandler(set ports.UISettings, ev *stubEvents) *AuthLocalHandler {
-	return NewAuthLocalHandler(nil, nil, nil, nil, stubSettings{set}, ev, loginguard.New(ev), captcha.NewService(), nil)
+	return NewAuthLocalHandler(nil, nil, nil, nil, stubSettings{set}, ev, loginguard.New(ev), captcha.NewService(), nil, nil, nil)
 }
 
 func TestLogin_LockedReturns429(t *testing.T) {

@@ -5,9 +5,10 @@ import { useTranslation } from 'react-i18next'
 import type { AxiosError } from 'axios'
 
 import { getAuthMethods, registerUser } from '@/api/auth'
-import type { AuthMethods } from '@/api/types'
+import type { AuthMethods, LoginCaptcha } from '@/api/types'
 import { useSiteStore } from '@/stores/site'
 import BrandLogo from '@/components/BrandLogo'
+import CaptchaWidget from '@/components/CaptchaWidget'
 
 function strongEnough(pw: string): boolean {
   return pw.length >= 8 && /[a-zA-Z]/.test(pw) && /[0-9]/.test(pw)
@@ -28,6 +29,9 @@ export default function RegisterView() {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [doneMsg, setDoneMsg] = useState('')
+  const [captcha, setCaptcha] = useState<LoginCaptcha>({})
+  const [captchaRefresh, setCaptchaRefresh] = useState(0)
+  const needCaptcha = !!methods?.captcha_register_required
 
   useEffect(() => { void site.load() }, [site])
   useEffect(() => { getAuthMethods().then(setMethods).catch(() => {}) }, [])
@@ -39,13 +43,18 @@ export default function RegisterView() {
     if (!strongEnough(pw)) { setError(t('auth:password_too_weak')); return }
     setBusy(true)
     try {
-      const res = await registerUser({ email: email.trim(), password: pw, display_name: displayName.trim() || undefined })
+      const res = await registerUser({ email: email.trim(), password: pw, display_name: displayName.trim() || undefined, ...captcha })
       setDoneMsg(res.requires_verification ? t('auth:register_check_email') : t('auth:register_success'))
     } catch (err) {
-      const e = err as AxiosError<{ error?: string }>
+      const e = err as AxiosError<{ error?: string; captcha_required?: boolean }>
       const status = e.response?.status
-      const msg = e.response?.data?.error || ''
-      if (status === 409 || /exist/i.test(msg)) setError(t('auth:register_email_exists'))
+      const data = e.response?.data
+      const msg = data?.error || ''
+      if (data?.captcha_required) {
+        setError(t('auth:captcha_required', { defaultValue: '请完成验证码' }))
+        setCaptcha({})
+        setCaptchaRefresh(x => x + 1)
+      } else if (status === 409 || /exist/i.test(msg)) setError(t('auth:register_email_exists'))
       else if (/domain/i.test(msg)) setError(t('auth:register_email_domain_not_allowed'))
       else if (status === 400 && /email/i.test(msg)) setError(t('auth:register_invalid_email', { defaultValue: '邮箱格式不正确' }))
       else setError(t('auth:register_error'))
@@ -80,6 +89,10 @@ export default function RegisterView() {
               onChange={e => setPw(e.target.value)} autoComplete="new-password" fullWidth />
             <TextField label={t('auth:register_password_confirm_label')} type="password" value={confirm}
               onChange={e => setConfirm(e.target.value)} autoComplete="new-password" fullWidth />
+            {needCaptcha && (
+              <CaptchaWidget provider={methods?.captcha_provider ?? 'image'}
+                siteKey={methods?.captcha_site_key} refreshKey={captchaRefresh} onChange={setCaptcha} />
+            )}
             {error && <Alert severity="error" sx={{ py: 0 }}>{error}</Alert>}
             {methods?.registration_require_email_verification && (
               <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant }}>

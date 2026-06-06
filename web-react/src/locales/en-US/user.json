@@ -99,7 +99,10 @@
     "disable_hint": "Enter a current code or one of your recovery codes to turn off two-factor authentication.",
     "disable_code_hint": "An authenticator code or a recovery code both work.",
     "disable": "Turn off 2FA",
-    "disabled_toast": "Two-factor authentication disabled"
+    "disabled_toast": "Two-factor authentication disabled",
+    "regenerate": "Regenerate recovery codes",
+    "regenerate_hint": "Enter a current authenticator code or a recovery code to generate a fresh set. Your old recovery codes stop working immediately.",
+    "regen_done_toast": "Recovery codes regenerated"
   },
   "password": {
     "title": "Change password",

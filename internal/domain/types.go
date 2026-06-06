@@ -727,6 +727,9 @@ type AuthToken struct {
 const (
 	AuthTokenPurposePasswordReset = "password_reset"
 	AuthTokenPurposeEmailVerify   = "email_verify"
+	// AuthTokenPurposeLogin2FA is a one-time code emailed to complete the login
+	// 2FA challenge when the admin enables email as an alternative factor.
+	AuthTokenPurposeLogin2FA = "login_2fa"
 )
 
 // PasskeyCredential is one registered WebAuthn credential (a "passkey") bound to
@@ -931,6 +934,7 @@ const (
 	MailReminderCertFailure      MailReminderKind = "cert_failure"
 	MailReminderPasswordReset    MailReminderKind = "password_reset"
 	MailReminderEmailVerify      MailReminderKind = "email_verify"
+	MailReminderLogin2FA         MailReminderKind = "login_2fa"
 )
 
 type MailSettings struct {

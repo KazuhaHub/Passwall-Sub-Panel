@@ -293,6 +293,12 @@ func DefaultTemplates() []*domain.MailTemplate {
 			Subject: "验证你的邮箱地址",
 			Body:    defaultEmailVerifyTemplate(),
 		},
+		{
+			Kind:    domain.MailReminderLogin2FA,
+			Enabled: true,
+			Subject: "你的登录验证码",
+			Body:    defaultLogin2FATemplate(),
+		},
 	}
 }
 
@@ -318,6 +324,29 @@ func defaultEmailVerifyTemplate() string {
       <div style="margin:0 0 8px;font-size:32px;font-weight:700;letter-spacing:.3em;color:#111827;background:#f8fafc;border:1px solid #e5e7eb;border-radius:10px;padding:18px 0;text-align:center;">{{.OTPCode}}</div>
       {{end}}
       <p style="margin:24px 0 0;font-size:12px;line-height:1.6;color:#6b7280;">如果这不是你本人的操作，请忽略此邮件。</p>
+    </div>
+  </div>
+</body>
+</html>`
+}
+
+// defaultLogin2FATemplate renders the one-time login code emailed when the admin
+// enables email as an alternative 2FA factor. Code-only (no link).
+func defaultLogin2FATemplate() string {
+	return `<!doctype html>
+<html>
+<body style="margin:0;background:#f4f6fb;padding:32px 16px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;color:#111827;">
+  <div style="max-width:640px;margin:0 auto;background:#ffffff;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden;">
+    <div style="padding:28px 32px;border-bottom:1px solid #eef2f7;background:#0f172a;">
+      {{if .LogoURL}}<img src="{{.LogoURL}}" alt="{{.SiteTitle}}" style="height:42px;max-width:220px;object-fit:contain;display:block;margin-bottom:18px;">{{end}}
+      <div style="font-size:13px;color:#94a3b8;letter-spacing:.08em;text-transform:uppercase;">{{.SiteTitle}}</div>
+      <h1 style="margin:8px 0 0;font-size:24px;line-height:1.3;color:#ffffff;font-weight:700;">登录验证码</h1>
+    </div>
+    <div style="padding:30px 32px;">
+      <p style="margin:0 0 16px;font-size:15px;line-height:1.7;color:#374151;">{{if .DisplayName}}你好 {{.DisplayName}}，{{else}}你好，{{end}}</p>
+      <p style="margin:0 0 24px;font-size:15px;line-height:1.7;color:#374151;">我们收到了你的登录请求，请在登录页面输入下面的验证码以完成两步验证。此验证码 {{.ExpireMinutes}} 分钟内有效，仅可使用一次。</p>
+      <div style="margin:0 0 8px;font-size:32px;font-weight:700;letter-spacing:.3em;color:#111827;background:#f8fafc;border:1px solid #e5e7eb;border-radius:10px;padding:18px 0;text-align:center;">{{.OTPCode}}</div>
+      <p style="margin:24px 0 0;font-size:12px;line-height:1.6;color:#6b7280;">如果这不是你本人的操作，请立即修改密码——可能有人已经掌握了你的密码。</p>
     </div>
   </div>
 </body>
@@ -514,7 +543,7 @@ func (s *Service) PreviewTemplate(ctx context.Context, tpl *domain.MailTemplate)
 
 func validateTemplateKind(kind domain.MailReminderKind) error {
 	switch kind {
-	case domain.MailReminderExpireBefore, domain.MailReminderExpired, domain.MailReminderTrafficLow, domain.MailReminderTrafficExhausted, domain.MailReminderAccountDisable, domain.MailReminderAccountEnable, domain.MailReminderAnnouncement, domain.MailReminderBlockedClient, domain.MailReminderPasswordReset, domain.MailReminderEmailVerify:
+	case domain.MailReminderExpireBefore, domain.MailReminderExpired, domain.MailReminderTrafficLow, domain.MailReminderTrafficExhausted, domain.MailReminderAccountDisable, domain.MailReminderAccountEnable, domain.MailReminderAnnouncement, domain.MailReminderBlockedClient, domain.MailReminderPasswordReset, domain.MailReminderEmailVerify, domain.MailReminderLogin2FA:
 		return nil
 	default:
 		return fmt.Errorf("%w: invalid template kind", domain.ErrValidation)
@@ -820,15 +849,11 @@ func (s *Service) SendPasswordReset(ctx context.Context, to, displayName, link, 
 		return fmt.Errorf("password_reset template unavailable")
 	}
 	uiCfg, _ := s.settings.Load(ctx, ports.UISettings{})
-	appTitle := uiCfg.AppTitle
-	if appTitle == "" {
-		appTitle = "Passwall"
-	}
 	base := strings.TrimRight(uiCfg.SubBaseURL, "/")
 	data := map[string]any{
 		"DisplayName":   displayName,
 		"Email":         to,
-		"SiteTitle":     appTitle,
+		"SiteTitle":     uiCfg.BrandName(),
 		"LogoURL":       resolveLogoURL(base, uiCfg.LogoURL, uiCfg.LogoURLDark),
 		"PanelURL":      base,
 		"ResetLink":     link,
@@ -877,15 +902,11 @@ func (s *Service) SendEmailVerification(ctx context.Context, to, displayName, li
 		return fmt.Errorf("email_verify template unavailable")
 	}
 	uiCfg, _ := s.settings.Load(ctx, ports.UISettings{})
-	appTitle := uiCfg.AppTitle
-	if appTitle == "" {
-		appTitle = "Passwall"
-	}
 	base := strings.TrimRight(uiCfg.SubBaseURL, "/")
 	data := map[string]any{
 		"DisplayName":   displayName,
 		"Email":         to,
-		"SiteTitle":     appTitle,
+		"SiteTitle":     uiCfg.BrandName(),
 		"LogoURL":       resolveLogoURL(base, uiCfg.LogoURL, uiCfg.LogoURLDark),
 		"PanelURL":      base,
 		"VerifyLink":    link,
@@ -898,6 +919,58 @@ func (s *Service) SendEmailVerification(ctx context.Context, to, displayName, li
 		return err
 	}
 	body, err := renderHTMLTemplate("email_verify_body", tpl.Body, data)
+	if err != nil {
+		return err
+	}
+	return sendSMTP(ctx, settings, to, subject, body)
+}
+
+// SendLogin2FACode delivers a one-time login code for the email-as-2FA factor.
+// Code-only (no link). Returns an error when SMTP isn't configured so the caller
+// can surface it.
+func (s *Service) SendLogin2FACode(ctx context.Context, to, displayName, code string, expireMinutes int) error {
+	settings, err := s.LoadSettings(ctx)
+	if err != nil {
+		return err
+	}
+	if !settings.Enabled {
+		return fmt.Errorf("%w: smtp not configured", domain.ErrValidation)
+	}
+	to = strings.TrimSpace(to)
+	if to == "" {
+		return fmt.Errorf("%w: recipient required", domain.ErrValidation)
+	}
+	var tpl *domain.MailTemplate
+	templates, err := s.ListTemplates(ctx)
+	if err != nil {
+		return err
+	}
+	for _, t := range templates {
+		if t.Kind == domain.MailReminderLogin2FA {
+			tpl = t
+			break
+		}
+	}
+	if tpl == nil {
+		return fmt.Errorf("login_2fa template unavailable")
+	}
+	uiCfg, _ := s.settings.Load(ctx, ports.UISettings{})
+	base := strings.TrimRight(uiCfg.SubBaseURL, "/")
+	data := map[string]any{
+		"DisplayName":   displayName,
+		"Email":         to,
+		"SiteTitle":     uiCfg.BrandName(),
+		"LogoURL":       resolveLogoURL(base, uiCfg.LogoURL, uiCfg.LogoURLDark),
+		"PanelURL":      base,
+		"OTPCode":       code,
+		"ExpireMinutes": expireMinutes,
+		"GeneratedAt":   time.Now().Format("2006-01-02 15:04"),
+	}
+	subject, err := renderTemplate("login_2fa_subject", tpl.Subject, data)
+	if err != nil {
+		return err
+	}
+	body, err := renderHTMLTemplate("login_2fa_body", tpl.Body, data)
 	if err != nil {
 		return err
 	}
@@ -1239,10 +1312,6 @@ func (s *Service) templateData(ctx context.Context, settings domain.MailSettings
 			trafficRemainGB = gb(remain)
 		}
 	}
-	appTitle := uiCfg.AppTitle
-	if appTitle == "" {
-		appTitle = "Passwall"
-	}
 	base := strings.TrimRight(uiCfg.SubBaseURL, "/")
 	panelURL := base
 	expireBeforeDays := uiCfg.ExpireBeforeDays
@@ -1259,7 +1328,7 @@ func (s *Service) templateData(ctx context.Context, settings domain.MailSettings
 		"UPN":                  u.UPN,
 		"DisplayName":          name,
 		"Email":                u.Email,
-		"SiteTitle":            appTitle, // Use AppTitle for email (with logo)
+		"SiteTitle":            uiCfg.BrandName(),
 		"LogoURL":              logoURL,
 		"PanelURL":             panelURL,
 		"GeneratedAt":          time.Now().Format("2006-01-02 15:04"),
@@ -1353,6 +1422,13 @@ func (s *Service) previewTemplateData(ctx context.Context, settings domain.MailS
 		"AnnouncementTitle":    announcementTitle,
 		"AnnouncementBodyHTML": htmltemplate.HTML(announcementBody), // demo HTML — pass through unescaped, mirrors the real announcement path
 		"ClientName":           "Clash 示例客户端",
+		// Auth templates (password_reset / email_verify / login_2fa) render an OTP
+		// code or an action link. Sample the OTP variant for preview; ResetLink /
+		// VerifyLink stay empty so the {{if}} falls to the code branch.
+		"OTPCode":       "123456",
+		"ExpireMinutes": 30,
+		"ResetLink":     "",
+		"VerifyLink":    "",
 	}
 	var configuredLogo, configuredLogoDark, base string
 	if s != nil && s.settings != nil {
@@ -1361,9 +1437,7 @@ func (s *Service) previewTemplateData(ctx context.Context, settings domain.MailS
 			AppTitle:  "Passwall",
 		})
 		if err == nil {
-			if st.AppTitle != "" {
-				data["SiteTitle"] = st.AppTitle
-			}
+			data["SiteTitle"] = st.BrandName()
 			base = strings.TrimRight(st.SubBaseURL, "/")
 			if base != "" {
 				data["PanelURL"] = base
@@ -1395,7 +1469,7 @@ func isHTTPURL(raw string) bool {
 // dark background (#0f172a), so the dark-mode variant is used. The "+" is a
 // literal path character (RFC 3986) — only query strings treat it as a space —
 // so it's sent as-is; Gmail's image proxy fetches the exact path.
-const emailLogoAssetPath = "/images/logo+title-circle-darkmode.png"
+const emailLogoAssetPath = "/images/logo-title-circle-darkmode.png"
 
 // resolveLogoURL produces an <img> src that mail clients can actually fetch.
 // Gmail and most webmail clients block "data:" URIs and cannot resolve

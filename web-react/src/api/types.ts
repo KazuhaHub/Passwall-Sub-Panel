@@ -212,16 +212,24 @@ export interface AuthLoginResponse {
   }
 }
 
-// AuthLoginResult is what /auth/local/login returns: either a full session
-// (AuthLoginResponse) or a 2FA challenge ({status:'2fa_required', pending_token})
-// that must be completed via /auth/2fa/verify.
-export type AuthLoginResult =
-  | AuthLoginResponse
-  | { status: '2fa_required'; pending_token: string }
+// TwoFAMethod identifies an alternative verification method offered at the login
+// 2FA challenge. The server returns the allowed set; the UI renders the "use
+// another method" picker from it.
+export type TwoFAMethod = 'totp' | 'recovery' | 'passkey' | 'email'
 
-export function isTwoFAChallenge(
-  r: AuthLoginResult,
-): r is { status: '2fa_required'; pending_token: string } {
+export interface TwoFAChallenge {
+  status: '2fa_required'
+  pending_token: string
+  // The verification methods the server will accept for THIS challenge (always
+  // includes totp + recovery; passkey/email are admin opt-in and context-gated).
+  methods?: TwoFAMethod[]
+}
+
+// AuthLoginResult is what /auth/local/login returns: either a full session
+// (AuthLoginResponse) or a 2FA challenge that must be completed via /auth/2fa/*.
+export type AuthLoginResult = AuthLoginResponse | TwoFAChallenge
+
+export function isTwoFAChallenge(r: AuthLoginResult): r is TwoFAChallenge {
   return (r as { status?: string }).status === '2fa_required'
 }
 
@@ -253,6 +261,10 @@ export interface AuthMethods {
   captcha_provider?: CaptchaProvider
   captcha_site_key?: string
   captcha_required?: boolean
+  // Per-context captcha (v3.7.0): the register / forgot forms gate their widget
+  // on these (always-on when the admin enables that context).
+  captcha_register_required?: boolean
+  captcha_forgot_required?: boolean
   // Self-service password recovery (v3.7.0). When enabled, the login page shows
   // a "Forgot password?" link; delivery decides whether the reset page expects
   // a token (from the email link) or an OTP code the user types.

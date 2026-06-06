@@ -14,6 +14,9 @@ import {
   FormControlLabel,
   IconButton,
   InputAdornment,
+  List,
+  ListItemButton,
+  ListItemText,
   Menu,
   MenuItem,
   Popover,
@@ -385,35 +388,50 @@ export default function SettingsView() {
           </Section>
 
           <Section title={t('settings.general.section_login_security', { defaultValue: '登录安全' })} md={md}>
-            {/* CAPTCHA */}
-            <FormControlLabel label={t('settings.general.captcha_enabled', { defaultValue: '启用登录验证码' })}
-              control={<Switch checked={settings.captcha_enabled}
-                onChange={(_, c) => patch('captcha_enabled', c)} />}
-              sx={{ ml: 0, '& .MuiFormControlLabel-label': { ml: 1.5 } }} />
-            {settings.captcha_enabled && (
+            {/* CAPTCHA — per-context (login / register / forgot). The provider +
+                keys are shared; each context toggles independently. */}
+            <Typography variant="body2" sx={{ fontWeight: 500, mb: 0.5 }}>
+              {t('settings.general.captcha_contexts', { defaultValue: '验证码适用范围' })}
+            </Typography>
+            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, mb: 1 }}>
+              <FormControlLabel label={t('settings.general.captcha_ctx_login', { defaultValue: '登录' })}
+                control={<Switch checked={settings.captcha_enabled} onChange={(_, c) => patch('captcha_enabled', c)} />}
+                sx={{ ml: 0, '& .MuiFormControlLabel-label': { ml: 0.75 } }} />
+              <FormControlLabel label={t('settings.general.captcha_ctx_register', { defaultValue: '注册' })}
+                control={<Switch checked={settings.captcha_register_enabled} onChange={(_, c) => patch('captcha_register_enabled', c)} />}
+                sx={{ ml: 0, '& .MuiFormControlLabel-label': { ml: 0.75 } }} />
+              <FormControlLabel label={t('settings.general.captcha_ctx_forgot', { defaultValue: '找回密码' })}
+                control={<Switch checked={settings.captcha_forgot_enabled} onChange={(_, c) => patch('captcha_forgot_enabled', c)} />}
+                sx={{ ml: 0, '& .MuiFormControlLabel-label': { ml: 0.75 } }} />
+            </Box>
+            {(settings.captcha_enabled || settings.captcha_register_enabled || settings.captcha_forgot_enabled) && (
               <>
-                <Pair>
-                  <TextField select fullWidth size="small"
-                    label={t('settings.general.captcha_provider', { defaultValue: '验证码提供方' })}
-                    value={settings.captcha_provider || 'image'}
-                    onChange={e => patch('captcha_provider', e.target.value as UISettings['captcha_provider'])}>
-                    <MenuItem value="image">{t('settings.general.captcha_provider_image', { defaultValue: '内置图形验证码（推荐，无外部依赖）' })}</MenuItem>
-                    <MenuItem value="turnstile">Cloudflare Turnstile</MenuItem>
-                    <MenuItem value="recaptcha">Google reCAPTCHA v2</MenuItem>
-                    <MenuItem value="hcaptcha">hCaptcha</MenuItem>
-                  </TextField>
-                  <TextField select fullWidth size="small"
-                    label={t('settings.general.captcha_trigger', { defaultValue: '触发时机' })}
-                    value={settings.captcha_trigger || 'after_failures'}
-                    onChange={e => patch('captcha_trigger', e.target.value as UISettings['captcha_trigger'])}>
-                    <MenuItem value="after_failures">{t('settings.general.captcha_trigger_after_failures', { defaultValue: '失败若干次后' })}</MenuItem>
-                    <MenuItem value="always">{t('settings.general.captcha_trigger_always', { defaultValue: '始终显示' })}</MenuItem>
-                  </TextField>
-                </Pair>
-                {settings.captcha_trigger !== 'always' && (
-                  <NumField label={t('settings.general.captcha_fail_threshold', { defaultValue: '触发阈值（失败次数）' })}
-                    value={settings.captcha_fail_threshold}
-                    onChange={v => patch('captcha_fail_threshold', v)} />
+                <TextField select fullWidth size="small"
+                  label={t('settings.general.captcha_provider', { defaultValue: '验证码提供方' })}
+                  value={settings.captcha_provider || 'image'}
+                  onChange={e => patch('captcha_provider', e.target.value as UISettings['captcha_provider'])}>
+                  <MenuItem value="image">{t('settings.general.captcha_provider_image', { defaultValue: '内置图形验证码（推荐，无外部依赖）' })}</MenuItem>
+                  <MenuItem value="turnstile">Cloudflare Turnstile</MenuItem>
+                  <MenuItem value="recaptcha">Google reCAPTCHA v2</MenuItem>
+                  <MenuItem value="hcaptcha">hCaptcha</MenuItem>
+                </TextField>
+                {/* Trigger / threshold are login-only (register & forgot are
+                    always-on when enabled — no pre-account failure history). */}
+                {settings.captcha_enabled && (
+                  <>
+                    <TextField select fullWidth size="small"
+                      label={t('settings.general.captcha_trigger', { defaultValue: '登录触发时机' })}
+                      value={settings.captcha_trigger || 'after_failures'}
+                      onChange={e => patch('captcha_trigger', e.target.value as UISettings['captcha_trigger'])}>
+                      <MenuItem value="after_failures">{t('settings.general.captcha_trigger_after_failures', { defaultValue: '失败若干次后' })}</MenuItem>
+                      <MenuItem value="always">{t('settings.general.captcha_trigger_always', { defaultValue: '始终显示' })}</MenuItem>
+                    </TextField>
+                    {settings.captcha_trigger !== 'always' && (
+                      <NumField label={t('settings.general.captcha_fail_threshold', { defaultValue: '触发阈值（失败次数）' })}
+                        value={settings.captcha_fail_threshold}
+                        onChange={v => patch('captcha_fail_threshold', v)} />
+                    )}
+                  </>
                 )}
                 {settings.captcha_provider && settings.captcha_provider !== 'image' && (
                   <>
@@ -545,6 +563,22 @@ export default function SettingsView() {
             <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant, mt: -1 }}>
               {t('settings.general.totp_hint', { defaultValue: '允许有本地密码的账号在「我的账号」里用身份验证器 App 开启两步验证。关闭仅阻止新开启，不会移除已启用账号的两步验证。SSO 账号不受影响。' })}
             </Typography>
+            {settings.totp_enabled && (
+              <Box sx={{ mt: 0.5 }}>
+                <Typography variant="body2" sx={{ fontWeight: 500 }}>
+                  {t('settings.general.twofa_methods_title', { defaultValue: '两步验证的备选方式' })}
+                </Typography>
+                <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant, mb: 0.5 }}>
+                  {t('settings.general.twofa_methods_hint', { defaultValue: '验证器代码和一次性备用码始终可用。可额外允许用户在登录挑战时改用：' })}
+                </Typography>
+                <FormControlLabel label={t('settings.general.twofa_allow_passkey', { defaultValue: '通行密钥验证（仅密码登录时可用）' })}
+                  control={<Switch checked={settings.twofa_allow_passkey} onChange={(_, c) => patch('twofa_allow_passkey', c)} />}
+                  sx={{ ml: 0, display: 'flex', '& .MuiFormControlLabel-label': { ml: 1.5 } }} />
+                <FormControlLabel label={t('settings.general.twofa_allow_email', { defaultValue: '邮箱一次性验证码（较弱，需配置 SMTP）' })}
+                  control={<Switch checked={settings.twofa_allow_email} onChange={(_, c) => patch('twofa_allow_email', c)} />}
+                  sx={{ ml: 0, display: 'flex', '& .MuiFormControlLabel-label': { ml: 1.5 } }} />
+              </Box>
+            )}
             <Divider sx={{ my: 0.5, borderColor: md.outlineVariant }} />
             {/* Passkeys / WebAuthn */}
             <FormControlLabel label={t('settings.general.passkey_enabled', { defaultValue: '允许通行密钥（Passkey）' })}
@@ -1022,7 +1056,7 @@ function MailTab() {
   const [testTo, setTestTo] = useState('')
   const [testBusy, setTestBusy] = useState(false)
   const [activeTpl, setActiveTpl] = useTabParam<MailReminderKind>('tpl', 'expire_before',
-    ['expire_before', 'expired', 'traffic_low', 'traffic_exhausted', 'account_disabled', 'account_enabled', 'announcement', 'blocked_client'])
+    ['expire_before', 'expired', 'traffic_low', 'traffic_exhausted', 'account_disabled', 'account_enabled', 'announcement', 'blocked_client', 'password_reset', 'email_verify', 'login_2fa'])
   const [tplBusy, setTplBusy] = useState(false)
   const [previewBusy, setPreviewBusy] = useState(false)
   const [preview, setPreview] = useState<{ subject: string; body: string; kind: MailReminderKind } | null>(null)
@@ -1133,7 +1167,12 @@ function MailTab() {
     return <Box sx={{ display: 'grid', placeItems: 'center', py: 6 }}><CircularProgress /></Box>
   }
 
-  const TPL_KINDS: MailReminderKind[] = ['expire_before', 'expired', 'traffic_low', 'traffic_exhausted', 'account_disabled', 'account_enabled', 'announcement', 'blocked_client']
+  // Templates grouped for the master-detail list (scales better than the old
+  // overflowing horizontal tab strip as the count grows).
+  const TPL_GROUPS: { labelKey: string; kinds: MailReminderKind[] }[] = [
+    { labelKey: 'group_ops', kinds: ['expire_before', 'expired', 'traffic_low', 'traffic_exhausted', 'account_disabled', 'account_enabled', 'announcement', 'blocked_client'] },
+    { labelKey: 'group_account', kinds: ['password_reset', 'email_verify', 'login_2fa'] },
+  ]
   // Fall back to a synthesized empty template if the backend response doesn't
   // include the active kind (e.g., user is on a pre-update binary that doesn't
   // know about `traffic_exhausted` yet). Without this, switching to such a tab
@@ -1269,11 +1308,33 @@ function MailTab() {
       <Card sx={{ p: 3, bgcolor: md.surfaceContainerLow, border: `1px solid ${md.outlineVariant}` }}>
         <Typography sx={{ fontWeight: 500, mb: 1.5 }}>{t('settings.mail.section_templates')}</Typography>
         <Divider sx={{ mb: 2 }} />
-        <Tabs value={activeTpl} onChange={(_, v) => setActiveTpl(v as MailReminderKind)}
-          variant="scrollable" scrollButtons="auto"
-          sx={{ borderBottom: `1px solid ${md.outlineVariant}`, mb: 2 }}>
-          {TPL_KINDS.map(k => <Tab key={k} value={k} label={t(`settings.mail.kind.${k}`)} />)}
-        </Tabs>
+        <Box sx={{ display: 'flex', gap: 2, flexDirection: { xs: 'column', md: 'row' }, alignItems: 'flex-start' }}>
+          {/* Master list: templates grouped by purpose; scales as the set grows. */}
+          <Box sx={{
+            width: { xs: '100%', md: 220 }, flexShrink: 0,
+            border: { md: `1px solid ${md.outlineVariant}` }, borderRadius: 2,
+            p: { xs: 0, md: 1 }, maxHeight: { md: 460 }, overflowY: { md: 'auto' },
+          }}>
+            {TPL_GROUPS.map(g => (
+              <Box key={g.labelKey} sx={{ mb: 1 }}>
+                <Typography variant="caption" sx={{ px: 1.5, py: 0.5, display: 'block', color: md.onSurfaceVariant, fontWeight: 600 }}>
+                  {t(`settings.mail.${g.labelKey}`, { defaultValue: g.labelKey === 'group_account' ? '账号安全' : '运营提醒' })}
+                </Typography>
+                <List dense disablePadding>
+                  {g.kinds.map(k => (
+                    <ListItemButton key={k} selected={activeTpl === k}
+                      onClick={() => setActiveTpl(k)} sx={{ borderRadius: 1.5, py: 0.5 }}>
+                      <ListItemText primary={t(`settings.mail.kind.${k}`)}
+                        primaryTypographyProps={{ fontSize: 14 }} />
+                    </ListItemButton>
+                  ))}
+                </List>
+              </Box>
+            ))}
+          </Box>
+
+          {/* Detail: the selected template's editor. */}
+          <Box sx={{ flex: 1, minWidth: 0, width: '100%' }}>
         {tplMissing && (
           <Box sx={{
             mb: 2, p: 1.5, borderRadius: 1.5,
@@ -1327,6 +1388,8 @@ function MailTab() {
             </Box>
           </Box>
         )}
+          </Box>
+        </Box>
       </Card>
 
       {/* Template variable cheat sheet. Triggered by the "可用变量" button
@@ -1367,6 +1430,10 @@ function MailTab() {
             ['{{.SiteTitle}}', t('settings.mail.tpl_vars.site_title', { defaultValue: '站点名称（用于邮件头）' })],
             ['{{.LogoURL}}', t('settings.mail.tpl_vars.logo_url', { defaultValue: '站点 Logo（自动 dark 兜底）' })],
             ['{{.GeneratedAt}}', t('settings.mail.tpl_vars.generated_at', { defaultValue: '邮件生成时间' })],
+            ['{{.OTPCode}}', t('settings.mail.tpl_vars.otp_code', { defaultValue: '一次性验证码（找回/验证/登录验证码模板）' })],
+            ['{{.ResetLink}}', t('settings.mail.tpl_vars.reset_link', { defaultValue: '重置密码链接（仅重置密码模板·link 投递）' })],
+            ['{{.VerifyLink}}', t('settings.mail.tpl_vars.verify_link', { defaultValue: '验证邮箱链接（仅验证邮箱模板·link 投递）' })],
+            ['{{.ExpireMinutes}}', t('settings.mail.tpl_vars.expire_minutes', { defaultValue: '链接/验证码有效分钟数' })],
           ].map(([code, desc]) => (
             <React.Fragment key={code}>
               <Box component="code" sx={{

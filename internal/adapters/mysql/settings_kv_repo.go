@@ -229,6 +229,8 @@ func settingDescriptors(s *ports.UISettings) []settingDescriptor {
 		intField("security", "captcha_fail_threshold", &s.CaptchaFailThreshold),
 		strField("security", "captcha_site_key", &s.CaptchaSiteKey),
 		encStrField("security", "captcha_secret_key", &s.CaptchaSecretKey), // encrypted at rest
+		boolField("security", "captcha_register_enabled", &s.CaptchaRegisterEnabled),
+		boolField("security", "captcha_forgot_enabled", &s.CaptchaForgotEnabled),
 		// security --- login protection: account lockout (v3.7.0)
 		boolField("security", "lockout_enabled", &s.LockoutEnabled),
 		intField("security", "lockout_threshold", &s.LockoutThreshold),
@@ -251,6 +253,9 @@ func settingDescriptors(s *ports.UISettings) []settingDescriptor {
 		// security --- passkeys / WebAuthn (v3.7.0)
 		boolField("security", "passkey_enabled", &s.PasskeyEnabled),
 		boolField("security", "passkey_passwordless", &s.PasskeyPasswordless),
+		// security --- alternative 2FA verification methods (v3.7.0)
+		boolField("security", "twofa_allow_passkey", &s.TwoFAAllowPasskey),
+		boolField("security", "twofa_allow_email", &s.TwoFAAllowEmail),
 
 		// runtime --- cron / performance / tz / global toggles
 		strField("runtime", "timezone", &s.Timezone),

@@ -1,8 +1,8 @@
 import { create } from 'zustand'
 import { getAuthMethods } from '@/api/auth'
 
-const DEFAULT_LOGO_LIGHT = '/images/logo+title-circle.png'
-const DEFAULT_LOGO_DARK = '/images/logo+title-circle-darkmode.png'
+const DEFAULT_LOGO_LIGHT = '/images/logo-title-circle.png'
+const DEFAULT_LOGO_DARK = '/images/logo-title-circle-darkmode.png'
 const DEFAULT_ICON = '/images/HeadPicture.png'
 
 interface SiteState {

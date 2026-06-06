@@ -5,6 +5,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/captcha"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/recovery"
 )
 
@@ -12,14 +14,22 @@ import (
 // endpoints. Both sit behind the login rate limiter (wired in the router).
 type AuthRecoveryHandler struct {
 	recovery *recovery.Service
+	settings ports.SettingsRepo
+	captcha  *captcha.Service
 }
 
-func NewAuthRecoveryHandler(r *recovery.Service) *AuthRecoveryHandler {
-	return &AuthRecoveryHandler{recovery: r}
+func NewAuthRecoveryHandler(r *recovery.Service, settings ports.SettingsRepo, captchaSvc *captcha.Service) *AuthRecoveryHandler {
+	return &AuthRecoveryHandler{recovery: r, settings: settings, captcha: captchaSvc}
 }
 
 type forgotPasswordRequest struct {
 	Ident string `json:"ident" binding:"required"`
+	// Optional captcha proof, checked when the admin enabled captcha for the
+	// password-recovery context. A captcha failure (400) reveals nothing about
+	// account existence — it's purely about the captcha.
+	CaptchaID     string `json:"captcha_id"`
+	CaptchaAnswer string `json:"captcha_answer"`
+	CaptchaToken  string `json:"captcha_token"`
 }
 
 // Forgot requests a reset email for the named account. It ALWAYS responds 200
@@ -30,6 +40,10 @@ func (h *AuthRecoveryHandler) Forgot(c *gin.Context) {
 	var req forgotPasswordRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	s, _ := h.settings.Load(c.Request.Context(), ports.UISettings{})
+	if !requireCaptcha(c, h.captcha, s, s.CaptchaForgotEnabled, req.CaptchaID, req.CaptchaAnswer, req.CaptchaToken) {
 		return
 	}
 	// Errors are swallowed inside RequestReset (logged there); the handler can't

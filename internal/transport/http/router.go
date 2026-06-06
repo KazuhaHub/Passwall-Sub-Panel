@@ -21,6 +21,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/cert"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/geo"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/group"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/login2fa"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/loginguard"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/mailer"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/node"
@@ -154,9 +155,17 @@ func NewRouter(d Deps) *gin.Engine {
 	// the profile-page enrollment/management endpoints.
 	passkeySvc := passkey.New(passkey.Deps{Creds: d.Repos.WebAuthn, Users: d.Repos.User, Settings: d.Repos.Settings})
 
+	// Email-as-2FA service — emails a one-time login code as an alternative 2FA
+	// factor (admin opt-in). Reuses the auth_tokens OTP machinery.
+	login2faSvc := login2fa.New(login2fa.Deps{Tokens: d.Repos.AuthToken, Mail: d.Mail, Settings: d.Repos.Settings})
+
+	// One shared captcha service: the image-challenge store must be the same
+	// instance that issues (/auth/captcha) and verifies (login/register/forgot).
+	captchaSvc := captcha.NewService()
+
 	// Auth endpoints
 	authLocal := handler.NewAuthLocalHandler(d.Auth, d.User, d.SAML, d.OIDC, d.Repos.Settings, d.Repos.AuthEvent,
-		loginguard.New(d.Repos.AuthEvent), captcha.NewService(), twofaSvc)
+		loginguard.New(d.Repos.AuthEvent), captchaSvc, twofaSvc, passkeySvc, login2faSvc)
 	loginLimiter := middleware.NewPerIPLimiter(d.LoginPerIPPerMin, time.Minute)
 	loginLimiter.SetLimitFunc(newSettingsIntCache(d.Repos.Settings, d.LoginPerIPPerMin, func(s ports.UISettings) int { return s.LoginPerIPPerMin }).get)
 	authGroup := g.Group("/api/auth")
@@ -169,6 +178,11 @@ func NewRouter(d Deps) *gin.Engine {
 		// Second factor of a 2FA login — exchanges the pending token + code for a
 		// real session. Behind the login limiter so the code can't be brute-forced.
 		authGroup.POST("/2fa/verify", loginLimiter.Handler(), authLocal.TwoFAVerify)
+		// Alternative 2FA verification methods (v3.7.0): email one-time code and
+		// passkey assertion. All share the login limiter.
+		authGroup.POST("/2fa/email/send", loginLimiter.Handler(), authLocal.TwoFAEmailSend)
+		authGroup.POST("/2fa/passkey/begin", loginLimiter.Handler(), authLocal.TwoFAPasskeyBegin)
+		authGroup.POST("/2fa/passkey/finish", loginLimiter.Handler(), authLocal.TwoFAPasskeyFinish)
 		// Usernameless (discoverable) passkey login. Behind the login limiter so
 		// /begin isn't a free challenge-churn / DoS surface.
 		passkeyAuth := handler.NewAuthPasskeyHandler(passkeySvc, d.Auth, d.Repos.Settings, d.Repos.AuthEvent)
@@ -186,7 +200,7 @@ func NewRouter(d Deps) *gin.Engine {
 			Settings:    d.Repos.Settings,
 			SetPassword: d.User.SetPassword,
 		})
-		recoveryH := handler.NewAuthRecoveryHandler(recoverySvc)
+		recoveryH := handler.NewAuthRecoveryHandler(recoverySvc, d.Repos.Settings, captchaSvc)
 		authGroup.POST("/forgot-password", loginLimiter.Handler(), recoveryH.Forgot)
 		authGroup.POST("/reset-password", loginLimiter.Handler(), recoveryH.Reset)
 		// Self-service registration (v3.7.0). Email-verify reuses the auth_tokens
@@ -198,7 +212,7 @@ func NewRouter(d Deps) *gin.Engine {
 			Mail:     d.Mail,
 			Settings: d.Repos.Settings,
 		})
-		registerH := handler.NewAuthRegisterHandler(registerSvc)
+		registerH := handler.NewAuthRegisterHandler(registerSvc, d.Repos.Settings, captchaSvc)
 		authGroup.POST("/register", loginLimiter.Handler(), registerH.Register)
 		authGroup.POST("/verify-email", loginLimiter.Handler(), registerH.VerifyEmail)
 		// SAML endpoints stay registered even when SSO is currently
@@ -238,6 +252,9 @@ func NewRouter(d Deps) *gin.Engine {
 		userGroup.POST("/2fa/begin", userMe.Begin2FA)
 		userGroup.POST("/2fa/enable", userMe.Enable2FA)
 		userGroup.POST("/2fa/disable", userMe.Disable2FA)
+		// Recovery-code rotation is step-up gated (current code as proof) and
+		// rate-limited like other credential endpoints.
+		userGroup.POST("/2fa/recovery/regenerate", loginLimiter.Handler(), userMe.RegenerateRecovery2FA)
 		// Passkey (WebAuthn) self-service enrollment / management.
 		userGroup.GET("/passkeys", userMe.ListPasskeys)
 		userGroup.POST("/passkeys/begin", userMe.BeginPasskeyEnroll)
@@ -281,6 +298,7 @@ func NewRouter(d Deps) *gin.Engine {
 		staffGroup.POST("/users/:id/reset-password", users.ResetPassword)
 		staffGroup.POST("/users/:id/reset-emergency-usage", users.ResetEmergencyUsage)
 		staffGroup.POST("/users/:id/reset-2fa", users.Reset2FA)
+		staffGroup.POST("/users/:id/2fa/recovery/regenerate", users.RegenerateUser2FARecovery)
 		// Passkey management (v3.7.0). List is read-only metadata; the revoke
 		// paths are break-glass for a lost/compromised authenticator.
 		staffGroup.GET("/users/:id/passkeys", users.ListUserPasskeys)

@@ -4,9 +4,11 @@ import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import { Link as RouterLink, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 
-import { requestPasswordReset } from '@/api/auth'
+import { getAuthMethods, requestPasswordReset } from '@/api/auth'
+import type { AuthMethods, LoginCaptcha } from '@/api/types'
 import { useSiteStore } from '@/stores/site'
 import BrandLogo from '@/components/BrandLogo'
+import CaptchaWidget from '@/components/CaptchaWidget'
 
 export default function ForgotPasswordView() {
   const theme = useTheme()
@@ -15,24 +17,40 @@ export default function ForgotPasswordView() {
   const navigate = useNavigate()
   const site = useSiteStore()
 
+  const [methods, setMethods] = useState<AuthMethods | null>(null)
   const [ident, setIdent] = useState('')
   const [busy, setBusy] = useState(false)
   const [done, setDone] = useState(false)
+  const [error, setError] = useState('')
+  const [captcha, setCaptcha] = useState<LoginCaptcha>({})
+  const [captchaRefresh, setCaptchaRefresh] = useState(0)
+  const needCaptcha = !!methods?.captcha_forgot_required
 
   useEffect(() => { void site.load() }, [site])
+  useEffect(() => { getAuthMethods().then(setMethods).catch(() => {}) }, [])
 
   async function submit(e: FormEvent) {
     e.preventDefault()
     if (!ident.trim() || busy) return
     setBusy(true)
+    setError('')
     try {
-      await requestPasswordReset(ident.trim())
-    } catch {
-      // The backend always 200s (no enumeration); a transport error still
-      // shouldn't reveal anything, so we show the same success state.
+      await requestPasswordReset(ident.trim(), captcha)
+      setDone(true)
+    } catch (err) {
+      // A captcha failure is about the captcha, not account existence, so it's
+      // safe to surface (and we must, or the user is silently stuck). Any other
+      // error stays generic — the backend 200s for real requests (no enumeration).
+      const e = err as { response?: { status?: number; data?: { captcha_required?: boolean } } }
+      if (e.response?.data?.captcha_required) {
+        setError(t('auth:captcha_required', { defaultValue: '请完成验证码' }))
+        setCaptcha({})
+        setCaptchaRefresh(x => x + 1)
+      } else {
+        setDone(true)
+      }
     } finally {
       setBusy(false)
-      setDone(true)
     }
   }
 
@@ -53,6 +71,11 @@ export default function ForgotPasswordView() {
           <Box component="form" onSubmit={submit} sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
             <TextField label={t('auth:forgot_password_upn_label')} value={ident}
               onChange={e => setIdent(e.target.value)} autoComplete="username" autoFocus fullWidth />
+            {needCaptcha && (
+              <CaptchaWidget provider={methods?.captcha_provider ?? 'image'}
+                siteKey={methods?.captcha_site_key} refreshKey={captchaRefresh} onChange={setCaptcha} />
+            )}
+            {error && <Alert severity="error" sx={{ py: 0 }}>{error}</Alert>}
             <Button type="submit" variant="contained" fullWidth size="large" disabled={busy || !ident.trim()}
               startIcon={busy ? <CircularProgress size={16} color="inherit" /> : undefined}>
               {t('auth:forgot_password_submit')}

@@ -49,7 +49,10 @@ func (m *memStore) GetByID(context.Context, int64) (*domain.User, error) {
 type stubSettings struct{ on bool }
 
 func (s stubSettings) Load(context.Context, ports.UISettings) (ports.UISettings, error) {
-	return ports.UISettings{TOTPEnabled: s.on, AppTitle: "Passwall"}, nil
+	// SiteTitle is the full brand; AppTitle is the short product name. The TOTP
+	// issuer must prefer SiteTitle (BrandName) so authenticator apps show the
+	// site name, not "Passwall".
+	return ports.UISettings{TOTPEnabled: s.on, SiteTitle: "Kazuha Hub Passwall", AppTitle: "Passwall"}, nil
 }
 
 func newSvc(store *memStore, on bool, validCode string) *Service {
@@ -75,6 +78,27 @@ func TestBegin_AlreadyEnabled(t *testing.T) {
 	st := &memStore{user: &domain.User{ID: 1, UPN: "u@x", PasswordHash: "bcrypt"}, enabled: true, secret: "S"}
 	if _, _, err := newSvc(st, true, "111111").Begin(context.Background(), 1); err == nil {
 		t.Fatal("Begin must error when 2FA is already enabled")
+	}
+}
+
+func TestBegin_IssuerUsesBrandName(t *testing.T) {
+	st := &memStore{user: &domain.User{ID: 1, UPN: "u@x", PasswordHash: "bcrypt"}}
+	var gotIssuer string
+	svc := New(Deps{
+		Users:    st,
+		Settings: stubSettings{on: true},
+		Validate: func(string, string) bool { return true },
+		GenSecret: func(issuer, _ string) (string, string, error) {
+			gotIssuer = issuer
+			return "SECRET32", "otpauth://x", nil
+		},
+		GenRecovery: func() ([]string, error) { return nil, nil },
+	})
+	if _, _, err := svc.Begin(context.Background(), 1); err != nil {
+		t.Fatal(err)
+	}
+	if gotIssuer != "Kazuha Hub Passwall" {
+		t.Fatalf("issuer = %q, want the SiteTitle-derived brand name", gotIssuer)
 	}
 }
 
@@ -188,5 +212,68 @@ func TestAdminReset_NoCode(t *testing.T) {
 	}
 	if !st.cleared {
 		t.Fatal("admin reset must clear TOTP unconditionally")
+	}
+}
+
+func TestRegenerateRecovery_RequiresEnabled(t *testing.T) {
+	st := &memStore{user: &domain.User{ID: 1, UPN: "u@x"}, enabled: false, secret: "S"}
+	if _, err := newSvc(st, true, "111111").RegenerateRecovery(context.Background(), 1, "111111"); err == nil {
+		t.Fatal("RegenerateRecovery must error when 2FA is not enabled")
+	}
+}
+
+func TestRegenerateRecovery_BadProof(t *testing.T) {
+	st := &memStore{user: &domain.User{ID: 1, UPN: "u@x"}, enabled: true, secret: "S",
+		recovery: []string{hashRecovery("OLD1-OLD1")}}
+	before := st.setCalls
+	if _, err := newSvc(st, true, "111111").RegenerateRecovery(context.Background(), 1, "wrong"); !errors.Is(err, domain.ErrUnauthorized) {
+		t.Fatalf("bad proof must be ErrUnauthorized, got %v", err)
+	}
+	if st.setCalls != before {
+		t.Fatal("bad proof must not rewrite recovery codes")
+	}
+}
+
+func TestRegenerateRecovery_SuccessWithTOTP(t *testing.T) {
+	st := &memStore{user: &domain.User{ID: 1, UPN: "u@x"}, enabled: true, secret: "S"}
+	codes, err := newSvc(st, true, "111111").RegenerateRecovery(context.Background(), 1, "111111")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(codes) != 2 {
+		t.Fatalf("want 2 fresh codes, got %d", len(codes))
+	}
+	if !st.enabled || st.secret != "S" {
+		t.Fatal("regeneration must preserve secret + enabled")
+	}
+	if len(st.recovery) != 2 || st.recovery[0] != hashRecovery(codes[0]) {
+		t.Fatal("store must hold hashes of the new plaintext codes")
+	}
+}
+
+func TestRegenerateRecovery_SuccessWithRecoveryCode(t *testing.T) {
+	st := &memStore{user: &domain.User{ID: 1, UPN: "u@x"}, enabled: true, secret: "S",
+		recovery: []string{hashRecovery("ZZZZ-YYYY")}}
+	codes, err := newSvc(st, true, "111111").RegenerateRecovery(context.Background(), 1, "zzzz-yyyy")
+	if err != nil {
+		t.Fatalf("a valid recovery code must prove possession: %v", err)
+	}
+	if len(codes) != 2 {
+		t.Fatalf("want 2 fresh codes, got %d", len(codes))
+	}
+}
+
+func TestAdminRegenerateRecovery(t *testing.T) {
+	st := &memStore{user: &domain.User{ID: 1, UPN: "u@x"}, enabled: true, secret: "S"}
+	codes, err := newSvc(st, true, "111111").AdminRegenerateRecovery(context.Background(), 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(codes) != 2 || !st.enabled || st.secret != "S" {
+		t.Fatal("admin regenerate must return fresh codes and keep 2FA on")
+	}
+	st2 := &memStore{user: &domain.User{ID: 2, UPN: "v@x"}, enabled: false}
+	if _, err := newSvc(st2, true, "111111").AdminRegenerateRecovery(context.Background(), 2); err == nil {
+		t.Fatal("admin regenerate must error when the user has no 2FA")
 	}
 }

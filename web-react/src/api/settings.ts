@@ -180,6 +180,10 @@ export interface UISettings {
    *  Image provider needs no keys. */
   captcha_secret_key?: string
   has_captcha_secret_key: boolean
+  /** Per-context captcha (v3.7.0): captcha_enabled gates the LOGIN form; these
+   *  extend the same provider to the register / forgot forms (always-on). */
+  captcha_register_enabled: boolean
+  captcha_forgot_enabled: boolean
   /** Master toggle for temporary account lockout after repeated failures. */
   lockout_enabled: boolean
   /** Failures within the window that trigger a lock. */
@@ -219,6 +223,13 @@ export interface UISettings {
   passkey_enabled: boolean
   /** Additionally allow usernameless passkey login from the login page. */
   passkey_passwordless: boolean
+
+  // ---- Alternative 2FA verification methods (v3.7.0) ----
+  /** Offer an enrolled passkey as the 2FA factor (only after a password first
+   *  factor). TOTP + recovery codes are always available regardless. */
+  twofa_allow_passkey: boolean
+  /** Offer a one-time code by email as the 2FA factor (weaker; default off). */
+  twofa_allow_email: boolean
 }
 
 export async function getUISettings() {
@@ -274,7 +285,7 @@ export async function updateGeoIPNow() {
 }
 
 // ---- Mail reminders ----
-export type MailReminderKind = 'expire_before' | 'expired' | 'traffic_low' | 'traffic_exhausted' | 'account_disabled' | 'account_enabled' | 'announcement' | 'blocked_client'
+export type MailReminderKind = 'expire_before' | 'expired' | 'traffic_low' | 'traffic_exhausted' | 'account_disabled' | 'account_enabled' | 'announcement' | 'blocked_client' | 'password_reset' | 'email_verify' | 'login_2fa'
 
 export interface MailSettings {
   enabled: boolean

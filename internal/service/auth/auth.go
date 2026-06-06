@@ -38,9 +38,10 @@ func (s *Service) Verify(tokenStr string) (*jwtutil.Claims, error) {
 }
 
 // IssuePending mints the short-lived 2fa_pending token returned to a user who
-// passed the password step but still owes a 2FA code.
-func (s *Service) IssuePending(u *domain.User) (string, error) {
-	return s.issuer.IssuePending(u.ID, u.UPN, u.Role, u.TokenVersion)
+// passed the first factor (password or passkey, named by firstFactor) but still
+// owes a 2FA code/assertion.
+func (s *Service) IssuePending(u *domain.User, firstFactor string) (string, error) {
+	return s.issuer.IssuePending(u.ID, u.UPN, u.Role, u.TokenVersion, firstFactor)
 }
 
 // VerifyPending parses a 2fa_pending token (the /auth/2fa/verify challenge).

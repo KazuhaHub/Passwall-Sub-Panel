@@ -24,6 +24,12 @@ type Claims struct {
 	// zero so legacy tokens (issued before this field existed) still
 	// pass the default user.TokenVersion == 0 check after upgrade.
 	TokenVersion int `json:"tv,omitempty"`
+	// FirstFactor records which credential satisfied the FIRST authentication step
+	// on a 2fa_pending token: "password" or "passkey". The 2FA challenge uses it to
+	// decide whether a passkey may serve as the SECOND factor — a passwordless
+	// passkey login must not be completable with the same passkey (one factor,
+	// twice). Empty on access/refresh tokens.
+	FirstFactor string `json:"ff,omitempty"`
 	jwt.RegisteredClaims
 }
 
@@ -34,6 +40,10 @@ const (
 	// succeed but before a 2FA code is verified. It is NOT an access token —
 	// /auth/2fa/verify trades it (plus a valid code) for the real pair.
 	SubjectPending = "2fa_pending"
+
+	// First-factor values stamped onto a 2fa_pending token.
+	FirstFactorPassword = "password"
+	FirstFactorPasskey  = "passkey"
 )
 
 // pendingTTL bounds how long a user has to enter their 2FA code after the
@@ -118,19 +128,20 @@ func (i *Issuer) RefreshTTL() time.Duration { return i.params().RefreshTTL }
 // IssueAccess signs and returns an access token.
 func (i *Issuer) IssueAccess(uid int64, upn string, role domain.Role, tokenVersion int) (string, error) {
 	p := i.params()
-	return i.issue(uid, upn, role, tokenVersion, SubjectAccess, p.AccessTTL, p.Issuer)
+	return i.issue(uid, upn, role, tokenVersion, "", SubjectAccess, p.AccessTTL, p.Issuer)
 }
 
 // IssueRefresh signs and returns a refresh token.
 func (i *Issuer) IssueRefresh(uid int64, upn string, role domain.Role, tokenVersion int) (string, error) {
 	p := i.params()
-	return i.issue(uid, upn, role, tokenVersion, SubjectRefresh, p.RefreshTTL, p.Issuer)
+	return i.issue(uid, upn, role, tokenVersion, "", SubjectRefresh, p.RefreshTTL, p.Issuer)
 }
 
-// IssuePending signs a short-lived 2fa_pending token carrying the user id, used
-// to resume login once the TOTP code is verified.
-func (i *Issuer) IssuePending(uid int64, upn string, role domain.Role, tokenVersion int) (string, error) {
-	return i.issue(uid, upn, role, tokenVersion, SubjectPending, pendingTTL, i.params().Issuer)
+// IssuePending signs a short-lived 2fa_pending token carrying the user id and the
+// first factor already satisfied, used to resume login once a 2FA code/assertion
+// is verified.
+func (i *Issuer) IssuePending(uid int64, upn string, role domain.Role, tokenVersion int, firstFactor string) (string, error) {
+	return i.issue(uid, upn, role, tokenVersion, firstFactor, SubjectPending, pendingTTL, i.params().Issuer)
 }
 
 // ParsePending verifies signature, time window and the 2fa_pending subject.
@@ -138,13 +149,14 @@ func (i *Issuer) ParsePending(tokenStr string) (*Claims, error) {
 	return i.parse(tokenStr, SubjectPending)
 }
 
-func (i *Issuer) issue(uid int64, upn string, role domain.Role, tokenVersion int, sub string, ttl time.Duration, iss string) (string, error) {
+func (i *Issuer) issue(uid int64, upn string, role domain.Role, tokenVersion int, firstFactor, sub string, ttl time.Duration, iss string) (string, error) {
 	now := time.Now()
 	claims := Claims{
 		UserID:       uid,
 		UPN:          upn,
 		Role:         role,
 		TokenVersion: tokenVersion,
+		FirstFactor:  firstFactor,
 		RegisteredClaims: jwt.RegisteredClaims{
 			Issuer:    iss,
 			Subject:   sub,

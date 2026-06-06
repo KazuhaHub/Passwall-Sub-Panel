@@ -92,10 +92,7 @@ func (s *Service) newWebAuthn(ctx context.Context) (*webauthn.WebAuthn, error) {
 	if err != nil {
 		return nil, err
 	}
-	display := strings.TrimSpace(set.AppTitle)
-	if display == "" {
-		display = "Passwall"
-	}
+	display := set.BrandName()
 	return webauthn.New(&webauthn.Config{
 		RPID:          rpID,
 		RPDisplayName: display,
@@ -307,6 +304,75 @@ func (s *Service) FinishLogin(ctx context.Context, sessionID string, r *http.Req
 		return nil, err
 	}
 	return resolved, nil
+}
+
+// BeginLoginForUser starts an allow-listed passkey assertion scoped to a single,
+// already-identified user — the passkey-as-second-factor flow. Unlike BeginLogin
+// (discoverable/usernameless), it only needs the enrollment master switch, not
+// passwordless, and it errors if the user has no passkeys. Returns request
+// options (with the user's credentials as the allow-list) + a session id.
+func (s *Service) BeginLoginForUser(ctx context.Context, userID int64) (*protocol.PublicKeyCredentialRequestOptions, string, error) {
+	if !s.Available(ctx) {
+		return nil, "", fmt.Errorf("%w: passkeys are not enabled on this panel", domain.ErrForbidden)
+	}
+	wa, err := s.newWebAuthn(ctx)
+	if err != nil {
+		return nil, "", err
+	}
+	wu, stored, err := s.loadUser(ctx, userID)
+	if err != nil {
+		return nil, "", err
+	}
+	if len(stored) == 0 {
+		return nil, "", fmt.Errorf("%w: no passkeys enrolled", domain.ErrValidation)
+	}
+	assertion, session, err := wa.BeginLogin(wu)
+	if err != nil {
+		return nil, "", err
+	}
+	id, err := s.sessions.put(session)
+	if err != nil {
+		return nil, "", err
+	}
+	return &assertion.Response, id, nil
+}
+
+// FinishLoginForUser verifies an allow-listed assertion against a single user's
+// credentials (the 2FA-step counterpart of FinishLogin). The userID comes from a
+// verified pending token, so this never resolves identity from the assertion. On
+// success it rejects a cloned authenticator and advances the gated sign count.
+func (s *Service) FinishLoginForUser(ctx context.Context, userID int64, sessionID string, r *http.Request) error {
+	if !s.Available(ctx) {
+		return fmt.Errorf("%w: passkeys are not enabled on this panel", domain.ErrForbidden)
+	}
+	session := s.sessions.take(sessionID)
+	if session == nil {
+		return fmt.Errorf("%w: login session expired; try again", domain.ErrValidation)
+	}
+	wa, err := s.newWebAuthn(ctx)
+	if err != nil {
+		return err
+	}
+	wu, stored, err := s.loadUser(ctx, userID)
+	if err != nil {
+		return err
+	}
+	cred, err := wa.FinishLogin(wu, *session, r)
+	if err != nil {
+		return fmt.Errorf("%w: %v", domain.ErrUnauthorized, err)
+	}
+	credID := base64.RawURLEncoding.EncodeToString(cred.ID)
+	var matched *domain.PasskeyCredential
+	for _, sc := range stored {
+		if sc.CredentialID == credID {
+			matched = sc
+			break
+		}
+	}
+	if matched == nil {
+		return domain.ErrUnauthorized
+	}
+	return s.finalizeAssertion(ctx, matched, cred)
 }
 
 // finalizeAssertion is the post-verification step of a passkey login: it rejects

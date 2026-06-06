@@ -18,8 +18,8 @@ import { Link as RouterLink, useLocation, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import type { AxiosError } from 'axios'
 
-import { getAuthMethods, oidcLoginURL, samlLoginURL } from '@/api/auth'
-import type { AuthMethods, LoginCaptcha } from '@/api/types'
+import { getAuthMethods, oidcLoginURL, samlLoginURL, send2FAEmail } from '@/api/auth'
+import type { AuthMethods, LoginCaptcha, TwoFAMethod } from '@/api/types'
 import CaptchaWidget from '@/components/CaptchaWidget'
 import { useAuthStore, selectIsAdmin } from '@/stores/auth'
 import { useSiteStore } from '@/stores/site'
@@ -64,6 +64,10 @@ export default function LoginView() {
   const [twoFAPending, setTwoFAPending] = useState<string | null>(null)
   const [twoFACode, setTwoFACode] = useState('')
   const [twoFAError, setTwoFAError] = useState('')
+  // The verification methods the server accepts for this challenge, and which
+  // code-entry method the user currently has selected.
+  const [twoFAMethods, setTwoFAMethods] = useState<TwoFAMethod[]>([])
+  const [twoFAMode, setTwoFAMode] = useState<'totp' | 'recovery' | 'email'>('totp')
   // Set when the user clicks the SSO button in sso_first / dual mode. We
   // render the same "正在前往 SSO" intermediate as sso_redirect so every
   // SSO entry point (auto-bounce OR explicit click) feels the same.
@@ -136,6 +140,8 @@ export default function LoginView() {
         // Password OK, but the account needs a second factor: switch to the
         // code-entry step rather than navigating.
         setTwoFAPending(outcome.pendingToken)
+        setTwoFAMethods(outcome.methods)
+        setTwoFAMode('totp')
         setTwoFACode('')
         setTwoFAError('')
         return
@@ -180,8 +186,7 @@ export default function LoginView() {
       // re-login — send the user back to the password step.
       const e = err as AxiosError<{ error?: string }>
       if (e.response?.status === 401 && /session/i.test(e.response?.data?.error ?? '')) {
-        setTwoFAPending(null)
-        setTwoFAError('')
+        cancel2FA()
         pushSnack(t('auth:twofa_session_expired'), 'warning')
       } else {
         setTwoFAError(t('auth:twofa_invalid'))
@@ -196,7 +201,57 @@ export default function LoginView() {
     setTwoFAPending(null)
     setTwoFACode('')
     setTwoFAError('')
+    setTwoFAMethods([])
+    setTwoFAMode('totp')
     setPassword('')
+  }
+
+  // Switch the code-entry method (totp ⇄ recovery). Email needs a send first.
+  function switchTwoFAMode(mode: 'totp' | 'recovery') {
+    setTwoFAMode(mode)
+    setTwoFACode('')
+    setTwoFAError('')
+  }
+
+  // onUseEmail switches to the email step and requests a one-time code.
+  async function onUseEmail() {
+    if (!twoFAPending) return
+    setTwoFAMode('email')
+    setTwoFACode('')
+    setTwoFAError('')
+    setBusy(true)
+    try {
+      await send2FAEmail(twoFAPending)
+      pushSnack(t('auth:twofa_email_sent'), 'success')
+    } catch {
+      setTwoFAError(t('auth:twofa_email_failed'))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  // onUsePasskey2FA completes the challenge by asserting a passkey (no code).
+  async function onUsePasskey2FA() {
+    if (!twoFAPending) return
+    setBusy(true)
+    setTwoFAError('')
+    try {
+      await auth.complete2FAPasskey(twoFAPending)
+      goHome()
+    } catch (err) {
+      const e = err as AxiosError<{ error?: string }>
+      const name = (err as { name?: string })?.name
+      if (name === 'NotAllowedError' || name === 'AbortError') {
+        // user dismissed the browser prompt — no error
+      } else if (e.response?.status === 401 && /session/i.test(e.response?.data?.error ?? '')) {
+        cancel2FA()
+        pushSnack(t('auth:twofa_session_expired'), 'warning')
+      } else {
+        setTwoFAError(t('auth:passkey_failed'))
+      }
+    } finally {
+      setBusy(false)
+    }
   }
 
   async function onPasskeyLogin() {
@@ -206,6 +261,8 @@ export default function LoginView() {
       const outcome = await auth.loginPasskey()
       if (outcome.twoFA) {
         setTwoFAPending(outcome.pendingToken)
+        setTwoFAMethods(outcome.methods)
+        setTwoFAMode('totp')
         setTwoFACode('')
         setTwoFAError('')
         return
@@ -312,21 +369,43 @@ export default function LoginView() {
     </Box>
   )
 
+  // Per-method copy for the code field. Passkey has no code field (it's an
+  // immediate ceremony), so it's only an alternative-method button.
+  const twoFAModeUI = {
+    totp: { prompt: t('auth:twofa_prompt'), label: t('auth:twofa_code'), placeholder: '123456' },
+    recovery: { prompt: t('auth:twofa_recovery_prompt'), label: t('auth:twofa_recovery_label'), placeholder: 'XXXXX-XXXXX' },
+    email: { prompt: t('auth:twofa_email_prompt'), label: t('auth:twofa_email_label'), placeholder: '123456' },
+  }[twoFAMode]
+
+  // Alternative-method buttons, excluding whatever is currently active.
+  const altButtons: React.ReactNode[] = []
+  if (twoFAMode !== 'totp') {
+    altButtons.push(<Button key="totp" size="small" onClick={() => switchTwoFAMode('totp')} disabled={busy}>{t('auth:twofa_use_totp')}</Button>)
+  }
+  if (twoFAMethods.includes('recovery') && twoFAMode !== 'recovery') {
+    altButtons.push(<Button key="recovery" size="small" onClick={() => switchTwoFAMode('recovery')} disabled={busy}>{t('auth:twofa_use_recovery')}</Button>)
+  }
+  if (twoFAMethods.includes('email') && twoFAMode !== 'email') {
+    altButtons.push(<Button key="email" size="small" onClick={onUseEmail} disabled={busy}>{t('auth:twofa_use_email')}</Button>)
+  }
+  if (twoFAMethods.includes('passkey')) {
+    altButtons.push(<Button key="passkey" size="small" startIcon={<FingerprintIcon />} onClick={onUsePasskey2FA} disabled={busy}>{t('auth:twofa_use_passkey')}</Button>)
+  }
+
   const twoFAFormBlock = (
     <Box component="form" onSubmit={submit2FA} sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
       <Typography variant="body2" sx={{ color: md.onSurfaceVariant }}>
-        {t('auth:twofa_prompt')}
+        {twoFAModeUI.prompt}
       </Typography>
       <TextField
-        label={t('auth:twofa_code')}
+        label={twoFAModeUI.label}
         value={twoFACode}
         onChange={e => setTwoFACode(e.target.value)}
         autoFocus
         fullWidth
         autoComplete="one-time-code"
         inputProps={{ inputMode: 'text', autoCapitalize: 'characters' }}
-        placeholder="123456"
-        helperText={t('auth:twofa_code_hint')}
+        placeholder={twoFAModeUI.placeholder}
       />
       {twoFAError && <Alert severity="error" sx={{ py: 0 }}>{twoFAError}</Alert>}
       <Button type="submit" variant="contained" fullWidth size="large"
@@ -335,6 +414,16 @@ export default function LoginView() {
         sx={{ mt: 1 }}>
         {t('auth:twofa_submit')}
       </Button>
+      {altButtons.length > 0 && (
+        <Box sx={{ mt: 0.5 }}>
+          <Typography variant="caption" sx={{ color: md.onSurfaceVariant, display: 'block', textAlign: 'center', mb: 0.5 }}>
+            {t('auth:twofa_use_another')}
+          </Typography>
+          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, justifyContent: 'center' }}>
+            {altButtons}
+          </Box>
+        </Box>
+      )}
       <Button variant="text" fullWidth size="small" onClick={cancel2FA} disabled={busy}>
         {t('auth:twofa_back')}
       </Button>

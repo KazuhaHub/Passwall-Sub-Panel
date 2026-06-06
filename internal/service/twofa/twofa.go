@@ -101,8 +101,8 @@ func (s *Service) Begin(ctx context.Context, userID int64) (otpauthURL, secret s
 		return "", "", fmt.Errorf("%w: two-factor authentication is already enabled", domain.ErrValidation)
 	}
 	issuer := "Passwall"
-	if set, serr := s.d.Settings.Load(ctx, ports.UISettings{}); serr == nil && strings.TrimSpace(set.AppTitle) != "" {
-		issuer = set.AppTitle
+	if set, serr := s.d.Settings.Load(ctx, ports.UISettings{}); serr == nil {
+		issuer = set.BrandName()
 	}
 	account := u.UPN
 	secret, otpauthURL, err = s.genSecret(issuer, account)
@@ -183,6 +183,73 @@ func (s *Service) VerifyLogin(ctx context.Context, userID int64, code string) (b
 // their authenticator and recovery codes).
 func (s *Service) AdminReset(ctx context.Context, userID int64) error {
 	return s.d.Users.ClearTOTP(ctx, userID)
+}
+
+// RegenerateRecovery rotates a user's recovery codes (self-service step-up). It
+// requires proof of possession — a current TOTP code or one of the existing
+// recovery codes — to stop a hijacked session from silently minting a fresh set.
+// Returns the new plaintext codes to show ONCE. 2FA must already be enabled.
+func (s *Service) RegenerateRecovery(ctx context.Context, userID int64, code string) ([]string, error) {
+	secret, enabled, codes, err := s.d.Users.GetTOTP(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	if !enabled {
+		return nil, fmt.Errorf("%w: two-factor authentication is not enabled", domain.ErrValidation)
+	}
+	// matchCode (not checkCode) deliberately does NOT consume the recovery code
+	// used as proof: the whole set is about to be replaced anyway.
+	if !s.matchCode(code, secret, codes) {
+		return nil, domain.ErrUnauthorized
+	}
+	return s.replaceRecovery(ctx, userID, secret)
+}
+
+// AdminRegenerateRecovery rotates a user's recovery codes without proof
+// (break-glass, same trust level as admin password reset). Returns the new
+// plaintext codes for the admin to relay over a secure channel. 2FA must be on.
+func (s *Service) AdminRegenerateRecovery(ctx context.Context, userID int64) ([]string, error) {
+	secret, enabled, _, err := s.d.Users.GetTOTP(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	if !enabled {
+		return nil, fmt.Errorf("%w: two-factor authentication is not enabled for this user", domain.ErrValidation)
+	}
+	return s.replaceRecovery(ctx, userID, secret)
+}
+
+// replaceRecovery generates a fresh batch of recovery codes, stores their hashes
+// (preserving the secret + enabled state), and returns the plaintext.
+func (s *Service) replaceRecovery(ctx context.Context, userID int64, secret string) ([]string, error) {
+	plain, err := s.genRecovery()
+	if err != nil {
+		return nil, err
+	}
+	hashes := make([]string, len(plain))
+	for i, c := range plain {
+		hashes[i] = hashRecovery(c)
+	}
+	if err := s.d.Users.SetTOTP(ctx, userID, secret, true, hashes); err != nil {
+		return nil, err
+	}
+	return plain, nil
+}
+
+// matchCode reports whether code is a valid TOTP or matches a stored recovery
+// hash, WITHOUT consuming anything. Used for step-up proof where the caller
+// replaces the whole recovery set afterwards.
+func (s *Service) matchCode(code, secret string, recoveryHashes []string) bool {
+	if secret != "" && s.validate(code, secret) {
+		return true
+	}
+	want := hashRecovery(code)
+	for _, h := range recoveryHashes {
+		if subtle.ConstantTimeCompare([]byte(h), []byte(want)) == 1 {
+			return true
+		}
+	}
+	return false
 }
 
 // checkCode validates a TOTP code, then falls back to recovery codes (consuming

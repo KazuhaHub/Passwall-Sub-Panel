@@ -83,3 +83,33 @@ func (h *UserMeHandler) Disable2FA(c *gin.Context) {
 	}
 	c.Status(http.StatusNoContent)
 }
+
+type regenerate2FARecoveryRequest struct {
+	Code string `json:"code" binding:"required"`
+}
+
+// RegenerateRecovery2FA rotates the calling user's one-time recovery codes,
+// requiring a current TOTP or recovery code as step-up proof, and returns the
+// fresh set to display ONCE. 2FA must already be enabled.
+func (h *UserMeHandler) RegenerateRecovery2FA(c *gin.Context) {
+	claims := middleware.ClaimsFrom(c)
+	if claims == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "No auth"})
+		return
+	}
+	var req regenerate2FARecoveryRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	codes, err := h.twofa.RegenerateRecovery(c.Request.Context(), claims.UserID, req.Code)
+	if err != nil {
+		if errors.Is(err, domain.ErrUnauthorized) {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid code"})
+			return
+		}
+		respondError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"recovery_codes": codes})
+}

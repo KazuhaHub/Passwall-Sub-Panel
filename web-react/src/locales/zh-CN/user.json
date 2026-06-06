@@ -99,7 +99,10 @@
     "disable_hint": "请输入当前的验证码或一个恢复码以关闭两步验证。",
     "disable_code_hint": "可输入身份验证器验证码或恢复码。",
     "disable": "关闭两步验证",
-    "disabled_toast": "两步验证已关闭"
+    "disabled_toast": "两步验证已关闭",
+    "regenerate": "重新生成备用码",
+    "regenerate_hint": "输入当前验证器代码或一个备用码以重新生成一组新的备用码。旧的备用码将立即作废。",
+    "regen_done_toast": "已重新生成备用码"
   },
   "password": {
     "title": "修改密码",

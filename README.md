@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="web-react/public/images/logo+title-circle.png" alt="Passwall Sub Panel" width="200">
+  <img src="web-react/public/images/logo-title-circle.png" alt="Passwall Sub Panel" width="200">
 </p>
 
 <h1 align="center">Passwall Sub Panel</h1>

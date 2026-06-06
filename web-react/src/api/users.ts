@@ -90,6 +90,16 @@ export async function reset2FA(id: number) {
   await client.post(`/admin/users/${id}/reset-2fa`)
 }
 
+// regenerateUser2FARecovery rotates a user's recovery codes (admin break-glass for
+// a user who still has 2FA on but lost their backup codes) and returns the fresh
+// set ONCE for the admin to relay securely. The user's 2FA stays enabled.
+export async function regenerateUser2FARecovery(id: number) {
+  const { data } = await client.post<{ recovery_codes: string[] }>(
+    `/admin/users/${id}/2fa/recovery/regenerate`,
+  )
+  return data.recovery_codes ?? []
+}
+
 export async function unlinkSSO(id: number) {
   await client.post(`/admin/users/${id}/unlink-sso`)
 }

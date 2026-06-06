@@ -4,6 +4,26 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## v3.7.0-beta.9 — 2026-06-06
+
+「账号安全」专题增强批次：**统一的管理员「账号安全」抽屉** + **2FA 多验证方式（备用码 / Passkey / Email）** + **备用码重新生成** + **验证码多场景** + **品牌名/邮件模板修正**。全程 TDD（service 层先红后绿），`go test ./...` / `go vet` / `tsc` / `npm build` 全绿，二进制重建 + 启动 smoke（`/auth/methods` 暴露新字段）通过，并经 7-agent 对抗审查（修 1 实 HIGH「注册/找回验证码前端漏接」+ 1 实 MED「抽屉快照过期」+ 2 项收口）。
+
+### Added
+
+- **管理员「账号安全」抽屉** —— 用户列表 ⋮ 菜单原先堆了 6 个安全动作（重置密码 / 重置凭证 / 重置紧急访问 / 解绑 SSO / 重置 2FA / 管理通行密钥），随功能增多已过载。现收敛成单一「账号安全」入口，打开右侧抽屉、分区呈现：登录密码、两步验证（状态 + 重置 + **重新生成备用码** + 剩余数）、通行密钥、订阅凭证、SSO 绑定、紧急访问。菜单瘦身为「复制订阅 URL / 个人规则 / 账号安全」三项。抽屉对既有动作走委托（沿用已验证的确认/结果流），并在每次重载后用列表数据回填打开中的抽屉（避免重置 2FA 后仍显示「已启用」的过期快照）。管理员**不能代为新增** 2FA/通行密钥（需用户本人设备）。
+- **2FA 登录支持多种验证方式** —— 登录挑战不再把验证器代码和备用码混在一个框。主输入为 TOTP，并提供「使用其他方式验证」：**备用码**（始终可用）、**通行密钥**（管理员开关 + 已绑 passkey + 第一因子为密码时；passwordless 登录不提供以免同因子两次）、**Email 一次性验证码**（管理员开关、默认关、较弱因子、限流 + 单次短 TTL）。`2fa_required` 响应携带服务端算出的 `methods` 列表驱动前端；pending token 新增 `ff`（first_factor）声明区分密码/passkey 首因子。新增 `/auth/2fa/{email/send,passkey/begin,passkey/finish}`（共用登录限流），passkey-2FA 按 pending 用户的凭据 allow-list 断言、email-2FA 复用 `auth_tokens` OTP 机制（新 `login_2fa` purpose + 同名邮件模板）。设置「登录与安全 → 两步验证」加 `twofa_allow_passkey` / `twofa_allow_email` 两开关。
+- **2FA 备用码重新生成** —— 自助 `POST /user/me/2fa/recovery/regenerate`（需当前 TOTP/备用码作 step-up 证明）+ 管理员破窗 `POST /admin/users/:id/2fa/recovery/regenerate`（无需证明、经 `ensureOperatorAllowed`、明文返回一次供转交）。`TwoFactorDialog` 增「重新生成备用码」步；管理员在抽屉内一键生成并查看。此前备用码只在启用时给一次、丢了只能整体重置 2FA。
+- **验证码可按场景启用** —— 原验证码仅作用于登录。新增 `captcha_register_enabled` / `captcha_forgot_enabled`，登录 / 注册 / 找回密码各自独立勾选（共享同一提供方/密钥；触发时机与失败阈值仍为登录专属）。后端在注册 / 找回端点接入 `requireCaptcha`（验证失败闭合、找回仍不暴露账号是否存在），`/auth/captcha` 在任一场景启用时即可签发图形验证码，`/auth/methods` 暴露 `captcha_register_required` / `captcha_forgot_required`。前端登录 / 注册 / 找回三页均按各自标志渲染 `CaptchaWidget`。
+- **邮件模板编辑器补全 + 改版** —— 后端早已注册的 `password_reset`（重置密码）/ `email_verify`（验证邮箱）模板此前前端未列出、无法编辑；现补上，并新增 `login_2fa`（登录验证码）模板。编辑器从横向 tab 改为**左侧分组列表 + 右侧编辑器**（运营提醒 / 账号安全），随模板增多可无限扩展；变量速查表补 `{{.OTPCode}}` / `{{.ResetLink}}` / `{{.VerifyLink}}` / `{{.ExpireMinutes}}`。
+
+### Changed
+
+- **验证器 / 通行密钥 / 邮件头的品牌名改用站点名称** —— TOTP issuer、Passkey RP 显示名、邮件头部品牌此前都取 `AppTitle`（默认 `Passwall`），现统一经 `UISettings.BrandName()` 优先取 `SiteTitle`（默认 `Kazuha Hub Passwall`）→ 回退 `AppTitle` → `Passwall`，单一来源避免三处漂移。已绑定的旧 2FA 不变（issuer 在绑定时写入 otpauth URI）。
+
+### Fixed
+
+- **默认邮件 logo 文件名硬化** —— 资源 `logo+title-circle*.png` 改名为 `logo-title-circle*.png`（去掉 `+`，部分邮件图片代理会把 `+` 误解析）。同步更新 render / mailer / 前端 store / README 引用。注意：本地 `SubBaseURL` 为 `127.0.0.1` 时 Gmail 等仍抓不到 logo（图片代理够不到本机），换公网域名即正常——这是 localhost 固有限制、非模板缺陷。
+
 ## v3.7.0-beta.8 — 2026-06-06
 
 「账号安全」专题收尾打磨：设置页**「登录与安全」独立 tab** + 管理员**查看 / 吊销用户的通行密钥**。`go test ./...` / `go vet` / `tsc` / `npm build` 全绿（passkey 仓储「按用户清空」+ 服务 `RevokeAll` 先红后绿 TDD）。

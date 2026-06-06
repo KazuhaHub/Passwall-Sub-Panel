@@ -6,6 +6,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/jwtutil"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/auth"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/passkey"
@@ -57,24 +58,26 @@ func (h *AuthPasskeyHandler) LoginFinish(c *gin.Context) {
 	}
 	// Honor the non-admin local-login lock: a passkey is a local-account
 	// credential, so allowing it when the admin forced SSO for users would be a
-	// bypass. Admins keep it as a break-glass path.
-	if u.Role != domain.RoleAdmin {
-		if s, sErr := h.settings.Load(c.Request.Context(), ports.UISettings{}); sErr == nil && s.DisallowUserLocalLogin {
-			recordAuthEvent(c, h.authEvents, domain.AuthMethodPasskey, domain.AuthOutcomeFailure, u.ID, u.UPN, "local_login_disallowed")
-			c.JSON(http.StatusForbidden, gin.H{"error": "Local login is restricted to administrators; please use SSO"})
-			return
-		}
+	// bypass. Admins keep it as a break-glass path. Load settings once (also reused
+	// for the 2FA method list below).
+	s, _ := h.settings.Load(c.Request.Context(), ports.UISettings{})
+	if u.Role != domain.RoleAdmin && s.DisallowUserLocalLogin {
+		recordAuthEvent(c, h.authEvents, domain.AuthMethodPasskey, domain.AuthOutcomeFailure, u.ID, u.UPN, "local_login_disallowed")
+		c.JSON(http.StatusForbidden, gin.H{"error": "Local login is restricted to administrators; please use SSO"})
+		return
 	}
 	// 2FA gate — a passkey proves possession; if the user also enrolled TOTP,
-	// still require it (defense in depth), mirroring password login.
+	// still require it (defense in depth), mirroring password login. The first
+	// factor is recorded as "passkey" so the challenge won't offer passkey again.
 	if u.TOTPEnabled {
-		pending, perr := h.auth.IssuePending(u)
+		pending, perr := h.auth.IssuePending(u, jwtutil.FirstFactorPasskey)
 		if perr != nil {
 			recordAuthEvent(c, h.authEvents, domain.AuthMethodPasskey, domain.AuthOutcomeFailure, u.ID, u.UPN, "token_error")
 			respondError(c, perr)
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{"status": "2fa_required", "pending_token": pending})
+		methods := availableTwoFAMethods(c.Request.Context(), u, jwtutil.FirstFactorPasskey, s, h.passkey)
+		c.JSON(http.StatusOK, gin.H{"status": "2fa_required", "pending_token": pending, "methods": methods})
 		return
 	}
 	access, refresh, err := h.auth.IssueTokens(u)

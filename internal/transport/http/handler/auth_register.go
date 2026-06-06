@@ -5,23 +5,32 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/captcha"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/registration"
 )
 
 // AuthRegisterHandler exposes the public self-registration endpoints. Both sit
 // behind the login rate limiter (wired in the router).
 type AuthRegisterHandler struct {
-	reg *registration.Service
+	reg      *registration.Service
+	settings ports.SettingsRepo
+	captcha  *captcha.Service
 }
 
-func NewAuthRegisterHandler(reg *registration.Service) *AuthRegisterHandler {
-	return &AuthRegisterHandler{reg: reg}
+func NewAuthRegisterHandler(reg *registration.Service, settings ports.SettingsRepo, captchaSvc *captcha.Service) *AuthRegisterHandler {
+	return &AuthRegisterHandler{reg: reg, settings: settings, captcha: captchaSvc}
 }
 
 type registerRequest struct {
 	Email       string `json:"email" binding:"required"`
 	Password    string `json:"password" binding:"required"`
 	DisplayName string `json:"display_name"`
+	// Optional captcha proof (image: id+answer; token providers: token), checked
+	// when the admin enabled captcha for the registration context.
+	CaptchaID     string `json:"captcha_id"`
+	CaptchaAnswer string `json:"captcha_answer"`
+	CaptchaToken  string `json:"captcha_token"`
 }
 
 // Register creates a new local account. On success returns whether the account
@@ -31,6 +40,10 @@ func (h *AuthRegisterHandler) Register(c *gin.Context) {
 	var req registerRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	s, _ := h.settings.Load(c.Request.Context(), ports.UISettings{})
+	if !requireCaptcha(c, h.captcha, s, s.CaptchaRegisterEnabled, req.CaptchaID, req.CaptchaAnswer, req.CaptchaToken) {
 		return
 	}
 	res, err := h.reg.Register(c.Request.Context(), registration.RegisterInput{

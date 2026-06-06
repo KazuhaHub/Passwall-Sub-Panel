@@ -43,14 +43,11 @@ import VisibilityIcon from '@mui/icons-material/Visibility'
 import VisibilityOffIcon from '@mui/icons-material/VisibilityOff'
 import ContentCopyIcon from '@mui/icons-material/ContentCopy'
 import MoreVertIcon from '@mui/icons-material/MoreVert'
-import KeyIcon from '@mui/icons-material/VpnKey'
-import LockResetIcon from '@mui/icons-material/LockReset'
 import CasinoIcon from '@mui/icons-material/Casino'
 import RuleIcon from '@mui/icons-material/Rule'
 import EmergencyIcon from '@mui/icons-material/MedicalServices'
 import LinkOffIcon from '@mui/icons-material/LinkOff'
 import ShieldIcon from '@mui/icons-material/GppMaybe'
-import FingerprintIcon from '@mui/icons-material/Fingerprint'
 import SyncIcon from '@mui/icons-material/Sync'
 import HelpOutlineIcon from '@mui/icons-material/HelpOutline'
 import { useTranslation } from 'react-i18next'
@@ -77,6 +74,7 @@ import type { Group, ResetPeriod, Role, User } from '@/api/types'
 import type { ReconcileReport } from '@/api/reconcile'
 import { UserActivity } from './UserActivity'
 import AdminPasskeysDialog from './AdminPasskeysDialog'
+import AccountSecurityDrawer from './AccountSecurityDrawer'
 import { Link as RouterLink } from 'react-router-dom'
 import { useAuthStore } from '@/stores/auth'
 import { useCan } from '@/utils/permissions'
@@ -325,6 +323,14 @@ export default function UsersView() {
   const [moreAnchor, setMoreAnchor] = useState<HTMLElement | null>(null)
   const [moreUser, setMoreUser] = useState<User | null>(null)
   const [passkeysUser, setPasskeysUser] = useState<User | null>(null)
+  const [securityUser, setSecurityUser] = useState<User | null>(null)
+  // Keep the open Account Security drawer in sync with reloaded data — its
+  // delegated actions (reset 2FA, unlink SSO, …) refresh the table, and the drawer
+  // must reflect the fresh state, not the snapshot it opened with. Keep the
+  // snapshot if the user fell off the current page (don't surprise-close).
+  useEffect(() => {
+    setSecurityUser(prev => (prev ? items.find(u => u.id === prev.id) ?? prev : prev))
+  }, [items])
   // Batch More menu
   const [batchMoreAnchor, setBatchMoreAnchor] = useState<HTMLElement | null>(null)
 
@@ -1206,40 +1212,27 @@ export default function UsersView() {
           <ListItemIcon><RuleIcon fontSize="small" /></ListItemIcon>
           <ListItemText>{t('admin:users.more_menu.personal_rules')}</ListItemText>
         </MenuItem>
-        <MenuItem onClick={() => moreUser && actionResetPassword(moreUser)}>
-          <ListItemIcon><LockResetIcon fontSize="small" /></ListItemIcon>
-          <ListItemText>{t('admin:users.more_menu.reset_password', { defaultValue: '重置密码' })}</ListItemText>
-        </MenuItem>
-        <MenuItem onClick={() => moreUser && actionResetCredentials(moreUser)}>
-          <ListItemIcon><KeyIcon fontSize="small" /></ListItemIcon>
-          <ListItemText>{t('admin:users.more_menu.reset_credentials')}</ListItemText>
-        </MenuItem>
-        <MenuItem onClick={() => moreUser && actionResetEmergency(moreUser)}>
-          <ListItemIcon><EmergencyIcon fontSize="small" /></ListItemIcon>
-          <ListItemText>{t('admin:users.more_menu.reset_emergency')}</ListItemText>
-        </MenuItem>
-        <MenuItem
-          onClick={() => moreUser && actionUnlinkSSO(moreUser)}
-          disabled={!moreUser || !moreUser.sso_provider || moreUser.sso_provider === 'local'}>
-          <ListItemIcon><LinkOffIcon fontSize="small" /></ListItemIcon>
-          <ListItemText>{t('admin:users.more_menu.unlink_sso')}</ListItemText>
-        </MenuItem>
-        {moreUser?.totp_enabled && (
-          <MenuItem onClick={() => moreUser && actionReset2FA(moreUser)}>
-            <ListItemIcon><ShieldIcon fontSize="small" /></ListItemIcon>
-            <ListItemText>{t('admin:users.more_menu.reset_2fa', { defaultValue: '重置两步验证' })}</ListItemText>
-          </MenuItem>
-        )}
-        {/* Always available: disabling the passkey feature does NOT remove
-            already-enrolled credentials, so the admin still needs a revoke path. */}
-        <MenuItem onClick={() => moreUser && actionManagePasskeys(moreUser)}>
-          <ListItemIcon><FingerprintIcon fontSize="small" /></ListItemIcon>
-          <ListItemText>{t('admin:users.more_menu.passkeys', { defaultValue: '管理通行密钥' })}</ListItemText>
+        {/* All credential / security actions live in the Account Security drawer
+            now — keeps this menu from overflowing as the actions grow. */}
+        <MenuItem onClick={() => { if (moreUser) setSecurityUser(moreUser); closeMore() }}>
+          <ListItemIcon><ShieldIcon fontSize="small" /></ListItemIcon>
+          <ListItemText>{t('admin:users.more_menu.account_security', { defaultValue: '账号安全' })}</ListItemText>
         </MenuItem>
       </Menu>
 
       <AdminPasskeysDialog open={!!passkeysUser} user={passkeysUser} md={md}
         onClose={() => setPasskeysUser(null)} />
+
+      <AccountSecurityDrawer
+        open={!!securityUser} user={securityUser} md={md}
+        onClose={() => setSecurityUser(null)}
+        onResetPassword={actionResetPassword}
+        onResetCredentials={actionResetCredentials}
+        onResetEmergency={actionResetEmergency}
+        onUnlinkSSO={actionUnlinkSSO}
+        onReset2FA={actionReset2FA}
+        onManagePasskeys={actionManagePasskeys}
+      />
 
       {/* Create dialog */}
       <Dialog open={createOpen} onClose={() => !createBusy && setCreateOpen(false)}

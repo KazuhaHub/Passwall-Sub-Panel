@@ -1,12 +1,23 @@
 import { create } from 'zustand'
 import { startAuthentication } from '@simplewebauthn/browser'
-import { localLogin, passkeyLoginBegin, passkeyLoginFinish, ssoComplete, verify2FA } from '@/api/auth'
+import {
+  localLogin,
+  passkey2FABegin,
+  passkey2FAFinish,
+  passkeyLoginBegin,
+  passkeyLoginFinish,
+  ssoComplete,
+  verify2FA,
+} from '@/api/auth'
 import { isTwoFAChallenge } from '@/api/types'
-import type { AuthLoginResponse, LoginCaptcha, Role } from '@/api/types'
+import type { AuthLoginResponse, LoginCaptcha, Role, TwoFAMethod } from '@/api/types'
 
 // LoginOutcome tells the login form whether the credentials produced a session
-// or a 2FA challenge that must be completed via complete2FA.
-export type LoginOutcome = { twoFA: false } | { twoFA: true; pendingToken: string }
+// or a 2FA challenge that must be completed. `methods` is the set of alternative
+// verification methods the server will accept for this challenge.
+export type LoginOutcome =
+  | { twoFA: false }
+  | { twoFA: true; pendingToken: string; methods: TwoFAMethod[] }
 
 interface AuthState {
   userId: number | null
@@ -23,8 +34,11 @@ interface AuthState {
   // login() — it may surface a 2FA challenge for accounts that also enrolled TOTP.
   loginPasskey: () => Promise<LoginOutcome>
   // complete2FA finishes a login that returned a 2FA challenge: it exchanges the
-  // pending token + code for a real session.
+  // pending token + code (TOTP, recovery, or emailed code) for a real session.
   complete2FA: (pendingToken: string, code: string) => Promise<void>
+  // complete2FAPasskey finishes a 2FA challenge by asserting a passkey instead of
+  // a code (only offered when the first factor was a password).
+  complete2FAPasskey: (pendingToken: string) => Promise<void>
   loginSSO: () => Promise<void>
   setDisplayName: (name: string) => void
   logout: () => void
@@ -77,7 +91,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     // A 2FA-enabled account returns a challenge, not a session: hold the
     // pending token and let the form collect the second factor.
     if (isTwoFAChallenge(res)) {
-      return { twoFA: true, pendingToken: res.pending_token }
+      return { twoFA: true, pendingToken: res.pending_token, methods: res.methods ?? ['totp', 'recovery'] }
     }
     applySession(res, set)
     return { twoFA: false }
@@ -89,7 +103,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     const assertion = await startAuthentication({ optionsJSON: publicKey })
     const res = await passkeyLoginFinish(session_id, assertion)
     if (isTwoFAChallenge(res)) {
-      return { twoFA: true, pendingToken: res.pending_token }
+      return { twoFA: true, pendingToken: res.pending_token, methods: res.methods ?? ['totp', 'recovery'] }
     }
     applySession(res, set)
     return { twoFA: false }
@@ -97,6 +111,13 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   async complete2FA(pendingToken, code) {
     const res = await verify2FA(pendingToken, code)
+    applySession(res, set)
+  },
+
+  async complete2FAPasskey(pendingToken) {
+    const { session_id, publicKey } = await passkey2FABegin(pendingToken)
+    const assertion = await startAuthentication({ optionsJSON: publicKey })
+    const res = await passkey2FAFinish(pendingToken, session_id, assertion)
     applySession(res, set)
   },
 

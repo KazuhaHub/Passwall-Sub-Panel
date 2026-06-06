@@ -56,8 +56,8 @@ type Output struct {
 func (s *Service) loadRenderSettings(ctx context.Context) ports.UISettings {
 	st, _ := s.repos.Settings.Load(ctx, ports.UISettings{
 		SiteTitle:   "Kazuha Hub Passwall",
-		LogoURL:     "/images/logo+title-circle.png",
-		LogoURLDark: "/images/logo+title-circle-darkmode.png",
+		LogoURL:     "/images/logo-title-circle.png",
+		LogoURLDark: "/images/logo-title-circle-darkmode.png",
 	})
 	return st
 }
@@ -207,7 +207,7 @@ func (s *Service) profilePlaceholders(u *domain.User, st ports.UISettings) map[s
 		st.SiteTitle = "Kazuha Hub Passwall"
 	}
 	if st.LogoURL == "" {
-		st.LogoURL = "/images/logo+title-circle.png"
+		st.LogoURL = "/images/logo-title-circle.png"
 	}
 	if st.LogoURLDark == "" {
 		st.LogoURLDark = st.LogoURL

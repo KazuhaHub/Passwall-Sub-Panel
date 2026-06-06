@@ -103,6 +103,8 @@ type settingsDTO struct {
 	// never echoed on GET. HasCaptchaSecretKey reports whether one is set.
 	CaptchaSecretKey       string `json:"captcha_secret_key,omitempty"`
 	HasCaptchaSecretKey    bool   `json:"has_captcha_secret_key"`
+	CaptchaRegisterEnabled bool   `json:"captcha_register_enabled"`
+	CaptchaForgotEnabled   bool   `json:"captcha_forgot_enabled"`
 	LockoutEnabled         bool   `json:"lockout_enabled"`
 	LockoutThreshold       int    `json:"lockout_threshold"`
 	LockoutWindowMinutes   int    `json:"lockout_window_minutes"`
@@ -128,6 +130,10 @@ type settingsDTO struct {
 	// passkeys; PasskeyPasswordless additionally allows usernameless passkey login.
 	PasskeyEnabled      bool `json:"passkey_enabled"`
 	PasskeyPasswordless bool `json:"passkey_passwordless"`
+	// Alternative 2FA verification methods offered at the login challenge (v3.7.0),
+	// on top of the always-available TOTP + recovery codes. Both default off.
+	TwoFAAllowPasskey bool `json:"twofa_allow_passkey"`
+	TwoFAAllowEmail   bool `json:"twofa_allow_email"`
 }
 
 func (h *AdminSettingsHandler) defaults() ports.UISettings {
@@ -225,6 +231,8 @@ func settingsToDTO(s ports.UISettings) settingsDTO {
 		CaptchaSiteKey:       s.CaptchaSiteKey,
 		// Secret key masked: never echoed, only presence reported.
 		HasCaptchaSecretKey:    strings.TrimSpace(s.CaptchaSecretKey) != "",
+		CaptchaRegisterEnabled: s.CaptchaRegisterEnabled,
+		CaptchaForgotEnabled:   s.CaptchaForgotEnabled,
 		LockoutEnabled:         s.LockoutEnabled,
 		LockoutThreshold:       s.LockoutThreshold,
 		LockoutWindowMinutes:   s.LockoutWindowMinutes,
@@ -242,6 +250,8 @@ func settingsToDTO(s ports.UISettings) settingsDTO {
 		TOTPEnabled:                          s.TOTPEnabled,
 		PasskeyEnabled:                       s.PasskeyEnabled,
 		PasskeyPasswordless:                  s.PasskeyPasswordless,
+		TwoFAAllowPasskey:                    s.TwoFAAllowPasskey,
+		TwoFAAllowEmail:                      s.TwoFAAllowEmail,
 	}
 }
 
@@ -329,6 +339,8 @@ func (h *AdminSettingsHandler) Put(c *gin.Context) {
 		CaptchaTrigger:              strings.ToLower(strings.TrimSpace(req.CaptchaTrigger)),
 		CaptchaFailThreshold:        req.CaptchaFailThreshold,
 		CaptchaSiteKey:              strings.TrimSpace(req.CaptchaSiteKey),
+		CaptchaRegisterEnabled:      req.CaptchaRegisterEnabled,
+		CaptchaForgotEnabled:        req.CaptchaForgotEnabled,
 		LockoutEnabled:              req.LockoutEnabled,
 		LockoutThreshold:            req.LockoutThreshold,
 		LockoutWindowMinutes:        req.LockoutWindowMinutes,
@@ -346,6 +358,8 @@ func (h *AdminSettingsHandler) Put(c *gin.Context) {
 		TOTPEnabled:                   req.TOTPEnabled,
 		PasskeyEnabled:                req.PasskeyEnabled,
 		PasskeyPasswordless:           req.PasskeyPasswordless,
+		TwoFAAllowPasskey:             req.TwoFAAllowPasskey,
+		TwoFAAllowEmail:               req.TwoFAAllowEmail,
 		// GeoIPUpdateToken / CaptchaSecretKey resolved below ("empty = keep existing").
 	}
 	// Update token is write-only: a blank field on save means the admin didn't

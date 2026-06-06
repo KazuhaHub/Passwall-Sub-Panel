@@ -580,6 +580,27 @@ func (h *AdminUserHandler) Reset2FA(c *gin.Context) {
 	c.Status(http.StatusNoContent)
 }
 
+// RegenerateUser2FARecovery is the admin break-glass for a user who still has
+// 2FA on but lost their recovery codes: it rotates the codes and returns the
+// fresh plaintext set for the admin to relay over a secure channel. The user's
+// 2FA stays enabled. Operators can't touch a privileged account.
+func (h *AdminUserHandler) RegenerateUser2FARecovery(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid id"})
+		return
+	}
+	if !h.ensureOperatorAllowed(c, id) {
+		return
+	}
+	codes, err := h.twofa.AdminRegenerateRecovery(c.Request.Context(), id)
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"recovery_codes": codes})
+}
+
 type updateUserRequest struct {
 	GroupID  *int64     `json:"group_id,omitempty"`
 	Role     *string    `json:"role,omitempty"`
