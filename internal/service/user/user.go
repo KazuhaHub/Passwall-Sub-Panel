@@ -1022,6 +1022,7 @@ type UpdateInput struct {
 	TrafficResetPeriod *domain.ResetPeriod
 	Remark             *string
 	DisplayName        *string
+	Require2FA         *bool
 }
 
 type EmergencyAccessResult struct {
@@ -1117,6 +1118,9 @@ func (s *Service) UpdateProfile(ctx context.Context, userID int64, in UpdateInpu
 	}
 	if in.Email != nil {
 		u.Email = *in.Email
+	}
+	if in.Require2FA != nil {
+		u.Require2FA = *in.Require2FA
 	}
 	if err := s.users.Update(ctx, u); err != nil {
 		return err

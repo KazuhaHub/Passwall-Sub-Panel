@@ -29,13 +29,14 @@ func NewAdminGroupHandler(groupSvc *group.Service, userSvc *user.Service, users 
 // ---- DTOs ----
 
 type groupDTO struct {
-	ID        int64         `json:"id"`
-	Slug      string        `json:"slug"`
-	Name      string        `json:"name"`
-	TagFilter tagFilterDTO  `json:"tag_filter"`
-	Layout    domain.Layout `json:"layout"`
-	Remark    string        `json:"remark,omitempty"`
-	Members   int64         `json:"members"`
+	ID         int64         `json:"id"`
+	Slug       string        `json:"slug"`
+	Name       string        `json:"name"`
+	TagFilter  tagFilterDTO  `json:"tag_filter"`
+	Layout     domain.Layout `json:"layout"`
+	Remark     string        `json:"remark,omitempty"`
+	Require2FA bool          `json:"require_2fa"`
+	Members    int64         `json:"members"`
 }
 
 type tagFilterDTO struct {
@@ -48,17 +49,19 @@ type tagFilterDTO struct {
 }
 
 type createGroupRequest struct {
-	Slug      string        `json:"slug" binding:"required"`
-	Name      string        `json:"name" binding:"required"`
-	TagFilter tagFilterDTO  `json:"tag_filter"`
-	Layout    domain.Layout `json:"layout"`
-	Remark    string        `json:"remark"`
+	Slug       string        `json:"slug" binding:"required"`
+	Name       string        `json:"name" binding:"required"`
+	TagFilter  tagFilterDTO  `json:"tag_filter"`
+	Layout     domain.Layout `json:"layout"`
+	Remark     string        `json:"remark"`
+	Require2FA bool          `json:"require_2fa"`
 }
 
 type updateGroupRequest struct {
-	Name      *string       `json:"name,omitempty"`
-	TagFilter *tagFilterDTO `json:"tag_filter,omitempty"`
-	Remark    *string       `json:"remark,omitempty"`
+	Name       *string       `json:"name,omitempty"`
+	TagFilter  *tagFilterDTO `json:"tag_filter,omitempty"`
+	Remark     *string       `json:"remark,omitempty"`
+	Require2FA *bool         `json:"require_2fa,omitempty"`
 }
 
 type updateLayoutRequest struct {
@@ -115,11 +118,12 @@ func (h *AdminGroupHandler) Create(c *gin.Context) {
 		return
 	}
 	g := &domain.Group{
-		Slug:      req.Slug,
-		Name:      req.Name,
-		TagFilter: domain.TagFilter{All: req.TagFilter.All, Tags: req.TagFilter.Tags, Mode: req.TagFilter.Mode},
-		Layout:    req.Layout,
-		Remark:    req.Remark,
+		Slug:       req.Slug,
+		Name:       req.Name,
+		TagFilter:  domain.TagFilter{All: req.TagFilter.All, Tags: req.TagFilter.Tags, Mode: req.TagFilter.Mode},
+		Layout:     req.Layout,
+		Remark:     req.Remark,
+		Require2FA: req.Require2FA,
 	}
 	if err := h.group.Create(c.Request.Context(), g); err != nil {
 		mapGroupServiceError(c, err)
@@ -158,6 +162,9 @@ func (h *AdminGroupHandler) Update(c *gin.Context) {
 	}
 	if req.Remark != nil {
 		g.Remark = *req.Remark
+	}
+	if req.Require2FA != nil {
+		g.Require2FA = *req.Require2FA
 	}
 	if err := h.group.Update(c.Request.Context(), g); err != nil {
 		mapGroupServiceError(c, err)
@@ -220,12 +227,13 @@ func toGroupDTO(g *domain.Group) groupDTO {
 		tags = []string{}
 	}
 	return groupDTO{
-		ID:        g.ID,
-		Slug:      g.Slug,
-		Name:      g.Name,
-		TagFilter: tagFilterDTO{All: g.TagFilter.All, Tags: tags, Mode: g.TagFilter.Mode},
-		Layout:    g.Layout,
-		Remark:    g.Remark,
+		ID:         g.ID,
+		Slug:       g.Slug,
+		Name:       g.Name,
+		TagFilter:  tagFilterDTO{All: g.TagFilter.All, Tags: tags, Mode: g.TagFilter.Mode},
+		Layout:     g.Layout,
+		Remark:     g.Remark,
+		Require2FA: g.Require2FA,
 	}
 }
 

@@ -13,6 +13,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/paneltz"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/authpolicy"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/passkey"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/render"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/traffic"
@@ -31,10 +32,11 @@ type UserMeHandler struct {
 	ownership ports.OwnershipRepo
 	twofa     *twofa.Service
 	passkey   *passkey.Service
+	enroll    *authpolicy.Service
 }
 
-func NewUserMeHandler(userSvc *user.Service, trafficSvc *traffic.Service, settings ports.SettingsRepo, nodes ports.NodeRepo, ownership ports.OwnershipRepo, twofaSvc *twofa.Service, passkeySvc *passkey.Service) *UserMeHandler {
-	return &UserMeHandler{user: userSvc, traffic: trafficSvc, settings: settings, nodes: nodes, ownership: ownership, twofa: twofaSvc, passkey: passkeySvc}
+func NewUserMeHandler(userSvc *user.Service, trafficSvc *traffic.Service, settings ports.SettingsRepo, nodes ports.NodeRepo, ownership ports.OwnershipRepo, twofaSvc *twofa.Service, passkeySvc *passkey.Service, enroll *authpolicy.Service) *UserMeHandler {
+	return &UserMeHandler{user: userSvc, traffic: trafficSvc, settings: settings, nodes: nodes, ownership: ownership, twofa: twofaSvc, passkey: passkeySvc, enroll: enroll}
 }
 
 func (h *UserMeHandler) Profile(c *gin.Context) {
@@ -107,6 +109,10 @@ func (h *UserMeHandler) Profile(c *gin.Context) {
 		// accounts can't enroll). totp_enabled is this user's current state.
 		"totp_available": u.HasLocalPassword() && settingsErr == nil && settings.TOTPEnabled,
 		"totp_enabled":   u.TOTPEnabled,
+		// must_enroll_2fa drives the frontend enrollment gate: the account is
+		// required to set up a second factor (per-user / group / staff-wide) but
+		// hasn't (no TOTP, no passkey). The backend hard-gate enforces the same.
+		"must_enroll_2fa": h.mustEnroll2FA(c.Request.Context(), u),
 		// Passkeys: passkey_available gates the "add passkey" affordance;
 		// passkey_credentials is the sanitized list; passkey_enabled is whether
 		// any are registered.
@@ -131,6 +137,17 @@ func (h *UserMeHandler) Profile(c *gin.Context) {
 			"used_bytes":      emergencyStatus.UsedBytes,
 		},
 	})
+}
+
+// mustEnroll2FA reports whether the account is required to set up a second factor
+// but hasn't. Best-effort: a checker/DB blip returns false so the profile still
+// loads (the backend hard-gate is the real enforcement).
+func (h *UserMeHandler) mustEnroll2FA(ctx context.Context, u *domain.User) bool {
+	if h.enroll == nil {
+		return false
+	}
+	must, err := h.enroll.MustEnroll(ctx, u)
+	return err == nil && must
 }
 
 // ServerStatus returns a sanitized, per-node availability list for the nodes

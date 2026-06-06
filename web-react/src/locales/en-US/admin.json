@@ -115,6 +115,8 @@
       "twofa_methods_hint": "Authenticator codes and one-time recovery codes are always available. You can additionally let users switch at the login challenge to:",
       "twofa_allow_passkey": "Passkey verification (only after a password login)",
       "twofa_allow_email": "Email one-time code (weaker; requires SMTP)",
+      "require_2fa_for_staff": "Require two-factor for all admins/operators",
+      "require_2fa_for_staff_hint": "When on, an admin/operator without TOTP or a passkey is required to finish setup right after login before using the panel. You can also require it per group (Groups) or per user (Account Security). Local accounts only.",
       "local_auth_scope_hint": "Two-factor auth and passkeys apply to LOCAL login only. MFA for SSO sign-ins is the identity provider's (IdP's) responsibility — PSP doesn't add its own. An account that has both a local password and an SSO binding is not subject to these when it signs in via SSO.",
       "passkey_enabled": "Allow passkeys (WebAuthn)",
       "passkey_passwordless": "Allow usernameless passkey login (no username)",
@@ -1131,7 +1133,8 @@
       "renewed": "Renewed by {{days}} days",
       "renew_permanent_skip": "Permanent accounts don't need quick renewal; edit the user to set an expiry first.",
       "copied": "Copied",
-      "sso_unlinked": "SSO binding cleared"
+      "sso_unlinked": "SSO binding cleared",
+      "saved": "Saved"
     },
     "confirm": {
       "delete_title": "Delete user",
@@ -1175,7 +1178,8 @@
       "regen_recovery_confirm": "Regenerate",
       "regen_recovery_title": "Regenerate recovery codes",
       "regen_recovery_message": "This invalidates all of {{upn}}'s current recovery codes and issues a new set. Relay the new codes to the user over a secure channel — they're shown only once.",
-      "regen_recovery_done": "New recovery codes (shown once — relay to the user):"
+      "regen_recovery_done": "New recovery codes (shown once — relay to the user):",
+      "require_2fa": "Require this user to set up two-factor auth"
     },
     "reset_password": {
       "title": "Reset login password",
@@ -1266,7 +1270,8 @@
       "tag": "Tag",
       "node": "Node",
       "custom_conditions": "Custom conditions",
-      "remark": "Remark"
+      "remark": "Remark",
+      "require_2fa": "Require this group's members to set up two-factor auth"
     },
     "placeholder": {
       "tags": "Pick region:XX / tag:YY from the dropdown, or type custom"

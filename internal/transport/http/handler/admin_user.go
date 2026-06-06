@@ -152,6 +152,8 @@ type userDTO struct {
 	// TOTPEnabled lets the admin table show a 2FA badge and surface the
 	// break-glass "reset 2FA" action only for accounts that actually have it on.
 	TOTPEnabled bool `json:"totp_enabled"`
+	// Require2FA is the per-user "force second-factor enrollment" override.
+	Require2FA bool `json:"require_2fa"`
 }
 
 type createUserRequest struct {
@@ -615,6 +617,9 @@ type updateUserRequest struct {
 	TrafficResetPeriod *string  `json:"traffic_reset_period,omitempty"`
 	Remark             *string  `json:"remark,omitempty"`
 	DisplayName        *string  `json:"display_name,omitempty"`
+	// Require2FA forces this account to enroll a second factor before using the
+	// panel (per-user override on top of the group / staff-wide flags).
+	Require2FA *bool `json:"require_2fa,omitempty"`
 }
 
 func (h *AdminUserHandler) Update(c *gin.Context) {
@@ -668,6 +673,7 @@ func (h *AdminUserHandler) Update(c *gin.Context) {
 		ClearExpire: req.ClearExpire,
 		Remark:      req.Remark,
 		DisplayName: req.DisplayName,
+		Require2FA:  req.Require2FA,
 	}
 	if req.Role != nil {
 		role := domain.Role(*req.Role)
@@ -787,6 +793,7 @@ func (h *AdminUserHandler) toDTOWith(u *domain.User, st ports.UISettings, loc *t
 		CreatedAt:           u.CreatedAt,
 		LastOnlineAt:        u.LastOnlineAt,
 		TOTPEnabled:         u.TOTPEnabled,
+		Require2FA:          u.Require2FA,
 	}
 }
 

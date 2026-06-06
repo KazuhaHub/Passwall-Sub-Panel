@@ -4,6 +4,22 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## v3.7.0-beta.11 — 2026-06-06
+
+新增**强制启用两步验证**：管理员可要求账号在使用面板前先绑定第二因子（TOTP 或通行密钥任一），三级粒度——**全局所有管理员/运营**、**按分组**、**按单个用户**。后端硬闸 + 前端引导双层执行。全程 TDD（策略 + 闸门中间件），经 7-agent 对抗审查修 1 实 HIGH（operator 锁死）+ 1 实 MED（闸门错误失败开放）。`go test ./...` / `go vet` / `tsc` / `npm build` 全绿，启动 smoke（新列 AutoMigrate + 响应正常）通过。
+
+### Added
+
+- **强制两步验证（require 2FA）** —— 三个开关：「登录与安全 → 强制所有管理员/运营启用」（`require_2fa_for_staff`）、分组编辑里的「强制本组成员」（`Group.Require2FA`）、用户「账号安全」抽屉里的「要求该用户启用」（`User.Require2FA`）。命中条件：账号有本地密码、被任一开关要求、且尚未绑定 TOTP 或通行密钥。新增 `internal/service/authpolicy`（`MustEnroll` 决策，TDD）。
+- **后端硬闸** —— 新增 `Require2FAEnrollment` 中间件挂在 user / staff / admin 三个鉴权路由组上：命中的用户除「读自身资料 + 2FA/通行密钥绑定端点」外一律 `403 {code:"2fa_enrollment_required"}`，杜绝绕过前端直接调 API。`operator` 角色一并加入 `/api/user/me` 路由组（否则被要求 2FA 的 operator 会被角色闸挡在绑定端点外、无路可走——审查 HIGH）。
+- **前端引导** —— `/user/me` 暴露 `must_enroll_2fa`；axios 拦截器遇到 `2fa_enrollment_required` 自动跳到新页面 `/enroll-2fa`（复用现成的 TOTP / 通行密钥绑定对话框），绑定完成即放行回面板。
+
+### 设计取舍 / 安全
+
+- **失败安全（不锁死）** —— 若 TOTP 与通行密钥两种绑定方式都被关掉，「强制」无从满足，`MustEnroll` 此时**不**拦截（关掉所有绑定方式即等于关掉强制），并配 TDD。
+- **仅本地登录** —— 强制只作用于本地密码账号；SSO 登录的二次验证由 IdP 负责，不在此处叠加。
+- **闸门错误失败开放（有意）** —— 用户查询 / 策略求值出错时放行并记 `WARN`（这是绑定提醒、非认证边界，认证边界 `RequireAuth` 已失败闭合；一次 DB/设置抖动不应把全体用户 403）。配中间件 TDD（拦截 / 放行 / 白名单 / 失败开放四类）。
+
 ## v3.7.0-beta.10 — 2026-06-06
 
 beta.9 的登录/账号安全 UI 打磨：**登录挑战改成"选择验证方式"** + **管理员「账号安全」抽屉视觉重做** + **`/login/local` 复用主登录页**（补上 passkey/2FA）+ 设置文案与间距。纯前端，后端零改动；`tsc` / `npm build` / 二进制重建全绿。

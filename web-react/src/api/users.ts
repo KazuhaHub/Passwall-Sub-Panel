@@ -22,6 +22,8 @@ export interface UpdateUserRequest {
   remark?: string
   display_name?: string
   email?: string
+  /** Per-user "force second-factor enrollment" override. */
+  require_2fa?: boolean
 }
 
 export interface UserListParams {

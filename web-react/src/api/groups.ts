@@ -29,6 +29,7 @@ export async function createGroup(req: {
   tag_filter?: TagFilter
   layout?: Layout
   remark?: string
+  require_2fa?: boolean
 }) {
   const { data } = await client.post<Group>('/admin/groups', req)
   return data
@@ -36,7 +37,7 @@ export async function createGroup(req: {
 
 export async function updateGroup(
   id: number,
-  req: { name?: string; tag_filter?: TagFilter; remark?: string },
+  req: { name?: string; tag_filter?: TagFilter; remark?: string; require_2fa?: boolean },
 ) {
   const { data } = await client.put<{ group: Group; resync_errors?: string[] }>(
     `/admin/groups/${id}`,

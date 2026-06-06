@@ -132,8 +132,9 @@ type settingsDTO struct {
 	PasskeyPasswordless bool `json:"passkey_passwordless"`
 	// Alternative 2FA verification methods offered at the login challenge (v3.7.0),
 	// on top of the always-available TOTP + recovery codes. Both default off.
-	TwoFAAllowPasskey bool `json:"twofa_allow_passkey"`
-	TwoFAAllowEmail   bool `json:"twofa_allow_email"`
+	TwoFAAllowPasskey  bool `json:"twofa_allow_passkey"`
+	TwoFAAllowEmail    bool `json:"twofa_allow_email"`
+	Require2FAForStaff bool `json:"require_2fa_for_staff"`
 }
 
 func (h *AdminSettingsHandler) defaults() ports.UISettings {
@@ -252,6 +253,7 @@ func settingsToDTO(s ports.UISettings) settingsDTO {
 		PasskeyPasswordless:                  s.PasskeyPasswordless,
 		TwoFAAllowPasskey:                    s.TwoFAAllowPasskey,
 		TwoFAAllowEmail:                      s.TwoFAAllowEmail,
+		Require2FAForStaff:                   s.Require2FAForStaff,
 	}
 }
 
@@ -360,6 +362,7 @@ func (h *AdminSettingsHandler) Put(c *gin.Context) {
 		PasskeyPasswordless:           req.PasskeyPasswordless,
 		TwoFAAllowPasskey:             req.TwoFAAllowPasskey,
 		TwoFAAllowEmail:               req.TwoFAAllowEmail,
+		Require2FAForStaff:            req.Require2FAForStaff,
 		// GeoIPUpdateToken / CaptchaSecretKey resolved below ("empty = keep existing").
 	}
 	// Update token is write-only: a blank field on save means the admin didn't

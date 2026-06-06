@@ -230,6 +230,9 @@ export interface UISettings {
   twofa_allow_passkey: boolean
   /** Offer a one-time code by email as the 2FA factor (weaker; default off). */
   twofa_allow_email: boolean
+  /** Force every admin/operator (local-password) account to enroll a second
+   *  factor before using the panel. */
+  require_2fa_for_staff: boolean
 }
 
 export async function getUISettings() {

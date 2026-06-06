@@ -115,6 +115,8 @@
       "twofa_methods_hint": "验证器代码和一次性备用码始终可用。可额外允许用户在登录挑战时改用：",
       "twofa_allow_passkey": "通行密钥验证（仅密码登录时可用）",
       "twofa_allow_email": "邮箱一次性验证码（较弱，需配置 SMTP）",
+      "require_2fa_for_staff": "强制所有管理员/运营启用两步验证",
+      "require_2fa_for_staff_hint": "开启后，未绑定 TOTP 或通行密钥的管理员/运营登录后会被要求先完成设置才能使用面板。也可在「分组」对每组、或在用户「账号安全」对单个用户单独强制。仅本地账号生效。",
       "passkey_enabled": "允许通行密钥（Passkey）",
       "passkey_passwordless": "允许通行密钥免密登录（无需用户名）",
       "passkey_hint": "允许有本地密码的账号在「我的账号」里绑定通行密钥（WebAuthn）。开启免密登录后，登录页会显示「使用通行密钥登录」按钮、无需输入用户名。需先配置「订阅基础 URL」（用于确定 RP 域名），且站点须为 HTTPS（localhost 除外）。SSO 账号不受影响。",
@@ -1131,7 +1133,8 @@
       "renewed": "已续期 {{days}} 天",
       "renew_permanent_skip": "永久账号无需快捷续期；如需改成限时账号请进入编辑设置到期时间",
       "copied": "已复制",
-      "sso_unlinked": "已解除 SSO 绑定"
+      "sso_unlinked": "已解除 SSO 绑定",
+      "saved": "已保存"
     },
     "confirm": {
       "delete_title": "删除用户",
@@ -1175,7 +1178,8 @@
       "regen_recovery_confirm": "重新生成",
       "regen_recovery_title": "重新生成备用码",
       "regen_recovery_message": "将作废 {{upn}} 现有的全部备用码并生成一组新的。请把新备用码通过安全渠道转交给用户——它只会显示这一次。",
-      "regen_recovery_done": "新备用码（只显示一次，请转交用户）："
+      "regen_recovery_done": "新备用码（只显示一次，请转交用户）：",
+      "require_2fa": "要求该用户启用两步验证"
     },
     "reset_password": {
       "title": "重置登录密码",
@@ -1266,7 +1270,8 @@
       "tag": "Tag",
       "node": "Node",
       "custom_conditions": "自定义条件",
-      "remark": "备注"
+      "remark": "备注",
+      "require_2fa": "强制本组成员启用两步验证"
     },
     "placeholder": {
       "tags": "从下拉选 region:XX / tag:YY，或自由输入"

@@ -82,6 +82,9 @@ export interface MeProfile {
   passkey_available?: boolean
   passkey_enabled?: boolean
   passkey_credentials?: PasskeyCredential[]
+  /** must_enroll_2fa: the account is required (per-user / group / staff-wide) to
+   *  set up a second factor but hasn't. The panel is gated until it does. */
+  must_enroll_2fa?: boolean
   emergency_access: {
     enabled: boolean
     available: boolean

@@ -862,6 +862,12 @@ type UISettings struct {
 	TwoFAAllowPasskey bool `json:"twofa_allow_passkey"`
 	TwoFAAllowEmail   bool `json:"twofa_allow_email"`
 
+	// Require2FAForStaff forces every admin/operator account (with a local
+	// password) to enroll a second factor before using the panel — a panel-wide
+	// lever on top of the per-group and per-user require flags. High-privilege
+	// accounts are the obvious thing to harden first.
+	Require2FAForStaff bool `json:"require_2fa_for_staff"`
+
 	// ---- IP geolocation (access-log region display, offline .mmdb) ----
 	// Resolution is fully offline against a local .mmdb in <ConfigDir>/geoip/;
 	// no per-IP external calls. GeoIPEnabled gates the whole feature (default

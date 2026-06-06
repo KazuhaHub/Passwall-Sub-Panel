@@ -256,6 +256,7 @@ func settingDescriptors(s *ports.UISettings) []settingDescriptor {
 		// security --- alternative 2FA verification methods (v3.7.0)
 		boolField("security", "twofa_allow_passkey", &s.TwoFAAllowPasskey),
 		boolField("security", "twofa_allow_email", &s.TwoFAAllowEmail),
+		boolField("security", "require_2fa_for_staff", &s.Require2FAForStaff),
 
 		// runtime --- cron / performance / tz / global toggles
 		strField("runtime", "timezone", &s.Timezone),

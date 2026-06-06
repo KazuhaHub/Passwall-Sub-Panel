@@ -6,8 +6,10 @@ import {
   Button,
   Chip,
   Drawer,
+  FormControlLabel,
   IconButton,
   Stack,
+  Switch,
   Typography,
 } from '@mui/material'
 import CloseIcon from '@mui/icons-material/Close'
@@ -22,7 +24,7 @@ import EmergencyIcon from '@mui/icons-material/MedicalServices'
 import PasswordIcon from '@mui/icons-material/Password'
 import { useTranslation } from 'react-i18next'
 
-import { regenerateUser2FARecovery } from '@/api/users'
+import { regenerateUser2FARecovery, updateUser } from '@/api/users'
 import type { User } from '@/api/types'
 import type { M3Tokens } from '@/theme'
 import { confirm } from '@/components/ConfirmHost'
@@ -55,13 +57,27 @@ export default function AccountSecurityDrawer({
   const { t } = useTranslation('admin')
   const [busy, setBusy] = useState(false)
   const [recoveryCodes, setRecoveryCodes] = useState<string[] | null>(null)
+  const [require2FA, setRequire2FA] = useState(false)
 
-  // Clear the one-time recovery panel whenever the target user changes.
+  // Reset transient state whenever the target user changes.
   const targetId = user?.id
   const [shownFor, setShownFor] = useState<number | undefined>(undefined)
   if (open && targetId !== shownFor) {
     setShownFor(targetId)
     setRecoveryCodes(null)
+    setRequire2FA(!!user?.require_2fa)
+  }
+
+  async function toggleRequire2FA(next: boolean) {
+    if (!user) return
+    setRequire2FA(next) // optimistic
+    setBusy(true)
+    try {
+      await updateUser(user.id, { require_2fa: next })
+      pushSnack(t('users.toast.saved', { defaultValue: '已保存' }), 'success')
+    } catch {
+      setRequire2FA(!next) // revert
+    } finally { setBusy(false) }
   }
 
   if (!user) return null
@@ -129,6 +145,10 @@ export default function AccountSecurityDrawer({
           status={u.totp_enabled
             ? <Chip size="small" color="success" label={t('users.security.twofa_on', { defaultValue: '2FA 已启用' })} sx={{ height: 22 }} />
             : <Typography variant="caption" color="text.secondary">{t('users.security.twofa_off', { defaultValue: '未启用' })}</Typography>}>
+          <FormControlLabel
+            control={<Switch size="small" checked={require2FA} disabled={busy} onChange={(_, c) => toggleRequire2FA(c)} />}
+            label={t('users.security.require_2fa', { defaultValue: '要求该用户启用两步验证' })}
+            sx={{ ml: 0, mb: 1, display: 'flex', '& .MuiFormControlLabel-label': { ml: 1, fontSize: 14 } }} />
           {u.totp_enabled ? (
             <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
               <Button size="small" variant="outlined" disabled={busy} onClick={doRegenRecovery}>

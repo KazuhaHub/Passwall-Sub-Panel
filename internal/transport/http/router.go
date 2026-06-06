@@ -17,6 +17,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/alert"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/audit"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/auth"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/authpolicy"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/captcha"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/cert"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/geo"
@@ -233,10 +234,22 @@ func NewRouter(d Deps) *gin.Engine {
 	}
 
 	// Authenticated user self-service
-	userMe := handler.NewUserMeHandler(d.User, d.Traffic, d.Repos.Settings, d.Repos.Node, d.Repos.Ownership, twofaSvc, passkeySvc)
+	// "Require 2FA" enforcement: decides whether an account must enroll a second
+	// factor before using the panel, and the middleware that gates it. Shared by
+	// the user, staff and admin trees + the /user/me profile flag.
+	enroll2FA := authpolicy.New(authpolicy.Deps{Groups: d.Repos.Group, Passkeys: d.Repos.WebAuthn, Settings: d.Repos.Settings})
+	require2FAGate := middleware.Require2FAEnrollment(enroll2FA, d.User)
+
+	userMe := handler.NewUserMeHandler(d.User, d.Traffic, d.Repos.Settings, d.Repos.Node, d.Repos.Ownership, twofaSvc, passkeySvc, enroll2FA)
 	userGroup := g.Group("/api/user/me",
 		middleware.RequireAuth(d.Auth, d.User),
-		middleware.RequireRole(domain.RoleUser, domain.RoleAdmin),
+		// Operators are included so that an operator forced to enroll 2FA (via the
+		// staff-wide / group / per-user requirement) can actually reach the
+		// self-service enrollment ceremonies + /user/me — otherwise the gate below
+		// would 403 them at RequireRole and lock them out with no way to enroll.
+		// Per-handler logic already scopes what these endpoints do.
+		middleware.RequireRole(domain.RoleUser, domain.RoleOperator, domain.RoleAdmin),
+		require2FAGate,
 	)
 	{
 		userGroup.GET("", userMe.Profile)
@@ -279,10 +292,12 @@ func NewRouter(d Deps) *gin.Engine {
 	staffGroup := g.Group("/api/admin",
 		middleware.RequireAuth(d.Auth, d.User),
 		middleware.RequireRole(domain.RoleAdmin, domain.RoleOperator),
+		require2FAGate,
 	)
 	adminGroup := g.Group("/api/admin",
 		middleware.RequireAuth(d.Auth, d.User),
 		middleware.RequireRole(domain.RoleAdmin),
+		require2FAGate,
 	)
 	{
 		users := handler.NewAdminUserHandler(d.User, d.Repos.Settings, d.Mail, d.Async, twofaSvc, passkeySvc)

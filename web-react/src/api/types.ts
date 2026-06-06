@@ -57,6 +57,9 @@ export interface User {
   /** Whether the account has TOTP 2FA enabled. Drives the admin table badge
    *  and the break-glass "reset 2FA" action's visibility. */
   totp_enabled?: boolean
+  /** Per-user "force second-factor enrollment" override (on top of the group /
+   *  staff-wide flags). Toggled from the Account Security drawer. */
+  require_2fa?: boolean
 }
 
 export interface CreateUserRequest {
@@ -198,6 +201,8 @@ export interface Group {
   tag_filter: TagFilter
   layout: Layout
   remark?: string
+  /** Force every local-password member of this group to enroll a second factor. */
+  require_2fa?: boolean
   members: number
 }
 

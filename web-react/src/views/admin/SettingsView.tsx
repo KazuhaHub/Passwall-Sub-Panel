@@ -580,6 +580,12 @@ export default function SettingsView() {
                     control={<Switch checked={settings.twofa_allow_email} onChange={(_, c) => patch('twofa_allow_email', c)} />}
                     sx={{ ml: 0, display: 'flex', '& .MuiFormControlLabel-label': { ml: 1.5 } }} />
                 </Stack>
+                <FormControlLabel label={t('settings.general.require_2fa_for_staff', { defaultValue: '强制所有管理员/运营启用两步验证' })}
+                  control={<Switch checked={settings.require_2fa_for_staff} onChange={(_, c) => patch('require_2fa_for_staff', c)} />}
+                  sx={{ ml: 0, mt: 1, display: 'flex', '& .MuiFormControlLabel-label': { ml: 1.5 } }} />
+                <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant }}>
+                  {t('settings.general.require_2fa_for_staff_hint', { defaultValue: '开启后，未绑定 TOTP 或通行密钥的管理员/运营登录后会被要求先完成设置才能使用面板。也可在「分组」对每组、或在用户「账号安全」对单个用户单独强制。仅本地账号生效。' })}
+                </Typography>
               </Box>
             )}
             <Divider sx={{ my: 0.5, borderColor: md.outlineVariant }} />

@@ -189,6 +189,17 @@ client.interceptors.response.use(
       logoutAndRedirect(err)
       return Promise.reject(err)
     }
+    // --- 403 "must enroll 2FA": the account is required to set up a second
+    // factor and the backend gate refuses everything but the enrollment
+    // endpoints. Bounce to the enrollment screen instead of a wall of 403
+    // toasts. (The screen only hits allowlisted endpoints, so no loop.)
+    if (err.response?.status === 403
+      && (err.response?.data as { code?: string } | undefined)?.code === '2fa_enrollment_required') {
+      if (location.pathname !== '/enroll-2fa') {
+        location.href = '/enroll-2fa'
+      }
+      return Promise.reject(err)
+    }
     // --- everything else: categorised + de-duped toast.
     if (!cfg?._skipErrorToast) {
       const status = err.response?.status ?? 0

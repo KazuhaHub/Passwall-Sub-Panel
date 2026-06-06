@@ -58,12 +58,14 @@ interface FormState {
   servers: string[]
   custom_text: string
   remark: string
+  require_2fa: boolean
 }
 
 const EMPTY_FORM: FormState = {
   slug: '', name: '', all: false, mode: 'all',
   regions: [], tags: [], servers: [], custom_text: '',
   remark: '',
+  require_2fa: false,
 }
 
 // parseTagConditions splits a stored tag_filter.tags array into the four
@@ -275,6 +277,7 @@ export default function GroupsView() {
       servers: parsed.servers,
       custom_text: parsed.custom.join(', '),
       remark: g.remark || '',
+      require_2fa: !!g.require_2fa,
     })
     setDialogOpen(true)
   }
@@ -297,6 +300,7 @@ export default function GroupsView() {
           name: form.name,
           tag_filter: tagFilter,
           remark: form.remark,
+          require_2fa: form.require_2fa,
         })
         pushSnack(t('admin:groups.toast.updated'), 'success')
         if (res.resync_errors?.length) {
@@ -308,6 +312,7 @@ export default function GroupsView() {
           name: form.name,
           tag_filter: tagFilter,
           remark: form.remark,
+          require_2fa: form.require_2fa,
         })
         pushSnack(t('admin:groups.toast.created'), 'success')
       }
@@ -633,6 +638,13 @@ export default function GroupsView() {
               label={t('admin:groups.field.remark')}
               value={form.remark}
               onChange={e => setForm({ ...form, remark: e.target.value })}
+            />
+            <FormControlLabel
+              label={t('admin:groups.field.require_2fa', { defaultValue: '强制本组成员启用两步验证' })}
+              control={
+                <Switch checked={form.require_2fa} onChange={(_, c) => setForm({ ...form, require_2fa: c })} />
+              }
+              sx={{ ml: 0, '& .MuiFormControlLabel-label': { ml: 1.5 } }}
             />
           </Box>
         </DialogContent>

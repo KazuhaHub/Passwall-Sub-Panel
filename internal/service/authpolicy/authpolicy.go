@@ -1,0 +1,78 @@
+// Package authpolicy decides whether an account must enroll a second factor
+// before it can use the panel — the "require 2FA" enforcement (per-user,
+// per-group, and panel-wide-for-staff). It only gates local-password accounts;
+// SSO sign-ins are the IdP's responsibility.
+package authpolicy
+
+import (
+	"context"
+
+	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
+)
+
+type GroupGetter interface {
+	GetByID(ctx context.Context, id int64) (*domain.Group, error)
+}
+
+type PasskeyLister interface {
+	FindByUserID(ctx context.Context, userID int64) ([]*domain.PasskeyCredential, error)
+}
+
+type SettingsLoader interface {
+	Load(ctx context.Context, defaults ports.UISettings) (ports.UISettings, error)
+}
+
+type Deps struct {
+	Groups   GroupGetter
+	Passkeys PasskeyLister
+	Settings SettingsLoader
+}
+
+type Service struct{ d Deps }
+
+func New(d Deps) *Service { return &Service{d: d} }
+
+// MustEnroll reports whether u is REQUIRED to set up a second factor but hasn't.
+// Required = the per-user flag, OR the panel-wide "require for staff" setting
+// (admins/operators), OR the user's group flag. Satisfied = an enrolled TOTP or
+// at least one passkey. Only local-password accounts are ever gated.
+func (s *Service) MustEnroll(ctx context.Context, u *domain.User) (bool, error) {
+	if u == nil || !u.HasLocalPassword() {
+		return false, nil
+	}
+	set, err := s.d.Settings.Load(ctx, ports.UISettings{})
+	if err != nil {
+		return false, err
+	}
+	// Fail-safe: if no second factor can be enrolled panel-wide, a requirement is
+	// unsatisfiable — never gate (it would be a lockout with no way out). Turning
+	// off every enrollment method cleanly disables enforcement.
+	if !set.TOTPEnabled && !set.PasskeyEnabled {
+		return false, nil
+	}
+	required := u.Require2FA
+	if !required && (u.Role == domain.RoleAdmin || u.Role == domain.RoleOperator) && set.Require2FAForStaff {
+		required = true
+	}
+	if !required && u.GroupID != 0 && s.d.Groups != nil {
+		g, err := s.d.Groups.GetByID(ctx, u.GroupID)
+		if err == nil && g != nil && g.Require2FA {
+			required = true
+		}
+		// A missing/error group is treated as "no group requirement" — never
+		// fail open into gating someone the group doesn't actually require.
+	}
+	if !required {
+		return false, nil
+	}
+	// Satisfied by a TOTP enrollment or any passkey.
+	if u.TOTPEnabled {
+		return false, nil
+	}
+	creds, err := s.d.Passkeys.FindByUserID(ctx, u.ID)
+	if err != nil {
+		return false, err
+	}
+	return len(creds) == 0, nil
+}

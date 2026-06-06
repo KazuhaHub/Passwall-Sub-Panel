@@ -87,6 +87,9 @@ type userRow struct {
 	TOTPSecret    string `gorm:"column:totp_secret;size:255;not null;default:''"`
 	TOTPEnabled   bool   `gorm:"column:totp_enabled;not null;default:false"`
 	RecoveryCodes jsonStrings `gorm:"column:recovery_codes"`
+	// Require2FA is a normal admin-set column (NOT in pollOwnedColumns): force this
+	// account to enroll a second factor before using the panel.
+	Require2FA bool `gorm:"column:require_2fa;not null;default:false"`
 	// LastOnlineAt is the most recent moment any of the user's owned
 	// 3X-UI clients reported activity (max(clientStats.lastOnline)
 	// across panels). Refreshed by the traffic poll. Nil = never seen
@@ -130,6 +133,7 @@ func (r *userRow) toDomain() *domain.User {
 		DisableDetail:          r.DisableDetail,
 		SelfRegistered:         r.SelfRegistered,
 		TOTPEnabled:            r.TOTPEnabled,
+		Require2FA:             r.Require2FA,
 		BlockViolationCount:    r.BlockViolationCount,
 		LastBlockViolationAt:   r.LastBlockViolationAt,
 		EmergencyUsedCount:     r.EmergencyUsedCount,
@@ -171,6 +175,7 @@ func userFromDomain(u *domain.User) *userRow {
 		AutoDisabledReason:     string(u.AutoDisabledReason),
 		DisableDetail:          u.DisableDetail,
 		SelfRegistered:         u.SelfRegistered,
+		Require2FA:             u.Require2FA,
 		BlockViolationCount:    u.BlockViolationCount,
 		LastBlockViolationAt:   u.LastBlockViolationAt,
 		EmergencyUsedCount:     u.EmergencyUsedCount,
@@ -187,10 +192,11 @@ type groupRow struct {
 	ID        int64  `gorm:"primaryKey;autoIncrement"`
 	Slug      string `gorm:"size:64;uniqueIndex;not null"`
 	Name      string `gorm:"size:128;not null"`
-	TagFilter jsonTagFilter
-	Layout    jsonLayout
-	Remark    string `gorm:"size:255"`
-	CreatedAt time.Time
+	TagFilter  jsonTagFilter
+	Layout     jsonLayout
+	Remark     string `gorm:"size:255"`
+	Require2FA bool   `gorm:"column:require_2fa;not null;default:false"`
+	CreatedAt  time.Time
 }
 
 // "groups" is a reserved word in some MySQL versions; use groups_ to avoid quoting issues.
@@ -201,10 +207,11 @@ func (r *groupRow) toDomain() *domain.Group {
 		ID:        r.ID,
 		Slug:      r.Slug,
 		Name:      r.Name,
-		TagFilter: domain.TagFilter(r.TagFilter),
-		Layout:    domain.Layout(r.Layout),
-		Remark:    r.Remark,
-		CreatedAt: r.CreatedAt,
+		TagFilter:  domain.TagFilter(r.TagFilter),
+		Layout:     domain.Layout(r.Layout),
+		Remark:     r.Remark,
+		Require2FA: r.Require2FA,
+		CreatedAt:  r.CreatedAt,
 	}
 }
 
@@ -213,10 +220,11 @@ func groupFromDomain(g *domain.Group) *groupRow {
 		ID:        g.ID,
 		Slug:      g.Slug,
 		Name:      g.Name,
-		TagFilter: jsonTagFilter(g.TagFilter),
-		Layout:    jsonLayout(g.Layout),
-		Remark:    g.Remark,
-		CreatedAt: g.CreatedAt,
+		TagFilter:  jsonTagFilter(g.TagFilter),
+		Layout:     jsonLayout(g.Layout),
+		Remark:     g.Remark,
+		Require2FA: g.Require2FA,
+		CreatedAt:  g.CreatedAt,
 	}
 }
 

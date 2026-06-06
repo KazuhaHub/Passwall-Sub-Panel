@@ -13,6 +13,7 @@ const LoggedOutView = lazy(() => import('@/views/LoggedOutView'))
 const ForgotPasswordView = lazy(() => import('@/views/ForgotPasswordView'))
 const ResetPasswordView = lazy(() => import('@/views/ResetPasswordView'))
 const RegisterView = lazy(() => import('@/views/RegisterView'))
+const Enroll2FAView = lazy(() => import('@/views/Enroll2FAView'))
 const VerifyEmailView = lazy(() => import('@/views/VerifyEmailView'))
 const AdminLayout = lazy(() => import('@/layouts/AdminLayout'))
 const UserLayout = lazy(() => import('@/layouts/UserLayout'))
@@ -109,6 +110,13 @@ export const router = createBrowserRouter([
         ],
       },
     ],
+  },
+  // Mandatory-2FA enrollment gate. Authenticated but layout-less (full-screen);
+  // the axios interceptor redirects here on a 2fa_enrollment_required 403.
+  {
+    path: '/enroll-2fa',
+    element: <RequireAuth />,
+    children: [{ index: true, element: <Enroll2FAView /> }],
   },
       // Catch-all: any unknown URL bounces to the role-based home.
       { path: '*', element: <RootRedirect /> },
