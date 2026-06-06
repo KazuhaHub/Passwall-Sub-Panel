@@ -124,6 +124,11 @@ type User struct {
 	// role, or the user changes password. Middleware.RequireAuth compares
 	// the claim against the live row and 401s on mismatch.
 	TokenVersion int
+	// TOTPEnabled reports whether the account has an activated authenticator
+	// (TOTP) second factor. The secret + recovery codes themselves are NOT on
+	// this struct — they're sensitive and only ever read/written through the
+	// dedicated TOTP repo methods (encrypted/hashed at the persistence boundary).
+	TOTPEnabled bool
 	// LastOnlineAt is the most recent moment any of the user's owned 3X-UI
 	// clients reported activity, derived from max(clientStats.lastOnline)
 	// across panels each traffic-poll cycle. Nil = never seen (fresh user,

@@ -27,6 +27,7 @@ import {
 import ContentCopyIcon from '@mui/icons-material/ContentCopy'
 import KeyIcon from '@mui/icons-material/VpnKey'
 import LockIcon from '@mui/icons-material/Lock'
+import SecurityIcon from '@mui/icons-material/Security'
 import RuleIcon from '@mui/icons-material/Rule'
 import EmergencyIcon from '@mui/icons-material/MedicalServices'
 import AccessTimeIcon from '@mui/icons-material/AccessTime'
@@ -73,6 +74,7 @@ const TrafficChart = lazy(() => import('@/components/TrafficChart'))
 import { confirm } from '@/components/ConfirmHost'
 import { pushSnack } from '@/components/SnackbarHost'
 import { copyToClipboard } from '@/utils/clipboard'
+import TwoFactorDialog from './TwoFactorDialog'
 
 function bytesToHuman(n: number) {
   if (n === 0) return '0'
@@ -251,6 +253,8 @@ export default function MeView() {
   const [pwdOld, setPwdOld] = useState('')
   const [pwdNew, setPwdNew] = useState('')
   const [pwdConfirm, setPwdConfirm] = useState('')
+
+  const [twoFAOpen, setTwoFAOpen] = useState(false)
 
   const [rulesOpen, setRulesOpen] = useState(false)
   const [rulesText, setRulesText] = useState('')
@@ -646,7 +650,7 @@ export default function MeView() {
             (local accounts where admin allows it). 个人规则 + 重置凭证 both
             live inside the Sub URL card now — they affect the subscription
             content directly so co-locating makes the consequence obvious. */}
-        {profile.can_change_password && (<>
+        {(profile.can_change_password || profile.totp_available || profile.totp_enabled) && (<>
           <IconButton onClick={(e: MouseEvent<HTMLElement>) => setMenuAnchor(e.currentTarget)}>
             <MoreVertIcon />
           </IconButton>
@@ -654,10 +658,21 @@ export default function MeView() {
             anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
             transformOrigin={{ vertical: 'top', horizontal: 'right' }}
             PaperProps={{ sx: { mt: 1, minWidth: 200 } }}>
-            <MenuItem onClick={() => { setMenuAnchor(null); openPwd() }}>
-              <ListItemIcon><LockIcon fontSize="small" /></ListItemIcon>
-              <ListItemText primary={t('actions.change_password')} />
-            </MenuItem>
+            {profile.can_change_password && (
+              <MenuItem onClick={() => { setMenuAnchor(null); openPwd() }}>
+                <ListItemIcon><LockIcon fontSize="small" /></ListItemIcon>
+                <ListItemText primary={t('actions.change_password')} />
+              </MenuItem>
+            )}
+            {(profile.totp_available || profile.totp_enabled) && (
+              <MenuItem onClick={() => { setMenuAnchor(null); setTwoFAOpen(true) }}>
+                <ListItemIcon><SecurityIcon fontSize="small" /></ListItemIcon>
+                <ListItemText
+                  primary={t('actions.two_factor')}
+                  secondary={profile.totp_enabled ? t('twofa.status_on') : t('twofa.status_off')}
+                />
+              </MenuItem>
+            )}
           </Menu>
         </>)}
       </Box>
@@ -1204,6 +1219,15 @@ export default function MeView() {
           </Button>
         </DialogActions>
       </Dialog>
+
+      {/* Two-factor authentication dialog */}
+      <TwoFactorDialog
+        open={twoFAOpen}
+        enabled={!!profile.totp_enabled}
+        md={md}
+        onClose={() => setTwoFAOpen(false)}
+        onChanged={() => { void load() }}
+      />
 
       {/* Personal rules dialog */}
       <Dialog open={rulesOpen} onClose={() => !rulesBusy && setRulesOpen(false)}

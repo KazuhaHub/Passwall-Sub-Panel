@@ -203,6 +203,15 @@ func (r *fakeUserRepo) List(ctx context.Context, f ports.UserFilter) ([]*domain.
 func (r *fakeUserRepo) ListByGroup(ctx context.Context, groupID int64) ([]*domain.User, error) {
 	return nil, nil
 }
+func (r *fakeUserRepo) SetTOTP(context.Context, int64, string, bool, []string) error { return nil }
+func (r *fakeUserRepo) GetTOTP(context.Context, int64) (string, bool, []string, error) {
+	return "", false, nil, nil
+}
+func (r *fakeUserRepo) SetRecoveryCodes(context.Context, int64, []string) error { return nil }
+func (r *fakeUserRepo) ConsumeRecoveryCode(context.Context, int64, []string, []string) (bool, error) {
+	return true, nil
+}
+func (r *fakeUserRepo) ClearTOTP(context.Context, int64) error { return nil }
 
 type fakeDisabler struct {
 	calls []bool

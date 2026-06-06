@@ -104,6 +104,8 @@
       "registration_default_traffic_gb": "Default traffic GB (0 = unlimited)",
       "registration_default_expire_days": "Default validity (days, 0 = no expiry)",
       "registration_hint": "Registrants sign in with their email as the username, get the user role, join the default group, and inherit the quota/expiry above. Email verification needs SMTP configured; link delivery needs the subscription base URL set.",
+      "totp_enabled": "Allow two-factor auth (TOTP)",
+      "totp_hint": "Lets accounts with a local password enable 2FA via an authenticator app from My Account. Turning this off only blocks new enrollment — it does not remove 2FA from already-enrolled accounts. SSO accounts are unaffected.",
       "login_mode": "Login mode",
       "login_mode_dual": "Local + SSO (default)",
       "login_mode_sso_first": "SSO first",
@@ -1124,7 +1126,9 @@
       "batch_unlink_sso_title": "Unlink SSO bindings",
       "batch_unlink_sso_message": "Unlink the SSO binding for {{names}}{{suffix}} — {{count}} users in total? Their next SSO sign-in will re-bind to whatever identity the IdP returns at that moment.",
       "batch_delete_title": "Delete users",
-      "batch_delete_message": "Delete {{names}}{{suffix}}? This removes their clients from every 3X-UI inbound."
+      "batch_delete_message": "Delete {{names}}{{suffix}}? This removes their clients from every 3X-UI inbound.",
+      "reset_2fa_title": "Reset two-factor auth",
+      "reset_2fa_message": "This clears {{upn}}'s two-factor authentication (TOTP). They'll be able to sign in with just their password and will need to re-enroll. Use only when the user lost their authenticator and has no recovery codes."
     },
     "more_menu": {
       "copy_sub": "Copy subscription URL",
@@ -1132,6 +1136,7 @@
       "reset_password": "Reset password",
       "reset_credentials": "Reset credentials",
       "reset_emergency": "Reset emergency-access count",
+      "reset_2fa": "Reset two-factor auth",
       "unlink_sso": "Unlink SSO binding"
     },
     "reset_password": {
@@ -1183,7 +1188,8 @@
     },
     "credentials": {
       "result": "Reset OK! New UUID: {{uuid}}",
-      "emergency_reset": "Emergency-access count reset"
+      "emergency_reset": "Emergency-access count reset",
+      "twofa_reset": "Two-factor auth reset"
     }
   },
   "groups": {

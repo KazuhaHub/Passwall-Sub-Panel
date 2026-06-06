@@ -30,7 +30,15 @@ type Claims struct {
 const (
 	SubjectAccess  = "access"
 	SubjectRefresh = "refresh"
+	// SubjectPending marks the short-lived token issued after password+captcha
+	// succeed but before a 2FA code is verified. It is NOT an access token —
+	// /auth/2fa/verify trades it (plus a valid code) for the real pair.
+	SubjectPending = "2fa_pending"
 )
+
+// pendingTTL bounds how long a user has to enter their 2FA code after the
+// password step. Short, since the secret is already proven by password.
+const pendingTTL = 5 * time.Minute
 
 // Params is the live-tunable subset of JWT issuance — TTLs and the "iss"
 // claim. Resolved fresh on every IssueAccess/IssueRefresh so admin edits
@@ -117,6 +125,17 @@ func (i *Issuer) IssueAccess(uid int64, upn string, role domain.Role, tokenVersi
 func (i *Issuer) IssueRefresh(uid int64, upn string, role domain.Role, tokenVersion int) (string, error) {
 	p := i.params()
 	return i.issue(uid, upn, role, tokenVersion, SubjectRefresh, p.RefreshTTL, p.Issuer)
+}
+
+// IssuePending signs a short-lived 2fa_pending token carrying the user id, used
+// to resume login once the TOTP code is verified.
+func (i *Issuer) IssuePending(uid int64, upn string, role domain.Role, tokenVersion int) (string, error) {
+	return i.issue(uid, upn, role, tokenVersion, SubjectPending, pendingTTL, i.params().Issuer)
+}
+
+// ParsePending verifies signature, time window and the 2fa_pending subject.
+func (i *Issuer) ParsePending(tokenStr string) (*Claims, error) {
+	return i.parse(tokenStr, SubjectPending)
 }
 
 func (i *Issuer) issue(uid int64, upn string, role domain.Role, tokenVersion int, sub string, ttl time.Duration, iss string) (string, error) {

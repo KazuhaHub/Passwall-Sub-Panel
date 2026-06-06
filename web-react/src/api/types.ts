@@ -54,6 +54,9 @@ export interface User {
    *  (where the lastOnline field doesn't exist). UI renders missing as
    *  "—" rather than a 1970 date. */
   last_online_at?: string | null
+  /** Whether the account has TOTP 2FA enabled. Drives the admin table badge
+   *  and the break-glass "reset 2FA" action's visibility. */
+  totp_enabled?: boolean
 }
 
 export interface CreateUserRequest {
@@ -207,6 +210,19 @@ export interface AuthLoginResponse {
     display_name?: string
     role: Role
   }
+}
+
+// AuthLoginResult is what /auth/local/login returns: either a full session
+// (AuthLoginResponse) or a 2FA challenge ({status:'2fa_required', pending_token})
+// that must be completed via /auth/2fa/verify.
+export type AuthLoginResult =
+  | AuthLoginResponse
+  | { status: '2fa_required'; pending_token: string }
+
+export function isTwoFAChallenge(
+  r: AuthLoginResult,
+): r is { status: '2fa_required'; pending_token: string } {
+  return (r as { status?: string }).status === '2fa_required'
 }
 
 export type LoginMode = 'sso_redirect' | 'sso_first' | 'dual' | 'local_only'

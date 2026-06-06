@@ -1,5 +1,11 @@
 import { client } from './client'
-import type { AuthLoginResponse, AuthMethods, CaptchaChallenge, LoginCaptcha } from './types'
+import type {
+  AuthLoginResponse,
+  AuthLoginResult,
+  AuthMethods,
+  CaptchaChallenge,
+  LoginCaptcha,
+} from './types'
 
 export async function getAuthMethods() {
   const { data } = await client.get<AuthMethods>('/auth/methods')
@@ -15,7 +21,22 @@ export async function getCaptcha(): Promise<CaptchaChallenge> {
 }
 
 export async function localLogin(upn: string, password: string, captcha?: LoginCaptcha) {
-  const { data } = await client.post<AuthLoginResponse>('/auth/local/login', { upn, password, ...captcha })
+  const { data } = await client.post<AuthLoginResult>('/auth/local/login', { upn, password, ...captcha })
+  return data
+}
+
+// verify2FA completes a 2FA login: it exchanges the pending token (from a
+// 2fa_required login response) plus a TOTP or recovery code for a real session.
+// _skipRefresh is essential: this is a PRE-session exchange, so a 401 (wrong/
+// expired code) must propagate straight to the caller — without it the shared
+// 401-refresh interceptor would hijack the response, wipe localStorage, and even
+// replay the request with a stale token.
+export async function verify2FA(pendingToken: string, code: string): Promise<AuthLoginResponse> {
+  const { data } = await client.post<AuthLoginResponse>(
+    '/auth/2fa/verify',
+    { pending_token: pendingToken, code },
+    { _skipErrorToast: true, _skipRefresh: true },
+  )
   return data
 }
 

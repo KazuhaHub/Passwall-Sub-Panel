@@ -16,6 +16,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/paneltz"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/mailer"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/twofa"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/user"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/transport/http/middleware"
 )
@@ -88,10 +89,11 @@ type AdminUserHandler struct {
 	settings ports.SettingsRepo
 	mailer   *mailer.Service
 	async    AsyncDispatcher
+	twofa    *twofa.Service
 }
 
-func NewAdminUserHandler(userSvc *user.Service, settings ports.SettingsRepo, mailerSvc *mailer.Service, async AsyncDispatcher) *AdminUserHandler {
-	return &AdminUserHandler{user: userSvc, settings: settings, mailer: mailerSvc, async: async}
+func NewAdminUserHandler(userSvc *user.Service, settings ports.SettingsRepo, mailerSvc *mailer.Service, async AsyncDispatcher, twofaSvc *twofa.Service) *AdminUserHandler {
+	return &AdminUserHandler{user: userSvc, settings: settings, mailer: mailerSvc, async: async, twofa: twofaSvc}
 }
 
 // ---- DTOs ----
@@ -145,6 +147,9 @@ type userDTO struct {
 	// nil = never seen / panel still on 3X-UI < 3.1.0; UI renders that as
 	// "—" rather than a literal "1970-01-01".
 	LastOnlineAt *time.Time `json:"last_online_at,omitempty"`
+	// TOTPEnabled lets the admin table show a 2FA badge and surface the
+	// break-glass "reset 2FA" action only for accounts that actually have it on.
+	TOTPEnabled bool `json:"totp_enabled"`
 }
 
 type createUserRequest struct {
@@ -554,6 +559,25 @@ func (h *AdminUserHandler) PutRules(c *gin.Context) {
 	c.Status(http.StatusNoContent)
 }
 
+// Reset2FA is the admin break-glass for a user who lost both their authenticator
+// and recovery codes: it clears their 2FA unconditionally so they can log in with
+// just their password and re-enroll. Operators can't reset a privileged account.
+func (h *AdminUserHandler) Reset2FA(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid id"})
+		return
+	}
+	if !h.ensureOperatorAllowed(c, id) {
+		return
+	}
+	if err := h.twofa.AdminReset(c.Request.Context(), id); err != nil {
+		respondError(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
 type updateUserRequest struct {
 	GroupID  *int64     `json:"group_id,omitempty"`
 	Role     *string    `json:"role,omitempty"`
@@ -739,6 +763,7 @@ func (h *AdminUserHandler) toDTOWith(u *domain.User, st ports.UISettings, loc *t
 		EmergencyQuotaBytes: quotaBytes,
 		CreatedAt:           u.CreatedAt,
 		LastOnlineAt:        u.LastOnlineAt,
+		TOTPEnabled:         u.TOTPEnabled,
 	}
 }
 

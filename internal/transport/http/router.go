@@ -30,6 +30,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/render"
 	syncsvc "github.com/KazuhaHub/passwall-sub-panel/internal/service/sync"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/traffic"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/twofa"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/user"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/transport/http/handler"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/transport/http/middleware"
@@ -144,9 +145,13 @@ func NewRouter(d Deps) *gin.Engine {
 	subLimiter.SetLimitFunc(newSettingsIntCache(d.Repos.Settings, d.SubPerIPPerMin, func(s ports.UISettings) int { return s.SubPerIPPerMin }).get)
 	subPathCache := newSubPathCache(d.Repos.Settings)
 
+	// 2FA (TOTP) service — shared by the login challenge, the user self-service
+	// enrollment endpoints, and the admin break-glass reset.
+	twofaSvc := twofa.New(twofa.Deps{Users: d.Repos.User, Settings: d.Repos.Settings})
+
 	// Auth endpoints
 	authLocal := handler.NewAuthLocalHandler(d.Auth, d.User, d.SAML, d.OIDC, d.Repos.Settings, d.Repos.AuthEvent,
-		loginguard.New(d.Repos.AuthEvent), captcha.NewService())
+		loginguard.New(d.Repos.AuthEvent), captcha.NewService(), twofaSvc)
 	loginLimiter := middleware.NewPerIPLimiter(d.LoginPerIPPerMin, time.Minute)
 	loginLimiter.SetLimitFunc(newSettingsIntCache(d.Repos.Settings, d.LoginPerIPPerMin, func(s ports.UISettings) int { return s.LoginPerIPPerMin }).get)
 	authGroup := g.Group("/api/auth")
@@ -156,6 +161,9 @@ func NewRouter(d Deps) *gin.Engine {
 		// so it can't be hammered to churn the captcha store.
 		authGroup.GET("/captcha", loginLimiter.Handler(), authLocal.Captcha)
 		authGroup.POST("/local/login", loginLimiter.Handler(), authLocal.Login)
+		// Second factor of a 2FA login — exchanges the pending token + code for a
+		// real session. Behind the login limiter so the code can't be brute-forced.
+		authGroup.POST("/2fa/verify", loginLimiter.Handler(), authLocal.TwoFAVerify)
 		// Refresh shares the login limiter — refresh storms from a misbehaving
 		// client should be throttled just like brute-force login attempts.
 		authGroup.POST("/refresh", loginLimiter.Handler(), authLocal.Refresh)
@@ -201,7 +209,7 @@ func NewRouter(d Deps) *gin.Engine {
 	}
 
 	// Authenticated user self-service
-	userMe := handler.NewUserMeHandler(d.User, d.Traffic, d.Repos.Settings, d.Repos.Node, d.Repos.Ownership)
+	userMe := handler.NewUserMeHandler(d.User, d.Traffic, d.Repos.Settings, d.Repos.Node, d.Repos.Ownership, twofaSvc)
 	userGroup := g.Group("/api/user/me",
 		middleware.RequireAuth(d.Auth, d.User),
 		middleware.RequireRole(domain.RoleUser, domain.RoleAdmin),
@@ -216,6 +224,10 @@ func NewRouter(d Deps) *gin.Engine {
 		userGroup.POST("/emergency-access", userMe.EmergencyAccess)
 		userGroup.POST("/reset-credentials", userMe.ResetCredentials)
 		userGroup.POST("/change-password", userMe.ChangePassword)
+		// 2FA (TOTP) self-service enrollment / disable.
+		userGroup.POST("/2fa/begin", userMe.Begin2FA)
+		userGroup.POST("/2fa/enable", userMe.Enable2FA)
+		userGroup.POST("/2fa/disable", userMe.Disable2FA)
 	}
 
 	// Admin API.
@@ -240,7 +252,7 @@ func NewRouter(d Deps) *gin.Engine {
 		middleware.RequireRole(domain.RoleAdmin),
 	)
 	{
-		users := handler.NewAdminUserHandler(d.User, d.Repos.Settings, d.Mail, d.Async)
+		users := handler.NewAdminUserHandler(d.User, d.Repos.Settings, d.Mail, d.Async, twofaSvc)
 		// User CRUD is the operator's bread and butter. Handler-level guard
 		// in users.Update prevents operators from creating/promoting other
 		// admins or modifying an existing admin's role.
@@ -252,6 +264,7 @@ func NewRouter(d Deps) *gin.Engine {
 		staffGroup.POST("/users/:id/reset-credentials", users.ResetCredentials)
 		staffGroup.POST("/users/:id/reset-password", users.ResetPassword)
 		staffGroup.POST("/users/:id/reset-emergency-usage", users.ResetEmergencyUsage)
+		staffGroup.POST("/users/:id/reset-2fa", users.Reset2FA)
 		staffGroup.POST("/users/:id/unlink-sso", users.UnlinkSSO)
 		staffGroup.POST("/users/:id/set-enabled", users.SetEnabled)
 		staffGroup.GET("/users/:id/rules", users.GetRules)

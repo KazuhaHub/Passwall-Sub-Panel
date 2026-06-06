@@ -74,6 +74,14 @@ type userRow struct {
 	// value. Default 0 so existing rows simply pass the check on a
 	// row that hasn't been bumped yet.
 	TokenVersion int `gorm:"default:0;not null"`
+	// 2FA / TOTP (v3.7.0). totp_secret is the base32 seed, AES-GCM encrypted at
+	// rest (enc:v1: prefix). recovery_codes is a JSON array of SHA-256 hashes of
+	// one-time backup codes. All three are written ONLY via the column-scoped
+	// TOTP repo methods and are in pollOwnedColumns, so the generic Update never
+	// touches (or clobbers) them.
+	TOTPSecret    string `gorm:"column:totp_secret;type:text;default:''"`
+	TOTPEnabled   bool   `gorm:"column:totp_enabled;not null;default:false"`
+	RecoveryCodes jsonStrings `gorm:"column:recovery_codes"`
 	// LastOnlineAt is the most recent moment any of the user's owned
 	// 3X-UI clients reported activity (max(clientStats.lastOnline)
 	// across panels). Refreshed by the traffic poll. Nil = never seen
@@ -116,6 +124,7 @@ func (r *userRow) toDomain() *domain.User {
 		AutoDisabledReason:     domain.AutoDisabledReason(r.AutoDisabledReason),
 		DisableDetail:          r.DisableDetail,
 		SelfRegistered:         r.SelfRegistered,
+		TOTPEnabled:            r.TOTPEnabled,
 		BlockViolationCount:    r.BlockViolationCount,
 		LastBlockViolationAt:   r.LastBlockViolationAt,
 		EmergencyUsedCount:     r.EmergencyUsedCount,

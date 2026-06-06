@@ -246,6 +246,8 @@ func settingDescriptors(s *ports.UISettings) []settingDescriptor {
 		strField("security", "registration_delivery", &s.RegistrationDelivery),
 		floatField("security", "registration_default_traffic_gb", &s.RegistrationDefaultTrafficGB),
 		intField("security", "registration_default_expire_days", &s.RegistrationDefaultExpireDays),
+		// security --- two-factor auth / TOTP (v3.7.0)
+		boolField("security", "totp_enabled", &s.TOTPEnabled),
 
 		// runtime --- cron / performance / tz / global toggles
 		strField("runtime", "timezone", &s.Timezone),

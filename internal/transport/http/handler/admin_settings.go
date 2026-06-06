@@ -120,6 +120,10 @@ type settingsDTO struct {
 	RegistrationDelivery                 string  `json:"registration_delivery"`
 	RegistrationDefaultTrafficGB         float64 `json:"registration_default_traffic_gb"`
 	RegistrationDefaultExpireDays        int     `json:"registration_default_expire_days"`
+	// Two-factor authentication (TOTP) master switch (v3.7.0). Off disables new
+	// enrollment panel-wide; it does NOT silently strip 2FA from already-enrolled
+	// accounts (their login challenge still applies until they disable it).
+	TOTPEnabled bool `json:"totp_enabled"`
 }
 
 func (h *AdminSettingsHandler) defaults() ports.UISettings {
@@ -141,9 +145,16 @@ func (h *AdminSettingsHandler) Get(c *gin.Context) {
 		respondError(c, err)
 		return
 	}
-	mode := s.LoginMode
-	c.JSON(http.StatusOK, settingsDTO{
-		LoginMode:                  mode,
+	c.JSON(http.StatusOK, settingsToDTO(s))
+}
+
+// settingsToDTO maps stored UISettings into the wire DTO. It is the SINGLE
+// source of truth for BOTH the GET and PUT responses — keeping one builder means
+// a newly-added field can't be echoed by one path and silently dropped by the
+// other (the drift that briefly broke the 2FA totp_enabled round-trip).
+func settingsToDTO(s ports.UISettings) settingsDTO {
+	return settingsDTO{
+		LoginMode:                  s.LoginMode,
 		SiteTitle:                  s.SiteTitle,
 		AppTitle:                   s.AppTitle,
 		IconURL:                    s.IconURL,
@@ -224,7 +235,8 @@ func (h *AdminSettingsHandler) Get(c *gin.Context) {
 		RegistrationDelivery:                 s.RegistrationDelivery,
 		RegistrationDefaultTrafficGB:         s.RegistrationDefaultTrafficGB,
 		RegistrationDefaultExpireDays:        s.RegistrationDefaultExpireDays,
-	})
+		TOTPEnabled:                          s.TOTPEnabled,
+	}
 }
 
 func (h *AdminSettingsHandler) Put(c *gin.Context) {
@@ -325,6 +337,7 @@ func (h *AdminSettingsHandler) Put(c *gin.Context) {
 		RegistrationDelivery:          strings.ToLower(strings.TrimSpace(req.RegistrationDelivery)),
 		RegistrationDefaultTrafficGB:  req.RegistrationDefaultTrafficGB,
 		RegistrationDefaultExpireDays: req.RegistrationDefaultExpireDays,
+		TOTPEnabled:                   req.TOTPEnabled,
 		// GeoIPUpdateToken / CaptchaSecretKey resolved below ("empty = keep existing").
 	}
 	// Update token is write-only: a blank field on save means the admin didn't
@@ -467,89 +480,7 @@ func (h *AdminSettingsHandler) Put(c *gin.Context) {
 		RefreshTTL: time.Duration(s.JWTRefreshTTLMinutes) * time.Minute,
 		Issuer:     s.JWTIssuer,
 	})
-	c.JSON(http.StatusOK, settingsDTO{
-		LoginMode:                  s.LoginMode,
-		SiteTitle:                  s.SiteTitle,
-		AppTitle:                   s.AppTitle,
-		IconURL:                    s.IconURL,
-		LogoURL:                    s.LogoURL,
-		LogoURLDark:                s.LogoURLDark,
-		EmailDomain:                s.EmailDomain,
-		AuditRetentionDays:         s.AuditRetentionDays,
-		SubBaseURL:                 s.SubBaseURL,
-		Timezone:                   s.Timezone,
-		CronTrafficPullMinutes:     s.CronTrafficPullMinutes,
-		CronReconcileMinutes:       s.CronReconcileMinutes,
-		MaxPanelConcurrency:        s.MaxPanelConcurrency,
-		JWTAccessTTLMinutes:        s.JWTAccessTTLMinutes,
-		JWTRefreshTTLMinutes:       s.JWTRefreshTTLMinutes,
-		JWTIssuer:                  s.JWTIssuer,
-		SubPerIPPerMin:             s.SubPerIPPerMin,
-		LoginPerIPPerMin:           s.LoginPerIPPerMin,
-		SyncTaskRetentionDays:      s.SyncTaskRetentionDays,
-		TrafficHistoryDays:         s.TrafficHistoryDays,
-		DisallowUserLocalLogin:     s.DisallowUserLocalLogin,
-		DisallowUserPasswordChange: s.DisallowUserPasswordChange,
-		AllowUserPersonalRules:     s.AllowUserPersonalRules,
-		EmergencyAccessEnabled:     s.EmergencyAccessEnabled,
-		EmergencyAccessHours:       s.EmergencyAccessHours,
-		EmergencyAccessMaxCount:    s.EmergencyAccessMaxCount,
-		EmergencyAccessQuotaGB:     s.EmergencyAccessQuotaGB,
-		SubPath:                    s.SubPath,
-		SubClients:                 s.SubClients,
-		SubClientFilterMode:        s.SubClientFilterMode,
-		SubImportTutorialURL:       s.SubImportTutorialURL,
-		SubLogRetentionDays:        s.SubLogRetentionDays,
-		MailSentRetentionDays:      s.MailSentRetentionDays,
-		AuthEventRetentionDays:     s.AuthEventRetentionDays,
-		SubBlockAutoDisable:        s.SubBlockAutoDisable,
-		SubBlockAutoDisableCount:   s.SubBlockAutoDisableCount,
-		SubBlockNotifyUser:         s.SubBlockNotifyUser,
-		SubBlockNotifyMaxPerDay:    s.SubBlockNotifyMaxPerDay,
-		SubUpdateIntervalHours:     s.SubUpdateIntervalHours,
-		SubProfileNameTemplate:     s.SubProfileNameTemplate,
-		SubRegionFlagPrefix:        s.SubRegionFlagPrefix,
-		QuickLinks:                 s.QuickLinks,
-		GlobalAnnouncement:         s.GlobalAnnouncement,
-		FooterText:                 s.FooterText,
-		ThemeColor:                 s.ThemeColor,
-		ExpireBeforeDays:           s.ExpireBeforeDays,
-		TrafficRemainPercent:       s.TrafficRemainPercent,
-		GeoIPEnabled:               s.GeoIPEnabled,
-		GeoIPDBFile:                s.GeoIPDBFile,
-		GeoIPAutoUpdate:            s.GeoIPAutoUpdate,
-		GeoIPUpdateSource:          s.GeoIPUpdateSource,
-		GeoIPUpdateURL:             s.GeoIPUpdateURL,
-		GeoIPUpdateEdition:         s.GeoIPUpdateEdition,
-		GeoIPUpdateIntervalHours:   s.GeoIPUpdateIntervalHours,
-		CertRenewBeforeDays:         s.CertRenewBeforeDays,
-		CertRenewCheckIntervalHours: s.CertRenewCheckIntervalHours,
-		ACMEEmail:                   s.ACMEEmail,
-		ACMEDirectoryURL:            s.ACMEDirectoryURL,
-		// Update token masked: never echoed, only presence reported.
-		HasGeoIPUpdateToken: strings.TrimSpace(s.GeoIPUpdateToken) != "",
-		CaptchaEnabled:       s.CaptchaEnabled,
-		CaptchaProvider:      s.CaptchaProvider,
-		CaptchaTrigger:       s.CaptchaTrigger,
-		CaptchaFailThreshold: s.CaptchaFailThreshold,
-		CaptchaSiteKey:       s.CaptchaSiteKey,
-		// Secret key masked: never echoed, only presence reported.
-		HasCaptchaSecretKey:    strings.TrimSpace(s.CaptchaSecretKey) != "",
-		LockoutEnabled:         s.LockoutEnabled,
-		LockoutThreshold:       s.LockoutThreshold,
-		LockoutWindowMinutes:   s.LockoutWindowMinutes,
-		LockoutDurationMinutes: s.LockoutDurationMinutes,
-		LockoutScope:           s.LockoutScope,
-		PasswordRecoveryEnabled:  s.PasswordRecoveryEnabled,
-		PasswordRecoveryDelivery: s.PasswordRecoveryDelivery,
-		RegistrationEnabled:                  s.RegistrationEnabled,
-		RegistrationRequireEmailVerification: !s.RegistrationAllowUnverified,
-		RegistrationEmailDomains:             s.RegistrationEmailDomains,
-		RegistrationDefaultGroupID:           s.RegistrationDefaultGroupID,
-		RegistrationDelivery:                 s.RegistrationDelivery,
-		RegistrationDefaultTrafficGB:         s.RegistrationDefaultTrafficGB,
-		RegistrationDefaultExpireDays:        s.RegistrationDefaultExpireDays,
-	})
+	c.JSON(http.StatusOK, settingsToDTO(s))
 }
 
 func normalizeQuickLinks(links []ports.QuickLink) []ports.QuickLink {

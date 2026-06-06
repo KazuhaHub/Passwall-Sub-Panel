@@ -1,6 +1,11 @@
 import { create } from 'zustand'
-import { localLogin, ssoComplete } from '@/api/auth'
-import type { LoginCaptcha, Role } from '@/api/types'
+import { localLogin, ssoComplete, verify2FA } from '@/api/auth'
+import { isTwoFAChallenge } from '@/api/types'
+import type { AuthLoginResponse, LoginCaptcha, Role } from '@/api/types'
+
+// LoginOutcome tells the login form whether the credentials produced a session
+// or a 2FA challenge that must be completed via complete2FA.
+export type LoginOutcome = { twoFA: false } | { twoFA: true; pendingToken: string }
 
 interface AuthState {
   userId: number | null
@@ -12,7 +17,10 @@ interface AuthState {
   // directly (which doesn't trigger re-renders). Kept in sync by
   // login / loginSSO / logout / the cross-tab storage listener.
   hasToken: boolean
-  login: (upn: string, password: string, captcha?: LoginCaptcha) => Promise<void>
+  login: (upn: string, password: string, captcha?: LoginCaptcha) => Promise<LoginOutcome>
+  // complete2FA finishes a login that returned a 2FA challenge: it exchanges the
+  // pending token + code for a real session.
+  complete2FA: (pendingToken: string, code: string) => Promise<void>
   loginSSO: () => Promise<void>
   setDisplayName: (name: string) => void
   logout: () => void
@@ -41,22 +49,39 @@ function persist(state: PersistedAuthState) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
 }
 
+// applySession writes the tokens + user identity from a full login response into
+// localStorage and the store. Shared by login / complete2FA / loginSSO.
+function applySession(res: AuthLoginResponse, set: (partial: Partial<AuthState>) => void) {
+  localStorage.setItem('psp_access', res.access_token)
+  localStorage.setItem('psp_refresh', res.refresh_token)
+  const next: PersistedAuthState = {
+    userId: res.user.id,
+    upn: res.user.upn,
+    displayName: res.user.display_name || '',
+    role: res.user.role,
+  }
+  set({ ...next, hasToken: true })
+  persist(next)
+}
+
 export const useAuthStore = create<AuthState>((set, get) => ({
   ...loadFromStorage(),
   hasToken: !!localStorage.getItem(ACCESS_KEY),
 
   async login(upn, password, captcha) {
     const res = await localLogin(upn, password, captcha)
-    localStorage.setItem('psp_access', res.access_token)
-    localStorage.setItem('psp_refresh', res.refresh_token)
-    const next: PersistedAuthState = {
-      userId: res.user.id,
-      upn: res.user.upn,
-      displayName: res.user.display_name || '',
-      role: res.user.role,
+    // A 2FA-enabled account returns a challenge, not a session: hold the
+    // pending token and let the form collect the second factor.
+    if (isTwoFAChallenge(res)) {
+      return { twoFA: true, pendingToken: res.pending_token }
     }
-    set({ ...next, hasToken: true })
-    persist(next)
+    applySession(res, set)
+    return { twoFA: false }
+  },
+
+  async complete2FA(pendingToken, code) {
+    const res = await verify2FA(pendingToken, code)
+    applySession(res, set)
   },
 
   async loginSSO() {

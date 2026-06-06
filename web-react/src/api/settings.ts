@@ -208,6 +208,11 @@ export interface UISettings {
   /** Quota/expiry a registrant inherits. 0 = unlimited / no expiry. */
   registration_default_traffic_gb: number
   registration_default_expire_days: number
+
+  // ---- Two-factor authentication (TOTP) (v3.7.0) ----
+  /** Master switch for 2FA enrollment. Off blocks new enrollment panel-wide but
+   *  does NOT strip 2FA from already-enrolled accounts. */
+  totp_enabled: boolean
 }
 
 export async function getUISettings() {

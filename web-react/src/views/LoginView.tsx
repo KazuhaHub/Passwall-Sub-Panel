@@ -58,6 +58,11 @@ export default function LoginView() {
   const [captcha, setCaptcha] = useState<LoginCaptcha>({})
   const [captchaRefresh, setCaptchaRefresh] = useState(0)
   const [lockedMsg, setLockedMsg] = useState('')
+  // 2FA challenge: set to the pending token once a 2FA-enabled account passes the
+  // password step. While set, the card renders the code-entry step instead.
+  const [twoFAPending, setTwoFAPending] = useState<string | null>(null)
+  const [twoFACode, setTwoFACode] = useState('')
+  const [twoFAError, setTwoFAError] = useState('')
   // Set when the user clicks the SSO button in sso_first / dual mode. We
   // render the same "正在前往 SSO" intermediate as sso_redirect so every
   // SSO entry point (auto-bounce OR explicit click) feels the same.
@@ -106,6 +111,16 @@ export default function LoginView() {
     return () => { cancelled = true }
   }, [returnTo])
 
+  // goHome routes to the requested page (or the role's default), guarding the
+  // admin area against non-admins. Shared by the password and 2FA submit paths.
+  function goHome() {
+    const fallback = homeForRole(useAuthStore.getState().role)
+    const requested = returnTo ?? fallback
+    const isAdmin = selectIsAdmin(useAuthStore.getState())
+    const target = isAdminPath(requested) && !isAdmin ? fallback : requested
+    navigate(target, { replace: true })
+  }
+
   async function submit(e: FormEvent) {
     e.preventDefault()
     if (!upn || !password) {
@@ -115,12 +130,16 @@ export default function LoginView() {
     setBusy(true)
     setLockedMsg('')
     try {
-      await auth.login(upn, password, showCaptcha ? captcha : undefined)
-      const fallback = homeForRole(useAuthStore.getState().role)
-      const requested = returnTo ?? fallback
-      const isAdmin = selectIsAdmin(useAuthStore.getState())
-      const target = isAdminPath(requested) && !isAdmin ? fallback : requested
-      navigate(target, { replace: true })
+      const outcome = await auth.login(upn, password, showCaptcha ? captcha : undefined)
+      if (outcome.twoFA) {
+        // Password OK, but the account needs a second factor: switch to the
+        // code-entry step rather than navigating.
+        setTwoFAPending(outcome.pendingToken)
+        setTwoFACode('')
+        setTwoFAError('')
+        return
+      }
+      goHome()
     } catch (err) {
       // The axios interceptor already toasted the message; here we react to the
       // structured flags to drive the inline captcha / lockout UI.
@@ -139,6 +158,44 @@ export default function LoginView() {
     } finally {
       setBusy(false)
     }
+  }
+
+  async function submit2FA(e: FormEvent) {
+    e.preventDefault()
+    if (!twoFAPending) return
+    const code = twoFACode.trim()
+    if (!code) {
+      setTwoFAError(t('auth:twofa_code_required'))
+      return
+    }
+    setBusy(true)
+    setTwoFAError('')
+    try {
+      await auth.complete2FA(twoFAPending, code)
+      goHome()
+    } catch (err) {
+      // A wrong/expired code: the verify endpoint skips the shared toast, so
+      // surface it inline. An expired pending token (5-min TTL) needs a full
+      // re-login — send the user back to the password step.
+      const e = err as AxiosError<{ error?: string }>
+      if (e.response?.status === 401 && /session/i.test(e.response?.data?.error ?? '')) {
+        setTwoFAPending(null)
+        setTwoFAError('')
+        pushSnack(t('auth:twofa_session_expired'), 'warning')
+      } else {
+        setTwoFAError(t('auth:twofa_invalid'))
+        setTwoFACode('')
+      }
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  function cancel2FA() {
+    setTwoFAPending(null)
+    setTwoFACode('')
+    setTwoFAError('')
+    setPassword('')
   }
 
   function ssoLogin(provider: 'saml' | 'oidc') {
@@ -230,6 +287,35 @@ export default function LoginView() {
     </Box>
   )
 
+  const twoFAFormBlock = (
+    <Box component="form" onSubmit={submit2FA} sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+      <Typography variant="body2" sx={{ color: md.onSurfaceVariant }}>
+        {t('auth:twofa_prompt')}
+      </Typography>
+      <TextField
+        label={t('auth:twofa_code')}
+        value={twoFACode}
+        onChange={e => setTwoFACode(e.target.value)}
+        autoFocus
+        fullWidth
+        autoComplete="one-time-code"
+        inputProps={{ inputMode: 'text', autoCapitalize: 'characters' }}
+        placeholder="123456"
+        helperText={t('auth:twofa_code_hint')}
+      />
+      {twoFAError && <Alert severity="error" sx={{ py: 0 }}>{twoFAError}</Alert>}
+      <Button type="submit" variant="contained" fullWidth size="large"
+        disabled={busy}
+        startIcon={busy ? <CircularProgress size={16} color="inherit" /> : <LoginIcon />}
+        sx={{ mt: 1 }}>
+        {t('auth:twofa_submit')}
+      </Button>
+      <Button variant="text" fullWidth size="small" onClick={cancel2FA} disabled={busy}>
+        {t('auth:twofa_back')}
+      </Button>
+    </Box>
+  )
+
   const ssoBlock = (samlEnabled || oidcEnabled) && (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
       {samlEnabled && (
@@ -286,7 +372,9 @@ export default function LoginView() {
             <Typography variant="body2" sx={{ mt: 0.5 }}>{t('auth:subtitle')}</Typography>
           </Box>
 
-          {ssoFirst ? (
+          {twoFAPending ? (
+            twoFAFormBlock
+          ) : ssoFirst ? (
             <>{ssoBlock}{dividerBlock}{localFormBlock}</>
           ) : (
             <>{localFormBlock}{dividerBlock}{ssoBlock}</>

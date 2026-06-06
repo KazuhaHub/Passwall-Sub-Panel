@@ -83,6 +83,12 @@ export async function resetEmergencyUsage(id: number) {
   await client.post(`/admin/users/${id}/reset-emergency-usage`)
 }
 
+// reset2FA is the admin break-glass: clears a user's 2FA so they can log in with
+// just their password and re-enroll (used when they lost their authenticator).
+export async function reset2FA(id: number) {
+  await client.post(`/admin/users/${id}/reset-2fa`)
+}
+
 export async function unlinkSSO(id: number) {
   await client.post(`/admin/users/${id}/unlink-sso`)
 }

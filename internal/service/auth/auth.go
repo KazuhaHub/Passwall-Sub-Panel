@@ -37,6 +37,17 @@ func (s *Service) Verify(tokenStr string) (*jwtutil.Claims, error) {
 	return s.issuer.ParseAccess(tokenStr)
 }
 
+// IssuePending mints the short-lived 2fa_pending token returned to a user who
+// passed the password step but still owes a 2FA code.
+func (s *Service) IssuePending(u *domain.User) (string, error) {
+	return s.issuer.IssuePending(u.ID, u.UPN, u.Role, u.TokenVersion)
+}
+
+// VerifyPending parses a 2fa_pending token (the /auth/2fa/verify challenge).
+func (s *Service) VerifyPending(tokenStr string) (*jwtutil.Claims, error) {
+	return s.issuer.ParsePending(tokenStr)
+}
+
 // VerifyRefresh parses and validates a refresh token. The refresh
 // endpoint uses this to confirm the caller actually holds an unexpired
 // refresh JWT before minting a new access pair.

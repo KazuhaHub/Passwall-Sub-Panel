@@ -188,6 +188,23 @@ type UserRepo interface {
 	GetBySubToken(ctx context.Context, token string) (*domain.User, error)
 	List(ctx context.Context, filter UserFilter) (items []*domain.User, total int64, err error)
 	ListByGroup(ctx context.Context, groupID int64) ([]*domain.User, error)
+
+	// ---- 2FA / TOTP (column-scoped; secret encrypted at rest, codes hashed) ----
+	// SetTOTP writes the secret + enabled flag + recovery-code hashes.
+	SetTOTP(ctx context.Context, userID int64, secret string, enabled bool, recoveryHashes []string) error
+	// GetTOTP returns the decrypted secret, enabled flag, and recovery hashes.
+	GetTOTP(ctx context.Context, userID int64) (secret string, enabled bool, recoveryHashes []string, err error)
+	// SetRecoveryCodes replaces the stored recovery-code hashes.
+	SetRecoveryCodes(ctx context.Context, userID int64, recoveryHashes []string) error
+	// ConsumeRecoveryCode atomically replaces the stored recovery-code hashes
+	// only if they still equal prevHashes (compare-and-swap), returning true when
+	// THIS call won the swap. It makes recovery-code redemption single-use even
+	// under concurrency: two requests redeeming the same one-time code read the
+	// same list, but only the first's CAS matches — the loser sees prevHashes
+	// already changed (RowsAffected==0) and must refuse the code.
+	ConsumeRecoveryCode(ctx context.Context, userID int64, prevHashes, nextHashes []string) (bool, error)
+	// ClearTOTP disables 2FA and wipes the secret + recovery codes.
+	ClearTOTP(ctx context.Context, userID int64) error
 }
 
 type GroupRepo interface {
@@ -783,6 +800,13 @@ type UISettings struct {
 	// Quota/expiry a registrant inherits (Group has none). 0 = unlimited / no expiry.
 	RegistrationDefaultTrafficGB  float64 `json:"registration_default_traffic_gb"`
 	RegistrationDefaultExpireDays int     `json:"registration_default_expire_days"`
+
+	// ---- Two-factor auth / TOTP (v3.7.0) ----
+	// TOTPEnabled is the panel-wide master toggle for letting local users enroll
+	// an authenticator-app second factor on their profile page. It does NOT
+	// affect users who already enabled 2FA — their login still requires it even
+	// if the admin later turns this off (you can't bypass an active factor).
+	TOTPEnabled bool `json:"totp_enabled"`
 
 	// ---- IP geolocation (access-log region display, offline .mmdb) ----
 	// Resolution is fully offline against a local .mmdb in <ConfigDir>/geoip/;

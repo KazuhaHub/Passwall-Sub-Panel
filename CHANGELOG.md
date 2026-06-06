@@ -4,6 +4,26 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## v3.7.0-beta.5 — 2026-06-05
+
+「账号安全」专题第五块：**两步验证（2FA / TOTP）**（可配，默认关，仅本地密码账号）。用户在「我的账号」用身份验证器 App（Google Authenticator / 1Password / Authy 等）绑定 TOTP，绑定时一次性下发 10 个恢复码；之后本地登录走「密码 → 两步验证码」两段式。SSO 账号不叠加 2FA（交由 IdP）。全程 TDD（twofa 服务 + 恢复码 CAS 仓储各自先红后绿）+ 真机端到端验（启用→绑定→重登出挑战→TOTP 验过→恢复码验过且单次失效→自助关闭→管理员重置 全链路通，TOTP 用 pquerna/otp 真算码）。`go test ./...` / `go vet` / `tsc` / `npm build` 全绿。
+
+### Added
+
+- **两步验证服务 `internal/service/twofa`** —— `Begin`（生成密钥、**禁用态**存库、回 otpauth URL + 明文密钥）→ `Enable`（验码确认→标记启用 + 生成 10 个恢复码，**只回明文一次**、库里存 SHA-256 哈希）；`VerifyLogin`（登录时验 TOTP，失败再比恢复码，**命中即消费**）；`Disable`（需当前 TOTP 或恢复码）；`AdminReset`（管理员无条件清除，破窗用）。TOTP 用 `pquerna/otp`（默认 ±1 步容差），恢复码比对用 `crypto/subtle` 常量时间。密钥列 AES-GCM 加密落库、恢复码哈希存储，均经 `pollOwnedColumns` 保护不被流量轮询的通用 Save 覆写。
+- **两段式登录 + 自助绑定/解绑 + 管理员重置** —— 本地登录密码过后，若账号已开 2FA 则回 `{status:"2fa_required", pending_token}`（5 分钟 `2fa_pending` JWT，非真会话）；`POST /auth/2fa/verify {pending_token, code}` 验码换真会话（与 `/login` 共用 per-IP 登录限流）。用户自助端点 `POST /user/me/2fa/{begin,enable,disable}`；管理员破窗 `POST /admin/users/:id/reset-2fa`（受 operator 越权防护，不能重置特权账号）。`/user/me` 暴露 `totp_available`（管理员开了 2FA 且账号有本地密码）/ `totp_enabled`。
+- **管理端开关 + 前端两步验证 UI** —— 「设置→登录安全」新增「允许两步验证（TOTP）」总开关（关只阻止新开启，**不**剥夺已启用账号）。「我的账号」新增两步验证对话框（二维码 `qrcode.react` + 手动密钥 + 验码启用 + 恢复码一次性展示 + 验码关闭）；登录页新增两步验证挑战步（输验证码或恢复码，pending 过期回退密码步）；用户列表对已开 2FA 的账号显示「重置两步验证」破窗项。中英 i18n 齐。
+
+### 安全加固（25-agent 对抗审查后）
+
+- **恢复码单次使用做成并发安全的原子 CAS（核心修复）** —— 原「读全表→内存匹配→盲写剩余集」是非原子读改写：两个并发 `/auth/2fa/verify` 携同一恢复码会都读到同一列表、都匹配、都盲写同一剩余集，**一个单次码换出两个会话**（双花）。新增 `UserRepo.ConsumeRecoveryCode(prev,next)`——`WHERE id=? AND recovery_codes=<prev>` 的 compare-and-swap，仅 `RowsAffected==1` 者赢（同仓库 `AdvanceBlockViolation` 的并发自增防护同款），输的一方据此拒绝该码。配 TDD（仓储 CAS 失配测试 + 服务层「CAS 输了即拒」测试）。
+- **`/auth/2fa/verify` 完成前重新核验账号状态** —— pending 令牌存活 5 分钟，期间管理员可能停用账号/改密/改角色。原 verify 直接签发会话，是整个登录面**唯一**会给已被吊销账号发会话的口子。现照 Refresh 路径补闸：`!Enabled`（豁免自助停用原因）即 403、`TokenVersion` 不符即 401，再签发——与 Login/Refresh 一致。
+- **2FA 验证请求绕开前端静默刷新机** —— `verify2FA` 补 `_skipRefresh`：这是**会话前**的换取，错码 401 必须直达调用方；否则共用的 401-刷新拦截器会劫持响应、清空 localStorage、甚至用旧令牌重放该请求。
+- **恢复码展示不被误关丢失** —— 启用后展示一次性恢复码的步骤，背景点击/Esc 不再静默关闭（否则恢复码永久丢失 + profile 仍显示「未开启」直到手动刷新）；强制点「完成」走 `finishRecovery → onChanged` 刷新 profile。
+- **消除设置 GET/PUT 双份 DTO 漂移源** —— `totp_enabled` 一度只加进 GET 响应漏了 PUT 响应导致往返丢失（真机 smoke 当场抓到）。抽出单一 `settingsToDTO(s)` 同时供 GET/PUT，新字段不可能再「一处回显、另一处丢弃」。
+
+> 已知取舍：TOTP 码在其 ~90s 有效窗内可重放（标准 TOTP 特性，RFC 6238 §5.2 提示但非强制）——本期不加 per-user「上次步」防重放（恢复码已单次、登录限流挡量），留作后续可选加固。
+
 ## v3.7.0-beta.4 — 2026-06-05
 
 「账号安全」专题第四块：**本地账号自助注册**（可配，默认关）。访客用邮箱注册（邮箱即登录名），默认**强制邮箱验证**后才激活；可配邮箱域名白名单、默认组、默认配额/有效期。全程 TDD（registration 服务先红后绿）+ 真机端到端验（关验证时「注册→直接登录成功」整链路通；开验证时「注册→pending→登录 403」；域名白名单 400；设置校验 400）。`go test ./...` / `go vet` / `tsc` / `npm build` 全绿。

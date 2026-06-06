@@ -67,6 +67,10 @@ export interface MeProfile {
   enabled: boolean
   can_change_password: boolean
   can_edit_personal_rules: boolean
+  /** totp_available: the admin has enabled 2FA panel-wide AND this account has a
+   *  local password (SSO-only accounts can't enroll). totp_enabled: current state. */
+  totp_available?: boolean
+  totp_enabled?: boolean
   emergency_access: {
     enabled: boolean
     available: boolean
@@ -142,4 +146,29 @@ export interface MyNodeStatus {
 export async function getMyServerStatus() {
   const { data } = await client.get<{ nodes: MyNodeStatus[] }>('/user/me/server-status')
   return data.nodes
+}
+
+// ---- Two-factor authentication (TOTP) self-service ----
+
+// begin2FA starts enrollment: returns the otpauth URL (for the QR) + raw secret
+// (for manual entry). The secret is stored disabled until confirmed via enable2FA.
+export async function begin2FA() {
+  const { data } = await client.post<{ otpauth_url: string; secret: string }>('/user/me/2fa/begin')
+  return data
+}
+
+// enable2FA confirms enrollment with a code and returns one-time recovery codes
+// to show ONCE.
+export async function enable2FA(code: string) {
+  const { data } = await client.post<{ recovery_codes: string[] }>(
+    '/user/me/2fa/enable',
+    { code },
+    { _skipErrorToast: true },
+  )
+  return data.recovery_codes
+}
+
+// disable2FA turns 2FA off, requiring a valid current TOTP or recovery code.
+export async function disable2FA(code: string) {
+  await client.post('/user/me/2fa/disable', { code }, { _skipErrorToast: true })
 }

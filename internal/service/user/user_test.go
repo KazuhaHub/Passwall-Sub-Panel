@@ -445,6 +445,26 @@ func (r *memoryUserRepo) ListByGroup(ctx context.Context, groupID int64) ([]*dom
 	return nil, errors.New("not implemented")
 }
 
+func (r *memoryUserRepo) SetTOTP(_ context.Context, id int64, _ string, enabled bool, _ []string) error {
+	if u := r.byID[id]; u != nil {
+		u.TOTPEnabled = enabled
+	}
+	return nil
+}
+func (r *memoryUserRepo) GetTOTP(context.Context, int64) (string, bool, []string, error) {
+	return "", false, nil, nil
+}
+func (r *memoryUserRepo) SetRecoveryCodes(context.Context, int64, []string) error { return nil }
+func (r *memoryUserRepo) ConsumeRecoveryCode(context.Context, int64, []string, []string) (bool, error) {
+	return true, nil
+}
+func (r *memoryUserRepo) ClearTOTP(_ context.Context, id int64) error {
+	if u := r.byID[id]; u != nil {
+		u.TOTPEnabled = false
+	}
+	return nil
+}
+
 func cloneUser(u *domain.User) *domain.User {
 	if u == nil {
 		return nil

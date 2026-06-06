@@ -49,6 +49,7 @@ import CasinoIcon from '@mui/icons-material/Casino'
 import RuleIcon from '@mui/icons-material/Rule'
 import EmergencyIcon from '@mui/icons-material/MedicalServices'
 import LinkOffIcon from '@mui/icons-material/LinkOff'
+import ShieldIcon from '@mui/icons-material/GppMaybe'
 import SyncIcon from '@mui/icons-material/Sync'
 import HelpOutlineIcon from '@mui/icons-material/HelpOutline'
 import { useTranslation } from 'react-i18next'
@@ -58,6 +59,7 @@ import {
   deleteUser,
   getUserRules,
   listUsers,
+  reset2FA,
   resetCredentials,
   resetEmergencyUsage,
   resetPassword,
@@ -768,6 +770,23 @@ export default function UsersView() {
     await load()
   }
 
+  async function actionReset2FA(u: User) {
+    closeMore()
+    const ok = await confirm({
+      title: t('admin:users.confirm.reset_2fa_title', { defaultValue: '重置两步验证' }),
+      message: t('admin:users.confirm.reset_2fa_message', {
+        upn: u.upn,
+        defaultValue: '将清除 {{upn}} 的两步验证（TOTP）。该用户随后仅凭密码即可登录，并需要重新绑定。仅在用户丢失验证器且无恢复码时使用。',
+      }),
+      destructive: true,
+      confirmText: t('admin:users.more_menu.reset_2fa', { defaultValue: '重置两步验证' }),
+    })
+    if (!ok) return
+    await reset2FA(u.id)
+    pushSnack(t('admin:users.credentials.twofa_reset', { defaultValue: '已重置两步验证' }), 'success')
+    await load()
+  }
+
   async function batchResetEmergency() {
     setBatchMoreAnchor(null)
     const rows = selectedRows
@@ -1197,6 +1216,12 @@ export default function UsersView() {
           <ListItemIcon><LinkOffIcon fontSize="small" /></ListItemIcon>
           <ListItemText>{t('admin:users.more_menu.unlink_sso')}</ListItemText>
         </MenuItem>
+        {moreUser?.totp_enabled && (
+          <MenuItem onClick={() => moreUser && actionReset2FA(moreUser)}>
+            <ListItemIcon><ShieldIcon fontSize="small" /></ListItemIcon>
+            <ListItemText>{t('admin:users.more_menu.reset_2fa', { defaultValue: '重置两步验证' })}</ListItemText>
+          </MenuItem>
+        )}
       </Menu>
 
       {/* Create dialog */}

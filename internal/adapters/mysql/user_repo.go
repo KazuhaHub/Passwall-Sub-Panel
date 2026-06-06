@@ -53,10 +53,101 @@ var pollOwnedColumns = []string{
 	"block_violation_count", "last_block_violation_at", "disable_detail",
 	// GrantEmergencyAccess / ClearEmergencyAccess (emergency subsystem)
 	"emergency_until", "emergency_used_count", "emergency_baseline_bytes",
+	// 2FA — written ONLY via SetTOTP / SetRecoveryCodes / ClearTOTP so a stale
+	// edit-dialog Save can't re-enable a just-disabled factor (or wipe a secret).
+	"totp_secret", "totp_enabled", "recovery_codes",
 }
 
 func (r *userRepo) Update(ctx context.Context, u *domain.User) error {
 	return r.db.WithContext(ctx).Omit(pollOwnedColumns...).Save(userFromDomain(u)).Error
+}
+
+// SetTOTP writes the TOTP secret (encrypted at rest), the enabled flag, and the
+// recovery-code hashes in one column-scoped update. Begin passes enabled=false
+// with no codes (a not-yet-confirmed secret); Enable passes enabled=true with
+// the freshly-generated recovery hashes.
+func (r *userRepo) SetTOTP(ctx context.Context, userID int64, secret string, enabled bool, recoveryHashes []string) error {
+	if userID == 0 {
+		return fmt.Errorf("SetTOTP requires a non-zero user ID")
+	}
+	enc, err := encryptSecret(secret)
+	if err != nil {
+		return err
+	}
+	if recoveryHashes == nil {
+		recoveryHashes = []string{}
+	}
+	return r.db.WithContext(ctx).Model(&userRow{}).Where("id = ?", userID).
+		Updates(map[string]any{
+			"totp_secret":    enc,
+			"totp_enabled":   enabled,
+			"recovery_codes": jsonStrings(recoveryHashes),
+		}).Error
+}
+
+// GetTOTP reads a user's decrypted TOTP secret, enabled flag, and recovery-code
+// hashes — the only place the secret is decrypted.
+func (r *userRepo) GetTOTP(ctx context.Context, userID int64) (secret string, enabled bool, recoveryHashes []string, err error) {
+	var row userRow
+	if e := r.db.WithContext(ctx).Select("totp_secret", "totp_enabled", "recovery_codes").
+		First(&row, userID).Error; e != nil {
+		return "", false, nil, wrapNotFound(e)
+	}
+	dec, e := decryptSecret(row.TOTPSecret)
+	if e != nil {
+		return "", false, nil, e
+	}
+	return dec, row.TOTPEnabled, []string(row.RecoveryCodes), nil
+}
+
+// SetRecoveryCodes replaces the stored recovery-code hashes (used to consume a
+// redeemed code by writing back the remaining set).
+func (r *userRepo) SetRecoveryCodes(ctx context.Context, userID int64, recoveryHashes []string) error {
+	if userID == 0 {
+		return fmt.Errorf("SetRecoveryCodes requires a non-zero user ID")
+	}
+	if recoveryHashes == nil {
+		recoveryHashes = []string{}
+	}
+	return r.db.WithContext(ctx).Model(&userRow{}).Where("id = ?", userID).
+		Update("recovery_codes", jsonStrings(recoveryHashes)).Error
+}
+
+// ConsumeRecoveryCode atomically swaps the stored recovery-code hashes from
+// prevHashes to nextHashes, returning true only when this call won (RowsAffected
+// == 1). The prior value lives in the WHERE clause (compare-and-swap), so two
+// concurrent redemptions of the same one-time code can't both succeed: the first
+// changes recovery_codes, and the second's `recovery_codes = <old>` predicate is
+// then false (0 rows) — the same pattern AdvanceBlockViolation uses for its
+// concurrent-increment guard. recovery_codes is in pollOwnedColumns, so the
+// generic Save path can't clobber this between read and swap.
+func (r *userRepo) ConsumeRecoveryCode(ctx context.Context, userID int64, prevHashes, nextHashes []string) (bool, error) {
+	if userID == 0 {
+		return false, fmt.Errorf("ConsumeRecoveryCode requires a non-zero user ID")
+	}
+	if nextHashes == nil {
+		nextHashes = []string{}
+	}
+	res := r.db.WithContext(ctx).Model(&userRow{}).
+		Where("id = ? AND recovery_codes = ?", userID, jsonStrings(prevHashes)).
+		Update("recovery_codes", jsonStrings(nextHashes))
+	if res.Error != nil {
+		return false, res.Error
+	}
+	return res.RowsAffected == 1, nil
+}
+
+// ClearTOTP disables 2FA and wipes the secret + recovery codes.
+func (r *userRepo) ClearTOTP(ctx context.Context, userID int64) error {
+	if userID == 0 {
+		return fmt.Errorf("ClearTOTP requires a non-zero user ID")
+	}
+	return r.db.WithContext(ctx).Model(&userRow{}).Where("id = ?", userID).
+		Updates(map[string]any{
+			"totp_secret":    "",
+			"totp_enabled":   false,
+			"recovery_codes": jsonStrings([]string{}),
+		}).Error
 }
 
 // CountEnabledAdmins counts enabled admin accounts (last-admin lockout guard).

@@ -535,6 +535,15 @@ export default function SettingsView() {
                 </Typography>
               </>
             )}
+            <Divider sx={{ my: 0.5, borderColor: md.outlineVariant }} />
+            {/* Two-factor authentication (TOTP) master switch */}
+            <FormControlLabel label={t('settings.general.totp_enabled', { defaultValue: '允许两步验证（TOTP）' })}
+              control={<Switch checked={settings.totp_enabled}
+                onChange={(_, c) => patch('totp_enabled', c)} />}
+              sx={{ ml: 0, '& .MuiFormControlLabel-label': { ml: 1.5 } }} />
+            <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant, mt: -1 }}>
+              {t('settings.general.totp_hint', { defaultValue: '允许有本地密码的账号在「我的账号」里用身份验证器 App 开启两步验证。关闭仅阻止新开启，不会移除已启用账号的两步验证。SSO 账号不受影响。' })}
+            </Typography>
           </Section>
 
           <Section title={t('settings.general.section_security')} md={md}>

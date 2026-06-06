@@ -104,6 +104,8 @@
       "registration_default_traffic_gb": "默认流量 GB（0=不限）",
       "registration_default_expire_days": "默认有效期（天，0=不过期）",
       "registration_hint": "注册用户以邮箱作为登录名、角色为普通用户，加入默认组并继承上述配额/有效期。开启邮箱验证需先配置 SMTP；链接方式需先配置订阅基础 URL。",
+      "totp_enabled": "允许两步验证（TOTP）",
+      "totp_hint": "允许有本地密码的账号在「我的账号」里用身份验证器 App 开启两步验证。关闭仅阻止新开启，不会移除已启用账号的两步验证。SSO 账号不受影响。",
       "login_mode": "登录模式",
       "login_mode_dual": "本地 + SSO（默认）",
       "login_mode_sso_first": "SSO 优先",
@@ -1124,7 +1126,9 @@
       "batch_unlink_sso_title": "批量解除 SSO 绑定",
       "batch_unlink_sso_message": "解除 {{names}}{{suffix}} 共 {{count}} 个用户的 SSO 绑定？解除后，他们下次 SSO 登录会重新绑定到当时的 IdP 身份。",
       "batch_delete_title": "批量删除用户",
-      "batch_delete_message": "确定删除 {{names}}{{suffix}}？该操作将从所有 3X-UI inbound 清除这些用户的 client。"
+      "batch_delete_message": "确定删除 {{names}}{{suffix}}？该操作将从所有 3X-UI inbound 清除这些用户的 client。",
+      "reset_2fa_title": "重置两步验证",
+      "reset_2fa_message": "将清除 {{upn}} 的两步验证（TOTP）。该用户随后仅凭密码即可登录，并需要重新绑定。仅在用户丢失验证器且无恢复码时使用。"
     },
     "more_menu": {
       "copy_sub": "复制订阅 URL",
@@ -1132,6 +1136,7 @@
       "reset_password": "重置密码",
       "reset_credentials": "重置凭证",
       "reset_emergency": "重置紧急访问次数",
+      "reset_2fa": "重置两步验证",
       "unlink_sso": "解除 SSO 绑定"
     },
     "reset_password": {
@@ -1183,7 +1188,8 @@
     },
     "credentials": {
       "result": "已重置！新 UUID: {{uuid}}",
-      "emergency_reset": "已重置紧急使用次数"
+      "emergency_reset": "已重置紧急使用次数",
+      "twofa_reset": "已重置两步验证"
     }
   },
   "groups": {

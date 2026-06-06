@@ -15,6 +15,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/render"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/traffic"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/twofa"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/user"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/transport/http/middleware"
 )
@@ -27,10 +28,11 @@ type UserMeHandler struct {
 	settings  ports.SettingsRepo
 	nodes     ports.NodeRepo
 	ownership ports.OwnershipRepo
+	twofa     *twofa.Service
 }
 
-func NewUserMeHandler(userSvc *user.Service, trafficSvc *traffic.Service, settings ports.SettingsRepo, nodes ports.NodeRepo, ownership ports.OwnershipRepo) *UserMeHandler {
-	return &UserMeHandler{user: userSvc, traffic: trafficSvc, settings: settings, nodes: nodes, ownership: ownership}
+func NewUserMeHandler(userSvc *user.Service, trafficSvc *traffic.Service, settings ports.SettingsRepo, nodes ports.NodeRepo, ownership ports.OwnershipRepo, twofaSvc *twofa.Service) *UserMeHandler {
+	return &UserMeHandler{user: userSvc, traffic: trafficSvc, settings: settings, nodes: nodes, ownership: ownership, twofa: twofaSvc}
 }
 
 func (h *UserMeHandler) Profile(c *gin.Context) {
@@ -94,6 +96,11 @@ func (h *UserMeHandler) Profile(c *gin.Context) {
 		"traffic_history_days": settings.TrafficHistoryDays,
 		"enabled":              u.Enabled,
 		"can_change_password":  canChangePassword,
+		// 2FA self-service: totp_available means the admin has turned on
+		// panel-wide enrollment AND the account has a local password (SSO-only
+		// accounts can't enroll). totp_enabled is this user's current state.
+		"totp_available": u.HasLocalPassword() && settingsErr == nil && settings.TOTPEnabled,
+		"totp_enabled":   u.TOTPEnabled,
 		// can_edit_personal_rules drives the portal's rules dialog: when
 		// false the textarea renders read-only and the Save button hides.
 		// Admins always can; for non-admins it follows the global flag.

@@ -51,7 +51,32 @@
   },
   "actions": {
     "change_password": "修改密码",
-    "personal_rules": "个人规则"
+    "personal_rules": "个人规则",
+    "two_factor": "两步验证"
+  },
+  "twofa": {
+    "status_on": "已开启",
+    "status_off": "未开启",
+    "title": "两步验证（2FA）",
+    "intro": "开启后，登录时除密码外还需输入身份验证器 App（如 Google Authenticator、1Password、Authy）生成的一次性验证码，显著提升账号安全。",
+    "start": "开始设置",
+    "cancel": "取消",
+    "scan_hint": "用身份验证器 App 扫描下方二维码：",
+    "manual_hint": "无法扫码？手动输入此密钥：",
+    "copy": "复制",
+    "code": "验证码",
+    "confirm": "确认开启",
+    "code_required": "请输入验证码",
+    "code_invalid": "验证码无效，请重试。",
+    "generic_error": "操作失败，请重试。",
+    "recovery_warning": "请妥善保存以下恢复码，每个仅可使用一次。当你无法使用身份验证器时，可用恢复码登录。此页关闭后将无法再次查看。",
+    "copy_all": "复制全部",
+    "done": "我已保存，完成",
+    "enabled_toast": "两步验证已开启",
+    "disable_hint": "请输入当前的验证码或一个恢复码以关闭两步验证。",
+    "disable_code_hint": "可输入身份验证器验证码或恢复码。",
+    "disable": "关闭两步验证",
+    "disabled_toast": "两步验证已关闭"
   },
   "password": {
     "title": "修改密码",
