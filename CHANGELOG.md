@@ -4,6 +4,14 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## v3.7.0-beta.12 — 2026-06-06
+
+修复管理员「账号安全」抽屉**开关无过渡动画、生硬闪入闪出**。`tsc` / `npm build` / 二进制重建全绿。
+
+### Fixed
+
+- **抽屉滑入/滑出动画丢失** —— 抽屉的 `open` 与 `user` 绑同一状态、关闭时一起置 `null`，组件内 `if (!user) return null` 导致每次关闭即整体卸载、每次打开都是全新挂载；而 MUI `Slide` 仅在组件**首次挂载之后**才播放 `appear`，于是进场动画被跳过、出场直接闪没。改为抽屉**常驻挂载**：用 `shown` 快照住目标用户（首帧即有内容、并撑过关闭滑出），`open` 边沿触发临时状态重置，过渡时长设为 `enter 300 / exit 240ms`。
+
 ## v3.7.0-beta.11 — 2026-06-06
 
 新增**强制启用两步验证**：管理员可要求账号在使用面板前先绑定第二因子（TOTP 或通行密钥任一），三级粒度——**全局所有管理员/运营**、**按分组**、**按单个用户**。后端硬闸 + 前端引导双层执行。全程 TDD（策略 + 闸门中间件），经 7-agent 对抗审查修 1 实 HIGH（operator 锁死）+ 1 实 MED（闸门错误失败开放）。`go test ./...` / `go vet` / `tsc` / `npm build` 全绿，启动 smoke（新列 AutoMigrate + 响应正常）通过。

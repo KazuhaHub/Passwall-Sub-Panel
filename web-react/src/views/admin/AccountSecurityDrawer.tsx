@@ -59,31 +59,40 @@ export default function AccountSecurityDrawer({
   const [recoveryCodes, setRecoveryCodes] = useState<string[] | null>(null)
   const [require2FA, setRequire2FA] = useState(false)
 
-  // Reset transient state whenever the target user changes.
-  const targetId = user?.id
-  const [shownFor, setShownFor] = useState<number | undefined>(undefined)
-  if (open && targetId !== shownFor) {
-    setShownFor(targetId)
-    setRecoveryCodes(null)
-    setRequire2FA(!!user?.require_2fa)
+  // Keep the Drawer permanently mounted (we no longer `return null` when there's
+  // no user) so MUI runs its slide + backdrop-fade transitions BOTH ways. The old
+  // unmount-on-close re-mounted the Drawer on every open, and MUI only animates
+  // `appear` AFTER a component's first mount — so the enter was skipped and the
+  // exit snapped. We snapshot the targeted user into `shown` so its content is
+  // present on the first open frame and survives the close slide-out.
+  const [shown, setShown] = useState<User | null>(null)
+  if (user && user !== shown) setShown(user)
+
+  // Reset transient UI on each open edge (also covers reopening the same user).
+  const [wasOpen, setWasOpen] = useState(false)
+  if (open !== wasOpen) {
+    setWasOpen(open)
+    if (open) {
+      setRecoveryCodes(null)
+      setRequire2FA(!!user?.require_2fa)
+    }
   }
 
+  const u = shown
+  const hasSSO = !!u?.sso_provider && u.sso_provider !== 'local'
+  const initial = (u?.display_name || u?.upn || '?').trim().charAt(0).toUpperCase()
+
   async function toggleRequire2FA(next: boolean) {
-    if (!user) return
+    if (!u) return
     setRequire2FA(next) // optimistic
     setBusy(true)
     try {
-      await updateUser(user.id, { require_2fa: next })
+      await updateUser(u.id, { require_2fa: next })
       pushSnack(t('users.toast.saved', { defaultValue: '已保存' }), 'success')
     } catch {
       setRequire2FA(!next) // revert
     } finally { setBusy(false) }
   }
-
-  if (!user) return null
-  const u = user
-  const hasSSO = !!u.sso_provider && u.sso_provider !== 'local'
-  const initial = (u.display_name || u.upn || '?').trim().charAt(0).toUpperCase()
 
   async function copy(text: string) {
     try {
@@ -93,6 +102,7 @@ export default function AccountSecurityDrawer({
   }
 
   async function doRegenRecovery() {
+    if (!u) return
     const ok = await confirm({
       title: t('users.security.regen_recovery_title', { defaultValue: '重新生成备用码' }),
       message: t('users.security.regen_recovery_message', {
@@ -110,7 +120,9 @@ export default function AccountSecurityDrawer({
 
   return (
     <Drawer anchor="right" open={open} onClose={onClose}
+      transitionDuration={{ enter: 300, exit: 240 }}
       PaperProps={{ sx: { width: 480, maxWidth: '94vw', bgcolor: md.surfaceContainerLow, borderTopLeftRadius: 16, borderBottomLeftRadius: 16 } }}>
+      {u && (<>
       {/* Header */}
       <Box sx={{ p: 2.5, pb: 2, display: 'flex', alignItems: 'center', gap: 1.5 }}>
         <Avatar sx={{ bgcolor: md.primaryContainer, color: md.onPrimaryContainer, width: 44, height: 44, fontWeight: 700 }}>
@@ -208,6 +220,7 @@ export default function AccountSecurityDrawer({
           </Button>
         </SectionCard>
       </Box>
+      </>)}
     </Drawer>
   )
 }
