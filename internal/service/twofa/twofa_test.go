@@ -272,8 +272,94 @@ func TestAdminRegenerateRecovery(t *testing.T) {
 	if len(codes) != 2 || !st.enabled || st.secret != "S" {
 		t.Fatal("admin regenerate must return fresh codes and keep 2FA on")
 	}
+	// Admin regenerate is now a guard-free break-glass primitive: the caller (admin
+	// handler) decides who has a second factor. It must work even for an account the
+	// twofa layer sees as TOTP-off — passkey-only users keep recovery codes outside
+	// TOTP — and must NOT flip TOTP on.
 	st2 := &memStore{user: &domain.User{ID: 2, UPN: "v@x"}, enabled: false}
-	if _, err := newSvc(st2, true, "111111").AdminRegenerateRecovery(context.Background(), 2); err == nil {
-		t.Fatal("admin regenerate must error when the user has no 2FA")
+	codes2, err := newSvc(st2, true, "111111").AdminRegenerateRecovery(context.Background(), 2)
+	if err != nil || len(codes2) != 2 {
+		t.Fatalf("admin regenerate must work without TOTP: codes=%d err=%v", len(codes2), err)
+	}
+	if st2.enabled {
+		t.Fatal("admin regenerate must not enable TOTP for a passkey-only / no-TOTP account")
+	}
+}
+
+// --- recovery codes decoupled from TOTP (any second factor → recovery codes) ---
+
+func TestVerifyLogin_RecoveryWithoutTOTP(t *testing.T) {
+	// Passkey-only account: no TOTP secret, TOTP disabled, but recovery codes exist
+	// (issued at passkey enrollment). A recovery code must still verify + be consumed.
+	st := &memStore{user: &domain.User{ID: 1}, enabled: false, secret: "",
+		recovery: []string{hashRecovery("AAAA-BBBB")}}
+	ok, err := newSvc(st, true, "111111").VerifyLogin(context.Background(), 1, "aaaa-bbbb")
+	if err != nil || !ok {
+		t.Fatalf("recovery code must verify for a passkey-only account: ok=%v err=%v", ok, err)
+	}
+	if len(st.recovery) != 0 {
+		t.Fatalf("recovery code must be consumed, remaining=%v", st.recovery)
+	}
+}
+
+func TestVerifyLogin_DisabledTOTPSecretRejected(t *testing.T) {
+	// A leftover secret with enabled=false must NOT validate as TOTP — otherwise a
+	// half-finished enrollment would silently act as an active factor.
+	st := &memStore{user: &domain.User{ID: 1}, enabled: false, secret: "SECRET32"}
+	if ok, _ := newSvc(st, true, "111111").VerifyLogin(context.Background(), 1, "111111"); ok {
+		t.Fatal("a disabled TOTP secret must not verify")
+	}
+}
+
+func TestEnsureRecovery_CreatesWhenNone(t *testing.T) {
+	st := &memStore{user: &domain.User{ID: 1}, enabled: false} // no codes yet
+	codes, created, err := newSvc(st, true, "111111").EnsureRecovery(context.Background(), 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !created || len(codes) != 2 {
+		t.Fatalf("must create codes when none exist: created=%v n=%d", created, len(codes))
+	}
+	if len(st.recovery) != 2 || st.recovery[0] != hashRecovery(codes[0]) {
+		t.Fatal("EnsureRecovery must store hashes of the new plaintext codes")
+	}
+	if st.enabled {
+		t.Fatal("EnsureRecovery must not touch the TOTP enabled state")
+	}
+}
+
+func TestEnsureRecovery_NoopWhenPresent(t *testing.T) {
+	st := &memStore{user: &domain.User{ID: 1}, recovery: []string{hashRecovery("X")}}
+	codes, created, err := newSvc(st, true, "111111").EnsureRecovery(context.Background(), 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created || codes != nil {
+		t.Fatalf("must be a no-op when codes already exist: created=%v codes=%v", created, codes)
+	}
+}
+
+func TestRecoveryRemaining(t *testing.T) {
+	st := &memStore{user: &domain.User{ID: 1}, recovery: []string{"a", "b", "c"}}
+	n, err := newSvc(st, true, "x").RecoveryRemaining(context.Background(), 1)
+	if err != nil || n != 3 {
+		t.Fatalf("want 3 remaining, got %d err=%v", n, err)
+	}
+}
+
+func TestRegenerateRecovery_PasskeyOnly(t *testing.T) {
+	// No TOTP, but recovery codes exist. A recovery code proves possession;
+	// regeneration must succeed and must not flip TOTP on.
+	st := &memStore{user: &domain.User{ID: 1, UPN: "u@x"}, enabled: false, secret: "",
+		recovery: []string{hashRecovery("ZZZZ-YYYY")}}
+	codes, err := newSvc(st, true, "111111").RegenerateRecovery(context.Background(), 1, "zzzz-yyyy")
+	if err != nil {
+		t.Fatalf("recovery-code proof must work for a passkey-only account: %v", err)
+	}
+	if len(codes) != 2 {
+		t.Fatalf("want 2 fresh codes, got %d", len(codes))
+	}
+	if st.enabled {
+		t.Fatal("regeneration must not enable TOTP")
 	}
 }

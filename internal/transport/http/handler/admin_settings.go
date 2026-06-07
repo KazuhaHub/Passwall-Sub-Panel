@@ -130,9 +130,9 @@ type settingsDTO struct {
 	// passkeys; PasskeyPasswordless additionally allows usernameless passkey login.
 	PasskeyEnabled      bool `json:"passkey_enabled"`
 	PasskeyPasswordless bool `json:"passkey_passwordless"`
-	// Alternative 2FA verification methods offered at the login challenge (v3.7.0),
-	// on top of the always-available TOTP + recovery codes. Both default off.
-	TwoFAAllowPasskey  bool `json:"twofa_allow_passkey"`
+	// Email-OTP as an opt-in weaker 2FA fallback at the login challenge (v3.7.0),
+	// on top of the factors the account already has (TOTP / passkey / recovery).
+	// Default off.
 	TwoFAAllowEmail    bool `json:"twofa_allow_email"`
 	Require2FAForStaff bool `json:"require_2fa_for_staff"`
 }
@@ -251,7 +251,6 @@ func settingsToDTO(s ports.UISettings) settingsDTO {
 		TOTPEnabled:                          s.TOTPEnabled,
 		PasskeyEnabled:                       s.PasskeyEnabled,
 		PasskeyPasswordless:                  s.PasskeyPasswordless,
-		TwoFAAllowPasskey:                    s.TwoFAAllowPasskey,
 		TwoFAAllowEmail:                      s.TwoFAAllowEmail,
 		Require2FAForStaff:                   s.Require2FAForStaff,
 	}
@@ -360,7 +359,6 @@ func (h *AdminSettingsHandler) Put(c *gin.Context) {
 		TOTPEnabled:                   req.TOTPEnabled,
 		PasskeyEnabled:                req.PasskeyEnabled,
 		PasskeyPasswordless:           req.PasskeyPasswordless,
-		TwoFAAllowPasskey:             req.TwoFAAllowPasskey,
 		TwoFAAllowEmail:               req.TwoFAAllowEmail,
 		Require2FAForStaff:            req.Require2FAForStaff,
 		// GeoIPUpdateToken / CaptchaSecretKey resolved below ("empty = keep existing").

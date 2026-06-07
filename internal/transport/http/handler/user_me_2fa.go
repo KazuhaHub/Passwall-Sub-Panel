@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"errors"
 	"net/http"
 
@@ -9,6 +10,19 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/transport/http/middleware"
 )
+
+// recoveryRemaining is the best-effort count of unused recovery codes for the
+// profile payload (0 on any error / when 2FA isn't wired).
+func (h *UserMeHandler) recoveryRemaining(ctx context.Context, userID int64) int {
+	if h.twofa == nil {
+		return 0
+	}
+	n, err := h.twofa.RecoveryRemaining(ctx, userID)
+	if err != nil {
+		return 0
+	}
+	return n
+}
 
 // Begin2FA starts TOTP enrollment for the calling user: it generates a secret
 // (stored disabled until confirmed) and returns the otpauth URL for the QR plus

@@ -77,6 +77,7 @@ import { pushSnack } from '@/components/SnackbarHost'
 import { copyToClipboard } from '@/utils/clipboard'
 import TwoFactorDialog from './TwoFactorDialog'
 import PasskeyDialog from './PasskeyDialog'
+import RecoveryCodesDialog from './RecoveryCodesDialog'
 
 function bytesToHuman(n: number) {
   if (n === 0) return '0'
@@ -258,6 +259,7 @@ export default function MeView() {
 
   const [twoFAOpen, setTwoFAOpen] = useState(false)
   const [passkeyOpen, setPasskeyOpen] = useState(false)
+  const [recoveryOpen, setRecoveryOpen] = useState(false)
 
   const [rulesOpen, setRulesOpen] = useState(false)
   const [rulesText, setRulesText] = useState('')
@@ -682,6 +684,17 @@ export default function MeView() {
                 <ListItemText
                   primary={t('actions.passkeys')}
                   secondary={t('passkey.count', { count: profile.passkey_credentials?.length ?? 0 })}
+                />
+              </MenuItem>
+            )}
+            {/* Recovery codes — shown whenever the account has any second factor
+                (TOTP or a passkey), since recovery codes are decoupled from TOTP. */}
+            {(profile.totp_enabled || (profile.passkey_credentials?.length ?? 0) > 0) && (
+              <MenuItem onClick={() => { setMenuAnchor(null); setRecoveryOpen(true) }}>
+                <ListItemIcon><ConfirmationNumberIcon fontSize="small" /></ListItemIcon>
+                <ListItemText
+                  primary={t('actions.recovery_codes', { defaultValue: '备用码' })}
+                  secondary={t('recovery.remaining', { count: profile.recovery_codes_remaining ?? 0, defaultValue: '剩余 {{count}} 个备用码' })}
                 />
               </MenuItem>
             )}
@@ -1248,6 +1261,16 @@ export default function MeView() {
         credentials={profile.passkey_credentials ?? []}
         md={md}
         onClose={() => setPasskeyOpen(false)}
+        onChanged={() => { void load() }}
+      />
+
+      {/* Recovery codes dialog — recovery codes are decoupled from TOTP, so this
+          is reachable for passkey-only accounts too. */}
+      <RecoveryCodesDialog
+        open={recoveryOpen}
+        remaining={profile.recovery_codes_remaining ?? 0}
+        md={md}
+        onClose={() => setRecoveryOpen(false)}
         onChanged={() => { void load() }}
       />
 

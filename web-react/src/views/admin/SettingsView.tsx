@@ -570,12 +570,9 @@ export default function SettingsView() {
                   {t('settings.general.twofa_methods_title', { defaultValue: '两步验证的备选方式' })}
                 </Typography>
                 <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant, mb: 1 }}>
-                  {t('settings.general.twofa_methods_hint', { defaultValue: '验证器代码和一次性备用码始终可用。可额外允许用户在登录挑战时改用：' })}
+                  {t('settings.general.twofa_methods_hint', { defaultValue: '验证器代码、一次性备用码、以及账号已绑定的通行密钥在登录挑战时都自动可用（绑定通行密钥即视为开启两步验证）。可额外允许一种较弱的方式：' })}
                 </Typography>
                 <Stack spacing={1}>
-                  <FormControlLabel label={t('settings.general.twofa_allow_passkey', { defaultValue: '通行密钥验证（仅密码登录时可用）' })}
-                    control={<Switch checked={settings.twofa_allow_passkey} onChange={(_, c) => patch('twofa_allow_passkey', c)} />}
-                    sx={{ ml: 0, display: 'flex', '& .MuiFormControlLabel-label': { ml: 1.5 } }} />
                   <FormControlLabel label={t('settings.general.twofa_allow_email', { defaultValue: '邮箱一次性验证码（较弱，需配置 SMTP）' })}
                     control={<Switch checked={settings.twofa_allow_email} onChange={(_, c) => patch('twofa_allow_email', c)} />}
                     sx={{ ml: 0, display: 'flex', '& .MuiFormControlLabel-label': { ml: 1.5 } }} />

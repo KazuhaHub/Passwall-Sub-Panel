@@ -82,6 +82,10 @@ export interface MeProfile {
   passkey_available?: boolean
   passkey_enabled?: boolean
   passkey_credentials?: PasskeyCredential[]
+  /** recovery_codes_remaining: unused one-time recovery codes. Recovery codes are
+   *  decoupled from TOTP — present whenever the account has any second factor
+   *  (TOTP or passkey). Drives the portal's "recovery codes" surface. */
+  recovery_codes_remaining?: number
   /** must_enroll_2fa: the account is required (per-user / group / staff-wide) to
    *  set up a second factor but hasn't. The panel is gated until it does. */
   must_enroll_2fa?: boolean
@@ -209,19 +213,21 @@ export async function beginPasskeyEnroll(): Promise<{
 }
 
 // finishPasskeyEnroll posts the attestation (body) with the session id + chosen
-// name in the query, and returns the updated credential list.
+// name in the query. Returns the updated credential list plus — ONLY on the
+// account's first passkey — a one-time set of recovery codes (a passkey is a
+// second factor, so the account needs a printable fallback, same as enabling TOTP).
 export async function finishPasskeyEnroll(
   sessionId: string,
   name: string,
   attestation: RegistrationResponseJSON,
-): Promise<PasskeyCredential[]> {
+): Promise<{ passkeys: PasskeyCredential[]; recovery_codes?: string[] }> {
   const q = `session=${encodeURIComponent(sessionId)}&name=${encodeURIComponent(name)}`
-  const { data } = await client.post<{ passkeys: PasskeyCredential[] }>(
+  const { data } = await client.post<{ passkeys: PasskeyCredential[]; recovery_codes?: string[] }>(
     `/user/me/passkeys/finish?${q}`,
     attestation,
     { _skipErrorToast: true },
   )
-  return data.passkeys
+  return data
 }
 
 export async function listPasskeys(): Promise<PasskeyCredential[]> {

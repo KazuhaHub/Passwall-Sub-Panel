@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"context"
 	"slices"
 	"testing"
 
@@ -10,79 +9,79 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 )
 
-type stubLister struct{ n int }
-
-func (s stubLister) List(context.Context, int64) ([]*domain.PasskeyCredential, error) {
-	out := make([]*domain.PasskeyCredential, s.n)
-	return out, nil
-}
-
 func TestAvailableTwoFAMethods(t *testing.T) {
-	withPK := stubLister{n: 2}
-	noPK := stubLister{n: 0}
-	u := &domain.User{ID: 1, Email: "a@b.c"}
-	noEmail := &domain.User{ID: 1}
+	totp := &domain.User{ID: 1, Email: "a@b.c", TOTPEnabled: true}
+	passkeyOnly := &domain.User{ID: 1, Email: "a@b.c"} // no TOTP
+	noEmail := &domain.User{ID: 1, TOTPEnabled: true}
 
 	cases := []struct {
 		name        string
 		u           *domain.User
 		firstFactor string
 		s           ports.UISettings
-		pk          passkeyLister
+		hasPasskey  bool
+		hasRecovery bool
 		want        []string
 	}{
 		{
-			name: "baseline is totp+recovery only",
-			u:    u, firstFactor: jwtutil.FirstFactorPassword,
-			s:    ports.UISettings{},
-			pk:   withPK,
-			want: []string{"totp", "recovery"},
+			name: "totp account with recovery codes",
+			u:    totp, firstFactor: jwtutil.FirstFactorPassword,
+			s:           ports.UISettings{},
+			hasRecovery: true,
+			want:        []string{"totp", "recovery"},
 		},
 		{
-			name: "passkey offered when allowed + enrolled + password first factor",
-			u:    u, firstFactor: jwtutil.FirstFactorPassword,
-			s:    ports.UISettings{TwoFAAllowPasskey: true, PasskeyEnabled: true},
-			pk:   withPK,
+			name: "totp account that burned all recovery codes",
+			u:    totp, firstFactor: jwtutil.FirstFactorPassword,
+			s:           ports.UISettings{},
+			hasRecovery: false,
+			want:        []string{"totp"},
+		},
+		{
+			name: "passkey-only account offers passkey + recovery, NOT totp",
+			u:    passkeyOnly, firstFactor: jwtutil.FirstFactorPassword,
+			s:          ports.UISettings{PasskeyEnabled: true},
+			hasPasskey: true, hasRecovery: true,
+			want: []string{"recovery", "passkey"},
+		},
+		{
+			name: "passkey offered when enrolled + password first factor (no separate allow toggle)",
+			u:    totp, firstFactor: jwtutil.FirstFactorPassword,
+			s:          ports.UISettings{PasskeyEnabled: true},
+			hasPasskey: true, hasRecovery: true,
 			want: []string{"totp", "recovery", "passkey"},
 		},
 		{
 			name: "passkey NOT offered when first factor was a passkey (no same-factor twice)",
-			u:    u, firstFactor: jwtutil.FirstFactorPasskey,
-			s:    ports.UISettings{TwoFAAllowPasskey: true, PasskeyEnabled: true},
-			pk:   withPK,
-			want: []string{"totp", "recovery"},
-		},
-		{
-			name: "passkey NOT offered when the user has none enrolled",
-			u:    u, firstFactor: jwtutil.FirstFactorPassword,
-			s:    ports.UISettings{TwoFAAllowPasskey: true, PasskeyEnabled: true},
-			pk:   noPK,
+			u:    totp, firstFactor: jwtutil.FirstFactorPasskey,
+			s:          ports.UISettings{PasskeyEnabled: true},
+			hasPasskey: true, hasRecovery: true,
 			want: []string{"totp", "recovery"},
 		},
 		{
 			name: "passkey NOT offered when the feature master switch is off",
-			u:    u, firstFactor: jwtutil.FirstFactorPassword,
-			s:    ports.UISettings{TwoFAAllowPasskey: true, PasskeyEnabled: false},
-			pk:   withPK,
+			u:    totp, firstFactor: jwtutil.FirstFactorPassword,
+			s:          ports.UISettings{PasskeyEnabled: false},
+			hasPasskey: true, hasRecovery: true,
 			want: []string{"totp", "recovery"},
 		},
 		{
 			name: "email offered when allowed + user has an email",
-			u:    u, firstFactor: jwtutil.FirstFactorPassword,
-			s:    ports.UISettings{TwoFAAllowEmail: true},
-			pk:   noPK,
-			want: []string{"totp", "recovery", "email"},
+			u:    totp, firstFactor: jwtutil.FirstFactorPassword,
+			s:           ports.UISettings{TwoFAAllowEmail: true},
+			hasRecovery: true,
+			want:        []string{"totp", "recovery", "email"},
 		},
 		{
 			name: "email NOT offered when the user has no email",
 			u:    noEmail, firstFactor: jwtutil.FirstFactorPassword,
-			s:    ports.UISettings{TwoFAAllowEmail: true},
-			pk:   noPK,
-			want: []string{"totp", "recovery"},
+			s:           ports.UISettings{TwoFAAllowEmail: true},
+			hasRecovery: true,
+			want:        []string{"totp", "recovery"},
 		},
 	}
 	for _, tc := range cases {
-		got := availableTwoFAMethods(context.Background(), tc.u, tc.firstFactor, tc.s, tc.pk)
+		got := availableTwoFAMethods(tc.u, tc.firstFactor, tc.s, tc.hasPasskey, tc.hasRecovery)
 		if !slices.Equal(got, tc.want) {
 			t.Errorf("%s: got %v, want %v", tc.name, got, tc.want)
 		}

@@ -34,6 +34,7 @@ type CredStore interface {
 	Rename(ctx context.Context, id, userID int64, name string) error
 	Delete(ctx context.Context, id, userID int64) error
 	DeleteAllByUserID(ctx context.Context, userID int64) (int, error)
+	CountByUserIDs(ctx context.Context, userIDs []int64) (map[int64]int, error)
 }
 
 type UserGetter interface {
@@ -403,6 +404,12 @@ func (s *Service) finalizeAssertion(ctx context.Context, stored *domain.PasskeyC
 // List returns a user's registered credentials (profile management).
 func (s *Service) List(ctx context.Context, userID int64) ([]*domain.PasskeyCredential, error) {
 	return s.d.Creds.FindByUserID(ctx, userID)
+}
+
+// CountByUsers returns the passkey count per user id in one query — the admin
+// user-list enrichment so the UI can flag accounts that have a passkey factor.
+func (s *Service) CountByUsers(ctx context.Context, userIDs []int64) (map[int64]int, error) {
+	return s.d.Creds.CountByUserIDs(ctx, userIDs)
 }
 
 // Rename / Delete are user-scoped at the repo so a caller can't touch another's.

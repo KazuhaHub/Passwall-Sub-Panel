@@ -53,9 +53,20 @@
     "change_password": "Change password",
     "personal_rules": "Personal rules",
     "two_factor": "Two-factor auth",
-    "passkeys": "Passkeys"
+    "passkeys": "Passkeys",
+    "recovery_codes": "Recovery codes"
+  },
+  "recovery": {
+    "title": "Recovery codes",
+    "intro": "When you can't use your authenticator or passkey, a one-time recovery code lets you sign in. Each code works only once.",
+    "remaining": "{{count}} recovery codes left",
+    "none_left": "You have no recovery codes left — please regenerate a set."
   },
   "passkey": {
+    "recovery_title": "Save your recovery codes",
+    "recovery_warning": "These are your one-time recovery codes — use one to sign in when you can't use your passkey. Save them somewhere safe; they're shown only once.",
+    "recovery_done": "I've saved them",
+    "copy_all": "Copy all",
     "count": "{{count}} registered",
     "title": "Passkeys",
     "intro": "Passkeys let you sign in with your device's fingerprint/face or a security key — no password to remember, and phishing-resistant. Once added, you can sign in from the login page with one tap.",

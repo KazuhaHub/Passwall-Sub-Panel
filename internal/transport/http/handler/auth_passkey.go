@@ -6,7 +6,6 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
-	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/jwtutil"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/auth"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/passkey"
@@ -66,20 +65,11 @@ func (h *AuthPasskeyHandler) LoginFinish(c *gin.Context) {
 		c.JSON(http.StatusForbidden, gin.H{"error": "Local login is restricted to administrators; please use SSO"})
 		return
 	}
-	// 2FA gate — a passkey proves possession; if the user also enrolled TOTP,
-	// still require it (defense in depth), mirroring password login. The first
-	// factor is recorded as "passkey" so the challenge won't offer passkey again.
-	if u.TOTPEnabled {
-		pending, perr := h.auth.IssuePending(u, jwtutil.FirstFactorPasskey)
-		if perr != nil {
-			recordAuthEvent(c, h.authEvents, domain.AuthMethodPasskey, domain.AuthOutcomeFailure, u.ID, u.UPN, "token_error")
-			respondError(c, perr)
-			return
-		}
-		methods := availableTwoFAMethods(c.Request.Context(), u, jwtutil.FirstFactorPasskey, s, h.passkey)
-		c.JSON(http.StatusOK, gin.H{"status": "2fa_required", "pending_token": pending, "methods": methods})
-		return
-	}
+	// No second-factor step: a passwordless passkey (a discoverable credential
+	// asserted with user verification — PIN / biometric) is itself a strong
+	// multi-factor proof. We deliberately do NOT stack a TOTP challenge on top even
+	// when the account also enrolled TOTP — that challenge is for password-first
+	// logins. Mint the session directly. (`s` above still gates the local-login lock.)
 	access, refresh, err := h.auth.IssueTokens(u)
 	if err != nil {
 		recordAuthEvent(c, h.authEvents, domain.AuthMethodPasskey, domain.AuthOutcomeFailure, u.ID, u.UPN, "token_error")

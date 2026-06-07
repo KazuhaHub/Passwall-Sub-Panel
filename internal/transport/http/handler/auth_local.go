@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strconv"
@@ -361,17 +362,26 @@ func (h *AuthLocalHandler) Login(c *gin.Context) {
 		c.JSON(http.StatusForbidden, gin.H{"error": "Local login is restricted to administrators; please use SSO"})
 		return
 	}
-	// 2FA gate: when the account has TOTP enabled, the password check is only the
-	// first factor. Hand back a short-lived pending token (not a real session) and
-	// require /auth/2fa/verify to complete the login.
-	if u.TOTPEnabled {
+	// 2FA gate: the password check is only the first factor when the account has a
+	// SECOND factor enrolled — TOTP, OR a passkey (enrolling a passkey opts the
+	// account into 2FA; there is no separate "allow passkey as 2FA" toggle). Hand
+	// back a short-lived pending token (not a real session) and require
+	// /auth/2fa/verify (or a passkey/email alternative) to complete the login.
+	hasPasskey := h.userHasPasskey(c.Request.Context(), u.ID, s)
+	if u.TOTPEnabled || hasPasskey {
 		pending, perr := h.auth.IssuePending(u, jwtutil.FirstFactorPassword)
 		if perr != nil {
 			recordAuthEvent(c, h.authEvents, domain.AuthMethodLocal, domain.AuthOutcomeFailure, u.ID, u.UPN, "token_error")
 			respondError(c, perr)
 			return
 		}
-		methods := availableTwoFAMethods(c.Request.Context(), u, jwtutil.FirstFactorPassword, s, h.passkey)
+		hasRecovery := false
+		if h.twofa != nil {
+			if n, rerr := h.twofa.RecoveryRemaining(c.Request.Context(), u.ID); rerr == nil {
+				hasRecovery = n > 0
+			}
+		}
+		methods := availableTwoFAMethods(u, jwtutil.FirstFactorPassword, s, hasPasskey, hasRecovery)
 		c.JSON(http.StatusOK, gin.H{"status": "2fa_required", "pending_token": pending, "methods": methods})
 		return
 	}
@@ -500,9 +510,23 @@ func (h *AuthLocalHandler) TwoFAEmailSend(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"sent": true})
 }
 
+// userHasPasskey reports whether the account has at least one passkey enrolled
+// AND passkeys are enabled panel-wide. Gating on PasskeyEnabled is the fail-safe:
+// if the admin turns passkeys off panel-wide the assertion ceremony would be
+// blocked, so the account must NOT be locked behind a passkey it can no longer
+// use — disabling passkeys cleanly drops the passkey 2FA requirement.
+func (h *AuthLocalHandler) userHasPasskey(ctx context.Context, userID int64, s ports.UISettings) bool {
+	if h.passkey == nil || !s.PasskeyEnabled {
+		return false
+	}
+	creds, err := h.passkey.List(ctx, userID)
+	return err == nil && len(creds) > 0
+}
+
 // passkeyTwoFAAllowed enforces the passkey-as-2FA preconditions, writing the
-// response and returning false if not met: passkey feature + admin toggle on, and
-// the first factor was a password (a passkey login can't re-use a passkey as 2FA).
+// response and returning false if not met: passkeys enabled panel-wide, and the
+// first factor was a password (a passwordless passkey login can't re-use a passkey
+// as 2FA). Enrolling a passkey is itself the opt-in — there is no separate toggle.
 func (h *AuthLocalHandler) passkeyTwoFAAllowed(c *gin.Context, claims *jwtutil.Claims) bool {
 	if h.passkey == nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Passkey verification is not available"})
@@ -513,7 +537,7 @@ func (h *AuthLocalHandler) passkeyTwoFAAllowed(c *gin.Context, claims *jwtutil.C
 		return false
 	}
 	s, err := h.settings.Load(c.Request.Context(), ports.UISettings{})
-	if err != nil || !s.TwoFAAllowPasskey || !s.PasskeyEnabled {
+	if err != nil || !s.PasskeyEnabled {
 		c.JSON(http.StatusForbidden, gin.H{"error": "Passkey is not an enabled verification method"})
 		return false
 	}

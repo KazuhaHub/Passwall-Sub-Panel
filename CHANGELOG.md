@@ -4,6 +4,28 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## v3.7.0-beta.13 — 2026-06-06
+
+修复**绑定通行密钥的账号用密码登录可直接进入**的鉴权漏洞，并把**备用码从 TOTP 解耦**——规则统一为「有任意第二因子（TOTP 或通行密钥）⇒ 拥有备用码 ⇒ 登录强制」。附 2FA 登录体验与安全排序调整。`go test ./...` / `go vet` / `tsc` / `npm build` / 二进制 / 启动 smoke 全绿。
+
+### Fixed
+
+- **通行密钥未作为第二因子强制（鉴权漏洞）** —— 登录的 2FA 闸此前只看 `TOTPEnabled`，完全忽略已绑定的通行密钥；于是绑了通行密钥的账号用密码登录被直接放行（与「passwordless 关闭时通行密钥仅作第二因子」的既定设计矛盾）。现触发条件改为 `TOTPEnabled || (PasskeyEnabled && 已绑 passkey)`——绑定通行密钥即视为开启两步验证。
+
+### Changed
+
+- **备用码与 TOTP 解耦** —— 备用码改为「账号有任意第二因子即拥有」：`VerifyLogin` 不再以 TOTP-enabled 为前提（passkey-only 账号也能用备用码登录），`replaceRecovery` 改走仅写备用码列的 `SetRecoveryCodes`（不再误把 TOTP 置为启用），新增 `EnsureRecovery`（首次绑通行密钥时生成）/ `RecoveryRemaining`。带 TDD（含「禁用的 TOTP secret 不得通过」「passkey-only 备用码可登录」「重新生成不得开启 TOTP」等）。
+- **首次绑定通行密钥即发放备用码** —— 通行密钥是第二因子，丢失需有兜底。首次绑定（账号尚无备用码）时一次性返回并在弹窗中展示，与开启 TOTP 一致。
+- **用户端「备用码」管理入口** —— 「我的账号」菜单新增「备用码」，只要账号有任意第二因子即可见，显示剩余数并可重新生成（passkey-only 账号同样可用）。此前重置备用码只藏在 TOTP 的关闭流程里、passkey-only 用户无从触及。
+- **2FA 登录改为「记住上次方式」** —— 登录挑战默认落在用户上次用过的方式（按浏览器 localStorage 记忆），其余收进「使用其他方式验证」；无记忆时按安全优先级 **通行密钥 > 验证器 > 邮箱 > 备用码** 回退（通行密钥抗钓鱼，优先于验证器）。备用码作为一次性兜底不会被记成默认。邮箱验证码不再在加载时自动发送（改为「发送验证码」按钮）。
+- **passwordless 通行密钥登录不再叠加 TOTP** —— 免密通行密钥登录（带用户验证）本身已是强多因子，移除其后的二次 TOTP 步骤。
+- **移除 `twofa_allow_passkey` 设置** —— 它与 `passkey_enabled` 重复（后者即「允许通行密钥作为方法」的开关），且默认关时正是上述漏洞之源。删除后「绑定通行密钥 = 开启两步验证」成为唯一规则（对齐 Entra ID 的方法策略模型）。
+- **管理端账号安全** —— 用户列表 DTO 增 `passkey_count`（一次分组查询批量填充，无 N+1），「账号安全」抽屉的备用码操作对仅绑通行密钥的用户同样开放；`AdminRegenerateRecovery` 成为无前置的破窗原语，由处理器侧校验用户确有第二因子。
+
+### 已知限制
+
+- 仅绑通行密钥、且备用码已耗尽/为空（如本次发布前就绑定的旧通行密钥）的账号无法**自助**重新生成备用码（重置需要一个现有备用码或 TOTP 作 step-up 证明）。可由管理员在「账号安全」重新生成，或用户再绑定一个通行密钥（会触发生成并展示）——无永久锁死。
+
 ## v3.7.0-beta.12 — 2026-06-06
 
 修复管理员「账号安全」抽屉**开关无过渡动画、生硬闪入闪出**。`tsc` / `npm build` / 二进制重建全绿。

@@ -254,7 +254,6 @@ func settingDescriptors(s *ports.UISettings) []settingDescriptor {
 		boolField("security", "passkey_enabled", &s.PasskeyEnabled),
 		boolField("security", "passkey_passwordless", &s.PasskeyPasswordless),
 		// security --- alternative 2FA verification methods (v3.7.0)
-		boolField("security", "twofa_allow_passkey", &s.TwoFAAllowPasskey),
 		boolField("security", "twofa_allow_email", &s.TwoFAAllowEmail),
 		boolField("security", "require_2fa_for_staff", &s.Require2FAForStaff),
 

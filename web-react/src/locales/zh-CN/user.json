@@ -53,9 +53,20 @@
     "change_password": "修改密码",
     "personal_rules": "个人规则",
     "two_factor": "两步验证",
-    "passkeys": "通行密钥"
+    "passkeys": "通行密钥",
+    "recovery_codes": "备用码"
+  },
+  "recovery": {
+    "title": "备用码",
+    "intro": "当你无法使用验证器或通行密钥时，可用一次性备用码登录。每个备用码只能用一次。",
+    "remaining": "剩余 {{count}} 个备用码",
+    "none_left": "你已没有可用的备用码，请重新生成一组。"
   },
   "passkey": {
+    "recovery_title": "保存你的备用码",
+    "recovery_warning": "这是你的一次性备用码——当你无法使用通行密钥时，可用它登录。请妥善保存，它只显示这一次。",
+    "recovery_done": "我已保存",
+    "copy_all": "全部复制",
     "count": "已绑定 {{count}} 个",
     "title": "通行密钥（Passkey）",
     "intro": "通行密钥用设备的指纹/面容或安全密钥登录，无需记密码，且能抗钓鱼。绑定后可在登录页一键免密登录。",

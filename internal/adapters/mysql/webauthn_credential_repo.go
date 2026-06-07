@@ -110,6 +110,32 @@ func (r *webauthnCredentialRepo) Delete(ctx context.Context, id, userID int64) e
 		Delete(&webauthnCredentialRow{}).Error
 }
 
+// CountByUserIDs returns the number of credentials per user for the given ids in
+// ONE grouped query (avoids an N+1 when enriching a user list). Users with no
+// passkeys are simply absent from the returned map.
+func (r *webauthnCredentialRepo) CountByUserIDs(ctx context.Context, userIDs []int64) (map[int64]int, error) {
+	out := make(map[int64]int, len(userIDs))
+	if len(userIDs) == 0 {
+		return out, nil
+	}
+	var rows []struct {
+		UserID int64
+		N      int64
+	}
+	if err := r.db.WithContext(ctx).
+		Model(&webauthnCredentialRow{}).
+		Select("user_id, COUNT(*) AS n").
+		Where("user_id IN ?", userIDs).
+		Group("user_id").
+		Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	for _, x := range rows {
+		out[x.UserID] = int(x.N)
+	}
+	return out, nil
+}
+
 // DeleteAllByUserID removes every credential owned by a user and returns the
 // count deleted. Used by the admin "revoke all passkeys" break-glass; the
 // user_id scope keeps it from touching anyone else's credentials.

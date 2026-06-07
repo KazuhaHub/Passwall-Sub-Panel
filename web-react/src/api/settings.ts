@@ -225,10 +225,9 @@ export interface UISettings {
   passkey_passwordless: boolean
 
   // ---- Alternative 2FA verification methods (v3.7.0) ----
-  /** Offer an enrolled passkey as the 2FA factor (only after a password first
-   *  factor). TOTP + recovery codes are always available regardless. */
-  twofa_allow_passkey: boolean
-  /** Offer a one-time code by email as the 2FA factor (weaker; default off). */
+  /** Offer a one-time code by email as the 2FA factor (weaker; default off).
+   *  TOTP, recovery codes, and an enrolled passkey are always available — a
+   *  passkey is itself a second factor, so there is no separate allow toggle. */
   twofa_allow_email: boolean
   /** Force every admin/operator (local-password) account to enroll a second
    *  factor before using the panel. */

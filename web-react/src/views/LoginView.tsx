@@ -36,6 +36,35 @@ interface LocationState {
   returnTo?: string
 }
 
+// The 2FA challenge defaults to the method the user chose last time (per-browser),
+// with the rest tucked behind "use another method" — so a returning user lands
+// straight on their usual factor instead of re-picking every login.
+const LAST_2FA_METHOD_KEY = 'psp.2fa.last_method'
+// Stable display/priority order, also the fallback when there's no remembered
+// choice (or it isn't offered this time). Passkey first: a WebAuthn assertion is
+// phishing-resistant (bound to the origin + hardware), strictly stronger than a
+// TOTP code a user can be tricked into typing on a lookalike site. Email + one-
+// time recovery codes are weaker fallbacks, last.
+const TWOFA_PRIORITY: TwoFAMethod[] = ['passkey', 'totp', 'email', 'recovery']
+
+function readLast2FAMethod(): TwoFAMethod | null {
+  try {
+    const v = localStorage.getItem(LAST_2FA_METHOD_KEY)
+    return TWOFA_PRIORITY.includes(v as TwoFAMethod) ? (v as TwoFAMethod) : null
+  } catch { return null }
+}
+function writeLast2FAMethod(m: TwoFAMethod) {
+  try { localStorage.setItem(LAST_2FA_METHOD_KEY, m) } catch { /* ignore */ }
+}
+// defaultTwoFAMethod picks the remembered method if it's offered this round,
+// else the first available in priority order.
+function defaultTwoFAMethod(available: TwoFAMethod[]): TwoFAMethod {
+  const order = TWOFA_PRIORITY.filter(m => available.includes(m))
+  const last = readLast2FAMethod()
+  if (last && order.includes(last)) return last
+  return order[0] ?? 'totp'
+}
+
 // forceLocal renders the local-login entry (/login/local): the local form +
 // passkey button only, never auto-redirecting to SSO and never showing SSO
 // buttons. It reuses all of LoginView's machinery (passkey, 2FA challenge,
@@ -72,6 +101,12 @@ export default function LoginView({ forceLocal = false }: { forceLocal?: boolean
   // code-entry method the user currently has selected.
   const [twoFAMethods, setTwoFAMethods] = useState<TwoFAMethod[]>([])
   const [twoFAMode, setTwoFAMode] = useState<TwoFAMethod>('totp')
+  // The challenge opens on the last-used method; the chooser stays hidden behind
+  // "use another method" until the user wants to switch.
+  const [showMethodPicker, setShowMethodPicker] = useState(false)
+  // Email is the one method that needs a code dispatched first — track whether
+  // we've sent one so the email view shows "send code" vs the code input.
+  const [emailSent, setEmailSent] = useState(false)
   // Set when the user clicks the SSO button in sso_first / dual mode. We
   // render the same "正在前往 SSO" intermediate as sso_redirect so every
   // SSO entry point (auto-bounce OR explicit click) feels the same.
@@ -145,7 +180,9 @@ export default function LoginView({ forceLocal = false }: { forceLocal?: boolean
         // code-entry step rather than navigating.
         setTwoFAPending(outcome.pendingToken)
         setTwoFAMethods(outcome.methods)
-        setTwoFAMode('totp')
+        setTwoFAMode(defaultTwoFAMethod(outcome.methods))
+        setShowMethodPicker(false)
+        setEmailSent(false)
         setTwoFACode('')
         setTwoFAError('')
         return
@@ -183,6 +220,9 @@ export default function LoginView({ forceLocal = false }: { forceLocal?: boolean
     setTwoFAError('')
     try {
       await auth.complete2FA(twoFAPending, code)
+      // Don't make the one-time recovery fallback the sticky default; remember
+      // only "real" methods (totp / email) the user would want to land on again.
+      if (twoFAMode !== 'recovery') writeLast2FAMethod(twoFAMode)
       goHome()
     } catch (err) {
       // A wrong/expired code: the verify endpoint skips the shared toast, so
@@ -207,19 +247,24 @@ export default function LoginView({ forceLocal = false }: { forceLocal?: boolean
     setTwoFAError('')
     setTwoFAMethods([])
     setTwoFAMode('totp')
+    setShowMethodPicker(false)
+    setEmailSent(false)
     setPassword('')
   }
 
   // selectMethod is the 2FA method picker: email needs a code sent first; passkey
-  // just switches to its button; totp/recovery switch the code field.
+  // just switches to its button; totp/recovery switch the code field. It collapses
+  // the chooser back down after a pick.
   function selectMethod(m: TwoFAMethod) {
+    setShowMethodPicker(false)
     if (m === 'email') { void onUseEmail(); return }
     setTwoFAMode(m)
     setTwoFACode('')
     setTwoFAError('')
   }
 
-  // onUseEmail switches to the email step and requests a one-time code.
+  // onUseEmail switches to the email step and requests a one-time code. Sets
+  // emailSent so the view flips from "send code" to the code input.
   async function onUseEmail() {
     if (!twoFAPending) return
     setTwoFAMode('email')
@@ -228,6 +273,7 @@ export default function LoginView({ forceLocal = false }: { forceLocal?: boolean
     setBusy(true)
     try {
       await send2FAEmail(twoFAPending)
+      setEmailSent(true)
       pushSnack(t('auth:twofa_email_sent'), 'success')
     } catch {
       setTwoFAError(t('auth:twofa_email_failed'))
@@ -243,6 +289,7 @@ export default function LoginView({ forceLocal = false }: { forceLocal?: boolean
     setTwoFAError('')
     try {
       await auth.complete2FAPasskey(twoFAPending)
+      writeLast2FAMethod('passkey')
       goHome()
     } catch (err) {
       const e = err as AxiosError<{ error?: string }>
@@ -268,7 +315,9 @@ export default function LoginView({ forceLocal = false }: { forceLocal?: boolean
       if (outcome.twoFA) {
         setTwoFAPending(outcome.pendingToken)
         setTwoFAMethods(outcome.methods)
-        setTwoFAMode('totp')
+        setTwoFAMode(defaultTwoFAMethod(outcome.methods))
+        setShowMethodPicker(false)
+        setEmailSent(false)
         setTwoFACode('')
         setTwoFAError('')
         return
@@ -377,15 +426,15 @@ export default function LoginView({ forceLocal = false }: { forceLocal?: boolean
   )
 
   // 2FA verification methods are equal choices, not "TOTP with fallbacks": the
-  // user picks one. Ordered TOTP → passkey → email → recovery, filtered to what
-  // the server allows for this challenge.
+  // user picks one. Ordered by TWOFA_PRIORITY (passkey first — phishing-resistant),
+  // filtered to what the server allows for this challenge.
   const methodLabel: Record<TwoFAMethod, string> = {
     totp: t('auth:twofa_m_totp'),
     passkey: t('auth:twofa_m_passkey'),
     email: t('auth:twofa_m_email'),
     recovery: t('auth:twofa_m_recovery'),
   }
-  const methodOrder = (['totp', 'passkey', 'email', 'recovery'] as TwoFAMethod[]).filter(m => twoFAMethods.includes(m))
+  const methodOrder = TWOFA_PRIORITY.filter(m => twoFAMethods.includes(m))
   // Code-field copy (passkey has no code field, so reuse totp's shape for typing).
   const codeUI = {
     totp: { prompt: t('auth:twofa_prompt'), label: t('auth:twofa_code'), placeholder: '123456' },
@@ -393,26 +442,10 @@ export default function LoginView({ forceLocal = false }: { forceLocal?: boolean
     email: { prompt: t('auth:twofa_email_prompt'), label: t('auth:twofa_email_label'), placeholder: '123456' },
   }[twoFAMode === 'passkey' ? 'totp' : twoFAMode]
 
+  // The challenge opens on the user's last-used method (twoFAMode); the other
+  // offered methods stay tucked behind "use another method" until they ask.
   const twoFAFormBlock = (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-      {methodOrder.length > 1 && (
-        <Box>
-          <Typography variant="caption" sx={{ color: md.onSurfaceVariant, display: 'block', mb: 0.75 }}>
-            {t('auth:twofa_choose_method')}
-          </Typography>
-          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.75 }}>
-            {methodOrder.map(m => (
-              <Button key={m} size="small"
-                variant={twoFAMode === m ? 'contained' : 'outlined'}
-                startIcon={m === 'passkey' ? <FingerprintIcon /> : undefined}
-                onClick={() => selectMethod(m)} disabled={busy}>
-                {methodLabel[m]}
-              </Button>
-            ))}
-          </Box>
-        </Box>
-      )}
-
       {twoFAMode === 'passkey' ? (
         <>
           <Typography variant="body2" sx={{ color: md.onSurfaceVariant }}>
@@ -423,6 +456,20 @@ export default function LoginView({ forceLocal = false }: { forceLocal?: boolean
             startIcon={busy ? <CircularProgress size={16} color="inherit" /> : <FingerprintIcon />}
             onClick={onUsePasskey2FA}>
             {t('auth:twofa_use_passkey')}
+          </Button>
+        </>
+      ) : twoFAMode === 'email' && !emailSent ? (
+        // Last-used was email but no code is out yet (we never auto-send on load,
+        // to avoid mailing on every challenge): offer to send one.
+        <>
+          <Typography variant="body2" sx={{ color: md.onSurfaceVariant }}>
+            {t('auth:twofa_email_prompt')}
+          </Typography>
+          {twoFAError && <Alert severity="error" sx={{ py: 0 }}>{twoFAError}</Alert>}
+          <Button variant="contained" fullWidth size="large" disabled={busy}
+            startIcon={busy ? <CircularProgress size={16} color="inherit" /> : undefined}
+            onClick={() => void onUseEmail()}>
+            {t('auth:twofa_email_send', { defaultValue: '发送验证码' })}
           </Button>
         </>
       ) : (
@@ -444,6 +491,33 @@ export default function LoginView({ forceLocal = false }: { forceLocal?: boolean
             {t('auth:twofa_submit')}
           </Button>
         </Box>
+      )}
+
+      {/* Method switcher — collapsed by default to "use another method", expands to
+          the full chooser. Only when more than one method is offered. */}
+      {methodOrder.length > 1 && (
+        showMethodPicker ? (
+          <Box>
+            <Typography variant="caption" sx={{ color: md.onSurfaceVariant, display: 'block', mb: 0.75 }}>
+              {t('auth:twofa_choose_method')}
+            </Typography>
+            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.75 }}>
+              {methodOrder.map(m => (
+                <Button key={m} size="small"
+                  variant={twoFAMode === m ? 'contained' : 'outlined'}
+                  startIcon={m === 'passkey' ? <FingerprintIcon /> : undefined}
+                  onClick={() => selectMethod(m)} disabled={busy}>
+                  {methodLabel[m]}
+                </Button>
+              ))}
+            </Box>
+          </Box>
+        ) : (
+          <Button variant="text" fullWidth size="small" disabled={busy}
+            onClick={() => setShowMethodPicker(true)}>
+            {t('auth:twofa_use_other', { defaultValue: '使用其他方式验证' })}
+          </Button>
+        )
       )}
 
       <Button variant="text" fullWidth size="small" onClick={cancel2FA} disabled={busy}>

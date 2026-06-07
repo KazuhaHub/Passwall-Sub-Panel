@@ -152,6 +152,10 @@ type userDTO struct {
 	// TOTPEnabled lets the admin table show a 2FA badge and surface the
 	// break-glass "reset 2FA" action only for accounts that actually have it on.
 	TOTPEnabled bool `json:"totp_enabled"`
+	// PasskeyCount is how many passkeys the account has enrolled. A passkey is a
+	// second factor, so the admin "account security" drawer keys its recovery-code
+	// actions on (TOTPEnabled || PasskeyCount>0), not TOTP alone. Bulk-filled.
+	PasskeyCount int `json:"passkey_count"`
 	// Require2FA is the per-user "force second-factor enrollment" override.
 	Require2FA bool `json:"require_2fa"`
 }
@@ -222,6 +226,19 @@ func (h *AdminUserHandler) List(c *gin.Context) {
 	for i, u := range items {
 		out[i] = h.toDTOWith(u, settings, loc, subBase, h.shouldRedactPrivilegedSecrets(c, u))
 	}
+	// Bulk-enrich the passkey count in ONE grouped query (not per row) so the
+	// "account security" drawer knows which accounts have a passkey second factor.
+	if h.passkey != nil && len(items) > 0 {
+		ids := make([]int64, len(items))
+		for i, u := range items {
+			ids[i] = u.ID
+		}
+		if counts, err := h.passkey.CountByUsers(c.Request.Context(), ids); err == nil {
+			for i := range out {
+				out[i].PasskeyCount = counts[out[i].ID]
+			}
+		}
+	}
 	c.JSON(http.StatusOK, pagedEnvelope(out, total, p))
 }
 
@@ -252,7 +269,13 @@ func (h *AdminUserHandler) Get(c *gin.Context) {
 		respondError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, h.toDTO(c.Request, u, h.shouldRedactPrivilegedSecrets(c, u)))
+	dto := h.toDTO(c.Request, u, h.shouldRedactPrivilegedSecrets(c, u))
+	if h.passkey != nil {
+		if creds, lerr := h.passkey.List(c.Request.Context(), u.ID); lerr == nil {
+			dto.PasskeyCount = len(creds)
+		}
+	}
+	c.JSON(http.StatusOK, dto)
 }
 
 func (h *AdminUserHandler) Create(c *gin.Context) {
@@ -593,6 +616,24 @@ func (h *AdminUserHandler) RegenerateUser2FARecovery(c *gin.Context) {
 		return
 	}
 	if !h.ensureOperatorAllowed(c, id) {
+		return
+	}
+	// Recovery codes are only meaningful for an account that actually has a second
+	// factor — TOTP or a passkey (recovery is decoupled from TOTP now). Refuse
+	// otherwise so the admin doesn't mint inert codes for a no-2FA account.
+	u, err := h.user.Get(c.Request.Context(), id)
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+	hasPasskey := false
+	if h.passkey != nil {
+		if creds, lerr := h.passkey.List(c.Request.Context(), id); lerr == nil {
+			hasPasskey = len(creds) > 0
+		}
+	}
+	if !u.TOTPEnabled && !hasPasskey {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "This user has no second factor (TOTP or passkey) to attach recovery codes to"})
 		return
 	}
 	codes, err := h.twofa.AdminRegenerateRecovery(c.Request.Context(), id)

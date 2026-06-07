@@ -30,6 +30,10 @@ type Store interface {
 	// returning true only when this call won — so a one-time recovery code can't be
 	// double-spent by two concurrent logins.
 	ConsumeRecoveryCode(ctx context.Context, userID int64, prevHashes, nextHashes []string) (bool, error)
+	// SetRecoveryCodes replaces ONLY the stored recovery-code hashes, leaving the
+	// TOTP secret + enabled flag untouched — so recovery codes can exist for a
+	// passkey-only account (no TOTP) without falsely flipping TOTP on.
+	SetRecoveryCodes(ctx context.Context, userID int64, recoveryHashes []string) error
 	ClearTOTP(ctx context.Context, userID int64) error
 	GetByID(ctx context.Context, userID int64) (*domain.User, error)
 }
@@ -167,16 +171,23 @@ func (s *Service) Disable(ctx context.Context, userID int64, code string) error 
 }
 
 // VerifyLogin checks a code at login time (TOTP or a one-time recovery code,
-// which is consumed on success).
+// which is consumed on success). Recovery codes are decoupled from TOTP: a
+// passkey-only account (no TOTP secret, TOTP disabled) can still redeem the
+// recovery codes it was issued at passkey enrollment. A leftover secret with
+// enabled=false is NOT treated as an active TOTP factor.
 func (s *Service) VerifyLogin(ctx context.Context, userID int64, code string) (bool, error) {
 	secret, enabled, codes, err := s.d.Users.GetTOTP(ctx, userID)
 	if err != nil {
 		return false, err
 	}
-	if !enabled {
+	totpSecret := ""
+	if enabled {
+		totpSecret = secret
+	}
+	if totpSecret == "" && len(codes) == 0 {
 		return false, nil
 	}
-	return s.checkCode(ctx, userID, code, secret, codes), nil
+	return s.checkCode(ctx, userID, code, totpSecret, codes), nil
 }
 
 // AdminReset clears a user's 2FA unconditionally (break-glass when a user loses
@@ -188,40 +199,71 @@ func (s *Service) AdminReset(ctx context.Context, userID int64) error {
 // RegenerateRecovery rotates a user's recovery codes (self-service step-up). It
 // requires proof of possession — a current TOTP code or one of the existing
 // recovery codes — to stop a hijacked session from silently minting a fresh set.
-// Returns the new plaintext codes to show ONCE. 2FA must already be enabled.
+// Returns the new plaintext codes to show ONCE. Works for any account that has a
+// second factor: a TOTP account proves with a code, a passkey-only account proves
+// with one of the recovery codes it was issued at enrollment.
 func (s *Service) RegenerateRecovery(ctx context.Context, userID int64, code string) ([]string, error) {
 	secret, enabled, codes, err := s.d.Users.GetTOTP(ctx, userID)
 	if err != nil {
 		return nil, err
 	}
-	if !enabled {
-		return nil, fmt.Errorf("%w: two-factor authentication is not enabled", domain.ErrValidation)
+	totpSecret := ""
+	if enabled {
+		totpSecret = secret
+	}
+	if totpSecret == "" && len(codes) == 0 {
+		return nil, fmt.Errorf("%w: no second factor to prove possession with", domain.ErrValidation)
 	}
 	// matchCode (not checkCode) deliberately does NOT consume the recovery code
 	// used as proof: the whole set is about to be replaced anyway.
-	if !s.matchCode(code, secret, codes) {
+	if !s.matchCode(code, totpSecret, codes) {
 		return nil, domain.ErrUnauthorized
 	}
-	return s.replaceRecovery(ctx, userID, secret)
+	return s.replaceRecovery(ctx, userID)
 }
 
 // AdminRegenerateRecovery rotates a user's recovery codes without proof
 // (break-glass, same trust level as admin password reset). Returns the new
-// plaintext codes for the admin to relay over a secure channel. 2FA must be on.
+// plaintext codes for the admin to relay over a secure channel. This is a
+// guard-free primitive — the admin handler decides whether the target actually
+// has a second factor (TOTP or passkey); it never flips TOTP on.
 func (s *Service) AdminRegenerateRecovery(ctx context.Context, userID int64) ([]string, error) {
-	secret, enabled, _, err := s.d.Users.GetTOTP(ctx, userID)
-	if err != nil {
-		return nil, err
-	}
-	if !enabled {
-		return nil, fmt.Errorf("%w: two-factor authentication is not enabled for this user", domain.ErrValidation)
-	}
-	return s.replaceRecovery(ctx, userID, secret)
+	return s.replaceRecovery(ctx, userID)
 }
 
-// replaceRecovery generates a fresh batch of recovery codes, stores their hashes
-// (preserving the secret + enabled state), and returns the plaintext.
-func (s *Service) replaceRecovery(ctx context.Context, userID int64, secret string) ([]string, error) {
+// EnsureRecovery guarantees the account has recovery codes: if it has none it
+// generates a batch (stored hashed) and returns the plaintext with created=true;
+// if it already has some it is a no-op (nil, false). Called when a user enrolls
+// their first passkey so a passkey-only account still has a printable fallback.
+func (s *Service) EnsureRecovery(ctx context.Context, userID int64) (codes []string, created bool, err error) {
+	_, _, existing, err := s.d.Users.GetTOTP(ctx, userID)
+	if err != nil {
+		return nil, false, err
+	}
+	if len(existing) > 0 {
+		return nil, false, nil
+	}
+	plain, err := s.replaceRecovery(ctx, userID)
+	if err != nil {
+		return nil, false, err
+	}
+	return plain, true, nil
+}
+
+// RecoveryRemaining reports how many unused recovery codes the account holds.
+func (s *Service) RecoveryRemaining(ctx context.Context, userID int64) (int, error) {
+	_, _, codes, err := s.d.Users.GetTOTP(ctx, userID)
+	if err != nil {
+		return 0, err
+	}
+	return len(codes), nil
+}
+
+// replaceRecovery generates a fresh batch of recovery codes and stores their
+// hashes via SetRecoveryCodes, which touches ONLY the recovery column — the TOTP
+// secret + enabled flag are left exactly as they were (so a passkey-only account
+// stays TOTP-off). Returns the plaintext.
+func (s *Service) replaceRecovery(ctx context.Context, userID int64) ([]string, error) {
 	plain, err := s.genRecovery()
 	if err != nil {
 		return nil, err
@@ -230,7 +272,7 @@ func (s *Service) replaceRecovery(ctx context.Context, userID int64, secret stri
 	for i, c := range plain {
 		hashes[i] = hashRecovery(c)
 	}
-	if err := s.d.Users.SetTOTP(ctx, userID, secret, true, hashes); err != nil {
+	if err := s.d.Users.SetRecoveryCodes(ctx, userID, hashes); err != nil {
 		return nil, err
 	}
 	return plain, nil

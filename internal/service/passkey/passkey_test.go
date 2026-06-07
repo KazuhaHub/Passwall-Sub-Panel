@@ -101,6 +101,9 @@ func (s *stubCredStore) DeleteAllByUserID(_ context.Context, userID int64) (int,
 	s.revokedUser = userID
 	return s.revokeN, nil
 }
+func (s *stubCredStore) CountByUserIDs(_ context.Context, userIDs []int64) (map[int64]int, error) {
+	return map[int64]int{}, nil
+}
 
 // RevokeAll is the admin break-glass that drops every passkey on an account; it
 // must target the requested user and surface the deleted count unchanged.

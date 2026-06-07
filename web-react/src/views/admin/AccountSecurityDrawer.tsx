@@ -81,6 +81,9 @@ export default function AccountSecurityDrawer({
   const u = shown
   const hasSSO = !!u?.sso_provider && u.sso_provider !== 'local'
   const initial = (u?.display_name || u?.upn || '?').trim().charAt(0).toUpperCase()
+  // A passkey is a second factor, so "has 2FA" (and thus has recovery codes) is
+  // TOTP OR ≥1 passkey — recovery-code management keys on this, not TOTP alone.
+  const has2FA = !!(u?.totp_enabled || (u?.passkey_count ?? 0) > 0)
 
   async function toggleRequire2FA(next: boolean) {
     if (!u) return
@@ -154,21 +157,25 @@ export default function AccountSecurityDrawer({
 
         <SectionCard md={md} icon={<ShieldIcon fontSize="small" />}
           title={t('users.security.section_2fa', { defaultValue: '两步验证 (2FA)' })}
-          status={u.totp_enabled
+          status={has2FA
             ? <Chip size="small" color="success" label={t('users.security.twofa_on', { defaultValue: '2FA 已启用' })} sx={{ height: 22 }} />
             : <Typography variant="caption" color="text.secondary">{t('users.security.twofa_off', { defaultValue: '未启用' })}</Typography>}>
           <FormControlLabel
             control={<Switch size="small" checked={require2FA} disabled={busy} onChange={(_, c) => toggleRequire2FA(c)} />}
             label={t('users.security.require_2fa', { defaultValue: '要求该用户启用两步验证' })}
             sx={{ ml: 0, mb: 1, display: 'flex', '& .MuiFormControlLabel-label': { ml: 1, fontSize: 14 } }} />
-          {u.totp_enabled ? (
+          {has2FA ? (
             <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+              {/* Recovery codes are decoupled from TOTP — a passkey-only account has
+                  them too, so this shows whenever the user has any second factor. */}
               <Button size="small" variant="outlined" disabled={busy} onClick={doRegenRecovery}>
                 {t('users.security.regen_recovery', { defaultValue: '重新生成备用码' })}
               </Button>
-              <Button size="small" variant="outlined" color="error" startIcon={<ShieldIcon />} onClick={() => onReset2FA(u)}>
-                {t('users.more_menu.reset_2fa', { defaultValue: '重置两步验证' })}
-              </Button>
+              {u.totp_enabled && (
+                <Button size="small" variant="outlined" color="error" startIcon={<ShieldIcon />} onClick={() => onReset2FA(u)}>
+                  {t('users.more_menu.reset_2fa', { defaultValue: '重置两步验证' })}
+                </Button>
+              )}
             </Stack>
           ) : (
             <Typography variant="body2" color="text.secondary">

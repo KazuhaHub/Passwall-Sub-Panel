@@ -109,6 +109,10 @@ func (h *UserMeHandler) Profile(c *gin.Context) {
 		// accounts can't enroll). totp_enabled is this user's current state.
 		"totp_available": u.HasLocalPassword() && settingsErr == nil && settings.TOTPEnabled,
 		"totp_enabled":   u.TOTPEnabled,
+		// recovery_codes_remaining drives the user portal's "recovery codes" surface:
+		// it's shown whenever the account has any second factor (TOTP or passkey),
+		// since recovery codes are now decoupled from TOTP. 0 = none left / not set up.
+		"recovery_codes_remaining": h.recoveryRemaining(c.Request.Context(), u.ID),
 		// must_enroll_2fa drives the frontend enrollment gate: the account is
 		// required to set up a second factor (per-user / group / staff-wide) but
 		// hasn't (no TOTP, no passkey). The backend hard-gate enforces the same.

@@ -73,7 +73,17 @@ func (h *UserMeHandler) FinishPasskeyEnroll(c *gin.Context) {
 		respondError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"passkeys": h.passkeyList(c.Request.Context(), claims.UserID)})
+	resp := gin.H{"passkeys": h.passkeyList(c.Request.Context(), claims.UserID)}
+	// A passkey is now a second factor, so the account needs a printable fallback.
+	// On the FIRST passkey (no recovery codes yet) mint a set and return it ONCE so
+	// the UI can show it — exactly like enabling TOTP does. No-op if codes already
+	// exist (e.g. the user also has TOTP, or this is their 2nd+ passkey).
+	if h.twofa != nil {
+		if codes, created, err := h.twofa.EnsureRecovery(c.Request.Context(), claims.UserID); err == nil && created {
+			resp["recovery_codes"] = codes
+		}
+	}
+	c.JSON(http.StatusOK, resp)
 }
 
 func (h *UserMeHandler) ListPasskeys(c *gin.Context) {

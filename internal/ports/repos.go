@@ -509,6 +509,10 @@ type WebAuthnCredentialRepo interface {
 	// DeleteAllByUserID drops every credential for a user — the admin "revoke
 	// all passkeys" break-glass. Returns the number of credentials removed.
 	DeleteAllByUserID(ctx context.Context, userID int64) (int, error)
+	// CountByUserIDs returns the credential count per user for the given ids in one
+	// grouped query (admin user-list enrichment without an N+1). Users with none
+	// are absent from the map.
+	CountByUserIDs(ctx context.Context, userIDs []int64) (map[int64]int, error)
 }
 
 type SubLogRepo interface {
@@ -850,17 +854,13 @@ type UISettings struct {
 	PasskeyPasswordless bool `json:"passkey_passwordless"`
 
 	// ---- Alternative 2FA verification methods (v3.7.0) ----
-	// At the login 2FA challenge the user always gets TOTP + one-time recovery
-	// codes. These two toggles let the admin additionally offer (opt-in, both
-	// default off):
-	//   TwoFAAllowPasskey — assert an enrolled passkey instead of a TOTP code,
-	//     but ONLY when the first factor was a password (so a passwordless
-	//     passkey login can't satisfy 2FA with the same factor twice).
-	//   TwoFAAllowEmail — receive a one-time code by email. A weaker factor
-	//     (whoever holds the password+inbox passes), hence default off; it is
-	//     rate-limited and the code is single-use with a short TTL.
-	TwoFAAllowPasskey bool `json:"twofa_allow_passkey"`
-	TwoFAAllowEmail   bool `json:"twofa_allow_email"`
+	// At the login 2FA challenge the account is offered the factors it actually
+	// has: TOTP (if enrolled), an enrolled passkey (a passkey IS a second factor —
+	// enrolling one opts the account in; gated only on PasskeyEnabled + the first
+	// factor being a password), and one-time recovery codes. TwoFAAllowEmail adds
+	// an opt-in weaker fallback (default off): a one-time code by email — whoever
+	// holds the password+inbox passes — rate-limited, single-use, short TTL.
+	TwoFAAllowEmail bool `json:"twofa_allow_email"`
 
 	// Require2FAForStaff forces every admin/operator account (with a local
 	// password) to enroll a second factor before using the panel — a panel-wide

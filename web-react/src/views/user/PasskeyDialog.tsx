@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import {
+  Alert,
   Box,
   Button,
   CircularProgress,
@@ -19,6 +20,7 @@ import AddIcon from '@mui/icons-material/Add'
 import DeleteIcon from '@mui/icons-material/DeleteOutline'
 import EditIcon from '@mui/icons-material/EditOutlined'
 import CheckIcon from '@mui/icons-material/Check'
+import ContentCopyIcon from '@mui/icons-material/ContentCopy'
 import { startRegistration } from '@simplewebauthn/browser'
 import { useTranslation } from 'react-i18next'
 import type { AxiosError } from 'axios'
@@ -28,6 +30,7 @@ import type { PasskeyCredential } from '@/api/types'
 import type { M3Tokens } from '@/theme'
 import { confirm } from '@/components/ConfirmHost'
 import { pushSnack } from '@/components/SnackbarHost'
+import { copyToClipboard } from '@/utils/clipboard'
 
 interface Props {
   open: boolean
@@ -47,12 +50,17 @@ export default function PasskeyDialog({ open, available, credentials, md, onClos
   const [newName, setNewName] = useState('')
   const [editId, setEditId] = useState<number | null>(null)
   const [editName, setEditName] = useState('')
+  // One-time recovery codes returned when this is the account's FIRST passkey —
+  // a passkey is a second factor, so the user needs a printable fallback. Shown
+  // until acknowledged; never re-fetchable (stored hashed server-side).
+  const [recoveryCodes, setRecoveryCodes] = useState<string[] | null>(null)
 
   useEffect(() => {
     if (open) {
       setAdding(false)
       setNewName('')
       setEditId(null)
+      setRecoveryCodes(null)
     }
   }, [open])
 
@@ -67,11 +75,15 @@ export default function PasskeyDialog({ open, available, credentials, md, onClos
     try {
       const { session_id, publicKey } = await beginPasskeyEnroll()
       const attResp = await startRegistration({ optionsJSON: publicKey })
-      await finishPasskeyEnroll(session_id, name, attResp)
+      const { recovery_codes } = await finishPasskeyEnroll(session_id, name, attResp)
       pushSnack(t('passkey.added'), 'success')
       setAdding(false)
       setNewName('')
       onChanged()
+      // First passkey → show the one-time recovery codes before anything else.
+      if (recovery_codes && recovery_codes.length > 0) {
+        setRecoveryCodes(recovery_codes)
+      }
     } catch (err) {
       const errName = (err as { name?: string })?.name
       // Quietly ignore a user-cancelled browser prompt.
@@ -119,6 +131,38 @@ export default function PasskeyDialog({ open, available, credentials, md, onClos
     } finally {
       setBusy(false)
     }
+  }
+
+  // First-passkey recovery codes take over the dialog until acknowledged so they
+  // can't be lost to a stray backdrop click (they're shown only once).
+  if (recoveryCodes) {
+    return (
+      <Dialog open={open} onClose={() => { /* force the explicit button */ }} fullWidth maxWidth="xs"
+        PaperProps={{ sx: { bgcolor: md.surfaceContainerHigh } }}>
+        <DialogTitle>{t('passkey.recovery_title', { defaultValue: '保存你的备用码' })}</DialogTitle>
+        <DialogContent>
+          <Alert severity="warning" sx={{ mb: 2 }}>
+            {t('passkey.recovery_warning', { defaultValue: '这是你的一次性备用码——当你无法使用通行密钥时，可用它登录。请妥善保存，它只显示这一次。' })}
+          </Alert>
+          <Box sx={{
+            p: 2, bgcolor: md.surfaceContainerHighest, borderRadius: 1,
+            fontFamily: 'monospace', fontSize: 14, lineHeight: 1.9,
+            display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 0.5,
+          }}>
+            {recoveryCodes.map(c => <Box key={c}>{c}</Box>)}
+          </Box>
+          <Button size="small" startIcon={<ContentCopyIcon fontSize="small" />} sx={{ mt: 1.5 }}
+            onClick={() => { void copyToClipboard(recoveryCodes.join('\n')) }}>
+            {t('passkey.copy_all', { defaultValue: '全部复制' })}
+          </Button>
+        </DialogContent>
+        <DialogActions>
+          <Button variant="contained" onClick={() => setRecoveryCodes(null)}>
+            {t('passkey.recovery_done', { defaultValue: '我已保存' })}
+          </Button>
+        </DialogActions>
+      </Dialog>
+    )
   }
 
   return (
