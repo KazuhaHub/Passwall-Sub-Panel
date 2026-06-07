@@ -52,7 +52,7 @@
   "actions": {
     "change_password": "Change password",
     "personal_rules": "Personal rules",
-    "two_factor": "Authenticator app",
+    "two_factor": "Authenticator app (TOTP)",
     "passkeys": "Passkeys",
     "recovery_codes": "Recovery codes"
   },

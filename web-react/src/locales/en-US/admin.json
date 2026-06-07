@@ -109,11 +109,13 @@
       "registration_default_traffic_gb": "Default traffic GB (0 = unlimited)",
       "registration_default_expire_days": "Default validity (days, 0 = no expiry)",
       "registration_hint": "Registrants sign in with their email as the username, get the user role, join the default group, and inherit the quota/expiry above. Email verification needs SMTP configured; link delivery needs the subscription base URL set.",
-      "totp_enabled": "Allow two-factor auth (TOTP)",
-      "totp_hint": "Lets accounts with a local password enable 2FA via an authenticator app from My Account. Turning this off only blocks new enrollment — it does not remove 2FA from already-enrolled accounts. SSO accounts are unaffected.",
-      "twofa_methods_title": "Alternative 2FA methods",
-      "twofa_methods_hint": "Authenticator codes, one-time recovery codes, and the account's enrolled passkey are all available automatically at the login challenge (enrolling a passkey counts as turning on two-factor). You can additionally allow one weaker method:",
+      "twofa_section_title": "Two-factor authentication (2FA)",
+      "twofa_section_hint": "Add a second step to local sign-in. Enable any of the methods below (accounts enroll them from My Account); authenticator codes, one-time recovery codes, and an account's enrolled passkey are all available automatically at the login challenge.",
+      "totp_enabled": "Allow authenticator app (TOTP)",
+      "totp_hint": "Lets accounts with a local password set up an authenticator app (TOTP) from My Account. Turning this off only blocks new enrollment — it does not remove the authenticator from already-enrolled accounts. SSO accounts are unaffected.",
       "twofa_allow_email": "Email one-time code (weaker; requires SMTP)",
+      "twofa_allow_email_hint": "A peer login-challenge method, available once the account has another factor (TOTP / passkey) enrolled. It's weaker — whoever has the password and inbox gets in — so it's off by default.",
+      "twofa_policy_subheading": "Enrollment policy",
       "require_2fa_for_staff": "Require two-factor for all admins/operators",
       "require_2fa_for_staff_hint": "When on, an admin/operator without TOTP or a passkey is required to finish setup right after login before using the panel. You can also require it per group (Groups) or per user (Account Security). Local accounts only.",
       "local_auth_scope_hint": "Two-factor auth and passkeys apply to LOCAL login only. MFA for SSO sign-ins is the identity provider's (IdP's) responsibility — PSP doesn't add its own. An account that has both a local password and an SSO binding is not subject to these when it signs in via SSO.",
@@ -1147,8 +1149,8 @@
       "batch_unlink_sso_message": "Unlink the SSO binding for {{names}}{{suffix}} — {{count}} users in total? Their next SSO sign-in will re-bind to whatever identity the IdP returns at that moment.",
       "batch_delete_title": "Delete users",
       "batch_delete_message": "Delete {{names}}{{suffix}}? This removes their clients from every 3X-UI inbound.",
-      "reset_2fa_title": "Reset two-factor auth",
-      "reset_2fa_message": "This clears {{upn}}'s two-factor authentication (TOTP). They'll be able to sign in with just their password and will need to re-enroll. Use only when the user lost their authenticator and has no recovery codes."
+      "reset_2fa_title": "Reset authenticator app (TOTP)",
+      "reset_2fa_message": "This clears {{upn}}'s authenticator app (TOTP) and its recovery codes; their passkeys, if any, are unaffected. They'll be able to sign in with just their password (unless another factor remains) and will need to re-enroll. Use only when the user lost their authenticator and has no recovery codes."
     },
     "more_menu": {
       "copy_sub": "Copy subscription URL",
@@ -1156,7 +1158,7 @@
       "reset_password": "Reset password",
       "reset_credentials": "Reset credentials",
       "reset_emergency": "Reset emergency-access count",
-      "reset_2fa": "Reset two-factor auth",
+      "reset_2fa": "Reset authenticator app (TOTP)",
       "unlink_sso": "Unlink SSO binding",
       "passkeys": "Manage passkeys",
       "account_security": "Account security"

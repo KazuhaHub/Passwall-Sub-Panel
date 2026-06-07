@@ -109,11 +109,13 @@
       "registration_default_traffic_gb": "默认流量 GB（0=不限）",
       "registration_default_expire_days": "默认有效期（天，0=不过期）",
       "registration_hint": "注册用户以邮箱作为登录名、角色为普通用户，加入默认组并继承上述配额/有效期。开启邮箱验证需先配置 SMTP；链接方式需先配置订阅基础 URL。",
-      "totp_enabled": "允许两步验证（TOTP）",
-      "totp_hint": "允许有本地密码的账号在「我的账号」里用身份验证器 App 开启两步验证。关闭仅阻止新开启，不会移除已启用账号的两步验证。SSO 账号不受影响。",
-      "twofa_methods_title": "两步验证的备选方式",
-      "twofa_methods_hint": "验证器代码、一次性备用码、以及账号已绑定的通行密钥在登录挑战时都自动可用（绑定通行密钥即视为开启两步验证）。可额外允许一种较弱的方式：",
+      "twofa_section_title": "两步验证（2FA）",
+      "twofa_section_hint": "为本地登录增加第二道验证。可启用下列任意方式（账号在「我的账号」里自助绑定）；登录时验证器代码、一次性备用码、以及账号已绑定的通行密钥都自动可用。",
+      "totp_enabled": "允许验证器 App（TOTP）",
+      "totp_hint": "允许有本地密码的账号在「我的账号」里用身份验证器 App（TOTP）开启验证。关闭仅阻止新开启，不会移除已启用账号的验证器。SSO 账号不受影响。",
       "twofa_allow_email": "邮箱一次性验证码（较弱，需配置 SMTP）",
+      "twofa_allow_email_hint": "与上面并列的一种登录验证方式，需账号已绑定其它因素（TOTP / 通行密钥）后方可启用。它较弱——掌握密码 + 邮箱即可通过，故默认关闭。",
+      "twofa_policy_subheading": "强制策略",
       "require_2fa_for_staff": "强制所有管理员/运营启用两步验证",
       "require_2fa_for_staff_hint": "开启后，未绑定 TOTP 或通行密钥的管理员/运营登录后会被要求先完成设置才能使用面板。也可在「分组」对每组、或在用户「账号安全」对单个用户单独强制。仅本地账号生效。",
       "passkey_enabled": "允许通行密钥（Passkey）",
@@ -1147,8 +1149,8 @@
       "batch_unlink_sso_message": "解除 {{names}}{{suffix}} 共 {{count}} 个用户的 SSO 绑定？解除后，他们下次 SSO 登录会重新绑定到当时的 IdP 身份。",
       "batch_delete_title": "批量删除用户",
       "batch_delete_message": "确定删除 {{names}}{{suffix}}？该操作将从所有 3X-UI inbound 清除这些用户的 client。",
-      "reset_2fa_title": "重置两步验证",
-      "reset_2fa_message": "将清除 {{upn}} 的两步验证（TOTP）。该用户随后仅凭密码即可登录，并需要重新绑定。仅在用户丢失验证器且无恢复码时使用。"
+      "reset_2fa_title": "重置验证器 App（TOTP）",
+      "reset_2fa_message": "将清除 {{upn}} 的验证器 App（TOTP）及其备用码；该用户的通行密钥（若有）不受影响。清除后该用户可仅凭密码登录（若无其它因素），并需要重新绑定。仅在用户丢失验证器且无备用码时使用。"
     },
     "more_menu": {
       "copy_sub": "复制订阅 URL",
@@ -1156,7 +1158,7 @@
       "reset_password": "重置密码",
       "reset_credentials": "重置凭证",
       "reset_emergency": "重置紧急访问次数",
-      "reset_2fa": "重置两步验证",
+      "reset_2fa": "重置验证器 App（TOTP）",
       "unlink_sso": "解除 SSO 绑定",
       "passkeys": "管理通行密钥",
       "account_security": "账号安全"

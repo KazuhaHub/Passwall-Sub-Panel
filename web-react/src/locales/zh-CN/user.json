@@ -52,7 +52,7 @@
   "actions": {
     "change_password": "修改密码",
     "personal_rules": "个人规则",
-    "two_factor": "验证器 App",
+    "two_factor": "验证器 App（TOTP）",
     "passkeys": "通行密钥",
     "recovery_codes": "备用码"
   },

@@ -4,6 +4,16 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## v3.7.0-beta.19 — 2026-06-07
+
+修正管理端「安全」设置里 2FA 的层级表述（2FA 是总括，TOTP / Passkey / Email 平级）+ 跨界面命名一致性。纯 UI / i18n，无认证逻辑改动。`tsc` / `npm build` / 二进制全绿；3 维度子代理对抗 review 通过（绑定完整性 + i18n 完整性 clean，层级 4 处文案问题已修）。
+
+### Changed
+
+- **「安全」设置 2FA 区重构** —— 原本把 TOTP 开关当作「两步验证」、邮箱码归入「备选方式」、通行密钥另置一区，层级错乱（2FA ≠ TOTP）。改为单一「两步验证（2FA）」总括，下列三者**平级**呈现：验证器 App（TOTP）/ 通行密钥（Passkey）/ 邮箱一次性验证码；「强制管理员/运营」作为**强制策略**与方式区分开（带独立小标题）。TOTP 开关正名「允许验证器 App（TOTP）」。
+- **邮箱码 + 强制策略的显示条件放宽** —— 从「仅 TOTP 开启时可见」改为「TOTP **或** 通行密钥任一开启时可见」（原来只开通行密钥时连邮箱码选项都看不到，是个隐性 bug）。
+- **跨界面命名统一** —— 用户端菜单项 `验证器 App` → `验证器 App（TOTP）`（与弹窗标题、管理端开关三处一致）；管理端「重置两步验证」正名「重置验证器 App（TOTP）」，文案说明只清 TOTP + 备用码、不动通行密钥。管理端「账号安全」抽屉的 2FA 卡片标题保留「两步验证（2FA）」——它承载的是跨方式的强制策略 + 2FA 状态 + 备用码，并非 TOTP 专属，故不改。
+
 ## v3.7.0-beta.18 — 2026-06-07
 
 v3.7.0 正式版前的全面 review（5 维度子代理 + 对抗验证）收口：2 个 MED + 多个 LOW 全修，全部带 TDD。`go test ./...` / `go vet` / `tsc` / `npm build` / 二进制全绿。

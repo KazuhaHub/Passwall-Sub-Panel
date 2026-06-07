@@ -556,50 +556,70 @@ export default function SettingsView() {
               </>
             )}
             <Divider sx={{ my: 0.5, borderColor: md.outlineVariant }} />
-            {/* Two-factor authentication (TOTP) master switch */}
-            <FormControlLabel label={t('settings.general.totp_enabled', { defaultValue: '允许两步验证（TOTP）' })}
-              control={<Switch checked={settings.totp_enabled}
-                onChange={(_, c) => patch('totp_enabled', c)} />}
-              sx={{ ml: 0, '& .MuiFormControlLabel-label': { ml: 1.5 } }} />
-            <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant, mt: -1 }}>
-              {t('settings.general.totp_hint', { defaultValue: '允许有本地密码的账号在「我的账号」里用身份验证器 App 开启两步验证。关闭仅阻止新开启，不会移除已启用账号的两步验证。SSO 账号不受影响。' })}
+            {/* Two-factor authentication (2FA). 2FA is the umbrella; the
+                authenticator app (TOTP), passkeys, and the email one-time code
+                are PEER methods under it (not TOTP == 2FA). "Require for staff"
+                is the enrollment policy, kept distinct from the methods. Email +
+                the policy are gated on (TOTP || passkey) because both only make
+                sense once at least one real factor can be enrolled. */}
+            <Typography variant="body2" sx={{ fontWeight: 500, mt: 0.5 }}>
+              {t('settings.general.twofa_section_title', { defaultValue: '两步验证（2FA）' })}
             </Typography>
-            {settings.totp_enabled && (
-              <Box sx={{ mt: 0.5 }}>
-                <Typography variant="body2" sx={{ fontWeight: 500 }}>
-                  {t('settings.general.twofa_methods_title', { defaultValue: '两步验证的备选方式' })}
-                </Typography>
-                <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant, mb: 1 }}>
-                  {t('settings.general.twofa_methods_hint', { defaultValue: '验证器代码、一次性备用码、以及账号已绑定的通行密钥在登录挑战时都自动可用（绑定通行密钥即视为开启两步验证）。可额外允许一种较弱的方式：' })}
-                </Typography>
-                <Stack spacing={1}>
+            <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant, mb: 1 }}>
+              {t('settings.general.twofa_section_hint', { defaultValue: '为本地登录增加第二道验证。可启用下列任意方式（账号在「我的账号」里自助绑定）；登录时验证器代码、一次性备用码、以及账号已绑定的通行密钥都自动可用。' })}
+            </Typography>
+            <Stack spacing={0.25}>
+              {/* Method: Authenticator app (TOTP) */}
+              <FormControlLabel label={t('settings.general.totp_enabled', { defaultValue: '允许验证器 App（TOTP）' })}
+                control={<Switch checked={settings.totp_enabled}
+                  onChange={(_, c) => patch('totp_enabled', c)} />}
+                sx={{ ml: 0, '& .MuiFormControlLabel-label': { ml: 1.5 } }} />
+              <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant, mt: -1, mb: 0.5 }}>
+                {t('settings.general.totp_hint', { defaultValue: '允许有本地密码的账号在「我的账号」里用身份验证器 App（TOTP）开启验证。关闭仅阻止新开启，不会移除已启用账号的验证器。SSO 账号不受影响。' })}
+              </Typography>
+
+              {/* Method: Passkey (WebAuthn) */}
+              <FormControlLabel label={t('settings.general.passkey_enabled', { defaultValue: '允许通行密钥（Passkey）' })}
+                control={<Switch checked={settings.passkey_enabled}
+                  onChange={(_, c) => patch('passkey_enabled', c)} />}
+                sx={{ ml: 0, '& .MuiFormControlLabel-label': { ml: 1.5 } }} />
+              {settings.passkey_enabled && (
+                <FormControlLabel label={t('settings.general.passkey_passwordless', { defaultValue: '允许通行密钥免密登录（无需用户名）' })}
+                  control={<Switch checked={settings.passkey_passwordless}
+                    onChange={(_, c) => patch('passkey_passwordless', c)} />}
+                  sx={{ ml: 3, '& .MuiFormControlLabel-label': { ml: 1.5 } }} />
+              )}
+              <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant, mt: -1, mb: 0.5 }}>
+                {t('settings.general.passkey_hint', { defaultValue: '允许有本地密码的账号在「我的账号」里绑定通行密钥（WebAuthn）。开启免密登录后，登录页会显示「使用通行密钥登录」按钮、无需输入用户名。需先配置「订阅基础 URL」（用于确定 RP 域名），且站点须为 HTTPS（localhost 除外）。SSO 账号不受影响。' })}
+              </Typography>
+
+              {/* Method: Email one-time code — a weaker challenge-time fallback,
+                  only relevant once a real factor (TOTP/passkey) is enabled. */}
+              {(settings.totp_enabled || settings.passkey_enabled) && (
+                <>
                   <FormControlLabel label={t('settings.general.twofa_allow_email', { defaultValue: '邮箱一次性验证码（较弱，需配置 SMTP）' })}
                     control={<Switch checked={settings.twofa_allow_email} onChange={(_, c) => patch('twofa_allow_email', c)} />}
                     sx={{ ml: 0, display: 'flex', '& .MuiFormControlLabel-label': { ml: 1.5 } }} />
-                </Stack>
+                  <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant, mt: -1 }}>
+                    {t('settings.general.twofa_allow_email_hint', { defaultValue: '作为登录挑战时的备选验证方式（账号需已启用上面任一方式）。它较弱——掌握密码 + 邮箱即可通过，故默认关闭。' })}
+                  </Typography>
+                </>
+              )}
+            </Stack>
+            {/* Policy: enrollment enforcement (not a method) */}
+            {(settings.totp_enabled || settings.passkey_enabled) && (
+              <Box sx={{ mt: 1 }}>
+                <Typography variant="body2" sx={{ fontWeight: 500, mb: 0.5 }}>
+                  {t('settings.general.twofa_policy_subheading', { defaultValue: '强制策略' })}
+                </Typography>
                 <FormControlLabel label={t('settings.general.require_2fa_for_staff', { defaultValue: '强制所有管理员/运营启用两步验证' })}
                   control={<Switch checked={settings.require_2fa_for_staff} onChange={(_, c) => patch('require_2fa_for_staff', c)} />}
-                  sx={{ ml: 0, mt: 1, display: 'flex', '& .MuiFormControlLabel-label': { ml: 1.5 } }} />
+                  sx={{ ml: 0, display: 'flex', '& .MuiFormControlLabel-label': { ml: 1.5 } }} />
                 <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant }}>
                   {t('settings.general.require_2fa_for_staff_hint', { defaultValue: '开启后，未绑定 TOTP 或通行密钥的管理员/运营登录后会被要求先完成设置才能使用面板。也可在「分组」对每组、或在用户「账号安全」对单个用户单独强制。仅本地账号生效。' })}
                 </Typography>
               </Box>
             )}
-            <Divider sx={{ my: 0.5, borderColor: md.outlineVariant }} />
-            {/* Passkeys / WebAuthn */}
-            <FormControlLabel label={t('settings.general.passkey_enabled', { defaultValue: '允许通行密钥（Passkey）' })}
-              control={<Switch checked={settings.passkey_enabled}
-                onChange={(_, c) => patch('passkey_enabled', c)} />}
-              sx={{ ml: 0, '& .MuiFormControlLabel-label': { ml: 1.5 } }} />
-            {settings.passkey_enabled && (
-              <FormControlLabel label={t('settings.general.passkey_passwordless', { defaultValue: '允许通行密钥免密登录（无需用户名）' })}
-                control={<Switch checked={settings.passkey_passwordless}
-                  onChange={(_, c) => patch('passkey_passwordless', c)} />}
-                sx={{ ml: 0, '& .MuiFormControlLabel-label': { ml: 1.5 } }} />
-            )}
-            <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant, mt: -1 }}>
-              {t('settings.general.passkey_hint', { defaultValue: '允许有本地密码的账号在「我的账号」里绑定通行密钥（WebAuthn）。开启免密登录后，登录页会显示「使用通行密钥登录」按钮、无需输入用户名。需先配置「订阅基础 URL」（用于确定 RP 域名），且站点须为 HTTPS（localhost 除外）。SSO 账号不受影响。' })}
-            </Typography>
             <Box sx={{ mt: 0.5, p: 1.25, borderRadius: 1.5, bgcolor: md.surfaceContainerHighest, display: 'flex', gap: 1, alignItems: 'flex-start' }}>
               <InfoOutlinedIcon sx={{ fontSize: 18, color: md.onSurfaceVariant, mt: '1px', flexShrink: 0 }} />
               <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant }}>
