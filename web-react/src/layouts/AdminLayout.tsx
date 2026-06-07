@@ -270,10 +270,16 @@ export default function AdminLayout() {
             px: railCollapsed ? 0 : 2,
             py: 0.75,
             textAlign: 'center',
-            color: md.onSurfaceVariant,
+            // Channel color: stable = green, pre-release (beta/rc) = amber, dev/
+            // unknown = neutral. Lets an admin tell at a glance they're on a test build.
+            color: (() => {
+              const base = (versionInfo.version || '').replace(/^v/i, '').split('+')[0]
+              if (!base || base === 'dev') return md.onSurfaceVariant
+              return base.includes('-') ? '#c98a2b' : '#22c55e'
+            })(),
             fontSize: 11,
             fontFamily: 'monospace',
-            opacity: 0.7,
+            opacity: 0.85,
             whiteSpace: 'nowrap',
             overflow: 'hidden',
             textOverflow: 'ellipsis',

@@ -9,6 +9,12 @@
 
 services:
   psp:
+    # Image channels:
+    #   :latest        → newest STABLE release (recommended; default below)
+    #   :beta          → newest PRE-RELEASE (beta/rc) — opt into early builds
+    #   :v3.7.0        → pin an exact version (stable or beta tag)
+    # With `pull_policy: always`, `docker compose up -d` re-pulls whatever the
+    # chosen tag points at. To follow betas, change :latest → :beta and re-up.
     image: ghcr.io/kazuhahub/passwall-sub-panel:latest
     container_name: psp
     restart: unless-stopped

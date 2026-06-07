@@ -6,7 +6,7 @@ export type AlertType =
   | 'cert_failed'
   | 'cert_expiring'
   | 'panel_upgrade'
-  | 'user_expiring'
+  | 'psp_upgrade'
   | 'login_security'
 
 export interface Alert {

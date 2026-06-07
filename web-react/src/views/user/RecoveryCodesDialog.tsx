@@ -129,15 +129,16 @@ export default function RecoveryCodesDialog({ open, remaining, hasPasskey, md, o
                 ? t('recovery.none_left', { defaultValue: '你已没有可用的备用码，请重新生成一组。' })
                 : t('recovery.remaining', { count: remaining, defaultValue: '剩余 {{count}} 个备用码' })}
             </Alert>
-            {error && <Alert severity="error" sx={{ mb: 1 }}>{error}</Alert>}
-          </DialogContent>
-          <DialogActions sx={{ flexWrap: 'wrap' }}>
-            <Button onClick={onClose} disabled={busy}>{t('twofa.cancel')}</Button>
             {hasPasskey && (
-              <Button startIcon={<FingerprintIcon />} disabled={busy} onClick={regenViaPasskey}>
+              <Button size="small" startIcon={<FingerprintIcon />} disabled={busy} sx={{ mt: 0.5 }}
+                onClick={regenViaPasskey}>
                 {t('recovery.regen_passkey', { defaultValue: '用通行密钥重新生成' })}
               </Button>
             )}
+            {error && <Alert severity="error" sx={{ mt: 1 }}>{error}</Alert>}
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={onClose} disabled={busy}>{t('twofa.cancel')}</Button>
             <Button variant="contained" onClick={() => { setStep('regenerate'); setCode(''); setError('') }}>
               {t('recovery.regen_code', { defaultValue: '用验证码重新生成' })}
             </Button>

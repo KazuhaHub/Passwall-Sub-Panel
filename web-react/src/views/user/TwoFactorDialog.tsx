@@ -18,7 +18,7 @@ import type { AxiosError } from 'axios'
 
 import FingerprintIcon from '@mui/icons-material/Fingerprint'
 
-import { begin2FA, disable2FA, disableTOTPWithPasskey, enable2FA, regenerate2FARecovery } from '@/api/me'
+import { begin2FA, disable2FA, disableTOTPWithPasskey, enable2FA } from '@/api/me'
 import type { M3Tokens } from '@/theme'
 import { pushSnack } from '@/components/SnackbarHost'
 import { copyToClipboard } from '@/utils/clipboard'
@@ -36,12 +36,14 @@ interface Props {
   onChanged: () => void
 }
 
-// TwoFactorDialog drives the whole 2FA self-service flow in one modal:
+// TwoFactorDialog drives the authenticator (TOTP) self-service flow in one modal:
 //   not enabled → intro → (begin) enroll(QR+code) → (enable) recovery codes → done
-//   enabled     → disable (requires a current code)
+//   enabled     → disable (requires a current code, or a passkey assertion)
+// Recovery-code regeneration lives in RecoveryCodesDialog — kept out of here so the
+// disable flow stays single-purpose and the footer isn't crowded.
 export default function TwoFactorDialog({ open, enabled, hasPasskey, md, onClose, onChanged }: Props) {
   const { t } = useTranslation('user')
-  type Step = 'intro' | 'enroll' | 'recovery' | 'disable' | 'regenerate'
+  type Step = 'intro' | 'enroll' | 'recovery' | 'disable'
   const [step, setStep] = useState<Step>(enabled ? 'disable' : 'intro')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -49,9 +51,6 @@ export default function TwoFactorDialog({ open, enabled, hasPasskey, md, onClose
   const [secret, setSecret] = useState('')
   const [code, setCode] = useState('')
   const [recoveryCodes, setRecoveryCodes] = useState<string[]>([])
-  // The recovery step is shared by initial enrollment and code regeneration; this
-  // picks the right "done" toast.
-  const [fromRegen, setFromRegen] = useState(false)
 
   // Reset to the correct starting step every time the dialog (re)opens.
   useEffect(() => {
@@ -62,7 +61,6 @@ export default function TwoFactorDialog({ open, enabled, hasPasskey, md, onClose
       setOtpauthURL('')
       setSecret('')
       setRecoveryCodes([])
-      setFromRegen(false)
     }
   }, [open, enabled])
 
@@ -147,32 +145,8 @@ export default function TwoFactorDialog({ open, enabled, hasPasskey, md, onClose
     }
   }
 
-  async function submitRegenerate(e: FormEvent) {
-    e.preventDefault()
-    const c = code.trim()
-    if (!c) {
-      setError(t('twofa.code_required'))
-      return
-    }
-    setBusy(true)
-    setError('')
-    try {
-      const codes = await regenerate2FARecovery(c)
-      setRecoveryCodes(codes)
-      setFromRegen(true)
-      setStep('recovery')
-    } catch (err) {
-      setError(t('twofa.code_invalid'))
-      setCode('')
-    } finally {
-      setBusy(false)
-    }
-  }
-
   function finishRecovery() {
-    pushSnack(t(fromRegen ? 'twofa.regen_done_toast' : 'twofa.enabled_toast', {
-      defaultValue: fromRegen ? '已重新生成备用码' : undefined,
-    }), 'success')
+    pushSnack(t('twofa.enabled_toast'), 'success')
     onChanged()
     onClose()
   }
@@ -306,45 +280,11 @@ export default function TwoFactorDialog({ open, enabled, hasPasskey, md, onClose
             )}
             {error && <Alert severity="error" sx={{ mt: 2 }}>{error}</Alert>}
           </DialogContent>
-          <DialogActions sx={{ justifyContent: 'space-between' }}>
-            <Button onClick={() => { setStep('regenerate'); setCode(''); setError('') }} disabled={busy}>
-              {t('twofa.regenerate', { defaultValue: '重新生成备用码' })}
-            </Button>
-            <Box>
-              <Button onClick={onClose} disabled={busy}>{t('twofa.cancel')}</Button>
-              <Button type="submit" color="error" variant="contained" disabled={busy}
-                startIcon={busy ? <CircularProgress size={16} color="inherit" /> : undefined}>
-                {t('twofa.disable')}
-              </Button>
-            </Box>
-          </DialogActions>
-        </Box>
-      )}
-
-      {step === 'regenerate' && (
-        <Box component="form" onSubmit={submitRegenerate}>
-          <DialogContent>
-            <Typography variant="body2" sx={{ color: md.onSurfaceVariant, mb: 2 }}>
-              {t('twofa.regenerate_hint', { defaultValue: '输入当前验证器代码或一个备用码以重新生成一组新的备用码。旧的备用码将立即作废。' })}
-            </Typography>
-            <TextField
-              label={t('twofa.code')}
-              value={code}
-              onChange={e => setCode(e.target.value)}
-              autoFocus
-              fullWidth
-              autoComplete="one-time-code"
-              placeholder="123456"
-            />
-            {error && <Alert severity="error" sx={{ mt: 2 }}>{error}</Alert>}
-          </DialogContent>
           <DialogActions>
-            <Button onClick={() => { setStep('disable'); setCode(''); setError('') }} disabled={busy}>
-              {t('twofa.cancel')}
-            </Button>
-            <Button type="submit" variant="contained" disabled={busy}
+            <Button onClick={onClose} disabled={busy}>{t('twofa.cancel')}</Button>
+            <Button type="submit" color="error" variant="contained" disabled={busy}
               startIcon={busy ? <CircularProgress size={16} color="inherit" /> : undefined}>
-              {t('twofa.regenerate', { defaultValue: '重新生成备用码' })}
+              {t('twofa.disable')}
             </Button>
           </DialogActions>
         </Box>

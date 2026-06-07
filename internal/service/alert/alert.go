@@ -20,14 +20,6 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 )
 
-// UserExpiringWindowDays is how far ahead the notification center looks for
-// expiring users. Kept equal to the dashboard's window by a drift test so the
-// bell and the dashboard card agree on which users are "expiring soon".
-const UserExpiringWindowDays = 7
-
-// userExpiringLimit caps how many per-user expiry alerts the feed emits, so a
-// bulk-expiry day can't produce an unbounded badge. Surfaced via log if hit.
-const userExpiringLimit = 50
 
 // defaultCertRenewBeforeDays is the cert-expiry lookahead used when the admin
 // hasn't set CertRenewBeforeDays.
@@ -52,7 +44,7 @@ const (
 	TypeCertFailed    Type = "cert_failed"
 	TypeCertExpiring  Type = "cert_expiring"
 	TypePanelUpgrade  Type = "panel_upgrade"
-	TypeUserExpiring  Type = "user_expiring"
+	TypePSPUpgrade    Type = "psp_upgrade"
 	TypeLoginSecurity Type = "login_security"
 )
 
@@ -70,9 +62,9 @@ type Alert struct {
 	HealthState    string     `json:"health_state,omitempty"`    // node_health
 	PanelName      string     `json:"panel_name,omitempty"`      // node_health
 	LastError      string     `json:"last_error,omitempty"`      // cert_failed
-	CurrentVersion string     `json:"current_version,omitempty"` // panel_upgrade
-	LatestVersion  string     `json:"latest_version,omitempty"`  // panel_upgrade
-	ExpireAt       *time.Time `json:"expire_at,omitempty"`       // cert_expiring / user_expiring
+	CurrentVersion string     `json:"current_version,omitempty"` // panel_upgrade / psp_upgrade
+	LatestVersion  string     `json:"latest_version,omitempty"`  // panel_upgrade / psp_upgrade
+	ExpireAt       *time.Time `json:"expire_at,omitempty"`       // cert_expiring
 	Count          int        `json:"count,omitempty"`           // login_security
 	Since          *time.Time `json:"since,omitempty"`
 }
@@ -82,7 +74,7 @@ type Alert struct {
 // bell never offers them a link to a page they're forbidden to open.
 func (t Type) AdminOnly() bool {
 	switch t {
-	case TypeCertFailed, TypeCertExpiring, TypePanelUpgrade:
+	case TypeCertFailed, TypeCertExpiring, TypePanelUpgrade, TypePSPUpgrade:
 		return true
 	default:
 		return false
@@ -124,9 +116,6 @@ type PanelLister interface {
 type CertLister interface {
 	ListByStatus(ctx context.Context, status domain.CertStatus) ([]*domain.TLSCertificate, error)
 }
-type UserExpiringLister interface {
-	ListExpiringBetween(ctx context.Context, from, to time.Time, limit int) ([]*domain.User, error)
-}
 type EventCounter interface {
 	CountByReasonSince(ctx context.Context, reason string, since time.Time) (int64, error)
 }
@@ -140,14 +129,17 @@ type Deps struct {
 	Nodes    NodeLister
 	Panels   PanelLister
 	Certs    CertLister
-	Users    UserExpiringLister
 	Events   EventCounter
 	Settings SettingsLoader
-	// UpgradeFor reports the latest tested-supported 3X-UI version reachable
-	// from `current`, or ("", false) when up to date / unknown / latest is
-	// untested. Injected so the service stays decoupled from the version
-	// package's global state (and testable). nil → no panel_upgrade alerts.
+	// UpgradeFor reports the 3X-UI version a panel running `current` should be
+	// nudged to upgrade to, or ("", false) when it's already at/above PSP's tested
+	// ceiling. (v3.7.0: this is PSP's max_tested_xui, not the upstream latest — we
+	// only nudge up to what PSP has verified.) nil → no panel_upgrade alerts.
 	UpgradeFor func(current string) (latest string, available bool)
+	// PSPUpgrade reports whether a newer STABLE PSP release exists than this build,
+	// for the psp_upgrade alert. ("","",false) when up to date / unknown. Injected
+	// so the service stays decoupled from the version package. nil → no psp_upgrade.
+	PSPUpgrade func() (current, latest string, available bool)
 	// Now defaults to time.Now.
 	Now func() time.Time
 }
@@ -172,8 +164,8 @@ func (s *Service) List(ctx context.Context) ([]Alert, Counts) {
 	var out []Alert
 	out = append(out, s.nodeHealth(ctx)...)
 	out = append(out, s.panelUpgrades(ctx)...)
+	out = append(out, s.pspUpgrade()...)
 	out = append(out, s.certAlerts(ctx)...)
-	out = append(out, s.userExpiring(ctx)...)
 	out = append(out, s.loginSecurity(ctx)...)
 	return out, Tally(out)
 }
@@ -309,36 +301,26 @@ func (s *Service) certAlerts(ctx context.Context) []Alert {
 	return out
 }
 
-func (s *Service) userExpiring(ctx context.Context) []Alert {
-	if s.d.Users == nil {
+// pspUpgrade emits a single admin-only alert when a newer STABLE PSP release is
+// available than this build (the self-update nudge). Stable-only by construction
+// — the injected PSPUpgrade reads version.LatestPSP() (GitHub /releases/latest,
+// which excludes pre-releases), so running a beta only alerts once the stable it's
+// behind ships, never to a newer beta.
+func (s *Service) pspUpgrade() []Alert {
+	if s.d.PSPUpgrade == nil {
 		return nil
 	}
-	now := s.now()
-	to := now.Add(UserExpiringWindowDays * 24 * time.Hour)
-	users, err := s.d.Users.ListExpiringBetween(ctx, now, to, userExpiringLimit)
-	if err != nil {
-		log.Warn("alert: list expiring users", "err", err)
+	current, latest, ok := s.d.PSPUpgrade()
+	if !ok || latest == "" {
 		return nil
 	}
-	if len(users) == userExpiringLimit {
-		log.Warn("alert: expiring-user list hit cap; some omitted from the feed", "cap", userExpiringLimit)
-	}
-	out := make([]Alert, 0, len(users))
-	for _, u := range users {
-		name := u.DisplayName
-		if name == "" {
-			name = u.UPN
-		}
-		out = append(out, Alert{
-			Key:        "user_expiring:" + strconv.FormatInt(u.ID, 10),
-			Type:       TypeUserExpiring,
-			Severity:   SeverityWarning,
-			TargetID:   u.ID,
-			TargetName: name,
-			ExpireAt:   u.ExpireAt,
-		})
-	}
-	return out
+	return []Alert{{
+		Key:            "psp_upgrade:" + latest,
+		Type:           TypePSPUpgrade,
+		Severity:       SeverityInfo,
+		CurrentVersion: current,
+		LatestVersion:  latest,
+	}}
 }
 
 func (s *Service) loginSecurity(ctx context.Context) []Alert {

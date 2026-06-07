@@ -8,7 +8,7 @@
       "cert_expiring": "Certificate {{name}} is expiring",
       "cert_expired": "Certificate {{name}} has expired",
       "panel_upgrade": "{{name}}: 3X-UI {{version}} available",
-      "user_expiring": "User {{name}} is expiring",
+      "psp_upgrade": "Panel update {{version}} available",
       "login_security": "{{count}} login lockouts recently"
     }
   },

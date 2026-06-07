@@ -8,7 +8,7 @@
       "cert_expiring": "证书 {{name}} 即将到期",
       "cert_expired": "证书 {{name}} 已过期",
       "panel_upgrade": "{{name}}：3X-UI {{version}} 可升级",
-      "user_expiring": "用户 {{name}} 即将到期",
+      "psp_upgrade": "面板新版本 {{version}} 可更新",
       "login_security": "近期发生 {{count}} 次登录锁定"
     }
   },

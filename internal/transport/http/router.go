@@ -424,18 +424,18 @@ func NewRouter(d Deps) *gin.Engine {
 			Nodes:    d.Repos.Node,
 			Panels:   d.Repos.XUIPanel,
 			Certs:    d.Repos.Certificate,
-			Users:    d.Repos.User,
 			Events:   d.Repos.AuthEvent,
 			Settings: d.Repos.Settings,
+			// Nudge a panel to upgrade ONLY when it's below PSP's tested ceiling
+			// (max_tested_xui), and only TOWARD that ceiling — never chasing a newer
+			// upstream release PSP hasn't verified. A panel at/above the ceiling
+			// gets no upgrade nudge (above is handled by the "Untested" badge).
 			UpgradeFor: func(current string) (string, bool) {
-				if !version.IsXUIUpdateAvailable(current) {
-					return "", false
-				}
-				latest := version.LatestXUI()
-				if version.CheckXUI(latest) != version.CompatSupported {
-					return "", false
-				}
-				return latest, true
+				return version.XUIUpgradeTarget(current)
+			},
+			// Self-update nudge: a newer STABLE PSP release than this build.
+			PSPUpgrade: func() (string, string, bool) {
+				return version.Version, version.LatestPSP(), version.IsPSPUpdateAvailable()
 			},
 		})
 		staffGroup.GET("/alerts", handler.NewAdminAlertsHandler(alertSvc).List)

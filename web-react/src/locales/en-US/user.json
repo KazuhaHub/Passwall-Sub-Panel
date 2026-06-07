@@ -52,7 +52,7 @@
   "actions": {
     "change_password": "Change password",
     "personal_rules": "Personal rules",
-    "two_factor": "Two-factor auth",
+    "two_factor": "Authenticator app",
     "passkeys": "Passkeys",
     "recovery_codes": "Recovery codes"
   },
@@ -93,7 +93,7 @@
   "twofa": {
     "status_on": "Enabled",
     "status_off": "Off",
-    "title": "Two-factor authentication (2FA)",
+    "title": "Authenticator app (TOTP)",
     "intro": "Once enabled, signing in requires a one-time code from an authenticator app (e.g. Google Authenticator, 1Password, Authy) in addition to your password, greatly improving account security.",
     "start": "Get started",
     "cancel": "Cancel",
@@ -108,12 +108,12 @@
     "recovery_warning": "Save these recovery codes somewhere safe — each can be used once to sign in if you lose your authenticator. They won't be shown again after you close this page.",
     "copy_all": "Copy all",
     "done": "I've saved them, done",
-    "enabled_toast": "Two-factor authentication enabled",
-    "disable_hint": "Enter a current code or one of your recovery codes to turn off two-factor authentication.",
+    "enabled_toast": "Authenticator enabled",
+    "disable_hint": "Enter a current code or one of your recovery codes to turn off your authenticator (TOTP).",
     "disable_code_hint": "An authenticator code or a recovery code both work.",
     "disable_passkey": "Or turn off with a passkey",
-    "disable": "Turn off 2FA",
-    "disabled_toast": "Two-factor authentication disabled",
+    "disable": "Turn off authenticator",
+    "disabled_toast": "Authenticator disabled",
     "regenerate": "Regenerate recovery codes",
     "regenerate_hint": "Enter a current authenticator code or a recovery code to generate a fresh set. Your old recovery codes stop working immediately.",
     "regen_done_toast": "Recovery codes regenerated"

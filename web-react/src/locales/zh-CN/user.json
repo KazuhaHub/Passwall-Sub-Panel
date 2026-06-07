@@ -52,7 +52,7 @@
   "actions": {
     "change_password": "修改密码",
     "personal_rules": "个人规则",
-    "two_factor": "两步验证",
+    "two_factor": "验证器 App",
     "passkeys": "通行密钥",
     "recovery_codes": "备用码"
   },
@@ -93,7 +93,7 @@
   "twofa": {
     "status_on": "已开启",
     "status_off": "未开启",
-    "title": "两步验证（2FA）",
+    "title": "验证器 App（TOTP）",
     "intro": "开启后，登录时除密码外还需输入身份验证器 App（如 Google Authenticator、1Password、Authy）生成的一次性验证码，显著提升账号安全。",
     "start": "开始设置",
     "cancel": "取消",
@@ -108,12 +108,12 @@
     "recovery_warning": "请妥善保存以下恢复码，每个仅可使用一次。当你无法使用身份验证器时，可用恢复码登录。此页关闭后将无法再次查看。",
     "copy_all": "复制全部",
     "done": "我已保存，完成",
-    "enabled_toast": "两步验证已开启",
-    "disable_hint": "请输入当前的验证码或一个恢复码以关闭两步验证。",
-    "disable_code_hint": "可输入身份验证器验证码或恢复码。",
+    "enabled_toast": "验证器已开启",
+    "disable_hint": "请输入当前的验证码或一个备用码以停用验证器（TOTP）。",
+    "disable_code_hint": "可输入身份验证器验证码或备用码。",
     "disable_passkey": "或用通行密钥停用",
-    "disable": "关闭两步验证",
-    "disabled_toast": "两步验证已关闭",
+    "disable": "停用验证器",
+    "disabled_toast": "验证器已停用",
     "regenerate": "重新生成备用码",
     "regenerate_hint": "输入当前验证器代码或一个备用码以重新生成一组新的备用码。旧的备用码将立即作废。",
     "regen_done_toast": "已重新生成备用码"

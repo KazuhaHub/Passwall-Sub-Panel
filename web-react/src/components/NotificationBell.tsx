@@ -24,14 +24,17 @@ import { useTranslation } from 'react-i18next'
 
 import { getAlerts, type Alert, type AlertSeverity, type AlertType } from '@/api/alerts'
 
-const ROUTE: Record<AlertType, string> = {
+// In-app deep links per alert type. psp_upgrade is intentionally absent — it opens
+// the GitHub releases page externally (handled in go()).
+const ROUTE: Partial<Record<AlertType, string>> = {
   node_health: '/admin/nodes',
   cert_failed: '/admin/certs',
   cert_expiring: '/admin/certs',
   panel_upgrade: '/admin/servers',
-  user_expiring: '/admin/users',
   login_security: '/admin/logs',
 }
+
+const PSP_RELEASES_URL = 'https://github.com/KazuhaHub/passwall-sub-panel/releases'
 
 const SEVERITY_RANK: Record<AlertSeverity, number> = { error: 0, warning: 1, info: 2 }
 
@@ -42,9 +45,9 @@ function typeIcon(type: AlertType, severity: AlertSeverity) {
     case 'cert_failed':
       return <ErrorOutlineIcon fontSize="small" />
     case 'cert_expiring':
-    case 'user_expiring':
       return <ScheduleIcon fontSize="small" />
     case 'panel_upgrade':
+    case 'psp_upgrade':
       return <SystemUpdateAltIcon fontSize="small" />
     case 'login_security':
       return <ShieldOutlinedIcon fontSize="small" />
@@ -104,8 +107,8 @@ export default function NotificationBell() {
           : t('alerts.title.cert_expiring', { name, defaultValue: `证书 ${name} 即将到期` })
       case 'panel_upgrade':
         return t('alerts.title.panel_upgrade', { name, version: a.latest_version, defaultValue: `${name}：3X-UI ${a.latest_version} 可升级` })
-      case 'user_expiring':
-        return t('alerts.title.user_expiring', { name, defaultValue: `用户 ${name} 即将到期` })
+      case 'psp_upgrade':
+        return t('alerts.title.psp_upgrade', { version: a.latest_version, defaultValue: `面板新版本 ${a.latest_version} 可更新` })
       case 'login_security':
         return t('alerts.title.login_security', { count: a.count, defaultValue: `近期发生 ${a.count} 次登录锁定` })
       default:
@@ -120,9 +123,9 @@ export default function NotificationBell() {
       case 'cert_failed':
         return a.last_error || ''
       case 'cert_expiring':
-      case 'user_expiring':
         return a.expire_at ? new Date(a.expire_at).toLocaleString() : ''
       case 'panel_upgrade':
+      case 'psp_upgrade':
         return `${a.current_version || '?'} → ${a.latest_version || '?'}`
       default:
         return ''
@@ -137,6 +140,11 @@ export default function NotificationBell() {
 
   function go(a: Alert) {
     setAnchor(null)
+    // PSP self-update has no in-app page — open the GitHub releases externally.
+    if (a.type === 'psp_upgrade') {
+      window.open(PSP_RELEASES_URL, '_blank', 'noopener,noreferrer')
+      return
+    }
     navigate(ROUTE[a.type] ?? '/admin/dashboard')
   }
 

@@ -232,6 +232,11 @@ jobs:
           tag_name: ${{ needs.setup.outputs.tag }}
           target_commitish: ${{ github.sha }}
           name: ${{ needs.setup.outputs.tag }}
+          # Mark pre-release tags (anything with a "-beta"/"-rc"/... suffix) as a
+          # GitHub pre-release so /releases/latest excludes them — PSP's in-app
+          # self-update nudge (psp_upgrade alert) reads /releases/latest and must
+          # only ever point at a STABLE release, never a beta.
+          prerelease: ${{ contains(needs.setup.outputs.tag, '-') }}
           generate_release_notes: true
           body_path: release_notes.md
           append_body: true
@@ -277,7 +282,13 @@ jobs:
           images: ghcr.io/${{ needs.setup.outputs.owner_lc }}/passwall-sub-panel
           tags: |
             type=raw,value=${{ needs.setup.outputs.tag }}
-            type=raw,value=latest,enable=${{ startsWith(needs.setup.outputs.tag, 'v') }}
+            # `latest` tracks STABLE releases only — never a pre-release. This
+            # mirrors GitHub's /releases/latest (and PSP's in-app self-update
+            # nudge), so a deploy pinned to :latest stays on the stable channel.
+            # Pre-release tags (anything with a "-beta"/"-rc"/... suffix) get the
+            # rolling :beta tag instead, so opt-in testers can pin image: ...:beta.
+            type=raw,value=latest,enable=${{ startsWith(needs.setup.outputs.tag, 'v') && !contains(needs.setup.outputs.tag, '-') }}
+            type=raw,value=beta,enable=${{ contains(needs.setup.outputs.tag, '-') }}
           labels: |
             org.opencontainers.image.title=passwall-sub-panel
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}

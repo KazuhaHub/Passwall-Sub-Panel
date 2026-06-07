@@ -62,6 +62,28 @@ func ActiveMaxTestedXUI() string {
 	return ""
 }
 
+// XUIUpgradeTarget reports the 3X-UI version a panel running `current` should be
+// nudged to upgrade to — PSP's max_tested ceiling — returned only when `current`
+// is STRICTLY below it. ("", false) when current is at/above the ceiling or when
+// either version is unknown/unparseable. Unlike IsXUIUpdateAvailable (which chases
+// the upstream LatestXUI tag), this only ever points at what PSP has verified, so
+// admins are never nudged onto an untested 3X-UI release.
+func XUIUpgradeTarget(current string) (string, bool) {
+	max := ActiveMaxTestedXUI()
+	if max == "" || current == "" {
+		return "", false
+	}
+	cv, ok1 := parseSemver(current)
+	mv, ok2 := parseSemver(max)
+	if !ok1 || !ok2 {
+		return "", false
+	}
+	if cmpSemver(cv, mv) >= 0 {
+		return "", false
+	}
+	return max, true
+}
+
 // ActiveMinXUI returns the lower bound currently in effect: the HIGHER of the
 // compiled MinXUI backstop and the operational min_xui loaded from the compat
 // JSON (RefreshRemoteCompat). The JSON can only RAISE the floor above the

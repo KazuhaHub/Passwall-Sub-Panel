@@ -37,12 +37,6 @@ func (s stubCerts) ListByStatus(_ context.Context, status domain.CertStatus) ([]
 	return nil, nil
 }
 
-type stubUsers struct{ expiring []*domain.User }
-
-func (s stubUsers) ListExpiringBetween(_ context.Context, _, _ time.Time, _ int) ([]*domain.User, error) {
-	return s.expiring, nil
-}
-
 type stubEvents struct{ count int64 }
 
 func (s stubEvents) CountByReasonSince(context.Context, string, time.Time) (int64, error) {
@@ -162,22 +156,24 @@ func TestCertAlerts(t *testing.T) {
 	}
 }
 
-func TestUserExpiringAlerts(t *testing.T) {
+func TestPSPUpgradeAlert(t *testing.T) {
 	now := time.Now()
+	// A newer stable available → one admin-only info alert carrying both versions.
 	svc := newSvc(Deps{
-		Settings: stubSettings{},
-		Users: stubUsers{expiring: []*domain.User{
-			{ID: 10, UPN: "a@x", DisplayName: "Alice", ExpireAt: tPtr(now.Add(2 * 24 * time.Hour))},
-			{ID: 11, UPN: "b@x", ExpireAt: tPtr(now.Add(6 * 24 * time.Hour))},
-		}},
+		Settings:   stubSettings{},
+		PSPUpgrade: func() (string, string, bool) { return "v3.7.0-beta.16", "v3.7.0", true },
 	}, now)
-	alerts, _ := svc.List(context.Background())
-	ue := byType(alerts, TypeUserExpiring)
-	if len(ue) != 2 {
-		t.Fatalf("want 2 user_expiring, got %d", len(ue))
+	up := byType(mustList(t, svc), TypePSPUpgrade)
+	if len(up) != 1 || up[0].Severity != SeverityInfo || up[0].CurrentVersion != "v3.7.0-beta.16" || up[0].LatestVersion != "v3.7.0" {
+		t.Fatalf("psp_upgrade wrong: %+v", up)
 	}
-	if ue[0].Severity != SeverityWarning || ue[0].TargetID != 10 || ue[0].TargetName != "Alice" {
-		t.Fatalf("user_expiring fields wrong: %+v", ue[0])
+	if !TypePSPUpgrade.AdminOnly() {
+		t.Fatal("psp_upgrade must be admin-only (operators don't manage PSP updates)")
+	}
+	// Up to date → silent.
+	none := newSvc(Deps{Settings: stubSettings{}, PSPUpgrade: func() (string, string, bool) { return "v3.7.0", "v3.7.0", false }}, now)
+	if len(byType(mustList(t, none), TypePSPUpgrade)) != 0 {
+		t.Fatal("psp_upgrade must be silent when up to date")
 	}
 }
 

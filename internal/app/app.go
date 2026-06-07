@@ -480,6 +480,13 @@ func (a *App) probePanelVersionsOnce(ctx context.Context) {
 		log.Debug("compat probe: refresh latest 3X-UI failed (offline / rate limited?)", "err", rerr)
 	}
 	latestCancel()
+	// Same cheap PSP-wide GitHub query for OUR own latest STABLE release — drives
+	// the admin psp_upgrade nudge. Throttled (30 min) + single-flight inside.
+	pspCtx, pspCancel := context.WithTimeout(ctx, 10*time.Second)
+	if rerr := version.RefreshLatestPSP(pspCtx); rerr != nil {
+		log.Debug("compat probe: refresh latest PSP failed (offline / rate limited?)", "err", rerr)
+	}
+	pspCancel()
 	for _, p := range panels {
 		if ctx.Err() != nil {
 			return
