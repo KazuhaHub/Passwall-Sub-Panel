@@ -11,8 +11,10 @@
     "cancel": "Cancel",
     "save": "Save",
     "edit": "Edit",
-    "delete": "Delete"
+    "delete": "Delete",
+    "deleted": "Deleted"
   },
+  "saved": "Saved",
   "status": {
     "online": "Online",
     "offline": "Offline",

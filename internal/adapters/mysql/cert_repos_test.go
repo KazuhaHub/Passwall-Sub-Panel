@@ -2,6 +2,7 @@ package mysql
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -67,29 +68,61 @@ func TestDNSCredentialRoundTripAndEncryptedAtRest(t *testing.T) {
 	}
 }
 
-func TestACMEAccountAbsentAndRoundTrip(t *testing.T) {
+func TestACMEAccountCRUDRoundTrip(t *testing.T) {
 	repos, _, ctx := newCertReposTest(t)
 
-	// Absent (email,directory) must be (nil, nil), not an error — callers
-	// treat absence as "not yet registered".
-	got, err := repos.ACMEAccount.GetByEmailDirectory(ctx, "a@b.c", "https://acme/dir")
-	if err != nil {
-		t.Fatalf("absent must be (nil,nil), got err %v", err)
+	// Create an EAB account; AccountKey + EABHMACKey are encrypted at rest.
+	acc := &domain.ACMEAccount{
+		Name: "ZeroSSL", Email: "a@b.c", Directory: "https://acme/dir",
+		EABKeyID: "kid", EABHMACKey: "hmac", KeyType: "RSA2048",
 	}
-	if got != nil {
-		t.Fatalf("absent must be nil, got %#v", got)
+	if err := repos.ACMEAccount.Create(ctx, acc); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if acc.ID == 0 {
+		t.Fatal("create must set the id")
 	}
 
-	acc := &domain.ACMEAccount{Email: "a@b.c", Directory: "https://acme/dir", AccountKey: "PEMKEY", Registration: `{"uri":"x"}`}
-	if err := repos.ACMEAccount.Save(ctx, acc); err != nil {
-		t.Fatalf("save: %v", err)
-	}
-	got, err = repos.ACMEAccount.GetByEmailDirectory(ctx, "a@b.c", "https://acme/dir")
+	got, err := repos.ACMEAccount.GetByID(ctx, acc.ID)
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
-	if got == nil || got.AccountKey != "PEMKEY" || got.Registration != `{"uri":"x"}` {
+	if got.Name != "ZeroSSL" || got.EABKeyID != "kid" || got.EABHMACKey != "hmac" || got.KeyType != "RSA2048" {
 		t.Fatalf("account round-trip = %#v", got)
+	}
+
+	// Registration write-back, then config Update must NOT clobber it.
+	if err := repos.ACMEAccount.UpdateRegistration(ctx, acc.ID, "PEMKEY", `{"uri":"x"}`); err != nil {
+		t.Fatalf("update registration: %v", err)
+	}
+	acc.Name = "ZeroSSL renamed"
+	if err := repos.ACMEAccount.Update(ctx, acc); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	got, _ = repos.ACMEAccount.GetByID(ctx, acc.ID)
+	if got.Name != "ZeroSSL renamed" || got.AccountKey != "PEMKEY" || got.Registration != `{"uri":"x"}` {
+		t.Fatalf("config update must preserve the lazy machine fields: %#v", got)
+	}
+
+	// ClearRegistration drops the lazy fields.
+	if err := repos.ACMEAccount.ClearRegistration(ctx, acc.ID); err != nil {
+		t.Fatalf("clear registration: %v", err)
+	}
+	got, _ = repos.ACMEAccount.GetByID(ctx, acc.ID)
+	if got.AccountKey != "" || got.Registration != "" {
+		t.Fatalf("clear must drop account key + registration: %#v", got)
+	}
+
+	// List + Delete.
+	list, err := repos.ACMEAccount.List(ctx)
+	if err != nil || len(list) != 1 {
+		t.Fatalf("list = %d (%v)", len(list), err)
+	}
+	if err := repos.ACMEAccount.Delete(ctx, acc.ID); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	if _, err := repos.ACMEAccount.GetByID(ctx, acc.ID); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("deleted account must be ErrNotFound, got %v", err)
 	}
 }
 

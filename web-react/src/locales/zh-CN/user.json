@@ -60,7 +60,9 @@
     "title": "备用码",
     "intro": "当你无法使用验证器或通行密钥时，可用一次性备用码登录。每个备用码只能用一次。",
     "remaining": "剩余 {{count}} 个备用码",
-    "none_left": "你已没有可用的备用码，请重新生成一组。"
+    "none_left": "你已没有可用的备用码，请重新生成一组。",
+    "regen_passkey": "用通行密钥重新生成",
+    "regen_code": "用验证码重新生成"
   },
   "passkey": {
     "recovery_title": "保存你的备用码",
@@ -109,6 +111,7 @@
     "enabled_toast": "两步验证已开启",
     "disable_hint": "请输入当前的验证码或一个恢复码以关闭两步验证。",
     "disable_code_hint": "可输入身份验证器验证码或恢复码。",
+    "disable_passkey": "或用通行密钥停用",
     "disable": "关闭两步验证",
     "disabled_toast": "两步验证已关闭",
     "regenerate": "重新生成备用码",

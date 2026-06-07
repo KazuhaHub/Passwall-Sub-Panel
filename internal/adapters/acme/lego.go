@@ -324,7 +324,7 @@ func (i *Issuer) Obtain(_ context.Context, req ports.ACMERequest) (ports.ACMERes
 	user := &acmeUser{email: req.Email, key: key, reg: reg}
 	cfg := lego.NewConfig(user)
 	cfg.CADirURL = req.DirectoryURL
-	cfg.Certificate.KeyType = certcrypto.EC256
+	cfg.Certificate.KeyType = keyTypeFromString(req.KeyType)
 
 	client, err := lego.NewClient(cfg)
 	if err != nil {
@@ -347,9 +347,22 @@ func (i *Issuer) Obtain(_ context.Context, req ports.ACMERequest) (ports.ACMERes
 
 	regJSON := req.RegistrationJSON
 	if user.reg == nil {
-		r, err := client.Registration.Register(registration.RegisterOptions{TermsOfServiceAgreed: true})
-		if err != nil {
-			return ports.ACMEResult{}, fmt.Errorf("acme: register account: %w", err)
+		var r *registration.Resource
+		var rerr error
+		if req.EABKeyID != "" {
+			// External Account Binding — ZeroSSL / Google Public CA and other
+			// EAB-gated CAs require binding the new ACME account to a pre-issued
+			// (kid, HMAC) credential at registration time.
+			r, rerr = client.Registration.RegisterWithExternalAccountBinding(registration.RegisterEABOptions{
+				TermsOfServiceAgreed: true,
+				Kid:                  req.EABKeyID,
+				HmacEncoded:          req.EABHMACKey,
+			})
+		} else {
+			r, rerr = client.Registration.Register(registration.RegisterOptions{TermsOfServiceAgreed: true})
+		}
+		if rerr != nil {
+			return ports.ACMEResult{}, fmt.Errorf("acme: register account: %w", rerr)
 		}
 		user.reg = r
 		b, err := json.Marshal(r)
@@ -405,6 +418,22 @@ func (i *Issuer) dnsProvider(req ports.ACMERequest) (challenge.Provider, func(),
 		return nil, nil, fmt.Errorf("acme: build dns provider %q: %w", req.DNSProvider, err)
 	}
 	return p, cleanup, nil
+}
+
+// keyTypeFromString maps an account's configured key-type string to lego's
+// certcrypto.KeyType for the issued certificate. Unknown/empty falls back to
+// EC256 (the prior hard-coded default), so existing accounts are unaffected.
+func keyTypeFromString(s string) certcrypto.KeyType {
+	switch strings.ToUpper(strings.TrimSpace(s)) {
+	case "EC384":
+		return certcrypto.EC384
+	case "RSA2048":
+		return certcrypto.RSA2048
+	case "RSA4096":
+		return certcrypto.RSA4096
+	default:
+		return certcrypto.EC256
+	}
 }
 
 // loadOrGenerateAccountKey parses an existing PEM account key, or generates a

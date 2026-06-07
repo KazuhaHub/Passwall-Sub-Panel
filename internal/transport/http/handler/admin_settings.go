@@ -333,8 +333,11 @@ func (h *AdminSettingsHandler) Put(c *gin.Context) {
 		GeoIPUpdateIntervalHours:   req.GeoIPUpdateIntervalHours,
 		CertRenewBeforeDays:         req.CertRenewBeforeDays,
 		CertRenewCheckIntervalHours: req.CertRenewCheckIntervalHours,
-		ACMEEmail:                   req.ACMEEmail,
-		ACMEDirectoryURL:            req.ACMEDirectoryURL,
+		// ACMEEmail/ACMEDirectoryURL are legacy (multi-account moved them to the
+		// acme_accounts table). No UI control writes them; carry the stored value
+		// over so it survives as a prefill hint for the first ACME-account form.
+		ACMEEmail:        prev.ACMEEmail,
+		ACMEDirectoryURL: prev.ACMEDirectoryURL,
 		CaptchaEnabled:              req.CaptchaEnabled,
 		CaptchaProvider:             strings.ToLower(strings.TrimSpace(req.CaptchaProvider)),
 		CaptchaTrigger:              strings.ToLower(strings.TrimSpace(req.CaptchaTrigger)),

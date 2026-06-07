@@ -915,18 +915,34 @@ type DNSCredential struct {
 	UpdatedAt   time.Time
 }
 
-// ACMEAccount is a registered ACME account, reused across every certificate
-// that shares an (Email, Directory). AccountKey (PEM) is encrypted at rest;
-// Registration is the lego registration resource JSON (carries the account URI).
+// ACMEAccount is an admin-managed ACME CA account profile. A certificate selects
+// which account to issue under (multi-account support: different CAs / contact
+// emails / EAB credentials per cert). Name/Email/Directory/EAB*/KeyType are
+// admin-entered config; AccountKey (PEM, encrypted) + Registration (lego resource
+// JSON, carries the account URI) are machine-generated and filled lazily on first
+// issuance, then reused so the account stays under the CA's rate limits.
 type ACMEAccount struct {
-	ID           int64
-	Email        string
-	Directory    string
-	AccountKey   string
-	Registration string
+	ID        int64
+	Name      string // admin label, e.g. "Let's Encrypt — ops@team.com"
+	Email     string // ACME account contact
+	Directory string // CA directory URL (LE prod/staging, ZeroSSL, Google, custom)
+	// External Account Binding — required by ZeroSSL / Google Public CA and other
+	// EAB-gated CAs. Empty EABKeyID => plain registration. EABHMACKey encrypted.
+	EABKeyID   string
+	EABHMACKey string
+	// KeyType is the issued certificate's key algorithm: "EC256" (default) /
+	// "EC384" / "RSA2048" / "RSA4096". Empty => EC256.
+	KeyType      string
+	AccountKey   string // generated account key PEM (encrypted), lazy
+	Registration string // lego registration resource JSON, lazy
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
 }
+
+// ACMEKeyType is the set of certificate key algorithms an ACME account may issue
+// with. The lego adapter maps these to certcrypto.KeyType; anything else (incl.
+// "") falls back to EC256.
+var ACMEKeyTypes = []string{"EC256", "EC384", "RSA2048", "RSA4096"}
 
 type MailReminderKind string
 

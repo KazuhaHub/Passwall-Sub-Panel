@@ -42,17 +42,23 @@ import VisibilityIcon from '@mui/icons-material/VisibilityOutlined'
 import { useTranslation } from 'react-i18next'
 
 import {
+  createACMEAccount,
   createCert,
   createDNSCred,
+  deleteACMEAccount,
   deleteCert,
   deleteDNSCred,
   downloadCert,
   getCertDetail,
+  listACMEAccounts,
+  listACMEKeyTypes,
   listCerts,
   listDNSCreds,
   listDNSProviders,
   renewCert,
+  updateACMEAccount,
   updateDNSCred,
+  type ACMEAccount,
   type Cert,
   type CertPEM,
   type CertTask,
@@ -70,6 +76,27 @@ import { useSiteStore } from '@/stores/site'
 
 const LE_PROD = 'https://acme-v02.api.letsencrypt.org/directory'
 const LE_STAGING = 'https://acme-staging-v02.api.letsencrypt.org/directory'
+
+// CA directory presets for the ACME-account form. ZeroSSL + Google Public CA
+// require External Account Binding (eab=true), so the form shows the EAB fields.
+const CA_PRESETS: { label: string; url: string; eab?: boolean }[] = [
+  { label: "Let's Encrypt", url: LE_PROD },
+  { label: 'LE Staging', url: LE_STAGING },
+  { label: 'ZeroSSL', url: 'https://acme.zerossl.com/v2/DV90', eab: true },
+  { label: 'Google', url: 'https://dv.acme-v02.api.pki.goog/directory', eab: true },
+]
+
+// caLabel maps a directory URL to a short CA label for the account list / cert
+// selector; an unrecognized URL shows its hostname so custom CAs still read well.
+function caLabel(directory: string): string {
+  const preset = CA_PRESETS.find(p => p.url === directory)
+  if (preset) return preset.label
+  try {
+    return new URL(directory).hostname
+  } catch {
+    return directory
+  }
+}
 
 function statusColor(md: Record<string, string>, status: string): string {
   switch (status) {
@@ -126,6 +153,8 @@ export default function CertificatesView() {
   const [tab, setTab] = useState(0)
   const [certs, setCerts] = useState<Cert[]>([])
   const [creds, setCreds] = useState<DNSCredential[]>([])
+  const [accounts, setAccounts] = useState<ACMEAccount[]>([])
+  const [keyTypes, setKeyTypes] = useState<string[]>([])
   const [providers, setProviders] = useState<DNSProviderInfo[]>([])
   const [loading, setLoading] = useState(true)
   const [certPage, setCertPage] = useState(1)
@@ -136,9 +165,10 @@ export default function CertificatesView() {
   const reload = useCallback(async () => {
     setLoading(true)
     try {
-      const [c, d] = await Promise.all([listCerts(), listDNSCreds()])
+      const [c, d, a] = await Promise.all([listCerts(), listDNSCreds(), listACMEAccounts()])
       setCerts(c)
       setCreds(d)
+      setAccounts(a)
     } catch {
       /* the axios interceptor surfaces the error toast */
     } finally {
@@ -149,6 +179,7 @@ export default function CertificatesView() {
   useEffect(() => {
     reload()
     listDNSProviders().then(setProviders).catch(() => {})
+    listACMEKeyTypes().then(setKeyTypes).catch(() => {})
     getUISettings().then(setSettings).catch(() => {})
   }, [reload])
 
@@ -156,6 +187,7 @@ export default function CertificatesView() {
   const [certOpen, setCertOpen] = useState(false)
   const [certName, setCertName] = useState('')
   const [certDomains, setCertDomains] = useState('')
+  const [certAccountId, setCertAccountId] = useState<number | ''>('')
   const [certCredId, setCertCredId] = useState<number | ''>('')
   const [certAutoRenew, setCertAutoRenew] = useState(true)
   const [certBusy, setCertBusy] = useState(false)
@@ -163,6 +195,7 @@ export default function CertificatesView() {
   function openCert() {
     setCertName('')
     setCertDomains('')
+    setCertAccountId(accounts[0]?.id ?? '')
     setCertCredId(creds[0]?.id ?? '')
     setCertAutoRenew(true)
     setCertOpen(true)
@@ -173,7 +206,7 @@ export default function CertificatesView() {
       .split(/[\s,]+/)
       .map(s => s.trim())
       .filter(Boolean)
-    if (!certName.trim() || domains.length === 0 || certCredId === '') {
+    if (!certName.trim() || domains.length === 0 || certAccountId === '' || certCredId === '') {
       pushSnack(t('admin:certs.validation_required'), 'error')
       return
     }
@@ -182,6 +215,7 @@ export default function CertificatesView() {
       await createCert({
         name: certName.trim(),
         domains,
+        acme_account_id: Number(certAccountId),
         dns_credential_id: Number(certCredId),
         auto_renew: certAutoRenew,
       })
@@ -192,6 +226,74 @@ export default function CertificatesView() {
       /* toast */
     } finally {
       setCertBusy(false)
+    }
+  }
+
+  // ---- ACME account dialog ----
+  const [acctOpen, setAcctOpen] = useState(false)
+  const [acctEditing, setAcctEditing] = useState<ACMEAccount | null>(null)
+  const [acctName, setAcctName] = useState('')
+  const [acctEmail, setAcctEmail] = useState('')
+  const [acctDir, setAcctDir] = useState(LE_PROD)
+  const [acctKeyType, setAcctKeyType] = useState('EC256')
+  const [acctEABKid, setAcctEABKid] = useState('')
+  const [acctEABHmac, setAcctEABHmac] = useState('')
+  const [acctBusy, setAcctBusy] = useState(false)
+
+  function openAcct(a?: ACMEAccount) {
+    if (a) {
+      setAcctEditing(a)
+      setAcctName(a.name); setAcctEmail(a.email); setAcctDir(a.directory)
+      setAcctKeyType(a.key_type || 'EC256'); setAcctEABKid(a.eab_key_id); setAcctEABHmac('')
+    } else {
+      setAcctEditing(null)
+      // Prefill from the legacy global ACME settings on first account (saves
+      // re-typing what the admin already configured before multi-account).
+      setAcctName('')
+      setAcctEmail(accounts.length === 0 ? (settings?.acme_email || '') : '')
+      setAcctDir(accounts.length === 0 ? (settings?.acme_directory_url || LE_PROD) : LE_PROD)
+      setAcctKeyType('EC256'); setAcctEABKid(''); setAcctEABHmac('')
+    }
+    setAcctOpen(true)
+  }
+
+  async function submitAcct() {
+    if (!acctEmail.trim() || !acctDir.trim()) {
+      pushSnack(t('admin:certs.validation_required'), 'error')
+      return
+    }
+    setAcctBusy(true)
+    try {
+      const req = {
+        name: acctName.trim(), email: acctEmail.trim(), directory: acctDir.trim(),
+        eab_key_id: acctEABKid.trim(), eab_hmac: acctEABHmac, key_type: acctKeyType,
+      }
+      if (acctEditing) await updateACMEAccount(acctEditing.id, req)
+      else await createACMEAccount(req)
+      pushSnack(t('common:saved', { defaultValue: '已保存' }), 'success')
+      setAcctOpen(false)
+      reload()
+    } catch {
+      /* toast */
+    } finally {
+      setAcctBusy(false)
+    }
+  }
+
+  async function onDeleteAcct(a: ACMEAccount) {
+    const ok = await confirm({
+      title: t('admin:certs.acct_delete_title', { defaultValue: '删除 ACME 账号' }),
+      message: t('admin:certs.acct_delete_msg', { name: a.name || a.email, defaultValue: '确定删除「{{name}}」？仍在使用它的证书需先改用其他账号。' }),
+      destructive: true,
+      confirmText: t('common:actions.delete'),
+    })
+    if (!ok) return
+    try {
+      await deleteACMEAccount(a.id)
+      pushSnack(t('common:actions.deleted', { defaultValue: '已删除' }), 'success')
+      reload()
+    } catch {
+      /* toast */
     }
   }
 
@@ -491,7 +593,7 @@ export default function CertificatesView() {
                           <Chip
                             label={t(`admin:certs.status.${c.status}`, { defaultValue: c.status })}
                             size="small"
-                            sx={{ bgcolor: statusColor(md, c.status), color: md.surface ?? '#fff', height: 22 }}
+                            sx={{ bgcolor: statusColor(md, c.status), color: md.surface ?? '#fff', height: 22, cursor: 'default', '&:hover': { bgcolor: statusColor(md, c.status) } }}
                           />
                         </Tooltip>
                       </TableCell>
@@ -582,64 +684,101 @@ export default function CertificatesView() {
         </Card>
       )}
 
-      {/* ---- Tab 2: ACME settings ---- */}
+      {/* ---- Tab 2: ACME accounts ---- */}
       {tab === 2 && (
-        <Card sx={{ p: 3, maxWidth: 720, bgcolor: md.surfaceContainerLow, border: `1px solid ${md.outlineVariant}` }}>
-          <Typography sx={{ fontSize: 18, fontWeight: 600, mb: 0.5 }}>{t('admin:certs.acme_title')}</Typography>
-          <Typography sx={{ fontSize: 13, color: md.onSurfaceVariant, mb: 2 }}>{t('admin:certs.acme_subtitle')}</Typography>
-          {!settings ? (
-            <CircularProgress size={22} />
-          ) : (
-            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-              <TextField
-                label={t('admin:certs.acme_email')}
-                value={settings.acme_email || ''}
-                onChange={e => patchSettings('acme_email', e.target.value)}
-                size="small"
-                placeholder="you@example.com"
-                helperText={t('admin:certs.acme_email_hint')}
-              />
-              <TextField
-                label={t('admin:certs.acme_directory')}
-                value={settings.acme_directory_url || ''}
-                onChange={e => patchSettings('acme_directory_url', e.target.value)}
-                size="small"
-                helperText={t('admin:certs.acme_directory_hint')}
-              />
-              <Box sx={{ display: 'flex', gap: 1, mt: -1 }}>
-                <Button size="small" variant={settings.acme_directory_url === LE_PROD ? 'contained' : 'outlined'} onClick={() => patchSettings('acme_directory_url', LE_PROD)}>
-                  {t('admin:certs.acme_le_prod')}
-                </Button>
-                <Button size="small" variant={settings.acme_directory_url === LE_STAGING ? 'contained' : 'outlined'} onClick={() => patchSettings('acme_directory_url', LE_STAGING)}>
-                  {t('admin:certs.acme_le_staging')}
-                </Button>
-              </Box>
-              <Box sx={{ display: 'flex', gap: 2 }}>
-                <TextField
-                  label={t('admin:certs.acme_renew_before_days')}
-                  type="number"
-                  value={settings.cert_renew_before_days}
-                  onChange={e => patchSettings('cert_renew_before_days', Number(e.target.value))}
-                  size="small"
-                  sx={{ flex: 1 }}
-                />
-                <TextField
-                  label={t('admin:certs.acme_renew_check_hours')}
-                  type="number"
-                  value={settings.cert_renew_check_interval_hours}
-                  onChange={e => patchSettings('cert_renew_check_interval_hours', Number(e.target.value))}
-                  size="small"
-                  sx={{ flex: 1 }}
-                />
-              </Box>
+        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+          {/* ACME CA accounts — a certificate issues under the account it selects */}
+          <Card sx={{ bgcolor: md.surfaceContainerLow, boxShadow: '0 1px 2px rgba(0,0,0,.3),0 1px 3px 1px rgba(0,0,0,.15)', overflow: 'hidden' }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', p: 2 }}>
               <Box>
-                <Button variant="contained" onClick={saveACME} disabled={acmeBusy}>
-                  {acmeBusy ? <CircularProgress size={20} /> : t('common:actions.save')}
-                </Button>
+                <Typography sx={{ fontWeight: 600 }}>{t('admin:certs.acct_title', { defaultValue: 'ACME 账号' })}</Typography>
+                <Typography sx={{ fontSize: 13, color: md.onSurfaceVariant }}>{t('admin:certs.acct_subtitle', { defaultValue: '管理多个 CA 账号（不同 CA / 联系邮箱 / EAB 凭据），证书签发时各自选用。' })}</Typography>
               </Box>
+              <Button variant="contained" size="small" startIcon={<AddIcon />} onClick={() => openAcct()}>
+                {t('admin:certs.acct_new', { defaultValue: '新建账号' })}
+              </Button>
             </Box>
-          )}
-        </Card>
+            <TableContainer>
+              <Table>
+                <TableHead>
+                  <TableRow sx={{ '& th': { color: md.onSurfaceVariant, fontWeight: 500, fontSize: 12, textTransform: 'uppercase', letterSpacing: '.5px', borderBottom: `1px solid ${md.outlineVariant}` } }}>
+                    <TableCell>{t('admin:certs.col_name')}</TableCell>
+                    <TableCell>{t('admin:certs.acct_email', { defaultValue: '邮箱' })}</TableCell>
+                    <TableCell>{t('admin:certs.acct_ca', { defaultValue: 'CA' })}</TableCell>
+                    <TableCell>{t('admin:certs.acct_key_type', { defaultValue: '密钥类型' })}</TableCell>
+                    <TableCell align="right">{t('admin:certs.col_actions')}</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {accounts.map(a => (
+                    <TableRow key={a.id} hover>
+                      <TableCell>{a.name || '—'}</TableCell>
+                      <TableCell sx={{ fontFamily: 'monospace', fontSize: 12 }}>{a.email}</TableCell>
+                      <TableCell>
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, flexWrap: 'wrap' }}>
+                          {caLabel(a.directory)}
+                          {a.eab_key_id && <Chip label="EAB" size="small" variant="outlined" sx={{ height: 20, fontSize: 10 }} />}
+                          {!a.registered && <Chip label={t('admin:certs.acct_unregistered', { defaultValue: '未注册' })} size="small" variant="outlined" sx={{ height: 20, fontSize: 10, color: md.onSurfaceVariant }} />}
+                        </Box>
+                      </TableCell>
+                      <TableCell sx={{ fontFamily: 'monospace', fontSize: 12 }}>{a.key_type || 'EC256'}</TableCell>
+                      <TableCell align="right">
+                        <Tooltip title={t('common:actions.edit')}>
+                          <IconButton size="small" onClick={() => openAcct(a)}><EditIcon fontSize="small" /></IconButton>
+                        </Tooltip>
+                        <Tooltip title={t('common:actions.delete')}>
+                          <IconButton size="small" onClick={() => onDeleteAcct(a)}><DeleteIcon fontSize="small" /></IconButton>
+                        </Tooltip>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                  {accounts.length === 0 && (
+                    <TableRow>
+                      <TableCell colSpan={5} align="center" sx={{ color: md.onSurfaceVariant }}>
+                        {t('admin:certs.acct_empty', { defaultValue: '还没有 ACME 账号。新建一个后才能签发证书。' })}
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </TableBody>
+              </Table>
+            </TableContainer>
+          </Card>
+
+          {/* Renewal cadence — panel-wide (not per-account) */}
+          <Card sx={{ p: 3, maxWidth: 720, bgcolor: md.surfaceContainerLow, border: `1px solid ${md.outlineVariant}` }}>
+            <Typography sx={{ fontSize: 18, fontWeight: 600, mb: 0.5 }}>{t('admin:certs.renew_title', { defaultValue: '续期' })}</Typography>
+            <Typography sx={{ fontSize: 13, color: md.onSurfaceVariant, mb: 2 }}>{t('admin:certs.renew_subtitle', { defaultValue: '自动续期的阈值与检查频率（对所有证书生效）。' })}</Typography>
+            {!settings ? (
+              <CircularProgress size={22} />
+            ) : (
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                <Box sx={{ display: 'flex', gap: 2 }}>
+                  <TextField
+                    label={t('admin:certs.acme_renew_before_days')}
+                    type="number"
+                    value={settings.cert_renew_before_days}
+                    onChange={e => patchSettings('cert_renew_before_days', Number(e.target.value))}
+                    size="small"
+                    sx={{ flex: 1 }}
+                  />
+                  <TextField
+                    label={t('admin:certs.acme_renew_check_hours')}
+                    type="number"
+                    value={settings.cert_renew_check_interval_hours}
+                    onChange={e => patchSettings('cert_renew_check_interval_hours', Number(e.target.value))}
+                    size="small"
+                    sx={{ flex: 1 }}
+                  />
+                </Box>
+                <Box>
+                  <Button variant="contained" onClick={saveACME} disabled={acmeBusy}>
+                    {acmeBusy ? <CircularProgress size={20} /> : t('common:actions.save')}
+                  </Button>
+                </Box>
+              </Box>
+            )}
+          </Card>
+        </Box>
       )}
 
       {/* cert detail dialog */}
@@ -654,7 +793,7 @@ export default function CertificatesView() {
                 <Chip
                   label={t(`admin:certs.status.${detailCert.status}`, { defaultValue: detailCert.status })}
                   size="small"
-                  sx={{ bgcolor: statusColor(md, detailCert.status), color: md.surface ?? '#fff', height: 22 }}
+                  sx={{ bgcolor: statusColor(md, detailCert.status), color: md.surface ?? '#fff', height: 22, cursor: 'default', '&:hover': { bgcolor: statusColor(md, detailCert.status) } }}
                 />
               </DetailRow>
               <DetailRow md={md} label={t('admin:certs.col_domains')}>
@@ -753,6 +892,16 @@ export default function CertificatesView() {
             helperText={t('admin:certs.domains_help')}
           />
           <FormControl size="small">
+            <InputLabel>{t('admin:certs.acct_title', { defaultValue: 'ACME 账号' })}</InputLabel>
+            <Select label={t('admin:certs.acct_title', { defaultValue: 'ACME 账号' })} value={certAccountId} onChange={e => setCertAccountId(e.target.value as number)}>
+              {accounts.map(a => (
+                <MenuItem key={a.id} value={a.id}>
+                  {a.name || a.email} — {caLabel(a.directory)}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+          <FormControl size="small">
             <InputLabel>{t('admin:certs.cred_title')}</InputLabel>
             <Select label={t('admin:certs.cred_title')} value={certCredId} onChange={e => setCertCredId(e.target.value as number)}>
               {creds.map(c => (
@@ -762,13 +911,59 @@ export default function CertificatesView() {
               ))}
             </Select>
           </FormControl>
-          <FormControlLabel control={<Switch checked={certAutoRenew} onChange={e => setCertAutoRenew(e.target.checked)} />} label={t('admin:certs.auto_renew')} />
+          <FormControlLabel control={<Switch checked={certAutoRenew} onChange={e => setCertAutoRenew(e.target.checked)} />}
+            label={t('admin:certs.auto_renew')}
+            sx={{ ml: 0, '& .MuiFormControlLabel-label': { ml: 1 } }} />
           </Box>
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setCertOpen(false)}>{t('common:actions.cancel')}</Button>
           <Button variant="contained" onClick={submitCert} disabled={certBusy}>
             {certBusy ? <CircularProgress size={20} /> : t('common:actions.create')}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* create/edit ACME account dialog */}
+      <Dialog open={acctOpen} onClose={() => setAcctOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>{acctEditing ? t('admin:certs.acct_edit', { defaultValue: '编辑 ACME 账号' }) : t('admin:certs.acct_new', { defaultValue: '新建账号' })}</DialogTitle>
+        <DialogContent>
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5, pt: 1 }}>
+            <TextField label={t('admin:certs.col_name')} value={acctName} onChange={e => setAcctName(e.target.value)} size="small" autoFocus
+              placeholder={t('admin:certs.acct_name_ph', { defaultValue: "例如：Let's Encrypt — ops@team.com" })} />
+            <TextField label={t('admin:certs.acct_email', { defaultValue: '邮箱' })} value={acctEmail} onChange={e => setAcctEmail(e.target.value)} size="small"
+              placeholder="you@example.com" helperText={t('admin:certs.acme_email_hint')} />
+            <TextField label={t('admin:certs.acct_directory', { defaultValue: 'CA Directory URL' })} value={acctDir} onChange={e => setAcctDir(e.target.value)} size="small"
+              helperText={t('admin:certs.acme_directory_hint')} />
+            <Box sx={{ display: 'flex', gap: 1, mt: -1, flexWrap: 'wrap' }}>
+              {CA_PRESETS.map(p => (
+                <Button key={p.url} size="small" variant={acctDir === p.url ? 'contained' : 'outlined'} onClick={() => setAcctDir(p.url)}>
+                  {p.label}
+                </Button>
+              ))}
+            </Box>
+            <FormControl size="small">
+              <InputLabel>{t('admin:certs.acct_key_type', { defaultValue: '密钥类型' })}</InputLabel>
+              <Select label={t('admin:certs.acct_key_type', { defaultValue: '密钥类型' })} value={acctKeyType} onChange={e => setAcctKeyType(e.target.value)}>
+                {(keyTypes.length ? keyTypes : ['EC256', 'EC384', 'RSA2048', 'RSA4096']).map(k => (
+                  <MenuItem key={k} value={k}>{k}</MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+            <Divider sx={{ borderColor: md.outlineVariant }} />
+            <Typography sx={{ fontSize: 13, color: md.onSurfaceVariant }}>
+              {t('admin:certs.acct_eab_hint', { defaultValue: '外部账号绑定（EAB）—— ZeroSSL、Google Public CA 等需要；Let\'s Encrypt 留空即可。' })}
+            </Typography>
+            <TextField label={t('admin:certs.acct_eab_kid', { defaultValue: 'EAB Key ID' })} value={acctEABKid} onChange={e => setAcctEABKid(e.target.value)} size="small" />
+            <TextField label={t('admin:certs.acct_eab_hmac', { defaultValue: 'EAB HMAC Key' })} value={acctEABHmac} onChange={e => setAcctEABHmac(e.target.value)} size="small"
+              type="password" autoComplete="new-password"
+              placeholder={acctEditing?.has_eab_hmac ? t('admin:certs.secret_keep', { defaultValue: '已设置 — 留空保持不变' }) : ''} />
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setAcctOpen(false)}>{t('common:actions.cancel')}</Button>
+          <Button variant="contained" onClick={submitAcct} disabled={acctBusy}>
+            {acctBusy ? <CircularProgress size={20} /> : t('common:actions.save')}
           </Button>
         </DialogActions>
       </Dialog>

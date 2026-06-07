@@ -1,5 +1,7 @@
+import { startAuthentication } from '@simplewebauthn/browser'
 import type {
   PublicKeyCredentialCreationOptionsJSON,
+  PublicKeyCredentialRequestOptionsJSON,
   RegistrationResponseJSON,
 } from '@simplewebauthn/browser'
 
@@ -197,6 +199,38 @@ export async function regenerate2FARecovery(code: string) {
   const { data } = await client.post<{ recovery_codes: string[] }>(
     '/user/me/2fa/recovery/regenerate',
     { code },
+    { _skipErrorToast: true },
+  )
+  return data.recovery_codes
+}
+
+// ---- Passkey step-up: authorize a 2FA-management action with a passkey assertion
+// (for users who hold a passkey but not their TOTP / recovery code) ----
+
+async function stepUpBegin(): Promise<{ session_id: string; publicKey: PublicKeyCredentialRequestOptionsJSON }> {
+  const { data } = await client.post('/user/me/2fa/stepup/passkey/begin', {}, { _skipErrorToast: true })
+  return data
+}
+
+// disableTOTPWithPasskey turns TOTP off, proven by a passkey assertion.
+export async function disableTOTPWithPasskey(): Promise<void> {
+  const { session_id, publicKey } = await stepUpBegin()
+  const assertion = await startAuthentication({ optionsJSON: publicKey })
+  await client.post(
+    `/user/me/2fa/stepup/passkey/finish?session=${encodeURIComponent(session_id)}&action=disable`,
+    assertion,
+    { _skipErrorToast: true },
+  )
+}
+
+// regenerateRecoveryWithPasskey rotates recovery codes, proven by a passkey
+// assertion, and returns the fresh set to show ONCE.
+export async function regenerateRecoveryWithPasskey(): Promise<string[]> {
+  const { session_id, publicKey } = await stepUpBegin()
+  const assertion = await startAuthentication({ optionsJSON: publicKey })
+  const { data } = await client.post<{ recovery_codes: string[] }>(
+    `/user/me/2fa/stepup/passkey/finish?session=${encodeURIComponent(session_id)}&action=recovery`,
+    assertion,
     { _skipErrorToast: true },
   )
   return data.recovery_codes

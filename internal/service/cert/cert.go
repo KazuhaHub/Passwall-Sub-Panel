@@ -59,9 +59,6 @@ type Service struct {
 	alerter  AdminAlerter
 	events   ports.CertEventRepo // optional cert activity log
 
-	directoryURL string // default ACME directory (LE prod/staging)
-	email        string // ACME account contact
-
 	mu              sync.RWMutex
 	renewBeforeDays int // renewal threshold N (admin-configurable; the worker refreshes it)
 }
@@ -74,13 +71,12 @@ func New(
 	nodes ports.NodeRepo,
 	tasks ports.SyncTaskRepo,
 	pusher NodeConfigPusher,
-	directoryURL, email string,
 	renewBeforeDays int,
 ) *Service {
 	return &Service{
 		certs: certs, dns: dns, accounts: accounts, issuer: issuer,
 		nodes: nodes, tasks: tasks, pusher: pusher,
-		directoryURL: directoryURL, email: email, renewBeforeDays: renewBeforeDays,
+		renewBeforeDays: renewBeforeDays,
 	}
 }
 
@@ -160,14 +156,131 @@ func (s *Service) GetCert(ctx context.Context, id int64) (*domain.TLSCertificate
 	return s.certs.GetByID(ctx, id)
 }
 
-// CreateCert persists a pending certificate and enqueues its first issuance.
+// CreateCert persists a pending certificate and enqueues its first issuance. An
+// ACME account is required (multi-account: the cert issues under the chosen CA
+// account) and must exist before we enqueue an issuance that would just fail.
 func (s *Service) CreateCert(ctx context.Context, c *domain.TLSCertificate) error {
+	if c.ACMEAccountID == 0 {
+		return fmt.Errorf("%w: an ACME account is required", domain.ErrValidation)
+	}
+	if _, err := s.accounts.GetByID(ctx, c.ACMEAccountID); err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			return fmt.Errorf("%w: acme account not found", domain.ErrValidation)
+		}
+		return err
+	}
 	c.Status = domain.CertStatusPending
 	c.CertPEM, c.KeyPEM, c.Fingerprint, c.LastError = "", "", "", ""
 	if err := s.certs.Create(ctx, c); err != nil {
 		return err
 	}
 	return s.enqueueCertTask(ctx, domain.SyncTaskCertIssue, c.ID, "issue certificate "+c.Name)
+}
+
+// ---- ACME account CRUD ----
+
+func (s *Service) ListACMEAccounts(ctx context.Context) ([]*domain.ACMEAccount, error) {
+	return s.accounts.List(ctx)
+}
+
+func (s *Service) GetACMEAccount(ctx context.Context, id int64) (*domain.ACMEAccount, error) {
+	return s.accounts.GetByID(ctx, id)
+}
+
+func (s *Service) CreateACMEAccount(ctx context.Context, a *domain.ACMEAccount) error {
+	if err := validateACMEAccount(a); err != nil {
+		return err
+	}
+	dup, err := s.acmeAccountByIdentity(ctx, a.Email, a.Directory)
+	if err != nil {
+		return err
+	}
+	if dup != nil {
+		return fmt.Errorf("%w: an ACME account for this email + directory already exists", domain.ErrAlreadyExists)
+	}
+	return s.accounts.Create(ctx, a)
+}
+
+// UpdateACMEAccount saves config edits. The EAB HMAC is write-only (blank = keep
+// the stored secret, like DNS creds / SMTP password). If the registered identity
+// (email / directory / EAB) changes, the stored account key + registration no
+// longer match the CA account, so they're cleared to force a fresh registration.
+func (s *Service) UpdateACMEAccount(ctx context.Context, a *domain.ACMEAccount) error {
+	existing, err := s.accounts.GetByID(ctx, a.ID)
+	if err != nil {
+		return err
+	}
+	if a.EABHMACKey == "" {
+		a.EABHMACKey = existing.EABHMACKey // keep stored secret on a blank re-save
+	}
+	// Validate AFTER the merge so a blank-HMAC re-save of an existing EAB account
+	// (the admin didn't re-enter the masked secret) doesn't fail the all-or-nothing check.
+	if err := validateACMEAccount(a); err != nil {
+		return err
+	}
+	if dup, derr := s.acmeAccountByIdentity(ctx, a.Email, a.Directory); derr != nil {
+		return derr
+	} else if dup != nil && dup.ID != a.ID {
+		return fmt.Errorf("%w: another ACME account for this email + directory already exists", domain.ErrAlreadyExists)
+	}
+	if err := s.accounts.Update(ctx, a); err != nil {
+		return err
+	}
+	if existing.Email != a.Email || existing.Directory != a.Directory ||
+		existing.EABKeyID != a.EABKeyID || existing.EABHMACKey != a.EABHMACKey {
+		if err := s.accounts.ClearRegistration(ctx, a.ID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// DeleteACMEAccount refuses while any certificate still issues under it — a
+// dangling acme_account_id would leave that cert unrenewable. Mirrors the
+// DeleteCert / xui_panel delete guards.
+func (s *Service) DeleteACMEAccount(ctx context.Context, id int64) error {
+	certs, err := s.certs.List(ctx)
+	if err != nil {
+		return err
+	}
+	bound := 0
+	for _, c := range certs {
+		if c.ACMEAccountID == id {
+			bound++
+		}
+	}
+	if bound > 0 {
+		return fmt.Errorf("%w: ACME account still used by %d certificate(s); change their account first", domain.ErrValidation, bound)
+	}
+	return s.accounts.Delete(ctx, id)
+}
+
+// acmeAccountByIdentity returns the account matching (email, directory), or nil.
+func (s *Service) acmeAccountByIdentity(ctx context.Context, email, directory string) (*domain.ACMEAccount, error) {
+	all, err := s.accounts.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, a := range all {
+		if a.Email == email && a.Directory == directory {
+			return a, nil
+		}
+	}
+	return nil, nil
+}
+
+func validateACMEAccount(a *domain.ACMEAccount) error {
+	if strings.TrimSpace(a.Email) == "" || strings.TrimSpace(a.Directory) == "" {
+		return fmt.Errorf("%w: ACME account email and directory URL are required", domain.ErrValidation)
+	}
+	if !strings.HasPrefix(a.Directory, "http://") && !strings.HasPrefix(a.Directory, "https://") {
+		return fmt.Errorf("%w: directory must be an http(s) URL", domain.ErrValidation)
+	}
+	// EAB is all-or-nothing: a kid without an HMAC (or vice-versa) can't register.
+	if (a.EABKeyID != "") != (a.EABHMACKey != "") {
+		return fmt.Errorf("%w: EAB requires both a Key ID and an HMAC key", domain.ErrValidation)
+	}
+	return nil
 }
 
 // DeleteCert refuses while any node still references the certificate — a
@@ -349,6 +462,13 @@ func (s *Service) shouldObtain(cert *domain.TLSCertificate, taskType domain.Sync
 }
 
 func (s *Service) buildACMERequest(ctx context.Context, cert *domain.TLSCertificate) (ports.ACMERequest, error) {
+	acct, err := s.accounts.GetByID(ctx, cert.ACMEAccountID)
+	if errors.Is(err, domain.ErrNotFound) {
+		return ports.ACMERequest{}, fmt.Errorf("%w: acme account %d not found", errPermanent, cert.ACMEAccountID)
+	}
+	if err != nil {
+		return ports.ACMERequest{}, err
+	}
 	cred, err := s.dns.GetByID(ctx, cert.DNSCredentialID)
 	if errors.Is(err, domain.ErrNotFound) {
 		return ports.ACMERequest{}, fmt.Errorf("%w: dns credential %d not found", errPermanent, cert.DNSCredentialID)
@@ -356,46 +476,28 @@ func (s *Service) buildACMERequest(ctx context.Context, cert *domain.TLSCertific
 	if err != nil {
 		return ports.ACMERequest{}, err
 	}
-	req := ports.ACMERequest{
-		Domains:        cert.Domains,
-		Email:          s.email,
-		DirectoryURL:   s.directoryURL,
-		DNSProvider:    cred.Provider,
-		DNSCredentials: cred.Credentials,
-	}
-	acct, err := s.accounts.GetByEmailDirectory(ctx, s.email, s.directoryURL)
-	if err != nil {
-		return ports.ACMERequest{}, err
-	}
-	if acct != nil {
-		req.AccountKeyPEM = acct.AccountKey
-		req.RegistrationJSON = acct.Registration
-	}
-	return req, nil
+	return ports.ACMERequest{
+		Domains:          cert.Domains,
+		Email:            acct.Email,
+		DirectoryURL:     acct.Directory,
+		EABKeyID:         acct.EABKeyID,
+		EABHMACKey:       acct.EABHMACKey,
+		KeyType:          acct.KeyType,
+		DNSProvider:      cred.Provider,
+		DNSCredentials:   cred.Credentials,
+		AccountKeyPEM:    acct.AccountKey,
+		RegistrationJSON: acct.Registration,
+	}, nil
 }
 
+// saveAccount writes the (possibly newly registered) account key + registration
+// back to the cert's selected ACME account, so the account is reused across
+// future issuances (staying under the CA's rate limits).
 func (s *Service) saveAccount(ctx context.Context, cert *domain.TLSCertificate, res ports.ACMEResult) error {
-	if res.AccountKeyPEM == "" {
+	if res.AccountKeyPEM == "" || cert.ACMEAccountID == 0 {
 		return nil
 	}
-	acct := &domain.ACMEAccount{
-		Email:        s.email,
-		Directory:    s.directoryURL,
-		AccountKey:   res.AccountKeyPEM,
-		Registration: res.RegistrationJSON,
-	}
-	existing, err := s.accounts.GetByEmailDirectory(ctx, s.email, s.directoryURL)
-	if err != nil {
-		return err
-	}
-	if existing != nil {
-		acct.ID = existing.ID
-	}
-	if err := s.accounts.Save(ctx, acct); err != nil {
-		return err
-	}
-	cert.ACMEAccountID = acct.ID
-	return nil
+	return s.accounts.UpdateRegistration(ctx, cert.ACMEAccountID, res.AccountKeyPEM, res.RegistrationJSON)
 }
 
 // markCertFailed flips status→failed + records LastError, WITHOUT clobbering the

@@ -630,12 +630,25 @@ type DNSCredentialRepo interface {
 	List(ctx context.Context) ([]*domain.DNSCredential, error)
 }
 
-// ACMEAccountRepo persists ACME accounts, keyed by (email, directory).
+// ACMEAccountRepo persists admin-managed ACME CA account profiles. (email,
+// directory) is unique — the same contact on the same CA is one ACME account.
 type ACMEAccountRepo interface {
-	// GetByEmailDirectory returns (nil, nil) when no account is registered for
-	// the pair — callers treat absence as "register on first obtain".
-	GetByEmailDirectory(ctx context.Context, email, directory string) (*domain.ACMEAccount, error)
-	Save(ctx context.Context, a *domain.ACMEAccount) error
+	Create(ctx context.Context, a *domain.ACMEAccount) error
+	// Update saves the admin-editable config (name/email/directory/EAB/keytype).
+	// It does NOT touch the lazily-filled AccountKey/Registration — the service
+	// clears those separately when the registered identity (email/directory/EAB)
+	// changes so the next issuance re-registers.
+	Update(ctx context.Context, a *domain.ACMEAccount) error
+	Delete(ctx context.Context, id int64) error
+	GetByID(ctx context.Context, id int64) (*domain.ACMEAccount, error)
+	List(ctx context.Context) ([]*domain.ACMEAccount, error)
+	// UpdateRegistration writes back the account key + registration after a
+	// successful first registration (the lazy machine fields), leaving config
+	// untouched. Used by the issuer write-back path.
+	UpdateRegistration(ctx context.Context, id int64, accountKeyPEM, registrationJSON string) error
+	// ClearRegistration drops the account key + registration so the next issuance
+	// re-registers — used when the admin changes the account's identity.
+	ClearRegistration(ctx context.Context, id int64) error
 }
 
 // CertEventRepo is the append-only cert issuance/renewal activity log surfaced
@@ -900,17 +913,20 @@ type UISettings struct {
 	// loop re-reads this each cycle, so changes take effect without a restart.
 	GeoIPUpdateIntervalHours int `json:"geo_ip_update_interval_hours"`
 
-	// cert --- PSP-managed ACME certificate automation (v3.6.4). ACMEEmail is
-	// the ACME account contact; ACMEDirectoryURL selects the CA (Let's Encrypt
-	// prod by default; switch to the staging directory for testing).
+	// cert --- PSP-managed ACME certificate automation (v3.6.4).
 	// CertRenewBeforeDays is the renewal threshold (hybrid: the renewal scan
 	// falls back to a lifetime fraction for short-lived certs). The renewal loop
 	// re-reads CertRenewCheckIntervalHours each cycle, so cadence changes take
 	// effect without a restart.
-	CertRenewBeforeDays         int    `json:"cert_renew_before_days"`
-	CertRenewCheckIntervalHours int    `json:"cert_renew_check_interval_hours"`
-	ACMEEmail                   string `json:"acme_email"`
-	ACMEDirectoryURL            string `json:"acme_directory_url"`
+	CertRenewBeforeDays         int `json:"cert_renew_before_days"`
+	CertRenewCheckIntervalHours int `json:"cert_renew_check_interval_hours"`
+	// ACMEEmail / ACMEDirectoryURL are LEGACY (v3.7.0): multi-account moved the
+	// ACME contact + CA directory onto per-account profiles (acme_accounts table).
+	// They're no longer used for issuance and are dropped from the settings UI;
+	// the stored value is kept only to PREFILL the first ACME-account form. The PUT
+	// path carries them over from the previous settings (no UI control writes them).
+	ACMEEmail        string `json:"acme_email"`
+	ACMEDirectoryURL string `json:"acme_directory_url"`
 
 	// AuthEventRetentionDays bounds how long the authentication-event log is
 	// kept — separate from AuditRetentionDays so logins can be retained on their

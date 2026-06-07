@@ -28,6 +28,7 @@ type certDTO struct {
 	Name            string     `json:"name"`
 	Domains         []string   `json:"domains"`
 	Status          string     `json:"status"`
+	ACMEAccountID   int64      `json:"acme_account_id"`
 	DNSCredentialID int64      `json:"dns_credential_id"`
 	NotBefore       *time.Time `json:"not_before"`
 	NotAfter        *time.Time `json:"not_after"`
@@ -46,7 +47,8 @@ func toCertDTO(c *domain.TLSCertificate) certDTO {
 	}
 	return certDTO{
 		ID: c.ID, Name: c.Name, Domains: c.Domains, Status: status,
-		DNSCredentialID: c.DNSCredentialID, NotBefore: c.NotBefore, NotAfter: c.NotAfter,
+		ACMEAccountID: c.ACMEAccountID, DNSCredentialID: c.DNSCredentialID,
+		NotBefore: c.NotBefore, NotAfter: c.NotAfter,
 		Fingerprint: c.Fingerprint, AutoRenew: c.AutoRenew, LastError: c.LastError, CreatedAt: c.CreatedAt,
 	}
 }
@@ -98,6 +100,7 @@ func (h *AdminCertHandler) Get(c *gin.Context) {
 type createCertRequest struct {
 	Name            string   `json:"name"`
 	Domains         []string `json:"domains"`
+	ACMEAccountID   int64    `json:"acme_account_id"`
 	DNSCredentialID int64    `json:"dns_credential_id"`
 	AutoRenew       bool     `json:"auto_renew"`
 }
@@ -110,7 +113,7 @@ func (h *AdminCertHandler) Create(c *gin.Context) {
 	}
 	cert := &domain.TLSCertificate{
 		Name: req.Name, Domains: req.Domains,
-		DNSCredentialID: req.DNSCredentialID, AutoRenew: req.AutoRenew,
+		ACMEAccountID: req.ACMEAccountID, DNSCredentialID: req.DNSCredentialID, AutoRenew: req.AutoRenew,
 	}
 	if err := h.cert.CreateCert(c.Request.Context(), cert); err != nil {
 		mapServerError(c, err)
@@ -282,6 +285,116 @@ func (h *AdminCertHandler) DeleteDNSCred(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
+// ---- ACME accounts ----
+
+// acmeAccountDTO never carries the account private key, registration JSON, or the
+// EAB HMAC secret — only whether an HMAC is set (has_eab_hmac), like other
+// write-only secrets. registered reflects whether the account has completed its
+// first registration with the CA.
+type acmeAccountDTO struct {
+	ID         int64     `json:"id"`
+	Name       string    `json:"name"`
+	Email      string    `json:"email"`
+	Directory  string    `json:"directory"`
+	EABKeyID   string    `json:"eab_key_id"`
+	HasEABHMAC bool      `json:"has_eab_hmac"`
+	KeyType    string    `json:"key_type"`
+	Registered bool      `json:"registered"`
+	CreatedAt  time.Time `json:"created_at"`
+}
+
+func toACMEAccountDTO(a *domain.ACMEAccount) acmeAccountDTO {
+	return acmeAccountDTO{
+		ID: a.ID, Name: a.Name, Email: a.Email, Directory: a.Directory,
+		EABKeyID: a.EABKeyID, HasEABHMAC: a.EABHMACKey != "", KeyType: a.KeyType,
+		Registered: a.AccountKey != "", CreatedAt: a.CreatedAt,
+	}
+}
+
+type acmeAccountRequest struct {
+	Name       string `json:"name"`
+	Email      string `json:"email"`
+	Directory  string `json:"directory"`
+	EABKeyID   string `json:"eab_key_id"`
+	EABHMACKey string `json:"eab_hmac"` // write-only; blank on edit = keep stored
+	KeyType    string `json:"key_type"`
+}
+
+func (h *AdminCertHandler) ListACMEAccounts(c *gin.Context) {
+	accts, err := h.cert.ListACMEAccounts(c.Request.Context())
+	if err != nil {
+		mapServerError(c, err)
+		return
+	}
+	out := make([]acmeAccountDTO, 0, len(accts))
+	for _, a := range accts {
+		out = append(out, toACMEAccountDTO(a))
+	}
+	c.JSON(http.StatusOK, gin.H{"accounts": out})
+}
+
+func (h *AdminCertHandler) CreateACMEAccount(c *gin.Context) {
+	var req acmeAccountRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	a := &domain.ACMEAccount{
+		Name: req.Name, Email: req.Email, Directory: req.Directory,
+		EABKeyID: req.EABKeyID, EABHMACKey: req.EABHMACKey, KeyType: req.KeyType,
+	}
+	if err := h.cert.CreateACMEAccount(c.Request.Context(), a); err != nil {
+		mapServerError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"account": toACMEAccountDTO(a)})
+}
+
+func (h *AdminCertHandler) UpdateACMEAccount(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	var req acmeAccountRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	a := &domain.ACMEAccount{
+		ID: id, Name: req.Name, Email: req.Email, Directory: req.Directory,
+		EABKeyID: req.EABKeyID, EABHMACKey: req.EABHMACKey, KeyType: req.KeyType,
+	}
+	if err := h.cert.UpdateACMEAccount(c.Request.Context(), a); err != nil {
+		mapServerError(c, err)
+		return
+	}
+	updated, err := h.cert.GetACMEAccount(c.Request.Context(), id)
+	if err != nil {
+		mapServerError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"account": toACMEAccountDTO(updated)})
+}
+
+func (h *AdminCertHandler) DeleteACMEAccount(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	if err := h.cert.DeleteACMEAccount(c.Request.Context(), id); err != nil {
+		mapServerError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
+// ListKeyTypes returns the certificate key-algorithm options for the account form.
+func (h *AdminCertHandler) ListKeyTypes(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{"key_types": domain.ACMEKeyTypes})
 }
 
 // ListProviders returns the curated DNS provider catalog — each provider's code,

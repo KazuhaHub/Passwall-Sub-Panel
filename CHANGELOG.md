@@ -4,6 +4,24 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## v3.7.0-beta.14 — 2026-06-07
+
+新增**多 ACME 账号支持**（合规向）+ **Passkey step-up 自助 2FA 管理** + 证书页 UI 小修。`go test ./...` / `go vet` / `tsc` / `npm build` / 二进制 / 启动 smoke 全绿；多 ACME 经**真机 LE-staging 端到端签发实测通过**。
+
+### Added
+
+- **多 ACME 账号** —— ACME 账号从「全局单份」升级为管理员可 CRUD 的一等实体（`acme_accounts` 表）：每账号含 名称 / 联系邮箱 / CA directory / 可选 **EAB（kid + HMAC）** / 证书密钥类型（EC256/EC384/RSA2048/RSA4096）；账号密钥 + EAB HMAC 均 AES-GCM 加密、永不回显。证书创建时**选用哪个 CA 账号签发**（与选 DNS 凭据并列）。lego 适配器支持 **EAB 注册**（`RegisterWithExternalAccountBinding`，ZeroSSL / Google Public CA 必需）与每账号密钥类型。`(email,directory)` 唯一；改账号身份（邮箱/目录/EAB）自动清注册以重新注册；账号被证书引用时拒绝删除。证书页「ACME settings」标签改为「**ACME 账号**」CRUD（CA 预设 LE / LE-staging / ZeroSSL / Google / 自定义），续期阈值/频率保留为独立「续期」卡。全局 ACME email/directory 从设置层移除（旧值仅用于首次建账号预填）。带 TDD（cert.Service 多账号/EAB+keytype 透传/缺账号=永久错误/改身份清注册/删账号守卫/重复拒绝；mysql repo CRUD 往返）。**真机实测**：Cloudflare DNS-01 + LE staging 端到端签发 `*.kazuha.org` 通过，账号注册回写正确。
+- **Passkey step-up 自助 2FA 管理** —— 持有通行密钥的用户可用一次 Passkey 断言授权敏感操作，不再需要 TOTP 验证器/备用码：**停用 TOTP**（验证器丢失也能删）、**重新生成备用码**（修复 beta.13 记录的「passkey-only 且备用码为空无法自助重生」缺口）。新端点 `/user/me/2fa/stepup/passkey/{begin,finish}`（按本用户凭据 allow-list 断言，用户 id 取自会话、绝不来自断言，走登录限流）；新增 `twofa.DisableProven`（无码停用，调用方已证明占有）。「两步验证」停用步与「备用码」对话框各加通行密钥按钮（仅在账号有 Passkey 时显示），原验证码路径保留。
+
+### Fixed
+
+- **证书页 UI** —— 状态 chip 鼠标悬停不再变深（`cursor:default` + 锁定 hover 背景色）；「Auto-renew」开关与标签间距按统一约定补齐。
+
+### 待真机验证
+
+- **EAB 实际签发**（ZeroSSL / Google Public CA）—— 接线 + 注册调用已编译并经请求装配单测覆盖；真注册需对应 CA 的 EAB 凭据。
+- **Passkey step-up 断言成功路径** —— WebAuthn 需浏览器；已 curl 验过接线/鉴权/错误路径（无 passkey→403、未知 action→400、坏 session→401、无 token→401）。
+
 ## v3.7.0-beta.13 — 2026-06-06
 
 修复**绑定通行密钥的账号用密码登录可直接进入**的鉴权漏洞，并把**备用码从 TOTP 解耦**——规则统一为「有任意第二因子（TOTP 或通行密钥）⇒ 拥有备用码 ⇒ 登录强制」。附 2FA 登录体验与安全排序调整。`go test ./...` / `go vet` / `tsc` / `npm build` / 二进制 / 启动 smoke 全绿。

@@ -16,7 +16,9 @@ import { QRCodeSVG } from 'qrcode.react'
 import { useTranslation } from 'react-i18next'
 import type { AxiosError } from 'axios'
 
-import { begin2FA, disable2FA, enable2FA, regenerate2FARecovery } from '@/api/me'
+import FingerprintIcon from '@mui/icons-material/Fingerprint'
+
+import { begin2FA, disable2FA, disableTOTPWithPasskey, enable2FA, regenerate2FARecovery } from '@/api/me'
 import type { M3Tokens } from '@/theme'
 import { pushSnack } from '@/components/SnackbarHost'
 import { copyToClipboard } from '@/utils/clipboard'
@@ -25,6 +27,9 @@ interface Props {
   open: boolean
   /** Whether 2FA is currently enabled on the account (drives enroll vs disable). */
   enabled: boolean
+  /** Whether the account has a passkey — enables disabling TOTP via a passkey
+   *  assertion (for users who lost their authenticator). */
+  hasPasskey: boolean
   md: M3Tokens
   onClose: () => void
   /** Called after a successful enable/disable so the parent can refresh profile. */
@@ -34,7 +39,7 @@ interface Props {
 // TwoFactorDialog drives the whole 2FA self-service flow in one modal:
 //   not enabled → intro → (begin) enroll(QR+code) → (enable) recovery codes → done
 //   enabled     → disable (requires a current code)
-export default function TwoFactorDialog({ open, enabled, md, onClose, onChanged }: Props) {
+export default function TwoFactorDialog({ open, enabled, hasPasskey, md, onClose, onChanged }: Props) {
   const { t } = useTranslation('user')
   type Step = 'intro' | 'enroll' | 'recovery' | 'disable' | 'regenerate'
   const [step, setStep] = useState<Step>(enabled ? 'disable' : 'intro')
@@ -119,6 +124,24 @@ export default function TwoFactorDialog({ open, enabled, md, onClose, onChanged 
     } catch (err) {
       setError(t('twofa.code_invalid'))
       setCode('')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  // Disable TOTP proven by a passkey assertion — for a user who has a passkey but
+  // no longer has their authenticator (or recovery codes) to type a code.
+  async function disableViaPasskey() {
+    setBusy(true)
+    setError('')
+    try {
+      await disableTOTPWithPasskey()
+      pushSnack(t('twofa.disabled_toast'), 'success')
+      onChanged()
+      onClose()
+    } catch (err) {
+      const name = (err as { name?: string })?.name
+      if (name !== 'NotAllowedError' && name !== 'AbortError') setError(inlineError(err))
     } finally {
       setBusy(false)
     }
@@ -275,6 +298,12 @@ export default function TwoFactorDialog({ open, enabled, md, onClose, onChanged 
               placeholder="123456"
               helperText={t('twofa.disable_code_hint')}
             />
+            {hasPasskey && (
+              <Button size="small" startIcon={<FingerprintIcon />} disabled={busy} sx={{ mt: 1 }}
+                onClick={disableViaPasskey}>
+                {t('twofa.disable_passkey', { defaultValue: '或用通行密钥停用' })}
+              </Button>
+            )}
             {error && <Alert severity="error" sx={{ mt: 2 }}>{error}</Alert>}
           </DialogContent>
           <DialogActions sx={{ justifyContent: 'space-between' }}>

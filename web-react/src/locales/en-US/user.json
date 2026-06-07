@@ -60,7 +60,9 @@
     "title": "Recovery codes",
     "intro": "When you can't use your authenticator or passkey, a one-time recovery code lets you sign in. Each code works only once.",
     "remaining": "{{count}} recovery codes left",
-    "none_left": "You have no recovery codes left — please regenerate a set."
+    "none_left": "You have no recovery codes left — please regenerate a set.",
+    "regen_passkey": "Regenerate with a passkey",
+    "regen_code": "Regenerate with a code"
   },
   "passkey": {
     "recovery_title": "Save your recovery codes",
@@ -109,6 +111,7 @@
     "enabled_toast": "Two-factor authentication enabled",
     "disable_hint": "Enter a current code or one of your recovery codes to turn off two-factor authentication.",
     "disable_code_hint": "An authenticator code or a recovery code both work.",
+    "disable_passkey": "Or turn off with a passkey",
     "disable": "Turn off 2FA",
     "disabled_toast": "Two-factor authentication disabled",
     "regenerate": "Regenerate recovery codes",

@@ -205,6 +205,18 @@ func TestDisable_RequiresValidCode(t *testing.T) {
 	}
 }
 
+func TestDisableProven_NoCode(t *testing.T) {
+	// Passkey step-up: the caller already proved possession, so disable takes no
+	// code and clears TOTP unconditionally (idempotent).
+	st := &memStore{user: &domain.User{ID: 1}, secret: "S", enabled: true}
+	if err := newSvc(st, true, "111111").DisableProven(context.Background(), 1); err != nil {
+		t.Fatal(err)
+	}
+	if !st.cleared {
+		t.Fatal("DisableProven must clear TOTP without a code")
+	}
+}
+
 func TestAdminReset_NoCode(t *testing.T) {
 	st := &memStore{user: &domain.User{ID: 1}, secret: "S", enabled: true}
 	if err := newSvc(st, true, "111111").AdminReset(context.Background(), 1); err != nil {

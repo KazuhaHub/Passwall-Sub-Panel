@@ -268,6 +268,10 @@ func NewRouter(d Deps) *gin.Engine {
 		// Recovery-code rotation is step-up gated (current code as proof) and
 		// rate-limited like other credential endpoints.
 		userGroup.POST("/2fa/recovery/regenerate", loginLimiter.Handler(), userMe.RegenerateRecovery2FA)
+		// Passkey step-up: authorize disable-TOTP / regenerate-recovery with a
+		// passkey assertion (for users who hold a passkey but not their TOTP code).
+		userGroup.POST("/2fa/stepup/passkey/begin", loginLimiter.Handler(), userMe.StepUpPasskeyBegin)
+		userGroup.POST("/2fa/stepup/passkey/finish", loginLimiter.Handler(), userMe.StepUpPasskeyFinish)
 		// Passkey (WebAuthn) self-service enrollment / management.
 		userGroup.GET("/passkeys", userMe.ListPasskeys)
 		userGroup.POST("/passkeys/begin", userMe.BeginPasskeyEnroll)
@@ -364,6 +368,12 @@ func NewRouter(d Deps) *gin.Engine {
 		adminGroup.PUT("/dns-credentials/:id", certs.UpdateDNSCred)
 		adminGroup.DELETE("/dns-credentials/:id", certs.DeleteDNSCred)
 		adminGroup.GET("/dns-providers", certs.ListProviders)
+		// ACME CA accounts (multi-account: certs select which CA account to issue under).
+		adminGroup.GET("/acme-accounts", certs.ListACMEAccounts)
+		adminGroup.POST("/acme-accounts", certs.CreateACMEAccount)
+		adminGroup.PUT("/acme-accounts/:id", certs.UpdateACMEAccount)
+		adminGroup.DELETE("/acme-accounts/:id", certs.DeleteACMEAccount)
+		adminGroup.GET("/acme-key-types", certs.ListKeyTypes)
 		adminGroup.PUT("/nodes/:id/cert-source", certs.SetNodeCertSource)
 
 		groups := handler.NewAdminGroupHandler(d.Group, d.User, d.Repos.User)

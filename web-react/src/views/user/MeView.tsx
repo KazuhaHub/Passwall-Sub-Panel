@@ -1249,6 +1249,7 @@ export default function MeView() {
       <TwoFactorDialog
         open={twoFAOpen}
         enabled={!!profile.totp_enabled}
+        hasPasskey={(profile.passkey_credentials?.length ?? 0) > 0}
         md={md}
         onClose={() => setTwoFAOpen(false)}
         onChanged={() => { void load() }}
@@ -1269,6 +1270,7 @@ export default function MeView() {
       <RecoveryCodesDialog
         open={recoveryOpen}
         remaining={profile.recovery_codes_remaining ?? 0}
+        hasPasskey={(profile.passkey_credentials?.length ?? 0) > 0}
         md={md}
         onClose={() => setRecoveryOpen(false)}
         onChanged={() => { void load() }}

@@ -271,7 +271,7 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	// inline cert into the node snapshot then enqueues a node-update push, so a
 	// deploy retry never re-issues (which would burn the ACME rate limit).
 	acmeIssuer := acme.NewIssuer()
-	certSvc := cert.New(repos.Certificate, repos.DNSCredential, repos.ACMEAccount, acmeIssuer, repos.Node, repos.SyncTask, nodeSvc, sysSettings.ACMEDirectoryURL, sysSettings.ACMEEmail, sysSettings.CertRenewBeforeDays)
+	certSvc := cert.New(repos.Certificate, repos.DNSCredential, repos.ACMEAccount, acmeIssuer, repos.Node, repos.SyncTask, nodeSvc, sysSettings.CertRenewBeforeDays)
 	// Late-bind the mailer so cert issuance/renewal failures email admins
 	// (deduped per cert/day), mirroring the dashboard cert-failure alert.
 	certSvc.SetAlerter(mailSvc)

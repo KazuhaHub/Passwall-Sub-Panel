@@ -170,6 +170,14 @@ func (s *Service) Disable(ctx context.Context, userID int64, code string) error 
 	return s.d.Users.ClearTOTP(ctx, userID)
 }
 
+// DisableProven turns TOTP off WITHOUT a code — the caller has already proven
+// possession by another means (a passkey step-up from the profile page, where the
+// account's passkey is a strong factor). Same effect as Disable's success path;
+// idempotent. NEVER expose this on an endpoint that lacks its own proof.
+func (s *Service) DisableProven(ctx context.Context, userID int64) error {
+	return s.d.Users.ClearTOTP(ctx, userID)
+}
+
 // VerifyLogin checks a code at login time (TOTP or a one-time recovery code,
 // which is consumed on success). Recovery codes are decoupled from TOTP: a
 // passkey-only account (no TOTP secret, TOTP disabled) can still redeem the

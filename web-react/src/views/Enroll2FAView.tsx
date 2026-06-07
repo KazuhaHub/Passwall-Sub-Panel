@@ -113,7 +113,7 @@ export default function Enroll2FAView() {
         </Card>
       </Box>
 
-      <TwoFactorDialog open={totpOpen} enabled={false} md={md}
+      <TwoFactorDialog open={totpOpen} enabled={false} hasPasskey={false} md={md}
         onClose={() => setTotpOpen(false)} onChanged={() => { setTotpOpen(false); void refresh() }} />
       <PasskeyDialog open={passkeyOpen} available={!!profile?.passkey_available}
         credentials={profile?.passkey_credentials ?? []} md={md}

@@ -27,6 +27,14 @@ type ACMERequest struct {
 	RegistrationJSON string            // empty => register the account (returned in the result)
 	DNSProvider      string            // lego provider code (e.g. "cloudflare", "alidns", "route53")
 	DNSCredentials   map[string]string // provider env vars (e.g. {"CF_DNS_API_TOKEN": "..."})
+	// External Account Binding — when EABKeyID is set AND the account isn't yet
+	// registered, registration uses RegisterWithExternalAccountBinding (required by
+	// ZeroSSL / Google Public CA). EABHMACKey is the base64url-encoded HMAC key.
+	EABKeyID   string
+	EABHMACKey string
+	// KeyType is the issued certificate's key algorithm ("EC256"/"EC384"/
+	// "RSA2048"/"RSA4096"); empty or unknown falls back to EC256.
+	KeyType string
 }
 
 // ACMEResult is the output of one ACME issuance. CertPEM/KeyPEM are handed to

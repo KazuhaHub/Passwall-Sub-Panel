@@ -6,6 +6,7 @@ export interface Cert {
   name: string
   domains: string[]
   status: string // pending | active | failed | renewing
+  acme_account_id: number
   dns_credential_id: number
   not_before: string | null
   not_after: string | null
@@ -18,8 +19,32 @@ export interface Cert {
 export interface CreateCertRequest {
   name: string
   domains: string[]
+  acme_account_id: number
   dns_credential_id: number
   auto_renew: boolean
+}
+
+// ACMEAccount mirrors the backend acmeAccountDTO — it NEVER carries the account
+// private key, registration JSON, or the EAB HMAC secret (only has_eab_hmac).
+export interface ACMEAccount {
+  id: number
+  name: string
+  email: string
+  directory: string
+  eab_key_id: string
+  has_eab_hmac: boolean
+  key_type: string
+  registered: boolean
+  created_at: string
+}
+
+export interface ACMEAccountRequest {
+  name: string
+  email: string
+  directory: string
+  eab_key_id: string
+  eab_hmac: string // write-only; blank on edit = keep the stored secret
+  key_type: string
 }
 
 // DNSCredential mirrors dnsCredDTO — only the credential KEY names come back,
@@ -154,6 +179,32 @@ export interface DNSProviderInfo {
 export async function listDNSProviders(): Promise<DNSProviderInfo[]> {
   const { data } = await client.get<{ providers: DNSProviderInfo[] }>('/admin/dns-providers')
   return data.providers
+}
+
+// ---- ACME accounts (multi-account: a cert issues under a chosen CA account) ----
+
+export async function listACMEAccounts(): Promise<ACMEAccount[]> {
+  const { data } = await client.get<{ accounts: ACMEAccount[] }>('/admin/acme-accounts')
+  return data.accounts
+}
+
+export async function createACMEAccount(req: ACMEAccountRequest): Promise<ACMEAccount> {
+  const { data } = await client.post<{ account: ACMEAccount }>('/admin/acme-accounts', req)
+  return data.account
+}
+
+export async function updateACMEAccount(id: number, req: ACMEAccountRequest): Promise<ACMEAccount> {
+  const { data } = await client.put<{ account: ACMEAccount }>(`/admin/acme-accounts/${id}`, req)
+  return data.account
+}
+
+export async function deleteACMEAccount(id: number): Promise<void> {
+  await client.delete(`/admin/acme-accounts/${id}`)
+}
+
+export async function listACMEKeyTypes(): Promise<string[]> {
+  const { data } = await client.get<{ key_types: string[] }>('/admin/acme-key-types')
+  return data.key_types
 }
 
 // PanelWebCert is the cert_source=from_panel result: the panel's own web TLS
