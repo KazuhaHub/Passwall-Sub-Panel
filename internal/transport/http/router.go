@@ -150,7 +150,16 @@ func NewRouter(d Deps) *gin.Engine {
 
 	// 2FA (TOTP) service — shared by the login challenge, the user self-service
 	// enrollment endpoints, and the admin break-glass reset.
-	twofaSvc := twofa.New(twofa.Deps{Users: d.Repos.User, Settings: d.Repos.Settings})
+	twofaSvc := twofa.New(twofa.Deps{
+		Users:    d.Repos.User,
+		Settings: d.Repos.Settings,
+		// So disabling TOTP keeps the recovery codes when a passkey remains as the
+		// account's second factor (see twofa.clearTOTPKeepingFactors).
+		PasskeyCount: func(ctx context.Context, userID int64) (int, error) {
+			creds, err := d.Repos.WebAuthn.FindByUserID(ctx, userID)
+			return len(creds), err
+		},
+	})
 
 	// Passkey (WebAuthn) service — shared by the usernameless login endpoints and
 	// the profile-page enrollment/management endpoints.

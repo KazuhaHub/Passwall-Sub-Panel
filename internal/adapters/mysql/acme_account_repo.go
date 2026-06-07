@@ -19,7 +19,7 @@ type acmeAccountRow struct {
 	ID           int64  `gorm:"primaryKey;autoIncrement"`
 	Name         string `gorm:"column:name;size:255;not null;default:''"`
 	Email        string `gorm:"column:email;size:255;not null;uniqueIndex:uk_acme_email_dir,priority:1"`
-	Directory    string `gorm:"column:directory;size:512;not null;uniqueIndex:uk_acme_email_dir,priority:2"`
+	Directory    string `gorm:"column:directory;size:255;not null;uniqueIndex:uk_acme_email_dir,priority:2"`
 	EABKeyID     string `gorm:"column:eab_key_id;size:255;not null;default:''"`
 	EABHMACKey   string `gorm:"column:eab_hmac;type:text"`
 	KeyType      string `gorm:"column:key_type;size:32;not null;default:''"`

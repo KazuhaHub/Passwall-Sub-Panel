@@ -15,6 +15,7 @@
     "deleted": "Deleted"
   },
   "saved": "Saved",
+  "empty": "No data",
   "status": {
     "online": "Online",
     "offline": "Offline",

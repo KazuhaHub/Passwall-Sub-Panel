@@ -25,6 +25,29 @@ func TestPSPBehindStable(t *testing.T) {
 	}
 }
 
+func TestAcceptLatestPSPStable(t *testing.T) {
+	cases := []struct {
+		tag        string
+		prerelease bool
+		wantTag    string
+		wantOK     bool
+	}{
+		{"v3.7.0", false, "v3.7.0", true},
+		{"v3.7.0-beta.16", false, "", false}, // load-bearing: flag false but the tag is a beta
+		{"v3.7.0-beta.16", true, "", false},
+		{"v3.7.0", true, "", false}, // GitHub flagged it pre-release
+		{"", false, "", false},
+		{"garbage", false, "", false}, // not a parseable semver
+	}
+	for _, c := range cases {
+		gotTag, gotOK := acceptLatestPSPStable(c.tag, c.prerelease)
+		if gotTag != c.wantTag || gotOK != c.wantOK {
+			t.Errorf("acceptLatestPSPStable(%q, %v) = (%q, %v), want (%q, %v)",
+				c.tag, c.prerelease, gotTag, gotOK, c.wantTag, c.wantOK)
+		}
+	}
+}
+
 func TestIsPrerelease(t *testing.T) {
 	for _, c := range []struct {
 		v    string

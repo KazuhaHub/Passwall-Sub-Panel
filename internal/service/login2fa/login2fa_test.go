@@ -100,6 +100,43 @@ func TestSendCode_StoresHashAndSends(t *testing.T) {
 	}
 }
 
+func TestSendCode_ResendCooldown(t *testing.T) {
+	tok, sender := &stubTokens{}, &stubSender{}
+	now := time.Date(2026, 6, 7, 12, 0, 0, 0, time.UTC)
+	cur := now
+	svc := New(Deps{
+		Tokens:   tok,
+		Mail:     sender,
+		Settings: stubSettings{allowEmail: true},
+		NewCode:  func() (string, error) { return "424242", nil },
+		Dispatch: func(f func()) { f() },
+		Now:      func() time.Time { return cur },
+	})
+	u := &domain.User{ID: 7, Email: "a@b.c", UPN: "u@x"}
+	if err := svc.SendCode(context.Background(), u); err != nil {
+		t.Fatal(err)
+	}
+	if !sender.sent {
+		t.Fatal("first send must go out")
+	}
+	// A re-send within the cooldown window must be suppressed (no new token/email).
+	sender.sent, tok.created = false, nil
+	if err := svc.SendCode(context.Background(), u); err != nil {
+		t.Fatal(err)
+	}
+	if sender.sent || tok.created != nil {
+		t.Fatal("a re-send within the cooldown must be suppressed")
+	}
+	// Once the cooldown elapses, a fresh send is allowed again.
+	cur = now.Add(2 * time.Minute)
+	if err := svc.SendCode(context.Background(), u); err != nil {
+		t.Fatal(err)
+	}
+	if !sender.sent || tok.created == nil {
+		t.Fatal("a re-send after the cooldown must go out")
+	}
+}
+
 func TestVerifyCode(t *testing.T) {
 	tok, sender := &stubTokens{}, &stubSender{}
 	svc := newSvc(tok, sender, true)

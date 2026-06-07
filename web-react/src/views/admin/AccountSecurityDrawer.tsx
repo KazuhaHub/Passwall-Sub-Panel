@@ -29,6 +29,7 @@ import type { User } from '@/api/types'
 import type { M3Tokens } from '@/theme'
 import { confirm } from '@/components/ConfirmHost'
 import { pushSnack } from '@/components/SnackbarHost'
+import { copyToClipboard } from '@/utils/clipboard'
 
 interface Props {
   open: boolean
@@ -98,10 +99,10 @@ export default function AccountSecurityDrawer({
   }
 
   async function copy(text: string) {
-    try {
-      await navigator.clipboard.writeText(text)
-      pushSnack(t('users.toast.copied'), 'success')
-    } catch { /* ignore */ }
+    // copyToClipboard handles the HTTP / non-secure-context fallback and toasts
+    // on success AND failure — the freshly regenerated recovery codes are shown
+    // only once, so a silent copy failure here would be costly.
+    await copyToClipboard(text)
   }
 
   async function doRegenRecovery() {

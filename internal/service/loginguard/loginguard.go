@@ -13,6 +13,7 @@ import (
 	"math"
 	"time"
 
+	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 )
 
@@ -117,5 +118,41 @@ func (g *Guard) Evaluate(ctx context.Context, s ports.UISettings, ip, upn string
 		}
 	}
 
+	return d, nil
+}
+
+// Evaluate2FA decides whether a user's second-factor verification is currently
+// locked out. Unlike Evaluate (which is IP-scoped and pre-password), this counts
+// failures PER ACCOUNT across all source IPs — the 2FA threat is a distributed
+// attacker who already has the password grinding TOTP codes, which the per-IP
+// login limiter and IP-scoped lockout can't stop. It reuses the same lockout
+// thresholds as the password path (threshold / window / duration), so enabling
+// account lockout covers the 2FA step too; with lockout off it's inert. Only the
+// genuine AuthReason2FAInvalid failures are counted (not the guard's own
+// 2fa_locked_out rejections), so the window can't slide forward forever.
+func (g *Guard) Evaluate2FA(ctx context.Context, s ports.UISettings, userID int64) (Decision, error) {
+	var d Decision
+	if !s.LockoutEnabled || s.LockoutThreshold <= 0 {
+		return d, nil
+	}
+	windowMin := s.LockoutWindowMinutes
+	if s.LockoutDurationMinutes > windowMin {
+		windowMin = s.LockoutDurationMinutes
+	}
+	if windowMin <= 0 {
+		return d, nil
+	}
+	since := g.now().Add(-minutesToDuration(windowMin))
+	count, lastAt, err := g.events.RecentUserFailures(ctx, userID, domain.AuthReason2FAInvalid, since)
+	if err != nil {
+		return Decision{}, err
+	}
+	if count >= int64(s.LockoutThreshold) {
+		until := lastAt.Add(minutesToDuration(s.LockoutDurationMinutes))
+		if now := g.now(); now.Before(until) {
+			d.Locked = true
+			d.RetryAfter = until.Sub(now)
+		}
+	}
 	return d, nil
 }

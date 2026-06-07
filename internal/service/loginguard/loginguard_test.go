@@ -26,6 +26,11 @@ func (f *fakeEvents) RecentAuthFailures(_ context.Context, ip, upn string, since
 	f.gotIP, f.gotUPN, f.gotSince = ip, upn, since
 	return f.count, f.lastAt, f.err
 }
+func (f *fakeEvents) RecentUserFailures(_ context.Context, _ int64, _ string, since time.Time) (int64, time.Time, error) {
+	f.calls++
+	f.gotSince = since
+	return f.count, f.lastAt, f.err
+}
 func (f *fakeEvents) Insert(context.Context, *domain.AuthEvent) error { return nil }
 func (f *fakeEvents) List(context.Context, ports.AuthEventFilter) ([]*domain.AuthEvent, int64, error) {
 	return nil, 0, nil
@@ -159,6 +164,39 @@ func TestEvaluate_HugeDurationDoesNotOverflowOpen(t *testing.T) {
 	}
 	if f.gotSince.After(now) {
 		t.Fatalf("count window must not overflow into the future: since=%v now=%v", f.gotSince, now)
+	}
+}
+
+func TestEvaluate2FA_LocksPerAccount(t *testing.T) {
+	now := time.Date(2026, 6, 5, 12, 0, 0, 0, time.UTC)
+	s := ports.UISettings{
+		LockoutEnabled: true, LockoutThreshold: 5,
+		LockoutWindowMinutes: 15, LockoutDurationMinutes: 15,
+	}
+	// At threshold, last failure 5 min ago → locked, retry ~10 min.
+	f := &fakeEvents{count: 5, lastAt: now.Add(-5 * time.Minute)}
+	d, err := guardAt(f, now).Evaluate2FA(context.Background(), s, 42)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !d.Locked {
+		t.Fatal("5 >= threshold 5 within the window must lock 2FA")
+	}
+	if want := 10 * time.Minute; (d.RetryAfter - want).Abs() > time.Second {
+		t.Fatalf("RetryAfter = %v, want ~%v", d.RetryAfter, want)
+	}
+	// Below threshold → not locked.
+	f = &fakeEvents{count: 4, lastAt: now.Add(-1 * time.Minute)}
+	if d, _ := guardAt(f, now).Evaluate2FA(context.Background(), s, 42); d.Locked {
+		t.Fatal("4 < threshold 5 must not lock")
+	}
+	// Lockout disabled → inert, no DB read.
+	f = &fakeEvents{count: 999}
+	if d, _ := guardAt(f, now).Evaluate2FA(context.Background(), ports.UISettings{}, 42); d.Locked {
+		t.Fatal("with lockout off the 2FA guard must be inert")
+	}
+	if f.calls != 0 {
+		t.Fatalf("disabled lockout must not query failures, calls=%d", f.calls)
 	}
 }
 

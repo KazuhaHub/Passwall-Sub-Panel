@@ -32,6 +32,9 @@ type stubEvents struct {
 func (f *stubEvents) RecentAuthFailures(context.Context, string, string, time.Time) (int64, time.Time, error) {
 	return f.count, f.lastAt, nil
 }
+func (f *stubEvents) RecentUserFailures(context.Context, int64, string, time.Time) (int64, time.Time, error) {
+	return f.count, f.lastAt, nil
+}
 func (f *stubEvents) Insert(context.Context, *domain.AuthEvent) error { f.inserted++; return nil }
 func (f *stubEvents) List(context.Context, ports.AuthEventFilter) ([]*domain.AuthEvent, int64, error) {
 	return nil, 0, nil

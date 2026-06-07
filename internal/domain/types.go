@@ -695,6 +695,16 @@ const (
 const (
 	AuthReasonInvalidCredentials = "invalid_credentials"
 	AuthReasonLockedOut          = "locked_out"
+	// AuthReason2FAInvalid marks a wrong second-factor code (TOTP / recovery /
+	// emailed code) at the 2FA login step. Counted PER ACCOUNT (across all source
+	// IPs) toward a 2FA verification lockout, so an attacker who already has the
+	// password can't grind TOTP from many IPs — the per-IP login limiter wouldn't
+	// stop that distributed guessing.
+	AuthReason2FAInvalid = "2fa_invalid"
+	// AuthReason2FALockedOut marks a 2FA attempt the guard itself rejected because
+	// the account was already 2FA-locked. Like AuthReasonLockedOut it is NOT a
+	// counted reason, so the lock window can't slide forward forever.
+	AuthReason2FALockedOut = "2fa_locked_out"
 )
 
 // AuthEvent is one authentication attempt — a login via any method, success or

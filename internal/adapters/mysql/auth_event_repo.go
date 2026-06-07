@@ -125,6 +125,35 @@ func (r *authEventRepo) RecentAuthFailures(ctx context.Context, ip, upn string, 
 	return count, newest.At, nil
 }
 
+// RecentUserFailures counts failure events for one user with the given reason
+// since `since` (across every source IP) and returns the newest matching
+// timestamp. Backs the per-account 2FA verification lockout. Mirrors
+// RecentAuthFailures' shape but scopes by user_id + an explicit reason instead
+// of ip/upn, so the count tracks the targeted account regardless of which IPs a
+// distributed attacker spreads the guesses across.
+func (r *authEventRepo) RecentUserFailures(ctx context.Context, userID int64, reason string, since time.Time) (int64, time.Time, error) {
+	q := r.db.WithContext(ctx).Model(&authEventRow{}).
+		Where("outcome = ?", string(domain.AuthOutcomeFailure)).
+		Where("user_id = ?", userID).
+		Where("reason = ?", reason).
+		Where("at >= ?", since)
+	var count int64
+	if err := q.Count(&count).Error; err != nil {
+		return 0, time.Time{}, err
+	}
+	if count == 0 {
+		return 0, time.Time{}, nil
+	}
+	// Map the newest row's `at` via GORM (the pure-Go SQLite driver hands back a
+	// string for a bare MAX(at), which won't scan into time.Time). Fresh session
+	// so the Count above doesn't leak into this statement.
+	var newest authEventRow
+	if err := q.Session(&gorm.Session{}).Order("at DESC").Limit(1).Find(&newest).Error; err != nil {
+		return count, time.Time{}, err
+	}
+	return count, newest.At, nil
+}
+
 // CountByReasonSince counts auth events with the given reason at or after
 // `since`. Used by the notification center's login_security alert.
 func (r *authEventRepo) CountByReasonSince(ctx context.Context, reason string, since time.Time) (int64, error) {

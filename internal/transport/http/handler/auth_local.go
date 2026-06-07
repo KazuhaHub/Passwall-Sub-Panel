@@ -463,6 +463,26 @@ func (h *AuthLocalHandler) TwoFAVerify(c *gin.Context) {
 	if !ok {
 		return
 	}
+	s, _ := h.settings.Load(c.Request.Context(), ports.UISettings{})
+	// Per-account 2FA lockout: a distributed attacker who already passed the
+	// password can otherwise grind TOTP codes from many IPs (the per-IP login
+	// limiter can't see that). Checked BEFORE verifying so a locked account can't
+	// keep guessing. A passkey assertion (TwoFAPasskeyFinish) is unaffected — it's
+	// cryptographic, not brute-forceable — so a user locked out of codes can still
+	// finish with their passkey.
+	if h.guard != nil {
+		if dec, derr := h.guard.Evaluate2FA(c.Request.Context(), s, u.ID); derr == nil && dec.Locked {
+			recordAuthEvent(c, h.authEvents, domain.AuthMethodLocal, domain.AuthOutcomeFailure, u.ID, u.UPN, domain.AuthReason2FALockedOut)
+			retry := int(dec.RetryAfter.Seconds()) + 1
+			c.Header("Retry-After", strconv.Itoa(retry))
+			c.JSON(http.StatusTooManyRequests, gin.H{
+				"error":       "Too many invalid codes, please try again later",
+				"locked":      true,
+				"retry_after": retry,
+			})
+			return
+		}
+	}
 	verified, err := h.twofa.VerifyLogin(c.Request.Context(), u.ID, req.Code)
 	if err != nil {
 		respondError(c, err)
@@ -471,14 +491,14 @@ func (h *AuthLocalHandler) TwoFAVerify(c *gin.Context) {
 	if !verified && h.login2fa != nil {
 		// Only accept an emailed code while email-as-2FA is enabled, so flipping
 		// the admin toggle off invalidates outstanding codes immediately.
-		if s, serr := h.settings.Load(c.Request.Context(), ports.UISettings{}); serr == nil && s.TwoFAAllowEmail {
+		if s.TwoFAAllowEmail {
 			if emailOK, eerr := h.login2fa.VerifyCode(c.Request.Context(), u.ID, req.Code); eerr == nil && emailOK {
 				verified = true
 			}
 		}
 	}
 	if !verified {
-		recordAuthEvent(c, h.authEvents, domain.AuthMethodLocal, domain.AuthOutcomeFailure, u.ID, u.UPN, "2fa_invalid")
+		recordAuthEvent(c, h.authEvents, domain.AuthMethodLocal, domain.AuthOutcomeFailure, u.ID, u.UPN, domain.AuthReason2FAInvalid)
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid 2FA code"})
 		return
 	}

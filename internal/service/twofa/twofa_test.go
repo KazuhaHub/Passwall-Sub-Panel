@@ -205,6 +205,53 @@ func TestDisable_RequiresValidCode(t *testing.T) {
 	}
 }
 
+func TestDisable_KeepsRecoveryWhenPasskeyRemains(t *testing.T) {
+	// TOTP + passkey account disables TOTP: the passkey remains as the second
+	// factor, so the recovery codes that back it must survive (ClearTOTP would
+	// wipe them, stranding the passkey with no printable fallback).
+	st := &memStore{user: &domain.User{ID: 1}, secret: "SECRET32", enabled: true,
+		recovery: []string{hashRecovery("AAAA-BBBB"), hashRecovery("CCCC-DDDD")}}
+	svc := New(Deps{
+		Users:        st,
+		Settings:     stubSettings{on: true},
+		Validate:     func(code, secret string) bool { return code == "111111" && secret != "" },
+		GenRecovery:  func() ([]string, error) { return nil, nil },
+		PasskeyCount: func(context.Context, int64) (int, error) { return 1, nil },
+	})
+	if err := svc.Disable(context.Background(), 1, "111111"); err != nil {
+		t.Fatal(err)
+	}
+	if st.cleared {
+		t.Fatal("disabling TOTP on a passkey account must NOT ClearTOTP (which wipes recovery codes)")
+	}
+	if st.enabled || st.secret != "" {
+		t.Fatalf("TOTP must be off: enabled=%v secret=%q", st.enabled, st.secret)
+	}
+	if len(st.recovery) != 2 {
+		t.Fatalf("recovery codes must be preserved (they back the remaining passkey), got %d", len(st.recovery))
+	}
+}
+
+func TestDisable_ClearsAllWhenNoPasskey(t *testing.T) {
+	// No passkey: disabling TOTP removes the account's only second factor, so
+	// everything (incl. recovery codes) is cleared via ClearTOTP.
+	st := &memStore{user: &domain.User{ID: 1}, secret: "S", enabled: true,
+		recovery: []string{hashRecovery("AAAA-BBBB")}}
+	svc := New(Deps{
+		Users:        st,
+		Settings:     stubSettings{on: true},
+		Validate:     func(code, secret string) bool { return code == "111111" && secret != "" },
+		GenRecovery:  func() ([]string, error) { return nil, nil },
+		PasskeyCount: func(context.Context, int64) (int, error) { return 0, nil },
+	})
+	if err := svc.Disable(context.Background(), 1, "111111"); err != nil {
+		t.Fatal(err)
+	}
+	if !st.cleared {
+		t.Fatal("with no passkey, disabling TOTP must clear everything via ClearTOTP")
+	}
+}
+
 func TestDisableProven_NoCode(t *testing.T) {
 	// Passkey step-up: the caller already proved possession, so disable takes no
 	// code and clears TOTP unconditionally (idempotent).

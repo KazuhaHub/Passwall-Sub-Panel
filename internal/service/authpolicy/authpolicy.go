@@ -66,13 +66,24 @@ func (s *Service) MustEnroll(ctx context.Context, u *domain.User) (bool, error) 
 	if !required {
 		return false, nil
 	}
-	// Satisfied by a TOTP enrollment or any passkey.
+	// Satisfied by a TOTP enrollment, or — only while passkeys are enabled
+	// panel-wide — any registered passkey. A passkey can't be used at login once
+	// the admin disables passkeys panel-wide (the assertion ceremony is blocked),
+	// so it must NOT count as a satisfying factor then: instead of silently
+	// dropping a passkey-only account to single-factor password login, treat the
+	// requirement as unmet so the user is guided to enroll an available method
+	// (TOTP). The earlier fail-safe already covers "no method enrollable at all".
 	if u.TOTPEnabled {
 		return false, nil
 	}
-	creds, err := s.d.Passkeys.FindByUserID(ctx, u.ID)
-	if err != nil {
-		return false, err
+	if set.PasskeyEnabled {
+		creds, err := s.d.Passkeys.FindByUserID(ctx, u.ID)
+		if err != nil {
+			return false, err
+		}
+		if len(creds) > 0 {
+			return false, nil
+		}
 	}
-	return len(creds) == 0, nil
+	return true, nil
 }

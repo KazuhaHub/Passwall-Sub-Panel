@@ -188,6 +188,7 @@ func (s *Service) GetACMEAccount(ctx context.Context, id int64) (*domain.ACMEAcc
 }
 
 func (s *Service) CreateACMEAccount(ctx context.Context, a *domain.ACMEAccount) error {
+	normalizeACMEAccount(a)
 	if err := validateACMEAccount(a); err != nil {
 		return err
 	}
@@ -206,6 +207,7 @@ func (s *Service) CreateACMEAccount(ctx context.Context, a *domain.ACMEAccount) 
 // (email / directory / EAB) changes, the stored account key + registration no
 // longer match the CA account, so they're cleared to force a fresh registration.
 func (s *Service) UpdateACMEAccount(ctx context.Context, a *domain.ACMEAccount) error {
+	normalizeACMEAccount(a)
 	existing, err := s.accounts.GetByID(ctx, a.ID)
 	if err != nil {
 		return err
@@ -262,11 +264,25 @@ func (s *Service) acmeAccountByIdentity(ctx context.Context, email, directory st
 		return nil, err
 	}
 	for _, a := range all {
-		if a.Email == email && a.Directory == directory {
+		// Email compared case-insensitively to match how the DB unique index folds
+		// case (avoids a duplicate slipping the in-memory guard then crashing on
+		// the index). Callers normalize the inputs via normalizeACMEAccount first.
+		if strings.EqualFold(a.Email, email) && a.Directory == directory {
 			return a, nil
 		}
 	}
 	return nil, nil
+}
+
+// normalizeACMEAccount canonicalizes the identity fields so the in-memory
+// duplicate guard agrees with the DB unique index: most MySQL/Postgres
+// collations compare the email case-insensitively, and stray surrounding
+// whitespace would otherwise let a near-duplicate pass the Go check but collide
+// on the index — surfacing as a raw 500 instead of the intended 409. Lowercasing
+// also keeps the stored value stable across re-saves.
+func normalizeACMEAccount(a *domain.ACMEAccount) {
+	a.Email = strings.ToLower(strings.TrimSpace(a.Email))
+	a.Directory = strings.TrimSpace(a.Directory)
 }
 
 func validateACMEAccount(a *domain.ACMEAccount) error {

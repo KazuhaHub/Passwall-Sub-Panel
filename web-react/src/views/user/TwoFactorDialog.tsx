@@ -98,8 +98,16 @@ export default function TwoFactorDialog({ open, enabled, hasPasskey, md, onClose
       setRecoveryCodes(codes)
       setStep('recovery')
     } catch (err) {
-      setError(t('twofa.code_invalid'))
-      setCode('')
+      // 401 = the code itself was wrong (show the localized message); anything
+      // else (e.g. an expired/missing begin-session, 400) carries a real reason
+      // worth surfacing instead of a misleading "invalid code".
+      const e = err as AxiosError<{ error?: string }>
+      if (e.response?.status === 401) {
+        setError(t('twofa.code_invalid'))
+        setCode('')
+      } else {
+        setError(e.response?.data?.error || t('twofa.generic_error'))
+      }
     } finally {
       setBusy(false)
     }
@@ -120,8 +128,13 @@ export default function TwoFactorDialog({ open, enabled, hasPasskey, md, onClose
       onChanged()
       onClose()
     } catch (err) {
-      setError(t('twofa.code_invalid'))
-      setCode('')
+      const e = err as AxiosError<{ error?: string }>
+      if (e.response?.status === 401) {
+        setError(t('twofa.code_invalid'))
+        setCode('')
+      } else {
+        setError(e.response?.data?.error || t('twofa.generic_error'))
+      }
     } finally {
       setBusy(false)
     }

@@ -15,6 +15,7 @@
     "deleted": "已删除"
   },
   "saved": "已保存",
+  "empty": "暂无数据",
   "status": {
     "online": "在线",
     "offline": "离线",

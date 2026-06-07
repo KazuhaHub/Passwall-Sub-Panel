@@ -54,18 +54,24 @@ type Deps struct {
 	Validate func(code, secret string) bool
 	// GenRecovery generates a fresh batch of plaintext recovery codes.
 	GenRecovery func() ([]string, error)
+	// PasskeyCount reports how many passkeys the user has. Used so that disabling
+	// TOTP keeps the recovery codes when a passkey REMAINS as the account's second
+	// factor (the codes back that passkey); with no passkey, disabling TOTP clears
+	// everything. nil → treated as 0 (clear everything, the pre-decoupling behaviour).
+	PasskeyCount func(ctx context.Context, userID int64) (int, error)
 }
 
 type Service struct {
-	d           Deps
-	now         func() time.Time
-	genSecret   func(issuer, account string) (string, string, error)
-	validate    func(code, secret string) bool
-	genRecovery func() ([]string, error)
+	d            Deps
+	now          func() time.Time
+	genSecret    func(issuer, account string) (string, string, error)
+	validate     func(code, secret string) bool
+	genRecovery  func() ([]string, error)
+	passkeyCount func(ctx context.Context, userID int64) (int, error)
 }
 
 func New(d Deps) *Service {
-	s := &Service{d: d, now: d.Now, genSecret: d.GenSecret, validate: d.Validate, genRecovery: d.GenRecovery}
+	s := &Service{d: d, now: d.Now, genSecret: d.GenSecret, validate: d.Validate, genRecovery: d.GenRecovery, passkeyCount: d.PasskeyCount}
 	if s.now == nil {
 		s.now = time.Now
 	}
@@ -167,7 +173,7 @@ func (s *Service) Disable(ctx context.Context, userID int64, code string) error 
 	if !s.checkCode(ctx, userID, code, secret, codes) {
 		return domain.ErrUnauthorized
 	}
-	return s.d.Users.ClearTOTP(ctx, userID)
+	return s.clearTOTPKeepingFactors(ctx, userID, codes)
 }
 
 // DisableProven turns TOTP off WITHOUT a code — the caller has already proven
@@ -175,6 +181,30 @@ func (s *Service) Disable(ctx context.Context, userID int64, code string) error 
 // account's passkey is a strong factor). Same effect as Disable's success path;
 // idempotent. NEVER expose this on an endpoint that lacks its own proof.
 func (s *Service) DisableProven(ctx context.Context, userID int64) error {
+	_, _, codes, err := s.d.Users.GetTOTP(ctx, userID)
+	if err != nil {
+		return err
+	}
+	return s.clearTOTPKeepingFactors(ctx, userID, codes)
+}
+
+// clearTOTPKeepingFactors removes the TOTP secret + enabled flag. If the account
+// still has a passkey, the recovery codes are KEPT (they back the remaining
+// passkey factor, so disabling the authenticator must not strip a passkey-user's
+// only printable fallback); with no passkey, everything is cleared so the account
+// is left with no second factor at all. recoveryHashes is the already-loaded
+// current set (avoids a re-read).
+func (s *Service) clearTOTPKeepingFactors(ctx context.Context, userID int64, recoveryHashes []string) error {
+	if s.passkeyCount != nil {
+		n, err := s.passkeyCount(ctx, userID)
+		if err != nil {
+			return err
+		}
+		if n > 0 {
+			// Keep recovery codes; clear ONLY the TOTP secret + enabled flag.
+			return s.d.Users.SetTOTP(ctx, userID, "", false, recoveryHashes)
+		}
+	}
 	return s.d.Users.ClearTOTP(ctx, userID)
 }
 

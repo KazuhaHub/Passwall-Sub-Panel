@@ -4,6 +4,45 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## v3.7.0-beta.18 — 2026-06-07
+
+v3.7.0 正式版前的全面 review（5 维度子代理 + 对抗验证）收口：2 个 MED + 多个 LOW 全修，全部带 TDD。`go test ./...` / `go vet` / `tsc` / `npm build` / 二进制全绿。
+
+### Security
+
+- **登录 2FA 校验加 per-account 锁定** —— 此前 TOTP / 恢复码 / 邮箱码校验只有 per-IP 限流，已知密码的攻击者可换 IP 分布式爆破 TOTP（邮箱 OTP 早有同款防护，TOTP 漏了）。新增 `loginguard.Evaluate2FA` + `AuthEventRepo.RecentUserFailures`：按账号跨 IP 统计 `2fa_invalid`，复用账号锁定阈值（threshold / window / duration），超限 429。passkey 断言不受影响（密码学强度，被码锁的用户仍可用 passkey 完成）。带 TDD。
+- **关闭 passkey 后不再静默降级为单因子** —— passkey 全局关闭时，passkey-only 账号此前仍被 `MustEnroll` 视为「已满足 2FA」→ 实际只剩密码单因子。改为 passkey 仅在 `PasskeyEnabled` 开启时算作满足因子，否则按未启用处理 → 引导用户注册可用方式（TOTP）。带 TDD。
+- **停用 TOTP 不再误删 passkey 账号的备用码** —— TOTP + passkey 账号自助停用 TOTP 会 `ClearTOTP` 连备用码一起清空，使 passkey 失去兜底。改为有 passkey 时仅清 TOTP 密钥 / 启用位、保留备用码（`clearTOTPKeepingFactors`），无 passkey 才全清。带 TDD。
+- **邮箱 2FA 重发加 60s per-account 冷却** —— 防密码后阶段的邮件轰炸（重发期间旧码仍有效，抑制无害）。带 TDD。
+
+### Fixed
+
+- **ACME 账号重复返回干净 409 而非裸 500** —— 内存查重为精确大小写比较，而 DB 唯一索引按 collation 折叠大小写，`Ops@x` vs `ops@x`（或首尾空格）会漏过内存检查、撞索引报 500。写入前规范化 email（小写 + trim）+ 查重改 `EqualFold`。
+- **证书页空状态显示字面量 `common:empty`** —— `common:empty` 键中英两个 locale 都缺（v3.6.4 起的老 bug），补齐。
+- **验证器弹窗错误透传** —— enroll / disable 此前把所有错误都显示「验证码无效」，掩盖了会话过期等真实原因；改为仅 401 显示「验证码无效」，其余透传后端信息。
+- **管理端账号安全抽屉复制** —— 重新生成的备用码（只显示一次）此前用原生 `navigator.clipboard`，HTTP 非安全上下文静默失败；改用带 execCommand 兜底 + 成功 / 失败 toast 的 `copyToClipboard`。
+
+### Internal
+
+- 通知 drift 测试由空操作改为真正运行 `AlertService.List`（喂坏节点 + 失败证书），断言 dashboard 用到的 `node_health` / `cert_failed` 确被产出（修掉一个形同虚设的防漂移闸）。
+- `version`：`acceptLatestPSPStable` 抽为纯函数并加单测（覆盖「GitHub 没标 prerelease 但 tag 带 `-beta`」这条 load-bearing 防御）；新增 `LatestPSPRefreshError` / `LatestPSPRefreshAt` 访问器（消除死字段、与 3X-UI 侧对齐）。
+- `acme_accounts.directory` 列 512→255（复合唯一索引兼容旧版 MySQL；ACME directory URL 远小于 255）。
+
+## v3.7.0-beta.17 — 2026-06-07
+
+通知中心定位收敛为「仅管理员相关」+ PSP 自更新检测 + 发布渠道分流（稳定 / 预发布）+ 验证器 / Passkey UI 正名。`go test ./...` / `go vet` / `tsc` / `npm build` / 二进制全绿。
+
+### Added
+
+- **PSP 自更新检测（仅稳定版）** —— 新增 admin-only `psp_upgrade` 告警：读 GitHub `/releases/latest`（按 prerelease 标记 + tag 串双重过滤，只认稳定版），预发布感知比较 `pspBehindStable`（跑 beta 且其稳定版已发时也提示）。
+- **发布渠道分流** —— release.yml 给预发布 tag（带 `-`）标 GitHub pre-release，使 `/releases/latest` 只回稳定版；docker `:latest` 只跟稳定版，新增 `:beta` 滚动标签跟「最前沿」（任何最新发布，稳定版一发即滚上）。README / README_EN 加「镜像渠道」说明并放宽项目定位。
+
+### Changed
+
+- **3X-UI 升级提示改看 PSP 已测最高版本** —— `panel_upgrade` 由「上游 latest + 已测支持」改为「面板版本 < PSP `max_tested_xui`」（`version.XUIUpgradeTarget`）：只在「升到 PSP 验证过的版本」时提示，不追上游发了多新。
+- **用户即将到期移出通知中心** —— 通知中心只与管理员相关；用户到期保留 dashboard 卡片 + 给用户的邮件提醒，不再进铃铛。
+- **「两步验证」正名为「验证器 App（TOTP）」** —— Passkey 也是 2FA，原标签易混；菜单 / 弹窗标题 / 停用文案统一改为明确指 TOTP。停用弹窗去掉与「备用码」对话框重复的「重新生成」步骤；两个弹窗的 passkey 替代操作统一收进正文、footer 只留 取消 + 主操作。
+
 ## v3.7.0-beta.16 — 2026-06-07
 
 清理：移除多 ACME（beta.14）唯一遗留的兼容代码 + 旧 ACME 设置标签的死 i18n。`go test ./...` / `go vet` / `tsc` / `npm build` / 二进制全绿。

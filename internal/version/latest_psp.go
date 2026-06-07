@@ -47,6 +47,21 @@ func LatestPSP() string {
 // SetLatestPSP installs a tag string (test hook / future cache loader).
 func SetLatestPSP(tag string) { latestPSPTag.Store(tag) }
 
+// LatestPSPRefreshError returns the last fetch error (nil on success / not yet
+// run) and LatestPSPRefreshAt the last successful-fetch time — parity with the
+// 3X-UI sibling accessors for ops visibility.
+func LatestPSPRefreshError() error {
+	latestPSPFetchMu.Lock()
+	defer latestPSPFetchMu.Unlock()
+	return latestPSPLastErr
+}
+
+func LatestPSPRefreshAt() time.Time {
+	latestPSPFetchMu.Lock()
+	defer latestPSPFetchMu.Unlock()
+	return latestPSPLastAt
+}
+
 // IsPrerelease reports whether a PSP version string is a pre-release build
 // (carries a "-beta"/"-rc"/... suffix). Drives the UI channel indicator
 // (stable = green, pre-release = yellow) and the self-update comparison below.
@@ -148,17 +163,26 @@ func fetchLatestPSP(ctx context.Context) error {
 	if err := json.Unmarshal(body, &release); err != nil {
 		return fmt.Errorf("decode release JSON: %w", err)
 	}
-	// Stable-only, defended two ways: the GitHub `prerelease` flag AND the tag
-	// string itself (a "-beta"/"-rc" suffix). The tag check is the load-bearing
-	// one — if a release was published WITHOUT the prerelease flag set (e.g. an
-	// older beta cut before the workflow marked pre-releases), /releases/latest
-	// could still hand us a beta tag; we must never treat that as a stable.
-	if release.TagName == "" || release.Prerelease || IsPrerelease(release.TagName) {
-		return nil
+	if tag, ok := acceptLatestPSPStable(release.TagName, release.Prerelease); ok {
+		SetLatestPSP(tag)
 	}
-	if _, ok := parseSemver(release.TagName); !ok {
-		return fmt.Errorf("unparseable tag_name %q", release.TagName)
-	}
-	SetLatestPSP(release.TagName)
 	return nil
+}
+
+// acceptLatestPSPStable decides whether a /releases/latest payload yields a
+// usable latest-STABLE tag. Stable-only, defended two ways: GitHub's prerelease
+// flag AND the tag string itself (a "-beta"/"-rc"/... suffix). The tag check is
+// the load-bearing one — a release published WITHOUT the prerelease flag set
+// (e.g. an older beta cut before the workflow began marking pre-releases) could
+// still arrive here, and must never be treated as a stable. Anything empty,
+// pre-release, or not a parseable semver yields ("", false) so the self-update
+// nudge only ever points at a real stable release.
+func acceptLatestPSPStable(tagName string, prerelease bool) (string, bool) {
+	if tagName == "" || prerelease || IsPrerelease(tagName) {
+		return "", false
+	}
+	if _, ok := parseSemver(tagName); !ok {
+		return "", false
+	}
+	return tagName, true
 }

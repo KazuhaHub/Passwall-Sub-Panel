@@ -462,6 +462,12 @@ type AuthEventRepo interface {
 	// excludes locked_out / disabled / server-error failures so a locked-out
 	// source's retries can't keep pushing the lock window forward.
 	RecentAuthFailures(ctx context.Context, ip, upn string, since time.Time) (count int64, lastAt time.Time, err error)
+	// RecentUserFailures counts failure events for ONE user with the given reason
+	// since `since` (across all source IPs), and returns the most recent matching
+	// timestamp (zero when count==0). Backs the per-account 2FA verification
+	// lockout: the threat is a distributed attacker who already has the password
+	// grinding TOTP from many IPs, which RecentAuthFailures' IP scope can't catch.
+	RecentUserFailures(ctx context.Context, userID int64, reason string, since time.Time) (count int64, lastAt time.Time, err error)
 	// CountByReasonSince counts events with the given failure reason since
 	// `since`. Drives the notification center's login_security alert (e.g. how
 	// many locked_out rejections happened recently = an active brute-force).

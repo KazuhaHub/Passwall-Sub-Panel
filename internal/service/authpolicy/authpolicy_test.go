@@ -21,13 +21,15 @@ func (s stubPasskeys) FindByUserID(_ context.Context, _ int64) ([]*domain.Passke
 }
 
 type stubSettings struct {
-	staff     bool
-	canEnroll bool // drives TOTPEnabled so a requirement is satisfiable
+	staff   bool
+	totp    bool // drives TOTPEnabled (a TOTP enrollment is satisfiable/usable)
+	passkey bool // drives PasskeyEnabled (a passkey counts only while it's on)
 }
 
 func (s stubSettings) Load(_ context.Context, d ports.UISettings) (ports.UISettings, error) {
 	d.Require2FAForStaff = s.staff
-	d.TOTPEnabled = s.canEnroll
+	d.TOTPEnabled = s.totp
+	d.PasskeyEnabled = s.passkey
 	return d, nil
 }
 
@@ -35,7 +37,7 @@ func svc(groupRequire, staffRequire bool, passkeys int) *Service {
 	return New(Deps{
 		Groups:   stubGroups{require: groupRequire},
 		Passkeys: stubPasskeys{n: passkeys},
-		Settings: stubSettings{staff: staffRequire, canEnroll: true},
+		Settings: stubSettings{staff: staffRequire, totp: true, passkey: true},
 	})
 }
 
@@ -115,12 +117,29 @@ func TestMustEnroll(t *testing.T) {
 		s := New(Deps{
 			Groups:   stubGroups{require: false},
 			Passkeys: stubPasskeys{n: 0},
-			Settings: stubSettings{staff: false, canEnroll: false},
+			Settings: stubSettings{staff: false, totp: false, passkey: false},
 		})
 		u := localUser(domain.RoleUser)
 		u.Require2FA = true
 		if got, _ := s.MustEnroll(ctx, u); got {
 			t.Fatal("must not gate when no second factor can be enrolled")
+		}
+	})
+
+	t.Run("passkey-only account is re-gated when passkeys are disabled panel-wide", func(t *testing.T) {
+		// The account's only factor is a passkey, but the admin turned passkeys off
+		// panel-wide → the passkey can't be used at login, so it no longer satisfies
+		// the requirement. Rather than silently dropping to single-factor password
+		// login, the user must enroll an available method (TOTP is still on).
+		s := New(Deps{
+			Groups:   stubGroups{require: false},
+			Passkeys: stubPasskeys{n: 1},
+			Settings: stubSettings{staff: false, totp: true, passkey: false},
+		})
+		u := localUser(domain.RoleUser)
+		u.Require2FA = true
+		if got, _ := s.MustEnroll(ctx, u); !got {
+			t.Fatal("a passkey must not satisfy the requirement when passkeys are disabled panel-wide")
 		}
 	})
 }
