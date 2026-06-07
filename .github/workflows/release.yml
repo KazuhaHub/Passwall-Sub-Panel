@@ -282,13 +282,17 @@ jobs:
           images: ghcr.io/${{ needs.setup.outputs.owner_lc }}/passwall-sub-panel
           tags: |
             type=raw,value=${{ needs.setup.outputs.tag }}
-            # `latest` tracks STABLE releases only — never a pre-release. This
-            # mirrors GitHub's /releases/latest (and PSP's in-app self-update
-            # nudge), so a deploy pinned to :latest stays on the stable channel.
-            # Pre-release tags (anything with a "-beta"/"-rc"/... suffix) get the
-            # rolling :beta tag instead, so opt-in testers can pin image: ...:beta.
+            # Two rolling channels:
+            #   :latest → newest STABLE only. Mirrors GitHub /releases/latest and
+            #             PSP's in-app self-update nudge, so a :latest deploy never
+            #             sees a pre-release.
+            #   :beta   → the leading edge. Applied to EVERY release (pre-release
+            #             AND stable), so it always points at the most recent
+            #             build. A :beta deploy therefore auto-rolls forward onto a
+            #             stable once that stable is the newest release, then onto
+            #             the next beta — "always newest", not "betas only".
             type=raw,value=latest,enable=${{ startsWith(needs.setup.outputs.tag, 'v') && !contains(needs.setup.outputs.tag, '-') }}
-            type=raw,value=beta,enable=${{ contains(needs.setup.outputs.tag, '-') }}
+            type=raw,value=beta,enable=${{ startsWith(needs.setup.outputs.tag, 'v') }}
           labels: |
             org.opencontainers.image.title=passwall-sub-panel
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}

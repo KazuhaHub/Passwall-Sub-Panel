@@ -10,11 +10,13 @@
 services:
   psp:
     # Image channels:
-    #   :latest        → newest STABLE release (recommended; default below)
-    #   :beta          → newest PRE-RELEASE (beta/rc) — opt into early builds
-    #   :v3.7.0        → pin an exact version (stable or beta tag)
+    #   :latest  → newest STABLE release (recommended; default below)
+    #   :beta    → leading edge: newest release of ANY kind (pre-release OR
+    #              stable). Auto-rolls forward onto a stable once it ships, then
+    #              onto the next beta — i.e. "always newest", not "betas only".
+    #   :v3.7.0  → pin an exact version (a stable or a beta tag)
     # With `pull_policy: always`, `docker compose up -d` re-pulls whatever the
-    # chosen tag points at. To follow betas, change :latest → :beta and re-up.
+    # chosen tag points at. To follow the leading edge, set :latest → :beta.
     image: ghcr.io/kazuhahub/passwall-sub-panel:latest
     container_name: psp
     restart: unless-stopped

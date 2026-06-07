@@ -5,7 +5,7 @@
 <h1 align="center">Passwall Sub Panel</h1>
 
 <p align="center">
-  一个轻量级的代理订阅管理面板，专为小型团队和朋友圈设计
+  在 3X-UI 之上的多用户订阅管理面板，动态渲染 Clash / Mihomo、sing-box、V2rayN 订阅
 </p>
 
 <p align="center">
@@ -25,9 +25,9 @@
 
 ## 简介
 
-Passwall Sub Panel 是一个基于 Go + React 的代理订阅管理系统，通过与 [3X-UI](https://github.com/MHSanaei/3x-ui) 面板集成，提供完整的用户管理、订阅生成、流量监控等功能。
+Passwall Sub Panel 是一个基于 Go + React 的代理订阅管理系统，通过与 [3X-UI](https://github.com/MHSanaei/3x-ui) 面板集成，提供完整的用户管理、订阅生成、流量监控，以及 SSO 单点登录（SAML / OIDC）、本地登录的 2FA / Passkey、操作审计、多数据库（SQLite / MySQL / PostgreSQL）与非 root 运行等能力。
 
-**适用场景**：小型团队、朋友圈、个人使用，不是企业级机场系统。
+**适用场景**：从个人 / 朋友圈、小团队，到需要单点登录、操作审计、合规留痕与非 root 部署的中大型组织 —— 同一套单文件二进制都能覆盖，按需开启。
 
 **部署形态**：单文件 Go 二进制（前端 SPA 通过 `go:embed` 嵌入），可直接 `./psp` 启动，也提供 Docker 镜像。
 
@@ -220,11 +220,33 @@ docker compose logs -f psp
 | 项 | 默认 | 原因 |
 |---|---|---|
 | 网络模式 | `network_mode: host` | 让 PSP 容器以 `127.0.0.1:<port>` 直访同宿主机的 3X-UI，无需 `extra_hosts` |
-| 镜像 | `ghcr.io/kazuhahub/passwall-sub-panel:latest`，`pull_policy: always` | 每次 `up -d` 自动取最新 |
+| 镜像 | `ghcr.io/kazuhahub/passwall-sub-panel:latest`，`pull_policy: always` | `:latest` = 最新**稳定版**，每次 `up -d` 自动重拉；想跟测试版（beta）见下「镜像渠道」 |
 | 配置 | **bind mount `./config:/app/config`** | 宿主机直接 `nano` 编辑，所见即所得；首启 entrypoint 从镜像内 `/app/defaults/` 把模板/规则集种到空目录里 |
 | 数据 | 命名 volume `psp-data` | SQLite 数据库 + 运行时数据，不需要宿主机直接访问 |
 
 所有运维设置（含 secrets、MySQL DSN）都改 `./config/config.yaml`——**不用** `.env`、**不用** 一堆 `PSP_*` 环境变量。
+
+### 镜像渠道（稳定版 / 测试版）
+
+发布分两条滚动通道，与面板内版本号颜色（绿 = 稳定、黄 = 测试）一致：
+
+| Tag | 跟踪 | 适合 |
+|---|---|---|
+| `:latest` | 最新**稳定版**（默认） | 生产 / 日常 |
+| `:beta` | **最前沿**——任何最新发布（预发布**或**稳定版） | 想一直用最新 |
+| `:v3.7.0` / `:v3.7.0-beta.17` | 钉死某个确切版本 | 不想自动滚动 |
+
+切换通道只改 `docker-compose.yml` 里那一行 `image`，然后 `docker compose up -d`（`pull_policy: always` 会自动重拉）：
+
+```yaml
+services:
+  psp:
+    image: ghcr.io/kazuhahub/passwall-sub-panel:beta   # latest → beta
+```
+
+> `:beta` 是「永远最新」而非「只有 beta」：在 `:beta` 上的部署，等稳定版（如 `v3.7.0`）发布后会**自动滚上稳定版**，之后再滚到下一个 beta。想固定在稳定轨就用 `:latest`，想钉死不动就用 `:vX.Y.Z`。
+>
+> 此外面板会在**管理员通知**里检测并提示 PSP 新稳定版（只提示稳定版、不催 beta），3X-UI 面板低于 PSP 已测最高支持版本时也会提示。
 
 ### 改配置：直接编辑宿主机文件
 

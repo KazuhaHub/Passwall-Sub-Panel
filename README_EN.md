@@ -5,7 +5,7 @@
 <h1 align="center">Passwall Sub Panel</h1>
 
 <p align="center">
-  A lightweight proxy subscription management panel designed for small teams and friend groups
+  Multi-user subscription panel on top of 3X-UI — dynamically renders Clash/Mihomo, sing-box and V2rayN
 </p>
 
 <p align="center">
@@ -25,9 +25,9 @@
 
 ## Introduction
 
-Passwall Sub Panel is a proxy subscription management system built with Go + React. It integrates with [3X-UI](https://github.com/MHSanaei/3x-ui) panels to provide complete user management, subscription generation, traffic monitoring, and more.
+Passwall Sub Panel is a proxy subscription management system built with Go + React. It integrates with [3X-UI](https://github.com/MHSanaei/3x-ui) panels to provide complete user management, subscription generation and traffic monitoring, plus SSO single sign-on (SAML / OIDC), 2FA / passkeys for local login, an operation audit trail, multiple databases (SQLite / MySQL / PostgreSQL) and non-root operation.
 
-**Use case**: Small teams, friend groups, personal use. Not an enterprise-level proxy service.
+**Use case**: From personal / friend groups and small teams to mid-to-large organizations that need single sign-on, an audit trail, compliance records and non-root deployment — all covered by the same single binary, enabled as needed.
 
 **Deployment form**: A single Go binary (the React SPA is embedded via `go:embed`). Just run `./psp`, or deploy via Docker.
 
@@ -194,11 +194,33 @@ The shipped [`docker-compose.yml`](docker-compose.yml) is opinionated:
 | Item | Default | Why |
 |---|---|---|
 | Network mode | `network_mode: host` | Lets the PSP container reach a co-located 3X-UI at `127.0.0.1:<port>` without `extra_hosts` tricks |
-| Image | `ghcr.io/kazuhahub/passwall-sub-panel:latest`, `pull_policy: always` | Each `up -d` pulls the latest tag |
+| Image | `ghcr.io/kazuhahub/passwall-sub-panel:latest`, `pull_policy: always` | `:latest` = newest **stable**; each `up -d` re-pulls it. To follow betas see "Image channels" below |
 | Config | **bind mount `./config:/app/config`** | Edit on the host with any editor; the entrypoint seeds templates/rulesets from `/app/defaults/` baked into the image when the directory is empty |
 | Data | named volume `psp-data` | SQLite DB + runtime data; no need for host-level access |
 
 Every operational setting (secrets, MySQL DSN) lives in `./config/config.yaml` — **no** `.env`, **no** sprawl of `PSP_*` environment variables.
+
+### Image channels (stable / beta)
+
+Releases flow through two rolling channels, matching the in-app version-badge color (green = stable, amber = pre-release):
+
+| Tag | Tracks | For |
+|---|---|---|
+| `:latest` | newest **stable** (default) | production / day-to-day |
+| `:beta` | the **leading edge** — newest release of any kind (pre-release **or** stable) | always on the newest build |
+| `:v3.7.0` / `:v3.7.0-beta.17` | a pinned exact version | no auto-roll |
+
+Switching channels is a one-line change to `image` in `docker-compose.yml`, then `docker compose up -d` (`pull_policy: always` re-pulls):
+
+```yaml
+services:
+  psp:
+    image: ghcr.io/kazuhahub/passwall-sub-panel:beta   # latest → beta
+```
+
+> `:beta` means "always newest", not "betas only": a `:beta` deploy **auto-rolls forward onto a stable** once it ships (e.g. `v3.7.0`), then onto the next beta. Use `:latest` to stay on the stable track, or `:vX.Y.Z` to pin.
+>
+> PSP also checks for a newer **stable** release of itself and surfaces it in the **admin notifications** (stable only — it never nags you toward a beta); it likewise flags a 3X-UI panel that's below PSP's max-tested version.
 
 ### Changing settings: edit host files directly
 
