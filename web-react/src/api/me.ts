@@ -180,17 +180,22 @@ export async function begin2FA() {
 // enable2FA confirms enrollment with a code and returns one-time recovery codes
 // to show ONCE.
 export async function enable2FA(code: string) {
+  // _skipRefresh: a wrong code returns 401, which the global refresh/logout
+  // interceptor would otherwise treat as an expired session and sign the user
+  // out mid-enrollment. We want the 401 to reach the dialog so it can show
+  // "invalid code". (Same reason the login-flow 2FA calls skip refresh.)
   const { data } = await client.post<{ recovery_codes: string[] }>(
     '/user/me/2fa/enable',
     { code },
-    { _skipErrorToast: true },
+    { _skipErrorToast: true, _skipRefresh: true },
   )
   return data.recovery_codes
 }
 
 // disable2FA turns 2FA off, requiring a valid current TOTP or recovery code.
+// _skipRefresh so a wrong code (401) surfaces in the dialog instead of logging out.
 export async function disable2FA(code: string) {
-  await client.post('/user/me/2fa/disable', { code }, { _skipErrorToast: true })
+  await client.post('/user/me/2fa/disable', { code }, { _skipErrorToast: true, _skipRefresh: true })
 }
 
 // regenerate2FARecovery rotates the user's recovery codes (requires a current
@@ -199,7 +204,7 @@ export async function regenerate2FARecovery(code: string) {
   const { data } = await client.post<{ recovery_codes: string[] }>(
     '/user/me/2fa/recovery/regenerate',
     { code },
-    { _skipErrorToast: true },
+    { _skipErrorToast: true, _skipRefresh: true }, // wrong proof code 401 → dialog, not logout
   )
   return data.recovery_codes
 }
@@ -219,7 +224,7 @@ export async function disableTOTPWithPasskey(): Promise<void> {
   await client.post(
     `/user/me/2fa/stepup/passkey/finish?session=${encodeURIComponent(session_id)}&action=disable`,
     assertion,
-    { _skipErrorToast: true },
+    { _skipErrorToast: true, _skipRefresh: true }, // failed assertion 401 → dialog, not logout
   )
 }
 
@@ -231,7 +236,7 @@ export async function regenerateRecoveryWithPasskey(): Promise<string[]> {
   const { data } = await client.post<{ recovery_codes: string[] }>(
     `/user/me/2fa/stepup/passkey/finish?session=${encodeURIComponent(session_id)}&action=recovery`,
     assertion,
-    { _skipErrorToast: true },
+    { _skipErrorToast: true, _skipRefresh: true }, // failed assertion 401 → dialog, not logout
   )
   return data.recovery_codes
 }

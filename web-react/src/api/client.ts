@@ -185,7 +185,14 @@ client.interceptors.response.use(
       return Promise.reject(err)
     }
     // --- 401 either on the refresh request itself, or after a retry.
-    if (err.response?.status === 401) {
+    // A request that opted out of the 401 dance (_skipRefresh) handles its own
+    // 401 — e.g. a WRONG 2FA code on a self-service enroll/disable endpoint, or
+    // the login-time 2FA verify. Those must NOT wipe the session and redirect to
+    // /login (a wrong authenticator code is bad input, not an expired session);
+    // let the 401 fall through to the caller's catch (and the general path below,
+    // which stays quiet under _skipErrorToast). Genuine session-expiry 401s don't
+    // set _skipRefresh, so they still refresh-then-logout as before.
+    if (err.response?.status === 401 && !cfg?._skipRefresh) {
       logoutAndRedirect(err)
       return Promise.reject(err)
     }

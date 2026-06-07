@@ -4,6 +4,18 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## v3.7.0-beta.20 — 2026-06-07
+
+修复「开启验证器（TOTP）时输错验证码被直接登出」的 bug + 管理端「安全」设置 2FA 区间距放松。`tsc` / `npm build` / 二进制全绿；2 维度子代理对抗 review（拦截器回归 + 5 条 2FA 流端到端）零 findings。
+
+### Fixed
+
+- **输错 2FA 验证码不再被登出（stable-blocker）** —— 自助开启 / 停用验证器（TOTP）、重新生成备用码、passkey step-up 时输错码，后端返回 401，被 axios 全局拦截器的**兜底 401 分支**当成「会话失效」→ `location.href='/login'` 直接登出（此前在登录页"看着没事"只因 `logoutAndRedirect` 在 `/login` 不跳转；已登录页面就会真登出）。修法：① `api/me.ts` 给 5 个带证明的自助调用（enable / disable / regenerate / 两个 passkey step-up）加 `_skipRefresh`；② `api/client.ts` 兜底 401 分支改为 `status === 401 && !cfg?._skipRefresh` —— 声明「自己处理 401」的请求不再被强制登出，401 透传到弹窗内联显示「验证码无效」。普通请求的「过期 → 刷新 → 重试 → 登出」路径不变（无 `_skipRefresh`）。
+
+### Changed
+
+- **「安全」设置 2FA 区间距放松** —— 三个方式（开关 + 说明）各成一组、组间距加大（Stack `spacing 0.25 → 2.5`），去掉把说明硬上拉的 `mt:-1`，「强制策略」与底部信息框各自拉开间距；不再挤成一长条。
+
 ## v3.7.0-beta.19 — 2026-06-07
 
 修正管理端「安全」设置里 2FA 的层级表述（2FA 是总括，TOTP / Passkey / Email 平级）+ 跨界面命名一致性。纯 UI / i18n，无认证逻辑改动。`tsc` / `npm build` / 二进制全绿；3 维度子代理对抗 review 通过（绑定完整性 + i18n 完整性 clean，层级 4 处文案问题已修）。
