@@ -122,6 +122,37 @@ func (h *AdminCertHandler) Create(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"cert": toCertDTO(cert)})
 }
 
+// Update edits a certificate's config (name / domains / ACME account / DNS
+// credential / auto-renew). The issued PEM is preserved; a SAN-list change
+// triggers a re-issue. Required so a cert can be re-pointed at an ACME account
+// (e.g. certs created before multi-account, whose acme_account_id is unset).
+func (h *AdminCertHandler) Update(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	var req createCertRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	cert := &domain.TLSCertificate{
+		ID: id, Name: req.Name, Domains: req.Domains,
+		ACMEAccountID: req.ACMEAccountID, DNSCredentialID: req.DNSCredentialID, AutoRenew: req.AutoRenew,
+	}
+	if err := h.cert.UpdateCert(c.Request.Context(), cert); err != nil {
+		mapServerError(c, err)
+		return
+	}
+	updated, err := h.cert.GetCert(c.Request.Context(), id)
+	if err != nil {
+		mapServerError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"cert": toCertDTO(updated)})
+}
+
 func (h *AdminCertHandler) Delete(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {

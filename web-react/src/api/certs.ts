@@ -77,6 +77,13 @@ export async function createCert(req: CreateCertRequest): Promise<Cert> {
   return data.cert
 }
 
+// updateCert edits a cert's config (name / domains / ACME account / DNS credential
+// / auto-renew). The issued PEM is preserved; a domain change re-issues.
+export async function updateCert(id: number, req: CreateCertRequest): Promise<Cert> {
+  const { data } = await client.put<{ cert: Cert }>(`/admin/certs/${id}`, req)
+  return data.cert
+}
+
 export async function deleteCert(id: number): Promise<void> {
   await client.delete(`/admin/certs/${id}`)
 }

@@ -359,6 +359,7 @@ func NewRouter(d Deps) *gin.Engine {
 		adminGroup.GET("/certs", certs.List)
 		adminGroup.GET("/certs/:id", certs.Get)
 		adminGroup.POST("/certs", certs.Create)
+		adminGroup.PUT("/certs/:id", certs.Update)
 		adminGroup.POST("/certs/:id/renew", certs.Renew)
 		adminGroup.GET("/certs/:id/download", certs.Download)
 		adminGroup.DELETE("/certs/:id", certs.Delete)

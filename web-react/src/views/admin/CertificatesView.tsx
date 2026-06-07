@@ -57,6 +57,7 @@ import {
   listDNSProviders,
   renewCert,
   updateACMEAccount,
+  updateCert,
   updateDNSCred,
   type ACMEAccount,
   type Cert,
@@ -185,6 +186,7 @@ export default function CertificatesView() {
 
   // ---- certificate dialog ----
   const [certOpen, setCertOpen] = useState(false)
+  const [certEditing, setCertEditing] = useState<Cert | null>(null)
   const [certName, setCertName] = useState('')
   const [certDomains, setCertDomains] = useState('')
   const [certAccountId, setCertAccountId] = useState<number | ''>('')
@@ -192,12 +194,22 @@ export default function CertificatesView() {
   const [certAutoRenew, setCertAutoRenew] = useState(true)
   const [certBusy, setCertBusy] = useState(false)
 
-  function openCert() {
-    setCertName('')
-    setCertDomains('')
-    setCertAccountId(accounts[0]?.id ?? '')
-    setCertCredId(creds[0]?.id ?? '')
-    setCertAutoRenew(true)
+  function openCert(c?: Cert) {
+    if (c) {
+      setCertEditing(c)
+      setCertName(c.name)
+      setCertDomains(c.domains.join('\n'))
+      setCertAccountId(c.acme_account_id || accounts[0]?.id || '')
+      setCertCredId(c.dns_credential_id || creds[0]?.id || '')
+      setCertAutoRenew(c.auto_renew)
+    } else {
+      setCertEditing(null)
+      setCertName('')
+      setCertDomains('')
+      setCertAccountId(accounts[0]?.id ?? '')
+      setCertCredId(creds[0]?.id ?? '')
+      setCertAutoRenew(true)
+    }
     setCertOpen(true)
   }
 
@@ -212,14 +224,20 @@ export default function CertificatesView() {
     }
     setCertBusy(true)
     try {
-      await createCert({
+      const req = {
         name: certName.trim(),
         domains,
         acme_account_id: Number(certAccountId),
         dns_credential_id: Number(certCredId),
         auto_renew: certAutoRenew,
-      })
-      pushSnack(t('admin:certs.create_queued'), 'success')
+      }
+      if (certEditing) {
+        await updateCert(certEditing.id, req)
+        pushSnack(t('common:saved', { defaultValue: '已保存' }), 'success')
+      } else {
+        await createCert(req)
+        pushSnack(t('admin:certs.create_queued'), 'success')
+      }
       setCertOpen(false)
       reload()
     } catch {
@@ -535,7 +553,7 @@ export default function CertificatesView() {
         subtitle={t('admin:certs.page_subtitle')}
         actions={
           tab === 0 ? (
-            <Button startIcon={<AddIcon />} variant="contained" disabled={creds.length === 0} onClick={openCert}>
+            <Button startIcon={<AddIcon />} variant="contained" disabled={creds.length === 0 || accounts.length === 0} onClick={() => openCert()}>
               {t('admin:certs.new')}
             </Button>
           ) : tab === 1 ? (
@@ -554,8 +572,14 @@ export default function CertificatesView() {
       {/* ---- Tab 0: Certificates ---- */}
       {tab === 0 && (
         <>
-          {creds.length === 0 && (
-            <Typography sx={{ fontSize: 13, color: md.onSurfaceVariant, mb: 1.5 }}>{t('admin:certs.need_cred_first')}</Typography>
+          {(accounts.length === 0 || creds.length === 0) && (
+            <Typography sx={{ fontSize: 13, color: md.onSurfaceVariant, mb: 1.5 }}>
+              {accounts.length === 0 && creds.length === 0
+                ? t('admin:certs.need_acct_and_cred', { defaultValue: '签发证书前，请先到「ACME 账号」标签建一个 CA 账号，并到「DNS 凭据」标签建一个 DNS 凭据。' })
+                : accounts.length === 0
+                  ? t('admin:certs.need_acct_first', { defaultValue: '请先到「ACME 账号」标签建一个 ACME 账号，才能签发证书。' })
+                  : t('admin:certs.need_cred_first')}
+            </Typography>
           )}
           <Card sx={{ bgcolor: md.surfaceContainerLow, boxShadow: '0 1px 2px rgba(0,0,0,.3),0 1px 3px 1px rgba(0,0,0,.15)', overflow: 'hidden' }}>
             <TableContainer>
@@ -602,6 +626,11 @@ export default function CertificatesView() {
                         <Tooltip title={t('admin:certs.detail_title')}>
                           <IconButton size="small" onClick={() => openDetail(c)}>
                             <InfoOutlinedIcon fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                        <Tooltip title={t('common:actions.edit')}>
+                          <IconButton size="small" onClick={() => openCert(c)}>
+                            <EditIcon fontSize="small" />
                           </IconButton>
                         </Tooltip>
                         <Tooltip title={t('admin:certs.renew')}>
@@ -875,9 +904,9 @@ export default function CertificatesView() {
         </DialogActions>
       </Dialog>
 
-      {/* create-cert dialog */}
+      {/* create / edit cert dialog */}
       <Dialog open={certOpen} onClose={() => setCertOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>{t('admin:certs.new')}</DialogTitle>
+        <DialogTitle>{certEditing ? t('admin:certs.edit', { defaultValue: '编辑证书' }) : t('admin:certs.new')}</DialogTitle>
         <DialogContent>
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5, pt: 1 }}>
           <TextField label={t('admin:certs.col_name')} value={certName} onChange={e => setCertName(e.target.value)} size="small" autoFocus />
@@ -919,7 +948,7 @@ export default function CertificatesView() {
         <DialogActions>
           <Button onClick={() => setCertOpen(false)}>{t('common:actions.cancel')}</Button>
           <Button variant="contained" onClick={submitCert} disabled={certBusy}>
-            {certBusy ? <CircularProgress size={20} /> : t('common:actions.create')}
+            {certBusy ? <CircularProgress size={20} /> : (certEditing ? t('common:actions.save') : t('common:actions.create'))}
           </Button>
         </DialogActions>
       </Dialog>

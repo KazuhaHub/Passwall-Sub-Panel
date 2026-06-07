@@ -305,6 +305,64 @@ func TestCreateCertRequiresACMEAccount(t *testing.T) {
 	}
 }
 
+// Reassigning a cert's ACME account (e.g. a cert created before multi-account,
+// acme_account_id=0) must preserve the issued PEM and NOT re-issue.
+func TestUpdateCertReassignAccountKeepsIssuedNoReissue(t *testing.T) {
+	certs := newFakeCertRepo()
+	na := time.Now().Add(80 * 24 * time.Hour)
+	nb := time.Now()
+	c := &domain.TLSCertificate{Name: "w", Domains: []string{"x.com"}, ACMEAccountID: 0, Status: domain.CertStatusActive, CertPEM: "CERT", KeyPEM: "KEY", NotAfter: &na, NotBefore: &nb}
+	certs.Create(context.Background(), c)
+	tasks := &fakeTaskRepo{}
+	s := newTestService(certs, &fakeDNSRepo{}, seededAccount(), &fakeIssuer{}, &fakeNodeRepo{}, tasks, &fakePusher{})
+
+	if err := s.UpdateCert(context.Background(), &domain.TLSCertificate{ID: c.ID, Name: "w2", Domains: []string{"x.com"}, ACMEAccountID: 1, AutoRenew: true}); err != nil {
+		t.Fatal(err)
+	}
+	got := certs.certs[c.ID]
+	if got.ACMEAccountID != 1 || got.Name != "w2" {
+		t.Fatalf("config not updated: %#v", got)
+	}
+	if got.CertPEM != "CERT" || got.Status != domain.CertStatusActive {
+		t.Fatalf("must preserve issued PEM/status on a config-only edit: %#v", got)
+	}
+	if len(tasks.created) != 0 {
+		t.Fatalf("account-only change must not re-issue: %#v", tasks.created)
+	}
+}
+
+// Changing the SAN list must flip the cert to pending and enqueue a re-issue.
+func TestUpdateCertReissuesOnDomainsChange(t *testing.T) {
+	certs := newFakeCertRepo()
+	na := time.Now().Add(80 * 24 * time.Hour)
+	nb := time.Now()
+	c := &domain.TLSCertificate{Name: "w", Domains: []string{"x.com"}, ACMEAccountID: 1, Status: domain.CertStatusActive, CertPEM: "CERT", NotAfter: &na, NotBefore: &nb}
+	certs.Create(context.Background(), c)
+	tasks := &fakeTaskRepo{}
+	s := newTestService(certs, &fakeDNSRepo{}, seededAccount(), &fakeIssuer{}, &fakeNodeRepo{}, tasks, &fakePusher{})
+
+	if err := s.UpdateCert(context.Background(), &domain.TLSCertificate{ID: c.ID, Name: "w", Domains: []string{"x.com", "y.com"}, ACMEAccountID: 1, AutoRenew: true}); err != nil {
+		t.Fatal(err)
+	}
+	got := certs.certs[c.ID]
+	if got.Status != domain.CertStatusPending {
+		t.Fatalf("domains change must flip to pending, got %s", got.Status)
+	}
+	if len(tasks.created) != 1 || tasks.created[0].Type != domain.SyncTaskCertIssue {
+		t.Fatalf("domains change must enqueue a re-issue: %#v", tasks.created)
+	}
+}
+
+func TestUpdateCertRequiresACMEAccount(t *testing.T) {
+	certs := newFakeCertRepo()
+	c := &domain.TLSCertificate{Name: "w", Domains: []string{"x"}, ACMEAccountID: 1, Status: domain.CertStatusActive}
+	certs.Create(context.Background(), c)
+	s := newTestService(certs, &fakeDNSRepo{}, seededAccount(), &fakeIssuer{}, &fakeNodeRepo{}, &fakeTaskRepo{}, &fakePusher{})
+	if err := s.UpdateCert(context.Background(), &domain.TLSCertificate{ID: c.ID, Name: "w", Domains: []string{"x"}, ACMEAccountID: 0}); !errors.Is(err, domain.ErrValidation) {
+		t.Fatalf("update without an acme account must be a validation error, got %v", err)
+	}
+}
+
 func TestRunCertTaskIssuesPersistsAndDeploys(t *testing.T) {
 	certs := newFakeCertRepo()
 	c := &domain.TLSCertificate{Name: "w", Domains: []string{"*.example.com"}, ACMEAccountID: 1, DNSCredentialID: 7, Status: domain.CertStatusPending}

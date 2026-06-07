@@ -4,6 +4,18 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## v3.7.0-beta.15 — 2026-06-07
+
+补全 beta.14 多 ACME 的**证书编辑**能力 + 创建可发现性修复。`go test ./...` / `go vet` / `tsc` / `npm build` / 二进制全绿。
+
+### Added
+
+- **编辑证书** —— 证书行新增「编辑」按钮，可改 名称 / 域名 / **ACME 账号** / DNS 凭据 / 自动续期。保留已签发的 PEM；**仅当 SAN 域名列表变化才重新签发**（内容必须匹配），改账号/凭据/名称不动现有证书（下次续期或手动「续期」时生效）。后端 `PUT /admin/certs/:id` + `cert.Service.UpdateCert`（校验 ACME 账号存在、域名变更置 pending 并入队重签），带 TDD。**这也是 beta.14 之前签发的证书（`acme_account_id` 未设）重新指派 ACME 账号、恢复可续期的唯一途径。**
+
+### Fixed
+
+- **证书创建可发现性** —— 「New certificate」按钮现在在**无 ACME 账号或无 DNS 凭据**时禁用，并在证书 tab 给出按缺项区分的指引文案（此前只看 DNS 凭据，导致能打开证书表单却发现 ACME 账号下拉为空）。
+
 ## v3.7.0-beta.14 — 2026-06-07
 
 新增**多 ACME 账号支持**（合规向）+ **Passkey step-up 自助 2FA 管理** + 证书页 UI 小修。`go test ./...` / `go vet` / `tsc` / `npm build` / 二进制 / 启动 smoke 全绿；多 ACME 经**真机 LE-staging 端到端签发实测通过**。

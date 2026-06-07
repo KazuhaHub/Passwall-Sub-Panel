@@ -283,6 +283,67 @@ func validateACMEAccount(a *domain.ACMEAccount) error {
 	return nil
 }
 
+// UpdateCert edits a certificate's config (name / domains / ACME account / DNS
+// credential / auto-renew) WITHOUT touching the already-issued PEM. An ACME
+// account is required and must exist. If the SAN list changes, the issued cert no
+// longer matches, so it's flipped to pending and a re-issue is enqueued.
+func (s *Service) UpdateCert(ctx context.Context, in *domain.TLSCertificate) error {
+	if in.ACMEAccountID == 0 {
+		return fmt.Errorf("%w: an ACME account is required", domain.ErrValidation)
+	}
+	if _, err := s.accounts.GetByID(ctx, in.ACMEAccountID); err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			return fmt.Errorf("%w: acme account not found", domain.ErrValidation)
+		}
+		return err
+	}
+	existing, err := s.certs.GetByID(ctx, in.ID)
+	if err != nil {
+		return err
+	}
+	domainsChanged := !sameDomains(existing.Domains, in.Domains)
+	existing.Name = in.Name
+	existing.Domains = in.Domains
+	existing.ACMEAccountID = in.ACMEAccountID
+	existing.DNSCredentialID = in.DNSCredentialID
+	existing.AutoRenew = in.AutoRenew
+	if domainsChanged {
+		// The issued cert's SAN list no longer matches — re-issue under the
+		// (possibly new) account. Changing only the account/cred/name does NOT
+		// re-issue: the current cert stays valid; the next renewal uses the new
+		// settings (or the admin can hit "renew" to re-issue now).
+		existing.Status = domain.CertStatusPending
+		existing.LastError = ""
+	}
+	if err := s.certs.Update(ctx, existing); err != nil {
+		return err
+	}
+	if domainsChanged {
+		return s.enqueueCertTask(ctx, domain.SyncTaskCertIssue, existing.ID, "re-issue certificate "+existing.Name)
+	}
+	return nil
+}
+
+// sameDomains reports whether two SAN lists hold the same names (order-insensitive).
+func sameDomains(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	seen := make(map[string]int, len(a))
+	for _, d := range a {
+		seen[d]++
+	}
+	for _, d := range b {
+		seen[d]--
+	}
+	for _, n := range seen {
+		if n != 0 {
+			return false
+		}
+	}
+	return true
+}
+
 // DeleteCert refuses while any node still references the certificate — a
 // dangling cert_id would leave that node's TLS deploy unsatisfiable. Mirrors the
 // xui_panel delete guard.
