@@ -265,11 +265,9 @@ export default function CertificatesView() {
       setAcctKeyType(a.key_type || 'EC256'); setAcctEABKid(a.eab_key_id); setAcctEABHmac('')
     } else {
       setAcctEditing(null)
-      // Prefill from the legacy global ACME settings on first account (saves
-      // re-typing what the admin already configured before multi-account).
       setAcctName('')
-      setAcctEmail(accounts.length === 0 ? (settings?.acme_email || '') : '')
-      setAcctDir(accounts.length === 0 ? (settings?.acme_directory_url || LE_PROD) : LE_PROD)
+      setAcctEmail('')
+      setAcctDir(LE_PROD)
       setAcctKeyType('EC256'); setAcctEABKid(''); setAcctEABHmac('')
     }
     setAcctOpen(true)

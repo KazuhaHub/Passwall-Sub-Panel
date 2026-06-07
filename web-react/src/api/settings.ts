@@ -158,8 +158,6 @@ export interface UISettings {
    *  page round-trips them on save instead of resetting them to defaults. */
   cert_renew_before_days: number
   cert_renew_check_interval_hours: number
-  acme_email: string
-  acme_directory_url: string
   /** Write-only: sent on PUT (empty = keep existing), never returned. The
    *  presence flag below reports whether one is stored. */
   geo_ip_update_token?: string

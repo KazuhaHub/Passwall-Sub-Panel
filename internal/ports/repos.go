@@ -920,13 +920,6 @@ type UISettings struct {
 	// effect without a restart.
 	CertRenewBeforeDays         int `json:"cert_renew_before_days"`
 	CertRenewCheckIntervalHours int `json:"cert_renew_check_interval_hours"`
-	// ACMEEmail / ACMEDirectoryURL are LEGACY (v3.7.0): multi-account moved the
-	// ACME contact + CA directory onto per-account profiles (acme_accounts table).
-	// They're no longer used for issuance and are dropped from the settings UI;
-	// the stored value is kept only to PREFILL the first ACME-account form. The PUT
-	// path carries them over from the previous settings (no UI control writes them).
-	ACMEEmail        string `json:"acme_email"`
-	ACMEDirectoryURL string `json:"acme_directory_url"`
 
 	// AuthEventRetentionDays bounds how long the authentication-event log is
 	// kept — separate from AuditRetentionDays so logins can be retained on their

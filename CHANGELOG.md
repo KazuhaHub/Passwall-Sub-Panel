@@ -4,6 +4,19 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## v3.7.0-beta.16 — 2026-06-07
+
+清理：移除多 ACME（beta.14）唯一遗留的兼容代码 + 旧 ACME 设置标签的死 i18n。`go test ./...` / `go vet` / `tsc` / `npm build` / 二进制全绿。
+
+### Removed
+
+- **全局 ACME email/directory 兼容代码彻底移除** —— 多账号重构后曾保留 `acme_email` / `acme_directory_url` 仅为「首次新建 ACME 账号」预填；按「同一发布线 beta 之间不留兼容代码」原则全删：`UISettings` 两字段、KV 描述符、默认值兜底、admin settings DTO/GET/PUT carry-over、前端 `settings.ts` type、`openAcct` 预填逻辑。新建 ACME 账号的邮箱/目录默认为空 / Let's Encrypt 生产，手填一次即可。
+- **死 i18n 清理** —— 旧「ACME settings」标签遗留的未引用键 `acme_title/acme_subtitle/acme_email/acme_directory/acme_le_prod/acme_le_staging`（中英各 6 条）删除；仍在用的 `acme_email_hint`/`acme_directory_hint`/`acme_renew_*` 保留。
+
+### 备注
+
+- 升级后 `settings` 表会残留 3 条孤儿 KV 行（`security/twofa_allow_passkey`、`cert/acme_email`、`cert/acme_directory_url`）——应用已不读，可按需手删，无害。
+
 ## v3.7.0-beta.15 — 2026-06-07
 
 补全 beta.14 多 ACME 的**证书编辑**能力 + 创建可发现性修复。`go test ./...` / `go vet` / `tsc` / `npm build` / 二进制全绿。

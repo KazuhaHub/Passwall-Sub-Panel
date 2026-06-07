@@ -285,8 +285,6 @@ func settingDescriptors(s *ports.UISettings) []settingDescriptor {
 		// cert --- PSP-managed ACME certificate automation (v3.6.4)
 		intField("cert", "cert_renew_before_days", &s.CertRenewBeforeDays),
 		intField("cert", "cert_renew_check_interval_hours", &s.CertRenewCheckIntervalHours),
-		strField("cert", "acme_email", &s.ACMEEmail),
-		strField("cert", "acme_directory_url", &s.ACMEDirectoryURL),
 	}
 }
 
@@ -531,12 +529,6 @@ func applyUISettingsDefaults(out, defaults ports.UISettings) ports.UISettings {
 	}
 	if out.RegistrationDelivery == "" {
 		out.RegistrationDelivery = "link"
-	}
-	if out.ACMEDirectoryURL == "" {
-		// Let's Encrypt production. Switch to the staging directory
-		// (https://acme-staging-v02.api.letsencrypt.org/directory) while testing
-		// to avoid prod rate limits.
-		out.ACMEDirectoryURL = "https://acme-v02.api.letsencrypt.org/directory"
 	}
 	// Unified client registry (v3.3.0). When absent, either migrate the legacy
 	// two-table config (sub_client_rules + sub_import_clients) in place — a

@@ -88,11 +88,11 @@ type settingsDTO struct {
 	// never echoed on GET. HasGeoIPUpdateToken reports whether one is set.
 	GeoIPUpdateToken    string `json:"geo_ip_update_token,omitempty"`
 	HasGeoIPUpdateToken bool   `json:"has_geo_ip_update_token"`
-	// PSP-managed certificate automation (v3.6.4).
-	CertRenewBeforeDays         int    `json:"cert_renew_before_days"`
-	CertRenewCheckIntervalHours int    `json:"cert_renew_check_interval_hours"`
-	ACMEEmail                   string `json:"acme_email"`
-	ACMEDirectoryURL            string `json:"acme_directory_url"`
+	// PSP-managed certificate automation (v3.6.4). ACME contact/CA moved to
+	// per-account profiles (acme_accounts) in v3.7.0; only the renewal cadence
+	// remains a panel-wide setting.
+	CertRenewBeforeDays         int `json:"cert_renew_before_days"`
+	CertRenewCheckIntervalHours int `json:"cert_renew_check_interval_hours"`
 	// Login security: CAPTCHA + account lockout (v3.7.0).
 	CaptchaEnabled       bool   `json:"captcha_enabled"`
 	CaptchaProvider      string `json:"captcha_provider"`
@@ -221,8 +221,6 @@ func settingsToDTO(s ports.UISettings) settingsDTO {
 		GeoIPUpdateIntervalHours:   s.GeoIPUpdateIntervalHours,
 		CertRenewBeforeDays:         s.CertRenewBeforeDays,
 		CertRenewCheckIntervalHours: s.CertRenewCheckIntervalHours,
-		ACMEEmail:                   s.ACMEEmail,
-		ACMEDirectoryURL:            s.ACMEDirectoryURL,
 		// Update token masked: never echoed, only presence reported.
 		HasGeoIPUpdateToken: strings.TrimSpace(s.GeoIPUpdateToken) != "",
 		CaptchaEnabled:       s.CaptchaEnabled,
@@ -333,11 +331,6 @@ func (h *AdminSettingsHandler) Put(c *gin.Context) {
 		GeoIPUpdateIntervalHours:   req.GeoIPUpdateIntervalHours,
 		CertRenewBeforeDays:         req.CertRenewBeforeDays,
 		CertRenewCheckIntervalHours: req.CertRenewCheckIntervalHours,
-		// ACMEEmail/ACMEDirectoryURL are legacy (multi-account moved them to the
-		// acme_accounts table). No UI control writes them; carry the stored value
-		// over so it survives as a prefill hint for the first ACME-account form.
-		ACMEEmail:        prev.ACMEEmail,
-		ACMEDirectoryURL: prev.ACMEDirectoryURL,
 		CaptchaEnabled:              req.CaptchaEnabled,
 		CaptchaProvider:             strings.ToLower(strings.TrimSpace(req.CaptchaProvider)),
 		CaptchaTrigger:              strings.ToLower(strings.TrimSpace(req.CaptchaTrigger)),
