@@ -63,10 +63,17 @@ content: |
     direct-nameserver: []
     direct-nameserver-follow-policy: false
 
-    # Bootstrap: resolves the DoH hostnames below; must be plain IPs
+    # Bootstrap: resolves the DoH hostnames below. Entries must be IP-hosted
+    # (plain IP, or encrypted DNS whose host is a literal IP). The domestic
+    # pair answers first inside China; the Cloudflare DoH-by-IP is a poison-
+    # resistant foreign fallback — its cert carries IP SANs so it validates
+    # without skip-cert-verify; blocked in CN (concurrent query, domestic wins,
+    # no added latency), used when running abroad. NB: 8.8.8.8-by-IP would NOT
+    # work here (Google's cert is dns.google-only, no IP SAN) — Cloudflare only.
     default-nameserver:
     - 223.5.5.5
     - 119.29.29.29
+    - https://1.1.1.1/dns-query
 
     # Resolves proxy-node domains; must be bare-reachable domestic DoH,
     # otherwise you can't connect to the nodes in the first place
@@ -88,12 +95,15 @@ content: |
       "geosite:cn,private,apple-cn,microsoft@cn":
       - https://dns.alidns.com/dns-query
       - https://doh.pub/dns-query
-      # Foreign domains -> org Cloudflare Gateway (primary), public CF/Google as backup.
-      # Bare resolution verified working on this line (TCP ping + full DoH Status:0).
+      # Foreign domains -> org Cloudflare Gateway (primary; bare resolution
+      # verified working — TCP ping + full DoH Status:0), public Cloudflare
+      # 1.1.1.1 / 1.0.0.1 as backup. The CF IPs carry IP SANs so DoH-by-IP
+      # validates cleanly; Google 8.8.8.8-by-IP is NOT used (its cert is
+      # dns.google-only, no IP SAN -> would fail certificate validation).
       "geosite:geolocation-!cn":
       - https://v5brh3pn84.cloudflare-gateway.com/dns-query
       - https://1.1.1.1/dns-query
-      - https://8.8.8.8/dns-query
+      - https://1.0.0.1/dns-query
 
   proxies:
     {{ proxies }}

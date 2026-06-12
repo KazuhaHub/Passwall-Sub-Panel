@@ -415,4 +415,40 @@ func TestSeedSingBoxRuleSetReferentialIntegrity(t *testing.T) {
 	assertAllRulesHaveAction("dns.rules", dnsRules)
 	routeRules, _ := route["rules"].([]any)
 	assertAllRulesHaveAction("route.rules", routeRules)
+
+	// DNS-server referential integrity: every dns.rules[].server, dns.final,
+	// and per-server domain_resolver must name a DEFINED dns.servers tag. A
+	// dangling reference (typo, renamed/removed server) is a load error in
+	// sing-box, so guard it here.
+	dnsServers, _ := dnsBlock["servers"].([]any)
+	serverTags := map[string]bool{}
+	for _, s := range dnsServers {
+		if sm, ok := s.(map[string]any); ok {
+			if tag, ok := sm["tag"].(string); ok {
+				serverTags[tag] = true
+			}
+		}
+	}
+	assertServerRef := func(what, tag string) {
+		if tag != "" && !serverTags[tag] {
+			t.Fatalf("%s references undefined dns server %q (defined=%v)", what, tag, serverTags)
+		}
+	}
+	for _, r := range dnsRules {
+		if rm, ok := r.(map[string]any); ok {
+			if srv, ok := rm["server"].(string); ok {
+				assertServerRef("a dns.rule", srv)
+			}
+		}
+	}
+	if f, ok := dnsBlock["final"].(string); ok {
+		assertServerRef("dns.final", f)
+	}
+	for _, s := range dnsServers {
+		if sm, ok := s.(map[string]any); ok {
+			if dr, ok := sm["domain_resolver"].(string); ok {
+				assertServerRef("server "+sm["tag"].(string)+".domain_resolver", dr)
+			}
+		}
+	}
 }

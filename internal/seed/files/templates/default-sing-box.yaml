@@ -41,10 +41,14 @@ content: |
           "domain_resolver": "bootstrap"
         },
         {
-          "tag": "cloudflare",
+          "tag": "cloudflare-1111",
           "type": "https",
-          "server": "cloudflare-dns.com",
-          "domain_resolver": "bootstrap"
+          "server": "1.1.1.1"
+        },
+        {
+          "tag": "cloudflare-1001",
+          "type": "https",
+          "server": "1.0.0.1"
         }
       ],
       "rules": [
