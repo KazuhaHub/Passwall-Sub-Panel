@@ -1135,6 +1135,13 @@ type GlobalAnnouncement struct {
 	UpdatedAt string `yaml:"updated_at" json:"updated_at"`
 }
 
+// SettingsReader is the read-only Load slice of SettingsRepo / ScopedSettings,
+// for helpers (paneltz timezone, sub-path/base resolution) that only need the
+// global value and must accept either the plain repo or the scoped resolver.
+type SettingsReader interface {
+	Load(ctx context.Context, defaults UISettings) (UISettings, error)
+}
+
 type SettingsRepo interface {
 	Load(ctx context.Context, defaults UISettings) (UISettings, error)
 	Save(ctx context.Context, s UISettings) error

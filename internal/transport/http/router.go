@@ -152,7 +152,7 @@ func NewRouter(d Deps) *gin.Engine {
 	// enrollment endpoints, and the admin break-glass reset.
 	twofaSvc := twofa.New(twofa.Deps{
 		Users:    d.Repos.User,
-		Settings: d.Repos.Settings,
+		Settings: d.Repos.ScopedSettings,
 		// So disabling TOTP keeps the recovery codes when a passkey remains as the
 		// account's second factor (see twofa.clearTOTPKeepingFactors).
 		PasskeyCount: func(ctx context.Context, userID int64) (int, error) {
@@ -163,7 +163,7 @@ func NewRouter(d Deps) *gin.Engine {
 
 	// Passkey (WebAuthn) service — shared by the usernameless login endpoints and
 	// the profile-page enrollment/management endpoints.
-	passkeySvc := passkey.New(passkey.Deps{Creds: d.Repos.WebAuthn, Users: d.Repos.User, Settings: d.Repos.Settings})
+	passkeySvc := passkey.New(passkey.Deps{Creds: d.Repos.WebAuthn, Users: d.Repos.User, Settings: d.Repos.ScopedSettings})
 
 	// Email-as-2FA service — emails a one-time login code as an alternative 2FA
 	// factor (admin opt-in). Reuses the auth_tokens OTP machinery.
@@ -249,7 +249,7 @@ func NewRouter(d Deps) *gin.Engine {
 	enroll2FA := authpolicy.New(authpolicy.Deps{Groups: d.Repos.Group, Passkeys: d.Repos.WebAuthn, Settings: d.Repos.ScopedSettings})
 	require2FAGate := middleware.Require2FAEnrollment(enroll2FA, d.User)
 
-	userMe := handler.NewUserMeHandler(d.User, d.Traffic, d.Repos.Settings, d.Repos.Node, d.Repos.Ownership, twofaSvc, passkeySvc, enroll2FA)
+	userMe := handler.NewUserMeHandler(d.User, d.Traffic, d.Repos.ScopedSettings, d.Repos.Node, d.Repos.Ownership, twofaSvc, passkeySvc, enroll2FA)
 	userGroup := g.Group("/api/user/me",
 		middleware.RequireAuth(d.Auth, d.User),
 		// Operators are included so that an operator forced to enroll 2FA (via the

@@ -55,6 +55,10 @@ func (s stubSettings) Load(context.Context, ports.UISettings) (ports.UISettings,
 	return ports.UISettings{TOTPEnabled: s.on, SiteTitle: "Kazuha Hub Passwall", AppTitle: "Passwall"}, nil
 }
 
+func (s stubSettings) LoadForUser(context.Context, *domain.User, ports.UISettings) (ports.UISettings, error) {
+	return ports.UISettings{TOTPEnabled: s.on, SiteTitle: "Kazuha Hub Passwall", AppTitle: "Passwall"}, nil
+}
+
 func newSvc(store *memStore, on bool, validCode string) *Service {
 	return New(Deps{
 		Users:    store,
@@ -78,6 +82,39 @@ func TestBegin_AlreadyEnabled(t *testing.T) {
 	st := &memStore{user: &domain.User{ID: 1, UPN: "u@x", PasswordHash: "bcrypt"}, enabled: true, secret: "S"}
 	if _, _, err := newSvc(st, true, "111111").Begin(context.Background(), 1); err == nil {
 		t.Fatal("Begin must error when 2FA is already enabled")
+	}
+}
+
+// stubPerGroupSettings enables TOTP enrollment only for users in allowGroupID —
+// proves availableForUser resolves the EFFECTIVE (group-scoped) setting.
+type stubPerGroupSettings struct{ allowGroupID int64 }
+
+func (s stubPerGroupSettings) Load(_ context.Context, d ports.UISettings) (ports.UISettings, error) {
+	d.SiteTitle = "Kazuha Hub Passwall"
+	return d, nil
+}
+func (s stubPerGroupSettings) LoadForUser(_ context.Context, u *domain.User, d ports.UISettings) (ports.UISettings, error) {
+	d.TOTPEnabled = u != nil && u.GroupID == s.allowGroupID
+	d.SiteTitle = "Kazuha Hub Passwall"
+	return d, nil
+}
+
+func TestBegin_PerGroupGating(t *testing.T) {
+	mk := func(groupID int64) *Service {
+		st := &memStore{user: &domain.User{ID: 1, UPN: "u@x", PasswordHash: "bcrypt", GroupID: groupID}}
+		return New(Deps{
+			Users:       st,
+			Settings:    stubPerGroupSettings{allowGroupID: 7},
+			Validate:    func(string, string) bool { return true },
+			GenSecret:   func(_, _ string) (string, string, error) { return "S", "otpauth://x", nil },
+			GenRecovery: func() ([]string, error) { return nil, nil },
+		})
+	}
+	if _, _, err := mk(7).Begin(context.Background(), 1); err != nil {
+		t.Fatalf("group 7 has TOTP enrollment enabled via override: %v", err)
+	}
+	if _, _, err := mk(9).Begin(context.Background(), 1); err == nil {
+		t.Fatal("group 9 inherits the global (off) → Begin must be gated")
 	}
 }
 

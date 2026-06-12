@@ -78,6 +78,10 @@ func (f stubSettings) Load(context.Context, ports.UISettings) (ports.UISettings,
 	return f.s, nil
 }
 
+func (f stubSettings) LoadForUser(context.Context, *domain.User, ports.UISettings) (ports.UISettings, error) {
+	return f.s, nil
+}
+
 type stubCredStore struct {
 	updated     bool
 	revokedUser int64

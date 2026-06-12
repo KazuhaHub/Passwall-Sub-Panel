@@ -41,8 +41,12 @@ type UserGetter interface {
 	GetByID(ctx context.Context, id int64) (*domain.User, error)
 }
 
+// SettingsLoader needs the global value (RP-ID / display name / passwordless are
+// panel-wide) and the per-user effective value (a group can gate passkey
+// enrollment + passkey-as-2FA). Wired to the ScopedSettings resolver.
 type SettingsLoader interface {
 	Load(ctx context.Context, defaults ports.UISettings) (ports.UISettings, error)
+	LoadForUser(ctx context.Context, u *domain.User, defaults ports.UISettings) (ports.UISettings, error)
 }
 
 type Deps struct {
@@ -66,9 +70,21 @@ func New(d Deps) *Service {
 	return &Service{d: d, now: now, sessions: newSessionStore(now)}
 }
 
-// Available reports whether the admin has enabled passkey enrollment.
+// Available reports whether passkeys are enabled panel-wide (global). Kept for
+// the global view + tests; enrollment / passkey-as-2FA use availableForUser.
 func (s *Service) Available(ctx context.Context) bool {
 	set, err := s.d.Settings.Load(ctx, ports.UISettings{})
+	return err == nil && set.PasskeyEnabled
+}
+
+// availableForUser reports whether passkeys are enabled for the user's EFFECTIVE
+// (group-scoped) settings — a group can gate passkey enrollment + passkey-as-2FA.
+func (s *Service) availableForUser(ctx context.Context, userID int64) bool {
+	u, err := s.d.Users.GetByID(ctx, userID)
+	if err != nil {
+		return false
+	}
+	set, err := s.d.Settings.LoadForUser(ctx, u, ports.UISettings{})
 	return err == nil && set.PasskeyEnabled
 }
 
@@ -169,7 +185,7 @@ func (s *Service) loadUser(ctx context.Context, userID int64) (*webauthnUser, []
 // BeginRegistration starts enrollment for a logged-in user: returns the creation
 // options to hand to the browser + a session id that must come back to Finish.
 func (s *Service) BeginRegistration(ctx context.Context, userID int64) (*protocol.PublicKeyCredentialCreationOptions, string, error) {
-	if !s.Available(ctx) {
+	if !s.availableForUser(ctx, userID) {
 		return nil, "", fmt.Errorf("%w: passkeys are not enabled on this panel", domain.ErrForbidden)
 	}
 	wa, err := s.newWebAuthn(ctx)
@@ -198,7 +214,7 @@ func (s *Service) BeginRegistration(ctx context.Context, userID int64) (*protoco
 // the given name, and returns it. The request body is the authenticator response
 // produced by the browser.
 func (s *Service) FinishRegistration(ctx context.Context, userID int64, sessionID, name string, r *http.Request) (*domain.PasskeyCredential, error) {
-	if !s.Available(ctx) {
+	if !s.availableForUser(ctx, userID) {
 		return nil, fmt.Errorf("%w: passkeys are not enabled on this panel", domain.ErrForbidden)
 	}
 	session := s.sessions.take(sessionID)
@@ -313,7 +329,7 @@ func (s *Service) FinishLogin(ctx context.Context, sessionID string, r *http.Req
 // passwordless, and it errors if the user has no passkeys. Returns request
 // options (with the user's credentials as the allow-list) + a session id.
 func (s *Service) BeginLoginForUser(ctx context.Context, userID int64) (*protocol.PublicKeyCredentialRequestOptions, string, error) {
-	if !s.Available(ctx) {
+	if !s.availableForUser(ctx, userID) {
 		return nil, "", fmt.Errorf("%w: passkeys are not enabled on this panel", domain.ErrForbidden)
 	}
 	wa, err := s.newWebAuthn(ctx)
@@ -343,7 +359,7 @@ func (s *Service) BeginLoginForUser(ctx context.Context, userID int64) (*protoco
 // verified pending token, so this never resolves identity from the assertion. On
 // success it rejects a cloned authenticator and advances the gated sign count.
 func (s *Service) FinishLoginForUser(ctx context.Context, userID int64, sessionID string, r *http.Request) error {
-	if !s.Available(ctx) {
+	if !s.availableForUser(ctx, userID) {
 		return fmt.Errorf("%w: passkeys are not enabled on this panel", domain.ErrForbidden)
 	}
 	session := s.sessions.take(sessionID)

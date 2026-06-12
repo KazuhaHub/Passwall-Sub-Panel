@@ -38,8 +38,12 @@ type Store interface {
 	GetByID(ctx context.Context, userID int64) (*domain.User, error)
 }
 
+// SettingsLoader needs the global value (the TOTP issuer = BrandName is
+// panel-wide) and the per-user effective value (a group can gate TOTP
+// enrollment). Wired to the ScopedSettings resolver.
 type SettingsLoader interface {
 	Load(ctx context.Context, defaults ports.UISettings) (ports.UISettings, error)
+	LoadForUser(ctx context.Context, u *domain.User, defaults ports.UISettings) (ports.UISettings, error)
 }
 
 type Deps struct {
@@ -87,9 +91,14 @@ func New(d Deps) *Service {
 	return s
 }
 
-// Available reports whether the admin has enabled 2FA enrollment panel-wide.
-func (s *Service) Available(ctx context.Context) bool {
-	set, err := s.d.Settings.Load(ctx, ports.UISettings{})
+// availableForUser reports whether TOTP enrollment is enabled for the user's
+// EFFECTIVE (group-scoped) settings — a group can gate TOTP enrollment.
+func (s *Service) availableForUser(ctx context.Context, userID int64) bool {
+	u, err := s.d.Users.GetByID(ctx, userID)
+	if err != nil {
+		return false
+	}
+	set, err := s.d.Settings.LoadForUser(ctx, u, ports.UISettings{})
 	return err == nil && set.TOTPEnabled
 }
 
@@ -97,7 +106,7 @@ func (s *Service) Available(ctx context.Context) bool {
 // isn't active until confirmed), and returns the otpauth URL (for the QR) + the
 // raw secret (for manual entry). Errors if 2FA is off panel-wide or already on.
 func (s *Service) Begin(ctx context.Context, userID int64) (otpauthURL, secret string, err error) {
-	if !s.Available(ctx) {
+	if !s.availableForUser(ctx, userID) {
 		return "", "", fmt.Errorf("%w: two-factor authentication is not enabled on this panel", domain.ErrForbidden)
 	}
 	u, err := s.d.Users.GetByID(ctx, userID)
@@ -130,7 +139,7 @@ func (s *Service) Begin(ctx context.Context, userID int64) (otpauthURL, secret s
 // marks 2FA enabled, generates one-time recovery codes (stored hashed), and
 // returns the plaintext codes to show ONCE.
 func (s *Service) Enable(ctx context.Context, userID int64, code string) ([]string, error) {
-	if !s.Available(ctx) {
+	if !s.availableForUser(ctx, userID) {
 		return nil, fmt.Errorf("%w: two-factor authentication is not enabled on this panel", domain.ErrForbidden)
 	}
 	secret, enabled, _, err := s.d.Users.GetTOTP(ctx, userID)

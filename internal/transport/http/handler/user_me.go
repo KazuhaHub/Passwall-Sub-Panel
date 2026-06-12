@@ -27,7 +27,7 @@ import (
 type UserMeHandler struct {
 	user      *user.Service
 	traffic   *traffic.Service
-	settings  ports.SettingsRepo
+	settings  ports.ScopedSettings
 	nodes     ports.NodeRepo
 	ownership ports.OwnershipRepo
 	twofa     *twofa.Service
@@ -35,7 +35,7 @@ type UserMeHandler struct {
 	enroll    *authpolicy.Service
 }
 
-func NewUserMeHandler(userSvc *user.Service, trafficSvc *traffic.Service, settings ports.SettingsRepo, nodes ports.NodeRepo, ownership ports.OwnershipRepo, twofaSvc *twofa.Service, passkeySvc *passkey.Service, enroll *authpolicy.Service) *UserMeHandler {
+func NewUserMeHandler(userSvc *user.Service, trafficSvc *traffic.Service, settings ports.ScopedSettings, nodes ports.NodeRepo, ownership ports.OwnershipRepo, twofaSvc *twofa.Service, passkeySvc *passkey.Service, enroll *authpolicy.Service) *UserMeHandler {
 	return &UserMeHandler{user: userSvc, traffic: trafficSvc, settings: settings, nodes: nodes, ownership: ownership, twofa: twofaSvc, passkey: passkeySvc, enroll: enroll}
 }
 
@@ -71,7 +71,10 @@ func (h *UserMeHandler) Profile(c *gin.Context) {
 	}
 	// Passkeys (best-effort): the sanitized credential list for the management
 	// dialog. Never expose the raw credential record — only id/name/timestamps.
-	passkeyAvailable := u.HasLocalPassword() && settingsErr == nil && settings.PasskeyEnabled
+	// The 2FA method-availability fields are group-scoped; the rest of the profile
+	// (sub / branding / traffic) stays global.
+	suEff, suErr := h.settings.LoadForUser(c.Request.Context(), u, ports.UISettings{})
+	passkeyAvailable := u.HasLocalPassword() && suErr == nil && suEff.PasskeyEnabled
 	passkeyList := h.passkeyList(c.Request.Context(), u.ID)
 	c.JSON(http.StatusOK, gin.H{
 		"id":           u.ID,
@@ -107,7 +110,7 @@ func (h *UserMeHandler) Profile(c *gin.Context) {
 		// 2FA self-service: totp_available means the admin has turned on
 		// panel-wide enrollment AND the account has a local password (SSO-only
 		// accounts can't enroll). totp_enabled is this user's current state.
-		"totp_available": u.HasLocalPassword() && settingsErr == nil && settings.TOTPEnabled,
+		"totp_available": u.HasLocalPassword() && suErr == nil && suEff.TOTPEnabled,
 		"totp_enabled":   u.TOTPEnabled,
 		// recovery_codes_remaining drives the user portal's "recovery codes" surface:
 		// it's shown whenever the account has any second factor (TOTP or passkey),
@@ -516,7 +519,7 @@ func (h *UserMeHandler) subURL(r *http.Request, token string) string {
 
 // resolveSubBase returns the panel's public base URL from the DB settings.
 // Empty means the caller may fall back to the current request's origin.
-func resolveSubBase(ctx context.Context, s ports.SettingsRepo) string {
+func resolveSubBase(ctx context.Context, s ports.SettingsReader) string {
 	if s == nil {
 		return ""
 	}
@@ -527,7 +530,7 @@ func resolveSubBase(ctx context.Context, s ports.SettingsRepo) string {
 	return st.SubBaseURL
 }
 
-func resolveSubBaseForRequest(ctx context.Context, s ports.SettingsRepo, r *http.Request) string {
+func resolveSubBaseForRequest(ctx context.Context, s ports.SettingsReader, r *http.Request) string {
 	if base := strings.TrimSpace(resolveSubBase(ctx, s)); base != "" {
 		return base
 	}
@@ -574,7 +577,7 @@ func firstForwardedValue(v string) string {
 	return strings.TrimSpace(v)
 }
 
-func resolveSubPath(ctx context.Context, s ports.SettingsRepo, token string) string {
+func resolveSubPath(ctx context.Context, s ports.SettingsReader, token string) string {
 	subPath := "sub"
 	if s != nil {
 		st, err := s.Load(ctx, ports.UISettings{SubPath: "sub"})

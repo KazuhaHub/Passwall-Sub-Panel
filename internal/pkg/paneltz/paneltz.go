@@ -30,7 +30,7 @@ var locationCache sync.Map // map[string]*time.Location
 // time.Local when the settings repo is nil, the load errors out, the
 // configured value is blank, or it's unparseable — matching pre-tz
 // behavior so existing installs keep working unchanged.
-func Location(ctx context.Context, settings ports.SettingsRepo) *time.Location {
+func Location(ctx context.Context, settings ports.SettingsReader) *time.Location {
 	if settings == nil {
 		return time.Local
 	}
