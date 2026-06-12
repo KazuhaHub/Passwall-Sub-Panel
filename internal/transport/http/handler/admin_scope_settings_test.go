@@ -124,17 +124,19 @@ func TestScopeSettingsHandler_GroupNotFound(t *testing.T) {
 }
 
 // TestOverridableScopeKeysAreKnown drift-guards the allowlist: every overridable
-// key must be a live setting name (else a write would strand on a dead key).
+// key must be a live setting descriptor (else a write would strand on a dead key
+// AND the resolver would silently skip the row). Validates the FULL "type.name"
+// the resolver/write-gate key on — a name-only check would pass a mistyped type
+// prefix (e.g. "sub.allow_user_personal_rules") that no-ops at runtime.
 func TestOverridableScopeKeysAreKnown(t *testing.T) {
-	known := mysql.KnownSettingNames()
+	known := mysql.KnownSettingKeys()
 	for key := range ports.OverridableScopeKeys {
-		parts := strings.SplitN(key, ".", 2)
-		if len(parts) != 2 {
+		if !strings.Contains(key, ".") {
 			t.Errorf("overridable key %q must be \"type.name\"", key)
 			continue
 		}
-		if !known[parts[1]] {
-			t.Errorf("overridable key %q is not a known setting name", key)
+		if !known[key] {
+			t.Errorf("overridable key %q is not a known setting descriptor (type.name mismatch)", key)
 		}
 	}
 }

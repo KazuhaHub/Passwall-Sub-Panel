@@ -168,6 +168,22 @@ func KnownSettingNames() map[string]bool {
 	return out
 }
 
+// KnownSettingKeys is like KnownSettingNames but keyed on the FULL "type.name"
+// the resolver and write-gate actually match on (applyScopeOverrides builds
+// d.Type+"."+d.Name; settingKeyEncrypted matches d.Type && d.Name). The
+// OverridableScopeKeys drift guard must validate the full key, not just the
+// name — a mistyped type prefix passes a name-only check yet silently no-ops at
+// both seams (SetOverride rejects it, applyScopeOverrides skips it).
+func KnownSettingKeys() map[string]bool {
+	var s ports.UISettings
+	descs := settingDescriptors(&s)
+	out := make(map[string]bool, len(descs))
+	for _, d := range descs {
+		out[d.Type+"."+d.Name] = true
+	}
+	return out
+}
+
 // settingKeyEncrypted reports whether (typ, name) is a known setting descriptor
 // and, if so, whether it is encrypted-at-rest. Used by the scope-override repo to
 // reject writes to unknown keys and to enforce that encrypted (global-only)

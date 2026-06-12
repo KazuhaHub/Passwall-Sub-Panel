@@ -375,7 +375,7 @@ export default function GroupsView() {
     } catch {
       // A mid-loop failure can leave overrides partially applied; surface it. The
       // backend writes are idempotent and reopening re-fetches the actual state.
-      pushSnack(t('admin:groups.scope.save_error', { defaultValue: '部分 2FA 覆盖保存失败，请重新打开核对' }), 'error')
+      pushSnack(t('admin:groups.scope.save_error', { defaultValue: '部分覆盖保存失败，请重新打开核对' }), 'error')
     }
   }
 

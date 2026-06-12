@@ -88,8 +88,12 @@ func (h *UserMeHandler) Profile(c *gin.Context) {
 		// can drop {{ profile_name_encoded }} into deep links exactly
 		// matching the Content-Disposition / Profile-Title strings the
 		// subscription response itself carries — no client-side template
-		// engine, no risk of the two surfaces drifting.
-		"profile_name": render.RenderProfileName(settings, u),
+		// engine, no risk of the two surfaces drifting. MUST use the per-user
+		// effective settings (suEff): sub_profile_name_template is group-
+		// overridable, and the /sub render resolves it via LoadForUser, so a
+		// global read here would drift the deep-link name from the served
+		// Profile-Title for any group that overrides the template.
+		"profile_name": render.RenderProfileName(suEff, u),
 		// sub_update_interval_hours surfaces the admin-configured value so
 		// import-URL templates can embed it (CMfA reads `update-interval`
 		// from the intent URI in minutes; the frontend converts on render).
