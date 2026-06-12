@@ -74,6 +74,27 @@ export function createAppTheme({ mode, sourceColor, language, density = 'comfort
       MuiCssBaseline: {
         styleOverrides: {
           body: { backgroundColor: t.surface },
+          // Immersive, themed scrollbars app-wide: a thin translucent thumb on a
+          // transparent track that blends into the UI instead of the OS's
+          // white/grey default — still grabbable, and darkens on hover. The
+          // border + content-box clip slims the visible thumb and rounds it.
+          // (The nav rail opts out separately, hiding its bar entirely.)
+          '*': {
+            scrollbarWidth: 'thin',
+            scrollbarColor: `${alpha(t.onSurfaceVariant, 0.32)} transparent`,
+          },
+          '*::-webkit-scrollbar': { width: 12, height: 12 },
+          '*::-webkit-scrollbar-track': { backgroundColor: 'transparent' },
+          '*::-webkit-scrollbar-thumb': {
+            backgroundColor: alpha(t.onSurfaceVariant, 0.32),
+            borderRadius: 8,
+            border: '3px solid transparent',
+            backgroundClip: 'content-box',
+          },
+          '*::-webkit-scrollbar-thumb:hover': {
+            backgroundColor: alpha(t.onSurfaceVariant, 0.55),
+          },
+          '*::-webkit-scrollbar-corner': { backgroundColor: 'transparent' },
         },
       },
       MuiAppBar: {
