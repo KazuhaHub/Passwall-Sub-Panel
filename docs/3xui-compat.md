@@ -9,7 +9,7 @@ PSP 通过 `/panel/api/*` 对接 3X-UI 面板。本文档维护两件事：
 
 | PSP 版本 | 最低 3X-UI | 已实测通过 | 备注 |
 |---|---|---|---|
-| **v3.6.2+** | **3.2.0** | 3.2.8 | client 适配迁到一级 `/clients/*` API,**硬切 ≥ 3.2.0**;已测上限 2026-06-05 实机抬到 3.2.8,见下文 |
+| **v3.6.2+** | **3.2.0** | 3.3.0 | client 适配迁到一级 `/clients/*` API,**硬切 ≥ 3.2.0**;已测上限 2026-06-12 实机抬到 3.3.0,见下文 |
 | v3.6.0 – v3.6.1 | 3.1.0 | 3.1.0 | 仍走 inbound-scoped 端点;别跑在 3.2.0 上,先升 PSP 到 v3.6.2 |
 | v3.5.1 – v3.5.x | 3.1.0 | 3.1.0 | `/inbounds/list` 把 settings 等改成 nested object,见下文 |
 | v3.5.0 | 3.0.x | 3.0.x | 跨 3.1.0 升级会破坏 traffic poll |
@@ -24,6 +24,19 @@ PSP 通过 `/panel/api/*` 对接 3X-UI 面板。本文档维护两件事：
 - 任何高于"已实测通过"的 3X-UI 版本都属于**未知风险**——升级前先在一台 panel 上小流量验证
 
 ## 历史兼容性事件
+
+### 2026-06-12 / 3X-UI 3.3.0 实机复核 → 已测上限 3.2.8 抬到 3.3.0
+
+**背景**: 上游发 3.3.0(minor 版本,自 3.2.8 起新增多节点/客户端分组/自定义 geo/出站订阅等一批功能)。拿一台已升到 **3.3.0 的真实面板**(`panelVersion 3.3.0`、xray `26.6.1`)用 API token 端到端复核。
+
+**复核结论(代码零改动,LIVE-VERIFIED)**: PSP 触及的端点在 3.3.0 全部仍在、形状未变。实机 smoke-test(临时 client,测完自清理,全 `success:true`):
+- **读路径**: `/inbounds/list` + `/inbounds/list/slim` 仍把 `settings`/`streamSettings`/`sniffing` 返回为 nested object(`allocate` 为 `null`,`flexJSON` 原样吞下),`clientStats` 带齐 `email/up/down/total/enable/expiryTime/reset/lastOnline`(新增的 `uuid`/`subId` 及 inbound 级 `originNodeGuid`/`lastTrafficResetTime`/`trafficReset` 都被 struct 忽略)。`/clients/get/{email}` 回 `{client:{uuid,email,enable,flow,password,auth,expiryTime,totalGB,…},inboundIds}`(PSP 从 `uuid` 取 ID,非 `id`)。
+- **写路径(全部按 panel 唯一 email)**: `add` → `get`(回读 uuid/email/enable/totalGB/inboundIds 全对)→ `update`(full-replace,totalGB 1GiB→2GiB 已生效)→ `del`(删后 get 回 `(record not found)`)→ `bulkCreate`(`created:1`)→ `bulkDel`(`deleted:1`)。
+- **server**: `/server/status`(panelVersion 3.3.0 + xray version)、`/server/getPanelUpdateInfo`、`/server/getXrayVersion`(tag 字符串数组)、`/server/getWebCertFiles`(`{webCertFile,webKeyFile}`)全正常。
+
+**3.2.8→3.3.0 变更对 PSP 的影响 = 无**: delta 纯**附加** —— 一批新端点(`clients/groups/*`、`clients/bulkAdjust|bulkAttach|bulkDetach|delDepleted`、`custom-geo/*`、`nodes/*`、`xray/outbound-subs/*`、`server/getNew{UUID,VlessEnc,EchCert,mldsa65,mlkem768}`)——**没有任何 PSP 调用的路由被删或改形状**,故 `min_xui` 维持 3.2.0、`version.MinXUI` const 与 drift-guard 不动。多节点注意点同 3.2.8:inbound 现在带 `originNodeGuid`,但 PSP 每个 `(panel,inbound)` 用唯一 email、一个 client 只落一个 inbound,3X-UI 自家多节点对 standalone PSP 仍是 no-op(部署仍建议对接单机 3X-UI,见下文)。
+
+**未复核项**: cookie(用户名/密码)登录这次没在 3.3.0 上验(本次只有 API token)。token 模式是 PSP 验证过且推荐的路径(3.2.x 起 cookie 模式对不安全方法要 `X-CSRF-Token`,token 模式不受约束)。
 
 ### 2026-06-05 / 3X-UI 3.2.8 实机复核 → 已测上限 3.2.7 抬到 3.2.8
 
