@@ -118,7 +118,7 @@
       "twofa_policy_subheading": "Enrollment policy",
       "twofa_email_cooldown": "Code resend cooldown (sec)",
       "require_2fa_for_staff": "Require two-factor for all admins/operators",
-      "require_2fa_for_staff_hint": "When on, an admin/operator without TOTP or a passkey is required to finish setup right after login before using the panel. You can also require it per group (Groups) or per user (Account Security). Local accounts only.",
+      "require_2fa_for_staff_hint": "When on, an admin/operator without TOTP or a passkey is required to finish setup right after login before using the panel. You can also require it per group (Groups). Local accounts only.",
       "local_auth_scope_hint": "Two-factor auth and passkeys apply to LOCAL login only. MFA for SSO sign-ins is the identity provider's (IdP's) responsibility — PSP doesn't add its own. An account that has both a local password and an SSO binding is not subject to these when it signs in via SSO.",
       "passkey_enabled": "Allow passkeys (WebAuthn)",
       "passkey_passwordless": "Allow usernameless passkey login (no username)",
@@ -1180,8 +1180,7 @@
       "regen_recovery_confirm": "Regenerate",
       "regen_recovery_title": "Regenerate recovery codes",
       "regen_recovery_message": "This invalidates all of {{upn}}'s current recovery codes and issues a new set. Relay the new codes to the user over a secure channel — they're shown only once.",
-      "regen_recovery_done": "New recovery codes (shown once — relay to the user):",
-      "require_2fa": "Require this user to set up two-factor auth"
+      "regen_recovery_done": "New recovery codes (shown once — relay to the user):"
     },
     "reset_password": {
       "title": "Reset login password",

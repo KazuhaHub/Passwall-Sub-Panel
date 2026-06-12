@@ -61,9 +61,6 @@ export interface User {
    *  the Account Security drawer shows recovery-code actions when totp_enabled OR
    *  passkey_count > 0. */
   passkey_count?: number
-  /** Per-user "force second-factor enrollment" override (on top of the group /
-   *  staff-wide flags). Toggled from the Account Security drawer. */
-  require_2fa?: boolean
 }
 
 export interface CreateUserRequest {

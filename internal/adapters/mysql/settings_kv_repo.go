@@ -168,6 +168,20 @@ func KnownSettingNames() map[string]bool {
 	return out
 }
 
+// settingKeyEncrypted reports whether (typ, name) is a known setting descriptor
+// and, if so, whether it is encrypted-at-rest. Used by the scope-override repo to
+// reject writes to unknown keys and to enforce that encrypted (global-only)
+// settings are never per-scope overridden (docs §10-3).
+func settingKeyEncrypted(typ, name string) (encrypted, known bool) {
+	var s ports.UISettings
+	for _, d := range settingDescriptors(&s) {
+		if d.Type == typ && d.Name == name {
+			return d.Encrypted, true
+		}
+	}
+	return false, false
+}
+
 // settingDescriptors returns the full mapping between UISettings fields and
 // (type, name) KV cells. The order groups rows by `type` so a SQL browser
 // displays them by category. To add a new field: declare it on UISettings,

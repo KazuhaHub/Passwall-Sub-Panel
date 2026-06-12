@@ -97,6 +97,10 @@ func Open(kind, dsn string) (*gorm.DB, error) {
 // aggregated ports.Repos for the service layer. Repositories are stateless
 // and safely share a single *gorm.DB.
 func NewRepos(db *gorm.DB) ports.Repos {
+	// Settings is wrapped in the in-process cache decorator (see below); the
+	// ScopedSettings resolver layers each group's sparse overrides on top of it.
+	cachedSettings := NewCachingSettingsRepo(newKVSettingsRepo(db))
+	scopeSettings := newKVScopeSettingsRepo(db)
 	return ports.Repos{
 		User:        &userRepo{db: db},
 		Group:       &groupRepo{db: db},
@@ -122,10 +126,12 @@ func NewRepos(db *gorm.DB) ports.Repos {
 		// fan into the DB for the same row dozens of times per request
 		// / cycle. Save is invalidate-on-write so admin edits become
 		// visible immediately (no TTL window). See settings_cache.go.
-		Settings:   NewCachingSettingsRepo(newKVSettingsRepo(db)),
-		Mail:       &mailRepo{db: db},
-		SAMLConfig: &samlConfigRepo{db: db},
-		OIDCConfig: &oidcConfigRepo{db: db},
+		Settings:       cachedSettings,
+		ScopeSettings:  scopeSettings,
+		ScopedSettings: NewScopedSettings(cachedSettings, scopeSettings),
+		Mail:           &mailRepo{db: db},
+		SAMLConfig:     &samlConfigRepo{db: db},
+		OIDCConfig:     &oidcConfigRepo{db: db},
 
 		Certificate:   &certificateRepo{db: db},
 		DNSCredential: &dnsCredentialRepo{db: db},

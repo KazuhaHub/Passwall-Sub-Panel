@@ -26,7 +26,7 @@ type stubSettings struct {
 	passkey bool // drives PasskeyEnabled (a passkey counts only while it's on)
 }
 
-func (s stubSettings) Load(_ context.Context, d ports.UISettings) (ports.UISettings, error) {
+func (s stubSettings) LoadForUser(_ context.Context, _ *domain.User, d ports.UISettings) (ports.UISettings, error) {
 	d.Require2FAForStaff = s.staff
 	d.TOTPEnabled = s.totp
 	d.PasskeyEnabled = s.passkey
@@ -49,7 +49,7 @@ func TestMustEnroll(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("sso-only account is never gated", func(t *testing.T) {
-		u := &domain.User{ID: 1, Role: domain.RoleUser, Require2FA: true} // no password
+		u := &domain.User{ID: 1, Role: domain.RoleUser, GroupID: 5} // no password
 		if got, _ := svc(true, true, 0).MustEnroll(ctx, u); got {
 			t.Fatal("an account without a local password must not be gated")
 		}
@@ -61,34 +61,23 @@ func TestMustEnroll(t *testing.T) {
 		}
 	})
 
-	t.Run("per-user require, no 2FA → gated", func(t *testing.T) {
-		u := localUser(domain.RoleUser)
-		u.Require2FA = true
-		if got, _ := svc(false, false, 0).MustEnroll(ctx, u); !got {
-			t.Fatal("required + no factor → gated")
+	t.Run("group require, no 2FA → gated", func(t *testing.T) {
+		if got, _ := svc(true, false, 0).MustEnroll(ctx, localUser(domain.RoleUser)); !got {
+			t.Fatal("group flag + no factor → gated")
 		}
 	})
 
-	t.Run("per-user require but has TOTP → satisfied", func(t *testing.T) {
+	t.Run("group require but has TOTP → satisfied", func(t *testing.T) {
 		u := localUser(domain.RoleUser)
-		u.Require2FA = true
 		u.TOTPEnabled = true
-		if got, _ := svc(false, false, 0).MustEnroll(ctx, u); got {
+		if got, _ := svc(true, false, 0).MustEnroll(ctx, u); got {
 			t.Fatal("TOTP enrolled satisfies the requirement")
 		}
 	})
 
-	t.Run("per-user require but has a passkey → satisfied", func(t *testing.T) {
-		u := localUser(domain.RoleUser)
-		u.Require2FA = true
-		if got, _ := svc(false, false, 1).MustEnroll(ctx, u); got {
+	t.Run("group require but has a passkey → satisfied", func(t *testing.T) {
+		if got, _ := svc(true, false, 1).MustEnroll(ctx, localUser(domain.RoleUser)); got {
 			t.Fatal("a passkey satisfies the requirement")
-		}
-	})
-
-	t.Run("group require → gated", func(t *testing.T) {
-		if got, _ := svc(true, false, 0).MustEnroll(ctx, localUser(domain.RoleUser)); !got {
-			t.Fatal("group flag → gated")
 		}
 	})
 
@@ -111,17 +100,14 @@ func TestMustEnroll(t *testing.T) {
 	})
 
 	t.Run("fail-safe: no enrollment method available → never gate (no lockout)", func(t *testing.T) {
-		// Required by the per-user flag, but TOTP + passkey are both off
-		// panel-wide → the requirement is unsatisfiable, so gating would lock the
-		// user out. Must NOT gate.
+		// Required by the group flag, but TOTP + passkey are both off panel-wide →
+		// the requirement is unsatisfiable, so gating would lock the user out.
 		s := New(Deps{
-			Groups:   stubGroups{require: false},
+			Groups:   stubGroups{require: true},
 			Passkeys: stubPasskeys{n: 0},
 			Settings: stubSettings{staff: false, totp: false, passkey: false},
 		})
-		u := localUser(domain.RoleUser)
-		u.Require2FA = true
-		if got, _ := s.MustEnroll(ctx, u); got {
+		if got, _ := s.MustEnroll(ctx, localUser(domain.RoleUser)); got {
 			t.Fatal("must not gate when no second factor can be enrolled")
 		}
 	})
@@ -132,13 +118,11 @@ func TestMustEnroll(t *testing.T) {
 		// the requirement. Rather than silently dropping to single-factor password
 		// login, the user must enroll an available method (TOTP is still on).
 		s := New(Deps{
-			Groups:   stubGroups{require: false},
+			Groups:   stubGroups{require: true},
 			Passkeys: stubPasskeys{n: 1},
 			Settings: stubSettings{staff: false, totp: true, passkey: false},
 		})
-		u := localUser(domain.RoleUser)
-		u.Require2FA = true
-		if got, _ := s.MustEnroll(ctx, u); !got {
+		if got, _ := s.MustEnroll(ctx, localUser(domain.RoleUser)); !got {
 			t.Fatal("a passkey must not satisfy the requirement when passkeys are disabled panel-wide")
 		}
 	})

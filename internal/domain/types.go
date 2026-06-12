@@ -129,11 +129,6 @@ type User struct {
 	// this struct — they're sensitive and only ever read/written through the
 	// dedicated TOTP repo methods (encrypted/hashed at the persistence boundary).
 	TOTPEnabled bool
-	// Require2FA forces this specific account to set up a second factor (TOTP or
-	// a passkey) before it can use the panel — a per-user override on top of the
-	// group flag and the panel-wide "require 2FA for staff" setting. Only bites
-	// local-password accounts (SSO MFA is the IdP's job).
-	Require2FA bool
 	// LastOnlineAt is the most recent moment any of the user's owned 3X-UI
 	// clients reported activity, derived from max(clientStats.lastOnline)
 	// across panels each traffic-poll cycle. Nil = never seen (fresh user,

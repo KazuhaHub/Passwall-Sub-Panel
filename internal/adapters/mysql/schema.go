@@ -87,9 +87,10 @@ type userRow struct {
 	TOTPSecret    string `gorm:"column:totp_secret;size:255;not null;default:''"`
 	TOTPEnabled   bool   `gorm:"column:totp_enabled;not null;default:false"`
 	RecoveryCodes jsonStrings `gorm:"column:recovery_codes"`
-	// Require2FA is a normal admin-set column (NOT in pollOwnedColumns): force this
-	// account to enroll a second factor before using the panel.
-	Require2FA bool `gorm:"column:require_2fa;not null;default:false"`
+	// NOTE: the per-user require_2fa column was dropped from the model in v3.8.0
+	// (enforcement is now staff-wide ∨ per-group). AutoMigrate does not drop
+	// columns, so the existing `require_2fa` column lingers as a harmless orphan
+	// on upgraded DBs and is simply never read; fresh installs don't create it.
 	// LastOnlineAt is the most recent moment any of the user's owned
 	// 3X-UI clients reported activity (max(clientStats.lastOnline)
 	// across panels). Refreshed by the traffic poll. Nil = never seen
@@ -133,7 +134,6 @@ func (r *userRow) toDomain() *domain.User {
 		DisableDetail:          r.DisableDetail,
 		SelfRegistered:         r.SelfRegistered,
 		TOTPEnabled:            r.TOTPEnabled,
-		Require2FA:             r.Require2FA,
 		BlockViolationCount:    r.BlockViolationCount,
 		LastBlockViolationAt:   r.LastBlockViolationAt,
 		EmergencyUsedCount:     r.EmergencyUsedCount,
@@ -175,7 +175,6 @@ func userFromDomain(u *domain.User) *userRow {
 		AutoDisabledReason:     string(u.AutoDisabledReason),
 		DisableDetail:          u.DisableDetail,
 		SelfRegistered:         u.SelfRegistered,
-		Require2FA:             u.Require2FA,
 		BlockViolationCount:    u.BlockViolationCount,
 		LastBlockViolationAt:   u.LastBlockViolationAt,
 		EmergencyUsedCount:     u.EmergencyUsedCount,
@@ -1126,6 +1125,7 @@ var schemaModels = []any{
 	&xuiPanelRow{},
 	&separatorRow{},
 	&settingRow{},
+	&scopeSettingRow{},
 	&mailSettingsRow{},
 	&mailTemplateRow{},
 	&mailSentRow{},

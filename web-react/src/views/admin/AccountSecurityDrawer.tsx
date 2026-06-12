@@ -6,10 +6,8 @@ import {
   Button,
   Chip,
   Drawer,
-  FormControlLabel,
   IconButton,
   Stack,
-  Switch,
   Typography,
 } from '@mui/material'
 import CloseIcon from '@mui/icons-material/Close'
@@ -24,11 +22,10 @@ import EmergencyIcon from '@mui/icons-material/MedicalServices'
 import PasswordIcon from '@mui/icons-material/Password'
 import { useTranslation } from 'react-i18next'
 
-import { regenerateUser2FARecovery, updateUser } from '@/api/users'
+import { regenerateUser2FARecovery } from '@/api/users'
 import type { User } from '@/api/types'
 import type { M3Tokens } from '@/theme'
 import { confirm } from '@/components/ConfirmHost'
-import { pushSnack } from '@/components/SnackbarHost'
 import { copyToClipboard } from '@/utils/clipboard'
 
 interface Props {
@@ -58,7 +55,6 @@ export default function AccountSecurityDrawer({
   const { t } = useTranslation('admin')
   const [busy, setBusy] = useState(false)
   const [recoveryCodes, setRecoveryCodes] = useState<string[] | null>(null)
-  const [require2FA, setRequire2FA] = useState(false)
 
   // Keep the Drawer permanently mounted (we no longer `return null` when there's
   // no user) so MUI runs its slide + backdrop-fade transitions BOTH ways. The old
@@ -75,7 +71,6 @@ export default function AccountSecurityDrawer({
     setWasOpen(open)
     if (open) {
       setRecoveryCodes(null)
-      setRequire2FA(!!user?.require_2fa)
     }
   }
 
@@ -85,18 +80,6 @@ export default function AccountSecurityDrawer({
   // A passkey is a second factor, so "has 2FA" (and thus has recovery codes) is
   // TOTP OR ≥1 passkey — recovery-code management keys on this, not TOTP alone.
   const has2FA = !!(u?.totp_enabled || (u?.passkey_count ?? 0) > 0)
-
-  async function toggleRequire2FA(next: boolean) {
-    if (!u) return
-    setRequire2FA(next) // optimistic
-    setBusy(true)
-    try {
-      await updateUser(u.id, { require_2fa: next })
-      pushSnack(t('users.toast.saved', { defaultValue: '已保存' }), 'success')
-    } catch {
-      setRequire2FA(!next) // revert
-    } finally { setBusy(false) }
-  }
 
   async function copy(text: string) {
     // copyToClipboard handles the HTTP / non-secure-context fallback and toasts
@@ -161,10 +144,6 @@ export default function AccountSecurityDrawer({
           status={has2FA
             ? <Chip size="small" color="success" label={t('users.security.twofa_on', { defaultValue: '2FA 已启用' })} sx={{ height: 22 }} />
             : <Typography variant="caption" color="text.secondary">{t('users.security.twofa_off', { defaultValue: '未启用' })}</Typography>}>
-          <FormControlLabel
-            control={<Switch size="small" checked={require2FA} disabled={busy} onChange={(_, c) => toggleRequire2FA(c)} />}
-            label={t('users.security.require_2fa', { defaultValue: '要求该用户启用两步验证' })}
-            sx={{ ml: 0, mb: 1, display: 'flex', '& .MuiFormControlLabel-label': { ml: 1, fontSize: 14 } }} />
           {has2FA ? (
             <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
               {/* Recovery codes are decoupled from TOTP — a passkey-only account has

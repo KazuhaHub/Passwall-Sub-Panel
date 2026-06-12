@@ -118,7 +118,7 @@
       "twofa_policy_subheading": "强制策略",
       "twofa_email_cooldown": "验证码重发冷却（秒）",
       "require_2fa_for_staff": "强制所有管理员/运营启用两步验证",
-      "require_2fa_for_staff_hint": "开启后，未绑定 TOTP 或通行密钥的管理员/运营登录后会被要求先完成设置才能使用面板。也可在「分组」对每组、或在用户「账号安全」对单个用户单独强制。仅本地账号生效。",
+      "require_2fa_for_staff_hint": "开启后，未绑定 TOTP 或通行密钥的管理员/运营登录后会被要求先完成设置才能使用面板。也可在「分组」对每组单独强制。仅本地账号生效。",
       "passkey_enabled": "允许通行密钥（Passkey）",
       "passkey_passwordless": "允许通行密钥免密登录（无需用户名）",
       "passkey_hint": "允许有本地密码的账号在「我的账号」里绑定通行密钥（WebAuthn）。开启免密登录后，登录页会显示「使用通行密钥登录」按钮、无需输入用户名。需先配置「订阅基础 URL」（用于确定 RP 域名），且站点须为 HTTPS（localhost 除外）。SSO 账号不受影响。",
@@ -1180,8 +1180,7 @@
       "regen_recovery_confirm": "重新生成",
       "regen_recovery_title": "重新生成备用码",
       "regen_recovery_message": "将作废 {{upn}} 现有的全部备用码并生成一组新的。请把新备用码通过安全渠道转交给用户——它只会显示这一次。",
-      "regen_recovery_done": "新备用码（只显示一次，请转交用户）：",
-      "require_2fa": "要求该用户启用两步验证"
+      "regen_recovery_done": "新备用码（只显示一次，请转交用户）："
     },
     "reset_password": {
       "title": "重置登录密码",

@@ -1140,6 +1140,48 @@ type SettingsRepo interface {
 	Save(ctx context.Context, s UISettings) error
 }
 
+// ScopeOverride is one per-scope setting override — the same (Type, Name, Value)
+// cell as a global setting row, scoped to a Group. Name must be a live setting
+// key (KnownSettingNames). Encrypted-at-rest keys are connection secrets, are
+// global-only, and are rejected at the repo boundary (see the global/group
+// partition in docs/v3.8.0-group-scoped-admin.md §3 / §10-3) — so Encrypted is
+// always false on a stored override.
+type ScopeOverride struct {
+	Type      string
+	Name      string
+	Value     string
+	Encrypted bool
+}
+
+// ScopeSettingsRepo persists sparse per-scope setting overrides that layer over
+// the global SettingsRepo. A missing (scope, key) row means "inherit the global
+// value", so an empty table = every scope fully inherits (the zero-migration
+// story). v3.8.0 only writes ScopeType "group"; the string scope type reserves
+// room for a future "user" scope without a schema change (no promise it ships).
+type ScopeSettingsRepo interface {
+	// ListOverrides returns one scope's sparse override set (typically 0–10
+	// rows); order is not significant.
+	ListOverrides(ctx context.Context, scopeType string, scopeID int64) ([]ScopeOverride, error)
+	// SetOverride upserts one override. Rejects unknown keys and encrypted keys.
+	SetOverride(ctx context.Context, scopeType string, scopeID int64, o ScopeOverride) error
+	// DeleteOverride removes one override = restore inheritance for that key.
+	DeleteOverride(ctx context.Context, scopeType string, scopeID int64, typ, name string) error
+	// DeleteScope removes every override for a scope (e.g. on group delete).
+	DeleteScope(ctx context.Context, scopeType string, scopeID int64) error
+}
+
+// ScopedSettings resolves the EFFECTIVE settings for a scope: the global
+// SettingsRepo value overlaid with a group's sparse overrides (global ⊕ group).
+// Load returns the global value unchanged (equivalent to SettingsRepo.Load);
+// LoadForGroup / LoadForUser apply the group's overrides on top of the
+// already-defaulted global base. GroupID 0 resolves to pure global. v3.8.0 is
+// two-level (global + group) only — there is no per-user scope.
+type ScopedSettings interface {
+	Load(ctx context.Context, defaults UISettings) (UISettings, error)
+	LoadForGroup(ctx context.Context, groupID int64, defaults UISettings) (UISettings, error)
+	LoadForUser(ctx context.Context, u *domain.User, defaults UISettings) (UISettings, error)
+}
+
 type MailRepo interface {
 	LoadSettings(ctx context.Context, defaults domain.MailSettings) (domain.MailSettings, error)
 	SaveSettings(ctx context.Context, s domain.MailSettings) error
@@ -1213,9 +1255,11 @@ type Repos struct {
 	SyncTask    SyncTaskRepo
 	RuleSet     RuleSetRepo
 	Template    TemplateRepo
-	XUIPanel    XUIPanelRepo
-	Settings    SettingsRepo
-	Mail        MailRepo
+	XUIPanel      XUIPanelRepo
+	Settings       SettingsRepo
+	ScopeSettings  ScopeSettingsRepo
+	ScopedSettings ScopedSettings
+	Mail           MailRepo
 	SAMLConfig  SAMLConfigRepo
 	OIDCConfig  OIDCConfigRepo
 

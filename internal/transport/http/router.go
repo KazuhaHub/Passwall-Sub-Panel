@@ -246,7 +246,7 @@ func NewRouter(d Deps) *gin.Engine {
 	// "Require 2FA" enforcement: decides whether an account must enroll a second
 	// factor before using the panel, and the middleware that gates it. Shared by
 	// the user, staff and admin trees + the /user/me profile flag.
-	enroll2FA := authpolicy.New(authpolicy.Deps{Groups: d.Repos.Group, Passkeys: d.Repos.WebAuthn, Settings: d.Repos.Settings})
+	enroll2FA := authpolicy.New(authpolicy.Deps{Groups: d.Repos.Group, Passkeys: d.Repos.WebAuthn, Settings: d.Repos.ScopedSettings})
 	require2FAGate := middleware.Require2FAEnrollment(enroll2FA, d.User)
 
 	userMe := handler.NewUserMeHandler(d.User, d.Traffic, d.Repos.Settings, d.Repos.Node, d.Repos.Ownership, twofaSvc, passkeySvc, enroll2FA)
@@ -395,6 +395,15 @@ func NewRouter(d Deps) *gin.Engine {
 		adminGroup.PUT("/groups/:id", groups.Update)
 		adminGroup.PUT("/groups/:id/layout", groups.UpdateLayout)
 		adminGroup.DELETE("/groups/:id", groups.Delete)
+
+		// Per-group setting overrides (v3.8.0). Admin-only — these are policy
+		// settings (the 2FA enrollment group in Phase 1). The frontend overlays
+		// the returned `overrides` onto the global settings to render the
+		// inherit / overridden state per field.
+		scopeSettings := handler.NewAdminScopeSettingsHandler(d.Repos.Group, d.Repos.ScopeSettings)
+		adminGroup.GET("/groups/:id/scope-settings", scopeSettings.Get)
+		adminGroup.PUT("/groups/:id/scope-settings", scopeSettings.SetOverride)
+		adminGroup.DELETE("/groups/:id/scope-settings/:type/:name", scopeSettings.DeleteOverride)
 
 		rules := handler.NewAdminRuleSetsHandler(d.Repos.RuleSet, d.Cfg.ConfigDir)
 		staffGroup.GET("/rules", rules.List)
