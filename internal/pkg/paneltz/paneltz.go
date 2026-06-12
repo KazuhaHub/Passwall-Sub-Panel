@@ -90,7 +90,7 @@ func DateString(t time.Time, loc *time.Location) string {
 }
 
 // Now returns time.Now() in the configured panel timezone.
-func Now(ctx context.Context, settings ports.SettingsRepo) time.Time {
+func Now(ctx context.Context, settings ports.SettingsReader) time.Time {
 	return time.Now().In(Location(ctx, settings))
 }
 

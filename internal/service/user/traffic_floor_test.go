@@ -10,9 +10,9 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 )
 
-// fakeFloorSettingsRepo is the tiniest SettingsRepo stub: only Load is
-// exercised by trafficFloor. Other methods return zero values so the
-// type still satisfies the interface.
+// fakeFloorSettingsRepo is the tiniest ScopedSettings stub: every resolver
+// method returns the same cfg, so it mimics a deployment with no group
+// overrides (effective == global). emergencyFloor reads it via LoadForUser.
 type fakeFloorSettingsRepo struct {
 	cfg ports.UISettings
 	err error
@@ -25,7 +25,38 @@ func (r *fakeFloorSettingsRepo) Load(_ context.Context, _ ports.UISettings) (por
 	return r.cfg, nil
 }
 
-func (r *fakeFloorSettingsRepo) Save(_ context.Context, _ ports.UISettings) error { return nil }
+func (r *fakeFloorSettingsRepo) LoadForGroup(_ context.Context, _ int64, _ ports.UISettings) (ports.UISettings, error) {
+	return r.Load(context.Background(), ports.UISettings{})
+}
+
+func (r *fakeFloorSettingsRepo) LoadForUser(_ context.Context, _ *domain.User, _ ports.UISettings) (ports.UISettings, error) {
+	return r.Load(context.Background(), ports.UISettings{})
+}
+
+// fakeScopedFloorSettings returns a per-user override distinct from the
+// global Load value, proving emergencyFloor resolves the EFFECTIVE
+// (group-scoped) emergency quota rather than the global one.
+type fakeScopedFloorSettings struct {
+	global  ports.UISettings
+	perUser map[int64]ports.UISettings
+}
+
+func (r *fakeScopedFloorSettings) Load(_ context.Context, _ ports.UISettings) (ports.UISettings, error) {
+	return r.global, nil
+}
+
+func (r *fakeScopedFloorSettings) LoadForGroup(_ context.Context, _ int64, _ ports.UISettings) (ports.UISettings, error) {
+	return r.global, nil
+}
+
+func (r *fakeScopedFloorSettings) LoadForUser(_ context.Context, u *domain.User, _ ports.UISettings) (ports.UISettings, error) {
+	if u != nil {
+		if s, ok := r.perUser[u.ID]; ok {
+			return s, nil
+		}
+	}
+	return r.global, nil
+}
 
 func futureTime(offsetHours int) *time.Time {
 	t := time.Now().Add(time.Duration(offsetHours) * time.Hour)
@@ -205,6 +236,34 @@ func TestTrafficFloor_EmergencyActive_SettingsLoadErrorDefaultsUnlimited(t *test
 	}
 	if got := s.trafficFloor(context.Background(), u); got != 0 {
 		t.Fatalf("emergency + settings err → got %d, want 0 (fail open)", got)
+	}
+}
+
+func TestTrafficFloor_EmergencyActive_UsesGroupScopedQuota(t *testing.T) {
+	// Global emergency quota is 0 (unlimited), but this user's group
+	// overrides it to 5 GB. The floor must honor the GROUP-scoped quota,
+	// i.e. emergencyFloor resolves LoadForUser (effective), not the global
+	// Load. With the global value the floor would be 0 (unlimited); the
+	// override forces a concrete remaining-byte cap.
+	quotaGB := 5.0
+	usedSinceWindowOpened := int64(2) * 1024 * 1024 * 1024
+	s := &Service{
+		trafficUsage: &fakeUsageReader{used: 999_999_999_999}, // poisoned, must not be consulted
+		settings: &fakeScopedFloorSettings{
+			global:  ports.UISettings{EmergencyAccessQuotaGB: 0},
+			perUser: map[int64]ports.UISettings{7: {EmergencyAccessQuotaGB: quotaGB}},
+		},
+	}
+	u := &domain.User{
+		ID:                     7,
+		TrafficLimitBytes:      10_000,
+		EmergencyUntil:         futureTime(2),
+		LifetimeTotalBytes:     usedSinceWindowOpened,
+		EmergencyBaselineBytes: 0,
+	}
+	want := int64(quotaGB)*1024*1024*1024 - usedSinceWindowOpened
+	if got := s.trafficFloor(context.Background(), u); got != want {
+		t.Fatalf("group-scoped emergency quota → got %d, want %d", got, want)
 	}
 }
 

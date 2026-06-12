@@ -77,9 +77,10 @@ const EMPTY_FORM: FormState = {
 const SCOPE_CATEGORIES: { id: string; labelKey: string; def: string }[] = [
   { id: '2fa', labelKey: 'cat_2fa', def: '两步验证 (2FA) 方式' },
   { id: 'notify', labelKey: 'cat_notify', def: '通知阈值' },
+  { id: 'emergency', labelKey: 'cat_emergency', def: '紧急访问（超额救急）' },
 ]
 const SCOPE_KEYS: {
-  cat: string; key: string; type: string; name: string; kind: 'bool' | 'int'
+  cat: string; key: string; type: string; name: string; kind: 'bool' | 'int' | 'float'
   field: keyof UISettings; labelKey: string; def: string
 }[] = [
   { cat: '2fa', key: 'security.totp_enabled', type: 'security', name: 'totp_enabled', kind: 'bool', field: 'totp_enabled', labelKey: 'totp', def: '验证器 App (TOTP)' },
@@ -87,6 +88,10 @@ const SCOPE_KEYS: {
   { cat: '2fa', key: 'security.twofa_allow_email', type: 'security', name: 'twofa_allow_email', kind: 'bool', field: 'twofa_allow_email', labelKey: 'email', def: '邮箱验证码' },
   { cat: 'notify', key: 'notify.expire_before_days', type: 'notify', name: 'expire_before_days', kind: 'int', field: 'expire_before_days', labelKey: 'expire_before', def: '到期前提醒（天）' },
   { cat: 'notify', key: 'notify.traffic_remain_percent', type: 'notify', name: 'traffic_remain_percent', kind: 'int', field: 'traffic_remain_percent', labelKey: 'traffic_remain', def: '剩余流量提醒（%）' },
+  { cat: 'emergency', key: 'security.emergency_access_enabled', type: 'security', name: 'emergency_access_enabled', kind: 'bool', field: 'emergency_access_enabled', labelKey: 'em_enabled', def: '启用紧急访问' },
+  { cat: 'emergency', key: 'security.emergency_access_hours', type: 'security', name: 'emergency_access_hours', kind: 'int', field: 'emergency_access_hours', labelKey: 'em_hours', def: '单次时长（小时）' },
+  { cat: 'emergency', key: 'security.emergency_access_max_count', type: 'security', name: 'emergency_access_max_count', kind: 'int', field: 'emergency_access_max_count', labelKey: 'em_max_count', def: '可用次数' },
+  { cat: 'emergency', key: 'security.emergency_access_quota_gb', type: 'security', name: 'emergency_access_quota_gb', kind: 'float', field: 'emergency_access_quota_gb', labelKey: 'em_quota_gb', def: '额外流量额度（GB）' },
 ]
 
 interface ScopeState {
@@ -96,11 +101,11 @@ interface ScopeState {
   edit: Record<string, { on: boolean; value: string }>
 }
 
-function kvFromGlobal(kind: 'bool' | 'int', v: unknown): string {
+function kvFromGlobal(kind: 'bool' | 'int' | 'float', v: unknown): string {
   return kind === 'bool' ? (v ? '1' : '0') : String(v ?? '')
 }
 
-function fmtScope(kind: 'bool' | 'int', raw: string): string {
+function fmtScope(kind: 'bool' | 'int' | 'float', raw: string): string {
   return kind === 'bool' ? (raw === '1' ? '开 / On' : '关 / Off') : raw
 }
 
@@ -770,6 +775,7 @@ export default function GroupsView() {
                                   onChange={(_, c) => setEdit({ on: true, value: c ? '1' : '0' })} />
                               ) : (
                                 <TextField size="small" type="number" value={st.value}
+                                  inputProps={k.kind === 'float' ? { step: 'any', min: 0 } : { step: 1, min: 0 }}
                                   onChange={e => setEdit({ on: true, value: e.target.value })} sx={{ width: 96 }} />
                               )
                             ) : (

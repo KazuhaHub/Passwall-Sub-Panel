@@ -71,7 +71,7 @@ type Service struct {
 	selector  NodeSelector
 	syncer    ClientSyncer
 	pool      ports.XUIPool
-	settings  ports.SettingsRepo
+	settings  ports.ScopedSettings
 	// trafficUsage is set lazily via SetTrafficUsage after traffic.Service
 	// is constructed (traffic depends on user, so user must exist first).
 	// May be nil during early-start; trafficFloor degrades to 0 in that case.
@@ -83,7 +83,7 @@ type Service struct {
 const maxPersonalRulesBytes = 64 * 1024
 
 func New(users ports.UserRepo, groups ports.GroupRepo, ownership ports.OwnershipRepo,
-	tasks ports.SyncTaskRepo, selector NodeSelector, syncer ClientSyncer, pool ports.XUIPool, settings ports.SettingsRepo) *Service {
+	tasks ports.SyncTaskRepo, selector NodeSelector, syncer ClientSyncer, pool ports.XUIPool, settings ports.ScopedSettings) *Service {
 	return &Service{
 		users:     users,
 		groups:    groups,
@@ -159,7 +159,7 @@ func (s *Service) emergencyFloor(ctx context.Context, u *domain.User) int64 {
 	if s.settings == nil {
 		return 0
 	}
-	st, err := s.settings.Load(ctx, ports.UISettings{})
+	st, err := s.settings.LoadForUser(ctx, u, ports.UISettings{})
 	if err != nil {
 		log.Warn("traffic floor: emergency settings load failed, defaulting to unlimited",
 			"user_id", u.ID, "err", err)
@@ -1162,7 +1162,11 @@ func (s *Service) UseEmergencyAccess(ctx context.Context, userID int64, trafficL
 		s.emergencyMu.Lock()
 		defer s.emergencyMu.Unlock()
 
-		settings, err := s.settings.Load(ctx, ports.UISettings{})
+		u, err := s.users.GetByID(ctx, userID)
+		if err != nil {
+			return err
+		}
+		settings, err := s.settings.LoadForUser(ctx, u, ports.UISettings{})
 		if err != nil {
 			return err
 		}
@@ -1173,10 +1177,6 @@ func (s *Service) UseEmergencyAccess(ctx context.Context, userID int64, trafficL
 			return fmt.Errorf("%w: emergency access settings are invalid", domain.ErrValidation)
 		}
 
-		u, err := s.users.GetByID(ctx, userID)
-		if err != nil {
-			return err
-		}
 		now := time.Now()
 		status := EmergencyAccessStatusForUserWithTrafficLimit(u, settings, now, trafficLimitExceeded)
 		if status.Remaining <= 0 {

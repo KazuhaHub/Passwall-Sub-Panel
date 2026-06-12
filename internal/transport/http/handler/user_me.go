@@ -65,15 +65,16 @@ func (h *UserMeHandler) Profile(c *gin.Context) {
 			canChangePassword = false
 		}
 	}
+	// Per-user effective settings (global ⊕ this user's group overrides).
+	// Emergency-access caps and 2FA method availability are group-scoped; the
+	// rest of the profile (sub / branding / traffic / login policy) stays global.
+	suEff, suErr := h.settings.LoadForUser(c.Request.Context(), u, ports.UISettings{})
 	var emergencyStatus user.EmergencyAccessStatus
-	if settingsErr == nil {
-		emergencyStatus = user.EmergencyAccessStatusForUserWithTrafficLimit(u, settings, time.Now(), h.trafficLimitExceeded(c.Request.Context(), u))
+	if suErr == nil {
+		emergencyStatus = user.EmergencyAccessStatusForUserWithTrafficLimit(u, suEff, time.Now(), h.trafficLimitExceeded(c.Request.Context(), u))
 	}
 	// Passkeys (best-effort): the sanitized credential list for the management
 	// dialog. Never expose the raw credential record — only id/name/timestamps.
-	// The 2FA method-availability fields are group-scoped; the rest of the profile
-	// (sub / branding / traffic) stays global.
-	suEff, suErr := h.settings.LoadForUser(c.Request.Context(), u, ports.UISettings{})
 	passkeyAvailable := u.HasLocalPassword() && suErr == nil && suEff.PasskeyEnabled
 	passkeyList := h.passkeyList(c.Request.Context(), u.ID)
 	c.JSON(http.StatusOK, gin.H{

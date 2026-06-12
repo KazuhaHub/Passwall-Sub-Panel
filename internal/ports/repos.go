@@ -1194,6 +1194,12 @@ var OverridableScopeKeys = map[string]bool{
 	// Notification thresholds — mailer.processUser.
 	"notify.expire_before_days":     true,
 	"notify.traffic_remain_percent": true,
+	// Emergency access (break-glass over-limit grant) — user.emergencyFloor /
+	// UseEmergencyAccess / EmergencyAccessStatusForUser.
+	"security.emergency_access_enabled":   true,
+	"security.emergency_access_hours":     true,
+	"security.emergency_access_max_count": true,
+	"security.emergency_access_quota_gb":  true,
 }
 
 // ScopedSettings resolves the EFFECTIVE settings for a scope: the global
