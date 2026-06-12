@@ -138,6 +138,40 @@ func TestScopedSettings_LoadForUser(t *testing.T) {
 	}
 }
 
+// TestScopedSettings_LoginPolicyOverridable: the login-policy locks
+// (disallow_user_password_change / allow_user_personal_rules) resolve per
+// group. Bites if either key is missing from OverridableScopeKeys —
+// applyScopeOverrides would skip the row and the group would inherit global.
+func TestScopedSettings_LoginPolicyOverridable(t *testing.T) {
+	global, scope, resolver := newScopedTestRepos(t)
+	ctx := context.Background()
+
+	base, _ := global.Load(ctx, ports.UISettings{})
+	base.DisallowUserPasswordChange = false
+	base.AllowUserPersonalRules = false
+	if err := global.Save(ctx, base); err != nil {
+		t.Fatalf("save global: %v", err)
+	}
+	if err := scope.SetOverride(ctx, "group", 1, ports.ScopeOverride{Type: "auth", Name: "disallow_user_password_change", Value: "1"}); err != nil {
+		t.Fatalf("set override (pwd): %v", err)
+	}
+	if err := scope.SetOverride(ctx, "group", 1, ports.ScopeOverride{Type: "runtime", Name: "allow_user_personal_rules", Value: "1"}); err != nil {
+		t.Fatalf("set override (rules): %v", err)
+	}
+
+	g, _ := resolver.LoadForGroup(ctx, 1, ports.UISettings{})
+	if !g.DisallowUserPasswordChange {
+		t.Error("group override disallow_user_password_change=true must apply")
+	}
+	if !g.AllowUserPersonalRules {
+		t.Error("group override allow_user_personal_rules=true must apply")
+	}
+	gl, _ := resolver.Load(ctx, ports.UISettings{})
+	if gl.DisallowUserPasswordChange || gl.AllowUserPersonalRules {
+		t.Error("global login policy must be unaffected by a group override")
+	}
+}
+
 // TestScopedSettings_SkipsNonOverridableRow: even if a stray override row for a
 // NON-overridable key exists (the admin handler blocks writing one, but the repo
 // itself doesn't), the resolver must ignore it so the global/group partition holds.

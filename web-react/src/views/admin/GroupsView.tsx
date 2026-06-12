@@ -78,6 +78,7 @@ const SCOPE_CATEGORIES: { id: string; labelKey: string; def: string }[] = [
   { id: '2fa', labelKey: 'cat_2fa', def: '两步验证 (2FA) 方式' },
   { id: 'notify', labelKey: 'cat_notify', def: '通知阈值' },
   { id: 'emergency', labelKey: 'cat_emergency', def: '紧急访问（超额救急）' },
+  { id: 'login', labelKey: 'cat_login', def: '登录与自助策略' },
 ]
 const SCOPE_KEYS: {
   cat: string; key: string; type: string; name: string; kind: 'bool' | 'int' | 'float'
@@ -92,6 +93,8 @@ const SCOPE_KEYS: {
   { cat: 'emergency', key: 'security.emergency_access_hours', type: 'security', name: 'emergency_access_hours', kind: 'int', field: 'emergency_access_hours', labelKey: 'em_hours', def: '单次时长（小时）' },
   { cat: 'emergency', key: 'security.emergency_access_max_count', type: 'security', name: 'emergency_access_max_count', kind: 'int', field: 'emergency_access_max_count', labelKey: 'em_max_count', def: '可用次数' },
   { cat: 'emergency', key: 'security.emergency_access_quota_gb', type: 'security', name: 'emergency_access_quota_gb', kind: 'float', field: 'emergency_access_quota_gb', labelKey: 'em_quota_gb', def: '额外流量额度（GB）' },
+  { cat: 'login', key: 'auth.disallow_user_password_change', type: 'auth', name: 'disallow_user_password_change', kind: 'bool', field: 'disallow_user_password_change', labelKey: 'disallow_pwd_change', def: '禁止用户自助改密码' },
+  { cat: 'login', key: 'runtime.allow_user_personal_rules', type: 'runtime', name: 'allow_user_personal_rules', kind: 'bool', field: 'allow_user_personal_rules', labelKey: 'allow_personal_rules', def: '允许用户自定义规则' },
 ]
 
 interface ScopeState {

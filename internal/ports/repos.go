@@ -1200,6 +1200,11 @@ var OverridableScopeKeys = map[string]bool{
 	"security.emergency_access_hours":     true,
 	"security.emergency_access_max_count": true,
 	"security.emergency_access_quota_gb":  true,
+	// Login policy (post-identity portal locks) — user_me ChangePassword /
+	// PutRules / profile. DisallowLocalLogin / LoginMode stay GLOBAL (decided
+	// pre-identity, §10-1), so they are deliberately NOT in this set.
+	"auth.disallow_user_password_change": true,
+	"runtime.allow_user_personal_rules":  true,
 }
 
 // ScopedSettings resolves the EFFECTIVE settings for a scope: the global

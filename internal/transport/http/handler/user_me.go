@@ -58,17 +58,18 @@ func (h *UserMeHandler) Profile(c *gin.Context) {
 	// users (no password to begin with) and for non-admin local users when
 	// the admin has flipped DisallowUserPasswordChange on. Admins always
 	// keep the option as a break-glass path.
+	// `settings` = global (sub / branding / traffic, read below); `suEff` =
+	// per-user effective (global ⊕ this user's group overrides) for the
+	// group-scoped categories: emergency-access caps, 2FA method availability,
+	// and login policy (password-change / personal-rules locks).
+	settings, _ := h.settings.Load(c.Request.Context(), ports.UISettings{})
+	suEff, suErr := h.settings.LoadForUser(c.Request.Context(), u, ports.UISettings{})
 	canChangePassword := u.HasLocalPassword()
-	settings, settingsErr := h.settings.Load(c.Request.Context(), ports.UISettings{})
 	if canChangePassword && u.Role != domain.RoleAdmin {
-		if settingsErr == nil && settings.DisallowUserPasswordChange {
+		if suErr == nil && suEff.DisallowUserPasswordChange {
 			canChangePassword = false
 		}
 	}
-	// Per-user effective settings (global ⊕ this user's group overrides).
-	// Emergency-access caps and 2FA method availability are group-scoped; the
-	// rest of the profile (sub / branding / traffic / login policy) stays global.
-	suEff, suErr := h.settings.LoadForUser(c.Request.Context(), u, ports.UISettings{})
 	var emergencyStatus user.EmergencyAccessStatus
 	if suErr == nil {
 		emergencyStatus = user.EmergencyAccessStatusForUserWithTrafficLimit(u, suEff, time.Now(), h.trafficLimitExceeded(c.Request.Context(), u))
@@ -129,8 +130,9 @@ func (h *UserMeHandler) Profile(c *gin.Context) {
 		"passkey_credentials": passkeyList,
 		// can_edit_personal_rules drives the portal's rules dialog: when
 		// false the textarea renders read-only and the Save button hides.
-		// Admins always can; for non-admins it follows the global flag.
-		"can_edit_personal_rules": u.Role == domain.RoleAdmin || (settingsErr == nil && settings.AllowUserPersonalRules),
+		// Admins always can; for non-admins it follows the per-user effective
+		// flag (group override ⊕ global).
+		"can_edit_personal_rules": u.Role == domain.RoleAdmin || (suErr == nil && suEff.AllowUserPersonalRules),
 		"emergency_access": gin.H{
 			"enabled":         emergencyStatus.Enabled,
 			"available":       emergencyStatus.Available,
@@ -313,7 +315,9 @@ func (h *UserMeHandler) EmergencyAccess(c *gin.Context) {
 	if pendingSync {
 		c.Header("X-Sync-Pending", "1")
 	}
-	settings, _ := h.settings.Load(c.Request.Context(), ports.UISettings{})
+	// Per-user effective: the emergency quota is group-scoped, so the grant
+	// result must report this user's effective cap, not the global one.
+	settings, _ := h.settings.LoadForUser(c.Request.Context(), res.User, ports.UISettings{})
 	c.JSON(http.StatusOK, gin.H{
 		"expire_at":       res.User.ExpireAt,
 		"emergency_until": res.User.EmergencyUntil,
@@ -414,10 +418,15 @@ func (h *UserMeHandler) PutRules(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "No auth"})
 		return
 	}
-	// Global lock: when the admin has turned off the personal-rules editor
-	// the user can still GET (read) but PUT is rejected. Mirrors the
-	// DisallowUserPasswordChange gate one method below.
-	settings, sErr := h.settings.Load(c.Request.Context(), ports.UISettings{})
+	// Per-group lock: when the personal-rules editor is off (globally or for
+	// this user's group) the user can still GET (read) but PUT is rejected.
+	// Mirrors the DisallowUserPasswordChange gate one method below.
+	u, err := h.user.Get(c.Request.Context(), claims.UserID)
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+	settings, sErr := h.settings.LoadForUser(c.Request.Context(), u, ports.UISettings{})
 	if sErr == nil && !settings.AllowUserPersonalRules {
 		c.JSON(http.StatusForbidden, gin.H{"error": "Personal rules editing is disabled by admin"})
 		return
@@ -492,7 +501,7 @@ func (h *UserMeHandler) ChangePassword(c *gin.Context) {
 	// from rotating their password through the panel UI. Admins always retain
 	// the ability (used by the break-glass account when SSO is broken).
 	if u.Role != domain.RoleAdmin {
-		s, sErr := h.settings.Load(c.Request.Context(), ports.UISettings{})
+		s, sErr := h.settings.LoadForUser(c.Request.Context(), u, ports.UISettings{})
 		if sErr == nil && s.DisallowUserPasswordChange {
 			c.JSON(http.StatusForbidden, gin.H{"error": "Password change is disabled for non-administrators"})
 			return
