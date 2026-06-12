@@ -69,11 +69,13 @@
     "tab_mail": "Mail",
     "tab_sso": "SSO",
     "save": "Save",
+    "cancel": "Cancel",
     "saved": "Saved",
     "scope": {
       "audience": "Audience",
       "all_users": "All users (global default)",
-      "override_hint": "Override the settings below for this group; un-overridden items inherit the global default."
+      "override_hint": "Override the settings below for this group; un-overridden items inherit the global default.",
+      "showing_for_label": "Showing settings for users in"
     },
     "feature_pending": "This tab is being migrated to React + MUI (next iteration). Use the Vue version meanwhile.",
     "general": {

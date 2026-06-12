@@ -53,13 +53,11 @@ import { setLanguage, currentLanguage } from '@/i18n'
 import { DEFAULT_PRESET_HEX, type AppLanguage } from '@/theme'
 import { getVersion, type VersionInfo } from '@/api/version'
 
-// Sidebar widths follow the global density setting: compact trims the
-// expanded rail to give admin pages another ~50px of horizontal room
-// (most felt in tables on smaller laptops), while the collapsed
-// (icon-only) state stays the same because icons + padding already
-// dominate the width.
-const DRAWER_WIDTH_EXPANDED_COMFORTABLE = 256
-const DRAWER_WIDTH_EXPANDED_COMPACT = 208
+// Sidebar width is fixed regardless of density: the compact setting tightens
+// page content (tables, forms, dialogs) but the nav rail keeps its full width
+// so labels — including the Workspace-style section headers — never get cramped
+// or truncated. The collapsed (icon-only) state is a separate, narrower width.
+const DRAWER_WIDTH_EXPANDED = 256
 const DRAWER_WIDTH_COLLAPSED = 76
 const COLLAPSED_STORAGE_KEY = 'psp-sidebar-collapsed'
 
@@ -140,7 +138,6 @@ export default function AdminLayout() {
   const siteThemeColor = useSiteStore(s => s.themeColor)
   const siteIcon = useSiteStore(selectIcon)
   const siteLoad = useSiteStore(s => s.load)
-  const density = useAppearanceStore(s => s.density)
   const appearanceMode = useAppearanceStore(s => s.mode)
   const appearanceSystemColor = useAppearanceStore(s => s.systemColor)
   const appearanceUserColor = useAppearanceStore(s => s.userColor)
@@ -165,11 +162,7 @@ export default function AdminLayout() {
   // Effective collapsed: only on desktop. Mobile drawer always renders the
   // full-width version regardless of the stored preference.
   const railCollapsed = collapsed && !isMobile
-  // Density-aware expanded width — see constants above for why only the
-  // expanded variant tightens.
-  const drawerWidthExpanded = density === 'compact'
-    ? DRAWER_WIDTH_EXPANDED_COMPACT
-    : DRAWER_WIDTH_EXPANDED_COMFORTABLE
+  const drawerWidthExpanded = DRAWER_WIDTH_EXPANDED
 
   // Load site branding once on mount. Depend on the action ref only —
   // pre-fix this used `[site]` which was a new object on every store

@@ -69,11 +69,13 @@
     "tab_mail": "邮件提醒",
     "tab_sso": "SSO 认证",
     "save": "保存",
+    "cancel": "取消",
     "saved": "已保存",
     "scope": {
       "audience": "适用对象",
       "all_users": "所有用户（全局默认）",
-      "override_hint": "为本组覆盖以下设置；未覆盖的项继承全局默认。"
+      "override_hint": "为本组覆盖以下设置；未覆盖的项继承全局默认。",
+      "showing_for_label": "当前显示范围："
     },
     "feature_pending": "该 tab 正在迁移到 React + MUI（下个版本）。当前请使用 Vue 版本管理这些字段。",
     "general": {

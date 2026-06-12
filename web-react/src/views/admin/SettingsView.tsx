@@ -361,9 +361,23 @@ export default function SettingsView() {
     { key: 'sso', labelKey: 'settings.tab_sso' },
   ]
 
-  const saveBar = (
-    <Box sx={{ display: 'flex', justifyContent: 'flex-end' }}>
-      <Button variant="contained" type="submit" disabled={saving}
+  // Workspace-style sticky bottom action bar shared by the global-form tabs.
+  // save() reads component state directly, so the bar lives outside the <form>
+  // and just calls it; Cancel re-fetches, discarding unsaved edits. Shown only
+  // on tabs whose global form is mounted (see render).
+  const showFormBar = tab === 'brand' || tab === 'portal'
+    || ((tab === 'general' || tab === 'security' || tab === 'subscription') && scopeGroupId === 0)
+  const actionBar = (
+    <Box sx={{
+      position: 'sticky', bottom: 0, zIndex: 2,
+      mx: -3, mt: 1, px: 3, py: 1.5,
+      display: 'flex', justifyContent: 'flex-end', gap: 1,
+      bgcolor: md.surface, borderTop: `1px solid ${md.outlineVariant}`,
+    }}>
+      <Button variant="text" onClick={() => void load()} disabled={saving}>
+        {t('settings.cancel', { defaultValue: '取消' })}
+      </Button>
+      <Button variant="contained" onClick={() => void save()} disabled={saving}
         startIcon={saving ? <CircularProgress size={14} color="inherit" /> : <SaveIcon />}>
         {t('settings.save')}
       </Button>
@@ -383,40 +397,75 @@ export default function SettingsView() {
     } finally { setScopeSaving(false) }
   }
 
-  // renderScopeTab wraps a scope-trackable tab: the audience selector on top,
-  // then either the global editors (All users) or the per-group inherit/override
-  // editor filtered to this tab's categories.
+  // renderScopeTab lays out a scope-trackable tab the Google Workspace way: a
+  // persistent left rail lists the audiences (All users + each group) and the
+  // right panel shows the settings for the chosen scope — the global editors
+  // for All users, or the per-group inherit/override editor (filtered to this
+  // tab's categories) plus its own Save.
   function renderScopeTab(categories: string[], globalContent: React.ReactNode) {
+    const scopeName = scopeGroupId === 0
+      ? t('settings.scope.all_users', { defaultValue: '所有用户（全局默认）' })
+      : (scopeGroups.find(g => g.id === scopeGroupId)?.name ?? '')
+    const railItem = (id: number, name: string) => {
+      const sel = scopeGroupId === id
+      return (
+        <ListItemButton
+          key={id}
+          selected={sel}
+          onClick={() => setScopeGroupId(id)}
+          sx={{
+            borderRadius: 2, mb: 0.25, minHeight: 40,
+            color: sel ? md.onSecondaryContainer : md.onSurfaceVariant,
+            '&.Mui-selected, &.Mui-selected:hover': { bgcolor: md.secondaryContainer },
+          }}
+        >
+          <ListItemText primary={name} primaryTypographyProps={{ fontSize: 14, fontWeight: sel ? 600 : 500, noWrap: true }} />
+        </ListItemButton>
+      )
+    }
     return (
-      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap' }}>
-          <Typography sx={{ fontSize: 13, color: md.onSurfaceVariant }}>
+      <Box sx={{ display: 'flex', gap: 2, alignItems: 'flex-start', flexWrap: { xs: 'wrap', md: 'nowrap' } }}>
+        {/* Left scope rail — Workspace-style audience picker (All users + groups). */}
+        <Card sx={{ width: { xs: '100%', md: 248 }, flexShrink: 0, bgcolor: md.surfaceContainerLow, border: `1px solid ${md.outlineVariant}`, p: 1 }}>
+          <Typography sx={{ px: 1.5, pt: 1, pb: 0.75, fontSize: 11, fontWeight: 600, letterSpacing: '.5px', textTransform: 'uppercase', color: md.onSurfaceVariant }}>
             {t('settings.scope.audience', { defaultValue: '适用对象' })}
           </Typography>
-          <TextField select size="small" value={scopeGroupId}
-            onChange={e => setScopeGroupId(Number(e.target.value))} sx={{ minWidth: 240 }}>
-            <MenuItem value={0}>{t('settings.scope.all_users', { defaultValue: '所有用户（全局默认）' })}</MenuItem>
-            {scopeGroups.map(g => <MenuItem key={g.id} value={g.id}>{g.name}</MenuItem>)}
-          </TextField>
-        </Box>
-        {scopeGroupId === 0 ? globalContent : scopeState ? (
-          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-            <Box sx={{ display: 'flex', justifyContent: 'flex-end' }}>
-              <Button variant="contained" disabled={scopeSaving} onClick={saveScope}
-                startIcon={scopeSaving ? <CircularProgress size={14} color="inherit" /> : <SaveIcon />}>
-                {t('settings.save')}
-              </Button>
-            </Box>
-            <Card sx={{ p: 3, bgcolor: md.surfaceContainerLow, border: `1px solid ${md.outlineVariant}` }}>
-              <Typography sx={{ fontSize: 13, color: md.onSurfaceVariant, mb: 1 }}>
-                {t('settings.scope.override_hint', { defaultValue: '为本组覆盖以下设置；未覆盖项继承全局默认。' })}
-              </Typography>
-              <ScopeOverridesEditor scope={scopeState} onChange={setScopeState} categories={categories} />
-            </Card>
+          <List dense disablePadding sx={{ maxHeight: 460, overflowY: 'auto' }}>
+            {railItem(0, t('settings.scope.all_users', { defaultValue: '所有用户（全局默认）' }))}
+            {scopeGroups.map(g => railItem(g.id, g.name))}
+          </List>
+        </Card>
+        {/* Right panel — settings for the chosen scope. */}
+        <Box sx={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
+          <Box sx={{ display: 'flex', alignItems: 'baseline', flexWrap: 'wrap', gap: 0.75, minHeight: 28 }}>
+            <Typography sx={{ fontSize: 14, color: md.onSurfaceVariant }}>
+              {t('settings.scope.showing_for_label', { defaultValue: '当前显示范围：' })}
+            </Typography>
+            <Typography sx={{ fontSize: 15, fontWeight: 700, color: md.onSurface }}>{scopeName}</Typography>
           </Box>
-        ) : (
-          <Box sx={{ display: 'grid', placeItems: 'center', py: 4 }}><CircularProgress size={24} /></Box>
-        )}
+          {scopeGroupId === 0 ? globalContent : scopeState ? (
+            <>
+              <Card sx={{ p: 2.5, bgcolor: md.surfaceContainerLow, border: `1px solid ${md.outlineVariant}` }}>
+                <Typography sx={{ fontSize: 13, color: md.onSurfaceVariant, mb: 1 }}>
+                  {t('settings.scope.override_hint', { defaultValue: '为本组覆盖以下设置；未覆盖项继承全局默认。' })}
+                </Typography>
+                <ScopeOverridesEditor scope={scopeState} onChange={setScopeState} categories={categories} />
+              </Card>
+              <Box sx={{
+                position: 'sticky', bottom: 0, zIndex: 2, mt: 1, py: 1.5,
+                display: 'flex', justifyContent: 'flex-end', gap: 1,
+                bgcolor: md.surface, borderTop: `1px solid ${md.outlineVariant}`,
+              }}>
+                <Button variant="contained" disabled={scopeSaving} onClick={saveScope}
+                  startIcon={scopeSaving ? <CircularProgress size={14} color="inherit" /> : <SaveIcon />}>
+                  {t('settings.save')}
+                </Button>
+              </Box>
+            </>
+          ) : (
+            <Box sx={{ display: 'grid', placeItems: 'center', py: 4 }}><CircularProgress size={24} /></Box>
+          )}
+        </Box>
       </Box>
     )
   }
@@ -430,9 +479,7 @@ export default function SettingsView() {
       </Tabs>
 
       {tab === 'security' && renderScopeTab(['2fa', 'login'], (
-        <Box component="form" onSubmit={save} sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-          {saveBar}
-          <Section title={t('settings.general.section_login')} md={md}>
+        <Box component="form" onSubmit={save} sx={{ display: 'flex', flexDirection: 'column', gap: 2.5, maxWidth: 880 }}>          <Section title={t('settings.general.section_login')} md={md}>
             <TextField select fullWidth size="small" label={t('settings.general.login_mode')}
               value={settings.login_mode}
               onChange={e => patch('login_mode', e.target.value as LoginMode)}>
@@ -741,9 +788,7 @@ export default function SettingsView() {
       ))}
 
       {tab === 'general' && renderScopeTab(['notify', 'emergency'], (
-        <Box component="form" onSubmit={save} sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-          {saveBar}
-          <Section title={t('settings.general.section_runtime')} md={md}>
+        <Box component="form" onSubmit={save} sx={{ display: 'flex', flexDirection: 'column', gap: 2.5, maxWidth: 880 }}>          <Section title={t('settings.general.section_runtime')} md={md}>
             <Autocomplete
               freeSolo
               size="small"
@@ -946,9 +991,7 @@ export default function SettingsView() {
       ))}
 
       {tab === 'brand' && (
-        <Box component="form" onSubmit={save} sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-          {saveBar}
-          <Section title={t('settings.brand.section_text')} md={md}>
+        <Box component="form" onSubmit={save} sx={{ display: 'flex', flexDirection: 'column', gap: 2.5, maxWidth: 880 }}>          <Section title={t('settings.brand.section_text')} md={md}>
             <Pair>
               <TextField fullWidth label={t('settings.brand.site_title')}
                 value={settings.site_title} onChange={e => patch('site_title', e.target.value)} />
@@ -1025,9 +1068,7 @@ export default function SettingsView() {
       )}
 
       {tab === 'subscription' && renderScopeTab(['sub'], (
-        <Box component="form" onSubmit={save} sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-          {saveBar}
-          <Section title={t('settings.subscription.section_basic')} md={md}>
+        <Box component="form" onSubmit={save} sx={{ display: 'flex', flexDirection: 'column', gap: 2.5, maxWidth: 880 }}>          <Section title={t('settings.subscription.section_basic')} md={md}>
             <TextField fullWidth label={t('settings.subscription.sub_path')}
               value={'/' + (settings.sub_path || '').replace(/^\/+/, '')}
               onChange={e => {
@@ -1086,9 +1127,7 @@ export default function SettingsView() {
       ))}
 
       {tab === 'portal' && (
-        <Box component="form" onSubmit={save} sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-          {saveBar}
-          <QuickLinksEditor
+        <Box component="form" onSubmit={save} sx={{ display: 'flex', flexDirection: 'column', gap: 2.5, maxWidth: 880 }}>          <QuickLinksEditor
             links={settings.quick_links}
             onChange={v => patch('quick_links', v)}
             md={md}
@@ -1137,6 +1176,8 @@ export default function SettingsView() {
       {tab === 'mail' && <MailTab />}
 
       {tab === 'sso' && <SsoTab />}
+
+      {showFormBar && actionBar}
     </Box>
   )
 }
@@ -1286,7 +1327,7 @@ function MailTab() {
   const tplMissing = !templates.some(t => t.kind === activeTpl)
 
   return (
-    <Box component="form" onSubmit={save} sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+    <Box component="form" onSubmit={save} sx={{ display: 'flex', flexDirection: 'column', gap: 2.5, maxWidth: 880 }}>
       <Box sx={{ display: 'flex', justifyContent: 'flex-end' }}>
         <Button variant="contained" startIcon={saving ? <CircularProgress size={14} color="inherit" /> : <SaveIcon />}
           disabled={saving} type="submit">
@@ -1776,10 +1817,10 @@ function QuickLinksEditor({ links, onChange, md }: { links: QuickLink[]; onChang
 interface SectionProps { title: string; children: React.ReactNode; md: MdShape }
 function Section({ title, children, md }: SectionProps) {
   return (
-    <Card sx={{ p: 3, bgcolor: md.surfaceContainerLow, border: `1px solid ${md.outlineVariant}` }}>
-      <Typography sx={{ fontWeight: 500, mb: 1.5, color: md.onSurface }}>{title}</Typography>
-      <Divider sx={{ mb: 2 }} />
-      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>{children}</Box>
+    <Card sx={{ p: 2.5, bgcolor: md.surfaceContainerLow, border: `1px solid ${md.outlineVariant}` }}>
+      <Typography sx={{ fontWeight: 600, fontSize: 14, mb: 1, color: md.onSurface }}>{title}</Typography>
+      <Divider sx={{ mb: 1.5 }} />
+      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>{children}</Box>
     </Card>
   )
 }
@@ -2107,7 +2148,7 @@ function SamlPanel() {
   if (loading || !cfg) return <Box sx={{ display: 'grid', placeItems: 'center', py: 6 }}><CircularProgress /></Box>
 
   return (
-    <Box component="form" onSubmit={save} sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+    <Box component="form" onSubmit={save} sx={{ display: 'flex', flexDirection: 'column', gap: 2.5, maxWidth: 880 }}>
       <Box sx={{ display: 'flex', justifyContent: 'flex-end' }}>
         <Button variant="contained" type="submit" disabled={saving}
           startIcon={saving ? <CircularProgress size={14} color="inherit" /> : <SaveIcon />}>
@@ -2413,7 +2454,7 @@ function OidcPanel() {
   if (loading || !cfg) return <Box sx={{ display: 'grid', placeItems: 'center', py: 6 }}><CircularProgress /></Box>
 
   return (
-    <Box component="form" onSubmit={save} sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+    <Box component="form" onSubmit={save} sx={{ display: 'flex', flexDirection: 'column', gap: 2.5, maxWidth: 880 }}>
       <Box sx={{ display: 'flex', justifyContent: 'flex-end' }}>
         <Button variant="contained" type="submit" disabled={saving}
           startIcon={saving ? <CircularProgress size={14} color="inherit" /> : <SaveIcon />}>
