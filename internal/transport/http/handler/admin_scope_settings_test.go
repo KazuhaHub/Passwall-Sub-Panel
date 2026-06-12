@@ -127,7 +127,7 @@ func TestScopeSettingsHandler_GroupNotFound(t *testing.T) {
 // key must be a live setting name (else a write would strand on a dead key).
 func TestOverridableScopeKeysAreKnown(t *testing.T) {
 	known := mysql.KnownSettingNames()
-	for key := range overridableScopeKeys {
+	for key := range ports.OverridableScopeKeys {
 		parts := strings.SplitN(key, ".", 2)
 		if len(parts) != 2 {
 			t.Errorf("overridable key %q must be \"type.name\"", key)

@@ -13,25 +13,11 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 )
 
-// overridableScopeKeys is the set of setting keys (type.name) a Group may
-// override. It holds only settings resolved AFTER the user (hence the group) is
-// known AND genuinely group-scoped: the 2FA *method-availability* settings.
-// Excluded on purpose: require_2fa_for_staff (staff is role-based, not
-// group-based — Group.Require2FA already covers per-group enrollment) and
-// passkey_passwordless (gates the usernameless login button, decided BEFORE the
-// user is known — a pre-identity setting kept global, per §10-1). Every key MUST
-// be a live setting (drift-tested vs mysql.KnownSettingNames); all are plain
-// bools/ints — encrypted settings are never overridable and the repo rejects them.
-var overridableScopeKeys = map[string]bool{
-	"security.totp_enabled":                    true,
-	"security.passkey_enabled":                 true,
-	"security.twofa_allow_email":               true,
-	"security.twofa_email_resend_cooldown_sec": true,
-}
-
+// overridableScopeKeyList is ports.OverridableScopeKeys (the single source) as a
+// sorted slice for the GET catalog. The repo enforces the same set on write.
 func overridableScopeKeyList() []string {
-	out := make([]string, 0, len(overridableScopeKeys))
-	for k := range overridableScopeKeys {
+	out := make([]string, 0, len(ports.OverridableScopeKeys))
+	for k := range ports.OverridableScopeKeys {
 		out = append(out, k)
 	}
 	sort.Strings(out)
@@ -105,7 +91,7 @@ func (h *AdminScopeSettingsHandler) SetOverride(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	if !overridableScopeKeys[req.Type+"."+req.Name] {
+	if !ports.OverridableScopeKeys[req.Type+"."+req.Name] {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "setting " + req.Type + "." + req.Name + " is not overridable per group"})
 		return
 	}

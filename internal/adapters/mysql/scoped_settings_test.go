@@ -55,24 +55,24 @@ func TestScopedSettings_GroupOverrideWins(t *testing.T) {
 	ctx := context.Background()
 
 	base, _ := global.Load(ctx, ports.UISettings{})
-	base.Require2FAForStaff = false
+	base.TOTPEnabled = false
 	if err := global.Save(ctx, base); err != nil {
 		t.Fatalf("save global: %v", err)
 	}
-	if err := scope.SetOverride(ctx, "group", 1, ports.ScopeOverride{Type: "security", Name: "require_2fa_for_staff", Value: "1"}); err != nil {
+	if err := scope.SetOverride(ctx, "group", 1, ports.ScopeOverride{Type: "security", Name: "totp_enabled", Value: "1"}); err != nil {
 		t.Fatalf("set override: %v", err)
 	}
 
 	g1, _ := resolver.LoadForGroup(ctx, 1, ports.UISettings{})
-	if !g1.Require2FAForStaff {
-		t.Error("group 1 should see the override require_2fa_for_staff=true")
+	if !g1.TOTPEnabled {
+		t.Error("group 1 should see the override totp_enabled=true")
 	}
 	gl, _ := resolver.Load(ctx, ports.UISettings{})
-	if gl.Require2FAForStaff {
+	if gl.TOTPEnabled {
 		t.Error("global value must be unaffected by a group override")
 	}
 	g2, _ := resolver.LoadForGroup(ctx, 2, ports.UISettings{})
-	if g2.Require2FAForStaff {
+	if g2.TOTPEnabled {
 		t.Error("group 2 (no override) must inherit the global false")
 	}
 }
@@ -101,15 +101,15 @@ func TestScopedSettings_OverrideBeatsDefaultedBase(t *testing.T) {
 	ctx := context.Background()
 
 	gl, _ := global.Load(ctx, ports.UISettings{})
-	if gl.LockoutThreshold != 10 {
-		t.Fatalf("precondition: default lockout_threshold = %d, want 10", gl.LockoutThreshold)
+	if gl.TOTPEnabled {
+		t.Fatal("precondition: default totp_enabled should be false")
 	}
-	if err := scope.SetOverride(ctx, "group", 1, ports.ScopeOverride{Type: "security", Name: "lockout_threshold", Value: "5"}); err != nil {
+	if err := scope.SetOverride(ctx, "group", 1, ports.ScopeOverride{Type: "security", Name: "totp_enabled", Value: "1"}); err != nil {
 		t.Fatalf("set override: %v", err)
 	}
 	g, _ := resolver.LoadForGroup(ctx, 1, ports.UISettings{})
-	if g.LockoutThreshold != 5 {
-		t.Errorf("group override lockout_threshold = %d, want 5 (not re-floored to default 10)", g.LockoutThreshold)
+	if !g.TOTPEnabled {
+		t.Error("group override totp_enabled must apply on top of the global base")
 	}
 }
 
@@ -120,20 +120,39 @@ func TestScopedSettings_LoadForUser(t *testing.T) {
 	ctx := context.Background()
 
 	base, _ := global.Load(ctx, ports.UISettings{})
-	base.Require2FAForStaff = false
+	base.TOTPEnabled = false
 	_ = global.Save(ctx, base)
-	_ = scope.SetOverride(ctx, "group", 3, ports.ScopeOverride{Type: "security", Name: "require_2fa_for_staff", Value: "1"})
+	_ = scope.SetOverride(ctx, "group", 3, ports.ScopeOverride{Type: "security", Name: "totp_enabled", Value: "1"})
 
 	inGroup, _ := resolver.LoadForUser(ctx, &domain.User{GroupID: 3}, ports.UISettings{})
-	if !inGroup.Require2FAForStaff {
+	if !inGroup.TOTPEnabled {
 		t.Error("user in group 3 must see the override")
 	}
 	noGroup, _ := resolver.LoadForUser(ctx, &domain.User{GroupID: 0}, ports.UISettings{})
-	if noGroup.Require2FAForStaff {
+	if noGroup.TOTPEnabled {
 		t.Error("user with GroupID 0 must resolve to pure global (false)")
 	}
 	nilUser, _ := resolver.LoadForUser(ctx, nil, ports.UISettings{})
-	if nilUser.Require2FAForStaff {
+	if nilUser.TOTPEnabled {
 		t.Error("nil user must resolve to global (false)")
+	}
+}
+
+// TestScopedSettings_SkipsNonOverridableRow: even if a stray override row for a
+// NON-overridable key exists (the admin handler blocks writing one, but the repo
+// itself doesn't), the resolver must ignore it so the global/group partition holds.
+func TestScopedSettings_SkipsNonOverridableRow(t *testing.T) {
+	global, scope, resolver := newScopedTestRepos(t)
+	ctx := context.Background()
+
+	gl, _ := global.Load(ctx, ports.UISettings{}) // global require_2fa_for_staff = false
+	// require_2fa_for_staff is known but NOT overridable; write a stray row directly.
+	if err := scope.SetOverride(ctx, "group", 1, ports.ScopeOverride{Type: "security", Name: "require_2fa_for_staff", Value: "1"}); err != nil {
+		t.Fatalf("set stray override: %v", err)
+	}
+	g, _ := resolver.LoadForGroup(ctx, 1, ports.UISettings{})
+	if g.Require2FAForStaff != gl.Require2FAForStaff {
+		t.Errorf("a non-overridable override row must be ignored by the resolver (got %v, want %v)",
+			g.Require2FAForStaff, gl.Require2FAForStaff)
 	}
 }

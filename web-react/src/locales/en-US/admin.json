@@ -1279,10 +1279,10 @@
       "totp": "Authenticator app (TOTP)",
       "passkey": "Passkeys",
       "email": "Email code",
-      "email_cooldown": "Email resend cooldown (s)",
       "override": "Override",
       "inherit": "Inherit",
-      "global_prefix": "Global"
+      "global_prefix": "Global",
+      "save_error": "Some 2FA overrides failed to save — reopen to verify"
     },
     "placeholder": {
       "tags": "Pick region:XX / tag:YY from the dropdown, or type custom"

@@ -1177,6 +1177,21 @@ type ScopeSettingsRepo interface {
 	DeleteScope(ctx context.Context, scopeType string, scopeID int64) error
 }
 
+// OverridableScopeKeys is the SINGLE source of which settings ("type.name") a
+// scope may override: the post-identity, genuinely group-scoped 2FA-method
+// settings. Both the admin handler AND the repo (ScopeSettingsRepo.SetOverride)
+// gate on it, and the frontend renders from the API's `overridable` echo of this
+// set. Excluded on purpose: require_2fa_for_staff (role-based; Group.Require2FA
+// covers per-group enrollment), passkey_passwordless (the usernameless login
+// button), and twofa_email_resend_cooldown_sec (the login page's resend
+// countdown reads it) — all consumed BEFORE the user/group is known, so they
+// stay global (§10-1).
+var OverridableScopeKeys = map[string]bool{
+	"security.totp_enabled":      true,
+	"security.passkey_enabled":   true,
+	"security.twofa_allow_email": true,
+}
+
 // ScopedSettings resolves the EFFECTIVE settings for a scope: the global
 // SettingsRepo value overlaid with a group's sparse overrides (global ⊕ group).
 // Load returns the global value unchanged (equivalent to SettingsRepo.Load);

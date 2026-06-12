@@ -13,10 +13,11 @@ import (
 type Service struct {
 	groups ports.GroupRepo
 	nodes  ports.NodeRepo
+	scope  ports.ScopeSettingsRepo
 }
 
-func New(groups ports.GroupRepo, nodes ports.NodeRepo) *Service {
-	return &Service{groups: groups, nodes: nodes}
+func New(groups ports.GroupRepo, nodes ports.NodeRepo, scope ports.ScopeSettingsRepo) *Service {
+	return &Service{groups: groups, nodes: nodes, scope: scope}
 }
 
 func (s *Service) Get(ctx context.Context, id int64) (*domain.Group, error) {
@@ -68,7 +69,17 @@ func (s *Service) Delete(ctx context.Context, id int64) error {
 	if n > 0 {
 		return fmt.Errorf("%w: group has %d members", domain.ErrConflict, n)
 	}
-	return s.groups.Delete(ctx, id)
+	if err := s.groups.Delete(ctx, id); err != nil {
+		return err
+	}
+	// Clean up the group's per-scope setting overrides so they don't linger as
+	// orphan rows. (Group IDs never recycle, so they'd be inert anyway, but tidy.)
+	if s.scope != nil {
+		if derr := s.scope.DeleteScope(ctx, "group", id); derr != nil {
+			return derr
+		}
+	}
+	return nil
 }
 
 // NodesFor returns the nodes that a group's tag_filter selects, sorted by

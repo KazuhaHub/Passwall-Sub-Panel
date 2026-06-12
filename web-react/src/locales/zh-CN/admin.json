@@ -1279,10 +1279,10 @@
       "totp": "验证器 App (TOTP)",
       "passkey": "通行密钥",
       "email": "邮箱验证码",
-      "email_cooldown": "邮箱重发冷却（秒）",
       "override": "覆盖",
       "inherit": "继承",
-      "global_prefix": "全局"
+      "global_prefix": "全局",
+      "save_error": "部分 2FA 覆盖保存失败，请重新打开核对"
     },
     "placeholder": {
       "tags": "从下拉选 region:XX / tag:YY，或自由输入"

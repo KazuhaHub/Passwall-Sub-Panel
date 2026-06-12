@@ -242,7 +242,7 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 		return nil, fmt.Errorf("init oidc: %w", err)
 	}
 	auditSvc := audit.New(repos.Audit)
-	groupSvc := group.New(repos.Group, repos.Node)
+	groupSvc := group.New(repos.Group, repos.Node, repos.ScopeSettings)
 	syncSvc := syncsvc.New(pool, repos.Ownership)
 	userSvc := user.New(repos.User, repos.Group, repos.Ownership, repos.SyncTask, groupSvc, syncSvc, pool, repos.Settings)
 	nodeSvc := node.New(repos.Node, repos.Separator, pool, syncSvc, repos.SyncTask, repos.Group, repos.User, syncSvc, repos.Settings)

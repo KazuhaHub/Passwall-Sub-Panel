@@ -79,6 +79,12 @@ func applyScopeOverrides(base ports.UISettings, overrides []ports.ScopeOverride)
 		byKey[d.Type+"."+d.Name] = d
 	}
 	for _, o := range overrides {
+		// Defense-in-depth: never APPLY a non-overridable key, even if a stray row
+		// exists (the admin handler blocks writing one). This gates the EFFECT, so
+		// the global/group partition holds regardless of what's stored.
+		if !ports.OverridableScopeKeys[o.Type+"."+o.Name] {
+			continue
+		}
 		d, ok := byKey[o.Type+"."+o.Name]
 		if !ok {
 			continue

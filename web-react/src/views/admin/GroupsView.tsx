@@ -81,7 +81,6 @@ const SCOPE_2FA_KEYS: {
   { key: 'security.totp_enabled', type: 'security', name: 'totp_enabled', kind: 'bool', field: 'totp_enabled', labelKey: 'totp', def: '验证器 App (TOTP)' },
   { key: 'security.passkey_enabled', type: 'security', name: 'passkey_enabled', kind: 'bool', field: 'passkey_enabled', labelKey: 'passkey', def: '通行密钥' },
   { key: 'security.twofa_allow_email', type: 'security', name: 'twofa_allow_email', kind: 'bool', field: 'twofa_allow_email', labelKey: 'email', def: '邮箱验证码' },
-  { key: 'security.twofa_email_resend_cooldown_sec', type: 'security', name: 'twofa_email_resend_cooldown_sec', kind: 'int', field: 'twofa_email_resend_cooldown_sec', labelKey: 'email_cooldown', def: '邮箱重发冷却（秒）' },
 ]
 
 interface ScopeState {
@@ -338,17 +337,23 @@ export default function GroupsView() {
   // those flipped back to inherit. Runs after the group itself is saved.
   async function applyScopeOverrides(groupId: number) {
     if (!scope) return
-    for (const k of SCOPE_2FA_KEYS) {
-      if (!scope.overridable.includes(k.key)) continue
-      const st = scope.edit[k.key]
-      const wasOverridden = scope.orig[k.key] !== undefined
-      if (st.on) {
-        if (!wasOverridden || scope.orig[k.key] !== st.value) {
-          await setGroupScopeOverride(groupId, k.type, k.name, st.value)
+    try {
+      for (const k of SCOPE_2FA_KEYS) {
+        if (!scope.overridable.includes(k.key)) continue
+        const st = scope.edit[k.key]
+        const wasOverridden = scope.orig[k.key] !== undefined
+        if (st.on) {
+          if (!wasOverridden || scope.orig[k.key] !== st.value) {
+            await setGroupScopeOverride(groupId, k.type, k.name, st.value)
+          }
+        } else if (wasOverridden) {
+          await deleteGroupScopeOverride(groupId, k.type, k.name)
         }
-      } else if (wasOverridden) {
-        await deleteGroupScopeOverride(groupId, k.type, k.name)
       }
+    } catch {
+      // A mid-loop failure can leave overrides partially applied; surface it. The
+      // backend writes are idempotent and reopening re-fetches the actual state.
+      pushSnack(t('admin:groups.scope.save_error', { defaultValue: '部分 2FA 覆盖保存失败，请重新打开核对' }), 'error')
     }
   }
 
