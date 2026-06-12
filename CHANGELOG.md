@@ -4,6 +4,15 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## v3.8.0-beta.4 — 2026-06-12
+
+UI 细节:**沉浸式滚动条**(纯前端)。
+
+### 改进
+
+- **全局沉浸式滚动条** —— 内容区滚动条由系统默认的白/灰改为细的半透明主题色滑块 + 透明轨道(经
+  `MuiCssBaseline` 全局注入),融入暗色界面、仍可抓取、hover 加深;侧栏导航的滚动条继续隐藏。
+
 ## v3.8.0-beta.3 — 2026-06-12
 
 分组化管理第三个预发布。beta.2 Workspace 化 UI 的细节修复(纯前端,后端与 beta.2 一致),真机预览逐项验证。
