@@ -21,6 +21,12 @@ type stubSettings struct{ s ports.UISettings }
 func (f stubSettings) Load(context.Context, ports.UISettings) (ports.UISettings, error) {
 	return f.s, nil
 }
+func (f stubSettings) LoadForGroup(context.Context, int64, ports.UISettings) (ports.UISettings, error) {
+	return f.s, nil
+}
+func (f stubSettings) LoadForUser(context.Context, *domain.User, ports.UISettings) (ports.UISettings, error) {
+	return f.s, nil
+}
 func (f stubSettings) Save(context.Context, ports.UISettings) error { return nil }
 
 type stubEvents struct {

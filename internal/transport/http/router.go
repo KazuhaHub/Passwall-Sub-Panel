@@ -167,14 +167,14 @@ func NewRouter(d Deps) *gin.Engine {
 
 	// Email-as-2FA service — emails a one-time login code as an alternative 2FA
 	// factor (admin opt-in). Reuses the auth_tokens OTP machinery.
-	login2faSvc := login2fa.New(login2fa.Deps{Tokens: d.Repos.AuthToken, Mail: d.Mail, Settings: d.Repos.Settings})
+	login2faSvc := login2fa.New(login2fa.Deps{Tokens: d.Repos.AuthToken, Mail: d.Mail, Settings: d.Repos.ScopedSettings})
 
 	// One shared captcha service: the image-challenge store must be the same
 	// instance that issues (/auth/captcha) and verifies (login/register/forgot).
 	captchaSvc := captcha.NewService()
 
 	// Auth endpoints
-	authLocal := handler.NewAuthLocalHandler(d.Auth, d.User, d.SAML, d.OIDC, d.Repos.Settings, d.Repos.AuthEvent,
+	authLocal := handler.NewAuthLocalHandler(d.Auth, d.User, d.SAML, d.OIDC, d.Repos.ScopedSettings, d.Repos.AuthEvent,
 		loginguard.New(d.Repos.AuthEvent), captchaSvc, twofaSvc, passkeySvc, login2faSvc)
 	loginLimiter := middleware.NewPerIPLimiter(d.LoginPerIPPerMin, time.Minute)
 	loginLimiter.SetLimitFunc(newSettingsIntCache(d.Repos.Settings, d.LoginPerIPPerMin, func(s ports.UISettings) int { return s.LoginPerIPPerMin }).get)

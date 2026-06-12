@@ -39,9 +39,12 @@ type Sender interface {
 	SendLogin2FACode(ctx context.Context, to, displayName, code string, expireMinutes int) error
 }
 
-// SettingsLoader is the slice of the settings repo this service needs.
+// SettingsLoader yields the EFFECTIVE settings for a user (global ⊕ the user's
+// group overrides), so a group can override twofa_allow_email / the resend
+// cooldown. Wired to the ScopedSettings resolver; with no overrides this equals
+// the global value.
 type SettingsLoader interface {
-	Load(ctx context.Context, defaults ports.UISettings) (ports.UISettings, error)
+	LoadForUser(ctx context.Context, u *domain.User, defaults ports.UISettings) (ports.UISettings, error)
 }
 
 // Deps wires the email-2FA service.
@@ -91,7 +94,7 @@ func New(d Deps) *Service {
 // can't stall the response. The caller has already verified the pending token,
 // so there is no enumeration concern — feature/email errors are returned.
 func (s *Service) SendCode(ctx context.Context, u *domain.User) error {
-	set, err := s.d.Settings.Load(ctx, ports.UISettings{})
+	set, err := s.d.Settings.LoadForUser(ctx, u, ports.UISettings{})
 	if err != nil {
 		return err
 	}

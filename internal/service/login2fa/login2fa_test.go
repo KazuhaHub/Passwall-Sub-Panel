@@ -36,8 +36,17 @@ func (s *stubTokens) DeleteExpired(context.Context, time.Time) (int64, error) { 
 
 type stubSettings struct{ allowEmail bool }
 
-func (s stubSettings) Load(_ context.Context, d ports.UISettings) (ports.UISettings, error) {
+func (s stubSettings) LoadForUser(_ context.Context, _ *domain.User, d ports.UISettings) (ports.UISettings, error) {
 	d.TwoFAAllowEmail = s.allowEmail
+	return d, nil
+}
+
+// stubPerGroupSettings enables email-2FA only for users in allowGroupID — proves
+// SendCode threads the user through LoadForUser so a group override takes effect.
+type stubPerGroupSettings struct{ allowGroupID int64 }
+
+func (s stubPerGroupSettings) LoadForUser(_ context.Context, u *domain.User, d ports.UISettings) (ports.UISettings, error) {
+	d.TwoFAAllowEmail = u != nil && u.GroupID == s.allowGroupID
 	return d, nil
 }
 
@@ -97,6 +106,23 @@ func TestSendCode_StoresHashAndSends(t *testing.T) {
 	}
 	if !sender.sent || sender.to != "a@b.c" || sender.code != "424242" {
 		t.Fatalf("email must be sent with the plaintext code, got sent=%v to=%q code=%q", sender.sent, sender.to, sender.code)
+	}
+}
+
+func TestSendCode_PerGroupAllowEmail(t *testing.T) {
+	svc := New(Deps{
+		Tokens: &stubTokens{}, Mail: &stubSender{},
+		Settings: stubPerGroupSettings{allowGroupID: 7},
+		NewCode:  func() (string, error) { return "424242", nil },
+		Dispatch: func(f func()) { f() },
+	})
+	// A user in the enabled group can be sent an email code…
+	if err := svc.SendCode(context.Background(), &domain.User{ID: 1, GroupID: 7, Email: "a@b.c"}); err != nil {
+		t.Fatalf("group 7 should have email-2FA enabled via override: %v", err)
+	}
+	// …while a user in another group inherits the global (off) and stays gated.
+	if err := svc.SendCode(context.Background(), &domain.User{ID: 2, GroupID: 9, Email: "c@d.e"}); err == nil {
+		t.Fatal("group 9 inherits the global (off) → SendCode must be gated")
 	}
 }
 

@@ -28,7 +28,7 @@ type AuthLocalHandler struct {
 	user       *user.Service
 	saml       *auth.SAMLService
 	oidc       *auth.OIDCService
-	settings   ports.SettingsRepo
+	settings   ports.ScopedSettings
 	authEvents ports.AuthEventRepo
 	guard      *loginguard.Guard
 	captcha    *captcha.Service
@@ -37,7 +37,7 @@ type AuthLocalHandler struct {
 	login2fa   *login2fa.Service
 }
 
-func NewAuthLocalHandler(authSvc *auth.Service, userSvc *user.Service, samlSvc *auth.SAMLService, oidcSvc *auth.OIDCService, settings ports.SettingsRepo, authEvents ports.AuthEventRepo, guard *loginguard.Guard, captchaSvc *captcha.Service, twofaSvc *twofa.Service, passkeySvc *passkey.Service, login2faSvc *login2fa.Service) *AuthLocalHandler {
+func NewAuthLocalHandler(authSvc *auth.Service, userSvc *user.Service, samlSvc *auth.SAMLService, oidcSvc *auth.OIDCService, settings ports.ScopedSettings, authEvents ports.AuthEventRepo, guard *loginguard.Guard, captchaSvc *captcha.Service, twofaSvc *twofa.Service, passkeySvc *passkey.Service, login2faSvc *login2fa.Service) *AuthLocalHandler {
 	return &AuthLocalHandler{auth: authSvc, user: userSvc, saml: samlSvc, oidc: oidcSvc, settings: settings, authEvents: authEvents, guard: guard, captcha: captchaSvc, twofa: twofaSvc, passkey: passkeySvc, login2fa: login2faSvc}
 }
 
@@ -370,7 +370,13 @@ func (h *AuthLocalHandler) Login(c *gin.Context) {
 	// account into 2FA; there is no separate "allow passkey as 2FA" toggle). Hand
 	// back a short-lived pending token (not a real session) and require
 	// /auth/2fa/verify (or a passkey/email alternative) to complete the login.
-	hasPasskey := h.userHasPasskey(c.Request.Context(), u.ID, s)
+	//
+	// The user is identified now, so the METHOD decision uses the EFFECTIVE
+	// settings (global ⊕ this user's group overrides) — a group can enable email
+	// or passkey as a 2FA method. The pre-password guard/captcha above stay on the
+	// global `s` (they run before the user, hence the group, is known).
+	su, _ := h.settings.LoadForUser(c.Request.Context(), u, ports.UISettings{})
+	hasPasskey := h.userHasPasskey(c.Request.Context(), u.ID, su)
 	if u.TOTPEnabled || hasPasskey {
 		pending, perr := h.auth.IssuePending(u, jwtutil.FirstFactorPassword)
 		if perr != nil {
@@ -384,7 +390,7 @@ func (h *AuthLocalHandler) Login(c *gin.Context) {
 				hasRecovery = n > 0
 			}
 		}
-		methods := availableTwoFAMethods(u, jwtutil.FirstFactorPassword, s, hasPasskey, hasRecovery)
+		methods := availableTwoFAMethods(u, jwtutil.FirstFactorPassword, su, hasPasskey, hasRecovery)
 		c.JSON(http.StatusOK, gin.H{"status": "2fa_required", "pending_token": pending, "methods": methods})
 		return
 	}
@@ -466,7 +472,11 @@ func (h *AuthLocalHandler) TwoFAVerify(c *gin.Context) {
 	if !ok {
 		return
 	}
+	// Global `s` for the per-account lockout (thresholds are panel-wide, §10-1);
+	// the user's EFFECTIVE settings `su` for the email-method gate (a group can
+	// enable email-as-2FA).
 	s, _ := h.settings.Load(c.Request.Context(), ports.UISettings{})
+	su, _ := h.settings.LoadForUser(c.Request.Context(), u, ports.UISettings{})
 	// Per-account 2FA lockout: a distributed attacker who already passed the
 	// password can otherwise grind TOTP codes from many IPs (the per-IP login
 	// limiter can't see that). Checked BEFORE verifying so a locked account can't
@@ -494,7 +504,7 @@ func (h *AuthLocalHandler) TwoFAVerify(c *gin.Context) {
 	if !verified && h.login2fa != nil {
 		// Only accept an emailed code while email-as-2FA is enabled, so flipping
 		// the admin toggle off invalidates outstanding codes immediately.
-		if s.TwoFAAllowEmail {
+		if su.TwoFAAllowEmail {
 			if emailOK, eerr := h.login2fa.VerifyCode(c.Request.Context(), u.ID, req.Code); eerr == nil && emailOK {
 				verified = true
 			}
@@ -550,7 +560,7 @@ func (h *AuthLocalHandler) userHasPasskey(ctx context.Context, userID int64, s p
 // response and returning false if not met: passkeys enabled panel-wide, and the
 // first factor was a password (a passwordless passkey login can't re-use a passkey
 // as 2FA). Enrolling a passkey is itself the opt-in — there is no separate toggle.
-func (h *AuthLocalHandler) passkeyTwoFAAllowed(c *gin.Context, claims *jwtutil.Claims) bool {
+func (h *AuthLocalHandler) passkeyTwoFAAllowed(c *gin.Context, u *domain.User, claims *jwtutil.Claims) bool {
 	if h.passkey == nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Passkey verification is not available"})
 		return false
@@ -559,7 +569,9 @@ func (h *AuthLocalHandler) passkeyTwoFAAllowed(c *gin.Context, claims *jwtutil.C
 		c.JSON(http.StatusForbidden, gin.H{"error": "A passkey can't be the second factor for a passkey login"})
 		return false
 	}
-	s, err := h.settings.Load(c.Request.Context(), ports.UISettings{})
+	// Effective (per-group) passkey toggle — a group can enable/disable passkey as
+	// a 2FA method for its members.
+	s, err := h.settings.LoadForUser(c.Request.Context(), u, ports.UISettings{})
 	if err != nil || !s.PasskeyEnabled {
 		c.JSON(http.StatusForbidden, gin.H{"error": "Passkey is not an enabled verification method"})
 		return false
@@ -581,7 +593,7 @@ func (h *AuthLocalHandler) TwoFAPasskeyBegin(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if !h.passkeyTwoFAAllowed(c, claims) {
+	if !h.passkeyTwoFAAllowed(c, u, claims) {
 		return
 	}
 	opts, sessionID, err := h.passkey.BeginLoginForUser(c.Request.Context(), u.ID)
@@ -600,7 +612,7 @@ func (h *AuthLocalHandler) TwoFAPasskeyFinish(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if !h.passkeyTwoFAAllowed(c, claims) {
+	if !h.passkeyTwoFAAllowed(c, u, claims) {
 		return
 	}
 	if err := h.passkey.FinishLoginForUser(c.Request.Context(), u.ID, c.Query("session"), c.Request); err != nil {

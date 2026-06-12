@@ -14,16 +14,17 @@ import (
 )
 
 // overridableScopeKeys is the set of setting keys (type.name) a Group may
-// override. v3.8.0 Phase 1 starts with the 2FA enrollment-policy group — the
-// cleanest, already-cascading field set (the end-to-end vertical slice). Later
-// phases extend it. Every key MUST be a live setting (drift-tested against
-// mysql.KnownSettingNames); all are plain bools/ints — encrypted settings are
-// never overridable and the repo rejects them regardless.
+// override. It holds only settings resolved AFTER the user (hence the group) is
+// known AND genuinely group-scoped: the 2FA *method-availability* settings.
+// Excluded on purpose: require_2fa_for_staff (staff is role-based, not
+// group-based — Group.Require2FA already covers per-group enrollment) and
+// passkey_passwordless (gates the usernameless login button, decided BEFORE the
+// user is known — a pre-identity setting kept global, per §10-1). Every key MUST
+// be a live setting (drift-tested vs mysql.KnownSettingNames); all are plain
+// bools/ints — encrypted settings are never overridable and the repo rejects them.
 var overridableScopeKeys = map[string]bool{
-	"security.require_2fa_for_staff":           true,
 	"security.totp_enabled":                    true,
 	"security.passkey_enabled":                 true,
-	"security.passkey_passwordless":            true,
 	"security.twofa_allow_email":               true,
 	"security.twofa_email_resend_cooldown_sec": true,
 }

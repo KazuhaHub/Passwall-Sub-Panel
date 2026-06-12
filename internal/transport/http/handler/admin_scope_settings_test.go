@@ -64,7 +64,7 @@ func TestScopeSettingsHandler_SetGetDelete(t *testing.T) {
 	h := NewAdminScopeSettingsHandler(fakeScopeGroups{exists: map[int64]bool{5: true}}, repo)
 	r := scopeRouter(h)
 
-	body, _ := json.Marshal(setScopeOverrideRequest{Type: "security", Name: "require_2fa_for_staff", Value: "1"})
+	body, _ := json.Marshal(setScopeOverrideRequest{Type: "security", Name: "totp_enabled", Value: "1"})
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, httptest.NewRequest(http.MethodPut, "/api/admin/groups/5/scope-settings", bytes.NewReader(body)))
 	if w.Code != http.StatusOK {
@@ -80,7 +80,7 @@ func TestScopeSettingsHandler_SetGetDelete(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &dto); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if dto.Overrides["security.require_2fa_for_staff"] != "1" {
+	if dto.Overrides["security.totp_enabled"] != "1" {
 		t.Errorf("GET overrides = %+v, want the set value", dto.Overrides)
 	}
 	if len(dto.Overridable) == 0 {
@@ -88,11 +88,11 @@ func TestScopeSettingsHandler_SetGetDelete(t *testing.T) {
 	}
 
 	w = httptest.NewRecorder()
-	r.ServeHTTP(w, httptest.NewRequest(http.MethodDelete, "/api/admin/groups/5/scope-settings/security/require_2fa_for_staff", nil))
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodDelete, "/api/admin/groups/5/scope-settings/security/totp_enabled", nil))
 	if w.Code != http.StatusOK {
 		t.Fatalf("DELETE = %d", w.Code)
 	}
-	if _, ok := repo.rows["security.require_2fa_for_staff"]; ok {
+	if _, ok := repo.rows["security.totp_enabled"]; ok {
 		t.Error("override must be gone after DELETE (inheritance restored)")
 	}
 }
