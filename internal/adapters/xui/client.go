@@ -42,6 +42,11 @@ type Client struct {
 	mu     sync.Mutex
 	jar    http.CookieJar
 	authed bool
+	// csrfToken is the per-session CSRF token fetched after a cookie-mode
+	// login. 3X-UI 3.2.x+ requires it as X-CSRF-Token on unsafe methods in
+	// cookie (username/password) mode; Bearer-token mode bypasses CSRF and
+	// leaves this empty. Guarded by mu alongside authed.
+	csrfToken string
 
 	// inboundWriteLocks serializes read-modify-write inbound updates per
 	// inbound ID within this process. UpdateInbound GETs the whole inbound,
@@ -136,6 +141,47 @@ func (c *Client) loginLocked(ctx context.Context) error {
 		return fmt.Errorf("login failed: %s", r.Msg)
 	}
 	c.authed = true
+	// Cookie mode needs a CSRF token for unsafe methods on 3X-UI 3.2.x+.
+	// Best-effort and intentionally ignored: a pre-CSRF panel (no /csrf-token
+	// route) or a transient failure leaves the token empty — reads still work,
+	// and a write that then 401/403s re-auths and re-fetches once (doJSONRetry).
+	_ = c.fetchCSRFLocked(ctx)
+	return nil
+}
+
+// fetchCSRFLocked retrieves and caches a CSRF token for cookie-mode unsafe
+// requests. Called from loginLocked with c.mu held, so it must NOT route
+// through doJSON (which re-acquires c.mu via ensureAuth → deadlock); it issues
+// a raw GET instead. The returned error is for testability — loginLocked
+// ignores it (best-effort by design). On any failure the cached token is
+// cleared so a stale token from a prior session never lingers.
+func (c *Client) fetchCSRFLocked(ctx context.Context) error {
+	c.csrfToken = ""
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/csrf-token", nil)
+	if err != nil {
+		return err
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("csrf-token: HTTP %d", resp.StatusCode)
+	}
+	b, _ := io.ReadAll(resp.Body)
+	var r genericResponse
+	if err := json.Unmarshal(b, &r); err != nil {
+		return fmt.Errorf("csrf-token: parse: %w", err)
+	}
+	if !r.Success {
+		return fmt.Errorf("csrf-token: %s", r.Msg)
+	}
+	var token string
+	if err := json.Unmarshal(r.Obj, &token); err != nil {
+		return fmt.Errorf("csrf-token: decode obj: %w", err)
+	}
+	c.csrfToken = token
 	return nil
 }
 
@@ -173,6 +219,16 @@ func (c *Client) doJSONRetry(ctx context.Context, method, path string, body any,
 	}
 	if c.apiToken != "" {
 		req.Header.Set("Authorization", "Bearer "+c.apiToken)
+	} else if isUnsafeMethod(method) {
+		// Cookie mode: 3X-UI 3.2.x+ requires X-CSRF-Token on unsafe methods.
+		// Empty token (pre-CSRF panel / fetch failed) sends no header — the
+		// request either succeeds (old panel) or 403s into the re-auth retry.
+		c.mu.Lock()
+		tok := c.csrfToken
+		c.mu.Unlock()
+		if tok != "" {
+			req.Header.Set("X-CSRF-Token", tok)
+		}
 	}
 	resp, err := c.http.Do(req)
 	if err != nil {
@@ -180,19 +236,24 @@ func (c *Client) doJSONRetry(ctx context.Context, method, path string, body any,
 	}
 	defer resp.Body.Close()
 
-	// On 401 in cookie mode, drop the cached session and retry exactly once.
-	if resp.StatusCode == http.StatusUnauthorized && c.apiToken == "" {
+	// In cookie mode a 401 (expired session) or 403 (stale/missing CSRF token
+	// after a session rotation) means drop the cached session + CSRF token,
+	// re-login (which re-fetches the token), and retry exactly once. Bearer
+	// mode never reaches here (apiToken is set), so a Bearer 403 stays a
+	// permanent ErrValidation below.
+	if (resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden) && c.apiToken == "" {
 		if retried {
-			// Re-auth already happened and the path is still 401 — stop here.
-			// Returning a plain (transient-classified) error lets the bounded
-			// task-level retry/backoff handle it instead of recursing forever.
-			return fmt.Errorf("%s %s: still HTTP 401 after re-authentication — "+
-				"login succeeds but the API path stays unauthorized "+
-				"(check reverse-proxy path auth, webBasePath, or a rotated session secret)",
-				method, path)
+			// Re-auth already happened and the path is still rejected — stop
+			// here. Returning a plain (transient-classified) error lets the
+			// bounded task-level retry/backoff handle it instead of recursing.
+			return fmt.Errorf("%s %s: still HTTP %d after re-authentication — "+
+				"login succeeds but the API path stays rejected "+
+				"(check reverse-proxy path auth, webBasePath, CSRF, or a rotated session secret)",
+				method, path, resp.StatusCode)
 		}
 		c.mu.Lock()
 		c.authed = false
+		c.csrfToken = ""
 		c.mu.Unlock()
 		if err := c.ensureAuth(ctx); err != nil {
 			return err
@@ -285,6 +346,18 @@ func isPermanentPanelMsg(msg string) bool {
 		strings.Contains(m, "already exist") ||
 		strings.Contains(m, "client not found") ||
 		strings.Contains(m, "not found in inbound")
+}
+
+// isUnsafeMethod reports whether m is a state-changing HTTP method that 3X-UI's
+// cookie-mode CSRF middleware guards. PSP only issues GET and POST, but the
+// full set is listed for correctness.
+func isUnsafeMethod(m string) bool {
+	switch m {
+	case http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete:
+		return true
+	default:
+		return false
+	}
 }
 
 // snippet truncates s to n chars with an ellipsis, suitable for embedding

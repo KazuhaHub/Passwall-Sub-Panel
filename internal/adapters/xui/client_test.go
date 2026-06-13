@@ -94,13 +94,18 @@ func TestDoJSON_TransientCodesStayRaw(t *testing.T) {
 func TestDoJSON_Persistent401CookieAuthDoesNotRecurseForever(t *testing.T) {
 	var apiHits, loginHits int
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/login" {
+		switch r.URL.Path {
+		case "/login":
 			loginHits++
 			_, _ = w.Write([]byte(`{"success":true}`))
-			return
+		case "/csrf-token":
+			// Cookie-mode login now fetches a CSRF token; answer it so the
+			// fetch doesn't count against the API-path hit budget asserted below.
+			_, _ = w.Write([]byte(`{"success":true,"obj":"csrf"}`))
+		default:
+			apiHits++
+			w.WriteHeader(http.StatusUnauthorized)
 		}
-		apiHits++
-		w.WriteHeader(http.StatusUnauthorized)
 	}))
 	defer srv.Close()
 	// Cookie mode: empty apiToken, username/password set so loginLocked succeeds.
@@ -487,5 +492,143 @@ func TestDoJSON_404MarksEndpointUnsupportedButStaysValidation(t *testing.T) {
 	err2 := c2.doJSON(context.Background(), http.MethodGet, "/x", nil, nil)
 	if errors.Is(err2, ports.ErrXUIEndpointUnsupported) {
 		t.Fatalf("400 must NOT be marked endpoint-unsupported, got %v", err2)
+	}
+}
+
+// --- 3X-UI 3.2.x+ cookie-mode CSRF (regression: cookie writes were silently
+// broken because no X-CSRF-Token was ever sent) ---
+
+// Cookie (username/password) mode must fetch a CSRF token after login and send
+// it as X-CSRF-Token on unsafe (POST) requests. 3X-UI 3.2.x+ rejects cookie-mode
+// writes without it, which silently broke every enroll/update/delete on
+// username/password panels. Bearer mode is exempt (see TestBearerMode_NoCSRFFetch).
+func TestCookieMode_SendsCSRFTokenOnWrites(t *testing.T) {
+	var gotCSRF string
+	var csrfFetched, loginHits int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/login":
+			loginHits++
+			_, _ = w.Write([]byte(`{"success":true}`))
+		case "/csrf-token":
+			csrfFetched++
+			_, _ = w.Write([]byte(`{"success":true,"obj":"TESTCSRF123"}`))
+		default:
+			gotCSRF = r.Header.Get("X-CSRF-Token")
+			_, _ = w.Write([]byte(`{"success":true}`))
+		}
+	}))
+	defer srv.Close()
+	c := &Client{baseURL: srv.URL, http: srv.Client(), username: "u", password: "p"}
+
+	if err := c.doJSON(context.Background(), http.MethodPost, "/panel/api/clients/add", map[string]any{"x": 1}, nil); err != nil {
+		t.Fatalf("cookie-mode write errored: %v", err)
+	}
+	if csrfFetched != 1 {
+		t.Fatalf("csrf-token fetched %d times, want 1", csrfFetched)
+	}
+	if gotCSRF != "TESTCSRF123" {
+		t.Fatalf("X-CSRF-Token on write = %q, want TESTCSRF123", gotCSRF)
+	}
+	if loginHits != 1 {
+		t.Fatalf("login hit %d times, want 1 (CSRF fetch must not re-login)", loginHits)
+	}
+}
+
+// Safe methods (GET) must NOT carry X-CSRF-Token — the token is scoped to
+// unsafe methods, matching the panel's CSRF middleware.
+func TestCookieMode_NoCSRFHeaderOnReads(t *testing.T) {
+	var gotCSRF string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/login":
+			_, _ = w.Write([]byte(`{"success":true}`))
+		case "/csrf-token":
+			_, _ = w.Write([]byte(`{"success":true,"obj":"TESTCSRF123"}`))
+		default:
+			gotCSRF = r.Header.Get("X-CSRF-Token")
+			_, _ = w.Write([]byte(`{"success":true,"obj":[]}`))
+		}
+	}))
+	defer srv.Close()
+	c := &Client{baseURL: srv.URL, http: srv.Client(), username: "u", password: "p"}
+	var out []rawInbound
+	if err := c.doJSON(context.Background(), http.MethodGet, "/panel/api/inbounds/list", nil, &out); err != nil {
+		t.Fatalf("cookie-mode read errored: %v", err)
+	}
+	if gotCSRF != "" {
+		t.Fatalf("GET must not carry X-CSRF-Token, got %q", gotCSRF)
+	}
+}
+
+// Bearer (API token) mode must not touch /csrf-token at all and must not send
+// X-CSRF-Token — the panel short-circuits CSRF for token auth. Guards against
+// the CSRF fix leaking into the common token path.
+func TestBearerMode_NoCSRFFetch(t *testing.T) {
+	var csrfFetched int
+	var gotCSRF, gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/csrf-token":
+			csrfFetched++
+			_, _ = w.Write([]byte(`{"success":true,"obj":"x"}`))
+		default:
+			gotCSRF = r.Header.Get("X-CSRF-Token")
+			gotAuth = r.Header.Get("Authorization")
+			_, _ = w.Write([]byte(`{"success":true}`))
+		}
+	}))
+	defer srv.Close()
+	c := &Client{baseURL: srv.URL, http: srv.Client(), apiToken: "tok"}
+	if err := c.doJSON(context.Background(), http.MethodPost, "/panel/api/clients/add", map[string]any{"x": 1}, nil); err != nil {
+		t.Fatalf("bearer write errored: %v", err)
+	}
+	if csrfFetched != 0 {
+		t.Fatalf("bearer mode must not fetch csrf-token, fetched %d", csrfFetched)
+	}
+	if gotCSRF != "" {
+		t.Fatalf("bearer mode must not send X-CSRF-Token, got %q", gotCSRF)
+	}
+	if gotAuth != "Bearer tok" {
+		t.Fatalf("Authorization = %q, want 'Bearer tok'", gotAuth)
+	}
+}
+
+// A cookie-mode write rejected with 403 (stale/missing CSRF after a session
+// rotation) must re-login, re-fetch the CSRF token, and retry exactly once.
+// Mirrors the bounded 401 re-auth so a persistent 403 can't recurse.
+func TestCookieMode_403RefetchesCSRFAndRetriesOnce(t *testing.T) {
+	var apiHits, csrfFetched, loginHits int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/login":
+			loginHits++
+			_, _ = w.Write([]byte(`{"success":true}`))
+		case "/csrf-token":
+			csrfFetched++
+			_, _ = w.Write([]byte(`{"success":true,"obj":"TESTCSRF123"}`))
+		default:
+			apiHits++
+			if apiHits == 1 {
+				w.WriteHeader(http.StatusForbidden) // first write: CSRF rejected
+				return
+			}
+			_, _ = w.Write([]byte(`{"success":true}`)) // retry succeeds
+		}
+	}))
+	defer srv.Close()
+	c := &Client{baseURL: srv.URL, http: srv.Client(), username: "u", password: "p"}
+
+	if err := c.doJSON(context.Background(), http.MethodPost, "/panel/api/clients/add", map[string]any{"x": 1}, nil); err != nil {
+		t.Fatalf("403 retry should recover, got: %v", err)
+	}
+	if apiHits != 2 {
+		t.Fatalf("API path hit %d times, want 2 (one retry)", apiHits)
+	}
+	if loginHits != 2 {
+		t.Fatalf("login hit %d times, want 2 (initial + re-auth)", loginHits)
+	}
+	if csrfFetched != 2 {
+		t.Fatalf("csrf-token fetched %d times, want 2 (initial + re-fetch on 403)", csrfFetched)
 	}
 }
