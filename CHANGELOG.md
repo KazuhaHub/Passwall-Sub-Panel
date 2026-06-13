@@ -4,6 +4,30 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## v3.8.0-beta.7 — 2026-06-14
+
+默认订阅模板的内网 DNS 解析修复 + 审计 low 收尾。后端,无前端改动。
+
+### 修复
+
+- **默认 mihomo / sing-box 模板:内网 / LAN / mDNS 域名改走系统解析器** —— 原模板把 `geosite:private`
+  (含 lan / local / localhost / *.arpa / internal 及私网反向区)以及 `.lan` / `.local` / `.arpa` 路由到
+  国内公共 DoH(alidns / doh.pub),而公共 DoH 解析不了这些内网名 → `.lan` / `.local` mDNS / NAS 主机名 /
+  intranet 全部 NXDOMAIN。现 mihomo 把 `geosite:private` 单列为 `→ system`,sing-box 新增 `{type: local}`
+  系统解析器并把 lan/local/localhost/internal/arpa 后缀路由过去。新增 `TestSeedTemplates_PrivateDNSUsesSystemResolver`
+  漂移守卫。**注**:`seed.Ensure` 不覆盖已存在文件,现有部署需在该模板上点「重置为默认」才会更新;新安装自动获得。
+- **SAML 断言重放缓存硬上限** —— 原 GC 只扫过期项,大量不同的有效断言 ID 会让缓存无界增长;现扫不动时按
+  最早过期淘汰到低水位(损失的重放保护最小)。红→绿测试覆盖洪泛场景。
+- **safehttp SSRF 纵深** —— 增封 IANA 特殊段(TEST-NET×3 / benchmarking / 协议保留 / class-E 保留 /
+  IPv6 doc)作为纵深防御;**故意不封** CGNAT `100.64.0.0/10`(Tailscale / Headscale overlay 上的合法面板在此段),
+  RFC1918 / ULA 私网照旧放行。
+
+### 改进
+
+- **rollup 时钟缝隙** —— `Service` 增加 `now` 时钟缝隙,把时区相关的 flaky 测试 pin 到固定 UTC。根因是测试
+  fixture bug(混用 UTC 的 `hourFloor` 与本地的 `time.Now`,SQLite 按 tz 字符串比较),非生产 bug(生产 pin UTC)。
+  全量测试套件恢复确定性绿。
+
 ## v3.8.0-beta.6 — 2026-06-13
 
 全局安全 + 性能审计修复(多 agent 审计 + 对抗式复核;0 个 critical/high,修复确认的 medium 与若干 low)。后端,无前端改动。
