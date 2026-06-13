@@ -91,8 +91,17 @@ content: |
     # concurrently and takes the fastest valid reply — so the primary is
     # used whenever healthy, and the backups seamlessly cover for it.
     nameserver-policy:
+      # Private / LAN / mDNS -> the OS (system) resolver. geosite:private
+      # contains lan / local / localhost / *.arpa / internal — names a public
+      # DoH cannot resolve, so routing them to a domestic DoH (as this template
+      # used to, by folding `private` into the key below) made .lan / .local /
+      # NAS / intranet lookups fail. The system resolver knows the router's
+      # local names and .local mDNS. (.lan/.local/*.arpa are also in
+      # fake-ip-filter above, so they already get a real IP, not a fake one.)
+      "geosite:private":
+      - system
       # Domestic domains -> domestic DoH
-      "geosite:cn,private,apple-cn,microsoft@cn":
+      "geosite:cn,apple-cn,microsoft@cn":
       - https://dns.alidns.com/dns-query
       - https://doh.pub/dns-query
       # Foreign domains -> org Cloudflare Gateway (primary; bare resolution

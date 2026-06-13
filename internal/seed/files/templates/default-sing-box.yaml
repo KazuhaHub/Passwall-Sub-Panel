@@ -23,6 +23,10 @@ content: |
           "server": "223.5.5.5"
         },
         {
+          "tag": "local",
+          "type": "local"
+        },
+        {
           "tag": "alidns",
           "type": "https",
           "server": "dns.alidns.com",
@@ -56,10 +60,12 @@ content: |
           "domain_suffix": [
             "lan",
             "local",
+            "localhost",
+            "internal",
             "arpa"
           ],
           "action": "route",
-          "server": "alidns"
+          "server": "local"
         },
         {
           "rule_set": [
