@@ -4,6 +4,27 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## v3.8.0-beta.6 — 2026-06-13
+
+全局安全 + 性能审计修复(多 agent 审计 + 对抗式复核;0 个 critical/high,修复确认的 medium 与若干 low)。后端,无前端改动。
+
+### 安全
+
+- **公开未认证端点不再泄露内部错误** —— `/api/auth/{register,verify-email,reset-password}` 改走 `respondPublicError`:非 sentinel(DB/内部)错误返回通用 500(详情仅记服务端),不再把驱动 / 表 / 约束名回给匿名调用者。domain sentinel(校验文案、状态)不变。
+- **无密码 passkey 登录强制 user verification** —— discoverable ceremony 设 `UserVerification=Required`,go-webauthn 据此校验 UV 标志;单因子(无密码、跳过 2FA)登录不再能被 UV=false 的纯触碰断言满足。2FA 第二因子 + 注册维持 Preferred。
+- **2FA 恢复码消除模偏置** —— 31 符号字母表改用拒绝采样(原 `byte%31` 让前 8 个符号略超采)。
+- **at-rest 密钥审计补扫 KV 设置表** —— `captcha_secret_key` / `geo_ip_update_token` 等加密设置若明文落库也会被启动审计告警。
+- **订正 proxy-trust 注释** —— wide-open 信任模式下解析出的 ClientIP 可被直连方伪造(限流 / 锁定 / 审计 key),与现有启动 WARN 一致。
+
+### 性能(/sub 热路径)
+
+- **短 TTL 渲染缓存** —— 按 (用户, 客户端类型) 缓存渲染结果 60s;轮询机群重复 poll 不再每次跑完整渲染 + group/node/separator/traffic 读,降为一次 map 查找。访问日志、客户端封禁检查、Subscription-Userinfo 头仍每次执行;陈旧度被 TTL 硬约束(配置变更 ≤TTL 生效)。
+- **enabled-node 缓存 + yamlScalar memoize** —— `NodesFor` 的 `ListEnabled` 同 TTL 缓存(跨用户在渲染缓存未命中路径上去重);节点名的 YAML 引用判定(原每名一次 `yaml.Unmarshal`)改进程级 memoize。
+
+### 修复
+
+- **group 成员后台 resync 纳入 WaitGroup** —— 原 untracked goroutine 可能在 shutdown 时被半路切断,现经跟踪式 dispatcher 运行、可被 drain(reconcile 仍兜底)。
+
 ## v3.8.0-beta.5 — 2026-06-13
 
 3X-UI 对接:**3.3.1 兼容验证 + cookie 模式 CSRF 写修复**(后端,无前端改动)。
