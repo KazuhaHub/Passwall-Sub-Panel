@@ -101,13 +101,20 @@ type Service struct {
 	// doesn't silently drop every segment (e.g. a 90-min poll would exceed a
 	// fixed 1h heartbeat on every normal segment and blank the chart).
 	heartbeat time.Duration
+	// now is the clock seam (defaults to time.Now). Tests pin it to a fixed
+	// instant so the raw-window bound and the bucket math are deterministic and
+	// timezone-independent — the SQLite driver compares captured_at as
+	// TZ-offset-bearing strings (see withRecentRawWindow), so a test mixing
+	// time.Now() (process TZ) with hourFloor() (UTC) fixtures was flaky in any
+	// non-UTC environment.
+	now func() time.Time
 }
 
 // New builds the rollup service. pollInterval is the traffic poll cadence; the
 // gap heartbeat is derived from it (see Service.heartbeat). Pass 0 to use the
 // 1h floor (tests / unknown cadence).
 func New(db *gorm.DB, pollInterval time.Duration) *Service {
-	return &Service{db: db, heartbeat: heartbeatFor(pollInterval)}
+	return &Service{db: db, heartbeat: heartbeatFor(pollInterval), now: time.Now}
 }
 
 // heartbeatFor returns the gap heartbeat for a poll cadence: max(1h floor,
@@ -135,7 +142,7 @@ func (s *Service) RollupOnce(ctx context.Context) error {
 // cycle. The bounded raw window still includes enough look-back that the
 // recent buckets are computed identically to RollupOnce.
 func (s *Service) RollupRecent(ctx context.Context) error {
-	return s.rollup(ctx, time.Now().Add(-rollupRecentEmitWindow))
+	return s.rollup(ctx, s.now().Add(-rollupRecentEmitWindow))
 }
 
 // rollup runs the user + node passes. emitSince bounds which buckets are
@@ -143,7 +150,7 @@ func (s *Service) RollupRecent(ctx context.Context) error {
 func (s *Service) rollup(ctx context.Context, emitSince time.Time) error {
 	// Include the current, still-filling hour: rows captured up to now. The
 	// idempotent upsert + per-poll cadence keep the open hour's bucket current.
-	cutoff := time.Now()
+	cutoff := s.now()
 
 	if userRows, err := s.rollupUser(ctx, cutoff, emitSince); err != nil {
 		return fmt.Errorf("user rollup: %w", err)

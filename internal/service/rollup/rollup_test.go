@@ -361,14 +361,24 @@ func TestRollupBoundaryBucketSurvivesRawPrune(t *testing.T) {
 func TestRollupRecentSkipsOldBuckets(t *testing.T) {
 	svc, g := newServiceFromTest(t)
 	ctx := context.Background()
+	// Pin the clock to a fixed UTC instant. Without this the test mixed
+	// hourFloor(time.Now()) (UTC) with time.Now() (process TZ) fixtures, and the
+	// SQLite driver compares captured_at as TZ-offset-bearing strings (see
+	// withRecentRawWindow), so in any non-UTC environment the UTC current-hour
+	// sample sorted below the local-offset window bound and was silently excluded
+	// — the current-hour segment then had a single sample and emitted nothing.
+	now := time.Date(2026, 6, 13, 12, 30, 0, 0, time.UTC)
+	svc.now = func() time.Time { return now }
 
 	// An old, long-closed hour…
 	insertUserSnap(t, g, 1, h14.Add(5*time.Minute), 100, 0, 100)
 	insertUserSnap(t, g, 1, h14.Add(55*time.Minute), 200, 0, 200)
-	// …and the current, still-open hour.
-	nowHour := hourFloor(time.Now())
+	// …and the current, still-open hour: two UTC samples (matching the pinned
+	// UTC clock) ~29 min apart — under the 1h heartbeat and strictly before the
+	// cutoff (now), so they form one emittable segment in the current bucket.
+	nowHour := hourFloor(now)
 	insertUserSnap(t, g, 1, nowHour, 1000, 0, 1000)
-	insertUserSnap(t, g, 1, time.Now(), 1400, 0, 1400)
+	insertUserSnap(t, g, 1, now.Add(-time.Minute), 1400, 0, 1400)
 
 	if err := svc.RollupRecent(ctx); err != nil {
 		t.Fatalf("rollup recent: %v", err)

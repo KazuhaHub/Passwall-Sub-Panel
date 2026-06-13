@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"sort"
 	"sync"
 	"time"
 )
@@ -40,12 +41,32 @@ func (c *assertionReplayCache) SeenOrAdd(id string, expiresAt time.Time, now tim
 	if exp, ok := c.items[id]; ok && now.Before(exp) {
 		return true
 	}
-	// Periodic GC: when the map grows past the cap, sweep expired
-	// entries. Sweep cost is amortised across many writes.
+	// Periodic GC: when the map grows past the cap, first sweep expired
+	// entries (free). Sweep cost is amortised across many writes.
 	if len(c.items) >= replayCacheMax {
 		for k, exp := range c.items {
 			if !now.Before(exp) {
 				delete(c.items, k)
+			}
+		}
+		// Hard cap: a flood of DISTINCT still-valid assertion IDs would leave
+		// the expired sweep empty-handed, so without this the map grows
+		// unbounded. Evict the soonest-to-expire entries down to a low-water
+		// mark — they're closest to expiring anyway, so the least replay
+		// protection is lost, and the sort only runs while pinned at the cap.
+		if len(c.items) >= replayCacheMax {
+			type kv struct {
+				k   string
+				exp time.Time
+			}
+			all := make([]kv, 0, len(c.items))
+			for k, exp := range c.items {
+				all = append(all, kv{k, exp})
+			}
+			sort.Slice(all, func(i, j int) bool { return all[i].exp.Before(all[j].exp) })
+			lowWater := replayCacheMax - replayCacheMax/16
+			for i := 0; i < len(all) && len(c.items) > lowWater; i++ {
+				delete(c.items, all[i].k)
 			}
 		}
 	}

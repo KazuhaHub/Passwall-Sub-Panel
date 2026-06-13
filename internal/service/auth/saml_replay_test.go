@@ -1,9 +1,29 @@
 package auth
 
 import (
+	"fmt"
 	"testing"
 	"time"
 )
+
+// A flood of DISTINCT, still-valid assertion IDs must not grow the replay cache
+// without bound: the expired-entry sweep frees nothing when every entry is
+// valid, so the cap must additionally evict the soonest-to-expire entries.
+func TestAssertionReplayCache_BoundedUnderValidFlood(t *testing.T) {
+	c := &assertionReplayCache{}
+	now := time.Unix(1_700_000_000, 0)
+	base := now.Add(5 * time.Minute) // all entries valid (expire well after now)
+	for i := 0; i < replayCacheMax+5000; i++ {
+		// distinct increasing expiries so "soonest-to-expire" is well-defined
+		c.SeenOrAdd(fmt.Sprintf("id-%d", i), base.Add(time.Duration(i)*time.Millisecond), now)
+	}
+	c.mu.Lock()
+	n := len(c.items)
+	c.mu.Unlock()
+	if n > replayCacheMax {
+		t.Fatalf("replay cache grew past the cap under a flood of valid assertions: %d > %d", n, replayCacheMax)
+	}
+}
 
 func TestAssertionReplayCache_SeenOrAdd(t *testing.T) {
 	var c assertionReplayCache

@@ -28,10 +28,42 @@ import (
 	"time"
 )
 
+// specialUseRanges are IANA special-use blocks that are never a legitimate
+// panel / IdP host yet aren't caught by IsLoopback / IsLinkLocal /
+// IsUnspecified: TEST-NET documentation ranges, the benchmarking range, the
+// IETF protocol-assignment block, the reserved/future class-E space, and the
+// IPv6 documentation prefix. Blocking them narrows the SSRF surface as
+// defense-in-depth.
+//
+// Deliberately NOT included: 100.64.0.0/10 (RFC 6598 CGNAT). Tailscale /
+// Headscale overlay networks address nodes in that range, so a self-hosted
+// panel reachable over Tailscale legitimately lives there — blocking it would
+// break a real deployment. RFC1918 / ULA private ranges are likewise allowed
+// (see the package doc).
+var specialUseRanges = parseCIDRs(
+	"192.0.0.0/24",    // RFC 6890 IETF protocol assignments
+	"192.0.2.0/24",    // RFC 5737 TEST-NET-1
+	"198.18.0.0/15",   // RFC 2544 benchmarking
+	"198.51.100.0/24", // RFC 5737 TEST-NET-2
+	"203.0.113.0/24",  // RFC 5737 TEST-NET-3
+	"240.0.0.0/4",     // RFC 1112 reserved / future use (includes 255.255.255.255)
+	"2001:db8::/32",   // RFC 3849 IPv6 documentation
+)
+
+func parseCIDRs(cidrs ...string) []*net.IPNet {
+	out := make([]*net.IPNet, 0, len(cidrs))
+	for _, c := range cidrs {
+		if _, n, err := net.ParseCIDR(c); err == nil {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
 // BlockNonPublicDial is the net.Dialer.Control hook that rejects
-// loopback / link-local / unspecified addresses post-DNS-resolution.
-// Exported so callers wiring their own dialer with extra knobs (DSCP,
-// SO_BINDTODEVICE, etc.) can reuse the policy without duplicating
+// loopback / link-local / unspecified / IANA-special-use addresses
+// post-DNS-resolution. Exported so callers wiring their own dialer with extra
+// knobs (DSCP, SO_BINDTODEVICE, etc.) can reuse the policy without duplicating
 // the rule set.
 func BlockNonPublicDial(_, address string, _ syscall.RawConn) error {
 	host, _, err := net.SplitHostPort(address)
@@ -44,6 +76,11 @@ func BlockNonPublicDial(_, address string, _ syscall.RawConn) error {
 	}
 	if ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified() {
 		return fmt.Errorf("refusing connection to non-public address %s", ip)
+	}
+	for _, n := range specialUseRanges {
+		if n.Contains(ip) {
+			return fmt.Errorf("refusing connection to special-use address %s", ip)
+		}
 	}
 	return nil
 }
