@@ -49,7 +49,7 @@ import (
 	"gorm.io/gorm"
 	gormlogger "gorm.io/gorm/logger"
 
-	"github.com/KazuhaHub/passwall-sub-panel/internal/adapters/mysql"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/adapters/sqlstore"
 )
 
 // Run executes the migrate subcommand. args is os.Args after the
@@ -106,7 +106,7 @@ func Run(args []string) int {
 	}
 
 	if !*dryRun {
-		if err := mysql.EnsureSchema(dstDB); err != nil {
+		if err := sqlstore.EnsureSchema(dstDB); err != nil {
 			log.Printf("create v3 schema on dst: %v", err)
 			return 1
 		}

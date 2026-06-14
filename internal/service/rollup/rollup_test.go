@@ -8,7 +8,7 @@ import (
 
 	"gorm.io/gorm"
 
-	"github.com/KazuhaHub/passwall-sub-panel/internal/adapters/mysql"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/adapters/sqlstore"
 )
 
 // newServiceFromTest spins up a fresh SQLite under t.TempDir(), runs
@@ -17,11 +17,11 @@ import (
 // OnConflict upsert and uniqueIndex shapes behave like production.
 func newServiceFromTest(t *testing.T) (*Service, *gorm.DB) {
 	t.Helper()
-	g, err := mysql.Open("sqlite", filepath.Join(t.TempDir(), "panel.db"))
+	g, err := sqlstore.Open("sqlite", filepath.Join(t.TempDir(), "panel.db"))
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
-	if err := mysql.EnsureSchema(g); err != nil {
+	if err := sqlstore.EnsureSchema(g); err != nil {
 		t.Fatalf("ensure schema: %v", err)
 	}
 	t.Cleanup(func() {

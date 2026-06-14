@@ -1,13 +1,13 @@
 # Settings 写路径改造计划：UPDATE-in-place（仿 Cloudreve，消除自增 id 跳号）
 
 > 状态：草案 / 待实施
-> 影响范围：`internal/adapters/mysql/settings_kv_repo.go`（+ 测试、changelog）
+> 影响范围：`internal/adapters/sqlstore/settings_kv_repo.go`（+ 测试、changelog）
 > 迁移：无（零数据迁移、读路径不变、可直接 revert）
 
 ## 1. 背景
 
 `settings` 是一张 KV 表 `settings(id BIGINT autoinc PK, type, name, value, encrypted, updated_at)`，
-唯一键为 `UNIQUE(type, name)`。当前保存逻辑（[settings_kv_repo.go](../internal/adapters/mysql/settings_kv_repo.go) 的 `Save`）
+唯一键为 `UNIQUE(type, name)`。当前保存逻辑（[settings_kv_repo.go](../internal/adapters/sqlstore/settings_kv_repo.go) 的 `Save`）
 是**一条批量 `INSERT ... ON DUPLICATE KEY UPDATE`**，一次写入全部 ~46 行。
 
 MySQL InnoDB 把 `INSERT ... ON DUPLICATE KEY UPDATE` 归类为 *mixed-mode insert*：
@@ -55,7 +55,7 @@ MySQL InnoDB 把 `INSERT ... ON DUPLICATE KEY UPDATE` 归类为 *mixed-mode inse
 
 ## 4. 改动清单
 
-### 4.1 `internal/adapters/mysql/settings_kv_repo.go` — 重写 `Save`（核心）
+### 4.1 `internal/adapters/sqlstore/settings_kv_repo.go` — 重写 `Save`（核心）
 
 ```go
 func (r *kvSettingsRepo) Save(ctx context.Context, s ports.UISettings) error {
@@ -112,7 +112,7 @@ func (r *kvSettingsRepo) Save(ctx context.Context, s ports.UISettings) error {
 4. **MySQL/SQLite 双兼容** —— `Updates` 与 `clause.OnConflict` 在两种方言下都成立（CI 用 SQLite 内存库）。
 5. `Load`、加密字段、缓存层 `cachingSettingsRepo`、`KnownSettingNames`、迁移器 `copySettingsKV` **均不改**。
 
-### 4.2 `internal/adapters/mysql/settings_kv_repo_test.go` — 新增测试
+### 4.2 `internal/adapters/sqlstore/settings_kv_repo_test.go` — 新增测试
 
 - `TestSave_DoesNotGrowAutoIncrement`（**核心保证**）：建表 → 首次 Save 记 `MAX(id)` → 连续 Save 多次（改值/不改值各来一遍）→ 断言 `MAX(id)` 不变。
 - `TestSave_FreshEmptyTable_InsertsAll`：空表 Save → 全部行被插入，`Load` 能读回。
@@ -147,7 +147,7 @@ id 计数器一生只按"历史上新增过的设置总数"缓慢增长，不再
 ## 7. 验证
 
 ```bash
-go test ./internal/adapters/mysql/...                 # 新老测试
+go test ./internal/adapters/sqlstore/...                 # 新老测试
 go build -ldflags="-s -w" -o psp ./cmd/panel          # 编译
 ```
 
@@ -156,7 +156,7 @@ go build -ldflags="-s -w" -o psp ./cmd/panel          # 编译
 ## 8. 可选增强（更贴近 Cloudreve，默认不做）
 
 若希望"DB 里始终有全部行"（方便 SQL 浏览、升级后新 key 立即可见而不必等首次 save），
-可在 `EnsureSchema`（[schema.go](../internal/adapters/mysql/schema.go) 的 `EnsureSchema`）AutoMigrate 之后
+可在 `EnsureSchema`（[schema.go](../internal/adapters/sqlstore/schema.go) 的 `EnsureSchema`）AutoMigrate 之后
 加一个**幂等 ensure-seed**：
 
 1. `SELECT type,name` 取现存 keys；

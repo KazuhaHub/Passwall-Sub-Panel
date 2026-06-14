@@ -11,7 +11,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/KazuhaHub/passwall-sub-panel/internal/adapters/mysql"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/adapters/sqlstore"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 )
@@ -129,7 +129,7 @@ func TestScopeSettingsHandler_GroupNotFound(t *testing.T) {
 // the resolver/write-gate key on — a name-only check would pass a mistyped type
 // prefix (e.g. "sub.allow_user_personal_rules") that no-ops at runtime.
 func TestOverridableScopeKeysAreKnown(t *testing.T) {
-	known := mysql.KnownSettingKeys()
+	known := sqlstore.KnownSettingKeys()
 	for key := range ports.OverridableScopeKeys {
 		if !strings.Contains(key, ".") {
 			t.Errorf("overridable key %q must be \"type.name\"", key)

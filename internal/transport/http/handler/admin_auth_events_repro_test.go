@@ -9,7 +9,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/KazuhaHub/passwall-sub-panel/internal/adapters/mysql"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/adapters/sqlstore"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/geo"
 )
@@ -17,9 +17,9 @@ import (
 // Exercises GET /api/admin/auth-events end-to-end (handler + repo + query +
 // marshal) on a real SQLite repo. No gin.Recovery, so any panic surfaces as the
 // test stack. (The beta.5 500 was a nil AuthEvent repo from app.go's wiring,
-// not this path — guarded separately by mysql.TestNewReposPopulatesEveryDBRepo.)
+// not this path — guarded separately by sqlstore.TestNewReposPopulatesEveryDBRepo.)
 func TestAuthEventsListHandler(t *testing.T) {
-	db, err := mysql.Open("sqlite", filepath.Join(t.TempDir(), "p.db"))
+	db, err := sqlstore.Open("sqlite", filepath.Join(t.TempDir(), "p.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -28,10 +28,10 @@ func TestAuthEventsListHandler(t *testing.T) {
 			_ = s.Close()
 		}
 	})
-	if err := mysql.EnsureSchema(db); err != nil {
+	if err := sqlstore.EnsureSchema(db); err != nil {
 		t.Fatal(err)
 	}
-	repos := mysql.NewRepos(db)
+	repos := sqlstore.NewRepos(db)
 	if err := repos.AuthEvent.Insert(context.Background(), &domain.AuthEvent{
 		UserID: 8, UPN: "x@y", Method: domain.AuthMethodLocal, Outcome: domain.AuthOutcomeSuccess, IP: "1.2.3.4", At: time.Now(),
 	}); err != nil {

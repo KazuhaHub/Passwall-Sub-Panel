@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/adapters/acme"
-	"github.com/KazuhaHub/passwall-sub-panel/internal/adapters/mysql"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/adapters/sqlstore"
 	xuiadapter "github.com/KazuhaHub/passwall-sub-panel/internal/adapters/xui"
 	yamladapter "github.com/KazuhaHub/passwall-sub-panel/internal/adapters/yaml"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/config"
@@ -141,14 +141,14 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	}
 
 	// --- adapter layer ---
-	db, err := mysql.Open(cfg.DBKind(), cfg.DBDSN())
+	db, err := sqlstore.Open(cfg.DBKind(), cfg.DBDSN())
 	if err != nil {
 		return nil, fmt.Errorf("db open: %w", err)
 	}
-	if err := mysql.EnsureSchema(db); err != nil {
+	if err := sqlstore.EnsureSchema(db); err != nil {
 		return nil, fmt.Errorf("db schema: %w", err)
 	}
-	mysql.ConfigureSecretKey(cfg.SecretKeyMaterial())
+	sqlstore.ConfigureSecretKey(cfg.SecretKeyMaterial())
 	// Surface advisory key-material warnings (weak jwt_secret/encryption_key,
 	// or the coupled-key fallback where jwt_secret doubles as the at-rest key).
 	for _, w := range cfg.SecurityWarnings() {
@@ -157,9 +157,9 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	// Boot-time secrets audit: walk the rows that hold encrypted creds
 	// and WARN if any are still plaintext. Catches the silent-downgrade
 	// case where ConfigureSecretKey("") makes encryptSecret a no-op.
-	mysql.AuditSecretsAtRest(db)
-	mysqlRepos := mysql.NewRepos(db)
-	if err := mysqlRepos.SyncTask.ResetRunning(ctx); err != nil {
+	sqlstore.AuditSecretsAtRest(db)
+	dbRepos := sqlstore.NewRepos(db)
+	if err := dbRepos.SyncTask.ResetRunning(ctx); err != nil {
 		return nil, fmt.Errorf("reset sync tasks: %w", err)
 	}
 	// Note: pre-v3 we ran syncPanelNameCaches here to refresh the
@@ -176,23 +176,23 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 		return nil, fmt.Errorf("ruleset repo: %w", err)
 	}
 
-	samlCfg, err := mysqlRepos.SAMLConfig.Load(ctx)
+	samlCfg, err := dbRepos.SAMLConfig.Load(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("load saml config: %w", err)
 	}
 
-	oidcCfg, err := mysqlRepos.OIDCConfig.Load(ctx)
+	oidcCfg, err := dbRepos.OIDCConfig.Load(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("load oidc config: %w", err)
 	}
 
-	// Start from the full mysql repo set and override only the two YAML-backed
+	// Start from the full DB repo set and override only the two YAML-backed
 	// repos (rule sets / templates live in config/*.yaml, not the DB). The old
 	// field-by-field copy here was a second source of truth that silently
 	// dropped a newly-added repo — AuthEvent ended up nil, so the auth-events
 	// handler panicked (nil-interface method call) and login emit no-op'd.
-	// Deriving from mysqlRepos makes that whole class of omission impossible.
-	repos := mysqlRepos
+	// Deriving from dbRepos makes that whole class of omission impossible.
+	repos := dbRepos
 	repos.RuleSet = ruleSetRepo
 	repos.Template = templateRepo
 

@@ -7,7 +7,7 @@ import (
 
 	"gorm.io/gorm"
 
-	"github.com/KazuhaHub/passwall-sub-panel/internal/adapters/mysql"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/adapters/sqlstore"
 )
 
 func closeGorm(t *testing.T, db *gorm.DB) {
@@ -55,12 +55,12 @@ func TestCopySettingsKV_OnlyWritesKnownKeys(t *testing.T) {
 		t.Fatalf("seed mail_settings: %v", err)
 	}
 
-	dst, err := mysql.Open("sqlite", filepath.Join(t.TempDir(), "dst.db"))
+	dst, err := sqlstore.Open("sqlite", filepath.Join(t.TempDir(), "dst.db"))
 	if err != nil {
 		t.Fatalf("open dst: %v", err)
 	}
 	defer closeGorm(t, dst)
-	if err := mysql.EnsureSchema(dst); err != nil {
+	if err := sqlstore.EnsureSchema(dst); err != nil {
 		t.Fatalf("dst schema: %v", err)
 	}
 
@@ -80,7 +80,7 @@ func TestCopySettingsKV_OnlyWritesKnownKeys(t *testing.T) {
 		t.Fatal("copySettingsKV wrote nothing")
 	}
 
-	known := mysql.KnownSettingNames()
+	known := sqlstore.KnownSettingNames()
 	got := make(map[string]string, len(rows))
 	for _, r := range rows {
 		if !known[r.Name] {

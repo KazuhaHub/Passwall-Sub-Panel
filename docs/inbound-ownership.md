@@ -104,7 +104,7 @@ inbound 的状态分两层，归属与方向**不同**：
 
 ## 4. 数据模型变更
 
-### 4.1 `nodeRow` 新增列（[schema.go](../internal/adapters/mysql/schema.go)）
+### 4.1 `nodeRow` 新增列（[schema.go](../internal/adapters/sqlstore/schema.go)）
 
 GORM AutoMigrate 自动加列，符合"自用项目无迁移脚手架"约定（[CLAUDE.md](../CLAUDE.md)）。
 
@@ -156,7 +156,7 @@ render 生成 proxy 块（[protocols.go `emitProxy`](../internal/service/render/
 ## 5. 实现阶段（checklist）
 
 ### 阶段 1 · Schema ✅
-- [x] `nodeRow` 加上述列（§4.1）+ to/from 映射（[schema.go](../internal/adapters/mysql/schema.go)）。
+- [x] `nodeRow` 加上述列（§4.1）+ to/from 映射（[schema.go](../internal/adapters/sqlstore/schema.go)）。
 - [x] domain `Node` 加对应字段（[types.go](../internal/domain/types.go)）。
 
 ### 阶段 2 · 写路径 write-through（[node.go](../internal/service/node/node.go)）✅

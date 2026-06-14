@@ -333,7 +333,7 @@ func (s *SyncSvc) ensureInboundDeletable(inboundID int) error {
 
 **v3.0.0 升级迁移**：通过独立的 `cmd/migrate-db-v2/` 一次性程序完成。v3.0.0 主程序**完全不识别旧 schema**；旧库由 admin 手工保留作永久 backup，无原地 ALTER。详见 [docs/UPGRADE-v3.0.0.md](UPGRADE-v3.0.0.md) 与 `cmd/migrate-db-v2/README.md`。
 
-**SQL DDL（v9，节选关键字段，详见 [internal/adapters/mysql/schema.go](../internal/adapters/mysql/schema.go) 与 [settings_kv_repo.go](../internal/adapters/mysql/settings_kv_repo.go)）**：
+**SQL DDL（v9，节选关键字段，详见 [internal/adapters/sqlstore/schema.go](../internal/adapters/sqlstore/schema.go) 与 [settings_kv_repo.go](../internal/adapters/sqlstore/settings_kv_repo.go)）**：
 
 ```sql
 -- 用户（含 lifetime 累加 + period 基线 + emergency 配额）
@@ -1511,7 +1511,7 @@ minor / patch 内升级**不需要**跑 migrate（按 [[feedback_semver]] 规则
 
 某些"破坏性"改动**不需要**走完整的 `psp migrate` 流水线 —— 例如把 `nodes` 表里的某一类行抽出来放到新表、或者删除某个旧列。它们在同一个 major 内部发生（beta 期间尤其常见），目标是 admin 直接换二进制重启就完成迁移，不用手动跑命令。
 
-这类一次性清理由 [internal/adapters/mysql/schema.go](../internal/adapters/mysql/schema.go) 的 **`cleanupLegacyState`** 函数承担，在 `EnsureSchema` 的 AutoMigrate 之后跑一次。
+这类一次性清理由 [internal/adapters/sqlstore/schema.go](../internal/adapters/sqlstore/schema.go) 的 **`cleanupLegacyState`** 函数承担，在 `EnsureSchema` 的 AutoMigrate 之后跑一次。
 
 约束（必须严格遵守）：
 
@@ -1552,7 +1552,7 @@ vN+1 migrate 子命令的执行顺序：
 
 **操作员视角**：每段都会在 PSP 启动时自动跑(幂等),新升级的部署看到对应 `[cleanupLegacyState]` 行就说明命中了;旧部署再启动就什么都不做。**不需要手动操作 DB**。
 
-**v4.0.0 实施者视角**:发 v4 时把上面这几段代码从 [schema.go `cleanupLegacyState`](../internal/adapters/mysql/schema.go) 移除,原样复制进 [`internal/migrate/`](../internal/migrate/) 的 v3→v4 迁移流程开头(顺序: 先跑搬过来的 cleanup, 再跑 v3→v4 schema 显式转换, 最后让 v4 的 `EnsureSchema` AutoMigrate 收尾)。已经在 v3.5+ 跑过这些 cleanup 的部署再次执行也是无害的(幂等性已经在原 cleanup 写入时保证)。
+**v4.0.0 实施者视角**:发 v4 时把上面这几段代码从 [schema.go `cleanupLegacyState`](../internal/adapters/sqlstore/schema.go) 移除,原样复制进 [`internal/migrate/`](../internal/migrate/) 的 v3→v4 迁移流程开头(顺序: 先跑搬过来的 cleanup, 再跑 v3→v4 schema 显式转换, 最后让 v4 的 `EnsureSchema` AutoMigrate 收尾)。已经在 v3.5+ 跑过这些 cleanup 的部署再次执行也是无害的(幂等性已经在原 cleanup 写入时保证)。
 
 ---
 
