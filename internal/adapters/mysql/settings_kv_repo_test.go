@@ -323,8 +323,10 @@ func TestKVSettingsBoolMarshal(t *testing.T) {
 	ctx := context.Background()
 
 	// Direct UPSERT of "true" — simulates an admin editing the row in a
-	// SQL browser. The boolField.Unmarshal must accept it.
-	if err := db.Exec(`INSERT INTO settings(type, name, value, encrypted, updated_at) VALUES ('auth','disallow_user_local_login','true',0,?)`, time.Now()).Error; err != nil {
+	// SQL browser. The boolField.Unmarshal must accept it. `encrypted` is bound
+	// as a Go bool (not a literal 0) so the driver encodes it per-dialect —
+	// Postgres' boolean column rejects an integer literal (SQLSTATE 42804).
+	if err := db.Exec(`INSERT INTO settings(type, name, value, encrypted, updated_at) VALUES ('auth','disallow_user_local_login','true',?,?)`, false, time.Now()).Error; err != nil {
 		t.Fatalf("seed: %v", err)
 	}
 	out, err := repo.Load(ctx, ports.UISettings{})
