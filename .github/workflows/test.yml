@@ -57,6 +57,12 @@ jobs:
         run: |
           set -o pipefail
           go test -v ./internal/adapters/mysql/... 2>&1 | tee test-output.txt
+      - name: surface errors as annotations
+        if: failure()
+        run: |
+          grep -haE "FAIL|panic:|pq:|pgconn|SQLSTATE|does not exist|cannot |relation |syntax error|--- FAIL|CREATE DATABASE|transaction|setup|open" test-output.txt | head -25 | while IFS= read -r l; do
+            printf '::error::%s\n' "$l"
+          done
       - name: upload test output
         if: failure()
         uses: actions/upload-artifact@v4
