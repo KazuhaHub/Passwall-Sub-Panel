@@ -4,6 +4,30 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## v3.8.0-beta.8 — 2026-06-14
+
+2FA step-up 体验修复 + PostgreSQL 兼容修复(由新加的跨数据库 CI 矩阵发现)。前端 1 处,其余后端 / CI。
+
+### 修复
+
+- **2FA 操作验证默认到「你实际启用 / 上次用过」的方法**(前端) —— 之前恢复码重生成等 step-up 弹窗无脑把
+  「用验证码」(TOTP)做主操作,passkey-only 账号(没开 TOTP)会被默认到一个它没有的方法。现在和登录共用
+  同一套「可用方法 + 上次用过(per-browser)」选默认的逻辑:passkey-only 用户默认「用通行密钥」,并记住这次
+  用的方法供下次默认。
+- **PostgreSQL:JSON 包装列被建成数组 / 不兼容类型(真实部署 bug)** —— `jsonStrings` / `jsonInt64s` /
+  `jsonRoleRules` / `jsonTagFilter` / `jsonLayout` 五个 JSON 列类型缺列声明,GORM 的 Postgres 驱动会从底层
+  `[]T` / struct 推断成 `text[]` 数组或结构体列,而它们 `Value()` 写的是 JSON 字符串 → Postgres 拒。其中
+  `TagFilter` / `Layout` 在 **groups 表**上,**即「分组」在 Postgres 上落库原本是坏的**。一律加
+  `GormDBDataType("text")`,所有方言建 text 列。SQLite / MySQL 因容错此前未暴露。
+
+### 测试 / CI
+
+- **新增测试 CI 工作流(SQLite / PostgreSQL / MySQL 矩阵)** —— 此前 `release.yml` 只构建、**CI 不跑任何测试**。
+  新增 `test.yml`:`sqlite` 跑全量 + `go vet`;`postgres` / `mysql` 各起服务容器跑 DB 适配器包(schema + 所有
+  repo + 分组 / 设置层)对真库验证跨方言行为。测试 DB 参数化(`openTestDB` 读 `PSP_TEST_DB_KIND` /
+  `PSP_TEST_DB_DSN`,每个测试一个独立 database;无 env 时仍是本地 SQLite 临时文件)。失败时上传测试输出 artifact。
+- 修一处测试可移植性:布尔列 seed 改用绑定参数而非字面量 `0`(Postgres `boolean` 拒整数 expression)。
+
 ## v3.8.0-beta.7 — 2026-06-14
 
 默认订阅模板的内网 DNS 解析修复 + 审计 low 收尾。后端,无前端改动。
