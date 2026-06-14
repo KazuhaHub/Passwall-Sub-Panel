@@ -2,6 +2,7 @@ package mysql
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -50,31 +51,40 @@ func uniqueTestNamespace() string {
 	return fmt.Sprintf("psptest_%d_%d", os.Getpid(), testDBSeq.Add(1))
 }
 
-// openIsolatedPostgresTestDB creates a unique schema on the shared Postgres and
-// returns a connection whose search_path is pinned to it; the schema is dropped
-// on cleanup. PSP_TEST_DB_DSN is a libpq/pgx URL whose database already exists,
-// e.g. postgres://psp:psp@localhost:5432/psptest?sslmode=disable
+// openIsolatedPostgresTestDB creates a unique DATABASE on the shared Postgres
+// and returns a connection scoped to it; dropped on cleanup. This mirrors the
+// MySQL path (a fresh database per test) instead of a schema + search_path,
+// which avoids depending on the driver honouring search_path in the DSN.
+// PSP_TEST_DB_DSN is a libpq/pgx URL pointing at an existing maintenance
+// database, e.g. postgres://psp:psp@localhost:5432/psptest?sslmode=disable
 func openIsolatedPostgresTestDB(t *testing.T) (*gorm.DB, error) {
 	base := os.Getenv("PSP_TEST_DB_DSN")
-	schema := uniqueTestNamespace()
+	dbName := uniqueTestNamespace()
 	admin, err := Open("postgres", base)
 	if err != nil {
 		return nil, err
 	}
-	if err := admin.Exec(`CREATE SCHEMA "` + schema + `"`).Error; err != nil {
+	// CREATE DATABASE can't run inside a transaction; Exec issues it directly.
+	if err := admin.Exec(`CREATE DATABASE "` + dbName + `"`).Error; err != nil {
 		closeGormDB(admin)
 		return nil, err
 	}
 	t.Cleanup(func() {
-		_ = admin.Exec(`DROP SCHEMA IF EXISTS "` + schema + `" CASCADE`).Error
+		// FORCE (PG13+) terminates any lingering pooled connections so the drop
+		// can't fail with "database is being accessed by other users".
+		_ = admin.Exec(`DROP DATABASE IF EXISTS "` + dbName + `" WITH (FORCE)`).Error
 		closeGormDB(admin)
 	})
-	sep := "?"
-	if strings.Contains(base, "?") {
-		sep = "&"
+	return Open("postgres", swapPostgresDBName(base, dbName))
+}
+
+// swapPostgresDBName rewrites the database segment of a postgres:// URL DSN.
+func swapPostgresDBName(dsn, dbName string) string {
+	if u, err := url.Parse(dsn); err == nil && u.Scheme != "" {
+		u.Path = "/" + dbName
+		return u.String()
 	}
-	// search_path as a connection parameter applies to every pooled connection.
-	return Open("postgres", base+sep+"search_path="+schema)
+	return dsn
 }
 
 // openIsolatedMySQLTestDB creates a unique database on the shared MySQL and
