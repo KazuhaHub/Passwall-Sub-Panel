@@ -53,7 +53,16 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-      - run: go test ./internal/adapters/mysql/...
+      - name: test
+        run: |
+          set -o pipefail
+          go test -v ./internal/adapters/mysql/... 2>&1 | tee test-output.txt
+      - name: upload test output
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: postgres-test-output
+          path: test-output.txt
 
   mysql:
     name: mysql (db adapter)

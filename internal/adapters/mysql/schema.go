@@ -1046,6 +1046,10 @@ func (j jsonRoleRules) Value() (driver.Value, error) {
 	return string(b), err
 }
 
+// GormDBDataType — see jsonInt64s.GormDBDataType. []config.SSORoleRule would
+// otherwise infer a Postgres array column; pin it to text.
+func (jsonRoleRules) GormDBDataType(*gorm.DB, *schema.Field) string { return "text" }
+
 func (j *jsonRoleRules) Scan(value any) error {
 	if value == nil {
 		*j = nil
@@ -1074,6 +1078,11 @@ func (j jsonTagFilter) Value() (driver.Value, error) {
 	return string(b), err
 }
 
+// GormDBDataType — see jsonInt64s.GormDBDataType. The struct would otherwise
+// let the Postgres driver infer a column type from its fields; pin it to text
+// (it's stored as a JSON blob on the groups table). Load-bearing for grouping.
+func (jsonTagFilter) GormDBDataType(*gorm.DB, *schema.Field) string { return "text" }
+
 func (j *jsonTagFilter) Scan(value any) error {
 	if value == nil {
 		return nil
@@ -1096,6 +1105,10 @@ func (j jsonLayout) Value() (driver.Value, error) {
 	b, err := json.Marshal(domain.Layout(j))
 	return string(b), err
 }
+
+// GormDBDataType — see jsonTagFilter.GormDBDataType. The Layout struct is also
+// a JSON blob on the groups table; pin it to text for Postgres.
+func (jsonLayout) GormDBDataType(*gorm.DB, *schema.Field) string { return "text" }
 
 func (j *jsonLayout) Scan(value any) error {
 	if value == nil {
