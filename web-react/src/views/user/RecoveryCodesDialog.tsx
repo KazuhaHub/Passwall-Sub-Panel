@@ -18,9 +18,11 @@ import type { AxiosError } from 'axios'
 import FingerprintIcon from '@mui/icons-material/Fingerprint'
 
 import { regenerate2FARecovery, regenerateRecoveryWithPasskey } from '@/api/me'
+import type { TwoFAMethod } from '@/api/types'
 import type { M3Tokens } from '@/theme'
 import { pushSnack } from '@/components/SnackbarHost'
 import { copyToClipboard } from '@/utils/clipboard'
+import { defaultTwoFAMethod, writeLast2FAMethod } from '@/utils/twofa'
 
 interface Props {
   open: boolean
@@ -29,6 +31,9 @@ interface Props {
   /** Whether the account has a passkey — enables regenerating via a passkey
    *  assertion (no TOTP/recovery code needed). */
   hasPasskey: boolean
+  /** Whether the account has TOTP enabled — together with hasPasskey/remaining it
+   *  decides which step-up method is offered as the default (mirrors login). */
+  totpEnabled: boolean
   md: M3Tokens
   onClose: () => void
   /** Called after a successful regenerate so the parent can refresh the count. */
@@ -40,7 +45,7 @@ interface Props {
 // can view how many remain and regenerate them. Regeneration is a step-up: it
 // needs a current authenticator code OR one of the existing recovery codes as
 // proof, then shows the fresh set ONCE.
-export default function RecoveryCodesDialog({ open, remaining, hasPasskey, md, onClose, onChanged }: Props) {
+export default function RecoveryCodesDialog({ open, remaining, hasPasskey, totpEnabled, md, onClose, onChanged }: Props) {
   const { t } = useTranslation('user')
   type Step = 'view' | 'regenerate' | 'codes'
   const [step, setStep] = useState<Step>('view')
@@ -48,6 +53,18 @@ export default function RecoveryCodesDialog({ open, remaining, hasPasskey, md, o
   const [error, setError] = useState('')
   const [code, setCode] = useState('')
   const [codes, setCodes] = useState<string[]>([])
+
+  // The code-entry step proves identity with a current TOTP code OR an existing
+  // recovery code, so it's only useful when the account actually has one of
+  // those. Passkey is the other proof. Pick the default step-up the same way
+  // login does (last-used per-browser, else strongest available) instead of
+  // hard-defaulting to a TOTP code a passkey-only user doesn't have.
+  const codePathAvailable = totpEnabled || remaining > 0
+  const available: TwoFAMethod[] = []
+  if (hasPasskey) available.push('passkey')
+  if (totpEnabled) available.push('totp')
+  if (remaining > 0) available.push('recovery')
+  const passkeyPrimary = hasPasskey && defaultTwoFAMethod(available) === 'passkey'
 
   useEffect(() => {
     if (open) {
@@ -69,6 +86,9 @@ export default function RecoveryCodesDialog({ open, remaining, hasPasskey, md, o
     setError('')
     try {
       setCodes(await regenerate2FARecovery(c))
+      // Remember the code path as the sticky default only when TOTP is the real
+      // factor; a one-time recovery code isn't worth landing on next time.
+      if (totpEnabled) writeLast2FAMethod('totp')
       setStep('codes')
     } catch (err) {
       const e = err as AxiosError<{ error?: string }>
@@ -86,6 +106,7 @@ export default function RecoveryCodesDialog({ open, remaining, hasPasskey, md, o
     setError('')
     try {
       setCodes(await regenerateRecoveryWithPasskey())
+      writeLast2FAMethod('passkey')
       setStep('codes')
     } catch (err) {
       const name = (err as { name?: string })?.name
@@ -129,19 +150,38 @@ export default function RecoveryCodesDialog({ open, remaining, hasPasskey, md, o
                 ? t('recovery.none_left', { defaultValue: '你已没有可用的备用码，请重新生成一组。' })
                 : t('recovery.remaining', { count: remaining, defaultValue: '剩余 {{count}} 个备用码' })}
             </Alert>
-            {hasPasskey && (
-              <Button size="small" startIcon={<FingerprintIcon />} disabled={busy} sx={{ mt: 0.5 }}
-                onClick={regenViaPasskey}>
-                {t('recovery.regen_passkey', { defaultValue: '用通行密钥重新生成' })}
-              </Button>
-            )}
             {error && <Alert severity="error" sx={{ mt: 1 }}>{error}</Alert>}
           </DialogContent>
+          {/* The default action follows the user's available + last-used method
+              (like login): passkey-primary for a passkey holder whose last/only
+              factor is a passkey, code-primary otherwise. */}
           <DialogActions>
             <Button onClick={onClose} disabled={busy}>{t('twofa.cancel')}</Button>
-            <Button variant="contained" onClick={() => { setStep('regenerate'); setCode(''); setError('') }}>
-              {t('recovery.regen_code', { defaultValue: '用验证码重新生成' })}
-            </Button>
+            {passkeyPrimary ? (
+              <>
+                {codePathAvailable && (
+                  <Button onClick={() => { setStep('regenerate'); setCode(''); setError('') }} disabled={busy}>
+                    {t('recovery.regen_code', { defaultValue: '用验证码重新生成' })}
+                  </Button>
+                )}
+                <Button variant="contained" disabled={busy} onClick={regenViaPasskey}
+                  startIcon={busy ? <CircularProgress size={16} color="inherit" /> : <FingerprintIcon />}>
+                  {t('recovery.regen_passkey', { defaultValue: '用通行密钥重新生成' })}
+                </Button>
+              </>
+            ) : (
+              <>
+                {hasPasskey && (
+                  <Button startIcon={<FingerprintIcon />} disabled={busy} onClick={regenViaPasskey}>
+                    {t('recovery.regen_passkey', { defaultValue: '用通行密钥重新生成' })}
+                  </Button>
+                )}
+                <Button variant="contained" disabled={busy || !codePathAvailable}
+                  onClick={() => { setStep('regenerate'); setCode(''); setError('') }}>
+                  {t('recovery.regen_code', { defaultValue: '用验证码重新生成' })}
+                </Button>
+              </>
+            )}
           </DialogActions>
         </>
       )}

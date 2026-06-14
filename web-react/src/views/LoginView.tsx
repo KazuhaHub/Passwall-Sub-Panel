@@ -21,6 +21,7 @@ import type { AxiosError } from 'axios'
 
 import { getAuthMethods, oidcLoginURL, samlLoginURL, send2FAEmail } from '@/api/auth'
 import type { AuthMethods, LoginCaptcha, TwoFAMethod } from '@/api/types'
+import { TWOFA_PRIORITY, defaultTwoFAMethod, writeLast2FAMethod } from '@/utils/twofa'
 import CaptchaWidget from '@/components/CaptchaWidget'
 import { useAuthStore, selectIsAdmin } from '@/stores/auth'
 import { useSiteStore } from '@/stores/site'
@@ -39,32 +40,9 @@ interface LocationState {
 
 // The 2FA challenge defaults to the method the user chose last time (per-browser),
 // with the rest tucked behind "use another method" — so a returning user lands
-// straight on their usual factor instead of re-picking every login.
-const LAST_2FA_METHOD_KEY = 'psp.2fa.last_method'
-// Stable display/priority order, also the fallback when there's no remembered
-// choice (or it isn't offered this time). Passkey first: a WebAuthn assertion is
-// phishing-resistant (bound to the origin + hardware), strictly stronger than a
-// TOTP code a user can be tricked into typing on a lookalike site. Email + one-
-// time recovery codes are weaker fallbacks, last.
-const TWOFA_PRIORITY: TwoFAMethod[] = ['passkey', 'totp', 'email', 'recovery']
-
-function readLast2FAMethod(): TwoFAMethod | null {
-  try {
-    const v = localStorage.getItem(LAST_2FA_METHOD_KEY)
-    return TWOFA_PRIORITY.includes(v as TwoFAMethod) ? (v as TwoFAMethod) : null
-  } catch { return null }
-}
-function writeLast2FAMethod(m: TwoFAMethod) {
-  try { localStorage.setItem(LAST_2FA_METHOD_KEY, m) } catch { /* ignore */ }
-}
-// defaultTwoFAMethod picks the remembered method if it's offered this round,
-// else the first available in priority order.
-function defaultTwoFAMethod(available: TwoFAMethod[]): TwoFAMethod {
-  const order = TWOFA_PRIORITY.filter(m => available.includes(m))
-  const last = readLast2FAMethod()
-  if (last && order.includes(last)) return last
-  return order[0] ?? 'totp'
-}
+// straight on their usual factor instead of re-picking every login. The
+// method-selection logic is shared with the in-app step-up dialogs — see
+// @/utils/twofa (defaultTwoFAMethod / writeLast2FAMethod).
 
 // forceLocal renders the local-login entry (/login/local): the local form +
 // passkey button only, never auto-redirecting to SSO and never showing SSO

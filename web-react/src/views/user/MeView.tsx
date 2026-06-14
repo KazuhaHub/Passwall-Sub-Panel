@@ -1271,6 +1271,7 @@ export default function MeView() {
         open={recoveryOpen}
         remaining={profile.recovery_codes_remaining ?? 0}
         hasPasskey={(profile.passkey_credentials?.length ?? 0) > 0}
+        totpEnabled={!!profile.totp_enabled}
         md={md}
         onClose={() => setRecoveryOpen(false)}
         onChanged={() => { void load() }}
