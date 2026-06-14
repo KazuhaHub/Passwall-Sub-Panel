@@ -66,7 +66,7 @@ jobs:
       - name: test
         run: |
           set -o pipefail
-          go test ./internal/adapters/mysql/... 2>&1 | tee test-output.txt
+          go test ./internal/adapters/sqlstore/... 2>&1 | tee test-output.txt
       - name: upload test output
         if: failure()
         uses: actions/upload-artifact@v4
@@ -103,7 +103,7 @@ jobs:
       - name: test
         run: |
           set -o pipefail
-          go test ./internal/adapters/mysql/... 2>&1 | tee test-output.txt
+          go test ./internal/adapters/sqlstore/... 2>&1 | tee test-output.txt
       - name: upload test output
         if: failure()
         uses: actions/upload-artifact@v4
