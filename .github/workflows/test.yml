@@ -5,8 +5,9 @@ name: Test
 # and mysql jobs run the DB-adapter package (schema + every repo + the grouped /
 # scoped-settings layer) against a real server to verify cross-dialect behaviour
 # that SQLite alone can't — see internal/adapters/mysql/testdb_test.go, which
-# reads PSP_TEST_DB_KIND / PSP_TEST_DB_DSN and gives each test its own schema
-# (Postgres) / database (MySQL) on the shared service container.
+# reads PSP_TEST_DB_KIND / PSP_TEST_DB_DSN and gives each test its own database
+# on the shared service container. Each job uploads its test output as an
+# artifact on failure for diagnosis.
 
 on:
   push:
@@ -25,7 +26,16 @@ jobs:
           go-version-file: go.mod
           cache: true
       - run: go vet ./...
-      - run: go test ./...
+      - name: test
+        run: |
+          set -o pipefail
+          go test ./... 2>&1 | tee test-output.txt
+      - name: upload test output
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sqlite-test-output
+          path: test-output.txt
 
   postgres:
     name: postgres (db adapter)
@@ -56,13 +66,7 @@ jobs:
       - name: test
         run: |
           set -o pipefail
-          go test -v ./internal/adapters/mysql/... 2>&1 | tee test-output.txt
-      - name: surface errors as annotations
-        if: failure()
-        run: |
-          grep -haE "FAIL|panic:|pq:|pgconn|SQLSTATE|does not exist|cannot |relation |syntax error|--- FAIL|CREATE DATABASE|transaction|setup|open" test-output.txt | head -25 | while IFS= read -r l; do
-            printf '::error::%s\n' "$l"
-          done
+          go test ./internal/adapters/mysql/... 2>&1 | tee test-output.txt
       - name: upload test output
         if: failure()
         uses: actions/upload-artifact@v4
@@ -96,4 +100,13 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-      - run: go test ./internal/adapters/mysql/...
+      - name: test
+        run: |
+          set -o pipefail
+          go test ./internal/adapters/mysql/... 2>&1 | tee test-output.txt
+      - name: upload test output
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mysql-test-output
+          path: test-output.txt
