@@ -3,7 +3,6 @@ package mysql
 import (
 	"context"
 	"errors"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -16,7 +15,7 @@ import (
 
 func newCertReposTest(t *testing.T) (ports.Repos, *gorm.DB, context.Context) {
 	t.Helper()
-	db, err := Open("sqlite", filepath.Join(t.TempDir(), "panel.db"))
+	db, err := openTestDB(t)
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}

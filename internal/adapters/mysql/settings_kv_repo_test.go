@@ -2,7 +2,6 @@ package mysql
 
 import (
 	"context"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -15,7 +14,7 @@ import (
 // written) must still get the bounded default; only an EXPLICIT 0 means forever.
 // applyUISettingsDefaults can't tell those apart on its own, so Load must.
 func TestKVSettings_ZeroRetentionMeansForever(t *testing.T) {
-	db, err := Open("sqlite", filepath.Join(t.TempDir(), "panel.db"))
+	db, err := openTestDB(t)
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
@@ -58,7 +57,7 @@ func TestKVSettings_ZeroRetentionMeansForever(t *testing.T) {
 // up to 90). Previously the loader hard-floored <=0 to 90, so admins could not
 // set a shorter retention or keep-forever.
 func TestKVSettings_AuthEventRetentionFreelyEditable(t *testing.T) {
-	db, err := Open("sqlite", filepath.Join(t.TempDir(), "panel.db"))
+	db, err := openTestDB(t)
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
@@ -103,7 +102,7 @@ func TestKVSettings_AuthEventRetentionFreelyEditable(t *testing.T) {
 // Marshal/Unmarshal halves of every descriptor — strField / intField /
 // boolField / jsonField — so regressions in any helper are caught here.
 func TestKVSettingsRoundtrip(t *testing.T) {
-	db, err := Open("sqlite", filepath.Join(t.TempDir(), "panel.db"))
+	db, err := openTestDB(t)
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
@@ -124,48 +123,48 @@ func TestKVSettingsRoundtrip(t *testing.T) {
 	ctx := context.Background()
 
 	in := ports.UISettings{
-		LoginMode:                    "dual",
-		SiteTitle:                    "Test Panel",
-		AppTitle:                     "PSP",
-		IconURL:                      "https://cdn.example.com/icon.png",
-		LogoURL:                      "https://cdn.example.com/logo.png",
-		LogoURLDark:                  "https://cdn.example.com/logo-dark.png",
-		FooterText:                   "© 2026 Test",
-		ThemeColor:                   "#0061A4",
-		EmailDomain:                  "users.example.com",
-		SubBaseURL:                   "https://panel.example.com",
-		JWTIssuer:                    "passwall-sub-panel",
-		JWTAccessTTLMinutes:          90,
-		JWTRefreshTTLMinutes:         60 * 24 * 14,
-		DisallowUserLocalLogin:       true,
-		DisallowUserPasswordChange:   false,
-		AllowUserPersonalRules:       true,
-		SubPath:                      "subscribe",
-		SubUpdateIntervalHours:       12,
-		SubRegionFlagPrefix:          true,
-		SubBlockAutoDisable:          true,
-		SubBlockAutoDisableCount:     5,
-		SubLogRetentionDays:          14,
-		SubImportTutorialURL:         "https://docs.example.com/import",
-		SubClientRules:               []ports.SubClientRule{{Name: "Clash", Keywords: []string{"clash"}, RenderFormat: "mihomo", Enabled: true}},
-		SubImportClients:             []ports.SubImportClient{{Name: "Verge", Platforms: []string{"windows"}, RenderFormat: "mihomo", ImportURLTemplate: "clash://x", Enabled: true, Sort: 10}},
-		SubPerIPPerMin:               42,
-		LoginPerIPPerMin:             7,
-		AuditRetentionDays:           45,
-		SyncTaskRetentionDays:        60,
-		TrafficHistoryDays: 200,
-		EmergencyAccessEnabled:       true,
-		EmergencyAccessHours:         48,
-		EmergencyAccessMaxCount:      4,
-		EmergencyAccessQuotaGB:       20,
-		Timezone:                     "America/Los_Angeles",
-		CronTrafficPullMinutes:       10,
-		CronReconcileMinutes:         30,
-		MaxPanelConcurrency:          16,
-		QuickLinks:                   []ports.QuickLink{{Label: "Docs", URL: "https://docs", Enabled: true, Sort: 1}},
-		GlobalAnnouncement:           ports.GlobalAnnouncement{Enabled: true, Title: "Maintenance", Content: "tonight 23:00", Level: "info"},
-		ExpireBeforeDays:             7,
-		TrafficRemainPercent:         15,
+		LoginMode:                  "dual",
+		SiteTitle:                  "Test Panel",
+		AppTitle:                   "PSP",
+		IconURL:                    "https://cdn.example.com/icon.png",
+		LogoURL:                    "https://cdn.example.com/logo.png",
+		LogoURLDark:                "https://cdn.example.com/logo-dark.png",
+		FooterText:                 "© 2026 Test",
+		ThemeColor:                 "#0061A4",
+		EmailDomain:                "users.example.com",
+		SubBaseURL:                 "https://panel.example.com",
+		JWTIssuer:                  "passwall-sub-panel",
+		JWTAccessTTLMinutes:        90,
+		JWTRefreshTTLMinutes:       60 * 24 * 14,
+		DisallowUserLocalLogin:     true,
+		DisallowUserPasswordChange: false,
+		AllowUserPersonalRules:     true,
+		SubPath:                    "subscribe",
+		SubUpdateIntervalHours:     12,
+		SubRegionFlagPrefix:        true,
+		SubBlockAutoDisable:        true,
+		SubBlockAutoDisableCount:   5,
+		SubLogRetentionDays:        14,
+		SubImportTutorialURL:       "https://docs.example.com/import",
+		SubClientRules:             []ports.SubClientRule{{Name: "Clash", Keywords: []string{"clash"}, RenderFormat: "mihomo", Enabled: true}},
+		SubImportClients:           []ports.SubImportClient{{Name: "Verge", Platforms: []string{"windows"}, RenderFormat: "mihomo", ImportURLTemplate: "clash://x", Enabled: true, Sort: 10}},
+		SubPerIPPerMin:             42,
+		LoginPerIPPerMin:           7,
+		AuditRetentionDays:         45,
+		SyncTaskRetentionDays:      60,
+		TrafficHistoryDays:         200,
+		EmergencyAccessEnabled:     true,
+		EmergencyAccessHours:       48,
+		EmergencyAccessMaxCount:    4,
+		EmergencyAccessQuotaGB:     20,
+		Timezone:                   "America/Los_Angeles",
+		CronTrafficPullMinutes:     10,
+		CronReconcileMinutes:       30,
+		MaxPanelConcurrency:        16,
+		QuickLinks:                 []ports.QuickLink{{Label: "Docs", URL: "https://docs", Enabled: true, Sort: 1}},
+		GlobalAnnouncement:         ports.GlobalAnnouncement{Enabled: true, Title: "Maintenance", Content: "tonight 23:00", Level: "info"},
+		ExpireBeforeDays:           7,
+		TrafficRemainPercent:       15,
 	}
 
 	if err := repo.Save(ctx, in); err != nil {
@@ -232,7 +231,7 @@ func TestKVSettingsRoundtrip(t *testing.T) {
 // intervals, JWT TTLs, retention days) with non-zero values so the panel
 // can boot against a freshly-created DB without an admin save first.
 func TestKVSettingsDefaultsOnEmpty(t *testing.T) {
-	db, err := Open("sqlite", filepath.Join(t.TempDir(), "panel.db"))
+	db, err := openTestDB(t)
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
@@ -255,20 +254,20 @@ func TestKVSettingsDefaultsOnEmpty(t *testing.T) {
 	// Spot-check the most critical defaults — tickers panic on zero/negative
 	// intervals, so these MUST be non-zero before the cron loops fire.
 	mustNonZero := map[string]int{
-		"CronTrafficPullMinutes":       out.CronTrafficPullMinutes,
-		"CronReconcileMinutes":         out.CronReconcileMinutes,
-		"JWTAccessTTLMinutes":          out.JWTAccessTTLMinutes,
-		"JWTRefreshTTLMinutes":         out.JWTRefreshTTLMinutes,
-		"SubPerIPPerMin":               out.SubPerIPPerMin,
-		"LoginPerIPPerMin":             out.LoginPerIPPerMin,
-		"SubLogRetentionDays":          out.SubLogRetentionDays,
-		"AuditRetentionDays":           out.AuditRetentionDays,
-		"SyncTaskRetentionDays":        out.SyncTaskRetentionDays,
-		"TrafficHistoryDays": out.TrafficHistoryDays,
-		"SubBlockAutoDisableCount":     out.SubBlockAutoDisableCount,
-		"SubUpdateIntervalHours":       out.SubUpdateIntervalHours,
-		"ExpireBeforeDays":             out.ExpireBeforeDays,
-		"TrafficRemainPercent":         out.TrafficRemainPercent,
+		"CronTrafficPullMinutes":   out.CronTrafficPullMinutes,
+		"CronReconcileMinutes":     out.CronReconcileMinutes,
+		"JWTAccessTTLMinutes":      out.JWTAccessTTLMinutes,
+		"JWTRefreshTTLMinutes":     out.JWTRefreshTTLMinutes,
+		"SubPerIPPerMin":           out.SubPerIPPerMin,
+		"LoginPerIPPerMin":         out.LoginPerIPPerMin,
+		"SubLogRetentionDays":      out.SubLogRetentionDays,
+		"AuditRetentionDays":       out.AuditRetentionDays,
+		"SyncTaskRetentionDays":    out.SyncTaskRetentionDays,
+		"TrafficHistoryDays":       out.TrafficHistoryDays,
+		"SubBlockAutoDisableCount": out.SubBlockAutoDisableCount,
+		"SubUpdateIntervalHours":   out.SubUpdateIntervalHours,
+		"ExpireBeforeDays":         out.ExpireBeforeDays,
+		"TrafficRemainPercent":     out.TrafficRemainPercent,
 	}
 	for name, v := range mustNonZero {
 		if v <= 0 {
@@ -307,7 +306,7 @@ func TestKVSettingsDefaultsOnEmpty(t *testing.T) {
 // "0"/"1" round trip in both directions, and "true" accepted as well so
 // external SQL tools can write a human-friendly value.
 func TestKVSettingsBoolMarshal(t *testing.T) {
-	db, err := Open("sqlite", filepath.Join(t.TempDir(), "panel.db"))
+	db, err := openTestDB(t)
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}

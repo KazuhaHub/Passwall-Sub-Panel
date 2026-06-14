@@ -2,7 +2,6 @@ package mysql
 
 import (
 	"context"
-	"path/filepath"
 	"testing"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
@@ -13,7 +12,7 @@ import (
 // loses, which is what stops two concurrent redemptions of one one-time code
 // from both succeeding (the double-spend the review flagged).
 func TestConsumeRecoveryCode_CAS(t *testing.T) {
-	db, err := Open("sqlite", filepath.Join(t.TempDir(), "panel.db"))
+	db, err := openTestDB(t)
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}

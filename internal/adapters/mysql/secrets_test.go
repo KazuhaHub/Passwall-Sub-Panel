@@ -2,7 +2,6 @@ package mysql
 
 import (
 	"context"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -13,7 +12,7 @@ func TestXUIPanelSecretsEncryptedAtRest(t *testing.T) {
 	ConfigureSecretKey("test-db-secret")
 	t.Cleanup(func() { ConfigureSecretKey("") })
 
-	db, err := Open("sqlite", filepath.Join(t.TempDir(), "panel.db"))
+	db, err := openTestDB(t)
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
@@ -149,7 +148,7 @@ func TestEncryptSecretRoundTripDifferentKey(t *testing.T) {
 func TestCountPlaintextEncryptedSettings(t *testing.T) {
 	ConfigureSecretKey("test-db-secret")
 	t.Cleanup(func() { ConfigureSecretKey("") })
-	db, err := Open("sqlite", filepath.Join(t.TempDir(), "panel.db"))
+	db, err := openTestDB(t)
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
@@ -157,9 +156,9 @@ func TestCountPlaintextEncryptedSettings(t *testing.T) {
 		t.Fatalf("schema: %v", err)
 	}
 	rows := []settingRow{
-		{Type: "security", Name: "captcha_secret_key", Value: "PLAINTEXTSECRET", Encrypted: true}, // leak — must count
+		{Type: "security", Name: "captcha_secret_key", Value: "PLAINTEXTSECRET", Encrypted: true},     // leak — must count
 		{Type: "geo", Name: "geo_ip_update_token", Value: secretPrefix + "deadbeef", Encrypted: true}, // ok
-		{Type: "ui", Name: "brand_name", Value: "Acme Corp", Encrypted: false},                       // not a secret
+		{Type: "ui", Name: "brand_name", Value: "Acme Corp", Encrypted: false},                        // not a secret
 	}
 	for i := range rows {
 		if err := db.Create(&rows[i]).Error; err != nil {

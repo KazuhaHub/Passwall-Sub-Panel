@@ -2,7 +2,6 @@ package mysql
 
 import (
 	"context"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -11,7 +10,7 @@ import (
 )
 
 func TestCreateUsersWithUPN(t *testing.T) {
-	db, err := Open("sqlite", filepath.Join(t.TempDir(), "panel.db"))
+	db, err := openTestDB(t)
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
@@ -66,7 +65,7 @@ func TestCreateUsersWithUPN(t *testing.T) {
 // window granted concurrently mid-cycle. ClearEmergencyAccess is the only poll
 // path allowed to clear it.
 func TestUpdateTrafficStatePreservesEmergency(t *testing.T) {
-	db, err := Open("sqlite", filepath.Join(t.TempDir(), "panel.db"))
+	db, err := openTestDB(t)
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
@@ -142,7 +141,7 @@ func timeNowUTCPlusHour() time.Time { return time.Now().UTC().Add(time.Hour) }
 //  3. failure path: a zero-ID row aborts the batch (transaction rolls back,
 //     no partial writes)
 func TestBatchUpdateTrafficState(t *testing.T) {
-	db, err := Open("sqlite", filepath.Join(t.TempDir(), "panel.db"))
+	db, err := openTestDB(t)
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
@@ -249,7 +248,7 @@ func TestBatchUpdateTrafficState(t *testing.T) {
 // future edit can't silently drop it and regress on Postgres, where LIKE is
 // case-sensitive. The same SQL runs verbatim on all three backends.
 func TestListSearchIsCaseInsensitive(t *testing.T) {
-	db, err := Open("sqlite", filepath.Join(t.TempDir(), "panel.db"))
+	db, err := openTestDB(t)
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}

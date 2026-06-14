@@ -2,7 +2,6 @@ package mysql
 
 import (
 	"context"
-	"path/filepath"
 	"testing"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
@@ -14,7 +13,7 @@ import (
 // and mail-log repos use the same LOWER(...) LIKE construction (plus a users
 // join), so this exercises the shared matching contract.
 func TestAuditRepoSearch(t *testing.T) {
-	db, err := Open("sqlite", filepath.Join(t.TempDir(), "panel.db"))
+	db, err := openTestDB(t)
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
@@ -74,7 +73,7 @@ func TestAuditRepoSearch(t *testing.T) {
 // beta.7 regression that broke every keyword search on MySQL deployments.
 // TestLikeColsEscapeIsPortable guards the generated-SQL form directly.
 func TestAuditRepoSearchEscapesLikeMeta(t *testing.T) {
-	db, err := Open("sqlite", filepath.Join(t.TempDir(), "panel.db"))
+	db, err := openTestDB(t)
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}

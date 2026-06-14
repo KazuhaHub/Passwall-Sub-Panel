@@ -2,7 +2,6 @@ package mysql
 
 import (
 	"context"
-	"path/filepath"
 	"testing"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
@@ -13,7 +12,7 @@ import (
 // window_key starts with the date prefix, so the mailer can stop after N sends
 // in a day. Each send uses a distinct "date#seq" window_key.
 func TestMailRepoCountSentInWindow(t *testing.T) {
-	db, err := Open("sqlite", filepath.Join(t.TempDir(), "panel.db"))
+	db, err := openTestDB(t)
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
@@ -72,7 +71,7 @@ func TestMailRepoCountSentInWindow(t *testing.T) {
 // key loses (false) — so concurrent blocked-client warnings can't both clear
 // the same per-day slot. A different key, user, or kind reserves independently.
 func TestMailRepoReserveSentSlot(t *testing.T) {
-	db, err := Open("sqlite", filepath.Join(t.TempDir(), "panel.db"))
+	db, err := openTestDB(t)
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}

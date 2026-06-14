@@ -2,7 +2,6 @@ package mysql
 
 import (
 	"context"
-	"path/filepath"
 	"testing"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
@@ -13,7 +12,7 @@ import (
 // any GORM/sqlite-side incompat with our jsonInt64s + boolean defaults
 // at insert time.
 func TestSeparatorRepoCreate_RepeatsForReportedBug(t *testing.T) {
-	db, err := Open("sqlite", filepath.Join(t.TempDir(), "panel.db"))
+	db, err := openTestDB(t)
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}

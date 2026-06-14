@@ -3,7 +3,6 @@ package mysql
 import (
 	"context"
 	"errors"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -11,7 +10,7 @@ import (
 )
 
 func TestTrafficSnapshotsReturnNotFoundWhenEmpty(t *testing.T) {
-	db, err := Open("sqlite", filepath.Join(t.TempDir(), "panel.db"))
+	db, err := openTestDB(t)
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
@@ -43,7 +42,7 @@ func TestTrafficSnapshotsReturnNotFoundWhenEmpty(t *testing.T) {
 // the most recent snapshot strictly before the cutoff, grouped per (panel,
 // inbound, email) client, for one user — keyed by ClientMatchKey.
 func TestLastBeforeForUserClients(t *testing.T) {
-	db, err := Open("sqlite", filepath.Join(t.TempDir(), "panel.db"))
+	db, err := openTestDB(t)
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
@@ -103,7 +102,7 @@ func TestLastBeforeForUserClients(t *testing.T) {
 //  3. empty input returns an empty map, not nil — so the caller can map-index
 //     it without a nil guard
 func TestLatestForUsers(t *testing.T) {
-	db, err := Open("sqlite", filepath.Join(t.TempDir(), "panel.db"))
+	db, err := openTestDB(t)
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
@@ -176,7 +175,7 @@ func TestLatestForUsers(t *testing.T) {
 // traffic_snapshots and client_traffic_snapshots are pruned in one call,
 // and that the cutoff comparison is strict (rows AT cutoff survive).
 func TestTrafficPruneBefore(t *testing.T) {
-	db, err := Open("sqlite", filepath.Join(t.TempDir(), "panel.db"))
+	db, err := openTestDB(t)
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
@@ -235,7 +234,7 @@ func TestTrafficPruneBefore(t *testing.T) {
 // that the wrong user/node and out-of-range buckets are excluded. These are
 // the SOLE source for HistoryFor / NodeHistoryFor.
 func TestListHourlyByUserAndNode(t *testing.T) {
-	db, err := Open("sqlite", filepath.Join(t.TempDir(), "panel.db"))
+	db, err := openTestDB(t)
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
@@ -317,7 +316,7 @@ func TestListHourlyByUserAndNode(t *testing.T) {
 // filtered, one row per bucket_start ascending. Verifies the GORM GROUP BY +
 // aggregate-alias mapping actually works against the real driver.
 func TestSumHourlyAllUsersAndNodes(t *testing.T) {
-	db, err := Open("sqlite", filepath.Join(t.TempDir(), "panel.db"))
+	db, err := openTestDB(t)
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}

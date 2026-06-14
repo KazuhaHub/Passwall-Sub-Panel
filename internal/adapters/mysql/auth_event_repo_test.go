@@ -2,7 +2,6 @@ package mysql
 
 import (
 	"context"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -11,7 +10,7 @@ import (
 )
 
 func TestAuthEventRepo(t *testing.T) {
-	db, err := Open("sqlite", filepath.Join(t.TempDir(), "panel.db"))
+	db, err := openTestDB(t)
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
@@ -93,7 +92,7 @@ func TestAuthEventRepo(t *testing.T) {
 // reason=invalid_credentials counts — disabled / locked_out / server-error
 // failures must NOT inflate the count (so the lock window can't slide).
 func TestAuthEventRecentFailures(t *testing.T) {
-	db, err := Open("sqlite", filepath.Join(t.TempDir(), "panel.db"))
+	db, err := openTestDB(t)
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
@@ -172,7 +171,7 @@ func TestAuthEventRecentFailures(t *testing.T) {
 // login_security alert relies on: how many events with a given reason landed
 // since a cutoff (e.g. recent locked_out rejections = an active brute-force).
 func TestAuthEventCountByReasonSince(t *testing.T) {
-	db, err := Open("sqlite", filepath.Join(t.TempDir(), "panel.db"))
+	db, err := openTestDB(t)
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}

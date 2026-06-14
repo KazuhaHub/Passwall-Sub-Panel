@@ -2,7 +2,6 @@ package mysql
 
 import (
 	"context"
-	"path/filepath"
 	"testing"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
@@ -14,7 +13,7 @@ import (
 // per-row column scope must match the single-row UpdateCounters; an aborted
 // batch must not partially apply.
 func TestOwnershipBatchUpdateCounters(t *testing.T) {
-	db, err := Open("sqlite", filepath.Join(t.TempDir(), "panel.db"))
+	db, err := openTestDB(t)
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
@@ -105,7 +104,7 @@ func TestOwnershipBatchUpdateCounters(t *testing.T) {
 // without rows are absent (not nil-valued), and empty input returns an
 // empty non-nil map so callers don't need a guard.
 func TestOwnershipListByUsers(t *testing.T) {
-	db, err := Open("sqlite", filepath.Join(t.TempDir(), "panel.db"))
+	db, err := openTestDB(t)
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}

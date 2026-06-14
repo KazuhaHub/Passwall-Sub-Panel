@@ -3,7 +3,6 @@ package mysql
 import (
 	"context"
 	"errors"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -11,7 +10,7 @@ import (
 )
 
 func TestWebAuthnCredentialRepo(t *testing.T) {
-	db, err := Open("sqlite", filepath.Join(t.TempDir(), "panel.db"))
+	db, err := openTestDB(t)
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
@@ -113,7 +112,7 @@ func TestWebAuthnCredentialRepo(t *testing.T) {
 // passkeys" break-glass: it must drop every credential of the target user, leave
 // other users untouched, return the deleted count, and be idempotent.
 func TestWebAuthnCredentialRepo_DeleteAllByUserID(t *testing.T) {
-	db, err := Open("sqlite", filepath.Join(t.TempDir(), "panel.db"))
+	db, err := openTestDB(t)
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}

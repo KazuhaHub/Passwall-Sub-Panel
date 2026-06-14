@@ -1,0 +1,84 @@
+name: Test
+
+# Runs the Go test suite. The release workflow only builds, so this is the
+# project's actual test gate. The sqlite job runs the WHOLE suite; the postgres
+# and mysql jobs run the DB-adapter package (schema + every repo + the grouped /
+# scoped-settings layer) against a real server to verify cross-dialect behaviour
+# that SQLite alone can't — see internal/adapters/mysql/testdb_test.go, which
+# reads PSP_TEST_DB_KIND / PSP_TEST_DB_DSN and gives each test its own schema
+# (Postgres) / database (MySQL) on the shared service container.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  sqlite:
+    name: sqlite (full suite)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: go vet ./...
+      - run: go test ./...
+
+  postgres:
+    name: postgres (db adapter)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: psp
+          POSTGRES_PASSWORD: psp
+          POSTGRES_DB: psptest
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U psp -d psptest"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      PSP_TEST_DB_KIND: postgres
+      PSP_TEST_DB_DSN: postgres://psp:psp@localhost:5432/psptest?sslmode=disable
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: go test ./internal/adapters/mysql/...
+
+  mysql:
+    name: mysql (db adapter)
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8
+        env:
+          MYSQL_ROOT_PASSWORD: psp
+          MYSQL_DATABASE: psptest
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -uroot -ppsp"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 30
+    env:
+      PSP_TEST_DB_KIND: mysql
+      # {schema} is substituted with a per-test database name by openTestDB.
+      PSP_TEST_DB_DSN: root:psp@tcp(127.0.0.1:3306)/{schema}?parseTime=true&multiStatements=true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: go test ./internal/adapters/mysql/...

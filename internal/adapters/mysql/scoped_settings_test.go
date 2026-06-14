@@ -2,7 +2,6 @@ package mysql
 
 import (
 	"context"
-	"path/filepath"
 	"testing"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
@@ -11,7 +10,7 @@ import (
 
 func newScopedTestRepos(t *testing.T) (ports.SettingsRepo, *kvScopeSettingsRepo, ports.ScopedSettings) {
 	t.Helper()
-	db, err := Open("sqlite", filepath.Join(t.TempDir(), "panel.db"))
+	db, err := openTestDB(t)
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}

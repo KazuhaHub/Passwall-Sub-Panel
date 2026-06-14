@@ -1,7 +1,6 @@
 package mysql
 
 import (
-	"path/filepath"
 	"reflect"
 	"testing"
 )
@@ -14,7 +13,7 @@ import (
 // every Repos field is non-nil EXCEPT the two YAML-backed repos that app.go
 // intentionally injects (rule sets / templates live in config/*.yaml).
 func TestNewReposPopulatesEveryDBRepo(t *testing.T) {
-	db, err := Open("sqlite", filepath.Join(t.TempDir(), "p.db"))
+	db, err := openTestDB(t)
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
