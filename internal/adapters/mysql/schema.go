@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/schema"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/config"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
@@ -967,6 +968,14 @@ func (j jsonInt64s) Value() (driver.Value, error) {
 	return string(b), err
 }
 
+// GormDBDataType pins the column to text on every dialect. Without it GORM's
+// Postgres driver infers a `text[]` / `bigint[]` ARRAY column from the
+// []string / []int64 underlying type and then rejects the JSON string that
+// Value() writes; SQLite and MySQL tolerate the inference, Postgres does not.
+// (Same "don't ship a driver-inferred slice/json column type — use text" rule
+// the project applies elsewhere.)
+func (jsonInt64s) GormDBDataType(*gorm.DB, *schema.Field) string { return "text" }
+
 func (j *jsonInt64s) Scan(value any) error {
 	if value == nil {
 		*j = nil
@@ -997,6 +1006,11 @@ func (j jsonStrings) Value() (driver.Value, error) {
 	b, err := json.Marshal(j)
 	return string(b), err
 }
+
+// GormDBDataType — see jsonInt64s.GormDBDataType. Pins recovery_codes /
+// enabled_rule_sets / tags / domains to a text column on every dialect so
+// Postgres doesn't infer a text[] array and reject the JSON string Value writes.
+func (jsonStrings) GormDBDataType(*gorm.DB, *schema.Field) string { return "text" }
 
 func (j *jsonStrings) Scan(value any) error {
 	if value == nil {
