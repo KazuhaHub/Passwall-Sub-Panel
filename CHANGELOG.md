@@ -4,6 +4,20 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## v3.8.0-beta.9 — 2026-06-14
+
+重构:DB 适配器包 `mysql` 改名为 `sqlstore`。无行为变更。
+
+### 重构
+
+- **`internal/adapters/mysql` → `internal/adapters/sqlstore`** —— 这个包用一份**方言无关**的 GORM 适配器同时
+  支撑 SQLite / MySQL / PostgreSQL(唯一按方言分叉的地方是 `conn.go` 里的驱动选择,从没有「按数据库分」的文件),
+  `mysql` 这个名字是历史误名、也喂养了「MySQL 中心」的偏向(它正是盖住 PG-only bug 的那层)。包 + 目录改名,
+  58 个文件保留 git 历史,所有 import + 唯一的局部变量(`mysqlRepos` → `dbRepos`)+ CLAUDE.md / docs / CI 路径
+  全部跟上。**保留不动**:config 键 `mysql.dsn` / `mysql:` block / `PSP_MYSQL_DSN`、DB-kind 值 `"mysql"`、
+  `mysqldriver`(都合法指 MySQL 数据库本身)。CLAUDE.md 顺手补上 Postgres-strict 规矩(JSON / 切片列给
+  `GormDBDataType("text")`、bool 绑参数、避开 `json` 列)。本地全量测试 + SQLite / MySQL / Postgres 三库 CI 全绿。
+
 ## v3.8.0-beta.8 — 2026-06-14
 
 2FA step-up 体验修复 + PostgreSQL 兼容修复(由新加的跨数据库 CI 矩阵发现)。前端 1 处,其余后端 / CI。
