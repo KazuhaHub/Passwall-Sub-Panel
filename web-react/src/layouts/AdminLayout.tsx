@@ -342,7 +342,10 @@ export default function AdminLayout() {
                 minWidth: 0,
                 color: md.onSurfaceVariant,
                 fontSize: 11,
-                fontFamily: 'monospace',
+                // Explicit Latin monospace stack — the bare `monospace` generic
+                // resolves to a CJK monospace under a Chinese locale, which
+                // renders the ASCII version string with wrong/heavier glyphs.
+                fontFamily: '"SFMono-Regular", "SF Mono", "Roboto Mono", ui-monospace, Menlo, Consolas, monospace',
                 opacity: 0.85,
                 whiteSpace: 'nowrap',
                 overflow: 'hidden',
