@@ -91,7 +91,18 @@ func (r *xuiPanelRepo) Save(ctx context.Context, p *domain.XUIPanel) error {
 	if err != nil {
 		return err
 	}
-	if err := r.db.WithContext(ctx).Save(row).Error; err != nil {
+	db := r.db.WithContext(ctx)
+	if row.ID == 0 {
+		err = db.Create(row).Error
+	} else {
+		// domain.XUIPanel carries no created_at, so a full Save would write the
+		// zero time on UPDATE — which MySQL strict mode (NO_ZERO_DATE) rejects
+		// ("Incorrect datetime value: '0000-00-00'"). Omit it: created_at stays
+		// as first written, updated_at still refreshes. SQLite/Postgres tolerated
+		// the zero date; the cross-DB CI surfaced this MySQL-only bug.
+		err = db.Omit("CreatedAt").Save(row).Error
+	}
+	if err != nil {
 		return err
 	}
 	p.ID = row.ID

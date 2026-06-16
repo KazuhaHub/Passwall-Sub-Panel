@@ -1240,7 +1240,7 @@ export default function ServersView() {
                 label={t('admin:servers.field.insecure_https', { defaultValue: '允许不安全的 HTTPS（跳过证书校验）' })}
                 control={<Switch checked={form.insecure_https}
                   onChange={(_, c) => setForm({ ...form, insecure_https: c })} />} />
-              <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant, ml: 0.25 }}>
+              <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant, ml: 0.25, mt: 0.75 }}>
                 {t('admin:servers.hint.insecure_https', { defaultValue: '面板使用自签名 / 域名不匹配证书时开启。仅对该面板生效，不影响 SSRF 防护。' })}
               </Typography>
             </Box>

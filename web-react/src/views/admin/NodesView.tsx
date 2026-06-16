@@ -3326,7 +3326,7 @@ export default function NodesView() {
                       <TextField size="small" label={t('admin:nodes.relay.name')} value={r.name}
                         onChange={e => update({ name: e.target.value })} sx={{ flex: 1 }}
                         placeholder={t('admin:nodes.relay.name_ph')} />
-                      <FormControlLabel sx={{ m: 0 }} label={t('admin:nodes.relay.enabled')}
+                      <FormControlLabel sx={{ m: 0, '& .MuiFormControlLabel-label': { ml: 0.75 } }} label={t('admin:nodes.relay.enabled')}
                         control={<Switch size="small" checked={r.enabled} onChange={(_, c) => update({ enabled: c })} />} />
                       <Tooltip title={t('admin:nodes.relay.remove')}>
                         <IconButton size="small" onClick={() => setEditForm(f => ({ ...f, relays: f.relays.filter((_, j) => j !== i) }))}>
@@ -3353,7 +3353,7 @@ export default function NodesView() {
                 )
               })}
               {editForm.relays.some(r => r.enabled) && (
-                <FormControlLabel sx={{ m: 0 }} label={t('admin:nodes.relay.hide_direct')}
+                <FormControlLabel sx={{ m: 0, '& .MuiFormControlLabel-label': { ml: 0.75 } }} label={t('admin:nodes.relay.hide_direct')}
                   control={<Switch size="small" checked={editForm.hide_direct} onChange={(_, c) => setEditForm(f => ({ ...f, hide_direct: c }))} />} />
               )}
             </Box>
