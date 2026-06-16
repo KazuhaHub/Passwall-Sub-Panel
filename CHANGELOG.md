@@ -4,6 +4,29 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## v3.8.0-beta.13 — 2026-06-17
+
+QUIC / UDP 分流控制 + 几处修复与统一。
+
+### 新增
+
+- **网页 QUIC / UDP 分流控制** —— 内置拒绝网页 QUIC(HTTP/3 over UDP 443),逼浏览器回落 h2/TCP(根治"烂 UDP 节点上 YouTube/Google 卡顿":QUIC 在 UDP 差的节点上很卡,TCP 在任何节点都稳)。优先级最高,只丢 QUIC 这次连接、TCP 回落仍按规则走(不会漏直连),代理拨号绕过规则引擎(Hysteria2 节点不受影响)。其余非本地 UDP 交给新的 **`🎮 UDP控制`** 选择组,可在客户端切换 `🚀 节点选择 / DIRECT / REJECT`(默认走节点);本地 / 私网 UDP 仍直连。mihomo + sing-box 一致(sing-box 新增 `NETWORK` 规则翻译)。
+- **新增节点默认排到列表末尾** —— `sort_order ≤ 0` 视为"自动追加",取 `max(sort_order)+10`,新节点不再卡在列表中间;纳管对话框可手填正数指定位置(0 = 末尾)。
+
+### 修复
+
+- **Hysteria2 ALPN 默认值错误** —— 创建 / 纳管 Hy2 入站时 ALPN 预填成 `h2,http/1.1`,但 Hy2 是 QUIC、ALPN 必须是 `h3`;该值会写进 3X-UI 入站,导致 Hy2 连不上。改为按协议预填(Hy2 → `h3`,TCP 类 TLS → `h2,http/1.1`),切换协议时自动调整,手填的自定义值保留。
+- **左下角版本号字体** —— 中文界面下裸 `monospace` 兜底成了 CJK 等宽字体,ASCII 版本号显示偏重 / 不对;改为显式拉丁等宽字体栈。
+
+### 改进
+
+- **设置页保存按钮统一** —— SSO(SAML / OIDC)与邮件页的保存按钮从顶部移到底部 sticky 工具栏,与其它设置页一致。
+- **mihomo 默认 `allow-lan` 改为 `false`** —— 默认只监听本机,更安全(需共享给局域网设备时再开)。
+
+### 升级提示
+
+- QUIC/UDP 与 `allow-lan` 的改动在**种子模板 / 规则集**里,只对新安装自动生效。现有部署升级后:到「模板」重置 `default-mihomo`(及 `default-sing-box`)、到「规则集」重置 `default_rules`,即可拉取新默认(会覆盖你对这两个文件的自定义)。sing-box 的 QUIC/UDP 渲染逻辑在程序内,升级即自动生效。
+
 ## v3.8.0-beta.12 — 2026-06-16
 
 beta.11 的修订:修复 MySQL 下编辑 3X-UI 服务器报错,+ 两处 UI 间距。
