@@ -2,6 +2,7 @@ package sqlstore
 
 import (
 	"context"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -114,6 +115,72 @@ func TestNodeRepo_ProtocolRoundTrips(t *testing.T) {
 	}
 	if again.Protocol != "vless" {
 		t.Fatalf("protocol after update = %q, want vless", again.Protocol)
+	}
+}
+
+// TestNodeRepo_RelaysRoundTrip pins the v3.8.0 transit-line persistence: a
+// node's Relays slice + HideDirect flag survive a write→read→update cycle
+// across every dialect (the JSON column is the Postgres-strict path — text,
+// not an inferred composite/array). A relay-less node reads back with no
+// relays and HideDirect false.
+func TestNodeRepo_RelaysRoundTrip(t *testing.T) {
+	repo, ctx := newNodeTestRepo(t)
+
+	n := &domain.Node{
+		PanelID:       1,
+		InboundID:     2,
+		DisplayName:   "HK",
+		ServerAddress: "land.example.com",
+		Protocol:      "vless",
+		Region:        "HK",
+		HideDirect:    true,
+		Relays: []domain.RelayLine{
+			{Name: "广州移动中转", Address: "gz.relay.cn", Port: 20001, Enabled: true},
+			{Name: "CDN优选", Address: "104.16.0.1", Port: 8443, SNI: "cdn.example.com", Host: "cdn.example.com", Enabled: false},
+		},
+	}
+	if err := repo.Create(ctx, n); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	got, err := repo.GetByID(ctx, n.ID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if !got.HideDirect {
+		t.Fatalf("HideDirect = false, want true")
+	}
+	if !reflect.DeepEqual(got.Relays, n.Relays) {
+		t.Fatalf("relays round-trip mismatch:\n got %#v\nwant %#v", got.Relays, n.Relays)
+	}
+
+	// Update path: drop one line, flip a toggle.
+	got.Relays = []domain.RelayLine{{Name: "上海电信", Address: "sh.relay.cn", Port: 30001, Enabled: true}}
+	got.HideDirect = false
+	if err := repo.Update(ctx, got); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	again, err := repo.GetByID(ctx, n.ID)
+	if err != nil {
+		t.Fatalf("get after update: %v", err)
+	}
+	if again.HideDirect {
+		t.Fatalf("HideDirect after update = true, want false")
+	}
+	if !reflect.DeepEqual(again.Relays, got.Relays) {
+		t.Fatalf("relays after update mismatch:\n got %#v\nwant %#v", again.Relays, got.Relays)
+	}
+
+	// Relay-less node: nil relays, HideDirect false.
+	plain := &domain.Node{PanelID: 1, InboundID: 3, DisplayName: "JP", ServerAddress: "jp.example.com", Region: "JP"}
+	if err := repo.Create(ctx, plain); err != nil {
+		t.Fatalf("create plain: %v", err)
+	}
+	gotPlain, err := repo.GetByID(ctx, plain.ID)
+	if err != nil {
+		t.Fatalf("get plain: %v", err)
+	}
+	if len(gotPlain.Relays) != 0 || gotPlain.HideDirect {
+		t.Fatalf("relay-less node = %#v, want no relays + HideDirect false", gotPlain)
 	}
 }
 

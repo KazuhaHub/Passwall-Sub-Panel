@@ -67,6 +67,22 @@ type nodeDTO struct {
 	// cert). "" = unmanaged. Never carries any PEM/secret — just the binding.
 	CertSource string `json:"cert_source,omitempty"`
 	CertID     int64  `json:"cert_id,omitempty"`
+	// Relays are the node's transit / 中转 lines; HideDirect drops the direct
+	// entry when at least one line is enabled. Surfaced so the edit form can
+	// round-trip them. Always present (possibly empty) for real nodes.
+	Relays     []relayLineDTO `json:"relays"`
+	HideDirect bool           `json:"hide_direct"`
+}
+
+// relayLineDTO is one transit front. Only the dialed endpoint differs from the
+// landing; SNI/Host are optional CDN-fronting overrides. See domain.RelayLine.
+type relayLineDTO struct {
+	Name    string `json:"name"`
+	Address string `json:"address"`
+	Port    int    `json:"port"`
+	SNI     string `json:"sni,omitempty"`
+	Host    string `json:"host,omitempty"`
+	Enabled bool   `json:"enabled"`
 }
 
 type inboundDTO struct {
@@ -91,10 +107,12 @@ type importNodeRequest struct {
 	Flow          string `json:"flow"`
 	// Protocol of the source inbound (lowercased), cached on the node so the
 	// UI can gate protocol-specific fields. Optional for backward compat.
-	Protocol  string   `json:"protocol"`
-	Region    string   `json:"region" binding:"required"`
-	Tags      []string `json:"tags"`
-	SortOrder int      `json:"sort_order"`
+	Protocol   string         `json:"protocol"`
+	Region     string         `json:"region" binding:"required"`
+	Tags       []string       `json:"tags"`
+	SortOrder  int            `json:"sort_order"`
+	Relays     []relayLineDTO `json:"relays"`
+	HideDirect bool           `json:"hide_direct"`
 }
 
 type createNodeRequest struct {
@@ -105,6 +123,8 @@ type createNodeRequest struct {
 	Region        string         `json:"region" binding:"required"`
 	Tags          []string       `json:"tags"`
 	SortOrder     int            `json:"sort_order"`
+	Relays        []relayLineDTO `json:"relays"`
+	HideDirect    bool           `json:"hide_direct"`
 	Inbound       inboundSpecDTO `json:"inbound" binding:"required"`
 }
 
@@ -128,6 +148,10 @@ type updateMetadataRequest struct {
 	Region        string   `json:"region"`
 	Tags          []string `json:"tags"`
 	SortOrder     int      `json:"sort_order"`
+	// Relays full-replaces the node's transit lines; nil (field absent) leaves
+	// them untouched, an explicit [] clears them — same patch semantics as Tags.
+	Relays     []relayLineDTO `json:"relays"`
+	HideDirect bool           `json:"hide_direct"`
 }
 
 type setNodeEnabledRequest struct {
@@ -393,6 +417,11 @@ func (h *AdminNodeHandler) ImportExisting(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	relays, err := parseRelays(req.Relays)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
 	n := &domain.Node{
 		PanelID:       req.PanelID,
 		InboundID:     req.InboundID,
@@ -403,6 +432,8 @@ func (h *AdminNodeHandler) ImportExisting(c *gin.Context) {
 		Region:        req.Region,
 		Tags:          req.Tags,
 		SortOrder:     req.SortOrder,
+		Relays:        relays,
+		HideDirect:    req.HideDirect,
 	}
 	if err := h.node.ImportExisting(c.Request.Context(), n); err != nil {
 		mapNodeServiceError(c, err)
@@ -418,6 +449,11 @@ func (h *AdminNodeHandler) CreateInbound(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	relays, err := parseRelays(req.Relays)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
 	n := &domain.Node{
 		PanelID:       req.PanelID,
 		DisplayName:   req.DisplayName,
@@ -427,6 +463,8 @@ func (h *AdminNodeHandler) CreateInbound(c *gin.Context) {
 		Region:        req.Region,
 		Tags:          req.Tags,
 		SortOrder:     req.SortOrder,
+		Relays:        relays,
+		HideDirect:    req.HideDirect,
 	}
 	spec := ports.InboundSpec{
 		Remark:         req.Inbound.Remark,
@@ -463,6 +501,11 @@ func (h *AdminNodeHandler) UpdateMetadata(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	relays, err := parseRelays(req.Relays)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
 	n, err := h.node.Get(c.Request.Context(), id)
 	if err != nil {
 		mapNodeServiceError(c, err)
@@ -482,6 +525,12 @@ func (h *AdminNodeHandler) UpdateMetadata(c *gin.Context) {
 		n.Tags = req.Tags
 	}
 	n.SortOrder = req.SortOrder
+	// Relays: nil (field absent) leaves them — and HideDirect — untouched, so a
+	// relay-unaware client never disturbs them; an explicit [] clears the lines.
+	if req.Relays != nil {
+		n.Relays = relays
+		n.HideDirect = req.HideDirect
+	}
 	if err := h.node.UpdateMetadata(c.Request.Context(), n); err != nil {
 		mapNodeServiceError(c, err)
 		return
@@ -719,6 +768,58 @@ func (h *AdminNodeHandler) loadPanelNames(ctx context.Context) map[int64]string 
 	return names
 }
 
+// maxRelayLines caps the transit lines per node — a sane ceiling so a typo or
+// malicious payload can't bloat the row / the rendered subscription.
+const maxRelayLines = 64
+
+// parseRelays validates + normalises the transit-line payload into the domain
+// shape. Whitespace is trimmed; a line must carry an address; the port is
+// either 0 (reuse the inbound port) or a valid 1-65535. Returns a friendly
+// error suitable for a 400.
+func parseRelays(dtos []relayLineDTO) ([]domain.RelayLine, error) {
+	if len(dtos) == 0 {
+		return nil, nil
+	}
+	if len(dtos) > maxRelayLines {
+		return nil, fmt.Errorf("too many relay lines (%d, max %d)", len(dtos), maxRelayLines)
+	}
+	out := make([]domain.RelayLine, 0, len(dtos))
+	for i, d := range dtos {
+		addr := strings.TrimSpace(d.Address)
+		if addr == "" {
+			return nil, fmt.Errorf("relay line %d: address is required", i+1)
+		}
+		if d.Port < 0 || d.Port > 65535 {
+			return nil, fmt.Errorf("relay line %d: port %d out of range (0-65535; 0 reuses the inbound port)", i+1, d.Port)
+		}
+		out = append(out, domain.RelayLine{
+			Name:    strings.TrimSpace(d.Name),
+			Address: addr,
+			Port:    d.Port,
+			SNI:     strings.TrimSpace(d.SNI),
+			Host:    strings.TrimSpace(d.Host),
+			Enabled: d.Enabled,
+		})
+	}
+	return out, nil
+}
+
+// relayDTOs maps the domain shape back for the API response.
+func relayDTOs(relays []domain.RelayLine) []relayLineDTO {
+	out := make([]relayLineDTO, 0, len(relays))
+	for _, r := range relays {
+		out = append(out, relayLineDTO{
+			Name:    r.Name,
+			Address: r.Address,
+			Port:    r.Port,
+			SNI:     r.SNI,
+			Host:    r.Host,
+			Enabled: r.Enabled,
+		})
+	}
+	return out
+}
+
 func (h *AdminNodeHandler) toNodeDTO(n *domain.Node, panelNames map[int64]string) nodeDTO {
 	// Panel name is resolved from the in-memory pool snapshot (panelNames map)
 	// rather than from the DB row — the v3 schema dropped the redundant
@@ -744,6 +845,8 @@ func (h *AdminNodeHandler) toNodeDTO(n *domain.Node, panelNames map[int64]string
 		Kind:            string(n.Kind),
 		CertSource:      string(n.CertSource),
 		CertID:          n.CertID,
+		Relays:          relayDTOs(n.Relays),
+		HideDirect:      n.HideDirect,
 	}
 }
 

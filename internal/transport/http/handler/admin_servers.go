@@ -58,6 +58,11 @@ type serverDTO struct {
 	Remark           string     `json:"remark,omitempty"`
 	HasAPIToken      bool       `json:"has_api_token"`
 	HasPassword      bool       `json:"has_password"`
+	// AuthMethod is the EFFECTIVE auth mode ("token" | "password") so the edit
+	// form pre-selects correctly — resolved from the stored method, falling back
+	// to inference for legacy rows. InsecureHTTPS skips TLS cert verification.
+	AuthMethod       string     `json:"auth_method"`
+	InsecureHTTPS    bool       `json:"insecure_https"`
 	PanelVersion     string     `json:"panel_version,omitempty"`
 	XrayVersion      string     `json:"xray_version,omitempty"`
 	VersionCheckedAt *time.Time `json:"version_checked_at,omitempty"`
@@ -73,23 +78,50 @@ type serverDTO struct {
 }
 
 type serverCreateRequest struct {
-	Name     string `json:"name" binding:"required"`
-	URL      string `json:"url" binding:"required"`
-	APIToken string `json:"api_token"`
-	Username string `json:"username"`
-	Password string `json:"password"`
-	Remark   string `json:"remark"`
+	Name          string `json:"name" binding:"required"`
+	URL           string `json:"url" binding:"required"`
+	APIToken      string `json:"api_token"`
+	Username      string `json:"username"`
+	Password      string `json:"password"`
+	Remark        string `json:"remark"`
+	AuthMethod    string `json:"auth_method"` // "" (auto) | "token" | "password"
+	InsecureHTTPS bool   `json:"insecure_https"`
 }
 
 // serverUpdateRequest uses pointers so omitted fields preserve existing
 // values; admin only re-enters secrets when actually changing them.
 type serverUpdateRequest struct {
-	Name     *string `json:"name,omitempty"`
-	URL      *string `json:"url,omitempty"`
-	APIToken *string `json:"api_token,omitempty"`
-	Username *string `json:"username,omitempty"`
-	Password *string `json:"password,omitempty"`
-	Remark   *string `json:"remark,omitempty"`
+	Name          *string `json:"name,omitempty"`
+	URL           *string `json:"url,omitempty"`
+	APIToken      *string `json:"api_token,omitempty"`
+	Username      *string `json:"username,omitempty"`
+	Password      *string `json:"password,omitempty"`
+	Remark        *string `json:"remark,omitempty"`
+	AuthMethod    *string `json:"auth_method,omitempty"`
+	InsecureHTTPS *bool   `json:"insecure_https,omitempty"`
+}
+
+// validAuthMethod gates the auth_method input to the known values.
+func validAuthMethod(m string) bool {
+	switch domain.XUIAuthMethod(m) {
+	case domain.XUIAuthAuto, domain.XUIAuthToken, domain.XUIAuthPassword:
+		return true
+	default:
+		return false
+	}
+}
+
+// effectiveAuthMethod resolves the concrete mode for the edit form: the stored
+// method when set, else the legacy inference (token present → token, else
+// password) so a pre-existing panel pre-selects the right radio.
+func effectiveAuthMethod(p *domain.XUIPanel) domain.XUIAuthMethod {
+	if p.AuthMethod != domain.XUIAuthAuto {
+		return p.AuthMethod
+	}
+	if p.APIToken != "" {
+		return domain.XUIAuthToken
+	}
+	return domain.XUIAuthPassword
 }
 
 func (h *AdminServersHandler) List(c *gin.Context) {
@@ -112,6 +144,10 @@ func (h *AdminServersHandler) Create(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	if !validAuthMethod(req.AuthMethod) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid auth_method"})
+		return
+	}
 	if _, err := h.repo.GetByName(c.Request.Context(), req.Name); err == nil {
 		c.JSON(http.StatusConflict, gin.H{"error": "Server name already exists"})
 		return
@@ -120,12 +156,14 @@ func (h *AdminServersHandler) Create(c *gin.Context) {
 		return
 	}
 	p := &domain.XUIPanel{
-		Name:     req.Name,
-		URL:      req.URL,
-		APIToken: req.APIToken,
-		Username: req.Username,
-		Password: req.Password,
-		Remark:   req.Remark,
+		Name:               req.Name,
+		URL:                req.URL,
+		APIToken:           req.APIToken,
+		Username:           req.Username,
+		Password:           req.Password,
+		Remark:             req.Remark,
+		AuthMethod:         domain.XUIAuthMethod(req.AuthMethod),
+		InsecureSkipVerify: req.InsecureHTTPS,
 	}
 	if err := h.repo.Save(c.Request.Context(), p); err != nil {
 		mapServerError(c, err)
@@ -173,6 +211,16 @@ func (h *AdminServersHandler) Update(c *gin.Context) {
 	}
 	if req.Remark != nil {
 		existing.Remark = *req.Remark
+	}
+	if req.AuthMethod != nil {
+		if !validAuthMethod(*req.AuthMethod) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid auth_method"})
+			return
+		}
+		existing.AuthMethod = domain.XUIAuthMethod(*req.AuthMethod)
+	}
+	if req.InsecureHTTPS != nil {
+		existing.InsecureSkipVerify = *req.InsecureHTTPS
 	}
 	if err := h.repo.Save(c.Request.Context(), existing); err != nil {
 		mapServerError(c, err)
@@ -713,6 +761,8 @@ func toServerDTO(p *domain.XUIPanel) serverDTO {
 		Remark:           p.Remark,
 		HasAPIToken:      p.APIToken != "",
 		HasPassword:      p.Password != "",
+		AuthMethod:       string(effectiveAuthMethod(p)),
+		InsecureHTTPS:    p.InsecureSkipVerify,
 		PanelVersion:     p.PanelVersion,
 		XrayVersion:      p.XrayVersion,
 		VersionCheckedAt: p.VersionCheckedAt,

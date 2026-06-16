@@ -228,6 +228,7 @@ func NewRouter(d Deps) *gin.Engine {
 		})
 		registerH := handler.NewAuthRegisterHandler(registerSvc, d.Repos.Settings, captchaSvc)
 		authGroup.POST("/register", loginLimiter.Handler(), registerH.Register)
+		authGroup.POST("/resend-verification", loginLimiter.Handler(), registerH.ResendVerification)
 		authGroup.POST("/verify-email", loginLimiter.Handler(), registerH.VerifyEmail)
 		// SAML endpoints stay registered even when SSO is currently
 		// disabled — the underlying service rejects calls until admin

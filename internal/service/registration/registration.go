@@ -23,6 +23,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/idgen"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/log"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/safego"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/sendthrottle"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/user"
 )
@@ -30,6 +31,17 @@ import (
 const (
 	defaultTokenTTL = 30 * time.Minute
 	gib             = 1024 * 1024 * 1024
+	// defaultResendCooldown throttles how often a verification email is (re)sent
+	// for one account — the anti-email-bomb guard that lets re-register/resend
+	// resume an abandoned signup without becoming a flood vector.
+	defaultResendCooldown = 60 * time.Second
+	// Panel-wide send cap: OFF by default (0). The per-account cooldown above is
+	// always on (harmless to legit users), but a hard global ceiling can throttle
+	// a legitimate signup burst — and the admin already has captcha as the real
+	// anti-abuse control. The mechanism stays available via Deps.SendGlobalLimit
+	// for anyone who wants to wire it to a setting later.
+	defaultSendGlobalLimit  = 0
+	defaultSendGlobalWindow = time.Minute
 )
 
 // UserStore is the slice of user.Service registration needs.
@@ -38,6 +50,9 @@ type UserStore interface {
 	CreateLocalAndSync(ctx context.Context, in user.CreateLocalInput) (*user.CreateLocalSyncedResult, error)
 	ActivateAfterVerification(ctx context.Context, userID int64) error
 	GetByUPN(ctx context.Context, upn string) (*domain.User, error)
+	// SetPassword refreshes a local account's password — used to resume a
+	// pending (unverified) signup when the visitor re-registers.
+	SetPassword(ctx context.Context, userID int64, newPassword string) error
 }
 
 // GroupLookup resolves the default registration group.
@@ -62,6 +77,10 @@ type Deps struct {
 	NewCode  func() (string, error)
 	Dispatch func(func()) // email send runner; defaults to a goroutine
 	TokenTTL time.Duration
+	// SendGlobalLimit / SendGlobalWindow cap verification emails panel-wide.
+	// SendGlobalLimit defaults to 0 (off). Overridable for tests.
+	SendGlobalLimit  int
+	SendGlobalWindow time.Duration
 }
 
 type Service struct {
@@ -71,6 +90,9 @@ type Service struct {
 	newCode  func() (string, error)
 	dispatch func(func())
 	tokenTTL time.Duration
+	// throttle gates the verification-email side effect: a per-account cooldown
+	// (anti same-victim bomb) AND a panel-wide cap (anti distributed SMTP flood).
+	throttle *sendthrottle.Throttle
 }
 
 func New(d Deps) *Service {
@@ -90,7 +112,25 @@ func New(d Deps) *Service {
 	if s.tokenTTL <= 0 {
 		s.tokenTTL = defaultTokenTTL
 	}
+	globalLimit := d.SendGlobalLimit
+	if globalLimit <= 0 {
+		globalLimit = defaultSendGlobalLimit
+	}
+	globalWindow := d.SendGlobalWindow
+	if globalWindow <= 0 {
+		globalWindow = defaultSendGlobalWindow
+	}
+	s.throttle = sendthrottle.New(globalLimit, globalWindow, s.now)
 	return s
+}
+
+// resendCooldown resolves the per-account verification-email cooldown from the
+// live admin setting, falling back to the default when unset.
+func resendCooldown(set ports.UISettings) time.Duration {
+	if set.CodeResendCooldownSec > 0 {
+		return time.Duration(set.CodeResendCooldownSec) * time.Second
+	}
+	return defaultResendCooldown
 }
 
 // RegisterInput is the public signup payload. The email doubles as the login
@@ -160,6 +200,24 @@ func (s *Service) Register(ctx context.Context, in RegisterInput) (*RegisterResu
 		return &RegisterResult{RequiresVerification: false}, nil
 	}
 
+	// Resume an abandoned signup: if a PENDING (unverified, disabled) account
+	// already owns this email, don't dead-end on "already registered" — refresh
+	// the password to what was just typed and re-send a fresh code (cooldown-
+	// guarded). Safe because activation is still gated by the email the code is
+	// sent to: only the inbox owner can finish. A fully-registered (enabled, or
+	// disabled for any OTHER reason) account falls through to CreateLocal, which
+	// returns ErrAlreadyExists — a real account can never be hijacked this way.
+	if existing, gerr := s.d.Users.GetByUPN(ctx, email); gerr == nil && existing != nil {
+		if !existing.Enabled && existing.AutoDisabledReason == domain.DisabledPendingEmailVerify {
+			if perr := s.d.Users.SetPassword(ctx, existing.ID, in.Password); perr != nil {
+				return nil, perr
+			}
+			s.sendVerification(ctx, set, existing)
+			return &RegisterResult{RequiresVerification: true}, nil
+		}
+		return nil, domain.ErrAlreadyExists
+	}
+
 	// Verification required → create a disabled, unprovisioned account, then
 	// email a one-time confirmation.
 	res, err := s.d.Users.CreateLocal(ctx, cin)
@@ -168,6 +226,30 @@ func (s *Service) Register(ctx context.Context, in RegisterInput) (*RegisterResu
 	}
 	s.sendVerification(ctx, set, res.User)
 	return &RegisterResult{RequiresVerification: true}, nil
+}
+
+// ResendVerification re-sends the email-verify code/link for a PENDING account.
+// Enumeration-safe by contract: it returns nothing and the handler always
+// answers 200, so a caller can't tell whether the email exists or its state.
+// The send itself is cooldown-guarded (anti email-bomb).
+func (s *Service) ResendVerification(ctx context.Context, email string) {
+	email = strings.ToLower(strings.TrimSpace(email))
+	if !validEmail(email) {
+		return
+	}
+	set, err := s.d.Settings.Load(ctx, ports.UISettings{})
+	if err != nil || !set.RegistrationEnabled {
+		return
+	}
+	u, err := s.d.Users.GetByUPN(ctx, email)
+	if err != nil || u == nil {
+		return
+	}
+	// Only resend for accounts still awaiting their first email verification.
+	if u.Enabled || u.AutoDisabledReason != domain.DisabledPendingEmailVerify {
+		return
+	}
+	s.sendVerification(ctx, set, u)
 }
 
 // VerifyInput confirms an email. Link delivery fills Token; OTP delivery fills
@@ -201,7 +283,17 @@ func (s *Service) Verify(ctx context.Context, in VerifyInput) error {
 }
 
 // sendVerification generates and emails a one-time verification token/code.
+// Cooldown-gated per account so re-register / resend can't flood an inbox.
 func (s *Service) sendVerification(ctx context.Context, set ports.UISettings, u *domain.User) {
+	if !s.throttle.Allow(u.ID, resendCooldown(set)) {
+		log.Info("registration: verification send throttled (cooldown or global cap), suppressed", "user_id", u.ID)
+		return
+	}
+	// Invalidate any prior live verify token so only the freshly-sent one works
+	// (a no-op on first registration). Keeps a single live code per account.
+	if derr := s.d.Tokens.DeleteByUserPurpose(ctx, u.ID, domain.AuthTokenPurposeEmailVerify); derr != nil {
+		log.Warn("registration: invalidate prior verify tokens", "user_id", u.ID, "err", derr)
+	}
 	now := s.now()
 	tok := &domain.AuthToken{
 		UserID:    u.ID,

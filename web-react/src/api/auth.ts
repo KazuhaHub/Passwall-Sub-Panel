@@ -173,6 +173,18 @@ export async function verifyEmail(input: { token?: string; ident?: string; code?
   return data
 }
 
+// resendVerification re-sends the verification code/link for a pending signup.
+// Always resolves 200 (enumeration-safe) and is cooldown-gated server-side.
+export async function resendVerification(input: {
+  email: string
+  captcha_id?: string
+  captcha_answer?: string
+  captcha_token?: string
+}) {
+  const { data } = await client.post('/auth/resend-verification', input, { _skipErrorToast: true })
+  return data
+}
+
 export function samlLoginURL(returnTo: string = '/user/me'): string {
   return `/api/auth/saml/login?return_to=${encodeURIComponent(returnTo)}`
 }

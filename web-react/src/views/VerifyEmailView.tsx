@@ -4,7 +4,7 @@ import { Link as RouterLink, useNavigate, useSearchParams } from 'react-router-d
 import { useTranslation } from 'react-i18next'
 import type { AxiosError } from 'axios'
 
-import { verifyEmail } from '@/api/auth'
+import { resendVerification, verifyEmail } from '@/api/auth'
 import { useSiteStore } from '@/stores/site'
 import BrandLogo from '@/components/BrandLogo'
 
@@ -25,7 +25,35 @@ export default function VerifyEmailView() {
   const [error, setError] = useState('')
   const autoTried = useRef(false)
 
+  // Resend: a 60s client cooldown mirrors the server-side throttle so the
+  // button reflects when another send would actually go out.
+  const [resend, setResend] = useState<'idle' | 'sending' | 'sent'>('idle')
+  const [resendLeft, setResendLeft] = useState(0)
+
   useEffect(() => { void site.load() }, [site])
+
+  useEffect(() => {
+    if (resendLeft <= 0) return
+    const id = setInterval(() => setResendLeft(s => Math.max(0, s - 1)), 1000)
+    return () => clearInterval(id)
+  }, [resendLeft])
+
+  async function doResend() {
+    if (!ident.trim() || resendLeft > 0 || resend === 'sending') return
+    setResend('sending')
+    setError('')
+    try {
+      await resendVerification({ email: ident.trim() })
+      setResend('sent')
+      setResendLeft(60)
+    } catch (err) {
+      const status = (err as AxiosError).response?.status
+      // 400 here means captcha is required for registration — the widget lives
+      // on the register page, so steer the user back there to trigger a resend.
+      setError(status === 400 ? t('auth:verify_email_resend_need_captcha') : t('auth:verify_email_error'))
+      setResend('idle')
+    }
+  }
 
   async function run(input: { token?: string; ident?: string; code?: string }) {
     setState('verifying')
@@ -92,6 +120,19 @@ export default function VerifyEmailView() {
               startIcon={state === 'verifying' ? <CircularProgress size={16} color="inherit" /> : undefined}>
               {t('auth:verify_email_submit')}
             </Button>
+            <Box sx={{ textAlign: 'center' }}>
+              {resend === 'sent' && (
+                <Typography variant="body2" sx={{ color: md.onSurfaceVariant, mb: 0.5 }}>
+                  {t('auth:verify_email_resent')}
+                </Typography>
+              )}
+              <Button variant="text" size="small" onClick={doResend}
+                disabled={!ident.trim() || resendLeft > 0 || resend === 'sending'}>
+                {resendLeft > 0
+                  ? t('auth:verify_email_resend_in', { sec: resendLeft })
+                  : t('auth:verify_email_resend')}
+              </Button>
+            </Box>
           </Box>
         )}
 

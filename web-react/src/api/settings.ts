@@ -229,6 +229,9 @@ export interface UISettings {
   twofa_allow_email: boolean
   /** Per-account cooldown (seconds) between email-code resends. 0 = default 60. */
   twofa_email_resend_cooldown_sec: number
+  /** Per-account cooldown (seconds) between signup-verification / password-reset
+   *  email-code resends (anti mail-bombing). 0 = default 60. */
+  code_resend_cooldown_sec: number
   /** Force every admin/operator (local-password) account to enroll a second
    *  factor before using the panel. */
   require_2fa_for_staff: boolean

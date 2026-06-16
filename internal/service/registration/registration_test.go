@@ -20,6 +20,7 @@ type stubUserStore struct {
 	activated        []int64
 	byUPN            map[string]*domain.User
 	nextID           int64
+	setPwd           []int64 // userIDs SetPassword was called for (resume path)
 }
 
 func (s *stubUserStore) CreateLocal(_ context.Context, in user.CreateLocalInput) (*user.CreateLocalResult, error) {
@@ -47,6 +48,10 @@ func (s *stubUserStore) GetByUPN(_ context.Context, upn string) (*domain.User, e
 		return u, nil
 	}
 	return nil, domain.ErrNotFound
+}
+func (s *stubUserStore) SetPassword(_ context.Context, userID int64, newPassword string) error {
+	s.setPwd = append(s.setPwd, userID)
+	return nil
 }
 
 type stubGroups struct{ groups []*domain.Group }
@@ -201,6 +206,76 @@ func TestRegister_EmailTaken(t *testing.T) {
 	us.createErr = domain.ErrAlreadyExists
 	if _, err := svc.Register(context.Background(), RegisterInput{Email: "a@x.com", Password: "GoodPass1"}); !errors.Is(err, domain.ErrAlreadyExists) {
 		t.Fatalf("taken email must surface ErrAlreadyExists, got %v", err)
+	}
+}
+
+// TestRegister_ResumePending: re-registering an email that already owns a
+// PENDING (unverified, disabled) account resumes the signup — refresh password,
+// re-send the code — instead of dead-ending on "already registered".
+func TestRegister_ResumePending(t *testing.T) {
+	svc, us, tk, ml := newSvc(enabledSet())
+	us.byUPN["a@x.com"] = &domain.User{ID: 42, UPN: "a@x.com", Email: "a@x.com",
+		Enabled: false, AutoDisabledReason: domain.DisabledPendingEmailVerify}
+
+	res, err := svc.Register(context.Background(), RegisterInput{Email: "a@x.com", Password: "GoodPass1"})
+	if err != nil {
+		t.Fatalf("resume must not error, got %v", err)
+	}
+	if !res.RequiresVerification {
+		t.Fatal("resume must still require verification")
+	}
+	if len(us.createLocalCalls) != 0 {
+		t.Fatal("resume must NOT create a second account")
+	}
+	if len(us.setPwd) != 1 || us.setPwd[0] != 42 {
+		t.Fatalf("resume must refresh the pending account's password, got %v", us.setPwd)
+	}
+	if ml.sent != 1 || len(tk.created) != 1 {
+		t.Fatalf("resume must re-send exactly one verification email/token, sent=%d tokens=%d", ml.sent, len(tk.created))
+	}
+}
+
+// TestRegister_EnabledAccountRejected: an already-verified (enabled) account is
+// never hijackable via re-registration — it must surface ErrAlreadyExists and
+// send nothing.
+func TestRegister_EnabledAccountRejected(t *testing.T) {
+	svc, us, _, ml := newSvc(enabledSet())
+	us.byUPN["a@x.com"] = &domain.User{ID: 7, UPN: "a@x.com", Email: "a@x.com", Enabled: true}
+	if _, err := svc.Register(context.Background(), RegisterInput{Email: "a@x.com", Password: "GoodPass1"}); !errors.Is(err, domain.ErrAlreadyExists) {
+		t.Fatalf("enabled account must surface ErrAlreadyExists, got %v", err)
+	}
+	if len(us.setPwd) != 0 || ml.sent != 0 {
+		t.Fatal("a real account must not have its password reset or an email sent")
+	}
+}
+
+// TestResendVerification_PendingOnly: resend emails only a pending account; an
+// enabled or absent account is a silent no-op (enumeration-safe).
+func TestResendVerification_PendingOnly(t *testing.T) {
+	svc, us, _, ml := newSvc(enabledSet())
+	us.byUPN["pending@x.com"] = &domain.User{ID: 1, UPN: "pending@x.com", Email: "pending@x.com",
+		Enabled: false, AutoDisabledReason: domain.DisabledPendingEmailVerify}
+	us.byUPN["live@x.com"] = &domain.User{ID: 2, UPN: "live@x.com", Email: "live@x.com", Enabled: true}
+
+	svc.ResendVerification(context.Background(), "pending@x.com")
+	svc.ResendVerification(context.Background(), "live@x.com")   // enabled → no-op
+	svc.ResendVerification(context.Background(), "absent@x.com") // unknown → no-op
+	if ml.sent != 1 {
+		t.Fatalf("only the pending account should get a resend, sent=%d", ml.sent)
+	}
+}
+
+// TestResendVerification_Cooldown: a second send for the same account within the
+// cooldown window is suppressed (anti email-bomb). The fixed test clock means
+// any two sends fall in the same window.
+func TestResendVerification_Cooldown(t *testing.T) {
+	svc, us, _, ml := newSvc(enabledSet())
+	us.byUPN["a@x.com"] = &domain.User{ID: 5, UPN: "a@x.com", Email: "a@x.com",
+		Enabled: false, AutoDisabledReason: domain.DisabledPendingEmailVerify}
+	svc.ResendVerification(context.Background(), "a@x.com")
+	svc.ResendVerification(context.Background(), "a@x.com")
+	if ml.sent != 1 {
+		t.Fatalf("second resend within cooldown must be suppressed, sent=%d", ml.sent)
 	}
 }
 

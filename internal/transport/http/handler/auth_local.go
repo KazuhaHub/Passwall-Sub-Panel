@@ -303,6 +303,7 @@ func (h *AuthLocalHandler) Login(c *gin.Context) {
 	if decision.CaptchaRequired {
 		ok, cerr := h.captcha.Verify(c.Request.Context(), s, captcha.Response{
 			ChallengeID: req.CaptchaID, Answer: req.CaptchaAnswer, Token: req.CaptchaToken, RemoteIP: ip,
+			ExpectedHost: captcha.HostOf(s.SubBaseURL),
 		})
 		if cerr != nil {
 			// Fail CLOSED: a captcha the panel can't verify (misconfigured

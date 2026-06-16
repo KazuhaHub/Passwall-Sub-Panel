@@ -10,12 +10,14 @@ import {
   DialogContent,
   DialogTitle,
   FormControl,
+  FormControlLabel,
   IconButton,
   InputAdornment,
   InputLabel,
   Menu,
   MenuItem,
   Select,
+  Switch,
   Table,
   TableBody,
   TableCell,
@@ -51,6 +53,8 @@ import {
   upgradePanel,
   upgradeXray,
   type Server,
+  type XUIAuthMethod,
+  type UpdateServerRequest,
 } from '@/api/servers'
 import { confirm } from '@/components/ConfirmHost'
 import PageHeader from '@/components/PageHeader'
@@ -81,6 +85,8 @@ interface FormState {
   username: string
   password: string
   remark: string
+  auth_method: XUIAuthMethod
+  insecure_https: boolean
   change_api_token: boolean
   change_password: boolean
   show_api_token: boolean
@@ -89,6 +95,7 @@ interface FormState {
 
 const EMPTY_FORM: FormState = {
   name: '', url: '', api_token: '', username: '', password: '', remark: '',
+  auth_method: 'token', insecure_https: false,
   change_api_token: false, change_password: false,
   show_api_token: false, show_password: false,
 }
@@ -384,6 +391,8 @@ export default function ServersView() {
       url: s.url,
       username: s.username ?? '',
       remark: s.remark ?? '',
+      auth_method: s.auth_method ?? 'token',
+      insecure_https: !!s.insecure_https,
     })
     setFieldErr({})
     setDialogOpen(true)
@@ -414,11 +423,13 @@ export default function ServersView() {
     setBusy(true)
     try {
       if (editing) {
-        const req: Record<string, string> = {
+        const req: UpdateServerRequest = {
           url: form.url,
           name: form.name,
           username: form.username,
           remark: form.remark,
+          auth_method: form.auth_method,
+          insecure_https: form.insecure_https,
         }
         if (form.change_api_token) req.api_token = form.api_token
         if (form.change_password) req.password = form.password
@@ -431,6 +442,8 @@ export default function ServersView() {
           username: form.username || undefined,
           password: form.password || undefined,
           remark: form.remark || undefined,
+          auth_method: form.auth_method,
+          insecure_https: form.insecure_https,
         })
         pushSnack(t('admin:servers.toast.created'), 'success')
       }
@@ -1166,40 +1179,53 @@ export default function ServersView() {
               sx={{ '& input': { fontSize: 14 } }}
             />
 
-            {/* API Token: in edit mode, default to "kept unchanged" with a Change link */}
-            <SecretField
-              label={t('admin:servers.field.api_token')}
-              placeholder={t('admin:servers.placeholder.api_token')}
-              value={form.api_token}
-              show={form.show_api_token}
-              onShow={v => setForm({ ...form, show_api_token: v })}
-              onChange={v => setForm({ ...form, api_token: v })}
-              edit={!!editing}
-              changing={form.change_api_token}
-              alreadyConfigured={!!editing?.has_api_token}
-              onStartChange={() => setForm({ ...form, change_api_token: true })}
-            />
+            {/* Auth method: pick one so the form only asks for the fields that
+                mode actually needs (token OR username+password). */}
+            <TextField select fullWidth
+              label={t('admin:servers.field.auth_method', { defaultValue: '认证方式' })}
+              value={form.auth_method}
+              onChange={e => setForm({ ...form, auth_method: e.target.value as XUIAuthMethod })}>
+              <MenuItem value="token">{t('admin:servers.auth_method.token', { defaultValue: 'API Token' })}</MenuItem>
+              <MenuItem value="password">{t('admin:servers.auth_method.password', { defaultValue: '账户密码' })}</MenuItem>
+            </TextField>
 
-            <TextField
-              fullWidth
-              label={t('admin:servers.field.username')}
-              placeholder={t('admin:servers.placeholder.username')}
-              value={form.username}
-              onChange={e => setForm({ ...form, username: e.target.value })}
-            />
-
-            <SecretField
-              label={t('admin:servers.field.password')}
-              placeholder={t('admin:servers.placeholder.password')}
-              value={form.password}
-              show={form.show_password}
-              onShow={v => setForm({ ...form, show_password: v })}
-              onChange={v => setForm({ ...form, password: v })}
-              edit={!!editing}
-              changing={form.change_password}
-              alreadyConfigured={!!editing?.has_password}
-              onStartChange={() => setForm({ ...form, change_password: true })}
-            />
+            {form.auth_method === 'token' ? (
+              /* API Token: in edit mode, default to "kept unchanged" with a Change link */
+              <SecretField
+                label={t('admin:servers.field.api_token')}
+                placeholder={t('admin:servers.placeholder.api_token')}
+                value={form.api_token}
+                show={form.show_api_token}
+                onShow={v => setForm({ ...form, show_api_token: v })}
+                onChange={v => setForm({ ...form, api_token: v })}
+                edit={!!editing}
+                changing={form.change_api_token}
+                alreadyConfigured={!!editing?.has_api_token}
+                onStartChange={() => setForm({ ...form, change_api_token: true })}
+              />
+            ) : (
+              <>
+                <TextField
+                  fullWidth
+                  label={t('admin:servers.field.username')}
+                  placeholder={t('admin:servers.placeholder.username')}
+                  value={form.username}
+                  onChange={e => setForm({ ...form, username: e.target.value })}
+                />
+                <SecretField
+                  label={t('admin:servers.field.password')}
+                  placeholder={t('admin:servers.placeholder.password')}
+                  value={form.password}
+                  show={form.show_password}
+                  onShow={v => setForm({ ...form, show_password: v })}
+                  onChange={v => setForm({ ...form, password: v })}
+                  edit={!!editing}
+                  changing={form.change_password}
+                  alreadyConfigured={!!editing?.has_password}
+                  onStartChange={() => setForm({ ...form, change_password: true })}
+                />
+              </>
+            )}
 
             <TextField
               fullWidth
@@ -1207,6 +1233,17 @@ export default function ServersView() {
               value={form.remark}
               onChange={e => setForm({ ...form, remark: e.target.value })}
             />
+
+            {/* Allow insecure HTTPS: skip TLS cert verification for self-signed panels. */}
+            <Box>
+              <FormControlLabel sx={{ ml: 0, '& .MuiFormControlLabel-label': { ml: 1 } }}
+                label={t('admin:servers.field.insecure_https', { defaultValue: '允许不安全的 HTTPS（跳过证书校验）' })}
+                control={<Switch checked={form.insecure_https}
+                  onChange={(_, c) => setForm({ ...form, insecure_https: c })} />} />
+              <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant, ml: 0.25 }}>
+                {t('admin:servers.hint.insecure_https', { defaultValue: '面板使用自签名 / 域名不匹配证书时开启。仅对该面板生效，不影响 SSRF 防护。' })}
+              </Typography>
+            </Box>
           </Box>
         </DialogContent>
         <DialogActions>

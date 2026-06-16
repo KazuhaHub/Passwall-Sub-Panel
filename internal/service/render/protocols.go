@@ -23,7 +23,7 @@ import (
 // Returns (nil, nil) when the protocol is recognised but not yet supported;
 // returns (nil, err) on configuration errors such as a missing server
 // address. Callers skip the node on either nil return value.
-func emitProxy(displayName string, n *domain.Node, u *domain.User, inb *ports.Inbound, userEmail string) (map[string]any, error) {
+func emitProxy(displayName string, n *domain.Node, u *domain.User, inb *ports.Inbound, userEmail string, relay *domain.RelayLine) (map[string]any, error) {
 	var settings xuiInboundSettings
 	_ = json.Unmarshal([]byte(inb.Settings), &settings)
 	var stream xuiStreamSettings
@@ -33,14 +33,18 @@ func emitProxy(displayName string, n *domain.Node, u *domain.User, inb *ports.In
 	if protocol == "" {
 		return nil, nil
 	}
-	if n.ServerAddress == "" {
+	// Resolve the dialed endpoint: the node's own address for a direct entry,
+	// the relay front for a transit variant (which also overrides SNI / Host
+	// on `stream` in place when the line carries them).
+	server, port := effectiveEndpoint(relay, n.ServerAddress, inb.Port, &stream)
+	if server == "" {
 		return nil, fmt.Errorf("node %d (%s) missing server_address", n.ID, n.DisplayName)
 	}
 
 	base := map[string]any{
 		"name":   displayName,
-		"server": n.ServerAddress,
-		"port":   inb.Port,
+		"server": server,
+		"port":   port,
 		"udp":    true,
 	}
 
@@ -59,7 +63,11 @@ func emitProxy(displayName string, n *domain.Node, u *domain.User, inb *ports.In
 	case domain.ProtoHysteria2:
 		// Per-user password is the user's UUID (same convention as VLESS:
 		// the panel-managed credential is what 3X-UI stores per client).
-		return emitHysteria2(base, u.UUID, parseHysteria2Opts(inb.Settings, inb.StreamSettings)), nil
+		opts := parseHysteria2Opts(inb.Settings, inb.StreamSettings)
+		if sni := relaySNIOverride(relay); sni != "" {
+			opts.SNI = sni
+		}
+		return emitHysteria2(base, u.UUID, opts), nil
 	}
 	return nil, nil
 }

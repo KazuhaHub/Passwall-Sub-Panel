@@ -25,6 +25,7 @@ import (
 
 	base64Captcha "github.com/mojocn/base64Captcha"
 
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/log"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 )
 
@@ -62,6 +63,28 @@ type Response struct {
 	Answer      string
 	Token       string
 	RemoteIP    string
+	// ExpectedHost, when non-empty, is the hostname the panel is served from
+	// (derived from the trusted SubBaseURL via HostOf). Token providers return
+	// the hostname the challenge was solved on; verifyToken rejects a mismatch
+	// so a token solved on a different site sharing this sitekey can't be
+	// replayed here. Empty (no base URL configured) skips the check — no
+	// false-positive lockout for zero-config deployments.
+	ExpectedHost string
+}
+
+// HostOf extracts the bare hostname (no scheme/port) from a base URL like
+// "https://panel.example.com:8443/". Returns "" for an empty/unparseable URL,
+// which callers pass through to Response.ExpectedHost to mean "don't check".
+func HostOf(baseURL string) string {
+	b := strings.TrimSpace(baseURL)
+	if b == "" {
+		return ""
+	}
+	u, err := url.Parse(b)
+	if err != nil {
+		return ""
+	}
+	return strings.ToLower(u.Hostname())
 }
 
 // Service issues and verifies captchas.
@@ -134,15 +157,18 @@ func (s *Service) Verify(ctx context.Context, set ports.UISettings, r Response) 
 		if secret == "" {
 			return false, fmt.Errorf("captcha: %s secret key not configured", provider)
 		}
-		return s.verifyToken(ctx, s.endpoints[provider], secret, r.Token, r.RemoteIP)
+		return s.verifyToken(ctx, s.endpoints[provider], secret, r.Token, r.RemoteIP, r.ExpectedHost)
 	default:
 		return false, fmt.Errorf("captcha: unknown provider %q", provider)
 	}
 }
 
 // verifyToken POSTs the standard siteverify form (shared by Turnstile,
-// reCAPTCHA and hCaptcha) and reads the `success` flag from the JSON reply.
-func (s *Service) verifyToken(ctx context.Context, endpoint, secret, token, remoteIP string) (bool, error) {
+// reCAPTCHA and hCaptcha) and validates the JSON reply: success must be true,
+// and — when an expectedHost is configured and the provider returned one — the
+// solved hostname must match (rejects cross-site token replay). error-codes are
+// logged so a misconfigured secret / domain surfaces in the logs.
+func (s *Service) verifyToken(ctx context.Context, endpoint, secret, token, remoteIP, expectedHost string) (bool, error) {
 	if endpoint == "" {
 		return false, fmt.Errorf("captcha: no siteverify endpoint configured")
 	}
@@ -161,10 +187,26 @@ func (s *Service) verifyToken(ctx context.Context, endpoint, secret, token, remo
 	}
 	defer resp.Body.Close()
 	var out struct {
-		Success bool `json:"success"`
+		Success    bool     `json:"success"`
+		Hostname   string   `json:"hostname"`
+		ErrorCodes []string `json:"error-codes"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		return false, fmt.Errorf("captcha: decode siteverify: %w", err)
 	}
-	return out.Success, nil
+	if !out.Success {
+		if len(out.ErrorCodes) > 0 {
+			log.Warn("captcha: siteverify rejected", "error_codes", out.ErrorCodes)
+		}
+		return false, nil
+	}
+	// Defense-in-depth hostname pinning: opt-in (skipped when no base URL is
+	// configured) and lenient (skipped when the provider omits a hostname, e.g.
+	// reCAPTCHA with domain verification disabled) so it can't lock out a
+	// correctly-configured admin.
+	if expectedHost != "" && out.Hostname != "" && !strings.EqualFold(out.Hostname, expectedHost) {
+		log.Warn("captcha: hostname mismatch — token rejected", "got", out.Hostname, "want", expectedHost)
+		return false, nil
+	}
+	return true, nil
 }

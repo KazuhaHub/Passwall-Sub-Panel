@@ -75,12 +75,22 @@ func New(p *domain.XUIPanel) (*Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	httpClient := safehttp.NewClient(30 * time.Second)
+	// InsecureSkipVerify relaxes ONLY cert validation (for a self-signed panel);
+	// the SSRF dial guard is unchanged.
+	httpClient := safehttp.NewClientTLS(30*time.Second, p.InsecureSkipVerify)
 	httpClient.Jar = jar
+	// Resolve the effective Bearer token from the explicit auth method. The rest
+	// of the client keys auth off apiToken != "" (Bearer) vs "" (cookie login),
+	// so password mode forces it empty even when a token is also stored, and
+	// auto mode keeps the legacy infer-from-presence behavior.
+	apiToken := p.APIToken
+	if p.AuthMethod == domain.XUIAuthPassword {
+		apiToken = ""
+	}
 	return &Client{
 		panelName:         p.Name,
 		baseURL:           strings.TrimRight(p.URL, "/"),
-		apiToken:          p.APIToken,
+		apiToken:          apiToken,
 		username:          p.Username,
 		password:          p.Password,
 		http:              httpClient,

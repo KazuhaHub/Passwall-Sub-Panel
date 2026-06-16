@@ -12,6 +12,11 @@ type renderItem struct {
 	isSeparator bool
 	name        string
 	node        *domain.Node
+	// relay, when non-nil, marks this item as a transit variant of node: the
+	// emit dispatchers dial the relay's endpoint (and apply its optional SNI /
+	// Host override) instead of the node's own ServerAddress. nil = direct.
+	// Populated by expandRelays.
+	relay *domain.RelayLine
 }
 
 // applyLayout returns the ordered list of items to emit, applying:

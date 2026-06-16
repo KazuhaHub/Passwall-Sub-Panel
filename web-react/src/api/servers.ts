@@ -4,6 +4,8 @@ import { client } from './client'
 // sync if either side changes.
 export type CompatStatus = 'supported' | 'too_old' | 'untested' | 'unknown'
 
+export type XUIAuthMethod = 'token' | 'password'
+
 export interface Server {
   id: number
   name: string
@@ -12,6 +14,10 @@ export interface Server {
   remark?: string
   has_api_token: boolean
   has_password: boolean
+  /** Effective auth mode (server resolves "" → token/password by inference). */
+  auth_method: XUIAuthMethod
+  /** Skip TLS cert verification when connecting to this panel (self-signed). */
+  insecure_https: boolean
   // Version-identity snapshot from the last successful probe (boot probe
   // + traffic-poll piggyback + admin "test connection" trigger). Empty
   // strings + missing version_checked_at == "never probed".
@@ -34,6 +40,8 @@ export interface CreateServerRequest {
   username?: string
   password?: string
   remark?: string
+  auth_method?: XUIAuthMethod
+  insecure_https?: boolean
 }
 
 export interface UpdateServerRequest {
@@ -43,6 +51,8 @@ export interface UpdateServerRequest {
   username?: string
   password?: string
   remark?: string
+  auth_method?: XUIAuthMethod
+  insecure_https?: boolean
 }
 
 export interface TestResult {

@@ -135,6 +135,7 @@ type settingsDTO struct {
 	// Default off.
 	TwoFAAllowEmail             bool `json:"twofa_allow_email"`
 	TwoFAEmailResendCooldownSec int  `json:"twofa_email_resend_cooldown_sec"`
+	CodeResendCooldownSec       int  `json:"code_resend_cooldown_sec"`
 	Require2FAForStaff          bool `json:"require_2fa_for_staff"`
 }
 
@@ -252,6 +253,7 @@ func settingsToDTO(s ports.UISettings) settingsDTO {
 		PasskeyPasswordless:                  s.PasskeyPasswordless,
 		TwoFAAllowEmail:                      s.TwoFAAllowEmail,
 		TwoFAEmailResendCooldownSec:          s.TwoFAEmailResendCooldownSec,
+		CodeResendCooldownSec:                s.CodeResendCooldownSec,
 		Require2FAForStaff:                   s.Require2FAForStaff,
 	}
 }
@@ -359,6 +361,7 @@ func (h *AdminSettingsHandler) Put(c *gin.Context) {
 		PasskeyPasswordless:           req.PasskeyPasswordless,
 		TwoFAAllowEmail:               req.TwoFAAllowEmail,
 		TwoFAEmailResendCooldownSec:   req.TwoFAEmailResendCooldownSec,
+		CodeResendCooldownSec:         req.CodeResendCooldownSec,
 		Require2FAForStaff:            req.Require2FAForStaff,
 		// GeoIPUpdateToken / CaptchaSecretKey resolved below ("empty = keep existing").
 	}

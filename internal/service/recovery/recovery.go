@@ -25,11 +25,21 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/idgen"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/log"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/safego"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/sendthrottle"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/user"
 )
 
-const defaultTokenTTL = 30 * time.Minute
+const (
+	defaultTokenTTL = 30 * time.Minute
+	// Reset-email anti-abuse, mirroring registration: a per-account cooldown is
+	// always on (a victim can't be reset-spammed). The panel-wide cap is OFF by
+	// default (0) — captcha is the admin's abuse control, and a hard ceiling can
+	// throttle legitimate use; still overridable via Deps.SendGlobalLimit.
+	defaultResendCooldown   = 60 * time.Second
+	defaultSendGlobalLimit  = 0
+	defaultSendGlobalWindow = time.Minute
+)
 
 // UserLookup resolves the account a reset is for. ident is the UPN (local-login
 // username) — email isn't a lookup key here because it's neither unique nor
@@ -60,6 +70,11 @@ type Deps struct {
 	// the SMTP round-trip is off the request critical path (no timing oracle, no
 	// stalled response on a slow server). Tests inject a synchronous runner.
 	Dispatch func(func())
+	// SendGlobalLimit / SendGlobalWindow tune the reset-email panel-wide cap
+	// (SendGlobalLimit defaults to 0 = off). The per-account cooldown is read
+	// live from the admin setting (CodeResendCooldownSec). Overridable for tests.
+	SendGlobalLimit  int
+	SendGlobalWindow time.Duration
 }
 
 type Service struct {
@@ -69,6 +84,9 @@ type Service struct {
 	newToken func() (string, error)
 	newCode  func() (string, error)
 	dispatch func(func())
+	// throttle gates the reset-email side effect (per-account cooldown +
+	// panel-wide cap) — the abuse backstop behind the per-IP limiter.
+	throttle *sendthrottle.Throttle
 }
 
 func New(d Deps) *Service {
@@ -95,7 +113,25 @@ func New(d Deps) *Service {
 	if s.dispatch == nil {
 		s.dispatch = func(f func()) { safego.Go("password-reset-email", f) }
 	}
+	globalLimit := d.SendGlobalLimit
+	if globalLimit <= 0 {
+		globalLimit = defaultSendGlobalLimit
+	}
+	globalWindow := d.SendGlobalWindow
+	if globalWindow <= 0 {
+		globalWindow = defaultSendGlobalWindow
+	}
+	s.throttle = sendthrottle.New(globalLimit, globalWindow, s.now)
 	return s
+}
+
+// resendCooldown resolves the per-account reset-email cooldown from the live
+// admin setting, falling back to the default when unset.
+func resendCooldown(set ports.UISettings) time.Duration {
+	if set.CodeResendCooldownSec > 0 {
+		return time.Duration(set.CodeResendCooldownSec) * time.Second
+	}
+	return defaultResendCooldown
 }
 
 // RequestReset issues a reset for the account named by ident, delivering it to
@@ -119,6 +155,12 @@ func (s *Service) RequestReset(ctx context.Context, ident string) error {
 	// there's nothing to recover; skip silently. Self-service disable reasons
 	// (traffic-exceeded / expired) CAN still log in, so they keep recovery.
 	if !u.Enabled && !domain.SelfServiceDisableReason(u.AutoDisabledReason) {
+		return nil
+	}
+	// Anti-abuse: suppress (still returning nil — enumeration-safe) when this
+	// account was emailed too recently or the panel-wide send budget is spent.
+	if !s.throttle.Allow(u.ID, resendCooldown(set)) {
+		log.Info("recovery: reset email throttled (cooldown or global cap), suppressed", "user_id", u.ID)
 		return nil
 	}
 

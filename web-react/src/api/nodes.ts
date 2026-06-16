@@ -1,5 +1,5 @@
 import { client } from './client'
-import type { ListResponse, Node, UnmanagedInbound } from './types'
+import type { ListResponse, Node, RelayLine, UnmanagedInbound } from './types'
 
 export interface AdminInbound {
   id: number
@@ -36,6 +36,10 @@ export interface UpdateNodeMetadataRequest {
   region?: string
   tags?: string[]
   sort_order?: number
+  /** Full-replace the transit lines. Omit to leave them (and hide_direct)
+   *  untouched; send [] to clear. */
+  relays?: RelayLine[]
+  hide_direct?: boolean
 }
 
 export interface InboundSpec {

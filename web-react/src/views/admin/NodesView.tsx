@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type Dispatch, type SetStateAction } from 'react'
 import {
   Autocomplete,
+  createFilterOptions,
   Box,
   Button,
   Card,
@@ -62,7 +63,7 @@ import { fetchPanelWebCert, listCerts, setNodeCertSource, type Cert } from '@/ap
 import { listServers, type Server } from '@/api/servers'
 import { MenuItem, Select, FormControlLabel } from '@mui/material'
 import KeyIcon from '@mui/icons-material/VpnKey'
-import type { Node, UnmanagedInbound, User } from '@/api/types'
+import type { Node, RelayLine, UnmanagedInbound, User } from '@/api/types'
 import { confirm } from '@/components/ConfirmHost'
 import PageHeader from '@/components/PageHeader'
 import { PagedTableFooter } from '@/components/PagedTableFooter'
@@ -90,12 +91,16 @@ function usesVlessStream(p: CreateProtocol): boolean {
   return p === 'vless' || p === 'vmess' || p === 'trojan'
 }
 
+const tagFilter = createFilterOptions<string>()
+
 // TagsAutocomplete is the shared tag input used by the create/edit/import/
 // separator dialogs. Wraps a freeSolo multi-select Autocomplete around the
 // form's `tags_text` comma-joined string so admins pick from existing tags
-// (suggestion dropdown) but can still introduce new ones by typing + Enter.
-// Form state stays as a comma-joined string for backend compatibility —
-// the split/join happens here, not in submit logic.
+// (suggestion dropdown) AND introduce new ones. freeSolo alone only adds on
+// Enter (no affordance, dead on touch) — filterOptions surfaces the typed
+// value as a clickable "add this" row so a new tag can be SELECTED too, which
+// is what the dropdown-only bug was missing. Form state stays a comma-joined
+// string for backend compatibility — the split/join happens here.
 function TagsAutocomplete(props: {
   label: string
   value: string
@@ -111,8 +116,22 @@ function TagsAutocomplete(props: {
       multiple
       freeSolo
       size="small"
+      selectOnFocus
+      clearOnBlur
+      handleHomeEndKeys
       options={props.options}
       value={tags}
+      filterOptions={(options, params) => {
+        const filtered = tagFilter(options, params)
+        const input = params.inputValue.trim()
+        // Offer the typed value as a selectable row when it isn't already a
+        // known option (case-insensitive) — so a brand-new tag can be clicked
+        // to add, not only committed via Enter.
+        if (input && !options.some(o => o.toLowerCase() === input.toLowerCase())) {
+          filtered.push(input)
+        }
+        return filtered
+      }}
       onChange={(_, v) => {
         // de-dup + drop empties so two passes through this onChange can't
         // create "Premium,Premium" / trailing commas. Sort is NOT applied
@@ -147,6 +166,8 @@ interface MetaForm {
   region: string
   tags_text: string
   sort_order: number
+  relays: RelayLine[]
+  hide_direct: boolean
 }
 
 interface ImportForm extends MetaForm {
@@ -297,6 +318,7 @@ interface InboundFormState {
 
 const EMPTY_META: MetaForm = {
   display_name: '', server_address: '', flow: '', region: '', tags_text: '', sort_order: 100,
+  relays: [], hide_direct: false,
 }
 
 const EMPTY_IMPORT: ImportForm = {
@@ -2144,6 +2166,8 @@ export default function NodesView() {
       region: n.region,
       tags_text: (n.tags ?? []).join(', '),
       sort_order: n.sort_order,
+      relays: (n.relays ?? []).map(r => ({ ...r })),
+      hide_direct: !!n.hide_direct,
     })
     setEditMetaErr({})
     setEditOpen(true)
@@ -2175,6 +2199,12 @@ export default function NodesView() {
           ? editForm.tags_text.split(',').map(s => s.trim()).filter(Boolean)
           : [],
         sort_order: editForm.sort_order,
+        // Drop blank-address lines, trim, and coerce port to a number so a
+        // half-filled row never reaches the backend (which would 400).
+        relays: editForm.relays
+          .map(r => ({ ...r, name: r.name.trim(), address: r.address.trim(), port: Number(r.port) || 0, sni: r.sni?.trim() || undefined, host: r.host?.trim() || undefined }))
+          .filter(r => r.address),
+        hide_direct: editForm.hide_direct,
       })
       pushSnack(t('admin:nodes.toast.saved'), 'success')
       setEditOpen(false)
@@ -3271,6 +3301,62 @@ export default function NodesView() {
               value={editForm.tags_text}
               options={allTags}
               onChange={v => setEditForm({ ...editForm, tags_text: v })} />
+
+            {/* Transit / 中转 lines: the same landing offered through extra
+                relay fronts. Server-side forwarding (realm/gost/iptables) is
+                set up outside the panel; here we only record each front's
+                address/port (+ optional CDN SNI/Host). */}
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <Typography sx={{ fontSize: 14, fontWeight: 600 }}>{t('admin:nodes.relay.title')}</Typography>
+                <Button size="small" startIcon={<AddIcon />}
+                  onClick={() => setEditForm(f => ({ ...f, relays: [...f.relays, { name: '', address: '', port: 0, sni: '', host: '', enabled: true }] }))}>
+                  {t('admin:nodes.relay.add')}
+                </Button>
+              </Box>
+              <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant }}>{t('admin:nodes.relay.hint')}</Typography>
+              {editForm.relays.length === 0 ? (
+                <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant, fontStyle: 'italic' }}>{t('admin:nodes.relay.empty')}</Typography>
+              ) : editForm.relays.map((r, i) => {
+                const update = (patch: Partial<RelayLine>) =>
+                  setEditForm(f => ({ ...f, relays: f.relays.map((x, j) => (j === i ? { ...x, ...patch } : x)) }))
+                return (
+                  <Box key={i} sx={{ border: `1px solid ${md.outlineVariant}`, borderRadius: 2, p: 1.5, display: 'flex', flexDirection: 'column', gap: 1 }}>
+                    <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+                      <TextField size="small" label={t('admin:nodes.relay.name')} value={r.name}
+                        onChange={e => update({ name: e.target.value })} sx={{ flex: 1 }}
+                        placeholder={t('admin:nodes.relay.name_ph')} />
+                      <FormControlLabel sx={{ m: 0 }} label={t('admin:nodes.relay.enabled')}
+                        control={<Switch size="small" checked={r.enabled} onChange={(_, c) => update({ enabled: c })} />} />
+                      <Tooltip title={t('admin:nodes.relay.remove')}>
+                        <IconButton size="small" onClick={() => setEditForm(f => ({ ...f, relays: f.relays.filter((_, j) => j !== i) }))}>
+                          <DeleteIcon fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
+                    </Box>
+                    <Box sx={{ display: 'flex', gap: 1 }}>
+                      <TextField size="small" required label={t('admin:nodes.relay.address')} value={r.address}
+                        onChange={e => update({ address: e.target.value })} sx={{ flex: 2 }} placeholder="relay.example.com" />
+                      <TextField size="small" type="number" label={t('admin:nodes.relay.port')} value={r.port || ''}
+                        onChange={e => update({ port: Number(e.target.value) || 0 })} sx={{ width: 120 }}
+                        helperText={t('admin:nodes.relay.port_hint')} />
+                    </Box>
+                    <Box sx={{ display: 'flex', gap: 1 }}>
+                      <TextField size="small" label={t('admin:nodes.relay.sni')} value={r.sni ?? ''}
+                        onChange={e => update({ sni: e.target.value })} sx={{ flex: 1 }}
+                        placeholder={t('admin:nodes.relay.cdn_optional')} />
+                      <TextField size="small" label={t('admin:nodes.relay.host')} value={r.host ?? ''}
+                        onChange={e => update({ host: e.target.value })} sx={{ flex: 1 }}
+                        placeholder={t('admin:nodes.relay.cdn_optional')} />
+                    </Box>
+                  </Box>
+                )
+              })}
+              {editForm.relays.some(r => r.enabled) && (
+                <FormControlLabel sx={{ m: 0 }} label={t('admin:nodes.relay.hide_direct')}
+                  control={<Switch size="small" checked={editForm.hide_direct} onChange={(_, c) => setEditForm(f => ({ ...f, hide_direct: c }))} />} />
+              )}
+            </Box>
             <Box sx={{ display: 'none' }}>{alpha(md.error, 0.5)}</Box>
           </Box>
         </DialogContent>

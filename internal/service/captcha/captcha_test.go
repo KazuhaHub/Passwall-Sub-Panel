@@ -101,6 +101,56 @@ func TestVerify_TokenProviderRejects(t *testing.T) {
 	}
 }
 
+// TestVerify_TokenHostnamePinning: when an ExpectedHost is set, a token solved
+// on a DIFFERENT hostname is rejected (cross-site replay defense); a matching
+// host (case-insensitive) passes; and an empty ExpectedHost or an omitted
+// provider hostname skips the check (no false-positive lockout).
+func TestVerify_TokenHostnamePinning(t *testing.T) {
+	respHostname := "evil.example.com"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"success":true,"hostname":"` + respHostname + `"}`))
+	}))
+	defer srv.Close()
+	svc := NewService()
+	svc.endpoints[ProviderTurnstile] = srv.URL
+	set := ports.UISettings{CaptchaEnabled: true, CaptchaProvider: ProviderTurnstile, CaptchaSecretKey: "sk"}
+
+	// Mismatch → reject.
+	if ok, _ := svc.Verify(context.Background(), set, Response{Token: "t", ExpectedHost: "panel.example.com"}); ok {
+		t.Fatal("token solved on a different hostname must be rejected")
+	}
+	// Match (case-insensitive) → pass.
+	respHostname = "Panel.Example.com"
+	if ok, err := svc.Verify(context.Background(), set, Response{Token: "t", ExpectedHost: "panel.example.com"}); err != nil || !ok {
+		t.Fatalf("matching hostname must verify: ok=%v err=%v", ok, err)
+	}
+	// No ExpectedHost configured → skip the check, accept.
+	respHostname = "whatever.example.com"
+	if ok, err := svc.Verify(context.Background(), set, Response{Token: "t", ExpectedHost: ""}); err != nil || !ok {
+		t.Fatalf("unconfigured host must skip the check: ok=%v err=%v", ok, err)
+	}
+	// Provider omits hostname → skip the check, accept.
+	respHostname = ""
+	if ok, err := svc.Verify(context.Background(), set, Response{Token: "t", ExpectedHost: "panel.example.com"}); err != nil || !ok {
+		t.Fatalf("omitted provider hostname must skip the check: ok=%v err=%v", ok, err)
+	}
+}
+
+func TestHostOf(t *testing.T) {
+	cases := map[string]string{
+		"https://panel.example.com/":      "panel.example.com",
+		"https://Panel.Example.com:8443":  "panel.example.com",
+		"http://10.0.0.1:8080/sub":        "10.0.0.1",
+		"":                                "",
+		"not a url with spaces":           "",
+	}
+	for in, want := range cases {
+		if got := HostOf(in); got != want {
+			t.Errorf("HostOf(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 func TestVerify_TokenMissingSecretFailsClosed(t *testing.T) {
 	svc := NewService()
 	set := ports.UISettings{CaptchaEnabled: true, CaptchaProvider: ProviderRecaptcha, CaptchaSecretKey: ""}

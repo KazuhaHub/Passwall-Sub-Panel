@@ -57,7 +57,10 @@ func (s *Service) renderURIList(ctx context.Context, u *domain.User, items []ren
 			continue
 		}
 		userEmail := u.ClientEmail(it.node.ID, emailRules)
-		uri, err := buildURI(it.node.DisplayName, it.node, u, inb, userEmail)
+		// it.name (not DisplayName) carries the layout-applied name — the
+		// region-flag prefix and, for relay variants, the per-line suffix —
+		// so each transit entry gets a distinct fragment.
+		uri, err := buildURI(it.name, it.node, u, inb, userEmail, it.relay)
 		if err != nil {
 			log.Warn("uri-list: skip node, build uri failed", "node_id", it.node.ID, "err", err)
 			continue
@@ -101,7 +104,7 @@ func (s *Service) renderURIList(ctx context.Context, u *domain.User, items []ren
 // userEmail is unused for URI builds today (WireGuard has no standard URI
 // form) but kept in the signature so adding it in the future is a one-line
 // switch case.
-func buildURI(name string, n *domain.Node, u *domain.User, inb *ports.Inbound, _ string) (string, error) {
+func buildURI(name string, n *domain.Node, u *domain.User, inb *ports.Inbound, _ string, relay *domain.RelayLine) (string, error) {
 	var settings xuiInboundSettings
 	_ = json.Unmarshal([]byte(inb.Settings), &settings)
 	var stream xuiStreamSettings
@@ -111,27 +114,34 @@ func buildURI(name string, n *domain.Node, u *domain.User, inb *ports.Inbound, _
 	if protocol == "" {
 		return "", nil
 	}
-	if n.ServerAddress == "" {
+	// Resolve the dialed endpoint (relay front for a transit variant, the
+	// node's own address for a direct entry) — also applies the line's SNI /
+	// Host override onto `stream` so the per-protocol builders below emit it.
+	host, port := effectiveEndpoint(relay, n.ServerAddress, inb.Port, &stream)
+	if host == "" {
 		return "", fmt.Errorf("node %d (%s) missing server_address", n.ID, n.DisplayName)
 	}
 
 	switch protocol {
 	case domain.ProtoVLESS:
-		return buildVLESSURI(name, n.ServerAddress, inb.Port, u.UUID, stream, n.Flow), nil
+		return buildVLESSURI(name, host, port, u.UUID, stream, n.Flow), nil
 	case domain.ProtoVMess:
-		return buildVMessURI(name, n.ServerAddress, inb.Port, u.UUID, stream), nil
+		return buildVMessURI(name, host, port, u.UUID, stream), nil
 	case domain.ProtoTrojan:
-		return buildTrojanURI(name, n.ServerAddress, inb.Port,
+		return buildTrojanURI(name, host, port,
 			crypto.DeriveProxyPassword(u.UUID, protocol, settings.Method), stream), nil
 	case domain.ProtoSS:
-		return buildSSURI(name, n.ServerAddress, inb.Port, settings.Method,
+		return buildSSURI(name, host, port, settings.Method,
 			crypto.DeriveProxyPassword(u.UUID, protocol, settings.Method)), nil
 	case domain.ProtoSS2022:
-		return buildSS2022URI(name, n.ServerAddress, inb.Port, settings.Method,
+		return buildSS2022URI(name, host, port, settings.Method,
 			settings.Password, crypto.DeriveProxyPassword(u.UUID, protocol, settings.Method)), nil
 	case domain.ProtoHysteria2:
-		return buildHysteria2URI(name, n.ServerAddress, inb.Port, u.UUID,
-			parseHysteria2Opts(inb.Settings, inb.StreamSettings)), nil
+		opts := parseHysteria2Opts(inb.Settings, inb.StreamSettings)
+		if sni := relaySNIOverride(relay); sni != "" {
+			opts.SNI = sni
+		}
+		return buildHysteria2URI(name, host, port, u.UUID, opts), nil
 	}
 	return "", nil
 }

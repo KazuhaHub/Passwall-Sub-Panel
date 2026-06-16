@@ -116,6 +116,30 @@ export interface Node {
    *  that the renewal worker keeps deployed. Never carries any PEM. */
   cert_source?: '' | 'manual' | 'from_panel' | 'psp_managed'
   cert_id?: number
+  /** Transit / 中转 lines: the same landing offered additionally through one or
+   *  more relay fronts. Each enabled line renders an extra subscription entry
+   *  that reuses the landing's protocol/credentials and only swaps the dialed
+   *  server/port (+ optional CDN-fronting SNI/Host). */
+  relays?: RelayLine[]
+  /** Drop the direct entry when at least one relay is enabled (landing only
+   *  reachable via its relays). Ignored when no relay is enabled. */
+  hide_direct?: boolean
+}
+
+/** One transit front for a Node. See domain.RelayLine. */
+export interface RelayLine {
+  /** Label appended after the node name in the rendered entry (e.g. 广州移动中转). */
+  name: string
+  /** Host the client dials instead of the landing's server_address. */
+  address: string
+  /** Relay listen port. 0 reuses the landing's inbound port. */
+  port: number
+  /** Optional TLS SNI override (CDN fronting). Empty keeps the landing's. */
+  sni?: string
+  /** Optional WS Host header override (CDN fronting). Empty keeps the landing's. */
+  host?: string
+  /** Whether this line renders. Disabled lines are kept but produce no entry. */
+  enabled: boolean
 }
 
 export type SyncTaskStatus = 'pending' | 'running' | 'succeeded' | 'canceled'

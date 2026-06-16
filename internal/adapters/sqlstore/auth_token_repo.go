@@ -2,6 +2,7 @@ package sqlstore
 
 import (
 	"context"
+	"crypto/subtle"
 	"time"
 
 	"gorm.io/gorm"
@@ -135,7 +136,11 @@ func (r *authTokenRepo) ConsumeByUserCode(ctx context.Context, purpose string, u
 		_ = r.db.WithContext(ctx).Delete(&authTokenRow{}, row.ID).Error
 		return nil, domain.ErrNotFound
 	}
-	if row.CodeHash != codeHash {
+	// Constant-time compare. The values are SHA-256 hashes (not raw codes), so a
+	// timing leak isn't practically exploitable — but the brute-force surface is
+	// already bounded by the per-token attempt cap above, and this keeps the
+	// secret-comparison hygiene uniform with the rest of the auth path.
+	if subtle.ConstantTimeCompare([]byte(row.CodeHash), []byte(codeHash)) != 1 {
 		return nil, domain.ErrNotFound // wrong code; the attempt was counted
 	}
 	// Correct code under the cap → consume it.

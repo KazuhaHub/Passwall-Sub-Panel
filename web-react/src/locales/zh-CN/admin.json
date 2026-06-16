@@ -124,6 +124,8 @@
       "twofa_allow_email_hint": "与上面并列的一种登录验证方式，需账号已绑定其它因素（TOTP / 通行密钥）后方可启用。它较弱——掌握密码 + 邮箱即可通过，故默认关闭。",
       "twofa_policy_subheading": "强制策略",
       "twofa_email_cooldown": "验证码重发冷却（秒）",
+      "code_resend_cooldown": "验证码重发冷却（秒，注册验证 / 找回密码）",
+      "code_resend_cooldown_hint": "同一账号两次重发验证码的最小间隔，防邮件轰炸（0=默认 60 秒）。与登录两步验证的邮件冷却相互独立。",
       "require_2fa_for_staff": "强制所有管理员/运营启用两步验证",
       "require_2fa_for_staff_hint": "开启后，未绑定 TOTP 或通行密钥的管理员/运营登录后会被要求先完成设置才能使用面板。也可在「分组」对每组单独强制。仅本地账号生效。",
       "passkey_enabled": "允许通行密钥（Passkey）",
@@ -803,6 +805,23 @@
     "create": "新增节点",
     "create_separator": "新增分隔标题",
     "edit_title": "编辑节点",
+    "relay": {
+      "title": "中转线路",
+      "add": "添加中转",
+      "hint": "在直连之外，把同一落地再通过中转入口暴露出来。中转机的端口转发（realm/gost/iptables）需你在面板外配置；这里只记录每条线路的入口地址和端口，凭证/协议/TLS 全部复用落地。",
+      "empty": "暂无中转线路（仅直连）。",
+      "name": "线路名称",
+      "name_ph": "如：广州移动中转",
+      "address": "入口地址",
+      "port": "入口端口",
+      "port_hint": "0 = 沿用落地端口",
+      "sni": "SNI（可选）",
+      "host": "Host（可选）",
+      "cdn_optional": "CDN 优选才需填",
+      "enabled": "启用",
+      "remove": "删除该线路",
+      "hide_direct": "隐藏直连（落地仅经中转可达）"
+    },
     "import": "纳管",
     "imported": "已纳管",
     "import_validate": "请填写连接地址和 Region",
@@ -1476,9 +1495,15 @@
       "username": "用户名",
       "password": "密码",
       "remark": "备注",
+      "auth_method": "认证方式",
+      "insecure_https": "允许不安全的 HTTPS（跳过证书校验）",
       "xray_version": "目标版本",
       "xray_version_latest": "latest（最新版）",
       "xray_version_loading": "正在加载可用版本…"
+    },
+    "auth_method": {
+      "token": "API Token",
+      "password": "账户密码"
     },
     "placeholder": {
       "name": "default / us-west / ...",
@@ -1492,7 +1517,8 @@
       "name": "显示名称，可修改；内部关联使用数据库 ID",
       "configured": "已配置（保持不变）",
       "unconfigured": "未配置",
-      "change": "修改"
+      "change": "修改",
+      "insecure_https": "面板使用自签名 / 域名不匹配证书时开启。仅对该面板生效，不影响 SSRF 防护。"
     },
     "table": {
       "name": "服务器名称",

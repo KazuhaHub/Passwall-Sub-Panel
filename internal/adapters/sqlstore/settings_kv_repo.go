@@ -286,6 +286,7 @@ func settingDescriptors(s *ports.UISettings) []settingDescriptor {
 		// security --- alternative 2FA verification methods (v3.7.0)
 		boolField("security", "twofa_allow_email", &s.TwoFAAllowEmail),
 		intField("security", "twofa_email_resend_cooldown_sec", &s.TwoFAEmailResendCooldownSec),
+		intField("security", "code_resend_cooldown_sec", &s.CodeResendCooldownSec),
 		boolField("security", "require_2fa_for_staff", &s.Require2FAForStaff),
 
 		// runtime --- cron / performance / tz / global toggles
@@ -485,6 +486,9 @@ func applyUISettingsDefaults(out, defaults ports.UISettings) ports.UISettings {
 	}
 	if out.TwoFAEmailResendCooldownSec <= 0 {
 		out.TwoFAEmailResendCooldownSec = 60
+	}
+	if out.CodeResendCooldownSec <= 0 {
+		out.CodeResendCooldownSec = 60
 	}
 	if out.SubPath == "" {
 		out.SubPath = "sub"

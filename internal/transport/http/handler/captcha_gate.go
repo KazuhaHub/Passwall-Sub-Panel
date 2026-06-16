@@ -21,6 +21,7 @@ func requireCaptcha(c *gin.Context, capSvc *captcha.Service, s ports.UISettings,
 	}
 	ok, err := capSvc.Verify(c.Request.Context(), s, captcha.Response{
 		ChallengeID: id, Answer: answer, Token: token, RemoteIP: c.ClientIP(),
+		ExpectedHost: captcha.HostOf(s.SubBaseURL),
 	})
 	if err != nil {
 		log.Warn("captcha verify error", "err", err)

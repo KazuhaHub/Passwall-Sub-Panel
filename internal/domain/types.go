@@ -430,6 +430,47 @@ type Node struct {
 	// reverse-looks-up nodes by CertID to re-deploy a renewed certificate.
 	CertSource CertSource
 	CertID     int64
+	// ---- Relay / transit lines (v3.8.0: 中转借点) ----
+	//
+	// A node's subscription normally renders one entry that dials ServerAddress
+	// directly. Relays let the SAME landing be offered additionally through one
+	// or more transit fronts (a 中转机 doing plain L4 forwarding, an encrypted
+	// tunnel, or a CDN/优选IP edge — all indistinguishable to the client). Each
+	// enabled line expands into its own subscription entry that reuses the
+	// landing's protocol/credentials/TLS verbatim and only swaps the dialed
+	// server/port (and optionally the TLS SNI / WS Host for CDN fronting). The
+	// relay machine's actual forwarding is configured outside the panel.
+	Relays []RelayLine
+	// HideDirect suppresses the direct entry when at least one relay line is
+	// enabled — for landings that only accept connections from their relays
+	// (firewalled to the transit IP). Ignored when no relay is enabled, so a
+	// node never silently vanishes from the subscription.
+	HideDirect bool
+}
+
+// RelayLine is one transit front for a Node (see Node.Relays). It changes only
+// the dialed endpoint; the protocol, UUID-derived credentials and transport
+// come from the landing inbound unchanged.
+type RelayLine struct {
+	// Name labels the rendered entry, appended after the node's display name
+	// (e.g. "广州移动中转"). Falls back to Address when empty.
+	Name string
+	// Address is the transit front's host the client dials instead of the
+	// landing's ServerAddress.
+	Address string
+	// Port is the transit front's listen port. 0 means "reuse the landing's
+	// inbound port" (common when the relay preserves the port via DNAT).
+	Port int
+	// SNI overrides the TLS server name / Reality serverName for this line.
+	// Empty keeps the landing's — only needed when the front terminates TLS
+	// on a different domain (CDN fronting). Not applied to plain L4 relays.
+	SNI string
+	// Host overrides the WebSocket Host header for this line. Empty keeps the
+	// landing's. Same CDN-fronting use case as SNI.
+	Host string
+	// Enabled gates whether the line renders. A disabled line is kept in the
+	// DB (so the admin can toggle it back) but produces no subscription entry.
+	Enabled bool
 }
 
 // SeparatorMode controls how a SeparatorEntry decides whether to appear
@@ -819,6 +860,21 @@ type Template struct {
 	Content         string // contains placeholders such as {{ proxies }}, {{ proxy_groups }}, {{ rules_common }}
 }
 
+// XUIAuthMethod selects how the client authenticates to a 3X-UI panel.
+type XUIAuthMethod string
+
+const (
+	// XUIAuthAuto is the legacy/default behavior: use the Bearer token when one
+	// is set, otherwise fall back to username/password cookie login. Existing
+	// rows (no stored method) resolve to this.
+	XUIAuthAuto XUIAuthMethod = ""
+	// XUIAuthToken forces Bearer-token auth.
+	XUIAuthToken XUIAuthMethod = "token"
+	// XUIAuthPassword forces username/password cookie auth even if a token is
+	// also stored (so switching modes doesn't require clearing the token).
+	XUIAuthPassword XUIAuthMethod = "password"
+)
+
 // XUIPanel holds the connection credentials for one 3X-UI panel.
 type XUIPanel struct {
 	ID       int64
@@ -828,6 +884,14 @@ type XUIPanel struct {
 	Username string // fallback: 3X-UI panel username/password cookie session
 	Password string
 	Remark   string
+	// AuthMethod chooses Bearer-token vs username/password explicitly. Empty
+	// (XUIAuthAuto) keeps the legacy infer-from-presence behavior for rows
+	// written before this field existed.
+	AuthMethod XUIAuthMethod
+	// InsecureSkipVerify disables TLS certificate verification when dialing this
+	// panel — for 3X-UI behind a self-signed / mismatched cert. Off by default;
+	// scoped to this one panel's HTTP client.
+	InsecureSkipVerify bool
 
 	// Version-identity snapshot, written by the boot-time compat probe
 	// (v3.6.0-beta.1) and refreshed on demand from admin actions. Empty

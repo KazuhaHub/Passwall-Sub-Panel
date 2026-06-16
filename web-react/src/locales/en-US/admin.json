@@ -124,6 +124,8 @@
       "twofa_allow_email_hint": "A peer login-challenge method, available once the account has another factor (TOTP / passkey) enrolled. It's weaker — whoever has the password and inbox gets in — so it's off by default.",
       "twofa_policy_subheading": "Enrollment policy",
       "twofa_email_cooldown": "Code resend cooldown (sec)",
+      "code_resend_cooldown": "Code resend cooldown (sec — signup verify / password reset)",
+      "code_resend_cooldown_hint": "Minimum gap between two code resends to one account, anti mail-bombing (0 = default 60s). Independent of the login 2FA email cooldown.",
       "require_2fa_for_staff": "Require two-factor for all admins/operators",
       "require_2fa_for_staff_hint": "When on, an admin/operator without TOTP or a passkey is required to finish setup right after login before using the panel. You can also require it per group (Groups). Local accounts only.",
       "local_auth_scope_hint": "Two-factor auth and passkeys apply to LOCAL login only. MFA for SSO sign-ins is the identity provider's (IdP's) responsibility — PSP doesn't add its own. An account that has both a local password and an SSO binding is not subject to these when it signs in via SSO.",
@@ -803,6 +805,23 @@
     "create": "New node",
     "create_separator": "New separator",
     "edit_title": "Edit node",
+    "relay": {
+      "title": "Transit lines",
+      "add": "Add transit",
+      "hint": "Offer the same landing through extra transit fronts in addition to the direct entry. The relay's port forwarding (realm/gost/iptables) is configured outside the panel; here you only record each front's address and port — the landing's credentials/protocol/TLS are reused verbatim.",
+      "empty": "No transit lines (direct only).",
+      "name": "Line name",
+      "name_ph": "e.g. GZ Mobile relay",
+      "address": "Front address",
+      "port": "Front port",
+      "port_hint": "0 = reuse landing port",
+      "sni": "SNI (optional)",
+      "host": "Host (optional)",
+      "cdn_optional": "Only for CDN fronting",
+      "enabled": "Enabled",
+      "remove": "Remove this line",
+      "hide_direct": "Hide direct (landing reachable only via relays)"
+    },
     "import": "Import",
     "imported": "Imported",
     "import_validate": "Address and Region are required",
@@ -1476,9 +1495,15 @@
       "username": "Username",
       "password": "Password",
       "remark": "Remark",
+      "auth_method": "Auth method",
+      "insecure_https": "Allow insecure HTTPS (skip cert verification)",
       "xray_version": "Target version",
       "xray_version_latest": "latest",
       "xray_version_loading": "Loading available versions…"
+    },
+    "auth_method": {
+      "token": "API Token",
+      "password": "Username & password"
     },
     "placeholder": {
       "name": "default / us-west / ...",
@@ -1492,7 +1517,8 @@
       "name": "Display name; the internal reference uses the database ID.",
       "configured": "Configured (kept unchanged)",
       "unconfigured": "Not configured",
-      "change": "Change"
+      "change": "Change",
+      "insecure_https": "Enable when the panel uses a self-signed / mismatched cert. Scoped to this panel; the SSRF guard is unaffected."
     },
     "table": {
       "name": "Server name",

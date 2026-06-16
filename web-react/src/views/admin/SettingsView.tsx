@@ -675,6 +675,20 @@ export default function SettingsView() {
                 </Typography>
               </>
             )}
+            {/* Shared anti-abuse: how often a signup-verification / password-reset
+                code may be re-sent to one account. Only relevant when either
+                self-service flow can send a code. */}
+            {(settings.password_recovery_enabled ||
+              (settings.registration_enabled && settings.registration_require_email_verification)) && (
+              <Box sx={{ maxWidth: 320 }}>
+                <NumField label={t('settings.general.code_resend_cooldown', { defaultValue: '验证码重发冷却（秒，注册验证 / 找回密码）' })}
+                  value={settings.code_resend_cooldown_sec}
+                  onChange={v => patch('code_resend_cooldown_sec', v)} />
+                <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant, mt: 0.5 }}>
+                  {t('settings.general.code_resend_cooldown_hint', { defaultValue: '同一账号两次重发验证码的最小间隔，防邮件轰炸（0=默认 60 秒）。与登录两步验证的邮件冷却相互独立。' })}
+                </Typography>
+              </Box>
+            )}
             <Divider sx={{ my: 0.5, borderColor: md.outlineVariant }} />
             {/* Two-factor authentication (2FA). 2FA is the umbrella; the
                 authenticator app (TOTP), passkeys, and the email one-time code

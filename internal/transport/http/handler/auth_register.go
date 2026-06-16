@@ -58,6 +58,33 @@ func (h *AuthRegisterHandler) Register(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"ok": true, "requires_verification": res.RequiresVerification})
 }
 
+type resendVerificationRequest struct {
+	Email string `json:"email" binding:"required"`
+	// Same optional captcha proof as Register — resend sends an email, so it's
+	// gated by the registration captcha toggle too.
+	CaptchaID     string `json:"captcha_id"`
+	CaptchaAnswer string `json:"captcha_answer"`
+	CaptchaToken  string `json:"captcha_token"`
+}
+
+// ResendVerification re-sends the verification code/link for a pending account.
+// ALWAYS responds 200 regardless of whether the email exists or its state — the
+// response must not let a caller enumerate accounts. The send is cooldown-gated
+// in the service (anti email-bomb).
+func (h *AuthRegisterHandler) ResendVerification(c *gin.Context) {
+	var req resendVerificationRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	s, _ := h.settings.Load(c.Request.Context(), ports.UISettings{})
+	if !requireCaptcha(c, h.captcha, s, s.CaptchaRegisterEnabled, req.CaptchaID, req.CaptchaAnswer, req.CaptchaToken) {
+		return
+	}
+	h.reg.ResendVerification(c.Request.Context(), req.Email)
+	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
 type verifyEmailRequest struct {
 	Token string `json:"token"`
 	Ident string `json:"ident"`

@@ -884,6 +884,12 @@ type UISettings struct {
 	// re-sent to one account (anti mail-bombing + drives the login page's resend
 	// countdown). 0 → defaulted to 60s.
 	TwoFAEmailResendCooldownSec int `json:"twofa_email_resend_cooldown_sec"`
+	// CodeResendCooldownSec throttles how often a self-service SIGNUP-verification
+	// or PASSWORD-RECOVERY email code may be re-sent to one account (anti
+	// mail-bombing; lets re-register/resend resume a signup without flooding).
+	// Distinct from the login-2FA cooldown above — signup/recovery is more
+	// abuse-prone, so admins may want it slower. 0 → defaulted to 60s.
+	CodeResendCooldownSec int `json:"code_resend_cooldown_sec"`
 
 	// Require2FAForStaff forces every admin/operator account (with a local
 	// password) to enroll a second factor before using the panel — a panel-wide

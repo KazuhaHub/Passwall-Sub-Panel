@@ -53,6 +53,8 @@ func (r *nodeRepo) UpdateMetadata(ctx context.Context, n *domain.Node) error {
 			"region":         n.Region,
 			"tags":           jsonStrings(n.Tags),
 			"sort_order":     n.SortOrder,
+			"relays":         jsonRelays(n.Relays),
+			"hide_direct":    n.HideDirect,
 		}).Error
 }
 

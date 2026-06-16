@@ -14,6 +14,32 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 )
 
+// TestNew_AuthMethodResolution pins how the explicit auth method maps onto the
+// client's apiToken field (which the auth path keys on): password mode forces
+// cookie login even when a token is stored; token/auto keep the token.
+func TestNew_AuthMethodResolution(t *testing.T) {
+	cases := []struct {
+		method  domain.XUIAuthMethod
+		token   string
+		wantTok string // expected effective c.apiToken
+	}{
+		{domain.XUIAuthPassword, "tok-abc", ""},     // password mode → force cookie
+		{domain.XUIAuthToken, "tok-abc", "tok-abc"}, // token mode → use it
+		{domain.XUIAuthAuto, "tok-abc", "tok-abc"},  // auto + token present → infer Bearer
+		{domain.XUIAuthAuto, "", ""},                // auto + no token → cookie
+	}
+	for _, tc := range cases {
+		c, err := New(&domain.XUIPanel{Name: "p", URL: "https://x.example", APIToken: tc.token,
+			Username: "u", Password: "pw", AuthMethod: tc.method})
+		if err != nil {
+			t.Fatalf("New(%q): %v", tc.method, err)
+		}
+		if c.apiToken != tc.wantTok {
+			t.Errorf("method=%q token=%q → apiToken=%q, want %q", tc.method, tc.token, c.apiToken, tc.wantTok)
+		}
+	}
+}
+
 func TestReplaceSettingsClientsPreservesCurrentClients(t *testing.T) {
 	next := `{"method":"2022-blake3-aes-256-gcm","clients":[]}`
 	current := `{"method":"old","clients":[{"id":"a","email":"a@example.test"}]}`

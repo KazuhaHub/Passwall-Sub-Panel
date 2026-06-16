@@ -21,6 +21,7 @@
 package safehttp
 
 import (
+	"crypto/tls"
 	"fmt"
 	"net"
 	"net/http"
@@ -90,11 +91,25 @@ func BlockNonPublicDial(_, address string, _ syscall.RawConn) error {
 // (Connect + TLS + read + write); the internal dial+keepalive
 // settings are reasonable defaults that mirror http.DefaultTransport.
 func NewClient(timeout time.Duration) *http.Client {
+	return NewClientTLS(timeout, false)
+}
+
+// NewClientTLS is NewClient with an explicit TLS-verification choice. When
+// insecureSkipVerify is true the client accepts any server certificate — for a
+// 3X-UI panel behind a self-signed / hostname-mismatched cert. The SSRF dial
+// guard is unchanged either way; this only relaxes certificate validation.
+func NewClientTLS(timeout time.Duration, insecureSkipVerify bool) *http.Client {
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.DialContext = (&net.Dialer{
 		Timeout:   10 * time.Second,
 		KeepAlive: 30 * time.Second,
 		Control:   BlockNonPublicDial,
 	}).DialContext
+	if insecureSkipVerify {
+		if transport.TLSClientConfig == nil {
+			transport.TLSClientConfig = &tls.Config{}
+		}
+		transport.TLSClientConfig.InsecureSkipVerify = true
+	}
 	return &http.Client{Timeout: timeout, Transport: transport}
 }

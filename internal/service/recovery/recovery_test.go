@@ -158,6 +158,29 @@ func TestRequestReset_OTPDelivery(t *testing.T) {
 	}
 }
 
+// TestRequestReset_Cooldown pins the per-account anti-abuse throttle: a second
+// reset request for the same account within the cooldown window is suppressed
+// (no second token, no second email) while still returning nil to stay
+// enumeration-safe. The fixed test clock keeps both calls in the same window.
+func TestRequestReset_Cooldown(t *testing.T) {
+	tk := &memTokens{}
+	ml := &stubMail{}
+	svc, _ := newSvc(Deps{
+		Users:    stubUsers{byUPN: map[string]*domain.User{"a": userWithPw(1, "a", "a@x")}},
+		Tokens:   tk, Mail: ml,
+		Settings: stubSettings{s: ports.UISettings{PasswordRecoveryEnabled: true, PasswordRecoveryDelivery: "otp"}},
+	})
+	if err := svc.RequestReset(context.Background(), "a"); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.RequestReset(context.Background(), "a"); err != nil {
+		t.Fatal(err)
+	}
+	if len(ml.sent) != 1 || len(tk.created) != 1 {
+		t.Fatalf("second reset within cooldown must be suppressed: sent=%d tokens=%d", len(ml.sent), len(tk.created))
+	}
+}
+
 func TestRequestReset_NoEnumeration(t *testing.T) {
 	for _, tc := range []struct {
 		name string

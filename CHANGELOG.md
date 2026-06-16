@@ -4,6 +4,32 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## v3.8.0-beta.11 — 2026-06-16
+
+本期:节点「中转借点」+ 自助注册/找回的安全加固与体验改进 + 3X-UI 面板认证方式选择与「不安全 HTTPS」开关 + 标签输入修复。
+
+### 新增
+
+- **中转借点(中转线路)** —— 每个节点可配置多条中转线路(`Node.Relays` + `HideDirect`),把同一落地额外通过中转机 / 隧道 / CDN 入口暴露。渲染时每条启用线路展开成一个独立订阅条目,复用落地的协议、UUID 派生凭证与 TLS,仅替换连接的 server/port,并可选覆盖 TLS SNI 与 WS Host(用于 CDN 优选)。Clash/Mihomo、sing-box、V2rayN URI-list 三种格式全支持;「隐藏直连」开关用于仅允许中转接入的落地(无启用线路时忽略,节点不会从订阅消失)。中转机的端口转发(realm/gost/iptables)在面板外配置,面板只记录入口地址 + 端口;节点编辑弹窗内含线路编辑器。
+- **3X-UI 面板认证方式选择** —— 面板可显式选「API Token」或「账户密码」。密码模式即使存有 Token 也强制走 Cookie 登录,无需先清空 Token 即可切换;留空(旧数据)保持「有 Token 用 Token、否则用密码」的推断。服务器表单按所选模式只展示对应字段。
+- **面板「允许不安全的 HTTPS」** —— 可按面板单独跳过 TLS 证书校验,用于自签名 / 域名不匹配证书的 3X-UI。仅放宽证书验证,SSRF 拨号防护(拒连环回 / 链路本地 / 元数据地址)保持不变。
+- **自助注册可续传 + 重发验证码** —— 新增 `POST /auth/resend-verification`(防账号枚举,恒返 200)。再次注册一个待验证邮箱不再以「已注册」死路返回,而是刷新密码并重发验证码续上(激活仍由收件邮箱把关;已激活账号仍拒绝,无法被劫持)。邮箱验证页新增「重新发送」按钮(60 秒倒计时)。
+- **验证码重发冷却设置** —— 新增 `code_resend_cooldown_sec`(默认 60 秒,热更新),统一控制注册验证与找回密码的验证码重发间隔,与登录两步验证的邮件冷却相互独立。
+
+### 安全
+
+- **发信防滥用节流** —— 新增共享节流组件:每次发验证码 / 找回邮件都过「单账号冷却」(默认开启,防针对单一受害者的邮件轰炸)+「全站滑动窗口上限」(默认关闭——抗滥用交由管理员配置的人机验证,避免硬上限误伤正常注册高峰);被拦截的发送不占用全站配额。注册与找回两条链路均接入。
+- **第三方验证码校验加固** —— Turnstile / reCAPTCHA / hCaptcha 的 siteverify 现在解析并在失败时记录 `error-codes`(便于排查密钥 / 域名错配),并新增可选的 hostname 绑定(与受信任的 SubBaseURL 比对,防跨站令牌重放);未配置 SubBaseURL 或 provider 未返回 hostname 时自动跳过,不会误锁。
+- **OTP 校验常量时间比较** —— 一次性码的哈希比较改用 `crypto/subtle.ConstantTimeCompare`,统一认证路径的密钥比对卫生。
+
+### 修复
+
+- **节点标签无法新增** —— 标签输入框此前虽是 freeSolo,但新标签只能靠回车提交、下拉无可点入口、触屏无法添加。现通过 `createFilterOptions` 把输入内容作为一行可点选项浮现,可直接点选新增(大小写不敏感判重);并补齐聚焦选中 / 失焦清空 / Home-End 键行为。
+
+### 持久化
+
+- nodes 表新增 `relays`(JSON 文本列)与 `hide_direct`;xui_panels 表新增 `auth_method` 与 `insecure_skip_verify`。均经 AutoMigrate 自动添加,旧行空 / false 不回填。
+
 ## v3.8.0-beta.10 — 2026-06-14
 
 移动端修复:管理后台顶部的子 Tab 行在窄屏上可滚动。前端,无后端改动。

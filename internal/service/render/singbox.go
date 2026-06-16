@@ -117,7 +117,7 @@ func (s *Service) buildSingBoxOutbounds(ctx context.Context, u *domain.User, ite
 			continue
 		}
 		userEmail := u.ClientEmail(it.node.ID, emailRules)
-		block, err := emitSingBoxOutbound(it.name, it.node, u, inb, userEmail)
+		block, err := emitSingBoxOutbound(it.name, it.node, u, inb, userEmail, it.relay)
 		if err != nil {
 			log.Warn("render: skip node, emit sing-box failed", "node_id", it.node.ID, "err", err)
 			continue
@@ -136,7 +136,7 @@ func (s *Service) buildSingBoxOutbounds(ctx context.Context, u *domain.User, ite
 	return out
 }
 
-func emitSingBoxOutbound(tag string, n *domain.Node, u *domain.User, inb *ports.Inbound, userEmail string) (map[string]any, error) {
+func emitSingBoxOutbound(tag string, n *domain.Node, u *domain.User, inb *ports.Inbound, userEmail string, relay *domain.RelayLine) (map[string]any, error) {
 	var settings xuiInboundSettings
 	_ = json.Unmarshal([]byte(inb.Settings), &settings)
 	var stream xuiStreamSettings
@@ -146,14 +146,17 @@ func emitSingBoxOutbound(tag string, n *domain.Node, u *domain.User, inb *ports.
 	if protocol == "" {
 		return nil, nil
 	}
-	if n.ServerAddress == "" {
+	// Relay variant dials the transit front (and overrides SNI / Host on
+	// `stream` in place); direct entry uses the node's own address + port.
+	server, port := effectiveEndpoint(relay, n.ServerAddress, inb.Port, &stream)
+	if server == "" {
 		return nil, fmt.Errorf("node %d (%s) missing server_address", n.ID, n.DisplayName)
 	}
 
 	base := map[string]any{
 		"tag":         tag,
-		"server":      n.ServerAddress,
-		"server_port": inb.Port,
+		"server":      server,
+		"server_port": port,
 	}
 
 	switch protocol {
@@ -192,10 +195,13 @@ func emitSingBoxOutbound(tag string, n *domain.Node, u *domain.User, inb *ports.
 		return base, nil
 	case domain.ProtoHysteria2:
 		// buildSingBoxHysteria2Outbound takes its own base map shape, so
-		// we hand it the tag/server/port directly rather than mutating the
-		// shared base map.
-		return buildSingBoxHysteria2Outbound(tag, n.ServerAddress, inb.Port, u.UUID,
-			parseHysteria2Opts(inb.Settings, inb.StreamSettings)), nil
+		// we hand it the (relay-resolved) tag/server/port directly rather
+		// than mutating the shared base map.
+		opts := parseHysteria2Opts(inb.Settings, inb.StreamSettings)
+		if sni := relaySNIOverride(relay); sni != "" {
+			opts.SNI = sni
+		}
+		return buildSingBoxHysteria2Outbound(tag, server, port, u.UUID, opts), nil
 	}
 	return nil, nil
 }

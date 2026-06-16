@@ -280,6 +280,12 @@ type nodeRow struct {
 	// cert_source='psp_managed'. AutoMigrate adds them; empty/0 = unmanaged.
 	CertSource string `gorm:"size:16;default:''"`
 	CertID     int64  `gorm:"default:0;index"`
+	// Relays / transit lines (v3.8.0): JSON array of transit fronts this node is
+	// additionally offered through. HideDirect drops the direct entry when at
+	// least one relay is enabled. AutoMigrate adds both; empty/false on legacy
+	// rows, no backfill.
+	Relays     jsonRelays `gorm:"column:relays"`
+	HideDirect bool       `gorm:"default:false"`
 	CreatedAt  time.Time
 }
 
@@ -337,6 +343,8 @@ func (r *nodeRow) toDomain() (*domain.Node, error) {
 		ConfigSyncState:       r.ConfigSyncState,
 		CertSource:            domain.CertSource(r.CertSource),
 		CertID:                r.CertID,
+		Relays:                []domain.RelayLine(r.Relays),
+		HideDirect:            r.HideDirect,
 		CreatedAt:             r.CreatedAt,
 	}, nil
 }
@@ -388,6 +396,8 @@ func nodeFromDomain(n *domain.Node) (*nodeRow, error) {
 		ConfigSyncState:       n.ConfigSyncState,
 		CertSource:            string(n.CertSource),
 		CertID:                n.CertID,
+		Relays:                jsonRelays(n.Relays),
+		HideDirect:            n.HideDirect,
 		CreatedAt:             n.CreatedAt,
 	}, nil
 }
@@ -740,6 +750,10 @@ type xuiPanelRow struct {
 	Username string `gorm:"size:255"`
 	Password string `gorm:"type:text"`
 	Remark   string `gorm:"size:255"`
+	// AuthMethod: "" (auto) / "token" / "password"; InsecureSkipVerify skips TLS
+	// cert checks for this panel. AutoMigrate adds both; empty/false on legacy rows.
+	AuthMethod         string `gorm:"size:16;default:''"`
+	InsecureSkipVerify bool   `gorm:"default:false"`
 	// ---- Version-identity snapshot (v3.6.0-beta.1) ----
 	// Written by the boot-time compat probe + future admin "refresh version"
 	// actions. Empty / NULL = never probed. Column-scoped writes via
@@ -858,16 +872,18 @@ func (r *xuiPanelRow) toDomain() (*domain.XUIPanel, error) {
 		return nil, err
 	}
 	return &domain.XUIPanel{
-		ID:               r.ID,
-		Name:             r.Name,
-		URL:              r.URL,
-		APIToken:         apiToken,
-		Username:         r.Username,
-		Password:         password,
-		Remark:           r.Remark,
-		PanelVersion:     r.PanelVersion,
-		XrayVersion:      r.XrayVersion,
-		VersionCheckedAt: r.VersionCheckedAt,
+		ID:                 r.ID,
+		Name:               r.Name,
+		URL:                r.URL,
+		APIToken:           apiToken,
+		Username:           r.Username,
+		Password:           password,
+		Remark:             r.Remark,
+		AuthMethod:         domain.XUIAuthMethod(r.AuthMethod),
+		InsecureSkipVerify: r.InsecureSkipVerify,
+		PanelVersion:       r.PanelVersion,
+		XrayVersion:        r.XrayVersion,
+		VersionCheckedAt:   r.VersionCheckedAt,
 	}, nil
 }
 
@@ -881,16 +897,18 @@ func xuiPanelFromDomain(p *domain.XUIPanel) (*xuiPanelRow, error) {
 		return nil, err
 	}
 	return &xuiPanelRow{
-		ID:               p.ID,
-		Name:             p.Name,
-		URL:              p.URL,
-		APIToken:         apiToken,
-		Username:         p.Username,
-		Password:         password,
-		Remark:           p.Remark,
-		PanelVersion:     p.PanelVersion,
-		XrayVersion:      p.XrayVersion,
-		VersionCheckedAt: p.VersionCheckedAt,
+		ID:                 p.ID,
+		Name:               p.Name,
+		URL:                p.URL,
+		APIToken:           apiToken,
+		Username:           p.Username,
+		Password:           password,
+		Remark:             p.Remark,
+		AuthMethod:         string(p.AuthMethod),
+		InsecureSkipVerify: p.InsecureSkipVerify,
+		PanelVersion:       p.PanelVersion,
+		XrayVersion:        p.XrayVersion,
+		VersionCheckedAt:   p.VersionCheckedAt,
 	}, nil
 }
 
@@ -1124,6 +1142,45 @@ func (j *jsonLayout) Scan(value any) error {
 		return fmt.Errorf("unsupported scan type for jsonLayout: %T", value)
 	}
 	return json.Unmarshal(b, (*domain.Layout)(j))
+}
+
+// jsonRelays persists a node's []domain.RelayLine (transit fronts) as a JSON
+// array column on the nodes table. Same shape as jsonStrings / jsonLayout.
+type jsonRelays []domain.RelayLine
+
+func (j jsonRelays) Value() (driver.Value, error) {
+	// Return "[]" (not nil) for the empty case so the column stays NOT NULL
+	// and GORM keeps inferring it as a text data type — mirrors jsonRoleRules.
+	if len(j) == 0 {
+		return "[]", nil
+	}
+	b, err := json.Marshal([]domain.RelayLine(j))
+	return string(b), err
+}
+
+// GormDBDataType — see jsonInt64s.GormDBDataType. []domain.RelayLine would
+// otherwise make Postgres infer a composite/array column; pin it to text.
+func (jsonRelays) GormDBDataType(*gorm.DB, *schema.Field) string { return "text" }
+
+func (j *jsonRelays) Scan(value any) error {
+	if value == nil {
+		*j = nil
+		return nil
+	}
+	var b []byte
+	switch v := value.(type) {
+	case []byte:
+		b = v
+	case string:
+		b = []byte(v)
+	default:
+		return fmt.Errorf("unsupported scan type for jsonRelays: %T", value)
+	}
+	if len(b) == 0 {
+		*j = nil
+		return nil
+	}
+	return json.Unmarshal(b, (*[]domain.RelayLine)(j))
 }
 
 // ---- Schema ----
