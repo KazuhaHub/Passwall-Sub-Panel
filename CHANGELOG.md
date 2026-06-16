@@ -4,6 +4,17 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## v3.8.0-beta.10 — 2026-06-14
+
+移动端修复:管理后台顶部的子 Tab 行在窄屏上可滚动。前端,无后端改动。
+
+### 修复
+
+- **手机上 Admin 顶部子 Tab 看不全** —— 各管理页(设置 / 日志 / 证书 / 节点 / 分组 / 流量)的顶部 Tab 行用的是
+  MUI 默认 `variant="standard"`,窄屏溢出时被直接裁掉、后面的 tab 看不到也点不到。改为在主题里给 `MuiTabs` 设
+  全局 defaultProps(`variant=scrollable` + `scrollButtons=auto` + `allowScrollButtonsMobile`):溢出时可滑动并
+  显示滚动箭头,放得下的 tab 行视觉不变(用户端 MeView 之前手动设的也由此统一)。
+
 ## v3.8.0-beta.9 — 2026-06-14
 
 重构:DB 适配器包 `mysql` 改名为 `sqlstore`。无行为变更。
