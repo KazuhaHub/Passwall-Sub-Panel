@@ -62,6 +62,69 @@ func TestXUIPanelSecretsEncryptedAtRest(t *testing.T) {
 	}
 }
 
+// TestXUIPanelAuthFieldsRoundTrip pins the v3.8.0 panel auth columns:
+// AuthMethod + InsecureSkipVerify survive a save → load → update cycle, and a
+// panel saved without an explicit method reads back as auto (""). These are new
+// columns, so the cross-DB CI (postgres/mysql jobs run this package) exercises
+// them on every dialect — mirroring TestNodeRepo_RelaysRoundTrip.
+func TestXUIPanelAuthFieldsRoundTrip(t *testing.T) {
+	db, err := openTestDB(t)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	if err := EnsureSchema(db); err != nil {
+		t.Fatalf("schema: %v", err)
+	}
+	sqlDB, _ := db.DB()
+	t.Cleanup(func() { _ = sqlDB.Close() })
+
+	repo := NewRepos(db).XUIPanel
+	ctx := context.Background()
+
+	// password mode + insecure on.
+	p := &domain.XUIPanel{
+		Name: "p", URL: "https://x.example.test", Username: "admin", Password: "pw",
+		AuthMethod: domain.XUIAuthPassword, InsecureSkipVerify: true,
+	}
+	if err := repo.Save(ctx, p); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	got, err := repo.GetByID(ctx, p.ID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.AuthMethod != domain.XUIAuthPassword || !got.InsecureSkipVerify {
+		t.Fatalf("round-trip = %q / %v, want password / true", got.AuthMethod, got.InsecureSkipVerify)
+	}
+
+	// Update flips both.
+	got.AuthMethod = domain.XUIAuthToken
+	got.InsecureSkipVerify = false
+	if err := repo.Save(ctx, got); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	again, err := repo.GetByID(ctx, p.ID)
+	if err != nil {
+		t.Fatalf("get after update: %v", err)
+	}
+	if again.AuthMethod != domain.XUIAuthToken || again.InsecureSkipVerify {
+		t.Fatalf("after update = %q / %v, want token / false", again.AuthMethod, again.InsecureSkipVerify)
+	}
+
+	// Legacy panel (no explicit method) reads back as auto + insecure off.
+	plain := &domain.XUIPanel{Name: "p2", URL: "https://y.example.test", APIToken: "tok"}
+	if err := repo.Save(ctx, plain); err != nil {
+		t.Fatalf("save plain: %v", err)
+	}
+	gotPlain, err := repo.GetByID(ctx, plain.ID)
+	if err != nil {
+		t.Fatalf("get plain: %v", err)
+	}
+	if gotPlain.AuthMethod != domain.XUIAuthAuto || gotPlain.InsecureSkipVerify {
+		t.Fatalf("legacy panel = %q / %v, want auto / false", gotPlain.AuthMethod, gotPlain.InsecureSkipVerify)
+	}
+}
+
 // TestDecryptSecretRequiresKey: dropping the key after writing
 // encrypted rows must make subsequent reads fail explicitly, not
 // silently return ciphertext-as-plaintext. Catches the regression
