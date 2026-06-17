@@ -4,6 +4,31 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## v3.8.0 — 2026-06-17
+
+**3.8.0 正式版**。汇总 beta.1~13 的全部内容,核心是「分组化管理」与一批分流 / 安全 / 对接增强。各项细节见下方对应 beta 条目。
+
+### 本期主线
+
+- **按 Group 覆盖设置 + 管理后台 Workspace 化**(beta.1~3)—— 在全局 `settings` 之上叠加稀疏的分组覆盖层(`scope_settings`),由 `OverridableScopeKeys` 白名单严格约束哪些键可被分组覆盖;管理后台重构为 Workspace 布局。
+- **中转借点(中转线路)**(beta.11)—— 每个节点可配置多条中转线路,把同一落地额外通过中转机 / 隧道 / CDN 入口暴露,渲染时展开成独立订阅条目;支持「隐藏直连」。
+- **网页 QUIC / UDP 分流控制 + `🎮 UDP控制` 选择组**(beta.13)—— 内置拒绝网页 QUIC(HTTP/3 over UDP 443)逼浏览器回落 TCP,其余非本地 UDP 交给可切换的 `🎮 UDP控制` 组;mihomo + sing-box 一致。
+- **自助注册 / 找回安全加固**(beta.6、beta.11)—— 发信防滥用节流(单账号冷却 + 可选全站上限)、注册可续传 + 重发验证码、第三方验证码 hostname 绑定、OTP 常量时间比较;另含一轮多 agent 全局安全 / 性能审计(0 个 critical/high)。
+- **3X-UI 对接增强**(beta.5、beta.11)—— 3.3.1 兼容验证、cookie 模式 CSRF 写修复、面板认证方式(Token / 账户密码)显式选择、按面板「允许不安全的 HTTPS」开关。
+- **Hysteria2 ALPN 默认值修复**(beta.13)—— Hy2 入站 ALPN 改为按协议预填 `h3`(此前错填 `h2,http/1.1` 导致连不上)。
+
+### 工程
+
+- DB 适配器包 `mysql` 改名为 `sqlstore`(beta.9,无行为变更);新增跨数据库(MySQL / Postgres / SQLite)CI 矩阵(beta.8),并由它发现并修复了若干 Postgres 严格方言与 MySQL 零日期问题。
+
+### 其它
+
+- **默认规则集**新增 `kazuha.us` 直连(`DOMAIN-SUFFIX,kazuha.us,DIRECT`),与既有的 `kazuha.org` 一致。仅对新安装自动生效;现有部署到「规则集」重置 `default_rules` 拉取。
+
+### 升级提示
+
+- 本版多项默认改动落在**种子模板 / 规则集**里,只对新安装自动生效。现有部署升级后:到「模板」重置 `default-mihomo`(及 `default-sing-box`)、到「规则集」重置 `default_rules`,即可拉取新默认(会覆盖你对这两个文件的自定义)。程序内的渲染 / 兼容逻辑升级即自动生效。
+
 ## v3.8.0-beta.13 — 2026-06-17
 
 QUIC / UDP 分流控制 + 几处修复与统一。

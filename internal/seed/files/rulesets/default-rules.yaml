@@ -9500,6 +9500,7 @@ content: |
   - DOMAIN,appboot.netflix.com,REJECT
   - DOMAIN,ios.ngp.prod.cloud.netflix.com,REJECT
   - DOMAIN-SUFFIX,kazuha.org,DIRECT
+  - DOMAIN-SUFFIX,kazuha.us,DIRECT
   - GEOSITE,geolocation-cn,🇨🇳 中国大陆
   - GEOIP,CN,🇨🇳 中国大陆
   - MATCH,🐟 漏网之鱼
