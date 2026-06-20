@@ -84,8 +84,24 @@ type Service struct {
 	// back to an untracked safego.Go with context.Background.
 	bg func(name string, fn func(ctx context.Context))
 
+	// psp shadow-writes the v3.9.0 psp_client model alongside each membership
+	// resync. Late-bound via SetPSPProvisioner; nil before wiring / in tests
+	// disables the dual-write entirely (the real ownership path is unaffected).
+	psp PSPClientProvisioner
+
 	emergencyMu sync.Mutex
 }
+
+// PSPClientProvisioner mirrors a user's desired nodes into the v3.9.0 psp_client
+// model. Implemented by clientprov.Service; kept as a local interface so the
+// user service stays decoupled and nil-tolerant. See SyncUser.
+type PSPClientProvisioner interface {
+	SyncUser(ctx context.Context, userID int64, userUUID string, rules domain.EmailRules, desiredNodes []*domain.Node) error
+}
+
+// SetPSPProvisioner late-binds the v3.9.0 shadow dual-write (mirrors the other
+// SetXxx wiring). Until set, ResyncMembership skips the psp_client write.
+func (s *Service) SetPSPProvisioner(p PSPClientProvisioner) { s.psp = p }
 
 // SetBackgroundRunner late-binds the app's tracked async dispatcher (mirrors
 // SetTrafficUsage's lazy wiring). Once set, background resync runs under the
@@ -1607,6 +1623,17 @@ func (s *Service) ResyncMembership(ctx context.Context, userID int64) error {
 			if firstErr == nil {
 				firstErr = fmt.Errorf("del from %d/%d: %w", k.panelID, k.inboundID, err)
 			}
+		}
+	}
+
+	// v3.9.0 shadow dual-write: mirror the same desired state into the psp_client
+	// model (one shared client per user-panel + attachments). Best-effort and
+	// fully isolated — it only writes the dormant psp_client tables (nothing
+	// reads them in production yet), so a failure here must NEVER affect the real
+	// ownership resync above. nil provisioner (tests / before wiring) skips it.
+	if s.psp != nil {
+		if err := s.psp.SyncUser(ctx, u.ID, u.UUID, rules, desiredNodes); err != nil {
+			log.Warn("psp_client shadow dual-write failed (non-fatal)", "user_id", u.ID, "err", err)
 		}
 	}
 

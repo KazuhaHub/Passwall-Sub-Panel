@@ -257,6 +257,15 @@ type nodeRow struct {
 	LastTrafficUpBytes    int64  `gorm:"default:0"`
 	LastTrafficDownBytes  int64  `gorm:"default:0"`
 	LastTrafficTotalBytes int64  `gorm:"default:0"`
+	// v3.9.0 node-traffic baseline (sourced from the inbound counter; see
+	// domain.Node). AutoMigrate adds these defaulting to 0/false;
+	// backfillTrafficCounterNulls COALESCEs any NULLs on existing rows
+	// (defense-in-depth, symmetric with last_traffic_*). recordNodeStats seeds
+	// the live baseline on the first poll (LastInboundSeeded gate).
+	LastInboundUpBytes    int64  `gorm:"default:0"`
+	LastInboundDownBytes  int64  `gorm:"default:0"`
+	LastInboundTotalBytes int64  `gorm:"default:0"`
+	LastInboundSeeded     bool   `gorm:"default:false"`
 	HealthState           string `gorm:"size:32;default:''"`
 	HealthCheckedAt       *time.Time
 	HealthDetail          string `gorm:"size:512;default:''"`
@@ -329,6 +338,10 @@ func (r *nodeRow) toDomain() (*domain.Node, error) {
 		LastTrafficUpBytes:    r.LastTrafficUpBytes,
 		LastTrafficDownBytes:  r.LastTrafficDownBytes,
 		LastTrafficTotalBytes: r.LastTrafficTotalBytes,
+		LastInboundUpBytes:    r.LastInboundUpBytes,
+		LastInboundDownBytes:  r.LastInboundDownBytes,
+		LastInboundTotalBytes: r.LastInboundTotalBytes,
+		LastInboundSeeded:     r.LastInboundSeeded,
 		HealthState:           domain.NodeHealthState(r.HealthState),
 		HealthCheckedAt:       r.HealthCheckedAt,
 		HealthDetail:          r.HealthDetail,
@@ -382,6 +395,10 @@ func nodeFromDomain(n *domain.Node) (*nodeRow, error) {
 		LastTrafficUpBytes:    n.LastTrafficUpBytes,
 		LastTrafficDownBytes:  n.LastTrafficDownBytes,
 		LastTrafficTotalBytes: n.LastTrafficTotalBytes,
+		LastInboundUpBytes:    n.LastInboundUpBytes,
+		LastInboundDownBytes:  n.LastInboundDownBytes,
+		LastInboundTotalBytes: n.LastInboundTotalBytes,
+		LastInboundSeeded:     n.LastInboundSeeded,
 		HealthState:           string(n.HealthState),
 		HealthCheckedAt:       n.HealthCheckedAt,
 		HealthDetail:          n.HealthDetail,
@@ -1194,6 +1211,8 @@ var schemaModels = []any{
 	&groupRow{},
 	&nodeRow{},
 	&ownershipRow{},
+	&pspClientRow{},
+	&pspClientInboundRow{},
 	&trafficRow{},
 	&clientTrafficRow{},
 	&nodeTrafficRow{},
@@ -1351,9 +1370,15 @@ SET
 	lifetime_total_bytes = COALESCE(lifetime_total_bytes, 0),
 	last_traffic_up_bytes = COALESCE(last_traffic_up_bytes, 0),
 	last_traffic_down_bytes = COALESCE(last_traffic_down_bytes, 0),
-	last_traffic_total_bytes = COALESCE(last_traffic_total_bytes, 0)
+	last_traffic_total_bytes = COALESCE(last_traffic_total_bytes, 0),
+	last_inbound_up_bytes = COALESCE(last_inbound_up_bytes, 0),
+	last_inbound_down_bytes = COALESCE(last_inbound_down_bytes, 0),
+	last_inbound_total_bytes = COALESCE(last_inbound_total_bytes, 0),
+	last_inbound_seeded = COALESCE(last_inbound_seeded, FALSE)
 WHERE lifetime_up_bytes IS NULL OR lifetime_down_bytes IS NULL OR lifetime_total_bytes IS NULL
 	OR last_traffic_up_bytes IS NULL OR last_traffic_down_bytes IS NULL OR last_traffic_total_bytes IS NULL
+	OR last_inbound_up_bytes IS NULL OR last_inbound_down_bytes IS NULL OR last_inbound_total_bytes IS NULL
+	OR last_inbound_seeded IS NULL
 `).Error; err != nil {
 		return err
 	}

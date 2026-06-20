@@ -40,6 +40,27 @@ func DeriveProxyPassword(userUUID string, protocol domain.Protocol, ssMethod str
 	return userUUID
 }
 
+// NewProxyPassword returns the v3.9.0 STORED proxy password for a client,
+// derived deterministically from the user's UUID. Unlike DeriveProxyPassword
+// (which branches per protocol and is recomputed at render time), this is ONE
+// value persisted on domain.PSPClient and used for EVERY password protocol —
+// Trojan, Shadowsocks, and SS-2022 (aes-256-gcm / chacha20). It is base64 of the
+// full 32-byte SHA-256(uuid): simultaneously a valid 32-byte SS-2022 PSK and a
+// perfectly good free-form Trojan/SS password. Storing one value (instead of
+// per-protocol derivation) is exactly what lets a single shared client span
+// inbounds of different password protocols; determinism lets the v3.9.0
+// migration compute it offline from the existing UUID with no panel read-back.
+//
+// It equals DeriveProxyPassword(uuid, ProtoSS2022, "...aes-256-gcm"), so a
+// client that already had an SS-2022-256 inbound keeps the same password across
+// the migration. A user who additionally has an SS-2022-*128*-gcm inbound on the
+// same panel needs a 16-byte PSK that this 32-byte value can't satisfy — that
+// inbound is split into a separate credential class (domain.PSPClient.CredClass).
+func NewProxyPassword(userUUID string) string {
+	h := sha256.Sum256([]byte(userUUID))
+	return base64.StdEncoding.EncodeToString(h[:])
+}
+
 // ss2022KeyLen returns the SIP022 PSK byte length for an SS-2022 cipher: 16 for
 // the aes-128-gcm variant, 32 for aes-256-gcm and chacha20-poly1305. Unknown /
 // empty methods fall back to 32 (the historical default and the more common
@@ -50,6 +71,12 @@ func ss2022KeyLen(method string) int {
 	}
 	return 32
 }
+
+// SS2022KeyLen exposes the SIP022 PSK byte length for an SS-2022 cipher method
+// (16 for aes-128-gcm, 32 otherwise). The v3.9.0 credential-class planner uses
+// it to detect the 128-bit case — a 16-byte PSK can't share the single client
+// `password` field with the 32-byte protocols, so it forces a separate client.
+func SS2022KeyLen(method string) int { return ss2022KeyLen(method) }
 
 // DetectProtocol classifies a 3X-UI inbound protocol string into the
 // internal Protocol enum. ssMethod is required to disambiguate SS from

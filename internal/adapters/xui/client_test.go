@@ -452,6 +452,157 @@ func TestBulkDelByEmailEmptyIsNoop(t *testing.T) {
 	}
 }
 
+// --- v3.9.0 multi-inbound client surface (attach/detach + multi-add) ---
+
+// AddClientToInbounds must put EVERY id into the inboundIds array (the whole
+// point — one client, many inbounds, one Xray restart).
+func TestAddClientToInboundsPostsAllInboundIds(t *testing.T) {
+	var got capturedReq
+	c := captureReq(t, `{"success":true}`, &got)
+	if err := c.AddClientToInbounds(context.Background(), []int{3, 5}, ports.ClientSpec{ID: "uuid-1", Email: "u3@psp.local"}); err != nil {
+		t.Fatal(err)
+	}
+	if got.method != http.MethodPost || got.path != "/panel/api/clients/add" {
+		t.Fatalf("method/path = %s %s", got.method, got.path)
+	}
+	var body struct {
+		Client     map[string]any `json:"client"`
+		InboundIDs []int          `json:"inboundIds"`
+	}
+	if err := json.Unmarshal([]byte(got.body), &body); err != nil {
+		t.Fatalf("body not JSON: %v (%s)", err, got.body)
+	}
+	if len(body.InboundIDs) != 2 || body.InboundIDs[0] != 3 || body.InboundIDs[1] != 5 {
+		t.Fatalf("inboundIds = %#v, want [3 5]", body.InboundIDs)
+	}
+}
+
+func TestAddClientToInboundsEmptyErrorsBeforeHTTP(t *testing.T) {
+	var got capturedReq
+	c := captureReq(t, `{"success":true}`, &got)
+	if err := c.AddClientToInbounds(context.Background(), nil, ports.ClientSpec{Email: "u3@psp.local"}); err == nil {
+		t.Fatal("empty inboundIDs must error before any HTTP call")
+	}
+	if got.method != "" {
+		t.Fatalf("empty inboundIDs must not hit the API, got %s %s", got.method, got.path)
+	}
+}
+
+func TestAttachClientPostsToAttachPath(t *testing.T) {
+	var got capturedReq
+	c := captureReq(t, `{"success":true}`, &got)
+	if err := c.AttachClient(context.Background(), "u3@psp.local", []int{7, 9}); err != nil {
+		t.Fatal(err)
+	}
+	if got.method != http.MethodPost || got.path != "/panel/api/clients/u3@psp.local/attach" {
+		t.Fatalf("method/path = %s %s", got.method, got.path)
+	}
+	var body struct {
+		InboundIDs []int `json:"inboundIds"`
+	}
+	if err := json.Unmarshal([]byte(got.body), &body); err != nil {
+		t.Fatalf("body not JSON: %v (%s)", err, got.body)
+	}
+	if len(body.InboundIDs) != 2 || body.InboundIDs[0] != 7 || body.InboundIDs[1] != 9 {
+		t.Fatalf("inboundIds = %#v, want [7 9]", body.InboundIDs)
+	}
+}
+
+func TestDetachClientPostsToDetachPath(t *testing.T) {
+	var got capturedReq
+	c := captureReq(t, `{"success":true}`, &got)
+	if err := c.DetachClient(context.Background(), "u3@psp.local", []int{9}); err != nil {
+		t.Fatal(err)
+	}
+	if got.method != http.MethodPost || got.path != "/panel/api/clients/u3@psp.local/detach" {
+		t.Fatalf("method/path = %s %s", got.method, got.path)
+	}
+}
+
+func TestAttachDetachEmptyInboundsIsNoop(t *testing.T) {
+	for _, name := range []string{"attach", "detach"} {
+		var got capturedReq
+		c := captureReq(t, `{"success":true}`, &got)
+		var err error
+		if name == "attach" {
+			err = c.AttachClient(context.Background(), "u3@psp.local", nil)
+		} else {
+			err = c.DetachClient(context.Background(), "u3@psp.local", nil)
+		}
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if got.method != "" {
+			t.Fatalf("%s with empty inbounds must not hit the API, got %s %s", name, got.method, got.path)
+		}
+	}
+}
+
+func TestAttachDetachRequireEmail(t *testing.T) {
+	c := &Client{baseURL: "http://unused", apiToken: "t"}
+	if err := c.AttachClient(context.Background(), "", []int{1}); err == nil {
+		t.Fatal("AttachClient with empty email must error before any HTTP call")
+	}
+	if err := c.DetachClient(context.Background(), "", []int{1}); err == nil {
+		t.Fatal("DetachClient with empty email must error before any HTTP call")
+	}
+}
+
+func TestBulkAttachPostsAndParsesResult(t *testing.T) {
+	var got capturedReq
+	c := captureReq(t, `{"success":true,"obj":{"attached":["a","b"],"skipped":["b"],"errors":[]}}`, &got)
+	res, err := c.BulkAttach(context.Background(), []string{"a", "b"}, []int{7, 9})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.method != http.MethodPost || got.path != "/panel/api/clients/bulkAttach" {
+		t.Fatalf("method/path = %s %s", got.method, got.path)
+	}
+	var body struct {
+		Emails     []string `json:"emails"`
+		InboundIDs []int    `json:"inboundIds"`
+	}
+	if err := json.Unmarshal([]byte(got.body), &body); err != nil {
+		t.Fatalf("body not JSON: %v (%s)", err, got.body)
+	}
+	if len(body.Emails) != 2 || len(body.InboundIDs) != 2 {
+		t.Fatalf("body = %#v", body)
+	}
+	if len(res.Done) != 2 || res.Done[0] != "a" || len(res.Skipped) != 1 || res.Skipped[0] != "b" {
+		t.Fatalf("result = %#v", res)
+	}
+}
+
+func TestBulkDetachParsesDetachedField(t *testing.T) {
+	var got capturedReq
+	c := captureReq(t, `{"success":true,"obj":{"detached":["a"],"skipped":[],"errors":[]}}`, &got)
+	res, err := c.BulkDetach(context.Background(), []string{"a"}, []int{7})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.path != "/panel/api/clients/bulkDetach" {
+		t.Fatalf("path = %s", got.path)
+	}
+	if len(res.Done) != 1 || res.Done[0] != "a" {
+		t.Fatalf("result = %#v", res)
+	}
+}
+
+func TestBulkAttachEmptyIsNoop(t *testing.T) {
+	var got capturedReq
+	c := captureReq(t, `{"success":true}`, &got)
+	// empty emails OR empty inbounds → no request
+	if _, err := c.BulkAttach(context.Background(), nil, []int{1}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.BulkAttach(context.Background(), []string{"a"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got.method != "" {
+		t.Fatalf("empty bulk inputs must not hit the API, got %s %s", got.method, got.path)
+	}
+}
+
 // --- v3.6.4 getWebCertFiles (cert_source=from_panel) ---
 
 // GetWebCertFiles maps the {webCertFile,webKeyFile} obj into ports.WebCertFiles.

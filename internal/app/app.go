@@ -27,6 +27,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/audit"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/auth"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/cert"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/clientprov"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/geo"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/group"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/health"
@@ -253,6 +254,9 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	// nil-tolerant so the order here doesn't open a startup race window.
 	userSvc.SetTrafficUsage(trafficSvc)
 	trafficSvc.SetConfigPusher(userSvc)
+	// v3.9.0 shadow dual-write: populate the psp_client model from each
+	// membership resync (best-effort; nothing reads it in production yet).
+	userSvc.SetPSPProvisioner(clientprov.New(repos.PSPClient))
 	mailSvc := mailer.New(repos.Mail, repos.User, repos.Traffic, repos.ScopedSettings, repos.SyncTask)
 	// Late-bind the mailer into the traffic poll so quota-exhaustion disables
 	// and period-rollover re-enables actually email the user (the only path

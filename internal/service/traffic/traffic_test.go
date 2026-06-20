@@ -1073,6 +1073,10 @@ func (r *fakeNodeRepo) UpdateTrafficCounters(ctx context.Context, n *domain.Node
 	cur.LastTrafficUpBytes = n.LastTrafficUpBytes
 	cur.LastTrafficDownBytes = n.LastTrafficDownBytes
 	cur.LastTrafficTotalBytes = n.LastTrafficTotalBytes
+	cur.LastInboundUpBytes = n.LastInboundUpBytes
+	cur.LastInboundDownBytes = n.LastInboundDownBytes
+	cur.LastInboundTotalBytes = n.LastInboundTotalBytes
+	cur.LastInboundSeeded = n.LastInboundSeeded
 	return nil
 }
 func (r *fakeNodeRepo) BatchUpdateTrafficCounters(ctx context.Context, nodes []*domain.Node) error {
@@ -1295,6 +1299,21 @@ func (c *fakeXUIClient) BulkAddToInbound(ctx context.Context, inboundID int, spe
 }
 func (c *fakeXUIClient) BulkDelByEmail(ctx context.Context, emails []string) (int, error) {
 	return 0, nil
+}
+func (c *fakeXUIClient) AddClientToInbounds(ctx context.Context, inboundIDs []int, spec ports.ClientSpec) error {
+	return nil
+}
+func (c *fakeXUIClient) AttachClient(ctx context.Context, email string, inboundIDs []int) error {
+	return nil
+}
+func (c *fakeXUIClient) DetachClient(ctx context.Context, email string, inboundIDs []int) error {
+	return nil
+}
+func (c *fakeXUIClient) BulkAttach(ctx context.Context, emails []string, inboundIDs []int) (ports.BulkAttachResult, error) {
+	return ports.BulkAttachResult{}, nil
+}
+func (c *fakeXUIClient) BulkDetach(ctx context.Context, emails []string, inboundIDs []int) (ports.BulkAttachResult, error) {
+	return ports.BulkAttachResult{}, nil
 }
 func (c *fakeXUIClient) GetServerStatus(ctx context.Context) (*ports.ServerStatus, error) {
 	return &ports.ServerStatus{PanelVersion: "3.1.0", XrayVersion: "26.5.9", XrayState: "running"}, nil
@@ -1680,7 +1699,12 @@ func TestPollOnceUsesSlimList(t *testing.T) {
 	}
 }
 
-func TestPollOnceRecordsNodeTrafficFromMatchedClientStats(t *testing.T) {
+func TestPollOnceRecordsNodeTrafficFromInboundCounter(t *testing.T) {
+	// v3.9.0: node traffic is the inbound's OWN cumulative up/down, NOT the sum
+	// of owned clients. The inbound counter is deliberately larger than the lone
+	// client's stats to prove the source is the inbound. The FIRST poll only
+	// SEEDS the baseline (delta 0 — the inbound's pre-existing counter is never
+	// folded in); the SECOND poll counts the inbound's increment.
 	email := "u1-n2@example.test"
 	users := &fakeUserRepo{users: map[int64]*domain.User{
 		1: {ID: 1, Enabled: true},
@@ -1703,32 +1727,127 @@ func TestPollOnceRecordsNodeTrafficFromMatchedClientStats(t *testing.T) {
 		},
 	}
 	nodeTraffic := &fakeNodeTrafficRepo{}
-	pool := &fakeXUIPool{clients: map[int64]ports.XUIClient{
-		10: &fakeXUIClient{inbounds: []ports.Inbound{{
-			ID:   20,
-			Up:   0,
-			Down: 0,
-			ClientStats: []ports.ClientTraffic{{
-				Email: email,
-				Up:    123,
-				Down:  456,
-			}},
-		}}},
+	client := &fakeXUIClient{inbounds: []ports.Inbound{{
+		ID: 20, Up: 1000, Down: 2000,
+		ClientStats: []ports.ClientTraffic{{Email: email, Up: 123, Down: 456}},
+	}}}
+	pool := &fakeXUIPool{clients: map[int64]ports.XUIClient{10: client}}
+	svc := New(users, ownership, &fakeTrafficRepo{}, nodes, nodeTraffic, pool, &fakeDisabler{})
+
+	// Poll 1: seed only. Lifetime stays 0; baseline + seeded flag set.
+	if err := svc.PollOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	node := nodes.nodes[2]
+	if got := node.LifetimeTotalBytes; got != 0 {
+		t.Fatalf("after seed poll, node lifetime total = %d, want 0 (counter not folded)", got)
+	}
+	if got := node.LastInboundTotalBytes; got != 3000 {
+		t.Fatalf("node baseline LastInboundTotalBytes = %d, want 3000", got)
+	}
+	if !node.LastInboundSeeded {
+		t.Fatal("node should be marked seeded after first poll")
+	}
+
+	// Poll 2: inbound advances by 500/700 → 1200 folds into lifetime; NOT the
+	// client sum (which also changed but is irrelevant to node accounting).
+	client.inbounds = []ports.Inbound{{
+		ID: 20, Up: 1500, Down: 2700,
+		ClientStats: []ports.ClientTraffic{{Email: email, Up: 999, Down: 999}},
 	}}
+	if err := svc.PollOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	node = nodes.nodes[2]
+	if got := node.LifetimeTotalBytes; got != 1200 {
+		t.Fatalf("after second poll, node lifetime total = %d, want 1200 (inbound delta, NOT client sum)", got)
+	}
+}
+
+// Regression for the adversarial-review HIGH finding: a node with
+// LifetimeTotalBytes==0 (never accrued under the old client-sum source) but a
+// LARGE live inbound counter must NOT fold that whole counter into lifetime on
+// the first v3.9.0 poll. The LastInboundSeeded gate seeds with delta 0.
+func TestPollOnceNodeTrafficZeroLifetimeNoSpike(t *testing.T) {
+	email := "u1-n2@example.test"
+	users := &fakeUserRepo{users: map[int64]*domain.User{1: {ID: 1, Enabled: true}}}
+	ownership := &fakeOwnershipRepo{byUser: map[int64][]*domain.XUIClientEntry{
+		1: {{UserID: 1, PanelID: 10, InboundID: 20, ClientEmail: email, CreatedAt: time.Now()}},
+	}}
+	nodes := &fakeNodeRepo{
+		// Lifetime 0 + new baseline columns 0 + not seeded = a fresh/imported row.
+		nodes:   map[int64]*domain.Node{2: {ID: 2, PanelID: 10, InboundID: 20, Enabled: true}},
+		byMatch: map[fakeNodeKey]int64{{panelID: 10, inboundID: 20}: 2},
+	}
+	nodeTraffic := &fakeNodeTrafficRepo{}
+	pool := &fakeXUIPool{clients: map[int64]ports.XUIClient{10: &fakeXUIClient{inbounds: []ports.Inbound{{
+		ID: 20, Up: 6_000_000_000, Down: 4_000_000_000, // 10 GB of pre-existing history
+		ClientStats: []ports.ClientTraffic{{Email: email, Up: 1, Down: 1}},
+	}}}}}
 	svc := New(users, ownership, &fakeTrafficRepo{}, nodes, nodeTraffic, pool, &fakeDisabler{})
 
 	if err := svc.PollOnce(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	node := nodes.nodes[2]
-	if got := node.LifetimeTotalBytes; got != 579 {
-		t.Fatalf("node lifetime total = %d, want clientStats sum 579", got)
+	if got := node.LifetimeTotalBytes; got != 0 {
+		t.Fatalf("lifetime total = %d, want 0 — the 10GB historical counter must NOT spike into lifetime", got)
 	}
-	if len(nodeTraffic.snapshots) != 1 {
-		t.Fatalf("node snapshots = %d, want 1", len(nodeTraffic.snapshots))
+	if got := node.LastInboundTotalBytes; got != 10_000_000_000 {
+		t.Fatalf("baseline LastInboundTotalBytes = %d, want 10000000000 (seeded)", got)
 	}
-	if got := nodeTraffic.snapshots[0].TotalBytes; got != 579 {
-		t.Fatalf("node snapshot total = %d, want 579", got)
+}
+
+// A ≤v3.8 node carries a Lifetime from the old client-sum era but LastInbound*
+// = 0 (the v3.9.0 columns default to 0 on upgrade). The first v3.9.0 poll must
+// NOT spike even though the inbound counter dwarfs the old lifetime — it
+// re-seeds the baseline with delta 0; only the NEXT poll folds in a real delta.
+func TestPollOnceNodeTrafficReseedsBaselineNoSpikeOnUpgrade(t *testing.T) {
+	email := "u1-n2@example.test"
+	users := &fakeUserRepo{users: map[int64]*domain.User{1: {ID: 1, Enabled: true}}}
+	ownership := &fakeOwnershipRepo{byUser: map[int64][]*domain.XUIClientEntry{
+		1: {{UserID: 1, PanelID: 10, InboundID: 20, ClientEmail: email, CreatedAt: time.Now()}},
+	}}
+	nodes := &fakeNodeRepo{
+		nodes: map[int64]*domain.Node{2: {
+			ID: 2, PanelID: 10, InboundID: 20, Enabled: true,
+			// Pre-existing lifetime from the old client-sum era; the new baseline
+			// columns (LastInbound*) are 0 — exactly the post-upgrade row shape.
+			LifetimeUpBytes: 400, LifetimeDownBytes: 600, LifetimeTotalBytes: 1000,
+		}},
+		byMatch: map[fakeNodeKey]int64{{panelID: 10, inboundID: 20}: 2},
+	}
+	nodeTraffic := &fakeNodeTrafficRepo{}
+	client := &fakeXUIClient{inbounds: []ports.Inbound{{
+		ID: 20, Up: 2_000_000, Down: 3_000_000,
+		ClientStats: []ports.ClientTraffic{{Email: email, Up: 1, Down: 1}},
+	}}}
+	pool := &fakeXUIPool{clients: map[int64]ports.XUIClient{10: client}}
+	svc := New(users, ownership, &fakeTrafficRepo{}, nodes, nodeTraffic, pool, &fakeDisabler{})
+
+	// Poll 1: re-seed only. Lifetime stays at 1000 (no spike); baseline seeded.
+	if err := svc.PollOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	node := nodes.nodes[2]
+	if got := node.LifetimeTotalBytes; got != 1000 {
+		t.Fatalf("after re-seed poll, lifetime total = %d, want unchanged 1000 (no spike)", got)
+	}
+	if got := node.LastInboundTotalBytes; got != 5_000_000 {
+		t.Fatalf("baseline not seeded: LastInboundTotalBytes = %d, want 5000000", got)
+	}
+
+	// Poll 2: inbound advances by 500 up / 700 down → 1200 folds into lifetime.
+	client.inbounds = []ports.Inbound{{
+		ID: 20, Up: 2_000_500, Down: 3_000_700,
+		ClientStats: []ports.ClientTraffic{{Email: email, Up: 1, Down: 1}},
+	}}
+	if err := svc.PollOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	node = nodes.nodes[2]
+	if got := node.LifetimeTotalBytes; got != 2200 {
+		t.Fatalf("after second poll, lifetime total = %d, want 2200 (1000 + 1200 delta)", got)
 	}
 }
 

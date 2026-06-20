@@ -361,9 +361,15 @@ func (s *Service) PollOnce(ctx context.Context) error {
 	// calls drop the wall-clock to roughly one ListInbounds time
 	// regardless of panel count, while the cap prevents tail-end
 	// regressions when admins eventually attach many panels.
+	type inboundCounter struct{ up, down int64 }
 	type panelListResult struct {
 		stats map[int]([]ports.ClientTraffic)
-		err   error
+		// counters holds each inbound's OWN cumulative up/down (ports.Inbound.Up/
+		// Down) — the v3.9.0 source for node-level traffic, replacing the old
+		// "sum the owned clients" approach (which double-counts once a client is
+		// attached to multiple inbounds; see docs/v3.9.0-client-multi-inbound.md).
+		counters map[int]inboundCounter
+		err      error
 	}
 	panelData := make(map[int64]panelListResult, len(byPanel))
 	var panelMu sync.Mutex
@@ -388,11 +394,15 @@ func (s *Service) PollOnce(ctx context.Context) error {
 			// carries — a big win on panels with thousands of clients.
 			listed, lerr := c.ListInboundsSlim(ctx)
 			stats := make(map[int][]ports.ClientTraffic, len(listed))
+			counters := make(map[int]inboundCounter, len(listed))
 			for _, inb := range listed {
 				stats[inb.ID] = inb.ClientStats
+				// Slim list keeps the inbound-level up/down; capture it as the
+				// node-traffic source (LIVE-VERIFIED reliable on 3.3.1).
+				counters[inb.ID] = inboundCounter{up: inb.Up, down: inb.Down}
 			}
 			panelMu.Lock()
-			panelData[pid] = panelListResult{stats: stats, err: lerr}
+			panelData[pid] = panelListResult{stats: stats, counters: counters, err: lerr}
 			panelMu.Unlock()
 		}(panelID)
 	}
@@ -424,15 +434,12 @@ func (s *Service) PollOnce(ctx context.Context) error {
 				trafficByEmail[t.Email] = t
 			}
 			matched := 0
-			var nodeUp, nodeDown int64
 			for _, ref := range refs {
 				t, ok := trafficByEmail[ref.email]
 				if !ok {
 					continue
 				}
 				matched++
-				nodeUp += t.Up
-				nodeDown += t.Down
 				// Take the max across all of this user's clients —
 				// "last online anywhere" is what powers the admin
 				// "最近活跃" column. 3X-UI < 3.1.0 panels report 0
@@ -489,13 +496,18 @@ func (s *Service) PollOnce(ctx context.Context) error {
 					"panel_owned_emails", wanted)
 			}
 
-			// Persist per-node snapshots from the managed client rows we
-			// matched above. Some 3X-UI builds return zero for inbound-level
-			// Up/Down even when clientStats is populated; summing the owned
-			// clients is both more reliable and matches the dashboard contract
-			// that only panel-managed clients are counted.
-			if matched > 0 {
-				if err := s.recordNodeStats(ctx, panelID, inboundID, nodeUp, nodeDown, sink); err != nil {
+			// Persist per-node traffic from the inbound's OWN cumulative counter
+			// (v3.9.0), not a sum of owned clients. Sourcing from the inbound
+			// keeps node stats correct once a client is attached to multiple
+			// inbounds — a client-sum double-counts a shared client (LIVE-VERIFIED
+			// on 3.3.1: both inbounds echo the same aggregate) — and records the
+			// node's real total even when no managed client matched this cycle.
+			// Trade-off: the figure now includes any non-PSP-managed clients on
+			// the same inbound (none on a PSP-exclusive inbound). recordNodeStats
+			// re-seeds its baseline from this counter on the first post-upgrade
+			// poll, so the source switch produces no spike.
+			if ctr, ok := pd.counters[inboundID]; ok {
+				if err := s.recordNodeStats(ctx, panelID, inboundID, ctr.up, ctr.down, sink); err != nil {
 					log.Warn("traffic poll node snapshot",
 						"panel_id", panelID, "inbound_id", inboundID, "err", err)
 				}
@@ -1312,10 +1324,83 @@ func (s *Service) UserNodeUsage(ctx context.Context, userID int64) ([]NodeUsageR
 	return rows, nil
 }
 
-// recordNodeStats writes a per-node snapshot for the inbound on the given
-// panel and updates the node's monotonic lifetime counters. Mirrors the
-// per-user logic in recordAndEnforce: counter resets (latest < prev) collapse
-// to "delta = current value", and only non-zero deltas trigger an Update.
+// ServerUsageRow is one user's usage on a single 3X-UI server (panel) — the
+// per-node rows aggregated by panel. This is the per-(user, server) view: it is
+// the natural unit because a user's clients on one server share its accounting.
+// Today it sums the legacy per-node ownership counters; under the v3.9.0
+// shared-client model it becomes a direct per-psp_client read (one row per
+// (user, panel)) yielding the identical number.
+type ServerUsageRow struct {
+	PanelID    int64
+	ServerName string
+	NodeCount  int
+
+	LifetimeUpBytes    int64
+	LifetimeDownBytes  int64
+	LifetimeTotalBytes int64
+	PeriodUpBytes      int64
+	PeriodDownBytes    int64
+	PeriodTotalBytes   int64
+	TodayUpBytes       int64
+	TodayDownBytes     int64
+	TodayTotalBytes    int64
+}
+
+// UserServerUsage returns one user's usage broken down per SERVER (3X-UI panel):
+// the per-node rows from UserNodeUsage summed by panel, with the panel's
+// friendly name joined from the live pool. Rows are ordered by first appearance
+// (stable). Empty when the user is on no nodes.
+func (s *Service) UserServerUsage(ctx context.Context, userID int64) ([]ServerUsageRow, error) {
+	nodeRows, err := s.UserNodeUsage(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	if len(nodeRows) == 0 {
+		return []ServerUsageRow{}, nil
+	}
+
+	byPanel := map[int64]*ServerUsageRow{}
+	order := make([]int64, 0, len(nodeRows))
+	for _, r := range nodeRows {
+		sr, ok := byPanel[r.PanelID]
+		if !ok {
+			sr = &ServerUsageRow{PanelID: r.PanelID}
+			byPanel[r.PanelID] = sr
+			order = append(order, r.PanelID)
+		}
+		sr.NodeCount++
+		sr.LifetimeUpBytes += r.LifetimeUpBytes
+		sr.LifetimeDownBytes += r.LifetimeDownBytes
+		sr.LifetimeTotalBytes += r.LifetimeTotalBytes
+		sr.PeriodUpBytes += r.PeriodUpBytes
+		sr.PeriodDownBytes += r.PeriodDownBytes
+		sr.PeriodTotalBytes += r.PeriodTotalBytes
+		sr.TodayUpBytes += r.TodayUpBytes
+		sr.TodayDownBytes += r.TodayDownBytes
+		sr.TodayTotalBytes += r.TodayTotalBytes
+	}
+
+	names := map[int64]string{}
+	if s.pool != nil {
+		for _, p := range s.pool.List() {
+			names[p.ID] = p.Name
+		}
+	}
+	out := make([]ServerUsageRow, 0, len(order))
+	for _, pid := range order {
+		sr := byPanel[pid]
+		sr.ServerName = names[pid]
+		out = append(out, *sr)
+	}
+	return out, nil
+}
+
+// recordNodeStats writes a per-node snapshot for the inbound on the given panel
+// and updates the node's monotonic lifetime counters from the inbound's own
+// cumulative up/down (v3.9.0). Counter resets (latest < prev) collapse to
+// "delta = current value". An already-seeded node whose counter is byte-for-byte
+// unchanged this cycle is idle → skipped entirely (no snapshot, no Update),
+// mirroring the per-client zero-delta suppression.
 func (s *Service) recordNodeStats(ctx context.Context, panelID int64, inboundID int, up, down int64, sink *pollSink) error {
 	if s.nodes == nil || s.nodeTraffic == nil {
 		return nil
@@ -1331,27 +1416,39 @@ func (s *Service) recordNodeStats(ctx context.Context, panelID int64, inboundID 
 	}
 	totalBytes := up + down
 
+	// Idle short-circuit: an already-seeded node whose inbound counter is
+	// identical to last poll moved no bytes → emit nothing (avoids one
+	// node_traffic_snapshots row + one counter write per poll for idle inbounds,
+	// which the dropped `matched>0` gate would otherwise produce). Excludes the
+	// first-seed poll (handled below, must persist) and resets (up != last).
+	if node.LastInboundSeeded &&
+		up == node.LastInboundUpBytes &&
+		down == node.LastInboundDownBytes &&
+		totalBytes == node.LastInboundTotalBytes {
+		return nil
+	}
+
 	var dUp, dDown, dTotal int64
-	hasRawBaseline := node.LastTrafficUpBytes != 0 || node.LastTrafficDownBytes != 0 || node.LastTrafficTotalBytes != 0
-	switch {
-	case hasRawBaseline:
-		dUp = monotonicDelta(up, node.LastTrafficUpBytes)
-		dDown = monotonicDelta(down, node.LastTrafficDownBytes)
-		dTotal = monotonicDelta(totalBytes, node.LastTrafficTotalBytes)
-	case node.LifetimeTotalBytes > 0:
-		// Existing installs may already have lifetime values but no raw
-		// baseline fields. Initialize the baseline without double-counting
-		// the current cumulative counters.
+	if node.LastInboundSeeded {
+		dUp = monotonicDelta(up, node.LastInboundUpBytes)
+		dDown = monotonicDelta(down, node.LastInboundDownBytes)
+		dTotal = monotonicDelta(totalBytes, node.LastInboundTotalBytes)
+	} else {
+		// FIRST observation of this node's inbound counter (fresh / imported /
+		// upgraded from the ≤v3.8 client-sum source). Seed the baseline with a
+		// ZERO delta — never fold the inbound's pre-existing cumulative counter
+		// into lifetime; PSP only counts what flows while it manages the node.
+		// This makes the v3.8→v3.9 source switch spike-free for EVERY row,
+		// including a node with Lifetime==0 but a large historical counter.
 		dUp, dDown, dTotal = 0, 0, 0
-	default:
-		dUp, dDown, dTotal = up, down, totalBytes
+		node.LastInboundSeeded = true
 	}
 	node.LifetimeUpBytes += dUp
 	node.LifetimeDownBytes += dDown
 	node.LifetimeTotalBytes += dTotal
-	node.LastTrafficUpBytes = up
-	node.LastTrafficDownBytes = down
-	node.LastTrafficTotalBytes = totalBytes
+	node.LastInboundUpBytes = up
+	node.LastInboundDownBytes = down
+	node.LastInboundTotalBytes = totalBytes
 
 	nodeSnap := &domain.NodeTrafficSnapshot{
 		NodeID:     node.ID,

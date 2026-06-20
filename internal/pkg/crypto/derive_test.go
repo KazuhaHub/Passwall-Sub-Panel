@@ -7,6 +7,38 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 )
 
+// TestNewProxyPassword pins the v3.9.0 stored-password invariants: it is a
+// valid 32-byte SS-2022 PSK (base64 of SHA-256), it equals the SS-2022-256
+// derivation (so migration keeps such clients' passwords stable), it is
+// deterministic, and it differs per UUID.
+func TestNewProxyPassword(t *testing.T) {
+	const uuid = "a265b1ec-cd81-43e7-8239-09f322ef22d6"
+	got := NewProxyPassword(uuid)
+
+	// 32 raw bytes once base64-decoded → a valid aes-256-gcm / chacha20 PSK.
+	raw, err := base64.StdEncoding.DecodeString(got)
+	if err != nil {
+		t.Fatalf("not valid base64: %v", err)
+	}
+	if len(raw) != 32 {
+		t.Fatalf("PSK length = %d bytes, want 32", len(raw))
+	}
+
+	// Must match the SS-2022-256 branch of DeriveProxyPassword so an existing
+	// SS-2022-256 client keeps the same password across the v3.9.0 migration.
+	if want := DeriveProxyPassword(uuid, domain.ProtoSS2022, "2022-blake3-aes-256-gcm"); got != want {
+		t.Fatalf("NewProxyPassword=%q != SS-2022-256 derivation=%q", got, want)
+	}
+
+	// Deterministic + UUID-sensitive.
+	if NewProxyPassword(uuid) != got {
+		t.Fatal("not deterministic")
+	}
+	if NewProxyPassword("different-uuid") == got {
+		t.Fatal("must differ per UUID")
+	}
+}
+
 // TestDetectProtocol_All covers every protocol family the panel renders
 // subscriptions for. Keeps the mapping pinned so a renaming somewhere in
 // 3X-UI's wire protocol can't silently change the dispatch result.

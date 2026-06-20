@@ -361,6 +361,36 @@ type OwnershipRepo interface {
 	BatchUpdateCounters(ctx context.Context, items []*domain.XUIClientEntry) error
 }
 
+// PSPClientRepo persists the v3.9.0 first-class client model: domain.PSPClient
+// (one row per (user, panel, credClass), identified panel-wide by email) plus
+// its PSPClientInbound attachment junction. It is PSP's mirror of 3X-UI's
+// clients + client_inbounds tables and supersedes OwnershipRepo's per-(user,
+// node) rows; the two coexist during the v3.9.0 migration window (sync / render
+// / reconcile move onto this repo in later phases). Added dormant in P4.0 — no
+// service wires it yet.
+type PSPClientRepo interface {
+	// Upsert creates or updates the client keyed by its panel-wide unique
+	// (PanelID, Email) and returns its ID (existing or new). Persists identity +
+	// credentials + counters; the attachment set is managed via SetInbounds.
+	Upsert(ctx context.Context, c *domain.PSPClient) (int64, error)
+	GetByID(ctx context.Context, id int64) (*domain.PSPClient, error)
+	GetByEmail(ctx context.Context, panelID int64, email string) (*domain.PSPClient, error)
+	ListByUser(ctx context.Context, userID int64) ([]*domain.PSPClient, error)
+	// DeleteByEmail removes the client and (cascading) its attachment rows.
+	DeleteByEmail(ctx context.Context, panelID int64, email string) error
+
+	// SetInbounds REPLACES the client's attachment set with the given junction
+	// rows (the DESIRED set reconcile pushes to the panel via attach/detach).
+	// Idempotent; an empty slice detaches the client from everything locally.
+	SetInbounds(ctx context.Context, clientID int64, inbounds []domain.PSPClientInbound) error
+	ListInbounds(ctx context.Context, clientID int64) ([]domain.PSPClientInbound, error)
+
+	// UpdateCounters / BatchUpdateCounters are the narrow counter-only writes for
+	// the traffic poll's end-of-cycle flush, mirroring OwnershipRepo.
+	UpdateCounters(ctx context.Context, c *domain.PSPClient) error
+	BatchUpdateCounters(ctx context.Context, items []*domain.PSPClient) error
+}
+
 type TrafficRepo interface {
 	Insert(ctx context.Context, s *domain.TrafficSnapshot) error
 	LatestForUser(ctx context.Context, userID int64) (*domain.TrafficSnapshot, error)
@@ -1299,6 +1329,7 @@ type Repos struct {
 	Node        NodeRepo
 	Separator   SeparatorRepo
 	Ownership   OwnershipRepo
+	PSPClient   PSPClientRepo
 	Traffic     TrafficRepo
 	NodeTraffic NodeTrafficRepo
 	Audit       AuditRepo

@@ -126,6 +126,8 @@ blast 分析担心"全局删丢掉 per-inbound 语义、绕过 ownership 守卫"
 (仍逐 ownership 行调 `DelOwnedClient`)。
 
 > 若未来 PSP 改成"一个 client 挂多 inbound"(v4 方向),再切回 `detach + inboundIds`。当前不需要。
+>
+> **→ 已立项为 v3.9.0,设计见 [v3.9.0-client-multi-inbound.md](v3.9.0-client-multi-inbound.md)**(凭据全对称 + 模型与 3X-UI 同构;attach/detach 已真机验证)。
 
 ### 4.3 RMW 退役 + axis-A inbound 配置回推(**需 live 验证**)
 

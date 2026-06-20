@@ -324,6 +324,66 @@ func (h *AdminTrafficHandler) UserNodeUsage(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"items": rows})
 }
 
+type userServerUsageRow struct {
+	PanelID    int64  `json:"panel_id"`
+	ServerName string `json:"server_name"`
+	NodeCount  int    `json:"node_count"`
+
+	LifetimeUpBytes    int64 `json:"lifetime_up_bytes"`
+	LifetimeDownBytes  int64 `json:"lifetime_down_bytes"`
+	LifetimeTotalBytes int64 `json:"lifetime_total_bytes"`
+	PeriodUpBytes      int64 `json:"period_up_bytes"`
+	PeriodDownBytes    int64 `json:"period_down_bytes"`
+	PeriodTotalBytes   int64 `json:"period_total_bytes"`
+	TodayUpBytes       int64 `json:"today_up_bytes"`
+	TodayDownBytes     int64 `json:"today_down_bytes"`
+	TodayTotalBytes    int64 `json:"today_total_bytes"`
+}
+
+// UserServerUsage returns one user's usage broken down per SERVER (3X-UI panel)
+// — the per-node usage aggregated by server. Same read-only / operator-scope
+// guard as UserNodeUsage. Sorted by period usage desc so the server the user
+// leans on this period leads.
+func (h *AdminTrafficHandler) UserServerUsage(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid id"})
+		return
+	}
+	if !h.operatorMayView(c, id) {
+		return
+	}
+	usage, err := h.traffic.UserServerUsage(c.Request.Context(), id)
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+	rows := make([]userServerUsageRow, 0, len(usage))
+	for _, u := range usage {
+		rows = append(rows, userServerUsageRow{
+			PanelID:            u.PanelID,
+			ServerName:         u.ServerName,
+			NodeCount:          u.NodeCount,
+			LifetimeUpBytes:    u.LifetimeUpBytes,
+			LifetimeDownBytes:  u.LifetimeDownBytes,
+			LifetimeTotalBytes: u.LifetimeTotalBytes,
+			PeriodUpBytes:      u.PeriodUpBytes,
+			PeriodDownBytes:    u.PeriodDownBytes,
+			PeriodTotalBytes:   u.PeriodTotalBytes,
+			TodayUpBytes:       u.TodayUpBytes,
+			TodayDownBytes:     u.TodayDownBytes,
+			TodayTotalBytes:    u.TodayTotalBytes,
+		})
+	}
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].PeriodTotalBytes != rows[j].PeriodTotalBytes {
+			return rows[i].PeriodTotalBytes > rows[j].PeriodTotalBytes
+		}
+		return rows[i].LifetimeTotalBytes > rows[j].LifetimeTotalBytes
+	})
+	c.JSON(http.StatusOK, gin.H{"items": rows})
+}
+
 func (h *AdminTrafficHandler) Poll(c *gin.Context) {
 	if err := h.traffic.PollOnce(c.Request.Context()); err != nil {
 		respondError(c, err)

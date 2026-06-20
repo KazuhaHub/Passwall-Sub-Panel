@@ -383,12 +383,32 @@ type Node struct {
 	// LifetimeUpBytes / LifetimeDownBytes / LifetimeTotalBytes accumulate
 	// monotonically across 3X-UI counter resets, mirroring the user-level
 	// fields. Updated by the traffic poll worker.
-	LifetimeUpBytes       int64
-	LifetimeDownBytes     int64
-	LifetimeTotalBytes    int64
+	LifetimeUpBytes    int64
+	LifetimeDownBytes  int64
+	LifetimeTotalBytes int64
+	// LastTraffic*Bytes is the LEGACY (≤v3.8) raw baseline: it held the sum of
+	// the owned clients' cumulative counters. v3.9.0 sources node traffic from
+	// the inbound's own up/down counter instead (LastInbound*Bytes below), so
+	// these are frozen at their last client-sum value and no longer read/written
+	// by the poll. Retained (not dropped) to avoid a column-drop migration.
 	LastTrafficUpBytes    int64
 	LastTrafficDownBytes  int64
 	LastTrafficTotalBytes int64
+	// LastInbound*Bytes is the v3.9.0 raw baseline for the node-delta math: the
+	// most recently observed cumulative up/down of the node's 3X-UI INBOUND
+	// (ports.Inbound.Up/Down), not a sum of clients.
+	LastInboundUpBytes    int64
+	LastInboundDownBytes  int64
+	LastInboundTotalBytes int64
+	// LastInboundSeeded gates the FIRST observation of this node's inbound
+	// counter. While false (a fresh row, an imported inbound, or a row upgraded
+	// from ≤v3.8 where the source was client-sum), recordNodeStats seeds the
+	// baseline with a ZERO delta — it never folds the inbound's pre-existing
+	// cumulative counter into lifetime. PSP only counts traffic that flows while
+	// it is managing the node, which is what makes the v3.8→v3.9 source switch
+	// spike-free for EVERY row (including Lifetime==0 nodes), with no data
+	// migration. Set true on the first poll; thereafter deltas accrue normally.
+	LastInboundSeeded bool
 	// Health is updated by the periodic health-check worker. Empty (zero
 	// value) until the first probe runs. Lets the admin Nodes view show a
 	// green/red dot without polling each 3X-UI live.
@@ -574,7 +594,8 @@ const (
 
 // NodeTrafficSnapshot is the per-node analogue of TrafficSnapshot: a
 // monotonic lifetime value at one point in time. Raw inbound counters are kept
-// on Node.LastTraffic* only as the baseline for the next delta calculation.
+// on Node.LastInbound* only as the baseline for the next delta calculation
+// (v3.9.0; the legacy Node.LastTraffic* baseline is frozen, see Node).
 type NodeTrafficSnapshot struct {
 	ID         int64
 	NodeID     int64

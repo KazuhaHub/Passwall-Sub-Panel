@@ -459,18 +459,116 @@ func (c *Client) SetInboundEnable(ctx context.Context, id int, enable bool) erro
 // docs/3xui-3.2-clients-migration.md.
 
 // AddClient creates a first-class client and attaches it to inboundID in one
-// call (POST /clients/add, body {client, inboundIds}). Per-protocol secrets
-// present in spec are sent verbatim; the panel generates any omitted ones.
+// call. Thin single-inbound wrapper over AddClientToInbounds; retained for the
+// existing per-node callers. Per-protocol secrets present in spec are sent
+// verbatim; the panel generates any omitted ones.
 func (c *Client) AddClient(ctx context.Context, inboundID int, spec ports.ClientSpec) error {
+	return c.AddClientToInbounds(ctx, []int{inboundID}, spec)
+}
+
+// AddClientToInbounds creates one first-class client attached to every id in
+// inboundIDs in a single POST /clients/add (body {client, inboundIds}) — one
+// Xray restart regardless of fan-out. Backs the v3.9.0 shared-client model.
+func (c *Client) AddClientToInbounds(ctx context.Context, inboundIDs []int, spec ports.ClientSpec) error {
+	if len(inboundIDs) == 0 {
+		return fmt.Errorf("AddClientToInbounds: at least one inbound id is required")
+	}
 	clientJSON, err := buildClientJSON(spec)
 	if err != nil {
 		return err
 	}
 	body := map[string]any{
 		"client":     json.RawMessage(clientJSON),
-		"inboundIds": []int{inboundID},
+		"inboundIds": inboundIDs,
 	}
 	return c.doJSON(ctx, http.MethodPost, "/panel/api/clients/add", body, nil)
+}
+
+// AttachClient attaches the existing client identified by email to the given
+// inbounds (POST /clients/{email}/attach, body {inboundIds}). Ids it is already
+// on are no-ops upstream. Empty inboundIDs sends no request.
+func (c *Client) AttachClient(ctx context.Context, email string, inboundIDs []int) error {
+	if email == "" {
+		return fmt.Errorf("AttachClient: email is required")
+	}
+	if len(inboundIDs) == 0 {
+		return nil
+	}
+	path := "/panel/api/clients/" + url.PathEscape(email) + "/attach"
+	return c.doJSON(ctx, http.MethodPost, path, map[string]any{"inboundIds": inboundIDs}, nil)
+}
+
+// DetachClient removes the client identified by email from the given inbounds
+// (POST /clients/{email}/detach) without deleting the client record. Pairs
+// where it is not attached are silent no-ops. Empty inboundIDs sends no request.
+func (c *Client) DetachClient(ctx context.Context, email string, inboundIDs []int) error {
+	if email == "" {
+		return fmt.Errorf("DetachClient: email is required")
+	}
+	if len(inboundIDs) == 0 {
+		return nil
+	}
+	path := "/panel/api/clients/" + url.PathEscape(email) + "/detach"
+	return c.doJSON(ctx, http.MethodPost, path, map[string]any{"inboundIds": inboundIDs}, nil)
+}
+
+// BulkAttach attaches many existing clients to many inbounds in one
+// POST /clients/bulkAttach (single Xray restart). The panel returns
+// {attached, skipped, errors}; absent fields decode as empty slices. Empty
+// emails or inboundIDs is a no-op.
+func (c *Client) BulkAttach(ctx context.Context, emails []string, inboundIDs []int) (ports.BulkAttachResult, error) {
+	if len(emails) == 0 || len(inboundIDs) == 0 {
+		return ports.BulkAttachResult{}, nil
+	}
+	body := map[string]any{"emails": emails, "inboundIds": inboundIDs}
+	var out struct {
+		Attached []string          `json:"attached"`
+		Skipped  []string          `json:"skipped"`
+		Errors   []json.RawMessage `json:"errors"`
+	}
+	if err := c.doJSON(ctx, http.MethodPost, "/panel/api/clients/bulkAttach", body, &out); err != nil {
+		return ports.BulkAttachResult{}, err
+	}
+	return ports.BulkAttachResult{Done: out.Attached, Skipped: out.Skipped, Errors: bulkErrStrings(out.Errors)}, nil
+}
+
+// BulkDetach detaches many clients from many inbounds in one
+// POST /clients/bulkDetach (single Xray restart). Mirror of BulkAttach; the
+// panel keeps client records even if they end up orphaned. Empty inputs no-op.
+func (c *Client) BulkDetach(ctx context.Context, emails []string, inboundIDs []int) (ports.BulkAttachResult, error) {
+	if len(emails) == 0 || len(inboundIDs) == 0 {
+		return ports.BulkAttachResult{}, nil
+	}
+	body := map[string]any{"emails": emails, "inboundIds": inboundIDs}
+	var out struct {
+		Detached []string          `json:"detached"`
+		Skipped  []string          `json:"skipped"`
+		Errors   []json.RawMessage `json:"errors"`
+	}
+	if err := c.doJSON(ctx, http.MethodPost, "/panel/api/clients/bulkDetach", body, &out); err != nil {
+		return ports.BulkAttachResult{}, err
+	}
+	return ports.BulkAttachResult{Done: out.Detached, Skipped: out.Skipped, Errors: bulkErrStrings(out.Errors)}, nil
+}
+
+// bulkErrStrings normalises the panel's bulkAttach/bulkDetach "errors" entries
+// to plain strings. The field is empty in the common case; its element shape is
+// not pinned in the API spec, so an entry that is a JSON string is unquoted and
+// anything else (e.g. an object) is kept as its raw JSON text — never dropped.
+func bulkErrStrings(raws []json.RawMessage) []string {
+	if len(raws) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(raws))
+	for _, r := range raws {
+		var s string
+		if err := json.Unmarshal(r, &s); err == nil {
+			out = append(out, s)
+		} else {
+			out = append(out, string(r))
+		}
+	}
+	return out
 }
 
 // UpdateClient replaces the client keyed by spec.Email (POST
@@ -729,6 +827,7 @@ func (c *Client) GetClient(ctx context.Context, email string) (*ports.ClientDeta
 		Auth:       out.Client.Auth,
 		ExpiryTime: out.Client.ExpiryTime,
 		TotalGB:    out.Client.TotalGB,
+		InboundIDs: out.InboundIDs,
 	}, nil
 }
 

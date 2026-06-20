@@ -75,6 +75,45 @@ type XUIClient interface {
 	// upstream are no-ops. Returns the count the panel reports as deleted.
 	BulkDelByEmail(ctx context.Context, emails []string) (int, error)
 
+	// --- v3.9.0 multi-inbound client surface (one client ↔ many inbounds) ---
+	//
+	// 3X-UI stores a client as a first-class row and projects it into the
+	// settings.clients[] of every inbound it is attached to. These methods
+	// expose that many-to-many directly so PSP can move from one-client-per-node
+	// to one-client-per-(user,panel). All are LIVE-VERIFIED on 3.3.1 and present
+	// since 3.1.0, so they are safe across PSP's whole supported range (≥3.2.0).
+	// See docs/v3.9.0-client-multi-inbound.md.
+
+	// AddClientToInbounds creates one first-class client and attaches it to
+	// every id in inboundIDs in a single POST /panel/api/clients/add (one Xray
+	// restart). The single-inbound AddClient is a thin wrapper over this. An
+	// empty inboundIDs slice is an error — the panel needs at least one target.
+	AddClientToInbounds(ctx context.Context, inboundIDs []int, spec ClientSpec) error
+
+	// AttachClient attaches an EXISTING client (keyed by its panel-wide email)
+	// to additional inbounds via POST /panel/api/clients/{email}/attach, body
+	// {inboundIds}. Inbounds the client is already on are no-ops on the panel
+	// side. An empty inboundIDs slice is a no-op (no request sent).
+	AttachClient(ctx context.Context, email string, inboundIDs []int) error
+
+	// DetachClient removes an existing client from the given inbounds via POST
+	// /panel/api/clients/{email}/detach WITHOUT deleting the client record (it
+	// survives even at zero inbounds — use DelClientByEmail for full removal).
+	// (email, inbound) pairs where the client is not attached are silent no-ops.
+	// An empty inboundIDs slice is a no-op.
+	DetachClient(ctx context.Context, email string, inboundIDs []int) error
+
+	// BulkAttach attaches many existing clients to many inbounds in one POST
+	// /panel/api/clients/bulkAttach (single Xray restart). Returns per-email
+	// done / skipped (already attached) / error lists. Empty emails or
+	// inboundIDs is a no-op.
+	BulkAttach(ctx context.Context, emails []string, inboundIDs []int) (BulkAttachResult, error)
+
+	// BulkDetach detaches many clients from many inbounds in one POST
+	// /panel/api/clients/bulkDetach (single Xray restart). Mirror of BulkAttach;
+	// client records are kept even if orphaned. Empty inputs are a no-op.
+	BulkDetach(ctx context.Context, emails []string, inboundIDs []int) (BulkAttachResult, error)
+
 	// GetServerStatus hits /panel/api/server/status. PSP only consumes the
 	// version-identity subset (panel/xray) for compatibility checks; the rest
 	// of the rich status payload (cpu/mem/etc.) is intentionally not surfaced
@@ -164,6 +203,11 @@ type ClientDetail struct {
 	Auth       string // Hysteria2 per-client credential
 	ExpiryTime int64
 	TotalGB    int64
+	// InboundIDs is the set of inbounds this client is currently attached to
+	// (3X-UI's client_inbounds junction). For the legacy one-client-per-node
+	// model this is a single id; the v3.9.0 shared-client model and reconcile's
+	// attach/detach delta both read it to compare desired vs actual attachment.
+	InboundIDs []int
 }
 
 // BulkAddResult is the parsed obj of /panel/api/clients/bulkCreate. Created is
@@ -179,6 +223,17 @@ type BulkAddResult struct {
 type BulkSkip struct {
 	Email  string
 	Reason string
+}
+
+// BulkAttachResult is the parsed obj of /panel/api/clients/bulkAttach and
+// /bulkDetach. Done holds the emails the panel attached (bulkAttach) or
+// detached (bulkDetach); Skipped lists emails already in the target state
+// (already attached / not attached); Errors lists emails the panel failed on.
+// The three together account for every requested email.
+type BulkAttachResult struct {
+	Done    []string
+	Skipped []string
+	Errors  []string
 }
 
 // BulkClientAdd is one client to create-and-own in a batched enrollment (e.g.

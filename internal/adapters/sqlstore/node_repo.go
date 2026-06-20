@@ -90,6 +90,10 @@ func (r *nodeRepo) UpdateTrafficCounters(ctx context.Context, n *domain.Node) er
 			"last_traffic_up_bytes":    n.LastTrafficUpBytes,
 			"last_traffic_down_bytes":  n.LastTrafficDownBytes,
 			"last_traffic_total_bytes": n.LastTrafficTotalBytes,
+			"last_inbound_up_bytes":    n.LastInboundUpBytes,
+			"last_inbound_down_bytes":  n.LastInboundDownBytes,
+			"last_inbound_total_bytes": n.LastInboundTotalBytes,
+			"last_inbound_seeded":      n.LastInboundSeeded,
 		}).Error
 }
 
@@ -116,6 +120,10 @@ func (r *nodeRepo) BatchUpdateTrafficCounters(ctx context.Context, nodes []*doma
 					"last_traffic_up_bytes":    n.LastTrafficUpBytes,
 					"last_traffic_down_bytes":  n.LastTrafficDownBytes,
 					"last_traffic_total_bytes": n.LastTrafficTotalBytes,
+					"last_inbound_up_bytes":    n.LastInboundUpBytes,
+					"last_inbound_down_bytes":  n.LastInboundDownBytes,
+					"last_inbound_total_bytes": n.LastInboundTotalBytes,
+					"last_inbound_seeded":      n.LastInboundSeeded,
 				}).Error; err != nil {
 				return err
 			}

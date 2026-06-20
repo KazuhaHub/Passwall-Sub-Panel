@@ -104,6 +104,67 @@ func TestUserNodeUsage(t *testing.T) {
 	}
 }
 
+// TestUserServerUsage pins the per-(user, server) view: the per-node rows
+// aggregated by panel. One user with two nodes on panel 10 and one on panel 11
+// must yield two server rows with summed lifetime/period and correct node counts.
+func TestUserServerUsage(t *testing.T) {
+	now := time.Now()
+	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	old := todayStart.AddDate(0, 0, -10) // pre-today → today usage 0 (no snapshots)
+
+	ownership := &fakeOwnershipRepo{byUser: map[int64][]*domain.XUIClientEntry{
+		1: {
+			{ID: 1, UserID: 1, PanelID: 10, InboundID: 20, ClientEmail: "u1-n1@x", CreatedAt: old,
+				LifetimeTotalBytes: 400, PeriodBaselineTotalBytes: 140},
+			{ID: 2, UserID: 1, PanelID: 10, InboundID: 21, ClientEmail: "u1-n2@x", CreatedAt: old,
+				LifetimeTotalBytes: 30, PeriodBaselineTotalBytes: 0},
+			{ID: 3, UserID: 1, PanelID: 11, InboundID: 30, ClientEmail: "u1-n3@x", CreatedAt: old,
+				LifetimeTotalBytes: 1000, PeriodBaselineTotalBytes: 200},
+		},
+	}}
+	nodes := &fakeNodeRepo{
+		nodes: map[int64]*domain.Node{
+			101: {ID: 101, PanelID: 10, InboundID: 20},
+			102: {ID: 102, PanelID: 10, InboundID: 21},
+			103: {ID: 103, PanelID: 11, InboundID: 30},
+		},
+		byMatch: map[fakeNodeKey]int64{
+			{panelID: 10, inboundID: 20}: 101,
+			{panelID: 10, inboundID: 21}: 102,
+			{panelID: 11, inboundID: 30}: 103,
+		},
+	}
+
+	svc := New(nil, ownership, &fakeTrafficRepo{}, nodes, nil, nil, nil)
+	rows, err := svc.UserServerUsage(context.Background(), 1)
+	if err != nil {
+		t.Fatalf("UserServerUsage: %v", err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("want 2 server rows, got %d", len(rows))
+	}
+	byPanel := map[int64]ServerUsageRow{}
+	for _, r := range rows {
+		byPanel[r.PanelID] = r
+	}
+	s10, ok := byPanel[10]
+	if !ok {
+		t.Fatal("server (panel) 10 missing")
+	}
+	if s10.NodeCount != 2 || s10.LifetimeTotalBytes != 430 || s10.PeriodTotalBytes != 290 {
+		t.Fatalf("server 10 = nodes %d / lifetime %d / period %d, want 2 / 430 / 290",
+			s10.NodeCount, s10.LifetimeTotalBytes, s10.PeriodTotalBytes)
+	}
+	s11, ok := byPanel[11]
+	if !ok {
+		t.Fatal("server (panel) 11 missing")
+	}
+	if s11.NodeCount != 1 || s11.LifetimeTotalBytes != 1000 || s11.PeriodTotalBytes != 800 {
+		t.Fatalf("server 11 = nodes %d / lifetime %d / period %d, want 1 / 1000 / 800",
+			s11.NodeCount, s11.LifetimeTotalBytes, s11.PeriodTotalBytes)
+	}
+}
+
 // TestUserNodeUsageBatchesNodeLookup pins that the per-node breakdown resolves
 // node identity with ONE List call, not a GetByPanelInbound per owned node (the
 // N+1 that made DB round-trips grow with a user's node count). Pagination can't
