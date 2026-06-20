@@ -103,6 +103,64 @@ type PSPClientProvisioner interface {
 // SetXxx wiring). Until set, ResyncMembership skips the psp_client write.
 func (s *Service) SetPSPProvisioner(p PSPClientProvisioner) { s.psp = p }
 
+// BackfillResult summarizes a BackfillPSPClients pass.
+type BackfillResult struct {
+	Processed int // users whose psp_client set was (re)synced
+	Skipped   int // users skipped (pending-delete, or no provisioner wired)
+	Errors    int // users that errored (logged + skipped, not fatal)
+}
+
+// BackfillPSPClients is the v3.9.0 cutover **Stage 0**: it populates the
+// psp_client model for EVERY user. The shadow dual-write only fires on
+// ResyncMembership, so users who haven't resynced since it shipped have no
+// psp_client rows; this closes that gap before any reader (render/traffic) is
+// ever pointed at the shared-client model.
+//
+// It is DB-only — it runs the SAME clientprov.SyncUser the dual-write uses,
+// which makes NO 3X-UI calls — so it merely fills the dormant psp_client /
+// psp_client_inbounds tables that nothing reads in production yet. Idempotent
+// (SyncUser upserts identity/creds and preserves poll-owned counters), so it is
+// safe to re-run. Per-user failures are logged and skipped, never fatal. A nil
+// provisioner makes the whole pass a no-op.
+func (s *Service) BackfillPSPClients(ctx context.Context) (BackfillResult, error) {
+	var res BackfillResult
+	if s.psp == nil {
+		return res, nil
+	}
+	users, _, err := s.users.List(ctx, ports.UserFilter{}) // PageSize 0 → all users
+	if err != nil {
+		return res, fmt.Errorf("list users: %w", err)
+	}
+	rules := s.emailRules(ctx)
+	for _, u := range users {
+		if u.AutoDisabledReason == domain.DisabledPendingDelete {
+			res.Skipped++
+			continue
+		}
+		g, err := s.groups.GetByID(ctx, u.GroupID)
+		if err != nil {
+			log.Warn("backfill psp_client: load group", "user_id", u.ID, "err", err)
+			res.Errors++
+			continue
+		}
+		nodes, err := s.selector.NodesFor(ctx, g)
+		if err != nil {
+			log.Warn("backfill psp_client: nodes for group", "user_id", u.ID, "err", err)
+			res.Errors++
+			continue
+		}
+		if err := s.psp.SyncUser(ctx, u.ID, u.UUID, rules, nodes); err != nil {
+			log.Warn("backfill psp_client: sync user", "user_id", u.ID, "err", err)
+			res.Errors++
+			continue
+		}
+		res.Processed++
+	}
+	log.Info("psp_client backfill complete",
+		"processed", res.Processed, "skipped", res.Skipped, "errors", res.Errors)
+	return res, nil
+}
+
 // SetBackgroundRunner late-binds the app's tracked async dispatcher (mirrors
 // SetTrafficUsage's lazy wiring). Once set, background resync runs under the
 // panel-wide WaitGroup + background context instead of an untracked goroutine.

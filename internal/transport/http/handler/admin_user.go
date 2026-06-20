@@ -760,6 +760,23 @@ func (h *AdminUserHandler) panelDateToInstant(ctx context.Context, dateStr strin
 	return &t, nil
 }
 
+// BackfillSharedClients is the v3.9.0 cutover Stage-0 trigger (admin-only): it
+// populates the dormant psp_client model for every user (DB-only, no 3X-UI
+// calls, idempotent). Safe to run anytime; nothing reads psp_client in
+// production yet. Returns the processed / skipped / error counts.
+func (h *AdminUserHandler) BackfillSharedClients(c *gin.Context) {
+	res, err := h.user.BackfillPSPClients(c.Request.Context())
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"processed": res.Processed,
+		"skipped":   res.Skipped,
+		"errors":    res.Errors,
+	})
+}
+
 // toDTO is the single-row path (Get / Create / Update). It loads
 // settings + resolves the sub base once per call, then delegates the
 // pure mapping to toDTOWith. List-style callers should bypass this and

@@ -341,6 +341,9 @@ func NewRouter(d Deps) *gin.Engine {
 		staffGroup.POST("/users/:id/set-enabled", users.SetEnabled)
 		staffGroup.GET("/users/:id/rules", users.GetRules)
 		staffGroup.PUT("/users/:id/rules", users.PutRules)
+		// v3.9.0 cutover Stage 0: one-shot psp_client backfill (admin-only;
+		// DB-only, idempotent, nothing reads psp_client in production yet).
+		adminGroup.POST("/clients/backfill-shared", users.BackfillSharedClients)
 
 		nodes := handler.NewAdminNodeHandler(d.Node, d.Sync, d.Repos.Ownership, d.Repos.User, d.Repos.XUIPanel)
 		// Reads + toggle-enabled are operator-safe; create/update/delete and
