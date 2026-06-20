@@ -1606,10 +1606,22 @@ func (s *Service) ResyncMembership(ctx context.Context, userID int64) error {
 			continue
 		}
 		expireTime := u.PushExpireTime()
-		if err := s.syncer.SetOwnedClientEnable(ctx, e.PanelID, e.InboundID, e.ClientEmail,
-			info.protocol, info.ssMethod, u.UUID, info.flow, u.EffectiveEnabled(time.Now()), expireTime, floor); err != nil {
+		// Prefer the prefetched-inbound form: it lets the sync layer skip the
+		// UpdateClient (and its Xray restart) when the panel already matches —
+		// so a steady-state resync of an N-node user costs ~0 restarts instead of
+		// N. The inbound was fetched by the prefetch above (resolveInfo succeeded,
+		// so it's present); fall back to the self-fetching form if not.
+		var uerr error
+		if pd, ok := panelMap[k.panelID]; ok && pd.byInbound[k.inboundID] != nil {
+			uerr = s.syncer.SetOwnedClientEnableWithInbound(ctx, e.PanelID, pd.byInbound[k.inboundID], e.ClientEmail,
+				info.protocol, info.ssMethod, u.UUID, info.flow, u.EffectiveEnabled(time.Now()), expireTime, floor)
+		} else {
+			uerr = s.syncer.SetOwnedClientEnable(ctx, e.PanelID, e.InboundID, e.ClientEmail,
+				info.protocol, info.ssMethod, u.UUID, info.flow, u.EffectiveEnabled(time.Now()), expireTime, floor)
+		}
+		if uerr != nil {
 			if firstErr == nil {
-				firstErr = fmt.Errorf("update %d/%d: %w", k.panelID, k.inboundID, err)
+				firstErr = fmt.Errorf("update %d/%d: %w", k.panelID, k.inboundID, uerr)
 			}
 		}
 	}

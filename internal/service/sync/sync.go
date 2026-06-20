@@ -20,6 +20,7 @@ import (
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/crypto"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/xrayspec"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 )
 
@@ -376,7 +377,51 @@ func (s *Service) SetOwnedClientEnableWithInbound(ctx context.Context, panelID i
 	}
 	spec := buildClientSpec(protocol, ssMethod, userUUID, email, flow, expireTime, totalGB)
 	spec.Enable = enable
+	// No-op skip: if the inbound we already hold shows this client matching the
+	// spec on every PSP-controlled field, UpdateClient would push byte-identical
+	// values and only cost an Xray restart. Skipping keeps a resync / push pass
+	// O(changed clients), not O(all owned clients) — so a large fleet doesn't pay
+	// one Xray reload per owned client every cycle (the "gets laggier at scale"
+	// problem). Conservative: any uncertainty falls through to the update.
+	if clientUnchanged(inb, spec, protocol) {
+		return nil
+	}
 	return c.UpdateClientWithInbound(ctx, inb, userUUID, spec)
+}
+
+// clientUnchanged reports whether inb already holds a client byte-identical to
+// spec on every field PSP would push, so an UpdateClient would be a pure no-op
+// (its only effect being an Xray restart). It returns false — i.e. "go ahead and
+// update" — whenever it cannot FULLY verify a match: a nil/slim inbound, a
+// missing client, a settings parse error, or Hysteria2 (whose `auth` credential
+// is not represented in the parsed client). That conservatism guarantees a skip
+// never leaves the panel stale; the worst case is an unnecessary update, exactly
+// today's behaviour.
+func clientUnchanged(inb *ports.Inbound, spec ports.ClientSpec, protocol domain.Protocol) bool {
+	if inb == nil || protocol == domain.ProtoHysteria2 {
+		return false
+	}
+	settings, err := xrayspec.ParseSettings(inb.Settings)
+	if err != nil {
+		return false
+	}
+	cur := xrayspec.FindClient(settings.Clients, spec.Email)
+	if cur == nil {
+		return false
+	}
+	if cur.IsEnabled() != spec.Enable ||
+		cur.Flow != spec.Flow ||
+		cur.ExpiryTime != spec.ExpiryTime ||
+		cur.TotalGB != spec.TotalGB ||
+		cur.ID != spec.ID {
+		return false
+	}
+	// Trojan/SS/SS-2022 also carry a password; VLESS/VMess leave spec.Password
+	// empty (so it's not compared — the id check above covers them).
+	if spec.Password != "" && cur.Password != spec.Password {
+		return false
+	}
+	return true
 }
 
 // DelAllOwnedForUser removes every 3X-UI client recorded under userID,
