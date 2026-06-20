@@ -4,6 +4,24 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## v3.9.0-beta.1 — 2026-06-20
+
+「一个 client 挂多 inbound」共享客户端模型的地基,加上一项可立即用的可观测功能与一项规模化性能修复。共享模型本身(render / sync 切到共享 client)**尚未启用**,本期只落地基础设施,对生产无行为影响。
+
+### 新增
+
+- **按服务器用量(每用户 × 每 Server)** —— 用户流量详情新增「按服务器用量」表(累计 / 本周期 / 今日,↑上行 ↓下行,可排序 + 合计),把该用户在每个 3X-UI 服务器上的用量分行展示(在「按节点用量」之上)。复用既有数据,**零额外 3X-UI 调用**,共享 client 迁移后口径不变。
+
+### 性能
+
+- **跳过无变化的 client 更新** —— resync / 配置下发时,若 3X-UI 上的 client 已与目标完全一致,不再发冗余 `updateClient`(每次都会触发一次 Xray 重启)。稳态下 N 节点用户的 resync 从 ~N 次重启降到 ~0,**规模越大收益越明显**。保守判定:任何无法完全确认一致的情况(slim inbound / 缺客户端 / Hysteria2 等)都照常更新,绝不会留下过期状态。
+- **节点级流量改读 inbound 自身计数器** —— 不再逐个累加 owned client,改读 inbound 的 `up/down`(为共享 client 下避免重复计数做准备);升级首轮以 0 增量重新播种基线,无突刺。
+
+### 工程(dormant,不影响生产)
+
+- **3X-UI 多 inbound 客户端 API 适配** —— 新增 `attach` / `detach` / 多 inbound `add` / `bulkAttach` / `bulkDetach`,`clients/get` 回填 `inboundIds`(已在真实 3.3.1 面板端到端验证)。
+- **v3.9.0 共享客户端模型地基** —— `psp_client` + `psp_client_inbound` 表与仓储、统一凭据生成、节点→期望客户端规划器、provisioner,以及 resync 时的**影子 dual-write**(尽力而为、与现有 ownership 流程隔离,生产暂无读取方)。设计与经多智能体对抗式验证的切换计划(含 7 个切换期风险)见 `docs/v3.9.0-client-multi-inbound.md`。
+
 ## v3.8.0 — 2026-06-17
 
 **3.8.0 正式版**。汇总 beta.1~13 的全部内容,核心是「分组化管理」与一批分流 / 安全 / 对接增强。各项细节见下方对应 beta 条目。
