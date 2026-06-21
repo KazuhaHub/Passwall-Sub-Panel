@@ -528,14 +528,15 @@ func (s *Service) PollOnce(ctx context.Context) error {
 
 	mark("Phase 2 inbound processing (sink appends)")
 
-	// v3.9.0 Stage 3 — meter shared-client traffic into the user quota totals.
-	// After the render flip (SubRenderUseSharedClient) a user's traffic accrues
-	// under the shared client's email (u{uid}@), which has no ownership row, so the
-	// per-node loop above misses it. Read it ONCE per shared client by email from
-	// the panel's aggregate (every attached inbound echoes the same figure — never
-	// sum per-inbound) and fold the monotonic delta into totals so quota/lifetime
-	// stay correct. Gated + nil-tolerant: zero cost until the cutover gate is on.
-	if pollCfg.SubRenderUseSharedClient && s.pspClient != nil {
+	// v3.9.0 — meter shared-client traffic into the user quota totals. Once a user
+	// is migrated, their traffic accrues under the shared client's email (u{uid}@),
+	// which has no ownership row, so the per-node loop above misses it. Read it ONCE
+	// per shared client by email from the panel's aggregate (every attached inbound
+	// echoes the same figure — never sum per-inbound) and fold the monotonic delta
+	// into totals. Runs UNCONDITIONALLY whenever the repo is wired: before a user
+	// migrates the shared client has no 3X-UI traffic so this is a no-op for them,
+	// and summing per-node + shared stays correct across the migration window.
+	if s.pspClient != nil {
 		if clients, err := s.pspClient.ListAll(ctx); err != nil {
 			log.Warn("traffic poll shared-client list failed; skipping shared metering this cycle", "err", err)
 		} else {
