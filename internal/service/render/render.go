@@ -282,6 +282,9 @@ func (s *Service) buildProxies(ctx context.Context, u *domain.User, items []rend
 	// (transition window) batch into one ListInbounds per panel. See
 	// resolveInbounds.
 	inboundByNode := s.resolveInbounds(ctx, items, st)
+	// v3.9.0 cutover gate (Stage 2): when SubRenderUseSharedClient is on, emit the
+	// stored shared-client password for provisioned nodes; nil = legacy derive.
+	cp := s.buildCredPlan(ctx, u, st)
 
 	out := make([]map[string]any, 0, len(items))
 	for _, it := range items {
@@ -296,7 +299,7 @@ func (s *Service) buildProxies(ctx context.Context, u *domain.User, items []rend
 			continue
 		}
 		userEmail := u.ClientEmail(it.node.ID, emailRules)
-		block, err := emitProxy(it.name, it.node, u, inb, userEmail, it.relay)
+		block, err := emitProxy(it.name, it.node, u, inb, userEmail, it.relay, cp)
 		if err != nil {
 			log.Warn("render: skip node, emit failed", "node_id", it.node.ID, "err", err)
 			continue

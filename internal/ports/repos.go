@@ -987,6 +987,15 @@ type UISettings struct {
 	// SubPath is the URL path prefix for subscription endpoints.
 	// Defaults to "sub". Dynamic, no restart required.
 	SubPath string `yaml:"sub_path" json:"sub_path"`
+	// SubRenderUseSharedClient is the v3.9.0 cutover gate (HOLE #1 / Stage 2).
+	// OFF (default, zero value) → render emits the legacy per-node DERIVED
+	// credentials, exactly as before. ON → render emits the STORED shared-client
+	// credentials (one psp_client per (user, panel, partition); see clientplan).
+	// This is the irreversible flip: only turn it on AFTER the cutover runbook
+	// (backfill-shared → provision-shared → full resync) has provisioned every
+	// shared client in 3X-UI and the lifecycle hooks are keeping them in lockstep,
+	// or live subscriptions break. Dynamic, no restart required.
+	SubRenderUseSharedClient bool `yaml:"sub_render_use_shared_client" json:"sub_render_use_shared_client"`
 	// Deprecated: superseded by SubClients (v3.3.0). Retained only so the KV
 	// loader can read legacy rows and migrate them once; no longer exposed via
 	// the admin API. Remove in the next major (v4.0.0) together with sub_clients_legacy.go.

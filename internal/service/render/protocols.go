@@ -23,7 +23,7 @@ import (
 // Returns (nil, nil) when the protocol is recognised but not yet supported;
 // returns (nil, err) on configuration errors such as a missing server
 // address. Callers skip the node on either nil return value.
-func emitProxy(displayName string, n *domain.Node, u *domain.User, inb *ports.Inbound, userEmail string, relay *domain.RelayLine) (map[string]any, error) {
+func emitProxy(displayName string, n *domain.Node, u *domain.User, inb *ports.Inbound, userEmail string, relay *domain.RelayLine, cp *credPlan) (map[string]any, error) {
 	var settings xuiInboundSettings
 	_ = json.Unmarshal([]byte(inb.Settings), &settings)
 	var stream xuiStreamSettings
@@ -54,12 +54,12 @@ func emitProxy(displayName string, n *domain.Node, u *domain.User, inb *ports.In
 	case domain.ProtoVMess:
 		return emitVMess(base, u.UUID, stream), nil
 	case domain.ProtoTrojan:
-		return emitTrojan(base, crypto.DeriveProxyPassword(u.UUID, protocol, settings.Method), stream), nil
+		return emitTrojan(base, cp.password(n.ID, u.UUID, protocol, settings.Method), stream), nil
 	case domain.ProtoSS:
-		return emitSSProxy(base, settings.Method, crypto.DeriveProxyPassword(u.UUID, protocol, settings.Method)), nil
+		return emitSSProxy(base, settings.Method, cp.password(n.ID, u.UUID, protocol, settings.Method)), nil
 	case domain.ProtoSS2022:
 		return emitSS2022(base, settings.Method, settings.Password,
-			crypto.DeriveProxyPassword(u.UUID, protocol, settings.Method)), nil
+			cp.password(n.ID, u.UUID, protocol, settings.Method)), nil
 	case domain.ProtoHysteria2:
 		// Per-user password is the user's UUID (same convention as VLESS:
 		// the panel-managed credential is what 3X-UI stores per client).

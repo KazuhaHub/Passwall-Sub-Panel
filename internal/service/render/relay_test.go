@@ -102,7 +102,7 @@ func TestEmitProxy_Relay(t *testing.T) {
 	u := &domain.User{UUID: "uuid-1"}
 
 	// Direct: untouched landing endpoint.
-	direct, err := emitProxy("HK", n, u, inb, "", nil)
+	direct, err := emitProxy("HK", n, u, inb, "", nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -115,7 +115,7 @@ func TestEmitProxy_Relay(t *testing.T) {
 
 	// CDN line: full override.
 	cdn := &domain.RelayLine{Address: "104.16.0.1", Port: 8443, SNI: "cdn.example.com", Host: "cdn.example.com", Enabled: true}
-	got, err := emitProxy("HK CDN", n, u, inb, "", cdn)
+	got, err := emitProxy("HK CDN", n, u, inb, "", cdn, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -136,7 +136,7 @@ func TestEmitProxy_Relay(t *testing.T) {
 
 	// Plain L4 line: only server changes; port falls back to inbound; SNI/Host kept.
 	l4 := &domain.RelayLine{Address: "relay.cn", Enabled: true}
-	got, err = emitProxy("HK L4", n, u, inb, "", l4)
+	got, err = emitProxy("HK L4", n, u, inb, "", l4, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -156,7 +156,7 @@ func TestBuildURI_Relay(t *testing.T) {
 	u := &domain.User{UUID: "uuid-1"}
 
 	cdn := &domain.RelayLine{Address: "104.16.0.1", Port: 8443, SNI: "cdn.example.com", Host: "cdn.example.com", Enabled: true}
-	uri, err := buildURI("HK CDN", n, u, inb, "", cdn)
+	uri, err := buildURI("HK CDN", n, u, inb, "", cdn, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -179,7 +179,7 @@ func TestEmitSingBoxOutbound_Relay(t *testing.T) {
 	u := &domain.User{UUID: "uuid-1"}
 
 	cdn := &domain.RelayLine{Address: "104.16.0.1", Port: 8443, SNI: "cdn.example.com", Host: "cdn.example.com", Enabled: true}
-	got, err := emitSingBoxOutbound("HK CDN", n, u, inb, "", cdn)
+	got, err := emitSingBoxOutbound("HK CDN", n, u, inb, "", cdn, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

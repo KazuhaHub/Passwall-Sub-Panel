@@ -88,6 +88,9 @@ func (s *Service) buildSingBoxOutbounds(ctx context.Context, u *domain.User, ite
 	// Local snapshot for captured nodes, one batched ListInbounds per panel for
 	// the un-captured transition-window remainder. See resolveInbounds.
 	inboundByNode := s.resolveInbounds(ctx, items, st)
+	// v3.9.0 cutover gate (Stage 2): stored shared-client passwords for
+	// provisioned nodes when SubRenderUseSharedClient is on; nil = legacy derive.
+	cp := s.buildCredPlan(ctx, u, st)
 
 	nodeTags := make([]string, 0, len(items))
 	for _, it := range items {
@@ -117,7 +120,7 @@ func (s *Service) buildSingBoxOutbounds(ctx context.Context, u *domain.User, ite
 			continue
 		}
 		userEmail := u.ClientEmail(it.node.ID, emailRules)
-		block, err := emitSingBoxOutbound(it.name, it.node, u, inb, userEmail, it.relay)
+		block, err := emitSingBoxOutbound(it.name, it.node, u, inb, userEmail, it.relay, cp)
 		if err != nil {
 			log.Warn("render: skip node, emit sing-box failed", "node_id", it.node.ID, "err", err)
 			continue
@@ -136,7 +139,7 @@ func (s *Service) buildSingBoxOutbounds(ctx context.Context, u *domain.User, ite
 	return out
 }
 
-func emitSingBoxOutbound(tag string, n *domain.Node, u *domain.User, inb *ports.Inbound, userEmail string, relay *domain.RelayLine) (map[string]any, error) {
+func emitSingBoxOutbound(tag string, n *domain.Node, u *domain.User, inb *ports.Inbound, userEmail string, relay *domain.RelayLine, cp *credPlan) (map[string]any, error) {
 	var settings xuiInboundSettings
 	_ = json.Unmarshal([]byte(inb.Settings), &settings)
 	var stream xuiStreamSettings
@@ -179,19 +182,19 @@ func emitSingBoxOutbound(tag string, n *domain.Node, u *domain.User, inb *ports.
 		return base, nil
 	case domain.ProtoTrojan:
 		base["type"] = "trojan"
-		base["password"] = crypto.DeriveProxyPassword(u.UUID, protocol, settings.Method)
+		base["password"] = cp.password(n.ID, u.UUID, protocol, settings.Method)
 		applySingBoxTLS(base, stream)
 		applySingBoxTransport(base, stream)
 		return base, nil
 	case domain.ProtoSS:
 		base["type"] = "shadowsocks"
 		base["method"] = settings.Method
-		base["password"] = crypto.DeriveProxyPassword(u.UUID, protocol, settings.Method)
+		base["password"] = cp.password(n.ID, u.UUID, protocol, settings.Method)
 		return base, nil
 	case domain.ProtoSS2022:
 		base["type"] = "shadowsocks"
 		base["method"] = settings.Method
-		base["password"] = settings.Password + ":" + crypto.DeriveProxyPassword(u.UUID, protocol, settings.Method)
+		base["password"] = settings.Password + ":" + cp.password(n.ID, u.UUID, protocol, settings.Method)
 		return base, nil
 	case domain.ProtoHysteria2:
 		// buildSingBoxHysteria2Outbound takes its own base map shape, so
