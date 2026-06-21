@@ -322,6 +322,7 @@ func (r *fakeOwnership) ListByUsers(ctx context.Context, userIDs []int64) (map[i
 func (r *fakeOwnership) ListByUser(ctx context.Context, userID int64) ([]*domain.XUIClientEntry, error) {
 	return r.listEntries, nil
 }
+func (r *fakeOwnership) DistinctUserIDs(ctx context.Context) ([]int64, error) { return nil, nil }
 func (r *fakeOwnership) ListByInbound(ctx context.Context, panelID int64, inboundID int) ([]*domain.XUIClientEntry, error) {
 	return r.listEntries, nil
 }

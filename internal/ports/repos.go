@@ -336,6 +336,9 @@ type OwnershipRepo interface {
 	RemoveByMatch(ctx context.Context, panelID int64, inboundID int, email string) error
 	GetByMatch(ctx context.Context, panelID int64, inboundID int, email string) (*domain.XUIClientEntry, error)
 	ListByUser(ctx context.Context, userID int64) ([]*domain.XUIClientEntry, error)
+	// DistinctUserIDs returns every user_id still holding a legacy ownership row
+	// (the not-yet-migrated set). Empty = shared-client migration complete. V3-only.
+	DistinctUserIDs(ctx context.Context) ([]int64, error)
 	// ListByUsers is the batched form of ListByUser. PollOnce calls it once
 	// at the top of each cycle to bucket every user's ownership rows in a
 	// single SQL roundtrip instead of N. Mirrors TrafficRepo.LatestForUsers's

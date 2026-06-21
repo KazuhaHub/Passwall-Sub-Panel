@@ -1183,6 +1183,7 @@ func (r *fakeOwnershipRepo) ListByUser(ctx context.Context, userID int64) ([]*do
 	}
 	return out, nil
 }
+func (r *fakeOwnershipRepo) DistinctUserIDs(ctx context.Context) ([]int64, error) { return nil, nil }
 func (r *fakeOwnershipRepo) ListByUsers(ctx context.Context, userIDs []int64) (map[int64][]*domain.XUIClientEntry, error) {
 	out := make(map[int64][]*domain.XUIClientEntry, len(userIDs))
 	for _, id := range userIDs {

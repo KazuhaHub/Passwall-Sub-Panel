@@ -42,6 +42,19 @@ func (r *ownershipRepo) GetByMatch(ctx context.Context, panelID int64, inboundID
 	return row.toDomain(), nil
 }
 
+// DistinctUserIDs returns every user_id that still has at least one legacy
+// ownership row — i.e. the set of users not yet migrated to the shared-client
+// model. The V3 migration sweep enqueues a user_migrate task per returned id;
+// an empty result means the migration is complete. V3-transitional.
+func (r *ownershipRepo) DistinctUserIDs(ctx context.Context) ([]int64, error) {
+	var ids []int64
+	if err := r.db.WithContext(ctx).Model(&ownershipRow{}).
+		Distinct().Pluck("user_id", &ids).Error; err != nil {
+		return nil, err
+	}
+	return ids, nil
+}
+
 func (r *ownershipRepo) ListByUser(ctx context.Context, userID int64) ([]*domain.XUIClientEntry, error) {
 	var rows []ownershipRow
 	if err := r.db.WithContext(ctx).Where("user_id = ?", userID).Find(&rows).Error; err != nil {

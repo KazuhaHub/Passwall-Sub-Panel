@@ -158,6 +158,42 @@ type BackfillResult struct {
 	Errors    int // users that errored (logged + skipped, not fatal)
 }
 
+// EnqueueSharedMigration is the V3-transitional boot trigger for the silent
+// shared-client migration. It backfills the psp_client model, then enqueues one
+// user_migrate sync task per user that still holds legacy ownership rows. The
+// sync-task loop drains them with backoff (surviving a 3X-UI outage — the
+// "兜底"). Self-regulating: once every user is migrated (no ownership rows) it
+// enqueues nothing, so it is cheap to call on every boot until done; enqueue is
+// deduped per (type, user). Returns the number of users enqueued. V3-ONLY.
+func (s *Service) EnqueueSharedMigration(ctx context.Context) (int, error) {
+	if s.ownership == nil || s.tasks == nil {
+		return 0, nil
+	}
+	pending, err := s.ownership.DistinctUserIDs(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("list un-migrated users: %w", err)
+	}
+	if len(pending) == 0 {
+		return 0, nil // already fully migrated
+	}
+	// Build the psp_client model (idempotent, DB-only) so the per-user tasks have
+	// something to provision. Best-effort: a failure here doesn't block enqueuing
+	// — each task re-derives from current state on run.
+	if _, err := s.BackfillPSPClients(ctx); err != nil {
+		log.Warn("shared migration backfill failed (tasks will still run)", "err", err)
+	}
+	n := 0
+	for _, uid := range pending {
+		if err := s.enqueueUserTask(ctx, domain.SyncTaskUserMigrate, uid, "migrate to shared client"); err != nil {
+			log.Warn("enqueue user migrate task", "user_id", uid, "err", err)
+			continue
+		}
+		n++
+	}
+	log.Info("shared-client migration enqueued", "users", n)
+	return n, nil
+}
+
 // BackfillPSPClients is the v3.9.0 cutover **Stage 0**: it populates the
 // psp_client model for EVERY user. The shadow dual-write only fires on
 // ResyncMembership, so users who haven't resynced since it shipped have no

@@ -459,6 +459,20 @@ func (a *App) Run() error {
 		a.probePanelVersionsOnce(bgCtx)
 	})
 	safego.GoTracked(&a.bgWG, "sync-task-loop", func() { a.runSyncTaskLoop(bgCtx) })
+	// V3-transitional: kick off the silent shared-client migration. Only enqueues
+	// per-user tasks for users still on the legacy per-node model; the sync-task
+	// loop (started above) drains them with backoff. Self-regulating + deduped, so
+	// it's a cheap no-op once every install has migrated. Removed at V4.
+	safego.GoTracked(&a.bgWG, "shared-migration-boot", func() {
+		if a.user == nil {
+			return
+		}
+		if n, err := a.user.EnqueueSharedMigration(bgCtx); err != nil {
+			log.Warn("shared-client migration enqueue failed", "err", err)
+		} else if n > 0 {
+			log.Info("shared-client migration started", "users_enqueued", n)
+		}
+	})
 	safego.GoTracked(&a.bgWG, "audit-cleanup-loop", func() { a.runAuditCleanupLoop(bgCtx) })
 	safego.GoTracked(&a.bgWG, "geo-update-loop", func() { a.runGeoUpdateLoop(bgCtx) })
 	safego.GoTracked(&a.bgWG, "traffic-loop", func() { a.runTrafficLoop(bgCtx) })
