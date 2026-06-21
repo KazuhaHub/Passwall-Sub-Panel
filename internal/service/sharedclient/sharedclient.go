@@ -23,22 +23,19 @@ type Service struct {
 	clients ports.PSPClientRepo
 	pool    ports.XUIPool
 	nodes   ports.NodeRepo
-	// ownership + settings are late-bound (SetCleanupDeps), used only by the
-	// Stage-4 legacy cleanup. Kept off New() so existing callers/tests are
-	// unaffected; nil disables cleanup (it returns an error rather than acting).
+	// ownership is late-bound (SetOwnershipRepo): the migration's deleteLegacyForUser
+	// reads + removes legacy per-node ownership rows. nil = legacy delete is skipped.
 	ownership ports.OwnershipRepo
-	settings  ports.SettingsRepo
 }
 
 func New(clients ports.PSPClientRepo, pool ports.XUIPool, nodes ports.NodeRepo) *Service {
 	return &Service{clients: clients, pool: pool, nodes: nodes}
 }
 
-// SetCleanupDeps late-binds the repos the Stage-4 legacy cleanup needs (the old
-// per-node ownership clients + the settings gate). Until set, CleanupLegacy* refuse.
-func (s *Service) SetCleanupDeps(ownership ports.OwnershipRepo, settings ports.SettingsRepo) {
+// SetOwnershipRepo late-binds the legacy ownership repo the migration uses to find
+// and delete a user's per-node clients. Until set, deleteLegacyForUser is a no-op.
+func (s *Service) SetOwnershipRepo(ownership ports.OwnershipRepo) {
 	s.ownership = ownership
-	s.settings = settings
 }
 
 // ProvisionResult summarizes one provisioning pass.
@@ -160,34 +157,6 @@ func (s *Service) ProvisionClient(ctx context.Context, c *domain.PSPClient) (Pro
 	return res, nil
 }
 
-// ProvisionAll provisions every psp_client in the system — the operator-run
-// Stage-1 pass that creates all shared clients in 3X-UI. Per-client failures are
-// logged and counted; the first is returned but every client is attempted.
-func (s *Service) ProvisionAll(ctx context.Context) (ProvisionResult, error) {
-	all, err := s.clients.ListAll(ctx)
-	if err != nil {
-		return ProvisionResult{}, fmt.Errorf("list clients: %w", err)
-	}
-	var total ProvisionResult
-	var firstErr error
-	for _, c := range all {
-		r, err := s.ProvisionClient(ctx, c)
-		if err != nil {
-			log.Warn("sharedclient: provision", "client_id", c.ID, "email", c.Email, "err", err)
-			if firstErr == nil {
-				firstErr = err
-			}
-		}
-		if r.Created {
-			total.Created = true
-		}
-		total.Provisioned += r.Provisioned
-		total.Skipped += r.Skipped
-	}
-	log.Info("sharedclient: provision-all complete", "provisioned", total.Provisioned, "skipped", total.Skipped)
-	return total, firstErr
-}
-
 // SyncLifecycle pushes the user's current enable / expiry / quota-floor onto the
 // shared client in 3X-UI (UpdateClient by email — propagates to every inbound the
 // client is attached to). This is HOLE #1: without it, a disabled / expired /
@@ -295,25 +264,6 @@ func (s *Service) MigrateUser(ctx context.Context, userID int64) (MigrateResult,
 	return res, nil
 }
 
-// CleanupLegacyUser removes a user's legacy per-node clients (the XUIClientEntry
-// ownership model) from 3X-UI, gated on the (legacy) render flag being on. Kept
-// only for the deprecated Stage-4 cleanup endpoint; the migration path uses the
-// gate-free deleteLegacyForUser directly.
-func (s *Service) CleanupLegacyUser(ctx context.Context, userID int64) (CleanupResult, error) {
-	var res CleanupResult
-	if s.settings == nil {
-		return res, fmt.Errorf("cleanup deps not wired")
-	}
-	st, err := s.settings.Load(ctx, ports.UISettings{})
-	if err != nil {
-		return res, fmt.Errorf("load settings: %w", err)
-	}
-	if !st.SubRenderUseSharedClient {
-		return res, fmt.Errorf("refusing legacy cleanup: render gate SubRenderUseSharedClient is OFF (per-node clients are still the rendered creds)")
-	}
-	return s.deleteLegacyForUser(ctx, userID)
-}
-
 // deleteLegacyForUser is the gate-free core: delete every legacy per-node client
 // whose (panel, inbound) is now served by a CONFIRMED-provisioned shared client,
 // plus its ownership row. Nodes not yet provisioned under a shared client are
@@ -377,39 +327,6 @@ func (s *Service) deleteLegacyForUser(ctx context.Context, userID int64) (Cleanu
 		res.Deleted++
 	}
 	return res, nil
-}
-
-// CleanupLegacyAll runs CleanupLegacyUser for every user that holds a shared
-// client. Returns the first error but attempts all.
-func (s *Service) CleanupLegacyAll(ctx context.Context) (CleanupResult, error) {
-	if s.ownership == nil || s.settings == nil {
-		return CleanupResult{}, fmt.Errorf("cleanup deps not wired")
-	}
-	all, err := s.clients.ListAll(ctx)
-	if err != nil {
-		return CleanupResult{}, fmt.Errorf("list clients: %w", err)
-	}
-	seen := map[int64]bool{}
-	var total CleanupResult
-	var firstErr error
-	for _, c := range all {
-		if seen[c.UserID] {
-			continue
-		}
-		seen[c.UserID] = true
-		r, err := s.CleanupLegacyUser(ctx, c.UserID)
-		if err != nil {
-			if firstErr == nil {
-				firstErr = err
-			}
-			continue
-		}
-		total.Deleted += r.Deleted
-		total.Kept += r.Kept
-		total.Skipped += r.Skipped
-	}
-	log.Info("sharedclient: legacy cleanup complete", "deleted", total.Deleted, "kept", total.Kept, "skipped", total.Skipped)
-	return total, firstErr
 }
 
 // ProvisionUser provisions every shared client a user holds (across panels).

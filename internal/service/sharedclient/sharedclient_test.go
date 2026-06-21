@@ -112,15 +112,6 @@ func (o *fakeOwnership) Remove(_ context.Context, id int64) error {
 	return nil
 }
 
-type fakeSettings struct {
-	ports.SettingsRepo
-	gate bool
-}
-
-func (s fakeSettings) Load(_ context.Context, _ ports.UISettings) (ports.UISettings, error) {
-	return ports.UISettings{SubRenderUseSharedClient: s.gate}, nil
-}
-
 type fakePool struct {
 	ports.XUIPool
 	c ports.XUIClient
@@ -279,7 +270,7 @@ func TestMigrateUser_ProvisionsThenDeletesLegacy(t *testing.T) {
 	}}
 	xui := &fakeXUI{confirm: []int{101, 102}} // 3X-UI confirms both attaches
 	svc := New(clients, fakePool{c: xui}, nodes)
-	svc.SetCleanupDeps(own, fakeSettings{gate: false}) // gate is irrelevant to MigrateUser
+	svc.SetOwnershipRepo(own)
 
 	res, err := svc.MigrateUser(context.Background(), 7)
 	if err != nil {
@@ -312,65 +303,13 @@ func TestMigrateUser_ProvisionFailureKeepsLegacy(t *testing.T) {
 	}}
 	xui := &fakeXUI{failAdd: true} // provisioning fails
 	svc := New(clients, fakePool{c: xui}, nodes)
-	svc.SetCleanupDeps(own, fakeSettings{gate: false})
+	svc.SetOwnershipRepo(own)
 
 	if _, err := svc.MigrateUser(context.Background(), 7); err == nil {
 		t.Fatal("MigrateUser must return an error when provisioning fails")
 	}
 	if len(xui.deleted) != 0 || len(own.removedID) != 0 {
 		t.Fatal("a failed provision must NOT delete any legacy per-node client")
-	}
-}
-
-func TestCleanupLegacyUser_DeletesProvisionedKeepsRest(t *testing.T) {
-	clients := &fakeClients{
-		byUser: []*domain.PSPClient{{ID: 1, UserID: 7, PanelID: 10}},
-		attachments: []domain.PSPClientInbound{
-			{ClientID: 1, NodeID: 11, Provisioned: true},  // node 11 → (panel10, inbound101) live
-			{ClientID: 1, NodeID: 12, Provisioned: false}, // node 12 → not provisioned
-		},
-	}
-	nodes := fakeNodes{byID: map[int64]*domain.Node{
-		11: {ID: 11, PanelID: 10, InboundID: 101},
-		12: {ID: 12, PanelID: 10, InboundID: 102},
-	}}
-	own := &fakeOwnership{entries: []*domain.XUIClientEntry{
-		{ID: 501, PanelID: 10, InboundID: 101, ClientEmail: "u7-n11@psp.local"}, // covered → delete
-		{ID: 502, PanelID: 10, InboundID: 102, ClientEmail: "u7-n12@psp.local"}, // not covered → keep
-	}}
-	xui := &fakeXUI{}
-	svc := New(clients, fakePool{c: xui}, nodes)
-	svc.SetCleanupDeps(own, fakeSettings{gate: true})
-
-	res, err := svc.CleanupLegacyUser(context.Background(), 7)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if res.Deleted != 1 || res.Kept != 1 {
-		t.Fatalf("result = %+v, want 1 deleted + 1 kept", res)
-	}
-	if len(xui.deleted) != 1 || xui.deleted[0].inbound != 101 || xui.deleted[0].email != "u7-n11@psp.local" {
-		t.Fatalf("must delete only the covered per-node client: %+v", xui.deleted)
-	}
-	if len(own.removedID) != 1 || own.removedID[0] != 501 {
-		t.Fatalf("must remove only ownership row 501: %+v", own.removedID)
-	}
-}
-
-// HOLE #1 safety: cleanup must REFUSE while the render gate is off (the per-node
-// clients are still the rendered creds — deleting them would break live subs).
-func TestCleanupLegacyUser_RefusesWhenGateOff(t *testing.T) {
-	clients := &fakeClients{byUser: []*domain.PSPClient{{ID: 1, UserID: 7, PanelID: 10}}}
-	own := &fakeOwnership{}
-	xui := &fakeXUI{}
-	svc := New(clients, fakePool{c: xui}, fakeNodes{})
-	svc.SetCleanupDeps(own, fakeSettings{gate: false}) // gate OFF
-
-	if _, err := svc.CleanupLegacyUser(context.Background(), 7); err == nil {
-		t.Fatal("cleanup must refuse when SubRenderUseSharedClient is off")
-	}
-	if len(xui.deleted) != 0 || len(own.removedID) != 0 {
-		t.Fatal("cleanup must delete nothing when refusing")
 	}
 }
 

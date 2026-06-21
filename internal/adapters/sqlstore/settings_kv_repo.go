@@ -225,7 +225,6 @@ func settingDescriptors(s *ports.UISettings) []settingDescriptor {
 
 		// sub --- subscription rendering & access
 		strField("sub", "sub_path", &s.SubPath),
-		boolField("sub", "sub_render_use_shared_client", &s.SubRenderUseSharedClient),
 		intField("sub", "sub_update_interval_hours", &s.SubUpdateIntervalHours),
 		strField("sub", "sub_profile_name_template", &s.SubProfileNameTemplate),
 		boolField("sub", "sub_region_flag_prefix", &s.SubRegionFlagPrefix),

@@ -271,7 +271,7 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	// 3X-UI + keeps their lifecycle in lockstep). Late-bound into the user
 	// service so the change-driven paths push enable/expiry onto shared clients.
 	sharedClientSvc := sharedclient.New(repos.PSPClient, pool, repos.Node)
-	sharedClientSvc.SetCleanupDeps(repos.Ownership, repos.Settings)
+	sharedClientSvc.SetOwnershipRepo(repos.Ownership)
 	userSvc.SetSharedLifecycleSyncer(sharedClientSvc)
 	// V3-transitional: the user_migrate sync task drives the per-user shared-client
 	// migration. Adapter drops the result (the task only needs success/failure).
@@ -354,7 +354,6 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 		Mail:             mailSvc,
 		Reconcile:        reconcileSvc,
 		Geo:              geoSvc,
-		Shared:           sharedClientSvc,
 		SubPerIPPerMin:   sysSettings.SubPerIPPerMin,
 		LoginPerIPPerMin: sysSettings.LoginPerIPPerMin,
 	})

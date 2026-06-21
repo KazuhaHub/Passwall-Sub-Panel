@@ -17,7 +17,6 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/mailer"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/passkey"
-	"github.com/KazuhaHub/passwall-sub-panel/internal/service/sharedclient"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/twofa"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/user"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/transport/http/middleware"
@@ -93,11 +92,10 @@ type AdminUserHandler struct {
 	async    AsyncDispatcher
 	twofa    *twofa.Service
 	passkey  *passkey.Service
-	shared   *sharedclient.Service
 }
 
-func NewAdminUserHandler(userSvc *user.Service, settings ports.SettingsRepo, mailerSvc *mailer.Service, async AsyncDispatcher, twofaSvc *twofa.Service, passkeySvc *passkey.Service, sharedSvc *sharedclient.Service) *AdminUserHandler {
-	return &AdminUserHandler{user: userSvc, settings: settings, mailer: mailerSvc, async: async, twofa: twofaSvc, passkey: passkeySvc, shared: sharedSvc}
+func NewAdminUserHandler(userSvc *user.Service, settings ports.SettingsRepo, mailerSvc *mailer.Service, async AsyncDispatcher, twofaSvc *twofa.Service, passkeySvc *passkey.Service) *AdminUserHandler {
+	return &AdminUserHandler{user: userSvc, settings: settings, mailer: mailerSvc, async: async, twofa: twofaSvc, passkey: passkeySvc}
 }
 
 // ---- DTOs ----
@@ -760,89 +758,6 @@ func (h *AdminUserHandler) panelDateToInstant(ctx context.Context, dateStr strin
 		return nil, fmt.Errorf("%w: invalid expire_date %q (want YYYY-MM-DD)", domain.ErrValidation, dateStr)
 	}
 	return &t, nil
-}
-
-// BackfillSharedClients is the v3.9.0 cutover Stage-0 trigger (admin-only): it
-// populates the dormant psp_client model for every user (DB-only, no 3X-UI
-// calls, idempotent). Safe to run anytime; nothing reads psp_client in
-// production yet. Returns the processed / skipped / error counts.
-func (h *AdminUserHandler) BackfillSharedClients(c *gin.Context) {
-	res, err := h.user.BackfillPSPClients(c.Request.Context())
-	if err != nil {
-		respondError(c, err)
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{
-		"processed": res.Processed,
-		"skipped":   res.Skipped,
-		"errors":    res.Errors,
-	})
-}
-
-// ProvisionSharedClients is the v3.9.0 cutover Stage-1b trigger (admin-only): it
-// creates every backfilled shared client in 3X-UI (AddClientToInbounds) and marks
-// each confirmed attachment provisioned. Run AFTER backfill-shared. Additive —
-// the shared clients coexist with the legacy per-node clients and nothing renders
-// them yet, so this is safe to run during cutover prep. Returns provisioned /
-// skipped counts.
-func (h *AdminUserHandler) ProvisionSharedClients(c *gin.Context) {
-	if h.shared == nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "shared-client reconcile not wired"})
-		return
-	}
-	res, err := h.shared.ProvisionAll(c.Request.Context())
-	if err != nil {
-		respondError(c, err)
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{"provisioned": res.Provisioned, "skipped": res.Skipped})
-}
-
-// MigrateShared is the one-click cutover prep (admin-only): it runs the safe,
-// idempotent steps — backfill psp_client rows, then provision/attach every shared
-// client in 3X-UI — in one call. It does NOT flip the render gate (that stays a
-// deliberate toggle because it changes Trojan/SS credentials) and does NOT delete
-// anything. Re-runnable; partial failures are reported, not fatal — unprovisioned
-// nodes simply keep rendering their legacy per-node client until a re-run.
-func (h *AdminUserHandler) MigrateShared(c *gin.Context) {
-	if h.shared == nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "shared-client service not wired"})
-		return
-	}
-	ctx := c.Request.Context()
-	bf, err := h.user.BackfillPSPClients(ctx)
-	if err != nil {
-		respondError(c, err)
-		return
-	}
-	pr, err := h.shared.ProvisionAll(ctx)
-	if err != nil {
-		respondError(c, err)
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{
-		"backfilled":  bf.Processed,
-		"provisioned": pr.Provisioned,
-		"skipped":     bf.Skipped + pr.Skipped,
-		"errors":      bf.Errors,
-	})
-}
-
-// CleanupLegacyClients is the v3.9.0 cutover Stage-4 trigger (admin-only, FINAL +
-// IRREVERSIBLE): removes the legacy per-node clients from 3X-UI for every node a
-// provisioned shared client now serves. Refuses unless the render gate
-// (SubRenderUseSharedClient) is on. Returns deleted / kept / skipped counts.
-func (h *AdminUserHandler) CleanupLegacyClients(c *gin.Context) {
-	if h.shared == nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "shared-client service not wired"})
-		return
-	}
-	res, err := h.shared.CleanupLegacyAll(c.Request.Context())
-	if err != nil {
-		respondError(c, err)
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{"deleted": res.Deleted, "kept": res.Kept, "skipped": res.Skipped})
 }
 
 // toDTO is the single-row path (Get / Create / Update). It loads

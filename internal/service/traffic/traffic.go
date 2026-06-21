@@ -55,8 +55,7 @@ type Service struct {
 	pool        ports.XUIPool
 	disabler    UserDisabler
 	// pspClient is the v3.9.0 shared-client repo, late-bound via SetPSPClientRepo
-	// (nil before wiring / in tests). When the SubRenderUseSharedClient gate is on
-	// the poll meters each shared client's per-email traffic (read once, aggregate)
+	// (nil before wiring / in tests). The poll meters each shared client's per-email traffic (read once, aggregate)
 	// into the user's quota total — Stage 3, so usage isn't lost after the render
 	// flip moves it from the per-node clients to the shared client.
 	pspClient ports.PSPClientRepo
@@ -144,7 +143,7 @@ func (s *Service) SetConfigPusher(p UserConfigPusher) {
 
 // SetPSPClientRepo late-binds the v3.9.0 shared-client repo so the poll can
 // meter shared-client traffic (Stage 3). Nil-tolerant: until set (and until the
-// SubRenderUseSharedClient gate is on) the shared-client metering pass is skipped.
+// repo is wired the shared-client metering pass runs (no-op pre-migration).
 func (s *Service) SetPSPClientRepo(r ports.PSPClientRepo) { s.pspClient = r }
 
 // CurrentPeriodUsage returns the bytes u has consumed since the start of

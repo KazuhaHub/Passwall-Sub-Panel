@@ -31,7 +31,6 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/recovery"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/registration"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/render"
-	"github.com/KazuhaHub/passwall-sub-panel/internal/service/sharedclient"
 	syncsvc "github.com/KazuhaHub/passwall-sub-panel/internal/service/sync"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/traffic"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/twofa"
@@ -76,7 +75,6 @@ type Deps struct {
 	Mail      *mailer.Service
 	Reconcile *reconcile.Service
 	Geo       *geo.Service
-	Shared    *sharedclient.Service
 	Async     AsyncDispatcher
 
 	// Rate-limit caps resolved from the DB settings table at startup. The
@@ -320,7 +318,7 @@ func NewRouter(d Deps) *gin.Engine {
 		require2FAGate,
 	)
 	{
-		users := handler.NewAdminUserHandler(d.User, d.Repos.Settings, d.Mail, d.Async, twofaSvc, passkeySvc, d.Shared)
+		users := handler.NewAdminUserHandler(d.User, d.Repos.Settings, d.Mail, d.Async, twofaSvc, passkeySvc)
 		// User CRUD is the operator's bread and butter. Handler-level guard
 		// in users.Update prevents operators from creating/promoting other
 		// admins or modifying an existing admin's role.
@@ -345,10 +343,6 @@ func NewRouter(d Deps) *gin.Engine {
 		staffGroup.PUT("/users/:id/rules", users.PutRules)
 		// v3.9.0 cutover Stage 0: one-shot psp_client backfill (admin-only;
 		// DB-only, idempotent, nothing reads psp_client in production yet).
-		adminGroup.POST("/clients/backfill-shared", users.BackfillSharedClients)
-		adminGroup.POST("/clients/provision-shared", users.ProvisionSharedClients)
-		adminGroup.POST("/clients/migrate-shared", users.MigrateShared)
-		adminGroup.POST("/clients/cleanup-legacy", users.CleanupLegacyClients)
 
 		nodes := handler.NewAdminNodeHandler(d.Node, d.Sync, d.Repos.Ownership, d.Repos.User, d.Repos.XUIPanel)
 		// Reads + toggle-enabled are operator-safe; create/update/delete and
