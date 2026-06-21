@@ -915,17 +915,13 @@ func (s *Service) syncExistingUsersToNode(ctx context.Context, n *domain.Node) e
 		return fmt.Errorf("list groups: %w", err)
 	}
 
-	rules := s.emailRules(ctx)
-	// Collect one request per eligible member, deduped by email (a user can be
-	// in more than one matching group), then enroll the whole set in a single
-	// bulkCreate — one Xray restart instead of one per member. floor 0 =
-	// unlimited on the 3X-UI side; the next traffic-poll cycle's
-	// pushClientConfigToAll sets the real floor (~5 min after node creation).
-	// Adding TrafficUsageReader to node.Service would invert the dependency
-	// graph for marginal benefit.
-	seen := make(map[string]bool)
-	var reqs []ports.BulkClientAdd
-	considered := 0
+	// v3.9.0 INVERTED ENROLLMENT: do NOT create per-node clients here — that path
+	// is retired and would write the dropped user_xui_clients table (failing on a
+	// migrated install) and regrow it. Instead enqueue a resync per eligible
+	// member; the sync-task loop runs ResyncMembership, which re-provisions each
+	// member's SHARED client to include this new node's inbound (idempotent).
+	seen := make(map[int64]bool)
+	considered, enqueued := 0, 0
 	for _, g := range groups {
 		if !group.Matches(n, g.TagFilter) {
 			continue
@@ -937,40 +933,43 @@ func (s *Service) syncExistingUsersToNode(ctx context.Context, n *domain.Node) e
 		}
 		for _, u := range members {
 			considered++
-			if !u.Enabled {
+			if !u.Enabled || seen[u.ID] {
 				continue
 			}
-			email := u.ClientEmail(n.ID, rules)
-			if seen[email] {
+			seen[u.ID] = true
+			if err := s.enqueueUserResync(ctx, u.ID, "attach shared client to new node "+n.DisplayName); err != nil {
+				log.Warn("new-node enqueue resync", "user_id", u.ID, "err", err)
 				continue
 			}
-			seen[email] = true
-			var expireTime int64
-			if u.ExpireAt != nil {
-				expireTime = u.ExpireAt.UnixMilli()
-			}
-			reqs = append(reqs, ports.BulkClientAdd{
-				UserID:     u.ID,
-				Protocol:   info.protocol,
-				SSMethod:   info.ssMethod,
-				UserUUID:   u.UUID,
-				Email:      email,
-				Flow:       info.flow,
-				ExpireTime: expireTime,
-				TotalGB:    0,
-			})
+			enqueued++
 		}
 	}
-	pushed, err := s.syncer.BulkAddClientsToInbound(ctx, n.PanelID, n.InboundID, reqs)
-	if err != nil {
-		// Per-member adopt/skip detail is logged inside the syncer; here we
-		// only note the batch didn't fully land. Reconcile axis-B heals any
-		// member left unenrolled within the next cycle.
-		log.Warn("new-node sync bulk add", "node_id", n.ID, "err", err)
-	}
 	log.Info("synced existing users on node", "node_id", n.ID,
-		"considered_members", considered, "pushed", pushed)
+		"considered_members", considered, "enqueued_resyncs", enqueued)
 	return nil
+}
+
+// enqueueUserResync queues a deduped user_resync task (mirrors user.enqueueUserTask).
+// The sync-task loop runs ResyncMembership, which provisions the user's shared
+// client across their current node set — the v3.9.0 replacement for the per-node
+// new-node enrollment that wrote the retired ownership table.
+func (s *Service) enqueueUserResync(ctx context.Context, userID int64, summary string) error {
+	if s.tasks == nil {
+		return nil
+	}
+	if _, err := s.tasks.GetActiveByTarget(ctx, domain.SyncTaskUserResync, "user", userID); err == nil {
+		return nil
+	} else if !errors.Is(err, domain.ErrNotFound) {
+		return err
+	}
+	return s.tasks.Create(ctx, &domain.SyncTask{
+		Type:       domain.SyncTaskUserResync,
+		Status:     domain.SyncTaskPending,
+		TargetType: "user",
+		TargetID:   userID,
+		Summary:    summary,
+		NextRunAt:  time.Now(),
+	})
 }
 
 type inboundInfo struct {

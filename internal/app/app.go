@@ -53,13 +53,19 @@ type asyncDispatcher struct {
 	wg  *sync.WaitGroup
 }
 
-// sharedMigratorFunc adapts a plain func to user.SharedMigrator, so the
-// composition root can wire sharedclient.MigrateUser (which returns a result)
-// into the user service's error-only interface without coupling the packages.
-type sharedMigratorFunc func(ctx context.Context, userID int64) error
+// sharedMigratorAdapter adapts sharedclient.Service (whose methods return result
+// structs) to the user service's error-only user.SharedMigrator interface, so the
+// composition root wires the two migration phases without coupling the packages.
+type sharedMigratorAdapter struct{ s *sharedclient.Service }
 
-func (f sharedMigratorFunc) MigrateUser(ctx context.Context, userID int64) error {
-	return f(ctx, userID)
+func (a sharedMigratorAdapter) ProvisionUser(ctx context.Context, userID int64) error {
+	_, err := a.s.ProvisionUser(ctx, userID)
+	return err
+}
+
+func (a sharedMigratorAdapter) DeleteLegacyForUser(ctx context.Context, userID int64) error {
+	_, err := a.s.DeleteLegacyForUser(ctx, userID)
+	return err
 }
 
 func (a *asyncDispatcher) Context() context.Context { return a.ctx }
@@ -273,12 +279,10 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	sharedClientSvc := sharedclient.New(repos.PSPClient, pool, repos.Node)
 	sharedClientSvc.SetOwnershipRepo(repos.Ownership)
 	userSvc.SetSharedLifecycleSyncer(sharedClientSvc)
-	// V3-transitional: the user_migrate sync task drives the per-user shared-client
-	// migration. Adapter drops the result (the task only needs success/failure).
-	userSvc.SetSharedMigrator(sharedMigratorFunc(func(ctx context.Context, userID int64) error {
-		_, err := sharedClientSvc.MigrateUser(ctx, userID)
-		return err
-	}))
+	// V3-transitional: ResyncMembership (and the user_migrate sync task) drive the
+	// per-user migration through the two phases — provision, then (after the
+	// lifecycle push) delete legacy. Adapter drops the result structs.
+	userSvc.SetSharedMigrator(sharedMigratorAdapter{sharedClientSvc})
 	// v3.9.0 Stage 3: let the traffic poll meter shared-client usage once the
 	// render gate is on (otherwise post-flip traffic on u{uid}@ is uncounted).
 	trafficSvc.SetPSPClientRepo(repos.PSPClient)

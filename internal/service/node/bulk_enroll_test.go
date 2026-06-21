@@ -44,11 +44,25 @@ func (twoMembers) ListByGroup(_ context.Context, _ int64) ([]*domain.User, error
 	}, nil
 }
 
-// syncExistingUsersToNode must enroll every eligible member in ONE bulkCreate
-// call (BulkAddClientsToInbound) — not N per-client AddClientToInbound calls —
-// so attaching a node to a populated group triggers a single Xray restart.
-func TestSyncExistingUsersToNodeUsesBulkAdd(t *testing.T) {
+type recordingTasks struct {
+	ports.SyncTaskRepo
+	created []*domain.SyncTask
+}
+
+func (r *recordingTasks) GetActiveByTarget(context.Context, domain.SyncTaskType, string, int64) (*domain.SyncTask, error) {
+	return nil, domain.ErrNotFound // no existing task → enqueue
+}
+func (r *recordingTasks) Create(_ context.Context, t *domain.SyncTask) error {
+	r.created = append(r.created, t)
+	return nil
+}
+
+// v3.9.0: new-node enrollment must NOT create per-node clients (the ownership
+// model is retired). Instead it enqueues a user_resync per eligible member, and
+// ResyncMembership re-provisions each member's SHARED client to include the node.
+func TestSyncExistingUsersToNodeEnqueuesResync(t *testing.T) {
 	rec := &recordingSyncer{}
+	tasks := &recordingTasks{}
 	client := &stubXUIClient{getResp: &ports.Inbound{
 		ID: 20, Protocol: "vless", StreamSettings: `{"security":"reality"}`,
 	}}
@@ -58,27 +72,24 @@ func TestSyncExistingUsersToNodeUsesBulkAdd(t *testing.T) {
 		users:    twoMembers{},
 		syncer:   rec,
 		settings: settingsStub{},
+		tasks:    tasks,
 	}
 	n := &domain.Node{ID: 5, PanelID: 10, InboundID: 20}
 
 	if err := svc.syncExistingUsersToNode(context.Background(), n); err != nil {
 		t.Fatalf("syncExistingUsersToNode: %v", err)
 	}
-	if rec.addCalls != 0 {
-		t.Fatalf("must NOT use per-client AddClientToInbound, addCalls = %d", rec.addCalls)
+	// No per-node client writes (no add, no bulk).
+	if rec.addCalls != 0 || rec.bulkCalls != 0 {
+		t.Fatalf("must NOT create per-node clients: add=%d bulk=%d", rec.addCalls, rec.bulkCalls)
 	}
-	if rec.bulkCalls != 1 {
-		t.Fatalf("must enroll via ONE bulk call, bulkCalls = %d", rec.bulkCalls)
+	// One user_resync task per eligible member.
+	if len(tasks.created) != 2 {
+		t.Fatalf("want 2 user_resync tasks enqueued, got %d", len(tasks.created))
 	}
-	if len(rec.bulkReqs) != 2 {
-		t.Fatalf("both members must be in the bulk request, got %d", len(rec.bulkReqs))
-	}
-	for _, r := range rec.bulkReqs {
-		if r.Flow != "xtls-rprx-vision" {
-			t.Fatalf("reality flow must propagate into each request: %#v", r)
-		}
-		if r.UserUUID == "" || r.Email == "" {
-			t.Fatalf("request missing uuid/email: %#v", r)
+	for _, ct := range tasks.created {
+		if ct.Type != domain.SyncTaskUserResync || ct.TargetType != "user" {
+			t.Fatalf("expected a user_resync task targeting a user, got %+v", ct)
 		}
 	}
 }

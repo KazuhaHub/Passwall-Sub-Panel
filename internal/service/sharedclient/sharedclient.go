@@ -23,7 +23,7 @@ type Service struct {
 	clients ports.PSPClientRepo
 	pool    ports.XUIPool
 	nodes   ports.NodeRepo
-	// ownership is late-bound (SetOwnershipRepo): the migration's deleteLegacyForUser
+	// ownership is late-bound (SetOwnershipRepo): the migration's DeleteLegacyForUser
 	// reads + removes legacy per-node ownership rows. nil = legacy delete is skipped.
 	ownership ports.OwnershipRepo
 }
@@ -33,7 +33,7 @@ func New(clients ports.PSPClientRepo, pool ports.XUIPool, nodes ports.NodeRepo) 
 }
 
 // SetOwnershipRepo late-binds the legacy ownership repo the migration uses to find
-// and delete a user's per-node clients. Until set, deleteLegacyForUser is a no-op.
+// and delete a user's per-node clients. Until set, DeleteLegacyForUser is a no-op.
 func (s *Service) SetOwnershipRepo(ownership ports.OwnershipRepo) {
 	s.ownership = ownership
 }
@@ -256,7 +256,7 @@ func (s *Service) MigrateUser(ctx context.Context, userID int64) (MigrateResult,
 		// working on them and the task retries.
 		return MigrateResult{Skipped: pr.Skipped}, fmt.Errorf("provision: %w", err)
 	}
-	cr, err := s.deleteLegacyForUser(ctx, userID)
+	cr, err := s.DeleteLegacyForUser(ctx, userID)
 	res := MigrateResult{Provisioned: pr.Provisioned, Deleted: cr.Deleted, Skipped: pr.Skipped + cr.Skipped}
 	if err != nil {
 		return res, fmt.Errorf("delete legacy: %w", err)
@@ -264,12 +264,12 @@ func (s *Service) MigrateUser(ctx context.Context, userID int64) (MigrateResult,
 	return res, nil
 }
 
-// deleteLegacyForUser is the gate-free core: delete every legacy per-node client
+// DeleteLegacyForUser is the gate-free core: delete every legacy per-node client
 // whose (panel, inbound) is now served by a CONFIRMED-provisioned shared client,
 // plus its ownership row. Nodes not yet provisioned under a shared client are
 // KEPT (render still falls back to them), so a partial migration never strands a
 // user. Idempotent.
-func (s *Service) deleteLegacyForUser(ctx context.Context, userID int64) (CleanupResult, error) {
+func (s *Service) DeleteLegacyForUser(ctx context.Context, userID int64) (CleanupResult, error) {
 	var res CleanupResult
 	if s.ownership == nil {
 		return res, fmt.Errorf("ownership repo not wired")

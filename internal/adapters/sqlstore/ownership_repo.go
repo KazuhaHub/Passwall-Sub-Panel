@@ -3,6 +3,7 @@ package sqlstore
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync/atomic"
 
 	"gorm.io/gorm"
@@ -20,11 +21,27 @@ type ownershipRepo struct {
 	gone atomic.Bool
 }
 
-// confirmGone is called only when a read errored: it checks whether the table is
-// actually missing (vs a real error), caching the answer. Keeping the check off
-// the success path means zero overhead while the table still exists.
-func (r *ownershipRepo) confirmGone() bool {
-	if !r.db.Migrator().HasTable(&ownershipRow{}) {
+// isMissingTableErr reports whether a query error means user_xui_clients does not
+// exist (vs a transient DB error). Matching the driver message is deliberate:
+// GORM's Migrator().HasTable swallows ALL errors and returns false, so trusting
+// its bool would latch "gone" on a transient blip (SQLITE_BUSY, pool exhaustion)
+// and permanently blind us to a still-populated table. Covers SQLite / MySQL / PG.
+func isMissingTableErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := strings.ToLower(err.Error())
+	return strings.Contains(s, "no such table") || // sqlite / glebarez
+		strings.Contains(s, "doesn't exist") || // mysql
+		strings.Contains(s, "does not exist") // postgres
+}
+
+// confirmGone is called only when a read errored: it caches gone=true ONLY when
+// the error positively says the table is absent. A transient error returns false
+// (propagated by the caller) so we never latch on a blip. Off the success path =
+// zero steady-state overhead.
+func (r *ownershipRepo) confirmGone(err error) bool {
+	if isMissingTableErr(err) {
 		r.gone.Store(true)
 		return true
 	}
@@ -34,19 +51,21 @@ func (r *ownershipRepo) confirmGone() bool {
 // DropIfMigrated physically removes the legacy user_xui_clients table ONCE the
 // shared-client migration has emptied it (0 rows). Returns done=true when no
 // further attempt is needed — the table was dropped, or never existed (a fresh
-// v3.9.0 install), or is already gone. Returns done=false while rows remain
-// (migration still draining), so the caller should poll again. V3-transitional.
+// v3.9.0 install), or is already gone. Returns done=false (no error) while rows
+// remain; returns a transient error so the caller polls again WITHOUT latching.
 func (r *ownershipRepo) DropIfMigrated(ctx context.Context) (done bool, err error) {
 	if r.gone.Load() {
 		return true, nil
 	}
-	if !r.db.Migrator().HasTable(&ownershipRow{}) {
-		r.gone.Store(true)
-		return true, nil // fresh install / already dropped
-	}
+	// Count is error-returning (unlike HasTable): a missing-table error means the
+	// table is genuinely gone; any other error is transient and must NOT latch.
 	var n int64
 	if err := r.db.WithContext(ctx).Model(&ownershipRow{}).Count(&n).Error; err != nil {
-		return false, err
+		if isMissingTableErr(err) {
+			r.gone.Store(true)
+			return true, nil // fresh install / already dropped
+		}
+		return false, err // transient — keep trying, do not latch
 	}
 	if n > 0 {
 		return false, nil // migration still in progress — keep the table + poll again
@@ -87,7 +106,7 @@ func (r *ownershipRepo) GetByMatch(ctx context.Context, panelID int64, inboundID
 		Where("panel_id = ? AND inbound_id = ? AND client_email = ?", panelID, inboundID, email).
 		First(&row).Error
 	if err != nil {
-		if r.confirmGone() {
+		if r.confirmGone(err) {
 			return nil, domain.ErrNotFound
 		}
 		return nil, wrapNotFound(err)
@@ -106,7 +125,7 @@ func (r *ownershipRepo) DistinctUserIDs(ctx context.Context) ([]int64, error) {
 	var ids []int64
 	if err := r.db.WithContext(ctx).Model(&ownershipRow{}).
 		Distinct().Pluck("user_id", &ids).Error; err != nil {
-		if r.confirmGone() {
+		if r.confirmGone(err) {
 			return nil, nil
 		}
 		return nil, err
@@ -120,7 +139,7 @@ func (r *ownershipRepo) ListByUser(ctx context.Context, userID int64) ([]*domain
 	}
 	var rows []ownershipRow
 	if err := r.db.WithContext(ctx).Where("user_id = ?", userID).Find(&rows).Error; err != nil {
-		if r.confirmGone() {
+		if r.confirmGone(err) {
 			return nil, nil
 		}
 		return nil, err
@@ -153,7 +172,7 @@ func (r *ownershipRepo) ListByUsers(ctx context.Context, userIDs []int64) (map[i
 	if err := r.db.WithContext(ctx).
 		Where("user_id IN ?", userIDs).
 		Find(&rows).Error; err != nil {
-		if r.confirmGone() {
+		if r.confirmGone(err) {
 			return map[int64][]*domain.XUIClientEntry{}, nil
 		}
 		return nil, err
@@ -175,7 +194,7 @@ func (r *ownershipRepo) ListByInbound(ctx context.Context, panelID int64, inboun
 		Where("panel_id = ? AND inbound_id = ?", panelID, inboundID).
 		Find(&rows).Error
 	if err != nil {
-		if r.confirmGone() {
+		if r.confirmGone(err) {
 			return nil, nil
 		}
 		return nil, err
@@ -270,7 +289,7 @@ func (r *ownershipRepo) Exists(ctx context.Context, panelID int64, inboundID int
 	err := r.db.WithContext(ctx).Model(&ownershipRow{}).
 		Where("panel_id = ? AND inbound_id = ? AND client_email = ?", panelID, inboundID, email).
 		Count(&n).Error
-	if err != nil && r.confirmGone() {
+	if err != nil && r.confirmGone(err) {
 		return false, nil
 	}
 	return n > 0, err

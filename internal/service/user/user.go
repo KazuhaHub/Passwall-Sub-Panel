@@ -126,11 +126,18 @@ type SharedLifecycleSyncer interface {
 // Until set, the change-driven paths skip it.
 func (s *Service) SetSharedLifecycleSyncer(p SharedLifecycleSyncer) { s.sharedLife = p }
 
-// SharedMigrator fully migrates ONE user to the shared-client model (provision +
-// delete legacy per-node). Implemented by sharedclient.Service (adapted in the
-// composition root). V3-transitional — drives the user_migrate sync task.
+// SharedMigrator migrates ONE user to the shared-client model in two phases so
+// the caller can push the user's REAL lifecycle (enable/expiry/floor) onto the
+// freshly-provisioned shared client BEFORE the legacy per-node clients (which
+// held the correct disabled/expired state) are deleted. Implemented by
+// sharedclient.Service (adapted in the composition root). V3-transitional.
 type SharedMigrator interface {
-	MigrateUser(ctx context.Context, userID int64) error
+	// ProvisionUser creates/reconciles the shared client(s) in 3X-UI + marks the
+	// confirmed attachments provisioned. Does NOT touch lifecycle or legacy clients.
+	ProvisionUser(ctx context.Context, userID int64) error
+	// DeleteLegacyForUser removes the user's legacy per-node clients (only those a
+	// provisioned shared client now serves) + their ownership rows.
+	DeleteLegacyForUser(ctx context.Context, userID int64) error
 }
 
 // SetSharedMigrator late-binds the V3 shared-client migrator. Until set, a
@@ -1610,15 +1617,31 @@ func (s *Service) ResyncMembership(ctx context.Context, userID int64) error {
 			}
 		}
 	}
+	// Order is enforcement-critical: provision the shared client → push the user's
+	// REAL enable/expiry/floor onto it → ONLY THEN delete the legacy per-node
+	// clients (which held the correct disabled/expired state). Provisioning with a
+	// hardcoded enable=true and deleting the per-node fallback BEFORE the lifecycle
+	// push would leave a disabled/expired/over-quota user with a fully-enabled
+	// shared client (an enforcement bypass). Delete is skipped if provision failed,
+	// so the per-node fallback survives.
+	provisioned := false
 	if s.migrator != nil {
-		if err := s.migrator.MigrateUser(ctx, u.ID); err != nil {
+		if err := s.migrator.ProvisionUser(ctx, u.ID); err != nil {
 			if firstErr == nil {
-				firstErr = fmt.Errorf("shared migrate: %w", err)
+				firstErr = fmt.Errorf("shared provision: %w", err)
+			}
+		} else {
+			provisioned = true
+		}
+	}
+	s.syncSharedLifecycle(ctx, u)
+	if provisioned && s.migrator != nil {
+		if err := s.migrator.DeleteLegacyForUser(ctx, u.ID); err != nil {
+			if firstErr == nil {
+				firstErr = fmt.Errorf("delete legacy: %w", err)
 			}
 		}
 	}
-	// Push enable / expiry / quota-floor onto the shared client.
-	s.syncSharedLifecycle(ctx, u)
 
 	return firstErr
 }
@@ -1707,6 +1730,13 @@ func (s *Service) PushClientConfig(ctx context.Context, userID int64) error {
 // off the client when the panel is offline. Computed once per call since
 // it depends on a snapshot read that can be slow on large traffic tables.
 func (s *Service) pushClientConfigToAll(ctx context.Context, u *domain.User) error {
+	// Refresh the SHARED client's enable/expiry/quota-floor too. The traffic poll
+	// calls this for users who accrued traffic, so it is the per-poll refresh that
+	// keeps the Xray-side totalGB safety net (cut the user off while PSP is offline)
+	// current as the floor (limit - period_used) shrinks. Runs BEFORE the early
+	// return below, so a fully-migrated user (zero ownership rows) still gets it.
+	s.syncSharedLifecycle(ctx, u)
+
 	entries, err := s.ownership.ListByUser(ctx, u.ID)
 	if err != nil {
 		return err
@@ -1968,10 +1998,10 @@ func (s *Service) runUserTask(ctx context.Context, task *domain.SyncTask) error 
 		}
 		return s.pushClientConfigToAll(ctx, u)
 	case domain.SyncTaskUserMigrate:
-		if s.migrator == nil {
-			return nil // not wired (tests / non-shared build) → task is done
-		}
-		if err := s.migrator.MigrateUser(ctx, task.TargetID); err != nil {
+		// Drive the migration through ResyncMembership: dual-write → provision →
+		// LIFECYCLE → delete legacy, so an auto-migrated disabled/expired/over-quota
+		// user's shared client gets the correct enable/expiry (no enforcement bypass).
+		if err := s.ResyncMembership(ctx, task.TargetID); err != nil {
 			if errors.Is(err, domain.ErrNotFound) {
 				return nil // user deleted between enqueue and run → done
 			}
