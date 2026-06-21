@@ -352,18 +352,14 @@ export async function sendTestMail(to: string) {
 }
 
 // ---- v3.9.0 shared-client cutover (admin actions) ----
-export interface BackfillResult { processed: number; skipped: number; errors: number }
-export interface ProvisionResult { provisioned: number; skipped: number }
+export interface MigrateResult { backfilled: number; provisioned: number; skipped: number; errors: number }
 export interface CleanupResult { deleted: number; kept: number; skipped: number }
 
-/** Backfill psp_client rows for every user (DB-only, idempotent, dormant). */
-export async function backfillSharedClients() {
-  const { data } = await client.post<BackfillResult>('/admin/clients/backfill-shared')
-  return data
-}
-/** Create/attach every shared client in 3X-UI (idempotent). */
-export async function provisionSharedClients() {
-  const { data } = await client.post<ProvisionResult>('/admin/clients/provision-shared')
+/** One-click migration prep: backfill psp_client rows + provision/attach every
+ *  shared client in 3X-UI. Safe + idempotent + re-runnable; does NOT flip the
+ *  render gate and deletes nothing. */
+export async function migrateShared() {
+  const { data } = await client.post<MigrateResult>('/admin/clients/migrate-shared')
   return data
 }
 /** Delete the legacy per-node clients now served by a provisioned shared client.

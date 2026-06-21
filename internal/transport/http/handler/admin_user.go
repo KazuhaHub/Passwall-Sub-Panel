@@ -798,6 +798,36 @@ func (h *AdminUserHandler) ProvisionSharedClients(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"provisioned": res.Provisioned, "skipped": res.Skipped})
 }
 
+// MigrateShared is the one-click cutover prep (admin-only): it runs the safe,
+// idempotent steps — backfill psp_client rows, then provision/attach every shared
+// client in 3X-UI — in one call. It does NOT flip the render gate (that stays a
+// deliberate toggle because it changes Trojan/SS credentials) and does NOT delete
+// anything. Re-runnable; partial failures are reported, not fatal — unprovisioned
+// nodes simply keep rendering their legacy per-node client until a re-run.
+func (h *AdminUserHandler) MigrateShared(c *gin.Context) {
+	if h.shared == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "shared-client service not wired"})
+		return
+	}
+	ctx := c.Request.Context()
+	bf, err := h.user.BackfillPSPClients(ctx)
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+	pr, err := h.shared.ProvisionAll(ctx)
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"backfilled":  bf.Processed,
+		"provisioned": pr.Provisioned,
+		"skipped":     bf.Skipped + pr.Skipped,
+		"errors":      bf.Errors,
+	})
+}
+
 // CleanupLegacyClients is the v3.9.0 cutover Stage-4 trigger (admin-only, FINAL +
 // IRREVERSIBLE): removes the legacy per-node clients from 3X-UI for every node a
 // provisioned shared client now serves. Refuses unless the render gate

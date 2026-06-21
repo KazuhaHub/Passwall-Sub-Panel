@@ -54,8 +54,7 @@ import {
   putSAML,
   putUISettings,
   sendTestMail,
-  backfillSharedClients,
-  provisionSharedClients,
+  migrateShared,
   cleanupLegacyClients,
   getGeoIPStatus,
   updateGeoIPNow,
@@ -174,7 +173,7 @@ export default function SettingsView() {
   const [geoStatus, setGeoStatus] = useState<GeoIPStatus | null>(null)
   const [geoBusy, setGeoBusy] = useState(false)
   // v3.9.0 cutover one-shot actions: '' idle, else the running action's key.
-  const [cutBusy, setCutBusy] = useState<'' | 'backfill' | 'provision' | 'cleanup'>('')
+  const [cutBusy, setCutBusy] = useState<'' | 'migrate' | 'cleanup'>('')
   const [cutResult, setCutResult] = useState('')
   // changeGeoToken mirrors the SMTP-password "kept unchanged" pattern: when a
   // token is already stored, show a read-only chip until the admin clicks Change.
@@ -353,19 +352,11 @@ export default function SettingsView() {
     setSettings(prev => prev ? { ...prev, [key]: value } : prev)
   }
 
-  async function runBackfill() {
-    setCutBusy('backfill')
+  async function runMigrate() {
+    setCutBusy('migrate')
     try {
-      const r = await backfillSharedClients()
-      setCutResult(t('settings.subscription.cutover_backfill_done', { processed: r.processed, skipped: r.skipped, errors: r.errors }))
-      pushSnack(t('settings.subscription.cutover_done'), 'success')
-    } finally { setCutBusy('') }
-  }
-  async function runProvision() {
-    setCutBusy('provision')
-    try {
-      const r = await provisionSharedClients()
-      setCutResult(t('settings.subscription.cutover_provision_done', { provisioned: r.provisioned, skipped: r.skipped }))
+      const r = await migrateShared()
+      setCutResult(t('settings.subscription.cutover_migrate_done', { backfilled: r.backfilled, provisioned: r.provisioned, skipped: r.skipped, errors: r.errors }))
       pushSnack(t('settings.subscription.cutover_done'), 'success')
     } finally { setCutBusy('') }
   }
@@ -1191,19 +1182,23 @@ export default function SettingsView() {
             <Typography sx={{ fontSize: 13, fontWeight: 600 }}>
               {t('settings.subscription.cutover_actions')}
             </Typography>
-            <Box sx={{ display: 'flex', gap: 1.5, flexWrap: 'wrap' }}>
-              <Button variant="outlined" disabled={cutBusy !== ''} onClick={runBackfill}
-                startIcon={cutBusy === 'backfill' ? <CircularProgress size={14} /> : undefined}>
-                {t('settings.subscription.cutover_backfill')}
+            <Box sx={{ display: 'flex', gap: 1.5, flexWrap: 'wrap', alignItems: 'center' }}>
+              <Button variant="contained" disableElevation disabled={cutBusy !== ''} onClick={runMigrate}
+                startIcon={cutBusy === 'migrate' ? <CircularProgress size={14} /> : undefined}>
+                {t('settings.subscription.cutover_migrate')}
               </Button>
-              <Button variant="outlined" disabled={cutBusy !== ''} onClick={runProvision}
-                startIcon={cutBusy === 'provision' ? <CircularProgress size={14} /> : undefined}>
-                {t('settings.subscription.cutover_provision')}
-              </Button>
+              <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant }}>
+                {t('settings.subscription.cutover_migrate_hint')}
+              </Typography>
+            </Box>
+            <Box sx={{ display: 'flex', gap: 1.5, flexWrap: 'wrap', alignItems: 'center' }}>
               <Button variant="outlined" color="error" disabled={cutBusy !== ''} onClick={runCleanup}
                 startIcon={cutBusy === 'cleanup' ? <CircularProgress size={14} /> : undefined}>
                 {t('settings.subscription.cutover_cleanup')}
               </Button>
+              <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant }}>
+                {t('settings.subscription.cutover_cleanup_hint')}
+              </Typography>
             </Box>
             {cutResult && (
               <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant, fontFamily: 'monospace' }}>

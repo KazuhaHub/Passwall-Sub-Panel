@@ -347,6 +347,7 @@ func NewRouter(d Deps) *gin.Engine {
 		// DB-only, idempotent, nothing reads psp_client in production yet).
 		adminGroup.POST("/clients/backfill-shared", users.BackfillSharedClients)
 		adminGroup.POST("/clients/provision-shared", users.ProvisionSharedClients)
+		adminGroup.POST("/clients/migrate-shared", users.MigrateShared)
 		adminGroup.POST("/clients/cleanup-legacy", users.CleanupLegacyClients)
 
 		nodes := handler.NewAdminNodeHandler(d.Node, d.Sync, d.Repos.Ownership, d.Repos.User, d.Repos.XUIPanel)
