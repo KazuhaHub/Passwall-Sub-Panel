@@ -12,15 +12,14 @@ const testUUID = "a265b1ec-cd81-43e7-8239-09f322ef22d6"
 
 var testRules = domain.EmailRules{Domain: "psp.local"}
 
-// The common case: a mix of VLESS (no flow) / Trojan / SS / SS-2022-256 /
-// Hysteria2 nodes collapses to ONE shared client, attached to all of them, with
-// the 32-byte stored password.
+// The common case: VLESS (no flow) / Trojan / SS / Hysteria2 collapse to ONE
+// shared client whose password is the RAW UUID — byte-identical to the legacy
+// per-node derivation, so the migration is silent.
 func TestBuild_MixedProtocolsCollapseToOneClient(t *testing.T) {
 	nodes := []NodeCred{
 		{NodeID: 1, Protocol: domain.ProtoVLESS}, // no flow → default class
 		{NodeID: 2, Protocol: domain.ProtoTrojan},
 		{NodeID: 3, Protocol: domain.ProtoSS},
-		{NodeID: 4, Protocol: domain.ProtoSS2022, SSMethod: "2022-blake3-aes-256-gcm"},
 		{NodeID: 5, Protocol: domain.ProtoHysteria2},
 	}
 	got := Build(42, testUUID, 10, testRules, nodes)
@@ -34,18 +33,19 @@ func TestBuild_MixedProtocolsCollapseToOneClient(t *testing.T) {
 	if c.Client.UUID != testUUID {
 		t.Fatalf("uuid = %q, want user uuid", c.Client.UUID)
 	}
-	if c.Client.Password != crypto.NewProxyPassword(testUUID) {
-		t.Fatalf("password is not the 32-byte stored value")
+	if c.Client.Password != testUUID {
+		t.Fatalf("default-class password must be the raw UUID (silent), got %q", c.Client.Password)
 	}
-	if len(c.Inbounds) != 5 {
-		t.Fatalf("attachment set size = %d, want 5", len(c.Inbounds))
+	if len(c.Inbounds) != 4 {
+		t.Fatalf("attachment set size = %d, want 4", len(c.Inbounds))
 	}
 }
 
 // HOLE #8: a client carries a single flow and 3X-UI has no per-inbound
 // flowOverride API, so VLESS nodes with DIFFERENT flow can't share a client. A
 // user with a VLESS-vision node + (VLESS-noflow + Trojan) gets TWO clients: the
-// default (u{uid}@) and a flow-split one (stable -k{hash} email).
+// default (u{uid}@) and a flow-split one (stable -k{hash} email). Both keep the
+// raw-UUID password — flow never changes the credential.
 func TestBuild_VLESSFlowSplitsClient(t *testing.T) {
 	nodes := []NodeCred{
 		{NodeID: 1, Protocol: domain.ProtoVLESS, Flow: "xtls-rprx-vision"}, // vision → its own client
@@ -64,69 +64,73 @@ func TestBuild_VLESSFlowSplitsClient(t *testing.T) {
 	if len(def.Inbounds) != 2 || def.Inbounds[0].NodeID != 2 || def.Inbounds[1].NodeID != 3 {
 		t.Fatalf("default client should hold the no-flow nodes 2,3: %+v", def.Inbounds)
 	}
-	// The vision client: same pwClass (0, same password) but a DIFFERENT, stable
-	// hash-suffix email; its single attachment carries the vision flow.
 	if vis.Client.CredClass != 0 {
-		t.Fatalf("flow split keeps pwClass 0 (default password), got %d", vis.Client.CredClass)
+		t.Fatalf("flow split keeps pwClass 0, got %d", vis.Client.CredClass)
 	}
-	if vis.Client.Email == def.Client.Email {
-		t.Fatal("flow-split client must have a distinct email from the default client")
-	}
-	if want := "u42-k"; vis.Client.Email[:len(want)] != want {
-		t.Fatalf("flow-split email = %q, want a -k hash suffix", vis.Client.Email)
+	if vis.Client.Email == def.Client.Email || vis.Client.Email[:5] != "u42-k" {
+		t.Fatalf("flow-split client needs a distinct -k email: %q", vis.Client.Email)
 	}
 	if len(vis.Inbounds) != 1 || vis.Inbounds[0].NodeID != 1 || vis.Inbounds[0].FlowOverride != "xtls-rprx-vision" {
 		t.Fatalf("vision client should hold node 1 with vision flow: %+v", vis.Inbounds)
 	}
-	if vis.Client.Password != crypto.NewProxyPassword(testUUID) {
-		t.Fatal("flow split must NOT change the password (same 32-byte value)")
+	if def.Client.Password != testUUID || vis.Client.Password != testUUID {
+		t.Fatal("flow split must keep the raw-UUID password (silent)")
 	}
 }
 
-// SS-2022-128 cannot share the password field with the 32-byte protocols, so a
-// user with both gets exactly two clients (credClass 0 and 1), partitioned
-// correctly, each with the right-length PSK.
-func TestBuild_SS2022_128_SplitsIntoSecondClient(t *testing.T) {
+// SS-2022 needs a real PSK, not the raw UUID, so each key length splits off its
+// own client. A user with VLESS + SS-2022-256 + SS-2022-128 gets THREE clients:
+// default (uuid), pwClass256 (32B PSK), pwClass128 (16B PSK).
+func TestBuild_SS2022SplitsByKeyLength(t *testing.T) {
 	nodes := []NodeCred{
 		{NodeID: 1, Protocol: domain.ProtoVLESS},
-		{NodeID: 2, Protocol: domain.ProtoSS2022, SSMethod: "2022-blake3-aes-256-gcm"}, // 32B → class 0
-		{NodeID: 3, Protocol: domain.ProtoSS2022, SSMethod: "2022-blake3-aes-128-gcm"}, // 16B → class 1
+		{NodeID: 2, Protocol: domain.ProtoSS2022, SSMethod: "2022-blake3-aes-256-gcm"}, // 32B → pwClass256
+		{NodeID: 3, Protocol: domain.ProtoSS2022, SSMethod: "2022-blake3-aes-128-gcm"}, // 16B → pwClass128
 	}
 	got := Build(42, testUUID, 10, testRules, nodes)
-	if len(got) != 2 {
-		t.Fatalf("want 2 clients (128 split), got %d", len(got))
+	if len(got) != 3 {
+		t.Fatalf("want 3 clients, got %d", len(got))
 	}
-	// Ordered by CredClass ascending.
-	c0, c1 := got[0], got[1]
-	if c0.Client.CredClass != 0 || c1.Client.CredClass != 1 {
-		t.Fatalf("classes = %d, %d", c0.Client.CredClass, c1.Client.CredClass)
+	// Sorted by pwClass: 0 (uuid), 1 (256), 2 (128).
+	def, ss256, ss128 := got[0], got[1], got[2]
+	if def.Client.CredClass != 0 || def.Client.Password != testUUID {
+		t.Fatalf("default class must be raw-UUID: %+v", def.Client)
 	}
-	if c0.Client.Email != "u42@psp.local" || c1.Client.Email != "u42-c1@psp.local" {
-		t.Fatalf("emails = %q, %q", c0.Client.Email, c1.Client.Email)
+	if def.Client.Email != "u42@psp.local" || len(def.Inbounds) != 1 || def.Inbounds[0].NodeID != 1 {
+		t.Fatalf("default should hold VLESS node 1: %+v", def)
 	}
-	// class 0 holds the VLESS + SS-2022-256 nodes; class 1 holds only the 128 node.
-	if len(c0.Inbounds) != 2 || len(c1.Inbounds) != 1 || c1.Inbounds[0].NodeID != 3 {
-		t.Fatalf("partition wrong: c0=%+v c1=%+v", c0.Inbounds, c1.Inbounds)
+	if ss256.Client.CredClass != 1 || ss256.Client.Password != crypto.NewProxyPassword(testUUID) {
+		t.Fatalf("ss256 class wrong: %+v", ss256.Client)
 	}
-	// The 128 client's password decodes to 16 bytes; the default client's to 32.
-	assertPSKLen(t, c0.Client.Password, 32)
-	assertPSKLen(t, c1.Client.Password, 16)
-	// Both clients share the user's UUID (VLESS/VMess id).
-	if c0.Client.UUID != testUUID || c1.Client.UUID != testUUID {
-		t.Fatal("both clients must carry the user's UUID")
+	assertPSKLen(t, ss256.Client.Password, 32)
+	if len(ss256.Inbounds) != 1 || ss256.Inbounds[0].NodeID != 2 {
+		t.Fatalf("ss256 should hold node 2: %+v", ss256.Inbounds)
+	}
+	if ss128.Client.CredClass != 2 {
+		t.Fatalf("ss128 class wrong: %+v", ss128.Client)
+	}
+	assertPSKLen(t, ss128.Client.Password, 16)
+	if len(ss128.Inbounds) != 1 || ss128.Inbounds[0].NodeID != 3 {
+		t.Fatalf("ss128 should hold node 3: %+v", ss128.Inbounds)
+	}
+	// The two SS-2022 clients get distinct hash emails, never the default u42@.
+	if ss256.Client.Email == "u42@psp.local" || ss128.Client.Email == "u42@psp.local" {
+		t.Fatal("SS-2022 clients must not reuse the default email")
+	}
+	if ss256.Client.Email == ss128.Client.Email {
+		t.Fatal("256 and 128 clients must have distinct emails")
 	}
 }
 
-// A user with only SS-2022-128 nodes gets a single class-0... no: it's the 128
-// class. Verify the lone-128 case still produces one (class-1) client, since
-// there is nothing in the default class.
+// A user with only SS-2022-128 nodes gets a single pwClass128 (CredClass 2)
+// client, since there is nothing in the default class.
 func TestBuild_OnlySS2022_128(t *testing.T) {
 	nodes := []NodeCred{
 		{NodeID: 7, Protocol: domain.ProtoSS2022, SSMethod: "2022-blake3-aes-128-gcm"},
 	}
 	got := Build(42, testUUID, 10, testRules, nodes)
-	if len(got) != 1 || got[0].Client.CredClass != 1 {
-		t.Fatalf("want a single class-1 client, got %+v", got)
+	if len(got) != 1 || got[0].Client.CredClass != 2 {
+		t.Fatalf("want a single pwClass128 (CredClass 2) client, got %+v", got)
 	}
 	assertPSKLen(t, got[0].Client.Password, 16)
 }

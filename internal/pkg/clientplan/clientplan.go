@@ -8,19 +8,23 @@
 // two nodes can share a client only when neither the password NOR the flow
 // conflicts. The partition key is therefore (pwClass, flow):
 //
-//   - pwClass: 0 normally; 1 iff the node is SS-2022 with a 16-byte PSK
-//     (aes-128-gcm). The 32-byte value crypto.NewProxyPassword serves VLESS/
-//     VMess (use id), Hysteria2 (uses auth) and Trojan/SS/SS-2022-256 (use it as
-//     password/PSK) — only the 16-byte SS-2022 case needs its own client.
+//   - pwClass: which value the single `password` field must hold. The default
+//     class (0) stores the RAW UUID — Trojan/SS use it as their password,
+//     VLESS/VMess (id) + Hy2 (auth) use the UUID and ignore the password — so it
+//     covers everything except SS-2022. SS-2022 needs a real PSK, so it splits
+//     into pwClass256 (32-byte, base64(sha256(uuid))) and pwClass128 (16-byte).
+//     Crucially every class equals the LEGACY DeriveProxyPassword for that
+//     protocol, so consolidating a node into its shared client changes no
+//     rendered credential — the migration is SILENT.
 //   - flow: the effective VLESS flow ("" or xtls-rprx-vision), "" for every
 //     other protocol (they ignore flow). VLESS inbounds needing different flow
 //     can't share one client, so they split.
 //
-// The overwhelming majority of users (default password, uniform/empty flow, no
-// SS-2022-128) get exactly ONE client whose email stays u{uid}@domain. The
-// client identity (email) is a STABLE, collision-free function of (uid, key) —
-// see PSPClientEmail / partKey.emailSuffix — so re-running, or a user's OTHER
-// nodes changing, never re-keys an existing client (would orphan it in 3X-UI).
+// The overwhelming majority of users (no SS-2022, uniform/empty flow) get exactly
+// ONE client whose email stays u{uid}@domain; SS-2022 or mixed-flow users get a
+// few. The client identity (email) is a STABLE, collision-free function of
+// (uid, key) — see PSPClientEmail / partKey.emailSuffix — so re-running, or a
+// user's OTHER nodes changing, never re-keys an existing client.
 package clientplan
 
 import (
@@ -35,8 +39,14 @@ import (
 )
 
 const (
-	pwClassDefault = 0 // 32-byte / free-form password (VLESS/VMess/Trojan/SS/SS-2022-256/Hy2)
-	pwClass128     = 1 // SS-2022 aes-128-gcm: 16-byte PSK, can't share the password field
+	// Password classes. The class fixes the client's single `password` field, and
+	// every class is BYTE-IDENTICAL to what the legacy per-node DeriveProxyPassword
+	// emitted for that protocol — so consolidating a node into its shared client
+	// never changes the rendered credential. That is what makes the v3.9.0
+	// migration SILENT: no subscriber re-fetch, and render can keep deriving.
+	pwClassDefault = 0 // password = the raw UUID. Trojan/SS use it as the password; VLESS/VMess (id) + Hy2 (auth) use the UUID and ignore the password field. Covers everything except SS-2022.
+	pwClass256     = 1 // SS-2022 with a 32-byte PSK (aes-256-gcm / chacha20): base64(sha256(uuid))
+	pwClass128     = 2 // SS-2022 with a 16-byte PSK (aes-128-gcm): base64(sha256(uuid))[:16]
 
 	// flowVision is the only non-empty VLESS flow current Xray uses. The flow
 	// dimension is allowlisted to {"", flowVision}; any other value coerces to ""
@@ -62,10 +72,11 @@ type NodeCred struct {
 //
 // Caveat — an UNcaptured node (empty InboundSettings) yields an empty method, so
 // crypto.DetectProtocol classifies a Shadowsocks inbound as plain SS, not
-// SS-2022. That is harmless for SS-2022-256 (same default class / 32-byte
-// password) but would mis-class an SS-2022-*128* node into the default class.
-// Callers that must support that exotic case should resolve the live inbound
-// first; the common path (captured nodes) is exact.
+// SS-2022, dropping it into the default (raw-UUID) class. With the silent scheme
+// that is now WRONG for BOTH SS-2022 key lengths: their password is a PSK, not
+// the UUID, so a mis-classed SS-2022 node would render an unusable credential.
+// The migration MUST therefore resolve the live inbound (to read the method)
+// before planning any Shadowsocks node; the captured-node path is exact.
 func NodeCredFromNode(n *domain.Node) NodeCred {
 	method := ssMethodFromSettings(n.InboundSettings)
 	return NodeCred{
@@ -115,8 +126,14 @@ type partKey struct {
 
 func partKeyFor(nc NodeCred) partKey {
 	pw := pwClassDefault
-	if nc.Protocol == domain.ProtoSS2022 && crypto.SS2022KeyLen(nc.SSMethod) == 16 {
-		pw = pwClass128
+	if nc.Protocol == domain.ProtoSS2022 {
+		// SS-2022 needs a real PSK, not the raw UUID, so it can't share the
+		// default (uuid-password) client; split by key length.
+		if crypto.SS2022KeyLen(nc.SSMethod) == 16 {
+			pw = pwClass128
+		} else {
+			pw = pwClass256
+		}
 	}
 	return partKey{pwClass: pw, flow: effectiveFlow(nc.Protocol, nc.Flow)}
 }
@@ -143,15 +160,14 @@ func (k partKey) canon() string {
 // pure function of the key's content (never positional), so a key that still
 // exists always maps to the same email regardless of the user's other nodes.
 func (k partKey) emailSuffix() string {
-	switch {
-	case k.pwClass == pwClassDefault && k.flow == "":
-		return "" // default → u{uid}@domain, byte-identical to the pre-flow scheme
-	case k.pwClass == pwClass128 && k.flow == "":
-		return "-c1" // SS-2022-128 → back-compatible with the legacy credClass==1 email
-	default:
-		sum := sha256.Sum256([]byte(k.canon()))
-		return "-k" + hex.EncodeToString(sum[:])[:8]
+	if k.pwClass == pwClassDefault && k.flow == "" {
+		return "" // the common case → u{uid}@domain
 	}
+	// Every other partition (SS-2022 of either key length, or a non-empty VLESS
+	// flow) gets a stable content-hash suffix. The email is the 3X-UI client
+	// identity only — invisible to the subscriber — so this never affects silence.
+	sum := sha256.Sum256([]byte(k.canon()))
+	return "-k" + hex.EncodeToString(sum[:])[:8]
 }
 
 // DesiredClient is one psp_client PSP should hold for a user on a panel, paired
@@ -212,11 +228,18 @@ func Build(userID int64, userUUID string, panelID int64, rules domain.EmailRules
 }
 
 // passwordForClass returns the single stored password for a partition's pwClass.
-// pwClass128 derives the 16-byte SS-2022 PSK (all nodes in that class are
-// aes-128); the default class uses the 32-byte NewProxyPassword.
+// Each is exactly what the legacy DeriveProxyPassword produced for that protocol,
+// so the migration is silent:
+//   - default: the raw UUID (legacy Trojan/SS password; VLESS/VMess/Hy2 ignore it)
+//   - pwClass256: base64(sha256(uuid)) — the 32-byte SS-2022 PSK
+//   - pwClass128: base64(sha256(uuid))[:16] — the 16-byte SS-2022 PSK
 func passwordForClass(pwClass int, userUUID string) string {
-	if pwClass == pwClass128 {
+	switch pwClass {
+	case pwClass256:
+		return crypto.NewProxyPassword(userUUID)
+	case pwClass128:
 		return crypto.DeriveProxyPassword(userUUID, domain.ProtoSS2022, "2022-blake3-aes-128-gcm")
+	default:
+		return userUUID
 	}
-	return crypto.NewProxyPassword(userUUID)
 }
