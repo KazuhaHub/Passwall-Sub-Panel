@@ -146,7 +146,12 @@ func (s *Service) syncSharedLifecycle(ctx context.Context, u *domain.User) {
 	if s.sharedLife == nil || u == nil {
 		return
 	}
-	if err := s.sharedLife.SyncUserLifecycle(ctx, u.ID, u.EffectiveEnabled(time.Now()), u.PushExpireTime(), 0); err != nil {
+	// Push the quota floor (limit - period_used) too, parity with the per-node
+	// path: it is the Xray-side safety net that cuts the client off even while PSP
+	// is offline. This is the change-driven snapshot; the per-poll refresh keeps it
+	// current as traffic accrues.
+	floor := s.trafficFloor(ctx, u)
+	if err := s.sharedLife.SyncUserLifecycle(ctx, u.ID, u.EffectiveEnabled(time.Now()), u.PushExpireTime(), floor); err != nil {
 		log.Warn("shared-client lifecycle push failed (non-fatal)", "user_id", u.ID, "err", err)
 	}
 }
@@ -1606,193 +1611,30 @@ func (s *Service) ResyncMembership(ctx context.Context, userID int64) error {
 	if err != nil {
 		return err
 	}
-	current, err := s.ownership.ListByUser(ctx, userID)
-	if err != nil {
-		return err
-	}
-
-	type key struct {
-		panelID   int64
-		inboundID int
-	}
-	desired := make(map[key]*domain.Node, len(desiredNodes))
-	for _, n := range desiredNodes {
-		desired[key{n.PanelID, n.InboundID}] = n
-	}
-	have := make(map[key]*domain.XUIClientEntry, len(current))
-	for _, e := range current {
-		have[key{e.PanelID, e.InboundID}] = e
-	}
-
 	rules := s.emailRules(ctx)
-	floor := s.trafficFloor(ctx, u)
 	var firstErr error
 
-	// Prefetch ListInbounds once per unique panel referenced by the desired
-	// nodes (parallel, capped by the shared fan-out concurrency), instead of a
-	// serial per-inbound GetInbound inside each ADD/UPDATE iteration. inboundInfo
-	// is then resolved from this in-memory index. Mirrors pushClientConfigToAll's
-	// Phase-1 prefetch.
-	cfg, _ := s.settings.Load(ctx, ports.UISettings{})
-	concurrency := paneltz.ResolveMaxPanelConcurrency(cfg.MaxPanelConcurrency)
-	// Fetch ONLY the inbounds the desired nodes reference (via GetInbound), not
-	// every inbound on each panel. resolveInfo below reads just the inbound-level
-	// Protocol + Settings (method/flow) of those specific inbounds; the old
-	// ListInbounds pulled the whole panel's clients[] for every inbound and
-	// discarded it. Group members on one panel share the same few inbounds, so
-	// this also shrinks the per-member fan-out during a group re-tag.
-	panelInbounds := make(map[int64]map[int]struct{})
-	for k := range desired {
-		ids := panelInbounds[k.panelID]
-		if ids == nil {
-			ids = make(map[int]struct{})
-			panelInbounds[k.panelID] = ids
-		}
-		ids[k.inboundID] = struct{}{}
-	}
-	type panelData struct {
-		byInbound map[int]*ports.Inbound
-		err       error
-	}
-	panelMap := make(map[int64]panelData, len(panelInbounds))
-	var prefetchMu sync.Mutex
-	var prefetchWG sync.WaitGroup
-	prefetchSem := make(chan struct{}, concurrency)
-	for pid, ids := range panelInbounds {
-		prefetchWG.Add(1)
-		go func(p int64, want map[int]struct{}) {
-			defer safego.Recover("user.ResyncMembership.prefetch")
-			defer prefetchWG.Done()
-			prefetchSem <- struct{}{}
-			defer func() { <-prefetchSem }()
-			c, err := s.pool.Get(p)
-			if err != nil {
-				prefetchMu.Lock()
-				panelMap[p] = panelData{err: err}
-				prefetchMu.Unlock()
-				return
-			}
-			idx := make(map[int]*ports.Inbound, len(want))
-			for id := range want {
-				inb, gerr := c.GetInbound(ctx, id)
-				if gerr != nil || inb == nil {
-					continue // missing → resolveInfo returns "inbound not found", as before
-				}
-				idx[inb.ID] = inb
-			}
-			prefetchMu.Lock()
-			panelMap[p] = panelData{byInbound: idx}
-			prefetchMu.Unlock()
-		}(pid, ids)
-	}
-	prefetchWG.Wait()
-
-	// resolveInfo reads the prefetched inbound and builds inboundInfo, mirroring
-	// inspectInbound's failure modes (panel unreachable / inbound gone).
-	resolveInfo := func(n *domain.Node) (*inboundInfo, error) {
-		pd, ok := panelMap[n.PanelID]
-		if !ok || pd.err != nil {
-			if ok && pd.err != nil {
-				return nil, pd.err
-			}
-			return nil, fmt.Errorf("panel %d not reachable", n.PanelID)
-		}
-		inb, found := pd.byInbound[n.InboundID]
-		if !found {
-			return nil, fmt.Errorf("inbound %d not found on panel %d", n.InboundID, n.PanelID)
-		}
-		return inboundInfoFromInbound(inb, n.Flow), nil
-	}
-
-	// ADD: desired but not currently owned
-	for k, n := range desired {
-		if _, ok := have[k]; ok {
-			continue
-		}
-		info, err := resolveInfo(n)
-		if err != nil {
-			if firstErr == nil {
-				firstErr = fmt.Errorf("inspect %d/%d: %w", k.panelID, k.inboundID, err)
-			}
-			continue
-		}
-		if info.protocol == "" {
-			continue
-		}
-		email := u.ClientEmail(n.ID, rules)
-		expireTime := u.PushExpireTime()
-		if err := s.syncer.AddClientToInbound(ctx, u.ID, k.panelID, k.inboundID,
-			info.protocol, info.ssMethod, u.UUID, email, info.flow, expireTime, floor); err != nil {
-			if firstErr == nil {
-				firstErr = fmt.Errorf("add to %d/%d: %w", k.panelID, k.inboundID, err)
-			}
-		}
-	}
-
-	// UPDATE: currently owned and still desired. Keep remote client fields in
-	// lockstep with the local user record. This makes queued user_resync tasks
-	// sufficient after credential reset, expiry changes, or enable flips.
-	for k, e := range have {
-		n, ok := desired[k]
-		if !ok {
-			continue
-		}
-		info, err := resolveInfo(n)
-		if err != nil {
-			if firstErr == nil {
-				firstErr = fmt.Errorf("inspect %d/%d: %w", k.panelID, k.inboundID, err)
-			}
-			continue
-		}
-		if info.protocol == "" {
-			continue
-		}
-		expireTime := u.PushExpireTime()
-		// Prefer the prefetched-inbound form: it lets the sync layer skip the
-		// UpdateClient (and its Xray restart) when the panel already matches —
-		// so a steady-state resync of an N-node user costs ~0 restarts instead of
-		// N. The inbound was fetched by the prefetch above (resolveInfo succeeded,
-		// so it's present); fall back to the self-fetching form if not.
-		var uerr error
-		if pd, ok := panelMap[k.panelID]; ok && pd.byInbound[k.inboundID] != nil {
-			uerr = s.syncer.SetOwnedClientEnableWithInbound(ctx, e.PanelID, pd.byInbound[k.inboundID], e.ClientEmail,
-				info.protocol, info.ssMethod, u.UUID, info.flow, u.EffectiveEnabled(time.Now()), expireTime, floor)
-		} else {
-			uerr = s.syncer.SetOwnedClientEnable(ctx, e.PanelID, e.InboundID, e.ClientEmail,
-				info.protocol, info.ssMethod, u.UUID, info.flow, u.EffectiveEnabled(time.Now()), expireTime, floor)
-		}
-		if uerr != nil {
-			if firstErr == nil {
-				firstErr = fmt.Errorf("update %d/%d: %w", k.panelID, k.inboundID, uerr)
-			}
-		}
-	}
-
-	// DEL: currently owned but no longer desired
-	for k, e := range have {
-		if _, ok := desired[k]; ok {
-			continue
-		}
-		if err := s.syncer.DelOwnedClient(ctx, e.PanelID, e.InboundID, e.ClientEmail); err != nil {
-			if firstErr == nil {
-				firstErr = fmt.Errorf("del from %d/%d: %w", k.panelID, k.inboundID, err)
-			}
-		}
-	}
-
-	// v3.9.0 shadow dual-write: mirror the same desired state into the psp_client
-	// model (one shared client per user-panel + attachments). Best-effort and
-	// fully isolated — it only writes the dormant psp_client tables (nothing
-	// reads them in production yet), so a failure here must NEVER affect the real
-	// ownership resync above. nil provisioner (tests / before wiring) skips it.
+	// v3.9.0 INVERTED ENROLLMENT: the shared-client model is PRIMARY. Build the
+	// psp_client set from the desired nodes (DB), then reconcile it into 3X-UI —
+	// provision the shared client, attach the desired inbounds, detach removed
+	// ones — and delete the user's legacy per-node clients. Render derives the
+	// SAME credentials the shared client stores (silent), so this never disrupts a
+	// live connection. (Replaces the old per-node ADD/UPDATE/DEL ownership diff.)
 	if s.psp != nil {
 		if err := s.psp.SyncUser(ctx, u.ID, u.UUID, rules, desiredNodes); err != nil {
-			log.Warn("psp_client shadow dual-write failed (non-fatal)", "user_id", u.ID, "err", err)
+			if firstErr == nil {
+				firstErr = fmt.Errorf("psp dual-write: %w", err)
+			}
 		}
 	}
-	// And keep the shared client's lifecycle (enable/expiry) in lockstep with the
-	// per-node clients pushed above (HOLE #1). Runs after SyncUser so the client
-	// row exists; best-effort.
+	if s.migrator != nil {
+		if err := s.migrator.MigrateUser(ctx, u.ID); err != nil {
+			if firstErr == nil {
+				firstErr = fmt.Errorf("shared migrate: %w", err)
+			}
+		}
+	}
+	// Push enable / expiry / quota-floor onto the shared client.
 	s.syncSharedLifecycle(ctx, u)
 
 	return firstErr
