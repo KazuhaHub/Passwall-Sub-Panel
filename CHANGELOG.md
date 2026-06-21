@@ -17,6 +17,7 @@ small improvement).
 - **Stage 2 —— render 切换开关**:`SubRenderUseSharedClient`(默认关)。开启后 render 改用存储的共享凭据;只有密码协议变(Trojan/SS 需重拉订阅,VLESS/VMess/Hy2/SS-2022 不变),且只对已 provisioned 的节点切换,其余回退派生——部分迁移不会断订阅。
 - **Stage 3 —— 共享 client 流量计量**:开关开启后,按 email **只读一次**面板聚合计数(绝不按 inbound 求和),折进用户 quota；首次观测 seed 防尖峰。每用户×每 Server 用量本就读 node 计数,flip 无关。
 - **Stage 4 —— 删除旧 per-node client**:端点 `POST /api/admin/clients/cleanup-legacy`,两道护栏(开关须开 + 只删已被 provisioned 共享 client 覆盖的节点),其余保留回退。最终不可逆步骤。
+- **管理 UI**:设置 → 订阅 新增「v3.9.0 共享客户端迁移」区块——渲染开关(带不可逆警告)+ 回填 / 建客户端 / 删除旧 client 三个一键操作(删除带确认弹窗),整套迁移可在面板内按 runbook 完成。
 
 ## v3.9.0-beta.1 — 2026-06-20
 
