@@ -2,12 +2,14 @@ package user
 
 import (
 	"context"
+	"sync"
 	"testing"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 )
 
 type fakeSharedLife struct {
+	mu    sync.Mutex // HealSharedClients pushes lifecycle from concurrent workers
 	calls []sharedLifeCall
 }
 
@@ -18,6 +20,8 @@ type sharedLifeCall struct {
 }
 
 func (f *fakeSharedLife) SyncUserLifecycle(_ context.Context, userID int64, enable bool, expiry, totalGB int64) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.calls = append(f.calls, sharedLifeCall{userID, enable, expiry, totalGB})
 	return nil
 }

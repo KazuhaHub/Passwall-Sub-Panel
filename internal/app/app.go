@@ -1135,11 +1135,19 @@ func (a *App) runReconcileLoop(ctx context.Context) {
 			report, err := a.reconcile.RunOnce(ctx, reconcile.LevelFull)
 			if err != nil {
 				log.Warn("reconcile run", "err", err)
-				continue
-			}
-			if report.Scanned > 0 || len(report.Issues) > 0 {
+				// fall through: the shared-client heal is independent of the
+				// per-node reconcile and worth running even if that errored.
+			} else if report.Scanned > 0 || len(report.Issues) > 0 {
 				log.Info("reconcile pass",
 					"scanned", report.Scanned, "fixed", report.Fixed, "issues", len(report.Issues))
+			}
+			// v3.9.0: heal shared-client drift the per-node reconcile can't see
+			// (the ownership table is dropped post-migration). No-op-skips make a
+			// no-drift sweep read-only (no Xray restarts).
+			if healed, herr := a.user.HealSharedClients(ctx); herr != nil {
+				log.Warn("shared-client heal", "repaired", healed, "err", herr)
+			} else if healed > 0 {
+				log.Debug("shared-client heal pass", "verified_or_repaired", healed)
 			}
 		}
 	}

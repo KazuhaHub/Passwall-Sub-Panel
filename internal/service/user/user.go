@@ -1652,6 +1652,83 @@ func (s *Service) ResyncMembership(ctx context.Context, userID int64) error {
 	return firstErr
 }
 
+// HealSharedClients is the v3.9.0 shared-model drift heal. It walks every user
+// and re-runs provision + lifecycle on their shared client(s), repairing 3X-UI
+// drift — a client manually deleted/detached in 3X-UI, or a provision that
+// exhausted its sync-task retries — that no membership/lifecycle event would
+// otherwise correct (the per-node ownership reconcile no-ops once the table is
+// dropped). With the no-op skips (provision skips when already attached to the
+// desired set; lifecycle skips when 3X-UI already holds the exact state+creds),
+// a no-drift sweep costs only GetClient READS — zero Xray restarts — so it is
+// safe to run on the reconcile cadence. Deliberately does NOT dual-write
+// psp_clients or delete legacy clients: those are membership-driven, not
+// drift-driven. Best-effort + concurrency-capped: per-user failures are logged
+// and skipped. Returns the count of users verified-or-repaired and the first error.
+func (s *Service) HealSharedClients(ctx context.Context) (int, error) {
+	if s.migrator == nil {
+		return 0, nil // shared model not wired (tests / non-shared build)
+	}
+	cfg, _ := s.settings.Load(ctx, ports.UISettings{})
+	concurrency := paneltz.ResolveMaxPanelConcurrency(cfg.MaxPanelConcurrency)
+
+	const pageSize = 200
+	var mu sync.Mutex
+	var healed int
+	var firstErr error
+	note := func(err error) {
+		mu.Lock()
+		if err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+		} else {
+			healed++
+		}
+		mu.Unlock()
+	}
+	for page := 1; ; page++ {
+		users, total, err := s.users.List(ctx, ports.UserFilter{
+			Pagination: ports.Pagination{Page: page, PageSize: pageSize},
+		})
+		if err != nil {
+			note(err)
+			break
+		}
+		if len(users) == 0 {
+			break
+		}
+		var wg sync.WaitGroup
+		sem := make(chan struct{}, concurrency)
+		for _, u := range users {
+			if u == nil || u.AutoDisabledReason == domain.DisabledPendingDelete {
+				continue
+			}
+			wg.Add(1)
+			go func(u *domain.User) {
+				defer safego.Recover("user.HealSharedClients")
+				defer wg.Done()
+				sem <- struct{}{}
+				defer func() { <-sem }()
+				if err := s.migrator.ProvisionUser(ctx, u.ID); err != nil {
+					log.Warn("shared heal: provision", "user_id", u.ID, "err", err)
+					note(err)
+					return
+				}
+				// Re-push the user's REAL enable/expiry/floor so a freshly
+				// re-created (drift-healed) client isn't left at the provision
+				// default of enable=true — same ordering guarantee as the migration.
+				s.syncSharedLifecycle(ctx, u)
+				note(nil)
+			}(u)
+		}
+		wg.Wait()
+		if int64(page*pageSize) >= total {
+			break
+		}
+	}
+	return healed, firstErr
+}
+
 // SetEnabledAndSync flips the enabled flag and propagates it to every owned
 // 3X-UI client. Used both by the admin UI and by traffic-limit enforcement.
 //
