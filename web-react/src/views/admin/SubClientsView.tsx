@@ -76,13 +76,6 @@ export default function SubClientsView() {
     <Box sx={{ p: 3 }}>
       <PageHeader title={t('nav:admin.sub_clients')} />
       <Box component="form" onSubmit={save} sx={{ display: 'flex', flexDirection: 'column', gap: 3, mt: 2 }}>
-        <Box sx={{ display: 'flex', justifyContent: 'flex-end' }}>
-          <Button variant="contained" type="submit" disabled={saving}
-            startIcon={saving ? <CircularProgress size={14} color="inherit" /> : <SaveIcon />}>
-            {t('settings.save')}
-          </Button>
-        </Box>
-
         <Card sx={{ p: 3, bgcolor: md.surfaceContainerLow, border: `1px solid ${md.outlineVariant}` }}>
           <Typography sx={{ fontWeight: 500, mb: 1.5, color: md.onSurface }}>
             {t('settings.subscription.section_detection', { defaultValue: '客户端检测与过滤' })}
@@ -111,6 +104,23 @@ export default function SubClientsView() {
           families={settings.sub_clients}
           onChange={v => patch('sub_clients', v)}
         />
+
+        {/* Sticky bottom action bar — matches SettingsView's convention so Save
+            sits in the same place across admin settings pages. */}
+        <Box sx={{
+          position: 'sticky', bottom: 0, zIndex: 2,
+          mx: -3, px: 3, py: 1.5,
+          display: 'flex', justifyContent: 'flex-end', gap: 1,
+          bgcolor: md.surface, borderTop: `1px solid ${md.outlineVariant}`,
+        }}>
+          <Button variant="text" type="button" onClick={() => void load()} disabled={saving}>
+            {t('settings.cancel', { defaultValue: '取消' })}
+          </Button>
+          <Button variant="contained" type="submit" disabled={saving}
+            startIcon={saving ? <CircularProgress size={14} color="inherit" /> : <SaveIcon />}>
+            {t('settings.save')}
+          </Button>
+        </Box>
       </Box>
     </Box>
   )
