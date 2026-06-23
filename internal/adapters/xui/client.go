@@ -61,41 +61,38 @@ type Client struct {
 	inboundWriteMu    sync.Mutex
 	inboundWriteLocks map[int]*sync.Mutex
 
-	// clientWriteLocks serializes mutating client operations per client EMAIL
-	// within this process. 3X-UI's first-class client endpoints (/clients/add,
-	// /update, /addClient (attach), /delClient (detach), /del) are NOT safe to
-	// run concurrently on the SAME client: two in-flight mutations race on
-	// 3X-UI's client_inbounds join table and one fails with "email already in
-	// use" or "UNIQUE constraint failed: client_inbounds.client_id,
-	// client_inbounds.inbound_id" (the whole transaction then rolls back, so the
-	// enable/expiry change is lost). PSP has several concurrent sources of such
-	// mutations on one client — the shared-migration boot heal, the sync-task
-	// migrate/resync drain, the traffic-poll lifecycle push, the reconcile heal,
-	// and admin enable/disable — so we serialize per email here. Keyed (not a
-	// single panel-wide mutex) so different clients still mutate in parallel.
-	// clientWriteMu guards the map itself. Reads (GetClient/ListInbounds) are
-	// unlocked — only mutations conflict.
-	clientWriteMu    sync.Mutex
-	clientWriteLocks map[string]*sync.Mutex
 }
 
-// lockClientEmail acquires the per-email write lock and returns its unlock func
-// (use `defer c.lockClientEmail(email)()`). See clientWriteLocks. An empty email
-// is a no-op (returns a nil-safe unlock) so callers needn't pre-check.
+// clientWriteLocks serializes mutating client operations per (backend, email)
+// GLOBALLY across all *Client instances in this process. 3X-UI's first-class
+// client endpoints (/clients/add, /update, /addClient (attach), /delClient
+// (detach), /del) are NOT safe to run concurrently on the SAME client: two
+// in-flight mutations race on 3X-UI's client_inbounds join table and one fails
+// with "email already in use" or "UNIQUE constraint failed: client_inbounds.
+// client_id, client_inbounds.inbound_id" (the whole transaction rolls back, so
+// the enable/expiry change is lost). PSP has several concurrent sources on one
+// client — the sync-task migrate/resync drain, the 2-min traffic-poll lifecycle
+// push, the reconcile/boot heal, and admin enable/disable.
+//
+// The lock is keyed by baseURL+email and lives at PACKAGE scope — NOT per *Client
+// — on purpose: if one physical 3X-UI server is registered as MORE THAN ONE PSP
+// panel (e.g. an "OLD" and a current registration of the same host), the Pool
+// holds a distinct *Client per panel, the shared client is provisioned through
+// BOTH, and a per-*Client lock would NOT serialize those two writers hitting the
+// same backend row. Keying on the backend URL makes every panel fronting the same
+// 3X-UI share one lock. Different clients (and different backends) still mutate in
+// parallel. Reads (GetClient/ListInbounds) are unlocked — only mutations conflict.
+var clientWriteLocks sync.Map // key: baseURL "\x00" email -> *sync.Mutex
+
+// lockClientEmail acquires the global per-(backend,email) write lock and returns
+// its unlock func (use `defer c.lockClientEmail(email)()`). See clientWriteLocks.
+// An empty email is a no-op (returns a nil-safe unlock) so callers needn't pre-check.
 func (c *Client) lockClientEmail(email string) func() {
 	if email == "" {
 		return func() {}
 	}
-	c.clientWriteMu.Lock()
-	if c.clientWriteLocks == nil {
-		c.clientWriteLocks = make(map[string]*sync.Mutex)
-	}
-	m := c.clientWriteLocks[email]
-	if m == nil {
-		m = &sync.Mutex{}
-		c.clientWriteLocks[email] = m
-	}
-	c.clientWriteMu.Unlock()
+	mi, _ := clientWriteLocks.LoadOrStore(c.baseURL+"\x00"+email, &sync.Mutex{})
+	m := mi.(*sync.Mutex)
 	m.Lock()
 	return m.Unlock
 }

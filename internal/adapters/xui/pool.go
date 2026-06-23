@@ -3,9 +3,11 @@ package xui
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/log"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 )
 
@@ -28,10 +30,25 @@ func NewPool(ctx context.Context, repo ports.XUIPanelRepo) (*Pool, error) {
 		clients: make(map[int64]*Client, len(panels)),
 		panels:  make(map[int64]*domain.XUIPanel, len(panels)),
 	}
+	seenBackends := make(map[string]string, len(panels)) // normalized URL -> first panel name
 	for _, panel := range panels {
 		c, err := New(panel)
 		if err != nil {
 			return nil, fmt.Errorf("init xui client %s: %w", panel.Name, err)
+		}
+		// Surface the duplicate-backend topology that breaks shared-client
+		// provisioning: two PSP panels pointing at the SAME 3X-UI server each get
+		// their own *Client, the shared client is provisioned through both, and they
+		// race on the backend's client_inbounds. The global per-(backend,email) lock
+		// (see client.go) now serializes those writes, but the duplicate panel is
+		// still wasteful + confusing — warn so the operator can remove it.
+		key := strings.TrimRight(panel.URL, "/")
+		if first, dup := seenBackends[key]; dup {
+			log.Warn("two PSP panels point to the SAME 3X-UI backend URL",
+				"url", key, "panel", panel.Name, "duplicate_of", first,
+				"hint", "shared-client writes are serialized by URL so this is safe, but you likely want to remove the duplicate panel registration")
+		} else {
+			seenBackends[key] = panel.Name
 		}
 		p.clients[panel.ID] = c
 		p.panels[panel.ID] = panel

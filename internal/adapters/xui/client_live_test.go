@@ -275,6 +275,76 @@ func TestLive_ConcurrentSameClientNoCorruption(t *testing.T) {
 	}
 }
 
+// TestLive_TwoClientsSameBackendNoCorruption reproduces the v3.9.0-beta.8 root
+// cause on a real panel: ONE 3X-UI server fronted by TWO PSP panels = two distinct
+// *Client instances writing the same backend client concurrently. The global
+// per-(backend,email) lock must serialize them so there's no client_inbounds
+// corruption — this test would FAIL with the old per-*Client lock.
+func TestLive_TwoClientsSameBackendNoCorruption(t *testing.T) {
+	base := os.Getenv("PSP_LIVE_XUI_URL")
+	token := os.Getenv("PSP_LIVE_XUI_TOKEN")
+	if base == "" || token == "" {
+		t.Skip("set PSP_LIVE_XUI_URL and PSP_LIVE_XUI_TOKEN to run the live 3X-UI smoke test")
+	}
+	mk := func() *Client {
+		return &Client{
+			baseURL:  strings.TrimRight(base, "/"),
+			apiToken: token,
+			http: &http.Client{
+				Timeout:   30 * time.Second,
+				Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}, //nolint:gosec // local smoke test only
+			},
+		}
+	}
+	c1, c2 := mk(), mk() // two *Clients, same backend — the duplicate-panel topology
+	ctx := context.Background()
+	inbounds, err := c1.ListInbounds(ctx)
+	if err != nil {
+		t.Fatalf("ListInbounds: %v", err)
+	}
+	if len(inbounds) < 2 {
+		t.Skipf("need >=2 inbounds, panel has %d", len(inbounds))
+	}
+	a, b := inbounds[0].ID, inbounds[1].ID
+	const email = "psp-twoclient-livetest@psp.local"
+	const uuid = "55555555-6666-7777-8888-999999999999"
+	_ = c1.DelClientByEmail(ctx, a, email)
+	t.Cleanup(func() { _ = c1.DelClientByEmail(ctx, a, email) })
+
+	spec := ports.ClientSpec{Email: email, Enable: true, ID: uuid, Password: uuid, Auth: uuid}
+	var wg sync.WaitGroup
+	errs := make([]error, 6)
+	for g := 0; g < 6; g++ {
+		c := c1
+		if g%2 == 1 {
+			c = c2 // half the writers go through the OTHER *Client for the same backend
+		}
+		wg.Add(1)
+		go func(idx int, c *Client) {
+			defer wg.Done()
+			if e := c.AddClientToInbounds(ctx, []int{a, b}, spec); e != nil {
+				errs[idx] = e
+				return
+			}
+			u := spec
+			u.Enable = idx%2 == 0
+			errs[idx] = c.UpdateClient(ctx, 0, uuid, u)
+		}(g, c)
+	}
+	wg.Wait()
+	for i, e := range errs {
+		if e != nil && strings.Contains(e.Error(), "client_inbounds") {
+			t.Fatalf("goroutine %d hit client_inbounds corruption across two *Clients (global lock failed): %v", i, e)
+		}
+	}
+	if cd, err := c1.GetClient(ctx, email); err != nil || cd == nil {
+		t.Fatalf("final GetClient: err=%v nil=%v", err, cd == nil)
+	}
+	if err := c2.UpdateClient(ctx, 0, uuid, spec); err != nil {
+		t.Fatalf("final UpdateClient must succeed, got: %v", err)
+	}
+}
+
 func assertAttached(t *testing.T, c *Client, ctx context.Context, email string, want ...int) {
 	t.Helper()
 	cd, err := c.GetClient(ctx, email)
