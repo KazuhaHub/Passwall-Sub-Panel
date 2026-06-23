@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -58,6 +59,69 @@ type Client struct {
 	// no inbound read-modify-write.)
 	inboundWriteMu    sync.Mutex
 	inboundWriteLocks map[int]*sync.Mutex
+
+	// clientWriteLocks serializes mutating client operations per client EMAIL
+	// within this process. 3X-UI's first-class client endpoints (/clients/add,
+	// /update, /addClient (attach), /delClient (detach), /del) are NOT safe to
+	// run concurrently on the SAME client: two in-flight mutations race on
+	// 3X-UI's client_inbounds join table and one fails with "email already in
+	// use" or "UNIQUE constraint failed: client_inbounds.client_id,
+	// client_inbounds.inbound_id" (the whole transaction then rolls back, so the
+	// enable/expiry change is lost). PSP has several concurrent sources of such
+	// mutations on one client — the shared-migration boot heal, the sync-task
+	// migrate/resync drain, the traffic-poll lifecycle push, the reconcile heal,
+	// and admin enable/disable — so we serialize per email here. Keyed (not a
+	// single panel-wide mutex) so different clients still mutate in parallel.
+	// clientWriteMu guards the map itself. Reads (GetClient/ListInbounds) are
+	// unlocked — only mutations conflict.
+	clientWriteMu    sync.Mutex
+	clientWriteLocks map[string]*sync.Mutex
+}
+
+// lockClientEmail acquires the per-email write lock and returns its unlock func
+// (use `defer c.lockClientEmail(email)()`). See clientWriteLocks. An empty email
+// is a no-op (returns a nil-safe unlock) so callers needn't pre-check.
+func (c *Client) lockClientEmail(email string) func() {
+	if email == "" {
+		return func() {}
+	}
+	c.clientWriteMu.Lock()
+	if c.clientWriteLocks == nil {
+		c.clientWriteLocks = make(map[string]*sync.Mutex)
+	}
+	m := c.clientWriteLocks[email]
+	if m == nil {
+		m = &sync.Mutex{}
+		c.clientWriteLocks[email] = m
+	}
+	c.clientWriteMu.Unlock()
+	m.Lock()
+	return m.Unlock
+}
+
+// lockClientEmails locks several emails at once (BulkDelByEmail), acquiring in
+// sorted+deduped order so two overlapping bulk calls can't deadlock. Returns a
+// single unlock func that releases all of them.
+func (c *Client) lockClientEmails(emails []string) func() {
+	uniq := make([]string, 0, len(emails))
+	seen := make(map[string]bool, len(emails))
+	for _, e := range emails {
+		if e == "" || seen[e] {
+			continue
+		}
+		seen[e] = true
+		uniq = append(uniq, e)
+	}
+	sort.Strings(uniq)
+	unlocks := make([]func(), 0, len(uniq))
+	for _, e := range uniq {
+		unlocks = append(unlocks, c.lockClientEmail(e))
+	}
+	return func() {
+		for i := len(unlocks) - 1; i >= 0; i-- {
+			unlocks[i]()
+		}
+	}
 }
 
 // New constructs a Client for the given 3X-UI panel.
@@ -473,6 +537,7 @@ func (c *Client) AddClientToInbounds(ctx context.Context, inboundIDs []int, spec
 	if len(inboundIDs) == 0 {
 		return fmt.Errorf("AddClientToInbounds: at least one inbound id is required")
 	}
+	defer c.lockClientEmail(spec.Email)()
 	clientJSON, err := buildClientJSON(spec)
 	if err != nil {
 		return err
@@ -494,6 +559,7 @@ func (c *Client) AttachClient(ctx context.Context, email string, inboundIDs []in
 	if len(inboundIDs) == 0 {
 		return nil
 	}
+	defer c.lockClientEmail(email)()
 	path := "/panel/api/clients/" + url.PathEscape(email) + "/attach"
 	return c.doJSON(ctx, http.MethodPost, path, map[string]any{"inboundIds": inboundIDs}, nil)
 }
@@ -508,6 +574,7 @@ func (c *Client) DetachClient(ctx context.Context, email string, inboundIDs []in
 	if len(inboundIDs) == 0 {
 		return nil
 	}
+	defer c.lockClientEmail(email)()
 	path := "/panel/api/clients/" + url.PathEscape(email) + "/detach"
 	return c.doJSON(ctx, http.MethodPost, path, map[string]any{"inboundIds": inboundIDs}, nil)
 }
@@ -520,6 +587,7 @@ func (c *Client) BulkAttach(ctx context.Context, emails []string, inboundIDs []i
 	if len(emails) == 0 || len(inboundIDs) == 0 {
 		return ports.BulkAttachResult{}, nil
 	}
+	defer c.lockClientEmails(emails)()
 	body := map[string]any{"emails": emails, "inboundIds": inboundIDs}
 	var out struct {
 		Attached []string          `json:"attached"`
@@ -539,6 +607,7 @@ func (c *Client) BulkDetach(ctx context.Context, emails []string, inboundIDs []i
 	if len(emails) == 0 || len(inboundIDs) == 0 {
 		return ports.BulkAttachResult{}, nil
 	}
+	defer c.lockClientEmails(emails)()
 	body := map[string]any{"emails": emails, "inboundIds": inboundIDs}
 	var out struct {
 		Detached []string          `json:"detached"`
@@ -582,6 +651,7 @@ func (c *Client) UpdateClient(ctx context.Context, inboundID int, clientUUID str
 	if spec.Email == "" {
 		return fmt.Errorf("UpdateClient: spec.Email is required (3.2.0 keys clients by email)")
 	}
+	defer c.lockClientEmail(spec.Email)()
 	clientJSON, err := buildClientJSON(spec)
 	if err != nil {
 		return err
@@ -608,6 +678,7 @@ func (c *Client) UpdateClientWithInbound(ctx context.Context, inb *ports.Inbound
 // accounting. The ownership guard in sync.DelOwnedClient runs before this, so
 // only PSP-managed clients ever reach here.
 func (c *Client) DelClientByEmail(ctx context.Context, inboundID int, email string) error {
+	defer c.lockClientEmail(email)()
 	path := "/panel/api/clients/del/" + url.PathEscape(email) + "?keepTraffic=0"
 	return c.doJSON(ctx, http.MethodPost, path, nil, nil)
 }
@@ -622,6 +693,11 @@ func (c *Client) BulkAddToInbound(ctx context.Context, inboundID int, specs []po
 	if len(specs) == 0 {
 		return ports.BulkAddResult{}, nil
 	}
+	emails := make([]string, 0, len(specs))
+	for _, s := range specs {
+		emails = append(emails, s.Email)
+	}
+	defer c.lockClientEmails(emails)()
 	items := make([]map[string]any, 0, len(specs))
 	for _, s := range specs {
 		clientJSON, err := buildClientJSON(s)
@@ -659,6 +735,7 @@ func (c *Client) BulkDelByEmail(ctx context.Context, emails []string) (int, erro
 	if len(emails) == 0 {
 		return 0, nil
 	}
+	defer c.lockClientEmails(emails)()
 	body := map[string]any{"emails": emails, "keepTraffic": false}
 	var out struct {
 		Deleted int `json:"deleted"`

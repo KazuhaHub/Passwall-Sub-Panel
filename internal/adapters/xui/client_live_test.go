@@ -7,6 +7,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -203,6 +204,74 @@ func TestLive_BulkDelPreservesSharedClient(t *testing.T) {
 		} else if cd != nil {
 			t.Fatalf("legacy client %s must be gone after bulk delete, got %v", e, cd.InboundIDs)
 		}
+	}
+}
+
+// TestLive_ConcurrentSameClientNoCorruption pins the v3.9.0-beta.5 fix for the
+// real-panel migration failure: several flows (the boot heal, the per-user migrate
+// task, the 2-min traffic-poll lifecycle push) all mutate the SAME shared client at
+// once. 3X-UI's client endpoints reject concurrent same-client writes with "email
+// already in use" or "UNIQUE constraint failed: client_inbounds.client_id,
+// client_inbounds.inbound_id" (and the rolled-back update silently drops the
+// enable/expiry change). The per-email write lock must serialize them so NO
+// client_inbounds corruption occurs and the client ends single + updatable. Losers
+// racing the create may still get a clean "email already in use" — fine (PSP's
+// GetClient-first skip + task retry converge); only client_inbounds is a failure.
+func TestLive_ConcurrentSameClientNoCorruption(t *testing.T) {
+	base := os.Getenv("PSP_LIVE_XUI_URL")
+	token := os.Getenv("PSP_LIVE_XUI_TOKEN")
+	if base == "" || token == "" {
+		t.Skip("set PSP_LIVE_XUI_URL and PSP_LIVE_XUI_TOKEN to run the live 3X-UI smoke test")
+	}
+	c := &Client{
+		baseURL:  strings.TrimRight(base, "/"),
+		apiToken: token,
+		http: &http.Client{
+			Timeout:   30 * time.Second,
+			Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}, //nolint:gosec // local smoke test only
+		},
+	}
+	ctx := context.Background()
+	inbounds, err := c.ListInbounds(ctx)
+	if err != nil {
+		t.Fatalf("ListInbounds: %v", err)
+	}
+	if len(inbounds) < 2 {
+		t.Skipf("need >=2 inbounds, panel has %d", len(inbounds))
+	}
+	a, b := inbounds[0].ID, inbounds[1].ID
+	const email = "psp-cc-livetest@psp.local"
+	const uuid = "44444444-5555-6666-7777-888888888888"
+	_ = c.DelClientByEmail(ctx, a, email)
+	t.Cleanup(func() { _ = c.DelClientByEmail(ctx, a, email) })
+
+	spec := ports.ClientSpec{Email: email, Enable: true, ID: uuid, Password: uuid, Auth: uuid}
+	var wg sync.WaitGroup
+	errs := make([]error, 6)
+	for g := 0; g < 6; g++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			if e := c.AddClientToInbounds(ctx, []int{a, b}, spec); e != nil {
+				errs[idx] = e
+				return
+			}
+			u := spec
+			u.Enable = idx%2 == 0
+			errs[idx] = c.UpdateClient(ctx, 0, uuid, u)
+		}(g)
+	}
+	wg.Wait()
+	for i, e := range errs {
+		if e != nil && strings.Contains(e.Error(), "client_inbounds") {
+			t.Fatalf("goroutine %d hit client_inbounds corruption (serialization failed): %v", i, e)
+		}
+	}
+	if cd, err := c.GetClient(ctx, email); err != nil || cd == nil {
+		t.Fatalf("final GetClient: err=%v nil=%v", err, cd == nil)
+	}
+	if err := c.UpdateClient(ctx, 0, uuid, spec); err != nil {
+		t.Fatalf("final UpdateClient must succeed after the concurrent storm, got: %v", err)
 	}
 }
 

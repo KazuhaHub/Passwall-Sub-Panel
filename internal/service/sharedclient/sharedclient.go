@@ -96,6 +96,11 @@ func (s *Service) ProvisionClient(ctx context.Context, c *domain.PSPClient) (Pro
 			res.Skipped++
 			continue
 		}
+		// Dedupe by inbound: two PSP node rows can map to the SAME (panel, inbound),
+		// and passing a duplicate inbound id to AddClientToInbounds is malformed.
+		if _, dup := nodeByInbound[n.InboundID]; dup {
+			continue
+		}
 		inboundIDs = append(inboundIDs, n.InboundID)
 		nodeByInbound[n.InboundID] = a.NodeID
 	}

@@ -475,34 +475,37 @@ func (a *App) Run() error {
 		} else if n > 0 {
 			log.Info("shared-client migration started", "users_enqueued", n)
 		}
-		// One immediate heal pass at boot. EnqueueSharedMigration only covers users
-		// with legacy ownership rows; an install upgrading from a PRIOR shared-model
-		// build (e.g. beta.2, which could have left disabled/expired users with a
-		// wrongly-enabled shared client) has zero ownership rows, so nothing above
-		// corrects it — and the reconcile-loop heal wouldn't fire for a full
-		// CronReconcileMinutes interval. Run it now so such clients are corrected
-		// within seconds of upgrade, not minutes. No-op-skips keep it read-only when
-		// there's no drift.
-		if healed, err := a.user.HealSharedClients(bgCtx); err != nil {
-			log.Warn("shared-client boot heal", "repaired", healed, "err", err)
-		} else if healed > 0 {
-			log.Info("shared-client boot heal pass", "verified_or_repaired", healed)
-		}
-		// Then poll until every user has migrated (0 ownership rows) and DROP the
-		// retired user_xui_clients table — v3.9.0 removes it for real, not just
-		// empties it. done=true (dropped / fresh install / already gone) stops the
-		// loop; otherwise re-check while the queue drains. bgCtx cancels on shutdown.
+		// Poll until every user has migrated (0 ownership rows) and DROP the retired
+		// user_xui_clients table — v3.9.0 removes it for real, not just empties it.
+		// done=true (dropped / fresh install / already gone) breaks out; otherwise
+		// re-check while the queue drains. bgCtx cancels on shutdown.
 		for {
-			if done, err := a.repos.Ownership.DropIfMigrated(bgCtx); err != nil {
+			done, err := a.repos.Ownership.DropIfMigrated(bgCtx)
+			if err != nil {
 				log.Warn("shared-client migration table drop", "err", err)
 			} else if done {
-				return
+				break
 			}
 			select {
 			case <-bgCtx.Done():
 				return
 			case <-time.After(time.Minute):
 			}
+		}
+		// One heal pass AFTER the migration has fully drained. Running it earlier
+		// (concurrently with the migrate-task drain) had the boot heal and the
+		// per-user migrate task mutate the SAME client at once; 3X-UI's client
+		// endpoints reject concurrent same-client writes ("email already in use" /
+		// "UNIQUE constraint failed: client_inbounds"). Per-email write locks now
+		// serialize those, but draining first avoids the contention entirely. The
+		// heal's real job here is a PRIOR shared-model upgrade (e.g. beta.2) whose
+		// already-migrated clients have 0 ownership rows — so the drain returns
+		// immediately and the heal runs at once; the reconcile-loop heal is the
+		// steady-state backstop. No-op-skips keep it read-only when there's no drift.
+		if healed, err := a.user.HealSharedClients(bgCtx); err != nil {
+			log.Warn("shared-client boot heal", "repaired", healed, "err", err)
+		} else if healed > 0 {
+			log.Info("shared-client boot heal pass", "verified_or_repaired", healed)
 		}
 	})
 	safego.GoTracked(&a.bgWG, "audit-cleanup-loop", func() { a.runAuditCleanupLoop(bgCtx) })
