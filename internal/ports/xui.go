@@ -59,6 +59,10 @@ type XUIClient interface {
 	// so a by-email fetch is both sufficient and far cheaper than pulling a
 	// whole inbound's client list to find one entry.
 	GetClient(ctx context.Context, email string) (*ClientDetail, error)
+	// ListClientInbounds returns every client on the panel keyed by email, valued by
+	// the inbound IDs it is attached to (one /list call). The shared-client orphan
+	// reconcile uses it to find clients PSP no longer tracks in psp_client.
+	ListClientInbounds(ctx context.Context) (map[string][]int, error)
 
 	// BulkAddToInbound creates many clients on one inbound in a single
 	// /panel/api/clients/bulkCreate call (one Xray restart instead of N). The

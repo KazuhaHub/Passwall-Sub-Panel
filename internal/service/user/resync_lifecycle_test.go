@@ -11,6 +11,7 @@ import (
 type resyncMigrator struct {
 	provisioned   []int64
 	deletedLegacy []int64
+	reconciled    []int64
 }
 
 func (m *resyncMigrator) ProvisionUser(_ context.Context, id int64) error {
@@ -19,6 +20,10 @@ func (m *resyncMigrator) ProvisionUser(_ context.Context, id int64) error {
 }
 func (m *resyncMigrator) DeleteLegacyForUser(_ context.Context, id int64) error {
 	m.deletedLegacy = append(m.deletedLegacy, id)
+	return nil
+}
+func (m *resyncMigrator) ReconcileOrphans(_ context.Context, id int64) error {
+	m.reconciled = append(m.reconciled, id)
 	return nil
 }
 

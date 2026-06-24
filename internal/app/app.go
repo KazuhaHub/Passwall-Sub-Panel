@@ -68,6 +68,10 @@ func (a sharedMigratorAdapter) DeleteLegacyForUser(ctx context.Context, userID i
 	return err
 }
 
+func (a sharedMigratorAdapter) ReconcileOrphans(ctx context.Context, userID int64) error {
+	return a.s.ReconcileOrphans(ctx, userID)
+}
+
 func (a *asyncDispatcher) Context() context.Context { return a.ctx }
 
 func (a *asyncDispatcher) Go(name string, fn func(ctx context.Context)) {

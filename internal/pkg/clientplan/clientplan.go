@@ -38,6 +38,7 @@ import (
 	"encoding/json"
 	"sort"
 	"strconv"
+	"strings"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/crypto"
@@ -310,7 +311,72 @@ func Build(userID int64, userUUID string, panelID int64, rules domain.EmailRules
 			Inbounds: inbounds,
 		})
 	}
+	// User-facing simplification: when a panel needs only ONE client (the common case
+	// once protocols merge), drop the partition-hash suffix and use the bare
+	// "u{id}@domain" email. A lone client carries its credentials in its own fields,
+	// so the email needs no (pwClass,flow) discriminator — the suffix only earns its
+	// keep when 2+ clients must coexist on one panel (a genuine same-field conflict,
+	// where distinct emails are mandatory). This makes the email count-dependent rather
+	// than a pure function of the partition; crossing the 1↔2 boundary re-keys the
+	// client(s), but render derives creds from the UUID so subscribers never re-fetch.
+	if len(out) == 1 {
+		out[0].Client.Email = domain.PSPClientEmail(userID, "", rules)
+	}
 	return out
+}
+
+// IsSharedClientEmail reports whether email is one the v3.9.0 shared-client scheme
+// could have minted for userID — on ANY panel and ANY domain, under ANY shipped
+// suffix version. It matches "u{id}@d" (the bare/merged form), "u{id}-k{8hex}@d"
+// (a partition content-hash), and the RETIRED literal "u{id}-c{n}@d" (an early-beta
+// SS-2022 key-length suffix). It is domain- and suffix-version-agnostic on purpose:
+// the orphan reconcile must recognise a client minted under an older scheme (a
+// reconstruct-the-email approach would miss those). It deliberately does NOT match
+// the legacy per-NODE email "u{id}-n{nodeID}@d" (domain.User.ClientEmail) — those
+// are the migration's enforcement fallback, owned by the legacy-cleanup path, and
+// must never be swept as shared-client orphans.
+func IsSharedClientEmail(email string, userID int64) bool {
+	prefix := "u" + strconv.FormatInt(userID, 10)
+	if !strings.HasPrefix(email, prefix) {
+		return false
+	}
+	rest := email[len(prefix):]
+	at := strings.IndexByte(rest, '@')
+	if at < 0 {
+		return false
+	}
+	return isSharedSuffix(rest[:at])
+}
+
+func isSharedSuffix(s string) bool {
+	switch {
+	case s == "": // bare: u{id}@  (default class or the lone-client form)
+		return true
+	case strings.HasPrefix(s, "-k"): // content-hash: -k{8 hex}
+		h := s[2:]
+		if len(h) != 8 {
+			return false
+		}
+		for _, ch := range h {
+			if !(ch >= '0' && ch <= '9' || ch >= 'a' && ch <= 'f') {
+				return false
+			}
+		}
+		return true
+	case strings.HasPrefix(s, "-c"): // retired literal: -c{digits}
+		d := s[2:]
+		if d == "" {
+			return false
+		}
+		for _, ch := range d {
+			if ch < '0' || ch > '9' {
+				return false
+			}
+		}
+		return true
+	default:
+		return false // notably -n{nodeID} (legacy per-node) falls here — NOT a shared client
+	}
 }
 
 // passwordForClass returns the single stored password for a partition's pwClass.

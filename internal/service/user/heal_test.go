@@ -28,6 +28,7 @@ func (m *healMigrator) ProvisionUser(_ context.Context, userID int64) error {
 	return nil
 }
 func (m *healMigrator) DeleteLegacyForUser(context.Context, int64) error { return nil }
+func (m *healMigrator) ReconcileOrphans(context.Context, int64) error    { return nil }
 
 // HealSharedClients must walk every user, skip pending-delete ones, and run
 // provision + lifecycle on the rest. A per-user provision failure is logged and

@@ -102,6 +102,14 @@ type Service struct {
 	migrator SharedMigrator
 
 	emergencyMu sync.Mutex
+
+	// resyncLocks serializes ResyncMembership PER USER. The same user can be resynced
+	// concurrently from the heal sweep, the sync-task drain, and request threads; the
+	// xui adapter's lock is per-(backend,email), not per-user, so two passes could
+	// race a re-key against the orphan reconcile (one deletes a client the other just
+	// made desired). A per-user mutex makes each user's rebuild→provision→reconcile
+	// atomic w.r.t. other passes. Keyed by userID; entries are cheap and never pruned.
+	resyncLocks sync.Map // map[int64]*sync.Mutex
 }
 
 // PSPClientProvisioner mirrors a user's desired nodes into the v3.9.0 psp_client
@@ -138,6 +146,21 @@ type SharedMigrator interface {
 	// DeleteLegacyForUser removes the user's legacy per-node clients (only those a
 	// provisioned shared client now serves) + their ownership rows.
 	DeleteLegacyForUser(ctx context.Context, userID int64) error
+	// ReconcileOrphans deletes the user's STALE shared clients — 3X-UI clients
+	// matching PSP's shared-client email scheme that the current plan no longer
+	// wants (e.g. pre-merge per-class clients whose psp_client rows were already
+	// pruned but whose 3X-UI clients survived a skipped delete). Per-panel
+	// coverage-gated and idempotent; a no-orphan user is a few reads.
+	ReconcileOrphans(ctx context.Context, userID int64) error
+}
+
+// lockUser acquires the per-user resync mutex and returns its unlock func. The
+// mutex is created on first use (LoadOrStore) so concurrent first-touchers share one.
+func (s *Service) lockUser(userID int64) func() {
+	mu, _ := s.resyncLocks.LoadOrStore(userID, &sync.Mutex{})
+	m := mu.(*sync.Mutex)
+	m.Lock()
+	return m.Unlock
 }
 
 // SetSharedMigrator late-binds the V3 shared-client migrator. Until set, a
@@ -1597,6 +1620,12 @@ func (s *Service) ResyncGroupMembersInBackground(groupID int64) {
 // after the loop so partial progress is preserved. Drift left behind is
 // healed by the next reconciliation pass.
 func (s *Service) ResyncMembership(ctx context.Context, userID int64) error {
+	// Serialize concurrent resyncs of the SAME user (heal sweep + sync-task drain +
+	// request threads) so a re-key in one pass can't race the orphan reconcile in
+	// another. Per-user, so different users still resync in parallel.
+	unlock := s.lockUser(userID)
+	defer unlock()
+
 	u, err := s.users.GetByID(ctx, userID)
 	if err != nil {
 		return err
@@ -1663,6 +1692,22 @@ func (s *Service) ResyncMembership(ctx context.Context, userID int64) error {
 	lifeErr := s.syncSharedLifecycle(ctx, u)
 	if lifeErr != nil && firstErr == nil {
 		firstErr = fmt.Errorf("shared lifecycle: %w", lifeErr)
+	}
+	// Clean up the user's STALE shared clients (pre-merge per-class clients the merge
+	// re-keyed, or any client whose psp_client row was pruned but whose 3X-UI client
+	// survived a skipped delete and is now UNTRACKED). This is the self-healing net
+	// for the original bug: it DISCOVERS orphans by listing each panel's live clients
+	// rather than relying on the prune map (whose emails are lost once the DB row is
+	// gone). It is gated PER PANEL on coverage inside ReconcileOrphans — so it cleans a
+	// healthy panel even if another panel is down (the cross-panel coupling that
+	// created the orphans), and never deletes a client whose inbounds the live
+	// replacement doesn't cover. It only deletes shared-scheme emails (never the
+	// legacy per-node fallback), and removing an unmanaged stale client only tightens
+	// enforcement — so it needs no provisioned/lifeErr precondition.
+	if s.migrator != nil {
+		if err := s.migrator.ReconcileOrphans(ctx, u.ID); err != nil && firstErr == nil {
+			firstErr = fmt.Errorf("orphan reconcile: %w", err)
+		}
 	}
 	if provisioned && lifeErr == nil && s.migrator != nil {
 		// The merged/current shared client(s) are now live, so it's safe to remove

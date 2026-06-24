@@ -1296,6 +1296,9 @@ func (c *fakeXUIClient) DelClientByEmail(ctx context.Context, inboundID int, ema
 func (c *fakeXUIClient) GetClient(ctx context.Context, email string) (*ports.ClientDetail, error) {
 	return nil, nil
 }
+func (c *fakeXUIClient) ListClientInbounds(ctx context.Context) (map[string][]int, error) {
+	return nil, nil
+}
 func (c *fakeXUIClient) BulkAddToInbound(ctx context.Context, inboundID int, specs []ports.ClientSpec) (ports.BulkAddResult, error) {
 	return ports.BulkAddResult{}, nil
 }

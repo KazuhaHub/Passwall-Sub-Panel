@@ -960,6 +960,41 @@ func (c *Client) GetClient(ctx context.Context, email string) (*ports.ClientDeta
 	}, nil
 }
 
+// ListClientInbounds returns every client on the panel keyed by email, valued by
+// the set of inbound IDs it is attached to. It parses the clients array out of each
+// inbound's settings in a SINGLE /list call (no per-inbound round-trips). Used by
+// the shared-client orphan reconcile to discover clients PSP no longer tracks in its
+// psp_client table (e.g. pre-merge per-class clients whose rows were already pruned)
+// — listing the live state is robust to email-suffix or domain drift, which a
+// reconstruct-the-email approach is not.
+func (c *Client) ListClientInbounds(ctx context.Context) (map[string][]int, error) {
+	ibs, err := c.ListInbounds(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := map[string][]int{}
+	for _, ib := range ibs {
+		if ib.Settings == "" {
+			continue
+		}
+		var s struct {
+			Clients []struct {
+				Email string `json:"email"`
+			} `json:"clients"`
+		}
+		if json.Unmarshal([]byte(ib.Settings), &s) != nil {
+			continue
+		}
+		for _, cl := range s.Clients {
+			if cl.Email == "" {
+				continue
+			}
+			out[cl.Email] = append(out[cl.Email], ib.ID)
+		}
+	}
+	return out, nil
+}
+
 // isClientNotFoundMsg reports whether a 3X-UI error message describes a
 // missing client. /clients/get answers a missing email with GORM's sentinel
 // " (record not found)"; update/del report "client not found" / "not found in

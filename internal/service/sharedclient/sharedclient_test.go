@@ -60,7 +60,8 @@ type fakeXUI struct {
 	confirm       []int // inboundIDs GetClient reports the client attached to AFTER an add/attach
 	preExist      []int // if non-nil, GetClient reports this BEFORE any add (pre-existing client); nil = absent
 	added         bool
-	attachedTo    []int // inboundIDs passed to AttachClient (the existing-client path)
+	attachedTo    []int             // inboundIDs passed to AttachClient (the existing-client path)
+	liveClients   map[string][]int  // orphan-reconcile tests: panel-wide email -> inbounds
 	updatedSpec   ports.ClientSpec
 	updateCalls   int
 	deleted       []deletedClient
@@ -82,7 +83,14 @@ func (c *fakeXUI) AddClientToInbounds(_ context.Context, inboundIDs []int, spec 
 
 // GetClient models 3X-UI: a client does not exist until added (returns nil), then
 // reports `confirm`. preExist simulates a client already present before provision.
-func (c *fakeXUI) GetClient(context.Context, string) (*ports.ClientDetail, error) {
+// When liveClients is set (orphan-reconcile tests), it is the source of truth.
+func (c *fakeXUI) GetClient(_ context.Context, email string) (*ports.ClientDetail, error) {
+	if c.liveClients != nil {
+		if inbs, ok := c.liveClients[email]; ok {
+			return &ports.ClientDetail{Email: email, InboundIDs: inbs}, nil
+		}
+		return nil, nil
+	}
 	if !c.added {
 		if c.preExist == nil {
 			return nil, nil
@@ -90,6 +98,11 @@ func (c *fakeXUI) GetClient(context.Context, string) (*ports.ClientDetail, error
 		return &ports.ClientDetail{InboundIDs: c.preExist}, nil
 	}
 	return &ports.ClientDetail{InboundIDs: c.confirm}, nil
+}
+
+// ListClientInbounds returns the panel-wide live client→inbounds map (orphan tests).
+func (c *fakeXUI) ListClientInbounds(context.Context) (map[string][]int, error) {
+	return c.liveClients, nil
 }
 // AttachClient is the existing-client path: idempotent attach of the desired
 // inbounds. Sets `added` so the read-back GetClient reports `confirm`.
@@ -209,6 +222,83 @@ func TestProvisionClient_SkipsRedundantReattach(t *testing.T) {
 	}
 	if res.Provisioned != 2 || !clients.provisioned[11] || !clients.provisioned[12] {
 		t.Fatalf("both nodes must still be marked provisioned: res=%+v marks=%v", res, clients.provisioned)
+	}
+}
+
+// ReconcileOrphans deletes a user's stale shared clients (pre-merge per-class
+// clients the merge re-keyed) but NEVER the legacy per-node fallback, an operator
+// client, or another user's client — and only when the desired client covers the
+// orphan's inbounds.
+func TestReconcileOrphans_DeletesStaleSharedOnly(t *testing.T) {
+	clients := &fakeClients{byUser: []*domain.PSPClient{
+		{ID: 1, UserID: 18, PanelID: 10, Email: "u18@psp.local", UUID: "uuid-18"},
+	}}
+	xui := &fakeXUI{liveClients: map[string][]int{
+		"u18@psp.local":           {1, 2}, // desired merged — covers both inbounds
+		"u18-kf2d62608@psp.local": {1},    // stale shared orphan (covered) → delete
+		"u18-k49f8cae4@psp.local": {2},    // stale shared orphan (covered) → delete
+		"u18-n7@psp.local":        {1},    // legacy per-node fallback → KEEP
+		"Kazuha Home 0":           {1},    // operator client → KEEP
+		"u1@psp.local":            {1},    // different user → KEEP
+	}}
+	svc := New(clients, fakePool{c: xui}, fakeNodes{})
+	if err := svc.ReconcileOrphans(context.Background(), 18); err != nil {
+		t.Fatal(err)
+	}
+	deleted := map[string]bool{}
+	for _, d := range xui.deleted {
+		deleted[d.email] = true
+	}
+	for _, want := range []string{"u18-kf2d62608@psp.local", "u18-k49f8cae4@psp.local"} {
+		if !deleted[want] {
+			t.Errorf("stale shared orphan %q must be deleted (deleted=%v)", want, xui.deleted)
+		}
+	}
+	for _, keep := range []string{"u18@psp.local", "u18-n7@psp.local", "Kazuha Home 0", "u1@psp.local"} {
+		if deleted[keep] {
+			t.Errorf("%q must NOT be deleted", keep)
+		}
+	}
+}
+
+// Coverage gate (availability): if the live desired client does NOT cover an
+// inbound the orphan serves, the orphan is kept — deleting it would drop that
+// inbound's only client.
+func TestReconcileOrphans_KeepsOrphanWhenReplacementUncovered(t *testing.T) {
+	clients := &fakeClients{byUser: []*domain.PSPClient{
+		{ID: 1, UserID: 18, PanelID: 10, Email: "u18@psp.local", UUID: "uuid-18"},
+	}}
+	xui := &fakeXUI{liveClients: map[string][]int{
+		"u18@psp.local":           {1}, // merged attached only to inbound 1 (partial)
+		"u18-k49f8cae4@psp.local": {2}, // orphan serves inbound 2 — NOT covered → KEEP
+	}}
+	svc := New(clients, fakePool{c: xui}, fakeNodes{})
+	if err := svc.ReconcileOrphans(context.Background(), 18); err != nil {
+		t.Fatal(err)
+	}
+	for _, d := range xui.deleted {
+		if d.email == "u18-k49f8cae4@psp.local" {
+			t.Fatal("must not delete an orphan whose inbound the replacement doesn't cover")
+		}
+	}
+}
+
+// Gate: if a desired client isn't live at all (provisioning failed), the panel is
+// skipped entirely — nothing is deleted.
+func TestReconcileOrphans_SkipsPanelWhenDesiredAbsent(t *testing.T) {
+	clients := &fakeClients{byUser: []*domain.PSPClient{
+		{ID: 1, UserID: 18, PanelID: 10, Email: "u18@psp.local", UUID: "uuid-18"},
+	}}
+	xui := &fakeXUI{liveClients: map[string][]int{
+		// u18@ absent → replacement not up; the per-class orphan must survive.
+		"u18-kf2d62608@psp.local": {1},
+	}}
+	svc := New(clients, fakePool{c: xui}, fakeNodes{})
+	if err := svc.ReconcileOrphans(context.Background(), 18); err != nil {
+		t.Fatal(err)
+	}
+	if len(xui.deleted) != 0 {
+		t.Fatalf("desired client absent → no deletes, got %v", xui.deleted)
 	}
 }
 

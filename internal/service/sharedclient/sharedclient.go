@@ -15,6 +15,7 @@ import (
 	"fmt"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/clientplan"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/log"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 )
@@ -443,4 +444,103 @@ func (s *Service) ProvisionUser(ctx context.Context, userID int64) (ProvisionRes
 		total.Skipped += r.Skipped
 	}
 	return total, firstErr
+}
+
+// ReconcileOrphans deletes a user's STALE shared clients: 3X-UI clients that match
+// PSP's shared-client email scheme for the user but are NOT in the user's current
+// desired psp_client set. They arise when the v3.9.0 merge re-keys a user (collapsing
+// per-class emails into one) but the old 3X-UI clients are never deleted — e.g. the
+// prune-delete was skipped because ANOTHER panel was down, after which the DB no
+// longer tracks them (a permanently-untracked orphan). It DISCOVERS them by listing
+// each panel's live clients (robust to email-suffix and domain drift, which a
+// reconstruct-the-email sweep is not), and is gated PER PANEL on coverage: a stale
+// client is deleted only when EVERY inbound it serves is also served by a
+// confirmed-live desired client on that panel. So one panel being down never blocks
+// cleanup on a healthy panel, and a user never loses access on an inbound the
+// replacement has not covered yet (those are retried on the next pass).
+//
+// It only ever deletes emails matching clientplan.IsSharedClientEmail, which by
+// construction excludes the legacy per-NODE fallback (u{id}-n{nodeID}@) — that is
+// owned by DeleteLegacyForUser. Deleting a stale shared client is enforcement-safe:
+// the lifecycle-managed desired client carries the user's real enable/expiry, while
+// a stale client is unmanaged, so removing it can only tighten enforcement.
+func (s *Service) ReconcileOrphans(ctx context.Context, userID int64) error {
+	clients, err := s.clients.ListByUser(ctx, userID)
+	if err != nil {
+		return fmt.Errorf("list clients: %w", err)
+	}
+	if len(clients) == 0 {
+		return nil // no desired client anywhere → no coverage authorises any delete
+	}
+	desiredByPanel := map[int64]map[string]struct{}{}
+	for _, c := range clients {
+		if desiredByPanel[c.PanelID] == nil {
+			desiredByPanel[c.PanelID] = map[string]struct{}{}
+		}
+		desiredByPanel[c.PanelID][c.Email] = struct{}{}
+	}
+
+	var firstErr error
+	noteErr := func(e error) {
+		if e != nil && firstErr == nil {
+			firstErr = e
+		}
+	}
+	for panelID, desired := range desiredByPanel {
+		cli, err := s.pool.Get(panelID)
+		if err != nil {
+			noteErr(err)
+			continue
+		}
+		// Coverage gate: confirm every desired client is live + attached, and gather
+		// the inbounds the desired clients actually cover. If any is missing/unattached
+		// the replacement isn't fully up — skip this panel and retry next pass.
+		covered := map[int]struct{}{}
+		allUp := true
+		for email := range desired {
+			cur, gerr := cli.GetClient(ctx, email)
+			if gerr != nil || cur == nil || len(cur.InboundIDs) == 0 {
+				allUp = false
+				break
+			}
+			for _, ib := range cur.InboundIDs {
+				covered[ib] = struct{}{}
+			}
+		}
+		if !allUp {
+			continue
+		}
+		live, lerr := cli.ListClientInbounds(ctx)
+		if lerr != nil {
+			noteErr(lerr)
+			continue
+		}
+		for email, inbounds := range live {
+			if _, isDesired := desired[email]; isDesired {
+				continue
+			}
+			if !clientplan.IsSharedClientEmail(email, userID) {
+				continue // operator client, another user, or the legacy -n{node} fallback
+			}
+			if !inboundsCovered(inbounds, covered) {
+				continue // a desired client doesn't (yet) serve one of this client's inbounds
+			}
+			if err := cli.DelClientByEmail(ctx, 0, email); err != nil {
+				log.Warn("orphan reconcile: delete stale shared client", "panel_id", panelID, "email", email, "user_id", userID, "err", err)
+				noteErr(err)
+				continue
+			}
+			log.Info("orphan reconcile: deleted stale shared client", "panel_id", panelID, "email", email, "user_id", userID)
+		}
+	}
+	return firstErr
+}
+
+func inboundsCovered(inbounds []int, covered map[int]struct{}) bool {
+	for _, ib := range inbounds {
+		if _, ok := covered[ib]; !ok {
+			return false
+		}
+	}
+	return true
 }

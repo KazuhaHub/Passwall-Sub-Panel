@@ -133,6 +133,11 @@ func TestBuild_VLESSVisionAndSS2022MergeToOne(t *testing.T) {
 	if c.UUID != testUUID {
 		t.Fatalf("merged client must carry the UUID for VLESS, got %q", c.UUID)
 	}
+	// Single client on the panel → bare email (no partition-hash suffix), even though
+	// its partition is (SS-2022, vision). The suffix is only for multi-client panels.
+	if c.Email != "u42@psp.local" {
+		t.Fatalf("a lone client must use the bare email u42@psp.local, got %q", c.Email)
+	}
 	ins := got[0].Inbounds
 	if len(ins) != 2 {
 		t.Fatalf("merged client must attach BOTH inbounds, got %d", len(ins))
@@ -169,6 +174,37 @@ func TestBuild_OnlySS2022_128(t *testing.T) {
 		t.Fatalf("want a single pwClass128 (CredClass 2) client, got %+v", got)
 	}
 	assertPSKLen(t, got[0].Client.Password, 16)
+	// Lone client → bare email even for the SS-2022-128 partition.
+	if got[0].Client.Email != "u42@psp.local" {
+		t.Fatalf("a lone client must use the bare email, got %q", got[0].Client.Email)
+	}
+}
+
+func TestIsSharedClientEmail(t *testing.T) {
+	cases := []struct {
+		email  string
+		userID int64
+		want   bool
+	}{
+		{"u18@psp.local", 18, true},                 // bare / merged
+		{"u18-kf2d62608@psp.local", 18, true},       // content-hash
+		{"u18-c1@psp.local", 18, true},              // retired SS-2022-128 literal
+		{"u18-c12@example.com", 18, true},           // -c{digits}, any domain
+		{"u18-n5@psp.local", 18, false},             // legacy PER-NODE fallback — must NOT match
+		{"u18-nodes@psp.local", 18, false},          // -n… is never a shared client
+		{"u1@psp.local", 18, false},                 // different user
+		{"u180@psp.local", 18, false},               // u18 is NOT a prefix of u180
+		{"u18-kf2d6260@psp.local", 18, false},       // 7 hex, not 8
+		{"u18-kf2d62608g@psp.local", 18, false},     // 9 chars / non-hex
+		{"Kazuha Home 0", 18, false},                // operator client, no @ / no scheme
+		{"u18", 18, false},                          // no @
+		{"u18-k49f8cae4@psp.local", 14, false},      // belongs to u18, reconciling u14
+	}
+	for _, c := range cases {
+		if got := IsSharedClientEmail(c.email, c.userID); got != c.want {
+			t.Errorf("IsSharedClientEmail(%q, %d) = %v, want %v", c.email, c.userID, got, c.want)
+		}
+	}
 }
 
 func TestBuild_EmptyNodesYieldsNoClients(t *testing.T) {
