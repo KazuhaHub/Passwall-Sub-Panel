@@ -38,7 +38,6 @@ import {
   type TrafficRow,
 } from '@/api/traffic'
 import type { Node, User } from '@/api/types'
-import { UserNodeUsage } from './UserNodeUsage'
 import { UserServerUsage } from './UserServerUsage'
 import { getUISettings } from '@/api/settings'
 import PageHeader from '@/components/PageHeader'
@@ -496,15 +495,14 @@ export default function TrafficView() {
             </Typography>
           </Card>
 
-          {/* Per-node usage breakdown — only when ONE specific user is
-              selected (not "all users", and not the by-node scope). Moved here
-              from the user-edit dialog so a growing node list can't bloat the
-              modal. */}
+          {/* Per-SERVER usage breakdown — only when ONE specific user is
+              selected. v3.9.0: the per-NODE breakdown was retired (a shared client
+              spans many inbounds, so 3X-UI reports only one aggregate counter and a
+              per-node-per-user split no longer exists); the per-server view is the
+              faithful replacement, sourced from psp_client. */}
           {scope === 'user' && selectedUserId !== 0 && (
             <Card sx={{ bgcolor: md.surfaceContainerLow, boxShadow: '0 1px 2px rgba(0,0,0,.3),0 1px 3px 1px rgba(0,0,0,.15)', p: 2, mt: 2 }}>
               <UserServerUsage userId={selectedUserId} />
-              <Box sx={{ height: 16 }} />
-              <UserNodeUsage userId={selectedUserId} />
             </Card>
           )}
         </>

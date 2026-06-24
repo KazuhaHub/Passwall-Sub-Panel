@@ -1533,6 +1533,16 @@ type ServerUsageRow struct {
 // friendly name joined from the live pool. Rows are ordered by first appearance
 // (stable). Empty when the user is on no nodes.
 func (s *Service) UserServerUsage(ctx context.Context, userID int64) ([]ServerUsageRow, error) {
+	// v3.9.0: prefer the shared-client source. A migrated user's usage lives in
+	// psp_client (one row per (user, panel, credClass)) and they hold NO ownership
+	// rows, so the legacy per-node aggregation below returns empty. Build per-server
+	// rows straight from psp_client when the user has any; pre-migration users (no
+	// psp_client yet) fall through to the ownership path so nothing regresses.
+	if s.pspClient != nil {
+		if clients, err := s.pspClient.ListByUser(ctx, userID); err == nil && len(clients) > 0 {
+			return s.serverUsageFromShared(ctx, clients), nil
+		}
+	}
 	nodeRows, err := s.UserNodeUsage(ctx, userID)
 	if err != nil {
 		return nil, err
@@ -1575,6 +1585,53 @@ func (s *Service) UserServerUsage(ctx context.Context, userID int64) ([]ServerUs
 		out = append(out, *sr)
 	}
 	return out, nil
+}
+
+// serverUsageFromShared builds the per-(user, server) usage rows from the user's
+// shared psp_client rows — the v3.9.0 source. One psp_client is per (user, panel,
+// credClass); rows are aggregated by panel (a panel may carry >1 credClass). Period
+// = Lifetime − PeriodBaseline (identical semantics to the legacy ownership row).
+// Today is left 0: a shared client spans inbounds and no per-client daily snapshot
+// is written (recordSharedClientStats), so a per-server "today" isn't reconstructable.
+// NodeCount = the distinct nodes attached to the user's clients on that panel.
+func (s *Service) serverUsageFromShared(ctx context.Context, clients []*domain.PSPClient) []ServerUsageRow {
+	byPanel := map[int64]*ServerUsageRow{}
+	nodeSet := map[int64]map[int64]struct{}{}
+	order := make([]int64, 0, len(clients))
+	for _, c := range clients {
+		sr := byPanel[c.PanelID]
+		if sr == nil {
+			sr = &ServerUsageRow{PanelID: c.PanelID}
+			byPanel[c.PanelID] = sr
+			nodeSet[c.PanelID] = map[int64]struct{}{}
+			order = append(order, c.PanelID)
+		}
+		sr.LifetimeUpBytes += c.LifetimeUpBytes
+		sr.LifetimeDownBytes += c.LifetimeDownBytes
+		sr.LifetimeTotalBytes += c.LifetimeTotalBytes
+		sr.PeriodUpBytes += nonNeg(c.LifetimeUpBytes - c.PeriodBaselineUpBytes)
+		sr.PeriodDownBytes += nonNeg(c.LifetimeDownBytes - c.PeriodBaselineDownBytes)
+		sr.PeriodTotalBytes += nonNeg(c.LifetimeTotalBytes - c.PeriodBaselineTotalBytes)
+		if atts, err := s.pspClient.ListInbounds(ctx, c.ID); err == nil {
+			for _, a := range atts {
+				nodeSet[c.PanelID][a.NodeID] = struct{}{}
+			}
+		}
+	}
+	names := map[int64]string{}
+	if s.pool != nil {
+		for _, p := range s.pool.List() {
+			names[p.ID] = p.Name
+		}
+	}
+	out := make([]ServerUsageRow, 0, len(order))
+	for _, pid := range order {
+		sr := byPanel[pid]
+		sr.NodeCount = len(nodeSet[pid])
+		sr.ServerName = names[pid]
+		out = append(out, *sr)
+	}
+	return out
 }
 
 // recordNodeStats writes a per-node snapshot for the inbound on the given panel
