@@ -34,7 +34,15 @@ func New(clients ports.PSPClientRepo) *Service { return &Service{clients: client
 // Credentials and attachments are authoritative here; the per-client traffic
 // counters are owned by the poll — PSPClientRepo.Upsert updates only identity +
 // credential columns, so a dual-write never clobbers accumulated usage.
-func (s *Service) Sync(ctx context.Context, userID int64, userUUID string, panelID int64, rules domain.EmailRules, nodes []clientplan.NodeCred) error {
+// Sync reconciles the user's psp_client rows on ONE panel to clientplan.Build's
+// desired set and RETURNS the emails of the psp_clients it pruned (rows the new
+// plan no longer wants). The prune here is DB-only — this is the shadow dual-write,
+// it never touches 3X-UI — so the reconcile caller must delete the corresponding
+// 3X-UI clients. A pruned email arises when a node leaves the user's group, a whole
+// panel is dropped, OR the partition grouping changes (the v3.9.0 merge collapses a
+// user's per-class clients into one); in every case the old 3X-UI client is now an
+// orphan and must be removed by the caller.
+func (s *Service) Sync(ctx context.Context, userID int64, userUUID string, panelID int64, rules domain.EmailRules, nodes []clientplan.NodeCred) ([]string, error) {
 	desired := clientplan.Build(userID, userUUID, panelID, rules, nodes)
 
 	keep := make(map[string]struct{}, len(desired))
@@ -42,7 +50,7 @@ func (s *Service) Sync(ctx context.Context, userID int64, userUUID string, panel
 		c := d.Client // copy: Upsert may stamp ID/CreatedAt
 		id, err := s.clients.Upsert(ctx, &c)
 		if err != nil {
-			return fmt.Errorf("upsert psp_client %s: %w", d.Client.Email, err)
+			return nil, fmt.Errorf("upsert psp_client %s: %w", d.Client.Email, err)
 		}
 		inbs := make([]domain.PSPClientInbound, len(d.Inbounds))
 		for i, in := range d.Inbounds {
@@ -50,15 +58,16 @@ func (s *Service) Sync(ctx context.Context, userID int64, userUUID string, panel
 			inbs[i] = in
 		}
 		if err := s.clients.SetInbounds(ctx, id, inbs); err != nil {
-			return fmt.Errorf("set inbounds for %s: %w", d.Client.Email, err)
+			return nil, fmt.Errorf("set inbounds for %s: %w", d.Client.Email, err)
 		}
 		keep[d.Client.Email] = struct{}{}
 	}
 
 	existing, err := s.clients.ListByUser(ctx, userID)
 	if err != nil {
-		return fmt.Errorf("list existing clients: %w", err)
+		return nil, fmt.Errorf("list existing clients: %w", err)
 	}
+	var pruned []string
 	for _, e := range existing {
 		if e.PanelID != panelID {
 			continue // only this panel's clients are in scope
@@ -67,10 +76,11 @@ func (s *Service) Sync(ctx context.Context, userID int64, userUUID string, panel
 			continue
 		}
 		if err := s.clients.DeleteByEmail(ctx, panelID, e.Email); err != nil {
-			return fmt.Errorf("prune stale client %s: %w", e.Email, err)
+			return pruned, fmt.Errorf("prune stale client %s: %w", e.Email, err)
 		}
+		pruned = append(pruned, e.Email)
 	}
-	return nil
+	return pruned, nil
 }
 
 // SyncUser reconciles ALL of a user's psp_clients across every panel from their
@@ -78,9 +88,11 @@ func (s *Service) Sync(ctx context.Context, userID int64, userUUID string, panel
 // calls Sync per panel; it ALSO calls Sync (with no nodes) for any panel where
 // the user still holds a client but now has zero desired nodes, so a user who
 // lost access to a whole server gets that server's client pruned. Separators and
-// undeterminable-protocol nodes are dropped by NodeCredsFromNodes. Returns the
-// first per-panel error but attempts every panel.
-func (s *Service) SyncUser(ctx context.Context, userID int64, userUUID string, rules domain.EmailRules, desiredNodes []*domain.Node) error {
+// undeterminable-protocol nodes are dropped by NodeCredsFromNodes. Returns, per
+// panel, the emails of the psp_clients it pruned (so the reconcile caller can
+// delete the now-orphaned 3X-UI clients), plus the first per-panel error (it
+// attempts every panel regardless).
+func (s *Service) SyncUser(ctx context.Context, userID int64, userUUID string, rules domain.EmailRules, desiredNodes []*domain.Node) (map[int64][]string, error) {
 	byPanel := map[int64][]*domain.Node{}
 	for _, n := range desiredNodes {
 		if n == nil || n.Kind == domain.NodeKindSeparator {
@@ -97,18 +109,23 @@ func (s *Service) SyncUser(ctx context.Context, userID int64, userUUID string, r
 	}
 	existing, err := s.clients.ListByUser(ctx, userID)
 	if err != nil {
-		return fmt.Errorf("list existing clients: %w", err)
+		return nil, fmt.Errorf("list existing clients: %w", err)
 	}
 	for _, c := range existing {
 		panels[c.PanelID] = struct{}{}
 	}
 
+	pruned := map[int64][]string{}
 	var firstErr error
 	for panelID := range panels {
 		creds := clientplan.NodeCredsFromNodes(byPanel[panelID]) // empty slice → prunes the panel
-		if serr := s.Sync(ctx, userID, userUUID, panelID, rules, creds); serr != nil && firstErr == nil {
+		p, serr := s.Sync(ctx, userID, userUUID, panelID, rules, creds)
+		if len(p) > 0 {
+			pruned[panelID] = p
+		}
+		if serr != nil && firstErr == nil {
 			firstErr = serr
 		}
 	}
-	return firstErr
+	return pruned, firstErr
 }

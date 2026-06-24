@@ -78,9 +78,10 @@ func TestBuild_VLESSFlowSplitsClient(t *testing.T) {
 	}
 }
 
-// SS-2022 needs a real PSK, not the raw UUID, so each key length splits off its
-// own client. A user with VLESS + SS-2022-256 + SS-2022-128 gets THREE clients:
-// default (uuid), pwClass256 (32B PSK), pwClass128 (16B PSK).
+// SS-2022's two key lengths need DIFFERENT PSKs in the single password slot, so
+// they can't share a client. But a password-agnostic VLESS node MERGES into one of
+// them (VLESS uses id, SS-2022 uses password — different fields). So a user with
+// VLESS + SS-2022-256 + SS-2022-128 gets TWO clients (256+VLESS, 128) — not three.
 func TestBuild_SS2022SplitsByKeyLength(t *testing.T) {
 	nodes := []NodeCred{
 		{NodeID: 1, Protocol: domain.ProtoVLESS},
@@ -88,23 +89,18 @@ func TestBuild_SS2022SplitsByKeyLength(t *testing.T) {
 		{NodeID: 3, Protocol: domain.ProtoSS2022, SSMethod: "2022-blake3-aes-128-gcm"}, // 16B → pwClass128
 	}
 	got := Build(42, testUUID, 10, testRules, nodes)
-	if len(got) != 3 {
-		t.Fatalf("want 3 clients, got %d", len(got))
+	if len(got) != 2 {
+		t.Fatalf("want 2 clients (256+VLESS merged, 128), got %d", len(got))
 	}
-	// Sorted by pwClass: 0 (uuid), 1 (256), 2 (128).
-	def, ss256, ss128 := got[0], got[1], got[2]
-	if def.Client.CredClass != 0 || def.Client.Password != testUUID {
-		t.Fatalf("default class must be raw-UUID: %+v", def.Client)
-	}
-	if def.Client.Email != "u42@psp.local" || len(def.Inbounds) != 1 || def.Inbounds[0].NodeID != 1 {
-		t.Fatalf("default should hold VLESS node 1: %+v", def)
-	}
+	// Sorted by pwClass: preq=[1(256), 2(128)] → client0=256, client1=128.
+	ss256, ss128 := got[0], got[1]
 	if ss256.Client.CredClass != 1 || ss256.Client.Password != crypto.NewProxyPassword(testUUID) {
 		t.Fatalf("ss256 class wrong: %+v", ss256.Client)
 	}
 	assertPSKLen(t, ss256.Client.Password, 32)
-	if len(ss256.Inbounds) != 1 || ss256.Inbounds[0].NodeID != 2 {
-		t.Fatalf("ss256 should hold node 2: %+v", ss256.Inbounds)
+	// The password-agnostic VLESS node (1) merges into the 256 client (different field).
+	if len(ss256.Inbounds) != 2 {
+		t.Fatalf("ss256 client should also hold the VLESS node (merge): %+v", ss256.Inbounds)
 	}
 	if ss128.Client.CredClass != 2 {
 		t.Fatalf("ss128 class wrong: %+v", ss128.Client)
@@ -113,12 +109,52 @@ func TestBuild_SS2022SplitsByKeyLength(t *testing.T) {
 	if len(ss128.Inbounds) != 1 || ss128.Inbounds[0].NodeID != 3 {
 		t.Fatalf("ss128 should hold node 3: %+v", ss128.Inbounds)
 	}
-	// The two SS-2022 clients get distinct hash emails, never the default u42@.
-	if ss256.Client.Email == "u42@psp.local" || ss128.Client.Email == "u42@psp.local" {
-		t.Fatal("SS-2022 clients must not reuse the default email")
-	}
 	if ss256.Client.Email == ss128.Client.Email {
 		t.Fatal("256 and 128 clients must have distinct emails")
+	}
+}
+
+// The merge the user asked for: VLESS-vision (uses id+flow) + SS-2022 (uses
+// password) are DIFFERENT fields, so they collapse to ONE client carrying
+// {id=uuid, password=PSK, flow=vision} attached to BOTH inbounds.
+func TestBuild_VLESSVisionAndSS2022MergeToOne(t *testing.T) {
+	nodes := []NodeCred{
+		{NodeID: 1, Protocol: domain.ProtoVLESS, Flow: "xtls-rprx-vision"},
+		{NodeID: 2, Protocol: domain.ProtoSS2022, SSMethod: "2022-blake3-aes-256-gcm"},
+	}
+	got := Build(42, testUUID, 10, testRules, nodes)
+	if len(got) != 1 {
+		t.Fatalf("VLESS-vision + SS-2022 must merge to ONE client, got %d: %+v", len(got), got)
+	}
+	c := got[0].Client
+	if c.CredClass != 1 || c.Password != crypto.NewProxyPassword(testUUID) {
+		t.Fatalf("merged client must carry the SS-2022 PSK, got CredClass %d pw %q", c.CredClass, c.Password)
+	}
+	if c.UUID != testUUID {
+		t.Fatalf("merged client must carry the UUID for VLESS, got %q", c.UUID)
+	}
+	ins := got[0].Inbounds
+	if len(ins) != 2 {
+		t.Fatalf("merged client must attach BOTH inbounds, got %d", len(ins))
+	}
+	for _, in := range ins {
+		if in.FlowOverride != "xtls-rprx-vision" {
+			t.Fatalf("merged client carries the vision flow on every attachment, got %q", in.FlowOverride)
+		}
+	}
+}
+
+// A genuine SAME-field conflict still splits: plain-SS (password=UUID) and SS-2022
+// (password=PSK) both need the single password slot with DIFFERENT values, so they
+// can't share — TWO clients, the physical limit.
+func TestBuild_PasswordConflictStillSplits(t *testing.T) {
+	nodes := []NodeCred{
+		{NodeID: 1, Protocol: domain.ProtoSS, SSMethod: "aes-256-gcm"},                 // plain SS → password=UUID (class 0)
+		{NodeID: 2, Protocol: domain.ProtoSS2022, SSMethod: "2022-blake3-aes-256-gcm"}, // SS-2022 → PSK (class 1)
+	}
+	got := Build(42, testUUID, 10, testRules, nodes)
+	if len(got) != 2 {
+		t.Fatalf("plain-SS (UUID pw) + SS-2022 (PSK pw) must stay 2 clients, got %d", len(got))
 	}
 }
 

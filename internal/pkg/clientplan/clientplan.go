@@ -3,28 +3,33 @@
 // nodes each is attached to. It is pure (no I/O) so both live enrollment and the
 // one-shot migration build the same plan, and so it is exhaustively testable.
 //
-// A 3X-UI client carries ONE set of fields: id (UUID), password, auth, and a
-// SINGLE flow — and 3X-UI exposes no API to set a per-inbound flowOverride. So
-// two nodes can share a client only when neither the password NOR the flow
-// conflicts. The partition key is therefore (pwClass, flow):
+// A single 3X-UI client carries id (UUID), password, auth and a SINGLE flow in
+// SEPARATE fields, and each inbound reads only the field its protocol uses —
+// VLESS/VMess read `id`, Trojan/SS/SS-2022 read `password`, Hysteria2 reads
+// `auth`, VLESS reads `flow`. So one client can serve MANY protocols at once;
+// PSP packs ALL of a user's nodes on a panel into the FEWEST clients possible.
 //
-//   - pwClass: which value the single `password` field must hold. The default
-//     class (0) stores the RAW UUID — Trojan/SS use it as their password,
-//     VLESS/VMess (id) + Hy2 (auth) use the UUID and ignore the password — so it
-//     covers everything except SS-2022. SS-2022 needs a real PSK, so it splits
-//     into pwClass256 (32-byte, base64(sha256(uuid))) and pwClass128 (16-byte).
-//     Crucially every class equals the LEGACY DeriveProxyPassword for that
-//     protocol, so consolidating a node into its shared client changes no
-//     rendered credential — the migration is SILENT.
-//   - flow: the effective VLESS flow ("" or xtls-rprx-vision), "" for every
-//     other protocol (they ignore flow). VLESS inbounds needing different flow
-//     can't share one client, so they split.
+// The only thing that forces a split is a genuine SAME-field conflict, because a
+// client has exactly ONE `password` slot and ONE `flow` slot:
 //
-// The overwhelming majority of users (no SS-2022, uniform/empty flow) get exactly
-// ONE client whose email stays u{uid}@domain; SS-2022 or mixed-flow users get a
-// few. The client identity (email) is a STABLE, collision-free function of
-// (uid, key) — see PSPClientEmail / partKey.emailSuffix — so re-running, or a
-// user's OTHER nodes changing, never re-keys an existing client.
+//   - password: Trojan / plain-SS need the RAW UUID (pwClass 0); SS-2022 needs a
+//     real PSK — pwClass256 (32-byte base64(sha256(uuid))) or pwClass128 (16-byte).
+//     A user with two DIFFERENT password requirements on one panel (e.g. plain-SS's
+//     UUID and SS-2022's PSK, or both SS-2022 key lengths) needs one client per
+//     distinct password. VLESS/VMess/Hy2 don't use the field, so they impose no
+//     password constraint. Every class equals the LEGACY DeriveProxyPassword, so
+//     merging a node into its shared client changes no rendered credential — SILENT.
+//   - flow: only VLESS uses it ("" or xtls-rprx-vision). Two VLESS inbounds with
+//     different flow need separate clients; everything else ignores flow.
+//
+// Crucially, a password-using protocol never uses flow and flow-using VLESS never
+// uses password, so no node constrains BOTH at once — the minimum client count is
+// max(#distinct-passwords, #distinct-flows, 1). The common user (VLESS-vision +
+// SS-2022, different fields) collapses to exactly ONE client per panel. The client
+// email is the content-hash of its (pwClass, flow); because that now depends on the
+// merge grouping, changing a node's protocol/flow can re-key a user's clients on
+// that panel — but only the 3X-UI-side client identity moves; rendered credentials
+// (derived from the UUID) are untouched, so subscribers never re-fetch.
 package clientplan
 
 import (
@@ -124,18 +129,44 @@ type partKey struct {
 	flow    string
 }
 
-func partKeyFor(nc NodeCred) partKey {
-	pw := pwClassDefault
-	if nc.Protocol == domain.ProtoSS2022 {
-		// SS-2022 needs a real PSK, not the raw UUID, so it can't share the
-		// default (uuid-password) client; split by key length.
+// pwAgnostic marks a node whose protocol doesn't use the `password` field at all
+// (VLESS/VMess authenticate by id; Hysteria2 by auth) — so it never constrains a
+// client's single password slot and can join whichever client a merge produces.
+const pwAgnostic = -1
+
+// pwReqFor returns the password CLASS a node requires its client's single password
+// field to hold, or pwAgnostic when the protocol doesn't use that field. SS-2022
+// needs a real PSK (split by key length); Trojan / plain-SS use the raw UUID
+// (default class); VLESS/VMess/Hy2 don't touch the password field, so they impose
+// no constraint and merge with anything.
+func pwReqFor(nc NodeCred) int {
+	switch nc.Protocol {
+	case domain.ProtoSS2022:
 		if crypto.SS2022KeyLen(nc.SSMethod) == 16 {
-			pw = pwClass128
-		} else {
-			pw = pwClass256
+			return pwClass128
 		}
+		return pwClass256
+	case domain.ProtoTrojan, domain.ProtoSS:
+		return pwClassDefault
+	default:
+		return pwAgnostic
 	}
-	return partKey{pwClass: pw, flow: effectiveFlow(nc.Protocol, nc.Flow)}
+}
+
+// flowAgnostic marks a node whose protocol ignores the `flow` field (everything
+// except VLESS) — 3X-UI drops flow for it, so it never constrains the client's
+// single flow slot.
+const flowAgnostic = "\x00flow-agnostic"
+
+// flowReqFor returns the flow a node requires its client to carry, or flowAgnostic
+// when the protocol doesn't use flow. Only VLESS uses flow (allowlisted to
+// {"", flowVision}); a VLESS inbound REQUIRES its exact flow — a no-flow inbound
+// would mis-authenticate a client carrying vision, and vice versa.
+func flowReqFor(nc NodeCred) string {
+	if nc.Protocol == domain.ProtoVLESS {
+		return effectiveFlow(nc.Protocol, nc.Flow)
+	}
+	return flowAgnostic
 }
 
 // effectiveFlow is the flow that will actually be pushed for this node: only
@@ -180,37 +211,92 @@ type DesiredClient struct {
 }
 
 // Build returns the desired clients for one user on one panel, given the nodes
-// they can access there. Deterministic and order-stable (keys sorted by pwClass
-// then flow). An empty nodes slice yields no clients.
+// they can access there. It produces the MINIMUM number of clients: one 3X-UI
+// client holds id (VLESS/VMess), password (Trojan/SS/SS-2022) and auth (Hy2) in
+// SEPARATE fields, so protocols that use different fields share a single client.
+// The only forced split is a genuine SAME-field conflict — two distinct password
+// values (plain-SS/Trojan's UUID vs SS-2022's PSK, or the two SS-2022 key lengths)
+// or two distinct VLESS flows — because the client has ONE password slot and ONE
+// flow slot.
+//
+// Because password-using protocols never use flow and flow-using VLESS never uses
+// password, no node constrains BOTH dimensions, so the minimum client count is
+// max(#distinct-required-passwords, #distinct-required-flows, 1). The common pair
+// (VLESS-vision + SS-2022) therefore collapses to exactly ONE client. Stored
+// credentials stay byte-identical to the legacy DeriveProxyPassword, so the merge
+// is SILENT (no subscriber re-fetch). Deterministic + order-stable.
 func Build(userID int64, userUUID string, panelID int64, rules domain.EmailRules, nodes []NodeCred) []DesiredClient {
 	if len(nodes) == 0 {
 		return nil
 	}
-	buckets := map[partKey][]NodeCred{}
-	keys := make([]partKey, 0, 2)
+	// Distinct REQUIRED password classes + flows (agnostic nodes impose neither).
+	var preq []int
+	var freq []string
+	seenP := map[int]bool{}
+	seenF := map[string]bool{}
 	for _, n := range nodes {
-		k := partKeyFor(n)
-		if _, seen := buckets[k]; !seen {
-			keys = append(keys, k)
+		if p := pwReqFor(n); p != pwAgnostic && !seenP[p] {
+			seenP[p] = true
+			preq = append(preq, p)
 		}
-		buckets[k] = append(buckets[k], n)
+		if f := flowReqFor(n); f != flowAgnostic && !seenF[f] {
+			seenF[f] = true
+			freq = append(freq, f)
+		}
 	}
-	sort.Slice(keys, func(i, j int) bool {
-		if keys[i].pwClass != keys[j].pwClass {
-			return keys[i].pwClass < keys[j].pwClass
-		}
-		return keys[i].flow < keys[j].flow
-	})
+	sort.Ints(preq)
+	sort.Strings(freq)
 
-	out := make([]DesiredClient, 0, len(keys))
-	for _, k := range keys {
-		bnodes := buckets[k]
-		inbounds := make([]domain.PSPClientInbound, 0, len(bnodes))
-		for _, n := range bnodes {
-			// All nodes in a partition share the key's effective flow, so the
-			// per-attachment FlowOverride is that flow (it records what the node
-			// uses; the client itself carries the same single flow).
-			inbounds = append(inbounds, domain.PSPClientInbound{NodeID: n.NodeID, FlowOverride: k.flow})
+	// One client per index, pairing the i-th required password with the i-th
+	// required flow (the dimensions are independent, so pairing is minimal);
+	// unpaired indices fall back to the default password / empty flow.
+	n := len(preq)
+	if len(freq) > n {
+		n = len(freq)
+	}
+	if n == 0 {
+		n = 1
+	}
+	keys := make([]partKey, n)
+	pwToClient := map[int]int{}
+	flowToClient := map[string]int{}
+	for i := 0; i < n; i++ {
+		k := partKey{pwClass: pwClassDefault, flow: ""}
+		if i < len(preq) {
+			k.pwClass = preq[i]
+			pwToClient[preq[i]] = i
+		}
+		if i < len(freq) {
+			k.flow = freq[i]
+			flowToClient[freq[i]] = i
+		}
+		keys[i] = k
+	}
+
+	// Assign each node: by its required password, else its required flow, else
+	// (fully agnostic — VMess / Hy2) to client 0.
+	buckets := make([][]NodeCred, n)
+	for _, node := range nodes {
+		idx := 0
+		if p := pwReqFor(node); p != pwAgnostic {
+			idx = pwToClient[p]
+		} else if f := flowReqFor(node); f != flowAgnostic {
+			idx = flowToClient[f]
+		}
+		buckets[idx] = append(buckets[idx], node)
+	}
+
+	out := make([]DesiredClient, 0, n)
+	for i, k := range keys {
+		if len(buckets[i]) == 0 {
+			continue
+		}
+		inbounds := make([]domain.PSPClientInbound, 0, len(buckets[i]))
+		for _, node := range buckets[i] {
+			// The client carries ONE flow (k.flow); record it on every attachment so
+			// provisioning pushes a single consistent flow. 3X-UI applies it only to
+			// the VLESS inbound(s) and drops it for the non-VLESS ones in the client.
+			inbounds = append(inbounds, domain.PSPClientInbound{NodeID: node.NodeID, FlowOverride: k.flow})
 		}
 		out = append(out, DesiredClient{
 			Client: domain.PSPClient{

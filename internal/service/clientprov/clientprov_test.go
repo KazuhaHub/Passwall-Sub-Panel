@@ -138,7 +138,7 @@ func TestSync_CreatesSharedClientAndAttachments(t *testing.T) {
 		{NodeID: 1, Protocol: domain.ProtoVLESS},
 		{NodeID: 2, Protocol: domain.ProtoTrojan},
 	}
-	if err := svc.Sync(context.Background(), 42, "uuid-x", 10, rules, nodes); err != nil {
+	if _, err := svc.Sync(context.Background(), 42, "uuid-x", 10, rules, nodes); err != nil {
 		t.Fatal(err)
 	}
 	c, err := repo.GetByEmail(context.Background(), 10, "u42@psp.local")
@@ -156,12 +156,12 @@ func TestSync_PrunesClientWhenAccessRevoked(t *testing.T) {
 	svc := New(repo)
 	ctx := context.Background()
 	// Initially the user has access to a node on panel 10.
-	_ = svc.Sync(ctx, 42, "uuid-x", 10, rules, []clientplan.NodeCred{{NodeID: 1, Protocol: domain.ProtoVLESS}})
+	_, _ = svc.Sync(ctx, 42, "uuid-x", 10, rules, []clientplan.NodeCred{{NodeID: 1, Protocol: domain.ProtoVLESS}})
 	if _, err := repo.GetByEmail(ctx, 10, "u42@psp.local"); err != nil {
 		t.Fatalf("precondition: client should exist: %v", err)
 	}
 	// Access revoked (no nodes) → the panel's client is pruned.
-	if err := svc.Sync(ctx, 42, "uuid-x", 10, rules, nil); err != nil {
+	if _, err := svc.Sync(ctx, 42, "uuid-x", 10, rules, nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := repo.GetByEmail(ctx, 10, "u42@psp.local"); err == nil {
@@ -173,10 +173,10 @@ func TestSync_DoesNotTouchOtherPanels(t *testing.T) {
 	repo := newFakeRepo()
 	svc := New(repo)
 	ctx := context.Background()
-	_ = svc.Sync(ctx, 42, "uuid-x", 10, rules, []clientplan.NodeCred{{NodeID: 1, Protocol: domain.ProtoVLESS}})
-	_ = svc.Sync(ctx, 42, "uuid-x", 11, rules, []clientplan.NodeCred{{NodeID: 9, Protocol: domain.ProtoVLESS}})
+	_, _ = svc.Sync(ctx, 42, "uuid-x", 10, rules, []clientplan.NodeCred{{NodeID: 1, Protocol: domain.ProtoVLESS}})
+	_, _ = svc.Sync(ctx, 42, "uuid-x", 11, rules, []clientplan.NodeCred{{NodeID: 9, Protocol: domain.ProtoVLESS}})
 	// Re-syncing panel 10 must not disturb the panel-11 client.
-	if err := svc.Sync(ctx, 42, "uuid-x", 10, rules, []clientplan.NodeCred{{NodeID: 1, Protocol: domain.ProtoVLESS}}); err != nil {
+	if _, err := svc.Sync(ctx, 42, "uuid-x", 10, rules, []clientplan.NodeCred{{NodeID: 1, Protocol: domain.ProtoVLESS}}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := repo.GetByEmail(ctx, 11, "u42@psp.local"); err != nil {
@@ -199,7 +199,7 @@ func TestSyncUser_AcrossPanelsAndPrunesLostServer(t *testing.T) {
 		{ID: 2, PanelID: 10, Protocol: "trojan"},
 		{ID: 3, PanelID: 11, Protocol: "vless"},
 	}
-	if err := svc.SyncUser(ctx, 42, "uuid-x", rules, nodes); err != nil {
+	if _, err := svc.SyncUser(ctx, 42, "uuid-x", rules, nodes); err != nil {
 		t.Fatal(err)
 	}
 	if list, _ := repo.ListByUser(ctx, 42); len(list) != 2 {
@@ -208,7 +208,7 @@ func TestSyncUser_AcrossPanelsAndPrunesLostServer(t *testing.T) {
 
 	// User loses all access to panel 11 → its client must be pruned even though
 	// no node references panel 11 anymore.
-	if err := svc.SyncUser(ctx, 42, "uuid-x", rules, []*domain.Node{
+	if _, err := svc.SyncUser(ctx, 42, "uuid-x", rules, []*domain.Node{
 		{ID: 1, PanelID: 10, Protocol: "vless"},
 	}); err != nil {
 		t.Fatal(err)
@@ -229,7 +229,7 @@ func TestSyncUser_SkipsSeparators(t *testing.T) {
 		{ID: 1, PanelID: 10, Protocol: "vless"},
 		{ID: 2, PanelID: 10, Kind: domain.NodeKindSeparator, Protocol: "vless"},
 	}
-	if err := svc.SyncUser(ctx, 42, "uuid-x", rules, nodes); err != nil {
+	if _, err := svc.SyncUser(ctx, 42, "uuid-x", rules, nodes); err != nil {
 		t.Fatal(err)
 	}
 	c, err := repo.GetByEmail(ctx, 10, "u42@psp.local")
@@ -246,12 +246,12 @@ func TestSync_PreservesCountersAcrossResync(t *testing.T) {
 	repo := newFakeRepo()
 	svc := New(repo)
 	ctx := context.Background()
-	_ = svc.Sync(ctx, 42, "uuid-x", 10, rules, []clientplan.NodeCred{{NodeID: 1, Protocol: domain.ProtoVLESS}})
+	_, _ = svc.Sync(ctx, 42, "uuid-x", 10, rules, []clientplan.NodeCred{{NodeID: 1, Protocol: domain.ProtoVLESS}})
 	c, _ := repo.GetByEmail(ctx, 10, "u42@psp.local")
 	// Simulate the poll advancing the counter.
 	_ = repo.UpdateCounters(ctx, &domain.PSPClient{ID: c.ID, LifetimeTotalBytes: 5_000})
 	// A re-sync (e.g. group membership change) must NOT reset usage.
-	if err := svc.Sync(ctx, 42, "uuid-x", 10, rules, []clientplan.NodeCred{
+	if _, err := svc.Sync(ctx, 42, "uuid-x", 10, rules, []clientplan.NodeCred{
 		{NodeID: 1, Protocol: domain.ProtoVLESS}, {NodeID: 2, Protocol: domain.ProtoTrojan},
 	}); err != nil {
 		t.Fatal(err)

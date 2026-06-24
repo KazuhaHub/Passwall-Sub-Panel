@@ -39,9 +39,9 @@ func (bfSettings) Load(_ context.Context, d ports.UISettings) (ports.UISettings,
 
 type bfPSP struct{ synced []int64 }
 
-func (p *bfPSP) SyncUser(_ context.Context, userID int64, _ string, _ domain.EmailRules, _ []*domain.Node) error {
+func (p *bfPSP) SyncUser(_ context.Context, userID int64, _ string, _ domain.EmailRules, _ []*domain.Node) (map[int64][]string, error) {
 	p.synced = append(p.synced, userID)
-	return nil
+	return nil, nil
 }
 
 func TestBackfillPSPClients(t *testing.T) {
