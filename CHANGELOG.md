@@ -4,6 +4,17 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## v3.9.0-beta.12 — 2026-06-24
+
+### 修复
+
+- **让已迁移用户真正收敛到合并后的单 client** —— beta.11 加了合并逻辑,但**已迁移用户没有变化**:他们的 `psp_client` 行还是旧的 per-class(`kf2d62608` + `k49f8cae4`),没有任何东西去重建它们。自愈(boot / reconcile heal)只调 `ProvisionUser`,等于把**旧的 per-class 行**又下发一遍(于是日志里刷 `email already in use`),根本不会重新分组。现在自愈改为**对每个用户跑完整的 `ResyncMembership`**:重建期望的 `psp_client` 集合(把拆成 per-class 的用户重新归并成 1 个)、下发、推生命周期、并删除被替换掉的旧 client。幂等且自收敛——已经是合并形态的用户只产生 GetClient 读取 + 无变更的 dual-write。于是 **reconcile 自愈(每 15 分钟)会把所有存量用户收敛到合并模型**,无需一次性触发器,`email already in use` 刷屏也随之停止。
+
+### 生效方式(更新)
+
+- 部署 beta.12 后,**最多 15 分钟**内(下一轮 reconcile 自愈),存量 per-class 用户会被重建为合并后的单 client(在可达且兼容的面板上),旧的 per-class client 被删除。
+- 仍需修复那两台基础设施:**Taiwan HiNet Static**(PSP 侧 connection refused)、**China Shanghai**(3X-UI 3.2.0 → 升到 ≥3.3.0)——这两台上的合并要等它们恢复才能完成。
+
 ## v3.9.0-beta.11 — 2026-06-24
 
 ### 变更
