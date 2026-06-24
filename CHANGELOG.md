@@ -4,6 +4,14 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## v3.9.0-beta.10 — 2026-06-24
+
+### 兼容性
+
+- **3X-UI 3.2.x 不再受 v3.9.0 支持(最低要求提到 3.3.0)** —— 真机定位到:迁移失败的根因是那台唯一跑 **3X-UI 3.2.0** 的面板(China Shanghai)。共享 client 模型通过 `/clients/update`(按 email)推送生命周期,而 **3.2.x 的这条更新路径会确定性地撞 `UNIQUE constraint failed: client_inbounds`**(3.3 系列修了这个 upsert)。你其余五台 3.3.x 全部迁移正常,正是因为它们 ≥ 3.3.0。现在 v3.9.0+ 把 3X-UI 最低版本从 3.2.0 提到 **3.3.0**;< 3.3.0 的面板会标为「too_old / 不兼容」,需先升级 3X-UI。(per-node 时代的旧 PSP 版本仍保留 3.2.0 下限,不受影响。)
+  - **你要做的**:把 China Shanghai - Aliyun 那台 3X-UI 从 3.2.0 升到 ≥ 3.3.0(面板里就有「Update → v3.3.1」),迁移即可收尾。
+- **已验证支持 3X-UI 3.4.0(测试上限提到 3.4.0)** —— 在真机 3.4.0 面板(xray 26.6.22)上跑通了完整共享 client 流程:多 inbound 增 / 查 / 改(按 email)/ 挂载 / 卸载 / 删 / 批量删,外加 6 路同 client、双 `*Client` 同后端并发,均无 `client_inbounds` 损坏;`server/status` 正确返回 3.4.0、inbound 结构无变化。**3.4.0 不影响 PSP,可放心使用。**
+
 ## v3.9.0-beta.9 — 2026-06-24
 
 ### 诊断改进
