@@ -14,6 +14,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/paneltz"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/authpolicy"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/group"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/passkey"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/render"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/traffic"
@@ -25,18 +26,17 @@ import (
 // UserMeHandler exposes the end-user self-service endpoints under
 // /api/user/me — view expiry / traffic, change password, reset sub_token.
 type UserMeHandler struct {
-	user      *user.Service
-	traffic   *traffic.Service
-	settings  ports.ScopedSettings
-	nodes     ports.NodeRepo
-	ownership ports.OwnershipRepo
-	twofa     *twofa.Service
-	passkey   *passkey.Service
-	enroll    *authpolicy.Service
+	user     *user.Service
+	traffic  *traffic.Service
+	settings ports.ScopedSettings
+	group    *group.Service
+	twofa    *twofa.Service
+	passkey  *passkey.Service
+	enroll   *authpolicy.Service
 }
 
-func NewUserMeHandler(userSvc *user.Service, trafficSvc *traffic.Service, settings ports.ScopedSettings, nodes ports.NodeRepo, ownership ports.OwnershipRepo, twofaSvc *twofa.Service, passkeySvc *passkey.Service, enroll *authpolicy.Service) *UserMeHandler {
-	return &UserMeHandler{user: userSvc, traffic: trafficSvc, settings: settings, nodes: nodes, ownership: ownership, twofa: twofaSvc, passkey: passkeySvc, enroll: enroll}
+func NewUserMeHandler(userSvc *user.Service, trafficSvc *traffic.Service, settings ports.ScopedSettings, groupSvc *group.Service, twofaSvc *twofa.Service, passkeySvc *passkey.Service, enroll *authpolicy.Service) *UserMeHandler {
+	return &UserMeHandler{user: userSvc, traffic: trafficSvc, settings: settings, group: groupSvc, twofa: twofaSvc, passkey: passkeySvc, enroll: enroll}
 }
 
 func (h *UserMeHandler) Profile(c *gin.Context) {
@@ -176,44 +176,36 @@ func (h *UserMeHandler) ServerStatus(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "No auth"})
 		return
 	}
-	entries, err := h.ownership.ListByUser(c.Request.Context(), claims.UserID)
-	if err != nil {
-		respondError(c, err)
-		return
-	}
 	type nodeStatus struct {
 		Name      string     `json:"name"`
 		Region    string     `json:"region"`
 		Status    string     `json:"status"` // "ok" | "down" | "unknown"
 		CheckedAt *time.Time `json:"checked_at,omitempty"`
 	}
-	// Pre-fix the loop ran one nodes.GetByPanelInbound per ownership
-	// entry — a user in a populous group might issue 20+ separate SELECTs
-	// per /user/me/server-status call, which the browser auto-refreshes.
-	// One List(ctx) + in-memory index collapses this to a single query
-	// no matter how many ownerships the user holds; at the panel's typical
-	// deployment size (~hundreds of nodes max) the extra bandwidth is
-	// strictly cheaper than the eliminated round-trips.
-	allNodes, err := h.nodes.List(c.Request.Context())
+	// Resolve the user's visible nodes the SAME way RenderForUser does — via the
+	// group selector — NOT via the ownership table. Post-migration the ownership
+	// table is empty/dropped, so the old ownership-driven lookup returned zero nodes
+	// and this panel rendered blank for every migrated user. NodesFor already returns
+	// the enabled, tag-matched, de-duplicated node set, so no extra enabled/seen
+	// filtering or per-inbound index is needed.
+	u, err := h.user.Get(c.Request.Context(), claims.UserID)
 	if err != nil {
 		respondError(c, err)
 		return
 	}
-	nodeByKey := make(map[[2]int64]*domain.Node, len(allNodes))
-	for _, n := range allNodes {
-		nodeByKey[[2]int64{n.PanelID, int64(n.InboundID)}] = n
+	g, err := h.group.Get(c.Request.Context(), u.GroupID)
+	if err != nil {
+		respondError(c, err)
+		return
 	}
-	out := make([]nodeStatus, 0, len(entries))
-	seen := make(map[int64]bool, len(entries))
-	for _, e := range entries {
-		n := nodeByKey[[2]int64{e.PanelID, int64(e.InboundID)}]
-		if n == nil || seen[n.ID] {
-			continue
-		}
-		seen[n.ID] = true
-		// Skip admin-disabled nodes: they're not in the rendered subscription,
-		// so surfacing them here would just confuse the user.
-		if !n.Enabled {
+	nodes, err := h.group.NodesFor(c.Request.Context(), g)
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+	out := make([]nodeStatus, 0, len(nodes))
+	for _, n := range nodes {
+		if n == nil || n.Kind == domain.NodeKindSeparator || !n.Enabled {
 			continue
 		}
 		out = append(out, nodeStatus{

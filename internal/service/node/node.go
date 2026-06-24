@@ -1117,7 +1117,7 @@ type InboundClientView struct {
 	OwnerUserID int64
 }
 
-func (s *Service) ListClientsOfInbound(ctx context.Context, nodeID int64, ownership ports.OwnershipRepo) ([]*InboundClientView, error) {
+func (s *Service) ListClientsOfInbound(ctx context.Context, nodeID int64, ownership ports.OwnershipRepo, pspClients ports.PSPClientRepo) ([]*InboundClientView, error) {
 	n, err := s.nodes.GetByID(ctx, nodeID)
 	if err != nil {
 		return nil, err
@@ -1153,6 +1153,14 @@ func (s *Service) ListClientsOfInbound(ctx context.Context, nodeID int64, owners
 		if entry, ok := ownedByEmail[cs.Email]; ok {
 			view.Managed = true
 			view.OwnerUserID = entry.UserID
+		} else if pspClients != nil {
+			// v3.9.0: a migrated user's client has no ownership row — it's a shared
+			// client. Resolve managed/owner from psp_client so the node-detail list
+			// doesn't mislabel every PSP client as an operator's unmanaged client.
+			if pc, perr := pspClients.GetByEmail(ctx, n.PanelID, cs.Email); perr == nil && pc != nil {
+				view.Managed = true
+				view.OwnerUserID = pc.UserID
+			}
 		}
 		out = append(out, view)
 	}

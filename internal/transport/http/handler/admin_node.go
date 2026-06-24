@@ -220,7 +220,7 @@ func (h *AdminNodeHandler) Get(c *gin.Context) {
 	panelNames := h.panelNameOf(c.Request.Context(), n.PanelID)
 
 	// Bundle the inbound clients so the detail page only needs one round-trip.
-	clients, err := h.node.ListClientsOfInbound(c.Request.Context(), id, h.ownership)
+	clients, err := h.node.ListClientsOfInbound(c.Request.Context(), id, h.ownership, h.pspClients)
 	if err != nil {
 		// Detail without clients is still useful; surface the error but don't 500.
 		out := gin.H{

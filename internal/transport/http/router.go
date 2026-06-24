@@ -254,7 +254,7 @@ func NewRouter(d Deps) *gin.Engine {
 	enroll2FA := authpolicy.New(authpolicy.Deps{Groups: d.Repos.Group, Passkeys: d.Repos.WebAuthn, Settings: d.Repos.ScopedSettings})
 	require2FAGate := middleware.Require2FAEnrollment(enroll2FA, d.User)
 
-	userMe := handler.NewUserMeHandler(d.User, d.Traffic, d.Repos.ScopedSettings, d.Repos.Node, d.Repos.Ownership, twofaSvc, passkeySvc, enroll2FA)
+	userMe := handler.NewUserMeHandler(d.User, d.Traffic, d.Repos.ScopedSettings, d.Group, twofaSvc, passkeySvc, enroll2FA)
 	userGroup := g.Group("/api/user/me",
 		middleware.RequireAuth(d.Auth, d.User),
 		// Operators are included so that an operator forced to enroll 2FA (via the
