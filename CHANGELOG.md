@@ -4,6 +4,12 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## v3.9.0-beta.23 — 2026-06-25
+
+### 新功能
+
+- **「在服务器上重建 inbound」—— 把节点迁到全新/空服务器,零手动重配** —— 把某个节点的 Server 改到一台**全新/空的 3X-UI**(状态显示 `Connected (0)`)后,节点没法用:PSP 是按 inbound ID 挂到**已存在**的 inbound 上的,自己从不创建 inbound,空服务器上没有东西给它挂。但 PSP **存了这个节点的 inbound 配置**(v3.5 快照),所以新增了一个动作:`RecreateInboundOnServer` —— 用快照在节点所在面板上**重建 inbound** → 拿到新 inbound ID → 自动把节点指过去(持久化失败会回滚刚建的 inbound)→ 再触发成员的共享 client 重新下发。于是迁到新空服务器**一个字段都不用手动改**。守卫:节点必须有已捕获的配置、且该 inbound 在面板上确实不存在(只重建缺失的,绝不重复创建在线的)。入口:节点列表里的 ☁️ 动作按钮(`POST /admin/nodes/:id/recreate-inbound`,仅管理员)。
+
 ## v3.9.0-beta.22 — 2026-06-25
 
 ### 修复
