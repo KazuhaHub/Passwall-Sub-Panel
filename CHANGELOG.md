@@ -4,6 +4,23 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## v3.9.0-beta.17 — 2026-06-24
+
+### 修复(多智能体审计发现的迁移后破绽)
+
+对「收集/修改/查看/使用」的所有数据路径做了一次多智能体审计 + 对抗式复核,确认根因统一:**代码读的是迁移后已清空并删除的 ownership 表**(`ownership_repo` 此时静默返回空、不报错),数据其实已搬到 `psp_client`。修复 6 处(B4 待定见下):
+
+- **B1(高,访问控制)** —— **删除用户后共享 client 仍在 3X-UI 上启用**,被删用户靠 UUID 推导的凭据**继续连接**,`psp_client` 行变孤儿。两条删除路径只调了 `DelAllOwnedForUser`(迁移后空操作)。新增 `DeleteSharedForUser`(按面板 `BulkDelByEmail` + 删 `psp_client` 行),在删用户行**之前**调用(无 FK 级联);3X-UI 失败则保留行交由 `SyncTaskUserDelete` 重试。
+- **B2(高)** —— **迁移后无法删除任何有用户的节点**:`ensureInboundDeletable` 把所有不在 ownership 表里的 client 当「未托管」→ 409 永久拒绝。给 `sync.Service` 注入 `PSPClientRepo`,能在 `psp_client` 里查到的 email 视为已托管。
+- **B3(高)** —— **轮换凭据后新 UUID 不下发**:`ResetCredentialsAndSync` 只在出错路径入队 resync,迁移后 per-node 循环空转 → 永不入队 → `/sub` 发新 UUID 而 3X-UI still 旧的 → 认证失败到下次 reconcile。改为只要共享模型已接线就入队(对齐 `ResetUUIDAndSync`)。
+- **B7(高)** —— **ClaimClient 的 UUID 防覆盖守卫失效**:守卫数的是 ownership 行(迁移后 0)→ 认领一个 UUID 不同的 client 会**静默改写用户 UUID、重置其所有节点**。改为也数 `psp_client`。
+- **B5(中)** —— **用户门户「服务器状态」对迁移用户全空**:`ServerStatus` 从 ownership 表解析节点。改为像渲染一样走分组选择器(`group.NodesFor`)。
+- **B6(低)** —— 节点详情把共享 client 显示为「未托管/owner 0」:`ListClientsOfInbound` 在 ownership 查不到时回落到 `psp_client.GetByEmail`。
+
+### 审计确认正常(未改动)
+
+启用/禁用/到期/配额强制、订阅渲染 + Userinfo 头、SSO、仪表盘、Top 用户、rollup、流量轮询(beta.16 后)—— 全部不依赖 ownership 或已迁移到共享模型,工作正常。
+
 ## v3.9.0-beta.16 — 2026-06-24
 
 ### 修复
