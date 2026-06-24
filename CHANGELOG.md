@@ -4,6 +4,18 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## v3.9.0-beta.11 — 2026-06-24
+
+### 变更
+
+- **每(用户, 面板)合并成一个共享 client** —— 一个 3X-UI client 原生就有**分开的** UUID / Password / Hysteria Auth 字段(还有 flow),不同协议用不同字段。之前按 `(pwClass, flow)` 分区**拆得过细**:同一用户的 VLESS-Vision(用 `id`)和 SS-2022(用 `password`)字段不冲突,却被拆成两个 client(`u-kf2d62608` + `u-k49f8cae4`)。现在 `clientplan` 把一个用户在一台面板上的所有节点**合并成最少的 client**:唯一会拆的是**同字段真冲突**——两个不同的 password 值(普通SS/Trojan 的 UUID vs SS-2022 的 PSK,或两种 SS-2022 密钥长度)或两个不同的 VLESS flow(client 只有一个 password 槽、一个 flow 槽)。因为用 password 的协议不用 flow、反之亦然,**最少 = max(不同password数, 不同flow数, 1)**;**VLESS-vision + SS-2022 → 正好 1 个** `{id=UUID, password=PSK, flow=vision}` 挂到两个入站(真机已验证)。存储凭据与旧的逐字节相同 → **静默**(订阅者无需重拉)。
+- **清理被合并替换掉的旧 client** —— 合并会让旧的 per-class client(kf2d62608 / k49f8cae4)变成孤儿。现在 dual-write 会返回被裁剪的 client 邮箱,`ResyncMembership` 在**新合并 client 上线之后**删除这些旧 3X-UI client(先建新、后删旧,和删旧版逐节点 client 同样的顺序)。顺带修了一个既有缺口:删节点/删面板以前会在 3X-UI 留下孤儿共享 client。
+
+### 生效方式
+
+- **还没迁移的用户**(当前卡住的那些,Taiwan/Shanghai 修好后跑):会**直接**生成合并后的 1 个 client,跳过 per-class 阶段。
+- **已迁移的用户**(已经是 per-class 的):在下次 resync 时转成合并版(同时删掉旧的 per-class 孤儿)。要一次性全转可后续加一个「全员 resync」开机步骤——建议等当前迁移彻底跑绿后再做。
+
 ## v3.9.0-beta.10 — 2026-06-24
 
 ### 兼容性
