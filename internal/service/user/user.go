@@ -1700,18 +1700,21 @@ func (s *Service) deletePrunedSharedClients(ctx context.Context, pruned map[int6
 	}
 }
 
-// HealSharedClients is the v3.9.0 shared-model drift heal. It walks every user
-// and re-runs provision + lifecycle on their shared client(s), repairing 3X-UI
-// drift — a client manually deleted/detached in 3X-UI, or a provision that
-// exhausted its sync-task retries — that no membership/lifecycle event would
-// otherwise correct (the per-node ownership reconcile no-ops once the table is
-// dropped). With the no-op skips (provision skips when already attached to the
-// desired set; lifecycle skips when 3X-UI already holds the exact state+creds),
-// a no-drift sweep costs only GetClient READS — zero Xray restarts — so it is
-// safe to run on the reconcile cadence. Deliberately does NOT dual-write
-// psp_clients or delete legacy clients: those are membership-driven, not
-// drift-driven. Best-effort + concurrency-capped: per-user failures are logged
-// and skipped. Returns the count of users verified-or-repaired and the first error.
+// HealSharedClients is the v3.9.0 shared-model drift heal. It walks every user and
+// re-runs a FULL membership reconcile (ResyncMembership) per user: rebuild the
+// desired psp_client set, provision it, push lifecycle, and delete now-orphaned
+// old/legacy clients. This repairs every kind of drift — a 3X-UI client manually
+// deleted/detached, a provision that exhausted its sync-task retries, AND a stale
+// psp_client SHAPE (e.g. a user still split into pre-merge per-class clients that
+// the current clientplan would consolidate). The full reconcile is what converges
+// existing users onto the merged-client model with no separate one-shot trigger.
+//
+// Idempotent + cheap once converged: the no-op skips (provision skips when already
+// attached to the desired set; lifecycle skips when 3X-UI already holds the exact
+// state+creds) mean a no-drift user costs only GetClient READS — zero Xray restarts
+// — plus a NodesFor + a no-change dual-write, so it is safe on the reconcile
+// cadence. Best-effort + concurrency-capped: per-user failures are logged and
+// skipped. Returns the count of users reconciled and the first error.
 func (s *Service) HealSharedClients(ctx context.Context) (int, error) {
 	if s.migrator == nil {
 		return 0, nil // shared model not wired (tests / non-shared build)
@@ -1757,15 +1760,15 @@ func (s *Service) HealSharedClients(ctx context.Context) (int, error) {
 				defer wg.Done()
 				sem <- struct{}{}
 				defer func() { <-sem }()
-				if err := s.migrator.ProvisionUser(ctx, u.ID); err != nil {
-					log.Warn("shared heal: provision", "user_id", u.ID, "err", err)
+				// Full reconcile (not just provision): rebuilds the psp_client set so a
+				// user migrated under an OLDER partition (pre-merge per-class clients) is
+				// re-grouped into the merged client, provisions it, pushes lifecycle, and
+				// deletes the orphaned old clients — then no-ops once converged.
+				if err := s.ResyncMembership(ctx, u.ID); err != nil {
+					log.Warn("shared heal: resync", "user_id", u.ID, "err", err)
 					note(err)
 					return
 				}
-				// Re-push the user's REAL enable/expiry/floor so a freshly
-				// re-created (drift-healed) client isn't left at the provision
-				// default of enable=true — same ordering guarantee as the migration.
-				s.syncSharedLifecycle(ctx, u)
 				note(nil)
 			}(u)
 		}

@@ -2,6 +2,7 @@ package user
 
 import (
 	"context"
+	"sync"
 	"testing"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
@@ -18,6 +19,15 @@ type bfUserRepo struct {
 
 func (r *bfUserRepo) List(context.Context, ports.UserFilter) ([]*domain.User, int64, error) {
 	return r.users, int64(len(r.users)), nil
+}
+
+func (r *bfUserRepo) GetByID(_ context.Context, id int64) (*domain.User, error) {
+	for _, u := range r.users {
+		if u.ID == id {
+			return u, nil
+		}
+	}
+	return nil, domain.ErrNotFound
 }
 
 type bfGroupRepo struct {
@@ -37,10 +47,15 @@ type bfSettings struct{ ports.ScopedSettings }
 
 func (bfSettings) Load(_ context.Context, d ports.UISettings) (ports.UISettings, error) { return d, nil }
 
-type bfPSP struct{ synced []int64 }
+type bfPSP struct {
+	mu     sync.Mutex // HealSharedClients calls SyncUser from concurrent workers
+	synced []int64
+}
 
 func (p *bfPSP) SyncUser(_ context.Context, userID int64, _ string, _ domain.EmailRules, _ []*domain.Node) (map[int64][]string, error) {
+	p.mu.Lock()
 	p.synced = append(p.synced, userID)
+	p.mu.Unlock()
 	return nil, nil
 }
 

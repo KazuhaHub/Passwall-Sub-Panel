@@ -40,7 +40,15 @@ func TestHealSharedClients(t *testing.T) {
 	}
 	mig := &healMigrator{}
 	life := &fakeSharedLife{}
-	svc := &Service{users: &bfUserRepo{users: users}, settings: bfSettings{}}
+	// HealSharedClients now runs a full ResyncMembership per user, so wire the deps
+	// it reaches before ProvisionUser: a group, a (node-less) selector, the psp.
+	svc := &Service{
+		users:    &bfUserRepo{users: users},
+		settings: bfSettings{},
+		groups:   &bfGroupRepo{g: &domain.Group{ID: 0}},
+		selector: bfSelector{},
+		psp:      &bfPSP{},
+	}
 	svc.SetSharedMigrator(mig)
 	svc.SetSharedLifecycleSyncer(life)
 
@@ -73,7 +81,15 @@ func TestHealSharedClients_BestEffortOnError(t *testing.T) {
 	users := []*domain.User{{ID: 1, Enabled: true}, {ID: 2, Enabled: true}}
 	mig := &healMigrator{failOn: 1}
 	life := &fakeSharedLife{}
-	svc := &Service{users: &bfUserRepo{users: users}, settings: bfSettings{}}
+	// HealSharedClients now runs a full ResyncMembership per user, so wire the deps
+	// it reaches before ProvisionUser: a group, a (node-less) selector, the psp.
+	svc := &Service{
+		users:    &bfUserRepo{users: users},
+		settings: bfSettings{},
+		groups:   &bfGroupRepo{g: &domain.Group{ID: 0}},
+		selector: bfSelector{},
+		psp:      &bfPSP{},
+	}
 	svc.SetSharedMigrator(mig)
 	svc.SetSharedLifecycleSyncer(life)
 
