@@ -8,11 +8,20 @@ import (
 )
 
 // MinXUI is the compiled SAFETY BACKSTOP for the lower bound — the lowest
-// 3X-UI version this binary's code can actually speak. It's a code-level
+// 3X-UI version this binary's code can correctly drive. It's a code-level
 // fact, not a tunable: PSP calls endpoints (3.2.0's /clients/* API; the
 // inbound-scoped per-client endpoints are gone) that simply don't exist on
 // older panels, so the binary literally can't manage a < MinXUI panel.
 // v3.6.2 raised it 3.1.0 → 3.2.0 with that /clients/* migration.
+//
+// v3.9.0 raised it 3.2.0 → 3.3.0: the shared-client model attaches ONE client
+// to many inbounds and drives lifecycle via /clients/update by email, and on
+// 3X-UI 3.2.x that update path hits "UNIQUE constraint failed:
+// client_inbounds.client_id, client_inbounds.inbound_id" (the client_inbounds
+// upsert was fixed in the 3.3 line — full add→update→del round-trip is
+// live-verified on 3.3.0/3.3.1). 3.2.x panels must upgrade to ≥ 3.3.0 before
+// migrating to PSP v3.9.0. The compat JSON keeps a separate v3.6.2–v3.8.99 entry
+// at the old 3.2.0 floor so the per-node-era PSP builds aren't wrongly tightened.
 //
 // docs/compat/v3.json's per-entry min_xui describes the SAME floor and MUST
 // stay equal to this const — TestMinXUIConstMatchesCompatJSON fails the build
@@ -35,7 +44,7 @@ import (
 // Versions compare numerically (major.minor.patch). A leading "v" is
 // tolerated — 3X-UI's /server/status emits "3.1.0" while /getPanelUpdateInfo
 // emits "v3.1.0" for the same release.
-const MinXUI = "3.2.0"
+const MinXUI = "3.3.0"
 
 // activeMaxTestedXUI holds the runtime-effective upper bound, loaded
 // from docs/compat/xui-compat.json via RefreshRemoteCompat. Empty string

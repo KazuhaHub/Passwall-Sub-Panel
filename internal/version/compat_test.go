@@ -66,22 +66,22 @@ func TestCheckXUI_UnknownWhenNoRemoteLoaded(t *testing.T) {
 
 func TestCheckXUI_SupportedExactlyAtBoundary(t *testing.T) {
 	resetCompatForTest(t)
-	SetActiveMaxTestedXUI("3.2.0")
-	if got := CheckXUI("3.2.0"); got != CompatSupported {
-		t.Fatalf("3.2.0 with min=max=3.2.0 should be Supported, got %s", got)
+	SetActiveMaxTestedXUI("3.3.0")
+	if got := CheckXUI("3.3.0"); got != CompatSupported {
+		t.Fatalf("3.3.0 with min=max=3.3.0 should be Supported, got %s", got)
 	}
-	if got := CheckXUI("v3.2.0"); got != CompatSupported {
-		t.Fatalf("v3.2.0 with min=max=3.2.0 should be Supported, got %s", got)
+	if got := CheckXUI("v3.3.0"); got != CompatSupported {
+		t.Fatalf("v3.3.0 with min=max=3.3.0 should be Supported, got %s", got)
 	}
 }
 
 func TestCheckXUI_TooOldBelowMin(t *testing.T) {
 	resetCompatForTest(t)
-	SetActiveMaxTestedXUI("3.2.0")
-	// 3.1.x is now below the v3.6.2 floor (3.2.0) — the migration dropped the
-	// inbound-scoped client endpoints those panels rely on, so they must read
-	// as TooOld (this is the case the user hit: a 3.1.0 panel with no warning).
-	for _, v := range []string{"3.1.0", "3.1.5", "3.0.2", "2.5.5", "1.0.0"} {
+	SetActiveMaxTestedXUI("3.4.0")
+	// v3.9.0 raised the floor 3.2.0 → 3.3.0: the shared-client model's
+	// /clients/update path breaks on 3X-UI 3.2.x ("UNIQUE constraint failed:
+	// client_inbounds"), so 3.2.x — and everything older — must read TooOld.
+	for _, v := range []string{"3.2.0", "3.2.9", "3.1.0", "3.0.2", "2.5.5", "1.0.0"} {
 		if got := CheckXUI(v); got != CompatTooOld {
 			t.Fatalf("%s should be TooOld (min=%s), got %s", v, MinXUI, got)
 		}
@@ -90,26 +90,26 @@ func TestCheckXUI_TooOldBelowMin(t *testing.T) {
 
 func TestCheckXUI_UntestedAboveMax(t *testing.T) {
 	resetCompatForTest(t)
-	SetActiveMaxTestedXUI("3.2.0")
-	for _, v := range []string{"3.2.1", "3.3.0", "4.0.0"} {
+	SetActiveMaxTestedXUI("3.4.0")
+	for _, v := range []string{"3.4.1", "3.5.0", "4.0.0"} {
 		if got := CheckXUI(v); got != CompatUntested {
-			t.Fatalf("%s should be Untested (max=3.2.0), got %s", v, got)
+			t.Fatalf("%s should be Untested (max=3.4.0), got %s", v, got)
 		}
 	}
 }
 
 func TestCheckXUI_OverrideWidensRange(t *testing.T) {
 	// Whole point of the dynamic override: a panel that would've been
-	// Untested at "max=3.1.0" becomes Supported once max widens. This
-	// is the "ship a new tested version via JSON, no PSP release" path.
+	// Untested at one max becomes Supported once max widens. This is the
+	// "ship a new tested version via JSON, no PSP release" path.
 	resetCompatForTest(t)
-	SetActiveMaxTestedXUI("3.1.0")
-	if got := CheckXUI("3.2.0"); got != CompatUntested {
-		t.Fatalf("3.2.0 with max=3.1.0 should be Untested, got %s", got)
+	SetActiveMaxTestedXUI("3.3.0")
+	if got := CheckXUI("3.4.0"); got != CompatUntested {
+		t.Fatalf("3.4.0 with max=3.3.0 should be Untested, got %s", got)
 	}
 	SetActiveMaxTestedXUI("3.5.0")
-	if got := CheckXUI("3.2.0"); got != CompatSupported {
-		t.Fatalf("3.2.0 with max=3.5.0 should be Supported, got %s", got)
+	if got := CheckXUI("3.4.0"); got != CompatSupported {
+		t.Fatalf("3.4.0 with max=3.5.0 should be Supported, got %s", got)
 	}
 }
 
