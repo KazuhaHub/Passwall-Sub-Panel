@@ -4,6 +4,16 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## v3.9.0-beta.19 — 2026-06-24
+
+### 优化
+
+- **迁移自愈不再每个 reconcile 周期全量扫描** —— reconcile 循环过去每 `cron_reconcile`(默认 15 分钟)就对**所有用户**跑一遍重型 `HealSharedClients`(每 client 一次 GetClient + 每面板一次列举),迁移完成后仍如此,既浪费又随 用户数×面板数 增长。其实稳态正确性已由**事件驱动**保证(用户/节点/分组/UUID 变更都会入队 resync,由 30s sync-task 循环处理),周期性全量扫描只是**漂移兜底**。现在:迁移**未完成**时每周期都跑(快速收敛);一旦 `SharedMigrationComplete`(没有用户还在旧 ownership 模型上),降为**每 N 个周期跑一次**(`sharedHealBackstopEvery=4`,15 分钟基准下约 1 小时)。迁移完成的判定检测一次后缓存(ownership 表迁移后已删、不会回退)。
+
+### 内部(为 V4 清理铺路)
+
+- **集中标记 v3 迁移过渡代码** —— 每处只为 v3.8→v3.9 过渡而存在的代码都加了 `// MIGRATION(v3→v4):` 标记,将来 V4 退役遗留路径时 `grep -rn "MIGRATION(v3→v4)" internal` 即可一处可查、不易漏。重点标了那些**删掉 ownership 仓库也不会编译报错**的内联「psp_client 否则 ownership」回落分支(最易漏)。新增 `docs/migration/v3-to-v4-cleanup.md` 写明按类别的移除配方(关键点:`ports.OwnershipRepo` 接口本身就是锚——删掉它,编译器会逐个报出所有遗留调用点)。无行为变更。
+
 ## v3.9.0-beta.18 — 2026-06-24
 
 ### 修复
