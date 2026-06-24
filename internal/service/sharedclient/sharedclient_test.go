@@ -57,9 +57,10 @@ type fakeXUI struct {
 	ports.XUIClient
 	addedInbounds []int
 	addedSpec     ports.ClientSpec
-	confirm       []int // inboundIDs GetClient reports the client attached to AFTER an add
+	confirm       []int // inboundIDs GetClient reports the client attached to AFTER an add/attach
 	preExist      []int // if non-nil, GetClient reports this BEFORE any add (pre-existing client); nil = absent
 	added         bool
+	attachedTo    []int // inboundIDs passed to AttachClient (the existing-client path)
 	updatedSpec   ports.ClientSpec
 	updateCalls   int
 	deleted       []deletedClient
@@ -89,6 +90,13 @@ func (c *fakeXUI) GetClient(context.Context, string) (*ports.ClientDetail, error
 		return &ports.ClientDetail{InboundIDs: c.preExist}, nil
 	}
 	return &ports.ClientDetail{InboundIDs: c.confirm}, nil
+}
+// AttachClient is the existing-client path: idempotent attach of the desired
+// inbounds. Sets `added` so the read-back GetClient reports `confirm`.
+func (c *fakeXUI) AttachClient(_ context.Context, _ string, inboundIDs []int) error {
+	c.added = true
+	c.attachedTo = append([]int(nil), inboundIDs...)
+	return nil
 }
 func (c *fakeXUI) DetachClient(_ context.Context, _ string, inboundIDs []int) error {
 	c.detached = append(c.detached, inboundIDs...)
@@ -201,6 +209,42 @@ func TestProvisionClient_SkipsRedundantReattach(t *testing.T) {
 	}
 	if res.Provisioned != 2 || !clients.provisioned[11] || !clients.provisioned[12] {
 		t.Fatalf("both nodes must still be marked provisioned: res=%+v marks=%v", res, clients.provisioned)
+	}
+}
+
+// The v3.9.0 merge steady state: the merged email REUSES an existing client's
+// email (e.g. the VLESS-vision per-class email when the panel has no SS-2022) and
+// now needs MORE inbounds than that client currently has. ProvisionClient must use
+// the idempotent AttachClient — NOT AddClientToInbounds, which 3X-UI rejects with
+// "email already in use" on the inbound the client is already on (verified live on
+// 3.4.0; this was the China Shanghai heal failure).
+func TestProvisionClient_AttachesWhenEmailAlreadyExists(t *testing.T) {
+	clients := &fakeClients{attachments: []domain.PSPClientInbound{
+		{ClientID: 1, NodeID: 11, FlowOverride: "xtls-rprx-vision"},
+		{ClientID: 1, NodeID: 12, FlowOverride: "xtls-rprx-vision"},
+	}}
+	nodes := fakeNodes{byID: map[int64]*domain.Node{
+		11: {ID: 11, PanelID: 10, InboundID: 101},
+		12: {ID: 12, PanelID: 10, InboundID: 102},
+	}}
+	// Client already exists on 101 (a per-class client being merged); desired is
+	// 101+102. 3X-UI confirms both after the idempotent attach.
+	xui := &fakeXUI{preExist: []int{101}, confirm: []int{101, 102}}
+	svc := New(clients, fakePool{c: xui}, nodes)
+
+	res, err := svc.ProvisionClient(context.Background(),
+		&domain.PSPClient{ID: 1, PanelID: 10, Email: "u1-kf2d62608@psp.local", UUID: "uuid-x"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(xui.addedInbounds) != 0 {
+		t.Fatalf("must NOT call AddClientToInbounds on an existing email (got %v)", xui.addedInbounds)
+	}
+	if len(xui.attachedTo) != 2 || xui.attachedTo[0] != 101 || xui.attachedTo[1] != 102 {
+		t.Fatalf("must AttachClient to the full desired set [101 102], got %v", xui.attachedTo)
+	}
+	if !res.Created || res.Provisioned != 2 {
+		t.Fatalf("result = %+v, want created + 2 provisioned", res)
 	}
 }
 

@@ -63,10 +63,12 @@ func buildSharedClientSpec(c *domain.PSPClient, flow string) ports.ClientSpec {
 }
 
 // ProvisionClient creates/attaches the shared client for one psp_client across
-// all its attached inbounds in a single AddClientToInbounds (one Xray restart),
-// reads it back, and marks Provisioned only the attachments 3X-UI confirms.
-// Idempotent: AddClient on an existing email re-attaches (3X-UI keys by email),
-// so a re-run heals a partial attach.
+// all its attached inbounds, reads it back, and marks Provisioned only the
+// attachments 3X-UI confirms. A brand-new client is created in one
+// AddClientToInbounds (one Xray restart); an existing client whose inbound set
+// drifted is converged with the idempotent AttachClient — AddClientToInbounds
+// would re-create it and 3X-UI rejects "email already in use" on inbounds it is
+// already attached to. Idempotent: a re-run heals a partial attach.
 func (s *Service) ProvisionClient(ctx context.Context, c *domain.PSPClient) (ProvisionResult, error) {
 	var res ProvisionResult
 	if c == nil {
@@ -126,7 +128,8 @@ func (s *Service) ProvisionClient(ctx context.Context, c *domain.PSPClient) (Pro
 	// reset keeps the same attachment (skipped here) but differs in lifecycle/creds
 	// (pushed there). A nil read (absent client / transient error) falls through to
 	// the attach path, which is idempotent.
-	if cur, _ := cli.GetClient(ctx, c.Email); cur != nil && sameInboundSet(cur.InboundIDs, desiredSet) {
+	cur, _ := cli.GetClient(ctx, c.Email)
+	if cur != nil && sameInboundSet(cur.InboundIDs, desiredSet) {
 		for _, nodeID := range nodeByInbound {
 			if err := s.clients.MarkInboundProvisioned(ctx, c.ID, nodeID, true); err != nil {
 				log.Warn("sharedclient: mark provisioned", "client_id", c.ID, "node_id", nodeID, "err", err)
@@ -137,8 +140,26 @@ func (s *Service) ProvisionClient(ctx context.Context, c *domain.PSPClient) (Pro
 		return res, nil
 	}
 
-	if err := cli.AddClientToInbounds(ctx, inboundIDs, buildSharedClientSpec(c, flow)); err != nil {
-		return res, fmt.Errorf("create shared client %s: %w", c.Email, err)
+	if cur == nil {
+		// Brand-new client: create it attached to every desired inbound in one POST.
+		if err := cli.AddClientToInbounds(ctx, inboundIDs, buildSharedClientSpec(c, flow)); err != nil {
+			return res, fmt.Errorf("create shared client %s: %w", c.Email, err)
+		}
+	} else {
+		// Client already exists but on a DIFFERENT inbound set — the steady state of
+		// the v3.9.0 merge: a user's per-class email gets REUSED as the merged email
+		// (e.g. the VLESS-vision client's u…-kf… email when the panel has no SS-2022)
+		// and now needs MORE inbounds than it has — those of the per-class clients
+		// being collapsed into it. A blanket AddClientToInbounds re-CREATES the client
+		// on inbounds it is already attached to and 3X-UI rejects the whole call
+		// ("email already in use"). AttachClient is idempotent — it no-ops inbounds
+		// already attached and attaches the rest. Because the email is a pure function
+		// of (password-class, flow), a reused email carries the IDENTICAL credentials,
+		// so no spec push is needed here; stale inbounds are detached by the read-back
+		// reconcile below. (Bug + fix verified live on 3X-UI 3.4.0.)
+		if err := cli.AttachClient(ctx, c.Email, inboundIDs); err != nil {
+			return res, fmt.Errorf("attach shared client %s: %w", c.Email, err)
+		}
 	}
 	res.Created = true
 
