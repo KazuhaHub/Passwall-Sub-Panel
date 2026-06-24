@@ -588,6 +588,22 @@ func (h *AdminNodeHandler) SetEnabled(c *gin.Context) {
 	c.Status(http.StatusNoContent)
 }
 
+// RecreateInbound rebuilds a node's inbound on its (repointed/empty) server from
+// PSP's captured config snapshot and relinks the node to the new inbound id. Used
+// after moving a node's Server to a fresh 3X-UI that shows "Connected (0)".
+func (h *AdminNodeHandler) RecreateInbound(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid id"})
+		return
+	}
+	if err := h.node.RecreateInboundOnServer(c.Request.Context(), id); err != nil {
+		mapNodeServiceError(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
 // Reorder accepts a bulk (node_id, sort_order) list and rewrites sort_order
 // for every listed node in one transaction. Powers drag-to-reorder in the
 // admin nodes table.

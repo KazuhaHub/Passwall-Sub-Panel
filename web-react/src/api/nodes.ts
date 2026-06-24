@@ -189,6 +189,13 @@ export async function deleteNode(id: number) {
   await client.delete(`/admin/nodes/${id}`)
 }
 
+// recreateNodeInbound rebuilds the node's inbound on its (repointed/empty) server
+// from PSP's captured config and relinks the node to the new inbound id. Use after
+// moving a node's Server to a fresh 3X-UI that shows "Connected (0)".
+export async function recreateNodeInbound(id: number) {
+  await client.post(`/admin/nodes/${id}/recreate-inbound`)
+}
+
 // detachNode drops the node record + ownership whitelist locally and does
 // NOT contact 3X-UI. Use when the upstream server is offline so PSP doesn't
 // burn retries against a dead panel; any clients PSP previously created

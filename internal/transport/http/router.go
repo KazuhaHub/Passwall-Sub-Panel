@@ -366,6 +366,7 @@ func NewRouter(d Deps) *gin.Engine {
 		adminGroup.PUT("/nodes/:id/inbound", nodes.UpdateInboundConfig)
 		adminGroup.DELETE("/nodes/:id", nodes.Delete)
 		adminGroup.POST("/nodes/:id/detach", nodes.Detach)
+		adminGroup.POST("/nodes/:id/recreate-inbound", nodes.RecreateInbound)
 		adminGroup.POST("/nodes/:id/claim", nodes.ClaimClient)
 		adminGroup.POST("/nodes/generate-reality-keypair", nodes.GenerateRealityKeypair)
 

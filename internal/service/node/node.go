@@ -307,6 +307,59 @@ func (s *Service) CreateInbound(ctx context.Context, n *domain.Node, spec ports.
 	return nil
 }
 
+// RecreateInboundOnServer rebuilds a node's inbound on its CURRENT panel from PSP's
+// captured config snapshot, then relinks the node to the newly-created inbound id.
+//
+// Use case: the node's Server was repointed to a fresh/empty 3X-UI (shows
+// "Connected (0)"). PSP attaches clients to EXISTING inbounds by id, so an empty
+// server has nothing for the node to use — and PSP never creates inbounds on its own.
+// But PSP OWNS the inbound config (the v3.5 snapshot), so this pushes it back as a new
+// inbound instead of the admin re-creating it by hand. Clients follow:
+// syncExistingUsersToNode enqueues a resync per eligible member, re-provisioning each
+// member's shared client onto the new inbound.
+//
+// Guards: the node must carry a captured config (HasLocalConfig — otherwise there's
+// nothing to push), and its inbound must be MISSING on the panel (the action recreates
+// a missing inbound, never duplicates a live one). A persist failure rolls back the
+// just-created inbound so a half-applied recreate leaves no stray. A full-row Update is
+// fine here: the node was unreachable (no live traffic/health writes to clobber).
+func (s *Service) RecreateInboundOnServer(ctx context.Context, nodeID int64) error {
+	n, err := s.nodes.GetByID(ctx, nodeID)
+	if err != nil {
+		return err
+	}
+	if n.IsSeparator() {
+		return fmt.Errorf("%w: node %d is a separator", domain.ErrValidation, nodeID)
+	}
+	if !inboundcfg.HasLocalConfig(n) {
+		return fmt.Errorf("%w: node %d has no captured inbound config to recreate", domain.ErrValidation, nodeID)
+	}
+	c, err := s.pool.Get(n.PanelID)
+	if err != nil {
+		return err
+	}
+	if inb, gerr := c.GetInbound(ctx, n.InboundID); gerr == nil && inb != nil {
+		return fmt.Errorf("%w: inbound %d already exists on panel %d — recreate is only for a missing inbound",
+			domain.ErrValidation, n.InboundID, n.PanelID)
+	}
+	spec := inboundcfg.SpecFromNode(n)
+	spec.Enable = true
+	newID, err := c.AddInbound(ctx, spec)
+	if err != nil {
+		return fmt.Errorf("recreate inbound on panel %d: %w", n.PanelID, err)
+	}
+	n.InboundID = newID
+	n.Enabled = true
+	inboundcfg.ApplySpec(n, spec) // re-stamp synced: we just pushed the snapshot live
+	if err := s.nodes.Update(ctx, n); err != nil {
+		_ = c.DelInbound(context.Background(), newID) // roll back the orphan inbound
+		return fmt.Errorf("relink node %d to new inbound %d: %w", nodeID, newID, err)
+	}
+	log.Info("recreated node inbound on its server", "node_id", nodeID, "panel_id", n.PanelID, "new_inbound_id", newID)
+	s.syncExistingUsersToNodeInBackground(n)
+	return nil
+}
+
 // ---- Update flows ----
 
 // Reorder rewrites sort_order for every (node_id, sort_order) pair in one

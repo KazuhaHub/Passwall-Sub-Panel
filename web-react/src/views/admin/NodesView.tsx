@@ -33,6 +33,7 @@ import DeleteIcon from '@mui/icons-material/DeleteOutline'
 import DragIndicatorIcon from '@mui/icons-material/DragIndicator'
 import EditIcon from '@mui/icons-material/EditOutlined'
 import LinkOffIcon from '@mui/icons-material/LinkOff'
+import CloudSyncIcon from '@mui/icons-material/CloudSync'
 import { useTranslation } from 'react-i18next'
 import { useCan } from '@/utils/permissions'
 
@@ -49,6 +50,7 @@ import {
   listNodes,
   listSeparators,
   listUnmanagedInbounds,
+  recreateNodeInbound,
   reorderNodes,
   reorderSeparators,
   setNodeEnabled,
@@ -2277,6 +2279,29 @@ export default function NodesView() {
     pushSnack(t('admin:nodes.toast.detached'), 'success')
   }
 
+  // Recreate inbound: PSP rebuilds this node's inbound on its (repointed/empty)
+  // server from its captured config and relinks the node. Use after moving the
+  // node's Server to a fresh 3X-UI that shows "Connected (0)".
+  async function confirmRecreateInbound(n: Node) {
+    const ok = await confirm({
+      title: t('admin:nodes.confirm.recreate_inbound_title', { defaultValue: '在服务器上重建 inbound?' }),
+      message: t('admin:nodes.confirm.recreate_inbound_message', {
+        name: n.display_name,
+        defaultValue: '用 PSP 保存的配置在「{{name}}」所在服务器上重建 inbound,并把节点指向新 inbound。适用于把节点迁到全新/空的 3X-UI 后。',
+      }),
+      confirmText: t('admin:nodes.action.recreate_inbound', { defaultValue: '重建 inbound' }),
+    })
+    if (!ok) return
+    try {
+      await recreateNodeInbound(n.id)
+      pushSnack(t('admin:nodes.toast.recreated_inbound', { defaultValue: 'inbound 已在服务器上重建' }), 'success')
+      await load()
+    } catch (err) {
+      const msg = (err as { message?: string }).message ?? 'unknown'
+      pushSnack(msg, 'error')
+    }
+  }
+
   async function batchSetEnabled(enable: boolean) {
     const rows = managed.filter(n => selected.has(n.id))
     if (!rows.length) return
@@ -2972,6 +2997,11 @@ export default function NodesView() {
                           <Tooltip title={t('admin:nodes.edit_inbound')}>
                             <IconButton size="small" onClick={() => openEditInbound(n)}>
                               <KeyIcon fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                          <Tooltip title={t('admin:nodes.action.recreate_inbound', { defaultValue: '在服务器上重建 inbound' })}>
+                            <IconButton size="small" onClick={() => confirmRecreateInbound(n)}>
+                              <CloudSyncIcon fontSize="small" />
                             </IconButton>
                           </Tooltip>
                           <Tooltip title={t('admin:nodes.action.detach')}>

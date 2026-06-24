@@ -1010,6 +1010,7 @@
       "edit": "Edit",
       "delete": "Delete",
       "detach": "Detach",
+      "recreate_inbound": "Re-create inbound on server",
       "drag_to_reorder": "Drag to reorder"
     },
     "validate": {
@@ -1028,13 +1029,16 @@
       "reordered": "Order updated",
       "reorder_failed": "Reorder failed",
       "separator_created": "Separator created",
-      "separator_updated": "Separator updated"
+      "separator_updated": "Separator updated",
+      "recreated_inbound": "Inbound re-created on the server"
     },
     "confirm": {
       "delete_title": "Delete node",
       "delete_message": "Delete node {{name}}? This removes the corresponding inbound from 3X-UI.",
       "detach_title": "Detach node",
       "detach_message": "Detach node {{name}}? The panel will drop the node record and forget its clients locally — 3X-UI will NOT be contacted. Any clients Passwall Panel previously created on this inbound stay on 3X-UI for you to clean up there. Use this when the upstream server is offline or decommissioned; otherwise use Delete.",
+      "recreate_inbound_title": "Re-create inbound on the server?",
+      "recreate_inbound_message": "Re-create node {{name}}'s inbound on its server from PSP's saved config and relink the node to the new inbound. Use after moving the node's Server to a fresh/empty 3X-UI (shows Connected (0)) — no manual node reconfig needed. Only works when that inbound is genuinely absent on the server.",
       "batch_delete_title": "Delete nodes",
       "batch_delete_message": "Delete {{count}} nodes?"
     }
