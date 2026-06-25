@@ -4,6 +4,13 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## v3.9.0-beta.24 — 2026-06-25
+
+### 改进
+
+- **「重建 inbound」现在自己把 client 灌好(后台立即下发 + 失败入队)** —— 之前重建只建 inbound、把灌 client 交给 30 秒的 sync-task 循环,看起来像没下发。现在 `RecreateInboundOnServer` 在**请求线程之外、立即**把节点所属分组成员的共享 client 下发到新 inbound(按钮秒回,不会因成员多而 HTTP 超时;client 几秒内出现,而不是等下一个 30 秒 tick)。每个成员走 `ResyncMembershipOrEnqueue`:**先实时下发,失败则丢进 sync-task 队列重试** —— 正是「否则后台持续创建,出问题就进 sync task」。
+- **「empty response body (HTTP 200)」的提示不再只甩锅认证** —— 一个端点返回空 200、而其它端点都正常返回 JSON,这其实是**面板前面有反向代理 / WAF 拦截了这个路径**的典型特征,不是认证错。提示改为同时点出两种可能,并建议「其它端点正常时,优先怀疑代理,直连面板测一下」。(实测定位:某面板 `clients/add` 返回空 200,而 `ListInbounds`/`GetClient`/`AddInbound` 全正常。)
+
 ## v3.9.0-beta.23 — 2026-06-25
 
 ### 新功能
