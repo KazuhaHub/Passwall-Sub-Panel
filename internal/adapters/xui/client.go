@@ -688,6 +688,43 @@ func (c *Client) BulkDetach(ctx context.Context, emails []string, inboundIDs []i
 	return ports.BulkAttachResult{Done: out.Detached, Skipped: out.Skipped, Errors: bulkErrStrings(out.Errors)}, nil
 }
 
+// BulkCreateClients creates many NEW clients in one POST /clients/bulkCreate —
+// the body is a JSON ARRAY of {client, inboundIds} (the same per-item shape
+// AddClientToInbounds sends), so a node-provision / heal fan-out of N creates
+// collapses to ONE Xray restart. ensureClients: callers pass only emails not yet
+// present on the panel (already-present ones go through BulkAttach), but a race
+// is harmless — the panel skips an existing email and the per-user resync heals
+// it. Items with no target inbound are dropped (a create needs a destination).
+func (c *Client) BulkCreateClients(ctx context.Context, items []ports.BulkCreateClientItem) (ports.BulkCreateResult, error) {
+	if len(items) == 0 {
+		return ports.BulkCreateResult{}, nil
+	}
+	emails := make([]string, 0, len(items))
+	arr := make([]map[string]any, 0, len(items))
+	for _, it := range items {
+		if len(it.InboundIDs) == 0 {
+			continue
+		}
+		clientJSON, err := buildClientJSON(it.Spec)
+		if err != nil {
+			return ports.BulkCreateResult{}, err
+		}
+		emails = append(emails, it.Spec.Email)
+		arr = append(arr, map[string]any{"client": json.RawMessage(clientJSON), "inboundIds": it.InboundIDs})
+	}
+	if len(arr) == 0 {
+		return ports.BulkCreateResult{}, nil
+	}
+	defer c.lockClientEmails(emails)()
+	var out struct {
+		Created int `json:"created"`
+	}
+	if err := c.doJSON(ctx, http.MethodPost, "/panel/api/clients/bulkCreate", arr, &out); err != nil {
+		return ports.BulkCreateResult{}, err
+	}
+	return ports.BulkCreateResult{Created: out.Created}, nil
+}
+
 // bulkErrStrings normalises the panel's bulkAttach/bulkDetach "errors" entries
 // to plain strings. The field is empty in the common case; its element shape is
 // not pinned in the API spec, so an entry that is a JSON string is unquoted and

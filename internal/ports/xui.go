@@ -110,6 +110,16 @@ type XUIClient interface {
 	// client records are kept even if orphaned. Empty inputs are a no-op.
 	BulkDetach(ctx context.Context, emails []string, inboundIDs []int) (BulkAttachResult, error)
 
+	// BulkCreateClients creates many NEW clients in one POST
+	// /panel/api/clients/bulkCreate — body is a JSON array of {client, inboundIds},
+	// the same per-item shape AddClientToInbounds accepts, processed server-side
+	// with a SINGLE Xray restart regardless of fan-out. Use it to collapse a
+	// per-user create loop (node provisioning / outage heal) into one call. Items
+	// whose email already exists are skipped server-side (Created counts only the
+	// real creates); pair with BulkAttach for the already-present ones. Empty
+	// input is a no-op.
+	BulkCreateClients(ctx context.Context, items []BulkCreateClientItem) (BulkCreateResult, error)
+
 	// GetServerStatus hits /panel/api/server/status. PSP only consumes the
 	// version-identity subset (panel/xray) for compatibility checks; the rest
 	// of the rich status payload (cpu/mem/etc.) is intentionally not surfaced
@@ -215,6 +225,23 @@ type BulkAttachResult struct {
 	Done    []string
 	Skipped []string
 	Errors  []string
+}
+
+// BulkCreateClientItem is one entry in a BulkCreateClients call: a client spec
+// plus the inbound IDs to attach it to (the same pairing AddClientToInbounds
+// takes for a single client).
+type BulkCreateClientItem struct {
+	Spec       ClientSpec
+	InboundIDs []int
+}
+
+// BulkCreateResult is the parsed obj of /panel/api/clients/bulkCreate. Created
+// is the number of clients the panel actually created. (Callers partition
+// create-vs-attach themselves from a prior client list, so the per-item skip
+// reasons aren't surfaced here — anything missed is healed by the per-user
+// resync backstop.)
+type BulkCreateResult struct {
+	Created int
 }
 
 // Inbound is the DTO returned by 3X-UI inbound endpoints. The Settings,

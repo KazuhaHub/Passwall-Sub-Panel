@@ -756,3 +756,61 @@ func TestCookieMode_403RefetchesCSRFAndRetriesOnce(t *testing.T) {
 		t.Fatalf("csrf-token fetched %d times, want 2 (initial + re-fetch on 403)", csrfFetched)
 	}
 }
+
+// BulkCreateClients posts a JSON ARRAY of {client, inboundIds} to /clients/bulkCreate
+// (one Xray restart for the whole fan-out) and parses obj.created.
+func TestBulkCreateClients(t *testing.T) {
+	var gotBody []byte
+	var gotPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotBody, _ = io.ReadAll(r.Body)
+		_, _ = w.Write([]byte(`{"success":true,"msg":"","obj":{"created":2}}`))
+	}))
+	defer srv.Close()
+	c := &Client{baseURL: srv.URL, apiToken: "t", http: srv.Client()}
+
+	res, err := c.BulkCreateClients(context.Background(), []ports.BulkCreateClientItem{
+		{Spec: ports.ClientSpec{ID: "uuid-a", Email: "a@psp.local", Enable: true}, InboundIDs: []int{7}},
+		{Spec: ports.ClientSpec{ID: "uuid-b", Email: "b@psp.local", Enable: true, Password: "pw"}, InboundIDs: []int{7, 9}},
+	})
+	if err != nil {
+		t.Fatalf("BulkCreateClients: %v", err)
+	}
+	if res.Created != 2 {
+		t.Fatalf("Created = %d, want 2", res.Created)
+	}
+	if gotPath != "/panel/api/clients/bulkCreate" {
+		t.Fatalf("path = %q", gotPath)
+	}
+	// Body must be a top-level JSON array of {client, inboundIds} items.
+	var items []struct {
+		Client     map[string]any `json:"client"`
+		InboundIDs []int          `json:"inboundIds"`
+	}
+	if err := json.Unmarshal(gotBody, &items); err != nil {
+		t.Fatalf("body is not a JSON array: %v (%s)", err, gotBody)
+	}
+	if len(items) != 2 {
+		t.Fatalf("items = %d, want 2", len(items))
+	}
+	if items[0].Client["email"] != "a@psp.local" || len(items[0].InboundIDs) != 1 || items[0].InboundIDs[0] != 7 {
+		t.Fatalf("item0 = %+v", items[0])
+	}
+	if items[1].Client["email"] != "b@psp.local" || len(items[1].InboundIDs) != 2 {
+		t.Fatalf("item1 = %+v", items[1])
+	}
+}
+
+// Empty / no-target input is a no-op (no HTTP call, no error).
+func TestBulkCreateClients_Empty(t *testing.T) {
+	c := &Client{baseURL: "http://unused", apiToken: "t"}
+	if res, err := c.BulkCreateClients(context.Background(), nil); err != nil || res.Created != 0 {
+		t.Fatalf("nil items must no-op, got res=%+v err=%v", res, err)
+	}
+	if res, err := c.BulkCreateClients(context.Background(), []ports.BulkCreateClientItem{
+		{Spec: ports.ClientSpec{Email: "x@psp.local"}, InboundIDs: nil},
+	}); err != nil || res.Created != 0 {
+		t.Fatalf("no-target item must be dropped (no-op), got res=%+v err=%v", res, err)
+	}
+}
