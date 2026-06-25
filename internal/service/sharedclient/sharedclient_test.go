@@ -490,9 +490,14 @@ func TestSyncLifecycle_UnprovisionedSkips(t *testing.T) {
 	}
 }
 
-// The full per-user migration: provision the shared client(s) in 3X-UI, confirm,
-// then delete the now-covered legacy per-node clients + ownership rows.
-func TestMigrateUser_ProvisionsThenDeletesLegacy(t *testing.T) {
+// DeleteLegacyForUser is the gate-free teardown the migration drives AFTER a
+// successful provision: every legacy per-node client whose (panel, inbound) is
+// now served by a CONFIRMED-provisioned shared client is removed (3X-UI client +
+// ownership row); uncovered ones are KEPT. (The orchestration — provision →
+// lifecycle push → THIS — lives in user.ResyncMembership; the removed MigrateUser
+// helper had the unsafe no-lifecycle ordering. The provision-fails-keeps-legacy
+// guarantee is covered by resync_lifecycle_test.go.)
+func TestDeleteLegacyForUser_DeletesProvisionedCovered(t *testing.T) {
 	clients := &fakeClients{
 		byUser: []*domain.PSPClient{{ID: 1, UserID: 7, PanelID: 10, Email: "u7@psp.local", UUID: "uuid-7"}},
 		attachments: []domain.PSPClientInbound{
@@ -512,44 +517,29 @@ func TestMigrateUser_ProvisionsThenDeletesLegacy(t *testing.T) {
 	svc := New(clients, fakePool{c: xui}, nodes)
 	svc.SetOwnershipRepo(own)
 
-	res, err := svc.MigrateUser(context.Background(), 7)
+	pr, err := svc.ProvisionUser(context.Background(), 7)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.Provisioned != 2 || res.Deleted != 2 {
-		t.Fatalf("result = %+v, want 2 provisioned + 2 deleted", res)
+	if pr.Provisioned != 2 {
+		t.Fatalf("provisioned = %d, want 2", pr.Provisioned)
 	}
 	if len(xui.addedInbounds) != 2 {
 		t.Fatalf("shared client should attach to both inbounds: %v", xui.addedInbounds)
+	}
+
+	cr, err := svc.DeleteLegacyForUser(context.Background(), 7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cr.Deleted != 2 {
+		t.Fatalf("deleted = %d, want 2 (both legacy clients covered by a provisioned shared client)", cr.Deleted)
 	}
 	if len(xui.deleted) != 2 {
 		t.Fatalf("both legacy per-node clients should be deleted: %+v", xui.deleted)
 	}
 	if len(own.removedID) != 2 {
 		t.Fatalf("both ownership rows should be removed: %v", own.removedID)
-	}
-}
-
-// Failure-safe: if provisioning the shared client fails, the legacy per-node
-// clients must be LEFT INTACT (the user keeps working; the task retries).
-func TestMigrateUser_ProvisionFailureKeepsLegacy(t *testing.T) {
-	clients := &fakeClients{
-		byUser:      []*domain.PSPClient{{ID: 1, UserID: 7, PanelID: 10, Email: "u7@psp.local"}},
-		attachments: []domain.PSPClientInbound{{ClientID: 1, NodeID: 11}},
-	}
-	nodes := fakeNodes{byID: map[int64]*domain.Node{11: {ID: 11, PanelID: 10, InboundID: 101}}}
-	own := &fakeOwnership{entries: []*domain.XUIClientEntry{
-		{ID: 501, PanelID: 10, InboundID: 101, ClientEmail: "u7-n11@psp.local"},
-	}}
-	xui := &fakeXUI{failAdd: true} // provisioning fails
-	svc := New(clients, fakePool{c: xui}, nodes)
-	svc.SetOwnershipRepo(own)
-
-	if _, err := svc.MigrateUser(context.Background(), 7); err == nil {
-		t.Fatal("MigrateUser must return an error when provisioning fails")
-	}
-	if len(xui.deleted) != 0 || len(own.removedID) != 0 {
-		t.Fatal("a failed provision must NOT delete any legacy per-node client")
 	}
 }
 

@@ -305,37 +305,13 @@ type panelInbound struct {
 	inbound int
 }
 
-// MigrateResult summarizes one user's full migration to the shared-client model.
-type MigrateResult struct {
-	Provisioned int // shared-client attachments confirmed in 3X-UI
-	Deleted     int // legacy per-node clients removed from 3X-UI + ownership
-	Skipped     int // provision/delete steps that failed (retried by the sync-task queue)
-}
-
-// MigrateUser is the V3-transitional one-shot: it fully migrates ONE user to the
-// shared-client model — provision the shared client(s) in 3X-UI (silent: the
-// stored creds are byte-identical to what render already emits), confirm the
-// attach, then delete that user's legacy per-node clients. Order is failure-safe:
-// if provisioning fails, the per-node clients are LEFT intact (the user keeps
-// working) and the sync-task queue retries. Idempotent — a re-run re-provisions
-// (no-op if present) and deletes any per-node clients now covered.
-//
-// V3-ONLY: this drives the upgrade migration and is removed at V4 (by then every
-// install is on the shared model and there are no per-node clients to delete).
-func (s *Service) MigrateUser(ctx context.Context, userID int64) (MigrateResult, error) {
-	pr, err := s.ProvisionUser(ctx, userID)
-	if err != nil {
-		// Provision failed → do NOT touch the per-node clients; the user keeps
-		// working on them and the task retries.
-		return MigrateResult{Skipped: pr.Skipped}, fmt.Errorf("provision: %w", err)
-	}
-	cr, err := s.DeleteLegacyForUser(ctx, userID)
-	res := MigrateResult{Provisioned: pr.Provisioned, Deleted: cr.Deleted, Skipped: pr.Skipped + cr.Skipped}
-	if err != nil {
-		return res, fmt.Errorf("delete legacy: %w", err)
-	}
-	return res, nil
-}
+// MIGRATION(v3→v4): the per-user migration is driven by user.ResyncMembership
+// (provision → lifecycle push → delete legacy), NOT a standalone one-shot here.
+// The earlier MigrateUser helper (provision → delete legacy, with NO lifecycle
+// push between) was superseded by that safer ordering and removed — reviving it
+// would reopen the audit-#1 enforcement bypass (a disabled/expired user left with
+// a fully-enabled shared client and no fallback during the push-failure window).
+// At V4, DeleteLegacyForUser + the ownership dependency below go away entirely.
 
 // DeleteLegacyForUser is the gate-free core: delete every legacy per-node client
 // whose (panel, inbound) is now served by a CONFIRMED-provisioned shared client,
@@ -470,6 +446,16 @@ func (s *Service) BulkProvisionNodeInbound(ctx context.Context, n *domain.Node, 
 	if err != nil {
 		return err
 	}
+	// The per-user ListByUser + per-client ListInbounds below are an O(members)
+	// DB-side N+1. Left deliberately un-batched: this is a one-shot, best-effort
+	// warm-up (the authoritative path is the per-member ResyncMembership backstop
+	// the caller runs right after), it runs only on an admin-triggered node
+	// provision/recreate, and these are sub-ms LOCAL reads. The expensive half —
+	// 3X-UI writes / Xray restarts — IS collapsed below to one BulkCreate + one
+	// BulkAttach (the whole point of this method). Batching the reads would mean two
+	// new repo methods (ListByUsers + ListInboundsForClients) + adapter tests for
+	// ~100ms-once on a cold path; not worth the interface surface. Revisit only if
+	// a node ever fans out to thousands of members on a remote DB.
 	var createItems []ports.BulkCreateClientItem
 	var attachEmails []string
 	for _, uid := range userIDs {
