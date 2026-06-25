@@ -158,19 +158,13 @@ func (h *SubHandler) Get(c *gin.Context) {
 		// Auto-disable when this newly-counted violation crosses the threshold.
 		if advanced && eff.SubBlockAutoDisable && count >= eff.SubBlockAutoDisableCount {
 			disableDetail := fmt.Sprintf("auto-disabled after %d violations, last client: %s", count, detected.ClientName)
+			// SetServiceSuspendedAndSync now emails the user (async, carrying the
+			// blocked-client reason) from its single chokepoint — so no separate
+			// send here. The old send double-fired against that path and used
+			// account-disable wording ("账号已被停用") for a service-only suspension
+			// the user can still log in through.
 			if err := h.user.SetServiceSuspendedAndSync(c.Request.Context(), u.ID, domain.DisabledBlockedClient, disableDetail); err != nil {
 				log.Warn("failed to auto-suspend user service", "user_id", u.ID, "err", err)
-			}
-
-			// Send account disabled notification email (async).
-			if h.mailer != nil && h.async != nil {
-				userCopy := u
-				dd := disableDetail
-				h.async.Go("sub.disabled-email", func(ctx context.Context) {
-					if err := h.mailer.SendAccountDisabledNotification(ctx, userCopy, "使用被禁止的客户端", dd); err != nil {
-						log.Warn("failed to send disable notification", "user_id", userCopy.ID, "err", err)
-					}
-				})
 			}
 
 			// Same 404-collapse as the other "account exists but service

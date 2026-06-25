@@ -39,15 +39,6 @@ type UserConfigPusher interface {
 	WithEmergencyLock(fn func())
 }
 
-// MailNotifier lets the poll email the user when it auto-disables them on
-// quota exhaustion or auto-re-enables them on period rollover. Optional /
-// nil-tolerant and late-bound (mailer.Service implements it but is wired up
-// after traffic.Service). Calls are fired async so SMTP can't stall the poll.
-type MailNotifier interface {
-	SendAccountDisabledToUser(ctx context.Context, userID int64, reason, detail string) error
-	SendAccountEnabledToUser(ctx context.Context, userID int64, reason, detail string) error
-}
-
 type Service struct {
 	users       ports.UserRepo
 	ownership   ports.OwnershipRepo
@@ -71,8 +62,6 @@ type Service struct {
 	// configPusher is wired lazily (user.Service is the implementor and
 	// is created before traffic.Service). nil = skip floor refresh on poll.
 	configPusher UserConfigPusher
-	// mailer is optional/late-bound. nil = no quota/rollover emails.
-	mailer MailNotifier
 	// pushSem caps how many safety-net floor pushes can run concurrently in
 	// the background. v3.5.0-beta.12 moved the per-user push out of the
 	// PollOnce hot path (was the dominant remaining cost after beta.9's
@@ -101,40 +90,11 @@ type Service struct {
 	pollCfgCache ports.UISettings
 }
 
-// SetMailNotifier wires the late-bound mailer used for auto-disable /
-// auto-re-enable emails. Same late-binding rationale as SetConfigPusher.
-func (s *Service) SetMailNotifier(m MailNotifier) { s.mailer = m }
-
-// SetBgWG wires the app-level WaitGroup the background goroutines
-// (floor push, quota-event email) register with so App.Shutdown can
-// drain them before the process exits. nil is tolerated and degrades
-// to "fire and forget" — same semantics as before this method existed.
+// SetBgWG wires the app-level WaitGroup the background goroutines (floor push)
+// register with so App.Shutdown can drain them before the process exits. nil is
+// tolerated and degrades to "fire and forget" — same semantics as before this
+// method existed. (Suspend/resume emails now fire from user.Service, not here.)
 func (s *Service) SetBgWG(wg *sync.WaitGroup) { s.bgWG = wg }
-
-// notifyDisabled / notifyEnabled fire the quota-event email off the poll's
-// hot path. Background context (the poll's ctx may be cancelled mid-cycle)
-// and a panic-shielded goroutine; best-effort, errors are logged not surfaced.
-func (s *Service) notifyDisabled(userID int64, reason, detail string) {
-	if s.mailer == nil {
-		return
-	}
-	safego.GoTracked(s.bgWG, "traffic.disabled-email", func() {
-		if err := s.mailer.SendAccountDisabledToUser(context.Background(), userID, reason, detail); err != nil {
-			log.Warn("traffic disabled email", "user_id", userID, "err", err)
-		}
-	})
-}
-
-func (s *Service) notifyEnabled(userID int64, reason, detail string) {
-	if s.mailer == nil {
-		return
-	}
-	safego.GoTracked(s.bgWG, "traffic.enabled-email", func() {
-		if err := s.mailer.SendAccountEnabledToUser(context.Background(), userID, reason, detail); err != nil {
-			log.Warn("traffic enabled email", "user_id", userID, "err", err)
-		}
-	})
-}
 
 // SetConfigPusher wires the late-bound config pusher. Same late-binding
 // pattern as user.Service.SetTrafficUsage — needed because both services
@@ -1280,8 +1240,8 @@ func (s *Service) recordAndEnforceWith(ctx context.Context, u *domain.User, tota
 				u.ServiceDisabledAt = nil
 				u.AutoDisabledReason = domain.DisabledNone
 				u.DisableDetail = ""
-				// Tell the user their quota reset and access is back (async).
-				s.notifyEnabled(u.ID, "traffic_reset", "new traffic period")
+				// The "service restored" email is sent by ResumeServiceAndSync
+				// (user.Service) above — the single chokepoint for resume mail.
 			}
 		}
 	}
@@ -1348,11 +1308,10 @@ func (s *Service) recordAndEnforceWith(ctx context.Context, u *domain.User, tota
 		u.ServiceDisableDetail = "traffic limit exceeded"
 		log.Info("auto-suspended user service (traffic exceeded)",
 			"user_id", u.ID, "period_used", periodUsed, "limit", u.TrafficLimitBytes)
-		// Notify the user (async — SMTP must not stall the poll). This is the
-		// only path that produces the traffic_exhausted email; service suspension
-		// itself never mails. Edge-triggered: the next poll short-circuits on
-		// the service-disabled reason, so this fires once per suspension.
-		s.notifyDisabled(u.ID, string(domain.DisabledTrafficExceeded), "traffic limit exceeded")
+		// The quota-suspension email (async, deduped) is sent by
+		// SetServiceSuspendedAndSync (user.Service) above — the single chokepoint
+		// every suspend path funnels through, so it carries the reason and fires
+		// once per suspension (the next poll short-circuits on the reason).
 		return nil
 	}
 	// Safety net: push the remaining-bytes floor into 3X-UI so the inbound

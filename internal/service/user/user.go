@@ -96,6 +96,12 @@ type Service struct {
 	// (user_migrate task). Late-bound via SetSharedMigrator; nil = task is a no-op.
 	migrator SharedMigrator
 
+	// mailer notifies the user on service-axis state changes (suspend / restore).
+	// Late-bound via SetMailNotifier; nil-tolerant (no email before wiring / in
+	// tests). Fired async (through s.bg) so the traffic poll's suspend path — which
+	// funnels through SetServiceSuspendedAndSync — never blocks on SMTP.
+	mailer MailNotifier
+
 	emergencyMu sync.Mutex
 
 	// resyncLocks serializes ResyncMembership PER USER. The same user can be resynced
@@ -322,6 +328,55 @@ func (s *Service) BackfillPSPClients(ctx context.Context) (BackfillResult, error
 // panel-wide WaitGroup + background context instead of an untracked goroutine.
 func (s *Service) SetBackgroundRunner(run func(name string, fn func(ctx context.Context))) {
 	s.bg = run
+}
+
+// runBackground routes fire-and-forget work through the app's tracked dispatcher
+// when wired (drained by Shutdown, cancellable ctx), else an untracked safego.Go.
+// Mirrors ResyncGroupMembersInBackground's bg-or-safego fallback.
+func (s *Service) runBackground(name string, fn func(ctx context.Context)) {
+	if s.bg != nil {
+		s.bg(name, fn)
+		return
+	}
+	safego.Go(name, func() { fn(context.Background()) })
+}
+
+// MailNotifier emails the user on service-axis (proxy/subscription) state changes.
+// Implemented by mailer.Service; a local interface keeps user decoupled from the
+// mailer package and nil-tolerant. Distinct from account disable/enable — a service
+// suspension does NOT block panel login.
+type MailNotifier interface {
+	SendServiceSuspendedToUser(ctx context.Context, userID int64, reason, detail string) error
+	SendServiceRestoredToUser(ctx context.Context, userID int64) error
+}
+
+// SetMailNotifier late-binds the mailer used for service suspend / restore emails
+// (same late-binding rationale as SetBackgroundRunner). nil = no email.
+func (s *Service) SetMailNotifier(m MailNotifier) { s.mailer = m }
+
+// notifyServiceSuspended / notifyServiceRestored fire the service-axis email off
+// the caller's hot path (the traffic poll suspends through this service). nil
+// mailer is a no-op.
+func (s *Service) notifyServiceSuspended(userID int64, reason domain.AutoDisabledReason, detail string) {
+	if s.mailer == nil {
+		return
+	}
+	s.runBackground("user.service-suspended-email", func(ctx context.Context) {
+		if err := s.mailer.SendServiceSuspendedToUser(ctx, userID, string(reason), detail); err != nil {
+			log.Warn("service-suspended email", "user_id", userID, "err", err)
+		}
+	})
+}
+
+func (s *Service) notifyServiceRestored(userID int64) {
+	if s.mailer == nil {
+		return
+	}
+	s.runBackground("user.service-restored-email", func(ctx context.Context) {
+		if err := s.mailer.SendServiceRestoredToUser(ctx, userID); err != nil {
+			log.Warn("service-restored email", "user_id", userID, "err", err)
+		}
+	})
 }
 
 const maxPersonalRulesBytes = 64 * 1024
@@ -2014,6 +2069,12 @@ func (s *Service) SetServiceSuspendedAndSync(ctx context.Context, userID int64, 
 	u.ServiceDisabledReason = reason
 	u.ServiceDisableDetail = detail
 	u.ServiceDisabledAt = &now
+	// Notify the user their SERVICE is suspended (with the reason). Async + nil-
+	// tolerant; fired once here so EVERY suspend path (quota poll, blocked-client,
+	// admin manual, manual usage override) emails uniformly from this chokepoint.
+	// The state is already committed (UpdateServiceState above), so the email is
+	// correct even if the 3X-UI push below fails and is enqueued.
+	s.notifyServiceSuspended(userID, reason, detail)
 	if err := s.pushClientConfigToAll(ctx, u); err != nil {
 		if taskErr := s.enqueueUserTask(ctx, domain.SyncTaskUserPushConfig, userID, fmt.Sprintf("sync service status for user %s", u.UPN)); taskErr != nil {
 			log.Warn("enqueue user service-status push failed", "user_id", userID, "err", taskErr)
@@ -2038,6 +2099,9 @@ func (s *Service) ResumeServiceAndSync(ctx context.Context, userID int64) error 
 	u.ServiceDisabledReason = domain.DisabledNone
 	u.ServiceDisableDetail = ""
 	u.ServiceDisabledAt = nil
+	// Tell the user their service is back (async, nil-tolerant). Mirrors the
+	// suspend notification so a suspend mail always has a matching resume mail.
+	s.notifyServiceRestored(userID)
 	if wasBlocked {
 		if err := s.users.ClearBlockViolation(ctx, userID); err != nil {
 			log.Warn("ResumeServiceAndSync: ClearBlockViolation failed; service restored but violation counter not reset",

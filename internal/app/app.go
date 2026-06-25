@@ -305,10 +305,14 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	// render gate is on (otherwise post-flip traffic on u{uid}@ is uncounted).
 	trafficSvc.SetPSPClientRepo(repos.PSPClient)
 	mailSvc := mailer.New(repos.Mail, repos.User, repos.Traffic, repos.ScopedSettings, repos.SyncTask)
-	// Late-bind the mailer into the traffic poll so quota-exhaustion disables
-	// and period-rollover re-enables actually email the user (the only path
-	// that produces those notifications).
-	trafficSvc.SetMailNotifier(mailSvc)
+	// Late-bind the mailer into the user service: SetServiceSuspendedAndSync /
+	// ResumeServiceAndSync are the single chokepoint every suspend/resume path
+	// funnels through (quota poll, blocked-client, admin manual, manual override),
+	// so emailing from there notifies the user uniformly — with the reason — for
+	// ALL of them. (Replaces the old traffic-poll-only notify, which missed the
+	// admin-manual and manual-override paths and used account-disable wording for
+	// a service-only suspension.)
+	userSvc.SetMailNotifier(mailSvc)
 	reconcileSvc := reconcile.New(repos.User, repos.Ownership, repos.Node, repos.Group, repos.Settings, repos.Audit, pool, syncSvc)
 	healthSvc := health.New(repos.Node)
 	renderSvc := render.New(repos, pool, groupSvc)
