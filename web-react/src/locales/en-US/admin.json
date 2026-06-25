@@ -330,6 +330,8 @@
         "traffic_exhausted": "Traffic exhausted",
         "account_disabled": "Account disabled",
         "account_enabled": "Account enabled",
+        "service_suspended": "Service suspended",
+        "service_restored": "Service restored",
         "announcement": "Global announcement",
         "blocked_client": "Blocked client warning",
         "password_reset": "Password reset",

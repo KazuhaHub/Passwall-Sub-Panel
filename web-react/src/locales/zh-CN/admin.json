@@ -330,6 +330,8 @@
         "traffic_exhausted": "流量耗尽",
         "account_disabled": "账号停用",
         "account_enabled": "账号启用",
+        "service_suspended": "服务暂停",
+        "service_restored": "服务恢复",
         "announcement": "全站公告",
         "blocked_client": "被禁客户端提醒",
         "password_reset": "重置密码",

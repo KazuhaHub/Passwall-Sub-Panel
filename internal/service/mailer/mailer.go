@@ -163,6 +163,10 @@ func (s *Service) processMailTask(ctx context.Context, task *domain.SyncTask) er
 		return s.SendAccountDisabledNotification(ctx, u, payload.Reason, payload.Detail)
 	case "account_enabled":
 		return s.SendAccountEnabledNotification(ctx, u, payload.Reason, payload.Detail)
+	case "service_suspended":
+		return s.SendServiceSuspendedNotification(ctx, u, payload.Reason, payload.Detail)
+	case "service_restored":
+		return s.SendServiceRestoredNotification(ctx, u)
 	default:
 		// Permanent: an unknown template kind is a code/enqueue bug, never
 		// recoverable by retrying. Classify as validation so it's cancelled.
@@ -259,6 +263,29 @@ func DefaultTemplates() []*domain.MailTemplate {
 				"账号已恢复",
 				"你的账号已恢复正常，可以继续使用订阅服务。",
 				loginRow+`{{if .EnableDetail}}`+emailRow("备注", "{{.EnableDetail}}", true)+`{{end}}`+emailRow("恢复时间", "{{.GeneratedAt}}", true),
+			),
+		},
+		{
+			Kind:    domain.MailReminderServiceSuspended,
+			Enabled: true,
+			Subject: "代理服务已暂停",
+			Body: defaultHTMLTemplate(
+				"服务已暂停",
+				"你的代理 / 订阅服务已被暂停，订阅暂时无法使用。你仍然可以登录面板查看原因或自助处理 —— 账号本身没有被禁用。",
+				loginRow+
+					emailRow("暂停原因", "{{.SuspendReason}}", false)+
+					`{{if .SuspendDetail}}`+emailRow("详情", "{{.SuspendDetail}}", true)+`{{end}}`+
+					emailRow("暂停时间", "{{.GeneratedAt}}", true),
+			),
+		},
+		{
+			Kind:    domain.MailReminderServiceRestored,
+			Enabled: true,
+			Subject: "代理服务已恢复",
+			Body: defaultHTMLTemplate(
+				"服务已恢复",
+				"你的代理 / 订阅服务已恢复，可以继续使用订阅。",
+				loginRow+emailRow("恢复时间", "{{.GeneratedAt}}", true),
 			),
 		},
 		{
@@ -738,6 +765,179 @@ func (s *Service) SendAccountEnabledToUser(ctx context.Context, userID int64, en
 		return err
 	}
 	return s.SendAccountEnabledNotification(ctx, u, enableReason, enableDetail)
+}
+
+// serviceSuspendReasonText maps a service-suspension reason code to user-facing
+// copy for the suspend email. Falls back to the raw code for unknown reasons.
+func serviceSuspendReasonText(reason string) string {
+	switch reason {
+	case string(domain.DisabledTrafficExceeded):
+		return "本期流量已用完"
+	case string(domain.DisabledBlockedClient):
+		return "使用了被禁止的客户端"
+	case string(domain.DisabledServiceManual):
+		return "管理员手动暂停服务"
+	case string(domain.DisabledExpired):
+		return "订阅已到期"
+	case "":
+		return "服务暂停"
+	default:
+		return reason
+	}
+}
+
+// SendServiceSuspendedNotification emails the user that their proxy / subscription
+// SERVICE was suspended — distinct from an account disable: they can still log in
+// to see why and self-rescue. Carries the reason. A quota suspension prefers the
+// richer traffic_exhausted template (it shows used/limit GB); every other reason
+// uses the generic service_suspended template with the humanized reason + detail.
+func (s *Service) SendServiceSuspendedNotification(ctx context.Context, u *domain.User, reason, detail string) error {
+	settings, err := s.LoadSettings(ctx)
+	if err != nil {
+		return err
+	}
+	if !settings.Enabled {
+		return nil
+	}
+	templates, err := s.ListTemplates(ctx)
+	if err != nil {
+		return err
+	}
+	// Quota suspensions keep their tuned copy (used/limit GB) when that template
+	// is enabled; otherwise fall back to the generic service_suspended template.
+	preferred := domain.MailReminderServiceSuspended
+	if reason == string(domain.DisabledTrafficExceeded) {
+		for _, t := range templates {
+			if t.Kind == domain.MailReminderTrafficExhausted && t.Enabled {
+				preferred = domain.MailReminderTrafficExhausted
+				break
+			}
+		}
+	}
+	var tpl *domain.MailTemplate
+	for _, t := range templates {
+		if t.Kind == preferred && t.Enabled {
+			tpl = t
+			break
+		}
+	}
+	if tpl == nil {
+		return nil // Template not found or disabled.
+	}
+	to := reminderAddress(u)
+	if to == "" {
+		return nil // No email address.
+	}
+	// Per-(user, reason, minute) dedup — same backstop as the account-disable
+	// path. The reason prefix keeps a manual-suspend mail from being masked by a
+	// same-minute quota mail, and the minute bucket lets a real later state change
+	// re-notify (see eventWindowKey).
+	windowKey := eventWindowKey(reason)
+	uiCfg, uiErr := s.settings.Load(ctx, ports.UISettings{})
+	if uiErr != nil {
+		log.Warn("mailer settings.Load", "err", uiErr)
+	}
+	data := s.templateData(ctx, settings, uiCfg, u)
+	data["SuspendReason"] = serviceSuspendReasonText(reason)
+	data["SuspendReasonCode"] = reason
+	data["SuspendDetail"] = detail
+	// Compat for the traffic_exhausted template's existing placeholders.
+	data["DisableReason"] = reason
+	data["DisableDetail"] = detail
+	subject, err := renderTemplate("service_suspended_subject", tpl.Subject, data)
+	if err != nil {
+		return err
+	}
+	body, err := renderHTMLTemplate("service_suspended_body", tpl.Body, data)
+	if err != nil {
+		return err
+	}
+	won, err := s.repo.ReserveSentSlot(ctx, u.ID, domain.MailReminderServiceSuspended, windowKey, to)
+	if err != nil {
+		return err
+	}
+	if !won {
+		return nil
+	}
+	if err := sendSMTP(ctx, settings, to, subject, body); err != nil {
+		s.enqueueMailNotify(ctx, u.ID, "service_suspended", reason, detail)
+		return err
+	}
+	return nil
+}
+
+// SendServiceSuspendedToUser is a convenience wrapper that loads the user first.
+func (s *Service) SendServiceSuspendedToUser(ctx context.Context, userID int64, reason, detail string) error {
+	u, err := s.users.GetByID(ctx, userID)
+	if err != nil {
+		return err
+	}
+	return s.SendServiceSuspendedNotification(ctx, u, reason, detail)
+}
+
+// SendServiceRestoredNotification emails the user that their proxy / subscription
+// service is back (the service-axis counterpart of SendAccountEnabledNotification).
+func (s *Service) SendServiceRestoredNotification(ctx context.Context, u *domain.User) error {
+	settings, err := s.LoadSettings(ctx)
+	if err != nil {
+		return err
+	}
+	if !settings.Enabled {
+		return nil
+	}
+	templates, err := s.ListTemplates(ctx)
+	if err != nil {
+		return err
+	}
+	var tpl *domain.MailTemplate
+	for _, t := range templates {
+		if t.Kind == domain.MailReminderServiceRestored && t.Enabled {
+			tpl = t
+			break
+		}
+	}
+	if tpl == nil {
+		return nil
+	}
+	to := reminderAddress(u)
+	if to == "" {
+		return nil
+	}
+	windowKey := eventWindowKey("service_restored")
+	uiCfg, uiErr := s.settings.Load(ctx, ports.UISettings{})
+	if uiErr != nil {
+		log.Warn("mailer settings.Load", "err", uiErr)
+	}
+	data := s.templateData(ctx, settings, uiCfg, u)
+	subject, err := renderTemplate("service_restored_subject", tpl.Subject, data)
+	if err != nil {
+		return err
+	}
+	body, err := renderHTMLTemplate("service_restored_body", tpl.Body, data)
+	if err != nil {
+		return err
+	}
+	won, err := s.repo.ReserveSentSlot(ctx, u.ID, domain.MailReminderServiceRestored, windowKey, to)
+	if err != nil {
+		return err
+	}
+	if !won {
+		return nil
+	}
+	if err := sendSMTP(ctx, settings, to, subject, body); err != nil {
+		s.enqueueMailNotify(ctx, u.ID, "service_restored", "", "")
+		return err
+	}
+	return nil
+}
+
+// SendServiceRestoredToUser is a convenience wrapper that loads the user first.
+func (s *Service) SendServiceRestoredToUser(ctx context.Context, userID int64) error {
+	u, err := s.users.GetByID(ctx, userID)
+	if err != nil {
+		return err
+	}
+	return s.SendServiceRestoredNotification(ctx, u)
 }
 
 // SendBlockedClientWarning emails the user that they used a blocked /

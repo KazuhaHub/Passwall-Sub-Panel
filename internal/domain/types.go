@@ -1096,6 +1096,13 @@ const (
 	MailReminderTrafficExhausted MailReminderKind = "traffic_exhausted"
 	MailReminderAccountDisable   MailReminderKind = "account_disabled"
 	MailReminderAccountEnable    MailReminderKind = "account_enabled"
+	// Service-axis (proxy/subscription) suspend & restore. Distinct from the
+	// account_disabled/enabled pair: a service suspension does NOT block panel
+	// login (the user can still sign in to see why), so the copy must not say
+	// "account disabled". Carries the reason (blocked-client / manual / quota /
+	// expiry) so the user knows what happened.
+	MailReminderServiceSuspended MailReminderKind = "service_suspended"
+	MailReminderServiceRestored  MailReminderKind = "service_restored"
 	MailReminderAnnouncement     MailReminderKind = "announcement"
 	MailReminderBlockedClient    MailReminderKind = "blocked_client"
 	MailReminderCertFailure      MailReminderKind = "cert_failure"
