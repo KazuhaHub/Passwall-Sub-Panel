@@ -288,9 +288,81 @@ func TestEnsureSSO_SelfRegisteredNotSilentlyLinked(t *testing.T) {
 	}
 }
 
+func TestSetServiceSuspendedAndSyncDoesNotDisableAccount(t *testing.T) {
+	ctx := context.Background()
+	repo := &memoryUserRepo{byID: map[int64]*domain.User{
+		1: {
+			ID:                 1,
+			UPN:                "service-paused@example.test",
+			Role:               domain.RoleUser,
+			Enabled:            true,
+			AutoDisabledReason: domain.DisabledNone,
+			GroupID:            1,
+		},
+	}}
+	svc := &Service{users: repo, ownership: emptyOwnershipRepo{}}
+
+	if err := svc.SetServiceSuspendedAndSync(ctx, 1, domain.DisabledBlockedClient, "blocked client: clash"); err != nil {
+		t.Fatalf("SetServiceSuspendedAndSync: %v", err)
+	}
+	got := repo.byID[1]
+	if !got.Enabled || got.AutoDisabledReason != domain.DisabledNone || got.DisableDetail != "" {
+		t.Fatalf("account state changed: enabled=%v reason=%q detail=%q",
+			got.Enabled, got.AutoDisabledReason, got.DisableDetail)
+	}
+	if got.ServiceDisabledReason != domain.DisabledBlockedClient || got.ServiceDisableDetail != "blocked client: clash" || got.ServiceDisabledAt == nil {
+		t.Fatalf("service state not set: reason=%q detail=%q at=%v",
+			got.ServiceDisabledReason, got.ServiceDisableDetail, got.ServiceDisabledAt)
+	}
+}
+
+func TestResumeServiceAndSyncClearsBlockedClientViolation(t *testing.T) {
+	ctx := context.Background()
+	at := time.Date(2026, 6, 25, 12, 0, 0, 0, time.UTC)
+	repo := &memoryUserRepo{byID: map[int64]*domain.User{
+		1: {
+			ID:                    1,
+			UPN:                   "service-resume@example.test",
+			Role:                  domain.RoleUser,
+			Enabled:               true,
+			GroupID:               1,
+			ServiceDisabledReason: domain.DisabledBlockedClient,
+			ServiceDisableDetail:  "blocked client: clash",
+			ServiceDisabledAt:     &at,
+			BlockViolationCount:   3,
+			LastBlockViolationAt:  &at,
+		},
+	}}
+	svc := &Service{users: repo, ownership: emptyOwnershipRepo{}}
+
+	if err := svc.ResumeServiceAndSync(ctx, 1); err != nil {
+		t.Fatalf("ResumeServiceAndSync: %v", err)
+	}
+	got := repo.byID[1]
+	if !got.Enabled || got.AutoDisabledReason != domain.DisabledNone {
+		t.Fatalf("account state changed: enabled=%v reason=%q", got.Enabled, got.AutoDisabledReason)
+	}
+	if got.ServiceDisabledReason != domain.DisabledNone || got.ServiceDisableDetail != "" || got.ServiceDisabledAt != nil {
+		t.Fatalf("service state not cleared: reason=%q detail=%q at=%v",
+			got.ServiceDisabledReason, got.ServiceDisableDetail, got.ServiceDisabledAt)
+	}
+	if got.BlockViolationCount != 0 || got.LastBlockViolationAt != nil {
+		t.Fatalf("blocked-client violation state not cleared: count=%d at=%v",
+			got.BlockViolationCount, got.LastBlockViolationAt)
+	}
+}
+
 type memoryUserRepo struct {
 	byID        map[int64]*domain.User
 	updateCalls int
+}
+
+type emptyOwnershipRepo struct {
+	ports.OwnershipRepo
+}
+
+func (emptyOwnershipRepo) ListByUser(context.Context, int64) ([]*domain.XUIClientEntry, error) {
+	return nil, nil
 }
 
 func (r *memoryUserRepo) Create(ctx context.Context, u *domain.User) error {
@@ -321,7 +393,6 @@ func (r *memoryUserRepo) AdvanceBlockViolation(ctx context.Context, userID int64
 	cur.BlockViolationCount++
 	la := at
 	cur.LastBlockViolationAt = &la
-	cur.DisableDetail = detail
 	return cur.BlockViolationCount, true, nil
 }
 
@@ -329,7 +400,15 @@ func (r *memoryUserRepo) ClearBlockViolation(ctx context.Context, userID int64) 
 	if cur, ok := r.byID[userID]; ok {
 		cur.BlockViolationCount = 0
 		cur.LastBlockViolationAt = nil
-		cur.DisableDetail = ""
+	}
+	return nil
+}
+
+func (r *memoryUserRepo) UpdateServiceState(ctx context.Context, userID int64, reason domain.AutoDisabledReason, detail string, disabledAt *time.Time) error {
+	if cur, ok := r.byID[userID]; ok {
+		cur.ServiceDisabledReason = reason
+		cur.ServiceDisableDetail = detail
+		cur.ServiceDisabledAt = disabledAt
 	}
 	return nil
 }

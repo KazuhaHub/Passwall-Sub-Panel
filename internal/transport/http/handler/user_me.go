@@ -110,9 +110,14 @@ func (h *UserMeHandler) Profile(c *gin.Context) {
 		// admin has set TrafficHistoryDays to 90). Mirrors the admin chart's
 		// rangeOptions filter; 0 means "no retention cap" (chart treats it
 		// as unlimited).
-		"traffic_history_days": settings.TrafficHistoryDays,
-		"enabled":              u.Enabled,
-		"can_change_password":  canChangePassword,
+		"traffic_history_days":    settings.TrafficHistoryDays,
+		"enabled":                 u.Enabled,
+		"account_status":          string(u.AccountStatus()),
+		"service_status":          string(u.ServiceStatus(time.Now())),
+		"service_disabled_reason": string(u.ServiceDisabledReason),
+		"service_disable_detail":  u.ServiceDisableDetail,
+		"service_disabled_at":     u.ServiceDisabledAt,
+		"can_change_password":     canChangePassword,
 		// 2FA self-service: totp_available means the admin has turned on
 		// panel-wide enrollment AND the account has a local password (SSO-only
 		// accounts can't enroll). totp_enabled is this user's current state.

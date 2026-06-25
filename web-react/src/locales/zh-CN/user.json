@@ -14,6 +14,16 @@
     "empty": "暂无可显示的节点",
     "checked_at": "最后检查：{{time}}"
   },
+  "service": {
+    "expired_title": "服务已到期",
+    "expired_body": "账号仍可登录面板，但订阅和代理服务已暂停。",
+    "traffic_title": "流量已用尽",
+    "traffic_body": "本周期流量已达到上限，代理服务已暂停。",
+    "blocked_title": "客户端违规封禁",
+    "blocked_body": "检测到使用了被禁止的客户端，订阅服务已暂停。请更换允许的客户端或联系管理员恢复。",
+    "suspended_title": "服务已暂停",
+    "suspended_body": "管理员已暂停你的订阅和代理服务。"
+  },
   "profile": {
     "title": "我的订阅",
     "usage_section": "我的用量",

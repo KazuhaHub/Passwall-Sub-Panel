@@ -12,6 +12,27 @@
 - **运行时**:迁移完成后 `user_xui_clients` 会被 `DropIfMigrated` **物理删除**;此后
   `ownership_repo` 的查询**静默返回空**(不报错)。
 
+## 状态拆分迁移记录
+
+v4 前已经把「账号是否能登录面板」和「代理/订阅服务是否可用」拆成两层:
+
+- **账号状态**:`enabled` + `auto_disabled_reason` + `disable_detail`,只负责面板登录 /
+  审批 / 删除 / 邮箱验证等账号级状态。
+- **服务状态**:`service_disabled_reason` + `service_disable_detail` +
+  `service_disabled_at`,只负责代理访问、订阅输出和 3X-UI client enable。
+
+本次不做历史禁用账号的自动搬迁:
+
+- 旧数据里已经 `enabled=false` 的账号保持原样,不会在启动时自动改成服务暂停。
+- `service_disabled_*` 列只承接新逻辑之后产生的到期、流量超限、客户端封禁、手动暂停等服务状态。
+- 如需恢复历史账号,由管理员在后台按实际情况手动启用账号或调整服务状态。
+
+后续清理注意:
+
+- 自动封禁客户端只暂停服务,不再禁用账号。
+- 客户端封禁恢复时通过 `ResumeServiceAndSync` 自动清空 `block_violation_count`。
+- 管理员后台应展示和管理服务状态,不能再把「禁用账号」当作所有停用场景的唯一入口。
+
 ## 约定:`MIGRATION(v3→v4)` 标记
 
 每一处**只为过渡期存在、V4 该删/该简化**的代码,都带注释标记:

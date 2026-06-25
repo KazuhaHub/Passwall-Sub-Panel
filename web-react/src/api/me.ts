@@ -73,6 +73,11 @@ export interface MeProfile {
    *  / "last 1 year"). 0 = no cap. */
   traffic_history_days?: number
   enabled: boolean
+  account_status?: string
+  service_status?: string
+  service_disabled_reason?: string
+  service_disable_detail?: string
+  service_disabled_at?: string | null
   can_change_password: boolean
   can_edit_personal_rules: boolean
   /** totp_available: the admin has enabled 2FA panel-wide AND this account has a

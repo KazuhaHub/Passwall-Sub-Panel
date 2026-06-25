@@ -93,8 +93,16 @@ type User struct {
 	Remark             string
 	Enabled            bool
 	AutoDisabledReason AutoDisabledReason
-	// DisableDetail stores additional context for the disable reason (e.g., admin note, blocked client info).
+	// DisableDetail stores additional context for an account-level disable reason
+	// (e.g., an admin note). Proxy/subscription suspensions live in the
+	// ServiceDisabled* fields below so they do not lock users out of the panel.
 	DisableDetail string
+	// ServiceDisabledReason gates subscription rendering and 3X-UI client enable
+	// state without affecting panel login. It is used for states such as traffic
+	// exhausted, blocked client, and admin-paused service.
+	ServiceDisabledReason AutoDisabledReason
+	ServiceDisableDetail  string
+	ServiceDisabledAt     *time.Time
 	// SelfRegistered marks an account created through the public self-service
 	// signup flow (UPN = a user-chosen email). Because that UPN is
 	// attacker-registerable, such a row must NOT be a silent first-time SSO
@@ -175,38 +183,83 @@ func (u *User) EmergencyQuotaExhausted(quotaBytes int64, t time.Time) bool {
 	if quotaBytes <= 0 || u.EmergencyUntil == nil || !t.Before(*u.EmergencyUntil) {
 		return false
 	}
-	if u.AutoDisabledReason != DisabledTrafficExceeded {
+	if u.ServiceDisabledReason != DisabledTrafficExceeded && u.AutoDisabledReason != DisabledTrafficExceeded {
 		return false
 	}
 	return u.LifetimeTotalBytes-u.EmergencyBaselineBytes >= quotaBytes
 }
 
+func (u *User) EmergencyActive(t time.Time) bool {
+	return u != nil && u.EmergencyUntil != nil && u.EmergencyUntil.After(t)
+}
+
+func (u *User) TrafficExceeded() bool {
+	return u != nil && u.TrafficLimitBytes > 0 && u.PeriodUsed() >= u.TrafficLimitBytes
+}
+
+func (u *User) AccountStatus() AccountStatus {
+	if u == nil {
+		return AccountStatusDisabled
+	}
+	if u.Enabled {
+		return AccountStatusActive
+	}
+	switch u.AutoDisabledReason {
+	case DisabledPendingDelete:
+		return AccountStatusPendingDelete
+	case DisabledPendingApproval:
+		return AccountStatusPendingApproval
+	case DisabledPendingEmailVerify:
+		return AccountStatusPendingEmailVerify
+	default:
+		return AccountStatusDisabled
+	}
+}
+
+func (u *User) ServiceStatus(t time.Time) ServiceStatus {
+	if u == nil || !u.Enabled {
+		return ServiceStatusAccountDisabled
+	}
+	switch u.ServiceDisabledReason {
+	case DisabledBlockedClient:
+		return ServiceStatusBlockedClient
+	case DisabledServiceManual:
+		return ServiceStatusManualSuspended
+	}
+	if u.EmergencyActive(t) {
+		return ServiceStatusEmergencyActive
+	}
+	if u.IsExpired(t) || u.ServiceDisabledReason == DisabledExpired {
+		return ServiceStatusExpired
+	}
+	if u.ServiceDisabledReason == DisabledTrafficExceeded || u.TrafficExceeded() {
+		return ServiceStatusTrafficExceeded
+	}
+	return ServiceStatusActive
+}
+
+func (u *User) ProxyAccessEnabled(t time.Time) bool {
+	st := u.ServiceStatus(t)
+	return st == ServiceStatusActive || st == ServiceStatusEmergencyActive
+}
+
 // EffectiveEnabled is the value the panel should publish to 3X-UI for the
-// `enable` field. Distinct from the raw u.Enabled toggle because expiry
-// gates effective access independently of the admin's enable intent:
+// `enable` field. Distinct from the raw u.Enabled toggle because service-level
+// suspensions and expiry gate proxy access independently of panel login:
 //
 //   - admin disabled                    → false (admin overrides everything)
 //   - permanent user (no ExpireAt)      → u.Enabled
 //   - ExpireAt in future                → u.Enabled
 //   - ExpireAt in past, no emergency    → false (expired + no extension)
 //   - ExpireAt in past, emergency live  → u.Enabled (emergency extends)
+//   - service suspended                 → false (user can still log in)
 //
 // Without this gate, an expired-but-Enabled user would push enable=true,
 // 3X-UI's own cron would re-disable on the past expiry timestamp, and the
 // reconcile loop would keep "fixing" the same enable_mismatch every cycle
 // (see the bug log on the v3.0.0-beta.20 release notes).
 func (u *User) EffectiveEnabled(t time.Time) bool {
-	if u == nil || !u.Enabled {
-		return false
-	}
-	if !u.IsExpired(t) {
-		return true
-	}
-	// Expired — honor emergency-access extension if still live.
-	if u.EmergencyUntil != nil && u.EmergencyUntil.After(t) {
-		return true
-	}
-	return false
+	return u.ProxyAccessEnabled(t)
 }
 
 // HasLocalPassword reports whether the user can authenticate through the
@@ -261,8 +314,8 @@ type Group struct {
 //   - All=true matches every node (Mode + Tags ignored)
 //   - otherwise Tags is a list of conditions like "region:TW", "tag:reality",
 //     "server:tw-hinet" combined under Mode semantics:
-//       Mode == "" or "all" → AND (every condition must match)
-//       Mode == "any"       → OR  (at least one condition must match)
+//     Mode == "" or "all" → AND (every condition must match)
+//     Mode == "any"       → OR  (at least one condition must match)
 type TagFilter struct {
 	All  bool
 	Tags []string

@@ -65,6 +65,10 @@ export async function setEnabled(id: number, enabled: boolean, reason?: string) 
   await client.post(`/admin/users/${id}/set-enabled`, { enabled, reason })
 }
 
+export async function setServiceStatus(id: number, enabled: boolean, reason?: string, detail?: string) {
+  await client.post(`/admin/users/${id}/set-service-status`, { enabled, reason, detail })
+}
+
 export async function resetCredentials(id: number) {
   const { data } = await client.post<{ sub_token: string; sub_url: string; uuid: string }>(
     `/admin/users/${id}/reset-credentials`,

@@ -21,6 +21,8 @@ import (
 // Defined here to keep the import direction one-way.
 type UserDisabler interface {
 	SetEnabledAndSync(ctx context.Context, userID int64, enabled bool, reason domain.AutoDisabledReason, detail string) error
+	SetServiceSuspendedAndSync(ctx context.Context, userID int64, reason domain.AutoDisabledReason, detail string) error
+	ResumeServiceAndSync(ctx context.Context, userID int64) error
 }
 
 // UserConfigPusher refreshes a user's full 3X-UI client config (enable +
@@ -1211,7 +1213,7 @@ func (s *Service) recordAndEnforceWith(ctx context.Context, u *domain.User, tota
 		if sink != nil {
 			sink.rolledOver[u.ID] = true
 		}
-		clearedEmergency := u.AutoDisabledReason == domain.DisabledTrafficExceeded
+		clearedEmergency := u.ServiceDisabledReason == domain.DisabledTrafficExceeded || u.AutoDisabledReason == domain.DisabledTrafficExceeded
 		if clearedEmergency {
 			u.EmergencyUntil = nil
 			u.EmergencyBaselineBytes = 0
@@ -1265,13 +1267,17 @@ func (s *Service) recordAndEnforceWith(ctx context.Context, u *domain.User, tota
 		} else {
 			persistRollover()
 		}
-		// If they were traffic-disabled (including an active emergency access
-		// window), the new period gives them quota back.
-		if u.AutoDisabledReason == domain.DisabledTrafficExceeded {
-			if err := s.disabler.SetEnabledAndSync(ctx, u.ID, true, domain.DisabledNone, ""); err != nil {
-				log.Warn("traffic re-enable", "user_id", u.ID, "err", err)
+		// If their service was traffic-suspended (including an active emergency
+		// access window), the new period gives them quota back without touching
+		// panel login state.
+		if u.ServiceDisabledReason == domain.DisabledTrafficExceeded || u.AutoDisabledReason == domain.DisabledTrafficExceeded {
+			if err := s.disabler.ResumeServiceAndSync(ctx, u.ID); err != nil {
+				log.Warn("traffic service resume", "user_id", u.ID, "err", err)
 			} else {
 				u.Enabled = true
+				u.ServiceDisabledReason = domain.DisabledNone
+				u.ServiceDisableDetail = ""
+				u.ServiceDisabledAt = nil
 				u.AutoDisabledReason = domain.DisabledNone
 				u.DisableDetail = ""
 				// Tell the user their quota reset and access is back (async).
@@ -1282,6 +1288,7 @@ func (s *Service) recordAndEnforceWith(ctx context.Context, u *domain.User, tota
 
 	// Enforce limit
 	emergencyActive := u.EmergencyUntil != nil && now.Before(*u.EmergencyUntil)
+	clearedEmergencyThisCycle := false
 	// If the admin has set a per-window emergency-access quota, end the window
 	// early once the user crosses it. Falling through to the normal limit
 	// check below will then auto-disable them (they're still over their period
@@ -1320,6 +1327,7 @@ func (s *Service) recordAndEnforceWith(ctx context.Context, u *domain.User, tota
 				clearEmergency()
 			}
 			emergencyActive = false
+			clearedEmergencyThisCycle = true
 		}
 	}
 	if u.TrafficLimitBytes <= 0 || !u.Enabled || !wroteSnap || emergencyActive {
@@ -1330,15 +1338,20 @@ func (s *Service) recordAndEnforceWith(ctx context.Context, u *domain.User, tota
 		return err
 	}
 	if periodUsed >= u.TrafficLimitBytes {
-		if err := s.disabler.SetEnabledAndSync(ctx, u.ID, false, domain.DisabledTrafficExceeded, "traffic limit exceeded"); err != nil {
-			return fmt.Errorf("auto-disable: %w", err)
+		if u.ServiceDisabledReason == domain.DisabledTrafficExceeded && !clearedEmergencyThisCycle {
+			return nil
 		}
-		log.Info("auto-disabled user (traffic exceeded)",
+		if err := s.disabler.SetServiceSuspendedAndSync(ctx, u.ID, domain.DisabledTrafficExceeded, "traffic limit exceeded"); err != nil {
+			return fmt.Errorf("auto-suspend service: %w", err)
+		}
+		u.ServiceDisabledReason = domain.DisabledTrafficExceeded
+		u.ServiceDisableDetail = "traffic limit exceeded"
+		log.Info("auto-suspended user service (traffic exceeded)",
 			"user_id", u.ID, "period_used", periodUsed, "limit", u.TrafficLimitBytes)
 		// Notify the user (async — SMTP must not stall the poll). This is the
-		// only path that produces the traffic_exhausted email; SetEnabledAndSync
+		// only path that produces the traffic_exhausted email; service suspension
 		// itself never mails. Edge-triggered: the next poll short-circuits on
-		// !u.Enabled, so this fires once per disable, not every cycle.
+		// the service-disabled reason, so this fires once per suspension.
 		s.notifyDisabled(u.ID, string(domain.DisabledTrafficExceeded), "traffic limit exceeded")
 		return nil
 	}
@@ -2338,11 +2351,11 @@ func (s *Service) SetPeriodUsage(ctx context.Context, userID int64, usedBytes in
 	if u.TrafficLimitBytes <= 0 {
 		return nil
 	}
-	if usedBytes >= u.TrafficLimitBytes && u.Enabled {
-		return s.disabler.SetEnabledAndSync(ctx, u.ID, false, domain.DisabledTrafficExceeded, "traffic limit exceeded")
+	if usedBytes >= u.TrafficLimitBytes && u.Enabled && u.ServiceDisabledReason != domain.DisabledTrafficExceeded {
+		return s.disabler.SetServiceSuspendedAndSync(ctx, u.ID, domain.DisabledTrafficExceeded, "traffic limit exceeded")
 	}
-	if usedBytes < u.TrafficLimitBytes && !u.Enabled && u.AutoDisabledReason == domain.DisabledTrafficExceeded {
-		return s.disabler.SetEnabledAndSync(ctx, u.ID, true, domain.DisabledNone, "")
+	if usedBytes < u.TrafficLimitBytes && u.ServiceDisabledReason == domain.DisabledTrafficExceeded {
+		return s.disabler.ResumeServiceAndSync(ctx, u.ID)
 	}
 	return nil
 }

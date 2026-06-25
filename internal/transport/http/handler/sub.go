@@ -107,7 +107,7 @@ func (h *SubHandler) Get(c *gin.Context) {
 	// "subscription unavailable" generic enough that they'll contact
 	// admin (who has the audit / users page for the real cause).
 	switch {
-	case u.EmergencyUntil != nil && now.After(*u.EmergencyUntil) && u.AutoDisabledReason == domain.DisabledTrafficExceeded:
+	case u.EmergencyUntil != nil && now.After(*u.EmergencyUntil) && u.ServiceDisabledReason == domain.DisabledTrafficExceeded:
 		log.Info("sub: blocked", "user_id", u.ID, "reason", "emergency_expired")
 		c.String(http.StatusNotFound, "")
 		return
@@ -125,8 +125,9 @@ func (h *SubHandler) Get(c *gin.Context) {
 			"auto_reason", string(u.AutoDisabledReason))
 		c.String(http.StatusNotFound, "")
 		return
-	case u.IsExpired(now):
-		log.Info("sub: blocked", "user_id", u.ID, "reason", "expired")
+	case !u.ProxyAccessEnabled(now):
+		log.Info("sub: blocked", "user_id", u.ID, "reason", string(u.ServiceStatus(now)),
+			"service_reason", string(u.ServiceDisabledReason))
 		c.String(http.StatusNotFound, "")
 		return
 	}
@@ -157,8 +158,8 @@ func (h *SubHandler) Get(c *gin.Context) {
 		// Auto-disable when this newly-counted violation crosses the threshold.
 		if advanced && eff.SubBlockAutoDisable && count >= eff.SubBlockAutoDisableCount {
 			disableDetail := fmt.Sprintf("auto-disabled after %d violations, last client: %s", count, detected.ClientName)
-			if err := h.user.SetEnabledAndSync(c.Request.Context(), u.ID, false, domain.DisabledBlockedClient, disableDetail); err != nil {
-				log.Warn("failed to auto-disable user", "user_id", u.ID, "err", err)
+			if err := h.user.SetServiceSuspendedAndSync(c.Request.Context(), u.ID, domain.DisabledBlockedClient, disableDetail); err != nil {
+				log.Warn("failed to auto-suspend user service", "user_id", u.ID, "err", err)
 			}
 
 			// Send account disabled notification email (async).
@@ -172,11 +173,10 @@ func (h *SubHandler) Get(c *gin.Context) {
 				})
 			}
 
-			// Same 404-collapse as the other "account exists but suspended"
-			// branches above — once auto-disable fires the account is in the
-			// same logical state as admin-disabled, so the response shouldn't
-			// leak that distinction either.
-			log.Info("sub: blocked", "user_id", u.ID, "reason", "auto_disabled_blocked_client", "violations", count)
+			// Same 404-collapse as the other "account exists but service
+			// unavailable" branches above — once auto-suspend fires, the
+			// response shouldn't leak that distinction either.
+			log.Info("sub: blocked", "user_id", u.ID, "reason", "auto_suspended_blocked_client", "violations", count)
 			c.String(http.StatusNotFound, "")
 			return
 		}

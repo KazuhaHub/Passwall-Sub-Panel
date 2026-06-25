@@ -132,6 +132,129 @@ func TestUpdateTrafficStatePreservesEmergency(t *testing.T) {
 
 func timeNowUTCPlusHour() time.Time { return time.Now().UTC().Add(time.Hour) }
 
+func TestEnsureSchemaDoesNotMigrateLegacyDisabledUsers(t *testing.T) {
+	db, err := openTestDB(t)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	if err := EnsureSchema(db); err != nil {
+		t.Fatalf("schema: %v", err)
+	}
+	t.Cleanup(func() {
+		if sqlDB, _ := db.DB(); sqlDB != nil {
+			_ = sqlDB.Close()
+		}
+	})
+	repo := NewRepos(db).User
+	ctx := context.Background()
+
+	u := &domain.User{
+		UPN:                "legacy-blocked@example.test",
+		PasswordHash:       "hash",
+		Role:               domain.RoleUser,
+		SubToken:           "sub-legacy-blocked",
+		UUID:               "00000000-0000-0000-0000-0000000000bb",
+		GroupID:            1,
+		TrafficResetPeriod: domain.ResetMonthly,
+		Enabled:            false,
+		AutoDisabledReason: domain.DisabledBlockedClient,
+		DisableDetail:      "legacy client block",
+	}
+	if err := repo.Create(ctx, u); err != nil {
+		t.Fatalf("create legacy disabled user: %v", err)
+	}
+
+	// Re-running schema cleanup must not reinterpret already-disabled accounts
+	// as service-only suspensions. Admins decide how to restore historical rows.
+	if err := EnsureSchema(db); err != nil {
+		t.Fatalf("schema rerun: %v", err)
+	}
+	got, err := repo.GetByID(ctx, u.ID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.Enabled {
+		t.Fatal("legacy disabled account was unexpectedly re-enabled")
+	}
+	if got.AutoDisabledReason != domain.DisabledBlockedClient || got.DisableDetail != "legacy client block" {
+		t.Fatalf("legacy account disable state changed: reason=%q detail=%q",
+			got.AutoDisabledReason, got.DisableDetail)
+	}
+	if got.ServiceDisabledReason != domain.DisabledNone || got.ServiceDisableDetail != "" || got.ServiceDisabledAt != nil {
+		t.Fatalf("legacy account was unexpectedly migrated to service state: reason=%q detail=%q at=%v",
+			got.ServiceDisabledReason, got.ServiceDisableDetail, got.ServiceDisabledAt)
+	}
+}
+
+func TestUpdateServiceStateDoesNotTouchAccountState(t *testing.T) {
+	db, err := openTestDB(t)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	if err := EnsureSchema(db); err != nil {
+		t.Fatalf("schema: %v", err)
+	}
+	t.Cleanup(func() {
+		if sqlDB, _ := db.DB(); sqlDB != nil {
+			_ = sqlDB.Close()
+		}
+	})
+	repo := NewRepos(db).User
+	ctx := context.Background()
+
+	u := &domain.User{
+		UPN:                "service-state@example.test",
+		PasswordHash:       "hash",
+		Role:               domain.RoleUser,
+		SubToken:           "sub-service-state",
+		UUID:               "00000000-0000-0000-0000-0000000000cc",
+		GroupID:            1,
+		TrafficResetPeriod: domain.ResetMonthly,
+		Enabled:            false,
+		AutoDisabledReason: domain.DisabledManual,
+		DisableDetail:      "account note",
+	}
+	if err := repo.Create(ctx, u); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	at := time.Date(2026, 6, 25, 10, 30, 0, 0, time.UTC)
+	if err := repo.UpdateServiceState(ctx, u.ID, domain.DisabledServiceManual, "service note", &at); err != nil {
+		t.Fatalf("UpdateServiceState: %v", err)
+	}
+	got, err := repo.GetByID(ctx, u.ID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.Enabled || got.AutoDisabledReason != domain.DisabledManual || got.DisableDetail != "account note" {
+		t.Fatalf("account state changed: enabled=%v reason=%q detail=%q",
+			got.Enabled, got.AutoDisabledReason, got.DisableDetail)
+	}
+	if got.ServiceDisabledReason != domain.DisabledServiceManual || got.ServiceDisableDetail != "service note" {
+		t.Fatalf("service state not persisted: reason=%q detail=%q",
+			got.ServiceDisabledReason, got.ServiceDisableDetail)
+	}
+	if got.ServiceDisabledAt == nil || !got.ServiceDisabledAt.Equal(at) {
+		t.Fatalf("service_disabled_at = %v, want %v", got.ServiceDisabledAt, at)
+	}
+
+	if err := repo.UpdateServiceState(ctx, u.ID, domain.DisabledNone, "", nil); err != nil {
+		t.Fatalf("clear service state: %v", err)
+	}
+	got, err = repo.GetByID(ctx, u.ID)
+	if err != nil {
+		t.Fatalf("get after clear: %v", err)
+	}
+	if got.ServiceDisabledReason != domain.DisabledNone || got.ServiceDisableDetail != "" || got.ServiceDisabledAt != nil {
+		t.Fatalf("service state not cleared: reason=%q detail=%q at=%v",
+			got.ServiceDisabledReason, got.ServiceDisableDetail, got.ServiceDisabledAt)
+	}
+	if got.Enabled || got.AutoDisabledReason != domain.DisabledManual || got.DisableDetail != "account note" {
+		t.Fatalf("clearing service state changed account state: enabled=%v reason=%q detail=%q",
+			got.Enabled, got.AutoDisabledReason, got.DisableDetail)
+	}
+}
+
 // TestBatchUpdateTrafficState pins three properties of the v3.5.0-beta.9
 // batched write that PollOnce now uses end-of-cycle:
 //  1. happy path: every row's traffic-owned columns land

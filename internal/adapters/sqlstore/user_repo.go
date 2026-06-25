@@ -33,7 +33,7 @@ func (r *userRepo) Create(ctx context.Context, u *domain.User) error {
 // columns aren't omitted the admin's stale snapshot rolls lifetime
 // back, stomps a last-online value the poll just wrote 50ms ago, OR
 // rewinds the blocked-client violation counter to whatever it was
-// when the dialog opened (defeating the auto-disable threshold —
+// when the dialog opened (defeating the auto-suspend threshold —
 // admin "save profile" between a violation increment and the next
 // /sub poll resets the counter to its pre-violation value).
 // The emergency-access columns are ALSO omitted: emergencyMu only serializes
@@ -49,8 +49,8 @@ var pollOwnedColumns = []string{
 	"period_baseline_bytes", "lifetime_baseline_at", "traffic_period_start",
 	// BatchUpdateLastOnline
 	"last_online_at",
-	// UpdateBlockViolation (sub.go blocked-client path)
-	"block_violation_count", "last_block_violation_at", "disable_detail",
+	// AdvanceBlockViolation (sub.go blocked-client path)
+	"block_violation_count", "last_block_violation_at",
 	// GrantEmergencyAccess / ClearEmergencyAccess (emergency subsystem)
 	"emergency_until", "emergency_used_count", "emergency_baseline_bytes",
 	// 2FA — written ONLY via SetTOTP / SetRecoveryCodes / ClearTOTP so a stale
@@ -218,7 +218,6 @@ func (r *userRepo) AdvanceBlockViolation(ctx context.Context, userID int64, notB
 		Updates(map[string]any{
 			"block_violation_count":   gorm.Expr("block_violation_count + 1"),
 			"last_block_violation_at": at,
-			"disable_detail":          detail,
 		})
 	if res.Error != nil {
 		return 0, false, res.Error
@@ -235,11 +234,12 @@ func (r *userRepo) AdvanceBlockViolation(ctx context.Context, userID int64, notB
 }
 
 // ClearBlockViolation resets the blocked-client tracking columns when a
-// user is re-enabled. Without this, a user who was auto-disabled at the
+// user's blocked-client service suspension is restored. Without this, a user
+// who was auto-suspended at the
 // SubBlockAutoDisableCount threshold (default 5) keeps their count at
-// 5 across the admin's manual re-enable — the very next /sub fetch
-// with a blocked client increments past the threshold and re-disables
-// instantly, trapping the account in an unrecoverable loop.
+// 5 across the admin's manual service restore — the very next /sub fetch
+// with a blocked client increments past the threshold and re-suspends
+// instantly.
 // Column-scoped because pollOwnedColumns omits these from the regular
 // userRepo.Update path (to protect sub.go's concurrent increment).
 func (r *userRepo) ClearBlockViolation(ctx context.Context, userID int64) error {
@@ -252,7 +252,20 @@ func (r *userRepo) ClearBlockViolation(ctx context.Context, userID int64) error 
 		Updates(map[string]any{
 			"block_violation_count":   0,
 			"last_block_violation_at": nil,
-			"disable_detail":          "",
+		}).Error
+}
+
+func (r *userRepo) UpdateServiceState(ctx context.Context, userID int64, reason domain.AutoDisabledReason, detail string, disabledAt *time.Time) error {
+	if userID == 0 {
+		return fmt.Errorf("UpdateServiceState requires a non-zero user ID")
+	}
+	return r.db.WithContext(ctx).
+		Model(&userRow{}).
+		Where("id = ?", userID).
+		Updates(map[string]any{
+			"service_disabled_reason": string(reason),
+			"service_disable_detail":  detail,
+			"service_disabled_at":     disabledAt,
 		}).Error
 }
 

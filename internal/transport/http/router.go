@@ -339,6 +339,7 @@ func NewRouter(d Deps) *gin.Engine {
 		staffGroup.DELETE("/users/:id/passkeys/:pkid", users.RevokeUserPasskey)
 		staffGroup.POST("/users/:id/unlink-sso", users.UnlinkSSO)
 		staffGroup.POST("/users/:id/set-enabled", users.SetEnabled)
+		staffGroup.POST("/users/:id/set-service-status", users.SetServiceStatus)
 		staffGroup.GET("/users/:id/rules", users.GetRules)
 		staffGroup.PUT("/users/:id/rules", users.PutRules)
 		// v3.9.0 cutover Stage 0: one-shot psp_client backfill (admin-only;

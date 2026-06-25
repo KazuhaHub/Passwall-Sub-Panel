@@ -63,8 +63,11 @@ type userRow struct {
 	Enabled                bool   `gorm:"not null"`
 	AutoDisabledReason     string `gorm:"size:32"`
 	DisableDetail          string `gorm:"type:text"`
-	SelfRegistered         bool   `gorm:"not null;default:false"`
-	BlockViolationCount    int    `gorm:"default:0"`
+	ServiceDisabledReason  string `gorm:"size:32;not null;default:''"`
+	ServiceDisableDetail   string `gorm:"type:text"`
+	ServiceDisabledAt      *time.Time
+	SelfRegistered         bool `gorm:"not null;default:false"`
+	BlockViolationCount    int  `gorm:"default:0"`
 	LastBlockViolationAt   *time.Time
 	EmergencyUsedCount     int
 	EmergencyUntil         *time.Time
@@ -85,8 +88,8 @@ type userRow struct {
 	// tolerates NULL, so it needs no default). All three are written ONLY via the
 	// column-scoped TOTP repo methods and are in pollOwnedColumns, so the generic
 	// Update never touches (or clobbers) them.
-	TOTPSecret    string `gorm:"column:totp_secret;size:255;not null;default:''"`
-	TOTPEnabled   bool   `gorm:"column:totp_enabled;not null;default:false"`
+	TOTPSecret    string      `gorm:"column:totp_secret;size:255;not null;default:''"`
+	TOTPEnabled   bool        `gorm:"column:totp_enabled;not null;default:false"`
 	RecoveryCodes jsonStrings `gorm:"column:recovery_codes"`
 	// NOTE: the per-user require_2fa column was dropped from the model in v3.8.0
 	// (enforcement is now staff-wide ∨ per-group). AutoMigrate does not drop
@@ -133,6 +136,9 @@ func (r *userRow) toDomain() *domain.User {
 		Enabled:                r.Enabled,
 		AutoDisabledReason:     domain.AutoDisabledReason(r.AutoDisabledReason),
 		DisableDetail:          r.DisableDetail,
+		ServiceDisabledReason:  domain.AutoDisabledReason(r.ServiceDisabledReason),
+		ServiceDisableDetail:   r.ServiceDisableDetail,
+		ServiceDisabledAt:      r.ServiceDisabledAt,
 		SelfRegistered:         r.SelfRegistered,
 		TOTPEnabled:            r.TOTPEnabled,
 		BlockViolationCount:    r.BlockViolationCount,
@@ -175,6 +181,9 @@ func userFromDomain(u *domain.User) *userRow {
 		Enabled:                u.Enabled,
 		AutoDisabledReason:     string(u.AutoDisabledReason),
 		DisableDetail:          u.DisableDetail,
+		ServiceDisabledReason:  string(u.ServiceDisabledReason),
+		ServiceDisableDetail:   u.ServiceDisableDetail,
+		ServiceDisabledAt:      u.ServiceDisabledAt,
 		SelfRegistered:         u.SelfRegistered,
 		BlockViolationCount:    u.BlockViolationCount,
 		LastBlockViolationAt:   u.LastBlockViolationAt,
@@ -189,9 +198,9 @@ func userFromDomain(u *domain.User) *userRow {
 }
 
 type groupRow struct {
-	ID        int64  `gorm:"primaryKey;autoIncrement"`
-	Slug      string `gorm:"size:64;uniqueIndex;not null"`
-	Name      string `gorm:"size:128;not null"`
+	ID         int64  `gorm:"primaryKey;autoIncrement"`
+	Slug       string `gorm:"size:64;uniqueIndex;not null"`
+	Name       string `gorm:"size:128;not null"`
 	TagFilter  jsonTagFilter
 	Layout     jsonLayout
 	Remark     string `gorm:"size:255"`
@@ -204,9 +213,9 @@ func (groupRow) TableName() string { return "groups_" }
 
 func (r *groupRow) toDomain() *domain.Group {
 	return &domain.Group{
-		ID:        r.ID,
-		Slug:      r.Slug,
-		Name:      r.Name,
+		ID:         r.ID,
+		Slug:       r.Slug,
+		Name:       r.Name,
 		TagFilter:  domain.TagFilter(r.TagFilter),
 		Layout:     domain.Layout(r.Layout),
 		Remark:     r.Remark,
@@ -217,9 +226,9 @@ func (r *groupRow) toDomain() *domain.Group {
 
 func groupFromDomain(g *domain.Group) *groupRow {
 	return &groupRow{
-		ID:        g.ID,
-		Slug:      g.Slug,
-		Name:      g.Name,
+		ID:         g.ID,
+		Slug:       g.Slug,
+		Name:       g.Name,
 		TagFilter:  jsonTagFilter(g.TagFilter),
 		Layout:     jsonLayout(g.Layout),
 		Remark:     g.Remark,

@@ -8,6 +8,8 @@
  *  assistant without handing over break-glass keys. */
 export type Role = 'admin' | 'operator' | 'user'
 export type ResetPeriod = 'never' | 'monthly' | 'quarterly' | 'yearly'
+export type AccountStatus = 'active' | 'disabled' | 'pending_delete' | 'pending_approval' | 'pending_email_verify' | string
+export type ServiceStatus = 'active' | 'account_disabled' | 'expired' | 'traffic_exceeded' | 'blocked_client' | 'manual_suspended' | 'emergency_active' | string
 
 export interface User {
   id: number
@@ -40,6 +42,12 @@ export interface User {
   remark?: string
   enabled: boolean
   auto_disabled_reason?: string
+  account_status?: AccountStatus
+  service_status?: ServiceStatus
+  service_disabled_reason?: string
+  service_disable_detail?: string
+  service_disabled_at?: string | null
+  block_violation_count?: number
   emergency_used_count: number
   /** RFC3339 timestamp; emergency window is active iff > now. */
   emergency_until?: string | null

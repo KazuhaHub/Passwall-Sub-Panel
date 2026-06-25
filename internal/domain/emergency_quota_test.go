@@ -24,6 +24,7 @@ func TestUserEmergencyQuotaExhausted(t *testing.T) {
 		want  bool
 	}{
 		{"active, used == quota", &User{AutoDisabledReason: DisabledTrafficExceeded, EmergencyUntil: &future, LifetimeTotalBytes: 3 * gb, EmergencyBaselineBytes: 2 * gb}, quota, true},
+		{"active service reason, used == quota", &User{ServiceDisabledReason: DisabledTrafficExceeded, EmergencyUntil: &future, LifetimeTotalBytes: 3 * gb, EmergencyBaselineBytes: 2 * gb}, quota, true},
 		{"active, used > quota", &User{AutoDisabledReason: DisabledTrafficExceeded, EmergencyUntil: &future, LifetimeTotalBytes: 5 * gb, EmergencyBaselineBytes: 2 * gb}, quota, true},
 		{"active, used < quota", &User{AutoDisabledReason: DisabledTrafficExceeded, EmergencyUntil: &future, LifetimeTotalBytes: 2*gb + 500, EmergencyBaselineBytes: 2 * gb}, quota, false},
 		{"no cap (quota<=0)", &User{AutoDisabledReason: DisabledTrafficExceeded, EmergencyUntil: &future, LifetimeTotalBytes: 9 * gb, EmergencyBaselineBytes: 0}, 0, false},

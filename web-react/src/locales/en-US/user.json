@@ -14,6 +14,16 @@
     "empty": "No nodes to show",
     "checked_at": "Last checked: {{time}}"
   },
+  "service": {
+    "expired_title": "Service expired",
+    "expired_body": "You can still sign in to the panel, but subscription and proxy service are paused.",
+    "traffic_title": "Traffic exhausted",
+    "traffic_body": "This period's traffic limit has been reached, so proxy service is paused.",
+    "blocked_title": "Client blocked",
+    "blocked_body": "A blocked client was detected, so subscription service is paused. Switch to an allowed client or contact an administrator to restore service.",
+    "suspended_title": "Service suspended",
+    "suspended_body": "An administrator has paused your subscription and proxy service."
+  },
   "profile": {
     "title": "My subscription",
     "usage_section": "My usage",

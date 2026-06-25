@@ -133,7 +133,7 @@ type UserRepo interface {
 	UpdateTrafficState(ctx context.Context, u *domain.User) error
 	// AdvanceBlockViolation atomically advances the blocked-client violation
 	// count in ONE gated UPDATE: it increments block_violation_count and
-	// stamps last_block_violation_at / disable_detail only when the row's
+	// stamps last_block_violation_at only when the row's
 	// last_block_violation_at is null or older than notBefore (the dedup
 	// window). Returns the resulting count and advanced=true iff a row was
 	// updated. Putting the dedup window inside the WHERE makes concurrent /sub
@@ -143,11 +143,14 @@ type UserRepo interface {
 	// write path, and concurrent admin edits must not be clobbered).
 	AdvanceBlockViolation(ctx context.Context, userID int64, notBefore, at time.Time, detail string) (count int, advanced bool, err error)
 	// ClearBlockViolation resets the blocked-client tracking columns
-	// (count, last-at, disable-detail) — called when admin re-enables
-	// a user, to prevent the auto-disable threshold from re-triggering
+	// (count, last-at) — called when admin restores a blocked-client service
+	// suspension, to prevent the auto-suspend threshold from re-triggering
 	// instantly on the next /sub fetch (the count would otherwise still
-	// be at the threshold value when re-enabled).
+	// be at the threshold value when restored).
 	ClearBlockViolation(ctx context.Context, userID int64) error
+	// UpdateServiceState writes the service-level suspension fields without
+	// touching account login state. reason="" means service is active.
+	UpdateServiceState(ctx context.Context, userID int64, reason domain.AutoDisabledReason, detail string, disabledAt *time.Time) error
 	// BatchUpdateTrafficState runs N UpdateTrafficState writes in one
 	// transaction. The traffic poll calls it ONCE at end-of-cycle instead
 	// of issuing N inline UPDATEs while it walks the user list. On SQLite
@@ -893,10 +896,10 @@ type UISettings struct {
 	// RegistrationEmailDomains is a comma-separated allow-list of email domains
 	// (e.g. "example.com, corp.org"). Empty = any domain. Server-side only —
 	// never exposed to the public methods endpoint.
-	RegistrationEmailDomains  string  `json:"registration_email_domains"`
+	RegistrationEmailDomains   string `json:"registration_email_domains"`
 	RegistrationDefaultGroupID int64  `json:"registration_default_group_id"`
 	// RegistrationDelivery picks the email-verify shape: "link" or "otp".
-	RegistrationDelivery       string  `json:"registration_delivery"`
+	RegistrationDelivery string `json:"registration_delivery"`
 	// Quota/expiry a registrant inherits (Group has none). 0 = unlimited / no expiry.
 	RegistrationDefaultTrafficGB  float64 `json:"registration_default_traffic_gb"`
 	RegistrationDefaultExpireDays int     `json:"registration_default_expire_days"`
@@ -1338,29 +1341,29 @@ type OIDCConfigRepo interface {
 
 // Repos aggregates all repository ports for dependency injection.
 type Repos struct {
-	User        UserRepo
-	Group       GroupRepo
-	Node        NodeRepo
-	Separator   SeparatorRepo
-	Ownership   OwnershipRepo
-	PSPClient   PSPClientRepo
-	Traffic     TrafficRepo
-	NodeTraffic NodeTrafficRepo
-	Audit       AuditRepo
-	AuthEvent   AuthEventRepo
-	AuthToken   AuthTokenRepo
-	WebAuthn    WebAuthnCredentialRepo
-	SubLog      SubLogRepo
-	SyncTask    SyncTaskRepo
-	RuleSet     RuleSetRepo
-	Template    TemplateRepo
-	XUIPanel      XUIPanelRepo
+	User           UserRepo
+	Group          GroupRepo
+	Node           NodeRepo
+	Separator      SeparatorRepo
+	Ownership      OwnershipRepo
+	PSPClient      PSPClientRepo
+	Traffic        TrafficRepo
+	NodeTraffic    NodeTrafficRepo
+	Audit          AuditRepo
+	AuthEvent      AuthEventRepo
+	AuthToken      AuthTokenRepo
+	WebAuthn       WebAuthnCredentialRepo
+	SubLog         SubLogRepo
+	SyncTask       SyncTaskRepo
+	RuleSet        RuleSetRepo
+	Template       TemplateRepo
+	XUIPanel       XUIPanelRepo
 	Settings       SettingsRepo
 	ScopeSettings  ScopeSettingsRepo
 	ScopedSettings ScopedSettings
 	Mail           MailRepo
-	SAMLConfig  SAMLConfigRepo
-	OIDCConfig  OIDCConfigRepo
+	SAMLConfig     SAMLConfigRepo
+	OIDCConfig     OIDCConfigRepo
 
 	Certificate   CertificateRepo
 	DNSCredential DNSCredentialRepo

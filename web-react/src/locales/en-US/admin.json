@@ -1070,6 +1070,8 @@
       "period_used_gb": "Period used (GB)",
       "account_enabled": "Account status",
       "account_self_locked": "You cannot disable your own account",
+      "service_status": "Service status",
+      "block_violations": "Violations: {{count}}",
       "emergency_used_count": "Emergency access used {{count}} time(s)",
       "emergency_window_until": "Active until {{time}} ({{hours}}h remaining)",
       "emergency_window_used_with_quota": "Window used {{used}} / {{quota}} GB",
@@ -1132,8 +1134,11 @@
       "traffic_exhausted": "Traffic exhausted",
       "blocked": "Blocked",
       "pending_approval": "Pending approval",
+      "pending_email_verify": "Email pending",
       "pending_delete": "Pending delete",
       "manual_disabled": "Manually disabled",
+      "service_suspended": "Service suspended",
+      "account_disabled": "Account disabled",
       "emergency_active": "Emergency active"
     },
     "action": {
@@ -1169,6 +1174,8 @@
       "renew_permanent_skip": "Permanent accounts don't need quick renewal; edit the user to set an expiry first.",
       "copied": "Copied",
       "sso_unlinked": "SSO binding cleared",
+      "service_resumed": "Service resumed",
+      "service_suspended": "Service suspended",
       "saved": "Saved"
     },
     "confirm": {
@@ -1195,6 +1202,8 @@
       "reset_2fa": "Reset authenticator app (TOTP)",
       "unlink_sso": "Unlink SSO binding",
       "passkeys": "Manage passkeys",
+      "resume_service": "Resume service",
+      "suspend_service": "Suspend service",
       "account_security": "Account security"
     },
     "security": {

@@ -1070,6 +1070,8 @@
       "period_used_gb": "本周期已用 (GB)",
       "account_enabled": "账户状态",
       "account_self_locked": "不能停用自己的账户",
+      "service_status": "服务状态",
+      "block_violations": "违规次数：{{count}}",
       "emergency_used_count": "紧急访问已用 {{count}} 次",
       "emergency_window_until": "生效至 {{time}}（剩余 {{hours}} 小时）",
       "emergency_window_used_with_quota": "本窗口已用 {{used}} / {{quota}} GB",
@@ -1132,8 +1134,11 @@
       "traffic_exhausted": "流量已用尽",
       "blocked": "违规停用",
       "pending_approval": "待审核",
+      "pending_email_verify": "邮箱待验证",
       "pending_delete": "待删除",
       "manual_disabled": "管理员停用",
+      "service_suspended": "服务暂停",
+      "account_disabled": "账号已停用",
       "emergency_active": "紧急访问中"
     },
     "action": {
@@ -1169,6 +1174,8 @@
       "renew_permanent_skip": "永久账号无需快捷续期；如需改成限时账号请进入编辑设置到期时间",
       "copied": "已复制",
       "sso_unlinked": "已解除 SSO 绑定",
+      "service_resumed": "服务已恢复",
+      "service_suspended": "服务已暂停",
       "saved": "已保存"
     },
     "confirm": {
@@ -1195,6 +1202,8 @@
       "reset_2fa": "重置验证器 App（TOTP）",
       "unlink_sso": "解除 SSO 绑定",
       "passkeys": "管理通行密钥",
+      "resume_service": "恢复服务",
+      "suspend_service": "暂停服务",
       "account_security": "账号安全"
     },
     "security": {

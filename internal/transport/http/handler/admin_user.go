@@ -125,15 +125,21 @@ type userDTO struct {
 	TrafficLimitBytes int64  `json:"traffic_limit_bytes"`
 	// Lifetime counters (never reset by period rolls) — surfaced read-only in
 	// the admin edit dialog's detail block.
-	LifetimeUpBytes    int64                     `json:"lifetime_up_bytes"`
-	LifetimeDownBytes  int64                     `json:"lifetime_down_bytes"`
-	LifetimeTotalBytes int64                     `json:"lifetime_total_bytes"`
-	TrafficResetPeriod domain.ResetPeriod        `json:"traffic_reset_period"`
-	Remark             string                    `json:"remark,omitempty"`
-	Enabled            bool                      `json:"enabled"`
-	AutoDisabledReason domain.AutoDisabledReason `json:"auto_disabled_reason,omitempty"`
-	EmergencyUsedCount int                       `json:"emergency_used_count"`
-	EmergencyUntil     *time.Time                `json:"emergency_until,omitempty"`
+	LifetimeUpBytes       int64                     `json:"lifetime_up_bytes"`
+	LifetimeDownBytes     int64                     `json:"lifetime_down_bytes"`
+	LifetimeTotalBytes    int64                     `json:"lifetime_total_bytes"`
+	TrafficResetPeriod    domain.ResetPeriod        `json:"traffic_reset_period"`
+	Remark                string                    `json:"remark,omitempty"`
+	Enabled               bool                      `json:"enabled"`
+	AutoDisabledReason    domain.AutoDisabledReason `json:"auto_disabled_reason,omitempty"`
+	AccountStatus         domain.AccountStatus      `json:"account_status"`
+	ServiceStatus         domain.ServiceStatus      `json:"service_status"`
+	ServiceDisabledReason domain.AutoDisabledReason `json:"service_disabled_reason,omitempty"`
+	ServiceDisableDetail  string                    `json:"service_disable_detail,omitempty"`
+	ServiceDisabledAt     *time.Time                `json:"service_disabled_at,omitempty"`
+	BlockViolationCount   int                       `json:"block_violation_count"`
+	EmergencyUsedCount    int                       `json:"emergency_used_count"`
+	EmergencyUntil        *time.Time                `json:"emergency_until,omitempty"`
 	// EmergencyUsedBytes is how much traffic the user has consumed since the
 	// active window opened (lifetime - baseline). Zero when no window is
 	// active. Exposed so the admin's edit dialog can show "已用 X / Y GB"
@@ -478,6 +484,12 @@ type setEnabledRequest struct {
 	Reason  string `json:"reason,omitempty"`
 }
 
+type setServiceStatusRequest struct {
+	Enabled bool   `json:"enabled"`
+	Reason  string `json:"reason,omitempty"`
+	Detail  string `json:"detail,omitempty"`
+}
+
 func (h *AdminUserHandler) SetEnabled(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
@@ -532,6 +544,47 @@ func (h *AdminUserHandler) SetEnabled(c *gin.Context) {
 		})
 	}
 
+	if h.user.HasPendingSync(c.Request.Context(), id) {
+		c.Header("X-Sync-Pending", "1")
+	}
+	c.Status(http.StatusNoContent)
+}
+
+func (h *AdminUserHandler) SetServiceStatus(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid id"})
+		return
+	}
+	if !h.ensureOperatorAllowed(c, id) {
+		return
+	}
+	var req setServiceStatusRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if req.Enabled {
+		if err := h.user.ResumeServiceAndSync(c.Request.Context(), id); err != nil {
+			respondError(c, err)
+			return
+		}
+	} else {
+		reason := domain.AutoDisabledReason(strings.TrimSpace(req.Reason))
+		if reason == "" {
+			reason = domain.DisabledServiceManual
+		}
+		switch reason {
+		case domain.DisabledServiceManual, domain.DisabledBlockedClient, domain.DisabledTrafficExceeded, domain.DisabledExpired:
+		default:
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid service status reason"})
+			return
+		}
+		if err := h.user.SetServiceSuspendedAndSync(c.Request.Context(), id, reason, strings.TrimSpace(req.Detail)); err != nil {
+			respondError(c, err)
+			return
+		}
+	}
 	if h.user.HasPendingSync(c.Request.Context(), id) {
 		c.Header("X-Sync-Pending", "1")
 	}
@@ -806,33 +859,39 @@ func (h *AdminUserHandler) toDTOWith(u *domain.User, st ports.UISettings, loc *t
 		subURL = ""
 	}
 	return userDTO{
-		ID:                  u.ID,
-		DisplayName:         u.DisplayName,
-		UPN:                 u.UPN,
-		Email:               u.Email,
-		SSOProvider:         u.SSOProvider,
-		SSOSubject:          u.SSOSubject,
-		Role:                u.Role,
-		GroupID:             u.GroupID,
-		UUID:                uuid,
-		SubURL:              subURL,
-		ExpireAt:            u.ExpireAt,
-		ExpireDate:          expireDate,
-		TrafficLimitBytes:   u.TrafficLimitBytes,
-		LifetimeUpBytes:     u.LifetimeUpBytes,
-		LifetimeDownBytes:   u.LifetimeDownBytes,
-		LifetimeTotalBytes:  u.LifetimeTotalBytes,
-		TrafficResetPeriod:  u.TrafficResetPeriod,
-		Remark:              u.Remark,
-		Enabled:             u.Enabled,
-		AutoDisabledReason:  u.AutoDisabledReason,
-		EmergencyUsedCount:  u.EmergencyUsedCount,
-		EmergencyUntil:      u.EmergencyUntil,
-		EmergencyUsedBytes:  usedBytes,
-		EmergencyQuotaBytes: quotaBytes,
-		CreatedAt:           u.CreatedAt,
-		LastOnlineAt:        u.LastOnlineAt,
-		TOTPEnabled:         u.TOTPEnabled,
+		ID:                    u.ID,
+		DisplayName:           u.DisplayName,
+		UPN:                   u.UPN,
+		Email:                 u.Email,
+		SSOProvider:           u.SSOProvider,
+		SSOSubject:            u.SSOSubject,
+		Role:                  u.Role,
+		GroupID:               u.GroupID,
+		UUID:                  uuid,
+		SubURL:                subURL,
+		ExpireAt:              u.ExpireAt,
+		ExpireDate:            expireDate,
+		TrafficLimitBytes:     u.TrafficLimitBytes,
+		LifetimeUpBytes:       u.LifetimeUpBytes,
+		LifetimeDownBytes:     u.LifetimeDownBytes,
+		LifetimeTotalBytes:    u.LifetimeTotalBytes,
+		TrafficResetPeriod:    u.TrafficResetPeriod,
+		Remark:                u.Remark,
+		Enabled:               u.Enabled,
+		AutoDisabledReason:    u.AutoDisabledReason,
+		AccountStatus:         u.AccountStatus(),
+		ServiceStatus:         u.ServiceStatus(time.Now()),
+		ServiceDisabledReason: u.ServiceDisabledReason,
+		ServiceDisableDetail:  u.ServiceDisableDetail,
+		ServiceDisabledAt:     u.ServiceDisabledAt,
+		BlockViolationCount:   u.BlockViolationCount,
+		EmergencyUsedCount:    u.EmergencyUsedCount,
+		EmergencyUntil:        u.EmergencyUntil,
+		EmergencyUsedBytes:    usedBytes,
+		EmergencyQuotaBytes:   quotaBytes,
+		CreatedAt:             u.CreatedAt,
+		LastOnlineAt:          u.LastOnlineAt,
+		TOTPEnabled:           u.TOTPEnabled,
 	}
 }
 

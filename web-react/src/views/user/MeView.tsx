@@ -503,6 +503,39 @@ export default function MeView() {
     return { bg: md.primaryContainer, fg: md.onPrimaryContainer, Icon: InfoOutlinedIcon }
   }
 
+  function serviceNotice() {
+    const p = profile
+    if (!p) return null
+    switch (p.service_status) {
+      case 'expired':
+        return {
+          title: t('service.expired_title', { defaultValue: '服务已到期' }),
+          body: t('service.expired_body', { defaultValue: '账号仍可登录面板，但订阅和代理服务已暂停。' }),
+          level: 'danger',
+        }
+      case 'traffic_exceeded':
+        return {
+          title: t('service.traffic_title', { defaultValue: '流量已用尽' }),
+          body: t('service.traffic_body', { defaultValue: '本周期流量已达到上限，代理服务已暂停。' }),
+          level: 'warning',
+        }
+      case 'blocked_client':
+        return {
+          title: t('service.blocked_title', { defaultValue: '客户端违规封禁' }),
+          body: p.service_disable_detail || t('service.blocked_body', { defaultValue: '检测到使用了被禁止的客户端，订阅服务已暂停。请更换允许的客户端或联系管理员恢复。' }),
+          level: 'danger',
+        }
+      case 'manual_suspended':
+        return {
+          title: t('service.suspended_title', { defaultValue: '服务已暂停' }),
+          body: p.service_disable_detail || t('service.suspended_body', { defaultValue: '管理员已暂停你的订阅和代理服务。' }),
+          level: 'danger',
+        }
+      default:
+        return null
+    }
+  }
+
   function buildImportURL(c: { import_url_template: string }): string {
     const subUrl = profile?.sub_url || ''
     // Server resolves SubProfileNameTemplate against the user and
@@ -633,6 +666,25 @@ export default function MeView() {
               {announcement.content && (
                 <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap' }}>{announcement.content}</Typography>
               )}
+            </Box>
+          </Box>
+        )
+      })()}
+
+      {(() => {
+        const notice = serviceNotice()
+        if (!notice) return null
+        const s = announcementStyle(notice.level)
+        return (
+          <Box sx={{
+            p: 2, mb: 2, borderRadius: 2,
+            bgcolor: s.bg, color: s.fg,
+            display: 'flex', gap: 1.5, alignItems: 'flex-start',
+          }}>
+            <s.Icon sx={{ flexShrink: 0, mt: 0.25 }} />
+            <Box sx={{ flex: 1, minWidth: 0 }}>
+              <Typography sx={{ fontWeight: 500, mb: 0.5 }}>{notice.title}</Typography>
+              <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap' }}>{notice.body}</Typography>
             </Box>
           </Box>
         )

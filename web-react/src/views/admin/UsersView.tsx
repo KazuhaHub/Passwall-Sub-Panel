@@ -62,6 +62,7 @@ import {
   resetEmergencyUsage,
   resetPassword,
   setEnabled,
+  setServiceStatus,
   unlinkSSO,
   updateUser,
   updateUserRules,
@@ -197,8 +198,17 @@ function formatRelativeTimeShort(diffMs: number, t: (k: string, opts?: Record<st
   const dd = String(d.getDate()).padStart(2, '0')
   return `${y}-${m}-${dd}`
 }
-function canQuickRenew(u: User) { return !!u.expire_at && u.auto_disabled_reason !== 'pending_delete' }
-function canSelect(u: User) { return u.auto_disabled_reason !== 'pending_delete' }
+function canQuickRenew(u: User) { return !!u.expire_at && u.account_status !== 'pending_delete' && u.auto_disabled_reason !== 'pending_delete' }
+function canSelect(u: User) { return u.account_status !== 'pending_delete' && u.auto_disabled_reason !== 'pending_delete' }
+function canResumeService(u: User) {
+  return ['blocked_client', 'manual_suspended'].includes(u.service_status || '')
+    || ['blocked_client', 'service_manual'].includes(u.service_disabled_reason || '')
+}
+function canSuspendService(u: User) {
+  const accountActive = (u.account_status || (u.enabled ? 'active' : 'disabled')) === 'active'
+  const serviceStatus = u.service_status || (isExpired(u) ? 'expired' : 'active')
+  return accountActive && serviceStatus === 'active'
+}
 function renewedExpireAt(u: User, days: number) {
   const now = Date.now()
   const current = u.expire_at ? new Date(u.expire_at).getTime() : 0
@@ -779,6 +789,20 @@ export default function UsersView() {
     await load()
   }
 
+  async function actionResumeService(u: User) {
+    closeMore()
+    await setServiceStatus(u.id, true)
+    pushSnack(t('admin:users.toast.service_resumed', { defaultValue: '服务已恢复' }), 'success')
+    await load()
+  }
+
+  async function actionSuspendService(u: User) {
+    closeMore()
+    await setServiceStatus(u.id, false, 'service_manual')
+    pushSnack(t('admin:users.toast.service_suspended', { defaultValue: '服务已暂停' }), 'success')
+    await load()
+  }
+
   async function actionReset2FA(u: User) {
     closeMore()
     const ok = await confirm({
@@ -899,51 +923,59 @@ export default function UsersView() {
   }
 
   function statusBadge(u: User) {
-    // Highest priority: active emergency window. The user is technically
-    // enabled but in a special "burning the emergency budget" state — admins
-    // need to spot these to know who's about to be cut off when the window
-    // expires. Uses tertiaryContainer (same green family) since it's
-    // self-service / not punitive.
-    const emergencyActive = u.emergency_until && new Date(u.emergency_until).getTime() > Date.now()
-    if (emergencyActive) {
-      return badge(t('admin:users.status.emergency_active'), md.tertiaryContainer, md.onTertiaryContainer)
-    }
-    if (u.enabled) {
-      // Even when `enabled` is still true the admin needs to see at-a-glance
-      // when the user is actually in a bad state — common cases:
-      //   • Traffic poll hasn't fired yet but periodUsed already >= limit
-      //   • Past ExpireAt but auto-disable hasn't caught up (5min cron)
-      // Surface those here so the table tells the truth without waiting for
-      // the next poll cycle. Limit/expire columns already show the numbers;
-      // this gives the status column matching semantics.
-      const periodUsed = usageMap.get(u.id)?.period_used_bytes ?? 0
-      if (u.traffic_limit_bytes > 0 && periodUsed >= u.traffic_limit_bytes) {
-        return badge(t('admin:users.status.traffic_exhausted'), md.tertiaryContainer, md.onTertiaryContainer)
+    const accountStatus = u.account_status || (u.enabled ? 'active' : u.auto_disabled_reason || 'disabled')
+    if (accountStatus !== 'active') {
+      switch (accountStatus) {
+        case 'pending_approval':
+          return badge(t('admin:users.status.pending_approval'), md.surfaceContainerHighest, md.onSurfaceVariant)
+        case 'pending_delete':
+          return badge(t('admin:users.status.pending_delete'), md.surfaceContainerHighest, md.onSurfaceVariant)
+        case 'pending_email_verify':
+          return badge(t('admin:users.status.pending_email_verify', { defaultValue: '邮箱待验证' }), md.surfaceContainerHighest, md.onSurfaceVariant)
+        case 'manual':
+        case 'disabled':
+        default:
+          return badge(t('admin:users.status.manual_disabled'), md.errorContainer, md.onErrorContainer)
       }
-      if (u.expire_at && new Date(u.expire_at).getTime() < Date.now()) {
-        return badge(t('admin:users.status.expired'), md.errorContainer, md.onErrorContainer)
-      }
-      return badge(t('admin:users.status.enabled'), md.tertiaryContainer, md.onTertiaryContainer)
     }
-    // Distinguish disabled-by-reason so admin can scan the table and see WHY
-    // a user is offline without opening the edit dialog. Traffic-exhausted
-    // is the most common case (auto-disabled when periodUsed >= limit) and
-    // gets its own copy "已用尽" so it doesn't read like a punitive action.
-    switch (u.auto_disabled_reason) {
+    const periodUsed = usageMap.get(u.id)?.period_used_bytes ?? 0
+    const derivedService = u.traffic_limit_bytes > 0 && periodUsed >= u.traffic_limit_bytes
+      ? 'traffic_exceeded'
+      : (u.expire_at && new Date(u.expire_at).getTime() < Date.now() ? 'expired' : 'active')
+    switch (u.service_status || derivedService) {
+      case 'emergency_active':
+        return badge(t('admin:users.status.emergency_active'), md.tertiaryContainer, md.onTertiaryContainer)
       case 'traffic_exceeded':
         return badge(t('admin:users.status.traffic_exhausted'), md.tertiaryContainer, md.onTertiaryContainer)
       case 'expired':
         return badge(t('admin:users.status.expired'), md.errorContainer, md.onErrorContainer)
       case 'blocked_client':
         return badge(t('admin:users.status.blocked'), md.errorContainer, md.onErrorContainer)
-      case 'pending_approval':
-        return badge(t('admin:users.status.pending_approval'), md.surfaceContainerHighest, md.onSurfaceVariant)
-      case 'pending_delete':
-        return badge(t('admin:users.status.pending_delete'), md.surfaceContainerHighest, md.onSurfaceVariant)
-      case 'manual':
-        return badge(t('admin:users.status.manual_disabled'), md.errorContainer, md.onErrorContainer)
+      case 'manual_suspended':
+        return badge(t('admin:users.status.service_suspended', { defaultValue: '服务暂停' }), md.errorContainer, md.onErrorContainer)
       default:
-        return badge(t('admin:users.status.disabled'), md.errorContainer, md.onErrorContainer)
+        return badge(t('admin:users.status.enabled'), md.tertiaryContainer, md.onTertiaryContainer)
+    }
+  }
+
+  function serviceStatusText(u: User) {
+    switch (u.service_status) {
+      case 'active':
+        return t('admin:users.status.enabled')
+      case 'emergency_active':
+        return t('admin:users.status.emergency_active')
+      case 'traffic_exceeded':
+        return t('admin:users.status.traffic_exhausted')
+      case 'expired':
+        return t('admin:users.status.expired')
+      case 'blocked_client':
+        return t('admin:users.status.blocked')
+      case 'manual_suspended':
+        return t('admin:users.status.service_suspended', { defaultValue: '服务暂停' })
+      case 'account_disabled':
+        return t('admin:users.status.account_disabled', { defaultValue: '账号已停用' })
+      default:
+        return u.service_status || t('admin:users.status.enabled')
     }
   }
 
@@ -1140,7 +1172,7 @@ export default function UsersView() {
               {items.map(u => (
                 <TableRow key={u.id} hover sx={{
                   '& td': { borderBottom: `1px solid ${md.outlineVariant}`, whiteSpace: 'nowrap' },
-                  opacity: u.enabled && !isExpired(u) ? 1 : 0.65,
+                  opacity: (u.account_status || (u.enabled ? 'active' : 'disabled')) === 'active' && (u.service_status || (isExpired(u) ? 'expired' : 'active')) === 'active' ? 1 : 0.65,
                 }}>
                   <TableCell padding="checkbox">
                     <Checkbox checked={selected.has(u.id)} disabled={!canSelect(u)}
@@ -1212,6 +1244,18 @@ export default function UsersView() {
           <ListItemIcon><RuleIcon fontSize="small" /></ListItemIcon>
           <ListItemText>{t('admin:users.more_menu.personal_rules')}</ListItemText>
         </MenuItem>
+        {moreUser && canResumeService(moreUser) && (
+          <MenuItem onClick={() => actionResumeService(moreUser)}>
+            <ListItemIcon><SyncIcon fontSize="small" /></ListItemIcon>
+            <ListItemText>{t('admin:users.more_menu.resume_service', { defaultValue: '恢复服务' })}</ListItemText>
+          </MenuItem>
+        )}
+        {moreUser && canSuspendService(moreUser) && (
+          <MenuItem onClick={() => actionSuspendService(moreUser)}>
+            <ListItemIcon><ToggleOffIcon fontSize="small" /></ListItemIcon>
+            <ListItemText>{t('admin:users.more_menu.suspend_service', { defaultValue: '暂停服务' })}</ListItemText>
+          </MenuItem>
+        )}
         {/* All credential / security actions live in the Account Security drawer
             now — keeps this menu from overflowing as the actions grow. */}
         <MenuItem onClick={() => { if (moreUser) setSecurityUser(moreUser); closeMore() }}>
@@ -1585,6 +1629,24 @@ export default function UsersView() {
               <MenuItem value="enabled">{t('admin:users.status.enabled')}</MenuItem>
               <MenuItem value="disabled">{t('admin:users.status.disabled')}</MenuItem>
             </TextField>
+            {editing && (
+              <Box sx={{ gridColumn: '1 / -1', display: 'flex', gap: 1, alignItems: 'flex-start' }}>
+                <TextField size="small" fullWidth label={t('admin:users.field.service_status', { defaultValue: '服务状态' })}
+                  value={serviceStatusText(editing)}
+                  InputProps={{ readOnly: true }}
+                  helperText={editing.service_disable_detail || (editing.block_violation_count ? t('admin:users.field.block_violations', { count: editing.block_violation_count, defaultValue: '违规次数：{{count}}' }) : '')} />
+                {canResumeService(editing) && (
+                  <Button variant="outlined" onClick={() => actionResumeService(editing)} sx={{ flexShrink: 0, mt: 0.25 }}>
+                    {t('admin:users.more_menu.resume_service', { defaultValue: '恢复服务' })}
+                  </Button>
+                )}
+                {canSuspendService(editing) && (
+                  <Button variant="outlined" color="error" onClick={() => actionSuspendService(editing)} sx={{ flexShrink: 0, mt: 0.25 }}>
+                    {t('admin:users.more_menu.suspend_service', { defaultValue: '暂停服务' })}
+                  </Button>
+                )}
+              </Box>
+            )}
             <Box sx={{ gridColumn: '1 / -1', display: 'flex', gap: 1.5, alignItems: 'flex-start' }}>
               <TextField select size="small" label={t('admin:users.field.expire_at')}
                 value={editForm.expire_mode}

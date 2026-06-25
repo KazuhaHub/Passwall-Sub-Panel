@@ -33,10 +33,33 @@ const (
 	DisabledPendingDelete   AutoDisabledReason = "pending_delete"
 	DisabledPendingApproval AutoDisabledReason = "pending_approval"
 	DisabledBlockedClient   AutoDisabledReason = "blocked_client"
+	DisabledServiceManual   AutoDisabledReason = "service_manual"
 	// DisabledPendingEmailVerify marks a self-registered account that hasn't yet
 	// confirmed its email. It can't log in (NOT a self-service reason) and has no
 	// 3X-UI clients provisioned until verification activates it.
 	DisabledPendingEmailVerify AutoDisabledReason = "pending_email_verify"
+)
+
+type AccountStatus string
+
+const (
+	AccountStatusActive             AccountStatus = "active"
+	AccountStatusDisabled           AccountStatus = "disabled"
+	AccountStatusPendingDelete      AccountStatus = "pending_delete"
+	AccountStatusPendingApproval    AccountStatus = "pending_approval"
+	AccountStatusPendingEmailVerify AccountStatus = "pending_email_verify"
+)
+
+type ServiceStatus string
+
+const (
+	ServiceStatusActive          ServiceStatus = "active"
+	ServiceStatusAccountDisabled ServiceStatus = "account_disabled"
+	ServiceStatusExpired         ServiceStatus = "expired"
+	ServiceStatusTrafficExceeded ServiceStatus = "traffic_exceeded"
+	ServiceStatusBlockedClient   ServiceStatus = "blocked_client"
+	ServiceStatusManualSuspended ServiceStatus = "manual_suspended"
+	ServiceStatusEmergencyActive ServiceStatus = "emergency_active"
 )
 
 // SelfServiceDisableReason reports whether an auto-disabled user with this
