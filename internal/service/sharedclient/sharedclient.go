@@ -494,27 +494,30 @@ func (s *Service) ReconcileOrphans(ctx context.Context, userID int64) error {
 			noteErr(err)
 			continue
 		}
+		// ONE panel-wide read drives BOTH the coverage gate and the stale-client
+		// scan: ListClientInbounds returns every live client's inbound set, so a
+		// busy panel costs a single call instead of one GetClient per desired email.
+		live, lerr := cli.ListClientInbounds(ctx)
+		if lerr != nil {
+			noteErr(lerr)
+			continue
+		}
 		// Coverage gate: confirm every desired client is live + attached, and gather
 		// the inbounds the desired clients actually cover. If any is missing/unattached
 		// the replacement isn't fully up — skip this panel and retry next pass.
 		covered := map[int]struct{}{}
 		allUp := true
 		for email := range desired {
-			cur, gerr := cli.GetClient(ctx, email)
-			if gerr != nil || cur == nil || len(cur.InboundIDs) == 0 {
+			inbs := live[email]
+			if len(inbs) == 0 {
 				allUp = false
 				break
 			}
-			for _, ib := range cur.InboundIDs {
+			for _, ib := range inbs {
 				covered[ib] = struct{}{}
 			}
 		}
 		if !allUp {
-			continue
-		}
-		live, lerr := cli.ListClientInbounds(ctx)
-		if lerr != nil {
-			noteErr(lerr)
 			continue
 		}
 		for email, inbounds := range live {

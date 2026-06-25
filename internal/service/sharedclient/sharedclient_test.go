@@ -60,18 +60,19 @@ func (f fakeNodes) GetByID(_ context.Context, id int64) (*domain.Node, error) {
 
 type fakeXUI struct {
 	ports.XUIClient
-	addedInbounds []int
-	addedSpec     ports.ClientSpec
-	confirm       []int // inboundIDs GetClient reports the client attached to AFTER an add/attach
-	preExist      []int // if non-nil, GetClient reports this BEFORE any add (pre-existing client); nil = absent
-	added         bool
-	attachedTo    []int             // inboundIDs passed to AttachClient (the existing-client path)
-	liveClients   map[string][]int  // orphan-reconcile tests: panel-wide email -> inbounds
-	updatedSpec   ports.ClientSpec
-	updateCalls   int
-	deleted       []deletedClient
-	detached      []int
-	failAdd       bool
+	addedInbounds  []int
+	addedSpec      ports.ClientSpec
+	confirm        []int // inboundIDs GetClient reports the client attached to AFTER an add/attach
+	preExist       []int // if non-nil, GetClient reports this BEFORE any add (pre-existing client); nil = absent
+	added          bool
+	attachedTo     []int            // inboundIDs passed to AttachClient (the existing-client path)
+	liveClients    map[string][]int // orphan-reconcile tests: panel-wide email -> inbounds
+	updatedSpec    ports.ClientSpec
+	updateCalls    int
+	getClientCalls int // counts GetClient invocations (orphan reconcile must not loop these)
+	deleted        []deletedClient
+	detached       []int
+	failAdd        bool
 }
 
 var errFakeAdd = errors.New("fake add failure")
@@ -90,6 +91,7 @@ func (c *fakeXUI) AddClientToInbounds(_ context.Context, inboundIDs []int, spec 
 // reports `confirm`. preExist simulates a client already present before provision.
 // When liveClients is set (orphan-reconcile tests), it is the source of truth.
 func (c *fakeXUI) GetClient(_ context.Context, email string) (*ports.ClientDetail, error) {
+	c.getClientCalls++
 	if c.liveClients != nil {
 		if inbs, ok := c.liveClients[email]; ok {
 			return &ports.ClientDetail{Email: email, InboundIDs: inbs}, nil
@@ -109,6 +111,7 @@ func (c *fakeXUI) GetClient(_ context.Context, email string) (*ports.ClientDetai
 func (c *fakeXUI) ListClientInbounds(context.Context) (map[string][]int, error) {
 	return c.liveClients, nil
 }
+
 // AttachClient is the existing-client path: idempotent attach of the desired
 // inbounds. Sets `added` so the read-back GetClient reports `confirm`.
 func (c *fakeXUI) AttachClient(_ context.Context, _ string, inboundIDs []int) error {
@@ -285,6 +288,11 @@ func TestReconcileOrphans_DeletesStaleSharedOnly(t *testing.T) {
 		if deleted[keep] {
 			t.Errorf("%q must NOT be deleted", keep)
 		}
+	}
+	// Coverage is derived from the single panel-wide ListClientInbounds, NOT a
+	// per-desired-email GetClient fan-out (which on a busy panel is N round-trips).
+	if xui.getClientCalls != 0 {
+		t.Errorf("orphan reconcile must not loop GetClient (got %d calls); derive coverage from ListClientInbounds", xui.getClientCalls)
 	}
 }
 
