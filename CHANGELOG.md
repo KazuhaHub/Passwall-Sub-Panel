@@ -4,6 +4,12 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## v3.9.0-beta.25 — 2026-06-25
+
+### 改进
+
+- **`clients/add` 空 200 的报错提示再补一个真凶:x-ui 进程卡死** —— 实测定位到:某面板 `POST /clients/add` 返回空 200,而 `ListInbounds`/`GetClient`/`AddInbound` 全正常 —— 既不是认证、也不是代理,而是 **x-ui 进程半挂死**;`x-ui restart` 后 `clients/add` 对所有 inbound + payload 全部恢复正常。提示现在列出三种原因(认证 / 反代-WAF / x-ui 卡死),并重申「其它端点正常 = 不是认证」。
+
 ## v3.9.0-beta.24 — 2026-06-25
 
 ### 改进
