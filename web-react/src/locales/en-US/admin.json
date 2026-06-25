@@ -1030,7 +1030,7 @@
       "reorder_failed": "Reorder failed",
       "separator_created": "Separator created",
       "separator_updated": "Separator updated",
-      "recreated_inbound": "Inbound re-created on the server"
+      "recreated_inbound": "Inbound re-created; provisioning clients in the background (refresh 3X-UI in a few seconds)"
     },
     "confirm": {
       "delete_title": "Delete node",

@@ -419,10 +419,14 @@ func (c *Client) doJSONRetry(ctx context.Context, method, path string, body any,
 		return base
 	}
 	if trimmed == "" {
-		hint := "verify URL and api_token / username+password — 3X-UI returns an empty body when auth is wrong"
-		if c.apiToken == "" {
-			hint = "verify username/password — 3X-UI returns an empty body when cookie auth is wrong"
-		}
+		// A blank 200 with no JSON has two common causes: (1) wrong auth — 3X-UI
+		// answers an empty body when the api_token / username+password is invalid;
+		// (2) a reverse proxy / WAF / CDN in front of the panel intercepting THIS
+		// endpoint (a blank 200 with no Content-Type on one path while every other
+		// endpoint returns JSON is the tell — verify by hitting the panel directly,
+		// bypassing the proxy). Don't assume auth: if other endpoints on this panel
+		// work, it's almost certainly the proxy/WAF on this path.
+		hint := "either auth is wrong (verify api_token / username+password) OR a reverse proxy / WAF in front of the panel is intercepting this endpoint — if other endpoints work, suspect the proxy and test the panel directly"
 		return fmt.Errorf("%s %s: empty response body (HTTP %d) — %s",
 			method, path, resp.StatusCode, hint)
 	}

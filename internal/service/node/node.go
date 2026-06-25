@@ -39,6 +39,14 @@ type InboundCleaner interface {
 	DeleteInbound(ctx context.Context, panelID int64, inboundID int) error
 }
 
+// MemberResyncer re-provisions a user's shared clients — immediately, falling back
+// to the sync-task queue on failure (so a flaky 3X-UI call isn't dropped, it's
+// retried). Implemented by user.Service.ResyncMembershipOrEnqueue; late-bound so the
+// node package never imports user. nil before wiring / in tests.
+type MemberResyncer interface {
+	ResyncMembershipOrEnqueue(ctx context.Context, userID int64, summary string) error
+}
+
 type Service struct {
 	nodes      ports.NodeRepo
 	separators ports.SeparatorRepo
@@ -48,7 +56,11 @@ type Service struct {
 	groups     ports.GroupRepo
 	users      ports.UserRepo
 	settings   ports.SettingsRepo
+	resyncer   MemberResyncer
 }
+
+// SetMemberResyncer late-binds the shared-client member resyncer (user.Service).
+func (s *Service) SetMemberResyncer(r MemberResyncer) { s.resyncer = r }
 
 func New(nodes ports.NodeRepo, separators ports.SeparatorRepo, pool ports.XUIPool, cleaner InboundCleaner,
 	tasks ports.SyncTaskRepo, groups ports.GroupRepo, users ports.UserRepo, settings ports.SettingsRepo) *Service {
@@ -356,8 +368,61 @@ func (s *Service) RecreateInboundOnServer(ctx context.Context, nodeID int64) err
 		return fmt.Errorf("relink node %d to new inbound %d: %w", nodeID, newID, err)
 	}
 	log.Info("recreated node inbound on its server", "node_id", nodeID, "panel_id", n.PanelID, "new_inbound_id", newID)
-	s.syncExistingUsersToNodeInBackground(n)
+	// Provision the members' clients onto the new inbound RIGHT AWAY, off the request
+	// thread — so the button returns fast (no 30s HTTP timeout on a populous node) and
+	// the clients appear within seconds rather than on the next 30s sync-task tick. Per
+	// member, ResyncMembershipOrEnqueue provisions live and, IF that fails, drops the
+	// member into the sync-task queue for retry (so a flaky 3X-UI call never loses the
+	// client). This is what makes recreate a single self-contained action.
+	s.provisionNodeMembersInBackground(n)
 	return nil
+}
+
+// provisionNodeMembersInBackground runs provisionNodeMembers off the request thread.
+func (s *Service) provisionNodeMembersInBackground(n *domain.Node) {
+	snap := *n
+	safego.Go("node.recreate-provision-members", func() {
+		s.provisionNodeMembers(context.Background(), &snap)
+	})
+}
+
+// provisionNodeMembers re-provisions every ENABLED member of the groups that include
+// n, attaching their shared client to n's inbound. Immediate per member, with a
+// sync-task-queue fallback on failure (via ResyncMembershipOrEnqueue). Synchronous +
+// testable; the caller runs it in the background.
+func (s *Service) provisionNodeMembers(ctx context.Context, n *domain.Node) {
+	if s.resyncer == nil || s.groups == nil || s.users == nil {
+		return
+	}
+	groups, err := s.groups.List(ctx)
+	if err != nil {
+		log.Warn("recreate: list groups for member provision", "node_id", n.ID, "err", err)
+		return
+	}
+	seen := make(map[int64]bool)
+	provisioned := 0
+	for _, g := range groups {
+		if !group.Matches(n, g.TagFilter) {
+			continue
+		}
+		members, err := s.users.ListByGroup(ctx, g.ID)
+		if err != nil {
+			log.Warn("recreate: list members", "group_id", g.ID, "err", err)
+			continue
+		}
+		for _, u := range members {
+			if !u.Enabled || seen[u.ID] {
+				continue
+			}
+			seen[u.ID] = true
+			if err := s.resyncer.ResyncMembershipOrEnqueue(ctx, u.ID, "provision client on recreated node "+n.DisplayName); err != nil {
+				log.Warn("recreate: provision member", "node_id", n.ID, "user_id", u.ID, "err", err)
+				continue
+			}
+			provisioned++
+		}
+	}
+	log.Info("recreate: provisioned clients for node members", "node_id", n.ID, "members", provisioned)
 }
 
 // ---- Update flows ----

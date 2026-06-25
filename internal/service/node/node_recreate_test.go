@@ -69,6 +69,55 @@ type recreateGroups struct{ ports.GroupRepo }
 
 func (recreateGroups) List(context.Context) ([]*domain.Group, error) { return nil, nil }
 
+type recreateGroupsList struct {
+	ports.GroupRepo
+	groups []*domain.Group
+}
+
+func (g recreateGroupsList) List(context.Context) ([]*domain.Group, error) { return g.groups, nil }
+
+type recreateUsers struct {
+	ports.UserRepo
+	byGroup map[int64][]*domain.User
+}
+
+func (u recreateUsers) ListByGroup(_ context.Context, gid int64) ([]*domain.User, error) {
+	return u.byGroup[gid], nil
+}
+
+type recreateResyncer struct{ ids []int64 }
+
+func (r *recreateResyncer) ResyncMembershipOrEnqueue(_ context.Context, id int64, _ string) error {
+	r.ids = append(r.ids, id)
+	return nil
+}
+
+// provisionNodeMembers (run in the background by recreate) re-provisions every
+// ENABLED member of a matching group, skipping disabled members. This is what gives
+// recreate its "build inbound AND push clients" one-step behaviour.
+func TestProvisionNodeMembers(t *testing.T) {
+	resync := &recreateResyncer{}
+	svc := &Service{
+		resyncer: resync,
+		groups:   recreateGroupsList{groups: []*domain.Group{{ID: 7, TagFilter: domain.TagFilter{All: true}}}},
+		users: recreateUsers{byGroup: map[int64][]*domain.User{
+			7: {{ID: 100, Enabled: true}, {ID: 101, Enabled: false}, {ID: 100, Enabled: true}},
+		}},
+	}
+	svc.provisionNodeMembers(context.Background(), &domain.Node{ID: 1, DisplayName: "TW"})
+
+	// Only the enabled member (100) is resynced, exactly once; disabled (101) skipped.
+	if len(resync.ids) != 1 || resync.ids[0] != 100 {
+		t.Fatalf("want a single resync for enabled member 100, got %v", resync.ids)
+	}
+}
+
+// A nil resyncer (not wired) makes member provisioning a safe no-op.
+func TestProvisionNodeMembers_NilResyncerNoop(t *testing.T) {
+	svc := &Service{groups: recreateGroupsList{groups: []*domain.Group{{ID: 7, TagFilter: domain.TagFilter{All: true}}}}}
+	svc.provisionNodeMembers(context.Background(), &domain.Node{ID: 1}) // must not panic
+}
+
 // RecreateInboundOnServer rebuilds a node's inbound from PSP's captured snapshot
 // onto its (repointed/empty) panel, then relinks the node to the new inbound ID.
 func TestRecreateInboundOnServer(t *testing.T) {

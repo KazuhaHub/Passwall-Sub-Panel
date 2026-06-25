@@ -281,6 +281,9 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	// nil-tolerant so the order here doesn't open a startup race window.
 	userSvc.SetTrafficUsage(trafficSvc)
 	trafficSvc.SetConfigPusher(userSvc)
+	// Recreate-inbound provisions the node's members' shared clients via the user
+	// service (immediate, with sync-task fallback). Late-bound to avoid node→user import.
+	nodeSvc.SetMemberResyncer(userSvc)
 	// v3.9.0 shadow dual-write: populate the psp_client model from each
 	// membership resync (best-effort; nothing reads it in production yet).
 	userSvc.SetPSPProvisioner(clientprov.New(repos.PSPClient))
