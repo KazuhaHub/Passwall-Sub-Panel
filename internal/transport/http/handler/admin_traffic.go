@@ -138,7 +138,15 @@ func (h *AdminTrafficHandler) operatorMayView(c *gin.Context, userID int64) bool
 		return true
 	}
 	target, err := h.users.GetByID(c.Request.Context(), userID)
-	if err == nil && (target.Role == domain.RoleAdmin || target.Role == domain.RoleOperator) {
+	if err != nil {
+		// Fail CLOSED: a guard that can't evaluate the target's role must deny,
+		// not fall through to "allowed" — otherwise a transient DB error lets an
+		// operator read an admin/operator account's traffic. Surface the real
+		// error (500) rather than a misleading 403; either way no data is served.
+		respondError(c, err)
+		return false
+	}
+	if target.Role == domain.RoleAdmin || target.Role == domain.RoleOperator {
 		c.JSON(http.StatusForbidden, gin.H{"error": "Operators cannot view admin or operator accounts"})
 		return false
 	}
