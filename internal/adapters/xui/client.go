@@ -426,7 +426,7 @@ func (c *Client) doJSONRetry(ctx context.Context, method, path string, body any,
 		// endpoint returns JSON is the tell — verify by hitting the panel directly,
 		// bypassing the proxy). Don't assume auth: if other endpoints on this panel
 		// work, it's almost certainly the proxy/WAF on this path.
-		hint := "either auth is wrong (verify api_token / username+password) OR a reverse proxy / WAF in front of the panel is intercepting this endpoint — if other endpoints work, suspect the proxy and test the panel directly"
+		hint := "any of: (1) auth is wrong (verify api_token / username+password); (2) a reverse proxy / WAF in front of the panel is intercepting this endpoint; (3) the panel's x-ui process is hung/half-broken (a restart often fixes it — LIVE-OBSERVED: a hung x-ui returned a blank 200 on clients/add while every other endpoint worked, and `x-ui restart` cleared it). If OTHER endpoints on this panel work, it is NOT auth — suspect the proxy or a stuck x-ui process and test the panel directly"
 		return fmt.Errorf("%s %s: empty response body (HTTP %d) — %s",
 			method, path, resp.StatusCode, hint)
 	}
