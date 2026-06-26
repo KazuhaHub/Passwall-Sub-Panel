@@ -239,10 +239,10 @@ func DefaultTemplates() []*domain.MailTemplate {
 			Subject: "本期流量已用完",
 			Body: defaultHTMLTemplate(
 				"流量已用完",
-				"你的本期流量已用完，账号已被自动停用。账号将在下个计费周期开始时自动恢复；如需立即继续使用，可以在面板申请紧急访问或联系管理员。",
+				"你的本期流量已用完，代理服务已暂停（账号未被禁用，仍可登录面板查看 / 处理）。服务将在下个计费周期开始时自动恢复；如需立即继续使用，可以在面板申请紧急访问或联系管理员。",
 				loginRow+
 					emailRow("已用流量", "{{.PeriodUsedGB}} / {{.TrafficLimitGB}} GB", true)+
-					emailRow("停用时间", "{{.GeneratedAt}}", true),
+					emailRow("暂停时间", "{{.GeneratedAt}}", true),
 			),
 		},
 		{
