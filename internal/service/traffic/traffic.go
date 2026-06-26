@@ -884,7 +884,8 @@ func (s *Service) recordClientStats(ctx context.Context, ownership *domain.XUICl
 	if hadPrev {
 		deltaUp = monotonicDelta(up, ownership.LastRawUpBytes)
 		deltaDown = monotonicDelta(down, ownership.LastRawDownBytes)
-		deltaTotal = monotonicDelta(totalBytes, ownership.LastRawTotalBytes)
+		// Derive total from the components (reset-safe) — see recordSharedClientStats.
+		deltaTotal = deltaUp + deltaDown
 	} else {
 		// First observation — current cumulative IS the delta.
 		deltaUp, deltaDown, deltaTotal = up, down, totalBytes
@@ -976,7 +977,11 @@ func (s *Service) recordSharedClientStats(ctx context.Context, c *domain.PSPClie
 
 	deltaUp := monotonicDelta(up, c.LastRawUpBytes)
 	deltaDown := monotonicDelta(down, c.LastRawDownBytes)
-	deltaTotal := monotonicDelta(totalBytes, c.LastRawTotalBytes)
+	// total = up + down by construction. Deriving it from the components (rather
+	// than a 3rd independent monotonicDelta on up+down) is reset-safe: when Xray
+	// resets up and down INDEPENDENTLY, the synthetic total may not cross its own
+	// reset threshold and would double-fold the reset component into lifetime.
+	deltaTotal := deltaUp + deltaDown
 	if deltaUp == 0 && deltaDown == 0 && deltaTotal == 0 {
 		return trafficDelta{hadPrev: true} // idle client → pure no-op (no write)
 	}
@@ -1648,7 +1653,8 @@ func (s *Service) recordNodeStats(ctx context.Context, panelID int64, inboundID 
 	if node.LastInboundSeeded {
 		dUp = monotonicDelta(up, node.LastInboundUpBytes)
 		dDown = monotonicDelta(down, node.LastInboundDownBytes)
-		dTotal = monotonicDelta(totalBytes, node.LastInboundTotalBytes)
+		// Derive total from the components (reset-safe) — see recordSharedClientStats.
+		dTotal = dUp + dDown
 	} else {
 		// FIRST observation of this node's inbound counter (fresh / imported /
 		// upgraded from the ≤v3.8 client-sum source). Seed the baseline with a
@@ -1883,6 +1889,14 @@ func (s *Service) periodUsage(ctx context.Context, u *domain.User, latest *domai
 }
 
 func shouldRollPeriod(now, periodStart time.Time, period domain.ResetPeriod) bool {
+	// CRITICAL: compare calendar fields in the SAME Location. `now` is panel-tz
+	// (time.Now().In(panelLoc)); `periodStart` comes from the DB, whose Location
+	// is driver-dependent — MySQL/Postgres return it in UTC, so a panel-tz instant
+	// like 2026-03-01 00:00 +0800 (= 2026-02-28 16:00 UTC) would read back as
+	// February and re-roll every poll all month (free traffic + spurious resume).
+	// Normalize periodStart into now's (panel) Location — same instant, correct
+	// panel-tz calendar fields — so the trigger is driver-independent.
+	periodStart = periodStart.In(now.Location())
 	switch period {
 	case domain.ResetMonthly:
 		return now.Year() != periodStart.Year() || now.Month() != periodStart.Month()
@@ -2249,7 +2263,11 @@ func (s *Service) SetPeriodUsage(ctx context.Context, userID int64, usedBytes in
 		return up, down
 	}
 	currentUp, currentDown := splitUpDown(currentTotal)
-	now := time.Now()
+	// Panel-tz (not server-local): TrafficPeriodStart is read back by
+	// shouldRollPeriod in the panel zone, and business-calendar math goes through
+	// paneltz per the project invariant. A server-local instant here could land in
+	// a different calendar month than the panel and trip an immediate spurious roll.
+	now := s.panelNow(ctx)
 	periodStart := now
 
 	if err := s.traffic.Insert(ctx, &domain.TrafficSnapshot{

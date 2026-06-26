@@ -597,7 +597,11 @@ func (s *Service) CreateLocal(ctx context.Context, in CreateLocalInput) (*Create
 		resetPeriod = domain.ResetMonthly
 	}
 
-	now := time.Now()
+	// Panel-tz: TrafficPeriodStart is compared back in the panel zone by
+	// shouldRollPeriod, and business-calendar math goes through paneltz. A
+	// server-local instant could sit in a different calendar month than the panel
+	// and trip a spurious first-poll period roll.
+	now := paneltz.Now(ctx, s.settings)
 	u := &domain.User{
 		UPN:                upn,
 		Email:              in.Email,
@@ -843,7 +847,9 @@ func (s *Service) EnsureSSO(ctx context.Context, in EnsureSSOInput) (*domain.Use
 	if resetPeriod == "" {
 		resetPeriod = domain.ResetMonthly
 	}
-	now := time.Now()
+	// Panel-tz for TrafficPeriodStart (see the admin-create path) — server-local
+	// could trip a spurious first-poll roll under shouldRollPeriod.
+	now := paneltz.Now(ctx, s.settings)
 	// New row: there is no current role to preserve, so the brand-new
 	// path just takes whichever role the first rule matched. RoleUser
 	// is the default when no rule fires; that's harmless because we
