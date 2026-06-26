@@ -9,7 +9,8 @@ PSP 通过 `/panel/api/*` 对接 3X-UI 面板。本文档维护两件事：
 
 | PSP 版本 | 最低 3X-UI | 已实测通过 | 备注 |
 |---|---|---|---|
-| **v3.6.2+** | **3.2.0** | 3.3.1 | client 适配迁到一级 `/clients/*` API,**硬切 ≥ 3.2.0**;已测上限 2026-06-13 实机抬到 3.3.1,见下文 |
+| **v3.9.0+** | **3.3.0** | 3.4.1 | 共享 client 模型(一个 client 跨多 inbound);floor 抬到 3.3.0(client_inbounds upsert 修复);已测上限 3.4.0 实机 + 3.4.1 源码核(2026-06-26),见下文 |
+| **v3.6.2 – v3.8.x** | **3.2.0** | 3.4.1 | 每节点 client(一级 `/clients/*` API),**硬切 ≥ 3.2.0**;已测上限同步抬到 3.4.1(per-node 路径是 shared 路径子集) |
 | v3.6.0 – v3.6.1 | 3.1.0 | 3.1.0 | 仍走 inbound-scoped 端点;别跑在 3.2.0 上,先升 PSP 到 v3.6.2 |
 | v3.5.1 – v3.5.x | 3.1.0 | 3.1.0 | `/inbounds/list` 把 settings 等改成 nested object,见下文 |
 | v3.5.0 | 3.0.x | 3.0.x | 跨 3.1.0 升级会破坏 traffic poll |
@@ -24,6 +25,23 @@ PSP 通过 `/panel/api/*` 对接 3X-UI 面板。本文档维护两件事：
 - 任何高于"已实测通过"的 3X-UI 版本都属于**未知风险**——升级前先在一台 panel 上小流量验证
 
 ## 历史兼容性事件
+
+### 2026-06-26 / 3X-UI 3.4.1 源码核 → 已测上限 3.4.0 抬到 3.4.1
+
+**背景**: 上游发 3.4.1(Rolling Dev 通道、日志查看器重做、内存优化、client 批量操作等)。3.4.0(下一条,2026-06-24 实机已核)的 patch 版,本次按完整 `v3.4.0...v3.4.1` commit 列表**源码核**(未实机)。
+
+**复核结论(代码零改动,SOURCE/CHANGELOG-VERIFIED)**: 整个 delta **没有动到任何 PSP 调用的端点 / 响应形状 / 数据模型 struct / DB schema / 认证路径**。
+- **client 改动是附加或利好**:
+  - `feat(clients)` 批量启停 + 批量设 XTLS flow(#5524)—— commit 明说 **「no new endpoint, DB column, or migration」**,flow 走既有 inbound-JSON→SyncInbound 路径,是 `bulkAdjust` 的一个**可选字段**,PSP 现有调用不受影响。
+  - `fix(web)` #5543「删除多 inbound client 时无视 shared email 从运行时移除」—— 正是 PSP「一个 shared client 跨多 inbound」模型,这个修复**让 `DelClientByEmail`/`BulkDelByEmail` 的运行时清理更正确**,对 PSP 是利好。
+- **其余全在 PSP 不碰的子系统**:3X-UI 自家订阅引擎(`PROTOCOL/TRANSPORT/SECURITY` 变量、Incy、`{{TRAFFIC_USED}}`)、tgbot、原生多节点(node traffic history)、tunnel(`rewritePort` null)、outbound、日志查看器、dev-update 通道。
+- **数据模型**:`model.Client`/`xray.ClientTraffic`/`model.Inbound` 未变,无相关 schema 迁移;无 auth/CSRF 改动。
+
+**两个非阻塞观察项**(不影响现有部署,记录备查):
+1. **新 VLESS 加密模式**(#5517):若管理员给某 VLESS inbound 配了新加密模式,PSP 渲染将来可能要补对应的 client `encryption` 字段 —— 属**后续渲染支持**,不是兼容性破坏。
+2. **#5520 恢复 Vision flow + 一次性 `MigrationRestoreVisionFlow` 启动迁移**:3X-UI 现在会在 flow-eligible inbound 上自愈 client 的 Vision flow。对 PSP 良性(reconcile 会重新收敛,PSP 自己的 flow 推导本就在该补的地方补 Vision)。
+
+**结论**: `max_tested_xui` 3.4.0 → 3.4.1(v3.json 两条 entry 同步);`min_xui` / `version.MinXUI` const / drift-guard 不动。**升级建议**:可以升 —— 若手头有一台已升 3.4.1 的面板,跑一遍 traffic poll + 加/删 client 实机确认更稳妥,我可以补做实机复核。
 
 ### 2026-06-13 / 3X-UI 3.3.1 实机复核 → 已测上限 3.3.0 抬到 3.3.1
 
