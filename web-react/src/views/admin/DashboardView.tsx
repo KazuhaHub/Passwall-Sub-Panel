@@ -27,6 +27,7 @@ import CheckCircleIcon from '@mui/icons-material/CheckCircle'
 import { dashboardSummary, type DashboardSummary } from '@/api/dashboard'
 import { topTraffic, trafficHistory, type TrafficHistoryItem, type TrafficRow } from '@/api/traffic'
 import PageHeader from '@/components/PageHeader'
+import TzHint from '@/components/TzHint'
 import { useSiteStore } from '@/stores/site'
 import { panelDayStr } from '@/utils/datetime'
 import type { M3Tokens } from '@/theme'
@@ -317,6 +318,9 @@ export default function DashboardView() {
             {t('dashboard.traffic.view_all')} →
           </MuiLink>
         </Box>
+        {/* The trend is bucketed in PANEL tz; disclose it (+ the viewer's browser
+            tz) only when they differ — the chart axis can't carry per-label tz. */}
+        <TzHint sx={{ display: 'block', mb: 1 }} />
         <Suspense fallback={<Box sx={{ height: 280, display: 'grid', placeItems: 'center' }}><CircularProgress size={24} /></Box>}>
           {trendLoading
             ? <Box sx={{ height: 280, display: 'grid', placeItems: 'center' }}><CircularProgress size={24} /></Box>

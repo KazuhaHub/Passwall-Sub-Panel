@@ -16,6 +16,7 @@
   },
   "saved": "已保存",
   "empty": "暂无数据",
+  "tz_hint": "时间按面板时区 {{panel}} 显示（你的本地：{{browser}}）",
   "status": {
     "online": "在线",
     "offline": "离线",
