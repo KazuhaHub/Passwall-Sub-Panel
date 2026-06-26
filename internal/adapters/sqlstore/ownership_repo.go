@@ -77,9 +77,21 @@ func (r *ownershipRepo) DropIfMigrated(ctx context.Context) (done bool, err erro
 	return true, nil
 }
 
+// MIGRATION(v3→v4): the write methods honor the `gone` flag for the SAME reason
+// the reads do — once the legacy table is dropped (post-migration) any write to
+// it is a dead-path call, so it short-circuits to a graceful no-op instead of a
+// "no such table" error. Keeps the repo self-safe rather than depending on every
+// caller staying gated on the user holding ownership rows. All of this goes away
+// with the ownership repo at V4.
 func (r *ownershipRepo) Add(ctx context.Context, e *domain.XUIClientEntry) error {
+	if r.gone.Load() {
+		return nil
+	}
 	row := ownershipFromDomain(e)
 	if err := r.db.WithContext(ctx).Create(row).Error; err != nil {
+		if r.confirmGone(err) {
+			return nil
+		}
 		return err
 	}
 	e.ID = row.ID
@@ -88,13 +100,31 @@ func (r *ownershipRepo) Add(ctx context.Context, e *domain.XUIClientEntry) error
 }
 
 func (r *ownershipRepo) Remove(ctx context.Context, id int64) error {
-	return r.db.WithContext(ctx).Delete(&ownershipRow{}, id).Error
+	if r.gone.Load() {
+		return nil
+	}
+	if err := r.db.WithContext(ctx).Delete(&ownershipRow{}, id).Error; err != nil {
+		if r.confirmGone(err) {
+			return nil
+		}
+		return err
+	}
+	return nil
 }
 
 func (r *ownershipRepo) RemoveByMatch(ctx context.Context, panelID int64, inboundID int, email string) error {
-	return r.db.WithContext(ctx).
+	if r.gone.Load() {
+		return nil
+	}
+	if err := r.db.WithContext(ctx).
 		Where("panel_id = ? AND inbound_id = ? AND client_email = ?", panelID, inboundID, email).
-		Delete(&ownershipRow{}).Error
+		Delete(&ownershipRow{}).Error; err != nil {
+		if r.confirmGone(err) {
+			return nil
+		}
+		return err
+	}
+	return nil
 }
 
 func (r *ownershipRepo) GetByMatch(ctx context.Context, panelID int64, inboundID int, email string) (*domain.XUIClientEntry, error) {
@@ -207,9 +237,18 @@ func (r *ownershipRepo) ListByInbound(ctx context.Context, panelID int64, inboun
 }
 
 func (r *ownershipRepo) UpdateUUID(ctx context.Context, panelID int64, inboundID int, email, newUUID string) error {
-	return r.db.WithContext(ctx).Model(&ownershipRow{}).
+	if r.gone.Load() {
+		return nil
+	}
+	if err := r.db.WithContext(ctx).Model(&ownershipRow{}).
 		Where("panel_id = ? AND inbound_id = ? AND client_email = ?", panelID, inboundID, email).
-		Update("client_uuid", newUUID).Error
+		Update("client_uuid", newUUID).Error; err != nil {
+		if r.confirmGone(err) {
+			return nil
+		}
+		return err
+	}
+	return nil
 }
 
 // ownershipCounterColumns is the explicit column set the traffic poll

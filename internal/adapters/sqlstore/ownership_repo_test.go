@@ -250,3 +250,51 @@ func TestOwnershipDropIfMigrated(t *testing.T) {
 		t.Fatalf("post-drop ListByUser = %v, %v; want empty, nil", entries, err)
 	}
 }
+
+// Post-drop the WRITE methods must ALSO be graceful no-ops, not just the reads.
+// The legacy ownership table is intentionally gone after migration, and every
+// live writer is gated on the user still holding ownership rows (always empty
+// post-drop), so a write here is a dead-path call. Erroring would make the repo
+// depend on that external gating staying correct forever — exactly the fragile
+// implicit coupling we don't want; the repo must be self-safe.
+func TestOwnershipWritesNoopAfterDrop(t *testing.T) {
+	db, err := openTestDB(t)
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	if err := EnsureSchema(db); err != nil {
+		t.Fatalf("schema: %v", err)
+	}
+	if err := db.Migrator().CreateTable(&ownershipRow{}); err != nil {
+		t.Fatalf("create ownership table: %v", err)
+	}
+	t.Cleanup(func() {
+		if sqlDB, _ := db.DB(); sqlDB != nil {
+			_ = sqlDB.Close()
+		}
+	})
+	repo := &ownershipRepo{db: db}
+	ctx := context.Background()
+
+	// Empty table → DropIfMigrated drops it and latches gone=true.
+	if done, err := repo.DropIfMigrated(ctx); err != nil || !done {
+		t.Fatalf("drop: done=%v err=%v, want done=true", done, err)
+	}
+	if db.Migrator().HasTable(&ownershipRow{}) {
+		t.Fatal("precondition: table should be dropped")
+	}
+
+	// Every write must be a no-op (nil), not a "no such table" error.
+	if err := repo.Add(ctx, &domain.XUIClientEntry{UserID: 1, PanelID: 10, InboundID: 20, ClientEmail: "a@x"}); err != nil {
+		t.Fatalf("post-drop Add must be a no-op, got %v", err)
+	}
+	if err := repo.Remove(ctx, 1); err != nil {
+		t.Fatalf("post-drop Remove must be a no-op, got %v", err)
+	}
+	if err := repo.RemoveByMatch(ctx, 10, 20, "a@x"); err != nil {
+		t.Fatalf("post-drop RemoveByMatch must be a no-op, got %v", err)
+	}
+	if err := repo.UpdateUUID(ctx, 10, 20, "a@x", "new-uuid"); err != nil {
+		t.Fatalf("post-drop UpdateUUID must be a no-op, got %v", err)
+	}
+}
