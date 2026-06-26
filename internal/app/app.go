@@ -356,6 +356,9 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	// Route the handler-triggered group-member resync through the tracked
 	// dispatcher so Shutdown drains it (it was an untracked safego.Go).
 	userSvc.SetBackgroundRunner(dispatcher.Go)
+	// Same for node.Service's handler-spawned background work (post-recreate
+	// member provisioning + sync-existing-users) — previously untracked safego.Go.
+	nodeSvc.SetBackgroundRunner(dispatcher.Go)
 	// Link the geo updater's background download to the app lifecycle so
 	// Shutdown cancels + drains an in-flight DB download instead of leaking it.
 	geoSvc.SetBackground(bgCtx, &a.bgWG)

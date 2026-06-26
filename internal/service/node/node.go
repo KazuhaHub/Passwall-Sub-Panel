@@ -62,10 +62,33 @@ type Service struct {
 	users      ports.UserRepo
 	settings   ports.SettingsRepo
 	resyncer   MemberResyncer
+	// bg routes handler-spawned background work (member provisioning after a node
+	// recreate; sync-existing-users after a node add) through the app's tracked
+	// dispatcher so App.Shutdown drains it under a cancellable context. Late-bound
+	// via SetBackgroundRunner (mirrors user.Service); nil before wiring / in tests,
+	// where runBackground falls back to an untracked safego.Go.
+	bg func(name string, fn func(ctx context.Context))
 }
 
 // SetMemberResyncer late-binds the shared-client member resyncer (user.Service).
 func (s *Service) SetMemberResyncer(r MemberResyncer) { s.resyncer = r }
+
+// SetBackgroundRunner late-binds the app's tracked async dispatcher so node
+// background work is drained by App.Shutdown instead of leaking on an untracked
+// goroutine (mirrors user.Service.SetBackgroundRunner).
+func (s *Service) SetBackgroundRunner(run func(name string, fn func(ctx context.Context))) {
+	s.bg = run
+}
+
+// runBackground routes fire-and-forget work through the tracked dispatcher when
+// wired (drained by Shutdown, cancellable ctx), else an untracked safego.Go.
+func (s *Service) runBackground(name string, fn func(ctx context.Context)) {
+	if s.bg != nil {
+		s.bg(name, fn)
+		return
+	}
+	safego.Go(name, func() { fn(context.Background()) })
+}
 
 func New(nodes ports.NodeRepo, separators ports.SeparatorRepo, pool ports.XUIPool, cleaner InboundCleaner,
 	tasks ports.SyncTaskRepo, groups ports.GroupRepo, users ports.UserRepo, settings ports.SettingsRepo) *Service {
@@ -398,11 +421,12 @@ func (s *Service) RecreateInboundOnServer(ctx context.Context, nodeID int64) err
 	return nil
 }
 
-// provisionNodeMembersInBackground runs provisionNodeMembers off the request thread.
+// provisionNodeMembersInBackground runs provisionNodeMembers off the request
+// thread, through the tracked dispatcher so App.Shutdown drains it.
 func (s *Service) provisionNodeMembersInBackground(n *domain.Node) {
 	snap := *n
-	safego.Go("node.recreate-provision-members", func() {
-		s.provisionNodeMembers(context.Background(), &snap)
+	s.runBackground("node.recreate-provision-members", func(ctx context.Context) {
+		s.provisionNodeMembers(ctx, &snap)
 	})
 }
 
@@ -1025,8 +1049,8 @@ func sameSyncStamp(a, b *time.Time) bool {
 // user.ResyncGroupMembersInBackground (beta.7).
 func (s *Service) syncExistingUsersToNodeInBackground(n *domain.Node) {
 	snap := *n
-	safego.Go("node.sync-existing-users", func() {
-		if err := s.syncExistingUsersToNode(context.Background(), &snap); err != nil {
+	s.runBackground("node.sync-existing-users", func(ctx context.Context) {
+		if err := s.syncExistingUsersToNode(ctx, &snap); err != nil {
 			log.Warn("sync existing users (background)", "node_id", snap.ID, "err", err)
 		}
 	})

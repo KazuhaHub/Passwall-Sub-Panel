@@ -131,6 +131,27 @@ func TestProvisionNodeMembers(t *testing.T) {
 	}
 }
 
+// When a tracked dispatcher is wired, the background provision must route through
+// it (so App.Shutdown drains it) — not an untracked safego.Go. Pins the GoTracked
+// convention for node.Service's handler-spawned work.
+func TestProvisionNodeMembersInBackground_UsesTrackedRunner(t *testing.T) {
+	var gotName string
+	ran := false
+	svc := &Service{} // nil resyncer → provisionNodeMembers is a safe no-op inside fn
+	svc.SetBackgroundRunner(func(name string, fn func(ctx context.Context)) {
+		gotName = name
+		fn(context.Background()) // run synchronously for the assertion
+		ran = true
+	})
+	svc.provisionNodeMembersInBackground(&domain.Node{ID: 1})
+	if !ran {
+		t.Fatal("background provision must route through the wired dispatcher, not an untracked goroutine")
+	}
+	if gotName != "node.recreate-provision-members" {
+		t.Fatalf("dispatcher task name = %q, want node.recreate-provision-members", gotName)
+	}
+}
+
 // A nil resyncer (not wired) makes member provisioning a safe no-op.
 func TestProvisionNodeMembers_NilResyncerNoop(t *testing.T) {
 	svc := &Service{groups: recreateGroupsList{groups: []*domain.Group{{ID: 7, TagFilter: domain.TagFilter{All: true}}}}}
