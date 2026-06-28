@@ -4,6 +4,19 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## v3.9.0-beta.32 — 2026-06-28
+
+### 修复
+
+- **CRITICAL —— 周期流量重置在 MySQL/Postgres 上「永不触发配额」(用户白嫖)** —— `shouldRollPeriod` 比较日历字段(月/季/年)时,`now` 是面板时区、`periodStart` 是从 DB 读回的,而 **MySQL/Postgres 统一按 UTC 返回**:面板时区写入的 `2026-03-01 00:00 +0800`(= `2026-02-28 16:00 UTC`)读回 `.Month()` 成了 2 月 → 整月每次轮询都判「跨月」→ **每个 tick 都重置周期 baseline** → 月/季/年配额**永远触发不了(无限流量)**,并反复把超额停用的用户解封。SQLite 侥幸没事(glebarez 返回固定偏移 Location),**所以这是 MySQL/Postgres 部署上的线上实际泄漏**。修复:比较前把 `periodStart` 归一化到面板 Location(同一时刻、正确日历字段、与驱动无关)。TDD 固化(UTC 读回不误触 + 真实跨月仍触发)。
+- **流量过计:Xray 非对称计数器重置** —— `deltaTotal` 之前对 `up+down` 单独算 `monotonicDelta`;当 Xray **独立**重置 up/down 之一时,合成 total 没跨过自己的阈值,会把重置量重复计入配额关键的 `LifetimeTotalBytes`(过计 → 误封付费用户)。改为 `deltaTotal = deltaUp + deltaDown`(client / shared / node 三处),重置安全且保证 total == up+down。TDD 固化。
+- **手动改用量 / 新建用户的周期起点改走面板时区** —— `SetPeriodUsage` 与建号(管理员 + SSO)之前用服务器本地 `time.Now()` 播种 `TrafficPeriodStart`,改走 `paneltz`,与业务日历一致(也避免叠加上面 CRITICAL 的时区错位)。
+
+### 改进
+
+- **前端时区显示规则统一** —— **用户自助页跟浏览器时区**(到期日 + 流量图,给终端用户看本地时间);**所有 Admin 页跟面板时区**,且**仅当浏览器 tz ≠ 面板 tz 时**才用括号 / 备注披露本地时区(同则不显示、不吵)。新增可复用的 `TzHint` 备注组件(图表用,逐坐标轴加括号不现实)+ `formatDualDate`(`formatDualTz` 的「只显示日期」版,避免给到期日硬塞 00:00)。已接入:Dashboard 趋势图 + 即将到期、Users(创建 / 最近在线 / 紧急访问 / 到期)、Nodes 健康时间、同步任务、登录活动、Passkey 日期。Logs / 证书页本就用 `formatDualTz` 合规。Settings 里的 GeoIP 构建日期 / IdP 证书到期是外部元数据,有意保持本地。
+- **`reconcile` / `health` 循环间隔即时生效(无需重启)** —— 后台改「对账间隔 / 流量拉取间隔」过去要重启才生效,与已经即时生效的 geo / cert 不一致。改为每轮重读设置 + `t.Reset`(geo / cert 同款写法);读失败时保持当前间隔。`traffic` 间隔仍需重启(它还被 rollup 当窗口参数,后续单独理顺)。
+
 ## v3.9.0-beta.31 — 2026-06-26
 
 ### 兼容
