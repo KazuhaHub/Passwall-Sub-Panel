@@ -255,6 +255,21 @@ export function createAppTheme({ mode, sourceColor, language, density = 'comfort
               opacity: 1,
               boxSizing: 'border-box',
             },
+            // Disabled: the base override hardcodes opaque colors (thumb =
+            // t.outline, track opacity 1), so a disabled switch's thumb looked
+            // as solid/dark as an active one. Lighten the thumb to the muted
+            // outlineVariant and fade the track so an inactive switch reads as
+            // clearly disabled. Placed after the checked rules so it also wins
+            // for the (rarer) checked-and-disabled case.
+            '& .MuiSwitch-switchBase.Mui-disabled': {
+              '& .MuiSwitch-thumb': {
+                backgroundColor: t.outlineVariant,
+              },
+              '& + .MuiSwitch-track': {
+                borderColor: t.outlineVariant,
+                opacity: 0.6,
+              },
+            },
           },
         },
       },

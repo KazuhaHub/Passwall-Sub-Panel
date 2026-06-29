@@ -16,7 +16,7 @@
   },
   "saved": "Saved",
   "empty": "No data",
-  "tz_hint": "Times shown in panel timezone {{panel}} (your local: {{browser}})",
+  "tz_hint": "Times shown in panel timezone {{panel}} (Your Local: {{browser}})",
   "status": {
     "online": "Online",
     "offline": "Offline",
