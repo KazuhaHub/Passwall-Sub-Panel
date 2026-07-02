@@ -3,8 +3,33 @@ import LanguageDetector from 'i18next-browser-languagedetector'
 import { initReactI18next } from 'react-i18next'
 
 import type { AppLanguage } from '@/theme'
+import { fetchLanguages, fetchLanguageBundle, type LocaleMeta } from '@/api/i18n'
 
+// Language-pack schema version, mirrors service/locale.Format on the backend.
+// The exported "base template" stamps this into `psp_language_pack`.
+export const LANGUAGE_PACK_FORMAT = 1
+
+// The two built-in languages are compiled into the bundle. Runtime-uploaded
+// packs are appended to SUPPORTED_LANGUAGES at boot (see loadManifest), so this
+// is a MUTABLE array — call sites read it by reference. Keep the built-ins first.
 export const SUPPORTED_LANGUAGES: AppLanguage[] = ['zh-CN', 'en-US']
+
+// The codes that live in the JS bundle (via the glob below). Everything else is
+// a server-supplied pack fetched over HTTP. Kept in sync with the backend's
+// reserved-code list.
+const BUILTIN_LANGUAGES = new Set<AppLanguage>(['zh-CN', 'en-US'])
+
+export function isBuiltinLanguage(lang: string): boolean {
+  return BUILTIN_LANGUAGES.has(lang)
+}
+
+// serverLanguages holds the manifest of uploaded packs (populated at boot).
+// LanguageMenu reads a pack's self-declared endonym from here for its label.
+export const serverLanguages: LocaleMeta[] = []
+
+export function serverLanguageMeta(code: string): LocaleMeta | undefined {
+  return serverLanguages.find(m => m.code === code)
+}
 
 // Locale namespaces. Each (lang, ns) bundle is loaded via dynamic import
 // — Vite splits them into per-namespace chunks so a user only downloads
@@ -65,10 +90,9 @@ function resolveInitialLanguage(): AppLanguage {
   return 'zh-CN'
 }
 
-const initialLang = resolveInitialLanguage()
-
-// Pre-load every namespace for the initial language, in parallel. Other
-// languages stream in on demand when the user toggles the language picker.
+// Pre-load every namespace for a BUILT-IN language, in parallel (from the Vite
+// glob chunks). Other languages stream in on demand when the user toggles the
+// language picker.
 async function loadLanguageResources(lang: AppLanguage): Promise<Record<string, Record<string, string>>> {
   const entries = await Promise.all(
     NAMESPACES.map(async ns => {
@@ -79,14 +103,87 @@ async function loadLanguageResources(lang: AppLanguage): Promise<Record<string, 
   return Object.fromEntries(entries)
 }
 
+// Fetch + flatten a SERVER-supplied pack. Missing namespaces resolve to {} — the
+// i18next fallback chain fills the gaps, so a partial pack is safe.
+async function loadServerLanguageResources(lang: AppLanguage): Promise<Record<string, Record<string, string>>> {
+  const { namespaces } = await fetchLanguageBundle(lang)
+  const out: Record<string, Record<string, string>> = {}
+  for (const ns of NAMESPACES) {
+    const tree = namespaces[ns]
+    out[ns] = tree ? flatten(tree as Nested) : {}
+  }
+  return out
+}
+
+// Dispatch by origin: built-ins from the glob, uploaded packs over HTTP.
+function loadResourcesFor(lang: AppLanguage): Promise<Record<string, Record<string, string>>> {
+  return isBuiltinLanguage(lang) ? loadLanguageResources(lang) : loadServerLanguageResources(lang)
+}
+
+// loadBuiltinSource returns the RAW (nested, un-flattened) source JSON for a
+// built-in language. The admin "export base template" affordance uses it so
+// translators start from the exact shipped strings in their original nesting.
+export async function loadBuiltinSource(lang: AppLanguage): Promise<Record<string, Record<string, unknown>>> {
+  const out: Record<string, Record<string, unknown>> = {}
+  await Promise.all(NAMESPACES.map(async ns => {
+    const key = `/src/locales/${lang}/${ns}.json`
+    const loader = localeLoaders[key]
+    out[ns] = loader ? ((await loader()).default as Record<string, unknown>) : {}
+  }))
+  return out
+}
+
+// loadManifest fetches the uploaded-pack list and folds it into SUPPORTED_LANGUAGES
+// BEFORE i18n.init — i18next rejects changeLanguage to codes outside supportedLngs,
+// so the whitelist must already contain server codes. Never throws: a manifest
+// failure just leaves the two built-ins available.
+async function loadManifest(): Promise<void> {
+  try {
+    const langs = await fetchLanguages()
+    serverLanguages.length = 0
+    for (const m of langs) {
+      serverLanguages.push(m)
+      if (!SUPPORTED_LANGUAGES.includes(m.code)) SUPPORTED_LANGUAGES.push(m.code)
+    }
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.warn('i18n: failed to load language manifest; only built-in languages available', err)
+  }
+}
+
 export const i18nReady = (async () => {
-  const initialResources = await loadLanguageResources(initialLang)
+  // Order matters: manifest first (extends supportedLngs + lets
+  // resolveInitialLanguage accept a persisted custom code), THEN resolve, THEN
+  // load resources, THEN init. This whole IIFE must never reject — main.tsx
+  // awaits it before mounting React, so a throw here would hang the app on a
+  // blank screen. Every await below is guarded.
+  await loadManifest()
+  let lng = resolveInitialLanguage()
+  const resources: Record<string, Record<string, Record<string, string>>> = {}
+  try {
+    resources[lng] = await loadResourcesFor(lng)
+  } catch (err) {
+    // A stale/removed custom pack (or a failed fetch) must never block mount —
+    // fall back to the always-present built-in default.
+    // eslint-disable-next-line no-console
+    console.warn('i18n: failed to load initial language, falling back to zh-CN', lng, err)
+    lng = 'zh-CN'
+    resources[lng] = await loadLanguageResources('zh-CN')
+  }
+  // Register the zh-CN fallback bundle too when it isn't the active language:
+  // load:'currentOnly' means i18next won't lazy-load the fallback, so a partial
+  // custom pack would otherwise surface raw keys instead of Chinese.
+  if (!resources['zh-CN']) {
+    try {
+      resources['zh-CN'] = await loadLanguageResources('zh-CN')
+    } catch { /* built-in should always be present; ignore */ }
+  }
   await i18n
     .use(LanguageDetector)
     .use(initReactI18next)
     .init({
-      resources: { [initialLang]: initialResources },
-      lng: initialLang,
+      resources,
+      lng,
       // Map generic browser language tags (en/zh) onto the exact bundles we ship.
       // Keep zh-CN as the final fallback so missing translations never surface
       // raw keys in normal use.
@@ -97,8 +194,8 @@ export const i18nReady = (async () => {
       },
       supportedLngs: SUPPORTED_LANGUAGES,
       load: 'currentOnly',
-      // No preload — we explicitly loaded the initial language above and
-      // stream the rest lazily via setLanguage() below.
+      // No preload — we explicitly loaded the initial language (+ fallback)
+      // above and stream the rest lazily via setLanguage() below.
       ns: NAMESPACES as unknown as string[],
       defaultNS: 'common',
       fallbackNS: 'common',
@@ -123,18 +220,19 @@ export const i18nReady = (async () => {
 
 export async function setLanguage(lang: AppLanguage): Promise<void> {
   // Lazy-load on first switch — subsequent toggles hit i18next's in-memory
-  // cache (hasResourceBundle) so they're free.
+  // cache (hasResourceBundle) so they're free. Built-ins come from the Vite
+  // glob; uploaded packs are fetched over HTTP (loadResourcesFor dispatches).
   //
-  // The Promise.all over per-namespace dynamic imports CAN reject (stale
-  // build chunks after a deploy + an open tab clicks language switch =
-  // 404 on a missing chunk). Callers (UserLayout / AdminLayout /
-  // LoginView*) fire-and-forget; without this try/catch the rejection
-  // surfaces as an unhandled promise + the UI silently stays on the
-  // old language. Log it and leave changeLanguage uncalled so i18next's
-  // resolvedLanguage stays consistent with what t() actually returns.
+  // Loading CAN reject (stale build chunks after a deploy + an open tab clicks
+  // language switch = 404 on a missing chunk; or a removed pack / offline
+  // backend for a custom code). Callers (UserLayout / AdminLayout / LoginView*)
+  // fire-and-forget; without this try/catch the rejection surfaces as an
+  // unhandled promise + the UI silently stays on the old language. Log it and
+  // leave changeLanguage uncalled so i18next's resolvedLanguage stays consistent
+  // with what t() actually returns.
   if (!i18n.hasResourceBundle(lang, 'common')) {
     try {
-      const resources = await loadLanguageResources(lang)
+      const resources = await loadResourcesFor(lang)
       for (const [ns, bundle] of Object.entries(resources)) {
         i18n.addResourceBundle(lang, ns, bundle, true, true)
       }

@@ -1,4 +1,37 @@
 {
+  "languagePacks": {
+    "title": "Language packs",
+    "subtitle": "Upload custom UI language packs. After uploading, reload the page to pick the language from the language menu.",
+    "upload": "Upload",
+    "upload_title": "Upload language pack",
+    "upload_help": "Choose or paste a JSON language-pack file. Tip: export the base template first, translate its strings, then upload.",
+    "choose_file": "Choose file",
+    "paste_placeholder": "Paste language-pack JSON here…",
+    "export_base": "Export base template",
+    "empty": "No custom language packs yet",
+    "size_hint": "Maximum {{max}} KB per language pack.",
+    "stale_warning": "Translated against {{base}}; the panel is now {{current}} — consider re-exporting the base and re-translating.",
+    "table": {
+      "code": "Code",
+      "name": "Name",
+      "author": "Author",
+      "base_version": "Base version",
+      "actions": "Actions"
+    },
+    "confirm": {
+      "delete_title": "Delete language pack",
+      "delete_message": "Delete language pack {{name}} ({{code}})? This cannot be undone."
+    },
+    "toast": {
+      "saved": "Language pack saved",
+      "deleted": "Language pack deleted",
+      "reload_hint": "Reload the page to see this language in the language menu.",
+      "invalid_json": "Could not parse JSON — please check the file contents.",
+      "missing_fields": "Pack is missing required fields (code / name / namespaces).",
+      "read_failed": "Failed to read file",
+      "too_large": "Language pack too large — maximum {{max}} KB."
+    }
+  },
   "alerts": {
     "bell_title": "Notifications",
     "empty": "Nothing needs attention",

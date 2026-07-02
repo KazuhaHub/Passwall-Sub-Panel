@@ -1,4 +1,37 @@
 {
+  "languagePacks": {
+    "title": "语言包",
+    "subtitle": "上传自定义界面语言包，上传后重新载入页面即可在语言菜单中选择。",
+    "upload": "上传",
+    "upload_title": "上传语言包",
+    "upload_help": "选择或粘贴一个 JSON 语言包文件。可先“导出基准模板”，翻译其中的文本后再上传。",
+    "choose_file": "选择文件",
+    "paste_placeholder": "在此粘贴语言包 JSON…",
+    "export_base": "导出基准模板",
+    "empty": "暂无自定义语言包",
+    "size_hint": "单个语言包最大 {{max}} KB。",
+    "stale_warning": "该翻译基于 {{base}},当前面板为 {{current}},建议重新导出基准并翻译。",
+    "table": {
+      "code": "语言代码",
+      "name": "名称",
+      "author": "作者",
+      "base_version": "基准版本",
+      "actions": "操作"
+    },
+    "confirm": {
+      "delete_title": "删除语言包",
+      "delete_message": "确定删除语言包 {{name}}（{{code}}）吗？此操作不可撤销。"
+    },
+    "toast": {
+      "saved": "语言包已保存",
+      "deleted": "语言包已删除",
+      "reload_hint": "重新载入页面后即可在语言菜单中看到该语言。",
+      "invalid_json": "JSON 解析失败，请检查文件内容。",
+      "missing_fields": "语言包缺少必填字段（code / name / namespaces）。",
+      "read_failed": "读取文件失败",
+      "too_large": "语言包过大，最大 {{max}} KB。"
+    }
+  },
   "alerts": {
     "bell_title": "通知",
     "empty": "暂无需要处理的通知",

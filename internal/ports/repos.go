@@ -626,6 +626,20 @@ type TemplateRepo interface {
 	Delete(ctx context.Context, slug string) error
 }
 
+// LocaleRepo persists runtime-uploaded UI language packs as one JSON file per
+// language under <ConfigDir>/locales/. Packs are additive on top of the two
+// compiled-in built-ins (zh-CN / en-US); there is no seed/reset for them.
+type LocaleRepo interface {
+	// List returns the manifest (codes/names/etags, no translation bodies).
+	List(ctx context.Context) ([]domain.LocaleMeta, error)
+	// Get returns one full pack, or domain.ErrNotFound.
+	Get(ctx context.Context, code string) (*domain.LocalePack, error)
+	// Save writes a pack atomically (caller validates structure first).
+	Save(ctx context.Context, p *domain.LocalePack) error
+	// Delete removes a pack, or domain.ErrNotFound if it doesn't exist.
+	Delete(ctx context.Context, code string) error
+}
+
 type XUIPanelRepo interface {
 	List(ctx context.Context) ([]*domain.XUIPanel, error)
 	// ListPaged is the admin-API entry point. Keyword matches name /
@@ -1357,6 +1371,7 @@ type Repos struct {
 	SyncTask       SyncTaskRepo
 	RuleSet        RuleSetRepo
 	Template       TemplateRepo
+	Locale         LocaleRepo
 	XUIPanel       XUIPanelRepo
 	Settings       SettingsRepo
 	ScopeSettings  ScopeSettingsRepo

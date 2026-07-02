@@ -26,15 +26,16 @@ func TestNewReposPopulatesEveryDBRepo(t *testing.T) {
 		t.Fatalf("schema: %v", err)
 	}
 
-	// YAML-backed repos are wired by app.go (not the DB), so NewRepos leaves
-	// them nil on purpose.
-	yamlBacked := map[string]bool{"RuleSet": true, "Template": true}
+	// File-backed repos are wired by app.go (not the DB), so NewRepos leaves
+	// them nil on purpose: rule sets / templates live in config/*.yaml and UI
+	// language packs in config/locales/*.json.
+	fileBacked := map[string]bool{"RuleSet": true, "Template": true, "Locale": true}
 
 	repos := NewRepos(db)
 	v := reflect.ValueOf(repos)
 	for i := 0; i < v.NumField(); i++ {
 		name := v.Type().Field(i).Name
-		if yamlBacked[name] {
+		if fileBacked[name] {
 			continue
 		}
 		if v.Field(i).IsNil() {

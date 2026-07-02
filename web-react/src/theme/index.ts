@@ -11,12 +11,27 @@ declare module '@mui/material/styles' {
   }
 }
 
-export type AppLanguage = 'zh-CN' | 'en-US'
+// The two built-in languages are 'zh-CN' | 'en-US', but runtime-uploaded
+// language packs can register any code, so AppLanguage is a plain string.
+export type AppLanguage = string
 
-// Map our language codes to MUI's bundled locale objects.
-const MUI_LOCALE_MAP: Record<AppLanguage, object> = {
+// Map our built-in language codes to MUI's bundled locale objects. Uploaded
+// packs resolve their MUI locale by deriving the key (see muiLocaleFor); those
+// without a matching @mui/material/locale export fall back to enUS for MUI's own
+// component strings (date pickers, pagination) — app strings still come from the
+// pack, so only a few built-in widget labels are affected.
+const MUI_LOCALE_MAP: Record<string, object> = {
   'zh-CN': muiLocales.zhCN,
   'en-US': muiLocales.enUS,
+}
+
+// muiLocaleFor resolves a language code to a MUI locale object. @mui/material/locale
+// exports are named like `frFR` / `deDE` / `zhCN`, so a code such as "fr-FR"
+// maps by stripping the hyphen. Unknown codes fall back to enUS.
+function muiLocaleFor(language: AppLanguage): object {
+  const key = language.replace(/-/g, '')
+  const all = muiLocales as unknown as Record<string, object>
+  return MUI_LOCALE_MAP[language] ?? all[key] ?? muiLocales.enUS
 }
 
 // Density modes mirror what stores/appearance.ts exposes. The theme
@@ -33,7 +48,7 @@ export interface CreateAppThemeArgs {
 
 export function createAppTheme({ mode, sourceColor, language, density = 'comfortable' }: CreateAppThemeArgs): Theme {
   const t = tokensFromSource(sourceColor, mode)
-  const muiLocale = MUI_LOCALE_MAP[language] ?? muiLocales.enUS
+  const muiLocale = muiLocaleFor(language)
   const compact = density === 'compact'
 
   return createTheme({

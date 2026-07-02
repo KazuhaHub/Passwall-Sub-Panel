@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/adapters/acme"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/adapters/localefs"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/adapters/sqlstore"
 	xuiadapter "github.com/KazuhaHub/passwall-sub-panel/internal/adapters/xui"
 	yamladapter "github.com/KazuhaHub/passwall-sub-panel/internal/adapters/yaml"
@@ -204,6 +205,10 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	if err != nil {
 		return nil, fmt.Errorf("ruleset repo: %w", err)
 	}
+	localeRepo, err := localefs.NewLocaleRepo(cfg.ConfigDir)
+	if err != nil {
+		return nil, fmt.Errorf("locale repo: %w", err)
+	}
 
 	samlCfg, err := dbRepos.SAMLConfig.Load(ctx)
 	if err != nil {
@@ -224,6 +229,7 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	repos := dbRepos
 	repos.RuleSet = ruleSetRepo
 	repos.Template = templateRepo
+	repos.Locale = localeRepo
 
 	// Admin bootstrap is deferred to Run() — see the comment on App.repos.
 	// We must NOT print the initial password before knowing the listen

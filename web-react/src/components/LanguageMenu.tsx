@@ -10,7 +10,7 @@ import TranslateIcon from '@mui/icons-material/Translate'
 import CheckIcon from '@mui/icons-material/Check'
 import { useTranslation } from 'react-i18next'
 import type { AppLanguage } from '@/theme'
-import { SUPPORTED_LANGUAGES } from '@/i18n'
+import { SUPPORTED_LANGUAGES, isBuiltinLanguage, serverLanguageMeta } from '@/i18n'
 
 interface Props {
   value: AppLanguage
@@ -27,6 +27,13 @@ export default function LanguageMenu({ value, onChange }: Props) {
   function pick(lang: AppLanguage) {
     onChange(lang)
     setAnchor(null)
+  }
+
+  // Built-in labels come from the `language` namespace (t(lng)); uploaded packs
+  // carry their own endonym in the manifest, shown under any active UI language.
+  function label(lng: AppLanguage): string {
+    if (isBuiltinLanguage(lng)) return t(lng)
+    return serverLanguageMeta(lng)?.name ?? lng
   }
 
   return (
@@ -46,7 +53,7 @@ export default function LanguageMenu({ value, onChange }: Props) {
       >
         {SUPPORTED_LANGUAGES.map(lng => (
           <MenuItem key={lng} onClick={() => pick(lng)} selected={lng === value}>
-            <ListItemText primary={t(lng)} />
+            <ListItemText primary={label(lng)} />
             {lng === value && <CheckIcon fontSize="small" />}
           </MenuItem>
         ))}

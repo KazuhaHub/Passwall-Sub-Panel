@@ -247,6 +247,13 @@ func NewRouter(d Deps) *gin.Engine {
 		authGroup.GET("/sso-complete", ssoComplete.Complete)
 	}
 
+	// Public UI language packs. Unauthenticated on purpose: the login screen must
+	// render in a custom language before anyone signs in. Serves only UI text (no
+	// secrets); ETag-cached so repeat page loads revalidate cheaply.
+	i18nPub := handler.NewI18nPublicHandler(d.Repos.Locale)
+	g.GET("/api/i18n/langs", i18nPub.Langs)
+	g.GET("/api/i18n/:lang", i18nPub.Bundle)
+
 	// Authenticated user self-service
 	// "Require 2FA" enforcement: decides whether an account must enroll a second
 	// factor before using the panel, and the middleware that gates it. Shared by
@@ -427,6 +434,15 @@ func NewRouter(d Deps) *gin.Engine {
 		adminGroup.PUT("/templates/:slug", templates.Save)
 		adminGroup.DELETE("/templates/:slug", templates.Delete)
 		adminGroup.POST("/templates/:slug/reset", templates.Reset)
+
+		// Runtime-uploaded UI language packs. List is staff-visible; writes are
+		// admin-only (uploading global UI content served to everyone is admin
+		// infrastructure — see permissions.ts config.write, the SPA-side guard).
+		// The public read side is registered outside the auth groups below.
+		locales := handler.NewAdminLocalesHandler(d.Repos.Locale)
+		staffGroup.GET("/locales", locales.List)
+		adminGroup.PUT("/locales/:code", locales.Save)
+		adminGroup.DELETE("/locales/:code", locales.Delete)
 
 		auditH := handler.NewAdminAuditHandler(d.Repos.Audit, d.Geo)
 		// Read so operators can review their own actions; only admin can

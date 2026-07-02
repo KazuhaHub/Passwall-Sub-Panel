@@ -39,6 +39,7 @@ import InsightsIcon from '@mui/icons-material/Insights'
 import ReceiptLongIcon from '@mui/icons-material/ReceiptLong'
 import SyncIcon from '@mui/icons-material/Sync'
 import SettingsIcon from '@mui/icons-material/Settings'
+import TranslateIcon from '@mui/icons-material/Translate'
 import LogoutIcon from '@mui/icons-material/Logout'
 
 import AppearanceMenu from '@/components/AppearanceMenu'
@@ -112,6 +113,7 @@ const ADMIN_NAV: NavSection[] = [
     { to: '/admin/sync-tasks', labelKey: 'nav:admin.sync_tasks', Icon: SyncIcon },
   ] },
   { items: [
+    { to: '/admin/language-packs', labelKey: 'nav:admin.language_packs', Icon: TranslateIcon, adminOnly: true },
     { to: '/admin/settings', labelKey: 'nav:admin.settings', Icon: SettingsIcon, adminOnly: true },
   ] },
 ]
