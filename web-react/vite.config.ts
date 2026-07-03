@@ -40,11 +40,12 @@ export default defineConfig({
         // Keep the chunk count low (no granular per-package) — a long
         // chunk list also hurts because HTTP/2 multiplex still pays
         // per-request overhead.
-        manualChunks: {
-          'vendor-react': ['react', 'react-dom', 'react-router-dom'],
-          'vendor-mui': ['@mui/material', '@mui/icons-material', '@emotion/react', '@emotion/styled'],
-          'vendor-echarts': ['echarts'],
-          'vendor-i18n': ['i18next', 'react-i18next'],
+        manualChunks(id) {
+          if (!id.includes('node_modules')) return
+          if (/[\\/](react|react-dom|react-router-dom)[\\/]/.test(id)) return 'vendor-react'
+          if (/[\\/](@mui[\\/]material|@mui[\\/]icons-material|@emotion[\\/](react|styled))[\\/]/.test(id)) return 'vendor-mui'
+          if (/[\\/]echarts[\\/]/.test(id)) return 'vendor-echarts'
+          if (/[\\/](i18next|react-i18next)[\\/]/.test(id)) return 'vendor-i18n'
         },
       },
     },
