@@ -21,7 +21,7 @@
     "@simplewebauthn/browser": "^13.3.0",
     "@uiw/react-codemirror": "^4.25.10",
     "axios": "^1.16.1",
-    "echarts": "^6.0.0",
+    "echarts": "^6.1.0",
     "i18next": "^26.2.0",
     "i18next-browser-languagedetector": "^8.2.1",
     "qrcode.react": "^4.2.0",
