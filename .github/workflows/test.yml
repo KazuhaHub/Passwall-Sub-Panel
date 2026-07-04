@@ -23,7 +23,7 @@ on:
 
 jobs:
   web:
-    name: web (typecheck + build)
+    name: web (typecheck + build + test)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -39,6 +39,9 @@ jobs:
       - name: build
         working-directory: web-react
         run: npm run build
+      - name: unit tests
+        working-directory: web-react
+        run: npm run test
 
   build:
     name: build (cross-compile release targets)

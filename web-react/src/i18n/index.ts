@@ -4,6 +4,7 @@ import { initReactI18next } from 'react-i18next'
 
 import type { AppLanguage } from '@/theme'
 import { fetchLanguages, fetchLanguageBundle, type LocaleMeta } from '@/api/i18n'
+import { NAMESPACES, flatten, I18N_STATIC_OPTIONS, type Nested } from './options'
 
 // Language-pack schema version, mirrors service/locale.Format on the backend.
 // The exported "base template" stamps this into `psp_language_pack`.
@@ -31,30 +32,12 @@ export function serverLanguageMeta(code: string): LocaleMeta | undefined {
   return serverLanguages.find(m => m.code === code)
 }
 
-// Locale namespaces. Each (lang, ns) bundle is loaded via dynamic import
-// — Vite splits them into per-namespace chunks so a user only downloads
-// the languages and namespaces they actually need. Pre-fix this module
-// statically imported all 7 namespaces × 2 languages (14 JSON modules,
-// ~120KB of which admin.json was 57KB per language) into the main
-// bundle; admins on en-US pulled the zh-CN strings for free, and users
-// who never visit admin pages still shipped the admin namespace.
-const NAMESPACES = ['common', 'appearance', 'language', 'auth', 'nav', 'admin', 'user'] as const
-
-// Flatten { a: { b: { c: 'x' } } } → { 'a.b.c': 'x' }.
-// We do this at init time + run i18n with keySeparator:false so a call like
-// t('admin:servers.title') treats 'servers.title' as one flat key. Workaround
-// for an i18next quirk where instance-level keySeparator doesn't actually get
-// used during nested-key resolution.
-type Nested = { [k: string]: string | Nested }
-function flatten(obj: Nested, prefix = ''): Record<string, string> {
-  const out: Record<string, string> = {}
-  for (const [k, v] of Object.entries(obj)) {
-    const key = prefix ? `${prefix}.${k}` : k
-    if (typeof v === 'string') out[key] = v
-    else if (v && typeof v === 'object') Object.assign(out, flatten(v, key))
-  }
-  return out
-}
+// NAMESPACES / flatten / the static init options live in ./options (a
+// side-effect-free module) so tests can import the real config without
+// triggering this module's bootstrap IIFE. Pre-fix this module statically
+// imported all 7 namespaces × 2 languages (14 JSON modules, ~120KB of which
+// admin.json was 57KB per language) into the main bundle; the glob below now
+// code-splits them per (lang, ns).
 
 // Vite's import.meta.glob gives us per-(lang, ns) lazy chunks. The
 // `import()`-style returns a Promise<{ default: Nested }> — wrapped in
@@ -182,29 +165,13 @@ export const i18nReady = (async () => {
     .use(LanguageDetector)
     .use(initReactI18next)
     .init({
+      // Shared resolution/fallback config (fallbackLng → zh-CN, keySeparator,
+      // fallbackNS, …) lives in ./options so a unit test exercises the same
+      // config. Only the per-instance dynamic bits + plugin config are here.
+      ...I18N_STATIC_OPTIONS,
       resources,
       lng,
-      // Map generic browser language tags (en/zh) onto the exact bundles we ship.
-      // Keep zh-CN as the final fallback so missing translations never surface
-      // raw keys in normal use.
-      fallbackLng: {
-        en: ['en-US', 'zh-CN'],
-        zh: ['zh-CN'],
-        default: ['zh-CN'],
-      },
       supportedLngs: SUPPORTED_LANGUAGES,
-      load: 'currentOnly',
-      // No preload — we explicitly loaded the initial language (+ fallback)
-      // above and stream the rest lazily via setLanguage() below.
-      ns: NAMESPACES as unknown as string[],
-      defaultNS: 'common',
-      fallbackNS: 'common',
-      // Resources are pre-flattened to dotted keys, so the runtime no longer
-      // needs to walk a nested object — keySeparator:false makes t() treat the
-      // whole 'servers.title' string as one flat lookup.
-      keySeparator: false,
-      nsSeparator: ':',
-      interpolation: { escapeValue: false },
       detection: {
         order: ['querystring', 'localStorage', 'navigator'],
         lookupQuerystring: 'lang',
