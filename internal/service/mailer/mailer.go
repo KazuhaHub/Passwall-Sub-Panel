@@ -1891,20 +1891,44 @@ func heloName(fromEmail, smtpHost string) string {
 	return strings.TrimSpace(smtpHost)
 }
 
+func sanitizeHeaderValue(v string) string {
+	v = strings.ReplaceAll(v, "\r", "")
+	v = strings.ReplaceAll(v, "\n", "")
+	return strings.TrimSpace(v)
+}
+
+func sanitizeAddressHeader(addr string) string {
+	if parsed, err := mail.ParseAddress(strings.TrimSpace(addr)); err == nil {
+		return sanitizeHeaderValue(parsed.String())
+	}
+	return sanitizeHeaderValue(addr)
+}
+
+func normalizeBody(body string) string {
+	body = strings.ReplaceAll(body, "\r\n", "\n")
+	body = strings.ReplaceAll(body, "\r", "\n")
+	return strings.ReplaceAll(body, "\n", "\r\n")
+}
+
 func buildMessage(from, to, subject, body string) string {
+	safeFrom := sanitizeAddressHeader(from)
+	safeTo := sanitizeAddressHeader(to)
+	safeSubject := sanitizeHeaderValue(subject)
+	safeBody := normalizeBody(body)
+
 	contentType := "text/plain; charset=UTF-8"
-	if looksLikeHTML(body) {
+	if looksLikeHTML(safeBody) {
 		contentType = "text/html; charset=UTF-8"
 	}
 	headers := []string{
-		"From: " + from,
-		"To: " + to,
-		"Subject: " + mime.QEncoding.Encode("utf-8", subject),
+		"From: " + safeFrom,
+		"To: " + safeTo,
+		"Subject: " + mime.QEncoding.Encode("utf-8", safeSubject),
 		"MIME-Version: 1.0",
 		"Content-Type: " + contentType,
 		"Content-Transfer-Encoding: 8bit",
 	}
-	return strings.Join(headers, "\r\n") + "\r\n\r\n" + strings.ReplaceAll(body, "\n", "\r\n")
+	return strings.Join(headers, "\r\n") + "\r\n\r\n" + safeBody
 }
 
 func looksLikeHTML(body string) bool {
