@@ -39,6 +39,7 @@ import ContentCopyIcon from '@mui/icons-material/ContentCopy'
 import CheckCircleIcon from '@mui/icons-material/CheckCircle'
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutlined'
 import { useTranslation } from 'react-i18next'
+import { panelPath } from '@/panelPath'
 
 import {
   fetchSAMLMetadata,
@@ -265,6 +266,11 @@ export default function SettingsView() {
         loaded.sub_base_url = window.location.origin
       }
       setSettings(loaded)
+      const changedPath = sessionStorage.getItem('psp_panel_path_changed')
+      if (changedPath !== null && changedPath === (panelPath || '/')) {
+        sessionStorage.removeItem('psp_panel_path_changed')
+        pushSnack(t('settings.panel_path_sso_notice'), 'warning')
+      }
     }
     finally { setLoading(false) }
   }
@@ -339,6 +345,13 @@ export default function SettingsView() {
       setChangeGeoToken(false)
       setChangeCaptchaSecret(false)
       if (!opts.quiet) pushSnack(t('settings.saved'), 'success')
+      // panel_path changes the browser-facing SPA/API base. Reload from the
+      // new mount immediately so this tab never continues using stale routes.
+      if (saved.panel_path !== panelPath) {
+        sessionStorage.setItem('psp_panel_path_changed', saved.panel_path || '/')
+        window.location.replace(`${saved.panel_path || ''}/admin/settings`)
+        return true
+      }
       return true
     } finally { setSaving(false) }
   }
@@ -1031,6 +1044,9 @@ export default function SettingsView() {
                   helperText={err ? t(`admin:${err}`) : ''} />
               )
             })()}
+            <TextField fullWidth label={t('settings.brand.panel_path')}
+              value={settings.panel_path} onChange={e => patch('panel_path', e.target.value)}
+              helperText={t('settings.brand.panel_path_hint')} />
           </Section>
 
           <Section title={t('settings.brand.section_assets')} md={md}>

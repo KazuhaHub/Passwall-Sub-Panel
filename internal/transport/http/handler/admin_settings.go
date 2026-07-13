@@ -8,6 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/jwtutil"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/panelpath"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/paneltz"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/captcha"
@@ -21,10 +22,12 @@ import (
 type AdminSettingsHandler struct {
 	repo      ports.SettingsRepo
 	jwtParams *jwtutil.ParamsCache
+	paths     *panelpath.Resolver
+	sso       *PanelPathSSOMigrator
 }
 
-func NewAdminSettingsHandler(repo ports.SettingsRepo, jwtParams *jwtutil.ParamsCache) *AdminSettingsHandler {
-	return &AdminSettingsHandler{repo: repo, jwtParams: jwtParams}
+func NewAdminSettingsHandler(repo ports.SettingsRepo, jwtParams *jwtutil.ParamsCache, paths *panelpath.Resolver, sso *PanelPathSSOMigrator) *AdminSettingsHandler {
+	return &AdminSettingsHandler{repo: repo, jwtParams: jwtParams, paths: paths, sso: sso}
 }
 
 type settingsDTO struct {
@@ -37,6 +40,7 @@ type settingsDTO struct {
 	EmailDomain                string                   `json:"email_domain"`
 	AuditRetentionDays         int                      `json:"audit_retention_days"`
 	SubBaseURL                 string                   `json:"sub_base_url"`
+	PanelPath                  string                   `json:"panel_path"`
 	Timezone                   string                   `json:"timezone"`
 	CronTrafficPullMinutes     int                      `json:"cron_traffic_pull_minutes"`
 	CronReconcileMinutes       int                      `json:"cron_reconcile_minutes"`
@@ -167,80 +171,81 @@ func (h *AdminSettingsHandler) Get(c *gin.Context) {
 // other (the drift that briefly broke the 2FA totp_enabled round-trip).
 func settingsToDTO(s ports.UISettings) settingsDTO {
 	return settingsDTO{
-		LoginMode:                  s.LoginMode,
-		SiteTitle:                  s.SiteTitle,
-		AppTitle:                   s.AppTitle,
-		IconURL:                    s.IconURL,
-		LogoURL:                    s.LogoURL,
-		LogoURLDark:                s.LogoURLDark,
-		EmailDomain:                s.EmailDomain,
-		AuditRetentionDays:         s.AuditRetentionDays,
-		SubBaseURL:                 s.SubBaseURL,
-		Timezone:                   s.Timezone,
-		CronTrafficPullMinutes:     s.CronTrafficPullMinutes,
-		CronReconcileMinutes:       s.CronReconcileMinutes,
-		MaxPanelConcurrency:        s.MaxPanelConcurrency,
-		JWTAccessTTLMinutes:        s.JWTAccessTTLMinutes,
-		JWTRefreshTTLMinutes:       s.JWTRefreshTTLMinutes,
-		JWTIssuer:                  s.JWTIssuer,
-		SubPerIPPerMin:             s.SubPerIPPerMin,
-		LoginPerIPPerMin:           s.LoginPerIPPerMin,
-		SyncTaskRetentionDays:      s.SyncTaskRetentionDays,
-		TrafficHistoryDays:         s.TrafficHistoryDays,
-		DisallowUserLocalLogin:     s.DisallowUserLocalLogin,
-		DisallowUserPasswordChange: s.DisallowUserPasswordChange,
-		AllowUserPersonalRules:     s.AllowUserPersonalRules,
-		EmergencyAccessEnabled:     s.EmergencyAccessEnabled,
-		EmergencyAccessHours:       s.EmergencyAccessHours,
-		EmergencyAccessMaxCount:    s.EmergencyAccessMaxCount,
-		EmergencyAccessQuotaGB:     s.EmergencyAccessQuotaGB,
-		SubPath:                    s.SubPath,
-		SubClients:                 s.SubClients,
-		SubClientFilterMode:        s.SubClientFilterMode,
-		SubImportTutorialURL:       s.SubImportTutorialURL,
-		SubLogRetentionDays:        s.SubLogRetentionDays,
-		MailSentRetentionDays:      s.MailSentRetentionDays,
-		AuthEventRetentionDays:     s.AuthEventRetentionDays,
-		SubBlockAutoDisable:        s.SubBlockAutoDisable,
-		SubBlockAutoDisableCount:   s.SubBlockAutoDisableCount,
-		SubBlockNotifyUser:         s.SubBlockNotifyUser,
-		SubBlockNotifyMaxPerDay:    s.SubBlockNotifyMaxPerDay,
-		SubUpdateIntervalHours:     s.SubUpdateIntervalHours,
-		SubProfileNameTemplate:     s.SubProfileNameTemplate,
-		SubRegionFlagPrefix:        s.SubRegionFlagPrefix,
-		QuickLinks:                 s.QuickLinks,
-		GlobalAnnouncement:         s.GlobalAnnouncement,
-		FooterText:                 s.FooterText,
-		ThemeColor:                 s.ThemeColor,
-		ExpireBeforeDays:           s.ExpireBeforeDays,
-		TrafficRemainPercent:       s.TrafficRemainPercent,
-		GeoIPEnabled:               s.GeoIPEnabled,
-		GeoIPDBFile:                s.GeoIPDBFile,
-		GeoIPAutoUpdate:            s.GeoIPAutoUpdate,
-		GeoIPUpdateSource:          s.GeoIPUpdateSource,
-		GeoIPUpdateURL:             s.GeoIPUpdateURL,
-		GeoIPUpdateEdition:         s.GeoIPUpdateEdition,
-		GeoIPUpdateIntervalHours:   s.GeoIPUpdateIntervalHours,
+		LoginMode:                   s.LoginMode,
+		SiteTitle:                   s.SiteTitle,
+		AppTitle:                    s.AppTitle,
+		IconURL:                     s.IconURL,
+		LogoURL:                     s.LogoURL,
+		LogoURLDark:                 s.LogoURLDark,
+		EmailDomain:                 s.EmailDomain,
+		AuditRetentionDays:          s.AuditRetentionDays,
+		SubBaseURL:                  s.SubBaseURL,
+		PanelPath:                   s.PanelPath,
+		Timezone:                    s.Timezone,
+		CronTrafficPullMinutes:      s.CronTrafficPullMinutes,
+		CronReconcileMinutes:        s.CronReconcileMinutes,
+		MaxPanelConcurrency:         s.MaxPanelConcurrency,
+		JWTAccessTTLMinutes:         s.JWTAccessTTLMinutes,
+		JWTRefreshTTLMinutes:        s.JWTRefreshTTLMinutes,
+		JWTIssuer:                   s.JWTIssuer,
+		SubPerIPPerMin:              s.SubPerIPPerMin,
+		LoginPerIPPerMin:            s.LoginPerIPPerMin,
+		SyncTaskRetentionDays:       s.SyncTaskRetentionDays,
+		TrafficHistoryDays:          s.TrafficHistoryDays,
+		DisallowUserLocalLogin:      s.DisallowUserLocalLogin,
+		DisallowUserPasswordChange:  s.DisallowUserPasswordChange,
+		AllowUserPersonalRules:      s.AllowUserPersonalRules,
+		EmergencyAccessEnabled:      s.EmergencyAccessEnabled,
+		EmergencyAccessHours:        s.EmergencyAccessHours,
+		EmergencyAccessMaxCount:     s.EmergencyAccessMaxCount,
+		EmergencyAccessQuotaGB:      s.EmergencyAccessQuotaGB,
+		SubPath:                     s.SubPath,
+		SubClients:                  s.SubClients,
+		SubClientFilterMode:         s.SubClientFilterMode,
+		SubImportTutorialURL:        s.SubImportTutorialURL,
+		SubLogRetentionDays:         s.SubLogRetentionDays,
+		MailSentRetentionDays:       s.MailSentRetentionDays,
+		AuthEventRetentionDays:      s.AuthEventRetentionDays,
+		SubBlockAutoDisable:         s.SubBlockAutoDisable,
+		SubBlockAutoDisableCount:    s.SubBlockAutoDisableCount,
+		SubBlockNotifyUser:          s.SubBlockNotifyUser,
+		SubBlockNotifyMaxPerDay:     s.SubBlockNotifyMaxPerDay,
+		SubUpdateIntervalHours:      s.SubUpdateIntervalHours,
+		SubProfileNameTemplate:      s.SubProfileNameTemplate,
+		SubRegionFlagPrefix:         s.SubRegionFlagPrefix,
+		QuickLinks:                  s.QuickLinks,
+		GlobalAnnouncement:          s.GlobalAnnouncement,
+		FooterText:                  s.FooterText,
+		ThemeColor:                  s.ThemeColor,
+		ExpireBeforeDays:            s.ExpireBeforeDays,
+		TrafficRemainPercent:        s.TrafficRemainPercent,
+		GeoIPEnabled:                s.GeoIPEnabled,
+		GeoIPDBFile:                 s.GeoIPDBFile,
+		GeoIPAutoUpdate:             s.GeoIPAutoUpdate,
+		GeoIPUpdateSource:           s.GeoIPUpdateSource,
+		GeoIPUpdateURL:              s.GeoIPUpdateURL,
+		GeoIPUpdateEdition:          s.GeoIPUpdateEdition,
+		GeoIPUpdateIntervalHours:    s.GeoIPUpdateIntervalHours,
 		CertRenewBeforeDays:         s.CertRenewBeforeDays,
 		CertRenewCheckIntervalHours: s.CertRenewCheckIntervalHours,
 		// Update token masked: never echoed, only presence reported.
-		HasGeoIPUpdateToken: strings.TrimSpace(s.GeoIPUpdateToken) != "",
+		HasGeoIPUpdateToken:  strings.TrimSpace(s.GeoIPUpdateToken) != "",
 		CaptchaEnabled:       s.CaptchaEnabled,
 		CaptchaProvider:      s.CaptchaProvider,
 		CaptchaTrigger:       s.CaptchaTrigger,
 		CaptchaFailThreshold: s.CaptchaFailThreshold,
 		CaptchaSiteKey:       s.CaptchaSiteKey,
 		// Secret key masked: never echoed, only presence reported.
-		HasCaptchaSecretKey:    strings.TrimSpace(s.CaptchaSecretKey) != "",
-		CaptchaRegisterEnabled: s.CaptchaRegisterEnabled,
-		CaptchaForgotEnabled:   s.CaptchaForgotEnabled,
-		LockoutEnabled:         s.LockoutEnabled,
-		LockoutThreshold:       s.LockoutThreshold,
-		LockoutWindowMinutes:   s.LockoutWindowMinutes,
-		LockoutDurationMinutes: s.LockoutDurationMinutes,
-		LockoutScope:           s.LockoutScope,
-		PasswordRecoveryEnabled:  s.PasswordRecoveryEnabled,
-		PasswordRecoveryDelivery: s.PasswordRecoveryDelivery,
+		HasCaptchaSecretKey:                  strings.TrimSpace(s.CaptchaSecretKey) != "",
+		CaptchaRegisterEnabled:               s.CaptchaRegisterEnabled,
+		CaptchaForgotEnabled:                 s.CaptchaForgotEnabled,
+		LockoutEnabled:                       s.LockoutEnabled,
+		LockoutThreshold:                     s.LockoutThreshold,
+		LockoutWindowMinutes:                 s.LockoutWindowMinutes,
+		LockoutDurationMinutes:               s.LockoutDurationMinutes,
+		LockoutScope:                         s.LockoutScope,
+		PasswordRecoveryEnabled:              s.PasswordRecoveryEnabled,
+		PasswordRecoveryDelivery:             s.PasswordRecoveryDelivery,
 		RegistrationEnabled:                  s.RegistrationEnabled,
 		RegistrationRequireEmailVerification: !s.RegistrationAllowUnverified,
 		RegistrationEmailDomains:             s.RegistrationEmailDomains,
@@ -279,76 +284,77 @@ func (h *AdminSettingsHandler) Put(c *gin.Context) {
 		return
 	}
 	s := ports.UISettings{
-		LoginMode:                  req.LoginMode,
-		SiteTitle:                  req.SiteTitle,
-		AppTitle:                   req.AppTitle,
-		IconURL:                    strings.TrimSpace(req.IconURL),
-		LogoURL:                    req.LogoURL,
-		LogoURLDark:                req.LogoURLDark,
-		EmailDomain:                strings.TrimSpace(req.EmailDomain),
-		AuditRetentionDays:         req.AuditRetentionDays,
-		SubBaseURL:                 strings.TrimRight(strings.TrimSpace(req.SubBaseURL), "/"),
-		Timezone:                   strings.TrimSpace(req.Timezone),
-		CronTrafficPullMinutes:     req.CronTrafficPullMinutes,
-		CronReconcileMinutes:       req.CronReconcileMinutes,
-		MaxPanelConcurrency:        req.MaxPanelConcurrency,
-		JWTAccessTTLMinutes:        req.JWTAccessTTLMinutes,
-		JWTRefreshTTLMinutes:       req.JWTRefreshTTLMinutes,
-		JWTIssuer:                  strings.TrimSpace(req.JWTIssuer),
-		SubPerIPPerMin:             req.SubPerIPPerMin,
-		LoginPerIPPerMin:           req.LoginPerIPPerMin,
-		SyncTaskRetentionDays:      req.SyncTaskRetentionDays,
-		TrafficHistoryDays:         req.TrafficHistoryDays,
-		DisallowUserLocalLogin:     req.DisallowUserLocalLogin,
-		DisallowUserPasswordChange: req.DisallowUserPasswordChange,
-		AllowUserPersonalRules:     req.AllowUserPersonalRules,
-		EmergencyAccessEnabled:     req.EmergencyAccessEnabled,
-		EmergencyAccessHours:       req.EmergencyAccessHours,
-		EmergencyAccessMaxCount:    req.EmergencyAccessMaxCount,
-		EmergencyAccessQuotaGB:     req.EmergencyAccessQuotaGB,
-		SubPath:                    strings.TrimSpace(req.SubPath),
-		SubClients:                 normalizeSubClients(req.SubClients),
-		SubClientFilterMode:        normalizeFilterMode(req.SubClientFilterMode),
-		SubImportTutorialURL:       strings.TrimSpace(req.SubImportTutorialURL),
-		SubLogRetentionDays:        req.SubLogRetentionDays,
-		MailSentRetentionDays:      req.MailSentRetentionDays,
-		AuthEventRetentionDays:     req.AuthEventRetentionDays,
-		SubBlockAutoDisable:        req.SubBlockAutoDisable,
-		SubBlockAutoDisableCount:   req.SubBlockAutoDisableCount,
-		SubBlockNotifyUser:         req.SubBlockNotifyUser,
-		SubBlockNotifyMaxPerDay:    req.SubBlockNotifyMaxPerDay,
-		SubUpdateIntervalHours:     req.SubUpdateIntervalHours,
-		SubProfileNameTemplate:     strings.TrimSpace(req.SubProfileNameTemplate),
-		SubRegionFlagPrefix:        req.SubRegionFlagPrefix,
-		QuickLinks:                 normalizeQuickLinks(req.QuickLinks),
-		GlobalAnnouncement:         normalizeGlobalAnnouncement(req.GlobalAnnouncement, prev.GlobalAnnouncement),
-		FooterText:                 strings.TrimSpace(req.FooterText),
-		ThemeColor:                 strings.TrimSpace(req.ThemeColor),
-		ExpireBeforeDays:           req.ExpireBeforeDays,
-		TrafficRemainPercent:       req.TrafficRemainPercent,
-		GeoIPEnabled:               req.GeoIPEnabled,
-		GeoIPDBFile:                strings.TrimSpace(req.GeoIPDBFile),
-		GeoIPAutoUpdate:            req.GeoIPAutoUpdate,
-		GeoIPUpdateSource:          strings.TrimSpace(req.GeoIPUpdateSource),
-		GeoIPUpdateURL:             strings.TrimSpace(req.GeoIPUpdateURL),
-		GeoIPUpdateEdition:         strings.TrimSpace(req.GeoIPUpdateEdition),
-		GeoIPUpdateIntervalHours:   req.GeoIPUpdateIntervalHours,
-		CertRenewBeforeDays:         req.CertRenewBeforeDays,
-		CertRenewCheckIntervalHours: req.CertRenewCheckIntervalHours,
-		CaptchaEnabled:              req.CaptchaEnabled,
-		CaptchaProvider:             strings.ToLower(strings.TrimSpace(req.CaptchaProvider)),
-		CaptchaTrigger:              strings.ToLower(strings.TrimSpace(req.CaptchaTrigger)),
-		CaptchaFailThreshold:        req.CaptchaFailThreshold,
-		CaptchaSiteKey:              strings.TrimSpace(req.CaptchaSiteKey),
-		CaptchaRegisterEnabled:      req.CaptchaRegisterEnabled,
-		CaptchaForgotEnabled:        req.CaptchaForgotEnabled,
-		LockoutEnabled:              req.LockoutEnabled,
-		LockoutThreshold:            req.LockoutThreshold,
-		LockoutWindowMinutes:        req.LockoutWindowMinutes,
-		LockoutDurationMinutes:      req.LockoutDurationMinutes,
-		LockoutScope:                strings.ToLower(strings.TrimSpace(req.LockoutScope)),
-		PasswordRecoveryEnabled:     req.PasswordRecoveryEnabled,
-		PasswordRecoveryDelivery:    strings.ToLower(strings.TrimSpace(req.PasswordRecoveryDelivery)),
+		LoginMode:                     req.LoginMode,
+		SiteTitle:                     req.SiteTitle,
+		AppTitle:                      req.AppTitle,
+		IconURL:                       strings.TrimSpace(req.IconURL),
+		LogoURL:                       req.LogoURL,
+		LogoURLDark:                   req.LogoURLDark,
+		EmailDomain:                   strings.TrimSpace(req.EmailDomain),
+		AuditRetentionDays:            req.AuditRetentionDays,
+		SubBaseURL:                    strings.TrimRight(strings.TrimSpace(req.SubBaseURL), "/"),
+		PanelPath:                     strings.TrimSpace(req.PanelPath),
+		Timezone:                      strings.TrimSpace(req.Timezone),
+		CronTrafficPullMinutes:        req.CronTrafficPullMinutes,
+		CronReconcileMinutes:          req.CronReconcileMinutes,
+		MaxPanelConcurrency:           req.MaxPanelConcurrency,
+		JWTAccessTTLMinutes:           req.JWTAccessTTLMinutes,
+		JWTRefreshTTLMinutes:          req.JWTRefreshTTLMinutes,
+		JWTIssuer:                     strings.TrimSpace(req.JWTIssuer),
+		SubPerIPPerMin:                req.SubPerIPPerMin,
+		LoginPerIPPerMin:              req.LoginPerIPPerMin,
+		SyncTaskRetentionDays:         req.SyncTaskRetentionDays,
+		TrafficHistoryDays:            req.TrafficHistoryDays,
+		DisallowUserLocalLogin:        req.DisallowUserLocalLogin,
+		DisallowUserPasswordChange:    req.DisallowUserPasswordChange,
+		AllowUserPersonalRules:        req.AllowUserPersonalRules,
+		EmergencyAccessEnabled:        req.EmergencyAccessEnabled,
+		EmergencyAccessHours:          req.EmergencyAccessHours,
+		EmergencyAccessMaxCount:       req.EmergencyAccessMaxCount,
+		EmergencyAccessQuotaGB:        req.EmergencyAccessQuotaGB,
+		SubPath:                       strings.TrimSpace(req.SubPath),
+		SubClients:                    normalizeSubClients(req.SubClients),
+		SubClientFilterMode:           normalizeFilterMode(req.SubClientFilterMode),
+		SubImportTutorialURL:          strings.TrimSpace(req.SubImportTutorialURL),
+		SubLogRetentionDays:           req.SubLogRetentionDays,
+		MailSentRetentionDays:         req.MailSentRetentionDays,
+		AuthEventRetentionDays:        req.AuthEventRetentionDays,
+		SubBlockAutoDisable:           req.SubBlockAutoDisable,
+		SubBlockAutoDisableCount:      req.SubBlockAutoDisableCount,
+		SubBlockNotifyUser:            req.SubBlockNotifyUser,
+		SubBlockNotifyMaxPerDay:       req.SubBlockNotifyMaxPerDay,
+		SubUpdateIntervalHours:        req.SubUpdateIntervalHours,
+		SubProfileNameTemplate:        strings.TrimSpace(req.SubProfileNameTemplate),
+		SubRegionFlagPrefix:           req.SubRegionFlagPrefix,
+		QuickLinks:                    normalizeQuickLinks(req.QuickLinks),
+		GlobalAnnouncement:            normalizeGlobalAnnouncement(req.GlobalAnnouncement, prev.GlobalAnnouncement),
+		FooterText:                    strings.TrimSpace(req.FooterText),
+		ThemeColor:                    strings.TrimSpace(req.ThemeColor),
+		ExpireBeforeDays:              req.ExpireBeforeDays,
+		TrafficRemainPercent:          req.TrafficRemainPercent,
+		GeoIPEnabled:                  req.GeoIPEnabled,
+		GeoIPDBFile:                   strings.TrimSpace(req.GeoIPDBFile),
+		GeoIPAutoUpdate:               req.GeoIPAutoUpdate,
+		GeoIPUpdateSource:             strings.TrimSpace(req.GeoIPUpdateSource),
+		GeoIPUpdateURL:                strings.TrimSpace(req.GeoIPUpdateURL),
+		GeoIPUpdateEdition:            strings.TrimSpace(req.GeoIPUpdateEdition),
+		GeoIPUpdateIntervalHours:      req.GeoIPUpdateIntervalHours,
+		CertRenewBeforeDays:           req.CertRenewBeforeDays,
+		CertRenewCheckIntervalHours:   req.CertRenewCheckIntervalHours,
+		CaptchaEnabled:                req.CaptchaEnabled,
+		CaptchaProvider:               strings.ToLower(strings.TrimSpace(req.CaptchaProvider)),
+		CaptchaTrigger:                strings.ToLower(strings.TrimSpace(req.CaptchaTrigger)),
+		CaptchaFailThreshold:          req.CaptchaFailThreshold,
+		CaptchaSiteKey:                strings.TrimSpace(req.CaptchaSiteKey),
+		CaptchaRegisterEnabled:        req.CaptchaRegisterEnabled,
+		CaptchaForgotEnabled:          req.CaptchaForgotEnabled,
+		LockoutEnabled:                req.LockoutEnabled,
+		LockoutThreshold:              req.LockoutThreshold,
+		LockoutWindowMinutes:          req.LockoutWindowMinutes,
+		LockoutDurationMinutes:        req.LockoutDurationMinutes,
+		LockoutScope:                  strings.ToLower(strings.TrimSpace(req.LockoutScope)),
+		PasswordRecoveryEnabled:       req.PasswordRecoveryEnabled,
+		PasswordRecoveryDelivery:      strings.ToLower(strings.TrimSpace(req.PasswordRecoveryDelivery)),
 		RegistrationEnabled:           req.RegistrationEnabled,
 		RegistrationAllowUnverified:   !req.RegistrationRequireEmailVerification,
 		RegistrationEmailDomains:      strings.TrimSpace(req.RegistrationEmailDomains),
@@ -364,6 +370,19 @@ func (h *AdminSettingsHandler) Put(c *gin.Context) {
 		CodeResendCooldownSec:         req.CodeResendCooldownSec,
 		Require2FAForStaff:            req.Require2FAForStaff,
 		// GeoIPUpdateToken / CaptchaSecretKey resolved below ("empty = keep existing").
+	}
+	var pathErr error
+	if s.PanelPath, pathErr = panelpath.Normalize(s.PanelPath); pathErr != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": pathErr.Error()})
+		return
+	}
+	if err := panelpath.Validate(s.PanelPath, s.SubPath); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if s.SubBaseURL, pathErr = panelpath.PublicOrigin(s.SubBaseURL, s.PanelPath != ""); pathErr != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": pathErr.Error()})
+		return
 	}
 	// Update token is write-only: a blank field on save means the admin didn't
 	// re-enter the masked token, so preserve the stored one (mirrors the
@@ -496,9 +515,30 @@ func (h *AdminSettingsHandler) Put(c *gin.Context) {
 	if s.SubPath == "" {
 		s.SubPath = "sub"
 	}
+	ssoMigration, err := h.sso.preparePanelPathChange(c.Request.Context(), prev, s)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
 	if err := h.repo.Save(c.Request.Context(), s); err != nil {
 		respondError(c, err)
 		return
+	}
+	if err := ssoMigration.apply(c.Request.Context()); err != nil {
+		// Keep the visible mount and SSO callbacks on one coherent version. The
+		// migration already restores SSO state; restore UI settings as well.
+		if rollbackErr := h.repo.Save(c.Request.Context(), prev); rollbackErr != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error() + "; settings rollback failed: " + rollbackErr.Error()})
+			return
+		}
+		if h.paths != nil {
+			h.paths.Invalidate()
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if h.paths != nil {
+		h.paths.Invalidate()
 	}
 	h.jwtParams.Store(jwtutil.Params{
 		AccessTTL:  time.Duration(s.JWTAccessTTLMinutes) * time.Minute,

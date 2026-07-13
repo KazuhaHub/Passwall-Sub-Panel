@@ -2,6 +2,9 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import path from 'node:path';
 export default defineConfig({
+    // Runtime panel_path is injected through <base href> in index.html. Relative
+    // asset URLs let the same bundle work at /, /panel/, or a deeper prefix.
+    base: './',
     plugins: [react()],
     resolve: {
         alias: {

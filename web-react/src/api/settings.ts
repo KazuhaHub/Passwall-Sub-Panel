@@ -72,6 +72,8 @@ export interface UISettings {
   /** Authentication-event log retention (days). Default 90, floored at 90. */
   auth_event_retention_days: number
   sub_base_url: string
+  /** Optional management SPA/API prefix. Empty means origin root. */
+  panel_path: string
   /** IANA timezone name used for system-level time math (traffic resets,
    *  expire_at, default chart bucketing). Empty falls back to server local. */
   timezone: string

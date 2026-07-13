@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { panelURL } from '@/panelPath'
 import { startAuthentication } from '@simplewebauthn/browser'
 import {
   localLogin,
@@ -147,7 +148,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     localStorage.removeItem('psp_refresh')
     localStorage.removeItem(STORAGE_KEY)
     set({ userId: null, upn: '', displayName: '', role: '', hasToken: false })
-    window.location.replace('/logged-out')
+    window.location.replace(panelURL('/logged-out'))
   },
 
   // syncFromStorage rebuilds the in-memory state from localStorage —

@@ -261,6 +261,7 @@ func settingDescriptors(s *ports.UISettings) []settingDescriptor {
 		strField("site", "theme_color", &s.ThemeColor),
 		strField("site", "email_domain", &s.EmailDomain),
 		strField("site", "sub_base_url", &s.SubBaseURL),
+		strField("site", "panel_path", &s.PanelPath),
 
 		// auth --- JWT + login policy
 		strField("auth", "login_mode", &s.LoginMode),

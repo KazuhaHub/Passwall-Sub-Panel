@@ -7,6 +7,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/config"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/panelpath"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/samlkey"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/auth"
@@ -65,10 +66,10 @@ type samlNewUserDTO struct {
 }
 
 type samlConfigDTO struct {
-	Enabled                 bool                 `json:"enabled"`
-	Mode                    string               `json:"mode"`
-	SP                      samlSPDTO            `json:"sp"`
-	IDP                     samlIDPDTO           `json:"idp"`
+	Enabled          bool                 `json:"enabled"`
+	Mode             string               `json:"mode"`
+	SP               samlSPDTO            `json:"sp"`
+	IDP              samlIDPDTO           `json:"idp"`
 	AttributeMapping samlAttrDTO          `json:"attribute_mapping"`
 	RoleRules        []config.SSORoleRule `json:"role_rules"`
 	DefaultGroupSlug string               `json:"default_group_slug"`
@@ -195,8 +196,8 @@ func (h *AdminSAMLHandler) Put(c *gin.Context) {
 	// claim URLs when the admin leaves a field blank.
 	if cfg.Mode == "auto" {
 		base := resolveSubBaseForRequest(c.Request.Context(), h.settings, c.Request)
-		cfg.SP.EntityID = base + "/api/auth/saml/metadata"
-		cfg.SP.ACSURL = base + "/api/auth/saml/acs"
+		cfg.SP.EntityID = panelpath.PanelURL(base, currentPanelPath(c.Request), "/api/auth/saml/metadata")
+		cfg.SP.ACSURL = panelpath.PanelURL(base, currentPanelPath(c.Request), "/api/auth/saml/acs")
 		if cfg.SP.CertPEM == "" || cfg.SP.KeyPEM == "" {
 			cert, key, err := samlkey.GenerateSelfSigned(cfg.SP.EntityID)
 			if err != nil {

@@ -758,6 +758,9 @@ type UISettings struct {
 	// subscription URLs ("<base>/sub/<token>"). Empty falls back to relative
 	// paths.
 	SubBaseURL string `yaml:"sub_base_url" json:"sub_base_url"`
+	// PanelPath is an optional URL prefix for the management SPA and API.
+	// Empty keeps the historical root deployment; subscriptions remain root-level.
+	PanelPath string `yaml:"panel_path" json:"panel_path"`
 	// Timezone is the IANA name (e.g. "Asia/Shanghai", "America/Los_Angeles")
 	// used for system-level time calculations: monthly/quarterly traffic
 	// resets, user expire_at "X days from now" math, and as the default

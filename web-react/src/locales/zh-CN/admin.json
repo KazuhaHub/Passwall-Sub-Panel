@@ -104,6 +104,7 @@
     "save": "保存",
     "cancel": "取消",
     "saved": "已保存",
+    "panel_path_sso_notice": "面板路径已更新；如启用了 SSO，请同步更新身份提供商中登记的回调地址。",
     "scope": {
       "audience": "适用对象",
       "all_users": "所有用户（全局默认）",
@@ -249,6 +250,8 @@
       "logo_url_dark": "深色主题 Logo URL",
       "email_domain": "默认邮箱域",
       "sub_base_url": "订阅 Base URL（必填）",
+      "panel_path": "面板路径前缀",
+      "panel_path_hint": "留空部署在域名根路径；例如 /panel。订阅链接不受此项影响。",
       "asset_hint": "Logo / Icon 留空时使用内置默认。",
       "theme_color": "系统默认主题色（HEX）",
       "theme_color_hint": "用作所有用户的默认主题色；用户仍可在顶栏调色板里覆盖。留空时回退到内置默认色。",

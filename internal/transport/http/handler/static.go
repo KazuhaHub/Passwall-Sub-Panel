@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"bytes"
 	"io/fs"
 	"mime"
 	"net/http"
@@ -11,6 +12,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/log"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/panelpath"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/web"
 )
 
@@ -103,6 +105,10 @@ func StaticSPA(c *gin.Context) {
 
 	if a, ok := assets[requested]; ok {
 		setCacheHeaders(c, requested)
+		if requested == "index.html" {
+			c.Data(http.StatusOK, "text/html; charset=utf-8", renderIndex(a.body, panelpath.FromRequest(c.Request)))
+			return
+		}
 		c.Data(http.StatusOK, a.contentType, a.body)
 		return
 	}
@@ -116,12 +122,28 @@ func StaticSPA(c *gin.Context) {
 	// SPA fallback to index.html.
 	if a, ok := assets["index.html"]; ok {
 		setCacheHeaders(c, "index.html")
-		c.Data(http.StatusOK, "text/html; charset=utf-8", a.body)
+		c.Data(http.StatusOK, "text/html; charset=utf-8", renderIndex(a.body, panelpath.FromRequest(c.Request)))
 		return
 	}
 
 	c.String(http.StatusNotFound,
 		"Frontend bundle not built. Run `cd web && npm install && npm run build` then rebuild the Go binary.")
+}
+
+// renderIndex injects the runtime prefix into the otherwise immutable Vite
+// bundle. index.html is explicitly no-cache, while hashed JS/CSS assets remain
+// cacheable for a year.
+func renderIndex(body []byte, prefix string) []byte {
+	base := "/"
+	if prefix != "" {
+		base = prefix + "/"
+	}
+	// Keep runtime configuration out of inline JavaScript: installations often
+	// enforce a strict CSP that correctly blocks script-src-elem inline code.
+	// panelpath.Normalize only permits safe path characters, so prefix is safe
+	// to place in the HTML attribute.
+	injected := `<base href="` + base + `"><meta name="psp-panel-path" content="` + prefix + `">`
+	return bytes.Replace(body, []byte("<!-- PSP_PANEL_BASE -->"), []byte(injected), 1)
 }
 
 // setCacheHeaders applies the Vite-aware caching policy described on

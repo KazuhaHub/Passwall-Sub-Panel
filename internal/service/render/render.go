@@ -16,6 +16,7 @@ import (
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/log"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/panelpath"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/paneltz"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 )
@@ -237,7 +238,7 @@ func (s *Service) profilePlaceholders(u *domain.User, st ports.UISettings) map[s
 	if st.LogoURLDark == "" {
 		st.LogoURLDark = st.LogoURL
 	}
-	base := strings.TrimRight(st.SubBaseURL, "/")
+	base := panelpath.PanelBase(strings.TrimRight(st.SubBaseURL, "/"), st.PanelPath)
 	logo := absoluteURL(base, st.LogoURL)
 	logoDark := absoluteURL(base, st.LogoURLDark)
 	displayName := u.DisplayName

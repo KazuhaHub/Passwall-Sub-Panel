@@ -298,6 +298,7 @@ Day-to-day operation should **only touch config.yaml**. The code keeps a few env
 | Section | Description |
 |---|---|
 | Public Base URL | Base for generated subscription URLs (required; e.g. `https://domain` behind Nginx) |
+| Panel Path Prefix | Optional. Leave empty for the origin root; `/panel` mounts the SPA, API and SSO callbacks at `https://domain/panel/` while subscriptions stay at the origin root. Update the callback URLs registered at the identity provider after changing it. |
 | Login Mode | SSO-first / Dual (SSO + local) / Local-only |
 | Subscription Path | URL prefix, default `sub` |
 | Client Rules | UA keywords + render format (mihomo / sing-box) + allow/deny lists |

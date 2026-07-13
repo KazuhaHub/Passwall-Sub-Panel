@@ -24,6 +24,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/idgen"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/log"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/panelpath"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/safego"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/sendthrottle"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
@@ -197,7 +198,7 @@ func (s *Service) RequestReset(ctx context.Context, ident string) error {
 			return nil
 		}
 		tok.TokenHash = hashSecret(raw)
-		link = base + "/reset-password?token=" + url.QueryEscape(raw)
+		link = panelpath.PanelURL(base, set.PanelPath, "/reset-password?token="+url.QueryEscape(raw))
 	}
 
 	// A new request invalidates any earlier outstanding reset for this user.

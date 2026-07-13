@@ -104,6 +104,7 @@
     "save": "Save",
     "cancel": "Cancel",
     "saved": "Saved",
+    "panel_path_sso_notice": "The panel path was updated. If SSO is enabled, update the callback URLs registered with your identity provider.",
     "scope": {
       "audience": "Audience",
       "all_users": "All users (global default)",
@@ -249,6 +250,8 @@
       "logo_url_dark": "Dark-mode logo URL",
       "email_domain": "Default email domain",
       "sub_base_url": "Subscription base URL (required)",
+      "panel_path": "Panel path prefix",
+      "panel_path_hint": "Leave blank to mount at the domain root; for example, /panel. Subscription URLs are unchanged.",
       "asset_hint": "Leave Logo / Icon blank to use built-in defaults.",
       "theme_color": "System default theme color (HEX)",
       "theme_color_hint": "Used as the default for every user. Users can still override via the palette in the top bar. Leave blank to fall back to the built-in default.",
