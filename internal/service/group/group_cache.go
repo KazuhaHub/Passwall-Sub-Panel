@@ -13,7 +13,8 @@ import (
 // address / port / stream settings / remark / region / tags — never the
 // traffic or health columns), and /sub is itself short-TTL-cached, so this adds
 // no staleness beyond that. It dedups the ListEnabled DB query across users on
-// the render-cache-miss path. Self-expiring, so no invalidate-on-write wiring.
+// the render-cache-miss path. Node ordering/config writes explicitly invalidate
+// it so the next subscription render observes the committed values immediately.
 //
 // Caching the *domain.Node slice is safe because render treats nodes as
 // read-only: sortNodes copies the slice before sorting, applyLayout copies the
@@ -28,6 +29,7 @@ type nodeListCache struct {
 	ok      bool
 	expires time.Time
 	ttl     time.Duration
+	version uint64
 }
 
 func newNodeListCache(ttl time.Duration) *nodeListCache {
@@ -43,12 +45,31 @@ func (c *nodeListCache) get(now time.Time) ([]*domain.Node, bool) {
 	return c.nodes, true
 }
 
-func (c *nodeListCache) put(nodes []*domain.Node, now time.Time) {
+func (c *nodeListCache) currentVersion() uint64 {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	return c.version
+}
+
+func (c *nodeListCache) putIfVersion(nodes []*domain.Node, now time.Time, version uint64) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.version != version {
+		return false
+	}
 	c.nodes = nodes
 	c.ok = true
 	c.expires = now.Add(c.ttl)
+	return true
+}
+
+func (c *nodeListCache) invalidate() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.nodes = nil
+	c.ok = false
+	c.expires = time.Time{}
+	c.version++
 }
 
 // listEnabledCached returns nodes.ListEnabled, cached for enabledNodesTTL. The
@@ -66,12 +87,25 @@ func (s *Service) listEnabledCached(ctx context.Context) ([]*domain.Node, error)
 			return nodes, nil
 		}
 	}
+	version := uint64(0)
+	if s.enabledCache != nil {
+		version = s.enabledCache.currentVersion()
+	}
 	nodes, err := s.nodes.ListEnabled(ctx)
 	if err != nil {
 		return nil, err
 	}
 	if s.enabledCache != nil {
-		s.enabledCache.put(nodes, now)
+		s.enabledCache.putIfVersion(nodes, now, version)
 	}
 	return nodes, nil
+}
+
+// InvalidateNodeCache makes the next NodesFor call reload enabled nodes from
+// the repository. The cache version also prevents a DB read that began before
+// invalidation from repopulating the cache with stale rows afterward.
+func (s *Service) InvalidateNodeCache() {
+	if s != nil && s.enabledCache != nil {
+		s.enabledCache.invalidate()
+	}
 }

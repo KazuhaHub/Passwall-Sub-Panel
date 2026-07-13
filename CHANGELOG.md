@@ -4,6 +4,16 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## v3.9.1-beta.7 — 2026-07-13
+
+### 修复
+
+- **节点与分隔符拖拽排序立即反映到订阅** —— 修复节点页显示“顺序已更新”，但 Clash Verge 等客户端刷新后仍拿到旧顺序、已有分隔符（例如 `------ Taiwan ------`）仍可能缺失的问题。根因是节点列表与完整订阅各有一层 60 秒缓存，排序事务提交后未主动失效；现在节点和分隔符排序成功后会同时清除两层缓存，下一次订阅请求立即从数据库重建。缓存增加版本代数，避免与排序同时进行的旧渲染在清空后把过期结果写回；数据库写入失败时不会错误清缓存。
+
+### 调整
+
+- **更新新建 REALITY 入站默认目标** —— 默认 `dest` / Server Name 从 Tesla 调整为 `www.asus.com:443` / `www.asus.com`，SpiderX 从 `/drive` 调整为 `/ai`；编辑已有节点仍优先读取并保留其实际配置。
+
 ## v3.9.1-beta.6 — 2026-07-13
 
 ### 修复

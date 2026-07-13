@@ -384,13 +384,13 @@ const EMPTY_INBOUND: InboundFormState = {
   tls_cert_pem: '',
   tls_key_pem: '',
   cert_id: 0,
-  reality_dest: 'www.tesla.com:443',
-  reality_server_names_text: 'www.tesla.com',
+  reality_dest: 'www.asus.com:443',
+  reality_server_names_text: 'www.asus.com',
   private_key: '',
   public_key: '',
   short_ids_text: '',
   reality_fingerprint: 'chrome',
-  reality_spider_x: '/drive',
+  reality_spider_x: '/ai',
   reality_xver: 0,
   reality_max_timediff: 0,
   // Default new REALITY inbounds to minClientVer 1.0.0 (= no version gate).
@@ -686,7 +686,7 @@ function buildStreamSettings(f: InboundFormState): unknown {
         publicKey: f.public_key,
         fingerprint: f.reality_fingerprint,
         serverName: '',
-        spiderX: f.reality_spider_x || '/drive',
+        spiderX: f.reality_spider_x || '/ai',
         // mldsa65Verify is the client-side counterpart; same parity
         // reasoning. Admin doesn't fill these via the form yet.
         mldsa65Verify: '',
@@ -920,13 +920,13 @@ function parseInboundForEdit(node: Node, ib: InboundDetail): InboundFormState {
     // aliases — fall back to them when the canonical key is empty so
     // existing rows don't silently lose their REALITY config on the
     // first edit.
-    reality_dest: stringValue(reality.target) || stringValue(reality.dest, 'www.tesla.com:443'),
-    reality_server_names_text: listToText(reality.serverNames) || 'www.tesla.com',
+    reality_dest: stringValue(reality.target) || stringValue(reality.dest, 'www.asus.com:443'),
+    reality_server_names_text: listToText(reality.serverNames) || 'www.asus.com',
     private_key: stringValue(reality.privateKey),
     public_key: stringValue(realityInner.publicKey),
     short_ids_text: listToText(reality.shortIds),
     reality_fingerprint: stringValue(realityInner.fingerprint, 'chrome'),
-    reality_spider_x: stringValue(realityInner.spiderX, '/drive'),
+    reality_spider_x: stringValue(realityInner.spiderX, '/ai'),
     reality_xver: numberValue(reality.xver),
     reality_max_timediff: numberValue(reality.maxTimediff),
     reality_min_client: stringValue(reality.minClientVer) || stringValue(reality.minClient),

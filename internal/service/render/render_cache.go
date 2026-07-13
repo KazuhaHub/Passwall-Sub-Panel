@@ -40,9 +40,10 @@ type renderCacheEntry struct {
 // immutable — it hashes/serves the body and copies headers, never mutates), so
 // no per-request copy is needed.
 type renderCache struct {
-	mu  sync.Mutex
-	m   map[renderCacheKey]renderCacheEntry
-	ttl time.Duration
+	mu      sync.Mutex
+	m       map[renderCacheKey]renderCacheEntry
+	ttl     time.Duration
+	version uint64
 }
 
 func newRenderCache(ttl time.Duration) *renderCache {
@@ -59,9 +60,18 @@ func (c *renderCache) get(key renderCacheKey, now time.Time) (*Output, bool) {
 	return e.out, true
 }
 
-func (c *renderCache) put(key renderCacheKey, out *Output, now time.Time) {
+func (c *renderCache) currentVersion() uint64 {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	return c.version
+}
+
+func (c *renderCache) putIfVersion(key renderCacheKey, out *Output, now time.Time, version uint64) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.version != version {
+		return false
+	}
 	if len(c.m) > renderCacheSweepThreshold {
 		for k, e := range c.m {
 			if !now.Before(e.expires) {
@@ -70,12 +80,20 @@ func (c *renderCache) put(key renderCacheKey, out *Output, now time.Time) {
 		}
 	}
 	c.m[key] = renderCacheEntry{out: out, expires: now.Add(c.ttl)}
+	return true
 }
 
 func (c *renderCache) size() int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return len(c.m)
+}
+
+func (c *renderCache) clear() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.m = make(map[renderCacheKey]renderCacheEntry)
+	c.version++
 }
 
 // RenderForUserCached is the /sub entry point: it returns a cached render for
@@ -92,10 +110,20 @@ func (s *Service) RenderForUserCached(ctx context.Context, u *domain.User, ct do
 	if out, ok := s.cache.get(key, now); ok {
 		return out, nil
 	}
+	version := s.cache.currentVersion()
 	out, err := s.RenderForUser(ctx, u, ct)
 	if err != nil {
 		return nil, err
 	}
-	s.cache.put(key, out, now)
+	s.cache.putIfVersion(key, out, now, version)
 	return out, nil
+}
+
+// InvalidateAll drops every rendered subscription variant. Incrementing the
+// cache version also stops a render that began before this call from restoring
+// a stale output after the map has been cleared.
+func (s *Service) InvalidateAll() {
+	if s != nil && s.cache != nil {
+		s.cache.clear()
+	}
 }

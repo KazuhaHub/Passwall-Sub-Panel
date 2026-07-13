@@ -68,6 +68,10 @@ type Service struct {
 	// via SetBackgroundRunner (mirrors user.Service); nil before wiring / in tests,
 	// where runBackground falls back to an untracked safego.Go.
 	bg func(name string, fn func(ctx context.Context))
+	// invalidateSubscriptions is late-bound by app wiring because the node
+	// package must not import the group or render services. It is called only
+	// after an ordering transaction commits successfully.
+	invalidateSubscriptions func()
 }
 
 // SetMemberResyncer late-binds the shared-client member resyncer (user.Service).
@@ -78,6 +82,18 @@ func (s *Service) SetMemberResyncer(r MemberResyncer) { s.resyncer = r }
 // goroutine (mirrors user.Service.SetBackgroundRunner).
 func (s *Service) SetBackgroundRunner(run func(name string, fn func(ctx context.Context))) {
 	s.bg = run
+}
+
+// SetSubscriptionInvalidator wires cache invalidation for subscription-visible
+// node and separator mutations without coupling this package to render.
+func (s *Service) SetSubscriptionInvalidator(invalidate func()) {
+	s.invalidateSubscriptions = invalidate
+}
+
+func (s *Service) invalidateSubscriptionCaches() {
+	if s.invalidateSubscriptions != nil {
+		s.invalidateSubscriptions()
+	}
 }
 
 // runBackground routes fire-and-forget work through the tracked dispatcher when
@@ -300,7 +316,11 @@ func (s *Service) ReorderSeparators(ctx context.Context, updates []ports.Separat
 		}
 		seen[u.SeparatorID] = struct{}{}
 	}
-	return s.separators.BatchUpdateSortOrder(ctx, updates)
+	if err := s.separators.BatchUpdateSortOrder(ctx, updates); err != nil {
+		return err
+	}
+	s.invalidateSubscriptionCaches()
+	return nil
 }
 
 // ImportExisting registers an inbound that already lives in 3X-UI under
@@ -527,7 +547,11 @@ func (s *Service) Reorder(ctx context.Context, updates []ports.NodeSortUpdate) e
 		}
 		seen[u.NodeID] = struct{}{}
 	}
-	return s.nodes.BatchUpdateSortOrder(ctx, updates)
+	if err := s.nodes.BatchUpdateSortOrder(ctx, updates); err != nil {
+		return err
+	}
+	s.invalidateSubscriptionCaches()
+	return nil
 }
 
 func (s *Service) UpdateMetadata(ctx context.Context, n *domain.Node) error {

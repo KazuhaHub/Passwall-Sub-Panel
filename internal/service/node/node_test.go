@@ -40,11 +40,13 @@ func (r *fakeNodeRepo) GetByID(ctx context.Context, id int64) (*domain.Node, err
 func (r *fakeNodeRepo) GetByPanelInbound(ctx context.Context, panelID int64, inboundID int) (*domain.Node, error) {
 	return nil, domain.ErrNotFound
 }
-func (r *fakeNodeRepo) List(ctx context.Context) ([]*domain.Node, error)        { return nil, nil }
+func (r *fakeNodeRepo) List(ctx context.Context) ([]*domain.Node, error) { return nil, nil }
 func (r *fakeNodeRepo) UpdateCertBinding(_ context.Context, _ int64, _ domain.CertSource, _ int64) error {
 	return nil
 }
-func (r *fakeNodeRepo) ListByCertID(_ context.Context, _ int64) ([]*domain.Node, error) { return nil, nil }
+func (r *fakeNodeRepo) ListByCertID(_ context.Context, _ int64) ([]*domain.Node, error) {
+	return nil, nil
+}
 func (r *fakeNodeRepo) ListEnabled(ctx context.Context) ([]*domain.Node, error) { return nil, nil }
 func (r *fakeNodeRepo) ListPaged(ctx context.Context, _ ports.Pagination) ([]*domain.Node, int64, error) {
 	return nil, 0, nil
@@ -57,6 +59,8 @@ func newReorderSvc(repo ports.NodeRepo) *Service {
 func TestReorder_HappyPath(t *testing.T) {
 	repo := &fakeNodeRepo{}
 	svc := newReorderSvc(repo)
+	invalidations := 0
+	svc.SetSubscriptionInvalidator(func() { invalidations++ })
 	in := []ports.NodeSortUpdate{
 		{NodeID: 1, SortOrder: 10},
 		{NodeID: 2, SortOrder: 20},
@@ -72,6 +76,9 @@ func TestReorder_HappyPath(t *testing.T) {
 		if repo.got[i] != in[i] {
 			t.Fatalf("update[%d] = %+v, want %+v", i, repo.got[i], in[i])
 		}
+	}
+	if invalidations != 1 {
+		t.Fatalf("subscription cache invalidations = %d, want 1", invalidations)
 	}
 }
 
@@ -124,11 +131,16 @@ func TestReorder_RepoErrorPropagates(t *testing.T) {
 	want := errors.New("boom")
 	repo := &fakeNodeRepo{err: want}
 	svc := newReorderSvc(repo)
+	invalidations := 0
+	svc.SetSubscriptionInvalidator(func() { invalidations++ })
 	err := svc.Reorder(context.Background(), []ports.NodeSortUpdate{
 		{NodeID: 1, SortOrder: 10},
 	})
 	if !errors.Is(err, want) {
 		t.Fatalf("err = %v, want %v wrapped", err, want)
+	}
+	if invalidations != 0 {
+		t.Fatalf("failed reorder invalidated subscription cache %d times", invalidations)
 	}
 }
 
@@ -136,7 +148,9 @@ func TestReorder_RepoErrorPropagates(t *testing.T) {
 // tests can inspect the row that would have been written. Implements the
 // SeparatorRepo surface with no-op stubs for the methods we don't drive.
 type captureSeparatorRepo struct {
-	created []*domain.SeparatorEntry
+	created      []*domain.SeparatorEntry
+	reordered    []ports.SeparatorSortUpdate
+	reorderError error
 }
 
 func (r *captureSeparatorRepo) Create(_ context.Context, s *domain.SeparatorEntry) error {
@@ -159,8 +173,46 @@ func (r *captureSeparatorRepo) ListPaged(context.Context, ports.Pagination) ([]*
 func (r *captureSeparatorRepo) ListEnabled(context.Context) ([]*domain.SeparatorEntry, error) {
 	return nil, nil
 }
-func (r *captureSeparatorRepo) BatchUpdateSortOrder(context.Context, []ports.SeparatorSortUpdate) error {
+func (r *captureSeparatorRepo) BatchUpdateSortOrder(_ context.Context, updates []ports.SeparatorSortUpdate) error {
+	if r.reorderError != nil {
+		return r.reorderError
+	}
+	r.reordered = append([]ports.SeparatorSortUpdate(nil), updates...)
 	return nil
+}
+
+func TestReorderSeparators_InvalidatesSubscriptionCacheAfterCommit(t *testing.T) {
+	repo := &captureSeparatorRepo{}
+	svc := &Service{separators: repo}
+	invalidations := 0
+	svc.SetSubscriptionInvalidator(func() { invalidations++ })
+	in := []ports.SeparatorSortUpdate{{SeparatorID: 2, SortOrder: 10}}
+
+	if err := svc.ReorderSeparators(context.Background(), in); err != nil {
+		t.Fatalf("ReorderSeparators = %v, want nil", err)
+	}
+	if len(repo.reordered) != 1 || repo.reordered[0] != in[0] {
+		t.Fatalf("repo updates = %+v, want %+v", repo.reordered, in)
+	}
+	if invalidations != 1 {
+		t.Fatalf("subscription cache invalidations = %d, want 1", invalidations)
+	}
+}
+
+func TestReorderSeparators_RepoErrorDoesNotInvalidate(t *testing.T) {
+	want := errors.New("boom")
+	repo := &captureSeparatorRepo{reorderError: want}
+	svc := &Service{separators: repo}
+	invalidations := 0
+	svc.SetSubscriptionInvalidator(func() { invalidations++ })
+
+	err := svc.ReorderSeparators(context.Background(), []ports.SeparatorSortUpdate{{SeparatorID: 2, SortOrder: 10}})
+	if !errors.Is(err, want) {
+		t.Fatalf("err = %v, want %v", err, want)
+	}
+	if invalidations != 0 {
+		t.Fatalf("failed separator reorder invalidated subscription cache %d times", invalidations)
+	}
 }
 
 func TestCreateSeparator_StoresEntry(t *testing.T) {

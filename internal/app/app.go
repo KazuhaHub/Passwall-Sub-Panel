@@ -322,6 +322,13 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	reconcileSvc := reconcile.New(repos.User, repos.Ownership, repos.Node, repos.Group, repos.Settings, repos.Audit, pool, syncSvc)
 	healthSvc := health.New(repos.Node)
 	renderSvc := render.New(repos, pool, groupSvc)
+	// Ordering nodes and standalone separators changes every affected
+	// subscription. Clear both cache layers after the DB transaction commits so
+	// the next client refresh sees the new merged order immediately.
+	nodeSvc.SetSubscriptionInvalidator(func() {
+		groupSvc.InvalidateNodeCache()
+		renderSvc.InvalidateAll()
+	})
 	// Geo IP resolution for access-log region display — fully offline against a
 	// local .mmdb in <ConfigDir>/geoip/. No per-IP external calls. Reads
 	// enabled/active-file live from settings and hot-reloads the DB on change.
