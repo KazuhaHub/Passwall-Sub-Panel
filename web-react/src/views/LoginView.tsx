@@ -14,7 +14,7 @@ import {
 import LoginIcon from '@mui/icons-material/Login'
 import OpenInNewIcon from '@mui/icons-material/OpenInNew'
 import FingerprintIcon from '@mui/icons-material/Fingerprint'
-import MailOutlineIcon from '@mui/icons-material/MailOutline'
+import MailOutlineIcon from '@mui/icons-material/MailOutlined'
 import { Link as RouterLink, useLocation, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import type { AxiosError } from 'axios'
@@ -459,7 +459,7 @@ export default function LoginView({ forceLocal = false }: { forceLocal?: boolean
       ) : twoFAMode === 'email' && !emailSent ? (
         // Last-used was email but no code is out yet (we never auto-send on load,
         // to avoid mailing on every challenge): offer to send one.
-        <>
+        (<>
           <Typography variant="body2" sx={{ color: md.onSurfaceVariant }}>
             {t('auth:twofa_email_prompt')}
           </Typography>
@@ -471,7 +471,7 @@ export default function LoginView({ forceLocal = false }: { forceLocal?: boolean
               ? t('auth:twofa_email_resend_wait', { sec: emailCd, defaultValue: '重新发送（{{sec}}s）' })
               : t('auth:twofa_email_send', { defaultValue: '发送验证码' })}
           </Button>
-        </>
+        </>)
       ) : (
         <Box component="form" onSubmit={submit2FA} sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
           <Typography variant="body2" sx={{ color: md.onSurfaceVariant }}>{codeUI.prompt}</Typography>
@@ -482,8 +482,10 @@ export default function LoginView({ forceLocal = false }: { forceLocal?: boolean
             autoFocus
             fullWidth
             autoComplete="one-time-code"
-            inputProps={{ inputMode: 'text', autoCapitalize: 'characters' }}
             placeholder={codeUI.placeholder}
+            slotProps={{
+              htmlInput: { inputMode: 'text', autoCapitalize: 'characters' }
+            }}
           />
           {twoFAError && <Alert severity="error" sx={{ py: 0 }}>{twoFAError}</Alert>}
           <Button type="submit" variant="contained" fullWidth size="large" disabled={busy}

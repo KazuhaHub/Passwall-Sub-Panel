@@ -14,7 +14,7 @@ import {
   Tooltip,
   Typography,
 } from '@mui/material'
-import DeleteIcon from '@mui/icons-material/DeleteOutline'
+import DeleteIcon from '@mui/icons-material/DeleteOutlined'
 import { useTranslation } from 'react-i18next'
 import type { AxiosError } from 'axios'
 
@@ -110,7 +110,9 @@ export default function AdminPasskeysDialog({ open, user, md, onClose }: Props) 
 
   return (
     <Dialog open={open} onClose={() => !busy && onClose()} fullWidth maxWidth="xs"
-      PaperProps={{ sx: { bgcolor: md.surfaceContainerHigh } }}>
+      slotProps={{
+        paper: { sx: { bgcolor: md.surfaceContainerHigh } }
+      }}>
       <DialogTitle>
         {t('users.passkeys.title', { defaultValue: '通行密钥' })}{user ? ` — ${user.upn}` : ''}
       </DialogTitle>
@@ -145,8 +147,10 @@ export default function AdminPasskeysDialog({ open, user, md, onClose }: Props) 
                       ? ' · ' + t('users.passkeys.last_used', { date: formatDualDate(c.last_used_at, panelTz), defaultValue: '最近使用 {{date}}' })
                       : '')
                   }
-                  primaryTypographyProps={{ fontSize: 14 }}
-                  secondaryTypographyProps={{ fontSize: 12 }} />
+                  slotProps={{
+                    primary: { sx: { fontSize: 14 } },
+                    secondary: { sx: { fontSize: 12 } }
+                  }} />
               </ListItem>
             ))}
           </List>
@@ -163,5 +167,5 @@ export default function AdminPasskeysDialog({ open, user, md, onClose }: Props) 
         <Button onClick={onClose} disabled={busy}>{t('users.passkeys.close', { defaultValue: '关闭' })}</Button>
       </DialogActions>
     </Dialog>
-  )
+  );
 }

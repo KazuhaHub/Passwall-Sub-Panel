@@ -23,7 +23,7 @@ import {
   useTheme,
 } from '@mui/material'
 import RefreshIcon from '@mui/icons-material/Refresh'
-import DeleteIcon from '@mui/icons-material/DeleteOutline'
+import DeleteIcon from '@mui/icons-material/DeleteOutlined'
 import VisibilityIcon from '@mui/icons-material/Visibility'
 import CloseIcon from '@mui/icons-material/Close'
 import ReplayIcon from '@mui/icons-material/Replay'
@@ -205,8 +205,6 @@ export default function SyncTasksView() {
           </>
         }
       />
-
-
       <Box sx={{ display: 'flex', gap: 1.5, mb: 2, flexWrap: 'wrap', alignItems: 'center' }}>
         <Select size="small" value={statusFilter} displayEmpty
           onChange={e => { setStatusFilter(e.target.value as SyncTaskStatus | ''); setPage(1) }}
@@ -241,7 +239,6 @@ export default function SyncTasksView() {
           </Box>
         )}
       </Box>
-
       <Card sx={{ bgcolor: md.surfaceContainerLow, boxShadow: '0 1px 2px rgba(0,0,0,.3),0 1px 3px 1px rgba(0,0,0,.15)', overflow: 'hidden' }}>
         <TableContainer>
           <Table>
@@ -312,10 +309,11 @@ export default function SyncTasksView() {
           onPageChange={setPage} onPageSizeChange={setPageSizePersist}
         />
       </Card>
-
       {/* Detail dialog */}
       <Dialog open={detailOpen} onClose={() => setDetailOpen(false)}
-        PaperProps={{ sx: { borderRadius: 3, bgcolor: md.surfaceContainerHigh, width: 720, maxWidth: '95vw' } }}>
+        slotProps={{
+          paper: { sx: { borderRadius: 3, bgcolor: md.surfaceContainerHigh, width: 720, maxWidth: '95vw' } }
+        }}>
         <DialogTitle>{t('admin:sync_tasks.detail_title')} #{detail && idOf(detail)}</DialogTitle>
         <DialogContent>
           {detail && (
@@ -339,5 +337,5 @@ export default function SyncTasksView() {
         </DialogActions>
       </Dialog>
     </Box>
-  )
+  );
 }

@@ -29,7 +29,7 @@ import {
   useTheme,
 } from '@mui/material'
 import AddIcon from '@mui/icons-material/Add'
-import DeleteIcon from '@mui/icons-material/DeleteOutline'
+import DeleteIcon from '@mui/icons-material/DeleteOutlined'
 import DragIndicatorIcon from '@mui/icons-material/DragIndicator'
 import EditIcon from '@mui/icons-material/EditOutlined'
 import LinkOffIcon from '@mui/icons-material/LinkOff'
@@ -163,9 +163,9 @@ function TagsAutocomplete(props: {
         }
         props.onChange(cleaned.join(', '))
       }}
-      renderTags={(value, getTagProps) =>
+      renderValue={(value, getItemProps) =>
         value.map((option, index) => {
-          const tagProps = getTagProps({ index })
+          const tagProps = getItemProps({ index })
           return <Chip {...tagProps} key={option} label={option} size="small" />
         })
       }
@@ -173,7 +173,7 @@ function TagsAutocomplete(props: {
         <TextField {...params} label={props.label} helperText={props.helperText} />
       )}
     />
-  )
+  );
 }
 
 interface MetaForm {
@@ -471,7 +471,7 @@ const SS2022_METHODS: { value: SS2022Method; bytes: number }[] = [
 ]
 
 function splitList(value: string): string[] {
-  return value.split(/[\n,]/).map(s => s.trim()).filter(Boolean)
+  return value.split(/[\n,]/).map(s => s.trim()).filter(Boolean);
 }
 
 function parseJSONSafe(raw: string | undefined): Record<string, unknown> {
@@ -2894,12 +2894,10 @@ export default function NodesView() {
           </Button>
         </>}
       />
-
       <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ mt: 2, mb: 2, borderBottom: `1px solid ${md.outlineVariant}` }}>
         <Tab value="managed" label={t('admin:nodes.tab_managed')} />
         <Tab value="unmanaged" label={t('admin:nodes.tab_unmanaged')} />
       </Tabs>
-
       {tab === 'managed' && selected.size > 0 && (
         <Box sx={{
           display: 'flex', alignItems: 'center', gap: 1, mb: 2, px: 2, py: 1,
@@ -2929,7 +2927,6 @@ export default function NodesView() {
           </Button>}
         </Box>
       )}
-
       <Card sx={{ bgcolor: md.surfaceContainerLow, boxShadow: '0 1px 2px rgba(0,0,0,.3),0 1px 3px 1px rgba(0,0,0,.15)', overflow: 'hidden' }}>
         {tab === 'managed' && (
           <>
@@ -3001,118 +2998,118 @@ export default function NodesView() {
                   const idx = (managedPage - 1) * managedPageSize + pageIdx
                   const isSep = n.kind === 'separator'
                   return (
-                  <TableRow key={isSep ? `sep-${n.id}` : `node-${n.id}`} hover
-                    draggable={!reorderBusy && !managedFilterActive}
-                    onDragStart={e => {
-                      setDragIndex(idx)
-                      // Required for Firefox to actually start the drag.
-                      try { e.dataTransfer.setData('text/plain', String(n.id)) } catch { /* ignore */ }
-                      e.dataTransfer.effectAllowed = 'move'
-                    }}
-                    onDragOver={e => {
-                      if (dragIndex === null) return
-                      e.preventDefault()
-                      e.dataTransfer.dropEffect = 'move'
-                      if (dropIndex !== idx) setDropIndex(idx)
-                    }}
-                    onDragLeave={() => {
-                      if (dropIndex === idx) setDropIndex(null)
-                    }}
-                    onDrop={e => {
-                      e.preventDefault()
-                      const from = dragIndex
-                      setDragIndex(null)
-                      setDropIndex(null)
-                      if (from === null || from === idx) return
-                      void commitReorder(from, idx)
-                    }}
-                    onDragEnd={() => {
-                      setDragIndex(null)
-                      setDropIndex(null)
-                    }}
-                    sx={{
-                      '& td': { borderBottom: `1px solid ${md.outlineVariant}`, whiteSpace: 'nowrap' },
-                      opacity: dragIndex === idx ? 0.4 : (n.enabled ? 1 : 0.65),
-                      cursor: reorderBusy ? 'wait' : 'default',
-                      bgcolor: dropIndex === idx && dragIndex !== null && dragIndex !== idx
-                        ? alpha(md.primary, 0.08)
-                        : 'transparent',
-                      transition: 'background-color 120ms',
-                    }}>
-                    <TableCell padding="none" sx={{ width: 32, textAlign: 'center', color: md.onSurfaceVariant, cursor: reorderBusy ? 'wait' : (managedFilterActive ? 'not-allowed' : 'grab'), opacity: managedFilterActive ? 0.4 : 1 }}>
-                      <Tooltip title={t('admin:nodes.action.drag_to_reorder')}>
-                        <DragIndicatorIcon fontSize="small" sx={{ verticalAlign: 'middle', opacity: 0.7 }} />
-                      </Tooltip>
-                    </TableCell>
-                    <TableCell padding="checkbox">
-                      <Checkbox checked={selected.has(n.id)} onChange={(_, c) => toggleOne(n.id, c)} />
-                    </TableCell>
-                    <TableCell sx={{ fontSize: 13, color: md.onSurfaceVariant }}>{n.id}</TableCell>
-                    <TableCell sx={{ fontWeight: 500, fontStyle: isSep ? 'italic' : 'normal', color: isSep ? md.primary : 'inherit' }}>
-                      {n.display_name}
-                    </TableCell>
-                    <TableCell sx={{ fontSize: 13 }}>{isSep ? '—' : n.panel_name}</TableCell>
-                    <TableCell sx={{ fontSize: 13, color: md.onSurfaceVariant }}>{isSep ? '—' : n.server_address}</TableCell>
-                    <TableCell sx={{ fontSize: 13 }}>{isSep && !n.region ? '—' : n.region}</TableCell>
-                    <TableCell>{isSep && (!n.tags || n.tags.length === 0) ? '—' : tagsCell(n.tags)}</TableCell>
-                    <TableCell align="center">{isSep ? '—' : (
-                      <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.75 }}>
-                        {healthDot(n)}
-                        {n.enabled && configSyncDot(n)}
-                      </Box>
-                    )}</TableCell>
-                    <TableCell align="center">
-                      <Switch checked={n.enabled} onChange={() => toggleEnabled(n)} disabled={enabledBusy[n.id]} />
-                    </TableCell>
-                    <TableCell align="right">
-                      {canConfig && (isSep ? (
-                        // Separators don't have inbound config / 3X-UI binding /
-                        // detach semantics — only edit + delete are meaningful.
-                        // Edit routes through openSeparatorEdit so the dialog
-                        // shows only the layout-relevant fields rather than the
-                        // full real-node edit form.
-                        <>
-                          <Tooltip title={t('admin:nodes.action.edit')}>
-                            <IconButton size="small" onClick={() => openSeparatorEdit(n)}>
-                              <EditIcon fontSize="small" />
-                            </IconButton>
-                          </Tooltip>
-                          <Tooltip title={t('admin:nodes.action.delete')}>
-                            <IconButton size="small" onClick={() => confirmDelete(n)} sx={{ color: md.error }}>
-                              <DeleteIcon fontSize="small" />
-                            </IconButton>
-                          </Tooltip>
-                        </>
-                      ) : (
-                        <>
-                          <Tooltip title={t('admin:nodes.action.edit')}>
-                            <IconButton size="small" onClick={() => openEdit(n)}><EditIcon fontSize="small" /></IconButton>
-                          </Tooltip>
-                          <Tooltip title={t('admin:nodes.edit_inbound')}>
-                            <IconButton size="small" onClick={() => openEditInbound(n)}>
-                              <KeyIcon fontSize="small" />
-                            </IconButton>
-                          </Tooltip>
-                          <Tooltip title={t('admin:nodes.action.recreate_inbound', { defaultValue: '在服务器上重建 inbound' })}>
-                            <IconButton size="small" onClick={() => confirmRecreateInbound(n)}>
-                              <CloudSyncIcon fontSize="small" />
-                            </IconButton>
-                          </Tooltip>
-                          <Tooltip title={t('admin:nodes.action.detach')}>
-                            <IconButton size="small" onClick={() => confirmDetach(n)} sx={{ color: md.tertiary }}>
-                              <LinkOffIcon fontSize="small" />
-                            </IconButton>
-                          </Tooltip>
-                          <Tooltip title={t('admin:nodes.action.delete')}>
-                            <IconButton size="small" onClick={() => confirmDelete(n)} sx={{ color: md.error }}>
-                              <DeleteIcon fontSize="small" />
-                            </IconButton>
-                          </Tooltip>
-                        </>
-                      ))}
-                    </TableCell>
-                  </TableRow>
-                  )
+                    <TableRow key={isSep ? `sep-${n.id}` : `node-${n.id}`} hover
+                      draggable={!reorderBusy && !managedFilterActive}
+                      onDragStart={e => {
+                        setDragIndex(idx)
+                        // Required for Firefox to actually start the drag.
+                        try { e.dataTransfer.setData('text/plain', String(n.id)) } catch { /* ignore */ }
+                        e.dataTransfer.effectAllowed = 'move'
+                      }}
+                      onDragOver={e => {
+                        if (dragIndex === null) return
+                        e.preventDefault()
+                        e.dataTransfer.dropEffect = 'move'
+                        if (dropIndex !== idx) setDropIndex(idx)
+                      }}
+                      onDragLeave={() => {
+                        if (dropIndex === idx) setDropIndex(null)
+                      }}
+                      onDrop={e => {
+                        e.preventDefault()
+                        const from = dragIndex
+                        setDragIndex(null)
+                        setDropIndex(null)
+                        if (from === null || from === idx) return
+                        void commitReorder(from, idx)
+                      }}
+                      onDragEnd={() => {
+                        setDragIndex(null)
+                        setDropIndex(null)
+                      }}
+                      sx={{
+                        '& td': { borderBottom: `1px solid ${md.outlineVariant}`, whiteSpace: 'nowrap' },
+                        opacity: dragIndex === idx ? 0.4 : (n.enabled ? 1 : 0.65),
+                        cursor: reorderBusy ? 'wait' : 'default',
+                        bgcolor: dropIndex === idx && dragIndex !== null && dragIndex !== idx
+                          ? alpha(md.primary, 0.08)
+                          : 'transparent',
+                        transition: 'background-color 120ms',
+                      }}>
+                      <TableCell padding="none" sx={{ width: 32, textAlign: 'center', color: md.onSurfaceVariant, cursor: reorderBusy ? 'wait' : (managedFilterActive ? 'not-allowed' : 'grab'), opacity: managedFilterActive ? 0.4 : 1 }}>
+                        <Tooltip title={t('admin:nodes.action.drag_to_reorder')}>
+                          <DragIndicatorIcon fontSize="small" sx={{ verticalAlign: 'middle', opacity: 0.7 }} />
+                        </Tooltip>
+                      </TableCell>
+                      <TableCell padding="checkbox">
+                        <Checkbox checked={selected.has(n.id)} onChange={(_, c) => toggleOne(n.id, c)} />
+                      </TableCell>
+                      <TableCell sx={{ fontSize: 13, color: md.onSurfaceVariant }}>{n.id}</TableCell>
+                      <TableCell sx={{ fontWeight: 500, fontStyle: isSep ? 'italic' : 'normal', color: isSep ? md.primary : 'inherit' }}>
+                        {n.display_name}
+                      </TableCell>
+                      <TableCell sx={{ fontSize: 13 }}>{isSep ? '—' : n.panel_name}</TableCell>
+                      <TableCell sx={{ fontSize: 13, color: md.onSurfaceVariant }}>{isSep ? '—' : n.server_address}</TableCell>
+                      <TableCell sx={{ fontSize: 13 }}>{isSep && !n.region ? '—' : n.region}</TableCell>
+                      <TableCell>{isSep && (!n.tags || n.tags.length === 0) ? '—' : tagsCell(n.tags)}</TableCell>
+                      <TableCell align="center">{isSep ? '—' : (
+                        <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.75 }}>
+                          {healthDot(n)}
+                          {n.enabled && configSyncDot(n)}
+                        </Box>
+                      )}</TableCell>
+                      <TableCell align="center">
+                        <Switch checked={n.enabled} onChange={() => toggleEnabled(n)} disabled={enabledBusy[n.id]} />
+                      </TableCell>
+                      <TableCell align="right">
+                        {canConfig && (isSep ? (
+                          // Separators don't have inbound config / 3X-UI binding /
+                          // detach semantics — only edit + delete are meaningful.
+                          // Edit routes through openSeparatorEdit so the dialog
+                          // shows only the layout-relevant fields rather than the
+                          // full real-node edit form.
+                          (<>
+                            <Tooltip title={t('admin:nodes.action.edit')}>
+                              <IconButton size="small" onClick={() => openSeparatorEdit(n)}>
+                                <EditIcon fontSize="small" />
+                              </IconButton>
+                            </Tooltip>
+                            <Tooltip title={t('admin:nodes.action.delete')}>
+                              <IconButton size="small" onClick={() => confirmDelete(n)} sx={{ color: md.error }}>
+                                <DeleteIcon fontSize="small" />
+                              </IconButton>
+                            </Tooltip>
+                          </>)
+                        ) : (
+                          <>
+                            <Tooltip title={t('admin:nodes.action.edit')}>
+                              <IconButton size="small" onClick={() => openEdit(n)}><EditIcon fontSize="small" /></IconButton>
+                            </Tooltip>
+                            <Tooltip title={t('admin:nodes.edit_inbound')}>
+                              <IconButton size="small" onClick={() => openEditInbound(n)}>
+                                <KeyIcon fontSize="small" />
+                              </IconButton>
+                            </Tooltip>
+                            <Tooltip title={t('admin:nodes.action.recreate_inbound', { defaultValue: '在服务器上重建 inbound' })}>
+                              <IconButton size="small" onClick={() => confirmRecreateInbound(n)}>
+                                <CloudSyncIcon fontSize="small" />
+                              </IconButton>
+                            </Tooltip>
+                            <Tooltip title={t('admin:nodes.action.detach')}>
+                              <IconButton size="small" onClick={() => confirmDetach(n)} sx={{ color: md.tertiary }}>
+                                <LinkOffIcon fontSize="small" />
+                              </IconButton>
+                            </Tooltip>
+                            <Tooltip title={t('admin:nodes.action.delete')}>
+                              <IconButton size="small" onClick={() => confirmDelete(n)} sx={{ color: md.error }}>
+                                <DeleteIcon fontSize="small" />
+                              </IconButton>
+                            </Tooltip>
+                          </>
+                        ))}
+                      </TableCell>
+                    </TableRow>
+                  );
                 })}
               </TableBody>
             </Table>
@@ -3248,10 +3245,11 @@ export default function NodesView() {
           </>
         )}
       </Card>
-
       {/* Create inbound dialog (multi-protocol) */}
       <Dialog open={createOpen} onClose={() => !createBusy && setCreateOpen(false)}
-        PaperProps={{ sx: { borderRadius: 3, bgcolor: md.surfaceContainerHigh, width: 800, maxWidth: '95vw' } }}>
+        slotProps={{
+          paper: { sx: { borderRadius: 3, bgcolor: md.surfaceContainerHigh, width: 800, maxWidth: '95vw' } }
+        }}>
         <DialogTitle sx={{ pt: 2.5, pb: 1, fontSize: 18 }}>
           {t('admin:nodes.create_dialog.title_dynamic', {
             protocol: PROTOCOL_OPTIONS.find(o => o.value === createForm.protocol)?.label ?? createForm.protocol,
@@ -3279,10 +3277,11 @@ export default function NodesView() {
           </Button>
         </DialogActions>
       </Dialog>
-
       {/* Edit Inbound config dialog (multi-protocol) */}
       <Dialog open={editInboundOpen} onClose={() => !editInboundBusy && setEditInboundOpen(false)}
-        PaperProps={{ sx: { borderRadius: 3, bgcolor: md.surfaceContainerHigh, width: 800, maxWidth: '95vw' } }}>
+        slotProps={{
+          paper: { sx: { borderRadius: 3, bgcolor: md.surfaceContainerHigh, width: 800, maxWidth: '95vw' } }
+        }}>
         <DialogTitle sx={{ pt: 2.5, pb: 1, fontSize: 18 }}>
           {t('admin:nodes.edit_inbound_dialog.title')}{editingInboundNode ? ` — ${editingInboundNode.display_name}` : ''}
         </DialogTitle>
@@ -3318,10 +3317,11 @@ export default function NodesView() {
           )}
         </DialogActions>
       </Dialog>
-
       {/* Claim existing 3X-UI client dialog */}
       <Dialog open={claimOpen} onClose={() => !claimBusy && setClaimOpen(false)}
-        PaperProps={{ sx: { borderRadius: 3, bgcolor: md.surfaceContainerHigh, width: 520, maxWidth: '90vw' } }}>
+        slotProps={{
+          paper: { sx: { borderRadius: 3, bgcolor: md.surfaceContainerHigh, width: 520, maxWidth: '90vw' } }
+        }}>
         <DialogTitle>{t('admin:nodes.claim_dialog.title')}</DialogTitle>
         <DialogContent>
           <Typography variant="body2" sx={{ mb: 2, color: md.onSurfaceVariant }}>
@@ -3356,10 +3356,11 @@ export default function NodesView() {
           </Button>
         </DialogActions>
       </Dialog>
-
       {/* Import unmanaged-inbound dialog */}
       <Dialog open={importOpen} onClose={() => !importBusy && setImportOpen(false)}
-        PaperProps={{ sx: { borderRadius: 3, bgcolor: md.surfaceContainerHigh, width: 520, maxWidth: '90vw' } }}>
+        slotProps={{
+          paper: { sx: { borderRadius: 3, bgcolor: md.surfaceContainerHigh, width: 520, maxWidth: '90vw' } }
+        }}>
         <DialogTitle>{t('admin:nodes.import_dialog.title')}</DialogTitle>
         <DialogContent>
           <Typography variant="body2" sx={{ mb: 2 }}>
@@ -3414,10 +3415,11 @@ export default function NodesView() {
           </Button>
         </DialogActions>
       </Dialog>
-
       {/* Metadata edit dialog */}
       <Dialog open={editOpen} onClose={() => !editBusy && setEditOpen(false)}
-        PaperProps={{ sx: { borderRadius: 3, bgcolor: md.surfaceContainerHigh, width: 520, maxWidth: '90vw' } }}>
+        slotProps={{
+          paper: { sx: { borderRadius: 3, bgcolor: md.surfaceContainerHigh, width: 520, maxWidth: '90vw' } }
+        }}>
         <DialogTitle>
           {t('admin:nodes.edit_title')} — {editing?.display_name}
         </DialogTitle>
@@ -3514,10 +3516,11 @@ export default function NodesView() {
           </Button>
         </DialogActions>
       </Dialog>
-
       {/* Separator dialog: layout-only row, persisted to nodes_separator. */}
       <Dialog open={separatorOpen} onClose={() => !separatorBusy && setSeparatorOpen(false)}
-        PaperProps={{ sx: { borderRadius: 3, bgcolor: md.surfaceContainerHigh, width: 520, maxWidth: '90vw' } }}>
+        slotProps={{
+          paper: { sx: { borderRadius: 3, bgcolor: md.surfaceContainerHigh, width: 520, maxWidth: '90vw' } }
+        }}>
         <DialogTitle>
           {separatorEditingId !== null
             ? t('admin:nodes.edit_separator_dialog.title', { defaultValue: '编辑分隔标题' })
@@ -3553,9 +3556,9 @@ export default function NodesView() {
                 isOptionEqualToValue={(a, b) => a.id === b.id}
                 value={managed.filter(n => separatorForm.node_ids.includes(n.id))}
                 onChange={(_, v) => setSeparatorForm({ ...separatorForm, node_ids: (v as Node[]).map(n => n.id) })}
-                renderTags={(value, getTagProps) =>
+                renderValue={(value, getItemProps) =>
                   value.map((option, index) => {
-                    const tagProps = getTagProps({ index })
+                    const tagProps = getItemProps({ index })
                     return <Chip {...tagProps} key={option.id} label={option.display_name} size="small" />
                   })
                 }
@@ -3585,5 +3588,5 @@ export default function NodesView() {
         </DialogActions>
       </Dialog>
     </Box>
-  )
+  );
 }

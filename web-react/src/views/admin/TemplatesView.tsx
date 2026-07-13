@@ -32,7 +32,7 @@ import {
 } from '@mui/material'
 import AddIcon from '@mui/icons-material/Add'
 import ContentCopyIcon from '@mui/icons-material/ContentCopyOutlined'
-import DeleteIcon from '@mui/icons-material/DeleteOutline'
+import DeleteIcon from '@mui/icons-material/DeleteOutlined'
 import EditIcon from '@mui/icons-material/EditOutlined'
 import RestartAltIcon from '@mui/icons-material/RestartAlt'
 import { useTranslation } from 'react-i18next'
@@ -51,7 +51,7 @@ const EMPTY: Template = {
 
 const BUILTIN_TARGETS = new Set(['DIRECT', 'REJECT', 'REJECT-DROP', 'REJECT-DROP-BIT', 'PASS'])
 
-function normalizeTarget(raw: string) { return raw.trim().replace(/^['"]|['"]$/g, '') }
+function normalizeTarget(raw: string) { return raw.trim().replace(/^['"]|['"]$/g, ''); }
 
 function extractProxyGroups(content: string): Set<string> {
   const groups = new Set<string>()
@@ -66,7 +66,7 @@ function extractProxyGroups(content: string): Set<string> {
 }
 
 function usesDynamicProxyGroups(content: string) {
-  return /\{\{\s*proxy_groups\s*\}\}/.test(content) || /\{\{\s*outbounds\s*\}\}/.test(content)
+  return /\{\{\s*proxy_groups\s*\}\}/.test(content) || /\{\{\s*outbounds\s*\}\}/.test(content);
 }
 
 function extractRuleTargets(sets: RuleSet[]): Set<string> {
@@ -310,7 +310,6 @@ export default function TemplatesView() {
           {t('admin:templates.create')}
         </Button>}
       />
-
       {selected.size > 0 && canConfig && (
         <Box sx={{
           display: 'flex', alignItems: 'center', gap: 1, mt: 2, mb: 1, px: 2, py: 1,
@@ -327,7 +326,6 @@ export default function TemplatesView() {
           </Button>
         </Box>
       )}
-
       <Card sx={{ mt: 2, bgcolor: md.surfaceContainerLow, boxShadow: '0 1px 2px rgba(0,0,0,.3),0 1px 3px 1px rgba(0,0,0,.15)', overflow: 'hidden' }}>
         <TableContainer>
           <Table>
@@ -414,10 +412,11 @@ export default function TemplatesView() {
           onPageChange={setPage} onPageSizeChange={changePageSize}
         />
       </Card>
-
       {/* Create/Edit dialog */}
       <Dialog open={dialogOpen} onClose={() => !busy && setDialogOpen(false)}
-        PaperProps={{ sx: { borderRadius: 3, bgcolor: md.surfaceContainerHigh, width: 900, maxWidth: '95vw' } }}>
+        slotProps={{
+          paper: { sx: { borderRadius: 3, bgcolor: md.surfaceContainerHigh, width: 900, maxWidth: '95vw' } }
+        }}>
         <DialogTitle>
           {editing ? t('admin:templates.edit_title') : t('admin:templates.create')}
         </DialogTitle>
@@ -498,5 +497,5 @@ export default function TemplatesView() {
         </DialogActions>
       </Dialog>
     </Box>
-  )
+  );
 }

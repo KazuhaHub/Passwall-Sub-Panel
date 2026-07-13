@@ -108,7 +108,9 @@ export default function AccountSecurityDrawer({
   return (
     <Drawer anchor="right" open={open} onClose={onClose}
       transitionDuration={{ enter: 300, exit: 240 }}
-      PaperProps={{ sx: { width: 480, maxWidth: '94vw', bgcolor: md.surfaceContainerLow, borderTopLeftRadius: 16, borderBottomLeftRadius: 16 } }}>
+      slotProps={{
+        paper: { sx: { width: 480, maxWidth: '94vw', bgcolor: md.surfaceContainerLow, borderTopLeftRadius: 16, borderBottomLeftRadius: 16 } }
+      }}>
       {u && (<>
       {/* Header */}
       <Box sx={{ p: 2.5, pb: 2, display: 'flex', alignItems: 'center', gap: 1.5 }}>
@@ -116,9 +118,9 @@ export default function AccountSecurityDrawer({
           {initial}
         </Avatar>
         <Box sx={{ flex: 1, minWidth: 0 }}>
-          <Typography variant="subtitle1" fontWeight={700} noWrap>{u.display_name || u.upn}</Typography>
+          <Typography variant="subtitle1" noWrap sx={{ fontWeight: 700 }}>{u.display_name || u.upn}</Typography>
           {u.display_name && <Typography variant="caption" color="text.secondary" noWrap sx={{ display: 'block' }}>{u.upn}</Typography>}
-          <Stack direction="row" spacing={0.75} sx={{ mt: 0.5 }} flexWrap="wrap" useFlexGap>
+          <Stack direction="row" spacing={0.75} sx={{ mt: 0.5, flexWrap: 'wrap' }} useFlexGap>
             <Chip size="small" label={u.role} sx={{ height: 22 }} />
             {u.totp_enabled && <Chip size="small" color="success" label={t('users.security.twofa_on', { defaultValue: '2FA 已启用' })} sx={{ height: 22 }} />}
             {hasSSO && <Chip size="small" variant="outlined" icon={<LinkIcon sx={{ fontSize: 14 }} />} label={u.sso_provider} sx={{ height: 22 }} />}
@@ -145,7 +147,7 @@ export default function AccountSecurityDrawer({
             ? <Chip size="small" color="success" label={t('users.security.twofa_on', { defaultValue: '2FA 已启用' })} sx={{ height: 22 }} />
             : <Typography variant="caption" color="text.secondary">{t('users.security.twofa_off', { defaultValue: '未启用' })}</Typography>}>
           {has2FA ? (
-            <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+            <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap' }} useFlexGap>
               {/* Recovery codes are decoupled from TOTP — a passkey-only account has
                   them too, so this shows whenever the user has any second factor. */}
               <Button size="small" variant="outlined" disabled={busy} onClick={doRegenRecovery}>
@@ -209,7 +211,7 @@ export default function AccountSecurityDrawer({
       </Box>
       </>)}
     </Drawer>
-  )
+  );
 }
 
 function SectionCard({ md, icon, title, status, children }: {
@@ -221,9 +223,9 @@ function SectionCard({ md, icon, title, status, children }: {
 }) {
   return (
     <Box sx={{ bgcolor: md.surfaceContainer, borderRadius: 3, p: 2 }}>
-      <Stack direction="row" alignItems="center" spacing={1.25} sx={{ mb: 1.25 }}>
+      <Stack direction="row" spacing={1.25} sx={{ mb: 1.25, alignItems: 'center' }}>
         <Box sx={{ color: md.onSurfaceVariant, display: 'flex' }}>{icon}</Box>
-        <Typography variant="subtitle2" fontWeight={700} sx={{ flex: 1 }}>{title}</Typography>
+        <Typography variant="subtitle2" sx={{ flex: 1, fontWeight: 700 }}>{title}</Typography>
         {status}
       </Stack>
       {children}

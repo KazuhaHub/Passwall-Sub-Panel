@@ -136,9 +136,10 @@ export default function RecoveryCodesDialog({ open, remaining, hasPasskey, totpE
         onClose()
       }}
       fullWidth maxWidth="xs"
-      PaperProps={{ sx: { bgcolor: md.surfaceContainerHigh } }}>
+      slotProps={{
+        paper: { sx: { bgcolor: md.surfaceContainerHigh } }
+      }}>
       <DialogTitle>{t('recovery.title', { defaultValue: '备用码' })}</DialogTitle>
-
       {step === 'view' && (
         <>
           <DialogContent>
@@ -185,7 +186,6 @@ export default function RecoveryCodesDialog({ open, remaining, hasPasskey, totpE
           </DialogActions>
         </>
       )}
-
       {step === 'regenerate' && (
         <Box component="form" onSubmit={submitRegenerate}>
           <DialogContent>
@@ -207,7 +207,6 @@ export default function RecoveryCodesDialog({ open, remaining, hasPasskey, totpE
           </DialogActions>
         </Box>
       )}
-
       {step === 'codes' && (
         <>
           <DialogContent>
@@ -230,5 +229,5 @@ export default function RecoveryCodesDialog({ open, remaining, hasPasskey, totpE
         </>
       )}
     </Dialog>
-  )
+  );
 }

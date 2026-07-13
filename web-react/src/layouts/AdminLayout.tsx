@@ -220,12 +220,12 @@ export default function AdminLayout() {
           // Square favicon fits the 76px rail much better than the wide
           // wordmark logo — the brand mark is reserved for the expanded view
           // where there's room for it next to the title text.
-          <Box
+          (<Box
             component="img"
             src={siteIcon}
             alt=""
             sx={{ width: 36, height: 36, borderRadius: 1, objectFit: 'contain', display: 'block' }}
-          />
+          />)
         ) : (
           <>
             <BrandLogo height={36} />
@@ -301,7 +301,9 @@ export default function AdminLayout() {
                     {!railCollapsed && (
                       <ListItemText
                         primary={t(item.labelKey)}
-                        primaryTypographyProps={{ fontSize: 14, fontWeight: active ? 600 : 500 }}
+                        slotProps={{
+                          primary: { sx: { fontSize: 14, fontWeight: active ? 600 : 500 } }
+                        }}
                       />
                     )}
                   </ListItemButton>
@@ -311,7 +313,7 @@ export default function AdminLayout() {
                   : button
               })}
             </Fragment>
-          )
+          );
         })}
       </List>
       {/* Footer: build identity + collapse toggle on one row, pinned below the
@@ -447,7 +449,7 @@ export default function AdminLayout() {
               onClose={() => setUserAnchor(null)}
               anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
               transformOrigin={{ vertical: 'top', horizontal: 'right' }}
-              PaperProps={{ sx: { mt: 1, minWidth: 180 } }}
+              slotProps={{ paper: { sx: { mt: 1, minWidth: 180 } } }}
             >
               <MenuItem disabled sx={{ opacity: '1 !important' }}>
                 <Box>

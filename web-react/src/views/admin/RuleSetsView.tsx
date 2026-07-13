@@ -25,7 +25,7 @@ import {
 } from '@mui/material'
 import AddIcon from '@mui/icons-material/Add'
 import ContentCopyIcon from '@mui/icons-material/ContentCopyOutlined'
-import DeleteIcon from '@mui/icons-material/DeleteOutline'
+import DeleteIcon from '@mui/icons-material/DeleteOutlined'
 import RestartAltIcon from '@mui/icons-material/RestartAlt'
 import EditIcon from '@mui/icons-material/EditOutlined'
 import LockIcon from '@mui/icons-material/Lock'
@@ -248,7 +248,6 @@ export default function RuleSetsView() {
           {t('admin:rules.create')}
         </Button>}
       />
-
       {selected.size > 0 && canConfig && (
         <Box sx={{
           display: 'flex', alignItems: 'center', gap: 1, mt: 2, mb: 1, px: 2, py: 1,
@@ -275,7 +274,6 @@ export default function RuleSetsView() {
           </Button>
         </Box>
       )}
-
       <Card sx={{ mt: 2, bgcolor: md.surfaceContainerLow, boxShadow: '0 1px 2px rgba(0,0,0,.3),0 1px 3px 1px rgba(0,0,0,.15)', overflow: 'hidden' }}>
         <TableContainer>
           <Table>
@@ -370,10 +368,11 @@ export default function RuleSetsView() {
           onPageChange={setPage} onPageSizeChange={changePageSize}
         />
       </Card>
-
       {/* Create/Edit dialog */}
       <Dialog open={dialogOpen} onClose={() => !busy && setDialogOpen(false)}
-        PaperProps={{ sx: { borderRadius: 3, bgcolor: md.surfaceContainerHigh, width: 720, maxWidth: '95vw' } }}>
+        slotProps={{
+          paper: { sx: { borderRadius: 3, bgcolor: md.surfaceContainerHigh, width: 720, maxWidth: '95vw' } }
+        }}>
         <DialogTitle>
           {editing ? t('admin:rules.edit_title') : t('admin:rules.create')}
         </DialogTitle>
@@ -431,5 +430,5 @@ export default function RuleSetsView() {
         </DialogActions>
       </Dialog>
     </Box>
-  )
+  );
 }

@@ -129,10 +129,12 @@ export default function CaptchaWidget({ provider, siteKey, refreshKey = 0, onCha
             onChange({ captcha_id: captchaId, captcha_answer: v })
           }}
           placeholder={t('auth:captcha_placeholder')}
-          inputProps={{ inputMode: 'numeric', autoComplete: 'off', maxLength: 8 }}
           sx={{ flex: 1 }}
+          slotProps={{
+            htmlInput: { inputMode: 'numeric', autoComplete: 'off', maxLength: 8 }
+          }}
         />
       </Box>
     </Box>
-  )
+  );
 }

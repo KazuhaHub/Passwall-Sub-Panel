@@ -14,7 +14,7 @@ import {
 } from '@mui/material'
 import NotificationsNoneIcon from '@mui/icons-material/NotificationsNone'
 import WarningAmberIcon from '@mui/icons-material/WarningAmber'
-import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline'
+import ErrorOutlineIcon from '@mui/icons-material/ErrorOutlined'
 import ScheduleIcon from '@mui/icons-material/Schedule'
 import SystemUpdateAltIcon from '@mui/icons-material/SystemUpdateAlt'
 import ShieldOutlinedIcon from '@mui/icons-material/ShieldOutlined'

@@ -127,10 +127,11 @@ export function UserNodeUsage({ userId }: { userId: number }) {
           onChange={e => { setKeyword(e.target.value); setPage(0) }}
           placeholder={t('users.nodeusage.search', { defaultValue: '搜索节点 / 地区' })}
           sx={{ width: 240 }}
-          InputProps={{ startAdornment: <InputAdornment position="start"><SearchIcon fontSize="small" /></InputAdornment> }}
+          slotProps={{
+            input: { startAdornment: <InputAdornment position="start"><SearchIcon fontSize="small" /></InputAdornment> }
+          }}
         />
       </Box>
-
       <TableContainer>
         <Table size="small">
           <TableHead>
@@ -176,7 +177,6 @@ export function UserNodeUsage({ userId }: { userId: number }) {
           </TableFooter>
         </Table>
       </TableContainer>
-
       <TablePagination
         component="div"
         count={filtered.length}
@@ -187,5 +187,5 @@ export function UserNodeUsage({ userId }: { userId: number }) {
         rowsPerPageOptions={[10, 25, 50]}
       />
     </Box>
-  )
+  );
 }

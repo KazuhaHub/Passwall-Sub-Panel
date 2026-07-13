@@ -32,7 +32,7 @@ import {
   useTheme,
 } from '@mui/material'
 import AddIcon from '@mui/icons-material/Add'
-import DeleteIcon from '@mui/icons-material/DeleteOutline'
+import DeleteIcon from '@mui/icons-material/DeleteOutlined'
 import EditIcon from '@mui/icons-material/EditOutlined'
 import AutorenewIcon from '@mui/icons-material/Autorenew'
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined'

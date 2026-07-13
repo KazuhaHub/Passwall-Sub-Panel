@@ -4,6 +4,13 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## v3.9.1-beta.6 — 2026-07-13
+
+### 修复
+
+- **修复 beta.5 部署后管理面板完全白屏** —— 根因是 Vite 8 / Rolldown 将 MUI v5 图标的 CommonJS 默认导入打包成模块对象，React 首屏渲染抛出 #130；错误兜底页本身也使用图标，因而无法显示报错。前端依赖整体升级为 React / React DOM 19.2.7、MUI / Icons 9.2.0、Emotion 11.14.x 与 Vite 8.1.4，并完成 `slotProps`、系统样式属性、Autocomplete、图标入口及主题覆盖等 MUI 9 API 迁移。生产构建已用全新 Chrome 配置验证登录表单和 SVG 图标可真实渲染。
+- **增加生产产物浏览器冒烟门禁** —— 新增 `npm run smoke:dist`，启动临时静态服务并用 Chrome/Chromium 打开实际 `internal/web/dist`，检查 React 根节点、登录表单、MUI SVG 图标及 React #130；普通 CI 与 Release 工作流都会在上传产物前执行，防止“TypeScript/构建通过但浏览器首屏崩溃”再次发布。
+
 ## v3.9.1-beta.5 — 2026-07-13
 
 ### 新功能

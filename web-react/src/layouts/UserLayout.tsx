@@ -82,7 +82,7 @@ export default function UserLayout() {
             onClose={() => setUserAnchor(null)}
             anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
             transformOrigin={{ vertical: 'top', horizontal: 'right' }}
-            PaperProps={{ sx: { mt: 1, minWidth: 180 } }}
+            slotProps={{ paper: { sx: { mt: 1, minWidth: 180 } } }}
           >
             <MenuItem onClick={handleLogout}>
               <ListItemIcon><LogoutIcon fontSize="small" /></ListItemIcon>

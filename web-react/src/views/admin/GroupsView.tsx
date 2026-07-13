@@ -31,7 +31,7 @@ import {
 } from '@mui/material'
 import AddIcon from '@mui/icons-material/Add'
 import SearchIcon from '@mui/icons-material/Search'
-import DeleteIcon from '@mui/icons-material/DeleteOutline'
+import DeleteIcon from '@mui/icons-material/DeleteOutlined'
 import EditIcon from '@mui/icons-material/EditOutlined'
 import { useTranslation } from 'react-i18next'
 import { useCan } from '@/utils/permissions'
@@ -145,9 +145,9 @@ function MultiPicker(props: {
         }
         props.onChange(cleaned)
       }}
-      renderTags={(value, getTagProps) =>
+      renderValue={(value, getItemProps) =>
         value.map((option, index) => {
-          const tagProps = getTagProps({ index })
+          const tagProps = getItemProps({ index })
           return <Chip {...tagProps} key={option} label={option} size="small" />
         })
       }
@@ -155,7 +155,7 @@ function MultiPicker(props: {
         <TextField {...params} label={props.label} />
       )}
     />
-  )
+  );
 }
 
 export default function GroupsView() {
@@ -475,7 +475,6 @@ export default function GroupsView() {
           {t('admin:groups.create')}
         </Button>}
       />
-
       {selectedCount > 0 && canConfig && (
         <Box sx={{
           display: 'flex', alignItems: 'center', gap: 1, mt: 2, mb: 1,
@@ -496,7 +495,6 @@ export default function GroupsView() {
           </Button>
         </Box>
       )}
-
       <Box sx={{ mt: 2 }}>
         <TextField
           size="small"
@@ -504,16 +502,17 @@ export default function GroupsView() {
           onChange={e => setSearch(e.target.value)}
           placeholder={t('admin:groups.search_placeholder', { defaultValue: '搜索名称 / slug' })}
           sx={{ width: 320, maxWidth: '100%' }}
-          InputProps={{
-            startAdornment: (
-              <InputAdornment position="start">
-                <SearchIcon fontSize="small" sx={{ color: md.onSurfaceVariant }} />
-              </InputAdornment>
-            ),
+          slotProps={{
+            input: {
+              startAdornment: (
+                <InputAdornment position="start">
+                  <SearchIcon fontSize="small" sx={{ color: md.onSurfaceVariant }} />
+                </InputAdornment>
+              ),
+            }
           }}
         />
       </Box>
-
       <Card sx={{ mt: 2, bgcolor: md.surfaceContainerLow, boxShadow: '0 1px 2px rgba(0,0,0,.3),0 1px 3px 1px rgba(0,0,0,.15)', overflow: 'hidden' }}>
         <TableContainer>
           <Table>
@@ -597,11 +596,12 @@ export default function GroupsView() {
           onPageChange={setPage} onPageSizeChange={changePageSize}
         />
       </Card>
-
       <Dialog
         open={dialogOpen}
         onClose={() => !busy && setDialogOpen(false)}
-        PaperProps={{ sx: { borderRadius: 3, bgcolor: md.surfaceContainerHigh, width: 600, maxWidth: '90vw' } }}
+        slotProps={{
+          paper: { sx: { borderRadius: 3, bgcolor: md.surfaceContainerHigh, width: 600, maxWidth: '90vw' } }
+        }}
       >
         <DialogTitle>
           {editing ? t('admin:groups.edit_title') : t('admin:groups.create')}
@@ -752,5 +752,5 @@ export default function GroupsView() {
         </DialogActions>
       </Dialog>
     </Box>
-  )
+  );
 }

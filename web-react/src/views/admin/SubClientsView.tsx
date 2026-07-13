@@ -18,7 +18,7 @@ import {
   useTheme,
 } from '@mui/material'
 import SaveIcon from '@mui/icons-material/Save'
-import HelpOutlineIcon from '@mui/icons-material/HelpOutline'
+import HelpOutlineIcon from '@mui/icons-material/HelpOutlined'
 import { useTranslation } from 'react-i18next'
 
 import { getUISettings, putUISettings, type UISettings } from '@/api/settings'

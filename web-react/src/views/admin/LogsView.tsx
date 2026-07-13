@@ -24,7 +24,7 @@ import {
   Typography,
   useTheme,
 } from '@mui/material'
-import DeleteIcon from '@mui/icons-material/DeleteOutline'
+import DeleteIcon from '@mui/icons-material/DeleteOutlined'
 import VisibilityIcon from '@mui/icons-material/Visibility'
 import CleaningIcon from '@mui/icons-material/CleaningServices'
 import SearchIcon from '@mui/icons-material/Search'
@@ -311,7 +311,6 @@ export default function LogsView() {
         <Tab value="email" label={t('admin:logs.tab_email')} />
         <Tab value="certs" label={t('admin:logs.tab_certs')} />
       </Tabs>
-
       {tab === 'sub' && (
         <>
           <Box component="form" onSubmit={onSubFilter} sx={{ display: 'flex', gap: 1.5, mb: 2, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -340,8 +339,10 @@ export default function LogsView() {
                 label={t('admin:logs.retention_label')}
                 value={retentionDays ?? ''}
                 onChange={(e: ChangeEvent<HTMLInputElement>) => setRetentionDays(e.target.value === '' ? null : Number(e.target.value))}
-                inputProps={{ min: 0 }}
                 sx={{ width: 200 }}
+                slotProps={{
+                  htmlInput: { min: 0 }
+                }}
               />
               <Button variant="contained" disabled={retentionSaving || retentionDays === null || retentionDays === retentionSavedDays}
                 onClick={saveRetention}>
@@ -406,7 +407,6 @@ export default function LogsView() {
           </Card>
         </>
       )}
-
       {tab === 'audit' && (
         <>
           <Box component="form" onSubmit={onAuditFilter} sx={{ display: 'flex', gap: 1.5, mb: 2, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -477,7 +477,6 @@ export default function LogsView() {
           </Card>
         </>
       )}
-
       {tab === 'auth' && (
         <>
           <Box component="form" onSubmit={onAuthFilter} sx={{ display: 'flex', gap: 1.5, mb: 2, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -561,7 +560,6 @@ export default function LogsView() {
           </Card>
         </>
       )}
-
       {tab === 'email' && (
         <>
           <Box component="form" onSubmit={onEmailFilter} sx={{ display: 'flex', gap: 1.5, mb: 2, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -590,8 +588,10 @@ export default function LogsView() {
                 label={t('admin:logs.retention_label')}
                 value={emailRetentionDays ?? ''}
                 onChange={(e: ChangeEvent<HTMLInputElement>) => setEmailRetentionDays(e.target.value === '' ? null : Number(e.target.value))}
-                inputProps={{ min: 0 }}
                 sx={{ width: 200 }}
+                slotProps={{
+                  htmlInput: { min: 0 }
+                }}
               />
               <Button variant="contained"
                 disabled={emailRetentionSaving || emailRetentionDays === null || emailRetentionDays === emailRetentionSavedDays}
@@ -649,12 +649,12 @@ export default function LogsView() {
           </Card>
         </>
       )}
-
       {tab === 'certs' && <CertEventsTab />}
-
       {/* Email log detail */}
       <Dialog open={emailDetailOpen} onClose={() => setEmailDetailOpen(false)}
-        PaperProps={{ sx: { borderRadius: 3, bgcolor: md.surfaceContainerHigh, width: 600, maxWidth: '95vw' } }}>
+        slotProps={{
+          paper: { sx: { borderRadius: 3, bgcolor: md.surfaceContainerHigh, width: 600, maxWidth: '95vw' } }
+        }}>
         <DialogTitle>{t('admin:logs.view_detail')} #{emailDetail?.id}</DialogTitle>
         <DialogContent>
           {emailDetail && (
@@ -671,10 +671,11 @@ export default function LogsView() {
           <Button variant="contained" onClick={() => setEmailDetailOpen(false)}>{t('common:actions.ok')}</Button>
         </DialogActions>
       </Dialog>
-
       {/* Sub log detail */}
       <Dialog open={subDetailOpen} onClose={() => setSubDetailOpen(false)}
-        PaperProps={{ sx: { borderRadius: 3, bgcolor: md.surfaceContainerHigh, width: 600, maxWidth: '95vw' } }}>
+        slotProps={{
+          paper: { sx: { borderRadius: 3, bgcolor: md.surfaceContainerHigh, width: 600, maxWidth: '95vw' } }
+        }}>
         <DialogTitle>{t('admin:logs.view_detail')} #{subDetail?.id}</DialogTitle>
         <DialogContent>
           {subDetail && (
@@ -692,10 +693,11 @@ export default function LogsView() {
           <Button variant="contained" onClick={() => setSubDetailOpen(false)}>{t('common:actions.ok')}</Button>
         </DialogActions>
       </Dialog>
-
       {/* Audit detail */}
       <Dialog open={auditDetailOpen} onClose={() => setAuditDetailOpen(false)}
-        PaperProps={{ sx: { borderRadius: 3, bgcolor: md.surfaceContainerHigh, width: 720, maxWidth: '95vw' } }}>
+        slotProps={{
+          paper: { sx: { borderRadius: 3, bgcolor: md.surfaceContainerHigh, width: 720, maxWidth: '95vw' } }
+        }}>
         <DialogTitle>{t('admin:logs.view_detail')} #{auditDetail?.id}</DialogTitle>
         <DialogContent>
           {auditDetail && (
@@ -730,7 +732,7 @@ export default function LogsView() {
         </DialogActions>
       </Dialog>
     </Box>
-  )
+  );
 }
 
 interface RowProps { label: string; value: string; mono?: boolean; md: { onSurfaceVariant: string } }

@@ -32,7 +32,7 @@ import {
 import AddIcon from '@mui/icons-material/Add'
 import SearchIcon from '@mui/icons-material/Search'
 import RefreshIcon from '@mui/icons-material/Refresh'
-import DeleteIcon from '@mui/icons-material/DeleteOutline'
+import DeleteIcon from '@mui/icons-material/DeleteOutlined'
 import EditIcon from '@mui/icons-material/EditOutlined'
 import VisibilityIcon from '@mui/icons-material/Visibility'
 import VisibilityOffIcon from '@mui/icons-material/VisibilityOff'
@@ -882,7 +882,6 @@ export default function ServersView() {
           </>
         }
       />
-
       {/* Compat banners — split by severity (too_old = error, can't be
           relied on; untested = warning, may still work). "Unknown" panels
           (never probed / probe failing transiently) stay out of both
@@ -908,7 +907,6 @@ export default function ServersView() {
           </Box>
         </Box>
       )}
-
       {/* untested banner ── warning severity. Panel may work, may not;
           admin action is "check if Passwall Panel has a newer release,
           or report the new 3X-UI version for verification". */}
@@ -931,7 +929,6 @@ export default function ServersView() {
           </Box>
         </Box>
       )}
-
       {/* Selection toolbar */}
       {selectedCount > 0 && (
         <Box sx={{
@@ -980,7 +977,6 @@ export default function ServersView() {
           </Button>
         </Box>
       )}
-
       {/* Search — Enter to commit so admin can type without firing a
           request per keystroke. */}
       <Box component="form" onSubmit={(e: FormEvent) => { e.preventDefault(); setKeyword(search) }}
@@ -992,16 +988,17 @@ export default function ServersView() {
           onBlur={() => setKeyword(search)}
           placeholder={t('admin:servers.search_placeholder', { defaultValue: '搜索名称 / URL' })}
           sx={{ width: 320, maxWidth: '100%' }}
-          InputProps={{
-            startAdornment: (
-              <InputAdornment position="start">
-                <SearchIcon fontSize="small" sx={{ color: md.onSurfaceVariant }} />
-              </InputAdornment>
-            ),
+          slotProps={{
+            input: {
+              startAdornment: (
+                <InputAdornment position="start">
+                  <SearchIcon fontSize="small" sx={{ color: md.onSurfaceVariant }} />
+                </InputAdornment>
+              ),
+            }
           }}
         />
       </Box>
-
       {/* Table */}
       <Card sx={{ mt: 2, bgcolor: md.surfaceContainerLow, boxShadow: '0 1px 2px rgba(0,0,0,.3),0 1px 3px 1px rgba(0,0,0,.15)', overflow: 'hidden' }}>
         <TableContainer>
@@ -1109,7 +1106,6 @@ export default function ServersView() {
           onPageChange={setPage} onPageSizeChange={setPageSize}
         />
       </Card>
-
       {/* Per-row kebab menu — hosts destructive remote-upgrade actions
           (panel + xray) so a stray click on the always-visible row
           buttons can't trigger a 3X-UI restart. Re-anchored per row,
@@ -1130,7 +1126,6 @@ export default function ServersView() {
           {t('admin:servers.action.upgrade_xray', { defaultValue: '升级 Xray（最新）' })}
         </MenuItem>
       </Menu>
-
       {/* Upgrade Xray dialog — pinning a specific xray-core version. The
           version list comes from the panel's /server/getXrayVersion at
           dialog-open time; if that fetch failed (xrayVersions is empty),
@@ -1139,7 +1134,9 @@ export default function ServersView() {
       <Dialog
         open={!!xrayDialogTarget}
         onClose={() => upgrading === null && closeXrayDialog()}
-        PaperProps={{ sx: { borderRadius: 3, bgcolor: md.surfaceContainerHigh, width: 480, maxWidth: '90vw' } }}
+        slotProps={{
+          paper: { sx: { borderRadius: 3, bgcolor: md.surfaceContainerHigh, width: 480, maxWidth: '90vw' } }
+        }}
       >
         <DialogTitle>{t('admin:servers.confirm.upgrade_xray_title')}</DialogTitle>
         <DialogContent>
@@ -1190,12 +1187,13 @@ export default function ServersView() {
           </Button>
         </DialogActions>
       </Dialog>
-
       {/* Create/Edit dialog */}
       <Dialog
         open={dialogOpen}
         onClose={() => !busy && setDialogOpen(false)}
-        PaperProps={{ sx: { borderRadius: 3, bgcolor: md.surfaceContainerHigh, width: 520, maxWidth: '90vw' } }}
+        slotProps={{
+          paper: { sx: { borderRadius: 3, bgcolor: md.surfaceContainerHigh, width: 520, maxWidth: '90vw' } }
+        }}
       >
         <DialogTitle>
           {editing ? t('admin:servers.edit_title', { name: editing.name }) : t('admin:servers.create')}
@@ -1236,7 +1234,7 @@ export default function ServersView() {
 
             {form.auth_method === 'token' ? (
               /* API Token: in edit mode, default to "kept unchanged" with a Change link */
-              <SecretField
+              (<SecretField
                 label={t('admin:servers.field.api_token')}
                 placeholder={t('admin:servers.placeholder.api_token')}
                 value={form.api_token}
@@ -1247,7 +1245,7 @@ export default function ServersView() {
                 changing={form.change_api_token}
                 alreadyConfigured={!!editing?.has_api_token}
                 onStartChange={() => setForm({ ...form, change_api_token: true })}
-              />
+              />)
             ) : (
               <>
                 <TextField
@@ -1305,7 +1303,7 @@ export default function ServersView() {
         </DialogActions>
       </Dialog>
     </Box>
-  )
+  );
 }
 
 interface SecretFieldProps {
@@ -1353,15 +1351,17 @@ function SecretField(p: SecretFieldProps) {
       placeholder={p.placeholder}
       value={p.value}
       onChange={e => p.onChange(e.target.value)}
-      InputProps={{
-        endAdornment: (
-          <InputAdornment position="end">
-            <IconButton size="small" onClick={() => p.onShow(!p.show)} aria-label="toggle visibility">
-              {p.show ? <VisibilityOffIcon fontSize="small" /> : <VisibilityIcon fontSize="small" />}
-            </IconButton>
-          </InputAdornment>
-        ),
+      slotProps={{
+        input: {
+          endAdornment: (
+            <InputAdornment position="end">
+              <IconButton size="small" onClick={() => p.onShow(!p.show)} aria-label="toggle visibility">
+                {p.show ? <VisibilityOffIcon fontSize="small" /> : <VisibilityIcon fontSize="small" />}
+              </IconButton>
+            </InputAdornment>
+          ),
+        }
       }}
     />
-  )
+  );
 }

@@ -84,8 +84,10 @@ export default function ScopeOverridesEditor({
                           onChange={e => setEdit({ on: true, value: e.target.value })} />
                       ) : (
                         <TextField size="small" type="number" value={st.value}
-                          inputProps={k.kind === 'float' ? { step: 'any', min: 0 } : { step: 1, min: 0 }}
-                          onChange={e => setEdit({ on: true, value: e.target.value })} sx={{ width: 100 }} />
+                          onChange={e => setEdit({ on: true, value: e.target.value })}
+                          sx={{ width: 100 }} slotProps={{
+                          htmlInput: k.kind === 'float' ? { step: 'any', min: 0 } : { step: 1, min: 0 }
+                        }} />
                       )
                     ) : (
                       <Typography variant="caption" color="text.secondary" sx={{ textAlign: 'right' }}>
@@ -94,11 +96,11 @@ export default function ScopeOverridesEditor({
                     )}
                   </Box>
                 </Box>
-              )
+              );
             })}
           </Box>
-        )
+        );
       })}
     </>
-  )
+  );
 }

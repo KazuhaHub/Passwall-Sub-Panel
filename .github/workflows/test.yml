@@ -39,6 +39,9 @@ jobs:
       - name: build
         working-directory: web-react
         run: npm run build
+      - name: production browser smoke
+        working-directory: web-react
+        run: npm run smoke:dist
       - name: unit tests
         working-directory: web-react
         run: npm run test

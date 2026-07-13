@@ -10,7 +10,7 @@
 import type { SvgIconComponent } from '@mui/icons-material'
 import DescriptionIcon from '@mui/icons-material/Description'
 import MenuBookIcon from '@mui/icons-material/MenuBook'
-import HelpOutlineIcon from '@mui/icons-material/HelpOutline'
+import HelpOutlineIcon from '@mui/icons-material/HelpOutlined'
 import ChatIcon from '@mui/icons-material/Chat'
 import ForumIcon from '@mui/icons-material/Forum'
 import CampaignIcon from '@mui/icons-material/Campaign'
@@ -63,7 +63,7 @@ const ICON_MAP: Record<string, SvgIconComponent> = Object.fromEntries(
 )
 
 export function isImageIcon(icon: string): boolean {
-  return /^https?:\/\//i.test(icon.trim())
+  return /^https?:\/\//i.test(icon.trim());
 }
 
 export function QuickLinkIcon({ icon, size = 22, color }: { icon: string; size?: number; color?: string }) {

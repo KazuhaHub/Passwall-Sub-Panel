@@ -17,7 +17,7 @@ import {
   Typography,
 } from '@mui/material'
 import AddIcon from '@mui/icons-material/Add'
-import DeleteIcon from '@mui/icons-material/DeleteOutline'
+import DeleteIcon from '@mui/icons-material/DeleteOutlined'
 import EditIcon from '@mui/icons-material/EditOutlined'
 import CheckIcon from '@mui/icons-material/Check'
 import ContentCopyIcon from '@mui/icons-material/ContentCopy'
@@ -138,7 +138,9 @@ export default function PasskeyDialog({ open, available, credentials, md, onClos
   if (recoveryCodes) {
     return (
       <Dialog open={open} onClose={() => { /* force the explicit button */ }} fullWidth maxWidth="xs"
-        PaperProps={{ sx: { bgcolor: md.surfaceContainerHigh } }}>
+        slotProps={{
+          paper: { sx: { bgcolor: md.surfaceContainerHigh } }
+        }}>
         <DialogTitle>{t('passkey.recovery_title', { defaultValue: '保存你的备用码' })}</DialogTitle>
         <DialogContent>
           <Alert severity="warning" sx={{ mb: 2 }}>
@@ -162,12 +164,14 @@ export default function PasskeyDialog({ open, available, credentials, md, onClos
           </Button>
         </DialogActions>
       </Dialog>
-    )
+    );
   }
 
   return (
     <Dialog open={open} onClose={() => !busy && onClose()} fullWidth maxWidth="xs"
-      PaperProps={{ sx: { bgcolor: md.surfaceContainerHigh } }}>
+      slotProps={{
+        paper: { sx: { bgcolor: md.surfaceContainerHigh } }
+      }}>
       <DialogTitle>{t('passkey.title')}</DialogTitle>
       <DialogContent>
         <Typography variant="body2" sx={{ color: md.onSurfaceVariant, mb: 1.5 }}>
@@ -210,8 +214,10 @@ export default function PasskeyDialog({ open, available, credentials, md, onClos
                 <ListItemText
                   primary={c.name}
                   secondary={t('passkey.added_at', { date: new Date(c.created_at).toLocaleDateString() })}
-                  primaryTypographyProps={{ fontSize: 14 }}
-                  secondaryTypographyProps={{ fontSize: 12 }} />
+                  slotProps={{
+                    primary: { sx: { fontSize: 14 } },
+                    secondary: { sx: { fontSize: 12 } }
+                  }} />
               )}
             </ListItem>
           ))}
@@ -246,5 +252,5 @@ export default function PasskeyDialog({ open, available, credentials, md, onClos
         <Button onClick={onClose} disabled={busy}>{t('passkey.close')}</Button>
       </DialogActions>
     </Dialog>
-  )
+  );
 }

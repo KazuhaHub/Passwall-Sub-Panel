@@ -85,7 +85,9 @@ export default function RealityTargetScannerDialog({
       onClose={onClose}
       fullWidth
       maxWidth="lg"
-      PaperProps={{ sx: { borderRadius: 3, bgcolor: md.surfaceContainerHigh } }}
+      slotProps={{
+        paper: { sx: { borderRadius: 3, bgcolor: md.surfaceContainerHigh } }
+      }}
     >
       <DialogTitle sx={{ pb: 1 }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
@@ -218,5 +220,5 @@ export default function RealityTargetScannerDialog({
         </Button>
       </DialogActions>
     </Dialog>
-  )
+  );
 }

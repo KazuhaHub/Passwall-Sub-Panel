@@ -21,7 +21,7 @@ import {
   useTheme,
 } from '@mui/material'
 import AddIcon from '@mui/icons-material/Add'
-import DeleteIcon from '@mui/icons-material/DeleteOutline'
+import DeleteIcon from '@mui/icons-material/DeleteOutlined'
 import { useTranslation } from 'react-i18next'
 
 import { confirm } from '@/components/ConfirmHost'
@@ -265,7 +265,7 @@ export default function ClientRegistryEditor({ families, onChange }: { families:
         <Button variant="text" size="small" color="warning" onClick={resetToPresets}>
           {t('settings.subscription.reset_to_presets')}
         </Button>
-        <Menu anchorEl={presetAnchor} open={!!presetAnchor} onClose={() => setPresetAnchor(null)} PaperProps={{ sx: { maxHeight: 360 } }}>
+        <Menu anchorEl={presetAnchor} open={!!presetAnchor} onClose={() => setPresetAnchor(null)} slotProps={{ paper: { sx: { maxHeight: 360 } } }}>
           {CLIENT_PRESETS.map(p => {
             const exists = families.some(f => f.name === p.name)
             return (

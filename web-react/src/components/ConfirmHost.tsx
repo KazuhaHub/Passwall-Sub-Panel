@@ -65,7 +65,9 @@ export default function ConfirmHost() {
     <Dialog
       open={state.open}
       onClose={() => close(false)}
-      PaperProps={{ sx: { borderRadius: 3, bgcolor: md.surfaceContainerHigh, minWidth: 320, maxWidth: 480 } }}
+      slotProps={{
+        paper: { sx: { borderRadius: 3, bgcolor: md.surfaceContainerHigh, minWidth: 320, maxWidth: 480 } }
+      }}
     >
       <DialogTitle sx={{ display: 'flex', gap: 1.5, alignItems: 'center', pt: 3 }}>
         {destructive && (
@@ -98,5 +100,5 @@ export default function ConfirmHost() {
         </Button>
       </DialogActions>
     </Dialog>
-  )
+  );
 }

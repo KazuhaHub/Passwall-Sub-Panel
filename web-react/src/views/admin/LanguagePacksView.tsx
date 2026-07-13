@@ -22,7 +22,7 @@ import {
 } from '@mui/material'
 import UploadIcon from '@mui/icons-material/UploadFileOutlined'
 import DownloadIcon from '@mui/icons-material/DownloadOutlined'
-import DeleteIcon from '@mui/icons-material/DeleteOutline'
+import DeleteIcon from '@mui/icons-material/DeleteOutlined'
 import WarningAmberIcon from '@mui/icons-material/WarningAmberOutlined'
 import { useTranslation } from 'react-i18next'
 
@@ -177,7 +177,6 @@ export default function LanguagePacksView() {
           </>
         )}
       />
-
       <Card sx={{ mt: 2, bgcolor: md.surfaceContainerLow, boxShadow: '0 1px 2px rgba(0,0,0,.3),0 1px 3px 1px rgba(0,0,0,.15)', overflow: 'hidden' }}>
         <TableContainer>
           <Table>
@@ -229,11 +228,11 @@ export default function LanguagePacksView() {
           </Table>
         </TableContainer>
       </Card>
-
       <input ref={fileInputRef} type="file" accept="application/json,.json" hidden onChange={onFileChosen} />
-
       <Dialog open={dialogOpen} onClose={() => !busy && setDialogOpen(false)}
-        PaperProps={{ sx: { borderRadius: 3, bgcolor: md.surfaceContainerHigh, width: 720, maxWidth: '95vw' } }}>
+        slotProps={{
+          paper: { sx: { borderRadius: 3, bgcolor: md.surfaceContainerHigh, width: 720, maxWidth: '95vw' } }
+        }}>
         <DialogTitle>{t('admin:languagePacks.upload_title')}</DialogTitle>
         <DialogContent>
           <Typography variant="body2" sx={{ color: md.onSurfaceVariant, mb: 2 }}>
@@ -260,5 +259,5 @@ export default function LanguagePacksView() {
         </DialogActions>
       </Dialog>
     </Box>
-  )
+  );
 }

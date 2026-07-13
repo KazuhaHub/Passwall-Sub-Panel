@@ -11,7 +11,7 @@ import BrandLogo from '@/components/BrandLogo'
 // A password meets the panel floor: >=8 chars with at least one letter and one
 // digit (mirrors the backend's IsMinimallyStrongPassword).
 function strongEnough(pw: string): boolean {
-  return pw.length >= 8 && /[a-zA-Z]/.test(pw) && /[0-9]/.test(pw)
+  return pw.length >= 8 && /[a-zA-Z]/.test(pw) && /[0-9]/.test(pw);
 }
 
 export default function ResetPasswordView() {
@@ -82,7 +82,9 @@ export default function ResetPasswordView() {
                 <TextField label={t('auth:forgot_password_upn_label')} value={ident}
                   onChange={e => setIdent(e.target.value)} autoComplete="username" fullWidth />
                 <TextField label={t('auth:reset_password_code_label', { defaultValue: '验证码' })} value={code}
-                  onChange={e => setCode(e.target.value)} inputProps={{ inputMode: 'numeric', maxLength: 8 }} fullWidth />
+                  onChange={e => setCode(e.target.value)} fullWidth slotProps={{
+                  htmlInput: { inputMode: 'numeric', maxLength: 8 }
+                }} />
               </>
             )}
             <TextField label={t('auth:reset_password_new_label')} type="password" value={pw}
@@ -107,5 +109,5 @@ export default function ResetPasswordView() {
         )}
       </Card>
     </Box>
-  )
+  );
 }

@@ -51,8 +51,10 @@ export default function SnackbarHost() {
       open={open}
       autoHideDuration={4000}
       onClose={(_, reason) => { if (reason !== 'clickaway') setOpen(false) }}
-      TransitionProps={{ onExited: () => setCurrent(null) }}
       anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+      slotProps={{
+        transition: { onExited: () => setCurrent(null) }
+      }}
     >
       {current ? (
         <Alert onClose={() => setOpen(false)} severity={current.severity} variant="filled" sx={{ minWidth: 280 }}>
@@ -60,5 +62,5 @@ export default function SnackbarHost() {
         </Alert>
       ) : undefined}
     </Snackbar>
-  )
+  );
 }

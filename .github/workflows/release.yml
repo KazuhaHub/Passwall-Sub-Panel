@@ -79,6 +79,10 @@ jobs:
         # vite.config.ts writes to ../internal/web/dist for //go:embed.
         run: npm run build
 
+      - name: Production browser smoke
+        working-directory: web-react
+        run: npm run smoke:dist
+
       - name: Upload web bundle
         uses: actions/upload-artifact@v7
         with:

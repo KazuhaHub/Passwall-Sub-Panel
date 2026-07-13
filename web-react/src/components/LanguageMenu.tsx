@@ -49,7 +49,7 @@ export default function LanguageMenu({ value, onChange }: Props) {
         onClose={() => setAnchor(null)}
         anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
         transformOrigin={{ vertical: 'top', horizontal: 'right' }}
-        PaperProps={{ sx: { minWidth: 180, mt: 1 } }}
+        slotProps={{ paper: { sx: { minWidth: 180, mt: 1 } } }}
       >
         {SUPPORTED_LANGUAGES.map(lng => (
           <MenuItem key={lng} onClick={() => pick(lng)} selected={lng === value}>

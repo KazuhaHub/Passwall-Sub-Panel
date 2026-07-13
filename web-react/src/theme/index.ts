@@ -129,17 +129,17 @@ export function createAppTheme({ mode, sourceColor, language, density = 'comfort
             minHeight: compact ? 34 : 40,
             paddingLeft: compact ? 18 : 24,
             paddingRight: compact ? 18 : 24,
-          },
-          sizeSmall: { minHeight: compact ? 28 : 32, paddingLeft: 14, paddingRight: 14 },
-          containedPrimary: {
-            backgroundColor: t.primary,
-            color: t.onPrimary,
-            '&:hover': {
+            '&.MuiButton-contained.MuiButton-colorPrimary': {
               backgroundColor: t.primary,
-              boxShadow:
-                '0 1px 2px rgba(0,0,0,.3),0 1px 3px 1px rgba(0,0,0,.15)',
+              color: t.onPrimary,
+              '&:hover': {
+                backgroundColor: t.primary,
+                boxShadow:
+                  '0 1px 2px rgba(0,0,0,.3),0 1px 3px 1px rgba(0,0,0,.15)',
+              },
             },
           },
+          sizeSmall: { minHeight: compact ? 28 : 32, paddingLeft: 14, paddingRight: 14 },
           outlined: {
             borderColor: t.outline,
             color: t.primary,

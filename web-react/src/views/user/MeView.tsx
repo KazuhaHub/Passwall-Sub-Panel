@@ -36,12 +36,12 @@ import DataUsageIcon from '@mui/icons-material/DataUsage'
 import ConfirmationNumberIcon from '@mui/icons-material/ConfirmationNumberOutlined'
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined'
 import WarningAmberIcon from '@mui/icons-material/WarningAmber'
-import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline'
+import ErrorOutlineIcon from '@mui/icons-material/ErrorOutlined'
 import MoreVertIcon from '@mui/icons-material/MoreVert'
 import LaunchIcon from '@mui/icons-material/Launch'
 import DownloadIcon from '@mui/icons-material/Download'
 import StarIcon from '@mui/icons-material/Star'
-import HelpOutlineIcon from '@mui/icons-material/HelpOutline'
+import HelpOutlineIcon from '@mui/icons-material/HelpOutlined'
 import VisibilityIcon from '@mui/icons-material/Visibility'
 import VisibilityOffIcon from '@mui/icons-material/VisibilityOff'
 import { QRCodeSVG } from 'qrcode.react'
@@ -675,7 +675,6 @@ export default function MeView() {
           </Box>
         )
       })()}
-
       {(() => {
         const notice = serviceNotice()
         if (!notice) return null
@@ -694,7 +693,6 @@ export default function MeView() {
           </Box>
         )
       })()}
-
       {/* Compact header — avatar + identity + kebab menu */}
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 3 }}>
         <Avatar sx={{ width: 48, height: 48, bgcolor: md.primary, color: md.onPrimary, fontSize: 18, fontWeight: 500 }}>
@@ -719,7 +717,7 @@ export default function MeView() {
           <Menu open={!!menuAnchor} anchorEl={menuAnchor} onClose={() => setMenuAnchor(null)}
             anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
             transformOrigin={{ vertical: 'top', horizontal: 'right' }}
-            PaperProps={{ sx: { mt: 1, minWidth: 200 } }}>
+            slotProps={{ paper: { sx: { mt: 1, minWidth: 200 } } }}>
             {profile.can_change_password && (
               <MenuItem onClick={() => { setMenuAnchor(null); openPwd() }}>
                 <ListItemIcon><LockIcon fontSize="small" /></ListItemIcon>
@@ -758,7 +756,6 @@ export default function MeView() {
           </Menu>
         </>)}
       </Box>
-
       {/* Section tabs — keep the page navigable as it grows. Server status is
           its own tab so it doesn't pile onto the already-long overview. */}
       <Tabs value={tab} onChange={(_, v) => setTab(v as 'overview' | 'traffic' | 'clients' | 'status')}
@@ -769,9 +766,7 @@ export default function MeView() {
         <Tab value="clients" label={t('tabs.clients', { defaultValue: '客户端' })} sx={{ minHeight: 40 }} />
         <Tab value="status" label={t('tabs.server_status', { defaultValue: '服务器状态' })} sx={{ minHeight: 40 }} />
       </Tabs>
-
       {tab === 'status' && <ServerStatusPanel md={md} />}
-
       {tab === 'overview' && (<>
       {/* HERO — pick the client whose recommended_for covers the visitor's
           detected platform. Falls back to nothing if no client is configured
@@ -836,7 +831,6 @@ export default function MeView() {
         )
       })()}
       </>)}
-
       {/* Two-column layout below the hero. Each column is an independent
           flex stack so a tall card on one side doesn't open a gap on the
           other (grid-template-rows would force row alignment by max
@@ -1092,31 +1086,31 @@ export default function MeView() {
                 </Button>
               )}
             </Box>
-              {!heroName && (
-                <Typography variant="body2" sx={{ mb: 2 }}>{t('import.intro')}</Typography>
-              )}
-              <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 2, mt: 1.5 }}>
-                {others.map(c => (
-                  <Box key={c.name} sx={{ p: 2, borderRadius: 2, border: `1px solid ${md.outlineVariant}`, bgcolor: md.surface }}>
-                    <Typography sx={{ fontWeight: 500, mb: 0.5 }}>{c.name}</Typography>
-                    <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant, mb: 1.5 }}>
-                      {c.platforms.map(p => t(`import.platform_${p}`, { defaultValue: p })).join(' · ')}
-                    </Typography>
-                    <Box sx={{ display: 'flex', gap: 1 }}>
-                      <Button size="small" variant="contained"
-                        onClick={() => { void triggerImport(buildImportURL(c)) }}>
-                        {t('import.import')}
-                      </Button>
-                      <Button size="small" variant="outlined"
-                        onClick={() => window.open(c.install_url, '_blank', 'noopener,noreferrer')}>
-                        {t('import.install')}
-                      </Button>
-                    </Box>
+            {!heroName && (
+              <Typography variant="body2" sx={{ mb: 2 }}>{t('import.intro')}</Typography>
+            )}
+            <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 2, mt: 1.5 }}>
+              {others.map(c => (
+                <Box key={c.name} sx={{ p: 2, borderRadius: 2, border: `1px solid ${md.outlineVariant}`, bgcolor: md.surface }}>
+                  <Typography sx={{ fontWeight: 500, mb: 0.5 }}>{c.name}</Typography>
+                  <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant, mb: 1.5 }}>
+                    {c.platforms.map(p => t(`import.platform_${p}`, { defaultValue: p })).join(' · ')}
+                  </Typography>
+                  <Box sx={{ display: 'flex', gap: 1 }}>
+                    <Button size="small" variant="contained"
+                      onClick={() => { void triggerImport(buildImportURL(c)) }}>
+                      {t('import.import')}
+                    </Button>
+                    <Button size="small" variant="outlined"
+                      onClick={() => window.open(c.install_url, '_blank', 'noopener,noreferrer')}>
+                      {t('import.install')}
+                    </Button>
                   </Box>
-                ))}
-              </Box>
+                </Box>
+              ))}
+            </Box>
           </Card>
-        )
+        );
       })()}
       </Box>
       )}{/* end other clients order wrapper */}
@@ -1244,7 +1238,6 @@ export default function MeView() {
       )}{/* end right col */}
 
       </Box>{/* end two-col flex */}
-
       {/* Global announcement popup (opt-in via admin settings) */}
       {announcementPopup && (() => {
         const s = announcementStyle(announcement.level)
@@ -1255,7 +1248,9 @@ export default function MeView() {
           // tertiary "不再提醒" persists localStorage dismissal, the primary
           // "我知道了" closes for this session only.
           <Dialog open={announceOpen} onClose={() => closeAnnounce(false)}
-            PaperProps={{ sx: { borderRadius: 3, bgcolor: md.surfaceContainerHigh, width: 480, maxWidth: '90vw' } }}>
+            slotProps={{
+              paper: { sx: { borderRadius: 3, bgcolor: md.surfaceContainerHigh, width: 480, maxWidth: '90vw' } }
+            }}>
             <DialogTitle sx={{ pt: 3, display: 'flex', alignItems: 'center', gap: 1.25 }}>
               <s.Icon sx={{ color: s.fg }} />
               {announcement.title}
@@ -1274,12 +1269,13 @@ export default function MeView() {
               </Button>
             </DialogActions>
           </Dialog>
-        )
+        );
       })()}
-
       {/* Change password dialog */}
       <Dialog open={pwdOpen} onClose={() => !pwdBusy && setPwdOpen(false)}
-        PaperProps={{ sx: { borderRadius: 3, bgcolor: md.surfaceContainerHigh, width: 440, maxWidth: '90vw' } }}>
+        slotProps={{
+          paper: { sx: { borderRadius: 3, bgcolor: md.surfaceContainerHigh, width: 440, maxWidth: '90vw' } }
+        }}>
         <DialogTitle>{t('password.title')}</DialogTitle>
         <DialogContent>
           <Box component="form" id="pwd-form" onSubmit={submitPwd} sx={{ display: 'flex', flexDirection: 'column', gap: 2.5, pt: 1 }}>
@@ -1301,7 +1297,6 @@ export default function MeView() {
           </Button>
         </DialogActions>
       </Dialog>
-
       {/* Two-factor authentication dialog */}
       <TwoFactorDialog
         open={twoFAOpen}
@@ -1311,7 +1306,6 @@ export default function MeView() {
         onClose={() => setTwoFAOpen(false)}
         onChanged={() => { void load() }}
       />
-
       {/* Passkey management dialog */}
       <PasskeyDialog
         open={passkeyOpen}
@@ -1321,7 +1315,6 @@ export default function MeView() {
         onClose={() => setPasskeyOpen(false)}
         onChanged={() => { void load() }}
       />
-
       {/* Recovery codes dialog — recovery codes are decoupled from TOTP, so this
           is reachable for passkey-only accounts too. */}
       <RecoveryCodesDialog
@@ -1333,10 +1326,11 @@ export default function MeView() {
         onClose={() => setRecoveryOpen(false)}
         onChanged={() => { void load() }}
       />
-
       {/* Personal rules dialog */}
       <Dialog open={rulesOpen} onClose={() => !rulesBusy && setRulesOpen(false)}
-        PaperProps={{ sx: { borderRadius: 3, bgcolor: md.surfaceContainerHigh, width: 600, maxWidth: '95vw' } }}>
+        slotProps={{
+          paper: { sx: { borderRadius: 3, bgcolor: md.surfaceContainerHigh, width: 600, maxWidth: '95vw' } }
+        }}>
         <DialogTitle>{t('rules.title')}</DialogTitle>
         <DialogContent>
           {!profile.can_edit_personal_rules && (
@@ -1356,8 +1350,10 @@ export default function MeView() {
             : <TextField fullWidth multiline minRows={10} maxRows={20}
                 value={rulesText} onChange={e => setRulesText(e.target.value)}
                 placeholder={t('rules.placeholder')}
-                InputProps={{ readOnly: !profile.can_edit_personal_rules }}
-                sx={{ '& textarea': { fontSize: 13, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace' } }} />}
+                sx={{ '& textarea': { fontSize: 13, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace' } }}
+                slotProps={{
+                  input: { readOnly: !profile.can_edit_personal_rules }
+                }} />}
         </DialogContent>
         {/* px: 3 (24px) matches MUI's button left-padding so the "插入示例
             规则" text aligns with the dialog content's left edge — without
@@ -1387,7 +1383,7 @@ export default function MeView() {
         </DialogActions>
       </Dialog>
     </Box>
-  )
+  );
 }
 
 interface UsagePanelProps {

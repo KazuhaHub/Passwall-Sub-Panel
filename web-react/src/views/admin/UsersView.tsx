@@ -35,7 +35,7 @@ import AddIcon from '@mui/icons-material/Add'
 import RefreshIcon from '@mui/icons-material/Refresh'
 import SearchIcon from '@mui/icons-material/Search'
 import EditIcon from '@mui/icons-material/EditOutlined'
-import DeleteIcon from '@mui/icons-material/DeleteOutline'
+import DeleteIcon from '@mui/icons-material/DeleteOutlined'
 import ToggleOnIcon from '@mui/icons-material/ToggleOn'
 import ToggleOffIcon from '@mui/icons-material/ToggleOff'
 import RestartAltIcon from '@mui/icons-material/RestartAlt'
@@ -49,7 +49,7 @@ import EmergencyIcon from '@mui/icons-material/MedicalServices'
 import LinkOffIcon from '@mui/icons-material/LinkOff'
 import ShieldIcon from '@mui/icons-material/GppMaybe'
 import SyncIcon from '@mui/icons-material/Sync'
-import HelpOutlineIcon from '@mui/icons-material/HelpOutline'
+import HelpOutlineIcon from '@mui/icons-material/HelpOutlined'
 import { useTranslation } from 'react-i18next'
 
 import {
@@ -1054,7 +1054,6 @@ export default function UsersView() {
           </Button>
         </>}
       />
-
       {/* Toolbar */}
       <Box sx={{ display: 'flex', gap: 1.5, mb: 2, flexWrap: 'wrap', alignItems: 'center' }}>
         <Box component="form" onSubmit={onSearchSubmit}
@@ -1075,7 +1074,6 @@ export default function UsersView() {
           {t('admin:users.refresh')}
         </Button>
       </Box>
-
       {/* Batch toolbar */}
       {selected.size > 0 && (
         <Box sx={{
@@ -1124,7 +1122,6 @@ export default function UsersView() {
           </Menu>
         </Box>
       )}
-
       {/* Table */}
       <Card sx={{ bgcolor: md.surfaceContainerLow, boxShadow: '0 1px 2px rgba(0,0,0,.3),0 1px 3px 1px rgba(0,0,0,.15)', overflow: 'hidden' }}>
         <TableContainer>
@@ -1232,7 +1229,6 @@ export default function UsersView() {
           onPageChange={setPage} onPageSizeChange={setPageSize}
         />
       </Card>
-
       {/* Per-row More menu */}
       <Menu anchorEl={moreAnchor} open={!!moreAnchor} onClose={closeMore}
         anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
@@ -1264,10 +1260,8 @@ export default function UsersView() {
           <ListItemText>{t('admin:users.more_menu.account_security', { defaultValue: '账号安全' })}</ListItemText>
         </MenuItem>
       </Menu>
-
       <AdminPasskeysDialog open={!!passkeysUser} user={passkeysUser} md={md}
         onClose={() => setPasskeysUser(null)} />
-
       <AccountSecurityDrawer
         open={!!securityUser} user={securityUser} md={md}
         onClose={() => setSecurityUser(null)}
@@ -1278,10 +1272,11 @@ export default function UsersView() {
         onReset2FA={actionReset2FA}
         onManagePasskeys={actionManagePasskeys}
       />
-
       {/* Create dialog */}
       <Dialog open={createOpen} onClose={() => !createBusy && setCreateOpen(false)}
-        PaperProps={{ sx: { borderRadius: 3, bgcolor: md.surfaceContainerHigh, width: 520, maxWidth: '90vw' } }}>
+        slotProps={{
+          paper: { sx: { borderRadius: 3, bgcolor: md.surfaceContainerHigh, width: 520, maxWidth: '90vw' } }
+        }}>
         <DialogTitle>{t('admin:users.create')}</DialogTitle>
         <DialogContent>
           <Box component="form" id="create-form" onSubmit={submitCreate} sx={{ display: 'flex', flexDirection: 'column', gap: 2.5, pt: 1 }}>
@@ -1302,13 +1297,15 @@ export default function UsersView() {
               value={createForm.password} onChange={e => setCreateForm({ ...createForm, password: e.target.value })}
               error={!!createErr.password}
               helperText={createErr.password ? t(`admin:${createErr.password}`) : ''}
-              InputProps={{ endAdornment: (
-                <InputAdornment position="end">
-                  <IconButton size="small" onClick={() => setCreateForm({ ...createForm, show_password: !createForm.show_password })}>
-                    {createForm.show_password ? <VisibilityOffIcon fontSize="small" /> : <VisibilityIcon fontSize="small" />}
-                  </IconButton>
-                </InputAdornment>
-              ) }} />
+              slotProps={{
+                input: { endAdornment: (
+                  <InputAdornment position="end">
+                    <IconButton size="small" onClick={() => setCreateForm({ ...createForm, show_password: !createForm.show_password })}>
+                      {createForm.show_password ? <VisibilityOffIcon fontSize="small" /> : <VisibilityIcon fontSize="small" />}
+                    </IconButton>
+                  </InputAdornment>
+                ) }
+              }} />
             <Autocomplete
               size="small" fullWidth
               options={groups}
@@ -1337,15 +1334,19 @@ export default function UsersView() {
                   helperText={createErr.expire_date
                     ? t(`admin:${createErr.expire_date}`)
                     : (expireTzDiffers ? t('admin:users.field.expire_tz_hint', { tz: panelTz }) : '')}
-                  sx={{ flex: 1 }} InputLabelProps={{ shrink: true }} />
+                  sx={{ flex: 1 }} slotProps={{
+                  inputLabel: { shrink: true }
+                }} />
               )}
             </Box>
             <TextField fullWidth type="number" label={t('admin:users.field.traffic_limit_gb')}
               value={createForm.traffic_limit_gb}
               onChange={e => setCreateForm({ ...createForm, traffic_limit_gb: Number(e.target.value) })}
-              inputProps={{ min: 0, step: 'any' }}
               error={!!createErr.traffic_limit_gb}
-              helperText={createErr.traffic_limit_gb ? t(`admin:${createErr.traffic_limit_gb}`) : ''} />
+              helperText={createErr.traffic_limit_gb ? t(`admin:${createErr.traffic_limit_gb}`) : ''}
+              slotProps={{
+                htmlInput: { min: 0, step: 'any' }
+              }} />
             <TextField select size="small" fullWidth label={t('admin:users.field.traffic_reset_period')}
               value={createForm.traffic_reset_period}
               onChange={e => setCreateForm({ ...createForm, traffic_reset_period: e.target.value as ResetPeriod })}>
@@ -1366,10 +1367,11 @@ export default function UsersView() {
           </Button>
         </DialogActions>
       </Dialog>
-
       {/* Reset-password dialog */}
       <Dialog open={pwdResetOpen} onClose={() => !pwdResetBusy && setPwdResetOpen(false)}
-        PaperProps={{ sx: { borderRadius: 3, bgcolor: md.surfaceContainerHigh, width: 460, maxWidth: '90vw' } }}>
+        slotProps={{
+          paper: { sx: { borderRadius: 3, bgcolor: md.surfaceContainerHigh, width: 460, maxWidth: '90vw' } }
+        }}>
         <DialogTitle>
           {t('admin:users.reset_password.title', { defaultValue: '重置登录密码' })}
           {pwdResetUser ? ` — ${pwdResetUser.upn}` : ''}
@@ -1388,19 +1390,21 @@ export default function UsersView() {
             onChange={e => { setPwdResetValue(e.target.value); if (pwdResetError) setPwdResetError('') }}
             error={!!pwdResetError}
             helperText={pwdResetError || ' '}
-            InputProps={{
-              endAdornment: (
-                <InputAdornment position="end">
-                  <Tooltip title={t('admin:users.reset_password.gen', { defaultValue: '随机生成' })}>
-                    <IconButton size="small" onClick={() => { setPwdResetValue(genRandomPassword()); setPwdResetShow(true); setPwdResetError('') }}>
-                      <CasinoIcon fontSize="small" />
+            slotProps={{
+              input: {
+                endAdornment: (
+                  <InputAdornment position="end">
+                    <Tooltip title={t('admin:users.reset_password.gen', { defaultValue: '随机生成' })}>
+                      <IconButton size="small" onClick={() => { setPwdResetValue(genRandomPassword()); setPwdResetShow(true); setPwdResetError('') }}>
+                        <CasinoIcon fontSize="small" />
+                      </IconButton>
+                    </Tooltip>
+                    <IconButton size="small" onClick={() => setPwdResetShow(s => !s)}>
+                      {pwdResetShow ? <VisibilityOffIcon fontSize="small" /> : <VisibilityIcon fontSize="small" />}
                     </IconButton>
-                  </Tooltip>
-                  <IconButton size="small" onClick={() => setPwdResetShow(s => !s)}>
-                    {pwdResetShow ? <VisibilityOffIcon fontSize="small" /> : <VisibilityIcon fontSize="small" />}
-                  </IconButton>
-                </InputAdornment>
-              ),
+                  </InputAdornment>
+                ),
+              }
             }}
           />
         </DialogContent>
@@ -1414,10 +1418,11 @@ export default function UsersView() {
           </Button>
         </DialogActions>
       </Dialog>
-
       {/* Result dialog */}
       <Dialog open={resultOpen} onClose={() => setResultOpen(false)}
-        PaperProps={{ sx: { borderRadius: 3, bgcolor: md.surfaceContainerHigh, width: 520, maxWidth: '90vw' } }}>
+        slotProps={{
+          paper: { sx: { borderRadius: 3, bgcolor: md.surfaceContainerHigh, width: 520, maxWidth: '90vw' } }
+        }}>
         <DialogTitle>{t('admin:users.result_title')}</DialogTitle>
         <DialogContent>
           <Typography variant="body2" sx={{ mb: 2 }}>
@@ -1458,10 +1463,11 @@ export default function UsersView() {
           <Button variant="contained" onClick={() => setResultOpen(false)}>{t('common:actions.ok')}</Button>
         </DialogActions>
       </Dialog>
-
       {/* Edit dialog */}
       <Dialog open={editOpen} onClose={() => !editBusy && setEditOpen(false)}
-        PaperProps={{ sx: { borderRadius: 3, bgcolor: md.surfaceContainerHigh, width: 860, maxWidth: '94vw' } }}>
+        slotProps={{
+          paper: { sx: { borderRadius: 3, bgcolor: md.surfaceContainerHigh, width: 860, maxWidth: '94vw' } }
+        }}>
         <DialogTitle>{t('admin:users.edit_title')} — {editing?.upn}</DialogTitle>
         <DialogContent>
           <Box sx={{ display: 'flex', gap: 3, pt: 1, flexWrap: 'wrap', alignItems: 'flex-start' }}>
@@ -1586,7 +1592,9 @@ export default function UsersView() {
                 onClose={() => setRoleHelpAnchor(null)}
                 anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
                 transformOrigin={{ vertical: 'top', horizontal: 'right' }}
-                PaperProps={{ sx: { p: 2, maxWidth: 360, bgcolor: md.surfaceContainerHigh } }}>
+                slotProps={{
+                  paper: { sx: { p: 2, maxWidth: 360, bgcolor: md.surfaceContainerHigh } }
+                }}>
                 <Typography sx={{ fontWeight: 500, mb: 1 }}>{t('admin:users.role.help_title', { defaultValue: '角色权限速览' })}</Typography>
                 <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.25, fontSize: 13 }}>
                   <Box>
@@ -1634,8 +1642,10 @@ export default function UsersView() {
               <Box sx={{ gridColumn: '1 / -1', display: 'flex', gap: 1, alignItems: 'flex-start' }}>
                 <TextField size="small" fullWidth label={t('admin:users.field.service_status', { defaultValue: '服务状态' })}
                   value={serviceStatusText(editing)}
-                  InputProps={{ readOnly: true }}
-                  helperText={editing.service_disable_detail || (editing.block_violation_count ? t('admin:users.field.block_violations', { count: editing.block_violation_count, defaultValue: '违规次数：{{count}}' }) : '')} />
+                  helperText={editing.service_disable_detail || (editing.block_violation_count ? t('admin:users.field.block_violations', { count: editing.block_violation_count, defaultValue: '违规次数：{{count}}' }) : '')}
+                  slotProps={{
+                    input: { readOnly: true }
+                  }} />
                 {canResumeService(editing) && (
                   <Button variant="outlined" onClick={() => actionResumeService(editing)} sx={{ flexShrink: 0, mt: 0.25 }}>
                     {t('admin:users.more_menu.resume_service', { defaultValue: '恢复服务' })}
@@ -1664,24 +1674,30 @@ export default function UsersView() {
                   helperText={editErr.expire_at
                     ? t(`admin:${editErr.expire_at}`)
                     : (expireTzDiffers ? t('admin:users.field.expire_tz_hint', { tz: panelTz }) : '')}
-                  sx={{ flex: 1 }} InputLabelProps={{ shrink: true }} />
+                  sx={{ flex: 1 }} slotProps={{
+                  inputLabel: { shrink: true }
+                }} />
               )}
             </Box>
             <Box sx={{ gridColumn: '1 / -1', display: 'flex', gap: 1.5, flexWrap: 'wrap' }}>
               <TextField type="number" label={t('admin:users.field.traffic_limit_gb')}
                 value={editForm.traffic_limit_gb}
                 onChange={e => setEditForm({ ...editForm, traffic_limit_gb: Number(e.target.value) })}
-                inputProps={{ min: 0, step: 'any' }}
                 error={!!editErr.traffic_limit_gb}
                 helperText={editErr.traffic_limit_gb ? t(`admin:${editErr.traffic_limit_gb}`) : ''}
-                sx={{ flex: '1 1 200px' }} />
+                sx={{ flex: '1 1 200px' }}
+                slotProps={{
+                  htmlInput: { min: 0, step: 'any' }
+                }} />
               <TextField type="number" label={t('admin:users.field.period_used_gb')}
                 value={editForm.period_used_gb}
                 onChange={e => setEditForm({ ...editForm, period_used_gb: Number(e.target.value) })}
-                inputProps={{ min: 0, step: 0.01 }}
                 error={!!editErr.period_used_gb}
                 helperText={editErr.period_used_gb ? t(`admin:${editErr.period_used_gb}`) : ''}
-                sx={{ flex: '1 1 200px' }} />
+                sx={{ flex: '1 1 200px' }}
+                slotProps={{
+                  htmlInput: { min: 0, step: 0.01 }
+                }} />
             </Box>
             <TextField select size="small" fullWidth label={t('admin:users.field.traffic_reset_period')}
               value={editForm.traffic_reset_period}
@@ -1768,10 +1784,11 @@ export default function UsersView() {
           </Button>
         </DialogActions>
       </Dialog>
-
       {/* Reason dialog (single + batch) */}
       <Dialog open={reasonOpen} onClose={() => setReasonOpen(false)}
-        PaperProps={{ sx: { borderRadius: 3, bgcolor: md.surfaceContainerHigh, width: 480, maxWidth: '90vw' } }}>
+        slotProps={{
+          paper: { sx: { borderRadius: 3, bgcolor: md.surfaceContainerHigh, width: 480, maxWidth: '90vw' } }
+        }}>
         <DialogTitle>
           {(reasonBatch?.enable ?? !reasonUser?.enabled)
             ? t('admin:users.reason.enable_title')
@@ -1799,10 +1816,11 @@ export default function UsersView() {
           </Button>
         </DialogActions>
       </Dialog>
-
       {/* Personal rules dialog */}
       <Dialog open={rulesOpen} onClose={() => !rulesBusy && setRulesOpen(false)}
-        PaperProps={{ sx: { borderRadius: 3, bgcolor: md.surfaceContainerHigh, width: 600, maxWidth: '95vw' } }}>
+        slotProps={{
+          paper: { sx: { borderRadius: 3, bgcolor: md.surfaceContainerHigh, width: 600, maxWidth: '95vw' } }
+        }}>
         <DialogTitle>
           {rulesUser && t('admin:users.rules.title', { upn: rulesUser.upn })}
         </DialogTitle>
@@ -1829,10 +1847,11 @@ export default function UsersView() {
           </Button>
         </DialogActions>
       </Dialog>
-
       {/* Reconcile result dialog (only when issues exist) */}
       <Dialog open={reconcileOpen} onClose={() => setReconcileOpen(false)}
-        PaperProps={{ sx: { borderRadius: 3, bgcolor: md.surfaceContainerHigh, width: 640, maxWidth: '95vw' } }}>
+        slotProps={{
+          paper: { sx: { borderRadius: 3, bgcolor: md.surfaceContainerHigh, width: 640, maxWidth: '95vw' } }
+        }}>
         <DialogTitle>{t('admin:users.reconcile.result_title')}</DialogTitle>
         <DialogContent>
           {reconcileReport && (
@@ -1893,5 +1912,5 @@ export default function UsersView() {
         </DialogActions>
       </Dialog>
     </Box>
-  )
+  );
 }

@@ -114,7 +114,9 @@ export default function VerifyEmailView() {
             <TextField label={t('auth:register_email_label')} type="email" value={ident}
               onChange={e => setIdent(e.target.value)} autoComplete="email" autoFocus fullWidth />
             <TextField label={t('auth:verify_email_code_label')} value={code}
-              onChange={e => setCode(e.target.value)} inputProps={{ inputMode: 'numeric', maxLength: 8 }} fullWidth />
+              onChange={e => setCode(e.target.value)} fullWidth slotProps={{
+              htmlInput: { inputMode: 'numeric', maxLength: 8 }
+            }} />
             {error && <Alert severity="error" sx={{ py: 0 }}>{error}</Alert>}
             <Button type="submit" variant="contained" fullWidth size="large" disabled={state === 'verifying'}
               startIcon={state === 'verifying' ? <CircularProgress size={16} color="inherit" /> : undefined}>
@@ -146,5 +148,5 @@ export default function VerifyEmailView() {
         )}
       </Card>
     </Box>
-  )
+  );
 }

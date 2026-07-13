@@ -32,12 +32,12 @@ import {
 import SaveIcon from '@mui/icons-material/Save'
 import VisibilityIcon from '@mui/icons-material/Visibility'
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined'
-import HelpOutlineIcon from '@mui/icons-material/HelpOutline'
+import HelpOutlineIcon from '@mui/icons-material/HelpOutlined'
 import VisibilityOffIcon from '@mui/icons-material/VisibilityOff'
 import SendIcon from '@mui/icons-material/Send'
 import ContentCopyIcon from '@mui/icons-material/ContentCopy'
 import CheckCircleIcon from '@mui/icons-material/CheckCircle'
-import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline'
+import ErrorOutlineIcon from '@mui/icons-material/ErrorOutlined'
 import { useTranslation } from 'react-i18next'
 
 import {
@@ -68,7 +68,7 @@ import {
   type UISettings,
 } from '@/api/settings'
 import AddIcon from '@mui/icons-material/Add'
-import DeleteIcon from '@mui/icons-material/DeleteOutline'
+import DeleteIcon from '@mui/icons-material/DeleteOutlined'
 import DragIndicatorIcon from '@mui/icons-material/DragIndicator'
 import AppsIcon from '@mui/icons-material/Apps'
 import type { LoginMode } from '@/api/types'
@@ -419,9 +419,11 @@ export default function SettingsView() {
             '&.Mui-selected, &.Mui-selected:hover': { bgcolor: md.secondaryContainer },
           }}
         >
-          <ListItemText primary={name} primaryTypographyProps={{ fontSize: 14, fontWeight: sel ? 600 : 500, noWrap: true }} />
+          <ListItemText primary={name} slotProps={{
+            primary: { sx: { fontSize: 14, fontWeight: sel ? 600 : 500 }, noWrap: true }
+          }} />
         </ListItemButton>
-      )
+      );
     }
     return (
       <Box sx={{ display: 'flex', gap: 2, alignItems: 'flex-start', flexWrap: { xs: 'wrap', md: 'nowrap' } }}>
@@ -473,11 +475,9 @@ export default function SettingsView() {
   return (
     <Box sx={{ p: 3 }}>
       <PageHeader title={t('settings.title')} />
-
       <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ mt: 2, mb: 3, borderBottom: `1px solid ${md.outlineVariant}` }}>
         {tabs.map(tb => <Tab key={tb.key} value={tb.key} label={t(tb.labelKey)} />)}
       </Tabs>
-
       {tab === 'security' && renderScopeTab(['2fa', 'login'], (
         <Box component="form" onSubmit={save} sx={{ display: 'flex', flexDirection: 'column', gap: 2.5, maxWidth: 880 }}>          <Section title={t('settings.general.section_login')} md={md}>
             <TextField select fullWidth size="small" label={t('settings.general.login_mode')}
@@ -800,7 +800,6 @@ export default function SettingsView() {
           </Section>
         </Box>
       ))}
-
       {tab === 'general' && renderScopeTab(['notify', 'emergency'], (
         <Box component="form" onSubmit={save} sx={{ display: 'flex', flexDirection: 'column', gap: 2.5, maxWidth: 880 }}>          <Section title={t('settings.general.section_runtime')} md={md}>
             <Autocomplete
@@ -892,16 +891,18 @@ export default function SettingsView() {
               {t('settings.geo.hint2', { defaultValue: '，或在下方配置自动更新。国家/省较可靠，城市仅供参考。' })}
             </Typography>
 
-            <TextField select fullWidth size="small" label={t('settings.geo.active_db', { defaultValue: '激活数据库' })}
+            <TextField
+              select
+              fullWidth
+              size="small"
+              label={t('settings.geo.active_db', { defaultValue: '激活数据库' })}
               value={settings.geo_ip_db_file ?? ''}
               onChange={e => patch('geo_ip_db_file', e.target.value)}
-              SelectProps={{ displayEmpty: true }}
-              // displayEmpty renders the placeholder MenuItem when value="",
-              // but with an empty value the InputLabel won't auto-shrink and
-              // ends up overlapping that placeholder text. Force shrink so the
-              // label floats into the outline notch.
-              InputLabelProps={{ shrink: true }}
-              helperText={t('settings.geo.active_db_hint', { defaultValue: '存在多个库时选用哪个（留空=按名取第一个）。只有一个激活源——不合并、无冲突。' })}>
+              helperText={t('settings.geo.active_db_hint', { defaultValue: '存在多个库时选用哪个（留空=按名取第一个）。只有一个激活源——不合并、无冲突。' })}
+              slotProps={{
+                select: { displayEmpty: true },
+                inputLabel: { shrink: true }
+              }}>
               <MenuItem value="">{t('settings.geo.auto', { defaultValue: '（自动：按文件名第一个）' })}</MenuItem>
               {(geoStatus?.available || []).map(db => (
                 <MenuItem key={db.file} value={db.file}>{db.file} — {db.granularity}{db.type ? ` · ${db.type}` : ''}</MenuItem>
@@ -928,9 +929,11 @@ export default function SettingsView() {
               label={t('settings.geo.update_interval_hours', { defaultValue: '自动更新间隔（小时）' })}
               value={settings.geo_ip_update_interval_hours || 12}
               onChange={e => patch('geo_ip_update_interval_hours', Math.max(1, Math.floor(Number(e.target.value) || 12)))}
-              inputProps={{ min: 1, step: 1 }}
               disabled={!settings.geo_ip_auto_update}
-              helperText={t('settings.geo.update_interval_hint', { defaultValue: '最小 1 小时；修改后无需重启即生效。' })} />
+              helperText={t('settings.geo.update_interval_hint', { defaultValue: '最小 1 小时；修改后无需重启即生效。' })}
+              slotProps={{
+                htmlInput: { min: 1, step: 1 }
+              }} />
             <Pair>
               <TextField select fullWidth size="small" label={t('settings.geo.source', { defaultValue: '更新来源' })}
                 value={settings.geo_ip_update_source || 'maxmind'}
@@ -1003,7 +1006,6 @@ export default function SettingsView() {
           </Section>
         </Box>
       ))}
-
       {tab === 'brand' && (
         <Box component="form" onSubmit={save} sx={{ display: 'flex', flexDirection: 'column', gap: 2.5, maxWidth: 880 }}>          <Section title={t('settings.brand.section_text')} md={md}>
             <Pair>
@@ -1080,7 +1082,6 @@ export default function SettingsView() {
           </Section>
         </Box>
       )}
-
       {tab === 'subscription' && renderScopeTab(['sub'], (
         <Box component="form" onSubmit={save} sx={{ display: 'flex', flexDirection: 'column', gap: 2.5, maxWidth: 880 }}>          <Section title={t('settings.subscription.section_basic')} md={md}>
             <TextField fullWidth label={t('settings.subscription.sub_path')}
@@ -1139,7 +1140,6 @@ export default function SettingsView() {
           </Section>
         </Box>
       ))}
-
       {tab === 'portal' && (
         <Box component="form" onSubmit={save} sx={{ display: 'flex', flexDirection: 'column', gap: 2.5, maxWidth: 880 }}>          <QuickLinksEditor
             links={settings.quick_links}
@@ -1186,14 +1186,11 @@ export default function SettingsView() {
           </Section>
         </Box>
       )}
-
       {tab === 'mail' && <MailTab />}
-
       {tab === 'sso' && <SsoTab />}
-
       {showFormBar && actionBar}
     </Box>
-  )
+  );
 }
 
 function MailTab() {
@@ -1364,8 +1361,10 @@ function MailTab() {
               value={mail.smtp_port} onChange={e => patchMail('smtp_port', Number(e.target.value))}
               error={!!errs.smtp_port}
               helperText={errs.smtp_port ? t(`admin:${errs.smtp_port}`) : ''}
-              inputProps={{ min: 1, max: 65535 }}
-              sx={{ width: 120 }} />
+              sx={{ width: 120 }}
+              slotProps={{
+                htmlInput: { min: 1, max: 65535 }
+              }} />
           </Box>
           <TextField select size="small" fullWidth label={t('settings.mail.encryption')}
             value={mail.encryption}
@@ -1397,14 +1396,16 @@ function MailTab() {
               value={mail.smtp_password ?? ''}
               onChange={e => patchMail('smtp_password', e.target.value)}
               autoComplete="new-password"
-              InputProps={{
-                endAdornment: (
-                  <InputAdornment position="end">
-                    <IconButton size="small" onClick={() => setShowPwd(!showPwd)}>
-                      {showPwd ? <VisibilityOffIcon fontSize="small" /> : <VisibilityIcon fontSize="small" />}
-                    </IconButton>
-                  </InputAdornment>
-                ),
+              slotProps={{
+                input: {
+                  endAdornment: (
+                    <InputAdornment position="end">
+                      <IconButton size="small" onClick={() => setShowPwd(!showPwd)}>
+                        {showPwd ? <VisibilityOffIcon fontSize="small" /> : <VisibilityIcon fontSize="small" />}
+                      </IconButton>
+                    </InputAdornment>
+                  ),
+                }
               }} />
           )}
         </Box>
@@ -1473,7 +1474,9 @@ function MailTab() {
                     <ListItemButton key={k} selected={activeTpl === k}
                       onClick={() => setActiveTpl(k)} sx={{ borderRadius: 1.5, py: 0.5 }}>
                       <ListItemText primary={t(`settings.mail.kind.${k}`)}
-                        primaryTypographyProps={{ fontSize: 14 }} />
+                        slotProps={{
+                          primary: { sx: { fontSize: 14 } }
+                        }} />
                     </ListItemButton>
                   ))}
                 </List>
@@ -1549,7 +1552,9 @@ function MailTab() {
         onClose={() => setTplVarsAnchor(null)}
         anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
         transformOrigin={{ vertical: 'top', horizontal: 'right' }}
-        PaperProps={{ sx: { p: 2, maxWidth: 460, maxHeight: 'min(720px, calc(100vh - 48px))', overflowY: 'auto', bgcolor: md.surfaceContainerHigh } }}>
+        slotProps={{
+          paper: { sx: { p: 2, maxWidth: 460, maxHeight: 'min(720px, calc(100vh - 48px))', overflowY: 'auto', bgcolor: md.surfaceContainerHigh } }
+        }}>
         <Typography sx={{ fontWeight: 500, mb: 1 }}>
           {t('settings.mail.tpl_vars_title', { defaultValue: '模板可用变量' })}
         </Typography>
@@ -1604,7 +1609,9 @@ function MailTab() {
       </Popover>
 
       <Dialog open={!!preview} onClose={() => setPreview(null)} maxWidth="md" fullWidth
-        PaperProps={{ sx: { bgcolor: md.surfaceContainerHigh } }}>
+        slotProps={{
+          paper: { sx: { bgcolor: md.surfaceContainerHigh } }
+        }}>
         <DialogTitle>{preview && t('settings.mail.preview_title', { kind: t(`settings.mail.kind.${preview.kind}`) })}</DialogTitle>
         <DialogContent dividers>
           <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant, mb: 0.75 }}>
@@ -1645,7 +1652,7 @@ function MailTab() {
         </Button>
       </Box>
     </Box>
-  )
+  );
 }
 
 type MdShape = {
@@ -1671,23 +1678,25 @@ function IconField({ value, onChange }: { value: string; onChange: (v: string) =
       <TextField size="small" label={t('settings.portal.link_table.icon', { defaultValue: '图标' })}
         value={value} onChange={e => onChange(e.target.value)}
         placeholder="😀 / https://… / mui:"
-        InputProps={{
-          startAdornment: value ? (
-            <Box sx={{ display: 'flex', alignItems: 'center', mr: 0.75 }}>
-              <QuickLinkIcon icon={value} size={18} />
-            </Box>
-          ) : undefined,
-          endAdornment: (
-            <IconButton size="small" edge="end"
-              title={t('settings.portal.link_table.icon_pick', { defaultValue: '选择内置图标' })}
-              onClick={e => setAnchor(e.currentTarget)}>
-              <AppsIcon fontSize="small" />
-            </IconButton>
-          ),
-        }}
-        sx={{ flex: '1 1 200px' }} />
+        sx={{ flex: '1 1 200px' }}
+        slotProps={{
+          input: {
+            startAdornment: value ? (
+              <Box sx={{ display: 'flex', alignItems: 'center', mr: 0.75 }}>
+                <QuickLinkIcon icon={value} size={18} />
+              </Box>
+            ) : undefined,
+            endAdornment: (
+              <IconButton size="small" edge="end"
+                title={t('settings.portal.link_table.icon_pick', { defaultValue: '选择内置图标' })}
+                onClick={e => setAnchor(e.currentTarget)}>
+                <AppsIcon fontSize="small" />
+              </IconButton>
+            ),
+          }
+        }} />
       <Menu open={!!anchor} anchorEl={anchor} onClose={() => setAnchor(null)}
-        PaperProps={{ sx: { maxHeight: 360 } }}>
+        slotProps={{ paper: { sx: { maxHeight: 360 } } }}>
         <MenuItem onClick={() => { onChange(''); setAnchor(null) }}>
           {t('settings.portal.link_table.icon_none', { defaultValue: '无' })}
         </MenuItem>
@@ -1701,7 +1710,7 @@ function IconField({ value, onChange }: { value: string; onChange: (v: string) =
         ))}
       </Menu>
     </>
-  )
+  );
 }
 
 function QuickLinksEditor({ links, onChange, md }: { links: QuickLink[]; onChange: (v: QuickLink[]) => void; md: MdShape }) {
@@ -1997,8 +2006,10 @@ function NumField({ label, value, onChange, helperText, step }: { label: string;
   return (
     <TextField fullWidth type="number" label={label}
       value={value} onChange={e => onChange(Number(e.target.value))}
-      inputProps={{ min: 0, step: step ?? 1 }} helperText={helperText} />
-  )
+      helperText={helperText} slotProps={{
+      htmlInput: { min: 0, step: step ?? 1 }
+    }} />
+  );
 }
 
 function ResetPeriodField({ value, onChange }: { value: string; onChange: (v: string) => void; md: MdShape }) {
@@ -2268,32 +2279,38 @@ function SamlPanel() {
             ) : (
               <>
                 <TextField fullWidth label={t('settings.sso.saml.sp_entity_id')} value={cfg.sp.entity_id}
-                  InputProps={{
-                    readOnly: true,
-                    endAdornment: (
-                      <InputAdornment position="end">
-                        <IconButton size="small" onClick={() => copyToClipboard(cfg.sp.entity_id)}>
-                          <ContentCopyIcon fontSize="small" />
-                        </IconButton>
-                      </InputAdornment>
-                    ),
+                  slotProps={{
+                    input: {
+                      readOnly: true,
+                      endAdornment: (
+                        <InputAdornment position="end">
+                          <IconButton size="small" onClick={() => copyToClipboard(cfg.sp.entity_id)}>
+                            <ContentCopyIcon fontSize="small" />
+                          </IconButton>
+                        </InputAdornment>
+                      ),
+                    }
                   }} />
                 <TextField fullWidth label={t('settings.sso.saml.sp_acs_url')} value={cfg.sp.acs_url}
-                  InputProps={{
-                    readOnly: true,
-                    endAdornment: (
-                      <InputAdornment position="end">
-                        <IconButton size="small" onClick={() => copyToClipboard(cfg.sp.acs_url)}>
-                          <ContentCopyIcon fontSize="small" />
-                        </IconButton>
-                      </InputAdornment>
-                    ),
+                  slotProps={{
+                    input: {
+                      readOnly: true,
+                      endAdornment: (
+                        <InputAdornment position="end">
+                          <IconButton size="small" onClick={() => copyToClipboard(cfg.sp.acs_url)}>
+                            <ContentCopyIcon fontSize="small" />
+                          </IconButton>
+                        </InputAdornment>
+                      ),
+                    }
                   }} />
                 <Box sx={{ position: 'relative' }}>
                   <TextField fullWidth multiline minRows={4} label={t('settings.sso.saml.sp_cert')}
                     value={cfg.sp.cert_pem}
-                    InputProps={{ readOnly: true }}
-                    sx={{ '& textarea': { fontSize: 12 } }} />
+                    sx={{ '& textarea': { fontSize: 12 } }}
+                    slotProps={{
+                      input: { readOnly: true }
+                    }} />
                   <IconButton size="small"
                     sx={{ position: 'absolute', top: 8, right: 8 }}
                     onClick={() => copyToClipboard(cfg.sp.cert_pem)}>
@@ -2407,7 +2424,7 @@ function SamlPanel() {
         </Button>
       </Box>
     </Box>
-  )
+  );
 }
 
 function OidcPanel() {
