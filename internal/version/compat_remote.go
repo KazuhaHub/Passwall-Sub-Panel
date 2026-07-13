@@ -71,6 +71,10 @@ type remoteCompatPayload struct {
 	Major         int                    `json:"major"`
 	UpdatedAt     string                 `json:"updated_at"`
 	Entries       []remoteCompatPSPEntry `json:"entries"`
+	// Advisories is the optional top-level version→advisory map surfaced in the
+	// pre-upgrade confirm dialog. Top-level (not per-entry) because "what breaks
+	// when you upgrade TO 3X-UI X" is independent of which PSP version is asking.
+	Advisories map[string]XUIAdvisory `json:"xui_advisories,omitempty"`
 }
 
 // remoteCompatPSPEntry covers one PSP version range. psp_min / psp_max
@@ -262,6 +266,9 @@ func fetchAndApply(ctx context.Context, url string) error {
 	}
 	SetActiveMaxTestedXUI(entry.MaxTestedXUI)
 	SetActiveMinXUI(entry.MinXUI) // "" → ActiveMinXUI falls back to the compiled backstop
+	// Advisories are top-level (PSP-version-independent) and runtime-only; install
+	// the whole map, canonicalizing keys so "v3.5.0"/"3.5" both resolve on lookup.
+	SetActiveAdvisories(canonAdvisories(payload.Advisories))
 	_ = saveCompatCache(entry.MaxTestedXUI)
 	return nil
 }

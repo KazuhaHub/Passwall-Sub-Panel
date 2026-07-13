@@ -473,6 +473,11 @@ func isPermanentPanelMsg(msg string) bool {
 	m := strings.ToLower(msg)
 	return strings.Contains(m, "duplicate") ||
 		strings.Contains(m, "already exist") ||
+		// AddInbound port conflict. "already exist" above catches the old
+		// "port already exists" wording; >= 3.4.2 panels return the
+		// transport-aware "port <p> (<proto>) already used by inbound ..."
+		// form (web/service/port_conflict.go) — a permanent condition too.
+		strings.Contains(m, "already used by inbound") ||
 		strings.Contains(m, "client not found") ||
 		strings.Contains(m, "not found in inbound")
 }

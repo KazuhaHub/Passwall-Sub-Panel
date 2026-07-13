@@ -502,6 +502,7 @@ func NewRouter(d Deps) *gin.Engine {
 		adminGroup.PUT("/servers/:id", servers.Update)
 		adminGroup.DELETE("/servers/:id", servers.Delete)
 		adminGroup.POST("/servers/probe", servers.Test)
+		adminGroup.GET("/servers/:id/upgrade-preview", servers.UpgradePreview)
 		adminGroup.POST("/servers/:id/upgrade-panel", servers.UpgradePanel)
 		adminGroup.POST("/servers/:id/upgrade-xray", servers.UpgradeXray)
 		adminGroup.GET("/servers/:id/xray-versions", servers.ListXrayVersions)

@@ -37,6 +37,29 @@ type stringErr struct{ s string }
 
 func (e *stringErr) Error() string { return e.s }
 
+func TestIsPermanentPanelMsg(t *testing.T) {
+	cases := []struct {
+		msg  string
+		want bool
+	}{
+		{"", false},
+		{"connection reset by peer", false},
+		{"Duplicate email: u1@psp.local", true},
+		{"email already exists", true},
+		{"port already exists", true}, // legacy AddInbound wording (via "already exist")
+		// AddInbound port conflict, 3X-UI >= 3.4.2 wording — LIVE-observed on 3.5.0.
+		{"Something went wrong (port 443 (tcp) already used by inbound 'USA NY - Host' (#1) on *\n)", true},
+		{"PORT 443 (TCP) ALREADY USED BY INBOUND", true}, // case-insensitive
+		{"client not found", true},
+		{"not found in inbound", true},
+	}
+	for _, tc := range cases {
+		if got := isPermanentPanelMsg(tc.msg); got != tc.want {
+			t.Errorf("isPermanentPanelMsg(%q) = %v, want %v", tc.msg, got, tc.want)
+		}
+	}
+}
+
 // conflictServer returns a 3X-UI-shaped server that replies with the transient
 // client_inbounds conflict for the first failFor calls, then success.
 func conflictServer(failFor int, calls *int32) *httptest.Server {

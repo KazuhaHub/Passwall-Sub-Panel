@@ -892,11 +892,23 @@ func (s *Service) tryAdoptOrphan(ctx context.Context, c ports.XUIClient, panelID
 	return nil, nil
 }
 
+// isPortAlreadyExistsError reports whether err is 3X-UI's "this port is already
+// taken by another inbound" rejection from AddInbound. 3X-UI's wording has
+// varied across versions: older panels said "port already exists", while
+// >= 3.4.2 return the transport-aware form
+// "port <p> (<proto>) already used by inbound '<name>' (#<id>) on <listen>"
+// (web/service/port_conflict.go — byte-identical through 3.5.0). Match BOTH so
+// port-conflict classification (fail-fast + orphan adoption) survives the
+// wording change; the "already used by inbound" form is LIVE-VERIFIED on a real
+// 3.5.0 panel. Kept as the single source of truth — permanentInboundCreateError
+// reuses it — so a future wording change is a one-line fix here.
 func isPortAlreadyExistsError(err error) bool {
 	if err == nil {
 		return false
 	}
-	return strings.Contains(strings.ToLower(err.Error()), "port already exists")
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "port already exists") ||
+		strings.Contains(msg, "already used by inbound")
 }
 
 func (s *Service) enqueueNodeCreateTask(ctx context.Context, n *domain.Node, spec ports.InboundSpec, cause error) error {
@@ -923,11 +935,13 @@ func permanentInboundCreateError(err error) error {
 	if err == nil {
 		return nil
 	}
-	msg := strings.TrimSpace(err.Error())
-	lower := strings.ToLower(msg)
-	switch {
-	case strings.Contains(lower, "port already exists"):
-		return fmt.Errorf("%w: %s", domain.ErrAlreadyExists, msg)
+	// A port conflict is permanent — the port won't free itself on retry — so
+	// surface it as ErrAlreadyExists (fail-fast) rather than a transient error
+	// the task runner would retry to the attempt cap. isPortAlreadyExistsError
+	// owns BOTH the old "port already exists" and the >= 3.4.2 "already used by
+	// inbound" wordings, so classification stays in one place.
+	if isPortAlreadyExistsError(err) {
+		return fmt.Errorf("%w: %s", domain.ErrAlreadyExists, strings.TrimSpace(err.Error()))
 	}
 	return nil
 }

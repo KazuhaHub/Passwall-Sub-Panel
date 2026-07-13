@@ -1679,6 +1679,8 @@
       "batch_upgrade_panel_message": "Fire a 3X-UI self-upgrade to latest on {{count}} panel(s). Each panel restarts — every user on it drops for ~30–60s — and each runs a smoke probe ~60s later (results in the audit log). Panels whose target version is outside Passwall Panel's tested range are blocked (not forced) — to force, use the per-panel ⋮ menu. Continue?",
       "upgrade_panel_title": "Upgrade 3X-UI panel",
       "upgrade_panel_message": "Passwall Panel will check the target version first and only fire the upgrade on {{name}} if it's within the tested range. The panel will restart; Passwall Panel runs a smoke probe ~60s later. Continue?",
+      "upgrade_target": "Target version: {{target}}",
+      "upgrade_affects_xray": "This upgrade also restarts and updates the bundled Xray-core; verify your inbounds are compatible with the new version before upgrading.",
       "upgrade_force_title": "Target version not verified by Passwall Panel",
       "upgrade_force_message": "About to upgrade to {{latest}}. Passwall Panel's highest verified 3X-UI version is {{max}}. Forcing the upgrade may cause traffic poll, reconcile, and other critical flows to fail due to protocol or field changes. Recommend upgrading Passwall Panel to a release that supports this 3X-UI version first. Force upgrade anyway?",
       "upgrade_xray_title": "Upgrade Xray",

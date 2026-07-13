@@ -51,8 +51,10 @@ import {
   testServer,
   updateServer,
   upgradePanel,
+  upgradePreview,
   upgradeXray,
   type Server,
+  type UpgradePreviewResult,
   type XUIAuthMethod,
   type UpdateServerRequest,
 } from '@/api/servers'
@@ -252,13 +254,56 @@ export default function ServersView() {
     try {
       if (!force) {
         closeMenu()
-        const ok = await confirm({
-          title: t('admin:servers.confirm.upgrade_panel_title', { defaultValue: '升级 3X-UI 面板' }),
-          message: t('admin:servers.confirm.upgrade_panel_message', {
+        // Read-only pre-flight: target version + tested-range check + advisory,
+        // so the confirm dialog warns about breaking changes (especially ones
+        // that also restart/upgrade the bundled Xray) BEFORE anything fires. If
+        // the preview itself fails (panel unreachable), fall through to a generic
+        // confirm — UpgradePanel's own gate still protects the actual fire.
+        let preview: UpgradePreviewResult | null = null
+        try {
+          preview = await upgradePreview(s.id)
+        } catch {
+          preview = null
+        }
+        if (preview?.already_latest) {
+          // Nothing to upgrade — report and skip the confirm + the fire entirely.
+          pushSnack(
+            t('admin:servers.toast.upgrade_panel_already_latest', {
+              version: preview.current_version ?? '',
+              defaultValue: '已是最新版（{{version}}），无需升级',
+            }),
+            'success',
+          )
+          return
+        }
+        const advisory = preview?.advisory
+        const lines = [
+          t('admin:servers.confirm.upgrade_panel_message', {
             name: s.name,
             defaultValue: 'Passwall Panel 将先检查目标版本是否在已测试范围内，在范围内才会触发 {{name}} 的自升级。面板会重启，约 60 秒后 Passwall Panel 跑 smoke probe 验证。是否继续？',
           }),
+        ]
+        if (preview?.target_version) {
+          lines.push(t('admin:servers.confirm.upgrade_target', {
+            target: preview.target_version,
+            defaultValue: '目标版本：{{target}}',
+          }))
+        }
+        if (advisory?.text) {
+          lines.push('⚠️ ' + advisory.text)
+        }
+        if (advisory?.affects_xray) {
+          lines.push(t('admin:servers.confirm.upgrade_affects_xray', {
+            defaultValue: '此升级会同时重启并升级内置 Xray-core，升级前请确认相关 inbound 与新版兼容。',
+          }))
+        }
+        const ok = await confirm({
+          title: t('admin:servers.confirm.upgrade_panel_title', { defaultValue: '升级 3X-UI 面板' }),
+          message: lines.join('\n\n'),
           confirmText: t('admin:servers.action.upgrade', { defaultValue: '升级' }),
+          // A "warning" advisory (or any breaking change flagged for Xray) makes
+          // the confirm destructive-styled so the admin slows down.
+          destructive: advisory?.severity === 'warning' || advisory?.affects_xray,
         })
         if (!ok) return // finally clears setUpgrading
       }

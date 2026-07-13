@@ -155,6 +155,46 @@ export async function upgradePanel(id: number, opts?: { force?: boolean }) {
   return data
 }
 
+// XUIAdvisory is the admin-facing pre-upgrade heads-up for a specific 3X-UI
+// target version, sourced from the remotely-updatable compat JSON. Mirrors
+// internal/version.XUIAdvisory.
+export interface XUIAdvisory {
+  severity: 'info' | 'warning'
+  affects_xray: boolean
+  text: string
+}
+
+// UpgradePreviewResult mirrors AdminServersHandler.UpgradePreview — the
+// READ-ONLY pre-flight the upgrade confirm dialog reads BEFORE firing anything:
+// what version the panel would jump to (3X-UI /updatePanel only pulls latest),
+// whether it's inside PSP's tested range, and any breaking-change advisory.
+export interface UpgradePreviewResult {
+  update_available: boolean
+  current_version?: string
+  target_version?: string
+  // already_latest: nothing to upgrade — the UI shows "already latest" and
+  // skips the confirm entirely.
+  already_latest?: boolean
+  compat_status?: CompatStatus
+  compat_message?: string
+  psp_min_xui?: string
+  psp_max_xui?: string
+  can_force?: boolean
+  advisory?: XUIAdvisory
+}
+
+// upgradePreview fetches the target version + tested-range check + advisory for
+// a panel WITHOUT firing anything, so the confirm dialog can warn about breaking
+// changes (especially ones that also restart/upgrade the bundled Xray) before
+// the admin commits. Read-only GET.
+export async function upgradePreview(id: number) {
+  // _skipErrorToast: runUpgradePanel catches a preview failure and silently
+  // falls back to a generic confirm (the UpgradePanel gate still protects the
+  // fire), so the global interceptor must NOT also fire a raw error toast.
+  const { data } = await client.get<UpgradePreviewResult>(`/admin/servers/${id}/upgrade-preview`, { _skipErrorToast: true })
+  return data
+}
+
 export interface UpgradeXrayResult {
   ok: boolean
   version?: string

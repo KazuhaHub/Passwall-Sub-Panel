@@ -378,6 +378,66 @@ type upgradePanelRequest struct {
 	Force bool `json:"force"`
 }
 
+// UpgradePreview is the READ-ONLY pre-flight for the remote 3X-UI upgrade. It
+// reports what version the panel would upgrade TO (3X-UI's /updatePanel only
+// ever pulls the latest GitHub release — there is no version-pin knob), whether
+// that target is inside PSP's tested range, and any admin-facing advisory for
+// that version (breaking changes, especially ones that also restart/upgrade the
+// bundled xray-core, which /updatePanel does in one shot). It fires NOTHING —
+// the UI shows this in the upgrade confirm dialog, then POSTs UpgradePanel on
+// confirm. GET so it's clearly side-effect-free and cacheable.
+func (h *AdminServersHandler) UpgradePreview(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid id"})
+		return
+	}
+	client, err := h.pool.Get(id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Server not registered in pool: " + err.Error()})
+		return
+	}
+	info, err := client.GetPanelUpdateInfo(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": "Failed to query 3X-UI update info: " + err.Error()})
+		return
+	}
+	resp := gin.H{
+		"update_available": info.UpdateAvailable,
+		"current_version":  info.CurrentVersion,
+		"target_version":   info.LatestVersion,
+	}
+	if !info.UpdateAvailable {
+		// Nothing to upgrade — the UI skips the confirm and shows "already latest".
+		resp["already_latest"] = true
+		c.JSON(http.StatusOK, resp)
+		return
+	}
+	// Force a fresh compat-JSON fetch so BOTH the support gate and the advisory
+	// reflect the newest published data, not a stale boot / last-page-open cache
+	// (mirrors UpgradePanel's pre-gate refresh). Best-effort: on failure we fall
+	// back to the currently-active range + advisories.
+	if rerr := version.RefreshRemoteCompat(context.Background(), "", true); rerr != nil {
+		log.Debug("upgrade-preview: force-refresh remote compat", "panel_id", id, "err", rerr)
+	}
+	compat := version.CheckXUI(info.LatestVersion)
+	resp["compat_status"] = compat.String()
+	resp["compat_message"] = version.CompatMessage(info.LatestVersion, compat)
+	resp["psp_min_xui"] = version.ActiveMinXUI()
+	resp["psp_max_xui"] = version.ActiveMaxTestedXUI()
+	// can_force mirrors UpgradePanel's gate: an untested target is overridable,
+	// so the UI can pre-color the confirm as "forced" before the admin proceeds.
+	resp["can_force"] = compat != version.CompatSupported
+	if adv, ok := version.LookupXUIAdvisory(info.LatestVersion); ok {
+		resp["advisory"] = gin.H{
+			"severity":     adv.Severity,
+			"affects_xray": adv.AffectsXray,
+			"text":         adv.Text,
+		}
+	}
+	c.JSON(http.StatusOK, resp)
+}
+
 func (h *AdminServersHandler) UpgradePanel(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {

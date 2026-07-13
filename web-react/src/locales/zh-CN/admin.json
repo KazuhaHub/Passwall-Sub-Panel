@@ -1679,6 +1679,8 @@
       "batch_upgrade_panel_message": "将对 {{count}} 台面板触发 3X-UI 自升级到最新版。每台面板会重启，其上所有用户断连约 30–60 秒；约 60 秒后各自跑 smoke probe，结果写入 audit log。目标版本超出 Passwall Panel 已测试范围的面板会被拦截（不强制）——如需强制，请用单台 ⋮ 菜单逐台确认。是否继续？",
       "upgrade_panel_title": "升级 3X-UI 面板",
       "upgrade_panel_message": "Passwall Panel 将先检查目标版本是否在已测试范围内，在范围内才会触发 {{name}} 的自升级。面板会重启，约 60 秒后 Passwall Panel 跑 smoke probe 验证。是否继续？",
+      "upgrade_target": "目标版本：{{target}}",
+      "upgrade_affects_xray": "此升级会同时重启并升级内置 Xray-core，升级前请确认相关 inbound 与新版兼容。",
       "upgrade_force_title": "目标版本未通过 Passwall Panel 验证",
       "upgrade_force_message": "即将升级到 {{latest}}。当前 Passwall Panel 已验证的最高 3X-UI 版本为 {{max}}。强制升级可能因协议或字段变更导致 traffic poll、reconcile 等关键流程失败。建议先升级 Passwall Panel 至支持该 3X-UI 版本的发行，再升级面板。是否仍要强制升级？",
       "upgrade_xray_title": "升级 Xray",
