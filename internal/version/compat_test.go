@@ -66,22 +66,21 @@ func TestCheckXUI_UnknownWhenNoRemoteLoaded(t *testing.T) {
 
 func TestCheckXUI_SupportedExactlyAtBoundary(t *testing.T) {
 	resetCompatForTest(t)
-	SetActiveMaxTestedXUI("3.3.0")
-	if got := CheckXUI("3.3.0"); got != CompatSupported {
-		t.Fatalf("3.3.0 with min=max=3.3.0 should be Supported, got %s", got)
+	SetActiveMaxTestedXUI("3.4.2")
+	if got := CheckXUI("3.4.2"); got != CompatSupported {
+		t.Fatalf("3.4.2 with min=max=3.4.2 should be Supported, got %s", got)
 	}
-	if got := CheckXUI("v3.3.0"); got != CompatSupported {
-		t.Fatalf("v3.3.0 with min=max=3.3.0 should be Supported, got %s", got)
+	if got := CheckXUI("v3.4.2"); got != CompatSupported {
+		t.Fatalf("v3.4.2 with min=max=3.4.2 should be Supported, got %s", got)
 	}
 }
 
 func TestCheckXUI_TooOldBelowMin(t *testing.T) {
 	resetCompatForTest(t)
-	SetActiveMaxTestedXUI("3.4.0")
-	// v3.9.0 raised the floor 3.2.0 → 3.3.0: the shared-client model's
-	// /clients/update path breaks on 3X-UI 3.2.x ("UNIQUE constraint failed:
-	// client_inbounds"), so 3.2.x — and everything older — must read TooOld.
-	for _, v := range []string{"3.2.0", "3.2.9", "3.1.0", "3.0.2", "2.5.5", "1.0.0"} {
+	SetActiveMaxTestedXUI("3.5.0")
+	// v3.9.1 requires the node-side REALITY scanner first shipped in 3.4.2,
+	// so 3.4.1 and everything older must read TooOld.
+	for _, v := range []string{"3.4.1", "3.3.0", "3.2.9", "3.1.0", "3.0.2", "2.5.5", "1.0.0"} {
 		if got := CheckXUI(v); got != CompatTooOld {
 			t.Fatalf("%s should be TooOld (min=%s), got %s", v, MinXUI, got)
 		}
@@ -90,10 +89,10 @@ func TestCheckXUI_TooOldBelowMin(t *testing.T) {
 
 func TestCheckXUI_UntestedAboveMax(t *testing.T) {
 	resetCompatForTest(t)
-	SetActiveMaxTestedXUI("3.4.0")
-	for _, v := range []string{"3.4.1", "3.5.0", "4.0.0"} {
+	SetActiveMaxTestedXUI("3.5.0")
+	for _, v := range []string{"3.5.1", "3.6.0", "4.0.0"} {
 		if got := CheckXUI(v); got != CompatUntested {
-			t.Fatalf("%s should be Untested (max=3.4.0), got %s", v, got)
+			t.Fatalf("%s should be Untested (max=3.5.0), got %s", v, got)
 		}
 	}
 }
@@ -103,13 +102,13 @@ func TestCheckXUI_OverrideWidensRange(t *testing.T) {
 	// Untested at one max becomes Supported once max widens. This is the
 	// "ship a new tested version via JSON, no PSP release" path.
 	resetCompatForTest(t)
-	SetActiveMaxTestedXUI("3.3.0")
-	if got := CheckXUI("3.4.0"); got != CompatUntested {
-		t.Fatalf("3.4.0 with max=3.3.0 should be Untested, got %s", got)
+	SetActiveMaxTestedXUI("3.4.2")
+	if got := CheckXUI("3.5.0"); got != CompatUntested {
+		t.Fatalf("3.5.0 with max=3.4.2 should be Untested, got %s", got)
 	}
 	SetActiveMaxTestedXUI("3.5.0")
-	if got := CheckXUI("3.4.0"); got != CompatSupported {
-		t.Fatalf("3.4.0 with max=3.5.0 should be Supported, got %s", got)
+	if got := CheckXUI("3.5.0"); got != CompatSupported {
+		t.Fatalf("3.5.0 with max=3.5.0 should be Supported, got %s", got)
 	}
 }
 

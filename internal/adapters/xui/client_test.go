@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -176,7 +177,7 @@ func TestReplaceSettingsClientsHandlesEmptyNext(t *testing.T) {
 // --- 3.2.0 first-class /clients/* adapter contract ---
 
 type capturedReq struct {
-	method, path, query, body string
+	method, path, query, body, contentType string
 }
 
 // captureReq spins up a one-shot server that records the method, decoded path,
@@ -186,11 +187,55 @@ func captureReq(t *testing.T, reply string, got *capturedReq) *Client {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		b, _ := io.ReadAll(r.Body)
-		got.method, got.path, got.query, got.body = r.Method, r.URL.Path, r.URL.RawQuery, string(b)
+		got.method, got.path, got.query, got.body, got.contentType = r.Method, r.URL.Path, r.URL.RawQuery, string(b), r.Header.Get("Content-Type")
 		_, _ = w.Write([]byte(reply))
 	}))
 	t.Cleanup(srv.Close)
 	return &Client{baseURL: srv.URL, http: srv.Client(), apiToken: "t"}
+}
+
+func TestScanRealityTargetsRunsOnSelectedPanelWithFormPayload(t *testing.T) {
+	var got capturedReq
+	c := captureReq(t, `{"success":true,"obj":[{"target":"www.example.com:443","host":"www.example.com","ip":"203.0.113.10","port":443,"feasible":true,"tls13":true,"tlsVersion":"1.3","h2":true,"alpn":"h2","x25519":true,"curveID":"X25519","certValid":true,"certSubject":"example.com","certIssuer":"Example CA","notAfter":"2027-01-01T00:00:00Z","serverNames":["example.com","www.example.com"],"latencyMs":42,"reason":""}]}`, &got)
+
+	items, err := c.ScanRealityTargets(context.Background(), "www.example.com:443,1.1.1.0/24")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.method != http.MethodPost || got.path != "/panel/api/server/scanRealityTargets" {
+		t.Fatalf("method/path = %s %s", got.method, got.path)
+	}
+	if got.contentType != "application/x-www-form-urlencoded" {
+		t.Fatalf("content-type = %q, want form encoding", got.contentType)
+	}
+	form, err := url.ParseQuery(got.body)
+	if err != nil {
+		t.Fatalf("parse form: %v", err)
+	}
+	if form.Get("targets") != "www.example.com:443,1.1.1.0/24" {
+		t.Fatalf("targets = %q", form.Get("targets"))
+	}
+	if len(items) != 1 || !items[0].Feasible || items[0].CurveID != "X25519" || items[0].LatencyMs != 42 {
+		t.Fatalf("decoded result = %#v", items)
+	}
+	if len(items[0].ServerNames) != 2 || items[0].ServerNames[1] != "www.example.com" {
+		t.Fatalf("serverNames = %#v", items[0].ServerNames)
+	}
+}
+
+func TestScanRealityTargetsEmptyInputUsesEmptyForm(t *testing.T) {
+	var got capturedReq
+	c := captureReq(t, `{"success":true,"obj":[]}`, &got)
+	items, err := c.ScanRealityTargets(context.Background(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 0 {
+		t.Fatalf("items = %#v", items)
+	}
+	if got.body != "" || got.contentType != "application/x-www-form-urlencoded" {
+		t.Fatalf("body/content-type = %q / %q", got.body, got.contentType)
+	}
 }
 
 func TestAddClientPostsToClientsAdd(t *testing.T) {

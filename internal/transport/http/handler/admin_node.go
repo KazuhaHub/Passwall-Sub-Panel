@@ -123,6 +123,11 @@ type importNodeRequest struct {
 	HideDirect bool           `json:"hide_direct"`
 }
 
+type realityScanRequest struct {
+	PanelID int64  `json:"panel_id" binding:"required"`
+	Targets string `json:"targets"`
+}
+
 type createNodeRequest struct {
 	PanelID       int64          `json:"panel_id" binding:"required"`
 	DisplayName   string         `json:"display_name" binding:"required"`
@@ -697,6 +702,48 @@ func (h *AdminNodeHandler) GenerateRealityKeypair(c *gin.Context) {
 		"private_key": priv,
 		"public_key":  pub,
 		"short_id":    shortID,
+	})
+}
+
+// ScanRealityTargets executes discovery on the selected 3X-UI host. PSP only
+// authenticates, validates, and relays the request; it never dials the supplied
+// domain/IP/CIDR itself, so reachability and latency reflect the Xray node.
+func (h *AdminNodeHandler) ScanRealityTargets(c *gin.Context) {
+	var req realityScanRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	// Upstream already caps tasks at 512, but cap the textual request too so a
+	// valid admin session cannot make PSP parse/proxy an unbounded token list.
+	if len(req.Targets) > 16*1024 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "targets is too long"})
+		return
+	}
+	if h.panels == nil {
+		respondError(c, errors.New("panel repository not configured"))
+		return
+	}
+	panel, err := h.panels.GetByID(c.Request.Context(), req.PanelID)
+	if err != nil {
+		mapNodeServiceError(c, err)
+		return
+	}
+	items, err := h.node.ScanRealityTargets(c.Request.Context(), req.PanelID, req.Targets)
+	if err != nil {
+		if errors.Is(err, ports.ErrXUIEndpointUnsupported) {
+			c.JSON(http.StatusConflict, gin.H{
+				"error": "selected 3X-UI server does not support REALITY target scanning; upgrade it to >= 3.4.2",
+			})
+			return
+		}
+		mapNodeServiceError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"source_panel_id":   panel.ID,
+		"source_panel_name": panel.Name,
+		"items":             items,
 	})
 }
 

@@ -145,6 +145,26 @@ func (s *Service) GetInboundConfig(ctx context.Context, id int64) (*ports.Inboun
 	return c.GetInbound(ctx, n.InboundID)
 }
 
+// ScanRealityTargets proxies discovery to the explicitly selected 3X-UI panel.
+// PSP must never probe the target itself: a central PSP host can have different
+// routing, filtering, DNS, and latency than the Xray node that will actually use
+// the REALITY target. 3X-UI >= 3.4.2 implements the optional RealityScanner
+// capability; PSP 3.9.1 raises its compatibility floor to that version.
+func (s *Service) ScanRealityTargets(ctx context.Context, panelID int64, targets string) ([]ports.RealityScanResult, error) {
+	if panelID <= 0 {
+		return nil, fmt.Errorf("%w: panel_id is required", domain.ErrValidation)
+	}
+	c, err := s.pool.Get(panelID)
+	if err != nil {
+		return nil, err
+	}
+	scanner, ok := c.(ports.RealityScanner)
+	if !ok {
+		return nil, fmt.Errorf("%w: %w", domain.ErrValidation, ports.ErrXUIEndpointUnsupported)
+	}
+	return scanner.ScanRealityTargets(ctx, targets)
+}
+
 func (s *Service) List(ctx context.Context) ([]*domain.Node, error) {
 	return s.nodes.List(ctx)
 }

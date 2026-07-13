@@ -4,6 +4,16 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## v3.9.1-beta.5 — 2026-07-13
+
+### 新功能
+
+- **REALITY 目标扫描器（由所选节点执行）** —— 节点创建/编辑页的 Reality `dest` 旁新增扫描入口，支持域名、IP、CIDR 和上游常用候选；结果展示 TLS、ALPN、X25519/X25519MLKEM768、证书、延迟与失败原因，并明确标注“扫描来源：3X-UI 服务器名”。点击“使用”只回填 `dest + serverNames`，不会自动保存。PSP 后端只代理到所选已登记面板的 `/panel/api/server/scanRealityTargets`，不从 PSP 主机探测，避免中央面板与实际 Xray 节点出口不同造成误判；接口 admin-only，PSP 每 IP 每分钟 6 次、输入 16 KiB 上限，3X-UI 继续承担 SSRF/并发/CIDR/总任务防护。
+
+### 升级注意
+
+- **PSP 3.9.1 的最低 3X-UI 版本提升为 3.4.2** —— 节点侧 REALITY 扫描端点在 3X-UI v3.4.2 首次出现，v3.4.1 及更早不存在；`version.MinXUI` 与 `docs/compat/v3.json` 最新 entry 已同步从 3.3.0 调到 3.4.2。兼容矩阵另保留 v3.9.0 专属的 3.3.0 floor，不反向改写历史版本要求；不提供 PSP 本机扫描回退。
+
 ## v3.9.1-beta.3 — 2026-07-07
 
 ### 新功能

@@ -73,6 +73,7 @@ import PageHeader from '@/components/PageHeader'
 import { PagedTableFooter } from '@/components/PagedTableFooter'
 import { pushSnack } from '@/components/SnackbarHost'
 import { useTabParam } from '@/hooks/useTabParam'
+import RealityTargetScannerDialog from './RealityTargetScannerDialog'
 import {
   type FieldErrors,
   firstError,
@@ -993,9 +994,12 @@ interface FieldsProps {
   // Existing tags across all nodes, surfaced as the Tags autocomplete's
   // suggestion list (same as the edit/import dialogs).
   allTags?: string[]
+  // Edit mode doesn't receive the selectable server list, but the scanner
+  // still needs to disclose which node is executing the probe.
+  scanSourceName?: string
 }
 
-function InboundFormFields({ form, setForm, showMetadata, servers, onGenKeys, onGenSSPassword, genKeysBusy, protocolReadonly, advanced, onSetAdvanced, allTags }: FieldsProps) {
+function InboundFormFields({ form, setForm, showMetadata, servers, onGenKeys, onGenSSPassword, genKeysBusy, protocolReadonly, advanced, onSetAdvanced, allTags, scanSourceName }: FieldsProps) {
   const theme = useTheme()
   const md = theme.palette.md
   const { t } = useTranslation(['admin', 'common'])
@@ -1013,6 +1017,7 @@ function InboundFormFields({ form, setForm, showMetadata, servers, onGenKeys, on
   //   / submitEditInbound. 'from_panel' fills the file-mode paths in place.
   const [managedCerts, setManagedCerts] = useState<Cert[]>([])
   const [fetchingPanelCert, setFetchingPanelCert] = useState(false)
+  const [realityScannerOpen, setRealityScannerOpen] = useState(false)
   useEffect(() => {
     listCerts().then(setManagedCerts).catch(() => {})
   }, [])
@@ -1511,11 +1516,18 @@ function InboundFormFields({ form, setForm, showMetadata, servers, onGenKeys, on
                 </Button>
               </Box>
               <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.25 }}>
-                <Box sx={{ display: 'flex', gap: 1.5, flexWrap: 'wrap' }}>
-                  <TextField required size="small" label={t('admin:nodes.create_dialog.reality_dest')}
-                    value={form.reality_dest}
-                    onChange={e => update('reality_dest', e.target.value)}
-                    sx={{ flex: '1 1 240px' }} />
+                <Box sx={{ display: 'flex', gap: 1.5, flexWrap: 'wrap', alignItems: 'flex-start' }}>
+                  <Box sx={{ display: 'flex', gap: 1, flex: '1 1 320px' }}>
+                    <TextField required size="small" fullWidth label={t('admin:nodes.create_dialog.reality_dest')}
+                      value={form.reality_dest}
+                      onChange={e => update('reality_dest', e.target.value)} />
+                    <Button type="button" size="small" variant="outlined"
+                      disabled={!form.panel_id}
+                      onClick={() => setRealityScannerOpen(true)}
+                      sx={{ whiteSpace: 'nowrap', minWidth: 104 }}>
+                      {t('admin:nodes.create_dialog.reality_scan_open')}
+                    </Button>
+                  </Box>
                   <TextField required size="small" label={t('admin:nodes.create_dialog.reality_server_names')}
                     value={form.reality_server_names_text}
                     onChange={e => update('reality_server_names_text', e.target.value)}
@@ -1770,6 +1782,21 @@ function InboundFormFields({ form, setForm, showMetadata, servers, onGenKeys, on
           </Box>
         </Box>
       )}
+      <RealityTargetScannerDialog
+        open={realityScannerOpen}
+        panelId={form.panel_id}
+        sourceName={servers?.find(s => s.id === form.panel_id)?.name || scanSourceName}
+        onClose={() => setRealityScannerOpen(false)}
+        onUse={result => {
+          setForm(prev => ({
+            ...prev,
+            reality_dest: result.target,
+            reality_server_names_text: result.serverNames.length > 0
+              ? result.serverNames.join(', ')
+              : prev.reality_server_names_text,
+          }))
+        }}
+      />
     </Box>
   )
 }
@@ -3270,6 +3297,7 @@ export default function NodesView() {
             <Box component="form" id="edit-inbound-form" onSubmit={submitEditInbound}>
               <InboundFormFields form={editInboundForm} setForm={setEditInboundForm}
                 showMetadata={false}
+                scanSourceName={editingInboundNode?.panel_name}
                 onGenKeys={genKeysForEdit}
                 onGenSSPassword={genSSPasswordEdit}
                 genKeysBusy={editInboundGenBusy}

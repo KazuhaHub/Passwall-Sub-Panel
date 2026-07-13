@@ -168,6 +168,15 @@ type XUIClient interface {
 	GetWebCertFiles(ctx context.Context) (*WebCertFiles, error)
 }
 
+// RealityScanner is the version-gated 3X-UI REALITY target discovery surface.
+// It intentionally stays separate from XUIClient so historical test doubles and
+// any out-of-tree adapters don't have to implement a capability that only exists
+// on 3X-UI >= 3.4.2. node.Service type-asserts this interface after resolving the
+// selected panel from XUIPool; the production xui.Client implements it.
+type RealityScanner interface {
+	ScanRealityTargets(ctx context.Context, targets string) ([]RealityScanResult, error)
+}
+
 // PanelUpdateInfo is the version pair returned by
 // /panel/api/server/getPanelUpdateInfo. CurrentVersion is reported without a
 // leading "v" ("3.1.0"); LatestVersion typically carries one ("v3.1.0"). Both
@@ -194,6 +203,31 @@ type ServerStatus struct {
 type WebCertFiles struct {
 	CertFile string // webCertFile
 	KeyFile  string // webKeyFile
+}
+
+// RealityScanResult mirrors one item returned by
+// POST /panel/api/server/scanRealityTargets. The probe is executed by the
+// selected 3X-UI host (the same network vantage point as its Xray process), not
+// by PSP. JSON tags deliberately follow 3X-UI's camelCase response contract.
+type RealityScanResult struct {
+	Target      string   `json:"target"`
+	Host        string   `json:"host"`
+	IP          string   `json:"ip"`
+	Port        int      `json:"port"`
+	Feasible    bool     `json:"feasible"`
+	TLS13       bool     `json:"tls13"`
+	TLSVersion  string   `json:"tlsVersion"`
+	H2          bool     `json:"h2"`
+	ALPN        string   `json:"alpn"`
+	X25519      bool     `json:"x25519"`
+	CurveID     string   `json:"curveID"`
+	CertValid   bool     `json:"certValid"`
+	CertSubject string   `json:"certSubject"`
+	CertIssuer  string   `json:"certIssuer"`
+	NotAfter    string   `json:"notAfter"`
+	ServerNames []string `json:"serverNames"`
+	LatencyMs   int      `json:"latencyMs"`
+	Reason      string   `json:"reason"`
 }
 
 // ClientDetail is a normalised view of one client. ID carries the uuid (the

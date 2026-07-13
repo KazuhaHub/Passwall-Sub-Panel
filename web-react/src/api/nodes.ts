@@ -72,6 +72,33 @@ export interface RealityKeypair {
   short_id: string
 }
 
+export interface RealityScanResult {
+  target: string
+  host: string
+  ip: string
+  port: number
+  feasible: boolean
+  tls13: boolean
+  tlsVersion: string
+  h2: boolean
+  alpn: string
+  x25519: boolean
+  curveID: string
+  certValid: boolean
+  certSubject: string
+  certIssuer: string
+  notAfter: string
+  serverNames: string[]
+  latencyMs: number
+  reason: string
+}
+
+export interface RealityScanResponse {
+  source_panel_id: number
+  source_panel_name: string
+  items: RealityScanResult[]
+}
+
 export interface NodeListParams {
   page?: number
   page_size?: number
@@ -169,6 +196,21 @@ export async function createInbound(req: CreateInboundRequest) {
 
 export async function generateRealityKeypair() {
   const { data } = await client.post<RealityKeypair>('/admin/nodes/generate-reality-keypair')
+  return data
+}
+
+/** Run REALITY discovery from the selected 3X-UI/Xray node. PSP only
+ * proxies this request; it never probes the target from its own host. */
+export async function scanRealityTargets(panelId: number, targets?: string) {
+  const { data } = await client.post<RealityScanResponse>('/admin/nodes/reality-targets/scan', {
+    panel_id: panelId,
+    targets: targets?.trim() || '',
+  }, {
+    // The selected 3X-UI host may process up to 512 domain probes in 32
+    // concurrent waves (10s each). Keep this override local to scanning; the
+    // shared client retains its 30s default for every other API call.
+    timeout: 185_000,
+  })
   return data
 }
 

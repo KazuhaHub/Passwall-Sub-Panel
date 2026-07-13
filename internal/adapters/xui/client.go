@@ -288,6 +288,20 @@ func (c *Client) fetchCSRFLocked(ctx context.Context) error {
 }
 
 func (c *Client) doJSON(ctx context.Context, method, path string, body any, out any) (err error) {
+	return c.doJSONWithClient(ctx, method, path, body, out, c.http)
+}
+
+// doJSONWithTimeout is the long-running-request variant used by REALITY CIDR
+// discovery. A 512-target scan runs in bounded waves on 3X-UI and can
+// legitimately exceed the normal adapter-wide 30s timeout; copying http.Client
+// only changes this call's deadline while reusing the same transport and jar.
+func (c *Client) doJSONWithTimeout(ctx context.Context, method, path string, body any, out any, timeout time.Duration) error {
+	hc := *c.http
+	hc.Timeout = timeout
+	return c.doJSONWithClient(ctx, method, path, body, out, &hc)
+}
+
+func (c *Client) doJSONWithClient(ctx context.Context, method, path string, body any, out any, hc *http.Client) (err error) {
 	// Tag every request error with which PANEL it came from. The 3X-UI API path is
 	// relative (e.g. /panel/api/clients/update/<email>), so in a multi-panel
 	// deployment a bare error can't tell you which 3X-UI failed — which made a
@@ -298,7 +312,7 @@ func (c *Client) doJSON(ctx context.Context, method, path string, body any, out 
 			err = fmt.Errorf("[%s] %w", c.reqTag(), err)
 		}
 	}()
-	return c.doJSONRetry(ctx, method, path, body, out, false)
+	return c.doJSONRetry(ctx, method, path, body, out, false, hc)
 }
 
 // reqTag identifies the panel a request belongs to, for error messages. Format:
@@ -323,24 +337,31 @@ func (c *Client) reqTag() string {
 // recover() cannot shield, taking the whole process down. On a second
 // consecutive 401 we surface a normal auth error the task/probe paths already
 // handle instead of recursing.
-func (c *Client) doJSONRetry(ctx context.Context, method, path string, body any, out any, retried bool) error {
+func (c *Client) doJSONRetry(ctx context.Context, method, path string, body any, out any, retried bool, hc *http.Client) error {
 	if err := c.ensureAuth(ctx); err != nil {
 		return err
 	}
 	var reader io.Reader
+	contentType := ""
 	if body != nil {
-		b, err := json.Marshal(body)
-		if err != nil {
-			return err
+		if form, ok := body.(url.Values); ok {
+			reader = strings.NewReader(form.Encode())
+			contentType = "application/x-www-form-urlencoded"
+		} else {
+			b, err := json.Marshal(body)
+			if err != nil {
+				return err
+			}
+			reader = bytes.NewReader(b)
+			contentType = "application/json"
 		}
-		reader = bytes.NewReader(b)
 	}
 	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, reader)
 	if err != nil {
 		return err
 	}
-	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
+	if contentType != "" {
+		req.Header.Set("Content-Type", contentType)
 	}
 	if c.apiToken != "" {
 		req.Header.Set("Authorization", "Bearer "+c.apiToken)
@@ -355,7 +376,7 @@ func (c *Client) doJSONRetry(ctx context.Context, method, path string, body any,
 			req.Header.Set("X-CSRF-Token", tok)
 		}
 	}
-	resp, err := c.http.Do(req)
+	resp, err := hc.Do(req)
 	if err != nil {
 		return err
 	}
@@ -383,7 +404,7 @@ func (c *Client) doJSONRetry(ctx context.Context, method, path string, body any,
 		if err := c.ensureAuth(ctx); err != nil {
 			return err
 		}
-		return c.doJSONRetry(ctx, method, path, body, out, true)
+		return c.doJSONRetry(ctx, method, path, body, out, true, hc)
 	}
 
 	b, _ := io.ReadAll(resp.Body)
@@ -853,6 +874,27 @@ func (c *Client) GetPanelUpdateInfo(ctx context.Context) (*ports.PanelUpdateInfo
 		LatestVersion:   raw.LatestVersion,
 		UpdateAvailable: raw.UpdateAvailable,
 	}, nil
+}
+
+// ScanRealityTargets asks THIS 3X-UI host to probe the supplied domains, IPs,
+// or CIDRs. Keeping the network operation upstream is intentional: the result
+// must represent the Xray node's reachability and latency, not PSP's host.
+// 3X-UI reads this endpoint with PostForm, so the payload must be URL-encoded
+// rather than JSON. An empty targets value selects the upstream seed list.
+func (c *Client) ScanRealityTargets(ctx context.Context, targets string) ([]ports.RealityScanResult, error) {
+	form := url.Values{}
+	if strings.TrimSpace(targets) != "" {
+		form.Set("targets", targets)
+	}
+	var out []ports.RealityScanResult
+	// Upstream caps scans at 512 tasks with 32 workers. IP/CIDR discovery uses
+	// a 4s timeout, while domain probes use 10s, so 512 worst-case domains can
+	// take about 160s in 16 waves. Allow 180s without relaxing the normal 30s
+	// timeout used by every other XUI call.
+	if err := c.doJSONWithTimeout(ctx, http.MethodPost, "/panel/api/server/scanRealityTargets", form, &out, 180*time.Second); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 // UpdatePanel triggers /panel/api/server/updatePanel. The 3X-UI panel

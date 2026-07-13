@@ -1242,7 +1242,7 @@ render 三条输出路径（mihomo/sing-box/URI list）统一从预取的 `psp_c
 
 ### 10.1 真实 API 清单（v3.9.0：`/panel/api/clients/*` 一等公民端点）
 
-Base path: `/panel/api` | 鉴权：`Authorization: Bearer <api-token>` 优先，session cookie 兜底。**当前 PSP 最低要求 3X-UI 3.3.0**（共享 client 模型依赖的 `client_inbounds` upsert 修复），已测上限 3.4.2，见 [3xui-compat.md](3xui-compat.md)。
+Base path: `/panel/api` | 鉴权：`Authorization: Bearer <api-token>` 优先，session cookie 兜底。**PSP 3.9.1 最低要求 3X-UI 3.4.2**（共享 client 模型依赖 3.3.0，节点侧 REALITY 扫描接口再把 floor 提至 3.4.2），已测上限 3.5.0，见 [3xui-compat.md](3xui-compat.md)。
 
 **Inbound CRUD（`/inbounds/*`）：**
 
@@ -1270,6 +1270,7 @@ Base path: `/panel/api` | 鉴权：`Authorization: Bearer <api-token>` 优先，
 |---|---|---|
 | GET | `/server/status`、`/server/getPanelUpdateInfo`、`/server/getXrayVersion` | 版本感知（v3.6.0） |
 | POST | `/server/updatePanel`、`/server/installXray` | 远程升级（管理员触发） |
+| POST | `/server/scanRealityTargets` | 从所选 3X-UI/Xray 节点扫描 REALITY 目标；PSP 仅代理，不从中央主机探测（v3.9.1） |
 
 > **已废弃/已删除，不要再用**：`/inbounds/{id}/addClient`、`/inbounds/{id}/delClient/:uuid`、`/inbounds/{id}/copyClients`、`/inbounds/getClientTraffics/:email`、`/inbounds/getClientTrafficsById/:id`、`/inbounds/{id}/resetClientTraffic/:email` —— 均已从 3X-UI 3.2.0 移除或从未被 PSP 封装（迁移设计与实测记录见 [3xui-3.2-clients-migration.md](3xui-3.2-clients-migration.md)）。流量轮询改为完全依赖 `ListInboundsSlim` 返回的 `clientStats`，无独立 traffic 端点调用。
 
@@ -1779,7 +1780,7 @@ minor / patch 内升级**不需要**跑 migrate（按 [[feedback_semver]] 规则
 - [x] 静默全量迁移（自动 + sync_task 兜底，无需人工操作）
 - [x] 流量按 email 聚合读取（消除多 inbound 双重计数）
 - [x] 账号状态 / 服务状态拆分
-- [x] 3X-UI 最低版本升到 3.3.0
+- [x] 3X-UI 最低版本升到 3.3.0（v3.9.0 shared client），再升到 3.4.2（v3.9.1 节点侧 REALITY 扫描）
 
 ---
 

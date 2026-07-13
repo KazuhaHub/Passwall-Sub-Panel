@@ -23,6 +23,12 @@ import (
 // migrating to PSP v3.9.0. The compat JSON keeps a separate v3.6.2–v3.8.99 entry
 // at the old 3.2.0 floor so the per-node-era PSP builds aren't wrongly tightened.
 //
+// v3.9.1 raises the floor again, 3.3.0 → 3.4.2, because PSP now proxies
+// REALITY target discovery through /panel/api/server/scanRealityTargets. That
+// route (and its node-side SSRF/concurrency bounds) first shipped in 3X-UI
+// 3.4.2; 3.4.1 and earlier do not expose it. The compat JSON preserves a
+// narrow v3.9.0-only entry at 3.3.0 so historical releases remain accurate.
+//
 // docs/compat/v3.json's per-entry min_xui describes the SAME floor and MUST
 // stay equal to this const — TestMinXUIConstMatchesCompatJSON fails the build
 // the moment they drift, so you can't edit the JSON and forget the const (the
@@ -44,7 +50,7 @@ import (
 // Versions compare numerically (major.minor.patch). A leading "v" is
 // tolerated — 3X-UI's /server/status emits "3.1.0" while /getPanelUpdateInfo
 // emits "v3.1.0" for the same release.
-const MinXUI = "3.3.0"
+const MinXUI = "3.4.2"
 
 // activeMaxTestedXUI holds the runtime-effective upper bound, loaded
 // from docs/compat/xui-compat.json via RefreshRemoteCompat. Empty string

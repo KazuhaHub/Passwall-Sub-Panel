@@ -353,6 +353,10 @@ func NewRouter(d Deps) *gin.Engine {
 		// DB-only, idempotent, nothing reads psp_client in production yet).
 
 		nodes := handler.NewAdminNodeHandler(d.Node, d.Sync, d.Repos.Ownership, d.Repos.User, d.Repos.XUIPanel, d.Repos.PSPClient)
+		// A batch scan can fan out to hundreds of bounded TLS probes on the
+		// selected node. Keep it admin-only and rate-limit repeated launches per
+		// source IP; 3X-UI applies its own task/concurrency/SSRF caps downstream.
+		realityScanLimiter := middleware.NewPerIPLimiter(6, time.Minute)
 		// Reads + toggle-enabled are operator-safe; create/update/delete and
 		// the import / claim flows touch 3X-UI panels directly, admin only.
 		staffGroup.GET("/nodes", nodes.List)
@@ -377,6 +381,7 @@ func NewRouter(d Deps) *gin.Engine {
 		adminGroup.POST("/nodes/:id/recreate-inbound", nodes.RecreateInbound)
 		adminGroup.POST("/nodes/:id/claim", nodes.ClaimClient)
 		adminGroup.POST("/nodes/generate-reality-keypair", nodes.GenerateRealityKeypair)
+		adminGroup.POST("/nodes/reality-targets/scan", realityScanLimiter.Handler(), nodes.ScanRealityTargets)
 
 		// PSP-managed certificates + DNS credentials (v3.6.4). adminGroup only —
 		// these touch ACME private keys and DNS provider secrets.

@@ -9,8 +9,9 @@ PSP 通过 `/panel/api/*` 对接 3X-UI 面板。本文档维护两件事：
 
 | PSP 版本 | 最低 3X-UI | 已实测通过 | 备注 |
 |---|---|---|---|
-| **v3.9.0+** | **3.3.0** | 3.4.2 | 共享 client 模型(一个 client 跨多 inbound);floor 抬到 3.3.0(client_inbounds upsert 修复);已测上限 3.4.2 实机复核(2026-07-01),见下文 |
-| **v3.6.2 – v3.8.x** | **3.2.0** | 3.4.2 | 每节点 client(一级 `/clients/*` API),**硬切 ≥ 3.2.0**;已测上限同步抬到 3.4.2(per-node 路径是 shared 路径子集) |
+| **v3.9.1+** | **3.4.2** | 3.5.0 | 新增由所选节点执行的 REALITY 目标扫描；依赖 3.4.2 首次提供的 `/server/scanRealityTargets`，不做 PSP 本机回退 |
+| **v3.9.0** | **3.3.0** | 3.5.0 | 共享 client 模型历史版本；保留其原始 3.3.0 floor，不因 3.9.1 新功能反向收紧 |
+| **v3.6.2 – v3.8.x** | **3.2.0** | 3.5.0 | 每节点 client(一级 `/clients/*` API),**硬切 ≥ 3.2.0**;per-node 路径是 shared 路径子集 |
 | v3.6.0 – v3.6.1 | 3.1.0 | 3.1.0 | 仍走 inbound-scoped 端点;别跑在 3.2.0 上,先升 PSP 到 v3.6.2 |
 | v3.5.1 – v3.5.x | 3.1.0 | 3.1.0 | `/inbounds/list` 把 settings 等改成 nested object,见下文 |
 | v3.5.0 | 3.0.x | 3.0.x | 跨 3.1.0 升级会破坏 traffic poll |
@@ -25,6 +26,16 @@ PSP 通过 `/panel/api/*` 对接 3X-UI 面板。本文档维护两件事：
 - 任何高于"已实测通过"的 3X-UI 版本都属于**未知风险**——升级前先在一台 panel 上小流量验证
 
 ## 历史兼容性事件
+
+### 2026-07-13 / PSP 3.9.1 接入节点侧 REALITY 目标扫描 → floor 3.3.0 抬到 3.4.2
+
+**结论**：3X-UI 的 `POST /panel/api/server/scanRealityTarget` 与 `/scanRealityTargets`、对应 `reality_scan.go` 服务实现均从 **v3.4.2** 开始存在；v3.4.1 及更早标签不存在这些文件/路由。因此 PSP 3.9.1 的最低 3X-UI 版本准确调整为 **3.4.2**。
+
+**PSP 实现策略**：管理员在节点创建/编辑页选择 3X-UI 服务器后打开扫描器；PSP 只鉴权并代理 URL-encoded `targets`，TLS/证书/ALPN/X25519/延迟探测由该 3X-UI 节点执行。返回结果携带 `source_panel_id/source_panel_name`，界面明确展示扫描来源；点击“使用”只回填 `dest + serverNames`，不会自动保存。没有 PSP 本机扫描回退，避免中央面板与节点出口不同导致误判。
+
+**安全与资源边界**：扫描 API 仅 admin 可用，PSP 侧按来源 IP 限制每分钟 6 次、输入文本上限 16 KiB；3X-UI 侧继续负责 SSRF 防护、最多 32 并发、CIDR 最多 256 IP、总任务最多 512。CIDR 最坏情况可能超过普通 API 的 30 秒，PSP 只为该请求单独放宽到 75 秒。
+
+**兼容矩阵处理**：`version.MinXUI` 与 v3 compat 最新 entry 同步设为 3.4.2；另保留窄范围 `v3.9.0..v3.9.0` entry（min 3.3.0），避免篡改历史版本事实。
 
 ### 2026-07-13 / 3X-UI 3.5.0(xray-core 26.7.11)REALITY 认证回归 → minClientVer 显式设置修复
 
