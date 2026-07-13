@@ -1,6 +1,7 @@
 import axios, { AxiosError, AxiosRequestConfig, InternalAxiosRequestConfig } from 'axios'
 import i18n from '@/i18n'
 import { pushSnack } from '@/components/SnackbarHost'
+import { panelAPIBase, panelURL } from '@/panelPath'
 
 // Shared axios instance. Bearer token is attached automatically from
 // local storage. The response interceptor centralises three concerns:
@@ -10,7 +11,7 @@ import { pushSnack } from '@/components/SnackbarHost'
 //   3. de-duplication of the same error fired N times in a tight burst
 //      — e.g. Promise.allSettled fan-out across a user-batch
 export const client = axios.create({
-  baseURL: '/api',
+  baseURL: panelAPIBase,
   timeout: 30000,
 })
 
@@ -120,13 +121,13 @@ function logoutAndRedirect(err: AxiosError<{ error?: string }>) {
   localStorage.removeItem('psp_refresh')
   localStorage.removeItem('psp_user')
   const onAuthPublicPage =
-    location.pathname === '/login'
-    || location.pathname.startsWith('/login/')
-    || location.pathname === '/logged-out'
+    location.pathname === panelURL('/login')
+    || location.pathname.startsWith(panelURL('/login/'))
+    || location.pathname === panelURL('/logged-out')
   if (onAuthPublicPage) {
     maybePushSnack('401:public', responseErrorMessage(err), 'error')
   } else {
-    location.href = '/login'
+    location.href = panelURL('/login')
   }
 }
 
@@ -202,8 +203,8 @@ client.interceptors.response.use(
     // toasts. (The screen only hits allowlisted endpoints, so no loop.)
     if (err.response?.status === 403
       && (err.response?.data as { code?: string } | undefined)?.code === '2fa_enrollment_required') {
-      if (location.pathname !== '/enroll-2fa') {
-        location.href = '/enroll-2fa'
+      if (location.pathname !== panelURL('/enroll-2fa')) {
+        location.href = panelURL('/enroll-2fa')
       }
       return Promise.reject(err)
     }

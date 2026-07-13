@@ -21,20 +21,14 @@ import (
 const (
 	CookieAccessToken  = "psp_access"
 	CookieRefreshToken = "psp_refresh"
-	// CookieAuthPath scopes every auth cookie set by this package to the
-	// /api/ tree. The old Path=/ value caused two real problems behind
+	// Auth cookies are scoped at runtime to <panel_path>/api. The old Path=/
+	// value caused two real problems behind
 	// Cloudflare: the cookie was sent on /assets/* requests, which trips
 	// CF's "skip cache for requests with cookies" default and turned every
 	// hashed bundle into a MISS, and it also broadcast the JWT to any
-	// future non-API surface mounted at the root. Only handlers under
-	// /api/auth/* read these cookies, so /api is the narrowest path that
-	// still works for every auth flow.
-	//
-	// Cookies are keyed on (name, path, domain, secure) — if the path
-	// drifts between set and clear sites the browser keeps the original
-	// cookie alive until its natural TTL. Keep every SetCookie / clearing
-	// SetCookie call routed through this constant.
-	CookieAuthPath = "/api"
+	// future non-API surface mounted at the root. Cookies are keyed on
+	// (name, path, domain, secure), so every set/clear call must use
+	// cookieAuthPath(c), derived from the same dispatched external path.
 )
 
 // AuthSAMLHandler exposes /api/auth/saml/{login,acs,metadata}.
@@ -92,7 +86,7 @@ func (h *AuthSAMLHandler) ACS(c *gin.Context) {
 	assertion, err := h.saml.ParseACSResponse(c.Request, possibleIDs)
 	if err != nil {
 		recordAuthEvent(c, h.authEvents, domain.AuthMethodSAML, domain.AuthOutcomeFailure, 0, "", "saml_assertion_invalid")
-		c.Redirect(http.StatusFound, "/sso-error?error=auth_failed&description="+url.QueryEscape(err.Error()))
+		c.Redirect(http.StatusFound, panelRedirect(c, "/sso-error?error=auth_failed&description="+url.QueryEscape(err.Error())))
 		return
 	}
 
@@ -126,17 +120,17 @@ func (h *AuthSAMLHandler) ACS(c *gin.Context) {
 	u, err := h.user.EnsureSSO(c.Request.Context(), in)
 	if errors.Is(err, domain.ErrSSONoAccount) {
 		recordAuthEvent(c, h.authEvents, domain.AuthMethodSAML, domain.AuthOutcomeFailure, 0, assertion.UPN, "sso_no_account")
-		c.Redirect(http.StatusFound, "/sso-no-account")
+		c.Redirect(http.StatusFound, panelRedirect(c, "/sso-no-account"))
 		return
 	}
 	if errors.Is(err, domain.ErrSSOAccountConflict) {
 		recordAuthEvent(c, h.authEvents, domain.AuthMethodSAML, domain.AuthOutcomeFailure, 0, assertion.UPN, "sso_conflict")
-		c.Redirect(http.StatusFound, "/sso-error?error=sso_conflict&description="+url.QueryEscape(err.Error()))
+		c.Redirect(http.StatusFound, panelRedirect(c, "/sso-error?error=sso_conflict&description="+url.QueryEscape(err.Error())))
 		return
 	}
 	if err != nil {
 		recordAuthEvent(c, h.authEvents, domain.AuthMethodSAML, domain.AuthOutcomeFailure, 0, assertion.UPN, "sso_error")
-		c.Redirect(http.StatusFound, "/sso-error?error=sso_error&description="+url.QueryEscape(err.Error()))
+		c.Redirect(http.StatusFound, panelRedirect(c, "/sso-error?error=sso_error&description="+url.QueryEscape(err.Error())))
 		return
 	}
 	if !u.Enabled && !allowDisabledEmergencyLogin(u.AutoDisabledReason) {
@@ -147,7 +141,7 @@ func (h *AuthSAMLHandler) ACS(c *gin.Context) {
 			errorCode = "account_pending"
 		}
 		recordAuthEvent(c, h.authEvents, domain.AuthMethodSAML, domain.AuthOutcomeFailure, u.ID, u.UPN, "disabled:"+string(u.AutoDisabledReason))
-		c.Redirect(http.StatusFound, "/sso-error?error="+errorCode)
+		c.Redirect(http.StatusFound, panelRedirect(c, "/sso-error?error="+errorCode))
 		return
 	}
 	access, refresh, err := h.auth.IssueTokens(u)
@@ -160,15 +154,15 @@ func (h *AuthSAMLHandler) ACS(c *gin.Context) {
 
 	secure := isHTTPS(c)
 	c.SetSameSite(http.SameSiteLaxMode)
-	c.SetCookie(CookieAccessToken, access, int(h.auth.AccessTTL().Seconds()), CookieAuthPath, "", secure, true)
-	c.SetCookie(CookieRefreshToken, refresh, int(h.auth.RefreshTTL().Seconds()), CookieAuthPath, "", secure, true)
+	c.SetCookie(CookieAccessToken, access, int(h.auth.AccessTTL().Seconds()), cookieAuthPath(c), "", secure, true)
+	c.SetCookie(CookieRefreshToken, refresh, int(h.auth.RefreshTTL().Seconds()), cookieAuthPath(c), "", secure, true)
 
 	// RelayState round-trips through the IdP and is fully attacker-controllable
 	// in a crafted / IdP-initiated POST (Login sanitized only the SP-initiated
 	// value). Re-sanitize here and QueryEscape into the next= param — server-side
 	// hardening must not depend on the SPA's navigate() neutralizing it.
 	returnTo = sanitizeReturnTo(returnTo, "/user/me")
-	c.Redirect(http.StatusFound, "/sso-callback?next="+url.QueryEscape(returnTo))
+	c.Redirect(http.StatusFound, panelRedirect(c, "/sso-callback?next="+url.QueryEscape(returnTo)))
 }
 
 func allowDisabledEmergencyLogin(reason domain.AutoDisabledReason) bool {

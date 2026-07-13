@@ -21,6 +21,7 @@ import (
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/log"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/panelpath"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/safego"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 )
@@ -1050,12 +1051,13 @@ func (s *Service) SendPasswordReset(ctx context.Context, to, displayName, link, 
 	}
 	uiCfg, _ := s.settings.Load(ctx, ports.UISettings{})
 	base := strings.TrimRight(uiCfg.SubBaseURL, "/")
+	panelBase := panelpath.PanelBase(base, uiCfg.PanelPath)
 	data := map[string]any{
 		"DisplayName":   displayName,
 		"Email":         to,
 		"SiteTitle":     uiCfg.BrandName(),
-		"LogoURL":       resolveLogoURL(base, uiCfg.LogoURL, uiCfg.LogoURLDark),
-		"PanelURL":      base,
+		"LogoURL":       resolveLogoURL(panelBase, uiCfg.LogoURL, uiCfg.LogoURLDark),
+		"PanelURL":      panelBase,
 		"ResetLink":     link,
 		"OTPCode":       code,
 		"ExpireMinutes": expireMinutes,
@@ -1103,12 +1105,13 @@ func (s *Service) SendEmailVerification(ctx context.Context, to, displayName, li
 	}
 	uiCfg, _ := s.settings.Load(ctx, ports.UISettings{})
 	base := strings.TrimRight(uiCfg.SubBaseURL, "/")
+	panelBase := panelpath.PanelBase(base, uiCfg.PanelPath)
 	data := map[string]any{
 		"DisplayName":   displayName,
 		"Email":         to,
 		"SiteTitle":     uiCfg.BrandName(),
-		"LogoURL":       resolveLogoURL(base, uiCfg.LogoURL, uiCfg.LogoURLDark),
-		"PanelURL":      base,
+		"LogoURL":       resolveLogoURL(panelBase, uiCfg.LogoURL, uiCfg.LogoURLDark),
+		"PanelURL":      panelBase,
 		"VerifyLink":    link,
 		"OTPCode":       code,
 		"ExpireMinutes": expireMinutes,
@@ -1156,12 +1159,13 @@ func (s *Service) SendLogin2FACode(ctx context.Context, to, displayName, code st
 	}
 	uiCfg, _ := s.settings.Load(ctx, ports.UISettings{})
 	base := strings.TrimRight(uiCfg.SubBaseURL, "/")
+	panelBase := panelpath.PanelBase(base, uiCfg.PanelPath)
 	data := map[string]any{
 		"DisplayName":   displayName,
 		"Email":         to,
 		"SiteTitle":     uiCfg.BrandName(),
-		"LogoURL":       resolveLogoURL(base, uiCfg.LogoURL, uiCfg.LogoURLDark),
-		"PanelURL":      base,
+		"LogoURL":       resolveLogoURL(panelBase, uiCfg.LogoURL, uiCfg.LogoURLDark),
+		"PanelURL":      panelBase,
 		"OTPCode":       code,
 		"ExpireMinutes": expireMinutes,
 		"GeneratedAt":   time.Now().Format("2006-01-02 15:04"),
@@ -1522,7 +1526,7 @@ func (s *Service) templateData(ctx context.Context, settings domain.MailSettings
 		}
 	}
 	base := strings.TrimRight(uiCfg.SubBaseURL, "/")
-	panelURL := base
+	panelURL := panelpath.PanelBase(base, uiCfg.PanelPath)
 	expireBeforeDays := uiCfg.ExpireBeforeDays
 	if expireBeforeDays <= 0 {
 		expireBeforeDays = 3
@@ -1531,7 +1535,7 @@ func (s *Service) templateData(ctx context.Context, settings domain.MailSettings
 	if trafficRemainPercent <= 0 {
 		trafficRemainPercent = 10
 	}
-	logoURL := resolveLogoURL(base, uiCfg.LogoURL, uiCfg.LogoURLDark)
+	logoURL := resolveLogoURL(panelURL, uiCfg.LogoURL, uiCfg.LogoURLDark)
 	return map[string]any{
 		"UserID":               u.ID,
 		"UPN":                  u.UPN,
@@ -1647,7 +1651,7 @@ func (s *Service) previewTemplateData(ctx context.Context, settings domain.MailS
 		})
 		if err == nil {
 			data["SiteTitle"] = st.BrandName()
-			base = strings.TrimRight(st.SubBaseURL, "/")
+			base = panelpath.PanelBase(strings.TrimRight(st.SubBaseURL, "/"), st.PanelPath)
 			if base != "" {
 				data["PanelURL"] = base
 			}

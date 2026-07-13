@@ -22,6 +22,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/idgen"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/log"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/panelpath"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/safego"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/sendthrottle"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
@@ -324,7 +325,7 @@ func (s *Service) sendVerification(ctx context.Context, set ports.UISettings, u 
 			return
 		}
 		tok.TokenHash = hashSecret(raw)
-		link = base + "/verify-email?token=" + url.QueryEscape(raw)
+		link = panelpath.PanelURL(base, set.PanelPath, "/verify-email?token="+url.QueryEscape(raw))
 	}
 	if err := s.d.Tokens.Create(ctx, tok); err != nil {
 		log.Warn("registration: create token", "user_id", u.ID, "err", err)

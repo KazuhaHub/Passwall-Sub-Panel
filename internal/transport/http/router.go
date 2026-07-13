@@ -3,6 +3,7 @@ package http
 
 import (
 	"context"
+	stdhttp "net/http"
 	"strings"
 	"sync"
 	"time"
@@ -13,6 +14,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/jwtutil"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/log"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/panelpath"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/alert"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/audit"
@@ -84,10 +86,16 @@ type Deps struct {
 	SubPerIPPerMin   int
 	LoginPerIPPerMin int
 	JWTParams        *jwtutil.ParamsCache
+	Paths            *panelpath.Resolver
 }
 
-// NewRouter returns a configured *gin.Engine ready to be served.
-func NewRouter(d Deps) *gin.Engine {
+// NewRouter returns the configured HTTP handler, including the runtime panel
+// prefix dispatcher in front of the Gin route tree.
+func NewRouter(d Deps) stdhttp.Handler {
+	paths := d.Paths
+	if paths == nil {
+		paths = panelpath.NewResolver(d.Repos.Settings)
+	}
 	g := gin.New()
 	tp := trustedProxies(d.Cfg.HTTP.TrustedProxies)
 	if err := g.SetTrustedProxies(tp); err != nil {
@@ -150,7 +158,6 @@ func NewRouter(d Deps) *gin.Engine {
 	subHandler := handler.NewSubHandler(d.User, d.Render, d.Repos.SubLog, d.Repos.ScopedSettings, d.Repos.User, d.Mail, d.Async)
 	subLimiter := middleware.NewPerIPLimiter(d.SubPerIPPerMin, time.Minute)
 	subLimiter.SetLimitFunc(newSettingsIntCache(d.Repos.Settings, d.SubPerIPPerMin, func(s ports.UISettings) int { return s.SubPerIPPerMin }).get)
-	subPathCache := newSubPathCache(d.Repos.Settings)
 
 	// 2FA (TOTP) service — shared by the login challenge, the user self-service
 	// enrollment endpoints, and the admin break-glass reset.
@@ -507,7 +514,8 @@ func NewRouter(d Deps) *gin.Engine {
 		adminGroup.GET("/servers/:id/xray-versions", servers.ListXrayVersions)
 		adminGroup.GET("/servers/:id/web-cert", servers.WebCert)
 
-		settings := handler.NewAdminSettingsHandler(d.Repos.Settings, d.JWTParams)
+		panelPathSSO := handler.NewPanelPathSSOMigrator(d.Repos.SAMLConfig, d.Repos.OIDCConfig, d.SAML, d.OIDC)
+		settings := handler.NewAdminSettingsHandler(d.Repos.Settings, d.JWTParams, paths, panelPathSSO)
 		adminGroup.GET("/settings/ui", settings.Get)
 		adminGroup.PUT("/settings/ui", settings.Put)
 
@@ -561,7 +569,7 @@ func NewRouter(d Deps) *gin.Engine {
 	// NoRoute handles both dynamic subscription paths and SPA fallback.
 	g.NoRoute(func(c *gin.Context) {
 		// Check if this is a subscription request (cached, no DB query).
-		if subPathCache.isSubRequest(c.Request.URL.Path) {
+		if paths.IsSubscription(c.Request.URL.Path) {
 			subLimiter.Handler()(c)
 			if !c.IsAborted() {
 				subHandler.Get(c)
@@ -572,7 +580,7 @@ func NewRouter(d Deps) *gin.Engine {
 		handler.StaticSPA(c)
 	})
 
-	return g
+	return panelDispatch(paths, g)
 }
 
 // trustedProxies resolves the SetTrustedProxies argument from the
@@ -627,49 +635,6 @@ func trustedProxies(raw string) []string {
 		}
 	}
 	return out
-}
-
-// subPathCache caches the subscription path prefix to avoid DB queries on every request.
-type subPathCache struct {
-	mu          sync.RWMutex
-	prefix      string
-	nextRefresh time.Time
-	repo        ports.SettingsRepo
-}
-
-func newSubPathCache(repo ports.SettingsRepo) *subPathCache {
-	c := &subPathCache{repo: repo}
-	c.refresh()
-	return c
-}
-
-func (c *subPathCache) refresh() {
-	s, err := c.repo.Load(context.Background(), ports.UISettings{SubPath: "sub"})
-	prefix := "/sub/"
-	subPath := strings.Trim(strings.TrimSpace(s.SubPath), "/")
-	if err != nil || subPath == "" {
-		prefix = "/sub/"
-	} else {
-		prefix = "/" + subPath + "/"
-	}
-	c.mu.Lock()
-	c.prefix = prefix
-	c.nextRefresh = time.Now().Add(5 * time.Second)
-	c.mu.Unlock()
-}
-
-func (c *subPathCache) isSubRequest(path string) bool {
-	c.mu.RLock()
-	prefix := c.prefix
-	stale := time.Now().After(c.nextRefresh)
-	c.mu.RUnlock()
-	if stale {
-		c.refresh()
-		c.mu.RLock()
-		prefix = c.prefix
-		c.mu.RUnlock()
-	}
-	return strings.HasPrefix(path, prefix)
 }
 
 // settingsIntCache caches one int-valued setting with a short TTL so a

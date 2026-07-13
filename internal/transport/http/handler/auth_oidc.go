@@ -75,16 +75,16 @@ func (h *AuthOIDCHandler) Login(c *gin.Context) {
 	// give CSRF protection; Secure closes the network-layer hole.
 	secure := isHTTPS(c)
 	c.SetSameSite(http.SameSiteLaxMode)
-	c.SetCookie(cookieOIDCState, state, oidcCookieTTL, CookieAuthPath, "", secure, true)
-	c.SetCookie(cookieOIDCNonce, nonce, oidcCookieTTL, CookieAuthPath, "", secure, true)
-	c.SetCookie(cookieOIDCVerifier, verifier, oidcCookieTTL, CookieAuthPath, "", secure, true)
-	c.SetCookie(cookieOIDCRet, returnTo, oidcCookieTTL, CookieAuthPath, "", secure, true)
+	c.SetCookie(cookieOIDCState, state, oidcCookieTTL, cookieAuthPath(c), "", secure, true)
+	c.SetCookie(cookieOIDCNonce, nonce, oidcCookieTTL, cookieAuthPath(c), "", secure, true)
+	c.SetCookie(cookieOIDCVerifier, verifier, oidcCookieTTL, cookieAuthPath(c), "", secure, true)
+	c.SetCookie(cookieOIDCRet, returnTo, oidcCookieTTL, cookieAuthPath(c), "", secure, true)
 	c.Redirect(http.StatusFound, url)
 }
 
 func (h *AuthOIDCHandler) Callback(c *gin.Context) {
 	if !h.oidc.Enabled() {
-		c.Redirect(http.StatusFound, "/sso-error?error=sso_error&description=OIDC+not+enabled")
+		c.Redirect(http.StatusFound, panelRedirect(c, "/sso-error?error=sso_error&description=OIDC+not+enabled"))
 		return
 	}
 	// Record the post-IdP terminal failures too (identity unknown → upn ""):
@@ -94,21 +94,21 @@ func (h *AuthOIDCHandler) Callback(c *gin.Context) {
 	if errParam := c.Query("error"); errParam != "" {
 		recordAuthEvent(c, h.authEvents, domain.AuthMethodOIDC, domain.AuthOutcomeFailure, 0, "", "oidc_idp_error")
 		desc := c.Query("error_description")
-		c.Redirect(http.StatusFound, "/sso-error?error=auth_failed&description="+url.QueryEscape(desc))
+		c.Redirect(http.StatusFound, panelRedirect(c, "/sso-error?error=auth_failed&description="+url.QueryEscape(desc)))
 		return
 	}
 	state := c.Query("state")
 	wantState, _ := c.Cookie(cookieOIDCState)
 	if state == "" || state != wantState {
 		recordAuthEvent(c, h.authEvents, domain.AuthMethodOIDC, domain.AuthOutcomeFailure, 0, "", "oidc_state_mismatch")
-		c.Redirect(http.StatusFound, "/sso-error?error=auth_failed&description=State+mismatch")
+		c.Redirect(http.StatusFound, panelRedirect(c, "/sso-error?error=auth_failed&description=State+mismatch"))
 		return
 	}
 	nonce, _ := c.Cookie(cookieOIDCNonce)
 	code := c.Query("code")
 	if code == "" {
 		recordAuthEvent(c, h.authEvents, domain.AuthMethodOIDC, domain.AuthOutcomeFailure, 0, "", "oidc_missing_code")
-		c.Redirect(http.StatusFound, "/sso-error?error=auth_failed&description=Missing+authorization+code")
+		c.Redirect(http.StatusFound, panelRedirect(c, "/sso-error?error=auth_failed&description=Missing+authorization+code"))
 		return
 	}
 	// Clear the one-time cookies regardless of outcome. Secure flag must
@@ -116,15 +116,15 @@ func (h *AuthOIDCHandler) Callback(c *gin.Context) {
 	// won't recognize the deletion and the stale cookie lingers. Declared
 	// once at this point so the later JWT cookie sets reuse it.
 	secure := isHTTPS(c)
-	c.SetCookie(cookieOIDCState, "", -1, CookieAuthPath, "", secure, true)
-	c.SetCookie(cookieOIDCNonce, "", -1, CookieAuthPath, "", secure, true)
+	c.SetCookie(cookieOIDCState, "", -1, cookieAuthPath(c), "", secure, true)
+	c.SetCookie(cookieOIDCNonce, "", -1, cookieAuthPath(c), "", secure, true)
 	pkceVerifier, _ := c.Cookie(cookieOIDCVerifier)
-	c.SetCookie(cookieOIDCVerifier, "", -1, CookieAuthPath, "", secure, true)
+	c.SetCookie(cookieOIDCVerifier, "", -1, cookieAuthPath(c), "", secure, true)
 
 	assertion, err := h.oidc.Exchange(c.Request.Context(), code, nonce, pkceVerifier)
 	if err != nil {
 		recordAuthEvent(c, h.authEvents, domain.AuthMethodOIDC, domain.AuthOutcomeFailure, 0, "", "oidc_exchange_failed")
-		c.Redirect(http.StatusFound, "/sso-error?error=auth_failed&description="+url.QueryEscape(err.Error()))
+		c.Redirect(http.StatusFound, panelRedirect(c, "/sso-error?error=auth_failed&description="+url.QueryEscape(err.Error())))
 		return
 	}
 
@@ -159,17 +159,17 @@ func (h *AuthOIDCHandler) Callback(c *gin.Context) {
 	u, err := h.user.EnsureSSO(c.Request.Context(), in)
 	if errors.Is(err, domain.ErrSSONoAccount) {
 		recordAuthEvent(c, h.authEvents, domain.AuthMethodOIDC, domain.AuthOutcomeFailure, 0, upn, "sso_no_account")
-		c.Redirect(http.StatusFound, "/sso-no-account")
+		c.Redirect(http.StatusFound, panelRedirect(c, "/sso-no-account"))
 		return
 	}
 	if errors.Is(err, domain.ErrSSOAccountConflict) {
 		recordAuthEvent(c, h.authEvents, domain.AuthMethodOIDC, domain.AuthOutcomeFailure, 0, upn, "sso_conflict")
-		c.Redirect(http.StatusFound, "/sso-error?error=sso_conflict&description="+url.QueryEscape(err.Error()))
+		c.Redirect(http.StatusFound, panelRedirect(c, "/sso-error?error=sso_conflict&description="+url.QueryEscape(err.Error())))
 		return
 	}
 	if err != nil {
 		recordAuthEvent(c, h.authEvents, domain.AuthMethodOIDC, domain.AuthOutcomeFailure, 0, upn, "sso_error")
-		c.Redirect(http.StatusFound, "/sso-error?error=sso_error&description="+url.QueryEscape(err.Error()))
+		c.Redirect(http.StatusFound, panelRedirect(c, "/sso-error?error=sso_error&description="+url.QueryEscape(err.Error())))
 		return
 	}
 	if !u.Enabled && !allowDisabledEmergencyLogin(u.AutoDisabledReason) {
@@ -180,7 +180,7 @@ func (h *AuthOIDCHandler) Callback(c *gin.Context) {
 			errorCode = "account_pending"
 		}
 		recordAuthEvent(c, h.authEvents, domain.AuthMethodOIDC, domain.AuthOutcomeFailure, u.ID, u.UPN, "disabled:"+string(u.AutoDisabledReason))
-		c.Redirect(http.StatusFound, "/sso-error?error="+errorCode)
+		c.Redirect(http.StatusFound, panelRedirect(c, "/sso-error?error="+errorCode))
 		return
 	}
 	access, refresh, err := h.auth.IssueTokens(u)
@@ -192,14 +192,14 @@ func (h *AuthOIDCHandler) Callback(c *gin.Context) {
 	recordAuthEvent(c, h.authEvents, domain.AuthMethodOIDC, domain.AuthOutcomeSuccess, u.ID, u.UPN, "")
 
 	c.SetSameSite(http.SameSiteLaxMode)
-	c.SetCookie(CookieAccessToken, access, int(h.auth.AccessTTL().Seconds()), CookieAuthPath, "", secure, true)
-	c.SetCookie(CookieRefreshToken, refresh, int(h.auth.RefreshTTL().Seconds()), CookieAuthPath, "", secure, true)
+	c.SetCookie(CookieAccessToken, access, int(h.auth.AccessTTL().Seconds()), cookieAuthPath(c), "", secure, true)
+	c.SetCookie(CookieRefreshToken, refresh, int(h.auth.RefreshTTL().Seconds()), cookieAuthPath(c), "", secure, true)
 
 	returnTo, _ := c.Cookie(cookieOIDCRet)
-	c.SetCookie(cookieOIDCRet, "", -1, CookieAuthPath, "", secure, true)
+	c.SetCookie(cookieOIDCRet, "", -1, cookieAuthPath(c), "", secure, true)
 	// The return target came from a sanitized HttpOnly cookie, but re-sanitize +
 	// QueryEscape anyway so this path matches the SAML ACS hardening and never
 	// emits an unescaped next= value.
 	returnTo = sanitizeReturnTo(returnTo, "/user/me")
-	c.Redirect(http.StatusFound, "/sso-callback?next="+url.QueryEscape(returnTo))
+	c.Redirect(http.StatusFound, panelRedirect(c, "/sso-callback?next="+url.QueryEscape(returnTo)))
 }

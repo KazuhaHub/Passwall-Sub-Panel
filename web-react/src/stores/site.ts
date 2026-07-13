@@ -1,9 +1,10 @@
 import { create } from 'zustand'
 import { getAuthMethods } from '@/api/auth'
+import { panelURL } from '@/panelPath'
 
-const DEFAULT_LOGO_LIGHT = '/images/logo-title-circle.png'
-const DEFAULT_LOGO_DARK = '/images/logo-title-circle-darkmode.png'
-const DEFAULT_ICON = '/images/HeadPicture.png'
+const DEFAULT_LOGO_LIGHT = panelURL('/images/logo-title-circle.png')
+const DEFAULT_LOGO_DARK = panelURL('/images/logo-title-circle-darkmode.png')
+const DEFAULT_ICON = panelURL('/images/HeadPicture.png')
 
 interface SiteState {
   siteTitle: string

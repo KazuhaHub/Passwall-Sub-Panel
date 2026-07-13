@@ -4,6 +4,7 @@ import { ErrorFallback } from '@/components/ErrorBoundary'
 import RequireAuth from './RequireAuth'
 import { homeForRole } from './home'
 import { useAuthStore } from '@/stores/auth'
+import { panelPath } from '@/panelPath'
 
 const LoginView = lazy(() => import('@/views/LoginView'))
 const SsoCallbackView = lazy(() => import('@/views/SsoCallbackView'))
@@ -126,4 +127,4 @@ export const router = createBrowserRouter([
       { path: '*', element: <RootRedirect /> },
     ],
   },
-])
+], { basename: panelPath || undefined })

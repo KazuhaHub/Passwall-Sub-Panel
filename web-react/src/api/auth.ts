@@ -4,6 +4,7 @@ import type {
 } from '@simplewebauthn/browser'
 
 import { client } from './client'
+import { panelAPIBase } from '@/panelPath'
 import type {
   AuthLoginResponse,
   AuthLoginResult,
@@ -186,9 +187,9 @@ export async function resendVerification(input: {
 }
 
 export function samlLoginURL(returnTo: string = '/user/me'): string {
-  return `/api/auth/saml/login?return_to=${encodeURIComponent(returnTo)}`
+  return `${panelAPIBase}/auth/saml/login?return_to=${encodeURIComponent(returnTo)}`
 }
 
 export function oidcLoginURL(returnTo: string = '/user/me'): string {
-  return `/api/auth/oidc/login?return_to=${encodeURIComponent(returnTo)}`
+  return `${panelAPIBase}/auth/oidc/login?return_to=${encodeURIComponent(returnTo)}`
 }

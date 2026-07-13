@@ -324,6 +324,7 @@ services:
 | 分类 | 说明 |
 |---|---|
 | 公网基地址 | 订阅 URL 生成的 base，必填（Nginx 模式下填 `https://domain`） |
+| 面板路径前缀 | 可选，留空时面板位于域名根路径；填 `/panel` 后管理页面、API 与 SSO 回调均位于 `https://domain/panel/`，订阅链接仍保持在根路径。修改后需同步更新身份提供商登记的 OIDC/SAML 回调地址 |
 | 登录模式 | SSO 优先 / 双形态（SSO + 本地）/ 仅本地 |
 | 订阅路径 | URL 前缀，默认 `sub` |
 | 客户端规则 | UA 匹配关键词 + 渲染格式（mihomo / sing-box）+ 白/黑名单 |
