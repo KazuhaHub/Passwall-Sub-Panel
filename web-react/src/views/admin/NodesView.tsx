@@ -392,7 +392,13 @@ const EMPTY_INBOUND: InboundFormState = {
   reality_spider_x: '/drive',
   reality_xver: 0,
   reality_max_timediff: 0,
-  reality_min_client: '',
+  // Default new REALITY inbounds to minClientVer 1.0.0 (= no version gate).
+  // xray-core >= 26.7.11 treats an EMPTY minClientVer as "26.3.27", which
+  // rejects mihomo/Clash Verge (hardcoded client version 1.8.2) and older
+  // cores — so an empty default silently breaks every new node. Existing
+  // nodes are unaffected: parseInboundForEdit overrides this with the panel's
+  // real value. See docs/3xui-compat.md 2026-07-13.
+  reality_min_client: '1.0.0',
   reality_max_client: '',
   ss_method: '2022-blake3-aes-256-gcm',
   ss_password: '',
@@ -1539,6 +1545,25 @@ function InboundFormFields({ form, setForm, showMetadata, servers, onGenKeys, on
                   value={form.short_ids_text}
                   onChange={e => update('short_ids_text', e.target.value)}
                   sx={{ '& input': { fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace', fontSize: 13, py: 1.25 } }} />
+                {/* minClientVer / maxClientVer gate the REALITY handshake by the
+                    client's self-reported xray-core version. Both empty = no gate
+                    (pre-3.5 behavior). IMPORTANT: xray-core >= 26.7.11 changed an
+                    EMPTY minClientVer to default to "26.3.27" server-side, which
+                    rejects mihomo/Clash-Verge (they hardcode client version 1.8.2)
+                    and any older core — set minClientVer to "1.0.0" to restore the
+                    open behavior. See docs/3xui-compat.md 2026-07-13. */}
+                <Box sx={{ display: 'flex', gap: 1.5, flexWrap: 'wrap' }}>
+                  <TextField size="small" label={t('admin:nodes.create_dialog.reality_min_client')}
+                    placeholder="1.0.0"
+                    value={form.reality_min_client}
+                    onChange={e => update('reality_min_client', e.target.value)}
+                    helperText={t('admin:nodes.create_dialog.reality_min_client_hint')}
+                    sx={{ flex: '1 1 180px', minWidth: 140 }} />
+                  <TextField size="small" label={t('admin:nodes.create_dialog.reality_max_client')}
+                    value={form.reality_max_client}
+                    onChange={e => update('reality_max_client', e.target.value)}
+                    sx={{ flex: '1 1 180px', minWidth: 140 }} />
+                </Box>
               </Box>
             </Box>
           )}

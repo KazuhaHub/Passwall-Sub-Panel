@@ -26,6 +26,29 @@ PSP 通过 `/panel/api/*` 对接 3X-UI 面板。本文档维护两件事：
 
 ## 历史兼容性事件
 
+### 2026-07-13 / 3X-UI 3.5.0(xray-core 26.7.11)REALITY 认证回归 → minClientVer 显式设置修复
+
+**背景**: 面板从 3.4.2(xray 26.6.27)自动升级到 3.5.0(xray 26.7.11)后,一条此前正常工作的 TCP+REALITY inbound(VLESS + xtls-rprx-vision,端口 443)所有客户端(用户的 mihomo/Clash Verge,以及排查时用官方最新 Xray-core 客户端复现)全部连接失败,同一面板上的 shadowsocks inbound 不受影响。
+
+**排查过程(逐项排除)**:
+- 网络/端口本身没问题:TCP 三次握手正常,拿一个未认证的探测者(裸 openssl s_client,SNI 打 dest 域名)去连,能正确回落到伪装网站的真实证书——说明 REALITY 监听、回落路径是健康的。
+- 密钥没问题:用 `xray x25519 -i <privateKey>` 反推,确认面板存的 privateKey/publicKey 数学上配对正确。
+- 不是 mihomo 专属问题:下载官方 Xray-core v26.7.11 二进制,拿面板真实的 publicKey/shortId/UUID 原样发起握手,同样失败(`uConn.Verified: false` → `REALITY: processed invalid connection`),排除客户端指纹(chrome/firefox 都试了,结果一致)和客户端版本问题。
+- 不是进程该重启没重启:`restartXrayService` 重启过,现象不变。
+- 用全新密钥、全新端口建一条临时 inbound(测完即删)复现,现象甚至更严重——连伪装回落都直接卡死无响应,证明问题不是这条 inbound 自己的历史包袱,是这台面板 3.5.0 + xray-core 26.7.11 组合本身的问题。
+
+**根因**: Xray-core commit [`af7eb68`](https://github.com/XTLS/Xray-core/commit/af7eb68)(随 v26.7.11 发布)把 REALITY 服务端行为改成:`realitySettings.minClientVer` 留空(以前的含义是"不限制客户端版本")现在会被服务端默认成 `"26.3.27"`,任何自报 Xray-core 版本低于这个值的 REALITY 客户端一律被当成未授权连接、回落到伪装网站。这个改动的动机是 Chrome/uTLS 指纹新鲜度(见 [XTLS/Xray-core#6181](https://github.com/XTLS/Xray-core/pull/6181) 讨论,RPRX 提到俄罗斯 GFW 已经在针对陈旧 Chrome 指纹限流),**不是一个访问控制/安全机制**——REALITY 真正的准入门槛(privateKey 派生的 AuthKey)完全不受这个字段影响。当天社区已有两份独立报告命中同一个 bug:[XTLS/Xray-core#6482](https://github.com/XTLS/Xray-core/issues/6482)(v26.6.27→v26.7.11 回归,现象一致)、[#6477](https://github.com/XTLS/Xray-core/issues/6477)(mihomo v1.19.28 客户端,官方回复确认修复方式是显式设置 `minClientVer`)。
+
+**修复**: 通过 `/panel/api/inbounds/update/{id}`(读-改-写,保留全部 22 个既有 client / 密钥 / shortId / dest 不动)把该 inbound 的 `minClientVer` 从 `""` 显式改成 `"1.0.0"`,拉 `/panel/api/server/getConfigJson` 确认改动已进入正在跑的 xray 进程。管理员的真实客户端随后确认恢复正常。面板与 xray-core 都保持最新版(3.5.0 / 26.7.11)不动,无需回退。
+
+**PSP 侧结论**: 与 PSP 代码无关——PSP 从不读写 `minClientVer`、不创建 REALITY inbound,`render` 包(`streams.go` / `urilist.go`)对着这台面板实时配置核对过,pbk/sni/sid/fp/spx 全部解析正确,纯粹是 3X-UI/xray-core 服务端的上游回归。
+
+**未解决 / 待观察项**:
+1. 临时 inbound 复现时"伪装回落也卡死"这个更严重的现象没有深挖根因(为避免在生产事故现场继续制造噪音,测完即删)。以后在这台面板(或同版本组合)上新建 REALITY inbound,建议先小流量验证再批量发给用户,不要假设新建的一定能用。
+2. 顺带发现 `realitySettings.dest` 在 3.5.0 里对已有(经历过迁移)的 inbound 返回时改名成了 `target`,但 `/inbounds/add` 新建的 inbound 读写时仍然认 `dest`——同一版本下字段名不统一,取决于 inbound 是老迁移的还是新建的。PSP 的 `xuiStreamSettings.RealitySettings.Dest`(streams.go:41)本身在 PSP 里全代码库零引用,不受影响,但提醒以后手工拼 inbound payload 时注意。
+
+**给未来的建议**: 如果某条 REALITY inbound 在 3X-UI 升级后(尤其是跳到 xray-core 26.7.x 系列)突然所有客户端都连不上、且用官方最新 Xray-core 客户端从零复现也失败,先查 `minClientVer` 是不是被新版本默认收紧了,显式设一个低版本号(如 `"1.0.0"`)就是最小侵入的修复,不需要回退 xray-core 版本。
+
 ### 2026-07-01 / 3X-UI 3.4.2 实机复核 → 已测上限 3.4.1 抬到 3.4.2
 
 **背景**: 上游发 3.4.2。拿一台真实 3.4.2 面板(`panelVersion 3.4.2`, xray `26.6.27`)用 API token 做实机复核。
