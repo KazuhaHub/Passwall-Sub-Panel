@@ -613,14 +613,17 @@ func (s *Service) SetEnabled(ctx context.Context, id int64, enabled bool) error 
 	if err != nil {
 		return err
 	}
+	c, clientErr := s.pool.Get(n.PanelID)
+	if clientErr == nil && !ports.SupportsCapability(c, ports.CapabilityInboundEnable) {
+		return fmt.Errorf("%w: selected panel cannot enable or disable individual inbounds", ports.ErrPanelCapabilityUnsupported)
+	}
 	n.Enabled = enabled
 	// Column-scoped write: a full-row Save here would revert the health/traffic/
 	// config columns the concurrent poll/health/reconcile loops are writing.
 	if err := s.nodes.UpdateEnabled(ctx, n.ID, enabled); err != nil {
 		return err
 	}
-	c, err := s.pool.Get(n.PanelID)
-	if err != nil {
+	if clientErr != nil {
 		if taskErr := s.enqueueNodeTask(ctx, domain.SyncTaskNodeSetEnabled, n, "sync node enabled state", map[string]bool{"enabled": enabled}); taskErr != nil {
 			log.Warn("enqueue node enabled sync failed", "node_id", n.ID, "err", taskErr)
 		}

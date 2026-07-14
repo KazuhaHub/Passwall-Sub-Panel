@@ -64,7 +64,7 @@ import {
 } from '@/api/nodes'
 import { listUsers } from '@/api/users'
 import { fetchPanelWebCert, listCerts, setNodeCertSource, type Cert } from '@/api/certs'
-import { listServers, type Server } from '@/api/servers'
+import { listServers, type PanelCapability, type PanelType, type Server } from '@/api/servers'
 import { MenuItem, Select, FormControlLabel } from '@mui/material'
 import KeyIcon from '@mui/icons-material/VpnKey'
 import type { Node, RelayLine, UnmanagedInbound, User } from '@/api/types'
@@ -83,7 +83,7 @@ import {
 } from '@/utils/validators'
 
 type CreateProtocol = 'vless' | 'vmess' | 'trojan' | 'ss2022' | 'hysteria2'
-type VlessNetwork = 'tcp' | 'ws' | 'grpc' | 'httpupgrade' | 'xhttp'
+type VlessNetwork = 'tcp' | 'ws' | 'grpc' | 'httpupgrade' | 'http' | 'xhttp'
 type VlessSecurity = 'none' | 'tls' | 'reality'
 type SS2022Method = '2022-blake3-aes-128-gcm' | '2022-blake3-aes-256-gcm' | '2022-blake3-chacha20-poly1305'
 
@@ -434,6 +434,7 @@ const VLESS_NETWORKS: { value: VlessNetwork; label: string }[] = [
   { value: 'ws', label: 'WebSocket' },
   { value: 'grpc', label: 'gRPC' },
   { value: 'httpupgrade', label: 'HTTPUpgrade' },
+  { value: 'http', label: 'HTTP' },
   { value: 'xhttp', label: 'XHTTP' },
 ]
 const XHTTP_MODES = ['', 'auto', 'packet-up', 'stream-up', 'stream-one']
@@ -552,9 +553,9 @@ function settingsBuilderFor(p: CreateProtocol): (f: InboundFormState) => unknown
   }
 }
 
-// xuiProtocolName maps the panel's CreateProtocol enum to the protocol
-// string 3X-UI expects in the inbound payload.
-function xuiProtocolName(p: CreateProtocol): string {
+// canonicalProtocolName maps the form enum to the stable protocol name used
+// by the admin API. Each panel adapter translates that canonical value.
+function canonicalProtocolName(p: CreateProtocol): string {
   switch (p) {
     case 'ss2022': return 'shadowsocks'
     case 'vmess': return 'vmess'
@@ -651,6 +652,11 @@ function buildStreamSettings(f: InboundFormState): unknown {
       path: f.httpupgrade_path || '/',
       host: f.httpupgrade_host,
       headers: f.httpupgrade_host ? { Host: f.httpupgrade_host } : {},
+    }
+  } else if (f.vless_network === 'http') {
+    stream.httpSettings = {
+      path: f.httpupgrade_path || '/',
+      host: f.httpupgrade_host ? [f.httpupgrade_host] : [],
     }
   } else if (f.vless_network === 'xhttp') {
     const xhttp: Record<string, unknown> = {
@@ -800,6 +806,7 @@ function parseInboundForEdit(node: Node, ib: InboundDetail): InboundFormState {
   const grpc = (stream.grpcSettings as Record<string, unknown>) ?? {}
   const httpupgrade = (stream.httpupgradeSettings as Record<string, unknown>) ?? {}
   const httpupgradeHeaders = (httpupgrade.headers as Record<string, unknown>) ?? {}
+  const httpTransport = (stream.httpSettings as Record<string, unknown>) ?? {}
   const tls = (stream.tlsSettings as Record<string, unknown>) ?? {}
   // 3X-UI nests fingerprint under tlsSettings.settings — older Passwall
   // builds emitted it at the top level (broken), so accept either spot
@@ -895,8 +902,8 @@ function parseInboundForEdit(node: Node, ib: InboundDetail): InboundFormState {
     grpc_service_name: stringValue(grpc.serviceName),
     grpc_authority: stringValue(grpc.authority),
     grpc_multi_mode: boolValue(grpc.multiMode),
-    httpupgrade_path: stringValue(httpupgrade.path, '/'),
-    httpupgrade_host: stringValue(httpupgrade.host) || stringValue(httpupgradeHeaders.Host),
+    httpupgrade_path: stringValue(httpupgrade.path) || stringValue(httpTransport.path, '/'),
+    httpupgrade_host: stringValue(httpupgrade.host) || stringValue(httpupgradeHeaders.Host) || listToText(httpTransport.host),
     httpupgrade_accept_proxy_protocol: boolValue(httpupgrade.acceptProxyProtocol),
     xhttp_path: stringValue(xhttp.path, '/'),
     xhttp_host: stringValue(xhttp.host),
@@ -997,9 +1004,13 @@ interface FieldsProps {
   // Edit mode doesn't receive the selectable server list, but the scanner
   // still needs to disclose which node is executing the probe.
   scanSourceName?: string
+  // S-UI accepts the structured canonical subset only; raw JSON is a
+  // 3X-UI escape hatch and must not be offered where it would be lossy.
+  panelType?: PanelType
+  allowRealityScan?: boolean
 }
 
-function InboundFormFields({ form, setForm, showMetadata, servers, onGenKeys, onGenSSPassword, genKeysBusy, protocolReadonly, advanced, onSetAdvanced, allTags, scanSourceName }: FieldsProps) {
+function InboundFormFields({ form, setForm, showMetadata, servers, onGenKeys, onGenSSPassword, genKeysBusy, protocolReadonly, advanced, onSetAdvanced, allTags, scanSourceName, panelType, allowRealityScan }: FieldsProps) {
   const theme = useTheme()
   const md = theme.palette.md
   const { t } = useTranslation(['admin', 'common'])
@@ -1018,6 +1029,10 @@ function InboundFormFields({ form, setForm, showMetadata, servers, onGenKeys, on
   const [managedCerts, setManagedCerts] = useState<Cert[]>([])
   const [fetchingPanelCert, setFetchingPanelCert] = useState(false)
   const [realityScannerOpen, setRealityScannerOpen] = useState(false)
+  const selectedServer = servers?.find(s => s.id === form.panel_id)
+  const effectivePanelType = panelType ?? selectedServer?.panel_type ?? '3xui'
+  const canUseAdvanced = effectivePanelType === '3xui'
+  const canScanReality = allowRealityScan ?? selectedServer?.capabilities?.includes('reality.scan') ?? false
   useEffect(() => {
     listCerts().then(setManagedCerts).catch(() => {})
   }, [])
@@ -1176,7 +1191,7 @@ function InboundFormFields({ form, setForm, showMetadata, servers, onGenKeys, on
             fontWeight: 500, fontSize: 11,
             color: md.primary, textTransform: 'uppercase', letterSpacing: '.6px',
           }}>{t('admin:nodes.create_dialog.section_inbound')}</Typography>
-          {onSetAdvanced && (
+          {onSetAdvanced && canUseAdvanced && (
             <FormControlLabel
               label={t('admin:nodes.create_dialog.advanced', { defaultValue: '高级 (JSON)' })}
               control={<Switch size="small" checked={!!advanced}
@@ -1203,12 +1218,29 @@ function InboundFormFields({ form, setForm, showMetadata, servers, onGenKeys, on
                 value={servers.find(s => s.id === form.panel_id) ?? servers[0]}
                 onChange={(_, v) => {
                   if (!v) return
+                  if (v.panel_type !== '3xui') onSetAdvanced?.(false)
                   // Switch panel and re-derive the Address default — but only
                   // when the field is still untouched (empty, or equal to the
                   // previously-selected server's host). A manual edit wins.
                   setForm(prev => {
                     const prevHost = hostFromURL(servers.find(s => s.id === prev.panel_id)?.url ?? '')
                     const next = { ...prev, panel_id: v.id }
+                    if (v.panel_type !== '3xui') {
+                      if (next.vless_network === 'xhttp') next.vless_network = 'tcp'
+                      next.enable = true
+                      next.tcp_header_type = 'none'
+                      next.tcp_accept_proxy_protocol = false
+                      next.ws_accept_proxy_protocol = false
+                      next.httpupgrade_accept_proxy_protocol = false
+                      next.grpc_authority = ''
+                      next.grpc_multi_mode = false
+                      next.tls_reject_unknown_sni = false
+                      next.ss_iv_check = false
+                      next.sockopt_enabled = false
+                      next.sockopt_tproxy = ''
+                    } else if (next.vless_network === 'http') {
+                      next.vless_network = 'tcp'
+                    }
                     if (!prev.server_address || prev.server_address === prevHost) {
                       next.server_address = hostFromURL(v.url)
                     }
@@ -1262,7 +1294,7 @@ function InboundFormFields({ form, setForm, showMetadata, servers, onGenKeys, on
             onChange={e => update('port', Number(e.target.value))}
             sx={{ width: 110 }} />
           <Box sx={{ alignSelf: 'center' }}>
-            {switchControl(t('admin:nodes.create_dialog.enable'), form.enable, c => update('enable', c))}
+            {effectivePanelType === '3xui' && switchControl(t('admin:nodes.create_dialog.enable'), form.enable, c => update('enable', c))}
           </Box>
         </Box>
       </Box>
@@ -1312,7 +1344,9 @@ function InboundFormFields({ form, setForm, showMetadata, servers, onGenKeys, on
                 {fieldLabel(t('admin:nodes.create_dialog.vless_network'))}
                 <Select size="small" fullWidth value={form.vless_network}
                   onChange={e => update('vless_network', e.target.value as VlessNetwork)}>
-                  {VLESS_NETWORKS.map(o => <MenuItem key={o.value} value={o.value}>{o.label}</MenuItem>)}
+                  {VLESS_NETWORKS
+                    .filter(o => effectivePanelType === '3xui' ? o.value !== 'http' : o.value !== 'xhttp')
+                    .map(o => <MenuItem key={o.value} value={o.value}>{o.label}</MenuItem>)}
                 </Select>
               </Box>
               <Box sx={{ flex: '1 1 180px', minWidth: 140 }}>
@@ -1353,7 +1387,7 @@ function InboundFormFields({ form, setForm, showMetadata, servers, onGenKeys, on
           </Box>
 
           {/* Network-specific transports */}
-          {form.vless_network === 'tcp' && (
+          {form.vless_network === 'tcp' && effectivePanelType === '3xui' && (
             <Box>
               {sectionTitle(t('admin:nodes.create_dialog.section_tcp'))}
               <Box sx={{ display: 'flex', gap: 1.5, flexWrap: 'wrap', alignItems: 'flex-end' }}>
@@ -1385,7 +1419,7 @@ function InboundFormFields({ form, setForm, showMetadata, servers, onGenKeys, on
                   value={form.ws_host}
                   onChange={e => update('ws_host', e.target.value)}
                   sx={{ flex: '1 1 200px' }} />
-                {switchControl(t('admin:nodes.create_dialog.accept_proxy_protocol'),
+                {effectivePanelType === '3xui' && switchControl(t('admin:nodes.create_dialog.accept_proxy_protocol'),
                   form.ws_accept_proxy_protocol,
                   c => update('ws_accept_proxy_protocol', c))}
               </Box>
@@ -1400,20 +1434,22 @@ function InboundFormFields({ form, setForm, showMetadata, servers, onGenKeys, on
                   value={form.grpc_service_name}
                   onChange={e => update('grpc_service_name', e.target.value)}
                   sx={{ flex: '1 1 200px' }} />
-                <TextField size="small" label={t('admin:nodes.create_dialog.grpc_authority')}
+                {effectivePanelType === '3xui' && <TextField size="small" label={t('admin:nodes.create_dialog.grpc_authority')}
                   value={form.grpc_authority}
                   onChange={e => update('grpc_authority', e.target.value)}
-                  sx={{ flex: '1 1 200px' }} />
-                {switchControl(t('admin:nodes.create_dialog.grpc_multi_mode'),
+                  sx={{ flex: '1 1 200px' }} />}
+                {effectivePanelType === '3xui' && switchControl(t('admin:nodes.create_dialog.grpc_multi_mode'),
                   form.grpc_multi_mode,
                   c => update('grpc_multi_mode', c))}
               </Box>
             </Box>
           )}
 
-          {form.vless_network === 'httpupgrade' && (
+          {(form.vless_network === 'httpupgrade' || form.vless_network === 'http') && (
             <Box>
-              {sectionTitle(t('admin:nodes.create_dialog.section_httpupgrade', { defaultValue: 'HTTPUpgrade' }))}
+              {sectionTitle(form.vless_network === 'http'
+                ? 'HTTP'
+                : t('admin:nodes.create_dialog.section_httpupgrade', { defaultValue: 'HTTPUpgrade' }))}
               <Box sx={{ display: 'flex', gap: 1.5, flexWrap: 'wrap', alignItems: 'center' }}>
                 <TextField size="small" label={t('admin:nodes.create_dialog.ws_path', { defaultValue: 'Path' })}
                   value={form.httpupgrade_path}
@@ -1423,7 +1459,7 @@ function InboundFormFields({ form, setForm, showMetadata, servers, onGenKeys, on
                   value={form.httpupgrade_host}
                   onChange={e => update('httpupgrade_host', e.target.value)}
                   sx={{ flex: '1 1 200px' }} />
-                {switchControl(t('admin:nodes.create_dialog.accept_proxy_protocol'),
+                {form.vless_network === 'httpupgrade' && effectivePanelType === '3xui' && switchControl(t('admin:nodes.create_dialog.accept_proxy_protocol'),
                   form.httpupgrade_accept_proxy_protocol,
                   c => update('httpupgrade_accept_proxy_protocol', c))}
               </Box>
@@ -1494,7 +1530,7 @@ function InboundFormFields({ form, setForm, showMetadata, servers, onGenKeys, on
                   {switchControl(t('admin:nodes.create_dialog.tls_allow_insecure', { defaultValue: 'Allow insecure (dev only)' }),
                     form.tls_allow_insecure,
                     c => update('tls_allow_insecure', c))}
-                  {switchControl(t('admin:nodes.create_dialog.tls_reject_unknown_sni', { defaultValue: 'Reject unknown SNI' }),
+                  {effectivePanelType === '3xui' && switchControl(t('admin:nodes.create_dialog.tls_reject_unknown_sni', { defaultValue: 'Reject unknown SNI' }),
                     form.tls_reject_unknown_sni,
                     c => update('tls_reject_unknown_sni', c))}
                 </Box>
@@ -1522,7 +1558,7 @@ function InboundFormFields({ form, setForm, showMetadata, servers, onGenKeys, on
                       value={form.reality_dest}
                       onChange={e => update('reality_dest', e.target.value)} />
                     <Button type="button" size="small" variant="outlined"
-                      disabled={!form.panel_id}
+                      disabled={!form.panel_id || !canScanReality}
                       onClick={() => setRealityScannerOpen(true)}
                       sx={{ whiteSpace: 'nowrap', minWidth: 104 }}>
                       {t('admin:nodes.create_dialog.reality_scan_open')}
@@ -1540,10 +1576,10 @@ function InboundFormFields({ form, setForm, showMetadata, servers, onGenKeys, on
                     sx={{ flex: '1 1 180px', minWidth: 140 }}>
                     {FINGERPRINTS.map(fp => <MenuItem key={fp} value={fp}>{fp}</MenuItem>)}
                   </TextField>
-                  <TextField size="small" label={t('admin:nodes.create_dialog.reality_spider_x')}
+                  {effectivePanelType === '3xui' && <TextField size="small" label={t('admin:nodes.create_dialog.reality_spider_x')}
                     value={form.reality_spider_x}
                     onChange={e => update('reality_spider_x', e.target.value)}
-                    sx={{ flex: '1 1 180px' }} />
+                    sx={{ flex: '1 1 180px' }} />}
                 </Box>
                 <TextField required size="small" fullWidth label={t('admin:nodes.create_dialog.private_key')}
                   value={form.private_key}
@@ -1564,7 +1600,7 @@ function InboundFormFields({ form, setForm, showMetadata, servers, onGenKeys, on
                     rejects mihomo/Clash-Verge (they hardcode client version 1.8.2)
                     and any older core — set minClientVer to "1.0.0" to restore the
                     open behavior. See docs/3xui-compat.md 2026-07-13. */}
-                <Box sx={{ display: 'flex', gap: 1.5, flexWrap: 'wrap' }}>
+                {effectivePanelType === '3xui' && <Box sx={{ display: 'flex', gap: 1.5, flexWrap: 'wrap' }}>
                   <TextField size="small" label={t('admin:nodes.create_dialog.reality_min_client')}
                     placeholder="1.0.0"
                     value={form.reality_min_client}
@@ -1575,7 +1611,7 @@ function InboundFormFields({ form, setForm, showMetadata, servers, onGenKeys, on
                     value={form.reality_max_client}
                     onChange={e => update('reality_max_client', e.target.value)}
                     sx={{ flex: '1 1 180px', minWidth: 140 }} />
-                </Box>
+                </Box>}
               </Box>
             </Box>
           )}
@@ -1668,7 +1704,7 @@ function InboundFormFields({ form, setForm, showMetadata, servers, onGenKeys, on
                 {t('admin:nodes.create_dialog.gen_ss_password')}
               </Button>
             </Box>
-            {switchControl(
+            {effectivePanelType === '3xui' && switchControl(
               t('admin:nodes.create_dialog.ss_iv_check', { defaultValue: 'ivCheck (拒绝重放的 IV)' }),
               form.ss_iv_check,
               c => update('ss_iv_check', c),
@@ -1683,7 +1719,7 @@ function InboundFormFields({ form, setForm, showMetadata, servers, onGenKeys, on
           tcpKeepAlive, tproxy ("tproxy" / "redirect" Linux modes) are
           the realistic knobs — sockopt has more (mark, domainStrategy
           on dial side) but those don't apply to inbound. */}
-      {!advanced && (
+      {!advanced && effectivePanelType === '3xui' && (
         <Box>
           {sectionTitle(t('admin:nodes.create_dialog.section_sockopt'))}
           <Box sx={{ display: 'flex', gap: 1.5, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -1730,7 +1766,7 @@ function InboundFormFields({ form, setForm, showMetadata, servers, onGenKeys, on
 
       {/* Sniffing — compact single row. Hidden in advanced mode because
           the raw sniffing JSON textarea covers it. */}
-      {!advanced && (
+      {!advanced && effectivePanelType === '3xui' && (
         <Box>
           {sectionTitle(t('admin:nodes.create_dialog.section_sniffing'))}
           <Box sx={{ display: 'flex', gap: 1.5, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -2121,9 +2157,11 @@ export default function NodesView() {
 
   const [servers, setServers] = useState<Server[]>([])
   const writableServers = useMemo(
-    () => servers.filter(s => s.capabilities?.includes('inbound.write')),
+    () => servers.filter(s => s.capabilities?.includes('inbound.create') && s.capabilities?.includes('inbound.delete')),
     [servers],
   )
+  const panelSupports = (panelID: number, capability: PanelCapability) =>
+    !!servers.find(s => s.id === panelID)?.capabilities?.includes(capability)
   const [createOpen, setCreateOpen] = useState(false)
   const [createBusy, setCreateBusy] = useState(false)
   const [createForm, setCreateForm] = useState<InboundFormState>(EMPTY_INBOUND)
@@ -2364,7 +2402,7 @@ export default function NodesView() {
   }
 
   async function batchSetEnabled(enable: boolean) {
-    const rows = managed.filter(n => selected.has(n.id))
+    const rows = managed.filter(n => selected.has(n.id) && panelSupports(n.panel_id, 'inbound.enable'))
     if (!rows.length) return
     setBatchBusy(enable ? 'enable' : 'disable')
     try {
@@ -2380,7 +2418,7 @@ export default function NodesView() {
   }
 
   async function batchDelete() {
-    const rows = managed.filter(n => selected.has(n.id))
+    const rows = managed.filter(n => selected.has(n.id) && panelSupports(n.panel_id, 'inbound.delete'))
     if (!rows.length) return
     const ok = await confirm({
       title: t('admin:nodes.confirm.batch_delete_title'),
@@ -2617,9 +2655,10 @@ export default function NodesView() {
     const streamSettings = createAdvanced
       ? (f.raw_stream_settings || '{}')
       : JSON.stringify(buildStreamSettings(f))
+    const panelType = servers.find(s => s.id === f.panel_id)?.panel_type ?? '3xui'
     const sniffing = createAdvanced
       ? (f.raw_sniffing || '{}')
-      : JSON.stringify(buildSniffing(f))
+      : panelType === '3xui' ? JSON.stringify(buildSniffing(f)) : '{}'
 
     setCreateBusy(true)
     try {
@@ -2633,10 +2672,10 @@ export default function NodesView() {
         sort_order: f.sort_order,
         inbound: {
           remark: f.display_name,
-          enable: f.enable,
+          enable: panelType === '3xui' ? f.enable : true,
           listen: f.listen,
           port: f.port,
-          protocol: xuiProtocolName(f.protocol),
+          protocol: canonicalProtocolName(f.protocol),
           settings,
           stream_settings: streamSettings,
           sniffing,
@@ -2749,17 +2788,18 @@ export default function NodesView() {
     const streamSettings = editAdvanced
       ? (f.raw_stream_settings || '{}')
       : JSON.stringify(buildStreamSettings(f))
+    const panelType = servers.find(s => s.id === editingInboundNode.panel_id)?.panel_type ?? '3xui'
     const sniffing = editAdvanced
       ? (f.raw_sniffing || '{}')
-      : JSON.stringify(buildSniffing(f))
+      : panelType === '3xui' ? JSON.stringify(buildSniffing(f)) : '{}'
     setEditInboundBusy(true)
     try {
       await updateInboundConfig(editingInboundNode.id, {
         remark: f.display_name,
-        enable: f.enable,
+        enable: panelType === '3xui' ? f.enable : true,
         listen: f.listen,
         port: f.port,
-        protocol: xuiProtocolName(f.protocol),
+        protocol: canonicalProtocolName(f.protocol),
         settings, stream_settings: streamSettings, sniffing,
         allocate: '',
       })
@@ -2916,19 +2956,19 @@ export default function NodesView() {
             {t('admin:nodes.selection_count', { count: selected.size })}
           </Typography>
           <Button size="small" variant="text" sx={{ color: 'inherit' }}
-            disabled={batchBusy !== ''}
+            disabled={batchBusy !== '' || !managed.some(n => selected.has(n.id) && panelSupports(n.panel_id, 'inbound.enable'))}
             startIcon={batchBusy === 'enable' ? <CircularProgress size={14} /> : undefined}
             onClick={() => batchSetEnabled(true)}>
             {t('admin:nodes.batch_enable')}
           </Button>
           <Button size="small" variant="text" sx={{ color: 'inherit' }}
-            disabled={batchBusy !== ''}
+            disabled={batchBusy !== '' || !managed.some(n => selected.has(n.id) && panelSupports(n.panel_id, 'inbound.enable'))}
             startIcon={batchBusy === 'disable' ? <CircularProgress size={14} /> : undefined}
             onClick={() => batchSetEnabled(false)}>
             {t('admin:nodes.batch_disable')}
           </Button>
           {canConfig && <Button size="small" variant="text" color="error"
-            disabled={batchBusy !== ''}
+            disabled={batchBusy !== '' || !managed.some(n => selected.has(n.id) && panelSupports(n.panel_id, 'inbound.delete'))}
             startIcon={batchBusy === 'delete' ? <CircularProgress size={14} /> : <DeleteIcon />}
             onClick={batchDelete}>
             {t('admin:nodes.batch_delete')}
@@ -3005,7 +3045,10 @@ export default function NodesView() {
                 {managedPaged.map((n, pageIdx) => {
                   const idx = (managedPage - 1) * managedPageSize + pageIdx
                   const isSep = n.kind === 'separator'
-                  const canWriteInbound = isSep || !!servers.find(s => s.id === n.panel_id)?.capabilities?.includes('inbound.write')
+                  const canEnableInbound = isSep || panelSupports(n.panel_id, 'inbound.enable')
+                  const canUpdateInbound = panelSupports(n.panel_id, 'inbound.update')
+                  const canDeleteInbound = isSep || panelSupports(n.panel_id, 'inbound.delete')
+                  const canRecreateInbound = panelSupports(n.panel_id, 'inbound.create') && canUpdateInbound && panelSupports(n.panel_id, 'inbound.delete')
                   return (
                     <TableRow key={isSep ? `sep-${n.id}` : `node-${n.id}`} hover
                       draggable={!reorderBusy && !managedFilterActive}
@@ -3068,7 +3111,7 @@ export default function NodesView() {
                         </Box>
                       )}</TableCell>
                       <TableCell align="center">
-                        <Switch checked={n.enabled} onChange={() => toggleEnabled(n)} disabled={enabledBusy[n.id] || !canWriteInbound} />
+                        <Switch checked={n.enabled} onChange={() => toggleEnabled(n)} disabled={enabledBusy[n.id] || !canEnableInbound} />
                       </TableCell>
                       <TableCell align="right">
                         {canConfig && (isSep ? (
@@ -3095,12 +3138,12 @@ export default function NodesView() {
                               <IconButton size="small" onClick={() => openEdit(n)}><EditIcon fontSize="small" /></IconButton>
                             </Tooltip>
                             <Tooltip title={t('admin:nodes.edit_inbound')}>
-                              <IconButton size="small" onClick={() => openEditInbound(n)} disabled={!canWriteInbound}>
+                              <IconButton size="small" onClick={() => openEditInbound(n)} disabled={!canUpdateInbound}>
                                 <KeyIcon fontSize="small" />
                               </IconButton>
                             </Tooltip>
                             <Tooltip title={t('admin:nodes.action.recreate_inbound', { defaultValue: '在服务器上重建 inbound' })}>
-                              <IconButton size="small" onClick={() => confirmRecreateInbound(n)} disabled={!canWriteInbound}>
+                              <IconButton size="small" onClick={() => confirmRecreateInbound(n)} disabled={!canRecreateInbound}>
                                 <CloudSyncIcon fontSize="small" />
                               </IconButton>
                             </Tooltip>
@@ -3110,7 +3153,7 @@ export default function NodesView() {
                               </IconButton>
                             </Tooltip>
                             <Tooltip title={t('admin:nodes.action.delete')}>
-                              <IconButton size="small" onClick={() => confirmDelete(n)} disabled={!canWriteInbound} sx={{ color: md.error }}>
+                              <IconButton size="small" onClick={() => confirmDelete(n)} disabled={!canDeleteInbound} sx={{ color: md.error }}>
                                 <DeleteIcon fontSize="small" />
                               </IconButton>
                             </Tooltip>
@@ -3275,6 +3318,8 @@ export default function NodesView() {
               advanced={createAdvanced}
               onSetAdvanced={setCreateAdvanced}
               allTags={allTags}
+              panelType={servers.find(s => s.id === createForm.panel_id)?.panel_type}
+              allowRealityScan={panelSupports(createForm.panel_id, 'reality.scan')}
             />
           </Box>
         </DialogContent>
@@ -3312,6 +3357,8 @@ export default function NodesView() {
                 protocolReadonly
                 advanced={editAdvanced}
                 onSetAdvanced={setEditAdvanced}
+                panelType={servers.find(s => s.id === editingInboundNode?.panel_id)?.panel_type}
+                allowRealityScan={!!editingInboundNode && panelSupports(editingInboundNode.panel_id, 'reality.scan')}
               />
             </Box>
           )}

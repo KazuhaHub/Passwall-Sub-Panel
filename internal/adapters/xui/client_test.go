@@ -41,6 +41,22 @@ func TestNew_AuthMethodResolution(t *testing.T) {
 	}
 }
 
+func TestCapabilitiesIncludeGranularInboundWrites(t *testing.T) {
+	want := map[ports.PanelCapability]bool{
+		ports.CapabilityInboundWrite:  true,
+		ports.CapabilityInboundCreate: true,
+		ports.CapabilityInboundUpdate: true,
+		ports.CapabilityInboundDelete: true,
+		ports.CapabilityInboundEnable: true,
+	}
+	for _, capability := range (&Client{}).Capabilities() {
+		delete(want, capability)
+	}
+	if len(want) != 0 {
+		t.Fatalf("missing capabilities: %#v", want)
+	}
+}
+
 func TestReplaceSettingsClientsPreservesCurrentClients(t *testing.T) {
 	next := `{"method":"2022-blake3-aes-256-gcm","clients":[]}`
 	current := `{"method":"old","clients":[{"id":"a","email":"a@example.test"}]}`

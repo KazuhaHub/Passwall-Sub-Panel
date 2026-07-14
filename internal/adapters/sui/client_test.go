@@ -3,7 +3,6 @@ package sui
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -176,14 +175,34 @@ func TestListInboundsNormalisesSUIAndTraffic(t *testing.T) {
 	}
 }
 
-func TestInboundWritesAdvertiseUnsupportedCapability(t *testing.T) {
-	client := &Client{}
-	if _, err := client.AddInbound(context.Background(), ports.InboundSpec{}); !errors.Is(err, ports.ErrPanelCapabilityUnsupported) {
-		t.Fatalf("AddInbound error = %v", err)
+func TestNormaliseInboundReadsRealityClientKeys(t *testing.T) {
+	serverTLS, _ := json.Marshal(map[string]any{
+		"enabled": true, "server_name": "edge.example.com",
+		"reality": map[string]any{
+			"enabled": true, "handshake": map[string]any{"server": "origin.example.com", "server_port": 443},
+			"private_key": "private-key", "short_id": []string{"01"},
+		},
+	})
+	clientTLS, _ := json.Marshal(map[string]any{
+		"enabled": true, "server_name": "edge.example.com",
+		"reality": map[string]any{"enabled": true, "public_key": "public-key", "short_id": "01"},
+		"utls":    map[string]any{"enabled": true, "fingerprint": "firefox"},
+	})
+	inbound, err := normaliseInbound(
+		inboundSummary{ID: 7, Type: "vless", Tag: "edge", ListenPort: 443},
+		map[string]any{"tls_id": float64(2)},
+		map[int]tlsModel{2: {ID: 2, Server: serverTLS, Client: clientTLS}},
+	)
+	if err != nil {
+		t.Fatalf("normaliseInbound: %v", err)
 	}
-	for _, capability := range client.Capabilities() {
-		if capability == ports.CapabilityInboundWrite {
-			t.Fatal("S-UI advertised inbound write support")
-		}
+	var stream map[string]any
+	if err := json.Unmarshal([]byte(inbound.StreamSettings), &stream); err != nil {
+		t.Fatalf("decode stream: %v", err)
+	}
+	reality := mapValue(stream["realitySettings"])
+	settings := mapValue(reality["settings"])
+	if stream["security"] != "reality" || settings["publicKey"] != "public-key" || settings["fingerprint"] != "firefox" {
+		t.Fatalf("reality settings = %#v", stream)
 	}
 }

@@ -8,6 +8,7 @@ export type XUIAuthMethod = 'token' | 'password'
 export type PanelType = '3xui' | 'sui'
 export type PanelCapability =
   | 'inbound.read' | 'inbound.write'
+  | 'inbound.create' | 'inbound.update' | 'inbound.delete' | 'inbound.enable'
   | 'client.read' | 'client.write' | 'traffic.read' | 'status.read'
   | 'panel.upgrade' | 'core.upgrade' | 'webcert.read' | 'reality.scan'
 

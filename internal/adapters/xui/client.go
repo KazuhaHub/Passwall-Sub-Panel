@@ -69,6 +69,10 @@ func (c *Client) Capabilities() []ports.PanelCapability {
 	return []ports.PanelCapability{
 		ports.CapabilityInboundRead,
 		ports.CapabilityInboundWrite,
+		ports.CapabilityInboundCreate,
+		ports.CapabilityInboundUpdate,
+		ports.CapabilityInboundDelete,
+		ports.CapabilityInboundEnable,
 		ports.CapabilityClientRead,
 		ports.CapabilityClientWrite,
 		ports.CapabilityTrafficRead,

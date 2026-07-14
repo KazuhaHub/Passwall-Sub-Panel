@@ -24,16 +24,22 @@ var ErrPanelCapabilityUnsupported = errors.New("panel capability unsupported")
 type PanelCapability string
 
 const (
-	CapabilityInboundRead  PanelCapability = "inbound.read"
-	CapabilityInboundWrite PanelCapability = "inbound.write"
-	CapabilityClientRead   PanelCapability = "client.read"
-	CapabilityClientWrite  PanelCapability = "client.write"
-	CapabilityTrafficRead  PanelCapability = "traffic.read"
-	CapabilityStatusRead   PanelCapability = "status.read"
-	CapabilityPanelUpgrade PanelCapability = "panel.upgrade"
-	CapabilityCoreUpgrade  PanelCapability = "core.upgrade"
-	CapabilityWebCertRead  PanelCapability = "webcert.read"
-	CapabilityRealityScan  PanelCapability = "reality.scan"
+	CapabilityInboundRead PanelCapability = "inbound.read"
+	// CapabilityInboundWrite is the legacy aggregate retained for API
+	// compatibility. New consumers should check the granular capabilities.
+	CapabilityInboundWrite  PanelCapability = "inbound.write"
+	CapabilityInboundCreate PanelCapability = "inbound.create"
+	CapabilityInboundUpdate PanelCapability = "inbound.update"
+	CapabilityInboundDelete PanelCapability = "inbound.delete"
+	CapabilityInboundEnable PanelCapability = "inbound.enable"
+	CapabilityClientRead    PanelCapability = "client.read"
+	CapabilityClientWrite   PanelCapability = "client.write"
+	CapabilityTrafficRead   PanelCapability = "traffic.read"
+	CapabilityStatusRead    PanelCapability = "status.read"
+	CapabilityPanelUpgrade  PanelCapability = "panel.upgrade"
+	CapabilityCoreUpgrade   PanelCapability = "core.upgrade"
+	CapabilityWebCertRead   PanelCapability = "webcert.read"
+	CapabilityRealityScan   PanelCapability = "reality.scan"
 )
 
 // CapabilityProvider is implemented by production adapters. It avoids
@@ -43,9 +49,25 @@ type CapabilityProvider interface {
 	Capabilities() []PanelCapability
 }
 
-// XUIClient is the abstract HTTP client for a single 3X-UI panel. The service
-// layer never instantiates this directly — it routes through XUIPool by
-// panel id.
+// SupportsCapability returns true for legacy/test implementations that do not
+// expose a capability list, preserving source compatibility. Production
+// adapters implement CapabilityProvider and are checked exactly.
+func SupportsCapability(client any, capability PanelCapability) bool {
+	provider, ok := client.(CapabilityProvider)
+	if !ok {
+		return true
+	}
+	for _, item := range provider.Capabilities() {
+		if item == capability {
+			return true
+		}
+	}
+	return false
+}
+
+// PanelClient is the data-plane contract for one upstream panel. The service
+// layer never instantiates an adapter directly — it routes through PanelPool
+// by panel id.
 type PanelClient interface {
 	// Inbound CRUD
 	ListInbounds(ctx context.Context) ([]Inbound, error)
@@ -324,9 +346,9 @@ type BulkCreateResult struct {
 	Created int
 }
 
-// Inbound is the DTO returned by 3X-UI inbound endpoints. The Settings,
-// StreamSettings, Sniffing and Allocate fields are JSON strings (not parsed
-// here) because their shape varies by protocol.
+// Inbound is the normalized panel DTO. Settings, StreamSettings, Sniffing and
+// Allocate retain the historical Xray-shaped JSON strings at the API boundary
+// so existing clients remain compatible; adapters translate as needed.
 type Inbound struct {
 	ID             int
 	Up             int64
@@ -401,9 +423,9 @@ type ClientTraffic struct {
 	LastOnline int64
 }
 
-// XUIPool routes write/read calls to the appropriate 3X-UI client by stable
-// panel id. Multi-panel deployments require all service code to go through Pool.Get
-// rather than holding a XUIClient reference directly.
+// PanelPool routes calls to the appropriate adapter by stable panel id.
+// Multi-panel deployments require service code to go through Pool.Get rather
+// than holding a concrete adapter directly.
 //
 // Add / Remove are used by AdminServersHandler so the pool stays in lockstep
 // with the persisted server list — adding a server immediately becomes

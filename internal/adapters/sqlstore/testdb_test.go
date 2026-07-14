@@ -30,17 +30,30 @@ import (
 // one covered by `go test` everywhere else.
 func openTestDB(t *testing.T) (*gorm.DB, error) {
 	t.Helper()
+	var (
+		db  *gorm.DB
+		err error
+	)
 	switch kind := os.Getenv("PSP_TEST_DB_KIND"); kind {
 	case "", "sqlite":
-		return Open("sqlite", filepath.Join(t.TempDir(), "panel.db"))
+		db, err = Open("sqlite", filepath.Join(t.TempDir(), "panel.db"))
 	case "postgres":
-		return openIsolatedPostgresTestDB(t)
+		db, err = openIsolatedPostgresTestDB(t)
 	case "mysql":
-		return openIsolatedMySQLTestDB(t)
+		db, err = openIsolatedMySQLTestDB(t)
 	default:
 		t.Fatalf("unknown PSP_TEST_DB_KIND %q (want sqlite|postgres|mysql)", kind)
 		return nil, nil
 	}
+	if err == nil {
+		// Keep connection cleanup at the shared seam. In particular, Windows
+		// cannot remove a t.TempDir SQLite file while its sql.DB is still open.
+		// This cleanup is registered after TempDir (and after the server-backed
+		// database drop cleanup), so LIFO execution closes the test connection
+		// before either resource is removed.
+		t.Cleanup(func() { closeGormDB(db) })
+	}
+	return db, err
 }
 
 // testDBSeq disambiguates schema/database names within one process; os.Getpid()

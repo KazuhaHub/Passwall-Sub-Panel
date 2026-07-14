@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
@@ -16,14 +17,17 @@ type inboundSummary struct {
 	ID         int      `json:"id"`
 	Type       string   `json:"type"`
 	Tag        string   `json:"tag"`
+	TLSID      int      `json:"tls_id"`
 	Listen     string   `json:"listen"`
 	ListenPort int      `json:"listen_port"`
 	Users      []string `json:"users"`
 }
 
 type tlsModel struct {
-	ID     int             `json:"id"`
+	ID     int             `json:"id,omitempty"`
+	Name   string          `json:"name"`
 	Server json.RawMessage `json:"server"`
+	Client json.RawMessage `json:"client"`
 }
 
 func (c *Client) inboundSummaries(ctx context.Context) ([]inboundSummary, error) {
@@ -36,16 +40,16 @@ func (c *Client) inboundSummaries(ctx context.Context) ([]inboundSummary, error)
 	return obj.Inbounds, nil
 }
 
-func (c *Client) tlsModels(ctx context.Context) (map[int]json.RawMessage, error) {
+func (c *Client) tlsModels(ctx context.Context) (map[int]tlsModel, error) {
 	var obj struct {
 		TLS []tlsModel `json:"tls"`
 	}
 	if err := c.do(ctx, http.MethodGet, "tls", nil, &obj); err != nil {
 		return nil, err
 	}
-	out := make(map[int]json.RawMessage, len(obj.TLS))
+	out := make(map[int]tlsModel, len(obj.TLS))
 	for _, item := range obj.TLS {
-		out[item.ID] = item.Server
+		out[item.ID] = item
 	}
 	return out, nil
 }
@@ -124,7 +128,7 @@ func (c *Client) GetInbound(ctx context.Context, id int) (*ports.Inbound, error)
 	return nil, fmt.Errorf("%w: S-UI inbound %d not found", domain.ErrNotFound, id)
 }
 
-func normaliseInbound(summary inboundSummary, raw map[string]any, tlsByID map[int]json.RawMessage) (ports.Inbound, error) {
+func normaliseInbound(summary inboundSummary, raw map[string]any, tlsByID map[int]tlsModel) (ports.Inbound, error) {
 	settings := map[string]any{"clients": []any{}}
 	if method, ok := raw["method"].(string); ok {
 		settings["method"] = method
@@ -132,46 +136,113 @@ func normaliseInbound(summary inboundSummary, raw map[string]any, tlsByID map[in
 	if password, ok := raw["password"].(string); ok {
 		settings["password"] = password
 	}
+	if network, ok := raw["network"].(string); ok {
+		settings["network"] = network
+	}
 	settingsJSON, _ := json.Marshal(settings)
 
 	stream := map[string]any{"network": "tcp", "security": "none"}
+	sockopt := map[string]any{}
+	if mark := intValue(raw["routing_mark"]); mark > 0 {
+		sockopt["mark"] = mark
+	}
+	if boolValue(raw["tcp_fast_open"]) {
+		sockopt["tcpFastOpen"] = true
+	}
+	if seconds := durationSeconds(raw["tcp_keep_alive_interval"]); seconds > 0 {
+		sockopt["tcpKeepAliveInterval"] = seconds
+	}
+	if seconds := durationSeconds(raw["tcp_keep_alive"]); seconds > 0 {
+		sockopt["tcpKeepAliveIdle"] = seconds
+	}
+	if len(sockopt) > 0 {
+		stream["sockopt"] = sockopt
+	}
 	if transport, ok := raw["transport"].(map[string]any); ok {
 		switch kind, _ := transport["type"].(string); kind {
 		case "ws":
 			stream["network"] = "ws"
-			stream["wsSettings"] = map[string]any{"path": transport["path"], "headers": transport["headers"]}
+			stream["wsSettings"] = map[string]any{
+				"path": transport["path"], "host": transport["host"], "headers": transport["headers"],
+			}
 		case "grpc":
 			stream["network"] = "grpc"
 			stream["grpcSettings"] = map[string]any{"serviceName": transport["service_name"]}
 		case "httpupgrade":
 			stream["network"] = "httpupgrade"
+			stream["httpupgradeSettings"] = map[string]any{
+				"path": transport["path"], "host": transport["host"], "headers": transport["headers"],
+			}
 		case "http":
 			stream["network"] = "http"
+			stream["httpSettings"] = map[string]any{"path": transport["path"], "host": transport["host"]}
 		}
 	}
 	tlsID := intValue(raw["tls_id"])
-	if tlsID > 0 && len(tlsByID[tlsID]) > 0 {
-		var tls map[string]any
-		if err := json.Unmarshal(tlsByID[tlsID], &tls); err != nil {
+	if tlsID > 0 && len(tlsByID[tlsID].Server) > 0 {
+		model := tlsByID[tlsID]
+		var tlsServer, tlsClient map[string]any
+		if err := json.Unmarshal(model.Server, &tlsServer); err != nil {
 			return ports.Inbound{}, err
 		}
-		if reality, ok := tls["reality"].(map[string]any); ok && boolValue(reality["enabled"]) {
+		if len(model.Client) > 0 {
+			if err := json.Unmarshal(model.Client, &tlsClient); err != nil {
+				return ports.Inbound{}, err
+			}
+		}
+		if tlsClient == nil {
+			tlsClient = map[string]any{}
+		}
+		if reality, ok := tlsServer["reality"].(map[string]any); ok && boolValue(reality["enabled"]) {
 			stream["security"] = "reality"
 			handshake, _ := reality["handshake"].(map[string]any)
 			dest := stringValue(handshake["server"])
 			if port := intValue(handshake["server_port"]); port > 0 {
 				dest += ":" + strconv.Itoa(port)
 			}
+			clientReality, _ := tlsClient["reality"].(map[string]any)
+			serverNames := stringSlice(tlsClient["server_name"])
+			if len(serverNames) == 0 {
+				serverNames = stringSlice(tlsServer["server_name"])
+			}
+			fingerprint := stringValue(mapValue(tlsClient["utls"])["fingerprint"])
+			if fingerprint == "" {
+				fingerprint = "chrome"
+			}
 			stream["realitySettings"] = map[string]any{
-				"dest": dest, "serverNames": stringSlice(tls["server_name"]),
+				"dest": dest, "serverNames": serverNames,
 				"privateKey": reality["private_key"], "shortIds": reality["short_id"],
-				"settings": map[string]any{"fingerprint": "chrome"},
+				"maxTimediff": durationMillis(reality["max_time_difference"]),
+				"settings": map[string]any{
+					"fingerprint": fingerprint, "publicKey": clientReality["public_key"],
+				},
 			}
-		} else if boolValue(tls["enabled"]) {
+		} else if boolValue(tlsServer["enabled"]) {
 			stream["security"] = "tls"
-			stream["tlsSettings"] = map[string]any{
-				"serverName": firstString(tls["server_name"]), "alpn": tls["alpn"],
+			serverName := firstString(tlsClient["server_name"])
+			if serverName == "" {
+				serverName = firstString(tlsServer["server_name"])
 			}
+			alpn := tlsClient["alpn"]
+			if alpn == nil {
+				alpn = tlsServer["alpn"]
+			}
+			tlsSettings := map[string]any{
+				"serverName": serverName, "alpn": alpn,
+				"minVersion": tlsServer["min_version"], "maxVersion": tlsServer["max_version"],
+				"allowInsecure": boolValue(tlsClient["insecure"]),
+			}
+			if fingerprint := stringValue(mapValue(tlsClient["utls"])["fingerprint"]); fingerprint != "" {
+				tlsSettings["settings"] = map[string]any{"fingerprint": fingerprint}
+			}
+			cert := map[string]any{
+				"certificateFile": tlsServer["certificate_path"], "keyFile": tlsServer["key_path"],
+				"certificate": tlsServer["certificate"], "key": tlsServer["key"],
+			}
+			if hasNonEmptyValue(cert) {
+				tlsSettings["certificates"] = []any{cert}
+			}
+			stream["tlsSettings"] = tlsSettings
 		}
 	}
 	if summary.Type == "hysteria2" {
@@ -181,6 +252,23 @@ func normaliseInbound(summary inboundSummary, raw map[string]any, tlsByID map[in
 				"type": "salamander", "settings": map[string]any{"password": obfs["password"]},
 			}}}
 		}
+		hysteriaSettings := map[string]any{"protocol": "hysteria2", "version": 2}
+		if timeout := durationSeconds(raw["udp_timeout"]); timeout > 0 {
+			hysteriaSettings["udpIdleTimeout"] = timeout
+		}
+		if masquerade, ok := raw["masquerade"].(map[string]any); ok {
+			legacy := map[string]any{"type": masquerade["type"]}
+			switch stringValue(masquerade["type"]) {
+			case "proxy":
+				legacy["url"] = masquerade["url"]
+			case "file":
+				legacy["dir"] = masquerade["directory"]
+			case "string":
+				legacy["content"] = masquerade["content"]
+			}
+			hysteriaSettings["masquerade"] = legacy
+		}
+		stream["hysteriaSettings"] = hysteriaSettings
 	}
 	streamJSON, _ := json.Marshal(stream)
 	return ports.Inbound{
@@ -205,6 +293,27 @@ func intValue(v any) int {
 }
 func boolValue(v any) bool     { b, _ := v.(bool); return b }
 func stringValue(v any) string { s, _ := v.(string); return s }
+func mapValue(v any) map[string]any {
+	m, _ := v.(map[string]any)
+	if m == nil {
+		return map[string]any{}
+	}
+	return m
+}
+func hasNonEmptyValue(values map[string]any) bool {
+	for _, value := range values {
+		switch typed := value.(type) {
+		case string:
+			if strings.TrimSpace(typed) != "" {
+				return true
+			}
+		case nil:
+		default:
+			return true
+		}
+	}
+	return false
+}
 func stringSlice(v any) []string {
 	if s := stringValue(v); s != "" {
 		return []string{s}
@@ -240,6 +349,38 @@ func firstPositive(values ...int) int {
 		if value > 0 {
 			return value
 		}
+	}
+	return 0
+}
+
+func durationSeconds(v any) int {
+	switch value := v.(type) {
+	case string:
+		d, err := time.ParseDuration(value)
+		if err == nil && d > 0 {
+			return int(d / time.Second)
+		}
+	case float64:
+		return int(value)
+	case int:
+		return value
+	}
+	return 0
+}
+
+func durationMillis(v any) int64 {
+	switch value := v.(type) {
+	case string:
+		d, err := time.ParseDuration(value)
+		if err == nil && d > 0 {
+			return d.Milliseconds()
+		}
+	case float64:
+		return int64(value)
+	case int64:
+		return value
+	case int:
+		return int64(value)
 	}
 	return 0
 }

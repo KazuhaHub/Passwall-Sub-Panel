@@ -53,6 +53,9 @@ func New(p *domain.Panel) (*Client, error) {
 func (c *Client) Capabilities() []ports.PanelCapability {
 	return []ports.PanelCapability{
 		ports.CapabilityInboundRead,
+		ports.CapabilityInboundCreate,
+		ports.CapabilityInboundUpdate,
+		ports.CapabilityInboundDelete,
 		ports.CapabilityClientRead,
 		ports.CapabilityClientWrite,
 		ports.CapabilityTrafficRead,
@@ -171,7 +174,11 @@ func (c *Client) getClientModel(ctx context.Context, name string) (*clientModel,
 	return nil, nil
 }
 
-func (c *Client) save(ctx context.Context, object, action string, data any) error {
+func (c *Client) saveInto(ctx context.Context, object, action string, data any, out any) error {
+	return c.saveIntoWithInitialUsers(ctx, object, action, data, "", out)
+}
+
+func (c *Client) saveIntoWithInitialUsers(ctx context.Context, object, action string, data any, initialUsers string, out any) error {
 	raw, err := json.Marshal(data)
 	if err != nil {
 		return err
@@ -181,7 +188,14 @@ func (c *Client) save(ctx context.Context, object, action string, data any) erro
 		"action": {action},
 		"data":   {string(raw)},
 	}
-	return c.do(ctx, http.MethodPost, "save", form, nil)
+	if initialUsers != "" {
+		form.Set("initUsers", initialUsers)
+	}
+	return c.do(ctx, http.MethodPost, "save", form, out)
+}
+
+func (c *Client) save(ctx context.Context, object, action string, data any) error {
+	return c.saveInto(ctx, object, action, data, nil)
 }
 
 func configFromSpec(spec ports.ClientSpec) map[string]map[string]any {
@@ -196,6 +210,7 @@ func configFromSpec(spec ports.ClientSpec) map[string]map[string]any {
 		"trojan":        {"name": name, "password": password},
 		"shadowsocks":   {"name": name, "password": password},
 		"shadowsocks16": {"name": name, "password": password},
+		"shadowsocks32": {"name": name, "password": password},
 		"hysteria2":     {"name": name, "password": password},
 	}
 }
@@ -284,7 +299,7 @@ func (c *Client) GetClient(ctx context.Context, email string) (*ports.ClientDeta
 			}
 		}
 	}
-	for _, key := range []string{"trojan", "shadowsocks", "shadowsocks16"} {
+	for _, key := range []string{"trojan", "shadowsocks", "shadowsocks16", "shadowsocks32"} {
 		if cfg := model.Config[key]; cfg != nil {
 			if value, _ := cfg["password"].(string); value != "" {
 				detail.Password = value
@@ -447,21 +462,13 @@ func (c *Client) BulkCreateClients(ctx context.Context, items []ports.BulkCreate
 	return ports.BulkCreateResult{Created: len(models)}, nil
 }
 
-// Inbound mutations are intentionally withheld in the first S-UI adapter
-// contract. S-UI stores native sing-box objects whereas the current admin form
-// still emits Xray-shaped settings; advertising write support would risk
-// destructive lossy conversions.
+// S-UI has no persisted per-inbound enable flag. Create/update/delete are
+// implemented in inbounds_write.go, but toggling one inbound cannot be mapped
+// without deleting its configuration, so that operation stays unsupported.
 func unsupportedInboundWrite() error {
-	return fmt.Errorf("%w: S-UI inbound writes require the canonical node spec", ports.ErrPanelCapabilityUnsupported)
+	return fmt.Errorf("%w: S-UI has no per-inbound enable switch", ports.ErrPanelCapabilityUnsupported)
 }
 
-func (c *Client) AddInbound(context.Context, ports.InboundSpec) (int, error) {
-	return 0, unsupportedInboundWrite()
-}
-func (c *Client) UpdateInbound(context.Context, int, ports.InboundSpec) error {
-	return unsupportedInboundWrite()
-}
-func (c *Client) DelInbound(context.Context, int) error             { return unsupportedInboundWrite() }
 func (c *Client) SetInboundEnable(context.Context, int, bool) error { return unsupportedInboundWrite() }
 
 func (c *Client) GetServerStatus(ctx context.Context) (*ports.ServerStatus, error) {

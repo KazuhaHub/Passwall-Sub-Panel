@@ -22,9 +22,10 @@ type captureNodeRepo struct {
 	// service accidentally calls the full-row Save path instead of the
 	// column-scoped snapshot writer (or vice versa). updateCfg is the
 	// snapshot path; update is everything else.
-	updateCfg *domain.Node
-	update    *domain.Node
-	created   *domain.Node
+	updateCfg      *domain.Node
+	update         *domain.Node
+	created        *domain.Node
+	enabledUpdates int
 }
 
 func (r *captureNodeRepo) Create(_ context.Context, n *domain.Node) error {
@@ -50,7 +51,10 @@ func (r *captureNodeRepo) UpdateInboundConfig(_ context.Context, n *domain.Node)
 	r.updateCfg = n
 	return nil
 }
-func (r *captureNodeRepo) UpdateEnabled(_ context.Context, _ int64, _ bool) error { return nil }
+func (r *captureNodeRepo) UpdateEnabled(_ context.Context, _ int64, _ bool) error {
+	r.enabledUpdates++
+	return nil
+}
 
 type stubXUIClient struct {
 	ports.XUIClient
@@ -58,6 +62,12 @@ type stubXUIClient struct {
 	getResp *ports.Inbound
 	addID   int
 	added   *ports.InboundSpec
+}
+
+type noInboundEnableClient struct{ *stubXUIClient }
+
+func (*noInboundEnableClient) Capabilities() []ports.PanelCapability {
+	return []ports.PanelCapability{ports.CapabilityInboundRead}
 }
 
 func (c *stubXUIClient) UpdateInbound(_ context.Context, _ int, spec ports.InboundSpec) error {
@@ -103,6 +113,20 @@ func updateSpec() ports.InboundSpec {
 		Port:           443,
 		Settings:       `{"decryption":"none","clients":[{"id":"x","email":"e"}]}`,
 		StreamSettings: `{"network":"ws","security":"tls"}`,
+	}
+}
+
+func TestSetEnabledRejectsUnsupportedPanelBeforeLocalMutation(t *testing.T) {
+	repo := &captureNodeRepo{node: &domain.Node{ID: 1, PanelID: 1, InboundID: 3, Enabled: true}}
+	client := &noInboundEnableClient{stubXUIClient: &stubXUIClient{}}
+	svc := &Service{nodes: repo, pool: stubXUIPool{c: client}}
+
+	err := svc.SetEnabled(context.Background(), 1, false)
+	if !errors.Is(err, ports.ErrPanelCapabilityUnsupported) {
+		t.Fatalf("SetEnabled error = %v", err)
+	}
+	if repo.enabledUpdates != 0 {
+		t.Fatalf("unsupported toggle wrote local state %d times", repo.enabledUpdates)
 	}
 }
 
