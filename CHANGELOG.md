@@ -4,6 +4,17 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## v3.9.1-beta.8 — 2026-07-14
+
+### 新功能
+
+- **支持可配置的面板路径前缀** —— 管理员可在系统设置中将 PSP 的管理页面、API 与 SSO 回调统一挂载到 `/panel` 等子路径；留空时继续部署在域名根路径。订阅链接与 `/health` 保持根路径不变，现有部署无需迁移。
+
+### 改进
+
+- **面板路径变更会同步处理前后端与 SSO** —— 前端运行时读取服务端注入的 base path，静态资源、API、登录跳转和 React Router 均随路径调整；OIDC/SAML 回调配置会在保存时迁移，失败则回滚，邮件中的面板链接也会使用新路径。
+- **保留当前前端依赖基线移植 PR #11** —— 仅采用路径前缀功能，排除 PR 分支中的 Vite、React/MUI 依赖回滚与 lockfile 重写，并补充中英文界面文案、数据库持久化和路径分发回归测试。
+
 ## v3.9.1-beta.7 — 2026-07-13
 
 ### 修复
