@@ -14,7 +14,9 @@ import (
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/adapters/acme"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/adapters/localefs"
+	paneladapter "github.com/KazuhaHub/passwall-sub-panel/internal/adapters/panel"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/adapters/sqlstore"
+	suiadapter "github.com/KazuhaHub/passwall-sub-panel/internal/adapters/sui"
 	xuiadapter "github.com/KazuhaHub/passwall-sub-panel/internal/adapters/xui"
 	yamladapter "github.com/KazuhaHub/passwall-sub-panel/internal/adapters/yaml"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/config"
@@ -235,9 +237,20 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	// We must NOT print the initial password before knowing the listen
 	// socket can actually bind; the user would lose it to a crash dump.
 
-	pool, err := xuiadapter.NewPool(ctx, repos.XUIPanel)
+	panelRegistry := paneladapter.NewRegistry()
+	if err := panelRegistry.Register(domain.PanelKind3XUI, func(p *domain.Panel) (ports.PanelClient, error) {
+		return xuiadapter.New(p)
+	}); err != nil {
+		return nil, fmt.Errorf("register 3X-UI adapter: %w", err)
+	}
+	if err := panelRegistry.Register(domain.PanelKindSUI, func(p *domain.Panel) (ports.PanelClient, error) {
+		return suiadapter.New(p)
+	}); err != nil {
+		return nil, fmt.Errorf("register S-UI adapter: %w", err)
+	}
+	pool, err := paneladapter.NewPool(ctx, repos.XUIPanel, panelRegistry)
 	if err != nil {
-		return nil, fmt.Errorf("xui pool: %w", err)
+		return nil, fmt.Errorf("panel pool: %w", err)
 	}
 
 	// --- service layer ---
@@ -633,6 +646,11 @@ func (a *App) probePanelVersionsOnce(ctx context.Context) {
 	for _, p := range panels {
 		if ctx.Err() != nil {
 			return
+		}
+		// This worker enforces the published 3X-UI compatibility range. Other
+		// adapters expose their own status but must not be evaluated as 3X-UI.
+		if domain.NormalizePanelKind(p.Kind) != domain.PanelKind3XUI {
+			continue
 		}
 		c, err := a.xuiPool.Get(p.ID)
 		if err != nil {

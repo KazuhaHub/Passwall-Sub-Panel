@@ -51,13 +51,15 @@ func NewAdminServersHandler(repo ports.XUIPanelRepo, pool ports.XUIPool, nodes p
 // "test connection" trigger (Test handler, refreshes these on every click).
 // Empty version strings + nil checked_at = "never probed" (UI shows ⋯).
 type serverDTO struct {
-	ID               int64      `json:"id"`
-	Name             string     `json:"name"`
-	URL              string     `json:"url"`
-	Username         string     `json:"username,omitempty"`
-	Remark           string     `json:"remark,omitempty"`
-	HasAPIToken      bool       `json:"has_api_token"`
-	HasPassword      bool       `json:"has_password"`
+	ID           int64                   `json:"id"`
+	Kind         string                  `json:"panel_type"`
+	Capabilities []ports.PanelCapability `json:"capabilities"`
+	Name         string                  `json:"name"`
+	URL          string                  `json:"url"`
+	Username     string                  `json:"username,omitempty"`
+	Remark       string                  `json:"remark,omitempty"`
+	HasAPIToken  bool                    `json:"has_api_token"`
+	HasPassword  bool                    `json:"has_password"`
 	// AuthMethod is the EFFECTIVE auth mode ("token" | "password") so the edit
 	// form pre-selects correctly — resolved from the stored method, falling back
 	// to inference for legacy rows. InsecureHTTPS skips TLS cert verification.
@@ -78,6 +80,7 @@ type serverDTO struct {
 }
 
 type serverCreateRequest struct {
+	Kind          string `json:"panel_type"`
 	Name          string `json:"name" binding:"required"`
 	URL           string `json:"url" binding:"required"`
 	APIToken      string `json:"api_token"`
@@ -91,6 +94,7 @@ type serverCreateRequest struct {
 // serverUpdateRequest uses pointers so omitted fields preserve existing
 // values; admin only re-enters secrets when actually changing them.
 type serverUpdateRequest struct {
+	Kind          *string `json:"panel_type,omitempty"`
 	Name          *string `json:"name,omitempty"`
 	URL           *string `json:"url,omitempty"`
 	APIToken      *string `json:"api_token,omitempty"`
@@ -133,7 +137,7 @@ func (h *AdminServersHandler) List(c *gin.Context) {
 	}
 	out := make([]serverDTO, len(panels))
 	for i, panel := range panels {
-		out[i] = toServerDTO(panel)
+		out[i] = h.toServerDTO(panel)
 	}
 	c.JSON(http.StatusOK, pagedEnvelope(out, total, p))
 }
@@ -148,6 +152,15 @@ func (h *AdminServersHandler) Create(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid auth_method"})
 		return
 	}
+	kind := domain.NormalizePanelKind(domain.PanelKind(req.Kind))
+	if validator, ok := h.pool.(ports.PanelKindValidator); ok && !validator.SupportsKind(kind) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Unknown panel_type: " + string(kind)})
+		return
+	}
+	if kind == domain.PanelKindSUI && (domain.XUIAuthMethod(req.AuthMethod) == domain.XUIAuthPassword || req.APIToken == "") {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "S-UI requires API token authentication"})
+		return
+	}
 	if _, err := h.repo.GetByName(c.Request.Context(), req.Name); err == nil {
 		c.JSON(http.StatusConflict, gin.H{"error": "Server name already exists"})
 		return
@@ -156,6 +169,7 @@ func (h *AdminServersHandler) Create(c *gin.Context) {
 		return
 	}
 	p := &domain.XUIPanel{
+		Kind:               kind,
 		Name:               req.Name,
 		URL:                req.URL,
 		APIToken:           req.APIToken,
@@ -175,7 +189,7 @@ func (h *AdminServersHandler) Create(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Register in pool: " + err.Error()})
 		return
 	}
-	c.JSON(http.StatusCreated, toServerDTO(p))
+	c.JSON(http.StatusCreated, h.toServerDTO(p))
 }
 
 func (h *AdminServersHandler) Update(c *gin.Context) {
@@ -189,13 +203,24 @@ func (h *AdminServersHandler) Update(c *gin.Context) {
 		mapServerError(c, err)
 		return
 	}
+	before := *existing
 	var req serverUpdateRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	if req.Kind != nil {
+		kind := domain.NormalizePanelKind(domain.PanelKind(*req.Kind))
+		if validator, ok := h.pool.(ports.PanelKindValidator); ok && !validator.SupportsKind(kind) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Unknown panel_type: " + string(kind)})
+			return
+		}
+	}
 	if req.Name != nil {
 		existing.Name = *req.Name
+	}
+	if req.Kind != nil {
+		existing.Kind = domain.NormalizePanelKind(domain.PanelKind(*req.Kind))
 	}
 	if req.URL != nil {
 		existing.URL = *req.URL
@@ -222,6 +247,11 @@ func (h *AdminServersHandler) Update(c *gin.Context) {
 	if req.InsecureHTTPS != nil {
 		existing.InsecureSkipVerify = *req.InsecureHTTPS
 	}
+	if domain.NormalizePanelKind(existing.Kind) == domain.PanelKindSUI &&
+		(existing.AuthMethod == domain.XUIAuthPassword || existing.APIToken == "") {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "S-UI requires API token authentication"})
+		return
+	}
 	if err := h.repo.Save(c.Request.Context(), existing); err != nil {
 		mapServerError(c, err)
 		return
@@ -238,17 +268,24 @@ func (h *AdminServersHandler) Update(c *gin.Context) {
 		Replace(*domain.XUIPanel) error
 	}); ok {
 		if err := rp.Replace(existing); err != nil {
+			if rollbackErr := h.repo.Save(c.Request.Context(), &before); rollbackErr != nil {
+				log.Error("admin server update rollback failed", "panel_id", id, "err", rollbackErr)
+			}
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Re-register in pool: " + err.Error()})
 			return
 		}
 	} else {
 		_ = h.pool.Remove(id)
 		if err := h.pool.Add(existing); err != nil {
+			_ = h.pool.Add(&before)
+			if rollbackErr := h.repo.Save(c.Request.Context(), &before); rollbackErr != nil {
+				log.Error("admin server update rollback failed", "panel_id", id, "err", rollbackErr)
+			}
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Re-register in pool: " + err.Error()})
 			return
 		}
 	}
-	c.JSON(http.StatusOK, toServerDTO(existing))
+	c.JSON(http.StatusOK, h.toServerDTO(existing))
 }
 
 // Test issues a lightweight ListInbounds against the named server. Returns
@@ -268,6 +305,12 @@ func (h *AdminServersHandler) Test(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"ok": false, "error": err.Error()})
 		return
 	}
+	panel, err := h.repo.GetByID(c.Request.Context(), req.ID)
+	if err != nil {
+		mapServerError(c, err)
+		return
+	}
+	isXUI := domain.NormalizePanelKind(panel.Kind) == domain.PanelKind3XUI
 	// The compat (v3.json) tested range is fetched REACTIVELY — not here, but
 	// only if the panel probed below turns out to sit outside the cached range
 	// (see the CheckXUI block). A supported fleet makes zero GitHub compat calls.
@@ -279,8 +322,10 @@ func (h *AdminServersHandler) Test(c *gin.Context) {
 	// Background ctx (not c.Request.Context()) so an admin navigating away
 	// mid-fetch doesn't cancel the call; RefreshLatestXUI enforces its own 8s
 	// timeout so the background ctx can't leak.
-	if rerr := version.RefreshLatestXUI(context.Background()); rerr != nil {
-		log.Debug("admin test: refresh latest 3X-UI failed", "err", rerr)
+	if isXUI {
+		if rerr := version.RefreshLatestXUI(context.Background()); rerr != nil {
+			log.Debug("admin test: refresh latest 3X-UI failed", "err", rerr)
+		}
 	}
 	client, err := h.pool.Get(req.ID)
 	if err != nil {
@@ -310,29 +355,33 @@ func (h *AdminServersHandler) Test(c *gin.Context) {
 		if uerr := h.repo.UpdateVersion(c.Request.Context(), req.ID, status.PanelVersion, status.XrayVersion, &now); uerr != nil {
 			log.Warn("admin test: write version", "panel_id", req.ID, "err", uerr)
 		}
-		compatStatus := version.CheckXUI(status.PanelVersion)
-		if compatStatus != version.CompatSupported {
-			// Reactive compat fetch: this panel's version isn't in the cached
-			// tested range — the published range may have been bumped to cover
-			// it. Pull the manifest (throttled) and re-check before reporting.
-			// Background ctx so navigating away can't 60s-lock the throttle.
-			if rerr := version.RefreshRemoteCompat(context.Background(), "", false); rerr != nil {
-				log.Debug("admin test: reactive compat refresh", "panel_id", req.ID, "err", rerr)
+		if isXUI {
+			compatStatus := version.CheckXUI(status.PanelVersion)
+			if compatStatus != version.CompatSupported {
+				// Reactive compat fetch: this panel's version isn't in the cached
+				// tested range — the published range may have been bumped to cover
+				// it. Pull the manifest (throttled) and re-check before reporting.
+				// Background ctx so navigating away can't 60s-lock the throttle.
+				if rerr := version.RefreshRemoteCompat(context.Background(), "", false); rerr != nil {
+					log.Debug("admin test: reactive compat refresh", "panel_id", req.ID, "err", rerr)
+				}
+				compatStatus = version.CheckXUI(status.PanelVersion)
 			}
-			compatStatus = version.CheckXUI(status.PanelVersion)
+			resp["compat_status"] = compatStatus.String()
+			resp["compat_message"] = version.CompatMessage(status.PanelVersion, compatStatus)
 		}
 		resp["panel_version"] = status.PanelVersion
 		resp["xray_version"] = status.XrayVersion
 		resp["xray_state"] = status.XrayState
-		resp["compat_status"] = compatStatus.String()
-		resp["compat_message"] = version.CompatMessage(status.PanelVersion, compatStatus)
+		resp["core_version"] = status.XrayVersion
+		resp["core_state"] = status.XrayState
 		resp["version_checked_at"] = now
 		// Carry the centralized "latest 3X-UI tag" snapshot back so the
 		// UI refreshes its ⋮ kebab badge in lockstep with the probed
 		// panel version. The latest tag itself is panel-independent
 		// (one PSP-wide value), but UpdateAvailable becomes meaningful
 		// only when paired with this specific panel's version.
-		if latest := version.LatestXUI(); latest != "" {
+		if latest := version.LatestXUI(); isXUI && latest != "" {
 			resp["latest_xui_version"] = latest
 			resp["update_available"] = version.IsXUIUpdateAvailable(status.PanelVersion)
 		}
@@ -397,7 +446,12 @@ func (h *AdminServersHandler) UpgradePreview(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Server not registered in pool: " + err.Error()})
 		return
 	}
-	info, err := client.GetPanelUpdateInfo(c.Request.Context())
+	updater, ok := client.(ports.PanelUpdater)
+	if !ok {
+		c.JSON(http.StatusNotImplemented, gin.H{"error": ports.ErrPanelCapabilityUnsupported.Error()})
+		return
+	}
+	info, err := updater.GetPanelUpdateInfo(c.Request.Context())
 	if err != nil {
 		c.JSON(http.StatusBadGateway, gin.H{"error": "Failed to query 3X-UI update info: " + err.Error()})
 		return
@@ -457,7 +511,12 @@ func (h *AdminServersHandler) UpgradePanel(c *gin.Context) {
 	var req upgradePanelRequest
 	_ = c.ShouldBindJSON(&req) // body optional; missing → force=false
 	// Pre-flight: ask the panel what version it would upgrade TO.
-	info, err := client.GetPanelUpdateInfo(c.Request.Context())
+	updater, ok := client.(ports.PanelUpdater)
+	if !ok {
+		c.JSON(http.StatusNotImplemented, gin.H{"ok": false, "error": ports.ErrPanelCapabilityUnsupported.Error()})
+		return
+	}
+	info, err := updater.GetPanelUpdateInfo(c.Request.Context())
 	if err != nil {
 		c.JSON(http.StatusBadGateway, gin.H{"error": "Failed to query 3X-UI update info: " + err.Error()})
 		return
@@ -509,7 +568,7 @@ func (h *AdminServersHandler) UpgradePanel(c *gin.Context) {
 	// Fire the upgrade. The adapter swallows the EOF/reset that the
 	// panel restart produces, so a nil err here means "upgrade signal
 	// accepted; panel is restarting".
-	if err := client.UpdatePanel(c.Request.Context()); err != nil {
+	if err := updater.UpdatePanel(c.Request.Context()); err != nil {
 		h.writeUpgradeAudit(c, "panel_upgrade_failed", panel, info.LatestVersion, err.Error())
 		c.JSON(http.StatusBadGateway, gin.H{"ok": false, "error": "updatePanel call failed: " + err.Error()})
 		return
@@ -559,7 +618,12 @@ func (h *AdminServersHandler) ListXrayVersions(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Server not registered in pool: " + err.Error()})
 		return
 	}
-	versions, err := client.GetXrayVersionList(c.Request.Context())
+	updater, ok := client.(ports.CoreUpdater)
+	if !ok {
+		c.JSON(http.StatusNotImplemented, gin.H{"error": ports.ErrPanelCapabilityUnsupported.Error()})
+		return
+	}
+	versions, err := updater.GetCoreVersionList(c.Request.Context())
 	if err != nil {
 		// Frontend falls back to a single "latest" option when this 502s,
 		// so an upstream failure is recoverable without admin intervention.
@@ -589,7 +653,12 @@ func (h *AdminServersHandler) WebCert(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Server not registered in pool: " + err.Error()})
 		return
 	}
-	wc, err := client.GetWebCertFiles(c.Request.Context())
+	provider, ok := client.(ports.WebCertProvider)
+	if !ok {
+		c.JSON(http.StatusOK, gin.H{"supported": false})
+		return
+	}
+	wc, err := provider.GetWebCertFiles(c.Request.Context())
 	if err != nil {
 		if errors.Is(err, ports.ErrXUIEndpointUnsupported) {
 			c.JSON(http.StatusOK, gin.H{"supported": false})
@@ -635,7 +704,12 @@ func (h *AdminServersHandler) UpgradeXray(c *gin.Context) {
 	if req.Version == "" {
 		req.Version = "latest"
 	}
-	if err := client.InstallXray(c.Request.Context(), req.Version); err != nil {
+	updater, ok := client.(ports.CoreUpdater)
+	if !ok {
+		c.JSON(http.StatusNotImplemented, gin.H{"ok": false, "error": ports.ErrPanelCapabilityUnsupported.Error()})
+		return
+	}
+	if err := updater.InstallCore(c.Request.Context(), req.Version); err != nil {
 		h.writeUpgradeAudit(c, "xray_upgrade_failed", panel, req.Version, err.Error())
 		c.JSON(http.StatusBadGateway, gin.H{"ok": false, "error": "installXray failed: " + err.Error()})
 		return
@@ -815,6 +889,7 @@ func (h *AdminServersHandler) Delete(c *gin.Context) {
 func toServerDTO(p *domain.XUIPanel) serverDTO {
 	dto := serverDTO{
 		ID:               p.ID,
+		Kind:             string(domain.NormalizePanelKind(p.Kind)),
 		Name:             p.Name,
 		URL:              p.URL,
 		Username:         p.Username,
@@ -830,7 +905,7 @@ func toServerDTO(p *domain.XUIPanel) serverDTO {
 	// Only compute compat fields when there's actually a probed version —
 	// "never probed" panels stay blank rather than displaying a meaningless
 	// "unknown" badge that admins would have to dismiss.
-	if p.PanelVersion != "" {
+	if domain.NormalizePanelKind(p.Kind) == domain.PanelKind3XUI && p.PanelVersion != "" {
 		status := version.CheckXUI(p.PanelVersion)
 		dto.CompatStatus = status.String()
 		dto.CompatMessage = version.CompatMessage(p.PanelVersion, status)
@@ -838,9 +913,21 @@ func toServerDTO(p *domain.XUIPanel) serverDTO {
 	// Derive the "update available" indicator from the PSP-wide latest
 	// tag rather than a per-panel column. Same snapshot drives every
 	// panel's badge, so the kebab dots flip in lockstep with one fetch.
-	if latest := version.LatestXUI(); latest != "" && p.PanelVersion != "" {
+	if latest := version.LatestXUI(); domain.NormalizePanelKind(p.Kind) == domain.PanelKind3XUI && latest != "" && p.PanelVersion != "" {
 		dto.LatestXUIVersion = latest
 		dto.UpdateAvailable = version.IsXUIUpdateAvailable(p.PanelVersion)
+	}
+	return dto
+}
+
+func (h *AdminServersHandler) toServerDTO(p *domain.Panel) serverDTO {
+	dto := toServerDTO(p)
+	client, err := h.pool.Get(p.ID)
+	if err != nil {
+		return dto
+	}
+	if provider, ok := client.(ports.CapabilityProvider); ok {
+		dto.Capabilities = provider.Capabilities()
 	}
 	return dto
 }

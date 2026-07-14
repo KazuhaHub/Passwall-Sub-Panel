@@ -869,7 +869,10 @@ func syncTaskFromDomain(t *domain.SyncTask) *syncTaskRow {
 }
 
 type xuiPanelRow struct {
-	ID       int64  `gorm:"primaryKey;autoIncrement"`
+	ID int64 `gorm:"primaryKey;autoIncrement"`
+	// Kind selects the adapter. Empty is the legacy 3X-UI value and is
+	// normalized on read, so this is an additive migration with no backfill.
+	Kind     string `gorm:"size:32;not null;default:'';index"`
 	Name     string `gorm:"size:128;uniqueIndex;not null"`
 	URL      string `gorm:"size:512;not null"`
 	APIToken string `gorm:"type:text"`
@@ -999,6 +1002,7 @@ func (r *xuiPanelRow) toDomain() (*domain.XUIPanel, error) {
 	}
 	return &domain.XUIPanel{
 		ID:                 r.ID,
+		Kind:               domain.NormalizePanelKind(domain.PanelKind(r.Kind)),
 		Name:               r.Name,
 		URL:                r.URL,
 		APIToken:           apiToken,
@@ -1024,6 +1028,7 @@ func xuiPanelFromDomain(p *domain.XUIPanel) (*xuiPanelRow, error) {
 	}
 	return &xuiPanelRow{
 		ID:                 p.ID,
+		Kind:               string(domain.NormalizePanelKind(p.Kind)),
 		Name:               p.Name,
 		URL:                p.URL,
 		APIToken:           apiToken,

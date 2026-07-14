@@ -5,9 +5,16 @@ import { client } from './client'
 export type CompatStatus = 'supported' | 'too_old' | 'untested' | 'unknown'
 
 export type XUIAuthMethod = 'token' | 'password'
+export type PanelType = '3xui' | 'sui'
+export type PanelCapability =
+  | 'inbound.read' | 'inbound.write'
+  | 'client.read' | 'client.write' | 'traffic.read' | 'status.read'
+  | 'panel.upgrade' | 'core.upgrade' | 'webcert.read' | 'reality.scan'
 
 export interface Server {
   id: number
+  panel_type: PanelType
+  capabilities: PanelCapability[]
   name: string
   url: string
   username?: string
@@ -34,6 +41,7 @@ export interface Server {
 }
 
 export interface CreateServerRequest {
+  panel_type?: PanelType
   name: string
   url: string
   api_token?: string
@@ -45,6 +53,7 @@ export interface CreateServerRequest {
 }
 
 export interface UpdateServerRequest {
+  panel_type?: PanelType
   name?: string
   url?: string
   api_token?: string

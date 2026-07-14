@@ -934,7 +934,34 @@ type Template struct {
 	Content         string // contains placeholders such as {{ proxies }}, {{ proxy_groups }}, {{ rules_common }}
 }
 
-// XUIAuthMethod selects how the client authenticates to a 3X-UI panel.
+// PanelKind identifies the upstream implementation behind a registered panel.
+// Keep these stable: values are persisted in xui_panels.kind and are part of
+// the admin API. The table keeps its historical name for a zero-downtime,
+// additive migration; the domain model is intentionally generic.
+type PanelKind string
+
+const (
+	PanelKind3XUI PanelKind = "3xui"
+	PanelKindSUI  PanelKind = "sui"
+)
+
+// NormalizePanelKind maps an empty legacy value to 3X-UI. Every panel row that
+// predates the pluggable-adapter layer therefore keeps its existing behaviour
+// without a data backfill.
+func NormalizePanelKind(kind PanelKind) PanelKind {
+	switch kind {
+	case PanelKindSUI:
+		return PanelKindSUI
+	case PanelKind3XUI, "":
+		return PanelKind3XUI
+	default:
+		return kind
+	}
+}
+
+// XUIAuthMethod selects how the client authenticates to a panel. It retains
+// its historical name for API/source compatibility. Adapters may support only
+// a subset (S-UI, for example, uses token auth for its external API).
 type XUIAuthMethod string
 
 const (
@@ -949,9 +976,12 @@ const (
 	XUIAuthPassword XUIAuthMethod = "password"
 )
 
-// XUIPanel holds the connection credentials for one 3X-UI panel.
-type XUIPanel struct {
+// Panel holds the connection credentials for one upstream panel. Adapter-
+// specific behaviour lives behind ports.PanelClient; services should branch
+// on capabilities rather than on Kind wherever possible.
+type Panel struct {
 	ID       int64
+	Kind     PanelKind
 	Name     string
 	URL      string
 	APIToken string // preferred: Bearer token auth
@@ -978,6 +1008,11 @@ type XUIPanel struct {
 	XrayVersion      string
 	VersionCheckedAt *time.Time
 }
+
+// XUIPanel is a compatibility alias. New code should use Panel; retaining the
+// alias lets the adapter refactor land without a high-risk all-at-once rename
+// across repositories, services, tests, and external integrations.
+type XUIPanel = Panel
 
 // CertStatus is the lifecycle state of a PSP-managed TLS certificate
 // (cert_source=psp_managed).

@@ -2120,6 +2120,10 @@ export default function NodesView() {
   const [claimErr, setClaimErr] = useState<FieldErrors<ClaimField>>({})
 
   const [servers, setServers] = useState<Server[]>([])
+  const writableServers = useMemo(
+    () => servers.filter(s => s.capabilities?.includes('inbound.write')),
+    [servers],
+  )
   const [createOpen, setCreateOpen] = useState(false)
   const [createBusy, setCreateBusy] = useState(false)
   const [createForm, setCreateForm] = useState<InboundFormState>(EMPTY_INBOUND)
@@ -2561,7 +2565,11 @@ export default function NodesView() {
       pushSnack(t('admin:nodes.create_dialog.no_servers'), 'warning')
       return
     }
-    setCreateForm({ ...EMPTY_INBOUND, panel_id: servers[0].id, server_address: hostFromURL(servers[0].url) })
+    if (writableServers.length === 0) {
+      pushSnack(t('admin:nodes.create_dialog.no_writable_servers', { defaultValue: '当前面板适配器均不支持创建 inbound；S-UI 可先导入已有 inbound' }), 'warning')
+      return
+    }
+    setCreateForm({ ...EMPTY_INBOUND, panel_id: writableServers[0].id, server_address: hostFromURL(writableServers[0].url) })
     setCreateAdvanced(false)
     setCreateOpen(true)
   }
@@ -2997,6 +3005,7 @@ export default function NodesView() {
                 {managedPaged.map((n, pageIdx) => {
                   const idx = (managedPage - 1) * managedPageSize + pageIdx
                   const isSep = n.kind === 'separator'
+                  const canWriteInbound = isSep || !!servers.find(s => s.id === n.panel_id)?.capabilities?.includes('inbound.write')
                   return (
                     <TableRow key={isSep ? `sep-${n.id}` : `node-${n.id}`} hover
                       draggable={!reorderBusy && !managedFilterActive}
@@ -3059,7 +3068,7 @@ export default function NodesView() {
                         </Box>
                       )}</TableCell>
                       <TableCell align="center">
-                        <Switch checked={n.enabled} onChange={() => toggleEnabled(n)} disabled={enabledBusy[n.id]} />
+                        <Switch checked={n.enabled} onChange={() => toggleEnabled(n)} disabled={enabledBusy[n.id] || !canWriteInbound} />
                       </TableCell>
                       <TableCell align="right">
                         {canConfig && (isSep ? (
@@ -3086,12 +3095,12 @@ export default function NodesView() {
                               <IconButton size="small" onClick={() => openEdit(n)}><EditIcon fontSize="small" /></IconButton>
                             </Tooltip>
                             <Tooltip title={t('admin:nodes.edit_inbound')}>
-                              <IconButton size="small" onClick={() => openEditInbound(n)}>
+                              <IconButton size="small" onClick={() => openEditInbound(n)} disabled={!canWriteInbound}>
                                 <KeyIcon fontSize="small" />
                               </IconButton>
                             </Tooltip>
                             <Tooltip title={t('admin:nodes.action.recreate_inbound', { defaultValue: '在服务器上重建 inbound' })}>
-                              <IconButton size="small" onClick={() => confirmRecreateInbound(n)}>
+                              <IconButton size="small" onClick={() => confirmRecreateInbound(n)} disabled={!canWriteInbound}>
                                 <CloudSyncIcon fontSize="small" />
                               </IconButton>
                             </Tooltip>
@@ -3101,7 +3110,7 @@ export default function NodesView() {
                               </IconButton>
                             </Tooltip>
                             <Tooltip title={t('admin:nodes.action.delete')}>
-                              <IconButton size="small" onClick={() => confirmDelete(n)} sx={{ color: md.error }}>
+                              <IconButton size="small" onClick={() => confirmDelete(n)} disabled={!canWriteInbound} sx={{ color: md.error }}>
                                 <DeleteIcon fontSize="small" />
                               </IconButton>
                             </Tooltip>
@@ -3259,7 +3268,7 @@ export default function NodesView() {
           <Box component="form" id="create-form" onSubmit={submitCreate}>
             <InboundFormFields form={createForm} setForm={setCreateForm}
               showMetadata
-              servers={servers}
+              servers={writableServers}
               onGenKeys={genKeys}
               onGenSSPassword={genSSPasswordCreate}
               genKeysBusy={genKeysBusy}

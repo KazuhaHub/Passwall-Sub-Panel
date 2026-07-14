@@ -31,6 +31,7 @@ func (r *xuiPanelRepo) List(ctx context.Context) ([]*domain.XUIPanel, error) {
 
 var xuiPanelSortAllowlist = map[string]string{
 	"id":            "id",
+	"panel_type":    "kind",
 	"name":          "name",
 	"url":           "url",
 	"panel_version": "panel_version",
@@ -171,4 +172,3 @@ func (r *xuiPanelRepo) UpdateVersionCheckedAt(ctx context.Context, panelID int64
 	return r.db.WithContext(ctx).Model(&xuiPanelRow{}).Where("id = ?", panelID).
 		Updates(map[string]any{"version_checked_at": checkedAt}).Error
 }
-

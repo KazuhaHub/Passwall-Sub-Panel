@@ -62,6 +62,24 @@ type Client struct {
 	inboundWriteLocks map[int]*sync.Mutex
 }
 
+// Capabilities advertises the operations implemented by the 3X-UI adapter.
+// Endpoint-level version gates (for example web cert files) are still checked
+// by the method itself; this list describes the adapter surface.
+func (c *Client) Capabilities() []ports.PanelCapability {
+	return []ports.PanelCapability{
+		ports.CapabilityInboundRead,
+		ports.CapabilityInboundWrite,
+		ports.CapabilityClientRead,
+		ports.CapabilityClientWrite,
+		ports.CapabilityTrafficRead,
+		ports.CapabilityStatusRead,
+		ports.CapabilityPanelUpgrade,
+		ports.CapabilityCoreUpgrade,
+		ports.CapabilityWebCertRead,
+		ports.CapabilityRealityScan,
+	}
+}
+
 // clientWriteLocks serializes mutating client operations per (backend, email)
 // GLOBALLY across all *Client instances in this process. 3X-UI's first-class
 // client endpoints (/clients/add, /update, /addClient (attach), /delClient
@@ -934,6 +952,12 @@ func (c *Client) InstallXray(ctx context.Context, version string) error {
 	return c.doJSON(ctx, http.MethodPost, "/panel/api/server/installXray/"+url.PathEscape(version), nil, nil)
 }
 
+// InstallCore implements ports.CoreUpdater. On 3X-UI the managed core is
+// xray-core, so the generic operation delegates to the existing endpoint.
+func (c *Client) InstallCore(ctx context.Context, version string) error {
+	return c.InstallXray(ctx, version)
+}
+
 // GetXrayVersionList hits /panel/api/server/getXrayVersion. 3X-UI returns
 // the obj field as a JSON array of tag strings, populated from the panel's
 // known-good xray-core releases. Order is upstream's (typically newest
@@ -945,6 +969,11 @@ func (c *Client) GetXrayVersionList(ctx context.Context) ([]string, error) {
 		return nil, err
 	}
 	return versions, nil
+}
+
+// GetCoreVersionList implements ports.CoreUpdater for xray-core.
+func (c *Client) GetCoreVersionList(ctx context.Context) ([]string, error) {
+	return c.GetXrayVersionList(ctx)
 }
 
 // GetWebCertFiles hits GET /panel/api/server/getWebCertFiles and returns the

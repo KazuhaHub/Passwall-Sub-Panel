@@ -14,10 +14,39 @@ import (
 // validation failure.
 var ErrXUIEndpointUnsupported = errors.New("3X-UI endpoint unsupported on this panel version")
 
+// ErrPanelCapabilityUnsupported means the selected adapter does not implement
+// an optional operation. It is distinct from a version-gated endpoint missing
+// on an otherwise capable backend.
+var ErrPanelCapabilityUnsupported = errors.New("panel capability unsupported")
+
+// PanelCapability is a stable, serialisable feature identifier. The admin API
+// exposes these values so clients can hide actions a backend cannot perform.
+type PanelCapability string
+
+const (
+	CapabilityInboundRead  PanelCapability = "inbound.read"
+	CapabilityInboundWrite PanelCapability = "inbound.write"
+	CapabilityClientRead   PanelCapability = "client.read"
+	CapabilityClientWrite  PanelCapability = "client.write"
+	CapabilityTrafficRead  PanelCapability = "traffic.read"
+	CapabilityStatusRead   PanelCapability = "status.read"
+	CapabilityPanelUpgrade PanelCapability = "panel.upgrade"
+	CapabilityCoreUpgrade  PanelCapability = "core.upgrade"
+	CapabilityWebCertRead  PanelCapability = "webcert.read"
+	CapabilityRealityScan  PanelCapability = "reality.scan"
+)
+
+// CapabilityProvider is implemented by production adapters. It avoids
+// guessing support merely because a compatibility method exists and returns
+// ErrPanelCapabilityUnsupported.
+type CapabilityProvider interface {
+	Capabilities() []PanelCapability
+}
+
 // XUIClient is the abstract HTTP client for a single 3X-UI panel. The service
 // layer never instantiates this directly — it routes through XUIPool by
 // panel id.
-type XUIClient interface {
+type PanelClient interface {
 	// Inbound CRUD
 	ListInbounds(ctx context.Context) ([]Inbound, error)
 	// ListInboundsSlim hits /panel/api/inbounds/list/slim — same per-inbound
@@ -135,7 +164,6 @@ type XUIClient interface {
 	// has no version-selection knob — it always pulls latest — so this
 	// is the only sane way to avoid auto-upgrading into a schema break
 	// like the 2026-05-23 v3.1.0 inbound serialization change.
-	GetPanelUpdateInfo(ctx context.Context) (*PanelUpdateInfo, error)
 
 	// UpdatePanel triggers /panel/api/server/updatePanel — 3X-UI self-
 	// updates to the latest GitHub release and restarts. The HTTP
@@ -144,27 +172,45 @@ type XUIClient interface {
 	// reset and treat it as "upgrade initiated, verify reachability
 	// after grace period". No version parameter — 3X-UI only knows how
 	// to pull latest.
-	UpdatePanel(ctx context.Context) error
 
 	// InstallXray triggers /panel/api/server/installXray/:version. Pass
 	// "latest" for the newest published xray-core release, or a specific
 	// tag like "v25.10.31". 3X-UI restarts xray after install but does
 	// NOT restart the panel itself, so unlike UpdatePanel this call
 	// returns normally with the panel still running.
-	InstallXray(ctx context.Context, version string) error
 
 	// GetXrayVersionList hits /panel/api/server/getXrayVersion and returns
 	// the xray-core tags the panel knows it can install (e.g. ["v25.10.31",
 	// "v25.9.15", ...] — typically the recent N releases plus "latest").
 	// Lets the admin Upgrade-Xray dialog populate a version dropdown so
 	// admin can pin a specific tag instead of always taking "latest".
-	GetXrayVersionList(ctx context.Context) ([]string, error)
 
 	// GetWebCertFiles hits /panel/api/server/getWebCertFiles — the panel's own
 	// web TLS cert/key file PATHS (never the PEM bytes). 3X-UI 3.2.7+ only;
 	// older panels have no such route and 404, which the adapter surfaces as
 	// ErrXUIEndpointUnsupported. Backs the cert_source=from_panel flow: fill a
 	// node-assigned inbound with file-mode paths that exist on the node.
+}
+
+// XUIClient is a source-compatibility alias. New services should depend on
+// PanelClient/PanelPool and optional capabilities instead.
+type XUIClient = PanelClient
+
+// PanelUpdater is the optional panel self-update capability.
+type PanelUpdater interface {
+	GetPanelUpdateInfo(ctx context.Context) (*PanelUpdateInfo, error)
+	UpdatePanel(ctx context.Context) error
+}
+
+// CoreUpdater is the vendor-neutral optional core upgrade capability. A
+// 3X-UI adapter maps this to xray-core; another adapter may map it to sing-box.
+type CoreUpdater interface {
+	GetCoreVersionList(ctx context.Context) ([]string, error)
+	InstallCore(ctx context.Context, version string) error
+}
+
+// WebCertProvider exposes certificate file paths from the upstream host.
+type WebCertProvider interface {
 	GetWebCertFiles(ctx context.Context) (*WebCertFiles, error)
 }
 
@@ -362,9 +408,18 @@ type ClientTraffic struct {
 // Add / Remove are used by AdminServersHandler so the pool stays in lockstep
 // with the persisted server list — adding a server immediately becomes
 // usable without a panel restart.
-type XUIPool interface {
-	Get(panelID int64) (XUIClient, error)
-	List() []*domain.XUIPanel
-	Add(panel *domain.XUIPanel) error
+type PanelPool interface {
+	Get(panelID int64) (PanelClient, error)
+	List() []*domain.Panel
+	Add(panel *domain.Panel) error
 	Remove(panelID int64) error
 }
+
+// PanelKindValidator is an optional pool capability used by the admin API to
+// reject unknown adapter kinds before persisting a panel row.
+type PanelKindValidator interface {
+	SupportsKind(kind domain.PanelKind) bool
+}
+
+// XUIPool is a source-compatibility alias for the generic pool contract.
+type XUIPool = PanelPool

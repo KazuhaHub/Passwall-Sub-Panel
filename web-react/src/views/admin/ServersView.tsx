@@ -54,6 +54,8 @@ import {
   upgradePreview,
   upgradeXray,
   type Server,
+  type PanelCapability,
+  type PanelType,
   type UpgradePreviewResult,
   type XUIAuthMethod,
   type UpdateServerRequest,
@@ -81,6 +83,7 @@ interface ProbeState {
 }
 
 interface FormState {
+  panel_type: PanelType
   name: string
   url: string
   api_token: string
@@ -97,6 +100,7 @@ interface FormState {
 
 const EMPTY_FORM: FormState = {
   name: '', url: '', api_token: '', username: '', password: '', remark: '',
+  panel_type: '3xui',
   auth_method: 'token', insecure_https: false,
   change_api_token: false, change_password: false,
   show_api_token: false, show_password: false,
@@ -104,6 +108,10 @@ const EMPTY_FORM: FormState = {
 
 function credentialsConfigured(s: Server): boolean {
   return s.has_api_token || s.has_password
+}
+
+function hasCapability(s: Server | null, capability: PanelCapability): boolean {
+  return !!s?.capabilities?.includes(capability)
 }
 
 export default function ServersView() {
@@ -179,6 +187,8 @@ export default function ServersView() {
   useEffect(() => { setSelected(new Set()) }, [pageIdsKey])
 
   const selectedCount = selected.size
+  const selectedCanUpgradeCore = items.some(s => selected.has(s.id) && s.capabilities?.includes('core.upgrade'))
+  const selectedCanUpgradePanel = items.some(s => selected.has(s.id) && s.capabilities?.includes('panel.upgrade'))
   // Header checkbox reflects the *visible* page only.
   const allChecked = items.length > 0 && items.every(s => selected.has(s.id))
   const someChecked = items.some(s => selected.has(s.id)) && !allChecked
@@ -433,6 +443,7 @@ export default function ServersView() {
     setForm({
       ...EMPTY_FORM,
       name: s.name,
+      panel_type: s.panel_type ?? '3xui',
       url: s.url,
       username: s.username ?? '',
       remark: s.remark ?? '',
@@ -469,6 +480,7 @@ export default function ServersView() {
     try {
       if (editing) {
         const req: UpdateServerRequest = {
+          panel_type: form.panel_type,
           url: form.url,
           name: form.name,
           username: form.username,
@@ -483,6 +495,7 @@ export default function ServersView() {
       } else {
         await createServer({
           name: form.name, url: form.url,
+          panel_type: form.panel_type,
           api_token: form.api_token || undefined,
           username: form.username || undefined,
           password: form.password || undefined,
@@ -546,7 +559,7 @@ export default function ServersView() {
   // resolves "latest" independently, so the post-upgrade xray versions
   // may differ by a patch but all sit at each panel's known latest.
   async function batchUpgradeXray() {
-    const rows = items.filter(s => selected.has(s.id))
+    const rows = items.filter(s => selected.has(s.id) && s.capabilities?.includes('core.upgrade'))
     if (!rows.length) return
     const ok = await confirm({
       title: t('admin:servers.confirm.batch_upgrade_xray_title', { defaultValue: '批量升级 Xray' }),
@@ -605,7 +618,7 @@ export default function ServersView() {
   // max_tested_xui covers the target, then the gate passes for every panel
   // and this one click upgrades the whole fleet.
   async function batchUpgradePanel() {
-    const rows = items.filter(s => selected.has(s.id))
+    const rows = items.filter(s => selected.has(s.id) && s.capabilities?.includes('panel.upgrade'))
     if (!rows.length) return
     const ok = await confirm({
       title: t('admin:servers.confirm.batch_upgrade_panel_title', { defaultValue: '批量升级 3X-UI 面板' }),
@@ -747,7 +760,9 @@ export default function ServersView() {
     }
     const versionText = (
       <Box sx={{ display: 'flex', flexDirection: 'column', lineHeight: 1.3 }}>
-        <Typography sx={{ fontSize: 13, fontWeight: 500 }}>3X-UI {s.panel_version}</Typography>
+        <Typography sx={{ fontSize: 13, fontWeight: 500 }}>
+          {s.panel_type === 'sui' ? 'S-UI' : '3X-UI'} {s.panel_version}
+        </Typography>
         {s.xray_version && (
           <Typography sx={{ fontSize: 11, color: md.onSurfaceVariant }}>
             Xray {s.xray_version}
@@ -952,7 +967,7 @@ export default function ServersView() {
           <Button
             size="small" variant="text"
             startIcon={batchBusy === 'upgrade_xray' ? <CircularProgress size={14} /> : <SystemUpdateIcon />}
-            disabled={batchBusy !== ''}
+            disabled={batchBusy !== '' || !selectedCanUpgradeCore}
             onClick={batchUpgradeXray}
             sx={{ color: 'inherit' }}
           >
@@ -961,7 +976,7 @@ export default function ServersView() {
           <Button
             size="small" variant="text"
             startIcon={batchBusy === 'upgrade_panel' ? <CircularProgress size={14} /> : <UpgradeIcon />}
-            disabled={batchBusy !== ''}
+            disabled={batchBusy !== '' || !selectedCanUpgradePanel}
             onClick={batchUpgradePanel}
             sx={{ color: 'inherit' }}
           >
@@ -1087,14 +1102,14 @@ export default function ServersView() {
                         "update available" hint lives in the Version
                         column (see versionCell), not on this button,
                         so the kebab stays neutral. */}
-                    <IconButton
+                    {(s.capabilities?.includes('panel.upgrade') || s.capabilities?.includes('core.upgrade')) && <IconButton
                       size="small"
                       onClick={e => openMenu(e, s)}
                       disabled={upgrading === s.id}
                       aria-label={t('admin:servers.action.more', { defaultValue: '更多操作' })}
                     >
                       {upgrading === s.id ? <CircularProgress size={14} /> : <MoreVertIcon fontSize="small" />}
-                    </IconButton>
+                    </IconButton>}
                   </TableCell>
                 </TableRow>
               ))}
@@ -1117,14 +1132,14 @@ export default function ServersView() {
         anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
         transformOrigin={{ vertical: 'top', horizontal: 'right' }}
       >
-        <MenuItem onClick={() => menuTarget && runUpgradePanel(menuTarget)}>
+        {hasCapability(menuTarget, 'panel.upgrade') && <MenuItem onClick={() => menuTarget && runUpgradePanel(menuTarget)}>
           <SystemUpdateIcon fontSize="small" sx={{ mr: 1 }} />
           {t('admin:servers.action.upgrade_panel', { defaultValue: '升级 3X-UI 面板（最新）' })}
-        </MenuItem>
-        <MenuItem onClick={() => menuTarget && openXrayDialog(menuTarget)}>
+        </MenuItem>}
+        {hasCapability(menuTarget, 'core.upgrade') && <MenuItem onClick={() => menuTarget && openXrayDialog(menuTarget)}>
           <SystemUpdateIcon fontSize="small" sx={{ mr: 1 }} />
           {t('admin:servers.action.upgrade_xray', { defaultValue: '升级 Xray（最新）' })}
-        </MenuItem>
+        </MenuItem>}
       </Menu>
       {/* Upgrade Xray dialog — pinning a specific xray-core version. The
           version list comes from the panel's /server/getXrayVersion at
@@ -1200,6 +1215,16 @@ export default function ServersView() {
         </DialogTitle>
         <DialogContent>
           <Box component="form" id="server-form" onSubmit={submit} sx={{ display: 'flex', flexDirection: 'column', gap: 2.5, pt: 1 }}>
+            <TextField select fullWidth
+              label={t('admin:servers.field.panel_type', { defaultValue: '面板类型' })}
+              value={form.panel_type}
+              onChange={e => {
+                const panelType = e.target.value as PanelType
+                setForm({ ...form, panel_type: panelType, auth_method: panelType === 'sui' ? 'token' : form.auth_method })
+              }}>
+              <MenuItem value="3xui">3X-UI</MenuItem>
+              <MenuItem value="sui">S-UI</MenuItem>
+            </TextField>
             <Box>
               <TextField
                 fullWidth required
@@ -1229,7 +1254,7 @@ export default function ServersView() {
               value={form.auth_method}
               onChange={e => setForm({ ...form, auth_method: e.target.value as XUIAuthMethod })}>
               <MenuItem value="token">{t('admin:servers.auth_method.token', { defaultValue: 'API Token' })}</MenuItem>
-              <MenuItem value="password">{t('admin:servers.auth_method.password', { defaultValue: '账户密码' })}</MenuItem>
+              {form.panel_type === '3xui' && <MenuItem value="password">{t('admin:servers.auth_method.password', { defaultValue: '账户密码' })}</MenuItem>}
             </TextField>
 
             {form.auth_method === 'token' ? (
