@@ -185,6 +185,7 @@ interface MetaForm {
   sort_order: number
   relays: RelayLine[]
   hide_direct: boolean
+  show_relay_status: boolean
 }
 
 interface ImportForm extends MetaForm {
@@ -348,7 +349,7 @@ interface InboundFormState {
 
 const EMPTY_META: MetaForm = {
   display_name: '', server_address: '', flow: '', region: '', tags_text: '', sort_order: 0,
-  relays: [], hide_direct: false,
+  relays: [], hide_direct: false, show_relay_status: false,
 }
 
 const EMPTY_IMPORT: ImportForm = {
@@ -2467,6 +2468,7 @@ export default function NodesView() {
       sort_order: n.sort_order,
       relays: (n.relays ?? []).map(r => ({ ...r })),
       hide_direct: !!n.hide_direct,
+      show_relay_status: !!n.show_relay_status || !!n.hide_direct,
     })
     setEditMetaErr({})
     setEditOpen(true)
@@ -2504,6 +2506,7 @@ export default function NodesView() {
           .map(r => ({ ...r, name: r.name.trim(), address: r.address.trim(), port: Number(r.port) || 0, sni: r.sni?.trim() || undefined, host: r.host?.trim() || undefined }))
           .filter(r => r.address),
         hide_direct: editForm.hide_direct,
+        show_relay_status: editForm.hide_direct || editForm.show_relay_status,
       })
       pushSnack(t('admin:nodes.toast.saved'), 'success')
       setEditOpen(false)
@@ -3721,8 +3724,15 @@ export default function NodesView() {
                 )
               })}
               {editForm.relays.some(r => r.enabled) && (
-                <FormControlLabel sx={{ m: 0, '& .MuiFormControlLabel-label': { ml: 0.75 } }} label={t('admin:nodes.relay.hide_direct')}
-                  control={<Switch size="small" checked={editForm.hide_direct} onChange={(_, c) => setEditForm(f => ({ ...f, hide_direct: c }))} />} />
+                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
+                  <FormControlLabel sx={{ m: 0, '& .MuiFormControlLabel-label': { ml: 0.75 } }} label={t('admin:nodes.relay.hide_direct')}
+                    control={<Switch size="small" checked={editForm.hide_direct}
+                      onChange={(_, c) => setEditForm(f => ({ ...f, hide_direct: c, show_relay_status: c || f.show_relay_status }))} />} />
+                  <FormControlLabel sx={{ m: 0, '& .MuiFormControlLabel-label': { ml: 0.75 } }} label={t('admin:nodes.relay.show_relay_status')}
+                    control={<Switch size="small" checked={editForm.hide_direct || editForm.show_relay_status}
+                      disabled={editForm.hide_direct}
+                      onChange={(_, c) => setEditForm(f => ({ ...f, show_relay_status: c }))} />} />
+                </Box>
               )}
             </Box>
             <Box sx={{ display: 'none' }}>{alpha(md.error, 0.5)}</Box>

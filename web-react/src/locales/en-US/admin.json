@@ -889,7 +889,8 @@
       "cdn_optional": "Only for CDN fronting",
       "enabled": "Enabled",
       "remove": "Remove this line",
-      "hide_direct": "Hide direct (landing reachable only via relays)"
+      "hide_direct": "Hide direct (landing reachable only via relays)",
+      "show_relay_status": "Show relay server status"
     },
     "import": "Import",
     "imported": "Imported",

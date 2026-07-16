@@ -43,6 +43,7 @@ func TestNodeRepo_UpdateMetadataPreservesPollColumns(t *testing.T) {
 		t.Fatalf("counters: %v", err)
 	}
 	n.HealthState, n.HealthDetail = "healthy", "ok"
+	n.RelayHealth = []domain.RelayHealth{{Index: 0, Address: "old.relay", Port: 443, State: domain.NodeHealthOK}}
 	if err := repo.UpdateHealth(ctx, n); err != nil {
 		t.Fatalf("health: %v", err)
 	}
@@ -52,6 +53,7 @@ func TestNodeRepo_UpdateMetadataPreservesPollColumns(t *testing.T) {
 	edit := &domain.Node{
 		ID: n.ID, PanelID: 1, InboundID: 2,
 		DisplayName: "New", ServerAddress: "n.example.com", Region: "HK", Tags: []string{"b", "c"}, SortOrder: 7,
+		Relays: []domain.RelayLine{{Name: "new", Address: "new.relay", Port: 8443, Enabled: true}}, ShowRelayStatus: true,
 		// Lifetime*/Health* deliberately zero — must not be persisted.
 	}
 	if err := repo.UpdateMetadata(ctx, edit); err != nil {
@@ -72,6 +74,12 @@ func TestNodeRepo_UpdateMetadataPreservesPollColumns(t *testing.T) {
 	// Poll-owned columns preserved (NOT clobbered to the edit's zeros).
 	if got.LifetimeTotalBytes != 300 || got.LastTrafficTotalBytes != 300 {
 		t.Errorf("traffic counters clobbered: lifetime=%d last=%d, want 300/300", got.LifetimeTotalBytes, got.LastTrafficTotalBytes)
+	}
+	if len(got.RelayHealth) != 1 || got.RelayHealth[0].Address != "old.relay" {
+		t.Errorf("relay health clobbered: %#v", got.RelayHealth)
+	}
+	if len(got.Relays) != 1 || got.Relays[0].Address != "new.relay" || !got.ShowRelayStatus {
+		t.Errorf("relay metadata not updated: relays=%#v show=%v", got.Relays, got.ShowRelayStatus)
 	}
 	if got.HealthState != "healthy" {
 		t.Errorf("health clobbered: %q, want healthy", got.HealthState)
@@ -172,13 +180,14 @@ func TestNodeRepo_RelaysRoundTrip(t *testing.T) {
 	repo, ctx := newNodeTestRepo(t)
 
 	n := &domain.Node{
-		PanelID:       1,
-		InboundID:     2,
-		DisplayName:   "HK",
-		ServerAddress: "land.example.com",
-		Protocol:      "vless",
-		Region:        "HK",
-		HideDirect:    true,
+		PanelID:         1,
+		InboundID:       2,
+		DisplayName:     "HK",
+		ServerAddress:   "land.example.com",
+		Protocol:        "vless",
+		Region:          "HK",
+		HideDirect:      true,
+		ShowRelayStatus: true,
 		Relays: []domain.RelayLine{
 			{Name: "广州移动中转", Address: "gz.relay.cn", Port: 20001, Enabled: true},
 			{Name: "CDN优选", Address: "104.16.0.1", Port: 8443, SNI: "cdn.example.com", Host: "cdn.example.com", Enabled: false},
@@ -194,6 +203,9 @@ func TestNodeRepo_RelaysRoundTrip(t *testing.T) {
 	if !got.HideDirect {
 		t.Fatalf("HideDirect = false, want true")
 	}
+	if !got.ShowRelayStatus {
+		t.Fatal("ShowRelayStatus = false, want true")
+	}
 	if !reflect.DeepEqual(got.Relays, n.Relays) {
 		t.Fatalf("relays round-trip mismatch:\n got %#v\nwant %#v", got.Relays, n.Relays)
 	}
@@ -201,6 +213,7 @@ func TestNodeRepo_RelaysRoundTrip(t *testing.T) {
 	// Update path: drop one line, flip a toggle.
 	got.Relays = []domain.RelayLine{{Name: "上海电信", Address: "sh.relay.cn", Port: 30001, Enabled: true}}
 	got.HideDirect = false
+	got.ShowRelayStatus = false
 	if err := repo.Update(ctx, got); err != nil {
 		t.Fatalf("update: %v", err)
 	}
@@ -210,6 +223,9 @@ func TestNodeRepo_RelaysRoundTrip(t *testing.T) {
 	}
 	if again.HideDirect {
 		t.Fatalf("HideDirect after update = true, want false")
+	}
+	if again.ShowRelayStatus {
+		t.Fatal("ShowRelayStatus after update = true, want false")
 	}
 	if !reflect.DeepEqual(again.Relays, got.Relays) {
 		t.Fatalf("relays after update mismatch:\n got %#v\nwant %#v", again.Relays, got.Relays)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strconv"
+	"sync"
 	"testing"
 	"time"
 
@@ -83,9 +84,11 @@ func (r *fakeNodeRepo) UpdateEnabled(ctx context.Context, id int64, enabled bool
 func (r *fakeNodeRepo) UpdateCertBinding(_ context.Context, _ int64, _ domain.CertSource, _ int64) error {
 	return nil
 }
-func (r *fakeNodeRepo) ListByCertID(_ context.Context, _ int64) ([]*domain.Node, error) { return nil, nil }
-func (r *fakeNodeRepo) Create(ctx context.Context, n *domain.Node) error                { return nil }
-func (r *fakeNodeRepo) Delete(ctx context.Context, id int64) error                      { return nil }
+func (r *fakeNodeRepo) ListByCertID(_ context.Context, _ int64) ([]*domain.Node, error) {
+	return nil, nil
+}
+func (r *fakeNodeRepo) Create(ctx context.Context, n *domain.Node) error { return nil }
+func (r *fakeNodeRepo) Delete(ctx context.Context, id int64) error       { return nil }
 func (r *fakeNodeRepo) BatchUpdateSortOrder(ctx context.Context, updates []ports.NodeSortUpdate) error {
 	return nil
 }
@@ -151,6 +154,49 @@ func TestCheckOnce_UDPProtocolProbedWithUDP(t *testing.T) {
 	}
 	if len(*calls) != 1 || (*calls)[0] != "udp h.example:8443" {
 		t.Fatalf("hysteria2 must be probed over udp; calls = %v", *calls)
+	}
+}
+
+func TestCheckOnce_RelayHealthIncludesEnabledLines(t *testing.T) {
+	repo := &fakeNodeRepo{nodes: []*domain.Node{{
+		ID: 1, Enabled: true, ServerAddress: "landing.example", Port: 443, Protocol: "vless",
+		HideDirect: true, // force relay probing even when ShowRelayStatus is false
+		Relays: []domain.RelayLine{
+			{Name: "good", Address: "good.relay", Port: 8443, Enabled: true},
+			{Name: "bad", Address: "bad.relay", Port: 0, Enabled: true},
+			{Name: "off", Address: "off.relay", Port: 9443, Enabled: false},
+		},
+	}}}
+	s := New(repo)
+	var mu sync.Mutex
+	calls := []string{}
+	s.probe = func(_ context.Context, network, host string, port int) error {
+		mu.Lock()
+		calls = append(calls, network+" "+host+":"+strconv.Itoa(port))
+		mu.Unlock()
+		if host == "bad.relay" {
+			return errors.New("connection refused")
+		}
+		return nil
+	}
+	if err := s.CheckOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(repo.updates) != 1 {
+		t.Fatalf("updates = %d, want 1", len(repo.updates))
+	}
+	got := repo.updates[0]
+	if len(got.RelayHealth) != 2 {
+		t.Fatalf("relay health = %#v, want two enabled lines", got.RelayHealth)
+	}
+	if got.RelayHealth[0].State != domain.NodeHealthOK || got.RelayHealth[0].Port != 8443 {
+		t.Fatalf("first relay health = %#v", got.RelayHealth[0])
+	}
+	if got.RelayHealth[1].State != domain.NodeHealthUnreachable || got.RelayHealth[1].Port != 443 {
+		t.Fatalf("second relay health = %#v", got.RelayHealth[1])
+	}
+	if len(calls) != 3 { // landing + two enabled relays; disabled line skipped
+		t.Fatalf("probe calls = %v", calls)
 	}
 }
 

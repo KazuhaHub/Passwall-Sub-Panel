@@ -12,6 +12,7 @@
     "down": "离线",
     "unknown": "未知",
     "empty": "暂无可显示的节点",
+    "relay_fallback": "中转 {{index}}",
     "checked_at": "最后检查：{{time}}"
   },
   "service": {

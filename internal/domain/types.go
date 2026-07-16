@@ -519,6 +519,39 @@ type Node struct {
 	// (firewalled to the transit IP). Ignored when no relay is enabled, so a
 	// node never silently vanishes from the subscription.
 	HideDirect bool
+	// ShowRelayStatus exposes the enabled relay endpoints' coarse reachability
+	// in the user portal. HideDirect implies this setting whenever at least one
+	// relay is enabled, so relay-only nodes can never end up with no visible
+	// status. RelayHealth is health-worker-owned and persisted separately from
+	// Relays so an async probe cannot overwrite a concurrent admin edit.
+	ShowRelayStatus bool
+	RelayHealth     []RelayHealth
+}
+
+// HasEnabledRelays reports whether this node currently has at least one relay
+// that participates in subscription rendering and health display.
+func (n *Node) HasEnabledRelays() bool {
+	if n == nil {
+		return false
+	}
+	for _, relay := range n.Relays {
+		if relay.Enabled {
+			return true
+		}
+	}
+	return false
+}
+
+// EffectiveHideDirect mirrors subscription rendering: HideDirect only takes
+// effect when an enabled relay exists, preventing a node from disappearing.
+func (n *Node) EffectiveHideDirect() bool {
+	return n != nil && n.HideDirect && n.HasEnabledRelays()
+}
+
+// EffectiveShowRelayStatus applies the UI/backend invariant requested for
+// relay-only nodes, including legacy rows created before ShowRelayStatus existed.
+func (n *Node) EffectiveShowRelayStatus() bool {
+	return n != nil && n.HasEnabledRelays() && (n.ShowRelayStatus || n.EffectiveHideDirect())
 }
 
 // RelayLine is one transit front for a Node (see Node.Relays). It changes only
@@ -544,6 +577,17 @@ type RelayLine struct {
 	// Enabled gates whether the line renders. A disabled line is kept in the
 	// DB (so the admin can toggle it back) but produces no subscription entry.
 	Enabled bool
+}
+
+// RelayHealth is a health-worker-owned snapshot for one relay endpoint. Index
+// plus endpoint identity prevents a stale result from being shown after an
+// admin reorders or edits the relay before the next health pass.
+type RelayHealth struct {
+	Index     int
+	Address   string
+	Port      int
+	State     NodeHealthState
+	CheckedAt *time.Time
 }
 
 // SeparatorMode controls how a SeparatorEntry decides whether to appear

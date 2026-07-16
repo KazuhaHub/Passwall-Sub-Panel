@@ -889,7 +889,8 @@
       "cdn_optional": "CDN 优选才需填",
       "enabled": "启用",
       "remove": "删除该线路",
-      "hide_direct": "隐藏直连（落地仅经中转可达）"
+      "hide_direct": "隐藏直连（落地仅经中转可达）",
+      "show_relay_status": "显示中转服务器状态"
     },
     "import": "纳管",
     "imported": "已纳管",

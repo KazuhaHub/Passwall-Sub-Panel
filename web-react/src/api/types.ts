@@ -140,6 +140,9 @@ export interface Node {
   /** Drop the direct entry when at least one relay is enabled (landing only
    *  reachable via its relays). Ignored when no relay is enabled. */
   hide_direct?: boolean
+  /** Show enabled relay endpoints' coarse health in the user server-status
+   *  tab. Always true when hide_direct is effective. */
+  show_relay_status?: boolean
 }
 
 /** One transit front for a Node. See domain.RelayLine. */

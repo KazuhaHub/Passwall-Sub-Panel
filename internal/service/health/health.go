@@ -104,16 +104,31 @@ func (s *Service) CheckOnce(ctx context.Context) error {
 	}
 
 	now := time.Now()
-	type target struct {
-		n       *domain.Node
-		host    string
-		network string
+	type nodeProbe struct {
+		node        *domain.Node
+		directState domain.NodeHealthState
+		directError string
+		relays      []domain.RelayHealth
 	}
+	type target struct {
+		owner     *nodeProbe
+		relaySlot int // -1 = landing/direct endpoint
+		host      string
+		port      int
+		network   string
+	}
+	var states []*nodeProbe
 	var targets []target
 
 	for _, n := range allNodes {
 		if !n.Enabled || n.IsSeparator() {
 			continue
+		}
+		state := &nodeProbe{node: n}
+		states = append(states, state)
+		network := "tcp"
+		if isUDPProtocol(n.Protocol) {
+			network = "udp"
 		}
 		// v3.5: port / protocol are the node row's own authoritative columns
 		// — populated by the inbound write-through paths and aligned by
@@ -122,15 +137,35 @@ func (s *Service) CheckOnce(ctx context.Context) error {
 			// Pre-v3.5 row that never got its port captured, or a freshly-
 			// imported node before reconcile backfills it. Report unreachable
 			// so the UI surfaces "no signal" rather than a stale green dot.
-			s.persist(ctx, n, n.Port, n.Protocol, domain.NodeHealthUnreachable,
-				"no known port to probe (awaiting inbound config capture)", now)
-			continue
+			state.directState = domain.NodeHealthUnreachable
+			state.directError = "no known port to probe (awaiting inbound config capture)"
+		} else {
+			targets = append(targets, target{owner: state, relaySlot: -1, host: n.ServerAddress, port: n.Port, network: network})
 		}
-		network := "tcp"
-		if isUDPProtocol(n.Protocol) {
-			network = "udp"
+
+		// Relay probes are opt-in, except HideDirect forces them on. Only
+		// enabled lines are user-visible/probed. Their snapshot is separate
+		// from Relays so this worker never overwrites admin-owned config.
+		if n.EffectiveShowRelayStatus() {
+			for relayIndex, relay := range n.Relays {
+				if !relay.Enabled {
+					continue
+				}
+				port := relay.Port
+				if port <= 0 {
+					port = n.Port
+				}
+				state.relays = append(state.relays, domain.RelayHealth{
+					Index: relayIndex, Address: relay.Address, Port: port, CheckedAt: &now,
+				})
+				slot := len(state.relays) - 1
+				if strings.TrimSpace(relay.Address) == "" || port <= 0 {
+					state.relays[slot].State = domain.NodeHealthUnreachable
+					continue
+				}
+				targets = append(targets, target{owner: state, relaySlot: slot, host: relay.Address, port: port, network: network})
+			}
 		}
-		targets = append(targets, target{n: n, host: n.ServerAddress, network: network})
 	}
 
 	sem := make(chan struct{}, healthProbeConcurrency)
@@ -143,16 +178,28 @@ func (s *Service) CheckOnce(ctx context.Context) error {
 			defer wg.Done()
 			defer func() { <-sem }()
 			defer safego.Recover("health.port-probe")
-			addr := net.JoinHostPort(tg.host, strconv.Itoa(tg.n.Port))
-			if err := s.probe(ctx, tg.network, tg.host, tg.n.Port); err != nil {
-				s.persist(ctx, tg.n, tg.n.Port, tg.n.Protocol, domain.NodeHealthUnreachable,
-					fmt.Sprintf("%s %s: %v", tg.network, addr, err), now)
+			addr := net.JoinHostPort(tg.host, strconv.Itoa(tg.port))
+			err := s.probe(ctx, tg.network, tg.host, tg.port)
+			state := domain.NodeHealthOK
+			if err != nil {
+				state = domain.NodeHealthUnreachable
+			}
+			if tg.relaySlot >= 0 {
+				tg.owner.relays[tg.relaySlot].State = state
 				return
 			}
-			s.persist(ctx, tg.n, tg.n.Port, tg.n.Protocol, domain.NodeHealthOK, "", now)
+			tg.owner.directState = state
+			if err != nil {
+				tg.owner.directError = fmt.Sprintf("%s %s: %v", tg.network, addr, err)
+			}
 		}()
 	}
 	wg.Wait()
+	for _, state := range states {
+		state.node.RelayHealth = state.relays
+		s.persist(ctx, state.node, state.node.Port, state.node.Protocol,
+			state.directState, state.directError, now)
+	}
 	return nil
 }
 

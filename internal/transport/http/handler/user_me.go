@@ -169,6 +169,53 @@ func (h *UserMeHandler) mustEnroll2FA(ctx context.Context, u *domain.User) bool 
 	return err == nil && must
 }
 
+type userRelayStatus struct {
+	Name      string     `json:"name"`
+	Status    string     `json:"status"` // "ok" | "down" | "unknown"
+	CheckedAt *time.Time `json:"checked_at,omitempty"`
+}
+
+type userNodeStatus struct {
+	Name          string            `json:"name"`
+	Region        string            `json:"region"`
+	Status        string            `json:"status"` // landing status; retained for API compatibility
+	CheckedAt     *time.Time        `json:"checked_at,omitempty"`
+	ShowDirect    bool              `json:"show_direct"`
+	RelayStatuses []userRelayStatus `json:"relay_statuses,omitempty"`
+}
+
+// userStatusForNode produces the sanitized presentation model. Relay endpoint
+// addresses/ports and failure details intentionally never cross this boundary.
+func userStatusForNode(n *domain.Node) userNodeStatus {
+	out := userNodeStatus{
+		Name: n.DisplayName, Region: n.Region,
+		Status: coarseNodeStatus(n.HealthState), CheckedAt: n.HealthCheckedAt,
+		ShowDirect: !n.EffectiveHideDirect(),
+	}
+	if !n.EffectiveShowRelayStatus() {
+		return out
+	}
+	for relayIndex, relay := range n.Relays {
+		if !relay.Enabled {
+			continue
+		}
+		port := relay.Port
+		if port <= 0 {
+			port = n.Port
+		}
+		status := userRelayStatus{Name: strings.TrimSpace(relay.Name), Status: "unknown"}
+		for _, health := range n.RelayHealth {
+			if health.Index == relayIndex && health.Address == relay.Address && health.Port == port {
+				status.Status = coarseNodeStatus(health.State)
+				status.CheckedAt = health.CheckedAt
+				break
+			}
+		}
+		out.RelayStatuses = append(out.RelayStatuses, status)
+	}
+	return out
+}
+
 // ServerStatus returns a sanitized, per-node availability list for the nodes
 // the caller actually has in their subscription (resolved from their ownership
 // rows). Deliberately user-safe: only display name + region + a coarse status
@@ -180,12 +227,6 @@ func (h *UserMeHandler) ServerStatus(c *gin.Context) {
 	if claims == nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "No auth"})
 		return
-	}
-	type nodeStatus struct {
-		Name      string     `json:"name"`
-		Region    string     `json:"region"`
-		Status    string     `json:"status"` // "ok" | "down" | "unknown"
-		CheckedAt *time.Time `json:"checked_at,omitempty"`
 	}
 	// Resolve the user's visible nodes the SAME way RenderForUser does — via the
 	// group selector — NOT via the ownership table. Post-migration the ownership
@@ -208,17 +249,12 @@ func (h *UserMeHandler) ServerStatus(c *gin.Context) {
 		respondError(c, err)
 		return
 	}
-	out := make([]nodeStatus, 0, len(nodes))
+	out := make([]userNodeStatus, 0, len(nodes))
 	for _, n := range nodes {
 		if n == nil || n.Kind == domain.NodeKindSeparator || !n.Enabled {
 			continue
 		}
-		out = append(out, nodeStatus{
-			Name:      n.DisplayName,
-			Region:    n.Region,
-			Status:    coarseNodeStatus(n.HealthState),
-			CheckedAt: n.HealthCheckedAt,
-		})
+		out = append(out, userStatusForNode(n))
 	}
 	// Stable order: region, then name — matches how the subscription groups them.
 	sort.Slice(out, func(i, j int) bool {

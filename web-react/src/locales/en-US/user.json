@@ -12,6 +12,7 @@
     "down": "Down",
     "unknown": "Unknown",
     "empty": "No nodes to show",
+    "relay_fallback": "Relay {{index}}",
     "checked_at": "Last checked: {{time}}"
   },
   "service": {

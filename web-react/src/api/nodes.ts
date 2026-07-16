@@ -40,6 +40,7 @@ export interface UpdateNodeMetadataRequest {
    *  untouched; send [] to clear. */
   relays?: RelayLine[]
   hide_direct?: boolean
+  show_relay_status?: boolean
 }
 
 export interface InboundSpec {

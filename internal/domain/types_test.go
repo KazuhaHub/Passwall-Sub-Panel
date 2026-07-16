@@ -5,6 +5,32 @@ import (
 	"time"
 )
 
+func TestNodeRelayStatusVisibility(t *testing.T) {
+	enabled := []RelayLine{{Address: "relay.example", Enabled: true}}
+	disabled := []RelayLine{{Address: "relay.example", Enabled: false}}
+	tests := []struct {
+		name       string
+		node       *Node
+		hideDirect bool
+		showRelay  bool
+	}{
+		{name: "no relays", node: &Node{}, hideDirect: false, showRelay: false},
+		{name: "disabled relay", node: &Node{Relays: disabled, HideDirect: true}, hideDirect: false, showRelay: false},
+		{name: "opt in", node: &Node{Relays: enabled, ShowRelayStatus: true}, hideDirect: false, showRelay: true},
+		{name: "hidden direct forces relay", node: &Node{Relays: enabled, HideDirect: true}, hideDirect: true, showRelay: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.node.EffectiveHideDirect(); got != tc.hideDirect {
+				t.Fatalf("EffectiveHideDirect = %v, want %v", got, tc.hideDirect)
+			}
+			if got := tc.node.EffectiveShowRelayStatus(); got != tc.showRelay {
+				t.Fatalf("EffectiveShowRelayStatus = %v, want %v", got, tc.showRelay)
+			}
+		})
+	}
+}
+
 // TestUserEffectiveEnabled pins the truth table for the value the panel
 // publishes to 3X-UI's enable field. Each case is one row of the matrix in
 // the EffectiveEnabled doc comment; the bug that motivated this method was
