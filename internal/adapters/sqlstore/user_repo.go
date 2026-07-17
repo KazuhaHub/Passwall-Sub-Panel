@@ -180,8 +180,8 @@ func (r *userRepo) CountByStatus(ctx context.Context, now time.Time) (ports.User
 	if err := r.db.WithContext(ctx).Model(&userRow{}).Count(&c.Total).Error; err != nil {
 		return c, err
 	}
-	if err := r.db.WithContext(ctx).Model(&userRow{}).
-		Where("enabled = ?", true).Count(&c.Enabled).Error; err != nil {
+	if err := accountAccessScope(r.db.WithContext(ctx).Model(&userRow{}), true).
+		Count(&c.Enabled).Error; err != nil {
 		return c, err
 	}
 	c.Disabled = c.Total - c.Enabled
@@ -464,7 +464,7 @@ func (r *userRepo) List(ctx context.Context, filter ports.UserFilter) ([]*domain
 		q = q.Where("role = ?", string(*filter.Role))
 	}
 	if filter.Enabled != nil {
-		q = q.Where("enabled = ?", *filter.Enabled)
+		q = accountAccessScope(q, *filter.Enabled)
 	}
 
 	var total int64
@@ -481,6 +481,18 @@ func (r *userRepo) List(ctx context.Context, filter ports.UserFilter) ([]*domain
 		out[i] = rows[i].toDomain()
 	}
 	return out, total, nil
+}
+
+// accountAccessScope applies the same account-axis interpretation as
+// domain.User.AccessSnapshot without materialising every row. Historical
+// expiry/quota disables remain portal-loginable and therefore count/filter as
+// account-active; other disabled reasons remain disabled.
+func accountAccessScope(q *gorm.DB, enabled bool) *gorm.DB {
+	legacyReasons := []string{string(domain.DisabledTrafficExceeded), string(domain.DisabledExpired)}
+	if enabled {
+		return q.Where("enabled = ? OR (enabled = ? AND auto_disabled_reason IN ?)", true, false, legacyReasons)
+	}
+	return q.Where("enabled = ? AND (auto_disabled_reason IS NULL OR auto_disabled_reason NOT IN ?)", false, legacyReasons)
 }
 
 var userSortAllowlist = map[string]string{

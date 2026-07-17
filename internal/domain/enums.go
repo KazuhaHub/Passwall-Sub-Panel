@@ -74,6 +74,31 @@ func SelfServiceDisableReason(r AutoDisabledReason) bool {
 	return r == DisabledTrafficExceeded || r == DisabledExpired
 }
 
+// AccountDisableReason reports whether r is valid for a new account-axis
+// transition. Expiry, quota and blocked-client restrictions belong to the
+// service axis; they are intentionally excluded even though historical rows
+// may still contain them.
+func AccountDisableReason(r AutoDisabledReason) bool {
+	switch r {
+	case DisabledManual, DisabledPendingDelete, DisabledPendingApproval, DisabledPendingEmailVerify:
+		return true
+	default:
+		return false
+	}
+}
+
+// ServiceSuspensionReason reports whether r is valid for the existing
+// service_disabled_reason column. Keeping this validation in the domain stops
+// internal callers from accidentally writing account lifecycle states there.
+func ServiceSuspensionReason(r AutoDisabledReason) bool {
+	switch r {
+	case DisabledServiceManual, DisabledBlockedClient, DisabledTrafficExceeded, DisabledExpired:
+		return true
+	default:
+		return false
+	}
+}
+
 // Protocol identifies a 3X-UI inbound's protocol family.
 // Used by pkg/crypto.DeriveProxyPassword to pick the right derivation rule.
 type Protocol string

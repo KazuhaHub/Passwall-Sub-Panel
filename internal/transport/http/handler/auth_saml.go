@@ -133,7 +133,7 @@ func (h *AuthSAMLHandler) ACS(c *gin.Context) {
 		c.Redirect(http.StatusFound, panelRedirect(c, "/sso-error?error=sso_error&description="+url.QueryEscape(err.Error())))
 		return
 	}
-	if !u.Enabled && !allowDisabledEmergencyLogin(u.AutoDisabledReason) {
+	if !domain.AccountLoginAllowed(u.Enabled, u.AutoDisabledReason) {
 		// No description: the SPA renders a localized message for these
 		// recognized codes. Passing a hardcoded string would override i18n.
 		errorCode := "account_disabled"
@@ -163,10 +163,6 @@ func (h *AuthSAMLHandler) ACS(c *gin.Context) {
 	// hardening must not depend on the SPA's navigate() neutralizing it.
 	returnTo = sanitizeReturnTo(returnTo, "/user/me")
 	c.Redirect(http.StatusFound, panelRedirect(c, "/sso-callback?next="+url.QueryEscape(returnTo)))
-}
-
-func allowDisabledEmergencyLogin(reason domain.AutoDisabledReason) bool {
-	return reason == domain.DisabledTrafficExceeded || reason == domain.DisabledExpired
 }
 
 // Metadata serves the SP metadata XML for IdP-side onboarding.

@@ -517,9 +517,9 @@
       "filter_mode": "Client filter mode",
       "filter_mode_blacklist": "Blacklist (allow by default, block disabled)",
       "filter_mode_whitelist": "Whitelist (block by default, allow known only)",
-      "filter_mode_help": "Blacklist (default): only clients you explicitly disable are blocked; unknown clients pass through (served mihomo as fallback).\n\nWhitelist: only known + enabled client families are allowed; anything unknown or disabled is blocked and counts as an abuse strike (may trigger auto-disable). Use for strict abuse protection.",
-      "sub_block_auto_disable": "Auto-disable account on abusive subscription requests",
-      "sub_block_auto_disable_count": "Consecutive failures before auto-disable",
+      "filter_mode_help": "Blacklist (default): only clients you explicitly disable are blocked; unknown clients pass through (served mihomo as fallback).\n\nWhitelist: only known + enabled client families are allowed; anything unknown or disabled is blocked and counts as an abuse strike (which may auto-suspend proxy service). Use for strict abuse protection.",
+      "sub_block_auto_disable": "Auto-suspend proxy service on abusive subscription requests",
+      "sub_block_auto_disable_count": "Consecutive failures before proxy-service suspension",
       "sub_block_notify_user": "Email the user when a blocked client is used",
       "sub_block_notify_max_per_day": "Max emails per day",
       "rule_table": {
@@ -1167,7 +1167,7 @@
       "period_used_gb": "Period used (GB)",
       "account_enabled": "Account status",
       "account_self_locked": "You cannot disable your own account",
-      "service_status": "Service status",
+      "service_status": "Proxy service status",
       "block_violations": "Violations: {{count}}",
       "emergency_used_count": "Emergency access used {{count}} time(s)",
       "emergency_window_until": "Active until {{time}} ({{hours}}h remaining)",
@@ -1222,6 +1222,9 @@
     "status": {
       "enabled": "Enabled",
       "disabled": "Disabled",
+      "account_active": "Account active",
+      "service_active": "Proxy service active",
+      "service_unavailable": "Proxy service unavailable",
       "expired": "Expired",
       "expiring_soon": "in {{days}} day(s)",
       "expired_days": "expired {{days}}d ago",
@@ -1234,15 +1237,15 @@
       "pending_email_verify": "Email pending",
       "pending_delete": "Pending delete",
       "manual_disabled": "Manually disabled",
-      "service_suspended": "Service suspended",
+      "service_suspended": "Proxy service suspended",
       "account_disabled": "Account disabled",
       "emergency_active": "Emergency active"
     },
     "action": {
       "edit": "Edit",
       "renew": "Renew 30 days",
-      "enable": "Enable",
-      "disable": "Disable",
+      "enable": "Enable account",
+      "disable": "Disable account",
       "delete": "Delete"
     },
     "result": {
@@ -1252,8 +1255,8 @@
       "copy": "Copy"
     },
     "reason": {
-      "enable_title": "Enable user",
-      "disable_title": "Disable user",
+      "enable_title": "Enable account",
+      "disable_title": "Disable account",
       "enable_placeholder": "Enable reason (optional)",
       "disable_placeholder": "Disable reason (optional)"
     },
@@ -1271,8 +1274,8 @@
       "renew_permanent_skip": "Permanent accounts don't need quick renewal; edit the user to set an expiry first.",
       "copied": "Copied",
       "sso_unlinked": "SSO binding cleared",
-      "service_resumed": "Service resumed",
-      "service_suspended": "Service suspended",
+      "service_resumed": "Proxy service resumed",
+      "service_suspended": "Proxy service suspended",
       "saved": "Saved"
     },
     "confirm": {
@@ -1299,8 +1302,8 @@
       "reset_2fa": "Reset authenticator app (TOTP)",
       "unlink_sso": "Unlink SSO binding",
       "passkeys": "Manage passkeys",
-      "resume_service": "Resume service",
-      "suspend_service": "Suspend service",
+      "resume_service": "Resume proxy service",
+      "suspend_service": "Suspend proxy service",
       "account_security": "Account security"
     },
     "security": {
@@ -1329,8 +1332,8 @@
     },
     "batch": {
       "selected": "{{count}} selected",
-      "enable": "Bulk enable",
-      "disable": "Bulk disable",
+      "enable": "Bulk enable accounts",
+      "disable": "Bulk disable accounts",
       "renew": "Bulk renew 30d",
       "delete": "Bulk delete",
       "more": "More",

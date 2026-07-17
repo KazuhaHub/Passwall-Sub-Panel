@@ -977,19 +977,13 @@ func (s *Service) VerifyLocalPassword(ctx context.Context, upn, password string)
 		_ = bcrypt.CompareHashAndPassword(dummyBcryptHash, []byte(password))
 		return nil, domain.ErrUnauthorized
 	}
-	if !u.Enabled && !emergencySelfServiceAllowedReason(u.AutoDisabledReason) {
+	if !domain.AccountLoginAllowed(u.Enabled, u.AutoDisabledReason) {
 		return u, domain.ErrForbidden
 	}
 	if err := bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(password)); err != nil {
 		return nil, domain.ErrUnauthorized
 	}
 	return u, nil
-}
-
-func emergencySelfServiceAllowedReason(reason domain.AutoDisabledReason) bool {
-	// Delegate to the domain helper so the login path and the token-refresh
-	// path share one definition (see domain.SelfServiceDisableReason).
-	return domain.SelfServiceDisableReason(reason)
 }
 
 // UnlinkSSO clears the user's SSO binding, dropping them back to local.
@@ -2050,6 +2044,12 @@ func (s *Service) HealSharedClients(ctx context.Context) (int, error) {
 // user's group) so imported clients with their recorded email are still
 // updated correctly.
 func (s *Service) SetEnabledAndSync(ctx context.Context, userID int64, enabled bool, reason domain.AutoDisabledReason, detail string) error {
+	if enabled && reason != domain.DisabledNone {
+		return fmt.Errorf("%w: enabling an account cannot carry a disable reason", domain.ErrValidation)
+	}
+	if !enabled && !domain.AccountDisableReason(reason) {
+		return fmt.Errorf("%w: invalid account disable reason %q", domain.ErrValidation, reason)
+	}
 	u, err := s.users.GetByID(ctx, userID)
 	if err != nil {
 		return err
@@ -2098,8 +2098,8 @@ func (s *Service) SetEnabledAndSync(ctx context.Context, userID int64, enabled b
 // panel login. Used by blocked-client enforcement, quota enforcement, and the
 // admin "pause service" action.
 func (s *Service) SetServiceSuspendedAndSync(ctx context.Context, userID int64, reason domain.AutoDisabledReason, detail string) error {
-	if reason == domain.DisabledNone {
-		return fmt.Errorf("%w: service suspension reason is required", domain.ErrValidation)
+	if !domain.ServiceSuspensionReason(reason) {
+		return fmt.Errorf("%w: invalid service suspension reason %q", domain.ErrValidation, reason)
 	}
 	u, err := s.users.GetByID(ctx, userID)
 	if err != nil {

@@ -155,7 +155,7 @@ func (s *Service) RequestReset(ctx context.Context, ident string) error {
 	// Manually-disabled / pending / blocked accounts can't log in anyway, so
 	// there's nothing to recover; skip silently. Self-service disable reasons
 	// (traffic-exceeded / expired) CAN still log in, so they keep recovery.
-	if !u.Enabled && !domain.SelfServiceDisableReason(u.AutoDisabledReason) {
+	if !domain.AccountLoginAllowed(u.Enabled, u.AutoDisabledReason) {
 		return nil
 	}
 	// Anti-abuse: suppress (still returning nil — enumeration-safe) when this

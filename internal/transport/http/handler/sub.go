@@ -96,6 +96,7 @@ func (h *SubHandler) Get(c *gin.Context) {
 		return
 	}
 	now := time.Now()
+	access := u.AccessSnapshot(now)
 	// "Valid token but the subscription can't be served right now"
 	// (disabled / expired / emergency-window-expired) is collapsed to
 	// the same opaque 404 + empty body the unknown-token branch above
@@ -120,13 +121,13 @@ func (h *SubHandler) Get(c *gin.Context) {
 		log.Info("sub: blocked", "user_id", u.ID, "reason", "emergency_quota_exhausted")
 		c.String(http.StatusNotFound, "")
 		return
-	case !u.Enabled:
+	case !access.CanLogin:
 		log.Info("sub: blocked", "user_id", u.ID, "reason", "disabled",
 			"auto_reason", string(u.AutoDisabledReason))
 		c.String(http.StatusNotFound, "")
 		return
-	case !u.ProxyAccessEnabled(now):
-		log.Info("sub: blocked", "user_id", u.ID, "reason", string(u.ServiceStatus(now)),
+	case !access.CanSubscribe:
+		log.Info("sub: blocked", "user_id", u.ID, "reason", string(access.ServiceStatus),
 			"service_reason", string(u.ServiceDisabledReason))
 		c.String(http.StatusNotFound, "")
 		return

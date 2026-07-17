@@ -137,6 +137,7 @@ type userDTO struct {
 	ServiceDisabledReason domain.AutoDisabledReason `json:"service_disabled_reason,omitempty"`
 	ServiceDisableDetail  string                    `json:"service_disable_detail,omitempty"`
 	ServiceDisabledAt     *time.Time                `json:"service_disabled_at,omitempty"`
+	Access                userAccessDTO             `json:"access"`
 	BlockViolationCount   int                       `json:"block_violation_count"`
 	EmergencyUsedCount    int                       `json:"emergency_used_count"`
 	EmergencyUntil        *time.Time                `json:"emergency_until,omitempty"`
@@ -574,9 +575,7 @@ func (h *AdminUserHandler) SetServiceStatus(c *gin.Context) {
 		if reason == "" {
 			reason = domain.DisabledServiceManual
 		}
-		switch reason {
-		case domain.DisabledServiceManual, domain.DisabledBlockedClient, domain.DisabledTrafficExceeded, domain.DisabledExpired:
-		default:
+		if !domain.ServiceSuspensionReason(reason) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid service status reason"})
 			return
 		}
@@ -828,10 +827,12 @@ func (h *AdminUserHandler) toDTO(r *http.Request, u *domain.User, redactSecrets 
 // toDTOWith is the pure mapping — no I/O, no Load — so list endpoints
 // can call it inside a tight loop with caller-supplied shared state.
 func (h *AdminUserHandler) toDTOWith(u *domain.User, st ports.UISettings, loc *time.Location, subBase string, redactSecrets bool) userDTO {
+	now := time.Now()
+	access := u.AccessSnapshot(now)
 	// Only fill EmergencyUsedBytes when a window is actually active — a stale
 	// baseline from a closed window is meaningless and would mislead the UI.
 	var usedBytes int64
-	if u.EmergencyUntil != nil && u.EmergencyUntil.After(time.Now()) {
+	if u.EmergencyUntil != nil && u.EmergencyUntil.After(now) {
 		usedBytes = u.LifetimeTotalBytes - u.EmergencyBaselineBytes
 		if usedBytes < 0 {
 			usedBytes = 0
@@ -879,11 +880,12 @@ func (h *AdminUserHandler) toDTOWith(u *domain.User, st ports.UISettings, loc *t
 		Remark:                u.Remark,
 		Enabled:               u.Enabled,
 		AutoDisabledReason:    u.AutoDisabledReason,
-		AccountStatus:         u.AccountStatus(),
-		ServiceStatus:         u.ServiceStatus(time.Now()),
+		AccountStatus:         access.AccountStatus,
+		ServiceStatus:         access.ServiceStatus,
 		ServiceDisabledReason: u.ServiceDisabledReason,
 		ServiceDisableDetail:  u.ServiceDisableDetail,
 		ServiceDisabledAt:     u.ServiceDisabledAt,
+		Access:                userAccessDTOFromSnapshot(access),
 		BlockViolationCount:   u.BlockViolationCount,
 		EmergencyUsedCount:    u.EmergencyUsedCount,
 		EmergencyUntil:        u.EmergencyUntil,

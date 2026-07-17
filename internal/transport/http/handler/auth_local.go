@@ -114,7 +114,7 @@ func (h *AuthLocalHandler) Methods(c *gin.Context) {
 		// Self-service registration (v3.7.0): the "Create account" link + whether
 		// the register page should expect an email-verify step. The email-domain
 		// allow-list is deliberately NOT exposed (server-side only).
-		"registration_enabled":                   s.RegistrationEnabled,
+		"registration_enabled":                    s.RegistrationEnabled,
 		"registration_require_email_verification": !s.RegistrationAllowUnverified,
 		"registration_delivery":                   s.RegistrationDelivery,
 		// Passkeys (v3.7.0): passkey_passwordless drives whether the login page
@@ -237,7 +237,7 @@ func (h *AuthLocalHandler) Refresh(c *gin.Context) {
 	// enough to reach the self-service emergency-access page. Without this they
 	// get bounced to the login screen every access-TTL. Other disable reasons
 	// (admin / pending / blocked) stay hard-blocked.
-	if !u.Enabled && !domain.SelfServiceDisableReason(u.AutoDisabledReason) {
+	if !domain.AccountLoginAllowed(u.Enabled, u.AutoDisabledReason) {
 		c.JSON(http.StatusUnauthorized, gin.H{
 			"error":  disabledReasonMessage(u.AutoDisabledReason),
 			"reason": string(u.AutoDisabledReason),
@@ -249,9 +249,9 @@ func (h *AuthLocalHandler) Refresh(c *gin.Context) {
 	// password reset, role change, and disable; without this check a refresh
 	// token issued before the bump would keep minting valid access+refresh
 	// pairs for the full refresh TTL (default 7d), defeating the documented
-	// "password change revokes other sessions" guarantee. (Disable is already
-	// caught by the !u.Enabled branch above; this closes the password/role
-	// rotation hole.)
+	// "password change revokes other sessions" guarantee. (A hard account
+	// suspension is already caught by AccountLoginAllowed above; this closes
+	// the password/role rotation hole.)
 	if u.TokenVersion != claims.TokenVersion {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Session revoked, please sign in again"})
 		return
@@ -426,7 +426,7 @@ func (h *AuthLocalHandler) resolvePendingUser(c *gin.Context, pendingToken strin
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid or expired 2FA session; please log in again"})
 		return nil, nil, false
 	}
-	if !u.Enabled && !domain.SelfServiceDisableReason(u.AutoDisabledReason) {
+	if !domain.AccountLoginAllowed(u.Enabled, u.AutoDisabledReason) {
 		recordAuthEvent(c, h.authEvents, domain.AuthMethodLocal, domain.AuthOutcomeFailure, u.ID, u.UPN, "disabled:"+string(u.AutoDisabledReason))
 		c.JSON(http.StatusForbidden, gin.H{"error": disabledReasonMessage(u.AutoDisabledReason), "reason": string(u.AutoDisabledReason)})
 		return nil, nil, false

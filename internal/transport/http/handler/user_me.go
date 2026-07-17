@@ -78,6 +78,8 @@ func (h *UserMeHandler) Profile(c *gin.Context) {
 	// dialog. Never expose the raw credential record — only id/name/timestamps.
 	passkeyAvailable := u.HasLocalPassword() && suErr == nil && suEff.PasskeyEnabled
 	passkeyList := h.passkeyList(c.Request.Context(), u.ID)
+	now := time.Now()
+	access := u.AccessSnapshot(now)
 	c.JSON(http.StatusOK, gin.H{
 		"id":           u.ID,
 		"display_name": u.DisplayName,
@@ -112,8 +114,9 @@ func (h *UserMeHandler) Profile(c *gin.Context) {
 		// as unlimited).
 		"traffic_history_days":    settings.TrafficHistoryDays,
 		"enabled":                 u.Enabled,
-		"account_status":          string(u.AccountStatus()),
-		"service_status":          string(u.ServiceStatus(time.Now())),
+		"account_status":          string(access.AccountStatus),
+		"service_status":          string(access.ServiceStatus),
+		"access":                  userAccessDTOFromSnapshot(access),
 		"service_disabled_reason": string(u.ServiceDisabledReason),
 		"service_disable_detail":  u.ServiceDisableDetail,
 		"service_disabled_at":     u.ServiceDisabledAt,

@@ -198,49 +198,15 @@ func (u *User) TrafficExceeded() bool {
 }
 
 func (u *User) AccountStatus() AccountStatus {
-	if u == nil {
-		return AccountStatusDisabled
-	}
-	if u.Enabled {
-		return AccountStatusActive
-	}
-	switch u.AutoDisabledReason {
-	case DisabledPendingDelete:
-		return AccountStatusPendingDelete
-	case DisabledPendingApproval:
-		return AccountStatusPendingApproval
-	case DisabledPendingEmailVerify:
-		return AccountStatusPendingEmailVerify
-	default:
-		return AccountStatusDisabled
-	}
+	return u.AccessSnapshot(time.Now()).AccountStatus
 }
 
 func (u *User) ServiceStatus(t time.Time) ServiceStatus {
-	if u == nil || !u.Enabled {
-		return ServiceStatusAccountDisabled
-	}
-	switch u.ServiceDisabledReason {
-	case DisabledBlockedClient:
-		return ServiceStatusBlockedClient
-	case DisabledServiceManual:
-		return ServiceStatusManualSuspended
-	}
-	if u.EmergencyActive(t) {
-		return ServiceStatusEmergencyActive
-	}
-	if u.IsExpired(t) || u.ServiceDisabledReason == DisabledExpired {
-		return ServiceStatusExpired
-	}
-	if u.ServiceDisabledReason == DisabledTrafficExceeded || u.TrafficExceeded() {
-		return ServiceStatusTrafficExceeded
-	}
-	return ServiceStatusActive
+	return u.AccessSnapshot(t).ServiceStatus
 }
 
 func (u *User) ProxyAccessEnabled(t time.Time) bool {
-	st := u.ServiceStatus(t)
-	return st == ServiceStatusActive || st == ServiceStatusEmergencyActive
+	return u.AccessSnapshot(t).ProxyEnabled
 }
 
 // EffectiveEnabled is the value the panel should publish to 3X-UI for the

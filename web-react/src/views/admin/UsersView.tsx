@@ -81,6 +81,7 @@ import { Link as RouterLink } from 'react-router-dom'
 import { useAuthStore } from '@/stores/auth'
 import { useCan } from '@/utils/permissions'
 import { formatDualTz } from '@/utils/datetime'
+import { accountEnabledForEdit, accountStateOf, proxyEnabled, serviceStateOf } from '@/utils/userAccess'
 import { useSiteStore } from '@/stores/site'
 import { confirm } from '@/components/ConfirmHost'
 import PageHeader from '@/components/PageHeader'
@@ -171,8 +172,6 @@ function avatarColor(seed: string): string {
   for (const c of seed) h = (h + c.charCodeAt(0) * 7) % 360
   return `hsl(${h} 42% 42%)`
 }
-function isExpired(u: User) { return !!u.expire_at && new Date(u.expire_at).getTime() < Date.now() }
-
 // formatRelativeTimeShort renders a "X 分钟前" / "X 小时前" / "X 天前" style
 // label. Chunked rather than using Intl.RelativeTimeFormat directly because we
 // want a single integer pick per call (no auto-pluralization in EN that adds
@@ -200,16 +199,14 @@ function formatRelativeTimeShort(diffMs: number, t: (k: string, opts?: Record<st
   const dd = String(d.getDate()).padStart(2, '0')
   return `${y}-${m}-${dd}`
 }
-function canQuickRenew(u: User) { return !!u.expire_at && u.account_status !== 'pending_delete' && u.auto_disabled_reason !== 'pending_delete' }
-function canSelect(u: User) { return u.account_status !== 'pending_delete' && u.auto_disabled_reason !== 'pending_delete' }
+function canQuickRenew(u: User) { return !!u.expire_at && accountStateOf(u) !== 'pending_delete' }
+function canSelect(u: User) { return accountStateOf(u) !== 'pending_delete' }
 function canResumeService(u: User) {
-  return ['blocked_client', 'manual_suspended'].includes(u.service_status || '')
+  return ['blocked_client', 'manual_suspended'].includes(serviceStateOf(u))
     || ['blocked_client', 'service_manual'].includes(u.service_disabled_reason || '')
 }
 function canSuspendService(u: User) {
-  const accountActive = (u.account_status || (u.enabled ? 'active' : 'disabled')) === 'active'
-  const serviceStatus = u.service_status || (isExpired(u) ? 'expired' : 'active')
-  return accountActive && serviceStatus === 'active'
+  return accountStateOf(u) === 'active' && serviceStateOf(u) === 'active'
 }
 function renewedExpireAt(u: User, days: number) {
   const now = Date.now()
@@ -483,7 +480,7 @@ export default function UsersView() {
       period_used_gb: usedGB,
       period_used_initial: usedGB,
       emergency_used_count: u.emergency_used_count,
-      enabled: u.enabled,
+      enabled: accountEnabledForEdit(u),
     })
     setEditErr({})
     setEditOpen(true)
@@ -543,7 +540,7 @@ export default function UsersView() {
       // Enable state rides the dedicated endpoint (updateUser has no `enabled`
       // field). Only fire when actually flipped — and never let an admin
       // disable their own account from here, which would lock them out.
-      if (editForm.enabled !== editing.enabled && editing.id !== auth.userId) {
+      if (editForm.enabled !== accountEnabledForEdit(editing) && editing.id !== auth.userId) {
         await setEnabled(editing.id, editForm.enabled)
       }
       if (editing.id === auth.userId) auth.setDisplayName(editForm.display_name || '')
@@ -601,7 +598,7 @@ export default function UsersView() {
       return
     }
     if (!reasonUser) return
-    const enabling = !reasonUser.enabled
+    const enabling = !accountEnabledForEdit(reasonUser)
     await setEnabled(reasonUser.id, enabling, reasonText.trim() || undefined)
     pushSnack(t(enabling ? 'admin:users.toast.enabled' : 'admin:users.toast.disabled'), 'success')
     await load()
@@ -923,26 +920,23 @@ export default function UsersView() {
   }
 
   function statusBadge(u: User) {
-    const accountStatus = u.account_status || (u.enabled ? 'active' : u.auto_disabled_reason || 'disabled')
-    if (accountStatus !== 'active') {
+    const accountStatus = accountStateOf(u)
+    const accountBadge = (() => {
       switch (accountStatus) {
+        case 'active':
+          return badge(t('admin:users.status.account_active'), md.primaryContainer, md.onPrimaryContainer)
         case 'pending_approval':
           return badge(t('admin:users.status.pending_approval'), md.surfaceContainerHighest, md.onSurfaceVariant)
         case 'pending_delete':
           return badge(t('admin:users.status.pending_delete'), md.surfaceContainerHighest, md.onSurfaceVariant)
         case 'pending_email_verify':
-          return badge(t('admin:users.status.pending_email_verify', { defaultValue: '邮箱待验证' }), md.surfaceContainerHighest, md.onSurfaceVariant)
-        case 'manual':
-        case 'disabled':
+          return badge(t('admin:users.status.pending_email_verify'), md.surfaceContainerHighest, md.onSurfaceVariant)
         default:
-          return badge(t('admin:users.status.manual_disabled'), md.errorContainer, md.onErrorContainer)
+          return badge(t('admin:users.status.account_disabled'), md.errorContainer, md.onErrorContainer)
       }
-    }
-    const periodUsed = usageMap.get(u.id)?.period_used_bytes ?? 0
-    const derivedService = u.traffic_limit_bytes > 0 && periodUsed >= u.traffic_limit_bytes
-      ? 'traffic_exceeded'
-      : (u.expire_at && new Date(u.expire_at).getTime() < Date.now() ? 'expired' : 'active')
-    switch (u.service_status || derivedService) {
+    })()
+    const serviceBadge = (() => {
+      switch (serviceStateOf(u)) {
       case 'emergency_active':
         return badge(t('admin:users.status.emergency_active'), md.tertiaryContainer, md.onTertiaryContainer)
       case 'traffic_exceeded':
@@ -952,16 +946,21 @@ export default function UsersView() {
       case 'blocked_client':
         return badge(t('admin:users.status.blocked'), md.errorContainer, md.onErrorContainer)
       case 'manual_suspended':
-        return badge(t('admin:users.status.service_suspended', { defaultValue: '服务暂停' }), md.errorContainer, md.onErrorContainer)
+        return badge(t('admin:users.status.service_suspended'), md.errorContainer, md.onErrorContainer)
+      case 'account_disabled':
+        return badge(t('admin:users.status.service_unavailable'), md.surfaceContainerHighest, md.onSurfaceVariant)
       default:
-        return badge(t('admin:users.status.enabled'), md.tertiaryContainer, md.onTertiaryContainer)
-    }
+        return badge(t('admin:users.status.service_active'), md.tertiaryContainer, md.onTertiaryContainer)
+      }
+    })()
+    return <Box sx={{ display: 'flex', gap: 0.5, alignItems: 'center', flexWrap: 'wrap' }}>{accountBadge}{serviceBadge}</Box>
   }
 
   function serviceStatusText(u: User) {
-    switch (u.service_status) {
+    const serviceStatus = serviceStateOf(u)
+    switch (serviceStatus) {
       case 'active':
-        return t('admin:users.status.enabled')
+        return t('admin:users.status.service_active')
       case 'emergency_active':
         return t('admin:users.status.emergency_active')
       case 'traffic_exceeded':
@@ -975,7 +974,7 @@ export default function UsersView() {
       case 'account_disabled':
         return t('admin:users.status.account_disabled', { defaultValue: '账号已停用' })
       default:
-        return u.service_status || t('admin:users.status.enabled')
+        return serviceStatus || t('admin:users.status.enabled')
     }
   }
 
@@ -1169,7 +1168,7 @@ export default function UsersView() {
               {items.map(u => (
                 <TableRow key={u.id} hover sx={{
                   '& td': { borderBottom: `1px solid ${md.outlineVariant}`, whiteSpace: 'nowrap' },
-                  opacity: (u.account_status || (u.enabled ? 'active' : 'disabled')) === 'active' && (u.service_status || (isExpired(u) ? 'expired' : 'active')) === 'active' ? 1 : 0.65,
+                  opacity: accountStateOf(u) === 'active' && proxyEnabled(u) ? 1 : 0.65,
                 }}>
                   <TableCell padding="checkbox">
                     <Checkbox checked={selected.has(u.id)} disabled={!canSelect(u)}
@@ -1200,9 +1199,9 @@ export default function UsersView() {
                       </span>
                     </Tooltip>
                     {canManageUser(u) && <>
-                    <Tooltip title={t(u.enabled ? 'admin:users.action.disable' : 'admin:users.action.enable')}>
+                    <Tooltip title={t(accountEnabledForEdit(u) ? 'admin:users.action.disable' : 'admin:users.action.enable')}>
                       <IconButton size="small" onClick={() => openReason(u)}>
-                        {u.enabled
+                        {accountEnabledForEdit(u)
                           ? <ToggleOnIcon fontSize="small" sx={{ color: md.primary }} />
                           : <ToggleOffIcon fontSize="small" />}
                       </IconButton>
@@ -1634,8 +1633,8 @@ export default function UsersView() {
                 ? t('admin:users.field.account_self_locked', { defaultValue: '不能停用自己的账户' })
                 : (!editForm.enabled && editing?.auto_disabled_reason ? editing.auto_disabled_reason : '')}
               sx={{ gridColumn: '1 / -1' }}>
-              <MenuItem value="enabled">{t('admin:users.status.enabled')}</MenuItem>
-              <MenuItem value="disabled">{t('admin:users.status.disabled')}</MenuItem>
+              <MenuItem value="enabled">{t('admin:users.status.account_active')}</MenuItem>
+              <MenuItem value="disabled">{t('admin:users.status.account_disabled')}</MenuItem>
             </TextField>
             {editing && (
               <Box sx={{ gridColumn: '1 / -1', display: 'flex', gap: 1, alignItems: 'flex-start' }}>
@@ -1789,7 +1788,7 @@ export default function UsersView() {
           paper: { sx: { borderRadius: 3, bgcolor: md.surfaceContainerHigh, width: 480, maxWidth: '90vw' } }
         }}>
         <DialogTitle>
-          {(reasonBatch?.enable ?? !reasonUser?.enabled)
+          {(reasonBatch?.enable ?? (reasonUser ? !accountEnabledForEdit(reasonUser) : true))
             ? t('admin:users.reason.enable_title')
             : t('admin:users.reason.disable_title')}
           {reasonUser ? ` — ${reasonUser.upn}` : reasonBatch ? ` (${selected.size})` : ''}
@@ -1798,7 +1797,7 @@ export default function UsersView() {
           <TextField fullWidth multiline minRows={3} autoFocus
             value={reasonText} onChange={e => setReasonText(e.target.value)}
             placeholder={
-              (reasonBatch?.enable ?? !reasonUser?.enabled)
+              (reasonBatch?.enable ?? (reasonUser ? !accountEnabledForEdit(reasonUser) : true))
                 ? t('admin:users.reason.enable_placeholder')
                 : t('admin:users.reason.disable_placeholder')
             } />
@@ -1806,10 +1805,10 @@ export default function UsersView() {
         <DialogActions>
           <Button onClick={() => setReasonOpen(false)} variant="text">{t('common:actions.cancel')}</Button>
           <Button onClick={submitReason} variant="contained"
-            sx={(reasonBatch?.enable ?? !reasonUser?.enabled)
+            sx={(reasonBatch?.enable ?? (reasonUser ? !accountEnabledForEdit(reasonUser) : true))
               ? undefined
               : { bgcolor: md.error, color: md.onError, '&:hover': { bgcolor: alpha(md.error, 0.9) } }}>
-            {(reasonBatch?.enable ?? !reasonUser?.enabled)
+            {(reasonBatch?.enable ?? (reasonUser ? !accountEnabledForEdit(reasonUser) : true))
               ? t('admin:users.action.enable')
               : t('admin:users.action.disable')}
           </Button>

@@ -6,7 +6,7 @@ import type {
 } from '@simplewebauthn/browser'
 
 import { client } from './client'
-import type { PasskeyCredential } from './types'
+import type { PasskeyCredential, UserAccess } from './types'
 
 export interface SubImportClient {
   name: string
@@ -78,6 +78,7 @@ export interface MeProfile {
   service_disabled_reason?: string
   service_disable_detail?: string
   service_disabled_at?: string | null
+  access?: UserAccess
   can_change_password: boolean
   can_edit_personal_rules: boolean
   /** totp_available: the admin has enabled 2FA panel-wide AND this account has a

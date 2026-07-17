@@ -511,7 +511,7 @@ export default function MeView() {
   function serviceNotice() {
     const p = profile
     if (!p) return null
-    switch (p.service_status) {
+    switch (p.access?.service_state ?? p.service_status) {
       case 'expired':
         return {
           title: t('service.expired_title', { defaultValue: '服务已到期' }),

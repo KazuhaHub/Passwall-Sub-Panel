@@ -50,7 +50,7 @@ func (h *AuthPasskeyHandler) LoginFinish(c *gin.Context) {
 	}
 	// Disable gate — a passkey for a disabled account must not mint a session
 	// (self-service disable reasons stay loginable, matching password login).
-	if !u.Enabled && !domain.SelfServiceDisableReason(u.AutoDisabledReason) {
+	if !domain.AccountLoginAllowed(u.Enabled, u.AutoDisabledReason) {
 		recordAuthEvent(c, h.authEvents, domain.AuthMethodPasskey, domain.AuthOutcomeFailure, u.ID, u.UPN, "disabled:"+string(u.AutoDisabledReason))
 		c.JSON(http.StatusForbidden, gin.H{"error": disabledReasonMessage(u.AutoDisabledReason), "reason": string(u.AutoDisabledReason)})
 		return

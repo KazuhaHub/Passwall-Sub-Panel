@@ -11,6 +11,18 @@ export type ResetPeriod = 'never' | 'monthly' | 'quarterly' | 'yearly'
 export type AccountStatus = 'active' | 'disabled' | 'pending_delete' | 'pending_approval' | 'pending_email_verify' | string
 export type ServiceStatus = 'active' | 'account_disabled' | 'expired' | 'traffic_exceeded' | 'blocked_client' | 'manual_suspended' | 'emergency_active' | string
 
+export interface UserAccess {
+  account_state: AccountStatus
+  service_state: ServiceStatus
+  can_login: boolean
+  can_use_portal: boolean
+  can_subscribe: boolean
+  proxy_enabled: boolean
+  account_reason?: string
+  service_reason?: string
+  legacy_service_encoding?: boolean
+}
+
 export interface User {
   id: number
   upn: string
@@ -47,6 +59,7 @@ export interface User {
   service_disabled_reason?: string
   service_disable_detail?: string
   service_disabled_at?: string | null
+  access?: UserAccess
   block_violation_count?: number
   emergency_used_count: number
   /** RFC3339 timestamp; emergency window is active iff > now. */

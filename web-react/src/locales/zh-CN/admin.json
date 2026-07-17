@@ -517,9 +517,9 @@
       "filter_mode": "客户端过滤模式",
       "filter_mode_blacklist": "黑名单（默认放行，仅拦禁用项）",
       "filter_mode_whitelist": "白名单（默认拦截，仅放行已知）",
-      "filter_mode_help": "黑名单（默认）：只拦截你明确「禁用」的客户端族，未识别的客户端放行（按 mihomo 兜底）。\n\n白名单：只放行「已知且启用」的客户端族，未识别 / 未启用的一律拦截，并计入异常次数（达到阈值可能触发自动停用）。适合严格防滥用。",
-      "sub_block_auto_disable": "异常订阅请求自动禁用账号",
-      "sub_block_auto_disable_count": "触发禁用的连续异常次数",
+      "filter_mode_help": "黑名单（默认）：只拦截你明确「禁用」的客户端族，未识别的客户端放行（按 mihomo 兜底）。\n\n白名单：只放行「已知且启用」的客户端族，未识别 / 未启用的一律拦截，并计入异常次数（达到阈值可能触发代理服务自动暂停）。适合严格防滥用。",
+      "sub_block_auto_disable": "异常订阅请求自动暂停代理服务",
+      "sub_block_auto_disable_count": "触发代理服务暂停的连续异常次数",
       "sub_block_notify_user": "被禁客户端时邮件提醒用户",
       "sub_block_notify_max_per_day": "每天最多发送（条）",
       "rule_table": {
@@ -1167,7 +1167,7 @@
       "period_used_gb": "本周期已用 (GB)",
       "account_enabled": "账户状态",
       "account_self_locked": "不能停用自己的账户",
-      "service_status": "服务状态",
+      "service_status": "代理服务状态",
       "block_violations": "违规次数：{{count}}",
       "emergency_used_count": "紧急访问已用 {{count}} 次",
       "emergency_window_until": "生效至 {{time}}（剩余 {{hours}} 小时）",
@@ -1222,6 +1222,9 @@
     "status": {
       "enabled": "启用",
       "disabled": "禁用",
+      "account_active": "账户正常",
+      "service_active": "代理服务正常",
+      "service_unavailable": "代理服务不可用",
       "expired": "已过期",
       "expiring_soon": "{{days}} 天内到期",
       "expired_days": "已过期 {{days}} 天",
@@ -1229,20 +1232,20 @@
       "permanent": "永久",
       "unlimited": "无限",
       "traffic_exhausted": "流量已用尽",
-      "blocked": "违规停用",
+      "blocked": "违规暂停",
       "pending_approval": "待审核",
       "pending_email_verify": "邮箱待验证",
       "pending_delete": "待删除",
       "manual_disabled": "管理员停用",
-      "service_suspended": "服务暂停",
-      "account_disabled": "账号已停用",
+      "service_suspended": "代理服务暂停",
+      "account_disabled": "账户已停用",
       "emergency_active": "紧急访问中"
     },
     "action": {
       "edit": "编辑",
       "renew": "续期 30 天",
-      "enable": "启用",
-      "disable": "停用",
+      "enable": "启用账户",
+      "disable": "停用账户",
       "delete": "删除"
     },
     "result": {
@@ -1252,8 +1255,8 @@
       "copy": "复制"
     },
     "reason": {
-      "enable_title": "启用用户",
-      "disable_title": "停用用户",
+      "enable_title": "启用账户",
+      "disable_title": "停用账户",
       "enable_placeholder": "启用原因（可选）",
       "disable_placeholder": "停用原因（可选）"
     },
@@ -1271,8 +1274,8 @@
       "renew_permanent_skip": "永久账号无需快捷续期；如需改成限时账号请进入编辑设置到期时间",
       "copied": "已复制",
       "sso_unlinked": "已解除 SSO 绑定",
-      "service_resumed": "服务已恢复",
-      "service_suspended": "服务已暂停",
+      "service_resumed": "代理服务已恢复",
+      "service_suspended": "代理服务已暂停",
       "saved": "已保存"
     },
     "confirm": {
@@ -1299,8 +1302,8 @@
       "reset_2fa": "重置验证器 App（TOTP）",
       "unlink_sso": "解除 SSO 绑定",
       "passkeys": "管理通行密钥",
-      "resume_service": "恢复服务",
-      "suspend_service": "暂停服务",
+      "resume_service": "恢复代理服务",
+      "suspend_service": "暂停代理服务",
       "account_security": "账号安全"
     },
     "security": {
@@ -1329,8 +1332,8 @@
     },
     "batch": {
       "selected": "已选 {{count}}",
-      "enable": "批量启用",
-      "disable": "批量停用",
+      "enable": "批量启用账户",
+      "disable": "批量停用账户",
       "renew": "批量续期 30 天",
       "delete": "批量删除",
       "more": "更多",

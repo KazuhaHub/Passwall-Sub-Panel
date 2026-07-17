@@ -456,7 +456,7 @@ func (s *Service) provisionNodeMembersInBackground(n *domain.Node) {
 	})
 }
 
-// provisionNodeMembers re-provisions every ENABLED member of the groups that include
+// provisionNodeMembers re-provisions every account-active member of the groups that include
 // n, attaching their shared client to n's inbound. Immediate per member, with a
 // sync-task-queue fallback on failure (via ResyncMembershipOrEnqueue). Synchronous +
 // testable; the caller runs it in the background.
@@ -469,7 +469,10 @@ func (s *Service) provisionNodeMembers(ctx context.Context, n *domain.Node) {
 		log.Warn("recreate: list groups for member provision", "node_id", n.ID, "err", err)
 		return
 	}
-	// Collect every ENABLED member of a matching group, deduped, order-preserving.
+	// Collect every account-active member of a matching group, deduped and
+	// order-preserving. AccountLoginAllowed includes historical expiry/quota
+	// encodings; their client is still provisioned but EffectiveEnabled keeps it
+	// disabled until the service restriction clears.
 	seen := make(map[int64]bool)
 	var memberIDs []int64
 	for _, g := range groups {
@@ -482,7 +485,7 @@ func (s *Service) provisionNodeMembers(ctx context.Context, n *domain.Node) {
 			continue
 		}
 		for _, u := range members {
-			if !u.Enabled || seen[u.ID] {
+			if !domain.AccountLoginAllowed(u.Enabled, u.AutoDisabledReason) || seen[u.ID] {
 				continue
 			}
 			seen[u.ID] = true
@@ -1140,7 +1143,7 @@ func (s *Service) syncExistingUsersToNode(ctx context.Context, n *domain.Node) e
 		}
 		for _, u := range members {
 			considered++
-			if !u.Enabled || seen[u.ID] {
+			if !domain.AccountLoginAllowed(u.Enabled, u.AutoDisabledReason) || seen[u.ID] {
 				continue
 			}
 			seen[u.ID] = true

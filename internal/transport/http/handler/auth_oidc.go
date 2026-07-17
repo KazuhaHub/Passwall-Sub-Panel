@@ -172,7 +172,7 @@ func (h *AuthOIDCHandler) Callback(c *gin.Context) {
 		c.Redirect(http.StatusFound, panelRedirect(c, "/sso-error?error=sso_error&description="+url.QueryEscape(err.Error())))
 		return
 	}
-	if !u.Enabled && !allowDisabledEmergencyLogin(u.AutoDisabledReason) {
+	if !domain.AccountLoginAllowed(u.Enabled, u.AutoDisabledReason) {
 		// No description: the SPA renders a localized message for these
 		// recognized codes. Passing a hardcoded string would override i18n.
 		errorCode := "account_disabled"

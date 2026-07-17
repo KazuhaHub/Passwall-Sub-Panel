@@ -84,7 +84,7 @@ func RequireAuth(svc *auth.Service, users UserLookup, userCache *AuthUserCache) 
 			u = authUserFromDomain(liveUser)
 			userCache.Put(u)
 		}
-		if !u.Enabled && !allowSelfServiceForDisabledUser(c, u.AutoDisabledReason) {
+		if !u.Enabled && (!domain.AccountLoginAllowed(u.Enabled, u.AutoDisabledReason) || !allowSelfServiceForDisabledUser(c, u.AutoDisabledReason)) {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Account disabled"})
 			return
 		}
@@ -163,7 +163,7 @@ func authUserFromDomain(u *domain.User) authUserSnapshot {
 // the previous "401 on everything" behavior — those are punitive states, not
 // quota states.
 func allowSelfServiceForDisabledUser(c *gin.Context, reason domain.AutoDisabledReason) bool {
-	if reason != domain.DisabledTrafficExceeded && reason != domain.DisabledExpired {
+	if !domain.AccountLoginAllowed(false, reason) {
 		return false
 	}
 	path := c.FullPath()
