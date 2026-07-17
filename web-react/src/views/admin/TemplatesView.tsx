@@ -37,6 +37,7 @@ import EditIcon from '@mui/icons-material/EditOutlined'
 import RestartAltIcon from '@mui/icons-material/RestartAlt'
 import { useTranslation } from 'react-i18next'
 import { useCan } from '@/utils/permissions'
+import { allSettledLimited } from '@/utils/promises'
 
 import { deleteTemplate, listTemplates, resetTemplate, saveTemplate, SEEDED_TEMPLATE_SLUGS, type Template } from '@/api/templates'
 import { listRuleSets, type RuleSet } from '@/api/rules'
@@ -236,7 +237,7 @@ export default function TemplatesView() {
     if (!ok) return
     setBatchBusy(true)
     try {
-      const results = await Promise.allSettled(rows.map(r => deleteTemplate(r.slug)))
+      const results = await allSettledLimited(rows, r => deleteTemplate(r.slug))
       const okSlugs = rows.filter((_, i) => results[i].status === 'fulfilled').map(r => r.slug)
       const failed = rows.length - okSlugs.length
       setItems(prev => prev.filter(x => !okSlugs.includes(x.slug)))

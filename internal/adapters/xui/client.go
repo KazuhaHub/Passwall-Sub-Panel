@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/keyedmutex"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/safehttp"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 )
@@ -55,11 +56,10 @@ type Client struct {
 	// re-injects settings.clients[], and POSTs it back; two concurrent writers
 	// on the same inbound (e.g. reconcile axis-A and a node edit) would each
 	// act on the same snapshot and the later POST would silently drop the
-	// earlier change. inboundWriteMu guards the map itself. (Client writes no
+	// earlier change. Idle keyed locks are removed after the final waiter. (Client writes no
 	// longer use this — 3.2.0's /clients/* endpoints are email-keyed and need
 	// no inbound read-modify-write.)
-	inboundWriteMu    sync.Mutex
-	inboundWriteLocks map[int]*sync.Mutex
+	inboundWriteLocks keyedmutex.Map[int]
 }
 
 // Capabilities advertises the operations implemented by the 3X-UI adapter.
@@ -103,7 +103,7 @@ func (c *Client) Capabilities() []ports.PanelCapability {
 // same backend row. Keying on the backend URL makes every panel fronting the same
 // 3X-UI share one lock. Different clients (and different backends) still mutate in
 // parallel. Reads (GetClient/ListInbounds) are unlocked — only mutations conflict.
-var clientWriteLocks sync.Map // key: baseURL "\x00" email -> *sync.Mutex
+var clientWriteLocks keyedmutex.Map[string] // key: baseURL "\x00" email
 
 // lockClientEmail acquires the global per-(backend,email) write lock and returns
 // its unlock func (use `defer c.lockClientEmail(email)()`). See clientWriteLocks.
@@ -112,10 +112,7 @@ func (c *Client) lockClientEmail(email string) func() {
 	if email == "" {
 		return func() {}
 	}
-	mi, _ := clientWriteLocks.LoadOrStore(c.baseURL+"\x00"+email, &sync.Mutex{})
-	m := mi.(*sync.Mutex)
-	m.Lock()
-	return m.Unlock
+	return clientWriteLocks.Lock(c.baseURL + "\x00" + email)
 }
 
 // isInboundConflict reports whether a client mutation failed on 3X-UI's transient
@@ -202,29 +199,20 @@ func New(p *domain.XUIPanel) (*Client, error) {
 		apiToken = ""
 	}
 	return &Client{
-		panelName:         p.Name,
-		baseURL:           strings.TrimRight(p.URL, "/"),
-		apiToken:          apiToken,
-		username:          p.Username,
-		password:          p.Password,
-		http:              httpClient,
-		jar:               jar,
-		inboundWriteLocks: make(map[int]*sync.Mutex),
+		panelName: p.Name,
+		baseURL:   strings.TrimRight(p.URL, "/"),
+		apiToken:  apiToken,
+		username:  p.Username,
+		password:  p.Password,
+		http:      httpClient,
+		jar:       jar,
 	}, nil
 }
 
 // lockInbound serializes read-modify-write updates to one inbound within this
 // process and returns the unlock func. Use as: defer c.lockInbound(id)().
 func (c *Client) lockInbound(id int) func() {
-	c.inboundWriteMu.Lock()
-	mu, ok := c.inboundWriteLocks[id]
-	if !ok {
-		mu = &sync.Mutex{}
-		c.inboundWriteLocks[id] = mu
-	}
-	c.inboundWriteMu.Unlock()
-	mu.Lock()
-	return mu.Unlock
+	return c.inboundWriteLocks.Lock(id)
 }
 
 // --- Auth ---

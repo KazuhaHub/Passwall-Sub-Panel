@@ -31,6 +31,7 @@ import CleaningIcon from '@mui/icons-material/CleaningServices'
 import { useTranslation } from 'react-i18next'
 import { useCan } from '@/utils/permissions'
 import { formatDualTz } from '@/utils/datetime'
+import { allSettledLimited } from '@/utils/promises'
 import { useSiteStore } from '@/stores/site'
 
 import {
@@ -135,7 +136,7 @@ export default function SyncTasksView() {
     if (!rows.length) return
     setBatchBusy('retry')
     try {
-      const results = await Promise.allSettled(rows.map(r => retrySyncTask(idOf(r))))
+      const results = await allSettledLimited(rows, r => retrySyncTask(idOf(r)))
       const failed = results.filter(r => r.status === 'rejected').length
       if (failed > 0) pushSnack(t('admin:sync_tasks.toast.batch_partial', { ok: rows.length - failed, fail: failed }), 'warning')
       else pushSnack(t('admin:sync_tasks.toast.batch_retried', { count: rows.length }), 'success')
@@ -154,7 +155,7 @@ export default function SyncTasksView() {
     if (!ok) return
     setBatchBusy('cancel')
     try {
-      const results = await Promise.allSettled(rows.map(r => cancelSyncTask(idOf(r))))
+      const results = await allSettledLimited(rows, r => cancelSyncTask(idOf(r)))
       const failed = results.filter(r => r.status === 'rejected').length
       if (failed > 0) pushSnack(t('admin:sync_tasks.toast.batch_partial', { ok: rows.length - failed, fail: failed }), 'warning')
       else pushSnack(t('admin:sync_tasks.toast.batch_canceled', { count: rows.length }), 'success')

@@ -477,9 +477,7 @@ func (s *Service) PollOnce(ctx context.Context) error {
 					// Remember this client's delta so the rollover baseline pass
 					// can subtract it (this cycle's traffic belongs to the NEW
 					// period, exactly as the user-level rollover treats it).
-					if sink != nil {
-						sink.clientDeltas[ref.entry.ID] = delta
-					}
+					sink.clientDeltas[ref.entry.ID] = delta
 				}
 				totals[ref.userID] = total
 			}

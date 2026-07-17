@@ -37,6 +37,7 @@ import EditIcon from '@mui/icons-material/EditOutlined'
 import VisibilityIcon from '@mui/icons-material/Visibility'
 import VisibilityOffIcon from '@mui/icons-material/VisibilityOff'
 import { useTranslation } from 'react-i18next'
+import { allSettledLimited } from '@/utils/promises'
 
 import WarningAmberIcon from '@mui/icons-material/WarningAmber'
 import MoreVertIcon from '@mui/icons-material/MoreVert'
@@ -179,7 +180,7 @@ export default function ServersView() {
   // per page / search / sort change, which is what we want.
   const pageIdsKey = useMemo(() => items.map(s => s.id).join('|'), [items])
   useEffect(() => {
-    void Promise.allSettled(items.map(s => probeServer(s)))
+    void allSettledLimited(items, s => probeServer(s))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pageIdsKey])
   // Reset selection on page change — selection state is per-id and
@@ -531,7 +532,7 @@ export default function ServersView() {
     if (!rows.length) return
     setBatchBusy('test')
     try {
-      await Promise.allSettled(rows.map(s => probeServer(s)))
+      await allSettledLimited(rows, s => probeServer(s))
       pushSnack(t('admin:servers.toast.batch_tested', { count: rows.length }), 'success')
     } finally {
       setBatchBusy('')
@@ -545,7 +546,7 @@ export default function ServersView() {
     if (!items.length) return
     setBatchBusy('test')
     try {
-      await Promise.allSettled(items.map(s => probeServer(s)))
+      await allSettledLimited(items, s => probeServer(s))
       pushSnack(t('admin:servers.toast.batch_tested', { count: items.length }), 'success')
     } finally {
       setBatchBusy('')
@@ -573,16 +574,15 @@ export default function ServersView() {
     if (!ok) return
     setBatchBusy('upgrade_xray')
     try {
-      const results = await Promise.allSettled(rows.map(r => upgradeXray(r.id)))
+      const results = await allSettledLimited(rows, r => upgradeXray(r.id))
       const success = results.filter(r => r.status === 'fulfilled').length
       const failed = rows.length - success
       // Refresh version snapshots for the rows that succeeded so the
       // Version column reflects the new xray-core tag without admin
       // having to click Test individually.
-      void Promise.allSettled(
-        rows
-          .filter((_, i) => results[i].status === 'fulfilled')
-          .map(s => probeServer(s)),
+      void allSettledLimited(
+        rows.filter((_, i) => results[i].status === 'fulfilled'),
+        s => probeServer(s),
       )
       if (failed > 0) {
         pushSnack(
@@ -632,7 +632,7 @@ export default function ServersView() {
     if (!ok) return
     setBatchBusy('upgrade_panel')
     try {
-      const results = await Promise.allSettled(rows.map(r => upgradePanel(r.id)))
+      const results = await allSettledLimited(rows, r => upgradePanel(r.id))
       let initiated = 0
       let alreadyLatest = 0
       let blocked = 0
@@ -694,7 +694,7 @@ export default function ServersView() {
     if (!ok) return
     setBatchBusy('delete')
     try {
-      const results = await Promise.allSettled(rows.map(r => deleteServer(r.id)))
+      const results = await allSettledLimited(rows, r => deleteServer(r.id))
       const okIds = rows.filter((_, i) => results[i].status === 'fulfilled').map(r => r.id)
       const failed = rows.length - okIds.length
       setSelected(new Set())

@@ -531,7 +531,7 @@ func (s *Service) shouldObtain(cert *domain.TLSCertificate, taskType domain.Sync
 		// redundant ACME call (after a successful renewal NotAfter jumps out).
 		if cert.NotBefore != nil && cert.NotAfter.After(*cert.NotBefore) {
 			lifetime := cert.NotAfter.Sub(*cert.NotBefore)
-			return cert.NotAfter.Sub(time.Now()) <= (2*lifetime)/3
+			return time.Until(*cert.NotAfter) <= (2*lifetime)/3
 		}
 		return true // lifetime unknown — trust the scan's due decision
 	}

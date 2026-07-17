@@ -37,6 +37,7 @@ import CloudSyncIcon from '@mui/icons-material/CloudSync'
 import { useTranslation } from 'react-i18next'
 import { useCan } from '@/utils/permissions'
 import { formatDualTz } from '@/utils/datetime'
+import { allSettledLimited } from '@/utils/promises'
 import { useSiteStore } from '@/stores/site'
 
 import {
@@ -2575,7 +2576,7 @@ export default function NodesView() {
     if (!rows.length) return
     setBatchBusy(enable ? 'enable' : 'disable')
     try {
-      const results = await Promise.allSettled(rows.map(r => setNodeEnabled(r.id, enable)))
+      const results = await allSettledLimited(rows, r => setNodeEnabled(r.id, enable))
       const failed = results.filter(r => r.status === 'rejected').length
       if (failed > 0) {
         pushSnack(t('admin:nodes.toast.batch_partial', { ok: rows.length - failed, fail: failed }), 'warning')
@@ -2598,7 +2599,7 @@ export default function NodesView() {
     if (!ok) return
     setBatchBusy('delete')
     try {
-      const results = await Promise.allSettled(rows.map(r => deleteNode(r.id)))
+      const results = await allSettledLimited(rows, r => deleteNode(r.id))
       const okIds = rows.filter((_, i) => results[i].status === 'fulfilled').map(r => r.id)
       const failed = rows.length - okIds.length
       setManaged(prev => prev.filter(x => !okIds.includes(x.id)))

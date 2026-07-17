@@ -7,7 +7,19 @@ import { fileURLToPath } from 'node:url'
 export default defineConfig({
   test: {
     environment: 'node',
-    include: ['src/**/*.test.ts'],
+    include: ['src/**/*.test.{ts,tsx}'],
+    coverage: {
+      provider: 'v8',
+      include: ['src/**/*.{ts,tsx}'],
+      exclude: ['src/**/*.test.{ts,tsx}', 'src/vite-env.d.ts'],
+      reporter: ['text', 'json-summary', 'html'],
+      thresholds: {
+        statements: 7,
+        branches: 6,
+        functions: 7,
+        lines: 8,
+      },
+    },
   },
   resolve: {
     alias: {

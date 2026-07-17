@@ -60,7 +60,6 @@ type Service struct {
 	tasks      ports.SyncTaskRepo
 	groups     ports.GroupRepo
 	users      ports.UserRepo
-	settings   ports.SettingsRepo
 	resyncer   MemberResyncer
 	// bg routes handler-spawned background work (member provisioning after a node
 	// recreate; sync-existing-users after a node add) through the app's tracked
@@ -107,7 +106,7 @@ func (s *Service) runBackground(name string, fn func(ctx context.Context)) {
 }
 
 func New(nodes ports.NodeRepo, separators ports.SeparatorRepo, pool ports.XUIPool, cleaner InboundCleaner,
-	tasks ports.SyncTaskRepo, groups ports.GroupRepo, users ports.UserRepo, settings ports.SettingsRepo) *Service {
+	tasks ports.SyncTaskRepo, groups ports.GroupRepo, users ports.UserRepo) *Service {
 	return &Service{
 		nodes:      nodes,
 		separators: separators,
@@ -116,20 +115,7 @@ func New(nodes ports.NodeRepo, separators ports.SeparatorRepo, pool ports.XUIPoo
 		tasks:      tasks,
 		groups:     groups,
 		users:      users,
-		settings:   settings,
 	}
-}
-
-func (s *Service) emailRules(ctx context.Context) domain.EmailRules {
-	defaults := ports.UISettings{EmailDomain: "psp.local"}
-	st, err := s.settings.Load(ctx, defaults)
-	if err != nil {
-		st = defaults
-	}
-	if st.EmailDomain == "" {
-		st.EmailDomain = "psp.local"
-	}
-	return domain.EmailRules{Domain: st.EmailDomain}
 }
 
 // ---- Read ----

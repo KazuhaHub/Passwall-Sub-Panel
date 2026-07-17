@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"net/url"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -36,7 +35,10 @@ func openTestDB(t *testing.T) (*gorm.DB, error) {
 	)
 	switch kind := os.Getenv("PSP_TEST_DB_KIND"); kind {
 	case "", "sqlite":
-		db, err = Open("sqlite", filepath.Join(t.TempDir(), "panel.db"))
+		// A named memory database remains available to the connection pool for
+		// the lifetime of this test. Each call gets a unique name, so tests stay
+		// isolated even when package-level parallelism is enabled.
+		db, err = Open("sqlite", "file:"+uniqueTestNamespace()+"?mode=memory&cache=shared")
 	case "postgres":
 		db, err = openIsolatedPostgresTestDB(t)
 	case "mysql":

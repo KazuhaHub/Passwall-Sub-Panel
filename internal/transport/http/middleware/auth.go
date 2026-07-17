@@ -47,12 +47,13 @@ type UserLookup interface {
 // portal's auto-refresh) bypassed the cache on every request — at active-
 // session scale that was ~one DB user-lookup per request per logged-in
 // admin. Bumping to 60s caps the worst-case "revoked JWT still works"
-// window to 60s; the trade-off is acceptable for a small self-use panel
-// where admin demote/disable are rare events. Per-user.Service-write
-// invalidation would tighten this further but requires plumbing through
-// every mutator path — out of scope for this batch.
-func RequireAuth(svc *auth.Service, users UserLookup) gin.HandlerFunc {
-	userCache := newAuthUserLRU(4096, 60*time.Second)
+// window to 60s for changes made outside user.Service. Normal service writes
+// actively invalidate the shared cache, so revocation takes effect on the
+// next authenticated request.
+func RequireAuth(svc *auth.Service, users UserLookup, userCache *AuthUserCache) gin.HandlerFunc {
+	if userCache == nil {
+		userCache = NewAuthUserCache(4096, 60*time.Second)
+	}
 	return func(c *gin.Context) {
 		raw := bearerToken(c.GetHeader("Authorization"))
 		if raw == "" {
@@ -90,8 +91,8 @@ func RequireAuth(svc *auth.Service, users UserLookup) gin.HandlerFunc {
 		// TokenVersion gate: a JWT whose tv claim is older than the live
 		// row's value has been revoked (admin disable / role demote /
 		// password change all bump the version). The cache TTL caps how
-		// long a stale token can survive past the bump (see TTL note on
-		// newAuthUserLRU above).
+		// long a stale token can survive past an out-of-band bump (see the
+		// TTL note above). Service writes invalidate the entry immediately.
 		if u.TokenVersion != claims.TokenVersion {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Session revoked, please sign in again"})
 			return
@@ -121,7 +122,9 @@ type authUserEntry struct {
 	expires time.Time
 }
 
-type authUserLRU struct {
+// AuthUserCache is a bounded, expiring cache of the live account fields used
+// to authorize a JWT. One instance should be shared by all protected routes.
+type AuthUserCache struct {
 	mu    sync.Mutex
 	max   int
 	ttl   time.Duration
@@ -129,8 +132,8 @@ type authUserLRU struct {
 	items map[int64]*list.Element
 }
 
-func newAuthUserLRU(max int, ttl time.Duration) *authUserLRU {
-	return &authUserLRU{
+func NewAuthUserCache(max int, ttl time.Duration) *AuthUserCache {
+	return &AuthUserCache{
 		max:   max,
 		ttl:   ttl,
 		ll:    list.New(),
@@ -173,7 +176,7 @@ func allowSelfServiceForDisabledUser(c *gin.Context, reason domain.AutoDisabledR
 	return strings.HasPrefix(path, "/api/user/me")
 }
 
-func (c *authUserLRU) Get(id int64) (authUserSnapshot, bool) {
+func (c *AuthUserCache) Get(id int64) (authUserSnapshot, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -190,7 +193,7 @@ func (c *authUserLRU) Get(id int64) (authUserSnapshot, bool) {
 	return entry.value, true
 }
 
-func (c *authUserLRU) Put(u authUserSnapshot) {
+func (c *AuthUserCache) Put(u authUserSnapshot) {
 	if c.max <= 0 || c.ttl <= 0 {
 		return
 	}
@@ -215,7 +218,17 @@ func (c *authUserLRU) Put(u authUserSnapshot) {
 	}
 }
 
-func (c *authUserLRU) remove(el *list.Element) {
+// Invalidate removes an account snapshot so the next request must read the
+// updated user row. It is safe to call for an ID that is not cached.
+func (c *AuthUserCache) Invalidate(id int64) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if el := c.items[id]; el != nil {
+		c.remove(el)
+	}
+}
+
+func (c *AuthUserCache) remove(el *list.Element) {
 	if el == nil {
 		return
 	}

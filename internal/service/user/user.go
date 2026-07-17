@@ -19,6 +19,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/crypto"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/idgen"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/keyedmutex"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/log"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/paneltz"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/safego"
@@ -67,6 +68,10 @@ type Service struct {
 	syncer    ClientSyncer
 	pool      ports.XUIPool
 	settings  ports.ScopedSettings
+	// authInvalidator evicts the HTTP authorization snapshot after a user row
+	// changes. It is wired once during router construction and is nil in tests
+	// that do not exercise HTTP authentication.
+	authInvalidator func(int64)
 	// trafficUsage is set lazily via SetTrafficUsage after traffic.Service
 	// is constructed (traffic depends on user, so user must exist first).
 	// May be nil during early-start; trafficFloor degrades to 0 in that case.
@@ -109,8 +114,8 @@ type Service struct {
 	// xui adapter's lock is per-(backend,email), not per-user, so two passes could
 	// race a re-key against the orphan reconcile (one deletes a client the other just
 	// made desired). A per-user mutex makes each user's rebuild→provision→reconcile
-	// atomic w.r.t. other passes. Keyed by userID; entries are cheap and never pruned.
-	resyncLocks sync.Map // map[int64]*sync.Mutex
+	// atomic w.r.t. other passes. Idle entries are pruned after the last waiter.
+	resyncLocks keyedmutex.Map[int64]
 }
 
 // PSPClientProvisioner mirrors a user's desired nodes into the v3.9.0 psp_client
@@ -167,10 +172,7 @@ type SharedMigrator interface {
 // lockUser acquires the per-user resync mutex and returns its unlock func. The
 // mutex is created on first use (LoadOrStore) so concurrent first-touchers share one.
 func (s *Service) lockUser(userID int64) func() {
-	mu, _ := s.resyncLocks.LoadOrStore(userID, &sync.Mutex{})
-	m := mu.(*sync.Mutex)
-	m.Lock()
-	return m.Unlock
+	return s.resyncLocks.Lock(userID)
 }
 
 // SetSharedMigrator late-binds the V3 shared-client migrator. Until set, a
@@ -328,6 +330,41 @@ func (s *Service) BackfillPSPClients(ctx context.Context) (BackfillResult, error
 // panel-wide WaitGroup + background context instead of an untracked goroutine.
 func (s *Service) SetBackgroundRunner(run func(name string, fn func(ctx context.Context))) {
 	s.bg = run
+}
+
+// SetAuthInvalidator wires the shared HTTP authorization cache eviction hook.
+func (s *Service) SetAuthInvalidator(invalidate func(int64)) {
+	s.authInvalidator = invalidate
+}
+
+func (s *Service) invalidateAuth(userID int64) {
+	if s.authInvalidator != nil {
+		s.authInvalidator(userID)
+	}
+}
+
+func (s *Service) updateUser(ctx context.Context, u *domain.User) error {
+	if err := s.users.Update(ctx, u); err != nil {
+		return err
+	}
+	s.invalidateAuth(u.ID)
+	return nil
+}
+
+func (s *Service) updateServiceState(ctx context.Context, userID int64, reason domain.AutoDisabledReason, detail string, disabledAt *time.Time) error {
+	if err := s.users.UpdateServiceState(ctx, userID, reason, detail, disabledAt); err != nil {
+		return err
+	}
+	s.invalidateAuth(userID)
+	return nil
+}
+
+func (s *Service) deleteUser(ctx context.Context, userID int64) error {
+	if err := s.users.Delete(ctx, userID); err != nil {
+		return err
+	}
+	s.invalidateAuth(userID)
+	return nil
 }
 
 // runBackground routes fire-and-forget work through the app's tracked dispatcher
@@ -534,7 +571,7 @@ func (s *Service) dropOrphanUser(ctx context.Context, userID int64) {
 	if s.syncer != nil {
 		_ = s.syncer.DelAllOwnedForUser(ctx, userID)
 	}
-	_ = s.users.Delete(ctx, userID)
+	_ = s.deleteUser(ctx, userID)
 }
 
 // HasPendingSync reports whether any 3X-UI sync task is currently queued
@@ -653,7 +690,7 @@ func (s *Service) ActivateAfterVerification(ctx context.Context, userID int64) e
 	u.Enabled = true
 	u.AutoDisabledReason = domain.DisabledNone
 	u.DisableDetail = ""
-	if err := s.users.Update(ctx, u); err != nil {
+	if err := s.updateUser(ctx, u); err != nil {
 		return err
 	}
 	// Provision the proxy clients now that the account is real. Best-effort with
@@ -911,7 +948,7 @@ func (s *Service) reconcileSSOUser(ctx context.Context, u *domain.User, in Ensur
 		dirty = true
 	}
 	if dirty {
-		if err := s.users.Update(ctx, u); err != nil {
+		if err := s.updateUser(ctx, u); err != nil {
 			return nil, fmt.Errorf("update sso user: %w", err)
 		}
 	}
@@ -971,7 +1008,7 @@ func (s *Service) UnlinkSSO(ctx context.Context, userID int64) error {
 	}
 	u.SSOProvider = domain.SSOProviderLocal
 	u.SSOSubject = u.UPN
-	if err := s.users.Update(ctx, u); err != nil {
+	if err := s.updateUser(ctx, u); err != nil {
 		return fmt.Errorf("unlink sso: %w", err)
 	}
 	return nil
@@ -988,7 +1025,7 @@ func (s *Service) ResetSubToken(ctx context.Context, userID int64) (string, erro
 		return "", err
 	}
 	u.SubToken = token
-	if err := s.users.Update(ctx, u); err != nil {
+	if err := s.updateUser(ctx, u); err != nil {
 		return "", err
 	}
 	return token, nil
@@ -1018,7 +1055,7 @@ func (s *Service) ResetCredentialsAndSync(ctx context.Context, userID int64) (*R
 	newUUID := idgen.NewUUID()
 	u.SubToken = token
 	u.UUID = newUUID
-	if err := s.users.Update(ctx, u); err != nil {
+	if err := s.updateUser(ctx, u); err != nil {
 		return nil, err
 	}
 	expireTime := u.PushExpireTime()
@@ -1078,7 +1115,7 @@ func (s *Service) SetPassword(ctx context.Context, userID int64, newPassword str
 	// (e.g. a stolen browser cookie). The caller will receive a fresh
 	// JWT on their next 401 → refresh cycle.
 	u.TokenVersion++
-	return s.users.Update(ctx, u)
+	return s.updateUser(ctx, u)
 }
 
 // AdminResetPassword sets the account's local credential and returns the
@@ -1117,7 +1154,7 @@ func (s *Service) AdminResetPassword(ctx context.Context, userID int64, requeste
 	// stops working immediately — otherwise a stolen access token
 	// outlives the password change for the remainder of the access TTL.
 	u.TokenVersion++
-	if err := s.users.Update(ctx, u); err != nil {
+	if err := s.updateUser(ctx, u); err != nil {
 		return "", err
 	}
 	return pwd, nil
@@ -1170,7 +1207,7 @@ func (s *Service) SetPersonalRules(ctx context.Context, userID int64, rules stri
 		return fmt.Errorf("%w: personal rules too large", domain.ErrValidation)
 	}
 	u.PersonalRules = rules
-	return s.users.Update(ctx, u)
+	return s.updateUser(ctx, u)
 }
 
 // GetBySubToken is used by the subscription handler.
@@ -1213,7 +1250,7 @@ func (s *Service) CreateLocalAndSync(ctx context.Context, in CreateLocalInput) (
 	// once their group can be resolved.
 	rollback := func() {
 		_ = s.syncer.DelAllOwnedForUser(context.Background(), u.ID)
-		_ = s.users.Delete(context.Background(), u.ID)
+		_ = s.deleteUser(context.Background(), u.ID)
 	}
 
 	g, err := s.groups.GetByID(ctx, u.GroupID)
@@ -1269,7 +1306,7 @@ func (s *Service) DeleteAndSync(ctx context.Context, userID int64) error {
 	}
 	u.Enabled = false
 	u.AutoDisabledReason = domain.DisabledPendingDelete
-	if err := s.users.Update(ctx, u); err != nil {
+	if err := s.updateUser(ctx, u); err != nil {
 		return err
 	}
 
@@ -1283,7 +1320,7 @@ func (s *Service) DeleteAndSync(ctx context.Context, userID int64) error {
 	// there is no FK cascade from users to psp_client.
 	if err := s.syncer.DelAllOwnedForUser(ctx, u.ID); err == nil {
 		if err := s.deleteSharedForUser(ctx, u.ID); err == nil {
-			if err := s.users.Delete(ctx, u.ID); err == nil {
+			if err := s.deleteUser(ctx, u.ID); err == nil {
 				return nil
 			}
 		}
@@ -1425,7 +1462,7 @@ func (s *Service) UpdateProfile(ctx context.Context, userID int64, in UpdateInpu
 	if in.Email != nil {
 		u.Email = *in.Email
 	}
-	if err := s.users.Update(ctx, u); err != nil {
+	if err := s.updateUser(ctx, u); err != nil {
 		return err
 	}
 	now := time.Now()
@@ -1434,7 +1471,7 @@ func (s *Service) UpdateProfile(ctx context.Context, userID int64, in UpdateInpu
 		u.ServiceDisabledReason = domain.DisabledNone
 		u.ServiceDisableDetail = ""
 		u.ServiceDisabledAt = nil
-		if err := s.users.UpdateServiceState(ctx, u.ID, domain.DisabledNone, "", nil); err != nil {
+		if err := s.updateServiceState(ctx, u.ID, domain.DisabledNone, "", nil); err != nil {
 			return err
 		}
 		serviceStateChanged = true
@@ -1443,7 +1480,7 @@ func (s *Service) UpdateProfile(ctx context.Context, userID int64, in UpdateInpu
 		u.ServiceDisabledReason = domain.DisabledNone
 		u.ServiceDisableDetail = ""
 		u.ServiceDisabledAt = nil
-		if err := s.users.UpdateServiceState(ctx, u.ID, domain.DisabledNone, "", nil); err != nil {
+		if err := s.updateServiceState(ctx, u.ID, domain.DisabledNone, "", nil); err != nil {
 			return err
 		}
 		serviceStateChanged = true
@@ -1547,7 +1584,7 @@ func (s *Service) UseEmergencyAccess(ctx context.Context, userID int64, trafficL
 		// admins can flip the cap on later without retroactively breaking the
 		// window's accounting.
 		u.EmergencyBaselineBytes = u.LifetimeTotalBytes
-		if err := s.users.Update(ctx, u); err != nil {
+		if err := s.updateUser(ctx, u); err != nil {
 			return err
 		}
 		// The broad Update above omits the emergency columns AND the
@@ -1557,7 +1594,7 @@ func (s *Service) UseEmergencyAccess(ctx context.Context, userID int64, trafficL
 		// branches above (traffic-exceeded keeps a service-suspended marker;
 		// expired clears it) — without it, granting emergency access would no
 		// longer persist the service_disabled_* transition.
-		if err := s.users.UpdateServiceState(ctx, u.ID, u.ServiceDisabledReason, u.ServiceDisableDetail, u.ServiceDisabledAt); err != nil {
+		if err := s.updateServiceState(ctx, u.ID, u.ServiceDisabledReason, u.ServiceDisableDetail, u.ServiceDisabledAt); err != nil {
 			return err
 		}
 		if err := s.users.GrantEmergencyAccess(ctx, u.ID, until, u.EmergencyUsedCount, u.EmergencyBaselineBytes); err != nil {
@@ -1673,7 +1710,7 @@ func (s *Service) ResetEmergencyUsage(ctx context.Context, userID int64) error {
 	// attribute future traffic the moment another window is granted.
 	u.EmergencyUntil = nil
 	u.EmergencyBaselineBytes = 0
-	return s.users.Update(ctx, u)
+	return s.updateUser(ctx, u)
 }
 
 // ChangeGroupAndSync moves a user to a different group and reconciles their
@@ -1692,7 +1729,7 @@ func (s *Service) ChangeGroupAndSync(ctx context.Context, userID, newGroupID int
 		return nil
 	}
 	u.GroupID = newGroupID
-	if err := s.users.Update(ctx, u); err != nil {
+	if err := s.updateUser(ctx, u); err != nil {
 		return err
 	}
 	if err := s.ResyncMembershipOrEnqueue(ctx, userID, fmt.Sprintf("sync node membership for user %s", u.UPN)); err != nil {
@@ -2039,7 +2076,7 @@ func (s *Service) SetEnabledAndSync(ctx context.Context, userID int64, enabled b
 	if !enabled {
 		u.TokenVersion++
 	}
-	if err := s.users.Update(ctx, u); err != nil {
+	if err := s.updateUser(ctx, u); err != nil {
 		return err
 	}
 	// pushClientConfigToAll mirrors the enable/expiry flip onto the shared client
@@ -2069,7 +2106,7 @@ func (s *Service) SetServiceSuspendedAndSync(ctx context.Context, userID int64, 
 		return err
 	}
 	now := time.Now()
-	if err := s.users.UpdateServiceState(ctx, userID, reason, detail, &now); err != nil {
+	if err := s.updateServiceState(ctx, userID, reason, detail, &now); err != nil {
 		return err
 	}
 	u.ServiceDisabledReason = reason
@@ -2099,7 +2136,7 @@ func (s *Service) ResumeServiceAndSync(ctx context.Context, userID int64) error 
 		return err
 	}
 	wasBlocked := u.ServiceDisabledReason == domain.DisabledBlockedClient
-	if err := s.users.UpdateServiceState(ctx, userID, domain.DisabledNone, "", nil); err != nil {
+	if err := s.updateServiceState(ctx, userID, domain.DisabledNone, "", nil); err != nil {
 		return err
 	}
 	u.ServiceDisabledReason = domain.DisabledNone
@@ -2434,7 +2471,7 @@ func (s *Service) runUserDeleteTask(ctx context.Context, task *domain.SyncTask) 
 	}
 	u.Enabled = false
 	u.AutoDisabledReason = domain.DisabledPendingDelete
-	if err := s.users.Update(ctx, u); err != nil {
+	if err := s.updateUser(ctx, u); err != nil {
 		return err
 	}
 	if err := s.syncer.DelAllOwnedForUser(ctx, u.ID); err != nil {
@@ -2443,7 +2480,7 @@ func (s *Service) runUserDeleteTask(ctx context.Context, task *domain.SyncTask) 
 	if err := s.deleteSharedForUser(ctx, u.ID); err != nil {
 		return fmt.Errorf("shared delete: %w", err)
 	}
-	return s.users.Delete(ctx, u.ID)
+	return s.deleteUser(ctx, u.ID)
 }
 
 // deleteSharedForUser tears down the user's v3.9.0 shared clients (3X-UI + their
@@ -2508,7 +2545,7 @@ func (s *Service) ResetUUIDAndSync(ctx context.Context, userID int64) (string, e
 	oldUUID := u.UUID
 	newUUID := idgen.NewUUID()
 	u.UUID = newUUID
-	if err := s.users.Update(ctx, u); err != nil {
+	if err := s.updateUser(ctx, u); err != nil {
 		return "", err
 	}
 	entries, err := s.ownership.ListByUser(ctx, userID)

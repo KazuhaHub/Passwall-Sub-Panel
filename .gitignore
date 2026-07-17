@@ -9,6 +9,7 @@
 *.test
 *.out
 coverage.*
+web-react/coverage/
 *.coverprofile
 profile.cov
 local-build/

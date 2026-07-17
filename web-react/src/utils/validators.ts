@@ -39,15 +39,35 @@ export function isEmail(v: string): boolean {
 // literals in brackets, localhost) goes through the loose HOSTNAME_RE.
 export function isHttpUrl(v: string): boolean {
   try {
-    const u = new URL(v.trim())
+    const raw = v.trim()
+    const u = new URL(raw)
     if (u.protocol !== 'http:' && u.protocol !== 'https:') return false
-    return isValidHostname(u.hostname)
+    // Validate the hostname as typed as well as URL's canonicalized value.
+    // WHATWG URL expands short numeric hosts (127.0.0 -> 127.0.0.0), which
+    // would otherwise defeat the strict IPv4 rule below.
+    const rawHost = rawHostname(raw)
+    return rawHost !== null && isValidHostname(rawHost) && isValidHostname(u.hostname)
   } catch {
     return false
   }
 }
 
+function rawHostname(value: string): string | null {
+  const schemeEnd = value.indexOf('://')
+  if (schemeEnd < 0) return null
+  const authority = value.slice(schemeEnd + 3).split(/[/?#]/, 1)[0]
+  const hostPort = authority.slice(authority.lastIndexOf('@') + 1)
+  if (hostPort.startsWith('[')) {
+    const end = hostPort.indexOf(']')
+    return end > 1 ? hostPort.slice(1, end) : null
+  }
+  const colon = hostPort.lastIndexOf(':')
+  return colon >= 0 ? hostPort.slice(0, colon) : hostPort
+}
+
 function isValidHostname(host: string): boolean {
+  // URL.hostname includes brackets around IPv6 literals in some runtimes.
+  if (host.startsWith('[') && host.endsWith(']')) host = host.slice(1, -1)
   if (!host) return false
   // IPv6 literal — URL.hostname strips brackets, leaving the raw address.
   if (host.includes(':')) return IPV6_RE.test(host)
@@ -119,7 +139,13 @@ export function isIsoDate(v: string): boolean {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(v)
   if (!m) return false
   const d = new Date(v + 'T00:00:00Z')
-  return !Number.isNaN(d.getTime())
+  if (Number.isNaN(d.getTime())) return false
+  // Date normalizes impossible calendar values instead of rejecting them
+  // (for example 2024-02-30 becomes 2024-03-01), so compare the parsed
+  // components with the normalized instant.
+  return d.getUTCFullYear() === Number(m[1])
+    && d.getUTCMonth() + 1 === Number(m[2])
+    && d.getUTCDate() === Number(m[3])
 }
 
 // --- High-level field validators (return i18n key or empty) -----------------

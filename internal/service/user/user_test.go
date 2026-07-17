@@ -10,6 +10,27 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 )
 
+func TestUserWritesInvalidateAuthorizationCache(t *testing.T) {
+	repo := &memoryUserRepo{byID: map[int64]*domain.User{
+		7: {ID: 7, UPN: "user@example.com", Enabled: true},
+	}}
+	svc := New(repo, nil, nil, nil, nil, nil, nil, nil)
+	var invalidated []int64
+	svc.SetAuthInvalidator(func(userID int64) { invalidated = append(invalidated, userID) })
+
+	u := cloneUser(repo.byID[7])
+	u.Enabled = false
+	if err := svc.updateUser(context.Background(), u); err != nil {
+		t.Fatalf("updateUser: %v", err)
+	}
+	if err := svc.deleteUser(context.Background(), u.ID); err != nil {
+		t.Fatalf("deleteUser: %v", err)
+	}
+	if len(invalidated) != 2 || invalidated[0] != 7 || invalidated[1] != 7 {
+		t.Fatalf("invalidations = %v, want [7 7]", invalidated)
+	}
+}
+
 // Once the app's tracked async dispatcher is wired (SetBackgroundRunner), the
 // group-member resync must route through it — so App.Shutdown can drain it and
 // it runs under a cancellable background context — instead of an untracked

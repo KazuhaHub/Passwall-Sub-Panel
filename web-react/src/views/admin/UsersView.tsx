@@ -51,6 +51,7 @@ import ShieldIcon from '@mui/icons-material/GppMaybe'
 import SyncIcon from '@mui/icons-material/Sync'
 import HelpOutlineIcon from '@mui/icons-material/HelpOutlined'
 import { useTranslation } from 'react-i18next'
+import { allSettledLimited } from '@/utils/promises'
 
 import {
   createUser,
@@ -588,7 +589,7 @@ export default function UsersView() {
       if (rows.length === 0) return
       setBatchBusy(enable ? 'enable' : 'disable')
       try {
-        const results = await Promise.allSettled(rows.map(r => setEnabled(r.id, enable, reasonText.trim() || undefined)))
+        const results = await allSettledLimited(rows, r => setEnabled(r.id, enable, reasonText.trim() || undefined))
         const failed = results.filter(r => r.status === 'rejected').length
         if (failed > 0) {
           pushSnack(t(enable ? 'admin:users.batch.enable_partial' : 'admin:users.batch.disable_partial', { ok: rows.length - failed, fail: failed }), 'warning')
@@ -618,9 +619,7 @@ export default function UsersView() {
     if (renewable.length === 0) { pushSnack(t('admin:users.batch.no_renewable'), 'info'); return }
     setBatchBusy('renew')
     try {
-      const results = await Promise.allSettled(
-        renewable.map(r => updateUser(r.id, { expire_at: renewedExpireAt(r, 30) })),
-      )
+      const results = await allSettledLimited(renewable, r => updateUser(r.id, { expire_at: renewedExpireAt(r, 30) }))
       const failed = results.filter(r => r.status === 'rejected').length
       const skipped = selectedRows.length - renewable.length
       if (failed > 0) {
@@ -657,7 +656,7 @@ export default function UsersView() {
     if (!ok) return
     setBatchBusy('unlink_sso')
     try {
-      const results = await Promise.allSettled(eligible.map(r => unlinkSSO(r.id)))
+      const results = await allSettledLimited(eligible, r => unlinkSSO(r.id))
       const failed = results.filter(r => r.status === 'rejected').length
       await load()
       setSelected(new Set())
@@ -690,7 +689,7 @@ export default function UsersView() {
     if (!ok) return
     setBatchBusy('delete')
     try {
-      const results = await Promise.allSettled(rows.map(r => deleteUser(r.id)))
+      const results = await allSettledLimited(rows, r => deleteUser(r.id))
       const okIds = rows.filter((_, i) => results[i].status === 'fulfilled').map(r => r.id)
       const failed = rows.length - okIds.length
       setSelected(new Set())
@@ -832,7 +831,7 @@ export default function UsersView() {
     if (rows.length === 0) return
     setBatchBusy('emergency')
     try {
-      const results = await Promise.allSettled(rows.map(r => resetEmergencyUsage(r.id)))
+      const results = await allSettledLimited(rows, r => resetEmergencyUsage(r.id))
       const failed = results.filter(r => r.status === 'rejected').length
       if (failed > 0) pushSnack(t('admin:users.batch.emergency_partial', { ok: rows.length - failed, fail: failed }), 'warning')
       else pushSnack(t('admin:users.batch.emergency_count', { count: rows.length }), 'success')

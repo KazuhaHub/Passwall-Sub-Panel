@@ -3,7 +3,6 @@ package version
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -301,7 +300,3 @@ func lookupForPSPVersion(payload remoteCompatPayload, pspVersion string) (remote
 	}
 	return remoteCompatPSPEntry{}, false
 }
-
-// errNoRefreshYet reserved for future callers that want to distinguish
-// "never refreshed" from "refreshed but no override active".
-var errNoRefreshYet = errors.New("remote compat not yet fetched")

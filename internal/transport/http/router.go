@@ -96,6 +96,10 @@ func NewRouter(d Deps) stdhttp.Handler {
 	if paths == nil {
 		paths = panelpath.NewResolver(d.Repos.Settings)
 	}
+	authUserCache := middleware.NewAuthUserCache(4096, 60*time.Second)
+	if d.User != nil {
+		d.User.SetAuthInvalidator(authUserCache.Invalidate)
+	}
 	g := gin.New()
 	tp := trustedProxies(d.Cfg.HTTP.TrustedProxies)
 	if err := g.SetTrustedProxies(tp); err != nil {
@@ -270,7 +274,7 @@ func NewRouter(d Deps) stdhttp.Handler {
 
 	userMe := handler.NewUserMeHandler(d.User, d.Traffic, d.Repos.ScopedSettings, d.Group, twofaSvc, passkeySvc, enroll2FA)
 	userGroup := g.Group("/api/user/me",
-		middleware.RequireAuth(d.Auth, d.User),
+		middleware.RequireAuth(d.Auth, d.User, authUserCache),
 		// Operators are included so that an operator forced to enroll 2FA (via the
 		// staff-wide / group / per-user requirement) can actually reach the
 		// self-service enrollment ceremonies + /user/me — otherwise the gate below
@@ -322,12 +326,12 @@ func NewRouter(d Deps) stdhttp.Handler {
 	//                    set + template writes, audit clear.
 	// Both share the AuditWrites engine-level middleware.
 	staffGroup := g.Group("/api/admin",
-		middleware.RequireAuth(d.Auth, d.User),
+		middleware.RequireAuth(d.Auth, d.User, authUserCache),
 		middleware.RequireRole(domain.RoleAdmin, domain.RoleOperator),
 		require2FAGate,
 	)
 	adminGroup := g.Group("/api/admin",
-		middleware.RequireAuth(d.Auth, d.User),
+		middleware.RequireAuth(d.Auth, d.User, authUserCache),
 		middleware.RequireRole(domain.RoleAdmin),
 		require2FAGate,
 	)

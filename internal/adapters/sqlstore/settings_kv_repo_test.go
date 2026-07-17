@@ -1,5 +1,7 @@
 package sqlstore
 
+//lint:file-ignore SA1019 This test protects compatibility with legacy persisted setting rows.
+
 import (
 	"context"
 	"database/sql"

@@ -173,16 +173,6 @@ type fakeOwnership struct {
 	updatedUUIDs  []string                 // emails passed to UpdateUUID
 }
 
-func newFakeOwnership(email, uuid string) *fakeOwnership {
-	return &fakeOwnership{entry: &domain.XUIClientEntry{
-		UserID:      1,
-		PanelID:     1,
-		InboundID:   100,
-		ClientEmail: email,
-		ClientUUID:  uuid,
-	}}
-}
-
 func (r *fakeOwnership) Add(ctx context.Context, e *domain.XUIClientEntry) error {
 	r.addCalled = true
 	r.addedEmails = append(r.addedEmails, e.ClientEmail)

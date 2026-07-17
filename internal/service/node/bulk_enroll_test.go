@@ -45,11 +45,10 @@ func TestSyncExistingUsersToNodeEnqueuesResync(t *testing.T) {
 		ID: 20, Protocol: "vless", StreamSettings: `{"security":"reality"}`,
 	}}
 	svc := &Service{
-		pool:     stubXUIPool{c: client},
-		groups:   oneAllGroup{},
-		users:    twoMembers{},
-		settings: settingsStub{},
-		tasks:    tasks,
+		pool:   stubXUIPool{c: client},
+		groups: oneAllGroup{},
+		users:  twoMembers{},
+		tasks:  tasks,
 	}
 	n := &domain.Node{ID: 5, PanelID: 10, InboundID: 20}
 

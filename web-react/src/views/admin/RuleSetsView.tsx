@@ -32,6 +32,7 @@ import LockIcon from '@mui/icons-material/Lock'
 import LockOpenIcon from '@mui/icons-material/LockOpen'
 import { useTranslation } from 'react-i18next'
 import { useCan } from '@/utils/permissions'
+import { allSettledLimited } from '@/utils/promises'
 
 import { deleteRuleSet, listRuleSets, resetRuleSet, saveRuleSet, SEEDED_RULESET_SLUGS, type RuleSet } from '@/api/rules'
 import { listTemplates, type Template } from '@/api/templates'
@@ -198,7 +199,7 @@ export default function RuleSetsView() {
     if (!rows.length) return
     setBatchBusy(enabled ? 'enable' : 'disable')
     try {
-      const results = await Promise.allSettled(rows.map(r => saveRuleSet({ ...r, enabled })))
+      const results = await allSettledLimited(rows, r => saveRuleSet({ ...r, enabled }))
       const failed = results.filter(r => r.status === 'rejected').length
       if (failed > 0) pushSnack(t('admin:rules.toast.batch_partial', { ok: rows.length - failed, fail: failed }), 'warning')
       else pushSnack(t(enabled ? 'admin:rules.toast.batch_enabled' : 'admin:rules.toast.batch_disabled', { count: rows.length }), 'success')
@@ -217,7 +218,7 @@ export default function RuleSetsView() {
     if (!ok) return
     setBatchBusy('delete')
     try {
-      const results = await Promise.allSettled(rows.map(r => deleteRuleSet(r.slug)))
+      const results = await allSettledLimited(rows, r => deleteRuleSet(r.slug))
       const okSlugs = rows.filter((_, i) => results[i].status === 'fulfilled').map(r => r.slug)
       const failed = rows.length - okSlugs.length
       setItems(prev => prev.filter(x => !okSlugs.includes(x.slug)))

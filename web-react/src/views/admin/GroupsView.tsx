@@ -35,6 +35,7 @@ import DeleteIcon from '@mui/icons-material/DeleteOutlined'
 import EditIcon from '@mui/icons-material/EditOutlined'
 import { useTranslation } from 'react-i18next'
 import { useCan } from '@/utils/permissions'
+import { allSettledLimited } from '@/utils/promises'
 
 import { createGroup, deleteGroup, listGroups, updateGroup } from '@/api/groups'
 import { listNodes } from '@/api/nodes'
@@ -391,7 +392,7 @@ export default function GroupsView() {
     if (!ok) return
     setBatchBusy(true)
     try {
-      const results = await Promise.allSettled(rows.map(r => deleteGroup(r.id)))
+      const results = await allSettledLimited(rows, r => deleteGroup(r.id))
       const okIds = rows.filter((_, i) => results[i].status === 'fulfilled').map(r => r.id)
       const failed = rows.length - okIds.length
       setItems(prev => prev.filter(g => !okIds.includes(g.id)))

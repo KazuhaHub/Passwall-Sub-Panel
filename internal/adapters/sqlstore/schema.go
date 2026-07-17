@@ -224,40 +224,6 @@ type roleRow struct {
 
 func (roleRow) TableName() string { return "roles" }
 
-func (r *roleRow) toDomain() *domain.RoleDef {
-	perms := make([]domain.Permission, len(r.Permissions))
-	for i, p := range r.Permissions {
-		perms[i] = domain.Permission(p)
-	}
-	return &domain.RoleDef{
-		Slug:        r.Slug,
-		Name:        r.Name,
-		Description: r.Description,
-		Permissions: perms,
-		Builtin:     r.Builtin,
-		Immutable:   r.Immutable,
-		CreatedAt:   r.CreatedAt,
-		UpdatedAt:   r.UpdatedAt,
-	}
-}
-
-func roleFromDomain(d *domain.RoleDef) *roleRow {
-	perms := make(jsonStrings, len(d.Permissions))
-	for i, p := range d.Permissions {
-		perms[i] = string(p)
-	}
-	return &roleRow{
-		Slug:        d.Slug,
-		Name:        d.Name,
-		Description: d.Description,
-		Builtin:     d.Builtin,
-		Immutable:   d.Immutable,
-		Permissions: perms,
-		CreatedAt:   d.CreatedAt,
-		UpdatedAt:   d.UpdatedAt,
-	}
-}
-
 // roleAssignmentRow is an ADDITIONAL, optionally group-scoped role grant beyond a
 // user's primary users.role (Entra administrative unit). ScopeGroupIDs reuses the
 // text-pinned jsonInt64s wrapper (empty/NULL = tenant-wide). Origin
@@ -274,28 +240,6 @@ type roleAssignmentRow struct {
 }
 
 func (roleAssignmentRow) TableName() string { return "role_assignments" }
-
-func (r *roleAssignmentRow) toDomain() *domain.RoleAssignment {
-	return &domain.RoleAssignment{
-		ID:            r.ID,
-		UserID:        r.UserID,
-		RoleSlug:      r.RoleSlug,
-		ScopeGroupIDs: []int64(r.ScopeGroupIDs),
-		Origin:        r.Origin,
-		CreatedAt:     r.CreatedAt,
-	}
-}
-
-func roleAssignmentFromDomain(a *domain.RoleAssignment) *roleAssignmentRow {
-	return &roleAssignmentRow{
-		ID:            a.ID,
-		UserID:        a.UserID,
-		RoleSlug:      a.RoleSlug,
-		ScopeGroupIDs: jsonInt64s(a.ScopeGroupIDs),
-		Origin:        a.Origin,
-		CreatedAt:     a.CreatedAt,
-	}
-}
 
 type groupRow struct {
 	ID         int64  `gorm:"primaryKey;autoIncrement"`

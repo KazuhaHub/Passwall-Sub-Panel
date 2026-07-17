@@ -90,13 +90,6 @@ type emptyGroups struct{ ports.GroupRepo }
 
 func (emptyGroups) List(context.Context) ([]*domain.Group, error) { return nil, nil }
 
-type settingsStub struct{}
-
-func (settingsStub) Load(_ context.Context, _ ports.UISettings) (ports.UISettings, error) {
-	return ports.UISettings{EmailDomain: "kazuha.org"}, nil
-}
-func (settingsStub) Save(_ context.Context, _ ports.UISettings) error { return nil }
-
 type stubXUIPool struct {
 	c   ports.XUIClient
 	err error
@@ -223,10 +216,9 @@ func TestCreateInbound_WriteThrough(t *testing.T) {
 	// user sync; addID is the inbound id 3X-UI "returns".
 	client := &stubXUIClient{addID: 7, getResp: &ports.Inbound{Protocol: "vless", Settings: `{"decryption":"none"}`}}
 	svc := &Service{
-		nodes:    repo,
-		pool:     stubXUIPool{c: client},
-		groups:   emptyGroups{},
-		settings: settingsStub{},
+		nodes:  repo,
+		pool:   stubXUIPool{c: client},
+		groups: emptyGroups{},
 	}
 	n := &domain.Node{DisplayName: "US-1", Region: "us", PanelID: 1}
 	spec := ports.InboundSpec{
@@ -272,7 +264,6 @@ func TestCreateInbound_SyncRunsInBackground(t *testing.T) {
 			called:  syncReached,
 			release: release,
 		},
-		settings: settingsStub{},
 	}
 	n := &domain.Node{DisplayName: "X", Region: "us", PanelID: 1}
 	spec := ports.InboundSpec{Protocol: "vless", Port: 443, StreamSettings: `{"network":"ws"}`}
@@ -333,10 +324,9 @@ func TestImportExisting_TakesOwnership(t *testing.T) {
 	}
 	client := &stubXUIClient{getResp: live}
 	svc := &Service{
-		nodes:    repo,
-		pool:     stubXUIPool{c: client},
-		groups:   emptyGroups{},
-		settings: settingsStub{},
+		nodes:  repo,
+		pool:   stubXUIPool{c: client},
+		groups: emptyGroups{},
 	}
 	n := &domain.Node{DisplayName: "imported", Region: "us", PanelID: 1, InboundID: 3}
 	if err := svc.ImportExisting(context.Background(), n); err != nil {

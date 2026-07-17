@@ -1,5 +1,7 @@
 package sqlstore
 
+//lint:file-ignore SA1019 This file intentionally reads v3 legacy fields for the one-time v4 migration.
+
 import (
 	"context"
 	"encoding/json"

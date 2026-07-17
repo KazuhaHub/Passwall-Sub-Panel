@@ -1,5 +1,5 @@
 # Stage 1 — build the React SPA bundle.
-FROM node:20-alpine AS web-builder
+FROM node:24-alpine AS web-builder
 WORKDIR /web
 COPY web-react/package.json web-react/package-lock.json* ./
 RUN if [ -f package-lock.json ]; then npm ci; else npm install; fi
@@ -7,10 +7,10 @@ COPY web-react/ ./
 # Vite writes into ../internal/web/dist by config, but inside this stage we
 # only have /web. Redirect outDir to the local dist/ here, then copy across
 # stages.
-RUN npx vite build --outDir /web/dist --emptyOutDir
+RUN npx tsc -b && npx vite build --outDir /web/dist --emptyOutDir
 
 # Stage 2 — build the Go binary with the SPA assets embedded.
-FROM golang:1.26-alpine AS go-builder
+FROM golang:1.26.5-alpine AS go-builder
 RUN apk add --no-cache git
 WORKDIR /src
 COPY go.mod go.sum ./
