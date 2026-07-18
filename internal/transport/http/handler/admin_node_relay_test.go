@@ -1,6 +1,21 @@
 package handler
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
+)
+
+func TestForceRelayStatusForHiddenDirect(t *testing.T) {
+	n := &domain.Node{
+		HideDirect: true,
+		Relays:     []domain.RelayLine{{Address: "relay.example", Enabled: true}},
+	}
+	forceRelayStatusForHiddenDirect(n)
+	if !n.ShowRelayStatus {
+		t.Fatal("hidden direct did not force relay status visibility")
+	}
+}
 
 // TestParseRelays_Valid pins the happy path: fields are trimmed, port 0 (reuse
 // the inbound port) is allowed, and the order is preserved.

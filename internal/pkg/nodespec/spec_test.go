@@ -67,6 +67,19 @@ func TestDecodeShadowsocksAndHysteria2(t *testing.T) {
 	}
 }
 
+func TestDecodeSocketAcceptProxyProtocol(t *testing.T) {
+	spec, err := Decode(ports.InboundSpec{
+		Port: 443, Protocol: "vless",
+		StreamSettings: `{"network":"tcp","sockopt":{"acceptProxyProtocol":true}}`,
+	})
+	if err != nil {
+		t.Fatalf("Decode: %v", err)
+	}
+	if !spec.Socket.AcceptProxyProtocol {
+		t.Fatalf("socket options = %#v", spec.Socket)
+	}
+}
+
 func TestDecodeRejectsInvalidInput(t *testing.T) {
 	for _, input := range []ports.InboundSpec{
 		{Port: 0, Protocol: "vless"},

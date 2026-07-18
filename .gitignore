@@ -63,6 +63,7 @@ private/
 # under local-build/ or from CI). Catches stray reset-admin-password.exe
 # / migrate-db-v2.exe etc. — the broader *.exe rule above misses files
 # without the .exe suffix on non-Windows hosts.
+/psp
 /migrate-db-v2*
 /reset-admin-password*
 

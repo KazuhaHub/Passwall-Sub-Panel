@@ -210,6 +210,9 @@ func suiInboundFromSpec(spec *nodespec.Spec, tag string, tlsID int) (map[string]
 	if spec.Transport.AcceptProxyProtocol {
 		return nil, fmt.Errorf("%w: S-UI/sing-box does not support Xray acceptProxyProtocol on this transport", domain.ErrValidation)
 	}
+	if spec.Socket.AcceptProxyProtocol {
+		return nil, fmt.Errorf("%w: S-UI/sing-box does not support Xray sockopt.acceptProxyProtocol", domain.ErrValidation)
+	}
 	if spec.Socket.TCPUserTimeout > 0 || (spec.Socket.TProxy != "" && spec.Socket.TProxy != "off") {
 		return nil, fmt.Errorf("%w: S-UI does not support Xray tcpUserTimeout or tproxy inbound socket options", domain.ErrValidation)
 	}
@@ -327,6 +330,9 @@ func validateSUIInboundRequest(input ports.InboundSpec, spec *nodespec.Spec) err
 	if spec != nil && (spec.Sniffing.Enabled || len(spec.Sniffing.DestinationOverride) > 0 ||
 		spec.Sniffing.MetadataOnly || spec.Sniffing.RouteOnly) {
 		return fmt.Errorf("%w: S-UI/sing-box does not persist Xray per-inbound sniffing", domain.ErrValidation)
+	}
+	if spec != nil && spec.Socket.AcceptProxyProtocol {
+		return fmt.Errorf("%w: S-UI/sing-box does not support Xray sockopt.acceptProxyProtocol", domain.ErrValidation)
 	}
 	return nil
 }

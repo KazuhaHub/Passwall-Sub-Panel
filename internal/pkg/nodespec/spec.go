@@ -47,6 +47,7 @@ type Transport struct {
 
 type SocketOptions struct {
 	Mark                 int64
+	AcceptProxyProtocol  bool
 	TCPFastOpen          bool
 	TCPKeepAliveInterval int64
 	TCPKeepAliveIdle     int64
@@ -258,6 +259,7 @@ func decodeTLS(out *Security, stream map[string]any) {
 func decodeSocket(out *SocketOptions, stream map[string]any) {
 	cfg := mapValue(stream["sockopt"])
 	out.Mark = int64Value(cfg["mark"])
+	out.AcceptProxyProtocol = boolValue(cfg["acceptProxyProtocol"])
 	out.TCPFastOpen = boolValue(cfg["tcpFastOpen"])
 	out.TCPKeepAliveInterval = int64Value(cfg["tcpKeepAliveInterval"])
 	out.TCPKeepAliveIdle = int64Value(cfg["tcpKeepAliveIdle"])

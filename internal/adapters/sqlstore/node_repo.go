@@ -60,14 +60,15 @@ func (r *nodeRepo) UpdateMetadata(ctx context.Context, n *domain.Node) error {
 		Model(&nodeRow{}).
 		Where("id = ?", n.ID).
 		Updates(map[string]any{
-			"display_name":   n.DisplayName,
-			"server_address": n.ServerAddress,
-			"flow":           n.Flow,
-			"region":         n.Region,
-			"tags":           jsonStrings(n.Tags),
-			"sort_order":     n.SortOrder,
-			"relays":         jsonRelays(n.Relays),
-			"hide_direct":    n.HideDirect,
+			"display_name":      n.DisplayName,
+			"server_address":    n.ServerAddress,
+			"flow":              n.Flow,
+			"region":            n.Region,
+			"tags":              jsonStrings(n.Tags),
+			"sort_order":        n.SortOrder,
+			"relays":            jsonRelays(n.Relays),
+			"hide_direct":       n.HideDirect,
+			"show_relay_status": n.ShowRelayStatus,
 		}).Error
 }
 
@@ -145,6 +146,7 @@ func (r *nodeRepo) UpdateHealth(ctx context.Context, n *domain.Node) error {
 			"health_state":      string(n.HealthState),
 			"health_detail":     n.HealthDetail,
 			"health_checked_at": n.HealthCheckedAt,
+			"relay_health":      jsonRelayHealth(n.RelayHealth),
 			// The health pass also refreshes the cached probe target learned
 			// from the inbound, so a port/protocol change propagates without a
 			// separate write path.

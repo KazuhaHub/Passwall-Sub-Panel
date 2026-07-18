@@ -346,9 +346,11 @@ type nodeRow struct {
 	// additionally offered through. HideDirect drops the direct entry when at
 	// least one relay is enabled. AutoMigrate adds both; empty/false on legacy
 	// rows, no backfill.
-	Relays     jsonRelays `gorm:"column:relays"`
-	HideDirect bool       `gorm:"default:false"`
-	CreatedAt  time.Time
+	Relays          jsonRelays      `gorm:"column:relays"`
+	HideDirect      bool            `gorm:"default:false"`
+	ShowRelayStatus bool            `gorm:"default:false"`
+	RelayHealth     jsonRelayHealth `gorm:"column:relay_health"`
+	CreatedAt       time.Time
 }
 
 func (nodeRow) TableName() string { return "nodes" }
@@ -411,6 +413,8 @@ func (r *nodeRow) toDomain() (*domain.Node, error) {
 		CertID:                r.CertID,
 		Relays:                []domain.RelayLine(r.Relays),
 		HideDirect:            r.HideDirect,
+		ShowRelayStatus:       r.ShowRelayStatus,
+		RelayHealth:           []domain.RelayHealth(r.RelayHealth),
 		CreatedAt:             r.CreatedAt,
 	}, nil
 }
@@ -468,6 +472,8 @@ func nodeFromDomain(n *domain.Node) (*nodeRow, error) {
 		CertID:                n.CertID,
 		Relays:                jsonRelays(n.Relays),
 		HideDirect:            n.HideDirect,
+		ShowRelayStatus:       n.ShowRelayStatus,
+		RelayHealth:           jsonRelayHealth(n.RelayHealth),
 		CreatedAt:             n.CreatedAt,
 	}, nil
 }
@@ -1295,6 +1301,42 @@ func (j *jsonRelays) Scan(value any) error {
 		return nil
 	}
 	return json.Unmarshal(b, (*[]domain.RelayLine)(j))
+}
+
+// jsonRelayHealth persists health-worker-owned relay probe snapshots separately
+// from the admin-owned relay configuration, avoiding lost updates between the
+// node editor and the periodic health loop.
+type jsonRelayHealth []domain.RelayHealth
+
+func (j jsonRelayHealth) Value() (driver.Value, error) {
+	if len(j) == 0 {
+		return "[]", nil
+	}
+	b, err := json.Marshal([]domain.RelayHealth(j))
+	return string(b), err
+}
+
+func (jsonRelayHealth) GormDBDataType(*gorm.DB, *schema.Field) string { return "text" }
+
+func (j *jsonRelayHealth) Scan(value any) error {
+	if value == nil {
+		*j = nil
+		return nil
+	}
+	var b []byte
+	switch v := value.(type) {
+	case []byte:
+		b = v
+	case string:
+		b = []byte(v)
+	default:
+		return fmt.Errorf("unsupported scan type for jsonRelayHealth: %T", value)
+	}
+	if len(b) == 0 {
+		*j = nil
+		return nil
+	}
+	return json.Unmarshal(b, (*[]domain.RelayHealth)(j))
 }
 
 // ---- Schema ----

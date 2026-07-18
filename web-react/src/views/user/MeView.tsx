@@ -116,7 +116,7 @@ function maskUrl(url: string): string {
 }
 
 // ServerStatusPanel renders the caller's own nodes' availability (the "服务器
-//状态" tab). Data is sanitized server-side — name + region + coarse status
+// 状态" tab). Data is sanitized server-side — names, region, and coarse status
 // only. Status dot: ok=primary, down=error, unknown=muted.
 function ServerStatusPanel({ md }: { md: M3Tokens }) {
   const { t } = useTranslation('user')
@@ -150,25 +150,41 @@ function ServerStatusPanel({ md }: { md: M3Tokens }) {
       </Card>
     )
   }
-  const okCount = nodes.filter(n => n.status === 'ok').length
-  const checkedAt = nodes.find(n => n.checked_at)?.checked_at
+  // Every dialable endpoint is rendered as a full node row. A landing comes
+  // first, followed immediately by its enabled relay lines. This mirrors the
+  // subscription's expanded-node model instead of squeezing landing + relays
+  // into columns on one row.
+  const rows = nodes.flatMap(n => {
+    const direct = n.show_direct !== false
+      ? [{ name: n.name, region: n.region, status: n.status, checked_at: n.checked_at }]
+      : []
+    const relays = (n.relay_statuses ?? []).map((relay, relayIndex) => ({
+      name: `${n.name} ${relay.name || t('status.relay_fallback', { index: relayIndex + 1, defaultValue: '中转 {{index}}' })}`,
+      region: n.region,
+      status: relay.status,
+      checked_at: relay.checked_at,
+    }))
+    return [...direct, ...relays]
+  })
+  const okCount = rows.filter(row => row.status === 'ok').length
+  const checkedAt = rows.find(row => row.checked_at)?.checked_at
   return (
     <Card sx={{ p: { xs: 2.5, sm: 3 }, bgcolor: md.surfaceContainerLow, border: `1px solid ${md.outlineVariant}` }}>
       <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1.5, mb: 2, flexWrap: 'wrap' }}>
         <Typography sx={{ fontWeight: 500 }}>{t('status.title', { defaultValue: '服务器状态' })}</Typography>
-        <Typography variant="body2" sx={{ color: okCount === nodes.length ? md.primary : md.error }}>
-          {t('status.summary', { ok: okCount, total: nodes.length, defaultValue: '{{ok}}/{{total}} 正常' })}
+        <Typography variant="body2" sx={{ color: okCount === rows.length ? md.primary : md.error }}>
+          {t('status.summary', { ok: okCount, total: rows.length, defaultValue: '{{ok}}/{{total}} 正常' })}
         </Typography>
       </Box>
       <Box sx={{ display: 'flex', flexDirection: 'column' }}>
-        {nodes.map((n, i) => {
-          const m = meta(n.status)
+        {rows.map((row, i) => {
+          const m = meta(row.status)
           return (
-            <Box key={i} sx={{ display: 'flex', alignItems: 'center', gap: 1.5, py: 1.25, borderBottom: i < nodes.length - 1 ? `1px solid ${md.outlineVariant}` : 'none' }}>
+            <Box key={`${row.name}-${i}`} sx={{ display: 'flex', alignItems: 'center', gap: 1.5, py: 1.25, borderBottom: i < rows.length - 1 ? `1px solid ${md.outlineVariant}` : 'none' }}>
               <Box sx={{ width: 10, height: 10, borderRadius: '50%', bgcolor: m.color, flexShrink: 0 }} />
               <Box sx={{ flex: 1, minWidth: 0 }}>
-                <Typography sx={{ fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{n.name}</Typography>
-                {n.region && <Typography variant="caption" sx={{ color: md.onSurfaceVariant }}>{n.region}</Typography>}
+                <Typography sx={{ fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row.name}</Typography>
+                {row.region && <Typography variant="caption" sx={{ color: md.onSurfaceVariant }}>{row.region}</Typography>}
               </Box>
               <Typography variant="body2" sx={{ color: m.color, fontWeight: 500, flexShrink: 0 }}>{m.label}</Typography>
             </Box>

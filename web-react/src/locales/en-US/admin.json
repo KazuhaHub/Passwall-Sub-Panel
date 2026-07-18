@@ -889,7 +889,8 @@
       "cdn_optional": "Only for CDN fronting",
       "enabled": "Enabled",
       "remove": "Remove this line",
-      "hide_direct": "Hide direct (landing reachable only via relays)"
+      "hide_direct": "Hide direct (landing reachable only via relays)",
+      "show_relay_status": "Show relay server status"
     },
     "import": "Import",
     "imported": "Imported",
@@ -1003,6 +1004,7 @@
       "section_sockopt": "Socket options",
       "sockopt_enabled": "Enable sockopt",
       "sockopt_mark": "SO_MARK",
+      "sockopt_accept_proxy_protocol": "Accept Proxy Protocol",
       "sockopt_tcp_fast_open": "TCP Fast Open",
       "sockopt_tcp_keep_alive_interval": "KeepAlive interval (s)",
       "sockopt_tcp_keep_alive_idle": "KeepAlive idle (s)",

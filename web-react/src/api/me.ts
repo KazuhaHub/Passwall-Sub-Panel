@@ -167,6 +167,17 @@ export interface MyNodeStatus {
   /** "ok" = up, "down" = unreachable/inbound gone, "unknown" = not yet probed. */
   status: 'ok' | 'down' | 'unknown'
   checked_at?: string
+  /** False when this node hides its landing/direct endpoint. */
+  show_direct: boolean
+  /** Enabled relay endpoints selected for user-visible health display. */
+  relay_statuses?: MyRelayStatus[]
+}
+
+export interface MyRelayStatus {
+  /** Admin-defined line name; may be empty and is then localized client-side. */
+  name: string
+  status: 'ok' | 'down' | 'unknown'
+  checked_at?: string
 }
 
 export async function getMyServerStatus() {

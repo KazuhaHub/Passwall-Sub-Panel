@@ -147,6 +147,7 @@ func TestValidateSUIInboundRequestRejectsUnmappedSemantics(t *testing.T) {
 		{Enable: true, Port: 443, Protocol: "vless", ExpiryTime: 1},
 		{Enable: true, Port: 443, Protocol: "vless", Allocate: `{"strategy":"always"}`},
 		{Enable: true, Port: 443, Protocol: "vless", Sniffing: `{"enabled":true,"destOverride":["tls"]}`},
+		{Enable: true, Port: 443, Protocol: "vless", StreamSettings: `{"sockopt":{"acceptProxyProtocol":true}}`},
 	}
 	for _, input := range tests {
 		spec, err := nodespec.Decode(input)

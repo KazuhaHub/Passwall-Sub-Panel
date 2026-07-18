@@ -186,6 +186,7 @@ interface MetaForm {
   sort_order: number
   relays: RelayLine[]
   hide_direct: boolean
+  show_relay_status: boolean
 }
 
 interface ImportForm extends MetaForm {
@@ -328,6 +329,9 @@ interface InboundFormState {
   // omitted here.
   sockopt_enabled: boolean
   sockopt_mark: number
+  // Xray inbound listener support for the HAProxy PROXY protocol. This is
+  // independent from the transport-level acceptProxyProtocol switches.
+  sockopt_accept_proxy_protocol: boolean
   sockopt_tcp_fast_open: boolean
   sockopt_tcp_keep_alive_interval: number
   sockopt_tcp_keep_alive_idle: number
@@ -346,7 +350,7 @@ interface InboundFormState {
 
 const EMPTY_META: MetaForm = {
   display_name: '', server_address: '', flow: '', region: '', tags_text: '', sort_order: 0,
-  relays: [], hide_direct: false,
+  relays: [], hide_direct: false, show_relay_status: false,
 }
 
 const EMPTY_IMPORT: ImportForm = {
@@ -433,6 +437,7 @@ const EMPTY_INBOUND: InboundFormState = {
   naive_quic_congestion_control: '',
   sockopt_enabled: false,
   sockopt_mark: 0,
+  sockopt_accept_proxy_protocol: false,
   sockopt_tcp_fast_open: false,
   sockopt_tcp_keep_alive_interval: 0,
   sockopt_tcp_keep_alive_idle: 0,
@@ -833,6 +838,7 @@ function buildSockoptWrapper(f: InboundFormState): Record<string, unknown> {
   if (!f.sockopt_enabled) return {}
   const so: Record<string, unknown> = {}
   if (f.sockopt_mark > 0) so.mark = f.sockopt_mark
+  if (f.sockopt_accept_proxy_protocol) so.acceptProxyProtocol = true
   if (f.sockopt_tcp_fast_open) so.tcpFastOpen = true
   if (f.sockopt_tcp_keep_alive_interval > 0) so.tcpKeepAliveInterval = f.sockopt_tcp_keep_alive_interval
   if (f.sockopt_tcp_keep_alive_idle > 0) so.tcpKeepAliveIdle = f.sockopt_tcp_keep_alive_idle
@@ -1032,6 +1038,7 @@ function parseInboundForEdit(node: Node, ib: InboundDetail): InboundFormState {
       : '') as InboundFormState['naive_quic_congestion_control'],
     sockopt_enabled: Object.keys(sockopt).length > 0,
     sockopt_mark: numberValue(sockopt.mark),
+    sockopt_accept_proxy_protocol: boolValue(sockopt.acceptProxyProtocol),
     sockopt_tcp_fast_open: boolValue(sockopt.tcpFastOpen),
     sockopt_tcp_keep_alive_interval: numberValue(sockopt.tcpKeepAliveInterval),
     sockopt_tcp_keep_alive_idle: numberValue(sockopt.tcpKeepAliveIdle),
@@ -1903,6 +1910,9 @@ function InboundFormFields({ form, setForm, showMetadata, servers, onGenKeys, on
                   value={form.sockopt_mark || ''}
                   onChange={e => update('sockopt_mark', Number(e.target.value) || 0)}
                   sx={{ width: 130 }} />
+                {switchControl(t('admin:nodes.create_dialog.sockopt_accept_proxy_protocol'),
+                  form.sockopt_accept_proxy_protocol,
+                  c => update('sockopt_accept_proxy_protocol', c))}
                 {switchControl(t('admin:nodes.create_dialog.sockopt_tcp_fast_open'),
                   form.sockopt_tcp_fast_open,
                   c => update('sockopt_tcp_fast_open', c))}
@@ -2459,6 +2469,7 @@ export default function NodesView() {
       sort_order: n.sort_order,
       relays: (n.relays ?? []).map(r => ({ ...r })),
       hide_direct: !!n.hide_direct,
+      show_relay_status: !!n.show_relay_status || !!n.hide_direct,
     })
     setEditMetaErr({})
     setEditOpen(true)
@@ -2496,6 +2507,7 @@ export default function NodesView() {
           .map(r => ({ ...r, name: r.name.trim(), address: r.address.trim(), port: Number(r.port) || 0, sni: r.sni?.trim() || undefined, host: r.host?.trim() || undefined }))
           .filter(r => r.address),
         hide_direct: editForm.hide_direct,
+        show_relay_status: editForm.hide_direct || editForm.show_relay_status,
       })
       pushSnack(t('admin:nodes.toast.saved'), 'success')
       setEditOpen(false)
@@ -3713,8 +3725,15 @@ export default function NodesView() {
                 )
               })}
               {editForm.relays.some(r => r.enabled) && (
-                <FormControlLabel sx={{ m: 0, '& .MuiFormControlLabel-label': { ml: 0.75 } }} label={t('admin:nodes.relay.hide_direct')}
-                  control={<Switch size="small" checked={editForm.hide_direct} onChange={(_, c) => setEditForm(f => ({ ...f, hide_direct: c }))} />} />
+                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
+                  <FormControlLabel sx={{ m: 0, '& .MuiFormControlLabel-label': { ml: 0.75 } }} label={t('admin:nodes.relay.hide_direct')}
+                    control={<Switch size="small" checked={editForm.hide_direct}
+                      onChange={(_, c) => setEditForm(f => ({ ...f, hide_direct: c, show_relay_status: c || f.show_relay_status }))} />} />
+                  <FormControlLabel sx={{ m: 0, '& .MuiFormControlLabel-label': { ml: 0.75 } }} label={t('admin:nodes.relay.show_relay_status')}
+                    control={<Switch size="small" checked={editForm.hide_direct || editForm.show_relay_status}
+                      disabled={editForm.hide_direct}
+                      onChange={(_, c) => setEditForm(f => ({ ...f, show_relay_status: c }))} />} />
+                </Box>
               )}
             </Box>
             <Box sx={{ display: 'none' }}>{alpha(md.error, 0.5)}</Box>
