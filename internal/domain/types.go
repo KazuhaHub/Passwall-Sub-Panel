@@ -968,6 +968,11 @@ type RuleSet struct {
 	// individual policy group. A nil/empty map preserves the legacy
 	// name-based defaults in render.proxyGroupChoices.
 	ProxyGroupMembers map[string][]ProxyGroupMember
+	// ProxyGroupOptions optionally changes the generated Mihomo group type and
+	// its health-check settings. Missing entries preserve the legacy select
+	// behavior. sing-box intentionally ignores these options and keeps using a
+	// selector outbound.
+	ProxyGroupOptions map[string]ProxyGroupOptions
 	Content           string // raw YAML rules fragment
 }
 
@@ -979,6 +984,19 @@ type ProxyGroupMember struct {
 	Kind   string `json:"kind" yaml:"kind"`
 	Value  string `json:"value,omitempty" yaml:"value,omitempty"`
 	NodeID int64  `json:"node_id,omitempty" yaml:"node_id,omitempty"`
+}
+
+// ProxyGroupOptions configures one generated Mihomo proxy group. Pointer
+// scalars preserve the distinction between an omitted value (use the panel
+// default) and an explicit zero, which is meaningful for interval.
+type ProxyGroupOptions struct {
+	Type      string `json:"type" yaml:"type"`
+	URL       string `json:"url,omitempty" yaml:"url,omitempty"`
+	Interval  *int   `json:"interval,omitempty" yaml:"interval,omitempty"`
+	Lazy      *bool  `json:"lazy,omitempty" yaml:"lazy,omitempty"`
+	Timeout   *int   `json:"timeout,omitempty" yaml:"timeout,omitempty"`
+	Tolerance *int   `json:"tolerance,omitempty" yaml:"tolerance,omitempty"`
+	Strategy  string `json:"strategy,omitempty" yaml:"strategy,omitempty"`
 }
 
 // Template is one Clash/Sing-box config template stored under config/templates/.

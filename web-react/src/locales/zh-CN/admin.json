@@ -798,7 +798,7 @@
       "content": "- DOMAIN-SUFFIX,example.com,DIRECT"
     },
     "hint": {
-      "proxy_group_order": "可留空；一行一个策略组名。绑定该规则集的订阅会优先按这里排列，未列出的策略组保持规则内容中的首次出现顺序。"
+      "proxy_group_order": "可留空；一行一个策略组名。未列出的策略组会放在开头，并保持规则内容中的首次出现顺序。"
     },
     "tabs": {
       "rules": "规则内容",
@@ -806,7 +806,11 @@
     },
     "members": {
       "groups_title": "代理组",
-      "groups_hint": "从当前规则内容自动识别",
+      "groups_hint": "按项目默认顺序显示；拖动或使用上下按钮调整顺序",
+      "order_unsaved": "代理组顺序有未保存的修改",
+      "restore_group_order": "恢复默认代理组顺序",
+      "move_group_up": "上移代理组",
+      "move_group_down": "下移代理组",
       "custom": "自定义编排",
       "system_default": "系统默认",
       "unsaved": "有未保存的修改",
@@ -814,6 +818,37 @@
       "first_default": "第一项是客户端默认选中的出口",
       "restore_default": "恢复系统默认",
       "default_badge": "默认",
+      "group_type": "代理组类型",
+      "type": {
+        "select": "手动选择（select）",
+        "url-test": "自动选择（url-test）",
+        "fallback": "自动回退（fallback）",
+        "load-balance": "负载均衡（load-balance）"
+      },
+      "type_hint": {
+        "select": "手动选择使用的出口，第一项为默认出口",
+        "url-test": "定期测速，自动使用延迟最低的可用节点",
+        "fallback": "按列表顺序使用首个可用节点，故障时自动切换",
+        "load-balance": "按所选策略将请求分配到多个可用节点"
+      },
+      "test_url": "测试地址",
+      "interval": "测试间隔（秒）",
+      "interval_hint": "0 表示关闭定时测试",
+      "timeout": "超时时间（毫秒）",
+      "tolerance": "节点切换容差（毫秒）",
+      "lazy": "懒惰检测（未使用该组时不测试）",
+      "strategy": "负载均衡策略",
+      "strategy_value": {
+        "round-robin": "轮询（round-robin）",
+        "consistent-hashing": "一致性哈希（consistent-hashing）",
+        "sticky-sessions": "粘性会话（sticky-sessions）"
+      },
+      "strategy_hint": {
+        "round-robin": "将请求分配给组内不同的代理节点。",
+        "consistent-hashing": "相同目标地址的请求固定分配给同一个代理节点。",
+        "sticky-sessions": "相同来源地址和目标地址的请求固定到同一节点，缓存 10 分钟。"
+      },
+      "mihomo_only": "代理组类型和健康检查参数仅作用于 Mihomo；sing-box 始终生成手动 selector。",
       "add_title": "添加成员",
       "add": "添加",
       "kind_node": "具体节点",
@@ -849,7 +884,15 @@
         "empty_node_set": "节点集合当前没有匹配项：{{value}}",
         "unknown_kind": "未知成员类型：{{value}}",
         "missing_remaining": "未包含“其余节点”，未来新增节点不会自动进入此代理组",
-        "cycle": "代理组引用形成循环"
+        "cycle": "代理组引用形成循环",
+        "unknown_group_options": "代理组类型配置不在当前规则内容中",
+        "invalid_group_type": "未知代理组类型：{{value}}",
+        "invalid_test_url": "测试地址必须是有效的 HTTP/HTTPS URL",
+        "invalid_interval": "测试间隔不能小于 0",
+        "invalid_timeout": "超时时间必须大于 0",
+        "invalid_tolerance": "节点切换容差不能小于 0",
+        "invalid_strategy": "未知负载均衡策略：{{value}}",
+        "insufficient_auto_members": "自动选择或负载均衡通常至少需要两个可用成员"
       }
     },
     "table": {

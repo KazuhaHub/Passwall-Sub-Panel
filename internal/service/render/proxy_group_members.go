@@ -34,11 +34,13 @@ type ProxyGroupInspectNode struct {
 }
 
 type ProxyGroupInspectGroup struct {
-	Name           string                    `json:"name"`
-	Configured     bool                      `json:"configured"`
-	DefaultMembers []domain.ProxyGroupMember `json:"default_members"`
-	Members        []domain.ProxyGroupMember `json:"members"`
-	Preview        []string                  `json:"preview"`
+	Name              string                    `json:"name"`
+	Configured        bool                      `json:"configured"`
+	OptionsConfigured bool                      `json:"options_configured"`
+	Options           domain.ProxyGroupOptions  `json:"options"`
+	DefaultMembers    []domain.ProxyGroupMember `json:"default_members"`
+	Members           []domain.ProxyGroupMember `json:"members"`
+	Preview           []string                  `json:"preview"`
 }
 
 type ProxyGroupInspection struct {
@@ -54,10 +56,11 @@ type ProxyGroupInspection struct {
 // validates a draft member map, and resolves a metadata-only preview. It is
 // intentionally free of repositories so the admin handler and unit tests can
 // use the exact compiler semantics without constructing a render Service.
-func InspectProxyGroups(content string, members map[string][]domain.ProxyGroupMember, nodes []*domain.Node, previewScope ...[]*domain.Node) ProxyGroupInspection {
+func InspectProxyGroups(content string, members map[string][]domain.ProxyGroupMember, options map[string]domain.ProxyGroupOptions, nodes []*domain.Node, previewScope ...[]*domain.Node) ProxyGroupInspection {
 	targets := withRequiredProxyGroupDependencies(ruleTargetsInOrder(content))
 	targets = withConfiguredProxyGroupDependencies(targets, members)
 	issues := validateProxyGroupMembers(targets, members, nodes)
+	issues = append(issues, validateProxyGroupOptions(targets, options)...)
 
 	regionsSet := map[string]bool{}
 	tagsSet := map[string]bool{}
@@ -113,11 +116,21 @@ func InspectProxyGroups(content string, members map[string][]domain.ProxyGroupMe
 		if configured {
 			effective = configuredMembers
 		}
+		effectiveOptions := domain.ProxyGroupOptions{Type: ProxyGroupTypeSelect}
+		rawOptions, optionsConfigured := options[target]
+		if optionsConfigured {
+			effectiveOptions = EffectiveProxyGroupOptions(rawOptions)
+		}
+		preview := resolveConfiguredMembers(effective, previewItems)
+		if (effectiveOptions.Type == ProxyGroupTypeURLTest || effectiveOptions.Type == ProxyGroupTypeLoadBalance) && len(preview) < 2 {
+			issues = append(issues, ProxyGroupIssue{Level: "warning", Group: target, Code: "insufficient_auto_members", Message: "自动选择或负载均衡通常至少需要两个可用成员"})
+		}
 		groups = append(groups, ProxyGroupInspectGroup{
-			Name: target, Configured: configured,
+			Name: target, Configured: configured, OptionsConfigured: optionsConfigured,
+			Options:        effectiveOptions,
 			DefaultMembers: defaults,
 			Members:        append([]domain.ProxyGroupMember(nil), effective...),
-			Preview:        resolveConfiguredMembers(effective, previewItems),
+			Preview:        preview,
 		})
 	}
 

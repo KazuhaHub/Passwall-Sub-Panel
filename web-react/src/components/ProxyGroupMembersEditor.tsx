@@ -7,12 +7,14 @@ import {
   Chip,
   CircularProgress,
   Divider,
+  FormControlLabel,
   IconButton,
   List,
   ListItemButton,
   ListItemText,
   MenuItem,
   Stack,
+  Switch,
   TextField,
   Tooltip,
   Typography,
@@ -30,17 +32,26 @@ import {
   inspectProxyGroups,
   type ProxyGroupInspection,
   type ProxyGroupMember,
+  type ProxyGroupOptions,
+  type ProxyGroupType,
 } from '@/api/rules'
 import type { Group } from '@/api/types'
-import { appendUniqueProxyGroupMember, proxyGroupMemberIdentity, proxyGroupMemberListsEqual, reorderProxyGroupMembers } from '@/utils/proxyGroupMembers'
+import { appendUniqueProxyGroupMember, applyProxyGroupOrder, defaultProxyGroupOptions, proxyGroupMemberIdentity, proxyGroupMemberListsEqual, proxyGroupOptionsEqual, proxyGroupOrderEqual, reorderProxyGroupMembers, reorderProxyGroupNames } from '@/utils/proxyGroupMembers'
 
 type MemberMap = Record<string, ProxyGroupMember[]>
+type OptionMap = Record<string, ProxyGroupOptions>
 
 interface Props {
   content: string
+  groupOrder: string[]
+  initialGroupOrder: string[]
+  onGroupOrderChange: (order: string[]) => void
   members: MemberMap
   initialMembers: MemberMap
   onChange: (members: MemberMap) => void
+  options: OptionMap
+  initialOptions: OptionMap
+  onOptionsChange: (options: OptionMap) => void
   previewGroups: Group[]
   onValidationChange?: (hasErrors: boolean) => void
 }
@@ -48,7 +59,7 @@ interface Props {
 type AddKind = 'node' | 'builtin' | 'proxy_group' | 'region' | 'tag' | 'remaining'
 type AddOption = { value: string | number; label: string }
 
-export default function ProxyGroupMembersEditor({ content, members, initialMembers, onChange, previewGroups, onValidationChange }: Props) {
+export default function ProxyGroupMembersEditor({ content, groupOrder, initialGroupOrder, onGroupOrderChange, members, initialMembers, onChange, options, initialOptions, onOptionsChange, previewGroups, onValidationChange }: Props) {
   const theme = useTheme()
   const md = theme.palette.md
   const { t } = useTranslation(['admin', 'common'])
@@ -59,8 +70,10 @@ export default function ProxyGroupMembersEditor({ content, members, initialMembe
   const [addKind, setAddKind] = useState<AddKind>('node')
   const [addValue, setAddValue] = useState<string | number | null>(null)
   const [dragIndex, setDragIndex] = useState<number | null>(null)
+  const [groupDragIndex, setGroupDragIndex] = useState<number | null>(null)
 
   const serializedMembers = useMemo(() => JSON.stringify(members), [members])
+  const serializedOptions = useMemo(() => JSON.stringify(options), [options])
   useEffect(() => {
     const controller = new AbortController()
     const timer = window.setTimeout(() => {
@@ -68,6 +81,7 @@ export default function ProxyGroupMembersEditor({ content, members, initialMembe
       void inspectProxyGroups({
         content,
         proxy_group_members: members,
+        proxy_group_options: options,
         preview_group_id: previewGroupID || undefined,
       }, controller.signal).then(result => {
         setInspection(result)
@@ -83,12 +97,22 @@ export default function ProxyGroupMembersEditor({ content, members, initialMembe
       })
     }, 300)
     return () => { window.clearTimeout(timer); controller.abort() }
-  }, [content, serializedMembers, previewGroupID]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [content, serializedMembers, serializedOptions, previewGroupID]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const current = inspection?.groups.find(group => group.name === selected)
   const currentConfigured = Object.prototype.hasOwnProperty.call(members, selected)
+  const currentOptionsConfigured = Object.prototype.hasOwnProperty.call(options, selected)
   const currentMembers = members[selected] || current?.default_members || []
+  const configuredOptions = options[selected]
+  const currentOptions = configuredOptions
+    ? { ...defaultProxyGroupOptions(configuredOptions.type), ...configuredOptions }
+    : current?.options || defaultProxyGroupOptions('select')
+  const currentType = currentOptions.type || 'select'
+  const emphasizeFirst = currentType === 'select' || currentType === 'fallback'
   const currentIssues = (inspection?.issues || []).filter(issue => !issue.group || issue.group === selected)
+  const orderedGroups = useMemo(() => applyProxyGroupOrder(inspection?.groups || [], groupOrder), [inspection, groupOrder])
+  const initialOrderedGroups = useMemo(() => applyProxyGroupOrder(inspection?.groups || [], initialGroupOrder), [inspection, initialGroupOrder])
+  const groupOrderDirty = !proxyGroupOrderEqual(orderedGroups.map(group => group.name), initialOrderedGroups.map(group => group.name))
 
   function commit(next: ProxyGroupMember[]) {
     if (!selected) return
@@ -97,14 +121,37 @@ export default function ProxyGroupMembersEditor({ content, members, initialMembe
 
   function resetCurrent() {
     if (!selected) return
-    const next = { ...members }
-    delete next[selected]
-    onChange(next)
+    const nextMembers = { ...members }
+    delete nextMembers[selected]
+    onChange(nextMembers)
+    const nextOptions = { ...options }
+    delete nextOptions[selected]
+    onOptionsChange(nextOptions)
+  }
+
+  function changeType(type: ProxyGroupType) {
+    if (!selected) return
+    const next = { ...options }
+    if (type === 'select') delete next[selected]
+    else next[selected] = defaultProxyGroupOptions(type)
+    onOptionsChange(next)
+  }
+
+  function updateOptions(patch: Partial<ProxyGroupOptions>) {
+    if (!selected || currentType === 'select') return
+    onOptionsChange({ ...options, [selected]: { ...currentOptions, ...patch } })
   }
 
   function move(from: number, to: number) {
     if (to < 0 || to >= currentMembers.length || from === to) return
     commit(reorderProxyGroupMembers(currentMembers, from, to))
+  }
+
+  function moveGroup(from: number, to: number) {
+    if (to < 0 || to >= orderedGroups.length || from === to) return
+    const next = reorderProxyGroupNames(orderedGroups.map(group => group.name), from, to)
+    const initialEffective = initialOrderedGroups.map(group => group.name)
+    onGroupOrderChange(proxyGroupOrderEqual(next, initialEffective) ? [...initialGroupOrder] : next)
   }
 
   function remove(index: number) {
@@ -135,7 +182,7 @@ export default function ProxyGroupMembersEditor({ content, members, initialMembe
 
   const addOptions = useMemo<AddOption[]>(() => {
     switch (addKind) {
-      case 'node': return (inspection?.nodes || []).map(node => ({ value: node.id, label: `${node.display_name} · ${node.server_address || '—'} · ${node.region || '—'}${node.enabled ? '' : ` · ${t('admin:rules.members.disabled')}`}` }))
+      case 'node': return (inspection?.nodes || []).map(node => ({ value: node.id, label: node.display_name }))
       case 'builtin': return (inspection?.builtins || []).map(value => ({ value, label: value }))
       case 'proxy_group': return (inspection?.groups || []).filter(group => group.name !== selected).map(group => ({ value: group.name, label: group.name }))
       case 'region': return (inspection?.regions || []).map(value => ({ value, label: value }))
@@ -164,19 +211,54 @@ export default function ProxyGroupMembersEditor({ content, members, initialMembe
     <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '280px minmax(0, 1fr)' }, height: { xs: 'auto', md: 560 }, minHeight: 560, border: `1px solid ${md.outlineVariant}`, borderRadius: 2, overflow: 'hidden' }}>
       <Box sx={{ borderRight: { md: `1px solid ${md.outlineVariant}` }, bgcolor: md.surfaceContainerLow, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
         <Box sx={{ p: 2, borderBottom: `1px solid ${md.outlineVariant}` }}>
-          <Typography sx={{ fontWeight: 600 }}>{t('admin:rules.members.groups_title')}</Typography>
+          <Stack direction="row" sx={{ alignItems: 'center', justifyContent: 'space-between', gap: 1 }}>
+            <Stack direction="row" sx={{ alignItems: 'center', gap: 1, minWidth: 0 }}>
+              <Typography sx={{ fontWeight: 600 }}>{t('admin:rules.members.groups_title')}</Typography>
+              {groupOrderDirty && (
+                <Tooltip title={t('admin:rules.members.order_unsaved')}>
+                  <Box component="span" sx={{ width: 10, height: 10, flexShrink: 0, borderRadius: '50%', bgcolor: md.primary }} />
+                </Tooltip>
+              )}
+            </Stack>
+            <Tooltip title={t('admin:rules.members.restore_group_order')}>
+              <IconButton size="small" onClick={() => onGroupOrderChange([])}>
+                <RestartAltIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
+          </Stack>
           <Typography variant="caption" color="text.secondary">{t('admin:rules.members.groups_hint')}</Typography>
         </Box>
         {loading && !inspection ? <Box sx={{ p: 4, textAlign: 'center' }}><CircularProgress size={22} /></Box> : (
           <List dense disablePadding sx={{ overflowY: 'auto', minHeight: 0 }}>
-            {(inspection?.groups || []).map(group => (
-              <ListItemButton key={group.name} selected={group.name === selected} onClick={() => setSelected(group.name)} sx={{ borderBottom: `1px solid ${md.outlineVariant}` }}>
-                <ListItemText primary={group.name} secondary={group.members[0] ? memberLabel(group.members[0]) : '—'} />
-                {!proxyGroupMemberListsEqual(members[group.name], initialMembers[group.name]) && (
+            {orderedGroups.map((group, index) => (
+              <ListItemButton key={group.name} selected={group.name === selected} draggable
+                onClick={() => setSelected(group.name)}
+                onDragStart={() => setGroupDragIndex(index)} onDragEnd={() => setGroupDragIndex(null)}
+                onDragOver={event => event.preventDefault()}
+                onDrop={() => { if (groupDragIndex !== null) moveGroup(groupDragIndex, index); setGroupDragIndex(null) }}
+                sx={{ gap: 0.25, borderBottom: `1px solid ${md.outlineVariant}`, opacity: groupDragIndex === index ? 0.5 : 1 }}>
+                <DragIndicatorIcon fontSize="small" sx={{ flexShrink: 0, cursor: 'grab', color: md.onSurfaceVariant }} />
+                <ListItemText primary={group.name} secondary={group.members[0] ? memberLabel(group.members[0]) : '—'}
+                  sx={{ minWidth: 0, mr: 0.25 }} slotProps={{ primary: { noWrap: true }, secondary: { noWrap: true } }} />
+                {(!proxyGroupMemberListsEqual(members[group.name], initialMembers[group.name]) || !proxyGroupOptionsEqual(options[group.name], initialOptions[group.name])) && (
                   <Tooltip title={t('admin:rules.members.unsaved')}>
                     <Box component="span" sx={{ width: 10, height: 10, flexShrink: 0, borderRadius: '50%', bgcolor: md.primary }} />
                   </Tooltip>
                 )}
+                <Tooltip title={t('admin:rules.members.move_group_up')}>
+                  <span>
+                    <IconButton size="small" disabled={index === 0} onClick={event => { event.stopPropagation(); moveGroup(index, index - 1) }}>
+                      <ArrowUpwardIcon sx={{ fontSize: 17 }} />
+                    </IconButton>
+                  </span>
+                </Tooltip>
+                <Tooltip title={t('admin:rules.members.move_group_down')}>
+                  <span>
+                    <IconButton size="small" disabled={index === orderedGroups.length - 1} onClick={event => { event.stopPropagation(); moveGroup(index, index + 1) }}>
+                      <ArrowDownwardIcon sx={{ fontSize: 17 }} />
+                    </IconButton>
+                  </span>
+                </Tooltip>
               </ListItemButton>
             ))}
           </List>
@@ -190,21 +272,62 @@ export default function ProxyGroupMembersEditor({ content, members, initialMembe
           <Stack direction={{ xs: 'column', sm: 'row' }} sx={{ justifyContent: 'space-between', gap: 1, alignItems: { sm: 'center' } }}>
             <Box>
               <Typography variant="h6">{current.name}</Typography>
-              <Typography variant="caption" color="text.secondary">{t('admin:rules.members.first_default')}</Typography>
+              <Typography variant="caption" color="text.secondary">{t(`admin:rules.members.type_hint.${currentType}`)}</Typography>
             </Box>
-            <Button size="small" startIcon={<RestartAltIcon />} onClick={resetCurrent} disabled={!currentConfigured}>
+            <Button size="small" startIcon={<RestartAltIcon />} onClick={resetCurrent} disabled={!currentConfigured && !currentOptionsConfigured}>
               {t('admin:rules.members.restore_default')}
             </Button>
           </Stack>
+
+          <Box sx={{ mt: 2, p: 1.5, borderRadius: 2, bgcolor: md.surfaceContainerLow }}>
+            <TextField select fullWidth size="small" label={t('admin:rules.members.group_type')}
+              value={currentType} onChange={e => changeType(e.target.value as ProxyGroupType)}>
+              <MenuItem value="select">{t('admin:rules.members.type.select')}</MenuItem>
+              <MenuItem value="url-test">{t('admin:rules.members.type.url-test')}</MenuItem>
+              <MenuItem value="fallback">{t('admin:rules.members.type.fallback')}</MenuItem>
+              <MenuItem value="load-balance">{t('admin:rules.members.type.load-balance')}</MenuItem>
+            </TextField>
+
+            {currentType !== 'select' && (
+              <Box sx={{ mt: 1.5, display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' }, gap: 1.5 }}>
+                <TextField size="small" label={t('admin:rules.members.test_url')} value={currentOptions.url || ''}
+                  onChange={e => updateOptions({ url: e.target.value })} sx={{ gridColumn: '1 / -1' }} />
+                <TextField size="small" type="number" label={t('admin:rules.members.interval')}
+                  value={currentOptions.interval ?? ''} onChange={e => updateOptions({ interval: Number(e.target.value) })}
+                  helperText={t('admin:rules.members.interval_hint')} slotProps={{ htmlInput: { min: 0, step: 1 } }} />
+                <TextField size="small" type="number" label={t('admin:rules.members.timeout')}
+                  value={currentOptions.timeout ?? ''} onChange={e => updateOptions({ timeout: Number(e.target.value) })}
+                  slotProps={{ htmlInput: { min: 1, step: 1 } }} />
+                {currentType === 'url-test' && (
+                  <TextField size="small" type="number" label={t('admin:rules.members.tolerance')}
+                    value={currentOptions.tolerance ?? ''} onChange={e => updateOptions({ tolerance: Number(e.target.value) })}
+                    slotProps={{ htmlInput: { min: 0, step: 1 } }} />
+                )}
+                {currentType === 'load-balance' && (
+                  <TextField select size="small" label={t('admin:rules.members.strategy')}
+                    value={currentOptions.strategy || 'consistent-hashing'} onChange={e => updateOptions({ strategy: e.target.value as ProxyGroupOptions['strategy'] })}
+                    helperText={t(`admin:rules.members.strategy_hint.${currentOptions.strategy || 'consistent-hashing'}`)} sx={{ gridColumn: '1 / -1' }}>
+                    <MenuItem value="round-robin">{t('admin:rules.members.strategy_value.round-robin')}</MenuItem>
+                    <MenuItem value="consistent-hashing">{t('admin:rules.members.strategy_value.consistent-hashing')}</MenuItem>
+                    <MenuItem value="sticky-sessions">{t('admin:rules.members.strategy_value.sticky-sessions')}</MenuItem>
+                  </TextField>
+                )}
+                <FormControlLabel sx={{ m: 0, minHeight: 40, columnGap: 1 }}
+                  control={<Switch size="small" checked={currentOptions.lazy ?? true} onChange={(_, checked) => updateOptions({ lazy: checked })} />}
+                  label={t('admin:rules.members.lazy')} />
+              </Box>
+            )}
+            <Alert severity="info" sx={{ mt: 1.5 }}>{t('admin:rules.members.mihomo_only')}</Alert>
+          </Box>
 
           <Stack spacing={1} sx={{ mt: 2 }}>
             {currentMembers.map((member, index) => (
               <Box key={`${memberKey(member)}:${index}`} draggable
                 onDragStart={() => setDragIndex(index)} onDragEnd={() => setDragIndex(null)}
                 onDragOver={e => e.preventDefault()} onDrop={() => { if (dragIndex !== null) move(dragIndex, index); setDragIndex(null) }}
-                sx={{ display: 'flex', alignItems: 'center', gap: 1, p: 1, border: `1px solid ${md.outlineVariant}`, borderRadius: 1.5, bgcolor: index === 0 ? md.primaryContainer : md.surfaceContainer, opacity: dragIndex === index ? 0.5 : 1 }}>
+                sx={{ display: 'flex', alignItems: 'center', gap: 1, p: 1, border: `1px solid ${md.outlineVariant}`, borderRadius: 1.5, bgcolor: index === 0 && emphasizeFirst ? md.primaryContainer : md.surfaceContainer, opacity: dragIndex === index ? 0.5 : 1 }}>
                 <DragIndicatorIcon fontSize="small" sx={{ cursor: 'grab', color: md.onSurfaceVariant }} />
-                <Chip size="small" label={index + 1} color={index === 0 ? 'primary' : 'default'} />
+                <Chip size="small" label={index + 1} color={index === 0 && emphasizeFirst ? 'primary' : 'default'} />
                 <Box sx={{ flex: 1, minWidth: 0 }}>
                   <Typography noWrap sx={{ fontSize: 14, fontWeight: 500 }}>{memberLabel(member)}</Typography>
                   <Typography noWrap variant="caption" color="text.secondary">{memberKey(member)}</Typography>

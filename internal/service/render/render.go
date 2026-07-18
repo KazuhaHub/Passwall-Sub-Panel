@@ -153,7 +153,7 @@ func (s *Service) RenderForUser(ctx context.Context, u *domain.User, ct domain.C
 		return nil, fmt.Errorf("marshal proxies: %w", err)
 	}
 
-	rulesCommon, proxyGroupOrder, proxyGroupMembers, err := s.resolveRulesCommon(ctx, tpl)
+	rulesCommon, proxyGroupOrder, proxyGroupMembers, proxyGroupOptions, err := s.resolveRulesCommon(ctx, tpl)
 	if err != nil {
 		return nil, fmt.Errorf("resolve rules: %w", err)
 	}
@@ -161,9 +161,12 @@ func (s *Service) RenderForUser(ctx context.Context, u *domain.User, ct domain.C
 		proxyGroupOrder = tpl.ProxyGroupOrder
 	}
 	if ct == domain.ClientSingBox {
+		// proxyGroupOptions is intentionally Mihomo-only. sing-box has no
+		// complete semantic equivalent for fallback/load-balance, so all groups
+		// remain selectors while sharing the same ordered member layouts.
 		return s.renderSingBox(ctx, u, tpl, items, rulesCommon, proxyGroupOrder, proxyGroupMembers, st)
 	}
-	proxyGroupsYAML, err := buildProxyGroupsYAMLWithMembers(strings.Join([]string{u.PersonalRules, rulesCommon}, "\n"), proxyGroupOrder, proxyGroupMembers, items)
+	proxyGroupsYAML, err := buildProxyGroupsYAMLWithMembers(strings.Join([]string{u.PersonalRules, rulesCommon}, "\n"), proxyGroupOrder, proxyGroupMembers, proxyGroupOptions, items)
 	if err != nil {
 		return nil, fmt.Errorf("build proxy groups: %w", err)
 	}
@@ -492,16 +495,17 @@ recv:
 	return out
 }
 
-func (s *Service) resolveRulesCommon(ctx context.Context, tpl *domain.Template) (string, []string, map[string][]domain.ProxyGroupMember, error) {
+func (s *Service) resolveRulesCommon(ctx context.Context, tpl *domain.Template) (string, []string, map[string][]domain.ProxyGroupMember, map[string]domain.ProxyGroupOptions, error) {
 	slugs := tpl.RuleSets
 	if len(slugs) == 0 {
 		log.Debug("render: no rule_sets configured for template", "template", tpl.Slug)
-		return "", nil, nil, nil
+		return "", nil, nil, nil, nil
 	}
 	parts := make([]string, 0, len(slugs))
 	proxyGroupOrder := []string{}
 	seenOrder := map[string]bool{}
 	proxyGroupMembers := map[string][]domain.ProxyGroupMember{}
+	proxyGroupOptions := map[string]domain.ProxyGroupOptions{}
 	for _, slug := range slugs {
 		rs, err := s.repos.RuleSet.GetBySlug(ctx, slug)
 		if err != nil {
@@ -534,11 +538,14 @@ func (s *Service) resolveRulesCommon(ctx context.Context, tpl *domain.Template) 
 				log.Warn("render: duplicate proxy-group member config; first rule_set wins", "group", target, "rule_set", slug)
 			}
 		}
+		for _, target := range mergeFirstProxyGroupOptions(proxyGroupOptions, rs.ProxyGroupOptions) {
+			log.Warn("render: duplicate proxy-group options; first rule_set wins", "group", target, "rule_set", slug)
+		}
 		log.Debug("render: loaded rule_set", "slug", slug, "lines", strings.Count(content, "\n")+1)
 	}
 	result := strings.Join(parts, "\n")
 	log.Debug("render: rules_common resolved", "total_length", len(result), "rule_sets", len(parts))
-	return result, proxyGroupOrder, proxyGroupMembers, nil
+	return result, proxyGroupOrder, proxyGroupMembers, proxyGroupOptions, nil
 }
 
 // mergeFirstProxyGroupMembers applies template rule-set precedence: once a
@@ -555,6 +562,38 @@ func mergeFirstProxyGroupMembers(dst, src map[string][]domain.ProxyGroupMember) 
 	}
 	sort.Strings(duplicates)
 	return duplicates
+}
+
+// mergeFirstProxyGroupOptions mirrors member precedence without coupling the
+// two maps: one rule set may define a type while another supplies the layout.
+func mergeFirstProxyGroupOptions(dst, src map[string]domain.ProxyGroupOptions) []string {
+	duplicates := []string{}
+	for target, configured := range src {
+		if _, exists := dst[target]; exists {
+			duplicates = append(duplicates, target)
+			continue
+		}
+		dst[target] = cloneProxyGroupOptions(configured)
+	}
+	sort.Strings(duplicates)
+	return duplicates
+}
+
+func cloneProxyGroupOptions(src domain.ProxyGroupOptions) domain.ProxyGroupOptions {
+	out := src
+	if src.Interval != nil {
+		out.Interval = intPointer(*src.Interval)
+	}
+	if src.Lazy != nil {
+		out.Lazy = boolPointer(*src.Lazy)
+	}
+	if src.Timeout != nil {
+		out.Timeout = intPointer(*src.Timeout)
+	}
+	if src.Tolerance != nil {
+		out.Tolerance = intPointer(*src.Tolerance)
+	}
+	return out
 }
 
 // DefaultSubProfileNameTemplate is the compiled-in fallback for

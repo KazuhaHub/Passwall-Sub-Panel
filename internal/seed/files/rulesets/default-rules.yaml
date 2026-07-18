@@ -4,8 +4,6 @@ sort: 10
 enabled: true
 proxy_group_order:
   - '🚀 节点选择'
-  # UDP catch-all toggle (node / DIRECT / REJECT); kept high so it's easy to
-  # flip when a node's UDP is poor.
   - '🎮 UDP控制'
   # Pulled up under the main selector by user preference even though
   # it still defaults to DIRECT — visual proximity to 🚀 节点选择

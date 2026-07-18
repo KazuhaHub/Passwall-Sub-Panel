@@ -38,6 +38,7 @@ type ruleSetDTO struct {
 	Enabled           bool                                 `json:"enabled"`
 	ProxyGroupOrder   []string                             `json:"proxy_group_order"`
 	ProxyGroupMembers map[string][]domain.ProxyGroupMember `json:"proxy_group_members,omitempty"`
+	ProxyGroupOptions map[string]domain.ProxyGroupOptions  `json:"proxy_group_options,omitempty"`
 	Content           string                               `json:"content"`
 }
 
@@ -55,6 +56,7 @@ func (h *AdminRuleSetsHandler) List(c *gin.Context) {
 			Enabled:           r.Enabled,
 			ProxyGroupOrder:   r.ProxyGroupOrder,
 			ProxyGroupMembers: r.ProxyGroupMembers,
+			ProxyGroupOptions: r.ProxyGroupOptions,
 			Content:           r.Content,
 		}
 	}
@@ -77,6 +79,7 @@ func (h *AdminRuleSetsHandler) Get(c *gin.Context) {
 		Enabled:           r.Enabled,
 		ProxyGroupOrder:   r.ProxyGroupOrder,
 		ProxyGroupMembers: r.ProxyGroupMembers,
+		ProxyGroupOptions: r.ProxyGroupOptions,
 		Content:           r.Content,
 	})
 }
@@ -96,7 +99,7 @@ func (h *AdminRuleSetsHandler) Save(c *gin.Context) {
 		respondError(c, err)
 		return
 	}
-	inspection := render.InspectProxyGroups(req.Content, req.ProxyGroupMembers, nodes)
+	inspection := render.InspectProxyGroups(req.Content, req.ProxyGroupMembers, req.ProxyGroupOptions, nodes)
 	for _, issue := range inspection.Issues {
 		if issue.Level == "error" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid proxy group members", "issues": inspection.Issues})
@@ -108,6 +111,7 @@ func (h *AdminRuleSetsHandler) Save(c *gin.Context) {
 		Enabled:           req.Enabled,
 		ProxyGroupOrder:   req.ProxyGroupOrder,
 		ProxyGroupMembers: req.ProxyGroupMembers,
+		ProxyGroupOptions: render.NormalizeProxyGroupOptionsMap(req.ProxyGroupOptions),
 		Content:           req.Content,
 	}); err != nil {
 		if errors.Is(err, domain.ErrValidation) {
@@ -126,6 +130,7 @@ func (h *AdminRuleSetsHandler) Save(c *gin.Context) {
 type inspectProxyGroupsRequest struct {
 	Content           string                               `json:"content"`
 	ProxyGroupMembers map[string][]domain.ProxyGroupMember `json:"proxy_group_members"`
+	ProxyGroupOptions map[string]domain.ProxyGroupOptions  `json:"proxy_group_options"`
 	PreviewGroupID    int64                                `json:"preview_group_id,omitempty"`
 }
 
@@ -156,7 +161,7 @@ func (h *AdminRuleSetsHandler) InspectProxyGroups(c *gin.Context) {
 			return
 		}
 	}
-	c.JSON(http.StatusOK, render.InspectProxyGroups(req.Content, req.ProxyGroupMembers, nodes, preview))
+	c.JSON(http.StatusOK, render.InspectProxyGroups(req.Content, req.ProxyGroupMembers, req.ProxyGroupOptions, nodes, preview))
 }
 
 func (h *AdminRuleSetsHandler) Delete(c *gin.Context) {

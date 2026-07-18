@@ -43,7 +43,7 @@ func TestBuildProxyGroupsYAMLWithMembersPutsNodeBeforeDirect(t *testing.T) {
 			{Kind: "node_set", Value: "remaining"},
 		},
 	}
-	raw, err := buildProxyGroupsYAMLWithMembers("- MATCH,🇨🇳 中国大陆", nil, configs, []renderItem{{name: node.DisplayName, node: node}})
+	raw, err := buildProxyGroupsYAMLWithMembers("- MATCH,🇨🇳 中国大陆", nil, configs, nil, []renderItem{{name: node.DisplayName, node: node}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,7 +94,7 @@ func TestInspectProxyGroupsRejectsCycleAndWarnsWithoutRemaining(t *testing.T) {
 		"A": {{Kind: "proxy_group", Value: "B"}},
 		"B": {{Kind: "proxy_group", Value: "A"}},
 	}
-	inspection := InspectProxyGroups("- DOMAIN,a,A\n- MATCH,B", configs, nil)
+	inspection := InspectProxyGroups("- DOMAIN,a,A\n- MATCH,B", configs, nil, nil)
 	hasCycle, hasWarning := false, false
 	for _, issue := range inspection.Issues {
 		if issue.Level == "error" && issue.Message == "代理组引用形成循环" {
@@ -116,7 +116,7 @@ func TestInspectProxyGroupsWarnsWhenDynamicSetHasNoCurrentMatch(t *testing.T) {
 	configs := map[string][]domain.ProxyGroupMember{
 		"A": {{Kind: "node_set", Value: "region:CN"}, {Kind: "node_set", Value: "remaining"}},
 	}
-	inspection := InspectProxyGroups("- MATCH,A", configs, []*domain.Node{{ID: 1, Region: "US", Enabled: true}})
+	inspection := InspectProxyGroups("- MATCH,A", configs, nil, []*domain.Node{{ID: 1, Region: "US", Enabled: true}})
 	for _, issue := range inspection.Issues {
 		if issue.Code == "empty_node_set" && issue.Level == "warning" {
 			return

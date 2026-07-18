@@ -207,7 +207,35 @@ func TestBuildProxyGroupsYAMLUsesManualDisplayOrder(t *testing.T) {
 	for i, group := range groups {
 		got[i] = group.Name
 	}
-	want := []string{"🚀 节点选择", "💬 Ai平台", "🎮 游戏平台", "🎯 全球直连", "🛑 广告拦截", "🐟 漏网之鱼"}
+	want := []string{"🎯 全球直连", "🛑 广告拦截", "🐟 漏网之鱼", "🚀 节点选择", "💬 Ai平台", "🎮 游戏平台"}
+	if len(got) != len(want) {
+		t.Fatalf("groups len = %d, want %d: %#v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("group[%d] = %q, want %q; all=%#v", i, got[i], want[i], got)
+		}
+	}
+}
+
+func TestApplyProxyGroupOrderUsesProjectDefaultAndPrependsUnknownGroups(t *testing.T) {
+	targets := []string{
+		"🐟 漏网之鱼",
+		"🏠 自定义代理组",
+		"🍎 苹果服务",
+		"🚀 节点选择",
+		"🇨🇳 中国大陆",
+		"🎮 UDP控制",
+	}
+	got := applyProxyGroupOrder(targets, nil)
+	want := []string{
+		"🏠 自定义代理组",
+		"🚀 节点选择",
+		"🎮 UDP控制",
+		"🇨🇳 中国大陆",
+		"🍎 苹果服务",
+		"🐟 漏网之鱼",
+	}
 	if len(got) != len(want) {
 		t.Fatalf("groups len = %d, want %d: %#v", len(got), len(want), got)
 	}

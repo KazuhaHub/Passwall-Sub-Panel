@@ -8,6 +8,7 @@ export interface RuleSet {
   enabled: boolean
   proxy_group_order: string[]
   proxy_group_members?: Record<string, ProxyGroupMember[]>
+  proxy_group_options?: Record<string, ProxyGroupOptions>
   content: string
 }
 
@@ -15,6 +16,19 @@ export interface ProxyGroupMember {
   kind: 'builtin' | 'proxy_group' | 'node' | 'node_set'
   value?: string
   node_id?: number
+}
+
+export type ProxyGroupType = 'select' | 'url-test' | 'fallback' | 'load-balance'
+export type LoadBalanceStrategy = 'round-robin' | 'consistent-hashing' | 'sticky-sessions'
+
+export interface ProxyGroupOptions {
+  type: ProxyGroupType
+  url?: string
+  interval?: number
+  lazy?: boolean
+  timeout?: number
+  tolerance?: number
+  strategy?: LoadBalanceStrategy
 }
 
 export interface ProxyGroupIssue {
@@ -37,6 +51,8 @@ export interface ProxyGroupInspectNode {
 export interface ProxyGroupInspectGroup {
   name: string
   configured: boolean
+  options_configured: boolean
+  options: ProxyGroupOptions
   default_members: ProxyGroupMember[]
   members: ProxyGroupMember[]
   preview: string[]
@@ -77,6 +93,7 @@ export async function saveRuleSet(rs: RuleSet) {
 export async function inspectProxyGroups(req: {
   content: string
   proxy_group_members: Record<string, ProxyGroupMember[]>
+  proxy_group_options: Record<string, ProxyGroupOptions>
   preview_group_id?: number
 }, signal?: AbortSignal) {
   const { data } = await client.post<ProxyGroupInspection>('/admin/rules/inspect-proxy-groups', req, { signal })

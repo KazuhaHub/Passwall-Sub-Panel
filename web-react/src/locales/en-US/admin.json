@@ -798,7 +798,7 @@
       "content": "- DOMAIN-SUFFIX,example.com,DIRECT"
     },
     "hint": {
-      "proxy_group_order": "Optional; one group name per line. Templates binding this set order their proxy groups by this list first; anything not listed keeps the order of first occurrence in the content."
+      "proxy_group_order": "Optional; one group name per line. Unlisted groups are placed first and keep their order of first occurrence in the rule content."
     },
     "tabs": {
       "rules": "Rules",
@@ -806,7 +806,11 @@
     },
     "members": {
       "groups_title": "Proxy groups",
-      "groups_hint": "Detected from the current rule content",
+      "groups_hint": "Shown in the project default order; drag or use the arrow buttons to reorder",
+      "order_unsaved": "Proxy group order has unsaved changes",
+      "restore_group_order": "Restore default proxy group order",
+      "move_group_up": "Move proxy group up",
+      "move_group_down": "Move proxy group down",
       "custom": "Custom layout",
       "system_default": "System default",
       "unsaved": "Has unsaved changes",
@@ -814,6 +818,37 @@
       "first_default": "The first item is selected by default in the client",
       "restore_default": "Restore system default",
       "default_badge": "Default",
+      "group_type": "Proxy group type",
+      "type": {
+        "select": "Manual selection (select)",
+        "url-test": "Automatic selection (url-test)",
+        "fallback": "Automatic fallback (fallback)",
+        "load-balance": "Load balancing (load-balance)"
+      },
+      "type_hint": {
+        "select": "Choose an outbound manually; the first item is the default",
+        "url-test": "Test nodes periodically and use the available node with the lowest latency",
+        "fallback": "Use the first available node in order and switch automatically on failure",
+        "load-balance": "Distribute requests across available nodes using the selected strategy"
+      },
+      "test_url": "Test URL",
+      "interval": "Test interval (seconds)",
+      "interval_hint": "0 disables scheduled tests",
+      "timeout": "Timeout (milliseconds)",
+      "tolerance": "Switch tolerance (milliseconds)",
+      "lazy": "Lazy health checks (skip while group is unused)",
+      "strategy": "Load-balancing strategy",
+      "strategy_value": {
+        "round-robin": "Round robin (round-robin)",
+        "consistent-hashing": "Consistent hashing (consistent-hashing)",
+        "sticky-sessions": "Sticky sessions (sticky-sessions)"
+      },
+      "strategy_hint": {
+        "round-robin": "Distribute requests among different proxy nodes in the group.",
+        "consistent-hashing": "Send requests for the same destination to the same proxy node.",
+        "sticky-sessions": "Pin the same source and destination pair to one node for 10 minutes."
+      },
+      "mihomo_only": "Proxy group types and health-check settings apply only to Mihomo; sing-box always generates a manual selector.",
       "add_title": "Add member",
       "add": "Add",
       "kind_node": "Specific node",
@@ -849,7 +884,15 @@
         "empty_node_set": "The node set currently has no matches: {{value}}",
         "unknown_kind": "Unknown member type: {{value}}",
         "missing_remaining": "Without “Remaining nodes”, newly added nodes will not enter this proxy group automatically",
-        "cycle": "Proxy-group references form a cycle"
+        "cycle": "Proxy-group references form a cycle",
+        "unknown_group_options": "The proxy-group type configuration does not occur in the current rule content",
+        "invalid_group_type": "Unknown proxy-group type: {{value}}",
+        "invalid_test_url": "The test URL must be a valid HTTP/HTTPS URL",
+        "invalid_interval": "The test interval cannot be negative",
+        "invalid_timeout": "The timeout must be greater than 0",
+        "invalid_tolerance": "The switch tolerance cannot be negative",
+        "invalid_strategy": "Unknown load-balancing strategy: {{value}}",
+        "insufficient_auto_members": "Automatic selection or load balancing usually needs at least two available members"
       }
     },
     "table": {

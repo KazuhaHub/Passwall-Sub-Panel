@@ -50,11 +50,15 @@ import ProxyGroupMembersEditor from '@/components/ProxyGroupMembersEditor'
 const CodeEditor = lazy(() => import('@/components/CodeEditor'))
 
 const EMPTY: RuleSet = {
-  slug: '', name: '', sort: 100, enabled: true, proxy_group_order: [], proxy_group_members: {}, content: '',
+  slug: '', name: '', sort: 100, enabled: true, proxy_group_order: [], proxy_group_members: {}, proxy_group_options: {}, content: '',
 }
 
 function cloneProxyGroupMembers(members: RuleSet['proxy_group_members']): NonNullable<RuleSet['proxy_group_members']> {
   return Object.fromEntries(Object.entries(members || {}).map(([name, list]) => [name, list.map(member => ({ ...member }))]))
+}
+
+function cloneProxyGroupOptions(options: RuleSet['proxy_group_options']): NonNullable<RuleSet['proxy_group_options']> {
+  return Object.fromEntries(Object.entries(options || {}).map(([name, value]) => [name, { ...value }]))
 }
 
 export default function RuleSetsView() {
@@ -73,8 +77,9 @@ export default function RuleSetsView() {
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editing, setEditing] = useState(false)
   const [form, setForm] = useState<RuleSet>(EMPTY)
+  const [initialProxyGroupOrder, setInitialProxyGroupOrder] = useState<string[]>([])
   const [initialProxyGroupMembers, setInitialProxyGroupMembers] = useState<NonNullable<RuleSet['proxy_group_members']>>({})
-  const [proxyGroupText, setProxyGroupText] = useState('')
+  const [initialProxyGroupOptions, setInitialProxyGroupOptions] = useState<NonNullable<RuleSet['proxy_group_options']>>({})
   const [busy, setBusy] = useState(false)
   const [dialogTab, setDialogTab] = useState<'rules' | 'members'>('rules')
   const [memberValidationErrors, setMemberValidationErrors] = useState(false)
@@ -130,12 +135,13 @@ export default function RuleSetsView() {
   }
 
   function openCreate() {
-    setEditing(false); setForm({ ...EMPTY, proxy_group_members: {} }); setInitialProxyGroupMembers({}); setProxyGroupText(''); setDialogTab('rules'); setMemberValidationErrors(false); setDialogOpen(true)
+    setEditing(false); setForm({ ...EMPTY, proxy_group_order: [], proxy_group_members: {}, proxy_group_options: {} }); setInitialProxyGroupOrder([]); setInitialProxyGroupMembers({}); setInitialProxyGroupOptions({}); setDialogTab('rules'); setMemberValidationErrors(false); setDialogOpen(true)
   }
   function openEdit(rs: RuleSet) {
     const proxyGroupMembers = cloneProxyGroupMembers(rs.proxy_group_members)
-    setEditing(true); setForm({ ...rs, proxy_group_members: proxyGroupMembers }); setInitialProxyGroupMembers(cloneProxyGroupMembers(proxyGroupMembers))
-    setProxyGroupText((rs.proxy_group_order || []).join('\n'))
+    const proxyGroupOptions = cloneProxyGroupOptions(rs.proxy_group_options)
+    setEditing(true); setForm({ ...rs, proxy_group_members: proxyGroupMembers, proxy_group_options: proxyGroupOptions }); setInitialProxyGroupMembers(cloneProxyGroupMembers(proxyGroupMembers)); setInitialProxyGroupOptions(cloneProxyGroupOptions(proxyGroupOptions))
+    setInitialProxyGroupOrder([...(rs.proxy_group_order || [])])
     setDialogTab('rules'); setMemberValidationErrors(false)
     setDialogOpen(true)
   }
@@ -145,15 +151,18 @@ export default function RuleSetsView() {
   // and would lose customizations on Restore).
   function openDuplicate(rs: RuleSet) {
     const proxyGroupMembers = cloneProxyGroupMembers(rs.proxy_group_members)
+    const proxyGroupOptions = cloneProxyGroupOptions(rs.proxy_group_options)
     setEditing(false)
     setForm({
       ...rs,
       slug: rs.slug + '-copy',
       name: rs.name + ' (Copy)',
       proxy_group_members: proxyGroupMembers,
+      proxy_group_options: proxyGroupOptions,
     })
     setInitialProxyGroupMembers(cloneProxyGroupMembers(proxyGroupMembers))
-    setProxyGroupText((rs.proxy_group_order || []).join('\n'))
+    setInitialProxyGroupOptions(cloneProxyGroupOptions(proxyGroupOptions))
+    setInitialProxyGroupOrder([...(rs.proxy_group_order || [])])
     setDialogTab('rules'); setMemberValidationErrors(false)
     setDialogOpen(true)
   }
@@ -176,8 +185,7 @@ export default function RuleSetsView() {
     }
     setBusy(true)
     try {
-      const proxyOrder = proxyGroupText.split('\n').map(s => s.trim()).filter(Boolean)
-      await saveRuleSet({ ...form, proxy_group_order: proxyOrder })
+      await saveRuleSet(form)
       pushSnack(t('admin:rules.toast.saved'), 'success')
       setDialogOpen(false)
       await load()
@@ -426,13 +434,6 @@ export default function RuleSetsView() {
                 sx={{ ml: 1, '& .MuiFormControlLabel-label': { ml: 1.5 } }}
               />
             </Box>
-            <TextField fullWidth multiline minRows={4} maxRows={8}
-              label={t('admin:rules.field.proxy_group_order')}
-              placeholder={t('admin:rules.placeholder.proxy_group_order')}
-              helperText={t('admin:rules.hint.proxy_group_order')}
-              value={proxyGroupText}
-              onChange={e => setProxyGroupText(e.target.value)}
-              sx={{ '& textarea': { fontSize: 13 } }} />
             <Box>
               <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant, mb: 0.5 }}>
                 {t('admin:rules.field.content')}
@@ -451,9 +452,15 @@ export default function RuleSetsView() {
             {dialogTab === 'members' && (
               <ProxyGroupMembersEditor
                 content={form.content}
+                groupOrder={form.proxy_group_order || []}
+                initialGroupOrder={initialProxyGroupOrder}
+                onGroupOrderChange={proxy_group_order => setForm(current => ({ ...current, proxy_group_order }))}
                 members={form.proxy_group_members || {}}
                 initialMembers={initialProxyGroupMembers}
                 onChange={proxy_group_members => setForm(current => ({ ...current, proxy_group_members }))}
+                options={form.proxy_group_options || {}}
+                initialOptions={initialProxyGroupOptions}
+                onOptionsChange={proxy_group_options => setForm(current => ({ ...current, proxy_group_options }))}
                 previewGroups={groups}
                 onValidationChange={setMemberValidationErrors}
               />
