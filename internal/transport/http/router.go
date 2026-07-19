@@ -437,8 +437,9 @@ func NewRouter(d Deps) stdhttp.Handler {
 		adminGroup.PUT("/groups/:id/scope-settings", scopeSettings.SetOverride)
 		adminGroup.DELETE("/groups/:id/scope-settings/:type/:name", scopeSettings.DeleteOverride)
 
-		rules := handler.NewAdminRuleSetsHandler(d.Repos.RuleSet, d.Cfg.ConfigDir)
+		rules := handler.NewAdminRuleSetsHandler(d.Repos.RuleSet, d.Repos.Node, d.Group, d.Render.InvalidateAll, d.Cfg.ConfigDir)
 		staffGroup.GET("/rules", rules.List)
+		adminGroup.POST("/rules/inspect-proxy-groups", rules.InspectProxyGroups)
 		staffGroup.GET("/rules/:slug", rules.Get)
 		adminGroup.PUT("/rules/:slug", rules.Save)
 		adminGroup.DELETE("/rules/:slug", rules.Delete)

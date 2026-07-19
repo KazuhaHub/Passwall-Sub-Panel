@@ -31,7 +31,13 @@ func TestRuleSetRepoSaveListGetDelete(t *testing.T) {
 		Sort:            10,
 		Enabled:         false,
 		ProxyGroupOrder: []string{"🚀 节点选择", "💬 Ai平台"},
-		Content:         "- DOMAIN-SUFFIX,example.com,DIRECT",
+		ProxyGroupMembers: map[string][]domain.ProxyGroupMember{
+			"💬 Ai平台": {{Kind: "node", NodeID: 42}, {Kind: "node_set", Value: "remaining"}},
+		},
+		ProxyGroupOptions: map[string]domain.ProxyGroupOptions{
+			"💬 Ai平台": {Type: "url-test", URL: "https://example.com/check", Interval: ruleSetInt(0), Lazy: ruleSetBool(false), Timeout: ruleSetInt(2500), Tolerance: ruleSetInt(80)},
+		},
+		Content: "- DOMAIN-SUFFIX,example.com,DIRECT",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -51,6 +57,12 @@ func TestRuleSetRepoSaveListGetDelete(t *testing.T) {
 	if got.Name != "A rules" || got.Enabled || len(got.ProxyGroupOrder) != 2 || got.ProxyGroupOrder[1] != "💬 Ai平台" {
 		t.Fatalf("unexpected ruleset: %#v", got)
 	}
+	if members := got.ProxyGroupMembers["💬 Ai平台"]; len(members) != 2 || members[0].NodeID != 42 || members[1].Value != "remaining" {
+		t.Fatalf("unexpected proxy group members: %#v", got.ProxyGroupMembers)
+	}
+	if options := got.ProxyGroupOptions["💬 Ai平台"]; options.Type != "url-test" || options.Interval == nil || *options.Interval != 0 || options.Lazy == nil || *options.Lazy || options.Tolerance == nil || *options.Tolerance != 80 {
+		t.Fatalf("unexpected proxy group options: %#v", got.ProxyGroupOptions)
+	}
 
 	if _, err := os.Stat(filepath.Join(repo.dir, "a_rules.yaml")); err != nil {
 		t.Fatalf("expected ruleset file: %v", err)
@@ -62,6 +74,9 @@ func TestRuleSetRepoSaveListGetDelete(t *testing.T) {
 		t.Fatalf("GetBySlug deleted err = %v, want ErrNotFound", err)
 	}
 }
+
+func ruleSetInt(value int) *int    { return &value }
+func ruleSetBool(value bool) *bool { return &value }
 
 func TestRuleSetRepoGetBySlugUsesDocumentSlug(t *testing.T) {
 	ctx := context.Background()

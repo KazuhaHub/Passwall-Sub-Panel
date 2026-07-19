@@ -1,6 +1,11 @@
 package render
 
-import "strings"
+import (
+	"strconv"
+	"strings"
+
+	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
+)
 
 var builtInRuleTargets = map[string]bool{
 	"DIRECT":          true,
@@ -10,15 +15,58 @@ var builtInRuleTargets = map[string]bool{
 	"PASS":            true,
 }
 
+// defaultProxyGroupOrder preserves the original project ordering when a rule
+// set does not declare a custom proxy_group_order. Groups that are not listed
+// here are prepended in their first-occurrence order from the rule content.
+var defaultProxyGroupOrder = []string{
+	"🚀 节点选择",
+	"🎮 UDP控制",
+	"🇨🇳 中国大陆",
+	"💬 Ai平台",
+	"📹 油管视频",
+	"🎥 奈飞视频",
+	"📺 巴哈姆特",
+	"🌍 国外媒体",
+	"🎮 游戏平台",
+	"📲 电报消息",
+	"Ⓜ️ 微软Bing",
+	"📢 谷歌FCM",
+	"🌏 国内媒体",
+	"📺 哔哩哔哩",
+	"Ⓜ️ 微软云盘",
+	"Ⓜ️ 微软服务",
+	"🍎 苹果服务",
+	"🎶 网易音乐",
+	"🎯 全球直连",
+	"🛑 广告拦截",
+	"🍃 应用净化",
+	"🐟 漏网之鱼",
+}
+
 type proxyGroup struct {
-	Name    string   `yaml:"name"`
-	Type    string   `yaml:"type"`
-	Proxies []string `yaml:"proxies"`
+	Name      string   `yaml:"name"`
+	Type      string   `yaml:"type"`
+	Proxies   []string `yaml:"proxies"`
+	URL       string   `yaml:"url,omitempty"`
+	Interval  *int     `yaml:"interval,omitempty"`
+	Lazy      *bool    `yaml:"lazy,omitempty"`
+	Timeout   *int     `yaml:"timeout,omitempty"`
+	Tolerance *int     `yaml:"tolerance,omitempty"`
+	Strategy  string   `yaml:"strategy,omitempty"`
 }
 
 func buildProxyGroupsYAML(rules string, preferredOrder []string) (string, error) {
+	return buildProxyGroupsYAMLInternal(rules, preferredOrder, nil, nil, nil, false)
+}
+
+func buildProxyGroupsYAMLWithMembers(rules string, preferredOrder []string, members map[string][]domain.ProxyGroupMember, options map[string]domain.ProxyGroupOptions, items []renderItem) (string, error) {
+	return buildProxyGroupsYAMLInternal(rules, preferredOrder, members, options, items, true)
+}
+
+func buildProxyGroupsYAMLInternal(rules string, preferredOrder []string, members map[string][]domain.ProxyGroupMember, options map[string]domain.ProxyGroupOptions, items []renderItem, resolve bool) (string, error) {
 	targets := ruleTargetsInOrder(rules)
 	targets = withRequiredProxyGroupDependencies(targets)
+	targets = withConfiguredProxyGroupDependencies(targets, members)
 	targets = applyProxyGroupOrder(targets, preferredOrder)
 	if len(targets) == 0 {
 		return "[]", nil
@@ -26,13 +74,42 @@ func buildProxyGroupsYAML(rules string, preferredOrder []string) (string, error)
 
 	lines := make([]string, 0, len(targets)*6)
 	for _, target := range targets {
+		groupOptions := domain.ProxyGroupOptions{Type: ProxyGroupTypeSelect}
+		if configured, ok := options[target]; ok {
+			groupOptions = EffectiveProxyGroupOptions(configured)
+		}
 		lines = append(lines,
 			"- name: "+yamlScalar(target),
-			"  type: select",
+			"  type: "+groupOptions.Type,
 			"  proxies:",
 		)
-		for _, proxy := range proxyGroupChoices(target) {
+		choices := proxyGroupChoices(target)
+		if resolve {
+			effectiveMembers := defaultMembersForTarget(target)
+			if configured, ok := members[target]; ok {
+				effectiveMembers = configured
+			}
+			choices = resolveConfiguredMembers(effectiveMembers, items)
+			if len(choices) == 0 {
+				choices = []string{"DIRECT"}
+			}
+		}
+		for _, proxy := range choices {
 			lines = append(lines, "  - "+yamlScalar(proxy))
+		}
+		if groupOptions.Type != ProxyGroupTypeSelect {
+			lines = append(lines,
+				"  url: "+yamlScalar(groupOptions.URL),
+				"  interval: "+strconv.Itoa(*groupOptions.Interval),
+				"  lazy: "+strconv.FormatBool(*groupOptions.Lazy),
+				"  timeout: "+strconv.Itoa(*groupOptions.Timeout),
+			)
+			if groupOptions.Type == ProxyGroupTypeURLTest {
+				lines = append(lines, "  tolerance: "+strconv.Itoa(*groupOptions.Tolerance))
+			}
+			if groupOptions.Type == ProxyGroupTypeLoadBalance {
+				lines = append(lines, "  strategy: "+groupOptions.Strategy)
+			}
 		}
 	}
 	return strings.Join(lines, "\n"), nil
@@ -40,13 +117,26 @@ func buildProxyGroupsYAML(rules string, preferredOrder []string) (string, error)
 
 func applyProxyGroupOrder(targets, preferredOrder []string) []string {
 	if len(preferredOrder) == 0 {
-		return targets
+		preferredOrder = defaultProxyGroupOrder
 	}
 	remaining := make(map[string]bool, len(targets))
 	for _, target := range targets {
 		remaining[target] = true
 	}
+	preferred := make(map[string]bool, len(preferredOrder))
+	for _, target := range preferredOrder {
+		target = strings.TrimSpace(target)
+		if target != "" {
+			preferred[target] = true
+		}
+	}
 	out := make([]string, 0, len(targets))
+	for _, target := range targets {
+		if remaining[target] && !preferred[target] {
+			out = append(out, target)
+			delete(remaining, target)
+		}
+	}
 	for _, preferred := range preferredOrder {
 		preferred = strings.TrimSpace(preferred)
 		if !remaining[preferred] {
@@ -54,11 +144,6 @@ func applyProxyGroupOrder(targets, preferredOrder []string) []string {
 		}
 		out = append(out, preferred)
 		delete(remaining, preferred)
-	}
-	for _, target := range targets {
-		if remaining[target] {
-			out = append(out, target)
-		}
 	}
 	return out
 }

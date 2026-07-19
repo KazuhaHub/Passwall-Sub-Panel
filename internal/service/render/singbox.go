@@ -17,8 +17,8 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 )
 
-func (s *Service) renderSingBox(ctx context.Context, u *domain.User, tpl *domain.Template, items []renderItem, rulesCommon string, proxyGroupOrder []string, st ports.UISettings) (*Output, error) {
-	outbounds := s.buildSingBoxOutbounds(ctx, u, items, proxyGroupOrder, st, u.PersonalRules, rulesCommon)
+func (s *Service) renderSingBox(ctx context.Context, u *domain.User, tpl *domain.Template, items []renderItem, rulesCommon string, proxyGroupOrder []string, proxyGroupMembers map[string][]domain.ProxyGroupMember, st ports.UISettings) (*Output, error) {
+	outbounds := s.buildSingBoxOutbounds(ctx, u, items, proxyGroupOrder, proxyGroupMembers, st, u.PersonalRules, rulesCommon)
 	outboundsJSON, err := marshalJSONBlock(outbounds)
 	if err != nil {
 		return nil, fmt.Errorf("marshal sing-box outbounds: %w", err)
@@ -75,7 +75,7 @@ func (s *Service) renderSingBox(ctx context.Context, u *domain.User, tpl *domain
 	}, nil
 }
 
-func (s *Service) buildSingBoxOutbounds(ctx context.Context, u *domain.User, items []renderItem, preferredOrder []string, st ports.UISettings, ruleParts ...string) []map[string]any {
+func (s *Service) buildSingBoxOutbounds(ctx context.Context, u *domain.User, items []renderItem, preferredOrder []string, memberConfigs map[string][]domain.ProxyGroupMember, st ports.UISettings, ruleParts ...string) []map[string]any {
 	out := []map[string]any{
 		{"type": "direct", "tag": "direct"},
 		{"type": "block", "tag": "block"},
@@ -90,7 +90,7 @@ func (s *Service) buildSingBoxOutbounds(ctx context.Context, u *domain.User, ite
 	// the un-captured transition-window remainder. See resolveInbounds.
 	inboundByNode := s.resolveInbounds(ctx, items, st)
 
-	nodeTags := make([]string, 0, len(items))
+	selectorItems := make([]renderItem, 0, len(items))
 	for _, it := range items {
 		if it.isSeparator {
 			// Same trick as mihomo's emitSeparator + uri-list's
@@ -98,7 +98,7 @@ func (s *Service) buildSingBoxOutbounds(ctx context.Context, u *domain.User, ite
 			// 127.0.0.1:1 so the separator surfaces as a labeled
 			// (non-connectable) entry in sing-box's selector
 			// dropdown — preserving the visual grouping admins
-			// configured. Tag goes into nodeTags so @all-style
+			// configured. The item goes into selectorItems so dynamic
 			// selector expansions include it in the right order.
 			out = append(out, map[string]any{
 				"type":        "shadowsocks",
@@ -108,7 +108,7 @@ func (s *Service) buildSingBoxOutbounds(ctx context.Context, u *domain.User, ite
 				"method":      "chacha20-ietf-poly1305",
 				"password":    "psp-separator",
 			})
-			nodeTags = append(nodeTags, it.name)
+			selectorItems = append(selectorItems, it)
 			continue
 		}
 		inb := inboundByNode[it.node.ID]
@@ -129,11 +129,11 @@ func (s *Service) buildSingBoxOutbounds(ctx context.Context, u *domain.User, ite
 			continue
 		}
 		out = append(out, block)
-		nodeTags = append(nodeTags, it.name)
+		selectorItems = append(selectorItems, it)
 	}
 
 	rules := strings.TrimSpace(strings.Join(ruleParts, "\n"))
-	out = append(out, buildSingBoxSelectorOutbounds(rules, nodeTags, preferredOrder)...)
+	out = append(out, buildSingBoxSelectorOutboundsWithMembers(rules, selectorItems, preferredOrder, memberConfigs)...)
 	return out
 }
 
@@ -341,11 +341,24 @@ func applySingBoxTransport(base map[string]any, stream xuiStreamSettings) {
 }
 
 func buildSingBoxSelectorOutbounds(rules string, nodeTags []string, preferredOrder []string) []map[string]any {
+	items := make([]renderItem, 0, len(nodeTags))
+	for _, tag := range nodeTags {
+		items = append(items, renderItem{name: tag})
+	}
+	return buildSingBoxSelectorOutboundsWithMembers(rules, items, preferredOrder, nil)
+}
+
+func buildSingBoxSelectorOutboundsWithMembers(rules string, items []renderItem, preferredOrder []string, memberConfigs map[string][]domain.ProxyGroupMember) []map[string]any {
 	targets := withRequiredProxyGroupDependencies(ruleTargetsInOrder(rules))
+	targets = withConfiguredProxyGroupDependencies(targets, memberConfigs)
 	targets = applyProxyGroupOrder(targets, preferredOrder)
 	out := make([]map[string]any, 0, len(targets))
 	for _, target := range targets {
-		choices := singBoxSelectorChoices(proxyGroupChoices(target), nodeTags)
+		members := defaultMembersForTarget(target)
+		if configured, ok := memberConfigs[target]; ok {
+			members = configured
+		}
+		choices := singBoxResolvedChoices(resolveConfiguredMembers(members, items))
 		if len(choices) == 0 {
 			choices = []string{"direct"}
 		}
@@ -356,6 +369,20 @@ func buildSingBoxSelectorOutbounds(rules string, nodeTags []string, preferredOrd
 			"default":   choices[0],
 		}
 		out = append(out, selector)
+	}
+	return out
+}
+
+func singBoxResolvedChoices(raw []string) []string {
+	seen := map[string]bool{}
+	out := []string{}
+	for _, item := range raw {
+		tag := singBoxOutboundTag(item)
+		if tag == "" || seen[tag] {
+			continue
+		}
+		seen[tag] = true
+		out = append(out, tag)
 	}
 	return out
 }

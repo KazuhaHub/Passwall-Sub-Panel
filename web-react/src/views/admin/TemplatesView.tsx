@@ -373,7 +373,7 @@ export default function TemplatesView() {
                   </TableCell>
                   <TableCell align="right">
                     {canConfig && <>
-                    <Tooltip title={t('admin:templates.field.is_default')}>
+                    <Tooltip title={t('admin:templates.edit_title')}>
                       <IconButton size="small" onClick={() => openEdit(tpl)}><EditIcon fontSize="small" /></IconButton>
                     </Tooltip>
                     <Tooltip title={t('admin:templates.duplicate')}>
