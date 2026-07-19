@@ -13,6 +13,7 @@
     "unknown": "未知",
     "empty": "暂无可显示的节点",
     "relay_fallback": "中转 {{index}}",
+    "relay_hint": "中转状态仅表示中转入口可达，不代表中转链路完全可用。",
     "checked_at": "最后检查：{{time}}"
   },
   "service": {

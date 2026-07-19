@@ -13,6 +13,7 @@
     "unknown": "Unknown",
     "empty": "No nodes to show",
     "relay_fallback": "Relay {{index}}",
+    "relay_hint": "Relay status only reflects whether the relay entry is reachable, not that the full relay path works.",
     "checked_at": "Last checked: {{time}}"
   },
   "service": {

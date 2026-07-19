@@ -892,7 +892,8 @@
         "invalid_timeout": "The timeout must be greater than 0",
         "invalid_tolerance": "The switch tolerance cannot be negative",
         "invalid_strategy": "Unknown load-balancing strategy: {{value}}",
-        "insufficient_auto_members": "Automatic selection or load balancing usually needs at least two available members"
+        "insufficient_auto_members": "Automatic selection or load balancing usually needs at least two available members",
+        "auto_group_builtin_member": "url-test / fallback / load-balance members cannot include built-in exits like DIRECT or REJECT; use a specific node or another proxy group instead"
       }
     },
     "table": {

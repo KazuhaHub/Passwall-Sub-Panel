@@ -168,6 +168,7 @@ function ServerStatusPanel({ md }: { md: M3Tokens }) {
   })
   const okCount = rows.filter(row => row.status === 'ok').length
   const downCount = rows.filter(row => row.status === 'down').length
+  const hasRelays = nodes.some(n => (n.relay_statuses ?? []).length > 0)
   const checkedAt = rows.find(row => row.checked_at)?.checked_at
   return (
     <Card sx={{ p: { xs: 2.5, sm: 3 }, bgcolor: md.surfaceContainerLow, border: `1px solid ${md.outlineVariant}` }}>
@@ -192,8 +193,13 @@ function ServerStatusPanel({ md }: { md: M3Tokens }) {
           )
         })}
       </Box>
-      {checkedAt && (
+      {hasRelays && (
         <Typography variant="caption" sx={{ display: 'block', mt: 2, color: md.onSurfaceVariant }}>
+          {t('status.relay_hint', { defaultValue: '中转状态仅表示中转入口可达，不代表中转链路完全可用。' })}
+        </Typography>
+      )}
+      {checkedAt && (
+        <Typography variant="caption" sx={{ display: 'block', mt: hasRelays ? 0.5 : 2, color: md.onSurfaceVariant }}>
           {t('status.checked_at', { time: new Date(checkedAt).toLocaleString(), defaultValue: '最后检查：{{time}}' })}
         </Typography>
       )}

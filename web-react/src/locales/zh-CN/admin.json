@@ -892,7 +892,8 @@
         "invalid_timeout": "超时时间必须大于 0",
         "invalid_tolerance": "节点切换容差不能小于 0",
         "invalid_strategy": "未知负载均衡策略：{{value}}",
-        "insufficient_auto_members": "自动选择或负载均衡通常至少需要两个可用成员"
+        "insufficient_auto_members": "自动选择或负载均衡通常至少需要两个可用成员",
+        "auto_group_builtin_member": "自动测速 / 回退 / 负载均衡类型的成员不能包含 DIRECT、REJECT 等内置出口，请改用具体节点或其它代理组"
       }
     },
     "table": {

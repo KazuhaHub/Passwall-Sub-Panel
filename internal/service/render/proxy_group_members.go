@@ -341,15 +341,6 @@ func memberLabel(member domain.ProxyGroupMember, nodes map[int64]*domain.Node) s
 	return member.Value
 }
 
-func hasProxyGroupErrors(issues []ProxyGroupIssue) bool {
-	for _, issue := range issues {
-		if issue.Level == "error" {
-			return true
-		}
-	}
-	return false
-}
-
 // resolveConfiguredMembers expands typed member definitions against the
 // already layout-sorted, user-authorized render items. It deduplicates final
 // labels globally, which makes "specific node, DIRECT, remaining" do what an
