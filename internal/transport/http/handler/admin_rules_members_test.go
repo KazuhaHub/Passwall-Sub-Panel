@@ -30,7 +30,10 @@ func TestAdminRuleSetsSavePersistsMembersAndOptionsAndInvalidatesRenderCache(t *
 	body := ruleSetDTO{
 		Slug: "custom", Name: "Custom", Enabled: true, Content: "- MATCH,🇨🇳 中国大陆",
 		ProxyGroupMembers: map[string][]domain.ProxyGroupMember{
-			"🇨🇳 中国大陆": {{Kind: "node", NodeID: 42}, {Kind: "builtin", Value: "DIRECT"}, {Kind: "node_set", Value: "remaining"}},
+			// A load-balance group may only health-check real endpoints, so its
+			// members are proxy-side (a specific node, the node selector, and the
+			// remaining nodes) — never DIRECT/REJECT built-in exits.
+			"🇨🇳 中国大陆": {{Kind: "node", NodeID: 42}, {Kind: "proxy_group", Value: "🚀 节点选择"}, {Kind: "node_set", Value: "remaining"}},
 		},
 		ProxyGroupOptions: map[string]domain.ProxyGroupOptions{
 			"🇨🇳 中国大陆": {Type: "load-balance", Strategy: "consistent-hashing"},

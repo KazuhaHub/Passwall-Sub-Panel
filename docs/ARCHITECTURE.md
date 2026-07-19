@@ -1229,11 +1229,11 @@ GET /{sub_path}/abc123 (UA: mihomo)
 | `@tag:reality` | tags 含 reality 的节点名 |
 | `@region:TW+tag:reality` | AND 组合 |
 
-规则集内的 `proxy_group_order` 是 mihomo `proxy-groups` 和 sing-box selector outbounds 的展示顺序。字段留空时使用项目内置默认顺序：`🚀 节点选择` → `🎮 UDP控制` → `🇨🇳 中国大陆` → `💬 Ai平台` → `📹 油管视频` → `🎥 奈飞视频` → `📺 巴哈姆特` → `🌍 国外媒体` → `🎮 游戏平台` → `📲 电报消息` → `Ⓜ️ 微软Bing` → `📢 谷歌FCM` → `🌏 国内媒体` → `📺 哔哩哔哩` → `Ⓜ️ 微软云盘` → `Ⓜ️ 微软服务` → `🍎 苹果服务` → `🎶 网易音乐` → `🎯 全球直连` → `🛑 广告拦截` → `🍃 应用净化` → `🐟 漏网之鱼`；不在默认或自定义列表中的代理组，按规则内容中的首次出现顺序放在列表开头。模板负责声明使用哪些规则集；规则集负责声明自定义策略组顺序和规则内容。
+规则集内的 `proxy_group_order` 是 mihomo `proxy-groups` 和 sing-box selector outbounds 的展示顺序。字段留空时使用项目内置默认顺序：`🚀 节点选择` → `🎮 UDP控制` → `🇨🇳 中国大陆` → `💬 Ai平台` → `📹 油管视频` → `🎥 奈飞视频` → `📺 巴哈姆特` → `🌍 国外媒体` → `🎮 游戏平台` → `📲 电报消息` → `Ⓜ️ 微软Bing` → `📢 谷歌FCM` → `🌏 国内媒体` → `📺 哔哩哔哩` → `Ⓜ️ 微软云盘` → `Ⓜ️ 微软服务` → `🍎 苹果服务` → `🎶 网易音乐` → `🎯 全球直连` → `🛑 广告拦截` → `🍃 应用净化` → `🐟 漏网之鱼`；不在默认或自定义列表中的代理组，按规则内容中的首次出现顺序放在列表末尾（保持既有订阅的展示位置，避免部分自定义顺序打乱未列出的组）。模板负责声明使用哪些规则集；规则集负责声明自定义策略组顺序和规则内容。
 
 `proxy_group_members` 可选地覆盖单个策略组内部的成员顺序，Mihomo 与 sing-box 共用。支持具体节点（稳定 `node_id`）、内置出口、其他策略组以及 `remaining` / `region:XX` / `tag:name` 动态节点集合；展开后按首次出现去重。字段缺失时继续使用内置的名称匹配默认顺序。后台入口为「规则库 → 编辑规则集 → 策略组成员」。
 
-`proxy_group_options` 可选地覆盖单个策略组的 Mihomo 类型，支持 `select`、`url-test`、`fallback`、`load-balance`。三个自动类型共用 `url`、`interval`、`lazy`、`timeout`；`url-test` 额外支持 `tolerance`，`load-balance` 额外支持 `round-robin` / `consistent-hashing` / `sticky-sessions`。该字段仅影响 Mihomo；sing-box 始终生成 `selector`。模板绑定多个规则集且同名组重复配置时，members 与 options 分别按规则集顺序取第一个配置。
+`proxy_group_options` 可选地覆盖单个策略组的 Mihomo 类型，支持 `select`、`url-test`、`fallback`、`load-balance`。三个自动类型共用 `url`、`interval`、`lazy`、`timeout`；`url-test` 额外支持 `tolerance`，`load-balance` 额外支持 `round-robin` / `consistent-hashing` / `sticky-sessions`。该字段仅影响 Mihomo；sing-box 始终生成 `selector`。自动类型（`url-test` / `fallback` / `load-balance`）的成员必须是真实出口（具体节点或其它代理组），不能包含 `DIRECT` / `REJECT` 等内置出口——保存校验会直接拦截，渲染时也会剥离内置出口；若某用户可授权节点与配置成员没有交集导致成员为空，该组会安全降级为 `select`（避免生成把全部流量导向 `DIRECT` 的伪自动组）。模板绑定多个规则集且同名组重复配置时，members 与 options 分别按规则集顺序取第一个配置。
 
 ### 9.2 分组级 layout
 

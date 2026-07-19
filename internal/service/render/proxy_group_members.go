@@ -122,6 +122,16 @@ func InspectProxyGroups(content string, members map[string][]domain.ProxyGroupMe
 			effectiveOptions = EffectiveProxyGroupOptions(rawOptions)
 		}
 		preview := resolveConfiguredMembers(effective, previewItems)
+		isAutoType := effectiveOptions.Type == ProxyGroupTypeURLTest ||
+			effectiveOptions.Type == ProxyGroupTypeFallback ||
+			effectiveOptions.Type == ProxyGroupTypeLoadBalance
+		if isAutoType && membersContainBuiltinExit(effective) {
+			// A DIRECT/REJECT member turns an auto group into a no-op: DIRECT wins
+			// the health check in ~0ms (everything routes direct) and REJECT makes
+			// the check fail. Block it at save time so the misconfiguration surfaces
+			// in the editor instead of silently misrouting at render time.
+			issues = append(issues, ProxyGroupIssue{Level: "error", Group: target, Code: "auto_group_builtin_member", Message: "自动测速 / 回退 / 负载均衡类型的成员不能包含 DIRECT、REJECT 等内置出口，请改用具体节点或其它代理组"})
+		}
 		if (effectiveOptions.Type == ProxyGroupTypeURLTest || effectiveOptions.Type == ProxyGroupTypeLoadBalance) && len(preview) < 2 {
 			issues = append(issues, ProxyGroupIssue{Level: "warning", Group: target, Code: "insufficient_auto_members", Message: "自动选择或负载均衡通常至少需要两个可用成员"})
 		}
@@ -304,6 +314,18 @@ func nodeSetHasMatch(selector string, nodes []*domain.Node) bool {
 					return true
 				}
 			}
+		}
+	}
+	return false
+}
+
+// membersContainBuiltinExit reports whether any member is a DIRECT/REJECT-family
+// built-in outbound, which is invalid inside an auto (url-test/fallback/
+// load-balance) group.
+func membersContainBuiltinExit(members []domain.ProxyGroupMember) bool {
+	for _, member := range members {
+		if member.Kind == "builtin" && builtInRuleTargets[member.Value] {
+			return true
 		}
 	}
 	return false

@@ -66,7 +66,7 @@ func TestInspectProxyGroupOptionsReportsInvalidValuesAndWarnsForOneMember(t *tes
 	for _, issue := range inspection.Issues {
 		codes[issue.Code] = true
 	}
-	for _, code := range []string{"invalid_test_url", "invalid_interval", "invalid_timeout", "invalid_tolerance", "unknown_group_options", "invalid_strategy", "insufficient_auto_members"} {
+	for _, code := range []string{"invalid_test_url", "invalid_interval", "invalid_timeout", "invalid_tolerance", "unknown_group_options", "invalid_strategy", "insufficient_auto_members", "auto_group_builtin_member"} {
 		if !codes[code] {
 			t.Fatalf("missing issue %q: %#v", code, inspection.Issues)
 		}

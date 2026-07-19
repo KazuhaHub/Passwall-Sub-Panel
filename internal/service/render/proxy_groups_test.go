@@ -207,7 +207,9 @@ func TestBuildProxyGroupsYAMLUsesManualDisplayOrder(t *testing.T) {
 	for i, group := range groups {
 		got[i] = group.Name
 	}
-	want := []string{"🎯 全球直连", "🛑 广告拦截", "🐟 漏网之鱼", "🚀 节点选择", "💬 Ai平台", "🎮 游戏平台"}
+	// Manually ordered groups come first (in the configured order); the groups
+	// the order does not mention keep their rule-content order and go last.
+	want := []string{"🚀 节点选择", "💬 Ai平台", "🎮 游戏平台", "🎯 全球直连", "🛑 广告拦截", "🐟 漏网之鱼"}
 	if len(got) != len(want) {
 		t.Fatalf("groups len = %d, want %d: %#v", len(got), len(want), got)
 	}
@@ -218,7 +220,7 @@ func TestBuildProxyGroupsYAMLUsesManualDisplayOrder(t *testing.T) {
 	}
 }
 
-func TestApplyProxyGroupOrderUsesProjectDefaultAndPrependsUnknownGroups(t *testing.T) {
+func TestApplyProxyGroupOrderUsesProjectDefaultAndAppendsUnknownGroups(t *testing.T) {
 	targets := []string{
 		"🐟 漏网之鱼",
 		"🏠 自定义代理组",
@@ -229,12 +231,12 @@ func TestApplyProxyGroupOrderUsesProjectDefaultAndPrependsUnknownGroups(t *testi
 	}
 	got := applyProxyGroupOrder(targets, nil)
 	want := []string{
-		"🏠 自定义代理组",
 		"🚀 节点选择",
 		"🎮 UDP控制",
 		"🇨🇳 中国大陆",
 		"🍎 苹果服务",
 		"🐟 漏网之鱼",
+		"🏠 自定义代理组",
 	}
 	if len(got) != len(want) {
 		t.Fatalf("groups len = %d, want %d: %#v", len(got), len(want), got)

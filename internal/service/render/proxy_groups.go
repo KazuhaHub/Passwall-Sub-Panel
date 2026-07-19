@@ -78,11 +78,6 @@ func buildProxyGroupsYAMLInternal(rules string, preferredOrder []string, members
 		if configured, ok := options[target]; ok {
 			groupOptions = EffectiveProxyGroupOptions(configured)
 		}
-		lines = append(lines,
-			"- name: "+yamlScalar(target),
-			"  type: "+groupOptions.Type,
-			"  proxies:",
-		)
 		choices := proxyGroupChoices(target)
 		if resolve {
 			effectiveMembers := defaultMembersForTarget(target)
@@ -90,10 +85,28 @@ func buildProxyGroupsYAMLInternal(rules string, preferredOrder []string, members
 				effectiveMembers = configured
 			}
 			choices = resolveConfiguredMembers(effectiveMembers, items)
+		}
+		// Auto types (url-test/fallback/load-balance) health-check their members
+		// and pick a winner, so a DIRECT/REJECT sitting among real nodes would
+		// short-circuit the whole group — DIRECT answers in ~0ms and always wins,
+		// silently routing everything direct. Strip the built-in exits, and when
+		// nothing testable is left (e.g. the configured members don't intersect
+		// THIS user's authorized nodes) degrade to a plain manual selector rather
+		// than emit a bogus single-member url-test.
+		if groupOptions.Type != ProxyGroupTypeSelect {
+			choices = withoutBuiltinExits(choices)
 			if len(choices) == 0 {
-				choices = []string{"DIRECT"}
+				groupOptions = domain.ProxyGroupOptions{Type: ProxyGroupTypeSelect}
 			}
 		}
+		if len(choices) == 0 {
+			choices = []string{"DIRECT"}
+		}
+		lines = append(lines,
+			"- name: "+yamlScalar(target),
+			"  type: "+groupOptions.Type,
+			"  proxies:",
+		)
 		for _, proxy := range choices {
 			lines = append(lines, "  - "+yamlScalar(proxy))
 		}
@@ -115,6 +128,11 @@ func buildProxyGroupsYAMLInternal(rules string, preferredOrder []string, members
 	return strings.Join(lines, "\n"), nil
 }
 
+// applyProxyGroupOrder emits the explicitly ordered groups first, in the
+// configured order, then appends any group the order does not mention at the
+// END, preserving its first-occurrence order from the rule content. Keeping the
+// unlisted groups last is what existing subscriptions already render, so a
+// partial custom order never reshuffles the groups an admin did not name.
 func applyProxyGroupOrder(targets, preferredOrder []string) []string {
 	if len(preferredOrder) == 0 {
 		preferredOrder = defaultProxyGroupOrder
@@ -123,27 +141,35 @@ func applyProxyGroupOrder(targets, preferredOrder []string) []string {
 	for _, target := range targets {
 		remaining[target] = true
 	}
-	preferred := make(map[string]bool, len(preferredOrder))
-	for _, target := range preferredOrder {
-		target = strings.TrimSpace(target)
-		if target != "" {
-			preferred[target] = true
-		}
-	}
 	out := make([]string, 0, len(targets))
-	for _, target := range targets {
-		if remaining[target] && !preferred[target] {
-			out = append(out, target)
-			delete(remaining, target)
-		}
-	}
 	for _, preferred := range preferredOrder {
 		preferred = strings.TrimSpace(preferred)
-		if !remaining[preferred] {
+		if preferred == "" || !remaining[preferred] {
 			continue
 		}
 		out = append(out, preferred)
 		delete(remaining, preferred)
+	}
+	for _, target := range targets {
+		if remaining[target] {
+			out = append(out, target)
+			delete(remaining, target)
+		}
+	}
+	return out
+}
+
+// withoutBuiltinExits drops DIRECT/REJECT-family built-in outbounds from a
+// resolved proxy list. Auto group types (url-test/fallback/load-balance) must
+// only health-check real endpoints, never a built-in exit that would win or
+// dilute the selection.
+func withoutBuiltinExits(choices []string) []string {
+	out := make([]string, 0, len(choices))
+	for _, choice := range choices {
+		if builtInRuleTargets[choice] {
+			continue
+		}
+		out = append(out, choice)
 	}
 	return out
 }

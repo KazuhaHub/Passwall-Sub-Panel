@@ -351,7 +351,7 @@ func TestBuildSingBoxSelectorOutboundsUsesManualDisplayOrder(t *testing.T) {
 	for i, selector := range selectors {
 		got[i] = selector["tag"].(string)
 	}
-	want := []string{"🎯 全球直连", "🛑 广告拦截", "🐟 漏网之鱼", "🚀 节点选择", "💬 Ai平台", "🎮 游戏平台"}
+	want := []string{"🚀 节点选择", "💬 Ai平台", "🎮 游戏平台", "🎯 全球直连", "🛑 广告拦截", "🐟 漏网之鱼"}
 	if len(got) != len(want) {
 		t.Fatalf("selectors len = %d, want %d: %#v", len(got), len(want), got)
 	}

@@ -63,6 +63,43 @@ func TestBuildProxyGroupsYAMLWithMembersPutsNodeBeforeDirect(t *testing.T) {
 	assertMemberStrings(t, found.Proxies, []string{node.DisplayName, "DIRECT"})
 }
 
+func TestBuildProxyGroupsYAMLSanitizesAutoTypeGroups(t *testing.T) {
+	nodeA := &domain.Node{ID: 42, DisplayName: "🇭🇰 HK", Region: "HK"}
+	nodeB := &domain.Node{ID: 7, DisplayName: "🇯🇵 JP", Region: "JP"}
+	items := []renderItem{{name: nodeA.DisplayName, node: nodeA}, {name: nodeB.DisplayName, node: nodeB}}
+	members := map[string][]domain.ProxyGroupMember{
+		"A": {{Kind: "node", NodeID: 42}, {Kind: "builtin", Value: "DIRECT"}, {Kind: "node_set", Value: "remaining"}},
+		"B": {{Kind: "node", NodeID: 999}}, // references a node this render has no access to
+	}
+	options := map[string]domain.ProxyGroupOptions{
+		"A": {Type: ProxyGroupTypeURLTest},
+		"B": {Type: ProxyGroupTypeURLTest},
+	}
+	raw, err := buildProxyGroupsYAMLWithMembers("- DOMAIN,a,A\n- MATCH,B", nil, members, options, items)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var groups []proxyGroup
+	if err := yaml.Unmarshal([]byte(raw), &groups); err != nil {
+		t.Fatal(err)
+	}
+	byName := map[string]proxyGroup{}
+	for _, g := range groups {
+		byName[g.Name] = g
+	}
+	// A: DIRECT stripped, real nodes kept, url-test preserved.
+	if a := byName["A"]; a.Type != ProxyGroupTypeURLTest {
+		t.Fatalf("group A type = %q, want url-test (%#v)", a.Type, groups)
+	}
+	assertMemberStrings(t, byName["A"].Proxies, []string{nodeA.DisplayName, nodeB.DisplayName})
+	// B: nothing testable resolved for this user → degrade to a plain selector
+	// over DIRECT instead of a bogus single-member url-test.
+	if b := byName["B"]; b.Type != ProxyGroupTypeSelect {
+		t.Fatalf("group B type = %q, want select (%#v)", b.Type, groups)
+	}
+	assertMemberStrings(t, byName["B"].Proxies, []string{"DIRECT"})
+}
+
 func TestSingBoxCustomMembersUseSameOrder(t *testing.T) {
 	node := &domain.Node{ID: 42, DisplayName: "China", Region: "CN"}
 	configs := map[string][]domain.ProxyGroupMember{

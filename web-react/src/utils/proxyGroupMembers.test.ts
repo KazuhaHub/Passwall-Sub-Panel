@@ -43,13 +43,13 @@ describe('proxy group member editor helpers', () => {
 
   it('applies partial group order and supports drag-style reordering', () => {
     const groups = [{ name: 'A' }, { name: 'B' }, { name: 'C' }]
-    expect(applyProxyGroupOrder(groups, ['C', 'missing']).map(group => group.name)).toEqual(['A', 'B', 'C'])
+    expect(applyProxyGroupOrder(groups, ['C', 'missing']).map(group => group.name)).toEqual(['C', 'A', 'B'])
     expect(reorderProxyGroupNames(['C', 'A', 'B'], 2, 0)).toEqual(['B', 'C', 'A'])
     expect(proxyGroupOrderEqual(['A', 'B'], ['A', 'B'])).toBe(true)
     expect(proxyGroupOrderEqual(['A', 'B'], ['B', 'A'])).toBe(false)
   })
 
-  it('uses the project default order and prepends groups not in that order', () => {
+  it('uses the project default order and appends groups not in that order', () => {
     const groups = [
       { name: '🐟 漏网之鱼' },
       { name: '🏠 自定义代理组' },
@@ -59,12 +59,12 @@ describe('proxy group member editor helpers', () => {
       { name: '🎮 UDP控制' },
     ]
     expect(applyProxyGroupOrder(groups, []).map(group => group.name)).toEqual([
-      '🏠 自定义代理组',
       '🚀 节点选择',
       '🎮 UDP控制',
       '🇨🇳 中国大陆',
       '🍎 苹果服务',
       '🐟 漏网之鱼',
+      '🏠 自定义代理组',
     ])
   })
 })

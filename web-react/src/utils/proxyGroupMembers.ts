@@ -50,20 +50,22 @@ export function proxyGroupOptionsEqual(left?: ProxyGroupOptions, right?: ProxyGr
     left.lazy === right.lazy && left.timeout === right.timeout && left.tolerance === right.tolerance && left.strategy === right.strategy
 }
 
+// Mirrors the backend renderer: explicitly ordered groups come first in the
+// configured order, then any group the order does not mention is appended at
+// the END keeping its original relative position. A partial custom order must
+// never reshuffle the groups the admin did not name.
 export function applyProxyGroupOrder<T extends { name: string }>(groups: T[], preferredOrder: string[]): T[] {
   const effectiveOrder = preferredOrder.length ? preferredOrder : DEFAULT_PROXY_GROUP_ORDER
   const byName = new Map(groups.map(group => [group.name, group]))
   const ordered: T[] = []
-  const preferredNames = new Set(effectiveOrder)
-  for (const group of groups) {
-    if (preferredNames.has(group.name) || !byName.delete(group.name)) continue
-    ordered.push(group)
-  }
   for (const name of effectiveOrder) {
     const group = byName.get(name)
     if (!group) continue
     ordered.push(group)
     byName.delete(name)
+  }
+  for (const group of groups) {
+    if (byName.delete(group.name)) ordered.push(group)
   }
   return ordered
 }
