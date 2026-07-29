@@ -4,6 +4,16 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## v3.9.1-beta.11 — 2026-07-29
+
+### 安全
+
+- **升级 React Router 修复开放重定向与拒绝服务漏洞** —— `react-router-dom` 升级到 7.18.2，修复 `<Link>` / `useNavigate` 中反斜杠导致的开放重定向（CVE-2025-68470 绕过）以及低效路由匹配引发的未认证拒绝服务。同时升级 `axios` 到 1.18.1、`vite` 到 8.1.5（连带 `postcss` 到 8.5.24，修复 source map 自动加载的路径穿越）。本项目为纯客户端 SPA（`createBrowserRouter` + `RouterProvider`，无 SSR / RSC），因此 npm audit 中剩余的 RSC 模式相关告警不适用；请勿执行 `npm audit fix --force`，它会把 `react-router-dom` 降级到 7.11.0 并重新引入上述漏洞。
+
+### 改进
+
+- **更新前后端依赖基线** —— 后端升级 `golang.org/x/crypto` 至 0.54.0、`coreos/go-oidc` 至 3.20.0、`gin` 至 1.12.0、`go-sql-driver/mysql` 至 1.10.0、`gorm` 至 1.31.2、`gorm.io/driver/mysql` 至 1.6.0；前端同步 `react` / `react-dom` 19.2.8、`i18next`、`react-i18next`、`zustand`、`vitest` 等补丁版本。前端更新均在既有 `^` 范围内，`package.json` 未变更。`crewjam/saml` 0.5.1 未纳入本次更新：它是 0.x minor 升级且现有测试未覆盖真实断言解析流程，需先在实际 IdP 环境验证。
+
 ## v3.9.1-beta.10 — 2026-07-29
 
 ### 新功能
