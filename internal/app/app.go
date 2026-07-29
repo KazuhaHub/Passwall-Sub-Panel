@@ -285,6 +285,10 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	if err != nil {
 		return nil, fmt.Errorf("init saml: %w", err)
 	}
+	// Durable assertion-replay set. Without it, replay protection is
+	// process-local: a restart forgets every consumed assertion and a second
+	// instance never learns what the first consumed.
+	samlSvc.SetReplayStore(repos.SAMLReplay)
 	oidcSvc, err := auth.NewOIDC(oidcCfg)
 	if err != nil {
 		return nil, fmt.Errorf("init oidc: %w", err)
@@ -836,6 +840,7 @@ func (a *App) runAuditCleanupLoop(ctx context.Context) {
 		a.pruneAudit(ctx)
 		a.pruneAuthEvents(ctx)
 		a.pruneAuthTokens(ctx)
+		a.pruneSAMLReplay(ctx)
 		a.pruneSyncTasks(ctx)
 		a.pruneTrafficSnapshots(ctx)
 		a.pruneMailSent(ctx)
@@ -1086,6 +1091,25 @@ func (a *App) pruneAuthTokens(ctx context.Context) {
 	}
 	if deleted > 0 {
 		log.Info("auth token cleanup", "deleted", deleted)
+	}
+}
+
+// pruneSAMLReplay drops consumed SAML assertion IDs whose validity window has
+// closed. Nothing depends on them past that point — the assertion itself would
+// be rejected as expired — so this is pure housekeeping that keeps the table
+// bounded by the SSO logins inside one assertion lifetime. No retention setting:
+// the expiry is dictated by the assertions, not by an admin preference.
+func (a *App) pruneSAMLReplay(ctx context.Context) {
+	if a.repos.SAMLReplay == nil {
+		return
+	}
+	deleted, err := a.repos.SAMLReplay.DeleteExpired(ctx, time.Now())
+	if err != nil {
+		log.Warn("saml replay cleanup", "err", err)
+		return
+	}
+	if deleted > 0 {
+		log.Info("saml replay cleanup", "deleted", deleted)
 	}
 }
 

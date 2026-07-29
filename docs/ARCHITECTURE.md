@@ -370,6 +370,7 @@ func (s *Service) ensureInboundDeletable(ctx context.Context, panelID int64, inb
 | **认证/账户安全 (3, v3.7.0+)** | `webauthn_credentials` | 用户注册的 passkey/WebAuthn 凭据 |
 | | `auth_tokens` | 找回密码 / 邮箱验证 / 自助注册的一次性令牌与验证码 |
 | | `auth_events` | 登录/2FA 验证事件审计轨迹 |
+| | `sso_assertion_seen` | **安全属性**：已消费的 SAML 断言 ID 集合，防止断言在有效期内被重放。crewjam/saml 只校验签名与 NotBefore/NotOnOrAfter，**不维护已消费 ID 集**，因此这层必须由 PSP 自己提供。仅有进程内缓存是不够的：重启会清空、多实例互不可见，两个重放窗口都得靠本表关闭。`assertion_id` 为主键，`SeenOrAdd` 依赖 `INSERT ... ON CONFLICT DO NOTHING` 做**单语句原子插入**（read-then-write 会让同一被窃断言的并发提交都判定为“未见过”）。过期行由每小时清理循环 `DeleteExpired` 回收，无保留期设置——窗口由断言自身决定。 |
 | **证书 (4, v3.6.4+)** | `acme_accounts` | ACME CA 账户资料 |
 | | `dns_credentials` | ACME DNS-01 挑战用的 DNS 服务商凭据 |
 | | `tls_certificates` | PSP 托管的 TLS 证书（状态：pending/valid/failed，自动续期） |

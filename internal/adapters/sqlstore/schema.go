@@ -726,6 +726,23 @@ type authEventRow struct {
 
 func (authEventRow) TableName() string { return "auth_events" }
 
+// ssoAssertionSeenRow is the durable SAML consumed-assertion set (see
+// ports.SAMLReplayRepo). AssertionID is the PRIMARY KEY, which is what makes
+// "INSERT ... ON CONFLICT DO NOTHING" an atomic insert-if-absent — the replay
+// check is only sound because the uniqueness is enforced by the database rather
+// than by a read-then-write in application code.
+//
+// Rows are pure housekeeping once ExpiresAt passes; DeleteExpired sweeps them
+// on the hourly cleanup loop, so the table stays bounded by the number of SSO
+// logins inside one assertion lifetime (minutes).
+type ssoAssertionSeenRow struct {
+	AssertionID string    `gorm:"primaryKey;size:255"`
+	ExpiresAt   time.Time `gorm:"index:idx_sso_assertion_expires;not null"`
+	ConsumedAt  time.Time `gorm:"not null"`
+}
+
+func (ssoAssertionSeenRow) TableName() string { return "sso_assertion_seen" }
+
 func (r *authEventRow) toDomain() *domain.AuthEvent {
 	return &domain.AuthEvent{
 		ID:      r.ID,
@@ -1365,6 +1382,7 @@ var schemaModels = []any{
 	&nodeTrafficHourlyRow{},
 	&auditRow{},
 	&authEventRow{},
+	&ssoAssertionSeenRow{},
 	&authTokenRow{},
 	&webauthnCredentialRow{},
 	&subLogRow{},
