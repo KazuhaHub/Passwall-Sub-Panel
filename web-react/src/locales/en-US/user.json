@@ -139,6 +139,7 @@
     "saved": "Password updated"
   },
   "rules": {
+    "readonly_hint": "Self-service editing has been disabled by an administrator. This view is read-only; contact an administrator to request changes.",
     "title": "My personal rules",
     "placeholder": "- DOMAIN-SUFFIX,openai.com,🚀 节点选择\n- DOMAIN-KEYWORD,github,🚀 节点选择\n- IP-CIDR,10.0.0.0/8,🎯 全球直连\n- MATCH,🐟 漏网之鱼",
     "hint": "One rule per line, Clash / Mihomo syntax. In the default template, personal rules take priority over the site ruleset.",

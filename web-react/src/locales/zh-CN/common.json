@@ -1,5 +1,6 @@
 {
   "actions": {
+    "retry": "重试",
     "details": "详情",
     "export": "导出",
     "sync": "批量同步",
