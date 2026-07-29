@@ -1268,6 +1268,8 @@ render 三条输出路径（mihomo/sing-box/URI list）统一从预取的 `psp_c
 
 Base path: `/panel/api` | 鉴权：`Authorization: Bearer <api-token>` 优先，session cookie 兜底。**PSP 3.9.1 最低要求 3X-UI 3.4.2**（共享 client 模型依赖 3.3.0，节点侧 REALITY 扫描接口再把 floor 提至 3.4.2），已测上限 3.5.0，见 [3xui-compat.md](3xui-compat.md)。
 
+> **S-UI 版本兼容门(`version.CheckSUI`)**：S-UI 侧有一套与 3X-UI 同构的版本区间机制(`compat/v3.json` 的 `sui_entries` / `sui_advisories`，字段为 `min_sui`(可选) / `max_tested_sui`(必填)，同样按 `[psp_min, psp_max]` 首个匹配生效)。与 3X-UI **有意不同的是没有编译期 `MinSUI` 兜底常量**：`MinXUI` 是代码级事实(PSP 调用的 `/clients/*` 接口在旧面板上根本不存在)，而 S-UI 适配器按**能力协商**而非版本门控，目前也**没有任何 S-UI 版本经过实机验证**，凭空写死常量等于宣称一个没人核实过的兼容性结论。因此 `sui_entries` 当前**刻意为空**：`ActiveMaxTestedSUI()` 为 `""`、`CheckSUI` 一律返回 `unknown`、服务器页对 S-UI 面板**不显示任何 compat 徽章**(与引入本机制前的行为完全一致)。实机验证某个 S-UI 版本后，往 `sui_entries` 追加一行即可对所有已部署的对应 PSP 版本生效，**无需发版**——与扩大 `max_tested_xui` 的机制相同。填写标准见 `v3.json` 的 `sui_entries_doc`：必须注明 LIVE-PANEL VERIFIED 还是 SOURCE-VERIFIED，不得仅凭 release notes 填写。
+
 **Inbound CRUD（`/inbounds/*`）：**
 
 | Method | Path | 用途 |

@@ -11,6 +11,10 @@
       "text": "升级 3X-UI 到 3.5.0 会同时把内置 Xray-core 升级到 v26.7.11 并重启 Xray。升级前请确认：① 没有 inbound 同时启用 Final Mask 与 REALITY —— 该组合会让新版 Xray-core 崩溃，3.5.0 已直接拒绝；② MTProto inbound 会自动从单密钥迁移为原生多客户端模型，且 tg:// 链接不再携带 remark 片段；③ 一次数据库迁移会修复溢出的流量计数，并移除 inbound 端口的旧 UNIQUE 约束。Passwall Panel 已对 3.5.0 完成兼容验证（本次已认证），可放心升级。"
     }
   },
+  "sui_entries_doc": "S-UI counterpart of `entries` (version.CheckSUI). Same first-match-wins matching on [psp_min, psp_max]; fields are min_sui (OPTIONAL) and max_tested_sui (REQUIRED). INTENTIONALLY EMPTY: no S-UI release has been validated against PSP yet, and unlike min_xui there is no compiled MinSUI backstop to fall back on — see internal/version/compat_sui.go for why that asymmetry is deliberate. While this list is empty, ActiveMaxTestedSUI() is \"\", CheckSUI returns unknown, and the Servers page shows NO compat badge for S-UI panels (identical to the behaviour before S-UI gating existed). Adding one verified row here turns the gate on for every deployed PSP of that version range with NO PSP release, exactly like bumping max_tested_xui. TO ADD A ROW: validate a real S-UI panel against the endpoints internal/adapters/sui/*.go calls (inbound list/get/create/update, client lifecycle, server status/appVersion), then append {psp_min, psp_max, max_tested_sui, notes} and state in notes whether the result is LIVE-PANEL VERIFIED or SOURCE-VERIFIED, mirroring the evidence standard the entries below hold themselves to. Do NOT populate this from release notes alone.",
+  "sui_entries": [],
+  "sui_advisories_doc": "S-UI counterpart of xui_advisories (version.LookupSUIAdvisory), keyed by the S-UI version being upgraded TO. Empty for the same reason as sui_entries.",
+  "sui_advisories": {},
   "entries": [
     {
       "psp_min": "v3.9.1",
