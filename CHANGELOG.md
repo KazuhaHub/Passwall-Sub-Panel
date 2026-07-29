@@ -4,6 +4,21 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## v3.9.2-beta.1 — 2026-07-29
+
+### 修复
+
+- **修复 S-UI 面板下无法创建任何客户端** —— S-UI 在 `clients/new` 与 `clients/addbulk` 两条路径上都会无条件反序列化 `client.Links`，而 PSP 此前省略该字段，导致每次创建客户端都被面板以 `save: unexpected end of JSON input` 拒绝。现在会发送显式的空数组 `"links":[]`，由面板按挂载的 inbound 自行生成本地链接。该问题影响所有使用 S-UI 的部署，已在真实 S-UI 1.5.4 面板上验证修复前必现、修复后全流程通过。
+
+### 新功能
+
+- **新增 S-UI 版本兼容门** —— 与 3X-UI 同构的版本区间机制：兼容 JSON 新增 `sui_entries`（`min_sui` 可选、`max_tested_sui` 必填）与 `sui_advisories`，按 `[psp_min, psp_max]` 首个匹配生效；超出已验证范围的面板会在服务器页标记为未测试。与 3X-UI 有意不同的是**没有编译期 `MinSUI` 兜底常量**：`MinXUI` 是代码级事实，而 S-UI 适配器按能力协商，凭空写死常量等于宣称未经核实的兼容结论。本版本随附首条实机验证条目 `max_tested_sui: 1.5.4`（S-UI 1.5.4 / sing-box v1.13.14，由 `TestLive_SUISurface` 直接驱动生产适配器完成验证）；`min_sui` 留空，因此仅在明确发布下限时才会判定“版本过低”。
+
+### 改进
+
+- **新增 S-UI 实机验证测试** —— `TestLive_SUISurface` 为 3X-UI `TestLive_*` 的 S-UI 对应物，通过 `PSP_LIVE_SUI_URL` / `PSP_LIVE_SUI_TOKEN` 环境变量启用、默认跳过，覆盖状态读取、inbound 增删改查与客户端完整生命周期（含挂载/摘除与删除后查询）。它驱动的是适配器本身而非另写脚本，因此验证的就是生产代码路径。
+- **修复英文界面残留中文文案** —— 六个 `t()` 调用引用了两个语言文件中都不存在的 key，因而始终回退到硬编码的中文 `defaultValue`（例如“新增服务器”对话框中的“面板类型”标签）。已补齐 `admin:servers.field.panel_type`、`admin:nodes.create_dialog.{no_writable_servers,advanced_invalid_json,section_httpupgrade}`、`common:actions.retry`、`user:rules.readonly_hint` 的中英文案。
+
 ## v3.9.1-beta.11 — 2026-07-29
 
 ### 安全
