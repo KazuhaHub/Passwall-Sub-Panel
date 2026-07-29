@@ -4,6 +4,18 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## v3.9.1-beta.10 — 2026-07-29
+
+### 新功能
+
+- **代理组成员、类型与顺序可视化编排** —— 规则集新增 `proxy_group_members` 与 `proxy_group_options`，可在「规则库 → 策略组成员」为每个代理组独立定义成员（具体节点 / 内置出口 / 其它代理组 / `remaining` / `region:XX` / `tag:name`）及顺序，并支持四种 Mihomo 类型：手动 `select`、自动测速 `url-test`、自动回退 `fallback`、负载均衡 `load-balance`（含 `url`/`interval`/`lazy`/`timeout`/`tolerance`/`strategy` 参数）。策略组整体顺序改为直接在列表中拖拽调整，Mihomo 与 sing-box 共用同一成员顺序；新增 `POST /api/admin/rules/inspect-proxy-groups` 在保存前识别代理组、预览展开结果并返回结构化校验（未知组、空成员、重复、循环引用、非法参数等）。缺少新字段的旧规则集无需迁移，继续按名称匹配生成 `select` 组。
+- **Xray Accept Proxy Protocol 与中转服务器状态** —— 节点 Inbound 的 Socket 选项新增 `Accept Proxy Protocol` 开关，写入 / 回读 `streamSettings.sockopt.acceptProxyProtocol`（3X-UI 支持，S-UI 明确返回校验错误而非静默忽略）。节点新增「显示中转服务器状态」，健康检查会探测启用的中转线路入口并在用户状态页以脱敏方式分行展示（仅节点名 / 线路名 / 粗粒度状态 / 检查时间，不暴露中转地址、端口或面板信息）；「隐藏直连」开启时自动强制展示中转状态。新增字段经 AutoMigrate 自动补齐，向后兼容。
+
+### 改进
+
+- **代理组顺序与自动类型的稳健性** —— 未列入 `proxy_group_order` 的代理组按规则内容首次出现顺序排在列表**末尾**，避免部分自定义顺序打乱既有订阅；自动类型（`url-test` / `fallback` / `load-balance`）的成员限定为真实出口，保存校验拦截并在渲染时剥离 `DIRECT` / `REJECT` 等内置出口，成员为空时安全降级为 `select`，避免生成把全部流量导向 `DIRECT` 的伪自动组。
+- **用户端中转状态提示** —— 状态汇总仅在存在离线入口时标红（未探测的「未知」不再误标红），并在含中转线路时提示"中转状态仅表示中转入口可达，不代表中转链路完全可用"。
+
 ## v3.9.1-beta.9 — 2026-07-17
 
 ### 新功能
