@@ -202,3 +202,100 @@ func TestJSONEqualEmptyEquivalence(t *testing.T) {
 		t.Fatalf("unparseable input must not equal empty")
 	}
 }
+
+// TestSpecFromNodeStripsRealityFinalmaskTCP covers the 3X-UI 3.6.0 upgrade
+// hazard: 3.6.0 ships a boot seeder (InboundRealityFinalmaskTcpStrip) that
+// deletes finalmask.tcp from every stored REALITY inbound, because that combo
+// panics Xray-core on the first connection (XTLS/Xray-core#6453). A PSP snapshot
+// captured BEFORE the upgrade still carries the key, so InSync reports drift and
+// reconcile reverse-pushes it — which 3X-UI then rejects forever
+// (validateFinalMaskRealityCombo), pinning the node at config_sync_state=pending.
+//
+// Stripping it here, on the push spec, makes the push succeed; reconcile's
+// post-push re-capture then converges the snapshot and the drift is gone for
+// good, with no admin action. PSP never authors this combination itself (the SPA
+// emits finalmask only for hysteria2, with an empty tcp array), so this only
+// affects inbounds PSP adopted from an operator.
+func TestSpecFromNodeStripsRealityFinalmaskTCP(t *testing.T) {
+	cases := []struct {
+		name          string
+		stream        string
+		wantHasTCP    bool
+		wantHasUDP    bool
+		wantHasFinal  bool
+		wantUnchanged bool
+	}{
+		{
+			name:         "reality + finalmask.tcp only — whole finalmask object goes",
+			stream:       `{"security":"reality","network":"tcp","finalmask":{"tcp":[{"type":"xmc"}]}}`,
+			wantHasTCP:   false,
+			wantHasFinal: false,
+		},
+		{
+			name:         "reality + both — tcp stripped, udp preserved",
+			stream:       `{"security":"reality","finalmask":{"tcp":[{"type":"xmc"}],"udp":[{"type":"salamander"}]}}`,
+			wantHasTCP:   false,
+			wantHasUDP:   true,
+			wantHasFinal: true,
+		},
+		{
+			name:         "reality + finalmask.udp only — untouched (Hy2 obfs is PSP's own)",
+			stream:       `{"security":"reality","finalmask":{"udp":[{"type":"salamander"}]}}`,
+			wantHasUDP:   true,
+			wantHasFinal: true,
+		},
+		{
+			name:         "reality + EMPTY tcp array — no rewrite (mirrors upstream's len>0 guard)",
+			stream:       `{"security":"reality","finalmask":{"tcp":[],"udp":[]}}`,
+			wantHasTCP:   true,
+			wantHasUDP:   true,
+			wantHasFinal: true,
+		},
+		{
+			name:       "tls + finalmask.tcp — NOT ours to touch, 3X-UI accepts it",
+			stream:     `{"security":"tls","finalmask":{"tcp":[{"type":"xmc"}]}}`,
+			wantHasTCP: true, wantHasUDP: false, wantHasFinal: true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			n := &domain.Node{StreamSettings: tc.stream}
+			got := SpecFromNode(n).StreamSettings
+
+			var stream map[string]any
+			if err := json.Unmarshal([]byte(got), &stream); err != nil {
+				t.Fatalf("result is not valid JSON: %v (got %q)", err, got)
+			}
+			// Everything outside finalmask must survive verbatim.
+			if _, ok := stream["security"]; !ok {
+				t.Fatalf("security key was lost: %q", got)
+			}
+			fm, hasFinal := stream["finalmask"].(map[string]any)
+			if hasFinal != tc.wantHasFinal {
+				t.Fatalf("finalmask present = %v, want %v (got %q)", hasFinal, tc.wantHasFinal, got)
+			}
+			if !hasFinal {
+				return
+			}
+			if _, ok := fm["tcp"]; ok != tc.wantHasTCP {
+				t.Errorf("finalmask.tcp present = %v, want %v (got %q)", ok, tc.wantHasTCP, got)
+			}
+			if _, ok := fm["udp"]; ok != tc.wantHasUDP {
+				t.Errorf("finalmask.udp present = %v, want %v (got %q)", ok, tc.wantHasUDP, got)
+			}
+		})
+	}
+}
+
+// TestSpecFromNodePassesThroughUnparseableStream guards the degenerate inputs:
+// the strip must never turn a stream string PSP could previously push into
+// something different (or into "null"). Anything it cannot parse is forwarded
+// byte-for-byte, so a stream shape we've never seen can still round-trip.
+func TestSpecFromNodePassesThroughUnparseableStream(t *testing.T) {
+	for _, s := range []string{"", "   ", "not json", `{"security":"reality"`, `[1,2,3]`, "null"} {
+		n := &domain.Node{StreamSettings: s}
+		if got := SpecFromNode(n).StreamSettings; got != s {
+			t.Errorf("SpecFromNode(%q).StreamSettings = %q, want it passed through unchanged", s, got)
+		}
+	}
+}

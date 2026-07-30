@@ -52,6 +52,17 @@ func TestIsPermanentPanelMsg(t *testing.T) {
 		{"PORT 443 (TCP) ALREADY USED BY INBOUND", true}, // case-insensitive
 		{"client not found", true},
 		{"not found in inbound", true},
+		// finalmask rejections are CONFIG-invalid, not transient: 3X-UI refuses
+		// the write every time, so retrying just burns the sync task's attempt
+		// budget and spams the audit log. Both wordings are verbatim from
+		// 3X-UI source (internal/web/service/inbound.go).
+		//
+		// >= 3.5.0: the REALITY combo reject (commit 7db92d63). This one is a
+		// PRE-EXISTING gap — PSP has been retrying it since 3.5.0 shipped.
+		{"Finalmask is not supported with REALITY security — it crashes Xray-core on the first connection (see XTLS/Xray-core#6453). Remove the finalmask configuration or switch security to tls/none.", true},
+		// >= 3.6.0: the XMC profile reject, added when xray-core 26.7.28
+		// replaced XMC.Usernames with XMC.Profiles.
+		{"XMC finalmask requires at least one complete Minecraft profile — each needs a username (3-16 of A-Z a-z 0-9 _), a UUID, and both texture fields from Mojang's session server (XTLS/Xray-core#6487). Complete the profiles or remove the XMC mask.", true},
 	}
 	for _, tc := range cases {
 		if got := isPermanentPanelMsg(tc.msg); got != tc.want {

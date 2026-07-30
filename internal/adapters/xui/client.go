@@ -510,7 +510,18 @@ func isPermanentPanelMsg(msg string) bool {
 		// form (web/service/port_conflict.go) — a permanent condition too.
 		strings.Contains(m, "already used by inbound") ||
 		strings.Contains(m, "client not found") ||
-		strings.Contains(m, "not found in inbound")
+		strings.Contains(m, "not found in inbound") ||
+		// finalmask rejections on inbound add/update. 3X-UI refuses these
+		// configs deterministically, so a retry can only fail again — without
+		// this the sync task burns its whole attempt budget and writes an
+		// audit row per attempt. Covers both known wordings (the substring
+		// "finalmask" appears in each): the >= 3.5.0 "Finalmask is not
+		// supported with REALITY security ..." combo reject, and the >= 3.6.0
+		// "XMC finalmask requires at least one complete Minecraft profile ..."
+		// reject that arrived with xray-core 26.7.28's XMC.Profiles change.
+		// The REALITY one is a PRE-EXISTING gap being closed here, not new to
+		// 3.6.0. Only an admin editing the inbound can clear either.
+		strings.Contains(m, "finalmask")
 }
 
 // isUnsafeMethod reports whether m is a state-changing HTTP method that 3X-UI's

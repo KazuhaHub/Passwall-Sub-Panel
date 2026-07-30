@@ -127,11 +127,66 @@ func SpecFromNode(n *domain.Node) ports.InboundSpec {
 		Port:           n.Port,
 		Protocol:       n.Protocol,
 		Settings:       n.InboundSettings,
-		StreamSettings: n.StreamSettings,
+		StreamSettings: stripRealityFinalmaskTCP(n.StreamSettings),
 		Sniffing:       n.Sniffing,
 		Allocate:       n.Allocate,
 		ExpiryTime:     n.InboundExpiryTime,
 	}
+}
+
+// stripRealityFinalmaskTCP removes finalmask.tcp from a REALITY stream before
+// PSP pushes it, mirroring the boot seeder 3X-UI 3.6.0 runs over its own stored
+// rows (InboundRealityFinalmaskTcpStrip, internal/database/db.go).
+//
+// WHY: that combination panics Xray-core on the first connection
+// (XTLS/Xray-core#6453), so 3.6.0 both deletes it from existing rows on upgrade
+// AND rejects any write carrying it (validateFinalMaskRealityCombo). A PSP
+// snapshot captured before the panel upgraded still has the key, which makes
+// InSync see drift and reconcile reverse-push it — and that push is then refused
+// on every single cycle, pinning the node at config_sync_state=pending with an
+// inbound_config_push_failed audit row each time. Stripping it here lets the
+// push succeed; reconcile's post-push re-capture converges the snapshot and the
+// drift is gone permanently, with no admin action.
+//
+// Scope is deliberately identical to upstream's, so PSP never removes something
+// 3X-UI would have kept: only when security == "reality", only the "tcp" array,
+// only when it is non-empty (an empty array is already harmless and rewriting it
+// would manufacture pointless drift), and the finalmask object itself is dropped
+// only if nothing else survives in it. finalmask.udp — the Hy2 salamander obfs
+// PSP actually renders — is never touched. Anything unparseable is returned
+// byte-for-byte so an unfamiliar stream shape still round-trips.
+func stripRealityFinalmaskTCP(streamSettings string) string {
+	if strings.TrimSpace(streamSettings) == "" {
+		return streamSettings
+	}
+	var stream map[string]any
+	if err := json.Unmarshal([]byte(streamSettings), &stream); err != nil || stream == nil {
+		return streamSettings
+	}
+	if sec, _ := stream["security"].(string); !strings.EqualFold(sec, "reality") {
+		return streamSettings
+	}
+	fm, ok := stream["finalmask"].(map[string]any)
+	if !ok {
+		return streamSettings
+	}
+	tcp, ok := fm["tcp"].([]any)
+	if !ok || len(tcp) == 0 {
+		return streamSettings
+	}
+	delete(fm, "tcp")
+	if len(fm) == 0 {
+		delete(stream, "finalmask")
+	} else {
+		stream["finalmask"] = fm
+	}
+	out, err := json.Marshal(stream)
+	if err != nil {
+		// Unreachable in practice (it round-tripped through Unmarshal), but a
+		// marshal failure must never blank the config PSP is about to push.
+		return streamSettings
+	}
+	return string(out)
 }
 
 // HasLocalConfig reports whether a node carries a usable local config snapshot,
