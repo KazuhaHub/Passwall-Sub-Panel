@@ -4,6 +4,23 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## v3.9.2-beta.2 — 2026-07-30
+
+3X-UI 3.6.0 兼容复核（实机验证，PSP 适配器零改动）+ S-UI 已验证范围下探，外加复核过程中发现的两个真实缺陷修复。
+
+### 修复
+
+- **面板拒绝 finalmask 配置时被误判为临时故障、白白耗尽重试预算** —— `isPermanentPanelMsg` 只认 5 种措辞，不含 finalmask。于是 3X-UI 对 finalmask 的**确定性拒绝**（每次都失败、不可能自愈）会被当成网络抖动一路重试到上限，每次还写一条审计记录。现在补上 `finalmask` 匹配，一次覆盖两种文案：3.5.0 起的「Finalmask is not supported with REALITY security…」（[XTLS/Xray-core#6453](https://github.com/XTLS/Xray-core/issues/6453)）和 3.6.0 新增的「XMC finalmask requires at least one complete Minecraft profile…」。**注意前者是先前就存在的缺口**（自 3.5.0 起就在空转重试），并非 3.6.0 引入。
+- **REALITY 节点在面板升级到 3.6.0 后，配置同步会永久卡在 `pending`** —— 3.6.0 开机迁移 `InboundRealityFinalmaskTcpStrip` 会就地删掉存量 REALITY inbound 的 `finalmask.tcp`（该组合会让 Xray-core 首个连接就崩溃）。PSP 升级前抓的快照仍带这个键 → `InSync` 判定漂移 → reconcile 反向推送 → 被 `validateFinalMaskRealityCombo` 每次都拒 → 节点永久停在 `pending`，并反复产生 `inbound_config_push_failed`。现在 `SpecFromNode` 在推送前按**与上游完全一致的口径**剥掉它（仅 `security == "reality"`、仅 `tcp` 数组、仅非空时；`finalmask.udp`——PSP 真正渲染的 Hy2 salamander 混淆——绝不触碰，空数组不重写以免制造无谓漂移）。推送成功后 reconcile 的回抓会把快照收敛掉，**自愈、无需管理员干预**。仅影响 PSP 从管理员手里接管的 inbound；PSP 自建节点结构上不会产生这个组合。
+
+### 改进
+
+- **3X-UI 已测上限抬到 3.6.0（实机验证）** —— 上游 2026-07-30 发布 3.6.0（xray-core v26.7.28，103 commits / 432 文件）。手头没有现成面板，因此从源码现搭了一台 3.6.0 + Xray-core 26.7.28（commit `5ca6f4b`，正是 3.6.0 `go.mod` 锁的版本）做端到端复核：PSP 触及的端点全部仍在、形状未变，**PSP 侧零代码改动**。发布说明里三条看着吓人的改动经核实与 PSP 无关 —— ①「openapi.json 移到 session 鉴权后」确实成立（从公开路由挪进带 `checkAPIAuth` 的 `/panel/api` 组），但 PSP 从不拉它；②「node API tokens 改为只写」指的是 3X-UI 自家多节点凭据，不是 PSP 粘贴的面板 API token，**Bearer token 仍打通全部 `/panel/api`**（由上游自己新增的 `TestCheckAPIAuth_BearerSuccess` 加本次全部实机写操作共同证明，新增的 mTLS 分支纯附加）；③「升级时修复遗留 tgId」修的是历史**字符串** tgId，`model.Client.TgID` 仍是 `int64`，而 PSP 自 3.2.0 起就一直发整数。路由表 diff 只新增 1 条（`GET /clients/get/tgId/:tgId`，Telegram 查询）、删除 0 条。`docs/compat/v3.json` 三条 active entry 同步抬到 3.6.0，**运行时按需拉取、无需发版**，各实例下次刷新就把 3.6.0 面板从「未测试」改判为「已支持」。`min_xui` / `version.MinXUI` const 不变（3.6.0 没引入任何 PSP 开始依赖的新能力）。
+- **新增 3X-UI 全表面实机测试 `TestLive_XUISurface` / `TestLive_XUIRealityScan`** —— 补上了长期缺失的 S-UI `TestLive_SUISurface` 对应物：此前 3X-UI 只有 5 个窄口径 `TestLive_*`，且都要求面板预先有 ≥2 个 inbound。新测试**自带 scratch inbound（禁用态 + 高端口，从不真正 bind）并自清理**，可直接指向全新面板；覆盖 server 读路径、inbound 全生命周期、共享 client 全生命周期（多 inbound 增查改/挂载/卸载/批量挂卸/批量增删/按 email 删）、per-node 时代的 `AddClient`/`UpdateClient`，以及单独一条 `scanRealityTargets`（`MinXUI=3.4.2` 这个 floor 的由来）。同样由 `PSP_LIVE_XUI_URL` / `PSP_LIVE_XUI_TOKEN` 环境变量启用、默认跳过。
+- **S-UI 已验证范围从单点 1.5.4 扩展到 1.4.1 – 1.5.4（实机验证）** —— 1.5.4 已是 S-UI 当前最新版，因此 `max_tested_sui` 维持 1.5.4 不变；本次做的是**把下沿探出来**。用 `TestLive_SUISurface` 对**连续七个版本**（1.5.4 / 1.5.3 / 1.5.2 / 1.5.1 / 1.5.0 / 1.4.2 / 1.4.1）逐一实测，每个版本都从源码单独编译、配独立数据库与管理员、单独灌 token，**全部通过**完整表面（状态读取、inbound 增查改删、客户端全生命周期含挂载/摘除与删后查询）。1.5.4 这次是独立于 07-29 那轮的复现。**`min_sui` 仍然刻意留空**：1.4.0 及 1.3.x 在本机**编译不过**（sing-box 的 tailscale endpoint 引用了当前 sing-tun 已不导出的 `tun.DefaultNIC` / `tun.NewTCPForwarder` / `ping.ConnectGVisor`），这是本机依赖解析的产物、**不是 S-UI 接口契约的结论** —— 官方发布的 1.4.0 二进制未必不能用。凭一个编译错误去写死下限会让 1.4.0 面板被误判为「版本过低」，所以维持「未知」这个诚实答案，只在 notes 里记录 **1.4.1 是已测范围的下沿、而非已发布的 floor**。
+- **新增 3X-UI 3.6.0 升级前告示（`xui_advisories`）** —— `warning` / `affects_xray: true`。逐 commit 源码核发现两个**只在已升级面板上才会出现**（全新安装的实机 smoke 结构上看不到）的观察项，都只影响手工配置过 finalmask 的 inbound，PSP 自建节点结构上免疫：① 新开机迁移 `InboundRealityFinalmaskTcpStrip` 会就地删掉 REALITY inbound 的 `finalmask.tcp`，若该 inbound 是 PSP 导入接管的，会凭空制造配置漂移 → 反向推送被 `validateFinalMaskRealityCombo` 永久拒绝 → 节点「配置同步」卡在 `pending` 并反复产生审计记录（**订阅内容不受影响**，PSP 只读 `finalmask.udp`；在节点编辑器里重存一次即可消除）；② 新增的 `validateFinalMaskXmcProfiles` 硬拒旧格式 XMC 掩码（xray-core 26.7.28 把 `usernames` 换成了 `profiles`），面板会在生成运行配置时内存丢弃该掩码、照常启动，PSP 全代码库对 `xmc` 零引用。详见 [docs/3xui-compat.md](docs/3xui-compat.md)。
+- **修正 reconcile 里与代码相反的注释** —— 轴 A 反向推送的分支注释写着「while disabled (the 3.2.0 default…)」，但 `New()` 自 2026-05-28 的 P2 实机验证起就已经把 `axisAReversePush` 设为 `true`。注释描述的是早已作废的历史默认值，实际会误导读者判断默认行为（本次复核中就误导了一次）。同步把该分支的审计文案从「pending 3X-UI 3.2.0 verification」改为「disabled by kill-switch」。纯注释/文案，无行为变化。
+
 ## v3.9.2-beta.1 — 2026-07-29
 
 ### 修复
