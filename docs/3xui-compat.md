@@ -9,9 +9,9 @@ PSP 通过 `/panel/api/*` 对接 3X-UI 面板。本文档维护两件事：
 
 | PSP 版本 | 最低 3X-UI | 已实测通过 | 备注 |
 |---|---|---|---|
-| **v3.9.1+** | **3.4.2** | 3.5.0 | 新增由所选节点执行的 REALITY 目标扫描；依赖 3.4.2 首次提供的 `/server/scanRealityTargets`，不做 PSP 本机回退 |
-| **v3.9.0** | **3.3.0** | 3.5.0 | 共享 client 模型历史版本；保留其原始 3.3.0 floor，不因 3.9.1 新功能反向收紧 |
-| **v3.6.2 – v3.8.x** | **3.2.0** | 3.5.0 | 每节点 client(一级 `/clients/*` API),**硬切 ≥ 3.2.0**;per-node 路径是 shared 路径子集 |
+| **v3.9.1+** | **3.4.2** | 3.6.0 | 新增由所选节点执行的 REALITY 目标扫描；依赖 3.4.2 首次提供的 `/server/scanRealityTargets`，不做 PSP 本机回退 |
+| **v3.9.0** | **3.3.0** | 3.6.0 | 共享 client 模型历史版本；保留其原始 3.3.0 floor，不因 3.9.1 新功能反向收紧 |
+| **v3.6.2 – v3.8.x** | **3.2.0** | 3.6.0 | 每节点 client(一级 `/clients/*` API),**硬切 ≥ 3.2.0**;per-node 路径是 shared 路径子集 |
 | v3.6.0 – v3.6.1 | 3.1.0 | 3.1.0 | 仍走 inbound-scoped 端点;别跑在 3.2.0 上,先升 PSP 到 v3.6.2 |
 | v3.5.1 – v3.5.x | 3.1.0 | 3.1.0 | `/inbounds/list` 把 settings 等改成 nested object,见下文 |
 | v3.5.0 | 3.0.x | 3.0.x | 跨 3.1.0 升级会破坏 traffic poll |
@@ -26,6 +26,38 @@ PSP 通过 `/panel/api/*` 对接 3X-UI 面板。本文档维护两件事：
 - 任何高于"已实测通过"的 3X-UI 版本都属于**未知风险**——升级前先在一台 panel 上小流量验证
 
 ## 历史兼容性事件
+
+### 2026-07-30 / 3X-UI 3.6.0 实机复核 → 已测上限 3.5.0 抬到 3.6.0
+
+**背景**: 上游当天发 3.6.0（"Trend-First Overview, xray-core v26.7.28, Subscription Correctness & Panel Hardening"，103 commits / 432 文件 / +26310 −8804）。手头没有现成的 3.6.0 面板，所以**从源码现搭了一台**：用 Go 1.26.5 编译 v3.6.0 的 darwin/arm64 二进制（只 stub 了 `internal/web/dist`，SPA 与 `/panel/api` 无关），配上官方 Xray-core **26.7.28**（commit `5ca6f4b`，正是 3.6.0 `go.mod` 锁的那个），API token 按 `crypto.HashTokenSHA256`（纯 SHA-256 hex、无盐）直接写库引导。面板报 `panelVersion 3.6.0 / xray 26.7.28 / state running`。
+
+**复核结论（代码零改动，LIVE-VERIFIED）**: PSP 触及的端点在 3.6.0 全部仍在、形状未变。
+
+**本次新增了 `TestLive_XUISurface` / `TestLive_XUIRealityScan`**（`internal/adapters/xui/client_live_surface_test.go`）—— 3X-UI 一直缺 S-UI 那样的全表面实机测试（`TestLive_SUISurface` 有，3X-UI 只有 5 个窄口径用例、且要求面板预先有 ≥2 个 inbound）。新测试**自带 scratch inbound（禁用态、高端口，从不真正 bind）并自清理**，可以直接指向一台全新面板。它驱动的是适配器本身而非另写脚本，因此验证的就是生产代码路径。
+
+- **读路径**: `server/status`(3.6.0 / xray 26.7.28)、`getPanelUpdateInfo`(`{channel:stable,currentVersion:3.6.0,latestVersion:v3.6.0,updateAvailable:false}`，`channel` 是新增附加键，Go 忽略)、`getXrayVersion`(tag 数组)、`getWebCertFiles`、`/inbounds/list` + `/list/slim`、`/clients/get`。
+- **写路径**: inbound `add`→`get`→`update`→`setEnable`→`del`；共享 client `add`(多 inbound)→`get`→`update-by-email`(full-replace，totalGB→2GiB、enable=false 均生效，uuid 保持不变)→`attach`/`detach`→`bulkAttach`/`bulkDetach`→`bulkCreate`(`created:1`)→`bulkDel`(`deleted:1`)→`del-by-email`；外加 per-node 时代的 `AddClient`/`UpdateClient`。
+- **`scanRealityTargets`**: 实机返回完整可解析的一行（Feasible/TLS13/H2/X25519/证书/7 个 serverNames）。这条路由就是当前 `MinXUI=3.4.2` 这个 floor 的由来，必须健康。
+- **破坏性端点**: `POST /updatePanel`、`POST /installXray/:version` 仅确认路由存在（`internal/web/controller/server.go:70-71`），未执行。
+- **PSP 字符串匹配的两处文案未变，且实机观测到**：删后 `clients/get` 回 `{"success":false,"msg":"Obtain (record not found)"}`（`isClientNotFoundMsg` 命中）；端口冲突回 `"Something went wrong (port 18443 (tcp) already used by inbound '...' (#1) on *\n)"`（PSP 自 3.4.2 起就匹配的 `already used by inbound` 措辞，`client.go:511` / `node.go:947`）。
+
+**发布说明里三个看着吓人、实际与 PSP 无关的改动**:
+1. **"openapi.json moved behind session auth"** —— 确实从公开路由 `g.GET("/panel/api/openapi.json")` 挪进了带鉴权的 `/panel/api` 组（`api.GET(...)` + `api.Use(checkAPIAuth)`）。**PSP 从不拉它，运行时零影响**；只是以后做兼容复核时得带上 token 才能取到。
+2. **"node API tokens made write-only"** —— 指的是 3X-UI **自家多节点**的凭据，不是 PSP 粘贴的那个面板 API token。Bearer token 仍然打通 `/panel/api` 全部路由，由上游自己新增的特征化测试 `internal/web/controller/api_auth_test.go` 的 `TestCheckAPIAuth_BearerSuccess` 加本次全部实机写操作共同证明；新增的 mTLS 客户端证书分支是**纯附加**，`api_authed` 照旧置位，CSRF 中间件照旧放行写操作。
+3. **"legacy tgId values repaired on upgrade"**（`16b2bcf9`）—— 修的是历史遗留的**字符串** tgId；`model.Client.TgID` 类型没变（仍 `int64`，只加了 gorm 索引 `idx_clients_tg_id`）。PSP 自 3.2.0 起就一直发整数（`client.go:1227/1235`），本来就在正确的一边。
+
+另外新增的 `ConfigEnvelopeMiddleware` 挂在 api 组上，但在没有 `Content-Encoding: zstd` / `X-Config-Sha256` 时直接 `c.Next()` 透传，PSP 两个都不发。
+
+**路由表 diff**: `v3.5.0 → v3.6.0` 只**新增 1 条**（`GET /clients/get/tgId/:tgId`，Telegram 查询，PSP 用不上），**删除 0 条**。
+
+**两个 upgrade-only 观察项**（全新安装的实机 smoke 结构上看不到，靠逐 commit 源码核补齐；两者都只影响**手工配置过 finalmask 的 inbound**，PSP 自己创建的节点结构上免疫）:
+
+1. **新开机迁移 `InboundRealityFinalmaskTcpStrip` 会就地改写存量 inbound 行**（`internal/database/db.go:1174` 门控、`:1690` 主体）—— 对 `security == "reality"` 的 inbound 删掉 `finalmask.tcp`。全新安装在 `db.go:1081` 预置了 seeder 名，所以永不触发。**已升级**的面板上它会凭空制造漂移：PSP 升级前抓的配置快照仍带 `finalmask.tcp`，`inboundcfg.InSync` 比对 streamSettings（`inboundcfg.go:211`）判定不一致 → reconcile 的轴 A 反向推送默认开启（`reconcile.go:81`）→ 推上去被 `validateFinalMaskRealityCombo`（`inbound.go:1345`）**永久拒绝** → 节点「配置同步」停在 `pending`，并反复产生 `inbound_config_push_failed` 审计记录。**订阅内容不受影响**：PSP 只读 `finalmask.udp`（Hy2 salamander 混淆，`render/streams.go:32`、`protocols.go:244-245`），从不读 `finalmask.tcp`，该节点只是退回渲染时回源拉取。触发条件极窄：得是 ≤3.4.2 时代手工建的、带 `finalmask.tcp` 的 REALITY inbound，被 PSP 导入接管，然后直升 3.6.0。**3.6.0 在这件事上是净利好** —— 这个组合会让 Xray-core 在首个连接时崩溃（[XTLS/Xray-core#6453](https://github.com/XTLS/Xray-core/issues/6453)），迁移修的是一台本来就躺了的面板，而推送被拒正好挡住 PSP 把崩溃配置又还原回去。**处理办法**：在 PSP 节点编辑器里重新保存一次该节点（SPA 会重新生成 streamSettings，REALITY 节点不会带 finalmask），漂移即消。
+2. **新增 `validateFinalMaskXmcProfiles`**（`inbound.go:773`，挂在 `:921` AddInbound 与 `:1348` UpdateInbound）—— Xray-core 26.7.28 把 XMC（Minecraft 伪装）掩码的 `usernames` 换成了 `profiles`（每项要 username + uuid + texturesValue + texturesSignature），并去掉了 `"Dream"` 默认值，于是旧格式掩码保存时被硬拒。**没有 DB 迁移去修存量行**，面板改为在生成运行配置时内存里丢弃该掩码（`xray.go:319`）并打告警 —— 所以面板照常启动，只是那条 inbound 失去伪装。PSP 全代码库对 `xmc` **零引用**（`.go`/`.ts`/`.tsx` 全无命中），只可能通过「接管一条别人手工建的 XMC inbound」这一条路碰到。
+
+**结论**: `max_tested_xui` 3.5.0 → 3.6.0（`v3.json` 三条 active entry 同步）；`min_xui` / `version.MinXUI` const / drift-guard **均不动** —— 3.6.0 没有引入任何 PSP 现在开始依赖的新能力。另加一条 `3.6.0` 的 `xui_advisories`（`warning` / `affects_xray: true`），把上面两个 finalmask 观察项和 xray-core 重启提示放进升级确认框。
+
+**关于更高效的端点（本次顺带盘的，非兼容性问题）**: 3.6.0 没有带来新的提效端点（唯一新路由是 Telegram 查询）。但盘路由表时发现**几个自 3.4.2 就存在、PSP 至今没用的批量端点**，采纳它们不需要抬 floor：`clients/bulkEnable` / `clients/bulkDisable`（PSP 目前是逐用户 `clients/update/:email` 全量替换来启停，配额超限/到期批量处理时是 N 次调用 + N 次 xray 重载）、`clients/delDepleted`、`clients/bulkResetTraffic`、以及 `GET /clients/list`（PSP 的 `ListClientInbounds` 现在是拉 `ListInbounds` 再逐个解析每条 inbound 的 settings JSON 反推出来的）。这些是**后续优化项**，需要各自单独做 TDD + 实机验证后再接，不在本次兼容复核范围内。
 
 ### 2026-07-13 / PSP 3.9.1 接入节点侧 REALITY 目标扫描 → floor 3.3.0 抬到 3.4.2
 
