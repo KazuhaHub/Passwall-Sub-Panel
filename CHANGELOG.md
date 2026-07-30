@@ -4,6 +4,18 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## v3.9.2-beta.3 — 2026-07-30
+
+### 安全
+
+- **升级两个存在已知漏洞的间接依赖** —— `quic-go` v0.59.0 → v0.59.1（[GHSA-vvgj-x9jq-8cj9](https://github.com/advisories/GHSA-vvgj-x9jq-8cj9)，HTTP/3 QPACK trailer 内存耗尽，中危）与 `google.golang.org/grpc` v1.80.0 → v1.82.1（[GHSA-hrxh-6v49-42gf](https://github.com/advisories/GHSA-hrxh-6v49-42gf)，xDS RBAC 与 HTTP/2 服务端，高危）。
+
+  **这两条在 PSP 中都不可达，本次属于加固而非事故响应**：quic-go 是 gin 引入 `quic-go/http3` 带进来的，而 PSP 走的是 `a.server.Serve(ln)`——纯 net/http + TCP listener，从不构造 `http3.Server`、不绑 UDP、不发 Alt-Svc；grpc 经 `lego/dns/gcloud` → `google.golang.org/api/option` 进来，是连 Google Cloud DNS 的 gRPC **客户端**，而漏洞讲的是 xDS RBAC（Envoy 服务网格，PSP 没有）和 HTTP/2 **服务端**（PSP 不跑 gRPC server）。修它的理由是成本为零，且「当前不可达」是个很脆的保证。两个都是 `// indirect`、PSP 代码零引用，升级后 `govulncheck ./...` 归零。
+
+  **注意 `govulncheck` 起初把这两条报为 "affected"，但调用链是误报**：`x509.CreateCertificate → transport.ClientStream.Close`、`time.LoadLocation → transport.NewHTTP2Client`、`io.ReadFull → http3.countingByteReader.Read` —— 都是接口分发的过近似（`io.ReadFull` 收 `io.Reader`，工具便把所有实现连了上去）。判定可达性时不要直接采信这类 trace。
+
+- **未处理：`react-router` 7.15.1 的 [GHSA-qwww-vcr4-c8h2](https://github.com/advisories/GHSA-qwww-vcr4-c8h2)（高危，RSC 模式 CSRF 绕过）** —— **对 PSP 不适用**：PSP 是纯客户端 Vite SPA，经 `go:embed` 当静态文件下发，没有 SSR、更没有 RSC 模式。而其修复版本 8.3.0 是**大版本升级**，为一个不适用的漏洞做路由库大版本迁移不划算，应作为单独的计划内迁移推进（3X-UI 3.6.0 本次已迁到 react-router 8，届时可参考）。
+
 ## v3.9.2-beta.2 — 2026-07-30
 
 3X-UI 3.6.0 兼容复核（实机验证，PSP 适配器零改动）+ S-UI 已验证范围下探，外加复核过程中发现的两个真实缺陷修复。
