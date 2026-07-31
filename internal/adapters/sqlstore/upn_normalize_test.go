@@ -24,6 +24,15 @@ import (
 
 func seedUPNs(t *testing.T, upns ...string) (*gorm.DB, func() []string) {
 	t.Helper()
+	db, readBack := newUPNTestDB(t)
+	seedInto(t, db, upns...)
+	return db, readBack
+}
+
+// newUPNTestDB opens an empty schema plus a read-back helper, so a test that
+// must PROBE the backend before deciding what to seed can do so on the same db.
+func newUPNTestDB(t *testing.T) (*gorm.DB, func() []string) {
+	t.Helper()
 	db, err := openTestDB(t)
 	if err != nil {
 		t.Fatalf("open: %v", err)
@@ -31,6 +40,15 @@ func seedUPNs(t *testing.T, upns ...string) (*gorm.DB, func() []string) {
 	if err := EnsureSchema(db); err != nil {
 		t.Fatalf("schema: %v", err)
 	}
+	return db, func() []string {
+		var got []string
+		db.Raw(`SELECT upn FROM users ORDER BY id`).Scan(&got)
+		return got
+	}
+}
+
+func seedInto(t *testing.T, db *gorm.DB, upns ...string) {
+	t.Helper()
 	for i, upn := range upns {
 		// Raw insert: the service layer would canonicalize these, and the whole
 		// point of the fixture is rows that predate that.
@@ -41,12 +59,6 @@ func seedUPNs(t *testing.T, upns ...string) (*gorm.DB, func() []string) {
 			t.Fatalf("seed %q: %v", upn, err)
 		}
 	}
-	readBack := func() []string {
-		var got []string
-		db.Raw(`SELECT upn FROM users ORDER BY id`).Scan(&got)
-		return got
-	}
-	return db, readBack
 }
 
 // N1 — a clean install has nothing to do, and says so.
@@ -89,7 +101,9 @@ func TestNormalizeStoredUPNsFoldsNonCanonical(t *testing.T) {
 // quota, whose traffic history survives) and a migration must never guess it.
 // Critically, the non-colliding rows in the same run still get folded.
 func TestNormalizeStoredUPNsRefusesCollidingGroups(t *testing.T) {
-	db, readBack := seedUPNs(t, "alice@corp.com", "Alice@Corp.Com", "Dave@Corp.Com")
+	db, readBack := newUPNTestDB(t)
+	requireCaseSensitiveUPNIndex(t, db)
+	seedInto(t, db, "alice@corp.com", "Alice@Corp.Com", "Dave@Corp.Com")
 	rep, err := NormalizeStoredUPNs(db, true)
 	if err != nil {
 		t.Fatalf("normalize: %v", err)
@@ -141,5 +155,37 @@ func TestNormalizeStoredUPNsIsIdempotent(t *testing.T) {
 	}
 	if got := readBack(); got[0] != "alice@corp.com" {
 		t.Fatalf("row = %q after two runs, want alice@corp.com", got[0])
+	}
+}
+
+// requireCaseSensitiveUPNIndex skips the caller unless this backend can
+// actually HOLD two rows whose upns differ only by case.
+//
+// A colliding pair is unconstructible on a backend whose unique index folds
+// case — a stock MySQL/MariaDB refuses the second insert with Error 1062. That
+// is not a gap in the test, it is the product behaviour: on such a server the
+// collision branch is unreachable because the collision cannot exist.
+//
+// It PROBES rather than checking PSP_TEST_DB_KIND=="mysql", because folding is
+// a property of the server's collation and not of the engine: PSP's DSN pins
+// charset but never collation (config.go), so a MySQL running utf8mb4_bin or
+// _as_cs behaves exactly like Postgres and these tests then SHOULD run. Asking
+// the database what it does is the only way to get that right.
+func requireCaseSensitiveUPNIndex(t *testing.T, db *gorm.DB) {
+	t.Helper()
+	const a, b = "caseprobe@corp.com", "CaseProbe@Corp.Com"
+	ins := func(upn, tag string) error {
+		return db.Exec(
+			"INSERT INTO users (upn, role, enabled, sub_token, uuid, group_id, token_version) VALUES (?, ?, ?, ?, ?, ?, ?)",
+			upn, "user", true, "probe-tok-"+tag, "probe-uuid-"+tag, 0, 0).Error
+	}
+	if err := ins(a, "1"); err != nil {
+		t.Fatalf("case probe: first insert failed: %v", err)
+	}
+	err := ins(b, "2")
+	db.Exec("DELETE FROM users WHERE upn IN (?, ?)", a, b)
+	if err != nil {
+		t.Skipf("backend's unique index folds case (%v) — a colliding pair cannot exist here, "+
+			"so the collision path is unreachable by construction", err)
 	}
 }

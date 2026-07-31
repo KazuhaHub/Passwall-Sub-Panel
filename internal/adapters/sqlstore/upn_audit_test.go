@@ -39,12 +39,14 @@ func TestAuditUPNCanonicalizationCountsCollisionsAndNonCanonical(t *testing.T) {
 	if err := EnsureSchema(db); err != nil {
 		t.Fatalf("schema: %v", err)
 	}
+	requireCaseSensitiveUPNIndex(t, db)
 	repos := NewRepos(db)
 	ctx := t.Context()
 
 	// A colliding pair (same folded name, two rows) plus a lone non-canonical
 	// row. Created through the repo so the fixture cannot drift from the real
-	// insert path.
+	// insert path. The probe above skips this entirely on a backend whose index
+	// folds case, where such a pair cannot be constructed at all.
 	for i, upn := range []string{"alice@corp.com", "Alice@Corp.Com", "Bob@Corp.Com"} {
 		u := mkUser(upn, string(rune('x'+i)))
 		if err := repos.User.Create(ctx, u); err != nil {
