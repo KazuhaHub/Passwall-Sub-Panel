@@ -19,9 +19,10 @@ import (
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/app"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/config"
-	pkglog "github.com/KazuhaHub/passwall-sub-panel/internal/pkg/log"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/migrate"
+	pkglog "github.com/KazuhaHub/passwall-sub-panel/internal/pkg/log"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/seed"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/upnnorm"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/version"
 )
 
@@ -71,8 +72,6 @@ func ensureDirs(cfg *config.Config) {
 	}
 }
 
-const defaultConfigPath = "config.yaml"
-
 func main() {
 	// Subcommand dispatch. Currently only `migrate` is intercepted so a
 	// `psp` invocation with no args (or with --config) still falls through
@@ -85,6 +84,15 @@ func main() {
 	// installs upgrade through each major in turn (vN-2 → vN-1 → vN).
 	if len(os.Args) > 1 && os.Args[1] == "migrate" {
 		os.Exit(migrate.Run(os.Args[2:]))
+	}
+	// `psp normalize-upn` folds stored login names to their canonical form.
+	// Operator-invoked rather than a boot migration: folding can violate the
+	// users.upn unique index on an install that already holds a near-duplicate
+	// pair, and neither aborting at boot nor silently rewriting an admin's
+	// login name is acceptable while the panel is coming up. Dry run unless
+	// --apply. Owns its own FlagSet, like migrate.
+	if len(os.Args) > 1 && os.Args[1] == "normalize-upn" {
+		os.Exit(upnnorm.Run(os.Args[2:]))
 	}
 	// `psp version` prints the version then exits — useful in scripts /
 	// CI to confirm the deployed binary matches the release tag.
@@ -113,7 +121,7 @@ func main() {
 	// flag nor env set anything explicit.
 	earlyLevelSet := applyEarlyLogLevel(*debugFlag)
 
-	cfgPath := resolveConfigPath(*cfgPathFlag)
+	cfgPath := config.ResolvePath(*cfgPathFlag)
 	cfg, err := config.LoadOrGenerate(cfgPath)
 	if err != nil {
 		log.Fatalf("load config %s: %v", cfgPath, err)
@@ -166,12 +174,3 @@ func main() {
 
 // resolveConfigPath picks the panel's config path with --config > PSP_CONFIG >
 // the bundled default. flag parsing happens in main() so this stays argv-free.
-func resolveConfigPath(flagVal string) string {
-	if flagVal != "" {
-		return flagVal
-	}
-	if v := os.Getenv("PSP_CONFIG"); v != "" {
-		return v
-	}
-	return defaultConfigPath
-}
