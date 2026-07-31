@@ -2035,3 +2035,10 @@ func TestCurrentPeriodStartYearly(t *testing.T) {
 		t.Errorf("currentPeriodStart(yearly) location = %q, want %q", got.Location(), tokyo)
 	}
 }
+
+// BulkSetEnabled satisfies ports.PanelClient. These tests exercise traffic
+// accounting and never flip enable state; a test that starts caring should
+// assert on recorded calls rather than lean on this stub.
+func (f *fakeXUIClient) BulkSetEnabled(_ context.Context, emails []string, _ bool) (ports.BulkSetEnabledResult, error) {
+	return ports.BulkSetEnabledResult{Changed: len(emails)}, nil
+}

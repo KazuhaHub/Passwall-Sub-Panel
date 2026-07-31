@@ -121,6 +121,13 @@ type PanelClient interface {
 	// DelClientByEmail; PSP keeps its own accounting. Emails already absent
 	// upstream are no-ops. Returns the count the panel reports as deleted.
 	BulkDelByEmail(ctx context.Context, emails []string) (int, error)
+	// BulkSetEnabled flips the enable flag for many clients in ONE call, so a
+	// fan-out that used to cost N /clients/update writes (and N xray reloads on
+	// the same panel) costs one. It ONLY moves the enable flag — unlike
+	// UpdateClient it does not re-push credentials — so use it for pure state
+	// transitions (quota suspend/resume) and keep the full write for paths that
+	// actually change configuration.
+	BulkSetEnabled(ctx context.Context, emails []string, enable bool) (BulkSetEnabledResult, error)
 
 	// --- v3.9.0 multi-inbound client surface (one client ↔ many inbounds) ---
 	//
@@ -342,6 +349,22 @@ type BulkCreateClientItem struct {
 // create-vs-attach themselves from a prior client list, so the per-item skip
 // reasons aren't surfaced here — anything missed is healed by the per-user
 // resync backstop.)
+// BulkSetEnabledSkip is one email the panel declined to flip, with its reason.
+type BulkSetEnabledSkip struct {
+	Email  string
+	Reason string
+}
+
+// BulkSetEnabledResult reports what a bulk enable/disable actually did.
+// Skipped is load-bearing: the panel answers success while silently declining
+// individual emails (a client that no longer exists), so a caller that read
+// "no error" as "every email flipped" would mark users synced that the panel
+// never touched.
+type BulkSetEnabledResult struct {
+	Changed int
+	Skipped []BulkSetEnabledSkip
+}
+
 type BulkCreateResult struct {
 	Created int
 }

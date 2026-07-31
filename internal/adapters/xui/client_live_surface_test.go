@@ -348,3 +348,80 @@ func TestLive_XUIRealityScan(t *testing.T) {
 		t.Logf("  %+v", r)
 	}
 }
+
+// TestLive_XUIBulkSetEnabled verifies the bulk enable/disable path against a
+// real panel. It is the collapse of the month-rollover fan-out: traffic periods
+// are calendar-aligned, so every quota-suspended user resumes on the same poll,
+// and this turns N /clients/update writes (N xray reloads on one panel) into one.
+//
+// Asserts the flag actually MOVED on the panel, not merely that the call
+// returned success — the endpoint reports per-email refusals in `skipped` while
+// still answering 200, so a green response proves nothing on its own.
+func TestLive_XUIBulkSetEnabled(t *testing.T) {
+	c, ctx := liveSurfaceClient(t)
+
+	inbounds, err := c.ListInbounds(ctx)
+	if err != nil {
+		t.Fatalf("ListInbounds: %v", err)
+	}
+	if len(inbounds) < 1 {
+		t.Skip("need at least one inbound")
+	}
+	inb := inbounds[0].ID
+
+	stamp := time.Now().UnixNano()
+	emails := []string{
+		fmt.Sprintf("psp-bulk-a-%d@psp.local", stamp),
+		fmt.Sprintf("psp-bulk-b-%d@psp.local", stamp),
+	}
+	for i, e := range emails {
+		if err := c.AddClientToInbounds(ctx, []int{inb}, ports.ClientSpec{
+			Email: e, Enable: true, ID: fmt.Sprintf("7f1e6a1c-6b6a-4f0e-9f4a-1f2b3c4d5e8%d", i),
+		}); err != nil {
+			t.Fatalf("seed %s: %v", e, err)
+		}
+		t.Cleanup(func() { _ = c.DelClientByEmail(context.Background(), inb, e) })
+	}
+
+	assertEnabled := func(want bool) {
+		t.Helper()
+		for _, e := range emails {
+			got, err := c.GetClient(ctx, e)
+			if err != nil {
+				t.Fatalf("GetClient(%s): %v", e, err)
+			}
+			if got.Enable != want {
+				t.Fatalf("client %s Enable = %v, want %v", e, got.Enable, want)
+			}
+		}
+	}
+
+	res, err := c.BulkSetEnabled(ctx, emails, false)
+	if err != nil {
+		t.Fatalf("BulkSetEnabled(false): %v", err)
+	}
+	if res.Changed != len(emails) {
+		t.Fatalf("disable changed = %d, want %d (skipped: %+v)", res.Changed, len(emails), res.Skipped)
+	}
+	assertEnabled(false)
+
+	res, err = c.BulkSetEnabled(ctx, emails, true)
+	if err != nil {
+		t.Fatalf("BulkSetEnabled(true): %v", err)
+	}
+	if res.Changed != len(emails) {
+		t.Fatalf("enable changed = %d, want %d (skipped: %+v)", res.Changed, len(emails), res.Skipped)
+	}
+	assertEnabled(true)
+
+	// A nonexistent email must be reported, not silently counted as flipped.
+	res, err = c.BulkSetEnabled(ctx, []string{emails[0], "psp-bulk-ghost@psp.local"}, false)
+	if err != nil {
+		t.Fatalf("BulkSetEnabled with a ghost: %v", err)
+	}
+	t.Logf("ghost run: changed=%d skipped=%+v", res.Changed, res.Skipped)
+	if res.Changed != 1 {
+		t.Fatalf("changed = %d, want 1 (only the real client)", res.Changed)
+	}
+	_, _ = c.BulkSetEnabled(ctx, emails, true)
+}

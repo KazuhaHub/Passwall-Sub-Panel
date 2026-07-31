@@ -875,3 +875,73 @@ func TestBulkCreateClients_Empty(t *testing.T) {
 		t.Fatalf("no-target item must be dropped (no-op), got res=%+v err=%v", res, err)
 	}
 }
+
+// BulkSetEnabled flips the enable flag for many clients in ONE call, which is
+// one xray reload instead of N. The body must be {emails:[...]} — the same
+// object shape bulkDel needs, since a bare array is rejected by the panel.
+func TestBulkSetEnabledPostsEmailsObject(t *testing.T) {
+	for _, tc := range []struct {
+		enable bool
+		path   string
+	}{
+		{true, "/panel/api/clients/bulkEnable"},
+		{false, "/panel/api/clients/bulkDisable"},
+	} {
+		var got capturedReq
+		c := captureReq(t, `{"success":true,"obj":{"changed":2}}`, &got)
+		res, err := c.BulkSetEnabled(context.Background(), []string{"u1@psp.local", "u2@psp.local"}, tc.enable)
+		if err != nil {
+			t.Fatalf("enable=%v: %v", tc.enable, err)
+		}
+		if got.method != http.MethodPost || got.path != tc.path {
+			t.Fatalf("enable=%v: method/path = %s %s, want POST %s", tc.enable, got.method, got.path, tc.path)
+		}
+		var body struct {
+			Emails []string `json:"emails"`
+		}
+		if err := json.Unmarshal([]byte(got.body), &body); err != nil {
+			t.Fatalf("body not a JSON object: %v (%s)", err, got.body)
+		}
+		if len(body.Emails) != 2 || body.Emails[0] != "u1@psp.local" {
+			t.Fatalf("emails = %#v", body.Emails)
+		}
+		if res.Changed != 2 {
+			t.Fatalf("changed = %d, want 2", res.Changed)
+		}
+	}
+}
+
+// The panel reports per-email refusals in `skipped` rather than failing the
+// call. Surfacing them matters: a caller that assumed "no error means every
+// email flipped" would mark users synced that the panel never touched.
+func TestBulkSetEnabledSurfacesSkipped(t *testing.T) {
+	var got capturedReq
+	c := captureReq(t, `{"success":true,"obj":{"changed":1,"skipped":[{"email":"gone@psp.local","reason":"not found"}]}}`, &got)
+	res, err := c.BulkSetEnabled(context.Background(), []string{"u1@psp.local", "gone@psp.local"}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Changed != 1 {
+		t.Fatalf("changed = %d, want 1", res.Changed)
+	}
+	if len(res.Skipped) != 1 || res.Skipped[0].Email != "gone@psp.local" || res.Skipped[0].Reason != "not found" {
+		t.Fatalf("skipped = %#v, want the gone@psp.local/not found entry", res.Skipped)
+	}
+}
+
+// Empty input must not reach the network at all — the poll calls this once per
+// panel per cycle and most cycles have nothing to flip.
+func TestBulkSetEnabledEmptyIsNoop(t *testing.T) {
+	var got capturedReq
+	c := captureReq(t, `{"success":true}`, &got)
+	res, err := c.BulkSetEnabled(context.Background(), nil, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.method != "" {
+		t.Fatalf("empty input still issued %s %s", got.method, got.path)
+	}
+	if res.Changed != 0 {
+		t.Fatalf("changed = %d, want 0", res.Changed)
+	}
+}

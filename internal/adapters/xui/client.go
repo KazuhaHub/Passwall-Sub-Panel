@@ -1263,3 +1263,52 @@ func buildClientJSON(s ports.ClientSpec) (json.RawMessage, error) {
 	}
 	return json.Marshal(obj)
 }
+
+// BulkSetEnabled flips the enable flag for many clients in one request:
+// POST /panel/api/clients/{bulkEnable,bulkDisable} with {"emails":[...]}.
+//
+// WHY: the traffic poll's quota enforcement used to call UpdateClient once per
+// user, and 3X-UI reloads xray after each write. That is invisible in steady
+// state — suspension is transition-guarded, so an over-quota user is pushed
+// once and then left alone — but traffic periods are CALENDAR-ALIGNED
+// (currentPeriodStart pins monthly to the 1st for everyone), so on the first
+// poll after the month rolls over EVERY suspended user resumes at once. On a
+// panel with fifty suspended users that was fifty back-to-back reloads. This
+// collapses it to one call per panel.
+//
+// It moves ONLY the enable flag. UpdateClient does a full-replace that also
+// re-pushes credentials and so incidentally heals a client that drifted
+// out-of-band; this does not. That trade is deliberate and confined to pure
+// state transitions — reconcile is what owns drift repair.
+//
+// Empty input never touches the network: the poll calls this once per panel per
+// cycle and most cycles have nothing to flip.
+//
+// Route and payload are byte-identical on 3X-UI 3.4.2 (PSP's floor) and 3.6.0,
+// so adopting it required no floor bump.
+func (c *Client) BulkSetEnabled(ctx context.Context, emails []string, enable bool) (ports.BulkSetEnabledResult, error) {
+	var out ports.BulkSetEnabledResult
+	if len(emails) == 0 {
+		return out, nil
+	}
+	defer c.lockClientEmails(emails)()
+	path := "/panel/api/clients/bulkDisable"
+	if enable {
+		path = "/panel/api/clients/bulkEnable"
+	}
+	var raw struct {
+		Changed int `json:"changed"`
+		Skipped []struct {
+			Email  string `json:"email"`
+			Reason string `json:"reason"`
+		} `json:"skipped"`
+	}
+	if err := c.doJSON(ctx, http.MethodPost, path, map[string]any{"emails": emails}, &raw); err != nil {
+		return out, err
+	}
+	out.Changed = raw.Changed
+	for _, s := range raw.Skipped {
+		out.Skipped = append(out.Skipped, ports.BulkSetEnabledSkip{Email: s.Email, Reason: s.Reason})
+	}
+	return out, nil
+}
