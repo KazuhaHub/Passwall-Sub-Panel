@@ -1281,6 +1281,21 @@ func buildClientJSON(s ports.ClientSpec) (json.RawMessage, error) {
 // out-of-band; this does not. That trade is deliberate and confined to pure
 // state transitions — reconcile is what owns drift repair.
 //
+// DO NOT wire this into the traffic poll's quota RESUME path. That was the
+// original motivation and it does not work: the resume push is not an enable
+// flip. pushClientConfigToAll → syncSharedLifecycle sends enable, expiry AND
+// the traffic floor (TrafficFloorBytes(limit, period_used)) — the Xray-side
+// safety net that cuts a user off while PSP is offline — and a period rollover
+// is precisely when the floor changes, since period_used resets and the floor
+// goes from exhausted back to the full quota. Flipping only enable would leave
+// the panel-side totalGB at last period's exhausted value, so Xray would cut
+// the user off anyway: a silent quota failure hitting exactly the users the
+// batching was meant to help. No bulk route can express it — bulkAdjust is
+// additive (addDays/addBytes), not an absolute set.
+//
+// It IS correct wherever only the enable flag moves and the quota floor is
+// unchanged — an admin bulk enable/disable action, for instance.
+//
 // Empty input never touches the network: the poll calls this once per panel per
 // cycle and most cycles have nothing to flip.
 //
