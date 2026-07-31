@@ -182,3 +182,116 @@ func containsInt(xs []int, want int) bool {
 	}
 	return false
 }
+
+// TestLive_SUIBulkSetEnabled exercises the S-UI half of the BulkSetEnabled
+// contract against a REAL panel.
+//
+// It gets its own live test because the S-UI implementation is structurally
+// different from 3X-UI's: S-UI has no bulkEnable route, so this reads each full
+// client row and issues ONE clients/editbulk save. editbulk performs a FULL-ROW
+// write, so the per-client GET is load-bearing — submitting the summary that
+// GET /clients returns (which omits config and links) would erase credentials.
+// That failure mode is invisible to a unit test with a fake, which is exactly
+// why this runs against a panel and asserts the credentials survived.
+func TestLive_SUIBulkSetEnabled(t *testing.T) {
+	c, ctx := liveClient(t)
+
+	inbounds, err := c.ListInbounds(ctx)
+	if err != nil {
+		t.Fatalf("ListInbounds: %v", err)
+	}
+	var inbID int
+	if len(inbounds) > 0 {
+		inbID = inbounds[0].ID
+	} else {
+		settings, _ := json.Marshal(map[string]any{"clients": []any{}})
+		stream, _ := json.Marshal(map[string]any{"security": "none", "network": "tcp"})
+		inbID, err = c.AddInbound(ctx, ports.InboundSpec{
+			Remark: "psp-bulk-live", Enable: true, Listen: "127.0.0.1", Port: 45899,
+			Protocol: "vless", Settings: string(settings), StreamSettings: string(stream),
+		})
+		if err != nil {
+			t.Fatalf("AddInbound: %v", err)
+		}
+		t.Cleanup(func() { _ = c.DelInbound(context.Background(), inbID) })
+	}
+
+	stamp := time.Now().UnixNano()
+	emails := []string{
+		fmt.Sprintf("psp-suibulk-a-%d@psp.local", stamp),
+		fmt.Sprintf("psp-suibulk-b-%d@psp.local", stamp),
+	}
+	const uuidA = "8f1e6a1c-6b6a-4f0e-9f4a-1f2b3c4d5e90"
+	for i, e := range emails {
+		id := uuidA
+		if i == 1 {
+			id = "8f1e6a1c-6b6a-4f0e-9f4a-1f2b3c4d5e91"
+		}
+		if err := c.AddClientToInbounds(ctx, []int{inbID}, ports.ClientSpec{
+			Email: e, Enable: true, ID: id,
+		}); err != nil {
+			t.Fatalf("seed %s: %v", e, err)
+		}
+		t.Cleanup(func() { _ = c.DelClientByEmail(context.Background(), inbID, e) })
+	}
+
+	assertEnabled := func(want bool) {
+		t.Helper()
+		for _, e := range emails {
+			d, err := c.GetClient(ctx, e)
+			if err != nil {
+				t.Fatalf("GetClient(%s): %v", e, err)
+			}
+			if d == nil {
+				t.Fatalf("GetClient(%s) = nil — the client vanished", e)
+			}
+			if d.Enable != want {
+				t.Fatalf("client %s Enable = %v, want %v", e, d.Enable, want)
+			}
+		}
+	}
+
+	res, err := c.BulkSetEnabled(ctx, emails, false)
+	if err != nil {
+		t.Fatalf("BulkSetEnabled(false): %v", err)
+	}
+	if res.Changed != len(emails) {
+		t.Fatalf("disable changed = %d, want %d (skipped %+v)", res.Changed, len(emails), res.Skipped)
+	}
+	assertEnabled(false)
+
+	// THE point of running this live: editbulk is a full-row save, so a wrong
+	// implementation flips enable and silently wipes the client's credentials.
+	if d, err := c.GetClient(ctx, emails[0]); err != nil {
+		t.Fatalf("GetClient after disable: %v", err)
+	} else if d.ID != uuidA {
+		t.Fatalf("client uuid = %q after the bulk write, want %q — editbulk erased credentials", d.ID, uuidA)
+	}
+
+	res, err = c.BulkSetEnabled(ctx, emails, true)
+	if err != nil {
+		t.Fatalf("BulkSetEnabled(true): %v", err)
+	}
+	if res.Changed != len(emails) {
+		t.Fatalf("enable changed = %d, want %d", res.Changed, len(emails))
+	}
+	assertEnabled(true)
+
+	// Already in the wanted state -> nothing to write.
+	if res, err = c.BulkSetEnabled(ctx, emails, true); err != nil {
+		t.Fatalf("idempotent run: %v", err)
+	} else if res.Changed != 0 {
+		t.Fatalf("re-enabling already-enabled clients changed = %d, want 0", res.Changed)
+	}
+
+	// An unknown email is reported, not counted as flipped.
+	res, err = c.BulkSetEnabled(ctx, []string{emails[0], "psp-suibulk-ghost@psp.local"}, false)
+	if err != nil {
+		t.Fatalf("ghost run: %v", err)
+	}
+	t.Logf("ghost run: changed=%d skipped=%+v", res.Changed, res.Skipped)
+	if res.Changed != 1 || len(res.Skipped) != 1 {
+		t.Fatalf("changed=%d skipped=%+v, want 1 changed and 1 skipped", res.Changed, res.Skipped)
+	}
+	_, _ = c.BulkSetEnabled(ctx, emails, true)
+}
