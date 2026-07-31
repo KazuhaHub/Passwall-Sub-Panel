@@ -236,8 +236,8 @@ func (s *Service) Register(ctx context.Context, in RegisterInput) (*RegisterResu
 // Enumeration-safe by contract: it returns nothing and the handler always
 // answers 200, so a caller can't tell whether the email exists or its state.
 // The send itself is cooldown-guarded (anti email-bomb).
-func (s *Service) ResendVerification(ctx context.Context, email string) {
-	email = strings.ToLower(strings.TrimSpace(email))
+func (s *Service) ResendVerification(ctx context.Context, rawEmail string) {
+	email := strings.ToLower(strings.TrimSpace(rawEmail))
 	if !validEmail(email) {
 		return
 	}
@@ -245,7 +245,13 @@ func (s *Service) ResendVerification(ctx context.Context, email string) {
 	if err != nil || !set.RegistrationEnabled {
 		return
 	}
-	u, err := s.d.Users.GetByUPN(ctx, email)
+	// Raw, like every other lookup: GetByUPN probes exact-then-normalized, so
+	// this also reaches a legacy non-canonical row. Self-registration has always
+	// folded, so a pending-verification row is normally canonical anyway — but
+	// an admin-created account carrying PendingEmailVerify from before
+	// normalization would not be, and a rule that holds at two of three
+	// callsites is how this class of bug regrows.
+	u, err := s.d.Users.GetByUPN(ctx, rawEmail)
 	if err != nil || u == nil {
 		return
 	}
