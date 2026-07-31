@@ -4,9 +4,14 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
-## 未发布
+## v3.9.2-beta.4 — 2026-07-31
+
+身份一致性收口：`upn` 的大小写/空白在三个数据库后端上统一语义（R1），外加复核过程中顺带发现的两个独立缺陷。
 
 ### 修复
+
+- **禁用账号状态被无凭据探测泄露** —— `VerifyLocalPassword` 里 `AccountLoginAllowed` 跑在 `bcrypt.CompareHashAndPassword` **之前**，于是任何未认证的调用方发一个乱填的密码就能凭 403 把"账号存在且已禁用/待验证"与其他所有结果区分开；而失败计数只记 `invalid_credentials`，这类探测**连锁定都不会触发**。范围有限——启用账号与纯 SSO 账号返回的都是同样的 401，所以只能枚举出"已禁用"这个子集、枚举不出用户列表。现在把密码校验放到状态检查之前：**先证明你拥有这个账号，才轮到你知道它的状态**。调用方仍会拿到 `ErrForbidden`（处理器要靠它给出 403 的具体原因），只是必须先过密码这关。
+
 
 - **登录名（`upn`）的大小写/空白不一致，导致同一个人被拆成两个账号（R1）** —— `users.upn` 是不带 COLLATE 的 `varchar(255) UNIQUE`，而三个后端对"同名"的定义并不一致：MySQL 默认 utf8mb4 排序规则会折叠大小写（`utf8mb4_0900_ai_ci` 连重音一起折），**Postgres 与 SQLite 逐字节比较**。实测确认（真实 `EnsureSchema` + 真实仓储）：在 SQLite（**本项目默认后端**）与 Postgres 上，`alice@corp.com` 与 `Alice@corp.com` 会各自建行、`GetByUPN` 大小写敏感。Go 侧同时存在折叠不一致：注册路径折叠、建号/登录/找回只 trim、SSO 连 trim 都没有。
 

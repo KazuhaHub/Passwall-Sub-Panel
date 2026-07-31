@@ -5,6 +5,8 @@ import (
 	"errors"
 	"testing"
 
+	"golang.org/x/crypto/bcrypt"
+
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 )
 
@@ -153,5 +155,43 @@ func TestCreateLocalRejectsExactLegacyNonCanonicalUPN(t *testing.T) {
 	}
 	if len(repo.byID) != 1 {
 		t.Fatalf("%d rows exist, want 1", len(repo.byID))
+	}
+}
+
+// A disabled account must not be distinguishable from an enabled one WITHOUT
+// the correct password.
+//
+// AccountLoginAllowed used to run before bcrypt.CompareHashAndPassword, so any
+// unauthenticated caller could tell "this account exists and is disabled/pending"
+// apart from every other outcome by sending a junk password — and because the
+// login-attempt counter only records invalid_credentials, those probes never fed
+// the lockout. Proving you own the account has to come first; only then is its
+// state yours to learn.
+func TestVerifyLocalPasswordHidesDisabledStateWithoutCorrectPassword(t *testing.T) {
+	hash, err := bcrypt.GenerateFromPassword([]byte("correct-horse"), bcrypt.MinCost)
+	if err != nil {
+		t.Fatalf("hash: %v", err)
+	}
+	repo := &memoryUserRepo{byID: map[int64]*domain.User{
+		1: {
+			ID: 1, UPN: "disabled@corp.com", Role: domain.RoleUser,
+			PasswordHash: string(hash),
+			Enabled:      false, AutoDisabledReason: domain.DisabledPendingEmailVerify,
+		},
+	}}
+	svc := &Service{users: repo}
+	ctx := context.Background()
+
+	// Wrong password against a disabled account must look exactly like wrong
+	// password against any other account: ErrUnauthorized, never ErrForbidden.
+	if _, err := svc.VerifyLocalPassword(ctx, "disabled@corp.com", "wrong-password"); !errors.Is(err, domain.ErrUnauthorized) {
+		t.Fatalf("wrong password on a disabled account = %v, want domain.ErrUnauthorized "+
+			"(returning ErrForbidden leaks the account's state to an unauthenticated prober)", err)
+	}
+
+	// With the CORRECT password the caller has proven ownership, so the
+	// disabled state is theirs to see — the handler needs it for its 403 reason.
+	if _, err := svc.VerifyLocalPassword(ctx, "disabled@corp.com", "correct-horse"); !errors.Is(err, domain.ErrForbidden) {
+		t.Fatalf("correct password on a disabled account = %v, want domain.ErrForbidden", err)
 	}
 }

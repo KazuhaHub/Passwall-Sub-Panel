@@ -996,11 +996,18 @@ func (s *Service) VerifyLocalPassword(ctx context.Context, upn, password string)
 		_ = bcrypt.CompareHashAndPassword(dummyBcryptHash, []byte(password))
 		return nil, domain.ErrUnauthorized
 	}
-	if !domain.AccountLoginAllowed(u.Enabled, u.AutoDisabledReason) {
-		return u, domain.ErrForbidden
-	}
+	// Password FIRST, account state second. The order is the security property:
+	// while the state check ran first, any unauthenticated caller could send a
+	// junk password and tell "exists and is disabled/pending" apart from every
+	// other outcome by the 403 — and since the login-attempt counter records
+	// only invalid_credentials, those probes never fed the lockout either.
+	// Callers still get ErrForbidden (the handler needs the reason for its 403),
+	// but only after proving they own the account.
 	if err := bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(password)); err != nil {
 		return nil, domain.ErrUnauthorized
+	}
+	if !domain.AccountLoginAllowed(u.Enabled, u.AutoDisabledReason) {
+		return u, domain.ErrForbidden
 	}
 	return u, nil
 }
