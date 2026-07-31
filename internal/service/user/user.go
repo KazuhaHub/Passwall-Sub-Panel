@@ -600,11 +600,20 @@ func (s *Service) HasPendingSync(ctx context.Context, userID int64) bool {
 // 3X-UI — use CreateLocalAndSync for the full "user appears on every
 // authorised inbound" flow.
 func (s *Service) CreateLocal(ctx context.Context, in CreateLocalInput) (*CreateLocalResult, error) {
-	upn := strings.TrimSpace(in.UPN)
+	// Canonicalize what we WRITE, but hand the guard the RAW input.
+	//
+	// The asymmetry is deliberate. GetByUPN probes the raw (trimmed) string
+	// first and the normalized one second, so passing the raw value detects
+	// BOTH a canonical row and a legacy non-canonical one (`Alice@Corp.Com`
+	// written before normalization existed). Pre-normalizing here would throw
+	// away probe 1 and let an admin create a second identity alongside a legacy
+	// row. Storing the normalized form is what stops new non-canonical rows
+	// from accumulating and lets the plain unique index enforce the invariant.
+	upn := domain.NormalizeUPN(in.UPN)
 	if upn == "" {
 		return nil, fmt.Errorf("%w: upn required", domain.ErrValidation)
 	}
-	if _, err := s.users.GetByUPN(ctx, upn); err == nil {
+	if _, err := s.users.GetByUPN(ctx, in.UPN); err == nil {
 		return nil, domain.ErrAlreadyExists
 	} else if !errors.Is(err, domain.ErrNotFound) {
 		return nil, err
@@ -812,7 +821,13 @@ func (s *Service) EnsureSSO(ctx context.Context, in EnsureSSOInput) (*domain.Use
 		return s.reconcileSSOUser(ctx, u, in)
 	}
 
-	// Pass 2: first-time linking by UPN.
+	// Pass 2: first-time linking by UPN. The assertion value goes in RAW on
+	// purpose: GetByUPN probes exact-then-normalized, so this matches a
+	// pre-provisioned canonical row AND a legacy non-canonical one. Folding it
+	// here first would discard the legacy probe. Before this lookup tolerated
+	// case, an IdP emitting directory casing (Entra does) missed the
+	// pre-provisioned account entirely and forked it into a second, group-0 row
+	// while the admin's configured row sat unused — silently.
 	linkable, err := s.users.GetByUPN(ctx, in.UPN)
 	if err != nil && !errors.Is(err, domain.ErrNotFound) {
 		return nil, err
@@ -897,7 +912,11 @@ func (s *Service) EnsureSSO(ctx context.Context, in EnsureSSOInput) (*domain.Use
 		newRole = matchedRole
 	}
 	u = &domain.User{
-		UPN:                in.UPN,
+		// JIT provisioning stored the IdP value verbatim — not even trimmed —
+		// so a non-conforming IdP could persist a upn that no local-credential
+		// path (all of which trim) could ever match again, on a column with no
+		// update path. Canonicalize like every other write site.
+		UPN:                domain.NormalizeUPN(in.UPN),
 		Email:              in.Email,
 		Role:               newRole,
 		SubToken:           subToken,

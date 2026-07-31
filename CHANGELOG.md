@@ -4,6 +4,35 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## 未发布
+
+### 修复
+
+- **登录名（`upn`）的大小写/空白不一致，导致同一个人被拆成两个账号（R1）** —— `users.upn` 是不带 COLLATE 的 `varchar(255) UNIQUE`，而三个后端对"同名"的定义并不一致：MySQL 默认 utf8mb4 排序规则会折叠大小写（`utf8mb4_0900_ai_ci` 连重音一起折），**Postgres 与 SQLite 逐字节比较**。实测确认（真实 `EnsureSchema` + 真实仓储）：在 SQLite（**本项目默认后端**）与 Postgres 上，`alice@corp.com` 与 `Alice@corp.com` 会各自建行、`GetByUPN` 大小写敏感。Go 侧同时存在折叠不一致：注册路径折叠、建号/登录/找回只 trim、SSO 连 trim 都没有。
+
+  三个静默失败（都不越安全边界——分叉方向是**丢权限而非获得权限**，且实测排除了账户接管、会话串号、3X-UI 客户端冲突与重置令牌错投）：
+  - **SSO 首次登录漏掉预置账号**：管理员预置 `alice@corp.com`（含分组与配额），IdP 断言 `Alice@corp.com`（Entra 发目录原始大小写）→ 链接守卫未命中 → **分叉出 group=0/quota=0 的第二行**，而管理员那行闲置且无人知晓；在出厂默认（`AllowAutoCreate=false`）下则直接 `ErrSSONoAccount` 把用户挡在门外。
+  - **密码找回静默失效**：`RequestReset` 对未知账号"保持沉默"直接返回 200，用户看到"请查收邮件"但**永远收不到**。
+  - **空白字符绕过锁定/验证码计数**：guard 收到的是原始字段而账号查找会 trim，于是 `" admin"` 与 `"admin"` 命中同一账号却各记一套失败计数（`TrimSpace` 可剥离 8 类字符，变体无穷）。仅节流失效，2FA 与 `TokenVersion` 撤销照常生效。
+
+  修复采用 **Go 侧规范化**而非方言排序规则：三个方言做不出一致语义（`NOCASE` 只折 ASCII、MySQL 连重音一起折、`CITEXT` 依赖扩展），且改列排序规则要在 `EnsureSchema` 里写三套 DDL。新增 `domain.NormalizeUPN`（`ToLower(TrimSpace)`），**写入侧**（建号、SSO JIT 供给）一律规范化，于是那个原本就存在的普通唯一索引在三个方言上都开始强制"一名一身份"，顺带堵掉 `GetByUPN`→`Create` 之间的 TOCTOU 竞态。
+
+  **`GetByUPN` 改为双探测：先原始（trim）、后规范化，两次都是普通等值、都命中 `idx_users_upn`，绝不发 `LOWER(upn) = ?`**（那会让登录热路径丢索引，且在已有近重复对的库上返回两行、把确定性错误变成随机命中）。probe 1 是**防锁定的关键**：存量行并不规范（建号存管理员敲的原样、SSO 存断言原值），只折叠输入并单次探测会让它们**瞬间全部失联**。因此**今天能登录的字符串，改完仍然能登录**；查找路径一律传原始值，让 probe 1 有机会命中存量行。
+
+- **唯一冲突返回原始驱动错误，本该 409 的地方吐 500** —— `userRepo.Create` 未把唯一索引冲突映射为 `domain.ErrAlreadyExists`，整个 sqlstore 也没有这类映射。在索引确实会拒的 MySQL 上，管理员建号与 `/auth/register`（`registration.go` 明确写着应暴露 `ErrAlreadyExists`）都会返回**带驱动字符串的 500**。这条与大小写之争无关、独立成立，但必须同批修：写入折叠后唯一索引成了竞态的最后防线，它的失败必须可读。新增 `isUniqueViolationErr`（形状对齐既有的 `isMissingTableErr`，文案为**三方言实测**而非猜测）。
+
+### 新功能
+
+- **启动期 `upn` 规范化审计** —— 仿 `AuditSecretsAtRest`，**只告警、绝不拒启**。报告 ① `LOWER(upn)` 重复的行组（折叠会撞唯一索引，须由人决定保留哪个账号——谁的 sub token、谁的配额、谁的流量历史），② `upn != NormalizeUPN(upn)` 的非规范行（可安全折叠，且正是仍依赖 probe 1 的那批）。这是后续回填的**前置条件**：不知道自己库里有没有冲突，就无从判断回填是否安全。
+
+### 改进
+
+- **收紧用户 fake 的 `Create`** —— 此前**完全没有唯一性检查**，这正是现有测试套件一条都没抓到本问题的原因；现在按存储值逐字节拒重（镜像真实索引），否则所有规范化断言都会空洞通过。`GetByUPN` fake 同步镜像双探测。
+- **新增跨方言测试 T1–T4**（`internal/adapters/sqlstore`，**SQLite 与 Postgres 均已实跑**）：查找契约、重复建号在三方言上统一返回 `ErrAlreadyExists`、**防锁定回归守卫**（绕过 service 直接 raw-insert 一行混合大小写，断言仍可命中）、并发建号恰好一个胜出。另有 S1–S5 覆盖 service 层的写入折叠与 SSO 链接。
+- **break-glass CLI 跟进** —— `reset-admin-password` 先精确后规范化解析出真实存储值再操作（**不是**用一条谓词同时匹配两种拼写：在仍有冲突对的库上那会一次改掉两个账号的密码）；`dump-user` 同步。
+
+> **本次是 R1，刻意只做到这里。** R2（`psp normalize-upn --dry-run` 一次性回填，拒绝碰冲突组）与 R3（回填干净后摘掉 probe 1）留待后续版本——**不在 `EnsureSchema` 里自动折叠**：那可能撞唯一索引，而开机中止或静默改掉管理员登录名都不可接受。
+
 ## v3.9.2-beta.3 — 2026-07-30
 
 ### 安全

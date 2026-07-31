@@ -280,17 +280,29 @@ func (h *AuthLocalHandler) Login(c *gin.Context) {
 	// Live config, loaded once and shared by the guard + captcha checks below.
 	s, _ := h.settings.Load(c.Request.Context(), ports.UISettings{})
 
+	// The lockout / captcha counter and the audit trail are keyed on the
+	// NORMALIZED upn, the same identity VerifyLocalPassword resolves.
+	//
+	// They used to be keyed on the raw field while the account lookup trimmed,
+	// so " admin", "admin\t" and "\nadmin" all authenticated against the same
+	// row but each kept its OWN failure counter — an unbounded supply of
+	// variants (TrimSpace strips space, \t, \n, \v, \f, \r, U+0085, U+00A0)
+	// that walked straight past the lockout and captcha gates "admin" had
+	// already tripped. Whatever normalization the account lookup uses, these
+	// must use the identical one or the divergence simply moves.
+	guardUPN := domain.NormalizeUPN(req.UPN)
+
 	// Pre-password guard: account lockout + captcha requirement. Runs BEFORE
 	// the bcrypt check so brute-force automation is stopped before it can even
 	// probe a password.
-	decision, gerr := h.guard.Evaluate(c.Request.Context(), s, ip, req.UPN)
+	decision, gerr := h.guard.Evaluate(c.Request.Context(), s, ip, guardUPN)
 	if gerr != nil {
 		// Fail open: a failed history read must never lock everyone out.
 		log.Warn("login guard evaluate failed", "err", gerr)
 		decision = loginguard.Decision{}
 	}
 	if decision.Locked {
-		recordAuthEvent(c, h.authEvents, domain.AuthMethodLocal, domain.AuthOutcomeFailure, 0, req.UPN, domain.AuthReasonLockedOut)
+		recordAuthEvent(c, h.authEvents, domain.AuthMethodLocal, domain.AuthOutcomeFailure, 0, guardUPN, domain.AuthReasonLockedOut)
 		retry := int(decision.RetryAfter.Seconds()) + 1
 		c.Header("Retry-After", strconv.Itoa(retry))
 		c.JSON(http.StatusTooManyRequests, gin.H{
@@ -329,12 +341,12 @@ func (h *AuthLocalHandler) Login(c *gin.Context) {
 	if err != nil {
 		switch {
 		case errors.Is(err, domain.ErrNotFound), errors.Is(err, domain.ErrUnauthorized):
-			recordAuthEvent(c, h.authEvents, domain.AuthMethodLocal, domain.AuthOutcomeFailure, 0, req.UPN, domain.AuthReasonInvalidCredentials)
+			recordAuthEvent(c, h.authEvents, domain.AuthMethodLocal, domain.AuthOutcomeFailure, 0, guardUPN, domain.AuthReasonInvalidCredentials)
 			body := gin.H{"error": "Invalid credentials"}
 			// Re-evaluate after recording this failure so the response can tell
 			// the client whether the retry now needs a captcha (after_failures
 			// mode flips on here).
-			if d, e := h.guard.Evaluate(c.Request.Context(), s, ip, req.UPN); e == nil && d.CaptchaRequired {
+			if d, e := h.guard.Evaluate(c.Request.Context(), s, ip, guardUPN); e == nil && d.CaptchaRequired {
 				body["captcha_required"] = true
 			}
 			c.JSON(http.StatusUnauthorized, body)
@@ -348,13 +360,13 @@ func (h *AuthLocalHandler) Login(c *gin.Context) {
 				reason = u.AutoDisabledReason
 				uid = u.ID
 			}
-			recordAuthEvent(c, h.authEvents, domain.AuthMethodLocal, domain.AuthOutcomeFailure, uid, req.UPN, "disabled:"+string(reason))
+			recordAuthEvent(c, h.authEvents, domain.AuthMethodLocal, domain.AuthOutcomeFailure, uid, guardUPN, "disabled:"+string(reason))
 			c.JSON(http.StatusForbidden, gin.H{
 				"error":  disabledReasonMessage(reason),
 				"reason": string(reason),
 			})
 		default:
-			recordAuthEvent(c, h.authEvents, domain.AuthMethodLocal, domain.AuthOutcomeFailure, 0, req.UPN, "error")
+			recordAuthEvent(c, h.authEvents, domain.AuthMethodLocal, domain.AuthOutcomeFailure, 0, guardUPN, "error")
 			respondError(c, err)
 		}
 		return

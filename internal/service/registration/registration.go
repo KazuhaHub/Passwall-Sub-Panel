@@ -208,7 +208,10 @@ func (s *Service) Register(ctx context.Context, in RegisterInput) (*RegisterResu
 	// sent to: only the inbox owner can finish. A fully-registered (enabled, or
 	// disabled for any OTHER reason) account falls through to CreateLocal, which
 	// returns ErrAlreadyExists — a real account can never be hijacked this way.
-	if existing, gerr := s.d.Users.GetByUPN(ctx, email); gerr == nil && existing != nil {
+	// in.Email raw rather than the folded `email`: the repo probes
+	// exact-then-normalized, so this also detects a legacy non-canonical row
+	// holding the same address.
+	if existing, gerr := s.d.Users.GetByUPN(ctx, in.Email); gerr == nil && existing != nil {
 		if !existing.Enabled && existing.AutoDisabledReason == domain.DisabledPendingEmailVerify {
 			if perr := s.d.Users.SetPassword(ctx, existing.ID, in.Password); perr != nil {
 				return nil, perr
@@ -271,7 +274,10 @@ func (s *Service) Verify(ctx context.Context, in VerifyInput) error {
 	if strings.TrimSpace(in.Token) != "" {
 		tok, err = s.d.Tokens.ConsumeByTokenHash(ctx, domain.AuthTokenPurposeEmailVerify, hashSecret(in.Token), now)
 	} else {
-		u, uerr := s.d.Users.GetByUPN(ctx, strings.ToLower(strings.TrimSpace(in.Ident)))
+		// Raw, not pre-folded: GetByUPN probes exact-then-normalized, so handing
+		// it the untouched input also reaches a legacy non-canonical row.
+		// Folding here first would discard that probe.
+		u, uerr := s.d.Users.GetByUPN(ctx, in.Ident)
 		if uerr != nil {
 			return domain.ErrUnauthorized
 		}

@@ -190,6 +190,7 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	// and WARN if any are still plaintext. Catches the silent-downgrade
 	// case where ConfigureSecretKey("") makes encryptSecret a no-op.
 	sqlstore.AuditSecretsAtRest(db)
+	sqlstore.AuditUPNCanonicalization(db)
 	dbRepos := sqlstore.NewRepos(db)
 	if err := dbRepos.SyncTask.ResetRunning(ctx); err != nil {
 		return nil, fmt.Errorf("reset sync tasks: %w", err)
