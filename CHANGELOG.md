@@ -4,6 +4,142 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## v3.9.2-beta.5 — 2026-07-31
+
+`upn` 规范化的第二步（R2）：把**存量**登录名折叠成规范形式。
+
+### 新功能
+
+- **新增 `psp normalize-upn` 子命令** —— beta.4（R1）让所有**写入**规范化、并让 `GetByUPN` 先精确后规范化双探测，覆盖了除一个方向外的全部情形：**库里存成 `Alice@Corp.Com` 的行，用规范拼写 `alice@corp.com` 找不到**——因为两次探测都是拿输入去比存储列，谁都改不了存储本身。这个子命令是唯一能修它的东西。
+
+  - **默认 dry-run**，不加 `--apply` 一个字节都不写；
+  - **折叠后同名的账号组会被报告并跳过，绝不合并** —— 每行各自拥有 `sub_token`（一条真在用的订阅 URL）、`uuid`（代理凭据派生种子）、流量计数、分组和到期时间，选谁存活是有用户可见后果的业务决策，迁移无权替你猜。被跳过的组保持原样，两行都照常工作、各自按精确拼写可达；
+  - **被拒的组不会阻塞其余行**，同一次运行里无关的行照常折叠；
+  - **单事务 + compare-and-swap**（`WHERE id = ? AND upn = ?`）：折叠到一半的用户表比两端任何一端都糟；若某行在运行期间被并发改动，宁可中止也不覆盖别人的写入；
+  - **幂等**，重复运行是 no-op；
+  - 通过 `config.yaml` 定位数据库（与面板同一套解析），而不是要你手敲 DSN —— 这个工具改的是用户登录用的那一列，指错库的失败模式值得从设计上消除。
+
+  **刻意不做成开机迁移**：折叠可能撞唯一索引，而面板启动时中止、或静默改掉管理员的登录名，两种结果都不可接受。
+
+  用法（SQLite 请先停面板，任何后端都请先备份）：
+
+  ```bash
+  psp normalize-upn            # 预览
+  psp normalize-upn --apply    # 执行
+  ```
+
+  折叠后受影响的用户需改用小写拼写登录；**密码、订阅令牌、流量历史均不变**。
+
+### 修复
+
+- **启动期 `upn` 审计可能静默跳过** —— 它此前用 `db.Migrator().HasTable("users")` 做前置判断，而 [ownership_repo.go](internal/adapters/sqlstore/ownership_repo.go) 早就记录过：**GORM 的 `HasTable` 会吞掉所有错误并返回 false**。于是一次连接抖动就会让审计静默跳过一轮启动——而一个会自己跳过的诊断比没有诊断更糟，因为它的沉默会被读成"干净"。改为直接查询并解释错误（复用同包的 `isMissingTableErr`）；查询真失败时现在会明确打出"本次启动没有产生全清结论"，不再让失败与干净长得一样。
+
+### 改进
+
+- 审计的 `action` 文案现在直接指向 `psp normalize-upn --dry-run`。注意**被拒绝的冲突组里的行仍会计入"非规范"计数**——它们确实非规范，只是在你人工解决冲突之前无法折叠，所以两条告警会同时存在，属预期。
+
+> R3（摘掉 `GetByUPN` 的 legacy 精确探测）仍然推迟：要等存量实例普遍回报审计干净之后再做。
+
+## v3.9.2-beta.4 — 2026-07-31
+
+身份一致性收口：`upn` 的大小写/空白在三个数据库后端上统一语义（R1），外加复核过程中顺带发现的两个独立缺陷。
+
+### 修复
+
+- **禁用账号状态被无凭据探测泄露** —— `VerifyLocalPassword` 里 `AccountLoginAllowed` 跑在 `bcrypt.CompareHashAndPassword` **之前**，于是任何未认证的调用方发一个乱填的密码就能凭 403 把"账号存在且已禁用/待验证"与其他所有结果区分开；而失败计数只记 `invalid_credentials`，这类探测**连锁定都不会触发**。范围有限——启用账号与纯 SSO 账号返回的都是同样的 401，所以只能枚举出"已禁用"这个子集、枚举不出用户列表。现在把密码校验放到状态检查之前：**先证明你拥有这个账号，才轮到你知道它的状态**。调用方仍会拿到 `ErrForbidden`（处理器要靠它给出 403 的具体原因），只是必须先过密码这关。
+
+
+- **登录名（`upn`）的大小写/空白不一致，导致同一个人被拆成两个账号（R1）** —— `users.upn` 是不带 COLLATE 的 `varchar(255) UNIQUE`，而三个后端对"同名"的定义并不一致：MySQL 默认 utf8mb4 排序规则会折叠大小写（`utf8mb4_0900_ai_ci` 连重音一起折），**Postgres 与 SQLite 逐字节比较**。实测确认（真实 `EnsureSchema` + 真实仓储）：在 SQLite（**本项目默认后端**）与 Postgres 上，`alice@corp.com` 与 `Alice@corp.com` 会各自建行、`GetByUPN` 大小写敏感。Go 侧同时存在折叠不一致：注册路径折叠、建号/登录/找回只 trim、SSO 连 trim 都没有。
+
+  三个静默失败（都不越安全边界——分叉方向是**丢权限而非获得权限**，且实测排除了账户接管、会话串号、3X-UI 客户端冲突与重置令牌错投）：
+  - **SSO 首次登录漏掉预置账号**：管理员预置 `alice@corp.com`（含分组与配额），IdP 断言 `Alice@corp.com`（Entra 发目录原始大小写）→ 链接守卫未命中 → **分叉出 group=0/quota=0 的第二行**，而管理员那行闲置且无人知晓；在出厂默认（`AllowAutoCreate=false`）下则直接 `ErrSSONoAccount` 把用户挡在门外。
+  - **密码找回静默失效**：`RequestReset` 对未知账号"保持沉默"直接返回 200，用户看到"请查收邮件"但**永远收不到**。
+  - **空白字符绕过锁定/验证码计数**：guard 收到的是原始字段而账号查找会 trim，于是 `" admin"` 与 `"admin"` 命中同一账号却各记一套失败计数（`TrimSpace` 可剥离 8 类字符，变体无穷）。仅节流失效，2FA 与 `TokenVersion` 撤销照常生效。
+
+  修复采用 **Go 侧规范化**而非方言排序规则：三个方言做不出一致语义（`NOCASE` 只折 ASCII、MySQL 连重音一起折、`CITEXT` 依赖扩展），且改列排序规则要在 `EnsureSchema` 里写三套 DDL。新增 `domain.NormalizeUPN`（`ToLower(TrimSpace)`），**写入侧**（建号、SSO JIT 供给）一律规范化，于是那个原本就存在的普通唯一索引在三个方言上都开始强制"一名一身份"，顺带堵掉 `GetByUPN`→`Create` 之间的 TOCTOU 竞态。
+
+  **`GetByUPN` 改为双探测：先原始（trim）、后规范化，两次都是普通等值、都命中 `idx_users_upn`，绝不发 `LOWER(upn) = ?`**（那会让登录热路径丢索引，且在已有近重复对的库上返回两行、把确定性错误变成随机命中）。probe 1 是**防锁定的关键**：存量行并不规范（建号存管理员敲的原样、SSO 存断言原值），只折叠输入并单次探测会让它们**瞬间全部失联**。因此**今天能登录的字符串，改完仍然能登录**；查找路径一律传原始值，让 probe 1 有机会命中存量行。
+
+- **唯一冲突返回原始驱动错误，本该 409 的地方吐 500** —— `userRepo.Create` 未把唯一索引冲突映射为 `domain.ErrAlreadyExists`，整个 sqlstore 也没有这类映射。在索引确实会拒的 MySQL 上，管理员建号与 `/auth/register`（`registration.go` 明确写着应暴露 `ErrAlreadyExists`）都会返回**带驱动字符串的 500**。这条与大小写之争无关、独立成立，但必须同批修：写入折叠后唯一索引成了竞态的最后防线，它的失败必须可读。新增 `isUniqueViolationErr`（形状对齐既有的 `isMissingTableErr`，文案为**三方言实测**而非猜测）。
+
+### 新功能
+
+- **启动期 `upn` 规范化审计** —— 仿 `AuditSecretsAtRest`，**只告警、绝不拒启**。报告 ① `LOWER(upn)` 重复的行组（折叠会撞唯一索引，须由人决定保留哪个账号——谁的 sub token、谁的配额、谁的流量历史），② `upn != NormalizeUPN(upn)` 的非规范行（可安全折叠，且正是仍依赖 probe 1 的那批）。这是后续回填的**前置条件**：不知道自己库里有没有冲突，就无从判断回填是否安全。
+
+### 改进
+
+- **收紧用户 fake 的 `Create`** —— 此前**完全没有唯一性检查**，这正是现有测试套件一条都没抓到本问题的原因；现在按存储值逐字节拒重（镜像真实索引），否则所有规范化断言都会空洞通过。`GetByUPN` fake 同步镜像双探测。
+- **新增跨方言测试 T1–T4**（`internal/adapters/sqlstore`，**SQLite 与 Postgres 均已实跑**）：查找契约、重复建号在三方言上统一返回 `ErrAlreadyExists`、**防锁定回归守卫**（绕过 service 直接 raw-insert 一行混合大小写，断言仍可命中）、并发建号恰好一个胜出。另有 S1–S5 覆盖 service 层的写入折叠与 SSO 链接。
+- **break-glass CLI 跟进** —— `reset-admin-password` 先精确后规范化解析出真实存储值再操作（**不是**用一条谓词同时匹配两种拼写：在仍有冲突对的库上那会一次改掉两个账号的密码）；`dump-user` 同步。
+
+> **本次是 R1，刻意只做到这里。** R2（`psp normalize-upn --dry-run` 一次性回填，拒绝碰冲突组）与 R3（回填干净后摘掉 probe 1）留待后续版本——**不在 `EnsureSchema` 里自动折叠**：那可能撞唯一索引，而开机中止或静默改掉管理员登录名都不可接受。
+
+## v3.9.2-beta.3 — 2026-07-30
+
+### 安全
+
+- **升级两个存在已知漏洞的间接依赖** —— `quic-go` v0.59.0 → v0.59.1（[GHSA-vvgj-x9jq-8cj9](https://github.com/advisories/GHSA-vvgj-x9jq-8cj9)，HTTP/3 QPACK trailer 内存耗尽，中危）与 `google.golang.org/grpc` v1.80.0 → v1.82.1（[GHSA-hrxh-6v49-42gf](https://github.com/advisories/GHSA-hrxh-6v49-42gf)，xDS RBAC 与 HTTP/2 服务端，高危）。
+
+  **这两条在 PSP 中都不可达，本次属于加固而非事故响应**：quic-go 是 gin 引入 `quic-go/http3` 带进来的，而 PSP 走的是 `a.server.Serve(ln)`——纯 net/http + TCP listener，从不构造 `http3.Server`、不绑 UDP、不发 Alt-Svc；grpc 经 `lego/dns/gcloud` → `google.golang.org/api/option` 进来，是连 Google Cloud DNS 的 gRPC **客户端**，而漏洞讲的是 xDS RBAC（Envoy 服务网格，PSP 没有）和 HTTP/2 **服务端**（PSP 不跑 gRPC server）。修它的理由是成本为零，且「当前不可达」是个很脆的保证。两个都是 `// indirect`、PSP 代码零引用，升级后 `govulncheck ./...` 归零。
+
+  **注意 `govulncheck` 起初把这两条报为 "affected"，但调用链是误报**：`x509.CreateCertificate → transport.ClientStream.Close`、`time.LoadLocation → transport.NewHTTP2Client`、`io.ReadFull → http3.countingByteReader.Read` —— 都是接口分发的过近似（`io.ReadFull` 收 `io.Reader`，工具便把所有实现连了上去）。判定可达性时不要直接采信这类 trace。
+
+- **未处理：`react-router` 7.15.1 的 [GHSA-qwww-vcr4-c8h2](https://github.com/advisories/GHSA-qwww-vcr4-c8h2)（高危，RSC 模式 CSRF 绕过）** —— **对 PSP 不适用**：PSP 是纯客户端 Vite SPA，经 `go:embed` 当静态文件下发，没有 SSR、更没有 RSC 模式。而其修复版本 8.3.0 是**大版本升级**，为一个不适用的漏洞做路由库大版本迁移不划算，应作为单独的计划内迁移推进（3X-UI 3.6.0 本次已迁到 react-router 8，届时可参考）。
+
+## v3.9.2-beta.2 — 2026-07-30
+
+3X-UI 3.6.0 兼容复核（实机验证，PSP 适配器零改动）+ S-UI 已验证范围下探，外加复核过程中发现的两个真实缺陷修复。
+
+### 修复
+
+- **面板拒绝 finalmask 配置时被误判为临时故障、白白耗尽重试预算** —— `isPermanentPanelMsg` 只认 5 种措辞，不含 finalmask。于是 3X-UI 对 finalmask 的**确定性拒绝**（每次都失败、不可能自愈）会被当成网络抖动一路重试到上限，每次还写一条审计记录。现在补上 `finalmask` 匹配，一次覆盖两种文案：3.5.0 起的「Finalmask is not supported with REALITY security…」（[XTLS/Xray-core#6453](https://github.com/XTLS/Xray-core/issues/6453)）和 3.6.0 新增的「XMC finalmask requires at least one complete Minecraft profile…」。**注意前者是先前就存在的缺口**（自 3.5.0 起就在空转重试），并非 3.6.0 引入。
+- **REALITY 节点在面板升级到 3.6.0 后，配置同步会永久卡在 `pending`** —— 3.6.0 开机迁移 `InboundRealityFinalmaskTcpStrip` 会就地删掉存量 REALITY inbound 的 `finalmask.tcp`（该组合会让 Xray-core 首个连接就崩溃）。PSP 升级前抓的快照仍带这个键 → `InSync` 判定漂移 → reconcile 反向推送 → 被 `validateFinalMaskRealityCombo` 每次都拒 → 节点永久停在 `pending`，并反复产生 `inbound_config_push_failed`。现在 `SpecFromNode` 在推送前按**与上游完全一致的口径**剥掉它（仅 `security == "reality"`、仅 `tcp` 数组、仅非空时；`finalmask.udp`——PSP 真正渲染的 Hy2 salamander 混淆——绝不触碰，空数组不重写以免制造无谓漂移）。推送成功后 reconcile 的回抓会把快照收敛掉，**自愈、无需管理员干预**。仅影响 PSP 从管理员手里接管的 inbound；PSP 自建节点结构上不会产生这个组合。
+
+### 改进
+
+- **3X-UI 已测上限抬到 3.6.0（实机验证）** —— 上游 2026-07-30 发布 3.6.0（xray-core v26.7.28，103 commits / 432 文件）。手头没有现成面板，因此从源码现搭了一台 3.6.0 + Xray-core 26.7.28（commit `5ca6f4b`，正是 3.6.0 `go.mod` 锁的版本）做端到端复核：PSP 触及的端点全部仍在、形状未变，**PSP 侧零代码改动**。发布说明里三条看着吓人的改动经核实与 PSP 无关 —— ①「openapi.json 移到 session 鉴权后」确实成立（从公开路由挪进带 `checkAPIAuth` 的 `/panel/api` 组），但 PSP 从不拉它；②「node API tokens 改为只写」指的是 3X-UI 自家多节点凭据，不是 PSP 粘贴的面板 API token，**Bearer token 仍打通全部 `/panel/api`**（由上游自己新增的 `TestCheckAPIAuth_BearerSuccess` 加本次全部实机写操作共同证明，新增的 mTLS 分支纯附加）；③「升级时修复遗留 tgId」修的是历史**字符串** tgId，`model.Client.TgID` 仍是 `int64`，而 PSP 自 3.2.0 起就一直发整数。路由表 diff 只新增 1 条（`GET /clients/get/tgId/:tgId`，Telegram 查询）、删除 0 条。`docs/compat/v3.json` 三条 active entry 同步抬到 3.6.0，**运行时按需拉取、无需发版**，各实例下次刷新就把 3.6.0 面板从「未测试」改判为「已支持」。`min_xui` / `version.MinXUI` const 不变（3.6.0 没引入任何 PSP 开始依赖的新能力）。
+- **新增 3X-UI 全表面实机测试 `TestLive_XUISurface` / `TestLive_XUIRealityScan`** —— 补上了长期缺失的 S-UI `TestLive_SUISurface` 对应物：此前 3X-UI 只有 5 个窄口径 `TestLive_*`，且都要求面板预先有 ≥2 个 inbound。新测试**自带 scratch inbound（禁用态 + 高端口，从不真正 bind）并自清理**，可直接指向全新面板；覆盖 server 读路径、inbound 全生命周期、共享 client 全生命周期（多 inbound 增查改/挂载/卸载/批量挂卸/批量增删/按 email 删）、per-node 时代的 `AddClient`/`UpdateClient`，以及单独一条 `scanRealityTargets`（`MinXUI=3.4.2` 这个 floor 的由来）。同样由 `PSP_LIVE_XUI_URL` / `PSP_LIVE_XUI_TOKEN` 环境变量启用、默认跳过。
+- **S-UI 已验证范围从单点 1.5.4 扩展到 1.4.1 – 1.5.4（实机验证）** —— 1.5.4 已是 S-UI 当前最新版，因此 `max_tested_sui` 维持 1.5.4 不变；本次做的是**把下沿探出来**。用 `TestLive_SUISurface` 对**连续七个版本**（1.5.4 / 1.5.3 / 1.5.2 / 1.5.1 / 1.5.0 / 1.4.2 / 1.4.1）逐一实测，每个版本都从源码单独编译、配独立数据库与管理员、单独灌 token，**全部通过**完整表面（状态读取、inbound 增查改删、客户端全生命周期含挂载/摘除与删后查询）。1.5.4 这次是独立于 07-29 那轮的复现。**`min_sui` 仍然刻意留空**：1.4.0 及 1.3.x 在本机**编译不过**（sing-box 的 tailscale endpoint 引用了当前 sing-tun 已不导出的 `tun.DefaultNIC` / `tun.NewTCPForwarder` / `ping.ConnectGVisor`），这是本机依赖解析的产物、**不是 S-UI 接口契约的结论** —— 官方发布的 1.4.0 二进制未必不能用。凭一个编译错误去写死下限会让 1.4.0 面板被误判为「版本过低」，所以维持「未知」这个诚实答案，只在 notes 里记录 **1.4.1 是已测范围的下沿、而非已发布的 floor**。
+- **新增 3X-UI 3.6.0 升级前告示（`xui_advisories`）** —— `warning` / `affects_xray: true`。逐 commit 源码核发现两个**只在已升级面板上才会出现**（全新安装的实机 smoke 结构上看不到）的观察项，都只影响手工配置过 finalmask 的 inbound，PSP 自建节点结构上免疫：① 新开机迁移 `InboundRealityFinalmaskTcpStrip` 会就地删掉 REALITY inbound 的 `finalmask.tcp`，若该 inbound 是 PSP 导入接管的，会凭空制造配置漂移 → 反向推送被 `validateFinalMaskRealityCombo` 永久拒绝 → 节点「配置同步」卡在 `pending` 并反复产生审计记录（**订阅内容不受影响**，PSP 只读 `finalmask.udp`；在节点编辑器里重存一次即可消除）；② 新增的 `validateFinalMaskXmcProfiles` 硬拒旧格式 XMC 掩码（xray-core 26.7.28 把 `usernames` 换成了 `profiles`），面板会在生成运行配置时内存丢弃该掩码、照常启动，PSP 全代码库对 `xmc` 零引用。详见 [docs/3xui-compat.md](docs/3xui-compat.md)。
+- **修正 reconcile 里与代码相反的注释** —— 轴 A 反向推送的分支注释写着「while disabled (the 3.2.0 default…)」，但 `New()` 自 2026-05-28 的 P2 实机验证起就已经把 `axisAReversePush` 设为 `true`。注释描述的是早已作废的历史默认值，实际会误导读者判断默认行为（本次复核中就误导了一次）。同步把该分支的审计文案从「pending 3X-UI 3.2.0 verification」改为「disabled by kill-switch」。纯注释/文案，无行为变化。
+
+## v3.9.2-beta.1 — 2026-07-29
+
+### 修复
+
+- **修复 S-UI 面板下无法创建任何客户端** —— S-UI 在 `clients/new` 与 `clients/addbulk` 两条路径上都会无条件反序列化 `client.Links`，而 PSP 此前省略该字段，导致每次创建客户端都被面板以 `save: unexpected end of JSON input` 拒绝。现在会发送显式的空数组 `"links":[]`，由面板按挂载的 inbound 自行生成本地链接。该问题影响所有使用 S-UI 的部署，已在真实 S-UI 1.5.4 面板上验证修复前必现、修复后全流程通过。
+
+### 新功能
+
+- **新增 S-UI 版本兼容门** —— 与 3X-UI 同构的版本区间机制：兼容 JSON 新增 `sui_entries`（`min_sui` 可选、`max_tested_sui` 必填）与 `sui_advisories`，按 `[psp_min, psp_max]` 首个匹配生效；超出已验证范围的面板会在服务器页标记为未测试。与 3X-UI 有意不同的是**没有编译期 `MinSUI` 兜底常量**：`MinXUI` 是代码级事实，而 S-UI 适配器按能力协商，凭空写死常量等于宣称未经核实的兼容结论。本版本随附首条实机验证条目 `max_tested_sui: 1.5.4`（S-UI 1.5.4 / sing-box v1.13.14，由 `TestLive_SUISurface` 直接驱动生产适配器完成验证）；`min_sui` 留空，因此仅在明确发布下限时才会判定“版本过低”。
+
+### 改进
+
+- **新增 S-UI 实机验证测试** —— `TestLive_SUISurface` 为 3X-UI `TestLive_*` 的 S-UI 对应物，通过 `PSP_LIVE_SUI_URL` / `PSP_LIVE_SUI_TOKEN` 环境变量启用、默认跳过，覆盖状态读取、inbound 增删改查与客户端完整生命周期（含挂载/摘除与删除后查询）。它驱动的是适配器本身而非另写脚本，因此验证的就是生产代码路径。
+- **修复英文界面残留中文文案** —— 六个 `t()` 调用引用了两个语言文件中都不存在的 key，因而始终回退到硬编码的中文 `defaultValue`（例如“新增服务器”对话框中的“面板类型”标签）。已补齐 `admin:servers.field.panel_type`、`admin:nodes.create_dialog.{no_writable_servers,advanced_invalid_json,section_httpupgrade}`、`common:actions.retry`、`user:rules.readonly_hint` 的中英文案。
+
+## v3.9.1-beta.11 — 2026-07-29
+
+### 安全
+
+- **升级 React Router 修复开放重定向与拒绝服务漏洞** —— `react-router-dom` 升级到 7.18.2，修复 `<Link>` / `useNavigate` 中反斜杠导致的开放重定向（CVE-2025-68470 绕过）以及低效路由匹配引发的未认证拒绝服务。同时升级 `axios` 到 1.18.1、`vite` 到 8.1.5（连带 `postcss` 到 8.5.24，修复 source map 自动加载的路径穿越）。本项目为纯客户端 SPA（`createBrowserRouter` + `RouterProvider`，无 SSR / RSC），因此 npm audit 中剩余的 RSC 模式相关告警不适用；请勿执行 `npm audit fix --force`，它会把 `react-router-dom` 降级到 7.11.0 并重新引入上述漏洞。
+
+### 改进
+
+- **更新前后端依赖基线** —— 后端升级 `golang.org/x/crypto` 至 0.54.0、`coreos/go-oidc` 至 3.20.0、`gin` 至 1.12.0、`go-sql-driver/mysql` 至 1.10.0、`gorm` 至 1.31.2、`gorm.io/driver/mysql` 至 1.6.0；前端同步 `react` / `react-dom` 19.2.8、`i18next`、`react-i18next`、`zustand`、`vitest` 等补丁版本。前端更新均在既有 `^` 范围内，`package.json` 未变更。`crewjam/saml` 0.5.1 未纳入本次更新：它是 0.x minor 升级且现有测试未覆盖真实断言解析流程，需先在实际 IdP 环境验证。
+
+## v3.9.1-beta.10 — 2026-07-29
+
+### 新功能
+
+- **代理组成员、类型与顺序可视化编排** —— 规则集新增 `proxy_group_members` 与 `proxy_group_options`，可在「规则库 → 策略组成员」为每个代理组独立定义成员（具体节点 / 内置出口 / 其它代理组 / `remaining` / `region:XX` / `tag:name`）及顺序，并支持四种 Mihomo 类型：手动 `select`、自动测速 `url-test`、自动回退 `fallback`、负载均衡 `load-balance`（含 `url`/`interval`/`lazy`/`timeout`/`tolerance`/`strategy` 参数）。策略组整体顺序改为直接在列表中拖拽调整，Mihomo 与 sing-box 共用同一成员顺序；新增 `POST /api/admin/rules/inspect-proxy-groups` 在保存前识别代理组、预览展开结果并返回结构化校验（未知组、空成员、重复、循环引用、非法参数等）。缺少新字段的旧规则集无需迁移，继续按名称匹配生成 `select` 组。
+- **Xray Accept Proxy Protocol 与中转服务器状态** —— 节点 Inbound 的 Socket 选项新增 `Accept Proxy Protocol` 开关，写入 / 回读 `streamSettings.sockopt.acceptProxyProtocol`（3X-UI 支持，S-UI 明确返回校验错误而非静默忽略）。节点新增「显示中转服务器状态」，健康检查会探测启用的中转线路入口并在用户状态页以脱敏方式分行展示（仅节点名 / 线路名 / 粗粒度状态 / 检查时间，不暴露中转地址、端口或面板信息）；「隐藏直连」开启时自动强制展示中转状态。新增字段经 AutoMigrate 自动补齐，向后兼容。
+
+### 改进
+
+- **代理组顺序与自动类型的稳健性** —— 未列入 `proxy_group_order` 的代理组按规则内容首次出现顺序排在列表**末尾**，避免部分自定义顺序打乱既有订阅；自动类型（`url-test` / `fallback` / `load-balance`）的成员限定为真实出口，保存校验拦截并在渲染时剥离 `DIRECT` / `REJECT` 等内置出口，成员为空时安全降级为 `select`，避免生成把全部流量导向 `DIRECT` 的伪自动组。
+- **用户端中转状态提示** —— 状态汇总仅在存在离线入口时标红（未探测的「未知」不再误标红），并在含中转线路时提示"中转状态仅表示中转入口可达，不代表中转链路完全可用"。
+
 ## v3.9.1-beta.9 — 2026-07-17
 
 ### 新功能

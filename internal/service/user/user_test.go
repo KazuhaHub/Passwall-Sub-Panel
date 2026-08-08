@@ -3,6 +3,8 @@ package user
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -386,9 +388,20 @@ func (emptyOwnershipRepo) ListByUser(context.Context, int64) ([]*domain.XUIClien
 	return nil, nil
 }
 
+// Create models the real users.upn UNIQUE index. It compares the STORED value
+// byte-exactly — not folded — because that is what the index does on Postgres
+// and SQLite, and because normalizing the upn is the SERVICE's job: a fake that
+// folded here would accept a caller that forgot to normalize and make every
+// such test pass vacuously. That omission (no uniqueness check at all) is
+// precisely why the existing suite never caught the upn case-collision bug.
 func (r *memoryUserRepo) Create(ctx context.Context, u *domain.User) error {
 	if r.byID == nil {
 		r.byID = map[int64]*domain.User{}
+	}
+	for _, existing := range r.byID {
+		if existing.UPN == u.UPN {
+			return fmt.Errorf("%w: upn %q", domain.ErrAlreadyExists, u.UPN)
+		}
 	}
 	if u.ID == 0 {
 		u.ID = int64(len(r.byID) + 1)
@@ -536,10 +549,22 @@ func (r *memoryUserRepo) GetByID(ctx context.Context, id int64) (*domain.User, e
 	return nil, domain.ErrNotFound
 }
 
+// GetByUPN mirrors the real repo's two-probe lookup: exact (trimmed) first so
+// legacy non-canonical rows stay reachable, then normalized. Keeping the fake
+// faithful matters — a service test written against an exact-only fake would
+// assert a contract production no longer has.
 func (r *memoryUserRepo) GetByUPN(ctx context.Context, upn string) (*domain.User, error) {
+	trimmed := strings.TrimSpace(upn)
 	for _, u := range r.byID {
-		if u.UPN == upn {
+		if u.UPN == trimmed {
 			return cloneUser(u), nil
+		}
+	}
+	if normalized := domain.NormalizeUPN(upn); normalized != trimmed {
+		for _, u := range r.byID {
+			if u.UPN == normalized {
+				return cloneUser(u), nil
+			}
 		}
 	}
 	return nil, domain.ErrNotFound

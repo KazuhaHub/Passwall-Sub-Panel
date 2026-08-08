@@ -1007,6 +1007,9 @@
       "saved": "Inbound 配置已保存"
     },
     "create_dialog": {
+      "section_httpupgrade": "HTTPUpgrade",
+      "no_writable_servers": "当前没有支持创建 inbound 的可写面板，请先检查服务器配置与适配器能力。",
+      "advanced_invalid_json": "{{field}} 不是合法的 JSON",
       "title": "新增 inbound",
       "title_dynamic": "新增 inbound ({{protocol}})",
       "note": "简化版：仅 VLESS + Reality + TCP 一种最常用组合。其他协议（WS / gRPC / SS-2022 等）下版本补充。",
@@ -1705,6 +1708,7 @@
     "batch_upgrade_xray": "批量升级 Xray",
     "batch_upgrade_panel": "批量升级 3X-UI",
     "field": {
+      "panel_type": "面板类型",
       "name": "服务器名称",
       "url": "URL",
       "api_token": "API Token",

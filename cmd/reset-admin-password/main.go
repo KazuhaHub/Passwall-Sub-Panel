@@ -22,12 +22,15 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/glebarez/sqlite"
 	"golang.org/x/crypto/bcrypt"
 	mysqldriver "gorm.io/driver/mysql"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
+
+	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 )
 
 func main() {
@@ -43,6 +46,16 @@ func main() {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "open db: %v\n", err)
 		os.Exit(1)
+	}
+
+	// Writes canonicalize the upn (domain.NormalizeUPN), but rows created before
+	// that are stored as typed. Resolve the ACTUAL stored spelling once —
+	// exact first, then normalized — and use it verbatim below. Matching both
+	// spellings in a single predicate would be wrong for the UPDATE: on an
+	// install that still has a colliding pair it would reset two accounts'
+	// passwords at once.
+	if resolved, ok := resolveStoredUPN(g, *upn); ok {
+		*upn = resolved
 	}
 
 	if *verify {
@@ -108,4 +121,17 @@ func openDB(driver, path, dsn string) (*gorm.DB, error) {
 	default:
 		return nil, fmt.Errorf("unknown -driver %q (expected sqlite or mysql)", driver)
 	}
+}
+
+// resolveStoredUPN returns the upn exactly as stored, matching the repo's
+// exact-then-normalized probe order so this break-glass tool keeps working
+// against both legacy and canonicalized rows.
+func resolveStoredUPN(g *gorm.DB, upn string) (string, bool) {
+	for _, candidate := range []string{strings.TrimSpace(upn), domain.NormalizeUPN(upn)} {
+		var got string
+		if err := g.Raw(`SELECT upn FROM users WHERE upn = ?`, candidate).Scan(&got).Error; err == nil && got != "" {
+			return got, true
+		}
+	}
+	return "", false
 }

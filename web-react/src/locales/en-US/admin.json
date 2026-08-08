@@ -1029,6 +1029,9 @@
       "saved": "Inbound config saved"
     },
     "create_dialog": {
+      "section_httpupgrade": "HTTPUpgrade",
+      "no_writable_servers": "No writable panel currently supports creating inbounds. Check the server configuration and adapter capabilities first.",
+      "advanced_invalid_json": "{{field}} is not valid JSON",
       "title": "New inbound",
       "title_dynamic": "New inbound ({{protocol}})",
       "note": "Simplified: VLESS + Reality + TCP only. Other protocols coming next iteration.",
@@ -1705,6 +1708,7 @@
     "batch_upgrade_xray": "Upgrade Xray on selected",
     "batch_upgrade_panel": "Upgrade 3X-UI on selected",
     "field": {
+      "panel_type": "Panel type",
       "name": "Server name",
       "url": "URL",
       "api_token": "API Token",

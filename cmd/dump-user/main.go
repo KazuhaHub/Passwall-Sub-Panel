@@ -14,11 +14,14 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
+
+	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 )
 
 func main() {
@@ -51,8 +54,8 @@ func main() {
 	}
 	q := g.Raw(
 		`SELECT id, upn, enabled, auto_disabled_reason, disable_detail, updated_at FROM users WHERE `+
-			ifThenElse(*id != 0, "id = ?", "upn = ?"),
-		ifThenElseAny(*id != 0, *id, *upn),
+			ifThenElse(*id != 0, "id = ?", "upn IN (?)"),
+		ifThenElseAny(*id != 0, *id, []any{strings.TrimSpace(*upn), domain.NormalizeUPN(*upn)}),
 	)
 	if err := q.Scan(&row).Error; err != nil {
 		fmt.Fprintf(os.Stderr, "query: %v\n", err)

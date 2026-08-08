@@ -849,15 +849,17 @@ func (s *Service) reconcileInboundConfig(ctx context.Context, n *domain.Node, li
 		return
 	}
 
-	// Captured but drifted. AXIS-A REVERSE-PUSH GATE: while disabled (the 3.2.0
-	// default — see the axisAReversePush field), DEGRADE to adopting 3X-UI's
-	// drifted connection config into the snapshot instead of pushing PSP's over
-	// it. This writes NOTHING to the inbound (avoiding the unverified
-	// settings.clients re-injection on 3.2.0) while keeping render correct —
-	// subscriptions follow the live config. The trade-off: an operator's direct
-	// edit to a managed inbound is followed, not reverted. `live` is the same
-	// snapshot InSync just compared against, so capturing it converges to
-	// in-sync with no extra fetch.
+	// Captured but drifted. AXIS-A REVERSE-PUSH GATE: reverse-push is ENABLED by
+	// default (New() sets axisAReversePush=true — see the field doc; the old
+	// 3.2.0-era default of OFF is history, not current behavior), so the normal
+	// path is the push below. This branch is the kill-switch degradation: when
+	// the gate is off, ADOPT 3X-UI's drifted connection config into the snapshot
+	// instead of pushing PSP's over it. It writes NOTHING to the inbound
+	// (avoiding the settings.clients re-injection that was unverified on 3.2.0)
+	// while keeping render correct — subscriptions follow the live config. The
+	// trade-off: an operator's direct edit to a managed inbound is followed, not
+	// reverted. `live` is the same snapshot InSync just compared against, so
+	// capturing it converges to in-sync with no extra fetch.
 	if !s.axisAReversePush {
 		inboundcfg.Capture(n, live)
 		if err := s.nodes.UpdateInboundConfig(ctx, n); err != nil {
@@ -866,7 +868,7 @@ func (s *Service) reconcileInboundConfig(ctx context.Context, n *domain.Node, li
 			return
 		}
 		s.recordInboundConfigEvent(ctx, report, n, "inbound_config_drift_adopted",
-			fmt.Sprintf("node id=%d — axis-A reverse-push disabled pending 3X-UI 3.2.0 verification", n.ID), true)
+			fmt.Sprintf("node id=%d — axis-A reverse-push disabled by kill-switch", n.ID), true)
 		return
 	}
 

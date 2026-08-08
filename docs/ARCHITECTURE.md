@@ -370,6 +370,7 @@ func (s *Service) ensureInboundDeletable(ctx context.Context, panelID int64, inb
 | **认证/账户安全 (3, v3.7.0+)** | `webauthn_credentials` | 用户注册的 passkey/WebAuthn 凭据 |
 | | `auth_tokens` | 找回密码 / 邮箱验证 / 自助注册的一次性令牌与验证码 |
 | | `auth_events` | 登录/2FA 验证事件审计轨迹 |
+| | `sso_assertion_seen` | **安全属性**（理由见 [ADR 0023](adr/0023-saml-assertion-replay-protection.md)）：已消费的 SAML 断言 ID 集合，防止断言在有效期内被重放。crewjam/saml 只校验签名与 NotBefore/NotOnOrAfter，**不维护已消费 ID 集**，因此这层必须由 PSP 自己提供。仅有进程内缓存是不够的：重启会清空、多实例互不可见，两个重放窗口都得靠本表关闭。`assertion_id` 为主键，`SeenOrAdd` 依赖 `INSERT ... ON CONFLICT DO NOTHING` 做**单语句原子插入**（read-then-write 会让同一被窃断言的并发提交都判定为“未见过”）。过期行由每小时清理循环 `DeleteExpired` 回收，无保留期设置——窗口由断言自身决定。 |
 | **证书 (4, v3.6.4+)** | `acme_accounts` | ACME CA 账户资料 |
 | | `dns_credentials` | ACME DNS-01 挑战用的 DNS 服务商凭据 |
 | | `tls_certificates` | PSP 托管的 TLS 证书（状态：pending/valid/failed，自动续期） |
@@ -1267,6 +1268,8 @@ render 三条输出路径（mihomo/sing-box/URI list）统一从预取的 `psp_c
 ### 10.1 真实 API 清单（v3.9.0：`/panel/api/clients/*` 一等公民端点）
 
 Base path: `/panel/api` | 鉴权：`Authorization: Bearer <api-token>` 优先，session cookie 兜底。**PSP 3.9.1 最低要求 3X-UI 3.4.2**（共享 client 模型依赖 3.3.0，节点侧 REALITY 扫描接口再把 floor 提至 3.4.2），已测上限 3.5.0，见 [3xui-compat.md](3xui-compat.md)。
+
+> **S-UI 版本兼容门(`version.CheckSUI`)**：S-UI 侧有一套与 3X-UI 同构的版本区间机制(`compat/v3.json` 的 `sui_entries` / `sui_advisories`，字段为 `min_sui`(可选) / `max_tested_sui`(必填)，同样按 `[psp_min, psp_max]` 首个匹配生效)。与 3X-UI **有意不同的是没有编译期 `MinSUI` 兜底常量**：`MinXUI` 是代码级事实(PSP 调用的 `/clients/*` 接口在旧面板上根本不存在)，而 S-UI 适配器按**能力协商**而非版本门控，目前也**没有任何 S-UI 版本经过实机验证**，凭空写死常量等于宣称一个没人核实过的兼容性结论。因此 `sui_entries` 当前**刻意为空**：`ActiveMaxTestedSUI()` 为 `""`、`CheckSUI` 一律返回 `unknown`、服务器页对 S-UI 面板**不显示任何 compat 徽章**(与引入本机制前的行为完全一致)。实机验证某个 S-UI 版本后，往 `sui_entries` 追加一行即可对所有已部署的对应 PSP 版本生效，**无需发版**——与扩大 `max_tested_xui` 的机制相同。填写标准见 `v3.json` 的 `sui_entries_doc`：必须注明 LIVE-PANEL VERIFIED 还是 SOURCE-VERIFIED，不得仅凭 release notes 填写。
 
 **Inbound CRUD（`/inbounds/*`）：**
 

@@ -139,6 +139,7 @@
     "saved": "已修改"
   },
   "rules": {
+    "readonly_hint": "管理员已关闭用户自助编辑。当前仅供查看，如需修改请联系管理员。",
     "title": "我的个人规则",
     "placeholder": "- DOMAIN-SUFFIX,openai.com,🚀 节点选择\n- DOMAIN-KEYWORD,github,🚀 节点选择\n- IP-CIDR,10.0.0.0/8,🎯 全球直连\n- MATCH,🐟 漏网之鱼",
     "hint": "每行一条规则，使用 Clash / Mihomo 规则语法。默认模板中，个人规则优先于站点规则集。",

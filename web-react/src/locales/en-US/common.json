@@ -1,5 +1,6 @@
 {
   "actions": {
+    "retry": "Retry",
     "details": "Details",
     "export": "Export",
     "sync": "Bulk sync",

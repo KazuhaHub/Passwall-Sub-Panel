@@ -531,3 +531,24 @@ func (c *Config) DBDSN() string {
 	}
 	return filepath.Join(c.DataDir, "panel.db")
 }
+
+// DefaultPath is where the panel looks for its config when nothing overrides it.
+const DefaultPath = "config.yaml"
+
+// ResolvePath picks the config file: an explicit flag wins, then PSP_CONFIG,
+// then DefaultPath.
+//
+// It lives here rather than in cmd/panel because subcommands (`psp
+// normalize-upn`) must resolve the config to exactly the same file the running
+// panel uses — a tool that rewrites the login column has to be pointed at the
+// panel's own database, and a second copy of this precedence that drifted from
+// this one would silently aim it somewhere else.
+func ResolvePath(flagVal string) string {
+	if flagVal != "" {
+		return flagVal
+	}
+	if v := os.Getenv("PSP_CONFIG"); v != "" {
+		return v
+	}
+	return DefaultPath
+}

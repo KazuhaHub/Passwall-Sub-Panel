@@ -1340,6 +1340,33 @@ type EmailLogFilter struct {
 	Until  *time.Time
 }
 
+// SAMLReplayRepo is the durable half of SAML assertion replay protection.
+//
+// crewjam/saml validates an assertion's signature and its NotBefore /
+// NotOnOrAfter window but does NOT keep a consumed-ID set, so without this a
+// captured SAMLResponse can simply be submitted again while it is still inside
+// that window. The in-process cache (service/auth/saml_replay.go) closes that
+// for one running process; persisting the consumed IDs closes the two windows
+// it cannot:
+//   - a panel restart drops the in-memory set, re-opening replay for every
+//     assertion still inside its validity window;
+//   - a second panel instance (HA / load-balanced) has its own empty set, so an
+//     assertion consumed on instance A still replays on instance B.
+//
+// SeenOrAdd must be ATOMIC (insert-if-absent in one statement) — a
+// read-then-write would let two concurrent submissions of the same stolen
+// assertion both observe "not seen".
+type SAMLReplayRepo interface {
+	// SeenOrAdd records the assertion ID and reports whether it had already
+	// been consumed and is still within `expiresAt`. A row whose expiry has
+	// passed is NOT a replay (the assertion itself would be rejected as expired
+	// anyway) and is refreshed in place.
+	SeenOrAdd(ctx context.Context, assertionID string, expiresAt time.Time, now time.Time) (bool, error)
+	// DeleteExpired drops consumed IDs whose window has closed. Nothing depends
+	// on them afterwards, so this is pure housekeeping.
+	DeleteExpired(ctx context.Context, now time.Time) (int64, error)
+}
+
 // SAMLConfigRepo persists the panel's SAML/SSO configuration in the
 // relational DB so admin can edit it from the panel without shell access.
 type SAMLConfigRepo interface {
@@ -1381,6 +1408,7 @@ type Repos struct {
 	ScopedSettings ScopedSettings
 	Mail           MailRepo
 	SAMLConfig     SAMLConfigRepo
+	SAMLReplay     SAMLReplayRepo
 	OIDCConfig     OIDCConfigRepo
 
 	Certificate   CertificateRepo

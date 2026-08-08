@@ -20,6 +20,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/config"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/log"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/safego"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 )
 
 // SAMLService is a thin wrapper around crewjam/saml's ServiceProvider that
@@ -39,6 +40,56 @@ type SAMLService struct {
 	// NotOnOrAfter and the signature, but does not maintain a
 	// consumed-ID set.
 	replay assertionReplayCache
+	// replayStore is the DURABLE consumed-ID set. The in-memory cache above
+	// only protects one running process, so on its own it leaves two windows
+	// open: a restart forgets every consumed ID, and a second panel instance
+	// never learns what the first consumed. When this is non-nil it is the
+	// authority; the memory cache stays as the fallback for the nil case and
+	// for transient DB errors. May be nil (tests, DB-less construction).
+	replayStore ports.SAMLReplayRepo
+}
+
+// SetReplayStore installs the durable replay set. Wired in app startup once the
+// repositories exist; safe to leave unset, in which case replay protection
+// degrades to the process-local cache (pre-existing behaviour).
+func (s *SAMLService) SetReplayStore(r ports.SAMLReplayRepo) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.replayStore = r
+}
+
+// assertionAlreadyConsumed reports whether this assertion ID has already been
+// spent. It ALWAYS records into the in-memory cache (cheap, and it keeps
+// single-process protection intact no matter what the database does), then lets
+// the durable store override the answer when one is configured.
+//
+// On a store error the durable answer is unavailable, and the two options are
+// to fail the login or to fall back to the memory result. Falling back is
+// chosen deliberately: a transient DB blip would otherwise lock every SSO user
+// out, and the fallback is exactly the protection level that shipped before
+// this table existed — never weaker. The error is logged at ERROR so the
+// degradation is visible rather than silent.
+func (s *SAMLService) assertionAlreadyConsumed(ctx context.Context, id string, expiresAt, now time.Time) bool {
+	memorySeen := s.replay.SeenOrAdd(id, expiresAt, now)
+
+	s.mu.RLock()
+	store := s.replayStore
+	s.mu.RUnlock()
+	if store == nil {
+		return memorySeen
+	}
+
+	seen, err := store.SeenOrAdd(ctx, id, expiresAt, now)
+	if err != nil {
+		log.Error("saml: durable replay check failed, falling back to in-process cache "+
+			"(replay protection is process-local until the store recovers)",
+			"assertion_id", id, "err", err)
+		return memorySeen
+	}
+	// Either source claiming the ID is enough: the memory cache catches a
+	// same-process double submit even if the row was swept, and the store
+	// catches submits this process never saw.
+	return seen || memorySeen
 }
 
 // NewSAML constructs the service. If cfg.Enabled is false, the returned
@@ -490,7 +541,7 @@ func (s *SAMLService) ParseACSResponse(r *http.Request, possibleRequestIDs []str
 		// cache already expired it. Pad by MaxClockSkew to close that window.
 		exp = assertion.Conditions.NotOnOrAfter.Add(saml.MaxClockSkew)
 	}
-	if s.replay.SeenOrAdd(assertion.ID, exp, time.Now()) {
+	if s.assertionAlreadyConsumed(r.Context(), assertion.ID, exp, time.Now()) {
 		log.Warn("saml: assertion replay detected", "assertion_id", assertion.ID)
 		return nil, fmt.Errorf("SAML assertion already consumed")
 	}

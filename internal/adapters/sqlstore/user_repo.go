@@ -2,7 +2,9 @@ package sqlstore
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -16,6 +18,18 @@ type userRepo struct{ db *gorm.DB }
 func (r *userRepo) Create(ctx context.Context, u *domain.User) error {
 	row := userFromDomain(u)
 	if err := r.db.WithContext(ctx).Create(row).Error; err != nil {
+		// A unique-index violation is a DOMAIN condition, not a transport
+		// failure: callers classify with errors.Is and answer 409, and
+		// registration.go documents that /auth/register surfaces
+		// ErrAlreadyExists. Returning the raw driver error skipped those
+		// branches and leaked a driver string through a 500 instead.
+		//
+		// This matters more now that writes normalize the upn: the plain
+		// unique index is what settles the TOCTOU race between a guard's read
+		// and its insert, so its failure has to be readable.
+		if isUniqueViolationErr(err) {
+			return fmt.Errorf("%w: %v", domain.ErrAlreadyExists, err)
+		}
 		return err
 	}
 	u.ID = row.ID
@@ -418,12 +432,87 @@ func (r *userRepo) GetByID(ctx context.Context, id int64) (*domain.User, error) 
 	return row.toDomain(), nil
 }
 
+// GetByUPN resolves a login username, tolerating the case and whitespace
+// variants a human actually types.
+//
+// TWO PROBES, both plain equality on idx_users_upn — deliberately never
+// `LOWER(upn) = ?`, which would drop the index on the login hot path and, worse,
+// return two rows on an install that already carries a near-duplicate pair,
+// turning today's wrong-but-deterministic resolution into an arbitrary pick.
+//
+//	probe 1: the raw (trimmed) input  — resolves LEGACY non-canonical rows
+//	probe 2: NormalizeUPN(input)      — resolves canonical rows
+//
+// Probe 1 is what makes this change safe to ship. Rows written before
+// normalization are not canonical: CreateLocal stored exactly what an admin
+// typed, and EnsureSSO stored the IdP's assertion verbatim, untrimmed. Folding
+// the input and probing only once would make every one of those instantly
+// unreachable — a hard lockout of real users, possibly including an admin.
+// Probe 1 is therefore a COMPATIBILITY SHIM with a planned retirement: once
+// installs report clean (see the boot-time upn audit) and the operator has run
+// the one-shot backfill, it can go and this collapses to a single normalized
+// hit. Until then, anything that authenticates today still authenticates.
+//
+// Probe 2 only runs when probe 1 missed — i.e. on failed logins and enumeration
+// attempts — so the steady-state cost of a successful login is unchanged.
 func (r *userRepo) GetByUPN(ctx context.Context, upn string) (*domain.User, error) {
+	trimmed := strings.TrimSpace(upn)
+	row, err := r.getByUPNExact(ctx, trimmed)
+	if err == nil {
+		return row.toDomain(), nil
+	}
+	if !errors.Is(err, domain.ErrNotFound) {
+		// A transport / driver failure must not be silently retried as if it
+		// were a miss, or a flaky DB reads as "no such user".
+		return nil, err
+	}
+	normalized := domain.NormalizeUPN(upn)
+	if normalized == trimmed {
+		// Already canonical — probe 2 would be the identical query.
+		return nil, domain.ErrNotFound
+	}
+	row, err = r.getByUPNExact(ctx, normalized)
+	if err != nil {
+		return nil, err
+	}
+	return row.toDomain(), nil
+}
+
+func (r *userRepo) getByUPNExact(ctx context.Context, upn string) (*userRow, error) {
 	var row userRow
 	if err := r.db.WithContext(ctx).Where("upn = ?", upn).First(&row).Error; err != nil {
 		return nil, wrapNotFound(err)
 	}
-	return row.toDomain(), nil
+	return &row, nil
+}
+
+// isUniqueViolationErr reports whether err is a unique-constraint violation,
+// across all three dialects. Mirrors isMissingTableErr in ownership_repo.go —
+// same reason for string matching: the drivers do not expose a portable typed
+// error, and gorm.ErrDuplicatedKey only materializes when the connection is
+// opened with TranslateError, which this codebase deliberately does not enable
+// globally (it would change error semantics for every repo at once). The
+// gorm.ErrDuplicatedKey check is kept first anyway so that if translation is
+// ever switched on, this keeps working without an edit.
+//
+// The literals below are LIVE-OBSERVED, not guessed:
+//
+//	sqlite/glebarez: constraint failed: UNIQUE constraint failed: users.upn (2067)
+//	postgres:        ERROR: duplicate key value violates unique constraint "idx_users_upn" (SQLSTATE 23505)
+//	mysql:           Error 1062 (23000): Duplicate entry '...' for key 'users.idx_users_upn'
+func isUniqueViolationErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, gorm.ErrDuplicatedKey) {
+		return true
+	}
+	s := strings.ToLower(err.Error())
+	return strings.Contains(s, "unique constraint") || // sqlite / postgres
+		strings.Contains(s, "duplicate key") || // postgres
+		strings.Contains(s, "duplicate entry") || // mysql
+		strings.Contains(s, "sqlstate 23505") || // postgres, wording-independent
+		strings.Contains(s, "error 1062") // mysql, wording-independent
 }
 
 func (r *userRepo) GetBySSO(ctx context.Context, provider, subject string) (*domain.User, error) {

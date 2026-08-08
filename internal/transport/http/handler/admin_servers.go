@@ -905,10 +905,21 @@ func toServerDTO(p *domain.XUIPanel) serverDTO {
 	// Only compute compat fields when there's actually a probed version —
 	// "never probed" panels stay blank rather than displaying a meaningless
 	// "unknown" badge that admins would have to dismiss.
-	if domain.NormalizePanelKind(p.Kind) == domain.PanelKind3XUI && p.PanelVersion != "" {
+	switch {
+	case domain.NormalizePanelKind(p.Kind) == domain.PanelKind3XUI && p.PanelVersion != "":
 		status := version.CheckXUI(p.PanelVersion)
 		dto.CompatStatus = status.String()
 		dto.CompatMessage = version.CompatMessage(p.PanelVersion, status)
+	// S-UI reports compat only once a verified range has actually been published
+	// (sui_entries in the compat JSON). Without that, ActiveMaxTestedSUI is ""
+	// and every panel would render a permanent, un-actionable "unknown" badge —
+	// so stay blank, exactly as before S-UI gating existed. Publishing a row
+	// lights this up with no PSP release.
+	case domain.NormalizePanelKind(p.Kind) == domain.PanelKindSUI &&
+		p.PanelVersion != "" && version.ActiveMaxTestedSUI() != "":
+		status := version.CheckSUI(p.PanelVersion)
+		dto.CompatStatus = status.String()
+		dto.CompatMessage = version.CompatMessageSUI(p.PanelVersion, status)
 	}
 	// Derive the "update available" indicator from the PSP-wide latest
 	// tag rather than a per-panel column. Same snapshot drives every

@@ -74,6 +74,13 @@ type remoteCompatPayload struct {
 	// pre-upgrade confirm dialog. Top-level (not per-entry) because "what breaks
 	// when you upgrade TO 3X-UI X" is independent of which PSP version is asking.
 	Advisories map[string]XUIAdvisory `json:"xui_advisories,omitempty"`
+	// SUIEntries is the S-UI counterpart of Entries, matched the same
+	// first-match-wins way against this PSP version. OPTIONAL: a JSON without it
+	// (every file published before S-UI gating existed) is valid and simply
+	// leaves the S-UI gate unpublished — see compat_sui.go.
+	SUIEntries []remoteCompatSUIEntry `json:"sui_entries,omitempty"`
+	// SUIAdvisories mirrors Advisories for S-UI releases.
+	SUIAdvisories map[string]XUIAdvisory `json:"sui_advisories,omitempty"`
 }
 
 // remoteCompatPSPEntry covers one PSP version range. psp_min / psp_max
@@ -85,6 +92,18 @@ type remoteCompatPSPEntry struct {
 	PSPMax       string `json:"psp_max"`
 	MinXUI       string `json:"min_xui"`
 	MaxTestedXUI string `json:"max_tested_xui"`
+	Notes        string `json:"notes,omitempty"`
+}
+
+// remoteCompatSUIEntry is remoteCompatPSPEntry's S-UI twin. min_sui is optional
+// even when the row exists: a ceiling can be verified before anyone has
+// established how far back support actually reaches, and CheckSUI only reports
+// CompatTooOld against a floor that was explicitly published.
+type remoteCompatSUIEntry struct {
+	PSPMin       string `json:"psp_min"`
+	PSPMax       string `json:"psp_max"`
+	MinSUI       string `json:"min_sui,omitempty"`
+	MaxTestedSUI string `json:"max_tested_sui"`
 	Notes        string `json:"notes,omitempty"`
 }
 
@@ -268,8 +287,63 @@ func fetchAndApply(ctx context.Context, url string) error {
 	// Advisories are top-level (PSP-version-independent) and runtime-only; install
 	// the whole map, canonicalizing keys so "v3.5.0"/"3.5" both resolve on lookup.
 	SetActiveAdvisories(canonAdvisories(payload.Advisories))
+	applySUICompat(payload)
 	_ = saveCompatCache(entry.MaxTestedXUI)
 	return nil
+}
+
+// applySUICompat installs the S-UI bounds for this PSP version, or CLEARS them
+// when the payload publishes none / publishes an unusable row.
+//
+// Deliberately cannot fail the refresh: S-UI gating is additive and every JSON
+// published before it existed omits sui_entries entirely, so a missing or
+// malformed row must degrade to "no S-UI compat data" (CheckSUI → Unknown, UI
+// stays silent) rather than black out the 3X-UI range that was just installed.
+// Clearing on absence is what keeps a stale ceiling from surviving a rollback of
+// the JSON row.
+func applySUICompat(payload remoteCompatPayload) {
+	SetActiveSUIAdvisories(canonAdvisories(payload.SUIAdvisories))
+	entry, ok := lookupSUIForPSPVersion(payload, Version)
+	if !ok {
+		SetActiveMaxTestedSUI("")
+		SetActiveMinSUI("")
+		return
+	}
+	if _, ok := parseSemver(entry.MaxTestedSUI); !ok {
+		// A row exists but its ceiling is unusable — treat as unpublished
+		// rather than guessing, same "refuse to invent a default" stance.
+		SetActiveMaxTestedSUI("")
+		SetActiveMinSUI("")
+		return
+	}
+	min := entry.MinSUI
+	if min != "" {
+		if _, ok := parseSemver(min); !ok {
+			min = "" // unparseable floor → publish the ceiling alone
+		}
+	}
+	SetActiveMaxTestedSUI(entry.MaxTestedSUI)
+	SetActiveMinSUI(min)
+}
+
+// lookupSUIForPSPVersion is lookupForPSPVersion over sui_entries: same
+// document-order, first-match-wins, skip-malformed-rows semantics.
+func lookupSUIForPSPVersion(payload remoteCompatPayload, pspVersion string) (remoteCompatSUIEntry, bool) {
+	pv, ok := parseSemver(pspVersion)
+	if !ok {
+		return remoteCompatSUIEntry{}, false
+	}
+	for _, e := range payload.SUIEntries {
+		lo, lok := parseSemver(e.PSPMin)
+		hi, hok := parseSemver(e.PSPMax)
+		if !lok || !hok || cmpSemver(lo, hi) > 0 {
+			continue
+		}
+		if cmpSemver(pv, lo) >= 0 && cmpSemver(pv, hi) <= 0 {
+			return e, true
+		}
+	}
+	return remoteCompatSUIEntry{}, false
 }
 
 // lookupForPSPVersion iterates entries in document order and returns the

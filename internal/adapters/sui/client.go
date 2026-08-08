@@ -234,6 +234,14 @@ func modelFromSpec(spec ports.ClientSpec, inboundIDs []int) clientModel {
 		Enable: spec.Enable, Name: spec.Email, Config: configFromSpec(spec),
 		Inbounds: inboundIDs, Volume: spec.TotalGB, Expiry: expiry,
 		Desc: "Managed by Passwall Sub Panel", Group: "PSP",
+		// S-UI unmarshals client.Links UNCONDITIONALLY on save (clients/new and
+		// clients/addbulk both reach updateLinksWithFixedInbounds), so omitting
+		// the key leaves it nil and the panel fails the whole request with
+		// "save: unexpected end of JSON input" — every client create returns an
+		// opaque error. Send an explicit empty array; the panel then regenerates
+		// the local links itself from the attached inbounds. Verified against
+		// S-UI 1.5.4: omitted -> failure, "links":[] -> success.
+		Links: json.RawMessage("[]"),
 	}
 }
 
