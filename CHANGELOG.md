@@ -4,6 +4,18 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## 未发布
+
+### 改进
+
+- **S-UI 已测上限抬到 1.5.5（源码核 + 实机验证）** —— 上游 2026-08-09 发布 1.5.5。`v1.5.4..v1.5.5` 的 delta 只有 5 个提交 / 7 个文件，而决定性的事实是：**`api/` 与 `service/` 逐字节未变**（对两个 tag 做 diff 为空），PSP 调用的整个 `/apiv2` 表面没被碰。
+
+  唯一落在 PSP 相关层的改动是 `database/db.go` 给 S-UI **自己的** SQLite DSN 加了 `_txlock=immediate`，而这对 PSP 是**净利好**：它让「先读后写」的事务提前拿写锁，不再在 stats 任务活跃时因锁升级失败而报 `database is locked`（[#1209](https://github.com/alireza0/s-ui/pull/1209)）——PSP 经 `/apiv2` 的写入正是可能观测到这类偶发失败的一方。`util/genLink.go` 改的是 S-UI 自家 naive 分享链接生成，与 PSP 无关：PSP 只**写** `client.Links`（发显式 `[]` 以满足 S-UI 保存时的无条件反序列化），**从不读回**，订阅是 PSP 自己渲染的。其余是 sing-box v1.13.18 / Go 1.26.5 升级、grpc 升级、release workflow、前端子模块指针与版本文件。
+
+  实机在从源码编译的真实 1.5.5 面板上验证：`TestLive_SUISurface`（状态读取报 1.5.5、core running，inbound 全生命周期，客户端全生命周期含删后查询）与 `TestLive_SUIBulkSetEnabled`（批量禁用/启用均回读确认、**凭据在 `editbulk` 整行写之后存活**、同状态重跑不写、未知地址进 `skipped`）全部通过。`min_sui` 仍刻意留空，1.5.5 不改变那个判断的依据。
+
+  仅 `docs/compat/v3.json` 数据变更，**运行时按需拉取、无需发版**即对存量部署生效。
+
 ## v3.9.2-beta.5 — 2026-07-31
 
 `upn` 规范化的第二步（R2）：把**存量**登录名折叠成规范形式。
