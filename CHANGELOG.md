@@ -4,9 +4,25 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
-## 未发布
+## v3.9.2-beta.6 — 2026-08-10
+
+上游兼容跟进（S-UI 1.5.5）、前端路由大版本迁移，以及一件**经调查后决定不做**的性能优化。
 
 ### 改进
+
+- **前端路由迁移到 react-router v8** —— v8 移除了 `react-router-dom` 包：通用 API 改从 `react-router` 导入，DOM 相关的 `RouterProvider` 改从 `react-router/dom`。共 23 个文件，只动 import。
+
+  发布说明写着「需要 React 19.2.7+ / Node 22.22+ / Vite 7+」，看起来会连锁拖出 React 与 MUI 升级；**核实后发现三个前置条件本来就全部满足**（PSP 已在 React 19.2.7 / MUI 9.2.0 / Vite 8.1.4），所以这是一次受控的包重命名。v8 其余破坏性变更（`meta` / `useMatches` 的 `data` 移除、framework mode 相关）对 PSP 都不适用——PSP 只用 `createBrowserRouter` + `RouterProvider` + `errorElement` 加纯组件路由，没有 loader/action。
+
+  顺带关掉了 Dependabot 的 [GHSA-qwww-vcr4-c8h2](https://github.com/advisories/GHSA-qwww-vcr4-c8h2)，但如实说：**那条对 PSP 从来就不适用**（RSC 模式的 CSRF 绕过，而 PSP 是纯客户端 SPA、经 `go:embed` 当静态文件下发、无 SSR）。这是技术债迁移，不是安全修复。
+
+  验证没有停在构建绿上——路由迁移恰恰是构建验证不了的：把构建产物装进真实二进制、在真实浏览器里走了一遍，登录页正常且无控制台报错，未认证深链 `/admin/users` 被重定向回登录（`RequireAuth` + `Navigate`），`/login` / `/forgot-password` / `/register` 各自渲染，未知路径回落登录页。
+
+- **新增 3X-UI / S-UI 适配器方法 `BulkSetEnabled`** —— 一次请求批量启停客户端（3X-UI 走 `clients/{bulkEnable,bulkDisable}`；S-UI 没有该路由，改用它自己的批量写 `clients/editbulk`，为 N 次读 + 1 次写）。请求与响应结构在 3X-UI v3.4.2（PSP 的 floor）与 v3.6.0 上逐字节一致，**无需抬 `MinXUI`**。
+
+  两个面板均已实机验证：启停后回读确认、未知 email 进 `skipped` 而非被当作已生效、S-UI 侧额外断言**凭据在 `editbulk` 整行写之后存活**（写错会静默抹掉凭据，这种失败用 fake 测不出来）。
+
+  **但它没有接进流量轮询，而且不应该接** —— 详见下方「调查结论」。
 
 - **S-UI 已测上限抬到 1.5.5（源码核 + 实机验证）** —— 上游 2026-08-09 发布 1.5.5。`v1.5.4..v1.5.5` 的 delta 只有 5 个提交 / 7 个文件，而决定性的事实是：**`api/` 与 `service/` 逐字节未变**（对两个 tag 做 diff 为空），PSP 调用的整个 `/apiv2` 表面没被碰。
 
@@ -15,6 +31,16 @@ small improvement).
   实机在从源码编译的真实 1.5.5 面板上验证：`TestLive_SUISurface`（状态读取报 1.5.5、core running，inbound 全生命周期，客户端全生命周期含删后查询）与 `TestLive_SUIBulkSetEnabled`（批量禁用/启用均回读确认、**凭据在 `editbulk` 整行写之后存活**、同状态重跑不写、未知地址进 `skipped`）全部通过。`min_sui` 仍刻意留空，1.5.5 不改变那个判断的依据。
 
   仅 `docs/compat/v3.json` 数据变更，**运行时按需拉取、无需发版**即对存量部署生效。
+
+### 调查结论（无代码改动）
+
+- **放弃「用批量端点削掉月初配额恢复的重载尖峰」这个优化** —— 最初的模型是「批量启停 = 少 N 次 xray 重载」。把推送路径从头读到尾后，模型是错的：`pushClientConfigToAll` → `syncSharedLifecycle` 推的是**三样东西**（enable、到期时间、以及 `TrafficFloorBytes(limit, period_used)` 这个 Xray 侧兜底配额），而**周期滚动恢复时变的恰恰是 floor**——`period_used` 归零，下限从「已耗尽」回到全额。
+
+  `bulkEnable` 只翻 enable 位。接进恢复路径会让用户在面板上被重新启用、但 `totalGB` 仍是上个周期耗尽的值，**Xray 照样切断他们**——一个静默的配额故障，精准命中这个优化本想帮助的那批人，且发生在每月 1 号。`bulkAdjust` 也表达不了（`addDays`/`addBytes` 是加法而非赋值），现有批量端点里没有能干这件事的。
+
+  挂起方向倒是能批量，但挂起是跃迁保护的、跨用户零散发生，本来就没有尖峰——批量它等于优化错的那一半。结论已写在 `BulkSetEnabled` 的方法定义处，避免后来者照着最初那条乐观的提交说明去踩。该方法本身保留：在「只翻 enable、配额下限不变」的场景（如将来的管理端批量启停）是正确工具。
+
+- **前端两个测试文件在 Node 26 上本地失败，CI（Node 24）绿** —— 已定位但未修，且**与本次迁移无关**（在迁移前的代码上复跑同样失败）。根因链：Node 22+ 在 `globalThis` 上定义了 own property `localStorage`（惰性 getter，未带 `--localstorage-file` 时返回 `undefined` 并告警）；而 vitest 的 jsdom 环境中 `window` 与 `globalThis` 是同一个对象，填充全局时**跳过已存在的键**，于是 Node 那个失效 getter 存活，`window.localStorage` 与 `localStorage` 读到同一个 `undefined`。jsdom 29 单独构造（给真实 url）是正常提供 storage 的，`environmentOptions.jsdom.url` 也确认已生效、来源不再不透明——所以这是 **vitest 在新 Node 上的环境填充问题**，宜上报上游，不宜在本仓库塞 workaround。
 
 ## v3.9.2-beta.5 — 2026-07-31
 
