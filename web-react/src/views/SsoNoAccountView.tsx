@@ -1,6 +1,6 @@
 import { Box, Button, Typography, useTheme } from '@mui/material'
 import WarningAmberIcon from '@mui/icons-material/WarningAmber'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router'
 import { useTranslation } from 'react-i18next'
 
 export default function SsoNoAccountView() {

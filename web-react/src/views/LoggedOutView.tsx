@@ -1,7 +1,7 @@
 import { useEffect } from 'react'
 import { Box, Button, Typography, useTheme } from '@mui/material'
 import LogoutIcon from '@mui/icons-material/Logout'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import { useSiteStore } from '@/stores/site'
 

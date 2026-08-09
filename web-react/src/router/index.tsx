@@ -1,4 +1,4 @@
-import { createBrowserRouter, Navigate, useRouteError, isRouteErrorResponse } from 'react-router-dom'
+import { createBrowserRouter, Navigate, useRouteError, isRouteErrorResponse } from 'react-router'
 import { lazy } from 'react'
 import { ErrorFallback } from '@/components/ErrorBoundary'
 import RequireAuth from './RequireAuth'

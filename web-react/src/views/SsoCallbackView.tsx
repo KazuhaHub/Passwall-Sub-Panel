@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Box, CircularProgress, Typography, useTheme } from '@mui/material'
-import { useNavigate, useSearchParams } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import { useAuthStore } from '@/stores/auth'
 

@@ -1,5 +1,5 @@
 import { useCallback } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useSearchParams } from 'react-router'
 
 /**
  * Persist a tab selection in the URL query string so a refresh stays put.
