@@ -2,7 +2,7 @@
 
 import type { PropsWithChildren } from 'react'
 import { act, renderHook, waitFor } from '@testing-library/react'
-import { MemoryRouter, useLocation } from 'react-router-dom'
+import { MemoryRouter, useLocation } from 'react-router'
 import { describe, expect, it } from 'vitest'
 
 import { useTabParam } from './useTabParam'

@@ -19,7 +19,7 @@ import ScheduleIcon from '@mui/icons-material/Schedule'
 import SystemUpdateAltIcon from '@mui/icons-material/SystemUpdateAlt'
 import ShieldOutlinedIcon from '@mui/icons-material/ShieldOutlined'
 import CheckCircleIcon from '@mui/icons-material/CheckCircle'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router'
 import { useTranslation } from 'react-i18next'
 
 import { getAlerts, type Alert, type AlertSeverity, type AlertType } from '@/api/alerts'

@@ -1,4 +1,4 @@
-import { Navigate, Outlet, useLocation } from 'react-router-dom'
+import { Navigate, Outlet, useLocation } from 'react-router'
 import { selectIsAdmin, selectIsLoggedIn, selectIsStaff, useAuthStore } from '@/stores/auth'
 import { isAdminOnlyPath } from '@/router/home'
 

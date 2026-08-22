@@ -1,6 +1,6 @@
 import { Box, Card, CardContent, Typography } from '@mui/material'
 import ConstructionIcon from '@mui/icons-material/Construction'
-import { useLocation } from 'react-router-dom'
+import { useLocation } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import { useTheme } from '@mui/material/styles'
 

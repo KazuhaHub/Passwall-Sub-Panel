@@ -2,7 +2,7 @@
 
 import type { PropsWithChildren } from 'react'
 import { act, renderHook, waitFor } from '@testing-library/react'
-import { MemoryRouter, useNavigate, type NavigateFunction } from 'react-router-dom'
+import { MemoryRouter, useNavigate, type NavigateFunction } from 'react-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { usePaged, type PagedResponse } from './usePaged'

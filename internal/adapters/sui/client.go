@@ -512,3 +512,66 @@ var (
 	_ ports.PanelClient        = (*Client)(nil)
 	_ ports.CapabilityProvider = (*Client)(nil)
 )
+
+// BulkSetEnabled flips the enable flag for many clients, mirroring the 3X-UI
+// adapter's contract on a panel that has no bulkEnable/bulkDisable route.
+//
+// S-UI does have a genuine bulk WRITE (clients/editbulk), so this is still one
+// write rather than N — it just has to read each full row first. GET /clients
+// deliberately omits config and links while editbulk performs a FULL-ROW save,
+// so submitting the summary would erase the client's credentials; the same trap
+// mutateAttachments documents, and the reason for the per-client GET here.
+//
+// Emails that no longer exist are reported in Skipped rather than failing the
+// call, so a caller cannot mistake "no error" for "every client flipped".
+func (c *Client) BulkSetEnabled(ctx context.Context, emails []string, enable bool) (ports.BulkSetEnabledResult, error) {
+	var result ports.BulkSetEnabledResult
+	if len(emails) == 0 {
+		return result, nil
+	}
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
+	items, err := c.listClients(ctx)
+	if err != nil {
+		return result, err
+	}
+	byName := make(map[string]int, len(items))
+	for _, item := range items {
+		byName[item.Name] = item.ID
+	}
+
+	changed := make([]clientModel, 0, len(emails))
+	for _, email := range emails {
+		id, ok := byName[email]
+		if !ok {
+			result.Skipped = append(result.Skipped, ports.BulkSetEnabledSkip{Email: email, Reason: "not found"})
+			continue
+		}
+		var obj struct {
+			Clients []clientModel `json:"clients"`
+		}
+		if err := c.do(ctx, http.MethodGet, "clients?id="+strconv.Itoa(id), nil, &obj); err != nil {
+			return ports.BulkSetEnabledResult{}, err
+		}
+		if len(obj.Clients) == 0 {
+			result.Skipped = append(result.Skipped, ports.BulkSetEnabledSkip{Email: email, Reason: "not found"})
+			continue
+		}
+		item := obj.Clients[0]
+		if item.Enable == enable {
+			// Already in the wanted state — leaving it out of the write keeps
+			// the payload (and any core reload it triggers) proportional to
+			// what actually changes.
+			continue
+		}
+		item.Enable = enable
+		changed = append(changed, item)
+	}
+	if len(changed) > 0 {
+		if err := c.save(ctx, "clients", "editbulk", changed); err != nil {
+			return ports.BulkSetEnabledResult{}, err
+		}
+	}
+	result.Changed = len(changed)
+	return result, nil
+}

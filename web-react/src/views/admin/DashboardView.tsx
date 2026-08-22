@@ -15,7 +15,7 @@ import {
   Typography,
   useTheme,
 } from '@mui/material'
-import { Link as RouterLink } from 'react-router-dom'
+import { Link as RouterLink } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import GroupIcon from '@mui/icons-material/Group'
 import DnsIcon from '@mui/icons-material/Dns'

@@ -4,7 +4,7 @@ import {
 } from '@mui/material'
 import ShieldIcon from '@mui/icons-material/GppGood'
 import FingerprintIcon from '@mui/icons-material/Fingerprint'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router'
 import { useTranslation } from 'react-i18next'
 
 import { getMyProfile, type MeProfile } from '@/api/me'

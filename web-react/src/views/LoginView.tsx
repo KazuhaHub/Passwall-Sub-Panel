@@ -15,7 +15,7 @@ import LoginIcon from '@mui/icons-material/Login'
 import OpenInNewIcon from '@mui/icons-material/OpenInNew'
 import FingerprintIcon from '@mui/icons-material/Fingerprint'
 import MailOutlineIcon from '@mui/icons-material/MailOutlined'
-import { Link as RouterLink, useLocation, useNavigate } from 'react-router-dom'
+import { Link as RouterLink, useLocation, useNavigate } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import type { AxiosError } from 'axios'
 
