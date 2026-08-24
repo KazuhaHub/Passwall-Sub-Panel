@@ -1193,11 +1193,22 @@ function InboundFormFields({ form, setForm, showMetadata, servers, onGenKeys, on
   const fieldLabel = (text: string) => (
     <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant, mb: 0.25 }}>{text}</Typography>
   )
-  const switchControl = (label: string, checked: boolean, onChange: (c: boolean) => void) => (
+  const switchControl = (
+    label: string,
+    checked: boolean,
+    onChange: (c: boolean) => void,
+    dangerous = false,
+  ) => (
     <FormControlLabel
       label={label}
       control={<Switch size="small" checked={checked} onChange={(_, c) => onChange(c)} />}
-      sx={{ ml: 0, '& .MuiFormControlLabel-label': { ml: 1, fontSize: 13 } }}
+      sx={{
+        ml: 0,
+        '& .MuiFormControlLabel-label': {
+          ml: 1, fontSize: 13,
+          color: dangerous ? md.error : undefined,
+        },
+      }}
     />
   )
 
@@ -1645,9 +1656,10 @@ function InboundFormFields({ form, setForm, showMetadata, servers, onGenKeys, on
                   onChange={value => update('tls_cipher_suites', value)}
                   helperText={t('admin:nodes.create_dialog.tls_cipher_suites_hint')} />
                 <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
-                  {switchControl(t('admin:nodes.create_dialog.tls_allow_insecure', { defaultValue: 'Allow insecure (dev only)' }),
+                  {switchControl(t('admin:nodes.create_dialog.tls_allow_insecure', { defaultValue: '允许不安全连接（危险！）' }),
                     form.tls_allow_insecure,
-                    c => update('tls_allow_insecure', c))}
+                    c => update('tls_allow_insecure', c),
+                    true)}
                   {effectivePanelType === '3xui' && switchControl(t('admin:nodes.create_dialog.tls_reject_unknown_sni', { defaultValue: 'Reject unknown SNI' }),
                     form.tls_reject_unknown_sni,
                     c => update('tls_reject_unknown_sni', c))}
@@ -1863,8 +1875,10 @@ function InboundFormFields({ form, setForm, showMetadata, servers, onGenKeys, on
                 <MenuItem value="">—</MenuItem>
                 {FINGERPRINTS.map(value => <MenuItem key={value} value={value}>{value}</MenuItem>)}
               </TextField>
-              {switchControl('跳过证书验证', form.tls_allow_insecure,
-                checked => update('tls_allow_insecure', checked))}
+              {switchControl(t('admin:nodes.create_dialog.tls_skip_cert_verify', { defaultValue: '跳过证书验证（危险！）' }),
+                form.tls_allow_insecure,
+                checked => update('tls_allow_insecure', checked),
+                true)}
             </Box>
             {tlsCertFields()}
           </Box>

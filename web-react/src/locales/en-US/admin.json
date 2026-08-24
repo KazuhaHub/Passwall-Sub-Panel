@@ -1097,7 +1097,8 @@
       "tls_cipher_suites": "TLS cipher suites",
       "tls_cipher_suites_hint": "Optional; leave blank to let Xray choose. Options come from Go crypto/tls and exclude known-insecure suites.",
       "tls_fingerprint": "uTLS fingerprint",
-      "tls_allow_insecure": "Allow insecure (dev only)",
+      "tls_allow_insecure": "Allow insecure connections (Danger!)",
+      "tls_skip_cert_verify": "Skip certificate verification (Danger!)",
       "tls_reject_unknown_sni": "Reject unknown SNI",
       "tls_cert_mode": "Certificate source",
       "tls_cert_none": "None",
@@ -1724,7 +1725,7 @@
       "password": "Password",
       "remark": "Remark",
       "auth_method": "Auth method",
-      "insecure_https": "Allow insecure HTTPS (skip cert verification)",
+      "insecure_https": "Allow insecure HTTPS (Danger!)",
       "xray_version": "Target version",
       "xray_version_latest": "latest",
       "xray_version_loading": "Loading available versions…"

@@ -1075,7 +1075,8 @@
       "tls_cipher_suites": "TLS 加密套件",
       "tls_cipher_suites_hint": "可选；留空时由 Xray 自动选择。候选项来自 Go crypto/tls，并排除已知不安全套件。",
       "tls_fingerprint": "uTLS 指纹",
-      "tls_allow_insecure": "允许不安全连接（仅开发用）",
+      "tls_allow_insecure": "允许不安全连接（危险！）",
+      "tls_skip_cert_verify": "跳过证书验证（危险！）",
       "tls_reject_unknown_sni": "拒绝未知 SNI",
       "tls_cert_mode": "证书来源",
       "tls_cert_none": "无",
@@ -1724,7 +1725,7 @@
       "password": "密码",
       "remark": "备注",
       "auth_method": "认证方式",
-      "insecure_https": "允许不安全的 HTTPS（跳过证书校验）",
+      "insecure_https": "允许不安全的 HTTPS（危险！）",
       "xray_version": "目标版本",
       "xray_version_latest": "latest（最新版）",
       "xray_version_loading": "正在加载可用版本…"
