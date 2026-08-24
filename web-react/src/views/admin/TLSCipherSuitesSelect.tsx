@@ -46,16 +46,24 @@ export function TLSCipherSuitesSelect(props: {
       options={[...TLS_CIPHER_SUITES]}
       value={selected}
       sx={{
-        '& .MuiAutocomplete-inputRoot': { position: 'relative', alignItems: 'center' },
-        // The field is a read-only generated preview. Keep the actual input as
-        // a transparent focus/click target without letting it consume a blank
-        // flex row below a wrapped cipher-suite string.
-        '& .MuiAutocomplete-input': {
-          position: 'absolute', inset: 0,
-          width: '100% !important', height: '100% !important',
-          m: '0 !important', p: '0 !important', opacity: 0,
-          cursor: 'pointer',
+        '& .MuiAutocomplete-inputRoot': {
+          position: 'relative', alignItems: 'center', minHeight: 40,
         },
+        // The field is a read-only generated preview. Keep the actual input as
+        // a transparent focus/click target. With no selection it must remain
+        // in normal flow so MUI can measure the field height; once the preview
+        // exists it can overlay that content without adding a blank flex row.
+        '& .MuiAutocomplete-input': selected.length > 0
+          ? {
+              position: 'absolute', inset: 0,
+              width: '100% !important', height: '100% !important',
+              m: '0 !important', p: '0 !important', opacity: 0,
+              cursor: 'pointer',
+            }
+          : {
+              width: '100% !important', minWidth: '30px !important',
+              opacity: 0, cursor: 'pointer',
+            },
         '& .MuiAutocomplete-endAdornment': { zIndex: 1 },
       }}
       slotProps={{

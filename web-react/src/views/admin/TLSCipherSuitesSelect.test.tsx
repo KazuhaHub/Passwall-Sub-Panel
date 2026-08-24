@@ -15,6 +15,8 @@ describe('TLSCipherSuitesSelect', () => {
 
     const input = screen.getByRole('combobox', { name: label })
     expect(input.getAttribute('placeholder')).toBeNull()
+    expect(getComputedStyle(input).position).not.toBe('absolute')
+    expect(getComputedStyle(input.closest('.MuiAutocomplete-inputRoot')!).minHeight).toBe('40px')
     fireEvent.focus(input)
     expect(screen.getAllByRole('option')).toHaveLength(TLS_CIPHER_SUITES.length)
 
@@ -26,6 +28,7 @@ describe('TLSCipherSuitesSelect', () => {
     )
     const selectedInput = screen.getByRole('combobox', { name: label })
     expect(selectedInput.getAttribute('readonly')).not.toBeNull()
+    expect(getComputedStyle(selectedInput).position).toBe('absolute')
     expect(screen.getByTitle(`${suiteA}:${suiteB}`).textContent).toBe(`${suiteA}:${suiteB}`)
     fireEvent.focus(selectedInput)
     fireEvent.click(screen.getByLabelText(`Remove ${suiteA}`))
