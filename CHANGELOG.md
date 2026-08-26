@@ -4,6 +4,36 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## Unreleased
+
+上游兼容跟进：3X-UI 已测上限抬到 3.7.0（实机验证），S-UI 复核后确认无需变动。
+
+### 改进
+
+- **3X-UI 已测上限抬到 3.7.0（实机验证，PSP 代码零改动）** —— 上游 2026-08-24 发布 3.7.0，delta 是 134 commits / 835 文件 / +78310 −23261，比 3.6.0 那次还大。照旧从源码现搭了一台：Go 1.27.0 编译 v3.7.0 的 linux/amd64 二进制（只 stub `internal/web/dist`），配 3.7.0 `go.mod` 锁的 Xray-core commit `5ca6f4b` / v26.7.28。
+
+  **第一个结论就是好消息**：那个 commit 和 3.6.0 锁的是同一个 —— **3.7.0 不动 Xray-core**，没有 3.5.0 / 3.6.0 那种「升面板顺带重启 Xray」的连带风险。advisory 里 `affects_xray` 记 `false`。
+
+  面板报 `panelVersion 3.7.0 / xray 26.7.28 / state running`，用 PSP 自己的适配器跑了 8 个 `TestLive_*`（`XUISurface`、`XUIRealityScan`、`XUIBulkSetEnabled` + 原有 5 个共享 client 用例）**全部通过**。delta 大但没碰 PSP 的面：PSP 调用的 inbound / client / server controller handler 与 3.6.0 逐字节相同（只有 `clients/update/:email` 一个例外），PSP 解析的 6 个响应结构体也逐字节相同，model 层改动全是新增 JSON 字段。`min_xui` 仍是 3.4.2。
+
+  **两个运维注意事项，都实测过，都不需要改 PSP 代码**：
+
+  ① **API token 现在有 scope（admin / monitor / node-sync）和过期时间**，而且 `MatchToken` 对 scope 不合法的 token 是直接判认证失败、不是降权。**现有 token 不受影响** —— 启动时的 `migrateApiTokenScopeAndExpiry` 会把空 scope 补成 `admin`；这条是手工把 scope 列清空、重启、再拿原 token 请求验证过的，迁移确实补回了 `admin` 且 token 照常可用。会坏的是**新建的非 admin token**：`monitor` 连 `/inbounds/list` 都 403，`node-sync` 在 `/inbounds/list/slim`、`/inbounds/get/:id`、`/clients/get/:email`、`/clients/bulk*` 等 11 条 PSP 路由上 403（逐条实测）。PSP 的 `doJSON` 把 403 包成 `domain.ErrValidation`，即永久失败不重试 —— 所以给 PSP 用的 token 必须是 `admin` scope 且不设过期。
+
+  ② **3.7.0 新增的面板侧客户端字段会被 PSP 的更新清掉**：`clients/update/:email` 无条件写 `limit_hwid` / `reset_day` / `reset_max`，而 `normalizeClientTrafficReset` 会把缺省的 `trafficReset` 先变成字面量 `"never"`，绕过了 `applyClientRecordMerge` 的非空守卫。实测一个 `3 / 15 / 5 / monthly / 15` 的客户端经 PSP `UpdateClient` 一次后变成 `0 / 0 / 0 / never / 1`。这是 PSP 全量替换语义作用在 3.6.0 里不存在的字段上，不算回归，但值得写进升级弹窗：别在 3X-UI 界面上给 PSP 管理的客户端配 HWID 上限或面板侧续期周期。
+
+  两条都已写进 `xui_advisories["3.7.0"]`，无需发版即可下发到所有已部署的 PSP。
+
+  **一条对 PSP 纯粹是好事的上游改动**：节点快照合并以前「发现 client 没挂载就立刻硬删」，3.7.0 换成软标记 + 15 分钟宽限 + 重新挂上自动撤销，误判不再不可恢复。
+
+  **本次验证的局限如实记在 `docs/3xui-compat.md` 与 `v3.json` 里**：面板是全新安装，升级专属行为靠源码复核（唯一例外是上面那条 token 迁移，走了真实升级路径）；`/server/getPanelUpdateInfo` 与 `/server/getXrayVersion` 因验证机器没有到 `api.github.com` 的路由而拿不到真实数据，两条路由确认存在且有应答，其 handler / 结构体 / 服务函数体与已实机验证的 3.6.0 逐字节相同，故这两个端点在 3.7.0 记为 SOURCE-VERIFIED 而非 live。
+
+- **`TestLive_XUISurface` 新增 `PSP_LIVE_XUI_NO_GITHUB` 开关，用于在无外网的验证机上跑** —— `getPanelUpdateInfo` 与 `getXrayVersion` 的答案都来自**面板自己**去 `api.github.com` 抓取，所以在 egress 受限的验证机上，端点再健康也只会返回面板自身的失败信封。设了 `PSP_LIVE_XUI_NO_GITHUB=1` 才把这两处的失败降级成记 log；**默认行为不变**，仍然 fatal。没有无条件放宽是有意的：面板的失败信封和「响应结构真的变了」在这里长得一模一样，无条件容忍会把真回归一起吞掉，所以要求验证者显式声明。路由是否存在**两种情况下都断言**（`ErrXUIEndpointUnsupported` / 404 永远 fatal）。
+
+### 兼容性
+
+- **S-UI 已测上限维持 1.5.5，本次复核后确认无需变动** —— 上游最新 release 仍是 1.5.5（2026-08-09），正是 PSP 当前的上限。`main` 分支在 tag 之后有 10 个未发布提交，且都不在 `api/`（PSP 调用的 `/apiv2` 表面）里。PSP 的上限跟的是 release，所以这次 S-UI 没有任何改动。`min_sui` 仍刻意留空。
+
 ## v3.9.2-beta.6 — 2026-08-10
 
 上游兼容跟进（S-UI 1.5.5）、前端路由大版本迁移，以及一件**经调查后决定不做**的性能优化。

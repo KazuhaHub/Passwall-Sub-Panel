@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -34,6 +35,19 @@ func liveSurfaceClient(t *testing.T) (*Client, context.Context) {
 			Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}, //nolint:gosec // local smoke test only
 		},
 	}, context.Background()
+}
+
+// offlineGitHubEnv opts the two GitHub-backed server routes out of a hard
+// failure. getPanelUpdateInfo and getXrayVersion answer from a lookup the PANEL
+// performs against api.github.com, so on an air-gapped or egress-filtered
+// validation host they return 3X-UI's own failure envelope however healthy the
+// endpoint is. Tolerating that unconditionally would also swallow a real
+// response-shape regression, so it takes a deliberate declaration; route
+// presence is asserted either way.
+const offlineGitHubEnv = "PSP_LIVE_XUI_NO_GITHUB"
+
+func githubBackedRouteIsOffline() bool {
+	return os.Getenv(offlineGitHubEnv) != ""
 }
 
 // TestLive_XUISurface is the 3X-UI counterpart of TestLive_SUISurface: it drives
@@ -71,18 +85,37 @@ func TestLive_XUISurface(t *testing.T) {
 	}
 	t.Logf("panelVersion=%q xrayVersion=%q xrayState=%q", st.PanelVersion, st.XrayVersion, st.XrayState)
 
-	info, err := c.GetPanelUpdateInfo(ctx)
-	if err != nil {
-		t.Fatalf("GetPanelUpdateInfo: %v", err)
+	// getPanelUpdateInfo's answer comes from a GitHub release lookup the PANEL
+	// makes, so a panel with no route to api.github.com returns 3X-UI's own
+	// {success:false} envelope no matter how healthy the endpoint is. That is an
+	// environment fact, not a compat signal — but it is indistinguishable here
+	// from a real response-shape regression, so it is tolerated ONLY when the
+	// operator says the panel is offline (see githubBackedRouteIsOffline). The
+	// route must exist either way: a 404 is always fatal, which is precisely the
+	// regression this smoke exists to catch.
+	switch info, err := c.GetPanelUpdateInfo(ctx); {
+	case errors.Is(err, ports.ErrXUIEndpointUnsupported):
+		t.Fatalf("GetPanelUpdateInfo: route missing on this panel: %v", err)
+	case err != nil && githubBackedRouteIsOffline():
+		t.Logf("GetPanelUpdateInfo: route answered; the panel's own GitHub lookup failed as declared by %s: %v", offlineGitHubEnv, err)
+	case err != nil:
+		t.Fatalf("GetPanelUpdateInfo: %v (set %s=1 if this panel genuinely cannot reach api.github.com)", err, offlineGitHubEnv)
+	default:
+		t.Logf("updateInfo current=%q latest=%q available=%v", info.CurrentVersion, info.LatestVersion, info.UpdateAvailable)
 	}
-	t.Logf("updateInfo current=%q latest=%q available=%v", info.CurrentVersion, info.LatestVersion, info.UpdateAvailable)
 
 	// getXrayVersion returns the list of installable xray tags (fetched by the
 	// panel from GitHub), not the running version — an empty list is a valid
-	// answer on a panel with no upstream network, so only the call must succeed.
-	if vers, err := c.GetXrayVersionList(ctx); err != nil {
-		t.Fatalf("GetXrayVersionList: %v", err)
-	} else {
+	// answer on a panel with no upstream network. Same GitHub-backed caveat and
+	// same opt-in as getPanelUpdateInfo above.
+	switch vers, err := c.GetXrayVersionList(ctx); {
+	case errors.Is(err, ports.ErrXUIEndpointUnsupported):
+		t.Fatalf("GetXrayVersionList: route missing on this panel: %v", err)
+	case err != nil && githubBackedRouteIsOffline():
+		t.Logf("GetXrayVersionList: route answered; the panel's own GitHub fetch failed as declared by %s: %v", offlineGitHubEnv, err)
+	case err != nil:
+		t.Fatalf("GetXrayVersionList: %v (set %s=1 if this panel genuinely cannot reach api.github.com)", err, offlineGitHubEnv)
+	default:
 		t.Logf("xray version list: %d entries", len(vers))
 	}
 
