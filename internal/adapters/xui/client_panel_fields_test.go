@@ -117,3 +117,51 @@ func equalStrings(a, b []string) bool {
 	}
 	return true
 }
+
+// TestSpecToRaw_PinsInboundPanelFields is the regression guard for the
+// inbound-level clobber. Upstream's UpdateInbound is a full-struct Save, so a
+// key PSP omits is written as Go's zero — these four are pinned so that intent
+// is explicit rather than a side effect of that binding. See specToRaw.
+func TestSpecToRaw_PinsInboundPanelFields(t *testing.T) {
+	body := specToRaw(&ports.InboundSpec{
+		Remark: "n1", Enable: true, Port: 443, Protocol: "vless",
+	}, 7)
+
+	for key, want := range map[string]any{
+		"total":           0,
+		"trafficReset":    "never",
+		"trafficResetDay": 1,
+		"disableFlow":     false,
+	} {
+		if body[key] != want {
+			t.Errorf("specToRaw[%q] = %#v, want %#v", key, body[key], want)
+		}
+	}
+
+	// subSortIndex is preserved, not pinned: UpdateInbound echoes the operator's
+	// live value. It must never be baked into the shared body, or every inbound
+	// PSP creates or updates would assert a rank it does not own.
+	if _, present := body["subSortIndex"]; present {
+		t.Error("specToRaw must not carry subSortIndex — UpdateInbound echoes the live value instead")
+	}
+}
+
+// TestSpecToRaw_KeySetIsPinned catches a field silently joining or leaving the
+// inbound body. No pre-3.7.0 panel is reachable in CI, so the request shape has
+// to be held by assertion.
+func TestSpecToRaw_KeySetIsPinned(t *testing.T) {
+	body := specToRaw(&ports.InboundSpec{}, 1)
+	want := []string{
+		"allocate", "disableFlow", "enable", "expiryTime", "id", "listen",
+		"port", "protocol", "remark", "settings", "sniffing", "streamSettings",
+		"total", "trafficReset", "trafficResetDay",
+	}
+	got := make([]string, 0, len(body))
+	for k := range body {
+		got = append(got, k)
+	}
+	sort.Strings(got)
+	if !equalStrings(got, want) {
+		t.Fatalf("inbound body key set changed\n got: %v\nwant: %v", got, want)
+	}
+}

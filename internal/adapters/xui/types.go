@@ -18,6 +18,7 @@ type rawInbound struct {
 	Remark         string             `json:"remark"`
 	Enable         bool               `json:"enable"`
 	ExpiryTime     int64              `json:"expiryTime"`
+	SubSortIndex   int                `json:"subSortIndex"`
 	Listen         string             `json:"listen"`
 	Port           int                `json:"port"`
 	Protocol       string             `json:"protocol"`

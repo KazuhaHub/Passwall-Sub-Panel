@@ -44,6 +44,19 @@ small improvement).
 
   顺带更正上一条记录里的一句话：当时写的「清零会删掉设备注册记录」是**不准确的**——单条记录的 subId 下清零后 effective 为 0，裁剪早退，一行都不删；只有当同一 subId 下另有启用的记录带着更小的非零上限时才会真的删。
 
+- **inbound 层的同类清零：一个从 3.4.2 就在的老问题，逐字段定了策略** —— 上一条查客户端字段时顺手实测到，PSP 的 `UpdateInbound` 也在清 inbound 层字段：把一条 inbound 设成 `total=50GB / subSortIndex=7 / trafficReset=monthly / trafficResetDay=9`，PSP 更新一次后变成 `0 / 1 / "" / 1`。原因同构：上游的 `UpdateInbound` 是**整结构 Save**，`specToRaw` 没发的键绑成 Go 零值后被写回去。`total` / `subSortIndex` / `trafficReset` 在 **3.4.2**（PSP 兼容下界）就存在，所以这**不是 3.7.0 回归，是一直都在的老问题**。
+
+  和上一轮一样，逐字段判断「该保留还是该显式关掉」，结论是 **1 保留 / 4 显式钉死**：
+
+  - **`subSortIndex` → 保留**（唯一真正改变行为的一项）。它只影响**面板自己**订阅输出里的链接排序，碰不到 xray 配置、配额、enable，而 PSP 渲染自己的订阅。之前每条被 PSP 碰过的 inbound 都会塌缩到 rank 1，没碰过的保持原 rank 并排到后面，管理员通过专门路由设的排序就这么无声退化成 id 序。现在 `UpdateInbound` 把面板上的活值回显回去——**不额外花一次往返**，因为它本来就要读一次 inbound 来重新注入 `settings.clients[]`，顺路带上即可。
+  - **`total` → 钉 0，并且明知这是 fail-open 还是这么定。** 保留看起来才对（PSP 根本没有 inbound 级配额概念），但反过来更危险：PSP 从 3.4.2 起就在清零，所以被接管的 inbound 的 `up+down` 早就在无上限地累积、**大概率已经超过那个存着的 cap**。一旦开始保留，等于**给一个已经被突破的 cap 重新上膛**——`disableInvalidInbounds` 每个流量 tick 都跑，会把 `enable` 置 false 并把 handler 从运行中的核心里摘掉，该节点上所有 PSP 用户直接断线；而且**没有自愈**：`inboundcfg.InSync` 有意不比较 `Enable`，reconcile 永远不会发现、也永远不会推。一个写进文档的 fail-open，好过一次无法自愈的全节点黑掉。
+  - **`trafficReset` / `trafficResetDay` → 钉「关闭」**。周期重置任务不只清 inbound 计数器，还会对该 inbound 上**每一个**客户端调 `ResetAllClientTraffics`。PSP 自己的总量扛得住（`monotonicDelta` 把倒退当重置），但让面板按 PSP 看不见的时间表擦流量，是客户端层 `resetDay` 那个坑的 inbound 版。注意钉的是 `"never"` 而不是裸清零产生的空字符串——两者行为等价（任务只查那四个真实周期），但 `"never"` 是列默认值、也是文档值，且从 3.4.2 起就在校验器的枚举内。
+  - **`disableFlow` → 钉 false，但这个值并不「中性」，注释里如实写了。** false 正是让该 inbound 进入上游 Vision-flow 恢复路径的值，那些路径会用 PSP 从不读的 `flow_override` 去写 `settings.clients[].flow`。PSP 仍然接受它，因为 true 更糟：`clientWithInboundFlow` 会把 PSP 每次客户端写入里的 flow 抹掉，而 reconcile 的 flow 修复器只要 `desiredFlow != ""` 且存的 flow 不同就会重推——于是变成**永不收敛的死循环，每轮一次 xray reload**。flow 由 PSP 自己解析，PSP 管的 inbound 不能同时被面板覆写。
+
+  **实测（不是推理）**：3.7.0 上连推三次，`subSortIndex` 稳定保持 7、其余落在钉死值；**真的 3.6.0 面板**上更新同样被接受并生效，`subSortIndex` 保持 5、`trafficReset` 收下 `"never"`、3.6.0 没有的 `disableFlow` 被忽略。两台面板上整套 `TestLive_*` 全绿。另加两个测试锁住 inbound 请求体的键集合、以及「`subSortIndex` 不得出现在共享 body 里」。
+
+  顺带删掉了因此变成死代码的 `settingsWithCurrentClients`（`UpdateInbound` 现在内联它以复用同一次读）。
+
 ### 兼容性
 
 - **S-UI 已测上限维持 1.5.5，本次复核后确认无需变动** —— 上游最新 release 仍是 1.5.5（2026-08-09），正是 PSP 当前的上限。`main` 分支在 tag 之后有 10 个未发布提交，且都不在 `api/`（PSP 调用的 `/apiv2` 表面）里。PSP 的上限跟的是 release，所以这次 S-UI 没有任何改动。`min_sui` 仍刻意留空。

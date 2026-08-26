@@ -606,7 +606,11 @@ func (c *Client) AddInbound(ctx context.Context, spec ports.InboundSpec) (int, e
 func (c *Client) UpdateInbound(ctx context.Context, id int, spec ports.InboundSpec) error {
 	defer c.lockInbound(id)()
 	mergedSpec := spec
-	settings, err := c.settingsWithCurrentClients(ctx, id, spec.Settings)
+	live, err := c.GetInbound(ctx, id)
+	if err != nil {
+		return err
+	}
+	settings, err := replaceSettingsClients(blankToEmptyObject(spec.Settings), live.Settings)
 	if err != nil {
 		return err
 	}
@@ -615,6 +619,26 @@ func (c *Client) UpdateInbound(ctx context.Context, id int, spec ports.InboundSp
 	// clients-less SS inbound leaves /clients/add blank-200ing. See AddInbound.
 	mergedSpec.Settings = ensureClientsArray(settings)
 	body := specToRaw(&mergedSpec, id)
+	// Echo the operator's subscription sort order back. Upstream's update is a
+	// full-struct Save, so omitting this key writes Go's zero and upstream then
+	// normalises it to 1 — collapsing every PSP-touched inbound into rank 1 while
+	// untouched ones keep their rank, silently degrading an ordering the operator
+	// set through a dedicated route (POST /inbounds/:id/subSortIndex).
+	//
+	// This is the ONE field of the five that is preserved rather than pinned, and
+	// it earns that because it is inert to PSP: it orders links in the PANEL's own
+	// subscription output only, never reaching xray config, quota, or enable
+	// state, and PSP renders its own subscriptions. Echoing a value PSP never
+	// compares also cannot start a fight loop the way a preserved disableFlow
+	// would — there is no desired value to diverge from.
+	//
+	// Costs no extra round-trip: UpdateInbound already had to read the live
+	// inbound to re-inject settings.clients[]; this rides that same read. Guarded
+	// on > 0 so a panel that predates the field (it decodes as 0) is sent nothing
+	// and keeps the old omit-and-normalise behaviour.
+	if live.SubSortIndex > 0 {
+		body["subSortIndex"] = live.SubSortIndex
+	}
 	return c.doJSON(ctx, http.MethodPost, "/panel/api/inbounds/update/"+strconv.Itoa(id), body, nil)
 }
 
@@ -1107,6 +1131,7 @@ func rawToInbound(r *rawInbound) ports.Inbound {
 		Remark:         r.Remark,
 		Enable:         r.Enable,
 		ExpiryTime:     r.ExpiryTime,
+		SubSortIndex:   r.SubSortIndex,
 		Listen:         r.Listen,
 		Port:           r.Port,
 		Protocol:       r.Protocol,
@@ -1119,6 +1144,54 @@ func rawToInbound(r *rawInbound) ports.Inbound {
 	}
 }
 
+// specToRaw serialises an InboundSpec into the body 3X-UI's inbound add/update
+// expects.
+//
+// # WHY THE LAST FOUR KEYS ARE HERE EVEN THOUGH PSP HAS NO CONCEPT FOR THEM
+//
+// Upstream's UpdateInbound is a full-struct Save: it binds the request into a
+// model.Inbound and assigns EVERY field onto the stored row, so a key PSP omits
+// is not "left alone" — it binds to Go's zero value and overwrites whatever the
+// operator had. That is how PSP has been silently flattening these four since
+// the 3.4.2 compat floor. Sending them explicitly does not change the resulting
+// values (omission already produced them); it makes the intent legible and stops
+// it depending on upstream's zero-value binding, which is the same discipline as
+// panelRenewalOff on the client side.
+//
+// Each one is pinned rather than preserved, and each for its own reason:
+//
+//   - total (inbound-wide byte cap): pinned 0 = unlimited. This IS a fail-open —
+//     an operator's cap silently stops applying — and it is pinned anyway, on
+//     purpose. PSP has zeroed it since 3.4.2, so an adopted inbound's stored cap
+//     has been accumulating up+down uncapped, very likely already past it.
+//     Preserving would re-arm an already-breached cap: disableInvalidInbounds
+//     runs on every traffic tick, flips enable=false and rips the handler out of
+//     the live core, taking every PSP user on that node dark — with NO recovery,
+//     because inboundcfg.InSync deliberately does not compare Enable, so
+//     reconcile never notices and never pushes. A documented fail-open beats an
+//     un-healable blackout; the advisory tells operators not to rely on
+//     inbound-level caps for PSP-managed inbounds.
+//   - trafficReset / trafficResetDay: pinned to the "off" cycle. The periodic
+//     reset job zeroes the inbound's counters AND calls ResetAllClientTraffics
+//     for every client on it, PSP-managed or not. PSP's own totals survive that
+//     (monotonicDelta treats a backwards counter as a reset), but letting the
+//     panel wipe traffic on a schedule PSP cannot see is the inbound-level twin
+//     of the client-level resetDay hazard. Note "never", not the empty string
+//     the bare clobber writes: both are inert (the job only ever queries the
+//     four real periods) but "never" is the documented value and the column
+//     default, and it is in-enum for the validator from 3.4.2 up.
+//   - disableFlow: pinned false. This one is NOT a neutral value and should not
+//     be described as one — false is what enrols the inbound in upstream's
+//     Vision-flow restore paths, which write settings.clients[].flow from
+//     flow_override, a column PSP never reads. PSP takes that deliberately,
+//     because true is worse: clientWithInboundFlow strips flow from every PSP
+//     client write, so reconcile's flow healer (which fires whenever
+//     desiredFlow != "" and the stored flow differs) would re-push forever, one
+//     xray reload per cycle, and never converge. PSP resolves flow itself; an
+//     inbound it manages cannot also have the panel overriding it.
+//
+// subSortIndex is deliberately ABSENT here and echoed in UpdateInbound instead —
+// it is the one field of the five that is preserved rather than pinned.
 func specToRaw(s *ports.InboundSpec, id int) map[string]any {
 	return map[string]any{
 		"id":             id,
@@ -1132,6 +1205,11 @@ func specToRaw(s *ports.InboundSpec, id int) map[string]any {
 		"sniffing":       s.Sniffing,
 		"allocate":       s.Allocate,
 		"expiryTime":     s.ExpiryTime,
+
+		"total":           0,
+		"trafficReset":    "never",
+		"trafficResetDay": 1,
+		"disableFlow":     false,
 	}
 }
 
@@ -1178,19 +1256,16 @@ func rawTrafficsToPorts(raws []rawClientTraffic) []ports.ClientTraffic {
 	return out
 }
 
-func (c *Client) settingsWithCurrentClients(ctx context.Context, inboundID int, nextSettings string) (string, error) {
-	// Empty/blank input would previously short-circuit and reach 3X-UI as a
-	// literal empty settings — which can wipe every live client. Treat it as
-	// "{}" so replaceSettingsClients always runs and injects whatever clients
-	// 3X-UI currently has (PSP-managed + manually-created, both preserved).
-	if strings.TrimSpace(nextSettings) == "" {
-		nextSettings = "{}"
+// blankToEmptyObject guards the settings read-modify-write. Empty/blank input
+// would otherwise short-circuit and reach 3X-UI as a literal empty settings —
+// which can wipe every live client. Treating it as "{}" makes
+// replaceSettingsClients always run and inject whatever clients 3X-UI currently
+// has (PSP-managed + manually-created, both preserved).
+func blankToEmptyObject(settings string) string {
+	if strings.TrimSpace(settings) == "" {
+		return "{}"
 	}
-	inb, err := c.GetInbound(ctx, inboundID)
-	if err != nil {
-		return "", err
-	}
-	return replaceSettingsClients(nextSettings, inb.Settings)
+	return settings
 }
 
 func replaceSettingsClients(nextSettings, currentSettings string) (string, error) {

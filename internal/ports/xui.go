@@ -373,13 +373,19 @@ type BulkCreateResult struct {
 // Allocate retain the historical Xray-shaped JSON strings at the API boundary
 // so existing clients remain compatible; adapters translate as needed.
 type Inbound struct {
-	ID             int
-	Up             int64
-	Down           int64
-	Total          int64
-	Remark         string
-	Enable         bool
-	ExpiryTime     int64
+	ID         int
+	Up         int64
+	Down       int64
+	Total      int64
+	Remark     string
+	Enable     bool
+	ExpiryTime int64
+	// SubSortIndex orders this inbound's links in the PANEL's own subscription
+	// output (1-based, lower first, ties by id). PSP renders its own
+	// subscriptions and never consumes it — it is decoded solely so
+	// UpdateInbound can echo the operator's value back instead of flattening
+	// every PSP-touched inbound to rank 1. Zero on a panel that predates it.
+	SubSortIndex   int
 	Listen         string
 	Port           int
 	Protocol       string

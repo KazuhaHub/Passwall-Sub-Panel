@@ -127,6 +127,23 @@ GORM AutoMigrate 自动加列，符合"自用项目无迁移脚手架"约定（[
 > 全保真后，轴 A 下发**只有 `clients[]` 需 RMW 合并**（client 混合、单独管理），listen/remark/expiry 等 PSP 自有，无需从 live 读。
 > 未被表单结构化建模的字段：靠前端已有的 `raw_settings` / `raw_stream_settings` / `raw_sniffing` round-trip 原样保留（[NodesView.tsx](../web-react/src/views/admin/NodesView.tsx)），存进上述 text 列即可全量保真。
 
+### 4.1.1 面板侧字段：PSP 不建模、但每次下发都会写到的那些（2026-08-26）
+
+上游的 `UpdateInbound` 是**整结构 Save**：把请求 bind 进 `model.Inbound`，然后把**每个字段**都赋回存储行。所以 PSP 请求体里**没发的键 = 绑成 Go 零值 = 覆盖掉运维方的值**，不是「保持不变」。PSP 从 3.4.2 兼容下界起就一直在无声地清掉下面这几个。
+
+实测（真实 3.7.0 面板）：`total=50GB / subSortIndex=7 / trafficReset=monthly / trafficResetDay=9` 经 PSP 更新一次 → `0 / 1 / "" / 1`。
+
+| 字段 | 策略 | 理由 |
+|---|---|---|
+| `subSortIndex` | **保留**（回显活值） | 只排序**面板自己**订阅输出里的链接，碰不到 xray 配置 / 配额 / enable，而 PSP 渲染自己的订阅（§2.1 零回源）。运维方通过专门路由 `POST /inbounds/:id/subSortIndex` 设置，属运维方状态。回显不额外花往返——`UpdateInbound` 本来就要读一次 inbound 去重注入 `clients[]`。回显一个 PSP 从不比较的值也不可能起环（没有 desired 值可背离）。 |
+| `total` | **钉 0（已知 fail-open）** | PSP 无 inbound 级配额概念，直觉上该保留——但 PSP 从 3.4.2 起就在清零，被接管 inbound 的 `up+down` 早已无上限累积、**大概率已超过存着的 cap**。开始保留 = 给已被突破的 cap 重新上膛：`disableInvalidInbounds` 每个流量 tick 跑一次，会 `enable=false` 并把 handler 从运行中的核心摘掉，该节点上所有 PSP 用户断线；且**无自愈**——`InSync` 有意不比较 `Enable`，reconcile 永远不会发现。写进文档的 fail-open 好过无法自愈的全节点黑掉。 |
+| `trafficReset` / `trafficResetDay` | **钉 `"never"` / `1`** | 周期重置任务不只清 inbound 计数器，还对该 inbound 上**每个**客户端调 `ResetAllClientTraffics`。PSP 总量扛得住（`monotonicDelta` 把倒退当重置），但让面板按 PSP 看不见的时间表擦流量，是 client 级 `resetDay` 那个坑的 inbound 版。钉 `"never"` 而非裸清零的空串：行为等价，但它是列默认值、文档值，且从 3.4.2 起就在校验枚举内。 |
+| `disableFlow` | **钉 `false`（并非中性值）** | false 正是让该 inbound 进入上游 Vision-flow 恢复路径的值，那些路径用 PSP 从不读的 `flow_override` 写 `settings.clients[].flow`。仍然接受，因为 true 更糟：`clientWithInboundFlow` 会抹掉 PSP 每次客户端写入的 flow，而 reconcile 的 flow 修复器只要 `desiredFlow != ""` 且存的不同就重推 → **永不收敛，每轮一次 xray reload**。flow 由 PSP 解析，PSP 管的 inbound 不能同时被面板覆写。 |
+
+> `shareAddrStrategy` / `shareAddr` **不在此列**：上游已经自带守卫——请求里 `shareAddrStrategy` 为空时会把旧值拷回去，所以 PSP 的省略本来就是安全的。
+>
+> 实现见 `specToRaw`（四个钉死键）与 `UpdateInbound`（`subSortIndex` 回显），两处都有逐字段注释。回归测试锁住 inbound 请求体的键集合，并断言 `subSortIndex` **不得**出现在共享 body 里。
+
 ### 4.2 为什么 `clients[]` 不入存档
 
 clients 始终由 ownership 表（`user_xui_clients`）+ sync 管理；inbound 的 client 列表是混合的（PSP 的 + 手动的）。存档只存"配置模板（去 clients）"，下发时用 3X-UI 活客户端合并，既避免存档里的 clients 走样，也天然满足"保留手动 client"。render 也根本不需要 clients[]。
