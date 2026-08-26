@@ -4,9 +4,9 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
-## Unreleased
+## v3.9.2-beta.7 — 2026-08-26
 
-上游兼容跟进：3X-UI 已测上限抬到 3.7.0（实机验证），S-UI 复核后确认无需变动。
+上游兼容跟进（3X-UI 3.7.0 实机验证，S-UI 复核后无需变动），外加四处「PSP 无声清掉运维方设置」的修复——其中三处早于 3.7.0 就存在，是这次逐字段核查时才浮出来的。
 
 ### 改进
 
