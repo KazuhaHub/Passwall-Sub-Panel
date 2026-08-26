@@ -144,6 +144,18 @@ GORM AutoMigrate 自动加列，符合"自用项目无迁移脚手架"约定（[
 >
 > 实现见 `specToRaw`（四个钉死键）与 `UpdateInbound`（`subSortIndex` 回显），两处都有逐字段注释。回归测试锁住 inbound 请求体的键集合，并断言 `subSortIndex` **不得**出现在共享 body 里。
 
+### 4.1.2 客户端侧的运维方标签：`comment` / `group`（2026-08-26）
+
+同构问题的客户端版。两者都是运维方在 3X-UI 界面上打的标签，PSP 没有对应概念也从不设置，但 `UpdateClient` 是整体替换、上游又无条件写这两列，于是 PSP 每次推送都抹掉它们——对活跃用户是**每个流量轮询周期一次**（缩小的配额下限会持续让 no-op skip 失效）。
+
+`group` 的机制多绕一层：上游的 `applyClientRecordMerge` **确实**守着它（`if incoming.Group != ""`），但 `ClientService.Update` 随后用一条独立语句无条件写 `group_name`，且是有意的——3X-UI 的客户端编辑器总会原样回传该字段，「清空分组」必须能生效。PSP 不回传，所以那个守卫从来保护不到 PSP。**只读代码会得出「group 已被守住」的错误结论，是实测推翻的。**
+
+**修法与边界**：`sharedclient.SyncLifecycle` 本来就在 `UpdateClient` 前做一次 `GetClient`（供 no-op skip 用），把两个标签搭这趟车带回去，零额外往返。`ClientSpec.Comment` / `.Group` 为空时**不发这两个键**——空值意味着「本调用方没读过」，而不是「运维方清空了」；发空串等于换个写法照样抹掉，省略则让读不到的路径保持原状。因此没有任何路径因此变差。
+
+旧的 per-node ownership 路径没有可搭车的读，**不为它单独加一次往返**：该路径已是迁移残留（`MIGRATION(v3→v4)`），会随 ownership 模型一起删除。
+
+> 对照：`limitHwid` **不**这样处理。它同样被清零，但回显一个先前读到的值会武装 `trimClientHwidsForSubID`、**永久删除设备注册行**；清零反而让那个裁剪在 `limit <= 0` 处短路。标签类字段没有这种副作用，所以可以带；带 `limitHwid` 不行。详见 `buildClientUpdateJSON` 的注释。
+
 ### 4.2 为什么 `clients[]` 不入存档
 
 clients 始终由 ownership 表（`user_xui_clients`）+ sync 管理；inbound 的 client 列表是混合的（PSP 的 + 手动的）。存档只存"配置模板（去 clients）"，下发时用 3X-UI 活客户端合并，既避免存档里的 clients 走样，也天然满足"保留手动 client"。render 也根本不需要 clients[]。

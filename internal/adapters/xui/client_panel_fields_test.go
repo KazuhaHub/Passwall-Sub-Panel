@@ -165,3 +165,46 @@ func TestSpecToRaw_KeySetIsPinned(t *testing.T) {
 		t.Fatalf("inbound body key set changed\n got: %v\nwant: %v", got, want)
 	}
 }
+
+// TestBuildClientJSON_OperatorLabelsOnlyWhenKnown pins the asymmetry that makes the
+// comment carry safe to add incrementally: a caller that did not read the
+// client omits the key and keeps the pre-existing blanking, while one that did
+// hands the operator's note back. Sending "" instead of omitting would be the
+// same blanking with extra steps, so absence is the contract, not a detail.
+func TestBuildClientJSON_OperatorLabelsOnlyWhenKnown(t *testing.T) {
+	base := ports.ClientSpec{Email: "u@example.test", Enable: true}
+
+	for _, shape := range []struct {
+		name string
+		fn   func(ports.ClientSpec) (json.RawMessage, error)
+	}{
+		{"create", buildClientJSON},
+		{"update", buildClientUpdateJSON},
+	} {
+		raw, err := shape.fn(base)
+		if err != nil {
+			t.Fatalf("%s unknown-comment: %v", shape.name, err)
+		}
+		unknown := decodeClientBody(t, raw)
+		for _, key := range []string{"comment", "group"} {
+			if _, present := unknown[key]; present {
+				t.Errorf("%s: %q key must be absent when the caller does not know it", shape.name, key)
+			}
+		}
+
+		withNote := base
+		withNote.Comment = "vip — paid through march"
+		withNote.Group = "gold"
+		raw, err = shape.fn(withNote)
+		if err != nil {
+			t.Fatalf("%s known-comment: %v", shape.name, err)
+		}
+		body := decodeClientBody(t, raw)
+		if got := body["comment"]; got != "vip — paid through march" {
+			t.Errorf("%s: comment = %#v, want the operator's note", shape.name, got)
+		}
+		if got := body["group"]; got != "gold" {
+			t.Errorf("%s: group = %#v, want the operator's label", shape.name, got)
+		}
+	}
+}

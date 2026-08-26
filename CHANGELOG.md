@@ -44,6 +44,20 @@ small improvement).
 
   顺带更正上一条记录里的一句话：当时写的「清零会删掉设备注册记录」是**不准确的**——单条记录的 subId 下清零后 effective 为 0，裁剪早退，一行都不删；只有当同一 subId 下另有启用的记录带着更小的非零上限时才会真的删。
 
+- **reconcile 新增 `flow_render_divergence` 上报：一个所有检查都报绿、但链接和服务端不一致的静默故障** —— render 直接用 `n.Flow` 出链接，而 reconcile 的 `resolveFlow` 在 `Node.Flow` 为空时**回落到面板存的 flow**。那个回落是有意的（防止修复器把运维方在 3X-UI 里设的 flow 清掉），但它让两边在**恰好一种状态**下分叉：`Node.Flow` 为空 **且** 面板存着非空 flow。此时 `desiredFlow == found.Flow`，上面每一项检查都通过、reconcile 报告全绿，而发给用户的链接**不带 flow，服务端却期待它**。
+
+  3.7.0 让这个状态**不需要任何人动 PSP 就能到达**：它的 Vision-flow 恢复路径会用 `flow_override`（PSP 从不读的一列）去写 `settings.clients[].flow`。
+
+  只上报、不修复，而且**故意放在所有修复检查之后**——`checkOne` 命中第一个 issue 就返回，放最后才不会挡住真正可修的漂移。不修是因为：修要么意味着清掉运维方的 flow（正是 `resolveFlow` 注释里记着的那个回归），要么意味着写进 `Node.Flow`——那是「PSP 该渲染什么」的运维决策，不是 reconcile 该悄悄替人拿的主意。判据抽成了 `flowRenderDiverges`，就放在 `resolveFlow` 旁边：两者是同一个回落的正反面，改一边不改另一边会让这个探测器无声失效，测试用同一张矩阵把这点钉住。
+
+- **客户端的 `comment` / `group` 不再被更新清掉** —— 两个都是运维方在 3X-UI 里打的标签，PSP 没有对应概念、也从不设置，但因为 `UpdateClient` 是整体替换、上游又无条件写这两列，PSP 每次推送都会把它们抹掉——对活跃用户就是**每个流量轮询周期一次**（缩小的配额下限会一直让 no-op skip 失效）。
+
+  `group` 的机制更绕一层，值得记一笔：上游的 merge **确实**有守卫（`if incoming.Group != ""`），但 `ClientService.Update` 之后又用一条独立语句无条件写 `group_name`，而且是**有意为之**——因为 3X-UI 的客户端编辑器总会把该字段原样回传，「清空分组」必须能生效。PSP 不回传，于是那个守卫从来就保护不到 PSP 的更新。**我一开始读代码判断成「group 已被上游守住、不需要修」，是实测把这个结论推翻的。**
+
+  修法零成本：`sharedclient.SyncLifecycle` **本来就**在 `UpdateClient` 前做一次 `GetClient`（用于 no-op skip），顺手把两个标签带回去即可。`ClientSpec` 里为空时**不发这两个键**——空值表示「本调用方没读过」，不是「运维方清空了」；发空串等于换个写法照样抹掉，省略则让读不到的路径维持现状。所以没有任何路径因此变差。旧的 per-node 路径没有可搭车的读，也随 ownership 模型一起在 v3→v4 里删除，不为它单独加一次往返。
+
+  **实测**：3.7.0 上 `comment='VIP — 3 月续费' / group='gold'` 连推五次（每次缩小配额下限以绕过 skip）后两者完好；真实 3.6.0 面板上同样生效（这两个字段在 3.6.0 也存在，所以是真的保住了，不只是被忽略）。两台面板整套 `TestLive_*` 全绿。
+
 - **inbound 层的同类清零：一个从 3.4.2 就在的老问题，逐字段定了策略** —— 上一条查客户端字段时顺手实测到，PSP 的 `UpdateInbound` 也在清 inbound 层字段：把一条 inbound 设成 `total=50GB / subSortIndex=7 / trafficReset=monthly / trafficResetDay=9`，PSP 更新一次后变成 `0 / 1 / "" / 1`。原因同构：上游的 `UpdateInbound` 是**整结构 Save**，`specToRaw` 没发的键绑成 Go 零值后被写回去。`total` / `subSortIndex` / `trafficReset` 在 **3.4.2**（PSP 兼容下界）就存在，所以这**不是 3.7.0 回归，是一直都在的老问题**。
 
   和上一轮一样，逐字段判断「该保留还是该显式关掉」，结论是 **1 保留 / 4 显式钉死**：

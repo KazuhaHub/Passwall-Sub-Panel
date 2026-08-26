@@ -1046,6 +1046,8 @@ func (c *Client) GetClient(ctx context.Context, email string) (*ports.ClientDeta
 			Auth       string `json:"auth"`
 			ExpiryTime int64  `json:"expiryTime"`
 			TotalGB    int64  `json:"totalGB"`
+			Comment    string `json:"comment"`
+			Group      string `json:"group"`
 		} `json:"client"`
 		InboundIDs []int `json:"inboundIds"`
 	}
@@ -1069,6 +1071,8 @@ func (c *Client) GetClient(ctx context.Context, email string) (*ports.ClientDeta
 		Auth:       out.Client.Auth,
 		ExpiryTime: out.Client.ExpiryTime,
 		TotalGB:    out.Client.TotalGB,
+		Comment:    out.Client.Comment,
+		Group:      out.Client.Group,
 		InboundIDs: out.InboundIDs,
 	}, nil
 }
@@ -1412,6 +1416,18 @@ func clientObj(s ports.ClientSpec) map[string]any {
 	}
 	if s.Auth != "" {
 		obj["auth"] = s.Auth
+	}
+	// Only when known. Upstream writes clients.comment unconditionally, so
+	// omitting the key blanks the operator's note — but PSP never authors one,
+	// so an empty value here means "this caller did not read it", not "the
+	// operator cleared it". Sending "" in that case would be the same blanking
+	// with extra steps; omitting keeps the existing behaviour on paths that
+	// cannot know, while the paths that can (they already GetClient) preserve it.
+	if s.Comment != "" {
+		obj["comment"] = s.Comment
+	}
+	if s.Group != "" {
+		obj["group"] = s.Group
 	}
 	return obj
 }
