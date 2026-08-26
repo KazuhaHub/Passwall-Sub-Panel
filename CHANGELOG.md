@@ -30,6 +30,20 @@ small improvement).
 
 - **`TestLive_XUISurface` 新增 `PSP_LIVE_XUI_NO_GITHUB` 开关，用于在无外网的验证机上跑** —— `getPanelUpdateInfo` 与 `getXrayVersion` 的答案都来自**面板自己**去 `api.github.com` 抓取，所以在 egress 受限的验证机上，端点再健康也只会返回面板自身的失败信封。设了 `PSP_LIVE_XUI_NO_GITHUB=1` 才把这两处的失败降级成记 log；**默认行为不变**，仍然 fatal。没有无条件放宽是有意的：面板的失败信封和「响应结构真的变了」在这里长得一模一样，无条件容忍会把真回归一起吞掉，所以要求验证者显式声明。路由是否存在**两种情况下都断言**（`ErrXUIEndpointUnsupported` / 404 永远 fatal）。
 
+### 修复
+
+- **3X-UI 3.7.0：客户端更新显式关闭面板侧续期周期，而不是靠巧合拿到那组值** —— 上一条记录了 PSP 的 `UpdateClient` 会把 3.7.0 新增的 `resetDay` / `resetMax` / `trafficReset` / `trafficResetDay` 清成 `0/0/never/1`。深挖之后结论反转了一半：**把这四个字段「保留」下来才是 bug**。面板的 `autoRenewClients` 会挑出 `reset_day > 0` 且已过期的客户端，**改写 expiryTime 并把 up/down 清零** —— 到期与流量账本归 PSP，让面板在背后跑续期等于给 PSP 停掉的用户续命、或抹掉计费用的计数器。
+
+  所以修的方向是**把「关闭」变成显式声明**：新增 `buildClientUpdateJSON`，在更新路径上显式发送 `resetDay=0 / resetMax=0 / trafficReset=never / trafficResetDay=1`。之前 PSP 是靠巧合拿到这组值的（不发键 → 绑零值 → 面板 normalizer 兜底），而上游**本来就写了保留守卫** `if incoming.TrafficReset != ""`，只是被 `normalizeClientTrafficReset` 跑在前面架空了；那个守卫的注释说它是为了防止过期节点快照抹掉已存周期，也就是上游**意图是保留**。哪天上游把 normalizer 挪到 merge 之后，PSP 的沉默就会从「关闭」变成「保持现状」，PSP 管理的客户端会无声无息被拉进面板侧自动续期。显式发送让意图不依赖那个顺序。
+
+  **只加在更新路径**：创建路径本来就落在同一组值上，在那里加键只会让不分块发送的 `/clients/bulkCreate` 请求体白白撑大（面板 10 MiB 上限）。
+
+  **对旧面板无副作用，且是实测的**：这些字段在 3.4.2 / 3.5.0 / 3.6.0 的 `model.Client` 上不存在，gin 用 `encoding/json` 默认忽略未知键。没有停在读源码推断——**从源码编译了一台真的 3.6.0 面板**，用 PSP 自己的适配器打过去，更新正常生效；`TestLive_*` 在 3.6.0 与 3.7.0 上都是全绿。3.7.0 上另外跑了「五次连续推送 + 递减 TotalGB」（模拟流量地板每个轮次都变、绕过 no-op skip 的真实失败模式），四个字段稳定停在 `0/0/never/1`。
+
+- **`limitHwid` 有意不修 —— 回写比清零更危险** —— 它是这批字段里唯一真实的损失：清成 0 等于**关掉设备绑定校验**（`EnforceHwidForSubID` 在上限 ≤ 0 时一律放行），而设备列表照常显示，界面上看不出校验已失效。但对抗性复核推翻了「读回来再写回去」这个直觉方案：`setClientLimitHwidByEmail` 会把重算的 sub 级 `MAX(limit_hwid)` 喂给 `trimClientHwidsForSubID`，后者按 `last_seen` 倒序保留 limit 条、**其余 DELETE**。只要在读与写之间管理员调高了上限、或用户多注册了一台设备，回写旧值就会**永久删除**设备注册记录；而清零会让裁剪停在 `limit <= 0` 的早退上，一行不删，丢的只是一个可重填的标量。把可恢复的标量损失换成不可恢复的行删除是亏的，所以保持不发。根因在上游：缺省键被绑成 0 而非「未设置」（`*int` 即可）。测试里显式断言 `limitHwid` **不在**请求体中，防止后来者好心把它加回去。
+
+  顺带更正上一条记录里的一句话：当时写的「清零会删掉设备注册记录」是**不准确的**——单条记录的 subId 下清零后 effective 为 0，裁剪早退，一行都不删；只有当同一 subId 下另有启用的记录带着更小的非零上限时才会真的删。
+
 ### 兼容性
 
 - **S-UI 已测上限维持 1.5.5，本次复核后确认无需变动** —— 上游最新 release 仍是 1.5.5（2026-08-09），正是 PSP 当前的上限。`main` 分支在 tag 之后有 10 个未发布提交，且都不在 `api/`（PSP 调用的 `/apiv2` 表面）里。PSP 的上限跟的是 release，所以这次 S-UI 没有任何改动。`min_sui` 仍刻意留空。

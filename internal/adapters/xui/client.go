@@ -795,16 +795,17 @@ func bulkErrStrings(raws []json.RawMessage) []string {
 // UpdateClient replaces the client keyed by spec.Email (POST
 // /clients/update/{email}); the change propagates to every inbound the client
 // is attached to. Full-replace semantics: the body carries the complete
-// intended state (buildClientJSON emits every field PSP manages), so fields
-// PSP does not set — e.g. a manually-added comment — are not preserved. A
-// UUID rotation is simply a new "id" under the unchanged email, so the old
+// intended state (buildClientUpdateJSON emits every field PSP manages, plus the
+// panel-side renewal fields pinned off), so fields PSP does not set — e.g. a
+// manually-added comment, or 3.7.0's limitHwid — are not preserved. A UUID
+// rotation is simply a new "id" under the unchanged email, so the old
 // clientUUID argument is unused.
 func (c *Client) UpdateClient(ctx context.Context, inboundID int, clientUUID string, spec ports.ClientSpec) error {
 	if spec.Email == "" {
 		return fmt.Errorf("UpdateClient: spec.Email is required (3.2.0 keys clients by email)")
 	}
 	defer c.lockClientEmail(spec.Email)()
-	clientJSON, err := buildClientJSON(spec)
+	clientJSON, err := buildClientUpdateJSON(spec)
 	if err != nil {
 		return err
 	}
@@ -1228,7 +1229,83 @@ func clientsFromSettings(settingsJSON string) ([]map[string]any, error) {
 // buildClientJSON serializes a ClientSpec into the JSON shape 3X-UI expects.
 // Field names follow the 3X-UI XrayClient model:
 // id / email / enable / flow / limitIp / totalGB / expiryTime / subId / tgId / reset / password / method
+//
+// This is the CREATE shape (/clients/add, /clients/bulkCreate). The update shape
+// adds four more keys — see buildClientUpdateJSON.
 func buildClientJSON(s ports.ClientSpec) (json.RawMessage, error) {
+	return json.Marshal(clientObj(s))
+}
+
+// panelRenewalOff is the panel-side auto-renew configuration PSP asserts for
+// every client it manages: no calendar renewal day, no renewal cap, and no
+// client-level traffic-reset cycle.
+//
+// WHY PSP PINS THESE RATHER THAN OMITTING THEM (3X-UI 3.7.0+)
+//
+// 3.7.0 added resetDay / resetMax / trafficReset / trafficResetDay to the client
+// model. They are not cosmetic: a client with reset_day > 0 and an expiry in the
+// past is selected by the panel's own autoRenewClients sweep, which REWRITES
+// expiryTime and ZEROES the up/down traffic counters
+// (internal/web/service/inbound_traffic.go in the upstream tree). PSP owns expiry
+// and traffic accounting for the clients it manages, so a panel-side renewal
+// cycle running behind its back would fight it — silently extending a user PSP
+// expired, or wiping the counters PSP bills from.
+//
+// Today PSP would get the values below by ACCIDENT: it omits the keys, they bind
+// to Go zero values, and the panel's normalizeClientTrafficReset() rewrites
+// ""->"never" and 0->1. But upstream already HAS a preserve guard for two of
+// them (`if incoming.TrafficReset != ""` in applyClientRecordMerge) that is
+// defeated only by that normalizer running FIRST. That ordering is an upstream
+// implementation detail, and the guard's own comment says it exists to stop a
+// stale node snapshot erasing a stored cycle — i.e. upstream intends to preserve
+// here. If a future release moves the normalizer after the merge, PSP's silence
+// would start meaning "keep whatever is stored" instead of "off", and
+// PSP-managed clients would quietly enrol in panel-side auto-renew.
+//
+// Sending the neutral values explicitly makes PSP's intent independent of that
+// ordering. On 3X-UI 3.4.2 .. 3.6.0 these keys do not exist on the client model
+// and gin binds with encoding/json's default (unknown keys ignored — the panel
+// never enables DisallowUnknownFields), so they are inert on every panel down to
+// PSP's compat floor.
+//
+// NOT INCLUDED HERE: limitHwid. See buildClientUpdateJSON.
+var panelRenewalOff = map[string]any{
+	"resetDay":        0,
+	"resetMax":        0,
+	"trafficReset":    "never",
+	"trafficResetDay": 1,
+}
+
+// buildClientUpdateJSON is buildClientJSON plus the panel-side renewal fields
+// pinned to their neutral values. Only the UPDATE path needs them: on create the
+// panel already lands on exactly these values for a body that omits them, so
+// adding the keys there would inflate every /clients/bulkCreate body (which PSP
+// sends unchunked, against the panel's 10 MiB request cap) to assert a state the
+// create already produces.
+//
+// DELIBERATELY ABSENT: limitHwid, the per-client device-binding cap 3.7.0 added.
+// PSP's update resets it to 0, which silently disables enforcement
+// (EnforceHwidForSubID returns Allowed=true whenever the effective limit is <= 0),
+// and PSP does NOT repair that here. Echoing back a value read moments earlier is
+// worse than leaving it zeroed, not better: setClientLimitHwidByEmail feeds the
+// recomputed sub-wide MAX into trimClientHwidsForSubID, which DELETES the
+// least-recently-seen device registrations beyond the limit. A stale carry (an
+// admin raising the cap, or a device registering, inside the read->write window)
+// therefore permanently destroys device rows, whereas the current clobber writes
+// 0, leaves the trim dormant at its `limit <= 0` guard, and loses only a scalar
+// the admin can retype. The real defect is upstream binding an omitted key to 0
+// instead of "unset" (a *int would fix it); until that lands, omission is the
+// safe behaviour. Admins are told not to set HWID caps on PSP-managed clients —
+// see docs/3xui-compat.md and xui_advisories["3.7.0"] in docs/compat/v3.json.
+func buildClientUpdateJSON(s ports.ClientSpec) (json.RawMessage, error) {
+	obj := clientObj(s)
+	for k, v := range panelRenewalOff {
+		obj[k] = v
+	}
+	return json.Marshal(obj)
+}
+
+func clientObj(s ports.ClientSpec) map[string]any {
 	// 3X-UI 3.2.0 types tgId as int64 and rejects a JSON string ("cannot
 	// unmarshal string into ... tgId of type int64"), so /clients/add and
 	// /clients/update fail outright if tgId is sent as a string. PSP never
@@ -1261,7 +1338,7 @@ func buildClientJSON(s ports.ClientSpec) (json.RawMessage, error) {
 	if s.Auth != "" {
 		obj["auth"] = s.Auth
 	}
-	return json.Marshal(obj)
+	return obj
 }
 
 // BulkSetEnabled flips the enable flag for many clients in one request:

@@ -53,6 +53,16 @@ delta 虽大但没碰 PSP 的面：PSP 调用的 inbound / client / server **con
 
    这是 PSP **全量替换语义**（见 `UpdateClient` 的注释）作用在 3.6.0 里根本不存在的字段上，不算回归 —— 但意味着：**不要在 3X-UI 界面上给「PSP 管理的客户端」配 HWID 上限或面板侧自动续期周期**，这些客户端的配额与生命周期归 PSP 管。`xui_advisories["3.7.0"]` 里已经把这条写进升级确认弹窗。
 
+   **后续（2026-08-26）：续期那半边已经在代码里处理掉了，但方向和「保留」相反。** 深挖之后发现，把 `resetDay` / `resetMax` / `trafficReset` / `trafficResetDay` **保留下来才是 bug**：面板的 `autoRenewClients`（`internal/web/service/inbound_traffic.go`）会挑出 `reset_day > 0` 且已过期的客户端，**改写它的 expiryTime 并把 up/down 清零**。到期与流量账本是 PSP 的，让面板在背后跑自己的续期周期，等于悄悄给 PSP 已经停掉的用户续命、或者抹掉 PSP 用来计费的计数器 —— 比现在的清零严重得多。
+
+   所以 `buildClientUpdateJSON` 现在在**更新路径上显式发送** `resetDay=0 / resetMax=0 / trafficReset=never / trafficResetDay=1`。之前 PSP 是靠**巧合**拿到这组值的：它不发这些键 → 绑成 Go 零值 → 面板的 `normalizeClientTrafficReset` 把 `""`→`"never"`、`0`→`1`。问题在于上游**本来就写了保留守卫**（`applyClientRecordMerge` 里的 `if incoming.TrafficReset != ""`），只是被那个 normalizer 跑在前面给架空了——而那个守卫的注释说它存在的目的正是防止过期的节点快照抹掉已存的周期，也就是上游**意图是保留**。哪天上游把 normalizer 挪到 merge 之后，PSP 的「沉默」就会从「关闭」变成「保持现状」，PSP 管理的客户端会无声无息地被拉进面板侧自动续期。显式发送让 PSP 的意图不再依赖那个顺序。
+
+   **只发在更新路径**：创建路径本来就落在同一组值上，在那里加键只会让 PSP 不分块发送的 `/clients/bulkCreate` 请求体白白变大（面板有 10 MiB 上限）。
+
+   **对 3.7.0 以下面板无副作用，而且是实测的不是推理的**：这些字段在 3.4.2 / 3.5.0 / 3.6.0 的 `model.Client` 上根本不存在，gin 用的是 `encoding/json` 默认的忽略未知键（面板从没开 `DisallowUnknownFields`）。为了不停在「读源码推断」，**从源码编译了一台真的 3.6.0 面板**，用 PSP 自己的适配器打过去，更新被正常接受并生效，整套 `TestLive_*` 在 3.6.0 和 3.7.0 上都是绿的。
+
+   **`limitHwid` 有意不修，这一条要说清楚。** 它是唯一真实的损失：清成 0 等于**关掉设备绑定校验**（`EnforceHwidForSubID` 在上限 ≤ 0 时一律 `Allowed = true`），而且设备列表照常显示，界面上看不出校验已经失效。但**回写一个刚读到的值比清零更危险**：`setClientLimitHwidByEmail` 会把重算出的 sub 级 `MAX(limit_hwid)` 喂给 `trimClientHwidsForSubID`，那个函数**按 last_seen 倒序保留 limit 条、其余直接 DELETE**。只要在「读」和「写」之间管理员调高了上限、或者用户多注册了一台设备，回写旧值就会**永久删掉**用户的设备注册记录；而清零会让裁剪停在 `limit <= 0` 的早退上，一行都不删，丢的只是一个可以重新填的数字。把可恢复的标量损失换成不可恢复的行删除是笔亏本买卖，所以 PSP 保持不发。根因在上游：缺省的键被绑成 0 而不是「未设置」，改成 `*int` 就好了。
+
 **一条对 PSP 纯粹是好事的上游改动**: `setRemoteTraffic` 的节点快照合并，以前是「一发现某 client 合并完没有任何挂载就立刻硬删」，3.7.0 换成了软标记（`sync_orphaned_at`）+ 15 分钟宽限 + 重新挂上自动撤销标记。一次误判不再是不可恢复的。
 
 **本次验证的两处局限（如实说明）**:
