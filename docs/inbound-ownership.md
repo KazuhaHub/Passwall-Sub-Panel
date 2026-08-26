@@ -127,6 +127,35 @@ GORM AutoMigrate 自动加列，符合"自用项目无迁移脚手架"约定（[
 > 全保真后，轴 A 下发**只有 `clients[]` 需 RMW 合并**（client 混合、单独管理），listen/remark/expiry 等 PSP 自有，无需从 live 读。
 > 未被表单结构化建模的字段：靠前端已有的 `raw_settings` / `raw_stream_settings` / `raw_sniffing` round-trip 原样保留（[NodesView.tsx](../web-react/src/views/admin/NodesView.tsx)），存进上述 text 列即可全量保真。
 
+### 4.1.1 面板侧字段：PSP 不建模、但每次下发都会写到的那些（2026-08-26）
+
+上游的 `UpdateInbound` 是**整结构 Save**：把请求 bind 进 `model.Inbound`，然后把**每个字段**都赋回存储行。所以 PSP 请求体里**没发的键 = 绑成 Go 零值 = 覆盖掉运维方的值**，不是「保持不变」。PSP 从 3.4.2 兼容下界起就一直在无声地清掉下面这几个。
+
+实测（真实 3.7.0 面板）：`total=50GB / subSortIndex=7 / trafficReset=monthly / trafficResetDay=9` 经 PSP 更新一次 → `0 / 1 / "" / 1`。
+
+| 字段 | 策略 | 理由 |
+|---|---|---|
+| `subSortIndex` | **保留**（回显活值） | 只排序**面板自己**订阅输出里的链接，碰不到 xray 配置 / 配额 / enable，而 PSP 渲染自己的订阅（§2.1 零回源）。运维方通过专门路由 `POST /inbounds/:id/subSortIndex` 设置，属运维方状态。回显不额外花往返——`UpdateInbound` 本来就要读一次 inbound 去重注入 `clients[]`。回显一个 PSP 从不比较的值也不可能起环（没有 desired 值可背离）。 |
+| `total` | **钉 0（已知 fail-open）** | PSP 无 inbound 级配额概念，直觉上该保留——但 PSP 从 3.4.2 起就在清零，被接管 inbound 的 `up+down` 早已无上限累积、**大概率已超过存着的 cap**。开始保留 = 给已被突破的 cap 重新上膛：`disableInvalidInbounds` 每个流量 tick 跑一次，会 `enable=false` 并把 handler 从运行中的核心摘掉，该节点上所有 PSP 用户断线；且**无自愈**——`InSync` 有意不比较 `Enable`，reconcile 永远不会发现。写进文档的 fail-open 好过无法自愈的全节点黑掉。 |
+| `trafficReset` / `trafficResetDay` | **钉 `"never"` / `1`** | 周期重置任务不只清 inbound 计数器，还对该 inbound 上**每个**客户端调 `ResetAllClientTraffics`。PSP 总量扛得住（`monotonicDelta` 把倒退当重置），但让面板按 PSP 看不见的时间表擦流量，是 client 级 `resetDay` 那个坑的 inbound 版。钉 `"never"` 而非裸清零的空串：行为等价，但它是列默认值、文档值，且从 3.4.2 起就在校验枚举内。 |
+| `disableFlow` | **钉 `false`（并非中性值）** | false 正是让该 inbound 进入上游 Vision-flow 恢复路径的值，那些路径用 PSP 从不读的 `flow_override` 写 `settings.clients[].flow`。仍然接受，因为 true 更糟：`clientWithInboundFlow` 会抹掉 PSP 每次客户端写入的 flow，而 reconcile 的 flow 修复器只要 `desiredFlow != ""` 且存的不同就重推 → **永不收敛，每轮一次 xray reload**。flow 由 PSP 解析，PSP 管的 inbound 不能同时被面板覆写。 |
+
+> `shareAddrStrategy` / `shareAddr` **不在此列**：上游已经自带守卫——请求里 `shareAddrStrategy` 为空时会把旧值拷回去，所以 PSP 的省略本来就是安全的。
+>
+> 实现见 `specToRaw`（四个钉死键）与 `UpdateInbound`（`subSortIndex` 回显），两处都有逐字段注释。回归测试锁住 inbound 请求体的键集合，并断言 `subSortIndex` **不得**出现在共享 body 里。
+
+### 4.1.2 客户端侧的运维方标签：`comment` / `group`（2026-08-26）
+
+同构问题的客户端版。两者都是运维方在 3X-UI 界面上打的标签，PSP 没有对应概念也从不设置，但 `UpdateClient` 是整体替换、上游又无条件写这两列，于是 PSP 每次推送都抹掉它们——对活跃用户是**每个流量轮询周期一次**（缩小的配额下限会持续让 no-op skip 失效）。
+
+`group` 的机制多绕一层：上游的 `applyClientRecordMerge` **确实**守着它（`if incoming.Group != ""`），但 `ClientService.Update` 随后用一条独立语句无条件写 `group_name`，且是有意的——3X-UI 的客户端编辑器总会原样回传该字段，「清空分组」必须能生效。PSP 不回传，所以那个守卫从来保护不到 PSP。**只读代码会得出「group 已被守住」的错误结论，是实测推翻的。**
+
+**修法与边界**：`sharedclient.SyncLifecycle` 本来就在 `UpdateClient` 前做一次 `GetClient`（供 no-op skip 用），把两个标签搭这趟车带回去，零额外往返。`ClientSpec.Comment` / `.Group` 为空时**不发这两个键**——空值意味着「本调用方没读过」，而不是「运维方清空了」；发空串等于换个写法照样抹掉，省略则让读不到的路径保持原状。因此没有任何路径因此变差。
+
+旧的 per-node ownership 路径没有可搭车的读，**不为它单独加一次往返**：该路径已是迁移残留（`MIGRATION(v3→v4)`），会随 ownership 模型一起删除。
+
+> 对照：`limitHwid` **不**这样处理。它同样被清零，但回显一个先前读到的值会武装 `trimClientHwidsForSubID`、**永久删除设备注册行**；清零反而让那个裁剪在 `limit <= 0` 处短路。标签类字段没有这种副作用，所以可以带；带 `limitHwid` 不行。详见 `buildClientUpdateJSON` 的注释。
+
 ### 4.2 为什么 `clients[]` 不入存档
 
 clients 始终由 ownership 表（`user_xui_clients`）+ sync 管理；inbound 的 client 列表是混合的（PSP 的 + 手动的）。存档只存"配置模板（去 clients）"，下发时用 3X-UI 活客户端合并，既避免存档里的 clients 走样，也天然满足"保留手动 client"。render 也根本不需要 clients[]。

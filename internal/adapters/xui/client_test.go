@@ -83,7 +83,7 @@ func TestReplaceSettingsClientsPreservesCurrentClients(t *testing.T) {
 	}
 }
 
-// Regression for the v3.5 client-wipe bug: settingsWithCurrentClients used to
+// Regression for the v3.5 client-wipe bug: UpdateInbound's settings merge used to
 // short-circuit on blank `nextSettings`, sending an empty `settings` to 3X-UI
 // and wiping every live client. With normalised empties ("{}" substitution),
 // passing `{}` as next must still re-merge every current client back in.

@@ -321,6 +321,58 @@ func TestResolveFlow(t *testing.T) {
 	}
 }
 
+// flowRenderDiverges is the detector for the one state in which every reconcile
+// check reports green while PSP's link and the panel's server config disagree.
+// It is the mirror of resolveFlow above; the two must stay consistent, so they
+// are tested against the same matrix.
+func TestFlowRenderDiverges(t *testing.T) {
+	vision := "xtls-rprx-vision"
+	cases := []struct {
+		name       string
+		protocol   domain.Protocol
+		nodeFlow   string
+		storedFlow string
+		want       bool
+	}{
+		{"blank node flow with a stored flow is the divergence", domain.ProtoVLESS, "", vision, true},
+		{"node flow set: PSP owns it, healer converges the panel", domain.ProtoVLESS, "xtls-rprx-direct", vision, false},
+		{"node flow set and matching", domain.ProtoVLESS, vision, vision, false},
+		{"neither side has a flow", domain.ProtoVLESS, "", "", false},
+		{"non-vless never carries flow", domain.ProtoTrojan, "", vision, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			n := &domain.Node{Flow: tc.nodeFlow}
+			if got := flowRenderDiverges(tc.protocol, n, tc.storedFlow); got != tc.want {
+				t.Fatalf("flowRenderDiverges(%s, node.Flow=%q, stored=%q) = %v, want %v",
+					tc.protocol, tc.nodeFlow, tc.storedFlow, got, tc.want)
+			}
+		})
+	}
+
+	// A nil node is the same case as a blank flow: nothing tells render what to
+	// emit, so a stored flow still diverges.
+	if !flowRenderDiverges(domain.ProtoVLESS, nil, vision) {
+		t.Fatal("nil node with a stored flow must report divergence")
+	}
+}
+
+// The detector must agree with resolveFlow: whenever it fires, resolveFlow has
+// adopted the panel's flow, which is exactly why the healer stays quiet and the
+// report reads green. If a change to either breaks that, this fails.
+func TestFlowRenderDiverges_AgreesWithResolveFlow(t *testing.T) {
+	vision := "xtls-rprx-vision"
+	n := &domain.Node{Flow: ""}
+	ce := &inboundCacheEntry{flow: vision}
+
+	if !flowRenderDiverges(domain.ProtoVLESS, n, vision) {
+		t.Fatal("precondition: this is the divergent state")
+	}
+	if got := resolveFlow(domain.ProtoVLESS, n, ce); got != vision {
+		t.Fatalf("resolveFlow adopted %q, want the panel's %q — the healer would fire and this would not be a silent divergence", got, vision)
+	}
+}
+
 // Regression: when an inbound has disappeared upstream (operator deleted it
 // directly in 3X-UI) the node is disabled — but via the column-scoped
 // UpdateEnabled, NOT a full-row Save of the cycle-start snapshot, which would

@@ -318,6 +318,13 @@ type ClientDetail struct {
 	Auth       string // Hysteria2 per-client credential
 	ExpiryTime int64
 	TotalGB    int64
+	// Comment is the operator's free-text note on the client, set in the 3X-UI
+	// UI. PSP has no concept of it and never sets one — it is read back solely
+	// so an update can hand it straight back instead of blanking it. See
+	// ClientSpec.Comment.
+	Comment string
+	// Group is the operator's 3X-UI client-list label, same story as Comment.
+	Group string
 	// InboundIDs is the set of inbounds this client is currently attached to
 	// (3X-UI's client_inbounds junction). For the legacy one-client-per-node
 	// model this is a single id; the v3.9.0 shared-client model and reconcile's
@@ -373,13 +380,19 @@ type BulkCreateResult struct {
 // Allocate retain the historical Xray-shaped JSON strings at the API boundary
 // so existing clients remain compatible; adapters translate as needed.
 type Inbound struct {
-	ID             int
-	Up             int64
-	Down           int64
-	Total          int64
-	Remark         string
-	Enable         bool
-	ExpiryTime     int64
+	ID         int
+	Up         int64
+	Down       int64
+	Total      int64
+	Remark     string
+	Enable     bool
+	ExpiryTime int64
+	// SubSortIndex orders this inbound's links in the PANEL's own subscription
+	// output (1-based, lower first, ties by id). PSP renders its own
+	// subscriptions and never consumes it — it is decoded solely so
+	// UpdateInbound can echo the operator's value back instead of flattening
+	// every PSP-touched inbound to rank 1. Zero on a panel that predates it.
+	SubSortIndex   int
 	Listen         string
 	Port           int
 	Protocol       string
@@ -421,6 +434,24 @@ type ClientSpec struct {
 	SubID      string
 	TgID       string
 	Reset      int
+
+	// Comment carries the operator's 3X-UI note back through an update.
+	// PSP never authors one: upstream writes clients.comment unconditionally
+	// from the request body, so an update that omits the key blanks whatever
+	// the operator typed. Callers that already read the client (they get it
+	// from ClientDetail.Comment) set this so the value survives; callers that
+	// do not leave it empty, the key is omitted, and the pre-existing blanking
+	// stands — no path is made worse by not knowing it.
+	Comment string
+	// Group is the operator's 3X-UI client-list grouping label. Same contract as
+	// Comment, and wiped by the same mechanism for a subtler reason: upstream's
+	// merge DOES guard it, but ClientService.Update then writes group_name
+	// unconditionally in a separate statement, deliberately, because the 3X-UI
+	// client editor always round-trips the field and clearing it had to work.
+	// PSP does not round-trip it, so the guard never protects PSP's updates.
+	// It is a label for the panel's own client list — no job, enforcement, xray
+	// config or subscription behaviour reads it.
+	Group string
 
 	// Protocol-specific
 	Password string // Trojan / SS / SS-2022

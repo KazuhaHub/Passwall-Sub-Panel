@@ -606,7 +606,11 @@ func (c *Client) AddInbound(ctx context.Context, spec ports.InboundSpec) (int, e
 func (c *Client) UpdateInbound(ctx context.Context, id int, spec ports.InboundSpec) error {
 	defer c.lockInbound(id)()
 	mergedSpec := spec
-	settings, err := c.settingsWithCurrentClients(ctx, id, spec.Settings)
+	live, err := c.GetInbound(ctx, id)
+	if err != nil {
+		return err
+	}
+	settings, err := replaceSettingsClients(blankToEmptyObject(spec.Settings), live.Settings)
 	if err != nil {
 		return err
 	}
@@ -615,6 +619,26 @@ func (c *Client) UpdateInbound(ctx context.Context, id int, spec ports.InboundSp
 	// clients-less SS inbound leaves /clients/add blank-200ing. See AddInbound.
 	mergedSpec.Settings = ensureClientsArray(settings)
 	body := specToRaw(&mergedSpec, id)
+	// Echo the operator's subscription sort order back. Upstream's update is a
+	// full-struct Save, so omitting this key writes Go's zero and upstream then
+	// normalises it to 1 — collapsing every PSP-touched inbound into rank 1 while
+	// untouched ones keep their rank, silently degrading an ordering the operator
+	// set through a dedicated route (POST /inbounds/:id/subSortIndex).
+	//
+	// This is the ONE field of the five that is preserved rather than pinned, and
+	// it earns that because it is inert to PSP: it orders links in the PANEL's own
+	// subscription output only, never reaching xray config, quota, or enable
+	// state, and PSP renders its own subscriptions. Echoing a value PSP never
+	// compares also cannot start a fight loop the way a preserved disableFlow
+	// would — there is no desired value to diverge from.
+	//
+	// Costs no extra round-trip: UpdateInbound already had to read the live
+	// inbound to re-inject settings.clients[]; this rides that same read. Guarded
+	// on > 0 so a panel that predates the field (it decodes as 0) is sent nothing
+	// and keeps the old omit-and-normalise behaviour.
+	if live.SubSortIndex > 0 {
+		body["subSortIndex"] = live.SubSortIndex
+	}
 	return c.doJSON(ctx, http.MethodPost, "/panel/api/inbounds/update/"+strconv.Itoa(id), body, nil)
 }
 
@@ -795,16 +819,17 @@ func bulkErrStrings(raws []json.RawMessage) []string {
 // UpdateClient replaces the client keyed by spec.Email (POST
 // /clients/update/{email}); the change propagates to every inbound the client
 // is attached to. Full-replace semantics: the body carries the complete
-// intended state (buildClientJSON emits every field PSP manages), so fields
-// PSP does not set — e.g. a manually-added comment — are not preserved. A
-// UUID rotation is simply a new "id" under the unchanged email, so the old
+// intended state (buildClientUpdateJSON emits every field PSP manages, plus the
+// panel-side renewal fields pinned off), so fields PSP does not set — e.g. a
+// manually-added comment, or 3.7.0's limitHwid — are not preserved. A UUID
+// rotation is simply a new "id" under the unchanged email, so the old
 // clientUUID argument is unused.
 func (c *Client) UpdateClient(ctx context.Context, inboundID int, clientUUID string, spec ports.ClientSpec) error {
 	if spec.Email == "" {
 		return fmt.Errorf("UpdateClient: spec.Email is required (3.2.0 keys clients by email)")
 	}
 	defer c.lockClientEmail(spec.Email)()
-	clientJSON, err := buildClientJSON(spec)
+	clientJSON, err := buildClientUpdateJSON(spec)
 	if err != nil {
 		return err
 	}
@@ -1021,6 +1046,8 @@ func (c *Client) GetClient(ctx context.Context, email string) (*ports.ClientDeta
 			Auth       string `json:"auth"`
 			ExpiryTime int64  `json:"expiryTime"`
 			TotalGB    int64  `json:"totalGB"`
+			Comment    string `json:"comment"`
+			Group      string `json:"group"`
 		} `json:"client"`
 		InboundIDs []int `json:"inboundIds"`
 	}
@@ -1044,6 +1071,8 @@ func (c *Client) GetClient(ctx context.Context, email string) (*ports.ClientDeta
 		Auth:       out.Client.Auth,
 		ExpiryTime: out.Client.ExpiryTime,
 		TotalGB:    out.Client.TotalGB,
+		Comment:    out.Client.Comment,
+		Group:      out.Client.Group,
 		InboundIDs: out.InboundIDs,
 	}, nil
 }
@@ -1106,6 +1135,7 @@ func rawToInbound(r *rawInbound) ports.Inbound {
 		Remark:         r.Remark,
 		Enable:         r.Enable,
 		ExpiryTime:     r.ExpiryTime,
+		SubSortIndex:   r.SubSortIndex,
 		Listen:         r.Listen,
 		Port:           r.Port,
 		Protocol:       r.Protocol,
@@ -1118,6 +1148,54 @@ func rawToInbound(r *rawInbound) ports.Inbound {
 	}
 }
 
+// specToRaw serialises an InboundSpec into the body 3X-UI's inbound add/update
+// expects.
+//
+// # WHY THE LAST FOUR KEYS ARE HERE EVEN THOUGH PSP HAS NO CONCEPT FOR THEM
+//
+// Upstream's UpdateInbound is a full-struct Save: it binds the request into a
+// model.Inbound and assigns EVERY field onto the stored row, so a key PSP omits
+// is not "left alone" — it binds to Go's zero value and overwrites whatever the
+// operator had. That is how PSP has been silently flattening these four since
+// the 3.4.2 compat floor. Sending them explicitly does not change the resulting
+// values (omission already produced them); it makes the intent legible and stops
+// it depending on upstream's zero-value binding, which is the same discipline as
+// panelRenewalOff on the client side.
+//
+// Each one is pinned rather than preserved, and each for its own reason:
+//
+//   - total (inbound-wide byte cap): pinned 0 = unlimited. This IS a fail-open —
+//     an operator's cap silently stops applying — and it is pinned anyway, on
+//     purpose. PSP has zeroed it since 3.4.2, so an adopted inbound's stored cap
+//     has been accumulating up+down uncapped, very likely already past it.
+//     Preserving would re-arm an already-breached cap: disableInvalidInbounds
+//     runs on every traffic tick, flips enable=false and rips the handler out of
+//     the live core, taking every PSP user on that node dark — with NO recovery,
+//     because inboundcfg.InSync deliberately does not compare Enable, so
+//     reconcile never notices and never pushes. A documented fail-open beats an
+//     un-healable blackout; the advisory tells operators not to rely on
+//     inbound-level caps for PSP-managed inbounds.
+//   - trafficReset / trafficResetDay: pinned to the "off" cycle. The periodic
+//     reset job zeroes the inbound's counters AND calls ResetAllClientTraffics
+//     for every client on it, PSP-managed or not. PSP's own totals survive that
+//     (monotonicDelta treats a backwards counter as a reset), but letting the
+//     panel wipe traffic on a schedule PSP cannot see is the inbound-level twin
+//     of the client-level resetDay hazard. Note "never", not the empty string
+//     the bare clobber writes: both are inert (the job only ever queries the
+//     four real periods) but "never" is the documented value and the column
+//     default, and it is in-enum for the validator from 3.4.2 up.
+//   - disableFlow: pinned false. This one is NOT a neutral value and should not
+//     be described as one — false is what enrols the inbound in upstream's
+//     Vision-flow restore paths, which write settings.clients[].flow from
+//     flow_override, a column PSP never reads. PSP takes that deliberately,
+//     because true is worse: clientWithInboundFlow strips flow from every PSP
+//     client write, so reconcile's flow healer (which fires whenever
+//     desiredFlow != "" and the stored flow differs) would re-push forever, one
+//     xray reload per cycle, and never converge. PSP resolves flow itself; an
+//     inbound it manages cannot also have the panel overriding it.
+//
+// subSortIndex is deliberately ABSENT here and echoed in UpdateInbound instead —
+// it is the one field of the five that is preserved rather than pinned.
 func specToRaw(s *ports.InboundSpec, id int) map[string]any {
 	return map[string]any{
 		"id":             id,
@@ -1131,6 +1209,11 @@ func specToRaw(s *ports.InboundSpec, id int) map[string]any {
 		"sniffing":       s.Sniffing,
 		"allocate":       s.Allocate,
 		"expiryTime":     s.ExpiryTime,
+
+		"total":           0,
+		"trafficReset":    "never",
+		"trafficResetDay": 1,
+		"disableFlow":     false,
 	}
 }
 
@@ -1177,19 +1260,16 @@ func rawTrafficsToPorts(raws []rawClientTraffic) []ports.ClientTraffic {
 	return out
 }
 
-func (c *Client) settingsWithCurrentClients(ctx context.Context, inboundID int, nextSettings string) (string, error) {
-	// Empty/blank input would previously short-circuit and reach 3X-UI as a
-	// literal empty settings — which can wipe every live client. Treat it as
-	// "{}" so replaceSettingsClients always runs and injects whatever clients
-	// 3X-UI currently has (PSP-managed + manually-created, both preserved).
-	if strings.TrimSpace(nextSettings) == "" {
-		nextSettings = "{}"
+// blankToEmptyObject guards the settings read-modify-write. Empty/blank input
+// would otherwise short-circuit and reach 3X-UI as a literal empty settings —
+// which can wipe every live client. Treating it as "{}" makes
+// replaceSettingsClients always run and inject whatever clients 3X-UI currently
+// has (PSP-managed + manually-created, both preserved).
+func blankToEmptyObject(settings string) string {
+	if strings.TrimSpace(settings) == "" {
+		return "{}"
 	}
-	inb, err := c.GetInbound(ctx, inboundID)
-	if err != nil {
-		return "", err
-	}
-	return replaceSettingsClients(nextSettings, inb.Settings)
+	return settings
 }
 
 func replaceSettingsClients(nextSettings, currentSettings string) (string, error) {
@@ -1228,7 +1308,83 @@ func clientsFromSettings(settingsJSON string) ([]map[string]any, error) {
 // buildClientJSON serializes a ClientSpec into the JSON shape 3X-UI expects.
 // Field names follow the 3X-UI XrayClient model:
 // id / email / enable / flow / limitIp / totalGB / expiryTime / subId / tgId / reset / password / method
+//
+// This is the CREATE shape (/clients/add, /clients/bulkCreate). The update shape
+// adds four more keys — see buildClientUpdateJSON.
 func buildClientJSON(s ports.ClientSpec) (json.RawMessage, error) {
+	return json.Marshal(clientObj(s))
+}
+
+// panelRenewalOff is the panel-side auto-renew configuration PSP asserts for
+// every client it manages: no calendar renewal day, no renewal cap, and no
+// client-level traffic-reset cycle.
+//
+// WHY PSP PINS THESE RATHER THAN OMITTING THEM (3X-UI 3.7.0+)
+//
+// 3.7.0 added resetDay / resetMax / trafficReset / trafficResetDay to the client
+// model. They are not cosmetic: a client with reset_day > 0 and an expiry in the
+// past is selected by the panel's own autoRenewClients sweep, which REWRITES
+// expiryTime and ZEROES the up/down traffic counters
+// (internal/web/service/inbound_traffic.go in the upstream tree). PSP owns expiry
+// and traffic accounting for the clients it manages, so a panel-side renewal
+// cycle running behind its back would fight it — silently extending a user PSP
+// expired, or wiping the counters PSP bills from.
+//
+// Today PSP would get the values below by ACCIDENT: it omits the keys, they bind
+// to Go zero values, and the panel's normalizeClientTrafficReset() rewrites
+// ""->"never" and 0->1. But upstream already HAS a preserve guard for two of
+// them (`if incoming.TrafficReset != ""` in applyClientRecordMerge) that is
+// defeated only by that normalizer running FIRST. That ordering is an upstream
+// implementation detail, and the guard's own comment says it exists to stop a
+// stale node snapshot erasing a stored cycle — i.e. upstream intends to preserve
+// here. If a future release moves the normalizer after the merge, PSP's silence
+// would start meaning "keep whatever is stored" instead of "off", and
+// PSP-managed clients would quietly enrol in panel-side auto-renew.
+//
+// Sending the neutral values explicitly makes PSP's intent independent of that
+// ordering. On 3X-UI 3.4.2 .. 3.6.0 these keys do not exist on the client model
+// and gin binds with encoding/json's default (unknown keys ignored — the panel
+// never enables DisallowUnknownFields), so they are inert on every panel down to
+// PSP's compat floor.
+//
+// NOT INCLUDED HERE: limitHwid. See buildClientUpdateJSON.
+var panelRenewalOff = map[string]any{
+	"resetDay":        0,
+	"resetMax":        0,
+	"trafficReset":    "never",
+	"trafficResetDay": 1,
+}
+
+// buildClientUpdateJSON is buildClientJSON plus the panel-side renewal fields
+// pinned to their neutral values. Only the UPDATE path needs them: on create the
+// panel already lands on exactly these values for a body that omits them, so
+// adding the keys there would inflate every /clients/bulkCreate body (which PSP
+// sends unchunked, against the panel's 10 MiB request cap) to assert a state the
+// create already produces.
+//
+// DELIBERATELY ABSENT: limitHwid, the per-client device-binding cap 3.7.0 added.
+// PSP's update resets it to 0, which silently disables enforcement
+// (EnforceHwidForSubID returns Allowed=true whenever the effective limit is <= 0),
+// and PSP does NOT repair that here. Echoing back a value read moments earlier is
+// worse than leaving it zeroed, not better: setClientLimitHwidByEmail feeds the
+// recomputed sub-wide MAX into trimClientHwidsForSubID, which DELETES the
+// least-recently-seen device registrations beyond the limit. A stale carry (an
+// admin raising the cap, or a device registering, inside the read->write window)
+// therefore permanently destroys device rows, whereas the current clobber writes
+// 0, leaves the trim dormant at its `limit <= 0` guard, and loses only a scalar
+// the admin can retype. The real defect is upstream binding an omitted key to 0
+// instead of "unset" (a *int would fix it); until that lands, omission is the
+// safe behaviour. Admins are told not to set HWID caps on PSP-managed clients —
+// see docs/3xui-compat.md and xui_advisories["3.7.0"] in docs/compat/v3.json.
+func buildClientUpdateJSON(s ports.ClientSpec) (json.RawMessage, error) {
+	obj := clientObj(s)
+	for k, v := range panelRenewalOff {
+		obj[k] = v
+	}
+	return json.Marshal(obj)
+}
+
+func clientObj(s ports.ClientSpec) map[string]any {
 	// 3X-UI 3.2.0 types tgId as int64 and rejects a JSON string ("cannot
 	// unmarshal string into ... tgId of type int64"), so /clients/add and
 	// /clients/update fail outright if tgId is sent as a string. PSP never
@@ -1261,7 +1417,19 @@ func buildClientJSON(s ports.ClientSpec) (json.RawMessage, error) {
 	if s.Auth != "" {
 		obj["auth"] = s.Auth
 	}
-	return json.Marshal(obj)
+	// Only when known. Upstream writes clients.comment unconditionally, so
+	// omitting the key blanks the operator's note — but PSP never authors one,
+	// so an empty value here means "this caller did not read it", not "the
+	// operator cleared it". Sending "" in that case would be the same blanking
+	// with extra steps; omitting keeps the existing behaviour on paths that
+	// cannot know, while the paths that can (they already GetClient) preserve it.
+	if s.Comment != "" {
+		obj["comment"] = s.Comment
+	}
+	if s.Group != "" {
+		obj["group"] = s.Group
+	}
+	return obj
 }
 
 // BulkSetEnabled flips the enable flag for many clients in one request:

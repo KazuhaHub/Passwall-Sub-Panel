@@ -9,9 +9,9 @@ PSP 通过 `/panel/api/*` 对接 3X-UI 面板。本文档维护两件事：
 
 | PSP 版本 | 最低 3X-UI | 已实测通过 | 备注 |
 |---|---|---|---|
-| **v3.9.1+** | **3.4.2** | 3.6.0 | 新增由所选节点执行的 REALITY 目标扫描；依赖 3.4.2 首次提供的 `/server/scanRealityTargets`，不做 PSP 本机回退 |
-| **v3.9.0** | **3.3.0** | 3.6.0 | 共享 client 模型历史版本；保留其原始 3.3.0 floor，不因 3.9.1 新功能反向收紧 |
-| **v3.6.2 – v3.8.x** | **3.2.0** | 3.6.0 | 每节点 client(一级 `/clients/*` API),**硬切 ≥ 3.2.0**;per-node 路径是 shared 路径子集 |
+| **v3.9.1+** | **3.4.2** | 3.7.0 | 新增由所选节点执行的 REALITY 目标扫描；依赖 3.4.2 首次提供的 `/server/scanRealityTargets`，不做 PSP 本机回退 |
+| **v3.9.0** | **3.3.0** | 3.7.0 | 共享 client 模型历史版本；保留其原始 3.3.0 floor，不因 3.9.1 新功能反向收紧 |
+| **v3.6.2 – v3.8.x** | **3.2.0** | 3.7.0 | 每节点 client(一级 `/clients/*` API),**硬切 ≥ 3.2.0**;per-node 路径是 shared 路径子集 |
 | v3.6.0 – v3.6.1 | 3.1.0 | 3.1.0 | 仍走 inbound-scoped 端点;别跑在 3.2.0 上,先升 PSP 到 v3.6.2 |
 | v3.5.1 – v3.5.x | 3.1.0 | 3.1.0 | `/inbounds/list` 把 settings 等改成 nested object,见下文 |
 | v3.5.0 | 3.0.x | 3.0.x | 跨 3.1.0 升级会破坏 traffic poll |
@@ -26,6 +26,51 @@ PSP 通过 `/panel/api/*` 对接 3X-UI 面板。本文档维护两件事：
 - 任何高于"已实测通过"的 3X-UI 版本都属于**未知风险**——升级前先在一台 panel 上小流量验证
 
 ## 历史兼容性事件
+
+### 2026-08-26 / 3X-UI 3.7.0 实机复核 → 已测上限 3.6.0 抬到 3.7.0
+
+**背景**: 上游 2026-08-24 发 3.7.0，delta 很大（134 commits / 835 文件 / +78310 −23261）。和上次一样从源码现搭了一台：Go 1.27.0 编译 v3.7.0 的 linux/amd64 二进制（只 stub 了 `internal/web/dist`，SPA 与 `/panel/api` 无关），配 3.7.0 `go.mod` 锁的那个 Xray-core —— commit `5ca6f4b` / v26.7.28。
+
+**先说一条好消息**: 那个 commit 和 3.6.0 锁的是**同一个**。也就是说 **3.7.0 不动 Xray-core**，没有 3.5.0 / 3.6.0 那种「升级面板顺带升级并重启 Xray」的连带风险，advisory 里 `affects_xray` 记的是 `false`。
+
+**复核结论（PSP 代码零改动，LIVE-VERIFIED）**: 面板报 `panelVersion 3.7.0 / xray 26.7.28 / state running`，用 PSP **自己的适配器**跑了 8 个 `TestLive_*` —— `TestLive_XUISurface`、`TestLive_XUIRealityScan`、`TestLive_XUIBulkSetEnabled`，加上原有 5 个共享 client 用例（MultiInboundClientSurface / SharedClientMigrationFlow / BulkDelPreservesSharedClient / ConcurrentSameClientNoCorruption / TwoClientsSameBackendNoCorruption）—— **8/8 全绿**。
+
+delta 虽大但没碰 PSP 的面：PSP 调用的 inbound / client / server **controller handler 与 3.6.0 逐字节相同**，只有一个例外（`clients/update/:email`，见下）；`BulkAttachResult` / `BulkDetachResult` / `BulkCreateResult` / `BulkDeleteResult` / `BulkSetEnableResult` / `PanelUpdateInfo` 这几个 PSP 解析的结构体也逐字节相同。`model.Client` / `model.ClientRecord` / `model.Inbound` 的改动全是**新增 JSON 字段**（`limitHwid`、`resetDay`、`resetMax`、`trafficReset`、`trafficResetDay`、`forwardedPorts`、`allowedIPsByInbound`、`disableFlow`、`tunnelAllowedIPs`、`/server/status` 上的 `amneziawg` 块、reality 扫描行上的 `privateTarget` / `certChainValid`），Go 直接忽略。
+
+`min_xui` 仍是 3.4.2 —— 3.7.0 没有删掉任何 PSP 依赖的路由。
+
+**两个运维注意事项（都实机验证过，但都不需要改 PSP 代码）**:
+
+1. **API token 现在有 scope 和过期时间。** 3.7.0 给 `api_tokens` 加了 `scope`（`admin` / `monitor` / `node-sync`）和 `expires_at`，并且用一个 allowlist 中间件强制 scope；更狠的是 `MatchToken` 对 scope 不在这三个值里的 token **直接判定认证失败**（不是「scope 不够」，是当作无效 token）。
+
+   **现有 token 不受影响**：`migrateApiTokenScopeAndExpiry` 在 `InitDB` 里随启动跑，把空 scope 补成 `admin`、`expires_at` 补成 0。**这条是手工实测过的**：在跑着的面板上把 scope 列清空、重启、再用原 token 请求 —— 迁移把它改回了 `admin`，token 照常被接受（`server/status` 200，`panelVersion 3.7.0`）。
+
+   **会坏的是新建的非 admin token**（以下 403 全是实测，不是推断）：`monitor` scope 连 `/inbounds/list` 都 403，所有 `/clients/*` 也 403；`node-sync` scope 在 `/inbounds/list/slim`、`/inbounds/get/:id`、`/inbounds/setEnable/:id`、`/clients/get/:email`、`/clients/:email/attach`、`/clients/bulkCreate`、`/clients/bulkDel`、`/clients/bulkEnable`、`/server/getXrayVersion`、`/server/getPanelUpdateInfo`、`/server/scanRealityTargets` 上都 403。PSP 的 `doJSON` 会把 403 包成 `domain.ErrValidation`，也就是**永久失败、不重试**。→ **给 PSP 用的 token 必须是 `admin` scope 且不设过期**。
+
+2. **新的面板侧客户端字段会被 PSP 的更新清掉。** `clients/update/:email` 现在也绑定 `limitHwid`，并且无条件写 `limit_hwid` / `reset_day` / `reset_max`；`trafficReset` 更绕一点 —— `normalizeClientTrafficReset` 会把缺省的空值先变成字面量 `"never"`，于是 `applyClientRecordMerge` 那个「非空才覆盖」的守卫就形同虚设。
+
+   实测：一个 `limitHwid=3 resetDay=15 resetMax=5 trafficReset=monthly trafficResetDay=15` 的客户端，被 PSP `UpdateClient` 更新**一次**之后变成 `0 / 0 / 0 / never / 1`。
+
+   这是 PSP **全量替换语义**（见 `UpdateClient` 的注释）作用在 3.6.0 里根本不存在的字段上，不算回归 —— 但意味着：**不要在 3X-UI 界面上给「PSP 管理的客户端」配 HWID 上限或面板侧自动续期周期**，这些客户端的配额与生命周期归 PSP 管。`xui_advisories["3.7.0"]` 里已经把这条写进升级确认弹窗。
+
+   **后续（2026-08-26）：续期那半边已经在代码里处理掉了，但方向和「保留」相反。** 深挖之后发现，把 `resetDay` / `resetMax` / `trafficReset` / `trafficResetDay` **保留下来才是 bug**：面板的 `autoRenewClients`（`internal/web/service/inbound_traffic.go`）会挑出 `reset_day > 0` 且已过期的客户端，**改写它的 expiryTime 并把 up/down 清零**。到期与流量账本是 PSP 的，让面板在背后跑自己的续期周期，等于悄悄给 PSP 已经停掉的用户续命、或者抹掉 PSP 用来计费的计数器 —— 比现在的清零严重得多。
+
+   所以 `buildClientUpdateJSON` 现在在**更新路径上显式发送** `resetDay=0 / resetMax=0 / trafficReset=never / trafficResetDay=1`。之前 PSP 是靠**巧合**拿到这组值的：它不发这些键 → 绑成 Go 零值 → 面板的 `normalizeClientTrafficReset` 把 `""`→`"never"`、`0`→`1`。问题在于上游**本来就写了保留守卫**（`applyClientRecordMerge` 里的 `if incoming.TrafficReset != ""`），只是被那个 normalizer 跑在前面给架空了——而那个守卫的注释说它存在的目的正是防止过期的节点快照抹掉已存的周期，也就是上游**意图是保留**。哪天上游把 normalizer 挪到 merge 之后，PSP 的「沉默」就会从「关闭」变成「保持现状」，PSP 管理的客户端会无声无息地被拉进面板侧自动续期。显式发送让 PSP 的意图不再依赖那个顺序。
+
+   **只发在更新路径**：创建路径本来就落在同一组值上，在那里加键只会让 PSP 不分块发送的 `/clients/bulkCreate` 请求体白白变大（面板有 10 MiB 上限）。
+
+   **对 3.7.0 以下面板无副作用，而且是实测的不是推理的**：这些字段在 3.4.2 / 3.5.0 / 3.6.0 的 `model.Client` 上根本不存在，gin 用的是 `encoding/json` 默认的忽略未知键（面板从没开 `DisallowUnknownFields`）。为了不停在「读源码推断」，**从源码编译了一台真的 3.6.0 面板**，用 PSP 自己的适配器打过去，更新被正常接受并生效，整套 `TestLive_*` 在 3.6.0 和 3.7.0 上都是绿的。
+
+   **`limitHwid` 有意不修，这一条要说清楚。** 它是唯一真实的损失：清成 0 等于**关掉设备绑定校验**（`EnforceHwidForSubID` 在上限 ≤ 0 时一律 `Allowed = true`），而且设备列表照常显示，界面上看不出校验已经失效。但**回写一个刚读到的值比清零更危险**：`setClientLimitHwidByEmail` 会把重算出的 sub 级 `MAX(limit_hwid)` 喂给 `trimClientHwidsForSubID`，那个函数**按 last_seen 倒序保留 limit 条、其余直接 DELETE**。只要在「读」和「写」之间管理员调高了上限、或者用户多注册了一台设备，回写旧值就会**永久删掉**用户的设备注册记录；而清零会让裁剪停在 `limit <= 0` 的早退上，一行都不删，丢的只是一个可以重新填的数字。把可恢复的标量损失换成不可恢复的行删除是笔亏本买卖，所以 PSP 保持不发。根因在上游：缺省的键被绑成 0 而不是「未设置」，改成 `*int` 就好了。
+
+**一条对 PSP 纯粹是好事的上游改动**: `setRemoteTraffic` 的节点快照合并，以前是「一发现某 client 合并完没有任何挂载就立刻硬删」，3.7.0 换成了软标记（`sync_orphaned_at`）+ 15 分钟宽限 + 重新挂上自动撤销标记。一次误判不再是不可恢复的。
+
+**本次验证的两处局限（如实说明）**:
+
+- 面板是**全新安装**，所以「只在升级时才会发生」的行为是靠读源码复核的，不是观察到的。唯一例外是上面那条 api-token 迁移 —— 那条是手工把列清空后真的走了一遍升级路径。
+- `/server/getPanelUpdateInfo` 和 `/server/getXrayVersion` **拿不到真实数据**，因为验证机器没有到 `api.github.com` 的路由。两条路由都确认存在且有应答（真 404 的话测试会挂），且它们的 handler、`PanelUpdateInfo` 结构体、`panel.GetUpdateInfo` 函数体与已实机验证过的 3.6.0 **逐字节相同** —— 所以这两个端点在 3.7.0 属于 **SOURCE-VERIFIED**，不是 live。
+
+  顺带在 `client_live_surface_test.go` 里给这两处加了一个**显式开关** `PSP_LIVE_XUI_NO_GITHUB=1`：不设时行为不变（面板抓取失败照样 fatal），设了才降级成记 log。之所以不无条件放宽 —— 面板的失败信封和「真的响应结构变了」在这里长得一样，无条件容忍等于连真回归一起吞掉。路由是否存在则**两种情况下都断言**（404 永远 fatal），那正是这个 smoke 要抓的东西。
 
 ### 2026-07-30 / 3X-UI 3.6.0 实机复核 → 已测上限 3.5.0 抬到 3.6.0
 

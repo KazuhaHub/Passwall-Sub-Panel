@@ -568,6 +568,32 @@ func resolveFlow(protocol domain.Protocol, n *domain.Node, ce *inboundCacheEntry
 	return flow
 }
 
+// flowRenderDiverges reports whether the subscription link PSP renders would
+// disagree with the flow the panel actually stores for this client.
+//
+// render emits Node.Flow directly (render/protocols.go emitVLESS) while
+// resolveFlow above falls back to the PANEL's flow when Node.Flow is blank. That
+// fallback is deliberate — it stops the healer clearing a flow an operator set
+// in 3X-UI — but it makes the two disagree in exactly one state: Node.Flow empty
+// AND the panel holding a non-empty flow. There desiredFlow == found.Flow, so
+// every reconcile check passes and the report is green, while the link handed to
+// the user omits a flow the server expects.
+//
+// Kept beside resolveFlow on purpose: the two encode the same fallback from
+// opposite sides, and a change to one that is not mirrored here silently turns
+// this detector off.
+func flowRenderDiverges(protocol domain.Protocol, n *domain.Node, storedFlow string) bool {
+	if protocol != domain.ProtoVLESS {
+		return false
+	}
+	if n != nil && n.Flow != "" {
+		// PSP owns the flow: render emits it and the healer converges the panel
+		// onto it, so any difference is transient drift, not a divergence.
+		return false
+	}
+	return storedFlow != ""
+}
+
 func (s *Service) checkOne(ctx context.Context, u *domain.User, e *domain.XUIClientEntry,
 	ce *inboundCacheEntry, n *domain.Node, level Level) (*Issue, bool) {
 
@@ -714,6 +740,29 @@ func (s *Service) checkOne(ctx context.Context, u *domain.User, e *domain.XUICli
 			PanelName: s.panelNameOf(e.PanelID), InboundID: e.InboundID, ClientEmail: e.ClientEmail,
 			Code: "expire_mismatch_fixed",
 		}, true
+	}
+
+	// Check 6 (REPORT ONLY): PSP's rendered link disagrees with the flow the
+	// panel stores — see flowRenderDiverges for why that state exists. 3X-UI
+	// 3.7.0 makes it reachable without anyone touching PSP: its Vision-flow
+	// restore paths write settings.clients[].flow from flow_override, a column
+	// PSP never reads.
+	//
+	// Reported, never healed, and deliberately last: healing would mean either
+	// clearing the operator's flow (the regression resolveFlow's comment
+	// documents) or writing it into Node.Flow, which is an operator decision
+	// about what PSP should render, not drift for reconcile to resolve silently.
+	// Running it after every healing check also keeps it from masking fixable
+	// drift — checkOne returns on its first issue, so anything actionable is
+	// handled first and this only fires when nothing else did.
+	if flowRenderDiverges(protocol, n, found.Flow) {
+		return &Issue{
+			PanelID:   e.PanelID,
+			PanelName: s.panelNameOf(e.PanelID), InboundID: e.InboundID, ClientEmail: e.ClientEmail,
+			Code: "flow_render_divergence",
+			Detail: fmt.Sprintf("panel stores flow %q but the node has no flow set, so PSP renders a link without one; "+
+				"set the node's flow to %q to match, or clear it in 3X-UI", found.Flow, found.Flow),
+		}, false
 	}
 
 	return nil, false

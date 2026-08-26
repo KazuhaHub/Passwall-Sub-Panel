@@ -263,10 +263,20 @@ func (s *Service) SyncLifecycle(ctx context.Context, c *domain.PSPClient, enable
 	// would issue a redundant full-replace each time. Creds are compared too, so a
 	// UUID reset (id/password differ) still propagates; an active user's shrinking
 	// quota-floor (totalGB differs) still refreshes the Xray-side cap.
-	if cur, err := cli.GetClient(ctx, c.Email); err == nil && cur != nil &&
-		cur.Enable == spec.Enable && cur.ExpiryTime == spec.ExpiryTime && cur.TotalGB == spec.TotalGB &&
-		cur.ID == spec.ID && cur.Password == spec.Password && cur.Flow == spec.Flow && cur.Auth == spec.Auth {
-		return nil
+	if cur, err := cli.GetClient(ctx, c.Email); err == nil && cur != nil {
+		// Hand the operator's 3X-UI note straight back. UpdateClient is a
+		// full-replace and upstream writes clients.comment unconditionally, so
+		// without this the note is blanked on every push — which for an active
+		// user is every traffic-poll cycle, because the shrinking quota floor
+		// keeps defeating the skip below. Free here: this GetClient already
+		// runs. Not carried on the legacy per-node paths, which have no read to
+		// ride and are slated for removal with the ownership model.
+		spec.Comment = cur.Comment
+		spec.Group = cur.Group
+		if cur.Enable == spec.Enable && cur.ExpiryTime == spec.ExpiryTime && cur.TotalGB == spec.TotalGB &&
+			cur.ID == spec.ID && cur.Password == spec.Password && cur.Flow == spec.Flow && cur.Auth == spec.Auth {
+			return nil
+		}
 	}
 	return cli.UpdateClient(ctx, 0, c.UUID, spec) // inbound/uuid args vestigial; keyed by spec.Email
 }

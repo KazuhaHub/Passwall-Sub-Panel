@@ -4,6 +4,77 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## v3.9.2-beta.7 — 2026-08-26
+
+上游兼容跟进（3X-UI 3.7.0 实机验证，S-UI 复核后无需变动），外加四处「PSP 无声清掉运维方设置」的修复——其中三处早于 3.7.0 就存在，是这次逐字段核查时才浮出来的。
+
+### 改进
+
+- **3X-UI 已测上限抬到 3.7.0（实机验证，PSP 代码零改动）** —— 上游 2026-08-24 发布 3.7.0，delta 是 134 commits / 835 文件 / +78310 −23261，比 3.6.0 那次还大。照旧从源码现搭了一台：Go 1.27.0 编译 v3.7.0 的 linux/amd64 二进制（只 stub `internal/web/dist`），配 3.7.0 `go.mod` 锁的 Xray-core commit `5ca6f4b` / v26.7.28。
+
+  **第一个结论就是好消息**：那个 commit 和 3.6.0 锁的是同一个 —— **3.7.0 不动 Xray-core**，没有 3.5.0 / 3.6.0 那种「升面板顺带重启 Xray」的连带风险。advisory 里 `affects_xray` 记 `false`。
+
+  面板报 `panelVersion 3.7.0 / xray 26.7.28 / state running`，用 PSP 自己的适配器跑了 8 个 `TestLive_*`（`XUISurface`、`XUIRealityScan`、`XUIBulkSetEnabled` + 原有 5 个共享 client 用例）**全部通过**。delta 大但没碰 PSP 的面：PSP 调用的 inbound / client / server controller handler 与 3.6.0 逐字节相同（只有 `clients/update/:email` 一个例外），PSP 解析的 6 个响应结构体也逐字节相同，model 层改动全是新增 JSON 字段。`min_xui` 仍是 3.4.2。
+
+  **两个运维注意事项，都实测过，都不需要改 PSP 代码**：
+
+  ① **API token 现在有 scope（admin / monitor / node-sync）和过期时间**，而且 `MatchToken` 对 scope 不合法的 token 是直接判认证失败、不是降权。**现有 token 不受影响** —— 启动时的 `migrateApiTokenScopeAndExpiry` 会把空 scope 补成 `admin`；这条是手工把 scope 列清空、重启、再拿原 token 请求验证过的，迁移确实补回了 `admin` 且 token 照常可用。会坏的是**新建的非 admin token**：`monitor` 连 `/inbounds/list` 都 403，`node-sync` 在 `/inbounds/list/slim`、`/inbounds/get/:id`、`/clients/get/:email`、`/clients/bulk*` 等 11 条 PSP 路由上 403（逐条实测）。PSP 的 `doJSON` 把 403 包成 `domain.ErrValidation`，即永久失败不重试 —— 所以给 PSP 用的 token 必须是 `admin` scope 且不设过期。
+
+  ② **3.7.0 新增的面板侧客户端字段会被 PSP 的更新清掉**：`clients/update/:email` 无条件写 `limit_hwid` / `reset_day` / `reset_max`，而 `normalizeClientTrafficReset` 会把缺省的 `trafficReset` 先变成字面量 `"never"`，绕过了 `applyClientRecordMerge` 的非空守卫。实测一个 `3 / 15 / 5 / monthly / 15` 的客户端经 PSP `UpdateClient` 一次后变成 `0 / 0 / 0 / never / 1`。这是 PSP 全量替换语义作用在 3.6.0 里不存在的字段上，不算回归，但值得写进升级弹窗：别在 3X-UI 界面上给 PSP 管理的客户端配 HWID 上限或面板侧续期周期。
+
+  两条都已写进 `xui_advisories["3.7.0"]`，无需发版即可下发到所有已部署的 PSP。
+
+  **一条对 PSP 纯粹是好事的上游改动**：节点快照合并以前「发现 client 没挂载就立刻硬删」，3.7.0 换成软标记 + 15 分钟宽限 + 重新挂上自动撤销，误判不再不可恢复。
+
+  **本次验证的局限如实记在 `docs/3xui-compat.md` 与 `v3.json` 里**：面板是全新安装，升级专属行为靠源码复核（唯一例外是上面那条 token 迁移，走了真实升级路径）；`/server/getPanelUpdateInfo` 与 `/server/getXrayVersion` 因验证机器没有到 `api.github.com` 的路由而拿不到真实数据，两条路由确认存在且有应答，其 handler / 结构体 / 服务函数体与已实机验证的 3.6.0 逐字节相同，故这两个端点在 3.7.0 记为 SOURCE-VERIFIED 而非 live。
+
+- **`TestLive_XUISurface` 新增 `PSP_LIVE_XUI_NO_GITHUB` 开关，用于在无外网的验证机上跑** —— `getPanelUpdateInfo` 与 `getXrayVersion` 的答案都来自**面板自己**去 `api.github.com` 抓取，所以在 egress 受限的验证机上，端点再健康也只会返回面板自身的失败信封。设了 `PSP_LIVE_XUI_NO_GITHUB=1` 才把这两处的失败降级成记 log；**默认行为不变**，仍然 fatal。没有无条件放宽是有意的：面板的失败信封和「响应结构真的变了」在这里长得一模一样，无条件容忍会把真回归一起吞掉，所以要求验证者显式声明。路由是否存在**两种情况下都断言**（`ErrXUIEndpointUnsupported` / 404 永远 fatal）。
+
+### 修复
+
+- **3X-UI 3.7.0：客户端更新显式关闭面板侧续期周期，而不是靠巧合拿到那组值** —— 上一条记录了 PSP 的 `UpdateClient` 会把 3.7.0 新增的 `resetDay` / `resetMax` / `trafficReset` / `trafficResetDay` 清成 `0/0/never/1`。深挖之后结论反转了一半：**把这四个字段「保留」下来才是 bug**。面板的 `autoRenewClients` 会挑出 `reset_day > 0` 且已过期的客户端，**改写 expiryTime 并把 up/down 清零** —— 到期与流量账本归 PSP，让面板在背后跑续期等于给 PSP 停掉的用户续命、或抹掉计费用的计数器。
+
+  所以修的方向是**把「关闭」变成显式声明**：新增 `buildClientUpdateJSON`，在更新路径上显式发送 `resetDay=0 / resetMax=0 / trafficReset=never / trafficResetDay=1`。之前 PSP 是靠巧合拿到这组值的（不发键 → 绑零值 → 面板 normalizer 兜底），而上游**本来就写了保留守卫** `if incoming.TrafficReset != ""`，只是被 `normalizeClientTrafficReset` 跑在前面架空了；那个守卫的注释说它是为了防止过期节点快照抹掉已存周期，也就是上游**意图是保留**。哪天上游把 normalizer 挪到 merge 之后，PSP 的沉默就会从「关闭」变成「保持现状」，PSP 管理的客户端会无声无息被拉进面板侧自动续期。显式发送让意图不依赖那个顺序。
+
+  **只加在更新路径**：创建路径本来就落在同一组值上，在那里加键只会让不分块发送的 `/clients/bulkCreate` 请求体白白撑大（面板 10 MiB 上限）。
+
+  **对旧面板无副作用，且是实测的**：这些字段在 3.4.2 / 3.5.0 / 3.6.0 的 `model.Client` 上不存在，gin 用 `encoding/json` 默认忽略未知键。没有停在读源码推断——**从源码编译了一台真的 3.6.0 面板**，用 PSP 自己的适配器打过去，更新正常生效；`TestLive_*` 在 3.6.0 与 3.7.0 上都是全绿。3.7.0 上另外跑了「五次连续推送 + 递减 TotalGB」（模拟流量地板每个轮次都变、绕过 no-op skip 的真实失败模式），四个字段稳定停在 `0/0/never/1`。
+
+- **`limitHwid` 有意不修 —— 回写比清零更危险** —— 它是这批字段里唯一真实的损失：清成 0 等于**关掉设备绑定校验**（`EnforceHwidForSubID` 在上限 ≤ 0 时一律放行），而设备列表照常显示，界面上看不出校验已失效。但对抗性复核推翻了「读回来再写回去」这个直觉方案：`setClientLimitHwidByEmail` 会把重算的 sub 级 `MAX(limit_hwid)` 喂给 `trimClientHwidsForSubID`，后者按 `last_seen` 倒序保留 limit 条、**其余 DELETE**。只要在读与写之间管理员调高了上限、或用户多注册了一台设备，回写旧值就会**永久删除**设备注册记录；而清零会让裁剪停在 `limit <= 0` 的早退上，一行不删，丢的只是一个可重填的标量。把可恢复的标量损失换成不可恢复的行删除是亏的，所以保持不发。根因在上游：缺省键被绑成 0 而非「未设置」（`*int` 即可）。测试里显式断言 `limitHwid` **不在**请求体中，防止后来者好心把它加回去。
+
+  顺带更正上一条记录里的一句话：当时写的「清零会删掉设备注册记录」是**不准确的**——单条记录的 subId 下清零后 effective 为 0，裁剪早退，一行都不删；只有当同一 subId 下另有启用的记录带着更小的非零上限时才会真的删。
+
+- **reconcile 新增 `flow_render_divergence` 上报：一个所有检查都报绿、但链接和服务端不一致的静默故障** —— render 直接用 `n.Flow` 出链接，而 reconcile 的 `resolveFlow` 在 `Node.Flow` 为空时**回落到面板存的 flow**。那个回落是有意的（防止修复器把运维方在 3X-UI 里设的 flow 清掉），但它让两边在**恰好一种状态**下分叉：`Node.Flow` 为空 **且** 面板存着非空 flow。此时 `desiredFlow == found.Flow`，上面每一项检查都通过、reconcile 报告全绿，而发给用户的链接**不带 flow，服务端却期待它**。
+
+  3.7.0 让这个状态**不需要任何人动 PSP 就能到达**：它的 Vision-flow 恢复路径会用 `flow_override`（PSP 从不读的一列）去写 `settings.clients[].flow`。
+
+  只上报、不修复，而且**故意放在所有修复检查之后**——`checkOne` 命中第一个 issue 就返回，放最后才不会挡住真正可修的漂移。不修是因为：修要么意味着清掉运维方的 flow（正是 `resolveFlow` 注释里记着的那个回归），要么意味着写进 `Node.Flow`——那是「PSP 该渲染什么」的运维决策，不是 reconcile 该悄悄替人拿的主意。判据抽成了 `flowRenderDiverges`，就放在 `resolveFlow` 旁边：两者是同一个回落的正反面，改一边不改另一边会让这个探测器无声失效，测试用同一张矩阵把这点钉住。
+
+- **客户端的 `comment` / `group` 不再被更新清掉** —— 两个都是运维方在 3X-UI 里打的标签，PSP 没有对应概念、也从不设置，但因为 `UpdateClient` 是整体替换、上游又无条件写这两列，PSP 每次推送都会把它们抹掉——对活跃用户就是**每个流量轮询周期一次**（缩小的配额下限会一直让 no-op skip 失效）。
+
+  `group` 的机制更绕一层，值得记一笔：上游的 merge **确实**有守卫（`if incoming.Group != ""`），但 `ClientService.Update` 之后又用一条独立语句无条件写 `group_name`，而且是**有意为之**——因为 3X-UI 的客户端编辑器总会把该字段原样回传，「清空分组」必须能生效。PSP 不回传，于是那个守卫从来就保护不到 PSP 的更新。**我一开始读代码判断成「group 已被上游守住、不需要修」，是实测把这个结论推翻的。**
+
+  修法零成本：`sharedclient.SyncLifecycle` **本来就**在 `UpdateClient` 前做一次 `GetClient`（用于 no-op skip），顺手把两个标签带回去即可。`ClientSpec` 里为空时**不发这两个键**——空值表示「本调用方没读过」，不是「运维方清空了」；发空串等于换个写法照样抹掉，省略则让读不到的路径维持现状。所以没有任何路径因此变差。旧的 per-node 路径没有可搭车的读，也随 ownership 模型一起在 v3→v4 里删除，不为它单独加一次往返。
+
+  **实测**：3.7.0 上 `comment='VIP — 3 月续费' / group='gold'` 连推五次（每次缩小配额下限以绕过 skip）后两者完好；真实 3.6.0 面板上同样生效（这两个字段在 3.6.0 也存在，所以是真的保住了，不只是被忽略）。两台面板整套 `TestLive_*` 全绿。
+
+- **inbound 层的同类清零：一个从 3.4.2 就在的老问题，逐字段定了策略** —— 上一条查客户端字段时顺手实测到，PSP 的 `UpdateInbound` 也在清 inbound 层字段：把一条 inbound 设成 `total=50GB / subSortIndex=7 / trafficReset=monthly / trafficResetDay=9`，PSP 更新一次后变成 `0 / 1 / "" / 1`。原因同构：上游的 `UpdateInbound` 是**整结构 Save**，`specToRaw` 没发的键绑成 Go 零值后被写回去。`total` / `subSortIndex` / `trafficReset` 在 **3.4.2**（PSP 兼容下界）就存在，所以这**不是 3.7.0 回归，是一直都在的老问题**。
+
+  和上一轮一样，逐字段判断「该保留还是该显式关掉」，结论是 **1 保留 / 4 显式钉死**：
+
+  - **`subSortIndex` → 保留**（唯一真正改变行为的一项）。它只影响**面板自己**订阅输出里的链接排序，碰不到 xray 配置、配额、enable，而 PSP 渲染自己的订阅。之前每条被 PSP 碰过的 inbound 都会塌缩到 rank 1，没碰过的保持原 rank 并排到后面，管理员通过专门路由设的排序就这么无声退化成 id 序。现在 `UpdateInbound` 把面板上的活值回显回去——**不额外花一次往返**，因为它本来就要读一次 inbound 来重新注入 `settings.clients[]`，顺路带上即可。
+  - **`total` → 钉 0，并且明知这是 fail-open 还是这么定。** 保留看起来才对（PSP 根本没有 inbound 级配额概念），但反过来更危险：PSP 从 3.4.2 起就在清零，所以被接管的 inbound 的 `up+down` 早就在无上限地累积、**大概率已经超过那个存着的 cap**。一旦开始保留，等于**给一个已经被突破的 cap 重新上膛**——`disableInvalidInbounds` 每个流量 tick 都跑，会把 `enable` 置 false 并把 handler 从运行中的核心里摘掉，该节点上所有 PSP 用户直接断线；而且**没有自愈**：`inboundcfg.InSync` 有意不比较 `Enable`，reconcile 永远不会发现、也永远不会推。一个写进文档的 fail-open，好过一次无法自愈的全节点黑掉。
+  - **`trafficReset` / `trafficResetDay` → 钉「关闭」**。周期重置任务不只清 inbound 计数器，还会对该 inbound 上**每一个**客户端调 `ResetAllClientTraffics`。PSP 自己的总量扛得住（`monotonicDelta` 把倒退当重置），但让面板按 PSP 看不见的时间表擦流量，是客户端层 `resetDay` 那个坑的 inbound 版。注意钉的是 `"never"` 而不是裸清零产生的空字符串——两者行为等价（任务只查那四个真实周期），但 `"never"` 是列默认值、也是文档值，且从 3.4.2 起就在校验器的枚举内。
+  - **`disableFlow` → 钉 false，但这个值并不「中性」，注释里如实写了。** false 正是让该 inbound 进入上游 Vision-flow 恢复路径的值，那些路径会用 PSP 从不读的 `flow_override` 去写 `settings.clients[].flow`。PSP 仍然接受它，因为 true 更糟：`clientWithInboundFlow` 会把 PSP 每次客户端写入里的 flow 抹掉，而 reconcile 的 flow 修复器只要 `desiredFlow != ""` 且存的 flow 不同就会重推——于是变成**永不收敛的死循环，每轮一次 xray reload**。flow 由 PSP 自己解析，PSP 管的 inbound 不能同时被面板覆写。
+
+  **实测（不是推理）**：3.7.0 上连推三次，`subSortIndex` 稳定保持 7、其余落在钉死值；**真的 3.6.0 面板**上更新同样被接受并生效，`subSortIndex` 保持 5、`trafficReset` 收下 `"never"`、3.6.0 没有的 `disableFlow` 被忽略。两台面板上整套 `TestLive_*` 全绿。另加两个测试锁住 inbound 请求体的键集合、以及「`subSortIndex` 不得出现在共享 body 里」。
+
+  顺带删掉了因此变成死代码的 `settingsWithCurrentClients`（`UpdateInbound` 现在内联它以复用同一次读）。
+
+### 兼容性
+
+- **S-UI 已测上限维持 1.5.5，本次复核后确认无需变动** —— 上游最新 release 仍是 1.5.5（2026-08-09），正是 PSP 当前的上限。`main` 分支在 tag 之后有 10 个未发布提交，且都不在 `api/`（PSP 调用的 `/apiv2` 表面）里。PSP 的上限跟的是 release，所以这次 S-UI 没有任何改动。`min_sui` 仍刻意留空。
+
 ## v3.9.2-beta.6 — 2026-08-10
 
 上游兼容跟进（S-UI 1.5.5）、前端路由大版本迁移，以及一件**经调查后决定不做**的性能优化。
