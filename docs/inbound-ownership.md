@@ -158,7 +158,21 @@ GORM AutoMigrate 自动加列，符合"自用项目无迁移脚手架"约定（[
 
 旧的 per-node ownership 路径没有可搭车的读，**不为它单独加一次往返**：该路径已是迁移残留（`MIGRATION(v3→v4)`），会随 ownership 模型一起删除。
 
-> 对照：`limitHwid` **不**这样处理。它同样被清零，但回显一个先前读到的值会武装 `trimClientHwidsForSubID`、**永久删除设备注册行**；清零反而让那个裁剪在 `limit <= 0` 处短路。标签类字段没有这种副作用，所以可以带；带 `limitHwid` 不行。详见 `buildClientUpdateJSON` 的注释。
+> 对照：`limitHwid` 一度**不**这样处理，理由是回显一个先前读到的值会武装 `trimClientHwidsForSubID`、**永久删除设备注册行**。那个理由只在「PSP 不拥有该字段、只能回显」时成立——见下节。
+
+### 4.1.3 连接限制：`limitIp` / `limitHwid`（2026-08-27）
+
+前两节的字段 PSP **不建模**，只能选择「带回去」或「让它被清掉」。这两个不一样：**PSP 拥有它们**。
+
+`User.IPLimit` / `User.DeviceLimit`（0 = 不限）是 PSP 的领域字段，经 `domain.UserLifecycle` 契约下发到 `ClientSpec.LimitIP` / `.LimitHwid`。
+
+**这解决了 §4.1.2 末尾那个两难。** 当时的困境是：不发 → 上游把缺失键绑 0 → `EnforceHwidForSubID` 在 `limit <= 0` 时一律放行，**静默关掉设备绑定校验**；回显 → 陈旧值喂进 `trimClientHwidsForSubID`，**永久删除**设备注册行。两者都是真损失，只能选轻的。
+
+**所有权让第三条路成立**：下发的是 PSP 的意图值，**不是回显**，所以**根本不存在读-改-写窗口**——trim 做的正是设备上限该做的事。
+
+因此这两个字段进入 `SyncLifecycle` 的比较集合（`lifecycleWriteReason`）：被人在面板界面改动会被**推回**，而不是像 `comment` / `group` 那样只是「顺路带一下」。这是「PSP 建模的字段」和「PSP 不建模的字段」在所有权轴上的分界。
+
+能力差异见 [connection-limits.md](connection-limits.md)：S-UI 两个都不支持，通过 capability 显式声明而非静默丢弃。
 
 ### 4.2 为什么 `clients[]` 不入存档
 

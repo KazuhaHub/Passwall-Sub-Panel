@@ -51,11 +51,21 @@ delta 虽大但没碰 PSP 的面：PSP 调用的 inbound / client / server **con
 
    实测：一个 `limitHwid=3 resetDay=15 resetMax=5 trafficReset=monthly trafficResetDay=15` 的客户端，被 PSP `UpdateClient` 更新**一次**之后变成 `0 / 0 / 0 / never / 1`。
 
-   这是 PSP **全量替换语义**（见 `UpdateClient` 的注释）作用在 3.6.0 里根本不存在的字段上，不算回归 —— 但意味着：**不要在 3X-UI 界面上给「PSP 管理的客户端」配 HWID 上限或面板侧自动续期周期**，这些客户端的配额与生命周期归 PSP 管。`xui_advisories["3.7.0"]` 里已经把这条写进升级确认弹窗。
+   这是 PSP **全量替换语义**（见 `UpdateClient` 的注释）作用在 3.6.0 里根本不存在的字段上，不算回归 —— 但意味着：**不要在 3X-UI 界面上给「PSP 管理的客户端」配这些字段**，它们的配额与生命周期归 PSP 管。`xui_advisories["3.7.0"]` 里已经把这条写进升级确认弹窗。
+
+   **两半后来都处理掉了，方向相反，各有各的道理**：续期那半边改成**显式关闭**（见下），HWID 那半边改成**由 PSP 接管**（见再下）。
 
    **后续（2026-08-26）：续期那半边已经在代码里处理掉了，但方向和「保留」相反。** 深挖之后发现，把 `resetDay` / `resetMax` / `trafficReset` / `trafficResetDay` **保留下来才是 bug**：面板的 `autoRenewClients`（`internal/web/service/inbound_traffic.go`）会挑出 `reset_day > 0` 且已过期的客户端，**改写它的 expiryTime 并把 up/down 清零**。到期与流量账本是 PSP 的，让面板在背后跑自己的续期周期，等于悄悄给 PSP 已经停掉的用户续命、或者抹掉 PSP 用来计费的计数器 —— 比现在的清零严重得多。
 
    所以 `buildClientUpdateJSON` 现在在**更新路径上显式发送** `resetDay=0 / resetMax=0 / trafficReset=never / trafficResetDay=1`。之前 PSP 是靠**巧合**拿到这组值的：它不发这些键 → 绑成 Go 零值 → 面板的 `normalizeClientTrafficReset` 把 `""`→`"never"`、`0`→`1`。问题在于上游**本来就写了保留守卫**（`applyClientRecordMerge` 里的 `if incoming.TrafficReset != ""`），只是被那个 normalizer 跑在前面给架空了——而那个守卫的注释说它存在的目的正是防止过期的节点快照抹掉已存的周期，也就是上游**意图是保留**。哪天上游把 normalizer 挪到 merge 之后，PSP 的「沉默」就会从「关闭」变成「保持现状」，PSP 管理的客户端会无声无息地被拉进面板侧自动续期。显式发送让 PSP 的意图不再依赖那个顺序。
+
+   **后续（2026-08-27）：HWID 那半边改成由 PSP 接管，方向和续期相反。** 续期字段 PSP 要的是「永远关闭」，所以显式钉死；设备上限 PSP 要的是「我说了算」，所以**收归自己所有**。
+
+   清零之所以曾是两害相权的选择：不发 → 上游把缺失键绑成 0 → `EnforceHwidForSubID` 在 `limit <= 0` 时一律放行，**等于静默关掉设备绑定校验**，而设备列表照常显示、界面上看不出失效；回显 → `setClientLimitHwidByEmail` 把重算的 sub 级 MAX 喂给 `trimClientHwidsForSubID`，**永久删除**超出上限、最久未使用的设备注册行，读-改-写窗口内的任何变化（管理员调高上限、一台设备刚注册）都会造成不可恢复的丢失。丢一个标量好过删数据。
+
+   **所有权消灭了这个两难。** PSP 现在下发的是 `User.DeviceLimit` —— **自己的意图值，不是回显**，因此根本不存在读-改-写窗口，trim 做的正是设备上限该做的事。运维方改在 **PSP 的用户编辑界面**里设，和到期时间、流量上限一致。详见 [connection-limits.md](connection-limits.md)。
+
+   **一个执行侧前提**：同批加入的并发 IP 上限（`limitIp`）走 core 的 online-stats API（不需要访问日志），但超限后是**把 IP 交给 fail2ban**（`check_client_ip_job.go`）—— 节点上没装配 fail2ban，这条限制推下去也拦不住任何东西。
 
    **只发在更新路径**：创建路径本来就落在同一组值上，在那里加键只会让 PSP 不分块发送的 `/clients/bulkCreate` 请求体白白变大（面板有 10 MiB 上限）。
 
