@@ -140,14 +140,107 @@ band = max(minBytes, remaining × pct)
 
 ---
 
-## Phase 3 —（条件性）Agent MVP
+## Phase 3 —（条件性）Agent
 
-仅在 Phase 2 判定为「做」时进入。最小范围：
+仅在 Phase 2 判定为「做」时进入。本节是**架构基线**，不是 MVP 清单——协议层的决定改起来最贵，越晚改越贵，所以先定死。
 
-- client CRUD + 计数器**推送**上报 + 健康上报
-- 配置生成继续复用 PSP 现有的 `inboundcfg`
+### 3.0 指导原则
+
+工业界（Envoy xDS、kubelet ↔ apiserver）在这个问题上收敛出的答案**不是「推送替代轮询」**，而是：
+
+> **声明式 + 水平触发 + 版本化快照。推送只是延迟优化，正确性靠周期性全量对账兜底。**
+
+水平触发有个关键附带好处：**丢消息不致命**。xDS 和 kubelet 都不保证每条消息送达，靠「下一次对账会修好」。这免掉了「推送必须可靠投递」这个最难的工程问题——不需要消息队列，不需要 exactly-once。
+
+### 3.1 必须在第一天定死的（协议层）
+
+| # | 决定 | 理由 |
+|---|---|---|
+| 1 | **声明式，下行只有期望状态，没有命令** | 命令式 RPC 必须携带全量字段，而携带全量就必须知道所有字段——这正是 v3.9.2-beta.7 四个静默清零的结构性根源 |
+| 2 | **版本化快照 + ACK/NACK** | 每份配置带单调递增 `generation`；agent 回报 `applied_generation`。控制面才能回答「哪台卡在哪个版本」 |
+| 3 | **spec / status 分离 + 字段所有权** | 见 §3.2，这是本计划最重要的一条设计约束 |
+| 4 | **Fail-static** | 控制面不可达时 agent 保持最后一份已知良好配置**继续服务**，绝不 fail closed |
+| 5 | **反向连接**：agent 主动连控制面（gRPC 双向流） | 穿 NAT；且**节点不再需要暴露任何管理端口**——现在每台 3X-UI 都得把面板 HTTP 端口暴露给 PSP，那是实打实的攻击面 |
+| 6 | **版本偏斜策略 + 能力协商** | 明文规定 agent 可落后控制面多少，写进文档。已有 `ports.CapabilityProvider` 先例可扩 |
+| 7 | **短期凭据 + 轮换**，bootstrap 走 token → CSR → 签发 | 不要长期静态 token（就是现在 3X-UI API token 的形态） |
+
+### 3.2 设计约束：字段所有权必须是**机制**，不是逐字段判断
+
+v3.9.2-beta.7 修的四组静默清零（`limitHwid` / `resetDay` 组 / inbound 的 `total`、`subSortIndex` / 客户端的 `comment`、`group`）**没有一个是 PSP 写错代码**，全部源于与 3X-UI 整结构 Save 语义的阻抗失配。当时的修法是逐字段人工判断「pin 还是 preserve」，并写长注释解释理由——那是**在没有所有权模型时的手工替代品**。
+
+K8s 的工业解法是 server-side apply 的 field manager：每个字段记录是谁写的，冲突显式暴露而不是静默覆盖。
+
+**约束**：自研协议**不得**把逐字段人工判断搬过来。资源要显式划分所有权域：
+
+- `psp-owned`：配额、到期、启用状态、凭据 —— 控制面写，agent 不碰
+- `agent-owned`（status）：流量计数、健康、已应用版本 —— agent 写，控制面只读
+- `operator-owned`：运维在本地设置的东西 —— **双方都只读**，apply 根本不触碰
+
+判据：**一个新字段加进来时，不需要任何人做「pin 还是 preserve」的判断**——它属于哪个域决定了一切。做不到这点，说明所有权模型没设计对。
+
+### 3.3 协议形状（草案）
+
+```
+agent ──(mTLS, gRPC 双向流, agent 发起)──> PSP
+
+  上行  Register(node_identity, agent_version, capabilities)
+  下行  ConfigSnapshot{generation, resources[], checksum}
+  上行  Ack{generation} / Nack{generation, reason}
+  上行  Status{applied_generation, xray_state, health}   ← 周期心跳，兼做 lease
+  上行  TrafficReport{counters[]}                        ← 周期推送
+```
+
+- 心跳超时 → 控制面标记节点 unreachable，但 **agent 侧继续按旧配置服务**（§3.1-4）
+- 周期性全量 resync（如 5 分钟）作为水平触发兜底——**这就是原来那个轮询，但它降级为安全网，不再是主路径**
+
+### 3.4 留钩子、暂不实现
+
+- **渐进式发布**：先做到「能指定单节点推送」即可，ring/canary/自动回滚以后再说
+- **增量（delta）传输**：先全量快照，PSP 的配置体量小，不值得
+
+### 3.5 明确不照搬
+
+完整 xDS 三层（LDS/RDS/CDS/EDS）、多租户控制面分片、自研服务发现、agent 自动升级。
+
+这些解决的是万节点 / 多租户 / 强监管的问题——**大厂那套的复杂度大部分是为规模和组织付的税，不是为正确性**。正确性来自 §3.1 那七条，它们在 10 个节点和 10000 个节点上同样必要，而且都不贵。
+
+### 3.6 仓库与产物布局：**单仓**
+
+判据（不是偏好，是可判定的规则）：
+
+> **agent 是否只被我们自己的控制面驱动？**
+> 是 → 单仓。否（要做成通用组件、被多个控制面驱动）→ 分仓。
+
+Kubernetes 就是前者：apiserver 和 kubelet **同仓、同 tag**（`kubernetes/kubernetes`），配一份明文版本偏斜策略。Envoy 是后者，所以它独立于 Istio——因为 Envoy 是通用代理，有许多不同的控制面。
+
+我们的 agent 是为 PSP 定制的，**不打算被第三方控制面驱动** → 单仓。
+
+具体理由：
+
+- **协议契约必须共享**。分仓要么引入第三个 proto 制品，要么 vendoring——两条都会制造新的版本对齐工作，而那正是本项目要消灭的东西
+- **一次 CI 能把两侧对着测**。可以在一个 `go test` 里同时拉起控制面和 agent 做集成测试；分仓要跨仓 CI 编排
+- **多二进制已是既有模式**：`cmd/` 下已有 `panel` / `dump-user` / `reset-admin-password`
+- **发布链路已经合适**：`build` 是 6 平台 matrix，`docker` job **不在容器里编译**、只 COPY 预编译二进制。加一个产物≈ release.yml +10~15 行 + 一个 20 行 Dockerfile
+
+**必须说清楚的一点**：单仓**不消除版本偏斜**。线上仍会出现「PSP v4.1 + 某台节点 agent v4.0」。单仓消除的是**源码偏斜**，并让**偏斜可测**（在一个 CI 里跑 N×M 版本矩阵）。所以 §3.1-6 的版本协商照做不误。
+
+**保留拆分能力**：proto / 协议类型放在**不依赖 `internal/` 的公开包**（如 `api/agent/v1/`）。拆仓的成本取决于接缝干不干净——接缝干净时拆是低风险的，现在拆是给自己上难度。等出现真实理由（第三方要实现 agent、或两侧发布节奏确实分叉）再拆。
+
+产物命名：
+
+| 位置 | 名称 |
+|---|---|
+| Go 包 | `cmd/agent` |
+| 二进制 | `psp-agent`（面板是 `psp`，前缀一致） |
+| 镜像 | `ghcr.io/kazuhahub/passwall-agent`（面板是 `passwall-sub-panel`，同族可辨） |
+| systemd unit | `passwall-agent.service` |
+| 协议包 | `api/agent/v1`（拆分接缝） |
+
+### 3.7 交付与共存
+
 - 单节点试点，与 3X-UI **长期共存**（适配器架构本就支持：存量节点留 3X-UI，新节点上 agent）
-- 安全面：mTLS + 重放保护（PSP 已有 SAML 重放保护的先例可参考）
+- 配置生成复用 PSP 现有的 `inboundcfg`
+- 退出条件：试点节点稳定运行一个完整计费周期，收敛状态可观测，fail-static 经过真实断网验证
 
 ---
 
