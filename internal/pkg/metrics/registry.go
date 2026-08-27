@@ -11,11 +11,19 @@ import (
 // resolution points — enough that an interpolated P95 lands within a
 // factor of ~1.6 of the truth anywhere in range.
 var (
-	// LatencyBucketsMS spans a fast local DB read (sub-millisecond) to a
-	// panel that has effectively hung (10s). A 3X-UI round trip over the
-	// public internet lands in the 50–500ms region, which gets six
-	// buckets — the resolution the RTT question actually needs.
+	// LatencyBucketsMS spans a fast local DB read to a panel that has
+	// effectively hung (10s). A 3X-UI round trip over the public internet
+	// lands in the 50–500ms region, which gets six buckets — the resolution
+	// the RTT question actually needs.
+	//
+	// The three sub-millisecond bounds are not padding. The poll's own stage
+	// timings are microsecond-scale on a small install, and with a single
+	// [0, 0.5ms] floor bucket every one of them reported the same
+	// indistinguishable midpoint — the breakdown could not tell a 3-microsecond
+	// prefetch from a 400-microsecond one, which is exactly the comparison the
+	// stage histogram exists to support.
 	LatencyBucketsMS = []float64{
+		0.05, 0.1, 0.25,
 		0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500,
 		1000, 2000, 5000, 10000,
 	}

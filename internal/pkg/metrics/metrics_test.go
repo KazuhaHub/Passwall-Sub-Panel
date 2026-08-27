@@ -180,3 +180,59 @@ func TestSnapshotBucketsAreCumulative(t *testing.T) {
 		t.Errorf("mean = %v, want %v", found.Mean, 555.5/4)
 	}
 }
+
+// A quantile can never exceed the largest sample. Interpolating inside a
+// bucket can, and did: a lone 3-microsecond observation sits in the widest
+// low-end bucket and interpolated to its midpoint — eighty times the value
+// actually recorded. Caught by reading the live diagnostics endpoint, where
+// psp_poll_stage_ms showed p50 = 0.250 against max = 0.003.
+func TestQuantileNeverExceedsTheLargestSample(t *testing.T) {
+	for _, v := range []float64{0.003, 0.04, 0.3, 7, 123, 99999} {
+		h := NewHistogram("test_clamp", "", "ms", LatencyBucketsMS)
+		h.Observe(v)
+		for _, q := range []float64{0.5, 0.9, 0.95, 0.99} {
+			if got := h.quantile(q); got > v {
+				t.Errorf("sample %v: quantile(%v) = %v, which exceeds the only sample", v, q, got)
+			}
+		}
+	}
+}
+
+// The clamp must not flatten a real distribution into its maximum.
+func TestQuantileStillSeparatesAMultiSampleSpread(t *testing.T) {
+	h := NewHistogram("test_spread", "", "ms", LatencyBucketsMS)
+	for i := 0; i < 1000; i++ {
+		h.Observe(float64(i) / 10)
+	}
+	p50, p99 := h.quantile(0.50), h.quantile(0.99)
+	if p50 >= p99 {
+		t.Fatalf("p50 %v must stay below p99 %v", p50, p99)
+	}
+	if p99 > h.max.Load() {
+		t.Fatalf("p99 %v exceeds max %v", p99, h.max.Load())
+	}
+}
+
+// Sub-millisecond work must be distinguishable, or the poll's stage
+// breakdown reports one indistinguishable number for every fast stage.
+func TestSubMillisecondSamplesLandInDistinctBuckets(t *testing.T) {
+	seen := map[int]bool{}
+	for _, v := range []float64{0.003, 0.07, 0.2, 0.4} {
+		h := NewHistogram("test_submilli", "", "ms", LatencyBucketsMS)
+		h.Observe(v)
+		idx := -1
+		for i := range h.buckets {
+			if h.buckets[i].Load() == 1 {
+				idx = i
+				break
+			}
+		}
+		if idx < 0 {
+			t.Fatalf("sample %v landed nowhere", v)
+		}
+		if seen[idx] {
+			t.Errorf("sample %v shares bucket %d with an earlier sample — sub-ms work is not resolvable", v, idx)
+		}
+		seen[idx] = true
+	}
+}

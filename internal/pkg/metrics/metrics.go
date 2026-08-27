@@ -215,7 +215,16 @@ func (h *Histogram) quantile(q float64) float64 {
 			// than report a quantile below the preceding bound.
 			return prev
 		}
-		return prev + (target-float64(cum))/float64(c)*(upper-prev)
+		est := prev + (target-float64(cum))/float64(c)*(upper-prev)
+		// A quantile of a sample set can never exceed its largest sample, but
+		// interpolating inside a bucket can: a lone 3-microsecond observation
+		// sits in the [0, 0.5ms] bucket and interpolates to 0.25ms — eighty
+		// times the value actually recorded. Clamping costs one comparison and
+		// makes every reported quantile a number some sample could have been.
+		if m := h.max.Load(); est > m {
+			return m
+		}
+		return est
 	}
 	return h.max.Load()
 }
