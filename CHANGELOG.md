@@ -4,7 +4,9 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
-## Unreleased
+## v3.9.2-beta.8 — 2026-08-27
+
+修掉一个长期存在、只影响设了流量上限的用户的量纲不匹配缺陷（面板会在他们用到一半时把人停掉），并把每用户的并发 IP 与设备数上限做通——PSP 持有字段语义，面板只负责翻译，翻译不了的显式上报缺口。另有数据面演进计划 Phase 0 的内置指标（纯观测）与一个把遗留客户端整批丢弃的 v2→v3 迁移器修复。
 
 ### 修复
 
