@@ -74,19 +74,11 @@ func TestPanelQuotaCapMethods(t *testing.T) {
 	if got := c.PanelQuotaCap(40 * GB); got != 100*GB {
 		t.Errorf("PSPClient cap = %d, want %d", got, 100*GB)
 	}
-	e := &XUIClientEntry{LastRawTotalBytes: 60 * GB}
-	if got := e.PanelQuotaCap(40 * GB); got != 100*GB {
-		t.Errorf("XUIClientEntry cap = %d, want %d", got, 100*GB)
-	}
 	// Nil-tolerant: the legacy push sites iterate rows that a concurrent
 	// delete can empty, and a panic there would take down a poll cycle.
 	var nilC *PSPClient
 	if got := nilC.PanelQuotaCap(40 * GB); got != 40*GB {
 		t.Errorf("nil PSPClient cap = %d, want %d", got, 40*GB)
-	}
-	var nilE *XUIClientEntry
-	if got := nilE.PanelQuotaCap(40 * GB); got != 40*GB {
-		t.Errorf("nil XUIClientEntry cap = %d, want %d", got, 40*GB)
 	}
 }
 

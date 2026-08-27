@@ -619,6 +619,12 @@ func (s *Service) CreateLocal(ctx context.Context, in CreateLocalInput) (*Create
 	if upn == "" {
 		return nil, fmt.Errorf("%w: upn required", domain.ErrValidation)
 	}
+	if err := validateConnLimit("ip_limit", in.IPLimit); err != nil {
+		return nil, err
+	}
+	if err := validateConnLimit("device_limit", in.DeviceLimit); err != nil {
+		return nil, err
+	}
 	if _, err := s.users.GetByUPN(ctx, in.UPN); err == nil {
 		return nil, domain.ErrAlreadyExists
 	} else if !errors.Is(err, domain.ErrNotFound) {
@@ -1090,6 +1096,11 @@ func (s *Service) ResetCredentialsAndSync(ctx context.Context, userID int64) (*R
 	// CurrentPeriodUsage doesn't blow up to N round-trips against the
 	// snapshots table.
 	floor := s.trafficFloor(ctx, u)
+	// One snapshot for the whole fan-out. Rebuilding it per client would
+	// evaluate EffectiveEnabled against a different `now` each time, so a user
+	// whose expiry falls inside the push window would come out enabled on some
+	// panels and disabled on others.
+	want := u.Lifecycle(time.Now(), floor)
 	needsRetry := false
 	for _, e := range entries {
 		info, err := s.inspectInboundByPanel(ctx, e.PanelID, e.InboundID)
@@ -1102,7 +1113,7 @@ func (s *Service) ResetCredentialsAndSync(ctx context.Context, userID int64) (*R
 		}
 		if err := s.syncer.RotateClientUUID(ctx, e.PanelID, e.InboundID, e.ClientEmail,
 			info.protocol, info.ssMethod, oldUUID, newUUID, info.flow,
-			u.Lifecycle(time.Now(), floor), e.LastRawTotalBytes); err != nil {
+			want, e.LastRawTotalBytes); err != nil {
 			needsRetry = true
 		}
 	}
@@ -1380,6 +1391,19 @@ func (s *Service) DeleteAndSync(ctx context.Context, userID int64) error {
 // nil → no change; non-nil → set to the dereferenced value. ClearExpire is
 // a separate bool because *time.Time cannot distinguish "no change" from
 // "explicit clear to permanent".
+// validateConnLimit rejects a negative connection cap.
+//
+// It matters more than the usual input hygiene: the panel reads any value <= 0
+// as "no cap", so a stored -1 would present in PSP's UI as a tightened limit
+// while actually disabling enforcement — a control that means the opposite of
+// what it displays. Zero is the legitimate "unlimited" encoding and passes.
+func validateConnLimit(field string, v int) error {
+	if v < 0 {
+		return fmt.Errorf("%w: %s must be >= 0 (0 = unlimited)", domain.ErrValidation, field)
+	}
+	return nil
+}
+
 type UpdateInput struct {
 	GroupID            *int64
 	Role               *domain.Role
@@ -1485,12 +1509,18 @@ func (s *Service) UpdateProfile(ctx context.Context, userID int64, in UpdateInpu
 	// Reusing the flag rather than adding a parallel one keeps a single edit
 	// that touches both to a single push.
 	if in.IPLimit != nil {
+		if err := validateConnLimit("ip_limit", *in.IPLimit); err != nil {
+			return err
+		}
 		if *in.IPLimit != u.IPLimit {
 			trafficLimitChanged = true
 		}
 		u.IPLimit = *in.IPLimit
 	}
 	if in.DeviceLimit != nil {
+		if err := validateConnLimit("device_limit", *in.DeviceLimit); err != nil {
+			return err
+		}
 		if *in.DeviceLimit != u.DeviceLimit {
 			trafficLimitChanged = true
 		}
@@ -2258,6 +2288,9 @@ func (s *Service) pushClientConfigToAll(ctx context.Context, u *domain.User) err
 		return nil
 	}
 	floor := s.trafficFloor(ctx, u)
+	// Single now-snapshot for the whole fan-out; see the note in the rotate
+	// paths above for why this must not be rebuilt per goroutine.
+	want := u.Lifecycle(time.Now(), floor)
 
 	// Resolve concurrency cap once. The setting is shared with the
 	// traffic poll and reconcile fan-out (v2.2.7 admin tunable) so an
@@ -2390,7 +2423,7 @@ func (s *Service) pushClientConfigToAll(ctx context.Context, u *domain.User) err
 			// re-fetching what Phase 1 already had in hand.
 			perr := s.syncer.SetOwnedClientEnableWithInbound(ctx, entry.PanelID, inbCopy, entry.ClientEmail,
 				infoCopy.protocol, infoCopy.ssMethod, u.UUID, infoCopy.flow,
-				u.Lifecycle(time.Now(), floor), entry.LastRawTotalBytes)
+				want, entry.LastRawTotalBytes)
 			outcomes <- pushOutcome{entry: entry, err: perr}
 		}()
 	}
@@ -2618,6 +2651,11 @@ func (s *Service) ResetUUIDAndSync(ctx context.Context, userID int64) (string, e
 		return newUUID, err
 	}
 	floor := s.trafficFloor(ctx, u)
+	// One snapshot for the whole fan-out. Rebuilding it per client would
+	// evaluate EffectiveEnabled against a different `now` each time, so a user
+	// whose expiry falls inside the push window would come out enabled on some
+	// panels and disabled on others.
+	want := u.Lifecycle(time.Now(), floor)
 	needsRetry := false
 	for _, e := range entries {
 		info, err := s.inspectInboundByPanel(ctx, e.PanelID, e.InboundID)
@@ -2630,7 +2668,7 @@ func (s *Service) ResetUUIDAndSync(ctx context.Context, userID int64) (string, e
 		}
 		if err := s.syncer.RotateClientUUID(ctx, e.PanelID, e.InboundID, e.ClientEmail,
 			info.protocol, info.ssMethod, oldUUID, newUUID, info.flow,
-			u.Lifecycle(time.Now(), floor), e.LastRawTotalBytes); err != nil {
+			want, e.LastRawTotalBytes); err != nil {
 			needsRetry = true
 		}
 	}

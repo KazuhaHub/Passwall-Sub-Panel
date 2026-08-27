@@ -58,15 +58,6 @@ func (c *PSPClient) PanelQuotaCap(headroom int64) int64 {
 	return PanelQuotaCap(headroom, c.LastRawTotalBytes)
 }
 
-// PanelQuotaCap resolves the absolute cap to push for this legacy per-node
-// client.
-func (e *XUIClientEntry) PanelQuotaCap(headroom int64) int64 {
-	if e == nil {
-		return PanelQuotaCap(headroom, 0)
-	}
-	return PanelQuotaCap(headroom, e.LastRawTotalBytes)
-}
-
 // UserLifecycle is the enforcement state every one of a user's panel-side
 // clients must reflect. It exists as a type rather than a parameter list
 // because it is a CONTRACT, not an argument bundle: PSP's own data plane is

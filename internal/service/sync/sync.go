@@ -275,7 +275,16 @@ func clientUnchanged(inb *ports.Inbound, spec ports.ClientSpec, protocol domain.
 		cur.Flow != spec.Flow ||
 		cur.ExpiryTime != spec.ExpiryTime ||
 		cur.TotalGB != spec.TotalGB ||
+		cur.LimitIP != spec.LimitIP ||
 		cur.ID != spec.ID {
+		return false
+	}
+	// limitHwid is NOT in the inbound's settings.clients[] — the panel keeps it
+	// on its own client row — so a pre-fetched inbound cannot prove a match.
+	// Per this function's contract (any uncertainty means "go ahead and
+	// update"), a non-zero device cap forces the write. Zero needs no write:
+	// it is what the panel already holds for a client PSP has never capped.
+	if spec.LimitHwid != 0 {
 		return false
 	}
 	// Trojan/SS/SS-2022 also carry a password; VLESS/VMess leave spec.Password

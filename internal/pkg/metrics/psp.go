@@ -27,11 +27,15 @@ package metrics
 // exchange (including the adapter's own retry/relogin) regardless of
 // which service called it. Labelled by operation name only: panel
 // identity would make the label space grow with the deployment.
+//
+// Only the 3X-UI adapter records these. S-UI has no equivalent hook yet, so
+// these histograms describe 3X-UI traffic exclusively — read them that way
+// before drawing conclusions about a mixed fleet.
 // ---------------------------------------------------------------------
 var (
 	PanelRTT = NewHistogramVec(
 		"psp_panel_rtt_ms",
-		"Latency of one 3X-UI/S-UI adapter operation, measured around the HTTP exchange.",
+		"Latency of one 3X-UI adapter operation, measured around the HTTP exchange. The S-UI adapter is NOT instrumented, so an S-UI-only deployment reads this empty.",
 		"ms", "op", LatencyBucketsMS,
 	)
 	PanelOpTotal = NewCounterVec(

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
@@ -73,6 +74,13 @@ type Service struct {
 	// cycle's pushes are still draining when a new cycle queues more, the
 	// new ones wait on the same sem instead of doubling the load on 3X-UI.
 	pushSem chan struct{}
+	// pushQueued counts floor pushes that actually BLOCKED waiting for a
+	// pushSem slot. It is the guard's input, deliberately separate from the
+	// metrics gauge of the same name: this one is per-Service and counts only
+	// real waits, so the guard describes this semaphore's state rather than
+	// the process's instrumentation.
+	pushQueued atomic.Int64
+
 	// bgWG is the app-level WaitGroup the background goroutines (floor
 	// push, quota-event email) attach to so App.Shutdown drains them
 	// before the process exits. Late-bound via SetBgWG because the WG
@@ -231,13 +239,19 @@ func (s *Service) PollOnce(ctx context.Context) (err error) {
 	// releases its slot at the adapter's HTTP timeout, so the queue
 	// always drains and the guard un-trips on its own.
 	//
+	// The counter is per-Service and counts only goroutines that ACTUALLY
+	// blocked. The observability gauge cannot serve here: it is a process
+	// global (so a second Service would suppress this one's pushes) and it is
+	// incremented before the send, so it also counts acquisitions that never
+	// waited — which would trip the guard on a perfectly healthy deployment.
+	//
 	// Sampled here, at the one moment the distinction between "this
 	// cycle's load" and "last cycle's leftovers" is observable.
-	pushBacklogged := metrics.PushSemWaiting.Value() > 0
+	pushBacklogged := s.pushQueued.Load() > 0
 	if pushBacklogged {
 		metrics.PushSemCarryoverTotal.Inc()
 		log.Warn("traffic poll: floor pushes from the previous cycle have not drained; skipping this cycle's pushes",
-			"queued", metrics.PushSemWaiting.Value(),
+			"queued", s.pushQueued.Load(),
 			"in_flight", metrics.PushSemInflight.Value(),
 			"capacity", metrics.PushSemCapacity.Value())
 	}
@@ -757,12 +771,33 @@ func (s *Service) PollOnce(ctx context.Context) (err error) {
 			log.Warn("traffic poll flush ownership counters", "count", len(sink.ownershipUpdates), "err", err)
 		}
 	}
+	// ORDERING IS LOAD-BEARING: the per-client counters must land BEFORE the
+	// user's traffic state, and a failure of the first must suppress the second.
+	//
+	// The async floor push re-reads both from the database, and the cap it
+	// computes is clientLastRaw + (limit - userPeriodUsed). Those two numbers
+	// have to come from the same cycle. Persisting the user's usage while the
+	// client's counter stays behind produces a cap built from a fresh (smaller)
+	// headroom on top of a stale counter — below where the panel's own counter
+	// already sits — and 3X-UI's depletion sweep then cuts a user who still has
+	// quota left. Persisting them the other way round errs the opposite way: a
+	// briefly over-generous cap, which the next cycle corrects. See
+	// docs/traffic-floor-defect.md.
+	countersStale := false
 	if len(sink.pspClientUpdates) > 0 && s.pspClient != nil {
 		if err := s.pspClient.BatchUpdateCounters(ctx, sink.pspClientUpdates); err != nil {
 			log.Warn("traffic poll flush shared-client counters", "count", len(sink.pspClientUpdates), "err", err)
+			countersStale = true
 		}
 	}
-	if len(sink.userUpdates) > 0 {
+	if countersStale {
+		// Hold the user state back so the pair stays consistent. Both lag by one
+		// cycle and the next poll re-derives them together — LastRawXxx is
+		// untouched, so monotonicDelta still produces the right increment.
+		log.Warn("traffic poll: holding user traffic state back to stay consistent with unflushed client counters",
+			"users", len(sink.userUpdates))
+	}
+	if len(sink.userUpdates) > 0 && !countersStale {
 		// Local name `pending` avoids shadowing the outer `users` (the list
 		// loaded at the top of PollOnce). Iteration order is non-deterministic
 		// (map) but harmless: rows in the batch are independent.
@@ -1434,9 +1469,16 @@ func (s *Service) recordAndEnforceWith(ctx context.Context, u *domain.User, tota
 		// wait with flat service time is the backlog, whereas both rising
 		// together is a slow panel.
 		queuedAt := time.Now()
-		metrics.PushSemWaiting.Inc()
-		s.pushSem <- struct{}{}
-		metrics.PushSemWaiting.Dec()
+		select {
+		case s.pushSem <- struct{}{}:
+			// A free slot: never queued, so it must not read as backlog.
+		default:
+			s.pushQueued.Add(1)
+			metrics.PushSemWaiting.Inc()
+			s.pushSem <- struct{}{}
+			metrics.PushSemWaiting.Dec()
+			s.pushQueued.Add(-1)
+		}
 		metrics.PushSemWait.ObserveSince(queuedAt)
 		metrics.PushSemInflight.Inc()
 		defer func() {

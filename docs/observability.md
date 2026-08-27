@@ -69,7 +69,16 @@ curl -s -b cookies.txt https://panel.example.com/api/admin/diagnostics/metrics >
 | `psp_lifecycle_sync_write_reason_total{reason=…}` | **是哪个字段挫败了 skip** |
 | `psp_lifecycle_sync_not_provisioned_total` | 单列，不进分母 |
 
-三个终态之和等于分母。未 provisioned 的调用单列，否则一支迁移到一半的机队会报出一个由「从未考虑过推送的调用」堆出来的漂亮 skip 率。
+**口径要说清楚，否则会算错**：`skipped + write = total`，这两个互斥且穷尽。**`error` 是与 `write` 重叠的子计数**（失败的 `UpdateClient` 两个都加一），另外还包含 pool 取用失败（那种既不算 skip 也不算 write）。所以：
+
+```
+skip 命中率 = skipped / total        ✅
+skipped + write + error = total      ❌ 别这么算
+```
+
+未 provisioned 的调用单列，否则一支迁移到一半的机队会报出一个由「从未考虑过推送的调用」堆出来的漂亮 skip 率。
+
+`reason=panel_unread` 表示 `GetClient` 失败或报告客户端不存在，skip 无从判断而直接走写入。单列它是为了让 `sum(write_reason) == write_total` 成立——否则漏掉的恰好是**最不稳定的那些面板**。
 
 ```
 skip 命中率 = psp_lifecycle_sync_skipped_total / psp_lifecycle_sync_total

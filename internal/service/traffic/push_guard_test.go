@@ -87,11 +87,11 @@ func TestPollOnce_SuppressesPushesWhileThePreviousCycleIsStillQueued(t *testing.
 	pusher := &countingPusher{}
 	svc, drain, _ := activeUserPoll(t, pusher)
 
-	// Simulate the previous cycle's leftovers. Driving the gauge directly is
-	// what keeps this a test of the GUARD rather than of how many goroutines
-	// it takes to saturate a semaphore.
-	metrics.PushSemWaiting.Inc()
-	defer metrics.PushSemWaiting.Dec()
+	// Simulate the previous cycle's leftovers by driving the counter the guard
+	// actually reads. Doing it directly keeps this a test of the GUARD rather
+	// than of how many goroutines it takes to saturate a semaphore.
+	svc.pushQueued.Add(1)
+	defer svc.pushQueued.Add(-1)
 
 	if err := svc.PollOnce(context.Background()); err != nil {
 		t.Fatalf("PollOnce: %v", err)
@@ -118,8 +118,13 @@ func TestPollOnce_InFlightPushesAloneDoNotTripTheGuard(t *testing.T) {
 	pusher := &countingPusher{}
 	svc, drain, _ := activeUserPoll(t, pusher)
 
-	metrics.PushSemInflight.Inc()
-	defer metrics.PushSemInflight.Dec()
+	// Hold a real semaphore slot with nobody queued behind it — the normal tail
+	// of a previous cycle still finishing. pushQueued stays 0, so the guard
+	// must not trip. (Driving the metrics gauge would prove nothing now: the
+	// guard reads the per-Service counter, precisely because that gauge is a
+	// process global and is incremented even for acquisitions that never wait.)
+	svc.pushSem <- struct{}{}
+	defer func() { <-svc.pushSem }()
 
 	if err := svc.PollOnce(context.Background()); err != nil {
 		t.Fatalf("PollOnce: %v", err)
@@ -141,12 +146,12 @@ func TestPollOnce_GuardReleasesOnceTheQueueDrains(t *testing.T) {
 	pusher := &countingPusher{}
 	svc, drain, bump := activeUserPoll(t, pusher)
 
-	metrics.PushSemWaiting.Inc()
+	svc.pushQueued.Add(1)
 	if err := svc.PollOnce(context.Background()); err != nil {
 		t.Fatalf("PollOnce (backlogged): %v", err)
 	}
 	drain()
-	metrics.PushSemWaiting.Dec()
+	svc.pushQueued.Add(-1)
 
 	bump() // the user keeps using traffic, so the next cycle has a delta again
 	if err := svc.PollOnce(context.Background()); err != nil {

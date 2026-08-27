@@ -54,6 +54,23 @@ small improvement).
 
   用法、逐项释义与已知限制见新增的 [`docs/observability.md`](docs/observability.md)。
 
+### 修复（自查发现，均为本轮引入的回归）
+
+对 `origin/main..HEAD` 做了一次高强度代码审查，查出 12 个问题——**大部分是这一轮自己引入的**。逐条修复并补了回归测试：
+
+- **能力缺失的面板会被写入死循环** —— 把 `LimitIP` / `LimitHwid` 加进 no-op skip 的比较集合时漏了一件事：存不下该字段的面板读回来**永远是 0**，于是 skip **结构性地永远不可能命中**——每周期看到差异、发一次整体替换、重启一次内核，而这个值**永远无法收敛**。S-UI 上任何设了限制的用户都会触发。现在比较受能力门控；缺口本身已由 `psp_capability_gap_total` 上报，不该同时变成写循环。
+- **reconcile 会抹掉两个上限** —— 每次漂移修复都推 `IPLimit=0 / DeviceLimit=0`。配额可以留零是因为它**自愈**（流量轮询每周期重算重推），而上限**不会**：没有别的东西会重推它们，对没设流量上限的用户，轮询的 no-op skip 随后看到完全一致就不再出声——**一次 reconcile 就把两个上限永久清零**。空闲用户根本不会收到下限推送，无论配额如何都逃不掉。
+- **并行扇出把 panic 吞成了成功** —— `safego.Recover` 吞掉 panic 后 `errs[i]` 仍是 nil，而 `ResyncMembership` 正是靠这个信号删除遗留 per-node 兜底，于是用户会被留在一个仍持有创建默认值（启用、无到期、无配额）的共享 client 上——**正是注释里警告的 audit#1 执法绕过**。被它取代的串行循环不会有这个问题，因为 panic 会往上传。现在 panic 记入 `errs[i]`。
+- **遗留路径的 no-op skip 看不到两个上限** —— `clientUnchanged` 不比较 `LimitIP`，于是管理员改了上限、legacy 客户端被判「未变化」而跳过。`limitHwid` 更特殊：它**根本不在 inbound 的 settings.clients[] 里**（在面板自己的行上），预取的 inbound 无法证明匹配，按该函数「无法完全验证就返回 false」的既有契约处理。
+- **跨周期守卫读的是进程级 gauge** —— 那个 gauge 在**发送前**自增，所以连没阻塞的获取也计入，会在健康部署上误伤；而且它是进程全局的，第二个 traffic.Service 会互相压制。改为每 Service 的计数器，且只在**真的阻塞**时才加（`select` + `default`）。
+- **刷盘顺序是偶然正确的** —— 异步下限推送会重新读取 client 计数器与用户已用量，两者必须同周期。「新已用量 + 旧计数器」会算出一个**低于面板当前计数器**的上限，面板立刻停用一个还有配额的用户。现有顺序恰好安全，但没人写下来，重排一下就会静默复活；且 client 批次刷失败、user 批次成功时仍会踩中。现在顺序有注释说明其是 load-bearing 的，且前者失败会**压住**后者，让两者一起滞后一个周期。
+- **指标不变式是错的** —— 我写的注释声称 `skipped + write + error = total`，但失败的 `UpdateClient` 会同时加 `write` 和 `error`。正确口径：`skipped + write = total`，`error` 是与 `write` **重叠**的子计数。另外 `GetClient` 失败时会直接走写入却不打 reason 标签，导致 `sum(write_reason) < write_total`，漏掉的**恰好是最不稳定的那些面板**——新增 `reason=panel_unread`。
+- **每用户扇出无视管理员的并发上限** —— 硬编码成默认 8，而其他每一条 3X-UI 扇出都读 `MaxPanelConcurrency`。运维方为保护弱机把滑块调低，这条路径照样八路并发，破坏了「一个滑块管住所有扇出」这个承诺。改为读同一个设置。
+- **生命周期快照在每个 goroutine 里重建** —— `u.Lifecycle(time.Now(), floor)` 落在闭包内，于是每个 client 拿到不同的 `now`；到期时间正好落在推送窗口内的用户，会在一部分面板上启用、另一部分上停用。改为与 `floor` 一起提到循环外，恢复单次快照语义。
+- **负数上限没有服务端校验** —— 面板把 `<= 0` 一律读作「不限」，所以存进去的 `-1` 会在 PSP 界面上显示成一个更严格的限制，实际却**关掉了执法**——一个显示与行为相反的控件。创建与更新路径都加了校验。前端也从小数版校验器改回整数版（`2.5` 原先只会得到一个不知所云的 400），并把清空/半输入产生的 `NaN` 收敛为 0。
+- **三条真实 HTTP 路径没打 op 标签** —— `ListClientInbounds` / `BulkSetEnabled` / `GetWebCertFiles` 的往返都落进 `other` 桶，而那个桶的定义正是「有热路径没打标签」。另外 `psp_panel_rtt_ms` 的说明声称覆盖 S-UI，**但 S-UI 适配器根本没有插桩**——说明已改为如实描述。
+- **`(*XUIClientEntry).PanelQuotaCap` 是死代码** —— 加了却没用上（遗留路径走的是 `want.PanelQuota(panelLifetime)`），只被自己的单测撑着。删除。
+
 ### 改进
 
 - **清理适配器的退化调用面** —— `UpdateClient` 的 `inboundID` / `clientUUID` 两个参数自 3.2.0 起就没用了（客户端按 email 改），两个适配器里都是 `_`；`UpdateClientWithInbound` 整个方法只是转发，只有一个调用点。两者一并删除，`ports.PanelClient` 少一个方法、`UpdateClient` 少两个参数。`AddClient` 的 `inboundID` 保留——创建必须落到某个 inbound。

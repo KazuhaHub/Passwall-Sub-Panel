@@ -30,7 +30,7 @@ func TestLifecycleWriteReason(t *testing.T) {
 		}
 	}
 
-	if got := lifecycleWriteReason(match(), base); got != "" {
+	if got := lifecycleWriteReason(match(), base, true, true); got != "" {
 		t.Fatalf("identical state must skip, got reason %q", got)
 	}
 
@@ -50,7 +50,7 @@ func TestLifecycleWriteReason(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			d := match()
 			tc.mutate(d)
-			if got := lifecycleWriteReason(d, base); got != tc.want {
+			if got := lifecycleWriteReason(d, base, true, true); got != tc.want {
 				t.Fatalf("reason = %q, want %q", got, tc.want)
 			}
 		})
@@ -63,7 +63,7 @@ func TestLifecycleWriteReason(t *testing.T) {
 func TestLifecycleWriteReason_QuotaWinsWhenSeveralFieldsDiffer(t *testing.T) {
 	spec := ports.ClientSpec{Enable: true, TotalGB: 5 << 30, ID: "a"}
 	cur := &ports.ClientDetail{Enable: false, TotalGB: 4 << 30, ID: "b"}
-	if got := lifecycleWriteReason(cur, spec); got != "total_gb" {
+	if got := lifecycleWriteReason(cur, spec, true, true); got != "total_gb" {
 		t.Fatalf("reason = %q, want total_gb", got)
 	}
 }
@@ -564,4 +564,95 @@ func TestSyncLifecycle_ReportsCapabilityGaps(t *testing.T) {
 			t.Errorf("update calls = %d, want 1 — a capability gap must not refuse the push", xui.updateCalls)
 		}
 	})
+}
+
+// A panel that cannot STORE a cap reads it back as 0 forever. If that fed the
+// skip decision, every cycle would see a difference and issue a full-replace
+// that restarts the core — for a value that can never converge. This pins the
+// SECOND call, which is where the loop would show up.
+func TestSyncLifecycle_CapLessPanelDoesNotLoopForever(t *testing.T) {
+	clients := &fakeClients{attachments: []domain.PSPClientInbound{
+		{ClientID: 1, NodeID: 11, Provisioned: true},
+	}}
+	// Declares client.write but neither cap: the S-UI shape. GetClient returns
+	// a detail with the caps at 0, exactly as such a panel would.
+	xui := &capLessXUI{
+		caps:    []ports.PanelCapability{ports.CapabilityClientWrite},
+		fakeXUI: fakeXUI{getDetail: &ports.ClientDetail{Enable: true}},
+	}
+	svc := New(clients, fakePool{c: xui}, fakeNodes{})
+	c := &domain.PSPClient{ID: 1, PanelID: 10, Email: "u1@psp.local"}
+	want := domain.UserLifecycle{Enable: true, IPLimit: 3, DeviceLimit: 2}
+
+	for i := 0; i < 3; i++ {
+		if err := svc.SyncLifecycle(context.Background(), c, want); err != nil {
+			t.Fatalf("cycle %d: %v", i, err)
+		}
+	}
+	if xui.updateCalls != 0 {
+		t.Fatalf("update calls = %d, want 0 — an unstorable cap must not defeat the skip "+
+			"every cycle; that is a core restart per poll that can never converge", xui.updateCalls)
+	}
+}
+
+// The mirror: a panel that CAN store the caps must still heal drift on them.
+// Excluding an unstorable field is not the same as ignoring drift.
+func TestSyncLifecycle_CapablePanelStillHealsDrift(t *testing.T) {
+	clients := &fakeClients{attachments: []domain.PSPClientInbound{
+		{ClientID: 1, NodeID: 11, Provisioned: true},
+	}}
+	xui := &capLessXUI{
+		caps: []ports.PanelCapability{
+			ports.CapabilityClientIPLimit, ports.CapabilityClientDeviceLimit,
+		},
+		fakeXUI: fakeXUI{getDetail: &ports.ClientDetail{Enable: true, LimitIP: 1, LimitHwid: 2}},
+	}
+	svc := New(clients, fakePool{c: xui}, fakeNodes{})
+	c := &domain.PSPClient{ID: 1, PanelID: 10, Email: "u1@psp.local"}
+	if err := svc.SyncLifecycle(context.Background(), c,
+		domain.UserLifecycle{Enable: true, IPLimit: 3, DeviceLimit: 2}); err != nil {
+		t.Fatal(err)
+	}
+	if xui.updateCalls != 1 {
+		t.Fatalf("update calls = %d, want 1 — drift on a storable cap must be healed", xui.updateCalls)
+	}
+}
+
+// panicXUI panics on the client whose email matches, to prove a panic in one
+// goroutine of the fan-out is reported rather than read as success.
+type panicXUI struct {
+	fakeXUI
+	panicOn string
+}
+
+func (c *panicXUI) GetClient(_ context.Context, email string) (*ports.ClientDetail, error) {
+	if email == c.panicOn {
+		panic("simulated panel adapter panic")
+	}
+	return nil, nil
+}
+
+// A nil errs[i] means "pushed successfully", and ResyncMembership deletes the
+// legacy per-node fallback on exactly that signal. A swallowed panic would
+// therefore strand the user on a shared client still holding its provision
+// defaults — the audit-#1 enforcement bypass. The serial loop this replaced
+// could not produce it, because a panic propagated.
+func TestSyncUserLifecycle_PanicIsReportedNotSwallowed(t *testing.T) {
+	byUser := []*domain.PSPClient{
+		{ID: 1, UserID: 7, PanelID: 10, Email: "ok@psp.local", UUID: "u"},
+		{ID: 2, UserID: 7, PanelID: 11, Email: "boom@psp.local", UUID: "u"},
+	}
+	clients := &fakeClients{byUser: byUser, attachments: []domain.PSPClientInbound{
+		{ClientID: 1, NodeID: 101, Provisioned: true},
+		{ClientID: 2, NodeID: 102, Provisioned: true},
+	}}
+	svc := New(clients, fakePool{c: &panicXUI{panicOn: "boom@psp.local"}}, fakeNodes{})
+
+	err := svc.SyncUserLifecycle(context.Background(), 7, domain.UserLifecycle{Enable: true})
+	if err == nil {
+		t.Fatal("a panic in the fan-out must surface as an error, not as success")
+	}
+	if !strings.Contains(err.Error(), "panic") {
+		t.Fatalf("error = %v, want it to name the panic", err)
+	}
 }

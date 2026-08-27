@@ -13,6 +13,7 @@ package sharedclient
 import (
 	"context"
 	"fmt"
+	"runtime/debug"
 	"sync"
 	"time"
 
@@ -21,7 +22,6 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/log"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/metrics"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/paneltz"
-	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/safego"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 )
 
@@ -32,6 +32,10 @@ type capGapKey struct {
 }
 
 type Service struct {
+	// settings is optional (WithSettings). When absent the fan-out below falls
+	// back to the same default every other 3X-UI fan-out resolves to.
+	settings ports.ScopedSettings
+
 	// capGapSeen keeps the capability-gap warning to once per (panel,
 	// capability) per process. sync.Map because the push path fans out
 	// concurrently and this is a write-once-read-many set.
@@ -270,10 +274,12 @@ func (s *Service) SyncLifecycle(ctx context.Context, c *domain.PSPClient, want d
 		metrics.LifecycleNotProvisionedTotal.Inc()
 		return nil
 	}
-	// Counted from here rather than at function entry so the accounting
-	// closes: every call past the provisioned gate lands in exactly one of
-	// skipped / write / error, and those three sum to this total. Calls
-	// that returned above are the separate not-provisioned tally.
+	// Counted from here rather than at function entry, so the denominator is
+	// "calls that reached the compare-then-write decision". Exactly one of
+	// skipped / write follows, and those two sum to this total; error is a
+	// SUB-count that overlaps write (a failed UpdateClient is both) and also
+	// covers the pool failure below, which reaches neither. Skip rate is
+	// skipped/total; do not try to reconcile all three against the total.
 	metrics.LifecycleTotal.Inc()
 	cli, err := s.pool.Get(c.PanelID)
 	if err != nil {
@@ -297,6 +303,16 @@ func (s *Service) SyncLifecycle(ctx context.Context, c *domain.PSPClient, want d
 	// would issue a redundant full-replace each time. Creds are compared too, so a
 	// UUID reset (id/password differ) still propagates; an active user's shrinking
 	// quota-floor (totalGB differs) still refreshes the Xray-side cap.
+	//
+	// Which caps the panel can actually store. A field it silently drops reads
+	// back as 0 forever, so letting it into the comparison below would mean the
+	// skip can NEVER fire: every cycle would see a difference, issue a
+	// full-replace, and restart the core — for a value that cannot converge.
+	// The gap is already reported above; it must not also become a write loop.
+	capIP := ports.SupportsCapability(cli, ports.CapabilityClientIPLimit)
+	capDevice := ports.SupportsCapability(cli, ports.CapabilityClientDeviceLimit)
+
+	unreadReason := "panel_unread"
 	if cur, err := cli.GetClient(ctx, c.Email); err == nil && cur != nil {
 		// Hand the operator's 3X-UI note straight back. UpdateClient is a
 		// full-replace and upstream writes clients.comment unconditionally, so
@@ -319,19 +335,56 @@ func (s *Service) SyncLifecycle(ctx context.Context, c *domain.PSPClient, want d
 		// that a deadband on that one field recovers the skip. Any other
 		// reason showing up in bulk would mean a deadband buys nothing
 		// and Phase 1a is aimed at the wrong field.
-		reason := lifecycleWriteReason(cur, spec)
+		reason := lifecycleWriteReason(cur, spec, capIP, capDevice)
 		if reason == "" {
 			metrics.LifecycleSkippedTotal.Inc()
 			return nil
 		}
 		metrics.LifecycleWriteReasonTotal.With(reason).Inc()
+		unreadReason = ""
+	}
+	if unreadReason != "" {
+		// GetClient failed or reported the client absent, so the skip could not
+		// be evaluated. Labelling it keeps sum(write_reason) == write_total,
+		// which otherwise silently under-counts exactly the flaky panels.
+		metrics.LifecycleWriteReasonTotal.With(unreadReason).Inc()
 	}
 	metrics.LifecycleWriteTotal.Inc()
-	if err := cli.UpdateClient(ctx, spec); err != nil { // inbound/uuid args vestigial; keyed by spec.Email
+	if err := cli.UpdateClient(ctx, spec); err != nil {
 		metrics.LifecycleErrorTotal.Inc()
 		return err
 	}
 	return nil
+}
+
+// WithSettings attaches the settings repo so the per-user fan-out honours the
+// admin's MaxPanelConcurrency. Optional, and returns the service for chaining
+// at construction sites — same shape as traffic.Service.WithSettings.
+func (s *Service) WithSettings(settings ports.ScopedSettings) *Service {
+	s.settings = settings
+	return s
+}
+
+// panelConcurrency resolves the per-user fan-out width.
+//
+// It reads the SAME admin setting as the traffic poll, reconcile and
+// pushClientConfigToAll, because that setting's whole promise is that moving
+// one slider bounds every 3X-UI fan-out. Hard-coding the default here would
+// break that promise in the least visible way possible: an operator who lowers
+// the cap to protect a weak VPS would still see this path fan out eight wide.
+//
+// Note this nests inside the poll's pushSem, so the real ceiling a panel sees
+// is the product. Honouring the setting at least keeps both factors under the
+// operator's control.
+func (s *Service) panelConcurrency(ctx context.Context) int {
+	if s.settings == nil {
+		return paneltz.ResolveMaxPanelConcurrency(0)
+	}
+	cfg, err := s.settings.Load(ctx, ports.UISettings{})
+	if err != nil {
+		return paneltz.ResolveMaxPanelConcurrency(0)
+	}
+	return paneltz.ResolveMaxPanelConcurrency(cfg.MaxPanelConcurrency)
 }
 
 // reportCapabilityGaps notices when PSP is about to push a setting the panel in
@@ -377,13 +430,20 @@ func (s *Service) reportCapabilityGaps(cli ports.XUIClient, panelID int64, want 
 //
 // The comparison set is kept identical to the skip condition it replaced;
 // adding a field here silently makes the skip stricter.
-func lifecycleWriteReason(cur *ports.ClientDetail, spec ports.ClientSpec) string {
+// capIP / capDevice say whether the panel can STORE each cap. A panel that
+// silently drops one reads it back as 0 forever, so including it here would
+// make the skip structurally impossible to hit: every cycle would see a
+// difference and issue a full-replace that restarts the core, for a value that
+// can never converge. Excluding it is not "ignoring drift" — there is no drift
+// to heal on a panel that has nowhere to put the value, and the gap is already
+// counted by reportCapabilityGaps.
+func lifecycleWriteReason(cur *ports.ClientDetail, spec ports.ClientSpec, capIP, capDevice bool) string {
 	switch {
 	case cur.TotalGB != spec.TotalGB:
 		return "total_gb"
-	case cur.LimitIP != spec.LimitIP:
+	case capIP && cur.LimitIP != spec.LimitIP:
 		return "ip_limit"
-	case cur.LimitHwid != spec.LimitHwid:
+	case capDevice && cur.LimitHwid != spec.LimitHwid:
 		return "device_limit"
 	case cur.Enable != spec.Enable:
 		return "enable"
@@ -476,11 +536,27 @@ func (s *Service) SyncUserLifecycle(ctx context.Context, userID int64, want doma
 	// latency, and callers surface it to an admin.
 	errs := make([]error, len(clients))
 	var wg sync.WaitGroup
-	sem := make(chan struct{}, paneltz.ResolveMaxPanelConcurrency(0))
+	sem := make(chan struct{}, s.panelConcurrency(ctx))
 	for i, c := range clients {
 		wg.Add(1)
 		go func(i int, c *domain.PSPClient) {
-			defer safego.Recover("sharedclient.SyncUserLifecycle")
+			// Record the panic as this client's error rather than letting
+			// safego.Recover swallow it. A nil errs[i] means "pushed
+			// successfully", and ResyncMembership deletes the legacy per-node
+			// fallback on exactly that signal — so a swallowed panic would
+			// strand the user on a shared client still holding its provision
+			// defaults (enabled, no expiry, no quota). That is the audit-#1
+			// enforcement bypass the ordering comments warn about, and the
+			// serial loop this replaced could not produce it because a panic
+			// propagated.
+			defer func() {
+				if r := recover(); r != nil {
+					errs[i] = fmt.Errorf("sharedclient.SyncUserLifecycle: panic: %v", r)
+					log.Error("panic in shared lifecycle push",
+						"client_id", c.ID, "panel_id", c.PanelID, "panic", r,
+						"stack", string(debug.Stack()))
+				}
+			}()
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()

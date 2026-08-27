@@ -95,6 +95,7 @@ import {
   validateEmail,
   validateGroupId,
   validateName,
+  validateNonNegativeInt,
   validateNonNegativeNumber,
   validatePassword,
   validateRequired,
@@ -436,8 +437,8 @@ export default function UsersView() {
       group_id: validateGroupId(f.group_id, { required: true }),
       expire_date: f.expire_mode === 'date' ? validateRequired(f.expire_date) : '',
       traffic_limit_gb: validateNonNegativeNumber(f.traffic_limit_gb),
-      ip_limit: validateNonNegativeNumber(f.ip_limit),
-      device_limit: validateNonNegativeNumber(f.device_limit),
+      ip_limit: validateNonNegativeInt(f.ip_limit),
+      device_limit: validateNonNegativeInt(f.device_limit),
     }
   }
 
@@ -510,8 +511,8 @@ export default function UsersView() {
       // accrued usage — integer-only would reject the field whenever a
       // real user has period usage).
       traffic_limit_gb: validateNonNegativeNumber(f.traffic_limit_gb),
-      ip_limit: validateNonNegativeNumber(f.ip_limit),
-      device_limit: validateNonNegativeNumber(f.device_limit),
+      ip_limit: validateNonNegativeInt(f.ip_limit),
+      device_limit: validateNonNegativeInt(f.device_limit),
       period_used_gb: validateNonNegativeNumber(f.period_used_gb),
     }
   }
@@ -1364,14 +1365,14 @@ export default function UsersView() {
             <Box sx={{ display: 'flex', gap: 1.5, flexWrap: 'wrap' }}>
               <TextField type="number" label={t('admin:users.field.ip_limit')}
                 value={createForm.ip_limit}
-                onChange={e => setCreateForm({ ...createForm, ip_limit: Number(e.target.value) })}
+                onChange={e => setCreateForm({ ...createForm, ip_limit: Number(e.target.value) || 0 })}
                 error={!!createErr.ip_limit}
                 helperText={createErr.ip_limit ? t(`admin:${createErr.ip_limit}`) : t('admin:users.field.limit_zero_hint')}
                 sx={{ flex: '1 1 180px' }}
                 slotProps={{ htmlInput: { min: 0, step: 1 } }} />
               <TextField type="number" label={t('admin:users.field.device_limit')}
                 value={createForm.device_limit}
-                onChange={e => setCreateForm({ ...createForm, device_limit: Number(e.target.value) })}
+                onChange={e => setCreateForm({ ...createForm, device_limit: Number(e.target.value) || 0 })}
                 error={!!createErr.device_limit}
                 helperText={createErr.device_limit ? t(`admin:${createErr.device_limit}`) : t('admin:users.field.limit_zero_hint')}
                 sx={{ flex: '1 1 180px' }}
@@ -1721,14 +1722,14 @@ export default function UsersView() {
                 }} />
               <TextField type="number" label={t('admin:users.field.ip_limit')}
                 value={editForm.ip_limit}
-                onChange={e => setEditForm({ ...editForm, ip_limit: Number(e.target.value) })}
+                onChange={e => setEditForm({ ...editForm, ip_limit: Number(e.target.value) || 0 })}
                 error={!!editErr.ip_limit}
                 helperText={editErr.ip_limit ? t(`admin:${editErr.ip_limit}`) : t('admin:users.field.limit_zero_hint')}
                 sx={{ flex: '1 1 200px' }}
                 slotProps={{ htmlInput: { min: 0, step: 1 } }} />
               <TextField type="number" label={t('admin:users.field.device_limit')}
                 value={editForm.device_limit}
-                onChange={e => setEditForm({ ...editForm, device_limit: Number(e.target.value) })}
+                onChange={e => setEditForm({ ...editForm, device_limit: Number(e.target.value) || 0 })}
                 error={!!editErr.device_limit}
                 helperText={editErr.device_limit ? t(`admin:${editErr.device_limit}`) : t('admin:users.field.limit_zero_hint')}
                 sx={{ flex: '1 1 200px' }}

@@ -1039,6 +1039,7 @@ func (c *Client) GetCoreVersionList(ctx context.Context) ([]string, error) {
 // can degrade (grey out "fetch cert from panel"). Backs cert_source=from_panel:
 // fill a node-assigned inbound with file-mode paths that exist on the node.
 func (c *Client) GetWebCertFiles(ctx context.Context) (*ports.WebCertFiles, error) {
+	ctx = withOp(ctx, "GetWebCertFiles")
 	var raw struct {
 		WebCertFile string `json:"webCertFile"`
 		WebKeyFile  string `json:"webKeyFile"`
@@ -1118,6 +1119,7 @@ func (c *Client) GetClient(ctx context.Context, email string) (*ports.ClientDeta
 // — listing the live state is robust to email-suffix or domain drift, which a
 // reconstruct-the-email approach is not.
 func (c *Client) ListClientInbounds(ctx context.Context) (map[string][]int, error) {
+	ctx = withOp(ctx, "ListClientInbounds")
 	ibs, err := c.ListInbounds(ctx)
 	if err != nil {
 		return nil, err
@@ -1501,6 +1503,7 @@ func clientObj(s ports.ClientSpec) map[string]any {
 // Route and payload are byte-identical on 3X-UI 3.4.2 (PSP's floor) and 3.6.0,
 // so adopting it required no floor bump.
 func (c *Client) BulkSetEnabled(ctx context.Context, emails []string, enable bool) (ports.BulkSetEnabledResult, error) {
+	ctx = withOp(ctx, "BulkSetEnabled")
 	var out ports.BulkSetEnabledResult
 	if len(emails) == 0 {
 		return out, nil

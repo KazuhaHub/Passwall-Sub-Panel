@@ -2,6 +2,7 @@ package user
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 
@@ -56,4 +57,36 @@ func TestSyncSharedLifecycle_PushesEffectiveEnable(t *testing.T) {
 // nil syncer (before wiring / in most tests) is a no-op, never a panic.
 func TestSyncSharedLifecycle_NilSyncerNoop(t *testing.T) {
 	(&Service{}).syncSharedLifecycle(context.Background(), &domain.User{ID: 1, Enabled: true})
+}
+
+// A negative connection cap must be rejected at the service boundary. The
+// panel reads any value <= 0 as "no cap", so a stored -1 would render in PSP's
+// UI as a tightened limit while actually disabling enforcement — a control
+// that means the opposite of what it shows.
+func TestConnLimitValidation(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		v       int
+		wantErr bool
+	}{
+		{"zero is the unlimited encoding", 0, false},
+		{"a real cap", 5, false},
+		{"negative is rejected", -1, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := validateConnLimit("ip_limit", tc.v)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatal("want a validation error")
+				}
+				if !errors.Is(err, domain.ErrValidation) {
+					t.Fatalf("error = %v, want it to wrap domain.ErrValidation so the handler maps it to 400", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		})
+	}
 }
