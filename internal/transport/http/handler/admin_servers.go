@@ -28,16 +28,15 @@ import (
 // (v3.6.0-beta.3) to write audit-trail rows and to schedule the post-upgrade
 // smoke probe; they're optional for the CRUD/Test flows.
 type AdminServersHandler struct {
-	repo      ports.XUIPanelRepo
-	pool      ports.XUIPool
-	nodes     ports.NodeRepo
-	ownership ports.OwnershipRepo
-	audit     ports.AuditRepo
-	async     AsyncDispatcher
+	repo  ports.XUIPanelRepo
+	pool  ports.XUIPool
+	nodes ports.NodeRepo
+	audit ports.AuditRepo
+	async AsyncDispatcher
 }
 
-func NewAdminServersHandler(repo ports.XUIPanelRepo, pool ports.XUIPool, nodes ports.NodeRepo, ownership ports.OwnershipRepo, audit ports.AuditRepo, async AsyncDispatcher) *AdminServersHandler {
-	return &AdminServersHandler{repo: repo, pool: pool, nodes: nodes, ownership: ownership, audit: audit, async: async}
+func NewAdminServersHandler(repo ports.XUIPanelRepo, pool ports.XUIPool, nodes ports.NodeRepo, audit ports.AuditRepo, async AsyncDispatcher) *AdminServersHandler {
+	return &AdminServersHandler{repo: repo, pool: pool, nodes: nodes, audit: audit, async: async}
 }
 
 // serverDTO is the API representation. Sensitive fields (api_token /

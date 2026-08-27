@@ -67,6 +67,12 @@ func (c *Client) Capabilities() []ports.PanelCapability {
 		ports.CapabilityClientWrite,
 		ports.CapabilityTrafficRead,
 		ports.CapabilityStatusRead,
+		// Absent on purpose: CapabilityClientIPLimit and
+		// CapabilityClientDeviceLimit. S-UI's client model carries neither a
+		// concurrent-IP cap nor a device cap, so applySpec drops both
+		// ClientSpec fields. A user given those limits on an S-UI panel
+		// simply has them unenforced there — surfaced through the capability
+		// API rather than failing a write.
 	}
 }
 
@@ -269,7 +275,7 @@ func (c *Client) AddClientToInbounds(ctx context.Context, inboundIDs []int, spec
 	return c.save(ctx, "clients", "new", modelFromSpec(spec, inboundIDs))
 }
 
-func (c *Client) UpdateClient(ctx context.Context, _ int, _ string, spec ports.ClientSpec) error {
+func (c *Client) UpdateClient(ctx context.Context, spec ports.ClientSpec) error {
 	c.writeMu.Lock()
 	defer c.writeMu.Unlock()
 	model, err := c.getClientModel(ctx, spec.Email)
@@ -281,13 +287,6 @@ func (c *Client) UpdateClient(ctx context.Context, _ int, _ string, spec ports.C
 	}
 	applySpec(model, spec)
 	return c.save(ctx, "clients", "edit", model)
-}
-
-func (c *Client) UpdateClientWithInbound(ctx context.Context, inb *ports.Inbound, clientUUID string, spec ports.ClientSpec) error {
-	if inb == nil {
-		return fmt.Errorf("S-UI update client: inbound is nil")
-	}
-	return c.UpdateClient(ctx, inb.ID, clientUUID, spec)
 }
 
 func (c *Client) DelClientByEmail(ctx context.Context, _ int, email string) error {

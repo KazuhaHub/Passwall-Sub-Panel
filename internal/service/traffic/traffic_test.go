@@ -1304,10 +1304,7 @@ func (c *fakeXUIClient) SetInboundEnable(ctx context.Context, id int, enable boo
 func (c *fakeXUIClient) AddClient(ctx context.Context, inboundID int, spec ports.ClientSpec) error {
 	return nil
 }
-func (c *fakeXUIClient) UpdateClient(ctx context.Context, inboundID int, clientUUID string, spec ports.ClientSpec) error {
-	return nil
-}
-func (c *fakeXUIClient) UpdateClientWithInbound(ctx context.Context, inb *ports.Inbound, clientUUID string, spec ports.ClientSpec) error {
+func (c *fakeXUIClient) UpdateClient(ctx context.Context, spec ports.ClientSpec) error {
 	return nil
 }
 func (c *fakeXUIClient) DelClientByEmail(ctx context.Context, inboundID int, email string) error {

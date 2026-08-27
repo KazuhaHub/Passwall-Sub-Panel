@@ -3,6 +3,7 @@ package sharedclient
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
@@ -70,6 +71,13 @@ func enabledNode(id, panelID int64, inboundID int) *domain.Node {
 
 type fakeXUI struct {
 	ports.XUIClient
+	// mu guards every recording field below. SyncUserLifecycle fans out
+	// across a user's clients concurrently (Phase 1b), so one fake can be
+	// driven by several goroutines at once; without this the -race build
+	// reports the FAKE rather than anything real. Test bodies still read
+	// the fields directly — that is safe because they read after the call
+	// under test has returned, which is a happens-after edge.
+	mu             sync.Mutex
 	addedInbounds  []int
 	addedSpec      ports.ClientSpec
 	confirm        []int // inboundIDs GetClient reports the client attached to AFTER an add/attach
@@ -80,16 +88,22 @@ type fakeXUI struct {
 	updatedSpec    ports.ClientSpec
 	updateCalls    int
 	getClientCalls int // counts GetClient invocations (orphan reconcile must not loop these)
-	deleted        []deletedClient
-	detached       []int
-	failAdd        bool
-	bulkCreated    []string // emails passed to BulkCreateClients
-	bulkAttached   []string // emails passed to BulkAttach
+	// getDetail, when set, is what GetClient returns verbatim — the
+	// lifecycle skip compares against a full ClientDetail, which the
+	// inbound-shaped returns below cannot express.
+	getDetail    *ports.ClientDetail
+	deleted      []deletedClient
+	detached     []int
+	failAdd      bool
+	bulkCreated  []string // emails passed to BulkCreateClients
+	bulkAttached []string // emails passed to BulkAttach
 }
 
 var errFakeAdd = errors.New("fake add failure")
 
 func (c *fakeXUI) AddClientToInbounds(_ context.Context, inboundIDs []int, spec ports.ClientSpec) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	if c.failAdd {
 		return errFakeAdd
 	}
@@ -103,7 +117,12 @@ func (c *fakeXUI) AddClientToInbounds(_ context.Context, inboundIDs []int, spec 
 // reports `confirm`. preExist simulates a client already present before provision.
 // When liveClients is set (orphan-reconcile tests), it is the source of truth.
 func (c *fakeXUI) GetClient(_ context.Context, email string) (*ports.ClientDetail, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.getClientCalls++
+	if c.getDetail != nil {
+		return c.getDetail, nil
+	}
 	if c.liveClients != nil {
 		if inbs, ok := c.liveClients[email]; ok {
 			return &ports.ClientDetail{Email: email, InboundIDs: inbs}, nil
@@ -127,15 +146,21 @@ func (c *fakeXUI) ListClientInbounds(context.Context) (map[string][]int, error) 
 // AttachClient is the existing-client path: idempotent attach of the desired
 // inbounds. Sets `added` so the read-back GetClient reports `confirm`.
 func (c *fakeXUI) AttachClient(_ context.Context, _ string, inboundIDs []int) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.added = true
 	c.attachedTo = append([]int(nil), inboundIDs...)
 	return nil
 }
 func (c *fakeXUI) DetachClient(_ context.Context, _ string, inboundIDs []int) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.detached = append(c.detached, inboundIDs...)
 	return nil
 }
-func (c *fakeXUI) UpdateClient(_ context.Context, _ int, _ string, spec ports.ClientSpec) error {
+func (c *fakeXUI) UpdateClient(_ context.Context, spec ports.ClientSpec) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.updatedSpec = spec
 	c.updateCalls++
 	return nil
@@ -147,11 +172,15 @@ type deletedClient struct {
 }
 
 func (c *fakeXUI) DelClientByEmail(_ context.Context, inboundID int, email string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.deleted = append(c.deleted, deletedClient{inboundID, email})
 	return nil
 }
 
 func (c *fakeXUI) BulkCreateClients(_ context.Context, items []ports.BulkCreateClientItem) (ports.BulkCreateResult, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	for _, it := range items {
 		c.bulkCreated = append(c.bulkCreated, it.Spec.Email)
 	}
@@ -159,6 +188,8 @@ func (c *fakeXUI) BulkCreateClients(_ context.Context, items []ports.BulkCreateC
 }
 
 func (c *fakeXUI) BulkAttach(_ context.Context, emails []string, _ []int) (ports.BulkAttachResult, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.bulkAttached = append(c.bulkAttached, emails...)
 	return ports.BulkAttachResult{Done: emails}, nil
 }
@@ -166,6 +197,8 @@ func (c *fakeXUI) BulkAttach(_ context.Context, emails []string, _ []int) (ports
 // BulkDelByEmail is the panel-wide batch delete the legacy cleanup now uses (one
 // call per panel). Record each email so len(deleted) still reflects client count.
 func (c *fakeXUI) BulkDelByEmail(_ context.Context, emails []string) (int, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	for _, e := range emails {
 		c.deleted = append(c.deleted, deletedClient{email: e})
 	}
@@ -448,7 +481,7 @@ func TestSyncLifecycle_PushesEnableExpiryQuotaWithCredsAndFlow(t *testing.T) {
 
 	c := &domain.PSPClient{ID: 1, PanelID: 10, Email: "u1@psp.local", UUID: "uuid-x", Password: "pw-x"}
 	// disabled, with an expiry + a quota floor
-	if err := svc.SyncLifecycle(context.Background(), c, false, 1893456000000, 5<<30); err != nil {
+	if err := svc.SyncLifecycle(context.Background(), c, domain.UserLifecycle{Enable: false, ExpiryTime: 1893456000000, QuotaHeadroom: 5 << 30}); err != nil {
 		t.Fatal(err)
 	}
 	if xui.updateCalls != 1 {
@@ -469,7 +502,7 @@ func TestSyncLifecycle_NoAttachmentsSkips(t *testing.T) {
 	clients := &fakeClients{attachments: nil}
 	xui := &fakeXUI{}
 	svc := New(clients, fakePool{c: xui}, fakeNodes{})
-	if err := svc.SyncLifecycle(context.Background(), &domain.PSPClient{ID: 1, PanelID: 10}, true, 0, 0); err != nil {
+	if err := svc.SyncLifecycle(context.Background(), &domain.PSPClient{ID: 1, PanelID: 10}, domain.UserLifecycle{Enable: true}); err != nil {
 		t.Fatal(err)
 	}
 	if xui.updateCalls != 0 {
@@ -486,7 +519,7 @@ func TestSyncLifecycle_UnprovisionedSkips(t *testing.T) {
 	}}
 	xui := &fakeXUI{}
 	svc := New(clients, fakePool{c: xui}, fakeNodes{})
-	if err := svc.SyncLifecycle(context.Background(), &domain.PSPClient{ID: 1, PanelID: 10, Email: "u1@psp.local"}, false, 0, 0); err != nil {
+	if err := svc.SyncLifecycle(context.Background(), &domain.PSPClient{ID: 1, PanelID: 10, Email: "u1@psp.local"}, domain.UserLifecycle{}); err != nil {
 		t.Fatal(err)
 	}
 	if xui.updateCalls != 0 {

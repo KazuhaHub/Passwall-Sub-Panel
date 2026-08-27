@@ -318,7 +318,7 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	// v3.9.0 cutover: the shared-client reconcile service (creates clients in
 	// 3X-UI + keeps their lifecycle in lockstep). Late-bound into the user
 	// service so the change-driven paths push enable/expiry onto shared clients.
-	sharedClientSvc := sharedclient.New(repos.PSPClient, pool, repos.Node)
+	sharedClientSvc := sharedclient.New(repos.PSPClient, pool, repos.Node).WithSettings(repos.ScopedSettings)
 	sharedClientSvc.SetOwnershipRepo(repos.Ownership)
 	userSvc.SetSharedLifecycleSyncer(sharedClientSvc)
 	// V3-transitional: ResyncMembership (and the user_migrate sync task) drive the

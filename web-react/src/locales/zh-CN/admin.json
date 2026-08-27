@@ -1276,6 +1276,9 @@
       "emergency_window_used_with_quota": "本窗口已用 {{used}} / {{quota}} GB",
       "emergency_window_used_unlimited": "本窗口已用 {{used}} GB（不限量）",
       "traffic_reset_period": "流量重置周期",
+      "ip_limit": "并发 IP 上限",
+      "device_limit": "设备数上限",
+      "limit_zero_hint": "0 = 不限",
       "remark": "备注"
     },
     "role": {

@@ -21,6 +21,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/idgen"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/keyedmutex"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/log"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/metrics"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/paneltz"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/safego"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
@@ -40,10 +41,10 @@ type ClientSyncer interface {
 	// used by pushClientConfigToAll to skip the redundant GetInbound
 	// each per-client push otherwise incurs.
 	SetOwnedClientEnableWithInbound(ctx context.Context, panelID int64, inb *ports.Inbound, email string,
-		protocol domain.Protocol, ssMethod, userUUID, flow string, enable bool, expireTime, totalGB int64) error
+		protocol domain.Protocol, ssMethod, userUUID, flow string, want domain.UserLifecycle, panelLifetime int64) error
 	DelAllOwnedForUser(ctx context.Context, userID int64) error
 	RotateClientUUID(ctx context.Context, panelID int64, inboundID int, email string,
-		protocol domain.Protocol, ssMethod, oldUUID, newUUID, flow string, enable bool, expireTime, totalGB int64) error
+		protocol domain.Protocol, ssMethod, oldUUID, newUUID, flow string, want domain.UserLifecycle, panelLifetime int64) error
 }
 
 // TrafficUsageReader yields the bytes a user has consumed in their current
@@ -133,7 +134,7 @@ func (s *Service) SetPSPProvisioner(p PSPClientProvisioner) { s.psp = p }
 // shared clients in 3X-UI. Implemented by sharedclient.Service; a local interface
 // so the user service stays decoupled and nil-tolerant.
 type SharedLifecycleSyncer interface {
-	SyncUserLifecycle(ctx context.Context, userID int64, enable bool, expiryTime, totalGB int64) error
+	SyncUserLifecycle(ctx context.Context, userID int64, want domain.UserLifecycle) error
 }
 
 // SetSharedLifecycleSyncer late-binds the v3.9.0 shared-client lifecycle push.
@@ -198,8 +199,7 @@ func (s *Service) syncSharedLifecycle(ctx context.Context, u *domain.User) error
 	if s.sharedLife == nil || u == nil {
 		return nil
 	}
-	floor := s.trafficFloor(ctx, u)
-	if err := s.sharedLife.SyncUserLifecycle(ctx, u.ID, u.EffectiveEnabled(time.Now()), u.PushExpireTime(), floor); err != nil {
+	if err := s.sharedLife.SyncUserLifecycle(ctx, u.ID, u.Lifecycle(time.Now(), s.trafficFloor(ctx, u))); err != nil {
 		log.Warn("shared-client lifecycle push failed", "user_id", u.ID, "err", err)
 		return err
 	}
@@ -456,6 +456,10 @@ func (s *Service) SetTrafficUsage(r TrafficUsageReader) {
 // per-window EmergencyAccessQuotaGB (or 0 for unlimited when admin has
 // it set to 0). The poll loop in service/traffic already short-circuits
 // the auto-disable check during emergency, so the two layers agree.
+// The returned value is PERIOD-RELATIVE headroom, NOT the number a panel is
+// given. Every push site rebases it onto that client's own panel-side lifetime
+// counter via domain.PanelQuotaCap, because the panel compares against a
+// counter it never resets — see docs/traffic-floor-defect.md.
 func (s *Service) trafficFloor(ctx context.Context, u *domain.User) int64 {
 	if u == nil || u.TrafficLimitBytes <= 0 {
 		return 0
@@ -542,6 +546,8 @@ type CreateLocalInput struct {
 	GroupID            int64
 	ExpireAt           *time.Time
 	TrafficLimitBytes  int64
+	IPLimit            int
+	DeviceLimit        int
 	TrafficResetPeriod domain.ResetPeriod
 	Remark             string
 	// PendingEmailVerify creates the account disabled + flagged
@@ -613,6 +619,12 @@ func (s *Service) CreateLocal(ctx context.Context, in CreateLocalInput) (*Create
 	if upn == "" {
 		return nil, fmt.Errorf("%w: upn required", domain.ErrValidation)
 	}
+	if err := validateConnLimit("ip_limit", in.IPLimit); err != nil {
+		return nil, err
+	}
+	if err := validateConnLimit("device_limit", in.DeviceLimit); err != nil {
+		return nil, err
+	}
 	if _, err := s.users.GetByUPN(ctx, in.UPN); err == nil {
 		return nil, domain.ErrAlreadyExists
 	} else if !errors.Is(err, domain.ErrNotFound) {
@@ -659,6 +671,8 @@ func (s *Service) CreateLocal(ctx context.Context, in CreateLocalInput) (*Create
 		GroupID:            in.GroupID,
 		ExpireAt:           in.ExpireAt,
 		TrafficLimitBytes:  in.TrafficLimitBytes,
+		IPLimit:            in.IPLimit,
+		DeviceLimit:        in.DeviceLimit,
 		TrafficResetPeriod: resetPeriod,
 		TrafficPeriodStart: &now,
 		Remark:             in.Remark,
@@ -1078,11 +1092,15 @@ func (s *Service) ResetCredentialsAndSync(ctx context.Context, userID int64) (*R
 	if err := s.updateUser(ctx, u); err != nil {
 		return nil, err
 	}
-	expireTime := u.PushExpireTime()
 	// Compute the floor once; reuse for every client we push so a slow
 	// CurrentPeriodUsage doesn't blow up to N round-trips against the
 	// snapshots table.
 	floor := s.trafficFloor(ctx, u)
+	// One snapshot for the whole fan-out. Rebuilding it per client would
+	// evaluate EffectiveEnabled against a different `now` each time, so a user
+	// whose expiry falls inside the push window would come out enabled on some
+	// panels and disabled on others.
+	want := u.Lifecycle(time.Now(), floor)
 	needsRetry := false
 	for _, e := range entries {
 		info, err := s.inspectInboundByPanel(ctx, e.PanelID, e.InboundID)
@@ -1094,7 +1112,8 @@ func (s *Service) ResetCredentialsAndSync(ctx context.Context, userID int64) (*R
 			continue
 		}
 		if err := s.syncer.RotateClientUUID(ctx, e.PanelID, e.InboundID, e.ClientEmail,
-			info.protocol, info.ssMethod, oldUUID, newUUID, info.flow, u.EffectiveEnabled(time.Now()), expireTime, floor); err != nil {
+			info.protocol, info.ssMethod, oldUUID, newUUID, info.flow,
+			want, e.LastRawTotalBytes); err != nil {
 			needsRetry = true
 		}
 	}
@@ -1372,6 +1391,19 @@ func (s *Service) DeleteAndSync(ctx context.Context, userID int64) error {
 // nil → no change; non-nil → set to the dereferenced value. ClearExpire is
 // a separate bool because *time.Time cannot distinguish "no change" from
 // "explicit clear to permanent".
+// validateConnLimit rejects a negative connection cap.
+//
+// It matters more than the usual input hygiene: the panel reads any value <= 0
+// as "no cap", so a stored -1 would present in PSP's UI as a tightened limit
+// while actually disabling enforcement — a control that means the opposite of
+// what it displays. Zero is the legitimate "unlimited" encoding and passes.
+func validateConnLimit(field string, v int) error {
+	if v < 0 {
+		return fmt.Errorf("%w: %s must be >= 0 (0 = unlimited)", domain.ErrValidation, field)
+	}
+	return nil
+}
+
 type UpdateInput struct {
 	GroupID            *int64
 	Role               *domain.Role
@@ -1379,6 +1411,8 @@ type UpdateInput struct {
 	ExpireAt           *time.Time
 	ClearExpire        bool
 	TrafficLimitBytes  *int64
+	IPLimit            *int
+	DeviceLimit        *int
 	TrafficResetPeriod *domain.ResetPeriod
 	Remark             *string
 	DisplayName        *string
@@ -1469,6 +1503,28 @@ func (s *Service) UpdateProfile(ctx context.Context, userID int64, in UpdateInpu
 			trafficLimitChanged = true
 		}
 		u.TrafficLimitBytes = *in.TrafficLimitBytes
+	}
+	// Connection caps ride the same push trigger as the traffic limit: they
+	// are panel-enforced, so a change is only real once it reaches the panel.
+	// Reusing the flag rather than adding a parallel one keeps a single edit
+	// that touches both to a single push.
+	if in.IPLimit != nil {
+		if err := validateConnLimit("ip_limit", *in.IPLimit); err != nil {
+			return err
+		}
+		if *in.IPLimit != u.IPLimit {
+			trafficLimitChanged = true
+		}
+		u.IPLimit = *in.IPLimit
+	}
+	if in.DeviceLimit != nil {
+		if err := validateConnLimit("device_limit", *in.DeviceLimit); err != nil {
+			return err
+		}
+		if *in.DeviceLimit != u.DeviceLimit {
+			trafficLimitChanged = true
+		}
+		u.DeviceLimit = *in.DeviceLimit
 	}
 	if in.TrafficResetPeriod != nil {
 		u.TrafficResetPeriod = *in.TrafficResetPeriod
@@ -2191,11 +2247,24 @@ func (s *Service) ResumeServiceAndSync(ctx context.Context, userID int64) error 
 // 3X-UI. Thin wrapper around pushClientConfigToAll so the worker doesn't
 // need access to the internal helper.
 func (s *Service) PushClientConfig(ctx context.Context, userID int64) error {
+	// Phase 0: the traffic poll fires this as a fire-and-forget goroutine
+	// behind pushSem, so its duration is what actually occupies a slot.
+	// Measured here (not around the enqueue) so the histogram is the
+	// service time the semaphore's queueing theory needs, with the wait
+	// time recorded separately by the caller.
+	metrics.PushConfigTotal.Inc()
+	defer metrics.PushConfigDuration.ObserveSince(time.Now())
+
 	u, err := s.users.GetByID(ctx, userID)
 	if err != nil {
+		metrics.PushConfigErrorTotal.Inc()
 		return err
 	}
-	return s.pushClientConfigToAll(ctx, u)
+	if err := s.pushClientConfigToAll(ctx, u); err != nil {
+		metrics.PushConfigErrorTotal.Inc()
+		return err
+	}
+	return nil
 }
 
 // pushClientConfigToAll iterates through all owned clients of the user and
@@ -2218,8 +2287,10 @@ func (s *Service) pushClientConfigToAll(ctx context.Context, u *domain.User) err
 	if len(entries) == 0 {
 		return nil
 	}
-	expireTime := u.PushExpireTime()
 	floor := s.trafficFloor(ctx, u)
+	// Single now-snapshot for the whole fan-out; see the note in the rotate
+	// paths above for why this must not be rebuilt per goroutine.
+	want := u.Lifecycle(time.Now(), floor)
 
 	// Resolve concurrency cap once. The setting is shared with the
 	// traffic poll and reconcile fan-out (v2.2.7 admin tunable) so an
@@ -2351,7 +2422,8 @@ func (s *Service) pushClientConfigToAll(ctx context.Context, u *domain.User) err
 			// SetOwnedClientEnable which then ran GetInbound per push,
 			// re-fetching what Phase 1 already had in hand.
 			perr := s.syncer.SetOwnedClientEnableWithInbound(ctx, entry.PanelID, inbCopy, entry.ClientEmail,
-				infoCopy.protocol, infoCopy.ssMethod, u.UUID, infoCopy.flow, u.EffectiveEnabled(time.Now()), expireTime, floor)
+				infoCopy.protocol, infoCopy.ssMethod, u.UUID, infoCopy.flow,
+				want, entry.LastRawTotalBytes)
 			outcomes <- pushOutcome{entry: entry, err: perr}
 		}()
 	}
@@ -2578,8 +2650,12 @@ func (s *Service) ResetUUIDAndSync(ctx context.Context, userID int64) (string, e
 	if err != nil {
 		return newUUID, err
 	}
-	expireTime := u.PushExpireTime()
 	floor := s.trafficFloor(ctx, u)
+	// One snapshot for the whole fan-out. Rebuilding it per client would
+	// evaluate EffectiveEnabled against a different `now` each time, so a user
+	// whose expiry falls inside the push window would come out enabled on some
+	// panels and disabled on others.
+	want := u.Lifecycle(time.Now(), floor)
 	needsRetry := false
 	for _, e := range entries {
 		info, err := s.inspectInboundByPanel(ctx, e.PanelID, e.InboundID)
@@ -2591,7 +2667,8 @@ func (s *Service) ResetUUIDAndSync(ctx context.Context, userID int64) (string, e
 			continue
 		}
 		if err := s.syncer.RotateClientUUID(ctx, e.PanelID, e.InboundID, e.ClientEmail,
-			info.protocol, info.ssMethod, oldUUID, newUUID, info.flow, u.EffectiveEnabled(time.Now()), expireTime, floor); err != nil {
+			info.protocol, info.ssMethod, oldUUID, newUUID, info.flow,
+			want, e.LastRawTotalBytes); err != nil {
 			needsRetry = true
 		}
 	}

@@ -17,8 +17,7 @@ func inbWith(client map[string]any) *ports.Inbound {
 
 func TestClientUnchanged(t *testing.T) {
 	// A VLESS spec PSP would push.
-	spec := buildClientSpec(domain.ProtoVLESS, "", "uuid-1", "u1@x", "vision", 1700, 200)
-	spec.Enable = true
+	spec := buildClientSpec(domain.ProtoVLESS, "", "uuid-1", "u1@x", "vision", domain.UserLifecycle{Enable: true, ExpiryTime: 1700, QuotaHeadroom: 200}, 0)
 
 	matching := map[string]any{
 		"id": "uuid-1", "email": "u1@x", "enable": true,
@@ -57,8 +56,7 @@ func TestClientUnchanged(t *testing.T) {
 }
 
 func TestClientUnchanged_TrojanComparesPassword(t *testing.T) {
-	spec := buildClientSpec(domain.ProtoTrojan, "", "uuid-1", "u1@x", "", 0, 0)
-	spec.Enable = true
+	spec := buildClientSpec(domain.ProtoTrojan, "", "uuid-1", "u1@x", "", domain.UserLifecycle{Enable: true, ExpiryTime: 0, QuotaHeadroom: 0}, 0)
 	if spec.Password == "" {
 		t.Fatal("precondition: Trojan spec must carry a password")
 	}
@@ -75,8 +73,7 @@ func TestClientUnchanged_TrojanComparesPassword(t *testing.T) {
 func TestClientUnchanged_Hysteria2AlwaysUpdates(t *testing.T) {
 	// Hy2's auth credential isn't represented in the parsed client, so we can
 	// never verify a match → must always update (conservative).
-	spec := buildClientSpec(domain.ProtoHysteria2, "", "uuid-1", "u1@x", "", 0, 0)
-	spec.Enable = true
+	spec := buildClientSpec(domain.ProtoHysteria2, "", "uuid-1", "u1@x", "", domain.UserLifecycle{Enable: true, ExpiryTime: 0, QuotaHeadroom: 0}, 0)
 	full := map[string]any{"id": "uuid-1", "email": "u1@x", "enable": true}
 	if clientUnchanged(inbWith(full), spec, domain.ProtoHysteria2) {
 		t.Fatal("Hysteria2 must never skip (auth not verifiable)")

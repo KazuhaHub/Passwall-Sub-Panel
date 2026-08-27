@@ -2,6 +2,7 @@ package user
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 
@@ -14,15 +15,14 @@ type fakeSharedLife struct {
 }
 
 type sharedLifeCall struct {
-	userID        int64
-	enable        bool
-	expiry, totGB int64
+	userID int64
+	want   domain.UserLifecycle
 }
 
-func (f *fakeSharedLife) SyncUserLifecycle(_ context.Context, userID int64, enable bool, expiry, totalGB int64) error {
+func (f *fakeSharedLife) SyncUserLifecycle(_ context.Context, userID int64, want domain.UserLifecycle) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.calls = append(f.calls, sharedLifeCall{userID, enable, expiry, totalGB})
+	f.calls = append(f.calls, sharedLifeCall{userID, want})
 	return nil
 }
 
@@ -37,7 +37,7 @@ func TestSyncSharedLifecycle_PushesEffectiveDisable(t *testing.T) {
 	if len(fake.calls) != 1 {
 		t.Fatalf("calls = %d, want 1", len(fake.calls))
 	}
-	if c := fake.calls[0]; c.userID != 7 || c.enable {
+	if c := fake.calls[0]; c.userID != 7 || c.want.Enable {
 		t.Fatalf("disabled user must push enable=false for uid 7: %+v", c)
 	}
 }
@@ -49,7 +49,7 @@ func TestSyncSharedLifecycle_PushesEffectiveEnable(t *testing.T) {
 
 	// Enabled, no expiry → EffectiveEnabled true.
 	svc.syncSharedLifecycle(context.Background(), &domain.User{ID: 8, Enabled: true})
-	if len(fake.calls) != 1 || !fake.calls[0].enable {
+	if len(fake.calls) != 1 || !fake.calls[0].want.Enable {
 		t.Fatalf("enabled user must push enable=true: %+v", fake.calls)
 	}
 }
@@ -57,4 +57,36 @@ func TestSyncSharedLifecycle_PushesEffectiveEnable(t *testing.T) {
 // nil syncer (before wiring / in most tests) is a no-op, never a panic.
 func TestSyncSharedLifecycle_NilSyncerNoop(t *testing.T) {
 	(&Service{}).syncSharedLifecycle(context.Background(), &domain.User{ID: 1, Enabled: true})
+}
+
+// A negative connection cap must be rejected at the service boundary. The
+// panel reads any value <= 0 as "no cap", so a stored -1 would render in PSP's
+// UI as a tightened limit while actually disabling enforcement — a control
+// that means the opposite of what it shows.
+func TestConnLimitValidation(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		v       int
+		wantErr bool
+	}{
+		{"zero is the unlimited encoding", 0, false},
+		{"a real cap", 5, false},
+		{"negative is rejected", -1, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := validateConnLimit("ip_limit", tc.v)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatal("want a validation error")
+				}
+				if !errors.Is(err, domain.ErrValidation) {
+					t.Fatalf("error = %v, want it to wrap domain.ErrValidation so the handler maps it to 400", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		})
+	}
 }

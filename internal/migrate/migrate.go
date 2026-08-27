@@ -8,6 +8,7 @@ import (
 
 	"gorm.io/gorm"
 
+	"github.com/KazuhaHub/passwall-sub-panel/internal/adapters/sqlstore"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 )
 
@@ -414,6 +415,15 @@ func copyOwnerships(ctx context.Context, src, dst *gorm.DB) error {
 	flush := func() error {
 		if len(batch) == 0 {
 			return nil
+		}
+		// v3.9.0 retired ownershipRow from schemaModels, so EnsureSchema does
+		// not create this table and a blank destination has nowhere to put the
+		// source's legacy per-node clients. Created lazily, on the first batch
+		// that actually has rows: an empty table on a destination that imported
+		// nothing would make the install look un-migrated forever, since the
+		// table's absence is what proves the shared-client migration finished.
+		if err := sqlstore.EnsureLegacyOwnershipTable(dst); err != nil {
+			return fmt.Errorf("create legacy ownership table on dst: %w", err)
 		}
 		if err := dst.WithContext(ctx).Table("user_xui_clients").Create(&batch).Error; err != nil {
 			return err

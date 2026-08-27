@@ -81,6 +81,13 @@ func (c *Client) Capabilities() []ports.PanelCapability {
 		ports.CapabilityCoreUpgrade,
 		ports.CapabilityWebCertRead,
 		ports.CapabilityRealityScan,
+		ports.CapabilityClientIPLimit,
+		// Declared unconditionally: the field is part of the protocol PSP
+		// speaks, and a panel below 3.7.0 ignores the key rather than
+		// erroring. Whether a given panel BUILD honours it is a version
+		// question the compat data answers — capabilities are static per
+		// adapter and cannot see the panel in front of them.
+		ports.CapabilityClientDeviceLimit,
 	}
 }
 
@@ -312,6 +319,13 @@ func (c *Client) doJSONWithTimeout(ctx context.Context, method, path string, bod
 }
 
 func (c *Client) doJSONWithClient(ctx context.Context, method, path string, body any, out any, hc *http.Client) (err error) {
+	// One record per HTTP exchange, not per logical call: mutateWithRetry
+	// can issue up to five requests for a single UpdateClient, and each is
+	// a round trip the caller genuinely waits on. The cost model in
+	// docs/data-plane-plan.md is denominated in round trips, so counting
+	// exchanges is what makes psp_panel_op_total comparable to it.
+	defer func(start time.Time) { recordOp(ctx, start, err) }(time.Now())
+
 	// Tag every request error with which PANEL it came from. The 3X-UI API path is
 	// relative (e.g. /panel/api/clients/update/<email>), so in a multi-panel
 	// deployment a bare error can't tell you which 3X-UI failed — which made a
@@ -548,6 +562,7 @@ func snippet(s string, n int) string {
 // --- Inbound ---
 
 func (c *Client) ListInbounds(ctx context.Context) ([]ports.Inbound, error) {
+	ctx = withOp(ctx, "ListInbounds")
 	return c.listInbounds(ctx, "/panel/api/inbounds/list")
 }
 
@@ -560,6 +575,7 @@ func (c *Client) ListInbounds(ctx context.Context) ([]ports.Inbound, error) {
 // slim route is live-verified present on the min_xui=3.2.0 floor, so there's
 // no version fallback (consistent with PSP's hard-cut compat model).
 func (c *Client) ListInboundsSlim(ctx context.Context) ([]ports.Inbound, error) {
+	ctx = withOp(ctx, "ListInboundsSlim")
 	return c.listInbounds(ctx, "/panel/api/inbounds/list/slim")
 }
 
@@ -576,6 +592,7 @@ func (c *Client) listInbounds(ctx context.Context, path string) ([]ports.Inbound
 }
 
 func (c *Client) GetInbound(ctx context.Context, id int) (*ports.Inbound, error) {
+	ctx = withOp(ctx, "GetInbound")
 	var raw rawInbound
 	if err := c.doJSON(ctx, http.MethodGet, "/panel/api/inbounds/get/"+strconv.Itoa(id), nil, &raw); err != nil {
 		return nil, err
@@ -585,6 +602,7 @@ func (c *Client) GetInbound(ctx context.Context, id int) (*ports.Inbound, error)
 }
 
 func (c *Client) AddInbound(ctx context.Context, spec ports.InboundSpec) (int, error) {
+	ctx = withOp(ctx, "AddInbound")
 	// PSP stores its inbound snapshot client-less (inboundcfg.StripClients), so
 	// the settings reaching here usually carry no clients[] field. 3X-UI's
 	// POST /clients/add appends to settings.clients IN PLACE; if that field is
@@ -604,6 +622,7 @@ func (c *Client) AddInbound(ctx context.Context, spec ports.InboundSpec) (int, e
 }
 
 func (c *Client) UpdateInbound(ctx context.Context, id int, spec ports.InboundSpec) error {
+	ctx = withOp(ctx, "UpdateInbound")
 	defer c.lockInbound(id)()
 	mergedSpec := spec
 	live, err := c.GetInbound(ctx, id)
@@ -643,10 +662,12 @@ func (c *Client) UpdateInbound(ctx context.Context, id int, spec ports.InboundSp
 }
 
 func (c *Client) DelInbound(ctx context.Context, id int) error {
+	ctx = withOp(ctx, "DelInbound")
 	return c.doJSON(ctx, http.MethodPost, "/panel/api/inbounds/del/"+strconv.Itoa(id), nil, nil)
 }
 
 func (c *Client) SetInboundEnable(ctx context.Context, id int, enable bool) error {
+	ctx = withOp(ctx, "SetInboundEnable")
 	body := map[string]any{"enable": enable}
 	return c.doJSON(ctx, http.MethodPost, "/panel/api/inbounds/setEnable/"+strconv.Itoa(id), body, nil)
 }
@@ -666,6 +687,7 @@ func (c *Client) SetInboundEnable(ctx context.Context, id int, enable bool) erro
 // existing per-node callers. Per-protocol secrets present in spec are sent
 // verbatim; the panel generates any omitted ones.
 func (c *Client) AddClient(ctx context.Context, inboundID int, spec ports.ClientSpec) error {
+	ctx = withOp(ctx, "AddClient")
 	return c.AddClientToInbounds(ctx, []int{inboundID}, spec)
 }
 
@@ -673,6 +695,7 @@ func (c *Client) AddClient(ctx context.Context, inboundID int, spec ports.Client
 // inboundIDs in a single POST /clients/add (body {client, inboundIds}) — one
 // Xray restart regardless of fan-out. Backs the v3.9.0 shared-client model.
 func (c *Client) AddClientToInbounds(ctx context.Context, inboundIDs []int, spec ports.ClientSpec) error {
+	ctx = withOp(ctx, "AddClientToInbounds")
 	if len(inboundIDs) == 0 {
 		return fmt.Errorf("AddClientToInbounds: at least one inbound id is required")
 	}
@@ -692,6 +715,7 @@ func (c *Client) AddClientToInbounds(ctx context.Context, inboundIDs []int, spec
 // inbounds (POST /clients/{email}/attach, body {inboundIds}). Ids it is already
 // on are no-ops upstream. Empty inboundIDs sends no request.
 func (c *Client) AttachClient(ctx context.Context, email string, inboundIDs []int) error {
+	ctx = withOp(ctx, "AttachClient")
 	if email == "" {
 		return fmt.Errorf("AttachClient: email is required")
 	}
@@ -707,6 +731,7 @@ func (c *Client) AttachClient(ctx context.Context, email string, inboundIDs []in
 // (POST /clients/{email}/detach) without deleting the client record. Pairs
 // where it is not attached are silent no-ops. Empty inboundIDs sends no request.
 func (c *Client) DetachClient(ctx context.Context, email string, inboundIDs []int) error {
+	ctx = withOp(ctx, "DetachClient")
 	if email == "" {
 		return fmt.Errorf("DetachClient: email is required")
 	}
@@ -723,6 +748,7 @@ func (c *Client) DetachClient(ctx context.Context, email string, inboundIDs []in
 // {attached, skipped, errors}; absent fields decode as empty slices. Empty
 // emails or inboundIDs is a no-op.
 func (c *Client) BulkAttach(ctx context.Context, emails []string, inboundIDs []int) (ports.BulkAttachResult, error) {
+	ctx = withOp(ctx, "BulkAttach")
 	if len(emails) == 0 || len(inboundIDs) == 0 {
 		return ports.BulkAttachResult{}, nil
 	}
@@ -743,6 +769,7 @@ func (c *Client) BulkAttach(ctx context.Context, emails []string, inboundIDs []i
 // POST /clients/bulkDetach (single Xray restart). Mirror of BulkAttach; the
 // panel keeps client records even if they end up orphaned. Empty inputs no-op.
 func (c *Client) BulkDetach(ctx context.Context, emails []string, inboundIDs []int) (ports.BulkAttachResult, error) {
+	ctx = withOp(ctx, "BulkDetach")
 	if len(emails) == 0 || len(inboundIDs) == 0 {
 		return ports.BulkAttachResult{}, nil
 	}
@@ -767,6 +794,7 @@ func (c *Client) BulkDetach(ctx context.Context, emails []string, inboundIDs []i
 // is harmless — the panel skips an existing email and the per-user resync heals
 // it. Items with no target inbound are dropped (a create needs a destination).
 func (c *Client) BulkCreateClients(ctx context.Context, items []ports.BulkCreateClientItem) (ports.BulkCreateResult, error) {
+	ctx = withOp(ctx, "BulkCreateClients")
 	if len(items) == 0 {
 		return ports.BulkCreateResult{}, nil
 	}
@@ -820,11 +848,12 @@ func bulkErrStrings(raws []json.RawMessage) []string {
 // /clients/update/{email}); the change propagates to every inbound the client
 // is attached to. Full-replace semantics: the body carries the complete
 // intended state (buildClientUpdateJSON emits every field PSP manages, plus the
-// panel-side renewal fields pinned off), so fields PSP does not set — e.g. a
-// manually-added comment, or 3.7.0's limitHwid — are not preserved. A UUID
-// rotation is simply a new "id" under the unchanged email, so the old
-// clientUUID argument is unused.
-func (c *Client) UpdateClient(ctx context.Context, inboundID int, clientUUID string, spec ports.ClientSpec) error {
+// panel-side renewal fields pinned off), so a field PSP does not set — e.g. an
+// operator's manually-added comment — is not preserved. A UUID rotation is
+// simply a new "id" under the unchanged email, which is why this takes no
+// separate uuid or inbound.
+func (c *Client) UpdateClient(ctx context.Context, spec ports.ClientSpec) error {
+	ctx = withOp(ctx, "UpdateClient")
 	if spec.Email == "" {
 		return fmt.Errorf("UpdateClient: spec.Email is required (3.2.0 keys clients by email)")
 	}
@@ -837,23 +866,13 @@ func (c *Client) UpdateClient(ctx context.Context, inboundID int, clientUUID str
 	return c.mutateWithRetry(ctx, path, json.RawMessage(clientJSON))
 }
 
-// UpdateClientWithInbound delegated to a read-modify-write of the inbound in
-// the ≤3.1.x era to save a GetInbound round-trip. 3.2.0 updates clients by
-// email with no inbound read, so the pre-fetched inbound is unused; this
-// delegates to UpdateClient. Kept for caller source-compatibility.
-func (c *Client) UpdateClientWithInbound(ctx context.Context, inb *ports.Inbound, clientUUID string, spec ports.ClientSpec) error {
-	if inb == nil {
-		return fmt.Errorf("UpdateClientWithInbound: inb is nil")
-	}
-	return c.UpdateClient(ctx, inb.ID, clientUUID, spec)
-}
-
 // DelClientByEmail deletes the client by its panel-wide email key (POST
 // /clients/del/{email}). This removes the client from every inbound it is
 // attached to. keepTraffic=0 drops the xray traffic row too; PSP keeps its own
 // accounting. Callers are responsible for scoping deletes to PSP-managed
 // legacy or shared-client emails before reaching here.
 func (c *Client) DelClientByEmail(ctx context.Context, inboundID int, email string) error {
+	ctx = withOp(ctx, "DelClientByEmail")
 	defer c.lockClientEmail(email)()
 	path := "/panel/api/clients/del/" + url.PathEscape(email) + "?keepTraffic=0"
 	return c.doJSON(ctx, http.MethodPost, path, nil, nil)
@@ -865,6 +884,7 @@ func (c *Client) DelClientByEmail(ctx context.Context, inboundID int, email stri
 // upstream are silently skipped (not counted). Returns the panel-reported
 // deleted count. An empty emails slice is a no-op.
 func (c *Client) BulkDelByEmail(ctx context.Context, emails []string) (int, error) {
+	ctx = withOp(ctx, "BulkDelByEmail")
 	if len(emails) == 0 {
 		return 0, nil
 	}
@@ -884,6 +904,7 @@ func (c *Client) BulkDelByEmail(ctx context.Context, emails []string) (int, erro
 // as "3.1.0" while /panel/api/server/getPanelUpdateInfo reports the same
 // release as "v3.1.0"; version.parseSemver tolerates both forms.
 func (c *Client) GetServerStatus(ctx context.Context) (*ports.ServerStatus, error) {
+	ctx = withOp(ctx, "GetServerStatus")
 	var raw struct {
 		PanelVersion string `json:"panelVersion"`
 		Xray         struct {
@@ -907,6 +928,7 @@ func (c *Client) GetServerStatus(ctx context.Context) (*ports.ServerStatus, erro
 // prefix ("3.1.0") while LatestVersion typically carries one ("v3.1.0").
 // PSP normalizes both via version.parseSemver.
 func (c *Client) GetPanelUpdateInfo(ctx context.Context) (*ports.PanelUpdateInfo, error) {
+	ctx = withOp(ctx, "GetPanelUpdateInfo")
 	var raw struct {
 		CurrentVersion  string `json:"currentVersion"`
 		LatestVersion   string `json:"latestVersion"`
@@ -928,6 +950,7 @@ func (c *Client) GetPanelUpdateInfo(ctx context.Context) (*ports.PanelUpdateInfo
 // 3X-UI reads this endpoint with PostForm, so the payload must be URL-encoded
 // rather than JSON. An empty targets value selects the upstream seed list.
 func (c *Client) ScanRealityTargets(ctx context.Context, targets string) ([]ports.RealityScanResult, error) {
+	ctx = withOp(ctx, "ScanRealityTargets")
 	form := url.Values{}
 	if strings.TrimSpace(targets) != "" {
 		form.Set("targets", targets)
@@ -950,6 +973,7 @@ func (c *Client) ScanRealityTargets(ctx context.Context, targets string) ([]port
 // errors here so the caller (admin handler) sees a clean nil and can
 // proceed straight to scheduling the post-upgrade smoke probe.
 func (c *Client) UpdatePanel(ctx context.Context) error {
+	ctx = withOp(ctx, "UpdatePanel")
 	err := c.doJSON(ctx, http.MethodPost, "/panel/api/server/updatePanel", nil, nil)
 	if err == nil {
 		return nil
@@ -974,6 +998,7 @@ func (c *Client) UpdatePanel(ctx context.Context) error {
 // itself keeps running across this call; only the xray-core child process
 // is restarted, so the HTTP response comes back normally.
 func (c *Client) InstallXray(ctx context.Context, version string) error {
+	ctx = withOp(ctx, "InstallXray")
 	if version == "" {
 		version = "latest"
 	}
@@ -983,6 +1008,7 @@ func (c *Client) InstallXray(ctx context.Context, version string) error {
 // InstallCore implements ports.CoreUpdater. On 3X-UI the managed core is
 // xray-core, so the generic operation delegates to the existing endpoint.
 func (c *Client) InstallCore(ctx context.Context, version string) error {
+	ctx = withOp(ctx, "InstallCore")
 	return c.InstallXray(ctx, version)
 }
 
@@ -992,6 +1018,7 @@ func (c *Client) InstallCore(ctx context.Context, version string) error {
 // first). Empty / missing → empty slice + nil error (panel rebooted into
 // a state without the list yet — admin can still type "latest" by hand).
 func (c *Client) GetXrayVersionList(ctx context.Context) ([]string, error) {
+	ctx = withOp(ctx, "GetXrayVersionList")
 	var versions []string
 	if err := c.doJSON(ctx, http.MethodGet, "/panel/api/server/getXrayVersion", nil, &versions); err != nil {
 		return nil, err
@@ -1001,6 +1028,7 @@ func (c *Client) GetXrayVersionList(ctx context.Context) ([]string, error) {
 
 // GetCoreVersionList implements ports.CoreUpdater for xray-core.
 func (c *Client) GetCoreVersionList(ctx context.Context) ([]string, error) {
+	ctx = withOp(ctx, "GetCoreVersionList")
 	return c.GetXrayVersionList(ctx)
 }
 
@@ -1011,6 +1039,7 @@ func (c *Client) GetCoreVersionList(ctx context.Context) ([]string, error) {
 // can degrade (grey out "fetch cert from panel"). Backs cert_source=from_panel:
 // fill a node-assigned inbound with file-mode paths that exist on the node.
 func (c *Client) GetWebCertFiles(ctx context.Context) (*ports.WebCertFiles, error) {
+	ctx = withOp(ctx, "GetWebCertFiles")
 	var raw struct {
 		WebCertFile string `json:"webCertFile"`
 		WebKeyFile  string `json:"webKeyFile"`
@@ -1033,6 +1062,7 @@ func (c *Client) GetWebCertFiles(ctx context.Context) (*ports.WebCertFiles, erro
 // transport failure. ClientDetail.ID is mapped from client.uuid (the xray
 // client id), NOT client.id (the numeric DB row id).
 func (c *Client) GetClient(ctx context.Context, email string) (*ports.ClientDetail, error) {
+	ctx = withOp(ctx, "GetClient")
 	if email == "" {
 		return nil, fmt.Errorf("GetClient: email is required")
 	}
@@ -1046,6 +1076,8 @@ func (c *Client) GetClient(ctx context.Context, email string) (*ports.ClientDeta
 			Auth       string `json:"auth"`
 			ExpiryTime int64  `json:"expiryTime"`
 			TotalGB    int64  `json:"totalGB"`
+			LimitIP    int    `json:"limitIp"`
+			LimitHwid  int    `json:"limitHwid"`
 			Comment    string `json:"comment"`
 			Group      string `json:"group"`
 		} `json:"client"`
@@ -1071,6 +1103,8 @@ func (c *Client) GetClient(ctx context.Context, email string) (*ports.ClientDeta
 		Auth:       out.Client.Auth,
 		ExpiryTime: out.Client.ExpiryTime,
 		TotalGB:    out.Client.TotalGB,
+		LimitIP:    out.Client.LimitIP,
+		LimitHwid:  out.Client.LimitHwid,
 		Comment:    out.Client.Comment,
 		Group:      out.Client.Group,
 		InboundIDs: out.InboundIDs,
@@ -1085,6 +1119,7 @@ func (c *Client) GetClient(ctx context.Context, email string) (*ports.ClientDeta
 // — listing the live state is robust to email-suffix or domain drift, which a
 // reconstruct-the-email approach is not.
 func (c *Client) ListClientInbounds(ctx context.Context) (map[string][]int, error) {
+	ctx = withOp(ctx, "ListClientInbounds")
 	ibs, err := c.ListInbounds(ctx)
 	if err != nil {
 		return nil, err
@@ -1346,8 +1381,6 @@ func buildClientJSON(s ports.ClientSpec) (json.RawMessage, error) {
 // and gin binds with encoding/json's default (unknown keys ignored — the panel
 // never enables DisallowUnknownFields), so they are inert on every panel down to
 // PSP's compat floor.
-//
-// NOT INCLUDED HERE: limitHwid. See buildClientUpdateJSON.
 var panelRenewalOff = map[string]any{
 	"resetDay":        0,
 	"resetMax":        0,
@@ -1362,20 +1395,19 @@ var panelRenewalOff = map[string]any{
 // sends unchunked, against the panel's 10 MiB request cap) to assert a state the
 // create already produces.
 //
-// DELIBERATELY ABSENT: limitHwid, the per-client device-binding cap 3.7.0 added.
-// PSP's update resets it to 0, which silently disables enforcement
-// (EnforceHwidForSubID returns Allowed=true whenever the effective limit is <= 0),
-// and PSP does NOT repair that here. Echoing back a value read moments earlier is
-// worse than leaving it zeroed, not better: setClientLimitHwidByEmail feeds the
-// recomputed sub-wide MAX into trimClientHwidsForSubID, which DELETES the
-// least-recently-seen device registrations beyond the limit. A stale carry (an
-// admin raising the cap, or a device registering, inside the read->write window)
-// therefore permanently destroys device rows, whereas the current clobber writes
-// 0, leaves the trim dormant at its `limit <= 0` guard, and loses only a scalar
-// the admin can retype. The real defect is upstream binding an omitted key to 0
-// instead of "unset" (a *int would fix it); until that lands, omission is the
-// safe behaviour. Admins are told not to set HWID caps on PSP-managed clients —
-// see docs/3xui-compat.md and xui_advisories["3.7.0"] in docs/compat/v3.json.
+// limitHwid is carried by clientObj, and the reason is worth stating because it
+// was deliberately omitted until PSP took ownership of the field. Omitting it
+// let upstream bind the missing key to 0, which silently disabled enforcement
+// (EnforceHwidForSubID allows everything at limit <= 0) — but echoing back a
+// value read moments earlier was worse, not better: setClientLimitHwidByEmail
+// feeds the limit into trimClientHwidsForSubID, which DELETES device
+// registrations beyond it, so a cap change or a device registering inside the
+// read->write window destroyed rows permanently.
+//
+// Ownership removes that window entirely. PSP now sends ITS OWN intended cap
+// (domain.User.DeviceLimit), never an echo, so there is no stale value to carry
+// and the trim does exactly what a device cap is for. See
+// docs/connection-limits.md.
 func buildClientUpdateJSON(s ports.ClientSpec) (json.RawMessage, error) {
 	obj := clientObj(s)
 	for k, v := range panelRenewalOff {
@@ -1396,6 +1428,7 @@ func clientObj(s ports.ClientSpec) map[string]any {
 		"email":      s.Email,
 		"enable":     s.Enable,
 		"limitIp":    s.LimitIP,
+		"limitHwid":  s.LimitHwid,
 		"totalGB":    s.TotalGB,
 		"expiryTime": s.ExpiryTime,
 		"subId":      s.SubID,
@@ -1470,6 +1503,7 @@ func clientObj(s ports.ClientSpec) map[string]any {
 // Route and payload are byte-identical on 3X-UI 3.4.2 (PSP's floor) and 3.6.0,
 // so adopting it required no floor bump.
 func (c *Client) BulkSetEnabled(ctx context.Context, emails []string, enable bool) (ports.BulkSetEnabledResult, error) {
+	ctx = withOp(ctx, "BulkSetEnabled")
 	var out ports.BulkSetEnabledResult
 	if len(emails) == 0 {
 		return out, nil

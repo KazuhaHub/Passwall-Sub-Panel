@@ -38,16 +38,20 @@ type userRow struct {
 	// can't use a B-tree index. The index was pure write amplification
 	// on the busy users table. cleanupLegacyState drops the existing
 	// auto-named idx_users_email so upgraded installs reclaim it.
-	Email              string `gorm:"size:255"`
-	PasswordHash       string `gorm:"size:255"`
-	Role               string `gorm:"size:16;not null;default:user"`
-	SubToken           string `gorm:"size:64;uniqueIndex;not null"`
-	UUID               string `gorm:"size:36;not null"`
-	GroupID            int64  `gorm:"index;not null"`
-	EnabledRuleSets    jsonStrings
-	PersonalRules      string `gorm:"type:text"`
-	ExpireAt           *time.Time
-	TrafficLimitBytes  int64
+	Email             string `gorm:"size:255"`
+	PasswordHash      string `gorm:"size:255"`
+	Role              string `gorm:"size:16;not null;default:user"`
+	SubToken          string `gorm:"size:64;uniqueIndex;not null"`
+	UUID              string `gorm:"size:36;not null"`
+	GroupID           int64  `gorm:"index;not null"`
+	EnabledRuleSets   jsonStrings
+	PersonalRules     string `gorm:"type:text"`
+	ExpireAt          *time.Time
+	TrafficLimitBytes int64
+	// 0 = unlimited, which is also the zero value, so AutoMigrate adds these
+	// to existing installs with no backfill and no behaviour change.
+	IPLimit            int    `gorm:"default:0;not null"`
+	DeviceLimit        int    `gorm:"default:0;not null"`
 	TrafficResetPeriod string `gorm:"size:16;default:never"`
 	TrafficPeriodStart *time.Time
 	LifetimeUpBytes    int64 `gorm:"default:0"`
@@ -132,6 +136,8 @@ func (r *userRow) toDomain() *domain.User {
 		PersonalRules:          r.PersonalRules,
 		ExpireAt:               r.ExpireAt,
 		TrafficLimitBytes:      r.TrafficLimitBytes,
+		IPLimit:                r.IPLimit,
+		DeviceLimit:            r.DeviceLimit,
 		TrafficResetPeriod:     domain.ResetPeriod(r.TrafficResetPeriod),
 		TrafficPeriodStart:     r.TrafficPeriodStart,
 		LifetimeUpBytes:        r.LifetimeUpBytes,
@@ -177,6 +183,8 @@ func userFromDomain(u *domain.User) *userRow {
 		PersonalRules:          u.PersonalRules,
 		ExpireAt:               u.ExpireAt,
 		TrafficLimitBytes:      u.TrafficLimitBytes,
+		IPLimit:                u.IPLimit,
+		DeviceLimit:            u.DeviceLimit,
 		TrafficResetPeriod:     string(u.TrafficResetPeriod),
 		TrafficPeriodStart:     u.TrafficPeriodStart,
 		LifetimeUpBytes:        u.LifetimeUpBytes,
@@ -1362,6 +1370,28 @@ func (j *jsonRelayHealth) Scan(value any) error {
 // truth for both the migrator and the schema_guard_test (which reflects over it
 // to catch cross-dialect-incompatible column definitions before they reach a
 // real MySQL/Postgres).
+// EnsureLegacyOwnershipTable creates `user_xui_clients` if it is absent.
+//
+// The table is deliberately NOT in schemaModels (see the note there): a running
+// panel must never grow it back, because its absence is exactly what proves an
+// install finished the shared-client migration — DropIfMigrated drops it only
+// at zero rows, so the table being gone is a one-way, machine-checkable marker.
+//
+// The v2 -> v3 offline migrator is the one caller that legitimately needs it.
+// It runs EnsureSchema against a BLANK destination and then imports the source's
+// legacy per-node clients, which have nowhere to land otherwise. Exported rather
+// than done with a raw DDL string in the migrator so the columns cannot drift
+// from ownershipRow.
+//
+// Call this only when there is actually a row to write: creating an empty table
+// would make a freshly-imported install look un-migrated forever.
+func EnsureLegacyOwnershipTable(db *gorm.DB) error {
+	if db.Migrator().HasTable(&ownershipRow{}) {
+		return nil
+	}
+	return db.Migrator().CreateTable(&ownershipRow{})
+}
+
 var schemaModels = []any{
 	&userRow{},
 	&roleRow{},

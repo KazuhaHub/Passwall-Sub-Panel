@@ -40,6 +40,15 @@ const (
 	CapabilityCoreUpgrade   PanelCapability = "core.upgrade"
 	CapabilityWebCertRead   PanelCapability = "webcert.read"
 	CapabilityRealityScan   PanelCapability = "reality.scan"
+	// CapabilityClientIPLimit — the panel enforces a per-client concurrent
+	// source-IP cap (ClientSpec.LimitIP).
+	CapabilityClientIPLimit PanelCapability = "client.iplimit"
+	// CapabilityClientDeviceLimit — the panel enforces a per-client device
+	// cap (ClientSpec.LimitHwid). Declared by an adapter whose protocol
+	// carries the field; whether the PANEL BUILD honours it is a version
+	// question (3X-UI 3.7.0+), tracked in docs/compat/v3.json, not here —
+	// capabilities are static per adapter and cannot see a panel's version.
+	CapabilityClientDeviceLimit PanelCapability = "client.devicelimit"
 )
 
 // CapabilityProvider is implemented by production adapters. It avoids
@@ -86,18 +95,11 @@ type PanelClient interface {
 	SetInboundEnable(ctx context.Context, id int, enable bool) error
 
 	// Client CRUD. Backed by 3X-UI 3.2.0's first-class /clients/* API, which
-	// keys clients by their panel-wide unique email. inboundID / clientUUID
-	// args are retained for source-compatibility but are vestigial — PSP's
-	// per-node-unique email (u{userID}-n{nodeID}@domain) is the real key. See
-	// docs/3xui-3.2-clients-migration.md.
+	// keys clients by their panel-wide unique email. AddClient still needs an
+	// inbound because a create has to land somewhere; every other operation is
+	// keyed by spec.Email alone. See docs/3xui-3.2-clients-migration.md.
 	AddClient(ctx context.Context, inboundID int, spec ClientSpec) error
-	UpdateClient(ctx context.Context, inboundID int, clientUUID string, spec ClientSpec) error
-	// UpdateClientWithInbound predates 3.2.0, when it saved a GetInbound
-	// round-trip for the read-modify-write update path. 3.2.0 updates clients
-	// by email with no inbound read, so it now just delegates to UpdateClient;
-	// the pre-fetched inb is unused. Kept so the traffic-poll push phase and
-	// reconcile call sites don't churn. inb must NOT be nil.
-	UpdateClientWithInbound(ctx context.Context, inb *Inbound, clientUUID string, spec ClientSpec) error
+	UpdateClient(ctx context.Context, spec ClientSpec) error
 	DelClientByEmail(ctx context.Context, inboundID int, email string) error
 
 	// GetClient fetches one client by its panel-wide unique email via
@@ -318,6 +320,11 @@ type ClientDetail struct {
 	Auth       string // Hysteria2 per-client credential
 	ExpiryTime int64
 	TotalGB    int64
+	// LimitIP / LimitHwid mirror ClientSpec's caps. Read back so the push
+	// path's compare-then-write can tell a drifted cap from an unchanged one
+	// and heal it, the same way it does for enable/expiry/quota.
+	LimitIP   int
+	LimitHwid int
 	// Comment is the operator's free-text note on the client, set in the 3X-UI
 	// UI. PSP has no concept of it and never sets one — it is read back solely
 	// so an update can hand it straight back instead of blanking it. See
@@ -424,11 +431,27 @@ type InboundSpec struct {
 //   - Trojan: Password holds the password
 //   - Shadowsocks / SS-2022: Password holds the PSK
 type ClientSpec struct {
-	ID         string // UUID (VLESS/VMess)
-	Email      string
-	Enable     bool
-	Flow       string // e.g. "xtls-rprx-vision"
-	LimitIP    int
+	ID     string // UUID (VLESS/VMess)
+	Email  string
+	Enable bool
+	Flow   string // e.g. "xtls-rprx-vision"
+	// LimitIP caps the number of distinct source IPs the client may use
+	// concurrently; 0 is unlimited. PSP owns the value — see
+	// docs/connection-limits.md.
+	LimitIP int
+	// LimitHwid caps the number of devices that may bind to the client's
+	// subscription; 0 is unlimited. 3X-UI 3.7.0+ only; older panels ignore
+	// the key, so a value set against one silently does nothing.
+	//
+	// PSP owns this outright, which is what makes it safe to send. It used
+	// to be omitted deliberately: an update that echoes back a value read
+	// moments earlier feeds a stale limit into the panel's
+	// trimClientHwidsForSubID, which DELETES device registrations beyond it,
+	// so a concurrent cap change or device registration inside the
+	// read-write window destroyed rows permanently. Sending PSP's own
+	// intended value has no read-modify-write window, so the trim does
+	// exactly what a device cap is supposed to do.
+	LimitHwid  int
 	TotalGB    int64 // bytes; panel manages traffic, keep this at 0
 	ExpiryTime int64 // ms epoch; panel manages expiry, keep this at 0
 	SubID      string

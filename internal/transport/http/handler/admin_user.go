@@ -123,6 +123,10 @@ type userDTO struct {
 	// the browser's or 3X-UI server's timezone. Empty for permanent users.
 	ExpireDate        string `json:"expire_date,omitempty"`
 	TrafficLimitBytes int64  `json:"traffic_limit_bytes"`
+	// Connection caps. 0 = unlimited. Whether a given panel enforces them is
+	// a capability question — see docs/connection-limits.md.
+	IPLimit     int `json:"ip_limit"`
+	DeviceLimit int `json:"device_limit"`
 	// Lifetime counters (never reset by period rolls) — surfaced read-only in
 	// the admin edit dialog's detail block.
 	LifetimeUpBytes       int64                     `json:"lifetime_up_bytes"`
@@ -178,6 +182,8 @@ type createUserRequest struct {
 	ExpireDate         string  `json:"expire_date"`
 	TrafficLimitGB     float64 `json:"traffic_limit_gb"` // fractional GB allowed (e.g. 0.3)
 	TrafficResetPeriod string  `json:"traffic_reset_period"`
+	IPLimit            int     `json:"ip_limit"`     // concurrent source IPs; 0 = unlimited
+	DeviceLimit        int     `json:"device_limit"` // bound devices; 0 = unlimited
 	Remark             string  `json:"remark"`
 }
 
@@ -320,6 +326,8 @@ func (h *AdminUserHandler) Create(c *gin.Context) {
 		ExpireAt:           expireAt,
 		TrafficLimitBytes:  int64(req.TrafficLimitGB * 1024 * 1024 * 1024),
 		TrafficResetPeriod: domain.ResetPeriod(req.TrafficResetPeriod),
+		IPLimit:            req.IPLimit,
+		DeviceLimit:        req.DeviceLimit,
 		Remark:             req.Remark,
 	}
 	res, err := h.user.CreateLocalAndSync(c.Request.Context(), in)
@@ -706,6 +714,8 @@ type updateUserRequest struct {
 	ClearExpire        bool     `json:"clear_expire,omitempty"`
 	TrafficLimitGB     *float64 `json:"traffic_limit_gb,omitempty"` // fractional GB allowed
 	TrafficResetPeriod *string  `json:"traffic_reset_period,omitempty"`
+	IPLimit            *int     `json:"ip_limit,omitempty"`
+	DeviceLimit        *int     `json:"device_limit,omitempty"`
 	Remark             *string  `json:"remark,omitempty"`
 	DisplayName        *string  `json:"display_name,omitempty"`
 }
@@ -774,6 +784,8 @@ func (h *AdminUserHandler) Update(c *gin.Context) {
 		p := domain.ResetPeriod(*req.TrafficResetPeriod)
 		in.TrafficResetPeriod = &p
 	}
+	in.IPLimit = req.IPLimit
+	in.DeviceLimit = req.DeviceLimit
 	if err := h.user.UpdateProfile(c.Request.Context(), id, in); err != nil {
 		switch {
 		case errors.Is(err, domain.ErrNotFound):
@@ -873,6 +885,8 @@ func (h *AdminUserHandler) toDTOWith(u *domain.User, st ports.UISettings, loc *t
 		ExpireAt:              u.ExpireAt,
 		ExpireDate:            expireDate,
 		TrafficLimitBytes:     u.TrafficLimitBytes,
+		IPLimit:               u.IPLimit,
+		DeviceLimit:           u.DeviceLimit,
 		LifetimeUpBytes:       u.LifetimeUpBytes,
 		LifetimeDownBytes:     u.LifetimeDownBytes,
 		LifetimeTotalBytes:    u.LifetimeTotalBytes,

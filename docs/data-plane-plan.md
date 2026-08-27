@@ -1,0 +1,418 @@
+# 数据面演进计划：先提效，再决定是否自研后端
+
+> 状态：**草案，待讨论**。本文不承诺任何交付日期，也不预设自研后端一定要做——Phase 2 是一个**决策门**，用 Phase 0 量到的数据决定。
+> 关联：[ARCHITECTURE.md](ARCHITECTURE.md)、[inbound-ownership.md](inbound-ownership.md)、[panel-adapters.md](panel-adapters.md)、[3xui-compat.md](3xui-compat.md)。
+
+## 0. 一句话
+
+当前 PSP 的性能瓶颈**不是轮询**，而是**每个活跃用户每周期两次串行 HTTP 往返**，且本该拦住它的 no-op skip 在结构上永远失效。先把这个修掉（不需要任何新后端），拿到真实数据后，再决定要不要自研数据面。
+
+---
+
+## 1. 已确认的事实
+
+以下每条都在代码里核过，不是推测。
+
+### 1.1 读侧已经很便宜
+
+traffic poll 是**每面板一次** `ListInboundsSlim`（`internal/service/traffic/traffic.go`，`for panelID := range panelsToFetch`），不是每节点一次；默认 5 分钟一轮（`cron_traffic_pull_minutes`，`settings_kv_repo.go:507`）。50 个面板也只有 0.17 req/s。
+
+**推论：把轮询换成推送，省下的是这一部分——不是瓶颈。**
+
+### 1.2 no-op skip 对活跃用户永远不成立（根因）
+
+| # | 位置 | 事实 |
+|---|---|---|
+| 1 | `traffic.go:1343` | 推送触发条件是 `totals.deltaTotal != 0`——用户只要动了流量就推 |
+| 2 | `user/user.go:479` | 推的 `TotalGB` = `TrafficFloorBytes(limit, 本期已用)` = `limit - used`，**逐字节精确，无量化** |
+| 3 | `sharedclient/sharedclient.go:266` | skip 要求 `cur.TotalGB == spec.TotalGB` |
+| 4 | — | 第 2 步保证这个数**每周期都不同** → **skip 结构性失效** |
+
+那个为「避免每周期重复全量替换」而写的 skip，对活跃用户从来没生效过。
+
+### 1.3 每次推送是两次**串行**往返
+
+`SyncUserLifecycle`（`sharedclient.go:301`）是普通 `for` 循环，逐个 `SyncLifecycle`；每个 `SyncLifecycle` = 一次 `GetClient`（供 skip 判断）+ 一次 `UpdateClient`。用户有 P 个 PSPClient（≈ 面板数 × 凭据类）就是 `P × 2` 次串行往返。
+
+### 1.4 并发闸是 8，且跨周期共享
+
+`pushSem`（`traffic.go:160`）容量 = `paneltz.ResolveMaxPanelConcurrency(0)` = **8**。注释明确说它跨周期共享：上周期没排空，下周期排队等它。**这意味着过载不是线性劣化，是雪崩。**
+
+### 1.5 xray reload 有上界（此前被高估）
+
+3X-UI 的 `ApplyPendingRestart()` 是 **30 秒 cron**（上游 `internal/web/web.go:292`），不是每次写一次 reload。CHANGELOG 里「N 次背靠背 reload」说的是突发场景，稳态下每面板最多 30 秒一次。
+
+**推论：成本在往返，不在 reload。** 优化方向应对准往返次数。
+
+### 1.6 成本模型
+
+```
+每周期墙钟 ≈ N × P × 2 × RTT / 8
+  N = 本周期有流量的用户数
+  P = 该用户的 PSPClient 数
+```
+
+| N | P | RTT 200ms | 占 300s 周期 |
+|---|---|---|---|
+| 1000 | 1 | 50s | 17% |
+| 1000 | 3 | 150s | 50% |
+| 2500 | 3 | 375s | **溢出 → 雪崩** |
+
+---
+
+## 2. 现在还不知道的（Phase 0 必须回答）
+
+- **N**：稳态下每周期真正有流量的用户数
+- **P**：用户平均 PSPClient 数
+- **RTT**：真实面板的 `GetClient` / `UpdateClient` 往返分布（P50/P95），不是代码注释里那个 `~300ms` 的历史值
+- 一轮 `PollOnce` 的耗时构成：读 / 写 / DB 各占多少
+- `pushSem` 实际排队深度——有没有已经在跨周期堆积
+
+**没有这些数，「提升了多少」无法验收，Phase 1 的参数也只能拍脑袋。**
+
+---
+
+## Phase 0 — 插桩与测量 ✅ 已实现，待采样
+
+**目标**：拿到 §2 的全部数字。**不改任何行为。**
+
+代码已落地。用法与逐项释义见 **[observability.md](observability.md)**；这里只记结果和为什么这么切。
+
+### 已插桩
+
+| 位置 | 回答 §2 的哪一问 |
+|---|---|
+| `adapters/xui` 的 HTTP 收口点 | **RTT**——按操作分的真实往返分布 |
+| `sharedclient.SyncLifecycle` | **skip 命中率**，以及**是哪个字段挫败了 skip** |
+| `sharedclient.SyncUserLifecycle` | **P**，与单用户扇出墙钟 |
+| `user.PushClientConfig` | 占用信号量槽位的服务时间 |
+| `traffic.PollOnce` | **N**、分段耗时、面板数 |
+| `pushSem` 出入队 | 排队深度、等槽耗时、**跨周期结转** |
+
+出口：`GET /api/admin/diagnostics/metrics`（admin 专属），`POST …/reset` 开新窗口。
+
+### 三个不显然的决定
+
+1. **不引 Prometheus。** 单二进制部署，附近没有抓取设施；换来的是一棵传递依赖树和第二个要加固的 HTTP 面。API 照 Prometheus 形状写，将来要抓取，改渲染即可。
+
+2. **RTT 按 HTTP 交换计，不按逻辑调用计。** `mutateWithRetry` 一次 `UpdateClient` 最多发五个请求——每个都是调用方真等的往返。§1.6 的成本模型以往返计价，这样才对得上。耗时含透明重登录：那也是要等的。
+
+3. **`reset` 返回它关闭的那个窗口。** 分位数不可相减，所以「取样两次做差」对 Phase 0 真正关心的那一半数据根本不成立。窗口只能靠 reset 划，而 reset 不能把它结束的窗口丢掉。
+
+### 最吃重的一项
+
+`psp_lifecycle_sync_write_reason_total{reason=…}`——记录**第一个不相等的字段**，且 `total_gb` 排在判定顺序首位（嫌疑犯不能被掩盖）。
+
+- 分布压倒性落在 `total_gb` → §1.2 成立，**且**对这一个字段做迟滞带就能把 skip 救回来 → Phase 1a 有的放矢
+- 别的原因大量出现 → **迟滞带白做，Phase 1a 打错了靶**
+
+换句话说，Phase 0 不只是量「有多痛」，它还负责**证伪 Phase 1a 的前提**。
+
+### 退出条件
+
+跑满至少 24h 且覆盖业务高峰后：
+
+- [ ] skip 命中率算得出（预期接近 0）
+- [ ] 写入原因分布明确（预期 `total_gb` 压倒性）
+- [ ] N、P、RTT 分位数拿到手
+- [ ] `psp_lifecycle_quota_delta_bytes` 分布拿到手 → band 参数**算得出**，不用拍
+- [ ] `psp_push_sem_carryover_total` 有没有在涨 → 决定 Phase 1c 的优先级
+
+**注意**：`uptime_ms` 与 `window_ms` 相差无几 = 中途重启过，样本作废。
+
+---
+
+## Phase 1 — 效率修复（不需要新后端）
+
+### 1a. 给推送决策加迟滞带（最高价值，针对 §1.2 根因）
+
+```
+band = max(minBytes, remaining × pct)
+若 |cur.TotalGB - spec.TotalGB| <= band 且其余字段全同 → skip
+```
+
+设计要点（已推敲，勿简化）：
+
+- **不要量化 `TrafficFloorBytes` 的返回值。** 向下取整会让面板提前掐断用户；向上取整会在 PSP 离线时多烧。加在**决策**上：真推时推的仍是精确值，陈旧度被 band 界住。
+- **相对带宽自动调节**：离上限远 → band 大 → 极少推；接近上限 → band 收紧 → 精确。
+- **尾部必须豁免**：`TrafficFloorBytes` 在 `used >= limit` 时返回 `1`，那是真正的掐断信号，**不能被 band 吞掉**，否则超额用户不会被停。
+- **迟滞自然收敛**：skip 时面板留旧值，下周期继续与旧值比，漂移累积超过 band 才推一次——不会棘轮。
+- **正确性代价**：PSP 离线窗口内最多多烧一个 band。该下限本就是「PSP 挂了别被无限白嫖」的兜底，替代品是**无限**，所以有界超烧远优于误伤停机。
+- `minBytes` / `pct` 的取值**由 Phase 0 的分布决定**，不预设。
+
+**但要分清这里到底有两个问题，只有一个需要等数据：**
+
+| 问题 | 谁回答 |
+|---|---|
+| band 上限设多少？ | **业务决策，现在就能定。** band 的语义就是「PSP 离线时，单个用户最多可以多烧多少字节」。这是可接受成本，不是可测量量——Phase 0 量不出它 |
+| 这个 band 真能把 skip 救回来吗？ | **Phase 0 数据。** `psp_lifecycle_quota_delta_bytes` 的分布若大量落在 band 以下，救得回来；若绝大多数漂移都远超 band，那 band 就得开到业务不能接受的量级，1a 作废 |
+
+换句话说：**先定「能接受多烧多少」，再用数据检验那个数够不够用。** 反过来（先看数据再倒推能接受多少）会让工程数字去决定业务容忍度，是本末倒置。
+
+### 1b. 并行化 `SyncUserLifecycle` 的串行循环 ✅ 已实现
+
+`SyncUserLifecycle` 改为并发扇出。P > 1 时把单用户延迟从 `P × 2` 个往返压到 `2` 个。
+
+**并行安全的依据（已核源码，非假设）**：一个用户的 client 列表里，不可能有两条指向同一个面板侧 client。PSPClient 以 `(user, panel, credClass)` 为键，而 `domain.PSPClientEmail` 把邮箱后缀构造成分区键的**无碰撞函数**——所以同一面板上的两个 client 必然邮箱不同。真正危险的形态（两个 goroutine 写同一个面板侧 client，在整替换语义下抢适配器的 per-email 写锁，退化成 last-writer-wins）**从这里不可达**。
+
+两个不显然的细节：
+
+- **P = 1 走直连**，不开 goroutine。多数用户 P 就是 1，为一次调用起协程加 channel 是纯开销。
+- **错误按下标收集，不按到达顺序。** 「第一个错误」必须是 client 列表顺序里的第一个，否则返回给管理员的报错取决于面板延迟——同一个故障每次报得都不一样。
+
+### 1c. 给 `pushSem` 加跨周期守卫 ✅ 已实现
+
+上周期未排空时跳过本周期推送并记一条 warn，把 §1.4 的雪崩降级为「掉一拍」。
+
+**触发条件是「有队列」（`waiting > 0`），不是「有在途」。** 周期开始时仍在途的推送，是上一周期正常收尾的尾巴；拿它触发会让健康部署每次周期与慢面板重叠一毫秒就误伤。而**还在排队**意味着上周期入队已超容量且没追上——这个条件没有良性解读。
+
+**跳过是安全的**：下限是「PSP 离线期间别被无限白嫖」的兜底，晚一周期刷新 = 有界陈旧。停用/到期不走这条路（走 `SetServiceSuspendedAndSync`），所以没有任何执法关键的东西被推迟。**自解除**：卡住的推送会在适配器 HTTP 超时释放槽位，队列终将排空，守卫自己松开——一次瞬时过载不会永久静音下限安全网。
+
+**Phase 1 退出条件**：在真实 3.7.0 面板上，构造活跃用户跑多轮，实测推送次数从「每轮 N 次」降到「每轮 ≪ N 次」；skip 命中率显著上升；`go test ./...` 与两台面板的 `TestLive_*` 全绿。
+
+> **当前状态**：1b / 1c 已实现（两者都不依赖测量数据）。
+>
+> **1a 很可能已经不需要做了。** 为回答「band 该设多大」而去核下限语义时，发现了一个量纲缺陷并已修复（**[traffic-floor-defect.md](traffic-floor-defect.md)**）：PSP 推的是「本期剩余」，面板拿它比「终身累计」。
+>
+> 关键在于：**§1.2 说的那个「每周期都在收缩、因而挫败 skip」的下限，其收缩正是缺陷本身。** 修复把推送值重基成 `lastRaw + 本期剩余`——面板计数器涨多少、本期已用就涨多少、剩余就减多少，两项相消。实机验证连续四轮推送，面板持有的值纹丝不动。
+>
+> **实测结论（50 周期，`internal/service/sharedclient/skip_rate_test.go`）**：`P = 1` 的 skip 率从 0% 升到 **98%**；`P > 1` 仍是 **0%**。
+>
+> 我一度以为 P>1 也会大幅改善，**算错了**：`cap_i` 每周期的变化是 `−Σ_{j≠i} δ_j`，只要有别的 client 动了流量它就变。而且这不能靠改公式解决——把 headroom 改成 per-client 会让离线超烧上界从 `P × 剩余` 变成 `P × 配额 − Σ已用`，**更松**。详见 [traffic-floor-defect.md](traffic-floor-defect.md) §6.3。
+>
+> **所以：P = 1 不需要迟滞带；P > 1 仍然需要，本节保留。** band 该设多大现在也更清楚——client i 的每周期漂移就是其他 client 那一周期的流量总和。
+
+---
+
+## Phase 2 — 决策门：要不要自研数据面
+
+用 Phase 0/1 的数据回答：**修完之后还剩多少痛？**
+
+| 若…… | 则 |
+|---|---|
+| Phase 1 后余量充足，痛点主要是兼容税 | **不做自研后端**，把力气放到并行轨（compat CI） |
+| Phase 1 后仍接近饱和，且已确认瓶颈在协议本身 | 进入 Phase 3 |
+
+**决策时必须同时接受的代价**（不是效率问题，是所有权问题）：
+
+- **换来**：数据模型所有权。v3.9.2-beta.7 修的四个静默清零（`limitHwid` / `resetDay` 组 / inbound 的 `total`、`subSortIndex` / 客户端的 `comment`、`group`）**没有一个是 PSP 写错代码**，全部源于与 3X-UI 整结构 Save 语义的阻抗失配。
+- **换走**：xray-core 兼容责任。现在 3X-UI 替 PSP 挡住了 xray-core 的变化（例：26.7.11 把 `minClientVer` 空值默认从「不限」改成 `26.3.27`，直接让 mihomo/Clash Verge 连不上）。xray-core 发版比 3X-UI 频繁。
+- **换走**：运维方在 3X-UI 界面上的操作习惯。上面那四个字段之所以会被清，正因为运维方在用那个界面。自研后端等于砍掉这个逃生口——字段要么搬进 PSP，要么消失。**这是产品决策，不是技术决策。**
+
+**已有的有利条件**（若决定做）：
+
+- PSP **已经是 inbound 配置的真相源**（[inbound-ownership.md](inbound-ownership.md)：自有 DB 存完整配置、订阅渲染零回源、reconcile 反向下发）。「生成什么配置」早就 PSP 说了算。
+- 适配器 seam 已存在：`ports.PanelClient` 22 个方法 + 6 个可选能力接口，已有 xui / sui 两个实现。第三个实现是设计**本来就预留的**。
+- 因此 agent 的职责比「重写 3X-UI」窄得多：**接收 PSP 已拥有的配置 → 生成 xray config → 管进程 → 上报计数器**。UI、用户体系、订阅、Telegram bot 全都不需要。
+
+**先查再定**：3X-UI 3.7.0 自己已有 master/node 推送协议（`/inbounds/pushClientTraffics`、`node-sync` token scope、节点 mTLS、`/nodes/history/*`）。花半天搞清它的成熟度与协议形状——可能可复用，也可能绑死在它自己的 master 上。不查就自己造，风险是重复造一个明年被上游做得更好的东西。
+
+---
+
+## Phase 3 —（条件性）Agent
+
+仅在 Phase 2 判定为「做」时进入。本节是**架构基线**，不是 MVP 清单——协议层的决定改起来最贵，越晚改越贵，所以先定死。
+
+### 3.0 指导原则
+
+工业界（Envoy xDS、kubelet ↔ apiserver）在这个问题上收敛出的答案**不是「推送替代轮询」**，而是：
+
+> **声明式 + 水平触发 + 版本化快照。推送只是延迟优化，正确性靠周期性全量对账兜底。**
+
+水平触发有个关键附带好处：**丢消息不致命**。xDS 和 kubelet 都不保证每条消息送达，靠「下一次对账会修好」。这免掉了「推送必须可靠投递」这个最难的工程问题——不需要消息队列，不需要 exactly-once。
+
+### 3.1 必须在第一天定死的（协议层）
+
+| # | 决定 | 理由 |
+|---|---|---|
+| 1 | **声明式，下行只有期望状态，没有命令** | 命令式 RPC 必须携带全量字段，而携带全量就必须知道所有字段——这正是 v3.9.2-beta.7 四个静默清零的结构性根源 |
+| 2 | **版本化快照 + ACK/NACK** | 每份配置带单调递增 `generation`；agent 回报 `applied_generation`。控制面才能回答「哪台卡在哪个版本」 |
+| 3 | **spec / status 分离 + 字段所有权** | 见 §3.2，这是本计划最重要的一条设计约束 |
+| 4 | **Fail-static** | 控制面不可达时 agent 保持最后一份已知良好配置**继续服务**，绝不 fail closed |
+| 5 | **反向连接**：agent 主动连控制面（gRPC 双向流） | 穿 NAT；且**节点不再需要暴露任何管理端口**——现在每台 3X-UI 都得把面板 HTTP 端口暴露给 PSP，那是实打实的攻击面 |
+| 6 | **版本偏斜策略 + 能力协商** | 明文规定 agent 可落后控制面多少，写进文档。已有 `ports.CapabilityProvider` 先例可扩 |
+| 7 | **短期凭据 + 轮换**，bootstrap 走 token → CSR → 签发 | 不要长期静态 token（就是现在 3X-UI API token 的形态） |
+
+### 3.2 设计约束：字段所有权必须是**机制**，不是逐字段判断
+
+v3.9.2-beta.7 修的四组静默清零（`limitHwid` / `resetDay` 组 / inbound 的 `total`、`subSortIndex` / 客户端的 `comment`、`group`）**没有一个是 PSP 写错代码**，全部源于与 3X-UI 整结构 Save 语义的阻抗失配。当时的修法是逐字段人工判断「pin 还是 preserve」，并写长注释解释理由——那是**在没有所有权模型时的手工替代品**。
+
+K8s 的工业解法是 server-side apply 的 field manager：每个字段记录是谁写的，冲突显式暴露而不是静默覆盖。
+
+**约束**：自研协议**不得**把逐字段人工判断搬过来。资源要显式划分所有权域：
+
+- `psp-owned`：配额、到期、启用状态、凭据 —— 控制面写，agent 不碰
+- `agent-owned`（status）：流量计数、健康、已应用版本 —— agent 写，控制面只读
+- `operator-owned`：运维在本地设置的东西 —— **双方都只读**，apply 根本不触碰
+
+判据：**一个新字段加进来时，不需要任何人做「pin 还是 preserve」的判断**——它属于哪个域决定了一切。做不到这点，说明所有权模型没设计对。
+
+### 3.3 协议形状（草案）
+
+```
+agent ──(mTLS, gRPC 双向流, agent 发起)──> PSP
+
+  上行  Register(node_identity, agent_version, capabilities)
+  下行  ConfigSnapshot{generation, resources[], checksum}
+  上行  Ack{generation} / Nack{generation, reason}
+  上行  Status{applied_generation, xray_state, health}   ← 周期心跳，兼做 lease
+  上行  TrafficReport{counters[]}                        ← 周期推送
+```
+
+- 心跳超时 → 控制面标记节点 unreachable，但 **agent 侧继续按旧配置服务**（§3.1-4）
+- 周期性全量 resync（如 5 分钟）作为水平触发兜底——**这就是原来那个轮询，但它降级为安全网，不再是主路径**
+
+### 3.4 留钩子、暂不实现
+
+- **渐进式发布**：先做到「能指定单节点推送」即可，ring/canary/自动回滚以后再说
+- **增量（delta）传输**：先全量快照，PSP 的配置体量小，不值得
+
+### 3.5 明确不照搬
+
+完整 xDS 三层（LDS/RDS/CDS/EDS）、多租户控制面分片、自研服务发现、agent 自动升级。
+
+这些解决的是万节点 / 多租户 / 强监管的问题——**大厂那套的复杂度大部分是为规模和组织付的税，不是为正确性**。正确性来自 §3.1 那七条，它们在 10 个节点和 10000 个节点上同样必要，而且都不贵。
+
+### 3.6 仓库与产物布局：**单仓**
+
+**先纠正一个常见的问法。** 「以后会不会被第三方驱动」是架构上最常被用来提前拆分的理由，而它问错了对象——真正决定第三方能否接入的是**协议是不是公开契约**，不是**代码放在哪个仓库**。
+
+Envoy 独立于 Istio，不是因为仓库卫生，而是因为 xDS 是一份正式规范（`cncf/xds`）、有独立的版本治理；仓库拆分是「协议成为公开契约」的**结果**而非原因。反例更有说服力：**Kubernetes 的 CRI**——`kubelet` 至今住在 `kubernetes/kubernetes` 里，但 CRI 协议住在独立的 `cri-api`，containerd 和 CRI-O 都是第三方实现。**协议拆了，实现没拆，第三方照样接得上。**
+
+所以第三方接入需要的是这四条，**没有一条要求拆仓**：
+
+1. 协议是**一等版本化制品**（proto + 语义化版本 + 明文兼容性保证）
+2. 协议包**不依赖 `internal/`**
+3. 它被当作**契约**文档化，而不是「我们 agent 碰巧接受什么」
+4. **一致性测试套件**，第三方实现可跑它自证兼容
+
+这四条本来就该做——它们同时也是让我们自己两侧可测的东西。
+
+**成本不对称**：
+
+| 路径 | 代价 |
+|---|---|
+| 单仓 → 以后拆 | 移一个包、建第二条 CI、发一个 module。**几天**。前提是接缝干净 |
+| 现在就拆 → 一直付 | 跨仓版本对齐、跨仓 CI 编排、proto 制品分发——**从第一天付到那个「以后」真的来临**，而它可能永远不来 |
+
+选项的价值来自**接缝**，不来自**目录**。
+
+**三种不同的「以后」，答案不同**：
+
+| 未来 | 例子 | 答案 |
+|---|---|---|
+| (a) 别人实现 **agent**，我们的控制面驱动它 | K8s ↔ CRI | 协议公开即可，**单仓完全够** |
+| (b) 别人的**控制面**驱动我们的 agent | Istio ↔ Envoy | 需要协议成为公共规范；仓库仍可后拆 |
+| (c) 我们的控制面驱动多种数据面 | — | **已经在做**：`ports.PanelClient` + xui/sui 两个实现 |
+
+(b) 还要先回答一个产品问题：**别人为什么要用我们的 agent？** Envoy 走到那步是因为它先成为了最好的通用代理；我们 agent 的价值恰恰在于**和 PSP 的模型紧耦合**——那正是它不通用的原因。真要通用化，那是产品转向，届时拆仓只是其中最小的一件事。
+
+**一个看似反例的数据点，实则支持单仓。** 机场生态里，面板（V2board / Xboard，PHP）与 agent（V2bX，Go）确实分属不同仓库、不同作者，且多个面板实现同一套 UniProxy API。但那个拆分是**语言边界的产物**，不是深思熟虑的架构选择：PHP 面板和 Go agent **无法共享任何代码**，唯一可能的契约就是 HTTP API——无法共享代码时，拆分是免费的。
+
+PSP 没有这道语言边界：控制面与 agent 同为 Go，且会共享 `inboundcfg`、`ports` 与领域类型。**能共享代码时，拆分才开始收费。**
+
+**结论：单仓，但协议从第一天就按公开契约做。**
+
+具体理由：
+
+- **协议契约必须共享**。分仓要么引入第三个 proto 制品，要么 vendoring——两条都会制造新的版本对齐工作，而那正是本项目要消灭的东西
+- **一次 CI 能把两侧对着测**。可以在一个 `go test` 里同时拉起控制面和 agent 做集成测试；分仓要跨仓 CI 编排
+- **多二进制已是既有模式**：`cmd/` 下已有 `panel` / `dump-user` / `reset-admin-password`
+- **发布链路已经合适**：`build` 是 6 平台 matrix，`docker` job **不在容器里编译**、只 COPY 预编译二进制。加一个产物≈ release.yml +10~15 行 + 一个 20 行 Dockerfile
+
+**必须说清楚的一点**：单仓**不消除版本偏斜**。线上仍会出现「PSP v4.1 + 某台节点 agent v4.0」。单仓消除的是**源码偏斜**，并让**偏斜可测**（在一个 CI 里跑 N×M 版本矩阵）。所以 §3.1-6 的版本协商照做不误。
+
+**拆分触发条件（写死，避免变成模糊的「以后再说」）**——任一条成立即拆，都不成立即保持单仓：
+
+1. 出现**第二个非我们自己写的 agent 实现**
+2. 有外部方把协议规范当作**交付物**来要
+3. 两侧发布节奏**实测**分叉（例：agent 半年未动而面板每周发）
+
+在此之前，接缝靠 `api/agent/v1`（不依赖 `internal/`）保留。
+
+产物命名：
+
+| 位置 | 名称 |
+|---|---|
+| Go 包 | `cmd/agent` |
+| 二进制 | `psp-agent`（面板是 `psp`，前缀一致） |
+| 镜像 | `ghcr.io/kazuhahub/passwall-agent`（面板是 `passwall-sub-panel`，同族可辨） |
+| systemd unit | `passwall-agent.service` |
+| 协议包 | `api/agent/v1`（拆分接缝） |
+
+### 3.7 Agent 的决策边界：**策略在控制面，执行在本地**
+
+结论来自读 **V2bX**（`wyx2685/V2bX`）源码，不是文档或传闻。
+
+> 注：原先并列引用的 **XrayR 已删库**（末次提交 `5ceba41 "Clear all files"`）。别照着一个被清空的项目建模。
+
+**V2bX 的整个契约只有 6 个端点**（对比 PSP 现在的 `ports.PanelClient` 22 个方法——差距不是功能少，是声明式契约天然比命令式小）：
+
+| 方向 | 端点 |
+|---|---|
+| 拉 | `/UniProxy/config`（节点配置）、`/UniProxy/user`（用户列表）、`/UniProxy/alivelist`（设备在线表） |
+| 推 | `/UniProxy/push`（流量上报）、`/UniProxy/alive`（在线用户上报） |
+
+**零本地配额逻辑。** 全仓搜 `quota|exceed|totaltraffic|overflow` 无命中。用户禁用的机制是（`node/task.go:63-207`）：拉用户列表 → 与当前列表 diff → `core.AddUsers()` / `core.DelUsers()` → 更新 limiter。**面板把用户从列表里拿掉，agent 下次拉取时 diff 出来删掉**，agent 完全不知道「配额」存在。
+
+**但 agent 并非无所事事。** V2bX 有完整的 `limiter/` 包：令牌桶限速、设备数统计、动态限速、连接拒绝——全是数据路径上的实时工作。关键在于**限速多少、限几个设备这些值来自面板**（`users[i].SpeedLimit` / `users[i].DeviceLimit`）。
+
+所以正确的分界线不是「执行器 vs 有决策」，而是：
+
+> **策略（policy）在控制面，执行（enforcement）在本地。**
+
+两个值得直接抄的细节：
+
+- **节奏由控制面下发**：`PullInterval` / `PushInterval` 来自节点配置，agent 运行时自我调整（`task.go:154-162`）。控制面能远程调快调慢，无需改 agent 配置。
+- **fail-static 是结构性的**：任何一次拉取失败即 `log + return nil`，不改状态，xray 继续按旧配置跑。不是特意实现的，是 diff-apply 模型的自然结果。
+
+#### PSP 的取舍：纯执行器 + 一个例外
+
+V2bX 模型下，**面板挂了 = agent 无限期按最后一份用户列表服务，对超额毫无防护**。而 PSP 现有的 traffic floor（推 `TotalGB` 让 3X-UI 侧兜底）**比生态惯例更严**——照搬 V2bX 等于主动放弃一个已有的保护。
+
+| 项 | 归属 |
+|---|---|
+| 配额判断、禁用、到期 | **控制面** |
+| 限速值、设备数上限 | 控制面下发**策略**，本地**执行** |
+| **离线流量下限** | **本地** —— 唯一值得下沉的决策 |
+
+最后一条是现有 traffic floor 概念的自然延续：agent 持有一个「剩余额度」，断线期间自行扣减，扣完自停。这不违反 §3.1-4 的 fail-static（仍在服务，只是有界），并补上了 V2bX 的那个缺口。
+
+### 3.8 交付与共存
+
+- 单节点试点，与 3X-UI **长期共存**（适配器架构本就支持：存量节点留 3X-UI，新节点上 agent）
+- 配置生成复用 PSP 现有的 `inboundcfg`
+- 退出条件：试点节点稳定运行一个完整计费周期，收敛状态可观测，fail-static 经过真实断网验证
+
+---
+
+## 并行轨 — 上游兼容 CI
+
+**与 Phase 编号无关，可随时开始；且无论 Phase 2 结论如何都要做**——因为共存意味着 3X-UI 适配器会长期留存，就得长期测。
+
+把 v3.9.2-beta.7 那次人工流程脚本化（每步都已实操验证过两遍）：拉上游 tag → stub `internal/web/dist` 后编译 → 按上游 `go.mod` 取对应 xray-core → `setting -getApiToken` 拿 token → 起面板 → 跑 8 个 `TestLive_*`。
+
+- 触发：定时 + 手动 dispatch（可传上游 tag）
+- 绿 → job summary 提示「可抬 `max_tested_xui`」；红 → 开 issue 附失败用例名
+- 加一条**升级路径** leg：起旧版本 → 造状态 → 换二进制 → 起新版本 → 断言（这是全新安装测不出来的那类问题，API token scope 迁移就是这么发现的）
+- 注：`PSP_LIVE_XUI_NO_GITHUB` 在 Actions 上**不需要**——runner 有外网，`getPanelUpdateInfo` / `getXrayVersion` 能拿到真数据
+
+**收益**：把「每个上游 minor 花大半天」变成看一眼红绿灯，失败用例名直接定位契约变更。
+
+---
+
+## 明确不做的事
+
+- **不为「推送替代轮询」这个理由做自研后端**——§1.1 已证明读侧不是瓶颈。
+- **不在 Phase 0 完成前定 band 参数**。
+- **不做一刀切迁移**。
+- **不在 Phase 1 里顺手扩大范围**（例如 inbound 层的 `specToRaw` 已知问题另开）。
+
+## 风险
+
+| 风险 | 缓解 |
+|---|---|
+| ~~Phase 0 插桩本身影响性能~~ | **已消解**：记录路径全部原子操作、无锁、零分配；一次直方图观测是十几个边界的二分查找加几次原子加。一轮 poll 最多几千次观测，相对单次 HTTP 往返不可测量 |
+| band 取值过大导致离线超烧 | band 相对化 + 尾部豁免；上限由业务可接受的超烧额度反推 |
+| Phase 1b 并行化引入对同一 client 的竞态 | 适配器已有 per-email 写锁（`lockClientEmail`）；并行粒度限制在**不同** client |
+| 自研后端半途而废，留下两套半成品 | Phase 2 决策门显式化；Phase 3 以单节点试点为退出条件，不达标就回退 |

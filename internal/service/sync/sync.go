@@ -126,13 +126,13 @@ func isDuplicateClientErr(err error) bool {
 }
 
 func (s *Service) AddClientToInbound(ctx context.Context, userID int64, panelID int64,
-	inboundID int, protocol domain.Protocol, ssMethod, userUUID, email, flow string, expireTime, totalGB int64) error {
+	inboundID int, protocol domain.Protocol, ssMethod, userUUID, email, flow string, want domain.UserLifecycle, panelLifetime int64) error {
 
 	c, err := s.pool.Get(panelID)
 	if err != nil {
 		return err
 	}
-	spec := buildClientSpec(protocol, ssMethod, userUUID, email, flow, expireTime, totalGB)
+	spec := buildClientSpec(protocol, ssMethod, userUUID, email, flow, want, panelLifetime)
 	if err := c.AddClient(ctx, inboundID, spec); err != nil {
 		// A duplicate-email error means the client already exists in 3X-UI. If
 		// we have no ownership row for it, that's an ORPHANED client — fall
@@ -181,7 +181,7 @@ func (s *Service) AddClientToInbound(ctx context.Context, userID int64, panelID 
 // On success the ownership table is updated so subsequent operations use
 // the new uuid as the path key.
 func (s *Service) RotateClientUUID(ctx context.Context, panelID int64, inboundID int,
-	email string, protocol domain.Protocol, ssMethod, oldUUID, newUUID, flow string, enable bool, expireTime, totalGB int64) error {
+	email string, protocol domain.Protocol, ssMethod, oldUUID, newUUID, flow string, want domain.UserLifecycle, panelLifetime int64) error {
 
 	if err := s.ensureClientOwned(ctx, panelID, inboundID, email); err != nil {
 		return err
@@ -190,9 +190,8 @@ func (s *Service) RotateClientUUID(ctx context.Context, panelID int64, inboundID
 	if err != nil {
 		return err
 	}
-	spec := buildClientSpec(protocol, ssMethod, newUUID, email, flow, expireTime, totalGB)
-	spec.Enable = enable
-	if err := c.UpdateClient(ctx, inboundID, oldUUID, spec); err != nil {
+	spec := buildClientSpec(protocol, ssMethod, newUUID, email, flow, want, panelLifetime)
+	if err := c.UpdateClient(ctx, spec); err != nil {
 		return fmt.Errorf("xui rotate uuid: %w", err)
 	}
 	return s.ownership.UpdateUUID(ctx, panelID, inboundID, email, newUUID)
@@ -205,7 +204,7 @@ func (s *Service) RotateClientUUID(ctx context.Context, panelID int64, inboundID
 // still matches what 3X-UI has. Uuid mismatch is handled by
 // RotateClientUUID, which takes both old and new uuids.
 func (s *Service) SetOwnedClientEnable(ctx context.Context, panelID int64, inboundID int,
-	email string, protocol domain.Protocol, ssMethod, userUUID, flow string, enable bool, expireTime, totalGB int64) error {
+	email string, protocol domain.Protocol, ssMethod, userUUID, flow string, want domain.UserLifecycle, panelLifetime int64) error {
 
 	if err := s.ensureClientOwned(ctx, panelID, inboundID, email); err != nil {
 		return err
@@ -214,9 +213,8 @@ func (s *Service) SetOwnedClientEnable(ctx context.Context, panelID int64, inbou
 	if err != nil {
 		return err
 	}
-	spec := buildClientSpec(protocol, ssMethod, userUUID, email, flow, expireTime, totalGB)
-	spec.Enable = enable
-	return c.UpdateClient(ctx, inboundID, userUUID, spec)
+	spec := buildClientSpec(protocol, ssMethod, userUUID, email, flow, want, panelLifetime)
+	return c.UpdateClient(ctx, spec)
 }
 
 // SetOwnedClientEnableWithInbound is SetOwnedClientEnable with a
@@ -227,7 +225,7 @@ func (s *Service) SetOwnedClientEnable(ctx context.Context, panelID int64, inbou
 // this variant the entire write phase is one HTTP roundtrip per push
 // instead of two.
 func (s *Service) SetOwnedClientEnableWithInbound(ctx context.Context, panelID int64, inb *ports.Inbound,
-	email string, protocol domain.Protocol, ssMethod, userUUID, flow string, enable bool, expireTime, totalGB int64) error {
+	email string, protocol domain.Protocol, ssMethod, userUUID, flow string, want domain.UserLifecycle, panelLifetime int64) error {
 
 	if inb == nil {
 		return fmt.Errorf("SetOwnedClientEnableWithInbound: inb is nil")
@@ -239,8 +237,7 @@ func (s *Service) SetOwnedClientEnableWithInbound(ctx context.Context, panelID i
 	if err != nil {
 		return err
 	}
-	spec := buildClientSpec(protocol, ssMethod, userUUID, email, flow, expireTime, totalGB)
-	spec.Enable = enable
+	spec := buildClientSpec(protocol, ssMethod, userUUID, email, flow, want, panelLifetime)
 	// No-op skip: if the inbound we already hold shows this client matching the
 	// spec on every PSP-controlled field, UpdateClient would push byte-identical
 	// values and only cost an Xray restart. Skipping keeps a resync / push pass
@@ -250,7 +247,7 @@ func (s *Service) SetOwnedClientEnableWithInbound(ctx context.Context, panelID i
 	if clientUnchanged(inb, spec, protocol) {
 		return nil
 	}
-	return c.UpdateClientWithInbound(ctx, inb, userUUID, spec)
+	return c.UpdateClient(ctx, spec)
 }
 
 // clientUnchanged reports whether inb already holds a client byte-identical to
@@ -278,7 +275,16 @@ func clientUnchanged(inb *ports.Inbound, spec ports.ClientSpec, protocol domain.
 		cur.Flow != spec.Flow ||
 		cur.ExpiryTime != spec.ExpiryTime ||
 		cur.TotalGB != spec.TotalGB ||
+		cur.LimitIP != spec.LimitIP ||
 		cur.ID != spec.ID {
+		return false
+	}
+	// limitHwid is NOT in the inbound's settings.clients[] — the panel keeps it
+	// on its own client row — so a pre-fetched inbound cannot prove a match.
+	// Per this function's contract (any uncertainty means "go ahead and
+	// update"), a non-zero device cap forces the write. Zero needs no write:
+	// it is what the panel already holds for a client PSP has never capped.
+	if spec.LimitHwid != 0 {
 		return false
 	}
 	// Trojan/SS/SS-2022 also carry a password; VLESS/VMess leave spec.Password
@@ -450,14 +456,21 @@ func IsOwnershipError(err error) bool {
 // totalGB is the per-client traffic floor pushed into 3X-UI (despite the
 // name, the field is bytes). 0 means unlimited on the 3X-UI side; pass the
 // output of user.TrafficFloorBytes for the safety-net behaviour.
-func buildClientSpec(protocol domain.Protocol, ssMethod, userUUID, email, flow string, expireTime, totalGB int64) ports.ClientSpec {
+// buildClientSpec maps PSP's intent onto a panel client spec. `want` is the
+// enforcement contract (domain.UserLifecycle) and panelLifetime is the client's
+// current panel-side cumulative counter, which is what turns the contract's
+// period-relative headroom into the absolute cap the panel compares against.
+func buildClientSpec(protocol domain.Protocol, ssMethod, userUUID, email, flow string,
+	want domain.UserLifecycle, panelLifetime int64) ports.ClientSpec {
 	password := crypto.DeriveProxyPassword(userUUID, protocol, ssMethod)
 	spec := ports.ClientSpec{
 		Email:      email,
-		Enable:     true,
+		Enable:     want.Enable,
 		Flow:       flow,
-		ExpiryTime: expireTime,
-		TotalGB:    totalGB,
+		ExpiryTime: want.ExpiryTime,
+		TotalGB:    want.PanelQuota(panelLifetime),
+		LimitIP:    want.IPLimit,
+		LimitHwid:  want.DeviceLimit,
 	}
 	switch protocol {
 	case domain.ProtoVLESS, domain.ProtoVMess:

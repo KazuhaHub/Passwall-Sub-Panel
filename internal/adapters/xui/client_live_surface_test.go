@@ -242,10 +242,10 @@ func TestLive_XUISurface(t *testing.T) {
 	// update-by-email is a FULL REPLACE on 3X-UI: whatever the spec omits is
 	// cleared. PSP relies on that (it always sends a complete spec), so the
 	// assertion is that a changed field lands AND the uuid survives.
-	if err := c.UpdateClientWithInbound(ctx, gotA, detail.ID, ports.ClientSpec{
+	if err := c.UpdateClient(ctx, ports.ClientSpec{
 		Email: email, Enable: false, ID: detail.ID, TotalGB: 2 << 30,
 	}); err != nil {
-		t.Fatalf("UpdateClientWithInbound: %v", err)
+		t.Fatalf("UpdateClient: %v", err)
 	}
 	if got, err := c.GetClient(ctx, email); err != nil {
 		t.Fatalf("GetClient after update: %v", err)
@@ -332,7 +332,7 @@ func TestLive_XUISurface(t *testing.T) {
 		t.Fatalf("AddClient: %v", err)
 	}
 	assertAttached(t, c, ctx, legacyEmail, inbA)
-	if err := c.UpdateClient(ctx, inbA, "5f1e6a1c-6b6a-4f0e-9f4a-1f2b3c4d5e72", ports.ClientSpec{
+	if err := c.UpdateClient(ctx, ports.ClientSpec{
 		Email: legacyEmail, Enable: false, ID: "5f1e6a1c-6b6a-4f0e-9f4a-1f2b3c4d5e72",
 	}); err != nil {
 		t.Fatalf("UpdateClient: %v", err)

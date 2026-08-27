@@ -13,14 +13,34 @@ package sharedclient
 import (
 	"context"
 	"fmt"
+	"runtime/debug"
+	"sync"
+	"time"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/clientplan"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/log"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/metrics"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/paneltz"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 )
 
+// capGapKey dedupes the capability-gap warning per (panel, capability).
+type capGapKey struct {
+	panelID    int64
+	capability ports.PanelCapability
+}
+
 type Service struct {
+	// settings is optional (WithSettings). When absent the fan-out below falls
+	// back to the same default every other 3X-UI fan-out resolves to.
+	settings ports.ScopedSettings
+
+	// capGapSeen keeps the capability-gap warning to once per (panel,
+	// capability) per process. sync.Map because the push path fans out
+	// concurrently and this is a write-once-read-many set.
+	capGapSeen sync.Map
+
 	clients ports.PSPClientRepo
 	pool    ports.XUIPool
 	nodes   ports.NodeRepo
@@ -214,6 +234,10 @@ func (s *Service) ProvisionClient(ctx context.Context, c *domain.PSPClient) (Pro
 	return res, nil
 }
 
+// want.QuotaHeadroom is bytes remaining IN THE CURRENT PERIOD, not the value
+// that reaches the panel: the panel compares against a lifetime counter, so it
+// is rebased onto that counter below.
+//
 // SyncLifecycle pushes the user's current enable / expiry / quota-floor onto the
 // shared client in 3X-UI (UpdateClient by email — propagates to every inbound the
 // client is attached to). This is HOLE #1: without it, a disabled / expired /
@@ -221,7 +245,7 @@ func (s *Service) ProvisionClient(ctx context.Context, c *domain.PSPClient) (Pro
 // only the legacy per-node clients get toggled. UpdateClient is full-replace, so
 // the stored creds + the partition's flow are re-sent unchanged. A client with no
 // attachments (hence no flow) is skipped.
-func (s *Service) SyncLifecycle(ctx context.Context, c *domain.PSPClient, enable bool, expiryTime, totalGB int64) error {
+func (s *Service) SyncLifecycle(ctx context.Context, c *domain.PSPClient, want domain.UserLifecycle) error {
 	if c == nil {
 		return nil
 	}
@@ -247,22 +271,48 @@ func (s *Service) SyncLifecycle(ctx context.Context, c *domain.PSPClient, enable
 		}
 	}
 	if !provisioned {
+		metrics.LifecycleNotProvisionedTotal.Inc()
 		return nil
 	}
+	// Counted from here rather than at function entry, so the denominator is
+	// "calls that reached the compare-then-write decision". Exactly one of
+	// skipped / write follows, and those two sum to this total; error is a
+	// SUB-count that overlaps write (a failed UpdateClient is both) and also
+	// covers the pool failure below, which reaches neither. Skip rate is
+	// skipped/total; do not try to reconcile all three against the total.
+	metrics.LifecycleTotal.Inc()
 	cli, err := s.pool.Get(c.PanelID)
 	if err != nil {
+		metrics.LifecycleErrorTotal.Inc()
 		return fmt.Errorf("xui pool get %d: %w", c.PanelID, err)
 	}
+	s.reportCapabilityGaps(cli, c.PanelID, want)
+
 	spec := buildSharedClientSpec(c, flow)
-	spec.Enable = enable
-	spec.ExpiryTime = expiryTime
-	spec.TotalGB = totalGB
+	spec.Enable = want.Enable
+	spec.ExpiryTime = want.ExpiryTime
+	spec.LimitIP = want.IPLimit
+	spec.LimitHwid = want.DeviceLimit
+	// QuotaHeadroom is period-relative; the panel enforces against its own
+	// never-reset lifetime counter. domain.PanelQuotaCap bridges the two —
+	// see docs/traffic-floor-defect.md for what pushing the raw headroom did.
+	spec.TotalGB = c.PanelQuotaCap(want.QuotaHeadroom)
 	// No-op-skip: if 3X-UI already holds this exact lifecycle AND creds, skip the
 	// UpdateClient. ResyncMembership calls this on every resync and the traffic poll
 	// calls it every cycle for active users; without the skip an unchanged user
 	// would issue a redundant full-replace each time. Creds are compared too, so a
 	// UUID reset (id/password differ) still propagates; an active user's shrinking
 	// quota-floor (totalGB differs) still refreshes the Xray-side cap.
+	//
+	// Which caps the panel can actually store. A field it silently drops reads
+	// back as 0 forever, so letting it into the comparison below would mean the
+	// skip can NEVER fire: every cycle would see a difference, issue a
+	// full-replace, and restart the core — for a value that cannot converge.
+	// The gap is already reported above; it must not also become a write loop.
+	capIP := ports.SupportsCapability(cli, ports.CapabilityClientIPLimit)
+	capDevice := ports.SupportsCapability(cli, ports.CapabilityClientDeviceLimit)
+
+	unreadReason := "panel_unread"
 	if cur, err := cli.GetClient(ctx, c.Email); err == nil && cur != nil {
 		// Hand the operator's 3X-UI note straight back. UpdateClient is a
 		// full-replace and upstream writes clients.comment unconditionally, so
@@ -273,12 +323,152 @@ func (s *Service) SyncLifecycle(ctx context.Context, c *domain.PSPClient, enable
 		// ride and are slated for removal with the ownership model.
 		spec.Comment = cur.Comment
 		spec.Group = cur.Group
-		if cur.Enable == spec.Enable && cur.ExpiryTime == spec.ExpiryTime && cur.TotalGB == spec.TotalGB &&
-			cur.ID == spec.ID && cur.Password == spec.Password && cur.Flow == spec.Flow && cur.Auth == spec.Auth {
+		// Sample the quota drift on EVERY compare, skip or not: the
+		// distribution a Phase 1a deadband has to be sized against is the
+		// drift the deadband would have to swallow, which includes the
+		// cycles where the floor barely moved.
+		metrics.LifecycleQuotaDeltaBytes.Observe(absInt64(cur.TotalGB - spec.TotalGB))
+		// The write REASON is the load-bearing measurement of Phase 0:
+		// docs/data-plane-plan.md §1.2 claims the shrinking quota floor
+		// defeats this skip on every cycle for every active user. A
+		// breakdown dominated by "total_gb" confirms that, and with it
+		// that a deadband on that one field recovers the skip. Any other
+		// reason showing up in bulk would mean a deadband buys nothing
+		// and Phase 1a is aimed at the wrong field.
+		reason := lifecycleWriteReason(cur, spec, capIP, capDevice)
+		if reason == "" {
+			metrics.LifecycleSkippedTotal.Inc()
 			return nil
 		}
+		metrics.LifecycleWriteReasonTotal.With(reason).Inc()
+		unreadReason = ""
 	}
-	return cli.UpdateClient(ctx, 0, c.UUID, spec) // inbound/uuid args vestigial; keyed by spec.Email
+	if unreadReason != "" {
+		// GetClient failed or reported the client absent, so the skip could not
+		// be evaluated. Labelling it keeps sum(write_reason) == write_total,
+		// which otherwise silently under-counts exactly the flaky panels.
+		metrics.LifecycleWriteReasonTotal.With(unreadReason).Inc()
+	}
+	metrics.LifecycleWriteTotal.Inc()
+	if err := cli.UpdateClient(ctx, spec); err != nil {
+		metrics.LifecycleErrorTotal.Inc()
+		return err
+	}
+	return nil
+}
+
+// WithSettings attaches the settings repo so the per-user fan-out honours the
+// admin's MaxPanelConcurrency. Optional, and returns the service for chaining
+// at construction sites — same shape as traffic.Service.WithSettings.
+func (s *Service) WithSettings(settings ports.ScopedSettings) *Service {
+	s.settings = settings
+	return s
+}
+
+// panelConcurrency resolves the per-user fan-out width.
+//
+// It reads the SAME admin setting as the traffic poll, reconcile and
+// pushClientConfigToAll, because that setting's whole promise is that moving
+// one slider bounds every 3X-UI fan-out. Hard-coding the default here would
+// break that promise in the least visible way possible: an operator who lowers
+// the cap to protect a weak VPS would still see this path fan out eight wide.
+//
+// Note this nests inside the poll's pushSem, so the real ceiling a panel sees
+// is the product. Honouring the setting at least keeps both factors under the
+// operator's control.
+func (s *Service) panelConcurrency(ctx context.Context) int {
+	if s.settings == nil {
+		return paneltz.ResolveMaxPanelConcurrency(0)
+	}
+	cfg, err := s.settings.Load(ctx, ports.UISettings{})
+	if err != nil {
+		return paneltz.ResolveMaxPanelConcurrency(0)
+	}
+	return paneltz.ResolveMaxPanelConcurrency(cfg.MaxPanelConcurrency)
+}
+
+// reportCapabilityGaps notices when PSP is about to push a setting the panel in
+// front of it cannot enforce, and says so once instead of silently succeeding.
+//
+// This is the enforcement half of the design stance in docs/connection-limits.md:
+// PSP's domain model is the source of truth and adapters translate what their
+// panel can express, so a gap has to be VISIBLE. An S-UI panel has no concept of
+// either cap, and a 3X-UI below 3.7.0 ignores the device one — in both cases the
+// write succeeds and enforces nothing, which is exactly the shape of failure the
+// capability list exists to prevent.
+//
+// The counter is the durable signal; the log line fires once per (panel,
+// capability) per process because the condition is steady-state — it persists
+// until the operator moves the user or upgrades the panel, so logging it every
+// cycle for every affected client would bury everything else.
+func (s *Service) reportCapabilityGaps(cli ports.XUIClient, panelID int64, want domain.UserLifecycle) {
+	check := func(set bool, capability ports.PanelCapability, field string) {
+		if !set || ports.SupportsCapability(cli, capability) {
+			return
+		}
+		metrics.CapabilityGapTotal.With(string(capability)).Inc()
+		if _, seen := s.capGapSeen.LoadOrStore(capGapKey{panelID, capability}, struct{}{}); seen {
+			return
+		}
+		log.Warn("panel cannot enforce a setting PSP is pushing; the write will succeed and do nothing",
+			"panel_id", panelID, "capability", string(capability), "field", field)
+	}
+	check(want.IPLimit > 0, ports.CapabilityClientIPLimit, "ip_limit")
+	check(want.DeviceLimit > 0, ports.CapabilityClientDeviceLimit, "device_limit")
+}
+
+// lifecycleWriteReason names the first field on which the panel's stored
+// client differs from what PSP intends to push, or "" when they match and
+// the no-op skip fires.
+//
+// Field order is deliberate: totalGB is checked FIRST because it is the
+// suspected reason a skip essentially never fires, and a reason breakdown
+// is only useful if the suspect cannot be masked by a field checked ahead
+// of it. The remaining order is arbitrary — a call that differs in two
+// fields is attributed to whichever comes first, which is fine for a
+// measurement whose question is "which single field dominates".
+//
+// The comparison set is kept identical to the skip condition it replaced;
+// adding a field here silently makes the skip stricter.
+// capIP / capDevice say whether the panel can STORE each cap. A panel that
+// silently drops one reads it back as 0 forever, so including it here would
+// make the skip structurally impossible to hit: every cycle would see a
+// difference and issue a full-replace that restarts the core, for a value that
+// can never converge. Excluding it is not "ignoring drift" — there is no drift
+// to heal on a panel that has nowhere to put the value, and the gap is already
+// counted by reportCapabilityGaps.
+func lifecycleWriteReason(cur *ports.ClientDetail, spec ports.ClientSpec, capIP, capDevice bool) string {
+	switch {
+	case cur.TotalGB != spec.TotalGB:
+		return "total_gb"
+	case capIP && cur.LimitIP != spec.LimitIP:
+		return "ip_limit"
+	case capDevice && cur.LimitHwid != spec.LimitHwid:
+		return "device_limit"
+	case cur.Enable != spec.Enable:
+		return "enable"
+	case cur.ExpiryTime != spec.ExpiryTime:
+		return "expiry"
+	case cur.ID != spec.ID:
+		return "id"
+	case cur.Password != spec.Password:
+		return "password"
+	case cur.Flow != spec.Flow:
+		return "flow"
+	case cur.Auth != spec.Auth:
+		return "auth"
+	}
+	return ""
+}
+
+// absInt64 returns |v| as a float64 for histogram observation. The floor
+// can move in either direction (usage grows; an admin raises the cap), and
+// a deadband is sized on magnitude, not sign.
+func absInt64(v int64) float64 {
+	if v < 0 {
+		return float64(-v)
+	}
+	return float64(v)
 }
 
 // sameInboundSet reports whether the live attachment set equals the desired set
@@ -297,19 +487,90 @@ func sameInboundSet(have []int, want map[int]bool) bool {
 
 // SyncUserLifecycle pushes the given lifecycle state onto ALL of a user's shared
 // clients (across panels/partitions). enable/expiry/quota are user-level, so they
-// apply identically to every client. Returns the first error, attempts all.
-func (s *Service) SyncUserLifecycle(ctx context.Context, userID int64, enable bool, expiryTime, totalGB int64) error {
+// apply identically to every client — want.QuotaHeadroom is the user's
+// remaining period bytes, which each client rebases onto its OWN panel-side
+// counter. Returns the first error, attempts all.
+//
+// The per-client work runs concurrently (docs/data-plane-plan.md Phase 1b).
+// Each SyncLifecycle is a GetClient plus an UpdateClient, so the serial loop
+// this replaced cost the user P x 2 round trips end to end; concurrently it is
+// 2, which for a user spread across several panels is the difference between
+// "one slow panel delays only its own client" and "one slow panel delays
+// everything after it in the list".
+//
+// Safe to run in parallel because no two entries in one user's list can name
+// the same panel-side client. A PSPClient is keyed by (user, panel, credClass),
+// and domain.PSPClientEmail derives the email suffix as a collision-free
+// function of the partition key — so two clients on the SAME panel necessarily
+// carry different emails. The dangerous shape (two goroutines writing one
+// panel-side client, racing the adapter's per-email write lock into a
+// last-writer-wins on a full-replace body) is therefore unreachable from here.
+// The pool hands back a shared adapter per panel, which is already driven
+// concurrently by the traffic poll's own panel fan-out.
+func (s *Service) SyncUserLifecycle(ctx context.Context, userID int64, want domain.UserLifecycle) error {
+	started := time.Now()
 	clients, err := s.clients.ListByUser(ctx, userID)
 	if err != nil {
 		return fmt.Errorf("list clients: %w", err)
 	}
-	var firstErr error
-	for _, c := range clients {
-		if err := s.SyncLifecycle(ctx, c, enable, expiryTime, totalGB); err != nil && firstErr == nil {
-			firstErr = err
+	// P and the per-user fan-out cost from docs/data-plane-plan.md §1.6.
+	// Sampled here rather than derived from the panel-op counters because
+	// this is the loop the cost model describes: the histogram's own P50
+	// against P95 is what says whether the fan-out is a uniform cost or a
+	// tail problem.
+	metrics.UserClientCount.Observe(float64(len(clients)))
+	defer func() { metrics.SyncUserDuration.ObserveSince(started) }()
+
+	// P is 1 for most users. Spawning a goroutine and a channel to run one
+	// call is pure overhead, so the common case keeps the direct call.
+	if len(clients) <= 1 {
+		if len(clients) == 0 {
+			return nil
+		}
+		return s.SyncLifecycle(ctx, clients[0], want)
+	}
+
+	// Results are collected BY INDEX, not by arrival, so "the first error"
+	// stays the first error in client order. Reporting whichever goroutine
+	// happened to fail first would make the returned error depend on panel
+	// latency, and callers surface it to an admin.
+	errs := make([]error, len(clients))
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, s.panelConcurrency(ctx))
+	for i, c := range clients {
+		wg.Add(1)
+		go func(i int, c *domain.PSPClient) {
+			// Record the panic as this client's error rather than letting
+			// safego.Recover swallow it. A nil errs[i] means "pushed
+			// successfully", and ResyncMembership deletes the legacy per-node
+			// fallback on exactly that signal — so a swallowed panic would
+			// strand the user on a shared client still holding its provision
+			// defaults (enabled, no expiry, no quota). That is the audit-#1
+			// enforcement bypass the ordering comments warn about, and the
+			// serial loop this replaced could not produce it because a panic
+			// propagated.
+			defer func() {
+				if r := recover(); r != nil {
+					errs[i] = fmt.Errorf("sharedclient.SyncUserLifecycle: panic: %v", r)
+					log.Error("panic in shared lifecycle push",
+						"client_id", c.ID, "panel_id", c.PanelID, "panic", r,
+						"stack", string(debug.Stack()))
+				}
+			}()
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			errs[i] = s.SyncLifecycle(ctx, c, want)
+		}(i, c)
+	}
+	wg.Wait()
+
+	for _, err := range errs {
+		if err != nil {
+			return err
 		}
 	}
-	return firstErr
+	return nil
 }
 
 // CleanupResult summarizes a Stage-4 legacy-cleanup pass.

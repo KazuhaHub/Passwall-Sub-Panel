@@ -4,6 +4,145 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## v3.9.2-beta.8 — 2026-08-27
+
+修掉一个长期存在、只影响设了流量上限的用户的量纲不匹配缺陷（面板会在他们用到一半时把人停掉），并把每用户的并发 IP 与设备数上限做通——PSP 持有字段语义，面板只负责翻译，翻译不了的显式上报缺口。另有数据面演进计划 Phase 0 的内置指标（纯观测）与一个把遗留客户端整批丢弃的 v2→v3 迁移器修复。
+
+### 修复
+
+- **流量下限量纲不匹配：设了配额的用户会在用到一半时被面板停用** —— 详见新增的 [`docs/traffic-floor-defect.md`](docs/traffic-floor-defect.md)。PSP 推给面板的是「**本期剩余**字节」，而面板拿它去比「**终身累计**字节」（`total > 0 AND up + down >= total`，且 `up/down` 以 `SET up = up + ?` 累加、PSP 从不重置、面板自身的重置周期又被 PSP 钉成 `never`）。
+
+  **实机确认**：真实 3.7.0 面板 + 真实 xray-core 26.7.28（`5ca6f4b`），用 PSP 自己的适配器与 `TrafficFloorBytes` 推送。配额 100 GB 时，45% 存活、**55% 被停用**——触发点正好落在配额的一半，且随客户端变老只会更早。最难看的是**老客户在新周期第一天、零使用也会被停**（终身累计已压过全额配额）。而且**会翻转**：PSP 下一轮推 `enable=true` 后，面板在一个 sweep（`@every 5s`）内重新停用，所以不是断一拍，而是每个 5 分钟轮询周期里只有几秒是通的。
+
+  **只影响设了流量上限的用户**：`limit <= 0` 时 PSP 推 `total = 0`，面板条件 `total > 0` 不成立，永不触发（已实测）。
+
+  **不是 3.7.0 回归**：≤3.6.0 的判定多一个 `reset = 0` 前置守卫，但 PSP 从不设 `ClientSpec.Reset`（默认 0），守卫恒成立，3.4.2 → 3.7.0 行为一致（源码核对，未实机）。
+
+  **修复**：新增 `domain.PanelQuotaCap(headroom, panelLifetime)`，把「本期剩余」重基到面板自己的累计计数器上（`LastRawTotalBytes`，PSP 上一轮读回的值，本就在 `PSPClient` / `XUIClientEntry` 上）。面板于是恰好在「从现在起再烧掉剩余额度」时停用。`trafficFloor` 的契约明确为**返回 headroom 而非给面板的数**；三个推送点各自用自己那个 client 的计数器重基（共享模型、遗留 per-node 推送、两处 UUID 轮换）。reconcile 的四处调用传 `0`，不受影响。
+
+  **一个必须守住的边界**：`headroom <= 0` 原样透传 0。面板把 `total == 0` 读作无上限，在这里叠加偏移会**凭空给没有配额的用户造出配额**——正好是反向的同一个缺陷，已有单测钉住。
+
+  **顺带解决了推送效率问题**：重基后 `cap = lastRaw + (limit − periodUsed)`，面板计数器涨多少、本期已用就涨多少、剩余就减多少，**两项相消，和不变**。实机验证连续四轮把终身流量从 10 GB 推到 31 GB，面板持有的 `totalGB` 始终是 100 GB。这直接影响数据面计划 §1.2 的断言「不断收缩的下限每周期都挫败 no-op skip」——**那个收缩正是缺陷本身**，修好后 skip 应当自然生效，Phase 1a 的迟滞带可能根本不需要。
+
+  **实机回归验证**（同一台 3.7.0 + xray 26.7.28）：55% / 90% 配额不再被停、老客户新周期零使用不再被停、耗尽用户一旦再动流量仍在一个 tick 内被切、推送值跨四轮不变——5/5 通过。用例 `client_live_floor_matrix_test.go`（env 门控，CI 默认跳过）现在是回归守卫。
+
+### 新增
+
+- **每用户连接限制：并发 IP 上限与设备数上限** —— 详见新增的 [`docs/connection-limits.md`](docs/connection-limits.md)。`User.IPLimit` / `User.DeviceLimit`（0 = 不限），贯通领域模型、持久化（AutoMigrate 加列，零值即「不限」，存量安装无需回填）、推送链路、管理 API 与用户编辑界面（中英文案齐备）。
+
+  **设计立场：PSP 的领域模型是真相源，面板是兼容目标。** 字段按 PSP 想表达的意图命名，不跟任何面板的字段名或语义走；各适配器翻译自己能表达的部分，翻译不了的**通过 capability 显式声明缺口**而不是静默不生效。新增 `client.iplimit` / `client.devicelimit` 两个能力：xui 声明两者，**S-UI 两者都不支持**（其 client 模型没有这两个概念，`applySpec` 直接丢弃）。
+
+  **`limitHwid` 从「故意不发」改为「PSP 所有」** —— 这是本功能的核心。3.7.0 引入该字段后 PSP 一直故意省略它，因为上游把缺失的 key 绑成 0，而 `EnforceHwidForSubID` 在 `limit <= 0` 时返回 `Allowed = true`，**等于每次推送都静默关掉这个安全控制**；但回显更糟——`trimClientHwidsForSubID` 会**永久删除**超出上限的设备注册行，读-改-写窗口内的任何变化都会造成数据丢失。两害相权当时选了清零。**所有权消灭了这个两难**：PSP 现在发的是自己的意图值而非回显，根本不存在读-改-写窗口，trim 做的正是设备上限该做的事。
+
+  **执行前提（已实测两面确认）**：3X-UI 的并发 IP 限制走 core 的 online-stats API（不需要访问日志），但执行被**两道闸**门控。`resolveEnforce` 在 Linux 上「有上限但没装 fail2ban」时返回 `false`，`updateInboundClientIps` 随即早退——**不封禁也不断连**，只把观察到的 IP 存起来给界面显示。实测：未装 → `enforce=false`，装上 → `enforce=true`。
+
+  **第二道闸是个陷阱**：`checkFail2BanInstalled` 还要求环境变量 `XUI_ENABLE_FAIL2BAN` 未设或等于字面量 `"true"`——设成 `XUI_ENABLE_FAIL2BAN=1` 看着像「启用」，实际把执行关掉了。
+
+  **另外，之前把它描述成「只是交给 fail2ban」也不准确**：装上之后是两件事一起做——面板经 xray API `RemoveUser` + 100ms 后重加，**掐断该客户端的全部连接**（仅 `vmess/vless/trojan/shadowsocks/hysteria`，其他协议只打 warning 就返回）；fail2ban 再按固定日志格式在防火墙层封那个具体 IP。两者互补。
+
+  给运维方的结论：节点上装 fail2ban，且**不要**设 `XUI_ENABLE_FAIL2BAN`（或只设成 `true`）。
+
+  **实机验证**（3.7.0 + xray-core 26.7.28）：创建/更新携带两个上限、**一次只改到期时间的无关更新不再抹掉设备上限**（本功能存在的核心回归）、0 能清空两个上限。4/4 通过。
+
+  **能力缺口会被上报，不会被吞掉** —— 声明能力只解决一半：S-UI 上的用户设了限制，写入照样成功、就是不生效，而这正是能力列表本该防住的失败形状。`SyncLifecycle` 在推送前检查，缺口计入 `psp_capability_gap_total{capability=…}`。只在 PSP 真的想强制时才算缺口（不限的用户落在不支持的面板上不是问题，计进去会让指标失去意义）；日志每（面板, 能力）只打一次，因为该状态是稳态的，每周期每客户端打一行会把别的都埋掉。**缺口是警告不是拒绝** —— 同一次写入里的 enable / 到期 / 配额，那台面板执行得好好的。
+
+  两个上限是 PSP 所有的，因此已进入 `SyncLifecycle` 的比较集合：被人在面板界面改动会被推回并计入 `psp_lifecycle_sync_write_reason_total{reason=ip_limit|device_limit}`；一致时仍命中 no-op skip。
+
+- **推送链路改用契约类型 `domain.UserLifecycle`** —— 取代原先「enable + expiry + quota」三个标量参数一路往下传的形状。它是契约不是参数打包：PSP 自己的数据面才是设计目标，所以这个集合由「PSP 想强制什么」定义，各适配器按能力翻译，**往里加字段不再波及五个函数签名**。`QuotaHeadroom` 始终是本期剩余，重基只在唯一知道「是哪个 client 的计数器」的那一点发生（`want.PanelQuota(panelLifetime)`）——一个用户的 lifecycle 会扇出到多个各有计数器的 client，所以这个转换不能折进结构体。
+
+- **内置指标与 `/api/admin/diagnostics/metrics`（数据面演进计划 Phase 0）** —— 给 traffic poll 与 3X-UI 推送扇出加了进程内计数器 / 直方图，用来回答 [`docs/data-plane-plan.md`](docs/data-plane-plan.md) §2 里那几个「现在还不知道」的数：N（每周期活跃用户数）、P（每用户共享客户端数）、真实面板 RTT 分布、`PollOnce` 分段耗时、`pushSem` 排队深度。**不改任何行为**，纯观测。
+
+  **没有引入 Prometheus。** PSP 是单二进制，绝大多数部署附近没有抓取设施；client library 换来的是一棵传递依赖树和第二个要加固的 HTTP 面，而要回答的问题一个挂在既有 admin 鉴权后的 JSON 就够。记录 API 照 Prometheus 形状写（counter / gauge / 显式 bucket 边界的 histogram，命名带单位后缀与 `_total`），将来若真要抓取端点，改的是渲染而不是调用点。热路径全原子操作、无锁、零分配。
+
+  **RTT 按 HTTP 交换计数，不按逻辑调用计数** —— `mutateWithRetry` 一次 `UpdateClient` 最多发五个请求，每个都是调用方真等的往返；成本模型以往返计价，这样才对得上。耗时覆盖整个 `doJSONRetry`，含透明重登录与那次 401 重试：那也是调用方要等的延迟，折进去才诚实地反映一次调用的真实代价。
+
+  **最吃重的一项是 `psp_lifecycle_sync_write_reason_total{reason=…}`** —— 记录是**哪个字段**挫败了 no-op skip，且 `total_gb` 排在判定顺序首位以免被掩盖。计划 §1.2 断言不断收缩的流量下限每周期都挫败 skip；若分布压倒性落在 `total_gb`，该断言成立且对这一个字段做迟滞带就能救回 skip，若别的原因大量出现则迟滞带白做。**Phase 0 因此不只量「有多痛」，它还负责证伪 Phase 1a 的前提。**
+
+  `POST /api/admin/diagnostics/metrics/reset` 返回它所关闭的那个窗口 —— 分位数不可相减，「取样两次做差」对 Phase 0 真正关心的那一半数据不成立，所以窗口只能靠 reset 划出来，而 reset 不能把它结束的窗口丢掉。两个端点均为 **admin 专属**（非 staff）：快照会暴露部署规模与面板响应性，那是站长的信息。
+
+  用法、逐项释义与已知限制见新增的 [`docs/observability.md`](docs/observability.md)。
+
+### 修复
+
+- **v2 → v3 离线迁移器已经坏了很久（实测复现）** —— v3.9.0 把 `ownershipRow` 移出 `schemaModels` 是完全正当的改动：运行中的面板不该再长回 `user_xui_clients`，因为**表的缺席正是迁移完成的证据**（`DropIfMigrated` 只在零行时 DROP）。但迁移器对**空白**目标库调 `EnsureSchema`（`runner.go:109`），随后 `copyOwnerships` 往那张不再被创建的表里写（`migrate.go:418`）。
+
+  实测：`HasTable(user_xui_clients) after EnsureSchema = false` → `insert err = SQL logic error: no such table: user_xui_clients`。**任何带遗留客户端的 v2 库都导不进来** —— 而那恰恰是迁移器存在的意义。仓内早有旁证：`ownership_repo_test.go` 显式 `CreateTable(&ownershipRow{})`，注释点名了这次 v3.9.0 改动。**测试知道，迁移器不知道。**
+
+  修复：新增 `sqlstore.EnsureLegacyOwnershipTable`，`copyOwnerships` 在**第一批真有行**时惰性建表——空导入不建表，否则那台安装会永远显得「未迁移」。回归测试 `internal/migrate/ownership_schema_test.go` 覆盖两个方向。
+
+  这件事是 V4 清理的缩影，已写进新增的 [`docs/v4-legacy-removal.md`](docs/v4-legacy-removal.md)：**一个理由充分的 schema 改动，作为「代码变更」发布，悄无声息弄坏了一条没有测试覆盖的迁移路径。**
+
+### 验证
+
+- **实测 skip 率，推翻了我自己写在文档里的一个判断** —— floor 修复后推送值对单 client 用户恒定，那 no-op skip 到底恢复了没有？50 个周期实测（`internal/service/sharedclient/skip_rate_test.go`，驱动真实 `SyncLifecycle`）：
+
+  | P | skip 率 | 修复前 |
+  |---|---|---|
+  | 1 | **98%**（50 周期只写 1 次）| 0% |
+  | 2 | **0%** | 0% |
+  | 3 | **0%** | 0% |
+
+  `P = 1` 如预期。**但 `P > 1` 是 0%，而我先前在 `traffic-floor-defect.md` 写的是「偏移量远小于修复前的整个 delta，skip 命中率仍会大幅上升」——算一下就知道错了**：`cap_i` 每周期的变化是 `−Σ_{j≠i} δ_j`，**只要有任何一个别的 client 动了流量它就变**，所有 client 都活跃时每周期都变。
+
+  **而且这不能靠改公式解决。** 把 headroom 也改成 per-client 确实能让它恒定，但会把 PSP 离线时的超烧上界从 `P × 剩余` 放宽到 `P × 配额 − Σ已用`——**兜底变松**。所以这个漂移是安全语义的必然代价，不是实现缺陷。
+
+  **结论：`P = 1` 不需要迟滞带，`P > 1` 仍然需要**，与计划原本的判断一致。band 取值现在也更清楚——client i 的每周期漂移就是其他 client 那一周期的流量总和。两处文档已修正。
+
+  面板保真度不靠假设：`TestLive_XUITrafficFloorMatrix` 已在真实 3.7.0 面板上验证过「面板存储并返回 PSP 写入的 cap」，本测试补的是另一半（给定这样的面板，skip 实际命中多少）。
+
+- **S-UI 1.5.5 实机复验（本轮改过它的适配器）** —— 这一轮删掉了 `UpdateClient` 的两个死参数、移除了整个 `UpdateClientWithInbound`，两个适配器都受影响，但此前**只验证了能编译**。S-UI 是兼容目标，改了它却不实测，标准不一致。
+
+  从源码编译 S-UI 1.5.5（`88bde26`）并以真实 sing-box 核心启动，跑 PSP 自己的 `TestLive_SUISurface`（读路径 + inbound 全生命周期 + 客户端全生命周期）与 `TestLive_SUIBulkSetEnabled`，**全部通过**，面板自报 `1.5.5 / core running`。
+
+- **CI 首次在本轮工作上运行** —— 此前最后一次 CI 停在本轮之前的旧 SHA，14 个提交**只有本地验证过**。已在当前 HEAD 跑通全套：**MySQL / PostgreSQL / SQLite 三方言全量测试**、`go vet`、前端 typecheck + build + 单测 + 生产浏览器冒烟、交叉编译发布目标。三方言这条尤其关键——本轮新增了两个 AutoMigrate 列，而本地只测得到 SQLite。
+
+### 修复（实机启动后发现）
+
+- **直方图分位数会超过实测最大值** —— 第一次真正启动 PSP 并读 `/api/admin/diagnostics/metrics` 才暴露：`psp_poll_stage_ms{stage=ownership_prefetch}` 报 `p50=0.250 / max=0.003`，**分位数是实际值的 83 倍**。分位数在数学上不可能超过样本最大值，但桶内插值可以——一个 3 微秒的孤立样本落在 `[0, 0.5ms]` 桶里，插值出来就是桶中点。现在钳在 max 以内：每个报出来的分位数都是「某个样本可能取到的数」。
+
+- **亚毫秒工作无法区分** —— 最低桶原本是 `[0, 0.5ms]`，于是轮询的每一个快阶段都读成同一个 `0.2500`，分段耗时**根本分辨不出 3 微秒的预取和 400 微秒的预取**，而那正是这个直方图存在的意义。补了 `0.05 / 0.1 / 0.25` 三个下沿边界。实机复测：各阶段现在是 `0.508 / 0.253 / 0.005 / 0.175 / 0.004`，全部可区分且分位数精确。
+
+### 清理
+
+- **删掉三处真正的残留** —— `AdminServersHandler.ownership`（只写不读的字段，`grep` 零引用，不喂任何响应）；路由里描述一个从未实现的端点的孤儿注释，**而且它现在是错的**（断言「生产中还没有东西读 psp_client」，但 `render.go:339` 就在实时渲染路径上读）。
+
+  **评估后决定不删的两处**（记在 v4 文档里）：`recordClientStats` 的 `else` 分支生产上确实不可达，但注释明说是刻意保留给非 poll 调用方的，删掉换 4 行、代价是把有契约的辅助函数变成静默不落盘；`GetByMatch` 无生产调用方，但它是 `BatchUpdateCounters`（每台未迁移安装的活代码）唯一的身份读回工具。
+
+### 修复（自查发现，均为本轮引入的回归）
+
+对 `origin/main..HEAD` 做了一次高强度代码审查，查出 12 个问题——**大部分是这一轮自己引入的**。逐条修复并补了回归测试：
+
+- **能力缺失的面板会被写入死循环** —— 把 `LimitIP` / `LimitHwid` 加进 no-op skip 的比较集合时漏了一件事：存不下该字段的面板读回来**永远是 0**，于是 skip **结构性地永远不可能命中**——每周期看到差异、发一次整体替换、重启一次内核，而这个值**永远无法收敛**。S-UI 上任何设了限制的用户都会触发。现在比较受能力门控；缺口本身已由 `psp_capability_gap_total` 上报，不该同时变成写循环。
+- **reconcile 会抹掉两个上限** —— 每次漂移修复都推 `IPLimit=0 / DeviceLimit=0`。配额可以留零是因为它**自愈**（流量轮询每周期重算重推），而上限**不会**：没有别的东西会重推它们，对没设流量上限的用户，轮询的 no-op skip 随后看到完全一致就不再出声——**一次 reconcile 就把两个上限永久清零**。空闲用户根本不会收到下限推送，无论配额如何都逃不掉。
+- **并行扇出把 panic 吞成了成功** —— `safego.Recover` 吞掉 panic 后 `errs[i]` 仍是 nil，而 `ResyncMembership` 正是靠这个信号删除遗留 per-node 兜底，于是用户会被留在一个仍持有创建默认值（启用、无到期、无配额）的共享 client 上——**正是注释里警告的 audit#1 执法绕过**。被它取代的串行循环不会有这个问题，因为 panic 会往上传。现在 panic 记入 `errs[i]`。
+- **遗留路径的 no-op skip 看不到两个上限** —— `clientUnchanged` 不比较 `LimitIP`，于是管理员改了上限、legacy 客户端被判「未变化」而跳过。`limitHwid` 更特殊：它**根本不在 inbound 的 settings.clients[] 里**（在面板自己的行上），预取的 inbound 无法证明匹配，按该函数「无法完全验证就返回 false」的既有契约处理。
+- **跨周期守卫读的是进程级 gauge** —— 那个 gauge 在**发送前**自增，所以连没阻塞的获取也计入，会在健康部署上误伤；而且它是进程全局的，第二个 traffic.Service 会互相压制。改为每 Service 的计数器，且只在**真的阻塞**时才加（`select` + `default`）。
+- **刷盘顺序是偶然正确的** —— 异步下限推送会重新读取 client 计数器与用户已用量，两者必须同周期。「新已用量 + 旧计数器」会算出一个**低于面板当前计数器**的上限，面板立刻停用一个还有配额的用户。现有顺序恰好安全，但没人写下来，重排一下就会静默复活；且 client 批次刷失败、user 批次成功时仍会踩中。现在顺序有注释说明其是 load-bearing 的，且前者失败会**压住**后者，让两者一起滞后一个周期。
+- **指标不变式是错的** —— 我写的注释声称 `skipped + write + error = total`，但失败的 `UpdateClient` 会同时加 `write` 和 `error`。正确口径：`skipped + write = total`，`error` 是与 `write` **重叠**的子计数。另外 `GetClient` 失败时会直接走写入却不打 reason 标签，导致 `sum(write_reason) < write_total`，漏掉的**恰好是最不稳定的那些面板**——新增 `reason=panel_unread`。
+- **每用户扇出无视管理员的并发上限** —— 硬编码成默认 8，而其他每一条 3X-UI 扇出都读 `MaxPanelConcurrency`。运维方为保护弱机把滑块调低，这条路径照样八路并发，破坏了「一个滑块管住所有扇出」这个承诺。改为读同一个设置。
+- **生命周期快照在每个 goroutine 里重建** —— `u.Lifecycle(time.Now(), floor)` 落在闭包内，于是每个 client 拿到不同的 `now`；到期时间正好落在推送窗口内的用户，会在一部分面板上启用、另一部分上停用。改为与 `floor` 一起提到循环外，恢复单次快照语义。
+- **负数上限没有服务端校验** —— 面板把 `<= 0` 一律读作「不限」，所以存进去的 `-1` 会在 PSP 界面上显示成一个更严格的限制，实际却**关掉了执法**——一个显示与行为相反的控件。创建与更新路径都加了校验。前端也从小数版校验器改回整数版（`2.5` 原先只会得到一个不知所云的 400），并把清空/半输入产生的 `NaN` 收敛为 0。
+- **三条真实 HTTP 路径没打 op 标签** —— `ListClientInbounds` / `BulkSetEnabled` / `GetWebCertFiles` 的往返都落进 `other` 桶，而那个桶的定义正是「有热路径没打标签」。另外 `psp_panel_rtt_ms` 的说明声称覆盖 S-UI，**但 S-UI 适配器根本没有插桩**——说明已改为如实描述。
+- **`(*XUIClientEntry).PanelQuotaCap` 是死代码** —— 加了却没用上（遗留路径走的是 `want.PanelQuota(panelLifetime)`），只被自己的单测撑着。删除。
+
+### 改进
+
+- **清理适配器的退化调用面** —— `UpdateClient` 的 `inboundID` / `clientUUID` 两个参数自 3.2.0 起就没用了（客户端按 email 改），两个适配器里都是 `_`；`UpdateClientWithInbound` 整个方法只是转发，只有一个调用点。两者一并删除，`ports.PanelClient` 少一个方法、`UpdateClient` 少两个参数。`AddClient` 的 `inboundID` 保留——创建必须落到某个 inbound。
+
+- **`SyncUserLifecycle` 改为并发扇出（计划 Phase 1b）** —— 原本是普通 `for` 循环逐个 `SyncLifecycle`，每个是一次 `GetClient` 加一次 `UpdateClient`，所以横跨 P 个面板的用户端到端要付 `P × 2` 次串行往返；现在是 2 次。对分布在多台面板上的用户，这是「一台慢面板只拖它自己那个 client」与「一台慢面板拖住它后面所有 client」的区别。
+
+  **并行安全性核过源码而非假设**：一个用户的 client 列表里不可能有两条指向同一个面板侧 client —— PSPClient 以 `(user, panel, credClass)` 为键，`domain.PSPClientEmail` 把邮箱后缀构造成分区键的无碰撞函数，所以同一面板上的两个 client 必然邮箱不同。真正危险的形态（两个 goroutine 写同一个面板侧 client，在整替换语义下把适配器 per-email 写锁抢成 last-writer-wins）从这里不可达。
+
+  P = 1 走直连不开协程（多数用户 P 就是 1，为一次调用起协程加 channel 是纯开销）。**错误按下标收集而非到达顺序** —— 「第一个错误」必须是列表顺序里的第一个，否则返回给管理员的报错取决于面板延迟，同一个故障每次报得都不一样。
+
+- **`pushSem` 跨周期守卫（计划 Phase 1c）** —— 信号量跨周期共享，所以过载不是线性劣化：上周期没排空的推送让本周期队列更长，下周期更长。现在周期开始时若发现上周期推送**仍在排队**，就跳过本周期的下限推送并记一条 warn，把雪崩降级成「掉一拍」。
+
+  **触发条件是「有队列」（`waiting > 0`）而非「有在途」** —— 周期开始时仍在途的是上周期正常收尾的尾巴，拿它触发会让健康部署每次周期与慢面板重叠一毫秒就误伤；还在排队则意味着上周期入队已超容量且没追上，这个条件没有良性解读。
+
+  跳过是安全的：下限是「PSP 离线期间别被无限白嫖」的兜底，晚一周期刷新即有界陈旧；停用/到期不走这条路（走 `SetServiceSuspendedAndSync`），没有执法关键的东西被推迟。**自解除** —— 卡住的推送会在适配器 HTTP 超时释放槽位，队列终将排空，守卫自行松开，一次瞬时过载不会永久静音下限安全网。
+
+- **`SyncLifecycle` 的 skip 判定抽成 `lifecycleWriteReason`** —— 原来是内联的七字段比较，现在是具名函数并有表驱动测试逐字段钉住。比较集合与原先逐字段一致（这里少一个字段就会让 skip 在不该生效时生效：被停用的用户在 Xray 侧仍然可用、轮换过的 UUID 永远推不下去）。
+
 ## v3.9.2-beta.7 — 2026-08-26
 
 上游兼容跟进（3X-UI 3.7.0 实机验证，S-UI 复核后无需变动），外加四处「PSP 无声清掉运维方设置」的修复——其中三处早于 3.7.0 就存在，是这次逐字段核查时才浮出来的。

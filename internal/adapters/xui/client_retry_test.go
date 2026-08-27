@@ -97,7 +97,7 @@ func TestMutateWithRetry_RecoversFromCrossProcessConflict(t *testing.T) {
 	defer srv.Close()
 	c := &Client{baseURL: srv.URL, apiToken: "t", http: srv.Client()}
 
-	if err := c.UpdateClient(context.Background(), 0, "uuid", ports.ClientSpec{Email: "u1@psp.local", Enable: true}); err != nil {
+	if err := c.UpdateClient(context.Background(), ports.ClientSpec{Email: "u1@psp.local", Enable: true}); err != nil {
 		t.Fatalf("expected success after retries, got: %v", err)
 	}
 	if got := atomic.LoadInt32(&calls); got != 3 {
@@ -111,7 +111,7 @@ func TestMutateWithRetry_GivesUpAfterMaxAttempts(t *testing.T) {
 	defer srv.Close()
 	c := &Client{baseURL: srv.URL, apiToken: "t", http: srv.Client()}
 
-	err := c.UpdateClient(context.Background(), 0, "uuid", ports.ClientSpec{Email: "u1@psp.local"})
+	err := c.UpdateClient(context.Background(), ports.ClientSpec{Email: "u1@psp.local"})
 	if err == nil || !strings.Contains(err.Error(), "client_inbounds") {
 		t.Fatalf("expected the client_inbounds error to surface after exhausting retries, got: %v", err)
 	}
@@ -129,7 +129,7 @@ func TestMutateWithRetry_DoesNotRetryOtherErrors(t *testing.T) {
 	defer srv.Close()
 	c := &Client{baseURL: srv.URL, apiToken: "t", http: srv.Client()}
 
-	if err := c.UpdateClient(context.Background(), 0, "uuid", ports.ClientSpec{Email: "u1@psp.local"}); err == nil {
+	if err := c.UpdateClient(context.Background(), ports.ClientSpec{Email: "u1@psp.local"}); err == nil {
 		t.Fatal("expected an error")
 	}
 	if got := atomic.LoadInt32(&calls); got != 1 {

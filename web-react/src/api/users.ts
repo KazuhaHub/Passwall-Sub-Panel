@@ -19,6 +19,8 @@ export interface UpdateUserRequest {
   clear_expire?: boolean
   traffic_limit_gb?: number
   traffic_reset_period?: ResetPeriod
+  ip_limit?: number
+  device_limit?: number
   remark?: string
   display_name?: string
   email?: string

@@ -35,9 +35,13 @@
 
 health worker 甚至**已经在做「从 inbound 抽字段写回 nodes 表」**（持久化 `Port`/`Protocol`，[health.go](../internal/service/health/health.go)），只是没把渲染需要的连接配置一起存下来。所以把配置本地化几乎是"白捡"——复用已有 poll 的结果即可，对 3X-UI **零新增请求**。
 
-### 1.3 横向参考：V2board / XrayR / V2bX
+### 1.3 横向参考：V2board / Xboard + V2bX
 
-V2board 这类机场面板**面板自己拥有节点配置**：节点连接参数存在面板 DB，边缘节点跑哑 agent（XrayR / V2bX）**反向轮询面板**拉配置 + 用户列表、并上报流量。订阅渲染是**纯 DB 读、零上游调用**。本设计借鉴其「配置本地化、render 零回源」的解耦思路，但**保留 PSP 的定位前提**：3X-UI 仍是实际跑 xray 的地方，PSP 通过其 API 下发，而不是引入新 agent。
+> **2026-08 更新**：原文把 XrayR 与 V2bX 并列。**XrayR 已删库**——其最后一个提交是 `5ceba41 "Clear all files"`，仓库被维护者清空。参考对象应为其继任者 **V2bX**（`wyx2685/V2bX`）。
+
+V2board / Xboard 这类机场面板**面板自己拥有节点配置**：节点连接参数存在面板 DB，边缘节点跑 agent（V2bX）**反向轮询面板**拉配置 + 用户列表，并上报流量。订阅渲染是**纯 DB 读、零上游调用**。本设计借鉴其「配置本地化、render 零回源」的解耦思路，但**保留 PSP 的定位前提**：3X-UI 仍是实际跑 xray 的地方，PSP 通过其 API 下发，而不是引入新 agent。
+
+就 agent 的职责边界，V2bX 的实证结论见 [data-plane-plan.md](data-plane-plan.md) §3.7——简言之：**策略在控制面，执行在本地，零本地配额逻辑**。
 
 ---
 
@@ -154,7 +158,21 @@ GORM AutoMigrate 自动加列，符合"自用项目无迁移脚手架"约定（[
 
 旧的 per-node ownership 路径没有可搭车的读，**不为它单独加一次往返**：该路径已是迁移残留（`MIGRATION(v3→v4)`），会随 ownership 模型一起删除。
 
-> 对照：`limitHwid` **不**这样处理。它同样被清零，但回显一个先前读到的值会武装 `trimClientHwidsForSubID`、**永久删除设备注册行**；清零反而让那个裁剪在 `limit <= 0` 处短路。标签类字段没有这种副作用，所以可以带；带 `limitHwid` 不行。详见 `buildClientUpdateJSON` 的注释。
+> 对照：`limitHwid` 一度**不**这样处理，理由是回显一个先前读到的值会武装 `trimClientHwidsForSubID`、**永久删除设备注册行**。那个理由只在「PSP 不拥有该字段、只能回显」时成立——见下节。
+
+### 4.1.3 连接限制：`limitIp` / `limitHwid`（2026-08-27）
+
+前两节的字段 PSP **不建模**，只能选择「带回去」或「让它被清掉」。这两个不一样：**PSP 拥有它们**。
+
+`User.IPLimit` / `User.DeviceLimit`（0 = 不限）是 PSP 的领域字段，经 `domain.UserLifecycle` 契约下发到 `ClientSpec.LimitIP` / `.LimitHwid`。
+
+**这解决了 §4.1.2 末尾那个两难。** 当时的困境是：不发 → 上游把缺失键绑 0 → `EnforceHwidForSubID` 在 `limit <= 0` 时一律放行，**静默关掉设备绑定校验**；回显 → 陈旧值喂进 `trimClientHwidsForSubID`，**永久删除**设备注册行。两者都是真损失，只能选轻的。
+
+**所有权让第三条路成立**：下发的是 PSP 的意图值，**不是回显**，所以**根本不存在读-改-写窗口**——trim 做的正是设备上限该做的事。
+
+因此这两个字段进入 `SyncLifecycle` 的比较集合（`lifecycleWriteReason`）：被人在面板界面改动会被**推回**，而不是像 `comment` / `group` 那样只是「顺路带一下」。这是「PSP 建模的字段」和「PSP 不建模的字段」在所有权轴上的分界。
+
+能力差异见 [connection-limits.md](connection-limits.md)：S-UI 两个都不支持，通过 capability 显式声明而非静默丢弃。
 
 ### 4.2 为什么 `clients[]` 不入存档
 

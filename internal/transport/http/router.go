@@ -360,8 +360,6 @@ func NewRouter(d Deps) stdhttp.Handler {
 		staffGroup.POST("/users/:id/set-service-status", users.SetServiceStatus)
 		staffGroup.GET("/users/:id/rules", users.GetRules)
 		staffGroup.PUT("/users/:id/rules", users.PutRules)
-		// v3.9.0 cutover Stage 0: one-shot psp_client backfill (admin-only;
-		// DB-only, idempotent, nothing reads psp_client in production yet).
 
 		nodes := handler.NewAdminNodeHandler(d.Node, d.Sync, d.Repos.Ownership, d.Repos.User, d.Repos.XUIPanel, d.Repos.PSPClient, d.Repos.Certificate)
 		// A batch scan can fan out to hundreds of bounded TLS probes on the
@@ -461,6 +459,14 @@ func NewRouter(d Deps) stdhttp.Handler {
 		adminGroup.PUT("/locales/:code", locales.Save)
 		adminGroup.DELETE("/locales/:code", locales.Delete)
 
+		// In-process performance counters (docs/observability.md). Admin
+		// only: the snapshot describes the deployment's shape and its
+		// panels' responsiveness, which is owner information rather than
+		// something an operator needs to do their job.
+		diagH := handler.NewAdminDiagnosticsHandler()
+		adminGroup.GET("/diagnostics/metrics", diagH.Metrics)
+		adminGroup.POST("/diagnostics/metrics/reset", diagH.ResetMetrics)
+
 		auditH := handler.NewAdminAuditHandler(d.Repos.Audit, d.Geo)
 		// Read so operators can review their own actions; only admin can
 		// wipe history.
@@ -512,7 +518,7 @@ func NewRouter(d Deps) stdhttp.Handler {
 		staffGroup.GET("/traffic/nodes/top", trafficH.NodesTop)
 		staffGroup.GET("/traffic/nodes/history", trafficH.NodesHistory)
 
-		servers := handler.NewAdminServersHandler(d.Repos.XUIPanel, d.Pool, d.Repos.Node, d.Repos.Ownership, d.Repos.Audit, d.Async)
+		servers := handler.NewAdminServersHandler(d.Repos.XUIPanel, d.Pool, d.Repos.Node, d.Repos.Audit, d.Async)
 		// 3X-UI panel credentials live here — never operator.
 		adminGroup.GET("/servers", servers.List)
 		adminGroup.POST("/servers", servers.Create)
