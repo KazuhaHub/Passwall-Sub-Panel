@@ -146,10 +146,18 @@ var (
 		"ms", LatencyBucketsMS,
 	)
 	// A push still queued when the next cycle starts is the concrete
-	// signal Phase 1c's cross-cycle guard would trip on.
+	// signal the cross-cycle guard trips on.
 	PushSemCarryoverTotal = NewCounter(
 		"psp_push_sem_carryover_total",
-		"Poll cycles that began while pushes from an earlier cycle were still queued or in flight.",
+		"Poll cycles that began while pushes from an earlier cycle were still queued. Each one is a cycle whose floor pushes the guard suppressed.",
+	)
+	// The magnitude behind the carryover count: how many pushes were
+	// actually dropped, not just how many cycles tripped. A carryover
+	// count that stays flat while this climbs means the deployment is
+	// permanently past the semaphore's capacity.
+	PushSuppressedTotal = NewCounter(
+		"psp_push_suppressed_total",
+		"Floor pushes the cross-cycle guard skipped rather than enqueued.",
 	)
 )
 

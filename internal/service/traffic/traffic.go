@@ -210,13 +210,36 @@ func (s *Service) PollOnce(ctx context.Context) (err error) {
 		log.Debug("traffic poll timing", "stage", key, "detail", detail, "ms", d.Milliseconds())
 		stage = time.Now()
 	}
-	// A push still queued or in flight when a new cycle opens is the
-	// concrete form of the cross-cycle backlog described in
-	// docs/data-plane-plan.md §1.4 — sampled here, at the one moment the
-	// distinction between "this cycle's load" and "last cycle's leftovers"
-	// is observable.
-	if metrics.PushSemWaiting.Value()+metrics.PushSemInflight.Value() > 0 {
+	// Cross-cycle guard (docs/data-plane-plan.md §1.4). pushSem is shared
+	// across cycles, so an overloaded deployment does not degrade
+	// linearly: last cycle's undrained pushes make this cycle's queue
+	// longer, and the next longer still. Skipping this cycle's floor
+	// pushes converts that avalanche into a dropped beat.
+	//
+	// The trip condition is a QUEUE (waiting > 0), not merely work in
+	// flight. In-flight pushes at cycle open are the normal tail of the
+	// previous cycle finishing; tripping on those would suppress pushes
+	// on a perfectly healthy deployment. A push still WAITING means the
+	// previous cycle enqueued past capacity and has not caught up, which
+	// is the condition with no benign reading.
+	//
+	// Safe to skip because the floor is a safety net for the window in
+	// which PSP is offline, and skipping refreshes it one cycle later —
+	// bounded staleness. Enable/expiry changes do not ride this path
+	// (suspension goes through SetServiceSuspendedAndSync), so nothing
+	// enforcement-critical is deferred. Self-limiting: a hung push
+	// releases its slot at the adapter's HTTP timeout, so the queue
+	// always drains and the guard un-trips on its own.
+	//
+	// Sampled here, at the one moment the distinction between "this
+	// cycle's load" and "last cycle's leftovers" is observable.
+	pushBacklogged := metrics.PushSemWaiting.Value() > 0
+	if pushBacklogged {
 		metrics.PushSemCarryoverTotal.Inc()
+		log.Warn("traffic poll: floor pushes from the previous cycle have not drained; skipping this cycle's pushes",
+			"queued", metrics.PushSemWaiting.Value(),
+			"in_flight", metrics.PushSemInflight.Value(),
+			"capacity", metrics.PushSemCapacity.Value())
 	}
 	metrics.PollTotal.Inc()
 	defer func() {
@@ -271,6 +294,7 @@ func (s *Service) PollOnce(ctx context.Context) (err error) {
 	// needed on the sink fields — they're just append targets owned by
 	// this poll.
 	sink := &pollSink{
+		skipFloorPush:      pushBacklogged,
 		userSnaps:          make([]*domain.TrafficSnapshot, 0, len(users)),
 		clientSnaps:        make([]*domain.ClientTrafficSnapshot, 0, len(users)*4),
 		nodeSnaps:          make([]*domain.NodeTrafficSnapshot, 0),
@@ -834,6 +858,13 @@ type bootstrapClientDelta struct {
 // reduces it to two end-of-cycle BatchUpdate calls plus the snapshot inserts
 // — at "100 users × 8 clients = 900 ops" scale, ~10s → ~200ms.
 type pollSink struct {
+	// skipFloorPush carries the cross-cycle guard's verdict to the
+	// per-user path. The sink is already the poll-scoped object threaded
+	// everywhere the decision is needed, so it carries this rather than
+	// growing another parameter on recordAndEnforceWith — but it is a
+	// cycle-wide FLAG, not one of the batched write buffers below.
+	skipFloorPush bool
+
 	userSnaps   []*domain.TrafficSnapshot
 	clientSnaps []*domain.ClientTrafficSnapshot
 	nodeSnaps   []*domain.NodeTrafficSnapshot
@@ -1388,6 +1419,10 @@ func (s *Service) recordAndEnforceWith(ctx context.Context, u *domain.User, tota
 	// aborts the push half-way. Background keeps it independent — failures
 	// are logged and the next cycle's push retries naturally.
 	if totals.deltaTotal == 0 || s.configPusher == nil {
+		return nil
+	}
+	if sink.skipFloorPush {
+		metrics.PushSuppressedTotal.Inc()
 		return nil
 	}
 	uid := u.ID

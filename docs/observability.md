@@ -102,14 +102,17 @@ skip 命中率 = psp_lifecycle_sync_skipped_total / psp_lifecycle_sync_total
 | `psp_push_sem_inflight` | 当前持槽数，含峰值 |
 | `psp_push_sem_waiting` | 当前排队数，含峰值 |
 | `psp_push_sem_wait_ms` | 等槽耗时 |
-| `psp_push_sem_carryover_total` | **上一周期还没排空，新周期就开了** |
+| `psp_push_sem_carryover_total` | **上一周期还没排空，新周期就开了**——每一次都是守卫压掉了一整轮推送 |
+| `psp_push_suppressed_total` | 被守卫压掉的推送**条数**（carryover 是轮数） |
 
 等待与服务时间**分开记**：这是排队问题，合在一起恰好会盖住 §1.4 要看的东西——
 
 - 等待涨、服务时间平 → **积压**
 - 两者一起涨 → 面板变慢
 
-`carryover` 每涨一次，就是 Phase 1c 那道跨周期守卫本该拦住的一拍。容量一并发布，是为了让快照自洽：「峰值 in-flight 8」只有在读者也知道容量是 8 时才意味着饱和，而那是个 admin 可调的设置。
+`carryover` 每涨一次，就是跨周期守卫压掉的一拍。两个计数一起看：**carryover 持平而 suppressed 一路涨，说明部署已经长期超出信号量容量**，不是偶发过载。
+
+容量一并发布，是为了让快照自洽：「峰值 in-flight 8」只有在读者也知道容量是 8 时才意味着饱和，而那是个 admin 可调的设置。
 
 ### 4.6 Poll 周期
 

@@ -2,7 +2,12 @@ package sharedclient
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/metrics"
@@ -151,4 +156,188 @@ func TestSyncLifecycle_SkipAndWriteAreCountedExactlyOnce(t *testing.T) {
 			t.Errorf("not_provisioned = %d, want 1", got)
 		}
 	})
+}
+
+// --- Phase 1b: the per-user fan-out runs concurrently ---
+
+// concurrencyProbe records how many SyncLifecycle calls were in flight at
+// once, so "parallel" is asserted rather than assumed.
+type concurrencyProbe struct {
+	mu      sync.Mutex
+	cur     int
+	peak    int
+	release chan struct{}
+}
+
+func (p *concurrencyProbe) enter() {
+	p.mu.Lock()
+	p.cur++
+	if p.cur > p.peak {
+		p.peak = p.cur
+	}
+	p.mu.Unlock()
+}
+
+func (p *concurrencyProbe) leave() {
+	p.mu.Lock()
+	p.cur--
+	p.mu.Unlock()
+}
+
+// probeXUI blocks inside GetClient until every goroutine has arrived, which
+// deadlocks (and so fails the test by timeout) if the calls are serial.
+type probeXUI struct {
+	fakeXUI
+	probe   *concurrencyProbe
+	arrived chan struct{}
+	want    int
+}
+
+func (c *probeXUI) GetClient(_ context.Context, _ string) (*ports.ClientDetail, error) {
+	c.probe.enter()
+	defer c.probe.leave()
+	c.arrived <- struct{}{}
+	<-c.probe.release
+	// A nil detail means "not on the panel", which sends SyncLifecycle
+	// straight to UpdateClient — the shape that exercises both round trips.
+	return nil, nil
+}
+
+func TestSyncUserLifecycle_FansOutConcurrently(t *testing.T) {
+	const n = 4
+	probe := &concurrencyProbe{release: make(chan struct{})}
+	xui := &probeXUI{probe: probe, arrived: make(chan struct{}, n), want: n}
+
+	byUser := make([]*domain.PSPClient, n)
+	atts := make([]domain.PSPClientInbound, n)
+	for i := range byUser {
+		// Distinct panels and emails — the shape the safety argument rests on.
+		byUser[i] = &domain.PSPClient{
+			ID: int64(i + 1), UserID: 7, PanelID: int64(10 + i),
+			Email: domain.PSPClientEmail(7, "", domain.EmailRules{}), UUID: "uuid-7",
+		}
+		atts[i] = domain.PSPClientInbound{ClientID: int64(i + 1), NodeID: int64(100 + i), Provisioned: true}
+	}
+	clients := &fakeClients{byUser: byUser, attachments: atts}
+	svc := New(clients, fakePool{c: xui}, fakeNodes{})
+
+	done := make(chan error, 1)
+	go func() { done <- svc.SyncUserLifecycle(context.Background(), 7, true, 0, 0) }()
+
+	// Every client must reach GetClient before ANY of them is allowed to
+	// finish. Serial execution can never satisfy this.
+	for i := 0; i < n; i++ {
+		select {
+		case <-xui.arrived:
+		case <-time.After(5 * time.Second):
+			t.Fatalf("only %d of %d clients reached the panel — the fan-out is still serial", i, n)
+		}
+	}
+	close(probe.release)
+
+	if err := <-done; err != nil {
+		t.Fatalf("SyncUserLifecycle: %v", err)
+	}
+	if probe.peak < n {
+		t.Errorf("peak concurrency = %d, want %d", probe.peak, n)
+	}
+}
+
+var errFakeGet = errors.New("fake panel failure")
+
+// A parallel fan-out must still report the first error in CLIENT order, not
+// whichever goroutine happened to fail first — the returned error reaches an
+// admin, and making it depend on panel latency would make the same failure
+// report differently on every run.
+func TestSyncUserLifecycle_FirstErrorIsDeterministic(t *testing.T) {
+	// Client 1 fails but is slow; client 2 fails fast. Client order must win.
+	byUser := []*domain.PSPClient{
+		{ID: 1, UserID: 7, PanelID: 10, Email: "slow@psp.local", UUID: "u"},
+		{ID: 2, UserID: 7, PanelID: 11, Email: "fast@psp.local", UUID: "u"},
+	}
+	clients := &fakeClients{byUser: byUser, attachments: []domain.PSPClientInbound{
+		{ClientID: 1, NodeID: 101, Provisioned: true},
+		{ClientID: 2, NodeID: 102, Provisioned: true},
+	}}
+	xui := &failByEmailXUI{fail: map[string]bool{"slow@psp.local": true, "fast@psp.local": true},
+		delay: map[string]time.Duration{"slow@psp.local": 40 * time.Millisecond}}
+	svc := New(clients, fakePool{c: xui}, fakeNodes{})
+
+	err := svc.SyncUserLifecycle(context.Background(), 7, true, 0, 0)
+	if err == nil {
+		t.Fatal("want an error")
+	}
+	if !strings.Contains(err.Error(), "slow@psp.local") {
+		t.Fatalf("error = %v, want the FIRST client in list order (slow@psp.local), not the first to fail", err)
+	}
+}
+
+type failByEmailXUI struct {
+	fakeXUI
+	fail  map[string]bool
+	delay map[string]time.Duration
+}
+
+func (c *failByEmailXUI) GetClient(_ context.Context, _ string) (*ports.ClientDetail, error) {
+	return nil, nil
+}
+
+func (c *failByEmailXUI) UpdateClient(_ context.Context, _ int, _ string, spec ports.ClientSpec) error {
+	time.Sleep(c.delay[spec.Email])
+	if c.fail[spec.Email] {
+		return fmt.Errorf("update %s: %w", spec.Email, errFakeGet)
+	}
+	return nil
+}
+
+// Every client must be attempted even when an earlier one fails — the serial
+// loop this replaced guaranteed that, and losing it would leave a user
+// half-synced whenever one panel is down.
+func TestSyncUserLifecycle_AttemptsEveryClientDespiteFailures(t *testing.T) {
+	byUser := []*domain.PSPClient{
+		{ID: 1, UserID: 7, PanelID: 10, Email: "a@psp.local", UUID: "u"},
+		{ID: 2, UserID: 7, PanelID: 11, Email: "b@psp.local", UUID: "u"},
+		{ID: 3, UserID: 7, PanelID: 12, Email: "c@psp.local", UUID: "u"},
+	}
+	clients := &fakeClients{byUser: byUser, attachments: []domain.PSPClientInbound{
+		{ClientID: 1, NodeID: 101, Provisioned: true},
+		{ClientID: 2, NodeID: 102, Provisioned: true},
+		{ClientID: 3, NodeID: 103, Provisioned: true},
+	}}
+	xui := &countingUpdateXUI{fail: map[string]bool{"a@psp.local": true}}
+	svc := New(clients, fakePool{c: xui}, fakeNodes{})
+
+	if err := svc.SyncUserLifecycle(context.Background(), 7, true, 0, 0); err == nil {
+		t.Fatal("want the failing client's error")
+	}
+	if got := xui.updates(); got != 3 {
+		t.Fatalf("update attempts = %d, want 3 — a failure must not abandon the rest", got)
+	}
+}
+
+type countingUpdateXUI struct {
+	fakeXUI
+	fail map[string]bool
+	mu   sync.Mutex
+	n    int
+}
+
+func (c *countingUpdateXUI) GetClient(context.Context, string) (*ports.ClientDetail, error) {
+	return nil, nil
+}
+
+func (c *countingUpdateXUI) UpdateClient(_ context.Context, _ int, _ string, spec ports.ClientSpec) error {
+	c.mu.Lock()
+	c.n++
+	c.mu.Unlock()
+	if c.fail[spec.Email] {
+		return errFakeGet
+	}
+	return nil
+}
+
+func (c *countingUpdateXUI) updates() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.n
 }

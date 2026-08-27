@@ -13,12 +13,15 @@ package sharedclient
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/clientplan"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/log"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/metrics"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/paneltz"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/safego"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 )
 
@@ -369,6 +372,23 @@ func sameInboundSet(have []int, want map[int]bool) bool {
 // SyncUserLifecycle pushes the given lifecycle state onto ALL of a user's shared
 // clients (across panels/partitions). enable/expiry/quota are user-level, so they
 // apply identically to every client. Returns the first error, attempts all.
+//
+// The per-client work runs concurrently (docs/data-plane-plan.md Phase 1b).
+// Each SyncLifecycle is a GetClient plus an UpdateClient, so the serial loop
+// this replaced cost the user P x 2 round trips end to end; concurrently it is
+// 2, which for a user spread across several panels is the difference between
+// "one slow panel delays only its own client" and "one slow panel delays
+// everything after it in the list".
+//
+// Safe to run in parallel because no two entries in one user's list can name
+// the same panel-side client. A PSPClient is keyed by (user, panel, credClass),
+// and domain.PSPClientEmail derives the email suffix as a collision-free
+// function of the partition key — so two clients on the SAME panel necessarily
+// carry different emails. The dangerous shape (two goroutines writing one
+// panel-side client, racing the adapter's per-email write lock into a
+// last-writer-wins on a full-replace body) is therefore unreachable from here.
+// The pool hands back a shared adapter per panel, which is already driven
+// concurrently by the traffic poll's own panel fan-out.
 func (s *Service) SyncUserLifecycle(ctx context.Context, userID int64, enable bool, expiryTime, totalGB int64) error {
 	started := time.Now()
 	clients, err := s.clients.ListByUser(ctx, userID)
@@ -378,18 +398,45 @@ func (s *Service) SyncUserLifecycle(ctx context.Context, userID int64, enable bo
 	// P and the per-user fan-out cost from docs/data-plane-plan.md §1.6.
 	// Sampled here rather than derived from the panel-op counters because
 	// this is the loop the cost model describes: the histogram's own P50
-	// against P95 is what says whether the serial loop is a uniform cost or
-	// a tail problem, which decides how much Phase 1b actually buys.
+	// against P95 is what says whether the fan-out is a uniform cost or a
+	// tail problem.
 	metrics.UserClientCount.Observe(float64(len(clients)))
 	defer func() { metrics.SyncUserDuration.ObserveSince(started) }()
 
-	var firstErr error
-	for _, c := range clients {
-		if err := s.SyncLifecycle(ctx, c, enable, expiryTime, totalGB); err != nil && firstErr == nil {
-			firstErr = err
+	// P is 1 for most users. Spawning a goroutine and a channel to run one
+	// call is pure overhead, so the common case keeps the direct call.
+	if len(clients) <= 1 {
+		if len(clients) == 0 {
+			return nil
+		}
+		return s.SyncLifecycle(ctx, clients[0], enable, expiryTime, totalGB)
+	}
+
+	// Results are collected BY INDEX, not by arrival, so "the first error"
+	// stays the first error in client order. Reporting whichever goroutine
+	// happened to fail first would make the returned error depend on panel
+	// latency, and callers surface it to an admin.
+	errs := make([]error, len(clients))
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, paneltz.ResolveMaxPanelConcurrency(0))
+	for i, c := range clients {
+		wg.Add(1)
+		go func(i int, c *domain.PSPClient) {
+			defer safego.Recover("sharedclient.SyncUserLifecycle")
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			errs[i] = s.SyncLifecycle(ctx, c, enable, expiryTime, totalGB)
+		}(i, c)
+	}
+	wg.Wait()
+
+	for _, err := range errs {
+		if err != nil {
+			return err
 		}
 	}
-	return firstErr
+	return nil
 }
 
 // CleanupResult summarizes a Stage-4 legacy-cleanup pass.
