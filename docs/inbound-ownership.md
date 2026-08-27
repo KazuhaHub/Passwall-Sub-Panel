@@ -35,9 +35,13 @@
 
 health worker 甚至**已经在做「从 inbound 抽字段写回 nodes 表」**（持久化 `Port`/`Protocol`，[health.go](../internal/service/health/health.go)），只是没把渲染需要的连接配置一起存下来。所以把配置本地化几乎是"白捡"——复用已有 poll 的结果即可，对 3X-UI **零新增请求**。
 
-### 1.3 横向参考：V2board / XrayR / V2bX
+### 1.3 横向参考：V2board / Xboard + V2bX
 
-V2board 这类机场面板**面板自己拥有节点配置**：节点连接参数存在面板 DB，边缘节点跑哑 agent（XrayR / V2bX）**反向轮询面板**拉配置 + 用户列表、并上报流量。订阅渲染是**纯 DB 读、零上游调用**。本设计借鉴其「配置本地化、render 零回源」的解耦思路，但**保留 PSP 的定位前提**：3X-UI 仍是实际跑 xray 的地方，PSP 通过其 API 下发，而不是引入新 agent。
+> **2026-08 更新**：原文把 XrayR 与 V2bX 并列。**XrayR 已删库**——其最后一个提交是 `5ceba41 "Clear all files"`，仓库被维护者清空。参考对象应为其继任者 **V2bX**（`wyx2685/V2bX`）。
+
+V2board / Xboard 这类机场面板**面板自己拥有节点配置**：节点连接参数存在面板 DB，边缘节点跑 agent（V2bX）**反向轮询面板**拉配置 + 用户列表，并上报流量。订阅渲染是**纯 DB 读、零上游调用**。本设计借鉴其「配置本地化、render 零回源」的解耦思路，但**保留 PSP 的定位前提**：3X-UI 仍是实际跑 xray 的地方，PSP 通过其 API 下发，而不是引入新 agent。
+
+就 agent 的职责边界，V2bX 的实证结论见 [data-plane-plan.md](data-plane-plan.md) §3.7——简言之：**策略在控制面，执行在本地，零本地配额逻辑**。
 
 ---
 
