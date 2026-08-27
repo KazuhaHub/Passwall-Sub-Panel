@@ -176,7 +176,11 @@ band = max(minBytes, remaining × pct)
 >
 > 关键在于：**§1.2 说的那个「每周期都在收缩、因而挫败 skip」的下限，其收缩正是缺陷本身。** 修复把推送值重基成 `lastRaw + 本期剩余`——面板计数器涨多少、本期已用就涨多少、剩余就减多少，两项相消。实机验证连续四轮推送，面板持有的值纹丝不动。
 >
-> 所以 skip 现在对单 client 用户应当自然生效。`P > 1` 时会被同用户其他 client 的流量带偏，但幅度远小于修复前的整个 delta。**先用 Phase 0 量出 `psp_lifecycle_quota_delta_bytes` 的真实分布，再决定迟滞带还有没有必要**——很可能没有。
+> **实测结论（50 周期，`internal/service/sharedclient/skip_rate_test.go`）**：`P = 1` 的 skip 率从 0% 升到 **98%**；`P > 1` 仍是 **0%**。
+>
+> 我一度以为 P>1 也会大幅改善，**算错了**：`cap_i` 每周期的变化是 `−Σ_{j≠i} δ_j`，只要有别的 client 动了流量它就变。而且这不能靠改公式解决——把 headroom 改成 per-client 会让离线超烧上界从 `P × 剩余` 变成 `P × 配额 − Σ已用`，**更松**。详见 [traffic-floor-defect.md](traffic-floor-defect.md) §6.3。
+>
+> **所以：P = 1 不需要迟滞带；P > 1 仍然需要，本节保留。** band 该设多大现在也更清楚——client i 的每周期漂移就是其他 client 那一周期的流量总和。
 
 ---
 

@@ -66,6 +66,22 @@ small improvement).
 
 ### 验证
 
+- **实测 skip 率，推翻了我自己写在文档里的一个判断** —— floor 修复后推送值对单 client 用户恒定，那 no-op skip 到底恢复了没有？50 个周期实测（`internal/service/sharedclient/skip_rate_test.go`，驱动真实 `SyncLifecycle`）：
+
+  | P | skip 率 | 修复前 |
+  |---|---|---|
+  | 1 | **98%**（50 周期只写 1 次）| 0% |
+  | 2 | **0%** | 0% |
+  | 3 | **0%** | 0% |
+
+  `P = 1` 如预期。**但 `P > 1` 是 0%，而我先前在 `traffic-floor-defect.md` 写的是「偏移量远小于修复前的整个 delta，skip 命中率仍会大幅上升」——算一下就知道错了**：`cap_i` 每周期的变化是 `−Σ_{j≠i} δ_j`，**只要有任何一个别的 client 动了流量它就变**，所有 client 都活跃时每周期都变。
+
+  **而且这不能靠改公式解决。** 把 headroom 也改成 per-client 确实能让它恒定，但会把 PSP 离线时的超烧上界从 `P × 剩余` 放宽到 `P × 配额 − Σ已用`——**兜底变松**。所以这个漂移是安全语义的必然代价，不是实现缺陷。
+
+  **结论：`P = 1` 不需要迟滞带，`P > 1` 仍然需要**，与计划原本的判断一致。band 取值现在也更清楚——client i 的每周期漂移就是其他 client 那一周期的流量总和。两处文档已修正。
+
+  面板保真度不靠假设：`TestLive_XUITrafficFloorMatrix` 已在真实 3.7.0 面板上验证过「面板存储并返回 PSP 写入的 cap」，本测试补的是另一半（给定这样的面板，skip 实际命中多少）。
+
 - **S-UI 1.5.5 实机复验（本轮改过它的适配器）** —— 这一轮删掉了 `UpdateClient` 的两个死参数、移除了整个 `UpdateClientWithInbound`，两个适配器都受影响，但此前**只验证了能编译**。S-UI 是兼容目标，改了它却不实测，标准不一致。
 
   从源码编译 S-UI 1.5.5（`88bde26`）并以真实 sing-box 核心启动，跑 PSP 自己的 `TestLive_SUISurface`（读路径 + inbound 全生命周期 + 客户端全生命周期）与 `TestLive_SUIBulkSetEnabled`，**全部通过**，面板自报 `1.5.5 / core running`。

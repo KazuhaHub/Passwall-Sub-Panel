@@ -93,7 +93,44 @@ cap = lastRaw + (limit − periodUsed)
 
 这直接影响 [data-plane-plan.md](data-plane-plan.md)：§1.2 断言「不断收缩的下限每周期都挫败 no-op skip」——**那个收缩正是缺陷本身**。修好之后 skip 对单 client 用户应当自然生效，**Phase 1a 的迟滞带可能根本不需要**。
 
-`P > 1` 时不完全恒定：`periodUsed` 是用户级（所有 client 之和），而 `lastRaw` 是单 client 的，所以某个 client 的 cap 会被**其他** client 的流量带偏。偏移量远小于修复前的整个 delta，skip 命中率仍会大幅上升。真实分布由 Phase 0 的 `psp_lifecycle_quota_delta_bytes` 给出。
+**但 `P > 1` 时完全不成立——这一条我先前推断错了，是实测推翻的。**
+
+`internal/service/sharedclient/skip_rate_test.go` 跑 50 个周期实测：
+
+| P | skip 率 | 修复前 |
+|---|---|---|
+| 1 | **98%**（50 周期 1 次写） | 0% |
+| 2 | **0%** | 0% |
+| 3 | **0%** | 0% |
+
+我原本写的是「偏移量远小于修复前的整个 delta，skip 命中率仍会大幅上升」。**算一下就知道不对**：
+
+```
+cap_i = lastRaw_i + (配额 − Σ所有 client 的已用)
+
+每周期：lastRaw_i 涨 δ_i，而 headroom 缩 Σδ
+        ⇒ cap_i 变化 = δ_i − Σδ = −Σ_{j≠i} δ_j
+```
+
+**只要有任何一个别的 client 动了流量，cap_i 就变。** 所有 client 都活跃时，每个 client 的 cap 每周期都变——skip 一次都不命中，和修复前一样糟。
+
+### 6.3.1 为什么不能靠改公式解决
+
+看起来把 headroom 也改成 per-client（`配额 − 本 client 已用`）就恒定了。**但那会削弱兜底本身**：
+
+| 方案 | 单 client 可再烧 | P 个 client 同时烧（PSP 离线）|
+|---|---|---|
+| 现行 | `配额 − Σ已用` | `P × (配额 − Σ已用)` |
+| per-client headroom | `配额 − 本client已用` | `P × 配额 − Σ已用` ← **更松** |
+
+现行方案更紧。所以**这个漂移是安全语义的必然代价，不是实现缺陷**。
+
+### 6.3.2 结论：Phase 1a 对 `P > 1` 仍然必要
+
+- **P = 1**：skip 已自然生效（98%），迟滞带**不需要**
+- **P > 1**：skip 结构性失效，**迟滞带是正确的工具**——和 [data-plane-plan.md](data-plane-plan.md) 原本的判断一致
+
+而且 band 该设多大现在更清楚了：client i 每周期的漂移就是**其他 client 那一周期的流量总和**。band 只要盖过典型的单周期流量，skip 就能恢复。真实分布仍由 Phase 0 的 `psp_lifecycle_quota_delta_bytes` 给出——现在知道该盯着 P>1 的用户看。
 
 ### 6.4 已知代价
 
