@@ -32,7 +32,13 @@ small improvement).
 
   **`limitHwid` 从「故意不发」改为「PSP 所有」** —— 这是本功能的核心。3.7.0 引入该字段后 PSP 一直故意省略它，因为上游把缺失的 key 绑成 0，而 `EnforceHwidForSubID` 在 `limit <= 0` 时返回 `Allowed = true`，**等于每次推送都静默关掉这个安全控制**；但回显更糟——`trimClientHwidsForSubID` 会**永久删除**超出上限的设备注册行，读-改-写窗口内的任何变化都会造成数据丢失。两害相权当时选了清零。**所有权消灭了这个两难**：PSP 现在发的是自己的意图值而非回显，根本不存在读-改-写窗口，trim 做的正是设备上限该做的事。
 
-  **上线前必验**：3X-UI 的并发 IP 限制走 core 的 online-stats API（不需要访问日志），但**超限后是把 IP 交给 fail2ban**——节点上没装配 fail2ban，这条限制就不会真正拦截。PSP 侧推送正确，执行侧前提在节点。
+  **执行前提（已实测两面确认）**：3X-UI 的并发 IP 限制走 core 的 online-stats API（不需要访问日志），但执行被**两道闸**门控。`resolveEnforce` 在 Linux 上「有上限但没装 fail2ban」时返回 `false`，`updateInboundClientIps` 随即早退——**不封禁也不断连**，只把观察到的 IP 存起来给界面显示。实测：未装 → `enforce=false`，装上 → `enforce=true`。
+
+  **第二道闸是个陷阱**：`checkFail2BanInstalled` 还要求环境变量 `XUI_ENABLE_FAIL2BAN` 未设或等于字面量 `"true"`——设成 `XUI_ENABLE_FAIL2BAN=1` 看着像「启用」，实际把执行关掉了。
+
+  **另外，之前把它描述成「只是交给 fail2ban」也不准确**：装上之后是两件事一起做——面板经 xray API `RemoveUser` + 100ms 后重加，**掐断该客户端的全部连接**（仅 `vmess/vless/trojan/shadowsocks/hysteria`，其他协议只打 warning 就返回）；fail2ban 再按固定日志格式在防火墙层封那个具体 IP。两者互补。
+
+  给运维方的结论：节点上装 fail2ban，且**不要**设 `XUI_ENABLE_FAIL2BAN`（或只设成 `true`）。
 
   **实机验证**（3.7.0 + xray-core 26.7.28）：创建/更新携带两个上限、**一次只改到期时间的无关更新不再抹掉设备上限**（本功能存在的核心回归）、0 能清空两个上限。4/4 通过。
 

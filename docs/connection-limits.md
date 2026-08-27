@@ -77,11 +77,35 @@ want.PanelQuota(panelLifetime)   // = PanelQuotaCap(QuotaHeadroom, panelLifetime
 
 **但「某个面板构建是否真的执行它」是版本问题**，由 `docs/compat/v3.json` 回答——capability 是每适配器静态的，看不见眼前这台面板的版本。
 
-### 5.1 `limitIp` 的执行依赖（上线前必验）
+### 5.1 `limitIp` 的执行前提（已实测确认）
 
-3X-UI 的并发 IP 限制走 **core 的 online-stats API**（不需要访问日志，这是好消息），但**超限后的动作是把 IP 排队交给 fail2ban**（`check_client_ip_job.go`）。
+3X-UI 的并发 IP 限制走 **core 的 online-stats API**（不需要访问日志，这是好消息）。但它的执行被**两道闸**门控，任一不满足就完全不生效——`resolveEnforce`（`check_client_ip_job.go:89`）：
 
-**也就是说节点上没装配 fail2ban，这个限制就不会真正拦截任何东西。** PSP 侧的推送是正确的，执行侧的前提在节点上。
+```go
+if hasLimit && runtime.GOOS != "windows" && !f2bInstalled {
+    return false            // ← 整个执行路径关闭
+}
+```
+
+`enforce == false` 时 `updateInboundClientIps` 在第 509 行直接早退：**不封禁、不断连**，只把观察到的 IP 存下来给界面显示。
+
+| 闸 | 条件 | 实测 |
+|---|---|---|
+| ① 二进制 | `fail2ban-client -h` 能跑通 | 未装 → `enforce=false`；装上 → `enforce=true` |
+| ② 环境变量 | `XUI_ENABLE_FAIL2BAN` **未设** 或等于字面量 `"true"` | 设成 `"1"` / `"yes"` / `"false"` **一律关闭** |
+
+**②是个陷阱**：`XUI_ENABLE_FAIL2BAN=1` 看着像「启用」，实际把执行关掉了（`isFail2BanEnabled` 只认 `"true"`）。
+
+### 5.1.1 装了 fail2ban 之后，实际执行的是什么
+
+不是「只写日志」——两件事一起做：
+
+1. **面板自己断连**：通过 xray API `RemoveUser` + 100ms 后重新 `AddUser`，掐掉该客户端**全部**连接。仅支持 `vmess / vless / trojan / shadowsocks / hysteria`，**其他协议只打一行 warning 就返回**。
+2. **fail2ban 在防火墙层封 IP**：面板按固定格式写 `[LIMIT_IP] Email = … || Disconnecting OLD IP = … || Timestamp = …`，`x-ui.sh` 建的 `filter.d/3x-ipl.conf` 匹配它。（上游注释明确写着「log format is load-bearing … don't change the wording」。）
+
+所以两者互补：①让超限客户端立刻掉线，②让那个具体 IP 短期内连不回来。
+
+**给运维方的结论**：节点上装 fail2ban，且**不要**设 `XUI_ENABLE_FAIL2BAN`（或只设成 `true`）。PSP 侧推送始终正确，执行前提在节点。
 
 ## 6. 漂移愈合
 
