@@ -54,6 +54,22 @@ small improvement).
 
   用法、逐项释义与已知限制见新增的 [`docs/observability.md`](docs/observability.md)。
 
+### 修复
+
+- **v2 → v3 离线迁移器已经坏了很久（实测复现）** —— v3.9.0 把 `ownershipRow` 移出 `schemaModels` 是完全正当的改动：运行中的面板不该再长回 `user_xui_clients`，因为**表的缺席正是迁移完成的证据**（`DropIfMigrated` 只在零行时 DROP）。但迁移器对**空白**目标库调 `EnsureSchema`（`runner.go:109`），随后 `copyOwnerships` 往那张不再被创建的表里写（`migrate.go:418`）。
+
+  实测：`HasTable(user_xui_clients) after EnsureSchema = false` → `insert err = SQL logic error: no such table: user_xui_clients`。**任何带遗留客户端的 v2 库都导不进来** —— 而那恰恰是迁移器存在的意义。仓内早有旁证：`ownership_repo_test.go` 显式 `CreateTable(&ownershipRow{})`，注释点名了这次 v3.9.0 改动。**测试知道，迁移器不知道。**
+
+  修复：新增 `sqlstore.EnsureLegacyOwnershipTable`，`copyOwnerships` 在**第一批真有行**时惰性建表——空导入不建表，否则那台安装会永远显得「未迁移」。回归测试 `internal/migrate/ownership_schema_test.go` 覆盖两个方向。
+
+  这件事是 V4 清理的缩影，已写进新增的 [`docs/v4-legacy-removal.md`](docs/v4-legacy-removal.md)：**一个理由充分的 schema 改动，作为「代码变更」发布，悄无声息弄坏了一条没有测试覆盖的迁移路径。**
+
+### 清理
+
+- **删掉三处真正的残留** —— `AdminServersHandler.ownership`（只写不读的字段，`grep` 零引用，不喂任何响应）；路由里描述一个从未实现的端点的孤儿注释，**而且它现在是错的**（断言「生产中还没有东西读 psp_client」，但 `render.go:339` 就在实时渲染路径上读）。
+
+  **评估后决定不删的两处**（记在 v4 文档里）：`recordClientStats` 的 `else` 分支生产上确实不可达，但注释明说是刻意保留给非 poll 调用方的，删掉换 4 行、代价是把有契约的辅助函数变成静默不落盘；`GetByMatch` 无生产调用方，但它是 `BatchUpdateCounters`（每台未迁移安装的活代码）唯一的身份读回工具。
+
 ### 修复（自查发现，均为本轮引入的回归）
 
 对 `origin/main..HEAD` 做了一次高强度代码审查，查出 12 个问题——**大部分是这一轮自己引入的**。逐条修复并补了回归测试：

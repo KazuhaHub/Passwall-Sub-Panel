@@ -1370,6 +1370,28 @@ func (j *jsonRelayHealth) Scan(value any) error {
 // truth for both the migrator and the schema_guard_test (which reflects over it
 // to catch cross-dialect-incompatible column definitions before they reach a
 // real MySQL/Postgres).
+// EnsureLegacyOwnershipTable creates `user_xui_clients` if it is absent.
+//
+// The table is deliberately NOT in schemaModels (see the note there): a running
+// panel must never grow it back, because its absence is exactly what proves an
+// install finished the shared-client migration — DropIfMigrated drops it only
+// at zero rows, so the table being gone is a one-way, machine-checkable marker.
+//
+// The v2 -> v3 offline migrator is the one caller that legitimately needs it.
+// It runs EnsureSchema against a BLANK destination and then imports the source's
+// legacy per-node clients, which have nowhere to land otherwise. Exported rather
+// than done with a raw DDL string in the migrator so the columns cannot drift
+// from ownershipRow.
+//
+// Call this only when there is actually a row to write: creating an empty table
+// would make a freshly-imported install look un-migrated forever.
+func EnsureLegacyOwnershipTable(db *gorm.DB) error {
+	if db.Migrator().HasTable(&ownershipRow{}) {
+		return nil
+	}
+	return db.Migrator().CreateTable(&ownershipRow{})
+}
+
 var schemaModels = []any{
 	&userRow{},
 	&roleRow{},
