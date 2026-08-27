@@ -144,10 +144,10 @@ func TestLive_SUISurface(t *testing.T) {
 		t.Fatalf("GetClient InboundIDs = %v, want to contain %d", detail.InboundIDs, id)
 	}
 
-	if err := c.UpdateClientWithInbound(ctx, got, detail.ID, ports.ClientSpec{
+	if err := c.UpdateClient(ctx, ports.ClientSpec{
 		Email: email, Enable: false, ID: detail.ID,
 	}); err != nil {
-		t.Fatalf("UpdateClientWithInbound: %v", err)
+		t.Fatalf("UpdateClient: %v", err)
 	}
 
 	if err := c.DetachClient(ctx, email, []int{id}); err != nil {

@@ -14,15 +14,14 @@ type fakeSharedLife struct {
 }
 
 type sharedLifeCall struct {
-	userID        int64
-	enable        bool
-	expiry, totGB int64
+	userID int64
+	want   domain.UserLifecycle
 }
 
-func (f *fakeSharedLife) SyncUserLifecycle(_ context.Context, userID int64, enable bool, expiry, totalGB int64) error {
+func (f *fakeSharedLife) SyncUserLifecycle(_ context.Context, userID int64, want domain.UserLifecycle) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.calls = append(f.calls, sharedLifeCall{userID, enable, expiry, totalGB})
+	f.calls = append(f.calls, sharedLifeCall{userID, want})
 	return nil
 }
 
@@ -37,7 +36,7 @@ func TestSyncSharedLifecycle_PushesEffectiveDisable(t *testing.T) {
 	if len(fake.calls) != 1 {
 		t.Fatalf("calls = %d, want 1", len(fake.calls))
 	}
-	if c := fake.calls[0]; c.userID != 7 || c.enable {
+	if c := fake.calls[0]; c.userID != 7 || c.want.Enable {
 		t.Fatalf("disabled user must push enable=false for uid 7: %+v", c)
 	}
 }
@@ -49,7 +48,7 @@ func TestSyncSharedLifecycle_PushesEffectiveEnable(t *testing.T) {
 
 	// Enabled, no expiry → EffectiveEnabled true.
 	svc.syncSharedLifecycle(context.Background(), &domain.User{ID: 8, Enabled: true})
-	if len(fake.calls) != 1 || !fake.calls[0].enable {
+	if len(fake.calls) != 1 || !fake.calls[0].want.Enable {
 		t.Fatalf("enabled user must push enable=true: %+v", fake.calls)
 	}
 }

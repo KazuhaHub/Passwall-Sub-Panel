@@ -113,6 +113,9 @@ interface CreateForm {
   expire_date: string
   traffic_limit_gb: number
   traffic_reset_period: ResetPeriod
+  // Connection caps; 0 = unlimited. Enforced by the panel, not by PSP.
+  ip_limit: number
+  device_limit: number
   remark: string
   show_password: boolean
 }
@@ -126,6 +129,8 @@ interface EditForm {
   expire_at: string
   traffic_limit_gb: number
   traffic_reset_period: ResetPeriod
+  ip_limit: number
+  device_limit: number
   remark: string
   // Period-used edit: initialised from the latest poll snapshot. If the
   // admin actually moves it (epsilon check), submitEdit calls setUserTraffic
@@ -142,7 +147,8 @@ interface EditForm {
 const EMPTY_CREATE: CreateForm = {
   upn: '', email: '', display_name: '', password: '',
   group_id: '', expire_mode: 'date', expire_date: '', traffic_limit_gb: 0,
-  traffic_reset_period: 'monthly', remark: '', show_password: false,
+  traffic_reset_period: 'monthly', ip_limit: 0, device_limit: 0,
+  remark: '', show_password: false,
 }
 
 // dateInNDays formats "n days from now" as a local YYYY-MM-DD string for the
@@ -158,7 +164,7 @@ function dateInNDays(n: number): string {
 const EMPTY_EDIT: EditForm = {
   display_name: '', email: '', group_id: '', role: 'user',
   expire_mode: 'date', expire_at: '', traffic_limit_gb: 0,
-  traffic_reset_period: 'monthly', remark: '',
+  traffic_reset_period: 'monthly', ip_limit: 0, device_limit: 0, remark: '',
   period_used_gb: 0, period_used_initial: 0, emergency_used_count: 0,
   enabled: true,
 }
@@ -282,7 +288,7 @@ export default function UsersView() {
   const [createOpen, setCreateOpen] = useState(false)
   const [createBusy, setCreateBusy] = useState(false)
   const [createForm, setCreateForm] = useState<CreateForm>(EMPTY_CREATE)
-  type CreateField = 'upn' | 'email' | 'display_name' | 'password' | 'group_id' | 'expire_date' | 'traffic_limit_gb'
+  type CreateField = 'upn' | 'email' | 'display_name' | 'password' | 'group_id' | 'expire_date' | 'traffic_limit_gb' | 'ip_limit' | 'device_limit'
   const [createErr, setCreateErr] = useState<FieldErrors<CreateField>>({})
 
   const [resultOpen, setResultOpen] = useState(false)
@@ -293,7 +299,7 @@ export default function UsersView() {
   const [editBusy, setEditBusy] = useState(false)
   const [editing, setEditing] = useState<User | null>(null)
   const [editForm, setEditForm] = useState<EditForm>(EMPTY_EDIT)
-  type EditField = 'display_name' | 'email' | 'group_id' | 'expire_at' | 'traffic_limit_gb' | 'period_used_gb'
+  type EditField = 'display_name' | 'email' | 'group_id' | 'expire_at' | 'traffic_limit_gb' | 'period_used_gb' | 'ip_limit' | 'device_limit'
   const [editErr, setEditErr] = useState<FieldErrors<EditField>>({})
 
   const [reasonOpen, setReasonOpen] = useState(false)
@@ -430,6 +436,8 @@ export default function UsersView() {
       group_id: validateGroupId(f.group_id, { required: true }),
       expire_date: f.expire_mode === 'date' ? validateRequired(f.expire_date) : '',
       traffic_limit_gb: validateNonNegativeNumber(f.traffic_limit_gb),
+      ip_limit: validateNonNegativeNumber(f.ip_limit),
+      device_limit: validateNonNegativeNumber(f.device_limit),
     }
   }
 
@@ -453,6 +461,8 @@ export default function UsersView() {
         // in the panel timezone (same path as edit). Permanent → omit entirely.
         expire_date: createForm.expire_mode === 'date' ? createForm.expire_date : undefined,
         traffic_limit_gb: createForm.traffic_limit_gb,
+        ip_limit: createForm.ip_limit,
+        device_limit: createForm.device_limit,
         traffic_reset_period: createForm.traffic_reset_period,
         remark: createForm.remark || undefined,
       })
@@ -475,6 +485,8 @@ export default function UsersView() {
       // the wrong day in zones west of UTC.
       expire_at: u.expire_date ?? '',
       traffic_limit_gb: bytesToGB(u.traffic_limit_bytes),
+      ip_limit: u.ip_limit,
+      device_limit: u.device_limit,
       traffic_reset_period: u.traffic_reset_period,
       remark: u.remark ?? '',
       period_used_gb: usedGB,
@@ -498,6 +510,8 @@ export default function UsersView() {
       // accrued usage — integer-only would reject the field whenever a
       // real user has period usage).
       traffic_limit_gb: validateNonNegativeNumber(f.traffic_limit_gb),
+      ip_limit: validateNonNegativeNumber(f.ip_limit),
+      device_limit: validateNonNegativeNumber(f.device_limit),
       period_used_gb: validateNonNegativeNumber(f.period_used_gb),
     }
   }
@@ -522,6 +536,8 @@ export default function UsersView() {
       const req: UpdateUserRequest = {
         group_id: editForm.group_id as number, email: editForm.email,
         traffic_limit_gb: editForm.traffic_limit_gb,
+        ip_limit: editForm.ip_limit,
+        device_limit: editForm.device_limit,
         traffic_reset_period: editForm.traffic_reset_period,
         remark: editForm.remark, display_name: editForm.display_name,
         role: editForm.role,
@@ -1345,6 +1361,22 @@ export default function UsersView() {
               slotProps={{
                 htmlInput: { min: 0, step: 'any' }
               }} />
+            <Box sx={{ display: 'flex', gap: 1.5, flexWrap: 'wrap' }}>
+              <TextField type="number" label={t('admin:users.field.ip_limit')}
+                value={createForm.ip_limit}
+                onChange={e => setCreateForm({ ...createForm, ip_limit: Number(e.target.value) })}
+                error={!!createErr.ip_limit}
+                helperText={createErr.ip_limit ? t(`admin:${createErr.ip_limit}`) : t('admin:users.field.limit_zero_hint')}
+                sx={{ flex: '1 1 180px' }}
+                slotProps={{ htmlInput: { min: 0, step: 1 } }} />
+              <TextField type="number" label={t('admin:users.field.device_limit')}
+                value={createForm.device_limit}
+                onChange={e => setCreateForm({ ...createForm, device_limit: Number(e.target.value) })}
+                error={!!createErr.device_limit}
+                helperText={createErr.device_limit ? t(`admin:${createErr.device_limit}`) : t('admin:users.field.limit_zero_hint')}
+                sx={{ flex: '1 1 180px' }}
+                slotProps={{ htmlInput: { min: 0, step: 1 } }} />
+            </Box>
             <TextField select size="small" fullWidth label={t('admin:users.field.traffic_reset_period')}
               value={createForm.traffic_reset_period}
               onChange={e => setCreateForm({ ...createForm, traffic_reset_period: e.target.value as ResetPeriod })}>
@@ -1687,6 +1719,20 @@ export default function UsersView() {
                 slotProps={{
                   htmlInput: { min: 0, step: 'any' }
                 }} />
+              <TextField type="number" label={t('admin:users.field.ip_limit')}
+                value={editForm.ip_limit}
+                onChange={e => setEditForm({ ...editForm, ip_limit: Number(e.target.value) })}
+                error={!!editErr.ip_limit}
+                helperText={editErr.ip_limit ? t(`admin:${editErr.ip_limit}`) : t('admin:users.field.limit_zero_hint')}
+                sx={{ flex: '1 1 200px' }}
+                slotProps={{ htmlInput: { min: 0, step: 1 } }} />
+              <TextField type="number" label={t('admin:users.field.device_limit')}
+                value={editForm.device_limit}
+                onChange={e => setEditForm({ ...editForm, device_limit: Number(e.target.value) })}
+                error={!!editErr.device_limit}
+                helperText={editErr.device_limit ? t(`admin:${editErr.device_limit}`) : t('admin:users.field.limit_zero_hint')}
+                sx={{ flex: '1 1 200px' }}
+                slotProps={{ htmlInput: { min: 0, step: 1 } }} />
               <TextField type="number" label={t('admin:users.field.period_used_gb')}
                 value={editForm.period_used_gb}
                 onChange={e => setEditForm({ ...editForm, period_used_gb: Number(e.target.value) })}

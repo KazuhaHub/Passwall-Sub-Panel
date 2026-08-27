@@ -40,7 +40,7 @@ type failingSharedLife struct {
 	calls int
 }
 
-func (f *failingSharedLife) SyncUserLifecycle(context.Context, int64, bool, int64, int64) error {
+func (f *failingSharedLife) SyncUserLifecycle(context.Context, int64, domain.UserLifecycle) error {
 	f.calls++
 	if f.fail {
 		return errors.New("updateClient timeout")

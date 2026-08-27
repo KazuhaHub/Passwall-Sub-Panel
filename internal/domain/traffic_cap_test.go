@@ -1,6 +1,9 @@
 package domain
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestPanelQuotaCap(t *testing.T) {
 	const GB = int64(1) << 30
@@ -84,5 +87,36 @@ func TestPanelQuotaCapMethods(t *testing.T) {
 	var nilE *XUIClientEntry
 	if got := nilE.PanelQuotaCap(40 * GB); got != 40*GB {
 		t.Errorf("nil XUIClientEntry cap = %d, want %d", got, 40*GB)
+	}
+}
+
+func TestUserLifecycleCarriesTheConnectionCaps(t *testing.T) {
+	const GB = int64(1) << 30
+	now := time.Now()
+	u := &User{Enabled: true, IPLimit: 3, DeviceLimit: 2}
+
+	got := u.Lifecycle(now, 40*GB)
+	if got.IPLimit != 3 || got.DeviceLimit != 2 {
+		t.Errorf("caps = %d/%d, want 3/2", got.IPLimit, got.DeviceLimit)
+	}
+	if got.QuotaHeadroom != 40*GB {
+		t.Errorf("headroom = %d, want %d", got.QuotaHeadroom, 40*GB)
+	}
+	if !got.Enable {
+		t.Error("an enabled, unexpired user must push enable=true")
+	}
+	// PanelQuota is the only place the headroom becomes a panel-facing number,
+	// so the struct must still be carrying the period-relative value.
+	if cap := got.PanelQuota(60 * GB); cap != 100*GB {
+		t.Errorf("PanelQuota = %d, want %d", cap, 100*GB)
+	}
+}
+
+// A nil user must not panic: the legacy push sites iterate rows a concurrent
+// delete can empty out from under them.
+func TestUserLifecycleNilSafe(t *testing.T) {
+	var u *User
+	if got := u.Lifecycle(time.Now(), 1); got != (UserLifecycle{}) {
+		t.Errorf("nil user lifecycle = %+v, want zero", got)
 	}
 }

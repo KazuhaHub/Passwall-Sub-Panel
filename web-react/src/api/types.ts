@@ -46,6 +46,10 @@ export interface User {
    *  set, independent of the browser's timezone. Empty for permanent users. */
   expire_date?: string
   traffic_limit_bytes: number
+  /** Connection caps. 0 = unlimited. Enforcement is per-panel — a panel that
+   *  lacks the capability simply leaves them unenforced. */
+  ip_limit: number
+  device_limit: number
   /** Lifetime counters (never reset by period rolls). Read-only detail. */
   lifetime_up_bytes?: number
   lifetime_down_bytes?: number
@@ -96,6 +100,8 @@ export interface CreateUserRequest {
   expire_date?: string
   traffic_limit_gb?: number
   traffic_reset_period?: ResetPeriod
+  ip_limit?: number
+  device_limit?: number
   remark?: string
 }
 

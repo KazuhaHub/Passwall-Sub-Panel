@@ -1276,6 +1276,9 @@
       "emergency_window_used_with_quota": "Window used {{used}} / {{quota}} GB",
       "emergency_window_used_unlimited": "Window used {{used}} GB (unlimited)",
       "traffic_reset_period": "Reset period",
+      "ip_limit": "Concurrent IP limit",
+      "device_limit": "Device limit",
+      "limit_zero_hint": "0 = unlimited",
       "remark": "Remark"
     },
     "role": {

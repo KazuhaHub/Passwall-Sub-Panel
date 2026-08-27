@@ -289,7 +289,7 @@ func TestUpdateClientPostsToClientsUpdateByEmail(t *testing.T) {
 	c := captureReq(t, `{"success":true}`, &got)
 	// old uuid in the (now vestigial) arg; new uuid rides in spec.ID under the
 	// unchanged email key.
-	if err := c.UpdateClient(context.Background(), 7, "old-uuid", ports.ClientSpec{ID: "new-uuid", Email: "u3-n9@psp.local", Enable: true}); err != nil {
+	if err := c.UpdateClient(context.Background(), ports.ClientSpec{ID: "new-uuid", Email: "u3-n9@psp.local", Enable: true}); err != nil {
 		t.Fatal(err)
 	}
 	if got.method != http.MethodPost || got.path != "/panel/api/clients/update/u3-n9@psp.local" {
@@ -310,7 +310,7 @@ func TestUpdateClientPostsToClientsUpdateByEmail(t *testing.T) {
 
 func TestUpdateClientRequiresEmail(t *testing.T) {
 	c := &Client{baseURL: "http://unused", apiToken: "t"}
-	if err := c.UpdateClient(context.Background(), 7, "uuid", ports.ClientSpec{Email: ""}); err == nil {
+	if err := c.UpdateClient(context.Background(), ports.ClientSpec{Email: ""}); err == nil {
 		t.Fatal("UpdateClient with empty email must error before any HTTP call")
 	}
 }
@@ -334,7 +334,7 @@ func TestDelClientByEmailPostsToClientsDel(t *testing.T) {
 func TestUpdateClientSurfacesPanelError(t *testing.T) {
 	var got capturedReq
 	c := captureReq(t, `{"success":false,"msg":"client not found"}`, &got)
-	err := c.UpdateClient(context.Background(), 7, "uuid", ports.ClientSpec{Email: "x@psp.local"})
+	err := c.UpdateClient(context.Background(), ports.ClientSpec{Email: "x@psp.local"})
 	if err == nil || !strings.Contains(err.Error(), "client not found") {
 		t.Fatalf("want error containing panel msg, got %v", err)
 	}

@@ -184,17 +184,17 @@ type recSyncer struct {
 	rotateCalls int
 }
 
-func (s *recSyncer) AddClientToInbound(context.Context, int64, int64, int, domain.Protocol, string, string, string, string, int64, int64) error {
+func (s *recSyncer) AddClientToInbound(context.Context, int64, int64, int, domain.Protocol, string, string, string, string, domain.UserLifecycle, int64) error {
 	s.addCalls++
 	return nil
 }
 
-func (s *recSyncer) SetOwnedClientEnable(context.Context, int64, int, string, domain.Protocol, string, string, string, bool, int64, int64) error {
+func (s *recSyncer) SetOwnedClientEnable(context.Context, int64, int, string, domain.Protocol, string, string, string, domain.UserLifecycle, int64) error {
 	s.enableCalls++
 	return nil
 }
 
-func (s *recSyncer) RotateClientUUID(context.Context, int64, int, string, domain.Protocol, string, string, string, string, bool, int64, int64) error {
+func (s *recSyncer) RotateClientUUID(context.Context, int64, int, string, domain.Protocol, string, string, string, string, domain.UserLifecycle, int64) error {
 	s.rotateCalls++
 	return nil
 }

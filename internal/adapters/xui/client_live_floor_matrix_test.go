@@ -60,7 +60,7 @@ func TestLive_XUITrafficFloorMatrix(t *testing.T) {
 	sniffing, _ := json.Marshal(map[string]any{"enabled": false, "destOverride": []string{"http", "tls"}})
 	stamp := time.Now().UnixNano()
 	inbID, err := c.AddInbound(ctx, ports.InboundSpec{
-		Remark: fmt.Sprintf("psp-floormatrix-%d", stamp), Enable: false, Port: 39102,
+		Remark: fmt.Sprintf("psp-floormatrix-%d", stamp), Enable: false, Port: scratchPort(stamp),
 		Protocol: "vless", Settings: string(settings),
 		StreamSettings: string(stream), Sniffing: string(sniffing),
 	})
@@ -105,7 +105,7 @@ func TestLive_XUITrafficFloorMatrix(t *testing.T) {
 			t.Fatalf("seed usage: %v", err)
 		}
 		cap := domain.PanelQuotaCap(user.TrafficFloorBytes(limit, periodUsed), lifetime)
-		if err := c.UpdateClient(ctx, inbID, uuid, ports.ClientSpec{
+		if err := c.UpdateClient(ctx, ports.ClientSpec{
 			Email: email, ID: uuid, Enable: true, TotalGB: cap,
 		}); err != nil {
 			t.Fatalf("UpdateClient: %v", err)
@@ -180,7 +180,7 @@ func TestLive_XUITrafficFloorMatrix(t *testing.T) {
 				t.Fatalf("advance usage: %v", err)
 			}
 			cap := domain.PanelQuotaCap(user.TrafficFloorBytes(limit, lifetime), lifetime)
-			if err := c.UpdateClient(ctx, inbID, uuid, ports.ClientSpec{
+			if err := c.UpdateClient(ctx, ports.ClientSpec{
 				Email: email, ID: uuid, Enable: true, TotalGB: cap,
 			}); err != nil {
 				t.Fatalf("cycle %d push: %v", cycle, err)

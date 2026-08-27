@@ -81,6 +81,13 @@ func (c *Client) Capabilities() []ports.PanelCapability {
 		ports.CapabilityCoreUpgrade,
 		ports.CapabilityWebCertRead,
 		ports.CapabilityRealityScan,
+		ports.CapabilityClientIPLimit,
+		// Declared unconditionally: the field is part of the protocol PSP
+		// speaks, and a panel below 3.7.0 ignores the key rather than
+		// erroring. Whether a given panel BUILD honours it is a version
+		// question the compat data answers — capabilities are static per
+		// adapter and cannot see the panel in front of them.
+		ports.CapabilityClientDeviceLimit,
 	}
 }
 
@@ -841,11 +848,11 @@ func bulkErrStrings(raws []json.RawMessage) []string {
 // /clients/update/{email}); the change propagates to every inbound the client
 // is attached to. Full-replace semantics: the body carries the complete
 // intended state (buildClientUpdateJSON emits every field PSP manages, plus the
-// panel-side renewal fields pinned off), so fields PSP does not set — e.g. a
-// manually-added comment, or 3.7.0's limitHwid — are not preserved. A UUID
-// rotation is simply a new "id" under the unchanged email, so the old
-// clientUUID argument is unused.
-func (c *Client) UpdateClient(ctx context.Context, inboundID int, clientUUID string, spec ports.ClientSpec) error {
+// panel-side renewal fields pinned off), so a field PSP does not set — e.g. an
+// operator's manually-added comment — is not preserved. A UUID rotation is
+// simply a new "id" under the unchanged email, which is why this takes no
+// separate uuid or inbound.
+func (c *Client) UpdateClient(ctx context.Context, spec ports.ClientSpec) error {
 	ctx = withOp(ctx, "UpdateClient")
 	if spec.Email == "" {
 		return fmt.Errorf("UpdateClient: spec.Email is required (3.2.0 keys clients by email)")
@@ -857,17 +864,6 @@ func (c *Client) UpdateClient(ctx context.Context, inboundID int, clientUUID str
 	}
 	path := "/panel/api/clients/update/" + url.PathEscape(spec.Email)
 	return c.mutateWithRetry(ctx, path, json.RawMessage(clientJSON))
-}
-
-// UpdateClientWithInbound delegated to a read-modify-write of the inbound in
-// the ≤3.1.x era to save a GetInbound round-trip. 3.2.0 updates clients by
-// email with no inbound read, so the pre-fetched inbound is unused; this
-// delegates to UpdateClient. Kept for caller source-compatibility.
-func (c *Client) UpdateClientWithInbound(ctx context.Context, inb *ports.Inbound, clientUUID string, spec ports.ClientSpec) error {
-	if inb == nil {
-		return fmt.Errorf("UpdateClientWithInbound: inb is nil")
-	}
-	return c.UpdateClient(ctx, inb.ID, clientUUID, spec)
 }
 
 // DelClientByEmail deletes the client by its panel-wide email key (POST
@@ -1079,6 +1075,8 @@ func (c *Client) GetClient(ctx context.Context, email string) (*ports.ClientDeta
 			Auth       string `json:"auth"`
 			ExpiryTime int64  `json:"expiryTime"`
 			TotalGB    int64  `json:"totalGB"`
+			LimitIP    int    `json:"limitIp"`
+			LimitHwid  int    `json:"limitHwid"`
 			Comment    string `json:"comment"`
 			Group      string `json:"group"`
 		} `json:"client"`
@@ -1104,6 +1102,8 @@ func (c *Client) GetClient(ctx context.Context, email string) (*ports.ClientDeta
 		Auth:       out.Client.Auth,
 		ExpiryTime: out.Client.ExpiryTime,
 		TotalGB:    out.Client.TotalGB,
+		LimitIP:    out.Client.LimitIP,
+		LimitHwid:  out.Client.LimitHwid,
 		Comment:    out.Client.Comment,
 		Group:      out.Client.Group,
 		InboundIDs: out.InboundIDs,
@@ -1379,8 +1379,6 @@ func buildClientJSON(s ports.ClientSpec) (json.RawMessage, error) {
 // and gin binds with encoding/json's default (unknown keys ignored — the panel
 // never enables DisallowUnknownFields), so they are inert on every panel down to
 // PSP's compat floor.
-//
-// NOT INCLUDED HERE: limitHwid. See buildClientUpdateJSON.
 var panelRenewalOff = map[string]any{
 	"resetDay":        0,
 	"resetMax":        0,
@@ -1395,20 +1393,19 @@ var panelRenewalOff = map[string]any{
 // sends unchunked, against the panel's 10 MiB request cap) to assert a state the
 // create already produces.
 //
-// DELIBERATELY ABSENT: limitHwid, the per-client device-binding cap 3.7.0 added.
-// PSP's update resets it to 0, which silently disables enforcement
-// (EnforceHwidForSubID returns Allowed=true whenever the effective limit is <= 0),
-// and PSP does NOT repair that here. Echoing back a value read moments earlier is
-// worse than leaving it zeroed, not better: setClientLimitHwidByEmail feeds the
-// recomputed sub-wide MAX into trimClientHwidsForSubID, which DELETES the
-// least-recently-seen device registrations beyond the limit. A stale carry (an
-// admin raising the cap, or a device registering, inside the read->write window)
-// therefore permanently destroys device rows, whereas the current clobber writes
-// 0, leaves the trim dormant at its `limit <= 0` guard, and loses only a scalar
-// the admin can retype. The real defect is upstream binding an omitted key to 0
-// instead of "unset" (a *int would fix it); until that lands, omission is the
-// safe behaviour. Admins are told not to set HWID caps on PSP-managed clients —
-// see docs/3xui-compat.md and xui_advisories["3.7.0"] in docs/compat/v3.json.
+// limitHwid is carried by clientObj, and the reason is worth stating because it
+// was deliberately omitted until PSP took ownership of the field. Omitting it
+// let upstream bind the missing key to 0, which silently disabled enforcement
+// (EnforceHwidForSubID allows everything at limit <= 0) — but echoing back a
+// value read moments earlier was worse, not better: setClientLimitHwidByEmail
+// feeds the limit into trimClientHwidsForSubID, which DELETES device
+// registrations beyond it, so a cap change or a device registering inside the
+// read->write window destroyed rows permanently.
+//
+// Ownership removes that window entirely. PSP now sends ITS OWN intended cap
+// (domain.User.DeviceLimit), never an echo, so there is no stale value to carry
+// and the trim does exactly what a device cap is for. See
+// docs/connection-limits.md.
 func buildClientUpdateJSON(s ports.ClientSpec) (json.RawMessage, error) {
 	obj := clientObj(s)
 	for k, v := range panelRenewalOff {
@@ -1429,6 +1426,7 @@ func clientObj(s ports.ClientSpec) map[string]any {
 		"email":      s.Email,
 		"enable":     s.Enable,
 		"limitIp":    s.LimitIP,
+		"limitHwid":  s.LimitHwid,
 		"totalGB":    s.TotalGB,
 		"expiryTime": s.ExpiryTime,
 		"subId":      s.SubID,

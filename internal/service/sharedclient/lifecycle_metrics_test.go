@@ -100,7 +100,7 @@ func TestSyncLifecycle_SkipAndWriteAreCountedExactlyOnce(t *testing.T) {
 	t.Run("panel already matches", func(t *testing.T) {
 		metrics.Reset()
 		svc, xui := newSvc(spec())
-		if err := svc.SyncLifecycle(context.Background(), c, false, 1893456000000, 5<<30); err != nil {
+		if err := svc.SyncLifecycle(context.Background(), c, domain.UserLifecycle{Enable: false, ExpiryTime: 1893456000000, QuotaHeadroom: 5 << 30}); err != nil {
 			t.Fatal(err)
 		}
 		if xui.updateCalls != 0 {
@@ -122,7 +122,7 @@ func TestSyncLifecycle_SkipAndWriteAreCountedExactlyOnce(t *testing.T) {
 		stale := spec()
 		stale.TotalGB = 6 << 30 // the floor shrank by 1 GiB since the last push
 		svc, xui := newSvc(stale)
-		if err := svc.SyncLifecycle(context.Background(), c, false, 1893456000000, 5<<30); err != nil {
+		if err := svc.SyncLifecycle(context.Background(), c, domain.UserLifecycle{Enable: false, ExpiryTime: 1893456000000, QuotaHeadroom: 5 << 30}); err != nil {
 			t.Fatal(err)
 		}
 		if xui.updateCalls != 1 {
@@ -146,7 +146,7 @@ func TestSyncLifecycle_SkipAndWriteAreCountedExactlyOnce(t *testing.T) {
 		metrics.Reset()
 		clients := &fakeClients{attachments: []domain.PSPClientInbound{{ClientID: 1, NodeID: 11}}}
 		svc := New(clients, fakePool{c: &fakeXUI{}}, fakeNodes{})
-		if err := svc.SyncLifecycle(context.Background(), c, false, 0, 0); err != nil {
+		if err := svc.SyncLifecycle(context.Background(), c, domain.UserLifecycle{Enable: false, ExpiryTime: 0, QuotaHeadroom: 0}); err != nil {
 			t.Fatal(err)
 		}
 		if got := counterByName(t, "psp_lifecycle_sync_total"); got != 0 {
@@ -222,7 +222,9 @@ func TestSyncUserLifecycle_FansOutConcurrently(t *testing.T) {
 	svc := New(clients, fakePool{c: xui}, fakeNodes{})
 
 	done := make(chan error, 1)
-	go func() { done <- svc.SyncUserLifecycle(context.Background(), 7, true, 0, 0) }()
+	go func() {
+		done <- svc.SyncUserLifecycle(context.Background(), 7, domain.UserLifecycle{Enable: true, ExpiryTime: 0, QuotaHeadroom: 0})
+	}()
 
 	// Every client must reach GetClient before ANY of them is allowed to
 	// finish. Serial execution can never satisfy this.
@@ -263,7 +265,7 @@ func TestSyncUserLifecycle_FirstErrorIsDeterministic(t *testing.T) {
 		delay: map[string]time.Duration{"slow@psp.local": 40 * time.Millisecond}}
 	svc := New(clients, fakePool{c: xui}, fakeNodes{})
 
-	err := svc.SyncUserLifecycle(context.Background(), 7, true, 0, 0)
+	err := svc.SyncUserLifecycle(context.Background(), 7, domain.UserLifecycle{Enable: true, ExpiryTime: 0, QuotaHeadroom: 0})
 	if err == nil {
 		t.Fatal("want an error")
 	}
@@ -282,7 +284,7 @@ func (c *failByEmailXUI) GetClient(_ context.Context, _ string) (*ports.ClientDe
 	return nil, nil
 }
 
-func (c *failByEmailXUI) UpdateClient(_ context.Context, _ int, _ string, spec ports.ClientSpec) error {
+func (c *failByEmailXUI) UpdateClient(_ context.Context, spec ports.ClientSpec) error {
 	time.Sleep(c.delay[spec.Email])
 	if c.fail[spec.Email] {
 		return fmt.Errorf("update %s: %w", spec.Email, errFakeGet)
@@ -307,7 +309,7 @@ func TestSyncUserLifecycle_AttemptsEveryClientDespiteFailures(t *testing.T) {
 	xui := &countingUpdateXUI{fail: map[string]bool{"a@psp.local": true}}
 	svc := New(clients, fakePool{c: xui}, fakeNodes{})
 
-	if err := svc.SyncUserLifecycle(context.Background(), 7, true, 0, 0); err == nil {
+	if err := svc.SyncUserLifecycle(context.Background(), 7, domain.UserLifecycle{Enable: true, ExpiryTime: 0, QuotaHeadroom: 0}); err == nil {
 		t.Fatal("want the failing client's error")
 	}
 	if got := xui.updates(); got != 3 {
@@ -326,7 +328,7 @@ func (c *countingUpdateXUI) GetClient(context.Context, string) (*ports.ClientDet
 	return nil, nil
 }
 
-func (c *countingUpdateXUI) UpdateClient(_ context.Context, _ int, _ string, spec ports.ClientSpec) error {
+func (c *countingUpdateXUI) UpdateClient(_ context.Context, spec ports.ClientSpec) error {
 	c.mu.Lock()
 	c.n++
 	c.mu.Unlock()
@@ -361,7 +363,7 @@ func TestSyncLifecycle_PushesTheQuotaCapRebasedOnPanelLifetime(t *testing.T) {
 		LastRawTotalBytes: 60 * GB, // what the panel's counter already holds
 	}
 	// 40 GB left this period.
-	if err := svc.SyncLifecycle(context.Background(), c, true, 0, 40*GB); err != nil {
+	if err := svc.SyncLifecycle(context.Background(), c, domain.UserLifecycle{Enable: true, ExpiryTime: 0, QuotaHeadroom: 40 * GB}); err != nil {
 		t.Fatal(err)
 	}
 	if got := xui.updatedSpec.TotalGB; got != 100*GB {
@@ -385,10 +387,96 @@ func TestSyncLifecycle_UnlimitedStaysUnlimited(t *testing.T) {
 		ID: 1, PanelID: 10, Email: "u1@psp.local", UUID: "uuid-x",
 		LastRawTotalBytes: 500 * GB,
 	}
-	if err := svc.SyncLifecycle(context.Background(), c, true, 0, 0); err != nil {
+	if err := svc.SyncLifecycle(context.Background(), c, domain.UserLifecycle{Enable: true, ExpiryTime: 0, QuotaHeadroom: 0}); err != nil {
 		t.Fatal(err)
 	}
 	if got := xui.updatedSpec.TotalGB; got != 0 {
 		t.Fatalf("pushed totalGB = %d, want 0 (unlimited)", got)
+	}
+}
+
+// --- Connection caps reach the panel and heal on drift ---
+
+func TestSyncLifecycle_PushesTheConnectionCaps(t *testing.T) {
+	clients := &fakeClients{attachments: []domain.PSPClientInbound{
+		{ClientID: 1, NodeID: 11, Provisioned: true},
+	}}
+	xui := &fakeXUI{}
+	svc := New(clients, fakePool{c: xui}, fakeNodes{})
+
+	c := &domain.PSPClient{ID: 1, PanelID: 10, Email: "u1@psp.local", UUID: "uuid-x"}
+	if err := svc.SyncLifecycle(context.Background(), c,
+		domain.UserLifecycle{Enable: true, IPLimit: 3, DeviceLimit: 2}); err != nil {
+		t.Fatal(err)
+	}
+	if got := xui.updatedSpec; got.LimitIP != 3 || got.LimitHwid != 2 {
+		t.Fatalf("pushed caps = %d/%d, want 3/2", got.LimitIP, got.LimitHwid)
+	}
+}
+
+// The caps are PSP-owned, so a value changed behind PSP's back must be healed
+// rather than skipped. Both are in the compare-then-write set for that reason;
+// the reason label is what makes the drift visible in the Phase 0 metrics.
+func TestSyncLifecycle_HealsDriftedConnectionCaps(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		panelState *ports.ClientDetail
+		wantReason string
+	}{
+		{
+			name:       "an operator lowered the IP cap in the panel UI",
+			panelState: &ports.ClientDetail{Enable: true, LimitIP: 1, LimitHwid: 2},
+			wantReason: "ip_limit",
+		},
+		{
+			name:       "a panel upgrade zeroed the device cap",
+			panelState: &ports.ClientDetail{Enable: true, LimitIP: 3, LimitHwid: 0},
+			wantReason: "device_limit",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			metrics.Reset()
+			clients := &fakeClients{attachments: []domain.PSPClientInbound{
+				{ClientID: 1, NodeID: 11, Provisioned: true},
+			}}
+			xui := &fakeXUI{getDetail: tc.panelState}
+			svc := New(clients, fakePool{c: xui}, fakeNodes{})
+
+			c := &domain.PSPClient{ID: 1, PanelID: 10, Email: "u1@psp.local"}
+			if err := svc.SyncLifecycle(context.Background(), c,
+				domain.UserLifecycle{Enable: true, IPLimit: 3, DeviceLimit: 2}); err != nil {
+				t.Fatal(err)
+			}
+			if xui.updateCalls != 1 {
+				t.Fatalf("update calls = %d, want 1 — drifted caps must be healed", xui.updateCalls)
+			}
+			key := "psp_lifecycle_sync_write_reason_total{reason=" + tc.wantReason + "}"
+			if got := counterByName(t, key); got != 1 {
+				t.Errorf("%s = %d, want 1", key, got)
+			}
+		})
+	}
+}
+
+// Matching caps must NOT defeat the no-op skip — otherwise every active user
+// pays a write per cycle for fields that never move.
+func TestSyncLifecycle_MatchingCapsStillSkip(t *testing.T) {
+	metrics.Reset()
+	clients := &fakeClients{attachments: []domain.PSPClientInbound{
+		{ClientID: 1, NodeID: 11, Provisioned: true},
+	}}
+	xui := &fakeXUI{getDetail: &ports.ClientDetail{Enable: true, LimitIP: 3, LimitHwid: 2}}
+	svc := New(clients, fakePool{c: xui}, fakeNodes{})
+
+	c := &domain.PSPClient{ID: 1, PanelID: 10, Email: "u1@psp.local"}
+	if err := svc.SyncLifecycle(context.Background(), c,
+		domain.UserLifecycle{Enable: true, IPLimit: 3, DeviceLimit: 2}); err != nil {
+		t.Fatal(err)
+	}
+	if xui.updateCalls != 0 {
+		t.Fatalf("update calls = %d, want 0", xui.updateCalls)
+	}
+	if got := counterByName(t, "psp_lifecycle_sync_skipped_total"); got != 1 {
+		t.Errorf("skipped = %d, want 1", got)
 	}
 }

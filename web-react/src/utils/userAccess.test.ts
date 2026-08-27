@@ -13,6 +13,8 @@ function user(overrides: Partial<User> = {}): User {
     uuid: 'uuid',
     sub_url: '/sub/token',
     traffic_limit_bytes: 0,
+    ip_limit: 0,
+    device_limit: 0,
     traffic_reset_period: 'monthly',
     enabled: true,
     emergency_used_count: 0,

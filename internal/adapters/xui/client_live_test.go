@@ -258,7 +258,7 @@ func TestLive_ConcurrentSameClientNoCorruption(t *testing.T) {
 			}
 			u := spec
 			u.Enable = idx%2 == 0
-			errs[idx] = c.UpdateClient(ctx, 0, uuid, u)
+			errs[idx] = c.UpdateClient(ctx, u)
 		}(g)
 	}
 	wg.Wait()
@@ -270,7 +270,7 @@ func TestLive_ConcurrentSameClientNoCorruption(t *testing.T) {
 	if cd, err := c.GetClient(ctx, email); err != nil || cd == nil {
 		t.Fatalf("final GetClient: err=%v nil=%v", err, cd == nil)
 	}
-	if err := c.UpdateClient(ctx, 0, uuid, spec); err != nil {
+	if err := c.UpdateClient(ctx, spec); err != nil {
 		t.Fatalf("final UpdateClient must succeed after the concurrent storm, got: %v", err)
 	}
 }
@@ -328,7 +328,7 @@ func TestLive_TwoClientsSameBackendNoCorruption(t *testing.T) {
 			}
 			u := spec
 			u.Enable = idx%2 == 0
-			errs[idx] = c.UpdateClient(ctx, 0, uuid, u)
+			errs[idx] = c.UpdateClient(ctx, u)
 		}(g, c)
 	}
 	wg.Wait()
@@ -340,7 +340,7 @@ func TestLive_TwoClientsSameBackendNoCorruption(t *testing.T) {
 	if cd, err := c1.GetClient(ctx, email); err != nil || cd == nil {
 		t.Fatalf("final GetClient: err=%v nil=%v", err, cd == nil)
 	}
-	if err := c2.UpdateClient(ctx, 0, uuid, spec); err != nil {
+	if err := c2.UpdateClient(ctx, spec); err != nil {
 		t.Fatalf("final UpdateClient must succeed, got: %v", err)
 	}
 }

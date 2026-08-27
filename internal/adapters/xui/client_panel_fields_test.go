@@ -39,7 +39,7 @@ func TestBuildClientJSON_CreateShapeIsUnchanged(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildClientJSON: %v", err)
 	}
-	want := []string{"email", "enable", "expiryTime", "id", "limitIp", "reset", "subId", "tgId", "totalGB"}
+	want := []string{"email", "enable", "expiryTime", "id", "limitHwid", "limitIp", "reset", "subId", "tgId", "totalGB"}
 	if got := sortedKeys(decodeClientBody(t, raw)); !equalStrings(got, want) {
 		t.Fatalf("create body key set changed\n got: %v\nwant: %v", got, want)
 	}
@@ -69,13 +69,29 @@ func TestBuildClientUpdateJSON_PinsPanelRenewalOff(t *testing.T) {
 		}
 	}
 
-	// limitHwid must NOT be sent. Echoing a value PSP read moments earlier arms
-	// trimClientHwidsForSubID and permanently deletes device registrations on a
-	// stale read; omitting writes 0, which leaves that trim dormant. Asserting
-	// absence keeps a well-meaning "preserve it too" change from landing without
-	// reading why it is unsafe.
-	if _, present := got["limitHwid"]; present {
-		t.Error("update body must not carry limitHwid — see buildClientUpdateJSON's comment")
+	// limitHwid MUST be sent, and must carry PSP's own value rather than
+	// anything read back from the panel. It used to be omitted on purpose,
+	// because echoing a stale read into trimClientHwidsForSubID permanently
+	// deletes device registrations. Ownership closed that window: there is no
+	// read-modify-write any more, so the value below is intent, not an echo.
+	// Asserting presence keeps a revert-to-omission from silently disabling
+	// device enforcement again (the panel binds a missing key to 0, and
+	// EnforceHwidForSubID allows everything at 0).
+	if got["limitHwid"] != float64(0) {
+		t.Errorf("update body limitHwid = %#v, want 0 for an unset cap", got["limitHwid"])
+	}
+	withCap, err := buildClientUpdateJSON(ports.ClientSpec{
+		Email: "u@example.test", Enable: true, LimitHwid: 3, LimitIP: 2,
+	})
+	if err != nil {
+		t.Fatalf("buildClientUpdateJSON(caps): %v", err)
+	}
+	capped := decodeClientBody(t, withCap)
+	if capped["limitHwid"] != float64(3) {
+		t.Errorf("limitHwid = %#v, want 3", capped["limitHwid"])
+	}
+	if capped["limitIp"] != float64(2) {
+		t.Errorf("limitIp = %#v, want 2", capped["limitIp"])
 	}
 }
 

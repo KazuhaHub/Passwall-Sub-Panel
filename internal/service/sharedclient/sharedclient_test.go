@@ -158,7 +158,7 @@ func (c *fakeXUI) DetachClient(_ context.Context, _ string, inboundIDs []int) er
 	c.detached = append(c.detached, inboundIDs...)
 	return nil
 }
-func (c *fakeXUI) UpdateClient(_ context.Context, _ int, _ string, spec ports.ClientSpec) error {
+func (c *fakeXUI) UpdateClient(_ context.Context, spec ports.ClientSpec) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.updatedSpec = spec
@@ -481,7 +481,7 @@ func TestSyncLifecycle_PushesEnableExpiryQuotaWithCredsAndFlow(t *testing.T) {
 
 	c := &domain.PSPClient{ID: 1, PanelID: 10, Email: "u1@psp.local", UUID: "uuid-x", Password: "pw-x"}
 	// disabled, with an expiry + a quota floor
-	if err := svc.SyncLifecycle(context.Background(), c, false, 1893456000000, 5<<30); err != nil {
+	if err := svc.SyncLifecycle(context.Background(), c, domain.UserLifecycle{Enable: false, ExpiryTime: 1893456000000, QuotaHeadroom: 5 << 30}); err != nil {
 		t.Fatal(err)
 	}
 	if xui.updateCalls != 1 {
@@ -502,7 +502,7 @@ func TestSyncLifecycle_NoAttachmentsSkips(t *testing.T) {
 	clients := &fakeClients{attachments: nil}
 	xui := &fakeXUI{}
 	svc := New(clients, fakePool{c: xui}, fakeNodes{})
-	if err := svc.SyncLifecycle(context.Background(), &domain.PSPClient{ID: 1, PanelID: 10}, true, 0, 0); err != nil {
+	if err := svc.SyncLifecycle(context.Background(), &domain.PSPClient{ID: 1, PanelID: 10}, domain.UserLifecycle{Enable: true}); err != nil {
 		t.Fatal(err)
 	}
 	if xui.updateCalls != 0 {
@@ -519,7 +519,7 @@ func TestSyncLifecycle_UnprovisionedSkips(t *testing.T) {
 	}}
 	xui := &fakeXUI{}
 	svc := New(clients, fakePool{c: xui}, fakeNodes{})
-	if err := svc.SyncLifecycle(context.Background(), &domain.PSPClient{ID: 1, PanelID: 10, Email: "u1@psp.local"}, false, 0, 0); err != nil {
+	if err := svc.SyncLifecycle(context.Background(), &domain.PSPClient{ID: 1, PanelID: 10, Email: "u1@psp.local"}, domain.UserLifecycle{}); err != nil {
 		t.Fatal(err)
 	}
 	if xui.updateCalls != 0 {

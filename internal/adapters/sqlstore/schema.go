@@ -38,16 +38,20 @@ type userRow struct {
 	// can't use a B-tree index. The index was pure write amplification
 	// on the busy users table. cleanupLegacyState drops the existing
 	// auto-named idx_users_email so upgraded installs reclaim it.
-	Email              string `gorm:"size:255"`
-	PasswordHash       string `gorm:"size:255"`
-	Role               string `gorm:"size:16;not null;default:user"`
-	SubToken           string `gorm:"size:64;uniqueIndex;not null"`
-	UUID               string `gorm:"size:36;not null"`
-	GroupID            int64  `gorm:"index;not null"`
-	EnabledRuleSets    jsonStrings
-	PersonalRules      string `gorm:"type:text"`
-	ExpireAt           *time.Time
-	TrafficLimitBytes  int64
+	Email             string `gorm:"size:255"`
+	PasswordHash      string `gorm:"size:255"`
+	Role              string `gorm:"size:16;not null;default:user"`
+	SubToken          string `gorm:"size:64;uniqueIndex;not null"`
+	UUID              string `gorm:"size:36;not null"`
+	GroupID           int64  `gorm:"index;not null"`
+	EnabledRuleSets   jsonStrings
+	PersonalRules     string `gorm:"type:text"`
+	ExpireAt          *time.Time
+	TrafficLimitBytes int64
+	// 0 = unlimited, which is also the zero value, so AutoMigrate adds these
+	// to existing installs with no backfill and no behaviour change.
+	IPLimit            int    `gorm:"default:0;not null"`
+	DeviceLimit        int    `gorm:"default:0;not null"`
 	TrafficResetPeriod string `gorm:"size:16;default:never"`
 	TrafficPeriodStart *time.Time
 	LifetimeUpBytes    int64 `gorm:"default:0"`
@@ -132,6 +136,8 @@ func (r *userRow) toDomain() *domain.User {
 		PersonalRules:          r.PersonalRules,
 		ExpireAt:               r.ExpireAt,
 		TrafficLimitBytes:      r.TrafficLimitBytes,
+		IPLimit:                r.IPLimit,
+		DeviceLimit:            r.DeviceLimit,
 		TrafficResetPeriod:     domain.ResetPeriod(r.TrafficResetPeriod),
 		TrafficPeriodStart:     r.TrafficPeriodStart,
 		LifetimeUpBytes:        r.LifetimeUpBytes,
@@ -177,6 +183,8 @@ func userFromDomain(u *domain.User) *userRow {
 		PersonalRules:          u.PersonalRules,
 		ExpireAt:               u.ExpireAt,
 		TrafficLimitBytes:      u.TrafficLimitBytes,
+		IPLimit:                u.IPLimit,
+		DeviceLimit:            u.DeviceLimit,
 		TrafficResetPeriod:     string(u.TrafficResetPeriod),
 		TrafficPeriodStart:     u.TrafficPeriodStart,
 		LifetimeUpBytes:        u.LifetimeUpBytes,

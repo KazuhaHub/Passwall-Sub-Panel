@@ -1,5 +1,7 @@
 package domain
 
+import "time"
+
 // PanelQuotaCap converts PSP's period-relative quota headroom into the
 // absolute counter value a panel actually enforces against.
 //
@@ -63,4 +65,54 @@ func (e *XUIClientEntry) PanelQuotaCap(headroom int64) int64 {
 		return PanelQuotaCap(headroom, 0)
 	}
 	return PanelQuotaCap(headroom, e.LastRawTotalBytes)
+}
+
+// UserLifecycle is the enforcement state every one of a user's panel-side
+// clients must reflect. It exists as a type rather than a parameter list
+// because it is a CONTRACT, not an argument bundle: PSP's own data plane is
+// the design target and 3X-UI / S-UI are compatibility targets, so this set
+// is defined by what PSP wants enforced — each adapter then translates as
+// much of it as its panel can express and declares the rest as a capability
+// gap. Adding a field here should not ripple through five signatures.
+type UserLifecycle struct {
+	// Enable is the user's effective service state (account enabled, not
+	// expired, not suspended).
+	Enable bool
+	// ExpiryTime is the panel-side expiry in epoch milliseconds; 0 = never.
+	ExpiryTime int64
+	// QuotaHeadroom is bytes remaining IN THE CURRENT PERIOD, NOT the number
+	// a panel is given. It stays period-relative everywhere; the rebase onto
+	// a panel counter happens at the one point that knows WHICH client's
+	// counter applies, via PanelQuota below. 0 = unlimited.
+	QuotaHeadroom int64
+	// IPLimit caps concurrent source IPs; 0 = unlimited.
+	IPLimit int
+	// DeviceLimit caps bound devices; 0 = unlimited.
+	DeviceLimit int
+}
+
+// Lifecycle assembles the enforcement state to push for this user.
+// quotaHeadroom comes from the caller because computing it needs a usage read
+// the domain layer has no business doing.
+func (u *User) Lifecycle(now time.Time, quotaHeadroom int64) UserLifecycle {
+	if u == nil {
+		return UserLifecycle{}
+	}
+	return UserLifecycle{
+		Enable:        u.EffectiveEnabled(now),
+		ExpiryTime:    u.PushExpireTime(),
+		QuotaHeadroom: quotaHeadroom,
+		IPLimit:       u.IPLimit,
+		DeviceLimit:   u.DeviceLimit,
+	}
+}
+
+// PanelQuota resolves this lifecycle's headroom into the absolute cap to push
+// for a client whose panel-side counter currently reads panelLifetime.
+//
+// One user's lifecycle fans out to several clients, each with its OWN counter,
+// so this cannot be folded into the struct — it is a per-client resolution of a
+// per-user intent.
+func (l UserLifecycle) PanelQuota(panelLifetime int64) int64 {
+	return PanelQuotaCap(l.QuotaHeadroom, panelLifetime)
 }

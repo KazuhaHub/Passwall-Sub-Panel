@@ -19,7 +19,7 @@ func TestAddClientToInbound_AdoptsOrphanOnDuplicate(t *testing.T) {
 	own := &fakeOwnership{existsVal: &no} // orphan: in 3X-UI, no ownership row
 	s := New(&fakePool{xui: xui}, own)
 
-	if err := s.AddClientToInbound(context.Background(), 1, 1, 100, domain.ProtoVLESS, "", "uuid-x", "u1-n1@x", "", 0, 0); err != nil {
+	if err := s.AddClientToInbound(context.Background(), 1, 1, 100, domain.ProtoVLESS, "", "uuid-x", "u1-n1@x", "", domain.UserLifecycle{Enable: true, ExpiryTime: 0, QuotaHeadroom: 0}, 0); err != nil {
 		t.Fatalf("duplicate client should be adopted, got: %v", err)
 	}
 	if !own.addCalled {
@@ -35,7 +35,7 @@ func TestAddClientToInbound_NonDuplicateErrorPropagates(t *testing.T) {
 	own := &fakeOwnership{existsVal: &no}
 	s := New(&fakePool{xui: xui}, own)
 
-	if err := s.AddClientToInbound(context.Background(), 1, 1, 100, domain.ProtoVLESS, "", "uuid-x", "u1-n1@x", "", 0, 0); err == nil {
+	if err := s.AddClientToInbound(context.Background(), 1, 1, 100, domain.ProtoVLESS, "", "uuid-x", "u1-n1@x", "", domain.UserLifecycle{Enable: true, ExpiryTime: 0, QuotaHeadroom: 0}, 0); err == nil {
 		t.Fatal("non-duplicate AddClient error must propagate")
 	}
 	if own.addCalled {
@@ -48,7 +48,7 @@ func TestAddClientToInbound_NonDuplicateErrorPropagates(t *testing.T) {
 // or password — otherwise 3X-UI rejects the client as "empty client ID". The
 // value equals the user's UUID, matching what the subscription renderer emits.
 func TestBuildClientSpecHysteria2SetsAuth(t *testing.T) {
-	spec := buildClientSpec(domain.ProtoHysteria2, "", "uuid-xyz", "u@example.test", "", 0, 0)
+	spec := buildClientSpec(domain.ProtoHysteria2, "", "uuid-xyz", "u@example.test", "", domain.UserLifecycle{Enable: true, ExpiryTime: 0, QuotaHeadroom: 0}, 0)
 	if spec.Auth != "uuid-xyz" {
 		t.Fatalf("Auth = %q, want uuid-xyz", spec.Auth)
 	}
@@ -59,7 +59,7 @@ func TestBuildClientSpecHysteria2SetsAuth(t *testing.T) {
 
 func TestBuildClientSpecSUIModernProtocols(t *testing.T) {
 	for _, protocol := range []domain.Protocol{domain.ProtoAnyTLS, domain.ProtoTUIC, domain.ProtoNaive} {
-		spec := buildClientSpec(protocol, "", "uuid-xyz", "u@example.test", "", 0, 0)
+		spec := buildClientSpec(protocol, "", "uuid-xyz", "u@example.test", "", domain.UserLifecycle{Enable: true, ExpiryTime: 0, QuotaHeadroom: 0}, 0)
 		if spec.ID != "uuid-xyz" || spec.Password != "uuid-xyz" {
 			t.Fatalf("%s spec = %+v, want UUID in id and password", protocol, spec)
 		}
@@ -79,7 +79,7 @@ func TestBuildClientSpecSS2022KeyLength(t *testing.T) {
 		{"2022-blake3-aes-256-gcm", 32},
 	}
 	for _, tc := range cases {
-		spec := buildClientSpec(domain.ProtoSS2022, tc.method, "uuid-xyz", "u@example.test", "", 0, 0)
+		spec := buildClientSpec(domain.ProtoSS2022, tc.method, "uuid-xyz", "u@example.test", "", domain.UserLifecycle{Enable: true, ExpiryTime: 0, QuotaHeadroom: 0}, 0)
 		raw, err := base64.StdEncoding.DecodeString(spec.Password)
 		if err != nil {
 			t.Fatalf("method %q: PSK %q not base64: %v", tc.method, spec.Password, err)

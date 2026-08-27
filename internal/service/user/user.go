@@ -41,10 +41,10 @@ type ClientSyncer interface {
 	// used by pushClientConfigToAll to skip the redundant GetInbound
 	// each per-client push otherwise incurs.
 	SetOwnedClientEnableWithInbound(ctx context.Context, panelID int64, inb *ports.Inbound, email string,
-		protocol domain.Protocol, ssMethod, userUUID, flow string, enable bool, expireTime, totalGB int64) error
+		protocol domain.Protocol, ssMethod, userUUID, flow string, want domain.UserLifecycle, panelLifetime int64) error
 	DelAllOwnedForUser(ctx context.Context, userID int64) error
 	RotateClientUUID(ctx context.Context, panelID int64, inboundID int, email string,
-		protocol domain.Protocol, ssMethod, oldUUID, newUUID, flow string, enable bool, expireTime, totalGB int64) error
+		protocol domain.Protocol, ssMethod, oldUUID, newUUID, flow string, want domain.UserLifecycle, panelLifetime int64) error
 }
 
 // TrafficUsageReader yields the bytes a user has consumed in their current
@@ -134,7 +134,7 @@ func (s *Service) SetPSPProvisioner(p PSPClientProvisioner) { s.psp = p }
 // shared clients in 3X-UI. Implemented by sharedclient.Service; a local interface
 // so the user service stays decoupled and nil-tolerant.
 type SharedLifecycleSyncer interface {
-	SyncUserLifecycle(ctx context.Context, userID int64, enable bool, expiryTime, quotaHeadroom int64) error
+	SyncUserLifecycle(ctx context.Context, userID int64, want domain.UserLifecycle) error
 }
 
 // SetSharedLifecycleSyncer late-binds the v3.9.0 shared-client lifecycle push.
@@ -199,8 +199,7 @@ func (s *Service) syncSharedLifecycle(ctx context.Context, u *domain.User) error
 	if s.sharedLife == nil || u == nil {
 		return nil
 	}
-	floor := s.trafficFloor(ctx, u)
-	if err := s.sharedLife.SyncUserLifecycle(ctx, u.ID, u.EffectiveEnabled(time.Now()), u.PushExpireTime(), floor); err != nil {
+	if err := s.sharedLife.SyncUserLifecycle(ctx, u.ID, u.Lifecycle(time.Now(), s.trafficFloor(ctx, u))); err != nil {
 		log.Warn("shared-client lifecycle push failed", "user_id", u.ID, "err", err)
 		return err
 	}
@@ -547,6 +546,8 @@ type CreateLocalInput struct {
 	GroupID            int64
 	ExpireAt           *time.Time
 	TrafficLimitBytes  int64
+	IPLimit            int
+	DeviceLimit        int
 	TrafficResetPeriod domain.ResetPeriod
 	Remark             string
 	// PendingEmailVerify creates the account disabled + flagged
@@ -664,6 +665,8 @@ func (s *Service) CreateLocal(ctx context.Context, in CreateLocalInput) (*Create
 		GroupID:            in.GroupID,
 		ExpireAt:           in.ExpireAt,
 		TrafficLimitBytes:  in.TrafficLimitBytes,
+		IPLimit:            in.IPLimit,
+		DeviceLimit:        in.DeviceLimit,
 		TrafficResetPeriod: resetPeriod,
 		TrafficPeriodStart: &now,
 		Remark:             in.Remark,
@@ -1083,7 +1086,6 @@ func (s *Service) ResetCredentialsAndSync(ctx context.Context, userID int64) (*R
 	if err := s.updateUser(ctx, u); err != nil {
 		return nil, err
 	}
-	expireTime := u.PushExpireTime()
 	// Compute the floor once; reuse for every client we push so a slow
 	// CurrentPeriodUsage doesn't blow up to N round-trips against the
 	// snapshots table.
@@ -1099,8 +1101,8 @@ func (s *Service) ResetCredentialsAndSync(ctx context.Context, userID int64) (*R
 			continue
 		}
 		if err := s.syncer.RotateClientUUID(ctx, e.PanelID, e.InboundID, e.ClientEmail,
-			info.protocol, info.ssMethod, oldUUID, newUUID, info.flow, u.EffectiveEnabled(time.Now()), expireTime,
-			e.PanelQuotaCap(floor)); err != nil {
+			info.protocol, info.ssMethod, oldUUID, newUUID, info.flow,
+			u.Lifecycle(time.Now(), floor), e.LastRawTotalBytes); err != nil {
 			needsRetry = true
 		}
 	}
@@ -1385,6 +1387,8 @@ type UpdateInput struct {
 	ExpireAt           *time.Time
 	ClearExpire        bool
 	TrafficLimitBytes  *int64
+	IPLimit            *int
+	DeviceLimit        *int
 	TrafficResetPeriod *domain.ResetPeriod
 	Remark             *string
 	DisplayName        *string
@@ -1475,6 +1479,22 @@ func (s *Service) UpdateProfile(ctx context.Context, userID int64, in UpdateInpu
 			trafficLimitChanged = true
 		}
 		u.TrafficLimitBytes = *in.TrafficLimitBytes
+	}
+	// Connection caps ride the same push trigger as the traffic limit: they
+	// are panel-enforced, so a change is only real once it reaches the panel.
+	// Reusing the flag rather than adding a parallel one keeps a single edit
+	// that touches both to a single push.
+	if in.IPLimit != nil {
+		if *in.IPLimit != u.IPLimit {
+			trafficLimitChanged = true
+		}
+		u.IPLimit = *in.IPLimit
+	}
+	if in.DeviceLimit != nil {
+		if *in.DeviceLimit != u.DeviceLimit {
+			trafficLimitChanged = true
+		}
+		u.DeviceLimit = *in.DeviceLimit
 	}
 	if in.TrafficResetPeriod != nil {
 		u.TrafficResetPeriod = *in.TrafficResetPeriod
@@ -2237,7 +2257,6 @@ func (s *Service) pushClientConfigToAll(ctx context.Context, u *domain.User) err
 	if len(entries) == 0 {
 		return nil
 	}
-	expireTime := u.PushExpireTime()
 	floor := s.trafficFloor(ctx, u)
 
 	// Resolve concurrency cap once. The setting is shared with the
@@ -2370,8 +2389,8 @@ func (s *Service) pushClientConfigToAll(ctx context.Context, u *domain.User) err
 			// SetOwnedClientEnable which then ran GetInbound per push,
 			// re-fetching what Phase 1 already had in hand.
 			perr := s.syncer.SetOwnedClientEnableWithInbound(ctx, entry.PanelID, inbCopy, entry.ClientEmail,
-				infoCopy.protocol, infoCopy.ssMethod, u.UUID, infoCopy.flow, u.EffectiveEnabled(time.Now()), expireTime,
-				entry.PanelQuotaCap(floor))
+				infoCopy.protocol, infoCopy.ssMethod, u.UUID, infoCopy.flow,
+				u.Lifecycle(time.Now(), floor), entry.LastRawTotalBytes)
 			outcomes <- pushOutcome{entry: entry, err: perr}
 		}()
 	}
@@ -2598,7 +2617,6 @@ func (s *Service) ResetUUIDAndSync(ctx context.Context, userID int64) (string, e
 	if err != nil {
 		return newUUID, err
 	}
-	expireTime := u.PushExpireTime()
 	floor := s.trafficFloor(ctx, u)
 	needsRetry := false
 	for _, e := range entries {
@@ -2611,8 +2629,8 @@ func (s *Service) ResetUUIDAndSync(ctx context.Context, userID int64) (string, e
 			continue
 		}
 		if err := s.syncer.RotateClientUUID(ctx, e.PanelID, e.InboundID, e.ClientEmail,
-			info.protocol, info.ssMethod, oldUUID, newUUID, info.flow, u.EffectiveEnabled(time.Now()), expireTime,
-			e.PanelQuotaCap(floor)); err != nil {
+			info.protocol, info.ssMethod, oldUUID, newUUID, info.flow,
+			u.Lifecycle(time.Now(), floor), e.LastRawTotalBytes); err != nil {
 			needsRetry = true
 		}
 	}

@@ -26,6 +26,20 @@ small improvement).
 
 ### 新增
 
+- **每用户连接限制：并发 IP 上限与设备数上限** —— 详见新增的 [`docs/connection-limits.md`](docs/connection-limits.md)。`User.IPLimit` / `User.DeviceLimit`（0 = 不限），贯通领域模型、持久化（AutoMigrate 加列，零值即「不限」，存量安装无需回填）、推送链路、管理 API 与用户编辑界面（中英文案齐备）。
+
+  **设计立场：PSP 的领域模型是真相源，面板是兼容目标。** 字段按 PSP 想表达的意图命名，不跟任何面板的字段名或语义走；各适配器翻译自己能表达的部分，翻译不了的**通过 capability 显式声明缺口**而不是静默不生效。新增 `client.iplimit` / `client.devicelimit` 两个能力：xui 声明两者，**S-UI 两者都不支持**（其 client 模型没有这两个概念，`applySpec` 直接丢弃）。
+
+  **`limitHwid` 从「故意不发」改为「PSP 所有」** —— 这是本功能的核心。3.7.0 引入该字段后 PSP 一直故意省略它，因为上游把缺失的 key 绑成 0，而 `EnforceHwidForSubID` 在 `limit <= 0` 时返回 `Allowed = true`，**等于每次推送都静默关掉这个安全控制**；但回显更糟——`trimClientHwidsForSubID` 会**永久删除**超出上限的设备注册行，读-改-写窗口内的任何变化都会造成数据丢失。两害相权当时选了清零。**所有权消灭了这个两难**：PSP 现在发的是自己的意图值而非回显，根本不存在读-改-写窗口，trim 做的正是设备上限该做的事。
+
+  **上线前必验**：3X-UI 的并发 IP 限制走 core 的 online-stats API（不需要访问日志），但**超限后是把 IP 交给 fail2ban**——节点上没装配 fail2ban，这条限制就不会真正拦截。PSP 侧推送正确，执行侧前提在节点。
+
+  **实机验证**（3.7.0 + xray-core 26.7.28）：创建/更新携带两个上限、**一次只改到期时间的无关更新不再抹掉设备上限**（本功能存在的核心回归）、0 能清空两个上限。4/4 通过。
+
+  两个上限是 PSP 所有的，因此已进入 `SyncLifecycle` 的比较集合：被人在面板界面改动会被推回并计入 `psp_lifecycle_sync_write_reason_total{reason=ip_limit|device_limit}`；一致时仍命中 no-op skip。
+
+- **推送链路改用契约类型 `domain.UserLifecycle`** —— 取代原先「enable + expiry + quota」三个标量参数一路往下传的形状。它是契约不是参数打包：PSP 自己的数据面才是设计目标，所以这个集合由「PSP 想强制什么」定义，各适配器按能力翻译，**往里加字段不再波及五个函数签名**。`QuotaHeadroom` 始终是本期剩余，重基只在唯一知道「是哪个 client 的计数器」的那一点发生（`want.PanelQuota(panelLifetime)`）——一个用户的 lifecycle 会扇出到多个各有计数器的 client，所以这个转换不能折进结构体。
+
 - **内置指标与 `/api/admin/diagnostics/metrics`（数据面演进计划 Phase 0）** —— 给 traffic poll 与 3X-UI 推送扇出加了进程内计数器 / 直方图，用来回答 [`docs/data-plane-plan.md`](docs/data-plane-plan.md) §2 里那几个「现在还不知道」的数：N（每周期活跃用户数）、P（每用户共享客户端数）、真实面板 RTT 分布、`PollOnce` 分段耗时、`pushSem` 排队深度。**不改任何行为**，纯观测。
 
   **没有引入 Prometheus。** PSP 是单二进制，绝大多数部署附近没有抓取设施；client library 换来的是一棵传递依赖树和第二个要加固的 HTTP 面，而要回答的问题一个挂在既有 admin 鉴权后的 JSON 就够。记录 API 照 Prometheus 形状写（counter / gauge / 显式 bucket 边界的 histogram，命名带单位后缀与 `_total`），将来若真要抓取端点，改的是渲染而不是调用点。热路径全原子操作、无锁、零分配。
@@ -39,6 +53,8 @@ small improvement).
   用法、逐项释义与已知限制见新增的 [`docs/observability.md`](docs/observability.md)。
 
 ### 改进
+
+- **清理适配器的退化调用面** —— `UpdateClient` 的 `inboundID` / `clientUUID` 两个参数自 3.2.0 起就没用了（客户端按 email 改），两个适配器里都是 `_`；`UpdateClientWithInbound` 整个方法只是转发，只有一个调用点。两者一并删除，`ports.PanelClient` 少一个方法、`UpdateClient` 少两个参数。`AddClient` 的 `inboundID` 保留——创建必须落到某个 inbound。
 
 - **`SyncUserLifecycle` 改为并发扇出（计划 Phase 1b）** —— 原本是普通 `for` 循环逐个 `SyncLifecycle`，每个是一次 `GetClient` 加一次 `UpdateClient`，所以横跨 P 个面板的用户端到端要付 `P × 2` 次串行往返；现在是 2 次。对分布在多台面板上的用户，这是「一台慢面板只拖它自己那个 client」与「一台慢面板拖住它后面所有 client」的区别。
 

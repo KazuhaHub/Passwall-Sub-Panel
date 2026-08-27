@@ -219,9 +219,9 @@ func (s *Service) ProvisionClient(ctx context.Context, c *domain.PSPClient) (Pro
 	return res, nil
 }
 
-// quotaHeadroom is bytes remaining IN THE CURRENT PERIOD, not the value that
-// reaches the panel: the panel compares against a lifetime counter, so this is
-// rebased onto that counter below.
+// want.QuotaHeadroom is bytes remaining IN THE CURRENT PERIOD, not the value
+// that reaches the panel: the panel compares against a lifetime counter, so it
+// is rebased onto that counter below.
 //
 // SyncLifecycle pushes the user's current enable / expiry / quota-floor onto the
 // shared client in 3X-UI (UpdateClient by email — propagates to every inbound the
@@ -230,7 +230,7 @@ func (s *Service) ProvisionClient(ctx context.Context, c *domain.PSPClient) (Pro
 // only the legacy per-node clients get toggled. UpdateClient is full-replace, so
 // the stored creds + the partition's flow are re-sent unchanged. A client with no
 // attachments (hence no flow) is skipped.
-func (s *Service) SyncLifecycle(ctx context.Context, c *domain.PSPClient, enable bool, expiryTime, quotaHeadroom int64) error {
+func (s *Service) SyncLifecycle(ctx context.Context, c *domain.PSPClient, want domain.UserLifecycle) error {
 	if c == nil {
 		return nil
 	}
@@ -270,12 +270,14 @@ func (s *Service) SyncLifecycle(ctx context.Context, c *domain.PSPClient, enable
 		return fmt.Errorf("xui pool get %d: %w", c.PanelID, err)
 	}
 	spec := buildSharedClientSpec(c, flow)
-	spec.Enable = enable
-	spec.ExpiryTime = expiryTime
-	// quotaHeadroom is period-relative; the panel enforces against its own
+	spec.Enable = want.Enable
+	spec.ExpiryTime = want.ExpiryTime
+	spec.LimitIP = want.IPLimit
+	spec.LimitHwid = want.DeviceLimit
+	// QuotaHeadroom is period-relative; the panel enforces against its own
 	// never-reset lifetime counter. domain.PanelQuotaCap bridges the two —
 	// see docs/traffic-floor-defect.md for what pushing the raw headroom did.
-	spec.TotalGB = c.PanelQuotaCap(quotaHeadroom)
+	spec.TotalGB = c.PanelQuotaCap(want.QuotaHeadroom)
 	// No-op-skip: if 3X-UI already holds this exact lifecycle AND creds, skip the
 	// UpdateClient. ResyncMembership calls this on every resync and the traffic poll
 	// calls it every cycle for active users; without the skip an unchanged user
@@ -312,7 +314,7 @@ func (s *Service) SyncLifecycle(ctx context.Context, c *domain.PSPClient, enable
 		metrics.LifecycleWriteReasonTotal.With(reason).Inc()
 	}
 	metrics.LifecycleWriteTotal.Inc()
-	if err := cli.UpdateClient(ctx, 0, c.UUID, spec); err != nil { // inbound/uuid args vestigial; keyed by spec.Email
+	if err := cli.UpdateClient(ctx, spec); err != nil { // inbound/uuid args vestigial; keyed by spec.Email
 		metrics.LifecycleErrorTotal.Inc()
 		return err
 	}
@@ -336,6 +338,10 @@ func lifecycleWriteReason(cur *ports.ClientDetail, spec ports.ClientSpec) string
 	switch {
 	case cur.TotalGB != spec.TotalGB:
 		return "total_gb"
+	case cur.LimitIP != spec.LimitIP:
+		return "ip_limit"
+	case cur.LimitHwid != spec.LimitHwid:
+		return "device_limit"
 	case cur.Enable != spec.Enable:
 		return "enable"
 	case cur.ExpiryTime != spec.ExpiryTime:
@@ -378,8 +384,9 @@ func sameInboundSet(have []int, want map[int]bool) bool {
 
 // SyncUserLifecycle pushes the given lifecycle state onto ALL of a user's shared
 // clients (across panels/partitions). enable/expiry/quota are user-level, so they
-// apply identically to every client — quotaHeadroom is the user's remaining
-// period bytes, which each client rebases onto its OWN panel-side counter. Returns the first error, attempts all.
+// apply identically to every client — want.QuotaHeadroom is the user's
+// remaining period bytes, which each client rebases onto its OWN panel-side
+// counter. Returns the first error, attempts all.
 //
 // The per-client work runs concurrently (docs/data-plane-plan.md Phase 1b).
 // Each SyncLifecycle is a GetClient plus an UpdateClient, so the serial loop
@@ -397,7 +404,7 @@ func sameInboundSet(have []int, want map[int]bool) bool {
 // last-writer-wins on a full-replace body) is therefore unreachable from here.
 // The pool hands back a shared adapter per panel, which is already driven
 // concurrently by the traffic poll's own panel fan-out.
-func (s *Service) SyncUserLifecycle(ctx context.Context, userID int64, enable bool, expiryTime, quotaHeadroom int64) error {
+func (s *Service) SyncUserLifecycle(ctx context.Context, userID int64, want domain.UserLifecycle) error {
 	started := time.Now()
 	clients, err := s.clients.ListByUser(ctx, userID)
 	if err != nil {
@@ -417,7 +424,7 @@ func (s *Service) SyncUserLifecycle(ctx context.Context, userID int64, enable bo
 		if len(clients) == 0 {
 			return nil
 		}
-		return s.SyncLifecycle(ctx, clients[0], enable, expiryTime, quotaHeadroom)
+		return s.SyncLifecycle(ctx, clients[0], want)
 	}
 
 	// Results are collected BY INDEX, not by arrival, so "the first error"
@@ -434,7 +441,7 @@ func (s *Service) SyncUserLifecycle(ctx context.Context, userID int64, enable bo
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
-			errs[i] = s.SyncLifecycle(ctx, c, enable, expiryTime, quotaHeadroom)
+			errs[i] = s.SyncLifecycle(ctx, c, want)
 		}(i, c)
 	}
 	wg.Wait()

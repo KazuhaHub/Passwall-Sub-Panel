@@ -50,15 +50,25 @@ type User struct {
 	// SAML, the `sub` claim for OIDC. For local accounts we store the
 	// UPN here so the (provider, subject) composite remains unique
 	// across local rows too — no NULL handling needed.
-	SSOSubject         string
-	Role               Role
-	SubToken           string // 32-byte base64url, subscription URL credential
-	UUID               string // v4, used as the derivation seed for proxy passwords
-	GroupID            int64
-	EnabledRuleSets    []string
-	PersonalRules      string
-	ExpireAt           *time.Time
-	TrafficLimitBytes  int64 // 0 = unlimited
+	SSOSubject        string
+	Role              Role
+	SubToken          string // 32-byte base64url, subscription URL credential
+	UUID              string // v4, used as the derivation seed for proxy passwords
+	GroupID           int64
+	EnabledRuleSets   []string
+	PersonalRules     string
+	ExpireAt          *time.Time
+	TrafficLimitBytes int64 // 0 = unlimited
+	// IPLimit caps concurrent source IPs; DeviceLimit caps bound devices.
+	// 0 = unlimited for both, matching TrafficLimitBytes above and the
+	// panel-side encoding (the panel treats 0 as "no cap"), so a fresh row
+	// and an upgraded row both mean "unlimited" with no backfill.
+	//
+	// Per-user rather than per-group: groups carry node selection and layout,
+	// never quotas, and TrafficLimitBytes already set that precedent. See
+	// docs/connection-limits.md.
+	IPLimit            int
+	DeviceLimit        int
 	TrafficResetPeriod ResetPeriod
 	TrafficPeriodStart *time.Time
 	// LifetimeUpBytes / LifetimeDownBytes / LifetimeTotalBytes accumulate
