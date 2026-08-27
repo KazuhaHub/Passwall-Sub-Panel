@@ -6,6 +6,18 @@ small improvement).
 
 ## Unreleased
 
+### 已知缺陷（已确认，本次未修复）
+
+- **流量下限量纲不匹配：设了配额的用户会在用到一半时被面板停用** —— 详见新增的 [`docs/traffic-floor-defect.md`](docs/traffic-floor-defect.md)。PSP 推给面板的是「**本期剩余**字节」，而面板拿它去比「**终身累计**字节」（`total > 0 AND up + down >= total`，且 `up/down` 以 `SET up = up + ?` 累加、PSP 从不重置、面板自身的重置周期又被 PSP 钉成 `never`）。
+
+  **实机确认**：真实 3.7.0 面板 + 真实 xray-core 26.7.28（`5ca6f4b`），用 PSP 自己的适配器与 `TrafficFloorBytes` 推送。配额 100 GB 时，45% 存活、**55% 被停用**——触发点正好落在配额的一半，且随客户端变老只会更早。最难看的是**老客户在新周期第一天、零使用也会被停**（终身累计已压过全额配额）。而且**会翻转**：PSP 下一轮推 `enable=true` 后，面板在一个 sweep（`@every 5s`）内重新停用，所以不是断一拍，而是每个 5 分钟轮询周期里只有几秒是通的。
+
+  **只影响设了流量上限的用户**：`limit <= 0` 时 PSP 推 `total = 0`，面板条件 `total > 0` 不成立，永不触发（已实测）。
+
+  **不是 3.7.0 回归**：≤3.6.0 的判定多一个 `reset = 0` 前置守卫，但 PSP 从不设 `ClientSpec.Reset`（默认 0），守卫恒成立，3.4.2 → 3.7.0 行为一致（源码核对，未实机）。
+
+  修复方向与取舍记在缺陷文档里；本次只落地实机复现用例（`client_live_floor_test.go` / `client_live_floor_matrix_test.go`，env 门控，CI 默认跳过，**对着真实面板会失败——这是刻意的**）。
+
 ### 新增
 
 - **内置指标与 `/api/admin/diagnostics/metrics`（数据面演进计划 Phase 0）** —— 给 traffic poll 与 3X-UI 推送扇出加了进程内计数器 / 直方图，用来回答 [`docs/data-plane-plan.md`](docs/data-plane-plan.md) §2 里那几个「现在还不知道」的数：N（每周期活跃用户数）、P（每用户共享客户端数）、真实面板 RTT 分布、`PollOnce` 分段耗时、`pushSem` 排队深度。**不改任何行为**，纯观测。
