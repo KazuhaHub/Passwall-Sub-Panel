@@ -12,6 +12,7 @@ import (
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/log"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/metrics"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/paneltz"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/safego"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
@@ -147,7 +148,8 @@ type ownershipRef struct {
 }
 
 func New(users ports.UserRepo, ownership ports.OwnershipRepo, traffic ports.TrafficRepo, nodes ports.NodeRepo, nodeTraffic ports.NodeTrafficRepo, pool ports.XUIPool, disabler UserDisabler) *Service {
-	return &Service{
+	capacity := paneltz.ResolveMaxPanelConcurrency(0)
+	svc := &Service{
 		users:       users,
 		ownership:   ownership,
 		traffic:     traffic,
@@ -157,8 +159,13 @@ func New(users ports.UserRepo, ownership ports.OwnershipRepo, traffic ports.Traf
 		disabler:    disabler,
 		// Service-scoped semaphore for async floor pushes — see Service.pushSem doc.
 		// Sized to the same default (8) as paneltz.ResolveMaxPanelConcurrency(0).
-		pushSem: make(chan struct{}, paneltz.ResolveMaxPanelConcurrency(0)),
+		pushSem: make(chan struct{}, capacity),
 	}
+	// Published so a snapshot is self-contained: "peak in-flight 8" only
+	// means saturation if the reader also knows the capacity is 8, and
+	// that value comes from a setting the operator can change.
+	metrics.PushSemCapacity.Set(int64(capacity))
+	return svc
 }
 
 // WithSettings attaches the settings repo so the poll can enforce the
@@ -181,20 +188,42 @@ func (s *Service) panelNow(ctx context.Context) time.Time {
 //
 // Errors per user are logged; the overall pass keeps going so one bad user
 // doesn't block the rest.
-func (s *Service) PollOnce(ctx context.Context) error {
+func (s *Service) PollOnce(ctx context.Context) (err error) {
 	// Per-stage timing — silent by default (Debug level), opens up when the
 	// process is started with PSP_LOG_LEVEL=debug. Kept in code so a future
 	// "Poll Now feels slow" diagnosis is a single env flip away rather than
 	// a code change + redeploy. Originally added in beta.13 to track down a
 	// 6–10s wall-clock report (turned out to be a pre-beta.12 binary still
 	// running on the server — see beta.14 changelog for the resolution).
+	//
+	// Every stage now also lands in a histogram, so the breakdown survives
+	// without debug logging on and can be read as a distribution rather
+	// than as whatever single cycle happened to be captured in a log. The
+	// key is a short stable slug because it becomes a metric label and the
+	// label space has to stay bounded; detail carries the prose that used
+	// to be the whole name and appears only in the log line.
 	pollStartedAt := time.Now()
 	stage := pollStartedAt
-	mark := func(name string) {
-		log.Debug("traffic poll timing", "stage", name, "ms", time.Since(stage).Milliseconds())
+	mark := func(key, detail string) {
+		d := time.Since(stage)
+		metrics.PollStageDuration.With(key).ObserveDuration(d)
+		log.Debug("traffic poll timing", "stage", key, "detail", detail, "ms", d.Milliseconds())
 		stage = time.Now()
 	}
+	// A push still queued or in flight when a new cycle opens is the
+	// concrete form of the cross-cycle backlog described in
+	// docs/data-plane-plan.md §1.4 — sampled here, at the one moment the
+	// distinction between "this cycle's load" and "last cycle's leftovers"
+	// is observable.
+	if metrics.PushSemWaiting.Value()+metrics.PushSemInflight.Value() > 0 {
+		metrics.PushSemCarryoverTotal.Inc()
+	}
+	metrics.PollTotal.Inc()
 	defer func() {
+		metrics.PollDuration.ObserveSince(pollStartedAt)
+		if err != nil {
+			metrics.PollErrorTotal.Inc()
+		}
 		log.Debug("traffic poll timing", "stage", "TOTAL", "ms", time.Since(pollStartedAt).Milliseconds())
 	}()
 
@@ -202,7 +231,8 @@ func (s *Service) PollOnce(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	mark("listAllUsers")
+	metrics.PollUsers.Observe(float64(len(users)))
+	mark("list_users", "")
 
 	// Load runtime settings + the resolved panel location ONCE per poll
 	// and share them across the inner loops. Before this each user's
@@ -272,7 +302,7 @@ func (s *Service) PollOnce(ctx context.Context) error {
 		latestByUser = nil
 	}
 	sink.latestByUser = latestByUser
-	mark("LatestForUsers prefetch")
+	mark("latest_prefetch", "LatestForUsers batched read")
 
 	// One batched read instead of the N+1 ListByUser-per-user loop. Small
 	// absolute win on MySQL/Postgres localhost (~1ms each → ~10ms total at
@@ -310,7 +340,7 @@ func (s *Service) PollOnce(ctx context.Context) error {
 		// at rollover (incl. clients 3X-UI didn't return this cycle).
 		sink.clientsByUser[u.ID] = entries
 	}
-	mark("ownership.ListByUsers batched read")
+	mark("ownership_prefetch", "ownership.ListByUsers batched read")
 
 	// Group queries per panel, fetch full inbound list once (it embeds
 	// clientStats — the dedicated /getClientTrafficsById endpoint is empty
@@ -410,7 +440,12 @@ func (s *Service) PollOnce(ctx context.Context) error {
 		}(panelID)
 	}
 	panelWG.Wait()
-	mark("Phase 1 parallel ListInbounds")
+	// §1.1 of the plan asserts the read side is one call per PANEL, not per
+	// node. Recording the panel count next to the stage duration is what
+	// makes that checkable against a real deployment rather than by
+	// re-reading the loop.
+	metrics.PollPanels.Observe(float64(len(panelsToFetch)))
+	mark("panel_fetch", "Phase 1 parallel ListInboundsSlim")
 
 	// Phase 2 — per-panel sequential processing. ListInbounds results are
 	// already in panelData (Phase 1); Phase 2 is pure in-memory attribution of
@@ -500,7 +535,7 @@ func (s *Service) PollOnce(ctx context.Context) error {
 		}
 	}
 
-	mark("Phase 2 inbound processing (sink appends)")
+	mark("inbound_processing", "Phase 2 inbound processing (sink appends)")
 
 	// Phase 2a — per-node traffic from each fetched inbound's OWN cumulative counter
 	// (v3.9.0), not a sum of owned clients. This runs over EVERY fetched inbound, not
@@ -522,7 +557,7 @@ func (s *Service) PollOnce(ctx context.Context) error {
 		}
 	}
 
-	mark("Phase 2a node-traffic snapshots")
+	mark("node_snapshots", "Phase 2a node-traffic snapshots")
 
 	// v3.9.0 — meter shared-client traffic into the user quota totals. Once a user
 	// is migrated, their traffic accrues under the shared client's email (u{uid}@),
@@ -594,7 +629,7 @@ func (s *Service) PollOnce(ctx context.Context) error {
 				totals[c.UserID] = tot
 			}
 		}
-		mark("Phase 2b shared-client metering")
+		mark("shared_metering", "Phase 2b shared-client metering")
 	}
 
 	for _, u := range users {
@@ -606,7 +641,19 @@ func (s *Service) PollOnce(ctx context.Context) error {
 			log.Warn("traffic poll user", "user_id", u.ID, "err", err)
 		}
 	}
-	mark("user loop (recordAndEnforceWith — push is async post-beta.12)")
+	// N in the cost model: users who moved bytes this cycle. Counted from
+	// totals rather than at the enqueue site so it measures the model's
+	// input (who was active) independently of how many of those actually
+	// reached a push — psp_poll_floor_push_enqueued_total covers that, and
+	// the gap between the two is diagnostic on its own.
+	activeUsers := 0
+	for _, t := range totals {
+		if t.deltaTotal != 0 {
+			activeUsers++
+		}
+	}
+	metrics.PollActiveUsers.Observe(float64(activeUsers))
+	mark("user_loop", "recordAndEnforceWith — push is async post-beta.12")
 
 	// Per-client period-baseline reseed for users whose period rolled this
 	// cycle. Mirrors the user-level u.PeriodBaselineBytes write above, one tier
@@ -640,7 +687,7 @@ func (s *Service) PollOnce(ctx context.Context) error {
 			}
 		}
 	}
-	mark("period-baseline reseed (rolled-over users)")
+	mark("baseline_reseed", "period-baseline reseed (rolled-over users)")
 
 	// Drain the sink in three batched INSERTs. Order doesn't matter — the
 	// snapshots are independent — but client first so the most numerous
@@ -722,7 +769,7 @@ func (s *Service) PollOnce(ctx context.Context) error {
 			}
 		}
 	}
-	mark("sink flush (6 batches)")
+	mark("sink_flush", "6 batches")
 	return nil
 }
 
@@ -1344,9 +1391,23 @@ func (s *Service) recordAndEnforceWith(ctx context.Context, u *domain.User, tota
 		return nil
 	}
 	uid := u.ID
+	metrics.PollFloorPushEnqueuedTotal.Inc()
 	safego.GoTracked(s.bgWG, "traffic.floor-push", func() {
+		// Wait and service time are recorded separately: the semaphore's
+		// behaviour under load is a queueing question, and folding the two
+		// together would hide exactly the thing §1.4 is about — a rising
+		// wait with flat service time is the backlog, whereas both rising
+		// together is a slow panel.
+		queuedAt := time.Now()
+		metrics.PushSemWaiting.Inc()
 		s.pushSem <- struct{}{}
-		defer func() { <-s.pushSem }()
+		metrics.PushSemWaiting.Dec()
+		metrics.PushSemWait.ObserveSince(queuedAt)
+		metrics.PushSemInflight.Inc()
+		defer func() {
+			<-s.pushSem
+			metrics.PushSemInflight.Dec()
+		}()
 		if err := s.configPusher.PushClientConfig(context.Background(), uid); err != nil {
 			log.Warn("traffic floor push failed", "user_id", uid, "err", err)
 		}

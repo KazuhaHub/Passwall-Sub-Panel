@@ -80,11 +80,15 @@ type fakeXUI struct {
 	updatedSpec    ports.ClientSpec
 	updateCalls    int
 	getClientCalls int // counts GetClient invocations (orphan reconcile must not loop these)
-	deleted        []deletedClient
-	detached       []int
-	failAdd        bool
-	bulkCreated    []string // emails passed to BulkCreateClients
-	bulkAttached   []string // emails passed to BulkAttach
+	// getDetail, when set, is what GetClient returns verbatim — the
+	// lifecycle skip compares against a full ClientDetail, which the
+	// inbound-shaped returns below cannot express.
+	getDetail    *ports.ClientDetail
+	deleted      []deletedClient
+	detached     []int
+	failAdd      bool
+	bulkCreated  []string // emails passed to BulkCreateClients
+	bulkAttached []string // emails passed to BulkAttach
 }
 
 var errFakeAdd = errors.New("fake add failure")
@@ -104,6 +108,9 @@ func (c *fakeXUI) AddClientToInbounds(_ context.Context, inboundIDs []int, spec 
 // When liveClients is set (orphan-reconcile tests), it is the source of truth.
 func (c *fakeXUI) GetClient(_ context.Context, email string) (*ports.ClientDetail, error) {
 	c.getClientCalls++
+	if c.getDetail != nil {
+		return c.getDetail, nil
+	}
 	if c.liveClients != nil {
 		if inbs, ok := c.liveClients[email]; ok {
 			return &ports.ClientDetail{Email: email, InboundIDs: inbs}, nil

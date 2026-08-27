@@ -4,6 +4,26 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## Unreleased
+
+### 新增
+
+- **内置指标与 `/api/admin/diagnostics/metrics`（数据面演进计划 Phase 0）** —— 给 traffic poll 与 3X-UI 推送扇出加了进程内计数器 / 直方图，用来回答 [`docs/data-plane-plan.md`](docs/data-plane-plan.md) §2 里那几个「现在还不知道」的数：N（每周期活跃用户数）、P（每用户共享客户端数）、真实面板 RTT 分布、`PollOnce` 分段耗时、`pushSem` 排队深度。**不改任何行为**，纯观测。
+
+  **没有引入 Prometheus。** PSP 是单二进制，绝大多数部署附近没有抓取设施；client library 换来的是一棵传递依赖树和第二个要加固的 HTTP 面，而要回答的问题一个挂在既有 admin 鉴权后的 JSON 就够。记录 API 照 Prometheus 形状写（counter / gauge / 显式 bucket 边界的 histogram，命名带单位后缀与 `_total`），将来若真要抓取端点，改的是渲染而不是调用点。热路径全原子操作、无锁、零分配。
+
+  **RTT 按 HTTP 交换计数，不按逻辑调用计数** —— `mutateWithRetry` 一次 `UpdateClient` 最多发五个请求，每个都是调用方真等的往返；成本模型以往返计价，这样才对得上。耗时覆盖整个 `doJSONRetry`，含透明重登录与那次 401 重试：那也是调用方要等的延迟，折进去才诚实地反映一次调用的真实代价。
+
+  **最吃重的一项是 `psp_lifecycle_sync_write_reason_total{reason=…}`** —— 记录是**哪个字段**挫败了 no-op skip，且 `total_gb` 排在判定顺序首位以免被掩盖。计划 §1.2 断言不断收缩的流量下限每周期都挫败 skip；若分布压倒性落在 `total_gb`，该断言成立且对这一个字段做迟滞带就能救回 skip，若别的原因大量出现则迟滞带白做。**Phase 0 因此不只量「有多痛」，它还负责证伪 Phase 1a 的前提。**
+
+  `POST /api/admin/diagnostics/metrics/reset` 返回它所关闭的那个窗口 —— 分位数不可相减，「取样两次做差」对 Phase 0 真正关心的那一半数据不成立，所以窗口只能靠 reset 划出来，而 reset 不能把它结束的窗口丢掉。两个端点均为 **admin 专属**（非 staff）：快照会暴露部署规模与面板响应性，那是站长的信息。
+
+  用法、逐项释义与已知限制见新增的 [`docs/observability.md`](docs/observability.md)。
+
+### 改进
+
+- **`SyncLifecycle` 的 skip 判定抽成 `lifecycleWriteReason`** —— 原来是内联的七字段比较，现在是具名函数并有表驱动测试逐字段钉住。比较集合与原先逐字段一致（这里少一个字段就会让 skip 在不该生效时生效：被停用的用户在 Xray 侧仍然可用、轮换过的 UUID 永远推不下去）。
+
 ## v3.9.2-beta.7 — 2026-08-26
 
 上游兼容跟进（3X-UI 3.7.0 实机验证，S-UI 复核后无需变动），外加四处「PSP 无声清掉运维方设置」的修复——其中三处早于 3.7.0 就存在，是这次逐字段核查时才浮出来的。

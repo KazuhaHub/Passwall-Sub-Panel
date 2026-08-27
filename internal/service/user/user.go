@@ -21,6 +21,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/idgen"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/keyedmutex"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/log"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/metrics"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/paneltz"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/safego"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
@@ -2191,11 +2192,24 @@ func (s *Service) ResumeServiceAndSync(ctx context.Context, userID int64) error 
 // 3X-UI. Thin wrapper around pushClientConfigToAll so the worker doesn't
 // need access to the internal helper.
 func (s *Service) PushClientConfig(ctx context.Context, userID int64) error {
+	// Phase 0: the traffic poll fires this as a fire-and-forget goroutine
+	// behind pushSem, so its duration is what actually occupies a slot.
+	// Measured here (not around the enqueue) so the histogram is the
+	// service time the semaphore's queueing theory needs, with the wait
+	// time recorded separately by the caller.
+	metrics.PushConfigTotal.Inc()
+	defer metrics.PushConfigDuration.ObserveSince(time.Now())
+
 	u, err := s.users.GetByID(ctx, userID)
 	if err != nil {
+		metrics.PushConfigErrorTotal.Inc()
 		return err
 	}
-	return s.pushClientConfigToAll(ctx, u)
+	if err := s.pushClientConfigToAll(ctx, u); err != nil {
+		metrics.PushConfigErrorTotal.Inc()
+		return err
+	}
+	return nil
 }
 
 // pushClientConfigToAll iterates through all owned clients of the user and

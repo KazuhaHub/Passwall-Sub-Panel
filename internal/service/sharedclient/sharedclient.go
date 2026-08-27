@@ -13,10 +13,12 @@ package sharedclient
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/clientplan"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/log"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/metrics"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 )
 
@@ -247,10 +249,17 @@ func (s *Service) SyncLifecycle(ctx context.Context, c *domain.PSPClient, enable
 		}
 	}
 	if !provisioned {
+		metrics.LifecycleNotProvisionedTotal.Inc()
 		return nil
 	}
+	// Counted from here rather than at function entry so the accounting
+	// closes: every call past the provisioned gate lands in exactly one of
+	// skipped / write / error, and those three sum to this total. Calls
+	// that returned above are the separate not-provisioned tally.
+	metrics.LifecycleTotal.Inc()
 	cli, err := s.pool.Get(c.PanelID)
 	if err != nil {
+		metrics.LifecycleErrorTotal.Inc()
 		return fmt.Errorf("xui pool get %d: %w", c.PanelID, err)
 	}
 	spec := buildSharedClientSpec(c, flow)
@@ -273,12 +282,74 @@ func (s *Service) SyncLifecycle(ctx context.Context, c *domain.PSPClient, enable
 		// ride and are slated for removal with the ownership model.
 		spec.Comment = cur.Comment
 		spec.Group = cur.Group
-		if cur.Enable == spec.Enable && cur.ExpiryTime == spec.ExpiryTime && cur.TotalGB == spec.TotalGB &&
-			cur.ID == spec.ID && cur.Password == spec.Password && cur.Flow == spec.Flow && cur.Auth == spec.Auth {
+		// Sample the quota drift on EVERY compare, skip or not: the
+		// distribution a Phase 1a deadband has to be sized against is the
+		// drift the deadband would have to swallow, which includes the
+		// cycles where the floor barely moved.
+		metrics.LifecycleQuotaDeltaBytes.Observe(absInt64(cur.TotalGB - spec.TotalGB))
+		// The write REASON is the load-bearing measurement of Phase 0:
+		// docs/data-plane-plan.md §1.2 claims the shrinking quota floor
+		// defeats this skip on every cycle for every active user. A
+		// breakdown dominated by "total_gb" confirms that, and with it
+		// that a deadband on that one field recovers the skip. Any other
+		// reason showing up in bulk would mean a deadband buys nothing
+		// and Phase 1a is aimed at the wrong field.
+		reason := lifecycleWriteReason(cur, spec)
+		if reason == "" {
+			metrics.LifecycleSkippedTotal.Inc()
 			return nil
 		}
+		metrics.LifecycleWriteReasonTotal.With(reason).Inc()
 	}
-	return cli.UpdateClient(ctx, 0, c.UUID, spec) // inbound/uuid args vestigial; keyed by spec.Email
+	metrics.LifecycleWriteTotal.Inc()
+	if err := cli.UpdateClient(ctx, 0, c.UUID, spec); err != nil { // inbound/uuid args vestigial; keyed by spec.Email
+		metrics.LifecycleErrorTotal.Inc()
+		return err
+	}
+	return nil
+}
+
+// lifecycleWriteReason names the first field on which the panel's stored
+// client differs from what PSP intends to push, or "" when they match and
+// the no-op skip fires.
+//
+// Field order is deliberate: totalGB is checked FIRST because it is the
+// suspected reason a skip essentially never fires, and a reason breakdown
+// is only useful if the suspect cannot be masked by a field checked ahead
+// of it. The remaining order is arbitrary — a call that differs in two
+// fields is attributed to whichever comes first, which is fine for a
+// measurement whose question is "which single field dominates".
+//
+// The comparison set is kept identical to the skip condition it replaced;
+// adding a field here silently makes the skip stricter.
+func lifecycleWriteReason(cur *ports.ClientDetail, spec ports.ClientSpec) string {
+	switch {
+	case cur.TotalGB != spec.TotalGB:
+		return "total_gb"
+	case cur.Enable != spec.Enable:
+		return "enable"
+	case cur.ExpiryTime != spec.ExpiryTime:
+		return "expiry"
+	case cur.ID != spec.ID:
+		return "id"
+	case cur.Password != spec.Password:
+		return "password"
+	case cur.Flow != spec.Flow:
+		return "flow"
+	case cur.Auth != spec.Auth:
+		return "auth"
+	}
+	return ""
+}
+
+// absInt64 returns |v| as a float64 for histogram observation. The floor
+// can move in either direction (usage grows; an admin raises the cap), and
+// a deadband is sized on magnitude, not sign.
+func absInt64(v int64) float64 {
+	if v < 0 {
+		return float64(-v)
+	}
+	return float64(v)
 }
 
 // sameInboundSet reports whether the live attachment set equals the desired set
@@ -299,10 +370,19 @@ func sameInboundSet(have []int, want map[int]bool) bool {
 // clients (across panels/partitions). enable/expiry/quota are user-level, so they
 // apply identically to every client. Returns the first error, attempts all.
 func (s *Service) SyncUserLifecycle(ctx context.Context, userID int64, enable bool, expiryTime, totalGB int64) error {
+	started := time.Now()
 	clients, err := s.clients.ListByUser(ctx, userID)
 	if err != nil {
 		return fmt.Errorf("list clients: %w", err)
 	}
+	// P and the per-user fan-out cost from docs/data-plane-plan.md §1.6.
+	// Sampled here rather than derived from the panel-op counters because
+	// this is the loop the cost model describes: the histogram's own P50
+	// against P95 is what says whether the serial loop is a uniform cost or
+	// a tail problem, which decides how much Phase 1b actually buys.
+	metrics.UserClientCount.Observe(float64(len(clients)))
+	defer func() { metrics.SyncUserDuration.ObserveSince(started) }()
+
 	var firstErr error
 	for _, c := range clients {
 		if err := s.SyncLifecycle(ctx, c, enable, expiryTime, totalGB); err != nil && firstErr == nil {

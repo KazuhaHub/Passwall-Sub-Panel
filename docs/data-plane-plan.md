@@ -72,16 +72,53 @@ traffic poll 是**每面板一次** `ListInboundsSlim`（`internal/service/traff
 
 ---
 
-## Phase 0 — 插桩与测量
+## Phase 0 — 插桩与测量 ✅ 已实现，待采样
 
-**目标**：拿到 §2 的全部数字。
-**不改任何行为。**
+**目标**：拿到 §2 的全部数字。**不改任何行为。**
 
-- 在 `PushClientConfig` / `SyncLifecycle` 上加计数器与耗时直方图：推送次数、skip 命中率、每次往返耗时
-- 记录每轮 `PollOnce` 的分段耗时与 `pushSem` 排队深度
-- 跑够一个完整计费周期的稳态样本（至少 24h，覆盖高峰）
+代码已落地。用法与逐项释义见 **[observability.md](observability.md)**；这里只记结果和为什么这么切。
 
-**退出条件**：能画出「每周期推送次数 vs 活跃用户数」和 RTT 分布；能算出当前 skip 命中率（预期接近 0）。
+### 已插桩
+
+| 位置 | 回答 §2 的哪一问 |
+|---|---|
+| `adapters/xui` 的 HTTP 收口点 | **RTT**——按操作分的真实往返分布 |
+| `sharedclient.SyncLifecycle` | **skip 命中率**，以及**是哪个字段挫败了 skip** |
+| `sharedclient.SyncUserLifecycle` | **P**，与单用户扇出墙钟 |
+| `user.PushClientConfig` | 占用信号量槽位的服务时间 |
+| `traffic.PollOnce` | **N**、分段耗时、面板数 |
+| `pushSem` 出入队 | 排队深度、等槽耗时、**跨周期结转** |
+
+出口：`GET /api/admin/diagnostics/metrics`（admin 专属），`POST …/reset` 开新窗口。
+
+### 三个不显然的决定
+
+1. **不引 Prometheus。** 单二进制部署，附近没有抓取设施；换来的是一棵传递依赖树和第二个要加固的 HTTP 面。API 照 Prometheus 形状写，将来要抓取，改渲染即可。
+
+2. **RTT 按 HTTP 交换计，不按逻辑调用计。** `mutateWithRetry` 一次 `UpdateClient` 最多发五个请求——每个都是调用方真等的往返。§1.6 的成本模型以往返计价，这样才对得上。耗时含透明重登录：那也是要等的。
+
+3. **`reset` 返回它关闭的那个窗口。** 分位数不可相减，所以「取样两次做差」对 Phase 0 真正关心的那一半数据根本不成立。窗口只能靠 reset 划，而 reset 不能把它结束的窗口丢掉。
+
+### 最吃重的一项
+
+`psp_lifecycle_sync_write_reason_total{reason=…}`——记录**第一个不相等的字段**，且 `total_gb` 排在判定顺序首位（嫌疑犯不能被掩盖）。
+
+- 分布压倒性落在 `total_gb` → §1.2 成立，**且**对这一个字段做迟滞带就能把 skip 救回来 → Phase 1a 有的放矢
+- 别的原因大量出现 → **迟滞带白做，Phase 1a 打错了靶**
+
+换句话说，Phase 0 不只是量「有多痛」，它还负责**证伪 Phase 1a 的前提**。
+
+### 退出条件
+
+跑满至少 24h 且覆盖业务高峰后：
+
+- [ ] skip 命中率算得出（预期接近 0）
+- [ ] 写入原因分布明确（预期 `total_gb` 压倒性）
+- [ ] N、P、RTT 分位数拿到手
+- [ ] `psp_lifecycle_quota_delta_bytes` 分布拿到手 → band 参数**算得出**，不用拍
+- [ ] `psp_push_sem_carryover_total` 有没有在涨 → 决定 Phase 1c 的优先级
+
+**注意**：`uptime_ms` 与 `window_ms` 相差无几 = 中途重启过，样本作废。
 
 ---
 
@@ -343,7 +380,7 @@ V2bX 模型下，**面板挂了 = agent 无限期按最后一份用户列表服�
 
 | 风险 | 缓解 |
 |---|---|
-| Phase 0 插桩本身影响性能 | 计数器与直方图用无锁/采样实现，先在单面板验证开销 |
+| ~~Phase 0 插桩本身影响性能~~ | **已消解**：记录路径全部原子操作、无锁、零分配；一次直方图观测是十几个边界的二分查找加几次原子加。一轮 poll 最多几千次观测，相对单次 HTTP 往返不可测量 |
 | band 取值过大导致离线超烧 | band 相对化 + 尾部豁免；上限由业务可接受的超烧额度反推 |
 | Phase 1b 并行化引入对同一 client 的竞态 | 适配器已有 per-email 写锁（`lockClientEmail`）；并行粒度限制在**不同** client |
 | 自研后端半途而废，留下两套半成品 | Phase 2 决策门显式化；Phase 3 以单节点试点为退出条件，不达标就回退 |

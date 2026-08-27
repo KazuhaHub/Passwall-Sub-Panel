@@ -461,6 +461,14 @@ func NewRouter(d Deps) stdhttp.Handler {
 		adminGroup.PUT("/locales/:code", locales.Save)
 		adminGroup.DELETE("/locales/:code", locales.Delete)
 
+		// In-process performance counters (docs/observability.md). Admin
+		// only: the snapshot describes the deployment's shape and its
+		// panels' responsiveness, which is owner information rather than
+		// something an operator needs to do their job.
+		diagH := handler.NewAdminDiagnosticsHandler()
+		adminGroup.GET("/diagnostics/metrics", diagH.Metrics)
+		adminGroup.POST("/diagnostics/metrics/reset", diagH.ResetMetrics)
+
 		auditH := handler.NewAdminAuditHandler(d.Repos.Audit, d.Geo)
 		// Read so operators can review their own actions; only admin can
 		// wipe history.
