@@ -1,6 +1,7 @@
-# 缺陷：流量下限的量纲不匹配（实机确认，未修复）
+# 缺陷：流量下限的量纲不匹配（已修复）
 
-> 状态：**已实机确认，尚未修复。** 影响范围：**所有设了流量上限的用户**；未设上限的用户完全不受影响。
+> 状态：**已修复并实机验证。** 影响范围（修复前）：**所有设了流量上限的用户**；未设上限的用户从未受影响。
+> 修复：`domain.PanelQuotaCap`，把「本期剩余」重基到面板自己的累计计数器上。回归守卫：`internal/adapters/xui/client_live_floor_matrix_test.go`（env 门控）。
 > 关联：[ARCHITECTURE.md](ARCHITECTURE.md)、[3xui-compat.md](3xui-compat.md)、`internal/service/user/traffic_floor.go`。
 
 ## 1. 一句话
@@ -57,30 +58,53 @@ PSP 推给面板的是「**本期剩余**字节」，面板拿它去比「**终�
 
 > 这一条是**源码核对，未实机**——要实测得再编一台 3.6.0 面板。
 
-## 6. 修复方向
+## 6. 修复
 
-### 推荐：推「面板终身计数 + 本期剩余」
+`domain.PanelQuotaCap(headroom, panelLifetime)`：
 
 ```go
-total = LastRawTotalBytes + TrafficFloorBytes(limit, periodUsed)
+total = LastRawTotalBytes + TrafficFloorBytes(limit, periodUsed)   // headroom > 0
+total = 0                                                          // headroom <= 0（无限）
 ```
 
-`LastRawTotalBytes` 就是 PSP 上一轮从面板读回的累计值，已经在 `PSPClient` 上。这样面板恰好在「从现在起再烧掉剩余额度」时停用——**正是本来想要的语义**。
+`LastRawTotalBytes` 是 PSP 上一轮从面板读回的累计值，已经在 `PSPClient` / `XUIClientEntry` 上。面板于是恰好在「从现在起再烧掉剩余额度」时停用——**正是本来想要的语义**。
 
-三个支持点：
+`trafficFloor` 的契约随之明确为**返回本期剩余（headroom），不是给面板的数**；三个推送点各自用自己那个 client 的计数器重基：共享模型走 `SyncLifecycle`，遗留 per-node 走 `pushClientConfigToAll` 与两处 UUID 轮换。reconcile 的四处调用传的是 `0`（无限），不受影响。
 
-- 每个 client 在面板上只有一行计数（§2），正好对应 PSP 的 per-client 聚合值，不用按 inbound 拆
-- 不需要任何面板侧破坏性操作
-- 不增加往返，数据 PSP 手上就有
+### 6.1 一个必须守住的边界
 
-**已知代价**：面板计数器若被重置（xray 重启、管理员手动重置），下限会偏松，直到下一轮推送自动修正。**有界且自愈**，方向也是安全的那一侧（宁可少停，不可误停）。
+`headroom <= 0` 必须原样透传 0。面板把 `total == 0` 读作「无上限」；在这里叠加偏移会**凭空给没有配额的用户造出一个配额**——正好是反向的同一个缺陷。已有单测钉住。
 
-### 备选：每期重置面板计数器
+### 6.2 耗尽哨兵的语义变化
 
-PSP 在周期滚动时调面板的重置接口，然后推 `total = 配额`。使面板计数器与本期用量对齐。
+`TrafficFloorBytes` 把「已达/超过上限」编码为 headroom = 1，重基后是 `lifetime + 1`。于是面板对已耗尽的客户端是**一旦再有任何流量就切**，而不是在它静止于上限时就切。
 
-**不推荐**：多一次往返，且重置是破坏性操作——若 PSP 自己的计量落后于那次重置，这一期的用量会被吞掉。PSP 的 `monotonicDelta` 能扛住计数器倒退，但没有理由主动制造这种局面。
+这对一个「PSP 离线期间限制滥用」的兜底来说是**正确的形状**：静止的超额用户不消耗任何东西，而它一旦消耗，就在一个 traffic tick（`@every 5s`）内被切掉。为了多切一个静止用户而去特判另一个包的哨兵编码，不值得。
+
+### 6.3 顺带解决了推送效率问题
+
+重基后，**推给面板的值对活跃用户是恒定的**：
+
+```
+cap = lastRaw + (limit − periodUsed)
+```
+
+面板计数器涨多少，本期已用就涨多少，剩余就减多少——**两项相消，和不变**。实机验证：连续四轮把终身流量从 10 GB 推到 31 GB，面板持有的 `totalGB` 始终是 100 GB。
+
+这直接影响 [data-plane-plan.md](data-plane-plan.md)：§1.2 断言「不断收缩的下限每周期都挫败 no-op skip」——**那个收缩正是缺陷本身**。修好之后 skip 对单 client 用户应当自然生效，**Phase 1a 的迟滞带可能根本不需要**。
+
+`P > 1` 时不完全恒定：`periodUsed` 是用户级（所有 client 之和），而 `lastRaw` 是单 client 的，所以某个 client 的 cap 会被**其他** client 的流量带偏。偏移量远小于修复前的整个 delta，skip 命中率仍会大幅上升。真实分布由 Phase 0 的 `psp_lifecycle_quota_delta_bytes` 给出。
+
+### 6.4 已知代价
+
+面板计数器若被重置（xray 重启、管理员手动重置），下限会偏松，直到下一轮推送自动修正。**有界且自愈**，且方向是安全的那一侧（宁可少停，不可误停）。
+
+### 6.5 未采纳：每期重置面板计数器
+
+PSP 在周期滚动时调面板的重置接口，然后推 `total = 配额`，使面板计数器与本期用量对齐。
+
+**不采纳**：多一次往返，且重置是破坏性操作——若 PSP 自己的计量落后于那次重置，这一期的用量会被吞掉。PSP 的 `monotonicDelta` 能扛住计数器倒退，但没有理由主动制造这种局面。
 
 ## 7. 对数据面演进计划的影响
 
-[data-plane-plan.md](data-plane-plan.md) 的 **Phase 1a（推送迟滞带）在此修复前不应开工**——band 是在给这个下限值加容差，而这个值当前的量纲本身就是错的。Phase 1b / 1c 与本缺陷无关，已实现。
+见 §6.3：修复很可能**顺带解决了 Phase 1a 想解决的问题**。重基后推送值对活跃用户恒定，no-op skip 应当自然生效——迟滞带在拿到 Phase 0 数据前不应开工，且届时可能已无必要。Phase 1b / 1c 与本缺陷无关，已实现。

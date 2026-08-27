@@ -134,7 +134,7 @@ func (s *Service) SetPSPProvisioner(p PSPClientProvisioner) { s.psp = p }
 // shared clients in 3X-UI. Implemented by sharedclient.Service; a local interface
 // so the user service stays decoupled and nil-tolerant.
 type SharedLifecycleSyncer interface {
-	SyncUserLifecycle(ctx context.Context, userID int64, enable bool, expiryTime, totalGB int64) error
+	SyncUserLifecycle(ctx context.Context, userID int64, enable bool, expiryTime, quotaHeadroom int64) error
 }
 
 // SetSharedLifecycleSyncer late-binds the v3.9.0 shared-client lifecycle push.
@@ -457,6 +457,10 @@ func (s *Service) SetTrafficUsage(r TrafficUsageReader) {
 // per-window EmergencyAccessQuotaGB (or 0 for unlimited when admin has
 // it set to 0). The poll loop in service/traffic already short-circuits
 // the auto-disable check during emergency, so the two layers agree.
+// The returned value is PERIOD-RELATIVE headroom, NOT the number a panel is
+// given. Every push site rebases it onto that client's own panel-side lifetime
+// counter via domain.PanelQuotaCap, because the panel compares against a
+// counter it never resets — see docs/traffic-floor-defect.md.
 func (s *Service) trafficFloor(ctx context.Context, u *domain.User) int64 {
 	if u == nil || u.TrafficLimitBytes <= 0 {
 		return 0
@@ -1095,7 +1099,8 @@ func (s *Service) ResetCredentialsAndSync(ctx context.Context, userID int64) (*R
 			continue
 		}
 		if err := s.syncer.RotateClientUUID(ctx, e.PanelID, e.InboundID, e.ClientEmail,
-			info.protocol, info.ssMethod, oldUUID, newUUID, info.flow, u.EffectiveEnabled(time.Now()), expireTime, floor); err != nil {
+			info.protocol, info.ssMethod, oldUUID, newUUID, info.flow, u.EffectiveEnabled(time.Now()), expireTime,
+			e.PanelQuotaCap(floor)); err != nil {
 			needsRetry = true
 		}
 	}
@@ -2365,7 +2370,8 @@ func (s *Service) pushClientConfigToAll(ctx context.Context, u *domain.User) err
 			// SetOwnedClientEnable which then ran GetInbound per push,
 			// re-fetching what Phase 1 already had in hand.
 			perr := s.syncer.SetOwnedClientEnableWithInbound(ctx, entry.PanelID, inbCopy, entry.ClientEmail,
-				infoCopy.protocol, infoCopy.ssMethod, u.UUID, infoCopy.flow, u.EffectiveEnabled(time.Now()), expireTime, floor)
+				infoCopy.protocol, infoCopy.ssMethod, u.UUID, infoCopy.flow, u.EffectiveEnabled(time.Now()), expireTime,
+				entry.PanelQuotaCap(floor))
 			outcomes <- pushOutcome{entry: entry, err: perr}
 		}()
 	}
@@ -2605,7 +2611,8 @@ func (s *Service) ResetUUIDAndSync(ctx context.Context, userID int64) (string, e
 			continue
 		}
 		if err := s.syncer.RotateClientUUID(ctx, e.PanelID, e.InboundID, e.ClientEmail,
-			info.protocol, info.ssMethod, oldUUID, newUUID, info.flow, u.EffectiveEnabled(time.Now()), expireTime, floor); err != nil {
+			info.protocol, info.ssMethod, oldUUID, newUUID, info.flow, u.EffectiveEnabled(time.Now()), expireTime,
+			e.PanelQuotaCap(floor)); err != nil {
 			needsRetry = true
 		}
 	}

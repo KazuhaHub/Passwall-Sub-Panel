@@ -14,16 +14,25 @@ import (
 
 	_ "github.com/glebarez/go-sqlite"
 
+	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/user"
 )
 
-// STATUS: the flap subtest FAILS against a live panel today, on purpose — see
-// docs/traffic-floor-defect.md. Env-gated, so CI skips it.
+// TestLive_XUITrafficFloorMatrix is the regression guard for the traffic-floor
+// datum fix (docs/traffic-floor-defect.md). PSP computes quota headroom per
+// PERIOD; the panel enforces against a lifetime counter it never resets. Before
+// the fix, pushing the bare headroom disabled a user at half their quota and
+// then re-disabled them within one sweep after every re-enable.
 //
-// TestLive_XUITrafficFloorMatrix maps the blast radius of the floor mismatch:
-// where the trip point actually sits, and what happens after the poll's next
-// push tries to undo it.
+// Every case below drives PSP's real adapter with a cap built the way the push
+// path now builds it — domain.PanelQuotaCap(headroom, panelLifetime) — and
+// asserts the panel leaves the client alone until the quota is genuinely gone.
+//
+// Env-gated, so CI skips it. Needs a scratch panel with a live xray, since the
+// depletion sweep is gated on IsXrayRunning, plus direct access to the panel's
+// SQLite file: 3X-UI exposes no API for seeding accumulated usage, which is
+// what upstream's own tests do via seedClientRow.
 func TestLive_XUITrafficFloorMatrix(t *testing.T) {
 	base := os.Getenv("PSP_LIVE_XUI_URL")
 	token := os.Getenv("PSP_LIVE_XUI_TOKEN")
@@ -88,70 +97,109 @@ func TestLive_XUITrafficFloorMatrix(t *testing.T) {
 		}
 		t.Cleanup(func() { _, _ = c.BulkDelByEmail(context.Background(), []string{email}) })
 
-		floor := user.TrafficFloorBytes(limit, periodUsed)
-		if err := c.UpdateClient(ctx, inbID, uuid, ports.ClientSpec{
-			Email: email, ID: uuid, Enable: true, TotalGB: floor,
-		}); err != nil {
-			t.Fatalf("UpdateClient: %v", err)
-		}
+		// Seed the accumulated usage xray would have reported BEFORE pushing,
+		// so the cap is built against the same counter the panel will compare
+		// it to — the ordering the traffic poll itself has (read, then push).
 		if _, err := db.Exec(`UPDATE client_traffics SET up = ?, down = ? WHERE email = ?`,
 			lifetime/2, lifetime-lifetime/2, email); err != nil {
 			t.Fatalf("seed usage: %v", err)
 		}
+		cap := domain.PanelQuotaCap(user.TrafficFloorBytes(limit, periodUsed), lifetime)
+		if err := c.UpdateClient(ctx, inbID, uuid, ports.ClientSpec{
+			Email: email, ID: uuid, Enable: true, TotalGB: cap,
+		}); err != nil {
+			t.Fatalf("UpdateClient: %v", err)
+		}
 		disabled := waitDisabled(email, 20*time.Second)
 		t.Logf("lifetime=%3dGB periodUsed=%3dGB (quota %3d%%) -> PSP pushes totalGB=%3dGB -> disabled=%v",
-			lifetime/GB, periodUsed/GB, 100*periodUsed/limit, floor/GB, disabled)
+			lifetime/GB, periodUsed/GB, 100*periodUsed/limit, cap/GB, disabled)
 		return email, uuid, disabled
 	}
 
-	// --- Where does the trip point actually sit? -------------------------
-	// In a client's FIRST period lifetime == periodUsed, so the panel's
-	// condition (lifetime >= limit - periodUsed) collapses to
-	// periodUsed >= limit/2. Bracket that prediction.
-	t.Run("first period, below half quota", func(t *testing.T) {
-		if _, _, disabled := probe(t, "p45", 45*GB, 45*GB); disabled {
-			t.Error("disabled at 45% of quota — trip point is even earlier than limit/2")
+	// --- Half quota is where the defect used to trip -----------------------
+	t.Run("first period, past half quota", func(t *testing.T) {
+		if _, _, disabled := probe(t, "p55", 55*GB, 55*GB); disabled {
+			t.Error("disabled at 55% of quota — the period/lifetime mismatch is back")
 		}
 	})
-	t.Run("first period, just past half quota", func(t *testing.T) {
-		if _, _, disabled := probe(t, "p55", 55*GB, 55*GB); !disabled {
-			t.Error("NOT disabled at 55% — the trip point is not limit/2")
+	t.Run("first period, deep into quota", func(t *testing.T) {
+		if _, _, disabled := probe(t, "p90", 90*GB, 90*GB); disabled {
+			t.Error("disabled at 90% of quota — a user with 10GB left must stay online")
 		}
 	})
 
-	// --- The case with no usage at all this period -----------------------
-	// A returning user on day 1 of a fresh billing period: PSP pushes the FULL
-	// quota as the floor, but the lifetime counter carries every prior period.
+	// --- An aged client on a fresh period --------------------------------
+	// The worst pre-fix case: two periods of history, nothing used yet this
+	// period. The cap has to sit above the client's whole lifetime, not at
+	// the bare quota.
 	t.Run("fresh period, zero used, aged client", func(t *testing.T) {
-		if _, _, disabled := probe(t, "aged", 200*GB, 0); !disabled {
-			t.Error("an aged client was NOT disabled on a fresh period — good, but unexpected")
+		if _, _, disabled := probe(t, "aged", 200*GB, 0); disabled {
+			t.Error("an aged client with a FULL fresh quota was disabled")
 		}
 	})
 
-	// --- Does the poll's next push heal it, or does it flap? -------------
-	t.Run("the next poll push does not heal it", func(t *testing.T) {
-		email, uuid, disabled := probe(t, "flap", 70*GB, 70*GB)
-		if !disabled {
-			t.Fatal("precondition failed: client was not disabled")
+	// --- Enforcement must still actually happen --------------------------
+	// The fix must not turn the safety net off. Note what "cut" means after
+	// rebasing: TrafficFloorBytes returns its exhausted sentinel (1) and the
+	// cap becomes lifetime+1, so the panel cuts as soon as the client moves
+	// ANY further traffic — not while it sits idle at exactly its limit.
+	//
+	// That is the correct shape for a net whose job is bounding abuse during
+	// a PSP outage: an idle exhausted user is consuming nothing, and the
+	// moment they consume anything they are gone, within one traffic tick
+	// (@every 5s). The pre-fix behaviour cut an idle user too, but only as a
+	// side effect of pushing a cap of 1 byte, which also cut everyone else.
+	t.Run("an exhausted user is cut the moment they move traffic", func(t *testing.T) {
+		email, _, disabled := probe(t, "spent", 100*GB, 100*GB)
+		if disabled {
+			t.Log("cut while idle at exactly the limit")
+			return
 		}
-		// Exactly what SyncLifecycle sends on the next cycle: enable=true plus
-		// a refreshed floor. If this heals, the damage is one cycle of outage;
-		// if the panel re-disables, the user is down essentially always.
-		floor := user.TrafficFloorBytes(limit, 70*GB)
-		if err := c.UpdateClient(ctx, inbID, uuid, ports.ClientSpec{
-			Email: email, ID: uuid, Enable: true, TotalGB: floor,
-		}); err != nil {
-			t.Fatalf("re-enable push: %v", err)
+		// The user sends something. One traffic tick later they must be gone.
+		if _, err := db.Exec(`UPDATE client_traffics SET up = up + ? WHERE email = ?`,
+			64<<10, email); err != nil {
+			t.Fatalf("advance usage: %v", err)
 		}
-		var e bool
-		_ = db.QueryRow(`SELECT enable FROM client_traffics WHERE email = ?`, email).Scan(&e)
-		t.Logf("immediately after PSP re-enables: enable=%v", e)
+		if !waitDisabled(email, 20*time.Second) {
+			t.Error("an exhausted user kept going after moving more traffic — the floor no longer enforces")
+		}
+	})
 
-		if waitDisabled(email, 20*time.Second) {
-			t.Errorf("FLAP CONFIRMED: PSP re-enables, the panel re-disables within one sweep. "+
-				"The user is offline for all but a sliver of each %s poll cycle.", "5-minute")
-		} else {
-			t.Log("the re-enable stuck — damage is bounded to one poll cycle")
+	// --- The pushed cap must be STABLE as traffic accrues ----------------
+	// The panel counter grows by the same delta the period headroom shrinks
+	// by, so the rebased cap is invariant. That is what lets the push path's
+	// no-op skip finally fire for an active user, and it is a property of the
+	// real panel round-trip, not just of the arithmetic.
+	t.Run("the pushed cap does not move as traffic accrues", func(t *testing.T) {
+		email, uuid, _ := probe(t, "stable", 10*GB, 10*GB)
+		var first int64
+		for cycle := 0; cycle < 4; cycle++ {
+			lifetime := (10 + int64(cycle)*7) * GB
+			if _, err := db.Exec(`UPDATE client_traffics SET up = ?, down = ? WHERE email = ?`,
+				lifetime/2, lifetime-lifetime/2, email); err != nil {
+				t.Fatalf("advance usage: %v", err)
+			}
+			cap := domain.PanelQuotaCap(user.TrafficFloorBytes(limit, lifetime), lifetime)
+			if err := c.UpdateClient(ctx, inbID, uuid, ports.ClientSpec{
+				Email: email, ID: uuid, Enable: true, TotalGB: cap,
+			}); err != nil {
+				t.Fatalf("cycle %d push: %v", cycle, err)
+			}
+			got, err := c.GetClient(ctx, email)
+			if err != nil || got == nil {
+				t.Fatalf("cycle %d GetClient: %v", cycle, err)
+			}
+			t.Logf("cycle %d: lifetime=%dGB -> panel holds totalGB=%dGB", cycle, lifetime/GB, got.TotalGB/GB)
+			if cycle == 0 {
+				first = got.TotalGB
+				continue
+			}
+			if got.TotalGB != first {
+				t.Errorf("cycle %d: panel holds %d, want it unchanged at %d", cycle, got.TotalGB, first)
+			}
+		}
+		if waitDisabled(email, 10*time.Second) {
+			t.Error("client was disabled while still well inside its quota")
 		}
 	})
 }

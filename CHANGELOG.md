@@ -6,7 +6,7 @@ small improvement).
 
 ## Unreleased
 
-### 已知缺陷（已确认，本次未修复）
+### 修复
 
 - **流量下限量纲不匹配：设了配额的用户会在用到一半时被面板停用** —— 详见新增的 [`docs/traffic-floor-defect.md`](docs/traffic-floor-defect.md)。PSP 推给面板的是「**本期剩余**字节」，而面板拿它去比「**终身累计**字节」（`total > 0 AND up + down >= total`，且 `up/down` 以 `SET up = up + ?` 累加、PSP 从不重置、面板自身的重置周期又被 PSP 钉成 `never`）。
 
@@ -16,7 +16,13 @@ small improvement).
 
   **不是 3.7.0 回归**：≤3.6.0 的判定多一个 `reset = 0` 前置守卫，但 PSP 从不设 `ClientSpec.Reset`（默认 0），守卫恒成立，3.4.2 → 3.7.0 行为一致（源码核对，未实机）。
 
-  修复方向与取舍记在缺陷文档里；本次只落地实机复现用例（`client_live_floor_test.go` / `client_live_floor_matrix_test.go`，env 门控，CI 默认跳过，**对着真实面板会失败——这是刻意的**）。
+  **修复**：新增 `domain.PanelQuotaCap(headroom, panelLifetime)`，把「本期剩余」重基到面板自己的累计计数器上（`LastRawTotalBytes`，PSP 上一轮读回的值，本就在 `PSPClient` / `XUIClientEntry` 上）。面板于是恰好在「从现在起再烧掉剩余额度」时停用。`trafficFloor` 的契约明确为**返回 headroom 而非给面板的数**；三个推送点各自用自己那个 client 的计数器重基（共享模型、遗留 per-node 推送、两处 UUID 轮换）。reconcile 的四处调用传 `0`，不受影响。
+
+  **一个必须守住的边界**：`headroom <= 0` 原样透传 0。面板把 `total == 0` 读作无上限，在这里叠加偏移会**凭空给没有配额的用户造出配额**——正好是反向的同一个缺陷，已有单测钉住。
+
+  **顺带解决了推送效率问题**：重基后 `cap = lastRaw + (limit − periodUsed)`，面板计数器涨多少、本期已用就涨多少、剩余就减多少，**两项相消，和不变**。实机验证连续四轮把终身流量从 10 GB 推到 31 GB，面板持有的 `totalGB` 始终是 100 GB。这直接影响数据面计划 §1.2 的断言「不断收缩的下限每周期都挫败 no-op skip」——**那个收缩正是缺陷本身**，修好后 skip 应当自然生效，Phase 1a 的迟滞带可能根本不需要。
+
+  **实机回归验证**（同一台 3.7.0 + xray 26.7.28）：55% / 90% 配额不再被停、老客户新周期零使用不再被停、耗尽用户一旦再动流量仍在一个 tick 内被切、推送值跨四轮不变——5/5 通过。用例 `client_live_floor_matrix_test.go`（env 门控，CI 默认跳过）现在是回归守卫。
 
 ### 新增
 

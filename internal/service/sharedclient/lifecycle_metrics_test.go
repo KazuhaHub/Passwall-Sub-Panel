@@ -341,3 +341,54 @@ func (c *countingUpdateXUI) updates() int {
 	defer c.mu.Unlock()
 	return c.n
 }
+
+// --- The quota floor is rebased onto the panel's own counter ---
+
+// SyncLifecycle receives PERIOD-relative headroom but the panel enforces
+// against a lifetime counter it never resets. Pushing the headroom raw
+// disabled users at half their quota (docs/traffic-floor-defect.md); this
+// pins the rebase at the service boundary, not just in the domain helper.
+func TestSyncLifecycle_PushesTheQuotaCapRebasedOnPanelLifetime(t *testing.T) {
+	const GB = int64(1) << 30
+	clients := &fakeClients{attachments: []domain.PSPClientInbound{
+		{ClientID: 1, NodeID: 11, Provisioned: true},
+	}}
+	xui := &fakeXUI{}
+	svc := New(clients, fakePool{c: xui}, fakeNodes{})
+
+	c := &domain.PSPClient{
+		ID: 1, PanelID: 10, Email: "u1@psp.local", UUID: "uuid-x",
+		LastRawTotalBytes: 60 * GB, // what the panel's counter already holds
+	}
+	// 40 GB left this period.
+	if err := svc.SyncLifecycle(context.Background(), c, true, 0, 40*GB); err != nil {
+		t.Fatal(err)
+	}
+	if got := xui.updatedSpec.TotalGB; got != 100*GB {
+		t.Fatalf("pushed totalGB = %d, want %d (60GB already counted + 40GB headroom). "+
+			"Pushing the bare headroom is the defect that disabled users at half quota.", got, 100*GB)
+	}
+}
+
+// An unlimited user must keep an unlimited panel cap. Rebasing a zero
+// headroom would invent a quota out of the client's own history — the exact
+// inverse defect, and one that would cut off users who have no limit at all.
+func TestSyncLifecycle_UnlimitedStaysUnlimited(t *testing.T) {
+	const GB = int64(1) << 30
+	clients := &fakeClients{attachments: []domain.PSPClientInbound{
+		{ClientID: 1, NodeID: 11, Provisioned: true},
+	}}
+	xui := &fakeXUI{}
+	svc := New(clients, fakePool{c: xui}, fakeNodes{})
+
+	c := &domain.PSPClient{
+		ID: 1, PanelID: 10, Email: "u1@psp.local", UUID: "uuid-x",
+		LastRawTotalBytes: 500 * GB,
+	}
+	if err := svc.SyncLifecycle(context.Background(), c, true, 0, 0); err != nil {
+		t.Fatal(err)
+	}
+	if got := xui.updatedSpec.TotalGB; got != 0 {
+		t.Fatalf("pushed totalGB = %d, want 0 (unlimited)", got)
+	}
+}
