@@ -64,6 +64,14 @@ small improvement).
 
   这件事是 V4 清理的缩影，已写进新增的 [`docs/v4-legacy-removal.md`](docs/v4-legacy-removal.md)：**一个理由充分的 schema 改动，作为「代码变更」发布，悄无声息弄坏了一条没有测试覆盖的迁移路径。**
 
+### 验证
+
+- **S-UI 1.5.5 实机复验（本轮改过它的适配器）** —— 这一轮删掉了 `UpdateClient` 的两个死参数、移除了整个 `UpdateClientWithInbound`，两个适配器都受影响，但此前**只验证了能编译**。S-UI 是兼容目标，改了它却不实测，标准不一致。
+
+  从源码编译 S-UI 1.5.5（`88bde26`）并以真实 sing-box 核心启动，跑 PSP 自己的 `TestLive_SUISurface`（读路径 + inbound 全生命周期 + 客户端全生命周期）与 `TestLive_SUIBulkSetEnabled`，**全部通过**，面板自报 `1.5.5 / core running`。
+
+- **CI 首次在本轮工作上运行** —— 此前最后一次 CI 停在本轮之前的旧 SHA，14 个提交**只有本地验证过**。已在当前 HEAD 跑通全套：**MySQL / PostgreSQL / SQLite 三方言全量测试**、`go vet`、前端 typecheck + build + 单测 + 生产浏览器冒烟、交叉编译发布目标。三方言这条尤其关键——本轮新增了两个 AutoMigrate 列，而本地只测得到 SQLite。
+
 ### 修复（实机启动后发现）
 
 - **直方图分位数会超过实测最大值** —— 第一次真正启动 PSP 并读 `/api/admin/diagnostics/metrics` 才暴露：`psp_poll_stage_ms{stage=ownership_prefetch}` 报 `p50=0.250 / max=0.003`，**分位数是实际值的 83 倍**。分位数在数学上不可能超过样本最大值，但桶内插值可以——一个 3 微秒的孤立样本落在 `[0, 0.5ms]` 桶里，插值出来就是桶中点。现在钳在 max 以内：每个报出来的分位数都是「某个样本可能取到的数」。
