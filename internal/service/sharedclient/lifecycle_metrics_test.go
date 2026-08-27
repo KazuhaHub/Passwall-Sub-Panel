@@ -480,3 +480,88 @@ func TestSyncLifecycle_MatchingCapsStillSkip(t *testing.T) {
 		t.Errorf("skipped = %d, want 1", got)
 	}
 }
+
+// --- A panel that cannot enforce a cap must say so ---
+
+// capLessXUI implements CapabilityProvider but declares neither connection
+// cap — the S-UI shape, and the shape of a 3X-UI below 3.7.0 for the device
+// cap. Writes still succeed there; they just enforce nothing, which is the
+// silent failure the capability list exists to surface.
+type capLessXUI struct {
+	fakeXUI
+	caps []ports.PanelCapability
+}
+
+func (c *capLessXUI) Capabilities() []ports.PanelCapability { return c.caps }
+
+func TestSyncLifecycle_ReportsCapabilityGaps(t *testing.T) {
+	newSvc := func(caps []ports.PanelCapability) (*Service, *capLessXUI) {
+		clients := &fakeClients{attachments: []domain.PSPClientInbound{
+			{ClientID: 1, NodeID: 11, Provisioned: true},
+		}}
+		xui := &capLessXUI{caps: caps}
+		return New(clients, fakePool{c: xui}, fakeNodes{}), xui
+	}
+	c := &domain.PSPClient{ID: 1, PanelID: 10, Email: "u1@psp.local"}
+
+	t.Run("a panel supporting neither cap reports both", func(t *testing.T) {
+		metrics.Reset()
+		svc, _ := newSvc([]ports.PanelCapability{ports.CapabilityClientWrite})
+		if err := svc.SyncLifecycle(context.Background(), c,
+			domain.UserLifecycle{Enable: true, IPLimit: 3, DeviceLimit: 2}); err != nil {
+			t.Fatal(err)
+		}
+		for _, cap := range []string{"client.iplimit", "client.devicelimit"} {
+			key := "psp_capability_gap_total{capability=" + cap + "}"
+			if got := counterByName(t, key); got != 1 {
+				t.Errorf("%s = %d, want 1", key, got)
+			}
+		}
+	})
+
+	// A gap is only a gap when PSP actually wants something enforced. An
+	// unlimited user on a panel without the feature is not a problem, and
+	// counting it would make the metric useless.
+	t.Run("unset caps are not gaps", func(t *testing.T) {
+		metrics.Reset()
+		svc, _ := newSvc([]ports.PanelCapability{ports.CapabilityClientWrite})
+		if err := svc.SyncLifecycle(context.Background(), c,
+			domain.UserLifecycle{Enable: true}); err != nil {
+			t.Fatal(err)
+		}
+		if got := counterByName(t, "psp_capability_gap_total{capability=client.iplimit}"); got != 0 {
+			t.Errorf("iplimit gap = %d, want 0", got)
+		}
+	})
+
+	t.Run("a supporting panel reports nothing", func(t *testing.T) {
+		metrics.Reset()
+		svc, _ := newSvc([]ports.PanelCapability{
+			ports.CapabilityClientIPLimit, ports.CapabilityClientDeviceLimit,
+		})
+		if err := svc.SyncLifecycle(context.Background(), c,
+			domain.UserLifecycle{Enable: true, IPLimit: 3, DeviceLimit: 2}); err != nil {
+			t.Fatal(err)
+		}
+		for _, cap := range []string{"client.iplimit", "client.devicelimit"} {
+			if got := counterByName(t, "psp_capability_gap_total{capability="+cap+"}"); got != 0 {
+				t.Errorf("%s = %d, want 0", cap, got)
+			}
+		}
+	})
+
+	// The push still has to happen. A gap is a warning, not a refusal: the
+	// other fields in the same write (enable, expiry, quota) are enforced
+	// perfectly well by a panel that lacks the caps.
+	t.Run("a gap does not block the write", func(t *testing.T) {
+		metrics.Reset()
+		svc, xui := newSvc([]ports.PanelCapability{ports.CapabilityClientWrite})
+		if err := svc.SyncLifecycle(context.Background(), c,
+			domain.UserLifecycle{Enable: true, IPLimit: 3, DeviceLimit: 2}); err != nil {
+			t.Fatal(err)
+		}
+		if xui.updateCalls != 1 {
+			t.Errorf("update calls = %d, want 1 — a capability gap must not refuse the push", xui.updateCalls)
+		}
+	})
+}

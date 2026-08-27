@@ -90,6 +90,21 @@ want.PanelQuota(panelLifetime)   // = PanelQuotaCap(QuotaHeadroom, panelLifetime
 - 面板值与 PSP 意图不一致 → 重推，并在 `psp_lifecycle_sync_write_reason_total{reason=ip_limit|device_limit}` 上计数
 - 一致 → 仍然命中 no-op skip，不会因为多了两个字段就每周期多一次写
 
+## 6.2 缺口是被上报的，不是被吞掉的
+
+声明能力只解决了一半：**S-UI 上的用户设了限制，写入照样成功、就是不生效。** 这正是能力列表本该防住的失败形状，所以 `SyncLifecycle` 在推送前检查：
+
+```
+PSP 想强制某个上限  且  目标面板没有对应能力  →  psp_capability_gap_total{capability=…} 计数 + 告警
+```
+
+两个设计选择：
+
+- **只在 PSP 真的想强制时才算缺口。** 不限的用户落在不支持的面板上不是问题，把它计进去会让这个指标失去意义。
+- **计数器是持久信号，日志每（面板, 能力）只打一次。** 这个状态是稳态的——直到运维方把用户挪走或升级面板才会消失，每周期为每个受影响的客户端打一行会把别的都埋掉。
+
+**缺口是警告，不是拒绝**：同一次写入里的 enable / 到期 / 配额，那台面板执行得好好的。
+
 ## 7. 已验证范围
 
 实机（3X-UI 3.7.0 源码编译 + xray-core 26.7.28 `5ca6f4b`），走 PSP 自己的适配器：
@@ -105,4 +120,4 @@ want.PanelQuota(panelLifetime)   // = PanelQuotaCap(QuotaHeadroom, panelLifetime
 
 - **组级默认值**：分组不承载配额，见 §2。真要做应连 `TrafficLimitBytes` 一起，作为独立的一次改动。
 - **SSO 新用户默认值**：`NewUserDefaults` 目前只带流量上限。加进去是小事，但属于 SSO 配置面的扩展，不混在本次里。
-- **UI 上的能力提示**：用户被分配到不支持该能力的面板时，编辑界面暂不提示。能力已经通过 API 暴露，缺的是前端呈现。
+- **UI 上的能力提示**：编辑界面暂不在字段旁提示「该用户所在面板不支持此项」。服务端已经在推送点上报缺口（§6.2），能力也已通过 `/api/admin/servers` 的 `capabilities` 暴露给前端；缺的是把两者接起来的呈现。

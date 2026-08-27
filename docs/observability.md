@@ -79,6 +79,14 @@ skip 命中率 = psp_lifecycle_sync_skipped_total / psp_lifecycle_sync_total
 
 `reason` 的判定顺序里 `total_gb` **排第一**——嫌疑犯不能被排在它前面的字段掩盖掉。
 
+### 4.2.1 能力缺口
+
+`psp_capability_gap_total{capability=…}`：PSP 想强制某个设置，但目标面板执行不了。
+
+写入会成功、就是不生效——这是能力列表本该防住的失败形状。**只在 PSP 真的想强制时才计数**（不限的用户落在不支持的面板上不算缺口）。日志每（面板, 能力）只打一次，因为这个状态是稳态的；计数器才是持久信号。
+
+见 [connection-limits.md](connection-limits.md) §6.2。
+
 ### 4.3 迟滞带该设多大
 
 `psp_lifecycle_quota_delta_bytes`：每次比较都采样，**skip 与否都采**。迟滞带要吞下的正是这个漂移分布，包含那些下限几乎没动的周期。

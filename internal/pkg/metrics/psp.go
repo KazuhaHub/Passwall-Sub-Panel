@@ -90,6 +90,15 @@ var (
 		"Absolute change in the pushed traffic floor versus what the panel already held. The distribution a Phase 1 deadband would be sized against.",
 		"bytes", ByteBuckets,
 	)
+	// A cap PSP intends but the panel in front of it cannot enforce. Counted
+	// rather than logged per cycle, because the condition is steady-state (it
+	// persists until the operator moves the user or the panel gains the
+	// feature) and a per-cycle log line would bury everything else.
+	CapabilityGapTotal = NewCounterVec(
+		"psp_capability_gap_total",
+		"Lifecycle pushes carrying a setting the target panel cannot enforce, by capability.",
+		"capability",
+	)
 	// P in the cost model.
 	UserClientCount = NewHistogram(
 		"psp_user_client_count",

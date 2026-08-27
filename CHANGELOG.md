@@ -36,6 +36,8 @@ small improvement).
 
   **实机验证**（3.7.0 + xray-core 26.7.28）：创建/更新携带两个上限、**一次只改到期时间的无关更新不再抹掉设备上限**（本功能存在的核心回归）、0 能清空两个上限。4/4 通过。
 
+  **能力缺口会被上报，不会被吞掉** —— 声明能力只解决一半：S-UI 上的用户设了限制，写入照样成功、就是不生效，而这正是能力列表本该防住的失败形状。`SyncLifecycle` 在推送前检查，缺口计入 `psp_capability_gap_total{capability=…}`。只在 PSP 真的想强制时才算缺口（不限的用户落在不支持的面板上不是问题，计进去会让指标失去意义）；日志每（面板, 能力）只打一次，因为该状态是稳态的，每周期每客户端打一行会把别的都埋掉。**缺口是警告不是拒绝** —— 同一次写入里的 enable / 到期 / 配额，那台面板执行得好好的。
+
   两个上限是 PSP 所有的，因此已进入 `SyncLifecycle` 的比较集合：被人在面板界面改动会被推回并计入 `psp_lifecycle_sync_write_reason_total{reason=ip_limit|device_limit}`；一致时仍命中 no-op skip。
 
 - **推送链路改用契约类型 `domain.UserLifecycle`** —— 取代原先「enable + expiry + quota」三个标量参数一路往下传的形状。它是契约不是参数打包：PSP 自己的数据面才是设计目标，所以这个集合由「PSP 想强制什么」定义，各适配器按能力翻译，**往里加字段不再波及五个函数签名**。`QuotaHeadroom` 始终是本期剩余，重基只在唯一知道「是哪个 client 的计数器」的那一点发生（`want.PanelQuota(panelLifetime)`）——一个用户的 lifecycle 会扇出到多个各有计数器的 client，所以这个转换不能折进结构体。

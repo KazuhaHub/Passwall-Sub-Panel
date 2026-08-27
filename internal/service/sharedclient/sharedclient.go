@@ -25,7 +25,18 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 )
 
+// capGapKey dedupes the capability-gap warning per (panel, capability).
+type capGapKey struct {
+	panelID    int64
+	capability ports.PanelCapability
+}
+
 type Service struct {
+	// capGapSeen keeps the capability-gap warning to once per (panel,
+	// capability) per process. sync.Map because the push path fans out
+	// concurrently and this is a write-once-read-many set.
+	capGapSeen sync.Map
+
 	clients ports.PSPClientRepo
 	pool    ports.XUIPool
 	nodes   ports.NodeRepo
@@ -269,6 +280,8 @@ func (s *Service) SyncLifecycle(ctx context.Context, c *domain.PSPClient, want d
 		metrics.LifecycleErrorTotal.Inc()
 		return fmt.Errorf("xui pool get %d: %w", c.PanelID, err)
 	}
+	s.reportCapabilityGaps(cli, c.PanelID, want)
+
 	spec := buildSharedClientSpec(c, flow)
 	spec.Enable = want.Enable
 	spec.ExpiryTime = want.ExpiryTime
@@ -319,6 +332,36 @@ func (s *Service) SyncLifecycle(ctx context.Context, c *domain.PSPClient, want d
 		return err
 	}
 	return nil
+}
+
+// reportCapabilityGaps notices when PSP is about to push a setting the panel in
+// front of it cannot enforce, and says so once instead of silently succeeding.
+//
+// This is the enforcement half of the design stance in docs/connection-limits.md:
+// PSP's domain model is the source of truth and adapters translate what their
+// panel can express, so a gap has to be VISIBLE. An S-UI panel has no concept of
+// either cap, and a 3X-UI below 3.7.0 ignores the device one — in both cases the
+// write succeeds and enforces nothing, which is exactly the shape of failure the
+// capability list exists to prevent.
+//
+// The counter is the durable signal; the log line fires once per (panel,
+// capability) per process because the condition is steady-state — it persists
+// until the operator moves the user or upgrades the panel, so logging it every
+// cycle for every affected client would bury everything else.
+func (s *Service) reportCapabilityGaps(cli ports.XUIClient, panelID int64, want domain.UserLifecycle) {
+	check := func(set bool, capability ports.PanelCapability, field string) {
+		if !set || ports.SupportsCapability(cli, capability) {
+			return
+		}
+		metrics.CapabilityGapTotal.With(string(capability)).Inc()
+		if _, seen := s.capGapSeen.LoadOrStore(capGapKey{panelID, capability}, struct{}{}); seen {
+			return
+		}
+		log.Warn("panel cannot enforce a setting PSP is pushing; the write will succeed and do nothing",
+			"panel_id", panelID, "capability", string(capability), "field", field)
+	}
+	check(want.IPLimit > 0, ports.CapabilityClientIPLimit, "ip_limit")
+	check(want.DeviceLimit > 0, ports.CapabilityClientDeviceLimit, "device_limit")
 }
 
 // lifecycleWriteReason names the first field on which the panel's stored
