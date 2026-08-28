@@ -16,15 +16,20 @@ func inbWith(client map[string]any) *ports.Inbound {
 }
 
 func TestClientUnchanged(t *testing.T) {
+	// The headroom the spec below was built from. clientUnchanged needs it to
+	// size the quota deadband, and passing the spec's own value is what keeps
+	// the two consistent — a mismatch here would silently test a band the
+	// caller never applies.
+	const quotaHeadroom = int64(200)
 	// A VLESS spec PSP would push.
-	spec := buildClientSpec(domain.ProtoVLESS, "", "uuid-1", "u1@x", "vision", domain.UserLifecycle{Enable: true, ExpiryTime: 1700, QuotaHeadroom: 200}, 0)
+	spec := buildClientSpec(domain.ProtoVLESS, "", "uuid-1", "u1@x", "vision", domain.UserLifecycle{Enable: true, ExpiryTime: 1700, QuotaHeadroom: quotaHeadroom}, 0)
 
 	matching := map[string]any{
 		"id": "uuid-1", "email": "u1@x", "enable": true,
 		"flow": "vision", "expiryTime": 1700, "totalGB": 200,
 	}
 
-	if !clientUnchanged(inbWith(matching), spec, domain.ProtoVLESS) {
+	if !clientUnchanged(inbWith(matching), spec, domain.ProtoVLESS, quotaHeadroom) {
 		t.Fatal("identical client must be a no-op (skip the update)")
 	}
 
@@ -38,19 +43,19 @@ func TestClientUnchanged(t *testing.T) {
 	} {
 		c := map[string]any{"id": "uuid-1", "email": "u1@x", "enable": true, "flow": "vision", "expiryTime": 1700, "totalGB": 200}
 		mut(c)
-		if clientUnchanged(inbWith(c), spec, domain.ProtoVLESS) {
+		if clientUnchanged(inbWith(c), spec, domain.ProtoVLESS, quotaHeadroom) {
 			t.Errorf("%s differs → must NOT skip", name)
 		}
 	}
 
 	// Missing client / nil inbound / parse error → update (never a stale skip).
-	if clientUnchanged(inbWith(map[string]any{"email": "someone-else@x"}), spec, domain.ProtoVLESS) {
+	if clientUnchanged(inbWith(map[string]any{"email": "someone-else@x"}), spec, domain.ProtoVLESS, quotaHeadroom) {
 		t.Error("absent client must not skip")
 	}
-	if clientUnchanged(nil, spec, domain.ProtoVLESS) {
+	if clientUnchanged(nil, spec, domain.ProtoVLESS, quotaHeadroom) {
 		t.Error("nil inbound must not skip")
 	}
-	if clientUnchanged(&ports.Inbound{Settings: "{bad json"}, spec, domain.ProtoVLESS) {
+	if clientUnchanged(&ports.Inbound{Settings: "{bad json"}, spec, domain.ProtoVLESS, quotaHeadroom) {
 		t.Error("unparseable settings must not skip")
 	}
 }
@@ -61,11 +66,11 @@ func TestClientUnchanged_TrojanComparesPassword(t *testing.T) {
 		t.Fatal("precondition: Trojan spec must carry a password")
 	}
 	base := map[string]any{"id": "uuid-1", "email": "u1@x", "enable": true, "password": spec.Password}
-	if !clientUnchanged(inbWith(base), spec, domain.ProtoTrojan) {
+	if !clientUnchanged(inbWith(base), spec, domain.ProtoTrojan, 0) {
 		t.Fatal("matching Trojan password must skip")
 	}
 	base["password"] = "stale-password"
-	if clientUnchanged(inbWith(base), spec, domain.ProtoTrojan) {
+	if clientUnchanged(inbWith(base), spec, domain.ProtoTrojan, 0) {
 		t.Fatal("differing Trojan password must NOT skip")
 	}
 }
@@ -75,7 +80,7 @@ func TestClientUnchanged_Hysteria2AlwaysUpdates(t *testing.T) {
 	// never verify a match → must always update (conservative).
 	spec := buildClientSpec(domain.ProtoHysteria2, "", "uuid-1", "u1@x", "", domain.UserLifecycle{Enable: true, ExpiryTime: 0, QuotaHeadroom: 0}, 0)
 	full := map[string]any{"id": "uuid-1", "email": "u1@x", "enable": true}
-	if clientUnchanged(inbWith(full), spec, domain.ProtoHysteria2) {
+	if clientUnchanged(inbWith(full), spec, domain.ProtoHysteria2, 0) {
 		t.Fatal("Hysteria2 must never skip (auth not verifiable)")
 	}
 }

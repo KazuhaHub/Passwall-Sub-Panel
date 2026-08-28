@@ -130,7 +130,9 @@ cap_i = lastRaw_i + (配额 − Σ所有 client 的已用)
 - **P = 1**：skip 已自然生效（98%），迟滞带**不需要**
 - **P > 1**：skip 结构性失效，**迟滞带是正确的工具**——和 [data-plane-plan.md](data-plane-plan.md) 原本的判断一致
 
-而且 band 该设多大现在更清楚了：client i 每周期的漂移就是**其他 client 那一周期的流量总和**。band 只要盖过典型的单周期流量，skip 就能恢复。真实分布仍由 Phase 0 的 `psp_lifecycle_quota_delta_bytes` 给出——现在知道该盯着 P>1 的用户看。
+client i 每周期的漂移就是**其他 client 那一周期的流量总和**。
+
+**已实现**，见 [traffic-quota-deadband.md](traffic-quota-deadband.md)：band = `min(headroom/20, 8 GiB)`，不对称（只容忍偏松），耗尽与不限两个边界精确。压力模型下 P=2 由 0% 升至 84%、P=3 升至 65%。
 
 ### 6.4 已知代价
 
@@ -144,4 +146,6 @@ PSP 在周期滚动时调面板的重置接口，然后推 `total = 配额`，�
 
 ## 7. 对数据面演进计划的影响
 
-见 §6.3：修复很可能**顺带解决了 Phase 1a 想解决的问题**。重基后推送值对活跃用户恒定，no-op skip 应当自然生效——迟滞带在拿到 Phase 0 数据前不应开工，且届时可能已无必要。Phase 1b / 1c 与本缺陷无关，已实现。
+见 §6.3：修复**解决了 Phase 1a 想解决问题的一半**。重基后推送值对 `P = 1` 的用户恒定，no-op skip 自然生效（98%）；`P > 1` 结构性失效，迟滞带已按 [traffic-quota-deadband.md](traffic-quota-deadband.md) 实现。Phase 1b / 1c 与本缺陷无关，已实现。
+
+> 本节一度写着「迟滞带在拿到 Phase 0 数据前不应开工，且届时可能已无必要」。后半句被实测否掉（P>1 时 skip 命中率是 0%），前半句则混淆了两件事：band **宽度**是策略量、现在就能定，需要数据的是**验收**。

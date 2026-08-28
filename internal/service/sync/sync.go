@@ -244,7 +244,7 @@ func (s *Service) SetOwnedClientEnableWithInbound(ctx context.Context, panelID i
 	// O(changed clients), not O(all owned clients) — so a large fleet doesn't pay
 	// one Xray reload per owned client every cycle (the "gets laggier at scale"
 	// problem). Conservative: any uncertainty falls through to the update.
-	if clientUnchanged(inb, spec, protocol) {
+	if clientUnchanged(inb, spec, protocol, want.QuotaHeadroom) {
 		return nil
 	}
 	return c.UpdateClient(ctx, spec)
@@ -258,7 +258,7 @@ func (s *Service) SetOwnedClientEnableWithInbound(ctx context.Context, panelID i
 // is not represented in the historical Xray-shaped settings. That conservatism guarantees a skip
 // never leaves the panel stale; the worst case is an unnecessary update, exactly
 // today's behaviour.
-func clientUnchanged(inb *ports.Inbound, spec ports.ClientSpec, protocol domain.Protocol) bool {
+func clientUnchanged(inb *ports.Inbound, spec ports.ClientSpec, protocol domain.Protocol, headroom int64) bool {
 	if inb == nil || protocol == domain.ProtoHysteria2 || protocol == domain.ProtoAnyTLS ||
 		protocol == domain.ProtoTUIC || protocol == domain.ProtoNaive {
 		return false
@@ -274,9 +274,17 @@ func clientUnchanged(inb *ports.Inbound, spec ports.ClientSpec, protocol domain.
 	if cur.IsEnabled() != spec.Enable ||
 		cur.Flow != spec.Flow ||
 		cur.ExpiryTime != spec.ExpiryTime ||
-		cur.TotalGB != spec.TotalGB ||
 		cur.LimitIP != spec.LimitIP ||
 		cur.ID != spec.ID {
+		return false
+	}
+	// The quota cap gets a deadband rather than an equality test, for the same
+	// reason the shared-client path does: a user's quota is shared across their
+	// clients, so traffic on one lowers every other one's intended cap every
+	// cycle and an exact comparison can never settle. domain.PanelQuotaWithinBand
+	// holds the policy, including its asymmetry — a cap that is too strict is
+	// corrected immediately, only a too-generous one is tolerated.
+	if !domain.PanelQuotaWithinBand(cur.TotalGB, spec.TotalGB, headroom) {
 		return false
 	}
 	// limitHwid is NOT in the inbound's settings.clients[] — the panel keeps it

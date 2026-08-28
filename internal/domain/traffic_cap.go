@@ -107,3 +107,88 @@ func (u *User) Lifecycle(now time.Time, quotaHeadroom int64) UserLifecycle {
 func (l UserLifecycle) PanelQuota(panelLifetime int64) int64 {
 	return PanelQuotaCap(l.QuotaHeadroom, panelLifetime)
 }
+
+// Quota deadband. See docs/traffic-quota-deadband.md.
+const (
+	// quotaBandDivisor makes the band 1/20th — 5% — of the headroom it
+	// protects. Expressed as a fraction of what is LEFT rather than of the
+	// total limit, it carries a policy statement that does not depend on the
+	// user's speed, plan size or usage pattern: IF PSP STOPS RUNNING, A USER
+	// GETS AT MOST 5% LONGER THAN THEY SHOULD HAVE. Their remaining headroom
+	// is the time they have left, so a fixed fraction of it is a fixed
+	// fraction of that time.
+	//
+	// Anything much tighter is below the noise floor and buys nothing: the
+	// panel's cap is already stale by one poll interval of the user's traffic
+	// no matter what this is set to, so a band smaller than that adds no risk
+	// and suppresses no writes either.
+	quotaBandDivisor = 20
+	// maxQuotaBandBytes is an absolute ceiling, and the one place the
+	// proportional argument above is deliberately abandoned. 5% stays 5%
+	// however large the quota, but on a multi-terabyte plan that percentage
+	// is a bandwidth bill rather than a rounding error, and no operator
+	// reading "5%" pictures 500 GB. It binds above ~160 GiB of headroom.
+	maxQuotaBandBytes = 8 << 30
+)
+
+// PanelQuotaBand is how far a panel's stored cap may lag the intended cap
+// before PSP spends a write to correct it.
+//
+// The band is NOT a tuning knob derived from observed traffic. It is a policy
+// number with one meaning: HOW MUCH EXTRA TRAFFIC A USER MAY GET IF PSP STOPS
+// RUNNING. PSP itself still cuts a user off at the exact right point on its
+// next poll, so a stale panel cap only ever materialises as real overshoot
+// during a PSP outage — which is the one scenario the panel-side cap exists
+// for. Sizing it from a measured delta distribution would optimise write
+// volume and let the safety margin fall out as a by-product; this is the other
+// way round, which is the correct one.
+//
+// Anchoring on the remaining headroom rather than the user's total limit is
+// what keeps the band safe as a user approaches exhaustion: the tolerance
+// shrinks with what is left to protect, so it can never exceed the headroom
+// itself. A limit-anchored band would do the opposite — 1% of a 1 TB quota is
+// 10 GB, which for a user with 1 GB left would authorise a tenfold overshoot.
+//
+// Integer division gives the boundary cases for free: headroom 0 (unlimited)
+// and headroom 1 (TrafficFloorBytes' "at or past the limit" sentinel) both
+// yield a band of 0, so an unlimited client and an exhausted one are always
+// pushed exactly.
+func PanelQuotaBand(headroom int64) int64 {
+	if headroom <= 0 {
+		return 0
+	}
+	band := headroom / quotaBandDivisor
+	if band > maxQuotaBandBytes {
+		return maxQuotaBandBytes
+	}
+	return band
+}
+
+// PanelQuotaWithinBand reports whether a panel's stored cap is close enough to
+// the cap PSP intends that correcting it is not worth a write.
+//
+// The band is deliberately ASYMMETRIC, because the two directions of drift are
+// not equally acceptable:
+//
+//   - stored > want — the panel holds a cap that is too GENEROUS. Bounded by
+//     the band, only realisable during a PSP outage, and the direction the
+//     steady state actually drifts in: a user's quota is shared across their
+//     clients, so traffic on client j lowers every OTHER client's intended cap
+//     while their own panel counters sit still. This is what the band is for.
+//
+//   - stored < want — the panel holds a cap that is too STRICT, and would cut
+//     a paying user off EARLY. This happens when headroom grows: a new billing
+//     period, or an admin raising the quota. Tolerating it would delay someone
+//     getting service they are owed, so it is never tolerated — one write, now.
+//
+// want <= 0 means unlimited, which a panel encodes as 0 and must be exact: a
+// leftover non-zero cap is a live restriction, not a rounding error.
+func PanelQuotaWithinBand(stored, want, headroom int64) bool {
+	if want <= 0 {
+		return stored == want
+	}
+	if stored < want {
+		return false
+	}
+	return stored-want <= PanelQuotaBand(headroom)
+}

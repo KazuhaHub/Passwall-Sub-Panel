@@ -328,6 +328,15 @@ func (s *Service) SyncLifecycle(ctx context.Context, c *domain.PSPClient, want d
 		// drift the deadband would have to swallow, which includes the
 		// cycles where the floor barely moved.
 		metrics.LifecycleQuotaDeltaBytes.Observe(absInt64(cur.TotalGB - spec.TotalGB))
+		// The band's yield, counted separately from the skip: a difference
+		// the band absorbed. Without this, a rising skip rate cannot be
+		// attributed — it could equally be quieter users. Counted even when
+		// another field goes on to force a write, because what is being
+		// measured is absorbed quota drift, not elided calls.
+		if cur.TotalGB != spec.TotalGB &&
+			domain.PanelQuotaWithinBand(cur.TotalGB, spec.TotalGB, want.QuotaHeadroom) {
+			metrics.LifecycleQuotaBandSkipTotal.Inc()
+		}
 		// The write REASON is the load-bearing measurement of Phase 0:
 		// docs/data-plane-plan.md §1.2 claims the shrinking quota floor
 		// defeats this skip on every cycle for every active user. A
@@ -335,7 +344,7 @@ func (s *Service) SyncLifecycle(ctx context.Context, c *domain.PSPClient, want d
 		// that a deadband on that one field recovers the skip. Any other
 		// reason showing up in bulk would mean a deadband buys nothing
 		// and Phase 1a is aimed at the wrong field.
-		reason := lifecycleWriteReason(cur, spec, capIP, capDevice)
+		reason := lifecycleWriteReason(cur, spec, capIP, capDevice, want.QuotaHeadroom)
 		if reason == "" {
 			metrics.LifecycleSkippedTotal.Inc()
 			return nil
@@ -437,9 +446,9 @@ func (s *Service) reportCapabilityGaps(cli ports.XUIClient, panelID int64, want 
 // can never converge. Excluding it is not "ignoring drift" — there is no drift
 // to heal on a panel that has nowhere to put the value, and the gap is already
 // counted by reportCapabilityGaps.
-func lifecycleWriteReason(cur *ports.ClientDetail, spec ports.ClientSpec, capIP, capDevice bool) string {
+func lifecycleWriteReason(cur *ports.ClientDetail, spec ports.ClientSpec, capIP, capDevice bool, headroom int64) string {
 	switch {
-	case cur.TotalGB != spec.TotalGB:
+	case !domain.PanelQuotaWithinBand(cur.TotalGB, spec.TotalGB, headroom):
 		return "total_gb"
 	case capIP && cur.LimitIP != spec.LimitIP:
 		return "ip_limit"

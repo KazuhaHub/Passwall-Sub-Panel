@@ -124,11 +124,14 @@ traffic poll 是**每面板一次** `ListInboundsSlim`（`internal/service/traff
 
 ## Phase 1 — 效率修复（不需要新后端）
 
-### 1a. 给推送决策加迟滞带（最高价值，针对 §1.2 根因）
+### 1a. 给推送决策加迟滞带（最高价值，针对 §1.2 根因）✅ 已实现
+
+完整设计与实测见 **[traffic-quota-deadband.md](traffic-quota-deadband.md)**。落地形态：
 
 ```
-band = max(minBytes, remaining × pct)
-若 |cur.TotalGB - spec.TotalGB| <= band 且其余字段全同 → skip
+band = min(headroom / 20, 8 GiB)          // 5%，锚在「剩余」上
+stored > want 且 stored - want <= band → skip
+stored < want                          → 立刻写（不对称，见下）
 ```
 
 设计要点（已推敲，勿简化）：
@@ -138,9 +141,10 @@ band = max(minBytes, remaining × pct)
 - **尾部必须豁免**：`TrafficFloorBytes` 在 `used >= limit` 时返回 `1`，那是真正的掐断信号，**不能被 band 吞掉**，否则超额用户不会被停。
 - **迟滞自然收敛**：skip 时面板留旧值，下周期继续与旧值比，漂移累积超过 band 才推一次——不会棘轮。
 - **正确性代价**：PSP 离线窗口内最多多烧一个 band。该下限本就是「PSP 挂了别被无限白嫖」的兜底，替代品是**无限**，所以有界超烧远优于误伤停机。
-- `minBytes` / `pct` 的取值**由 Phase 0 的分布决定**，不预设。
+- **不对称**（实现时新增的一条）：只容忍面板持有的 cap **偏松**。偏紧会**提前切断付费用户**，且正是新计费周期 / 运维方调高配额到达面板的路径，因此一个字节也立刻改。对称的 band 会让「新周期第一天用户还被上个周期的余量卡着」成为可能状态。
+- 两条推送链路（共享客户端模型与遗留 per-node 模型）走同一个判定函数——漂移机制相同，只修一边等于留一个会复发的孪生缺陷。
 
-**但要分清这里到底有两个问题，只有一个需要等数据：**
+**这里有两个问题，只有一个需要等数据。**（实现时一度把这条忘了，写成「band 从 `quota_delta_bytes` 的 P95 算出来」——那正是下表右列在警告的本末倒置。此处的原始判断是对的。）
 
 | 问题 | 谁回答 |
 |---|---|
@@ -148,6 +152,10 @@ band = max(minBytes, remaining × pct)
 | 这个 band 真能把 skip 救回来吗？ | **Phase 0 数据。** `psp_lifecycle_quota_delta_bytes` 的分布若大量落在 band 以下，救得回来；若绝大多数漂移都远超 band，那 band 就得开到业务不能接受的量级，1a 作废 |
 
 换句话说：**先定「能接受多烧多少」，再用数据检验那个数够不够用。** 反过来（先看数据再倒推能接受多少）会让工程数字去决定业务容忍度，是本末倒置。
+
+**已定的那一半**：不是「多烧多少字节」而是「多用多少时间」——剩余额度就是剩下的时间，取它的固定比例即取那段时间的固定比例，于是这个数与用户速率、套餐大小、使用模式都无关：**PSP 停止运行时，用户最多多用 5% 的时间。**
+
+**待检验的那一半**：`psp_lifecycle_quota_band_skip_total` 与 `psp_lifecycle_sync_skipped_total` 的比值。沙箱压力模型（每客户端连续 50 周期维持 3.6–25 Mbps）下 P=2 从 0% 升到 84%、P=3 升到 65%；真实机群应当好于此，但那要 Phase 0 的窗口说了算。
 
 ### 1b. 并行化 `SyncUserLifecycle` 的串行循环 ✅ 已实现
 

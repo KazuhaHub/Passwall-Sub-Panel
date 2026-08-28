@@ -146,8 +146,10 @@ func TestSkipDoesNotSwallowARealQuotaChange(t *testing.T) {
 // each client rebases onto only its OWN panel counter. One client's cap
 // therefore drifts by the other clients' traffic.
 //
-// This quantifies the residue that survives the floor fix — the only input
-// left that could still justify a Phase 1a deadband.
+// This is what justified the Phase 1a deadband, and now measures it. Read the
+// numbers as a stress case, not a forecast: every client here sustains 3.6 to
+// 25 Mbps for fifty consecutive cycles, so the sibling drift the band has to
+// swallow is close to the worst a real fleet produces.
 func TestSkipRateWithSeveralClientsPerUser(t *testing.T) {
 	const GB = int64(1) << 30
 	const limit = 100 * GB
@@ -196,6 +198,19 @@ func TestSkipRateWithSeveralClientsPerUser(t *testing.T) {
 
 			if P == 1 && rate < 95 {
 				t.Errorf("P=1 skip rate %.1f%%, want ~98%% — the cap should be invariant", rate)
+			}
+			// Floors, not targets: they pin that the band still works, and
+			// are set well under the measured 84% / 65% so an unrelated
+			// change to the traffic model does not fail the build. What
+			// they actually guard is a regression to the pre-band 0%.
+			if min := map[int]float64{2: 70, 3: 50}[P]; min > 0 && rate < min {
+				t.Errorf("P=%d skip rate %.1f%%, want at least %.0f%% — the deadband has stopped absorbing sibling drift", P, rate, min)
+			}
+			if P > 1 {
+				band := counterByName(t, "psp_lifecycle_quota_band_skip_total")
+				if band == 0 {
+					t.Errorf("P=%d skipped %d calls but the band absorbed none of them — the skips are coming from somewhere else", P, skipped)
+				}
 			}
 		})
 	}
