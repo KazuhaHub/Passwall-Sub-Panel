@@ -24,21 +24,32 @@ PSP 是单二进制，绝大多数部署是一台 VPS，附近没有任何抓取
 
 ## 3. 跑一次测量
 
-```bash
-# 0. 确认跑的是带插桩的构建——对着错的二进制测，比不测更糟
-curl -s -b cookies.txt https://panel.example.com/api/admin/diagnostics/metrics | jq '{version, commit, uptime_ms}'
+**鉴权走 `Authorization: Bearer`，不是 cookie。** SPA 把 JWT 存在 `localStorage.psp_access` 里；HttpOnly cookie 那条路只有 SAML ACS 会设，所以 `curl -b cookies.txt` / `fetch(..., {credentials:'include'})` 都会得到 `401 {"error":"Missing token"}`。
 
-# 1. 开窗
-curl -s -b cookies.txt -X POST https://panel.example.com/api/admin/diagnostics/metrics/reset > /dev/null
+最省事的做法是在已登录的面板页面上打开浏览器控制台：
 
-# 2. 等。至少 24 小时，且必须盖过业务高峰——
-#    N（每周期活跃用户数）在低谷和高峰能差一个数量级。
+```js
+// 0. 确认跑的是带插桩的构建——对着错的二进制测，比不测更糟
+await (await fetch('/api/admin/diagnostics/metrics',
+  {headers:{Authorization:`Bearer ${localStorage.getItem('psp_access')}`}})).json()
 
-# 3. 收窗
-curl -s -b cookies.txt https://panel.example.com/api/admin/diagnostics/metrics > window.json
+// 1. 开窗
+await (await fetch('/api/admin/diagnostics/metrics/reset',
+  {method:'POST', headers:{Authorization:`Bearer ${localStorage.getItem('psp_access')}`}})).json()
+
+// 2. 等。至少 24 小时，且必须盖过业务高峰——
+//    N（每周期活跃用户数）在低谷和高峰能差一个数量级。
+
+// 3. 收窗（copy 把整个 JSON 放进剪贴板）
+copy(JSON.stringify(await (await fetch('/api/admin/diagnostics/metrics',
+  {headers:{Authorization:`Bearer ${localStorage.getItem('psp_access')}`}})).json(), null, 2))
 ```
 
+**每步都现读一次 `localStorage`，不要把令牌存进变量。** access token 默认 60 分钟过期，而第 3 步在 24 小时之后——把第 0 步取到的那个存下来复用，收窗时必然 401，而且是在等了一整天之后才发现。
+
 `uptime_ms` 与 `metrics.window_ms` 是两个不同的东西：前者是进程活了多久，后者是本次测量窗口开了多久。**若两者相差无几，说明中途重启过，样本作废**——counter 会跟着进程一起归零。
+
+> **所以别在刚启动时开窗。** 升级或重启后先让面板跑 20–30 分钟再 reset。否则这两个数从一开始就贴在一起、之后一直贴在一起，上面那条自检**会误报**，你分不清是真重启过还是本来就同时起步的。留出的那段间隔本身就成了「进程没重启过」的正面证据。
 
 ## 4. 指标与它回答的问题
 
@@ -68,6 +79,7 @@ curl -s -b cookies.txt https://panel.example.com/api/admin/diagnostics/metrics >
 | `psp_lifecycle_sync_error_total` | 失败 |
 | `psp_lifecycle_sync_write_reason_total{reason=…}` | **是哪个字段挫败了 skip** |
 | `psp_lifecycle_sync_not_provisioned_total` | 单列，不进分母 |
+| `psp_lifecycle_quota_band_skip_total` | 被迟滞带吸收掉的配额差异 |
 
 **口径要说清楚，否则会算错**：`skipped + write = total`，这两个互斥且穷尽。**`error` 是与 `write` 重叠的子计数**（失败的 `UpdateClient` 两个都加一），另外还包含 pool 取用失败（那种既不算 skip 也不算 write）。所以：
 
@@ -96,11 +108,13 @@ skip 命中率 = psp_lifecycle_sync_skipped_total / psp_lifecycle_sync_total
 
 见 [connection-limits.md](connection-limits.md) §6.2。
 
-### 4.3 迟滞带该设多大
+### 4.3 迟滞带
 
 `psp_lifecycle_quota_delta_bytes`：每次比较都采样，**skip 与否都采**。迟滞带要吞下的正是这个漂移分布，包含那些下限几乎没动的周期。
 
-只有拿到这个分布，band 参数才是**算出来的**，不是拍出来的。
+`psp_lifecycle_quota_band_skip_total`：**band 的验收信号**。`skipped_total` 单独上升**不能归因**——用户变安静也会让它涨；这个计数器说明上升是 band 带来的。注意它计的是**被吸收的漂移**，不是**被省掉的调用**：同一次比较里若有别的字段不同仍会写入，但那次配额漂移确实被吸收了。
+
+> 这里曾经写着「只有拿到这个分布，band 参数才是算出来的」。**那个思路是错的**，band 宽度不该由观测到的流量反推——那是拿写入量当目标、把安全裕度当副产品。band 是策略量：「PSP 停止运行时用户最多多用多久」。理由与选定的 5% 见 [traffic-quota-deadband.md](traffic-quota-deadband.md) §2。这里的分布现在是**验收用的**，不是定参用的。
 
 ### 4.4 P 与每用户扇出
 
