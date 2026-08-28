@@ -549,6 +549,15 @@ func (s *Service) SyncUserLifecycle(ctx context.Context, userID int64, want doma
 			// enforcement bypass the ordering comments warn about, and the
 			// serial loop this replaced could not produce it because a panic
 			// propagated.
+			// wg.Done is registered FIRST so that it runs LAST: defers are
+			// LIFO, and the recover below has to finish writing errs[i]
+			// before wg.Wait() is allowed to return. Registered the other way
+			// round — as it was — a panicking goroutine released the WaitGroup
+			// while errs[i] was still nil, so the caller could read the slice
+			// mid-write (a race) and see a clean nil for a push that panicked.
+			// That is precisely the enforcement bypass the comment above says
+			// this recover exists to prevent, reintroduced by defer ordering.
+			defer wg.Done()
 			defer func() {
 				if r := recover(); r != nil {
 					errs[i] = fmt.Errorf("sharedclient.SyncUserLifecycle: panic: %v", r)
@@ -557,7 +566,6 @@ func (s *Service) SyncUserLifecycle(ctx context.Context, userID int64, want doma
 						"stack", string(debug.Stack()))
 				}
 			}()
-			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
 			errs[i] = s.SyncLifecycle(ctx, c, want)

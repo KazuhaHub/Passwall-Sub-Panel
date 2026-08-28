@@ -648,11 +648,18 @@ func TestSyncUserLifecycle_PanicIsReportedNotSwallowed(t *testing.T) {
 	}}
 	svc := New(clients, fakePool{c: &panicXUI{panicOn: "boom@psp.local"}}, fakeNodes{})
 
-	err := svc.SyncUserLifecycle(context.Background(), 7, domain.UserLifecycle{Enable: true})
-	if err == nil {
-		t.Fatal("a panic in the fan-out must surface as an error, not as success")
-	}
-	if !strings.Contains(err.Error(), "panic") {
-		t.Fatalf("error = %v, want it to name the panic", err)
+	// Repeated, because the way this breaks is a RACE, not a logic error: if
+	// wg.Done() is released before the recover writes errs[i], the caller
+	// sometimes reads the slice early and sees a clean nil. A single pass
+	// passed even with the defers in the wrong order; this loop (especially
+	// under -race) is what actually holds the ordering in place.
+	for i := 0; i < 200; i++ {
+		err := svc.SyncUserLifecycle(context.Background(), 7, domain.UserLifecycle{Enable: true})
+		if err == nil {
+			t.Fatalf("iteration %d: a panic in the fan-out must surface as an error, not as success", i)
+		}
+		if !strings.Contains(err.Error(), "panic") {
+			t.Fatalf("iteration %d: error = %v, want it to name the panic", i, err)
+		}
 	}
 }
