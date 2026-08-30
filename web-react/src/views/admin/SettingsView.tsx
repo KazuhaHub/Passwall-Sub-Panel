@@ -88,7 +88,7 @@ import {
 } from '@/utils/validators'
 import { useSiteStore } from '@/stores/site'
 import { useTabParam } from '@/hooks/useTabParam'
-import { listAllGroups, listGroups } from '@/api/groups'
+import { listAllGroups } from '@/api/groups'
 import type { Group } from '@/api/types'
 import { normalizeRegistry } from './subclients/clientRegistry'
 import ScopeOverridesEditor from '@/components/scope/ScopeOverridesEditor'
@@ -189,9 +189,11 @@ export default function SettingsView() {
 
   useEffect(() => { void load(); void loadGeoStatus() }, [])
 
-  // The complete group catalogue drives the scope selector, SSO default-group
-  // pickers, and the self-registration landing-group picker. Failure leaves
-  // the existing settings visible and keeps the scope rail global-only.
+  // This copy of the complete group catalogue drives the scope selector and
+  // the self-registration landing-group picker. The SAML/OIDC panels below
+  // keep their own copy (they mount independently of this tab) but load it
+  // the same way, so no settings picker silently omits group 201+. Failure
+  // leaves the existing settings visible and keeps the scope rail global-only.
   useEffect(() => {
     let alive = true
     listAllGroups()
@@ -2156,7 +2158,7 @@ function SamlPanel() {
 
   useEffect(() => { void load(); void loadGroups() }, [])
   async function loadGroups() {
-    try { setGroups((await listGroups()).items) } catch { /* dropdown stays empty */ }
+    try { setGroups(await listAllGroups()) } catch { /* dropdown stays empty */ }
   }
   // Fresh DB serialises `admin_group_ids` as null (Go nil slice -> JSON
   // null). The editor calls `.join(', ')` unconditionally; defend at the
@@ -2518,7 +2520,7 @@ function OidcPanel() {
 
   useEffect(() => { void load(); void loadGroups() }, [])
   async function loadGroups() {
-    try { setGroups((await listGroups()).items) } catch { /* dropdown stays empty */ }
+    try { setGroups(await listAllGroups()) } catch { /* dropdown stays empty */ }
   }
   // Same null-array gotcha as SAML: scopes + admin_group_ids come back
   // as null on a fresh DB, and the editor calls `.join` on them.

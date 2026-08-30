@@ -1354,6 +1354,11 @@ function InboundFormFields({ form, setForm, showMetadata, servers, onGenKeys, on
                       next.grpc_authority = ''
                       next.grpc_multi_mode = false
                       next.tls_reject_unknown_sni = false
+                      // S-UI builds its own TLS block and never reads
+                      // cipherSuites, so a value carried over from a 3X-UI
+                      // server would sit in the snapshot advertising a
+                      // restriction the panel does not apply.
+                      next.tls_cipher_suites = ''
                       next.ss_iv_check = false
                       next.sockopt_enabled = false
                       next.sockopt_tproxy = ''
@@ -1650,11 +1655,11 @@ function InboundFormFields({ form, setForm, showMetadata, servers, onGenKeys, on
                     {TLS_VERSIONS.map(v => <MenuItem key={v} value={v}>{v || '—'}</MenuItem>)}
                   </TextField>
                 </Box>
-                <TLSCipherSuitesSelect
+                {effectivePanelType === '3xui' && <TLSCipherSuitesSelect
                   label={t('admin:nodes.create_dialog.tls_cipher_suites')}
                   value={form.tls_cipher_suites}
                   onChange={value => update('tls_cipher_suites', value)}
-                  helperText={t('admin:nodes.create_dialog.tls_cipher_suites_hint')} />
+                  helperText={t('admin:nodes.create_dialog.tls_cipher_suites_hint')} />}
                 <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
                   {switchControl(t('admin:nodes.create_dialog.tls_allow_insecure', { defaultValue: '允许不安全连接（危险！）' }),
                     form.tls_allow_insecure,
@@ -1768,11 +1773,11 @@ function InboundFormFields({ form, setForm, showMetadata, servers, onGenKeys, on
                 onChange={e => update('hy2_udp_idle_timeout', Number(e.target.value) || 60)}
                 sx={{ width: 160 }} />
             </Box>
-            <TLSCipherSuitesSelect
+            {effectivePanelType === '3xui' && <TLSCipherSuitesSelect
               label={t('admin:nodes.create_dialog.tls_cipher_suites')}
               value={form.tls_cipher_suites}
               onChange={value => update('tls_cipher_suites', value)}
-              helperText={t('admin:nodes.create_dialog.tls_cipher_suites_hint')} />
+              helperText={t('admin:nodes.create_dialog.tls_cipher_suites_hint')} />}
             <TextField size="small" fullWidth
               label={t('admin:nodes.create_dialog.hy2_obfs_password', { defaultValue: '混淆 (salamander) 密码 — 留空 = 不启用' })}
               value={form.hy2_obfs_password}
