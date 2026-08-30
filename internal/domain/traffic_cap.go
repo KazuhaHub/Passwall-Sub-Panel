@@ -127,8 +127,17 @@ const (
 	// proportional argument above is deliberately abandoned. 5% stays 5%
 	// however large the quota, but on a multi-terabyte plan that percentage
 	// is a bandwidth bill rather than a rounding error, and no operator
-	// reading "5%" pictures 500 GB. It binds above ~160 GiB of headroom.
-	maxQuotaBandBytes = 8 << 30
+	// reading "5%" pictures 500 GB. It binds above 20 GiB of headroom.
+	//
+	// Unlike the divisor, this number IS one data should set: its whole job
+	// is to bound the absolute drift a band may swallow, and how large that
+	// has to be is an empirical question. A 40.9-hour production window
+	// (25 users, 9 nodes, P=4.0) put the largest sibling drift ever observed
+	// at 607 MiB, with p95 at 14.9 MiB. 1 GiB covers the worst observed cycle
+	// with room to spare; the 8 GiB this started as was picked before that
+	// window existed and left an order of magnitude of unnecessary overshoot
+	// on the table.
+	maxQuotaBandBytes = 1 << 30
 )
 
 // PanelQuotaBand is how far a panel's stored cap may lag the intended cap

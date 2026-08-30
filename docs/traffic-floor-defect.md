@@ -132,7 +132,7 @@ cap_i = lastRaw_i + (配额 − Σ所有 client 的已用)
 
 client i 每周期的漂移就是**其他 client 那一周期的流量总和**。
 
-**已实现**，见 [traffic-quota-deadband.md](traffic-quota-deadband.md)：band = `min(headroom/20, 8 GiB)`，不对称（只容忍偏松），耗尽与不限两个边界精确。压力模型下 P=2 由 0% 升至 84%、P=3 升至 65%。
+**已实现**，见 [traffic-quota-deadband.md](traffic-quota-deadband.md)：band = `min(headroom/20, 1 GiB)`，不对称（只容忍偏松），耗尽与不限两个边界精确。40.9 小时生产窗口实测：写入原因 **100% 是 `total_gb`**，skip 命中率 33.9%；按实测漂移分布投影，加 band 后约 99%。
 
 ### 6.4 已知代价
 

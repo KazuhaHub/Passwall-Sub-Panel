@@ -121,10 +121,16 @@ func TestPanelQuotaBand(t *testing.T) {
 		headroom int64
 		want     int64
 	}{
-		{"five percent of headroom", 100 << 30, 5 << 30},
+		{"five percent of headroom", 10 << 30, 512 << 20},
 		{"scales down with what is left", 1 << 30, 1 << 30 / 20},
 		// A huge quota must not buy a proportionally huge overshoot.
-		{"capped in absolute terms", 1 << 50, 8 << 30},
+		// The ceiling exists to bound absolute overshoot on very large plans,
+		// and its size is the one thing here that data sets rather than
+		// policy: the largest sibling drift seen in a 40.9h production window
+		// was 607 MiB, so 1 GiB covers the worst observed cycle.
+		{"capped in absolute terms", 1 << 50, 1 << 30},
+		{"ceiling binds above 20 GiB of headroom", 21 << 30, 1 << 30},
+		{"just below the ceiling stays proportional", 19 << 30, (19 << 30) / 20},
 		// Both boundaries fall out of integer division, and both matter:
 		// 0 is "unlimited" and 1 is TrafficFloorBytes' exhausted sentinel.
 		// A band on either would be a hole in the safety net.
@@ -144,9 +150,12 @@ func TestPanelQuotaBand(t *testing.T) {
 // realisable during a PSP outage, while a too-strict one cuts a paying user
 // off early. Only the first is tolerated.
 func TestPanelQuotaWithinBand(t *testing.T) {
-	const headroom = int64(100 << 30) // band = 5 GiB
+	// 10 GiB of headroom keeps this below the absolute ceiling, so the cases
+	// below exercise the PROPORTIONAL arm; the ceiling has its own case in
+	// TestPanelQuotaBand.
+	const headroom = int64(10 << 30)
+	const band = int64(512 << 20) // headroom / 20
 	const want = int64(500 << 30)
-	const band = int64(5 << 30)
 
 	for _, tc := range []struct {
 		name   string
