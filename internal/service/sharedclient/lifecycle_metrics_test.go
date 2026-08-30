@@ -23,6 +23,11 @@ func TestLifecycleWriteReason(t *testing.T) {
 		Enable: true, ExpiryTime: 1893456000000, TotalGB: 5 << 30,
 		ID: "uuid-x", Password: "pw-x", Flow: "xtls-rprx-vision", Auth: "uuid-x",
 	}
+	// The headroom the band is derived from. 5 GiB of headroom buys a band
+	// of 256 MiB, so every mutation below stays far outside it and the table
+	// still pins exact-field detection rather than accidentally testing the
+	// band.
+	const headroom = int64(5 << 30)
 	match := func() *ports.ClientDetail {
 		return &ports.ClientDetail{
 			Enable: base.Enable, ExpiryTime: base.ExpiryTime, TotalGB: base.TotalGB,
@@ -30,7 +35,7 @@ func TestLifecycleWriteReason(t *testing.T) {
 		}
 	}
 
-	if got := lifecycleWriteReason(match(), base, true, true); got != "" {
+	if got := lifecycleWriteReason(match(), base, true, true, headroom); got != "" {
 		t.Fatalf("identical state must skip, got reason %q", got)
 	}
 
@@ -50,7 +55,7 @@ func TestLifecycleWriteReason(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			d := match()
 			tc.mutate(d)
-			if got := lifecycleWriteReason(d, base, true, true); got != tc.want {
+			if got := lifecycleWriteReason(d, base, true, true, headroom); got != tc.want {
 				t.Fatalf("reason = %q, want %q", got, tc.want)
 			}
 		})
@@ -63,7 +68,7 @@ func TestLifecycleWriteReason(t *testing.T) {
 func TestLifecycleWriteReason_QuotaWinsWhenSeveralFieldsDiffer(t *testing.T) {
 	spec := ports.ClientSpec{Enable: true, TotalGB: 5 << 30, ID: "a"}
 	cur := &ports.ClientDetail{Enable: false, TotalGB: 4 << 30, ID: "b"}
-	if got := lifecycleWriteReason(cur, spec, true, true); got != "total_gb" {
+	if got := lifecycleWriteReason(cur, spec, true, true, 5<<30); got != "total_gb" {
 		t.Fatalf("reason = %q, want total_gb", got)
 	}
 }
@@ -136,6 +141,52 @@ func TestSyncLifecycle_SkipAndWriteAreCountedExactlyOnce(t *testing.T) {
 		}
 		if got := counterByName(t, `psp_lifecycle_sync_write_reason_total{reason=total_gb}`); got != 1 {
 			t.Errorf("total_gb reason = %d, want 1", got)
+		}
+	})
+
+	// Phase 1a. The drift the band exists for: this client's own panel
+	// counter has not moved, but a SIBLING client of the same user burned
+	// quota, so the user's headroom — and with it this client's intended cap
+	// — dropped. Before the band that was one full-replace per cycle per
+	// client, each one restarting the node's core.
+	t.Run("sibling drift inside the band is absorbed", func(t *testing.T) {
+		metrics.Reset()
+		stale := spec()
+		stale.TotalGB = (5 << 30) + (16 << 20) // 16 MiB of sibling drift; band is 256 MiB
+		svc, xui := newSvc(stale)
+		if err := svc.SyncLifecycle(context.Background(), c, domain.UserLifecycle{Enable: false, ExpiryTime: 1893456000000, QuotaHeadroom: 5 << 30}); err != nil {
+			t.Fatal(err)
+		}
+		if xui.updateCalls != 0 {
+			t.Errorf("update calls = %d, want 0 (the band should have absorbed the drift)", xui.updateCalls)
+		}
+		if got := counterByName(t, "psp_lifecycle_sync_skipped_total"); got != 1 {
+			t.Errorf("skipped = %d, want 1", got)
+		}
+		if got := counterByName(t, "psp_lifecycle_quota_band_skip_total"); got != 1 {
+			t.Errorf("band skip = %d, want 1 — a rising skip rate is only attributable to the band if this counts it", got)
+		}
+	})
+
+	// The other direction is never absorbed, however small. A cap the panel
+	// holds BELOW what PSP intends cuts a paying user off early, and it is
+	// how a new billing period or a raised quota reaches the panel.
+	t.Run("a too-strict cap is corrected immediately", func(t *testing.T) {
+		metrics.Reset()
+		stale := spec()
+		stale.TotalGB = (5 << 30) - 1 // one byte too strict
+		svc, xui := newSvc(stale)
+		if err := svc.SyncLifecycle(context.Background(), c, domain.UserLifecycle{Enable: false, ExpiryTime: 1893456000000, QuotaHeadroom: 5 << 30}); err != nil {
+			t.Fatal(err)
+		}
+		if xui.updateCalls != 1 {
+			t.Errorf("update calls = %d, want 1", xui.updateCalls)
+		}
+		if got := counterByName(t, `psp_lifecycle_sync_write_reason_total{reason=total_gb}`); got != 1 {
+			t.Errorf("total_gb reason = %d, want 1", got)
+		}
+		if got := counterByName(t, "psp_lifecycle_quota_band_skip_total"); got != 0 {
+			t.Errorf("band skip = %d, want 0", got)
 		}
 	})
 
@@ -648,11 +699,18 @@ func TestSyncUserLifecycle_PanicIsReportedNotSwallowed(t *testing.T) {
 	}}
 	svc := New(clients, fakePool{c: &panicXUI{panicOn: "boom@psp.local"}}, fakeNodes{})
 
-	err := svc.SyncUserLifecycle(context.Background(), 7, domain.UserLifecycle{Enable: true})
-	if err == nil {
-		t.Fatal("a panic in the fan-out must surface as an error, not as success")
-	}
-	if !strings.Contains(err.Error(), "panic") {
-		t.Fatalf("error = %v, want it to name the panic", err)
+	// Repeated, because the way this breaks is a RACE, not a logic error: if
+	// wg.Done() is released before the recover writes errs[i], the caller
+	// sometimes reads the slice early and sees a clean nil. A single pass
+	// passed even with the defers in the wrong order; this loop (especially
+	// under -race) is what actually holds the ordering in place.
+	for i := 0; i < 200; i++ {
+		err := svc.SyncUserLifecycle(context.Background(), 7, domain.UserLifecycle{Enable: true})
+		if err == nil {
+			t.Fatalf("iteration %d: a panic in the fan-out must surface as an error, not as success", i)
+		}
+		if !strings.Contains(err.Error(), "panic") {
+			t.Fatalf("iteration %d: error = %v, want it to name the panic", i, err)
+		}
 	}
 }

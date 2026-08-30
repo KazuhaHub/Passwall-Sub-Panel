@@ -94,6 +94,16 @@ var (
 		"Absolute change in the pushed traffic floor versus what the panel already held. The distribution a Phase 1 deadband would be sized against.",
 		"bytes", ByteBuckets,
 	)
+	// The deadband's yield: quota differences it absorbed. This is the
+	// acceptance signal for Phase 1a — psp_lifecycle_sync_skipped_total
+	// rising says the skip fires more, this says the BAND is why. Note a
+	// compare counted here can still end in a write, because another field
+	// may differ in the same call; it counts absorbed quota drift, not
+	// elided calls.
+	LifecycleQuotaBandSkipTotal = NewCounter(
+		"psp_lifecycle_quota_band_skip_total",
+		"Compares where the panel's stored cap differed from the intended one but fell inside the deadband, so it was left alone.",
+	)
 	// A cap PSP intends but the panel in front of it cannot enforce. Counted
 	// rather than logged per cycle, because the condition is steady-state (it
 	// persists until the operator moves the user or the panel gains the

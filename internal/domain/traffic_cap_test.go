@@ -112,3 +112,124 @@ func TestUserLifecycleNilSafe(t *testing.T) {
 		t.Errorf("nil user lifecycle = %+v, want zero", got)
 	}
 }
+
+// The band is a policy number — "how much extra may a user get if PSP stops
+// running" — so these cases pin the policy, not an implementation detail.
+func TestPanelQuotaBand(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		headroom int64
+		want     int64
+	}{
+		{"five percent of headroom", 10 << 30, 512 << 20},
+		{"scales down with what is left", 1 << 30, 1 << 30 / 20},
+		// A huge quota must not buy a proportionally huge overshoot.
+		// The ceiling exists to bound absolute overshoot on very large plans,
+		// and its size is the one thing here that data sets rather than
+		// policy: the largest sibling drift seen in a 40.9h production window
+		// was 607 MiB, so 1 GiB covers the worst observed cycle.
+		{"capped in absolute terms", 1 << 50, 1 << 30},
+		{"ceiling binds above 20 GiB of headroom", 21 << 30, 1 << 30},
+		{"just below the ceiling stays proportional", 19 << 30, (19 << 30) / 20},
+		// Both boundaries fall out of integer division, and both matter:
+		// 0 is "unlimited" and 1 is TrafficFloorBytes' exhausted sentinel.
+		// A band on either would be a hole in the safety net.
+		{"unlimited gets no band", 0, 0},
+		{"exhausted gets no band", 1, 0},
+		{"negative gets no band", -5, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := PanelQuotaBand(tc.headroom); got != tc.want {
+				t.Fatalf("PanelQuotaBand(%d) = %d, want %d", tc.headroom, got, tc.want)
+			}
+		})
+	}
+}
+
+// The asymmetry is the whole point: a too-generous cap is bounded and only
+// realisable during a PSP outage, while a too-strict one cuts a paying user
+// off early. Only the first is tolerated.
+func TestPanelQuotaWithinBand(t *testing.T) {
+	// 10 GiB of headroom keeps this below the absolute ceiling, so the cases
+	// below exercise the PROPORTIONAL arm; the ceiling has its own case in
+	// TestPanelQuotaBand.
+	const headroom = int64(10 << 30)
+	const band = int64(512 << 20) // headroom / 20
+	const want = int64(500 << 30)
+
+	for _, tc := range []struct {
+		name   string
+		stored int64
+		want   int64
+		ok     bool
+	}{
+		{"exact match", want, want, true},
+		{"generous, inside the band", want + band - 1, want, true},
+		{"generous, exactly at the band", want + band, want, true},
+		{"generous, past the band", want + band + 1, want, false},
+		// Never tolerated at any magnitude: this is a user being cut off
+		// before they should be, which happens when headroom GROWS (a new
+		// period, an admin raising the quota).
+		{"strict by one byte", want - 1, want, false},
+		{"strict by a lot", want - (100 << 30), want, false},
+		// Unlimited is exact in both directions: a leftover cap is a live
+		// restriction, and inventing one for an uncapped user is the
+		// traffic-floor defect in reverse.
+		{"unlimited stays unlimited", 0, 0, true},
+		{"leftover cap on an unlimited user", band, 0, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := PanelQuotaWithinBand(tc.stored, tc.want, headroom); got != tc.ok {
+				t.Fatalf("PanelQuotaWithinBand(%d, %d, %d) = %v, want %v",
+					tc.stored, tc.want, headroom, got, tc.ok)
+			}
+		})
+	}
+}
+
+// An exhausted client must be pushed exactly, or the band becomes the hole
+// through which a user who has spent their quota keeps browsing.
+func TestPanelQuotaWithinBand_ExhaustedIsExact(t *testing.T) {
+	// TrafficFloorBytes encodes "at or past the limit" as a headroom of 1.
+	const headroom = int64(1)
+	want := PanelQuotaCap(headroom, 10<<30)
+	if PanelQuotaWithinBand(want+1, want, headroom) {
+		t.Fatal("an exhausted client tolerated a stale cap; the band must be 0 here")
+	}
+	if !PanelQuotaWithinBand(want, want, headroom) {
+		t.Fatal("an exact match must still skip")
+	}
+}
+
+// The steady state the band exists for: one user's quota is shared across
+// their clients, so traffic on client B lowers client A's intended cap every
+// cycle while A's own panel counter sits still. Before the band that was a
+// guaranteed write per cycle per client.
+func TestPanelQuotaWithinBand_AbsorbsSiblingDrift(t *testing.T) {
+	const limit = int64(100 << 30)
+	lastRawA := int64(20 << 30) // client A's panel counter, unmoving
+
+	// A's cap was pushed when the user had burned nothing.
+	stored := PanelQuotaCap(limit, lastRawA)
+
+	// Client B now burns 512 MiB. A's own counter did not move, but the
+	// user's headroom did, so A's intended cap drops by the same amount.
+	headroom := limit - (512 << 20)
+	want := PanelQuotaCap(headroom, lastRawA)
+	if stored == want {
+		t.Fatal("precondition: sibling traffic must move the intended cap")
+	}
+	if !PanelQuotaWithinBand(stored, want, headroom) {
+		t.Fatalf("512 MiB of sibling drift should sit inside a %d-byte band",
+			PanelQuotaBand(headroom))
+	}
+
+	// Keep burning. Once the accumulated drift passes the band, PSP pays for
+	// one write and the staleness resets — it does not accumulate unbounded.
+	headroom = limit - (16 << 30)
+	want = PanelQuotaCap(headroom, lastRawA)
+	if PanelQuotaWithinBand(stored, want, headroom) {
+		t.Fatalf("16 GiB of drift must exceed the %d-byte band and force a write",
+			PanelQuotaBand(headroom))
+	}
+}
