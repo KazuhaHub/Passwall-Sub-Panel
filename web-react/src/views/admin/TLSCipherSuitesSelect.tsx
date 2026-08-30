@@ -1,6 +1,7 @@
 import AddIcon from '@mui/icons-material/Add'
 import CloseIcon from '@mui/icons-material/Close'
 import { Autocomplete, Box, IconButton, TextField, Typography, alpha } from '@mui/material'
+import { useTranslation } from 'react-i18next'
 
 // crypto/tls.CipherSuites(), in the same ID-sorted order as Go's official
 // source. InsecureCipherSuites() is intentionally excluded: Go documents those
@@ -32,6 +33,15 @@ export function TLSCipherSuitesSelect(props: {
   value: string
   onChange: (next: string) => void
 }) {
+  const { t } = useTranslation(['admin'])
+  // The suite name is appended rather than interpolated: it is a protocol
+  // identifier that never translates, and keeping it out of the message means
+  // the label stays deterministic without an initialised i18n instance.
+  const actionLabel = (suite: string, selected: boolean) =>
+    `${selected
+      ? t('admin:nodes.create_dialog.tls_cipher_remove', { defaultValue: 'Remove' })
+      : t('admin:nodes.create_dialog.tls_cipher_add', { defaultValue: 'Add' })} ${suite}`
+
   const selected = props.value
     ? props.value.split(':').map(value => value.trim()).filter(Boolean)
     : []
@@ -81,7 +91,11 @@ export function TLSCipherSuitesSelect(props: {
         // The selected value is a generated preview, not a text editor. Keep
         // Backspace/Delete from removing values through Autocomplete's default
         // keyboard handling; changes only come from the + / × option buttons.
+        // useAutocomplete gates its own handler on `defaultMuiPrevented`, NOT
+        // on defaultPrevented — calling preventDefault() alone leaves the
+        // built-in "Backspace removes the last value" path running.
         if (event.key === 'Backspace' || event.key === 'Delete') {
+          event.defaultMuiPrevented = true
           event.preventDefault()
           event.stopPropagation()
         }
@@ -112,7 +126,7 @@ export function TLSCipherSuitesSelect(props: {
               {option}
             </Typography>
             <IconButton component="span" size="small" tabIndex={-1}
-              aria-label={state.selected ? `Remove ${option}` : `Add ${option}`}
+              aria-label={actionLabel(option, state.selected)}
               sx={{ flex: '0 0 auto', p: 0.25 }}>
               {state.selected ? <CloseIcon sx={{ fontSize: 16 }} /> : <AddIcon sx={{ fontSize: 16 }} />}
             </IconButton>
