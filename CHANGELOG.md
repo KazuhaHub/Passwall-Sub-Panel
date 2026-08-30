@@ -4,7 +4,28 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
-## Unreleased
+## v3.9.2-beta.9 — 2026-08-30
+
+补上数据面演进计划的最后一项效率修复（多客户端用户的配额迟滞带），外加一个自查发现的严重回归：并行推送扇出里 panic 会被当成成功上报。
+
+### 修复
+
+- **panic 的推送被 defer 顺序当成了成功** —— 上一轮并行化扇出时我把 defer 注册顺序写反了，而它恰好废掉了那次改动声称要加的保护。defer 是 LIFO，recover 注册在 `wg.Done()` 之前意味着 `wg.Done()` **先**执行：
+
+  ```go
+  defer func() { ...recover, errs[i] = ... }()   // 先注册，后执行
+  defer wg.Done()                                // 后注册，先执行
+  ```
+
+  于是 panic 的 goroutine 在 `errs[i]` 还是 nil 时就释放了 WaitGroup。`wg.Wait()` 可以返回，调用方在 recover 还在写的时候读那个切片——一个数据竞态，而它的常见结果是**给一次 panic 掉的推送报出一个干净的 nil**。
+
+  nil 的含义是「推送成功」，`ResyncMembership` 正是靠这个信号删掉遗留 per-node 回退路径，于是用户被**留在一个还带着开通默认值（启用、无到期、无配额）的共享客户端上**——这正是 audit #1 那个越权形状，也正是那个 recover 存在的理由。被它替换掉的串行循环产生不了这种情况，因为 panic 会向上传播。
+
+  把 `wg.Done()` 改为**第一个**注册即可（于是最后执行，在 `errs[i]` 写完之后）。
+
+  **原有的回归测试在 defer 顺序错误时是通过的**，这就是它得以发布的原因：跑一次通常能赢这个竞态。现在重复 200 次，加 `-race` 后对着旧顺序**第 0 次迭代就失败**，同时报出被吞的 panic 和竞态本身。
+
+- **`docs/observability.md` 的测量流程有三处会失败** —— 都是靠着对一台真实启动的面板实际执行、而不是重读文档才发现的。**鉴权写错**：写的是 `curl -b cookies.txt`，而 SPA 把 JWT 存在 `localStorage.psp_access` 里、以 `Authorization: Bearer` 发出（HttpOnly cookie 那条路只有 SAML ACS 会设），照做会得到 `401 {"error":"Missing token"}`，看起来像端点坏了而不是配方错了。**令牌跨等待期缓存**：改写的初稿把令牌提到第 0 步的 const 里、第 3 步（24 小时之后）复用，而 access TTL 默认 60 分钟（`app.go`），收窗必然 401——而且要等满一整天才发现。**自检会误报**：文档说 `uptime_ms` 与 `window_ms` 接近即中途重启、样本作废，但这只在窗口是**启动后一段时间**才开的情况下成立；刚升级完立刻 reset 是最自然的动作，而那样两个数从一开始就贴在一起、之后一直贴在一起，自检根本分不开「重启过」和「同时起步」。补上缺的前提：先跑 20–30 分钟再开窗，那段间隔本身就是「没重启过」的正面证据。
 
 ### 新增
 
