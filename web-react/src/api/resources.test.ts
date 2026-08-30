@@ -105,6 +105,22 @@ describe('resource API contracts', () => {
     expect(http.post).toHaveBeenCalledWith('/admin/sync-tasks/5/retry')
   })
 
+  it('loads every group page for settings dropdowns', async () => {
+    const first = { id: 1, slug: 'default', name: 'Default' }
+    const last = { id: 201, slug: 'staff', name: 'Staff' }
+    http.get
+      .mockResolvedValueOnce({ data: { items: [first], total: 2, page: 1, page_size: 200 } })
+      .mockResolvedValueOnce({ data: { items: [last], total: 2, page: 2, page_size: 200 } })
+
+    await expect(groups.listAllGroups()).resolves.toEqual([first, last])
+    expect(http.get).toHaveBeenNthCalledWith(1, '/admin/groups', {
+      params: { page: 1, page_size: 200, sort_by: 'id', sort_dir: 'asc' }, signal: undefined,
+    })
+    expect(http.get).toHaveBeenNthCalledWith(2, '/admin/groups', {
+      params: { page: 2, page_size: 200, sort_by: 'id', sort_dir: 'asc' }, signal: undefined,
+    })
+  })
+
   it('maps traffic scopes and always includes a timezone', async () => {
     await expect(traffic.topTraffic(5, { silent: true })).resolves.toEqual([{ id: 1 }])
     await traffic.trafficHistory({ period: 'day', tz: 'Asia/Taipei' })

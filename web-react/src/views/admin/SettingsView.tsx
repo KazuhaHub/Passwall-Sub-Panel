@@ -88,7 +88,7 @@ import {
 } from '@/utils/validators'
 import { useSiteStore } from '@/stores/site'
 import { useTabParam } from '@/hooks/useTabParam'
-import { listGroups } from '@/api/groups'
+import { listAllGroups, listGroups } from '@/api/groups'
 import type { Group } from '@/api/types'
 import { normalizeRegistry } from './subclients/clientRegistry'
 import ScopeOverridesEditor from '@/components/scope/ScopeOverridesEditor'
@@ -182,15 +182,28 @@ export default function SettingsView() {
   // existing global editors below), a group id swaps that tab's overridable
   // fields for the inherit/override editor backed by the scope-settings API.
   const [scopeGroups, setScopeGroups] = useState<Group[]>([])
+  const [groupCatalogueState, setGroupCatalogueState] = useState<'loading' | 'ready' | 'error'>('loading')
   const [scopeGroupId, setScopeGroupId] = useState(0)
   const [scopeState, setScopeState] = useState<ScopeState | null>(null)
   const [scopeSaving, setScopeSaving] = useState(false)
 
   useEffect(() => { void load(); void loadGeoStatus() }, [])
 
-  // Group list drives the scope selector. Failure leaves it global-only.
+  // The complete group catalogue drives the scope selector, SSO default-group
+  // pickers, and the self-registration landing-group picker. Failure leaves
+  // the existing settings visible and keeps the scope rail global-only.
   useEffect(() => {
-    listGroups().then(r => setScopeGroups(r.items)).catch(() => { /* selector stays global-only */ })
+    let alive = true
+    listAllGroups()
+      .then(groups => {
+        if (!alive) return
+        setScopeGroups(groups)
+        setGroupCatalogueState('ready')
+      })
+      .catch(() => {
+        if (alive) setGroupCatalogueState('error')
+      })
+    return () => { alive = false }
   }, [])
 
   // Load the selected group's override set (global baseline + sparse overrides).
@@ -673,9 +686,56 @@ export default function SettingsView() {
                   onChange={e => patch('registration_email_domains', e.target.value)}
                   placeholder="example.com, corp.org" />
                 <Pair>
-                  <NumField label={t('settings.general.registration_default_group_id', { defaultValue: '默认组 ID（0=第一个组）' })}
+                  <TextField select fullWidth size="small"
+                    label={t('settings.general.registration_default_group_id', { defaultValue: '默认组' })}
                     value={settings.registration_default_group_id}
-                    onChange={v => patch('registration_default_group_id', v)} />
+                    disabled={groupCatalogueState !== 'ready'}
+                    onChange={e => patch('registration_default_group_id', Number(e.target.value))}
+                    helperText={groupCatalogueState === 'loading'
+                      ? t('settings.general.registration_default_group_loading', {
+                          defaultValue: '正在加载分组列表…',
+                        })
+                      : groupCatalogueState === 'error'
+                        ? t('settings.general.registration_default_group_load_error', {
+                            defaultValue: '分组列表加载失败，请刷新页面后重试。',
+                          })
+                        : settings.registration_default_group_id > 0 &&
+                          !scopeGroups.some(g => g.id === settings.registration_default_group_id)
+                      ? t('settings.general.registration_default_group_missing', {
+                          id: settings.registration_default_group_id,
+                          defaultValue: `已保存的分组不存在（ID：${settings.registration_default_group_id}），请选择一个有效分组`,
+                        })
+                      : t('settings.general.registration_default_group_hint', {
+                          defaultValue: '新注册用户将加入所选分组，并继承该分组的策略。',
+                        })}>
+                    <MenuItem value={0}>
+                      {scopeGroups[0]
+                        ? t('settings.general.registration_default_group_auto', {
+                            defaultValue: `自动选择第一个分组（${scopeGroups[0].name}）`,
+                            group: scopeGroups[0].name,
+                          })
+                        : t('settings.general.registration_default_group_auto_empty', {
+                            defaultValue: '自动选择第一个分组',
+                          })}
+                    </MenuItem>
+                    {settings.registration_default_group_id > 0 &&
+                      !scopeGroups.some(g => g.id === settings.registration_default_group_id) && (
+                        <MenuItem value={settings.registration_default_group_id}>
+                          {groupCatalogueState === 'ready'
+                            ? t('settings.general.registration_default_group_missing_option', {
+                                id: settings.registration_default_group_id,
+                                defaultValue: `无效分组（ID：${settings.registration_default_group_id}）`,
+                              })
+                            : t('settings.general.registration_default_group_current_option', {
+                                id: settings.registration_default_group_id,
+                                defaultValue: `当前设置（ID：${settings.registration_default_group_id}）`,
+                              })}
+                        </MenuItem>
+                      )}
+                    {scopeGroups.map(g => (
+                      <MenuItem key={g.id} value={g.id}>{g.name} ({g.slug})</MenuItem>
+                    ))}
+                  </TextField>
                   <NumField label={t('settings.general.registration_default_traffic_gb', { defaultValue: '默认流量 GB（0=不限）' })}
                     value={settings.registration_default_traffic_gb}
                     onChange={v => patch('registration_default_traffic_gb', v)} />

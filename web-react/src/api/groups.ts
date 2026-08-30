@@ -18,6 +18,26 @@ export async function listGroups(params: GroupListParams = {}, signal?: AbortSig
   return data
 }
 
+// Settings pickers need the complete group catalogue, not just the first
+// backend-clamped page. Keep the pagination detail here so every caller gets
+// the same stable id-ordered list and no form silently omits group 201+.
+export async function listAllGroups(signal?: AbortSignal) {
+  const pageSize = 200
+  const items: Group[] = []
+  let page = 1
+  let total = 0
+
+  do {
+    const data = await listGroups({ page, page_size: pageSize, sort_by: 'id', sort_dir: 'asc' }, signal)
+    items.push(...data.items)
+    total = data.total
+    if (data.items.length === 0) break
+    page += 1
+  } while (items.length < total)
+
+  return items
+}
+
 export async function getGroup(id: number) {
   const { data } = await client.get<Group>(`/admin/groups/${id}`)
   return data

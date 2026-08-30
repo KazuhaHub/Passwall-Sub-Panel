@@ -1320,8 +1320,11 @@ export default function ServersView() {
 
             {/* Allow insecure HTTPS: skip TLS cert verification for self-signed panels. */}
             <Box>
-              <FormControlLabel sx={{ ml: 0, '& .MuiFormControlLabel-label': { ml: 1 } }}
-                label={t('admin:servers.field.insecure_https', { defaultValue: '允许不安全的 HTTPS（跳过证书校验）' })}
+              <FormControlLabel sx={{
+                ml: 0,
+                '& .MuiFormControlLabel-label': { ml: 1, color: md.error },
+              }}
+                label={t('admin:servers.field.insecure_https', { defaultValue: '允许不安全的 HTTPS（危险！）' })}
                 control={<Switch checked={form.insecure_https}
                   onChange={(_, c) => setForm({ ...form, insecure_https: c })} />} />
               <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant, ml: 0.25, mt: 0.75 }}>
