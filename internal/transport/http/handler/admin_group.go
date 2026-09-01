@@ -2,6 +2,7 @@ package handler
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 
@@ -36,7 +37,14 @@ type groupDTO struct {
 	Layout     domain.Layout `json:"layout"`
 	Remark     string        `json:"remark,omitempty"`
 	Require2FA bool          `json:"require_2fa"`
-	Members    int64         `json:"members"`
+	// The group's entitlement policy every member inherits unless they
+	// override it. null = the group states nothing, which resolves to
+	// unlimited — distinct from 0, which states "uncapped" explicitly. The
+	// UI needs the difference to render "not set" against "unlimited".
+	TrafficLimitGB *float64 `json:"traffic_limit_gb"`
+	IPLimit        *int     `json:"ip_limit"`
+	DeviceLimit    *int     `json:"device_limit"`
+	Members        int64    `json:"members"`
 }
 
 type tagFilterDTO struct {
@@ -55,6 +63,10 @@ type createGroupRequest struct {
 	Layout     domain.Layout `json:"layout"`
 	Remark     string        `json:"remark"`
 	Require2FA bool          `json:"require_2fa"`
+	// Omitted (or null) leaves the group stating nothing.
+	TrafficLimitGB *float64 `json:"traffic_limit_gb,omitempty"`
+	IPLimit        *int     `json:"ip_limit,omitempty"`
+	DeviceLimit    *int     `json:"device_limit,omitempty"`
 }
 
 type updateGroupRequest struct {
@@ -62,6 +74,16 @@ type updateGroupRequest struct {
 	TagFilter  *tagFilterDTO `json:"tag_filter,omitempty"`
 	Remark     *string       `json:"remark,omitempty"`
 	Require2FA *bool         `json:"require_2fa,omitempty"`
+	// A nil limit means "leave it alone", so clearing a policy back to "states
+	// nothing" needs its own signal. Same shape as the user side's Inherit*
+	// flags, and for the same reason a sparse DTO always needs one. A clear
+	// flag wins over its value if both arrive.
+	TrafficLimitGB    *float64 `json:"traffic_limit_gb,omitempty"`
+	IPLimit           *int     `json:"ip_limit,omitempty"`
+	DeviceLimit       *int     `json:"device_limit,omitempty"`
+	ClearTrafficLimit bool     `json:"clear_traffic_limit,omitempty"`
+	ClearIPLimit      bool     `json:"clear_ip_limit,omitempty"`
+	ClearDeviceLimit  bool     `json:"clear_device_limit,omitempty"`
 }
 
 type updateLayoutRequest struct {
@@ -124,6 +146,11 @@ func (h *AdminGroupHandler) Create(c *gin.Context) {
 		Layout:     req.Layout,
 		Remark:     req.Remark,
 		Require2FA: req.Require2FA,
+		Limits: domain.GroupLimits{
+			TrafficLimitBytes: gbToBytesPtr(req.TrafficLimitGB),
+			IPLimit:           req.IPLimit,
+			DeviceLimit:       req.DeviceLimit,
+		},
 	}
 	if err := h.group.Create(c.Request.Context(), g); err != nil {
 		mapGroupServiceError(c, err)
@@ -165,6 +192,29 @@ func (h *AdminGroupHandler) Update(c *gin.Context) {
 	}
 	if req.Require2FA != nil {
 		g.Require2FA = *req.Require2FA
+	}
+	if req.ClearTrafficLimit {
+		g.Limits.TrafficLimitBytes = nil
+	} else if req.TrafficLimitGB != nil {
+		g.Limits.TrafficLimitBytes = gbToBytesPtr(req.TrafficLimitGB)
+	}
+	if req.ClearIPLimit {
+		g.Limits.IPLimit = nil
+	} else if req.IPLimit != nil {
+		if err := validateGroupConnLimit("ip_limit", *req.IPLimit); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		g.Limits.IPLimit = req.IPLimit
+	}
+	if req.ClearDeviceLimit {
+		g.Limits.DeviceLimit = nil
+	} else if req.DeviceLimit != nil {
+		if err := validateGroupConnLimit("device_limit", *req.DeviceLimit); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		g.Limits.DeviceLimit = req.DeviceLimit
 	}
 	if err := h.group.Update(c.Request.Context(), g); err != nil {
 		mapGroupServiceError(c, err)
@@ -227,14 +277,36 @@ func toGroupDTO(g *domain.Group) groupDTO {
 		tags = []string{}
 	}
 	return groupDTO{
-		ID:         g.ID,
-		Slug:       g.Slug,
-		Name:       g.Name,
-		TagFilter:  tagFilterDTO{All: g.TagFilter.All, Tags: tags, Mode: g.TagFilter.Mode},
-		Layout:     g.Layout,
-		Remark:     g.Remark,
-		Require2FA: g.Require2FA,
+		ID:             g.ID,
+		Slug:           g.Slug,
+		Name:           g.Name,
+		TagFilter:      tagFilterDTO{All: g.TagFilter.All, Tags: tags, Mode: g.TagFilter.Mode},
+		Layout:         g.Layout,
+		Remark:         g.Remark,
+		Require2FA:     g.Require2FA,
+		TrafficLimitGB: bytesToGBPtr(g.Limits.TrafficLimitBytes),
+		IPLimit:        g.Limits.IPLimit,
+		DeviceLimit:    g.Limits.DeviceLimit,
 	}
+}
+
+// bytesToGBPtr renders a byte quota as GB for the API, preserving the
+// null-vs-zero distinction the whole feature rests on.
+func bytesToGBPtr(b *int64) *float64 {
+	if b == nil {
+		return nil
+	}
+	gb := float64(*b) / (1024 * 1024 * 1024)
+	return &gb
+}
+
+// gbToBytesPtr is its inverse.
+func gbToBytesPtr(gb *float64) *int64 {
+	if gb == nil {
+		return nil
+	}
+	b := int64(*gb * 1024 * 1024 * 1024)
+	return &b
 }
 
 func mapGroupServiceError(c *gin.Context, err error) {
@@ -250,4 +322,14 @@ func mapGroupServiceError(c *gin.Context, err error) {
 	default:
 		respondError(c, err)
 	}
+}
+
+// validateGroupConnLimit rejects a negative connection cap. Mirrors the
+// per-user check in service/user so a policy cannot be set to something a user
+// would be refused for.
+func validateGroupConnLimit(field string, v int) error {
+	if v < 0 {
+		return fmt.Errorf("%w: %s must be >= 0", domain.ErrValidation, field)
+	}
+	return nil
 }

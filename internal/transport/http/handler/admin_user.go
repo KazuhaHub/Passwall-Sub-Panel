@@ -121,12 +121,21 @@ type userDTO struct {
 	// falls on in the *panel* timezone. The UI uses this for the date
 	// picker and table so the displayed day matches what was set, free of
 	// the browser's or 3X-UI server's timezone. Empty for permanent users.
-	ExpireDate        string `json:"expire_date,omitempty"`
-	TrafficLimitBytes int64  `json:"traffic_limit_bytes"`
-	// Connection caps. 0 = unlimited. Whether a given panel enforces them is
-	// a capability question — see docs/connection-limits.md.
-	IPLimit     int `json:"ip_limit"`
-	DeviceLimit int `json:"device_limit"`
+	ExpireDate string `json:"expire_date,omitempty"`
+	// The three below are the RESOLVED entitlements — what PSP will actually
+	// enforce, after the user's own overrides are layered on their group's
+	// policy. 0 = unlimited. Whether a given panel enforces the connection
+	// caps is a separate, capability question — see docs/connection-limits.md.
+	TrafficLimitBytes int64 `json:"traffic_limit_bytes"`
+	IPLimit           int   `json:"ip_limit"`
+	DeviceLimit       int   `json:"device_limit"`
+	// Whether each resolved value came from the group rather than from this
+	// user. The edit dialog needs this to show "inheriting 100 GB from
+	// Premium" instead of presenting the inherited number as the user's own —
+	// which would make saving the form silently pin them to it.
+	InheritsTrafficLimit bool `json:"inherits_traffic_limit"`
+	InheritsIPLimit      bool `json:"inherits_ip_limit"`
+	InheritsDeviceLimit  bool `json:"inherits_device_limit"`
 	// Lifetime counters (never reset by period rolls) — surfaced read-only in
 	// the admin edit dialog's detail block.
 	LifetimeUpBytes       int64                     `json:"lifetime_up_bytes"`
@@ -346,6 +355,14 @@ func (h *AdminUserHandler) Create(c *gin.Context) {
 	}
 	if h.user.HasPendingSync(c.Request.Context(), res.User.ID) {
 		c.Header("X-Sync-Pending", "1")
+	}
+	// Re-read so the response carries RESOLVED entitlements. The service
+	// returns the user it just built, whose limit fields are still zero —
+	// only a load resolves them against the group's policy. Without this an
+	// admin creating an inheriting user sees 0/0/0 and has to refresh before
+	// the inherited values appear.
+	if fresh, err := h.user.Get(c.Request.Context(), res.User.ID); err == nil && fresh != nil {
+		res.User = fresh
 	}
 	c.JSON(http.StatusCreated, createUserResponse{
 		User:            h.toDTO(c.Request, res.User, h.shouldRedactPrivilegedSecrets(c, res.User)),
@@ -716,8 +733,14 @@ type updateUserRequest struct {
 	TrafficResetPeriod *string  `json:"traffic_reset_period,omitempty"`
 	IPLimit            *int     `json:"ip_limit,omitempty"`
 	DeviceLimit        *int     `json:"device_limit,omitempty"`
-	Remark             *string  `json:"remark,omitempty"`
-	DisplayName        *string  `json:"display_name,omitempty"`
+	// Go back to taking this field from the group. A nil value above means
+	// "leave it alone" and cannot also mean "unset it", so each field needs
+	// its own signal — same shape as ClearExpire.
+	InheritTrafficLimit bool    `json:"inherit_traffic_limit,omitempty"`
+	InheritIPLimit      bool    `json:"inherit_ip_limit,omitempty"`
+	InheritDeviceLimit  bool    `json:"inherit_device_limit,omitempty"`
+	Remark              *string `json:"remark,omitempty"`
+	DisplayName         *string `json:"display_name,omitempty"`
 }
 
 func (h *AdminUserHandler) Update(c *gin.Context) {
@@ -786,6 +809,9 @@ func (h *AdminUserHandler) Update(c *gin.Context) {
 	}
 	in.IPLimit = req.IPLimit
 	in.DeviceLimit = req.DeviceLimit
+	in.InheritTrafficLimit = req.InheritTrafficLimit
+	in.InheritIPLimit = req.InheritIPLimit
+	in.InheritDeviceLimit = req.InheritDeviceLimit
 	if err := h.user.UpdateProfile(c.Request.Context(), id, in); err != nil {
 		switch {
 		case errors.Is(err, domain.ErrNotFound):
@@ -887,6 +913,9 @@ func (h *AdminUserHandler) toDTOWith(u *domain.User, st ports.UISettings, loc *t
 		TrafficLimitBytes:     u.TrafficLimitBytes,
 		IPLimit:               u.IPLimit,
 		DeviceLimit:           u.DeviceLimit,
+		InheritsTrafficLimit:  u.Limits.InheritsTrafficLimit(),
+		InheritsIPLimit:       u.Limits.InheritsIPLimit(),
+		InheritsDeviceLimit:   u.Limits.InheritsDeviceLimit(),
 		LifetimeUpBytes:       u.LifetimeUpBytes,
 		LifetimeDownBytes:     u.LifetimeDownBytes,
 		LifetimeTotalBytes:    u.LifetimeTotalBytes,

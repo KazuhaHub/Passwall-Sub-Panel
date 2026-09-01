@@ -173,3 +173,60 @@ func TestLimitsSurviveGroupDeletion(t *testing.T) {
 		t.Fatalf("IPLimit = %d, want 0 (unlimited) after the group vanished", got.IPLimit)
 	}
 }
+
+// The invariant the whole two-field design rests on.
+//
+// domain.User carries the RESOLVED limits beside the stored overrides, so a
+// user loaded from an inheriting row has TrafficLimitBytes = 100 GB in memory
+// while its stored override is still NULL. If a save wrote the resolved value
+// back, an edit that never mentioned limits would silently detach that user
+// from their group's policy — and it would look like nothing happened until
+// the group's quota changed and this one user did not follow.
+//
+// userFromDomain reads u.Limits and never the resolved fields. This pins it.
+func TestSaveDoesNotPinAnInheritingUser(t *testing.T) {
+	db, err := openTestDB(t)
+	if err != nil {
+		t.Skipf("no test DB: %v", err)
+	}
+	if err := EnsureSchema(db); err != nil {
+		t.Fatalf("schema: %v", err)
+	}
+	ur, gr := reposFor(t, db)
+	ctx := context.Background()
+
+	g := seedGroup(t, gr, "plan", domain.GroupLimits{
+		TrafficLimitBytes: i64p(100 << 30), IPLimit: intp(3), DeviceLimit: intp(2),
+	})
+	u := seedUser(t, ur, "follower", g.ID, domain.LimitOverrides{})
+
+	loaded, err := ur.GetByID(ctx, u.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.IPLimit != 3 {
+		t.Fatalf("precondition: resolved IPLimit = %d, want the group's 3", loaded.IPLimit)
+	}
+
+	// An ordinary edit that has nothing to do with limits.
+	loaded.DisplayName = "renamed"
+	if err := ur.Update(ctx, loaded); err != nil {
+		t.Fatal(err)
+	}
+
+	// Still inheriting, so a change to the group still reaches them.
+	again, err := ur.GetByID(ctx, u.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !again.Limits.InheritsTrafficLimit() || !again.Limits.InheritsIPLimit() || !again.Limits.InheritsDeviceLimit() {
+		t.Fatalf("saving an unrelated field pinned the user to their group's values: %+v", again.Limits)
+	}
+	g.Limits.IPLimit = intp(8)
+	if err := gr.Update(ctx, g); err != nil {
+		t.Fatal(err)
+	}
+	if final, _ := ur.GetByID(ctx, u.ID); final.IPLimit != 8 {
+		t.Fatalf("IPLimit = %d after the group moved to 8 — the user was detached", final.IPLimit)
+	}
+}

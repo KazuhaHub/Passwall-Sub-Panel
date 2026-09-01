@@ -45,11 +45,18 @@ export interface User {
    *  Use this for the date picker and table so the shown day matches what was
    *  set, independent of the browser's timezone. Empty for permanent users. */
   expire_date?: string
+  /** The RESOLVED entitlements: this user's overrides layered on their
+   *  group's policy. 0 = unlimited. Connection-cap enforcement is per-panel —
+   *  a panel lacking the capability simply leaves them unenforced. */
   traffic_limit_bytes: number
-  /** Connection caps. 0 = unlimited. Enforcement is per-panel — a panel that
-   *  lacks the capability simply leaves them unenforced. */
   ip_limit: number
   device_limit: number
+  /** Whether each resolved value above came from the GROUP rather than from
+   *  this user. The edit form must not present an inherited number as the
+   *  user's own, or saving it would silently pin them to it. */
+  inherits_traffic_limit?: boolean
+  inherits_ip_limit?: boolean
+  inherits_device_limit?: boolean
   /** Lifetime counters (never reset by period rolls). Read-only detail. */
   lifetime_up_bytes?: number
   lifetime_down_bytes?: number
@@ -266,6 +273,14 @@ export interface Group {
   remark?: string
   /** Force every local-password member of this group to enroll a second factor. */
   require_2fa?: boolean
+  /**
+   * The entitlement policy every member inherits unless they override it.
+   * null means the group states nothing (resolves to unlimited) — distinct
+   * from 0, which states "uncapped" explicitly.
+   */
+  traffic_limit_gb?: number | null
+  ip_limit?: number | null
+  device_limit?: number | null
   members: number
 }
 

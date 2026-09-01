@@ -64,6 +64,12 @@ interface FormState {
   custom_text: string
   remark: string
   require_2fa: boolean
+  // The group's entitlement policy. Empty string = the group states nothing,
+  // which is NOT the same as '0' (explicitly uncapped). Kept as strings so an
+  // empty input stays distinguishable from a typed zero.
+  traffic_limit_gb: string
+  ip_limit: string
+  device_limit: string
 }
 
 const EMPTY_FORM: FormState = {
@@ -71,6 +77,25 @@ const EMPTY_FORM: FormState = {
   regions: [], tags: [], servers: [], custom_text: '',
   remark: '',
   require_2fa: false,
+  traffic_limit_gb: '', ip_limit: '', device_limit: '',
+}
+
+// limitField turns one form input into the sparse-update shape.
+//
+// An empty input means "this group states nothing", and a sparse DTO cannot
+// express that with a value — omitting the key means "leave it alone", which is
+// the opposite. So an empty field sends the clear flag instead. A typed 0 is a
+// real value ("uncapped") and is sent as one; conflating the two is the same
+// mistake the whole third state exists to prevent.
+function limitField(
+  key: 'traffic_limit_gb' | 'ip_limit' | 'device_limit',
+  raw: string,
+  clearKey: 'clear_traffic_limit' | 'clear_ip_limit' | 'clear_device_limit',
+): Record<string, number | boolean> {
+  if (raw.trim() === '') return { [clearKey]: true }
+  const n = Number(raw)
+  if (!Number.isFinite(n)) return {}
+  return { [key]: n }
 }
 
 // parseTagConditions splits a stored tag_filter.tags array into the four
@@ -291,6 +316,9 @@ export default function GroupsView() {
       custom_text: parsed.custom.join(', '),
       remark: g.remark || '',
       require_2fa: !!g.require_2fa,
+      traffic_limit_gb: g.traffic_limit_gb == null ? '' : String(g.traffic_limit_gb),
+      ip_limit: g.ip_limit == null ? '' : String(g.ip_limit),
+      device_limit: g.device_limit == null ? '' : String(g.device_limit),
     })
     setScope(null)
     setDlgTab('access')
@@ -338,6 +366,11 @@ export default function GroupsView() {
           tag_filter: tagFilter,
           remark: form.remark,
           require_2fa: form.require_2fa,
+          // An emptied field must CLEAR the policy, and a sparse request
+          // cannot say that with a value — hence the explicit flags.
+          ...limitField('traffic_limit_gb', form.traffic_limit_gb, 'clear_traffic_limit'),
+          ...limitField('ip_limit', form.ip_limit, 'clear_ip_limit'),
+          ...limitField('device_limit', form.device_limit, 'clear_device_limit'),
         })
         await applyScopeOverrides(editing.id)
         pushSnack(t('admin:groups.toast.updated'), 'success')
@@ -351,6 +384,11 @@ export default function GroupsView() {
           tag_filter: tagFilter,
           remark: form.remark,
           require_2fa: form.require_2fa,
+          // On create an empty field is simply omitted, which is already
+          // "states nothing" — no clear flag needed.
+          ...(form.traffic_limit_gb.trim() === '' ? {} : { traffic_limit_gb: Number(form.traffic_limit_gb) }),
+          ...(form.ip_limit.trim() === '' ? {} : { ip_limit: Number(form.ip_limit) }),
+          ...(form.device_limit.trim() === '' ? {} : { device_limit: Number(form.device_limit) }),
         })
         pushSnack(t('admin:groups.toast.created'), 'success')
       }
@@ -699,6 +737,29 @@ export default function GroupsView() {
 
             {dlgTab === 'policies' && (
               <>
+                <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                  {t('admin:groups.field.limits_title', { defaultValue: '本组配额（成员未单独设置时继承）' })}
+                </Typography>
+                <Typography variant="caption" color="text.secondary" sx={{ mt: -0.5, mb: 0.5 }}>
+                  {t('admin:groups.field.limits_hint', { defaultValue: '留空 = 本组不作规定（不限）；填 0 = 明确不限。成员自己填了值就以成员的为准。' })}
+                </Typography>
+                <Box sx={{ display: 'flex', gap: 1.5, flexWrap: 'wrap' }}>
+                  <TextField type="number" size="small" sx={{ flex: '1 1 160px' }}
+                    label={t('admin:groups.field.traffic_limit_gb', { defaultValue: '流量上限 (GB)' })}
+                    value={form.traffic_limit_gb}
+                    onChange={e => setForm({ ...form, traffic_limit_gb: e.target.value })}
+                    slotProps={{ htmlInput: { min: 0, step: 'any' } }} />
+                  <TextField type="number" size="small" sx={{ flex: '1 1 160px' }}
+                    label={t('admin:groups.field.ip_limit', { defaultValue: '并发 IP 上限' })}
+                    value={form.ip_limit}
+                    onChange={e => setForm({ ...form, ip_limit: e.target.value })}
+                    slotProps={{ htmlInput: { min: 0, step: 1 } }} />
+                  <TextField type="number" size="small" sx={{ flex: '1 1 160px' }}
+                    label={t('admin:groups.field.device_limit', { defaultValue: '设备数上限' })}
+                    value={form.device_limit}
+                    onChange={e => setForm({ ...form, device_limit: e.target.value })}
+                    slotProps={{ htmlInput: { min: 0, step: 1 } }} />
+                </Box>
                 <FormControlLabel
                   label={t('admin:groups.field.require_2fa', { defaultValue: '强制本组成员启用两步验证' })}
                   control={

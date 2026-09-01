@@ -1292,6 +1292,7 @@
       "ip_limit": "并发 IP 上限",
       "device_limit": "设备数上限",
       "limit_zero_hint": "0 = 不限",
+      "inherit_from_group": "跟随分组",
       "limit_unsupported": "以下面板不支持，落在其上的客户端不会生效：{{panels}}",
       "remark": "备注"
     },
@@ -1533,7 +1534,12 @@
       "node": "Node",
       "custom_conditions": "自定义条件",
       "remark": "备注",
-      "require_2fa": "强制本组成员启用两步验证"
+      "require_2fa": "强制本组成员启用两步验证",
+      "limits_title": "本组配额（成员未单独设置时继承）",
+      "limits_hint": "留空 = 本组不作规定（不限）；填 0 = 明确不限。成员自己填了值就以成员的为准。",
+      "traffic_limit_gb": "流量上限 (GB)",
+      "ip_limit": "并发 IP 上限",
+      "device_limit": "设备数上限"
     },
     "scope": {
       "title": "按组覆盖（否则继承全局）",
