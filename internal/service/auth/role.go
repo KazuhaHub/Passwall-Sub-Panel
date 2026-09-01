@@ -108,17 +108,29 @@ func ResolveRoleForSSO(
 }
 
 func ruleMatches(r config.SSORoleRule, groupsAttrName string, attrs map[string][]string, groups []string) bool {
+	return attributeMatches(r.Attribute, r.Value, groupsAttrName, attrs, groups)
+}
+
+// attributeMatches is the shared predicate behind every SSO rule kind:
+// role rules and group rules alike. Kept as one function on purpose —
+// two rule types that claim to match "the same way" but each own a copy
+// of the matcher will drift, and the first divergence would be silent
+// (a rule that fires for roles but not for groups, or the reverse).
+func attributeMatches(attribute, value, groupsAttrName string, attrs map[string][]string, groups []string) bool {
 	// An empty rule Value must never match. Empty strings legitimately reach the
 	// values slice (an []any groups claim, an empty SAML <AttributeValue/>), so
 	// without this guard a rule with a blank Value — an easy admin mistake on a
 	// role-granting rule — would match any login whose groups attribute carries
 	// an empty element, a privilege-escalation footgun.
-	if r.Value == "" {
+	//
+	// The same guard protects group rules, where a blank Value would silently
+	// re-home every such login into that rule's OU.
+	if value == "" {
 		return false
 	}
-	values := lookupRuleValues(r.Attribute, groupsAttrName, attrs, groups)
+	values := lookupRuleValues(attribute, groupsAttrName, attrs, groups)
 	for _, v := range values {
-		if v == r.Value {
+		if v == value {
 			return true
 		}
 	}

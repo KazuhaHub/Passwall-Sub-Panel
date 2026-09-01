@@ -31,6 +31,12 @@ type OIDCConfig struct {
 	// its own Keep flag for the "no match" branch.
 	RoleRules []SSORoleRule `yaml:"role_rules" json:"role_rules"`
 
+	// GroupRules place a principal into an OU from their IdP
+	// attributes: first match wins, DefaultGroupSlug is the fallback,
+	// and — unlike a create-time-only mapping — they are re-evaluated on
+	// every login so a revoked IdP group actually costs the OU it backed.
+	GroupRules []SSOGroupRule `yaml:"group_rules" json:"group_rules"`
+
 	DefaultGroupSlug string `yaml:"default_group_slug" json:"default_group_slug"`
 
 	// AllowAutoCreate: see SAMLConfig.AllowAutoCreate. Off by default;

@@ -112,6 +112,7 @@ func (h *AuthSAMLHandler) ACS(c *gin.Context) {
 	}
 	if cfg != nil {
 		in.AllowAutoCreate = cfg.AllowAutoCreate
+		in.GroupRules = cfg.GroupRules
 		in.DefaultGroupSlug = cfg.DefaultGroupSlug
 		in.DefaultExpireDays = cfg.NewUserDefaults.ExpireDays
 		in.DefaultLimitBytes = cfg.NewUserDefaults.TrafficLimitBytes
