@@ -50,25 +50,31 @@ type User struct {
 	// SAML, the `sub` claim for OIDC. For local accounts we store the
 	// UPN here so the (provider, subject) composite remains unique
 	// across local rows too — no NULL handling needed.
-	SSOSubject        string
-	Role              Role
-	SubToken          string // 32-byte base64url, subscription URL credential
-	UUID              string // v4, used as the derivation seed for proxy passwords
-	GroupID           int64
-	EnabledRuleSets   []string
-	PersonalRules     string
-	ExpireAt          *time.Time
-	TrafficLimitBytes int64 // 0 = unlimited
-	// IPLimit caps concurrent source IPs; DeviceLimit caps bound devices.
-	// 0 = unlimited for both, matching TrafficLimitBytes above and the
-	// panel-side encoding (the panel treats 0 as "no cap"), so a fresh row
-	// and an upgraded row both mean "unlimited" with no backfill.
+	SSOSubject      string
+	Role            Role
+	SubToken        string // 32-byte base64url, subscription URL credential
+	UUID            string // v4, used as the derivation seed for proxy passwords
+	GroupID         int64
+	EnabledRuleSets []string
+	PersonalRules   string
+	ExpireAt        *time.Time
+	// TrafficLimitBytes / IPLimit / DeviceLimit are the RESOLVED entitlements:
+	// the user's own override if they have one, else their group's, else
+	// unlimited. 0 = unlimited throughout, matching the panel-side encoding.
 	//
-	// Per-user rather than per-group: groups carry node selection and layout,
-	// never quotas, and TrafficLimitBytes already set that precedent. See
-	// docs/connection-limits.md.
-	IPLimit            int
-	DeviceLimit        int
+	// Read these when you want the number. Do NOT write them expecting it to
+	// persist — the stored value is Limits below, and a resolved value written
+	// back would convert an inheriting user into an explicitly-pinned one.
+	// The admin write path is a sparse pointer DTO (UpdateProfileInput) for
+	// exactly this reason: a request that does not mention a limit does not
+	// touch it. See domain/limits.go.
+	TrafficLimitBytes int64
+	IPLimit           int
+	DeviceLimit       int
+	// Limits is what is actually stored on the row: per-field overrides where
+	// nil means "inherit from the group". This is the field the admin API and
+	// the UI edit; the three above are derived from it on load.
+	Limits             LimitOverrides
 	TrafficResetPeriod ResetPeriod
 	TrafficPeriodStart *time.Time
 	// LifetimeUpBytes / LifetimeDownBytes / LifetimeTotalBytes accumulate
@@ -283,7 +289,16 @@ type Group struct {
 	// Require2FA forces every local-password member of this group to enroll a
 	// second factor (TOTP or passkey) before using the panel.
 	Require2FA bool
-	CreatedAt  time.Time
+	// Limits is the group's entitlement policy — the traffic quota and the two
+	// connection caps every member inherits unless they override it. A nil
+	// field states nothing and resolves to unlimited.
+	//
+	// This is the group carrying policy, which it already did (Require2FA
+	// above, and the sparse setting overrides in OverridableScopeKeys). The
+	// older claim that groups only carry node selection and layout was never
+	// quite true and is no longer true at all.
+	Limits    GroupLimits
+	CreatedAt time.Time
 }
 
 // TagFilter expresses a node selection rule.

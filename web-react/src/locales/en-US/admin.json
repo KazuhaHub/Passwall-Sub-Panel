@@ -1292,6 +1292,8 @@
       "ip_limit": "Concurrent IP limit",
       "device_limit": "Device limit",
       "limit_zero_hint": "0 = unlimited",
+      "inherit_from_group": "Follow group",
+      "limit_unsupported": "Not enforceable on: {{panels}} — clients placed there ignore this.",
       "remark": "Remark"
     },
     "role": {
@@ -1532,7 +1534,12 @@
       "node": "Node",
       "custom_conditions": "Custom conditions",
       "remark": "Remark",
-      "require_2fa": "Require this group's members to set up two-factor auth"
+      "require_2fa": "Require this group's members to set up two-factor auth",
+      "limits_title": "Group entitlements (inherited unless a member overrides)",
+      "limits_hint": "Empty = the group states nothing (unlimited). 0 = explicitly uncapped. A member's own value always wins.",
+      "traffic_limit_gb": "Traffic limit (GB)",
+      "ip_limit": "Concurrent IP limit",
+      "device_limit": "Device limit"
     },
     "scope": {
       "title": "Per-group overrides (else inherit global)",

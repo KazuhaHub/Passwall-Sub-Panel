@@ -5,6 +5,7 @@ import {
   Button,
   Card,
   Checkbox,
+  FormControlLabel,
   CircularProgress,
   Dialog,
   DialogActions,
@@ -70,6 +71,8 @@ import {
 } from '@/api/users'
 import type { UpdateUserRequest } from '@/api/users'
 import { listGroups } from '@/api/groups'
+import { listServers, type Server } from '@/api/servers'
+import { unenforceablePanels } from '@/utils/capabilities'
 import { runReconcile } from '@/api/reconcile'
 import { setUserTraffic, topTraffic, type TrafficRow } from '@/api/traffic'
 import type { Group, ResetPeriod, Role, User } from '@/api/types'
@@ -132,6 +135,13 @@ interface EditForm {
   traffic_reset_period: ResetPeriod
   ip_limit: number
   device_limit: number
+  // Whether each limit comes from the group. While true the number beside it
+  // is the INHERITED value shown read-only — submitting must not send it, or
+  // an ordinary edit would silently pin the user to whatever their group
+  // happened to say at that moment.
+  inherit_traffic: boolean
+  inherit_ip: boolean
+  inherit_device: boolean
   remark: string
   // Period-used edit: initialised from the latest poll snapshot. If the
   // admin actually moves it (epsilon check), submitEdit calls setUserTraffic
@@ -166,6 +176,7 @@ const EMPTY_EDIT: EditForm = {
   display_name: '', email: '', group_id: '', role: 'user',
   expire_mode: 'date', expire_at: '', traffic_limit_gb: 0,
   traffic_reset_period: 'monthly', ip_limit: 0, device_limit: 0, remark: '',
+  inherit_traffic: false, inherit_ip: false, inherit_device: false,
   period_used_gb: 0, period_used_initial: 0, emergency_used_count: 0,
   enabled: true,
 }
@@ -247,6 +258,11 @@ export default function UsersView() {
   const [search, setSearch] = useState('')
   const [groupFilter, setGroupFilter] = useState<number | ''>('')
   const [groups, setGroups] = useState<Group[]>([])
+  // Panels, purely so the two connection-cap fields can say when a value
+  // would be accepted and then not enforced. Best-effort: a failed load
+  // leaves the list empty, which suppresses the hint rather than
+  // inventing one.
+  const [servers, setServers] = useState<Server[]>([])
   const [reconcileBusy, setReconcileBusy] = useState(false)
   // Paged user list. The fetcher closes over groupFilter so changing
   // the group filter triggers a re-fetch through the hook's normal
@@ -360,7 +376,7 @@ export default function UsersView() {
   const someChecked = selected.size > 0 && !allChecked
   const selectedRows = items.filter(u => selected.has(u.id))
 
-  useEffect(() => { void loadGroups() }, [])
+  useEffect(() => { void loadGroups(); void loadServers() }, [])
   // Reset row selection whenever the visible page changes — selection
   // state is per-id, but admin scrolling away from rows they had
   // checked shouldn't carry the action forward.
@@ -399,6 +415,41 @@ export default function UsersView() {
 
   async function loadGroups() {
     try { const res = await listGroups(); setGroups(res.items) } catch { /* toast */ }
+  }
+
+  // A cap the operator can set but the fleet cannot enforce is exactly the
+  // failure shape the capability list exists to prevent — the write succeeds
+  // and nothing happens. The server counts it (psp_capability_gap_total), but
+  // a counter is not where the person typing the value is looking.
+  // The inherit toggle. Ticking it hands the field back to the group; the
+  // number stays visible but read-only so the operator can see WHAT they are
+  // inheriting rather than an empty box.
+  function inheritToggle(checked: boolean, onChange: (v: boolean) => void) {
+    return (
+      <FormControlLabel
+        sx={{ ml: 0, mt: -0.5 }}
+        control={<Checkbox size="small" checked={checked} onChange={(_, v) => onChange(v)} />}
+        label={
+          <Typography variant="caption" color="text.secondary">
+            {t('admin:users.field.inherit_from_group', { defaultValue: '跟随分组' })}
+          </Typography>
+        }
+      />
+    )
+  }
+
+  function capHint(limit: number, capability: 'client.iplimit' | 'client.devicelimit') {
+    const panels = unenforceablePanels(limit, servers, capability)
+    if (!panels.length) return null
+    return (
+      <Box component="span" sx={{ color: 'warning.main' }}>
+        {t('admin:users.field.limit_unsupported', { panels: panels.join('/ ') })}
+      </Box>
+    )
+  }
+
+  async function loadServers() {
+    try { const res = await listServers({ page: 1, page_size: 200 }); setServers(res.items) } catch { /* hint is optional */ }
   }
 
   // load() is the post-mutation reload entry (create / delete / batch
@@ -488,6 +539,9 @@ export default function UsersView() {
       traffic_limit_gb: bytesToGB(u.traffic_limit_bytes),
       ip_limit: u.ip_limit,
       device_limit: u.device_limit,
+      inherit_traffic: !!u.inherits_traffic_limit,
+      inherit_ip: !!u.inherits_ip_limit,
+      inherit_device: !!u.inherits_device_limit,
       traffic_reset_period: u.traffic_reset_period,
       remark: u.remark ?? '',
       period_used_gb: usedGB,
@@ -510,9 +564,10 @@ export default function UsersView() {
       // takes decimals (1.23 GB is the natural way to show 1320 MB of
       // accrued usage — integer-only would reject the field whenever a
       // real user has period usage).
-      traffic_limit_gb: validateNonNegativeNumber(f.traffic_limit_gb),
-      ip_limit: validateNonNegativeInt(f.ip_limit),
-      device_limit: validateNonNegativeInt(f.device_limit),
+      // An inherited field is not this user's to be wrong about.
+      traffic_limit_gb: f.inherit_traffic ? '' : validateNonNegativeNumber(f.traffic_limit_gb),
+      ip_limit: f.inherit_ip ? '' : validateNonNegativeInt(f.ip_limit),
+      device_limit: f.inherit_device ? '' : validateNonNegativeInt(f.device_limit),
       period_used_gb: validateNonNegativeNumber(f.period_used_gb),
     }
   }
@@ -536,12 +591,22 @@ export default function UsersView() {
     try {
       const req: UpdateUserRequest = {
         group_id: editForm.group_id as number, email: editForm.email,
-        traffic_limit_gb: editForm.traffic_limit_gb,
-        ip_limit: editForm.ip_limit,
-        device_limit: editForm.device_limit,
         traffic_reset_period: editForm.traffic_reset_period,
         remark: editForm.remark, display_name: editForm.display_name,
         role: editForm.role,
+        // Send the value OR the inherit flag, never the value while
+        // inheriting: the number in the field is then the GROUP's, and
+        // echoing it back would detach the user from the policy without
+        // anyone asking for that.
+        ...(editForm.inherit_traffic
+          ? { inherit_traffic_limit: true }
+          : { traffic_limit_gb: editForm.traffic_limit_gb }),
+        ...(editForm.inherit_ip
+          ? { inherit_ip_limit: true }
+          : { ip_limit: editForm.ip_limit }),
+        ...(editForm.inherit_device
+          ? { inherit_device_limit: true }
+          : { device_limit: editForm.device_limit }),
       }
       if (editForm.expire_mode === 'permanent') req.clear_expire = true
       // Send the bare YYYY-MM-DD; the backend anchors it to end-of-day in
@@ -1367,14 +1432,14 @@ export default function UsersView() {
                 value={createForm.ip_limit}
                 onChange={e => setCreateForm({ ...createForm, ip_limit: Number(e.target.value) || 0 })}
                 error={!!createErr.ip_limit}
-                helperText={createErr.ip_limit ? t(`admin:${createErr.ip_limit}`) : t('admin:users.field.limit_zero_hint')}
+                helperText={createErr.ip_limit ? t(`admin:${createErr.ip_limit}`) : (capHint(createForm.ip_limit, 'client.iplimit') ?? t('admin:users.field.limit_zero_hint'))}
                 sx={{ flex: '1 1 180px' }}
                 slotProps={{ htmlInput: { min: 0, step: 1 } }} />
               <TextField type="number" label={t('admin:users.field.device_limit')}
                 value={createForm.device_limit}
                 onChange={e => setCreateForm({ ...createForm, device_limit: Number(e.target.value) || 0 })}
                 error={!!createErr.device_limit}
-                helperText={createErr.device_limit ? t(`admin:${createErr.device_limit}`) : t('admin:users.field.limit_zero_hint')}
+                helperText={createErr.device_limit ? t(`admin:${createErr.device_limit}`) : (capHint(createForm.device_limit, 'client.devicelimit') ?? t('admin:users.field.limit_zero_hint'))}
                 sx={{ flex: '1 1 180px' }}
                 slotProps={{ htmlInput: { min: 0, step: 1 } }} />
             </Box>
@@ -1711,29 +1776,36 @@ export default function UsersView() {
               )}
             </Box>
             <Box sx={{ gridColumn: '1 / -1', display: 'flex', gap: 1.5, flexWrap: 'wrap' }}>
-              <TextField type="number" label={t('admin:users.field.traffic_limit_gb')}
-                value={editForm.traffic_limit_gb}
-                onChange={e => setEditForm({ ...editForm, traffic_limit_gb: Number(e.target.value) })}
-                error={!!editErr.traffic_limit_gb}
-                helperText={editErr.traffic_limit_gb ? t(`admin:${editErr.traffic_limit_gb}`) : ''}
-                sx={{ flex: '1 1 200px' }}
-                slotProps={{
-                  htmlInput: { min: 0, step: 'any' }
-                }} />
-              <TextField type="number" label={t('admin:users.field.ip_limit')}
-                value={editForm.ip_limit}
-                onChange={e => setEditForm({ ...editForm, ip_limit: Number(e.target.value) || 0 })}
-                error={!!editErr.ip_limit}
-                helperText={editErr.ip_limit ? t(`admin:${editErr.ip_limit}`) : t('admin:users.field.limit_zero_hint')}
-                sx={{ flex: '1 1 200px' }}
-                slotProps={{ htmlInput: { min: 0, step: 1 } }} />
-              <TextField type="number" label={t('admin:users.field.device_limit')}
-                value={editForm.device_limit}
-                onChange={e => setEditForm({ ...editForm, device_limit: Number(e.target.value) || 0 })}
-                error={!!editErr.device_limit}
-                helperText={editErr.device_limit ? t(`admin:${editErr.device_limit}`) : t('admin:users.field.limit_zero_hint')}
-                sx={{ flex: '1 1 200px' }}
-                slotProps={{ htmlInput: { min: 0, step: 1 } }} />
+              <Box sx={{ flex: '1 1 200px', display: 'flex', flexDirection: 'column' }}>
+                <TextField type="number" label={t('admin:users.field.traffic_limit_gb')}
+                  value={editForm.traffic_limit_gb}
+                  disabled={editForm.inherit_traffic}
+                  onChange={e => setEditForm({ ...editForm, traffic_limit_gb: Number(e.target.value) })}
+                  error={!!editErr.traffic_limit_gb}
+                  helperText={editErr.traffic_limit_gb ? t(`admin:${editErr.traffic_limit_gb}`) : ''}
+                  slotProps={{ htmlInput: { min: 0, step: 'any' } }} />
+                {inheritToggle(editForm.inherit_traffic, v => setEditForm({ ...editForm, inherit_traffic: v }))}
+              </Box>
+              <Box sx={{ flex: '1 1 200px', display: 'flex', flexDirection: 'column' }}>
+                <TextField type="number" label={t('admin:users.field.ip_limit')}
+                  value={editForm.ip_limit}
+                  disabled={editForm.inherit_ip}
+                  onChange={e => setEditForm({ ...editForm, ip_limit: Number(e.target.value) || 0 })}
+                  error={!!editErr.ip_limit}
+                  helperText={editErr.ip_limit ? t(`admin:${editErr.ip_limit}`) : (capHint(editForm.ip_limit, 'client.iplimit') ?? t('admin:users.field.limit_zero_hint'))}
+                  slotProps={{ htmlInput: { min: 0, step: 1 } }} />
+                {inheritToggle(editForm.inherit_ip, v => setEditForm({ ...editForm, inherit_ip: v }))}
+              </Box>
+              <Box sx={{ flex: '1 1 200px', display: 'flex', flexDirection: 'column' }}>
+                <TextField type="number" label={t('admin:users.field.device_limit')}
+                  value={editForm.device_limit}
+                  disabled={editForm.inherit_device}
+                  onChange={e => setEditForm({ ...editForm, device_limit: Number(e.target.value) || 0 })}
+                  error={!!editErr.device_limit}
+                  helperText={editErr.device_limit ? t(`admin:${editErr.device_limit}`) : (capHint(editForm.device_limit, 'client.devicelimit') ?? t('admin:users.field.limit_zero_hint'))}
+                  slotProps={{ htmlInput: { min: 0, step: 1 } }} />
+                {inheritToggle(editForm.inherit_device, v => setEditForm({ ...editForm, inherit_device: v }))}
+              </Box>
               <TextField type="number" label={t('admin:users.field.period_used_gb')}
                 value={editForm.period_used_gb}
                 onChange={e => setEditForm({ ...editForm, period_used_gb: Number(e.target.value) })}

@@ -13,7 +13,31 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 )
 
-type userRepo struct{ db *gorm.DB }
+type userRepo struct {
+	db *gorm.DB
+	// groupLimits resolves each loaded user's effective entitlements from
+	// their stored overrides plus their group's policy. Nil-safe: a bare
+	// userRepo (tests) resolves every user to unlimited, which is what the
+	// pre-inheritance behaviour was.
+	groupLimits *groupLimitsCache
+}
+
+// resolve fills u's effective limit fields. Every userRow -> domain.User
+// conversion in this file goes through resolve or resolveAll; a path that
+// skips it hands the caller a user whose limits all read as unlimited.
+func (r *userRepo) resolve(u *domain.User) *domain.User {
+	if r.groupLimits == nil {
+		return u
+	}
+	return r.groupLimits.resolve(u)
+}
+
+func (r *userRepo) resolveAll(us []*domain.User) []*domain.User {
+	if r.groupLimits == nil {
+		return us
+	}
+	return r.groupLimits.resolveAll(us)
+}
 
 func (r *userRepo) Create(ctx context.Context, u *domain.User) error {
 	row := userFromDomain(u)
@@ -224,7 +248,7 @@ func (r *userRepo) ListExpiringBetween(ctx context.Context, from, to time.Time, 
 	}
 	out := make([]*domain.User, len(rows))
 	for i := range rows {
-		out[i] = rows[i].toDomain()
+		out[i] = r.resolve(rows[i].toDomain())
 	}
 	return out, nil
 }
@@ -429,7 +453,7 @@ func (r *userRepo) GetByID(ctx context.Context, id int64) (*domain.User, error) 
 	if err := r.db.WithContext(ctx).First(&row, id).Error; err != nil {
 		return nil, wrapNotFound(err)
 	}
-	return row.toDomain(), nil
+	return r.resolve(row.toDomain()), nil
 }
 
 // GetByUPN resolves a login username, tolerating the case and whitespace
@@ -459,7 +483,7 @@ func (r *userRepo) GetByUPN(ctx context.Context, upn string) (*domain.User, erro
 	trimmed := strings.TrimSpace(upn)
 	row, err := r.getByUPNExact(ctx, trimmed)
 	if err == nil {
-		return row.toDomain(), nil
+		return r.resolve(row.toDomain()), nil
 	}
 	if !errors.Is(err, domain.ErrNotFound) {
 		// A transport / driver failure must not be silently retried as if it
@@ -475,7 +499,7 @@ func (r *userRepo) GetByUPN(ctx context.Context, upn string) (*domain.User, erro
 	if err != nil {
 		return nil, err
 	}
-	return row.toDomain(), nil
+	return r.resolve(row.toDomain()), nil
 }
 
 func (r *userRepo) getByUPNExact(ctx context.Context, upn string) (*userRow, error) {
@@ -525,7 +549,7 @@ func (r *userRepo) GetBySSO(ctx context.Context, provider, subject string) (*dom
 		First(&row).Error; err != nil {
 		return nil, wrapNotFound(err)
 	}
-	return row.toDomain(), nil
+	return r.resolve(row.toDomain()), nil
 }
 
 func (r *userRepo) GetBySubToken(ctx context.Context, token string) (*domain.User, error) {
@@ -533,7 +557,7 @@ func (r *userRepo) GetBySubToken(ctx context.Context, token string) (*domain.Use
 	if err := r.db.WithContext(ctx).Where("sub_token = ?", token).First(&row).Error; err != nil {
 		return nil, wrapNotFound(err)
 	}
-	return row.toDomain(), nil
+	return r.resolve(row.toDomain()), nil
 }
 
 func (r *userRepo) List(ctx context.Context, filter ports.UserFilter) ([]*domain.User, int64, error) {
@@ -567,7 +591,7 @@ func (r *userRepo) List(ctx context.Context, filter ports.UserFilter) ([]*domain
 	}
 	out := make([]*domain.User, len(rows))
 	for i := range rows {
-		out[i] = rows[i].toDomain()
+		out[i] = r.resolve(rows[i].toDomain())
 	}
 	return out, total, nil
 }
@@ -604,7 +628,7 @@ func (r *userRepo) ListByGroup(ctx context.Context, groupID int64) ([]*domain.Us
 	}
 	out := make([]*domain.User, len(rows))
 	for i := range rows {
-		out[i] = rows[i].toDomain()
+		out[i] = r.resolve(rows[i].toDomain())
 	}
 	return out, nil
 }

@@ -670,9 +670,7 @@ func (s *Service) CreateLocal(ctx context.Context, in CreateLocalInput) (*Create
 		UUID:               idgen.NewUUID(),
 		GroupID:            in.GroupID,
 		ExpireAt:           in.ExpireAt,
-		TrafficLimitBytes:  in.TrafficLimitBytes,
-		IPLimit:            in.IPLimit,
-		DeviceLimit:        in.DeviceLimit,
+		Limits:             domain.LimitOverridesFromCreate(in.TrafficLimitBytes, in.IPLimit, in.DeviceLimit),
 		TrafficResetPeriod: resetPeriod,
 		TrafficPeriodStart: &now,
 		Remark:             in.Remark,
@@ -937,7 +935,7 @@ func (s *Service) EnsureSSO(ctx context.Context, in EnsureSSOInput) (*domain.Use
 		UUID:               idgen.NewUUID(),
 		GroupID:            groupID,
 		ExpireAt:           expire,
-		TrafficLimitBytes:  in.DefaultLimitBytes,
+		Limits:             domain.LimitOverridesFromCreate(in.DefaultLimitBytes, 0, 0),
 		TrafficResetPeriod: resetPeriod,
 		TrafficPeriodStart: &now,
 		DisplayName:        in.DisplayName,
@@ -1405,17 +1403,25 @@ func validateConnLimit(field string, v int) error {
 }
 
 type UpdateInput struct {
-	GroupID            *int64
-	Role               *domain.Role
-	Email              *string
-	ExpireAt           *time.Time
-	ClearExpire        bool
-	TrafficLimitBytes  *int64
-	IPLimit            *int
-	DeviceLimit        *int
-	TrafficResetPeriod *domain.ResetPeriod
-	Remark             *string
-	DisplayName        *string
+	GroupID           *int64
+	Role              *domain.Role
+	Email             *string
+	ExpireAt          *time.Time
+	ClearExpire       bool
+	TrafficLimitBytes *int64
+	IPLimit           *int
+	DeviceLimit       *int
+	// A nil limit above means "leave this field alone"; it cannot also mean
+	// "go back to inheriting from the group", so each gets an explicit clear
+	// flag. Same shape as ClearExpire above, and for the same reason: a sparse
+	// DTO needs a separate signal for "unset it" or the value can only ever be
+	// changed, never removed. A flag wins over its value if both are sent.
+	InheritTrafficLimit bool
+	InheritIPLimit      bool
+	InheritDeviceLimit  bool
+	TrafficResetPeriod  *domain.ResetPeriod
+	Remark              *string
+	DisplayName         *string
 }
 
 type EmergencyAccessResult struct {
@@ -1498,33 +1504,61 @@ func (s *Service) UpdateProfile(ctx context.Context, userID int64, in UpdateInpu
 		u.ExpireAt = in.ExpireAt
 		expireChanged = true
 	}
-	if in.TrafficLimitBytes != nil {
-		if *in.TrafficLimitBytes != u.TrafficLimitBytes {
+	// These write u.Limits (what is stored), never the resolved u.*Limit
+	// fields (what was loaded). Writing the resolved value back would pin an
+	// inheriting user to whatever their group happened to say at that moment,
+	// silently detaching them from the policy.
+	//
+	// The change flags compare against the RESOLVED value, because what
+	// decides whether a push is needed is the effective number the panel
+	// holds. Clearing to inherit always sets the flag: the resolved value may
+	// move and this function cannot see the group to know. An extra push is
+	// cheap; a missed one leaves the panel enforcing a stale cap.
+	if in.InheritTrafficLimit {
+		if u.Limits.TrafficLimitBytes != nil {
 			trafficLimitChanged = true
 		}
-		u.TrafficLimitBytes = *in.TrafficLimitBytes
+		u.Limits.TrafficLimitBytes = nil
+	} else if in.TrafficLimitBytes != nil {
+		if *in.TrafficLimitBytes != u.TrafficLimitBytes || u.Limits.TrafficLimitBytes == nil {
+			trafficLimitChanged = true
+		}
+		v := *in.TrafficLimitBytes
+		u.Limits.TrafficLimitBytes = &v
 	}
 	// Connection caps ride the same push trigger as the traffic limit: they
 	// are panel-enforced, so a change is only real once it reaches the panel.
 	// Reusing the flag rather than adding a parallel one keeps a single edit
 	// that touches both to a single push.
-	if in.IPLimit != nil {
+	if in.InheritIPLimit {
+		if u.Limits.IPLimit != nil {
+			trafficLimitChanged = true
+		}
+		u.Limits.IPLimit = nil
+	} else if in.IPLimit != nil {
 		if err := validateConnLimit("ip_limit", *in.IPLimit); err != nil {
 			return err
 		}
-		if *in.IPLimit != u.IPLimit {
+		if *in.IPLimit != u.IPLimit || u.Limits.IPLimit == nil {
 			trafficLimitChanged = true
 		}
-		u.IPLimit = *in.IPLimit
+		v := *in.IPLimit
+		u.Limits.IPLimit = &v
 	}
-	if in.DeviceLimit != nil {
+	if in.InheritDeviceLimit {
+		if u.Limits.DeviceLimit != nil {
+			trafficLimitChanged = true
+		}
+		u.Limits.DeviceLimit = nil
+	} else if in.DeviceLimit != nil {
 		if err := validateConnLimit("device_limit", *in.DeviceLimit); err != nil {
 			return err
 		}
-		if *in.DeviceLimit != u.DeviceLimit {
+		if *in.DeviceLimit != u.DeviceLimit || u.Limits.DeviceLimit == nil {
 			trafficLimitChanged = true
 		}
-		u.DeviceLimit = *in.DeviceLimit
+		v := *in.DeviceLimit
+		u.Limits.DeviceLimit = &v
 	}
 	if in.TrafficResetPeriod != nil {
 		u.TrafficResetPeriod = *in.TrafficResetPeriod
@@ -1541,6 +1575,16 @@ func (s *Service) UpdateProfile(ctx context.Context, userID int64, in UpdateInpu
 	if err := s.updateUser(ctx, u); err != nil {
 		return err
 	}
+	// The limit block above wrote u.Limits (what is stored); the resolved
+	// fields beside it still hold what was loaded. Everything below reads the
+	// RESOLVED quota — the traffic auto-disable check most of all — so they
+	// must be brought up to date here, before the first reader, not on the way
+	// out to the push.
+	//
+	// Getting this wrong is not subtle: raising an exhausted user's quota
+	// would leave TrafficExceeded() judging against the OLD limit, so the
+	// service stayed disabled and the admin's edit appeared to do nothing.
+	s.resolveUserLimits(ctx, u)
 	now := time.Now()
 	serviceStateChanged := false
 	if u.ServiceDisabledReason == domain.DisabledExpired && !u.IsExpired(now) {
@@ -2806,4 +2850,29 @@ func extractDefaultFlow(settingsJSON string) string {
 		}
 	}
 	return ""
+}
+
+// resolveUserLimits refreshes u's effective entitlement fields from its stored
+// overrides plus its group's policy.
+//
+// The repository does this on every load, so it is only needed where a user is
+// held across a mutation of u.Limits — UpdateProfile, which then reads the
+// resolved quota to decide whether a traffic auto-disable should lift, and
+// pushes the resolved caps to the panels.
+//
+// A group that cannot be read resolves to "states nothing", i.e. unlimited.
+// Same reasoning as the repository's cache: cutting a paying user off because
+// of a transient failure is the worse mistake, and PSP meters independently.
+func (s *Service) resolveUserLimits(ctx context.Context, u *domain.User) {
+	if u == nil {
+		return
+	}
+	var gl domain.GroupLimits
+	if u.GroupID != 0 && s.groups != nil {
+		if g, err := s.groups.GetByID(ctx, u.GroupID); err == nil && g != nil {
+			gl = g.Limits
+		}
+	}
+	eff := domain.ResolveLimits(u.Limits, gl)
+	u.TrafficLimitBytes, u.IPLimit, u.DeviceLimit = eff.TrafficLimitBytes, eff.IPLimit, eff.DeviceLimit
 }

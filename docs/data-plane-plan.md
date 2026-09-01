@@ -199,7 +199,16 @@ stored < want                          → 立刻写（不对称，见下）
 
 **已定的那一半**：不是「多烧多少字节」而是「多用多少时间」——剩余额度就是剩下的时间，取它的固定比例即取那段时间的固定比例，于是这个数与用户速率、套餐大小、使用模式都无关：**PSP 停止运行时，用户最多多用 5% 的时间。**
 
-**待检验的那一半**：`psp_lifecycle_quota_band_skip_total` 与 `psp_lifecycle_sync_skipped_total` 的比值。沙箱压力模型（每客户端连续 50 周期维持 3.6–25 Mbps）下 P=2 从 0% 升到 84%、P=3 升到 65%；真实机群应当好于此，但那要 Phase 0 的窗口说了算。
+**已检验的那一半** ✅：44.5 小时生产窗口（v3.9.2-beta.9，`gap 38min` 未重启）。
+
+```
+total=35355  skipped=35252  write=103  err=0   → skip 命中率 99.7%（无 band 时 33.9%）
+band_skip_total / sync_skipped_total = 28201 / 35252 = 80.0%
+```
+
+**写入 473.3/小时 → 2.3/小时，204 倍。** skip 的另外 20% 是配额本就精确相等。真实机群远好于沙箱压力模型（99.7% vs 该模型在 1 GiB 上限下的 P=2 57% / P=3 29%）——那个模型在 p95 上比现实狠约 40 倍。
+
+完整验收记录与一条重要的读数陷阱（`quota_delta_bytes` 在 band 上线前后量的不是同一件事）见 [traffic-quota-deadband.md](traffic-quota-deadband.md) §7.2。
 
 ### 1b. 并行化 `SyncUserLifecycle` 的串行循环 ✅ 已实现
 

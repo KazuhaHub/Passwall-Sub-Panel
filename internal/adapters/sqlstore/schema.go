@@ -38,20 +38,23 @@ type userRow struct {
 	// can't use a B-tree index. The index was pure write amplification
 	// on the busy users table. cleanupLegacyState drops the existing
 	// auto-named idx_users_email so upgraded installs reclaim it.
-	Email             string `gorm:"size:255"`
-	PasswordHash      string `gorm:"size:255"`
-	Role              string `gorm:"size:16;not null;default:user"`
-	SubToken          string `gorm:"size:64;uniqueIndex;not null"`
-	UUID              string `gorm:"size:36;not null"`
-	GroupID           int64  `gorm:"index;not null"`
-	EnabledRuleSets   jsonStrings
-	PersonalRules     string `gorm:"type:text"`
-	ExpireAt          *time.Time
-	TrafficLimitBytes int64
-	// 0 = unlimited, which is also the zero value, so AutoMigrate adds these
-	// to existing installs with no backfill and no behaviour change.
-	IPLimit            int    `gorm:"default:0;not null"`
-	DeviceLimit        int    `gorm:"default:0;not null"`
+	Email           string `gorm:"size:255"`
+	PasswordHash    string `gorm:"size:255"`
+	Role            string `gorm:"size:16;not null;default:user"`
+	SubToken        string `gorm:"size:64;uniqueIndex;not null"`
+	UUID            string `gorm:"size:36;not null"`
+	GroupID         int64  `gorm:"index;not null"`
+	EnabledRuleSets jsonStrings
+	PersonalRules   string `gorm:"type:text"`
+	ExpireAt        *time.Time
+	// The three entitlement columns are NULLABLE, and the null is load-bearing:
+	// NULL = inherit from the group, 0 = explicitly unlimited, N = explicitly N.
+	// Without the third state 0 would be ambiguous the moment groups gained a
+	// policy, and reading it wrong invents a quota for a user who has none.
+	// See domain/limits.go and migrateLimitsToTriState below.
+	TrafficLimitBytes  *int64
+	IPLimit            *int
+	DeviceLimit        *int
 	TrafficResetPeriod string `gorm:"size:16;default:never"`
 	TrafficPeriodStart *time.Time
 	LifetimeUpBytes    int64 `gorm:"default:0"`
@@ -122,22 +125,24 @@ func (userRow) TableName() string { return "users" }
 
 func (r *userRow) toDomain() *domain.User {
 	return &domain.User{
-		ID:                     r.ID,
-		UPN:                    r.UPN,
-		SSOProvider:            r.SSOProvider,
-		SSOSubject:             r.SSOSubject,
-		Email:                  r.Email,
-		PasswordHash:           r.PasswordHash,
-		Role:                   domain.Role(r.Role),
-		SubToken:               r.SubToken,
-		UUID:                   r.UUID,
-		GroupID:                r.GroupID,
-		EnabledRuleSets:        []string(r.EnabledRuleSets),
-		PersonalRules:          r.PersonalRules,
-		ExpireAt:               r.ExpireAt,
-		TrafficLimitBytes:      r.TrafficLimitBytes,
-		IPLimit:                r.IPLimit,
-		DeviceLimit:            r.DeviceLimit,
+		ID:              r.ID,
+		UPN:             r.UPN,
+		SSOProvider:     r.SSOProvider,
+		SSOSubject:      r.SSOSubject,
+		Email:           r.Email,
+		PasswordHash:    r.PasswordHash,
+		Role:            domain.Role(r.Role),
+		SubToken:        r.SubToken,
+		UUID:            r.UUID,
+		GroupID:         r.GroupID,
+		EnabledRuleSets: []string(r.EnabledRuleSets),
+		PersonalRules:   r.PersonalRules,
+		ExpireAt:        r.ExpireAt,
+		Limits: domain.LimitOverrides{
+			TrafficLimitBytes: r.TrafficLimitBytes,
+			IPLimit:           r.IPLimit,
+			DeviceLimit:       r.DeviceLimit,
+		},
 		TrafficResetPeriod:     domain.ResetPeriod(r.TrafficResetPeriod),
 		TrafficPeriodStart:     r.TrafficPeriodStart,
 		LifetimeUpBytes:        r.LifetimeUpBytes,
@@ -169,22 +174,26 @@ func (r *userRow) toDomain() *domain.User {
 
 func userFromDomain(u *domain.User) *userRow {
 	return &userRow{
-		ID:                     u.ID,
-		UPN:                    u.UPN,
-		SSOProvider:            u.SSOProvider,
-		SSOSubject:             u.SSOSubject,
-		Email:                  u.Email,
-		PasswordHash:           u.PasswordHash,
-		Role:                   string(u.Role),
-		SubToken:               u.SubToken,
-		UUID:                   u.UUID,
-		GroupID:                u.GroupID,
-		EnabledRuleSets:        jsonStrings(u.EnabledRuleSets),
-		PersonalRules:          u.PersonalRules,
-		ExpireAt:               u.ExpireAt,
-		TrafficLimitBytes:      u.TrafficLimitBytes,
-		IPLimit:                u.IPLimit,
-		DeviceLimit:            u.DeviceLimit,
+		ID:              u.ID,
+		UPN:             u.UPN,
+		SSOProvider:     u.SSOProvider,
+		SSOSubject:      u.SSOSubject,
+		Email:           u.Email,
+		PasswordHash:    u.PasswordHash,
+		Role:            string(u.Role),
+		SubToken:        u.SubToken,
+		UUID:            u.UUID,
+		GroupID:         u.GroupID,
+		EnabledRuleSets: jsonStrings(u.EnabledRuleSets),
+		PersonalRules:   u.PersonalRules,
+		ExpireAt:        u.ExpireAt,
+		// Deliberately u.Limits and not the resolved u.TrafficLimitBytes /
+		// u.IPLimit / u.DeviceLimit: writing a resolved value back would turn
+		// an inheriting user into an explicitly-pinned one, silently detaching
+		// them from their group's policy.
+		TrafficLimitBytes:      u.Limits.TrafficLimitBytes,
+		IPLimit:                u.Limits.IPLimit,
+		DeviceLimit:            u.Limits.DeviceLimit,
 		TrafficResetPeriod:     string(u.TrafficResetPeriod),
 		TrafficPeriodStart:     u.TrafficPeriodStart,
 		LifetimeUpBytes:        u.LifetimeUpBytes,
@@ -257,7 +266,14 @@ type groupRow struct {
 	Layout     jsonLayout
 	Remark     string `gorm:"size:255"`
 	Require2FA bool   `gorm:"column:require_2fa;not null;default:false"`
-	CreatedAt  time.Time
+	// The group's entitlement policy. NULL = the group states nothing, which
+	// resolves to unlimited. New columns on an existing table arrive NULL, so
+	// an upgraded install starts with every group stating nothing and every
+	// member's effective limits unchanged.
+	TrafficLimitBytes *int64
+	IPLimit           *int
+	DeviceLimit       *int
+	CreatedAt         time.Time
 }
 
 // "groups" is a reserved word in some MySQL versions; use groups_ to avoid quoting issues.
@@ -272,20 +288,28 @@ func (r *groupRow) toDomain() *domain.Group {
 		Layout:     domain.Layout(r.Layout),
 		Remark:     r.Remark,
 		Require2FA: r.Require2FA,
-		CreatedAt:  r.CreatedAt,
+		Limits: domain.GroupLimits{
+			TrafficLimitBytes: r.TrafficLimitBytes,
+			IPLimit:           r.IPLimit,
+			DeviceLimit:       r.DeviceLimit,
+		},
+		CreatedAt: r.CreatedAt,
 	}
 }
 
 func groupFromDomain(g *domain.Group) *groupRow {
 	return &groupRow{
-		ID:         g.ID,
-		Slug:       g.Slug,
-		Name:       g.Name,
-		TagFilter:  jsonTagFilter(g.TagFilter),
-		Layout:     jsonLayout(g.Layout),
-		Remark:     g.Remark,
-		Require2FA: g.Require2FA,
-		CreatedAt:  g.CreatedAt,
+		ID:                g.ID,
+		Slug:              g.Slug,
+		Name:              g.Name,
+		TagFilter:         jsonTagFilter(g.TagFilter),
+		Layout:            jsonLayout(g.Layout),
+		Remark:            g.Remark,
+		Require2FA:        g.Require2FA,
+		TrafficLimitBytes: g.Limits.TrafficLimitBytes,
+		IPLimit:           g.Limits.IPLimit,
+		DeviceLimit:       g.Limits.DeviceLimit,
+		CreatedAt:         g.CreatedAt,
 	}
 }
 
@@ -1393,6 +1417,7 @@ func EnsureLegacyOwnershipTable(db *gorm.DB) error {
 }
 
 var schemaModels = []any{
+	&schemaMigrationRow{},
 	&userRow{},
 	&roleRow{},
 	&roleAssignmentRow{},
@@ -1440,6 +1465,11 @@ func EnsureSchema(db *gorm.DB) error {
 		return err
 	}
 	if err := backfillTrafficCounterNulls(db); err != nil {
+		return err
+	}
+	// After AutoMigrate (the columns must be nullable first) and before
+	// anything reads a user.
+	if err := migrateLimitsToTriState(db); err != nil {
 		return err
 	}
 	if err := seedBuiltinRoles(db); err != nil {
@@ -1680,4 +1710,79 @@ func wrapNotFound(err error) error {
 		return domain.ErrNotFound
 	}
 	return err
+}
+
+// schemaMigrationRow records one-shot data migrations that must NOT re-run.
+//
+// The boot-time backfills above are all idempotent — they coalesce NULLs to a
+// zero that was always the intended value, so running them twice changes
+// nothing. A migration that reinterprets an existing value is different: it is
+// correct exactly once, and running it again would corrupt data an operator
+// has since entered deliberately. Those need a durable marker, and a row in
+// this table is it.
+type schemaMigrationRow struct {
+	ID        string `gorm:"primaryKey;size:64"`
+	AppliedAt time.Time
+}
+
+func (schemaMigrationRow) TableName() string { return "schema_migrations" }
+
+// applyOnce runs fn if this migration ID has never been recorded, and records
+// it in the SAME transaction as fn's own writes.
+//
+// The transaction is the whole point: a crash between the data change and the
+// marker would otherwise leave the migration eligible to run a second time,
+// which for a reinterpreting migration means silent corruption. Either both
+// land or neither does.
+func applyOnce(db *gorm.DB, id string, fn func(tx *gorm.DB) error) error {
+	var count int64
+	if err := db.Model(&schemaMigrationRow{}).Where("id = ?", id).Count(&count).Error; err != nil {
+		return fmt.Errorf("schema migration %s: check: %w", id, err)
+	}
+	if count > 0 {
+		return nil
+	}
+	return db.Transaction(func(tx *gorm.DB) error {
+		if err := fn(tx); err != nil {
+			return fmt.Errorf("schema migration %s: %w", id, err)
+		}
+		return tx.Create(&schemaMigrationRow{ID: id, AppliedAt: time.Now().UTC()}).Error
+	})
+}
+
+// limitsTriStateMigrationID names the migration that gave the three
+// entitlement columns their third state.
+const limitsTriStateMigrationID = "limits_tristate_v3.9.3"
+
+// migrateLimitsToTriState reinterprets a stored 0 as "inherit from the group".
+//
+// Before this change 0 was the ONLY way to express "no limit", and there was no
+// group policy for a user value to stand against — so no stored 0 can carry the
+// intent "unlimited, in deliberate contrast to whatever my group says". That is
+// what makes the reinterpretation safe: it discards no information that ever
+// existed.
+//
+// It also makes the group layer reach the users who need it. Left as explicit
+// zeroes, every pre-existing user would silently opt out of their group's
+// policy, and an operator setting a group quota would find it applied to
+// nobody — the exact per-user drudgery this feature removes.
+//
+// Behaviour at the moment it runs is unchanged: every group starts stating
+// nothing (the new columns arrive NULL), so inherit resolves to unlimited,
+// which is what a 0 meant. Non-zero values are untouched and stay explicit
+// overrides.
+//
+// Each column is converted independently — a user may well have a real traffic
+// quota and no connection caps.
+func migrateLimitsToTriState(db *gorm.DB) error {
+	return applyOnce(db, limitsTriStateMigrationID, func(tx *gorm.DB) error {
+		for _, col := range []string{"traffic_limit_bytes", "ip_limit", "device_limit"} {
+			if err := tx.Exec(
+				"UPDATE users SET " + col + " = NULL WHERE " + col + " = 0",
+			).Error; err != nil {
+				return fmt.Errorf("column %s: %w", col, err)
+			}
+		}
+		return nil
+	})
 }

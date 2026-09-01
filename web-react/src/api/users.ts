@@ -21,6 +21,10 @@ export interface UpdateUserRequest {
   traffic_reset_period?: ResetPeriod
   ip_limit?: number
   device_limit?: number
+  /** Go back to taking the field from the group. Wins over the value above. */
+  inherit_traffic_limit?: boolean
+  inherit_ip_limit?: boolean
+  inherit_device_limit?: boolean
   remark?: string
   display_name?: string
   email?: string

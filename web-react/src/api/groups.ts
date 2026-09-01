@@ -50,6 +50,9 @@ export async function createGroup(req: {
   layout?: Layout
   remark?: string
   require_2fa?: boolean
+  traffic_limit_gb?: number
+  ip_limit?: number
+  device_limit?: number
 }) {
   const { data } = await client.post<Group>('/admin/groups', req)
   return data
@@ -57,7 +60,19 @@ export async function createGroup(req: {
 
 export async function updateGroup(
   id: number,
-  req: { name?: string; tag_filter?: TagFilter; remark?: string; require_2fa?: boolean },
+  req: {
+    name?: string
+    tag_filter?: TagFilter
+    remark?: string
+    require_2fa?: boolean
+    traffic_limit_gb?: number
+    ip_limit?: number
+    device_limit?: number
+    /** Clear the policy back to "states nothing". Wins over the value. */
+    clear_traffic_limit?: boolean
+    clear_ip_limit?: boolean
+    clear_device_limit?: boolean
+  },
 ) {
   const { data } = await client.put<{ group: Group; resync_errors?: string[] }>(
     `/admin/groups/${id}`,
