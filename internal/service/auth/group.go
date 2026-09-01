@@ -41,32 +41,20 @@ func MatchFirstGroupRule(
 	return "", false
 }
 
-// idpSpokeAboutGroups reports whether the assertion actually carried any of
-// the attributes this rule set reads.
-//
-// It exists because attributeMatches cannot tell "the IdP says you are not in
-// that group" from "the IdP said nothing at all", and only the first is a
-// revocation. The second happens for reasons that have nothing to do with the
-// principal: Entra stops emitting `groups` and sends `hasgroups` once a user
-// is in roughly 150+ groups, a claim mapping can be edited or broken, a new
-// app registration can ship without the claim configured.
-//
-// Demoting on silence would turn any of those into a fleet-wide entitlement
-// change — every SSO user leaving their OU on their next login, losing its
-// quota and its node set — triggered by a directory-side edit nobody connected to
-// PSP. So silence means SSO has no opinion, and the stored group stands.
+// idpSpokeAboutGroups is idpSpokeAbout over this rule set's attributes. See
+// that function for why silence must not read as revocation; the same guard
+// protects role rules, which is why the core lives in one place.
 func idpSpokeAboutGroups(
 	rules []config.SSOGroupRule,
 	groupsAttrName string,
 	attrs map[string][]string,
 	groups []string,
 ) bool {
+	attributes := make([]string, 0, len(rules))
 	for _, r := range rules {
-		if len(lookupRuleValues(r.Attribute, groupsAttrName, attrs, groups)) > 0 {
-			return true
-		}
+		attributes = append(attributes, r.Attribute)
 	}
-	return false
+	return idpSpokeAbout(attributes, groupsAttrName, attrs, groups)
 }
 
 // ResolveGroupForSSO applies the full SSO group policy on an EXISTING

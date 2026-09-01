@@ -142,3 +142,69 @@ func TestMatchFirstRule_NoMatchReturnsEmptyAndFalse(t *testing.T) {
 		t.Fatalf("no match: got (%q, %v), want (\"\", false)", r, ok)
 	}
 }
+
+// An absent claim is not a revocation — the role-side twin of the guard the
+// group rules got first, and the reason it now lives in one shared function.
+//
+// Entra stops emitting `groups` and sends `hasgroups` once a principal is in
+// roughly 150+ groups; a claim mapping can also be broken or newly
+// misconfigured. Without this guard any of those demotes EVERY rule-granted
+// admin and operator on their next login, so a panel can lose all its
+// privileged users to a directory-side edit nobody connected to PSP.
+func TestResolveRoleForSSO_AbsentClaimIsNotRevocation(t *testing.T) {
+	rules := []config.SSORoleRule{{Attribute: "", Value: "g-adm", Role: "admin"}}
+	role, sso := ResolveRoleForSSO(rules, domain.RoleAdmin, "groups", nil, nil)
+	if role != domain.RoleAdmin || sso {
+		t.Fatalf("silence demoted an admin: got (%q, sso=%v), want (admin, false)", role, sso)
+	}
+}
+
+// The distinction that keeps the guard from simply disabling demotion: the
+// claim IS present and merely omits this principal's group. That is a real
+// revocation and must still cost the role.
+func TestResolveRoleForSSO_PresentClaimWithoutTheValueStillDemotes(t *testing.T) {
+	rules := []config.SSORoleRule{{Attribute: "", Value: "g-adm", Role: "admin"}}
+	role, sso := ResolveRoleForSSO(rules, domain.RoleAdmin, "groups", nil, groupsOf("g-other"))
+	if role != domain.RoleUser || !sso {
+		t.Fatalf("a present claim that drops the value must demote: got (%q, sso=%v), want (user, true)", role, sso)
+	}
+}
+
+// The guard reads the attributes the RULES name, not only the groups
+// shortcut, so a rule set keyed on a named attribute is protected too.
+func TestResolveRoleForSSO_AbsentNamedAttributeIsAlsoSilence(t *testing.T) {
+	rules := []config.SSORoleRule{{Attribute: "department", Value: "it", Role: "operator"}}
+	role, sso := ResolveRoleForSSO(rules, domain.RoleOperator, "groups",
+		attrs(map[string][]string{"unrelated": {"x"}}), nil)
+	if role != domain.RoleOperator || sso {
+		t.Fatalf("absent named attribute demoted an operator: got (%q, sso=%v), want (operator, false)", role, sso)
+	}
+}
+
+// Both rule kinds must agree on what counts as "the IdP spoke". They share one
+// function precisely so they cannot drift; this pins that they do, because a
+// divergence would fail in opposite directions on the same assertion and would
+// be invisible.
+func TestIdpSpokeAbout_RoleAndGroupRulesAgree(t *testing.T) {
+	a := attrs(map[string][]string{"department": {"it"}})
+	cases := []struct {
+		name  string
+		attrs map[string][]string
+		grps  []string
+		want  bool
+	}{
+		{"named attribute present", a, nil, true},
+		{"nothing at all", nil, nil, false},
+		{"groups shortcut present", nil, groupsOf("g-adm"), false}, // rules key on "department"
+	}
+	for _, tc := range cases {
+		roleRules := []config.SSORoleRule{{Attribute: "department", Value: "it", Role: "operator"}}
+		groupRules := []config.SSOGroupRule{{Attribute: "department", Value: "it", Group: "staff"}}
+
+		gotRole := idpSpokeAbout([]string{roleRules[0].Attribute}, "groups", tc.attrs, tc.grps)
+		gotGroup := idpSpokeAboutGroups(groupRules, "groups", tc.attrs, tc.grps)
+		if gotRole != tc.want || gotGroup != tc.want {
+			t.Fatalf("%s: role=%v group=%v, want both %v", tc.name, gotRole, gotGroup, tc.want)
+		}
+	}
+}

@@ -104,6 +104,18 @@ func ResolveRoleForSSO(
 	if currentKeep {
 		return current, true
 	}
+	// Demote only if the IdP actually said something. An absent claim is
+	// not a revocation; see idpSpokeAbout. Without this, an Entra group
+	// overage or a broken claim mapping demotes every rule-granted admin
+	// and operator on their next login — the panel losing its privileged
+	// users to a directory-side edit.
+	attributes := make([]string, 0, len(rules))
+	for _, r := range rules {
+		attributes = append(attributes, r.Attribute)
+	}
+	if !idpSpokeAbout(attributes, groupsAttrName, attrs, groups) {
+		return current, false
+	}
 	return domain.RoleUser, true
 }
 
@@ -131,6 +143,34 @@ func attributeMatches(attribute, value, groupsAttrName string, attrs map[string]
 	values := lookupRuleValues(attribute, groupsAttrName, attrs, groups)
 	for _, v := range values {
 		if v == value {
+			return true
+		}
+	}
+	return false
+}
+
+// idpSpokeAbout reports whether the assertion actually carried any of the
+// named attributes. Shared by both rule kinds.
+//
+// It exists because attributeMatches cannot tell "the IdP says you are not in
+// that group / do not have that role" from "the IdP said nothing at all", and
+// only the first is a revocation. The second happens for reasons that have
+// nothing to do with the principal: Entra stops emitting `groups` and sends
+// `hasgroups` once a user is in roughly 150+ groups, a claim mapping can be
+// edited or broken, a new app registration can ship without the claim
+// configured.
+//
+// Demoting on silence turns any of those into a fleet-wide change on the next
+// login — every rule-granted admin dropping to RoleUser, every SSO user
+// leaving their OU — triggered by a directory-side edit nobody connected to
+// PSP. So silence means SSO has no opinion, and what is stored stands.
+//
+// One function for both kinds on purpose: a role rule set and a group rule set
+// that disagreed about what counts as "the IdP spoke" would fail in opposite
+// directions on the same assertion, and the divergence would be silent.
+func idpSpokeAbout(attributes []string, groupsAttrName string, attrs map[string][]string, groups []string) bool {
+	for _, a := range attributes {
+		if len(lookupRuleValues(a, groupsAttrName, attrs, groups)) > 0 {
 			return true
 		}
 	}
