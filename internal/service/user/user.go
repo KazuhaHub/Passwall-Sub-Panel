@@ -619,6 +619,9 @@ func (s *Service) CreateLocal(ctx context.Context, in CreateLocalInput) (*Create
 	if upn == "" {
 		return nil, fmt.Errorf("%w: upn required", domain.ErrValidation)
 	}
+	if err := validateTrafficLimit(in.TrafficLimitBytes); err != nil {
+		return nil, err
+	}
 	if err := validateConnLimit("ip_limit", in.IPLimit); err != nil {
 		return nil, err
 	}
@@ -1530,6 +1533,21 @@ func (s *Service) DeleteAndSync(ctx context.Context, userID int64) error {
 // nil → no change; non-nil → set to the dereferenced value. ClearExpire is
 // a separate bool because *time.Time cannot distinguish "no change" from
 // "explicit clear to permanent".
+// validateTrafficLimit rejects a negative quota.
+//
+// The two connection caps were guarded from the start; traffic was not, and
+// the omission is worse than it looks: a negative value is stored as an
+// explicit override and then read as "unlimited" by trafficFloor,
+// PanelQuotaCap and the traffic-exceeded check alike, because every one of
+// them tests `> 0`. So "-1 GB" does not mean a tiny quota or an error — it
+// means no quota at all, on a user the admin was trying to restrict.
+func validateTrafficLimit(v int64) error {
+	if v < 0 {
+		return fmt.Errorf("%w: traffic_limit_gb must be >= 0 (0 = unlimited)", domain.ErrValidation)
+	}
+	return nil
+}
+
 // validateConnLimit rejects a negative connection cap.
 //
 // It matters more than the usual input hygiene: the panel reads any value <= 0
@@ -1661,6 +1679,9 @@ func (s *Service) UpdateProfile(ctx context.Context, userID int64, in UpdateInpu
 		}
 		u.Limits.TrafficLimitBytes = nil
 	} else if in.TrafficLimitBytes != nil {
+		if err := validateTrafficLimit(*in.TrafficLimitBytes); err != nil {
+			return err
+		}
 		if *in.TrafficLimitBytes != u.TrafficLimitBytes || u.Limits.TrafficLimitBytes == nil {
 			trafficLimitChanged = true
 		}

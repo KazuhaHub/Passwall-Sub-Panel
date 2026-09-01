@@ -1,0 +1,55 @@
+# beta.8 / beta.9 的对抗性审查
+
+每用户 IP / 设备上限（v3.9.2-beta.8）与配额迟滞带（v3.9.2-beta.9）发布时都没跑过对抗性审查。这份记录审查结果，包括**我逐条核实后对审查本身的更正**——四条里两条如实、一条说过头、一条机制说错但结论成立。
+
+## 迟滞带的算术本身站得住
+
+先说没问题的部分，因为它决定了后面几条的严重性。`stored - want` 在 `want > 0` 时不会溢出；判定是**绝对的而非增量的**，所以漂移不跨周期累积，面板被留得比预期宽松的幅度上界始终是 `min(headroom/20, 1 GiB)`；`want <= 0` 与 `headroom == 1` 两个边界精确，所以「不限」客户端和 `TrafficFloorBytes` 的耗尽哨兵永远被精确下发；流量超额停用通过 `enable` 那条分支到达面板，与迟滞带在 `total_gb` 上吸收了什么无关。
+
+管理员**下调**配额确实可能被带吸收，但只在带宽之内，且随 headroom 缩小自愈，多次下调是累加而非重置——这符合已记录的不对称，不构成绕过。
+
+## 一、【严重】设备上限在 3.7.0 以下的面板上造成永久写循环
+
+`lifecycleWriteReason` 的注释明确预见了这个失效：
+
+> A panel that silently drops one reads it back as 0 forever, so including it here would make the skip structurally impossible to hit: every cycle would see a difference and issue a full-replace that restarts the core.
+
+保护它的是 `capDevice`。而 `internal/adapters/xui/client.go` 里 `CapabilityClientDeviceLimit` 是**无条件声明**的，那里的注释同样明确：能力是每适配器静态的，看不见面前的面板。
+
+**两处注释互相矛盾，这就是缺陷。** PSP 支持的 3X-UI 下限是 3.4.2，而 `limitHwid` 是 3.7.0 才有的字段。在 3.4.2–3.6.x 上：读回永远是 0 → 每周期 `device_limit` → 全量替换 + Xray 重启 → 永不收敛。同一个静态能力也让 `reportCapabilityGaps` 保持沉默，所以运维方连计数都看不到。
+
+后果的量级值得说清楚：beta.9 把写入从 473.3/小时降到 2.3（204×），而这条缺陷对**任何在旧面板上设了设备上限的用户**把那个成果整个抵消，并附带持续的核心重启。
+
+**未修**：正确的修法要让能力感知面板版本。面板版本 PSP 拿得到（`GetServerStatus` 返回 `panelVersion`），但 `Capabilities()` 是静态方法、没有面板上下文，而且没有按服务器存储的探测结果——前端 `/api/admin/servers` 读到的能力也来自同一份静态列表。这是一次有真实取舍的改动（版本未知时该声明还是不声明，直接影响是「写循环」还是「静默不生效 + 误报缺口」），不适合在长会话末尾仓促决定。
+
+## 二、旧的 `clientUnchanged` 跳过被设备上限无条件击穿
+
+`internal/service/sync/sync.go` 里 `spec.LimitHwid != 0` 直接返回 false。按该函数「任何不确定就更新」的契约这是自洽的，但结果是**任何设了设备上限的用户，在每个节点、每个轮询周期都吃一次 UpdateClient + Xray 重启**，与面板版本无关。
+
+**未修**，与第一条同源：都需要「面板到底存没存下这个值」这一信息。
+
+## 三、负数流量配额被接受，并被读成「不限」
+
+两个连接上限从一开始就有 `validateConnLimit` 挡着负数。**流量没有。**
+
+而负值不是「一个很小的配额」，是**没有配额**：`trafficFloor`、`PanelQuotaCap`、流量超额判定**全部**用 `> 0` 测试，所以存进去的 `-1` 在每一处都读作「不限」——管理员本想收紧，实际放开了。
+
+**已修**：`validateTrafficLimit` 在创建与更新两条路径上各自执行，两处均变异验证。
+
+> **审查在这条上说过头了**，我核实后收窄：它称 ip/device 也未校验，实际两者一直有保护，缺口只在流量。
+>
+> 但另一半是对的，而且是我的错：`validateGroupLimits` 的注释写着「The user endpoints have always answered 400 for this」。对 ip/device 成立，**对流量不成立**——我在做 OU 时断言了一个从未核实的事实。注释已改成如实陈述，包括它曾经是错的。
+
+## 四、IP / 设备上限的语义是「每 email」，不是「每用户」
+
+界面上这两个值写的是「每用户」。实际执行不是。
+
+- 3X-UI 的 `check_client_ip_job` 按 **email** 取上限（`limitByEmail[email]`），IP 记录行也是 `InboundClientIps{ClientEmail: email}`，每 email 一行。
+- PSP 的客户端 email 是 `u{userID}{suffix}@{domain}`（`PSPClientEmail`），suffix 为 `""` / `-c1`（SS-2022-128）/ `-k{8hex}`（flow 拆分）——**同一用户跨凭据分区时会有多个不同的 email**。
+- `spec.LimitIP = want.IPLimit` 逐客户端盖章，**每个 email 都拿到完整的上限**。
+
+所以一个用户的实际并发 IP 额度 = （该面板上他的 email 数）× 填写值，再跨面板相加。填 3，跨 4 个分区就是 12。
+
+> **审查在机制上说错了**（它称按 3X-UI 自动生成的 per-client `sub_id` 计），我读上游源码后更正为按 email。**结论成立，倍数来源不同**：不是客户端数，是**凭据分区数**。
+
+**未修**：跨面板独立执行是多面板部署的固有性质；分区内的倍增才是 PSP 侧的语义缺口。自动把上限除以分区数是错的（分区数不稳定、也不可预期）。合理的方向是让界面在填写处说出真实语义，与已有的能力提示同一个模式——「计数器不是设置这个值的人正在看的地方」。

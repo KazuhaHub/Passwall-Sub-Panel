@@ -335,8 +335,14 @@ func mapGroupServiceError(c *gin.Context, err error) {
 // It runs on create as well as update: a negative cap slipped in at creation
 // would be inherited by every member, pushed verbatim as the panel's LimitIP,
 // and — because the capability-gap warning only fires for a positive limit —
-// would not even show up as unenforceable. The user endpoints have always
-// answered 400 for this, so the group endpoints must too.
+// would not even show up as unenforceable.
+//
+// The user endpoints answer 400 for all three now. They did NOT when this
+// comment first claimed they did: the two connection caps were guarded from
+// the start, traffic was not, and asserting otherwise here was a fact never
+// checked. The gap mattered — a negative quota stores as an explicit override
+// and then reads as "unlimited" everywhere, because trafficFloor,
+// PanelQuotaCap and the traffic-exceeded check all test `> 0`.
 func validateGroupLimits(l domain.GroupLimits) error {
 	if l.TrafficLimitBytes != nil && *l.TrafficLimitBytes < 0 {
 		return fmt.Errorf("%w: traffic_limit_gb must be >= 0", domain.ErrValidation)
