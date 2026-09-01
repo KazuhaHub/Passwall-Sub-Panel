@@ -714,3 +714,79 @@ func TestSyncUserLifecycle_PanicIsReportedNotSwallowed(t *testing.T) {
 		}
 	}
 }
+
+// The band's two exact-match boundaries, driven through the real SyncLifecycle
+// rather than asserted on the domain predicate alone.
+//
+// Both exist because a mutation survived the suite: swapping the headroom
+// argument at the call site for spec.TotalGB — a plausible slip, since both are
+// int64 quota-ish values sitting on adjacent lines — turned a 1-byte difference
+// on an EXHAUSTED client into a band of 1 GiB and silently skipped the push.
+// Nothing in domain/traffic_cap_test.go could catch that: the predicate was
+// still correct, it was being handed the wrong number. These tests pin the
+// wiring, not the arithmetic.
+func TestSyncLifecycle_BandBoundariesAreExactThroughTheRealPath(t *testing.T) {
+	const GiB = int64(1) << 30
+	newSvc := func(stored *ports.ClientDetail) (*Service, *fakeXUI) {
+		clients := &fakeClients{attachments: []domain.PSPClientInbound{
+			{ClientID: 1, NodeID: 11, FlowOverride: "xtls-rprx-vision", Provisioned: true},
+		}}
+		xui := &fakeXUI{getDetail: stored}
+		return New(clients, fakePool{c: xui}, fakeNodes{}), xui
+	}
+	detail := func(totalGB int64) *ports.ClientDetail {
+		return &ports.ClientDetail{
+			Enable: true, ExpiryTime: 1893456000000, TotalGB: totalGB,
+			ID: "uuid-x", Password: "pw-x", Flow: "xtls-rprx-vision", Auth: "uuid-x",
+		}
+	}
+
+	// TrafficFloorBytes encodes "at or past the limit" as a headroom of 1, so
+	// the band must be 0 no matter how large the client's lifetime counter is.
+	// A user who has spent their quota must not keep browsing because the
+	// panel is holding a stale, more generous cap.
+	t.Run("exhausted client is pushed exactly", func(t *testing.T) {
+		metrics.Reset()
+		lastRaw := 200 * GiB
+		want := domain.PanelQuotaCap(1, lastRaw)
+		svc, xui := newSvc(detail(want + 1)) // one byte too generous
+		c := &domain.PSPClient{
+			ID: 1, PanelID: 10, Email: "u1@psp.local", UUID: "uuid-x", Password: "pw-x",
+			LastRawTotalBytes: lastRaw,
+		}
+		if err := svc.SyncLifecycle(context.Background(), c, domain.UserLifecycle{
+			Enable: true, ExpiryTime: 1893456000000, QuotaHeadroom: 1,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if xui.updateCalls != 1 {
+			t.Errorf("update calls = %d, want 1 — an exhausted client must be pushed exactly", xui.updateCalls)
+		}
+		if got := counterByName(t, "psp_lifecycle_quota_band_skip_total"); got != 0 {
+			t.Errorf("band skip = %d, want 0 — the band must be 0 at the exhausted sentinel", got)
+		}
+	})
+
+	// headroom 0 means unlimited, which a panel encodes as totalGB 0. A
+	// leftover non-zero cap is a live restriction on a user who has none, so
+	// it must be corrected however small it is.
+	t.Run("unlimited client is pushed exactly", func(t *testing.T) {
+		metrics.Reset()
+		svc, xui := newSvc(detail(1)) // one stray byte of cap
+		c := &domain.PSPClient{
+			ID: 1, PanelID: 10, Email: "u1@psp.local", UUID: "uuid-x", Password: "pw-x",
+			LastRawTotalBytes: 200 * GiB,
+		}
+		if err := svc.SyncLifecycle(context.Background(), c, domain.UserLifecycle{
+			Enable: true, ExpiryTime: 1893456000000, QuotaHeadroom: 0,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if xui.updateCalls != 1 {
+			t.Errorf("update calls = %d, want 1 — a leftover cap on an unlimited user must be cleared", xui.updateCalls)
+		}
+		if got := counterByName(t, "psp_lifecycle_quota_band_skip_total"); got != 0 {
+			t.Errorf("band skip = %d, want 0 — unlimited is compared exactly", got)
+		}
+	})
+}
