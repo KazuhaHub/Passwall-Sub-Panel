@@ -1048,6 +1048,13 @@ func (s *Service) reconcileSSOUser(ctx context.Context, u *domain.User, in Ensur
 // leave the stored group untouched — distinct from "move them to no
 // group", which would be ok=true with id 0.
 func (s *Service) resolveSSOGroupID(ctx context.Context, u *domain.User, in EnsureSSOInput) (int64, bool, error) {
+	// Cheapest check first. Without it every SSO login on a deployment that
+	// has never written a rule pays a group read whose answer cannot change
+	// the outcome, and a transient failure on that read logs "sso group rule
+	// unresolved" for a feature nobody configured.
+	if len(in.GroupRules) == 0 {
+		return 0, false, nil
+	}
 	current := ""
 	if u.GroupID != 0 {
 		g, err := s.groups.GetByID(ctx, u.GroupID)

@@ -2,10 +2,12 @@ package handler
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/config"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 )
 
@@ -24,7 +26,7 @@ import (
 // Both handlers share this. Two copies of "what makes a rule valid" would be
 // free to disagree, and the SAML and OIDC forms would then accept different
 // things for no reason a user could see.
-func validateSSOGroupRules(ctx context.Context, groups ports.GroupRepo, rules []config.SSOGroupRule) error {
+func validateSSOGroupRules(ctx context.Context, groups ports.GroupRepo, rules []config.SSOGroupRule, defaultGroupSlug string) error {
 	if len(rules) == 0 {
 		return nil
 	}
@@ -32,6 +34,22 @@ func validateSSOGroupRules(ctx context.Context, groups ports.GroupRepo, rules []
 		// A handler built without the repo cannot check, and silently
 		// skipping would make the guarantee conditional on wiring. Say so.
 		return fmt.Errorf("group rules cannot be validated: no group repository wired")
+	}
+	// A rule set can DEMOTE: a principal the IdP stops claiming falls back
+	// to the default group. With no default group configured there is
+	// nowhere to fall back to, and a user in no group inherits nothing —
+	// which resolves to unlimited traffic and no connection caps. Storing
+	// rules without a destination would arm a revocation that hands out
+	// more than it takes away, so it is refused here rather than guarded
+	// only at login time.
+	if strings.TrimSpace(defaultGroupSlug) == "" {
+		return fmt.Errorf("group rules require a default group: it is where a user goes when the IdP stops matching any rule")
+	}
+	if _, err := groups.GetBySlug(ctx, strings.TrimSpace(defaultGroupSlug)); err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			return fmt.Errorf("default group %q does not exist", defaultGroupSlug)
+		}
+		return fmt.Errorf("checking default group %q: %w", defaultGroupSlug, err)
 	}
 	// Resolve each distinct slug once — a rule set typically points several
 	// IdP groups at the same OU.
@@ -52,7 +70,13 @@ func validateSSOGroupRules(ctx context.Context, groups ports.GroupRepo, rules []
 			continue
 		}
 		if _, err := groups.GetBySlug(ctx, slug); err != nil {
-			return fmt.Errorf("group rule %d: no group with slug %q", i+1, slug)
+			// Only a genuine miss means the slug is wrong. Reporting a
+			// dropped connection as "no group with slug X" sends an admin
+			// hunting for a typo in a value that is correct.
+			if errors.Is(err, domain.ErrNotFound) {
+				return fmt.Errorf("group rule %d: no group with slug %q", i+1, slug)
+			}
+			return fmt.Errorf("group rule %d: checking group %q: %w", i+1, slug, err)
 		}
 		checked[slug] = true
 	}

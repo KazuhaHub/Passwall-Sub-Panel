@@ -41,6 +41,34 @@ func MatchFirstGroupRule(
 	return "", false
 }
 
+// idpSpokeAboutGroups reports whether the assertion actually carried any of
+// the attributes this rule set reads.
+//
+// It exists because attributeMatches cannot tell "the IdP says you are not in
+// that group" from "the IdP said nothing at all", and only the first is a
+// revocation. The second happens for reasons that have nothing to do with the
+// principal: Entra stops emitting `groups` and sends `hasgroups` once a user
+// is in roughly 150+ groups, a claim mapping can be edited or broken, a new
+// app registration can ship without the claim configured.
+//
+// Demoting on silence would turn any of those into a fleet-wide entitlement
+// change — every SSO user leaving their OU on their next login, losing its
+// quota and its node set — triggered by a directory-side edit nobody connected to
+// PSP. So silence means SSO has no opinion, and the stored group stands.
+func idpSpokeAboutGroups(
+	rules []config.SSOGroupRule,
+	groupsAttrName string,
+	attrs map[string][]string,
+	groups []string,
+) bool {
+	for _, r := range rules {
+		if len(lookupRuleValues(r.Attribute, groupsAttrName, attrs, groups)) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
 // ResolveGroupForSSO applies the full SSO group policy on an EXISTING
 // user: rule matching PLUS per-rule Keep semantics PLUS the
 // "panel-managed group" carve-out. It is the group-shaped twin of
@@ -127,6 +155,25 @@ func ResolveGroupForSSO(
 	}
 	if currentKeep {
 		return current, true
+	}
+	// Below here we would demote. Two conditions have to hold first, and
+	// neither is about this principal.
+	//
+	// The IdP must have actually said something. See idpSpokeAboutGroups:
+	// an absent claim is not a revocation, and treating it as one turns a
+	// directory-side accident into a fleet-wide entitlement change.
+	if !idpSpokeAboutGroups(rules, groupsAttrName, attrs, groups) {
+		return current, false
+	}
+	// And there has to be somewhere to demote TO. An empty defaultSlug
+	// means no group, and a user in no group inherits nothing — which
+	// resolves to 0/0/0, i.e. UNLIMITED traffic and no connection caps.
+	// Demoting into that would hand a revoked principal MORE than they
+	// had, the exact inversion of what this branch exists to do. The
+	// settings validator refuses to store rules without a default group,
+	// so this is the belt to that braces.
+	if defaultSlug == "" {
+		return current, false
 	}
 	return defaultSlug, true
 }

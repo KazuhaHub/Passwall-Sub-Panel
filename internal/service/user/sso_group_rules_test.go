@@ -31,8 +31,9 @@ import (
 // Resolution looks rows up by id; the rules speak slugs.
 type multiGroupRepo struct {
 	ports.GroupRepo
-	bySlug map[string]*domain.Group
-	byID   map[int64]*domain.Group
+	bySlug    map[string]*domain.Group
+	byID      map[int64]*domain.Group
+	byIDCalls int
 }
 
 func newMultiGroupRepo(gs ...*domain.Group) *multiGroupRepo {
@@ -45,6 +46,7 @@ func newMultiGroupRepo(gs ...*domain.Group) *multiGroupRepo {
 }
 
 func (r *multiGroupRepo) GetByID(_ context.Context, id int64) (*domain.Group, error) {
+	r.byIDCalls++
 	if g, ok := r.byID[id]; ok {
 		return g, nil
 	}
@@ -284,5 +286,83 @@ func TestEnsureSSO_ReconcileUnknownRuleGroupDoesNotBlockLogin(t *testing.T) {
 	}
 	if u.GroupID != 3 {
 		t.Fatalf("unresolvable target should leave the group alone, got %d", u.GroupID)
+	}
+}
+
+// The service-level half of the two guards adversarial review found. The
+// resolver tests cover the decision; these cover it reaching the stored row,
+// which is what actually decides a user's entitlements.
+
+// Demoting with no default group configured would persist GroupID=0, and a
+// user in no group inherits nothing — resolving to unlimited traffic and no
+// connection caps. A revocation that grants more than it takes is worse than
+// no revocation at all.
+func TestEnsureSSO_DemotionWithoutDefaultGroupLeavesTheUserPut(t *testing.T) {
+	existing := &domain.User{
+		ID: 11, UPN: "vip@corp.com", Enabled: true, GroupID: 2,
+		SSOProvider: domain.SSOProviderSAML, SSOSubject: "s11",
+	}
+	repo := &memoryUserRepo{byID: map[int64]*domain.User{11: existing}}
+	tasks := &recordingTaskRepo{}
+	svc := &Service{users: repo, groups: ssoGroupFixture(), ownership: emptyOwnershipRepo{},
+		selector: unreachableSelector{}, tasks: tasks}
+
+	in := ssoIn("s11", "vip@corp.com", []string{"idp-other"}, vipRule())
+	in.DefaultGroupSlug = ""
+
+	u, err := svc.EnsureSSO(context.Background(), in)
+	if err != nil {
+		t.Fatalf("EnsureSSO: %v", err)
+	}
+	if u.GroupID != 2 {
+		t.Fatalf("demoted to group %d with no default configured; group 0 resolves to UNLIMITED", u.GroupID)
+	}
+	if got := tasks.resyncedUsers(); len(got) != 0 {
+		t.Fatalf("no move should mean no panel churn, got resyncs %v", got)
+	}
+}
+
+// An IdP that sends no groups at all — Entra past its group-overage limit, a
+// broken claim mapping — must not read as "everyone was revoked".
+func TestEnsureSSO_AbsentGroupsClaimDoesNotMoveAnyone(t *testing.T) {
+	existing := &domain.User{
+		ID: 12, UPN: "vip@corp.com", Enabled: true, GroupID: 2,
+		SSOProvider: domain.SSOProviderSAML, SSOSubject: "s12",
+	}
+	repo := &memoryUserRepo{byID: map[int64]*domain.User{12: existing}}
+	tasks := &recordingTaskRepo{}
+	svc := &Service{users: repo, groups: ssoGroupFixture(), ownership: emptyOwnershipRepo{},
+		selector: unreachableSelector{}, tasks: tasks}
+
+	u, err := svc.EnsureSSO(context.Background(), ssoIn("s12", "vip@corp.com", nil, vipRule()))
+	if err != nil {
+		t.Fatalf("EnsureSSO: %v", err)
+	}
+	if u.GroupID != 2 {
+		t.Fatalf("an absent claim moved the user from group 2 to %d", u.GroupID)
+	}
+	if got := tasks.resyncedUsers(); len(got) != 0 {
+		t.Fatalf("silence should push nothing, got resyncs %v", got)
+	}
+}
+
+// A deployment with no rules must not even read the group row: the answer
+// cannot change, and a transient failure there would log a warning about a
+// feature nobody configured.
+func TestEnsureSSO_NoRulesDoesNotReadTheGroup(t *testing.T) {
+	existing := &domain.User{
+		ID: 13, UPN: "plain@corp.com", Enabled: true, GroupID: 3,
+		SSOProvider: domain.SSOProviderSAML, SSOSubject: "s13",
+	}
+	repo := &memoryUserRepo{byID: map[int64]*domain.User{13: existing}}
+	groups := ssoGroupFixture()
+	svc := &Service{users: repo, groups: groups, ownership: emptyOwnershipRepo{}}
+
+	before := groups.byIDCalls
+	if _, err := svc.EnsureSSO(context.Background(), ssoIn("s13", "plain@corp.com", []string{"idp-vip"}, nil)); err != nil {
+		t.Fatalf("EnsureSSO: %v", err)
+	}
+	if groups.byIDCalls != before {
+		t.Fatalf("group read %d times with no rules configured, want 0", groups.byIDCalls-before)
 	}
 }
