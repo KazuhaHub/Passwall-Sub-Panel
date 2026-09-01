@@ -38,10 +38,13 @@ func oidcIssuerHTTPS(enabled bool, issuer string) bool {
 type AdminOIDCHandler struct {
 	repo ports.OIDCConfigRepo
 	oidc *auth.OIDCService
+	// groups: see AdminSAMLHandler.groups — group-rule targets are
+	// validated where they are typed rather than at somebody's login.
+	groups ports.GroupRepo
 }
 
-func NewAdminOIDCHandler(repo ports.OIDCConfigRepo, oidcSvc *auth.OIDCService) *AdminOIDCHandler {
-	return &AdminOIDCHandler{repo: repo, oidc: oidcSvc}
+func NewAdminOIDCHandler(repo ports.OIDCConfigRepo, oidcSvc *auth.OIDCService, groups ports.GroupRepo) *AdminOIDCHandler {
+	return &AdminOIDCHandler{repo: repo, oidc: oidcSvc, groups: groups}
 }
 
 type oidcAttrDTO struct {
@@ -52,31 +55,33 @@ type oidcAttrDTO struct {
 }
 
 type oidcConfigDTO struct {
-	Enabled                   bool           `json:"enabled"`
-	IssuerURL                 string         `json:"issuer_url"`
-	ClientID                  string         `json:"client_id"`
-	HasClientSecret           bool           `json:"has_client_secret"`
-	RedirectURL               string         `json:"redirect_url"`
-	Scopes                    []string       `json:"scopes"`
-	AttributeMapping          oidcAttrDTO    `json:"attribute_mapping"`
-	RoleRules        []config.SSORoleRule `json:"role_rules"`
-	DefaultGroupSlug string               `json:"default_group_slug"`
-	AllowAutoCreate  bool                 `json:"allow_auto_create"`
-	NewUserDefaults  samlNewUserDTO       `json:"new_user_defaults"`
+	Enabled          bool                  `json:"enabled"`
+	IssuerURL        string                `json:"issuer_url"`
+	ClientID         string                `json:"client_id"`
+	HasClientSecret  bool                  `json:"has_client_secret"`
+	RedirectURL      string                `json:"redirect_url"`
+	Scopes           []string              `json:"scopes"`
+	AttributeMapping oidcAttrDTO           `json:"attribute_mapping"`
+	RoleRules        []config.SSORoleRule  `json:"role_rules"`
+	GroupRules       []config.SSOGroupRule `json:"group_rules"`
+	DefaultGroupSlug string                `json:"default_group_slug"`
+	AllowAutoCreate  bool                  `json:"allow_auto_create"`
+	NewUserDefaults  samlNewUserDTO        `json:"new_user_defaults"`
 }
 
 type oidcUpdateRequest struct {
-	Enabled                   bool           `json:"enabled"`
-	IssuerURL                 string         `json:"issuer_url"`
-	ClientID                  string         `json:"client_id"`
-	ClientSecret              string         `json:"client_secret"`
-	RedirectURL               string         `json:"redirect_url"`
-	Scopes                    []string       `json:"scopes"`
-	AttributeMapping          oidcAttrDTO    `json:"attribute_mapping"`
-	RoleRules        []config.SSORoleRule `json:"role_rules"`
-	DefaultGroupSlug string               `json:"default_group_slug"`
-	AllowAutoCreate  bool                 `json:"allow_auto_create"`
-	NewUserDefaults  samlNewUserDTO       `json:"new_user_defaults"`
+	Enabled          bool                  `json:"enabled"`
+	IssuerURL        string                `json:"issuer_url"`
+	ClientID         string                `json:"client_id"`
+	ClientSecret     string                `json:"client_secret"`
+	RedirectURL      string                `json:"redirect_url"`
+	Scopes           []string              `json:"scopes"`
+	AttributeMapping oidcAttrDTO           `json:"attribute_mapping"`
+	RoleRules        []config.SSORoleRule  `json:"role_rules"`
+	GroupRules       []config.SSOGroupRule `json:"group_rules"`
+	DefaultGroupSlug string                `json:"default_group_slug"`
+	AllowAutoCreate  bool                  `json:"allow_auto_create"`
+	NewUserDefaults  samlNewUserDTO        `json:"new_user_defaults"`
 }
 
 func (h *AdminOIDCHandler) Get(c *gin.Context) {
@@ -91,6 +96,12 @@ func (h *AdminOIDCHandler) Get(c *gin.Context) {
 func (h *AdminOIDCHandler) Put(c *gin.Context) {
 	var req oidcUpdateRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	// Before anything is stored: a rule pointing at a group that does
+	// not exist would otherwise only be discovered at somebody's login.
+	if err := validateSSOGroupRules(c.Request.Context(), h.groups, req.GroupRules); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
@@ -117,6 +128,7 @@ func (h *AdminOIDCHandler) Put(c *gin.Context) {
 			Groups:      req.AttributeMapping.Groups,
 		},
 		RoleRules:        req.RoleRules,
+		GroupRules:       req.GroupRules,
 		DefaultGroupSlug: req.DefaultGroupSlug,
 		AllowAutoCreate:  req.AllowAutoCreate,
 		NewUserDefaults: config.SAMLNewUserDefaults{
@@ -163,6 +175,7 @@ func toOIDCDTO(c *config.OIDCConfig) oidcConfigDTO {
 			Groups:      c.AttributeMapping.Groups,
 		},
 		RoleRules:        c.RoleRules,
+		GroupRules:       c.GroupRules,
 		DefaultGroupSlug: c.DefaultGroupSlug,
 		AllowAutoCreate:  c.AllowAutoCreate,
 		NewUserDefaults: samlNewUserDTO{

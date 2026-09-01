@@ -1219,6 +1219,44 @@ func (j *jsonRoleRules) Scan(value any) error {
 	return json.Unmarshal(b, j)
 }
 
+// jsonGroupRules persists []config.SSOGroupRule as a JSON blob, the same
+// way jsonRoleRules does for the role rules that live beside it. Kept as a
+// distinct type rather than a generic one because the Scan error message
+// naming the actual column is worth more than the saved lines when a row
+// fails to decode.
+type jsonGroupRules []config.SSOGroupRule
+
+func (j jsonGroupRules) Value() (driver.Value, error) {
+	if j == nil {
+		return "[]", nil
+	}
+	b, err := json.Marshal(j)
+	return string(b), err
+}
+
+func (jsonGroupRules) GormDBDataType(*gorm.DB, *schema.Field) string { return "text" }
+
+func (j *jsonGroupRules) Scan(value any) error {
+	if value == nil {
+		*j = nil
+		return nil
+	}
+	var b []byte
+	switch v := value.(type) {
+	case []byte:
+		b = v
+	case string:
+		b = []byte(v)
+	default:
+		return fmt.Errorf("unsupported scan type for jsonGroupRules: %T", value)
+	}
+	if len(b) == 0 {
+		*j = nil
+		return nil
+	}
+	return json.Unmarshal(b, j)
+}
+
 // jsonPermOverrides persists []domain.PermissionOverride as a JSON blob on the
 // users table (RBAC v2 per-user grant/deny). Same shape as jsonRoleRules —
 // Value returns "[]" for nil so the column stays NOT NULL / text; Scan tolerates

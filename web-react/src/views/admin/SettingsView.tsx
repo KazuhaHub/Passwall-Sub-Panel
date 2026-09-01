@@ -65,6 +65,7 @@ import {
   type OIDCConfig,
   type QuickLink,
   type SAMLConfig,
+  type SSOGroupRule,
   type SSORoleRule,
   type UISettings,
 } from '@/api/settings'
@@ -2078,6 +2079,160 @@ function RoleRulesEditor({ value, onChange, md }: {
   )
 }
 
+// GroupRulesEditor: attribute-driven OU placement. Same shape as
+// RoleRulesEditor above — ordered list, first match wins, drag to
+// reorder — because the two rule kinds are matched by one shared
+// server-side predicate and an admin should not have to learn a second
+// model to write them.
+//
+// One deliberate difference: the target is a SELECT over real groups,
+// not free text. A role may legitimately name something the backend
+// does not recognise yet (the role editor is free-form for exactly
+// that reason), but a group slug that does not resolve has two bad
+// endings — it refuses to provision new principals and is skipped for
+// existing ones — and both surface at somebody's login rather than
+// here. The server validates this too; the picker is what stops the
+// mistake from being made in the first place.
+function GroupRulesEditor({ value, onChange, groups, md }: {
+  value: SSOGroupRule[]
+  onChange: (rules: SSOGroupRule[]) => void
+  groups: Group[]
+  md: MdShape
+}) {
+  const { t } = useTranslation('admin')
+  const rules = value ?? []
+  const [dragIndex, setDragIndex] = useState<number | null>(null)
+  const [dropIndex, setDropIndex] = useState<number | null>(null)
+
+  function patchRule(idx: number, patch: Partial<SSOGroupRule>) {
+    onChange(rules.map((r, i) => i === idx ? { ...r, ...patch } : r))
+  }
+  function addRule() {
+    // Seed the group from the catalogue rather than leaving it blank:
+    // a rule with no group is skipped by the matcher and rejected by
+    // the server, so an empty default would make every freshly added
+    // row start out invalid.
+    onChange([...rules, { attribute: '', value: '', group: groups[0]?.slug ?? '', keep: false, note: '' }])
+  }
+  function removeRule(idx: number) {
+    onChange(rules.filter((_, i) => i !== idx))
+  }
+  function moveRule(from: number, to: number) {
+    if (from === to) return
+    const next = rules.slice()
+    const [m] = next.splice(from, 1)
+    next.splice(to, 0, m)
+    onChange(next)
+  }
+
+  return (
+    <Box>
+      <Typography sx={{ fontSize: 13, color: md.onSurfaceVariant, mb: 1 }}>
+        {t('settings.sso.group_rules_hint')}
+      </Typography>
+      {rules.length === 0 && (
+        <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant, fontStyle: 'italic', mb: 1 }}>
+          {t('settings.sso.group_rules_empty')}
+        </Typography>
+      )}
+      {rules.map((r, i) => {
+        const isBeingDragged = dragIndex === i
+        const isDropTarget = dropIndex === i && dragIndex !== null && dragIndex !== i
+        // A rule may point at a group that has since been deleted. Keep
+        // the value selectable so opening the form does not silently
+        // rewrite it to something else, and mark it so the admin can
+        // see which row the save error is about.
+        const missingGroup = !!r.group && !groups.some(g => g.slug === r.group)
+        return (
+          <Box key={i}
+            draggable
+            onDragStart={e => {
+              setDragIndex(i)
+              try { e.dataTransfer.setData('text/plain', String(i)) } catch { /* Firefox */ }
+              e.dataTransfer.effectAllowed = 'move'
+            }}
+            onDragOver={e => {
+              if (dragIndex === null) return
+              e.preventDefault()
+              e.dataTransfer.dropEffect = 'move'
+              if (dropIndex !== i) setDropIndex(i)
+            }}
+            onDragLeave={() => {
+              if (dropIndex === i) setDropIndex(null)
+            }}
+            onDrop={e => {
+              e.preventDefault()
+              const from = dragIndex
+              setDragIndex(null)
+              setDropIndex(null)
+              if (from === null || from === i) return
+              moveRule(from, i)
+            }}
+            onDragEnd={() => {
+              setDragIndex(null)
+              setDropIndex(null)
+            }}
+            sx={{
+              display: 'flex', gap: 1, alignItems: 'center', flexWrap: 'wrap',
+              mb: 1, py: 0.75, px: 0.5, borderRadius: 1,
+              opacity: isBeingDragged ? 0.4 : 1,
+              bgcolor: isDropTarget ? alpha(md.primary, 0.08) : 'transparent',
+              transition: 'background-color 120ms',
+            }}>
+            <Tooltip title={t('settings.sso.role_rules_drag') as string}>
+              <Box sx={{ cursor: 'grab', display: 'inline-flex', color: md.onSurfaceVariant, px: 0.25 }}>
+                <DragIndicatorIcon fontSize="small" sx={{ opacity: 0.7 }} />
+              </Box>
+            </Tooltip>
+            <TextField size="small" sx={{ flex: '2 1 180px' }}
+              label={t('settings.sso.role_rules_attribute')}
+              placeholder={t('settings.sso.role_rules_attribute_placeholder')}
+              value={r.attribute}
+              onChange={e => patchRule(i, { attribute: e.target.value })} />
+            <TextField size="small" sx={{ flex: '2 1 140px' }}
+              label={t('settings.sso.role_rules_value')}
+              value={r.value}
+              onChange={e => patchRule(i, { value: e.target.value })} />
+            <TextField select size="small" sx={{ flex: '1 1 150px' }}
+              label={t('settings.sso.group_rules_group')}
+              error={missingGroup}
+              helperText={missingGroup ? t('settings.sso.group_rules_missing') : undefined}
+              value={r.group}
+              onChange={e => patchRule(i, { group: e.target.value })}>
+              {missingGroup && (
+                <MenuItem value={r.group}>{r.group}</MenuItem>
+              )}
+              {groups.map(g => (
+                <MenuItem key={g.slug} value={g.slug}>{g.name || g.slug}</MenuItem>
+              ))}
+            </TextField>
+            <Tooltip title={t('settings.sso.group_rules_keep_hint') as string}>
+              <FormControlLabel
+                sx={{ ml: 0, '& .MuiFormControlLabel-label': { fontSize: 12, ml: 0.5 } }}
+                control={<Switch size="small" checked={!!r.keep}
+                  onChange={(_, c) => patchRule(i, { keep: c })} />}
+                label={t('settings.sso.role_rules_keep')} />
+            </Tooltip>
+            <TextField size="small" sx={{ flex: '3 1 200px' }}
+              label={t('settings.sso.role_rules_note')}
+              placeholder={t('settings.sso.role_rules_note_placeholder')}
+              value={r.note ?? ''}
+              onChange={e => patchRule(i, { note: e.target.value })} />
+            <IconButton size="small" onClick={() => removeRule(i)}
+              aria-label={t('settings.sso.role_rules_remove')}>
+              <DeleteIcon fontSize="small" />
+            </IconButton>
+          </Box>
+        )
+      })}
+      <Button size="small" variant="outlined" startIcon={<AddIcon />} onClick={addRule}
+        disabled={groups.length === 0}>
+        {t('settings.sso.group_rules_add')}
+      </Button>
+    </Box>
+  )
+}
+
 function NumField({ label, value, onChange, helperText, step }: { label: string; value: number; onChange: (v: number) => void; helperText?: string; step?: number | string }) {
   // step defaults to 1 (integer fields: hours, count, ports, days). Pass
   // step="any" for fields that accept fractional values (e.g. GB quotas).
@@ -2448,14 +2603,23 @@ function SamlPanel() {
         </Pair>
       </Section>
 
-      {/* Group resolution holds rule-based role assignment only. The
-          default group slug is provisioning-time policy and lives with
-          the other "what does a fresh SSO user look like" defaults
-          below. */}
+      {/* Both rule kinds live here: role assignment and OU placement.
+          They are separate ordered lists because "which principals are
+          administrators" and "which OU is this principal in" are rarely
+          the same condition. The DEFAULT group slug stays below with the
+          other "what does a fresh SSO user look like" defaults — it is
+          the fallback when no group rule matches, not a rule itself. */}
       <Section title={t('settings.sso.saml.group_section', { defaultValue: '分组解析' })} md={md}>
         <RoleRulesEditor
           value={cfg.role_rules ?? []}
           onChange={rules => patch('role_rules', rules)}
+          md={md}
+        />
+        <Divider sx={{ my: 2 }} />
+        <GroupRulesEditor
+          value={cfg.group_rules ?? []}
+          onChange={rules => patch('group_rules', rules)}
+          groups={groups}
           md={md}
         />
       </Section>
@@ -2631,6 +2795,13 @@ function OidcPanel() {
         <RoleRulesEditor
           value={cfg.role_rules ?? []}
           onChange={rules => patch('role_rules', rules)}
+          md={md}
+        />
+        <Divider sx={{ my: 2 }} />
+        <GroupRulesEditor
+          value={cfg.group_rules ?? []}
+          onChange={rules => patch('group_rules', rules)}
+          groups={groups}
           md={md}
         />
       </Section>

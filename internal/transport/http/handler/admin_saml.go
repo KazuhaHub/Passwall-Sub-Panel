@@ -29,14 +29,22 @@ type AdminSAMLHandler struct {
 	repo     ports.SAMLConfigRepo
 	saml     *auth.SAMLService
 	settings ports.SettingsRepo
+	// groups exists only to validate group-rule targets at save time.
+	// A rule naming a group that does not exist has two bad endings —
+	// it refuses provisioning for new principals and is skipped for
+	// existing ones — and both surface at somebody's login rather than
+	// where the value was typed. Catching it here is the difference
+	// between a form error and a support ticket.
+	groups ports.GroupRepo
 }
 
 func NewAdminSAMLHandler(repo ports.SAMLConfigRepo, samlSvc *auth.SAMLService,
-	settings ports.SettingsRepo) *AdminSAMLHandler {
+	settings ports.SettingsRepo, groups ports.GroupRepo) *AdminSAMLHandler {
 	return &AdminSAMLHandler{
 		repo:     repo,
 		saml:     samlSvc,
 		settings: settings,
+		groups:   groups,
 	}
 }
 
@@ -66,15 +74,16 @@ type samlNewUserDTO struct {
 }
 
 type samlConfigDTO struct {
-	Enabled          bool                 `json:"enabled"`
-	Mode             string               `json:"mode"`
-	SP               samlSPDTO            `json:"sp"`
-	IDP              samlIDPDTO           `json:"idp"`
-	AttributeMapping samlAttrDTO          `json:"attribute_mapping"`
-	RoleRules        []config.SSORoleRule `json:"role_rules"`
-	DefaultGroupSlug string               `json:"default_group_slug"`
-	AllowAutoCreate  bool                 `json:"allow_auto_create"`
-	NewUserDefaults  samlNewUserDTO       `json:"new_user_defaults"`
+	Enabled          bool                  `json:"enabled"`
+	Mode             string                `json:"mode"`
+	SP               samlSPDTO             `json:"sp"`
+	IDP              samlIDPDTO            `json:"idp"`
+	AttributeMapping samlAttrDTO           `json:"attribute_mapping"`
+	RoleRules        []config.SSORoleRule  `json:"role_rules"`
+	GroupRules       []config.SSOGroupRule `json:"group_rules"`
+	DefaultGroupSlug string                `json:"default_group_slug"`
+	AllowAutoCreate  bool                  `json:"allow_auto_create"`
+	NewUserDefaults  samlNewUserDTO        `json:"new_user_defaults"`
 }
 
 // samlUpdateRequest is the same shape as samlConfigDTO but SP.KeyPEM is an
@@ -92,11 +101,12 @@ type samlUpdateRequest struct {
 		MetadataURL          string `json:"metadata_url"`
 		MetadataRefreshHours int    `json:"metadata_refresh_hours"`
 	} `json:"idp"`
-	AttributeMapping samlAttrDTO          `json:"attribute_mapping"`
-	RoleRules        []config.SSORoleRule `json:"role_rules"`
-	DefaultGroupSlug string               `json:"default_group_slug"`
-	AllowAutoCreate  bool                 `json:"allow_auto_create"`
-	NewUserDefaults  samlNewUserDTO       `json:"new_user_defaults"`
+	AttributeMapping samlAttrDTO           `json:"attribute_mapping"`
+	RoleRules        []config.SSORoleRule  `json:"role_rules"`
+	GroupRules       []config.SSOGroupRule `json:"group_rules"`
+	DefaultGroupSlug string                `json:"default_group_slug"`
+	AllowAutoCreate  bool                  `json:"allow_auto_create"`
+	NewUserDefaults  samlNewUserDTO        `json:"new_user_defaults"`
 }
 
 type samlFetchRequest struct {
@@ -137,6 +147,12 @@ func (h *AdminSAMLHandler) Put(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	// Before anything is stored: a rule pointing at a group that does
+	// not exist would otherwise only be discovered at somebody's login.
+	if err := validateSSOGroupRules(c.Request.Context(), h.groups, req.GroupRules); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
 
 	existing, err := h.repo.Load(c.Request.Context())
 	if err != nil {
@@ -174,6 +190,7 @@ func (h *AdminSAMLHandler) Put(c *gin.Context) {
 			Groups:      req.AttributeMapping.Groups,
 		},
 		RoleRules:        req.RoleRules,
+		GroupRules:       req.GroupRules,
 		DefaultGroupSlug: req.DefaultGroupSlug,
 		AllowAutoCreate:  req.AllowAutoCreate,
 		NewUserDefaults: config.SAMLNewUserDefaults{
@@ -258,6 +275,7 @@ func toSAMLDTO(c *config.SAMLConfig) samlConfigDTO {
 			Groups:      c.AttributeMapping.Groups,
 		},
 		RoleRules:        c.RoleRules,
+		GroupRules:       c.GroupRules,
 		DefaultGroupSlug: c.DefaultGroupSlug,
 		AllowAutoCreate:  c.AllowAutoCreate,
 		NewUserDefaults: samlNewUserDTO{

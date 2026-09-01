@@ -753,7 +753,14 @@ type EnsureSSOInput struct {
 	// false (the closed-deployment default) only IdP-promoted users
 	// (admin / operator output by a rule) get an account; every other
 	// unknown UPN is bounced to /sso-no-account.
-	AllowAutoCreate    bool
+	AllowAutoCreate bool
+	// GroupRules place a principal into an OU from their IdP
+	// attributes, evaluated in order with the first match winning and
+	// DefaultGroupSlug as the fallback. Unlike Rules these are
+	// consulted on every login, not only at creation — see
+	// auth.ResolveGroupForSSO for why, and for the carve-outs that keep
+	// a hand-placed OU out of the IdP's reach.
+	GroupRules         []config.SSOGroupRule
 	DefaultGroupSlug   string
 	DefaultExpireDays  int
 	DefaultLimitBytes  int64
@@ -885,10 +892,28 @@ func (s *Service) EnsureSSO(ctx context.Context, in EnsureSSOInput) (*domain.Use
 		return nil, domain.ErrSSONoAccount
 	}
 
+	// A matching group rule outranks the deployment default; with no
+	// rules, or none matching, this is exactly the previous behaviour.
+	groupSlug := in.DefaultGroupSlug
+	fromRule := false
+	if ruleSlug, ok := auth.MatchFirstGroupRule(in.GroupRules, in.GroupsAttrName, in.Attributes, in.Groups); ok {
+		groupSlug = ruleSlug
+		fromRule = true
+	}
 	var groupID int64
-	if in.DefaultGroupSlug != "" {
-		g, err := s.groups.GetBySlug(ctx, in.DefaultGroupSlug)
+	if groupSlug != "" {
+		g, err := s.groups.GetBySlug(ctx, groupSlug)
 		if err != nil {
+			// Refuse to provision rather than quietly dropping the
+			// principal into the default OU. A rule that names a group
+			// which does not exist is a configuration error, and
+			// falling back could place a principal a rule meant to
+			// RESTRICT into a more permissive default. Creation is also
+			// the cheapest moment to fail: there is no existing service
+			// to interrupt.
+			if fromRule {
+				return nil, fmt.Errorf("sso group rule target %q: %w", groupSlug, err)
+			}
 			return nil, fmt.Errorf("default group %q: %w", in.DefaultGroupSlug, err)
 		}
 		groupID = g.ID
@@ -970,6 +995,27 @@ func (s *Service) reconcileSSOUser(ctx context.Context, u *domain.User, in Ensur
 		u.Role = newRole
 		dirty = true
 	}
+	// Group resolution, the same shape as the role block above and for
+	// the same reason: an OU decides node placement, subscription
+	// content and — since v3.9.2-beta.10 — the user's entitlements, so
+	// a principal the IdP has removed from the group backing a premium
+	// OU must actually lose it. ResolveGroupForSSO holds the per-rule
+	// Keep policy and the panel-managed carve-out.
+	groupChanged := false
+	if newID, ok, err := s.resolveSSOGroupID(ctx, u, in); err != nil {
+		// Never fail a sign-in over a provisioning-mapping problem. An
+		// existing user losing access because a rule names a group that
+		// was later deleted is a worse outcome than a stale OU, and the
+		// condition is caught loudly at settings-save time plus in this
+		// log. Creation is stricter precisely because there is no
+		// existing access to protect there.
+		log.Warn("sso group rule unresolved; leaving group unchanged",
+			"user_id", u.ID, "upn", u.UPN, "err", err)
+	} else if ok && newID != u.GroupID {
+		u.GroupID = newID
+		dirty = true
+		groupChanged = true
+	}
 	if in.DisplayName != "" && u.DisplayName != in.DisplayName {
 		u.DisplayName = in.DisplayName
 		dirty = true
@@ -983,7 +1029,46 @@ func (s *Service) reconcileSSOUser(ctx context.Context, u *domain.User, in Ensur
 			return nil, fmt.Errorf("update sso user: %w", err)
 		}
 	}
+	if groupChanged {
+		// The new OU's node membership AND its inherited entitlements
+		// have to reach the panels; the stored row alone changes
+		// nothing on the nodes. Same mechanism an admin-side group move
+		// uses (ChangeGroupAndSync). Failures are enqueued, so a panel
+		// that is down does not block the login.
+		if err := s.ResyncMembershipOrEnqueue(ctx, u.ID, fmt.Sprintf("sync node membership for user %s", u.UPN)); err != nil {
+			log.Warn("enqueue user membership resync failed", "user_id", u.ID, "err", err)
+		}
+	}
 	return u, nil
+}
+
+// resolveSSOGroupID answers "which group should this existing user be
+// in", translating between the slug the rules speak and the id the row
+// stores. ok=false means SSO had nothing to say and the caller must
+// leave the stored group untouched — distinct from "move them to no
+// group", which would be ok=true with id 0.
+func (s *Service) resolveSSOGroupID(ctx context.Context, u *domain.User, in EnsureSSOInput) (int64, bool, error) {
+	current := ""
+	if u.GroupID != 0 {
+		g, err := s.groups.GetByID(ctx, u.GroupID)
+		if err != nil {
+			return 0, false, fmt.Errorf("current group %d: %w", u.GroupID, err)
+		}
+		current = g.Slug
+	}
+	slug, authoritative := auth.ResolveGroupForSSO(
+		in.GroupRules, current, in.DefaultGroupSlug, in.GroupsAttrName, in.Attributes, in.Groups)
+	if !authoritative || slug == current {
+		return 0, false, nil
+	}
+	if slug == "" {
+		return 0, true, nil
+	}
+	g, err := s.groups.GetBySlug(ctx, slug)
+	if err != nil {
+		return 0, false, fmt.Errorf("group %q: %w", slug, err)
+	}
+	return g.ID, true, nil
 }
 
 // VerifyLocalPassword returns the user if UPN/password match a password-enabled
