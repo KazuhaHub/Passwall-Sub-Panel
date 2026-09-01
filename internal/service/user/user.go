@@ -1575,6 +1575,16 @@ func (s *Service) UpdateProfile(ctx context.Context, userID int64, in UpdateInpu
 	if err := s.updateUser(ctx, u); err != nil {
 		return err
 	}
+	// The limit block above wrote u.Limits (what is stored); the resolved
+	// fields beside it still hold what was loaded. Everything below reads the
+	// RESOLVED quota — the traffic auto-disable check most of all — so they
+	// must be brought up to date here, before the first reader, not on the way
+	// out to the push.
+	//
+	// Getting this wrong is not subtle: raising an exhausted user's quota
+	// would leave TrafficExceeded() judging against the OLD limit, so the
+	// service stayed disabled and the admin's edit appeared to do nothing.
+	s.resolveUserLimits(ctx, u)
 	now := time.Now()
 	serviceStateChanged := false
 	if u.ServiceDisabledReason == domain.DisabledExpired && !u.IsExpired(now) {
@@ -1602,14 +1612,6 @@ func (s *Service) UpdateProfile(ctx context.Context, userID int64, in UpdateInpu
 		return nil
 	}
 	if expireChanged || trafficLimitChanged || serviceStateChanged {
-		// Re-read so the push carries the RESOLVED entitlements. u.Limits was
-		// just mutated in memory, but the resolved fields beside it still hold
-		// what was loaded — and only the repository knows the group's policy.
-		// One query on an admin edit, against pushing a stale cap to every
-		// panel the user is on.
-		if fresh, err := s.users.GetByID(ctx, userID); err == nil && fresh != nil {
-			u = fresh
-		}
 		if err := s.pushClientConfigToAll(ctx, u); err != nil {
 			if taskErr := s.enqueueUserTask(ctx, domain.SyncTaskUserPushConfig, userID, fmt.Sprintf("sync enabled/expiry config for user %s", u.UPN)); taskErr != nil {
 				log.Warn("enqueue user config push failed", "user_id", userID, "err", taskErr)
@@ -2848,4 +2850,29 @@ func extractDefaultFlow(settingsJSON string) string {
 		}
 	}
 	return ""
+}
+
+// resolveUserLimits refreshes u's effective entitlement fields from its stored
+// overrides plus its group's policy.
+//
+// The repository does this on every load, so it is only needed where a user is
+// held across a mutation of u.Limits — UpdateProfile, which then reads the
+// resolved quota to decide whether a traffic auto-disable should lift, and
+// pushes the resolved caps to the panels.
+//
+// A group that cannot be read resolves to "states nothing", i.e. unlimited.
+// Same reasoning as the repository's cache: cutting a paying user off because
+// of a transient failure is the worse mistake, and PSP meters independently.
+func (s *Service) resolveUserLimits(ctx context.Context, u *domain.User) {
+	if u == nil {
+		return
+	}
+	var gl domain.GroupLimits
+	if u.GroupID != 0 && s.groups != nil {
+		if g, err := s.groups.GetByID(ctx, u.GroupID); err == nil && g != nil {
+			gl = g.Limits
+		}
+	}
+	eff := domain.ResolveLimits(u.Limits, gl)
+	u.TrafficLimitBytes, u.IPLimit, u.DeviceLimit = eff.TrafficLimitBytes, eff.IPLimit, eff.DeviceLimit
 }

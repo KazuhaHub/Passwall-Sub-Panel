@@ -618,3 +618,39 @@ func cloneUser(u *domain.User) *domain.User {
 	cp := *u
 	return &cp
 }
+
+// Raising an exhausted user's quota must lift the traffic auto-disable.
+//
+// This broke when limits gained a third state: UpdateProfile writes u.Limits
+// (what is stored) while the RESOLVED u.TrafficLimitBytes beside it still held
+// the pre-edit value, so TrafficExceeded() below kept judging against the OLD
+// quota. The user stayed disabled and the admin's edit appeared to do nothing —
+// silent, and invisible to the suite, because nothing exercised the interaction
+// between an edit and the auto-disable.
+func TestUpdateProfile_RaisingTheQuotaLiftsTheTrafficAutoDisable(t *testing.T) {
+	const GiB = int64(1) << 30
+	u := &domain.User{
+		ID: 1, Role: domain.RoleUser, Enabled: true, PasswordHash: "x", GroupID: 1,
+		Limits:                domain.LimitOverrides{TrafficLimitBytes: ptrInt64(10 * GiB)},
+		TrafficLimitBytes:     10 * GiB, // resolved, as a load would leave it
+		LifetimeTotalBytes:    12 * GiB,
+		ServiceDisabledReason: domain.DisabledTrafficExceeded,
+	}
+	repo := &memoryUserRepo{byID: map[int64]*domain.User{1: u}}
+	// A push follows the edit; an empty ownership repo lets it run to
+	// completion without a panel.
+	svc := &Service{users: repo, ownership: emptyOwnershipRepo{}}
+
+	if !u.TrafficExceeded() {
+		t.Fatal("precondition: the user must start over quota")
+	}
+	raised := 200 * GiB
+	if err := svc.UpdateProfile(context.Background(), 1, UpdateInput{TrafficLimitBytes: &raised}); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	if got := repo.byID[1].ServiceDisabledReason; got != domain.DisabledNone {
+		t.Fatalf("service disabled reason = %q, want none — raising the quota did not lift the auto-disable", got)
+	}
+}
+
+func ptrInt64(v int64) *int64 { return &v }

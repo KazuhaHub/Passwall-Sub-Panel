@@ -152,6 +152,10 @@ func (h *AdminGroupHandler) Create(c *gin.Context) {
 			DeviceLimit:       req.DeviceLimit,
 		},
 	}
+	if err := validateGroupLimits(g.Limits); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
 	if err := h.group.Create(c.Request.Context(), g); err != nil {
 		mapGroupServiceError(c, err)
 		return
@@ -193,6 +197,7 @@ func (h *AdminGroupHandler) Update(c *gin.Context) {
 	if req.Require2FA != nil {
 		g.Require2FA = *req.Require2FA
 	}
+	before := g.Limits
 	if req.ClearTrafficLimit {
 		g.Limits.TrafficLimitBytes = nil
 	} else if req.TrafficLimitGB != nil {
@@ -201,21 +206,22 @@ func (h *AdminGroupHandler) Update(c *gin.Context) {
 	if req.ClearIPLimit {
 		g.Limits.IPLimit = nil
 	} else if req.IPLimit != nil {
-		if err := validateGroupConnLimit("ip_limit", *req.IPLimit); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
 		g.Limits.IPLimit = req.IPLimit
 	}
 	if req.ClearDeviceLimit {
 		g.Limits.DeviceLimit = nil
 	} else if req.DeviceLimit != nil {
-		if err := validateGroupConnLimit("device_limit", *req.DeviceLimit); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
 		g.Limits.DeviceLimit = req.DeviceLimit
 	}
+	if err := validateGroupLimits(g.Limits); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	// A limit change is panel-enforced, so it is not real until it reaches the
+	// panels. Nothing else would carry it: an idle member generates no traffic,
+	// so the poll never pushes them, and they would keep the old cap
+	// indefinitely.
+	limitsChanged := !sameGroupLimits(before, g.Limits)
 	if err := h.group.Update(c.Request.Context(), g); err != nil {
 		mapGroupServiceError(c, err)
 		return
@@ -226,7 +232,7 @@ func (h *AdminGroupHandler) Update(c *gin.Context) {
 	// per member) so a populous group / slow panel doesn't block the save on N
 	// sequential 3X-UI round-trips. The save returns at once; reconcile heals
 	// anything the background pass can't finish.
-	if filterChanged {
+	if filterChanged || limitsChanged {
 		h.user.ResyncGroupMembersInBackground(id)
 	}
 	c.JSON(http.StatusOK, gin.H{"group": toGroupDTO(g)})
@@ -324,12 +330,45 @@ func mapGroupServiceError(c *gin.Context, err error) {
 	}
 }
 
-// validateGroupConnLimit rejects a negative connection cap. Mirrors the
-// per-user check in service/user so a policy cannot be set to something a user
-// would be refused for.
-func validateGroupConnLimit(field string, v int) error {
-	if v < 0 {
-		return fmt.Errorf("%w: %s must be >= 0", domain.ErrValidation, field)
+// validateGroupLimits rejects a policy a user endpoint would refuse.
+//
+// It runs on create as well as update: a negative cap slipped in at creation
+// would be inherited by every member, pushed verbatim as the panel's LimitIP,
+// and — because the capability-gap warning only fires for a positive limit —
+// would not even show up as unenforceable. The user endpoints have always
+// answered 400 for this, so the group endpoints must too.
+func validateGroupLimits(l domain.GroupLimits) error {
+	if l.TrafficLimitBytes != nil && *l.TrafficLimitBytes < 0 {
+		return fmt.Errorf("%w: traffic_limit_gb must be >= 0", domain.ErrValidation)
+	}
+	if l.IPLimit != nil && *l.IPLimit < 0 {
+		return fmt.Errorf("%w: ip_limit must be >= 0", domain.ErrValidation)
+	}
+	if l.DeviceLimit != nil && *l.DeviceLimit < 0 {
+		return fmt.Errorf("%w: device_limit must be >= 0", domain.ErrValidation)
 	}
 	return nil
+}
+
+// sameGroupLimits compares two policies, treating nil (states nothing) as
+// distinct from any value — clearing a policy changes what members enforce
+// just as much as setting one, so it has to count as a change.
+func sameGroupLimits(a, b domain.GroupLimits) bool {
+	return sameInt64Ptr(a.TrafficLimitBytes, b.TrafficLimitBytes) &&
+		sameIntPtr(a.IPLimit, b.IPLimit) &&
+		sameIntPtr(a.DeviceLimit, b.DeviceLimit)
+}
+
+func sameInt64Ptr(a, b *int64) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	return *a == *b
+}
+
+func sameIntPtr(a, b *int) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	return *a == *b
 }
