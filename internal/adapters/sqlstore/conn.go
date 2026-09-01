@@ -105,9 +105,15 @@ func NewRepos(db *gorm.DB) ports.Repos {
 	// resolver). Sharing the instance is what makes invalidate-on-write correct —
 	// a SetOverride/DeleteScope clears the same cache the /sub resolver reads.
 	scopeSettings := NewCachingScopeRepo(newKVScopeSettingsRepo(db))
+	// One cache shared by the user repo (which reads it to resolve every
+	// user's effective limits) and the group repo (which invalidates it on
+	// write). Sharing the instance is what makes an edited group policy take
+	// effect at once instead of within the TTL — same discipline as the scope
+	// settings cache above.
+	groupLimits := newGroupLimitsCache(db)
 	return ports.Repos{
-		User:        &userRepo{db: db},
-		Group:       &groupRepo{db: db},
+		User:        &userRepo{db: db, groupLimits: groupLimits},
+		Group:       &groupRepo{db: db, limitsCache: groupLimits},
 		Node:        &nodeRepo{db: db},
 		Separator:   &separatorRepo{db: db},
 		Ownership:   &ownershipRepo{db: db},

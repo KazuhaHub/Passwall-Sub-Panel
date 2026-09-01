@@ -9,7 +9,20 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 )
 
-type groupRepo struct{ db *gorm.DB }
+type groupRepo struct {
+	db *gorm.DB
+	// limitsCache is the user repo's view of group entitlement policy. Every
+	// write here invalidates it, so an operator editing a group's quota sees
+	// it applied on the next user load rather than after the TTL.
+	limitsCache *groupLimitsCache
+}
+
+// invalidateLimits is nil-safe so tests can construct a bare groupRepo.
+func (r *groupRepo) invalidateLimits() {
+	if r.limitsCache != nil {
+		r.limitsCache.invalidate()
+	}
+}
 
 func (r *groupRepo) Create(ctx context.Context, g *domain.Group) error {
 	row := groupFromDomain(g)
@@ -18,15 +31,24 @@ func (r *groupRepo) Create(ctx context.Context, g *domain.Group) error {
 	}
 	g.ID = row.ID
 	g.CreatedAt = row.CreatedAt
+	r.invalidateLimits()
 	return nil
 }
 
 func (r *groupRepo) Update(ctx context.Context, g *domain.Group) error {
-	return r.db.WithContext(ctx).Save(groupFromDomain(g)).Error
+	if err := r.db.WithContext(ctx).Save(groupFromDomain(g)).Error; err != nil {
+		return err
+	}
+	r.invalidateLimits()
+	return nil
 }
 
 func (r *groupRepo) Delete(ctx context.Context, id int64) error {
-	return r.db.WithContext(ctx).Delete(&groupRow{}, id).Error
+	if err := r.db.WithContext(ctx).Delete(&groupRow{}, id).Error; err != nil {
+		return err
+	}
+	r.invalidateLimits()
+	return nil
 }
 
 func (r *groupRepo) GetByID(ctx context.Context, id int64) (*domain.Group, error) {

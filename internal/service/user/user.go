@@ -670,9 +670,7 @@ func (s *Service) CreateLocal(ctx context.Context, in CreateLocalInput) (*Create
 		UUID:               idgen.NewUUID(),
 		GroupID:            in.GroupID,
 		ExpireAt:           in.ExpireAt,
-		TrafficLimitBytes:  in.TrafficLimitBytes,
-		IPLimit:            in.IPLimit,
-		DeviceLimit:        in.DeviceLimit,
+		Limits:             domain.LimitOverridesFromCreate(in.TrafficLimitBytes, in.IPLimit, in.DeviceLimit),
 		TrafficResetPeriod: resetPeriod,
 		TrafficPeriodStart: &now,
 		Remark:             in.Remark,
@@ -937,7 +935,7 @@ func (s *Service) EnsureSSO(ctx context.Context, in EnsureSSOInput) (*domain.Use
 		UUID:               idgen.NewUUID(),
 		GroupID:            groupID,
 		ExpireAt:           expire,
-		TrafficLimitBytes:  in.DefaultLimitBytes,
+		Limits:             domain.LimitOverridesFromCreate(in.DefaultLimitBytes, 0, 0),
 		TrafficResetPeriod: resetPeriod,
 		TrafficPeriodStart: &now,
 		DisplayName:        in.DisplayName,
@@ -1405,17 +1403,25 @@ func validateConnLimit(field string, v int) error {
 }
 
 type UpdateInput struct {
-	GroupID            *int64
-	Role               *domain.Role
-	Email              *string
-	ExpireAt           *time.Time
-	ClearExpire        bool
-	TrafficLimitBytes  *int64
-	IPLimit            *int
-	DeviceLimit        *int
-	TrafficResetPeriod *domain.ResetPeriod
-	Remark             *string
-	DisplayName        *string
+	GroupID           *int64
+	Role              *domain.Role
+	Email             *string
+	ExpireAt          *time.Time
+	ClearExpire       bool
+	TrafficLimitBytes *int64
+	IPLimit           *int
+	DeviceLimit       *int
+	// A nil limit above means "leave this field alone"; it cannot also mean
+	// "go back to inheriting from the group", so each gets an explicit clear
+	// flag. Same shape as ClearExpire above, and for the same reason: a sparse
+	// DTO needs a separate signal for "unset it" or the value can only ever be
+	// changed, never removed. A flag wins over its value if both are sent.
+	InheritTrafficLimit bool
+	InheritIPLimit      bool
+	InheritDeviceLimit  bool
+	TrafficResetPeriod  *domain.ResetPeriod
+	Remark              *string
+	DisplayName         *string
 }
 
 type EmergencyAccessResult struct {
@@ -1498,33 +1504,61 @@ func (s *Service) UpdateProfile(ctx context.Context, userID int64, in UpdateInpu
 		u.ExpireAt = in.ExpireAt
 		expireChanged = true
 	}
-	if in.TrafficLimitBytes != nil {
-		if *in.TrafficLimitBytes != u.TrafficLimitBytes {
+	// These write u.Limits (what is stored), never the resolved u.*Limit
+	// fields (what was loaded). Writing the resolved value back would pin an
+	// inheriting user to whatever their group happened to say at that moment,
+	// silently detaching them from the policy.
+	//
+	// The change flags compare against the RESOLVED value, because what
+	// decides whether a push is needed is the effective number the panel
+	// holds. Clearing to inherit always sets the flag: the resolved value may
+	// move and this function cannot see the group to know. An extra push is
+	// cheap; a missed one leaves the panel enforcing a stale cap.
+	if in.InheritTrafficLimit {
+		if u.Limits.TrafficLimitBytes != nil {
 			trafficLimitChanged = true
 		}
-		u.TrafficLimitBytes = *in.TrafficLimitBytes
+		u.Limits.TrafficLimitBytes = nil
+	} else if in.TrafficLimitBytes != nil {
+		if *in.TrafficLimitBytes != u.TrafficLimitBytes || u.Limits.TrafficLimitBytes == nil {
+			trafficLimitChanged = true
+		}
+		v := *in.TrafficLimitBytes
+		u.Limits.TrafficLimitBytes = &v
 	}
 	// Connection caps ride the same push trigger as the traffic limit: they
 	// are panel-enforced, so a change is only real once it reaches the panel.
 	// Reusing the flag rather than adding a parallel one keeps a single edit
 	// that touches both to a single push.
-	if in.IPLimit != nil {
+	if in.InheritIPLimit {
+		if u.Limits.IPLimit != nil {
+			trafficLimitChanged = true
+		}
+		u.Limits.IPLimit = nil
+	} else if in.IPLimit != nil {
 		if err := validateConnLimit("ip_limit", *in.IPLimit); err != nil {
 			return err
 		}
-		if *in.IPLimit != u.IPLimit {
+		if *in.IPLimit != u.IPLimit || u.Limits.IPLimit == nil {
 			trafficLimitChanged = true
 		}
-		u.IPLimit = *in.IPLimit
+		v := *in.IPLimit
+		u.Limits.IPLimit = &v
 	}
-	if in.DeviceLimit != nil {
+	if in.InheritDeviceLimit {
+		if u.Limits.DeviceLimit != nil {
+			trafficLimitChanged = true
+		}
+		u.Limits.DeviceLimit = nil
+	} else if in.DeviceLimit != nil {
 		if err := validateConnLimit("device_limit", *in.DeviceLimit); err != nil {
 			return err
 		}
-		if *in.DeviceLimit != u.DeviceLimit {
+		if *in.DeviceLimit != u.DeviceLimit || u.Limits.DeviceLimit == nil {
 			trafficLimitChanged = true
 		}
-		u.DeviceLimit = *in.DeviceLimit
+		v := *in.DeviceLimit
+		u.Limits.DeviceLimit = &v
 	}
 	if in.TrafficResetPeriod != nil {
 		u.TrafficResetPeriod = *in.TrafficResetPeriod
@@ -1568,6 +1602,14 @@ func (s *Service) UpdateProfile(ctx context.Context, userID int64, in UpdateInpu
 		return nil
 	}
 	if expireChanged || trafficLimitChanged || serviceStateChanged {
+		// Re-read so the push carries the RESOLVED entitlements. u.Limits was
+		// just mutated in memory, but the resolved fields beside it still hold
+		// what was loaded — and only the repository knows the group's policy.
+		// One query on an admin edit, against pushing a stale cap to every
+		// panel the user is on.
+		if fresh, err := s.users.GetByID(ctx, userID); err == nil && fresh != nil {
+			u = fresh
+		}
 		if err := s.pushClientConfigToAll(ctx, u); err != nil {
 			if taskErr := s.enqueueUserTask(ctx, domain.SyncTaskUserPushConfig, userID, fmt.Sprintf("sync enabled/expiry config for user %s", u.UPN)); taskErr != nil {
 				log.Warn("enqueue user config push failed", "user_id", userID, "err", taskErr)
