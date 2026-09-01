@@ -1292,6 +1292,7 @@
       "ip_limit": "并发 IP 上限",
       "device_limit": "设备数上限",
       "limit_zero_hint": "0 = 不限",
+      "limit_unsupported": "以下面板不支持，落在其上的客户端不会生效：{{panels}}",
       "remark": "备注"
     },
     "role": {

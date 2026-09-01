@@ -70,6 +70,8 @@ import {
 } from '@/api/users'
 import type { UpdateUserRequest } from '@/api/users'
 import { listGroups } from '@/api/groups'
+import { listServers, type Server } from '@/api/servers'
+import { unenforceablePanels } from '@/utils/capabilities'
 import { runReconcile } from '@/api/reconcile'
 import { setUserTraffic, topTraffic, type TrafficRow } from '@/api/traffic'
 import type { Group, ResetPeriod, Role, User } from '@/api/types'
@@ -247,6 +249,11 @@ export default function UsersView() {
   const [search, setSearch] = useState('')
   const [groupFilter, setGroupFilter] = useState<number | ''>('')
   const [groups, setGroups] = useState<Group[]>([])
+  // Panels, purely so the two connection-cap fields can say when a value
+  // would be accepted and then not enforced. Best-effort: a failed load
+  // leaves the list empty, which suppresses the hint rather than
+  // inventing one.
+  const [servers, setServers] = useState<Server[]>([])
   const [reconcileBusy, setReconcileBusy] = useState(false)
   // Paged user list. The fetcher closes over groupFilter so changing
   // the group filter triggers a re-fetch through the hook's normal
@@ -360,7 +367,7 @@ export default function UsersView() {
   const someChecked = selected.size > 0 && !allChecked
   const selectedRows = items.filter(u => selected.has(u.id))
 
-  useEffect(() => { void loadGroups() }, [])
+  useEffect(() => { void loadGroups(); void loadServers() }, [])
   // Reset row selection whenever the visible page changes — selection
   // state is per-id, but admin scrolling away from rows they had
   // checked shouldn't carry the action forward.
@@ -399,6 +406,24 @@ export default function UsersView() {
 
   async function loadGroups() {
     try { const res = await listGroups(); setGroups(res.items) } catch { /* toast */ }
+  }
+
+  // A cap the operator can set but the fleet cannot enforce is exactly the
+  // failure shape the capability list exists to prevent — the write succeeds
+  // and nothing happens. The server counts it (psp_capability_gap_total), but
+  // a counter is not where the person typing the value is looking.
+  function capHint(limit: number, capability: 'client.iplimit' | 'client.devicelimit') {
+    const panels = unenforceablePanels(limit, servers, capability)
+    if (!panels.length) return null
+    return (
+      <Box component="span" sx={{ color: 'warning.main' }}>
+        {t('admin:users.field.limit_unsupported', { panels: panels.join('/ ') })}
+      </Box>
+    )
+  }
+
+  async function loadServers() {
+    try { const res = await listServers({ page: 1, page_size: 200 }); setServers(res.items) } catch { /* hint is optional */ }
   }
 
   // load() is the post-mutation reload entry (create / delete / batch
@@ -1367,14 +1392,14 @@ export default function UsersView() {
                 value={createForm.ip_limit}
                 onChange={e => setCreateForm({ ...createForm, ip_limit: Number(e.target.value) || 0 })}
                 error={!!createErr.ip_limit}
-                helperText={createErr.ip_limit ? t(`admin:${createErr.ip_limit}`) : t('admin:users.field.limit_zero_hint')}
+                helperText={createErr.ip_limit ? t(`admin:${createErr.ip_limit}`) : (capHint(createForm.ip_limit, 'client.iplimit') ?? t('admin:users.field.limit_zero_hint'))}
                 sx={{ flex: '1 1 180px' }}
                 slotProps={{ htmlInput: { min: 0, step: 1 } }} />
               <TextField type="number" label={t('admin:users.field.device_limit')}
                 value={createForm.device_limit}
                 onChange={e => setCreateForm({ ...createForm, device_limit: Number(e.target.value) || 0 })}
                 error={!!createErr.device_limit}
-                helperText={createErr.device_limit ? t(`admin:${createErr.device_limit}`) : t('admin:users.field.limit_zero_hint')}
+                helperText={createErr.device_limit ? t(`admin:${createErr.device_limit}`) : (capHint(createForm.device_limit, 'client.devicelimit') ?? t('admin:users.field.limit_zero_hint'))}
                 sx={{ flex: '1 1 180px' }}
                 slotProps={{ htmlInput: { min: 0, step: 1 } }} />
             </Box>
@@ -1724,14 +1749,14 @@ export default function UsersView() {
                 value={editForm.ip_limit}
                 onChange={e => setEditForm({ ...editForm, ip_limit: Number(e.target.value) || 0 })}
                 error={!!editErr.ip_limit}
-                helperText={editErr.ip_limit ? t(`admin:${editErr.ip_limit}`) : t('admin:users.field.limit_zero_hint')}
+                helperText={editErr.ip_limit ? t(`admin:${editErr.ip_limit}`) : (capHint(editForm.ip_limit, 'client.iplimit') ?? t('admin:users.field.limit_zero_hint'))}
                 sx={{ flex: '1 1 200px' }}
                 slotProps={{ htmlInput: { min: 0, step: 1 } }} />
               <TextField type="number" label={t('admin:users.field.device_limit')}
                 value={editForm.device_limit}
                 onChange={e => setEditForm({ ...editForm, device_limit: Number(e.target.value) || 0 })}
                 error={!!editErr.device_limit}
-                helperText={editErr.device_limit ? t(`admin:${editErr.device_limit}`) : t('admin:users.field.limit_zero_hint')}
+                helperText={editErr.device_limit ? t(`admin:${editErr.device_limit}`) : (capHint(editForm.device_limit, 'client.devicelimit') ?? t('admin:users.field.limit_zero_hint'))}
                 sx={{ flex: '1 1 200px' }}
                 slotProps={{ htmlInput: { min: 0, step: 1 } }} />
               <TextField type="number" label={t('admin:users.field.period_used_gb')}

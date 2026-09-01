@@ -4,6 +4,22 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## Unreleased
+
+### 新增
+
+- **UI 上的能力提示：设了却不会生效的上限，现在当场就说** —— 详见 [`docs/connection-limits.md`](docs/connection-limits.md) §9。服务端一直把能力缺口计进 `psp_capability_gap_total`，但**计数器不是设置这个值的人正在看的地方**：写入成功、就是不生效，而这在管理界面上原本完全不可见。
+
+  新建 / 编辑用户对话框里，并发 IP 上限与设备数上限各自在下方点名无法执行它的面板（例：`Not enforceable on: sui-osaka — clients placed there ignore this.`）。
+
+  判定是纯函数 `unenforceablePanels(limit, servers, capability)`，**规则与服务端 `reportCapabilityGaps` 刻意保持一致**：`limit <= 0` 一律不提示（不限的用户落在不支持的面板上不是问题，为它告警只会训练运维方忽略真正要紧的那条）；两个上限各判各的（一台面板可能只支持其中一个）；未声明任何能力的面板算作不支持（从未探测过或较旧的构建），宁可多提示——这个提示存在的意义就是拦住静默不生效的设置。
+
+  顺带补上前端 `PanelCapability` 类型里缺失的 `client.iplimit` / `client.devicelimit`——它们随该功能一起加在后端，但前端类型没跟上，于是 UI 连判断的依据都没有。
+
+  **实机验证**：真实浏览器驱动真实面板，建一台 S-UI（两个能力都不声明），上限为 0 时不提示、设成 3 后提示出现并点名该面板、无 console 报错、两个字段互不干扰。
+
+  **范围上的诚实**：提示列的是整个机队里不支持的面板，不是「这个用户的客户端实际落在哪几台」——后者要走 用户 → 分组 → 节点 → 面板 这条链，前端此处没有。文案因此是「落在其上的客户端不会生效」。
+
 ## v3.9.2-beta.9 — 2026-08-30
 
 补上数据面演进计划的最后一项效率修复（多客户端用户的配额迟滞带），外加一个自查发现的严重回归：并行推送扇出里 panic 会被当成成功上报。**同时这一版带着第一份真实生产测量的结论**——40.9 小时窗口回答了计划里全部的未知数，并把 Phase 2 那道「要不要自研数据面」的决策门判为**不做**。

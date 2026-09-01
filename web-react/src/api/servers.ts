@@ -11,6 +11,7 @@ export type PanelCapability =
   | 'inbound.create' | 'inbound.update' | 'inbound.delete' | 'inbound.enable'
   | 'client.read' | 'client.write' | 'traffic.read' | 'status.read'
   | 'panel.upgrade' | 'core.upgrade' | 'webcert.read' | 'reality.scan'
+  | 'client.iplimit' | 'client.devicelimit'
 
 export interface Server {
   id: number

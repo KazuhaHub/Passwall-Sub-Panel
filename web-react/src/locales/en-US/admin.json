@@ -1292,6 +1292,7 @@
       "ip_limit": "Concurrent IP limit",
       "device_limit": "Device limit",
       "limit_zero_hint": "0 = unlimited",
+      "limit_unsupported": "Not enforceable on: {{panels}} — clients placed there ignore this.",
       "remark": "Remark"
     },
     "role": {
