@@ -979,6 +979,18 @@ func (s *Service) EnsureSSO(ctx context.Context, in EnsureSSOInput) (*domain.Use
 // (pass 1) and first-time-linking (pass 2) code paths so the role-policy
 // and dirty-tracking stay in one place.
 func (s *Service) reconcileSSOUser(ctx context.Context, u *domain.User, in EnsureSSOInput) (*domain.User, error) {
+	// Make the fail-open guard visible before acting on it. When rules exist
+	// but the IdP sent none of the attributes they read, nothing is
+	// re-evaluated and the stored role and group stand — deliberately, so a
+	// directory-side accident cannot demote a fleet in one pass. The cost is
+	// that whoever can make the claim disappear keeps what they already have,
+	// so the condition has to be countable rather than merely correct.
+	if len(in.Rules) > 0 && !auth.IdPSpokeAboutRoleRules(in.Rules, in.GroupsAttrName, in.Attributes, in.Groups) {
+		metrics.SSOClaimSilentTotal.With("role").Inc()
+	}
+	if len(in.GroupRules) > 0 && !auth.IdPSpokeAboutGroupRules(in.GroupRules, in.GroupsAttrName, in.Attributes, in.Groups) {
+		metrics.SSOClaimSilentTotal.With("group").Inc()
+	}
 	dirty := false
 	if u.SSOProvider != in.Provider {
 		u.SSOProvider = in.Provider
@@ -992,8 +1004,25 @@ func (s *Service) reconcileSSOUser(ctx context.Context, u *domain.User, in Ensur
 	// Keep policy plus the "panel-managed role" carve-out (when no
 	// rule outputs the user's current role, SSO leaves it alone).
 	if newRole, ssoAuthoritative := auth.ResolveRoleForSSO(in.Rules, u.Role, in.GroupsAttrName, in.Attributes, in.Groups); ssoAuthoritative && newRole != u.Role {
-		u.Role = newRole
-		dirty = true
+		// Last-admin lockout guard, the same one UpdateProfile, Delete and
+		// the disable path all enforce. Without it a directory-side edit —
+		// someone removed from the admin group in the IdP — can take the
+		// panel's LAST enabled admin, leaving nobody able to manage it and
+		// no way in unless a local-password admin happens to survive. The
+		// admin API refuses that on all three of its own paths; the SSO
+		// path reached the same column without passing any of them.
+		//
+		// Refusing here cannot look like the API's error: failing the login
+		// would lock the principal out entirely, which is worse than a
+		// stale role. So the demotion is declined, loudly, and the login
+		// proceeds. Every other role change still applies.
+		if u.Role == domain.RoleAdmin && newRole != domain.RoleAdmin && s.lastEnabledAdmin(ctx, u) {
+			log.Warn("sso role demotion declined: would remove the last enabled admin",
+				"user_id", u.ID, "upn", u.UPN, "wanted_role", newRole)
+		} else {
+			u.Role = newRole
+			dirty = true
+		}
 	}
 	// Group resolution, the same shape as the role block above and for
 	// the same reason: an OU decides node placement, subscription
@@ -1040,6 +1069,26 @@ func (s *Service) reconcileSSOUser(ctx context.Context, u *domain.User, in Ensur
 		}
 	}
 	return u, nil
+}
+
+// lastEnabledAdmin reports whether u is the only enabled admin left.
+//
+// Fails SAFE on a read error: an unknown count is treated as "yes, last one",
+// so a database blip declines a demotion rather than performing one it cannot
+// justify. The cost of being wrong that way is a stale admin until the next
+// login; the cost of the other way is a panel with no administrator.
+func (s *Service) lastEnabledAdmin(ctx context.Context, u *domain.User) bool {
+	if !u.Enabled {
+		// A disabled row is not counted by CountEnabledAdmins, so it cannot
+		// be the last one and its role is nobody's lockout risk.
+		return false
+	}
+	n, err := s.users.CountEnabledAdmins(ctx)
+	if err != nil {
+		log.Warn("counting enabled admins failed; declining sso role demotion", "err", err)
+		return true
+	}
+	return n <= 1
 }
 
 // resolveSSOGroupID answers "which group should this existing user be

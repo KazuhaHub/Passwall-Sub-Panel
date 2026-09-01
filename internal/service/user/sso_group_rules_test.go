@@ -7,6 +7,7 @@ import (
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/config"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/metrics"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 )
 
@@ -364,5 +365,133 @@ func TestEnsureSSO_NoRulesDoesNotReadTheGroup(t *testing.T) {
 	}
 	if groups.byIDCalls != before {
 		t.Fatalf("group read %d times with no rules configured, want 0", groups.byIDCalls-before)
+	}
+}
+
+// Security review findings. Both are about the SSO path reaching a privilege
+// decision that the admin API guards and this path did not.
+
+// The admin API refuses to demote, delete or disable the last enabled admin on
+// all three of its own paths. The SSO role sync wrote the same column without
+// passing any of them, so a directory-side edit — someone removed from the
+// admin group in the IdP — could leave the panel with ZERO administrators and
+// nobody able to grant the role back.
+func TestEnsureSSO_WillNotDemoteTheLastEnabledAdmin(t *testing.T) {
+	admin := &domain.User{
+		ID: 1, UPN: "admin@corp.com", Enabled: true, GroupID: 1,
+		Role: domain.RoleAdmin, SSOProvider: domain.SSOProviderSAML, SSOSubject: "sa",
+	}
+	repo := &memoryUserRepo{byID: map[int64]*domain.User{1: admin}}
+	svc := &Service{users: repo, groups: ssoGroupFixture(), ownership: emptyOwnershipRepo{}}
+
+	// The IdP still speaks — it simply no longer lists the admin group.
+	in := ssoIn("sa", "admin@corp.com", []string{"g-other"}, nil)
+	in.Rules = []config.SSORoleRule{{Attribute: "", Value: "g-adm", Role: "admin"}}
+
+	u, err := svc.EnsureSSO(context.Background(), in)
+	if err != nil {
+		t.Fatalf("EnsureSSO: %v", err)
+	}
+	if u.Role != domain.RoleAdmin {
+		t.Fatalf("the last enabled admin was demoted to %q by an IdP edit", u.Role)
+	}
+	if n, _ := repo.CountEnabledAdmins(context.Background()); n != 1 {
+		t.Fatalf("enabled admins = %d, want 1 — the panel must never be left unmanageable", n)
+	}
+	// Declining must not fail the login: locking the principal out entirely
+	// is worse than a stale role.
+	if u.ID != 1 {
+		t.Fatalf("login did not complete: %+v", u)
+	}
+}
+
+// The guard must not become a way to keep admin forever. With a second admin
+// present there is no lockout risk, so the IdP's decision stands.
+func TestEnsureSSO_DemotesAnAdminWhenAnotherRemains(t *testing.T) {
+	first := &domain.User{
+		ID: 1, UPN: "a@corp.com", Enabled: true, GroupID: 1,
+		Role: domain.RoleAdmin, SSOProvider: domain.SSOProviderSAML, SSOSubject: "sa",
+	}
+	second := &domain.User{
+		ID: 2, UPN: "b@corp.com", Enabled: true, GroupID: 1,
+		Role: domain.RoleAdmin, PasswordHash: "x", SSOProvider: domain.SSOProviderLocal,
+	}
+	repo := &memoryUserRepo{byID: map[int64]*domain.User{1: first, 2: second}}
+	svc := &Service{users: repo, groups: ssoGroupFixture(), ownership: emptyOwnershipRepo{}}
+
+	in := ssoIn("sa", "a@corp.com", []string{"g-other"}, nil)
+	in.Rules = []config.SSORoleRule{{Attribute: "", Value: "g-adm", Role: "admin"}}
+
+	u, err := svc.EnsureSSO(context.Background(), in)
+	if err != nil {
+		t.Fatalf("EnsureSSO: %v", err)
+	}
+	if u.Role != domain.RoleUser {
+		t.Fatalf("revocation was refused with a spare admin present: role %q, want user", u.Role)
+	}
+}
+
+// The fail-open silence guard keeps whatever is stored, which means anyone able
+// to make the claim disappear holds a grant the directory may have taken back.
+// That is an accepted trade — it stops a fleet-wide demotion from one
+// directory-side accident — but it has to be COUNTABLE, or the condition is
+// indistinguishable from nothing happening.
+func TestEnsureSSO_SilentClaimIsCounted(t *testing.T) {
+	existing := &domain.User{
+		ID: 3, UPN: "vip@corp.com", Enabled: true, GroupID: 2,
+		Role: domain.RoleUser, SSOProvider: domain.SSOProviderSAML, SSOSubject: "s3",
+	}
+	repo := &memoryUserRepo{byID: map[int64]*domain.User{3: existing}}
+	svc := &Service{users: repo, groups: ssoGroupFixture(), ownership: emptyOwnershipRepo{}}
+
+	before := metrics.SSOClaimSilentTotal.With("group").Value()
+	in := ssoIn("s3", "vip@corp.com", nil, vipRule()) // IdP sent nothing
+	if _, err := svc.EnsureSSO(context.Background(), in); err != nil {
+		t.Fatalf("EnsureSSO: %v", err)
+	}
+	if got := metrics.SSOClaimSilentTotal.With("group").Value(); got != before+1 {
+		t.Fatalf("silent claim not counted: %d -> %d", before, got)
+	}
+
+	// A login where the IdP DID speak must not be counted, or the signal is
+	// noise and an operator learns to ignore it.
+	before = metrics.SSOClaimSilentTotal.With("group").Value()
+	if _, err := svc.EnsureSSO(context.Background(), ssoIn("s3", "vip@corp.com", []string{"idp-vip"}, vipRule())); err != nil {
+		t.Fatalf("EnsureSSO: %v", err)
+	}
+	if got := metrics.SSOClaimSilentTotal.With("group").Value(); got != before {
+		t.Fatalf("a login with a present claim was counted as silent: %d -> %d", before, got)
+	}
+}
+
+// The count itself can fail. An unknown number of admins must be treated as
+// "this might be the last one" and decline the demotion: being wrong that way
+// costs a stale admin until the next login, being wrong the other way costs
+// the panel its administrator on a database blip.
+type countErrUserRepo struct {
+	*memoryUserRepo
+}
+
+func (countErrUserRepo) CountEnabledAdmins(context.Context) (int64, error) {
+	return 0, errors.New("database unavailable")
+}
+
+func TestEnsureSSO_AdminCountFailureDeclinesTheDemotion(t *testing.T) {
+	admin := &domain.User{
+		ID: 1, UPN: "admin@corp.com", Enabled: true, GroupID: 1,
+		Role: domain.RoleAdmin, SSOProvider: domain.SSOProviderSAML, SSOSubject: "sa",
+	}
+	inner := &memoryUserRepo{byID: map[int64]*domain.User{1: admin}}
+	svc := &Service{users: countErrUserRepo{inner}, groups: ssoGroupFixture(), ownership: emptyOwnershipRepo{}}
+
+	in := ssoIn("sa", "admin@corp.com", []string{"g-other"}, nil)
+	in.Rules = []config.SSORoleRule{{Attribute: "", Value: "g-adm", Role: "admin"}}
+
+	u, err := svc.EnsureSSO(context.Background(), in)
+	if err != nil {
+		t.Fatalf("a failed count must not fail the login: %v", err)
+	}
+	if u.Role != domain.RoleAdmin {
+		t.Fatalf("demoted to %q while the admin count was unknown; the safe answer is to decline", u.Role)
 	}
 }

@@ -149,6 +149,22 @@ func attributeMatches(attribute, value, groupsAttrName string, attrs map[string]
 	return false
 }
 
+// IdPSpokeAboutRoleRules is the exported counterpart of
+// IdPSpokeAboutGroupRules, for observing the same fail-open guard on the role
+// side. See metrics.SSOClaimSilentTotal.
+func IdPSpokeAboutRoleRules(
+	rules []config.SSORoleRule,
+	groupsAttrName string,
+	attrs map[string][]string,
+	groups []string,
+) bool {
+	attributes := make([]string, 0, len(rules))
+	for _, r := range rules {
+		attributes = append(attributes, r.Attribute)
+	}
+	return idpSpokeAbout(attributes, groupsAttrName, attrs, groups)
+}
+
 // idpSpokeAbout reports whether the assertion actually carried any of the
 // named attributes. Shared by both rule kinds.
 //

@@ -41,6 +41,19 @@ func MatchFirstGroupRule(
 	return "", false
 }
 
+// IdPSpokeAboutGroupRules is the exported form, for callers that need to
+// observe the fail-open guard rather than act on it — the guard is otherwise
+// invisible, and its cost is that a principal keeps a grant the directory may
+// have taken back. See metrics.SSOClaimSilentTotal.
+func IdPSpokeAboutGroupRules(
+	rules []config.SSOGroupRule,
+	groupsAttrName string,
+	attrs map[string][]string,
+	groups []string,
+) bool {
+	return idpSpokeAboutGroups(rules, groupsAttrName, attrs, groups)
+}
+
 // idpSpokeAboutGroups is idpSpokeAbout over this rule set's attributes. See
 // that function for why silence must not read as revocation; the same guard
 // protects role rules, which is why the core lives in one place.

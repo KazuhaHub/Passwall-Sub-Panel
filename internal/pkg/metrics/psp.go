@@ -113,6 +113,23 @@ var (
 		"Lifecycle pushes carrying a setting the target panel cannot enforce, by capability.",
 		"capability",
 	)
+	// An SSO login where the IdP sent NONE of the attributes the rules read,
+	// so neither the role nor the group could be re-evaluated and whatever is
+	// stored was kept.
+	//
+	// Counted because the guard that produces it is a deliberate
+	// fail-open: silence is treated as "no opinion" so a directory-side
+	// accident (an Entra group overage, a broken claim mapping) cannot demote
+	// a whole fleet at once. The cost of that choice is that anyone able to
+	// make the claim disappear keeps the role and OU they already have, and
+	// the guard is otherwise invisible. A rate above roughly zero means
+	// either the IdP stopped sending a claim PSP depends on, or someone is
+	// holding a grant the directory has already taken back.
+	SSOClaimSilentTotal = NewCounterVec(
+		"psp_sso_claim_silent_total",
+		"SSO logins where none of the attributes the rules read were present, so the stored value was kept.",
+		"kind",
+	)
 	// P in the cost model.
 	UserClientCount = NewHistogram(
 		"psp_user_client_count",
