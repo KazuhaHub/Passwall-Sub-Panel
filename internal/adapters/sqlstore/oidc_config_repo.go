@@ -38,6 +38,7 @@ type oidcConfigRow struct {
 	AttrGroups      string `gorm:"size:128"`
 
 	RoleRules        jsonRoleRules
+	GroupRules       jsonGroupRules
 	DefaultGroupSlug string `gorm:"size:64"`
 	AllowAutoCreate  bool
 
@@ -69,6 +70,7 @@ func (r *oidcConfigRow) toDomain() (*config.OIDCConfig, error) {
 			Groups:      r.AttrGroups,
 		},
 		RoleRules:        []config.SSORoleRule(r.RoleRules),
+		GroupRules:       []config.SSOGroupRule(r.GroupRules),
 		DefaultGroupSlug: r.DefaultGroupSlug,
 		AllowAutoCreate:  r.AllowAutoCreate,
 		NewUserDefaults: config.SAMLNewUserDefaults{
@@ -98,9 +100,10 @@ func oidcConfigFromDomain(c *config.OIDCConfig) (*oidcConfigRow, error) {
 		AttrEmail:                 c.AttributeMapping.Email,
 		AttrDisplayName:           c.AttributeMapping.DisplayName,
 		AttrGroups:                c.AttributeMapping.Groups,
-		RoleRules:        jsonRoleRules(c.RoleRules),
-		DefaultGroupSlug: c.DefaultGroupSlug,
-		AllowAutoCreate:  c.AllowAutoCreate,
+		RoleRules:                 jsonRoleRules(c.RoleRules),
+		GroupRules:                jsonGroupRules(c.GroupRules),
+		DefaultGroupSlug:          c.DefaultGroupSlug,
+		AllowAutoCreate:           c.AllowAutoCreate,
 		NewUserExpireDays:         c.NewUserDefaults.ExpireDays,
 		NewUserTrafficLimitBytes:  c.NewUserDefaults.TrafficLimitBytes,
 		NewUserTrafficResetPeriod: c.NewUserDefaults.TrafficResetPeriod,

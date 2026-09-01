@@ -551,12 +551,12 @@ func NewRouter(d Deps) stdhttp.Handler {
 		adminGroup.POST("/settings/mail/test", mail.Test)
 		adminGroup.POST("/settings/mail/announcement", mail.Announcement)
 
-		samlAdmin := handler.NewAdminSAMLHandler(d.Repos.SAMLConfig, d.SAML, d.Repos.Settings)
+		samlAdmin := handler.NewAdminSAMLHandler(d.Repos.SAMLConfig, d.SAML, d.Repos.Settings, d.Repos.Group)
 		adminGroup.GET("/settings/saml", samlAdmin.Get)
 		adminGroup.PUT("/settings/saml", samlAdmin.Put)
 		adminGroup.POST("/settings/saml/fetch", samlAdmin.FetchMetadata)
 
-		oidcAdmin := handler.NewAdminOIDCHandler(d.Repos.OIDCConfig, d.OIDC)
+		oidcAdmin := handler.NewAdminOIDCHandler(d.Repos.OIDCConfig, d.OIDC, d.Repos.Group)
 		adminGroup.GET("/settings/oidc", oidcAdmin.Get)
 		adminGroup.PUT("/settings/oidc", oidcAdmin.Put)
 
