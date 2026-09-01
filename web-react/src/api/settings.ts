@@ -377,6 +377,7 @@ export interface SAMLConfig {
    *  behaviour when the rule doesn't fire. See backend
    *  ResolveRoleForSSO for the full matcher. */
   role_rules: SSORoleRule[]
+  group_rules: SSOGroupRule[]
   new_user_defaults: {
     expire_days: number
     traffic_limit_bytes: number
@@ -398,6 +399,32 @@ export interface SAMLConfig {
  *    logins where THIS rule does NOT fire (admin remains admin even
  *    if their group attribute happens to miss this time). Defaults
  *    to false = rule is authoritative both ways. */
+/** SSOGroupRule: an IdP attribute value -> panel group (OU) mapping.
+ *  Shared by SAML and OIDC, same as SSORoleRule, and matched by the
+ *  same server-side predicate — `attribute` and `value` mean exactly
+ *  what they mean over there.
+ *
+ *  Unlike role rules these decide a user's OU, which carries node
+ *  placement, subscription content and (since v3.9.2-beta.10) their
+ *  quota and connection caps. They are re-evaluated on EVERY login, so
+ *  a principal the IdP removes from the group backing a premium OU
+ *  actually loses it rather than keeping it indefinitely. */
+export interface SSOGroupRule {
+  attribute: string
+  value: string
+  /** The panel group's SLUG. The editor picks from real groups rather
+   *  than accepting free text: a slug that does not resolve refuses to
+   *  provision new principals and is skipped for existing ones, and
+   *  both of those surface at somebody's login rather than here. */
+  group: string
+  /** When this rule does not match and the user is currently IN this
+   *  rule's group: true leaves them there (the OU is treated as
+   *  hand-managed), false lets them fall back to the default group. */
+  keep: boolean
+  /** Admin-facing free-form note. Never affects matching. */
+  note: string
+}
+
 export interface SSORoleRule {
   attribute: string
   value: string
@@ -461,6 +488,7 @@ export interface OIDCConfig {
   allow_auto_create: boolean
   /** Attribute-driven role mapping. See SAMLConfig.role_rules. */
   role_rules: SSORoleRule[]
+  group_rules: SSOGroupRule[]
   new_user_defaults: {
     expire_days: number
     traffic_limit_bytes: number
