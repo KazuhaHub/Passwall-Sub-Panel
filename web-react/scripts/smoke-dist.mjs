@@ -64,6 +64,25 @@ const chromeCandidates = [
   'chromium-browser',
 ].filter(Boolean)
 
+// Chrome handles SIGTERM gracefully and exits 0, so a browser we had to kill
+// is INDISTINGUISHABLE from a clean run by exit code alone. That mattered: a
+// hung browser dumped nothing, exited 0, and the content checks below then
+// reported three APPLICATION render failures for what was a runner problem.
+// These kinds keep the two apart.
+const NOT_FOUND = 'NOT_FOUND'   // this binary isn't here — try the next candidate
+const TIMEOUT = 'TIMEOUT'      // it ran and never finished
+const EXITED = 'EXITED'        // it ran and failed
+
+class BrowserError extends Error {
+  constructor(kind, message) {
+    super(message)
+    this.kind = kind
+  }
+}
+
+// Overridable so the failure paths can be exercised without waiting 30s.
+const browserTimeoutMs = Number(process.env.PSP_SMOKE_TIMEOUT_MS) || 30_000
+
 function runChrome(command, url) {
   return new Promise((resolveRun, reject) => {
     const child = spawn(command, [
@@ -81,17 +100,31 @@ function runChrome(command, url) {
 
     let stdout = ''
     let stderr = ''
-    const timeout = setTimeout(() => child.kill(), 30_000)
+    let timedOut = false
+    const timeout = setTimeout(() => {
+      timedOut = true
+      child.kill()
+    }, browserTimeoutMs)
     child.stdout.on('data', chunk => { stdout += chunk })
     child.stderr.on('data', chunk => { stderr += chunk })
     child.once('error', error => {
       clearTimeout(timeout)
-      reject(error)
+      reject(error.code === 'ENOENT'
+        ? new BrowserError(NOT_FOUND, `${command}: not installed`)
+        : error)
     })
     child.once('close', code => {
       clearTimeout(timeout)
+      if (timedOut) {
+        reject(new BrowserError(TIMEOUT,
+          `${command}: still running after ${browserTimeoutMs / 1000}s, killed. It dumped `
+          + `${stdout.length} bytes. The page never reached its --virtual-time-budget of 5s, `
+          + `so this is a browser or runner problem, NOT a rendering regression.`
+          + (stderr ? `\n${stderr}` : '')))
+        return
+      }
       if (code === 0) resolveRun({ stdout, stderr })
-      else reject(new Error(`${command} exited with ${code}: ${stderr}`))
+      else reject(new BrowserError(EXITED, `${command}: exited with ${code}: ${stderr}`))
     })
   })
 }
@@ -102,18 +135,36 @@ try {
   const url = `http://127.0.0.1:${address.port}/`
 
   let result
-  let lastError
+  const attempts = []
   for (const candidate of chromeCandidates) {
     try {
       result = await runChrome(candidate, url)
       break
     } catch (error) {
-      lastError = error
+      // Only "this binary isn't here" justifies trying another one. A browser
+      // that RAN and misbehaved is the answer; swallowing it would let the next
+      // candidate's ENOENT overwrite it and report a missing browser instead of
+      // the hang we actually hit.
+      if (error.kind !== NOT_FOUND) throw error
+      attempts.push(error.message)
     }
   }
-  if (!result) throw lastError || new Error('Chrome/Chromium executable not found')
+  if (!result) throw new Error(`no usable Chrome/Chromium found:\n  ${attempts.join('\n  ')}`)
 
-  const root = result.stdout.match(/<div id="root">([\s\S]*?)<\/body>/)?.[1] || ''
+  // Separate "the browser gave us nothing to check" from "the app rendered
+  // nothing". Falling back to '' here is what turned an empty dump into three
+  // confident, wrong claims about React.
+  const rootMatch = result.stdout.match(/<div id="root">([\s\S]*?)<\/body>/)
+  if (!rootMatch) {
+    throw new Error(result.stdout.length < 200
+      ? `the browser produced no DOM dump (${result.stdout.length} bytes of stdout). `
+        + 'That is a browser or runner failure — the render checks never ran, so this '
+        + 'says nothing about the bundle.'
+      : `dumped ${result.stdout.length} bytes, but no <div id="root"> … </body> region `
+        + 'matched. The page shell changed shape, so the render checks could not be '
+        + 'evaluated against it.')
+  }
+  const root = rootMatch[1]
   const checks = {
     'React root rendered': /<\w+/.test(root),
     'login form rendered': /<form\b/.test(root),
