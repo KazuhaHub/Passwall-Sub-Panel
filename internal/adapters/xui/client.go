@@ -20,6 +20,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/keyedmutex"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/safehttp"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/version"
 )
 
 // Client implements ports.XUIClient for a single 3X-UI panel.
@@ -35,11 +36,14 @@ import (
 // way to avoid clobbering pre-existing clients that the panel does not
 // manage (e.g. the operator's personal clients).
 type Client struct {
-	panelName string
-	baseURL   string
-	apiToken  string
-	username  string
-	password  string
+	// panelVersion is the version probePanelVersionsOnce last read from this
+	// panel. Capabilities() gates limitHwid on it.
+	panelVersion string
+	panelName    string
+	baseURL      string
+	apiToken     string
+	username     string
+	password     string
 
 	http   *http.Client
 	mu     sync.Mutex
@@ -66,7 +70,7 @@ type Client struct {
 // Endpoint-level version gates (for example web cert files) are still checked
 // by the method itself; this list describes the adapter surface.
 func (c *Client) Capabilities() []ports.PanelCapability {
-	return []ports.PanelCapability{
+	caps := []ports.PanelCapability{
 		ports.CapabilityInboundRead,
 		ports.CapabilityInboundWrite,
 		ports.CapabilityInboundCreate,
@@ -82,14 +86,34 @@ func (c *Client) Capabilities() []ports.PanelCapability {
 		ports.CapabilityWebCertRead,
 		ports.CapabilityRealityScan,
 		ports.CapabilityClientIPLimit,
-		// Declared unconditionally: the field is part of the protocol PSP
-		// speaks, and a panel below 3.7.0 ignores the key rather than
-		// erroring. Whether a given panel BUILD honours it is a version
-		// question the compat data answers — capabilities are static per
-		// adapter and cannot see the panel in front of them.
-		ports.CapabilityClientDeviceLimit,
 	}
+	// limitHwid arrived in 3X-UI 3.7.0. PSP's supported floor is 3.4.2, so
+	// older panels accept the key and silently drop it — they read it back as
+	// 0 forever.
+	//
+	// This used to be declared unconditionally, on the reasoning that
+	// capabilities are static per adapter and cannot see the panel. That
+	// reasoning was wrong in a way the code one layer up had already written
+	// down: lifecycleWriteReason skips comparing a field the panel cannot
+	// store precisely BECAUSE such a comparison can never converge, and it
+	// relies on this list to know. Declaring it always meant the guard never
+	// engaged, so every poll cycle saw 0 != N, issued a full client replace,
+	// and restarted the node's Xray core — forever, for every capped user on
+	// an older panel. It also kept reportCapabilityGaps silent, so nothing
+	// counted it.
+	//
+	// The version is a stored, re-probed fact (servers.panel_version, refreshed
+	// every 10 minutes and preserved across probe failures), so this is not a
+	// guess. Unknown answers false — see version.XUIAtLeast for why that
+	// direction is the safe one.
+	if version.XUIAtLeast(c.panelVersion, deviceLimitMinVersion) {
+		caps = append(caps, ports.CapabilityClientDeviceLimit)
+	}
+	return caps
 }
+
+// deviceLimitMinVersion is the 3X-UI release that added client limitHwid.
+const deviceLimitMinVersion = "3.7.0"
 
 // clientWriteLocks serializes mutating client operations per (backend, email)
 // GLOBALLY across all *Client instances in this process. 3X-UI's first-class
@@ -206,13 +230,17 @@ func New(p *domain.XUIPanel) (*Client, error) {
 		apiToken = ""
 	}
 	return &Client{
-		panelName: p.Name,
-		baseURL:   strings.TrimRight(p.URL, "/"),
-		apiToken:  apiToken,
-		username:  p.Username,
-		password:  p.Password,
-		http:      httpClient,
-		jar:       jar,
+		// The version probePanelVersionsOnce last read from this panel.
+		// Capabilities() needs it: whether a field can be STORED is a
+		// property of the panel in front of us, not of the adapter type.
+		panelVersion: p.PanelVersion,
+		panelName:    p.Name,
+		baseURL:      strings.TrimRight(p.URL, "/"),
+		apiToken:     apiToken,
+		username:     p.Username,
+		password:     p.Password,
+		http:         httpClient,
+		jar:          jar,
 	}, nil
 }
 
