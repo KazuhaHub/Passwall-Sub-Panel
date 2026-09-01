@@ -6,6 +6,20 @@ import "time"
 // this package so storage adapters and auth services can share one type
 // without importing each other.
 //
+// Deliberately no yaml tags, here or on OIDCConfig or the SSO rule types.
+// These settings live in the DATABASE (saml_settings / oidc_settings) and are
+// edited from Admin → Settings; the only yaml.Unmarshal into a config struct
+// targets the top-level Config, which carries no SSO field at all. The tags
+// were vestigial and actively misleading — they read as "this is configured
+// in config.yaml", which is where someone looks, and does not find it. The
+// generated config.yaml says as much in its own header: it holds only what
+// the binary needs to BOOT.
+//
+// The json tags on OIDCConfig and on SSORoleRule / SSOGroupRule are NOT
+// decorative: those two types are serialised into the settings tables as JSON
+// blobs and are the admin API's wire shape, so their tag names are the stored
+// column keys. Renaming one orphans existing rules.
+//
 // Mode controls how much of the form the admin fills in:
 //   - "auto": one-click via App Federation Metadata URL. The panel derives
 //     SP entity_id / ACS URL from the panel's public base URL, auto-generates
@@ -14,61 +28,61 @@ import "time"
 //     is always on.
 //   - "manual": every field is admin-controlled.
 type SAMLConfig struct {
-	Enabled bool    `yaml:"enabled"`
-	Mode    string  `yaml:"mode"`
-	SP      SPConf  `yaml:"sp"`
-	IDP     IDPConf `yaml:"idp"`
+	Enabled bool
+	Mode    string
+	SP      SPConf
+	IDP     IDPConf
 
-	AttributeMapping SAMLAttributeMap `yaml:"attribute_mapping"`
+	AttributeMapping SAMLAttributeMap
 
 	// RoleRules is the attribute-driven role mapping evaluated in order.
 	// The first rule whose value appears in the configured attribute
 	// decides the panel role. Each rule carries its own Keep flag that
 	// controls whether the role is preserved when no rule fires. See
 	// internal/service/auth.ResolveRoleForSSO for the full matcher.
-	RoleRules []SSORoleRule `yaml:"role_rules"`
+	RoleRules []SSORoleRule
 
 	// GroupRules place a principal into an OU from their IdP
 	// attributes: first match wins, DefaultGroupSlug is the fallback,
 	// and — unlike a create-time-only mapping — they are re-evaluated on
 	// every login so a revoked IdP group actually costs the OU it backed.
-	GroupRules []SSOGroupRule `yaml:"group_rules"`
+	GroupRules []SSOGroupRule
 
-	DefaultGroupSlug string `yaml:"default_group_slug"`
+	DefaultGroupSlug string
 
 	// AllowAutoCreate controls whether an unprivileged SSO login may
 	// provision a fresh account. When false (the closed-deployment
 	// default) only principals a rule promotes to admin or operator
 	// bootstrap an account; every other unknown UPN is bounced to the
 	// "contact your administrator" page.
-	AllowAutoCreate bool `yaml:"allow_auto_create"`
+	AllowAutoCreate bool
 
-	NewUserDefaults SAMLNewUserDefaults `yaml:"new_user_defaults"`
+	NewUserDefaults SAMLNewUserDefaults
 }
 
 type SPConf struct {
-	EntityID string `yaml:"entity_id"`
-	ACSURL   string `yaml:"acs_url"`
-	CertPEM  string `yaml:"cert_pem,omitempty"`
-	KeyPEM   string `yaml:"key_pem,omitempty"`
+	EntityID string
+	ACSURL   string
+	CertPEM  string
+	KeyPEM   string
 }
 
 type IDPConf struct {
-	MetadataURL             string        `yaml:"metadata_url"`
-	MetadataRefreshInterval time.Duration `yaml:"metadata_refresh_interval"`
+	MetadataURL             string
+	MetadataRefreshInterval time.Duration
 }
 
 type SAMLAttributeMap struct {
-	UPN         string `yaml:"upn"`
-	Email       string `yaml:"email"`
-	DisplayName string `yaml:"display_name"`
-	Groups      string `yaml:"groups"`
+	UPN         string
+	Email       string
+	DisplayName string
+	Groups      string
 }
 
 type SAMLNewUserDefaults struct {
-	TrafficLimitBytes  int64  `yaml:"traffic_limit_bytes"`
-	ExpireDays         int    `yaml:"expire_days"`
-	TrafficResetPeriod string `yaml:"traffic_reset_period"`
+	TrafficLimitBytes  int64
+	ExpireDays         int
+	TrafficResetPeriod string
 }
 
 // ApplySAMLDefaults fills in any zero fields with sensible defaults.
