@@ -101,7 +101,7 @@ func (h *AdminOIDCHandler) Put(c *gin.Context) {
 	}
 	// Before anything is stored: a rule pointing at a group that does
 	// not exist would otherwise only be discovered at somebody's login.
-	if err := validateSSOGroupRules(c.Request.Context(), h.groups, req.GroupRules); err != nil {
+	if err := validateSSOGroupRules(c.Request.Context(), h.groups, req.GroupRules, req.DefaultGroupSlug); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}

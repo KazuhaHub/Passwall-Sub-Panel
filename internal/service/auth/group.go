@@ -41,6 +41,22 @@ func MatchFirstGroupRule(
 	return "", false
 }
 
+// idpSpokeAboutGroups is idpSpokeAbout over this rule set's attributes. See
+// that function for why silence must not read as revocation; the same guard
+// protects role rules, which is why the core lives in one place.
+func idpSpokeAboutGroups(
+	rules []config.SSOGroupRule,
+	groupsAttrName string,
+	attrs map[string][]string,
+	groups []string,
+) bool {
+	attributes := make([]string, 0, len(rules))
+	for _, r := range rules {
+		attributes = append(attributes, r.Attribute)
+	}
+	return idpSpokeAbout(attributes, groupsAttrName, attrs, groups)
+}
+
 // ResolveGroupForSSO applies the full SSO group policy on an EXISTING
 // user: rule matching PLUS per-rule Keep semantics PLUS the
 // "panel-managed group" carve-out. It is the group-shaped twin of
@@ -127,6 +143,25 @@ func ResolveGroupForSSO(
 	}
 	if currentKeep {
 		return current, true
+	}
+	// Below here we would demote. Two conditions have to hold first, and
+	// neither is about this principal.
+	//
+	// The IdP must have actually said something. See idpSpokeAboutGroups:
+	// an absent claim is not a revocation, and treating it as one turns a
+	// directory-side accident into a fleet-wide entitlement change.
+	if !idpSpokeAboutGroups(rules, groupsAttrName, attrs, groups) {
+		return current, false
+	}
+	// And there has to be somewhere to demote TO. An empty defaultSlug
+	// means no group, and a user in no group inherits nothing — which
+	// resolves to 0/0/0, i.e. UNLIMITED traffic and no connection caps.
+	// Demoting into that would hand a revoked principal MORE than they
+	// had, the exact inversion of what this branch exists to do. The
+	// settings validator refuses to store rules without a default group,
+	// so this is the belt to that braces.
+	if defaultSlug == "" {
+		return current, false
 	}
 	return defaultSlug, true
 }

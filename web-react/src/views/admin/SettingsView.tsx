@@ -2093,10 +2093,16 @@ function RoleRulesEditor({ value, onChange, md }: {
 // existing ones — and both surface at somebody's login rather than
 // here. The server validates this too; the picker is what stops the
 // mistake from being made in the first place.
-function GroupRulesEditor({ value, onChange, groups, md }: {
+function GroupRulesEditor({ value, onChange, groups, groupsLoaded, md }: {
   value: SSOGroupRule[]
   onChange: (rules: SSOGroupRule[]) => void
   groups: Group[]
+  /** False while the catalogue is loading OR after the fetch failed. An
+   *  empty list means nothing on its own: a dropped request and a panel
+   *  with no groups look identical, and treating the first as the second
+   *  marks every saved rule "this group no longer exists" — presenting a
+   *  transient network failure as a corrupt configuration. */
+  groupsLoaded: boolean
   md: MdShape
 }) {
   const { t } = useTranslation('admin')
@@ -2142,7 +2148,8 @@ function GroupRulesEditor({ value, onChange, groups, md }: {
         // the value selectable so opening the form does not silently
         // rewrite it to something else, and mark it so the admin can
         // see which row the save error is about.
-        const missingGroup = !!r.group && !groups.some(g => g.slug === r.group)
+        // Only claim a group is gone once we know what exists. See groupsLoaded.
+        const missingGroup = groupsLoaded && !!r.group && !groups.some(g => g.slug === r.group)
         return (
           <Box key={i}
             draggable
@@ -2226,7 +2233,7 @@ function GroupRulesEditor({ value, onChange, groups, md }: {
         )
       })}
       <Button size="small" variant="outlined" startIcon={<AddIcon />} onClick={addRule}
-        disabled={groups.length === 0}>
+        disabled={!groupsLoaded || groups.length === 0}>
         {t('settings.sso.group_rules_add')}
       </Button>
     </Box>
@@ -2294,6 +2301,7 @@ function SamlPanel() {
   type SamlField = 'entity_id' | 'acs_url' | 'cert_pem' | 'metadata_url'
   const [errs, setErrs] = useState<FieldErrors<SamlField>>({})
   const [groups, setGroups] = useState<Group[]>([])
+  const [groupsLoaded, setGroupsLoaded] = useState(false)
 
   // Auto mode hides SP / attribute editing because the backend auto-derives
   // entity_id, ACS URL and a self-signed cert from sub_base_url on save,
@@ -2313,7 +2321,14 @@ function SamlPanel() {
 
   useEffect(() => { void load(); void loadGroups() }, [])
   async function loadGroups() {
-    try { setGroups(await listAllGroups()) } catch { /* dropdown stays empty */ }
+    // The failure is recorded, not swallowed: an empty list caused by a
+    // dropped request must not be read as "this panel has no groups".
+    try {
+      setGroups(await listAllGroups())
+      setGroupsLoaded(true)
+    } catch {
+      setGroupsLoaded(false)
+    }
   }
   // Fresh DB serialises `admin_group_ids` as null (Go nil slice -> JSON
   // null). The editor calls `.join(', ')` unconditionally; defend at the
@@ -2620,6 +2635,7 @@ function SamlPanel() {
           value={cfg.group_rules ?? []}
           onChange={rules => patch('group_rules', rules)}
           groups={groups}
+          groupsLoaded={groupsLoaded}
           md={md}
         />
       </Section>
@@ -2681,10 +2697,18 @@ function OidcPanel() {
   type OidcField = 'issuer_url' | 'client_id' | 'redirect_url'
   const [errs, setErrs] = useState<FieldErrors<OidcField>>({})
   const [groups, setGroups] = useState<Group[]>([])
+  const [groupsLoaded, setGroupsLoaded] = useState(false)
 
   useEffect(() => { void load(); void loadGroups() }, [])
   async function loadGroups() {
-    try { setGroups(await listAllGroups()) } catch { /* dropdown stays empty */ }
+    // The failure is recorded, not swallowed: an empty list caused by a
+    // dropped request must not be read as "this panel has no groups".
+    try {
+      setGroups(await listAllGroups())
+      setGroupsLoaded(true)
+    } catch {
+      setGroupsLoaded(false)
+    }
   }
   // Same null-array gotcha as SAML: scopes + admin_group_ids come back
   // as null on a fresh DB, and the editor calls `.join` on them.
@@ -2802,6 +2826,7 @@ function OidcPanel() {
           value={cfg.group_rules ?? []}
           onChange={rules => patch('group_rules', rules)}
           groups={groups}
+          groupsLoaded={groupsLoaded}
           md={md}
         />
       </Section>

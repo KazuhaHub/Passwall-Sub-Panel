@@ -157,3 +157,56 @@ func TestResolveGroupForSSO_NoCurrentGroupIsNotClaimedByBlankRule(t *testing.T) 
 		t.Fatalf("group-less: got (%q, sso=%v), want (\"\", false)", got, sso)
 	}
 }
+
+// The two conditions that must hold before a demotion, neither of which is
+// about the principal. Both were found by adversarial review AFTER the feature
+// shipped its first cut, and both turned the branch that exists to REVOKE an
+// entitlement into one that grants or misfires.
+
+// An empty defaultSlug means "no group", and a user in no group inherits
+// nothing — which resolves to 0/0/0, i.e. unlimited traffic and no connection
+// caps. Demoting into that hands a revoked principal MORE than they had.
+func TestResolveGroupForSSO_NoDefaultGroupMustNotDemoteIntoUnlimited(t *testing.T) {
+	rules := []config.SSOGroupRule{groupRule("g-vip", "vip")}
+	got, sso := ResolveGroupForSSO(rules, "vip", "", "groups", nil, groupsOf("g-staff"))
+	if got != "vip" || sso {
+		t.Fatalf("demoted with nowhere to go: got (%q, sso=%v), want (vip, false) — "+
+			"moving to no group resolves to unlimited", got, sso)
+	}
+}
+
+// An absent claim is not a revocation. Entra stops emitting `groups` past
+// ~150 group memberships, and a claim mapping can be broken or newly
+// misconfigured; demoting on silence turns any of those into every SSO user
+// leaving their OU on their next login.
+func TestResolveGroupForSSO_AbsentClaimIsNotRevocation(t *testing.T) {
+	rules := []config.SSOGroupRule{groupRule("g-vip", "vip")}
+	got, sso := ResolveGroupForSSO(rules, "vip", "default", "groups", nil, nil)
+	if got != "vip" || sso {
+		t.Fatalf("silence treated as revocation: got (%q, sso=%v), want (vip, false)", got, sso)
+	}
+}
+
+// The distinction that makes the guard above meaningful: the claim IS present
+// and simply does not list this principal's group. That is a real revocation
+// and must still cost the OU, or the fix would have closed the hole by
+// disabling the feature.
+func TestResolveGroupForSSO_PresentClaimWithoutTheGroupStillDemotes(t *testing.T) {
+	rules := []config.SSOGroupRule{groupRule("g-vip", "vip")}
+	got, sso := ResolveGroupForSSO(rules, "vip", "default", "groups", nil, groupsOf("g-something-else"))
+	if got != "default" || !sso {
+		t.Fatalf("a present claim that drops the group must demote: got (%q, sso=%v), want (default, true)", got, sso)
+	}
+}
+
+// The silence guard reads the attributes the RULES name, not just the groups
+// shortcut — a rule set keyed on a named attribute must get the same
+// protection.
+func TestResolveGroupForSSO_AbsentNamedAttributeIsAlsoSilence(t *testing.T) {
+	rules := []config.SSOGroupRule{{Attribute: "department", Value: "finance", Group: "staff"}}
+	got, sso := ResolveGroupForSSO(rules, "staff", "default", "groups",
+		attrs(map[string][]string{"unrelated": {"x"}}), nil)
+	if got != "staff" || sso {
+		t.Fatalf("absent named attribute treated as revocation: got (%q, sso=%v), want (staff, false)", got, sso)
+	}
+}

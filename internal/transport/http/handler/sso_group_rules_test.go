@@ -47,7 +47,7 @@ func TestValidateSSOGroupRules_AcceptsResolvableRules(t *testing.T) {
 		{Attribute: "", Value: "idp-vip", Group: "vip"},
 		{Attribute: "department", Value: "finance", Group: "staff"},
 	}
-	if err := validateSSOGroupRules(context.Background(), knownGroups("vip", "staff"), rules); err != nil {
+	if err := validateSSOGroupRules(context.Background(), knownGroups("vip", "staff", "default"), rules, "default"); err != nil {
 		t.Fatalf("valid rules rejected: %v", err)
 	}
 }
@@ -56,7 +56,7 @@ func TestValidateSSOGroupRules_AcceptsResolvableRules(t *testing.T) {
 // cannot be provisioned at all — an error on somebody else's login screen.
 func TestValidateSSOGroupRules_RejectsUnknownSlug(t *testing.T) {
 	rules := []config.SSOGroupRule{{Attribute: "", Value: "idp-vip", Group: "typo"}}
-	err := validateSSOGroupRules(context.Background(), knownGroups("vip"), rules)
+	err := validateSSOGroupRules(context.Background(), knownGroups("vip", "default"), rules, "default")
 	if err == nil {
 		t.Fatal("a rule naming a nonexistent group must not save")
 	}
@@ -72,7 +72,7 @@ func TestValidateSSOGroupRules_RejectsUnknownSlug(t *testing.T) {
 // directory that is not sending the claim.
 func TestValidateSSOGroupRules_RejectsBlankValue(t *testing.T) {
 	rules := []config.SSOGroupRule{{Attribute: "", Value: "  ", Group: "vip"}}
-	if err := validateSSOGroupRules(context.Background(), knownGroups("vip"), rules); err == nil {
+	if err := validateSSOGroupRules(context.Background(), knownGroups("vip", "default"), rules, "default"); err == nil {
 		t.Fatal("a rule with no value can never match and must not save")
 	}
 }
@@ -81,7 +81,7 @@ func TestValidateSSOGroupRules_RejectsBlankValue(t *testing.T) {
 // rule set. Refusing the save is how the admin learns the row is unfinished.
 func TestValidateSSOGroupRules_RejectsBlankGroup(t *testing.T) {
 	rules := []config.SSOGroupRule{{Attribute: "", Value: "idp-vip", Group: ""}}
-	if err := validateSSOGroupRules(context.Background(), knownGroups("vip"), rules); err == nil {
+	if err := validateSSOGroupRules(context.Background(), knownGroups("vip", "default"), rules, "default"); err == nil {
 		t.Fatal("a rule with no group must not save")
 	}
 }
@@ -89,7 +89,7 @@ func TestValidateSSOGroupRules_RejectsBlankGroup(t *testing.T) {
 // An empty rule set is the state every deployment is in before using the
 // feature; validating it must not require a group repository or a round trip.
 func TestValidateSSOGroupRules_EmptyIsFineWithoutARepo(t *testing.T) {
-	if err := validateSSOGroupRules(context.Background(), nil, nil); err != nil {
+	if err := validateSSOGroupRules(context.Background(), nil, nil, "default"); err != nil {
 		t.Fatalf("no rules should validate trivially: %v", err)
 	}
 }
@@ -100,25 +100,26 @@ func TestValidateSSOGroupRules_EmptyIsFineWithoutARepo(t *testing.T) {
 // still believes the form checked.
 func TestValidateSSOGroupRules_MissingRepoIsAnErrorNotASkip(t *testing.T) {
 	rules := []config.SSOGroupRule{{Attribute: "", Value: "idp-vip", Group: "vip"}}
-	if err := validateSSOGroupRules(context.Background(), nil, rules); err == nil {
+	if err := validateSSOGroupRules(context.Background(), nil, rules, "default"); err == nil {
 		t.Fatal("unvalidatable rules must not be accepted as valid")
 	}
 }
 
 // Several IdP groups pointing at one OU is the ordinary shape of a rule set;
-// it must not cost one query per row.
+// it must not cost one query per row. The default group is resolved once on
+// top of that, so three rules sharing one target cost two reads, not four.
 func TestValidateSSOGroupRules_ResolvesEachSlugOnce(t *testing.T) {
-	repo := knownGroups("vip")
+	repo := knownGroups("vip", "default")
 	rules := []config.SSOGroupRule{
 		{Attribute: "", Value: "idp-vip-eu", Group: "vip"},
 		{Attribute: "", Value: "idp-vip-us", Group: "vip"},
 		{Attribute: "", Value: "idp-vip-ap", Group: "vip"},
 	}
-	if err := validateSSOGroupRules(context.Background(), repo, rules); err != nil {
+	if err := validateSSOGroupRules(context.Background(), repo, rules, "default"); err != nil {
 		t.Fatalf("valid rules rejected: %v", err)
 	}
-	if repo.calls != 1 {
-		t.Fatalf("resolved the same slug %d times, want 1", repo.calls)
+	if repo.calls != 2 {
+		t.Fatalf("group reads = %d, want 2 (the shared target once + the default group once)", repo.calls)
 	}
 }
 
@@ -182,7 +183,7 @@ func TestAdminSAMLPutRejectsUnresolvableGroupRule(t *testing.T) {
 	// pure state and touches nothing external, and the difference only
 	// shows when the validator is ABSENT — which is precisely the run
 	// that has to produce a readable failure.
-	h := NewAdminSAMLHandler(repo, &auth.SAMLService{}, nil, knownGroups("vip"))
+	h := NewAdminSAMLHandler(repo, &auth.SAMLService{}, nil, knownGroups("vip", "default"))
 
 	rec := putJSON(t, h.Put, badRuleBody)
 	if rec.Code != http.StatusBadRequest {
@@ -202,7 +203,7 @@ func TestAdminOIDCPutRejectsUnresolvableGroupRule(t *testing.T) {
 	// test with it — instead of failing this test cleanly. That is a
 	// signal reading as infrastructure noise exactly when it should read
 	// as "the save path stopped checking".
-	h := NewAdminOIDCHandler(repo, &auth.OIDCService{}, knownGroups("vip"))
+	h := NewAdminOIDCHandler(repo, &auth.OIDCService{}, knownGroups("vip", "default"))
 
 	rec := putJSON(t, h.Put, badRuleBody)
 	if rec.Code != http.StatusBadRequest {
