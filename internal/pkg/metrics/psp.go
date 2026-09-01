@@ -130,6 +130,31 @@ var (
 		"SSO logins where none of the attributes the rules read were present, so the stored value was kept.",
 		"kind",
 	)
+	// P split by the two things that produce it.
+	//
+	// UserClientCount is P — clients per user — and it conflates two
+	// independent multipliers that happen to look the same in the cost model
+	// and do NOT look the same for the connection caps:
+	//
+	//   * how many PANELS the user is on. Each panel enforces limitIp on its
+	//     own and cannot see the others, so this multiplier is inherent to a
+	//     multi-panel fleet.
+	//   * how many CLIENTS the user needs on ONE panel. clientplan splits by
+	//     (password class, flow) because a 3X-UI client row holds a single
+	//     password and a single flow, and an SS-2022-128 node cannot share a
+	//     row with an SS-2022-256 one. Each split client gets its own email,
+	//     and 3X-UI budgets IPs per email — so this multiplier is PSP's, and
+	//     it silently multiplies a cap the admin typed once.
+	//
+	// P alone cannot tell them apart: a user on four panels with one client
+	// each and a user on one panel split four ways both report 4. This
+	// histogram is the second factor by itself, so the two can be separated
+	// without guessing which one the fleet is paying.
+	UserClientsPerPanel = NewHistogram(
+		"psp_user_clients_per_panel",
+		"Shared clients a user needs on ONE panel, sampled once per SyncUserLifecycle. Above 1 means clientplan split them, and each split carries its own copy of the connection caps.",
+		"clients", CountBuckets,
+	)
 	// P in the cost model.
 	UserClientCount = NewHistogram(
 		"psp_user_client_count",
