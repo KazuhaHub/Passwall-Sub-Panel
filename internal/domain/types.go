@@ -1074,6 +1074,16 @@ type Panel struct {
 	PanelVersion     string
 	XrayVersion      string
 	VersionCheckedAt *time.Time
+
+	// IPLimitEnforcement is the last answer from this node's fail2ban probe:
+	// whether a limitIp PSP pushes here does anything at all. It is a fact
+	// about the NODE, not about the panel's API surface, which is why it is
+	// stored beside the version snapshot rather than derived from a capability.
+	// Unknown covers never probed, probe failed, and panel older than 3.7.0.
+	// IPLimitProbedAt is nil until the first probe answers; a stale timestamp
+	// with an Enforcing state is how a node that lost fail2ban stays visible.
+	IPLimitEnforcement IPLimitEnforcement
+	IPLimitProbedAt    *time.Time
 }
 
 // XUIPanel is a compatibility alias. New code should use Panel; retaining the

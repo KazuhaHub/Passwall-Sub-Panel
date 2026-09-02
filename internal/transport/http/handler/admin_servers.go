@@ -76,6 +76,18 @@ type serverDTO struct {
 	// would just be N copies of the same string going stale together.
 	LatestXUIVersion string `json:"latest_xui_version,omitempty"`
 	UpdateAvailable  bool   `json:"update_available,omitempty"`
+	// IPLimitEnforcement is what the node's fail2ban probe concluded about the
+	// concurrent-IP cap: whether a limit pushed here is acted on at all. It is
+	// NOT a capability — 3X-UI stores limitIp on every supported version and
+	// says nothing about acting on it — so it is reported separately and, on
+	// purpose, INCLUDING "unknown". A panel we cannot read must not be
+	// indistinguishable from one that is enforcing.
+	//
+	// 3X-UI only. S-UI has no concept of the cap at all, which the capability
+	// list already reports; adding a second permanently-unknown badge there
+	// would be noise an admin has to learn to ignore.
+	IPLimitEnforcement string     `json:"ip_limit_enforcement,omitempty"`
+	IPLimitProbedAt    *time.Time `json:"ip_limit_probed_at,omitempty"`
 }
 
 type serverCreateRequest struct {
@@ -383,6 +395,14 @@ func (h *AdminServersHandler) Test(c *gin.Context) {
 		if latest := version.LatestXUI(); isXUI && latest != "" {
 			resp["latest_xui_version"] = latest
 			resp["update_available"] = version.IsXUIUpdateAvailable(status.PanelVersion)
+		}
+		// Same click, same reason: an admin who just installed fail2ban on the
+		// node should not have to wait out the 10-minute probe tick to see the
+		// IP cap go from "stored and ignored" to "enforced".
+		if isXUI {
+			if state, ok := h.refreshIPLimitEnforcement(c.Request.Context(), req.ID, client, now); ok {
+				resp["ip_limit_enforcement"] = string(state)
+			}
 		}
 	} else {
 		log.Warn("admin test: version probe", "panel_id", req.ID, "err", perr)
@@ -920,6 +940,14 @@ func toServerDTO(p *domain.XUIPanel) serverDTO {
 		dto.CompatStatus = status.String()
 		dto.CompatMessage = version.CompatMessageSUI(p.PanelVersion, status)
 	}
+	if domain.NormalizePanelKind(p.Kind) == domain.PanelKind3XUI {
+		state := p.IPLimitEnforcement
+		if !state.Valid() {
+			state = domain.IPLimitEnforcementUnknown
+		}
+		dto.IPLimitEnforcement = string(state)
+		dto.IPLimitProbedAt = p.IPLimitProbedAt
+	}
 	// Derive the "update available" indicator from the PSP-wide latest
 	// tag rather than a per-panel column. Same snapshot drives every
 	// panel's badge, so the kebab dots flip in lockstep with one fetch.
@@ -928,6 +956,41 @@ func toServerDTO(p *domain.XUIPanel) serverDTO {
 		dto.UpdateAvailable = version.IsXUIUpdateAvailable(p.PanelVersion)
 	}
 	return dto
+}
+
+// refreshIPLimitEnforcement re-probes one node's fail2ban preconditions and
+// stores the result, returning what it concluded.
+//
+// ok=false means the probe produced nothing usable and the STORED state was
+// left alone. That is deliberate and matches the background probe: a blip must
+// not turn "enforced" into "unknown", because unknown is what an operator sees
+// when the probe itself is broken and it would send them after the wrong fault.
+//
+// A panel older than 3.7.0 has no such route, which is an answer — recorded as
+// unsupported rather than as a fault, so it does not become a permanent warning
+// on a node that may well be enforcing fine.
+func (h *AdminServersHandler) refreshIPLimitEnforcement(
+	ctx context.Context, panelID int64, client ports.XUIClient, now time.Time,
+) (domain.IPLimitEnforcement, bool) {
+	reader, ok := client.(ports.Fail2banReader)
+	if !ok {
+		return "", false
+	}
+	st, err := reader.GetFail2banStatus(ctx)
+	state := domain.IPLimitEnforcementUnsupported
+	switch {
+	case errors.Is(err, ports.ErrXUIEndpointUnsupported):
+	case err != nil:
+		log.Debug("admin test: ip-cap probe failed; keeping the last known state",
+			"panel_id", panelID, "err", err)
+		return "", false
+	default:
+		state = domain.ClassifyIPLimit(*st)
+	}
+	if uerr := h.repo.UpdateIPLimitEnforcement(ctx, panelID, state, now); uerr != nil {
+		log.Warn("admin test: write ip-cap state", "panel_id", panelID, "err", uerr)
+	}
+	return state, true
 }
 
 func (h *AdminServersHandler) toServerDTO(p *domain.Panel) serverDTO {

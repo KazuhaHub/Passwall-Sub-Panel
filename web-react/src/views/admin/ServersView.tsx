@@ -67,6 +67,7 @@ import { pushSnack } from '@/components/SnackbarHost'
 import { PagedTableFooter } from '@/components/PagedTableFooter'
 import { SortableTableCell } from '@/components/SortableTableCell'
 import { usePaged } from '@/hooks/usePaged'
+import { ipCapBadgeTone, type IPCapTone } from '@/utils/capabilities'
 import {
   type FieldErrors,
   firstError,
@@ -215,7 +216,12 @@ export default function ServersView() {
         // version fields back into the row so the Version column and the
         // top-of-page compat banner reflect the fresh probe without a
         // full list reload.
-        if (r.panel_version !== undefined || r.compat_status) {
+        // The IP-cap probe rides the same click, so an admin who just
+        // installed fail2ban sees the badge clear here rather than after the
+        // next 10-minute tick. Absent means the probe produced nothing usable
+        // and the stored state was deliberately left alone — keep the old
+        // value rather than blanking the badge on a blip.
+        if (r.panel_version !== undefined || r.compat_status || r.ip_limit_enforcement) {
           mutateItems(prev => prev.map(it => it.id === s.id ? {
             ...it,
             panel_version: r.panel_version ?? it.panel_version,
@@ -223,6 +229,7 @@ export default function ServersView() {
             version_checked_at: r.version_checked_at ?? it.version_checked_at,
             compat_status: r.compat_status ?? it.compat_status,
             compat_message: r.compat_message ?? it.compat_message,
+            ip_limit_enforcement: r.ip_limit_enforcement ?? it.ip_limit_enforcement,
           } : it))
         }
         if (notify) pushSnack(t('admin:servers.toast.test_ok', { count: r.inbound_count ?? 0 }), 'success')
@@ -875,6 +882,62 @@ export default function ServersView() {
     return chip
   }
 
+  // ipCapBadge says whether a concurrent-IP cap pushed to this node is acted
+  // on. It sits under the connection status because that is the question it
+  // answers: the panel is reachable, the write succeeds, and the limit still
+  // does nothing.
+  //
+  // Two states render NOTHING, for opposite reasons. "enforced" is the clean
+  // case and needs no decoration, mirroring compat_status 'supported'. And
+  // "unsupported" — a panel older than 3.7.0, which has no way to tell us —
+  // would otherwise become a permanent badge on every older node, un-actionable
+  // and therefore quickly unread; the version cell beside it already says the
+  // panel is old.
+  //
+  // "unknown" DOES render, greyed. It means a panel that should have answered
+  // did not, so the detector itself is broken — and a broken detector that
+  // looks like a clean fleet is the exact failure this whole probe exists to
+  // prevent.
+  function ipCapBadge(s: Server) {
+    const tone = ipCapBadgeTone(s.ip_limit_enforcement)
+    if (tone === 'none') return null
+    const palette: Record<Exclude<IPCapTone, 'none'>, [string, string]> = {
+      error: [md.errorContainer, md.onErrorContainer],
+      info: [md.secondaryContainer, md.onSecondaryContainer],
+      neutral: [md.surfaceContainerHighest, md.onSurfaceVariant],
+    }
+    const [bg, fg] = palette[tone]
+    let label: string, tip: string
+    switch (s.ip_limit_enforcement) {
+      case 'disabled':
+        label = t('admin:servers.ip_cap.dead')
+        tip = t('admin:servers.ip_cap.disabled_tip')
+        break
+      case 'not_installed':
+        label = t('admin:servers.ip_cap.dead')
+        tip = t('admin:servers.ip_cap.not_installed_tip')
+        break
+      case 'disconnect_only':
+        label = t('admin:servers.ip_cap.disconnect_only')
+        tip = t('admin:servers.ip_cap.disconnect_only_tip')
+        break
+      default:
+        label = t('admin:servers.ip_cap.unknown')
+        tip = t('admin:servers.ip_cap.unknown_tip')
+    }
+    return (
+      <Tooltip title={tip} placement="top">
+        <Box sx={{
+          display: 'inline-block', px: 1, py: 0.125, mt: 0.5,
+          borderRadius: 1, fontSize: 11, fontWeight: 500,
+          bgcolor: bg, color: fg, whiteSpace: 'nowrap',
+        }}>
+          {label}
+        </Box>
+      </Tooltip>
+    )
+  }
+
   return (
     <Box sx={{ p: 3 }}>
       {/* Header */}
@@ -1078,7 +1141,10 @@ export default function ServersView() {
                       <span>{s.url}</span>
                     </Tooltip>
                   </TableCell>
-                  <TableCell sx={{ whiteSpace: 'nowrap' }}>{statusBadge(s)}</TableCell>
+                  <TableCell sx={{ whiteSpace: 'nowrap' }}>
+                    <Box>{statusBadge(s)}</Box>
+                    {ipCapBadge(s)}
+                  </TableCell>
                   <TableCell sx={{ whiteSpace: 'nowrap' }}>{versionCell(s)}</TableCell>
                   <TableCell sx={{ color: md.onSurfaceVariant, fontSize: 13 }}>{s.remark || '—'}</TableCell>
                   <TableCell align="right" sx={{ whiteSpace: 'nowrap' }}>

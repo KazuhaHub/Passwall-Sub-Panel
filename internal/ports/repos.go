@@ -668,6 +668,15 @@ type XUIPanelRepo interface {
 	// probe would wipe the cached version snapshot and downgrade admin
 	// UI to "never probed" until the next successful probe.
 	UpdateVersionCheckedAt(ctx context.Context, panelID int64, checkedAt time.Time) error
+	// UpdateIPLimitEnforcement writes only the two IP-cap probe columns,
+	// column-scoped for the same reason as UpdateVersion: the probe runs on a
+	// timer and must never roll back credentials an admin edited in between.
+	//
+	// Called only when the probe produced an ANSWER. A failed probe leaves the
+	// last known state alone — a network blip must not turn "enforced" into
+	// "unknown", because unknown is what an operator sees when the detector
+	// itself is broken and they would go looking for the wrong fault.
+	UpdateIPLimitEnforcement(ctx context.Context, panelID int64, state domain.IPLimitEnforcement, probedAt time.Time) error
 }
 
 // CertificateRepo persists PSP-managed ACME certificates (cert_source=psp_managed).

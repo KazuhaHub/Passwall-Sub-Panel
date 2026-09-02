@@ -113,6 +113,19 @@ var (
 		"Lifecycle pushes carrying a setting the target panel cannot enforce, by capability.",
 		"capability",
 	)
+	// What each 3X-UI node's fail2ban probe concluded about the concurrent-IP
+	// cap, counted once per panel per probe tick.
+	//
+	// Labelled by state, with unknown carried alongside the rest, because the
+	// question an operator actually has is a RATIO: "enforced" on its own says
+	// nothing while the denominator is hidden. A fleet whose probe has started
+	// 404ing or timing out shows up here as unknown climbing, and looks exactly
+	// like a healthy fleet if only the enforced line is watched.
+	IPLimitEnforcementTotal = NewCounterVec(
+		"psp_ip_limit_enforcement_total",
+		"Node fail2ban probes, by what they concluded about the concurrent-IP cap.",
+		"state",
+	)
 	// An SSO login where the IdP sent NONE of the attributes the rules read,
 	// so neither the role nor the group could be re-evaluated and whatever is
 	// stored was kept.

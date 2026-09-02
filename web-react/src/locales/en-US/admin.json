@@ -1343,6 +1343,7 @@
       "inherit_from_group": "Follow group",
       "limit_unsupported": "Not enforceable on: {{panels}} — clients placed there ignore this.",
       "device_limit_inert": "Not enforced yet: 3X-UI counts devices only when a client fetches the panel's own subscription, and PSP serves subscriptions itself. The value is saved but does nothing.",
+      "ip_limit_unenforced": "Stored but not enforced on: {{panels}} — no usable fail2ban on those nodes.",
       "remark": "Remark"
     },
     "role": {
@@ -1835,6 +1836,15 @@
       "untested": "Untested",
       "unknown": "Unknown",
       "not_loaded": "not loaded"
+    },
+    "ip_cap": {
+      "dead": "IP limit inert",
+      "disabled_tip": "XUI_ENABLE_FAIL2BAN on this node is set to something other than \"true\" (setting it to \"1\" also turns enforcement off). The panel still stores the concurrent-IP limit and still returns success, but nothing is disconnected and no IP is banned. Fix: unset the variable, or set it to the literal string true.",
+      "not_installed_tip": "fail2ban is not installed on this node. The panel still stores the concurrent-IP limit and still returns success, but nothing is disconnected and no IP is banned. Fix: install fail2ban on the node.",
+      "disconnect_only": "Disconnect only",
+      "disconnect_only_tip": "Windows node: going over the limit disconnects the client, but no firewall ban follows, so it can reconnect immediately.",
+      "unknown": "Cannot confirm",
+      "unknown_tip": "This panel is able to report the state but has not answered yet (the probe failed, or has not run). Nothing is claimed either way — not that it works, not that it is broken."
     },
     "action": {
       "test": "Test",

@@ -40,7 +40,33 @@ export interface Server {
   // touch GitHub for this. Drives the ⋮ kebab "new version" badge.
   latest_xui_version?: string
   update_available?: boolean
+  /**
+   * What the node's fail2ban probe concluded about the concurrent-IP cap.
+   * 3X-UI panels only; absent on S-UI, which has no such cap at all.
+   *
+   * Not a capability. 3X-UI stores `limitIp` on every supported version and
+   * says nothing about acting on it — enforcement needs fail2ban on the box
+   * and `XUI_ENABLE_FAIL2BAN` unset or literally "true".
+   *
+   * - `enforced`        the client is disconnected and its IP banned
+   * - `disconnect_only` Windows: disconnected, but nothing keeps the IP out
+   * - `disabled`        the env var is set to something other than "true"
+   * - `not_installed`   fail2ban is missing, so the job gives up
+   * - `unknown`         no answer yet from a panel that should be able to give one
+   * - `unsupported`     panel predates 3.7.0, which added the route
+   */
+  ip_limit_enforcement?: IPLimitEnforcement
+  /** When the current state was established — NOT when a probe was last attempted. */
+  ip_limit_probed_at?: string
 }
+
+export type IPLimitEnforcement =
+  | 'enforced'
+  | 'disconnect_only'
+  | 'disabled'
+  | 'not_installed'
+  | 'unknown'
+  | 'unsupported'
 
 export interface CreateServerRequest {
   panel_type?: PanelType
@@ -84,6 +110,13 @@ export interface TestResult {
   // GitHub, etc.) — UI keeps the previously-cached values in items.
   latest_xui_version?: string
   update_available?: boolean
+  /**
+   * Refreshed on the same click, so an admin who just installed fail2ban does
+   * not wait out the 10-minute probe tick. Absent when the probe itself failed,
+   * in which case the stored state is left alone rather than reset — a blip
+   * must not turn "enforced" into "unknown".
+   */
+  ip_limit_enforcement?: IPLimitEnforcement
 }
 
 export interface ServerListParams {
