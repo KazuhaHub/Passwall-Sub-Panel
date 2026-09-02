@@ -1569,3 +1569,62 @@ func (c *Client) BulkSetEnabled(ctx context.Context, emails []string, enable boo
 	}
 	return out, nil
 }
+
+// ListLiveClientIPs implements ports.LiveIPReader.
+//
+// One POST per panel returns every email's live source IPs, already filtered
+// by upstream's staleness window, so this does not scale with user count —
+// which matters because the caller runs it across the whole fleet.
+//
+// The by-guid endpoint is used rather than the per-email one deliberately:
+// /server/clientIps takes a single email, so covering a fleet with it would
+// be one request per user per panel.
+//
+// Upstream keys by node guid because one 3X-UI can front several nodes. PSP
+// does not model that layer, and for a per-user total it must not: the same
+// IP seen on two of a panel's nodes is one person on one connection path, so
+// counting it twice would inflate exactly the number this exists to make
+// trustworthy. Flattened and de-duplicated per email here.
+//
+// What this CANNOT tell you is which physical device an IP belongs to. See
+// ports.LiveIPReader.
+func (c *Client) ListLiveClientIPs(ctx context.Context) (map[string][]string, error) {
+	ctx = withOp(ctx, "ListLiveClientIPs")
+	// nodeGuid -> email -> [{ip, timestamp}]
+	var raw map[string]map[string][]struct {
+		IP string `json:"ip"`
+	}
+	if err := c.doJSON(ctx, http.MethodPost, "/panel/api/clients/clientIpsByGuid", nil, &raw); err != nil {
+		return nil, err
+	}
+	seen := map[string]map[string]struct{}{}
+	for _, byEmail := range raw {
+		for email, entries := range byEmail {
+			if email == "" {
+				continue
+			}
+			for _, e := range entries {
+				ip := strings.TrimSpace(e.IP)
+				if ip == "" {
+					continue
+				}
+				if seen[email] == nil {
+					seen[email] = map[string]struct{}{}
+				}
+				seen[email][ip] = struct{}{}
+			}
+		}
+	}
+	out := make(map[string][]string, len(seen))
+	for email, ips := range seen {
+		list := make([]string, 0, len(ips))
+		for ip := range ips {
+			list = append(list, ip)
+		}
+		// Sorted so a caller comparing two snapshots, or a test asserting
+		// on the value, is not reading Go's randomized map order.
+		sort.Strings(list)
+		out[email] = list
+	}
+	return out, nil
+}

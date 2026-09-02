@@ -245,6 +245,27 @@ type WebCertProvider interface {
 	GetWebCertFiles(ctx context.Context) (*WebCertFiles, error)
 }
 
+// LiveIPReader is the optional "who is connected right now" capability.
+//
+// It answers a question no single panel can: a user's credentials are split
+// across panels, and each panel counts only its own. PSP holds the
+// email→user mapping, so it is the only place the per-USER total exists.
+// The panel-side caps are per client email per panel and are multiplied by
+// both — see docs/connection-limits.md §11.
+//
+// Source IPs, not devices. The data plane sees connections and source
+// addresses; it has no device concept. One household behind one NAT reads
+// as 1, one phone moving between wifi and cellular reads as 2. A device
+// identity exists only at the subscription layer. Anything built on this
+// must say "IP", never "device", or it will promise something it cannot
+// deliver — the exact mistake that let the device cap look enforced.
+type LiveIPReader interface {
+	// ListLiveClientIPs returns each client email's currently-live source
+	// IPs on this panel. Upstream applies its own staleness window, so an
+	// email with no live connections is absent rather than empty.
+	ListLiveClientIPs(ctx context.Context) (map[string][]string, error)
+}
+
 // RealityScanner is the version-gated 3X-UI REALITY target discovery surface.
 // It intentionally stays separate from XUIClient so historical test doubles and
 // any out-of-tree adapters don't have to implement a capability that only exists
