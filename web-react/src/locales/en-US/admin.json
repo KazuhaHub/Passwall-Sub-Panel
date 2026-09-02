@@ -212,6 +212,28 @@
       "emergency_access_quota_gb": "Per-window traffic quota (GB)",
       "emergency_access_quota_gb_hint": "0 = unlimited; once exceeded the panel ends the window early and re-disables the user"
     },
+    "geo_anomaly": {
+      "section": "Concurrent-location detection",
+      "hint": "Combines one user's live source IPs across every panel; being in several places at once is the signal for a shared account. Needs the IP location database above — without it every verdict is \"unknown\", never \"clean\". Observation and alerting only; nothing is enforced automatically.",
+      "scope": "Granularity",
+      "scope_hint": "Country is the recommended setting. Two CITIES happens every day — a commute, a carrier NAT pool, a phone changing networks — so city scope produces constant false alarms unless you know your users are local.",
+      "scope_country": "Country (recommended)",
+      "scope_region": "Region / state",
+      "scope_city": "City (noisy)",
+      "scope_off": "Detection off",
+      "max_places": "Tolerance: places allowed at once",
+      "max_places_hint": "1 means two at once is over. A second location is often legitimate — a work VPN, a second home, family abroad — so raise it to 2 if you see false alarms.",
+      "min_placed_ratio": "Minimum locatable share",
+      "min_placed_ratio_hint": "0–1. Below this share of addresses being locatable the verdict is \"unknown\", so a stale or partial database cannot quietly read as a clean fleet.",
+      "flag_after": "Consecutive checks to flag",
+      "flag_after_hint": "One noisy sample does not raise an alert — below this it shows as \"suspect\". Setting it to 1 disables hysteresis and makes the detector flap; not recommended.",
+      "clear_after": "Consecutive checks to clear",
+      "clear_after_hint": "Deliberately larger than the flag threshold, or an account sheds its flag by stepping under the line for one check. Being disconnected does not count toward clearing.",
+      "co_travel": "Places that count as one",
+      "co_travel_hint": "One set per line, members comma-separated. For a genuine cross-border user this is more precise than raising their tolerance: a third place outside the set still flags.",
+      "allow_anywhere": "Allow anywhere in this scope (no detection)",
+      "allow_anywhere_hint": "An outright exemption rather than a raised threshold — raising the threshold would also loosen detection for everyone who is not travelling. Set it on one group to exempt only that group."
+    },
     "geo": {
       "section": "IP region (logs)",
       "enabled": "Show IP region",

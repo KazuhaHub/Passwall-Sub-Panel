@@ -142,6 +142,18 @@ export interface UISettings {
   // ---- IP geolocation (offline .mmdb region display in access logs) ----
   /** Master toggle. Off by default; resolution is fully offline against a
    *  local .mmdb in <ConfigDir>/geoip/ (no per-IP external calls). */
+  // Concurrent-location anomaly policy. Every field is per-group
+  // overridable; see docs/connection-limits.md §12.3 for why each knob
+  // exists — each one is there because a specific real user would
+  // otherwise be misjudged.
+  geo_anomaly_scope: 'off' | 'country' | 'region' | 'city' | ''
+  geo_anomaly_max_places: number
+  geo_anomaly_flag_after_polls: number
+  geo_anomaly_clear_after_polls: number
+  geo_anomaly_min_placed_ratio: number
+  // One place set per LINE, members comma-separated ("JP,TW").
+  geo_anomaly_co_travel: string
+  geo_anomaly_allow_anywhere: boolean
   geo_ip_enabled: boolean
   /** Active database filename when several .mmdb are present. Empty = first by
    *  name. Only one is ever active (no merging → no conflict). */
