@@ -57,7 +57,7 @@ type PanelLiveIPs struct {
 // clientKey identifies a client row the way the fleet does: an email is
 // unique only WITHIN a panel, so the same email string on two panels is two
 // different clients. Keying on email alone would silently merge them.
-type clientKey struct {
+type ClientKey struct {
 	PanelID int64
 	Email   string
 }
@@ -79,7 +79,7 @@ type clientKey struct {
 // A caller asking "who is over their cap" needs the zeroes to distinguish
 // "idle" from "not looked at", and a caller building a distribution needs
 // them or the histogram is conditioned on being online.
-func AggregateLiveIPsByUser(panels []PanelLiveIPs, owners map[clientKey]int64) map[int64]UserLiveIPs {
+func AggregateLiveIPsByUser(panels []PanelLiveIPs, owners map[ClientKey]int64) map[int64]UserLiveIPs {
 	// Seed every known user so absence is representable.
 	acc := map[int64]map[string]struct{}{}
 	panelsSeen := map[int64]map[int64]struct{}{}
@@ -110,7 +110,7 @@ func AggregateLiveIPsByUser(panels []PanelLiveIPs, owners map[clientKey]int64) m
 			continue
 		}
 		for email, ips := range p.ByEmail {
-			uid, ok := owners[clientKey{PanelID: p.PanelID, Email: email}]
+			uid, ok := owners[ClientKey{PanelID: p.PanelID, Email: email}]
 			if !ok {
 				continue
 			}
@@ -144,6 +144,6 @@ func AggregateLiveIPsByUser(panels []PanelLiveIPs, owners map[clientKey]int64) m
 // NewClientKey builds the aggregator's owner-map key. Exported so callers
 // outside this package can assemble owners without re-deriving the rule that
 // an email is unique per panel, not globally.
-func NewClientKey(panelID int64, email string) clientKey {
-	return clientKey{PanelID: panelID, Email: email}
+func NewClientKey(panelID int64, email string) ClientKey {
+	return ClientKey{PanelID: panelID, Email: email}
 }

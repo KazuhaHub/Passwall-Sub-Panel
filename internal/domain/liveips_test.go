@@ -11,8 +11,8 @@ import (
 // count accuses someone who did nothing, and a silently truncated one clears
 // someone who did. Each test names which way it is guarding.
 
-func owners(pairs ...any) map[clientKey]int64 {
-	m := map[clientKey]int64{}
+func owners(pairs ...any) map[ClientKey]int64 {
+	m := map[ClientKey]int64{}
 	for i := 0; i+2 < len(pairs)+1; i += 3 {
 		m[NewClientKey(int64(pairs[i].(int)), pairs[i+1].(string))] = int64(pairs[i+2].(int))
 	}

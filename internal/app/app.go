@@ -393,6 +393,12 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	// Link the geo updater's background download to the app lifecycle so
 	// Shutdown cancels + drains an in-flight DB download instead of leaking it.
 	geoSvc.SetBackground(bgCtx, &a.bgWG)
+	// Concurrent-location observation on the traffic poll. Late-bound like the
+	// shared-client repo: without it the poll still meters, and every verdict
+	// reads Unknown rather than Clean — the honest answer when nothing can be
+	// placed. Observation only; no automatic response is armed.
+	trafficSvc.SetGeoResolver(geoSvc)
+	trafficSvc.SetGeoPolicy(domain.DefaultGeoPolicy())
 
 	// --- transport layer ---
 	httpHandler := httptransport.NewRouter(httptransport.Deps{

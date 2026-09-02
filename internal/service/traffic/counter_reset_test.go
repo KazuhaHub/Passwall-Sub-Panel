@@ -15,10 +15,11 @@ import (
 // component straight into the quota-driving LifetimeTotalBytes.
 //
 // Prev raw up=1000 down=1000 total=2000. Now up RESETS to 50, down GROWS to 1100:
-//   deltaUp   = monotonicDelta(50, 1000)   = 50   (reset → current)
-//   deltaDown = monotonicDelta(1100, 1000) = 100
-//   correct deltaTotal = 150
-//   buggy   deltaTotal = monotonicDelta(1150, 2000) = 1150  (+1000 over-count)
+//
+//	deltaUp   = monotonicDelta(50, 1000)   = 50   (reset → current)
+//	deltaDown = monotonicDelta(1100, 1000) = 100
+//	correct deltaTotal = 150
+//	buggy   deltaTotal = monotonicDelta(1150, 2000) = 1150  (+1000 over-count)
 func TestRecordSharedClientStats_AsymmetricResetNoOvercount(t *testing.T) {
 	s := &Service{}
 	sink := &pollSink{}
