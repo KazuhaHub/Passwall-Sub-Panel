@@ -1300,6 +1300,7 @@
       "limit_zero_hint": "0 = 不限",
       "inherit_from_group": "跟随分组",
       "limit_unsupported": "以下面板不支持，落在其上的客户端不会生效：{{panels}}",
+      "device_limit_inert": "当前不生效：3X-UI 只在客户端拉取「面板自己的订阅」时才认设备，而订阅由 PSP 发放。值会被保存，暂不执行。",
       "remark": "备注"
     },
     "role": {

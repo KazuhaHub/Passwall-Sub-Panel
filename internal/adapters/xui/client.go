@@ -106,13 +106,25 @@ func (c *Client) Capabilities() []ports.PanelCapability {
 	// every 10 minutes and preserved across probe failures), so this is not a
 	// guess. Unknown answers false — see version.XUIAtLeast for why that
 	// direction is the safe one.
+	//
+	// What this capability means, precisely: the panel can STORE limitHwid.
+	// It does NOT mean the cap is enforced. Upstream enforces it in one place
+	// only — its own subscription controller, where a client app's fetch
+	// registers a device — and PSP serves its own subscriptions, so that gate
+	// never fires for a PSP user on any version. Declaring the capability is
+	// still right: it is what the field above is asking about, and it is what
+	// keeps the write loop shut. Enforcement is a separate question that has
+	// to be answered at PSP's subscription endpoint, which is also the only
+	// place a cap can be per USER rather than per client email per panel.
+	// See docs/connection-limits.md §4.1 and ports.ClientSpec.LimitHwid.
 	if version.XUIAtLeast(c.panelVersion, deviceLimitMinVersion) {
 		caps = append(caps, ports.CapabilityClientDeviceLimit)
 	}
 	return caps
 }
 
-// deviceLimitMinVersion is the 3X-UI release that added client limitHwid.
+// deviceLimitMinVersion is the 3X-UI release that added the client limitHwid
+// COLUMN. Storage only; it is not the version at which the cap starts working.
 const deviceLimitMinVersion = "3.7.0"
 
 // clientWriteLocks serializes mutating client operations per (backend, email)

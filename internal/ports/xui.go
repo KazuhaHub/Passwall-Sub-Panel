@@ -439,18 +439,37 @@ type ClientSpec struct {
 	// concurrently; 0 is unlimited. PSP owns the value — see
 	// docs/connection-limits.md.
 	LimitIP int
-	// LimitHwid caps the number of devices that may bind to the client's
-	// subscription; 0 is unlimited. 3X-UI 3.7.0+ only; older panels ignore
-	// the key, so a value set against one silently does nothing.
+	// LimitHwid is 3X-UI's per-subscription device cap; 0 is unlimited.
 	//
-	// PSP owns this outright, which is what makes it safe to send. It used
-	// to be omitted deliberately: an update that echoes back a value read
-	// moments earlier feeds a stale limit into the panel's
-	// trimClientHwidsForSubID, which DELETES device registrations beyond it,
-	// so a concurrent cap change or device registration inside the
-	// read-write window destroyed rows permanently. Sending PSP's own
-	// intended value has no read-modify-write window, so the trim does
-	// exactly what a device cap is supposed to do.
+	// IT DOES NOT ENFORCE ANYTHING IN PSP'S ARCHITECTURE, on any panel
+	// version. Upstream reads limit_hwid for a decision in exactly one
+	// place — effectiveHwidLimitForSubID, reached only from
+	// EnforceHwidForSubID, called only from 3X-UI's OWN subscription
+	// controller. Devices register when a client app fetches the PANEL's
+	// subscription URL. PSP serves its own subscriptions, so that endpoint
+	// is never hit by a PSP user, client_hwids stays empty for
+	// PSP-managed clients, and the cap is stored and then ignored.
+	//
+	// Keep sending it anyway. It costs one integer, it is correct if a
+	// deployment ever exposes the panel's own subscription, and omitting
+	// the key is actively harmful: upstream binds a missing key to 0, so
+	// every push would silently clear a cap an operator set by hand.
+	//
+	// Not an upstream defect — 3X-UI enforces at the point it serves. The
+	// mismatch is ours: PSP took over the subscription and expected
+	// enforcement to stay behind. A cap that is per USER can only live at
+	// PSP's own subscription endpoint, which is the one place that sees
+	// every fetch by one user across every credential partition and panel.
+	// See docs/connection-limits.md §4.1.
+	//
+	// PSP sends its OWN intended value, never an echo. An update that
+	// echoes back a value read moments earlier feeds a stale limit into
+	// the panel's trimClientHwidsForSubID, which DELETES device
+	// registrations beyond it — so a concurrent cap change or registration
+	// inside the read-write window destroyed rows permanently. Sending an
+	// intent has no read-modify-write window. That hazard is real and the
+	// stance is right; it is simply moot until something populates the
+	// registry this trims.
 	LimitHwid  int
 	TotalGB    int64 // bytes; panel manages traffic, keep this at 0
 	ExpiryTime int64 // ms epoch; panel manages expiry, keep this at 0

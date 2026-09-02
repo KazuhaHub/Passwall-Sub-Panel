@@ -60,22 +60,60 @@ want.PanelQuota(panelLifetime)   // = PanelQuotaCap(QuotaHeadroom, panelLifetime
 
 两害相权，当时选了「清零」——丢一个标量，好过删数据。
 
-**所有权消灭了这个两难。** PSP 现在发的是**自己的意图值**（`User.DeviceLimit`），不是回显，**根本不存在读-改-写窗口**。于是 trim 做的正是设备上限该做的事。
+**所有权消灭了这个两难。** PSP 现在发的是**自己的意图值**（`User.DeviceLimit`），不是回显，**根本不存在读-改-写窗口**。
 
 > 这正是「领域模型为主、面板为辅」的价值：只要 PSP 拥有该字段，上游那个「缺失 key 绑 0」的缺陷就不再能伤到任何人。
 
+### 4.1 但这个字段在 PSP 架构下**不执行**（2026-09-02 更正）
+
+上面整段分析成立，结论不成立。之前追到 `EnforceHwidForSubID` 就停了，没有再问一句**谁调用它**。
+
+在 3X-UI 全仓里，`limit_hwid` 只有**一处**被拿来做判断：
+
+```
+internal/sub/controller.go:623
+  → EnforceHwidForSubID(c.Param("subid"), …)
+    → effectiveHwidLimitForSubID   (client_hwid.go:70)
+       SELECT COALESCE(MAX(limit_hwid), 0)
+       FROM clients WHERE sub_id = ? AND enable = true
+```
+
+其余每一处引用都只是写入、在 payload 里传递、在列表里回显、或节点同步时合并——没有一处执行。
+
+而那唯一的调用方是**订阅控制器**：设备指纹在客户端 App 去拉**3X-UI 自己的订阅 URL** 时，从请求里注册进 `client_hwids`。
+
+**PSP 自己发订阅**（`internal/transport/http/router.go:162`，走 NoRoute 动态路径）。PSP 的用户拿到的是 PSP 的订阅地址，永远不会请求 3X-UI 的那个端点。于是：
+
+- 那道闸**从不触发**；
+- `client_hwids` 对 PSP 管理的客户端**永远是空表**；
+- `limitHwid` 被正确地存进 client 记录，然后**什么也不做**——在**任何** 3X-UI 版本上，3.7.0 及以上也一样；
+- `trimClientHwidsForSubID` 同理无事可做，因为没有注册记录可裁。
+
+还有一条相关事实：PSP **从不设置 `subId`**（`buildSharedClientSpec` 不填，适配器发 `"subId": ""`）。`EnforceHwidForSubID` 对空 `subId` 直接 `Allowed = true` 短路返回（`client_hwid.go:81-84`），所以**不会**发生「所有 PSP 客户端共用一个设备桶」——`MAX(limit_hwid)` 不会跨用户取。不幸中的万幸，但也说明这条路本来就没接通。
+
+**这不是上游缺陷。** 3X-UI 的设计是自洽的：它自己发订阅，就在自己的订阅端认设备。缺陷在于 PSP 把订阅接管了，却指望执行留在原地。
+
+**因此设备上限的执行点只能在 PSP 的订阅端。** 而且这恰恰是**唯一可能做成「按用户」的位置**——它能看见同一个用户的全部拉取，无论凭据被 `clientplan` 拆成几份、落在几块面板上。对照之下 `limitIp` 是按 client email、按面板各算各的，被双重放大。见 §11 与任务 #45。
+
 ## 5. 能力与兼容
+
+**能力（capability）回答的是「面板存不存得下这个字段」，不是「这个值会不会被执行」。** 两者不同，而且下表只说前者：
 
 | 能力 | xui | sui |
 |---|---|---|
 | `client.iplimit` | ✅ | ❌ |
-| `client.devicelimit` | ✅ | ❌ |
+| `client.devicelimit` | 面板 ≥ 3.7.0 才声明 | ❌ |
 
 **S-UI 两个都不支持**——它的 client 模型既没有并发 IP 上限也没有设备上限，`applySpec` 直接丢弃这两个字段。给 S-UI 面板上的用户设了限制，那里就是不生效。这通过 capability API 呈现，而不是让写入失败。
 
-**xui 无条件声明两者**：字段是 PSP 所说协议的一部分，低于 3.7.0 的面板会**忽略**这个 key 而不是报错（gin 用 encoding/json 默认行为，从不开 `DisallowUnknownFields`）。
+**xui 的设备上限跟随面板版本**（v3.9.2-beta.14 起）。`limitHwid` 是 3.7.0 才有的列，更低版本收下这个 key 但不保存，读回永远是 0；无条件声明会让 `lifecycleWriteReason` 的收敛守卫失效，每周期发一次全量替换 + 内核重启。`version.XUIAtLeast` 对空值或无法解析的版本判 false，方向是刻意的——误报支持产生上述循环，误报不支持只是让该字段不再单独触发写入。**IP 上限不设版本门**：它在所有受支持版本上都存在，设了门反而会让未探测面板上的上限静默失效。
 
-**但「某个面板构建是否真的执行它」是版本问题**，由 `docs/compat/v3.json` 回答——capability 是每适配器静态的，看不见眼前这台面板的版本。
+**存得下 ≠ 会执行。** 两个字段各有一个能力系统看不见的执行前提：
+
+- **`limitIp`** 需要节点上装有可用的 fail2ban（见 §5.1）。缺了它，面板照常存值、照常返回成功，然后不封任何东西。3.7.0 起可以用 `GET /server/fail2banStatus` 探测（任务 #46）。
+- **`limitHwid`** 需要客户端去拉**3X-UI 自己的订阅端点**——而 PSP 接管了订阅，所以它在 PSP 架构下**从不执行**，与面板版本无关。详见 §4.1。
+
+换言之：能力为 ✅ 只保证写入不会被丢弃，**不保证限制生效**。这两条前提要各自被观测，否则它们和「面板存不下」对管理员是同一个症状——填了值，毫无作用。
 
 ### 5.1 `limitIp` 的执行前提（已实测确认）
 

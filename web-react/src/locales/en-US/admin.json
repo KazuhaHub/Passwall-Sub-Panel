@@ -1300,6 +1300,7 @@
       "limit_zero_hint": "0 = unlimited",
       "inherit_from_group": "Follow group",
       "limit_unsupported": "Not enforceable on: {{panels}} — clients placed there ignore this.",
+      "device_limit_inert": "Not enforced yet: 3X-UI counts devices only when a client fetches the panel's own subscription, and PSP serves subscriptions itself. The value is saved but does nothing.",
       "remark": "Remark"
     },
     "role": {

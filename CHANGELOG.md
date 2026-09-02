@@ -4,6 +4,22 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
+## 未发布
+
+### 更正
+
+- **设备数上限（`limitHwid`）从来没有生效过，beta.14 的说明把这一点说错了** —— 那一版把设备能力改成跟随面板版本，并说明"低于 3.7.0 的面板存不下"。写循环是真的、修复也对，但由此暗示的"3.7.0 及以上就会执行"是错的。
+
+  追查停在了"3.7.0 加了 `limit_hwid` 列"，没有再问一句**谁读它**。在 3X-UI 全仓里，这个值只有**一处**被拿来做判断：`effectiveHwidLimitForSubID`，只被 `EnforceHwidForSubID` 调用，而后者只被**3X-UI 自己的订阅控制器**调用（`internal/sub/controller.go:623`）。设备指纹是在客户端 App 去拉**面板自己的订阅 URL** 时注册的。
+
+  **PSP 自己发订阅**，用户永远不会请求那个端点。于是那道闸从不触发、`client_hwids` 对 PSP 管理的客户端永远是空表、`limitHwid` 被正确存进 client 记录然后什么也不做——**在任何面板版本上**。
+
+  这不是上游缺陷：3X-UI 在自己发放的地方执行，是自洽的。错配在我们——PSP 接管了订阅，却指望执行留在原地。
+
+  **界面上这个字段现在标注为不生效**，直到执行落到 PSP 的订阅端为止。那也是唯一可能做成**按用户**的位置：它能看见同一个用户的全部拉取，无论凭据被拆成几份、落在几块面板上。对照之下 `limitIp` 是按 client email、按面板各算各的。详见 [`docs/connection-limits.md`](docs/connection-limits.md) §4.1。
+
+  代码与文档已更正，能力声明保持不变——它回答的是"面板存不存得下"，那个答案没变，而且它正是挡住写循环的那个判断。
+
 ## v3.9.2-beta.14 — 2026-09-01
 
 对 beta.8 / beta.9（每用户连接上限、配额迟滞带）做对抗性审查——这两个功能发布时都没跑过。查出四条，本版修掉两条、为第三条加上测量、第四条如实记录在 [`docs/beta8-beta9-review.md`](docs/beta8-beta9-review.md)。

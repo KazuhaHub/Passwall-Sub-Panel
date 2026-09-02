@@ -24,3 +24,30 @@ export function unenforceablePanels(
     .filter(s => !(s.capabilities ?? []).includes(capability))
     .map(s => s.name)
 }
+
+/**
+ * Whether a device cap of `limit` is stored but enforced by nothing.
+ *
+ * Today this is true of every non-zero device cap, on every panel, at every
+ * version — which is why it takes no server list. 3X-UI reads `limit_hwid`
+ * for a decision in exactly one place (`effectiveHwidLimitForSubID`, reached
+ * only from `EnforceHwidForSubID`), and that path runs only when a client app
+ * fetches THE PANEL's own subscription URL. PSP serves subscriptions itself,
+ * so the gate never fires, `client_hwids` stays empty for PSP-managed
+ * clients, and the cap does nothing. See docs/connection-limits.md §4.1.
+ *
+ * Deliberately NOT expressed as `unenforceablePanels(limit, servers,
+ * 'client.devicelimit')`. That helper names the panels that cannot STORE the
+ * field, and naming a subset here would imply the panels it omits do enforce
+ * it — a more confident wrong answer than saying nothing.
+ *
+ * `limit <= 0` is silent, matching unenforceablePanels: a cap nobody set is
+ * not a broken promise, and warning about it would train the operator to
+ * ignore the warning that matters.
+ *
+ * This is the single switch to flip once enforcement lands at PSP's own
+ * subscription endpoint.
+ */
+export function deviceCapIsInert(limit: number): boolean {
+  return Number.isFinite(limit) && limit > 0
+}

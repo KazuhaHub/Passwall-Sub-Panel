@@ -34,6 +34,7 @@ import SearchIcon from '@mui/icons-material/Search'
 import DeleteIcon from '@mui/icons-material/DeleteOutlined'
 import EditIcon from '@mui/icons-material/EditOutlined'
 import { useTranslation } from 'react-i18next'
+import { deviceCapIsInert } from '@/utils/capabilities'
 import { useCan } from '@/utils/permissions'
 import { allSettledLimited } from '@/utils/promises'
 
@@ -758,6 +759,15 @@ export default function GroupsView() {
                     label={t('admin:groups.field.device_limit', { defaultValue: '设备数上限' })}
                     value={form.device_limit}
                     onChange={e => setForm({ ...form, device_limit: e.target.value })}
+                    // Stored on every panel, enforced on none: 3X-UI counts
+                    // devices only at its own subscription endpoint, which PSP
+                    // replaces. Warn wherever the number is typed, not only on
+                    // the user form — a group value reaches more people.
+                    helperText={deviceCapIsInert(Number(form.device_limit)) ? (
+                      <Box component="span" sx={{ color: 'warning.main' }}>
+                        {t('admin:users.field.device_limit_inert')}
+                      </Box>
+                    ) : undefined}
                     slotProps={{ htmlInput: { min: 0, step: 1 } }} />
                 </Box>
                 <FormControlLabel
