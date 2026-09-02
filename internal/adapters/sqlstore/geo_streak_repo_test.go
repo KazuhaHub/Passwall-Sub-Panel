@@ -3,6 +3,7 @@ package sqlstore
 import (
 	"context"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 )
@@ -257,5 +258,42 @@ func TestGeoStreakRepo_ListReturnsEveryRecord(t *testing.T) {
 	}
 	if seen[7] != domain.GeoStateFlagged || seen[8] != domain.GeoStateClean {
 		t.Fatalf("states = %v", seen)
+	}
+}
+
+// Truncation must land on a rune boundary.
+//
+// Reasons carry city names and admin-typed co-travel text, so the 512-byte cut
+// routinely falls inside a multi-byte sequence. A byte-wise slice stores an
+// invalid string — some drivers reject it outright, and every reader renders a
+// replacement character exactly where the explanation was.
+func TestGeoStreakRepo_TruncationDoesNotSplitARune(t *testing.T) {
+	r := newStreakRepo(t)
+	ctx := context.Background()
+	// Every rune is 3 bytes, so a 512-byte cut cannot land on a boundary by
+	// chance: 512 is not divisible by 3.
+	long := ""
+	for i := 0; i < 400; i++ {
+		long += "东京"
+	}
+	if err := r.Save(ctx, map[int64]domain.GeoRecord{
+		7: {UserID: 7, Reason: long, Places: []string{long}},
+	}); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	got, err := r.Load(ctx)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if !utf8.ValidString(got[7].Reason) {
+		t.Fatalf("reason is not valid UTF-8 after truncation: %q", got[7].Reason)
+	}
+	for _, p := range got[7].Places {
+		if !utf8.ValidString(p) {
+			t.Fatalf("place is not valid UTF-8 after truncation: %q", p)
+		}
+	}
+	if got[7].Reason == "" {
+		t.Fatal("truncation must keep what fits, not discard everything")
 	}
 }

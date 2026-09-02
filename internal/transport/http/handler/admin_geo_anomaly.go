@@ -75,7 +75,12 @@ func (h *AdminGeoAnomalyHandler) List(c *gin.Context) {
 	}
 	recs, err := h.records.List(c.Request.Context())
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		// respondError, not err.Error(): the helper exists precisely to stop
+		// GORM internals — driver, table and constraint names — reaching a
+		// browser. Admin-only reach makes the impact small, but a handler that
+		// opts out of the shared mapping is how that helper stops being true
+		// of the codebase.
+		respondError(c, err)
 		return
 	}
 

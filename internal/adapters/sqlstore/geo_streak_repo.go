@@ -3,6 +3,7 @@ package sqlstore
 import (
 	"context"
 	"strings"
+	"unicode/utf8"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -173,6 +174,13 @@ func (r *GeoStreakRepo) Save(ctx context.Context, records map[int64]domain.GeoRe
 func truncate(s string, max int) string {
 	if len(s) <= max {
 		return s
+	}
+	// Cut on a rune boundary. The reason and the place list carry city names
+	// and admin-typed text, so a byte-wise slice can end mid-sequence and
+	// store an invalid string — which some drivers reject and every reader
+	// renders as a replacement character right where the explanation was.
+	for max > 0 && !utf8.RuneStart(s[max]) {
+		max--
 	}
 	return s[:max]
 }

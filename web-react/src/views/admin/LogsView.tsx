@@ -311,11 +311,15 @@ export default function LogsView() {
         <Tab value="auth" label={t('admin:logs.tab_auth', { defaultValue: '认证日志' })} />
         <Tab value="email" label={t('admin:logs.tab_email')} />
         <Tab value="certs" label={t('admin:logs.tab_certs')} />
-        <Tab value="geo" label={t('admin:logs.tab_geo', { defaultValue: '异地并发' })} />
+        {/* admin only, matching the endpoint's RequireRole(RoleAdmin). Without
+            the gate an operator sees a tab that can only ever answer 403 —
+            the API is the authority either way, this just stops offering a
+            door that is always locked. */}
+        {canConfig && <Tab value="geo" label={t('admin:logs.tab_geo', { defaultValue: '异地并发' })} />}
       </Tabs>
       {/* Lives beside the logs rather than on its own page: it is a record of
           what the fleet did, read the same way and by the same person. */}
-      {tab === 'geo' && <GeoAnomaliesTab />}
+      {tab === 'geo' && canConfig && <GeoAnomaliesTab />}
       {tab === 'sub' && (
         <>
           <Box component="form" onSubmit={onSubFilter} sx={{ display: 'flex', gap: 1.5, mb: 2, alignItems: 'center', flexWrap: 'wrap' }}>
