@@ -214,13 +214,25 @@ jobs:
           VERSION: ${{ needs.setup.outputs.tag }}
           OWNER_LC: ${{ needs.setup.outputs.owner_lc }}
         run: |
+          # The :latest tag is pushed for STABLE releases only (see the docker
+          # job's metadata rules). Offering it in a pre-release's notes hands
+          # the reader a command that silently installs the previous stable
+          # image instead of the build they are looking at — the one failure
+          # mode where following the instructions verbatim gets you the wrong
+          # binary and no error. So a pre-release names its own tag, only.
+          if [[ "${VERSION}" == *-* ]]; then
+            PULL_LINES="docker pull ghcr.io/${OWNER_LC}/passwall-sub-panel:${VERSION}"
+          else
+            PULL_LINES="docker pull ghcr.io/${OWNER_LC}/passwall-sub-panel:latest
+          # Or specific version
+          docker pull ghcr.io/${OWNER_LC}/passwall-sub-panel:${VERSION}"
+          fi
+
           cat <<EOF > release_notes.md
           ### Docker image (ghcr.io)
 
           \`\`\`shell
-          docker pull ghcr.io/${OWNER_LC}/passwall-sub-panel:latest
-          # Or specific version
-          docker pull ghcr.io/${OWNER_LC}/passwall-sub-panel:${VERSION}
+          ${PULL_LINES}
           \`\`\`
 
           ### Verify
