@@ -399,6 +399,11 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	// placed. Observation only; no automatic response is armed.
 	trafficSvc.SetGeoResolver(geoSvc)
 	trafficSvc.SetGeoPolicy(domain.DefaultGeoPolicy())
+	// The hysteresis state has to outlive the process. The detector latches a
+	// flag deliberately — over tolerance for N consecutive checks to raise it,
+	// within tolerance for M to clear it — and keeping that only in memory
+	// would make every deploy a free acquittal for anyone being watched.
+	trafficSvc.SetGeoStreakStore(sqlstore.NewGeoStreakRepo(db))
 
 	// --- transport layer ---
 	httpHandler := httptransport.NewRouter(httptransport.Deps{
