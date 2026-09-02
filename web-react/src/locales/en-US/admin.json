@@ -743,6 +743,25 @@
     },
     "detail_title": "Task detail"
   },
+    "geo_anomalies": {
+      "intro": "Verdicts on each user's live source IPs combined across every panel. Only \"flagged\" means sustained; \"suspect\" is the ramp that has not reached the threshold yet. This is suspicion, not proof — split tunnelling, a corporate VPN and family abroad all produce it honestly. Nothing is enforced automatically.",
+      "unwired": "Concurrent-location detection is not enabled in this deployment.",
+      "empty": "No verdicts yet — they appear after the traffic poll has run a cycle.",
+      "incomplete": "A panel could not be read, so this number is a floor rather than a total.",
+      "col_user": "User",
+      "col_state": "Verdict",
+      "col_places": "Places at once",
+      "col_ips": "Live IPs",
+      "col_reason": "Basis",
+      "col_updated": "Last judged",
+      "state_flagged": "Flagged",
+      "state_suspect": "Suspect",
+      "state_clean": "Clean",
+      "state_unknown": "Cannot tell",
+      "state_idle": "Idle",
+      "state_exempt": "Exempt",
+      "state_disabled": "Off"
+    },
   "logs": {
     "title": "Logs",
     "tab_sub": "Subscription logs",
@@ -750,6 +769,7 @@
     "tab_auth": "Auth logs",
     "tab_email": "Email logs",
     "tab_certs": "Certificates",
+      "tab_geo": "Locations",
     "cert_table": { "at": "Time", "cert": "Certificate", "kind": "Action", "result": "Result", "message": "Message" },
     "cert_kind": { "issue": "Issue", "renew": "Renew" },
     "cert_result": { "ok": "OK", "fail": "Failed" },

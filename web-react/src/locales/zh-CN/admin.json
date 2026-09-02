@@ -743,6 +743,25 @@
     },
     "detail_title": "任务详情"
   },
+    "geo_anomalies": {
+      "intro": "按用户合并全部面板的并发源 IP 后的判定。只有「已标记」代表持续超限；「疑似」是尚未达到次数的爬升过程。这是嫌疑不是证据——分割隧道、公司 VPN、境外家人都会诚实产生这个信号。目前不做任何自动处置。",
+      "unwired": "本部署未启用异地并发检测。",
+      "empty": "还没有判定记录——流量轮询跑过一轮后才会出现。",
+      "incomplete": "有面板读取失败，这个数字是下限而不是总数。",
+      "col_user": "用户",
+      "col_state": "判定",
+      "col_places": "同时所在",
+      "col_ips": "并发 IP",
+      "col_reason": "依据",
+      "col_updated": "最后判定",
+      "state_flagged": "已标记",
+      "state_suspect": "疑似",
+      "state_clean": "正常",
+      "state_unknown": "无法判断",
+      "state_idle": "无连接",
+      "state_exempt": "已豁免",
+      "state_disabled": "未启用"
+    },
   "logs": {
     "title": "日志管理",
     "tab_sub": "订阅日志",
@@ -750,6 +769,7 @@
     "tab_auth": "认证日志",
     "tab_email": "邮件日志",
     "tab_certs": "证书",
+      "tab_geo": "异地并发",
     "cert_table": { "at": "时间", "cert": "证书", "kind": "动作", "result": "结果", "message": "消息" },
     "cert_kind": { "issue": "签发", "renew": "续期" },
     "cert_result": { "ok": "成功", "fail": "失败" },

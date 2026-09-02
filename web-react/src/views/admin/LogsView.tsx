@@ -42,6 +42,7 @@ import { confirm } from '@/components/ConfirmHost'
 import { pushSnack } from '@/components/SnackbarHost'
 import { PagedTableFooter } from '@/components/PagedTableFooter'
 import { useTabParam } from '@/hooks/useTabParam'
+import GeoAnomaliesTab from './GeoAnomaliesTab'
 import { formatDualTz } from '@/utils/datetime'
 import CertEventsTab from './CertEventsTab'
 import { useSiteStore } from '@/stores/site'
@@ -73,7 +74,7 @@ export default function LogsView() {
   const canConfig = useCan('config.write')
   const panelTz = useSiteStore(s => s.timezone)
 
-  const [tab, setTab] = useTabParam<'sub' | 'audit' | 'auth' | 'email' | 'certs'>('tab', 'sub', ['sub', 'audit', 'auth', 'email', 'certs'])
+  const [tab, setTab] = useTabParam<'sub' | 'audit' | 'auth' | 'email' | 'certs' | 'geo'>('tab', 'sub', ['sub', 'audit', 'auth', 'email', 'certs', 'geo'])
 
   // Sub logs
   const [subItems, setSubItems] = useState<SubLog[]>([])
@@ -310,7 +311,11 @@ export default function LogsView() {
         <Tab value="auth" label={t('admin:logs.tab_auth', { defaultValue: '认证日志' })} />
         <Tab value="email" label={t('admin:logs.tab_email')} />
         <Tab value="certs" label={t('admin:logs.tab_certs')} />
+        <Tab value="geo" label={t('admin:logs.tab_geo', { defaultValue: '异地并发' })} />
       </Tabs>
+      {/* Lives beside the logs rather than on its own page: it is a record of
+          what the fleet did, read the same way and by the same person. */}
+      {tab === 'geo' && <GeoAnomaliesTab />}
       {tab === 'sub' && (
         <>
           <Box component="form" onSubmit={onSubFilter} sx={{ display: 'flex', gap: 1.5, mb: 2, alignItems: 'center', flexWrap: 'wrap' }}>
