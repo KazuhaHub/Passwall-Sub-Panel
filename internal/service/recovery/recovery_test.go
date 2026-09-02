@@ -34,7 +34,7 @@ func (m *memTokens) Create(_ context.Context, t *domain.AuthToken) error {
 	m.created = append(m.created, t)
 	return nil
 }
-func (m *memTokens) ConsumeByTokenHash(_ context.Context, _ , tokenHash string, _ time.Time) (*domain.AuthToken, error) {
+func (m *memTokens) ConsumeByTokenHash(_ context.Context, _, tokenHash string, _ time.Time) (*domain.AuthToken, error) {
 	m.consumedHash = tokenHash
 	return m.consume, m.consumeErr
 }
@@ -103,8 +103,8 @@ func TestRequestReset_FeatureOff(t *testing.T) {
 	tk := &memTokens{}
 	ml := &stubMail{}
 	svc, _ := newSvc(Deps{
-		Users:    stubUsers{byUPN: map[string]*domain.User{"a": userWithPw(1, "a", "a@x")}},
-		Tokens:   tk, Mail: ml,
+		Users:  stubUsers{byUPN: map[string]*domain.User{"a": userWithPw(1, "a", "a@x")}},
+		Tokens: tk, Mail: ml,
 		Settings: stubSettings{s: ports.UISettings{PasswordRecoveryEnabled: false}},
 	})
 	if err := svc.RequestReset(context.Background(), "a"); err != nil {
@@ -119,8 +119,8 @@ func TestRequestReset_LinkDelivery(t *testing.T) {
 	tk := &memTokens{}
 	ml := &stubMail{}
 	svc, _ := newSvc(Deps{
-		Users:    stubUsers{byUPN: map[string]*domain.User{"a": userWithPw(1, "a", "a@x")}},
-		Tokens:   tk, Mail: ml,
+		Users:  stubUsers{byUPN: map[string]*domain.User{"a": userWithPw(1, "a", "a@x")}},
+		Tokens: tk, Mail: ml,
 		Settings: stubSettings{s: ports.UISettings{PasswordRecoveryEnabled: true, PasswordRecoveryDelivery: "link", SubBaseURL: "https://panel.example"}},
 	})
 	if err := svc.RequestReset(context.Background(), "a"); err != nil {
@@ -145,8 +145,8 @@ func TestRequestReset_OTPDelivery(t *testing.T) {
 	tk := &memTokens{}
 	ml := &stubMail{}
 	svc, _ := newSvc(Deps{
-		Users:    stubUsers{byUPN: map[string]*domain.User{"a": userWithPw(1, "a", "a@x")}},
-		Tokens:   tk, Mail: ml,
+		Users:  stubUsers{byUPN: map[string]*domain.User{"a": userWithPw(1, "a", "a@x")}},
+		Tokens: tk, Mail: ml,
 		Settings: stubSettings{s: ports.UISettings{PasswordRecoveryEnabled: true, PasswordRecoveryDelivery: "otp"}},
 	})
 	_ = svc.RequestReset(context.Background(), "a")
@@ -166,8 +166,8 @@ func TestRequestReset_Cooldown(t *testing.T) {
 	tk := &memTokens{}
 	ml := &stubMail{}
 	svc, _ := newSvc(Deps{
-		Users:    stubUsers{byUPN: map[string]*domain.User{"a": userWithPw(1, "a", "a@x")}},
-		Tokens:   tk, Mail: ml,
+		Users:  stubUsers{byUPN: map[string]*domain.User{"a": userWithPw(1, "a", "a@x")}},
+		Tokens: tk, Mail: ml,
 		Settings: stubSettings{s: ports.UISettings{PasswordRecoveryEnabled: true, PasswordRecoveryDelivery: "otp"}},
 	})
 	if err := svc.RequestReset(context.Background(), "a"); err != nil {
@@ -198,8 +198,8 @@ func TestRequestReset_NoEnumeration(t *testing.T) {
 			byUPN["a"] = tc.u
 		}
 		svc, _ := newSvc(Deps{
-			Users:    stubUsers{byUPN: byUPN},
-			Tokens:   tk, Mail: ml,
+			Users:  stubUsers{byUPN: byUPN},
+			Tokens: tk, Mail: ml,
 			Settings: stubSettings{s: ports.UISettings{PasswordRecoveryEnabled: true, PasswordRecoveryDelivery: "link", SubBaseURL: "https://p"}},
 		})
 		if err := svc.RequestReset(context.Background(), tc.key); err != nil {
@@ -218,8 +218,8 @@ func TestRequestReset_DisabledAccountSkipped(t *testing.T) {
 	u.Enabled = false
 	u.AutoDisabledReason = domain.DisabledManual // not a self-service reason
 	svc, _ := newSvc(Deps{
-		Users:    stubUsers{byUPN: map[string]*domain.User{"a": u}},
-		Tokens:   tk, Mail: ml,
+		Users:  stubUsers{byUPN: map[string]*domain.User{"a": u}},
+		Tokens: tk, Mail: ml,
 		Settings: stubSettings{s: ports.UISettings{PasswordRecoveryEnabled: true, PasswordRecoveryDelivery: "link", SubBaseURL: "https://p"}},
 	})
 	_ = svc.RequestReset(context.Background(), "a")
@@ -232,8 +232,8 @@ func TestRequestReset_LinkWithoutBaseURLRefuses(t *testing.T) {
 	tk := &memTokens{}
 	ml := &stubMail{}
 	svc, _ := newSvc(Deps{
-		Users:    stubUsers{byUPN: map[string]*domain.User{"a": userWithPw(1, "a", "a@x")}},
-		Tokens:   tk, Mail: ml,
+		Users:  stubUsers{byUPN: map[string]*domain.User{"a": userWithPw(1, "a", "a@x")}},
+		Tokens: tk, Mail: ml,
 		// link delivery + empty SubBaseURL → refuse (no Host-header poisoning).
 		Settings: stubSettings{s: ports.UISettings{PasswordRecoveryEnabled: true, PasswordRecoveryDelivery: "link", SubBaseURL: ""}},
 	})
@@ -246,8 +246,8 @@ func TestRequestReset_LinkWithoutBaseURLRefuses(t *testing.T) {
 func TestReset_LinkValid(t *testing.T) {
 	tk := &memTokens{consume: &domain.AuthToken{UserID: 42}}
 	svc, rec := newSvc(Deps{
-		Users:    stubUsers{byUPN: map[string]*domain.User{}},
-		Tokens:   tk, Mail: &stubMail{},
+		Users:  stubUsers{byUPN: map[string]*domain.User{}},
+		Tokens: tk, Mail: &stubMail{},
 		Settings: stubSettings{},
 	})
 	if err := svc.Reset(context.Background(), ResetInput{Token: "rawlink", NewPassword: "GoodPass1"}); err != nil {

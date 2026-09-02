@@ -16,16 +16,17 @@ import (
 // can still debug from server logs.
 //
 // Mapping (covers the domain.Err* sentinels used across the codebase):
-//   ErrValidation        → 400 (re-uses err.Error() because validation
-//                          messages are intentionally user-facing —
-//                          "panel name required", "invalid recipient")
-//   ErrUnauthorized      → 401, "Unauthorized"
-//   ErrForbidden         → 403, "Forbidden"
-//   ErrNotFound          → 404, "Not found"
-//   ErrConflict          → 409, "Conflict"
-//   ErrSSONoAccount      → 404, "No SSO-linked account for this identity"
-//   ErrSSOAccountConflict→ 409, "SSO identity conflicts with an existing account"
-//   default              → 500, "Internal server error"
+//
+//	ErrValidation        → 400 (re-uses err.Error() because validation
+//	                       messages are intentionally user-facing —
+//	                       "panel name required", "invalid recipient")
+//	ErrUnauthorized      → 401, "Unauthorized"
+//	ErrForbidden         → 403, "Forbidden"
+//	ErrNotFound          → 404, "Not found"
+//	ErrConflict          → 409, "Conflict"
+//	ErrSSONoAccount      → 404, "No SSO-linked account for this identity"
+//	ErrSSOAccountConflict→ 409, "SSO identity conflicts with an existing account"
+//	default              → 500, "Internal server error"
 //
 // Use this in every handler's "unexpected error" branch instead of
 // returning err.Error() raw — that path used to leak GORM / SMTP /

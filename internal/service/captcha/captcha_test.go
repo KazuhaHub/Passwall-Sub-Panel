@@ -138,11 +138,11 @@ func TestVerify_TokenHostnamePinning(t *testing.T) {
 
 func TestHostOf(t *testing.T) {
 	cases := map[string]string{
-		"https://panel.example.com/":      "panel.example.com",
-		"https://Panel.Example.com:8443":  "panel.example.com",
-		"http://10.0.0.1:8080/sub":        "10.0.0.1",
-		"":                                "",
-		"not a url with spaces":           "",
+		"https://panel.example.com/":     "panel.example.com",
+		"https://Panel.Example.com:8443": "panel.example.com",
+		"http://10.0.0.1:8080/sub":       "10.0.0.1",
+		"":                               "",
+		"not a url with spaces":          "",
 	}
 	for in, want := range cases {
 		if got := HostOf(in); got != want {

@@ -12,8 +12,8 @@ import (
 // provisioner tests. Keyed by (panelID, email) like the real unique index.
 type fakePSPClientRepo struct {
 	nextID   int64
-	clients  map[string]*domain.PSPClient            // key: panel|email
-	inbounds map[int64][]domain.PSPClientInbound      // clientID -> attachments
+	clients  map[string]*domain.PSPClient        // key: panel|email
+	inbounds map[int64][]domain.PSPClientInbound // clientID -> attachments
 }
 
 func newFakeRepo() *fakePSPClientRepo {

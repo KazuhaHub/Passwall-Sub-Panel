@@ -118,11 +118,11 @@ func TestObserveLiveIPs_FlagsAfterSustainedSpread(t *testing.T) {
 		}
 	}
 
-	s.observeLiveIPs(context.Background(), clients, ips, panelsOf(1, 2))
+	s.observeLiveIPs(context.Background(), nil, clients, ips, panelsOf(1, 2))
 	if got := counterFor(t, "psp_geo_verdict_total{state=suspect}"); got != 1 {
 		t.Fatalf("first cycle must be suspect, not flagged: %d", got)
 	}
-	s.observeLiveIPs(context.Background(), clients, ips, panelsOf(1, 2))
+	s.observeLiveIPs(context.Background(), nil, clients, ips, panelsOf(1, 2))
 	if got := counterFor(t, "psp_geo_verdict_total{state=flagged}"); got != 1 {
 		t.Fatalf("second cycle must flag: %d", got)
 	}
@@ -137,7 +137,7 @@ func TestObserveLiveIPs_FlagsAfterSustainedSpread(t *testing.T) {
 func TestObserveLiveIPs_FeedsTheLiveIPHistogram(t *testing.T) {
 	metrics.Reset()
 	s := newObserver(&stubGeo{available: false}, nil, domain.DefaultGeoPolicy())
-	s.observeLiveIPs(context.Background(),
+	s.observeLiveIPs(context.Background(), nil,
 		[]*domain.PSPClient{client(7, 1, "u7@x")},
 		func(int64) (map[string][]string, error) {
 			return map[string][]string{"u7@x": {"1.1.1.1", "2.2.2.2"}}, nil
@@ -163,7 +163,7 @@ func TestObserveLiveIPs_FeedsTheLiveIPHistogram(t *testing.T) {
 func TestObserveLiveIPs_CountsIncompleteCoverage(t *testing.T) {
 	metrics.Reset()
 	s := newObserver(&stubGeo{available: true}, nil, domain.DefaultGeoPolicy())
-	s.observeLiveIPs(context.Background(),
+	s.observeLiveIPs(context.Background(), nil,
 		[]*domain.PSPClient{client(7, 1, "u7@x"), client(7, 2, "u7@x")},
 		func(pid int64) (map[string][]string, error) {
 			if pid == 2 {
@@ -184,7 +184,7 @@ func TestObserveLiveIPs_GeoOffIsUnknownNotClean(t *testing.T) {
 	s := newObserver(&stubGeo{available: false, places: map[string]domain.GeoLocation{
 		"1.1.1.1": at("JP"), "2.2.2.2": at("DE"),
 	}}, nil, domain.DefaultGeoPolicy())
-	s.observeLiveIPs(context.Background(),
+	s.observeLiveIPs(context.Background(), nil,
 		[]*domain.PSPClient{client(7, 1, "u7@x")},
 		func(int64) (map[string][]string, error) {
 			return map[string][]string{"u7@x": {"1.1.1.1", "2.2.2.2"}}, nil
@@ -203,7 +203,7 @@ func TestObserveLiveIPs_GeoOffIsUnknownNotClean(t *testing.T) {
 func TestObserveLiveIPs_NoGeoServiceIsUnknown(t *testing.T) {
 	metrics.Reset()
 	s := newObserver(nil, nil, domain.DefaultGeoPolicy())
-	s.observeLiveIPs(context.Background(),
+	s.observeLiveIPs(context.Background(), nil,
 		[]*domain.PSPClient{client(7, 1, "u7@x")},
 		func(int64) (map[string][]string, error) {
 			return map[string][]string{"u7@x": {"1.1.1.1"}}, nil
@@ -228,7 +228,7 @@ func TestObserveLiveIPs_StreakLoadFailureUnderReports(t *testing.T) {
 		loadErr: errors.New("db down"),
 	}
 	s := newObserver(geo, store, p)
-	s.observeLiveIPs(context.Background(),
+	s.observeLiveIPs(context.Background(), nil,
 		[]*domain.PSPClient{client(7, 1, "u7@x")},
 		func(int64) (map[string][]string, error) {
 			return map[string][]string{"u7@x": {"1.1.1.1", "2.2.2.2"}}, nil
@@ -246,7 +246,7 @@ func TestObserveLiveIPs_StreakLoadFailureUnderReports(t *testing.T) {
 func TestObserveLiveIPs_UnownedClientIsNotAttributed(t *testing.T) {
 	metrics.Reset()
 	s := newObserver(&stubGeo{available: true}, nil, domain.DefaultGeoPolicy())
-	s.observeLiveIPs(context.Background(),
+	s.observeLiveIPs(context.Background(), nil,
 		[]*domain.PSPClient{client(7, 1, "u7@x")},
 		func(int64) (map[string][]string, error) {
 			return map[string][]string{
@@ -268,7 +268,7 @@ func TestObserveLiveIPs_NoClientsDoesNothing(t *testing.T) {
 	metrics.Reset()
 	geo := &stubGeo{available: true}
 	s := newObserver(geo, nil, domain.DefaultGeoPolicy())
-	s.observeLiveIPs(context.Background(), nil, func(int64) (map[string][]string, error) {
+	s.observeLiveIPs(context.Background(), nil, nil, func(int64) (map[string][]string, error) {
 		t.Fatal("panel data must not be read when there are no clients")
 		return nil, nil
 	}, panelsOf(1))
@@ -355,5 +355,178 @@ func TestPollOnce_AdapterWithoutLiveIPsIsUnreadNotZero(t *testing.T) {
 	}
 	if got := counterFor(t, "psp_live_ip_users_incomplete_total"); got != 1 {
 		t.Fatalf("incomplete = %d, want 1 — an adapter that cannot answer must not read as zero", got)
+	}
+}
+
+// fakeScoped resolves settings the way ScopedSettings does, and counts the
+// resolutions so a test can prove the per-GROUP cache is real rather than a
+// comment.
+type fakeScoped struct {
+	byGroup map[int64]ports.UISettings
+	loads   int
+	err     error
+}
+
+func (f *fakeScoped) Load(context.Context, ports.UISettings) (ports.UISettings, error) {
+	return ports.UISettings{}, f.err
+}
+func (f *fakeScoped) LoadForGroup(_ context.Context, gid int64, _ ports.UISettings) (ports.UISettings, error) {
+	f.loads++
+	return f.byGroup[gid], f.err
+}
+func (f *fakeScoped) LoadForUser(_ context.Context, u *domain.User, _ ports.UISettings) (ports.UISettings, error) {
+	f.loads++
+	if f.err != nil {
+		return ports.UISettings{}, f.err
+	}
+	var gid int64
+	if u != nil {
+		gid = u.GroupID
+	}
+	return f.byGroup[gid], nil
+}
+
+// Whether a STORED policy actually reaches the judgement. Every test of
+// GeoPolicyFromSettings proves the conversion; none of them prove the poll
+// consults it, and a knob that is never read is a claim rather than a feature.
+func TestObserveLiveIPs_StoredPolicyChangesTheVerdict(t *testing.T) {
+	geo := &stubGeo{available: true, places: map[string]domain.GeoLocation{
+		"1.1.1.1": at("JP"), "2.2.2.2": at("DE"),
+	}}
+	users := []*domain.User{{ID: 7, GroupID: 3}}
+	clients := []*domain.PSPClient{client(7, 1, "u7@x")}
+	ips := func(int64) (map[string][]string, error) {
+		return map[string][]string{"u7@x": {"1.1.1.1", "2.2.2.2"}}, nil
+	}
+
+	// Tolerance 1, flag immediately: two countries is over.
+	metrics.Reset()
+	s := newObserver(geo, nil, domain.DefaultGeoPolicy())
+	s.settings = &fakeScoped{byGroup: map[int64]ports.UISettings{
+		3: {GeoAnomalyMaxPlaces: 1, GeoAnomalyFlagAfterPolls: 1},
+	}}
+	s.observeLiveIPs(context.Background(), users, clients, ips, panelsOf(1))
+	if got := counterFor(t, "psp_geo_verdict_total{state=flagged}"); got != 1 {
+		t.Fatalf("with tolerance 1 the user must flag: %d", got)
+	}
+
+	// Same input, tolerance raised to 2: the SAME user is now clean. If the
+	// stored value were ignored this would still flag.
+	metrics.Reset()
+	s = newObserver(geo, nil, domain.DefaultGeoPolicy())
+	s.settings = &fakeScoped{byGroup: map[int64]ports.UISettings{
+		3: {GeoAnomalyMaxPlaces: 2, GeoAnomalyFlagAfterPolls: 1},
+	}}
+	s.observeLiveIPs(context.Background(), users, clients, ips, panelsOf(1))
+	if got := counterFor(t, "psp_geo_verdict_total{state=clean}"); got != 1 {
+		t.Fatalf("raising the stored tolerance must clear the same user: clean=%d flagged=%d",
+			got, counterFor(t, "psp_geo_verdict_total{state=flagged}"))
+	}
+}
+
+// A group set to allow-anywhere exempts its members without loosening anyone
+// else's detection.
+func TestObserveLiveIPs_GroupExemptionAppliesPerGroup(t *testing.T) {
+	metrics.Reset()
+	geo := &stubGeo{available: true, places: map[string]domain.GeoLocation{
+		"1.1.1.1": at("JP"), "2.2.2.2": at("DE"),
+	}}
+	s := newObserver(geo, nil, domain.DefaultGeoPolicy())
+	s.settings = &fakeScoped{byGroup: map[int64]ports.UISettings{
+		3: {GeoAnomalyAllowAnywhere: true}, // travelling staff
+		4: {GeoAnomalyFlagAfterPolls: 1},   // everyone else
+	}}
+	s.observeLiveIPs(context.Background(),
+		[]*domain.User{{ID: 7, GroupID: 3}, {ID: 8, GroupID: 4}},
+		[]*domain.PSPClient{client(7, 1, "u7@x"), client(8, 1, "u8@x")},
+		func(int64) (map[string][]string, error) {
+			return map[string][]string{
+				"u7@x": {"1.1.1.1", "2.2.2.2"},
+				"u8@x": {"1.1.1.1", "2.2.2.2"},
+			}, nil
+		}, panelsOf(1))
+
+	if got := counterFor(t, "psp_geo_verdict_total{state=exempt}"); got != 1 {
+		t.Fatalf("exempt = %d, want 1 (the travelling group)", got)
+	}
+	if got := counterFor(t, "psp_geo_verdict_total{state=flagged}"); got != 1 {
+		t.Fatalf("flagged = %d, want 1 — one group's exemption must not cover another", got)
+	}
+}
+
+// The policy is resolved once per GROUP, not once per user: within a group
+// the answer cannot differ, and a per-user round trip would cost one settings
+// read per user per poll.
+func TestObserveLiveIPs_PolicyIsResolvedOncePerGroup(t *testing.T) {
+	metrics.Reset()
+	sc := &fakeScoped{byGroup: map[int64]ports.UISettings{3: {GeoAnomalyMaxPlaces: 2}}}
+	s := newObserver(&stubGeo{available: true}, nil, domain.DefaultGeoPolicy())
+	s.settings = sc
+
+	var users []*domain.User
+	var clients []*domain.PSPClient
+	live := map[string][]string{}
+	for i := int64(1); i <= 5; i++ {
+		users = append(users, &domain.User{ID: i, GroupID: 3})
+		email := "u" + string(rune('0'+i)) + "@x"
+		clients = append(clients, client(i, 1, email))
+		live[email] = []string{"1.1.1.1"}
+	}
+	s.observeLiveIPs(context.Background(), users, clients,
+		func(int64) (map[string][]string, error) { return live, nil }, panelsOf(1))
+
+	if sc.loads != 1 {
+		t.Fatalf("settings resolved %d times for 5 users in ONE group, want 1", sc.loads)
+	}
+}
+
+// A settings read that fails must fall back to the deployment default, not to
+// a zero policy — a zero MaxPlaces flags every connected user, including one
+// sitting at home.
+func TestObserveLiveIPs_SettingsFailureFallsBackToTheDefault(t *testing.T) {
+	metrics.Reset()
+	s := newObserver(&stubGeo{available: true, places: map[string]domain.GeoLocation{
+		"1.1.1.1": at("JP"),
+	}}, nil, domain.DefaultGeoPolicy())
+	s.settings = &fakeScoped{err: errors.New("settings unavailable")}
+	s.observeLiveIPs(context.Background(),
+		[]*domain.User{{ID: 7, GroupID: 3}},
+		[]*domain.PSPClient{client(7, 1, "u7@x")},
+		func(int64) (map[string][]string, error) {
+			return map[string][]string{"u7@x": {"1.1.1.1"}}, nil
+		}, panelsOf(1))
+
+	if got := counterFor(t, "psp_geo_verdict_total{state=clean}"); got != 1 {
+		t.Fatalf("clean = %d; a failed settings read must not flag a user in ONE place", got)
+	}
+}
+
+// And the fallback must be the DEFAULT policy, not a zero one.
+//
+// A zero policy is not inert: EvaluateGeo sanitises it to MaxPlaces 1 and
+// FlagAfterPolls 1, which is STRICTER than the shipped default's 3 — so a
+// settings outage would turn the detector trigger-happy and flag people on a
+// single sample. Found by mutation: the previous test used one location and
+// could not tell the two apart.
+func TestObserveLiveIPs_SettingsFailureKeepsTheDefaultHysteresis(t *testing.T) {
+	metrics.Reset()
+	s := newObserver(&stubGeo{available: true, places: map[string]domain.GeoLocation{
+		"1.1.1.1": at("JP"), "2.2.2.2": at("DE"),
+	}}, nil, domain.DefaultGeoPolicy())
+	s.settings = &fakeScoped{err: errors.New("settings unavailable")}
+	s.observeLiveIPs(context.Background(),
+		[]*domain.User{{ID: 7, GroupID: 3}},
+		[]*domain.PSPClient{client(7, 1, "u7@x")},
+		func(int64) (map[string][]string, error) {
+			return map[string][]string{"u7@x": {"1.1.1.1", "2.2.2.2"}}, nil
+		}, panelsOf(1))
+
+	if got := counterFor(t, "psp_geo_verdict_total{state=flagged}"); got != 0 {
+		t.Fatalf("flagged = %d on the FIRST sample; the default needs %d consecutive checks, "+
+			"so a settings outage must not fall back to a stricter policy",
+			got, domain.DefaultGeoPolicy().FlagAfterPolls)
+	}
+	if got := counterFor(t, "psp_geo_verdict_total{state=suspect}"); got != 1 {
+		t.Fatalf("suspect = %d, want 1 — the ramp must still be visible", got)
 	}
 }

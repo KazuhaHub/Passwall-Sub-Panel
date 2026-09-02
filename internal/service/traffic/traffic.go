@@ -532,7 +532,7 @@ func (s *Service) PollOnce(ctx context.Context) (err error) {
 	// Pure in-memory: the reads already happened above, inside the slot each
 	// panel goroutine held. Observation only for now; nothing here changes a
 	// user's state or writes to a panel.
-	s.observeLiveIPs(ctx, sharedClients, func(pid int64) (map[string][]string, error) {
+	s.observeLiveIPs(ctx, users, sharedClients, func(pid int64) (map[string][]string, error) {
 		d := panelData[pid]
 		return d.liveIPs, d.liveErr
 	}, panelsToFetch)

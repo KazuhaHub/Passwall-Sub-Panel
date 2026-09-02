@@ -20,7 +20,6 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 )
 
-
 // defaultCertRenewBeforeDays is the cert-expiry lookahead used when the admin
 // hasn't set CertRenewBeforeDays.
 const defaultCertRenewBeforeDays = 14

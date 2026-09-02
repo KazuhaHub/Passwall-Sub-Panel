@@ -86,7 +86,7 @@ func (m *memTokens) ConsumeByUserCode(_ context.Context, _ string, userID int64,
 	return m.consume, m.consumeErr
 }
 func (m *memTokens) DeleteByUserPurpose(context.Context, int64, string) error { return nil }
-func (m *memTokens) DeleteExpired(context.Context, time.Time) (int64, error)   { return 0, nil }
+func (m *memTokens) DeleteExpired(context.Context, time.Time) (int64, error)  { return 0, nil }
 
 type stubMail struct{ sent int }
 

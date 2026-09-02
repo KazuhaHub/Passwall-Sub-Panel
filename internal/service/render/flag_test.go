@@ -20,7 +20,7 @@ func TestApplyRegionFlagPrefix(t *testing.T) {
 		"🇹🇼 TW-01",
 		"🇯🇵 JP-01",
 		"NoRegion",      // empty region → unchanged
-		"🇽🇽 Bogus",     // any 2 letters get prefixed; client renders best-effort
+		"🇽🇽 Bogus",      // any 2 letters get prefixed; client renders best-effort
 		"── Premium ──", // separator untouched
 	}
 	for i, w := range wants {
@@ -39,12 +39,12 @@ func TestRegionFlagEmoji(t *testing.T) {
 		{"tw", "🇹🇼"}, // case-insensitive
 		{"JP", "🇯🇵"},
 		{"US", "🇺🇸"},
-		{"", ""},     // empty
-		{"T", ""},    // too short
-		{"TWN", ""},  // too long (ISO alpha-3 not supported)
-		{"T1", ""},   // non-letter
+		{"", ""},    // empty
+		{"T", ""},   // too short
+		{"TWN", ""}, // too long (ISO alpha-3 not supported)
+		{"T1", ""},  // non-letter
 		{"😀", ""},   // non-ASCII
-		{"  ", ""},   // whitespace
+		{"  ", ""},  // whitespace
 	}
 	for _, tc := range cases {
 		if got := regionFlagEmoji(tc.in); got != tc.want {

@@ -6,6 +6,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/log"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/metrics"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 )
 
 // GeoResolver is what this package needs from the geo service: place a batch
@@ -55,6 +56,7 @@ func (s *Service) SetGeoStreakStore(st GeoStreakStore) { s.geoStreaks = st }
 // primary job.
 func (s *Service) observeLiveIPs(
 	ctx context.Context,
+	users []*domain.User,
 	clients []*domain.PSPClient,
 	panelIPs func(panelID int64) (map[string][]string, error),
 	panelIDs map[int64]struct{},
@@ -104,6 +106,54 @@ func (s *Service) observeLiveIPs(
 		}
 	}
 
+	// Resolve the policy per GROUP, not per user.
+	//
+	// The knobs are group-overridable (ports.OverridableScopeKeys), so every
+	// member of a group shares one answer, and a per-user settings load would
+	// be one round trip per user per poll for a value that cannot differ
+	// within the group. Cached for the cycle; a fresh poll re-reads, so an
+	// admin's change takes effect on the next cycle rather than on restart.
+	byUser := make(map[int64]*domain.User, len(users))
+	for _, u := range users {
+		if u != nil {
+			byUser[u.ID] = u
+		}
+	}
+	policyCache := map[int64]domain.GeoAnomalyPolicy{}
+	policyFor := func(uid int64) domain.GeoAnomalyPolicy {
+		u := byUser[uid]
+		key := int64(0)
+		if u != nil {
+			key = u.GroupID
+		}
+		if p, ok := policyCache[key]; ok {
+			return p
+		}
+		p := s.geoPolicy
+		if s.settings != nil && u != nil {
+			// LoadForUser already layers user > group > global, which is the
+			// same precedence the traffic and connection limits use.
+			if set, err := s.settings.LoadForUser(ctx, u, ports.UISettings{}); err == nil {
+				p = domain.GeoPolicyFromSettings(domain.GeoPolicySettings{
+					Scope:           set.GeoAnomalyScope,
+					MaxPlaces:       set.GeoAnomalyMaxPlaces,
+					FlagAfterPolls:  set.GeoAnomalyFlagAfterPolls,
+					ClearAfterPolls: set.GeoAnomalyClearAfterPolls,
+					MinPlacedRatio:  set.GeoAnomalyMinPlacedRatio,
+					CoTravel:        set.GeoAnomalyCoTravel,
+					AllowAnywhere:   set.GeoAnomalyAllowAnywhere,
+				})
+			} else {
+				// Fall back to the process default rather than to a zero
+				// policy: a zero MaxPlaces would flag every connected user.
+				log.Warn("live-ip observe: could not resolve the location policy; using the deployment default",
+					"user_id", uid, "err", err)
+			}
+		}
+		policyCache[key] = p
+		return p
+	}
+
 	next := make(map[int64]domain.GeoStreak, len(agg))
 	var incomplete int
 	for uid, u := range agg {
@@ -112,10 +162,7 @@ func (s *Service) observeLiveIPs(
 			incomplete++
 		}
 
-		// Per-principal policy. Group and user overrides are not wired yet
-		// (see task #48); until they are, every user resolves to the
-		// deployment default, which ResolveGeoPolicy also sanitises.
-		policy := domain.ResolveGeoPolicy(s.geoPolicy, domain.GeoPolicyOverrides{}, domain.GeoPolicyOverrides{})
+		policy := policyFor(uid)
 
 		obs := domain.ObserveGeo(policy, u, lookup, geoAvailable)
 		v := domain.EvaluateGeo(policy, obs, streaks[uid])

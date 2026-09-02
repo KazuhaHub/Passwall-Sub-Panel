@@ -23,8 +23,8 @@ func (a alPanels) List(context.Context) ([]*domain.XUIPanel, error) { return a.p
 // alert (node_health) and one admin-only alert (panel_upgrade).
 func alertsHandlerWith() *AdminAlertsHandler {
 	svc := alert.New(alert.Deps{
-		Nodes:  alNodes{n: []*domain.Node{{ID: 1, DisplayName: "n1", Enabled: true, HealthState: domain.NodeHealthUnreachable}}},
-		Panels: alPanels{p: []*domain.XUIPanel{{ID: 2, Name: "p2", PanelVersion: "3.2.6"}}},
+		Nodes:      alNodes{n: []*domain.Node{{ID: 1, DisplayName: "n1", Enabled: true, HealthState: domain.NodeHealthUnreachable}}},
+		Panels:     alPanels{p: []*domain.XUIPanel{{ID: 2, Name: "p2", PanelVersion: "3.2.6"}}},
 		UpgradeFor: func(string) (string, bool) { return "3.2.8", true },
 	})
 	return NewAdminAlertsHandler(svc)

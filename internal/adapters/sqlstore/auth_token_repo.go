@@ -16,12 +16,12 @@ import (
 // token_hash index serves link lookups; the expires_at index serves the
 // retention prune.
 type authTokenRow struct {
-	ID        int64  `gorm:"primaryKey;autoIncrement"`
-	UserID    int64  `gorm:"index:idx_authtoken_user_purpose,priority:1;default:0"`
-	Purpose   string `gorm:"size:32;not null;index:idx_authtoken_user_purpose,priority:2"`
-	TokenHash string `gorm:"size:64;index:idx_authtoken_tokenhash;default:''"`
-	CodeHash  string `gorm:"size:64;not null;default:''"`
-	Email     string `gorm:"size:255"`
+	ID        int64     `gorm:"primaryKey;autoIncrement"`
+	UserID    int64     `gorm:"index:idx_authtoken_user_purpose,priority:1;default:0"`
+	Purpose   string    `gorm:"size:32;not null;index:idx_authtoken_user_purpose,priority:2"`
+	TokenHash string    `gorm:"size:64;index:idx_authtoken_tokenhash;default:''"`
+	CodeHash  string    `gorm:"size:64;not null;default:''"`
+	Email     string    `gorm:"size:255"`
 	ExpiresAt time.Time `gorm:"index:idx_authtoken_expires"`
 	UsedAt    *time.Time
 	// Attempts counts failed OTP guesses against this token. The OTP search

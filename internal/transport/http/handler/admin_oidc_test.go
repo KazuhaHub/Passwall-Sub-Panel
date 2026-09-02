@@ -12,12 +12,12 @@ func TestOIDCIssuerHTTPS(t *testing.T) {
 	}{
 		{true, "https://login.example.com", true},
 		{true, "https://login.example.com/", true},
-		{true, "http://login.example.com", false},  // downgrade
-		{true, "http://169.254.169.254", false},     // metadata SSRF over http
+		{true, "http://login.example.com", false}, // downgrade
+		{true, "http://169.254.169.254", false},   // metadata SSRF over http
 		{true, "ftp://x", false},
 		{true, "not a url", false},
 		{true, "", false},
-		{false, "", true},                           // disabled → any issuer ok
+		{false, "", true}, // disabled → any issuer ok
 		{false, "http://whatever", true},
 	}
 	for _, tc := range cases {

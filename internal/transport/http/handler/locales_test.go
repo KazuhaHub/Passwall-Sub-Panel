@@ -17,7 +17,9 @@ import (
 // fakeLocaleRepo is an in-memory ports.LocaleRepo.
 type fakeLocaleRepo struct{ rows map[string]*domain.LocalePack }
 
-func newFakeLocaleRepo() *fakeLocaleRepo { return &fakeLocaleRepo{rows: map[string]*domain.LocalePack{}} }
+func newFakeLocaleRepo() *fakeLocaleRepo {
+	return &fakeLocaleRepo{rows: map[string]*domain.LocalePack{}}
+}
 
 func (f *fakeLocaleRepo) List(_ context.Context) ([]domain.LocaleMeta, error) {
 	out := []domain.LocaleMeta{}

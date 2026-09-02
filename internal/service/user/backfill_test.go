@@ -45,7 +45,9 @@ func (s bfSelector) NodesFor(context.Context, *domain.Group) ([]*domain.Node, er
 
 type bfSettings struct{ ports.ScopedSettings }
 
-func (bfSettings) Load(_ context.Context, d ports.UISettings) (ports.UISettings, error) { return d, nil }
+func (bfSettings) Load(_ context.Context, d ports.UISettings) (ports.UISettings, error) {
+	return d, nil
+}
 
 type bfPSP struct {
 	mu     sync.Mutex // HealSharedClients calls SyncUser from concurrent workers

@@ -186,19 +186,19 @@ func TestIsSharedClientEmail(t *testing.T) {
 		userID int64
 		want   bool
 	}{
-		{"u18@psp.local", 18, true},                 // bare / merged
-		{"u18-kf2d62608@psp.local", 18, true},       // content-hash
-		{"u18-c1@psp.local", 18, true},              // retired SS-2022-128 literal
-		{"u18-c12@example.com", 18, true},           // -c{digits}, any domain
-		{"u18-n5@psp.local", 18, false},             // legacy PER-NODE fallback — must NOT match
-		{"u18-nodes@psp.local", 18, false},          // -n… is never a shared client
-		{"u1@psp.local", 18, false},                 // different user
-		{"u180@psp.local", 18, false},               // u18 is NOT a prefix of u180
-		{"u18-kf2d6260@psp.local", 18, false},       // 7 hex, not 8
-		{"u18-kf2d62608g@psp.local", 18, false},     // 9 chars / non-hex
-		{"Kazuha Home 0", 18, false},                // operator client, no @ / no scheme
-		{"u18", 18, false},                          // no @
-		{"u18-k49f8cae4@psp.local", 14, false},      // belongs to u18, reconciling u14
+		{"u18@psp.local", 18, true},             // bare / merged
+		{"u18-kf2d62608@psp.local", 18, true},   // content-hash
+		{"u18-c1@psp.local", 18, true},          // retired SS-2022-128 literal
+		{"u18-c12@example.com", 18, true},       // -c{digits}, any domain
+		{"u18-n5@psp.local", 18, false},         // legacy PER-NODE fallback — must NOT match
+		{"u18-nodes@psp.local", 18, false},      // -n… is never a shared client
+		{"u1@psp.local", 18, false},             // different user
+		{"u180@psp.local", 18, false},           // u18 is NOT a prefix of u180
+		{"u18-kf2d6260@psp.local", 18, false},   // 7 hex, not 8
+		{"u18-kf2d62608g@psp.local", 18, false}, // 9 chars / non-hex
+		{"Kazuha Home 0", 18, false},            // operator client, no @ / no scheme
+		{"u18", 18, false},                      // no @
+		{"u18-k49f8cae4@psp.local", 14, false},  // belongs to u18, reconciling u14
 	}
 	for _, c := range cases {
 		if got := IsSharedClientEmail(c.email, c.userID); got != c.want {

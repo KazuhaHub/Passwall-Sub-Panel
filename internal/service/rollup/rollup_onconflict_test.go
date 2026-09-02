@@ -21,7 +21,7 @@ func dryRunOnConflictSQL(t *testing.T, db *gorm.DB, oc clause.OnConflict) string
 
 // TestOnConflictClause_KeepActionPerDialect pins the v3.9.0-beta.6 fix: on the
 // keep-on-conflict (insert-once) path, MySQL must NOT emit an empty "ON DUPLICATE
-// KEY UPDATE" — that's invalid SQL (Error 1064 "near ''", observed wrecking the
+// KEY UPDATE" — that's invalid SQL (Error 1064 "near ”", observed wrecking the
 // hourly traffic rollup on a production MySQL deployment) — while SQLite/Postgres
 // keep the native DO NOTHING. SQL is generated offline via GORM DryRun, so no live
 // MySQL is required.

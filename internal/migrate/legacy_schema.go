@@ -80,49 +80,49 @@ func (legacyMailSettingsRow) TableName() string { return "mail_settings" }
 // ---- legacySAMLConfigRow / legacyOIDCConfigRow: renamed in v3 ----
 
 type legacySAMLConfigRow struct {
-	ID                            int64 `gorm:"primaryKey"`
-	Enabled                       bool
-	Mode                          string
-	SPEntityID                    string
-	SPACSURL                      string
-	SPCertPEM                     string
-	SPKeyPEM                      string
-	IDPMetadataURL                string
-	IDPMetadataRefreshSec         int64
-	AttrUPN                       string
-	AttrEmail                     string
-	AttrDisplayName               string
-	AttrGroups                    string
-	RoleRules                     string `gorm:"type:json"`
-	DefaultGroupSlug              string
-	AllowAutoCreate               bool
-	NewUserExpireDays             int
-	NewUserTrafficLimitBytes      int64
-	NewUserTrafficResetPeriod     string
-	UpdatedAt                     string // opaque shuttle
+	ID                        int64 `gorm:"primaryKey"`
+	Enabled                   bool
+	Mode                      string
+	SPEntityID                string
+	SPACSURL                  string
+	SPCertPEM                 string
+	SPKeyPEM                  string
+	IDPMetadataURL            string
+	IDPMetadataRefreshSec     int64
+	AttrUPN                   string
+	AttrEmail                 string
+	AttrDisplayName           string
+	AttrGroups                string
+	RoleRules                 string `gorm:"type:json"`
+	DefaultGroupSlug          string
+	AllowAutoCreate           bool
+	NewUserExpireDays         int
+	NewUserTrafficLimitBytes  int64
+	NewUserTrafficResetPeriod string
+	UpdatedAt                 string // opaque shuttle
 }
 
 func (legacySAMLConfigRow) TableName() string { return "saml_config" }
 
 type legacyOIDCConfigRow struct {
-	ID                            int64 `gorm:"primaryKey"`
-	Enabled                       bool
-	IssuerURL                     string
-	ClientID                      string
-	ClientSecret                  string
-	RedirectURL                   string
-	Scopes                        string `gorm:"type:json"`
-	AttrUsername                  string
-	AttrEmail                     string
-	AttrDisplayName               string
-	AttrGroups                    string
-	RoleRules                     string `gorm:"type:json"`
-	DefaultGroupSlug              string
-	AllowAutoCreate               bool
-	NewUserExpireDays             int
-	NewUserTrafficLimitBytes      int64
-	NewUserTrafficResetPeriod     string
-	UpdatedAt                     string // opaque shuttle
+	ID                        int64 `gorm:"primaryKey"`
+	Enabled                   bool
+	IssuerURL                 string
+	ClientID                  string
+	ClientSecret              string
+	RedirectURL               string
+	Scopes                    string `gorm:"type:json"`
+	AttrUsername              string
+	AttrEmail                 string
+	AttrDisplayName           string
+	AttrGroups                string
+	RoleRules                 string `gorm:"type:json"`
+	DefaultGroupSlug          string
+	AllowAutoCreate           bool
+	NewUserExpireDays         int
+	NewUserTrafficLimitBytes  int64
+	NewUserTrafficResetPeriod string
+	UpdatedAt                 string // opaque shuttle
 }
 
 func (legacyOIDCConfigRow) TableName() string { return "oidc_config" }

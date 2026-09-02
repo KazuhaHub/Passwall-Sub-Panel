@@ -136,4 +136,3 @@ func (r *subLogRepo) DeleteBefore(ctx context.Context, cutoff time.Time) (int64,
 	result := r.db.WithContext(ctx).Where("accessed_at < ?", cutoff).Delete(&subLogRow{})
 	return result.RowsAffected, result.Error
 }
-
