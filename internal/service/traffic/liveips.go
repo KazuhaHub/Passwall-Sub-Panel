@@ -36,8 +36,8 @@ func (s *Service) SetGeoPolicy(p domain.GeoAnomalyPolicy) { s.geoPolicy = p }
 // deployment that has not wired storage still gets correct single-sample
 // behaviour rather than a crash.
 type GeoStreakStore interface {
-	Load(ctx context.Context) (map[int64]domain.GeoStreak, error)
-	Save(ctx context.Context, streaks map[int64]domain.GeoStreak) error
+	Load(ctx context.Context) (map[int64]domain.GeoRecord, error)
+	Save(ctx context.Context, records map[int64]domain.GeoRecord) error
 }
 
 // SetGeoStreakStore late-binds streak persistence.
@@ -96,13 +96,13 @@ func (s *Service) observeLiveIPs(
 	// from a clean streak this cycle", which under-reports (nobody reaches
 	// the flag threshold) rather than over-reports — the safe direction when
 	// the alternative is accusing people on state we could not read.
-	streaks := map[int64]domain.GeoStreak{}
+	prev := map[int64]domain.GeoRecord{}
 	if s.geoStreaks != nil {
 		loaded, err := s.geoStreaks.Load(ctx)
 		if err != nil {
 			log.Warn("live-ip observe: could not load geo streaks; this cycle judges without history", "err", err)
 		} else if loaded != nil {
-			streaks = loaded
+			prev = loaded
 		}
 	}
 
@@ -154,7 +154,7 @@ func (s *Service) observeLiveIPs(
 		return p
 	}
 
-	next := make(map[int64]domain.GeoStreak, len(agg))
+	next := make(map[int64]domain.GeoRecord, len(agg))
 	var incomplete int
 	for uid, u := range agg {
 		metrics.UserLiveIPs.Observe(float64(u.Count()))
@@ -165,8 +165,16 @@ func (s *Service) observeLiveIPs(
 		policy := policyFor(uid)
 
 		obs := domain.ObserveGeo(policy, u, lookup, geoAvailable)
-		v := domain.EvaluateGeo(policy, obs, streaks[uid])
-		next[uid] = v.Streak
+		v := domain.EvaluateGeo(policy, obs, prev[uid].Streak)
+		next[uid] = domain.GeoRecord{
+			UserID:   uid,
+			Streak:   v.Streak,
+			State:    v.State,
+			Reason:   v.Reason,
+			Places:   v.Places,
+			LiveIPs:  u.Count(),
+			Complete: u.Complete(),
+		}
 		metrics.GeoVerdictTotal.With(string(v.State)).Inc()
 
 		// Log only the states an operator would want to see, and only the

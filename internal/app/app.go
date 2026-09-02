@@ -403,13 +403,15 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	// flag deliberately — over tolerance for N consecutive checks to raise it,
 	// within tolerance for M to clear it — and keeping that only in memory
 	// would make every deploy a free acquittal for anyone being watched.
-	trafficSvc.SetGeoStreakStore(sqlstore.NewGeoStreakRepo(db))
+	geoStreaks := sqlstore.NewGeoStreakRepo(db)
+	trafficSvc.SetGeoStreakStore(geoStreaks)
 
 	// --- transport layer ---
 	httpHandler := httptransport.NewRouter(httptransport.Deps{
 		Async:            dispatcher,
 		Cfg:              cfg,
 		Repos:            repos,
+		GeoRecords:       geoStreaks,
 		Pool:             pool,
 		Auth:             authSvc,
 		SAML:             samlSvc,

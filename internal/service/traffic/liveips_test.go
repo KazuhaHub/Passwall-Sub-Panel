@@ -30,20 +30,20 @@ func (g *stubGeo) Lookup(_ context.Context, ips []string) map[string]domain.GeoL
 func (g *stubGeo) Available(context.Context) bool { return g.available }
 
 type memStreaks struct {
-	data  map[int64]domain.GeoStreak
+	data  map[int64]domain.GeoRecord
 	saved int
 	loadErr,
 	saveErr error
 }
 
-func (m *memStreaks) Load(context.Context) (map[int64]domain.GeoStreak, error) {
+func (m *memStreaks) Load(context.Context) (map[int64]domain.GeoRecord, error) {
 	if m.loadErr != nil {
 		return nil, m.loadErr
 	}
 	return m.data, nil
 }
 
-func (m *memStreaks) Save(_ context.Context, s map[int64]domain.GeoStreak) error {
+func (m *memStreaks) Save(_ context.Context, s map[int64]domain.GeoRecord) error {
 	m.saved++
 	if m.saveErr != nil {
 		return m.saveErr
@@ -224,7 +224,7 @@ func TestObserveLiveIPs_StreakLoadFailureUnderReports(t *testing.T) {
 	p := domain.DefaultGeoPolicy()
 	p.FlagAfterPolls = 2
 	store := &memStreaks{
-		data:    map[int64]domain.GeoStreak{7: {Over: 99, Flagged: true}},
+		data:    map[int64]domain.GeoRecord{7: {Streak: domain.GeoStreak{Over: 99, Flagged: true}}},
 		loadErr: errors.New("db down"),
 	}
 	s := newObserver(geo, store, p)
@@ -528,5 +528,68 @@ func TestObserveLiveIPs_SettingsFailureKeepsTheDefaultHysteresis(t *testing.T) {
 	}
 	if got := counterFor(t, "psp_geo_verdict_total{state=suspect}"); got != 1 {
 		t.Fatalf("suspect = %d, want 1 — the ramp must still be visible", got)
+	}
+}
+
+// The poll must persist the VERDICT, not only the counters.
+//
+// The counters answer "is this account flagged"; an operator deciding whether
+// to act needs why. And the two must come from the same cycle — storing them
+// separately would let a reason describe a state that is no longer current,
+// with nothing to signal the mismatch.
+func TestObserveLiveIPs_PersistsTheVerdictWithItsStreak(t *testing.T) {
+	metrics.Reset()
+	store := &memStreaks{}
+	p := domain.DefaultGeoPolicy()
+	p.FlagAfterPolls = 1
+	s := newObserver(&stubGeo{available: true, places: map[string]domain.GeoLocation{
+		"1.1.1.1": at("JP"), "2.2.2.2": at("DE"),
+	}}, store, p)
+
+	s.observeLiveIPs(context.Background(), nil,
+		[]*domain.PSPClient{client(7, 1, "u7@x")},
+		func(int64) (map[string][]string, error) {
+			return map[string][]string{"u7@x": {"1.1.1.1", "2.2.2.2"}}, nil
+		}, panelsOf(1))
+
+	rec, ok := store.data[7]
+	if !ok {
+		t.Fatal("nothing was persisted for the judged user")
+	}
+	if rec.State != domain.GeoStateFlagged {
+		t.Fatalf("state = %q, want flagged", rec.State)
+	}
+	if !rec.Streak.Flagged {
+		t.Fatal("the state and the streak disagree; they must come from one evaluation")
+	}
+	if rec.Reason == "" {
+		t.Fatal("a flag with no reason is not a basis for acting on an account")
+	}
+	if rec.LiveIPs != 2 {
+		t.Fatalf("liveIPs = %d, want 2", rec.LiveIPs)
+	}
+	if len(rec.Places) != 2 {
+		t.Fatalf("places = %v, want the two countries", rec.Places)
+	}
+}
+
+// A count that is a floor must be persisted as one. This is the field a
+// reader is most likely to skip, and skipping it turns a partial count into a
+// clean bill of health.
+func TestObserveLiveIPs_PersistsThatACountWasOnlyAFloor(t *testing.T) {
+	metrics.Reset()
+	store := &memStreaks{}
+	s := newObserver(&stubGeo{available: true}, store, domain.DefaultGeoPolicy())
+	s.observeLiveIPs(context.Background(), nil,
+		[]*domain.PSPClient{client(7, 1, "u7@x"), client(7, 2, "u7@x")},
+		func(pid int64) (map[string][]string, error) {
+			if pid == 2 {
+				return nil, errors.New("unreachable")
+			}
+			return map[string][]string{"u7@x": {"1.1.1.1"}}, nil
+		}, panelsOf(1, 2))
+
+	if store.data[7].Complete {
+		t.Fatal("a panel could not be read, so the count is a floor — persisting it as complete hides that")
 	}
 }

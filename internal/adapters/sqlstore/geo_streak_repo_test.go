@@ -26,9 +26,9 @@ func newStreakRepo(t *testing.T) *GeoStreakRepo {
 func TestGeoStreakRepo_RoundTrip(t *testing.T) {
 	r := newStreakRepo(t)
 	ctx := context.Background()
-	want := map[int64]domain.GeoStreak{
-		7: {Over: 3, Under: 0, Flagged: true},
-		8: {Over: 0, Under: 5, Flagged: false},
+	want := map[int64]domain.GeoRecord{
+		7: {Streak: domain.GeoStreak{Over: 3, Under: 0, Flagged: true}},
+		8: {Streak: domain.GeoStreak{Over: 0, Under: 5, Flagged: false}},
 	}
 	if err := r.Save(ctx, want); err != nil {
 		t.Fatalf("save: %v", err)
@@ -38,7 +38,7 @@ func TestGeoStreakRepo_RoundTrip(t *testing.T) {
 		t.Fatalf("load: %v", err)
 	}
 	for uid, w := range want {
-		if got[uid] != w {
+		if got[uid].Streak != w.Streak {
 			t.Fatalf("user %d: got %+v, want %+v", uid, got[uid], w)
 		}
 	}
@@ -56,8 +56,8 @@ func TestGeoStreakRepo_FlagSurvivesAReopen(t *testing.T) {
 		t.Fatalf("ensure schema: %v", err)
 	}
 	ctx := context.Background()
-	if err := NewGeoStreakRepo(db).Save(ctx, map[int64]domain.GeoStreak{
-		7: {Over: 4, Flagged: true},
+	if err := NewGeoStreakRepo(db).Save(ctx, map[int64]domain.GeoRecord{
+		7: {Streak: domain.GeoStreak{Over: 4, Flagged: true}},
 	}); err != nil {
 		t.Fatalf("save: %v", err)
 	}
@@ -66,7 +66,7 @@ func TestGeoStreakRepo_FlagSurvivesAReopen(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	if !got[7].Flagged || got[7].Over != 4 {
+	if !got[7].Streak.Flagged || got[7].Streak.Over != 4 {
 		t.Fatalf("after a reopen: got %+v, want the flag and the streak intact", got[7])
 	}
 }
@@ -76,10 +76,10 @@ func TestGeoStreakRepo_FlagSurvivesAReopen(t *testing.T) {
 func TestGeoStreakRepo_SaveIsIdempotentAndUpdates(t *testing.T) {
 	r := newStreakRepo(t)
 	ctx := context.Background()
-	if err := r.Save(ctx, map[int64]domain.GeoStreak{7: {Over: 1}}); err != nil {
+	if err := r.Save(ctx, map[int64]domain.GeoRecord{7: {Streak: domain.GeoStreak{Over: 1}}}); err != nil {
 		t.Fatalf("first save: %v", err)
 	}
-	if err := r.Save(ctx, map[int64]domain.GeoStreak{7: {Over: 0, Under: 2, Flagged: false}}); err != nil {
+	if err := r.Save(ctx, map[int64]domain.GeoRecord{7: {Streak: domain.GeoStreak{Over: 0, Under: 2, Flagged: false}}}); err != nil {
 		t.Fatalf("second save: %v", err)
 	}
 	got, err := r.Load(ctx)
@@ -89,7 +89,7 @@ func TestGeoStreakRepo_SaveIsIdempotentAndUpdates(t *testing.T) {
 	if len(got) != 1 {
 		t.Fatalf("rows = %d, want 1 — the second save must update, not insert", len(got))
 	}
-	if got[7].Over != 0 || got[7].Under != 2 {
+	if got[7].Streak.Over != 0 || got[7].Streak.Under != 2 {
 		t.Fatalf("got %+v, want the second value", got[7])
 	}
 }
@@ -101,24 +101,24 @@ func TestGeoStreakRepo_SaveIsIdempotentAndUpdates(t *testing.T) {
 func TestGeoStreakRepo_AbsentUserKeepsTheirRow(t *testing.T) {
 	r := newStreakRepo(t)
 	ctx := context.Background()
-	if err := r.Save(ctx, map[int64]domain.GeoStreak{
-		7: {Over: 3, Flagged: true},
-		8: {Under: 1},
+	if err := r.Save(ctx, map[int64]domain.GeoRecord{
+		7: {Streak: domain.GeoStreak{Over: 3, Flagged: true}},
+		8: {Streak: domain.GeoStreak{Under: 1}},
 	}); err != nil {
 		t.Fatalf("save: %v", err)
 	}
 	// Next cycle sees only user 8 — user 7 went idle.
-	if err := r.Save(ctx, map[int64]domain.GeoStreak{8: {Under: 2}}); err != nil {
+	if err := r.Save(ctx, map[int64]domain.GeoRecord{8: {Streak: domain.GeoStreak{Under: 2}}}); err != nil {
 		t.Fatalf("second save: %v", err)
 	}
 	got, err := r.Load(ctx)
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	if !got[7].Flagged {
+	if !got[7].Streak.Flagged {
 		t.Fatal("an idle user's latched flag was dropped; disconnecting must not acquit")
 	}
-	if got[8].Under != 2 {
+	if got[8].Streak.Under != 2 {
 		t.Fatalf("user 8 = %+v, want the updated streak", got[8])
 	}
 }
@@ -128,14 +128,14 @@ func TestGeoStreakRepo_AbsentUserKeepsTheirRow(t *testing.T) {
 func TestGeoStreakRepo_EmptySaveIsANoOpNotATruncate(t *testing.T) {
 	r := newStreakRepo(t)
 	ctx := context.Background()
-	if err := r.Save(ctx, map[int64]domain.GeoStreak{7: {Flagged: true}}); err != nil {
+	if err := r.Save(ctx, map[int64]domain.GeoRecord{7: {Streak: domain.GeoStreak{Flagged: true}}}); err != nil {
 		t.Fatalf("save: %v", err)
 	}
 	if err := r.Save(ctx, nil); err != nil {
 		t.Fatalf("empty save: %v", err)
 	}
 	got, _ := r.Load(ctx)
-	if !got[7].Flagged {
+	if !got[7].Streak.Flagged {
 		t.Fatal("an empty cycle cleared a latched flag")
 	}
 }
@@ -147,5 +147,115 @@ func TestGeoStreakRepo_LoadOnEmptyTableIsEmptyNotAnError(t *testing.T) {
 	}
 	if len(got) != 0 {
 		t.Fatalf("got %d rows, want none", len(got))
+	}
+}
+
+// The verdict must round-trip alongside the counters that produced it.
+//
+// An operator deciding whether to act needs the reason, not just the flag.
+// "Flagged" with no "because they were in 2 places for 3 consecutive checks,
+// and the tolerance is 1" is not a basis for touching somebody's account.
+func TestGeoStreakRepo_VerdictRoundTripsWithTheStreak(t *testing.T) {
+	r := newStreakRepo(t)
+	ctx := context.Background()
+	want := domain.GeoRecord{
+		UserID:   7,
+		Streak:   domain.GeoStreak{Over: 3, Flagged: true},
+		State:    domain.GeoStateFlagged,
+		Reason:   "in 2 places at once ([DE JP]); tolerance is 1",
+		Places:   []string{"DE", "JP"},
+		LiveIPs:  4,
+		Complete: false,
+	}
+	if err := r.Save(ctx, map[int64]domain.GeoRecord{7: want}); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	got, err := r.Load(ctx)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	g := got[7]
+	if g.State != want.State || g.Reason != want.Reason {
+		t.Fatalf("state/reason = %q / %q, want %q / %q", g.State, g.Reason, want.State, want.Reason)
+	}
+	if len(g.Places) != 2 || g.Places[0] != "DE" || g.Places[1] != "JP" {
+		t.Fatalf("places = %v, want [DE JP]", g.Places)
+	}
+	if g.LiveIPs != 4 {
+		t.Fatalf("liveIPs = %d, want 4", g.LiveIPs)
+	}
+	// The half a reader is most likely to miss: this count was a FLOOR, not a
+	// total, because a panel could not be read. Losing that turns a partial
+	// count into a clean bill of health.
+	if g.Complete {
+		t.Fatal("Complete=false did not survive; a floor would be shown as a total")
+	}
+}
+
+// No places is a real state (nobody connected, or nothing placeable) and must
+// come back as an empty list rather than a list containing one empty string.
+// A phantom place would be counted by anything that reads the length.
+func TestGeoStreakRepo_EmptyPlacesIsNotOneBlankPlace(t *testing.T) {
+	r := newStreakRepo(t)
+	ctx := context.Background()
+	if err := r.Save(ctx, map[int64]domain.GeoRecord{
+		7: {UserID: 7, State: domain.GeoStateIdle},
+	}); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	got, _ := r.Load(ctx)
+	if len(got[7].Places) != 0 {
+		t.Fatalf("places = %#v, want none", got[7].Places)
+	}
+}
+
+// A reason is assembled from a policy an admin controls, so nothing this
+// package owns bounds its length. Truncating beats failing the write: losing
+// the tail of an explanation costs readability, failing costs the whole
+// fleet's hysteresis for that cycle.
+func TestGeoStreakRepo_OverlongReasonIsTruncatedNotRejected(t *testing.T) {
+	r := newStreakRepo(t)
+	ctx := context.Background()
+	long := ""
+	for i := 0; i < 200; i++ {
+		long += "long reason "
+	}
+	if err := r.Save(ctx, map[int64]domain.GeoRecord{
+		7: {UserID: 7, Reason: long, Streak: domain.GeoStreak{Flagged: true}},
+	}); err != nil {
+		t.Fatalf("an overlong reason must not fail the write: %v", err)
+	}
+	got, _ := r.Load(ctx)
+	if !got[7].Streak.Flagged {
+		t.Fatal("the streak was lost along with the truncated reason")
+	}
+	if len(got[7].Reason) > 512 {
+		t.Fatalf("reason len = %d, want <= 512", len(got[7].Reason))
+	}
+}
+
+// List is the admin view's read: same rows, ordered.
+func TestGeoStreakRepo_ListReturnsEveryRecord(t *testing.T) {
+	r := newStreakRepo(t)
+	ctx := context.Background()
+	if err := r.Save(ctx, map[int64]domain.GeoRecord{
+		7: {UserID: 7, State: domain.GeoStateFlagged, Streak: domain.GeoStreak{Flagged: true}},
+		8: {UserID: 8, State: domain.GeoStateClean},
+	}); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	got, err := r.List(ctx)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("rows = %d, want 2", len(got))
+	}
+	seen := map[int64]domain.GeoState{}
+	for _, rec := range got {
+		seen[rec.UserID] = rec.State
+	}
+	if seen[7] != domain.GeoStateFlagged || seen[8] != domain.GeoStateClean {
+		t.Fatalf("states = %v", seen)
 	}
 }
