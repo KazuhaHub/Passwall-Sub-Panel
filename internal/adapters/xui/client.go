@@ -962,6 +962,38 @@ func (c *Client) GetServerStatus(ctx context.Context) (*ports.ServerStatus, erro
 	}, nil
 }
 
+// GetFail2banStatus hits /panel/api/server/fail2banStatus (3X-UI 3.7.0+) and
+// reports the node-side preconditions for the concurrent-IP cap.
+//
+// This is the one thing about limitIp that PSP cannot infer. The write path is
+// indistinguishable between a node that bans and one that does not: both accept
+// the field, both return success, both read it back. Upstream added this route
+// for its own UI for exactly that reason.
+//
+// An older panel 404s, which arrives as ErrXUIEndpointUnsupported. Callers must
+// degrade to "unknown" there rather than to "not installed" — a 3.6 node may
+// well have fail2ban running, and accusing it would train operators to ignore
+// the warning. No version gate here: the 404 already carries that answer, and a
+// gate would depend on the version probe having run first.
+func (c *Client) GetFail2banStatus(ctx context.Context) (*domain.Fail2banStatus, error) {
+	ctx = withOp(ctx, "GetFail2banStatus")
+	var raw struct {
+		Enabled   bool `json:"enabled"`
+		Installed bool `json:"installed"`
+		Usable    bool `json:"usable"`
+		Windows   bool `json:"windows"`
+	}
+	if err := c.doJSON(ctx, http.MethodGet, "/panel/api/server/fail2banStatus", nil, &raw); err != nil {
+		return nil, err
+	}
+	return &domain.Fail2banStatus{
+		Enabled:   raw.Enabled,
+		Installed: raw.Installed,
+		Usable:    raw.Usable,
+		Windows:   raw.Windows,
+	}, nil
+}
+
 // GetPanelUpdateInfo hits /panel/api/server/getPanelUpdateInfo. Returns the
 // panel's current version, the latest 3X-UI tag reachable on GitHub, and
 // whether an update is available. CurrentVersion is reported without a "v"

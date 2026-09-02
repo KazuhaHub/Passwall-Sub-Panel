@@ -266,6 +266,22 @@ type LiveIPReader interface {
 	ListLiveClientIPs(ctx context.Context) (map[string][]string, error)
 }
 
+// Fail2banReader is the optional "will the IP cap actually do anything"
+// probe.
+//
+// Separate from CapabilityClientIPLimit on purpose. That capability says the
+// panel can STORE limitIp, which every supported 3X-UI can: the write returns
+// success and the value reads back. Enforcement is a fact about the NODE — a
+// binary on the box and an environment variable — and no read PSP already
+// makes can see it. A panel missing it accepts the cap and bans nobody, which
+// looks identical to a working one from here.
+//
+// 3X-UI 3.7.0+ only; older panels 404 the route, which surfaces as
+// ErrXUIEndpointUnsupported and means "cannot tell", not "broken".
+type Fail2banReader interface {
+	GetFail2banStatus(ctx context.Context) (*domain.Fail2banStatus, error)
+}
+
 // RealityScanner is the version-gated 3X-UI REALITY target discovery surface.
 // It intentionally stays separate from XUIClient so historical test doubles and
 // any out-of-tree adapters don't have to implement a capability that only exists

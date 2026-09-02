@@ -1343,6 +1343,7 @@
       "inherit_from_group": "跟随分组",
       "limit_unsupported": "以下面板不支持，落在其上的客户端不会生效：{{panels}}",
       "device_limit_inert": "当前不生效：3X-UI 只在客户端拉取「面板自己的订阅」时才认设备，而订阅由 PSP 发放。值会被保存，暂不执行。",
+      "ip_limit_unenforced": "以下面板会保存该上限但不执行（节点上没有可用的 fail2ban）：{{panels}}",
       "remark": "备注"
     },
     "role": {
@@ -1835,6 +1836,15 @@
       "untested": "未测试",
       "unknown": "无法识别",
       "not_loaded": "未加载"
+    },
+    "ip_cap": {
+      "dead": "IP 上限不生效",
+      "disabled_tip": "节点上的 XUI_ENABLE_FAIL2BAN 被设成了 true 以外的值（设成 \"1\" 同样是关闭）。面板照常保存并发 IP 上限、照常返回成功，但不会断连、也不会封禁任何 IP。改法：删掉这个环境变量，或把它设成字面量 true。",
+      "not_installed_tip": "节点上没装 fail2ban。面板照常保存并发 IP 上限、照常返回成功，但不会断连、也不会封禁任何 IP。改法：在该节点上安装 fail2ban。",
+      "disconnect_only": "仅断连",
+      "disconnect_only_tip": "Windows 节点：超限时面板会掐断该客户端的连接，但不会在防火墙层封 IP，对方可以立刻重连。",
+      "unknown": "无法确认",
+      "unknown_tip": "这块面板本可以上报，但至今没给出答复（探测失败，或还没跑过）。这里不下任何结论——既不能说它在生效，也不能说它坏了。"
     },
     "action": {
       "test": "测试连接",

@@ -172,3 +172,23 @@ func (r *xuiPanelRepo) UpdateVersionCheckedAt(ctx context.Context, panelID int64
 	return r.db.WithContext(ctx).Model(&xuiPanelRow{}).Where("id = ?", panelID).
 		Updates(map[string]any{"version_checked_at": checkedAt}).Error
 }
+
+// UpdateIPLimitEnforcement records what the node's fail2ban probe concluded.
+//
+// Rejects an unrecognised state rather than storing it: the column feeds an
+// operator-facing verdict about somebody's node, and a value nothing can
+// interpret would read back as "unknown" — indistinguishable from a probe that
+// never ran, with no trace of the write that caused it.
+func (r *xuiPanelRepo) UpdateIPLimitEnforcement(ctx context.Context, panelID int64, state domain.IPLimitEnforcement, probedAt time.Time) error {
+	if panelID == 0 {
+		return fmt.Errorf("%w: panel id required", domain.ErrValidation)
+	}
+	if !state.Valid() {
+		return fmt.Errorf("%w: unknown ip limit enforcement state %q", domain.ErrValidation, string(state))
+	}
+	return r.db.WithContext(ctx).Model(&xuiPanelRow{}).Where("id = ?", panelID).
+		Updates(map[string]any{
+			"ip_limit_enforcement": string(state),
+			"ip_limit_probed_at":   probedAt,
+		}).Error
+}

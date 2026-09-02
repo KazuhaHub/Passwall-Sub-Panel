@@ -5,6 +5,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -24,6 +25,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/idgen"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/jwtutil"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/log"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/metrics"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/safego"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 
@@ -143,6 +145,14 @@ type App struct {
 	// up. Atomic-bool flip via CompareAndSwap; the loser logs Debug and
 	// returns immediately.
 	compatProbeInflight atomic.Bool
+
+	// ipLimitWarnedOnce keeps the "this node cannot enforce the IP cap"
+	// warning to once per panel per process for a STEADY state, while a
+	// change of state always logs. Without the first half the warning would
+	// repeat on every probe tick forever; without the second half a node that
+	// lost fail2ban after boot would never say so, because the stored state
+	// and the probed state agree at start-up and only differ on transition.
+	ipLimitWarnedOnce sync.Map
 
 	// xuiPool kept so Run() can fire a one-shot boot version probe across
 	// every configured 3X-UI panel — services already hold their own
@@ -728,7 +738,91 @@ func (a *App) probePanelVersionsOnce(ctx context.Context) {
 		if uerr := a.repos.XUIPanel.UpdateVersion(ctx, p.ID, status.PanelVersion, status.XrayVersion, &now); uerr != nil {
 			log.Warn("compat probe: write version", "panel_id", p.ID, "err", uerr)
 		}
+		// Rides the same tick and the same authenticated client. One extra GET
+		// against a panel we are already talking to, every 10 minutes.
+		a.probeIPLimitEnforcement(ctx, p, c, now)
 	}
+}
+
+// probeIPLimitEnforcement asks one node whether the concurrent-IP cap PSP
+// pushes to it can do anything, and records the answer.
+//
+// This is the only way to know. limitIp is accepted, stored and read back
+// identically by a node that bans and one that does not — the difference lives
+// in a binary on the box and an environment variable, neither of which any
+// other call PSP makes can see. Left unprobed, an admin sets a cap, the write
+// succeeds, the UI shows the value, and nothing is ever limited.
+//
+// Observation only, like the version probe beside it: nothing here changes a
+// push, a capability, or a user.
+func (a *App) probeIPLimitEnforcement(ctx context.Context, p *domain.XUIPanel, cli any, now time.Time) {
+	reader, ok := cli.(ports.Fail2banReader)
+	if !ok {
+		return
+	}
+	probeCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	st, err := reader.GetFail2banStatus(probeCtx)
+	cancel()
+
+	state := domain.IPLimitEnforcementUnknown
+	switch {
+	case errors.Is(err, ports.ErrXUIEndpointUnsupported):
+		// Panel predates 3.7.0, which added the route. Its own state, not a
+		// fault: such a node may well be enforcing perfectly, and telling its
+		// operator to install fail2ban would train them to ignore the warning
+		// that matters. Kept apart from unknown so the UI can stay quiet here
+		// while still flagging a panel that should have answered and did not.
+		state = domain.IPLimitEnforcementUnsupported
+		log.Debug("ip-cap probe: panel has no fail2ban status route (pre-3.7.0)",
+			"panel_id", p.ID, "panel_name", p.Name, "panel_version", p.PanelVersion)
+	case err != nil:
+		// Keep the last answer. A blip must not turn "enforced" into "unknown":
+		// unknown is what an operator sees when the probe itself is broken, and
+		// manufacturing it here would send them after the wrong fault. The
+		// stored timestamp stays put, so the staleness is visible instead.
+		log.Debug("ip-cap probe failed; keeping the last known state",
+			"panel_id", p.ID, "panel_name", p.Name,
+			"state", string(p.IPLimitEnforcement), "err", err)
+		return
+	default:
+		state = domain.ClassifyIPLimit(*st)
+	}
+
+	metrics.IPLimitEnforcementTotal.With(string(state)).Inc()
+
+	changed := state != p.IPLimitEnforcement
+	if state.Actionable() {
+		_, warned := a.ipLimitWarnedOnce.LoadOrStore(p.ID, struct{}{})
+		if changed || !warned {
+			log.Warn("node cannot enforce the concurrent-IP cap; limits pushed here are stored and ignored",
+				"panel_id", p.ID, "panel_name", p.Name, "state", string(state),
+				"fix", ipLimitEnforcementFix(state))
+		}
+	} else if changed {
+		// A recovery is worth a line of its own, and clearing the once-flag
+		// means a later regression warns again instead of being swallowed.
+		a.ipLimitWarnedOnce.Delete(p.ID)
+		log.Info("node ip-cap enforcement changed",
+			"panel_id", p.ID, "panel_name", p.Name,
+			"from", string(p.IPLimitEnforcement), "to", string(state))
+	}
+
+	if uerr := a.repos.XUIPanel.UpdateIPLimitEnforcement(ctx, p.ID, state, now); uerr != nil {
+		log.Warn("ip-cap probe: write state", "panel_id", p.ID, "err", uerr)
+	}
+}
+
+// ipLimitEnforcementFix names the one thing to change on the node, because
+// "not_installed" and "disabled" have different remedies and the disabled case
+// is a trap: XUI_ENABLE_FAIL2BAN=1 reads as "on" and turns enforcement off.
+func ipLimitEnforcementFix(state domain.IPLimitEnforcement) string {
+	switch state {
+	case domain.IPLimitEnforcementDisabled:
+		return "unset XUI_ENABLE_FAIL2BAN on the node, or set it to the literal string true"
+	case domain.IPLimitEnforcementNotInstalled:
+		return "install fail2ban on the node"
+	}
+	return ""
 }
 
 func (a *App) runMailLoop(ctx context.Context) {

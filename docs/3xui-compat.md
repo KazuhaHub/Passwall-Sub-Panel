@@ -65,7 +65,7 @@ delta 虽大但没碰 PSP 的面：PSP 调用的 inbound / client / server **con
 
    **所有权消灭了这个两难。** PSP 现在下发的是 `User.DeviceLimit` —— **自己的意图值，不是回显**，因此根本不存在读-改-写窗口，trim 做的正是设备上限该做的事。运维方改在 **PSP 的用户编辑界面**里设，和到期时间、流量上限一致。详见 [connection-limits.md](connection-limits.md)。
 
-   **一个执行侧前提（已实测）**：同批加入的并发 IP 上限（`limitIp`）走 core 的 online-stats API（不需要访问日志），但执行被**两道闸**门控 —— `resolveEnforce` 在 Linux 上「有上限但没装 fail2ban」时直接返回 `false`，`updateInboundClientIps` 随即早退，**不封禁也不断连**；`checkFail2BanInstalled` 还额外要求环境变量 `XUI_ENABLE_FAIL2BAN` 未设或等于字面量 `"true"`——**设成 `1` 反而会关掉执行**。装上之后实际做两件事：面板经 xray API `RemoveUser`+重加**掐断该客户端全部连接**（仅 vmess/vless/trojan/shadowsocks/hysteria），fail2ban 再按固定日志格式在防火墙层封那个 IP。详见 [connection-limits.md](connection-limits.md) §5.1。
+   **一个执行侧前提（已实测）**：同批加入的并发 IP 上限（`limitIp`）走 core 的 online-stats API（不需要访问日志），但执行被**两道闸**门控 —— `resolveEnforce` 在 Linux 上「有上限但没装 fail2ban」时直接返回 `false`，`updateInboundClientIps` 随即早退，**不封禁也不断连**；`checkFail2BanInstalled` 还额外要求环境变量 `XUI_ENABLE_FAIL2BAN` 未设或等于字面量 `"true"`——**设成 `1` 反而会关掉执行**。装上之后实际做两件事：面板经 xray API `RemoveUser`+重加**掐断该客户端全部连接**（仅 vmess/vless/trojan/shadowsocks/hysteria），fail2ban 再按固定日志格式在防火墙层封那个 IP。**这两道闸现在由 PSP 主动探测**（3.7.0 的 `GET /server/fail2banStatus`，随 10 分钟版本探测顺带一次），结论落在 `xui_panels.ip_limit_enforcement` 上并显示在服务器列表和填写上限的表单里。详见 [connection-limits.md](connection-limits.md) §5.1、§5.2。
 
    **只发在更新路径**：创建路径本来就落在同一组值上，在那里加键只会让 PSP 不分块发送的 `/clients/bulkCreate` 请求体白白变大（面板有 10 MiB 上限）。
 

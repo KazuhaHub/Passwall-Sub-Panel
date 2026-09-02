@@ -890,8 +890,15 @@ type xuiPanelRow struct {
 	PanelVersion     string `gorm:"size:32;default:''"`
 	XrayVersion      string `gorm:"size:32;default:''"`
 	VersionCheckedAt *time.Time
-	CreatedAt        time.Time
-	UpdatedAt        time.Time
+	// ---- IP-cap enforcement probe (v3.9.2-beta.16) ----
+	// Whether limitIp actually bans anything on this node. AutoMigrate adds
+	// both; legacy rows read back empty, which maps to "unknown" rather than
+	// to a state that reassures or accuses. Written column-scoped via
+	// UpdateIPLimitEnforcement for the same reason as the version columns.
+	IPLimitEnforcement string `gorm:"size:24;default:''"`
+	IPLimitProbedAt    *time.Time
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
 }
 
 type mailSettingsRow struct {
@@ -1013,6 +1020,11 @@ func (r *xuiPanelRow) toDomain() (*domain.XUIPanel, error) {
 		PanelVersion:       r.PanelVersion,
 		XrayVersion:        r.XrayVersion,
 		VersionCheckedAt:   r.VersionCheckedAt,
+		// Anything unrecognised — a legacy empty string, a hand-edited row,
+		// a state a newer build wrote — reads as unknown. The alternative is
+		// surfacing junk as a verdict about somebody's node.
+		IPLimitEnforcement: normalizeIPLimitEnforcement(r.IPLimitEnforcement),
+		IPLimitProbedAt:    r.IPLimitProbedAt,
 	}, nil
 }
 
@@ -1039,7 +1051,20 @@ func xuiPanelFromDomain(p *domain.XUIPanel) (*xuiPanelRow, error) {
 		PanelVersion:       p.PanelVersion,
 		XrayVersion:        p.XrayVersion,
 		VersionCheckedAt:   p.VersionCheckedAt,
+		IPLimitEnforcement: string(normalizeIPLimitEnforcement(string(p.IPLimitEnforcement))),
+		IPLimitProbedAt:    p.IPLimitProbedAt,
 	}, nil
+}
+
+// normalizeIPLimitEnforcement keeps an unreadable stored value from becoming a
+// claim about a node. Both directions go through it so a round trip cannot
+// launder junk into the domain, and an admin edit of the panel (a full Save,
+// which carries every column) cannot write junk back.
+func normalizeIPLimitEnforcement(s string) domain.IPLimitEnforcement {
+	if e := domain.IPLimitEnforcement(s); e.Valid() {
+		return e
+	}
+	return domain.IPLimitEnforcementUnknown
 }
 
 func (subLogRow) TableName() string { return "sub_logs" }

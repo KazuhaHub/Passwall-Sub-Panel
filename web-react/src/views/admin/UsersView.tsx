@@ -72,7 +72,7 @@ import {
 import type { UpdateUserRequest } from '@/api/users'
 import { listGroups } from '@/api/groups'
 import { listServers, type Server } from '@/api/servers'
-import { deviceCapIsInert, unenforceablePanels } from '@/utils/capabilities'
+import { deviceCapIsInert, ipCapUnenforcedPanels, unenforceablePanels } from '@/utils/capabilities'
 import { runReconcile } from '@/api/reconcile'
 import { setUserTraffic, topTraffic, type TrafficRow } from '@/api/traffic'
 import type { Group, ResetPeriod, Role, User } from '@/api/types'
@@ -453,12 +453,28 @@ export default function UsersView() {
       )
     }
     const panels = unenforceablePanels(limit, servers, capability)
-    if (!panels.length) return null
-    return (
-      <Box component="span" sx={{ color: 'warning.main' }}>
-        {t('admin:users.field.limit_unsupported', { panels: panels.join('/ ') })}
-      </Box>
-    )
+    if (panels.length) {
+      return (
+        <Box component="span" sx={{ color: 'warning.main' }}>
+          {t('admin:users.field.limit_unsupported', { panels: panels.join('/ ') })}
+        </Box>
+      )
+    }
+    // A panel that CAN store the cap can still be unable to act on it: 3X-UI
+    // needs fail2ban on the node, and the write succeeds either way. Checked
+    // second because "the panel drops the field" is the bigger problem of the
+    // two and naming both at once would read as one confused warning.
+    if (capability === 'client.iplimit') {
+      const dead = ipCapUnenforcedPanels(limit, servers)
+      if (dead.length) {
+        return (
+          <Box component="span" sx={{ color: 'warning.main' }}>
+            {t('admin:users.field.ip_limit_unenforced', { panels: dead.join('/ ') })}
+          </Box>
+        )
+      }
+    }
+    return null
   }
 
   async function loadServers() {
