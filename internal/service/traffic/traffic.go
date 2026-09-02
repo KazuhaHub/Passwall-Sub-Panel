@@ -61,6 +61,13 @@ type Service struct {
 	// which both resolve the same per-group quota. Nil-tolerant: when absent,
 	// emergency access is uncapped (legacy behavior).
 	settings ports.ScopedSettings
+	// geo, geoPolicy and geoStreaks back the per-user concurrent-location
+	// observation in liveips.go. All optional and late-bound: a deployment
+	// without them still meters traffic, and every verdict reads Unknown
+	// rather than Clean, which is the honest answer when nothing can be placed.
+	geo        GeoResolver
+	geoPolicy  domain.GeoAnomalyPolicy
+	geoStreaks GeoStreakStore
 	// configPusher is wired lazily (user.Service is the implementor and
 	// is created before traffic.Service). nil = skip floor refresh on poll.
 	configPusher UserConfigPusher
@@ -441,6 +448,15 @@ func (s *Service) PollOnce(ctx context.Context) (err error) {
 		// attached to multiple inbounds; see docs/v3.9.0-client-multi-inbound.md).
 		counters map[int]inboundCounter
 		err      error
+		// liveIPs is client email -> that email's live source IPs on this
+		// panel, or nil when the read did not happen. liveErr is kept
+		// SEPARATE from err on purpose: traffic is this poll's job, and a
+		// panel that metered fine but could not answer the live-IP call
+		// must not have its traffic discarded. The two failures also mean
+		// different things downstream — err drops the panel's numbers,
+		// liveErr only makes the per-user IP total a floor.
+		liveIPs map[string][]string
+		liveErr error
 	}
 	panelData := make(map[int64]panelListResult, len(panelsToFetch))
 	var panelMu sync.Mutex
@@ -472,8 +488,34 @@ func (s *Service) PollOnce(ctx context.Context) (err error) {
 				// node-traffic source (LIVE-VERIFIED reliable on 3.3.1).
 				counters[inb.ID] = inboundCounter{up: inb.Up, down: inb.Down}
 			}
+			// Who is connected right now, on this panel. Rides the slot
+			// this goroutine already holds rather than opening a second
+			// fan-out: it is one more POST against a panel we are already
+			// talking to, and the by-guid endpoint returns the whole panel
+			// in that one call regardless of user count.
+			//
+			// Optional capability. An adapter that does not implement it
+			// (S-UI has no equivalent) leaves liveIPs nil with no error,
+			// and the aggregate counts its users as unread — never as
+			// zero, which would read as "nobody is connected".
+			var live map[string][]string
+			var liveErr error
+			if reader, ok := c.(ports.LiveIPReader); ok {
+				live, liveErr = reader.ListLiveClientIPs(ctx)
+				if liveErr != nil {
+					// Warn, do not fail the panel: the traffic numbers
+					// above are good and are what this poll exists for.
+					log.Warn("traffic poll: live client IPs unavailable for this panel",
+						"panel_id", pid, "err", liveErr)
+				}
+			} else {
+				liveErr = ports.ErrPanelCapabilityUnsupported
+			}
 			panelMu.Lock()
-			panelData[pid] = panelListResult{stats: stats, counters: counters, err: lerr}
+			panelData[pid] = panelListResult{
+				stats: stats, counters: counters, err: lerr,
+				liveIPs: live, liveErr: liveErr,
+			}
 			panelMu.Unlock()
 		}(panelID)
 	}
@@ -484,6 +526,17 @@ func (s *Service) PollOnce(ctx context.Context) (err error) {
 	// re-reading the loop.
 	metrics.PollPanels.Observe(float64(len(panelsToFetch)))
 	mark("panel_fetch", "Phase 1 parallel ListInboundsSlim")
+
+	// Phase 1b — fold the live-IP reads into one row per USER.
+	//
+	// Pure in-memory: the reads already happened above, inside the slot each
+	// panel goroutine held. Observation only for now; nothing here changes a
+	// user's state or writes to a panel.
+	s.observeLiveIPs(ctx, users, sharedClients, func(pid int64) (map[string][]string, error) {
+		d := panelData[pid]
+		return d.liveIPs, d.liveErr
+	}, panelsToFetch)
+	mark("live_ips", "Phase 1b per-user live-IP aggregation")
 
 	// Phase 2 — per-panel sequential processing. ListInbounds results are
 	// already in panelData (Phase 1); Phase 2 is pure in-memory attribution of

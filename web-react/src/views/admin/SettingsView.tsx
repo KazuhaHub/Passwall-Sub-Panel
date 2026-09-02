@@ -1080,6 +1080,72 @@ export default function SettingsView() {
               {t('settings.geo.attribution', { defaultValue: '数据来源需在使用处署名：MaxMind（GeoLite2）/ DB-IP / IPinfo —— 视所用库而定。' })}
             </Typography>
           </Section>
+
+          {/* Concurrent-location anomaly. Deliberately its own section rather
+              than folded into the geo one above: that section is about
+              DISPLAYING a region in the access log, this one JUDGES people.
+              Every field below is per-group overridable, so a team that works
+              across borders is loosened without weakening the fleet. */}
+          <Section title={t('settings.geo_anomaly.section', { defaultValue: '异地并发检测' })} md={md}>
+            <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant }}>
+              {t('settings.geo_anomaly.hint', { defaultValue: '把一个用户在所有面板上的并发源 IP 合起来看，同时出现在多个地方就是共享账号的信号。需要上面的 IP 地区库可用，否则一律判为「无法判断」而不是「正常」。目前只观测和告警，不做任何自动处置。' })}
+            </Typography>
+
+            <TextField select fullWidth size="small"
+              label={t('settings.geo_anomaly.scope', { defaultValue: '判定粒度' })}
+              value={settings.geo_anomaly_scope || 'country'}
+              onChange={e => patch('geo_anomaly_scope', e.target.value as typeof settings.geo_anomaly_scope)}
+              helperText={t('settings.geo_anomaly.scope_hint', { defaultValue: '「国家」是推荐值：异城市每天都在发生（通勤、运营商 NAT 池、手机切基站），按城市判会天天误报。只有确知用户都在本地时才选城市。' })}>
+              <MenuItem value="country">{t('settings.geo_anomaly.scope_country', { defaultValue: '国家（推荐）' })}</MenuItem>
+              <MenuItem value="region">{t('settings.geo_anomaly.scope_region', { defaultValue: '省 / 州' })}</MenuItem>
+              <MenuItem value="city">{t('settings.geo_anomaly.scope_city', { defaultValue: '城市（易误报）' })}</MenuItem>
+              <MenuItem value="off">{t('settings.geo_anomaly.scope_off', { defaultValue: '关闭检测' })}</MenuItem>
+            </TextField>
+
+            <Pair>
+              <NumField
+                label={t('settings.geo_anomaly.max_places', { defaultValue: '容错：允许同时几个地方' })}
+                value={settings.geo_anomaly_max_places}
+                onChange={v => patch('geo_anomaly_max_places', v)}
+                helperText={t('settings.geo_anomaly.max_places_hint', { defaultValue: '1 = 同时两个地方就算超。第二个地点常常是正常的（公司 VPN、第二住所、境外家人），觉得误报多就调到 2。' })} />
+              <NumField
+                label={t('settings.geo_anomaly.min_placed_ratio', { defaultValue: '最低可定位比例' })}
+                value={settings.geo_anomaly_min_placed_ratio}
+                onChange={v => patch('geo_anomaly_min_placed_ratio', v)}
+                step="any"
+                helperText={t('settings.geo_anomaly.min_placed_ratio_hint', { defaultValue: '0–1。低于这个比例的地址能被定位时判「无法判断」，防止陈旧或残缺的库悄悄变成「全员清白」。' })} />
+            </Pair>
+
+            <Pair>
+              <NumField
+                label={t('settings.geo_anomaly.flag_after', { defaultValue: '连续几次才标记' })}
+                value={settings.geo_anomaly_flag_after_polls}
+                onChange={v => patch('geo_anomaly_flag_after_polls', v)}
+                helperText={t('settings.geo_anomaly.flag_after_hint', { defaultValue: '一次噪声不报警——未达次数时只显示「疑似」。设成 1 等于关掉迟滞，会让检测器抖动，不建议。' })} />
+              <NumField
+                label={t('settings.geo_anomaly.clear_after', { defaultValue: '连续几次才解除' })}
+                value={settings.geo_anomaly_clear_after_polls}
+                onChange={v => patch('geo_anomaly_clear_after_polls', v)}
+                helperText={t('settings.geo_anomaly.clear_after_hint', { defaultValue: '刻意比上面大：否则账号在两次检查之间踩到线下就能甩掉标记。断线不计入解除。' })} />
+            </Pair>
+
+            <TextField fullWidth size="small" multiline minRows={2}
+              label={t('settings.geo_anomaly.co_travel', { defaultValue: '视为同一地点的组合' })}
+              value={settings.geo_anomaly_co_travel ?? ''}
+              onChange={e => patch('geo_anomaly_co_travel', e.target.value)}
+              placeholder={'JP,TW\nDE,AT,CH'}
+              helperText={t('settings.geo_anomaly.co_travel_hint', { defaultValue: '一行一组，组内用逗号分隔国家代码。给真实跨境常客用——比调高容错率更精确：组外的第三个地点仍然会触发。' })} />
+
+            <FormControlLabel
+              label={t('settings.geo_anomaly.allow_anywhere', { defaultValue: '本范围内允许任何地方（不检测）' })}
+              control={<Switch checked={settings.geo_anomaly_allow_anywhere}
+                onChange={(_, c) => patch('geo_anomaly_allow_anywhere', c)} />}
+              sx={{ ml: 0, '& .MuiFormControlLabel-label': { ml: 1.5 } }} />
+            <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant, mt: -1 }}>
+              {t('settings.geo_anomaly.allow_anywhere_hint', { defaultValue: '整体豁免，而不是抬高阈值——抬阈值会连带放松那些没在出差的人。在「分组」里对某个组单独打开，就只豁免那个组。' })}
+            </Typography>
+          </Section>
+
         </Box>
       ))}
       {tab === 'brand' && (

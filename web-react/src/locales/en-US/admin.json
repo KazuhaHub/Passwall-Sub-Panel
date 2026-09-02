@@ -212,6 +212,28 @@
       "emergency_access_quota_gb": "Per-window traffic quota (GB)",
       "emergency_access_quota_gb_hint": "0 = unlimited; once exceeded the panel ends the window early and re-disables the user"
     },
+    "geo_anomaly": {
+      "section": "Concurrent-location detection",
+      "hint": "Combines one user's live source IPs across every panel; being in several places at once is the signal for a shared account. Needs the IP location database above — without it every verdict is \"unknown\", never \"clean\". Observation and alerting only; nothing is enforced automatically.",
+      "scope": "Granularity",
+      "scope_hint": "Country is the recommended setting. Two CITIES happens every day — a commute, a carrier NAT pool, a phone changing networks — so city scope produces constant false alarms unless you know your users are local.",
+      "scope_country": "Country (recommended)",
+      "scope_region": "Region / state",
+      "scope_city": "City (noisy)",
+      "scope_off": "Detection off",
+      "max_places": "Tolerance: places allowed at once",
+      "max_places_hint": "1 means two at once is over. A second location is often legitimate — a work VPN, a second home, family abroad — so raise it to 2 if you see false alarms.",
+      "min_placed_ratio": "Minimum locatable share",
+      "min_placed_ratio_hint": "0–1. Below this share of addresses being locatable the verdict is \"unknown\", so a stale or partial database cannot quietly read as a clean fleet.",
+      "flag_after": "Consecutive checks to flag",
+      "flag_after_hint": "One noisy sample does not raise an alert — below this it shows as \"suspect\". Setting it to 1 disables hysteresis and makes the detector flap; not recommended.",
+      "clear_after": "Consecutive checks to clear",
+      "clear_after_hint": "Deliberately larger than the flag threshold, or an account sheds its flag by stepping under the line for one check. Being disconnected does not count toward clearing.",
+      "co_travel": "Places that count as one",
+      "co_travel_hint": "One set per line, members comma-separated. For a genuine cross-border user this is more precise than raising their tolerance: a third place outside the set still flags.",
+      "allow_anywhere": "Allow anywhere in this scope (no detection)",
+      "allow_anywhere_hint": "An outright exemption rather than a raised threshold — raising the threshold would also loosen detection for everyone who is not travelling. Set it on one group to exempt only that group."
+    },
     "geo": {
       "section": "IP region (logs)",
       "enabled": "Show IP region",
@@ -721,6 +743,25 @@
     },
     "detail_title": "Task detail"
   },
+    "geo_anomalies": {
+      "intro": "Verdicts on each user's live source IPs combined across every panel. Only \"flagged\" means sustained; \"suspect\" is the ramp that has not reached the threshold yet. This is suspicion, not proof — split tunnelling, a corporate VPN and family abroad all produce it honestly. Nothing is enforced automatically.",
+      "unwired": "Concurrent-location detection is not enabled in this deployment.",
+      "empty": "No verdicts yet — they appear after the traffic poll has run a cycle.",
+      "incomplete": "A panel could not be read, so this number is a floor rather than a total.",
+      "col_user": "User",
+      "col_state": "Verdict",
+      "col_places": "Places at once",
+      "col_ips": "Live IPs",
+      "col_reason": "Basis",
+      "col_updated": "Last judged",
+      "state_flagged": "Flagged",
+      "state_suspect": "Suspect",
+      "state_clean": "Clean",
+      "state_unknown": "Cannot tell",
+      "state_idle": "Idle",
+      "state_exempt": "Exempt",
+      "state_disabled": "Off"
+    },
   "logs": {
     "title": "Logs",
     "tab_sub": "Subscription logs",
@@ -728,6 +769,7 @@
     "tab_auth": "Auth logs",
     "tab_email": "Email logs",
     "tab_certs": "Certificates",
+      "tab_geo": "Locations",
     "cert_table": { "at": "Time", "cert": "Certificate", "kind": "Action", "result": "Result", "message": "Message" },
     "cert_kind": { "issue": "Issue", "renew": "Renew" },
     "cert_result": { "ok": "OK", "fail": "Failed" },
@@ -1300,6 +1342,7 @@
       "limit_zero_hint": "0 = unlimited",
       "inherit_from_group": "Follow group",
       "limit_unsupported": "Not enforceable on: {{panels}} — clients placed there ignore this.",
+      "device_limit_inert": "Not enforced yet: 3X-UI counts devices only when a client fetches the panel's own subscription, and PSP serves subscriptions itself. The value is saved but does nothing.",
       "remark": "Remark"
     },
     "role": {

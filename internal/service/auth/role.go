@@ -39,22 +39,22 @@ func MatchFirstRule(
 // PLUS per-rule Keep semantics PLUS the "panel-managed role" carve-out.
 //
 // Decision matrix:
-//   1. No rules configured → SSO is silent about roles. Leave current
-//      alone and signal ssoAuthoritative=false so the caller can skip
-//      the DB update entirely.
-//   2. A rule matched:
-//        a. matched.Role == current → no change, ssoAuthoritative=true.
-//        b. matched.Role != current AND some rule outputting `current`
-//           has Keep=true → preserve current (panel-side grant wins).
-//        c. otherwise → apply matched.Role.
-//   3. No rule matched:
-//        a. No rule outputs `current` → the role isn't IdP-managed at
-//           all (think: admin manually granted a custom "auditor" role
-//           the IdP doesn't know about). Leave current alone.
-//        b. Some rule outputs `current` with Keep=true → preserve.
-//        c. Some rule outputs `current` but none have Keep=true →
-//           demote to RoleUser (the role is IdP-managed and the IdP
-//           is saying "not this user, not this time").
+//  1. No rules configured → SSO is silent about roles. Leave current
+//     alone and signal ssoAuthoritative=false so the caller can skip
+//     the DB update entirely.
+//  2. A rule matched:
+//     a. matched.Role == current → no change, ssoAuthoritative=true.
+//     b. matched.Role != current AND some rule outputting `current`
+//     has Keep=true → preserve current (panel-side grant wins).
+//     c. otherwise → apply matched.Role.
+//  3. No rule matched:
+//     a. No rule outputs `current` → the role isn't IdP-managed at
+//     all (think: admin manually granted a custom "auditor" role
+//     the IdP doesn't know about). Leave current alone.
+//     b. Some rule outputs `current` with Keep=true → preserve.
+//     c. Some rule outputs `current` but none have Keep=true →
+//     demote to RoleUser (the role is IdP-managed and the IdP
+//     is saying "not this user, not this time").
 //
 // Returns (final, ssoAuthoritative). final is the role to write;
 // ssoAuthoritative=false means SSO had nothing to say and the caller

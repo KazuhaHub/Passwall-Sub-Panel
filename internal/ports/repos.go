@@ -961,6 +961,56 @@ type UISettings struct {
 	// accounts are the obvious thing to harden first.
 	Require2FAForStaff bool `json:"require_2fa_for_staff"`
 
+	// ---- Concurrent-location anomaly detection ----
+	// Judges how many places ONE USER is connecting from at once, fleet-wide.
+	// Read docs/connection-limits.md §12 before changing a default: every
+	// knob here exists because a specific real user would otherwise be
+	// misjudged, and the two failure directions are not symmetric — a false
+	// flag accuses somebody who did nothing.
+	//
+	// All of these are per-group overridable (see OverridableScopeKeys), so a
+	// group of travelling staff can be exempted without loosening the fleet.
+	//
+	// GeoAnomalyScope is the granularity at which two observations count as
+	// different places: "off", "country" (default), "region", "city".
+	// Two CITIES is a commute or a carrier NAT pool and fires constantly in a
+	// general fleet, which is why country is the default and city is not.
+	GeoAnomalyScope string `json:"geo_anomaly_scope"`
+	// GeoAnomalyMaxPlaces is how many places may be occupied concurrently
+	// before a sample is over tolerance. 1 means "two at once is over".
+	// A second location is often entirely legitimate — a work VPN, a second
+	// home, family abroad — so this is a number rather than a hardcoded 2.
+	GeoAnomalyMaxPlaces int `json:"geo_anomaly_max_places"`
+	// GeoAnomalyFlagAfterPolls is how many CONSECUTIVE over-tolerance samples
+	// are required before the state becomes flagged; below it the state is
+	// "suspect" and is never acted on. This is the knob that stops the
+	// detector flapping, and a flapping detector is worse than none because
+	// operators learn to ignore it.
+	GeoAnomalyFlagAfterPolls int `json:"geo_anomaly_flag_after_polls"`
+	// GeoAnomalyClearAfterPolls is how many consecutive within-tolerance
+	// samples clear a flag. Deliberately larger than the flag threshold so an
+	// account cannot step under the line for one check and shed the flag.
+	GeoAnomalyClearAfterPolls int `json:"geo_anomaly_clear_after_polls"`
+	// GeoAnomalyMinPlacedRatio is the fraction of a user's live addresses that
+	// must be locatable before any conclusion is drawn; below it the verdict
+	// is "unknown". Without it a stale or partial database reads as a fleet
+	// where nobody is sharing.
+	GeoAnomalyMinPlacedRatio float64 `json:"geo_anomaly_min_placed_ratio"`
+	// GeoAnomalyCoTravel names place sets that do not count as separate from
+	// each other: one set per LINE, members comma-separated (e.g. "JP,TW").
+	// For a genuine dual presence this is more honest than raising their
+	// tolerance, because it stays specific: a THIRD place still flags.
+	//
+	// A single newline-separated string rather than a list because the
+	// settings store has scalar descriptors only, and because a textarea is
+	// how an admin actually enters this.
+	GeoAnomalyCoTravel string `json:"geo_anomaly_co_travel"`
+	// GeoAnomalyAllowAnywhere exempts everyone in scope outright. Set on a
+	// group for travelling staff or a shared team credential; exempting is
+	// cleaner than raising a threshold, which would loosen detection for
+	// people who are not travelling.
+	GeoAnomalyAllowAnywhere bool `json:"geo_anomaly_allow_anywhere"`
+
 	// ---- IP geolocation (access-log region display, offline .mmdb) ----
 	// Resolution is fully offline against a local .mmdb in <ConfigDir>/geoip/;
 	// no per-IP external calls. GeoIPEnabled gates the whole feature (default
@@ -1257,6 +1307,17 @@ type ScopeSettingsRepo interface {
 // require_2fa_for_staff stays global too (Group.Require2FA covers per-group
 // enrollment). Grow this set one category at a time as consumers migrate.
 var OverridableScopeKeys = map[string]bool{
+	// Concurrent-location anomaly policy — traffic.observeLiveIPs. Per-group
+	// so a team that genuinely works across borders can be exempted or
+	// loosened without weakening detection for everyone else. See
+	// docs/connection-limits.md §12.3.
+	"geo_anomaly.scope":             true,
+	"geo_anomaly.max_places":        true,
+	"geo_anomaly.flag_after_polls":  true,
+	"geo_anomaly.clear_after_polls": true,
+	"geo_anomaly.min_placed_ratio":  true,
+	"geo_anomaly.co_travel":         true,
+	"geo_anomaly.allow_anywhere":    true,
 	// 2FA methods (login / enroll) — auth_local / twofa / passkey / login2fa.
 	"security.totp_enabled":      true,
 	"security.passkey_enabled":   true,

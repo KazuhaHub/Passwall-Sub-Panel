@@ -252,10 +252,19 @@ func (r *fakeTaskRepo) Create(_ context.Context, t *domain.SyncTask) error {
 func (r *fakeTaskRepo) ListDue(_ context.Context, _ time.Time, _ int) ([]*domain.SyncTask, error) {
 	return r.due, nil
 }
-func (r *fakeTaskRepo) MarkRunning(_ context.Context, _ int64) (bool, error)               { return true, nil }
-func (r *fakeTaskRepo) MarkSucceeded(_ context.Context, id int64) error                    { r.succeeded = append(r.succeeded, id); return nil }
-func (r *fakeTaskRepo) MarkRetry(_ context.Context, id int64, _ string, _ time.Time) error { r.retried = append(r.retried, id); return nil }
-func (r *fakeTaskRepo) Cancel(_ context.Context, id int64) error                           { r.canceled = append(r.canceled, id); return nil }
+func (r *fakeTaskRepo) MarkRunning(_ context.Context, _ int64) (bool, error) { return true, nil }
+func (r *fakeTaskRepo) MarkSucceeded(_ context.Context, id int64) error {
+	r.succeeded = append(r.succeeded, id)
+	return nil
+}
+func (r *fakeTaskRepo) MarkRetry(_ context.Context, id int64, _ string, _ time.Time) error {
+	r.retried = append(r.retried, id)
+	return nil
+}
+func (r *fakeTaskRepo) Cancel(_ context.Context, id int64) error {
+	r.canceled = append(r.canceled, id)
+	return nil
+}
 
 type fakePusher struct{ pushed []int64 }
 
@@ -659,7 +668,9 @@ func (r *fakeCertEventRepo) Create(_ context.Context, e *domain.CertEvent) error
 func (r *fakeCertEventRepo) ListPaged(_ context.Context, _, _ int) ([]*domain.CertEvent, int64, error) {
 	return r.events, int64(len(r.events)), nil
 }
-func (r *fakeCertEventRepo) PruneOlderThan(_ context.Context, _ time.Time) (int64, error) { return 0, nil }
+func (r *fakeCertEventRepo) PruneOlderThan(_ context.Context, _ time.Time) (int64, error) {
+	return 0, nil
+}
 
 func TestRunCertTaskRecordsSuccessEvent(t *testing.T) {
 	certs := newFakeCertRepo()

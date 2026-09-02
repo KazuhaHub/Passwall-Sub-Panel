@@ -25,14 +25,14 @@ func TestUserNodeUsage(t *testing.T) {
 		1: {
 			{
 				ID: 1, UserID: 1, PanelID: 10, InboundID: 20, ClientEmail: "u1-n1@x",
-				CreatedAt:          tenDaysAgo,
-				LifetimeUpBytes:    100, LifetimeDownBytes: 300, LifetimeTotalBytes: 400,
+				CreatedAt:       tenDaysAgo,
+				LifetimeUpBytes: 100, LifetimeDownBytes: 300, LifetimeTotalBytes: 400,
 				PeriodBaselineUpBytes: 40, PeriodBaselineDownBytes: 100, PeriodBaselineTotalBytes: 140,
 			},
 			{
 				ID: 2, UserID: 1, PanelID: 10, InboundID: 21, ClientEmail: "u1-n2@x",
-				CreatedAt:          now, // born today
-				LifetimeUpBytes:    10, LifetimeDownBytes: 20, LifetimeTotalBytes: 30,
+				CreatedAt:       now, // born today
+				LifetimeUpBytes: 10, LifetimeDownBytes: 20, LifetimeTotalBytes: 30,
 				PeriodBaselineUpBytes: 0, PeriodBaselineDownBytes: 0, PeriodBaselineTotalBytes: 0,
 			},
 		},

@@ -434,7 +434,7 @@ func (s *Service) upsert(ctx context.Context, table string, conflictCols []strin
 // The "keep" action is dialect-specific. SQLite/Postgres render
 // OnConflict.DoNothing as a native "DO NOTHING". MySQL, however, renders it as an
 // EMPTY "ON DUPLICATE KEY UPDATE" with no assignments — invalid SQL that fails with
-// "Error 1064 ... near ''" (observed in production on a MySQL deployment). For
+// "Error 1064 ... near ”" (observed in production on a MySQL deployment). For
 // MySQL we instead emit a no-op self-assignment of a conflict-key column
 // ("`col`=`col`"): a valid "keep the existing row" that touches no data column.
 // Verified via offline DryRun SQL generation across dialects (see the test).

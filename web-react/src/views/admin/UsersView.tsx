@@ -72,7 +72,7 @@ import {
 import type { UpdateUserRequest } from '@/api/users'
 import { listGroups } from '@/api/groups'
 import { listServers, type Server } from '@/api/servers'
-import { unenforceablePanels } from '@/utils/capabilities'
+import { deviceCapIsInert, unenforceablePanels } from '@/utils/capabilities'
 import { runReconcile } from '@/api/reconcile'
 import { setUserTraffic, topTraffic, type TrafficRow } from '@/api/traffic'
 import type { Group, ResetPeriod, Role, User } from '@/api/types'
@@ -439,6 +439,19 @@ export default function UsersView() {
   }
 
   function capHint(limit: number, capability: 'client.iplimit' | 'client.devicelimit') {
+    // The device cap is stored everywhere and enforced nowhere, so its
+    // warning is unconditional rather than a list of panels that lack it.
+    // 3X-UI applies limitHwid only when a client app fetches THE PANEL's
+    // own subscription URL; PSP serves subscriptions itself, so that gate
+    // never runs. Naming panels here would be worse than silence — it
+    // would imply the ones not named do enforce it.
+    if (capability === 'client.devicelimit' && deviceCapIsInert(limit)) {
+      return (
+        <Box component="span" sx={{ color: 'warning.main' }}>
+          {t('admin:users.field.device_limit_inert')}
+        </Box>
+      )
+    }
     const panels = unenforceablePanels(limit, servers, capability)
     if (!panels.length) return null
     return (

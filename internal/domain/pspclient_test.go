@@ -10,8 +10,8 @@ func TestPSPClientEmail(t *testing.T) {
 		want   string
 	}{
 		{42, "", "psp.local", "u42@psp.local"},
-		{42, "", "", "u42@psp.local"},                  // empty domain → default
-		{42, "-c1", "example.com", "u42-c1@example.com"}, // SS-2022-128
+		{42, "", "", "u42@psp.local"},                      // empty domain → default
+		{42, "-c1", "example.com", "u42-c1@example.com"},   // SS-2022-128
 		{7, "-k1a2b3c4d", "x.test", "u7-k1a2b3c4d@x.test"}, // flow-split hash suffix
 	}
 	for _, tc := range cases {

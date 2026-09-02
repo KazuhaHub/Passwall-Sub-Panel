@@ -47,7 +47,7 @@ func TestShouldRollPeriod_DBReadbackInUTCDoesNotSpuriouslyReRoll(t *testing.T) {
 // rolls, even with the periodStart carrying a UTC Location.
 func TestShouldRollPeriod_GenuineRolloverStillFires(t *testing.T) {
 	east := time.FixedZone("UTC+8", 8*3600)
-	now := time.Date(2026, 4, 2, 10, 0, 0, 0, east)           // April, panel tz
+	now := time.Date(2026, 4, 2, 10, 0, 0, 0, east)              // April, panel tz
 	marStartUTC := time.Date(2026, 3, 1, 0, 0, 0, 0, east).UTC() // March period, UTC readback
 	if !shouldRollPeriod(now, marStartUTC, domain.ResetMonthly) {
 		t.Fatal("a genuine month change (Mar -> Apr) must still roll")

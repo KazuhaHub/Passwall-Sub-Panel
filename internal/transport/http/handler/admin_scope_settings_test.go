@@ -26,7 +26,9 @@ func (f fakeScopeGroups) GetByID(_ context.Context, id int64) (*domain.Group, er
 }
 
 // fakeScopeRepo is an in-memory ports.ScopeSettingsRepo for one scope.
-type fakeScopeRepo struct{ rows map[string]ports.ScopeOverride }
+type fakeScopeRepo struct {
+	rows map[string]ports.ScopeOverride
+}
 
 func newFakeScopeRepo() *fakeScopeRepo { return &fakeScopeRepo{rows: map[string]ports.ScopeOverride{}} }
 

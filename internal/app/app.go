@@ -393,12 +393,25 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	// Link the geo updater's background download to the app lifecycle so
 	// Shutdown cancels + drains an in-flight DB download instead of leaking it.
 	geoSvc.SetBackground(bgCtx, &a.bgWG)
+	// Concurrent-location observation on the traffic poll. Late-bound like the
+	// shared-client repo: without it the poll still meters, and every verdict
+	// reads Unknown rather than Clean — the honest answer when nothing can be
+	// placed. Observation only; no automatic response is armed.
+	trafficSvc.SetGeoResolver(geoSvc)
+	trafficSvc.SetGeoPolicy(domain.DefaultGeoPolicy())
+	// The hysteresis state has to outlive the process. The detector latches a
+	// flag deliberately — over tolerance for N consecutive checks to raise it,
+	// within tolerance for M to clear it — and keeping that only in memory
+	// would make every deploy a free acquittal for anyone being watched.
+	geoStreaks := sqlstore.NewGeoStreakRepo(db)
+	trafficSvc.SetGeoStreakStore(geoStreaks)
 
 	// --- transport layer ---
 	httpHandler := httptransport.NewRouter(httptransport.Deps{
 		Async:            dispatcher,
 		Cfg:              cfg,
 		Repos:            repos,
+		GeoRecords:       geoStreaks,
 		Pool:             pool,
 		Auth:             authSvc,
 		SAML:             samlSvc,

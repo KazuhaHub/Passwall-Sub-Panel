@@ -262,3 +262,26 @@ func (s *Service) Status(ctx context.Context) Status {
 	}
 	return st
 }
+
+// Available reports whether this service can place addresses at all right
+// now: the feature is switched on AND a database is actually loadable.
+//
+// It exists so a caller can tell "geo said nothing about these addresses"
+// from "geo is not in a position to say anything". They produce identical
+// empty lookups and mean opposite things — the first is evidence, the second
+// is the absence of it — and conflating them lets a switched-off or broken
+// database read as a clean result. See domain.GeoStateUnknown.
+//
+// Deliberately stricter than Status().Enabled: a deployment can have the
+// toggle on and no usable .mmdb file, which resolves nothing while looking
+// configured.
+func (s *Service) Available(ctx context.Context) bool {
+	if s == nil {
+		return false
+	}
+	set, err := s.settings.Load(ctx, ports.UISettings{})
+	if err != nil || !set.GeoIPEnabled {
+		return false
+	}
+	return s.ensureReader(set.GeoIPDBFile) != nil
+}

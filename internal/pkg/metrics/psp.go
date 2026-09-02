@@ -155,6 +155,38 @@ var (
 		"Shared clients a user needs on ONE panel, sampled once per SyncUserLifecycle. Above 1 means clientplan split them, and each split carries its own copy of the connection caps.",
 		"clients", CountBuckets,
 	)
+	// The number the connection cap was always meant to bound: how many
+	// distinct source addresses ONE PERSON is using across the whole fleet,
+	// right now. Every enforcement point below bounds something else —
+	// 3X-UI applies limitIp per client EMAIL, and PSP splits a user into
+	// several emails per panel and across panels — so this is the first
+	// place the per-user figure exists at all.
+	//
+	// Read the distribution before arming anything. It is what says whether
+	// a cap of N would catch sharers or households: CGNAT, a phone changing
+	// networks and a carrier NAT pool all inflate it honestly.
+	UserLiveIPs = NewHistogram(
+		"psp_user_live_ips",
+		"Distinct live source IPs per user across the whole fleet, sampled once per traffic poll. Source addresses, never devices - the data plane has no device concept.",
+		"ips", CountBuckets,
+	)
+	// Verdicts per poll, labelled by outcome so the DENOMINATOR stays
+	// visible. Watching only the flagged line cannot distinguish a clean
+	// fleet from a detector that has silently stopped detecting: "unknown"
+	// is what a stale or switched-off geo database produces, and "disabled"
+	// and "exempt" are policy choices that also look like zero flags.
+	GeoVerdictTotal = NewCounterVec(
+		"psp_geo_verdict_total",
+		"Users classified per traffic poll by concurrent-location policy: clean, suspect, flagged, idle, unknown, exempt, disabled.",
+		"state",
+	)
+	// Users whose fleet-wide live-IP count is a FLOOR rather than a total,
+	// because a panel holding their clients could not be read. Above zero
+	// means psp_user_live_ips understates, and so does anything drawn from it.
+	LiveIPUsersIncompleteTotal = NewCounter(
+		"psp_live_ip_users_incomplete_total",
+		"Users whose fleet-wide live-IP count was a floor this poll because a panel could not be read.",
+	)
 	// P in the cost model.
 	UserClientCount = NewHistogram(
 		"psp_user_client_count",

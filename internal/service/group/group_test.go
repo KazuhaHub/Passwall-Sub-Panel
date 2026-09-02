@@ -99,9 +99,9 @@ func TestMatches_CondTypes(t *testing.T) {
 		want bool
 	}{
 		{"region:TW", true},
-		{"region:tw", true},     // region is case-insensitive
-		{"region:JP", false},    // wrong region
-		{"tag:reality", true},   // tag: prefix strips, looks up "reality"
+		{"region:tw", true},   // region is case-insensitive
+		{"region:JP", false},  // wrong region
+		{"tag:reality", true}, // tag: prefix strips, looks up "reality"
 		{"tag:missing", false},
 		{"server:tw-hinet", true}, // unknown prefix → literal tag match (full string in node.Tags)
 		{"server:other", false},
@@ -127,14 +127,14 @@ func TestMatches_TrimsSpaces(t *testing.T) {
 		cond string
 		want bool
 	}{
-		{"tag: reality", true},        // space after colon (the reported bug)
-		{"tag :reality", true},        // space before colon
-		{"  tag : reality  ", true},   // spaces all over
-		{"region: TW", true},          // region prefix with space
-		{"tag: Premium", true},        // capitalized tag with space (literal report)
-		{"server: tw-hinet", true},    // unknown prefix path also normalises
-		{" Premium ", true},           // no-colon path: outer whitespace trimmed
-		{"tag: missing", false},       // still false when value truly absent
+		{"tag: reality", true},      // space after colon (the reported bug)
+		{"tag :reality", true},      // space before colon
+		{"  tag : reality  ", true}, // spaces all over
+		{"region: TW", true},        // region prefix with space
+		{"tag: Premium", true},      // capitalized tag with space (literal report)
+		{"server: tw-hinet", true},  // unknown prefix path also normalises
+		{" Premium ", true},         // no-colon path: outer whitespace trimmed
+		{"tag: missing", false},     // still false when value truly absent
 	}
 	for _, tc := range cases {
 		f := domain.TagFilter{Tags: []string{tc.cond}}

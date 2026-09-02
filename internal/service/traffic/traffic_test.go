@@ -1278,6 +1278,13 @@ type fakeXUIClient struct {
 	// call counters so tests can assert which list endpoint the poll used.
 	listFullCalled int
 	listSlimCalled int
+	// liveIPs, when non-nil, makes this fake implement ports.LiveIPReader so
+	// a test can drive the poll's concurrent-location observation. Left nil
+	// by default so every pre-existing test keeps exercising the "adapter
+	// does not support the read" path, which is S-UI's real behaviour.
+	liveIPs    map[string][]string
+	liveIPsErr error
+	liveCalls  int
 }
 
 func (c *fakeXUIClient) ListInbounds(ctx context.Context) ([]ports.Inbound, error) {
@@ -2038,4 +2045,16 @@ func TestCurrentPeriodStartYearly(t *testing.T) {
 // assert on recorded calls rather than lean on this stub.
 func (f *fakeXUIClient) BulkSetEnabled(_ context.Context, emails []string, _ bool) (ports.BulkSetEnabledResult, error) {
 	return ports.BulkSetEnabledResult{Changed: len(emails)}, nil
+}
+
+// liveIPReaderFake is fakeXUIClient with the optional capability present.
+// Separate type so the base fake keeps NOT implementing the interface: the
+// two paths (supported / unsupported) must stay independently reachable.
+type liveIPReaderFake struct {
+	*fakeXUIClient
+}
+
+func (c *liveIPReaderFake) ListLiveClientIPs(context.Context) (map[string][]string, error) {
+	c.liveCalls++
+	return c.liveIPs, c.liveIPsErr
 }

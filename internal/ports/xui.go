@@ -245,6 +245,27 @@ type WebCertProvider interface {
 	GetWebCertFiles(ctx context.Context) (*WebCertFiles, error)
 }
 
+// LiveIPReader is the optional "who is connected right now" capability.
+//
+// It answers a question no single panel can: a user's credentials are split
+// across panels, and each panel counts only its own. PSP holds the
+// email→user mapping, so it is the only place the per-USER total exists.
+// The panel-side caps are per client email per panel and are multiplied by
+// both — see docs/connection-limits.md §11.
+//
+// Source IPs, not devices. The data plane sees connections and source
+// addresses; it has no device concept. One household behind one NAT reads
+// as 1, one phone moving between wifi and cellular reads as 2. A device
+// identity exists only at the subscription layer. Anything built on this
+// must say "IP", never "device", or it will promise something it cannot
+// deliver — the exact mistake that let the device cap look enforced.
+type LiveIPReader interface {
+	// ListLiveClientIPs returns each client email's currently-live source
+	// IPs on this panel. Upstream applies its own staleness window, so an
+	// email with no live connections is absent rather than empty.
+	ListLiveClientIPs(ctx context.Context) (map[string][]string, error)
+}
+
 // RealityScanner is the version-gated 3X-UI REALITY target discovery surface.
 // It intentionally stays separate from XUIClient so historical test doubles and
 // any out-of-tree adapters don't have to implement a capability that only exists
@@ -439,18 +460,37 @@ type ClientSpec struct {
 	// concurrently; 0 is unlimited. PSP owns the value — see
 	// docs/connection-limits.md.
 	LimitIP int
-	// LimitHwid caps the number of devices that may bind to the client's
-	// subscription; 0 is unlimited. 3X-UI 3.7.0+ only; older panels ignore
-	// the key, so a value set against one silently does nothing.
+	// LimitHwid is 3X-UI's per-subscription device cap; 0 is unlimited.
 	//
-	// PSP owns this outright, which is what makes it safe to send. It used
-	// to be omitted deliberately: an update that echoes back a value read
-	// moments earlier feeds a stale limit into the panel's
-	// trimClientHwidsForSubID, which DELETES device registrations beyond it,
-	// so a concurrent cap change or device registration inside the
-	// read-write window destroyed rows permanently. Sending PSP's own
-	// intended value has no read-modify-write window, so the trim does
-	// exactly what a device cap is supposed to do.
+	// IT DOES NOT ENFORCE ANYTHING IN PSP'S ARCHITECTURE, on any panel
+	// version. Upstream reads limit_hwid for a decision in exactly one
+	// place — effectiveHwidLimitForSubID, reached only from
+	// EnforceHwidForSubID, called only from 3X-UI's OWN subscription
+	// controller. Devices register when a client app fetches the PANEL's
+	// subscription URL. PSP serves its own subscriptions, so that endpoint
+	// is never hit by a PSP user, client_hwids stays empty for
+	// PSP-managed clients, and the cap is stored and then ignored.
+	//
+	// Keep sending it anyway. It costs one integer, it is correct if a
+	// deployment ever exposes the panel's own subscription, and omitting
+	// the key is actively harmful: upstream binds a missing key to 0, so
+	// every push would silently clear a cap an operator set by hand.
+	//
+	// Not an upstream defect — 3X-UI enforces at the point it serves. The
+	// mismatch is ours: PSP took over the subscription and expected
+	// enforcement to stay behind. A cap that is per USER can only live at
+	// PSP's own subscription endpoint, which is the one place that sees
+	// every fetch by one user across every credential partition and panel.
+	// See docs/connection-limits.md §4.1.
+	//
+	// PSP sends its OWN intended value, never an echo. An update that
+	// echoes back a value read moments earlier feeds a stale limit into
+	// the panel's trimClientHwidsForSubID, which DELETES device
+	// registrations beyond it — so a concurrent cap change or registration
+	// inside the read-write window destroyed rows permanently. Sending an
+	// intent has no read-modify-write window. That hazard is real and the
+	// stance is right; it is simply moot until something populates the
+	// registry this trims.
 	LimitHwid  int
 	TotalGB    int64 // bytes; panel manages traffic, keep this at 0
 	ExpiryTime int64 // ms epoch; panel manages expiry, keep this at 0

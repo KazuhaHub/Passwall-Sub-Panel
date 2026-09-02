@@ -130,7 +130,7 @@ func TestCertAlerts(t *testing.T) {
 		Certs: stubCerts{
 			failed: []*domain.TLSCertificate{{ID: 1, Name: "fail.example", Status: domain.CertStatusFailed, LastError: "dns timeout"}},
 			active: []*domain.TLSCertificate{
-				{ID: 2, Name: "fresh.example", Status: domain.CertStatusActive, NotAfter: tPtr(now.Add(60 * 24 * time.Hour))},  // far off → no alert
+				{ID: 2, Name: "fresh.example", Status: domain.CertStatusActive, NotAfter: tPtr(now.Add(60 * 24 * time.Hour))}, // far off → no alert
 				{ID: 3, Name: "soon.example", Status: domain.CertStatusActive, NotAfter: tPtr(now.Add(5 * 24 * time.Hour))},   // within 14d → warning
 				{ID: 4, Name: "gone.example", Status: domain.CertStatusActive, NotAfter: tPtr(now.Add(-2 * 24 * time.Hour))},  // already expired → error
 			},
@@ -198,10 +198,10 @@ func TestLoginSecurityAlert(t *testing.T) {
 func TestCountsAggregate(t *testing.T) {
 	now := time.Date(2026, 6, 5, 12, 0, 0, 0, time.UTC)
 	svc := newSvc(Deps{
-		Nodes:    stubNodes{nodes: []*domain.Node{{ID: 1, Enabled: true, HealthState: domain.NodeHealthUnreachable}}}, // 1 error
-		Certs:    stubCerts{active: []*domain.TLSCertificate{{ID: 2, Name: "s", Status: domain.CertStatusActive, NotAfter: tPtr(now.Add(3 * 24 * time.Hour))}}}, // 1 warning
-		Panels:   stubPanels{panels: []*domain.XUIPanel{{ID: 3, Name: "p", PanelVersion: "3.2.6"}}},
-		Settings: stubSettings{s: ports.UISettings{CertRenewBeforeDays: 14}},
+		Nodes:      stubNodes{nodes: []*domain.Node{{ID: 1, Enabled: true, HealthState: domain.NodeHealthUnreachable}}},                                           // 1 error
+		Certs:      stubCerts{active: []*domain.TLSCertificate{{ID: 2, Name: "s", Status: domain.CertStatusActive, NotAfter: tPtr(now.Add(3 * 24 * time.Hour))}}}, // 1 warning
+		Panels:     stubPanels{panels: []*domain.XUIPanel{{ID: 3, Name: "p", PanelVersion: "3.2.6"}}},
+		Settings:   stubSettings{s: ports.UISettings{CertRenewBeforeDays: 14}},
 		UpgradeFor: func(string) (string, bool) { return "3.2.8", true }, // 1 info
 	}, now)
 	_, counts := svc.List(context.Background())

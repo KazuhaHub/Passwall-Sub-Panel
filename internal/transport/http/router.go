@@ -60,24 +60,29 @@ type AsyncDispatcher interface {
 // Deps bundles every dependency the HTTP layer needs. App-startup wiring
 // populates this and passes it to NewRouter.
 type Deps struct {
-	Cfg       *config.Config
-	Repos     ports.Repos
-	Pool      ports.XUIPool
-	Auth      *auth.Service
-	SAML      *auth.SAMLService
-	OIDC      *auth.OIDCService
-	User      *user.Service
-	Group     *group.Service
-	Node      *node.Service
-	Cert      *cert.Service
-	Render    *render.Service
-	Audit     *audit.Service
-	Sync      *syncsvc.Service
-	Traffic   *traffic.Service
-	Mail      *mailer.Service
-	Reconcile *reconcile.Service
-	Geo       *geo.Service
-	Async     AsyncDispatcher
+	Cfg   *config.Config
+	Repos ports.Repos
+	// GeoRecords is the read side of the concurrent-location detector, the
+	// same rows the traffic poll writes each cycle. Optional: a deployment
+	// without it gets a 503 from the endpoint rather than an empty list, so
+	// "nothing to report" stays distinguishable from "cannot report".
+	GeoRecords handler.GeoRecordLister
+	Pool       ports.XUIPool
+	Auth       *auth.Service
+	SAML       *auth.SAMLService
+	OIDC       *auth.OIDCService
+	User       *user.Service
+	Group      *group.Service
+	Node       *node.Service
+	Cert       *cert.Service
+	Render     *render.Service
+	Audit      *audit.Service
+	Sync       *syncsvc.Service
+	Traffic    *traffic.Service
+	Mail       *mailer.Service
+	Reconcile  *reconcile.Service
+	Geo        *geo.Service
+	Async      AsyncDispatcher
 
 	// Rate-limit caps resolved from the DB settings table at startup. The
 	// middleware uses fixed buckets so admin edits require a restart for
@@ -159,6 +164,11 @@ func NewRouter(d Deps) stdhttp.Handler {
 
 	// Subscription handler — uses dynamic path from settings.
 	// The actual route is registered via NoRoute handler for dynamic path support.
+	// Reads the same rows the traffic poll writes. Constructed from the DB
+	// handle rather than added to the repo bundle: the poll's store interface
+	// is satisfied structurally, so a ports declaration would add a name
+	// without adding a guarantee.
+	geoAnomalyH := handler.NewAdminGeoAnomalyHandler(d.GeoRecords, d.Repos.User)
 	subHandler := handler.NewSubHandler(d.User, d.Render, d.Repos.SubLog, d.Repos.ScopedSettings, d.Repos.User, d.Mail, d.Async)
 	subLimiter := middleware.NewPerIPLimiter(d.SubPerIPPerMin, time.Minute)
 	subLimiter.SetLimitFunc(newSettingsIntCache(d.Repos.Settings, d.SubPerIPPerMin, func(s ports.UISettings) int { return s.SubPerIPPerMin }).get)
@@ -464,6 +474,10 @@ func NewRouter(d Deps) stdhttp.Handler {
 		// panels' responsiveness, which is owner information rather than
 		// something an operator needs to do their job.
 		diagH := handler.NewAdminDiagnosticsHandler()
+		// Who the concurrent-location detector currently suspects. adminGroup,
+		// not staffGroup: it names people on a signal rather than proof, and
+		// what to do about that is the owner's call.
+		adminGroup.GET("/geo-anomalies", geoAnomalyH.List)
 		adminGroup.GET("/diagnostics/metrics", diagH.Metrics)
 		adminGroup.POST("/diagnostics/metrics/reset", diagH.ResetMetrics)
 
