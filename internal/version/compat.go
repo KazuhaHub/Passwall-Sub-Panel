@@ -211,6 +211,32 @@ func CheckXUI(panelVersion string) CompatStatus {
 // suffix ignored), "3.1" (minor-only, patch defaults to 0). Returns false on
 // anything else so probe paths can treat the panel as Unknown rather than
 // crashing.
+// XUIAtLeast reports whether a probed 3X-UI panel version is at or above the
+// given floor. Unparseable or empty versions answer FALSE.
+//
+// That default is the whole point of the function. Its callers ask "can this
+// panel store the field I am about to compare against?", and answering "yes"
+// when the truth is unknown is what produces a comparison the panel can never
+// satisfy — a full client replace and an Xray restart every poll cycle,
+// forever. Answering "no" when the truth is unknown costs at most a field that
+// stops being independently re-asserted; it still rides along on every write
+// the other fields trigger.
+//
+// Empty is the normal state only for a panel that has never once been
+// reachable: probePanelVersionsOnce preserves the last known good version
+// across failures precisely so a blip does not erase it.
+func XUIAtLeast(panelVersion, floor string) bool {
+	have, ok := parseSemver(panelVersion)
+	if !ok {
+		return false
+	}
+	want, ok := parseSemver(floor)
+	if !ok {
+		return false
+	}
+	return cmpSemver(have, want) >= 0
+}
+
 func parseSemver(s string) ([3]int, bool) {
 	var zero [3]int
 	s = strings.TrimSpace(s)

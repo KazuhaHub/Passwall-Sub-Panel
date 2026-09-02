@@ -528,6 +528,14 @@ func (s *Service) SyncUserLifecycle(ctx context.Context, userID int64, want doma
 	// against P95 is what says whether the fan-out is a uniform cost or a
 	// tail problem.
 	metrics.UserClientCount.Observe(float64(len(clients)))
+	// The same total, split by panel. P conflates "on many panels" with
+	// "split on one panel", and only the second is PSP's doing — see
+	// metrics.UserClientsPerPanel. The connection caps are budgeted per
+	// panel-side email, so this is the factor that decides whether a cap the
+	// admin typed once is being enforced once.
+	for _, n := range clientsPerPanel(clients) {
+		metrics.UserClientsPerPanel.Observe(n)
+	}
 	defer func() { metrics.SyncUserDuration.ObserveSince(started) }()
 
 	// P is 1 for most users. Spawning a goroutine and a channel to run one
@@ -946,4 +954,27 @@ func inboundsCovered(inbounds []int, covered map[int]struct{}) bool {
 		}
 	}
 	return true
+}
+
+// clientsPerPanel buckets a user's clients by panel and returns one count per
+// panel they are present on.
+//
+// Extracted rather than inlined because what it separates is the whole point:
+// P (clients per user) cannot distinguish a user on four panels with one
+// client each from a user split four ways on one panel, and only the second is
+// PSP multiplying a connection cap the admin typed once. A helper can be
+// tested on that distinction directly; four lines inside the sync loop cannot.
+func clientsPerPanel(clients []*domain.PSPClient) []float64 {
+	if len(clients) == 0 {
+		return nil
+	}
+	perPanel := make(map[int64]int, len(clients))
+	for _, c := range clients {
+		perPanel[c.PanelID]++
+	}
+	out := make([]float64, 0, len(perPanel))
+	for _, n := range perPanel {
+		out = append(out, float64(n))
+	}
+	return out
 }

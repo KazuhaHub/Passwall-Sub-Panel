@@ -138,3 +138,39 @@ func assertResolvesToGroupPolicy(t *testing.T, u *domain.User, svc *Service) {
 		t.Fatalf("resolved to %d/%d/%d, want the group's 100GiB/3/5", u.TrafficLimitBytes, u.IPLimit, u.DeviceLimit)
 	}
 }
+
+// A negative quota is not a small quota — it is NO quota.
+//
+// trafficFloor, PanelQuotaCap and the traffic-exceeded check all test `> 0`,
+// so a stored -1 reads as "unlimited" in every one of them. The two connection
+// caps were guarded from the start; traffic was not, and the comment on
+// validateGroupLimits asserted the opposite. Both create and update are pinned
+// here because they validate independently.
+func TestNegativeTrafficLimitIsRejectedOnCreate(t *testing.T) {
+	repo := &memoryUserRepo{byID: map[int64]*domain.User{}}
+	svc := &Service{users: repo, groups: policyGroup()}
+
+	_, err := svc.CreateLocal(context.Background(), CreateLocalInput{
+		UPN: "neg@corp.com", GroupID: 7, TrafficLimitBytes: -(1 << 30),
+	})
+	if err == nil {
+		t.Fatal("a negative quota must be rejected; stored, it reads as unlimited everywhere")
+	}
+	if len(repo.byID) != 0 {
+		t.Fatalf("rejected input still created a user: %+v", repo.byID)
+	}
+}
+
+func TestNegativeTrafficLimitIsRejectedOnUpdate(t *testing.T) {
+	u := &domain.User{ID: 1, UPN: "u@corp.com", Enabled: true, GroupID: 7, Role: domain.RoleUser}
+	repo := &memoryUserRepo{byID: map[int64]*domain.User{1: u}}
+	svc := &Service{users: repo, groups: policyGroup(), ownership: emptyOwnershipRepo{}}
+
+	neg := int64(-1)
+	if err := svc.UpdateProfile(context.Background(), 1, UpdateInput{TrafficLimitBytes: &neg}); err == nil {
+		t.Fatal("a negative quota must be rejected on update too")
+	}
+	if got := repo.byID[1].Limits.TrafficLimitBytes; got != nil {
+		t.Fatalf("rejected update still wrote an override: %v", *got)
+	}
+}
