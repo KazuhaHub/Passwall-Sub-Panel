@@ -129,7 +129,20 @@ export function createAppTheme({ mode, sourceColor, language, density = 'comfort
             minHeight: compact ? 34 : 40,
             paddingLeft: compact ? 18 : 24,
             paddingRight: compact ? 18 : 24,
-            '&.MuiButton-contained.MuiButton-colorPrimary': {
+            // This selector carries THREE classes, so it outranks MUI's own
+            // two-class `.MuiButton-root.Mui-disabled` rule — it used to
+            // repaint every DISABLED contained button at full brand
+            // saturation, and a button that looks live but does nothing reads
+            // as the panel being broken. It outranks a view's plain `sx`
+            // bgcolor (one class) too, so no view could fix this locally.
+            //
+            // The rule below is what actually fixes that (mutation-verified;
+            // deleting it brings the bug back). This `:not()` is redundant
+            // today and buys exactly one thing: the fix stops depending on
+            // these two keys' relative order, since emotion resolves equal
+            // specificity by source position. Removing it changes nothing
+            // now — that is why the tests do not catch its removal.
+            '&.MuiButton-contained.MuiButton-colorPrimary:not(.Mui-disabled)': {
               backgroundColor: t.primary,
               color: t.onPrimary,
               '&:hover': {
@@ -137,6 +150,15 @@ export function createAppTheme({ mode, sourceColor, language, density = 'comfort
                 boxShadow:
                   '0 1px 2px rgba(0,0,0,.3),0 1px 3px 1px rgba(0,0,0,.15)',
               },
+            },
+            // Stated explicitly rather than left to MUI's default, so the
+            // disabled look is the same for every contained button whatever
+            // colour the view paints it — the emergency-access card uses the
+            // tertiary role, and a half-faded tertiary would read as a third
+            // state. MD3: container onSurface @ 12%, label onSurface @ 38%.
+            '&.MuiButton-contained.Mui-disabled': {
+              backgroundColor: alpha(t.onSurface, 0.12),
+              color: alpha(t.onSurface, 0.38),
             },
           },
           sizeSmall: { minHeight: compact ? 28 : 32, paddingLeft: 14, paddingRight: 14 },
