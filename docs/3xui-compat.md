@@ -65,7 +65,7 @@ delta 虽大但没碰 PSP 的面：PSP 调用的 inbound / client / server **con
 
    **所有权消灭了这个两难。** PSP 现在下发的是 `User.DeviceLimit` —— **自己的意图值，不是回显**，因此根本不存在读-改-写窗口，trim 做的正是设备上限该做的事。运维方改在 **PSP 的用户编辑界面**里设，和到期时间、流量上限一致。详见 [connection-limits.md](connection-limits.md)。
 
-   **一个执行侧前提（已实测）**：同批加入的并发 IP 上限（`limitIp`）走 core 的 online-stats API（不需要访问日志），但执行被**两道闸**门控 —— `resolveEnforce` 在 Linux 上「有上限但没装 fail2ban」时直接返回 `false`，`updateInboundClientIps` 随即早退，**不封禁也不断连**；`checkFail2BanInstalled` 还额外要求环境变量 `XUI_ENABLE_FAIL2BAN` 未设或等于字面量 `"true"`——**设成 `1` 反而会关掉执行**。装上之后实际做两件事：面板经 xray API `RemoveUser`+重加**掐断该客户端全部连接**（仅 vmess/vless/trojan/shadowsocks/hysteria），fail2ban 再按固定日志格式在防火墙层封那个 IP。**这两道闸现在由 PSP 主动探测**（3.7.0 的 `GET /server/fail2banStatus`，随 10 分钟版本探测顺带一次），结论落在 `xui_panels.ip_limit_enforcement` 上并显示在服务器列表和填写上限的表单里。详见 [connection-limits.md](connection-limits.md) §5.1、§5.2。
+   **一个执行侧前提（已实测）**：同批加入的并发 IP 上限（`limitIp`）走 core 的 online-stats API（不需要访问日志），但执行被**两道闸**门控 —— `resolveEnforce` 在 Linux 上「有上限但没装 fail2ban」时直接返回 `false`，`updateInboundClientIps` 随即早退，**不封禁也不断连**；`checkFail2BanInstalled` 还额外要求环境变量 `XUI_ENABLE_FAIL2BAN` 未设或等于字面量 `"true"`——**设成 `1` 反而会关掉执行**。装上之后实际做两件事：面板经 xray API `RemoveUser`+重加**掐断该客户端全部连接**（仅 vmess/vless/trojan/shadowsocks/hysteria），fail2ban 再按固定日志格式在防火墙层封那个 IP。**这两道闸现在由 PSP 主动探测**（3.7.0 的 `GET /server/fail2banStatus`，随版本探测顺带一次；该探测挂在流量轮询上，默认 5 分钟一轮），结论落在 `xui_panels.ip_limit_enforcement` 上并显示在服务器列表和填写上限的表单里。详见 [connection-limits.md](connection-limits.md) §5.1、§5.2。
 
    **只发在更新路径**：创建路径本来就落在同一组值上，在那里加键只会让 PSP 不分块发送的 `/clients/bulkCreate` 请求体白白变大（面板有 10 MiB 上限）。
 
@@ -233,6 +233,12 @@ delta 虽大但没碰 PSP 的面：PSP 调用的 inbound / client / server **con
 - **CSRF(3.2.x 新增)**: Bearer(API token)模式不受 CSRF 约束(实测 Bearer POST = HTTP 200)。
   **注意**: cookie(用户名/密码)模式下 3.2.x 对不安全方法要求 `X-CSRF-Token`——PSP 的 username/password 回退模式**未在 3.2.x 上验证**,
   生产请优先用 API token 模式(PSP 本就 token 优先)。
+
+  **3.7.0 上已实测为不可用(2026-09-04)**: 对着实机面板用 username/password 建 Client 并调用,
+  `POST /login` 直接回 **HTTP 403、空 body**(CSP 头带 `form-action 'self'`), PSP 侧表现为
+  `login: unexpected end of JSON input (raw: )` —— 登录发生在拿 CSRF token 之前, 所以回退模式在 3.7.0 上进不去。
+  换成 admin scope 的 API token 后同一套调用全部通过。
+  **结论: 3.7.0 面板必须用 API token**, 这一条已从「未验证」升级为「已知失效」。
 - **tgId / keepTraffic**: `tgId` 早已按 int64 发(v3.6.2 修);`/clients/del?keepTraffic=0` 与文档「不传 keepTraffic=1 即清流量」一致。
 
 **写路径已实测**: 在 3.2.6 实机上跑了 client add→get→update→del 与 bulkCreate/bulkDel 的一次性 smoke-test(临时 client,测完自清理),全部 `success:true`、删后 get 回 `(record not found)`。配合读路径(traffic poll 的 `/inbounds/list`),3.2.6 端到端验证通过。
@@ -329,7 +335,7 @@ PSP 启动时先读本地 cache(`<DataDir>/compat-cache.json`)装入上次成功
 之后**不主动周期性拉 GitHub**。compat JSON(`docs/compat/v3.json`)只在**探测到某面板版本
 对不上当前缓存范围**时才拉(reactive,v3.7.0):
 
-- 版本探测(boot / 每 10 分钟 tick / Servers 页 Test)算出 `CheckXUI(panelVersion) != Supported`
+- 版本探测(boot / 每次流量轮询 tick,默认 5 分钟 / Servers 页 Test)算出 `CheckXUI(panelVersion) != Supported`
   时才 `RefreshRemoteCompat`(60s 节流——同一 tick 多台对不上合并成一次)再重判;
 - upgrade-panel 闸门**强制**拉一次(force,跳节流),保证"是否支持"判定不吃旧缓存。
 

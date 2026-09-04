@@ -112,7 +112,7 @@ export interface TestResult {
   update_available?: boolean
   /**
    * Refreshed on the same click, so an admin who just installed fail2ban does
-   * not wait out the 10-minute probe tick. Absent when the probe itself failed,
+   * not wait out the next traffic-poll probe. Absent when the probe itself failed,
    * in which case the stored state is left alone rather than reset — a blip
    * must not turn "enforced" into "unknown".
    */

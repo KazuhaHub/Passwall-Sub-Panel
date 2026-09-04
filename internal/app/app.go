@@ -739,7 +739,8 @@ func (a *App) probePanelVersionsOnce(ctx context.Context) {
 			log.Warn("compat probe: write version", "panel_id", p.ID, "err", uerr)
 		}
 		// Rides the same tick and the same authenticated client. One extra GET
-		// against a panel we are already talking to, every 10 minutes.
+		// against a panel we are already talking to, once per traffic poll
+		// (cron_traffic_pull_minutes, default 5).
 		a.probeIPLimitEnforcement(ctx, p, c, now)
 	}
 }

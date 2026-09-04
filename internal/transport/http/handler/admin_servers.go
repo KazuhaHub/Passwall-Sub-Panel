@@ -397,7 +397,7 @@ func (h *AdminServersHandler) Test(c *gin.Context) {
 			resp["update_available"] = version.IsXUIUpdateAvailable(status.PanelVersion)
 		}
 		// Same click, same reason: an admin who just installed fail2ban on the
-		// node should not have to wait out the 10-minute probe tick to see the
+		// node should not have to wait out the next traffic-poll probe to see the
 		// IP cap go from "stored and ignored" to "enforced".
 		if isXUI {
 			if state, ok := h.refreshIPLimitEnforcement(c.Request.Context(), req.ID, client, now); ok {

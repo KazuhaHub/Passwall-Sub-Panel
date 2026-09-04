@@ -22,9 +22,15 @@ services:
     restart: unless-stopped
     pull_policy: always
 
-    # Host networking so PSP can reach a co-located 3X-UI at 127.0.0.1:<port>
-    # without extra_hosts gymnastics. The listen port is whatever you set in
-    # config.yaml (`listen: ":8788"` by default).
+    # Host networking avoids extra_hosts gymnastics and port mapping; the
+    # listen port is whatever you set in config.yaml (`listen: ":8788"` by
+    # default).
+    #
+    # It does NOT let you point PSP at a co-located panel via 127.0.0.1: the
+    # upstream-panel HTTP client refuses loopback on purpose (the panel URL is
+    # admin-supplied and stored, which is the main reason that guard exists).
+    # Use the host's LAN or public IP for the panel address instead — RFC1918
+    # ranges are deliberately allowed. See "上游面板地址" in the README.
     network_mode: host
 
     volumes:
