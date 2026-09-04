@@ -418,11 +418,21 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 
 	// --- transport layer ---
 	httpHandler := httptransport.NewRouter(httptransport.Deps{
-		Async:            dispatcher,
-		Cfg:              cfg,
-		Repos:            repos,
-		GeoRecords:       geoStreaks,
-		Pool:             pool,
+		Async:      dispatcher,
+		Cfg:        cfg,
+		Repos:      repos,
+		GeoRecords: geoStreaks,
+		Pool:       pool,
+		// Node enrollment probes a candidate panel that is not in the pool yet.
+		// Built here because this is where adapter choice already lives; the
+		// transport layer stays free of a concrete adapter import.
+		EnrollProbe: func(ctx context.Context, p *domain.XUIPanel) (*ports.ServerStatus, error) {
+			cli, err := xuiadapter.New(p)
+			if err != nil {
+				return nil, err
+			}
+			return cli.GetServerStatus(ctx)
+		},
 		Auth:             authSvc,
 		SAML:             samlSvc,
 		OIDC:             oidcSvc,
