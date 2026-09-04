@@ -86,6 +86,20 @@ func BlockNonPublicDial(_, address string, _ syscall.RawConn) error {
 	return nil
 }
 
+// AllowsIP reports whether this policy would let a dial to ip proceed.
+//
+// For callers that need to know BEFORE dialing — node enrollment filters the
+// addresses a node offers, so an unusable one is reported as "that address is
+// not reachable from here" instead of surfacing later as a dial error that
+// reads like a bug. It delegates to BlockNonPublicDial rather than restating
+// the rules, so the pre-check and the dial can never disagree.
+func AllowsIP(ip net.IP) bool {
+	if ip == nil {
+		return false
+	}
+	return BlockNonPublicDial("", net.JoinHostPort(ip.String(), "0"), nil) == nil
+}
+
 // NewClient returns an *http.Client whose dialer enforces
 // BlockNonPublicDial. `timeout` caps the full request lifetime
 // (Connect + TLS + read + write); the internal dial+keepalive

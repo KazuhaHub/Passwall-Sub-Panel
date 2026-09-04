@@ -84,6 +84,18 @@ type Deps struct {
 	Geo        *geo.Service
 	Async      AsyncDispatcher
 
+	// EnrollProbe asks a candidate panel who it is, for a panel spec that is
+	// NOT yet in the pool. Node enrollment needs it: nothing may be stored
+	// until one of the node's addresses has actually answered, and a panel row
+	// that cannot be reached is worse than none — it looks configured, so the
+	// operator debugs the panel instead of the topology.
+	//
+	// Injected by the composition root rather than built here, so transport
+	// keeps no dependency on a concrete adapter. Nil disables enrollment: the
+	// endpoints answer 503, which is honest about "this build cannot do it"
+	// rather than failing later in a way that looks like the node's fault.
+	EnrollProbe func(ctx context.Context, p *domain.XUIPanel) (*ports.ServerStatus, error)
+
 	// Rate-limit caps resolved from the DB settings table at startup. The
 	// middleware uses fixed buckets so admin edits require a restart for
 	// these to refresh. JWT TTLs are NOT here — the issuer reads them
@@ -169,6 +181,11 @@ func NewRouter(d Deps) stdhttp.Handler {
 	// is satisfied structurally, so a ports declaration would add a name
 	// without adding a guarantee.
 	geoAnomalyH := handler.NewAdminGeoAnomalyHandler(d.GeoRecords, d.Repos.User)
+	// Node self-enrollment handler. Constructed here rather than inside the
+	// admin block because one of its three routes is admin-only and two are
+	// public, and they must share the same token store.
+	enrollPublic := handler.NewNodeEnrollHandler(d.Repos.AuthToken, d.Repos.XUIPanel, d.Pool, d.EnrollProbe)
+
 	subHandler := handler.NewSubHandler(d.User, d.Render, d.Repos.SubLog, d.Repos.ScopedSettings, d.Repos.User, d.Mail, d.Async)
 	subLimiter := middleware.NewPerIPLimiter(d.SubPerIPPerMin, time.Minute)
 	subLimiter.SetLimitFunc(newSettingsIntCache(d.Repos.Settings, d.SubPerIPPerMin, func(s ports.UISettings) int { return s.SubPerIPPerMin }).get)
@@ -543,6 +560,10 @@ func NewRouter(d Deps) stdhttp.Handler {
 		adminGroup.POST("/servers/:id/upgrade-panel", servers.UpgradePanel)
 		adminGroup.POST("/servers/:id/upgrade-xray", servers.UpgradeXray)
 		adminGroup.GET("/servers/:id/xray-versions", servers.ListXrayVersions)
+
+		// Node self-enrollment: the admin mints a one-time command here, the
+		// node runs it and calls the public routes near the end of this file.
+		adminGroup.POST("/servers/enroll-token", enrollPublic.Mint)
 		adminGroup.GET("/servers/:id/web-cert", servers.WebCert)
 
 		panelPathSSO := handler.NewPanelPathSSOMigrator(d.Repos.SAMLConfig, d.Repos.OIDCConfig, d.SAML, d.OIDC)
@@ -594,6 +615,18 @@ func NewRouter(d Deps) stdhttp.Handler {
 		adminGroup.DELETE("/email-logs", emailLogs.Clear)
 		adminGroup.POST("/email-logs/purge", emailLogs.Purge)
 	}
+
+	// Node enrollment, unauthenticated by design.
+	//
+	// GET /enroll/:token serves the installer. It is NOT gated on the token
+	// being live: the script does nothing without a valid token (the callback
+	// enforces that), and checking here would make this route an oracle
+	// answering "is this token still good" to anyone who asks.
+	//
+	// POST /api/enroll/:token is the callback. The one-time token IS the
+	// authentication, and it is consumed on presentation.
+	g.GET("/enroll/:token", enrollPublic.Script)
+	g.POST("/api/enroll/:token", enrollPublic.Callback)
 
 	// Static SPA bundle (embedded). Must be registered last so /api and
 	// subscription path keep precedence.
