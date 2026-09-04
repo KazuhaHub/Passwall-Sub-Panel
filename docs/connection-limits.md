@@ -149,7 +149,7 @@ if hasLimit && runtime.GOOS != "windows" && !f2bInstalled {
 
 上面那两道闸是**节点上的事实**——一个二进制文件和一个环境变量——PSP 已有的任何一次读取都看不见它们。写入成功、读回一致、界面显示正常，然后什么也没封。所以只能主动去问。
 
-3X-UI 3.7.0 起提供 `GET /server/fail2banStatus`，返回 `enabled / installed / usable / windows` 四个布尔量。PSP 在**已有的 10 分钟版本探测那一跳里顺带发一次 GET**（同一个面板、同一个已登录的会话），把结论落在 `xui_panels.ip_limit_enforcement` 上。管理员点「测试连接」也会立刻重探一次，不用等下一个周期。
+3X-UI 3.7.0 起提供 `GET /server/fail2banStatus`，返回 `enabled / installed / usable / windows` 四个布尔量。PSP 在**已有的版本探测那一跳里顺带发一次 GET**（同一个面板、同一个已登录的会话）。该探测挂在**流量轮询**上，周期即 `cron_traffic_pull_minutes`（默认 **5 分钟**，管理员可调），而不是一个独立的定时器，把结论落在 `xui_panels.ip_limit_enforcement` 上。管理员点「测试连接」也会立刻重探一次，不用等下一个周期。
 
 **六种状态，判定顺序是刻意的：**
 

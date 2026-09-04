@@ -218,7 +218,7 @@ export default function ServersView() {
         // full list reload.
         // The IP-cap probe rides the same click, so an admin who just
         // installed fail2ban sees the badge clear here rather than after the
-        // next 10-minute tick. Absent means the probe produced nothing usable
+        // next traffic-poll tick. Absent means the probe produced nothing usable
         // and the stored state was deliberately left alone — keep the old
         // value rather than blanking the badge on a blip.
         if (r.panel_version !== undefined || r.compat_status || r.ip_limit_enforcement) {

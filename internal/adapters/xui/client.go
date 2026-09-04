@@ -103,7 +103,7 @@ func (c *Client) Capabilities() []ports.PanelCapability {
 	// counted it.
 	//
 	// The version is a stored, re-probed fact (servers.panel_version, refreshed
-	// every 10 minutes and preserved across probe failures), so this is not a
+	// once per traffic poll and preserved across probe failures), so this is not a
 	// guess. Unknown answers false — see version.XUIAtLeast for why that
 	// direction is the safe one.
 	//

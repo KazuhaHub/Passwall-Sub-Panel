@@ -283,6 +283,8 @@ docker compose restart psp       # 改完重启生效
 
 ### 3X-UI 联通
 
+> 完整的一步步接入流程（装面板 → 建 token → 加服务器 → 建节点 → 拿订阅，含每一步的失败对照表）见 **[docs/node-onboarding.md](docs/node-onboarding.md)**。
+
 宿主机上跑着 3X-UI → 登录 PSP 后，「服务器」页面 URL 填 **宿主机的内网或公网 IP**，例如 `http://192.168.1.10:2053`。
 
 **不要填 `http://127.0.0.1:2053`**，即使 3X-UI 就在同一台机器上。PSP 连上游面板的 HTTP 客户端会拒绝 loopback（见上文「上游面板地址」），「测试连接」会报：
