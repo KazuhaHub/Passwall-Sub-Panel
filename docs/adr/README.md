@@ -9,6 +9,7 @@
 | 编号 | 标题 | 状态 |
 |---|---|---|
 | [0023](0023-saml-assertion-replay-protection.md) | SAML 断言重放防护必须持久化 | 已接受（v3.9.2） |
+| [0024](0024-psp-native-node-backend.md) | 自研节点后端作为一个 PanelKind，而不是一套新架构 | 草案 |
 
 > 编号从 0023 起始：更早的设计决策分散记录在 [ARCHITECTURE.md](../ARCHITECTURE.md)、各专题文档（如 [3xui-compat.md](../3xui-compat.md)、[panel-adapters.md](../panel-adapters.md)）以及提交历史中，尚未回溯整理为 ADR。新增决策请沿用此处的递增编号。
 
