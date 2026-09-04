@@ -220,12 +220,33 @@ docker compose logs -f psp
 
 | 项 | 默认 | 原因 |
 |---|---|---|
-| 网络模式 | `network_mode: host` | 让 PSP 容器以 `127.0.0.1:<port>` 直访同宿主机的 3X-UI，无需 `extra_hosts` |
+| 网络模式 | `network_mode: host` | 免去 `extra_hosts` 与端口映射，容器直接用宿主机网络栈。**注意：同机的 3X-UI 不能填 `127.0.0.1`** —— 见下方「上游面板地址」 |
 | 镜像 | `ghcr.io/kazuhahub/passwall-sub-panel:latest`，`pull_policy: always` | `:latest` = 最新**稳定版**，每次 `up -d` 自动重拉；想跟测试版（beta）见下「镜像渠道」 |
 | 配置 | **bind mount `./config:/app/config`** | 宿主机直接 `nano` 编辑，所见即所得；首启 entrypoint 从镜像内 `/app/defaults/` 把模板/规则集种到空目录里 |
 | 数据 | 命名 volume `psp-data` | SQLite 数据库 + 运行时数据，不需要宿主机直接访问 |
 
 所有运维设置（含 secrets、MySQL DSN）都改 `./config/config.yaml`——**不用** `.env`、**不用** 一堆 `PSP_*` 环境变量。
+
+### 上游面板地址：不能用 `127.0.0.1`
+
+PSP 连接上游 3X-UI / S-UI 面板时，走的是一个**拒绝 loopback 的 HTTP 客户端**（`internal/pkg/safehttp`）。面板地址是管理员填进数据库的、可以指向任何地方的字符串，这道拨号守卫存在的首要理由就是它——顺带挡掉云厂商的 `169.254.169.254` 元数据端点。
+
+所以即使 3X-UI 和 PSP 在**同一台机器**上，面板地址也**不能**填 `http://127.0.0.1:2053`。填了会在「测试连接」时报：
+
+```
+dial tcp 127.0.0.1:2053: refusing connection to non-public address 127.0.0.1
+```
+
+**填宿主机的局域网或公网 IP。** RFC1918 私网段（`10/8`、`172.16/12`、`192.168/16`）是**刻意放行**的 —— 内网自建面板是正常部署形态，网络可达性本身就是一层凭据。
+
+| 面板地址 | 能否连上 |
+|---|---|
+| `http://127.0.0.1:2053` | ❌ 被拒（loopback） |
+| `http://10.0.0.5:2053` / `http://192.168.1.10:2053` | ✅ |
+| `https://panel.example.com:2053` | ✅ |
+| `http://169.254.169.254/...` | ❌ 被拒（link-local，云元数据） |
+
+同机部署时，把 3X-UI 监听在宿主机的内网/公网 IP 上，PSP 填那个 IP 即可。
 
 ### 镜像渠道（稳定版 / 测试版）
 
