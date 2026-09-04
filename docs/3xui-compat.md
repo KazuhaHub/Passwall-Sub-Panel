@@ -233,6 +233,12 @@ delta 虽大但没碰 PSP 的面：PSP 调用的 inbound / client / server **con
 - **CSRF(3.2.x 新增)**: Bearer(API token)模式不受 CSRF 约束(实测 Bearer POST = HTTP 200)。
   **注意**: cookie(用户名/密码)模式下 3.2.x 对不安全方法要求 `X-CSRF-Token`——PSP 的 username/password 回退模式**未在 3.2.x 上验证**,
   生产请优先用 API token 模式(PSP 本就 token 优先)。
+
+  **3.7.0 上已实测为不可用(2026-09-04)**: 对着实机面板用 username/password 建 Client 并调用,
+  `POST /login` 直接回 **HTTP 403、空 body**(CSP 头带 `form-action 'self'`), PSP 侧表现为
+  `login: unexpected end of JSON input (raw: )` —— 登录发生在拿 CSRF token 之前, 所以回退模式在 3.7.0 上进不去。
+  换成 admin scope 的 API token 后同一套调用全部通过。
+  **结论: 3.7.0 面板必须用 API token**, 这一条已从「未验证」升级为「已知失效」。
 - **tgId / keepTraffic**: `tgId` 早已按 int64 发(v3.6.2 修);`/clients/del?keepTraffic=0` 与文档「不传 keepTraffic=1 即清流量」一致。
 
 **写路径已实测**: 在 3.2.6 实机上跑了 client add→get→update→del 与 bulkCreate/bulkDel 的一次性 smoke-test(临时 client,测完自清理),全部 `success:true`、删后 get 回 `(record not found)`。配合读路径(traffic poll 的 `/inbounds/list`),3.2.6 端到端验证通过。
