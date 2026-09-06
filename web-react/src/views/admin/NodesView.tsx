@@ -2344,20 +2344,18 @@ export default function NodesView() {
         // global mode keeps the backend payload clean.
         node_ids: separatorForm.mode === 'node_bound' ? separatorForm.node_ids : [],
       }
-      const saved = separatorEditingId !== null
-        ? await updateSeparator(separatorEditingId, payload)
-        : await createSeparator(payload)
       if (separatorEditingId !== null) {
+        const saved = await updateSeparator(separatorEditingId, payload)
         setSeparators(prev => prev.map(item => item.id === saved.id ? saved : item))
         pushSnack(t('admin:nodes.toast.separator_updated', { defaultValue: '分隔标题已更新' }), 'success')
       } else {
-        setSeparators(prev => [...prev, saved])
+        await createSeparator(payload)
         pushSnack(t('admin:nodes.toast.separator_created', { defaultValue: '分隔标题已创建' }), 'success')
       }
       setSeparatorOpen(false)
       setSeparatorEditingId(null)
       setSeparatorForm(EMPTY_SEPARATOR_FORM)
-      void load().catch(() => {})
+      if (separatorEditingId === null) void load().catch(() => {})
     } catch { /* axios interceptor toasted */ } finally { setSeparatorBusy(false) }
   }
 
@@ -2550,7 +2548,6 @@ export default function NodesView() {
       setManaged(prev => prev.map(node => node.id === saved.id ? saved : node))
       pushSnack(t('admin:nodes.toast.saved'), 'success')
       setEditOpen(false)
-      void load().catch(() => {})
     } finally { setEditBusy(false) }
   }
 

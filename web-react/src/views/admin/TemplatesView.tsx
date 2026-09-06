@@ -195,18 +195,13 @@ export default function TemplatesView() {
     }
     setBusy(true)
     try {
-      const saved: Template = {
-        ...form,
-        rule_sets: [...(form.rule_sets || [])],
-        proxy_group_order: [...(form.proxy_group_order || [])],
-      }
-      await saveTemplate(saved)
+      await saveTemplate(form)
       if (editing) {
-        setItems(prev => prev.map(item => item.slug === saved.slug ? saved : item))
+        setItems(prev => prev.map(item => item.slug === form.slug ? form : item))
       }
       pushSnack(t('admin:templates.toast.saved'), 'success')
       setDialogOpen(false)
-      void load().catch(() => {})
+      if (!editing) void load().catch(() => {})
     } finally { setBusy(false) }
   }
 

@@ -516,7 +516,7 @@ export default function ServersView() {
         pushSnack(t('admin:servers.toast.created'), 'success')
       }
       setDialogOpen(false)
-      refresh()
+      if (!editing) refresh()
     } finally {
       setBusy(false)
     }

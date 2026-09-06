@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
-import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
+import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
-import { api, deferred, editRow, installReads, mount } from '@/test/adminSaveHarness'
+import { api, editRow, installReads, mount } from '@/test/adminSaveHarness'
 import CertificatesView from './CertificatesView'
 
 const cert = { id: 1, name: 'old-name', domains: ['example.test'], acme_account_id: 1, dns_credential_id: 1, auto_renew: true, status: 'active' }
@@ -14,12 +14,12 @@ const reads = {
 }
 
 for (const testCase of [
-  { name: 'certificate', tab: 0, url: '/admin/certs/1', listUrl: '/admin/certs', dataKey: 'cert', row: cert },
-  { name: 'DNS credential', tab: 1, url: '/admin/dns-credentials/1', listUrl: '/admin/dns-credentials', dataKey: 'credential', row: credential },
-  { name: 'ACME account', tab: 2, url: '/admin/acme-accounts/1', listUrl: '/admin/acme-accounts', dataKey: 'account', row: account },
+  { name: 'certificate', tab: 0, url: '/admin/certs/1', dataKey: 'cert', row: cert },
+  { name: 'DNS credential', tab: 1, url: '/admin/dns-credentials/1', dataKey: 'credential', row: credential },
+  { name: 'ACME account', tab: 2, url: '/admin/acme-accounts/1', dataKey: 'account', row: account },
 ] as const) {
   describe(testCase.name, () => {
-    it('reopens with the saved value while the background refresh is pending', async () => {
+    it('reopens with the update response without reloading the stale list', async () => {
       installReads(reads)
       mount(<CertificatesView />)
       if (testCase.tab) fireEvent.click((await screen.findAllByRole('tab'))[testCase.tab])
@@ -31,18 +31,11 @@ for (const testCase of [
         return { data: { [testCase.dataKey]: saved } }
       })
 
-      const pending = deferred<{ data: unknown }>()
-      const normalGet = api.get.getMockImplementation()!
-      api.get.mockImplementation((url: string, ...args: unknown[]) =>
-        url === testCase.listUrl ? pending.promise : normalGet(url, ...args),
-      )
       fireEvent.click(within(dialog).getByRole('button', { name: 'common:actions.save' }))
 
       await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
       const reopened = await editRow('new-name')
       expect(within(reopened).getByDisplayValue('new-name')).toBeTruthy()
-
-      await act(async () => pending.resolve({ data: { [testCase.dataKey === 'cert' ? 'certs' : `${testCase.dataKey}s`]: [saved] } }))
     })
   })
 }

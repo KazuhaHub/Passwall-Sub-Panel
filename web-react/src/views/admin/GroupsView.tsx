@@ -395,7 +395,7 @@ export default function GroupsView() {
         pushSnack(t('admin:groups.toast.created'), 'success')
       }
       setDialogOpen(false)
-      void load().catch(() => {})
+      if (!editing) void load().catch(() => {})
     } finally {
       setBusy(false)
     }

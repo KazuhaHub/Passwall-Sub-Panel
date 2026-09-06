@@ -24,13 +24,6 @@ vi.mock('@/components/CodeEditor', () => ({
     <textarea aria-label="code" value={value} onChange={e => onChange(e.target.value)} />,
 }))
 
-export function deferred<T>() {
-  let resolve!: (value: T) => void
-  let reject!: (error: Error) => void
-  const promise = new Promise<T>((ok, fail) => { resolve = ok; reject = fail })
-  return { promise, resolve, reject }
-}
-
 export const list = (items: unknown[]) => ({ items, total: items.length, page: 1, page_size: 25 })
 export const group = { id: 1, slug: 'test', name: 'group', tag_filter: { all: true, tags: [], mode: 'all' }, members: 0, remark: '', require_2fa: false }
 export const server = { id: 1, name: 'server', url: 'https://panel.example.test', panel_type: '3xui', auth_method: 'token', has_api_token: true, capabilities: ['inbound.read', 'inbound.update', 'inbound.create', 'inbound.enable'], enabled: true }

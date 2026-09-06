@@ -240,7 +240,7 @@ export default function CertificatesView() {
         pushSnack(t('admin:certs.create_queued'), 'success')
       }
       setCertOpen(false)
-      void reload()
+      if (!certEditing) void reload()
     } catch {
       /* toast */
     } finally {
@@ -293,7 +293,7 @@ export default function CertificatesView() {
       }
       pushSnack(t('common:saved', { defaultValue: '已保存' }), 'success')
       setAcctOpen(false)
-      void reload()
+      if (!acctEditing) void reload()
     } catch {
       /* toast */
     } finally {
@@ -507,7 +507,7 @@ export default function CertificatesView() {
       }
       pushSnack(t('common:saved'), 'success')
       setCredOpen(false)
-      void reload()
+      if (!credEditing) void reload()
     } catch {
       /* toast */
     } finally {

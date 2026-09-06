@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
-import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
+import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { expect, it } from 'vitest'
-import { api, deferred, editRow, installReads, list, mount, node } from '@/test/adminSaveHarness'
+import { api, editRow, installReads, list, mount, node } from '@/test/adminSaveHarness'
 import NodesView from './NodesView'
 
 const inbound = { id: 1, protocol: 'vless', remark: 'old-name', enable: true, port: 443, listen: '', settings: '{"decryption":"none"}', stream_settings: '{"network":"tcp","security":"tls","tlsSettings":{"serverName":"example.test"}}', sniffing: '{}', allocate: '' }
@@ -19,7 +19,7 @@ it('uses the fresh detail node when opening the inbound editor', async () => {
   expect(within(dialog).getByDisplayValue('xtls-rprx-vision')).toBeTruthy()
 })
 
-it('reopens node metadata from the saved local row while refresh is pending', async () => {
+it('reopens node metadata from the update response without reloading the stale list', async () => {
   const saved = { ...node, display_name: 'new-name' }
   installReads({ '/admin/nodes': list([node]) })
   api.put.mockResolvedValueOnce({ data: saved })
@@ -27,16 +27,9 @@ it('reopens node metadata from the saved local row while refresh is pending', as
   const dialog = await editRow()
   fireEvent.change(within(dialog).getByDisplayValue('old-name'), { target: { value: 'new-name' } })
 
-  const pending = deferred<{ data: unknown }>()
-  const normalGet = api.get.getMockImplementation()!
-  api.get.mockImplementation((url: string, ...args: unknown[]) =>
-    url === '/admin/nodes' ? pending.promise : normalGet(url, ...args),
-  )
   fireEvent.click(within(dialog).getByRole('button', { name: 'common:actions.ok' }))
 
   await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
   const reopened = await editRow('new-name')
   expect(within(reopened).getByDisplayValue('new-name')).toBeTruthy()
-
-  await act(async () => pending.resolve({ data: list([saved]) }))
 })
