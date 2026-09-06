@@ -2344,17 +2344,20 @@ export default function NodesView() {
         // global mode keeps the backend payload clean.
         node_ids: separatorForm.mode === 'node_bound' ? separatorForm.node_ids : [],
       }
+      const saved = separatorEditingId !== null
+        ? await updateSeparator(separatorEditingId, payload)
+        : await createSeparator(payload)
       if (separatorEditingId !== null) {
-        await updateSeparator(separatorEditingId, payload)
+        setSeparators(prev => prev.map(item => item.id === saved.id ? saved : item))
         pushSnack(t('admin:nodes.toast.separator_updated', { defaultValue: '分隔标题已更新' }), 'success')
       } else {
-        await createSeparator(payload)
+        setSeparators(prev => [...prev, saved])
         pushSnack(t('admin:nodes.toast.separator_created', { defaultValue: '分隔标题已创建' }), 'success')
       }
       setSeparatorOpen(false)
       setSeparatorEditingId(null)
       setSeparatorForm(EMPTY_SEPARATOR_FORM)
-      await load()
+      void load().catch(() => {})
     } catch { /* axios interceptor toasted */ } finally { setSeparatorBusy(false) }
   }
 
@@ -2527,7 +2530,7 @@ export default function NodesView() {
     if (firstKey) { pushSnack(t(`admin:${firstKey}`), 'warning'); return }
     setEditBusy(true)
     try {
-      await updateNodeMetadata(editing.id, {
+      const saved = await updateNodeMetadata(editing.id, {
         display_name: editForm.display_name,
         server_address: editForm.server_address,
         flow: editForm.flow || undefined,
@@ -2544,9 +2547,10 @@ export default function NodesView() {
         hide_direct: editForm.hide_direct,
         show_relay_status: editForm.hide_direct || editForm.show_relay_status,
       })
+      setManaged(prev => prev.map(node => node.id === saved.id ? saved : node))
       pushSnack(t('admin:nodes.toast.saved'), 'success')
       setEditOpen(false)
-      await load()
+      void load().catch(() => {})
     } finally { setEditBusy(false) }
   }
 
@@ -2945,7 +2949,8 @@ export default function NodesView() {
         setEditInboundUnsupported(true)
         return
       }
-      setEditInboundForm(parseInboundForEdit(n, ib as InboundDetail))
+      setEditingInboundNode(detail.node)
+      setEditInboundForm(parseInboundForEdit(detail.node, ib as InboundDetail))
     } catch (err) {
       const msg = (err as { message?: string }).message ?? 'unknown'
       pushSnack(t('admin:nodes.edit_inbound_dialog.load_failed', { error: msg }), 'error')
@@ -3042,7 +3047,7 @@ export default function NodesView() {
       } catch { /* toast via interceptor */ }
       pushSnack(t('admin:nodes.edit_inbound_dialog.saved'), 'success')
       setEditInboundOpen(false)
-      await load()
+      void load().catch(() => {})
     } finally { setEditInboundBusy(false) }
   }
 

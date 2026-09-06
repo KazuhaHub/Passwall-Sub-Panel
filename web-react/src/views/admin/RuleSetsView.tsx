@@ -186,10 +186,19 @@ export default function RuleSetsView() {
     }
     setBusy(true)
     try {
-      await saveRuleSet(form)
+      const saved: RuleSet = {
+        ...form,
+        proxy_group_order: [...(form.proxy_group_order || [])],
+        proxy_group_members: cloneProxyGroupMembers(form.proxy_group_members),
+        proxy_group_options: cloneProxyGroupOptions(form.proxy_group_options),
+      }
+      await saveRuleSet(saved)
+      if (editing) {
+        setItems(prev => prev.map(item => item.slug === saved.slug ? saved : item))
+      }
       pushSnack(t('admin:rules.toast.saved'), 'success')
       setDialogOpen(false)
-      await load()
+      void load().catch(() => {})
     } finally { setBusy(false) }
   }
 
