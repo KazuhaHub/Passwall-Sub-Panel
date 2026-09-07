@@ -33,13 +33,43 @@ import "time"
 // within one traffic tick. Special-casing the sentinel to cut an idle user too
 // would couple this to another package's encoding to buy a few seconds.
 //
-// panelLifetime is the last raw cumulative counter PSP read from the panel
-// (LastRawTotalBytes). It can be stale by up to one poll interval, and it goes
-// backwards when the panel-side counter is reset (an xray restart, an admin
-// pressing reset). Both make the resulting cap slightly generous until the
-// next poll refreshes it — bounded, self-correcting, and erring toward letting
-// a user through rather than cutting them off, which is the right side to miss
-// on for a safety net whose whole job is to bound abuse during a PSP outage.
+// The cap is deliberately generous, and there are THREE reasons it can exceed
+// the true remaining quota. The first two are transient and self-correcting;
+// the third is structural and is not.
+//
+//  1. STALENESS. panelLifetime is the last raw cumulative counter PSP read from
+//     the panel (LastRawTotalBytes), so it lags by up to one poll interval.
+//     Corrected by the next poll.
+//
+//  2. COUNTER RESET. It goes backwards when the panel-side counter is reset (an
+//     xray restart, an admin pressing reset), leaving the stored value above the
+//     live one. Also corrected by the next poll.
+//
+//  3. FAN-OUT ACROSS PANELS — the largest term, and the only permanent one.
+//     headroom is the user's GLOBAL remaining bytes, and SyncUserLifecycle
+//     sends that same figure to EVERY panel the user holds a client on, each
+//     rebased onto that panel's own counter. So a user spread across P panels
+//     is permitted `headroom` more bytes on EACH of them: P x headroom in total,
+//     not headroom.
+//
+//     This cannot be fixed here, and probably not at all. The predicate under
+//     enforcement is `Σ_panels usage >= limit`: PSP owns the limit, and each
+//     panel owns exactly one addend and cannot see the others. No single value
+//     pushed to one panel makes that panel enforce a sum it has no access to.
+//     Splitting headroom P ways would bound the total but cut off a user who
+//     spends it all on one panel — failing on the side this net exists not to
+//     fail on.
+//
+//     It costs nothing in normal operation: PSP's own enforcement (traffic poll
+//     -> SetServiceSuspendedAndSync) works off the SUMMED usage and is exact.
+//     The amplification applies only while PSP cannot poll, which is precisely
+//     the window this cap covers. Stated here because an error budget that
+//     enumerates its two smallest terms and omits its largest reads as tighter
+//     than it is.
+//
+// All three err toward letting a user through rather than cutting them off,
+// which is the right side to miss on for a safety net whose whole job is to
+// bound abuse during a PSP outage.
 func PanelQuotaCap(headroom, panelLifetime int64) int64 {
 	if headroom <= 0 {
 		return 0

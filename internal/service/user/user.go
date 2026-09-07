@@ -187,9 +187,15 @@ func (s *Service) SetSharedMigrator(m SharedMigrator) { s.migrator = m }
 // it to the user's real state — so a caller that is about to delete the legacy
 // per-node fallback (ResyncMembership) MUST NOT proceed if this failed, or a
 // disabled/expired/over-quota user would be left with a fully-enabled shared
-// client and no fallback (the audit-#1 bypass). Callers that aren't deleting a
-// fallback (per-poll refresh, the reconcile heal) may ignore the returned error;
-// it is logged here either way.
+// client and no fallback (the audit-#1 bypass).
+//
+// NO caller may drop this error. It used to read "callers that aren't deleting a
+// fallback may ignore it, it is logged either way", and pushClientConfigToAll took
+// that literally — which was correct only while every user still had legacy
+// ownership rows to fall back on. Post-migration this push is the ONLY write those
+// callers make, so a dropped error becomes a nil return for a push that never
+// landed, and every retry-task enqueue gated on that nil goes unreachable. A log
+// line is not a retry.
 //
 // Push the quota floor (limit - period_used) too, parity with the per-node path:
 // it is the Xray-side safety net that cuts the client off even while PSP is
@@ -2484,14 +2490,26 @@ func (s *Service) pushClientConfigToAll(ctx context.Context, u *domain.User) err
 	// keeps the Xray-side totalGB safety net (cut the user off while PSP is offline)
 	// current as the floor (limit - period_used) shrinks. Runs BEFORE the early
 	// return below, so a fully-migrated user (zero ownership rows) still gets it.
-	s.syncSharedLifecycle(ctx, u)
+	//
+	// Its error is KEPT. Once the legacy ownership table is dropped this is the
+	// only write this function performs, so discarding it made the function return
+	// nil for a push that never reached 3X-UI — and all six callers read that nil
+	// as "delivered" and skip their SyncTaskUserPushConfig enqueue. That includes
+	// SetEnabledAndSync, which admin disable and quota/expiry auto-disable funnel
+	// through: a disabled user stayed live on the panel with nothing queued to
+	// retry and PushConfigErrorTotal still reading zero.
+	//
+	// Per-node errors keep precedence in the return: a shared failure is also
+	// logged at its own site, a per-node one is only reported here. Either way the
+	// caller enqueues the same task, which re-runs this whole function.
+	sharedErr := s.syncSharedLifecycle(ctx, u)
 
 	entries, err := s.ownership.ListByUser(ctx, u.ID)
 	if err != nil {
 		return err
 	}
 	if len(entries) == 0 {
-		return nil
+		return sharedErr
 	}
 	floor := s.trafficFloor(ctx, u)
 	// Single now-snapshot for the whole fan-out; see the note in the rotate
@@ -2657,6 +2675,9 @@ func (s *Service) pushClientConfigToAll(ctx context.Context, u *domain.User) err
 		if o.err != nil && firstErr == nil {
 			firstErr = fmt.Errorf("push config %d/%d/%s: %w", o.entry.PanelID, o.entry.InboundID, o.entry.ClientEmail, o.err)
 		}
+	}
+	if firstErr == nil {
+		firstErr = sharedErr
 	}
 	return firstErr
 }

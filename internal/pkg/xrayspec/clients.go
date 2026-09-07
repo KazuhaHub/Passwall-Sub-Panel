@@ -93,6 +93,25 @@ func ParseSettings(settingsJSON string) (*InboundSettings, error) {
 	return out, nil
 }
 
+// FirstClientFlow returns the inbound's own VLESS flow: the first non-empty
+// flow among its clients. On a Reality/Vision inbound every client carries the
+// same one, so "first non-empty" is the inbound's flow rather than one client's.
+//
+// This is the single resolver for "what flow does this inbound actually use".
+// It lives here, above both callers, because the field has no fixed owner —
+// PSP's Node.Flow wins when an admin set one, the panel's value stands
+// otherwise — and a runtime-resolved owner is only safe while every reader
+// resolves it the SAME way. Two paths resolving it differently is precisely
+// how Reality clients were once recreated with an empty flow.
+func FirstClientFlow(clients []InboundClient) string {
+	for _, c := range clients {
+		if c.Flow != "" {
+			return c.Flow
+		}
+	}
+	return ""
+}
+
 // FindClient returns a pointer to the client with the given email, or nil.
 func FindClient(clients []InboundClient, email string) *InboundClient {
 	for i := range clients {

@@ -233,3 +233,41 @@ func TestPanelQuotaWithinBand_AbsorbsSiblingDrift(t *testing.T) {
 			PanelQuotaBand(headroom))
 	}
 }
+
+// Characterization test for reason 3 in PanelQuotaCap's error budget: the cap
+// fans out ACROSS panels, so the panel-side safety net bounds abuse at
+// P x headroom, not at headroom.
+//
+// Pinned rather than merely commented because the arithmetic is invisible from
+// any single call — every individual cap is correct for its own panel, and only
+// the sum is wrong. Anyone who changes the fan-out to make this test fail is
+// changing the safety net's guarantee and should have to say so.
+func TestPanelQuotaCap_FansOutAcrossPanels(t *testing.T) {
+	const GB = int64(1) << 30
+	const headroom = 10 * GB
+	// One user, three panels, each with its own never-reset lifetime counter.
+	// SyncUserLifecycle sends the SAME global headroom to all three.
+	panelLifetimes := []int64{0, 3 * GB, 47 * GB}
+
+	var allowedTotal int64
+	for _, lifetime := range panelLifetimes {
+		panelCap := PanelQuotaCap(headroom, lifetime)
+		// Each panel cuts the client off at panelCap, having already counted
+		// `lifetime` — so it permits exactly `headroom` more bytes.
+		allowedFromNow := panelCap - lifetime
+		if allowedFromNow != headroom {
+			t.Fatalf("panel at lifetime=%d permits %d more bytes, want headroom=%d",
+				lifetime, allowedFromNow, headroom)
+		}
+		allowedTotal += allowedFromNow
+	}
+
+	want := int64(len(panelLifetimes)) * headroom
+	if allowedTotal != want {
+		t.Fatalf("total permitted across %d panels = %d, want %d",
+			len(panelLifetimes), allowedTotal, want)
+	}
+	if allowedTotal <= headroom {
+		t.Fatal("precondition broken: this test exists to pin that the total EXCEEDS the user's real headroom")
+	}
+}
