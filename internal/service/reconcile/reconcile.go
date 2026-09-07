@@ -497,7 +497,7 @@ func prefetchInbounds(ctx context.Context, pool ports.XUIPool,
 				inbound: inb,
 				clients: settings.Clients,
 				method:  settings.Method,
-				flow:    firstClientFlow(settings.Clients),
+				flow:    xrayspec.FirstClientFlow(settings.Clients),
 			}
 			cached++
 		}
@@ -539,19 +539,10 @@ func (s *Service) loadInbound(ctx context.Context, cache map[inboundCacheKey]*in
 		inbound: inb,
 		clients: settings.Clients,
 		method:  settings.Method,
-		flow:    firstClientFlow(settings.Clients),
+		flow:    xrayspec.FirstClientFlow(settings.Clients),
 	}
 	cache[key] = entry
 	return entry, nil
-}
-
-func firstClientFlow(clients []xrayspec.InboundClient) string {
-	for _, c := range clients {
-		if c.Flow != "" {
-			return c.Flow
-		}
-	}
-	return ""
 }
 
 // resolveFlow returns the VLESS flow PSP should push for a client on this
@@ -758,28 +749,15 @@ func (s *Service) checkOne(ctx context.Context, u *domain.User, e *domain.XUICli
 		}, true
 	}
 
-	// Check 6 (REPORT ONLY): PSP's rendered link disagrees with the flow the
-	// panel stores — see flowRenderDiverges for why that state exists. 3X-UI
-	// 3.7.0 makes it reachable without anyone touching PSP: its Vision-flow
-	// restore paths write settings.clients[].flow from flow_override, a column
-	// PSP never reads.
+	// The flow-render divergence check used to live here as "check 6". It is now
+	// reportFlowRenderDivergence, called from checkNodes.
 	//
-	// Reported, never healed, and deliberately last: healing would mean either
-	// clearing the operator's flow (the regression resolveFlow's comment
-	// documents) or writing it into Node.Flow, which is an operator decision
-	// about what PSP should render, not drift for reconcile to resolve silently.
-	// Running it after every healing check also keeps it from masking fixable
-	// drift — checkOne returns on its first issue, so anything actionable is
-	// handled first and this only fires when nothing else did.
-	if flowRenderDiverges(protocol, n, found.Flow) {
-		return &Issue{
-			PanelID:   e.PanelID,
-			PanelName: s.panelNameOf(e.PanelID), InboundID: e.InboundID, ClientEmail: e.ClientEmail,
-			Code: "flow_render_divergence",
-			Detail: fmt.Sprintf("panel stores flow %q but the node has no flow set, so PSP renders a link without one; "+
-				"set the node's flow to %q to match, or clear it in 3X-UI", found.Flow, found.Flow),
-		}, false
-	}
+	// It had to move because checkOne only ever runs over LEGACY OWNERSHIP ROWS,
+	// and the shared-client migration DROPs that table — so on any migrated
+	// install this loop iterates nothing and a per-client check here can never
+	// fire. The detector added for 3.7.0 was dead exactly where 3.7.0 made the
+	// state reachable. The datum is node-level anyway (Node.Flow versus the
+	// inbound's own flow), so checkNodes is where it belonged.
 
 	return nil, false
 }
@@ -860,8 +838,42 @@ func (s *Service) checkNodes(ctx context.Context, report *Report, cache map[inbo
 			}
 			continue
 		}
+		s.reportFlowRenderDivergence(n, entry, report)
 		s.reconcileInboundConfig(ctx, n, entry.inbound, report)
 	}
+}
+
+// reportFlowRenderDivergence surfaces the one state in which PSP pushes a flow
+// it does not render: Node.Flow blank while the inbound itself carries one.
+//
+// REPORT ONLY, and the restraint is deliberate. Healing would mean either
+// clearing the operator's flow in 3X-UI (the regression resolveFlow's comment
+// records) or writing the panel's value into Node.Flow — a decision about what
+// PSP should RENDER, which is the operator's, not drift for reconcile to
+// resolve silently across a whole fleet.
+//
+// What has changed since that call was made is the cost of leaving it: the
+// shared-client path has no panel fallback (clientplan derives from Node.Flow
+// alone), so on a migrated install this state no longer merely renders a bad
+// link — it PROVISIONS a flowless client. ImportExisting now adopts the
+// inbound's flow so new imports cannot land here; rows imported before that
+// still can, which is who this report is for.
+//
+// Runs before reconcileInboundConfig so it is not skipped by that function's
+// early returns, and per NODE rather than per client: Node.Flow is a node
+// column, so one blank produces one issue however many users are on it.
+func (s *Service) reportFlowRenderDivergence(n *domain.Node, entry *inboundCacheEntry, report *Report) {
+	if entry == nil || !flowRenderDiverges(domain.Protocol(n.Protocol), n, entry.flow) {
+		return
+	}
+	report.Issues = append(report.Issues, Issue{
+		PanelID:   n.PanelID,
+		PanelName: s.panelNameOf(n.PanelID), InboundID: n.InboundID,
+		Code: "flow_render_divergence",
+		Detail: fmt.Sprintf("node id=%d: the inbound uses flow %q but the node has none set, so PSP renders links without one "+
+			"and provisions shared clients without one; set the node's flow to %q to match, or clear it in 3X-UI",
+			n.ID, entry.flow, entry.flow),
+	})
 }
 
 // reconcileInboundConfig maintains the v3.5 axis-A invariant: PSP is the

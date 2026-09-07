@@ -487,3 +487,73 @@ func TestTryAdoptOrphan_RefusesOnProtocolMismatch(t *testing.T) {
 		t.Fatalf("must NOT adopt across protocol mismatch; got %+v", got)
 	}
 }
+
+// Importing is taking ownership of what is already there, so a blank Flow on a
+// Reality/Vision inbound must adopt the inbound's own flow rather than stay
+// empty. An empty Node.Flow is the state every reader disagrees about: the
+// legacy push falls back to the panel's value, render emits Node.Flow (so the
+// user's link omits the flow the server expects), and the shared path derives
+// from Node.Flow alone — so the client is PROVISIONED flowless, which is the
+// regression resolveFlow's comment records as fixed for the legacy path only.
+func TestImportExisting_AdoptsInboundFlowWhenBlank(t *testing.T) {
+	repo := &captureNodeRepo{}
+	live := &ports.Inbound{
+		Protocol:       "vless",
+		Port:           443,
+		StreamSettings: `{"network":"tcp","security":"reality"}`,
+		Settings:       `{"decryption":"none","clients":[{"id":"abc","email":"old","flow":"xtls-rprx-vision"}]}`,
+	}
+	svc := &Service{nodes: repo, pool: stubXUIPool{c: &stubXUIClient{getResp: live}}, groups: emptyGroups{}}
+
+	n := &domain.Node{DisplayName: "imported", Region: "us", PanelID: 1, InboundID: 3, Protocol: "vless"}
+	if err := svc.ImportExisting(context.Background(), n); err != nil {
+		t.Fatalf("ImportExisting = %v, want nil", err)
+	}
+	if repo.created == nil {
+		t.Fatal("node not created on import")
+	}
+	if repo.created.Flow != "xtls-rprx-vision" {
+		t.Fatalf("blank flow must adopt the inbound's own: got %q", repo.created.Flow)
+	}
+}
+
+// The other half: a flow the admin typed is their decision. Adopting only fills
+// a blank — it must never overwrite, or an operator deliberately rendering a
+// different flow than the panel's first client would be silently overruled.
+func TestImportExisting_KeepsAdminFlow(t *testing.T) {
+	repo := &captureNodeRepo{}
+	live := &ports.Inbound{
+		Protocol: "vless", Port: 443,
+		StreamSettings: `{"network":"tcp","security":"reality"}`,
+		Settings:       `{"decryption":"none","clients":[{"id":"abc","email":"old","flow":"xtls-rprx-vision"}]}`,
+	}
+	svc := &Service{nodes: repo, pool: stubXUIPool{c: &stubXUIClient{getResp: live}}, groups: emptyGroups{}}
+
+	n := &domain.Node{DisplayName: "imported", Region: "us", PanelID: 1, InboundID: 3, Protocol: "vless", Flow: "none-on-purpose"}
+	if err := svc.ImportExisting(context.Background(), n); err != nil {
+		t.Fatalf("ImportExisting = %v, want nil", err)
+	}
+	if repo.created.Flow != "none-on-purpose" {
+		t.Fatalf("an admin-set flow must survive import: got %q", repo.created.Flow)
+	}
+}
+
+// Non-VLESS carries no flow at all, so nothing is adopted even if some client
+// blob happens to contain the key.
+func TestImportExisting_NonVLESSAdoptsNoFlow(t *testing.T) {
+	repo := &captureNodeRepo{}
+	live := &ports.Inbound{
+		Protocol: "trojan", Port: 443,
+		StreamSettings: `{"network":"tcp"}`,
+		Settings:       `{"clients":[{"password":"p","email":"old","flow":"xtls-rprx-vision"}]}`,
+	}
+	svc := &Service{nodes: repo, pool: stubXUIPool{c: &stubXUIClient{getResp: live}}, groups: emptyGroups{}}
+
+	n := &domain.Node{DisplayName: "imported", Region: "us", PanelID: 1, InboundID: 3, Protocol: "trojan"}
+	if err := svc.ImportExisting(context.Background(), n); err != nil {
+		t.Fatalf("ImportExisting = %v, want nil", err)
+	}
+	if repo.created.Flow != "" {
+		t.Fatalf("non-VLESS must not adopt a flow: got %q", repo.created.Flow)
+	}
+}

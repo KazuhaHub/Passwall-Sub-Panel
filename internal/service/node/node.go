@@ -25,6 +25,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/crypto"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/log"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/safego"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/xrayspec"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/group"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/inboundcfg"
@@ -331,6 +332,30 @@ func (s *Service) ImportExisting(ctx context.Context, n *domain.Node) error {
 		return fmt.Errorf("inbound %d not found on panel %d: %w", n.InboundID, n.PanelID, err)
 	}
 	n.Enabled = true
+	// Adopt the inbound's own VLESS flow when the admin left the field blank.
+	//
+	// Flow otherwise arrives ONLY from the import form, and a blank one on a
+	// Reality/Vision inbound is the state every reader disagrees about: the
+	// legacy push falls back to the panel's flow (reconcile.resolveFlow), render
+	// emits Node.Flow and so hands the user a link with no flow, and the shared
+	// path has no fallback at all — clientplan derives from Node.Flow alone, so
+	// the client is PROVISIONED flowless, which is the same regression
+	// resolveFlow's comment records as fixed for the legacy path.
+	//
+	// Importing is taking ownership of what is already there, so the honest
+	// default is the value already there. Only a blank is filled: a flow the
+	// admin typed is their decision and stays untouched.
+	if n.Flow == "" && strings.EqualFold(n.Protocol, string(domain.ProtoVLESS)) {
+		if settings, perr := xrayspec.ParseSettings(inb.Settings); perr == nil {
+			n.Flow = xrayspec.FirstClientFlow(settings.Clients)
+		} else {
+			// Non-fatal: an unparseable settings blob costs the flow default,
+			// not the import. reconcile's flow_render_divergence still reports
+			// the resulting blank.
+			log.Warn("import: could not parse inbound settings for flow default",
+				"panel_id", n.PanelID, "inbound_id", n.InboundID, "err", perr)
+		}
+	}
 	// Import = take ownership: capture the live inbound's config into the local
 	// snapshot so render reads it without a live fetch and reconcile can keep
 	// 3X-UI aligned to PSP. clients[] is stripped (ownership-managed).
