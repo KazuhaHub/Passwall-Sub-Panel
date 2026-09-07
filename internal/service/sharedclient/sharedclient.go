@@ -500,6 +500,14 @@ func sameInboundSet(have []int, want map[int]bool) bool {
 // remaining period bytes, which each client rebases onto its OWN panel-side
 // counter. Returns the first error, attempts all.
 //
+// "Identically to every client" is exact and has a consequence worth naming
+// here, where it happens: each of the user's P panels is handed the SAME global
+// headroom, so each independently permits that many more bytes and the
+// panel-side net bounds a PSP outage at P x headroom rather than at headroom.
+// That is a property of the predicate (a panel cannot enforce a sum it cannot
+// see), not a bug in this fan-out — see reason 3 in domain.PanelQuotaCap's
+// error budget, pinned by TestPanelQuotaCap_FansOutAcrossPanels.
+//
 // The per-client work runs concurrently (docs/data-plane-plan.md Phase 1b).
 // Each SyncLifecycle is a GetClient plus an UpdateClient, so the serial loop
 // this replaced cost the user P x 2 round trips end to end; concurrently it is
