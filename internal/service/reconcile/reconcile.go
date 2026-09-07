@@ -1,13 +1,30 @@
 // Package reconcile runs the layered drift-detection job described in
-// docs/ARCHITECTURE.md §9.4. Three triggers share the same checks:
+// docs/ARCHITECTURE.md §9.4.
 //
-//   - L1 immediate post-write verification (called from SyncSvc; not yet wired)
-//   - L2 lightweight scan piggy-backed on TrafficSvc (every 5 min)
-//   - L3 full reconciliation cron (default every 15 min)
+// Of the three triggers that design names, ONE exists:
 //
-// All checks operate only on rows present in the ownership table. Clients
-// outside that table (operator's own clients and unimported users)
-// are never touched.
+//   - L1 immediate post-write verification (from SyncSvc) — not wired
+//   - L2 lightweight scan piggy-backed on TrafficSvc — not wired either, and
+//     LevelLight, the depth it would run at, is passed by nobody: both RunOnce
+//     call sites pass LevelFull
+//   - L3 full reconciliation cron (CronReconcileMinutes, default 15 min) — this
+//     is the whole job today
+//
+// Stated rather than quietly left as aspiration: a design note that reads as
+// present tense gets cited as fact long after the implementation diverged.
+//
+// TWO AXES, and they are driven by different tables:
+//
+//   - per-CLIENT checks (checkOne, checkMissingOwnerships) iterate the LEGACY
+//     ownership table, which the shared-client migration DROPs. On a migrated
+//     install they scan nothing, and Report.Scanned is permanently 0. Per-user
+//     credential and limit drift is healed by user.HealSharedClients instead,
+//     which merely shares this package's ticker (every 4th tick).
+//   - per-NODE checks (checkNodes) are driven by the nodes table and the panel
+//     prefetch, so they run on every install.
+//
+// Clients outside PSP's own bookkeeping (an operator's own clients, unimported
+// users) are never touched by either axis.
 package reconcile
 
 import (

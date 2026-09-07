@@ -4,6 +4,7 @@
 - **日期**：2026-09-04
 - **相关代码**：`internal/ports/xui.go`（`PanelClient` 及各可选能力）、`internal/adapters/panel`（`Registry` / `Pool`）、`docs/panel-adapters.md`、`internal/transport/http/handler/node_enroll.go`（节点自注册）
 - **前置决策**：[`data-plane-plan.md`](../data-plane-plan.md) Phase 2
+- **后续决策**：[ADR 0025](0025-push-pull-decision-rule.md) —— 推/拉的决策规则。其 Q2a 记录了本 ADR 落地前 PSP 在这个问题上没有选择权，因此那场讨论随本 ADR 一起解冻。
 
 ## 与既有决策的关系（先读这一节）
 
