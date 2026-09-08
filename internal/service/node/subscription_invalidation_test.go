@@ -69,7 +69,7 @@ func TestDisablingInvalidatesTheSubscriptionCache(t *testing.T) {
 	})
 
 	t.Run("separator", func(t *testing.T) {
-		repo := &captureSeparatorRepo{}
+		repo := &captureSeparatorRepo{stored: &domain.SeparatorEntry{ID: 1, SortOrder: 10, Enabled: true}}
 		svc := &Service{separators: repo}
 		invalidations := 0
 		svc.SetSubscriptionInvalidator(func() { invalidations++ })
@@ -101,7 +101,7 @@ func TestSeparatorCreateAndDeleteInvalidate(t *testing.T) {
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			svc := &Service{separators: &captureSeparatorRepo{}, nodes: &fakeNodeRepo{}}
+			svc := &Service{separators: &captureSeparatorRepo{stored: &domain.SeparatorEntry{ID: 1, SortOrder: 10}}, nodes: &fakeNodeRepo{}}
 			invalidations := 0
 			svc.SetSubscriptionInvalidator(func() { invalidations++ })
 			if err := tc.run(svc); err != nil {
@@ -117,7 +117,7 @@ func TestSeparatorCreateAndDeleteInvalidate(t *testing.T) {
 // Re-wiring must not stack decorators: two wrappers would drop every rendered
 // subscription twice per write, doubling the re-render stampede.
 func TestRewiringTheInvalidatorDoesNotStackDecorators(t *testing.T) {
-	svc := &Service{separators: &captureSeparatorRepo{}, nodes: &fakeNodeRepo{}}
+	svc := &Service{separators: &captureSeparatorRepo{stored: &domain.SeparatorEntry{ID: 1, SortOrder: 10}}, nodes: &fakeNodeRepo{}}
 	invalidations := 0
 	svc.SetSubscriptionInvalidator(func() { invalidations++ })
 	svc.SetSubscriptionInvalidator(func() { invalidations++ })

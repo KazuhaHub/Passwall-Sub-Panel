@@ -151,6 +151,8 @@ type captureSeparatorRepo struct {
 	created      []*domain.SeparatorEntry
 	reordered    []ports.SeparatorSortUpdate
 	reorderError error
+	stored       *domain.SeparatorEntry
+	updated      *domain.SeparatorEntry
 }
 
 func (r *captureSeparatorRepo) Create(_ context.Context, s *domain.SeparatorEntry) error {
@@ -159,10 +161,23 @@ func (r *captureSeparatorRepo) Create(_ context.Context, s *domain.SeparatorEntr
 	s.ID = int64(len(r.created))
 	return nil
 }
-func (r *captureSeparatorRepo) Update(context.Context, *domain.SeparatorEntry) error { return nil }
-func (r *captureSeparatorRepo) Delete(context.Context, int64) error                  { return nil }
-func (r *captureSeparatorRepo) GetByID(context.Context, int64) (*domain.SeparatorEntry, error) {
-	return nil, domain.ErrNotFound
+func (r *captureSeparatorRepo) Update(_ context.Context, e *domain.SeparatorEntry) error {
+	cp := *e
+	r.updated = &cp
+	return nil
+}
+func (r *captureSeparatorRepo) Delete(context.Context, int64) error { return nil }
+
+// stored is what GetByID serves. nil keeps the old "row is gone" behaviour,
+// which UpdateSeparator now surfaces as an error rather than letting GORM's
+// Save insert a fresh row under the requested id.
+func (r *captureSeparatorRepo) GetByID(_ context.Context, id int64) (*domain.SeparatorEntry, error) {
+	if r.stored == nil {
+		return nil, domain.ErrNotFound
+	}
+	cp := *r.stored
+	cp.ID = id
+	return &cp, nil
 }
 func (r *captureSeparatorRepo) List(context.Context) ([]*domain.SeparatorEntry, error) {
 	return nil, nil

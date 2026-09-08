@@ -267,16 +267,28 @@ func (s *Service) UpdateSeparator(ctx context.Context, e *domain.SeparatorEntry)
 		return fmt.Errorf("separator repo not configured")
 	}
 	e.DisplayName = strings.TrimSpace(e.DisplayName)
-	// Edit dialog no longer surfaces sort_order; the absent field arrives
-	// as 0 and must not clobber the position the admin set via drag. Load
-	// the existing row and preserve it when the caller didn't specify one.
+	// The caller builds this entry from a request DTO, so the fields the form
+	// does not carry arrive as zero values. Two of them must come from storage
+	// instead, and for different reasons:
+	//
+	//   SortOrder is WRITTEN, so a zero would clobber the position the admin
+	//     set by dragging (the edit dialog no longer shows the field).
+	//   CreatedAt is NOT written — the repo omits the column — but it is
+	//     returned to the caller, which renders it and updates its local row
+	//     from the response. Leaving it zero made the API report a creation
+	//     date of year 1 for a row whose stored value was fine: the write was
+	//     honest and the answer was not.
+	//
+	// So the entry is reconciled with storage before the write, and the caller
+	// gets back what is actually stored rather than what it sent.
+	existing, err := s.separators.GetByID(ctx, e.ID)
+	if err != nil {
+		return err
+	}
 	if e.SortOrder <= 0 {
-		existing, err := s.separators.GetByID(ctx, e.ID)
-		if err != nil {
-			return err
-		}
 		e.SortOrder = existing.SortOrder
 	}
+	e.CreatedAt = existing.CreatedAt
 	return s.separators.Update(ctx, e)
 }
 
