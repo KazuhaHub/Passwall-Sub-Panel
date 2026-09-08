@@ -1386,7 +1386,11 @@
       "limit_unsupported": "Not enforceable on: {{panels}} — clients placed there ignore this.",
       "device_limit_inert": "Not enforced yet: 3X-UI counts devices only when a client fetches the panel's own subscription, and PSP serves subscriptions itself. The value is saved but does nothing.",
       "ip_limit_unenforced": "Stored but not enforced on: {{panels}} — no usable fail2ban on those nodes.",
-      "remark": "Remark"
+      "remark": "Remark",
+      "cap_void": "Void fleet-wide: {{panels}} cannot enforce it, so the user simply routes through those.",
+      "cap_unknown": "Cannot confirm this is in force: {{panels}} could not be read. An unread precondition is not a working one.",
+      "cap_multiplied": "Reachable total is {{total}}: the cap is enforced per panel-side client, and this user has {{rows}}, each allowing {{typed}}.",
+      "cap_no_clients": "This user has no panel-side client anywhere yet, so there is nothing enforcing this cap."
     },
     "role": {
       "admin": "Admin",

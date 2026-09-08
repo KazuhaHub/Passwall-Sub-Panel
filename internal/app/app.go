@@ -423,6 +423,9 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 		Repos:      repos,
 		GeoRecords: geoStreaks,
 		Pool:       pool,
+		// Same service the push path uses, so the capabilities the edit form
+		// reports are read through the identical check that gates the write.
+		SharedClients: sharedClientSvc,
 		// Node enrollment probes a candidate panel that is not in the pool yet.
 		// Built here because this is where adapter choice already lives; the
 		// transport layer stays free of a concrete adapter import.

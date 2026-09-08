@@ -986,3 +986,71 @@ func clientsPerPanel(clients []*domain.PSPClient) []float64 {
 	}
 	return out
 }
+
+// PanelLimitFacts is what ONE of a user's panels can do with the connection
+// caps PSP pushes there. Capability only — whether the panel's protocol can
+// carry the field at all.
+//
+// Deliberately not the whole answer. Whether a stored limitIp then bans
+// anybody is a fact about the NODE (fail2ban), it lives on the panel row, and
+// it is re-probed after this pool was built — so reading it from the pool's
+// cached definition would report a state the probe has since contradicted.
+// The caller joins that half from the repo; see domain.IPLimitEnforcement.
+type PanelLimitFacts struct {
+	PanelID int64
+	// Clients is how many panel-side client rows this user has HERE. The caps
+	// are budgeted per (panel, email), so a value above 1 means the number the
+	// admin typed once is enforced once per row, on this panel alone.
+	Clients int
+	// CanStoreIP / CanStoreDevice mirror the exact capability checks the push
+	// path makes in reportCapabilityGaps. A false means the write succeeds and
+	// the field is dropped: it reads back as 0 forever.
+	CanStoreIP     bool
+	CanStoreDevice bool
+	// PanelUnreachable marks a panel that is registered but whose adapter the
+	// pool would not hand over. Held apart from "cannot store" because the two
+	// say different things: this one is "we do not know", and an unknown must
+	// never render as a working cap.
+	PanelUnreachable bool
+}
+
+// LimitEnforcement reports, per panel this user has a client on, whether the
+// connection caps PSP pushes can be stored there.
+//
+// Read-only and pool-local: no panel is contacted. It exists so the place an
+// admin TYPES a cap can say what that cap will actually do, which until now
+// was answerable only by reading the source. The caps are enforced per
+// (panel, client email) while the admin types one number for the user, so the
+// gap between the two is structural rather than a misconfiguration.
+func (s *Service) LimitEnforcement(ctx context.Context, userID int64) ([]PanelLimitFacts, error) {
+	clients, err := s.clients.ListByUser(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("list clients: %w", err)
+	}
+	byPanel := make(map[int64]*PanelLimitFacts)
+	order := make([]int64, 0, len(clients))
+	for _, c := range clients {
+		f, seen := byPanel[c.PanelID]
+		if !seen {
+			f = &PanelLimitFacts{PanelID: c.PanelID}
+			byPanel[c.PanelID] = f
+			order = append(order, c.PanelID)
+			// Asked once per panel rather than once per client: capabilities
+			// are a property of the adapter, and a user with two credential
+			// classes on one panel would otherwise ask twice for one answer.
+			cli, gerr := s.pool.Get(c.PanelID)
+			if gerr != nil || cli == nil {
+				f.PanelUnreachable = true
+			} else {
+				f.CanStoreIP = ports.SupportsCapability(cli, ports.CapabilityClientIPLimit)
+				f.CanStoreDevice = ports.SupportsCapability(cli, ports.CapabilityClientDeviceLimit)
+			}
+		}
+		f.Clients++
+	}
+	out := make([]PanelLimitFacts, 0, len(order))
+	for _, id := range order {
+		out = append(out, *byPanel[id])
+	}
+	return out, nil
+}

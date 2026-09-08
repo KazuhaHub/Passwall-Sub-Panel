@@ -92,10 +92,24 @@ type AdminUserHandler struct {
 	async    AsyncDispatcher
 	twofa    *twofa.Service
 	passkey  *passkey.Service
+
+	// shared + panels serve /limit-enforcement only, and are late-bound
+	// (WithLimitEnforcement) because every other route here works without
+	// them. Both nil answers 503 rather than an empty list — see that handler.
+	shared LimitEnforcementReader
+	panels ports.XUIPanelRepo
 }
 
 func NewAdminUserHandler(userSvc *user.Service, settings ports.SettingsRepo, mailerSvc *mailer.Service, async AsyncDispatcher, twofaSvc *twofa.Service, passkeySvc *passkey.Service) *AdminUserHandler {
 	return &AdminUserHandler{user: userSvc, settings: settings, mailer: mailerSvc, async: async, twofa: twofaSvc, passkey: passkeySvc}
+}
+
+// WithLimitEnforcement wires the two reads /limit-enforcement needs: which
+// panels a user has clients on (and their capabilities), and the panel rows
+// carrying the fail2ban probe's verdict.
+func (h *AdminUserHandler) WithLimitEnforcement(shared LimitEnforcementReader, panels ports.XUIPanelRepo) *AdminUserHandler {
+	h.shared, h.panels = shared, panels
+	return h
 }
 
 // ---- DTOs ----

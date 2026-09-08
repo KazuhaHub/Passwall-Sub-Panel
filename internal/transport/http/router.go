@@ -84,6 +84,13 @@ type Deps struct {
 	Geo        *geo.Service
 	Async      AsyncDispatcher
 
+	// SharedClients answers, for one user, which panels hold their clients and
+	// whether each can store the connection caps. Read-only; serves the
+	// /limit-enforcement endpoint. Optional for the same reason GeoRecords is:
+	// absent, that endpoint answers 503 rather than an empty list, so "this
+	// build cannot tell you" stays distinguishable from "nothing is wrong".
+	SharedClients handler.LimitEnforcementReader
+
 	// EnrollProbe asks a candidate panel who it is, for a panel spec that is
 	// NOT yet in the pool. Node enrollment needs it: nothing may be stored
 	// until one of the node's addresses has actually answered, and a panel row
@@ -369,7 +376,8 @@ func NewRouter(d Deps) stdhttp.Handler {
 		require2FAGate,
 	)
 	{
-		users := handler.NewAdminUserHandler(d.User, d.Repos.Settings, d.Mail, d.Async, twofaSvc, passkeySvc)
+		users := handler.NewAdminUserHandler(d.User, d.Repos.Settings, d.Mail, d.Async, twofaSvc, passkeySvc).
+			WithLimitEnforcement(d.SharedClients, d.Repos.XUIPanel)
 		// User CRUD is the operator's bread and butter. Handler-level guard
 		// in users.Update prevents operators from creating/promoting other
 		// admins or modifying an existing admin's role.
@@ -391,6 +399,11 @@ func NewRouter(d Deps) stdhttp.Handler {
 		staffGroup.POST("/users/:id/unlink-sso", users.UnlinkSSO)
 		staffGroup.POST("/users/:id/set-enabled", users.SetEnabled)
 		staffGroup.POST("/users/:id/set-service-status", users.SetServiceStatus)
+		// adminGroup, not staffGroup: the answer names every panel the user is
+		// on and how each one is configured, which is deployment shape rather
+		// than day-to-day user work — the same line the diagnostics snapshot
+		// is held to.
+		adminGroup.GET("/users/:id/limit-enforcement", users.LimitEnforcement)
 		staffGroup.GET("/users/:id/rules", users.GetRules)
 		staffGroup.PUT("/users/:id/rules", users.PutRules)
 

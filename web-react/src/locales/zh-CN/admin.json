@@ -1386,7 +1386,11 @@
       "limit_unsupported": "以下面板不支持，落在其上的客户端不会生效：{{panels}}",
       "device_limit_inert": "当前不生效：3X-UI 只在客户端拉取「面板自己的订阅」时才认设备，而订阅由 PSP 发放。值会被保存，暂不执行。",
       "ip_limit_unenforced": "以下面板会保存该上限但不执行（节点上没有可用的 fail2ban）：{{panels}}",
-      "remark": "备注"
+      "remark": "备注",
+      "cap_void": "此上限整体不生效：{{panels}} 无法执行，用户只走这些面板即可绕过。",
+      "cap_unknown": "无法确认此上限是否生效：{{panels}} 的状态读不到。未读到的前提不等于正常。",
+      "cap_multiplied": "实际可达 {{total}}：上限按「面板 × 客户端」各自独立执行，该用户有 {{rows}} 份，每份各放行 {{typed}}。",
+      "cap_no_clients": "该用户在任何面板上都还没有客户端，此上限目前无处执行。"
     },
     "role": {
       "admin": "管理员",
