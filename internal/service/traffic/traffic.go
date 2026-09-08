@@ -128,20 +128,25 @@ func (s *Service) SetPSPClientRepo(r ports.PSPClientRepo) { s.pspClient = r }
 // their current traffic period. Used by user.Service to compute the per-
 // client traffic floor it pushes into 3X-UI.
 //
-// Wraps the existing periodUsage helper but loads the latest snapshot
-// itself so callers don't need to thread one in.
+// Reads nothing. The answer is lifetime - baseline off the user row (see
+// periodUsage), both maintained by the poll, so a snapshot is not involved.
+//
+// It used to load the latest snapshot first and branch on that read, which was
+// residue from before periodUsage became O(1) — and it was not merely wasteful.
+// LatestForUser returns (nil, err) on a DB failure and (nil, ErrNotFound) when
+// the user has no snapshot row, and BOTH landed in a guard that returned
+// (0, nil): usage read as ZERO for a user whose row said otherwise. The single
+// caller is user.trafficFloor, so TrafficFloorBytes(limit, 0) handed back the
+// FULL limit and PSP pushed a panel cap of panelLifetime + entire quota. A user
+// who had already burned most of their period got a second one during the next
+// PSP outage — the same class of hole as docs/traffic-floor-defect.md, reached
+// by a different route.
+//
+// A missing or unreadable snapshot says nothing about how much the user has
+// consumed; the counters that answer that live on the user row and were never
+// in question.
 func (s *Service) CurrentPeriodUsage(ctx context.Context, u *domain.User) (int64, error) {
-	if u == nil {
-		return 0, nil
-	}
-	latest, err := s.traffic.LatestForUser(ctx, u.ID)
-	if err != nil {
-		if errors.Is(err, domain.ErrNotFound) || latest == nil {
-			return 0, nil
-		}
-		return 0, err
-	}
-	return s.periodUsage(ctx, u, latest)
+	return s.periodUsage(ctx, u, nil)
 }
 
 type inboundKey struct {
