@@ -374,6 +374,7 @@ export default function GroupsView() {
           ...limitField('device_limit', form.device_limit, 'clear_device_limit'),
         })
         await applyScopeOverrides(editing.id)
+        setItems(prev => prev.map(item => item.id === res.group.id ? res.group : item))
         pushSnack(t('admin:groups.toast.updated'), 'success')
         if (res.resync_errors?.length) {
           pushSnack(t('admin:groups.toast.resync_partial', { count: res.resync_errors.length }), 'warning')
@@ -394,7 +395,7 @@ export default function GroupsView() {
         pushSnack(t('admin:groups.toast.created'), 'success')
       }
       setDialogOpen(false)
-      await load()
+      if (!editing) void load().catch(() => {})
     } finally {
       setBusy(false)
     }

@@ -499,7 +499,8 @@ export default function ServersView() {
         }
         if (form.change_api_token) req.api_token = form.api_token
         if (form.change_password) req.password = form.password
-        await updateServer(editing.id, req)
+        const saved = await updateServer(editing.id, req)
+        mutateItems(prev => prev.map(server => server.id === saved.id ? saved : server))
         pushSnack(t('admin:servers.toast.saved'), 'success')
       } else {
         await createServer({
@@ -515,7 +516,7 @@ export default function ServersView() {
         pushSnack(t('admin:servers.toast.created'), 'success')
       }
       setDialogOpen(false)
-      await load()
+      if (!editing) refresh()
     } finally {
       setBusy(false)
     }

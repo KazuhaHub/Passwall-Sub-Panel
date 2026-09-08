@@ -287,7 +287,7 @@ export default function UsersView() {
     [groupFilter],
   )
   const paged = usePaged<User>(fetchUsers, { defaultSortBy: 'id', defaultSortDir: 'desc' })
-  const { items, total, loading, page, pageSize, sortBy, sortDir, setPage, setPageSize, setKeyword, setSort, refresh } = paged
+  const { items, total, loading, page, pageSize, sortBy, sortDir, setPage, setPageSize, setKeyword, setSort, refresh, mutateItems } = paged
   // groupFilter is captured by fetchUsers' useCallback closure but the
   // hook's fetch effect deps are page/pageSize/keyword/sort — NOT the
   // fetcher itself (which lives in a ref). Without this effect, picking
@@ -641,23 +641,30 @@ export default function UsersView() {
       // Send the bare YYYY-MM-DD; the backend anchors it to end-of-day in
       // the panel timezone so the chosen day can't drift with the browser tz.
       else if (editForm.expire_at) req.expire_date = editForm.expire_at
-      await updateUser(editing.id, req)
+      let savedUser = await updateUser(editing.id, req)
       // Period-used edit: only push when admin actually moved it. Sub-1MB
       // jitter is treated as no-op so refreshing the dialog without changing
       // anything doesn't synthesise a baseline snapshot.
       if (Math.abs(editForm.period_used_gb - editForm.period_used_initial) > 0.001) {
-        await setUserTraffic(editing.id, editForm.period_used_gb)
+        const usage = await setUserTraffic(editing.id, editForm.period_used_gb)
+        setUsageMap(prev => {
+          const next = new Map(prev)
+          const current = next.get(editing.id)
+          next.set(editing.id, { ...current, ...usage, upn: editing.upn })
+          return next
+        })
       }
       // Enable state rides the dedicated endpoint (updateUser has no `enabled`
       // field). Only fire when actually flipped — and never let an admin
       // disable their own account from here, which would lock them out.
       if (editForm.enabled !== accountEnabledForEdit(editing) && editing.id !== auth.userId) {
         await setEnabled(editing.id, editForm.enabled)
+        savedUser = { ...savedUser, enabled: editForm.enabled }
       }
+      mutateItems(prev => prev.map(user => user.id === savedUser.id ? savedUser : user))
       if (editing.id === auth.userId) auth.setDisplayName(editForm.display_name || '')
       pushSnack(t('admin:users.toast.saved'), 'success')
       setEditOpen(false)
-      await load()
     } catch {
       // The save is several sequential calls (update → traffic → enable); if a
       // later one fails the earlier ones already persisted. The client

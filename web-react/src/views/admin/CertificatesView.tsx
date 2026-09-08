@@ -232,14 +232,15 @@ export default function CertificatesView() {
         auto_renew: certAutoRenew,
       }
       if (certEditing) {
-        await updateCert(certEditing.id, req)
+        const saved = await updateCert(certEditing.id, req)
+        setCerts(prev => prev.map(cert => cert.id === saved.id ? saved : cert))
         pushSnack(t('common:saved', { defaultValue: '已保存' }), 'success')
       } else {
         await createCert(req)
         pushSnack(t('admin:certs.create_queued'), 'success')
       }
       setCertOpen(false)
-      reload()
+      if (!certEditing) void reload()
     } catch {
       /* toast */
     } finally {
@@ -284,11 +285,15 @@ export default function CertificatesView() {
         name: acctName.trim(), email: acctEmail.trim(), directory: acctDir.trim(),
         eab_key_id: acctEABKid.trim(), eab_hmac: acctEABHmac, key_type: acctKeyType,
       }
-      if (acctEditing) await updateACMEAccount(acctEditing.id, req)
-      else await createACMEAccount(req)
+      if (acctEditing) {
+        const saved = await updateACMEAccount(acctEditing.id, req)
+        setAccounts(prev => prev.map(account => account.id === saved.id ? saved : account))
+      } else {
+        await createACMEAccount(req)
+      }
       pushSnack(t('common:saved', { defaultValue: '已保存' }), 'success')
       setAcctOpen(false)
-      reload()
+      if (!acctEditing) void reload()
     } catch {
       /* toast */
     } finally {
@@ -495,13 +500,14 @@ export default function CertificatesView() {
     setCredBusy(true)
     try {
       if (credEditing) {
-        await updateDNSCred(credEditing.id, { name: credName.trim(), provider: credProvider.trim(), credentials })
+        const saved = await updateDNSCred(credEditing.id, { name: credName.trim(), provider: credProvider.trim(), credentials })
+        setCreds(prev => prev.map(credential => credential.id === saved.id ? saved : credential))
       } else {
         await createDNSCred({ name: credName.trim(), provider: credProvider.trim(), credentials })
       }
       pushSnack(t('common:saved'), 'success')
       setCredOpen(false)
-      reload()
+      if (!credEditing) void reload()
     } catch {
       /* toast */
     } finally {
