@@ -12,6 +12,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/transport/http/middleware"
 )
 
 // fakeLocaleRepo is an in-memory ports.LocaleRepo.
@@ -183,5 +184,54 @@ func TestLocalesHandler_BundleReservedOrMissing404(t *testing.T) {
 		if w.Code != http.StatusNotFound {
 			t.Fatalf("bundle %s code = %d, want 404", lang, w.Code)
 		}
+	}
+}
+
+// The bundle route is the one /api/ endpoint that deliberately opts INTO
+// caching, so it runs with the blanket no-store middleware mounted the way
+// router.go mounts it. A live check found the 200 correct and the 304 wrong:
+// the handler set no-cache only on the body path, so the revalidation carried
+// no-store instead. A 304 updates the stored response's headers, so that told
+// the browser to drop the entry it had just revalidated - every load back to a
+// full-body 200, and the ETag buying nothing. Both exits are pinned here
+// because only one of them was ever covered.
+func TestBundleRevalidationSurvivesTheNoStoreMiddleware(t *testing.T) {
+	repo := newFakeLocaleRepo()
+	repo.rows["fr-FR"] = &domain.LocalePack{
+		Code: "fr-FR", Name: "Français",
+		Namespaces: map[string]map[string]any{"nav": {"home": "Accueil"}},
+	}
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.Use(middleware.NoStoreAPI())
+	r.GET("/api/i18n/:lang", NewI18nPublicHandler(repo).Bundle)
+
+	// 200: the handler's own directive must beat the blanket one.
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/i18n/fr-FR", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("code = %d, want 200", w.Code)
+	}
+	if got := w.Header().Get("Cache-Control"); got != "no-cache" {
+		t.Fatalf("200 Cache-Control = %q, want %q", got, "no-cache")
+	}
+	etag := w.Header().Get("ETag")
+	if etag == "" {
+		t.Fatal("200 carried no ETag, so there is nothing to revalidate with")
+	}
+
+	// 304: same directive, same validator. A no-store here is the defect.
+	w = httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/i18n/fr-FR", nil)
+	req.Header.Set("If-None-Match", etag)
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusNotModified {
+		t.Fatalf("code = %d, want 304", w.Code)
+	}
+	if got := w.Header().Get("Cache-Control"); got != "no-cache" {
+		t.Fatalf("304 Cache-Control = %q, want %q - a no-store here evicts the entry the browser just revalidated", got, "no-cache")
+	}
+	if got := w.Header().Get("ETag"); got != etag {
+		t.Fatalf("304 ETag = %q, want %q", got, etag)
 	}
 }

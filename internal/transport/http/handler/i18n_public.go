@@ -64,6 +64,17 @@ func (h *I18nPublicHandler) Bundle(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Not found"})
 		return
 	}
+	// Set on BOTH exits, before the conditional return. A 304 updates the
+	// stored response's headers (RFC 9111 4.3.4), so a 304 that carries the
+	// blanket API no-store would evict the entry the browser just revalidated
+	// - every load would go back to a full-body 200 and the ETag would buy
+	// nothing. The ETag rides along for the same reason RFC 9110 15.4.5 asks
+	// for it: a revalidation that returns no validator leaves the cache with
+	// nothing to revalidate against next time.
+	if etag != "" {
+		c.Header("ETag", etag)
+	}
+	c.Header("Cache-Control", "no-cache")
 	if etag != "" && c.GetHeader("If-None-Match") == etag {
 		c.Status(http.StatusNotModified)
 		return
@@ -73,9 +84,5 @@ func (h *I18nPublicHandler) Bundle(c *gin.Context) {
 		respondPublicError(c, err)
 		return
 	}
-	if etag != "" {
-		c.Header("ETag", etag)
-	}
-	c.Header("Cache-Control", "no-cache")
 	c.JSON(http.StatusOK, gin.H{"namespaces": pack.Namespaces})
 }
