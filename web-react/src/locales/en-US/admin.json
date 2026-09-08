@@ -308,7 +308,7 @@
       "role_rules_add": "Add rule",
       "role_rules_remove": "Remove",
       "group_rules_hint": "Decide which group (OU) a user lands in from their IdP attributes; the first matching rule wins. Re-evaluated on every login, so a principal the IdP removes from a group leaves the matching OU instead of keeping its quota and nodes indefinitely. No match falls back to the default group below.",
-      "group_rules_empty": "No group rules \u2014 every SSO user lands in the default group below, and no existing user's group is changed by the IdP.",
+      "group_rules_empty": "No group rules — every SSO user lands in the default group below, and no existing user's group is changed by the IdP.",
       "group_rules_group": "Group (OU)",
       "group_rules_add": "Add group rule",
       "group_rules_missing": "This group no longer exists; saving will be rejected",
@@ -743,25 +743,25 @@
     },
     "detail_title": "Task detail"
   },
-    "geo_anomalies": {
-      "intro": "Verdicts on each user's live source IPs combined across every panel. Only \"flagged\" means sustained; \"suspect\" is the ramp that has not reached the threshold yet. This is suspicion, not proof — split tunnelling, a corporate VPN and family abroad all produce it honestly. Nothing is enforced automatically.",
-      "unwired": "Concurrent-location detection is not enabled in this deployment.",
-      "empty": "No verdicts yet — they appear after the traffic poll has run a cycle.",
-      "incomplete": "A panel could not be read, so this number is a floor rather than a total.",
-      "col_user": "User",
-      "col_state": "Verdict",
-      "col_places": "Places at once",
-      "col_ips": "Live IPs",
-      "col_reason": "Basis",
-      "col_updated": "Last judged",
-      "state_flagged": "Flagged",
-      "state_suspect": "Suspect",
-      "state_clean": "Clean",
-      "state_unknown": "Cannot tell",
-      "state_idle": "Idle",
-      "state_exempt": "Exempt",
-      "state_disabled": "Off"
-    },
+  "geo_anomalies": {
+    "intro": "Verdicts on each user's live source IPs combined across every panel. Only \"flagged\" means sustained; \"suspect\" is the ramp that has not reached the threshold yet. This is suspicion, not proof — split tunnelling, a corporate VPN and family abroad all produce it honestly. Nothing is enforced automatically.",
+    "unwired": "Concurrent-location detection is not enabled in this deployment.",
+    "empty": "No verdicts yet — they appear after the traffic poll has run a cycle.",
+    "incomplete": "A panel could not be read, so this number is a floor rather than a total.",
+    "col_user": "User",
+    "col_state": "Verdict",
+    "col_places": "Places at once",
+    "col_ips": "Live IPs",
+    "col_reason": "Basis",
+    "col_updated": "Last judged",
+    "state_flagged": "Flagged",
+    "state_suspect": "Suspect",
+    "state_clean": "Clean",
+    "state_unknown": "Cannot tell",
+    "state_idle": "Idle",
+    "state_exempt": "Exempt",
+    "state_disabled": "Off"
+  },
   "logs": {
     "title": "Logs",
     "tab_sub": "Subscription logs",
@@ -769,13 +769,35 @@
     "tab_auth": "Auth logs",
     "tab_email": "Email logs",
     "tab_certs": "Certificates",
-      "tab_geo": "Locations",
-    "cert_table": { "at": "Time", "cert": "Certificate", "kind": "Action", "result": "Result", "message": "Message" },
-    "cert_kind": { "issue": "Issue", "renew": "Renew" },
-    "cert_result": { "ok": "OK", "fail": "Failed" },
+    "tab_geo": "Locations",
+    "cert_table": {
+      "at": "Time",
+      "cert": "Certificate",
+      "kind": "Action",
+      "result": "Result",
+      "message": "Message"
+    },
+    "cert_kind": {
+      "issue": "Issue",
+      "renew": "Renew"
+    },
+    "cert_result": {
+      "ok": "OK",
+      "fail": "Failed"
+    },
     "auth_filter_all": "All",
-    "auth_outcome": { "success": "Success", "failure": "Failure" },
-    "auth_table": { "at": "Time", "upn": "User", "method": "Method", "outcome": "Outcome", "ip": "IP / region", "reason": "Reason" },
+    "auth_outcome": {
+      "success": "Success",
+      "failure": "Failure"
+    },
+    "auth_table": {
+      "at": "Time",
+      "upn": "User",
+      "method": "Method",
+      "outcome": "Outcome",
+      "ip": "IP / region",
+      "reason": "Reason"
+    },
     "retention_label": "Subscription log retention (days)",
     "retention_save": "Save",
     "retention_saved": "Retention updated",
@@ -1307,9 +1329,29 @@
     "title": "Users",
     "create": "New user",
     "edit_title": "Edit user",
-    "activity": { "title": "Recent sign-ins", "empty": "No sign-in records", "ok": "OK", "fail": "Failed" },
-    "nodeusage": { "title": "Usage by node", "empty": "No nodes for this user", "lifetime": "Lifetime", "period": "Period", "today": "Today", "total": "Total", "node": "Node", "search": "Search node / region", "no_match": "No matching node" },
-    "serverusage": { "title": "Usage by server", "empty": "No servers for this user", "server": "Server", "node_count": "{{n}} nodes" },
+    "activity": {
+      "title": "Recent sign-ins",
+      "empty": "No sign-in records",
+      "ok": "OK",
+      "fail": "Failed"
+    },
+    "nodeusage": {
+      "title": "Usage by node",
+      "empty": "No nodes for this user",
+      "lifetime": "Lifetime",
+      "period": "Period",
+      "today": "Today",
+      "total": "Total",
+      "node": "Node",
+      "search": "Search node / region",
+      "no_match": "No matching node"
+    },
+    "serverusage": {
+      "title": "Usage by server",
+      "empty": "No servers for this user",
+      "server": "Server",
+      "node_count": "{{n}} nodes"
+    },
     "result_title": "User created",
     "search_placeholder": "Search UPN / display name / email…",
     "filter_group_all": "All groups",
@@ -1445,8 +1487,7 @@
       "copied": "Copied",
       "sso_unlinked": "SSO binding cleared",
       "service_resumed": "Proxy service resumed",
-      "service_suspended": "Proxy service suspended",
-      "saved": "Saved"
+      "service_suspended": "Proxy service suspended"
     },
     "confirm": {
       "delete_title": "Delete user",
@@ -1738,7 +1779,12 @@
     "renew_queued": "Renewal queued",
     "domains_help": "One domain per line / comma-separated; wildcards like *.example.com are supported",
     "auto_renew": "Auto-renew",
-    "status": { "pending": "Issuing", "active": "Active", "failed": "Failed", "expired": "Expired" },
+    "status": {
+      "pending": "Issuing",
+      "active": "Active",
+      "failed": "Failed",
+      "expired": "Expired"
+    },
     "detail_title": "Certificate details",
     "not_before": "Issued",
     "fingerprint": "Fingerprint",
@@ -1896,6 +1942,120 @@
       "upgrade_force_message": "About to upgrade to {{latest}}. Passwall Panel's highest verified 3X-UI version is {{max}}. Forcing the upgrade may cause traffic poll, reconcile, and other critical flows to fail due to protocol or field changes. Recommend upgrading Passwall Panel to a release that supports this 3X-UI version first. Force upgrade anyway?",
       "upgrade_xray_title": "Upgrade Xray",
       "upgrade_xray_message": "Install xray-core on {{name}}. Pick a target version below (defaults to latest). The panel itself stays up; only the xray child process restarts."
+    }
+  },
+  "diagnostics": {
+    "title": "Diagnostics",
+    "subtitle": "In-process measurements. Counters reset on restart or when cleared by hand, so every number has to be read together with its window.",
+    "refresh": "Refresh",
+    "load_failed": "Could not load diagnostics.",
+    "window": "Measured over {{window}} · process up {{uptime}}",
+    "was_reset": "counters were cleared by hand, so the window is shorter than the uptime",
+    "blackout": "The window is under one poll interval ({{interval}}), so not even one cycle need have finished. A zero here is not evidence of health, so the numbers are withheld — anything already observed is still listed above.",
+    "verdict": {
+      "problems": "{{count}} finding(s)",
+      "blackout": "Measuring — the window is under one poll interval",
+      "measuring": "Measuring — the window is still too short for a zero to mean anything",
+      "ok": "Nothing found in this window"
+    },
+    "precondition": {
+      "poll_running": {
+        "label": "Poll running",
+        "help": "The traffic poll drives everything below. If it is not running, that is the single reason for every zero on this page."
+      },
+      "push_capacity": {
+        "label": "Push gate built",
+        "help": "Capacity is set once at construction. Reading 0 does not mean a small pool — it means the traffic service was never built and this whole family describes nothing."
+      },
+      "push_reaching": {
+        "label": "Pushes executing",
+        "help": "Whether quota-floor pushes actually reach execution. Nothing attempted means no success rate — an absent denominator, not 0%."
+      },
+      "lifecycle_running": {
+        "label": "Lifecycle syncing",
+        "help": "Whether enable/expiry/quota are being written to shared clients at all."
+      },
+      "liveip_complete": {
+        "label": "Live-IP read complete",
+        "help": "If any panel went unread, every figure downstream is a floor rather than a total."
+      }
+    },
+    "findings": {
+      "title": "Findings ({{count}})",
+      "push_capacity_zero": {
+        "title": "Push semaphore capacity is 0",
+        "detail": "Capacity is set once at construction, so 0 means the traffic service was never built. Every metric in the push family is currently describing nothing real. Check the startup log."
+      },
+      "poll_dead": {
+        "title": "The traffic poll has not entered a cycle in {{minutes}} min",
+        "detail": "It is dead, was never started, or panics on entry. Metering, quota enforcement and live-IP collection are all stopped. Look for the traceback in the server log."
+      },
+      "push_errors": {
+        "title": "{{errors}} quota-floor pushes failed of {{attempted}} attempted",
+        "detail": "This path has no retry queue — only a log line, and the next attempt requires that user to move bytes again. Search the log for 'traffic floor push failed' and 'shared-client lifecycle push failed', then check panel reachability."
+      },
+      "poll_errors": {
+        "title": "{{errors}} traffic poll cycles failed",
+        "detail": "Note this counts only the user-list read. An unreachable panel or a failed snapshot write is not counted here."
+      },
+      "lifecycle_errors": {
+        "title": "{{errors}} shared-client lifecycle writes failed",
+        "detail": "Enable state, expiry or quota did not reach the panel. This is the path a disable travels."
+      },
+      "push_suppressed": {
+        "title": "{{suppressed}} pushes suppressed by the cross-cycle guard",
+        "detail": "The previous cycle's pushes had not drained, so a whole cycle of floor pushes was skipped. Occasional is tolerable; sustained means the push side is falling behind."
+      },
+      "push_carryover": {
+        "title": "Pushes spilled into the next cycle {{carryover}} times",
+        "detail": "One of the three reopen triggers for a self-hosted data plane in data-plane-plan.md. Note it is counted at cycle open, so one or two right after a restart are expected."
+      },
+      "capability_gaps": {
+        "title": "{{gaps}} capability gaps",
+        "detail": "A panel cannot store a field PSP writes. Note the device-limit row: a clean reading means the panel can STORE the field, not that any device cap is enforced — nothing in PSP's architecture enforces one on any panel version."
+      },
+      "liveip_incomplete": {
+        "title": "Live-IP read incomplete for {{incomplete}} users",
+        "detail": "A panel did not answer. Their live-IP counts and location verdicts are floors, not totals, and must not be read as totals."
+      },
+      "invariant_poll_ms": {
+        "title": "Poll-duration samples disagree with the cycle count",
+        "detail": "{{observed}} samples observed against {{expected}} recorded cycles. A difference of one is snapshot non-atomicity; more means cycles are exiting early."
+      },
+      "invariant_push_enqueue": {
+        "title": "More pushes executed than were enqueued",
+        "detail": "{{started}} started against {{enqueued}} enqueued. Every execution is enqueued first, so a difference in this direction should not occur."
+      }
+    },
+    "reset": {
+      "action": "Clear and restart the window",
+      "title": "Clear the counters?",
+      "message": "This discards the {{window}} already measured and starts a new window. The pre-reset snapshot is returned in the response, but this page does not keep it.",
+      "done": "Counters cleared; a new measurement window has started",
+      "nothing": "The window is empty — nothing to clear"
+    },
+    "table": {
+      "metric": "Metric",
+      "value": "Value",
+      "means": "Means"
+    },
+    "never_observed": "never observed in this window",
+    "too_few_samples": "only {{count}} samples · max {{max}}",
+    "footer": "version {{version}} · commit {{commit}} · goroutines {{goroutines}} · push gate capacity {{capacity}}",
+    "metric": {
+      "psp_poll_total": "Traffic-poll cycles completed",
+      "psp_poll_error_total": "Cycles that failed (counts only the user-list read)",
+      "psp_poll_ms": "Wall time for one poll cycle",
+      "panel_fetch": "The waiting-on-panels part of a cycle, normally most of it",
+      "psp_push_client_config_total": "Quota-floor pushes that began executing (traffic-poll path only)",
+      "psp_push_client_config_error_total": "How many of those failed",
+      "psp_push_suppressed_total": "Pushes skipped by the cross-cycle guard",
+      "psp_push_sem_carryover_total": "Times pushes spilled into the next cycle",
+      "psp_push_sem_wait_ms": "Wait on the push semaphore (written only by pushes that escaped the queue, so it is a floor)",
+      "psp_lifecycle_sync_total": "Shared-client lifecycle checks",
+      "psp_lifecycle_sync_write_total": "How many of those actually wrote to a panel",
+      "psp_lifecycle_sync_error_total": "How many of those writes failed",
+      "psp_capability_gap_total": "Times a panel could not store a field PSP writes"
     }
   }
 }

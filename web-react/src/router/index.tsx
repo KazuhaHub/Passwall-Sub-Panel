@@ -30,6 +30,7 @@ const TemplatesView = lazy(() => import('@/views/admin/TemplatesView'))
 const SubClientsView = lazy(() => import('@/views/admin/SubClientsView'))
 const LogsView = lazy(() => import('@/views/admin/LogsView'))
 const SyncTasksView = lazy(() => import('@/views/admin/SyncTasksView'))
+const DiagnosticsView = lazy(() => import('@/views/admin/DiagnosticsView'))
 const TrafficView = lazy(() => import('@/views/admin/TrafficView'))
 const SettingsView = lazy(() => import('@/views/admin/SettingsView'))
 const LanguagePacksView = lazy(() => import('@/views/admin/LanguagePacksView'))
@@ -95,6 +96,7 @@ export const router = createBrowserRouter([
           { path: 'sub-clients', element: <SubClientsView /> },
           { path: 'logs', element: <LogsView /> },
           { path: 'sync-tasks', element: <SyncTasksView /> },
+          { path: 'diagnostics', element: <DiagnosticsView /> },
           { path: 'traffic', element: <TrafficView /> },
           { path: 'settings', element: <SettingsView /> },
           { path: 'language-packs', element: <LanguagePacksView /> },

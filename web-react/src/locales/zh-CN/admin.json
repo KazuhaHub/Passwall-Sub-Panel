@@ -743,25 +743,25 @@
     },
     "detail_title": "任务详情"
   },
-    "geo_anomalies": {
-      "intro": "按用户合并全部面板的并发源 IP 后的判定。只有「已标记」代表持续超限；「疑似」是尚未达到次数的爬升过程。这是嫌疑不是证据——分割隧道、公司 VPN、境外家人都会诚实产生这个信号。目前不做任何自动处置。",
-      "unwired": "本部署未启用异地并发检测。",
-      "empty": "还没有判定记录——流量轮询跑过一轮后才会出现。",
-      "incomplete": "有面板读取失败，这个数字是下限而不是总数。",
-      "col_user": "用户",
-      "col_state": "判定",
-      "col_places": "同时所在",
-      "col_ips": "并发 IP",
-      "col_reason": "依据",
-      "col_updated": "最后判定",
-      "state_flagged": "已标记",
-      "state_suspect": "疑似",
-      "state_clean": "正常",
-      "state_unknown": "无法判断",
-      "state_idle": "无连接",
-      "state_exempt": "已豁免",
-      "state_disabled": "未启用"
-    },
+  "geo_anomalies": {
+    "intro": "按用户合并全部面板的并发源 IP 后的判定。只有「已标记」代表持续超限；「疑似」是尚未达到次数的爬升过程。这是嫌疑不是证据——分割隧道、公司 VPN、境外家人都会诚实产生这个信号。目前不做任何自动处置。",
+    "unwired": "本部署未启用异地并发检测。",
+    "empty": "还没有判定记录——流量轮询跑过一轮后才会出现。",
+    "incomplete": "有面板读取失败，这个数字是下限而不是总数。",
+    "col_user": "用户",
+    "col_state": "判定",
+    "col_places": "同时所在",
+    "col_ips": "并发 IP",
+    "col_reason": "依据",
+    "col_updated": "最后判定",
+    "state_flagged": "已标记",
+    "state_suspect": "疑似",
+    "state_clean": "正常",
+    "state_unknown": "无法判断",
+    "state_idle": "无连接",
+    "state_exempt": "已豁免",
+    "state_disabled": "未启用"
+  },
   "logs": {
     "title": "日志管理",
     "tab_sub": "订阅日志",
@@ -769,13 +769,35 @@
     "tab_auth": "认证日志",
     "tab_email": "邮件日志",
     "tab_certs": "证书",
-      "tab_geo": "异地并发",
-    "cert_table": { "at": "时间", "cert": "证书", "kind": "动作", "result": "结果", "message": "消息" },
-    "cert_kind": { "issue": "签发", "renew": "续期" },
-    "cert_result": { "ok": "成功", "fail": "失败" },
+    "tab_geo": "异地并发",
+    "cert_table": {
+      "at": "时间",
+      "cert": "证书",
+      "kind": "动作",
+      "result": "结果",
+      "message": "消息"
+    },
+    "cert_kind": {
+      "issue": "签发",
+      "renew": "续期"
+    },
+    "cert_result": {
+      "ok": "成功",
+      "fail": "失败"
+    },
     "auth_filter_all": "全部",
-    "auth_outcome": { "success": "成功", "failure": "失败" },
-    "auth_table": { "at": "时间", "upn": "用户", "method": "方法", "outcome": "结果", "ip": "IP / 地区", "reason": "原因" },
+    "auth_outcome": {
+      "success": "成功",
+      "failure": "失败"
+    },
+    "auth_table": {
+      "at": "时间",
+      "upn": "用户",
+      "method": "方法",
+      "outcome": "结果",
+      "ip": "IP / 地区",
+      "reason": "原因"
+    },
     "retention_label": "订阅日志保留天数",
     "retention_save": "保存",
     "retention_saved": "保留天数已更新",
@@ -1307,9 +1329,29 @@
     "title": "用户管理",
     "create": "新增用户",
     "edit_title": "编辑用户",
-    "activity": { "title": "最近登录", "empty": "暂无登录记录", "ok": "成功", "fail": "失败" },
-    "nodeusage": { "title": "按节点用量", "empty": "该用户暂无节点", "lifetime": "累计", "period": "本周期", "today": "今日", "total": "合计", "node": "节点", "search": "搜索节点 / 地区", "no_match": "无匹配节点" },
-    "serverusage": { "title": "按服务器用量", "empty": "该用户暂无服务器", "server": "服务器", "node_count": "{{n}} 节点" },
+    "activity": {
+      "title": "最近登录",
+      "empty": "暂无登录记录",
+      "ok": "成功",
+      "fail": "失败"
+    },
+    "nodeusage": {
+      "title": "按节点用量",
+      "empty": "该用户暂无节点",
+      "lifetime": "累计",
+      "period": "本周期",
+      "today": "今日",
+      "total": "合计",
+      "node": "节点",
+      "search": "搜索节点 / 地区",
+      "no_match": "无匹配节点"
+    },
+    "serverusage": {
+      "title": "按服务器用量",
+      "empty": "该用户暂无服务器",
+      "server": "服务器",
+      "node_count": "{{n}} 节点"
+    },
     "result_title": "用户已创建",
     "search_placeholder": "搜索 UPN / 显示名 / 邮箱…",
     "filter_group_all": "全部分组",
@@ -1445,8 +1487,7 @@
       "copied": "已复制",
       "sso_unlinked": "已解除 SSO 绑定",
       "service_resumed": "代理服务已恢复",
-      "service_suspended": "代理服务已暂停",
-      "saved": "已保存"
+      "service_suspended": "代理服务已暂停"
     },
     "confirm": {
       "delete_title": "删除用户",
@@ -1738,7 +1779,12 @@
     "renew_queued": "已提交续期",
     "domains_help": "每行/逗号分隔一个域名，支持通配符 *.example.com",
     "auto_renew": "自动续期",
-    "status": { "pending": "申请中", "active": "正常", "failed": "申请失败", "expired": "过期" },
+    "status": {
+      "pending": "申请中",
+      "active": "正常",
+      "failed": "申请失败",
+      "expired": "过期"
+    },
     "detail_title": "证书详情",
     "not_before": "签发于",
     "fingerprint": "指纹",
@@ -1896,6 +1942,120 @@
       "upgrade_force_message": "即将升级到 {{latest}}。当前 Passwall Panel 已验证的最高 3X-UI 版本为 {{max}}。强制升级可能因协议或字段变更导致 traffic poll、reconcile 等关键流程失败。建议先升级 Passwall Panel 至支持该 3X-UI 版本的发行，再升级面板。是否仍要强制升级？",
       "upgrade_xray_title": "升级 Xray",
       "upgrade_xray_message": "在 {{name}} 上安装 xray-core。可在下方选择目标版本（默认最新）。面板自身不重启，只重启 xray 子进程。"
+    }
+  },
+  "diagnostics": {
+    "title": "运行诊断",
+    "subtitle": "进程内的实测指标。计数在重启或手动清零时归零，所以每个数字都要连同它的窗口一起读。",
+    "refresh": "刷新",
+    "load_failed": "读取诊断数据失败。",
+    "window": "测量窗口 {{window}} · 进程已运行 {{uptime}}",
+    "was_reset": "计数被手动清零过，所以窗口短于进程运行时长",
+    "blackout": "窗口还不足一个轮询周期（{{interval}}），一轮都可能没跑完。此时的 0 不代表正常，所以数字暂不显示——已观测到的问题仍会在上方列出。",
+    "verdict": {
+      "problems": "发现 {{count}} 项问题",
+      "blackout": "测量中——窗口还不足一个轮询周期",
+      "measuring": "测量中——窗口还太短，0 值暂不能作为结论",
+      "ok": "本窗口内未发现问题"
+    },
+    "precondition": {
+      "poll_running": {
+        "label": "轮询在跑",
+        "help": "流量轮询是下面一切的驱动来源。它没跑，下面所有的 0 都只有这一个原因。"
+      },
+      "push_capacity": {
+        "label": "推送闸已建",
+        "help": "并发闸容量在构造时写入一次。读到 0 不是「池子小」，是流量服务从未被构造，这一族指标描述的全是空气。"
+      },
+      "push_reaching": {
+        "label": "推送在执行",
+        "help": "配额 floor 推送是否真的进入执行。没有尝试就没有成功率——那是缺分母，不是 0%。"
+      },
+      "lifecycle_running": {
+        "label": "生命周期同步在跑",
+        "help": "共享客户端的启用/到期/配额下发是否在发生。"
+      },
+      "liveip_complete": {
+        "label": "在线 IP 读取完整",
+        "help": "有任何一个面板没读到，下游每个数字都只是下限而不是总数。"
+      }
+    },
+    "findings": {
+      "title": "发现（{{count}}）",
+      "push_capacity_zero": {
+        "title": "推送并发闸容量为 0",
+        "detail": "容量在构造时写入一次，所以 0 意味着流量服务从未被构造。推送一族的所有指标此刻都不描述任何真实的东西。检查启动日志。"
+      },
+      "poll_dead": {
+        "title": "流量轮询已 {{minutes}} 分钟没有进入过一个周期",
+        "detail": "它死了、从未启动、或在入口就 panic。下游的计量、配额执法、在线 IP 全部停摆。去服务端日志找 traceback。"
+      },
+      "push_errors": {
+        "title": "{{errors}} 次配额 floor 推送失败（共尝试 {{attempted}} 次）",
+        "detail": "这条路径没有重试队列——只有一行日志，且下次重试的前提是该用户再产生流量。搜日志 traffic floor push failed / shared-client lifecycle push failed，并核对面板可达性。"
+      },
+      "poll_errors": {
+        "title": "{{errors}} 轮流量轮询失败",
+        "detail": "注意这只统计用户列表读取这一条错误路径；面板不可达、快照写入失败等都不计入这里。"
+      },
+      "lifecycle_errors": {
+        "title": "{{errors}} 次共享客户端生命周期下发失败",
+        "detail": "启用状态、到期时间或配额没能写进面板。停用指令走的就是这条路。"
+      },
+      "push_suppressed": {
+        "title": "{{suppressed}} 次推送被跨周期守卫抑制",
+        "detail": "上一周期的推送还没排空，整个周期的 floor 推送被跳过。偶发可接受；持续出现说明推送侧开始追不上。"
+      },
+      "push_carryover": {
+        "title": "推送溢出到下一周期 {{carryover}} 次",
+        "detail": "这是 data-plane-plan.md 里「重开自研数据面」的三条判据之一。注意它在周期开始时就计数，所以刚启动时出现一两次是正常的。"
+      },
+      "capability_gaps": {
+        "title": "{{gaps}} 次能力缺口",
+        "detail": "面板存不下 PSP 要写的字段。注意：设备上限这一项即使没有缺口，也不代表它被执行了——PSP 架构下任何面板版本都不执行设备上限。"
+      },
+      "liveip_incomplete": {
+        "title": "{{incomplete}} 个用户的在线 IP 读取不完整",
+        "detail": "有面板没答上来。这些用户的在线 IP 数和异地判定都只是下限，不能当总数读。"
+      },
+      "invariant_poll_ms": {
+        "title": "轮询耗时样本数与轮询次数不符",
+        "detail": "观测到 {{observed}} 个样本，但记录了 {{expected}} 轮。差 1 是快照非原子造成的噪声；差得多说明有周期在中途退出。"
+      },
+      "invariant_push_enqueue": {
+        "title": "推送执行数超过入队数",
+        "detail": "执行 {{started}} 次、入队 {{enqueued}} 次。每次执行都应当先入队，所以这个方向的差值不该出现。"
+      }
+    },
+    "reset": {
+      "action": "清零并重新计时",
+      "title": "清零计数？",
+      "message": "这会丢弃已经测量了 {{window}} 的窗口，重新开始计时。清零前的快照会在响应里返回，但界面不会保留它。",
+      "done": "计数已清零，新的测量窗口开始",
+      "nothing": "窗口是空的，没有可清零的内容"
+    },
+    "table": {
+      "metric": "指标",
+      "value": "值",
+      "means": "含义"
+    },
+    "never_observed": "本窗口内从未观测到",
+    "too_few_samples": "样本仅 {{count}} 个 · 最大 {{max}}",
+    "footer": "版本 {{version}} · commit {{commit}} · goroutine {{goroutines}} · 推送并发闸容量 {{capacity}}",
+    "metric": {
+      "psp_poll_total": "流量轮询完成的周期数",
+      "psp_poll_error_total": "轮询失败次数（仅统计用户列表读取这一条错误路径）",
+      "psp_poll_ms": "一轮轮询的墙钟耗时",
+      "panel_fetch": "轮询中「等面板回话」那一段，通常占整轮的绝大部分",
+      "psp_push_client_config_total": "配额 floor 推送开始执行的次数（仅流量轮询这条路径）",
+      "psp_push_client_config_error_total": "其中失败的次数",
+      "psp_push_suppressed_total": "因跨周期守卫被跳过的推送",
+      "psp_push_sem_carryover_total": "推送溢出到下一周期的次数",
+      "psp_push_sem_wait_ms": "在并发闸上的等待时间（只由挤过队列的推送写入，因此是下限）",
+      "psp_lifecycle_sync_total": "共享客户端生命周期检查次数",
+      "psp_lifecycle_sync_write_total": "其中真的写入面板的次数",
+      "psp_lifecycle_sync_error_total": "其中写入失败的次数",
+      "psp_capability_gap_total": "面板存不下 PSP 要写的字段的次数"
     }
   }
 }

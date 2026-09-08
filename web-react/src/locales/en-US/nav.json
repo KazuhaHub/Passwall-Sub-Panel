@@ -13,7 +13,8 @@
     "logs": "Logs",
     "sync_tasks": "Sync tasks",
     "language_packs": "Language packs",
-    "settings": "Settings"
+    "settings": "Settings",
+    "diagnostics": "Diagnostics"
   },
   "section": {
     "directory": "Directory",
