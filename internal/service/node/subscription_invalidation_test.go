@@ -13,6 +13,16 @@ import (
 type getByIDRepo struct {
 	fakeNodeRepo
 	node *domain.Node
+	// enabledWritten / enabledValue record the column-scoped write so a test
+	// can assert the local row was committed even when the panel push and its
+	// retry both failed.
+	enabledWritten bool
+	enabledValue   bool
+}
+
+func (r *getByIDRepo) UpdateEnabled(_ context.Context, _ int64, enabled bool) error {
+	r.enabledWritten, r.enabledValue = true, enabled
+	return nil
 }
 
 func (r *getByIDRepo) GetByID(context.Context, int64) (*domain.Node, error) {

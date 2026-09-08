@@ -1774,8 +1774,11 @@ func (s *Service) UpdateProfile(ctx context.Context, userID int64, in UpdateInpu
 		serviceStateChanged = true
 	}
 	if groupChanged {
+		// ResyncMembershipOrEnqueue already returns nil when it managed to queue
+		// the work, so a non-nil error here means neither happened.
 		if err := s.ResyncMembershipOrEnqueue(ctx, userID, fmt.Sprintf("sync node membership for user %s", u.UPN)); err != nil {
 			log.Warn("enqueue user membership resync failed", "user_id", userID, "err", err)
+			return errUnqueuedPush("resync node membership", err, err)
 		}
 		return nil
 	}
@@ -1783,6 +1786,7 @@ func (s *Service) UpdateProfile(ctx context.Context, userID int64, in UpdateInpu
 		if err := s.pushClientConfigToAll(ctx, u); err != nil {
 			if taskErr := s.enqueueUserTask(ctx, domain.SyncTaskUserPushConfig, userID, fmt.Sprintf("sync enabled/expiry config for user %s", u.UPN)); taskErr != nil {
 				log.Warn("enqueue user config push failed", "user_id", userID, "err", taskErr)
+				return errUnqueuedPush("sync enabled/expiry config", err, taskErr)
 			}
 			return nil
 		}
@@ -2022,6 +2026,7 @@ func (s *Service) ChangeGroupAndSync(ctx context.Context, userID, newGroupID int
 	}
 	if err := s.ResyncMembershipOrEnqueue(ctx, userID, fmt.Sprintf("sync node membership for user %s", u.UPN)); err != nil {
 		log.Warn("enqueue user membership resync failed", "user_id", userID, "err", err)
+		return errUnqueuedPush("resync node membership", err, err)
 	}
 	return nil
 }
@@ -2382,6 +2387,7 @@ func (s *Service) SetEnabledAndSync(ctx context.Context, userID int64, enabled b
 	if pushErr != nil {
 		if taskErr := s.enqueueUserTask(ctx, domain.SyncTaskUserPushConfig, userID, fmt.Sprintf("sync enabled/expiry config for user %s", u.UPN)); taskErr != nil {
 			log.Warn("enqueue user config push failed", "user_id", userID, "err", taskErr)
+			return errUnqueuedPush("sync account enabled state", pushErr, taskErr)
 		}
 		return nil
 	}
@@ -2415,6 +2421,7 @@ func (s *Service) SetServiceSuspendedAndSync(ctx context.Context, userID int64, 
 	if err := s.pushClientConfigToAll(ctx, u); err != nil {
 		if taskErr := s.enqueueUserTask(ctx, domain.SyncTaskUserPushConfig, userID, fmt.Sprintf("sync service status for user %s", u.UPN)); taskErr != nil {
 			log.Warn("enqueue user service-status push failed", "user_id", userID, "err", taskErr)
+			return errUnqueuedPush("suspend proxy service", err, taskErr)
 		}
 		return nil
 	}
@@ -2448,6 +2455,7 @@ func (s *Service) ResumeServiceAndSync(ctx context.Context, userID int64) error 
 	if err := s.pushClientConfigToAll(ctx, u); err != nil {
 		if taskErr := s.enqueueUserTask(ctx, domain.SyncTaskUserPushConfig, userID, fmt.Sprintf("sync service resume for user %s", u.UPN)); taskErr != nil {
 			log.Warn("enqueue user service-resume push failed", "user_id", userID, "err", taskErr)
+			return errUnqueuedPush("resume proxy service", err, taskErr)
 		}
 		return nil
 	}

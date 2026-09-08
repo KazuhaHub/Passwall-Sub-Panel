@@ -664,15 +664,21 @@ func (s *Service) SetEnabled(ctx context.Context, id int64, enabled bool) error 
 	if err := s.nodes.UpdateEnabled(ctx, n.ID, enabled); err != nil {
 		return err
 	}
+	// A queued retry is a real outcome, so nil is right whenever the enqueue
+	// lands. It is only wrong when the enqueue ITSELF fails — then the panel
+	// still has the inbound enabled, nothing is pending, and the admin has been
+	// told the node is off. See errUnqueuedPush.
 	if clientErr != nil {
 		if taskErr := s.enqueueNodeTask(ctx, domain.SyncTaskNodeSetEnabled, n, "sync node enabled state", map[string]bool{"enabled": enabled}); taskErr != nil {
 			log.Warn("enqueue node enabled sync failed", "node_id", n.ID, "err", taskErr)
+			return errUnqueuedPush("set node enabled state", clientErr, taskErr)
 		}
 		return nil
 	}
 	if err := c.SetInboundEnable(ctx, n.InboundID, enabled); err != nil {
 		if taskErr := s.enqueueNodeTask(ctx, domain.SyncTaskNodeSetEnabled, n, "sync node enabled state", map[string]bool{"enabled": enabled}); taskErr != nil {
 			log.Warn("enqueue node enabled sync failed", "node_id", n.ID, "err", taskErr)
+			return errUnqueuedPush("set node enabled state", err, taskErr)
 		}
 		return nil
 	}
