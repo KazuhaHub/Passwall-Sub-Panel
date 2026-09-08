@@ -32,7 +32,17 @@ func (r *separatorRepo) Create(ctx context.Context, s *domain.SeparatorEntry) er
 
 func (r *separatorRepo) Update(ctx context.Context, s *domain.SeparatorEntry) error {
 	row := separatorFromDomain(s)
-	return r.db.WithContext(ctx).Save(row).Error
+	// created_at is omitted, not written. Save is a full-row write and the
+	// admin edit path builds its entry from the request DTO, which has no
+	// created_at — so every edit was stamping the column with Go's zero time
+	// and the row came back claiming to have been created in year 1. Nothing
+	// failed and nothing warned; the value was simply gone.
+	//
+	// Omitting rather than reloading the row: the column is immutable by
+	// definition, so a writer that cannot touch it is a stronger guarantee
+	// than one that carefully copies the old value forward and can be made to
+	// stop copying by the next refactor.
+	return r.db.WithContext(ctx).Omit("created_at").Save(row).Error
 }
 
 func (r *separatorRepo) Delete(ctx context.Context, id int64) error {

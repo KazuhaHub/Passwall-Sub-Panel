@@ -69,9 +69,12 @@ type Service struct {
 	// where runBackground falls back to an untracked safego.Go.
 	bg func(name string, fn func(ctx context.Context))
 	// invalidateSubscriptions is late-bound by app wiring because the node
-	// package must not import the group or render services. It is called only
-	// after an ordering transaction commits successfully.
+	// package must not import the group or render services. It fires after any
+	// successful write that changes what a subscription renders.
 	invalidateSubscriptions func()
+	// repoWrapped guards SetSubscriptionInvalidator against stacking a second
+	// decorator on a re-wire.
+	repoWrapped bool
 }
 
 // SetMemberResyncer late-binds the shared-client member resyncer (user.Service).
@@ -86,8 +89,37 @@ func (s *Service) SetBackgroundRunner(run func(name string, fn func(ctx context.
 
 // SetSubscriptionInvalidator wires cache invalidation for subscription-visible
 // node and separator mutations without coupling this package to render.
+//
+// Wiring the invalidator is ALSO what installs it, by wrapping this service's
+// repo handles (invalidating_repo.go). It used to be a call each mutating
+// method had to remember and 15 of 17 forgot — among them SetEnabled, so a
+// node the operator disabled kept being served for up to a minute, and
+// UpdateSeparator, so a disabled separator kept rendering while the admin UI
+// reported success. Making it a property of the WRITE means a new mutating
+// method cannot forget.
+//
+// Done here rather than in New so a Service assembled by struct literal — as
+// every test in this package does — behaves the same as the wired one the
+// moment it declares that it wants invalidation. Doing it in New would leave
+// those silently un-invalidating, which is the exact failure mode being fixed.
+//
+// Only THIS service's handles are wrapped. The traffic poll and health loop
+// keep the undecorated repos they were given, so their per-cycle column writes
+// do not keep the render cache empty.
 func (s *Service) SetSubscriptionInvalidator(invalidate func()) {
 	s.invalidateSubscriptions = invalidate
+	if s.repoWrapped {
+		// Idempotent: re-wiring must not stack a second wrapper, which would
+		// fire the same drop twice per write.
+		return
+	}
+	s.repoWrapped = true
+	if s.nodes != nil {
+		s.nodes = invalidatingNodeRepo{NodeRepo: s.nodes, notify: s.invalidateSubscriptionCaches}
+	}
+	if s.separators != nil {
+		s.separators = invalidatingSeparatorRepo{SeparatorRepo: s.separators, notify: s.invalidateSubscriptionCaches}
+	}
 }
 
 func (s *Service) invalidateSubscriptionCaches() {
@@ -303,11 +335,9 @@ func (s *Service) ReorderSeparators(ctx context.Context, updates []ports.Separat
 		}
 		seen[u.SeparatorID] = struct{}{}
 	}
-	if err := s.separators.BatchUpdateSortOrder(ctx, updates); err != nil {
-		return err
-	}
-	s.invalidateSubscriptionCaches()
-	return nil
+	// Invalidation rides the repo write (invalidating_repo.go), so no explicit
+	// call here — it would fire the same drop twice.
+	return s.separators.BatchUpdateSortOrder(ctx, updates)
 }
 
 // ImportExisting registers an inbound that already lives in 3X-UI under
@@ -561,11 +591,8 @@ func (s *Service) Reorder(ctx context.Context, updates []ports.NodeSortUpdate) e
 		}
 		seen[u.NodeID] = struct{}{}
 	}
-	if err := s.nodes.BatchUpdateSortOrder(ctx, updates); err != nil {
-		return err
-	}
-	s.invalidateSubscriptionCaches()
-	return nil
+	// Invalidation rides the repo write — see ReorderSeparators.
+	return s.nodes.BatchUpdateSortOrder(ctx, updates)
 }
 
 func (s *Service) UpdateMetadata(ctx context.Context, n *domain.Node) error {
