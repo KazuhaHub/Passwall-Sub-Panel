@@ -98,7 +98,12 @@ func (r *dnsCredentialRepo) Update(ctx context.Context, c *domain.DNSCredential)
 	if err != nil {
 		return err
 	}
-	return r.db.WithContext(ctx).Save(row).Error
+	// created_at is omitted, not written — see separatorRepo.Update for the
+	// same fix and the same reason. The admin edit path builds its
+	// DNSCredential from the request DTO (admin_cert.go), which has no such
+	// field, so a full-row Save stamped the column with Go's zero time on
+	// every rename or credential rotation.
+	return r.db.WithContext(ctx).Omit("created_at").Save(row).Error
 }
 
 func (r *dnsCredentialRepo) Delete(ctx context.Context, id int64) error {
