@@ -26,6 +26,23 @@ PUT /entity/:id 成功
 
 两个浏览器都能复现、且等待数秒后自行恢复，只能说明问题不属于某个浏览器引擎；它不构成给任意一层武断归因的证据。因此本约定不依赖「固定等待几秒」或某种浏览器缓存假设，而是直接消除错误的数据流：**成功写响应已经给出本次操作的权威结果时，不再用一次非必要的列表读覆盖它。**
 
+### 1.1 后续：找到了一个具体成因，并已修掉（2026-09-08）
+
+上面刻意不归因是对的——当时没有证据。事后复查找到了一个**具体、可验证**的候选，并已修复：
+
+**`/api/*` 的响应过去不带任何缓存指令。** `middleware.SecurityHeaders` 设了 HSTS / X-Frame-Options / CSP 等五个头，没有 `Cache-Control`；`deploy/nginx/passwall-sub-panel.conf` 对 `/api` 明确「Don't override here」；前端 axios 也没有任何防缓存措施。
+
+按 **RFC 9111 §4.2.2**,一个不带显式新鲜度信息的 200 GET **允许**被按启发式规则存储和复用。所以「没有指令」不等于「不要缓存」——它等于**把这个决定交给了浏览器和中间层**。而这个项目按设计就跑在反向代理后面，它自己的 CSP 还放行了 `static.cloudflareinsights.com`。
+
+修复是 `middleware.NoStoreAPI`（`internal/transport/http/middleware/no_store_api.go`）：给 `/api/*` 的响应加 `Cache-Control: no-store`。选 `no-store` 而不是 `no-cache`,是因为这些响应没有校验器（无 ETag、无 Last-Modified）,`no-cache` 会允许存储、却要求一次无从进行的重新验证；而且它们带的是账号数据和配置。中间件挂在路由之前，所以自己想清楚过缓存策略的 handler（`/api/i18n/:lang` 的 `no-cache` + ETag）仍然覆盖得掉。
+
+**这不推翻本文的任何约定。** 两件事是独立的：
+
+- 本文修的是**前端多做了一次会覆盖新值的读**——即使缓存被修掉，那次读也是多余的，而且未来任何一致性边界都会让它再次咬人；
+- `no-store` 修的是**那次读为什么会拿到旧值**——不修的话，第二个管理员、或 TTL 内的一次页面刷新，照样看到旧数据，只是不再有人注意到。
+
+**怎么自查**：F12 → Network → 保存后那次 GET，看有没有 `(from disk cache)` / `(from memory cache)`,或响应头里的 `cf-cache-status`。
+
 ---
 
 ## 2. 定稿：按操作类型选择同步方式

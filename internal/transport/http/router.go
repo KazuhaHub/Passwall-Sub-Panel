@@ -149,6 +149,12 @@ func NewRouter(d Deps) stdhttp.Handler {
 	// Referrer-Policy / CSP). Mounted early so every later handler — SPA
 	// fallback, SAML metadata, sub render — picks them up by default.
 	g.Use(middleware.SecurityHeaders())
+	// Mark /api responses uncacheable. Mounted right after SecurityHeaders and
+	// before every route so the default applies, while a handler that has
+	// thought about its own caching (/api/i18n/:lang serves no-cache + ETag)
+	// still overrides it. See NoStoreAPI for why the absence of a directive was
+	// not the same as "do not cache".
+	g.Use(middleware.NoStoreAPI())
 	// Stash the trusted-proxy decision into each request's context so handler
 	// helpers holding only an *http.Request (sub-URL inference, SAML SP entity
 	// URLs) can refuse to honour an attacker-supplied X-Forwarded-Host.
