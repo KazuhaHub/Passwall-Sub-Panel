@@ -102,6 +102,27 @@ function val(m: MetricsSnapshot, name: string): number {
 /** Windows shorter than this many intervals leave zeros inconclusive. */
 export const SETTLED_INTERVALS = 3
 
+/**
+ * The poll interval to judge a window against.
+ *
+ * Prefer what the traffic loop reports it is actually running on. The settings
+ * row is only what has been REQUESTED: the loop picks a change up on its next
+ * tick, so between the two the row says one minute while the ticker is still
+ * sleeping out five. Judging against the row there marks a window settled three
+ * minutes in and reports a healthy poll as dead — the exact false alarm every
+ * gate on this page exists to avoid, arriving through the gate's own input.
+ *
+ * Falls back to the settings value only when the gauge is absent, which means a
+ * server older than the gauge.
+ */
+export function effectivePollIntervalMs(
+  m: MetricsSnapshot,
+  settingsIntervalMs: number,
+): number {
+  const g = gauge(m, 'psp_poll_interval_ms')
+  return g && g.value > 0 ? g.value : settingsIntervalMs
+}
+
 export function windowMode(windowMs: number, pollIntervalMs: number): WindowMode {
   if (!(pollIntervalMs > 0)) return 'measuring' // interval unknown: never claim settled
   if (windowMs < pollIntervalMs) return 'blackout'

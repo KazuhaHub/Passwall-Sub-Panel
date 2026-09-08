@@ -1316,12 +1316,52 @@ func (a *App) Shutdown(ctx context.Context) error {
 	return httpErr
 }
 
+// nextTrafficInterval decides the cadence the traffic loop should run on next,
+// given the one it currently holds and a settings read that may have failed.
+//
+// Every path that is not a usable new value KEEPS the current interval. A zero
+// would panic time.Ticker.Reset, and a settings outage must not change how
+// often the fleet is metered — the read is a convenience for picking up an
+// admin's edit, not an input the loop depends on to keep running.
+//
+// Note the change lands one interval late by construction: the loop is asleep
+// in its select when the admin saves, so a 5m -> 1m edit takes effect on the
+// next 5m tick. That is the same bargain the health, geo and cert loops make,
+// and it is why the loop publishes what it HOLDS rather than what was asked
+// for - during that gap the two disagree, and a reader that trusts the request
+// will judge a healthy poll dead.
+func nextTrafficInterval(current time.Duration, s ports.UISettings, err error) time.Duration {
+	if err != nil || s.CronTrafficPullMinutes <= 0 {
+		return current
+	}
+	return time.Duration(s.CronTrafficPullMinutes) * time.Minute
+}
+
 func (a *App) runTrafficLoop(ctx context.Context) {
 	interval := a.trafficInterval
 	t := time.NewTicker(interval)
 	defer t.Stop()
+	metrics.PollIntervalMS.Set(interval.Milliseconds())
 	log.Info("traffic loop started", "interval", interval.String())
 	for {
+		// Re-read the cadence each cycle so an admin's change takes effect
+		// WITHOUT a restart, matching the health, geo and cert loops. This one
+		// captured its interval at boot, so changing cron_traffic_pull_minutes
+		// was a silent no-op on the loop that meters traffic, enforces quota
+		// and collects live IPs - the three things the setting exists to pace.
+		//
+		// The gauge is set here rather than beside the settings write because
+		// what a reader needs is the interval the ticker HOLDS, not the one
+		// that has been requested; between a change and this tick they differ,
+		// and a diagnostics reader that believes the requested one will call a
+		// healthy poll dead.
+		set, err := a.settings.Load(ctx, ports.UISettings{})
+		if next := nextTrafficInterval(interval, set, err); next != interval {
+			interval = next
+			t.Reset(interval)
+			log.Info("traffic loop interval changed", "interval", interval.String())
+		}
+		metrics.PollIntervalMS.Set(interval.Milliseconds())
 		select {
 		case <-ctx.Done():
 			return

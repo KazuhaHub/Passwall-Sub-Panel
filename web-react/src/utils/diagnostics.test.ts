@@ -5,6 +5,7 @@ import type { DiagnosticsSnapshot, MetricsSnapshot } from '@/api/diagnostics'
 import {
   SETTLED_INTERVALS,
   deriveFindings,
+  effectivePollIntervalMs,
   derivePreconditions,
   quantileUsable,
   verdict,
@@ -286,4 +287,44 @@ describe('locale coverage for computed keys', () => {
       }
     })
   }
+})
+
+// The live check that this test was written from: the settings row said one
+// minute while the traffic loop's ticker was still on five, so a four-minute
+// window looked settled, psp_poll_total was legitimately 0, and the page
+// reported a critical "the traffic poll is dead" about a healthy process. The
+// gate was right; its input was a value that had not taken effect yet.
+describe('effectivePollIntervalMs', () => {
+  it('believes the loop over the settings row when they disagree', () => {
+    const m = metrics({ gauges: [g('psp_poll_interval_ms', 5 * 60_000)] })
+    expect(effectivePollIntervalMs(m, 60_000)).toBe(5 * 60_000)
+  })
+
+  it('does not call a window settled while the loop is still on the old cadence', () => {
+    // 4 min elapsed, settings say 1 min (=> settled, poll must be dead),
+    // loop says 5 min (=> not even one cycle is due yet).
+    const m = metrics({
+      window_ms: 4 * 60_000,
+      counters: [c('psp_poll_total', 0)],
+      gauges: [g('psp_push_sem_capacity', 8), g('psp_poll_interval_ms', 5 * 60_000)],
+    })
+    expect(windowMode(m.window_ms, 60_000)).toBe('settled')
+    expect(windowMode(m.window_ms, effectivePollIntervalMs(m, 60_000))).toBe('blackout')
+
+    const s: DiagnosticsSnapshot = { ...snap(), metrics: m }
+    expect(deriveFindings(s, 60_000).map(f => f.id)).toContain('poll_dead')
+    expect(deriveFindings(s, effectivePollIntervalMs(m, 60_000)).map(f => f.id))
+      .not.toContain('poll_dead')
+  })
+
+  it('falls back to the settings row when the server is too old to publish the gauge', () => {
+    expect(effectivePollIntervalMs(metrics(), 60_000)).toBe(60_000)
+  })
+
+  it('treats a zero or missing gauge as no answer rather than as zero', () => {
+    // A zero interval would make windowMode refuse to settle forever, which
+    // hides real findings instead of merely delaying them.
+    const m = metrics({ gauges: [g('psp_poll_interval_ms', 0)] })
+    expect(effectivePollIntervalMs(m, 60_000)).toBe(60_000)
+  })
 })

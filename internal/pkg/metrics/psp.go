@@ -276,6 +276,18 @@ var (
 // wall-clock breakdown that until now only existed as debug log lines.
 // ---------------------------------------------------------------------
 var (
+	// The cadence the traffic loop is ACTUALLY running on, published by the
+	// loop itself rather than derived from the settings row. Those two
+	// diverge: an admin's change lands in settings immediately, and the loop
+	// picks it up on its next tick. A reader that assumes the settings value
+	// is live will call a healthy poll dead during that gap - it computes
+	// "several intervals have passed" against the new short interval while
+	// the loop is still sleeping out the old long one. Reporting what the
+	// ticker holds removes the guess.
+	PollIntervalMS = NewGauge(
+		"psp_poll_interval_ms",
+		"Interval the traffic loop's ticker is currently set to. Published by the loop, so it is the effective cadence rather than the configured one.",
+	)
 	PollTotal = NewCounter(
 		"psp_poll_total",
 		"Traffic poll cycles started.",

@@ -32,6 +32,7 @@ import {
   counterFamilyTotal,
   deriveFindings,
   derivePreconditions,
+  effectivePollIntervalMs,
   gauge,
   histogram,
   quantileUsable,
@@ -121,9 +122,13 @@ export default function DiagnosticsView() {
   }
 
   const m = snap.metrics
-  const mode = windowMode(m.window_ms, intervalMs)
-  const findings = deriveFindings(snap, intervalMs)
-  const preconditions = derivePreconditions(snap, intervalMs)
+  // What the loop is running on beats what the settings row asks for: they
+  // differ from the moment an admin saves until the loop's next tick, and
+  // every gate below is judged against this number.
+  const interval = effectivePollIntervalMs(m, intervalMs)
+  const mode = windowMode(m.window_ms, interval)
+  const findings = deriveFindings(snap, interval)
+  const preconditions = derivePreconditions(snap, interval)
   const v = verdict(findings, mode)
   const reset = wasReset(snap)
 
@@ -216,7 +221,7 @@ export default function DiagnosticsView() {
         // zero on the screen, and it gets read as one.
         <Alert severity="info">
           <Typography variant="body2">
-            {t('admin:diagnostics.blackout', { interval: duration(intervalMs || 300_000) })}
+            {t('admin:diagnostics.blackout', { interval: duration(interval || 300_000) })}
           </Typography>
         </Alert>
       ) : (
