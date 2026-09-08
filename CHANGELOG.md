@@ -4,7 +4,11 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
-## v3.9.2-beta.18 — 2026-09-08
+## v3.9.2-beta.20 — 2026-09-08
+
+> **v3.9.2-beta.18 与 v3.9.2-beta.19 是误发**,请勿使用。两个 tag 都被打在了一个月前的一个提交上（`380a633`,提交信息 "prepare v3.9.2-beta.6"），因此**不包含下列任何改动**——尽管面板左下角会显示那个版本号（版本号是构建时从 tag 注入的，不能证明代码是新的）。本节描述的内容全部在 beta.20 里。
+>
+> 未受影响：`:latest` 镜像只跟随正式版，beta 是 pre-release、不进 `/releases/latest`,所以面板内的升级提示也没有被带偏。
 
 **这一版的主题是「写入成功了，但什么都没发生」。** 起点是一条用户报告；顺着它的形状查下去，一共八处，各自独立。
 
