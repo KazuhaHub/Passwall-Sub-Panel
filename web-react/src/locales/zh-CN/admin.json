@@ -1390,7 +1390,14 @@
       "cap_void": "此上限整体不生效：{{panels}} 无法执行，用户只走这些面板即可绕过。",
       "cap_unknown": "无法确认此上限是否生效：{{panels}} 的状态读不到。未读到的前提不等于正常。",
       "cap_multiplied": "实际可达 {{total}}：上限按「面板 × 客户端」各自独立执行，该用户有 {{rows}} 份，每份各放行 {{typed}}。",
-      "cap_no_clients": "该用户在任何面板上都还没有客户端，此上限目前无处执行。"
+      "cap_no_clients": "该用户在任何面板上都还没有客户端，此上限目前无处执行。",
+      "cap_void_short": "整体不生效",
+      "cap_unknown_short": "无法确认是否生效",
+      "cap_multiplied_short": "实际可达 {{total}}",
+      "cap_no_clients_short": "暂无处执行",
+      "device_limit_inert_short": "当前不生效",
+      "limit_unsupported_short": "部分面板不支持",
+      "ip_limit_unenforced_short": "部分面板不执行"
     },
     "role": {
       "admin": "管理员",

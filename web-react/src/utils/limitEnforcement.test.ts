@@ -161,26 +161,54 @@ describe('isMisleading', () => {
   })
 })
 
-// Every verdict the assessors can emit must have wording in BOTH bundles.
-// The keys are computed at runtime, so a new verdict without copy renders as a
-// raw key rather than failing to compile — and this repo has already shipped a
-// missing en-US key that silently fell back to Chinese.
+// Every verdict the assessors can emit must have wording in BOTH bundles, and
+// in BOTH halves: the summary shown under the field and the detail behind the
+// click. The keys are computed at runtime, so a hint added with only one half
+// renders as a raw key rather than failing to compile — and this repo has
+// already shipped a missing en-US key that silently fell back to Chinese.
 describe('locale coverage', () => {
-  it('has wording in both bundles for every verdict that renders one', () => {
-    const keys: Record<Exclude<CapVerdict, 'unlimited' | 'exact'>, string> = {
-      never_enforced: 'device_limit_inert',
-      void: 'cap_void',
-      unknown: 'cap_unknown',
-      multiplied: 'cap_multiplied',
-      no_clients: 'cap_no_clients',
-    }
-    for (const key of Object.values(keys)) {
-      expect(zh.users.field, `zh-CN missing ${key}`).toHaveProperty(key)
-      expect(en.users.field, `en-US missing ${key}`).toHaveProperty(key)
+  // Verdicts that render nothing, so they need no wording.
+  const SILENT: CapVerdict[] = ['unlimited', 'exact']
+
+  const KEYS: Record<Exclude<CapVerdict, 'unlimited' | 'exact'>, string> = {
+    never_enforced: 'device_limit_inert',
+    void: 'cap_void',
+    unknown: 'cap_unknown',
+    multiplied: 'cap_multiplied',
+    no_clients: 'cap_no_clients',
+  }
+
+  // The fleet-wide hints on the create form share the same component and the
+  // same key-stem convention, so they are held to the same rule.
+  const CREATE_FORM_KEYS = ['limit_unsupported', 'ip_limit_unenforced']
+
+  it('covers every verdict that renders wording', () => {
+    expect(Object.keys(KEYS).length + SILENT.length).toBe(7)
+  })
+
+  it('has BOTH the summary and the detail, in both bundles', () => {
+    for (const key of [...Object.values(KEYS), ...CREATE_FORM_KEYS]) {
+      for (const [lang, bundle] of [['zh-CN', zh], ['en-US', en]] as const) {
+        expect(bundle.users.field, `${lang} missing detail ${key}`).toHaveProperty(key)
+        expect(bundle.users.field, `${lang} missing summary ${key}_short`).toHaveProperty(`${key}_short`)
+      }
     }
   })
 
-  it('keeps the placeholders the view interpolates', () => {
+  // A summary that runs to a sentence defeats the point — it reflows the form
+  // it was shortened to protect. Generous bound: this catches "somebody pasted
+  // the detail in", not a word of drift.
+  it('keeps summaries short enough to sit under a field', () => {
+    for (const key of [...Object.values(KEYS), ...CREATE_FORM_KEYS]) {
+      for (const [lang, bundle] of [['zh-CN', zh], ['en-US', en]] as const) {
+        const text = (bundle.users.field as Record<string, string>)[`${key}_short`]
+        expect(text.length, `${lang} ${key}_short is too long to be a summary: ${text}`)
+          .toBeLessThanOrEqual(32)
+      }
+    }
+  })
+
+  it('keeps the placeholders each half interpolates', () => {
     for (const bundle of [zh, en]) {
       const f = bundle.users.field as Record<string, string>
       expect(f.cap_void).toContain('{{panels}}')
@@ -188,6 +216,9 @@ describe('locale coverage', () => {
       for (const ph of ['{{total}}', '{{rows}}', '{{typed}}']) {
         expect(f.cap_multiplied).toContain(ph)
       }
+      // The summary carries only the number — the panel names are what the
+      // detail exists for.
+      expect(f.cap_multiplied_short).toContain('{{total}}')
     }
   })
 })

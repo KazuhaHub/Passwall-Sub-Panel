@@ -1390,7 +1390,14 @@
       "cap_void": "Void fleet-wide: {{panels}} cannot enforce it, so the user simply routes through those.",
       "cap_unknown": "Cannot confirm this is in force: {{panels}} could not be read. An unread precondition is not a working one.",
       "cap_multiplied": "Reachable total is {{total}}: the cap is enforced per panel-side client, and this user has {{rows}}, each allowing {{typed}}.",
-      "cap_no_clients": "This user has no panel-side client anywhere yet, so there is nothing enforcing this cap."
+      "cap_no_clients": "This user has no panel-side client anywhere yet, so there is nothing enforcing this cap.",
+      "cap_void_short": "Void fleet-wide",
+      "cap_unknown_short": "Cannot confirm",
+      "cap_multiplied_short": "Reaches {{total}}",
+      "cap_no_clients_short": "Nothing to enforce yet",
+      "device_limit_inert_short": "Not enforced",
+      "limit_unsupported_short": "Unsupported on some panels",
+      "ip_limit_unenforced_short": "Not enforced on some panels"
     },
     "role": {
       "admin": "Admin",

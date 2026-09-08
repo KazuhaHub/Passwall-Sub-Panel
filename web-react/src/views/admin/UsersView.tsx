@@ -72,7 +72,8 @@ import {
 import type { UpdateUserRequest } from '@/api/users'
 import { listGroups } from '@/api/groups'
 import { getLimitEnforcement, type LimitEnforcement, type LimitPanel } from '@/api/limitEnforcement'
-import { assessDeviceLimit, assessIPLimit, type CapAssessment } from '@/utils/limitEnforcement'
+import { assessDeviceLimit, assessIPLimit, isMisleading, type CapAssessment } from '@/utils/limitEnforcement'
+import FieldHint from '@/components/FieldHint'
 import { listServers, type Server } from '@/api/servers'
 import { deviceCapIsInert, ipCapUnenforcedPanels, unenforceablePanels } from '@/utils/capabilities'
 import { runReconcile } from '@/api/reconcile'
@@ -453,19 +454,11 @@ export default function UsersView() {
     // never runs. Naming panels here would be worse than silence — it
     // would imply the ones not named do enforce it.
     if (capability === 'client.devicelimit' && deviceCapIsInert(limit)) {
-      return (
-        <Box component="span" sx={{ color: 'warning.main' }}>
-          {t('admin:users.field.device_limit_inert')}
-        </Box>
-      )
+      return hint('device_limit_inert')
     }
     const panels = unenforceablePanels(limit, servers, capability)
     if (panels.length) {
-      return (
-        <Box component="span" sx={{ color: 'warning.main' }}>
-          {t('admin:users.field.limit_unsupported', { panels: panels.join('/ ') })}
-        </Box>
-      )
+      return hint('limit_unsupported', { panels: panels.join(' / ') })
     }
     // A panel that CAN store the cap can still be unable to act on it: 3X-UI
     // needs fail2ban on the node, and the write succeeds either way. Checked
@@ -474,14 +467,28 @@ export default function UsersView() {
     if (capability === 'client.iplimit') {
       const dead = ipCapUnenforcedPanels(limit, servers)
       if (dead.length) {
-        return (
-          <Box component="span" sx={{ color: 'warning.main' }}>
-            {t('admin:users.field.ip_limit_unenforced', { panels: dead.join('/ ') })}
-          </Box>
-        )
+        return hint('ip_limit_unenforced', { panels: dead.join(' / ') })
       }
     }
     return null
+  }
+
+  // Every cap hint is a short verdict plus the reasoning behind it, and the
+  // reasoning is one click away rather than inline: a full sentence under the
+  // field reflows the form as the admin types, and a warning that moves the
+  // layout around gets ignored as reliably as one that says nothing.
+  //
+  // The two halves share a key stem — `<key>` is the detail, `<key>_short` the
+  // summary — so a hint can never be added with only one of them written. The
+  // locale guard in utils/limitEnforcement.test.ts checks both.
+  function hint(key: string, vars?: Record<string, unknown>, tone?: 'warning' | 'muted') {
+    return (
+      <FieldHint
+        tone={tone}
+        summary={t(`admin:users.field.${key}_short`, vars ?? {})}
+        detail={t(`admin:users.field.${key}`, vars ?? {})}
+      />
+    )
   }
 
   // The per-user answer, used in the EDIT dialog only. The create form has no
@@ -506,28 +513,28 @@ export default function UsersView() {
     const names = (ps: LimitPanel[]) =>
       ps.map(p => p.name || `#${p.panel_id}`).join(' / ')
 
+    // Tone follows isMisleading rather than a second judgement made here: a
+    // verdict is drawn in warning colour exactly when the number on the form
+    // is not the number in force. 'multiplied' qualifies — the cap works, but
+    // the fleet-wide total is a multiple of what was typed, which is the whole
+    // reason this hint exists.
+    const tone = isMisleading(a.verdict) ? 'warning' : 'muted'
     switch (a.verdict) {
       case 'never_enforced':
-        return warn(t('admin:users.field.device_limit_inert'))
+        return hint('device_limit_inert', undefined, tone)
       case 'void':
-        return warn(t('admin:users.field.cap_void', { panels: names(a.voidPanels) }))
+        return hint('cap_void', { panels: names(a.voidPanels) }, tone)
       case 'unknown':
-        return warn(t('admin:users.field.cap_unknown', { panels: names(a.unknownPanels) }))
+        return hint('cap_unknown', { panels: names(a.unknownPanels) }, tone)
       case 'multiplied':
-        // Not styled as an error: it is the system working as designed, and
-        // it is the number the admin actually needs.
-        return warn(t('admin:users.field.cap_multiplied', {
+        return hint('cap_multiplied', {
           total: a.typed * a.enforcingRows, rows: a.enforcingRows, typed: a.typed,
-        }))
+        }, tone)
       case 'no_clients':
-        return <Box component="span" sx={{ color: 'text.secondary' }}>{t('admin:users.field.cap_no_clients')}</Box>
+        return hint('cap_no_clients', undefined, tone)
       default:
         return null
     }
-  }
-
-  function warn(text: string) {
-    return <Box component="span" sx={{ color: 'warning.main' }}>{text}</Box>
   }
 
   async function loadServers() {
