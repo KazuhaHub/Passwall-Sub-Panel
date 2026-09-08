@@ -1,16 +1,16 @@
 # PSP 自研节点后端（agent）设计
 
-- **状态**：编写中。**协议层尚未定稿**，等 [ADR 0024](adr/0024-psp-native-node-backend.md) 的前置作业（上游协议调研）。
+- **状态**：编写中。**上游协议调研已完成（§7，2026-09-08）**,ADR 0024 的前置作业因此解除；协议的端点与载荷仍待定稿（§8）。
 - **决策依据**：[ADR 0024](adr/0024-psp-native-node-backend.md)（2026-09-08 所有者已决定自研）、[ADR 0025](adr/0025-push-pull-decision-rule.md)（推/拉判据）、[data-plane-plan.md](data-plane-plan.md) Phase 2/3
 - **相关代码**：`internal/ports/xui.go`、`internal/adapters/panel`、`docs/panel-adapters.md`、`docs/inbound-ownership.md`
 
 ## 这份文档写到哪、为什么停在那
 
-**能从 PSP 自己的代码推导出来的部分现在就写死**——它们不依赖上游长什么样，调研结论不会推翻它们。
+**能从 PSP 自己的代码推导出来的部分现在就写死**——它们不依赖上游长什么样，调研结论没有推翻其中任何一条。
 
-**协议的线上形状（端点、载荷、认证、谁拨号）留空**，因为 ADR 0024 给自己立了一条规矩：先读完 3X-UI 3.7.0 自带的 master/node 协议再定，「不查就自己造，风险是重复造一个明年被上游做得更好的东西」。决心不废除这条约束。
+ADR 0024 给自己立了一条规矩：先读完上游的 master/node 协议再定形状，「不查就自己造，风险是重复造一个明年被上游做得更好的东西」。**这条约束已经履行**（§7），结论是：3X-UI 没有可复用的节点协议（它的"节点"就是另一台 3X-UI 面板），机场生态那套（V2bX/XrayR）有两样值得抄、两样必须避开、一样已经没有维护者。
 
-下文每个「⏸ 等调研」的小节都写明了它在等什么。
+仍然留空的是**端点与载荷的逐字段定稿**（§8）——那要等 `psp` 适配器的验收清单（§2 末尾那张映射表）先写出来。
 
 ## 0. 第一原则：我们的模型是主，3X-UI 和 S-UI 是被适配的对象
 
@@ -193,24 +193,77 @@ agent 协议要回答的是另一组问题，从我们自己的领域出发：
 
 [ADR 0025](adr/0025-push-pull-decision-rule.md) 的 Q2a 是「你控制节点上的软件吗」。对 3X-UI/S-UI 答案是**否**，所以 PSP 今天没有选择权。**自研后答案变成是**,Q2b 才第一次成为真问题。
 
-⏸ **等调研**——因为 Q2b 的答案取决于上游那套协议是否可复用（若可复用，拨号方向可能已被它定死）。但下列几条与调研无关，现在就能定：
+**调研已完成（§7.5）：方向定为节点拨出，但心跳与用量解耦，且面板侧对失联做独立判定。** 下列三条在调研之前就成立，调研只是给它们补上了外部证据：
 
-- **累计计数 vs 增量**和推/拉**正交**。PSP 现在读的是面板的累计值、自己做单调差分（`LastRawXxx` 基线），agent 应当继续上报**累计值**——可重放，丢一轮自愈。
-- **遥测若改成 agent 主动推，必须是「数字没变也照发」的心跳。** 否则「死掉的上报器」和「没人用的空闲节点」长得一模一样——这是本仓库反复出现、也反复设防的失效模式。
+- **累计计数 vs 增量**和推/拉**正交**。PSP 现在读的是面板的累计值、自己做单调差分（`LastRawXxx` 基线），agent 应当继续上报**累计值**——可重放，丢一轮自愈。**§7.3 给出了反例的代价**：V2bX 在发送前就把计数器清零，一次失败的 POST 永久丢账。
+- **遥测若改成 agent 主动推，必须是「数字没变也照发」的心跳。** 否则「死掉的上报器」和「没人用的空闲节点」长得一模一样——这是本仓库反复出现、也反复设防的失效模式。**§7.3：V2bX 正是这样翻的车**（没有流量就整轮不发）。
 - **单一拨号方今天在偷偷提供四样东西**，翻转前必须逐条给出替代品：对远端一行的互斥（`clientWriteLocks` 是包级锁）、`UpdateInbound` 的读-改-写窗口、失败域独立的第二观察者（健康探测）、以及**「这次没到」这个证据由谁制造**（PSP 拨号时它由 PSP 的传输层制造；改成 agent 推之后，它变成被观测组件对自己是否故障的自述）。
 
-## 7. ⏸ 协议形状（等调研）
+## 7. 上游协议调研（已完成 2026-09-08）
 
-**在读完以下四份源码之前不写：**
+四份源码里只有三份可读——**XrayR 上游仓库已被清空**（`xrayr-project/XrayR` 的 HEAD 是一次 "Clear all files" 提交，工作树为空），所以它由继承同一形状的 V2bX 代表。这一条本身就是结论的一部分：机场生态里那个"经典形状"的原始实现已经没有维护者了。
 
-| 源码 | 本地路径 | 版本 | 要回答 |
+### 7.1 三种形状，不是三个协议
+
+| | 3X-UI 3.7.0 | V2bX（XrayR 后继） | S-UI |
 |---|---|---|---|
-| 3X-UI | `/home/user/mhsanaei/3x-ui` | v3.7.0 | 自带的 master/node 协议（`/inbounds/pushClientTraffics`、`node-sync` token scope、节点 mTLS、`/nodes/history/*`）成熟度如何？可复用还是绑死在它自己的 master 上？ |
-| S-UI | `/home/user/alireza0/s-ui` | — | client 模型与 3X-UI 的差异，决定我们的模型要覆盖什么 |
-| XrayR | `/home/user/xrayr-project/xrayr` | `5ceba41` | 机场生态的经典形状：节点拉配置 + 推用量 |
-| V2bX | `/home/user/wyx2685/v2bx` | v0.4.1 | XrayR 的后继，多 core |
+| 节点是什么 | **另一个完整的 3X-UI 面板** | 瘦 agent（xray / sing-box） | 面板本身，无 master/node |
+| 谁拨号 | master → node | **node → panel**（节点无入站端口） | — |
+| 认证 | Bearer token（`node-sync` scope）或 **mTLS**（master 自签 CA） | `?token=` 查询参数 + `node_id` + `node_type`，**全局共享密钥** | — |
+| 配置传递 | master 写：`/inbounds/add`、`/clients/update/:email` … | node 拉：`GET /UniProxy/config`、`/user`，**ETag + 304** | — |
+| 用量传递 | master 拉（读 node 的累计计数器） | **node 推增量**：`POST /UniProxy/push` `{uid:[up,down]}` | — |
+| 在线设备 | master 拉 `/clients/onlinesByGuid` | node 推 `POST /UniProxy/alive`；**再从 `/alivelist` 拉回全局聚合值** | — |
 
-产出应当回答：**协议里哪些能借、哪些必须自己造、哪些上游已经做得比我们会做的好。**
+**3X-UI 没有"节点协议"可借。** 它的 node-sync 是同一套面板 API 加一张 21 条路由的白名单（`internal/web/controller/api.go:91`），节点必须**是**一个 3X-UI 面板。采用它等于让我们的 agent 变成 3X-UI——正是本次自研要摆脱的那笔兼容税。所以它对我们的价值是**参考**，不是复用。
+
+### 7.2 能借的三样
+
+- **ETag + `If-None-Match` + 304 的配置拉取**（V2bX `api/panel/node.go`、`user.go`）。这正是 ADR 0025 的 Q4 想要的东西：拉取的代价可以压到一次条件请求，配置不变时零载荷。V2bX 还在 304 之外再做一次 body 的 SHA-256 比对——因为**上游面板的 ETag 不可信**；我们两端都自己写，不需要这层补丁，但它提醒了一件事：ETag 必须由内容决定，不能由时间戳决定。
+- **msgpack 作为可选编码**（`X-Response-Format: msgpack`）。用户列表是唯一会随用户数线性增长的载荷，值得给它留一个编码协商位。
+- **面板聚合、节点执行**（`/UniProxy/alivelist`：面板把跨节点聚合后的每用户在线设备数发回节点，节点照它执行）。这正面回答了我们在 [connection-limits.md](connection-limits.md) 和 `PanelQuotaCap` 里记录的 **P× 放大**问题：单个节点看不见其他节点的加数，所以**求和必须发生在面板，把和发下去**，而不是把同一个上限发给每个节点。这条要抄，而且要抄到配额上，不只是设备数。
+
+### 7.3 必须自己造的两样（上游都做错了）
+
+**一、用量上报必须是累计值，不能是增量。**
+
+V2bX 的节点在**发送之前**就把本地计数器清零了：
+
+```go
+// core/xray/user.go:60  GetUserTrafficSlice(tag, reset=true)
+up := traffic.UpCounter.Load(); down := traffic.DownCounter.Load()
+if reset { traffic.UpCounter.Store(0); traffic.DownCounter.Store(0) }   // ← 先清零
+...
+// node/user.go:11  调用方
+userTraffic, _ := c.server.GetUserTrafficSlice(c.tag, true)
+err = c.apiClient.ReportUserTraffic(userTraffic)                        // ← 后发送
+if err != nil { log.Info("Report user traffic failed") }                // ← 只记日志
+```
+
+一次失败的 POST**永久丢掉那一窗口的用量**：计数器已经清了，没有重试、没有补发、没有任何一处知道丢了多少。而这恰恰发生在面板不可达的时候——也就是最可能连续失败的时候。
+
+PSP 今天读的是面板的累计值、自己做单调差分（`LastRawXxx` 基线），这个选择现在有了外部证据：**累计值可重放，丢一轮自愈；增量不可重放，丢一轮就是永久错账。** 本仓库已经为"重置检测"付出过代价（`counter_reset_test.go`），那是累计模型的已知成本，比永久丢账便宜得多。
+
+**二、心跳必须与用量解耦。**
+
+V2bX 在没有流量时**根本不发**（`node/user.go:12`：`if len(userTraffic) > 0`），而且 `GetUserTrafficSlice` 还会把低于阈值的用户整个跳过。于是"上报器死了"和"这个节点没人用"在面板侧**完全同形**——这正是本仓库反复设防的那个失效模式（诊断页的「零要看窗口」、`psp_live_ip_users_incomplete_total` 的 floor 标记、地理检测器的 `unknown ≠ clean`）。
+
+我们的 agent **必须在数字没变时也照发**，并且面板必须能区分"上报了 0"与"没有上报"。这条已经写在 §6，调研只是把它从"我们的经验"升级成"上游最广泛部署的实现确实这样翻车"。
+
+### 7.4 模型形状：跟 S-UI，不跟 3X-UI
+
+S-UI 的 `Client` 是**一等对象，横跨多个 inbound**（`database/model/model.go:25`，`Inbounds json.RawMessage` 是一个列表），并且自带 `Volume` / `Expiry` / `AutoReset` / `ResetDays` / `NextReset`。
+
+3X-UI 的 client 住在**某一个 inbound 的 settings JSON 里面**，所以"一个用户"在 P 个 inbound 上就是 P 份互相独立的副本——PSP 的扇出、`clientplan` 的拆分、以及 §5 那整套字段所有权机制，全都是在补这个模型缺陷。
+
+**我们的模型采用 S-UI 的形状**：一个用户对象，挂到 N 个 inbound 上，配额和到期是用户的属性而不是副本的属性。这不是偏好问题——P× 放大、`psp_user_clients_per_panel > 1` 时每份副本各带一套连接上限、以及"改一个字段要写 P 次"，三个已记录的问题都直接来自 3X-UI 的那个模型。
+
+### 7.5 拨号方向：Q2b 的答案
+
+调研没有把方向定死（3X-UI master 拨、V2bX node 拨，两种都在生产里跑），所以 §6 列的四件事仍然是判据。但调研加了一条**新的成本项**：
+
+V2bX 那种"节点拨出"的形态，让节点**不需要任何入站端口、不需要公网可达、不需要证书**——这是它在机场生态里胜出的真正原因，跟性能无关。代价是 §6 已经列出的第四条：**"这次没到"这个证据变成被观测组件对自己是否故障的自述**。V2bX 没有解决这个代价，它只是没有承认。
+
+所以 Q2b 的答案是：**节点拨出，但心跳与用量解耦，并且面板侧对"该到没到"做独立判定**（`last_seen` 超过 N 个心跳周期即判定失联，不依赖节点自己承认）。这样既拿到"不需要公网可达"的运维收益，又不把故障检测交给故障方自己。
 
 ## 8. ⏸ 其余未决
 
