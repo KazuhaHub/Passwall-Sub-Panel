@@ -94,6 +94,18 @@
 
 ### 2. agent 的 API 直接照 `ports.PanelClient` 的形状设计
 
+> **⚠️ 2026-09-08 已被推翻。** 所有者的方向修正：「我们不要被 3X-UI 带偏了。我们自己的为主，后续只兼容 3X-UI 和 S-UI，而不再主动向着他们。」
+>
+> 本节原来的论证有一个没说出口的前提：`ports.PanelClient` 是中立的。它不是——**它的形状是被 3X-UI 的 API 塑出来的**。照它设计 agent，等于把上游的模型搬进我们自己的后端，然后永久留在协议里。
+>
+> 实证：`BulkSetEnabled` 与 `BulkDetach` 在**生产代码里零调用**（只出现在 port 声明、两个适配器、以及被接口逼着实现它们的测试替身中）。它们在这个接口里的唯一原因是 3X-UI 提供了这两个端点。
+>
+> 修正后的方向见 [psp-node-agent.md](../psp-node-agent.md) §0。要点：**agent 的线上协议按 PSP 自己的领域模型设计**，`ports.PanelClient` 是内部接口、可以随后重塑，两者的阻抗由**我们自己的 `psp` 适配器**吸收——放在我们能看见也能拆掉的地方。
+>
+> 代价要记明：本 ADR「其它什么都不用改」这个卖点**被主动放弃了一部分**。它当初是决策依据之一，所以这里不含糊过去。
+
+以下为原文，保留供对照：
+
 `PanelClient` 目前是 **21 个必需方法**，加上 `CapabilityProvider` / `PanelUpdater` / `CoreUpdater` / `WebCertProvider` / `LiveIPReader` / `RealityScanner` 这些可选能力。
 
 适配 3X-UI 时，这 21 个方法是把 PSP 的意图**翻译**成别人的 API；自研时它们是**直接映射**。这消灭了适配层里绝大部分复杂度——不需要 `flexjson` 容忍类型漂移，不需要猜信封形状，不需要按版本开关能力。
