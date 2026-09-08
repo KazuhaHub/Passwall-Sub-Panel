@@ -26,9 +26,13 @@ type tlsCertificateRow struct {
 	NotBefore       *time.Time  `gorm:"column:not_before"`
 	NotAfter        *time.Time  `gorm:"column:not_after"`
 	Fingerprint     string      `gorm:"column:fingerprint;size:128;default:''"`
-	AutoRenew       bool        `gorm:"column:auto_renew;default:true"`
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
+	// *bool for the reason separatorRow.Enabled documents: a plain bool with a
+	// column default cannot store false on create, so a certificate created
+	// with auto-renew switched OFF was stored with it on — and the operator
+	// would only find out when it renewed anyway.
+	AutoRenew *bool `gorm:"column:auto_renew;default:true"`
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
 func (tlsCertificateRow) TableName() string { return "tls_certificates" }
@@ -55,7 +59,7 @@ func (r *tlsCertificateRow) toDomain() (*domain.TLSCertificate, error) {
 		NotBefore:       r.NotBefore,
 		NotAfter:        r.NotAfter,
 		Fingerprint:     r.Fingerprint,
-		AutoRenew:       r.AutoRenew,
+		AutoRenew:       r.AutoRenew != nil && *r.AutoRenew,
 		CreatedAt:       r.CreatedAt,
 		UpdatedAt:       r.UpdatedAt,
 	}, nil
@@ -87,7 +91,7 @@ func tlsCertificateFromDomain(c *domain.TLSCertificate) (*tlsCertificateRow, err
 		NotBefore:       c.NotBefore,
 		NotAfter:        c.NotAfter,
 		Fingerprint:     c.Fingerprint,
-		AutoRenew:       c.AutoRenew,
+		AutoRenew:       &c.AutoRenew,
 		CreatedAt:       c.CreatedAt,
 		UpdatedAt:       c.UpdatedAt,
 	}, nil

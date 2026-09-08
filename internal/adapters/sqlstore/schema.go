@@ -329,8 +329,12 @@ type nodeRow struct {
 	Port      int    `gorm:"default:0"`
 	Region    string `gorm:"size:16;not null"`
 	Tags      jsonStrings
-	SortOrder int  `gorm:"default:0"`
-	Enabled   bool `gorm:"default:true"`
+	SortOrder int `gorm:"default:0"`
+	// *bool for the reason separatorRow.Enabled documents: a plain bool with a
+	// column default cannot store false on create. A node created disabled came
+	// back enabled, which on this table means it was handed straight to every
+	// subscription — the one column where getting this wrong ships traffic.
+	Enabled *bool `gorm:"default:true"`
 	// Kind discriminates real 3X-UI-backed nodes from layout-only
 	// separator entries. Empty (the default for rows written before this
 	// column existed) is treated as "real" by the toDomain mapping so
@@ -417,7 +421,7 @@ func (r *nodeRow) toDomain() (*domain.Node, error) {
 		Region:                r.Region,
 		Tags:                  []string(r.Tags),
 		SortOrder:             r.SortOrder,
-		Enabled:               r.Enabled,
+		Enabled:               r.Enabled != nil && *r.Enabled,
 		Kind:                  kind,
 		LifetimeUpBytes:       r.LifetimeUpBytes,
 		LifetimeDownBytes:     r.LifetimeDownBytes,
@@ -476,7 +480,7 @@ func nodeFromDomain(n *domain.Node) (*nodeRow, error) {
 		Region:                n.Region,
 		Tags:                  jsonStrings(n.Tags),
 		SortOrder:             n.SortOrder,
-		Enabled:               n.Enabled,
+		Enabled:               &n.Enabled,
 		Kind:                  string(kind),
 		LifetimeUpBytes:       n.LifetimeUpBytes,
 		LifetimeDownBytes:     n.LifetimeDownBytes,
@@ -1079,7 +1083,14 @@ type separatorRow struct {
 	ID          int64  `gorm:"primaryKey;autoIncrement"`
 	DisplayName string `gorm:"size:255;not null"`
 	SortOrder   int    `gorm:"default:0"`
-	Enabled     bool   `gorm:"default:true"`
+	// *bool, not bool. GORM omits a zero-valued field from an INSERT when the
+	// column carries a default, so a plain `bool` with `default:true` CANNOT
+	// store false on create: an admin creating a separator with the toggle off
+	// got an enabled one. The column default is kept because AutoMigrate uses
+	// it to backfill rows that predate the column; the pointer is what stops
+	// Go's false from reading as "unset". Same trap the geo streak repo
+	// documents on its `complete` column.
+	Enabled *bool `gorm:"default:true"`
 	// Mode replaces the legacy show_in_all_groups bool. "global" =
 	// visible everywhere; "node_bound" = visible only when the group
 	// being rendered contains at least one node listed in NodeIDs.
@@ -1104,7 +1115,7 @@ func (r *separatorRow) toDomain() *domain.SeparatorEntry {
 		ID:          r.ID,
 		DisplayName: r.DisplayName,
 		SortOrder:   r.SortOrder,
-		Enabled:     r.Enabled,
+		Enabled:     r.Enabled != nil && *r.Enabled,
 		Mode:        mode,
 		NodeIDs:     []int64(r.NodeIDs),
 		CreatedAt:   r.CreatedAt,
@@ -1120,7 +1131,7 @@ func separatorFromDomain(s *domain.SeparatorEntry) *separatorRow {
 		ID:          s.ID,
 		DisplayName: s.DisplayName,
 		SortOrder:   s.SortOrder,
-		Enabled:     s.Enabled,
+		Enabled:     &s.Enabled,
 		Mode:        string(mode),
 		NodeIDs:     jsonInt64s(s.NodeIDs),
 		CreatedAt:   s.CreatedAt,
