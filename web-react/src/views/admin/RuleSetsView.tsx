@@ -187,9 +187,12 @@ export default function RuleSetsView() {
     setBusy(true)
     try {
       await saveRuleSet(form)
+      if (editing) {
+        setItems(prev => prev.map(item => item.slug === form.slug ? form : item))
+      }
       pushSnack(t('admin:rules.toast.saved'), 'success')
       setDialogOpen(false)
-      await load()
+      if (!editing) void load().catch(() => {})
     } finally { setBusy(false) }
   }
 

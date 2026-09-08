@@ -111,9 +111,9 @@ export default function LanguagePacksView() {
     setBusy(true)
     try {
       await saveLocale(pack)
+      await load()
       pushSnack(t('admin:languagePacks.toast.saved'), 'success')
       setDialogOpen(false)
-      await load()
       // The switcher's language list is built at boot, so a freshly-uploaded
       // pack only appears after a reload.
       pushSnack(t('admin:languagePacks.toast.reload_hint'), 'info')
