@@ -72,17 +72,21 @@ type dashboardCertAlert struct {
 }
 
 type dashboardSummaryResponse struct {
-	UserTotal     int                    `json:"user_total"`
-	UserEnabled   int                    `json:"user_enabled"`
-	UserDisabled  int                    `json:"user_disabled"`
-	UserEmergency int                    `json:"user_emergency"`
-	NodeTotal     int                    `json:"node_total"`
-	NodeEnabled   int                    `json:"node_enabled"`
-	NodeHealthy   int                    `json:"node_healthy"`
-	GroupCount    int                    `json:"group_count"`
-	ExpiringUsers []dashboardExpiringRow `json:"expiring_users"`
-	NodeAlerts    []dashboardNodeAlert   `json:"node_alerts"`
-	CertAlerts    []dashboardCertAlert   `json:"cert_alerts"`
+	UserTotal     int `json:"user_total"`
+	UserEnabled   int `json:"user_enabled"`
+	UserDisabled  int `json:"user_disabled"`
+	UserEmergency int `json:"user_emergency"`
+	NodeTotal     int `json:"node_total"`
+	NodeEnabled   int `json:"node_enabled"`
+	NodeHealthy   int `json:"node_healthy"`
+	// NodeInconclusive counts enabled nodes whose probe ran and could not
+	// decide. Separate from both healthy and the alert list on purpose — see
+	// domain.NodeHealthInconclusive.
+	NodeInconclusive int                    `json:"node_inconclusive"`
+	GroupCount       int                    `json:"group_count"`
+	ExpiringUsers    []dashboardExpiringRow `json:"expiring_users"`
+	NodeAlerts       []dashboardNodeAlert   `json:"node_alerts"`
+	CertAlerts       []dashboardCertAlert   `json:"cert_alerts"`
 }
 
 // Summary returns the aggregate values the admin dashboard renders.
@@ -140,9 +144,16 @@ func (h *AdminDashboardHandler) Summary(c *gin.Context) {
 			continue
 		}
 		resp.NodeEnabled++
-		if n.HealthState == domain.NodeHealthOK {
+		switch {
+		case n.HealthState == domain.NodeHealthOK:
 			resp.NodeHealthy++
-		} else if n.HealthState != "" {
+		case n.HealthState == domain.NodeHealthInconclusive:
+			// Counted, never alerted, never healthy. It needs its own number
+			// precisely because it is neither: without one it would be
+			// invisible here, and "the probe cannot see these N nodes" is the
+			// fact an operator most needs when the fleet looks fine.
+			resp.NodeInconclusive++
+		case n.HealthState != "":
 			alerts = append(alerts, n)
 		}
 	}

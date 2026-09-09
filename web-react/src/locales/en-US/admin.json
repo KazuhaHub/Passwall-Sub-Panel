@@ -1263,7 +1263,9 @@
       "inbound_disabled": "Inbound disabled",
       "unknown": "Not probed yet",
       "never": "never",
-      "checked_at": "Last check: {{time}}"
+      "checked_at": "Last check: {{time}}",
+      "unreachable": "Unreachable",
+      "inconclusive": "Cannot determine"
     },
     "config_sync": {
       "synced": "Config in sync",

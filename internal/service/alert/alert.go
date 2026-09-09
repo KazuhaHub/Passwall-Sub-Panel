@@ -187,6 +187,15 @@ func (s *Service) nodeHealth(ctx context.Context) []Alert {
 		if n.HealthState == "" || n.HealthState == domain.NodeHealthOK {
 			continue
 		}
+		// Inconclusive is NOT an alert. A UDP node running obfuscation is
+		// unprobeable by design, so this state is permanent for it, and an
+		// alert that fires forever on something nobody can fix is how a reader
+		// learns to ignore the whole channel. It stays visible as its own
+		// state on the node list and in the dashboard's own counter — this
+		// only keeps it out of the notification stream.
+		if n.HealthState == domain.NodeHealthInconclusive {
+			continue
+		}
 		bad = append(bad, n)
 	}
 	// Most-recently-checked first (mirrors the dashboard), nil checked-at last.

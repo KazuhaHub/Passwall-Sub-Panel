@@ -140,7 +140,11 @@ export interface Node {
    *  server/inbound/health metadata. */
   kind?: 'real' | 'separator'
   /** Most recent health-probe outcome. Empty before the first tick has run. */
-  health_state?: '' | 'ok' | 'panel_unreachable' | 'inbound_missing' | 'inbound_disabled'
+  // 'unreachable' and 'inconclusive' are the only two the data-plane probe
+  // actually writes today; the other three have had no producer since v3.5.
+  // Leaving 'unreachable' out of this union is how it ended up rendering as
+  // the empty/never-probed state — a down node shown as no signal.
+  health_state?: '' | 'ok' | 'unreachable' | 'inconclusive' | 'panel_unreachable' | 'inbound_missing' | 'inbound_disabled'
   /** RFC3339 timestamp of the last probe (regardless of outcome). */
   health_checked_at?: string | null
   /** Error string for the most recent failed probe; empty when healthy. */

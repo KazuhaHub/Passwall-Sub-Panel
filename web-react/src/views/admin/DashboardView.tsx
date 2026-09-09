@@ -31,6 +31,7 @@ import TzHint from '@/components/TzHint'
 import { useSiteStore } from '@/stores/site'
 import { formatDualDate, panelDayStr } from '@/utils/datetime'
 import type { M3Tokens } from '@/theme'
+import { nodeHealthColor } from '@/views/admin/nodeHealth'
 
 const TrafficChart = lazy(() => import('@/components/TrafficChart'))
 
@@ -415,11 +416,11 @@ function AlertCard({ title, icon, emptyLabel, empty, loading, to, md, children }
   )
 }
 
+// Delegates to the shared table so this view and the node list cannot disagree
+// about what a state means — and so nodeHealth.test.ts governs both. Before the
+// 2026-09-09 fix neither had an entry for `unreachable`, the one state the
+// data-plane probe actually writes, so a down node rendered as the grey
+// never-probed dot in both places.
 function healthColor(md: M3Tokens, state: string): string {
-  switch (state) {
-    case 'panel_unreachable': return md.error
-    case 'inbound_missing': return '#f97316'
-    case 'inbound_disabled': return '#9ca3af'
-    default: return md.outlineVariant
-  }
+  return nodeHealthColor(state, md)
 }

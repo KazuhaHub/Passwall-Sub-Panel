@@ -278,6 +278,12 @@ func coarseNodeStatus(s domain.NodeHealthState) string {
 		return "ok"
 	case domain.NodeHealthPanelUnreachable, domain.NodeHealthInboundMissing, domain.NodeHealthInboundDisabled, domain.NodeHealthUnreachable:
 		return "down"
+	case domain.NodeHealthInconclusive:
+		// Explicit rather than left to default: a subscriber must not be told
+		// a working node is down because our probe cannot see it, and must not
+		// be told it is up either. Same bucket as "not yet probed", which is
+		// what it honestly is from the portal's point of view.
+		return "unknown"
 	default:
 		return "unknown"
 	}

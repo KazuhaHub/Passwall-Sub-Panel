@@ -1263,7 +1263,9 @@
       "inbound_disabled": "Inbound 已关闭",
       "unknown": "尚未探测",
       "never": "尚未运行",
-      "checked_at": "上次探测：{{time}}"
+      "checked_at": "上次探测：{{time}}",
+      "unreachable": "不可达",
+      "inconclusive": "无法判定"
     },
     "config_sync": {
       "synced": "配置已同步",

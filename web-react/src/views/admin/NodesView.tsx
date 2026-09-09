@@ -75,6 +75,7 @@ import { PagedTableFooter } from '@/components/PagedTableFooter'
 import { pushSnack } from '@/components/SnackbarHost'
 import { useTabParam } from '@/hooks/useTabParam'
 import RealityTargetScannerDialog from './RealityTargetScannerDialog'
+import { nodeHealthColor } from './nodeHealth'
 import { CONFIG_SYNC_KEY, CONFIG_SYNC_STATES, configSyncColor, humanizeSince, type ConfigSyncState } from './configSync'
 import { TLSCipherSuitesSelect } from './TLSCipherSuitesSelect'
 import {
@@ -2759,14 +2760,21 @@ export default function NodesView() {
       return <Typography sx={{ fontSize: 13, color: md.onSurfaceVariant }}>—</Typography>
     }
     const state = n.health_state || ''
-    const palette: Record<string, { bg: string; label: string }> = {
-      ok:                   { bg: '#22c55e', label: t('admin:nodes.health.ok',                   { defaultValue: '健康' }) },
-      panel_unreachable:    { bg: md.error,  label: t('admin:nodes.health.panel_unreachable',    { defaultValue: '面板不可达' }) },
-      inbound_missing:      { bg: '#f97316', label: t('admin:nodes.health.inbound_missing',      { defaultValue: 'Inbound 缺失' }) },
-      inbound_disabled:     { bg: '#9ca3af', label: t('admin:nodes.health.inbound_disabled',     { defaultValue: 'Inbound 已关闭' }) },
-      '':                   { bg: md.outlineVariant, label: t('admin:nodes.health.unknown',      { defaultValue: '尚未探测' }) },
+    // Colour comes from nodeHealth.ts so the guard in nodeHealth.test.ts governs
+    // what actually renders here, rather than a second copy of the table that
+    // can drift from it. The label still falls back to the never-probed wording
+    // for an unrecognised state, but every state the backend can write now has
+    // its own key — which is what the guard asserts.
+    const labels: Record<string, string> = {
+      ok:                t('admin:nodes.health.ok',                { defaultValue: '健康' }),
+      unreachable:       t('admin:nodes.health.unreachable',       { defaultValue: '不可达' }),
+      inconclusive:      t('admin:nodes.health.inconclusive',      { defaultValue: '无法判定' }),
+      panel_unreachable: t('admin:nodes.health.panel_unreachable', { defaultValue: '面板不可达' }),
+      inbound_missing:   t('admin:nodes.health.inbound_missing',   { defaultValue: 'Inbound 缺失' }),
+      inbound_disabled:  t('admin:nodes.health.inbound_disabled',  { defaultValue: 'Inbound 已关闭' }),
+      '':                t('admin:nodes.health.unknown',           { defaultValue: '尚未探测' }),
     }
-    const p = palette[state] ?? palette['']
+    const p = { bg: nodeHealthColor(state, md), label: labels[state] ?? labels[''] }
     const checkedAt = n.health_checked_at ? formatDualTz(n.health_checked_at, panelTz) : t('admin:nodes.health.never', { defaultValue: '尚未运行' })
     const tooltip = (
       <Box sx={{ fontSize: 12, lineHeight: 1.5 }}>

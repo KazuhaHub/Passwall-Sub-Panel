@@ -767,6 +767,24 @@ const (
 	// failed — i.e. the proxy endpoint isn't actually reachable from the panel
 	// server. This is the data-plane probe layered on top of the inbound check.
 	NodeHealthUnreachable NodeHealthState = "unreachable"
+	// NodeHealthInconclusive means the probe RAN and could not decide. It is
+	// deliberately distinct from NodeHealthUnknown ("" = never probed): a
+	// detector that cannot see is not the same fact as a detector that has not
+	// looked yet, and collapsing the two is how a blind probe starts reading as
+	// a clean fleet.
+	//
+	// It exists because of connectionless UDP. A QUIC endpoint that answers our
+	// version-negotiation probe is provably up; one that returns ICMP
+	// port-unreachable is provably down; SILENCE is neither — it is a filtered
+	// port, a dead host, or a live Hysteria2 server with obfuscation enabled
+	// that is designed not to answer strangers. Reporting silence as "ok" (what
+	// this code did until 2026-09-09) made the UDP probe structurally incapable
+	// of ever saying anything but "up".
+	//
+	// Consumers must treat it as "not healthy" but NOT as an alert: an
+	// obfuscated node is permanently unprobeable, and a detector that fires
+	// forever on a condition nobody can fix trains its reader to ignore it.
+	NodeHealthInconclusive NodeHealthState = "inconclusive"
 )
 
 // NodeTrafficSnapshot is the per-node analogue of TrafficSnapshot: a
