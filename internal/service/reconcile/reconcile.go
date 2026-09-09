@@ -426,8 +426,14 @@ func (s *Service) checkMissingOwnershipsWithCtx(
 		// whenever Node.Flow was blank — a broken xtls-rprx-vision connection.
 		flow := resolveFlow(protocol, n, ce)
 
-		// Quota and connection caps left zero (= unlimited); the next
-		// traffic-poll cycle pushes the real ones. Reconcile only heals drift.
+		// The connection caps ARE carried (IPLimit/DeviceLimit below); only the
+		// QUOTA is left at zero, which the panel reads as no cap. The comment
+		// here used to claim both were zero and that "the next traffic-poll
+		// cycle pushes the real ones" — the poll's floor re-push is gated on the
+		// user having moved bytes that cycle, so for an idle user it does not.
+		// This path is reached only with an EffectiveEnabled gate above it
+		// (unlike checkOne's), so Enable is genuinely known-true here rather
+		// than assumed.
 		err = s.syncer.AddClientToInbound(ctx, u.ID, n.PanelID, n.InboundID, protocol, ce.method, u.UUID, email, flow,
 			domain.UserLifecycle{Enable: true, ExpiryTime: expireTime, IPLimit: u.IPLimit, DeviceLimit: u.DeviceLimit}, 0)
 
@@ -638,9 +644,16 @@ func (s *Service) checkOne(ctx context.Context, u *domain.User, e *domain.XUICli
 
 	// Check 1: existence
 	if found == nil {
+		// desiredEnable, NOT a hardcoded true. This recreates a client that went
+		// missing, and it used to recreate it ENABLED regardless of the user's
+		// real state — so a suspended or expired account whose client vanished
+		// came back serving traffic, and stayed that way until Check 3 caught it
+		// on a LATER pass (the cron is 15 minutes by default). The entries loop
+		// here has no EffectiveEnabled gate of its own, so nothing else was
+		// holding that line.
 		if err := s.syncer.AddClientToInbound(ctx, u.ID, e.PanelID, e.InboundID,
 			protocol, ce.method, u.UUID, e.ClientEmail, desiredFlow,
-			domain.UserLifecycle{Enable: true, ExpiryTime: expireTime, IPLimit: u.IPLimit, DeviceLimit: u.DeviceLimit}, 0); err != nil {
+			domain.UserLifecycle{Enable: desiredEnable, ExpiryTime: expireTime, IPLimit: u.IPLimit, DeviceLimit: u.DeviceLimit}, 0); err != nil {
 			return &Issue{
 				PanelID:   e.PanelID,
 				PanelName: s.panelNameOf(e.PanelID), InboundID: e.InboundID, ClientEmail: e.ClientEmail,

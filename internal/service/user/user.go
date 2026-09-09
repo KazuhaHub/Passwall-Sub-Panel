@@ -47,19 +47,6 @@ type ClientSyncer interface {
 		protocol domain.Protocol, ssMethod, oldUUID, newUUID, flow string, want domain.UserLifecycle, panelLifetime int64) error
 }
 
-// TrafficUsageReader yields the bytes a user has consumed in their current
-// traffic period. user.Service needs this to compute the per-client floor
-// it pushes into 3X-UI (TrafficFloorBytes = limit - period_used). Defined
-// as an interface so user doesn't have to import traffic — the actual
-// implementation lives in traffic.Service and is wired late in app.Build.
-//
-// nil-safe: when the reader is nil (early-start path), trafficFloor returns
-// 0 (= unlimited on the 3X-UI side) — equivalent to the historical
-// behaviour before the floor was added.
-type TrafficUsageReader interface {
-	CurrentPeriodUsage(ctx context.Context, u *domain.User) (int64, error)
-}
-
 type Service struct {
 	users     ports.UserRepo
 	groups    ports.GroupRepo
@@ -73,11 +60,6 @@ type Service struct {
 	// changes. It is wired once during router construction and is nil in tests
 	// that do not exercise HTTP authentication.
 	authInvalidator func(int64)
-	// trafficUsage is set lazily via SetTrafficUsage after traffic.Service
-	// is constructed (traffic depends on user, so user must exist first).
-	// May be nil during early-start; trafficFloor degrades to 0 in that case.
-	trafficUsage TrafficUsageReader
-
 	// bg, when set via SetBackgroundRunner, routes fire-and-forget background
 	// work (group-member resync) through the app's tracked async dispatcher so
 	// App.Shutdown drains it and it runs under a cancellable background context.
@@ -438,15 +420,6 @@ func New(users ports.UserRepo, groups ports.GroupRepo, ownership ports.Ownership
 	}
 }
 
-// SetTrafficUsage wires the late-bound traffic-usage reader. traffic.Service
-// implements TrafficUsageReader but is constructed after user.Service (it
-// takes user.Service as its disabler), so we can't pass it through New().
-// Calling SetTrafficUsage with nil disables floor computation, keeping the
-// 3X-UI side at "unlimited" on every push (the historical behaviour).
-func (s *Service) SetTrafficUsage(r TrafficUsageReader) {
-	s.trafficUsage = r
-}
-
 // trafficFloor returns the bytes value to push into 3X-UI's per-client
 // totalGB for u. 0 means "no cap on 3X-UI side" — used for unlimited
 // users, when the reader isn't wired, or on any error reading usage. Any
@@ -477,16 +450,17 @@ func (s *Service) trafficFloor(ctx context.Context, u *domain.User) int64 {
 	if u.EmergencyUntil != nil && time.Now().Before(*u.EmergencyUntil) {
 		return s.emergencyFloor(ctx, u)
 	}
-	if s.trafficUsage == nil {
-		return 0
-	}
-	used, err := s.trafficUsage.CurrentPeriodUsage(ctx, u)
-	if err != nil {
-		log.Warn("traffic floor: usage read failed, defaulting to unlimited",
-			"user_id", u.ID, "err", err)
-		return 0
-	}
-	return TrafficFloorBytes(u.TrafficLimitBytes, used)
+	// Period usage is read straight off the user row. It used to go through a
+	// late-wired TrafficUsageReader with two "cannot read -> 0" exits — a nil
+	// guard and an error branch — and BOTH resolved to 0, which the panel reads
+	// as no cap. They were defending a call that could not fail:
+	// traffic.CurrentPeriodUsage forwarded to periodUsage, whose whole body was
+	// `return u.PeriodUsed(), nil` — a subtraction of two columns already on the
+	// user in hand. So the guards bought nothing and stood ready to convert any
+	// future read failure into a silently unlimited user. Removing the indirection
+	// deletes both branches rather than making them handle the error better: the
+	// failure they guarded can no longer be expressed.
+	return TrafficFloorBytes(u.TrafficLimitBytes, u.PeriodUsed())
 }
 
 // emergencyFloor computes the 3X-UI floor for a user inside an active

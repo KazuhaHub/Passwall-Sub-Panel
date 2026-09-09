@@ -313,11 +313,11 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	userSvc := user.New(repos.User, repos.Group, repos.Ownership, repos.SyncTask, groupSvc, syncSvc, pool, repos.ScopedSettings)
 	nodeSvc := node.New(repos.Node, repos.Separator, pool, syncSvc, repos.SyncTask, repos.Group, repos.User)
 	trafficSvc := traffic.New(repos.User, repos.Ownership, repos.Traffic, repos.Node, repos.NodeTraffic, pool, userSvc).WithSettings(repos.ScopedSettings)
-	// Wire the two-way dependency for the traffic-floor safety net: user
-	// needs traffic to compute current-period usage; traffic needs user to
-	// push the resulting floor into 3X-UI after each poll. Both fields are
-	// nil-tolerant so the order here doesn't open a startup race window.
-	userSvc.SetTrafficUsage(trafficSvc)
+	// traffic needs user to push the per-client floor into 3X-UI after each
+	// poll. The reverse edge is gone: user used to take a late-wired usage
+	// reader back from traffic, but that reader only ever subtracted two
+	// columns already on the user row, while its nil- and error-guards both
+	// resolved to "unlimited". It reads the row directly now.
 	trafficSvc.SetConfigPusher(userSvc)
 	// Recreate-inbound provisions the node's members' shared clients via the user
 	// service (immediate, with sync-task fallback). Late-bound to avoid node→user import.

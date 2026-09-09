@@ -24,13 +24,13 @@ const gib = int64(1) << 30
 // A user with no snapshot is ordinary: retention prunes them
 // (rawTrafficRetentionDays), and a v2 import carries period counters without
 // any snapshot history.
-func TestCurrentPeriodUsage_IgnoresMissingSnapshot(t *testing.T) {
+func TestPeriodUsage_IgnoresMissingSnapshot(t *testing.T) {
 	svc := &Service{traffic: &fakeTrafficRepo{}} // no snapshots → ErrNotFound
 	u := &domain.User{ID: 7, LifetimeTotalBytes: 190 * gib, PeriodBaselineBytes: 0}
 
-	got, err := svc.CurrentPeriodUsage(context.Background(), u)
+	got, err := svc.periodUsage(context.Background(), u, nil)
 	if err != nil {
-		t.Fatalf("CurrentPeriodUsage = %v, want nil error", err)
+		t.Fatalf("periodUsage = %v, want nil error", err)
 	}
 	if want := u.PeriodUsed(); got != want {
 		t.Fatalf("usage = %d, want %d (the user row's own counters); a missing snapshot "+
@@ -40,13 +40,13 @@ func TestCurrentPeriodUsage_IgnoresMissingSnapshot(t *testing.T) {
 
 // The period baseline is what makes this a PERIOD figure rather than a lifetime
 // one, so it has to survive the same path.
-func TestCurrentPeriodUsage_SubtractsPeriodBaseline(t *testing.T) {
+func TestPeriodUsage_SubtractsPeriodBaseline(t *testing.T) {
 	svc := &Service{traffic: &fakeTrafficRepo{}}
 	u := &domain.User{ID: 8, LifetimeTotalBytes: 500 * gib, PeriodBaselineBytes: 460 * gib}
 
-	got, err := svc.CurrentPeriodUsage(context.Background(), u)
+	got, err := svc.periodUsage(context.Background(), u, nil)
 	if err != nil {
-		t.Fatalf("CurrentPeriodUsage = %v, want nil error", err)
+		t.Fatalf("periodUsage = %v, want nil error", err)
 	}
 	if got != 40*gib {
 		t.Fatalf("usage = %d, want %d", got, 40*gib)
@@ -55,10 +55,10 @@ func TestCurrentPeriodUsage_SubtractsPeriodBaseline(t *testing.T) {
 
 // A nil user is still 0 — the floor path calls this before it has decided
 // whether the user is worth pushing for.
-func TestCurrentPeriodUsage_NilUser(t *testing.T) {
+func TestPeriodUsage_NilUser(t *testing.T) {
 	svc := &Service{traffic: &fakeTrafficRepo{}}
-	got, err := svc.CurrentPeriodUsage(context.Background(), nil)
+	got, err := svc.periodUsage(context.Background(), nil, nil)
 	if err != nil || got != 0 {
-		t.Fatalf("CurrentPeriodUsage(nil) = (%d, %v), want (0, nil)", got, err)
+		t.Fatalf("periodUsage(nil) = (%d, %v), want (0, nil)", got, err)
 	}
 }

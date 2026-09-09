@@ -8,6 +8,32 @@ small improvement).
 
 ### 修复
 
+- **两条「读不出来 = 无限额」的出口，被删掉而不是被改好。** `user.trafficFloor` 通过一个晚绑定的
+  `TrafficUsageReader` 去取周期用量，并为它准备了两道防线：reader 为 nil、以及读取返回错误——
+  **两道都 return 0，而面板把 0 读成「没有配额」**。而它们守的那次调用**不可能失败**：
+  `traffic.CurrentPeriodUsage` 转发给 `periodUsage`，后者的函数体就是
+  `return u.PeriodUsed(), nil`——两个已经在手上的列相减。所以这两道防线一分钱没买到，却随时准备
+  把将来某个真实的读失败翻译成「这个用户没有限额」。
+
+  修法不是把错误处理得更好，是**让那条会失败的路径不存在**：`trafficFloor` 直接读用户行，
+  `TrafficUsageReader` / `SetTrafficUsage` / `traffic.CurrentPeriodUsage` 一并删除。分支消失了，
+  不是被妥善处理了。两个原本断言「降级为无限额」的测试**被删除而不是被适配**——它们钉住的正是缺陷；
+  换成一条反向断言：一个有限额的用户，无论用量是多少，都不可能得到 0。
+
+- **丢失的客户端被重建时会忽略用户的真实启用状态。** reconcile 的 Check 1 把
+  `Enable` 写死成 `true`，而两行之上刚算出来的 `desiredEnable` 就在那里没被用。它的调用循环
+  **没有** `EffectiveEnabled` 闸（`checkMissingOwnerships` 有，Check 1 所在的这条没有），
+  所以没有别的东西守着这条线：一个被停用或已过期的账号，只要客户端恰好丢失，就会被重建成
+  **正在服务**，并一直保持到下一轮 Check 3 发现——而 reconcile 的 cron 默认 15 分钟。
+
+  > **范围要说清楚**：这条路径（`checkOne` / `checkMissingOwnerships`）遍历的是**旧版**
+  > ownership 表，而共享客户端迁移会把它 DROP 掉。在**已迁移的装机上它一次都不会跑**
+  > （`Report.Scanned` 恒为 0，包注释里写着）。所以这个修复只对尚未迁移的装机有实际效果；
+  > 之所以仍然要改，是因为它在那些装机上是真的，而且留着一个写死的 `true` 就是留着一颗雷。
+  > 同一条路径上「配额被推成 0」的问题也一并复核过——它同样只存在于那条已死的路径上，
+  > 而迁移后真正的写入方（`sharedclient.SyncLifecycle`）算的是真实 floor。
+
+
 - **健康探测会把节点的端口改回去，而且是唯一能把它改成 0 的地方。** `UpdateHealth` 一直在写
   `port` / `protocol` 两列，注释说这是「顺带刷新从 inbound 学到的探测目标」——而这个前提在 v3.5
   就死了：从那时起 health 完全不调用 3X-UI，它学不到任何东西，只是把一趟探测**开始时**读到的

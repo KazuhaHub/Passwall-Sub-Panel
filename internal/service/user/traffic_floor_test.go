@@ -68,67 +68,61 @@ func pastTime(offsetHours int) *time.Time {
 	return &t
 }
 
-// fakeUsageReader is the smallest possible TrafficUsageReader stub: lets a
-// test pin "current period usage" without standing up the traffic service.
-type fakeUsageReader struct {
-	used int64
-	err  error
+// Period usage now comes off the user row (LifetimeTotalBytes -
+// PeriodBaselineBytes), so tests state it there instead of through a reader
+// stub. usedBy builds a user whose period usage is exactly n.
+func usedBy(limit, n int64) *domain.User {
+	return &domain.User{ID: 1, TrafficLimitBytes: limit, LifetimeTotalBytes: n}
 }
 
-func (f *fakeUsageReader) CurrentPeriodUsage(_ context.Context, _ *domain.User) (int64, error) {
-	return f.used, f.err
-}
-
-func TestTrafficFloor_DelegatesToReader(t *testing.T) {
-	s := &Service{trafficUsage: &fakeUsageReader{used: 3_000}}
-	u := &domain.User{ID: 1, TrafficLimitBytes: 10_000}
+func TestTrafficFloor_ComputesFromTheUserRow(t *testing.T) {
+	s := &Service{}
+	u := usedBy(10_000, 3_000)
 	if got := s.trafficFloor(context.Background(), u); got != 7_000 {
 		t.Fatalf("limit=10000 used=3000 → got %d, want 7000", got)
 	}
 }
 
 func TestTrafficFloor_NilUserSafe(t *testing.T) {
-	s := &Service{trafficUsage: &fakeUsageReader{used: 999}}
+	s := &Service{}
 	if got := s.trafficFloor(context.Background(), nil); got != 0 {
 		t.Fatalf("nil user must short-circuit to 0, got %d", got)
 	}
 }
 
-func TestTrafficFloor_UnlimitedUserSkipsRead(t *testing.T) {
+func TestTrafficFloor_UnlimitedUserStaysUnlimited(t *testing.T) {
 	// Reader returns a poisoned error; trafficFloor must short-circuit
 	// before calling it because TrafficLimitBytes == 0.
-	s := &Service{trafficUsage: &fakeUsageReader{err: errors.New("must not be called")}}
-	u := &domain.User{ID: 1, TrafficLimitBytes: 0}
+	s := &Service{}
+	u := usedBy(0, 999)
 	if got := s.trafficFloor(context.Background(), u); got != 0 {
 		t.Fatalf("unlimited user must return 0 without reading usage, got %d", got)
 	}
 }
 
-func TestTrafficFloor_NilReaderDegradesToUnlimited(t *testing.T) {
-	// Early-start path: trafficUsage hasn't been wired yet. Must NOT
-	// crash; degrades to "unlimited on 3X-UI side" (= status quo).
-	s := &Service{trafficUsage: nil}
-	u := &domain.User{ID: 1, TrafficLimitBytes: 10_000}
-	if got := s.trafficFloor(context.Background(), u); got != 0 {
-		t.Fatalf("nil reader must degrade to 0, got %d", got)
-	}
-}
-
-func TestTrafficFloor_ReaderErrorDegradesToUnlimited(t *testing.T) {
-	// Snapshot table hiccup must not stop the rest of the push: degrade
-	// to 0 (3X-UI unlimited) and let the next poll re-try.
-	s := &Service{trafficUsage: &fakeUsageReader{err: errors.New("db boom")}}
-	u := &domain.User{ID: 1, TrafficLimitBytes: 10_000}
-	if got := s.trafficFloor(context.Background(), u); got != 0 {
-		t.Fatalf("reader err must degrade to 0, got %d", got)
+// The two tests that used to live here — "nil reader degrades to unlimited" and
+// "reader error degrades to unlimited" — were deleted rather than adapted.
+// They pinned the DEFECT: both paths returned 0, which the panel reads as no
+// cap, and both were guarding a call that could not fail (a subtraction of two
+// columns already on the user). Removing the reader removed the branches, so
+// there is nothing left to degrade. This is the inverse assertion.
+func TestTrafficFloor_HasNoPathThatDegradesToUnlimited(t *testing.T) {
+	s := &Service{}
+	// A limited user always gets a real floor, whatever their usage. There is no
+	// longer any input to trafficFloor that can turn a limited user unlimited.
+	for _, used := range []int64{0, 1, 3_000, 9_999, 10_000, 50_000} {
+		got := s.trafficFloor(context.Background(), usedBy(10_000, used))
+		if got == 0 {
+			t.Fatalf("used=%d produced floor 0 — the panel reads that as NO CAP on a user who has one", used)
+		}
 	}
 }
 
 func TestTrafficFloor_AtOrPastLimitReturnsOne(t *testing.T) {
 	// Same edge case TestTrafficFloorBytes covers at the pure-func level,
 	// but verified through the integration path (reader + lookup + math).
-	s := &Service{trafficUsage: &fakeUsageReader{used: 10_000}}
-	u := &domain.User{ID: 1, TrafficLimitBytes: 10_000}
+	s := &Service{}
+	u := usedBy(10_000, 10_000)
 	if got := s.trafficFloor(context.Background(), u); got != 1 {
 		t.Fatalf("limit==used → got %d, want 1", got)
 	}
@@ -148,8 +142,7 @@ func TestTrafficFloor_EmergencyActive_UnlimitedQuotaReturnsZero(t *testing.T) {
 	// match: 0 (unlimited on 3X-UI side) so the user can actually use
 	// the window the panel just opened.
 	s := &Service{
-		trafficUsage: &fakeUsageReader{used: 999_999},
-		settings:     &fakeFloorSettingsRepo{cfg: ports.UISettings{EmergencyAccessQuotaGB: 0}},
+		settings: &fakeFloorSettingsRepo{cfg: ports.UISettings{EmergencyAccessQuotaGB: 0}},
 	}
 	u := &domain.User{
 		ID: 1, TrafficLimitBytes: 10_000, // already over
@@ -168,8 +161,7 @@ func TestTrafficFloor_EmergencyActive_QuotaRemainingReturnsRemaining(t *testing.
 	quotaGB := 5.0
 	usedSinceWindowOpened := int64(2) * 1024 * 1024 * 1024
 	s := &Service{
-		trafficUsage: &fakeUsageReader{used: 999_999_999_999}, // poisoned, must not be consulted
-		settings:     &fakeFloorSettingsRepo{cfg: ports.UISettings{EmergencyAccessQuotaGB: quotaGB}},
+		settings: &fakeFloorSettingsRepo{cfg: ports.UISettings{EmergencyAccessQuotaGB: quotaGB}},
 	}
 	u := &domain.User{
 		ID:                     1,
@@ -210,12 +202,12 @@ func TestTrafficFloor_EmergencyExpired_FallsBackToNormalMath(t *testing.T) {
 	// EmergencyUntil is in the past — treat as ordinary over-limit
 	// user: TrafficFloorBytes(limit, used) wins.
 	s := &Service{
-		trafficUsage: &fakeUsageReader{used: 12_000}, // over limit
-		settings:     &fakeFloorSettingsRepo{cfg: ports.UISettings{EmergencyAccessQuotaGB: 5}},
+		settings: &fakeFloorSettingsRepo{cfg: ports.UISettings{EmergencyAccessQuotaGB: 5}},
 	}
 	u := &domain.User{
 		ID: 1, TrafficLimitBytes: 10_000,
-		EmergencyUntil: pastTime(1), // already lapsed
+		LifetimeTotalBytes: 12_000,      // over limit — period usage now lives on the row
+		EmergencyUntil:     pastTime(1), // already lapsed
 	}
 	if got := s.trafficFloor(context.Background(), u); got != 1 {
 		t.Fatalf("emergency expired → expected fallback to over-limit sentinel 1, got %d", got)
@@ -248,7 +240,6 @@ func TestTrafficFloor_EmergencyActive_UsesGroupScopedQuota(t *testing.T) {
 	quotaGB := 5.0
 	usedSinceWindowOpened := int64(2) * 1024 * 1024 * 1024
 	s := &Service{
-		trafficUsage: &fakeUsageReader{used: 999_999_999_999}, // poisoned, must not be consulted
 		settings: &fakeScopedFloorSettings{
 			global:  ports.UISettings{EmergencyAccessQuotaGB: 0},
 			perUser: map[int64]ports.UISettings{7: {EmergencyAccessQuotaGB: quotaGB}},
