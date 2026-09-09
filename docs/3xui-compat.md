@@ -18,6 +18,14 @@ PSP 通过 `/panel/api/*` 对接 3X-UI 面板。本文档维护两件事：
 | v3.4.x | 3.0.x | 3.0.x | 同上 |
 | ≤ v3.3.x | 2.x – 3.0.x | 3.0.x | 历史兼容性见 CHANGELOG |
 
+### S-UI
+
+| PSP 版本 | 最低 S-UI | 已实测通过 | 备注 |
+|---|---|---|---|
+| **v3.9.2+** | 未发布 | **1.6.0** | 实机验证（2026-09-09）。没有编译期 floor —— 与 `MinXUI` 的这个不对称是刻意的，理由见 `internal/version/compat_sui.go` |
+
+> S-UI 侧没有 `min_sui`：上限验过了，但「支持到多旧」从来没有人确立过，而 `CheckSUI` 只对**显式发布过的** floor 报 too_old。
+
 > 这张表是人看的速查；运行时真相源是 `docs/compat/v3.json`。`min_xui` 和 `max_tested_xui` 两个字段**都已接入运行时**(PSP 按需拉取并据此判 too_old / untested)。
 
 **规则**:
@@ -26,6 +34,42 @@ PSP 通过 `/panel/api/*` 对接 3X-UI 面板。本文档维护两件事：
 - 任何高于"已实测通过"的 3X-UI 版本都属于**未知风险**——升级前先在一台 panel 上小流量验证
 
 ## 历史兼容性事件
+
+### 2026-09-09 / S-UI 1.6.0 实机复核 → 已测上限 1.5.5 抬到 1.6.0
+
+**这一条是被自动发现的，不是被人想起来的。** `cmd/compatwatch` 的**第一次运行**就报了
+S-UI 上限落后：上游已发 v1.6.0，而 `max_tested_sui` 还停在 1.5.5。在此之前**从来没有任何东西
+看过 `alireza0/s-ui`** —— PSP 只为管理页的角标去拉 3X-UI 的 latest。
+
+**先做源码核，用来决定实机要盯什么**（`git diff v1.5.5..v1.6.0`，96 文件 / +5451）：
+
+- `api/`、`web/`、`middleware/` **完全未改** → `/apiv2` 路由、`Token` 头认证、
+  `{success,msg,obj}` 信封都没动。
+- `database/model/model.go`（`Client` 和 `Inbound` 都在这里，也就是 PSP 读写的全部形状）
+  **逐字节相同**；`service/inbound.go` 未改。
+- 这个版本的体量来自一整套 sing-box 1.14 迁移，作用对象是**全局 `config` 设置**
+  （dns / experimental / route）和 **TLS 对象**——两者 PSP 都不是作者。
+
+**唯一落在 PSP 写入路径上的行为变化**：`service/client.go` 新增 `validateClientName`——
+拒绝空名、拒绝与其它客户端**全局重名**（更新时豁免 `id != client.Id`）、保存前 trim。
+PSP 三条都满足：客户端名就是 PSP 的 email，非空；
+按 `uk_psp_client(panel_id, email)` 每面板唯一；不含空白（`admin_settings.go:309`
+在写入边界 trim 了 `email_domain`）；而 `UpdateClient` 先读回 model 再保存，所以行自己的
+id 在场，唯一性检查会豁免它。**净效果是变好**：一个与既有客户端赛跑的创建现在会报错，
+而不是悄悄产生一个重复行，PSP 现有的错误路径会把它排进重试。
+
+**实机验证**：从 v1.6.0 tag 用仓库自己的 `build.sh` 流程构建（Go + `s-ui-frontend` 子模块），
+起一个 scratch 面板，用 PSP **自己的适配器**跑 `TestLive_SUISurface`——
+**14 个方法、23 处断言全过**，`GetServerStatus` 报 appVersion `1.6.0`（正是兼容闸读的那个字段），
+core running。新校验的空名分支也在这个面板上确认触发
+（`save: client name must not be empty`），与重名分支同属一个函数。
+
+**未验证的（适配器本来就不实现）**：`SetInboundEnable`（S-UI 没有 per-inbound 开关）、
+IP / 设备上限（S-UI 的 client 模型两者都没有，通过能力 API 声明）。
+
+同时发布了 **S-UI 的第一条 advisory**（1.6.0，warning）：sing-box 1.14 会一次性改写管理员的
+全局配置，而且**有两处它不会替你改**——legacy DNS address 过滤器和 DNS 规则的 `strategy`
+动作，因为迁移它们要重排规则并插入 evaluate 动作、会改变解析结果，得手工转换。
 
 ### 2026-08-26 / 3X-UI 3.7.0 实机复核 → 已测上限 3.6.0 抬到 3.7.0
 
