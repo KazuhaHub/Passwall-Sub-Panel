@@ -1,0 +1,75 @@
+name: Upstream compat watch
+
+# Watches 3X-UI and S-UI for releases past the tested ceilings in
+# docs/compat/v3.json.
+#
+# WHY THIS IS A JOB AND NOT A CHECKLIST ITEM: that ceiling is the only compat
+# fact that goes stale with nobody editing anything — it is a claim about an
+# upstream that keeps shipping. And its failure is quiet from the maintainer's
+# side but loud from the admin's: PSP refuses a panel upgrade whose target
+# exceeds the ceiling, so a stale file shows up as somebody being blocked from
+# upgrading, months after the release that did it.
+#
+# It never edits the file. Raising a ceiling means the live-panel review pass in
+# docs/3xui-compat.md; a job that bumped the number automatically would be
+# asserting precisely the thing it did not verify.
+#
+# A red run here is not a broken build — it is the signal. Two different reds:
+# exit 1 means an upstream is ahead (do the review pass), exit 2 means a
+# comparison could not be made at all (the watcher itself needs attention).
+# "Could not tell" is deliberately not green, because an upstream whose releases
+# we can no longer read looks exactly like one that has shipped nothing.
+
+on:
+  schedule:
+    # Mondays 03:17 UTC. Off the hour on purpose — scheduled runs at :00 queue
+    # behind everyone else's and get delayed or dropped.
+    - cron: "17 3 * * 1"
+  workflow_dispatch:
+  # Also on changes to the inputs, so an edit that puts the compat file out of
+  # reach of its own watcher is caught on the PR rather than on the next Monday.
+  pull_request:
+    paths:
+      - "docs/compat/**"
+      - "cmd/compatwatch/**"
+      - "internal/version/ceiling*.go"
+      - ".github/workflows/compat-watch.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  watch:
+    name: ceilings vs upstream releases
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      # Built rather than `go run`: go run reports a child's non-zero exit as
+      # plain 1, which would collapse "an upstream is ahead" (1) into "the
+      # watcher could not tell" (2) — the one distinction this job exists to
+      # make. Verified: a program calling os.Exit(2) comes back as 1 under
+      # `go run` and as 2 when the built binary is executed.
+      - name: build the watcher
+        run: go build -o /tmp/compatwatch ./cmd/compatwatch
+      - name: compare ceilings against upstream releases
+        env:
+          # Lifts the GitHub API quota off the anonymous 60/hour-per-IP limit
+          # that Actions runners share, so an "unknown" verdict means something
+          # about the upstream rather than about the runner's neighbours.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set +e
+          /tmp/compatwatch
+          code=$?
+          set -e
+          case "$code" in
+            0) echo "::notice::Both upstream ceilings are current." ;;
+            1) echo "::error::An upstream has released past its tested ceiling. Do the live-panel review in docs/3xui-compat.md before moving the number in docs/compat/v3.json." ;;
+            2) echo "::error::The ceiling comparison could not be made — the watcher itself needs attention (upstream repo moved, API shape changed, or rate limited). This is NOT a clean bill of health." ;;
+            *) echo "::error::compatwatch exited $code" ;;
+          esac
+          exit $code

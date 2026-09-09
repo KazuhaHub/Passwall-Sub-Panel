@@ -299,6 +299,34 @@ PSP `rawInbound` 这四个字段定义为 Go `string`,`json.Unmarshal` 一个 ob
 每个 PSP major 一个 JSON 文件(v3.x 都拉 `docs/compat/v3.json`,v4.x 都拉 `v4.json`)。
 这是 v3.6.0-beta.7 引入的 per-major 分文件设计,理由见 ARCHITECTURE.md。
 
+### 什么时候会有人告诉你该改了（2026-09-09 起自动化）
+
+`max_tested_xui` / `max_tested_sui` 是这个文件里**唯一一个没人动它也会过期**的事实——
+它是一句关于「上游还在发版」的断言。而它过期的表现是**单向沉默的**：PSP 会拒绝一次
+超出已测上限的面板升级（`version.MaxTestedXUI`），所以**管理员被挡住了，而能改这个
+文件的人什么都不知道**，有时要过好几个月。
+
+`.github/workflows/compat-watch.yml` 每周一跑 `cmd/compatwatch`，把两个上游的
+`/releases/latest` 跟这个文件里**最新那条 entry**（`psp_max` 最大的，与
+`TestMinXUIConstMatchesCompatJSON` 同一条选择规则）的上限比一次。
+
+三种结果，**两种是红的**：
+
+| 退出码 | 含义 | 你该做什么 |
+|---|---|---|
+| 0 | 两个上游都没超过上限 | 无 |
+| 1 | 某个上游发版超过了上限 | 走下面的复核流程，**人工**抬上限 |
+| 2 | **比不出来**（上游仓库搬家、API 变形、被限流） | 修 watcher —— 这**不是**「一切正常」 |
+
+退出码 2 也是红的，是刻意的：一个我们**读不到发布列表**的上游，和一个**什么都没发**的
+上游，在监控上长得一模一样，把两者合并就等于把一个坏掉的探测器变成一张健康证明。
+（这条规则由 `TestUnknownIsNeverAnAllClear` 和 `TestCompareCeilingNeverCallsAnUnanswerableQuestionCurrent`
+守着，两个都做过变异验证。）
+
+**这个 job 永远不会自己改这个文件。** 抬上限的全部价值就在于「有人真的验过」，
+一个自动 bump 数字的 job 恰好是在断言它没有检查过的那件事。它只负责让「该复核了」
+这件事**可见**。
+
 ### 何时改 / 改什么
 
 - **新 3X-UI 出 patch 版本(无 API 改动)** ── 在当前 active major 的 JSON 里把
