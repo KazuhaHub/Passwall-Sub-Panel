@@ -167,9 +167,15 @@ UI 上两者分别显示，不一致时可见。
 - **轮询周期照 `next_poll_s` 走，默认 5 秒，不要写死 120 秒**（§8.7）。
   120 秒会把「新增用户生效」从今天的秒级变成最坏两分钟——退步的正好是有人盯着等的那条路径。
   5 秒 × 5 台 = 1 req/s,可忽略；延迟 ≤5s,与今天 `provisionNodeMembers` 写下的「within seconds」等价。
-- **轻量轮询要带 `partial: true`,省掉 `objects` / `clients` / `subjects`**;全量报告仍按 120 秒发。
-  每 5 秒发一次全量逐客户端计数是纯浪费。**`partial` 的零值是「全量」,这个方向不能反**——
-  理由和变异验证见 §8.7 与 `protocol_test.go` 的 `TestPartialReportFailsSafe`。
+- **轻量轮询要带 `partial: true`,省掉 `objects` / `clients` / `subjects`**;
+  全量报告按 `full_report_seconds` 走，**默认 60 秒**。每 5 秒发一次全量逐客户端计数是纯浪费。
+  **`partial` 的零值是「全量」,这个方向不能反**——理由和变异验证见 §8.7 与
+  `protocol_test.go` 的 `TestPartialReportFailsSafe`。
+- **两个周期都由 PSP 下发，节点不存策略**;`full_report_seconds` 缺失或为 0 → **每轮都发全量**。
+  判定用 `protocol.ShouldSendFull`,**不要在 PSP 侧再实现一遍**——PSP 得能精确预测 agent 的行为。
+- **`full_report_seconds` 需要一个管理员设置项**（PSP 侧，A3 那批 schema 工作里一起做）。
+  它不是「能配就配一下」:这个周期是 `overburn_headroom_bytes` 的上界，
+  旋钮换的是**带宽 ↔ 允许超用多少**。写 UI 提示时要说清这一点，别写成「上报间隔」。
 - **不要为了延迟去做长轮询**。部署路径上有 Cloudflare（源站超时约 100 秒，超过即 524）,
   挂起请求是在别人的超时阈值边上跑。它是后手，不是首选——真需要亚秒下发时再启用，协议不用改。
 - **产生 Issue 时立即发一次报告，不等周期**（用 `partial` 报告，§8.7）。
