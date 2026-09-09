@@ -900,7 +900,7 @@ func (s *Service) ReconcileOrphans(ctx context.Context, userID int64) error {
 			if !inboundsCovered(inbounds, covered) {
 				continue // a desired client doesn't (yet) serve one of this client's inbounds
 			}
-			if err := cli.DelClientByEmail(ctx, 0, email); err != nil {
+			if err := cli.DelClientByEmail(ctx, email); err != nil {
 				log.Warn("orphan reconcile: delete stale shared client", "panel_id", panelID, "email", email, "user_id", userID, "err", err)
 				noteErr(err)
 				continue

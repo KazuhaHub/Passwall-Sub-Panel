@@ -168,7 +168,7 @@ func (s *Service) AddClientToInbound(ctx context.Context, userID int64, panelID 
 	}
 	if err := s.ownership.Add(ctx, entry); err != nil {
 		// best-effort rollback to keep panel and 3X-UI consistent
-		_ = c.DelClientByEmail(ctx, inboundID, email)
+		_ = c.DelClientByEmail(ctx, email)
 		return fmt.Errorf("ownership add: %w", err)
 	}
 	return nil

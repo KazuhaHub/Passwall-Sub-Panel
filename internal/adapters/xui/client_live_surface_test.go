@@ -216,7 +216,7 @@ func TestLive_XUISurface(t *testing.T) {
 
 	// --- Shared-client lifecycle -----------------------------------------
 	email := fmt.Sprintf("psp-surface-%d@psp.local", stamp)
-	t.Cleanup(func() { _ = c.DelClientByEmail(context.Background(), inbA, email) })
+	t.Cleanup(func() { _ = c.DelClientByEmail(context.Background(), email) })
 
 	// One client, both inbounds, single call — the shared-client create path.
 	if err := c.AddClientToInbounds(ctx, []int{inbA, inbB}, ports.ClientSpec{
@@ -273,9 +273,11 @@ func TestLive_XUISurface(t *testing.T) {
 	}
 	assertAttached(t, c, ctx, email, inbA, inbB)
 
-	// Bulk attach/detach are the node-warm-up path (one xray reload instead of N).
-	if _, err := c.BulkDetach(ctx, []string{email}, []int{inbB}); err != nil {
-		t.Fatalf("BulkDetach: %v", err)
+	// BulkAttach is the node-warm-up path (one xray reload instead of N). Its
+	// mirror BulkDetach was deleted in the agent acceptance-mapping pass (zero
+	// production callers), so the single-client DetachClient sets the state up.
+	if err := c.DetachClient(ctx, email, []int{inbB}); err != nil {
+		t.Fatalf("DetachClient (bulk setup): %v", err)
 	}
 	assertAttached(t, c, ctx, email, inbA)
 	if _, err := c.BulkAttach(ctx, []string{email}, []int{inbB}); err != nil {
@@ -283,7 +285,7 @@ func TestLive_XUISurface(t *testing.T) {
 	}
 	assertAttached(t, c, ctx, email, inbA, inbB)
 
-	if err := c.DelClientByEmail(ctx, inbA, email); err != nil {
+	if err := c.DelClientByEmail(ctx, email); err != nil {
 		t.Fatalf("DelClientByEmail: %v", err)
 	}
 	// Unlike the S-UI adapter (which reports a miss as (nil,nil) from a clean
@@ -325,7 +327,7 @@ func TestLive_XUISurface(t *testing.T) {
 	// still live code (the v3.6.2-v3.8.x compat entry covers panels driven that
 	// way), so a bump of max_tested_xui has to cover them too.
 	legacyEmail := fmt.Sprintf("psp-surface-legacy-%d@psp.local", stamp)
-	t.Cleanup(func() { _ = c.DelClientByEmail(context.Background(), inbA, legacyEmail) })
+	t.Cleanup(func() { _ = c.DelClientByEmail(context.Background(), legacyEmail) })
 	if err := c.AddClient(ctx, inbA, ports.ClientSpec{
 		Email: legacyEmail, Enable: true, ID: "5f1e6a1c-6b6a-4f0e-9f4a-1f2b3c4d5e72",
 	}); err != nil {
@@ -342,7 +344,7 @@ func TestLive_XUISurface(t *testing.T) {
 	} else if got.Enable {
 		t.Fatal("UpdateClient did not persist enable=false")
 	}
-	if err := c.DelClientByEmail(ctx, inbA, legacyEmail); err != nil {
+	if err := c.DelClientByEmail(ctx, legacyEmail); err != nil {
 		t.Fatalf("DelClientByEmail(legacy): %v", err)
 	}
 
@@ -380,81 +382,4 @@ func TestLive_XUIRealityScan(t *testing.T) {
 	for _, r := range results {
 		t.Logf("  %+v", r)
 	}
-}
-
-// TestLive_XUIBulkSetEnabled verifies the bulk enable/disable path against a
-// real panel. It is the collapse of the month-rollover fan-out: traffic periods
-// are calendar-aligned, so every quota-suspended user resumes on the same poll,
-// and this turns N /clients/update writes (N xray reloads on one panel) into one.
-//
-// Asserts the flag actually MOVED on the panel, not merely that the call
-// returned success — the endpoint reports per-email refusals in `skipped` while
-// still answering 200, so a green response proves nothing on its own.
-func TestLive_XUIBulkSetEnabled(t *testing.T) {
-	c, ctx := liveSurfaceClient(t)
-
-	inbounds, err := c.ListInbounds(ctx)
-	if err != nil {
-		t.Fatalf("ListInbounds: %v", err)
-	}
-	if len(inbounds) < 1 {
-		t.Skip("need at least one inbound")
-	}
-	inb := inbounds[0].ID
-
-	stamp := time.Now().UnixNano()
-	emails := []string{
-		fmt.Sprintf("psp-bulk-a-%d@psp.local", stamp),
-		fmt.Sprintf("psp-bulk-b-%d@psp.local", stamp),
-	}
-	for i, e := range emails {
-		if err := c.AddClientToInbounds(ctx, []int{inb}, ports.ClientSpec{
-			Email: e, Enable: true, ID: fmt.Sprintf("7f1e6a1c-6b6a-4f0e-9f4a-1f2b3c4d5e8%d", i),
-		}); err != nil {
-			t.Fatalf("seed %s: %v", e, err)
-		}
-		t.Cleanup(func() { _ = c.DelClientByEmail(context.Background(), inb, e) })
-	}
-
-	assertEnabled := func(want bool) {
-		t.Helper()
-		for _, e := range emails {
-			got, err := c.GetClient(ctx, e)
-			if err != nil {
-				t.Fatalf("GetClient(%s): %v", e, err)
-			}
-			if got.Enable != want {
-				t.Fatalf("client %s Enable = %v, want %v", e, got.Enable, want)
-			}
-		}
-	}
-
-	res, err := c.BulkSetEnabled(ctx, emails, false)
-	if err != nil {
-		t.Fatalf("BulkSetEnabled(false): %v", err)
-	}
-	if res.Changed != len(emails) {
-		t.Fatalf("disable changed = %d, want %d (skipped: %+v)", res.Changed, len(emails), res.Skipped)
-	}
-	assertEnabled(false)
-
-	res, err = c.BulkSetEnabled(ctx, emails, true)
-	if err != nil {
-		t.Fatalf("BulkSetEnabled(true): %v", err)
-	}
-	if res.Changed != len(emails) {
-		t.Fatalf("enable changed = %d, want %d (skipped: %+v)", res.Changed, len(emails), res.Skipped)
-	}
-	assertEnabled(true)
-
-	// A nonexistent email must be reported, not silently counted as flipped.
-	res, err = c.BulkSetEnabled(ctx, []string{emails[0], "psp-bulk-ghost@psp.local"}, false)
-	if err != nil {
-		t.Fatalf("BulkSetEnabled with a ghost: %v", err)
-	}
-	t.Logf("ghost run: changed=%d skipped=%+v", res.Changed, res.Skipped)
-	if res.Changed != 1 {
-		t.Fatalf("changed = %d, want 1 (only the real client)", res.Changed)
-	}
-	_, _ = c.BulkSetEnabled(ctx, emails, true)
 }

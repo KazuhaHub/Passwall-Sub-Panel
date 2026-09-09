@@ -2249,7 +2249,7 @@ func (s *Service) deletePrunedSharedClients(ctx context.Context, pruned map[int6
 			continue
 		}
 		for _, email := range emails {
-			if err := cli.DelClientByEmail(ctx, 0, email); err != nil {
+			if err := cli.DelClientByEmail(ctx, email); err != nil {
 				log.Warn("delete pruned shared client", "panel_id", panelID, "email", email, "err", err)
 			}
 		}

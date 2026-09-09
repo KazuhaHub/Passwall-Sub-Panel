@@ -100,7 +100,7 @@ type PanelClient interface {
 	// keyed by spec.Email alone. See docs/3xui-3.2-clients-migration.md.
 	AddClient(ctx context.Context, inboundID int, spec ClientSpec) error
 	UpdateClient(ctx context.Context, spec ClientSpec) error
-	DelClientByEmail(ctx context.Context, inboundID int, email string) error
+	DelClientByEmail(ctx context.Context, email string) error
 
 	// GetClient fetches one client by its panel-wide unique email via
 	// /panel/api/clients/get/{email}. Returns (nil, nil) when the panel has no
@@ -123,13 +123,6 @@ type PanelClient interface {
 	// DelClientByEmail; PSP keeps its own accounting. Emails already absent
 	// upstream are no-ops. Returns the count the panel reports as deleted.
 	BulkDelByEmail(ctx context.Context, emails []string) (int, error)
-	// BulkSetEnabled flips the enable flag for many clients in ONE call, so a
-	// fan-out that used to cost N /clients/update writes (and N xray reloads on
-	// the same panel) costs one. It ONLY moves the enable flag — unlike
-	// UpdateClient it does not re-push credentials — so use it for pure state
-	// transitions (quota suspend/resume) and keep the full write for paths that
-	// actually change configuration.
-	BulkSetEnabled(ctx context.Context, emails []string, enable bool) (BulkSetEnabledResult, error)
 
 	// --- v3.9.0 multi-inbound client surface (one client ↔ many inbounds) ---
 	//
@@ -164,11 +157,6 @@ type PanelClient interface {
 	// done / skipped (already attached) / error lists. Empty emails or
 	// inboundIDs is a no-op.
 	BulkAttach(ctx context.Context, emails []string, inboundIDs []int) (BulkAttachResult, error)
-
-	// BulkDetach detaches many clients from many inbounds in one POST
-	// /panel/api/clients/bulkDetach (single Xray restart). Mirror of BulkAttach;
-	// client records are kept even if orphaned. Empty inputs are a no-op.
-	BulkDetach(ctx context.Context, emails []string, inboundIDs []int) (BulkAttachResult, error)
 
 	// BulkCreateClients creates many NEW clients in one POST
 	// /panel/api/clients/bulkCreate — body is a JSON array of {client, inboundIds},
@@ -400,22 +388,6 @@ type BulkCreateClientItem struct {
 // create-vs-attach themselves from a prior client list, so the per-item skip
 // reasons aren't surfaced here — anything missed is healed by the per-user
 // resync backstop.)
-// BulkSetEnabledSkip is one email the panel declined to flip, with its reason.
-type BulkSetEnabledSkip struct {
-	Email  string
-	Reason string
-}
-
-// BulkSetEnabledResult reports what a bulk enable/disable actually did.
-// Skipped is load-bearing: the panel answers success while silently declining
-// individual emails (a client that no longer exists), so a caller that read
-// "no error" as "every email flipped" would mark users synced that the panel
-// never touched.
-type BulkSetEnabledResult struct {
-	Changed int
-	Skipped []BulkSetEnabledSkip
-}
-
 type BulkCreateResult struct {
 	Created int
 }

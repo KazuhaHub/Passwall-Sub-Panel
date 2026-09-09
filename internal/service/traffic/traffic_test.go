@@ -1314,7 +1314,7 @@ func (c *fakeXUIClient) AddClient(ctx context.Context, inboundID int, spec ports
 func (c *fakeXUIClient) UpdateClient(ctx context.Context, spec ports.ClientSpec) error {
 	return nil
 }
-func (c *fakeXUIClient) DelClientByEmail(ctx context.Context, inboundID int, email string) error {
+func (c *fakeXUIClient) DelClientByEmail(ctx context.Context, email string) error {
 	return nil
 }
 func (c *fakeXUIClient) GetClient(ctx context.Context, email string) (*ports.ClientDetail, error) {
@@ -1336,9 +1336,6 @@ func (c *fakeXUIClient) DetachClient(ctx context.Context, email string, inboundI
 	return nil
 }
 func (c *fakeXUIClient) BulkAttach(ctx context.Context, emails []string, inboundIDs []int) (ports.BulkAttachResult, error) {
-	return ports.BulkAttachResult{}, nil
-}
-func (c *fakeXUIClient) BulkDetach(ctx context.Context, emails []string, inboundIDs []int) (ports.BulkAttachResult, error) {
 	return ports.BulkAttachResult{}, nil
 }
 func (c *fakeXUIClient) BulkCreateClients(ctx context.Context, items []ports.BulkCreateClientItem) (ports.BulkCreateResult, error) {
@@ -2038,13 +2035,6 @@ func TestCurrentPeriodStartYearly(t *testing.T) {
 	if got.Location().String() != tokyo.String() {
 		t.Errorf("currentPeriodStart(yearly) location = %q, want %q", got.Location(), tokyo)
 	}
-}
-
-// BulkSetEnabled satisfies ports.PanelClient. These tests exercise traffic
-// accounting and never flip enable state; a test that starts caring should
-// assert on recorded calls rather than lean on this stub.
-func (f *fakeXUIClient) BulkSetEnabled(_ context.Context, emails []string, _ bool) (ports.BulkSetEnabledResult, error) {
-	return ports.BulkSetEnabledResult{Changed: len(emails)}, nil
 }
 
 // liveIPReaderFake is fakeXUIClient with the optional capability present.

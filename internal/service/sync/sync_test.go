@@ -232,7 +232,7 @@ func (c *fakeXUIClient) AddClient(ctx context.Context, inboundID int, spec ports
 func (c *fakeXUIClient) GetClient(ctx context.Context, email string) (*ports.ClientDetail, error) {
 	return nil, nil
 }
-func (c *fakeXUIClient) DelClientByEmail(ctx context.Context, inboundID int, email string) error {
+func (c *fakeXUIClient) DelClientByEmail(ctx context.Context, email string) error {
 	c.deletedByEmail = email
 	return nil
 }

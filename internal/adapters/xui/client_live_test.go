@@ -62,8 +62,8 @@ func TestLive_MultiInboundClientSurface(t *testing.T) {
 
 	const email = "psp-livetest@psp.local"
 	// Pre-clean any leftover from a previous aborted run, then guarantee teardown.
-	_ = c.DelClientByEmail(ctx, a, email)
-	t.Cleanup(func() { _ = c.DelClientByEmail(ctx, a, email) })
+	_ = c.DelClientByEmail(ctx, email)
+	t.Cleanup(func() { _ = c.DelClientByEmail(ctx, email) })
 
 	// 1. Create one client attached to BOTH inbounds in a single call.
 	if err := c.AddClientToInbounds(ctx, []int{a, b}, ports.ClientSpec{Email: email, Enable: true}); err != nil {
@@ -115,8 +115,8 @@ func TestLive_SharedClientMigrationFlow(t *testing.T) {
 
 	const email = "psp-migtest@psp.local"
 	const uuid = "11111111-2222-3333-4444-555555555555"
-	_ = c.DelClientByEmail(ctx, a, email)
-	t.Cleanup(func() { _ = c.DelClientByEmail(ctx, a, email) })
+	_ = c.DelClientByEmail(ctx, email)
+	t.Cleanup(func() { _ = c.DelClientByEmail(ctx, email) })
 
 	// Create with the silent migration spec (all per-protocol fields populated).
 	spec := ports.ClientSpec{Email: email, Enable: true, ID: uuid, Password: uuid, Auth: uuid}
@@ -126,7 +126,7 @@ func TestLive_SharedClientMigrationFlow(t *testing.T) {
 	assertAttached(t, c, ctx, email, a, b)
 
 	// Delete (the migration's legacy cleanup) → the client is fully gone.
-	if err := c.DelClientByEmail(ctx, a, email); err != nil {
+	if err := c.DelClientByEmail(ctx, email); err != nil {
 		t.Fatalf("DelClientByEmail: %v", err)
 	}
 	if cd, err := c.GetClient(ctx, email); err != nil {
@@ -169,13 +169,13 @@ func TestLive_BulkDelPreservesSharedClient(t *testing.T) {
 	const legacy1 = "u9001-n1@psp.local" // legacy per-node (deleted)
 	const legacy2 = "u9001-n2@psp.local" // legacy per-node (deleted)
 	for _, e := range []string{shared, legacy1, legacy2} {
-		_ = c.DelClientByEmail(ctx, a, e)
-		_ = c.DelClientByEmail(ctx, b, e)
+		_ = c.DelClientByEmail(ctx, e)
+		_ = c.DelClientByEmail(ctx, e)
 	}
 	t.Cleanup(func() {
 		for _, e := range []string{shared, legacy1, legacy2} {
-			_ = c.DelClientByEmail(ctx, a, e)
-			_ = c.DelClientByEmail(ctx, b, e)
+			_ = c.DelClientByEmail(ctx, e)
+			_ = c.DelClientByEmail(ctx, e)
 		}
 	})
 
@@ -242,8 +242,8 @@ func TestLive_ConcurrentSameClientNoCorruption(t *testing.T) {
 	a, b := inbounds[0].ID, inbounds[1].ID
 	const email = "psp-cc-livetest@psp.local"
 	const uuid = "44444444-5555-6666-7777-888888888888"
-	_ = c.DelClientByEmail(ctx, a, email)
-	t.Cleanup(func() { _ = c.DelClientByEmail(ctx, a, email) })
+	_ = c.DelClientByEmail(ctx, email)
+	t.Cleanup(func() { _ = c.DelClientByEmail(ctx, email) })
 
 	spec := ports.ClientSpec{Email: email, Enable: true, ID: uuid, Password: uuid, Auth: uuid}
 	var wg sync.WaitGroup
@@ -308,8 +308,8 @@ func TestLive_TwoClientsSameBackendNoCorruption(t *testing.T) {
 	a, b := inbounds[0].ID, inbounds[1].ID
 	const email = "psp-twoclient-livetest@psp.local"
 	const uuid = "55555555-6666-7777-8888-999999999999"
-	_ = c1.DelClientByEmail(ctx, a, email)
-	t.Cleanup(func() { _ = c1.DelClientByEmail(ctx, a, email) })
+	_ = c1.DelClientByEmail(ctx, email)
+	t.Cleanup(func() { _ = c1.DelClientByEmail(ctx, email) })
 
 	spec := ports.ClientSpec{Email: email, Enable: true, ID: uuid, Password: uuid, Auth: uuid}
 	var wg sync.WaitGroup

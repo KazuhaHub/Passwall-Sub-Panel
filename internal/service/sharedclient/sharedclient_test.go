@@ -167,14 +167,13 @@ func (c *fakeXUI) UpdateClient(_ context.Context, spec ports.ClientSpec) error {
 }
 
 type deletedClient struct {
-	inbound int
-	email   string
+	email string
 }
 
-func (c *fakeXUI) DelClientByEmail(_ context.Context, inboundID int, email string) error {
+func (c *fakeXUI) DelClientByEmail(_ context.Context, email string) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.deleted = append(c.deleted, deletedClient{inboundID, email})
+	c.deleted = append(c.deleted, deletedClient{email: email})
 	return nil
 }
 
