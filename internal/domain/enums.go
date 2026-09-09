@@ -34,6 +34,23 @@ const (
 	DisabledPendingApproval AutoDisabledReason = "pending_approval"
 	DisabledBlockedClient   AutoDisabledReason = "blocked_client"
 	DisabledServiceManual   AutoDisabledReason = "service_manual"
+	// DisabledGeoAnomaly is a proxy-service suspension an operator applied from
+	// the concurrent-location evidence. Held apart from DisabledServiceManual
+	// even though both are a human's decision, for a reason that is the point
+	// of the whole feature: a RESUME of a geo suspension is a labelled false
+	// positive, and no other reason lets you count those.
+	//
+	// The detector's own false-positive rate is what the response ladder in
+	// docs/connection-limits.md 12.5 is waiting on, and passively watching the
+	// state distribution cannot produce it — a distribution says how many were
+	// flagged, never how many were flagged WRONGLY. Only a human's judgement
+	// answers that, so the judgement has to be recorded where it can be
+	// counted.
+	//
+	// Service-level on purpose, never an account disable: the account keeps its
+	// panel login so the user can read why they were cut off and respond, and
+	// the step is reversible in one call. Suspicion is not proof.
+	DisabledGeoAnomaly AutoDisabledReason = "geo_anomaly"
 	// DisabledPendingEmailVerify marks a self-registered account that hasn't yet
 	// confirmed its email. It can't log in (NOT a self-service reason) and has no
 	// 3X-UI clients provisioned until verification activates it.
@@ -92,7 +109,8 @@ func AccountDisableReason(r AutoDisabledReason) bool {
 // internal callers from accidentally writing account lifecycle states there.
 func ServiceSuspensionReason(r AutoDisabledReason) bool {
 	switch r {
-	case DisabledServiceManual, DisabledBlockedClient, DisabledTrafficExceeded, DisabledExpired:
+	case DisabledServiceManual, DisabledBlockedClient, DisabledTrafficExceeded, DisabledExpired,
+		DisabledGeoAnomaly:
 		return true
 	default:
 		return false

@@ -82,6 +82,20 @@ func (u *User) AccessSnapshot(now time.Time) UserAccessSnapshot {
 		snapshot.ServiceStatus = ServiceStatusManualSuspended
 		snapshot.ServiceReason = DisabledServiceManual
 		return snapshot
+	case DisabledGeoAnomaly:
+		// Reuses ManualSuspended as the user-facing STATUS because that is what
+		// it is — a person decided — and inventing a status would ripple into
+		// the portal to tell the user something the panel cannot prove. The
+		// REASON stays distinct, which is where the admin side and the
+		// false-positive count read from.
+		//
+		// Without this case the reason falls through every branch below to
+		// ServiceStatusActive with ProxyEnabled true: the suspension would be
+		// committed and do nothing. TestEverySuspensionReasonActuallySuspends
+		// exists so the next reason added here cannot repeat that.
+		snapshot.ServiceStatus = ServiceStatusManualSuspended
+		snapshot.ServiceReason = DisabledGeoAnomaly
+		return snapshot
 	}
 
 	if u.EmergencyActive(now) {

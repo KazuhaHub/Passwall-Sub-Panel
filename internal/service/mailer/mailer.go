@@ -778,6 +778,13 @@ func serviceSuspendReasonText(reason string) string {
 		return "使用了被禁止的客户端"
 	case string(domain.DisabledServiceManual):
 		return "管理员手动暂停服务"
+	case string(domain.DisabledGeoAnomaly):
+		// Deliberately not "sharing detected" or anything that states the
+		// suspicion as fact: split tunnelling, a corporate VPN and a family
+		// member abroad all produce this signal honestly. The wording says what
+		// was observed and that a person made the call, so a wrongly-suspended
+		// user knows what to dispute.
+		return "检测到账号在多个地区同时使用，管理员已暂停服务；如有疑问请联系管理员"
 	case string(domain.DisabledExpired):
 		return "订阅已到期"
 	case "":
