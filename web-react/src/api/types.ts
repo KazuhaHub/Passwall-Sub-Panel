@@ -153,6 +153,12 @@ export interface Node {
   /** RFC3339 timestamp of the last successful config capture/align; null before
    *  the node was ever captured. */
   config_synced_at?: string | null
+  /**
+   * When this node FIRST stopped being converged. Absent — not zero — for a
+   * converged node and for rows predating the column: a zero-length lag and an
+   * unknown one render identically, and only one of them is reassuring.
+   */
+  config_pending_since?: string | null
   /** Managed-certificate binding. "" / undefined = unmanaged (manual /
    *  historical). 'psp_managed' means cert_id points to a PSP-managed cert
    *  that the renewal worker keeps deployed. Never carries any PEM. */

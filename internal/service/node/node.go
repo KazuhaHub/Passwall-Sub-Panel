@@ -156,7 +156,7 @@ func (s *Service) markConfigSyncGaveUp(ctx context.Context, task *domain.SyncTas
 	if n.ConfigSyncState == domain.ConfigSyncFailed {
 		return
 	}
-	n.ConfigSyncState = domain.ConfigSyncFailed
+	n.SetConfigSyncState(domain.ConfigSyncFailed, time.Now())
 	if err := s.nodes.UpdateInboundConfig(ctx, n); err != nil {
 		log.Warn("config-sync give-up: state not written; the node will keep claiming a pending retry",
 			"node_id", n.ID, "err", err)
@@ -693,7 +693,7 @@ func (s *Service) markConfigPending(ctx context.Context, n *domain.Node) {
 	if n.ConfigSyncState == domain.ConfigSyncPending {
 		return
 	}
-	n.ConfigSyncState = domain.ConfigSyncPending
+	n.SetConfigSyncState(domain.ConfigSyncPending, time.Now())
 	if err := s.nodes.UpdateInboundConfig(ctx, n); err != nil {
 		log.Warn("mark config pending failed", "node_id", n.ID, "err", err)
 	}
@@ -925,7 +925,7 @@ func (s *Service) runNodeTask(ctx context.Context, task *domain.SyncTask) error 
 			return nil
 		}
 		if fresh.ConfigSyncState != domain.ConfigSyncSynced {
-			fresh.ConfigSyncState = domain.ConfigSyncSynced
+			fresh.SetConfigSyncState(domain.ConfigSyncSynced, time.Now())
 			_ = s.nodes.UpdateInboundConfig(ctx, fresh)
 		}
 		return nil

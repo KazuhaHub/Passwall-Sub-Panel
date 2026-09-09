@@ -52,3 +52,27 @@ export function configSyncColor(
       return md.outlineVariant
   }
 }
+
+/**
+ * A coarse "how long ago", for the config-sync tooltip.
+ *
+ * Coarse on purpose: the reader is deciding whether to wait or to investigate,
+ * and that decision turns on minutes-versus-days. Second-level precision would
+ * add digits without adding information, and would make the tooltip reflow as
+ * it ticked.
+ *
+ * An unparseable or future timestamp returns '' rather than a guess — the
+ * caller renders nothing at all in that case, which is the honest answer.
+ */
+export function humanizeSince(iso: string, now: Date = new Date()): string {
+  const then = new Date(iso).getTime()
+  if (!Number.isFinite(then)) return ''
+  const ms = now.getTime() - then
+  if (ms < 0) return ''
+  const mins = Math.floor(ms / 60_000)
+  if (mins < 1) return '<1 min'
+  if (mins < 60) return `${mins} min`
+  const hours = Math.floor(mins / 60)
+  if (hours < 48) return `${hours} h`
+  return `${Math.floor(hours / 24)} d`
+}

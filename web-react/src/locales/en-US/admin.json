@@ -1272,7 +1272,8 @@
       "uncaptured": "Local config not captured (renders via live fetch)",
       "never": "not captured yet",
       "synced_at": "Last capture: {{time}}",
-      "failed": "Config push gave up (retries exhausted); subscriptions render the panel’s own config until an operator intervenes"
+      "failed": "Config push gave up (retries exhausted); subscriptions render the panel’s own config until an operator intervenes",
+      "stuck_for": "Un-converged for {{age}}"
     },
     "field": {
       "display_name": "Display name",

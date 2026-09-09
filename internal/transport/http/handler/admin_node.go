@@ -72,6 +72,12 @@ type nodeDTO struct {
 	// failed, retried next reconcile cycle). See docs/inbound-ownership.md.
 	ConfigSyncState string     `json:"config_sync_state,omitempty"`
 	ConfigSyncedAt  *time.Time `json:"config_synced_at,omitempty"`
+	// ConfigPendingSince is when this node FIRST stopped being converged, so
+	// the admin can tell ten seconds apart from three days. Absent — not zero
+	// — for a converged node and for rows written before the column existed:
+	// a zero-length lag and an unknown one read identically, and only one of
+	// them is reassuring.
+	ConfigPendingSince *time.Time `json:"config_pending_since,omitempty"`
 	// CertSource/CertID surface the managed-certificate binding so the
 	// node-edit form can pre-select the current source (psp_managed + which
 	// cert). "" = unmanaged. Never carries any PEM/secret — just the binding.
@@ -963,29 +969,30 @@ func (h *AdminNodeHandler) toNodeDTO(n *domain.Node, panelNames map[int64]string
 	// every historical row stale.
 	panelName := panelNames[n.PanelID]
 	return nodeDTO{
-		ID:              n.ID,
-		PanelID:         n.PanelID,
-		PanelName:       panelName,
-		InboundID:       n.InboundID,
-		DisplayName:     n.DisplayName,
-		ServerAddress:   n.ServerAddress,
-		Flow:            n.Flow,
-		Protocol:        n.Protocol,
-		Region:          n.Region,
-		Tags:            n.Tags,
-		SortOrder:       n.SortOrder,
-		Enabled:         n.Enabled,
-		HealthState:     string(n.HealthState),
-		HealthCheckedAt: n.HealthCheckedAt,
-		HealthDetail:    n.HealthDetail,
-		ConfigSyncState: n.ConfigSyncState,
-		ConfigSyncedAt:  n.ConfigSyncedAt,
-		Kind:            string(n.Kind),
-		CertSource:      string(n.CertSource),
-		CertID:          n.CertID,
-		Relays:          relayDTOs(n.Relays),
-		HideDirect:      n.HideDirect,
-		ShowRelayStatus: n.EffectiveShowRelayStatus(),
+		ID:                 n.ID,
+		PanelID:            n.PanelID,
+		PanelName:          panelName,
+		InboundID:          n.InboundID,
+		DisplayName:        n.DisplayName,
+		ServerAddress:      n.ServerAddress,
+		Flow:               n.Flow,
+		Protocol:           n.Protocol,
+		Region:             n.Region,
+		Tags:               n.Tags,
+		SortOrder:          n.SortOrder,
+		Enabled:            n.Enabled,
+		HealthState:        string(n.HealthState),
+		HealthCheckedAt:    n.HealthCheckedAt,
+		HealthDetail:       n.HealthDetail,
+		ConfigSyncState:    n.ConfigSyncState,
+		ConfigSyncedAt:     n.ConfigSyncedAt,
+		ConfigPendingSince: n.ConfigPendingSince,
+		Kind:               string(n.Kind),
+		CertSource:         string(n.CertSource),
+		CertID:             n.CertID,
+		Relays:             relayDTOs(n.Relays),
+		HideDirect:         n.HideDirect,
+		ShowRelayStatus:    n.EffectiveShowRelayStatus(),
 	}
 }
 

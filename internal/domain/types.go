@@ -352,6 +352,40 @@ type SortEntry struct {
 // traffic accounting or health probing — they exist purely for layout.
 // Empty value is treated as NodeKindReal so existing rows in the DB
 // stay valid without a backfill.
+// SetConfigSyncState is the ONLY way this pair of fields should be written.
+//
+// The rule it enforces — stamp on the way in, clear on the way out, never
+// re-stamp while still un-converged — is one line of logic that was going to
+// be repeated at six call sites across five packages, which is how the state
+// column itself ended up as six bare literals nobody could enumerate.
+func (n *Node) SetConfigSyncState(state string, now time.Time) {
+	n.ConfigSyncState = state
+	switch state {
+	case ConfigSyncSynced, ConfigSyncNeverCaptured:
+		n.ConfigPendingSince = nil
+	default:
+		// Already un-converged: keep the original stamp so the age keeps
+		// growing. A node that has been stuck for three days must not look
+		// fifteen minutes old just because reconcile touched it again.
+		if n.ConfigPendingSince == nil {
+			t := now
+			n.ConfigPendingSince = &t
+		}
+	}
+}
+
+// ConfigSyncLag reports how long this node has been un-converged, and whether
+// that question has an answer at all. Converged nodes and rows written before
+// the column existed both answer false rather than zero — a zero-length lag
+// and an unknown one read identically on a dashboard, and only one of them is
+// reassuring.
+func (n *Node) ConfigSyncLag(now time.Time) (time.Duration, bool) {
+	if n == nil || n.ConfigPendingSince == nil {
+		return 0, false
+	}
+	return now.Sub(*n.ConfigPendingSince), true
+}
+
 // ConfigSyncState values. The whole set, because the admin UI colours a dot
 // per state and falls back to the "never captured" wording for anything it
 // does not recognise — so a state added here without matching frontend copy
@@ -522,6 +556,21 @@ type Node struct {
 	// pushed to 3X-UI. nil means "never captured" — render falls back to a
 	// one-shot live fetch for such a node until the next poll backfills it.
 	ConfigSyncedAt *time.Time
+	// ConfigPendingSince is when this node FIRST stopped being converged —
+	// nil whenever ConfigSyncState is synced or never-captured.
+	//
+	// Set once and not refreshed while the node stays un-converged, which is
+	// the whole point: reconcile re-marks a stuck node pending on every cycle,
+	// so a stamp rewritten on each write would reset the clock every fifteen
+	// minutes and the age could never grow past one cycle. An operator needs
+	// to tell ten seconds from three days, and that difference is the only
+	// thing that says whether to wait or to go look.
+	//
+	// Deliberately NOT ConfigSyncedAt, which is already doing two jobs: it is
+	// the "last captured" timestamp the admin UI renders, and it is the
+	// optimistic-concurrency token sameSyncStamp compares to detect a
+	// concurrent write. Overloading it a third time would break both.
+	ConfigPendingSince *time.Time
 	// ConfigSyncState is one of the ConfigSync* constants below. It was six
 	// bare string literals across five packages until they drifted into
 	// something a reader could not enumerate; the constants exist so the set

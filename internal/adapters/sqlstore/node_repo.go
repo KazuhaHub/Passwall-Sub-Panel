@@ -177,17 +177,18 @@ func (r *nodeRepo) UpdateInboundConfig(ctx context.Context, n *domain.Node) erro
 		Model(&nodeRow{}).
 		Where("id = ?", n.ID).
 		Updates(map[string]any{
-			"inbound_listen":      n.InboundListen,
-			"inbound_remark":      n.InboundRemark,
-			"inbound_settings":    inboundSettings,
-			"stream_settings":     streamSettings,
-			"sniffing":            n.Sniffing,
-			"allocate":            n.Allocate,
-			"inbound_expiry_time": n.InboundExpiryTime,
-			"config_synced_at":    n.ConfigSyncedAt,
-			"config_sync_state":   n.ConfigSyncState,
-			"port":                n.Port,
-			"protocol":            n.Protocol,
+			"inbound_listen":       n.InboundListen,
+			"inbound_remark":       n.InboundRemark,
+			"inbound_settings":     inboundSettings,
+			"stream_settings":      streamSettings,
+			"sniffing":             n.Sniffing,
+			"allocate":             n.Allocate,
+			"inbound_expiry_time":  n.InboundExpiryTime,
+			"config_synced_at":     n.ConfigSyncedAt,
+			"config_sync_state":    n.ConfigSyncState,
+			"config_pending_since": n.ConfigPendingSince,
+			"port":                 n.Port,
+			"protocol":             n.Protocol,
 		}).Error
 }
 

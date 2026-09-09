@@ -364,15 +364,16 @@ type nodeRow struct {
 	// can push PSP's version back. Empty on rows written before v3.5;
 	// backfilled by the health/traffic poll and write-through on
 	// create/update/import. See docs/inbound-ownership.md.
-	InboundListen     string `gorm:"size:64;default:''"`
-	InboundRemark     string `gorm:"size:255;default:''"`
-	InboundSettings   string `gorm:"type:text"`
-	StreamSettings    string `gorm:"type:text"`
-	Sniffing          string `gorm:"type:text"`
-	Allocate          string `gorm:"type:text"`
-	InboundExpiryTime int64  `gorm:"default:0"`
-	ConfigSyncedAt    *time.Time
-	ConfigSyncState   string `gorm:"size:32;default:''"`
+	InboundListen      string `gorm:"size:64;default:''"`
+	InboundRemark      string `gorm:"size:255;default:''"`
+	InboundSettings    string `gorm:"type:text"`
+	StreamSettings     string `gorm:"type:text"`
+	Sniffing           string `gorm:"type:text"`
+	Allocate           string `gorm:"type:text"`
+	InboundExpiryTime  int64  `gorm:"default:0"`
+	ConfigSyncedAt     *time.Time
+	ConfigSyncState    string `gorm:"size:32;default:''"`
+	ConfigPendingSince *time.Time
 	// Managed certificate binding (v3.6.4): cert_source discriminates the TLS
 	// cert provisioning mode; cert_id points to tls_certificates when
 	// cert_source='psp_managed'. AutoMigrate adds them; empty/0 = unmanaged.
@@ -444,6 +445,7 @@ func (r *nodeRow) toDomain() (*domain.Node, error) {
 		Allocate:              r.Allocate,
 		InboundExpiryTime:     r.InboundExpiryTime,
 		ConfigSyncedAt:        r.ConfigSyncedAt,
+		ConfigPendingSince:    r.ConfigPendingSince,
 		ConfigSyncState:       r.ConfigSyncState,
 		CertSource:            domain.CertSource(r.CertSource),
 		CertID:                r.CertID,
@@ -503,6 +505,7 @@ func nodeFromDomain(n *domain.Node) (*nodeRow, error) {
 		Allocate:              n.Allocate,
 		InboundExpiryTime:     n.InboundExpiryTime,
 		ConfigSyncedAt:        n.ConfigSyncedAt,
+		ConfigPendingSince:    n.ConfigPendingSince,
 		ConfigSyncState:       n.ConfigSyncState,
 		CertSource:            string(n.CertSource),
 		CertID:                n.CertID,

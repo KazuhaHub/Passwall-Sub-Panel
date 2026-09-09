@@ -1042,7 +1042,7 @@ func (s *Service) markConfigSyncStatePending(ctx context.Context, n *domain.Node
 	if n.ConfigSyncState == domain.ConfigSyncPending {
 		return
 	}
-	n.ConfigSyncState = domain.ConfigSyncPending
+	n.SetConfigSyncState(domain.ConfigSyncPending, time.Now())
 	_ = s.nodes.UpdateInboundConfig(ctx, n)
 }
 

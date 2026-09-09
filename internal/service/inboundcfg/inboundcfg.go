@@ -286,7 +286,7 @@ func InSync(n *domain.Node, live *ports.Inbound) bool {
 func markSynced(n *domain.Node) {
 	now := time.Now()
 	n.ConfigSyncedAt = &now
-	n.ConfigSyncState = domain.ConfigSyncSynced
+	n.SetConfigSyncState(domain.ConfigSyncSynced, now)
 }
 
 // jsonEqual compares two JSON strings semantically: key ordering and whitespace

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import zh from '@/locales/zh-CN/admin.json'
 import en from '@/locales/en-US/admin.json'
-import { CONFIG_SYNC_KEY, CONFIG_SYNC_STATES, configSyncColor } from './configSync'
+import { CONFIG_SYNC_KEY, CONFIG_SYNC_STATES, configSyncColor, humanizeSince } from './configSync'
 
 /**
  * Every config_sync_state the Go side can write must have its own dot colour
@@ -48,5 +48,27 @@ describe('config sync states', () => {
       expect(cs.failed).not.toBe(cs.pending)
       expect(cs.failed.length, 'failed must say what the operator should do about it').toBeGreaterThan(10)
     }
+  })
+})
+
+describe('humanizeSince', () => {
+  const now = new Date('2026-09-09T12:00:00Z')
+  const ago = (ms: number) => new Date(now.getTime() - ms).toISOString()
+
+  // Coarse by design: the reader is deciding wait-or-investigate, and that
+  // turns on minutes-versus-days.
+  it('reads at the granularity the decision needs', () => {
+    expect(humanizeSince(ago(30_000), now)).toBe('<1 min')
+    expect(humanizeSince(ago(5 * 60_000), now)).toBe('5 min')
+    expect(humanizeSince(ago(3 * 3_600_000), now)).toBe('3 h')
+    expect(humanizeSince(ago(72 * 3_600_000), now)).toBe('3 d')
+  })
+
+  // An unknown lag renders as nothing, never as a number. A tooltip saying
+  // "un-converged for 0 min" on a node whose stamp is missing would be a
+  // confident answer to a question the panel cannot answer.
+  it('returns nothing rather than guessing', () => {
+    expect(humanizeSince('not-a-date', now)).toBe('')
+    expect(humanizeSince(new Date(now.getTime() + 60_000).toISOString(), now)).toBe('')
   })
 })

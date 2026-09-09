@@ -103,7 +103,7 @@ func (s *Service) DeployToNode(ctx context.Context, n *domain.Node, cert *domain
 	}
 	now := time.Now()
 	n.StreamSettings = newSS
-	n.ConfigSyncState = domain.ConfigSyncPending
+	n.SetConfigSyncState(domain.ConfigSyncPending, now)
 	n.ConfigSyncedAt = &now
 	if err := s.nodes.UpdateInboundConfig(ctx, n); err != nil {
 		return err

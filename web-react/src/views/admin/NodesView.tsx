@@ -75,7 +75,7 @@ import { PagedTableFooter } from '@/components/PagedTableFooter'
 import { pushSnack } from '@/components/SnackbarHost'
 import { useTabParam } from '@/hooks/useTabParam'
 import RealityTargetScannerDialog from './RealityTargetScannerDialog'
-import { CONFIG_SYNC_KEY, CONFIG_SYNC_STATES, configSyncColor, type ConfigSyncState } from './configSync'
+import { CONFIG_SYNC_KEY, CONFIG_SYNC_STATES, configSyncColor, humanizeSince, type ConfigSyncState } from './configSync'
 import { TLSCipherSuitesSelect } from './TLSCipherSuitesSelect'
 import {
   type FieldErrors,
@@ -2813,9 +2813,19 @@ export default function NodesView() {
       label: t(`admin:nodes.config_sync.${CONFIG_SYNC_KEY[state]}`),
     }
     const syncedAt = n.config_synced_at ? formatDualTz(n.config_synced_at, panelTz) : t('admin:nodes.config_sync.never', { defaultValue: '尚未捕获' })
+    // How long it has been un-converged, which is the number that says whether
+    // to wait or to go and look. Rendered only when the server sent it: a node
+    // that is fine, and a row written before the column existed, both send
+    // nothing — and "no lag" must not be drawn as "zero lag".
+    const lag = n.config_pending_since ? humanizeSince(n.config_pending_since) : ''
     const tooltip = (
       <Box sx={{ fontSize: 12, lineHeight: 1.5 }}>
         <Box sx={{ fontWeight: 600, mb: 0.25 }}>{p.label}</Box>
+        {lag && (
+          <Box sx={{ opacity: 0.85 }}>
+            {t('admin:nodes.config_sync.stuck_for', { age: lag, defaultValue: `已 ${lag} 未同步` })}
+          </Box>
+        )}
         <Box sx={{ opacity: 0.7 }}>{t('admin:nodes.config_sync.synced_at', { time: syncedAt, defaultValue: `上次捕获：${syncedAt}` })}</Box>
       </Box>
     )
