@@ -97,6 +97,12 @@
   > 也就是说：判据没有被推翻，是被权衡后让位了。**能让它继续成立的办法不是改名，是把那三条约束真的做到。**
 - **代价说在前面**：「别人也能用」不是免费的——它意味着协议要**对外文档化并保持稳定**，破坏性变更要走废弃周期。这是一项长期成本，值得当作选择来接受，而不是事后才发现。
 
+  > **2026-09-09 已建仓并落地**：<https://github.com/KazuhaHub/Passwall-Node>，§8 的线上契约以 `protocol/` 包的形式住在那里。PSP 里那份可编译草稿（`docs/agent-protocol/`）同时删除——留着就是第二份真相源，正是约束 1 明文禁止的那件事，而且是这次自研要摆脱的那个问题在自己内部的复刻。
+  >
+  > **PSP 的 `go.mod` 依赖不在这一步加，要等第一个 import。** Go 的 `require` 没有消费者就会被 `go mod tidy` 删掉，所以「加依赖」在技术上不可能早于 §10 第 4 步的 `psp` 适配器——搬家清单里把它排在删除之前是写错了顺序，不是漏做了一步。
+  >
+  > 已实测 module path 能解析：默认 `GOPROXY`（proxy.golang.org + sum.golang.org，校验和已入 `go.sum`）和 `GOPROXY=direct` 两条路都拉得到 `github.com/KazuhaHub/passwall-node@main`。这一条值得写下来，因为 GitHub 对 `?go-get=1` 回的 `go-import` 标签用的是仓库的原始大小写（`github.com/KazuhaHub/Passwall-Node`），与 module 路径不一致——看起来像个坑，实测两条路都不受影响。
+
 ## 1. 边界：agent 要做什么，不做什么
 
 PSP 的上游访问走的是一层与厂商无关的适配器（`xui_panels.kind` → `adapters/panel.Registry` → 构造函数，`Pool` 按面板 ID 路由）。所以自研后端**是新增一个 `PanelKind`,不是新架构**——节点管理、客户端下发、流量轮询、订阅渲染、异地并发检测全部不动。
@@ -541,7 +547,7 @@ overburn_headroom_bytes = Σ(baseline + headroom) − Σ(最新已报累计)
 按依赖顺序，不是按难度：
 
 1. ~~拍板仓库名~~ **已定：`Passwall-Node`（§0.5）。**
-2. **建仓库，把 §8 变成 Go 类型定义**——协议类型住在 agent 仓库，PSP 用 module 引它（§0.5 约束 1：一份真相源，两侧都被编译器检查）。
+2. ~~建仓库，把 §8 变成 Go 类型定义~~ **已做：<https://github.com/KazuhaHub/Passwall-Node> 的 `protocol/` 包。** PSP 用 module 引它这一半要等第 4 步——没有 import 的 `require` 活不过一次 `go mod tidy`（§0.5）。
 3. **还掉 §8.6 的三条硬前置**（期望文档的单一铸造者、客户端行身份稳定、agent 表）。这三条是 PSP 侧的工作，与 agent 仓库并行。
 4. **`psp` 适配器最小实现 + 对着一个真 agent 的契约测试**（§0.5 约束 3）。
 
