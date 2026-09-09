@@ -121,7 +121,7 @@ PSP 的上游访问走的是一层与厂商无关的适配器（`xui_panels.kind
 
 > **注：分区键不是 `(user, panel, credClass)`。** 这份文档早先这么写过，协议设计一度以它为前提，是错的。真正的分区键是 `clientplan.go:128` 的 `partKey{pwClass, flow}` —— **二维**，而落进 `domain.PSPClient` 的只有一维（`clientplan.go:306`：`CredClass: k.pwClass`）。所以同一面板上 VLESS+vision 与 VLESS+空 flow 是两个分区、两个客户端，`CredClass` 却相同：**`(user, panel, credClass)` 不单射，它是一个存下来的属性，不是判别式。**
 >
-> 存储层的唯一键是 `psp_client_repo.go:22-23` 的 `uk_psp_client(panel_id, email)`。而 `Email` 是**渲染产物、不是身份**：`clientplan.go:322-337` 在「这个面板只需要一个客户端」时会去掉分区后缀，所以分区总数跨越 1↔2 会让 email **re-key**（这段注释自己写明了）。协议主键因此既不能用 `credClass`，也不能用 `email`——见 §2.3 ①。
+> 存储层的唯一键是 `psp_client_repo.go:22-23` 的 `uk_psp_client(panel_id, email)`。而 `Email` 是**渲染产物、不是身份**：`clientplan.go:314-324` 在「这个面板只需要一个客户端」时会去掉分区后缀，所以分区总数跨越 1↔2 会让 email **re-key**（这段注释自己写明了）。协议主键因此既不能用 `credClass`，也不能用 `email`——见 §2.3 ①。
 
 ## 2. agent 必须实现的接口（已定，来自 PSP 代码）
 
@@ -248,7 +248,7 @@ agent 协议要回答的是另一组问题，从我们自己的领域出发：
 
 按 §2 那段警告逐条对照，验收自己也漏过了这四处：
 
-1. **把「email 全面板唯一」立成协议主键。** 两组独立地提议用 `(panelID, Email)` 当 client key，理由是它在 PSP 存储层已经被证明唯一（`uk_psp_client`）。但 **`Email` 是渲染产物**：`clientplan.go:322-337` 在面板只需一个客户端时去掉分区后缀，分区总数跨越 1↔2 就 re-key；再叠上它依赖 `rules.Domain`（改域名 = 全量 re-key）。把一个会因为**别的分区**出现/消失而改变、且依赖一个可配置域名的字符串当协议主键，是把 3X-UI 的缺陷买断了。**正确形状**：主键用 **PSP 自己铸造的行 id**（`cli_{psp_clients.id}`），email 降级成随载荷下发的展示字段。
+1. **把「email 全面板唯一」立成协议主键。** 两组独立地提议用 `(panelID, Email)` 当 client key，理由是它在 PSP 存储层已经被证明唯一（`uk_psp_client`）。但 **`Email` 是渲染产物**：`clientplan.go:314-324` 在面板只需一个客户端时去掉分区后缀，分区总数跨越 1↔2 就 re-key；再叠上它依赖 `rules.Domain`（改域名 = 全量 re-key）。把一个会因为**别的分区**出现/消失而改变、且依赖一个可配置域名的字符串当协议主键，是把 3X-UI 的缺陷买断了。**正确形状**：主键用 **PSP 自己铸造的行 id**（`cli_{psp_clients.id}`），email 降级成随载荷下发的展示字段。
 
 > **订正（2026-09-09，§8 定稿时）**：这一行原本开的处方是「用 `partKey.canon()` 派生的 partition id，并且把 flow 写进 canon」。**两半都错。** flow 早就在 canon 里（`clientplan.go:187-189`）；而 canon **不是客户端身份的纯函数，它是位置相关的**：`clientplan.go:250-274` 的 `keys[i] = {preq[i], freq[i]}` 把排好序的「所需密码类」与「所需 flow」**按下标配对**。于是同一个客户端的 canon 会因为**别的节点**出现或消失而改变——用户只有一个 VLESS+vision 节点时是 `{默认密码类, vision}`，管理员给他加一个 SS-2022-256 节点，同一个客户端变成 `{pw256, vision}`。
 >
@@ -543,6 +543,8 @@ overburn_headroom_bytes = Σ(baseline + headroom) − Σ(最新已报累计)
 
 
 ## 10. 下一步
+
+> **可交接的展开版见 [`psp-node-plan.md`](psp-node-plan.md)**——每一项带完成判据、涉及文件、依赖顺序，以及一份「十条不要」。这一节只留骨架。
 
 按依赖顺序，不是按难度：
 
