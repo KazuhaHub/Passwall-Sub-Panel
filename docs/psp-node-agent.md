@@ -89,16 +89,20 @@ PSP 的上游访问走的是一层与厂商无关的适配器（`xui_panels.kind
 | | 依据 |
 |---|---|
 | inbound 配置的真相源（自有 DB 存完整配置、订阅渲染零回源、reconcile 反向下发） | [inbound-ownership.md](inbound-ownership.md) |
-| 客户端模型（`psp_clients` + `psp_client_inbounds`，按 (user, panel, credClass) 分区） | `internal/domain/pspclient.go` |
+| 客户端模型（`psp_clients` + `psp_client_inbounds`，分区键见下方注） | `internal/domain/pspclient.go`、`internal/pkg/clientplan/clientplan.go` |
 | 订阅渲染、模板、规则集 | `internal/service/render` |
 | 用户体系、分组、SSO、配额与到期的判定 | `internal/service/user` |
 | 期望态与重试（sync task 队列） | `internal/service/user` runUserTask |
 
 **agent 的职责因此很窄**：接收 PSP 已经拥有的配置 → 生成 core 配置 → 管进程 → 上报计数器。**UI、用户体系、订阅、Telegram bot 一律不需要。**
 
+> **注：分区键不是 `(user, panel, credClass)`。** 这份文档早先这么写过，协议设计一度以它为前提，是错的。真正的分区键是 `clientplan.go:128` 的 `partKey{pwClass, flow}` —— **二维**，而落进 `domain.PSPClient` 的只有一维（`clientplan.go:306`：`CredClass: k.pwClass`）。所以同一面板上 VLESS+vision 与 VLESS+空 flow 是两个分区、两个客户端，`CredClass` 却相同：**`(user, panel, credClass)` 不单射，它是一个存下来的属性，不是判别式。**
+>
+> 存储层的唯一键是 `psp_client_repo.go:22-23` 的 `uk_psp_client(panel_id, email)`。而 `Email` 是**渲染产物、不是身份**：`clientplan.go:322-337` 在「这个面板只需要一个客户端」时会去掉分区后缀，所以分区总数跨越 1↔2 会让 email **re-key**（这段注释自己写明了）。协议主键因此既不能用 `credClass`，也不能用 `email`——见 §2.3 ①。
+
 ## 2. agent 必须实现的接口（已定，来自 PSP 代码）
 
-`ports.PanelClient` —— **21 个必需方法**，任何 `PanelKind` 都要实现：
+`ports.PanelClient` —— **19 个必需方法**，任何 `PanelKind` 都要实现（映射表做完后从 21 降到 19，见 §2.5）：
 
 **inbound（7）**
 `ListInbounds` · `ListInboundsSlim` · `GetInbound` · `AddInbound` · `UpdateInbound` · `DelInbound` · `SetInboundEnable`
@@ -106,13 +110,13 @@ PSP 的上游访问走的是一层与厂商无关的适配器（`xui_panels.kind
 **client 单体（5）**
 `AddClient` · `UpdateClient` · `DelClientByEmail` · `GetClient` · `ListClientInbounds`
 
-**client 批量与挂载（8）**
-`AddClientToInbounds` · `AttachClient` · `DetachClient` · `BulkAttach` · `BulkDetach` · `BulkCreateClients` · `BulkDelByEmail` · `BulkSetEnabled`
+**client 批量与挂载（6）**
+`AddClientToInbounds` · `AttachClient` · `DetachClient` · `BulkAttach` · `BulkCreateClients` · `BulkDelByEmail`
 
 **状态（1）**
 `GetServerStatus`
 
-**可选能力接口（8 个，按需实现，`CapabilityProvider` 自报）：**
+**可选能力接口（7 个接口 / 9 个方法，按需实现，`CapabilityProvider` 自报）：**
 
 | 接口 | 方法 | agent 该不该实现 |
 |---|---|---|
@@ -126,19 +130,112 @@ PSP 的上游访问走的是一层与厂商无关的适配器（`xui_panels.kind
 
 ### ⚠️ 上表是「今天的 port 长什么样」，不是「agent 协议该长什么样」
 
-按 §0，这两件事已经分开了。这 21 个方法里有相当一部分**是被 3X-UI 的模型逼出来的**：客户端按 email 全面板唯一、inbound 挂载是一张 junction、整结构 Save 语义、批量接口是为了少触发 xray reload——**其中两个（`BulkSetEnabled`、`BulkDetach`）连生产调用点都没有。**
+按 §0，这两件事已经分开了。这些方法里有相当一部分**是被 3X-UI 的模型逼出来的**：客户端按 email 全面板唯一、inbound 挂载是一张 junction、整结构 Save 语义、批量接口是为了少触发 xray reload——**其中两个（`BulkSetEnabled`、`BulkDetach`）连生产调用点都没有，已在 §2.5 删除。**
 
-所以上表的用途是**给 `psp` 适配器当验收清单**（它必须让这 21 个方法都能工作，PSP 的 service 层才不用动），**不是给 agent 协议当规格**。
+所以上表的用途是**给 `psp` 适配器当验收清单**（它必须让这些方法都能工作，PSP 的 service 层才不用动），**不是给 agent 协议当规格**。
 
 agent 协议要回答的是另一组问题，从我们自己的领域出发：
 
 - 一个**节点**要接收什么才能提供服务？（PSP 已拥有的 inbound 配置 + 该节点上的客户端集合）
-- 一个**客户端**在我们的模型里是什么？（`domain.PSPClient`：按 (user, panel, credClass) 分区，凭据由 UUID 派生，挂在若干 inbound 上）
+- 一个**客户端**在我们的模型里是什么？（`domain.PSPClient`：按 `partKey{pwClass, flow}` 分区——**不是 credClass，见 §1 的注**——凭据由 UUID 派生，挂在若干 inbound 上）
 - 节点要回报什么？（累计计数、在线 IP、**已应用的配置版本**、进程健康）
 
 这三个问题的答案和 3X-UI 的方法表没有对应关系，也不应该有。
 
-**待 §7 协议定稿时给出映射表**：agent 协议的每个操作 → `psp` 适配器如何用它兑现那 21 个方法。**哪些方法兑现不了、需要 port 让步，就是第 3 步重塑 port 的清单。**
+### 2.1 验收映射表（2026-09-09 完成）
+
+先定名字。四组独立推导时给同一个操作起了三四个名字（「名册」被叫成 `client.list` / `NodeStateReport` / `roster`，字段集互不兼容），所以协议操作先收敛成这一套，表里只用这些名字：
+
+| 操作 | 方向 | 语义 |
+|---|---|---|
+| `ConfigApply` | PSP → agent | 提交一份**带版本号**的期望监听器配置文档 |
+| `ClientSetApply` | PSP → agent | 提交一份**带版本号**的期望客户端名册（声明式、全量或 keyed upsert） |
+| `NodeReport` | agent → PSP | **唯一的观测流**：名册现状 + 每客户端累计计数 + 每监听器累计计数 + 在线源 IP + 已应用版本 + core 运行状态 |
+| `ListenerEnumerate` | 应答式 | 枚举这台 agent 上**全部**监听器 key（孤儿回收） |
+| `EnforcementDirective` | PSP → agent | **面板聚合后**的每用户上限（设备数、配额预算 + epoch），节点照它执行（§7.2） |
+| `Issue` | agent → PSP | 稳定 issue code —— CONTESTED 类字段的出口 |
+| `RealityProbe` | PSP → agent | 由节点的路由/DNS/延迟视角实测 |
+| `CoreVersions` / `CoreInstall` / `AgentUpgrade` | PSP → agent | core 与 agent 自身的版本管理 |
+| `TLSMaterial` | agent → PSP | 证书文件路径 |
+
+**结论标记**：A = agent 提供更小的正交操作、`psp` 适配器本地合成；B = 协议不提供、PSP 用自有状态作答；C = port 让步（删除或改签名）；D = 一比一保留。**⚠ = 这一行在对抗验收中被真实生产调用点推翻过，处方是修正后的版本，括号里是它欠的债。**
+
+**inbound（7）**
+
+| 方法 | 结论 | 兑现方式 |
+|---|---|---|
+| `ListInbounds` | A ⚠ | `NodeReport` 的名册。**⚠ 名册必须携带 reconcile 真正比较的字段**（uuid/password/flow/expiry/enable），否则 `reconcile.go:623-754` 的逐字段比对两条路都是死的：填指纹 → 每轮对每个客户端触发一次 `RotateClientUUID`（每客户端一次写，破 §4）；填 PSP 自己的期望值 → 所有比较按构造成立、`found` 永不为 nil，`reconcile.go:639` 的 `missing_client_recovered`（断网自愈）永远不触发。这是 §5 硬约束 1 的**第二个**同义反复现场。 |
+| `ListInboundsSlim` | A | `NodeReport`。**这是 §4 里那个占 poll p95 94% 的 `panel_fetch`**（`traffic.go:487`），它同时喂两样东西：`inb.ClientStats`（每客户端累计）与 `traffic.go:494` 的 `inboundCounter{up,down}` → `nodeTraffic.InsertBatch`（`traffic.go:812`，**节点流量图表的唯一数据源**）。§4 那句「一次调用返回整个节点的客户端计数」在这一行兑现，不在别处。 |
+| `GetInbound` | ⚠ 未解决 | 不能由本地快照作答。`user.go:2582` 的 GetInbound 不是在读配置，它是「别在面板抖动时大规模丢 ownership」的守卫，其结果授权一次破坏性本地写（`:2632` staleInbound → `:2670` `ownership.RemoveByMatch`）。本地作答后「面板挂了」与「inbound 已被删除」同时变得**不可产生**。且 flow 合成不出来：`extractDefaultFlow` 读 `settings.clients[].flow`，而快照按构造过 `StripClients`。 |
+| `AddInbound` | A ⚠ | `ConfigApply`。**⚠ 三处 `_ = DelInbound` 回滚不能直接删**：`node.go:461-473` 与 `:953-989` 都是先建监听器、后 `nodes.Create`，Create 失败就留下一个**不在任何 PSP 行里**的活监听器。PSP 铸造身份消灭的是「认领」问题，不是「孤儿」问题。所以要么保留回滚，要么 `ListenerEnumerate` 必须存在——不能两个都不要。 |
+| `UpdateInbound` | A ⚠ | `ConfigApply`。**⚠ 前置条件：先收敛期望文档的唯一生产者。** `node.go:677` 推的是管理员表单原文，不是 `SpecFromNode(n)`；今天它安全**只是因为** xui 适配器做了 RMW（`client.go:668-679` 用实况换掉 `clients[]`）。新协议禁止适配器读回合并，于是表单里那份**可能带 `clients[]`** 的 blob 直接成为期望配置——§3 的静默清零换条路重现。 |
+| `DelInbound` | A ⚠ | `ConfigApply`（缺席即删）。**⚠ 「已经不在了」这个否定不能由 agent 的 present 位提供**：`node.go:876` 今天由 PSP 的传输层制造它，并分岔到语义完全相反的两条路（`:878` 保留客户端的 unclaim vs `:886` 真删客户端）。agent 重启期间一次假 absent 会让 PSP unclaim + `nodes.Delete`，而监听器和它的客户端仍然活着：**无人拥有、无人可达、仍在服务**。 |
+| `SetInboundEnable` | C ⚠ | 删除；enable 是 `ConfigApply` 文档里的一个字段。**⚠ 必须同时改 `node.go:708` 的能力门**——它在写库**之前**就 `return ErrPanelCapabilityUnsupported`，不改的话管理员点开关直接报错，连 `n.Enabled` 都没落库。（顺带：`inboundcfg.go:126` 的 `SpecFromNode` 本来就写 `Enable: n.Enabled`，不需要把 Enable 塞进快照。） |
+
+**client 单体（5）与 client 批量挂载（8）—— 13 个方法塌成 1 个操作**
+
+这是这张表最大的结果，单独写在 §2.2。
+
+| 方法 | 结论 | 兑现方式 |
+|---|---|---|
+| `AddClient` / `UpdateClient` / `DelClientByEmail` | A | 同一条 `ClientSetApply` upsert / remove。协议里**不存在**「创建」与「更新」两个动作，upsert 天然幂等，`isDuplicateClientErr` 那段匹配 3X-UI 错误文案的 substring 代码随之删除。 |
+| `GetClient` / `ListClientInbounds` | A | `NodeReport` 的名册（同一份，见 `ListInbounds` 行的 ⚠）。 |
+| `AddClientToInbounds` · `AttachClient` · `DetachClient` · `BulkAttach` · `BulkDetach` · `BulkCreateClients` · `BulkDelByEmail` · `BulkSetEnabled` | A / C | **零个专用操作。** 挂载是 client 对象的 `inbounds` 字段，改挂载就是改字段；批量是 `ClientSetApply` 的天然形态而不是一个优化端点。`BulkSetEnabled` 与 `BulkDetach` **今天就删**（零生产调用点）。 |
+
+**状态（1）**
+
+| 方法 | 结论 | 兑现方式 |
+|---|---|---|
+| `GetServerStatus` | A ⚠ | `NodeReport` 的头部。**⚠ 必须带 core 运行状态**，不能只带版本身份：`ServerStatus.XrayState` 今天喂 `admin_servers.go:386/388` 的 Servers 页，只报 `agent_version/core_version` 会让「psp 节点的 core 挂了」在 UI 上没有任何表现。 |
+
+**可选能力（7 接口 / 9 方法）**
+
+| 方法 | 结论 | 兑现方式 |
+|---|---|---|
+| `Capabilities()` | A | agent 自报 `features[]`。**极性翻转**（§0.5）：不再是「上游缺什么」，而是「这个 agent 版本提供什么」。 |
+| `ListLiveClientIPs()` | A | `NodeReport`。注意它今天与 `ListInboundsSlim` 骑**同一个 goroutine、同一个面板槽位**（`traffic.go:509`），新协议里它们本来就是同一份上报。 |
+| `GetFail2banStatus()` | B | 不实现。`psp` 适配器直接答 `ErrPanelCapabilityUnsupported` —— 执行搬进 core 层之后这个探针没有被探测对象。**注意不要答 `ErrXUIEndpointUnsupported`**，那是版本闸的语义（见 §2.4 ④）。 |
+| `GetCoreVersionList()` / `InstallCore()` | A | `CoreVersions` / `CoreInstall`。 |
+| `GetPanelUpdateInfo()` / `UpdatePanel()` | A | `AgentUpgrade`。 |
+| `GetWebCertFiles()` | A | `TLSMaterial`。 |
+| `ScanRealityTargets()` | D ⚠ | `RealityProbe` —— 全表**唯一**真正的「调用」（只有节点的网络视角能答）。**⚠ 但不要连 JSON 契约一起保留**：`RealityScanResult` 的 tag 注释自己写着「deliberately follow 3X-UI's camelCase response contract」。前端要它是**加一层 handler DTO 的理由，不是冻结线上协议的理由**。 |
+
+### 2.2 主结果：13 个方法塌成 1 个操作
+
+`AddClient` / `UpdateClient` / `DelClientByEmail` / `GetClient` / `ListClientInbounds` / `AddClientToInbounds` / `AttachClient` / `DetachClient` / `BulkAttach` / `BulkDetach` / `BulkCreateClients` / `BulkDelByEmail` / `BulkSetEnabled` —— **13 个方法，在新模型里是 1 个 `ClientSetApply` 加 1 份 `NodeReport` 名册。**
+
+原因正是 §7.4：3X-UI 的 client 住在某个 inbound 的 settings JSON 里，所以「挂载」必须是动词、必须有加法和减法、还必须有批量版本来省 xray reload。**S-UI 形状里挂载是 client 对象的一个字段**，于是 attach/detach/bulkAttach/bulkDetach 这一族在新协议里是**零个操作**，不是四个。
+
+「批量」这个概念也一起消失：`BulkCreateClients` 存在的唯一理由是「一次重启而不是 N 次」，而声明式 apply 天生就是一次。**代价要写清楚**：「一次写 = 一次 reload」的成本转移到 agent —— PSP 无条件发期望态 + 版本号，agent 自己 diff 决定要不要 reload。于是 `clientUnchanged` / `lifecycleWriteReason` / Phase 0 那整套跳过指标在 psp 后端上**失去被测对象**，要保住它们衡量的东西得改成量 agent 侧的 reload 计数。这是要主动做的迁移，不是白得的。
+
+### 2.3 验收暴露的六个洞（协议定稿前必须回答）
+
+对抗验收把 21 行里的 19 行推翻过，绝大多数不是「映射错了」，而是**这个 port 方法今天在偷偷提供第二样东西**。六个洞按严重度排：
+
+1. **「已应用版本 N」的作用域从来没被定义。** 三组分别按监听器、按名册、按一次 apply 调用使用它，而 §5 硬约束 2 只说「agent 回报的是我应用了版本 N」，**没说 N 是谁的版本号**。ADR 0025 的 Q2b 正好点名这个坑（部分失败怎么表达）。**版本号的粒度是协议的一等决策**，且它取决于第 2 条。
+2. **一个节点的配置文档和它的客户端名册，是一份带版本的文档还是两份？** `ConfigApply` 与 `ClientSetApply` 至今是两条独立通道，没有任何一行说明它们的版本关系。
+3. **孤儿回收（`ListenerEnumerate`）被三条独立论证要求、被零行承载。** `AddInbound` / `ListInboundsSlim` / `DelInbound` 三行各自推出「必须能枚举这台 agent 上的全部监听器」，因为 `node.go:461-473` 与 `:953-989` 都是先建后 Create。这是全表里唯一被三次独立推导出来的必要操作。
+4. **CONTESTED 这一整类没有出口。** §5 要求协议能表达全部四种归属，CONTESTED 的终态是「不修、记一个稳定 issue code、交给人」——而表里所有 issue code（`inbound_missing_disabled_node`、`flow_render_divergence`）**全是 PSP 侧自己产生的**，没有一处让节点报告一个它自己无法调和的状态。`Issue` 操作是为这一格留的，语义未定。
+5. **§7.2 的「面板聚合、节点执行」没有被任何 port 方法牵引出来。** 它是 §7 调研里唯一被点名「要抄，而且要抄到配额上」的东西，但它不对应任何现有方法——所以按方法映射的做法**天然看不见它**。`EnforcementDirective` 是凭 §7.2 直接补进操作表的，不是从这 21 行推出来的。这本身是这次方法学的一个已知盲区。
+6. **`ClientSetApply` 需不需要同步语义，与 §7.5 的「节点拨出」直接冲突。** `user.go:2656` 的 `perr` 决定 sync task 是否重试，`sync.go:216-218` 的 `UpdateClient` → `ownership.UpdateUUID` 依赖顺序保证——这些理由都成立，但「调用返回时」这个概念在节点拨出的协议里**不存在**。要么承认凭据吊销需要一条即时通道（Q2b 对 revoke 有例外），要么回去改 §7.5。**不能含糊。**
+
+### 2.4 差点被走私进新协议的四种 3X-UI 形状
+
+按 §2 那段警告逐条对照，验收自己也漏过了这四处：
+
+1. **把「email 全面板唯一」立成协议主键。** 两组独立地提议用 `(panelID, Email)` 当 client key，理由是它在 PSP 存储层已经被证明唯一（`uk_psp_client`）。但 **`Email` 是渲染产物**：`clientplan.go:322-337` 在面板只需一个客户端时去掉分区后缀，分区总数跨越 1↔2 就 re-key；再叠上它依赖 `rules.Domain`（改域名 = 全量 re-key）。把一个会因为**别的分区**出现/消失而改变、且依赖一个可配置域名的字符串当协议主键，是把 3X-UI 的缺陷买断了。**正确形状**：主键用 `partKey.canon()`（`clientplan.go:187`，注释自称 injective）派生的显式 partition id，**并且把 flow 写进 canon**；email 降级成随载荷下发的展示字段。
+2. **把 `/attach` 端点强行留下来。** 唯一撑着「必须保留一个加法原语」的调用点是 `sharedclient.go:813` 的 `BulkProvisionNodeInbound`，而它的 docstring 自陈是 **best-effort warm-up、与权威 resync 重叠、目的是 front-load 成一次重启**——正是 §2 警告点名的「批量接口只为少触发 xray reload」。所以这里应判 C：这条冷路径整个删掉，由 `ResyncMembershipOrEnqueue` 独自承担，协议只留声明式的挂载字段。
+3. **把 3X-UI 的响应契约当成 agent 的线上格式**（`RealityScanResult` 的 camelCase tag）。见 §2.1 最后一行。
+4. **把两个 error 语义对调。** `ErrXUIEndpointUnsupported` 的定义是**版本闸**（路由在这个面板版本上 404），`ErrPanelCapabilityUnsupported` 才是「这个适配器不实现这个可选操作」——`ports/xui.go:17-20` 明写两者 distinct。对一个自研 agent 根本不存在「路由在某个面板版本上 404」，继续用前者就是把 3X-UI 的版本兼容坐标系搬过来。
+
+### 2.5 这一刀立刻删掉的东西
+
+映射表证明为死的，本次一并删除，不留到第 3 步：
+
+- **`BulkSetEnabled`**、**`BulkDetach`** —— 零生产调用点（只有 port、两个适配器、测试替身）。删掉等于 `xui` 与 `sui` **永久**各少实现两个方法。
+- **`DelClientByEmail` 的 `inboundID` 参数** —— `xui` 适配器函数体从不引用它，`sui` 直接命名为 `_`，三个调用点里两个传字面量 `0`。3X-UI 3.2.0 之前按 inbound 删客户端时代的残留。
+
+`ports.PanelClient` 因此从 21 个方法降到 **19 个**。
 
 ## 3. 要消除的具体缺陷（已实测，非推测）
 
