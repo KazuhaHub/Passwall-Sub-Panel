@@ -747,8 +747,18 @@ func (s *Service) checkOne(ctx context.Context, u *domain.User, e *domain.XUICli
 	// on — manifested as "auto-fixed 10 issues" every single reconcile
 	// click. The drift-healing path that does fire here (expire only)
 	// reuses the existing SetOwnedClientEnable signature; we pass totalGB=0
-	// only because the helper requires it — the per-client floor is
-	// re-asserted by the very next traffic poll regardless.
+	// only because the helper requires it.
+	//
+	// This used to say the floor is "re-asserted by the very next traffic poll
+	// regardless". That is FALSE and the word did real work here: the poll's
+	// re-push is gated on the user having moved bytes this cycle
+	// (traffic.go: `if totals.deltaTotal == 0 { return nil }`). So for an IDLE
+	// user the 0 written here — which the panel reads as "no cap" — is not
+	// corrected until they next transmit. The offline safety net exists
+	// precisely for "PSP is down and the user starts consuming", so it is off
+	// during the window right before the case it was built for. Narrow (needs
+	// an expiry drift to fire at all) but real; audited 2026-09-09, see
+	// docs/adr/0025-push-pull-decision-rule.md.
 	if found.ExpiryTime != expireTime {
 		if err := s.syncer.SetOwnedClientEnable(ctx, e.PanelID, e.InboundID, e.ClientEmail,
 			protocol, ce.method, u.UUID, desiredFlow,

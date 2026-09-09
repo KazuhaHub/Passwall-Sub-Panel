@@ -130,25 +130,66 @@
 
 按 `docs/panel-adapters.md` 已有的五步流程接入。适配器住在 `internal/adapters/pspnode`。
 
-### 2. agent 的 API 直接照 `ports.PanelClient` 的形状设计
+### 2. 线上协议按 PSP 自己的领域模型设计；`ports.PanelClient` 由 `psp` 适配器兑现
 
-> **⚠️ 2026-09-08 已被推翻。** 所有者的方向修正：「我们不要被 3X-UI 带偏了。我们自己的为主，后续只兼容 3X-UI 和 S-UI，而不再主动向着他们。」
->
-> 本节原来的论证有一个没说出口的前提：`ports.PanelClient` 是中立的。它不是——**它的形状是被 3X-UI 的 API 塑出来的**。照它设计 agent，等于把上游的模型搬进我们自己的后端，然后永久留在协议里。
->
-> 实证：`BulkSetEnabled` 与 `BulkDetach` 在**生产代码里零调用**（只出现在 port 声明、两个适配器、以及被接口逼着实现它们的测试替身中）。它们在这个接口里的唯一原因是 3X-UI 提供了这两个端点。
->
-> 修正后的方向见 [psp-node-agent.md](../psp-node-agent.md) §0。要点：**agent 的线上协议按 PSP 自己的领域模型设计**，`ports.PanelClient` 是内部接口、可以随后重塑，两者的阻抗由**我们自己的 `psp` 适配器**吸收——放在我们能看见也能拆掉的地方。
->
-> 代价要记明：本 ADR「其它什么都不用改」这个卖点**被主动放弃了一部分**。它当初是决策依据之一，所以这里不含糊过去。
+> **本节于 2026-09-09 重写。** 触发它的是本 ADR 自己立的重写条件（见上文「2026-09-08（同日稍晚）」），
+> 条件已成立。原标题是「agent 的 API 直接照 `ports.PanelClient` 的形状设计」，
+> 它有一个没说出口的前提：`PanelClient` 是中立的。它不是——**它的形状是被 3X-UI 的 API 塑出来的**。
 
-以下为原文，保留供对照：
+#### 形状：13 个方法塌成 1 个操作
 
-`PanelClient` 目前是 **21 个必需方法**，加上 `CapabilityProvider` / `PanelUpdater` / `CoreUpdater` / `WebCertProvider` / `LiveIPReader` / `RealityScanner` 这些可选能力。
+[psp-node-agent.md §2](../psp-node-agent.md) 的验收映射表（2026-09-09 完成，逐方法对抗验收）
+给出了这一节欠的那个具体答案：
 
-适配 3X-UI 时，这 21 个方法是把 PSP 的意图**翻译**成别人的 API；自研时它们是**直接映射**。这消灭了适配层里绝大部分复杂度——不需要 `flexjson` 容忍类型漂移，不需要猜信封形状，不需要按版本开关能力。
+`AddClient` / `UpdateClient` / `DelClientByEmail` / `GetClient` / `ListClientInbounds` /
+`AddClientToInbounds` / `AttachClient` / `DetachClient` / `BulkAttach` / `BulkDetach` /
+`BulkCreateClients` / `BulkDelByEmail` / `BulkSetEnabled` ——
+**13 个方法，在新模型里是 1 个 `ClientSetApply` 加 1 份 `NodeReport` 名册。**
 
-**能力仍然要如实声明。** 早期版本的 agent 大可以不实现 REALITY 扫描或证书管理，那就不声明——`reportCapabilityGaps` 会照常把缺口报出来。这条纪律不因为「后端是自己的」而放松：能力回答的是「这个部署能不能做」，不是「这个项目打算不打算做」。
+原因不是「我们更喜欢声明式」，而是 §7.4 的模型形状：3X-UI 的 client 住在某个 inbound 的
+settings JSON 里，所以「挂载」必须是动词、必须有加法和减法、还必须有批量版本来省 xray reload。
+S-UI 形状里挂载是 client 对象的一个字段，于是 attach/detach/bulkAttach/bulkDetach 这一族是
+**零个操作**，不是四个。
+
+这就是「契约不是 `ports.PanelClient`」的实证形态。**它长在适配器模型旁边，不长在里面。**
+
+#### 折中方案就是计划本身，且它的风险不打折
+
+上文未决问题第 1 条里那个「尚未评估的折中」现在是计划：
+**`psp` 适配器在 PSP 侧仍实现 `PanelClient`,但方法体不发 RPC，而是写 PSP 自己的期望态，
+由 agent 收敛。** 上层服务因此不动，线上协议却是节点拨出（§7.5）。
+
+它当时附带的风险原样保留：`AddClient` 返回成功从此意味着**「意图已记录」而非「节点已生效」**。
+这正是本项目反复踩到的那个失败形状，所以它的前置条件不是免责声明，是**开工闸门**。
+
+#### 前置条件的当前状态：节点级已满足，客户端级尚未
+
+前置条件的准确表述（上文已订正过一次）是：**先让收敛滞后成为一个有长度、可观测、能超时的状态**。
+
+- **节点级：已满足。** `domain.Node.ConfigPendingSince` + `SetConfigSyncState` +
+  `ConfigSyncLag` 让未收敛状态第一次有了长度，并且「放弃重试」会把行移出 pending
+  （提交 `be85d44`、`d615b43`）。在此之前 `config_sync_state` 只有 `pending` / `synced`
+  两个会落库的值，表达不了「意图已记录、尚未生效」。
+- **客户端级：尚未满足。** `psp_client_inbounds.provisioned` 是一个**布尔**
+  （`domain/pspclient.go:87`、`sqlstore/psp_client_repo.go:51`）。它能说「没收敛」，
+  **说不出「多久了」**——正是节点级刚修掉的那个缺陷，低一层原样存在。
+  而折中方案的语义漂移恰恰发生在**客户端**这一层（`AddClient` / `UpdateClient` 是
+  客户端方法），所以这一格必须补上，否则闸门只关了一半。
+
+#### 能力声明仍然如实，极性翻转
+
+早期 agent 大可以不实现 REALITY 扫描或证书管理，那就不声明，`reportCapabilityGaps` 照常报缺口。
+这条纪律不因为「后端是自己的」而放松：能力回答的是「这个部署能不能做」，不是「这个项目打算不打算做」。
+变的只是极性（§0.5）：不再是「上游缺什么」，而是「这个 agent 版本提供什么」。
+
+#### 代价，写明不含糊
+
+本 ADR「其它什么都不用改」这个卖点**被主动放弃了一部分**，它当初是决策依据之一。
+具体地：服务层确实不动，但适配器不再是一层薄翻译，它要承担期望态的记账与收敛可见性；
+而 `ports.PanelClient` 成为一个**内部**接口，可以随后重塑——
+[psp-node-agent.md §2.5](../psp-node-agent.md) 已经按映射表删掉了它证明为死的三样
+（`BulkSetEnabled`、`BulkDetach`、`DelClientByEmail` 的 `inboundID` 参数），
+21 个必需方法降到 19。
 
 ### 2.5 core：xray 与 sing-box 都支持（已定）
 

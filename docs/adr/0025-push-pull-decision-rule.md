@@ -104,6 +104,129 @@ Q1 谈的是**权威**，Q5 谈的是**同时性**，两者不是一回事，而
 | 失败域独立的第二观察者（健康探测） | 两条路径 | 一个拨号方会让控制面故障和数据面故障产生一模一样的沉默 |
 | 「这次没到」由 PSP 自己的传输层制造（能区分「答了但 0 个 inbound」和「答了但解析不出来」） | 观察方即证据制造方 | 变成「被观测组件对自己是否故障的自述」 |
 
+### 2026-09-09：这四条的偿还方案被逐条对抗验收，三条草稿答案全部不成立
+
+一次 fan-out 对抗验收（三个怀疑者各攻一条，一个裁判独立复核每一处 file:line；裁判驳回了怀疑者
+三处误读，并把 UDP 探测原样抽出来跑了一遍）。**三条草稿答案全部被真实生产代码推翻，而且失效
+模式各不相同**——恰好是本仓库那三种老毛病各一次：「债已还」其实只还了一半、「新模型里不存在了」
+其实只是换条路重现、「探测不出来」和「一切正常」长得一样。
+
+表里第 4 条（「这次没到」的证据出处）由 [psp-node-agent.md §7.5](../psp-node-agent.md) 回答：
+节点拨出，但面板侧对失联做独立判定，不依赖节点自己承认。以下是其余三条。
+
+#### 债务 1 不是一笔债，是三笔
+
+**先纠正对「今天」的描述**，因为草稿和这张表原来的写法都不准。今天保住正确性的**不是那把锁**：
+
+1. `clientWriteLocks` 只裹住一次 POST（`xui/client.go:874-886`），进程内。
+2. **远端的 UNIQUE 约束报错 + 有界重试**（`client.go:161-190`）。`:169-176` 明写它就是为了
+   盖住包级锁盖不住的**跨进程 / 多实例**竞争，而 `client_retry_test.go:90-106` pin 的是
+   v3.9.0-beta.7 的一次**真实修复**。所以「PSP 是单进程，那把锁够用」是错的——仓库自己已经否掉了。
+3. **每 2 分钟一次的重推**。`reconcile.go:745-751` 把这一条写成了明文依赖：它明知 `totalGB`
+   是 JOINT、自己算不出来，就写 0，靠轮询兜底。
+
+- **1a｜远端互斥：真的被消灭，但同时消灭了一个报错者。** `client_inbounds` 的 UNIQUE 冲突在
+  §7.4 的形状里不存在（挂载是字段，apply 是整份名册，agent 侧一次事务）。**但今天跨进程竞争会
+  fail 且可重试，声明式 last-write-wins 下它变成静默覆盖。** 所以协议必须补乐观并发控制：apply
+  携带 `expected_version`，版本不匹配时 agent **拒绝并回报当前版本**——不是丢弃，也不是应用。
+  没有这一条，「写成功但什么都没发生」直接成型。
+- **1b｜期望文档的唯一生产者：一笔新的、必须在翻转前还的 PSP 侧债。** 今天**不存在**装期望客户端
+  状态的本地行（`psp_client_repo.go:19-40` 只有身份、凭据、计数器，没有 enable/expiry/total_gb/limit_*），
+  期望态由 `user.go:1251`、`sharedclient.go:299`、`reconcile.go:643` 三处各自现算，**而且算出的值不同**
+  （后者把 `Enable` 写死 `true`、`totalGB` 写 0）。草稿把「搬到本地行」当成一次搬迁，其实那一行要先被
+  **造出来**。并且两条附加约束：
+  - **JOINT 字段（`total_gb`）不得以标量落进期望文档。** `traffic_cap.go:73-76` 让「我不知道」和
+    「无限额」在同一列里都是 0；而每一轮 `NodeReport` 都会改变它 → 版本 +1 → apply → 可能 reload，
+    正是本 ADR 对 `client.enable` 警告过的那个不收敛写循环换了个字段。**正确形状是 Q3b 的「下放一个
+    绝对值」**：文档写 `quota_headroom_bytes` + 一个 epoch，由 agent 用自己的计数器判
+    `used_since(epoch) >= headroom`。这样「写前必须现读节点那一半」这个在异步 apply 里**结构上
+    无法满足**的要求（PSP 在 T1 铸文档，agent 在 T2≫T1 应用）就不再需要被满足。
+  - **`comment` / `group` 必须显式标为「不由 PSP 拥有」**。它们今天靠 `sharedclient.go:324-325`
+    的一次现读活着，而 legacy 每节点路径按注释「have no read to ride」——**今天就在清零**。
+- **1c｜本地并发不为零，且阻塞于两个未决问题。**「本地行的串行化是已解决的问题」是错的：
+  `user/user.go:113-119` 的 `resyncLocks` 就是一把**为本地侧存在的**进程级 keyed mutex，注释写明
+  一次事务给不了「rebuild→provision→reconcile 跨多行原子」。而行的身份本身不稳定
+  （`clientplan.go:322` 在分区数跨 1↔2 时 re-key），挂在行上的版本号会断流。**这一条卡在
+  [psp-node-agent.md §2.3](../psp-node-agent.md) 的洞 1（版本号作用域未定义）与洞 2（配置文档
+  与名册是一份还是两份）上，在它们被填上之前写不完。**
+
+#### 债务 2 需要替代品：危险没消失，只是换了宿主
+
+草稿说「clients 不住在 inbound 里，就没有 clients[] 可被摧毁」。**最强的反证是我们自己的 S-UI 适配器**：
+`sui/inbounds_write.go:126-150` 的 `mergeSUIInboundUpdate` 在一个 client **早已是一等对象**的后端上，
+仍然必须做 inbound 级读-改-写，而它保护的字段与客户端毫无关系——docstring 自陈，没有这一步，
+「管理员只改了端口或 TLS，却把 multiplex / detour / tcp_multi_path / udp_fragment / addrs 静默抹掉」。
+同理 `sui/client.go:398-400`：改挂载在 S-UI 上也必须先读回整行，否则整行 save 会清空凭据。
+
+**所以危险的机制不是「client 住在哪」，而是 §5 自己写下的那条律**：只要协议里存在「整结构写回」，
+就会有字段在某条路径上被遗漏。3X-UI 那次读回今天驮着三样货，不是一样：`clients[]`、
+`subSortIndex`（`xui/client.go:698-700`，五个字段里唯一靠读回保住而非 pin 住的）、以及 client 侧的
+`comment`/`group`（另一次读回）。
+
+**替代品是三条协议一等条款：**
+
+1. **字段覆盖律**：期望文档逐字段声明覆盖范围，agent 只写覆盖到的字段。**「全量替换」只允许作用在
+   记录集合的成员资格上（谁在名册里），不允许作用在记录内部的字段上。**
+2. **节点拥有的字段在 apply 时显式排除**，并且可测：agent 侧契约测试必须证明「一次 apply 之后累计
+   计数不回退」。这是 §7.3 那条禁令在 **apply 方向**上的对偶——今天只写了上报方向，而 PSP 侧对归零
+   毫无免疫（`traffic.go:1553-1562` 的 `monotonicDelta` 把归零当重置，随后 `:1077-1079` 的零 delta
+   短路让这一轮既不写 lifetime 也不推进基线，损失与「这个用户闲置」完全同形）。
+3. **覆盖不到的字段要写成显式的删除裁定**，不能靠「新模型里没有」默认掉。
+
+**仍然未决**：`reconcile.go:981` 的 `spec.Remark = live.Remark` 怎么处置。照草稿「只存在一份
+`SpecFromNode` 文档」去收敛就要删掉它，等于装回「管理员改名后又被推回去」的缺陷；保留它，则期望
+文档的生产者仍在做实况读合并，而 `live` 来自 `ListInbounds`（§2.1 已映射成 `NodeReport`），于是它
+成为 §5 硬约束 1 的**第三个**同义反复现场。两条路都坏，**正解在洞 4（CONTESTED 至今没有出口）**。
+
+#### 债务 3：本表原来的描述已经过时，而它盖住了四个今天就在漏的缺陷
+
+**这张表原来把健康探测记作「控制面之外的第二条路径」。自 v3.5 起它已经完全不调用 3X-UI**
+（`health/health.go:12-18`）。这不是小订正——它把这一行拆成了四件事，只有一件真的还了：
+
+- **(a) 失败域独立性：已还，是唯一真正还了的部分。** `health` 全文不引用 xui / pool / PanelClient，
+  探测目标 `ServerAddress` 的全部写入方是管理员表单，自注册回调只产生控制面 URL。
+  **翻转后要显式守住**：§8 说自注册复用同一行安装机制，一旦允许 agent 自报地址回填 `ServerAddress`，
+  独立性当场退化成「故障方自证」。协议写死：探测目标的 host 与 port **都**只能来自 PSP 的期望文档，
+  `NodeReport` 不得写它们。
+- **(b) 「两条路径可能互相矛盾」这个价值：从未兑现。** 控制面确有结论（`reconcile.go:830` 的
+  `panel_unreachable` issue code），但它只在管理员手点时短暂现身，后台循环只 log 一个计数；流量轮询
+  的失败（`traffic.go:550-556`）连这个都没有；而消费端（`alert.go:187`、`admin_dashboard.go:143`）
+  只读 `HealthState` 一个字段。**没有任何对账点。** 翻转前必须造出来：把「数据面 verdict × 控制面
+  verdict」落成两个独立字段 + 一张显式命名四个格子的表（both-up / both-down / 数据面 up 控制面 down
+  = agent 挂了但 core 还在 / 数据面 down 控制面 up = 端口没监听）。**没有这张表，翻转后不是「有两个
+  观察者」，是「有一个观察者和一个日志计数器」。**
+- **(c) 探测器本身对两类节点结构性失效**——与翻转无关，今天就在漏。见下方缺陷清单。
+- **(d) 「探测目标不能变成观测态」不是未来风险，是今天已经破了的不变量。**
+  `inboundcfg.go:98` 的 `Capture` 把面板读回的 port 写进 `n.Port`（五个调用点），而 `:127`
+  `SpecFromNode` 把**同一列**当期望值推回去——一个列同时是期望态和观测态，正是本 ADR Q4「分开存」
+  的违反。**偿还方式是拆列**：`desired_port/protocol`（只有 ApplySpec 写）与
+  `observed_port/protocol`（只有 Capture / NodeReport 写）分开，`SpecFromNode` 与 health 只读前者，
+  `InSync` 比两者。这一条与债务 2 是同一笔工作。
+
+#### 这次验收顺带查实的四个今天就在漏的缺陷
+
+它们与协议无关，不该混在设计债里，单独记在这里以免丢失：
+
+1. **UDP-only 节点的健康探测结构上只会说 up。** `health.go:83-93`：超时即 `return nil`。
+   对 Hysteria2 / TUIC，「整机不可达」和「一切正常」写出同一个 `NodeHealthOK`——而且写的是 OK
+   不是 unknown，所以它还会盖掉「未知」。
+2. **探测器唯一能写的非 ok 状态，在管理端被渲染成「尚未探测」。** `health.go:191` 写
+   `NodeHealthUnreachable = "unreachable"`，而 `NodesView.tsx:2762-2770` 的 palette 没有这个键
+   （`palette[state] ?? palette['']` → 灰点「尚未探测」）、`DashboardView.tsx:420` 落 default、
+   `api/types.ts:143` 的联合类型没有它、两份 locale 都没有这个 key。更讽刺的是 palette 里那三个
+   有颜色的状态（`panel_unreachable` / `inbound_missing` / `inbound_disabled`）自 v3.5 起
+   **一个生产者都没有**。**down 被显示成 no signal**，正是 `health.go` 注释说它要避免的那件事的镜像。
+3. **`health` 是 `port` / `protocol` 两列的写入方，且写的是陈旧值。** `health.go:101` 取快照 →
+   `:206` 用几十秒前的值 → `node_repo.go:145-155` 的 `UpdateHealth` 无条件写这两列，条件只有
+   `Where("id = ?")`。那段注释「health 顺带刷新从 inbound 学到的探测目标」在 v3.5 之后已失效——
+   health 什么都不学，只是回声。它是全仓库唯一能把 port 写回 0 的写入方。
+4. **`reconcile.go:751` 的注释是错的。** 它写「the per-client floor is re-asserted by the very next
+   traffic poll **regardless**」，而 `traffic.go:1514` 是 `if totals.deltaTotal == 0 { return nil }`——
+   重推**以「本轮动过字节」为闸**。对一个闲置用户，reconcile 写下的 `totalGB=0`（面板读作「无限额」）
+   不会被纠正。而离线安全网恰恰是为「PSP 挂了、用户开始消费」而存在的。这句注释是 reconcile 敢写
+   `totalGB=0` 的全部依据。**这正是本 ADR「先写代码再补规则」那一节的教训又一次应验：一条以现在时
+   书写的设计叙述，会在实现漂移之后继续被当成事实引用。**
+
 **分母不在这张表里**，因为推**不会**摧毁它：PSP 两种模式下都有自己的节点表。真正变的是——完整性今天由观测本身携带（一个解析成功的 200 就是「截至此刻枚举完整」的断言），改成推之后它变成上报方的自我断言，**而它恰好在上报方坏掉时无法验证**。
 
 **不能破坏的不变量：**

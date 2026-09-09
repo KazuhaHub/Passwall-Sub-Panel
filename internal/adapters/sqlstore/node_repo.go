@@ -147,9 +147,19 @@ func (r *nodeRepo) UpdateHealth(ctx context.Context, n *domain.Node) error {
 			"health_detail":     n.HealthDetail,
 			"health_checked_at": n.HealthCheckedAt,
 			"relay_health":      jsonRelayHealth(n.RelayHealth),
-			// The health pass also refreshes the cached probe target learned
-			// from the inbound, so a port/protocol change propagates without a
-			// separate write path.
+			// TODO(psp): these two columns should not be written here.
+			// The comment this replaces claimed the health pass "refreshes the
+			// cached probe target learned from the inbound". That stopped being
+			// true at v3.5, when health stopped calling 3X-UI at all (see the
+			// health package doc): it learns nothing now, it echoes back the
+			// Node it read at the START of the pass. A pass is bounded by
+			// (nodeCount/concurrency) x timeout, so a snapshot tens of seconds
+			// old can overwrite a port written meanwhile by reconcile or by an
+			// admin edit — and health is the only writer in the repo that can
+			// put a port back to 0. Column-scoping does not help:
+			// UpdateInboundConfig writes this same pair. Tracked with the
+			// desired/observed column split in
+			// docs/adr/0025-push-pull-decision-rule.md (debt 3d).
 			"port":     n.Port,
 			"protocol": n.Protocol,
 		}).Error
