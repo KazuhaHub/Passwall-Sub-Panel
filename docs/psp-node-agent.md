@@ -223,7 +223,11 @@ agent 协议要回答的是另一组问题，从我们自己的领域出发：
 
 按 §2 那段警告逐条对照，验收自己也漏过了这四处：
 
-1. **把「email 全面板唯一」立成协议主键。** 两组独立地提议用 `(panelID, Email)` 当 client key，理由是它在 PSP 存储层已经被证明唯一（`uk_psp_client`）。但 **`Email` 是渲染产物**：`clientplan.go:322-337` 在面板只需一个客户端时去掉分区后缀，分区总数跨越 1↔2 就 re-key；再叠上它依赖 `rules.Domain`（改域名 = 全量 re-key）。把一个会因为**别的分区**出现/消失而改变、且依赖一个可配置域名的字符串当协议主键，是把 3X-UI 的缺陷买断了。**正确形状**：主键用 `partKey.canon()`（`clientplan.go:187`，注释自称 injective）派生的显式 partition id，**并且把 flow 写进 canon**；email 降级成随载荷下发的展示字段。
+1. **把「email 全面板唯一」立成协议主键。** 两组独立地提议用 `(panelID, Email)` 当 client key，理由是它在 PSP 存储层已经被证明唯一（`uk_psp_client`）。但 **`Email` 是渲染产物**：`clientplan.go:322-337` 在面板只需一个客户端时去掉分区后缀，分区总数跨越 1↔2 就 re-key；再叠上它依赖 `rules.Domain`（改域名 = 全量 re-key）。把一个会因为**别的分区**出现/消失而改变、且依赖一个可配置域名的字符串当协议主键，是把 3X-UI 的缺陷买断了。**正确形状**：主键用 **PSP 自己铸造的行 id**（`cli_{psp_clients.id}`），email 降级成随载荷下发的展示字段。
+
+> **订正（2026-09-09，§8 定稿时）**：这一行原本开的处方是「用 `partKey.canon()` 派生的 partition id，并且把 flow 写进 canon」。**两半都错。** flow 早就在 canon 里（`clientplan.go:187-189`）；而 canon **不是客户端身份的纯函数，它是位置相关的**：`clientplan.go:250-274` 的 `keys[i] = {preq[i], freq[i]}` 把排好序的「所需密码类」与「所需 flow」**按下标配对**。于是同一个客户端的 canon 会因为**别的节点**出现或消失而改变——用户只有一个 VLESS+vision 节点时是 `{默认密码类, vision}`，管理员给他加一个 SS-2022-256 节点，同一个客户端变成 `{pw256, vision}`。
+>
+> 那句 "pure function of the key's content (never positional)"（`:191-193`）说的是 **key → email** 稳定，不是 **client → key** 稳定。用它当协议主键，就是 §2.4 ① 自己点名的那个错误换了个字符串重犯一次——而且后果更热：名册是全量 apply，旧 key 缺席即被删，agent 侧该客户端的累计计数从 0 重来。
 2. **把 `/attach` 端点强行留下来。** 唯一撑着「必须保留一个加法原语」的调用点是 `sharedclient.go:813` 的 `BulkProvisionNodeInbound`，而它的 docstring 自陈是 **best-effort warm-up、与权威 resync 重叠、目的是 front-load 成一次重启**——正是 §2 警告点名的「批量接口只为少触发 xray reload」。所以这里应判 C：这条冷路径整个删掉，由 `ResyncMembershipOrEnqueue` 独自承担，协议只留声明式的挂载字段。
 3. **把 3X-UI 的响应契约当成 agent 的线上格式**（`RealityScanResult` 的 camelCase tag）。见 §2.1 最后一行。
 4. **把两个 error 语义对调。** `ErrXUIEndpointUnsupported` 的定义是**版本闸**（路由在这个面板版本上 404），`ErrPanelCapabilityUnsupported` 才是「这个适配器不实现这个可选操作」——`ports/xui.go:17-20` 明写两者 distinct。对一个自研 agent 根本不存在「路由在某个面板版本上 404」，继续用前者就是把 3X-UI 的版本兼容坐标系搬过来。
@@ -362,7 +366,75 @@ V2bX 那种"节点拨出"的形态，让节点**不需要任何入站端口、�
 
 所以 Q2b 的答案是：**节点拨出，但心跳与用量解耦，并且面板侧对"该到没到"做独立判定**（`last_seen` 超过 N 个心跳周期即判定失联，不依赖节点自己承认）。这样既拿到"不需要公网可达"的运维收益，又不把故障检测交给故障方自己。
 
-## 8. ⏸ 其余未决
+## 8. 协议形状（2026-09-09 定稿：洞 2 与洞 1）
+
+**决定：两份带版本的文档（`config` = 监听器，`roster` = 名册）+ 一段同样带版本的指令流（`directives`），三个独立版本流装在一次往返的同一个响应里；作用域是一台 agent；两个主键都用 PSP 铸造的行 id。**
+
+### 8.1 否掉「一份文档」的不是字节
+
+三个形状各自算过带宽，比值 1.005~1.19 —— **这条论据被三方独立打穿，护栏留在这里免得后来者重新捡起来**：拆文档省下的量，在比例上显著时绝对值可忽略，在绝对值要紧时比例可忽略。
+
+真正的理由是 **reload 隔离**。一份文档下，每一次停用用户都让**监听器配置**的 ETag 失效，agent 必须重新 diff 监听器配置；一个 diff bug 或一次 core 的 JSON 规范化变更 = **每停用一个用户 reload 一次 core**，正是 ADR 0025 对 `client.enable` 警告过的那个带 reload 的写循环。两份文档下 agent 连那份文档都不会打开，**这条路径结构上不可达**。这是一份文档无论加多少逐对象状态表都补不平的唯一一条。
+
+而「一份文档买到引用闭包」这个卖点是虚的：它只买到**文档级**闭包，撑不过部分应用——一个 client 照样会挂在一个已接受但被 core 拒绝的监听器上。**可重入的 join 三个形状都得写。**
+
+### 8.2 洞 1 的答案
+
+**N 是「流」的版本号。一台 agent 的已应用状态是一个每流一个 N 的向量。期望侧按文档编版本，观测侧按对象报收敛。**
+
+分工写死：**版本回答「哪一份」，状态回答「到哪一步」。** 洞 1 之所以有三组人给出三个答案，正是因为这两件事被挤进了一个数字。
+
+- **不按监听器/客户端编版本**：删除在声明式全量里就是**缺席**，而一个不存在的对象不能携带版本号——版本号必须住在表达成员资格的那个容器上。
+- **不按 apply 调用编版本**：随 §7.5（节点拨出）一起死，「调用返回时」这个概念不存在。
+- 三个流的版本对严格说是**偏序**；此处可判定只因为节点的每个坐标都不可能超过 PSP。规格写「每流可比」，不写「全序」。
+
+### 8.3 线上规格
+
+**端点**：稳态唯一 `POST /v1/node/sync`。节点拨出，上行 `NodeReport`、下行三段，同一次往返——响应必须在知道 agent 刚报了什么的前提下计算。§2.1 的五个**调用**（RealityProbe / CoreVersions / CoreInstall / AgentUpgrade / TLSMaterial）转成响应里的 `tasks[]` + 下一轮的 `task_results[]`。**这笔账明着付**（ADR 0025 Q0：「这是要主动付的代价，不是换个拨号方就白得的」）：交互延迟最长一个心跳周期，响应带 `next_poll_s` 供 PSP 下调。
+
+**版本序**：`(epoch, version)` 字典序单调，不是单个 int64。epoch 在注册时铸、在 PSP 侧文档行被**重建**时 +1；agent 遇到更高 epoch 时清零本地已提交版本。**没有这条，一次 DB 还原会让 agent 永久拒收、无限期以旧配置服务，唯一出路是重装。** DB 还原是常规运维事件。
+
+**作用域**：一台 agent，身份是注册时铸的 `agent_id`（不是地址——NAT 后面的 agent 没有稳定地址）。协议明写 **agent ↔ panel 作用域 1:1**：否则同一个 client 的累计计数要跨 N 台 agent 求和折进**一个**标量基线（`pspclient.go` 的 `LastRaw*`，注释自陈无 per-inbound 求和），一台 agent 重装让和值下降，而 `monotonicDelta` 在 `d < 0` 时返回 current —— **这是超记，不是丢账，会把用户瞬间打到配额上限。**
+
+**主键**：`lst_{nodes.id}`、`cli_{psp_clients.id}`。派生串一律禁止（email、credClass、`partKey.canon()`、端口、remark、上游 inbound_id）。理由见 §2.4 ① 的订正。
+
+**ETag**：每段一个 = 该段 canonical 序列化的 sha256，**纯内容，版本号不进 ETag**（§7.2 唯一被点名的那条规则；单调序号和时间戳是同一类东西）。**PSP 铸造必须内容幂等**：CAS 前先比 canonical 内容，相同则不铸新版本——否则「重算并写回同值」的空写会让稳态零载荷正好在 churn 最多的路径上失效。验证器只在请求体里一处，**不用 HTTP 条件请求头**（其语义定义在 GET 上，这里是 POST 且永不返回 304）。**收敛判据是 etag 相等，不是 version 相等**（版本回滚 A/B/A 时不产生假的未收敛）。
+
+**引用完整性**：闭包由 PSP 的**同一个读事务**保证，不由版本算术保证。roster 带 `min_config_version`，它是**可复核凭据**，不是 agent 的门。agent 侧 join 的对象是**已收敛的**监听器集合，不是「已持有的文档」——否则一个已接受但被 core 永久拒绝的监听器上挂的 client 会被判 applied、名册报绿，而那批 client 一个都不可达。三态裁定：
+
+| 情形 | 裁定 |
+|---|---|
+| `min_config_version` > 我持有的 config 版本 | `roster_ahead_of_config` —— **自愈中的正常态**，不告警；超过 K 轮升 Issue |
+| 版本闭合、但 key 找不到 | `attachment_unknown_listener` —— PSP 侧缺陷，按自己的 bug 告警 |
+| 监听器存在但被拒 | 该挂载记 `blocked`，**该 client 不得判 applied** |
+
+**禁止 `requires_config_version >= N` 这类门**——join 必须可重入，可重入的 join 严格强于一个有序投递保证。这条禁令一字不改地留着：它正是后来者会顺手改成门的那种字段。**交集为空仍物化 client，绝不删除**（删除会让累计计数从 0 重来）。应用顺序：config 新增与修改 → roster 全量 → config 删除。
+
+**部分失败（ADR 0025 Q2b 欠的那个答案）**：**原子的是期望态落库，不是运行时收敛。** 这句逐字进规格。`accepted{version, etag}`（事务）与 `objects[]`（收敛）是两个字段，允许不一致。对象四态：`applied` / `pending{since_version, first_failed_at}` / `rejected{issue_code, first_failed_at}` / `blocked{on}`。**`pending` 与 `rejected` 都必须能超时**升级成 Issue —— ADR 0024 的开工闸门要的是「有长度、可观测、**能超时**」，而 `rejected` 是唯一「重试同一内容无用」的一格。**这是洞 4 的第一个真实生产者。** 失败对象不阻塞下一版本，绝不部分回滚，`degraded` 是一等稳态。文档级缺陷（schema 不认识 / 闭包被绕过 / 删除集超出 coverage 声明）→ 整段拒收、保留上一版、报 Issue 交给人。
+
+**枚举与覆盖度**：`objects[]` 对 clients 是**含零值的全量枚举**，PSP 把「不在枚举里」判为 issue，**永不判为闲置** —— 这是 §7.3 那条禁令在 apply 方向上的对偶。每段带 `coverage{count}`；`directives` 额外带 `for_roster_version` 与聚合覆盖度（「聚合完整」与「聚合缺了三个节点」不得同形）。**`directives` 条目缺席 = 保持上一次已知预算，永不解释成无限额**；`quota_headroom_bytes` **三态编码**（`null` 未配置 / `0` 已耗尽 / `N` 剩余），**不得 omitempty** —— `traffic_cap.go` 让「我不知道」和「无限额」同列的那个缺陷不许搬进新协议。
+
+**re-key 是一次计数器 epoch 事件**：report 逐 client 带 `counter_epoch`，PSP 在 epoch 变化时**结转基线**而不是当成重置。
+
+**`NodeReport` 只能写 `observed_*`，永不写 `desired_*`**；健康探测目标的 host 与 port 只能来自期望文档。不写这一句，接上 `inboundcfg.Capture` 与 `SpecFromNode` 就是 ADR 0025 债务 3(d) 换了个入口。
+
+### 8.4 关掉了哪些选项
+
+**永久关闭**：按监听器/按 apply 调用编版本；一份文档（以后要合并只能走一次破坏性协议升级）；事件日志 + 游标模型（它推翻 §2.2 的声明式塌缩，需要快照 + 日志尾巴两套实现，并把状态从「当前文档的函数」退化成「历史的折叠」）；一台 agent 服务多个 panel 作用域；agent 自报探测目标 host/port。
+
+**没有关掉**：增量传输。同一个版本号下以后可以加 patch 段，**字节可以以后买回来**。
+
+**顺带关掉洞 6，不留含糊**：凭据吊销**不买第二条通道**，用**版本闸** —— 订阅渲染与本地凭据切换以 `applied.roster.version >= N` 为闸。`sync.go` 的 `RotateClientUUID` 是一个 happens-before（`UpdateClient` 成功之后**才** `ownership.UpdateUUID`），长轮询只把窗口从 60s 缩到 <1s，买到的是**延迟**不是**顺序**，而 25 秒和 0 秒在授权/吊销上不是同一件事。版本闸把洞 6 变成洞 1 那个版本号的一个消费者，§7.5 不动。
+
+### 8.5 卡在哪（是前置条件，不是不做决定的借口）
+
+1. **期望文档必须只有一个铸造者**（ADR 0025 债务 1b）。今天不存在装期望客户端状态的本地行，三处各自现算且**算出的值不同**。且 `node.go` 推的是管理员表单原文，今天安全**只因为** xui 适配器做 RMW。必须在第一版协议实现前还掉，**但不阻塞本决定落纸**。
+2. **客户端行身份必须稳定**（债务 1c）—— 这是 `cli_{psp_clients.id}` 成立的唯一条件。`psp_client_repo` 的 Upsert 按 `(panel_id, email)` 查，email 跨 1↔2 分区边界 re-key → 新行、新 id、计数器从 0。**解锁条件已经确定：把 email 从唯一键降级成可变属性，行按稳定身份查。** 债务 1c 剩下的全部工作就是这一句。
+3. **落库位置不存在**：PSP 今天没有「agent / 主机」这一行。需要一张 agent 表 + 每流一行的 `(applied_version, applied_etag, pending_since, last_seen)`，以及把 `psp_client_inbounds.provisioned` 那个 bool 换成 `(state, applied_version, first_failed_at)`（ADR 0024 明写的开工闸门）。
+4. **版本差不能当存活信号**：失联判定走 `last_seen` + 显式陈旧度上限，独立于任何版本号（§7.5：面板侧独立判定）。
+5. **§4 的成本表要按真实拓扑重算**：5 台 agent、合计 9 个监听器、T=120s。9 是 `(panel_id, inbound_id)` 行数，不是主机数；三份提案的成本表都用了不存在的 9 台机群。方向性结论不受影响（**94% 的收益来自节点拨出，不来自文档拆分——这一条不许记在文档拆分的账上**），但数字要重算。
+
+## 9. ⏸ 其余未决
 
 - 交付形态的细节（单文件二进制 + Docker 已定，见 ADR 0024 §4；构建矩阵与自升级机制未定）
 - core 选型：xray 与 sing-box 都支持（已定，ADR 0024 §2.5）；配置生成的抽象层未定
