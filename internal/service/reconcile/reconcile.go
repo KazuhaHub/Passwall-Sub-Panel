@@ -1039,10 +1039,10 @@ func (s *Service) recordInboundConfigEvent(ctx context.Context, report *Report, 
 // via inboundcfg.Capture / markSynced. Best-effort: a DB failure here doesn't
 // matter — the same condition will re-trigger next cycle.
 func (s *Service) markConfigSyncStatePending(ctx context.Context, n *domain.Node) {
-	if n.ConfigSyncState == "pending" {
+	if n.ConfigSyncState == domain.ConfigSyncPending {
 		return
 	}
-	n.ConfigSyncState = "pending"
+	n.ConfigSyncState = domain.ConfigSyncPending
 	_ = s.nodes.UpdateInboundConfig(ctx, n)
 }
 

@@ -352,6 +352,43 @@ type SortEntry struct {
 // traffic accounting or health probing — they exist purely for layout.
 // Empty value is treated as NodeKindReal so existing rows in the DB
 // stay valid without a backfill.
+// ConfigSyncState values. The whole set, because the admin UI colours a dot
+// per state and falls back to the "never captured" wording for anything it
+// does not recognise — so a state added here without matching frontend copy
+// renders as a DIFFERENT, wrong label rather than as an obvious gap.
+// TestConfigSyncStatesAreExhaustive and the frontend's own guard pin the two
+// lists to each other.
+const (
+	// ConfigSyncNeverCaptured is the empty value: PSP holds no local snapshot,
+	// so render live-fetches this node. Ordinary for a freshly imported node.
+	ConfigSyncNeverCaptured = ""
+	// ConfigSyncSynced means the last write PSP attempted succeeded. It does
+	// NOT mean PSP and the panel agree right now — an operator's panel-side
+	// edit between reconcile cycles leaves this untouched.
+	ConfigSyncSynced = "synced"
+	// ConfigSyncPending means a push failed and a retry is queued. The admin
+	// tooltip says exactly that, so it must not outlive the queued task.
+	ConfigSyncPending = "pending"
+	// ConfigSyncFailed means the retries ran out and the task was cancelled:
+	// nothing is pending and nothing will fix it without the operator.
+	//
+	// Split from Pending because the two demand different things from whoever
+	// is reading the dot. Before this existed, a node whose push permanently
+	// failed kept the Pending label — "配置下发待重试" / "Config push pending
+	// retry" — describing a retry that had already been cancelled, forever.
+	// The row was honest about the push having failed and dishonest about what
+	// would happen next, which is this project's recurring defect wearing a
+	// different hat.
+	ConfigSyncFailed = "failed"
+	// ConfigSyncDrift is DECLARED BUT NEVER WRITTEN today, and the admin UI
+	// renders an orange dot for it that therefore cannot light up. Reconcile
+	// detects a drift and repairs it inside the same call, so a node cannot
+	// rest here — see docs/adr/0024 for why that changes once convergence
+	// becomes asynchronous. Kept so the constant list matches what the UI can
+	// draw, and so the day a writer appears it has a name to use.
+	ConfigSyncDrift = "drift"
+)
+
 type NodeKind string
 
 const (
@@ -485,7 +522,10 @@ type Node struct {
 	// pushed to 3X-UI. nil means "never captured" — render falls back to a
 	// one-shot live fetch for such a node until the next poll backfills it.
 	ConfigSyncedAt *time.Time
-	// ConfigSyncState: "" (never captured) / "synced" / "drift" / "pending".
+	// ConfigSyncState is one of the ConfigSync* constants below. It was six
+	// bare string literals across five packages until they drifted into
+	// something a reader could not enumerate; the constants exist so the set
+	// is closed and the frontend guard has something to compare against.
 	ConfigSyncState string
 	// ---- Managed certificate binding (v3.6.4) ----
 	// CertSource discriminates how this inbound's TLS certificate is

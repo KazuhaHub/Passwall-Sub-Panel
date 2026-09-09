@@ -1271,7 +1271,8 @@
       "pending": "Config push pending retry",
       "uncaptured": "Local config not captured (renders via live fetch)",
       "never": "not captured yet",
-      "synced_at": "Last capture: {{time}}"
+      "synced_at": "Last capture: {{time}}",
+      "failed": "Config push gave up (retries exhausted); subscriptions render the panel’s own config until an operator intervenes"
     },
     "field": {
       "display_name": "Display name",

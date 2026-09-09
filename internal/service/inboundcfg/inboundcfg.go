@@ -195,14 +195,22 @@ func stripRealityFinalmaskTCP(streamSettings string) string {
 // edit form and reconcile never disagree on which nodes are PSP-owned.
 //
 // False for never-captured nodes (ConfigSyncedAt nil: pre-v3.5 rows, or freshly
-// imported before reconcile backfills) and for any non-"synced" state a future
-// writer might set to gate reads off (today only "" / "synced" are written).
+// imported before reconcile backfills). Every OTHER state gates reads off,
+// because in each of them PSP's stored intent is not what the node is running:
+// "pending" and "failed" are both failed pushes, and "drift" means the node
+// disagrees by definition. Serving the snapshot there would hand users a
+// config the node does not have.
+//
+// This comment used to say only the empty value and "synced" were ever
+// written. That stopped being true once "pending" gained four write sites, and
+// a stale comment on the arm that silently governs render is how a live path
+// gets read as dead code.
 func HasLocalConfig(n *domain.Node) bool {
 	if n == nil || n.ConfigSyncedAt == nil {
 		return false
 	}
 	switch n.ConfigSyncState {
-	case "", "synced":
+	case domain.ConfigSyncNeverCaptured, domain.ConfigSyncSynced:
 		return true
 	default:
 		return false
@@ -278,7 +286,7 @@ func InSync(n *domain.Node, live *ports.Inbound) bool {
 func markSynced(n *domain.Node) {
 	now := time.Now()
 	n.ConfigSyncedAt = &now
-	n.ConfigSyncState = "synced"
+	n.ConfigSyncState = domain.ConfigSyncSynced
 }
 
 // jsonEqual compares two JSON strings semantically: key ordering and whitespace

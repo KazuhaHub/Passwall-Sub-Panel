@@ -128,6 +128,44 @@ func (s *Service) invalidateSubscriptionCaches() {
 	}
 }
 
+// markConfigSyncGaveUp moves a node off ConfigSyncPending once its retry has
+// been cancelled, because Pending is a promise: the admin dot reads "配置下发
+// 待重试" / "Config push pending retry" and the Sync Tasks view is where a
+// retry would be visible. Leaving the row Pending after the last attempt was
+// cancelled left that promise standing forever — the state was honest that the
+// push had failed and dishonest about what would happen next.
+//
+// Only the config-carrying task types touch the column. A SetEnabled task that
+// gives up is a real problem too, but it is not a CONFIG sync failure and
+// mislabelling it would make the dot mean two different things.
+//
+// Best-effort: this runs after the task was already cancelled, so a failed
+// write here must not stall the rest of the due batch. It is logged at Warn
+// because the consequence — a row still claiming a retry — is exactly what
+// this function exists to prevent.
+func (s *Service) markConfigSyncGaveUp(ctx context.Context, task *domain.SyncTask, cause error) {
+	if task.Type != domain.SyncTaskNodeUpdate && task.Type != domain.SyncTaskNodeCreate {
+		return
+	}
+	n, err := s.nodes.GetByID(ctx, task.TargetID)
+	if err != nil {
+		log.Warn("config-sync give-up: node not readable",
+			"node_id", task.TargetID, "err", err)
+		return
+	}
+	if n.ConfigSyncState == domain.ConfigSyncFailed {
+		return
+	}
+	n.ConfigSyncState = domain.ConfigSyncFailed
+	if err := s.nodes.UpdateInboundConfig(ctx, n); err != nil {
+		log.Warn("config-sync give-up: state not written; the node will keep claiming a pending retry",
+			"node_id", n.ID, "err", err)
+		return
+	}
+	log.Warn("config push gave up; node left un-converged and rendering from the panel's own config",
+		"node_id", n.ID, "task_id", task.ID, "cause", cause.Error())
+}
+
 // runBackground routes fire-and-forget work through the tracked dispatcher when
 // wired (drained by Shutdown, cancellable ctx), else an untracked safego.Go.
 func (s *Service) runBackground(name string, fn func(ctx context.Context)) {
@@ -652,10 +690,10 @@ func (s *Service) UpdateInboundConfig(ctx context.Context, id int64, spec ports.
 // Best-effort: a DB failure here is logged-only, the same edit will re-trigger
 // on the next admin save or the reconcile that comes after.
 func (s *Service) markConfigPending(ctx context.Context, n *domain.Node) {
-	if n.ConfigSyncState == "pending" {
+	if n.ConfigSyncState == domain.ConfigSyncPending {
 		return
 	}
-	n.ConfigSyncState = "pending"
+	n.ConfigSyncState = domain.ConfigSyncPending
 	if err := s.nodes.UpdateInboundConfig(ctx, n); err != nil {
 		log.Warn("mark config pending failed", "node_id", n.ID, "err", err)
 	}
@@ -780,6 +818,7 @@ func (s *Service) ProcessDueTasks(ctx context.Context, limit int) error {
 				if markErr := s.tasks.Cancel(ctx, task.ID); markErr != nil {
 					log.Warn("node task cancel", "task_id", task.ID, "err", markErr)
 				}
+				s.markConfigSyncGaveUp(ctx, task, err)
 				continue
 			}
 			// Cap retries the same way the user processor does (maxUserTaskAttempts):
@@ -795,6 +834,7 @@ func (s *Service) ProcessDueTasks(ctx context.Context, limit int) error {
 				if markErr := s.tasks.Cancel(ctx, task.ID); markErr != nil {
 					log.Warn("node task cancel (max attempts)", "task_id", task.ID, "err", markErr)
 				}
+				s.markConfigSyncGaveUp(ctx, task, err)
 				continue
 			}
 			next := time.Now().Add(nodeTaskBackoff(task.Attempts + 1))
@@ -884,8 +924,8 @@ func (s *Service) runNodeTask(ctx context.Context, task *domain.SyncTask) error 
 		if err != nil || fresh == nil || !sameSyncStamp(stamp, fresh.ConfigSyncedAt) {
 			return nil
 		}
-		if fresh.ConfigSyncState != "synced" {
-			fresh.ConfigSyncState = "synced"
+		if fresh.ConfigSyncState != domain.ConfigSyncSynced {
+			fresh.ConfigSyncState = domain.ConfigSyncSynced
 			_ = s.nodes.UpdateInboundConfig(ctx, fresh)
 		}
 		return nil

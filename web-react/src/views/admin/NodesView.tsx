@@ -75,6 +75,7 @@ import { PagedTableFooter } from '@/components/PagedTableFooter'
 import { pushSnack } from '@/components/SnackbarHost'
 import { useTabParam } from '@/hooks/useTabParam'
 import RealityTargetScannerDialog from './RealityTargetScannerDialog'
+import { CONFIG_SYNC_KEY, CONFIG_SYNC_STATES, configSyncColor, type ConfigSyncState } from './configSync'
 import { TLSCipherSuitesSelect } from './TLSCipherSuitesSelect'
 import {
   type FieldErrors,
@@ -2786,19 +2787,31 @@ export default function NodesView() {
 
   // configSyncDot renders a small SQUARE (distinct from the round health dot) for
   // the node's inbound-config snapshot state — whether PSP's locally-stored config
-  // (the render truth source since v3.5) is in sync with 3X-UI. "drift"/"pending"
-  // are the states worth noticing (reconcile re-pushes); "synced" is the steady
-  // state; "" means never captured (render live-fetches this node). Only shown for
-  // enabled real nodes — disabled nodes aren't reconciled, so their state is moot.
+  // (the render truth source since v3.5) is in sync with 3X-UI. "synced" is the
+  // steady state; "" means never captured (render live-fetches this node). Only
+  // shown for enabled real nodes — disabled nodes aren't reconciled, so their
+  // state is moot.
+  //
+  // "pending" and "failed" are both push failures and both red, but they ask
+  // different things of the reader: pending has a retry queued, failed has had
+  // its retry cancelled and will not move without the operator. Before failed
+  // existed, a node that had given up kept the pending label and went on
+  // promising a retry that had already been cancelled.
+  //
+  // "drift" is DECLARED BUT UNREACHABLE today — reconcile repairs a drift inside
+  // the same call, so no node ever rests in it. Kept because the backend
+  // constant exists and the day a writer appears the dot should already work.
+  //
+  // The palette falls back to the '' entry for anything it does not recognise,
+  // so a state added on the Go side without copy here renders under the WRONG
+  // label rather than an obvious gap. configSyncStates.test.ts pins the set.
   function configSyncDot(n: Node) {
-    const state = n.config_sync_state || ''
-    const palette: Record<string, { bg: string; label: string }> = {
-      synced:  { bg: '#22c55e',           label: t('admin:nodes.config_sync.synced',     { defaultValue: '配置已同步' }) },
-      drift:   { bg: '#f97316',           label: t('admin:nodes.config_sync.drift',      { defaultValue: '配置漂移（reconcile 将下发对齐）' }) },
-      pending: { bg: md.error,            label: t('admin:nodes.config_sync.pending',    { defaultValue: '配置下发待重试' }) },
-      '':      { bg: md.outlineVariant,   label: t('admin:nodes.config_sync.uncaptured', { defaultValue: '未捕获本地配置（渲染时回源）' }) },
+    const raw = n.config_sync_state || ''
+    const state = (CONFIG_SYNC_STATES as readonly string[]).includes(raw) ? (raw as ConfigSyncState) : ''
+    const p = {
+      bg: configSyncColor(state, md),
+      label: t(`admin:nodes.config_sync.${CONFIG_SYNC_KEY[state]}`),
     }
-    const p = palette[state] ?? palette['']
     const syncedAt = n.config_synced_at ? formatDualTz(n.config_synced_at, panelTz) : t('admin:nodes.config_sync.never', { defaultValue: '尚未捕获' })
     const tooltip = (
       <Box sx={{ fontSize: 12, lineHeight: 1.5 }}>

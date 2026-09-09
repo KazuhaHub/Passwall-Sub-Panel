@@ -299,3 +299,41 @@ func TestSpecFromNodePassesThroughUnparseableStream(t *testing.T) {
 		}
 	}
 }
+
+// HasLocalConfig decides whether render trusts PSP's stored snapshot or falls
+// back to fetching the panel's own config. Both failure states must fall back:
+// in each, PSP's intent is NOT what the node is running, and serving the
+// stored intent would hand users a config the node does not have.
+//
+// The `failed` case is the one this test was added for. It reaches here via
+// the default arm, which is correct — but the arm's comment used to claim
+// "today only "" / "synced" are written", and by then `pending` was written at
+// four sites. A stale comment on the arm that silently governs render is how a
+// reachable path gets read as dead code.
+func TestHasLocalConfigOnlyTrustsConvergedStates(t *testing.T) {
+	now := time.Now()
+	for _, tc := range []struct {
+		state string
+		want  bool
+		why   string
+	}{
+		{domain.ConfigSyncSynced, true, "the last push landed"},
+		{domain.ConfigSyncNeverCaptured, true, "nothing stored; the live fetch backfills it"},
+		{domain.ConfigSyncPending, false, "a push failed and is queued — the node still runs its own config"},
+		{domain.ConfigSyncFailed, false, "the push gave up — the node still runs its own config"},
+		{domain.ConfigSyncDrift, false, "the node disagrees with us by definition"},
+	} {
+		t.Run(tc.state, func(t *testing.T) {
+			n := &domain.Node{ConfigSyncedAt: &now, ConfigSyncState: tc.state}
+			if got := HasLocalConfig(n); got != tc.want {
+				t.Fatalf("HasLocalConfig(%q) = %v, want %v — %s", tc.state, got, tc.want, tc.why)
+			}
+		})
+	}
+
+	// A node with no capture timestamp never renders from the snapshot,
+	// whatever the state column says.
+	if HasLocalConfig(&domain.Node{ConfigSyncState: domain.ConfigSyncSynced}) {
+		t.Fatal("no ConfigSyncedAt must mean no local config, regardless of state")
+	}
+}

@@ -1271,7 +1271,8 @@
       "pending": "配置下发待重试",
       "uncaptured": "未捕获本地配置（渲染时回源）",
       "never": "尚未捕获",
-      "synced_at": "上次捕获：{{time}}"
+      "synced_at": "上次捕获：{{time}}",
+      "failed": "配置下发已放弃（重试次数用尽）；订阅正在回源于面板现状，需人工介入"
     },
     "field": {
       "display_name": "显示名",
