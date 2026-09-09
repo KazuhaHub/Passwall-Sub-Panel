@@ -379,3 +379,49 @@ func TestNodeRepo_ProtocolEmptyForLegacyRows(t *testing.T) {
 		t.Fatalf("protocol = %q, want empty", got.Protocol)
 	}
 }
+
+// UpdateHealth must not touch port / protocol.
+//
+// It used to write both, under a comment claiming the health pass "refreshes
+// the cached probe target learned from the inbound". That premise died at v3.5
+// when health stopped calling 3X-UI: since then it hands back the values off
+// the Node it read at the START of a pass, and a pass is bounded by
+// (nodeCount/concurrency) x probeTimeout. So a port written meanwhile by
+// reconcile or an admin edit could be reverted tens of seconds later by a
+// stale echo — and health was the only writer in the repo able to put a port
+// back to 0, which reverse-push would then have sent on to 3X-UI.
+//
+// Column scoping did not protect this: UpdateInboundConfig writes the SAME
+// pair, so the two writers collided on the same columns rather than on
+// different ones. The invariant is ownership, not scoping — hence a test.
+func TestNodeRepo_UpdateHealthDoesNotWriteTheProbeTarget(t *testing.T) {
+	repo, ctx := newNodeTestRepo(t)
+	n := &domain.Node{PanelID: 1, InboundID: 2, DisplayName: "n", Port: 443, Protocol: "vless"}
+	if err := repo.Create(ctx, n); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	// A health pass holding a STALE snapshot: it read the node before an admin
+	// moved the port, so its copy still carries the old value — and in the
+	// worst case (a pre-v3.5 row) a zero.
+	stale := &domain.Node{ID: n.ID, Port: 0, Protocol: "", HealthState: domain.NodeHealthUnreachable, HealthDetail: "probe failed"}
+	if err := repo.UpdateHealth(ctx, stale); err != nil {
+		t.Fatalf("health: %v", err)
+	}
+
+	got, err := repo.GetByID(ctx, n.ID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.Port != 443 {
+		t.Errorf("port = %d, want 443 — a stale health pass reverted the probe target; at 0 reverse-push would send a broken listener to the panel", got.Port)
+	}
+	if got.Protocol != "vless" {
+		t.Errorf("protocol = %q, want vless — a stale health pass reverted it", got.Protocol)
+	}
+	// The verdict itself must still land, or the guard would have been bought
+	// by disabling the writer.
+	if got.HealthState != domain.NodeHealthUnreachable {
+		t.Errorf("health_state = %q, want %q — the probe verdict must still be written", got.HealthState, domain.NodeHealthUnreachable)
+	}
+}

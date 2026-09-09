@@ -982,7 +982,14 @@ func (s *Service) reconcileInboundConfig(ctx context.Context, n *domain.Node, li
 	if err != nil {
 		return
 	}
-	spec := inboundcfg.SpecFromNode(n)
+	spec, serr := inboundcfg.SpecFromNode(n)
+	if serr != nil {
+		// Refusing to push is the whole point: a node with no captured port is
+		// mid-backfill, and sending port 0 would break a listener that is
+		// currently working. Reported rather than skipped silently.
+		s.recordInboundConfigEvent(ctx, report, n, "inbound_config_push_skipped_no_port", serr.Error(), false)
+		return
+	}
 	// remark is operator-owned: an axis-A drift push must never overwrite a
 	// rename made directly in 3X-UI (InSync already ignores remark, so a
 	// remark-only change isn't even why we're here). Carry the live remark

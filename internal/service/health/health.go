@@ -310,18 +310,21 @@ func (s *Service) CheckOnce(ctx context.Context) error {
 	wg.Wait()
 	for _, state := range states {
 		state.node.RelayHealth = state.relays
-		s.persist(ctx, state.node, state.node.Port, state.node.Protocol,
-			state.directState, state.directError, now)
+		s.persist(ctx, state.node, state.directState, state.directError, now)
 	}
 	return nil
 }
 
-func (s *Service) persist(ctx context.Context, n *domain.Node, port int, proto string, state domain.NodeHealthState, detail string, at time.Time) {
+// persist writes the probe verdict. It does NOT write port / protocol: those
+// are the probe's TARGET, i.e. desired state owned by the inbound-snapshot
+// writers, and health has learned nothing about them since v3.5 (it stopped
+// calling 3X-UI entirely). Handing back the values off a pass-start snapshot
+// made this a stale second writer of somebody else's columns — see
+// nodeRepo.UpdateHealth.
+func (s *Service) persist(ctx context.Context, n *domain.Node, state domain.NodeHealthState, detail string, at time.Time) {
 	n.HealthState = state
 	n.HealthDetail = detail
 	n.HealthCheckedAt = &at // always stamped so "last checked" reflects the real probe time
-	n.Port = port
-	n.Protocol = proto
 	if err := s.nodes.UpdateHealth(ctx, n); err != nil {
 		// Don't propagate — one stuck node row mustn't block updates for
 		// the rest of the fleet.

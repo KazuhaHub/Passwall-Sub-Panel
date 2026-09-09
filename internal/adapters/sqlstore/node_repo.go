@@ -135,6 +135,21 @@ func (r *nodeRepo) BatchUpdateTrafficCounters(ctx context.Context, nodes []*doma
 
 // UpdateHealth writes only the health-probe columns (see UpdateTrafficCounters
 // for why this is column-scoped rather than a full-row Save).
+//
+// port / protocol are DELIBERATELY absent, and this is load-bearing. They used
+// to be written here under a comment saying the health pass "refreshes the
+// cached probe target learned from the inbound" — a premise that died at v3.5,
+// when health stopped calling 3X-UI at all. Since then it learns nothing: it
+// hands back the values off the Node it read at the START of the pass, and a
+// pass is bounded by (nodeCount/concurrency) x probeTimeout, so a snapshot tens
+// of seconds stale could overwrite a port written meanwhile by reconcile or by
+// an admin edit. Column scoping does not help here — UpdateInboundConfig writes
+// the same pair, so the two writers collided on the same columns rather than on
+// different ones. It also made health the only writer in the repo able to put a
+// port back to 0, which reverse-push would then have sent to 3X-UI.
+//
+// The probe TARGET is desired state, owned by the inbound snapshot writers.
+// Health only reads it. See docs/adr/0025-push-pull-decision-rule.md, debt 3d.
 func (r *nodeRepo) UpdateHealth(ctx context.Context, n *domain.Node) error {
 	if n == nil || n.ID == 0 {
 		return fmt.Errorf("UpdateHealth requires a non-zero node ID; got %+v", n)
@@ -147,26 +162,11 @@ func (r *nodeRepo) UpdateHealth(ctx context.Context, n *domain.Node) error {
 			"health_detail":     n.HealthDetail,
 			"health_checked_at": n.HealthCheckedAt,
 			"relay_health":      jsonRelayHealth(n.RelayHealth),
-			// TODO(psp): these two columns should not be written here.
-			// The comment this replaces claimed the health pass "refreshes the
-			// cached probe target learned from the inbound". That stopped being
-			// true at v3.5, when health stopped calling 3X-UI at all (see the
-			// health package doc): it learns nothing now, it echoes back the
-			// Node it read at the START of the pass. A pass is bounded by
-			// (nodeCount/concurrency) x timeout, so a snapshot tens of seconds
-			// old can overwrite a port written meanwhile by reconcile or by an
-			// admin edit — and health is the only writer in the repo that can
-			// put a port back to 0. Column-scoping does not help:
-			// UpdateInboundConfig writes this same pair. Tracked with the
-			// desired/observed column split in
-			// docs/adr/0025-push-pull-decision-rule.md (debt 3d).
-			"port":     n.Port,
-			"protocol": n.Protocol,
 		}).Error
 }
 
 // UpdateInboundConfig writes only the v3.5 inbound-config snapshot columns
-// (plus port/protocol which the snapshot also owns). Same column-scoping
+// (plus port/protocol which the snapshot solely owns — see UpdateHealth). Same column-scoping
 // rationale as UpdateHealth / UpdateTrafficCounters: snapshot writers (admin
 // create/update, reconcile backfill, post-push capture) run concurrently
 // with the health pass and the traffic poll, so a full-row Save would

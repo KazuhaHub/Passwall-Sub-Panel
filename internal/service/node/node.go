@@ -515,7 +515,10 @@ func (s *Service) RecreateInboundOnServer(ctx context.Context, nodeID int64) err
 		if !inboundcfg.HasLocalConfig(n) {
 			return fmt.Errorf("%w: node %d has no captured inbound config to recreate", domain.ErrValidation, nodeID)
 		}
-		spec := inboundcfg.SpecFromNode(n)
+		spec, serr := inboundcfg.SpecFromNode(n)
+		if serr != nil {
+			return fmt.Errorf("recreate inbound on panel %d: %w", n.PanelID, serr)
+		}
 		spec.Enable = true
 		newID, aerr := c.AddInbound(ctx, spec)
 		if aerr != nil {
@@ -536,7 +539,11 @@ func (s *Service) RecreateInboundOnServer(ctx context.Context, nodeID int64) err
 		// UpdateInbound RMW re-applies the snapshot (ensureClientsArray guarantees the
 		// clients[] array) while preserving whatever clients are live. So re-clicking
 		// recreate fixes an existing un-addable inbound without delete+recreate.
-		if uerr := c.UpdateInbound(ctx, n.InboundID, inboundcfg.SpecFromNode(n)); uerr != nil {
+		spec, serr := inboundcfg.SpecFromNode(n)
+		if serr != nil {
+			return fmt.Errorf("heal existing inbound %d on panel %d: %w", n.InboundID, n.PanelID, serr)
+		}
+		if uerr := c.UpdateInbound(ctx, n.InboundID, spec); uerr != nil {
 			return fmt.Errorf("heal existing inbound %d on panel %d: %w", n.InboundID, n.PanelID, uerr)
 		}
 		log.Info("recreate: re-pushed snapshot to heal existing inbound", "node_id", nodeID, "panel_id", n.PanelID, "inbound_id", n.InboundID)
@@ -910,7 +917,13 @@ func (s *Service) runNodeTask(ctx context.Context, task *domain.SyncTask) error 
 		// regress 3X-UI to a superseded spec. Capture the version stamp we're
 		// about to push so the post-push state flip can detect a concurrent edit.
 		stamp := n.ConfigSyncedAt
-		if err := c.UpdateInbound(ctx, n.InboundID, inboundcfg.SpecFromNode(n)); err != nil {
+		spec, serr := inboundcfg.SpecFromNode(n)
+		if serr != nil {
+			// A task that can never produce a valid push must not spin: this is
+			// terminal for the task, not a transient panel failure.
+			return fmt.Errorf("%w: %w", domain.ErrValidation, serr)
+		}
+		if err := c.UpdateInbound(ctx, n.InboundID, spec); err != nil {
 			return err
 		}
 		// The push is a multi-second round-trip that may straddle an admin

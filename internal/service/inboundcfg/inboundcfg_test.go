@@ -2,6 +2,7 @@ package inboundcfg
 
 import (
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -99,7 +100,10 @@ func TestCaptureAndRoundTrip(t *testing.T) {
 
 	// SpecFromNode is the inverse used by the reconcile push; it must round-trip
 	// the stored fields (clients[] absent — UpdateInbound re-merges live ones).
-	spec := SpecFromNode(n)
+	spec, err := SpecFromNode(n)
+	if err != nil {
+		t.Fatalf("SpecFromNode: %v", err)
+	}
 	if spec.Protocol != "shadowsocks" || spec.Port != 8388 || spec.Listen != "127.0.0.1" || !spec.Enable {
 		t.Fatalf("SpecFromNode mismatch: %+v", spec)
 	}
@@ -259,8 +263,14 @@ func TestSpecFromNodeStripsRealityFinalmaskTCP(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			n := &domain.Node{StreamSettings: tc.stream}
-			got := SpecFromNode(n).StreamSettings
+			// Port is set only to clear SpecFromNode's push guard; these cases
+			// are about stream-settings passthrough, not the port.
+			n := &domain.Node{Port: 443, StreamSettings: tc.stream}
+			spec, err := SpecFromNode(n)
+			if err != nil {
+				t.Fatalf("SpecFromNode: %v", err)
+			}
+			got := spec.StreamSettings
 
 			var stream map[string]any
 			if err := json.Unmarshal([]byte(got), &stream); err != nil {
@@ -293,8 +303,12 @@ func TestSpecFromNodeStripsRealityFinalmaskTCP(t *testing.T) {
 // byte-for-byte, so a stream shape we've never seen can still round-trip.
 func TestSpecFromNodePassesThroughUnparseableStream(t *testing.T) {
 	for _, s := range []string{"", "   ", "not json", `{"security":"reality"`, `[1,2,3]`, "null"} {
-		n := &domain.Node{StreamSettings: s}
-		if got := SpecFromNode(n).StreamSettings; got != s {
+		n := &domain.Node{Port: 443, StreamSettings: s}
+		spec, err := SpecFromNode(n)
+		if err != nil {
+			t.Fatalf("SpecFromNode: %v", err)
+		}
+		if got := spec.StreamSettings; got != s {
 			t.Errorf("SpecFromNode(%q).StreamSettings = %q, want it passed through unchanged", s, got)
 		}
 	}
@@ -335,5 +349,37 @@ func TestHasLocalConfigOnlyTrustsConvergedStates(t *testing.T) {
 	// whatever the state column says.
 	if HasLocalConfig(&domain.Node{ConfigSyncState: domain.ConfigSyncSynced}) {
 		t.Fatal("no ConfigSyncedAt must mean no local config, regardless of state")
+	}
+}
+
+// A node legitimately sits at port 0 for a while (a pre-v3.5 row whose port was
+// never captured, or a fresh import before reconcile backfills it). That state
+// is fine to HOLD and fatal to PUSH: 3X-UI's specToRaw sends whatever it is
+// handed, so a spec with port 0 replaces a working listener with a broken one.
+//
+// The path became reachable because the health pass wrote port/protocol back
+// from a pass-start snapshot and was the only writer able to reset a port to 0,
+// while reverse-push had no check of its own.
+func TestSpecFromNodeRefusesToPushAPortlessNode(t *testing.T) {
+	for _, port := range []int{0, -1} {
+		n := &domain.Node{ID: 7, Port: port, Protocol: "vless", InboundSettings: "{}"}
+		_, err := SpecFromNode(n)
+		if err == nil {
+			t.Fatalf("port=%d produced a pushable spec — this replaces a live listener with a broken one", port)
+		}
+		if !errors.Is(err, ErrNoPushablePort) {
+			t.Errorf("port=%d: error %v does not wrap ErrNoPushablePort, so callers cannot tell it from a panel failure", port, err)
+		}
+	}
+}
+
+func TestSpecFromNodeAllowsAValidPort(t *testing.T) {
+	n := &domain.Node{ID: 7, Port: 443, Protocol: "vless", InboundSettings: "{}"}
+	spec, err := SpecFromNode(n)
+	if err != nil {
+		t.Fatalf("a node with a real port must be pushable: %v", err)
+	}
+	if spec.Port != 443 {
+		t.Errorf("Port = %d, want 443", spec.Port)
 	}
 }
