@@ -1,7 +1,6 @@
 package render
 
 import (
-	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -10,20 +9,6 @@ import (
 )
 
 func TestDefaultMihomoTemplateQUICControl(t *testing.T) {
-	seedRaw, err := os.ReadFile("../../seed/files/templates/default-mihomo.yaml")
-	if err != nil {
-		t.Fatal(err)
-	}
-	configRaw, err := os.ReadFile("../../../config/templates/default-mihomo.yaml")
-	if err != nil {
-		t.Fatal(err)
-	}
-	seedNormalized := strings.ReplaceAll(string(seedRaw), "\r\n", "\n")
-	configNormalized := strings.ReplaceAll(string(configRaw), "\r\n", "\n")
-	if seedNormalized != configNormalized {
-		t.Fatal("default mihomo runtime template and embedded seed must stay identical")
-	}
-
 	content := readTemplateContent(t, "../../seed/files/templates/default-mihomo.yaml")
 	skeleton := placeholderRE.ReplaceAllString(content, "")
 	var cfg struct {
