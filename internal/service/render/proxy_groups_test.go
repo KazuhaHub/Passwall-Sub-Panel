@@ -125,7 +125,7 @@ func TestBuildProxyGroupsYAMLSelectedServicesDefaultToNodeSelector(t *testing.T)
 
 // TestBuildProxyGroupsYAML_UDPControl pins the 🎮 UDP控制 catch-all selector
 // derived from a `NETWORK,udp,🎮 UDP控制` rule: candidates are
-// [🚀 节点选择, DIRECT, REJECT] in that order (node = default).
+// [PASS, 🚀 节点选择, DIRECT, REJECT] in that order (PASS = default).
 func TestBuildProxyGroupsYAML_UDPControl(t *testing.T) {
 	raw, err := buildProxyGroupsYAML("- NETWORK,udp,🎮 UDP控制\n", nil)
 	if err != nil {
@@ -144,7 +144,7 @@ func TestBuildProxyGroupsYAML_UDPControl(t *testing.T) {
 	if g == nil {
 		t.Fatalf("🎮 UDP控制 group missing: %#v", groups)
 	}
-	want := []string{"🚀 节点选择", "DIRECT", "REJECT"}
+	want := []string{"PASS", "🚀 节点选择", "DIRECT", "REJECT"}
 	if len(g.Proxies) != len(want) {
 		t.Fatalf("UDP控制 proxies = %#v, want %#v", g.Proxies, want)
 	}
@@ -153,6 +153,23 @@ func TestBuildProxyGroupsYAML_UDPControl(t *testing.T) {
 			t.Fatalf("UDP控制 proxies[%d] = %q, want %q", i, g.Proxies[i], want[i])
 		}
 	}
+}
+
+func TestSingBoxUDPControlPassDefaultsToDeduplicatedDirect(t *testing.T) {
+	outbounds := buildSingBoxSelectorOutboundsWithMembers("- NETWORK,udp,🎮 UDP控制\n", nil, nil, nil)
+	for _, outbound := range outbounds {
+		if outbound["tag"] != "🎮 UDP控制" {
+			continue
+		}
+		got, _ := outbound["outbounds"].([]string)
+		want := []string{"direct", "🚀 节点选择", "block"}
+		assertMemberStrings(t, got, want)
+		if outbound["default"] != "direct" {
+			t.Fatalf("default = %#v, want direct", outbound["default"])
+		}
+		return
+	}
+	t.Fatalf("🎮 UDP控制 selector missing: %#v", outbounds)
 }
 
 func TestBuildProxyGroupsYAMLDomesticServiceGroupHasNodeSelector(t *testing.T) {

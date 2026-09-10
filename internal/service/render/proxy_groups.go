@@ -243,11 +243,11 @@ func proxyGroupChoices(name string) []string {
 	switch {
 	case strings.Contains(name, "UDP控制"):
 		// UDP catch-all selector: pick where ALL (non-local) UDP goes at
-		// runtime — through the node (default), straight DIRECT (bypass proxy,
-		// e.g. when the node's UDP is poor), or REJECT (drop UDP → QUIC falls
-		// back to TCP). 🚀 节点选择 first so the default preserves today's
-		// behaviour (UDP proxied through the chosen node).
-		return []string{"🚀 节点选择", "DIRECT", "REJECT"}
+		// runtime. PASS first lets matching continue with the subsequent routing
+		// rules by default; users can instead force the selected node, DIRECT, or
+		// REJECT. sing-box has no PASS outbound, so its renderer maps PASS to
+		// direct and deduplicates the later DIRECT member.
+		return []string{"PASS", "🚀 节点选择", "DIRECT", "REJECT"}
 	case strings.Contains(name, "全球直连"):
 		return []string{"DIRECT"}
 	case strings.Contains(name, "广告拦截") || strings.Contains(name, "应用净化"):
