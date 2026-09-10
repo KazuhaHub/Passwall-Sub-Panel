@@ -91,6 +91,32 @@ func TestEmitVLESS_FlowVerbatim(t *testing.T) {
 	}
 }
 
+func TestEmitVLESS_X25519MLKEM768(t *testing.T) {
+	realitySettings := &xuiRealitySettings{}
+	realitySettings.Settings.Fingerprint = "firefox"
+	realitySettings.Settings.SupportX25519MLKEM768 = true
+	reality := xuiStreamSettings{Network: "tcp", Security: "reality", RealitySettings: realitySettings}
+
+	got := emitVLESS(map[string]any{"name": "n"}, "uuid", reality, "")
+	if got["client-fingerprint"] != "chrome" {
+		t.Fatalf("client-fingerprint = %v, want chrome", got["client-fingerprint"])
+	}
+	opts, ok := got["reality-opts"].(map[string]any)
+	if !ok || opts["support-x25519mlkem768"] != true {
+		t.Fatalf("reality-opts = %#v, want support-x25519mlkem768=true", got["reality-opts"])
+	}
+
+	realitySettings.Settings.SupportX25519MLKEM768 = false
+	got = emitVLESS(map[string]any{"name": "n"}, "uuid", reality, "")
+	if got["client-fingerprint"] != "firefox" {
+		t.Fatalf("client-fingerprint = %v, want firefox", got["client-fingerprint"])
+	}
+	opts = got["reality-opts"].(map[string]any)
+	if _, exists := opts["support-x25519mlkem768"]; exists {
+		t.Fatalf("disabled support flag should be omitted: %#v", opts)
+	}
+}
+
 // TestEmitTLS_AllowInsecure pins that tlsSettings.allowInsecure flows into
 // the client config's skip-cert-verify (Clash) for VLESS, VMess and Trojan.
 func TestEmitTLS_AllowInsecure(t *testing.T) {

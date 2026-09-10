@@ -33,3 +33,51 @@ it('reopens node metadata from the update response without reloading the stale l
   const reopened = await editRow('new-name')
   expect(within(reopened).getByDisplayValue('new-name')).toBeTruthy()
 })
+
+it('limits REALITY fingerprints and locks chrome when X25519MLKEM768 is enabled', async () => {
+  const realityInbound = {
+    ...inbound,
+    stream_settings: JSON.stringify({
+      network: 'tcp',
+      security: 'reality',
+      realitySettings: {
+        target: 'example.test:443',
+        serverNames: ['example.test'],
+        privateKey: 'private-key',
+        shortIds: ['abcd'],
+        settings: { publicKey: 'public-key', fingerprint: 'firefox' },
+      },
+    }),
+  }
+  installReads({
+    '/admin/nodes': list([node]),
+    '/admin/nodes/1': { node, inbound: realityInbound, clients: [] },
+  })
+  mount(<NodesView />)
+  const dialog = await editRow('old-name', 'VpnKeyIcon')
+  const fingerprint = within(dialog).getByRole('combobox', {
+    name: 'admin:nodes.create_dialog.reality_fingerprint',
+  })
+
+  fireEvent.mouseDown(fingerprint)
+  const options = await screen.findAllByRole('option')
+  expect(options.map(option => option.textContent)).toEqual(['chrome', 'firefox', 'safari'])
+  fireEvent.keyDown(screen.getByRole('listbox'), { key: 'Escape' })
+
+  fireEvent.click(within(dialog).getByRole('switch', {
+    name: 'admin:nodes.create_dialog.reality_support_x25519mlkem768',
+  }))
+  await waitFor(() => {
+    expect(fingerprint.getAttribute('aria-disabled')).toBe('true')
+    expect(fingerprint.textContent).toBe('chrome')
+  })
+
+  fireEvent.click(within(dialog).getByRole('button', { name: 'common:actions.ok' }))
+  await waitFor(() => expect(api.put).toHaveBeenCalled())
+  const request = api.put.mock.calls.find(([url]) => url === '/admin/nodes/1/inbound')?.[1]
+  const streamSettings = JSON.parse(request.stream_settings)
+  expect(streamSettings.realitySettings.settings).toMatchObject({
+    fingerprint: 'chrome',
+    supportX25519MLKEM768: true,
+  })
+})

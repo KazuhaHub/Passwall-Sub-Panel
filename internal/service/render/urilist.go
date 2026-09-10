@@ -248,7 +248,7 @@ func buildVLESSURI(name, host string, port int, uuid string, stream xuiStreamSet
 			if sid := first(stream.RealitySettings.ShortIds); sid != "" {
 				q.Set("sid", sid)
 			}
-			if fp := stream.RealitySettings.Settings.Fingerprint; fp != "" {
+			if fp := realityFingerprint(stream.RealitySettings); fp != "" {
 				q.Set("fp", fp)
 			}
 			if sx := stream.RealitySettings.Settings.SpiderX; sx != "" {

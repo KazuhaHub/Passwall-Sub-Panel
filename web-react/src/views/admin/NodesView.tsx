@@ -282,6 +282,7 @@ interface InboundFormState {
   public_key: string
   short_ids_text: string
   reality_fingerprint: string
+  reality_support_x25519mlkem768: boolean
   reality_spider_x: string
   reality_xver: number
   reality_max_timediff: number
@@ -412,11 +413,13 @@ const EMPTY_INBOUND: InboundFormState = {
   public_key: '',
   short_ids_text: '',
   reality_fingerprint: 'chrome',
+  reality_support_x25519mlkem768: false,
   reality_spider_x: '/ai',
   reality_xver: 0,
   reality_max_timediff: 0,
   // Default new REALITY inbounds to minClientVer 1.0.0 (= no version gate).
-  // xray-core >= 26.7.11 treats an EMPTY minClientVer as "26.3.27", which
+  // xray-core 26.7.11 through 26.7.28 treats an EMPTY minClientVer as
+  // "26.3.27", which
   // rejects mihomo/Clash Verge (hardcoded client version 1.8.2) and older
   // cores — so an empty default silently breaks every new node. Existing
   // nodes are unaffected: parseInboundForEdit overrides this with the panel's
@@ -483,6 +486,7 @@ const VLESS_SECURITIES: { value: VlessSecurity; label: string }[] = [
   { value: 'reality', label: 'Reality' },
 ]
 const FINGERPRINTS = ['chrome', 'firefox', 'safari', 'ios', 'android', 'edge', '360', 'qq', 'random', 'randomized']
+const REALITY_FINGERPRINTS = ['chrome', 'firefox', 'safari']
 const VLESS_FLOWS = ['', 'xtls-rprx-vision', 'xtls-rprx-vision-udp443']
 
 // hostFromURL extracts just the hostname from a 3X-UI panel URL so it can
@@ -747,6 +751,7 @@ function buildStreamSettings(f: InboundFormState): unknown {
   if (security === 'tls') {
     stream.tlsSettings = buildTLSSettings(f)
   } else if (security === 'reality') {
+    const realityFingerprint = f.reality_support_x25519mlkem768 ? 'chrome' : f.reality_fingerprint
     // REALITY field names follow 3X-UI's frontend model (target /
     // minClientVer / maxClientVer) so the inbound round-trips cleanly
     // when an admin opens it in 3X-UI's own web UI. xray-core itself
@@ -768,7 +773,8 @@ function buildStreamSettings(f: InboundFormState): unknown {
       mldsa65Seed: '',
       settings: {
         publicKey: f.public_key,
-        fingerprint: f.reality_fingerprint,
+        fingerprint: realityFingerprint,
+        supportX25519MLKEM768: f.reality_support_x25519mlkem768,
         serverName: '',
         spiderX: f.reality_spider_x || '/ai',
         // mldsa65Verify is the client-side counterpart; same parity
@@ -1015,7 +1021,10 @@ function parseInboundForEdit(node: Node, ib: InboundDetail): InboundFormState {
     private_key: stringValue(reality.privateKey),
     public_key: stringValue(realityInner.publicKey),
     short_ids_text: listToText(reality.shortIds),
-    reality_fingerprint: stringValue(realityInner.fingerprint, 'chrome'),
+    reality_fingerprint: boolValue(realityInner.supportX25519MLKEM768)
+      ? 'chrome'
+      : stringValue(realityInner.fingerprint, 'chrome'),
+    reality_support_x25519mlkem768: boolValue(realityInner.supportX25519MLKEM768),
     reality_spider_x: stringValue(realityInner.spiderX, '/ai'),
     reality_xver: numberValue(reality.xver),
     reality_max_timediff: numberValue(reality.maxTimediff),
@@ -1710,13 +1719,28 @@ function InboundFormFields({ form, setForm, showMetadata, servers, onGenKeys, on
                   <TextField select size="small" label={t('admin:nodes.create_dialog.reality_fingerprint')}
                     value={form.reality_fingerprint}
                     onChange={e => update('reality_fingerprint', e.target.value)}
+                    disabled={form.reality_support_x25519mlkem768}
                     sx={{ flex: '1 1 180px', minWidth: 140 }}>
-                    {FINGERPRINTS.map(fp => <MenuItem key={fp} value={fp}>{fp}</MenuItem>)}
+                    {REALITY_FINGERPRINTS.map(fp => <MenuItem key={fp} value={fp}>{fp}</MenuItem>)}
                   </TextField>
                   {effectivePanelType === '3xui' && <TextField size="small" label={t('admin:nodes.create_dialog.reality_spider_x')}
                     value={form.reality_spider_x}
                     onChange={e => update('reality_spider_x', e.target.value)}
                     sx={{ flex: '1 1 180px' }} />}
+                </Box>
+                <Box>
+                  {switchControl(
+                    t('admin:nodes.create_dialog.reality_support_x25519mlkem768'),
+                    form.reality_support_x25519mlkem768,
+                    checked => setForm(prev => ({
+                      ...prev,
+                      reality_support_x25519mlkem768: checked,
+                      reality_fingerprint: checked ? 'chrome' : prev.reality_fingerprint,
+                    })),
+                  )}
+                  <Typography sx={{ ml: 1.5, mt: -0.5, fontSize: 12, color: md.onSurfaceVariant }}>
+                    {t('admin:nodes.create_dialog.reality_support_x25519mlkem768_hint')}
+                  </Typography>
                 </Box>
                 <TextField required size="small" fullWidth label={t('admin:nodes.create_dialog.private_key')}
                   value={form.private_key}
@@ -1732,8 +1756,9 @@ function InboundFormFields({ form, setForm, showMetadata, servers, onGenKeys, on
                   sx={{ '& input': { fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace', fontSize: 13, py: 1.25 } }} />
                 {/* minClientVer / maxClientVer gate the REALITY handshake by the
                     client's self-reported xray-core version. Both empty = no gate
-                    (pre-3.5 behavior). IMPORTANT: xray-core >= 26.7.11 changed an
-                    EMPTY minClientVer to default to "26.3.27" server-side, which
+                    (pre-3.5 behavior). IMPORTANT: xray-core 26.7.11 through
+                    26.7.28 changed an EMPTY minClientVer to default to "26.3.27"
+                    server-side, which
                     rejects mihomo/Clash-Verge (they hardcode client version 1.8.2)
                     and any older core — set minClientVer to "1.0.0" to restore the
                     open behavior. See docs/3xui-compat.md 2026-07-13. */}

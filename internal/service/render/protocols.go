@@ -162,7 +162,7 @@ func emitVLESS(base map[string]any, uuid string, stream xuiStreamSettings, flow 
 	case "reality":
 		base["tls"] = true
 		if stream.RealitySettings != nil {
-			base["client-fingerprint"] = defaultStr(stream.RealitySettings.Settings.Fingerprint, "chrome")
+			base["client-fingerprint"] = realityFingerprint(stream.RealitySettings)
 			base["servername"] = first(stream.RealitySettings.ServerNames)
 			// publicKey is what the client actually needs. Modern 3X-UI stores
 			// it alongside privateKey under realitySettings.settings.publicKey.
@@ -174,10 +174,14 @@ func emitVLESS(base map[string]any, uuid string, stream xuiStreamSettings, flow 
 					pub = derived
 				}
 			}
-			base["reality-opts"] = map[string]any{
+			realityOpts := map[string]any{
 				"public-key": pub,
 				"short-id":   first(stream.RealitySettings.ShortIds),
 			}
+			if stream.RealitySettings.Settings.SupportX25519MLKEM768 {
+				realityOpts["support-x25519mlkem768"] = true
+			}
+			base["reality-opts"] = realityOpts
 		}
 	case "tls":
 		base["tls"] = true

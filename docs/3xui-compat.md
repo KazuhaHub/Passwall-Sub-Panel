@@ -168,6 +168,14 @@ delta 虽大但没碰 PSP 的面：PSP 调用的 inbound / client / server **con
 
 **兼容矩阵处理**：`version.MinXUI` 与 v3 compat 最新 entry 同步设为 3.4.2；另保留窄范围 `v3.9.0..v3.9.0` entry（min 3.3.0），避免篡改历史版本事实。
 
+### 2026-09-10 / xray-core 26.9.8 REALITY 强制 X25519MLKEM768
+
+**背景**: xray-core v26.9.8 合入 XTLS/REALITY `8cdf7bf` 后，REALITY 服务端要求 Client Hello 的 key share 包含 `X25519MLKEM768`，并且必须位于可选的 `X25519` 之前；不满足时连接会回落到伪装目标。Mihomo 默认会移除该 key share，需要在 `reality-opts` 中显式设置 `support-x25519mlkem768: true`。
+
+**PSP 处理**: REALITY Fingerprint 候选项收窄为 `chrome`、`firefox`、`safari`。节点表单新增“支持 X25519-MLKEM768 密钥交换”开关；开启时持久化 `realitySettings.settings.supportX25519MLKEM768`，订阅渲染为 Mihomo 的 `reality-opts.support-x25519mlkem768: true`，并在表单、Mihomo、sing-box 与 URI 渲染层统一强制 Fingerprint 为 `chrome`。关闭时不输出该 Mihomo 字段，以保留旧 REALITY 服务端兼容性。
+
+**限制**: `support-x25519mlkem768` 是 Mihomo 专用字段，`vless://` 分享链接和 sing-box 配置没有对应开关；这两种输出只能通过强制 `chrome` Fingerprint 表达兼容意图。当前 Mihomo 所用 uTLS 中也只有 `chrome` 会携带所需混合 key share，因此不能仅开启布尔开关而保留其他 Fingerprint。
+
 ### 2026-07-13 / 3X-UI 3.5.0(xray-core 26.7.11)REALITY 认证回归 → minClientVer 显式设置修复
 
 **背景**: 面板从 3.4.2(xray 26.6.27)自动升级到 3.5.0(xray 26.7.11)后,一条此前正常工作的 TCP+REALITY inbound(VLESS + xtls-rprx-vision,端口 443)所有客户端(用户的 mihomo/Clash Verge,以及排查时用官方最新 Xray-core 客户端复现)全部连接失败,同一面板上的 shadowsocks inbound 不受影响。

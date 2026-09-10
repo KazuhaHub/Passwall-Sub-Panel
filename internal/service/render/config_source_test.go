@@ -60,7 +60,8 @@ func vlessRealityNode(synced bool) *domain.Node {
 		Kind:          domain.NodeKindReal,
 		StreamSettings: `{"network":"tcp","security":"reality",` +
 			`"realitySettings":{"serverNames":["www.microsoft.com"],"shortIds":["abcd"],` +
-			`"privateKey":"aPriv","settings":{"publicKey":"aPubKey","fingerprint":"chrome"}}}`,
+			`"privateKey":"aPriv","settings":{"publicKey":"aPubKey","fingerprint":"firefox",` +
+			`"supportX25519MLKEM768":true}}}`,
 		InboundSettings: `{"decryption":"none"}`,
 	}
 	if synced {
@@ -127,8 +128,11 @@ func TestBuildProxies_LocalConfig_ZeroFetch(t *testing.T) {
 	if got["flow"] != "xtls-rprx-vision" || got["servername"] != "www.microsoft.com" {
 		t.Fatalf("flow/servername mismatch: %#v", got)
 	}
+	if got["client-fingerprint"] != "chrome" {
+		t.Fatalf("client-fingerprint mismatch: %#v", got)
+	}
 	ro, ok := got["reality-opts"].(map[string]any)
-	if !ok || ro["public-key"] != "aPubKey" || ro["short-id"] != "abcd" {
+	if !ok || ro["public-key"] != "aPubKey" || ro["short-id"] != "abcd" || ro["support-x25519mlkem768"] != true {
 		t.Fatalf("reality-opts mismatch: %#v", got["reality-opts"])
 	}
 }

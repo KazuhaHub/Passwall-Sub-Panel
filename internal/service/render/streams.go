@@ -50,11 +50,22 @@ type xuiRealitySettings struct {
 	PrivateKey  string   `json:"privateKey"`
 	ShortIds    []string `json:"shortIds"`
 	Settings    struct {
-		PublicKey   string `json:"publicKey"`
-		Fingerprint string `json:"fingerprint"`
-		ServerName  string `json:"serverName"`
-		SpiderX     string `json:"spiderX"`
+		PublicKey             string `json:"publicKey"`
+		Fingerprint           string `json:"fingerprint"`
+		SupportX25519MLKEM768 bool   `json:"supportX25519MLKEM768"`
+		ServerName            string `json:"serverName"`
+		SpiderX               string `json:"spiderX"`
 	} `json:"settings"`
+}
+
+func realityFingerprint(settings *xuiRealitySettings) string {
+	if settings != nil && settings.Settings.SupportX25519MLKEM768 {
+		return "chrome"
+	}
+	if settings == nil {
+		return "chrome"
+	}
+	return defaultStr(settings.Settings.Fingerprint, "chrome")
 }
 
 type xuiTLSSettings struct {

@@ -275,7 +275,7 @@ func applySingBoxTLS(base map[string]any, stream xuiStreamSettings) {
 		tls := map[string]any{"enabled": true}
 		if stream.RealitySettings != nil {
 			tls["server_name"] = first(stream.RealitySettings.ServerNames)
-			fp := defaultStr(stream.RealitySettings.Settings.Fingerprint, "chrome")
+			fp := realityFingerprint(stream.RealitySettings)
 			tls["utls"] = map[string]any{"enabled": true, "fingerprint": fp}
 			pub := stream.RealitySettings.Settings.PublicKey
 			if pub == "" && stream.RealitySettings.PrivateKey != "" {
