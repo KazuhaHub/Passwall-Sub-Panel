@@ -8,11 +8,10 @@ import (
 )
 
 var builtInRuleTargets = map[string]bool{
-	"DIRECT":          true,
-	"REJECT":          true,
-	"REJECT-DROP":     true,
-	"REJECT-DROP-BIT": true,
-	"PASS":            true,
+	"DIRECT":      true,
+	"REJECT":      true,
+	"REJECT-DROP": true,
+	"PASS":        true,
 }
 
 // defaultProxyGroupOrder preserves the original project ordering when a rule

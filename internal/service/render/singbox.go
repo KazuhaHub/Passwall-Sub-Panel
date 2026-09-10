@@ -562,7 +562,7 @@ func singBoxOutboundTag(target string) string {
 	switch target {
 	case "DIRECT":
 		return "direct"
-	case "REJECT", "REJECT-DROP", "REJECT-DROP-BIT":
+	case "REJECT", "REJECT-DROP":
 		return "block"
 	case "PASS":
 		return "direct"

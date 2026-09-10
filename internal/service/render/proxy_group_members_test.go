@@ -1,11 +1,19 @@
 package render
 
 import (
+	"reflect"
 	"testing"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 	"gopkg.in/yaml.v3"
 )
+
+func TestProxyGroupBuiltinsMatchSupportedTargets(t *testing.T) {
+	want := []string{"DIRECT", "REJECT", "REJECT-DROP", "PASS"}
+	if !reflect.DeepEqual(proxyGroupBuiltins, want) {
+		t.Fatalf("proxyGroupBuiltins = %#v, want %#v", proxyGroupBuiltins, want)
+	}
+}
 
 func TestResolveConfiguredMembersSpecificNodeBeforeDirectAndRemainingDeduplicates(t *testing.T) {
 	china := &domain.Node{ID: 42, DisplayName: "🇨🇳 China SH - Aliyun", Region: "CN", Tags: []string{"premium"}}
