@@ -25,11 +25,11 @@ type Document struct {
 	UserID   int64 `json:"user_id"`
 	PanelID  int64 `json:"panel_id"`
 
-	Email       string `json:"email"`
-	UUID        string `json:"uuid"`
-	Password    string `json:"password"`
-	Enable      bool   `json:"enable"`
-	ExpiryTime  int64  `json:"expiry_time"`
+	Email      string `json:"email"`
+	UUID       string `json:"uuid"`
+	Password   string `json:"password"`
+	Enable     bool   `json:"enable"`
+	ExpiryTime int64  `json:"expiry_time"`
 	// Compatibility-only lifecycle fields are deliberately OUTSIDE canonical
 	// client content. Quota and IP policy belong to the independently-versioned
 	// directives stream; device limit has no native data-plane executor. Keeping

@@ -319,7 +319,7 @@ func TestNodeCredsFromNodes_SkipsSeparatorsAndUnknown(t *testing.T) {
 		{ID: 1, DesiredProtocol: "vless"},
 		{ID: 2, Kind: domain.NodeKindSeparator, DesiredProtocol: "vless"}, // separator → skipped
 		{ID: 3, DesiredProtocol: ""},                                      // unknown protocol → skipped
-		nil,                                                        // nil → skipped
+		nil,                                                               // nil → skipped
 		{ID: 5, DesiredProtocol: "trojan"},
 	}
 	got := NodeCredsFromNodes(nodes)
