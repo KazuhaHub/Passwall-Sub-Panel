@@ -112,8 +112,8 @@ func TestEmitVLESS_X25519MLKEM768(t *testing.T) {
 		t.Fatalf("client-fingerprint = %v, want firefox", got["client-fingerprint"])
 	}
 	opts = got["reality-opts"].(map[string]any)
-	if _, exists := opts["support-x25519mlkem768"]; exists {
-		t.Fatalf("disabled support flag should be omitted: %#v", opts)
+	if opts["support-x25519mlkem768"] != false {
+		t.Fatalf("support-x25519mlkem768 = %v, want false", opts["support-x25519mlkem768"])
 	}
 }
 

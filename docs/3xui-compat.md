@@ -172,7 +172,7 @@ delta 虽大但没碰 PSP 的面：PSP 调用的 inbound / client / server **con
 
 **背景**: xray-core v26.9.8 合入 XTLS/REALITY `8cdf7bf` 后，REALITY 服务端要求 Client Hello 的 key share 包含 `X25519MLKEM768`，并且必须位于可选的 `X25519` 之前；不满足时连接会回落到伪装目标。Mihomo 默认会移除该 key share，需要在 `reality-opts` 中显式设置 `support-x25519mlkem768: true`。
 
-**PSP 处理**: REALITY Fingerprint 候选项收窄为 `chrome`、`firefox`、`safari`。节点表单新增“支持 X25519-MLKEM768 密钥交换”开关；开启时持久化 `realitySettings.settings.supportX25519MLKEM768`，订阅渲染为 Mihomo 的 `reality-opts.support-x25519mlkem768: true`，并在表单、Mihomo、sing-box 与 URI 渲染层统一强制 Fingerprint 为 `chrome`。关闭时不输出该 Mihomo 字段，以保留旧 REALITY 服务端兼容性。
+**PSP 处理**: Fingerprint 候选项收窄为 `chrome`、`firefox`、`safari`。节点表单新增“支持 X25519-MLKEM768 密钥交换”开关；该值持久化为 `realitySettings.settings.supportX25519MLKEM768`，并直接渲染为 Mihomo 的 `reality-opts.support-x25519mlkem768`。开启时在表单、Mihomo、sing-box 与 URI 渲染层统一强制 Fingerprint 为 `chrome`。
 
 **限制**: `support-x25519mlkem768` 是 Mihomo 专用字段，`vless://` 分享链接和 sing-box 配置没有对应开关；这两种输出只能通过强制 `chrome` Fingerprint 表达兼容意图。当前 Mihomo 所用 uTLS 中也只有 `chrome` 会携带所需混合 key share，因此不能仅开启布尔开关而保留其他 Fingerprint。
 

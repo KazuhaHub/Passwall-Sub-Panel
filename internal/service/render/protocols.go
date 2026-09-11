@@ -174,14 +174,11 @@ func emitVLESS(base map[string]any, uuid string, stream xuiStreamSettings, flow 
 					pub = derived
 				}
 			}
-			realityOpts := map[string]any{
-				"public-key": pub,
-				"short-id":   first(stream.RealitySettings.ShortIds),
+			base["reality-opts"] = map[string]any{
+				"public-key":             pub,
+				"short-id":               first(stream.RealitySettings.ShortIds),
+				"support-x25519mlkem768": stream.RealitySettings.Settings.SupportX25519MLKEM768,
 			}
-			if stream.RealitySettings.Settings.SupportX25519MLKEM768 {
-				realityOpts["support-x25519mlkem768"] = true
-			}
-			base["reality-opts"] = realityOpts
 		}
 	case "tls":
 		base["tls"] = true

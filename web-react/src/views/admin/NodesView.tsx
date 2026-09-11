@@ -485,8 +485,7 @@ const VLESS_SECURITIES: { value: VlessSecurity; label: string }[] = [
   { value: 'tls', label: 'TLS' },
   { value: 'reality', label: 'Reality' },
 ]
-const FINGERPRINTS = ['chrome', 'firefox', 'safari', 'ios', 'android', 'edge', '360', 'qq', 'random', 'randomized']
-const REALITY_FINGERPRINTS = ['chrome', 'firefox', 'safari']
+const FINGERPRINTS = ['chrome', 'firefox', 'safari']
 const VLESS_FLOWS = ['', 'xtls-rprx-vision', 'xtls-rprx-vision-udp443']
 
 // hostFromURL extracts just the hostname from a 3X-UI panel URL so it can
@@ -1721,7 +1720,7 @@ function InboundFormFields({ form, setForm, showMetadata, servers, onGenKeys, on
                     onChange={e => update('reality_fingerprint', e.target.value)}
                     disabled={form.reality_support_x25519mlkem768}
                     sx={{ flex: '1 1 180px', minWidth: 140 }}>
-                    {REALITY_FINGERPRINTS.map(fp => <MenuItem key={fp} value={fp}>{fp}</MenuItem>)}
+                    {FINGERPRINTS.map(fp => <MenuItem key={fp} value={fp}>{fp}</MenuItem>)}
                   </TextField>
                   {effectivePanelType === '3xui' && <TextField size="small" label={t('admin:nodes.create_dialog.reality_spider_x')}
                     value={form.reality_spider_x}
