@@ -1131,6 +1131,9 @@ func (r *fakeNodeRepo) UpdateMetadata(ctx context.Context, n *domain.Node) error
 	return nil
 }
 func (r *fakeNodeRepo) UpdateInboundConfig(ctx context.Context, n *domain.Node) error { return nil }
+func (r *fakeNodeRepo) UpdateObservedEndpoint(context.Context, int64, domain.NodeObservedEndpoint) error {
+	return nil
+}
 func (r *fakeNodeRepo) UpdateEnabled(ctx context.Context, id int64, enabled bool) error {
 	return nil
 }

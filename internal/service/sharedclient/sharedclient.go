@@ -1,7 +1,7 @@
 // Package sharedclient is the v3.9.0 cutover Stage-1b reconcile service: it
 // CREATES the shared client in 3X-UI for a psp_client and confirms the result
-// before marking each attachment provisioned. It is the only writer of the
-// per-(client,node) Provisioned flag, which render/traffic later consult.
+// before marking each attachment applied. It is the legacy-panel writer of the
+// per-(client,node) four-state convergence record, which render/traffic consult.
 //
 // It is additive/dormant: the shared client is created enable=true with no
 // expiry/quota (the full lifecycle is wired in Stage 1c, BEFORE any render flip),
@@ -23,6 +23,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/metrics"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/paneltz"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/clientdoc"
 )
 
 // capGapKey dedupes the capability-gap warning per (panel, capability).
@@ -66,25 +67,30 @@ type ProvisionResult struct {
 	Skipped     int  // attachments whose node could not be resolved
 }
 
-// buildSharedClientSpec maps a psp_client to the 3X-UI client spec, carrying the
-// STORED credentials (not derived). One client object holds every protocol's
+// buildSharedClientSpec projects the authoritative psp_client document into a
+// 3X-UI client spec. One client object holds every protocol's
 // field — id (VLESS/VMess), password (Trojan/SS/SS-2022), auth (Hysteria2 = the
 // UUID, matching what render emits) — and 3X-UI projects only the relevant field
-// into each inbound. Flow is the partition's single effective flow. Enable is
-// true; expiry/quota are left 0 — Stage 1c owns the lifecycle.
+// into each inbound. Flow is the partition's single effective flow. Lifecycle
+// and credentials come only from the persisted desired row.
 func buildSharedClientSpec(c *domain.PSPClient, flow string) ports.ClientSpec {
+	doc := clientdoc.Mint(c, nil)
 	return ports.ClientSpec{
-		ID:       c.UUID,
-		Email:    c.Email,
-		Enable:   true,
-		Flow:     flow,
-		Password: c.Password,
-		Auth:     c.UUID,
+		ID:         doc.UUID,
+		Email:      doc.Email,
+		Enable:     doc.Enable,
+		Flow:       flow,
+		Password:   doc.Password,
+		Auth:       doc.UUID,
+		LimitIP:    doc.IPLimit,
+		LimitHwid:  doc.DeviceLimit,
+		TotalGB:    c.PanelQuotaCap(doc.QuotaHeadroom),
+		ExpiryTime: doc.ExpiryTime,
 	}
 }
 
 // ProvisionClient creates/attaches the shared client for one psp_client across
-// all its attached inbounds, reads it back, and marks Provisioned only the
+// all its attached inbounds, reads it back, and marks applied only the
 // attachments 3X-UI confirms. A brand-new client is created in one
 // AddClientToInbounds (one Xray restart); an existing client whose inbound set
 // drifted is converged with the idempotent AttachClient — AddClientToInbounds
@@ -161,7 +167,10 @@ func (s *Service) ProvisionClient(ctx context.Context, c *domain.PSPClient) (Pro
 	cur, _ := cli.GetClient(ctx, c.Email)
 	if cur != nil && sameInboundSet(cur.InboundIDs, desiredSet) {
 		for _, nodeID := range nodeByInbound {
-			if err := s.clients.MarkInboundProvisioned(ctx, c.ID, nodeID, true); err != nil {
+			if err := s.clients.UpdateInboundState(ctx, domain.PSPClientInbound{
+				ClientID: c.ID, NodeID: nodeID, State: domain.ClientApplyApplied,
+				AppliedEmail: cur.Email, AppliedUUID: appliedUUID(cur), AppliedPassword: cur.Password,
+			}); err != nil {
 				log.Warn("sharedclient: mark provisioned", "client_id", c.ID, "node_id", nodeID, "err", err)
 				continue
 			}
@@ -193,7 +202,7 @@ func (s *Service) ProvisionClient(ctx context.Context, c *domain.PSPClient) (Pro
 	}
 	res.Created = true
 
-	// Read-back: only mark Provisioned the inbounds 3X-UI actually confirms the
+	// Read-back: only mark applied the inbounds 3X-UI actually confirms the
 	// client is attached to (the gate render/traffic trust — never "we asked").
 	detail, err := cli.GetClient(ctx, c.Email)
 	if err != nil {
@@ -225,13 +234,51 @@ func (s *Service) ProvisionClient(ctx context.Context, c *domain.PSPClient) (Pro
 		if !confirmed[inb] {
 			continue
 		}
-		if err := s.clients.MarkInboundProvisioned(ctx, c.ID, nodeID, true); err != nil {
+		if err := s.clients.UpdateInboundState(ctx, domain.PSPClientInbound{
+			ClientID: c.ID, NodeID: nodeID, State: domain.ClientApplyApplied,
+			AppliedEmail: detail.Email, AppliedUUID: appliedUUID(detail), AppliedPassword: detail.Password,
+		}); err != nil {
 			log.Warn("sharedclient: mark provisioned", "client_id", c.ID, "node_id", nodeID, "err", err)
 			continue
 		}
 		res.Provisioned++
 	}
 	return res, nil
+}
+
+func appliedUUID(detail *ports.ClientDetail) string {
+	if detail == nil {
+		return ""
+	}
+	if detail.ID != "" {
+		return detail.ID
+	}
+	return detail.Auth
+}
+
+func (s *Service) refreshAppliedCredentials(ctx context.Context, c *domain.PSPClient, attachments []domain.PSPClientInbound, detail *ports.ClientDetail) error {
+	if detail == nil {
+		return fmt.Errorf("shared client %s absent during credential confirmation", c.Email)
+	}
+	uuid := appliedUUID(detail)
+	if uuid == "" && detail.Password == "" {
+		// Some legacy/test adapters cannot project credentials on reads. An
+		// unknown read-back must not erase a previously confirmed snapshot.
+		return nil
+	}
+	for _, attachment := range attachments {
+		if !attachment.Applied() {
+			continue
+		}
+		if err := s.clients.UpdateInboundState(ctx, domain.PSPClientInbound{
+			ClientID: c.ID, NodeID: attachment.NodeID, State: domain.ClientApplyApplied,
+			AppliedVersion: attachment.AppliedVersion, AppliedEmail: detail.Email,
+			AppliedUUID: uuid, AppliedPassword: detail.Password,
+		}); err != nil {
+			return fmt.Errorf("record applied credentials for client %d node %d: %w", c.ID, attachment.NodeID, err)
+		}
+	}
+	return nil
 }
 
 // want.QuotaHeadroom is bytes remaining IN THE CURRENT PERIOD, not the value
@@ -245,7 +292,7 @@ func (s *Service) ProvisionClient(ctx context.Context, c *domain.PSPClient) (Pro
 // only the legacy per-node clients get toggled. UpdateClient is full-replace, so
 // the stored creds + the partition's flow are re-sent unchanged. A client with no
 // attachments (hence no flow) is skipped.
-func (s *Service) SyncLifecycle(ctx context.Context, c *domain.PSPClient, want domain.UserLifecycle) error {
+func (s *Service) SyncLifecycle(ctx context.Context, c *domain.PSPClient) error {
 	if c == nil {
 		return nil
 	}
@@ -254,7 +301,7 @@ func (s *Service) SyncLifecycle(ctx context.Context, c *domain.PSPClient, want d
 		return fmt.Errorf("list attachments: %w", err)
 	}
 	// Only push once the shared client actually EXISTS in 3X-UI — i.e. at least
-	// one attachment is confirmed Provisioned by the reconcile read-back. Before
+	// one attachment is confirmed applied by the reconcile read-back. Before
 	// provisioning (the default on every install where the operator hasn't run the
 	// cutover, yet the shadow dual-write has already created psp_client rows +
 	// attachments), the client's email is unknown to 3X-UI, so an UpdateClient
@@ -265,7 +312,7 @@ func (s *Service) SyncLifecycle(ctx context.Context, c *domain.PSPClient, want d
 	flow := ""
 	provisioned := false
 	for _, a := range atts {
-		if a.Provisioned {
+		if a.Applied() {
 			provisioned, flow = true, a.FlowOverride // uniform flow across the partition
 			break
 		}
@@ -281,6 +328,7 @@ func (s *Service) SyncLifecycle(ctx context.Context, c *domain.PSPClient, want d
 	// covers the pool failure below, which reaches neither. Skip rate is
 	// skipped/total; do not try to reconcile all three against the total.
 	metrics.LifecycleTotal.Inc()
+	want := clientdoc.Mint(c, atts).Lifecycle()
 	cli, err := s.pool.Get(c.PanelID)
 	if err != nil {
 		metrics.LifecycleErrorTotal.Inc()
@@ -289,14 +337,6 @@ func (s *Service) SyncLifecycle(ctx context.Context, c *domain.PSPClient, want d
 	s.reportCapabilityGaps(cli, c.PanelID, want)
 
 	spec := buildSharedClientSpec(c, flow)
-	spec.Enable = want.Enable
-	spec.ExpiryTime = want.ExpiryTime
-	spec.LimitIP = want.IPLimit
-	spec.LimitHwid = want.DeviceLimit
-	// QuotaHeadroom is period-relative; the panel enforces against its own
-	// never-reset lifetime counter. domain.PanelQuotaCap bridges the two —
-	// see docs/traffic-floor-defect.md for what pushing the raw headroom did.
-	spec.TotalGB = c.PanelQuotaCap(want.QuotaHeadroom)
 	// No-op-skip: if 3X-UI already holds this exact lifecycle AND creds, skip the
 	// UpdateClient. ResyncMembership calls this on every resync and the traffic poll
 	// calls it every cycle for active users; without the skip an unchanged user
@@ -347,7 +387,7 @@ func (s *Service) SyncLifecycle(ctx context.Context, c *domain.PSPClient, want d
 		reason := lifecycleWriteReason(cur, spec, capIP, capDevice, want.QuotaHeadroom)
 		if reason == "" {
 			metrics.LifecycleSkippedTotal.Inc()
-			return nil
+			return s.refreshAppliedCredentials(ctx, c, atts, cur)
 		}
 		metrics.LifecycleWriteReasonTotal.With(reason).Inc()
 		unreadReason = ""
@@ -360,6 +400,19 @@ func (s *Service) SyncLifecycle(ctx context.Context, c *domain.PSPClient, want d
 	}
 	metrics.LifecycleWriteTotal.Inc()
 	if err := cli.UpdateClient(ctx, spec); err != nil {
+		metrics.LifecycleErrorTotal.Inc()
+		return err
+	}
+	confirmed, err := cli.GetClient(ctx, c.Email)
+	if err != nil {
+		metrics.LifecycleErrorTotal.Inc()
+		return fmt.Errorf("confirm shared client %s credentials: %w", c.Email, err)
+	}
+	if confirmed == nil || confirmed.ID != spec.ID || confirmed.Password != spec.Password || confirmed.Auth != spec.Auth {
+		metrics.LifecycleErrorTotal.Inc()
+		return fmt.Errorf("confirm shared client %s credentials: read-back does not match desired identity", c.Email)
+	}
+	if err := s.refreshAppliedCredentials(ctx, c, atts, confirmed); err != nil {
 		metrics.LifecycleErrorTotal.Inc()
 		return err
 	}
@@ -526,6 +579,9 @@ func sameInboundSet(have []int, want map[int]bool) bool {
 // concurrently by the traffic poll's own panel fan-out.
 func (s *Service) SyncUserLifecycle(ctx context.Context, userID int64, want domain.UserLifecycle) error {
 	started := time.Now()
+	if err := s.clients.UpdateDesiredLifecycleByUser(ctx, userID, want); err != nil {
+		return fmt.Errorf("store desired lifecycle: %w", err)
+	}
 	clients, err := s.clients.ListByUser(ctx, userID)
 	if err != nil {
 		return fmt.Errorf("list clients: %w", err)
@@ -552,7 +608,7 @@ func (s *Service) SyncUserLifecycle(ctx context.Context, userID int64, want doma
 		if len(clients) == 0 {
 			return nil
 		}
-		return s.SyncLifecycle(ctx, clients[0], want)
+		return s.SyncLifecycle(ctx, clients[0])
 	}
 
 	// Results are collected BY INDEX, not by arrival, so "the first error"
@@ -593,7 +649,7 @@ func (s *Service) SyncUserLifecycle(ctx context.Context, userID int64, want doma
 			}()
 			sem <- struct{}{}
 			defer func() { <-sem }()
-			errs[i] = s.SyncLifecycle(ctx, c, want)
+			errs[i] = s.SyncLifecycle(ctx, c)
 		}(i, c)
 	}
 	wg.Wait()
@@ -651,7 +707,7 @@ func (s *Service) DeleteLegacyForUser(ctx context.Context, userID int64) (Cleanu
 			return res, fmt.Errorf("list attachments: %w", err)
 		}
 		for _, a := range atts {
-			if !a.Provisioned {
+			if !a.Applied() {
 				continue
 			}
 			n, err := s.nodes.GetByID(ctx, a.NodeID)
@@ -916,7 +972,7 @@ func (s *Service) ReconcileOrphans(ctx context.Context, userID int64) error {
 // the shared 3X-UI client u{uid}@ live and ENABLED on every panel, so a deleted
 // user keeps authenticating with their UUID-derived creds. For each panel it
 // BulkDelByEmail's the user's client emails (one call → one Xray restart per panel),
-// then drops the psp_client rows (DeleteByEmail cascades psp_client_inbounds). It
+// then drops the psp_client rows by stable ID (DeleteByID cascades attachments). It
 // returns the first error; on a 3X-UI failure for a panel it leaves that panel's DB
 // rows so the caller's durable retry re-lists and re-attempts. The caller MUST run
 // this BEFORE deleting the user row — there is no FK cascade from users to
@@ -926,12 +982,16 @@ func (s *Service) DeleteSharedForUser(ctx context.Context, userID int64) error {
 	if err != nil {
 		return fmt.Errorf("list clients: %w", err)
 	}
-	byPanel := map[int64][]string{}
+	byPanel := map[int64][]*domain.PSPClient{}
 	for _, c := range clients {
-		byPanel[c.PanelID] = append(byPanel[c.PanelID], c.Email)
+		byPanel[c.PanelID] = append(byPanel[c.PanelID], c)
 	}
 	var firstErr error
-	for panelID, emails := range byPanel {
+	for panelID, panelClients := range byPanel {
+		emails := make([]string, len(panelClients))
+		for i, c := range panelClients {
+			emails[i] = c.Email
+		}
 		cli, err := s.pool.Get(panelID)
 		if err != nil {
 			if firstErr == nil {
@@ -945,9 +1005,9 @@ func (s *Service) DeleteSharedForUser(ctx context.Context, userID int64) error {
 			}
 			continue // keep the DB rows for retry — don't orphan the 3X-UI clients
 		}
-		for _, email := range emails {
-			if err := s.clients.DeleteByEmail(ctx, panelID, email); err != nil && firstErr == nil {
-				firstErr = fmt.Errorf("drop psp_client row %s: %w", email, err)
+		for _, c := range panelClients {
+			if err := s.clients.DeleteByID(ctx, c.ID); err != nil && firstErr == nil {
+				firstErr = fmt.Errorf("drop psp_client row %d (%s): %w", c.ID, c.Email, err)
 			}
 		}
 		log.Info("deleted shared clients for user", "user_id", userID, "panel_id", panelID, "count", len(emails))

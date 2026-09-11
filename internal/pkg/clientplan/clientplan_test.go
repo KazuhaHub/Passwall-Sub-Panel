@@ -22,7 +22,7 @@ func TestBuild_MixedProtocolsCollapseToOneClient(t *testing.T) {
 		{NodeID: 3, Protocol: domain.ProtoSS},
 		{NodeID: 5, Protocol: domain.ProtoHysteria2},
 	}
-	got := Build(42, testUUID, 10, testRules, nodes)
+	got := Build(42, testUUID, 10, testRules, nodes, nil)
 	if len(got) != 1 {
 		t.Fatalf("want 1 shared client, got %d", len(got))
 	}
@@ -52,7 +52,7 @@ func TestBuild_VLESSFlowSplitsClient(t *testing.T) {
 		{NodeID: 2, Protocol: domain.ProtoVLESS},                           // no flow → default
 		{NodeID: 3, Protocol: domain.ProtoTrojan},                          // no flow → default
 	}
-	got := Build(42, testUUID, 10, testRules, nodes)
+	got := Build(42, testUUID, 10, testRules, nodes, nil)
 	if len(got) != 2 {
 		t.Fatalf("want 2 clients (flow split), got %d", len(got))
 	}
@@ -88,7 +88,7 @@ func TestBuild_SS2022SplitsByKeyLength(t *testing.T) {
 		{NodeID: 2, Protocol: domain.ProtoSS2022, SSMethod: "2022-blake3-aes-256-gcm"}, // 32B → pwClass256
 		{NodeID: 3, Protocol: domain.ProtoSS2022, SSMethod: "2022-blake3-aes-128-gcm"}, // 16B → pwClass128
 	}
-	got := Build(42, testUUID, 10, testRules, nodes)
+	got := Build(42, testUUID, 10, testRules, nodes, nil)
 	if len(got) != 2 {
 		t.Fatalf("want 2 clients (256+VLESS merged, 128), got %d", len(got))
 	}
@@ -122,7 +122,7 @@ func TestBuild_VLESSVisionAndSS2022MergeToOne(t *testing.T) {
 		{NodeID: 1, Protocol: domain.ProtoVLESS, Flow: "xtls-rprx-vision"},
 		{NodeID: 2, Protocol: domain.ProtoSS2022, SSMethod: "2022-blake3-aes-256-gcm"},
 	}
-	got := Build(42, testUUID, 10, testRules, nodes)
+	got := Build(42, testUUID, 10, testRules, nodes, nil)
 	if len(got) != 1 {
 		t.Fatalf("VLESS-vision + SS-2022 must merge to ONE client, got %d: %+v", len(got), got)
 	}
@@ -157,7 +157,7 @@ func TestBuild_PasswordConflictStillSplits(t *testing.T) {
 		{NodeID: 1, Protocol: domain.ProtoSS, SSMethod: "aes-256-gcm"},                 // plain SS → password=UUID (class 0)
 		{NodeID: 2, Protocol: domain.ProtoSS2022, SSMethod: "2022-blake3-aes-256-gcm"}, // SS-2022 → PSK (class 1)
 	}
-	got := Build(42, testUUID, 10, testRules, nodes)
+	got := Build(42, testUUID, 10, testRules, nodes, nil)
 	if len(got) != 2 {
 		t.Fatalf("plain-SS (UUID pw) + SS-2022 (PSK pw) must stay 2 clients, got %d", len(got))
 	}
@@ -169,7 +169,7 @@ func TestBuild_OnlySS2022_128(t *testing.T) {
 	nodes := []NodeCred{
 		{NodeID: 7, Protocol: domain.ProtoSS2022, SSMethod: "2022-blake3-aes-128-gcm"},
 	}
-	got := Build(42, testUUID, 10, testRules, nodes)
+	got := Build(42, testUUID, 10, testRules, nodes, nil)
 	if len(got) != 1 || got[0].Client.CredClass != 2 {
 		t.Fatalf("want a single pwClass128 (CredClass 2) client, got %+v", got)
 	}
@@ -208,7 +208,7 @@ func TestIsSharedClientEmail(t *testing.T) {
 }
 
 func TestBuild_EmptyNodesYieldsNoClients(t *testing.T) {
-	if got := Build(42, testUUID, 10, testRules, nil); got != nil {
+	if got := Build(42, testUUID, 10, testRules, nil, nil); got != nil {
 		t.Fatalf("empty nodes should yield no clients, got %+v", got)
 	}
 }
@@ -218,14 +218,71 @@ func TestBuild_Deterministic(t *testing.T) {
 		{NodeID: 1, Protocol: domain.ProtoVLESS},
 		{NodeID: 2, Protocol: domain.ProtoSS2022, SSMethod: "2022-blake3-aes-128-gcm"},
 	}
-	a := Build(42, testUUID, 10, testRules, nodes)
-	b := Build(42, testUUID, 10, testRules, nodes)
+	a := Build(42, testUUID, 10, testRules, nodes, nil)
+	b := Build(42, testUUID, 10, testRules, nodes, nil)
 	if len(a) != len(b) {
 		t.Fatalf("non-deterministic length")
 	}
 	for i := range a {
 		if a[i].Client.Email != b[i].Client.Email || a[i].Client.Password != b[i].Client.Password {
 			t.Fatalf("non-deterministic at %d", i)
+		}
+	}
+}
+
+func TestBuild_CarriesStableIDAcrossOneToTwoPartitionSplit(t *testing.T) {
+	// The existing SS-2022 client is alone, so its rendered email is bare.
+	// Adding a plain-SS node creates a password conflict and changes the old
+	// client's email to a -k suffix. Its durable row must follow node 1 rather
+	// than the email or the new partition position.
+	existing := []ExistingClient{{ClientID: 77, CredClass: 1, NodeIDs: []int64{1}}}
+	got := Build(42, testUUID, 10, testRules, []NodeCred{
+		{NodeID: 1, Protocol: domain.ProtoSS2022, SSMethod: "2022-blake3-aes-256-gcm"},
+		{NodeID: 2, Protocol: domain.ProtoSS, SSMethod: "aes-256-gcm"},
+	}, existing)
+	if len(got) != 2 {
+		t.Fatalf("want split into two clients, got %+v", got)
+	}
+	for _, d := range got {
+		for _, in := range d.Inbounds {
+			if in.NodeID == 1 {
+				if d.Client.ID != 77 {
+					t.Fatalf("old node moved from stable client 77 to %d", d.Client.ID)
+				}
+				if d.Client.Email == "u42@psp.local" {
+					t.Fatalf("test did not cross the rendered-email boundary: %+v", d.Client)
+				}
+				return
+			}
+		}
+	}
+	t.Fatal("old node missing from split plan")
+}
+
+func TestBuild_CarriesStableIDsAcrossDomainChange(t *testing.T) {
+	nodes := []NodeCred{
+		{NodeID: 1, Protocol: domain.ProtoSS2022, SSMethod: "2022-blake3-aes-256-gcm"},
+		{NodeID: 2, Protocol: domain.ProtoSS, SSMethod: "aes-256-gcm"},
+	}
+	before := Build(42, testUUID, 10, testRules, nodes, nil)
+	if len(before) != 2 {
+		t.Fatalf("precondition: want two clients, got %+v", before)
+	}
+	existing := make([]ExistingClient, len(before))
+	for i, d := range before {
+		nodeIDs := make([]int64, len(d.Inbounds))
+		for j, in := range d.Inbounds {
+			nodeIDs[j] = in.NodeID
+		}
+		existing[i] = ExistingClient{ClientID: int64(100 + i), CredClass: d.Client.CredClass, NodeIDs: nodeIDs}
+	}
+	after := Build(42, testUUID, 10, domain.EmailRules{Domain: "new.example"}, nodes, existing)
+	for i, d := range after {
+		if d.Client.ID != int64(100+i) {
+			t.Fatalf("partition %d ID = %d, want %d", i, d.Client.ID, 100+i)
+		}
+		if d.Client.Email == before[i].Client.Email {
+			t.Fatalf("partition %d email did not change domains: %q", i, d.Client.Email)
 		}
 	}
 }
@@ -238,13 +295,13 @@ func TestNodeCredFromNode(t *testing.T) {
 		wantSS    string
 		wantFlow  string
 	}{
-		{"vless", &domain.Node{ID: 1, Protocol: "vless", Flow: "xtls-rprx-vision"}, domain.ProtoVLESS, "", "xtls-rprx-vision"},
-		{"trojan", &domain.Node{ID: 2, Protocol: "trojan"}, domain.ProtoTrojan, "", ""},
-		{"ss2022-256", &domain.Node{ID: 3, Protocol: "shadowsocks", InboundSettings: `{"method":"2022-blake3-aes-256-gcm"}`}, domain.ProtoSS2022, "2022-blake3-aes-256-gcm", ""},
-		{"ss2022-128", &domain.Node{ID: 4, Protocol: "shadowsocks", InboundSettings: `{"method":"2022-blake3-aes-128-gcm"}`}, domain.ProtoSS2022, "2022-blake3-aes-128-gcm", ""},
-		{"plain-ss", &domain.Node{ID: 5, Protocol: "shadowsocks", InboundSettings: `{"method":"aes-256-gcm"}`}, domain.ProtoSS, "aes-256-gcm", ""},
+		{"vless", &domain.Node{ID: 1, DesiredProtocol: "vless", Flow: "xtls-rprx-vision"}, domain.ProtoVLESS, "", "xtls-rprx-vision"},
+		{"trojan", &domain.Node{ID: 2, DesiredProtocol: "trojan"}, domain.ProtoTrojan, "", ""},
+		{"ss2022-256", &domain.Node{ID: 3, DesiredProtocol: "shadowsocks", InboundSettings: `{"method":"2022-blake3-aes-256-gcm"}`}, domain.ProtoSS2022, "2022-blake3-aes-256-gcm", ""},
+		{"ss2022-128", &domain.Node{ID: 4, DesiredProtocol: "shadowsocks", InboundSettings: `{"method":"2022-blake3-aes-128-gcm"}`}, domain.ProtoSS2022, "2022-blake3-aes-128-gcm", ""},
+		{"plain-ss", &domain.Node{ID: 5, DesiredProtocol: "shadowsocks", InboundSettings: `{"method":"aes-256-gcm"}`}, domain.ProtoSS, "aes-256-gcm", ""},
 		// Uncaptured shadowsocks (no settings) → classified as plain SS (documented caveat).
-		{"ss-uncaptured", &domain.Node{ID: 6, Protocol: "shadowsocks"}, domain.ProtoSS, "", ""},
+		{"ss-uncaptured", &domain.Node{ID: 6, DesiredProtocol: "shadowsocks"}, domain.ProtoSS, "", ""},
 	}
 	for _, tc := range cases {
 		got := NodeCredFromNode(tc.node)
@@ -259,11 +316,11 @@ func TestNodeCredFromNode(t *testing.T) {
 
 func TestNodeCredsFromNodes_SkipsSeparatorsAndUnknown(t *testing.T) {
 	nodes := []*domain.Node{
-		{ID: 1, Protocol: "vless"},
-		{ID: 2, Kind: domain.NodeKindSeparator, Protocol: "vless"}, // separator → skipped
-		{ID: 3, Protocol: ""},                                      // unknown protocol → skipped
+		{ID: 1, DesiredProtocol: "vless"},
+		{ID: 2, Kind: domain.NodeKindSeparator, DesiredProtocol: "vless"}, // separator → skipped
+		{ID: 3, DesiredProtocol: ""},                                      // unknown protocol → skipped
 		nil,                                                        // nil → skipped
-		{ID: 5, Protocol: "trojan"},
+		{ID: 5, DesiredProtocol: "trojan"},
 	}
 	got := NodeCredsFromNodes(nodes)
 	if len(got) != 2 {

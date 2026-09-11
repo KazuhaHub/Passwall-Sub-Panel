@@ -4,6 +4,7 @@ sort: 10
 enabled: true
 proxy_group_order:
   - '🚀 节点选择'
+  - '⚡ QUIC控制'
   - '🎮 UDP控制'
   # Pulled up under the main selector by user preference even though
   # it still defaults to DIRECT — visual proximity to 🚀 节点选择
@@ -49,12 +50,16 @@ content: |
   - IP-CIDR6,fc00::/7,🎯 全球直连,no-resolve
   - IP-CIDR6,fe80::/10,🎯 全球直连,no-resolve
   - IP-CIDR6,fd00::/8,🎯 全球直连,no-resolve
-  # All remaining (non-local) UDP -> the 🎮 UDP控制 selector, so UDP/QUIC can be
-  # toggled between the node / DIRECT / REJECT at runtime (default: through the
-  # node). Sits AFTER the localhost/LAN/private-IP direct rules above so router
-  # DNS, mDNS (.local) and LAN UDP stay direct; before the domain/geosite rules
-  # so it catches UDP before they would route it. TCP is unaffected (this only
-  # matches udp), so e.g. YouTube still uses its domain rule over TCP.
+  # HTTP/3's usual transport (UDP/443) has its own runtime selector. It defaults
+  # to the general UDP selector, but a subscriber can independently force the
+  # selected proxy, DIRECT, or REJECT (which lets browsers fall back to TCP).
+  # This intentionally contains no country assumption: overseas users and
+  # return-to-China profiles need the same safe controls in the opposite
+  # direction. Non-443 QUIC is handled by the general UDP selector below.
+  - AND,((NETWORK,UDP),(DST-PORT,443)),⚡ QUIC控制
+  # All remaining non-local UDP -> the 🎮 UDP控制 selector. Both rules
+  # sit after localhost/LAN/private-IP direct rules so router DNS, mDNS (.local)
+  # and LAN UDP stay direct. TCP is unaffected.
   - NETWORK,udp,🎮 UDP控制
   - DOMAIN,instant.arubanetworks.com,🎯 全球直连
   - DOMAIN,setmeup.arubanetworks.com,🎯 全球直连

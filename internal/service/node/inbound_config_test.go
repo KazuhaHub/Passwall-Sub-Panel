@@ -181,8 +181,8 @@ func TestRunNodeTask_UpdateSuccessClearsPending(t *testing.T) {
 	now := time.Now()
 	repo := &captureNodeRepo{node: &domain.Node{
 		ID: 1, PanelID: 1, InboundID: 3,
-		Protocol:        "vless",
-		Port:            443,
+		DesiredProtocol: "vless",
+		DesiredPort:     443,
 		StreamSettings:  `{"network":"ws"}`,
 		InboundSettings: `{"decryption":"none"}`,
 		ConfigSyncedAt:  &now,
@@ -240,7 +240,7 @@ func TestCreateInbound_WriteThrough(t *testing.T) {
 	if got.ConfigSyncedAt == nil {
 		t.Fatalf("config snapshot not captured on create (ConfigSyncedAt nil)")
 	}
-	if got.StreamSettings != `{"network":"ws","security":"tls"}` || got.Port != 443 {
+	if got.StreamSettings != `{"network":"ws","security":"tls"}` || got.DesiredPort != 443 {
 		t.Fatalf("create did not store the inbound config: %+v", got)
 	}
 	if strings.Contains(got.InboundSettings, "clients") {
@@ -339,7 +339,7 @@ func TestImportExisting_TakesOwnership(t *testing.T) {
 	if got.ConfigSyncedAt == nil {
 		t.Fatalf("import must capture the live config (ConfigSyncedAt nil)")
 	}
-	if got.Protocol != "shadowsocks" || got.Port != 8388 || got.InboundListen != "127.0.0.1" {
+	if got.DesiredProtocol != "shadowsocks" || got.DesiredPort != 8388 || got.ObservedProtocol != "shadowsocks" || got.ObservedPort != 8388 || got.InboundListen != "127.0.0.1" {
 		t.Fatalf("import did not capture live config: %+v", got)
 	}
 	if strings.Contains(got.InboundSettings, "clients") {
@@ -359,8 +359,8 @@ func TestGetInboundConfig_LocalSnapshot(t *testing.T) {
 	now := time.Now()
 	repo := &captureNodeRepo{node: &domain.Node{
 		ID: 1, PanelID: 1, InboundID: 3,
-		Protocol:        "vless",
-		Port:            443,
+		DesiredProtocol: "vless",
+		DesiredPort:     443,
 		StreamSettings:  `{"network":"ws"}`,
 		InboundSettings: `{"decryption":"none"}`,
 		ConfigSyncedAt:  &now,
@@ -505,7 +505,7 @@ func TestImportExisting_AdoptsInboundFlowWhenBlank(t *testing.T) {
 	}
 	svc := &Service{nodes: repo, pool: stubXUIPool{c: &stubXUIClient{getResp: live}}, groups: emptyGroups{}}
 
-	n := &domain.Node{DisplayName: "imported", Region: "us", PanelID: 1, InboundID: 3, Protocol: "vless"}
+	n := &domain.Node{DisplayName: "imported", Region: "us", PanelID: 1, InboundID: 3, DesiredProtocol: "vless"}
 	if err := svc.ImportExisting(context.Background(), n); err != nil {
 		t.Fatalf("ImportExisting = %v, want nil", err)
 	}
@@ -529,7 +529,7 @@ func TestImportExisting_KeepsAdminFlow(t *testing.T) {
 	}
 	svc := &Service{nodes: repo, pool: stubXUIPool{c: &stubXUIClient{getResp: live}}, groups: emptyGroups{}}
 
-	n := &domain.Node{DisplayName: "imported", Region: "us", PanelID: 1, InboundID: 3, Protocol: "vless", Flow: "none-on-purpose"}
+	n := &domain.Node{DisplayName: "imported", Region: "us", PanelID: 1, InboundID: 3, DesiredProtocol: "vless", Flow: "none-on-purpose"}
 	if err := svc.ImportExisting(context.Background(), n); err != nil {
 		t.Fatalf("ImportExisting = %v, want nil", err)
 	}
@@ -549,7 +549,7 @@ func TestImportExisting_NonVLESSAdoptsNoFlow(t *testing.T) {
 	}
 	svc := &Service{nodes: repo, pool: stubXUIPool{c: &stubXUIClient{getResp: live}}, groups: emptyGroups{}}
 
-	n := &domain.Node{DisplayName: "imported", Region: "us", PanelID: 1, InboundID: 3, Protocol: "trojan"}
+	n := &domain.Node{DisplayName: "imported", Region: "us", PanelID: 1, InboundID: 3, DesiredProtocol: "trojan"}
 	if err := svc.ImportExisting(context.Background(), n); err != nil {
 		t.Fatalf("ImportExisting = %v, want nil", err)
 	}

@@ -1,5 +1,5 @@
 // Package sqlstore provides the GORM-backed implementation of ports.Repos.
-// It supports both MySQL and SQLite; SQLite keeps local setups zero-config.
+// It supports SQLite, MySQL and PostgreSQL; SQLite keeps local setups zero-config.
 package sqlstore
 
 import (
@@ -112,21 +112,25 @@ func NewRepos(db *gorm.DB) ports.Repos {
 	// settings cache above.
 	groupLimits := newGroupLimitsCache(db)
 	return ports.Repos{
-		User:        &userRepo{db: db, groupLimits: groupLimits},
-		Group:       &groupRepo{db: db, limitsCache: groupLimits},
-		Node:        &nodeRepo{db: db},
-		Separator:   &separatorRepo{db: db},
-		Ownership:   &ownershipRepo{db: db},
-		PSPClient:   &pspClientRepo{db: db},
-		Traffic:     &trafficRepo{db: db},
-		NodeTraffic: &nodeTrafficRepo{db: db},
-		Audit:       &auditRepo{db: db},
-		AuthEvent:   &authEventRepo{db: db},
-		AuthToken:   &authTokenRepo{db: db},
-		SAMLReplay:  &samlReplayRepo{db: db},
-		WebAuthn:    &webauthnCredentialRepo{db: db},
-		SubLog:      &subLogRepo{db: db},
-		SyncTask:    &syncTaskRepo{db: db},
+		User:                    &userRepo{db: db, groupLimits: groupLimits},
+		Group:                   &groupRepo{db: db, limitsCache: groupLimits},
+		Node:                    &nodeRepo{db: db},
+		Separator:               &separatorRepo{db: db},
+		Ownership:               &ownershipRepo{db: db},
+		PSPClient:               &pspClientRepo{db: db},
+		NodeAgent:               &nodeAgentRepo{db: db},
+		NativeAgentProvisioning: &nativeAgentProvisioningRepo{db: db},
+		NodeAgentIssue:          &nodeAgentIssueRepo{db: db},
+		NativeDesired:           &nativeDesiredRepo{db: db},
+		Traffic:                 &trafficRepo{db: db},
+		NodeTraffic:             &nodeTrafficRepo{db: db},
+		Audit:                   &auditRepo{db: db},
+		AuthEvent:               &authEventRepo{db: db},
+		AuthToken:               &authTokenRepo{db: db},
+		SAMLReplay:              &samlReplayRepo{db: db},
+		WebAuthn:                &webauthnCredentialRepo{db: db},
+		SubLog:                  &subLogRepo{db: db},
+		SyncTask:                &syncTaskRepo{db: db},
 		// RuleSet is intentionally absent here: production wires the
 		// yamladapter.RuleSetRepo in app.go (rule sets live in
 		// config/rulesets/*.yaml, not the DB). A previous MySQL repo

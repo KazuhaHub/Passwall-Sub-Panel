@@ -193,6 +193,10 @@
       "timezone_hint": "用于流量重置、用户到期日计算、图表默认时区。订阅页和用户自助页始终使用浏览器时区。",
       "cron_traffic_pull_minutes": "流量采集间隔（分钟）",
       "cron_reconcile_minutes": "Reconcile 间隔（分钟）",
+      "node_poll_seconds": "原生节点同步心跳（秒）",
+      "node_poll_seconds_hint": "控制配置和任务送达原生节点的速度。0 = 使用默认 30 秒；有排队任务时 PSP 可临时要求更快重试。",
+      "full_report_seconds": "原生节点全量报告周期（秒）",
+      "full_report_seconds_hint": "降低此值会增加节点上行带宽，但会缩短全车队流量分子陈旧时间，从而收紧配额可能超用的上界。0 = 每轮同步都发送全量报告。",
       "max_panel_concurrency": "面板并发上限（流量采集/Reconcile）",
       "max_panel_concurrency_hint": "并发拉取每个 3X-UI 面板入站数据的上限。0 = 使用默认值 8。单面板部署调高无意义；多面板（5+）且 3X-UI 服务器空闲时可调到 16-32。> 64 会被自动夹回 64。",
       "audit_retention_days": "审计日志保留（天）",
@@ -743,6 +747,35 @@
     },
     "detail_title": "任务详情"
   },
+  "node_issues": {
+    "title": "节点问题",
+    "subtitle": "原生节点无法自行调和并已持久化的问题。确认表示已查看，不代表节点已经恢复。",
+    "search": "搜索 Agent、代码、对象或详情",
+    "search_action": "搜索",
+    "refresh": "刷新",
+    "empty": "没有匹配的节点问题。",
+    "acknowledge": "确认已查看",
+    "acknowledged": "已确认查看",
+    "filter": {
+      "all": "全部查看状态",
+      "unacknowledged": "待查看",
+      "acknowledged": "已查看"
+    },
+    "state": {
+      "unacknowledged": "待查看",
+      "acknowledged": "已查看"
+    },
+    "table": {
+      "state": "查看状态",
+      "code": "稳定代码",
+      "agent": "Agent",
+      "key": "对象",
+      "detail": "详情",
+      "first_seen": "首次出现",
+      "last_seen": "最近出现",
+      "actions": "操作"
+    }
+  },
   "geo_anomalies": {
     "intro": "按用户合并全部面板的并发源 IP 后的判定。只有「已标记」代表持续超限；「疑似」是尚未达到次数的爬升过程。这是嫌疑不是证据——分割隧道、公司 VPN、境外家人都会诚实产生这个信号。目前不做任何自动处置。",
     "unwired": "本部署未启用异地并发检测。",
@@ -1235,6 +1268,7 @@
       "flow": "Flow（可选）",
       "region": "Region",
       "tags": "Tags",
+      "endpoint": "端点（期望 / 实际）",
       "sort_order": "排序权重",
       "sort_order_hint": "0 = 自动排到列表末尾"
     },
@@ -1255,6 +1289,13 @@
       "health": "状态",
       "enabled": "启用",
       "actions": "操作"
+    },
+    "endpoint": {
+      "desired_short": "期",
+      "observed_short": "实",
+      "synced": "实际端点与期望一致",
+      "mismatch": "实际监听端点与期望配置不一致",
+      "unobserved": "尚未收到实际端点上报"
     },
     "health": {
       "ok": "健康",
@@ -1827,8 +1868,8 @@
     "cred_add_field": "添加字段"
   },
   "servers": {
-    "title": "服务器（3X-UI）",
-    "subtitle": "节点（inbound）关联到服务器。新增节点时从这里的列表选择。",
+    "title": "服务器与原生节点",
+    "subtitle": "在这里注册上游面板或 PSP 原生节点，再到节点页面添加 inbound。",
     "create": "新增服务器",
     "test_all": "测试全部",
     "search_placeholder": "搜索名称 / URL",
@@ -1851,7 +1892,13 @@
       "insecure_https": "允许不安全的 HTTPS（危险！）",
       "xray_version": "目标版本",
       "xray_version_latest": "latest（最新版）",
-      "xray_version_loading": "正在加载可用版本…"
+      "xray_version_loading": "正在加载可用版本…",
+      "core_catalog_unavailable": "无法读取已核验版本目录；为避免安装未知版本，本次不能继续。",
+      "core_reality_matrix": "REALITY：Xray {{xray}} · Mihomo {{mihomo}} · sing-box {{singbox}} · URI {{uri}}",
+      "core_evidence": "证据：配置自检 {{config}} · 客户端真实握手 {{handshake}}",
+      "core_evidence_yes": "已完成",
+      "core_evidence_no": "未完成",
+      "core_handshake_title": "实测矩阵："
     },
     "auth_method": {
       "token": "API Token",
@@ -1871,6 +1918,21 @@
       "unconfigured": "未配置",
       "change": "修改",
       "insecure_https": "面板使用自签名 / 域名不匹配证书时开启。仅对该面板生效，不影响 SSRF 防护。"
+    },
+    "native": {
+      "outbound_hint": "原生节点主动连接 PSP，不需要入站管理 URL 或上游面板凭据；创建后会显示一次性节点凭据。",
+      "created_title": "保存原生节点凭据",
+      "once_warning": "节点凭据只显示这一次。PSP 只保存摘要，关闭后无法找回；请先写入权限为 0600 的凭据文件。",
+      "agent_id": "Agent ID",
+      "credential": "一次性节点凭据",
+      "start_command": "启动命令（凭据文件需另行写入）",
+      "copy_credential": "复制凭据",
+      "copy_command": "复制启动命令",
+      "saved_confirm": "我已安全保存",
+      "rotate_title": "轮换原生节点凭据",
+      "rotate_warning": "确定轮换「{{name}}」的凭据？当前凭据会立即失效；在替换凭据文件并重启 agent 前，core 会离线执行最后一次确认的状态。",
+      "rotate_confirm": "轮换凭据",
+      "rotated": "凭据已轮换。关闭此窗口前请安全保存新凭据。"
     },
     "table": {
       "name": "服务器名称",
@@ -1915,7 +1977,31 @@
       "upgrade": "升级",
       "force_upgrade": "强制升级",
       "upgrade_panel": "升级 3X-UI 面板（最新）",
-      "upgrade_xray": "升级 Xray"
+      "upgrade_xray": "升级 Xray",
+      "select_core": "选择 Xray 内核版本",
+      "rotate_node_credential": "轮换节点凭据"
+    },
+    "core_tier": {
+      "recommended": "推荐（多客户端兼容）",
+      "verified": "完整握手已核验",
+      "config_verified": "配置已核验",
+      "restricted": "受限客户端"
+    },
+    "core_support": {
+      "supported": "兼容",
+      "supported_with_transform": "兼容（自动转换）",
+      "conditional": "有条件兼容",
+      "unsupported": "不兼容",
+      "unverified": "未核验"
+    },
+    "core_client": {
+      "xray": "Xray",
+      "mihomo": "Mihomo",
+      "sing_box": "sing-box"
+    },
+    "core_handshake_result": {
+      "pass": "通过",
+      "expected_failure": "确认不兼容"
     },
     "validate": {
       "url_required": "URL 必填",
@@ -1934,6 +2020,7 @@
       "upgrade_panel_already_latest": "已是最新版（{{version}}），无需升级",
       "upgrade_panel_blocked": "拒绝升级：目标版本 {{latest}} 超出 Passwall Panel 测试范围（最高 {{max}}），请先升级 Passwall Panel",
       "upgrade_xray_ok": "Xray 已升级到 {{version}}",
+      "core_intent_saved": "已保存 Xray {{version}} 为期望版本；节点核验、切换并回报后才算完成",
       "batch_upgrade_xray_ok": "已升级 {{count}} 台 Xray 到最新版",
       "batch_upgrade_xray_partial": "已升级 {{ok}} 台 Xray，失败 {{fail}} 台",
       "batch_upgrade_panel_ok": "已发起 {{count}} 台 3X-UI 升级，约 60 秒后各自跑 smoke probe（结果见 audit log）",
@@ -1956,7 +2043,11 @@
       "upgrade_force_title": "目标版本未通过 Passwall Panel 验证",
       "upgrade_force_message": "即将升级到 {{latest}}。当前 Passwall Panel 已验证的最高 3X-UI 版本为 {{max}}。强制升级可能因协议或字段变更导致 traffic poll、reconcile 等关键流程失败。建议先升级 Passwall Panel 至支持该 3X-UI 版本的发行，再升级面板。是否仍要强制升级？",
       "upgrade_xray_title": "升级 Xray",
-      "upgrade_xray_message": "在 {{name}} 上安装 xray-core。可在下方选择目标版本（默认最新）。面板自身不重启，只重启 xray 子进程。"
+      "upgrade_xray_message": "在 {{name}} 上安装 xray-core。可在下方选择目标版本（默认最新）。面板自身不重启，只重启 xray 子进程。",
+      "select_core_message": "为 {{name}} 选择经过审计的 Xray 版本。Node 会先校验来源、SHA-256 与现有配置，再原子切换；启动失败自动回滚。",
+      "restricted_core_title": "此版本会缩窄 REALITY 客户端兼容范围",
+      "restricted_core_message": "Xray {{version}}：{{summary}} 选择后 sing-box REALITY 节点会被订阅输出排除；Mihomo 会固定 chrome 并开启 ML-KEM。是否接受这个兼容范围？",
+      "restricted_core_confirm": "接受并选择"
     }
   },
   "diagnostics": {

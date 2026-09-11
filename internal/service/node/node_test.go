@@ -23,8 +23,11 @@ func (r *fakeNodeRepo) UpdateTrafficCounters(ctx context.Context, n *domain.Node
 func (r *fakeNodeRepo) BatchUpdateTrafficCounters(ctx context.Context, nodes []*domain.Node) error {
 	return nil
 }
-func (r *fakeNodeRepo) UpdateHealth(ctx context.Context, n *domain.Node) error          { return nil }
-func (r *fakeNodeRepo) UpdateInboundConfig(ctx context.Context, n *domain.Node) error   { return nil }
+func (r *fakeNodeRepo) UpdateHealth(ctx context.Context, n *domain.Node) error        { return nil }
+func (r *fakeNodeRepo) UpdateInboundConfig(ctx context.Context, n *domain.Node) error { return nil }
+func (r *fakeNodeRepo) UpdateObservedEndpoint(context.Context, int64, domain.NodeObservedEndpoint) error {
+	return nil
+}
 func (r *fakeNodeRepo) UpdateEnabled(ctx context.Context, id int64, enabled bool) error { return nil }
 func (r *fakeNodeRepo) BatchUpdateSortOrder(ctx context.Context, updates []ports.NodeSortUpdate) error {
 	if r.err != nil {

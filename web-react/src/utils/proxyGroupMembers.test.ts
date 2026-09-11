@@ -56,10 +56,12 @@ describe('proxy group member editor helpers', () => {
       { name: '🍎 苹果服务' },
       { name: '🚀 节点选择' },
       { name: '🇨🇳 中国大陆' },
+      { name: '⚡ QUIC控制' },
       { name: '🎮 UDP控制' },
     ]
     expect(applyProxyGroupOrder(groups, []).map(group => group.name)).toEqual([
       '🚀 节点选择',
+      '⚡ QUIC控制',
       '🎮 UDP控制',
       '🇨🇳 中国大陆',
       '🍎 苹果服务',

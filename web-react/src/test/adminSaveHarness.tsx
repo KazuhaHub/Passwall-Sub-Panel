@@ -27,7 +27,7 @@ vi.mock('@/components/CodeEditor', () => ({
 export const list = (items: unknown[]) => ({ items, total: items.length, page: 1, page_size: 25 })
 export const group = { id: 1, slug: 'test', name: 'group', tag_filter: { all: true, tags: [], mode: 'all' }, members: 0, remark: '', require_2fa: false }
 export const server = { id: 1, name: 'server', url: 'https://panel.example.test', panel_type: '3xui', auth_method: 'token', has_api_token: true, capabilities: ['inbound.read', 'inbound.update', 'inbound.create', 'inbound.enable'], enabled: true }
-export const node = { id: 1, panel_id: 1, inbound_id: 1, panel_name: 'server', display_name: 'old-name', server_address: 'proxy.example.test', region: 'US', tags: [], sort_order: 0, enabled: true, protocol: 'vless', flow: '', relays: [], cert_source: 'manual', cert_id: 0 }
+export const node = { id: 1, panel_id: 1, inbound_id: 1, panel_name: 'server', display_name: 'old-name', server_address: 'proxy.example.test', region: 'US', tags: [], sort_order: 0, enabled: true, protocol: 'vless', desired_protocol: 'vless', desired_port: 443, observed_protocol: 'vless', observed_port: 443, endpoint_in_sync: true, flow: '', relays: [], cert_source: 'manual', cert_id: 0 }
 export const user = { id: 2, upn: 'user@example.test', display_name: 'old-name', email: 'user@example.test', group_id: 1, role: 'user', enabled: true, traffic_limit_bytes: 0, traffic_reset_period: 'monthly', ip_limit: 0, device_limit: 0, emergency_used_count: 0 }
 
 const defaults: Record<string, unknown> = {

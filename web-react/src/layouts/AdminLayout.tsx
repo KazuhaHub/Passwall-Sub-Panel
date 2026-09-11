@@ -38,6 +38,7 @@ import AppsIcon from '@mui/icons-material/Apps'
 import InsightsIcon from '@mui/icons-material/Insights'
 import ReceiptLongIcon from '@mui/icons-material/ReceiptLong'
 import SyncIcon from '@mui/icons-material/Sync'
+import ReportProblemIcon from '@mui/icons-material/ReportProblemOutlined'
 import MonitorHeartIcon from '@mui/icons-material/MonitorHeart'
 import SettingsIcon from '@mui/icons-material/Settings'
 import TranslateIcon from '@mui/icons-material/Translate'
@@ -112,6 +113,7 @@ const ADMIN_NAV: NavSection[] = [
     { to: '/admin/traffic', labelKey: 'nav:admin.traffic', Icon: InsightsIcon },
     { to: '/admin/logs', labelKey: 'nav:admin.logs', Icon: ReceiptLongIcon },
     { to: '/admin/sync-tasks', labelKey: 'nav:admin.sync_tasks', Icon: SyncIcon },
+    { to: '/admin/node-issues', labelKey: 'nav:admin.node_issues', Icon: ReportProblemIcon },
     { to: '/admin/diagnostics', labelKey: 'nav:admin.diagnostics', Icon: MonitorHeartIcon, adminOnly: true },
   ] },
   { items: [

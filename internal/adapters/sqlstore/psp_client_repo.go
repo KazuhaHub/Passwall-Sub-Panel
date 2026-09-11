@@ -3,6 +3,7 @@ package sqlstore
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"gorm.io/gorm"
@@ -11,28 +12,36 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 )
 
-// pspClientRow is the v3.9.0 first-class client table (domain.PSPClient): one
-// row per (user, panel, credClass), panel-wide unique by (panel_id, email) to
-// mirror 3X-UI's own clients-keyed-by-email model. Credentials are stored (full
-// symmetry — render reads them, no on-the-fly derivation); counters mirror
-// ownershipRow but per (user,panel,credClass) instead of per (user,node).
+// pspClientRow is the v3.9.0 first-class client table (domain.PSPClient). ID is
+// the only durable identity. Email and CredClass describe the current upstream
+// projection and may change when the rules domain or partition layout changes.
+// The non-unique (panel_id,email) index keeps upstream observation lookups fast
+// without letting a rendered email decide whether a local row survives.
 type pspClientRow struct {
 	ID        int64  `gorm:"primaryKey;autoIncrement"`
 	UserID    int64  `gorm:"index;not null"`
-	PanelID   int64  `gorm:"not null;uniqueIndex:uk_psp_client,priority:1"`
-	Email     string `gorm:"size:255;not null;uniqueIndex:uk_psp_client,priority:2"`
+	PanelID   int64  `gorm:"not null;index:idx_psp_client_panel_email,priority:1"`
+	Email     string `gorm:"size:255;not null;index:idx_psp_client_panel_email,priority:2"`
 	CredClass int    `gorm:"not null;default:0"`
 	UUID      string `gorm:"size:36;not null;default:''"`
 	Password  string `gorm:"size:128;not null;default:''"`
-	CreatedAt time.Time
+
+	DesiredEnable      bool  `gorm:"not null;default:false"`
+	DesiredExpiryTime  int64 `gorm:"not null;default:0"`
+	PanelQuotaHeadroom int64 `gorm:"not null;default:0"`
+	PanelIPLimit       int   `gorm:"not null;default:0"`
+	PanelDeviceLimit   int   `gorm:"not null;default:0"`
+	DesiredMinted      bool  `gorm:"not null;default:false"`
+	CreatedAt          time.Time
 
 	LifetimeUpBytes    int64 `gorm:"default:0"`
 	LifetimeDownBytes  int64 `gorm:"default:0"`
 	LifetimeTotalBytes int64 `gorm:"default:0"`
 
-	LastRawUpBytes    int64 `gorm:"default:0"`
-	LastRawDownBytes  int64 `gorm:"default:0"`
-	LastRawTotalBytes int64 `gorm:"default:0"`
+	LastRawUpBytes    int64  `gorm:"default:0"`
+	LastRawDownBytes  int64  `gorm:"default:0"`
+	LastRawTotalBytes int64  `gorm:"default:0"`
+	LastCounterEpoch  uint64 `gorm:"default:0"`
 
 	PeriodBaselineUpBytes    int64 `gorm:"default:0"`
 	PeriodBaselineDownBytes  int64 `gorm:"default:0"`
@@ -44,11 +53,16 @@ func (pspClientRow) TableName() string { return "psp_clients" }
 // pspClientInboundRow is the attachment junction (domain.PSPClientInbound):
 // which inbounds (PSP nodes) a client is attached to, unique per (client, node).
 type pspClientInboundRow struct {
-	ID           int64  `gorm:"primaryKey;autoIncrement"`
-	ClientID     int64  `gorm:"not null;index;uniqueIndex:uk_psp_client_inbound,priority:1"`
-	NodeID       int64  `gorm:"not null;uniqueIndex:uk_psp_client_inbound,priority:2"`
-	FlowOverride string `gorm:"size:64;not null;default:''"`
-	Provisioned  bool   `gorm:"default:false"`
+	ID              int64  `gorm:"primaryKey;autoIncrement"`
+	ClientID        int64  `gorm:"not null;index;uniqueIndex:uk_psp_client_inbound,priority:1"`
+	NodeID          int64  `gorm:"not null;uniqueIndex:uk_psp_client_inbound,priority:2"`
+	FlowOverride    string `gorm:"size:64;not null;default:''"`
+	State           string `gorm:"size:16;not null;default:pending"`
+	AppliedVersion  uint64 `gorm:"not null;default:0"`
+	AppliedEmail    string `gorm:"size:255;not null;default:''"`
+	AppliedUUID     string `gorm:"size:36;not null;default:''"`
+	AppliedPassword string `gorm:"size:128;not null;default:''"`
+	FirstFailedAt   *time.Time
 }
 
 func (pspClientInboundRow) TableName() string { return "psp_client_inbounds" }
@@ -62,6 +76,12 @@ func pspClientToRow(c *domain.PSPClient) pspClientRow {
 		CredClass:                c.CredClass,
 		UUID:                     c.UUID,
 		Password:                 c.Password,
+		DesiredEnable:            c.DesiredEnable,
+		DesiredExpiryTime:        c.DesiredExpiryTime,
+		PanelQuotaHeadroom:       c.PanelQuotaHeadroom,
+		PanelIPLimit:             c.PanelIPLimit,
+		PanelDeviceLimit:         c.PanelDeviceLimit,
+		DesiredMinted:            c.DesiredMinted,
 		CreatedAt:                c.CreatedAt,
 		LifetimeUpBytes:          c.LifetimeUpBytes,
 		LifetimeDownBytes:        c.LifetimeDownBytes,
@@ -69,6 +89,7 @@ func pspClientToRow(c *domain.PSPClient) pspClientRow {
 		LastRawUpBytes:           c.LastRawUpBytes,
 		LastRawDownBytes:         c.LastRawDownBytes,
 		LastRawTotalBytes:        c.LastRawTotalBytes,
+		LastCounterEpoch:         c.LastCounterEpoch,
 		PeriodBaselineUpBytes:    c.PeriodBaselineUpBytes,
 		PeriodBaselineDownBytes:  c.PeriodBaselineDownBytes,
 		PeriodBaselineTotalBytes: c.PeriodBaselineTotalBytes,
@@ -84,6 +105,12 @@ func rowToPSPClient(r *pspClientRow) *domain.PSPClient {
 		CredClass:                r.CredClass,
 		UUID:                     r.UUID,
 		Password:                 r.Password,
+		DesiredEnable:            r.DesiredEnable,
+		DesiredExpiryTime:        r.DesiredExpiryTime,
+		PanelQuotaHeadroom:       r.PanelQuotaHeadroom,
+		PanelIPLimit:             r.PanelIPLimit,
+		PanelDeviceLimit:         r.PanelDeviceLimit,
+		DesiredMinted:            r.DesiredMinted,
 		CreatedAt:                r.CreatedAt,
 		LifetimeUpBytes:          r.LifetimeUpBytes,
 		LifetimeDownBytes:        r.LifetimeDownBytes,
@@ -91,54 +118,67 @@ func rowToPSPClient(r *pspClientRow) *domain.PSPClient {
 		LastRawUpBytes:           r.LastRawUpBytes,
 		LastRawDownBytes:         r.LastRawDownBytes,
 		LastRawTotalBytes:        r.LastRawTotalBytes,
+		LastCounterEpoch:         r.LastCounterEpoch,
 		PeriodBaselineUpBytes:    r.PeriodBaselineUpBytes,
 		PeriodBaselineDownBytes:  r.PeriodBaselineDownBytes,
 		PeriodBaselineTotalBytes: r.PeriodBaselineTotalBytes,
 	}
 }
 
+func (r *pspClientRepo) UpdateDesiredLifecycleByUser(ctx context.Context, userID int64, lifecycle domain.UserLifecycle) error {
+	if userID == 0 {
+		return errors.New("UpdateDesiredLifecycleByUser: user ID required")
+	}
+	return r.db.WithContext(ctx).Model(&pspClientRow{}).Where("user_id = ?", userID).Updates(map[string]any{
+		"desired_enable":       lifecycle.Enable,
+		"desired_expiry_time":  lifecycle.ExpiryTime,
+		"panel_quota_headroom": lifecycle.QuotaHeadroom,
+		"panel_ip_limit":       lifecycle.IPLimit,
+		"panel_device_limit":   lifecycle.DeviceLimit,
+		"desired_minted":       true,
+	}).Error
+}
+
 type pspClientRepo struct{ db *gorm.DB }
 
-// Upsert creates the client (panel_id, email) or, if it exists, updates ONLY
-// its identity + credential columns — never the traffic counters, which the poll
-// owns via UpdateCounters and would otherwise be clobbered by an identity write
-// carrying zero counters. A brand-new row is created with whatever counters the
-// caller supplies (the migration seeds merged counters this way); an existing
-// row keeps its counters + created_at. Returns the row ID.
-func (r *pspClientRepo) Upsert(ctx context.Context, c *domain.PSPClient) (int64, error) {
+// Create mints a new durable client identity. The caller must not supply an ID:
+// an existing row is updated only through UpdateDefinition, whose required ID
+// prevents email from ever becoming an accidental identity discriminator again.
+// Initial counters are accepted for import/migration callers.
+func (r *pspClientRepo) Create(ctx context.Context, c *domain.PSPClient) (int64, error) {
 	if c == nil {
-		return 0, errors.New("Upsert: nil client")
+		return 0, errors.New("Create: nil client")
 	}
-	var existing pspClientRow
-	err := r.db.WithContext(ctx).
-		Where("panel_id = ? AND email = ?", c.PanelID, c.Email).
-		First(&existing).Error
-	switch {
-	case err == nil:
-		if uerr := r.db.WithContext(ctx).
-			Model(&pspClientRow{}).
-			Where("id = ?", existing.ID).
-			Updates(map[string]any{
-				"user_id":    c.UserID,
-				"cred_class": c.CredClass,
-				"uuid":       c.UUID,
-				"password":   c.Password,
-			}).Error; uerr != nil {
-			return 0, uerr
-		}
-		return existing.ID, nil
-	case errors.Is(err, gorm.ErrRecordNotFound):
-		row := pspClientToRow(c)
-		if row.CreatedAt.IsZero() {
-			row.CreatedAt = time.Now()
-		}
-		if cerr := r.db.WithContext(ctx).Create(&row).Error; cerr != nil {
-			return 0, cerr
-		}
-		return row.ID, nil
-	default:
+	if c.ID != 0 {
+		return 0, errors.New("Create: client ID must be zero")
+	}
+	row := pspClientToRow(c)
+	if row.CreatedAt.IsZero() {
+		row.CreatedAt = time.Now()
+	}
+	if err := r.db.WithContext(ctx).Create(&row).Error; err != nil {
 		return 0, err
 	}
+	return row.ID, nil
+}
+
+// UpdateDefinition changes only the mutable upstream projection and credential
+// columns of an existing stable row. UserID and PanelID scope the ID update so
+// a bad caller cannot move a row across owners/panels; none of the traffic
+// baselines or CreatedAt are touched.
+func (r *pspClientRepo) UpdateDefinition(ctx context.Context, c *domain.PSPClient) error {
+	if c == nil || c.ID == 0 {
+		return errors.New("UpdateDefinition: client ID required")
+	}
+	return r.db.WithContext(ctx).
+		Model(&pspClientRow{}).
+		Where("id = ? AND user_id = ? AND panel_id = ?", c.ID, c.UserID, c.PanelID).
+		Updates(map[string]any{
+			"email":      c.Email,
+			"cred_class": c.CredClass,
+			"uuid":       c.UUID,
+			"password":   c.Password,
+		}).Error
 }
 
 func (r *pspClientRepo) GetByID(ctx context.Context, id int64) (*domain.PSPClient, error) {
@@ -155,7 +195,7 @@ func (r *pspClientRepo) GetByID(ctx context.Context, id int64) (*domain.PSPClien
 func (r *pspClientRepo) GetByEmail(ctx context.Context, panelID int64, email string) (*domain.PSPClient, error) {
 	var row pspClientRow
 	if err := r.db.WithContext(ctx).
-		Where("panel_id = ? AND email = ?", panelID, email).
+		Where("panel_id = ? AND email = ?", panelID, email).Order("id").
 		First(&row).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, domain.ErrNotFound
@@ -167,7 +207,7 @@ func (r *pspClientRepo) GetByEmail(ctx context.Context, panelID int64, email str
 
 func (r *pspClientRepo) ListAll(ctx context.Context) ([]*domain.PSPClient, error) {
 	var rows []pspClientRow
-	if err := r.db.WithContext(ctx).Order("panel_id, user_id, cred_class").Find(&rows).Error; err != nil {
+	if err := r.db.WithContext(ctx).Order("panel_id, user_id, id").Find(&rows).Error; err != nil {
 		return nil, err
 	}
 	out := make([]*domain.PSPClient, len(rows))
@@ -181,7 +221,7 @@ func (r *pspClientRepo) ListByUser(ctx context.Context, userID int64) ([]*domain
 	var rows []pspClientRow
 	if err := r.db.WithContext(ctx).
 		Where("user_id = ?", userID).
-		Order("panel_id, cred_class").
+		Order("panel_id, id").
 		Find(&rows).Error; err != nil {
 		return nil, err
 	}
@@ -192,10 +232,13 @@ func (r *pspClientRepo) ListByUser(ctx context.Context, userID int64) ([]*domain
 	return out, nil
 }
 
-func (r *pspClientRepo) DeleteByEmail(ctx context.Context, panelID int64, email string) error {
+func (r *pspClientRepo) DeleteByID(ctx context.Context, id int64) error {
+	if id == 0 {
+		return errors.New("DeleteByID: client ID required")
+	}
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var row pspClientRow
-		err := tx.Where("panel_id = ? AND email = ?", panelID, email).First(&row).Error
+		err := tx.Where("id = ?", id).First(&row).Error
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil // idempotent
 		}
@@ -211,12 +254,12 @@ func (r *pspClientRepo) DeleteByEmail(ctx context.Context, panelID int64, email 
 
 // SetInbounds reconciles the client's attachment set to the desired nodes via an
 // ADDITIVE DIFF (not delete-all-recreate): rows for nodes no longer desired are
-// removed, missing nodes are inserted (provisioned=false), and a still-desired
-// node's row is kept — preserving its Provisioned flag and only updating
+// removed, missing nodes are inserted pending, and a still-desired node's row
+// is kept — preserving its convergence state/version and only updating
 // FlowOverride. This is load-bearing: the shadow dual-write calls SetInbounds on
-// every membership resync, and a delete-recreate would clobber the reconcile
-// service's per-attachment Provisioned signal (HOLE #7). A node removed and later
-// re-added correctly comes back with provisioned=false (a fresh attachment).
+// every membership resync, and a delete-recreate would erase the observed
+// convergence signal. A removed-then-readded node correctly gets fresh pending
+// state and a new failure clock.
 func (r *pspClientRepo) SetInbounds(ctx context.Context, clientID int64, inbounds []domain.PSPClientInbound) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var existing []pspClientInboundRow
@@ -240,14 +283,17 @@ func (r *pspClientRepo) SetInbounds(ctx context.Context, clientID int64, inbound
 				}
 			}
 		}
-		// Insert missing; update flow-only on existing (Provisioned preserved).
+		// Insert missing as pending; update flow-only on existing (state preserved).
 		for _, in := range inbounds {
 			cur, ok := curByNode[in.NodeID]
 			if !ok {
+				now := time.Now().UTC()
 				if err := tx.Create(&pspClientInboundRow{
-					ClientID:     clientID,
-					NodeID:       in.NodeID,
-					FlowOverride: in.FlowOverride,
+					ClientID:      clientID,
+					NodeID:        in.NodeID,
+					FlowOverride:  in.FlowOverride,
+					State:         string(domain.ClientApplyPending),
+					FirstFailedAt: &now,
 				}).Error; err != nil {
 					return err
 				}
@@ -264,15 +310,55 @@ func (r *pspClientRepo) SetInbounds(ctx context.Context, clientID int64, inbound
 	})
 }
 
-// MarkInboundProvisioned sets the per-(client, node) Provisioned flag — called by
-// the reconcile service only after a GetClient read-back confirms the shared
-// client is attached to that node's inbound in 3X-UI. No-op if the attachment
-// row doesn't exist.
-func (r *pspClientRepo) MarkInboundProvisioned(ctx context.Context, clientID, nodeID int64, provisioned bool) error {
-	return r.db.WithContext(ctx).
-		Model(&pspClientInboundRow{}).
-		Where("client_id = ? AND node_id = ?", clientID, nodeID).
-		Update("provisioned", provisioned).Error
+// UpdateInboundState is the only writer of attachment convergence. A missing
+// FirstFailedAt starts the clock on the first pending/rejected transition and
+// preserves it across retries; applied/blocked clear it.
+func (r *pspClientRepo) UpdateInboundState(ctx context.Context, inbound domain.PSPClientInbound) error {
+	if inbound.ClientID == 0 || inbound.NodeID == 0 {
+		return errors.New("UpdateInboundState: client and node IDs required")
+	}
+	switch inbound.State {
+	case domain.ClientApplyApplied, domain.ClientApplyPending,
+		domain.ClientApplyRejected, domain.ClientApplyBlocked:
+	default:
+		return fmt.Errorf("UpdateInboundState: invalid state %q", inbound.State)
+	}
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var cur pspClientInboundRow
+		if err := tx.Where("client_id = ? AND node_id = ?", inbound.ClientID, inbound.NodeID).
+			First(&cur).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil
+			}
+			return err
+		}
+		failedAt := inbound.FirstFailedAt
+		switch inbound.State {
+		case domain.ClientApplyPending, domain.ClientApplyRejected:
+			if failedAt == nil {
+				failedAt = cur.FirstFailedAt
+			}
+			if failedAt == nil {
+				now := time.Now().UTC()
+				failedAt = &now
+			}
+		default:
+			failedAt = nil
+		}
+		updates := map[string]any{
+			"state":           string(inbound.State),
+			"first_failed_at": failedAt,
+		}
+		if inbound.State == domain.ClientApplyApplied {
+			updates["applied_version"] = inbound.AppliedVersion
+			if inbound.AppliedEmail != "" || inbound.AppliedUUID != "" || inbound.AppliedPassword != "" {
+				updates["applied_email"] = inbound.AppliedEmail
+				updates["applied_uuid"] = inbound.AppliedUUID
+				updates["applied_password"] = inbound.AppliedPassword
+			}
+		}
+		return tx.Model(&pspClientInboundRow{}).Where("id = ?", cur.ID).Updates(updates).Error
+	})
 }
 
 func (r *pspClientRepo) ListInbounds(ctx context.Context, clientID int64) ([]domain.PSPClientInbound, error) {
@@ -286,10 +372,14 @@ func (r *pspClientRepo) ListInbounds(ctx context.Context, clientID int64) ([]dom
 	out := make([]domain.PSPClientInbound, len(rows))
 	for i, row := range rows {
 		out[i] = domain.PSPClientInbound{
-			ClientID:     row.ClientID,
-			NodeID:       row.NodeID,
-			FlowOverride: row.FlowOverride,
-			Provisioned:  row.Provisioned,
+			ClientID:       row.ClientID,
+			NodeID:         row.NodeID,
+			FlowOverride:   row.FlowOverride,
+			State:          domain.ClientApplyState(row.State),
+			AppliedVersion: row.AppliedVersion,
+			AppliedEmail:   row.AppliedEmail, AppliedUUID: row.AppliedUUID,
+			AppliedPassword: row.AppliedPassword,
+			FirstFailedAt:   row.FirstFailedAt,
 		}
 	}
 	return out, nil
@@ -306,6 +396,7 @@ func pspClientCounterMap(c *domain.PSPClient) map[string]any {
 		"last_raw_up_bytes":           c.LastRawUpBytes,
 		"last_raw_down_bytes":         c.LastRawDownBytes,
 		"last_raw_total_bytes":        c.LastRawTotalBytes,
+		"last_counter_epoch":          c.LastCounterEpoch,
 		"period_baseline_up_bytes":    c.PeriodBaselineUpBytes,
 		"period_baseline_down_bytes":  c.PeriodBaselineDownBytes,
 		"period_baseline_total_bytes": c.PeriodBaselineTotalBytes,

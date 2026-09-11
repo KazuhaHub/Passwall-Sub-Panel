@@ -84,11 +84,12 @@ func (s *Service) buildSingBoxOutbounds(ctx context.Context, u *domain.User, ite
 	// Same EmailRules resolution as mihomo's buildProxies — needed so the
 	// WireGuard dispatcher can look up the user's peer entry by email.
 	emailRules := domain.EmailRules{Domain: st.EmailDomain}
-	sharedEmails := s.sharedClientEmailsByNode(ctx, u)
+	appliedCredentials := s.appliedClientCredentialsByNode(ctx, u)
 
 	// Local snapshot for captured nodes, one batched ListInbounds per panel for
 	// the un-captured transition-window remainder. See resolveInbounds.
 	inboundByNode := s.resolveInbounds(ctx, items, st)
+	mlkemFirstRealityByPanel := s.mlkemFirstRealityPanels(ctx, items, inboundByNode)
 
 	selectorItems := make([]renderItem, 0, len(items))
 	for _, it := range items {
@@ -117,8 +118,16 @@ func (s *Service) buildSingBoxOutbounds(ctx context.Context, u *domain.User, ite
 				"node_id", it.node.ID, "panel_id", it.node.PanelID, "inbound_id", it.node.InboundID)
 			continue
 		}
-		userEmail := clientEmailForNode(u, it.node.ID, emailRules, sharedEmails)
-		block, err := emitSingBoxOutbound(it.name, it.node, u, inb, userEmail, it.relay)
+		if mlkemFirstRealityByPanel[it.node.PanelID] && inboundUsesReality(inb) {
+			// Xray 26.9.8+ hard-requires the X25519MLKEM768 key share. Current
+			// sing-box filters that key share and has no equivalent opt-in, so
+			// emitting this outbound would produce a green-looking dead node.
+			log.Warn("render: skip REALITY node incompatible with sing-box client",
+				"node_id", it.node.ID, "panel_id", it.node.PanelID)
+			continue
+		}
+		renderUser, userEmail, appliedPassword := renderIdentityForNode(u, it.node.ID, emailRules, appliedCredentials)
+		block, err := emitSingBoxOutbound(it.name, it.node, renderUser, inb, userEmail, appliedPassword, it.relay)
 		if err != nil {
 			log.Warn("render: skip node, emit sing-box failed", "node_id", it.node.ID, "err", err)
 			continue
@@ -137,7 +146,15 @@ func (s *Service) buildSingBoxOutbounds(ctx context.Context, u *domain.User, ite
 	return out
 }
 
-func emitSingBoxOutbound(tag string, n *domain.Node, u *domain.User, inb *ports.Inbound, userEmail string, relay *domain.RelayLine) (map[string]any, error) {
+func inboundUsesReality(inbound *ports.Inbound) bool {
+	if inbound == nil {
+		return false
+	}
+	var stream xuiStreamSettings
+	return json.Unmarshal([]byte(inbound.StreamSettings), &stream) == nil && strings.EqualFold(stream.Security, "reality")
+}
+
+func emitSingBoxOutbound(tag string, n *domain.Node, u *domain.User, inb *ports.Inbound, userEmail, appliedPassword string, relay *domain.RelayLine) (map[string]any, error) {
 	var settings xuiInboundSettings
 	_ = json.Unmarshal([]byte(inb.Settings), &settings)
 	var stream xuiStreamSettings
@@ -180,19 +197,19 @@ func emitSingBoxOutbound(tag string, n *domain.Node, u *domain.User, inb *ports.
 		return base, nil
 	case domain.ProtoTrojan:
 		base["type"] = "trojan"
-		base["password"] = crypto.DeriveProxyPassword(u.UUID, protocol, settings.Method)
+		base["password"] = renderPassword(u.UUID, appliedPassword, protocol, settings.Method)
 		applySingBoxTLS(base, stream)
 		applySingBoxTransport(base, stream)
 		return base, nil
 	case domain.ProtoSS:
 		base["type"] = "shadowsocks"
 		base["method"] = settings.Method
-		base["password"] = crypto.DeriveProxyPassword(u.UUID, protocol, settings.Method)
+		base["password"] = renderPassword(u.UUID, appliedPassword, protocol, settings.Method)
 		return base, nil
 	case domain.ProtoSS2022:
 		base["type"] = "shadowsocks"
 		base["method"] = settings.Method
-		base["password"] = settings.Password + ":" + crypto.DeriveProxyPassword(u.UUID, protocol, settings.Method)
+		base["password"] = settings.Password + ":" + renderPassword(u.UUID, appliedPassword, protocol, settings.Method)
 		return base, nil
 	case domain.ProtoHysteria2:
 		// buildSingBoxHysteria2Outbound takes its own base map shape, so
@@ -205,13 +222,13 @@ func emitSingBoxOutbound(tag string, n *domain.Node, u *domain.User, inb *ports.
 		return buildSingBoxHysteria2Outbound(tag, server, port, u.UUID, opts), nil
 	case domain.ProtoAnyTLS:
 		base["type"] = "anytls"
-		base["password"] = u.UUID
+		base["password"] = renderPassword(u.UUID, appliedPassword, protocol, settings.Method)
 		applySingBoxTLS(base, stream)
 		return base, nil
 	case domain.ProtoTUIC:
 		base["type"] = "tuic"
 		base["uuid"] = u.UUID
-		base["password"] = u.UUID
+		base["password"] = renderPassword(u.UUID, appliedPassword, protocol, settings.Method)
 		base["congestion_control"] = defaultStr(settings.CongestionControl, "cubic")
 		if settings.ZeroRTTHandshake {
 			base["zero_rtt_handshake"] = true
@@ -224,7 +241,7 @@ func emitSingBoxOutbound(tag string, n *domain.Node, u *domain.User, inb *ports.
 	case domain.ProtoNaive:
 		base["type"] = "naive"
 		base["username"] = userEmail
-		base["password"] = u.UUID
+		base["password"] = renderPassword(u.UUID, appliedPassword, protocol, settings.Method)
 		if settings.QUICCongestionControl != "" {
 			base["quic"] = true
 			base["quic_congestion_control"] = normalizedNaiveCongestion(settings.QUICCongestionControl)
@@ -416,16 +433,7 @@ func buildSingBoxRouteRules(ruleParts ...string) ([]map[string]any, string) {
 	// at the head of route.rules — match-all, runs before subsequent
 	// route rules. See
 	// https://sing-box.sagernet.org/migration/#migrate-legacy-inbound-fields-to-rule-actions
-	rules := []map[string]any{
-		{"action": "sniff"},
-		// Web QUIC (HTTP/3 over UDP 443): built-in reject → browsers fall back to
-		// h2/TCP. Highest priority among route rules (before the 🎮 UDP控制 rule
-		// that comes from the ruleset), mirroring the mihomo template's UDP-443
-		// REJECT. The `reject` action (1.11+, same floor as sniff/route) drops the
-		// QUIC attempt; the TCP retry still follows the rules below, so it's not a
-		// direct leak, and proxy-node dials bypass route rules (Hysteria2 safe).
-		{"network": "udp", "port": []int{443}, "action": "reject"},
-	}
+	rules := []map[string]any{{"action": "sniff"}}
 	finalOutbound := "direct"
 	for _, part := range ruleParts {
 		for _, rawLine := range strings.Split(part, "\n") {
@@ -434,6 +442,12 @@ func buildSingBoxRouteRules(ruleParts ...string) ([]map[string]any, string) {
 				continue
 			}
 			outbound := singBoxOutboundTag(target)
+			// PASS means "continue rule matching" in Mihomo and is not an
+			// outbound in sing-box. Dropping the rule/member preserves that
+			// behavior; mapping it to direct would silently bypass the proxy.
+			if outbound == "" {
+				continue
+			}
 			if kind == "MATCH" {
 				finalOutbound = outbound
 				return rules, finalOutbound
@@ -481,6 +495,12 @@ func parseClashRuleLine(rawLine string) (kind, value, target string, ok bool) {
 }
 
 func splitCSVLine(line string) []string {
+	// encoding/csv cannot understand commas nested inside Clash logical-rule
+	// parentheses. Split those at depth zero so an expression such as
+	// AND,((NETWORK,UDP),(DST-PORT,443)),⚡ QUIC控制 remains three fields.
+	if strings.ContainsAny(line, "()") {
+		return splitTopLevelRuleFields(line)
+	}
 	r := csv.NewReader(strings.NewReader(line))
 	r.FieldsPerRecord = -1
 	parts, err := r.Read()
@@ -493,8 +513,45 @@ func splitCSVLine(line string) []string {
 	return parts
 }
 
+func splitTopLevelRuleFields(line string) []string {
+	parts := make([]string, 0, 4)
+	start, depth := 0, 0
+	var quote byte
+	for i := 0; i < len(line); i++ {
+		c := line[i]
+		if quote != 0 {
+			if c == '\\' && i+1 < len(line) {
+				i++
+				continue
+			}
+			if c == quote {
+				quote = 0
+			}
+			continue
+		}
+		switch c {
+		case '\'', '"':
+			quote = c
+		case '(':
+			depth++
+		case ')':
+			if depth > 0 {
+				depth--
+			}
+		case ',':
+			if depth == 0 {
+				parts = append(parts, line[start:i])
+				start = i + 1
+			}
+		}
+	}
+	return append(parts, line[start:])
+}
+
 func singBoxRouteRule(kind, value string) map[string]any {
 	switch kind {
+	case "AND":
+		return singBoxAndRouteRule(value)
 	case "NETWORK":
 		// Clash NETWORK,tcp|udp → sing-box rule "network" field. Lets a rule
 		// match purely by transport (e.g. route all UDP to the UDP-control
@@ -558,14 +615,47 @@ func singBoxRouteRule(kind, value string) map[string]any {
 	return nil
 }
 
+func singBoxAndRouteRule(value string) map[string]any {
+	value = strings.TrimSpace(value)
+	if len(value) < 2 || value[0] != '(' || value[len(value)-1] != ')' {
+		return nil
+	}
+	operands := splitTopLevelRuleFields(value[1 : len(value)-1])
+	if len(operands) < 2 {
+		return nil
+	}
+	result := map[string]any{}
+	for _, operand := range operands {
+		operand = strings.TrimSpace(operand)
+		if len(operand) < 2 || operand[0] != '(' || operand[len(operand)-1] != ')' {
+			return nil
+		}
+		fields := splitTopLevelRuleFields(operand[1 : len(operand)-1])
+		if len(fields) != 2 {
+			return nil
+		}
+		child := singBoxRouteRule(strings.ToUpper(normalizeRulePart(fields[0])), normalizeRulePart(fields[1]))
+		if len(child) == 0 {
+			return nil
+		}
+		for key, childValue := range child {
+			if _, duplicate := result[key]; duplicate {
+				return nil
+			}
+			result[key] = childValue
+		}
+	}
+	return result
+}
+
 func singBoxOutboundTag(target string) string {
 	switch target {
 	case "DIRECT":
 		return "direct"
-	case "REJECT", "REJECT-DROP", "REJECT-DROP-BIT":
+	case "REJECT", "REJECT-DROP":
 		return "block"
 	case "PASS":
-		return "direct"
+		return ""
 	default:
 		return target
 	}

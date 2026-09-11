@@ -42,7 +42,7 @@ func realityInbound(id int) ports.Inbound {
 // steady state. It fails if the check ever moves back onto an ownership-driven
 // path.
 func TestRunOnce_ReportsFlowDivergenceWithNoOwnershipRows(t *testing.T) {
-	node := &domain.Node{ID: 1, PanelID: 1, InboundID: 3, Protocol: "vless", Enabled: true} // Flow blank
+	node := &domain.Node{ID: 1, PanelID: 1, InboundID: 3, DesiredProtocol: "vless", Enabled: true} // Flow blank
 	user := &domain.User{ID: 7, UUID: "uuid-7", GroupID: 9, Enabled: true}
 	live := realityInbound(node.InboundID)
 	client := &recClient{inbounds: []ports.Inbound{live}}
@@ -91,8 +91,8 @@ func TestRunOnce_ReportsFlowDivergenceWithNoOwnershipRows(t *testing.T) {
 // (Under the old per-client placement this scaled with the user count.)
 func TestCheckNodes_FlowDivergenceIsReportedOncePerNode(t *testing.T) {
 	nodes := []*domain.Node{
-		{ID: 1, PanelID: 1, InboundID: 3, Protocol: "vless", Enabled: true},
-		{ID: 2, PanelID: 1, InboundID: 4, Protocol: "vless", Enabled: true},
+		{ID: 1, PanelID: 1, InboundID: 3, DesiredProtocol: "vless", Enabled: true},
+		{ID: 2, PanelID: 1, InboundID: 4, DesiredProtocol: "vless", Enabled: true},
 	}
 	live := []ports.Inbound{realityInbound(3), realityInbound(4)}
 	repo := &recNodeRepo{nodes: nodes}
@@ -114,7 +114,7 @@ func TestCheckNodes_FlowDivergenceIsReportedOncePerNode(t *testing.T) {
 // owns it, so PSP renders and pushes the same value and there is nothing to
 // report. Without this, a detector that fired unconditionally would pass.
 func TestCheckNodes_NoFlowDivergenceWhenNodeFlowIsSet(t *testing.T) {
-	node := &domain.Node{ID: 1, PanelID: 1, InboundID: 3, Protocol: "vless", Flow: visionFlow, Enabled: true}
+	node := &domain.Node{ID: 1, PanelID: 1, InboundID: 3, DesiredProtocol: "vless", Flow: visionFlow, Enabled: true}
 	live := []ports.Inbound{realityInbound(3)}
 	svc := &Service{
 		nodes: &recNodeRepo{nodes: []*domain.Node{node}},

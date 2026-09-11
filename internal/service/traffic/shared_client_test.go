@@ -155,3 +155,31 @@ func TestRecordSharedClientStats_IdleZeroFirstObsNoWrite(t *testing.T) {
 		t.Fatalf("idle-zero first obs must not queue a counter write, got %d", len(sink.pspClientUpdates))
 	}
 }
+
+func TestRecordSharedClientStats_NativeEpochResetSeedsThenAccrues(t *testing.T) {
+	s := &Service{}
+	sink := &pollSink{}
+	c := &domain.PSPClient{
+		ID: 3, LifetimeUpBytes: 50, LifetimeDownBytes: 50, LifetimeTotalBytes: 100,
+		LastRawUpBytes: 900, LastRawDownBytes: 800, LastRawTotalBytes: 1700,
+		LastCounterEpoch: 4,
+	}
+
+	reset := s.recordSharedClientStats(context.Background(), c, 20, 30, sink, 5)
+	if reset.total != 0 || c.LifetimeTotalBytes != 100 || c.LastCounterEpoch != 5 ||
+		c.LastRawUpBytes != 20 || c.LastRawDownBytes != 30 {
+		t.Fatalf("epoch change must seed without charging: delta=%+v client=%+v", reset, c)
+	}
+	delta := s.recordSharedClientStats(context.Background(), c, 27, 41, sink, 5)
+	if delta.up != 7 || delta.down != 11 || delta.total != 18 || c.LifetimeTotalBytes != 118 {
+		t.Fatalf("same native epoch must accrue monotonic delta: delta=%+v client=%+v", delta, c)
+	}
+
+	// A decrease without an epoch change is malformed native observation, not
+	// a reset signal. Clamp it instead of applying the legacy "take current"
+	// heuristic and overcharging the user.
+	malformed := s.recordSharedClientStats(context.Background(), c, 1, 2, sink, 5)
+	if malformed.total != 0 || c.LifetimeTotalBytes != 118 {
+		t.Fatalf("same-epoch decrease must not charge: delta=%+v client=%+v", malformed, c)
+	}
+}

@@ -64,7 +64,7 @@ func TestSkipRateForAnActiveUser(t *testing.T) {
 
 	metrics.Reset()
 	clients := &fakeClients{attachments: []domain.PSPClientInbound{
-		{ClientID: 1, NodeID: 11, Provisioned: true},
+		{ClientID: 1, NodeID: 11, State: domain.ClientApplyApplied},
 	}}
 	xui := &storingXUI{}
 	svc := New(clients, fakePool{c: xui}, fakeNodes{})
@@ -80,7 +80,7 @@ func TestSkipRateForAnActiveUser(t *testing.T) {
 		// before the push goroutine reads it.
 		c.LastRawTotalBytes += delta
 
-		if err := svc.SyncLifecycle(context.Background(), c, domain.UserLifecycle{
+		if err := syncLifecycle(svc, context.Background(), c, domain.UserLifecycle{
 			Enable: true, QuotaHeadroom: limit - periodUsed,
 		}); err != nil {
 			t.Fatalf("cycle %d: %v", cycle, err)
@@ -112,7 +112,7 @@ func TestSkipDoesNotSwallowARealQuotaChange(t *testing.T) {
 	const GB = int64(1) << 30
 	metrics.Reset()
 	clients := &fakeClients{attachments: []domain.PSPClientInbound{
-		{ClientID: 1, NodeID: 11, Provisioned: true},
+		{ClientID: 1, NodeID: 11, State: domain.ClientApplyApplied},
 	}}
 	xui := &storingXUI{}
 	svc := New(clients, fakePool{c: xui}, fakeNodes{})
@@ -120,7 +120,7 @@ func TestSkipDoesNotSwallowARealQuotaChange(t *testing.T) {
 
 	push := func(limit int64) {
 		t.Helper()
-		if err := svc.SyncLifecycle(context.Background(), c, domain.UserLifecycle{
+		if err := syncLifecycle(svc, context.Background(), c, domain.UserLifecycle{
 			Enable: true, QuotaHeadroom: limit - 40*GB,
 		}); err != nil {
 			t.Fatal(err)
@@ -159,7 +159,7 @@ func TestSkipRateWithSeveralClientsPerUser(t *testing.T) {
 		t.Run(map[int]string{1: "P=1", 2: "P=2", 3: "P=3"}[P], func(t *testing.T) {
 			metrics.Reset()
 			clients := &fakeClients{attachments: []domain.PSPClientInbound{
-				{ClientID: 1, NodeID: 11, Provisioned: true},
+				{ClientID: 1, NodeID: 11, State: domain.ClientApplyApplied},
 			}}
 			panels := make([]*storingXUI, P)
 			pspClients := make([]*domain.PSPClient, P)
@@ -181,7 +181,7 @@ func TestSkipRateWithSeveralClientsPerUser(t *testing.T) {
 				}
 				for i, pc := range pspClients {
 					svc := New(clients, fakePool{c: panels[i]}, fakeNodes{})
-					if err := svc.SyncLifecycle(context.Background(), pc, domain.UserLifecycle{
+					if err := syncLifecycle(svc, context.Background(), pc, domain.UserLifecycle{
 						Enable: true, QuotaHeadroom: limit - periodUsed,
 					}); err != nil {
 						t.Fatalf("P=%d cycle %d client %d: %v", P, cycle, i, err)
@@ -263,7 +263,7 @@ func TestSkipRateAgainstMeasuredProductionDrift(t *testing.T) {
 		t.Run(map[int]string{2: "P=2", 3: "P=3", 4: "P=4 (the measured value)"}[P], func(t *testing.T) {
 			metrics.Reset()
 			clients := &fakeClients{attachments: []domain.PSPClientInbound{
-				{ClientID: 1, NodeID: 11, Provisioned: true},
+				{ClientID: 1, NodeID: 11, State: domain.ClientApplyApplied},
 			}}
 			panels := make([]*storingXUI, P)
 			pspClients := make([]*domain.PSPClient, P)
@@ -286,7 +286,7 @@ func TestSkipRateAgainstMeasuredProductionDrift(t *testing.T) {
 				}
 				for i, pc := range pspClients {
 					svc := New(clients, fakePool{c: panels[i]}, fakeNodes{})
-					if err := svc.SyncLifecycle(context.Background(), pc, domain.UserLifecycle{
+					if err := syncLifecycle(svc, context.Background(), pc, domain.UserLifecycle{
 						Enable: true, QuotaHeadroom: limit - periodUsed,
 					}); err != nil {
 						t.Fatalf("P=%d cycle %d client %d: %v", P, cycle, i, err)

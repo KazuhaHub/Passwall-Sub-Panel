@@ -14,10 +14,13 @@ import (
 // decorator rather than a repo.
 type countingNodeRepo struct{ ports.NodeRepo }
 
-func (countingNodeRepo) Create(context.Context, *domain.Node) error                { return nil }
-func (countingNodeRepo) Update(context.Context, *domain.Node) error                { return nil }
-func (countingNodeRepo) UpdateMetadata(context.Context, *domain.Node) error        { return nil }
-func (countingNodeRepo) UpdateInboundConfig(context.Context, *domain.Node) error   { return nil }
+func (countingNodeRepo) Create(context.Context, *domain.Node) error              { return nil }
+func (countingNodeRepo) Update(context.Context, *domain.Node) error              { return nil }
+func (countingNodeRepo) UpdateMetadata(context.Context, *domain.Node) error      { return nil }
+func (countingNodeRepo) UpdateInboundConfig(context.Context, *domain.Node) error { return nil }
+func (countingNodeRepo) UpdateObservedEndpoint(context.Context, int64, domain.NodeObservedEndpoint) error {
+	return nil
+}
 func (countingNodeRepo) UpdateEnabled(context.Context, int64, bool) error          { return nil }
 func (countingNodeRepo) UpdateTrafficCounters(context.Context, *domain.Node) error { return nil }
 func (countingNodeRepo) UpdateHealth(context.Context, *domain.Node) error          { return nil }
@@ -53,6 +56,7 @@ func TestInvalidatingNodeRepoCoversEveryWriter(t *testing.T) {
 		"BatchUpdateTrafficCounters": "traffic poll, several times a minute; render never reads counters",
 		"UpdateTrafficCounters":      "same as the batch form",
 		"UpdateHealth":               "health loop; render never reads health",
+		"UpdateObservedEndpoint":     "agent/panel observation; render and health read desired endpoint",
 		"UpdateCertBinding":          "cert lifecycle writes the binding; the rendered config comes from the inbound snapshot",
 	}
 

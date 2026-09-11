@@ -85,16 +85,17 @@ func (r *nodeRepo) UpdateTrafficCounters(ctx context.Context, n *domain.Node) er
 		Model(&nodeRow{}).
 		Where("id = ?", n.ID).
 		Updates(map[string]any{
-			"lifetime_up_bytes":        n.LifetimeUpBytes,
-			"lifetime_down_bytes":      n.LifetimeDownBytes,
-			"lifetime_total_bytes":     n.LifetimeTotalBytes,
-			"last_traffic_up_bytes":    n.LastTrafficUpBytes,
-			"last_traffic_down_bytes":  n.LastTrafficDownBytes,
-			"last_traffic_total_bytes": n.LastTrafficTotalBytes,
-			"last_inbound_up_bytes":    n.LastInboundUpBytes,
-			"last_inbound_down_bytes":  n.LastInboundDownBytes,
-			"last_inbound_total_bytes": n.LastInboundTotalBytes,
-			"last_inbound_seeded":      n.LastInboundSeeded,
+			"lifetime_up_bytes":          n.LifetimeUpBytes,
+			"lifetime_down_bytes":        n.LifetimeDownBytes,
+			"lifetime_total_bytes":       n.LifetimeTotalBytes,
+			"last_traffic_up_bytes":      n.LastTrafficUpBytes,
+			"last_traffic_down_bytes":    n.LastTrafficDownBytes,
+			"last_traffic_total_bytes":   n.LastTrafficTotalBytes,
+			"last_inbound_up_bytes":      n.LastInboundUpBytes,
+			"last_inbound_down_bytes":    n.LastInboundDownBytes,
+			"last_inbound_total_bytes":   n.LastInboundTotalBytes,
+			"last_inbound_counter_epoch": n.LastInboundCounterEpoch,
+			"last_inbound_seeded":        n.LastInboundSeeded,
 		}).Error
 }
 
@@ -115,16 +116,17 @@ func (r *nodeRepo) BatchUpdateTrafficCounters(ctx context.Context, nodes []*doma
 			if err := tx.Model(&nodeRow{}).
 				Where("id = ?", n.ID).
 				Updates(map[string]any{
-					"lifetime_up_bytes":        n.LifetimeUpBytes,
-					"lifetime_down_bytes":      n.LifetimeDownBytes,
-					"lifetime_total_bytes":     n.LifetimeTotalBytes,
-					"last_traffic_up_bytes":    n.LastTrafficUpBytes,
-					"last_traffic_down_bytes":  n.LastTrafficDownBytes,
-					"last_traffic_total_bytes": n.LastTrafficTotalBytes,
-					"last_inbound_up_bytes":    n.LastInboundUpBytes,
-					"last_inbound_down_bytes":  n.LastInboundDownBytes,
-					"last_inbound_total_bytes": n.LastInboundTotalBytes,
-					"last_inbound_seeded":      n.LastInboundSeeded,
+					"lifetime_up_bytes":          n.LifetimeUpBytes,
+					"lifetime_down_bytes":        n.LifetimeDownBytes,
+					"lifetime_total_bytes":       n.LifetimeTotalBytes,
+					"last_traffic_up_bytes":      n.LastTrafficUpBytes,
+					"last_traffic_down_bytes":    n.LastTrafficDownBytes,
+					"last_traffic_total_bytes":   n.LastTrafficTotalBytes,
+					"last_inbound_up_bytes":      n.LastInboundUpBytes,
+					"last_inbound_down_bytes":    n.LastInboundDownBytes,
+					"last_inbound_total_bytes":   n.LastInboundTotalBytes,
+					"last_inbound_counter_epoch": n.LastInboundCounterEpoch,
+					"last_inbound_seeded":        n.LastInboundSeeded,
 				}).Error; err != nil {
 				return err
 			}
@@ -166,7 +168,7 @@ func (r *nodeRepo) UpdateHealth(ctx context.Context, n *domain.Node) error {
 }
 
 // UpdateInboundConfig writes only the v3.5 inbound-config snapshot columns
-// (plus port/protocol which the snapshot solely owns — see UpdateHealth). Same column-scoping
+// (plus desired_port/desired_protocol which the snapshot solely owns). Same column-scoping
 // rationale as UpdateHealth / UpdateTrafficCounters: snapshot writers (admin
 // create/update, reconcile backfill, post-push capture) run concurrently
 // with the health pass and the traffic poll, so a full-row Save would
@@ -197,8 +199,25 @@ func (r *nodeRepo) UpdateInboundConfig(ctx context.Context, n *domain.Node) erro
 			"config_synced_at":     n.ConfigSyncedAt,
 			"config_sync_state":    n.ConfigSyncState,
 			"config_pending_since": n.ConfigPendingSince,
-			"port":                 n.Port,
-			"protocol":             n.Protocol,
+			"desired_port":         n.DesiredPort,
+			"desired_protocol":     n.DesiredProtocol,
+		}).Error
+}
+
+// UpdateObservedEndpoint is intentionally unable to write desired endpoint
+// columns: its payload contains only the last reported values, and this SQL
+// statement names only observed_port/observed_protocol. Agent reports and
+// panel probes use this boundary; admin intent uses UpdateInboundConfig.
+func (r *nodeRepo) UpdateObservedEndpoint(ctx context.Context, nodeID int64, observed domain.NodeObservedEndpoint) error {
+	if nodeID == 0 {
+		return fmt.Errorf("UpdateObservedEndpoint requires a non-zero node ID")
+	}
+	return r.db.WithContext(ctx).
+		Model(&nodeRow{}).
+		Where("id = ?", nodeID).
+		Updates(map[string]any{
+			"observed_port":     observed.Port,
+			"observed_protocol": observed.Protocol,
 		}).Error
 }
 

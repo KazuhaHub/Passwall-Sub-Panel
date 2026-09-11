@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -314,22 +315,19 @@ func groupFromDomain(g *domain.Group) *groupRow {
 }
 
 type nodeRow struct {
-	ID            int64  `gorm:"primaryKey;autoIncrement"`
-	PanelID       int64  `gorm:"not null;index;uniqueIndex:uk_panel_inbound,priority:1"`
-	InboundID     int    `gorm:"not null;uniqueIndex:uk_panel_inbound,priority:2"`
-	DisplayName   string `gorm:"size:255;not null"`
-	ServerAddress string `gorm:"size:255"`
-	Flow          string `gorm:"size:64"`
-	// Protocol caches the upstream inbound's protocol so the UI can gate
-	// protocol-specific fields without a live 3X-UI fetch. Empty for rows
-	// written before this column existed; AutoMigrate adds it, no backfill.
-	Protocol string `gorm:"size:32;default:''"`
-	// Port caches the inbound's listen port for the health TCP/UDP probe.
-	// AutoMigrate adds it; the health pass backfills it from the inbound.
-	Port      int    `gorm:"default:0"`
-	Region    string `gorm:"size:16;not null"`
-	Tags      jsonStrings
-	SortOrder int `gorm:"default:0"`
+	ID               int64  `gorm:"primaryKey;autoIncrement"`
+	PanelID          int64  `gorm:"not null;index;uniqueIndex:uk_panel_inbound,priority:1"`
+	InboundID        int    `gorm:"not null;uniqueIndex:uk_panel_inbound,priority:2"`
+	DisplayName      string `gorm:"size:255;not null"`
+	ServerAddress    string `gorm:"size:255"`
+	Flow             string `gorm:"size:64"`
+	DesiredProtocol  string `gorm:"size:32;default:''"`
+	DesiredPort      int    `gorm:"default:0"`
+	ObservedProtocol string `gorm:"size:32;default:''"`
+	ObservedPort     int    `gorm:"default:0"`
+	Region           string `gorm:"size:16;not null"`
+	Tags             jsonStrings
+	SortOrder        int `gorm:"default:0"`
 	// *bool for the reason separatorRow.Enabled documents: a plain bool with a
 	// column default cannot store false on create. A node created disabled came
 	// back enabled, which on this table means it was handed straight to every
@@ -351,13 +349,14 @@ type nodeRow struct {
 	// backfillTrafficCounterNulls COALESCEs any NULLs on existing rows
 	// (defense-in-depth, symmetric with last_traffic_*). recordNodeStats seeds
 	// the live baseline on the first poll (LastInboundSeeded gate).
-	LastInboundUpBytes    int64  `gorm:"default:0"`
-	LastInboundDownBytes  int64  `gorm:"default:0"`
-	LastInboundTotalBytes int64  `gorm:"default:0"`
-	LastInboundSeeded     bool   `gorm:"default:false"`
-	HealthState           string `gorm:"size:32;default:''"`
-	HealthCheckedAt       *time.Time
-	HealthDetail          string `gorm:"size:512;default:''"`
+	LastInboundUpBytes      int64  `gorm:"default:0"`
+	LastInboundDownBytes    int64  `gorm:"default:0"`
+	LastInboundTotalBytes   int64  `gorm:"default:0"`
+	LastInboundCounterEpoch uint64 `gorm:"default:0"`
+	LastInboundSeeded       bool   `gorm:"default:false"`
+	HealthState             string `gorm:"size:32;default:''"`
+	HealthCheckedAt         *time.Time
+	HealthDetail            string `gorm:"size:512;default:''"`
 	// ---- Inbound config snapshot (v3.5) ----
 	// Faithful copy of the 3X-UI inbound's connection config (mirrors
 	// ports.InboundSpec minus clients[]) so render reads locally and reconcile
@@ -411,49 +410,52 @@ func (r *nodeRow) toDomain() (*domain.Node, error) {
 		return nil, fmt.Errorf("decrypt stream_settings (node id=%d): %w", r.ID, err)
 	}
 	return &domain.Node{
-		ID:                    r.ID,
-		PanelID:               r.PanelID,
-		InboundID:             r.InboundID,
-		DisplayName:           r.DisplayName,
-		ServerAddress:         r.ServerAddress,
-		Port:                  r.Port,
-		Flow:                  r.Flow,
-		Protocol:              r.Protocol,
-		Region:                r.Region,
-		Tags:                  []string(r.Tags),
-		SortOrder:             r.SortOrder,
-		Enabled:               r.Enabled != nil && *r.Enabled,
-		Kind:                  kind,
-		LifetimeUpBytes:       r.LifetimeUpBytes,
-		LifetimeDownBytes:     r.LifetimeDownBytes,
-		LifetimeTotalBytes:    r.LifetimeTotalBytes,
-		LastTrafficUpBytes:    r.LastTrafficUpBytes,
-		LastTrafficDownBytes:  r.LastTrafficDownBytes,
-		LastTrafficTotalBytes: r.LastTrafficTotalBytes,
-		LastInboundUpBytes:    r.LastInboundUpBytes,
-		LastInboundDownBytes:  r.LastInboundDownBytes,
-		LastInboundTotalBytes: r.LastInboundTotalBytes,
-		LastInboundSeeded:     r.LastInboundSeeded,
-		HealthState:           domain.NodeHealthState(r.HealthState),
-		HealthCheckedAt:       r.HealthCheckedAt,
-		HealthDetail:          r.HealthDetail,
-		InboundListen:         r.InboundListen,
-		InboundRemark:         r.InboundRemark,
-		InboundSettings:       inboundSettings,
-		StreamSettings:        streamSettings,
-		Sniffing:              r.Sniffing,
-		Allocate:              r.Allocate,
-		InboundExpiryTime:     r.InboundExpiryTime,
-		ConfigSyncedAt:        r.ConfigSyncedAt,
-		ConfigPendingSince:    r.ConfigPendingSince,
-		ConfigSyncState:       r.ConfigSyncState,
-		CertSource:            domain.CertSource(r.CertSource),
-		CertID:                r.CertID,
-		Relays:                []domain.RelayLine(r.Relays),
-		HideDirect:            r.HideDirect,
-		ShowRelayStatus:       r.ShowRelayStatus,
-		RelayHealth:           []domain.RelayHealth(r.RelayHealth),
-		CreatedAt:             r.CreatedAt,
+		ID:                      r.ID,
+		PanelID:                 r.PanelID,
+		InboundID:               r.InboundID,
+		DisplayName:             r.DisplayName,
+		ServerAddress:           r.ServerAddress,
+		DesiredPort:             r.DesiredPort,
+		ObservedPort:            r.ObservedPort,
+		Flow:                    r.Flow,
+		DesiredProtocol:         r.DesiredProtocol,
+		ObservedProtocol:        r.ObservedProtocol,
+		Region:                  r.Region,
+		Tags:                    []string(r.Tags),
+		SortOrder:               r.SortOrder,
+		Enabled:                 r.Enabled != nil && *r.Enabled,
+		Kind:                    kind,
+		LifetimeUpBytes:         r.LifetimeUpBytes,
+		LifetimeDownBytes:       r.LifetimeDownBytes,
+		LifetimeTotalBytes:      r.LifetimeTotalBytes,
+		LastTrafficUpBytes:      r.LastTrafficUpBytes,
+		LastTrafficDownBytes:    r.LastTrafficDownBytes,
+		LastTrafficTotalBytes:   r.LastTrafficTotalBytes,
+		LastInboundUpBytes:      r.LastInboundUpBytes,
+		LastInboundDownBytes:    r.LastInboundDownBytes,
+		LastInboundTotalBytes:   r.LastInboundTotalBytes,
+		LastInboundCounterEpoch: r.LastInboundCounterEpoch,
+		LastInboundSeeded:       r.LastInboundSeeded,
+		HealthState:             domain.NodeHealthState(r.HealthState),
+		HealthCheckedAt:         r.HealthCheckedAt,
+		HealthDetail:            r.HealthDetail,
+		InboundListen:           r.InboundListen,
+		InboundRemark:           r.InboundRemark,
+		InboundSettings:         inboundSettings,
+		StreamSettings:          streamSettings,
+		Sniffing:                r.Sniffing,
+		Allocate:                r.Allocate,
+		InboundExpiryTime:       r.InboundExpiryTime,
+		ConfigSyncedAt:          r.ConfigSyncedAt,
+		ConfigPendingSince:      r.ConfigPendingSince,
+		ConfigSyncState:         r.ConfigSyncState,
+		CertSource:              domain.CertSource(r.CertSource),
+		CertID:                  r.CertID,
+		Relays:                  []domain.RelayLine(r.Relays),
+		HideDirect:              r.HideDirect,
+		ShowRelayStatus:         r.ShowRelayStatus,
+		RelayHealth:             []domain.RelayHealth(r.RelayHealth),
+		CreatedAt:               r.CreatedAt,
 	}, nil
 }
 
@@ -471,49 +473,52 @@ func nodeFromDomain(n *domain.Node) (*nodeRow, error) {
 		return nil, fmt.Errorf("encrypt stream_settings: %w", err)
 	}
 	return &nodeRow{
-		ID:                    n.ID,
-		PanelID:               n.PanelID,
-		InboundID:             n.InboundID,
-		DisplayName:           n.DisplayName,
-		ServerAddress:         n.ServerAddress,
-		Port:                  n.Port,
-		Flow:                  n.Flow,
-		Protocol:              n.Protocol,
-		Region:                n.Region,
-		Tags:                  jsonStrings(n.Tags),
-		SortOrder:             n.SortOrder,
-		Enabled:               &n.Enabled,
-		Kind:                  string(kind),
-		LifetimeUpBytes:       n.LifetimeUpBytes,
-		LifetimeDownBytes:     n.LifetimeDownBytes,
-		LifetimeTotalBytes:    n.LifetimeTotalBytes,
-		LastTrafficUpBytes:    n.LastTrafficUpBytes,
-		LastTrafficDownBytes:  n.LastTrafficDownBytes,
-		LastTrafficTotalBytes: n.LastTrafficTotalBytes,
-		LastInboundUpBytes:    n.LastInboundUpBytes,
-		LastInboundDownBytes:  n.LastInboundDownBytes,
-		LastInboundTotalBytes: n.LastInboundTotalBytes,
-		LastInboundSeeded:     n.LastInboundSeeded,
-		HealthState:           string(n.HealthState),
-		HealthCheckedAt:       n.HealthCheckedAt,
-		HealthDetail:          n.HealthDetail,
-		InboundListen:         n.InboundListen,
-		InboundRemark:         n.InboundRemark,
-		InboundSettings:       inboundSettings,
-		StreamSettings:        streamSettings,
-		Sniffing:              n.Sniffing,
-		Allocate:              n.Allocate,
-		InboundExpiryTime:     n.InboundExpiryTime,
-		ConfigSyncedAt:        n.ConfigSyncedAt,
-		ConfigPendingSince:    n.ConfigPendingSince,
-		ConfigSyncState:       n.ConfigSyncState,
-		CertSource:            string(n.CertSource),
-		CertID:                n.CertID,
-		Relays:                jsonRelays(n.Relays),
-		HideDirect:            n.HideDirect,
-		ShowRelayStatus:       n.ShowRelayStatus,
-		RelayHealth:           jsonRelayHealth(n.RelayHealth),
-		CreatedAt:             n.CreatedAt,
+		ID:                      n.ID,
+		PanelID:                 n.PanelID,
+		InboundID:               n.InboundID,
+		DisplayName:             n.DisplayName,
+		ServerAddress:           n.ServerAddress,
+		DesiredPort:             n.DesiredPort,
+		ObservedPort:            n.ObservedPort,
+		Flow:                    n.Flow,
+		DesiredProtocol:         n.DesiredProtocol,
+		ObservedProtocol:        n.ObservedProtocol,
+		Region:                  n.Region,
+		Tags:                    jsonStrings(n.Tags),
+		SortOrder:               n.SortOrder,
+		Enabled:                 &n.Enabled,
+		Kind:                    string(kind),
+		LifetimeUpBytes:         n.LifetimeUpBytes,
+		LifetimeDownBytes:       n.LifetimeDownBytes,
+		LifetimeTotalBytes:      n.LifetimeTotalBytes,
+		LastTrafficUpBytes:      n.LastTrafficUpBytes,
+		LastTrafficDownBytes:    n.LastTrafficDownBytes,
+		LastTrafficTotalBytes:   n.LastTrafficTotalBytes,
+		LastInboundUpBytes:      n.LastInboundUpBytes,
+		LastInboundDownBytes:    n.LastInboundDownBytes,
+		LastInboundTotalBytes:   n.LastInboundTotalBytes,
+		LastInboundCounterEpoch: n.LastInboundCounterEpoch,
+		LastInboundSeeded:       n.LastInboundSeeded,
+		HealthState:             string(n.HealthState),
+		HealthCheckedAt:         n.HealthCheckedAt,
+		HealthDetail:            n.HealthDetail,
+		InboundListen:           n.InboundListen,
+		InboundRemark:           n.InboundRemark,
+		InboundSettings:         inboundSettings,
+		StreamSettings:          streamSettings,
+		Sniffing:                n.Sniffing,
+		Allocate:                n.Allocate,
+		InboundExpiryTime:       n.InboundExpiryTime,
+		ConfigSyncedAt:          n.ConfigSyncedAt,
+		ConfigPendingSince:      n.ConfigPendingSince,
+		ConfigSyncState:         n.ConfigSyncState,
+		CertSource:              string(n.CertSource),
+		CertID:                  n.CertID,
+		Relays:                  jsonRelays(n.Relays),
+		HideDirect:              n.HideDirect,
+		ShowRelayStatus:         n.ShowRelayStatus,
+		RelayHealth:             jsonRelayHealth(n.RelayHealth),
+		CreatedAt:               n.CreatedAt,
 	}, nil
 }
 
@@ -1506,6 +1511,9 @@ var schemaModels = []any{
 	// shared-client migration DROPs it. The ownership repo tolerates its absence.
 	&pspClientRow{},
 	&pspClientInboundRow{},
+	&nodeAgentRow{},
+	&nodeAgentStreamRow{},
+	&nodeAgentIssueRow{},
 	&trafficRow{},
 	&clientTrafficRow{},
 	&nodeTrafficRow{},
@@ -1542,6 +1550,18 @@ func EnsureSchema(db *gorm.DB) error {
 	if err := db.AutoMigrate(schemaModels...); err != nil {
 		return err
 	}
+	if err := migratePSPClientIdentityIndex(db); err != nil {
+		return err
+	}
+	if err := migratePSPClientInboundState(db); err != nil {
+		return err
+	}
+	if err := backfillPSPClientInboundAppliedCredentials(db); err != nil {
+		return err
+	}
+	if err := migrateNodeEndpointState(db); err != nil {
+		return err
+	}
 	if err := backfillTrafficCounterNulls(db); err != nil {
 		return err
 	}
@@ -1554,6 +1574,130 @@ func EnsureSchema(db *gorm.DB) error {
 		return err
 	}
 	return cleanupLegacyState(db)
+}
+
+const pspClientInboundAppliedCredentialsMigrationID = "psp_client_inbound_applied_credentials_v1"
+
+// backfillPSPClientInboundAppliedCredentials gives upgraded applied rows the
+// credential snapshot that was live at the migration boundary. Future desired
+// rotations may then advance psp_clients immediately while render continues to
+// serve this confirmed snapshot until convergence reports a newer roster.
+//
+// The row-wise GORM update is deliberate: unlike UPDATE ... FROM syntax it is
+// portable across SQLite, MySQL and PostgreSQL, and this runs only once.
+func backfillPSPClientInboundAppliedCredentials(db *gorm.DB) error {
+	return applyOnce(db, pspClientInboundAppliedCredentialsMigrationID, func(tx *gorm.DB) error {
+		var attachments []pspClientInboundRow
+		if err := tx.Where("state = ? AND applied_uuid = ?", string(domain.ClientApplyApplied), "").Find(&attachments).Error; err != nil {
+			return err
+		}
+		if len(attachments) == 0 {
+			return nil
+		}
+		ids := make([]int64, 0, len(attachments))
+		seen := make(map[int64]struct{}, len(attachments))
+		for _, attachment := range attachments {
+			if _, ok := seen[attachment.ClientID]; !ok {
+				seen[attachment.ClientID] = struct{}{}
+				ids = append(ids, attachment.ClientID)
+			}
+		}
+		var clients []pspClientRow
+		if err := tx.Where("id IN ?", ids).Find(&clients).Error; err != nil {
+			return err
+		}
+		byID := make(map[int64]pspClientRow, len(clients))
+		for _, client := range clients {
+			byID[client.ID] = client
+		}
+		for _, attachment := range attachments {
+			client, ok := byID[attachment.ClientID]
+			if !ok {
+				continue
+			}
+			if err := tx.Model(&pspClientInboundRow{}).Where("id = ?", attachment.ID).Updates(map[string]any{
+				"applied_email": client.Email, "applied_uuid": client.UUID, "applied_password": client.Password,
+			}).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+// migratePSPClientIdentityIndex removes the v3.9.x unique (panel_id,email)
+// index. Email is an upstream projection: changing the configured domain or
+// crossing the one/two-partition boundary rewrites it, so it cannot determine
+// whether the durable psp_clients row (and its traffic baselines) survives.
+//
+// AutoMigrate creates the replacement non-unique lookup index declared on
+// pspClientRow but intentionally does not drop indexes removed from struct
+// tags. The explicit, fatal migration is therefore required on every supported
+// dialect; leaving the old uniqueness behind would make the new ID-keyed write
+// path fail precisely during a re-key. Existing rows are not rewritten, so
+// their database-minted IDs and every counter baseline remain byte-for-byte
+// intact. HasIndex makes this safe to run on every boot and on fresh installs.
+func migratePSPClientIdentityIndex(db *gorm.DB) error {
+	const legacyIndex = "uk_psp_client"
+	if !db.Migrator().HasIndex(&pspClientRow{}, legacyIndex) {
+		return nil
+	}
+	if err := db.Migrator().DropIndex(&pspClientRow{}, legacyIndex); err != nil {
+		return fmt.Errorf("drop legacy psp_clients email identity index: %w", err)
+	}
+	return nil
+}
+
+const pspClientInboundStateMigrationID = "psp_client_inbound_state_v4"
+
+// migratePSPClientInboundState reinterprets the old confirmation boolean into
+// the four-state convergence model exactly once. A false row was never proven
+// rejected; it therefore becomes pending and starts an observable clock at the
+// migration instant. The legacy column is dropped later by cleanupLegacyState,
+// after this transaction and its durable marker commit together.
+func migratePSPClientInboundState(db *gorm.DB) error {
+	legacyExists := db.Migrator().HasColumn(&pspClientInboundRow{}, "provisioned")
+	return applyOnce(db, pspClientInboundStateMigrationID, func(tx *gorm.DB) error {
+		if !legacyExists {
+			return nil
+		}
+		now := time.Now().UTC()
+		return tx.Exec(`
+UPDATE psp_client_inbounds
+SET
+	state = CASE WHEN provisioned = ? THEN ? ELSE ? END,
+	applied_version = 0,
+	first_failed_at = CASE
+		WHEN provisioned = ? THEN NULL
+		ELSE COALESCE(first_failed_at, ?)
+	END
+`, true, string(domain.ClientApplyApplied), string(domain.ClientApplyPending), true, now).Error
+	})
+}
+
+const nodeEndpointStateMigrationID = "node_endpoint_desired_observed_v4"
+
+// migrateNodeEndpointState splits the legacy ambiguous port/protocol pair into
+// explicit desired and observed columns. At the migration boundary the single
+// old value is the only fact available, so copying it to both sides preserves
+// behavior and begins in a converged state. Future reports can update only the
+// observed pair through NodeRepo.UpdateObservedEndpoint.
+func migrateNodeEndpointState(db *gorm.DB) error {
+	legacyPort := db.Migrator().HasColumn(&nodeRow{}, "port")
+	legacyProtocol := db.Migrator().HasColumn(&nodeRow{}, "protocol")
+	return applyOnce(db, nodeEndpointStateMigrationID, func(tx *gorm.DB) error {
+		if !legacyPort && !legacyProtocol {
+			return nil
+		}
+		assignments := make([]string, 0, 4)
+		if legacyPort {
+			assignments = append(assignments, "desired_port = port", "observed_port = port")
+		}
+		if legacyProtocol {
+			assignments = append(assignments, "desired_protocol = protocol", "observed_protocol = protocol")
+		}
+		return tx.Exec("UPDATE nodes SET " + strings.Join(assignments, ", ")).Error
+	})
 }
 
 // seedBuiltinRoles ensures the three built-in roles (RBAC v2) exist after
@@ -1728,6 +1872,30 @@ func cleanupLegacyState(db *gorm.DB) error {
 		}
 	}
 
+	// v4 native-agent convergence: the old bool could not distinguish pending,
+	// rejected or blocked work and therefore could never time out. Its values
+	// were translated transactionally by migratePSPClientInboundState above;
+	// keeping the column would leave two writable representations of one fact.
+	if db.Migrator().HasColumn(&pspClientInboundRow{}, "provisioned") {
+		fmt.Println("[cleanupLegacyState] dropping psp_client_inbounds.provisioned (replaced by four-state convergence)")
+		if err := db.Migrator().DropColumn(&pspClientInboundRow{}, "provisioned"); err != nil {
+			return fmt.Errorf("drop legacy psp_client_inbounds.provisioned: %w", err)
+		}
+	}
+
+	// v4 native-agent convergence: the old endpoint pair mixed administrator
+	// intent with panel observations. migrateNodeEndpointState copied it to both
+	// explicit axes; retaining it would recreate an ambiguous third writer.
+	for _, legacy := range []string{"port", "protocol"} {
+		if !db.Migrator().HasColumn(&nodeRow{}, legacy) {
+			continue
+		}
+		fmt.Printf("[cleanupLegacyState] dropping nodes.%s (replaced by desired/observed endpoint columns)\n", legacy)
+		if err := db.Migrator().DropColumn(&nodeRow{}, legacy); err != nil {
+			return fmt.Errorf("drop legacy nodes.%s: %w", legacy, err)
+		}
+	}
+
 	return nil
 }
 
@@ -1764,17 +1932,6 @@ WHERE lifetime_up_bytes IS NULL OR lifetime_down_bytes IS NULL OR lifetime_total
 	OR last_traffic_up_bytes IS NULL OR last_traffic_down_bytes IS NULL OR last_traffic_total_bytes IS NULL
 	OR last_inbound_up_bytes IS NULL OR last_inbound_down_bytes IS NULL OR last_inbound_total_bytes IS NULL
 	OR last_inbound_seeded IS NULL
-`).Error; err != nil {
-		return err
-	}
-	// psp_client_inbounds.provisioned (v3.9.0): the table shipped in v3.9.0-beta.1
-	// without this column, so a beta.1→later upgrade may leave existing rows NULL.
-	// COALESCE to false (defense-in-depth, same as the columns above). No-op once
-	// every row is non-NULL.
-	if err := db.Exec(`
-UPDATE psp_client_inbounds
-SET provisioned = COALESCE(provisioned, FALSE)
-WHERE provisioned IS NULL
 `).Error; err != nil {
 		return err
 	}

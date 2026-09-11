@@ -167,6 +167,8 @@ func TestKVSettingsRoundtrip(t *testing.T) {
 		Timezone:                   "America/Los_Angeles",
 		CronTrafficPullMinutes:     10,
 		CronReconcileMinutes:       30,
+		NodePollSeconds:            15,
+		FullReportSeconds:          45,
 		MaxPanelConcurrency:        16,
 		QuickLinks:                 []ports.QuickLink{{Label: "Docs", URL: "https://docs", Enabled: true, Sort: 1}},
 		GlobalAnnouncement:         ports.GlobalAnnouncement{Enabled: true, Title: "Maintenance", Content: "tonight 23:00", Level: "info"},
@@ -209,6 +211,8 @@ func TestKVSettingsRoundtrip(t *testing.T) {
 		{"TrafficHistoryDays", out.TrafficHistoryDays, in.TrafficHistoryDays},
 		{"EmergencyAccessQuotaGB", out.EmergencyAccessQuotaGB, in.EmergencyAccessQuotaGB},
 		{"Timezone", out.Timezone, in.Timezone},
+		{"NodePollSeconds", out.NodePollSeconds, in.NodePollSeconds},
+		{"FullReportSeconds", out.FullReportSeconds, in.FullReportSeconds},
 		{"MaxPanelConcurrency", out.MaxPanelConcurrency, in.MaxPanelConcurrency},
 		{"ExpireBeforeDays", out.ExpireBeforeDays, in.ExpireBeforeDays},
 		{"TrafficRemainPercent", out.TrafficRemainPercent, in.TrafficRemainPercent},
@@ -264,6 +268,8 @@ func TestKVSettingsDefaultsOnEmpty(t *testing.T) {
 	mustNonZero := map[string]int{
 		"CronTrafficPullMinutes":   out.CronTrafficPullMinutes,
 		"CronReconcileMinutes":     out.CronReconcileMinutes,
+		"NodePollSeconds":          out.NodePollSeconds,
+		"FullReportSeconds":        out.FullReportSeconds,
 		"JWTAccessTTLMinutes":      out.JWTAccessTTLMinutes,
 		"JWTRefreshTTLMinutes":     out.JWTRefreshTTLMinutes,
 		"SubPerIPPerMin":           out.SubPerIPPerMin,
@@ -307,6 +313,24 @@ func TestKVSettingsDefaultsOnEmpty(t *testing.T) {
 	}
 	if !hasApps {
 		t.Errorf("default registry should include families with import apps")
+	}
+	if out.NodePollSeconds != 30 || out.FullReportSeconds != 60 {
+		t.Fatalf("native-agent cadence defaults = (%d, %d), want (30, 60)", out.NodePollSeconds, out.FullReportSeconds)
+	}
+	// Both zeros are deliberate wire semantics, not missing values: poll zero
+	// asks the coordinator to use its safe 30-second fallback, while full-report
+	// zero asks the agent to enumerate every round.
+	out.NodePollSeconds = 0
+	out.FullReportSeconds = 0
+	if err := repo.Save(context.Background(), out); err != nil {
+		t.Fatalf("save explicit cadence zeros: %v", err)
+	}
+	explicit, err := repo.Load(context.Background(), ports.UISettings{})
+	if err != nil {
+		t.Fatalf("load explicit cadence zeros: %v", err)
+	}
+	if explicit.NodePollSeconds != 0 || explicit.FullReportSeconds != 0 {
+		t.Fatalf("explicit cadence zeros were defaulted: (%d, %d)", explicit.NodePollSeconds, explicit.FullReportSeconds)
 	}
 }
 

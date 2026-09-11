@@ -35,6 +35,18 @@ PSP 通过 `/panel/api/*` 对接 3X-UI 面板。本文档维护两件事：
 
 ## 历史兼容性事件
 
+### 2026-09-10 / xray-core 26.9.8+ REALITY 要求 ML-KEM-first
+
+xray-core 26.9.8+ 的 REALITY 服务端要求 ClientHello 先携带 `X25519MLKEM768` key share。
+Mihomo 默认会移除该 key share，只有客户端 proxy 中的
+`client-fingerprint: chrome` + `reality-opts.support-x25519mlkem768: true` 组合经当前版本实测可用。
+
+PSP 不把该字段写入 Xray inbound，也不要求管理员逐节点手动开关。订阅渲染根据面板已探测的
+Xray 版本自动决定：26.9.8+ 的 Mihomo REALITY 节点生成上述组合；已知不兼容的
+sing-box 输出省略该节点；URI-list 不冒充能表达 Mihomo 专用开关。未知版本保留旧输出而不猜测。
+
+详细实测矩阵、内核版本选择和发布闸门见 [ADR 0029](adr/0029-xray-reality-client-compatibility.md)。
+
 ### 2026-09-09 / S-UI 1.6.0 实机复核 → 已测上限 1.5.5 抬到 1.6.0
 
 **这一条是被自动发现的，不是被人想起来的。** `cmd/compatwatch` 的**第一次运行**就报了

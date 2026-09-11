@@ -61,3 +61,32 @@ func TestBodyLimitAllowsRequestsWithoutBody(t *testing.T) {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusNoContent)
 	}
 }
+
+func TestBodyLimitByPathUsesExactOverride(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.Use(BodyLimitByPath(4, map[string]int64{"/v1/node/sync": 8}))
+	read := func(c *gin.Context) {
+		if _, err := io.ReadAll(c.Request.Body); err != nil {
+			c.Status(http.StatusRequestEntityTooLarge)
+			return
+		}
+		c.Status(http.StatusNoContent)
+	}
+	r.POST("/v1/node/sync", read)
+	r.POST("/other", read)
+
+	for _, test := range []struct {
+		path   string
+		status int
+	}{
+		{path: "/v1/node/sync", status: http.StatusNoContent},
+		{path: "/other", status: http.StatusRequestEntityTooLarge},
+	} {
+		response := httptest.NewRecorder()
+		r.ServeHTTP(response, httptest.NewRequest(http.MethodPost, test.path, strings.NewReader("12345678")))
+		if response.Code != test.status {
+			t.Fatalf("%s status = %d, want %d", test.path, response.Code, test.status)
+		}
+	}
+}

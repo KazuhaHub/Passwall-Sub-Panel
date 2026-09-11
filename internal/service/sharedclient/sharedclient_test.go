@@ -14,20 +14,26 @@ import (
 
 type fakeClients struct {
 	ports.PSPClientRepo
+	mu          sync.Mutex
 	attachments []domain.PSPClientInbound
-	provisioned map[int64]bool      // nodeID -> provisioned
+	provisioned map[int64]bool // nodeID -> provisioned
+	applied     map[int64]domain.PSPClientInbound
 	byUser      []*domain.PSPClient // ListByUser result (cleanup tests)
-	deletedRows []string            // emails passed to DeleteByEmail
+	deletedRows []int64             // stable IDs passed to DeleteByID
 }
 
 func (f *fakeClients) ListInbounds(context.Context, int64) ([]domain.PSPClientInbound, error) {
-	// Overlay MarkInboundProvisioned updates so ListInbounds reflects what
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	// Overlay UpdateInboundState calls so ListInbounds reflects what
 	// ProvisionClient just confirmed (without mutating the seed slice).
 	out := make([]domain.PSPClientInbound, len(f.attachments))
 	copy(out, f.attachments)
 	for i := range out {
-		if f.provisioned[out[i].NodeID] {
-			out[i].Provisioned = true
+		if applied, ok := f.applied[out[i].NodeID]; ok {
+			out[i] = applied
+		} else if f.provisioned[out[i].NodeID] {
+			out[i].State = domain.ClientApplyApplied
 		}
 	}
 	return out, nil
@@ -41,16 +47,35 @@ func (f *fakeClients) ListByUser(_ context.Context, userID int64) ([]*domain.PSP
 	}
 	return out, nil
 }
-func (f *fakeClients) DeleteByEmail(_ context.Context, panelID int64, email string) error {
-	f.deletedRows = append(f.deletedRows, email)
+func (f *fakeClients) UpdateDesiredLifecycleByUser(_ context.Context, userID int64, want domain.UserLifecycle) error {
+	for _, c := range f.byUser {
+		if c.UserID == userID {
+			c.SetDesiredLifecycle(want)
+		}
+	}
 	return nil
 }
-func (f *fakeClients) MarkInboundProvisioned(_ context.Context, _ int64, nodeID int64, p bool) error {
+func (f *fakeClients) DeleteByID(_ context.Context, id int64) error {
+	f.deletedRows = append(f.deletedRows, id)
+	return nil
+}
+func (f *fakeClients) UpdateInboundState(_ context.Context, inbound domain.PSPClientInbound) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	if f.provisioned == nil {
 		f.provisioned = map[int64]bool{}
 	}
-	f.provisioned[nodeID] = p
+	f.provisioned[inbound.NodeID] = inbound.Applied()
+	if f.applied == nil {
+		f.applied = map[int64]domain.PSPClientInbound{}
+	}
+	f.applied[inbound.NodeID] = inbound
 	return nil
+}
+
+func syncLifecycle(svc *Service, ctx context.Context, client *domain.PSPClient, want domain.UserLifecycle) error {
+	client.SetDesiredLifecycle(want)
+	return svc.SyncLifecycle(ctx, client)
 }
 
 type fakeNodes struct {
@@ -129,6 +154,16 @@ func (c *fakeXUI) GetClient(_ context.Context, email string) (*ports.ClientDetai
 		}
 		return nil, nil
 	}
+	if c.updateCalls > 0 && c.updatedSpec.Email == email {
+		inbounds := c.confirm
+		if len(inbounds) == 0 {
+			inbounds = c.preExist
+		}
+		return &ports.ClientDetail{
+			ID: c.updatedSpec.ID, Email: c.updatedSpec.Email, Password: c.updatedSpec.Password,
+			Auth: c.updatedSpec.Auth, InboundIDs: append([]int(nil), inbounds...),
+		}, nil
+	}
 	if !c.added {
 		if c.preExist == nil {
 			return nil, nil
@@ -163,6 +198,18 @@ func (c *fakeXUI) UpdateClient(_ context.Context, spec ports.ClientSpec) error {
 	defer c.mu.Unlock()
 	c.updatedSpec = spec
 	c.updateCalls++
+	if c.getDetail != nil {
+		c.getDetail.ID = spec.ID
+		c.getDetail.Email = spec.Email
+		c.getDetail.Password = spec.Password
+		c.getDetail.Auth = spec.Auth
+		c.getDetail.Enable = spec.Enable
+		c.getDetail.Flow = spec.Flow
+		c.getDetail.ExpiryTime = spec.ExpiryTime
+		c.getDetail.TotalGB = spec.TotalGB
+		c.getDetail.LimitIP = spec.LimitIP
+		c.getDetail.LimitHwid = spec.LimitHwid
+	}
 	return nil
 }
 
@@ -237,7 +284,10 @@ func TestProvisionClient_CreatesAndMarksConfirmed(t *testing.T) {
 	xui := &fakeXUI{confirm: []int{101, 102}} // 3X-UI confirms both
 	svc := New(clients, fakePool{c: xui}, nodes)
 
-	c := &domain.PSPClient{ID: 1, PanelID: 10, Email: "u1@psp.local", UUID: "uuid-x", Password: "pw-x"}
+	c := &domain.PSPClient{
+		ID: 1, PanelID: 10, Email: "u1@psp.local", UUID: "uuid-x", Password: "pw-x",
+		DesiredEnable: true,
+	}
 	res, err := svc.ProvisionClient(context.Background(), c)
 	if err != nil {
 		t.Fatal(err)
@@ -471,16 +521,36 @@ func TestProvisionClient_MarksOnlyConfirmed(t *testing.T) {
 	}
 }
 
+func TestProvisionClientSnapshotsObservedCredentialsNotNewDesiredValues(t *testing.T) {
+	clients := &fakeClients{attachments: []domain.PSPClientInbound{{ClientID: 1, NodeID: 11}}}
+	nodes := fakeNodes{byID: map[int64]*domain.Node{11: enabledNode(11, 10, 101)}}
+	xui := &fakeXUI{getDetail: &ports.ClientDetail{
+		ID: "old-applied-uuid", Email: "u1@old.example", Password: "old-password",
+		Auth: "old-applied-uuid", InboundIDs: []int{101},
+	}}
+	svc := New(clients, fakePool{c: xui}, nodes)
+	desired := &domain.PSPClient{
+		ID: 1, PanelID: 10, Email: "u1@new.example", UUID: "new-desired-uuid", Password: "new-password",
+	}
+	if _, err := svc.ProvisionClient(context.Background(), desired); err != nil {
+		t.Fatal(err)
+	}
+	applied := clients.applied[11]
+	if applied.AppliedUUID != "old-applied-uuid" || applied.AppliedPassword != "old-password" || applied.AppliedEmail != "u1@old.example" {
+		t.Fatalf("provision recorded desired credentials before lifecycle apply: %+v", applied)
+	}
+}
+
 func TestSyncLifecycle_PushesEnableExpiryQuotaWithCredsAndFlow(t *testing.T) {
 	clients := &fakeClients{attachments: []domain.PSPClientInbound{
-		{ClientID: 1, NodeID: 11, FlowOverride: "xtls-rprx-vision", Provisioned: true},
+		{ClientID: 1, NodeID: 11, FlowOverride: "xtls-rprx-vision", State: domain.ClientApplyApplied},
 	}}
 	xui := &fakeXUI{}
 	svc := New(clients, fakePool{c: xui}, fakeNodes{})
 
 	c := &domain.PSPClient{ID: 1, PanelID: 10, Email: "u1@psp.local", UUID: "uuid-x", Password: "pw-x"}
 	// disabled, with an expiry + a quota floor
-	if err := svc.SyncLifecycle(context.Background(), c, domain.UserLifecycle{Enable: false, ExpiryTime: 1893456000000, QuotaHeadroom: 5 << 30}); err != nil {
+	if err := syncLifecycle(svc, context.Background(), c, domain.UserLifecycle{Enable: false, ExpiryTime: 1893456000000, QuotaHeadroom: 5 << 30}); err != nil {
 		t.Fatal(err)
 	}
 	if xui.updateCalls != 1 {
@@ -497,11 +567,31 @@ func TestSyncLifecycle_PushesEnableExpiryQuotaWithCredsAndFlow(t *testing.T) {
 	}
 }
 
+func TestSyncLifecycleAdvancesAppliedCredentialOnlyAfterReadBack(t *testing.T) {
+	clients := &fakeClients{attachments: []domain.PSPClientInbound{{
+		ClientID: 1, NodeID: 11, State: domain.ClientApplyApplied,
+		AppliedEmail: "u1@psp.local", AppliedUUID: "old-uuid", AppliedPassword: "old-password",
+	}}}
+	xui := &fakeXUI{getDetail: &ports.ClientDetail{
+		ID: "old-uuid", Email: "u1@psp.local", Password: "old-password", Auth: "old-uuid",
+		Enable: true, InboundIDs: []int{101},
+	}}
+	svc := New(clients, fakePool{c: xui}, fakeNodes{})
+	c := &domain.PSPClient{ID: 1, PanelID: 10, Email: "u1@psp.local", UUID: "new-uuid", Password: "new-password"}
+	if err := syncLifecycle(svc, context.Background(), c, domain.UserLifecycle{Enable: true}); err != nil {
+		t.Fatal(err)
+	}
+	applied := clients.applied[11]
+	if applied.AppliedUUID != "new-uuid" || applied.AppliedPassword != "new-password" {
+		t.Fatalf("confirmed lifecycle did not advance applied snapshot: %+v", applied)
+	}
+}
+
 func TestSyncLifecycle_NoAttachmentsSkips(t *testing.T) {
 	clients := &fakeClients{attachments: nil}
 	xui := &fakeXUI{}
 	svc := New(clients, fakePool{c: xui}, fakeNodes{})
-	if err := svc.SyncLifecycle(context.Background(), &domain.PSPClient{ID: 1, PanelID: 10}, domain.UserLifecycle{Enable: true}); err != nil {
+	if err := syncLifecycle(svc, context.Background(), &domain.PSPClient{ID: 1, PanelID: 10}, domain.UserLifecycle{Enable: true}); err != nil {
 		t.Fatal(err)
 	}
 	if xui.updateCalls != 0 {
@@ -518,7 +608,7 @@ func TestSyncLifecycle_UnprovisionedSkips(t *testing.T) {
 	}}
 	xui := &fakeXUI{}
 	svc := New(clients, fakePool{c: xui}, fakeNodes{})
-	if err := svc.SyncLifecycle(context.Background(), &domain.PSPClient{ID: 1, PanelID: 10, Email: "u1@psp.local"}, domain.UserLifecycle{}); err != nil {
+	if err := syncLifecycle(svc, context.Background(), &domain.PSPClient{ID: 1, PanelID: 10, Email: "u1@psp.local"}, domain.UserLifecycle{}); err != nil {
 		t.Fatal(err)
 	}
 	if xui.updateCalls != 0 {

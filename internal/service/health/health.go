@@ -221,20 +221,20 @@ func (s *Service) CheckOnce(ctx context.Context) error {
 		state := &nodeProbe{node: n}
 		states = append(states, state)
 		network := "tcp"
-		if isUDPProtocol(n.Protocol) {
+		if isUDPProtocol(n.DesiredProtocol) {
 			network = "udp"
 		}
 		// v3.5: port / protocol are the node row's own authoritative columns
 		// — populated by the inbound write-through paths and aligned by
 		// reconcile axis A. No ListInbounds, no per-panel grouping needed.
-		if n.ServerAddress == "" || n.Port <= 0 {
+		if n.ServerAddress == "" || n.DesiredPort <= 0 {
 			// Pre-v3.5 row that never got its port captured, or a freshly-
 			// imported node before reconcile backfills it. Report unreachable
 			// so the UI surfaces "no signal" rather than a stale green dot.
 			state.directState = domain.NodeHealthUnreachable
 			state.directError = "no known port to probe (awaiting inbound config capture)"
 		} else {
-			targets = append(targets, target{owner: state, relaySlot: -1, host: n.ServerAddress, port: n.Port, network: network})
+			targets = append(targets, target{owner: state, relaySlot: -1, host: n.ServerAddress, port: n.DesiredPort, network: network})
 		}
 
 		// Relay probes are opt-in, except HideDirect forces them on. Only
@@ -253,7 +253,7 @@ func (s *Service) CheckOnce(ctx context.Context) error {
 				}
 				port := relay.Port
 				if port <= 0 {
-					port = n.Port
+					port = n.DesiredPort
 				}
 				state.relays = append(state.relays, domain.RelayHealth{
 					Index: relayIndex, Address: relay.Address, Port: port, CheckedAt: &now,

@@ -77,17 +77,18 @@ func ApplySpec(n *domain.Node, spec ports.InboundSpec) {
 	n.Allocate = spec.Allocate
 	n.InboundExpiryTime = spec.ExpiryTime
 	if spec.Port != 0 {
-		n.Port = spec.Port
+		n.DesiredPort = spec.Port
 	}
 	if p := strings.ToLower(spec.Protocol); p != "" {
-		n.Protocol = p
+		n.DesiredProtocol = p
 	}
 	markSynced(n)
 }
 
-// Capture writes a live 3X-UI inbound into the node's local config snapshot
-// (import = take ownership; reconcile backfill / post-push convergence) and
-// marks it synced.
+// Capture writes a live inbound's observed endpoint and normalized config into
+// the local node snapshot. It deliberately never changes desired endpoint
+// intent. Use Adopt only for the explicit import/backfill paths where the
+// operator is choosing the live endpoint as the initial desired state.
 func Capture(n *domain.Node, inb *ports.Inbound) {
 	n.InboundListen = inb.Listen
 	n.InboundRemark = inb.Remark
@@ -97,12 +98,26 @@ func Capture(n *domain.Node, inb *ports.Inbound) {
 	n.Allocate = inb.Allocate
 	n.InboundExpiryTime = inb.ExpiryTime
 	if inb.Port != 0 {
-		n.Port = inb.Port
+		n.ObservedPort = inb.Port
 	}
 	if p := strings.ToLower(inb.Protocol); p != "" {
-		n.Protocol = p
+		n.ObservedProtocol = p
 	}
 	markSynced(n)
+}
+
+// Adopt is the explicit live-to-desired transition used when PSP first takes
+// ownership of an existing inbound (including legacy snapshot backfill and the
+// reverse-push kill-switch). Keeping it separate from Capture prevents routine
+// observation from silently changing administrator intent.
+func Adopt(n *domain.Node, inb *ports.Inbound) {
+	Capture(n, inb)
+	if n.ObservedPort != 0 {
+		n.DesiredPort = n.ObservedPort
+	}
+	if n.ObservedProtocol != "" {
+		n.DesiredProtocol = n.ObservedProtocol
+	}
 }
 
 // normalizeSettings substitutes "{}" for blank input so the snapshot is always
@@ -141,8 +156,8 @@ var ErrNoPushablePort = errors.New("node snapshot has no port to push")
 // a new push path. "Remember to validate" is the mechanism that fails; a type
 // that will not compile without handling it is the one that does not.
 func SpecFromNode(n *domain.Node) (ports.InboundSpec, error) {
-	if n.Port <= 0 {
-		return ports.InboundSpec{}, fmt.Errorf("%w: node id=%d port=%d", ErrNoPushablePort, n.ID, n.Port)
+	if n.DesiredPort <= 0 {
+		return ports.InboundSpec{}, fmt.Errorf("%w: node id=%d port=%d", ErrNoPushablePort, n.ID, n.DesiredPort)
 	}
 	return specFromNodeUnchecked(n), nil
 }
@@ -155,8 +170,8 @@ func specFromNodeUnchecked(n *domain.Node) ports.InboundSpec {
 		Remark:         n.InboundRemark,
 		Enable:         n.Enabled,
 		Listen:         n.InboundListen,
-		Port:           n.Port,
-		Protocol:       n.Protocol,
+		Port:           n.DesiredPort,
+		Protocol:       n.DesiredProtocol,
 		Settings:       n.InboundSettings,
 		StreamSettings: stripRealityFinalmaskTCP(n.StreamSettings),
 		Sniffing:       n.Sniffing,
@@ -267,8 +282,8 @@ func InboundFromNode(n *domain.Node) *ports.Inbound {
 		ExpiryTime:     n.InboundExpiryTime,
 		Listen:         n.InboundListen,
 		Remark:         n.InboundRemark,
-		Port:           n.Port,
-		Protocol:       n.Protocol,
+		Port:           n.DesiredPort,
+		Protocol:       n.DesiredProtocol,
 		Settings:       n.InboundSettings,
 		StreamSettings: n.StreamSettings,
 		Sniffing:       n.Sniffing,
@@ -285,10 +300,10 @@ func InboundFromNode(n *domain.Node) *ports.Inbound {
 // so a borderline mismatch (e.g. 3X-UI normalising JSON) self-corrects after a
 // single push instead of looping.
 func InSync(n *domain.Node, live *ports.Inbound) bool {
-	if n.Port != live.Port {
+	if n.DesiredPort != live.Port {
 		return false
 	}
-	if !strings.EqualFold(n.Protocol, live.Protocol) {
+	if !strings.EqualFold(n.DesiredProtocol, live.Protocol) {
 		return false
 	}
 	if n.InboundListen != live.Listen {

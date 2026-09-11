@@ -26,10 +26,11 @@
 // uses password, so no node constrains BOTH at once — the minimum client count is
 // max(#distinct-passwords, #distinct-flows, 1). The common user (VLESS-vision +
 // SS-2022, different fields) collapses to exactly ONE client per panel. The client
-// email is the content-hash of its (pwClass, flow); because that now depends on the
-// merge grouping, changing a node's protocol/flow can re-key a user's clients on
-// that panel — but only the 3X-UI-side client identity moves; rendered credentials
-// (derived from the UUID) are untouched, so subscribers never re-fetch.
+// email is an upstream projection: partitioned rows use a content-hash suffix,
+// while a panel with one row uses the bare form. Changing a node's protocol/flow
+// can therefore re-key that projection; the durable psp_clients.id survives by
+// attachment affinity, and credentials remain byte-identical, so subscribers do
+// not need to re-fetch.
 package clientplan
 
 import (
@@ -87,7 +88,7 @@ func NodeCredFromNode(n *domain.Node) NodeCred {
 	method := ssMethodFromSettings(n.InboundSettings)
 	return NodeCred{
 		NodeID:   n.ID,
-		Protocol: crypto.DetectProtocol(n.Protocol, method),
+		Protocol: crypto.DetectProtocol(n.DesiredProtocol, method),
 		SSMethod: method,
 		Flow:     n.Flow,
 	}
@@ -202,10 +203,23 @@ func (k partKey) emailSuffix() string {
 	return "-k" + hex.EncodeToString(sum[:])[:8]
 }
 
+// ExistingClient is the stable identity and attachment shape of a persisted
+// psp_client. ClientID is the identity; CredClass and NodeIDs are only affinity
+// hints used to keep that identity attached to the closest desired partition
+// when the partition layout changes. In particular, neither email nor the
+// positional partKey is accepted here, so a caller cannot accidentally turn a
+// rendered value back into identity.
+type ExistingClient struct {
+	ClientID  int64
+	CredClass int
+	NodeIDs   []int64
+}
+
 // DesiredClient is one psp_client PSP should hold for a user on a panel, paired
 // with its attachment set. Credentials are filled in (the stored source of
-// truth); the Client's ID/CreatedAt/counters are left zero for the repo to
-// assign/preserve on upsert. CredClass carries the pwClass bit (0/1).
+// truth). Build carries forward a persisted Client.ID where one is available;
+// a zero ID means the repo must mint a new row. CredClass remains a mutable
+// password-shape attribute, not an identity discriminator.
 type DesiredClient struct {
 	Client   domain.PSPClient
 	Inbounds []domain.PSPClientInbound
@@ -226,7 +240,7 @@ type DesiredClient struct {
 // (VLESS-vision + SS-2022) therefore collapses to exactly ONE client. Stored
 // credentials stay byte-identical to the legacy DeriveProxyPassword, so the merge
 // is SILENT (no subscriber re-fetch). Deterministic + order-stable.
-func Build(userID int64, userUUID string, panelID int64, rules domain.EmailRules, nodes []NodeCred) []DesiredClient {
+func Build(userID int64, userUUID string, panelID int64, rules domain.EmailRules, nodes []NodeCred, existing []ExistingClient) []DesiredClient {
 	if len(nodes) == 0 {
 		return nil
 	}
@@ -322,7 +336,136 @@ func Build(userID int64, userUUID string, panelID int64, rules domain.EmailRules
 	if len(out) == 1 {
 		out[0].Client.Email = domain.PSPClientEmail(userID, "", rules)
 	}
+	assignStableIDs(out, existing)
 	return out
+}
+
+// assignStableIDs matches persisted rows to the new partition layout without
+// deriving identity from any mutable partition attribute. The matching first
+// maximises how many rows survive, then how many node attachments keep the same
+// row, with exact attachment sets and the old credential class used only as
+// tie-breakers. This handles both important re-key events:
+//
+//   - a 1→2 split keeps the old row on the partition containing its old nodes;
+//   - a domain change keeps every row because attachment sets are unchanged.
+//
+// The dynamic program is O(existing * desired * 2^desired). desired is bounded
+// by the planner's password/flow dimensions (currently at most three), while
+// this shape also remains cheap and deterministic if that bound grows later.
+func assignStableIDs(desired []DesiredClient, existing []ExistingClient) {
+	if len(desired) == 0 || len(existing) == 0 {
+		return
+	}
+	existing = append([]ExistingClient(nil), existing...)
+	sort.Slice(existing, func(i, j int) bool { return existing[i].ClientID < existing[j].ClientID })
+
+	type score struct {
+		valid      bool
+		matched    int
+		overlap    int
+		exact      int
+		classMatch int
+		ids        []int64 // desired index -> persisted ID; zero means unmatched
+	}
+	better := func(a, b score) bool {
+		if !a.valid {
+			return false
+		}
+		if !b.valid {
+			return true
+		}
+		if a.matched != b.matched {
+			return a.matched > b.matched
+		}
+		if a.overlap != b.overlap {
+			return a.overlap > b.overlap
+		}
+		if a.exact != b.exact {
+			return a.exact > b.exact
+		}
+		if a.classMatch != b.classMatch {
+			return a.classMatch > b.classMatch
+		}
+		// Deterministic final tie-break: lower durable IDs stay with earlier
+		// (deterministically ordered) desired partitions. Treat zero as last.
+		for i := range a.ids {
+			av, bv := a.ids[i], b.ids[i]
+			if av == bv {
+				continue
+			}
+			if av == 0 {
+				return false
+			}
+			if bv == 0 {
+				return true
+			}
+			return av < bv
+		}
+		return false
+	}
+	affinity := func(e ExistingClient, d DesiredClient) (overlap int, exact bool) {
+		desiredNodes := make(map[int64]struct{}, len(d.Inbounds))
+		for _, in := range d.Inbounds {
+			desiredNodes[in.NodeID] = struct{}{}
+		}
+		existingNodes := make(map[int64]struct{}, len(e.NodeIDs))
+		for _, nodeID := range e.NodeIDs {
+			existingNodes[nodeID] = struct{}{}
+			if _, ok := desiredNodes[nodeID]; ok {
+				overlap++
+			}
+		}
+		return overlap, len(existingNodes) == len(desiredNodes) && overlap == len(desiredNodes)
+	}
+
+	stateCount := 1 << len(desired)
+	dp := make([]score, stateCount)
+	dp[0] = score{valid: true, ids: make([]int64, len(desired))}
+	for _, e := range existing {
+		next := make([]score, stateCount)
+		for mask, current := range dp {
+			if !current.valid {
+				continue
+			}
+			if better(current, next[mask]) {
+				next[mask] = current
+			}
+			for i := range desired {
+				bit := 1 << i
+				if mask&bit != 0 {
+					continue
+				}
+				candidate := current
+				candidate.ids = append([]int64(nil), current.ids...)
+				candidate.ids[i] = e.ClientID
+				candidate.matched++
+				overlap, exact := affinity(e, desired[i])
+				candidate.overlap += overlap
+				if exact {
+					candidate.exact++
+				}
+				if e.CredClass == desired[i].Client.CredClass {
+					candidate.classMatch++
+				}
+				candidate.valid = true
+				newMask := mask | bit
+				if better(candidate, next[newMask]) {
+					next[newMask] = candidate
+				}
+			}
+		}
+		dp = next
+	}
+
+	best := score{}
+	for _, candidate := range dp {
+		if better(candidate, best) {
+			best = candidate
+		}
+	}
+	for i, id := range best.ids {
+		desired[i].Client.ID = id
+	}
 }
 
 // IsSharedClientEmail reports whether email is one the v3.9.0 shared-client scheme

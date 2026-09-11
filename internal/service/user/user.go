@@ -2082,7 +2082,13 @@ func (s *Service) syncUserDesired(ctx context.Context, userID int64) error {
 	}
 	desiredNodes = s.resolveShadowsocksMethods(ctx, desiredNodes)
 	_, err = s.psp.SyncUser(ctx, u.ID, u.UUID, s.emailRules(ctx), desiredNodes)
-	return err
+	if err != nil {
+		return err
+	}
+	// The bulk provisioner projects from the persisted desired client row. Mint
+	// lifecycle before it can create the client, so a disabled/expired user is
+	// never briefly created with permissive defaults.
+	return s.syncSharedLifecycle(ctx, u)
 }
 
 // BulkProvisionNodeMembers builds every member's desired psp_client set (so the new
@@ -2151,13 +2157,18 @@ func (s *Service) ResyncMembership(ctx context.Context, userID int64) error {
 			}
 		}
 	}
-	// Order is enforcement-critical: provision the shared client → push the user's
-	// REAL enable/expiry/floor onto it → ONLY THEN delete the legacy per-node
-	// clients (which held the correct disabled/expired state). Provisioning with a
-	// hardcoded enable=true and deleting the per-node fallback BEFORE the lifecycle
-	// push would leave a disabled/expired/over-quota user with a fully-enabled
-	// shared client (an enforcement bypass). Delete is skipped if provision failed,
-	// so the per-node fallback survives.
+	// Mint the authoritative desired lifecycle before any panel projection. For
+	// an existing shared client this also pushes it now; for a new/unconfirmed
+	// client it only persists the document, and ProvisionUser below creates the
+	// client directly from that fail-closed intent.
+	lifeErr := s.syncSharedLifecycle(ctx, u)
+	if lifeErr != nil && firstErr == nil {
+		firstErr = fmt.Errorf("shared lifecycle: %w", lifeErr)
+	}
+
+	// Order remains enforcement-critical: desired intent → provision → cleanup →
+	// delete legacy fallback. Delete is skipped on either lifecycle or provision
+	// failure, so the old correctly-enforced client survives.
 	provisioned := false
 	if s.migrator != nil {
 		if err := s.migrator.ProvisionUser(ctx, u.ID); err != nil {
@@ -2167,16 +2178,6 @@ func (s *Service) ResyncMembership(ctx context.Context, userID int64) error {
 		} else {
 			provisioned = true
 		}
-	}
-	// The lifecycle push corrects the shared client from its provision default
-	// (Enable:true / no expiry / no quota) to the user's REAL state. If it FAILS,
-	// the shared client is still at that default, so we must NOT delete the legacy
-	// per-node fallback (which holds the correct disabled/expired state) — doing so
-	// would leave a disabled/expired/over-quota user fully enabled with no fallback
-	// (audit #1). Surface the error so the sync-task retries and re-pushes next run.
-	lifeErr := s.syncSharedLifecycle(ctx, u)
-	if lifeErr != nil && firstErr == nil {
-		firstErr = fmt.Errorf("shared lifecycle: %w", lifeErr)
 	}
 	// Clean up the user's STALE shared clients (pre-merge per-class clients the merge
 	// re-keyed, or any client whose psp_client row was pruned but whose 3X-UI client
@@ -2907,7 +2908,7 @@ func (s *Service) resolveShadowsocksMethods(ctx context.Context, nodes []*domain
 		if n == nil {
 			continue
 		}
-		p := strings.ToLower(strings.TrimSpace(n.Protocol))
+		p := strings.ToLower(strings.TrimSpace(n.DesiredProtocol))
 		if p != "shadowsocks" && p != "ss" {
 			continue
 		}

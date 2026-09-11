@@ -412,6 +412,10 @@ func (s *Service) ImportExisting(ctx context.Context, n *domain.Node) error {
 		return fmt.Errorf("inbound %d not found on panel %d: %w", n.InboundID, n.PanelID, err)
 	}
 	n.Enabled = true
+	// Explicit import/adoption is the one operation allowed to initialize
+	// desired endpoint intent from live state. Ordinary Capture calls only
+	// update the observed axis.
+	inboundcfg.Adopt(n, inb)
 	// Adopt the inbound's own VLESS flow when the admin left the field blank.
 	//
 	// Flow otherwise arrives ONLY from the import form, and a blank one on a
@@ -425,7 +429,7 @@ func (s *Service) ImportExisting(ctx context.Context, n *domain.Node) error {
 	// Importing is taking ownership of what is already there, so the honest
 	// default is the value already there. Only a blank is filled: a flow the
 	// admin typed is their decision and stays untouched.
-	if n.Flow == "" && strings.EqualFold(n.Protocol, string(domain.ProtoVLESS)) {
+	if n.Flow == "" && strings.EqualFold(n.DesiredProtocol, string(domain.ProtoVLESS)) {
 		if settings, perr := xrayspec.ParseSettings(inb.Settings); perr == nil {
 			n.Flow = xrayspec.FirstClientFlow(settings.Clients)
 		} else {
@@ -439,7 +443,6 @@ func (s *Service) ImportExisting(ctx context.Context, n *domain.Node) error {
 	// Import = take ownership: capture the live inbound's config into the local
 	// snapshot so render reads it without a live fetch and reconcile can keep
 	// 3X-UI aligned to PSP. clients[] is stripped (ownership-managed).
-	inboundcfg.Capture(n, inb)
 	if err := s.nodes.Create(ctx, n); err != nil {
 		return err
 	}
@@ -470,6 +473,9 @@ func (s *Service) CreateInbound(ctx context.Context, n *domain.Node, spec ports.
 	// v3.5 write-through: persist the just-pushed config into the local snapshot
 	// so the node renders without a live fetch from its first subscription.
 	inboundcfg.ApplySpec(n, spec)
+	if async, ok := c.(ports.AsynchronousApplier); ok && async.ApplyIsAsynchronous() {
+		n.SetConfigSyncState(domain.ConfigSyncPending, time.Now())
+	}
 	if err := s.nodes.Create(ctx, n); err != nil {
 		_ = c.DelInbound(context.Background(), inboundID)
 		return err
@@ -684,6 +690,9 @@ func (s *Service) UpdateInboundConfig(ctx context.Context, id int64, spec ports.
 	if err := c.UpdateInbound(ctx, n.InboundID, spec); err != nil {
 		s.markConfigPending(ctx, n)
 		return s.enqueueNodeTask(ctx, domain.SyncTaskNodeUpdate, n, "update node config", spec)
+	}
+	if async, ok := c.(ports.AsynchronousApplier); ok && async.ApplyIsAsynchronous() {
+		s.markConfigPending(ctx, n)
 	}
 	return nil
 }
@@ -926,6 +935,9 @@ func (s *Service) runNodeTask(ctx context.Context, task *domain.SyncTask) error 
 		if err := c.UpdateInbound(ctx, n.InboundID, spec); err != nil {
 			return err
 		}
+		if async, ok := c.(ports.AsynchronousApplier); ok && async.ApplyIsAsynchronous() {
+			return nil
+		}
 		// The push is a multi-second round-trip that may straddle an admin
 		// UpdateInboundConfig (S2). Re-read and only flip config_sync_state when
 		// the snapshot we pushed is still current: on a stamp mismatch a newer
@@ -976,7 +988,7 @@ func (s *Service) runNodeCreateTask(ctx context.Context, task *domain.SyncTask) 
 			if adopted, lookupErr := s.tryAdoptOrphan(ctx, c, n.PanelID, p.Spec); lookupErr == nil && adopted != nil {
 				n.InboundID = adopted.ID
 				n.Enabled = true
-				inboundcfg.Capture(&n, adopted)
+				inboundcfg.Adopt(&n, adopted)
 				if err := s.nodes.Create(ctx, &n); err != nil {
 					return err
 				}

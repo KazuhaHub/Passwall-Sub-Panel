@@ -126,11 +126,16 @@ export interface Node {
   display_name: string
   server_address: string
   flow?: string
-  /** Cached upstream inbound protocol (vless / vmess / trojan /
-   *  shadowsocks / hysteria2 / anytls / tuic / naive, lowercased). Empty for nodes imported
-   *  before this field existed; used to gate protocol-specific UI like
-   *  the VLESS-only Flow field. */
+  /** Compatibility alias for desired_protocol. */
   protocol?: string
+  /** PSP's authoritative endpoint intent. */
+  desired_protocol?: string
+  desired_port?: number
+  /** Most recently confirmed endpoint served by the panel/native agent. */
+  observed_protocol?: string
+  observed_port?: number
+  /** Exact desired/observed endpoint equality (protocol compare is case-insensitive). */
+  endpoint_in_sync: boolean
   region: string
   tags: string[]
   sort_order: number
@@ -236,6 +241,19 @@ export interface SyncTask {
   updated_at?: string
   FinishedAt?: string | null
   finished_at?: string | null
+}
+
+export interface NodeAgentIssue {
+	id: number
+	agent_id: string
+	code: string
+	key?: string
+	detail?: string
+	first_seen_at: string
+	last_seen_at: string
+	acknowledged_at?: string | null
+	created_at: string
+	updated_at: string
 }
 
 export interface UnmanagedInbound {

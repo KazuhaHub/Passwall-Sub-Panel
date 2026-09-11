@@ -2,6 +2,7 @@ package domain
 
 import (
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -478,23 +479,24 @@ type Node struct {
 	DisplayName   string
 	ServerAddress string
 	Flow          string
-	// Protocol caches the upstream inbound's protocol (vless / vmess /
-	// trojan / shadowsocks / hysteria2 / anytls / tuic / naive, lowercased) so the UI can gate
-	// protocol-specific fields (e.g. Flow is VLESS-only) without a live
-	// upstream-panel fetch. Populated on import / create / inbound edit; empty for
-	// rows written before this column existed (treated as "unknown").
-	Protocol string
-	// Port caches the upstream inbound's listen port so the health checker can
-	// TCP-probe ServerAddress:Port without a live 3X-UI lookup (and still
-	// probe when the panel's admin API is temporarily down). Refreshed from
-	// the inbound on each health pass. 0 = not yet learned.
-	Port      int
-	Region    string
-	Tags      []string
-	SortOrder int
-	Enabled   bool
-	Kind      NodeKind
-	CreatedAt time.Time
+	// DesiredProtocol / DesiredPort are PSP's authoritative endpoint intent.
+	// Render, health and reverse-push read these fields; observation paths must
+	// never write them. Empty/zero means no desired endpoint has been minted.
+	DesiredProtocol string
+	DesiredPort     int
+	// ObservedProtocol / ObservedPort are the most recently confirmed values on
+	// the serving node/panel. They may legitimately differ from desired while a
+	// rollout is pending or rejected. NodeObservedEndpoint is the deliberately
+	// narrow write shape used by report/probe paths, so those paths cannot even
+	// carry desired columns to the repository.
+	ObservedProtocol string
+	ObservedPort     int
+	Region           string
+	Tags             []string
+	SortOrder        int
+	Enabled          bool
+	Kind             NodeKind
+	CreatedAt        time.Time
 	// LifetimeUpBytes / LifetimeDownBytes / LifetimeTotalBytes accumulate
 	// monotonically across 3X-UI counter resets, mirroring the user-level
 	// fields. Updated by the traffic poll worker.
@@ -515,6 +517,10 @@ type Node struct {
 	LastInboundUpBytes    int64
 	LastInboundDownBytes  int64
 	LastInboundTotalBytes int64
+	// LastInboundCounterEpoch is non-zero for native agents. It makes an
+	// explicit runtime reset seed a new baseline instead of relying on the
+	// legacy panel's counter-decrease heuristic.
+	LastInboundCounterEpoch uint64
 	// LastInboundSeeded gates the FIRST observation of this node's inbound
 	// counter. While false (a fresh row, an imported inbound, or a row upgraded
 	// from ≤v3.8 where the source was client-sum), recordNodeStats seeds the
@@ -606,6 +612,26 @@ type Node struct {
 	// Relays so an async probe cannot overwrite a concurrent admin edit.
 	ShowRelayStatus bool
 	RelayHealth     []RelayHealth
+}
+
+// NodeObservedEndpoint is the only payload accepted by the observed endpoint
+// writer. Keeping node ID and desired values out of this type makes accidental
+// desired-state mutation impossible at the repository boundary.
+type NodeObservedEndpoint struct {
+	Protocol string
+	Port     int
+}
+
+func (n *Node) ObservedEndpoint() NodeObservedEndpoint {
+	if n == nil {
+		return NodeObservedEndpoint{}
+	}
+	return NodeObservedEndpoint{Protocol: n.ObservedProtocol, Port: n.ObservedPort}
+}
+
+func (n *Node) EndpointInSync() bool {
+	return n != nil && n.DesiredPort == n.ObservedPort &&
+		strings.EqualFold(n.DesiredProtocol, n.ObservedProtocol)
 }
 
 // HasEnabledRelays reports whether this node currently has at least one relay
@@ -1117,6 +1143,7 @@ type PanelKind string
 const (
 	PanelKind3XUI PanelKind = "3xui"
 	PanelKindSUI  PanelKind = "sui"
+	PanelKindPSP  PanelKind = "psp"
 )
 
 // NormalizePanelKind maps an empty legacy value to 3X-UI. Every panel row that
@@ -1124,8 +1151,8 @@ const (
 // without a data backfill.
 func NormalizePanelKind(kind PanelKind) PanelKind {
 	switch kind {
-	case PanelKindSUI:
-		return PanelKindSUI
+	case PanelKindSUI, PanelKindPSP:
+		return kind
 	case PanelKind3XUI, "":
 		return PanelKind3XUI
 	default:

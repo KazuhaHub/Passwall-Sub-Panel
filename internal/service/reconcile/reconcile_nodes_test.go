@@ -19,6 +19,7 @@ type recNodeRepo struct {
 	// writer (UpdateInboundConfig — the v3.5 path snapshot writes must use).
 	updates     []*domain.Node
 	updatesCfg  []*domain.Node
+	observed    []domain.NodeObservedEndpoint
 	enabledSets []bool // column-scoped UpdateEnabled calls
 	getOverride func(int64) (*domain.Node, error)
 }
@@ -37,6 +38,11 @@ func (r *recNodeRepo) Update(_ context.Context, n *domain.Node) error {
 func (r *recNodeRepo) UpdateInboundConfig(_ context.Context, n *domain.Node) error {
 	cp := *n
 	r.updatesCfg = append(r.updatesCfg, &cp)
+	return nil
+}
+
+func (r *recNodeRepo) UpdateObservedEndpoint(_ context.Context, _ int64, observed domain.NodeObservedEndpoint) error {
+	r.observed = append(r.observed, observed)
 	return nil
 }
 
@@ -406,8 +412,8 @@ func TestCheckNodes_DisabledNodeSkipsConfigDrift(t *testing.T) {
 	now := time.Now()
 	node := &domain.Node{
 		ID: 1, PanelID: 1, InboundID: 3, Enabled: false,
-		Protocol:        "vless",
-		Port:            443,
+		DesiredProtocol: "vless",
+		DesiredPort:     443,
 		StreamSettings:  `{"network":"ws"}`,
 		InboundSettings: `{"decryption":"none"}`,
 		ConfigSyncedAt:  &now,
@@ -440,8 +446,8 @@ func TestCheckNodes_DriftPushed(t *testing.T) {
 	now := time.Now()
 	node := &domain.Node{
 		ID: 1, PanelID: 1, InboundID: 3, Enabled: true,
-		Protocol:        "vless",
-		Port:            443,
+		DesiredProtocol: "vless",
+		DesiredPort:     443,
 		StreamSettings:  `{"network":"ws","security":"tls"}`, // PSP's truth
 		InboundSettings: `{"decryption":"none"}`,
 		InboundRemark:   "psp-stored", // stale vs the operator's live rename below
@@ -486,7 +492,7 @@ func TestCheckNodes_DriftAdoptedWhenReversePushDisabled(t *testing.T) {
 	now := time.Now()
 	node := &domain.Node{
 		ID: 1, PanelID: 1, InboundID: 3, Enabled: true,
-		Protocol: "vless", Port: 443,
+		DesiredProtocol: "vless", DesiredPort: 443,
 		StreamSettings:  `{"network":"ws","security":"tls"}`, // PSP's stored truth
 		InboundSettings: `{"decryption":"none"}`,
 		ConfigSyncedAt:  &now, ConfigSyncState: "synced",
@@ -533,8 +539,8 @@ func TestCheckNodes_StaleReadDoesNotRevertAdminEdit(t *testing.T) {
 	freshStamp := time.Now()                      // what admin just wrote
 	cached := &domain.Node{
 		ID: 1, PanelID: 1, InboundID: 3, Enabled: true,
-		Protocol:        "vless",
-		Port:            443,
+		DesiredProtocol: "vless",
+		DesiredPort:     443,
 		StreamSettings:  `{"network":"ws","security":"tls"}`, // PSP's *old* truth
 		InboundSettings: `{"decryption":"none"}`,
 		ConfigSyncedAt:  &cachedStamp,
@@ -577,8 +583,8 @@ func TestCheckNodes_InSync_NoOp(t *testing.T) {
 	now := time.Now()
 	node := &domain.Node{
 		ID: 1, PanelID: 1, InboundID: 3, Enabled: true,
-		Protocol:        "vless",
-		Port:            443,
+		DesiredProtocol: "vless",
+		DesiredPort:     443,
 		StreamSettings:  `{"security":"tls","network":"ws"}`, // key order differs only
 		InboundSettings: `{"decryption":"none"}`,
 		ConfigSyncedAt:  &now,
@@ -629,7 +635,7 @@ func TestCheckNodes_DriftPushedEmitsAudit(t *testing.T) {
 	now := time.Now()
 	node := &domain.Node{
 		ID: 1, PanelID: 1, InboundID: 3, Enabled: true,
-		Protocol: "vless", Port: 443,
+		DesiredProtocol: "vless", DesiredPort: 443,
 		StreamSettings:  `{"network":"ws"}`,
 		InboundSettings: `{"decryption":"none"}`,
 		ConfigSyncedAt:  &now, ConfigSyncState: "synced",
@@ -658,7 +664,7 @@ func TestCheckNodes_PushFailMarksPendingAndAudits(t *testing.T) {
 	now := time.Now()
 	node := &domain.Node{
 		ID: 1, PanelID: 1, InboundID: 3, Enabled: true,
-		Protocol: "vless", Port: 443,
+		DesiredProtocol: "vless", DesiredPort: 443,
 		StreamSettings:  `{"network":"ws"}`,
 		InboundSettings: `{"decryption":"none"}`,
 		ConfigSyncedAt:  &now, ConfigSyncState: "synced",
@@ -695,7 +701,7 @@ func TestCheckNodes_RecaptureFailMarksPendingAndAudits(t *testing.T) {
 	now := time.Now()
 	node := &domain.Node{
 		ID: 1, PanelID: 1, InboundID: 3, Enabled: true,
-		Protocol: "vless", Port: 443,
+		DesiredProtocol: "vless", DesiredPort: 443,
 		StreamSettings:  `{"network":"ws"}`,
 		InboundSettings: `{"decryption":"none"}`,
 		ConfigSyncedAt:  &now, ConfigSyncState: "synced",

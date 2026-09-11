@@ -16,6 +16,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/adapters/acme"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/adapters/localefs"
 	paneladapter "github.com/KazuhaHub/passwall-sub-panel/internal/adapters/panel"
+	pspnodeadapter "github.com/KazuhaHub/passwall-sub-panel/internal/adapters/pspnode"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/adapters/sqlstore"
 	suiadapter "github.com/KazuhaHub/passwall-sub-panel/internal/adapters/sui"
 	xuiadapter "github.com/KazuhaHub/passwall-sub-panel/internal/adapters/xui"
@@ -38,6 +39,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/health"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/mailer"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/node"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/nodesync"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/reconcile"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/render"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/rollup"
@@ -113,6 +115,7 @@ type App struct {
 	mail      *mailer.Service
 	health    *health.Service
 	geo       *geo.Service
+	render    *render.Service
 	settings  ports.SettingsRepo
 	syncTasks ports.SyncTaskRepo
 	// trafficRepo / nodeTraffic kept for the retention cron — PruneBefore is
@@ -233,8 +236,9 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 		return nil, fmt.Errorf("load oidc config: %w", err)
 	}
 
-	// Start from the full DB repo set and override only the two YAML-backed
-	// repos (rule sets / templates live in config/*.yaml, not the DB). The old
+	// Start from the full DB repo set and override only the three file-backed
+	// repos (rule sets, templates and locales live in ConfigDir subdirectories,
+	// not the DB). The old
 	// field-by-field copy here was a second source of truth that silently
 	// dropped a newly-added repo — AuthEvent ended up nil, so the auth-events
 	// handler panicked (nil-interface method call) and login emit no-op'd.
@@ -249,6 +253,13 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	// socket can actually bind; the user would lose it to a crash dump.
 
 	panelRegistry := paneladapter.NewRegistry()
+	nativeSync, err := nodesync.New(nodesync.Options{
+		Desired: repos.NativeDesired, Agents: repos.NodeAgent, Issues: repos.NodeAgentIssue, Users: repos.User,
+		Clients: repos.PSPClient, Nodes: repos.Node, Settings: repos.Settings, Panels: repos.XUIPanel,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("native node sync: %w", err)
+	}
 	if err := panelRegistry.Register(domain.PanelKind3XUI, func(p *domain.Panel) (ports.PanelClient, error) {
 		return xuiadapter.New(p)
 	}); err != nil {
@@ -259,16 +270,20 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	}); err != nil {
 		return nil, fmt.Errorf("register S-UI adapter: %w", err)
 	}
+	if err := panelRegistry.Register(domain.PanelKindPSP, func(p *domain.Panel) (ports.PanelClient, error) {
+		return pspnodeadapter.New(p, nativeSync, repos.Node, repos.NodeAgent)
+	}); err != nil {
+		return nil, fmt.Errorf("register PSP native adapter: %w", err)
+	}
 	pool, err := paneladapter.NewPool(ctx, repos.XUIPanel, panelRegistry)
 	if err != nil {
 		return nil, fmt.Errorf("panel pool: %w", err)
 	}
 
 	// --- service layer ---
-	// Cron intervals + rate limits are still startup-loaded (the tickers /
-	// middleware they configure aren't rebuilt mid-run). JWT TTLs and the
-	// "iss" claim ARE live: the issuer reads them from settings on every
-	// IssueAccess / IssueRefresh.
+	// This load supplies boot values to services and the traffic ticker. Most
+	// runtime settings are re-read by their consumers; notably JWT TTLs and
+	// rate limits are live, while the traffic interval still requires restart.
 	sysSettings, err := repos.Settings.Load(ctx, ports.UISettings{})
 	if err != nil {
 		return nil, fmt.Errorf("load settings: %w", err)
@@ -348,8 +363,10 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	// a service-only suspension.)
 	userSvc.SetMailNotifier(mailSvc)
 	reconcileSvc := reconcile.New(repos.User, repos.Ownership, repos.Node, repos.Group, repos.Settings, repos.Audit, pool, syncSvc)
+	reconcileSvc.SetPSPClientRepo(repos.PSPClient)
 	healthSvc := health.New(repos.Node)
 	renderSvc := render.New(repos, pool, groupSvc)
+	nativeSync.SetRenderInvalidator(renderSvc.InvalidateAll)
 	// Ordering nodes and standalone separators changes every affected
 	// subscription. Clear both cache layers after the DB transaction commits so
 	// the next client refresh sees the new merged order immediately.
@@ -388,6 +405,7 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 		cfg:       cfg,
 		bgCancel:  cancel,
 		bgRootCtx: bgCtx,
+		render:    renderSvc,
 	}
 	dispatcher := &asyncDispatcher{ctx: bgCtx, wg: &a.bgWG}
 	// Wire traffic.Service into the panel-wide WaitGroup. Its async
@@ -450,6 +468,7 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 		Mail:             mailSvc,
 		Reconcile:        reconcileSvc,
 		Geo:              geoSvc,
+		NodeSync:         nativeSync,
 		SubPerIPPerMin:   sysSettings.SubPerIPPerMin,
 		LoginPerIPPerMin: sysSettings.LoginPerIPPerMin,
 	})
@@ -750,6 +769,12 @@ func (a *App) probePanelVersionsOnce(ctx context.Context) {
 		}
 		if uerr := a.repos.XUIPanel.UpdateVersion(ctx, p.ID, status.PanelVersion, status.XrayVersion, &now); uerr != nil {
 			log.Warn("compat probe: write version", "panel_id", p.ID, "err", uerr)
+		} else if a.render != nil && p.XrayVersion != status.XrayVersion {
+			// Mihomo REALITY output changes at the Xray 26.9.8 boundary.
+			// Drop the 60s render cache as soon as a manual/out-of-band core
+			// upgrade is observed, otherwise a freshly refreshed subscription
+			// can keep the pre-upgrade handshake shape until cache expiry.
+			a.render.InvalidateAll()
 		}
 		// Rides the same tick and the same authenticated client. One extra GET
 		// against a panel we are already talking to, once per traffic poll

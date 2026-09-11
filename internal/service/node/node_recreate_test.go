@@ -164,7 +164,7 @@ func TestRecreateInboundOnServer(t *testing.T) {
 	now := time.Now()
 	node := &domain.Node{
 		ID: 1, PanelID: 10, InboundID: 5, Enabled: true,
-		Protocol: "vless", Port: 443,
+		DesiredProtocol: "vless", DesiredPort: 443,
 		InboundRemark:   "TW Static",
 		InboundSettings: `{"clients":[]}`,
 		StreamSettings:  `{"network":"tcp","security":"reality"}`,
@@ -199,7 +199,7 @@ func TestRecreateInboundOnServer(t *testing.T) {
 func TestRecreateInboundOnServer_Guards(t *testing.T) {
 	now := time.Now()
 	base := func() *domain.Node {
-		return &domain.Node{ID: 1, PanelID: 10, InboundID: 5, Protocol: "vless", Port: 443,
+		return &domain.Node{ID: 1, PanelID: 10, InboundID: 5, DesiredProtocol: "vless", DesiredPort: 443,
 			InboundSettings: "{}", ConfigSyncedAt: &now, ConfigSyncState: "synced"}
 	}
 	// Inbound already present (with a captured snapshot) → idempotent: no error,

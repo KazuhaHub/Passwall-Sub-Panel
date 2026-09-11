@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent, type MouseEvent } from 'react'
 import {
+	Alert,
   Box,
   Button,
   Card,
@@ -36,6 +37,8 @@ import DeleteIcon from '@mui/icons-material/DeleteOutlined'
 import EditIcon from '@mui/icons-material/EditOutlined'
 import VisibilityIcon from '@mui/icons-material/Visibility'
 import VisibilityOffIcon from '@mui/icons-material/VisibilityOff'
+import ContentCopyIcon from '@mui/icons-material/ContentCopy'
+import VpnKeyIcon from '@mui/icons-material/VpnKeyOutlined'
 import { useTranslation } from 'react-i18next'
 import { allSettledLimited } from '@/utils/promises'
 
@@ -49,14 +52,17 @@ import {
   deleteServer,
   listServers,
   listXrayVersions,
+	rotateNativeCredential,
   testServer,
   updateServer,
   upgradePanel,
   upgradePreview,
   upgradeXray,
-  type Server,
+	type Server,
+	type NativeServerProvisioning,
   type PanelCapability,
   type PanelType,
+	type CoreRelease,
   type UpgradePreviewResult,
   type XUIAuthMethod,
   type UpdateServerRequest,
@@ -68,6 +74,7 @@ import { PagedTableFooter } from '@/components/PagedTableFooter'
 import { SortableTableCell } from '@/components/SortableTableCell'
 import { usePaged } from '@/hooks/usePaged'
 import { ipCapBadgeTone, type IPCapTone } from '@/utils/capabilities'
+import { copyToClipboard } from '@/utils/clipboard'
 import {
   type FieldErrors,
   firstError,
@@ -109,7 +116,7 @@ const EMPTY_FORM: FormState = {
 }
 
 function credentialsConfigured(s: Server): boolean {
-  return s.has_api_token || s.has_password
+	return s.panel_type === 'psp' || s.has_api_token || s.has_password
 }
 
 function hasCapability(s: Server | null, capability: PanelCapability): boolean {
@@ -119,7 +126,7 @@ function hasCapability(s: Server | null, capability: PanelCapability): boolean {
 export default function ServersView() {
   const theme = useTheme()
   const md = theme.palette.md
-  const { t } = useTranslation(['admin', 'common'])
+  const { t, i18n } = useTranslation(['admin', 'common'])
 
   const [search, setSearch] = useState('')
   const [probeStates, setProbeStates] = useState<Record<number, ProbeState>>({})
@@ -136,16 +143,24 @@ export default function ServersView() {
   // Xray upgrade dialog state. Opened from the kebab menu's "升级 Xray"
   // item; the dialog lazy-loads the version list from
   // GET /admin/servers/:id/xray-versions on mount. xrayVersionPick = "" means
-  // "use latest" (also the default before the list resolves).
+  // "use latest" only for legacy 3X-UI; native PSP nodes select an exact,
+  // catalog-approved release and fail closed if no catalog is available.
   const [xrayDialogTarget, setXrayDialogTarget] = useState<Server | null>(null)
   const [xrayVersionPick, setXrayVersionPick] = useState<string>('')
   const [xrayVersions, setXrayVersions] = useState<string[]>([])
+	const [xrayReleases, setXrayReleases] = useState<CoreRelease[]>([])
   const [xrayLoadingVersions, setXrayLoadingVersions] = useState(false)
+	const nativeCoreDialog = xrayDialogTarget?.panel_type === 'psp'
+	const selectedXrayRelease = xrayReleases.find(release => release.version === xrayVersionPick)
 
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editing, setEditing] = useState<Server | null>(null)
   const [form, setForm] = useState<FormState>(EMPTY_FORM)
-  const [busy, setBusy] = useState(false)
+	const [busy, setBusy] = useState(false)
+	const [nativeProvisioning, setNativeProvisioning] = useState<NativeServerProvisioning | null>(null)
+	const nativeStartCommand = nativeProvisioning
+		? `passwall-node --endpoint ${nativeProvisioning.endpoint} --agent-id ${nativeProvisioning.agent_id} --credential-file /etc/passwall-node/credential --data-dir /var/lib/passwall-node${nativeProvisioning.endpoint.startsWith('http://') ? ' --allow-insecure-http' : ''}`
+		: ''
   type ServerField = 'name' | 'url' | 'api_token' | 'password'
   const [fieldErr, setFieldErr] = useState<FieldErrors<ServerField>>({})
 
@@ -189,7 +204,7 @@ export default function ServersView() {
   useEffect(() => { setSelected(new Set()) }, [pageIdsKey])
 
   const selectedCount = selected.size
-  const selectedCanUpgradeCore = items.some(s => selected.has(s.id) && s.capabilities?.includes('core.upgrade'))
+	const selectedCanUpgradeCore = items.some(s => selected.has(s.id) && s.panel_type !== 'psp' && s.capabilities?.includes('core.upgrade'))
   const selectedCanUpgradePanel = items.some(s => selected.has(s.id) && s.capabilities?.includes('panel.upgrade'))
   // Header checkbox reflects the *visible* page only.
   const allChecked = items.length > 0 && items.every(s => selected.has(s.id))
@@ -394,16 +409,22 @@ export default function ServersView() {
   async function openXrayDialog(s: Server) {
     closeMenu()
     setXrayDialogTarget(s)
-    setXrayVersionPick('') // "" = latest
+		setXrayVersionPick('') // "" = latest for legacy 3X-UI only
     setXrayVersions([])
+		setXrayReleases([])
     setXrayLoadingVersions(true)
     try {
-      const versions = await listXrayVersions(s.id)
-      setXrayVersions(versions)
+			const result = await listXrayVersions(s.id)
+			setXrayVersions(result.versions)
+			setXrayReleases(result.releases)
+			if (s.panel_type === 'psp') {
+				setXrayVersionPick(result.releases.find(release => release.tier === 'recommended')?.version ?? result.versions[0] ?? '')
+			}
     } catch {
       // Panel unreachable / endpoint failed — dialog still opens with
       // just the "latest" pseudo-option so admin can still upgrade.
       setXrayVersions([])
+			setXrayReleases([])
     } finally {
       setXrayLoadingVersions(false)
     }
@@ -411,6 +432,7 @@ export default function ServersView() {
 
   function closeXrayDialog() {
     setXrayDialogTarget(null)
+		setXrayReleases([])
   }
 
   async function submitXrayUpgrade() {
@@ -418,16 +440,33 @@ export default function ServersView() {
     if (!s) return
     setUpgrading(s.id)
     try {
-      // Empty string means "latest" — backend treats undefined/empty
-      // identically and falls back to the latest xray-core release.
-      const r = await upgradeXray(s.id, xrayVersionPick || undefined)
+			const selectedRelease = xrayReleases.find(release => release.version === xrayVersionPick)
+			let confirmRestricted = false
+			if (s.panel_type === 'psp') {
+				if (!xrayVersionPick) return
+				if (selectedRelease?.requires_confirmation) {
+					const accepted = await confirm({
+						title: t('admin:servers.confirm.restricted_core_title'),
+						message: t('admin:servers.confirm.restricted_core_message', {
+							version: selectedRelease.version,
+							summary: i18n.language.startsWith('zh') ? selectedRelease.summary.zh_cn : selectedRelease.summary.en,
+						}),
+						confirmText: t('admin:servers.confirm.restricted_core_confirm'),
+					})
+					if (!accepted) return
+					confirmRestricted = true
+				}
+			}
+			const r = await upgradeXray(s.id, xrayVersionPick || undefined, { confirmRestricted })
       pushSnack(
-        t('admin:servers.toast.upgrade_xray_ok', { version: r.version ?? 'latest' }),
+				s.panel_type === 'psp'
+					? (r.message ?? t('admin:servers.toast.core_intent_saved', { version: r.version }))
+					: t('admin:servers.toast.upgrade_xray_ok', { version: r.version ?? 'latest' }),
         'success',
       )
       // Backend already refreshed UpdateVersion server-side; probe to
       // pull the latest snapshot into the items list.
-      void probeServer(s)
+			if (s.panel_type !== 'psp') void probeServer(s)
       closeXrayDialog()
     } catch (err) {
       const msg = (err as { response?: { data?: { error?: string } }; message?: string }).response?.data?.error
@@ -438,6 +477,30 @@ export default function ServersView() {
       setUpgrading(null)
     }
   }
+
+	async function rotateCredential(s: Server) {
+		closeMenu()
+		const accepted = await confirm({
+			title: t('admin:servers.native.rotate_title'),
+			message: t('admin:servers.native.rotate_warning', { name: s.name }),
+			destructive: true,
+			confirmText: t('admin:servers.native.rotate_confirm'),
+		})
+		if (!accepted) return
+		setUpgrading(s.id)
+		try {
+			const provisioned = await rotateNativeCredential(s.id)
+			setNativeProvisioning(provisioned)
+			pushSnack(t('admin:servers.native.rotated'), 'success')
+		} catch (err) {
+			const message = (err as { response?: { data?: { error?: string } }; message?: string }).response?.data?.error
+				?? (err as { message?: string }).message
+				?? 'unknown'
+			pushSnack(message, 'error')
+		} finally {
+			setUpgrading(null)
+		}
+	}
 
   function openCreate() {
     setEditing(null)
@@ -462,7 +525,10 @@ export default function ServersView() {
     setDialogOpen(true)
   }
 
-  function validateForm(f: FormState, isEdit: boolean): FieldErrors<ServerField> {
+	function validateForm(f: FormState, isEdit: boolean): FieldErrors<ServerField> {
+		if (f.panel_type === 'psp') {
+			return { name: validateName(f.name, { required: true, max: 64 }), url: '', api_token: '', password: '' }
+		}
     const tokenRequired = f.panel_type === 'sui' || f.auth_method === 'token'
     const tokenConfigured = isEdit && !!editing?.has_api_token && !f.change_api_token
     const passwordConfigured = isEdit && !!editing?.has_password && !f.change_password
@@ -487,32 +553,37 @@ export default function ServersView() {
     if (firstKey) { pushSnack(t(`admin:${firstKey}`), 'warning'); return }
     setBusy(true)
     try {
-      if (editing) {
-        const req: UpdateServerRequest = {
-          panel_type: form.panel_type,
-          url: form.url,
-          name: form.name,
-          username: form.username,
-          remark: form.remark,
-          auth_method: form.auth_method,
-          insecure_https: form.insecure_https,
-        }
-        if (form.change_api_token) req.api_token = form.api_token
-        if (form.change_password) req.password = form.password
+		if (editing) {
+			const req: UpdateServerRequest = editing.panel_type === 'psp'
+				? { name: form.name, remark: form.remark }
+				: {
+					panel_type: form.panel_type,
+					url: form.url,
+					name: form.name,
+					username: form.username,
+					remark: form.remark,
+					auth_method: form.auth_method,
+					insecure_https: form.insecure_https,
+				}
+			if (editing.panel_type !== 'psp' && form.change_api_token) req.api_token = form.api_token
+			if (editing.panel_type !== 'psp' && form.change_password) req.password = form.password
         const saved = await updateServer(editing.id, req)
         mutateItems(prev => prev.map(server => server.id === saved.id ? saved : server))
         pushSnack(t('admin:servers.toast.saved'), 'success')
       } else {
-        await createServer({
-          name: form.name, url: form.url,
-          panel_type: form.panel_type,
-          api_token: form.api_token || undefined,
-          username: form.username || undefined,
-          password: form.password || undefined,
-          remark: form.remark || undefined,
-          auth_method: form.auth_method,
-          insecure_https: form.insecure_https,
-        })
+			const created = await createServer(form.panel_type === 'psp'
+				? { name: form.name, panel_type: 'psp', remark: form.remark || undefined }
+				: {
+					name: form.name, url: form.url,
+					panel_type: form.panel_type,
+					api_token: form.api_token || undefined,
+					username: form.username || undefined,
+					password: form.password || undefined,
+					remark: form.remark || undefined,
+					auth_method: form.auth_method,
+					insecure_https: form.insecure_https,
+				})
+			if ('server' in created) setNativeProvisioning(created)
         pushSnack(t('admin:servers.toast.created'), 'success')
       }
       setDialogOpen(false)
@@ -569,7 +640,7 @@ export default function ServersView() {
   // resolves "latest" independently, so the post-upgrade xray versions
   // may differ by a patch but all sit at each panel's known latest.
   async function batchUpgradeXray() {
-    const rows = items.filter(s => selected.has(s.id) && s.capabilities?.includes('core.upgrade'))
+		const rows = items.filter(s => selected.has(s.id) && s.panel_type !== 'psp' && s.capabilities?.includes('core.upgrade'))
     if (!rows.length) return
     const ok = await confirm({
       title: t('admin:servers.confirm.batch_upgrade_xray_title', { defaultValue: '批量升级 Xray' }),
@@ -770,7 +841,7 @@ export default function ServersView() {
     const versionText = (
       <Box sx={{ display: 'flex', flexDirection: 'column', lineHeight: 1.3 }}>
         <Typography sx={{ fontSize: 13, fontWeight: 500 }}>
-          {s.panel_type === 'sui' ? 'S-UI' : '3X-UI'} {s.panel_version}
+          {s.panel_type === 'sui' ? 'S-UI' : s.panel_type === 'psp' ? 'PSP Node' : '3X-UI'} {s.panel_version}
         </Typography>
         {s.xray_version && (
           <Typography sx={{ fontSize: 11, color: md.onSurfaceVariant }}>
@@ -1206,8 +1277,14 @@ export default function ServersView() {
         </MenuItem>}
         {hasCapability(menuTarget, 'core.upgrade') && <MenuItem onClick={() => menuTarget && openXrayDialog(menuTarget)}>
           <SystemUpdateIcon fontSize="small" sx={{ mr: 1 }} />
-          {t('admin:servers.action.upgrade_xray', { defaultValue: '升级 Xray（最新）' })}
+						{menuTarget?.panel_type === 'psp'
+							? t('admin:servers.action.select_core')
+							: t('admin:servers.action.upgrade_xray')}
         </MenuItem>}
+		{menuTarget?.panel_type === 'psp' && <MenuItem onClick={() => rotateCredential(menuTarget)}>
+			<VpnKeyIcon fontSize="small" sx={{ mr: 1 }} />
+			{t('admin:servers.action.rotate_node_credential')}
+		</MenuItem>}
       </Menu>
       {/* Upgrade Xray dialog — pinning a specific xray-core version. The
           version list comes from the panel's /server/getXrayVersion at
@@ -1226,7 +1303,9 @@ export default function ServersView() {
           {xrayDialogTarget && (
             <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, pt: 1 }}>
               <Typography variant="body2">
-                {t('admin:servers.confirm.upgrade_xray_message', { name: xrayDialogTarget.name })}
+								{t(nativeCoreDialog
+									? 'admin:servers.confirm.select_core_message'
+									: 'admin:servers.confirm.upgrade_xray_message', { name: xrayDialogTarget.name })}
               </Typography>
               <FormControl fullWidth size="small" disabled={xrayLoadingVersions || upgrading !== null}>
                 <InputLabel id="xray-version-select">
@@ -1238,14 +1317,17 @@ export default function ServersView() {
                   label={t('admin:servers.field.xray_version', { defaultValue: '目标版本' })}
                   onChange={e => setXrayVersionPick(e.target.value)}
                 >
-                  {/* The "latest" pseudo-option is always present so admin
-                      can upgrade even if version list fetch failed. */}
-                  <MenuItem value="">
-                    {t('admin:servers.field.xray_version_latest', { defaultValue: 'latest（最新版）' })}
-                  </MenuItem>
-                  {xrayVersions.map(v => (
-                    <MenuItem key={v} value={v}>{v}</MenuItem>
-                  ))}
+									{!nativeCoreDialog && <MenuItem value="">
+										{t('admin:servers.field.xray_version_latest')}
+									</MenuItem>}
+                  {xrayVersions.map(v => {
+                    const release = xrayReleases.find(item => item.version === v)
+                    return (
+                      <MenuItem key={v} value={v}>
+                        {v}{release ? ` · ${t(`admin:servers.core_tier.${release.tier}`)}` : ''}
+                      </MenuItem>
+                    )
+                  })}
                 </Select>
               </FormControl>
               {xrayLoadingVersions && (
@@ -1253,6 +1335,47 @@ export default function ServersView() {
                   {t('admin:servers.field.xray_version_loading', { defaultValue: '正在加载可用版本…' })}
                 </Typography>
               )}
+							{nativeCoreDialog && !xrayLoadingVersions && xrayVersions.length === 0 && (
+								<Typography variant="caption" sx={{ color: md.error }}>
+									{t('admin:servers.field.core_catalog_unavailable')}
+								</Typography>
+							)}
+							{nativeCoreDialog && selectedXrayRelease && (
+								<Box sx={{ p: 1.5, borderRadius: 2, bgcolor: md.surfaceContainerHighest }}>
+									<Typography variant="body2" sx={{ fontWeight: 600 }}>
+										{t(`admin:servers.core_tier.${selectedXrayRelease.tier}`)}
+									</Typography>
+									<Typography variant="body2" sx={{ mt: 0.5 }}>
+										{i18n.language.startsWith('zh') ? selectedXrayRelease.summary.zh_cn : selectedXrayRelease.summary.en}
+									</Typography>
+									<Typography variant="caption" component="div" sx={{ mt: 1, color: md.onSurfaceVariant }}>
+										{t('admin:servers.field.core_reality_matrix', {
+											xray: t(`admin:servers.core_support.${selectedXrayRelease.reality.xray}`),
+											mihomo: t(`admin:servers.core_support.${selectedXrayRelease.reality.mihomo}`),
+											singbox: t(`admin:servers.core_support.${selectedXrayRelease.reality.sing_box}`),
+											uri: t(`admin:servers.core_support.${selectedXrayRelease.reality.uri_list}`),
+										})}
+									</Typography>
+									<Typography variant="caption" component="div" sx={{ color: md.onSurfaceVariant }}>
+										{t('admin:servers.field.core_evidence', {
+											config: selectedXrayRelease.evidence.config_tested ? t('admin:servers.field.core_evidence_yes') : t('admin:servers.field.core_evidence_no'),
+											handshake: selectedXrayRelease.evidence.handshake_tested ? t('admin:servers.field.core_evidence_yes') : t('admin:servers.field.core_evidence_no'),
+										})}
+									</Typography>
+									{selectedXrayRelease.evidence.handshakes?.length ? (
+										<Typography variant="caption" component="div" sx={{ color: md.onSurfaceVariant }}>
+											{t('admin:servers.field.core_handshake_title')}{' '}
+											{selectedXrayRelease.evidence.handshakes.map((handshake, index) => (
+												<Box component="span" key={`${handshake.client}-${handshake.version}-${handshake.profile}`} title={`${handshake.profile}; ${handshake.platform}`}>
+													{index > 0 ? ' · ' : ''}
+													{t(`admin:servers.core_client.${handshake.client}`)} {handshake.version}{' '}
+													{t(`admin:servers.core_handshake_result.${handshake.result}`)}
+												</Box>
+											))}
+										</Typography>
+									) : null}
+								</Box>
+							)}
             </Box>
           )}
         </DialogContent>
@@ -1263,7 +1386,7 @@ export default function ServersView() {
           <Button
             onClick={submitXrayUpgrade}
             variant="contained"
-            disabled={upgrading !== null}
+				disabled={upgrading !== null || (nativeCoreDialog && (xrayLoadingVersions || !xrayVersionPick))}
             startIcon={upgrading !== null ? <CircularProgress size={16} color="inherit" /> : null}
           >
             {t('admin:servers.action.upgrade', { defaultValue: '升级' })}
@@ -1286,74 +1409,75 @@ export default function ServersView() {
             <TextField select fullWidth
               label={t('admin:servers.field.panel_type', { defaultValue: '面板类型' })}
               value={form.panel_type}
+              disabled={!!editing}
               onChange={e => {
                 const panelType = e.target.value as PanelType
                 setForm(prev => panelType === 'sui'
                   ? {
-                      ...prev,
-                      panel_type: panelType,
-                      auth_method: 'token',
-                      username: '',
-                      password: '',
-                      change_password: false,
-                      show_password: false,
+                      ...prev, panel_type: panelType, auth_method: 'token', username: '', password: '',
+                      change_password: false, show_password: false,
                     }
-                  : { ...prev, panel_type: panelType })
+                  : panelType === 'psp'
+                    ? {
+                        ...prev, panel_type: panelType, url: '', api_token: '', username: '', password: '',
+                        auth_method: '', insecure_https: false, change_api_token: false, change_password: false,
+                      }
+                    : { ...prev, panel_type: panelType, auth_method: prev.auth_method || 'token' })
                 setFieldErr(prev => ({ ...prev, api_token: '', password: '' }))
               }}>
               <MenuItem value="3xui">3X-UI</MenuItem>
               <MenuItem value="sui">S-UI</MenuItem>
+              <MenuItem value="psp">PSP Node</MenuItem>
             </TextField>
-            <Box>
-              <TextField
-                fullWidth required
-                label={t('admin:servers.field.name')}
-                placeholder={t('admin:servers.placeholder.name')}
-                value={form.name}
-                onChange={e => setForm({ ...form, name: e.target.value })}
-                error={!!fieldErr.name}
-                helperText={fieldErr.name ? t(`admin:${fieldErr.name}`) : t('admin:servers.hint.name')}
-              />
-            </Box>
             <TextField
               fullWidth required
-              label={t('admin:servers.field.url')}
-              placeholder={t('admin:servers.placeholder.url')}
-              value={form.url}
-              onChange={e => setForm({ ...form, url: e.target.value })}
-              error={!!fieldErr.url}
-              helperText={fieldErr.url ? t(`admin:${fieldErr.url}`) : ''}
-              sx={{ '& input': { fontSize: 14 } }}
+              label={t('admin:servers.field.name')}
+              placeholder={t('admin:servers.placeholder.name')}
+              value={form.name}
+              onChange={e => setForm({ ...form, name: e.target.value })}
+              error={!!fieldErr.name}
+              helperText={fieldErr.name ? t(`admin:${fieldErr.name}`) : t('admin:servers.hint.name')}
             />
 
-            {/* Auth method: pick one so the form only asks for the fields that
-                mode actually needs (token OR username+password). */}
-            <TextField select fullWidth
-              label={t('admin:servers.field.auth_method', { defaultValue: '认证方式' })}
-              value={form.auth_method}
-              onChange={e => setForm({ ...form, auth_method: e.target.value as XUIAuthMethod })}>
-              <MenuItem value="token">{t('admin:servers.auth_method.token', { defaultValue: 'API Token' })}</MenuItem>
-              {form.panel_type === '3xui' && <MenuItem value="password">{t('admin:servers.auth_method.password', { defaultValue: '账户密码' })}</MenuItem>}
-            </TextField>
+            {form.panel_type === 'psp' ? (
+              <Alert severity="info">
+                {t('admin:servers.native.outbound_hint', { defaultValue: '原生节点主动连接 PSP，不需要填写入站 URL 或上游面板凭据。创建后会显示一次性节点凭据。' })}
+              </Alert>
+            ) : <>
+              <TextField
+                fullWidth required
+                label={t('admin:servers.field.url')}
+                placeholder={t('admin:servers.placeholder.url')}
+                value={form.url}
+                onChange={e => setForm({ ...form, url: e.target.value })}
+                error={!!fieldErr.url}
+                helperText={fieldErr.url ? t(`admin:${fieldErr.url}`) : ''}
+                sx={{ '& input': { fontSize: 14 } }}
+              />
+              <TextField select fullWidth
+                label={t('admin:servers.field.auth_method', { defaultValue: '认证方式' })}
+                value={form.auth_method}
+                onChange={e => setForm({ ...form, auth_method: e.target.value as XUIAuthMethod })}>
+                <MenuItem value="token">{t('admin:servers.auth_method.token', { defaultValue: 'API Token' })}</MenuItem>
+                {form.panel_type === '3xui' && <MenuItem value="password">{t('admin:servers.auth_method.password', { defaultValue: '账户密码' })}</MenuItem>}
+              </TextField>
 
-            {form.auth_method === 'token' ? (
-              /* API Token: in edit mode, default to "kept unchanged" with a Change link */
-              (<SecretField
-                label={t('admin:servers.field.api_token')}
-                placeholder={t('admin:servers.placeholder.api_token')}
-                value={form.api_token}
-                show={form.show_api_token}
-                onShow={v => setForm({ ...form, show_api_token: v })}
-                onChange={v => setForm({ ...form, api_token: v })}
-                edit={!!editing}
-                changing={form.change_api_token}
-                alreadyConfigured={!!editing?.has_api_token}
-                onStartChange={() => setForm({ ...form, change_api_token: true })}
-                error={!!fieldErr.api_token}
-                helperText={fieldErr.api_token ? t(`admin:${fieldErr.api_token}`) : ''}
-              />)
-            ) : (
-              <>
+              {form.auth_method === 'token' ? (
+                <SecretField
+                  label={t('admin:servers.field.api_token')}
+                  placeholder={t('admin:servers.placeholder.api_token')}
+                  value={form.api_token}
+                  show={form.show_api_token}
+                  onShow={v => setForm({ ...form, show_api_token: v })}
+                  onChange={v => setForm({ ...form, api_token: v })}
+                  edit={!!editing}
+                  changing={form.change_api_token}
+                  alreadyConfigured={!!editing?.has_api_token}
+                  onStartChange={() => setForm({ ...form, change_api_token: true })}
+                  error={!!fieldErr.api_token}
+                  helperText={fieldErr.api_token ? t(`admin:${fieldErr.api_token}`) : ''}
+                />
+              ) : <>
                 <TextField
                   fullWidth
                   label={t('admin:servers.field.username')}
@@ -1375,8 +1499,21 @@ export default function ServersView() {
                   error={!!fieldErr.password}
                   helperText={fieldErr.password ? t(`admin:${fieldErr.password}`) : ''}
                 />
-              </>
-            )}
+              </>}
+
+              <Box>
+                <FormControlLabel sx={{
+                  ml: 0,
+                  '& .MuiFormControlLabel-label': { ml: 1, color: md.error },
+                }}
+                  label={t('admin:servers.field.insecure_https', { defaultValue: '允许不安全的 HTTPS（危险！）' })}
+                  control={<Switch checked={form.insecure_https}
+                    onChange={(_, checked) => setForm({ ...form, insecure_https: checked })} />} />
+                <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant, ml: 0.25, mt: 0.75 }}>
+                  {t('admin:servers.hint.insecure_https', { defaultValue: '面板使用自签名 / 域名不匹配证书时开启。仅对该面板生效，不影响 SSRF 防护。' })}
+                </Typography>
+              </Box>
+            </>}
 
             <TextField
               fullWidth
@@ -1384,20 +1521,6 @@ export default function ServersView() {
               value={form.remark}
               onChange={e => setForm({ ...form, remark: e.target.value })}
             />
-
-            {/* Allow insecure HTTPS: skip TLS cert verification for self-signed panels. */}
-            <Box>
-              <FormControlLabel sx={{
-                ml: 0,
-                '& .MuiFormControlLabel-label': { ml: 1, color: md.error },
-              }}
-                label={t('admin:servers.field.insecure_https', { defaultValue: '允许不安全的 HTTPS（危险！）' })}
-                control={<Switch checked={form.insecure_https}
-                  onChange={(_, c) => setForm({ ...form, insecure_https: c })} />} />
-              <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant, ml: 0.25, mt: 0.75 }}>
-                {t('admin:servers.hint.insecure_https', { defaultValue: '面板使用自签名 / 域名不匹配证书时开启。仅对该面板生效，不影响 SSRF 防护。' })}
-              </Typography>
-            </Box>
           </Box>
         </DialogContent>
         <DialogActions>
@@ -1413,6 +1536,57 @@ export default function ServersView() {
           </Button>
         </DialogActions>
       </Dialog>
+		<Dialog
+			open={!!nativeProvisioning}
+			onClose={() => undefined}
+			slotProps={{ paper: { sx: { borderRadius: 3, bgcolor: md.surfaceContainerHigh, width: 680, maxWidth: '94vw' } } }}
+		>
+			<DialogTitle>{t('admin:servers.native.created_title', { defaultValue: '保存原生节点凭据' })}</DialogTitle>
+			<DialogContent sx={{ display: 'flex', flexDirection: 'column', gap: 2, pt: '12px !important' }}>
+				<Alert severity="warning">
+					{t('admin:servers.native.once_warning', { defaultValue: '节点凭据只显示这一次。PSP 只保存摘要，关闭后无法找回；请先写入权限为 0600 的凭据文件。' })}
+				</Alert>
+				<TextField
+					label={t('admin:servers.native.agent_id', { defaultValue: 'Agent ID' })}
+					value={nativeProvisioning?.agent_id ?? ''}
+					fullWidth slotProps={{ input: { readOnly: true } }}
+				/>
+				<TextField
+					label={t('admin:servers.native.credential', { defaultValue: '一次性节点凭据' })}
+					value={nativeProvisioning?.credential ?? ''}
+					fullWidth slotProps={{
+						input: {
+							readOnly: true,
+							endAdornment: <InputAdornment position="end">
+								<IconButton onClick={() => void copyToClipboard(nativeProvisioning?.credential ?? '')} size="small">
+									<ContentCopyIcon fontSize="small" />
+								</IconButton>
+							</InputAdornment>,
+						},
+					}}
+				/>
+				<TextField
+					label={t('admin:servers.native.start_command', { defaultValue: '启动命令（凭据文件需另行写入）' })}
+					value={nativeStartCommand}
+					fullWidth multiline minRows={3} slotProps={{ input: { readOnly: true } }}
+				/>
+				<Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+					<Button variant="outlined" startIcon={<ContentCopyIcon />}
+						onClick={() => void copyToClipboard(nativeProvisioning?.credential ?? '')}>
+						{t('admin:servers.native.copy_credential', { defaultValue: '复制凭据' })}
+					</Button>
+					<Button variant="outlined" startIcon={<ContentCopyIcon />}
+						onClick={() => void copyToClipboard(nativeStartCommand)}>
+						{t('admin:servers.native.copy_command', { defaultValue: '复制启动命令' })}
+					</Button>
+				</Box>
+			</DialogContent>
+			<DialogActions>
+				<Button variant="contained" onClick={() => setNativeProvisioning(null)}>
+					{t('admin:servers.native.saved_confirm', { defaultValue: '我已安全保存' })}
+				</Button>
+			</DialogActions>
+		</Dialog>
     </Box>
   );
 }

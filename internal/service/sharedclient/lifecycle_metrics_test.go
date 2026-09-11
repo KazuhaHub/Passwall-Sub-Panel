@@ -95,7 +95,7 @@ func TestSyncLifecycle_SkipAndWriteAreCountedExactlyOnce(t *testing.T) {
 	}
 	newSvc := func(detail *ports.ClientDetail) (*Service, *fakeXUI) {
 		clients := &fakeClients{attachments: []domain.PSPClientInbound{
-			{ClientID: 1, NodeID: 11, FlowOverride: "xtls-rprx-vision", Provisioned: true},
+			{ClientID: 1, NodeID: 11, FlowOverride: "xtls-rprx-vision", State: domain.ClientApplyApplied},
 		}}
 		xui := &fakeXUI{getDetail: detail}
 		return New(clients, fakePool{c: xui}, fakeNodes{}), xui
@@ -105,7 +105,7 @@ func TestSyncLifecycle_SkipAndWriteAreCountedExactlyOnce(t *testing.T) {
 	t.Run("panel already matches", func(t *testing.T) {
 		metrics.Reset()
 		svc, xui := newSvc(spec())
-		if err := svc.SyncLifecycle(context.Background(), c, domain.UserLifecycle{Enable: false, ExpiryTime: 1893456000000, QuotaHeadroom: 5 << 30}); err != nil {
+		if err := syncLifecycle(svc, context.Background(), c, domain.UserLifecycle{Enable: false, ExpiryTime: 1893456000000, QuotaHeadroom: 5 << 30}); err != nil {
 			t.Fatal(err)
 		}
 		if xui.updateCalls != 0 {
@@ -127,7 +127,7 @@ func TestSyncLifecycle_SkipAndWriteAreCountedExactlyOnce(t *testing.T) {
 		stale := spec()
 		stale.TotalGB = 6 << 30 // the floor shrank by 1 GiB since the last push
 		svc, xui := newSvc(stale)
-		if err := svc.SyncLifecycle(context.Background(), c, domain.UserLifecycle{Enable: false, ExpiryTime: 1893456000000, QuotaHeadroom: 5 << 30}); err != nil {
+		if err := syncLifecycle(svc, context.Background(), c, domain.UserLifecycle{Enable: false, ExpiryTime: 1893456000000, QuotaHeadroom: 5 << 30}); err != nil {
 			t.Fatal(err)
 		}
 		if xui.updateCalls != 1 {
@@ -154,7 +154,7 @@ func TestSyncLifecycle_SkipAndWriteAreCountedExactlyOnce(t *testing.T) {
 		stale := spec()
 		stale.TotalGB = (5 << 30) + (16 << 20) // 16 MiB of sibling drift; band is 256 MiB
 		svc, xui := newSvc(stale)
-		if err := svc.SyncLifecycle(context.Background(), c, domain.UserLifecycle{Enable: false, ExpiryTime: 1893456000000, QuotaHeadroom: 5 << 30}); err != nil {
+		if err := syncLifecycle(svc, context.Background(), c, domain.UserLifecycle{Enable: false, ExpiryTime: 1893456000000, QuotaHeadroom: 5 << 30}); err != nil {
 			t.Fatal(err)
 		}
 		if xui.updateCalls != 0 {
@@ -176,7 +176,7 @@ func TestSyncLifecycle_SkipAndWriteAreCountedExactlyOnce(t *testing.T) {
 		stale := spec()
 		stale.TotalGB = (5 << 30) - 1 // one byte too strict
 		svc, xui := newSvc(stale)
-		if err := svc.SyncLifecycle(context.Background(), c, domain.UserLifecycle{Enable: false, ExpiryTime: 1893456000000, QuotaHeadroom: 5 << 30}); err != nil {
+		if err := syncLifecycle(svc, context.Background(), c, domain.UserLifecycle{Enable: false, ExpiryTime: 1893456000000, QuotaHeadroom: 5 << 30}); err != nil {
 			t.Fatal(err)
 		}
 		if xui.updateCalls != 1 {
@@ -197,7 +197,7 @@ func TestSyncLifecycle_SkipAndWriteAreCountedExactlyOnce(t *testing.T) {
 		metrics.Reset()
 		clients := &fakeClients{attachments: []domain.PSPClientInbound{{ClientID: 1, NodeID: 11}}}
 		svc := New(clients, fakePool{c: &fakeXUI{}}, fakeNodes{})
-		if err := svc.SyncLifecycle(context.Background(), c, domain.UserLifecycle{Enable: false, ExpiryTime: 0, QuotaHeadroom: 0}); err != nil {
+		if err := syncLifecycle(svc, context.Background(), c, domain.UserLifecycle{Enable: false, ExpiryTime: 0, QuotaHeadroom: 0}); err != nil {
 			t.Fatal(err)
 		}
 		if got := counterByName(t, "psp_lifecycle_sync_total"); got != 0 {
@@ -242,9 +242,17 @@ type probeXUI struct {
 	probe   *concurrencyProbe
 	arrived chan struct{}
 	want    int
+	liveMu  sync.Mutex
+	live    map[string]ports.ClientSpec
 }
 
-func (c *probeXUI) GetClient(_ context.Context, _ string) (*ports.ClientDetail, error) {
+func (c *probeXUI) GetClient(ctx context.Context, email string) (*ports.ClientDetail, error) {
+	c.liveMu.Lock()
+	spec, updated := c.live[email]
+	c.liveMu.Unlock()
+	if updated {
+		return &ports.ClientDetail{ID: spec.ID, Email: spec.Email, Password: spec.Password, Auth: spec.Auth}, nil
+	}
 	c.probe.enter()
 	defer c.probe.leave()
 	c.arrived <- struct{}{}
@@ -252,6 +260,19 @@ func (c *probeXUI) GetClient(_ context.Context, _ string) (*ports.ClientDetail, 
 	// A nil detail means "not on the panel", which sends SyncLifecycle
 	// straight to UpdateClient — the shape that exercises both round trips.
 	return nil, nil
+}
+
+func (c *probeXUI) UpdateClient(ctx context.Context, spec ports.ClientSpec) error {
+	if err := c.fakeXUI.UpdateClient(ctx, spec); err != nil {
+		return err
+	}
+	c.liveMu.Lock()
+	if c.live == nil {
+		c.live = make(map[string]ports.ClientSpec)
+	}
+	c.live[spec.Email] = spec
+	c.liveMu.Unlock()
+	return nil
 }
 
 func TestSyncUserLifecycle_FansOutConcurrently(t *testing.T) {
@@ -267,7 +288,7 @@ func TestSyncUserLifecycle_FansOutConcurrently(t *testing.T) {
 			ID: int64(i + 1), UserID: 7, PanelID: int64(10 + i),
 			Email: domain.PSPClientEmail(7, "", domain.EmailRules{}), UUID: "uuid-7",
 		}
-		atts[i] = domain.PSPClientInbound{ClientID: int64(i + 1), NodeID: int64(100 + i), Provisioned: true}
+		atts[i] = domain.PSPClientInbound{ClientID: int64(i + 1), NodeID: int64(100 + i), State: domain.ClientApplyApplied}
 	}
 	clients := &fakeClients{byUser: byUser, attachments: atts}
 	svc := New(clients, fakePool{c: xui}, fakeNodes{})
@@ -309,8 +330,8 @@ func TestSyncUserLifecycle_FirstErrorIsDeterministic(t *testing.T) {
 		{ID: 2, UserID: 7, PanelID: 11, Email: "fast@psp.local", UUID: "u"},
 	}
 	clients := &fakeClients{byUser: byUser, attachments: []domain.PSPClientInbound{
-		{ClientID: 1, NodeID: 101, Provisioned: true},
-		{ClientID: 2, NodeID: 102, Provisioned: true},
+		{ClientID: 1, NodeID: 101, State: domain.ClientApplyApplied},
+		{ClientID: 2, NodeID: 102, State: domain.ClientApplyApplied},
 	}}
 	xui := &failByEmailXUI{fail: map[string]bool{"slow@psp.local": true, "fast@psp.local": true},
 		delay: map[string]time.Duration{"slow@psp.local": 40 * time.Millisecond}}
@@ -329,9 +350,16 @@ type failByEmailXUI struct {
 	fakeXUI
 	fail  map[string]bool
 	delay map[string]time.Duration
+	mu    sync.Mutex
+	live  map[string]ports.ClientSpec
 }
 
-func (c *failByEmailXUI) GetClient(_ context.Context, _ string) (*ports.ClientDetail, error) {
+func (c *failByEmailXUI) GetClient(_ context.Context, email string) (*ports.ClientDetail, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if spec, ok := c.live[email]; ok {
+		return &ports.ClientDetail{ID: spec.ID, Email: spec.Email, Password: spec.Password, Auth: spec.Auth}, nil
+	}
 	return nil, nil
 }
 
@@ -340,6 +368,12 @@ func (c *failByEmailXUI) UpdateClient(_ context.Context, spec ports.ClientSpec) 
 	if c.fail[spec.Email] {
 		return fmt.Errorf("update %s: %w", spec.Email, errFakeGet)
 	}
+	c.mu.Lock()
+	if c.live == nil {
+		c.live = make(map[string]ports.ClientSpec)
+	}
+	c.live[spec.Email] = spec
+	c.mu.Unlock()
 	return nil
 }
 
@@ -353,9 +387,9 @@ func TestSyncUserLifecycle_AttemptsEveryClientDespiteFailures(t *testing.T) {
 		{ID: 3, UserID: 7, PanelID: 12, Email: "c@psp.local", UUID: "u"},
 	}
 	clients := &fakeClients{byUser: byUser, attachments: []domain.PSPClientInbound{
-		{ClientID: 1, NodeID: 101, Provisioned: true},
-		{ClientID: 2, NodeID: 102, Provisioned: true},
-		{ClientID: 3, NodeID: 103, Provisioned: true},
+		{ClientID: 1, NodeID: 101, State: domain.ClientApplyApplied},
+		{ClientID: 2, NodeID: 102, State: domain.ClientApplyApplied},
+		{ClientID: 3, NodeID: 103, State: domain.ClientApplyApplied},
 	}}
 	xui := &countingUpdateXUI{fail: map[string]bool{"a@psp.local": true}}
 	svc := New(clients, fakePool{c: xui}, fakeNodes{})
@@ -373,19 +407,30 @@ type countingUpdateXUI struct {
 	fail map[string]bool
 	mu   sync.Mutex
 	n    int
+	live map[string]ports.ClientSpec
 }
 
-func (c *countingUpdateXUI) GetClient(context.Context, string) (*ports.ClientDetail, error) {
+func (c *countingUpdateXUI) GetClient(_ context.Context, email string) (*ports.ClientDetail, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if spec, ok := c.live[email]; ok {
+		return &ports.ClientDetail{ID: spec.ID, Email: spec.Email, Password: spec.Password, Auth: spec.Auth}, nil
+	}
 	return nil, nil
 }
 
 func (c *countingUpdateXUI) UpdateClient(_ context.Context, spec ports.ClientSpec) error {
 	c.mu.Lock()
 	c.n++
-	c.mu.Unlock()
 	if c.fail[spec.Email] {
+		c.mu.Unlock()
 		return errFakeGet
 	}
+	if c.live == nil {
+		c.live = make(map[string]ports.ClientSpec)
+	}
+	c.live[spec.Email] = spec
+	c.mu.Unlock()
 	return nil
 }
 
@@ -404,7 +449,7 @@ func (c *countingUpdateXUI) updates() int {
 func TestSyncLifecycle_PushesTheQuotaCapRebasedOnPanelLifetime(t *testing.T) {
 	const GB = int64(1) << 30
 	clients := &fakeClients{attachments: []domain.PSPClientInbound{
-		{ClientID: 1, NodeID: 11, Provisioned: true},
+		{ClientID: 1, NodeID: 11, State: domain.ClientApplyApplied},
 	}}
 	xui := &fakeXUI{}
 	svc := New(clients, fakePool{c: xui}, fakeNodes{})
@@ -414,7 +459,7 @@ func TestSyncLifecycle_PushesTheQuotaCapRebasedOnPanelLifetime(t *testing.T) {
 		LastRawTotalBytes: 60 * GB, // what the panel's counter already holds
 	}
 	// 40 GB left this period.
-	if err := svc.SyncLifecycle(context.Background(), c, domain.UserLifecycle{Enable: true, ExpiryTime: 0, QuotaHeadroom: 40 * GB}); err != nil {
+	if err := syncLifecycle(svc, context.Background(), c, domain.UserLifecycle{Enable: true, ExpiryTime: 0, QuotaHeadroom: 40 * GB}); err != nil {
 		t.Fatal(err)
 	}
 	if got := xui.updatedSpec.TotalGB; got != 100*GB {
@@ -429,7 +474,7 @@ func TestSyncLifecycle_PushesTheQuotaCapRebasedOnPanelLifetime(t *testing.T) {
 func TestSyncLifecycle_UnlimitedStaysUnlimited(t *testing.T) {
 	const GB = int64(1) << 30
 	clients := &fakeClients{attachments: []domain.PSPClientInbound{
-		{ClientID: 1, NodeID: 11, Provisioned: true},
+		{ClientID: 1, NodeID: 11, State: domain.ClientApplyApplied},
 	}}
 	xui := &fakeXUI{}
 	svc := New(clients, fakePool{c: xui}, fakeNodes{})
@@ -438,7 +483,7 @@ func TestSyncLifecycle_UnlimitedStaysUnlimited(t *testing.T) {
 		ID: 1, PanelID: 10, Email: "u1@psp.local", UUID: "uuid-x",
 		LastRawTotalBytes: 500 * GB,
 	}
-	if err := svc.SyncLifecycle(context.Background(), c, domain.UserLifecycle{Enable: true, ExpiryTime: 0, QuotaHeadroom: 0}); err != nil {
+	if err := syncLifecycle(svc, context.Background(), c, domain.UserLifecycle{Enable: true, ExpiryTime: 0, QuotaHeadroom: 0}); err != nil {
 		t.Fatal(err)
 	}
 	if got := xui.updatedSpec.TotalGB; got != 0 {
@@ -450,13 +495,13 @@ func TestSyncLifecycle_UnlimitedStaysUnlimited(t *testing.T) {
 
 func TestSyncLifecycle_PushesTheConnectionCaps(t *testing.T) {
 	clients := &fakeClients{attachments: []domain.PSPClientInbound{
-		{ClientID: 1, NodeID: 11, Provisioned: true},
+		{ClientID: 1, NodeID: 11, State: domain.ClientApplyApplied},
 	}}
 	xui := &fakeXUI{}
 	svc := New(clients, fakePool{c: xui}, fakeNodes{})
 
 	c := &domain.PSPClient{ID: 1, PanelID: 10, Email: "u1@psp.local", UUID: "uuid-x"}
-	if err := svc.SyncLifecycle(context.Background(), c,
+	if err := syncLifecycle(svc, context.Background(), c,
 		domain.UserLifecycle{Enable: true, IPLimit: 3, DeviceLimit: 2}); err != nil {
 		t.Fatal(err)
 	}
@@ -488,13 +533,13 @@ func TestSyncLifecycle_HealsDriftedConnectionCaps(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			metrics.Reset()
 			clients := &fakeClients{attachments: []domain.PSPClientInbound{
-				{ClientID: 1, NodeID: 11, Provisioned: true},
+				{ClientID: 1, NodeID: 11, State: domain.ClientApplyApplied},
 			}}
 			xui := &fakeXUI{getDetail: tc.panelState}
 			svc := New(clients, fakePool{c: xui}, fakeNodes{})
 
 			c := &domain.PSPClient{ID: 1, PanelID: 10, Email: "u1@psp.local"}
-			if err := svc.SyncLifecycle(context.Background(), c,
+			if err := syncLifecycle(svc, context.Background(), c,
 				domain.UserLifecycle{Enable: true, IPLimit: 3, DeviceLimit: 2}); err != nil {
 				t.Fatal(err)
 			}
@@ -514,13 +559,13 @@ func TestSyncLifecycle_HealsDriftedConnectionCaps(t *testing.T) {
 func TestSyncLifecycle_MatchingCapsStillSkip(t *testing.T) {
 	metrics.Reset()
 	clients := &fakeClients{attachments: []domain.PSPClientInbound{
-		{ClientID: 1, NodeID: 11, Provisioned: true},
+		{ClientID: 1, NodeID: 11, State: domain.ClientApplyApplied},
 	}}
 	xui := &fakeXUI{getDetail: &ports.ClientDetail{Enable: true, LimitIP: 3, LimitHwid: 2}}
 	svc := New(clients, fakePool{c: xui}, fakeNodes{})
 
 	c := &domain.PSPClient{ID: 1, PanelID: 10, Email: "u1@psp.local"}
-	if err := svc.SyncLifecycle(context.Background(), c,
+	if err := syncLifecycle(svc, context.Background(), c,
 		domain.UserLifecycle{Enable: true, IPLimit: 3, DeviceLimit: 2}); err != nil {
 		t.Fatal(err)
 	}
@@ -548,7 +593,7 @@ func (c *capLessXUI) Capabilities() []ports.PanelCapability { return c.caps }
 func TestSyncLifecycle_ReportsCapabilityGaps(t *testing.T) {
 	newSvc := func(caps []ports.PanelCapability) (*Service, *capLessXUI) {
 		clients := &fakeClients{attachments: []domain.PSPClientInbound{
-			{ClientID: 1, NodeID: 11, Provisioned: true},
+			{ClientID: 1, NodeID: 11, State: domain.ClientApplyApplied},
 		}}
 		xui := &capLessXUI{caps: caps}
 		return New(clients, fakePool{c: xui}, fakeNodes{}), xui
@@ -558,7 +603,7 @@ func TestSyncLifecycle_ReportsCapabilityGaps(t *testing.T) {
 	t.Run("a panel supporting neither cap reports both", func(t *testing.T) {
 		metrics.Reset()
 		svc, _ := newSvc([]ports.PanelCapability{ports.CapabilityClientWrite})
-		if err := svc.SyncLifecycle(context.Background(), c,
+		if err := syncLifecycle(svc, context.Background(), c,
 			domain.UserLifecycle{Enable: true, IPLimit: 3, DeviceLimit: 2}); err != nil {
 			t.Fatal(err)
 		}
@@ -576,7 +621,7 @@ func TestSyncLifecycle_ReportsCapabilityGaps(t *testing.T) {
 	t.Run("unset caps are not gaps", func(t *testing.T) {
 		metrics.Reset()
 		svc, _ := newSvc([]ports.PanelCapability{ports.CapabilityClientWrite})
-		if err := svc.SyncLifecycle(context.Background(), c,
+		if err := syncLifecycle(svc, context.Background(), c,
 			domain.UserLifecycle{Enable: true}); err != nil {
 			t.Fatal(err)
 		}
@@ -590,7 +635,7 @@ func TestSyncLifecycle_ReportsCapabilityGaps(t *testing.T) {
 		svc, _ := newSvc([]ports.PanelCapability{
 			ports.CapabilityClientIPLimit, ports.CapabilityClientDeviceLimit,
 		})
-		if err := svc.SyncLifecycle(context.Background(), c,
+		if err := syncLifecycle(svc, context.Background(), c,
 			domain.UserLifecycle{Enable: true, IPLimit: 3, DeviceLimit: 2}); err != nil {
 			t.Fatal(err)
 		}
@@ -607,7 +652,7 @@ func TestSyncLifecycle_ReportsCapabilityGaps(t *testing.T) {
 	t.Run("a gap does not block the write", func(t *testing.T) {
 		metrics.Reset()
 		svc, xui := newSvc([]ports.PanelCapability{ports.CapabilityClientWrite})
-		if err := svc.SyncLifecycle(context.Background(), c,
+		if err := syncLifecycle(svc, context.Background(), c,
 			domain.UserLifecycle{Enable: true, IPLimit: 3, DeviceLimit: 2}); err != nil {
 			t.Fatal(err)
 		}
@@ -623,7 +668,7 @@ func TestSyncLifecycle_ReportsCapabilityGaps(t *testing.T) {
 // SECOND call, which is where the loop would show up.
 func TestSyncLifecycle_CapLessPanelDoesNotLoopForever(t *testing.T) {
 	clients := &fakeClients{attachments: []domain.PSPClientInbound{
-		{ClientID: 1, NodeID: 11, Provisioned: true},
+		{ClientID: 1, NodeID: 11, State: domain.ClientApplyApplied},
 	}}
 	// Declares client.write but neither cap: the S-UI shape. GetClient returns
 	// a detail with the caps at 0, exactly as such a panel would.
@@ -636,7 +681,7 @@ func TestSyncLifecycle_CapLessPanelDoesNotLoopForever(t *testing.T) {
 	want := domain.UserLifecycle{Enable: true, IPLimit: 3, DeviceLimit: 2}
 
 	for i := 0; i < 3; i++ {
-		if err := svc.SyncLifecycle(context.Background(), c, want); err != nil {
+		if err := syncLifecycle(svc, context.Background(), c, want); err != nil {
 			t.Fatalf("cycle %d: %v", i, err)
 		}
 	}
@@ -650,7 +695,7 @@ func TestSyncLifecycle_CapLessPanelDoesNotLoopForever(t *testing.T) {
 // Excluding an unstorable field is not the same as ignoring drift.
 func TestSyncLifecycle_CapablePanelStillHealsDrift(t *testing.T) {
 	clients := &fakeClients{attachments: []domain.PSPClientInbound{
-		{ClientID: 1, NodeID: 11, Provisioned: true},
+		{ClientID: 1, NodeID: 11, State: domain.ClientApplyApplied},
 	}}
 	xui := &capLessXUI{
 		caps: []ports.PanelCapability{
@@ -660,7 +705,7 @@ func TestSyncLifecycle_CapablePanelStillHealsDrift(t *testing.T) {
 	}
 	svc := New(clients, fakePool{c: xui}, fakeNodes{})
 	c := &domain.PSPClient{ID: 1, PanelID: 10, Email: "u1@psp.local"}
-	if err := svc.SyncLifecycle(context.Background(), c,
+	if err := syncLifecycle(svc, context.Background(), c,
 		domain.UserLifecycle{Enable: true, IPLimit: 3, DeviceLimit: 2}); err != nil {
 		t.Fatal(err)
 	}
@@ -680,7 +725,7 @@ func (c *panicXUI) GetClient(_ context.Context, email string) (*ports.ClientDeta
 	if email == c.panicOn {
 		panic("simulated panel adapter panic")
 	}
-	return nil, nil
+	return c.fakeXUI.GetClient(context.Background(), email)
 }
 
 // A nil errs[i] means "pushed successfully", and ResyncMembership deletes the
@@ -694,8 +739,8 @@ func TestSyncUserLifecycle_PanicIsReportedNotSwallowed(t *testing.T) {
 		{ID: 2, UserID: 7, PanelID: 11, Email: "boom@psp.local", UUID: "u"},
 	}
 	clients := &fakeClients{byUser: byUser, attachments: []domain.PSPClientInbound{
-		{ClientID: 1, NodeID: 101, Provisioned: true},
-		{ClientID: 2, NodeID: 102, Provisioned: true},
+		{ClientID: 1, NodeID: 101, State: domain.ClientApplyApplied},
+		{ClientID: 2, NodeID: 102, State: domain.ClientApplyApplied},
 	}}
 	svc := New(clients, fakePool{c: &panicXUI{panicOn: "boom@psp.local"}}, fakeNodes{})
 
@@ -729,7 +774,7 @@ func TestSyncLifecycle_BandBoundariesAreExactThroughTheRealPath(t *testing.T) {
 	const GiB = int64(1) << 30
 	newSvc := func(stored *ports.ClientDetail) (*Service, *fakeXUI) {
 		clients := &fakeClients{attachments: []domain.PSPClientInbound{
-			{ClientID: 1, NodeID: 11, FlowOverride: "xtls-rprx-vision", Provisioned: true},
+			{ClientID: 1, NodeID: 11, FlowOverride: "xtls-rprx-vision", State: domain.ClientApplyApplied},
 		}}
 		xui := &fakeXUI{getDetail: stored}
 		return New(clients, fakePool{c: xui}, fakeNodes{}), xui
@@ -754,7 +799,7 @@ func TestSyncLifecycle_BandBoundariesAreExactThroughTheRealPath(t *testing.T) {
 			ID: 1, PanelID: 10, Email: "u1@psp.local", UUID: "uuid-x", Password: "pw-x",
 			LastRawTotalBytes: lastRaw,
 		}
-		if err := svc.SyncLifecycle(context.Background(), c, domain.UserLifecycle{
+		if err := syncLifecycle(svc, context.Background(), c, domain.UserLifecycle{
 			Enable: true, ExpiryTime: 1893456000000, QuotaHeadroom: 1,
 		}); err != nil {
 			t.Fatal(err)
@@ -777,7 +822,7 @@ func TestSyncLifecycle_BandBoundariesAreExactThroughTheRealPath(t *testing.T) {
 			ID: 1, PanelID: 10, Email: "u1@psp.local", UUID: "uuid-x", Password: "pw-x",
 			LastRawTotalBytes: 200 * GiB,
 		}
-		if err := svc.SyncLifecycle(context.Background(), c, domain.UserLifecycle{
+		if err := syncLifecycle(svc, context.Background(), c, domain.UserLifecycle{
 			Enable: true, ExpiryTime: 1893456000000, QuotaHeadroom: 0,
 		}); err != nil {
 			t.Fatal(err)

@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	nodeprotocol "github.com/KazuhaHub/passwall-node/protocol"
 	"github.com/gin-gonic/gin"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/jwtutil"
@@ -44,6 +45,8 @@ type settingsDTO struct {
 	Timezone                   string                   `json:"timezone"`
 	CronTrafficPullMinutes     int                      `json:"cron_traffic_pull_minutes"`
 	CronReconcileMinutes       int                      `json:"cron_reconcile_minutes"`
+	NodePollSeconds            int                      `json:"node_poll_seconds"`
+	FullReportSeconds          int                      `json:"full_report_seconds"`
 	MaxPanelConcurrency        int                      `json:"max_panel_concurrency"`
 	JWTAccessTTLMinutes        int                      `json:"jwt_access_ttl_minutes"`
 	JWTRefreshTTLMinutes       int                      `json:"jwt_refresh_ttl_minutes"`
@@ -193,6 +196,8 @@ func settingsToDTO(s ports.UISettings) settingsDTO {
 		Timezone:                    s.Timezone,
 		CronTrafficPullMinutes:      s.CronTrafficPullMinutes,
 		CronReconcileMinutes:        s.CronReconcileMinutes,
+		NodePollSeconds:             s.NodePollSeconds,
+		FullReportSeconds:           s.FullReportSeconds,
 		MaxPanelConcurrency:         s.MaxPanelConcurrency,
 		JWTAccessTTLMinutes:         s.JWTAccessTTLMinutes,
 		JWTRefreshTTLMinutes:        s.JWTRefreshTTLMinutes,
@@ -313,6 +318,8 @@ func (h *AdminSettingsHandler) Put(c *gin.Context) {
 		Timezone:                   strings.TrimSpace(req.Timezone),
 		CronTrafficPullMinutes:     req.CronTrafficPullMinutes,
 		CronReconcileMinutes:       req.CronReconcileMinutes,
+		NodePollSeconds:            req.NodePollSeconds,
+		FullReportSeconds:          req.FullReportSeconds,
 		MaxPanelConcurrency:        req.MaxPanelConcurrency,
 		JWTAccessTTLMinutes:        req.JWTAccessTTLMinutes,
 		JWTRefreshTTLMinutes:       req.JWTRefreshTTLMinutes,
@@ -506,13 +513,21 @@ func (h *AdminSettingsHandler) Put(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Retention days must be >= 0"})
 		return
 	}
-	if s.CronTrafficPullMinutes < 0 || s.CronReconcileMinutes < 0 ||
+	if s.CronTrafficPullMinutes < 0 || s.CronReconcileMinutes < 0 || s.NodePollSeconds < 0 || s.FullReportSeconds < 0 ||
 		s.JWTAccessTTLMinutes < 0 || s.JWTRefreshTTLMinutes < 0 ||
 		s.SubPerIPPerMin < 0 || s.LoginPerIPPerMin < 0 ||
 		s.EmergencyAccessHours < 0 || s.EmergencyAccessMaxCount < 0 || s.EmergencyAccessQuotaGB < 0 ||
 		s.SubLogRetentionDays < 0 || s.SubBlockAutoDisableCount < 0 ||
 		s.SubUpdateIntervalHours < 0 {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Runtime tuning values must be >= 0"})
+		return
+	}
+	if s.FullReportSeconds > nodeprotocol.MaxFullReportSeconds {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Full_report_seconds must be <= 86400"})
+		return
+	}
+	if s.NodePollSeconds > nodeprotocol.MaxNextPollSeconds {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Node_poll_seconds must be <= 3600"})
 		return
 	}
 	if s.EmergencyAccessEnabled && (s.EmergencyAccessHours <= 0 || s.EmergencyAccessMaxCount <= 0) {

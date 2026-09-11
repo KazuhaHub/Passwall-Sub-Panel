@@ -19,6 +19,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/log"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/panelpath"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/paneltz"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/xraycompat"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 )
 
@@ -281,13 +282,14 @@ func (s *Service) buildProxies(ctx context.Context, u *domain.User, items []rend
 	// Pre-resolve EmailRules once per render. ClientEmail is per-(user,
 	// node), so the rules can be reused across the loop.
 	emailRules := domain.EmailRules{Domain: st.EmailDomain}
-	sharedEmails := s.sharedClientEmailsByNode(ctx, u)
+	appliedCredentials := s.appliedClientCredentialsByNode(ctx, u)
 
 	// Captured nodes render from the local snapshot (zero 3X-UI calls), so a
 	// subscription still renders while 3X-UI is unreachable; un-captured nodes
 	// (transition window) batch into one ListInbounds per panel. See
 	// resolveInbounds.
 	inboundByNode := s.resolveInbounds(ctx, items, st)
+	mlkemFirstRealityByPanel := s.mlkemFirstRealityPanels(ctx, items, inboundByNode)
 
 	out := make([]map[string]any, 0, len(items))
 	for _, it := range items {
@@ -301,8 +303,9 @@ func (s *Service) buildProxies(ctx context.Context, u *domain.User, items []rend
 				"node_id", it.node.ID, "panel_id", it.node.PanelID, "inbound_id", it.node.InboundID)
 			continue
 		}
-		userEmail := clientEmailForNode(u, it.node.ID, emailRules, sharedEmails)
-		block, err := emitProxy(it.name, it.node, u, inb, userEmail, it.relay)
+		renderUser, userEmail, appliedPassword := renderIdentityForNode(u, it.node.ID, emailRules, appliedCredentials)
+		block, err := emitProxy(it.name, it.node, renderUser, inb, userEmail, appliedPassword, it.relay,
+			mlkemFirstRealityByPanel[it.node.PanelID])
 		if err != nil {
 			log.Warn("render: skip node, emit failed", "node_id", it.node.ID, "err", err)
 			continue
@@ -326,13 +329,54 @@ func (s *Service) buildProxies(ctx context.Context, u *domain.User, items []rend
 	return withSentinelIfEmpty(out)
 }
 
-// sharedClientEmailsByNode resolves the first-class PSP client actually
-// provisioned on each node. Most protocols derive credentials from the user
-// UUID, but Naive authenticates with the S-UI client name, so its subscription
-// username must be byte-identical to the provisioned client email. During the
-// migration window an unprovisioned shared attachment falls back to the legacy
-// per-node email, matching the client that is still live upstream.
-func (s *Service) sharedClientEmailsByNode(ctx context.Context, u *domain.User) map[int64]string {
+// mlkemFirstRealityPanels resolves only panels that contribute a REALITY
+// outbound to this render. Mihomo uses the result to opt in to ML-KEM; sing-box
+// uses it to omit a known-incompatible outbound. The version snapshot is
+// refreshed by the existing boot/manual/post-upgrade probes, so subscription
+// generation stays local and does not turn into a live panel call. Unknown
+// versions preserve the legacy output instead of guessing a release.
+func (s *Service) mlkemFirstRealityPanels(ctx context.Context, items []renderItem, inbounds map[int64]*ports.Inbound) map[int64]bool {
+	if s.repos.XUIPanel == nil {
+		return nil
+	}
+	wanted := make(map[int64]struct{})
+	for _, item := range items {
+		if item.isSeparator || item.node == nil {
+			continue
+		}
+		inbound := inbounds[item.node.ID]
+		if inbound == nil {
+			continue
+		}
+		if !inboundUsesReality(inbound) {
+			continue
+		}
+		wanted[item.node.PanelID] = struct{}{}
+	}
+	result := make(map[int64]bool, len(wanted))
+	for panelID := range wanted {
+		panel, err := s.repos.XUIPanel.GetByID(ctx, panelID)
+		if err != nil {
+			log.Warn("render: cannot resolve Xray version for REALITY client compatibility",
+				"panel_id", panelID, "err", err)
+			continue
+		}
+		result[panelID] = xraycompat.MihomoNeedsMLKEM(panel.XrayVersion)
+	}
+	return result
+}
+
+type appliedClientCredential struct {
+	Email    string
+	UUID     string
+	Password string
+}
+
+// appliedClientCredentialsByNode resolves the credential snapshot the backend
+// has actually confirmed on each node. PSPClient contains desired credentials
+// and may already have advanced to a new rotation; reading it here would let a
+// subscription publish the new credential before the node can accept it.
+func (s *Service) appliedClientCredentialsByNode(ctx context.Context, u *domain.User) map[int64]appliedClientCredential {
 	if u == nil || s.repos.PSPClient == nil {
 		return nil
 	}
@@ -341,9 +385,9 @@ func (s *Service) sharedClientEmailsByNode(ctx context.Context, u *domain.User) 
 		log.Warn("render: list PSP clients for email resolution", "user_id", u.ID, "err", err)
 		return nil
 	}
-	out := make(map[int64]string)
+	out := make(map[int64]appliedClientCredential)
 	for _, client := range clients {
-		if client == nil || client.Email == "" {
+		if client == nil {
 			continue
 		}
 		attachments, err := s.repos.PSPClient.ListInbounds(ctx, client.ID)
@@ -352,19 +396,37 @@ func (s *Service) sharedClientEmailsByNode(ctx context.Context, u *domain.User) 
 			continue
 		}
 		for _, attachment := range attachments {
-			if attachment.Provisioned {
-				out[attachment.NodeID] = client.Email
+			// The current convergence state may already be pending/rejected for
+			// a newer desired roster. Keep serving the last confirmed snapshot;
+			// replacing it with current desired credentials would bypass the
+			// version gate precisely while the newer apply is outstanding.
+			if attachment.AppliedUUID != "" || attachment.AppliedPassword != "" {
+				out[attachment.NodeID] = appliedClientCredential{
+					Email: attachment.AppliedEmail, UUID: attachment.AppliedUUID,
+					Password: attachment.AppliedPassword,
+				}
 			}
 		}
 	}
 	return out
 }
 
-func clientEmailForNode(u *domain.User, nodeID int64, rules domain.EmailRules, shared map[int64]string) string {
-	if email := shared[nodeID]; email != "" {
-		return email
+// renderIdentityForNode freezes subscription credentials at the last applied
+// roster version. UUID is the source for every currently rendered credential;
+// Password is retained in the snapshot as the exact server-side value for
+// future independently-rotatable password fields.
+func renderIdentityForNode(u *domain.User, nodeID int64, rules domain.EmailRules, applied map[int64]appliedClientCredential) (*domain.User, string, string) {
+	credential, ok := applied[nodeID]
+	if !ok {
+		return u, u.ClientEmail(nodeID, rules), ""
 	}
-	return u.ClientEmail(nodeID, rules)
+	copy := *u
+	copy.UUID = credential.UUID
+	email := credential.Email
+	if email == "" {
+		email = u.ClientEmail(nodeID, rules)
+	}
+	return &copy, email, credential.Password
 }
 
 // prefetchInboundsForRender pulls every inbound the proxy-block builder

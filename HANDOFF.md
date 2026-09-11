@@ -8,7 +8,8 @@
 ## 0. 三十秒版本
 
 PSP 今天通过 3X-UI / S-UI 这两个第三方面板管理节点。这个项目**自研一个节点后端**替掉它们，
-理由和判据在 ADR 0024。**协议已定稿，类型已落地，实现还没开始。**
+理由和判据在 ADR 0024。**协议、PSP 原生适配器与生产同步路由已合流；C2 真 agent 契约测试已通过，
+Passwall-Node 的 Xray 生产 daemon、精确 core 目录、遥测、离线执法、六平台发布与 Docker 均已接通。**
 
 | | 在哪 |
 |---|---|
@@ -56,18 +57,52 @@ A5（随时，独立）────╯
 
 **轨道 A（PSP 侧，关键路径，现在就能开工）**——ADR 0024 明写的开工闸门：
 
-- **A1 客户端行身份稳定**。必须最先做：协议主键是 `cli_{psp_clients.id}`,而这个 id 今天
-  会因为分区总数跨越 1↔2 而换新 → 累计计数从 0 重来 → 用户被瞬间打到配额上限。
-- **A2 期望文档只有一个铸造者**。今天三处各自现算且算出的值不同。
-- **A3 agent 表 + 每流状态**,并把 `psp_client_inbounds.provisioned` 那个 bool 换成
-  `(state, applied_version, first_failed_at)`。
-- **A4 desired / observed 列拆分**（已解锁）。
-- **A5 §4 成本表按真实拓扑重算**（文档改动，随时可做）。
+- **A1 客户端行身份稳定（已完成，2026-09-09）**。`psp_clients.id` 现在是唯一稳定身份；
+  email 已降级为可变属性，1↔2 分区与域名变更都会按旧挂载延续行 id 和流量基线。
+- **A2 期望文档只有一个铸造者（已完成，2026-09-09）**。`clientdoc` 统一铸造客户端定义，
+  `nodesync` 从同一事务快照铸造 config / roster / directives。
+- **A3 agent 表 + 每流状态（已完成，2026-09-09）**。挂载 bool 已替换为四态、应用版本、
+  首次失败时间与**最后确认凭据快照**；新 roster pending/rejected 时订阅仍使用旧快照，只有 read-back
+  确认后才切换。节点 Issue 进入独立持久化收件箱，重复报告更新 last-seen，管理页可人工确认已查看；
+  全量报告缺对象由 PSP 生成 `report_missing_object`，不再静默吞掉。
+- **A4 desired / observed 列拆分（已完成，2026-09-09）**。报告路径只能写 observed 窄接口。
+- **A5 §4 成本表按真实拓扑重算（已完成，2026-09-09）**。
 
 **轨道 B（Passwall-Node 仓库，第一天就能并行）**:见该仓库的 `HANDOFF.md`。
 
-**轨道 C（合流）**:`internal/adapters/pspnode` + 对着真 agent 的契约测试。
-**PSP 的 `go.mod` 依赖在 C1 加**,不能更早——没有 import 的 `require` 活不过一次 `go mod tidy`。
+**轨道 C（合流，已完成，2026-09-09）**:`internal/adapters/pspnode` 已接入现有 pool；
+`TestLive_RealNodeAgentContract` 已启动 sibling 仓库的真 agent，完成两轮 HTTP/SQLite/apply/report 验收。
+同步边界统一调用协议包校验，有限额但计数未知的客户端默认关闭；`node_poll_seconds` 与
+`full_report_seconds` 均由管理员配置并随响应下发，信封中的新鲜度与剩余授权按全 agent 统计。
+config/roster 覆盖度按本机闭包精确校验，directives 覆盖度则保留全车队分母语义；未定义的
+`task_results` 明确拒收并留在节点 outbox，绝不用成功响应把未来副作用结果丢掉。
+全量计数的新鲜度只读 PSP 的实际接收时间，不信任 agent 自报时钟；缓存过期会令
+`want_full_report=true`，有限额客户端在刷新前保持关闭。
+双向同步载荷共用协议包的 16 MiB 上限；PSP 只接受自己确实铸造过的 applied epoch/version/ETag
+组合，节点不能用未来坐标或同版本错摘要污染收敛状态。协议包同时约束响应调度值，后台设置校验
+直接引用同一常量，避免控制面和 agent 各自维护不同上限。配额 pending delta 还会重新核验
+agent→panel→client 所有权，越权 client key 与已退役 agent 缓存都不能影响别的面板用户。
+跨仓模块发布闸已于 2026-09-11 完成：Passwall-Node revision `54705828baf3` 已进入 main，PSP
+依赖已更新到 `v0.0.0-20260911213024-54705828baf3`。关闭父目录 `go.work` 后，PSP 全量 Go
+测试、vet、关键路径 race、C2 真 agent 契约测试和六平台交叉编译均通过。
+
+管理端现在可直接创建 `panel_type=psp`：PSP 在一个事务中建立 panel、agent 和三条流，返回一次性的
+agent ID / Bearer 凭据 / sync endpoint；数据库只存 SHA-256。原生节点只能编辑名称和备注，旧凭据可
+立即吊销并轮换，新值同样只显示一次。删除采用 fail-closed 规则：仍有节点/客户端，或空 config/roster
+尚未由 agent 精确确认时，不能先删掉认证身份而留下一个继续服务、却再也接管不了的 core。
+
+Xray core 选择已改成声明式 desired state：PSP 原生节点只能从 Passwall-Node `corecatalog/` 的精确
+版本目录选择，`latest` 和未列入版本一律拒绝，受限版本要求管理员二次确认。PSP 选择器展示同一份
+兼容说明、REALITY 客户端矩阵和结构化实测证据。当前默认 `26.6.27`；`26.7.28` 经
+`minClientVer=0.0.0` 转换后 Xray/Mihomo/sing-box 均实测通过；`26.9.9` 的 Mihomo 输出固定
+`chrome + support-x25519mlkem768=true`，sing-box 订阅会省略该 REALITY 节点而不是下发一个死节点。
+
+订阅默认规则已把 HTTP/3 常见的 `UDP/443` 与其他 UDP 分开：`⚡ QUIC控制` 默认委托
+`🎮 UDP控制`，用户也可分别选节点、直连或拒绝。规则位于私网/LAN 直连之后，不包含“中国直连、
+其他拒绝”这类地区假设。sing-box 对 `AND(NETWORK=UDP,DST-PORT=443)` 生成同等路由；其不支持
+`PASS`，因此省略该匹配继续向下，绝不映射为直连。详见 ADR 0030。
+旧官方模板和规则集两个文件都未修改时，seeder 按旧内容 SHA-256 自动升级；任一文件已自定义时
+两者都保留，避免半升级覆盖用户意图。
 
 ## 3. 还欠着的账（都不阻塞开工，但别忘了）
 
@@ -75,14 +110,17 @@ A5（随时，独立）────╯
   但今天发的是**全额剩余**,于是长时间断网最坏可跑 `P × 剩余配额`（P 实测 4.0）。
   公式和旋钮已写进文档，**默认值待测**——取决于单客户端 60 秒吞吐分布，那个分布从未被测过。
   第一版按不设上限上线（即今天的行为），同时记录 `overburn_headroom_bytes` 的分布。
-- **镜像方向：到期/停用在 PSP 维护期间会漏服务**（§8.4 末）。月初刷新已经修了
-  （PSP 提前发下一期授权），但反方向没修——名册条目缺席 = 保持上次已知，
-  所以维护期间一个账号到期的用户会继续被服务。**漏收入，比「少服务」更值得修**,
-  修法同形，卡在「到期」在 PSP 侧有多个来源、要先理清哪个权威。属于 A 轨。
+- **可预知到期的协议形状与执行均已闭合**：权威链是
+  `User.PushExpireTime → PSPClient.DesiredExpiryTime → Client.ExpiresAtMS`；Node runtime 在
+  PSP 断线时仍按绝对截止时间本地停用，不等 roster 条目消失。真正无法预知的是断线之后
+  才发生的管理员/策略撤销；不增加租约或第二通道就只能等下次同步，属于 §9 的生产取舍。
 - **任务 #49**:异地并发被标记的账号该怎么处理。停在证据不足上，
   v1 的 `ip_shadow` 影子执行就是为了给它攒证据。
-- **§9 的四项**:构建矩阵与自升级、core 配置生成的抽象层、证书谁签、自注册凭据的具体形状。
-  **都可以等 C2 跑绿之后再定**,现在定等于在没有验收标准的情况下猜。
+- **§9 的剩余项**：sing-box core adapter、agent 自升级、带 exactly-once 结果状态的任务协议与
+  RealityProbe。当前未知 `tasks[]` 仍必须明确拒绝；不能为了这些后续能力放宽现有失败语义。
+- **跨仓发布闸已完成（2026-09-11）**：Passwall-Node 先发布、PSP 再更新 pseudo-version，且已在
+  `GOWORK=off` 下通过全量 Go 测试/vet、关键路径 race、C2 真 agent 契约测试及六平台交叉编译。
+  前端 31 文件/208 测试和生产构建通过；浏览器 smoke 交由 PR 的 Linux Chrome job 做最终确认。
 - **`Passwall-Node` 的 licence**（README 写着 TBD）。
 
 ## 4. 这个项目的三条底线

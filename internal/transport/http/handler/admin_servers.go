@@ -2,14 +2,18 @@ package handler
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"net/http"
 	"strconv"
 	"time"
 
+	"github.com/KazuhaHub/passwall-node/corecatalog"
 	"github.com/gin-gonic/gin"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/idgen"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/log"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/transport/http/middleware"
@@ -28,15 +32,24 @@ import (
 // (v3.6.0-beta.3) to write audit-trail rows and to schedule the post-upgrade
 // smoke probe; they're optional for the CRUD/Test flows.
 type AdminServersHandler struct {
-	repo  ports.XUIPanelRepo
-	pool  ports.XUIPool
-	nodes ports.NodeRepo
-	audit ports.AuditRepo
-	async AsyncDispatcher
+	repo             ports.XUIPanelRepo
+	pool             ports.XUIPool
+	nodes            ports.NodeRepo
+	audit            ports.AuditRepo
+	async            AsyncDispatcher
+	invalidateRender func()
+	native           ports.NativeAgentProvisioningRepo
 }
 
-func NewAdminServersHandler(repo ports.XUIPanelRepo, pool ports.XUIPool, nodes ports.NodeRepo, audit ports.AuditRepo, async AsyncDispatcher) *AdminServersHandler {
-	return &AdminServersHandler{repo: repo, pool: pool, nodes: nodes, audit: audit, async: async}
+func (h *AdminServersHandler) WithNativeAgentProvisioning(repo ports.NativeAgentProvisioningRepo) *AdminServersHandler {
+	h.native = repo
+	return h
+}
+
+func NewAdminServersHandler(repo ports.XUIPanelRepo, pool ports.XUIPool, nodes ports.NodeRepo, audit ports.AuditRepo, async AsyncDispatcher, invalidateRender func()) *AdminServersHandler {
+	return &AdminServersHandler{
+		repo: repo, pool: pool, nodes: nodes, audit: audit, async: async, invalidateRender: invalidateRender,
+	}
 }
 
 // serverDTO is the API representation. Sensitive fields (api_token /
@@ -93,13 +106,30 @@ type serverDTO struct {
 type serverCreateRequest struct {
 	Kind          string `json:"panel_type"`
 	Name          string `json:"name" binding:"required"`
-	URL           string `json:"url" binding:"required"`
+	URL           string `json:"url"`
 	APIToken      string `json:"api_token"`
 	Username      string `json:"username"`
 	Password      string `json:"password"`
 	Remark        string `json:"remark"`
 	AuthMethod    string `json:"auth_method"` // "" (auto) | "token" | "password"
 	InsecureHTTPS bool   `json:"insecure_https"`
+}
+
+type nativeServerCreateResponse struct {
+	Server     serverDTO `json:"server"`
+	AgentID    string    `json:"agent_id"`
+	Credential string    `json:"credential"`
+	Endpoint   string    `json:"endpoint"`
+}
+
+func newNativeCredential() (raw, digest string, err error) {
+	secret, err := idgen.NewSubToken()
+	if err != nil {
+		return "", "", err
+	}
+	raw = "pspn_" + secret
+	sum := sha256.Sum256([]byte(raw))
+	return raw, hex.EncodeToString(sum[:]), nil
 }
 
 // serverUpdateRequest uses pointers so omitted fields preserve existing
@@ -172,11 +202,19 @@ func (h *AdminServersHandler) Create(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "S-UI requires API token authentication"})
 		return
 	}
+	if kind != domain.PanelKindPSP && req.URL == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Server URL is required"})
+		return
+	}
 	if _, err := h.repo.GetByName(c.Request.Context(), req.Name); err == nil {
 		c.JSON(http.StatusConflict, gin.H{"error": "Server name already exists"})
 		return
 	} else if !errors.Is(err, domain.ErrNotFound) {
 		respondError(c, err)
+		return
+	}
+	if kind == domain.PanelKindPSP {
+		h.createNative(c, req)
 		return
 	}
 	p := &domain.XUIPanel{
@@ -203,6 +241,111 @@ func (h *AdminServersHandler) Create(c *gin.Context) {
 	c.JSON(http.StatusCreated, h.toServerDTO(p))
 }
 
+func (h *AdminServersHandler) createNative(c *gin.Context, req serverCreateRequest) {
+	if h.native == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "native node provisioning is not wired in this build"})
+		return
+	}
+	if req.URL != "" || req.APIToken != "" || req.Username != "" || req.Password != "" || req.InsecureHTTPS || req.AuthMethod != "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "PSP native nodes do not accept an inbound URL or upstream credentials"})
+		return
+	}
+	base := enrollBaseURL(c)
+	if !EnrollBaseAllowed(base) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "cannot derive a safe public PSP endpoint from this request"})
+		return
+	}
+	identity, err := idgen.NewSubToken()
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+	agentID := "agt_" + identity
+	credential, digest, err := newNativeCredential()
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+	release, err := corecatalog.Recommended("xray")
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+	panel := &domain.XUIPanel{
+		Kind: domain.PanelKindPSP, Name: req.Name, URL: "psp://" + agentID,
+		Remark: req.Remark,
+	}
+	agent := &domain.NodeAgent{
+		AgentID: agentID, CredentialSHA256: digest,
+		DesiredCoreVersion: release.Version,
+	}
+	if err := h.native.Create(c.Request.Context(), panel, agent); err != nil {
+		mapServerError(c, err)
+		return
+	}
+	if err := h.pool.Add(panel); err != nil {
+		if rollbackErr := h.native.DeleteConverged(c.Request.Context(), panel.ID); rollbackErr != nil {
+			log.Error("native panel create rollback failed", "panel_id", panel.ID, "agent_id", agentID, "err", rollbackErr)
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Register native node in pool: " + err.Error()})
+		return
+	}
+	c.JSON(http.StatusCreated, nativeServerCreateResponse{
+		Server: h.toServerDTO(panel), AgentID: agentID, Credential: credential,
+		Endpoint: base + "/v1/node/sync",
+	})
+}
+
+// RotateNativeCredential invalidates the old native-agent credential and
+// returns the replacement exactly once. No agent identity or convergence
+// coordinate changes, so a restarted daemon resumes its existing state.
+func (h *AdminServersHandler) RotateNativeCredential(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid id"})
+		return
+	}
+	if h.native == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "native node provisioning is not wired in this build"})
+		return
+	}
+	panel, err := h.repo.GetByID(c.Request.Context(), id)
+	if err != nil {
+		mapServerError(c, err)
+		return
+	}
+	if domain.NormalizePanelKind(panel.Kind) != domain.PanelKindPSP {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Credential rotation is available only for PSP native nodes"})
+		return
+	}
+	base := enrollBaseURL(c)
+	if !EnrollBaseAllowed(base) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "cannot derive a safe public PSP endpoint from this request"})
+		return
+	}
+	credential, digest, err := newNativeCredential()
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+	agent, err := h.native.RotateCredential(c.Request.Context(), id, digest)
+	if err != nil {
+		mapServerError(c, err)
+		return
+	}
+	if h.audit != nil {
+		_ = h.audit.Insert(c.Request.Context(), &domain.AuditEntry{
+			Actor: actorFromGin(c), Action: "native_node_credential_rotated",
+			Target: "panel=" + strconv.FormatInt(id, 10) + " agent=" + agent.AgentID,
+			At:     time.Now(),
+		})
+	}
+	c.JSON(http.StatusOK, nativeServerCreateResponse{
+		Server: h.toServerDTO(panel), AgentID: agent.AgentID, Credential: credential,
+		Endpoint: base + "/v1/node/sync",
+	})
+}
+
 func (h *AdminServersHandler) Update(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
@@ -226,6 +369,15 @@ func (h *AdminServersHandler) Update(c *gin.Context) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Unknown panel_type: " + string(kind)})
 			return
 		}
+		if (existing.Kind == domain.PanelKindPSP) != (kind == domain.PanelKindPSP) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Cannot convert between a native node and an upstream panel"})
+			return
+		}
+	}
+	if existing.Kind == domain.PanelKindPSP && (req.URL != nil || req.APIToken != nil || req.Username != nil ||
+		req.Password != nil || req.AuthMethod != nil || req.InsecureHTTPS != nil) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Only name and remark can be edited for a PSP native node"})
+		return
 	}
 	if req.Name != nil {
 		existing.Name = *req.Name
@@ -322,6 +474,7 @@ func (h *AdminServersHandler) Test(c *gin.Context) {
 		return
 	}
 	isXUI := domain.NormalizePanelKind(panel.Kind) == domain.PanelKind3XUI
+	isNative := domain.NormalizePanelKind(panel.Kind) == domain.PanelKindPSP
 	// The compat (v3.json) tested range is fetched REACTIVELY — not here, but
 	// only if the panel probed below turns out to sit outside the cached range
 	// (see the CheckXUI block). A supported fleet makes zero GitHub compat calls.
@@ -343,6 +496,14 @@ func (h *AdminServersHandler) Test(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"ok": false, "error": "Server not registered in pool: " + err.Error()})
 		return
 	}
+	var observedStatus *ports.ServerStatus
+	if isNative {
+		observedStatus, err = client.GetServerStatus(c.Request.Context())
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{"ok": false, "error": "native agent has not delivered a full report"})
+			return
+		}
+	}
 	inbounds, err := client.ListInbounds(c.Request.Context())
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{"ok": false, "error": err.Error()})
@@ -361,10 +522,16 @@ func (h *AdminServersHandler) Test(c *gin.Context) {
 		"ok":            true,
 		"inbound_count": len(inbounds),
 	}
-	if status, perr := client.GetServerStatus(c.Request.Context()); perr == nil {
+	status, perr := observedStatus, error(nil)
+	if status == nil {
+		status, perr = client.GetServerStatus(c.Request.Context())
+	}
+	if perr == nil && status != nil {
 		now := time.Now()
 		if uerr := h.repo.UpdateVersion(c.Request.Context(), req.ID, status.PanelVersion, status.XrayVersion, &now); uerr != nil {
 			log.Warn("admin test: write version", "panel_id", req.ID, "err", uerr)
+		} else if h.invalidateRender != nil {
+			h.invalidateRender()
 		}
 		if isXUI {
 			compatStatus := version.CheckXUI(status.PanelVersion)
@@ -622,10 +789,10 @@ func (h *AdminServersHandler) UpgradePanel(c *gin.Context) {
 	})
 }
 
-// ListXrayVersions returns the xray-core tags the 3X-UI panel knows it
-// can install. Drives the Upgrade-Xray dialog's version dropdown so admin
-// can pin a specific tag instead of always taking "latest". GET so it's
-// cacheable / browser-prefetchable and clearly read-only.
+// ListXrayVersions returns the versions this backend can install. A native PSP
+// node returns the exact shared catalog plus its audit/handshake evidence;
+// legacy 3X-UI returns its own tag list. GET keeps the lookup read-only and
+// cacheable.
 func (h *AdminServersHandler) ListXrayVersions(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
@@ -644,12 +811,28 @@ func (h *AdminServersHandler) ListXrayVersions(c *gin.Context) {
 	}
 	versions, err := updater.GetCoreVersionList(c.Request.Context())
 	if err != nil {
-		// Frontend falls back to a single "latest" option when this 502s,
-		// so an upstream failure is recoverable without admin intervention.
+		// Legacy 3X-UI can still fall back to "latest" in the frontend. A
+		// native node fails closed because an unavailable catalog must not
+		// turn into an unaudited install.
 		c.JSON(http.StatusBadGateway, gin.H{"error": "GetXrayVersion failed: " + err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"versions": versions})
+	available := make(map[string]struct{}, len(versions))
+	for _, coreVersion := range versions {
+		available[coreVersion] = struct{}{}
+	}
+	catalog, catalogErr := corecatalog.List("xray")
+	if catalogErr != nil {
+		respondError(c, catalogErr)
+		return
+	}
+	metadata := make([]corecatalog.Release, 0, len(catalog))
+	for _, release := range catalog {
+		if _, ok := available[release.Version]; ok {
+			metadata = append(metadata, release)
+		}
+	}
+	c.JSON(http.StatusOK, gin.H{"versions": versions, "releases": metadata})
 }
 
 // WebCert proxies GET /panel/api/server/getWebCertFiles on the panel and
@@ -689,16 +872,13 @@ func (h *AdminServersHandler) WebCert(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"supported": true, "cert_file": wc.CertFile, "key_file": wc.KeyFile})
 }
 
-// UpgradeXray triggers a remote xray-core install. xray-core compatibility
-// with PSP is low-coupling (PSP only talks to the 3X-UI panel, never
-// directly to xray), and 3X-UI's installXray accepts an explicit version
-// tag, so we DON'T pre-check against any PSP-side range — admin can pull
-// "latest" or pin a specific tag freely. Unlike UpdatePanel, the 3X-UI
-// panel itself keeps running across this call (only xray-core restarts),
-// so there's no smoke probe — the handler returns the underlying API
-// result synchronously.
+// UpgradeXray triggers or declares a core install. Legacy 3X-UI keeps its
+// synchronous upstream behavior. A PSP-native node accepts only the shared
+// audited catalog, persists the chosen version as desired state, and returns
+// 202 until the dialing agent applies and reports it.
 type upgradeXrayRequest struct {
-	Version string `json:"version"`
+	Version           string `json:"version"`
+	ConfirmRestricted bool   `json:"confirm_restricted"`
 }
 
 func (h *AdminServersHandler) UpgradeXray(c *gin.Context) {
@@ -718,10 +898,37 @@ func (h *AdminServersHandler) UpgradeXray(c *gin.Context) {
 		return
 	}
 	var req upgradeXrayRequest
-	// Body is optional — empty/missing means "latest".
+	// Legacy 3X-UI keeps its historical empty=latest behavior. A native PSP
+	// node instead defaults to the audited recommended release and never
+	// accepts latest or an unlisted version.
 	_ = c.ShouldBindJSON(&req)
-	if req.Version == "" {
+	if req.Version == "" && panel.Kind == domain.PanelKindPSP {
+		recommended, resolveErr := corecatalog.Recommended("xray")
+		if resolveErr != nil {
+			respondError(c, resolveErr)
+			return
+		}
+		req.Version = recommended.Version
+	} else if req.Version == "" {
 		req.Version = "latest"
+	}
+	if panel.Kind == domain.PanelKindPSP {
+		release, resolveErr := corecatalog.Resolve("xray", req.Version)
+		if resolveErr != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"ok": false, "reason": "core_not_audited", "error": resolveErr.Error()})
+			return
+		}
+		if release.RequiresConfirmation && !req.ConfirmRestricted {
+			c.JSON(http.StatusConflict, gin.H{
+				"ok": false, "reason": "restricted_core_confirmation_required",
+				"version": release.Version, "release": release,
+			})
+			return
+		}
+		if !release.RequiresConfirmation && req.ConfirmRestricted {
+			c.JSON(http.StatusBadRequest, gin.H{"ok": false, "reason": "unexpected_restricted_confirmation"})
+			return
+		}
 	}
 	updater, ok := client.(ports.CoreUpdater)
 	if !ok {
@@ -733,12 +940,24 @@ func (h *AdminServersHandler) UpgradeXray(c *gin.Context) {
 		c.JSON(http.StatusBadGateway, gin.H{"ok": false, "error": "installXray failed: " + err.Error()})
 		return
 	}
+	if applier, ok := client.(ports.AsynchronousApplier); ok && applier.ApplyIsAsynchronous() {
+		h.writeUpgradeAudit(c, "xray_upgrade_requested", panel, req.Version, "")
+		c.JSON(http.StatusAccepted, gin.H{
+			"ok": true, "version": req.Version,
+			"message": "Core version intent recorded; the native node will download, validate, switch and report the observed version.",
+		})
+		return
+	}
 	h.writeUpgradeAudit(c, "xray_upgrade_completed", panel, req.Version, "")
 	// Refresh version snapshot — installXray triggers an xray restart
 	// so the panel's reported xray.version field updates immediately.
 	if status, perr := client.GetServerStatus(c.Request.Context()); perr == nil {
 		now := time.Now()
-		_ = h.repo.UpdateVersion(c.Request.Context(), id, status.PanelVersion, status.XrayVersion, &now)
+		if err := h.repo.UpdateVersion(c.Request.Context(), id, status.PanelVersion, status.XrayVersion, &now); err != nil {
+			log.Warn("xray upgrade: write version", "panel_id", id, "err", err)
+		} else if h.invalidateRender != nil {
+			h.invalidateRender()
+		}
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"ok":      true,
@@ -818,7 +1037,11 @@ func (h *AdminServersHandler) runPostUpgradeSmoke(ctx context.Context, panelID i
 		// All good — refresh the cached version snapshot too so the
 		// Servers UI immediately reflects the post-upgrade version.
 		now := time.Now()
-		_ = h.repo.UpdateVersion(ctx, panelID, status.PanelVersion, status.XrayVersion, &now)
+		if err := h.repo.UpdateVersion(ctx, panelID, status.PanelVersion, status.XrayVersion, &now); err != nil {
+			log.Warn("post-upgrade smoke: write version", "panel_id", panelID, "err", err)
+		} else if h.invalidateRender != nil {
+			h.invalidateRender()
+		}
 		h.writeSmokeAudit(ctx, "panel_upgrade_succeeded", panelID, panelName, targetVersion,
 			"panel back online at "+status.PanelVersion+" (xray "+status.XrayVersion+"), inbounds decode ok")
 		return
@@ -895,7 +1118,21 @@ func (h *AdminServersHandler) Delete(c *gin.Context) {
 			return
 		}
 	}
-	if err := h.repo.Delete(c.Request.Context(), id); err != nil {
+	panel, err := h.repo.GetByID(c.Request.Context(), id)
+	if err != nil {
+		mapServerError(c, err)
+		return
+	}
+	if panel.Kind == domain.PanelKindPSP && h.native == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "native node provisioning is not wired in this build"})
+		return
+	}
+	if panel.Kind == domain.PanelKindPSP {
+		err = h.native.DeleteConverged(c.Request.Context(), id)
+	} else {
+		err = h.repo.Delete(c.Request.Context(), id)
+	}
+	if err != nil {
 		mapServerError(c, err)
 		return
 	}
@@ -920,6 +1157,10 @@ func toServerDTO(p *domain.XUIPanel) serverDTO {
 		PanelVersion:     p.PanelVersion,
 		XrayVersion:      p.XrayVersion,
 		VersionCheckedAt: p.VersionCheckedAt,
+	}
+	if domain.NormalizePanelKind(p.Kind) == domain.PanelKindPSP {
+		dto.URL = ""
+		dto.AuthMethod = ""
 	}
 	// Only compute compat fields when there's actually a probed version —
 	// "never probed" panels stay blank rather than displaying a meaningless

@@ -4,8 +4,8 @@ import { client } from './client'
 // sync if either side changes.
 export type CompatStatus = 'supported' | 'too_old' | 'untested' | 'unknown'
 
-export type XUIAuthMethod = 'token' | 'password'
-export type PanelType = '3xui' | 'sui'
+export type XUIAuthMethod = '' | 'token' | 'password'
+export type PanelType = '3xui' | 'sui' | 'psp'
 export type PanelCapability =
   | 'inbound.read' | 'inbound.write'
   | 'inbound.create' | 'inbound.update' | 'inbound.delete' | 'inbound.enable'
@@ -69,15 +69,23 @@ export type IPLimitEnforcement =
   | 'unsupported'
 
 export interface CreateServerRequest {
-  panel_type?: PanelType
-  name: string
-  url: string
+	panel_type?: PanelType
+	name: string
+	url?: string
   api_token?: string
   username?: string
   password?: string
   remark?: string
   auth_method?: XUIAuthMethod
   insecure_https?: boolean
+}
+
+export interface NativeServerProvisioning {
+	server: Server
+	agent_id: string
+	/** Returned exactly once; PSP persists only its SHA-256 digest. */
+	credential: string
+	endpoint: string
 }
 
 export interface UpdateServerRequest {
@@ -135,8 +143,13 @@ export async function listServers(params: ServerListParams = {}, signal?: AbortS
 }
 
 export async function createServer(req: CreateServerRequest) {
-  const { data } = await client.post<Server>('/admin/servers', req)
-  return data
+	const { data } = await client.post<Server | NativeServerProvisioning>('/admin/servers', req)
+	return data
+}
+
+export async function rotateNativeCredential(id: number) {
+	const { data } = await client.post<NativeServerProvisioning>(`/admin/servers/${id}/rotate-node-credential`)
+	return data
 }
 
 export async function updateServer(id: number, req: UpdateServerRequest) {
@@ -246,11 +259,48 @@ export interface UpgradeXrayResult {
   error?: string
 }
 
-// upgradeXray defaults version to "latest" on the backend when the field is
-// empty / missing — pass undefined for the common "give me latest" case,
-// or a specific tag like "v25.10.31" to pin a release.
-export async function upgradeXray(id: number, version?: string) {
-  const body = version ? { version } : {}
+export interface CoreRelease {
+	engine: string
+	version: string
+	tier: 'recommended' | 'verified' | 'config_verified' | 'restricted'
+	prerelease: boolean
+	selectable: boolean
+	requires_confirmation: boolean
+	published_at: string
+	source_url: string
+	summary: { en: string; zh_cn: string }
+	reality: {
+		xray: string
+		mihomo: string
+		sing_box: string
+		uri_list: string
+		server_min_client_ver?: string
+		mihomo_fingerprint?: string
+		mihomo_x25519mlkem768?: boolean
+	}
+	evidence: {
+		source_audited: boolean
+		config_tested: boolean
+		handshake_tested: boolean
+		verified_at?: string
+		handshakes?: Array<{
+			client: 'xray' | 'mihomo' | 'sing_box'
+			version: string
+			platform: string
+			profile: string
+			result: 'pass' | 'expected_failure'
+		}>
+	}
+}
+
+// Legacy 3X-UI treats an omitted version as "latest". A native PSP node treats
+// it as the catalog's recommended exact release and rejects latest/unlisted
+// values. The caller normally sends the explicit selector value for native.
+export async function upgradeXray(id: number, version?: string, options?: { confirmRestricted?: boolean }) {
+	const body = {
+		...(version ? { version } : {}),
+		...(options?.confirmRestricted ? { confirm_restricted: true } : {}),
+	}
   // _skipErrorToast: submitXrayUpgrade and batchUpgradeXray own their own
   // toasts (a single-row catch + an aggregate summary); the global interceptor
   // would otherwise double-toast each failure.
@@ -258,11 +308,11 @@ export async function upgradeXray(id: number, version?: string) {
   return data
 }
 
-// listXrayVersions returns the xray-core tags 3X-UI knows it can install
-// on this panel. Used by the Upgrade Xray dialog to populate its version
-// dropdown. Failure is recoverable — UI falls back to a single "latest"
-// option so admin can still upgrade without browsing tags.
+// listXrayVersions returns the versions a backend can install. Native nodes
+// include the shared audited release metadata; legacy 3X-UI returns its own
+// tag list. A legacy failure can still fall back to latest, while native
+// selection fails closed when its catalog cannot be loaded.
 export async function listXrayVersions(id: number) {
-  const { data } = await client.get<{ versions: string[] }>(`/admin/servers/${id}/xray-versions`)
-  return data.versions ?? []
+	const { data } = await client.get<{ versions: string[]; releases?: CoreRelease[] }>(`/admin/servers/${id}/xray-versions`)
+	return { versions: data.versions ?? [], releases: data.releases ?? [] }
 }

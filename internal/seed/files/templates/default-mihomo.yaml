@@ -127,12 +127,5 @@ content: |
     {{ proxy_groups }}
 
   rules:
-    # Web QUIC (HTTP/3 over UDP 443): built-in REJECT so browsers fall back to
-    # h2/TCP. Highest priority — runs before 🎮 UDP控制 and the routing rules
-    # below. QUIC on a poor-UDP node makes YouTube/Google laggy; TCP is reliable
-    # on every node. Only drops the QUIC attempt — the TCP fallback still follows
-    # the rules below (not a direct leak), and proxy-node dials bypass the rule
-    # engine so Hysteria2 nodes are unaffected.
-    - AND,((NETWORK,udp),(DST-PORT,443)),REJECT
     {{ rules_personal }}
     {{ rules_common }}

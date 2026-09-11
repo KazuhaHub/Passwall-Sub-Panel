@@ -298,6 +298,32 @@ type ServerStatus struct {
 	XrayState    string // "running" / "stop" / "error"
 }
 
+// NativePanelSnapshot is the latest full observation projected into the
+// existing PanelClient vocabulary. The native adapter is intentionally a thin
+// compatibility facade: desired writes are delivered by the document stream,
+// while reads come only from an agent report that actually observed runtime.
+type NativePanelSnapshot struct {
+	Inbounds      []Inbound
+	Clients       map[string]ClientDetail
+	LiveClientIPs map[string][]string
+	Status        ServerStatus
+}
+
+// NativePanelSnapshotReader is implemented by the node-sync coordinator and
+// consumed by adapters/pspnode. Keeping this port here avoids an adapter →
+// service dependency and preserves the repository's one-way architecture.
+type NativePanelSnapshotReader interface {
+	NativePanelSnapshot(ctx context.Context, panelID int64) (*NativePanelSnapshot, error)
+}
+
+// AsynchronousApplier marks an adapter whose successful imperative write means
+// "intent is recorded" rather than "runtime already applied it". Native node
+// documents converge on a later agent round trip, so node services keep their
+// pending state until an observed object acknowledgement arrives.
+type AsynchronousApplier interface {
+	ApplyIsAsynchronous() bool
+}
+
 // WebCertFiles is the obj of /panel/api/server/getWebCertFiles — filesystem
 // PATHS on the panel host (e.g. /opt/1panel/secret/server.crt), never the
 // certificate bytes. The cert must already exist on the node; PSP only learns
@@ -396,13 +422,15 @@ type BulkCreateResult struct {
 // Allocate retain the historical Xray-shaped JSON strings at the API boundary
 // so existing clients remain compatible; adapters translate as needed.
 type Inbound struct {
-	ID         int
-	Up         int64
-	Down       int64
-	Total      int64
-	Remark     string
-	Enable     bool
-	ExpiryTime int64
+	ID    int
+	Up    int64
+	Down  int64
+	Total int64
+	// CounterEpoch is zero for legacy panels and explicit for native agents.
+	CounterEpoch uint64
+	Remark       string
+	Enable       bool
+	ExpiryTime   int64
 	// SubSortIndex orders this inbound's links in the PANEL's own subscription
 	// output (1-based, lower first, ties by id). PSP renders its own
 	// subscriptions and never consumes it — it is decoded solely so
@@ -526,6 +554,9 @@ type ClientTraffic struct {
 	ExpiryTime int64
 	Reset      int
 	LastOnline int64
+	// CounterEpoch is zero for legacy panels. Native agents increment it when
+	// their cumulative source resets so PSP can seed a new baseline.
+	CounterEpoch uint64
 }
 
 // PanelPool routes calls to the appropriate adapter by stable panel id.

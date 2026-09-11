@@ -71,7 +71,10 @@ private/
 .idea/
 .vscode/
 .claude/
+AGENT.md
+AGENTS.md
 CLAUDE.md
+CLAUDE.me
 
 # Scratch files used by the assistant to feed multi-line commit messages
 # to `git commit -F`. Should never end up tracked.

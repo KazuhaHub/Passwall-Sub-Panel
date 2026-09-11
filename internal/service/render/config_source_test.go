@@ -20,6 +20,40 @@ func (f fakeSettings) Load(_ context.Context, _ ports.UISettings) (ports.UISetti
 }
 func (f fakeSettings) Save(_ context.Context, _ ports.UISettings) error { return nil }
 
+type renderCredentialRepo struct {
+	ports.PSPClientRepo
+	client      *domain.PSPClient
+	attachments []domain.PSPClientInbound
+}
+
+type renderPanelRepo struct {
+	ports.XUIPanelRepo
+	version  string
+	versions map[int64]string
+}
+
+func (r renderPanelRepo) GetByID(_ context.Context, id int64) (*domain.XUIPanel, error) {
+	version := r.version
+	if resolved, ok := r.versions[id]; ok {
+		version = resolved
+	}
+	return &domain.XUIPanel{ID: id, XrayVersion: version}, nil
+}
+
+func (r renderCredentialRepo) ListByUser(_ context.Context, userID int64) ([]*domain.PSPClient, error) {
+	if r.client == nil || r.client.UserID != userID {
+		return nil, nil
+	}
+	return []*domain.PSPClient{r.client}, nil
+}
+
+func (r renderCredentialRepo) ListInbounds(_ context.Context, clientID int64) ([]domain.PSPClientInbound, error) {
+	if r.client == nil || r.client.ID != clientID {
+		return nil, nil
+	}
+	return append([]domain.PSPClientInbound(nil), r.attachments...), nil
+}
+
 // panicPool fails the test if any pool access happens — used to prove that a
 // node with a local config snapshot triggers zero 3X-UI calls.
 type panicPool struct{}
@@ -48,16 +82,16 @@ func (p *recordingPool) Remove(int64) error         { return nil }
 // snapshot, as the v3.5 write-through / poll backfill would store it.
 func vlessRealityNode(synced bool) *domain.Node {
 	n := &domain.Node{
-		ID:            7,
-		PanelID:       1,
-		InboundID:     3,
-		DisplayName:   "US-1",
-		ServerAddress: "node.example.com",
-		Flow:          "xtls-rprx-vision",
-		Protocol:      "vless",
-		Port:          443,
-		Enabled:       true,
-		Kind:          domain.NodeKindReal,
+		ID:              7,
+		PanelID:         1,
+		InboundID:       3,
+		DisplayName:     "US-1",
+		ServerAddress:   "node.example.com",
+		Flow:            "xtls-rprx-vision",
+		DesiredProtocol: "vless",
+		DesiredPort:     443,
+		Enabled:         true,
+		Kind:            domain.NodeKindReal,
 		StreamSettings: `{"network":"tcp","security":"reality",` +
 			`"realitySettings":{"serverNames":["www.microsoft.com"],"shortIds":["abcd"],` +
 			`"privateKey":"aPriv","settings":{"publicKey":"aPubKey","fingerprint":"chrome"}}}`,
@@ -130,6 +164,191 @@ func TestBuildProxies_LocalConfig_ZeroFetch(t *testing.T) {
 	ro, ok := got["reality-opts"].(map[string]any)
 	if !ok || ro["public-key"] != "aPubKey" || ro["short-id"] != "abcd" {
 		t.Fatalf("reality-opts mismatch: %#v", got["reality-opts"])
+	}
+}
+
+func TestBuildProxiesAddsMLKEMForNewXrayReality(t *testing.T) {
+	node := vlessRealityNode(true)
+	node.StreamSettings = `{"network":"tcp","security":"reality",` +
+		`"realitySettings":{"serverNames":["www.microsoft.com"],"shortIds":["abcd"],` +
+		`"settings":{"publicKey":"aPubKey","fingerprint":"firefox"}}}`
+	s := &Service{
+		repos: ports.Repos{
+			Settings: fakeSettings{ports.UISettings{EmailDomain: "kazuha.org"}},
+			XUIPanel: renderPanelRepo{version: "26.9.9"},
+		},
+		pool: panicPool{},
+	}
+	out := s.buildProxies(context.Background(), &domain.User{ID: 5, UUID: "uuid-of-user-5"},
+		[]renderItem{{name: "US-1", node: node}}, ports.UISettings{EmailDomain: "kazuha.org"})
+	if len(out) != 1 {
+		t.Fatalf("want one proxy, got %#v", out)
+	}
+	if out[0]["client-fingerprint"] != "chrome" {
+		t.Fatalf("new Xray REALITY fingerprint = %#v, want chrome", out[0]["client-fingerprint"])
+	}
+	reality, ok := out[0]["reality-opts"].(map[string]any)
+	if !ok || reality["support-x25519mlkem768"] != true {
+		t.Fatalf("new Xray REALITY options = %#v", out[0]["reality-opts"])
+	}
+}
+
+func TestBuildProxiesKeepsLegacyRealityForOlderXray(t *testing.T) {
+	node := vlessRealityNode(true)
+	node.StreamSettings = `{"network":"tcp","security":"reality",` +
+		`"realitySettings":{"serverNames":["www.microsoft.com"],"shortIds":["abcd"],` +
+		`"settings":{"publicKey":"aPubKey","fingerprint":"firefox"}}}`
+	s := &Service{
+		repos: ports.Repos{
+			Settings: fakeSettings{ports.UISettings{EmailDomain: "kazuha.org"}},
+			XUIPanel: renderPanelRepo{version: "26.7.28"},
+		},
+		pool: panicPool{},
+	}
+	out := s.buildProxies(context.Background(), &domain.User{ID: 5, UUID: "uuid-of-user-5"},
+		[]renderItem{{name: "US-1", node: node}}, ports.UISettings{EmailDomain: "kazuha.org"})
+	if len(out) != 1 || out[0]["client-fingerprint"] != "firefox" {
+		t.Fatalf("older Xray REALITY proxy = %#v", out)
+	}
+	reality := out[0]["reality-opts"].(map[string]any)
+	if _, exists := reality["support-x25519mlkem768"]; exists {
+		t.Fatalf("older Xray unexpectedly enabled ML-KEM: %#v", reality)
+	}
+}
+
+func TestBuildProxiesAppliesMLKEMCompatibilityPerServingPanel(t *testing.T) {
+	oldNode := vlessRealityNode(true)
+	oldNode.ID = 7
+	oldNode.PanelID = 1
+	oldNode.DisplayName = "old-xray"
+	oldNode.StreamSettings = `{"network":"tcp","security":"reality",` +
+		`"realitySettings":{"serverNames":["www.microsoft.com"],"shortIds":["abcd"],` +
+		`"settings":{"publicKey":"oldPubKey","fingerprint":"firefox"}}}`
+
+	newNode := vlessRealityNode(true)
+	newNode.ID = 8
+	newNode.PanelID = 2
+	newNode.DisplayName = "new-xray"
+	newNode.ServerAddress = "new-node.example.com"
+	newNode.StreamSettings = `{"network":"tcp","security":"reality",` +
+		`"realitySettings":{"serverNames":["www.microsoft.com"],"shortIds":["ef01"],` +
+		`"settings":{"publicKey":"newPubKey","fingerprint":"firefox"}}}`
+
+	s := &Service{
+		repos: ports.Repos{
+			Settings: fakeSettings{ports.UISettings{EmailDomain: "kazuha.org"}},
+			XUIPanel: renderPanelRepo{versions: map[int64]string{
+				1: "26.7.28",
+				2: "26.9.9",
+			}},
+		},
+		pool: panicPool{},
+	}
+	out := s.buildProxies(context.Background(), &domain.User{ID: 5, UUID: "uuid-of-user-5"},
+		[]renderItem{{name: "old-xray", node: oldNode}, {name: "new-xray", node: newNode}},
+		ports.UISettings{EmailDomain: "kazuha.org"})
+	if len(out) != 2 {
+		t.Fatalf("want two mixed-version proxies, got %#v", out)
+	}
+
+	if out[0]["client-fingerprint"] != "firefox" {
+		t.Fatalf("old Xray fingerprint = %#v, want preserved firefox", out[0]["client-fingerprint"])
+	}
+	oldReality := out[0]["reality-opts"].(map[string]any)
+	if _, exists := oldReality["support-x25519mlkem768"]; exists {
+		t.Fatalf("old Xray unexpectedly enabled ML-KEM: %#v", oldReality)
+	}
+
+	if out[1]["client-fingerprint"] != "chrome" {
+		t.Fatalf("new Xray fingerprint = %#v, want chrome", out[1]["client-fingerprint"])
+	}
+	newReality := out[1]["reality-opts"].(map[string]any)
+	if newReality["support-x25519mlkem768"] != true {
+		t.Fatalf("new Xray did not enable ML-KEM: %#v", newReality)
+	}
+}
+
+func TestBuildSingBoxOutboundsOmitsMLKEMFirstReality(t *testing.T) {
+	node := vlessRealityNode(true)
+	s := &Service{
+		repos: ports.Repos{
+			Settings: fakeSettings{ports.UISettings{EmailDomain: "kazuha.org"}},
+			XUIPanel: renderPanelRepo{version: "26.9.9"},
+		},
+		pool: panicPool{},
+	}
+	out := s.buildSingBoxOutbounds(context.Background(), &domain.User{ID: 5, UUID: "uuid-of-user-5"},
+		[]renderItem{{name: "US-1", node: node}}, nil, nil, ports.UISettings{EmailDomain: "kazuha.org"})
+	for _, outbound := range out {
+		if outbound["tag"] == "US-1" {
+			t.Fatalf("known-incompatible sing-box REALITY outbound was emitted: %#v", outbound)
+		}
+	}
+}
+
+func TestBuildSingBoxOutboundsKeepsOlderReality(t *testing.T) {
+	node := vlessRealityNode(true)
+	s := &Service{
+		repos: ports.Repos{
+			Settings: fakeSettings{ports.UISettings{EmailDomain: "kazuha.org"}},
+			XUIPanel: renderPanelRepo{version: "26.7.28"},
+		},
+		pool: panicPool{},
+	}
+	out := s.buildSingBoxOutbounds(context.Background(), &domain.User{ID: 5, UUID: "uuid-of-user-5"},
+		[]renderItem{{name: "US-1", node: node}}, nil, nil, ports.UISettings{EmailDomain: "kazuha.org"})
+	for _, outbound := range out {
+		if outbound["tag"] == "US-1" {
+			return
+		}
+	}
+	t.Fatalf("older compatible sing-box REALITY outbound missing: %#v", out)
+}
+
+func TestBuildProxiesKeepsLastAppliedCredentialWhileNewRosterIsPending(t *testing.T) {
+	node := vlessRealityNode(true)
+	repo := renderCredentialRepo{
+		client: &domain.PSPClient{ID: 11, UserID: 5, UUID: "new-desired-uuid"},
+		attachments: []domain.PSPClientInbound{{
+			ClientID: 11, NodeID: node.ID, State: domain.ClientApplyPending,
+			AppliedVersion: 7, AppliedEmail: "u5@old.example", AppliedUUID: "old-applied-uuid",
+		}},
+	}
+	s := &Service{
+		repos: ports.Repos{
+			Settings:  fakeSettings{ports.UISettings{EmailDomain: "new.example"}},
+			PSPClient: repo,
+		},
+		pool: panicPool{},
+	}
+	u := &domain.User{ID: 5, UUID: "new-desired-uuid"}
+	out := s.buildProxies(context.Background(), u, []renderItem{{name: "US-1", node: node}}, ports.UISettings{EmailDomain: "new.example"})
+	if len(out) != 1 || out[0]["uuid"] != "old-applied-uuid" {
+		t.Fatalf("pending credential rotation rendered desired UUID: %#v", out)
+	}
+}
+
+func TestBuildProxiesUsesLastAppliedPasswordForPasswordOnlyClient(t *testing.T) {
+	node := vlessRealityNode(true)
+	node.DesiredProtocol = "shadowsocks"
+	node.Flow = ""
+	node.StreamSettings = `{}`
+	node.InboundSettings = `{"method":"chacha20-ietf-poly1305"}`
+	repo := renderCredentialRepo{
+		client: &domain.PSPClient{ID: 12, UserID: 5, UUID: "new-desired-uuid", Password: "new-password"},
+		attachments: []domain.PSPClientInbound{{
+			ClientID: 12, NodeID: node.ID, State: domain.ClientApplyPending,
+			AppliedVersion: 7, AppliedEmail: "u5@old.example", AppliedPassword: "old-applied-password",
+		}},
+	}
+	s := &Service{
+		repos: ports.Repos{Settings: fakeSettings{}, PSPClient: repo},
+		pool:  panicPool{},
+	}
+	u := &domain.User{ID: 5, UUID: "new-desired-uuid"}
+	out := s.buildProxies(context.Background(), u, []renderItem{{name: "SS", node: node}}, ports.UISettings{})
+	if len(out) != 1 || out[0]["password"] != "old-applied-password" {
+		t.Fatalf("pending password rotation rendered desired password: %#v", out)
 	}
 }
 

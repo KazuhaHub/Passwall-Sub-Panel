@@ -93,6 +93,16 @@ func (r *kvSettingsRepo) Load(ctx context.Context, defaults ports.UISettings) (p
 	if _, ok := byKey["security.auth_event_retention_days"]; !ok && out.AuthEventRetentionDays == 0 {
 		out.AuthEventRetentionDays = defaultAuthEventRetentionDays
 	}
+	// Protocol fail-safe: an EXPLICIT zero means every agent report is full,
+	// while a missing row means the operator has never selected a cadence and
+	// receives the 60-second product default. Do this by key presence rather
+	// than applyUISettingsDefaults, which cannot distinguish those two states.
+	if _, ok := byKey["runtime.full_report_seconds"]; !ok && out.FullReportSeconds == 0 {
+		out.FullReportSeconds = defaultFullReportSeconds
+	}
+	if _, ok := byKey["runtime.node_poll_seconds"]; !ok && out.NodePollSeconds == 0 {
+		out.NodePollSeconds = defaultNodePollSeconds
+	}
 
 	return applyUISettingsDefaults(out, defaults), nil
 }
@@ -103,6 +113,8 @@ const (
 	defaultTrafficHistoryDays     = 730 // 2y: 2x the longest "last 1 year" chart range
 	defaultSubLogRetentionDays    = 7
 	defaultAuthEventRetentionDays = 90 // compliance-friendly default; admin may lower or set 0=forever
+	defaultNodePollSeconds        = 30
+	defaultFullReportSeconds      = 60
 )
 
 func (r *kvSettingsRepo) Save(ctx context.Context, s ports.UISettings) error {
@@ -343,6 +355,8 @@ func settingDescriptors(s *ports.UISettings) []settingDescriptor {
 		strField("runtime", "timezone", &s.Timezone),
 		intField("runtime", "cron_traffic_pull_minutes", &s.CronTrafficPullMinutes),
 		intField("runtime", "cron_reconcile_minutes", &s.CronReconcileMinutes),
+		intField("runtime", "node_poll_seconds", &s.NodePollSeconds),
+		intField("runtime", "full_report_seconds", &s.FullReportSeconds),
 		intField("runtime", "max_panel_concurrency", &s.MaxPanelConcurrency),
 		boolField("runtime", "allow_user_personal_rules", &s.AllowUserPersonalRules),
 
