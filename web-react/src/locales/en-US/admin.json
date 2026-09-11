@@ -1217,7 +1217,7 @@
       "reality_support_x25519mlkem768_hint": "For xray-core >= 26.9.8, this option must be enabled when connecting with the mihomo core, or the connection will fall back. Enabling this forces the fingerprint to chrome.",
       "reality_spider_x": "spiderX path",
       "reality_min_client": "Min client version",
-      "reality_min_client_hint": "For xray-core >= 26.7.11, leaving this field empty makes the server default it to 26.3.27, preventing mihomo- and sing-box-based clients from connecting. Enter 1.8.1 to allow the latest versions of both cores.",
+      "reality_min_client_hint": "For xray-core >= 26.7.11, leaving this field empty makes the server default it to 26.3.27, preventing other non-xray-core clients from connecting. Enter 0.0.0 to allow all client cores.",
       "reality_max_client": "Max client version",
       "reality_keys": "Reality keypair",
       "gen_keys": "Generate keypair",
