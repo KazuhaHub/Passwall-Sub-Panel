@@ -119,10 +119,22 @@ func (r *nativeAgentProvisioningRepo) DeleteConverged(ctx context.Context, panel
 		if clientRefs != 0 {
 			return fmt.Errorf("%w: native panel still has %d client(s)", domain.ErrValidation, clientRefs)
 		}
+		var nodeRefs int64
+		if err := tx.Model(&nodeRow{}).Where("panel_id = ?", panelID).Count(&nodeRefs).Error; err != nil {
+			return err
+		}
+		if nodeRefs != 0 {
+			return fmt.Errorf("%w: panel still has %d node(s); remove or reassign them first", domain.ErrValidation, nodeRefs)
+		}
 		if err := requireEmptyConvergedNativeStreams(tx, agent.AgentID); err != nil {
 			return err
 		}
-		if err := (&xuiPanelRepo{db: tx}).Delete(ctx, panelID); err != nil {
+		// Native panels can only own the current psp_clients records checked
+		// above. Do not route this transactional deletion through xuiPanelRepo:
+		// its transitional legacy-ownership probe intentionally tolerates a
+		// missing user_xui_clients table, but PostgreSQL aborts the transaction
+		// as soon as that probe touches the retired table.
+		if err := tx.Delete(&xuiPanelRow{}, panelID).Error; err != nil {
 			return err
 		}
 		if err := tx.Where("agent_id = ?", agent.AgentID).Delete(&nodeAgentIssueRow{}).Error; err != nil {
