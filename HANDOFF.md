@@ -83,8 +83,8 @@ config/roster 覆盖度按本机闭包精确校验，directives 覆盖度则保�
 组合，节点不能用未来坐标或同版本错摘要污染收敛状态。协议包同时约束响应调度值，后台设置校验
 直接引用同一常量，避免控制面和 agent 各自维护不同上限。配额 pending delta 还会重新核验
 agent→panel→client 所有权，越权 client key 与已退役 agent 缓存都不能影响别的面板用户。
-跨仓模块发布闸已于 2026-09-11 完成：Passwall-Node revision `05714af366a5` 已进入 main，PSP
-依赖已更新到 `v0.0.0-20260911233412-05714af366a5`。关闭父目录 `go.work` 后，PSP 全量 Go
+跨仓模块发布闸已于 2026-09-11 完成：Passwall-Node revision `86b565a98293` 已进入 main，PSP
+依赖已更新到 `v0.0.0-20260911234806-86b565a98293`。关闭父目录 `go.work` 后，PSP 全量 Go
 测试、vet、关键路径 race、C2 真 agent 契约测试和六平台交叉编译均通过。
 
 管理端现在可直接创建 `panel_type=psp`：PSP 在一个事务中建立 panel、agent 和三条流，返回一次性的
