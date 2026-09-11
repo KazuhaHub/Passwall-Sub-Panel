@@ -64,9 +64,9 @@ it('limits REALITY fingerprints and locks chrome when X25519MLKEM768 is enabled'
   expect(options.map(option => option.textContent)).toEqual(['chrome', 'firefox', 'safari'])
   fireEvent.keyDown(screen.getByRole('listbox'), { key: 'Escape' })
 
-  fireEvent.click(within(dialog).getByRole('switch', {
-    name: 'admin:nodes.create_dialog.reality_support_x25519mlkem768',
-  }))
+  // The title is part of FormControlLabel, matching the larger click target
+  // used by the other switches in this form.
+  fireEvent.click(within(dialog).getByText('admin:nodes.create_dialog.reality_support_x25519mlkem768'))
   await waitFor(() => {
     expect(fingerprint.getAttribute('aria-disabled')).toBe('true')
     expect(fingerprint.textContent).toBe('chrome')

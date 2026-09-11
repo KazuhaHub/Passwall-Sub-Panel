@@ -1727,25 +1727,28 @@ function InboundFormFields({ form, setForm, showMetadata, servers, onGenKeys, on
                     onChange={e => update('reality_spider_x', e.target.value)}
                     sx={{ flex: '1 1 180px' }} />}
                 </Box>
-                <Box sx={{ display: 'flex', alignItems: 'flex-start' }}>
-                  <Switch size="small"
+                <FormControlLabel
+                  control={<Switch size="small"
                     checked={form.reality_support_x25519mlkem768}
                     onChange={(_, checked) => setForm(prev => ({
                       ...prev,
                       reality_support_x25519mlkem768: checked,
                       reality_fingerprint: checked ? 'chrome' : prev.reality_fingerprint,
                     }))}
-                    slotProps={{ input: { 'aria-label': t('admin:nodes.create_dialog.reality_support_x25519mlkem768') } }}
-                    sx={{ flexShrink: 0, mr: 1 }} />
-                  <Box sx={{ pt: 0.25 }}>
+                    slotProps={{ input: { 'aria-label': t('admin:nodes.create_dialog.reality_support_x25519mlkem768') } }} />}
+                  label={<Box>
                     <Typography sx={{ fontSize: 13, lineHeight: 1.5 }}>
                       {t('admin:nodes.create_dialog.reality_support_x25519mlkem768')}
                     </Typography>
                     <Typography sx={{ mt: 0.25, fontSize: 12, color: md.onSurfaceVariant }}>
                       {t('admin:nodes.create_dialog.reality_support_x25519mlkem768_hint')}
                     </Typography>
-                  </Box>
-                </Box>
+                  </Box>}
+                  sx={{
+                    ml: 0, mr: 0, alignItems: 'flex-start',
+                    '& .MuiSwitch-root': { flexShrink: 0 },
+                    '& .MuiFormControlLabel-label': { ml: 1, pt: 0.25 },
+                  }} />
                 <TextField required size="small" fullWidth label={t('admin:nodes.create_dialog.private_key')}
                   value={form.private_key}
                   onChange={e => update('private_key', e.target.value)}
