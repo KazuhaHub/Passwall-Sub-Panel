@@ -417,14 +417,12 @@ const EMPTY_INBOUND: InboundFormState = {
   reality_spider_x: '/ai',
   reality_xver: 0,
   reality_max_timediff: 0,
-  // Default new REALITY inbounds to minClientVer 1.0.0 (= no version gate).
-  // xray-core 26.7.11 through 26.7.28 treats an EMPTY minClientVer as
-  // "26.3.27", which
-  // rejects mihomo/Clash Verge (hardcoded client version 1.8.2) and older
-  // cores — so an empty default silently breaks every new node. Existing
-  // nodes are unaffected: parseInboundForEdit overrides this with the panel's
-  // real value. See docs/3xui-compat.md 2026-07-13.
-  reality_min_client: '1.0.0',
+  // Default new REALITY inbounds to minClientVer 1.8.1 so current mihomo and
+  // sing-box cores remain eligible. xray-core >= 26.7.11 treats an EMPTY
+  // minClientVer as "26.3.27", which rejects those clients. Existing nodes
+  // are unaffected: parseInboundForEdit overrides this with the panel's real
+  // value. See docs/3xui-compat.md 2026-07-13.
+  reality_min_client: '1.8.1',
   reality_max_client: '',
   ss_method: '2022-blake3-aes-256-gcm',
   ss_password: '',
@@ -1763,15 +1761,14 @@ function InboundFormFields({ form, setForm, showMetadata, servers, onGenKeys, on
                   sx={{ '& input': { fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace', fontSize: 13, py: 1.25 } }} />
                 {/* minClientVer / maxClientVer gate the REALITY handshake by the
                     client's self-reported xray-core version. Both empty = no gate
-                    (pre-3.5 behavior). IMPORTANT: xray-core 26.7.11 through
-                    26.7.28 changed an EMPTY minClientVer to default to "26.3.27"
-                    server-side, which
+                    (pre-3.5 behavior). IMPORTANT: xray-core >= 26.7.11 changed
+                    an EMPTY minClientVer to default to "26.3.27" server-side, which
                     rejects mihomo/Clash-Verge (they hardcode client version 1.8.2)
-                    and any older core — set minClientVer to "1.0.0" to restore the
-                    open behavior. See docs/3xui-compat.md 2026-07-13. */}
+                    and any older core — set minClientVer to "1.8.1" to allow current
+                    mihomo and sing-box cores. See docs/3xui-compat.md 2026-07-13. */}
                 {effectivePanelType === '3xui' && <Box sx={{ display: 'flex', gap: 1.5, flexWrap: 'wrap' }}>
                   <TextField size="small" label={t('admin:nodes.create_dialog.reality_min_client')}
-                    placeholder="1.0.0"
+                    placeholder="1.8.1"
                     value={form.reality_min_client}
                     onChange={e => update('reality_min_client', e.target.value)}
                     helperText={t('admin:nodes.create_dialog.reality_min_client_hint')}

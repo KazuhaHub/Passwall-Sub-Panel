@@ -1195,7 +1195,7 @@
       "reality_support_x25519mlkem768_hint": "对于 xray-core >= 26.9.8，若使用 mihomo 内核连接，此项必须开启，否则连接将回落。开启后 Fingerprint 强制使用 chrome。",
       "reality_spider_x": "spiderX 路径",
       "reality_min_client": "最低客户端版本",
-      "reality_min_client_hint": "对于 26.7.11 <= xray-core <= 26.7.28，此项留空会被服务端默认为 26.3.27，导致 mihomo 和 sing-box 内核无法连接。填入 1.8.1 来放行这两类内核的最新版本。",
+      "reality_min_client_hint": "对于 xray-core >= 26.7.11，此项留空会被服务端默认为 26.3.27，导致 mihomo 和 sing-box 内核无法连接。填入 1.8.1 来放行这两类内核的最新版本。",
       "reality_max_client": "最高客户端版本",
       "reality_keys": "Reality 密钥对",
       "gen_keys": "生成 keypair",
