@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -30,9 +31,20 @@ func TestNodeAgentCreateMintsAllStreamsAndStoresOnlyDigest(t *testing.T) {
 	if agent.ID == 0 || agent.Epoch != 1 {
 		t.Fatalf("created agent = %+v", agent)
 	}
+	if agent.DesiredCoreEngine != domain.NodeCoreXray {
+		t.Fatalf("default desired core engine = %q", agent.DesiredCoreEngine)
+	}
 	agents, err := repo.List(context.Background())
 	if err != nil || len(agents) != 1 || agents[0].AgentID != agent.AgentID {
 		t.Fatalf("agent list = (%+v, %v)", agents, err)
+	}
+	pageAgents, err := repo.ListByPanelIDs(context.Background(), []int64{agent.PanelID, agent.PanelID + 1})
+	if err != nil || len(pageAgents) != 1 || pageAgents[0].AgentID != agent.AgentID {
+		t.Fatalf("page-scoped agent list = (%+v, %v)", pageAgents, err)
+	}
+	emptyAgents, err := repo.ListByPanelIDs(context.Background(), nil)
+	if err != nil || len(emptyAgents) != 0 {
+		t.Fatalf("empty page-scoped agent list = (%+v, %v)", emptyAgents, err)
 	}
 	streams, err := repo.ListStreams(context.Background(), agent.AgentID)
 	if err != nil {
@@ -89,15 +101,35 @@ func TestNodeAgentCoreSelectionUsesColumnScopedUpdate(t *testing.T) {
 	if err := repo.Create(ctx, agent); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.UpdateCoreSelection(ctx, agent.AgentID, "26.9.9", true); err != nil {
+	if err := repo.UpdateCoreSelection(ctx, agent.AgentID, domain.NodeCoreXray, "26.9.9", true); err != nil {
 		t.Fatal(err)
 	}
 	loaded, err := repo.GetByAgentID(ctx, agent.AgentID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if loaded.DesiredCoreVersion != "26.9.9" || !loaded.AllowRestrictedReality || loaded.CredentialSHA256 != agent.CredentialSHA256 {
+	if loaded.DesiredCoreEngine != domain.NodeCoreXray || loaded.DesiredCoreVersion != "26.9.9" || !loaded.AllowRestrictedReality || loaded.CredentialSHA256 != agent.CredentialSHA256 {
 		t.Fatalf("updated agent = %+v", loaded)
+	}
+	if err := repo.UpdateCoreSelection(ctx, agent.AgentID, domain.NodeCoreSingBox, "1.14.0", false); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.UpdateCoreObservation(ctx, agent.AgentID, domain.NodeCoreSingBox); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.UpdateCoreSelection(ctx, agent.AgentID, domain.NodeCoreSingBox, "1.14.0", false); err != nil {
+		t.Fatalf("idempotent core selection: %v", err)
+	}
+	if err := repo.UpdateCoreObservation(ctx, agent.AgentID, domain.NodeCoreSingBox); err != nil {
+		t.Fatalf("idempotent core observation: %v", err)
+	}
+	loaded, err = repo.GetByAgentID(ctx, agent.AgentID)
+	if err != nil || loaded.DesiredCoreEngine != domain.NodeCoreSingBox || loaded.DesiredCoreVersion != "1.14.0" ||
+		loaded.AllowRestrictedReality || loaded.ObservedCoreEngine != domain.NodeCoreSingBox {
+		t.Fatalf("sing-box agent = (%+v, %v)", loaded, err)
+	}
+	if err := repo.UpdateCoreObservation(ctx, "agt_missing", domain.NodeCoreXray); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("missing agent observation error = %v", err)
 	}
 }
 

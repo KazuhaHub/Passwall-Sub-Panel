@@ -424,10 +424,12 @@ type PSPClientRepo interface {
 type NodeAgentRepo interface {
 	Create(ctx context.Context, agent *domain.NodeAgent) error
 	List(ctx context.Context) ([]*domain.NodeAgent, error)
+	ListByPanelIDs(ctx context.Context, panelIDs []int64) ([]*domain.NodeAgent, error)
 	GetByAgentID(ctx context.Context, agentID string) (*domain.NodeAgent, error)
 	GetByCredentialSHA256(ctx context.Context, digest string) (*domain.NodeAgent, error)
 	GetByPanelID(ctx context.Context, panelID int64) (*domain.NodeAgent, error)
-	UpdateCoreSelection(ctx context.Context, agentID, version string, allowRestrictedReality bool) error
+	UpdateCoreSelection(ctx context.Context, agentID string, engine domain.NodeCoreEngine, version string, allowRestrictedReality bool) error
+	UpdateCoreObservation(ctx context.Context, agentID string, engine domain.NodeCoreEngine) error
 	TouchLastSeen(ctx context.Context, agentID string, seenAt time.Time) error
 	GetStream(ctx context.Context, agentID string, stream domain.NodeAgentStreamName) (*domain.NodeAgentStream, error)
 	ListStreams(ctx context.Context, agentID string) ([]*domain.NodeAgentStream, error)

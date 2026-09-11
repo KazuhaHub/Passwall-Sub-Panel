@@ -159,10 +159,17 @@ func (s *Service) recordPanelObservation(ctx context.Context, agent *domain.Node
 	if coreVersion == "" {
 		coreVersion = panel.XrayVersion
 	}
+	observedEngine := domain.NodeCoreEngine(report.CoreEngine)
+	engineChanged := observedEngine != "" && observedEngine != agent.ObservedCoreEngine
+	if engineChanged && s.agents != nil {
+		if err := s.agents.UpdateCoreObservation(ctx, agent.AgentID, observedEngine); err != nil {
+			return fmt.Errorf("nodesync: persist native core engine observation: %w", err)
+		}
+	}
 	if err := s.panels.UpdateVersion(ctx, agent.PanelID, panelVersion, coreVersion, &now); err != nil {
 		return fmt.Errorf("nodesync: persist native panel observation: %w", err)
 	}
-	if coreVersion != panel.XrayVersion && s.invalidateRender != nil {
+	if (coreVersion != panel.XrayVersion || engineChanged) && s.invalidateRender != nil {
 		s.invalidateRender()
 	}
 	return nil
@@ -194,18 +201,23 @@ type listenerConfig struct {
 }
 
 func buildConfig(snapshot *ports.NativeDesiredSnapshot, agent *domain.NodeAgent) (nodeprotocol.ConfigBody, error) {
+	engine := domain.NodeCoreXray
 	version := ""
 	allowRestricted := false
 	if agent != nil {
+		engine = domain.NormalizeNodeCoreEngine(agent.DesiredCoreEngine)
 		version = agent.DesiredCoreVersion
 		allowRestricted = agent.AllowRestrictedReality
+	}
+	if !engine.Valid() {
+		return nodeprotocol.ConfigBody{}, fmt.Errorf("nodesync: desired core engine %q is unsupported", engine)
 	}
 	var release corecatalog.Release
 	var err error
 	if version == "" {
-		release, err = corecatalog.Recommended("xray")
+		release, err = corecatalog.Recommended(string(engine))
 	} else {
-		release, err = corecatalog.Resolve("xray", version)
+		release, err = corecatalog.Resolve(string(engine), version)
 	}
 	if err != nil {
 		return nodeprotocol.ConfigBody{}, fmt.Errorf("nodesync: resolve desired core: %w", err)
@@ -216,7 +228,7 @@ func buildConfig(snapshot *ports.NativeDesiredSnapshot, agent *domain.NodeAgent)
 	body := nodeprotocol.ConfigBody{
 		Listeners: make([]nodeprotocol.Listener, 0, len(snapshot.Nodes)),
 		Core: nodeprotocol.CoreSelection{
-			Engine: "xray", Version: release.Version, AllowRestrictedReality: allowRestricted,
+			Engine: string(engine), Version: release.Version, AllowRestrictedReality: allowRestricted,
 		},
 	}
 	for _, node := range snapshot.Nodes {
@@ -949,7 +961,10 @@ func (s *Service) NativePanelSnapshot(ctx context.Context, panelID int64) (*port
 	nodesByID := make(map[int64]*domain.Node, len(desired.Nodes))
 	result := &ports.NativePanelSnapshot{
 		Clients: make(map[string]ports.ClientDetail), LiveClientIPs: make(map[string][]string),
-		Status: ports.ServerStatus{PanelVersion: report.AgentVersion, XrayVersion: report.CoreVersion, XrayState: report.CoreState},
+		Status: ports.ServerStatus{
+			PanelVersion: report.AgentVersion, CoreEngine: report.CoreEngine,
+			XrayVersion: report.CoreVersion, XrayState: report.CoreState,
+		},
 	}
 	for _, node := range desired.Nodes {
 		if node == nil {

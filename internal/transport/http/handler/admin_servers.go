@@ -39,10 +39,16 @@ type AdminServersHandler struct {
 	async            AsyncDispatcher
 	invalidateRender func()
 	native           ports.NativeAgentProvisioningRepo
+	agents           ports.NodeAgentRepo
 }
 
 func (h *AdminServersHandler) WithNativeAgentProvisioning(repo ports.NativeAgentProvisioningRepo) *AdminServersHandler {
 	h.native = repo
+	return h
+}
+
+func (h *AdminServersHandler) WithNodeAgents(repo ports.NodeAgentRepo) *AdminServersHandler {
+	h.agents = repo
 	return h
 }
 
@@ -57,11 +63,10 @@ func NewAdminServersHandler(repo ports.XUIPanelRepo, pool ports.XUIPool, nodes p
 // "has_api_token" / "has_password" booleans. The edit dialog re-enters
 // secrets when changing them.
 //
-// Version-identity fields (panel_version / xray_version / version_checked_at /
-// compat_status / compat_message) reflect the last successful probe via the
-// boot probe + traffic-poll-piggyback path (v3.6.0-beta.1) or the manual
-// "test connection" trigger (Test handler, refreshes these on every click).
-// Empty version strings + nil checked_at = "never probed" (UI shows ⋯).
+// Version-identity fields reflect the last successful probe via the boot probe
+// + traffic-poll-piggyback path (v3.6.0-beta.1) or the manual "test
+// connection" trigger. Native nodes additionally expose desired core identity
+// from NodeAgent separately from the last observed runtime identity.
 type serverDTO struct {
 	ID           int64                   `json:"id"`
 	Kind         string                  `json:"panel_type"`
@@ -75,13 +80,17 @@ type serverDTO struct {
 	// AuthMethod is the EFFECTIVE auth mode ("token" | "password") so the edit
 	// form pre-selects correctly — resolved from the stored method, falling back
 	// to inference for legacy rows. InsecureHTTPS skips TLS cert verification.
-	AuthMethod       string     `json:"auth_method"`
-	InsecureHTTPS    bool       `json:"insecure_https"`
-	PanelVersion     string     `json:"panel_version,omitempty"`
-	XrayVersion      string     `json:"xray_version,omitempty"`
-	VersionCheckedAt *time.Time `json:"version_checked_at,omitempty"`
-	CompatStatus     string     `json:"compat_status,omitempty"`  // "supported" | "too_old" | "untested" | "unknown"
-	CompatMessage    string     `json:"compat_message,omitempty"` // human-readable, for tooltip / banner
+	AuthMethod         string     `json:"auth_method"`
+	InsecureHTTPS      bool       `json:"insecure_https"`
+	PanelVersion       string     `json:"panel_version,omitempty"`
+	XrayVersion        string     `json:"xray_version,omitempty"`
+	CoreEngine         string     `json:"core_engine,omitempty"`
+	CoreVersion        string     `json:"core_version,omitempty"`
+	DesiredCoreEngine  string     `json:"desired_core_engine,omitempty"`
+	DesiredCoreVersion string     `json:"desired_core_version,omitempty"`
+	VersionCheckedAt   *time.Time `json:"version_checked_at,omitempty"`
+	CompatStatus       string     `json:"compat_status,omitempty"`  // "supported" | "too_old" | "untested" | "unknown"
+	CompatMessage      string     `json:"compat_message,omitempty"` // human-readable, for tooltip / banner
 	// LatestXUIVersion / UpdateAvailable are derived per-request from the
 	// PSP-wide version.LatestXUI() snapshot (one GitHub query feeds every
 	// row) compared against this panel's PanelVersion. NOT persisted per
@@ -171,14 +180,34 @@ func effectiveAuthMethod(p *domain.XUIPanel) domain.XUIAuthMethod {
 
 func (h *AdminServersHandler) List(c *gin.Context) {
 	p := parsePagination(c)
-	panels, total, err := h.repo.ListPaged(c.Request.Context(), p)
+	ctx := c.Request.Context()
+	panels, total, err := h.repo.ListPaged(ctx, p)
 	if err != nil {
 		respondError(c, err)
 		return
 	}
+	agentsByPanel := make(map[int64]*domain.NodeAgent)
+	if h.agents != nil {
+		panelIDs := make([]int64, 0, len(panels))
+		for _, panel := range panels {
+			if panel != nil && domain.NormalizePanelKind(panel.Kind) == domain.PanelKindPSP {
+				panelIDs = append(panelIDs, panel.ID)
+			}
+		}
+		agents, listErr := h.agents.ListByPanelIDs(ctx, panelIDs)
+		if listErr != nil {
+			respondError(c, listErr)
+			return
+		}
+		for _, agent := range agents {
+			if agent != nil {
+				agentsByPanel[agent.PanelID] = agent
+			}
+		}
+	}
 	out := make([]serverDTO, len(panels))
 	for i, panel := range panels {
-		out[i] = h.toServerDTO(panel)
+		out[i] = h.toServerDTOWithAgent(panel, agentsByPanel[panel.ID])
 	}
 	c.JSON(http.StatusOK, pagedEnvelope(out, total, p))
 }
@@ -238,7 +267,7 @@ func (h *AdminServersHandler) Create(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Register in pool: " + err.Error()})
 		return
 	}
-	c.JSON(http.StatusCreated, h.toServerDTO(p))
+	c.JSON(http.StatusCreated, h.toServerDTO(c.Request.Context(), p))
 }
 
 func (h *AdminServersHandler) createNative(c *gin.Context, req serverCreateRequest) {
@@ -277,6 +306,7 @@ func (h *AdminServersHandler) createNative(c *gin.Context, req serverCreateReque
 	}
 	agent := &domain.NodeAgent{
 		AgentID: agentID, CredentialSHA256: digest,
+		DesiredCoreEngine:  domain.NodeCoreXray,
 		DesiredCoreVersion: release.Version,
 	}
 	if err := h.native.Create(c.Request.Context(), panel, agent); err != nil {
@@ -291,7 +321,7 @@ func (h *AdminServersHandler) createNative(c *gin.Context, req serverCreateReque
 		return
 	}
 	c.JSON(http.StatusCreated, nativeServerCreateResponse{
-		Server: h.toServerDTO(panel), AgentID: agentID, Credential: credential,
+		Server: h.toServerDTO(c.Request.Context(), panel), AgentID: agentID, Credential: credential,
 		Endpoint: base + "/v1/node/sync",
 	})
 }
@@ -341,7 +371,7 @@ func (h *AdminServersHandler) RotateNativeCredential(c *gin.Context) {
 		})
 	}
 	c.JSON(http.StatusOK, nativeServerCreateResponse{
-		Server: h.toServerDTO(panel), AgentID: agent.AgentID, Credential: credential,
+		Server: h.toServerDTO(c.Request.Context(), panel), AgentID: agent.AgentID, Credential: credential,
 		Endpoint: base + "/v1/node/sync",
 	})
 }
@@ -448,7 +478,7 @@ func (h *AdminServersHandler) Update(c *gin.Context) {
 			return
 		}
 	}
-	c.JSON(http.StatusOK, h.toServerDTO(existing))
+	c.JSON(http.StatusOK, h.toServerDTO(c.Request.Context(), existing))
 }
 
 // Test issues a lightweight ListInbounds against the named server. Returns
@@ -551,6 +581,9 @@ func (h *AdminServersHandler) Test(c *gin.Context) {
 		resp["panel_version"] = status.PanelVersion
 		resp["xray_version"] = status.XrayVersion
 		resp["xray_state"] = status.XrayState
+		if status.CoreEngine != "" {
+			resp["core_engine"] = status.CoreEngine
+		}
 		resp["core_version"] = status.XrayVersion
 		resp["core_state"] = status.XrayState
 		resp["version_checked_at"] = now
@@ -833,6 +866,133 @@ func (h *AdminServersHandler) ListXrayVersions(c *gin.Context) {
 		}
 	}
 	c.JSON(http.StatusOK, gin.H{"versions": versions, "releases": metadata})
+}
+
+// ListCoreReleases returns the complete audited engine/version matrix for a
+// PSP-native node. Keeping this separate from the legacy xray-versions route
+// avoids pretending a 3X-UI panel can switch engine families.
+func (h *AdminServersHandler) ListCoreReleases(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid id"})
+		return
+	}
+	panel, err := h.repo.GetByID(c.Request.Context(), id)
+	if err != nil {
+		mapServerError(c, err)
+		return
+	}
+	if domain.NormalizePanelKind(panel.Kind) != domain.PanelKindPSP {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Core engine selection is available only for PSP native nodes"})
+		return
+	}
+	client, err := h.pool.Get(id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Server not registered in pool: " + err.Error()})
+		return
+	}
+	selector, ok := client.(ports.CoreEngineSelector)
+	if !ok {
+		c.JSON(http.StatusNotImplemented, gin.H{"error": ports.ErrPanelCapabilityUnsupported.Error()})
+		return
+	}
+	engines := []domain.NodeCoreEngine{domain.NodeCoreXray, domain.NodeCoreSingBox}
+	releases := make([]corecatalog.Release, 0)
+	for _, engine := range engines {
+		versions, listErr := selector.GetCoreVersionListForEngine(c.Request.Context(), engine)
+		if listErr != nil {
+			c.JSON(http.StatusBadGateway, gin.H{"error": "Get core catalog failed: " + listErr.Error()})
+			return
+		}
+		available := make(map[string]struct{}, len(versions))
+		for _, version := range versions {
+			available[version] = struct{}{}
+		}
+		catalog, catalogErr := corecatalog.List(string(engine))
+		if catalogErr != nil {
+			respondError(c, catalogErr)
+			return
+		}
+		for _, release := range catalog {
+			if _, exists := available[release.Version]; exists {
+				releases = append(releases, release)
+			}
+		}
+	}
+	c.JSON(http.StatusOK, gin.H{"releases": releases})
+}
+
+type selectCoreRequest struct {
+	Engine            string `json:"engine"`
+	Version           string `json:"version"`
+	ConfirmRestricted bool   `json:"confirm_restricted"`
+}
+
+// SelectCore records one exact, catalog-audited deployment identity. The
+// dialing node downloads and validates it on its next synchronization round;
+// the HTTP success therefore means accepted intent, never observed runtime.
+func (h *AdminServersHandler) SelectCore(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid id"})
+		return
+	}
+	panel, err := h.repo.GetByID(c.Request.Context(), id)
+	if err != nil {
+		mapServerError(c, err)
+		return
+	}
+	if domain.NormalizePanelKind(panel.Kind) != domain.PanelKindPSP {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Core engine selection is available only for PSP native nodes"})
+		return
+	}
+	var req selectCoreRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	engine := domain.NodeCoreEngine(req.Engine)
+	if !engine.Valid() || req.Version == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"ok": false, "reason": "invalid_core_selection", "error": "supported engine and exact version are required"})
+		return
+	}
+	release, err := corecatalog.Resolve(string(engine), req.Version)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"ok": false, "reason": "core_not_audited", "error": err.Error()})
+		return
+	}
+	if release.RequiresConfirmation && !req.ConfirmRestricted {
+		c.JSON(http.StatusConflict, gin.H{
+			"ok": false, "reason": "restricted_core_confirmation_required",
+			"engine": release.Engine, "version": release.Version, "release": release,
+		})
+		return
+	}
+	if !release.RequiresConfirmation && req.ConfirmRestricted {
+		c.JSON(http.StatusBadRequest, gin.H{"ok": false, "reason": "unexpected_restricted_confirmation"})
+		return
+	}
+	client, err := h.pool.Get(id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Server not registered in pool: " + err.Error()})
+		return
+	}
+	selector, ok := client.(ports.CoreEngineSelector)
+	if !ok {
+		c.JSON(http.StatusNotImplemented, gin.H{"ok": false, "error": ports.ErrPanelCapabilityUnsupported.Error()})
+		return
+	}
+	target := release.Engine + "/" + release.Version
+	if err := selector.InstallCoreEngine(c.Request.Context(), engine, release.Version, req.ConfirmRestricted); err != nil {
+		h.writeUpgradeAudit(c, "core_selection_failed", panel, target, err.Error())
+		c.JSON(http.StatusBadGateway, gin.H{"ok": false, "error": "select core failed: " + err.Error()})
+		return
+	}
+	h.writeUpgradeAudit(c, "core_selection_requested", panel, target, "")
+	c.JSON(http.StatusAccepted, gin.H{
+		"ok": true, "engine": release.Engine, "version": release.Version,
+		"message": "Core intent recorded; the native node will download, validate, switch atomically and report the observed deployment.",
+	})
 }
 
 // WebCert proxies GET /panel/api/server/getWebCertFiles on the panel and
@@ -1234,8 +1394,29 @@ func (h *AdminServersHandler) refreshIPLimitEnforcement(
 	return state, true
 }
 
-func (h *AdminServersHandler) toServerDTO(p *domain.Panel) serverDTO {
+func (h *AdminServersHandler) toServerDTO(ctx context.Context, p *domain.Panel) serverDTO {
+	var agent *domain.NodeAgent
+	if h.agents != nil && domain.NormalizePanelKind(p.Kind) == domain.PanelKindPSP {
+		loaded, err := h.agents.GetByPanelID(ctx, p.ID)
+		if err == nil {
+			agent = loaded
+		} else if !errors.Is(err, domain.ErrNotFound) {
+			log.Warn("admin servers: load native core selection", "panel_id", p.ID, "err", err)
+		}
+	}
+	return h.toServerDTOWithAgent(p, agent)
+}
+
+func (h *AdminServersHandler) toServerDTOWithAgent(p *domain.Panel, agent *domain.NodeAgent) serverDTO {
 	dto := toServerDTO(p)
+	if domain.NormalizePanelKind(p.Kind) == domain.PanelKindPSP {
+		dto.CoreVersion = p.XrayVersion
+		if agent != nil {
+			dto.CoreEngine = string(agent.ObservedCoreEngine)
+			dto.DesiredCoreEngine = string(domain.NormalizeNodeCoreEngine(agent.DesiredCoreEngine))
+			dto.DesiredCoreVersion = agent.DesiredCoreVersion
+		}
+	}
 	client, err := h.pool.Get(p.ID)
 	if err != nil {
 		return dto

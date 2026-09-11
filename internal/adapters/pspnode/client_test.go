@@ -37,6 +37,7 @@ type nodeRepo struct {
 type agentRepo struct {
 	ports.NodeAgentRepo
 	agent   *domain.NodeAgent
+	engine  domain.NodeCoreEngine
 	version string
 	allow   bool
 }
@@ -45,7 +46,8 @@ func (r *agentRepo) GetByPanelID(context.Context, int64) (*domain.NodeAgent, err
 	return r.agent, nil
 }
 
-func (r *agentRepo) UpdateCoreSelection(_ context.Context, _ string, version string, allow bool) error {
+func (r *agentRepo) UpdateCoreSelection(_ context.Context, _ string, engine domain.NodeCoreEngine, version string, allow bool) error {
+	r.engine = engine
 	r.version = version
 	r.allow = allow
 	return nil
@@ -137,7 +139,17 @@ func TestCoreUpdaterUsesAuditedCatalogAndPersistsDesiredVersion(t *testing.T) {
 	if err := client.InstallCore(context.Background(), "26.9.9"); err != nil {
 		t.Fatal(err)
 	}
-	if repo.version != "26.9.9" || !repo.allow {
-		t.Fatalf("persisted selection = %q allow=%v", repo.version, repo.allow)
+	if repo.engine != domain.NodeCoreXray || repo.version != "26.9.9" || !repo.allow {
+		t.Fatalf("persisted selection = %s/%s allow=%v", repo.engine, repo.version, repo.allow)
+	}
+	singBoxVersions, err := client.GetCoreVersionListForEngine(context.Background(), domain.NodeCoreSingBox)
+	if err != nil || len(singBoxVersions) != 1 || singBoxVersions[0] != "1.14.0" {
+		t.Fatalf("sing-box catalog = (%v, %v)", singBoxVersions, err)
+	}
+	if err := client.InstallCoreEngine(context.Background(), domain.NodeCoreSingBox, "1.14.0", false); err != nil {
+		t.Fatal(err)
+	}
+	if repo.engine != domain.NodeCoreSingBox || repo.version != "1.14.0" || repo.allow {
+		t.Fatalf("persisted selection = %s/%s allow=%v", repo.engine, repo.version, repo.allow)
 	}
 }

@@ -1890,6 +1890,7 @@
       "remark": "备注",
       "auth_method": "认证方式",
       "insecure_https": "允许不安全的 HTTPS（危险！）",
+      "core_engine": "内核",
       "xray_version": "目标版本",
       "xray_version_latest": "latest（最新版）",
       "xray_version_loading": "正在加载可用版本…",
@@ -1898,7 +1899,8 @@
       "core_evidence": "证据：配置自检 {{config}} · 客户端真实握手 {{handshake}}",
       "core_evidence_yes": "已完成",
       "core_evidence_no": "未完成",
-      "core_handshake_title": "实测矩阵："
+      "core_handshake_title": "实测矩阵：",
+      "core_pending": "待切换 → {{engine}} {{version}}"
     },
     "auth_method": {
       "token": "API Token",
@@ -1978,7 +1980,7 @@
       "force_upgrade": "强制升级",
       "upgrade_panel": "升级 3X-UI 面板（最新）",
       "upgrade_xray": "升级 Xray",
-      "select_core": "选择 Xray 内核版本",
+      "select_core": "选择内核与版本",
       "rotate_node_credential": "轮换节点凭据"
     },
     "core_tier": {
@@ -2020,7 +2022,7 @@
       "upgrade_panel_already_latest": "已是最新版（{{version}}），无需升级",
       "upgrade_panel_blocked": "拒绝升级：目标版本 {{latest}} 超出 Passwall Panel 测试范围（最高 {{max}}），请先升级 Passwall Panel",
       "upgrade_xray_ok": "Xray 已升级到 {{version}}",
-      "core_intent_saved": "已保存 Xray {{version}} 为期望版本；节点核验、切换并回报后才算完成",
+      "core_intent_saved": "已保存 {{engine}} {{version}} 为期望内核；节点核验、切换并回报后才算完成",
       "batch_upgrade_xray_ok": "已升级 {{count}} 台 Xray 到最新版",
       "batch_upgrade_xray_partial": "已升级 {{ok}} 台 Xray，失败 {{fail}} 台",
       "batch_upgrade_panel_ok": "已发起 {{count}} 台 3X-UI 升级，约 60 秒后各自跑 smoke probe（结果见 audit log）",
@@ -2043,8 +2045,9 @@
       "upgrade_force_title": "目标版本未通过 Passwall Panel 验证",
       "upgrade_force_message": "即将升级到 {{latest}}。当前 Passwall Panel 已验证的最高 3X-UI 版本为 {{max}}。强制升级可能因协议或字段变更导致 traffic poll、reconcile 等关键流程失败。建议先升级 Passwall Panel 至支持该 3X-UI 版本的发行，再升级面板。是否仍要强制升级？",
       "upgrade_xray_title": "升级 Xray",
+      "select_core_title": "选择节点内核",
       "upgrade_xray_message": "在 {{name}} 上安装 xray-core。可在下方选择目标版本（默认最新）。面板自身不重启，只重启 xray 子进程。",
-      "select_core_message": "为 {{name}} 选择经过审计的 Xray 版本。Node 会先校验来源、SHA-256 与现有配置，再原子切换；启动失败自动回滚。",
+      "select_core_message": "为 {{name}} 选择经过审计的内核与精确版本。Node 会先校验来源、SHA-256 与现有配置，再原子切换；启动失败自动回滚。",
       "restricted_core_title": "此版本会缩窄 REALITY 客户端兼容范围",
       "restricted_core_message": "Xray {{version}}：{{summary}} 选择后 sing-box REALITY 节点会被订阅输出排除；Mihomo 会固定 chrome 并开启 ML-KEM。是否接受这个兼容范围？",
       "restricted_core_confirm": "接受并选择"

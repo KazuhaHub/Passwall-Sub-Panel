@@ -228,6 +228,14 @@ type CoreUpdater interface {
 	InstallCore(ctx context.Context, version string) error
 }
 
+// CoreEngineSelector is the native-node extension to CoreUpdater. Legacy
+// upstream panels manage one vendor-defined core, while a PSP node can switch
+// both its audited engine and exact version as one desired deployment.
+type CoreEngineSelector interface {
+	GetCoreVersionListForEngine(ctx context.Context, engine domain.NodeCoreEngine) ([]string, error)
+	InstallCoreEngine(ctx context.Context, engine domain.NodeCoreEngine, version string, allowRestrictedReality bool) error
+}
+
 // WebCertProvider exposes certificate file paths from the upstream host.
 type WebCertProvider interface {
 	GetWebCertFiles(ctx context.Context) (*WebCertFiles, error)
@@ -294,6 +302,7 @@ type PanelUpdateInfo struct {
 // and xray.version as the bare semver of the xray-core binary.
 type ServerStatus struct {
 	PanelVersion string
+	CoreEngine   string
 	XrayVersion  string
 	XrayState    string // "running" / "stop" / "error"
 }

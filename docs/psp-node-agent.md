@@ -795,12 +795,13 @@ NAT 后面的节点直接做不了）。**不划算，不要走这条。**
 PSP 拨入时「这次没到」的证据由 PSP 的传输层产生，节点拨出时它变成故障方的自述，
 所以才有 `last_seen` 的独立判定（§7.5）。这是**检测**问题，不是**延迟**问题，不要混。
 
-## 9. ⏸ 后续增量（不影响当前 Xray 生产路径）
+## 9. ⏸ 后续增量（不影响当前 Xray / sing-box 生产路径）
 
 - 交付形态已完成：单文件六平台二进制、Linux amd64/arm64 Docker、校验和与发布 CI。agent 自身
   升级机制仍未定。
-- core：Xray 的 `Compiler / Supervisor / Telemetry` 与生产 composition 已接通；sing-box adapter
-  是后续实现，不等于当前可运行承诺。
+- core：Xray 与 sing-box 的 `Compiler / Supervisor / Telemetry` 均已接入生产 composition；PSP
+  从审计目录选择 engine + exact version，并将 desired 和 observed identity 分开展示。sing-box
+  当前核验 `1.14.0`，编译范围为 VLESS、VMess、Trojan、Shadowsocks-2022。
 - 证书：PSP 管理的证书材料已内联进 PSP 所有的期望 stream config，由 core 配置校验与原子部署
   一起提交/回滚；native 节点不得依赖控制面机器上的本地证书路径。
 - 注册与认证已完成：创建时事务性铸造 panel + agent + 三条流，长期随机 Bearer 只展示一次，PSP
@@ -813,9 +814,9 @@ PSP 拨入时「这次没到」的证据由 PSP 的传输层产生，节点拨�
 
 > **可交接的展开版见 [`psp-node-plan.md`](psp-node-plan.md)**——每一项带完成判据、涉及文件、依赖顺序，以及一份「十条不要」。这一节只留骨架。
 
-依赖链 A1 → A2/A3 → C1/C2 → B3-Xray 已完成。当前下一步不是重写协议，而是执行发布闸：
+依赖链 A1 → A2/A3 → C1/C2 → B3-Xray/B3-sing-box 已完成。当前下一步不是重写协议，而是保持跨仓发布闸：
 
 1. 发布 Passwall-Node 新 revision/tag，保留六平台与容器 CI 证据。
 2. 把 PSP 的 `go.mod` pseudo-version 指向该 revision。
 3. 关闭父目录 `go.work`，跑 PSP 后端、前端、跨平台构建和 live contract 全套闸门。
-4. 后续能力按 §9 独立立项；不得把未知 task 当成功，也不得让 sing-box 占位声明看起来像已支持。
+4. 后续能力按 §9 独立立项；不得把未知 task 当成功，也不得把未经目录核验的 core 版本暴露为可选项。

@@ -50,9 +50,11 @@ import UpgradeIcon from '@mui/icons-material/Upgrade'
 import {
   createServer,
   deleteServer,
+	listCoreReleases,
   listServers,
   listXrayVersions,
 	rotateNativeCredential,
+	selectCore,
   testServer,
   updateServer,
   upgradePanel,
@@ -60,6 +62,7 @@ import {
   upgradeXray,
 	type Server,
 	type NativeServerProvisioning,
+	type NativeCoreEngine,
   type PanelCapability,
   type PanelType,
 	type CoreRelease,
@@ -140,18 +143,20 @@ export default function ServersView() {
   const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null)
   const [menuTarget, setMenuTarget] = useState<Server | null>(null)
   const [upgrading, setUpgrading] = useState<number | null>(null)
-  // Xray upgrade dialog state. Opened from the kebab menu's "升级 Xray"
-  // item; the dialog lazy-loads the version list from
-  // GET /admin/servers/:id/xray-versions on mount. xrayVersionPick = "" means
-  // "use latest" only for legacy 3X-UI; native PSP nodes select an exact,
-  // catalog-approved release and fail closed if no catalog is available.
-  const [xrayDialogTarget, setXrayDialogTarget] = useState<Server | null>(null)
-  const [xrayVersionPick, setXrayVersionPick] = useState<string>('')
-  const [xrayVersions, setXrayVersions] = useState<string[]>([])
-	const [xrayReleases, setXrayReleases] = useState<CoreRelease[]>([])
-  const [xrayLoadingVersions, setXrayLoadingVersions] = useState(false)
-	const nativeCoreDialog = xrayDialogTarget?.panel_type === 'psp'
-	const selectedXrayRelease = xrayReleases.find(release => release.version === xrayVersionPick)
+  // Core selection dialog state. Legacy 3X-UI lazy-loads its Xray list and
+  // may use "latest"; native PSP nodes load the shared audited engine catalog,
+  // require an exact version, and fail closed if the catalog is unavailable.
+  const [coreDialogTarget, setCoreDialogTarget] = useState<Server | null>(null)
+  const [coreVersionPick, setCoreVersionPick] = useState<string>('')
+  const [legacyXrayVersions, setLegacyXrayVersions] = useState<string[]>([])
+	const [coreReleases, setCoreReleases] = useState<CoreRelease[]>([])
+	const [coreEnginePick, setCoreEnginePick] = useState<NativeCoreEngine>('xray')
+  const [coreVersionsLoading, setCoreVersionsLoading] = useState(false)
+	const nativeCoreDialog = coreDialogTarget?.panel_type === 'psp'
+	const selectedCoreRelease = coreReleases.find(release => release.engine === coreEnginePick && release.version === coreVersionPick)
+	const selectableCoreVersions = nativeCoreDialog
+		? coreReleases.filter(release => release.engine === coreEnginePick).map(release => release.version)
+		: legacyXrayVersions
 
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editing, setEditing] = useState<Server | null>(null)
@@ -241,6 +246,8 @@ export default function ServersView() {
             ...it,
             panel_version: r.panel_version ?? it.panel_version,
             xray_version: r.xray_version ?? it.xray_version,
+						core_engine: r.core_engine ?? it.core_engine,
+						core_version: r.core_version ?? it.core_version,
             version_checked_at: r.version_checked_at ?? it.version_checked_at,
             compat_status: r.compat_status ?? it.compat_status,
             compat_message: r.compat_message ?? it.compat_message,
@@ -402,48 +409,64 @@ export default function ServersView() {
     }
   }
 
-  // openXrayDialog replaces the v3.6.0-beta.7 simple confirm flow. The
+  // openCoreDialog replaces the v3.6.0-beta.7 simple confirm flow. The
   // dialog hosts a version dropdown so admin can pin a specific xray-core
   // tag (or keep "latest"); version list is lazy-loaded from the panel's
   // own /server/getXrayVersion the moment the dialog opens.
-  async function openXrayDialog(s: Server) {
+  async function openCoreDialog(s: Server) {
     closeMenu()
-    setXrayDialogTarget(s)
-		setXrayVersionPick('') // "" = latest for legacy 3X-UI only
-    setXrayVersions([])
-		setXrayReleases([])
-    setXrayLoadingVersions(true)
+    setCoreDialogTarget(s)
+		setCoreVersionPick('') // "" = latest for legacy 3X-UI only
+		setCoreEnginePick('xray')
+    setLegacyXrayVersions([])
+		setCoreReleases([])
+    setCoreVersionsLoading(true)
     try {
-			const result = await listXrayVersions(s.id)
-			setXrayVersions(result.versions)
-			setXrayReleases(result.releases)
 			if (s.panel_type === 'psp') {
-				setXrayVersionPick(result.releases.find(release => release.tier === 'recommended')?.version ?? result.versions[0] ?? '')
+				const releases = await listCoreReleases(s.id)
+				setCoreReleases(releases)
+				const engine = s.desired_core_engine ?? s.core_engine ?? 'xray'
+				setCoreEnginePick(engine)
+				const selected = releases.find(release => release.engine === engine && release.version === s.desired_core_version)
+					?? releases.find(release => release.engine === engine && release.tier === 'recommended')
+					?? releases.find(release => release.engine === engine)
+				setCoreVersionPick(selected?.version ?? '')
+			} else {
+				const result = await listXrayVersions(s.id)
+				setLegacyXrayVersions(result.versions)
+				setCoreReleases(result.releases)
 			}
     } catch {
       // Panel unreachable / endpoint failed — dialog still opens with
       // just the "latest" pseudo-option so admin can still upgrade.
-      setXrayVersions([])
-			setXrayReleases([])
+      setLegacyXrayVersions([])
+			setCoreReleases([])
     } finally {
-      setXrayLoadingVersions(false)
+      setCoreVersionsLoading(false)
     }
   }
 
-  function closeXrayDialog() {
-    setXrayDialogTarget(null)
-		setXrayReleases([])
+  function closeCoreDialog() {
+    setCoreDialogTarget(null)
+		setCoreReleases([])
   }
 
-  async function submitXrayUpgrade() {
-    const s = xrayDialogTarget
+	function changeCoreEngine(engine: NativeCoreEngine) {
+		setCoreEnginePick(engine)
+		const release = coreReleases.find(item => item.engine === engine && item.tier === 'recommended')
+			?? coreReleases.find(item => item.engine === engine)
+		setCoreVersionPick(release?.version ?? '')
+	}
+
+  async function submitCoreSelection() {
+    const s = coreDialogTarget
     if (!s) return
     setUpgrading(s.id)
     try {
-			const selectedRelease = xrayReleases.find(release => release.version === xrayVersionPick)
+			const selectedRelease = coreReleases.find(release => release.engine === coreEnginePick && release.version === coreVersionPick)
 			let confirmRestricted = false
 			if (s.panel_type === 'psp') {
-				if (!xrayVersionPick) return
+				if (!coreVersionPick) return
 				if (selectedRelease?.requires_confirmation) {
 					const accepted = await confirm({
 						title: t('admin:servers.confirm.restricted_core_title'),
@@ -457,17 +480,26 @@ export default function ServersView() {
 					confirmRestricted = true
 				}
 			}
-			const r = await upgradeXray(s.id, xrayVersionPick || undefined, { confirmRestricted })
+			const r = s.panel_type === 'psp'
+				? await selectCore(s.id, coreEnginePick, coreVersionPick, { confirmRestricted })
+				: await upgradeXray(s.id, coreVersionPick || undefined, { confirmRestricted })
+			if (s.panel_type === 'psp') {
+				mutateItems(previous => previous.map(item => item.id === s.id ? {
+					...item,
+					desired_core_engine: coreEnginePick,
+					desired_core_version: coreVersionPick,
+				} : item))
+			}
       pushSnack(
 				s.panel_type === 'psp'
-					? (r.message ?? t('admin:servers.toast.core_intent_saved', { version: r.version }))
+					? t('admin:servers.toast.core_intent_saved', { engine: coreEnginePick === 'sing-box' ? 'sing-box' : 'Xray', version: r.version })
 					: t('admin:servers.toast.upgrade_xray_ok', { version: r.version ?? 'latest' }),
         'success',
       )
       // Backend already refreshed UpdateVersion server-side; probe to
       // pull the latest snapshot into the items list.
 			if (s.panel_type !== 'psp') void probeServer(s)
-      closeXrayDialog()
+      closeCoreDialog()
     } catch (err) {
       const msg = (err as { response?: { data?: { error?: string } }; message?: string }).response?.data?.error
         ?? (err as { message?: string }).message
@@ -812,13 +844,16 @@ export default function ServersView() {
   // from "probed and ok". Compat colors mirror Material's container roles
   // for consistency with statusBadge.
   function versionCell(s: Server) {
-    if (!s.panel_version) {
+		if (!s.panel_version && (s.panel_type !== 'psp' || !s.desired_core_version)) {
       return <Typography sx={{ fontSize: 13, color: md.onSurfaceVariant }}>—</Typography>
     }
+		const pendingCoreSelection = s.panel_type === 'psp' && !!s.desired_core_version &&
+			(s.desired_core_engine !== s.core_engine || s.desired_core_version !== s.core_version)
     let bg = md.tertiaryContainer
     let fg = md.onTertiaryContainer
     let label: string | null = null
-    switch (s.compat_status) {
+		if (s.panel_type !== 'psp') {
+			switch (s.compat_status) {
       case 'supported':
         // No badge — clean state. The version text alone suffices.
         break
@@ -837,17 +872,28 @@ export default function ServersView() {
         bg = md.surfaceContainerHighest
         fg = md.onSurfaceVariant
         label = t('admin:servers.compat.unknown', { defaultValue: '无法识别' })
-    }
+			}
+		}
     const versionText = (
       <Box sx={{ display: 'flex', flexDirection: 'column', lineHeight: 1.3 }}>
         <Typography sx={{ fontSize: 13, fontWeight: 500 }}>
-          {s.panel_type === 'sui' ? 'S-UI' : s.panel_type === 'psp' ? 'PSP Node' : '3X-UI'} {s.panel_version}
+					{s.panel_type === 'sui' ? 'S-UI' : s.panel_type === 'psp' ? 'PSP Node' : '3X-UI'} {s.panel_version ?? ''}
         </Typography>
-        {s.xray_version && (
+        {(s.panel_type === 'psp' ? s.core_version : s.xray_version) && (
           <Typography sx={{ fontSize: 11, color: md.onSurfaceVariant }}>
-            Xray {s.xray_version}
+						{s.panel_type === 'psp'
+							? `${s.core_engine === 'sing-box' ? 'sing-box' : 'Xray'} ${s.core_version}`
+							: `Xray ${s.xray_version}`}
           </Typography>
         )}
+				{pendingCoreSelection && (
+					<Typography sx={{ fontSize: 11, color: md.tertiary }}>
+						{t('admin:servers.field.core_pending', {
+							engine: s.desired_core_engine === 'sing-box' ? 'sing-box' : 'Xray',
+							version: s.desired_core_version,
+						})}
+					</Typography>
+				)}
       </Box>
     )
     const badge = label && (
@@ -1275,7 +1321,7 @@ export default function ServersView() {
           <SystemUpdateIcon fontSize="small" sx={{ mr: 1 }} />
           {t('admin:servers.action.upgrade_panel', { defaultValue: '升级 3X-UI 面板（最新）' })}
         </MenuItem>}
-        {hasCapability(menuTarget, 'core.upgrade') && <MenuItem onClick={() => menuTarget && openXrayDialog(menuTarget)}>
+        {hasCapability(menuTarget, 'core.upgrade') && <MenuItem onClick={() => menuTarget && openCoreDialog(menuTarget)}>
           <SystemUpdateIcon fontSize="small" sx={{ mr: 1 }} />
 						{menuTarget?.panel_type === 'psp'
 							? t('admin:servers.action.select_core')
@@ -1286,42 +1332,53 @@ export default function ServersView() {
 			{t('admin:servers.action.rotate_node_credential')}
 		</MenuItem>}
       </Menu>
-      {/* Upgrade Xray dialog — pinning a specific xray-core version. The
-          version list comes from the panel's /server/getXrayVersion at
-          dialog-open time; if that fetch failed (xrayVersions is empty),
-          the dropdown still offers "latest" so admin can proceed. Empty
-          string in the Select value carries "use latest" semantics. */}
+      {/* Legacy 3X-UI upgrades Xray in place; native PSP nodes select an
+          audited engine + exact version and converge asynchronously. */}
       <Dialog
-        open={!!xrayDialogTarget}
-        onClose={() => upgrading === null && closeXrayDialog()}
+        open={!!coreDialogTarget}
+        onClose={() => upgrading === null && closeCoreDialog()}
         slotProps={{
           paper: { sx: { borderRadius: 3, bgcolor: md.surfaceContainerHigh, width: 480, maxWidth: '90vw' } }
         }}
       >
-        <DialogTitle>{t('admin:servers.confirm.upgrade_xray_title')}</DialogTitle>
+				<DialogTitle>{t(nativeCoreDialog ? 'admin:servers.confirm.select_core_title' : 'admin:servers.confirm.upgrade_xray_title')}</DialogTitle>
         <DialogContent>
-          {xrayDialogTarget && (
+          {coreDialogTarget && (
             <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, pt: 1 }}>
               <Typography variant="body2">
 								{t(nativeCoreDialog
 									? 'admin:servers.confirm.select_core_message'
-									: 'admin:servers.confirm.upgrade_xray_message', { name: xrayDialogTarget.name })}
+									: 'admin:servers.confirm.upgrade_xray_message', { name: coreDialogTarget.name })}
               </Typography>
-              <FormControl fullWidth size="small" disabled={xrayLoadingVersions || upgrading !== null}>
+							{nativeCoreDialog && (
+								<FormControl fullWidth size="small" disabled={coreVersionsLoading || upgrading !== null}>
+									<InputLabel id="core-engine-select">{t('admin:servers.field.core_engine')}</InputLabel>
+									<Select
+										labelId="core-engine-select"
+										value={coreEnginePick}
+										label={t('admin:servers.field.core_engine')}
+										onChange={event => changeCoreEngine(event.target.value as NativeCoreEngine)}
+									>
+										<MenuItem value="xray">Xray</MenuItem>
+										<MenuItem value="sing-box">sing-box</MenuItem>
+									</Select>
+								</FormControl>
+							)}
+              <FormControl fullWidth size="small" disabled={coreVersionsLoading || upgrading !== null}>
                 <InputLabel id="xray-version-select">
                   {t('admin:servers.field.xray_version', { defaultValue: '目标版本' })}
                 </InputLabel>
                 <Select
                   labelId="xray-version-select"
-                  value={xrayVersionPick}
+                  value={coreVersionPick}
                   label={t('admin:servers.field.xray_version', { defaultValue: '目标版本' })}
-                  onChange={e => setXrayVersionPick(e.target.value)}
+                  onChange={e => setCoreVersionPick(e.target.value)}
                 >
 									{!nativeCoreDialog && <MenuItem value="">
 										{t('admin:servers.field.xray_version_latest')}
 									</MenuItem>}
-                  {xrayVersions.map(v => {
-                    const release = xrayReleases.find(item => item.version === v)
+									{selectableCoreVersions.map(v => {
+										const release = coreReleases.find(item => item.engine === coreEnginePick && item.version === v)
                     return (
                       <MenuItem key={v} value={v}>
                         {v}{release ? ` · ${t(`admin:servers.core_tier.${release.tier}`)}` : ''}
@@ -1330,42 +1387,42 @@ export default function ServersView() {
                   })}
                 </Select>
               </FormControl>
-              {xrayLoadingVersions && (
+              {coreVersionsLoading && (
                 <Typography variant="caption" sx={{ color: md.onSurfaceVariant }}>
                   {t('admin:servers.field.xray_version_loading', { defaultValue: '正在加载可用版本…' })}
                 </Typography>
               )}
-							{nativeCoreDialog && !xrayLoadingVersions && xrayVersions.length === 0 && (
+							{nativeCoreDialog && !coreVersionsLoading && coreReleases.length === 0 && (
 								<Typography variant="caption" sx={{ color: md.error }}>
 									{t('admin:servers.field.core_catalog_unavailable')}
 								</Typography>
 							)}
-							{nativeCoreDialog && selectedXrayRelease && (
+							{nativeCoreDialog && selectedCoreRelease && (
 								<Box sx={{ p: 1.5, borderRadius: 2, bgcolor: md.surfaceContainerHighest }}>
 									<Typography variant="body2" sx={{ fontWeight: 600 }}>
-										{t(`admin:servers.core_tier.${selectedXrayRelease.tier}`)}
+										{t(`admin:servers.core_tier.${selectedCoreRelease.tier}`)}
 									</Typography>
 									<Typography variant="body2" sx={{ mt: 0.5 }}>
-										{i18n.language.startsWith('zh') ? selectedXrayRelease.summary.zh_cn : selectedXrayRelease.summary.en}
+										{i18n.language.startsWith('zh') ? selectedCoreRelease.summary.zh_cn : selectedCoreRelease.summary.en}
 									</Typography>
 									<Typography variant="caption" component="div" sx={{ mt: 1, color: md.onSurfaceVariant }}>
 										{t('admin:servers.field.core_reality_matrix', {
-											xray: t(`admin:servers.core_support.${selectedXrayRelease.reality.xray}`),
-											mihomo: t(`admin:servers.core_support.${selectedXrayRelease.reality.mihomo}`),
-											singbox: t(`admin:servers.core_support.${selectedXrayRelease.reality.sing_box}`),
-											uri: t(`admin:servers.core_support.${selectedXrayRelease.reality.uri_list}`),
+											xray: t(`admin:servers.core_support.${selectedCoreRelease.reality.xray}`),
+											mihomo: t(`admin:servers.core_support.${selectedCoreRelease.reality.mihomo}`),
+											singbox: t(`admin:servers.core_support.${selectedCoreRelease.reality.sing_box}`),
+											uri: t(`admin:servers.core_support.${selectedCoreRelease.reality.uri_list}`),
 										})}
 									</Typography>
 									<Typography variant="caption" component="div" sx={{ color: md.onSurfaceVariant }}>
 										{t('admin:servers.field.core_evidence', {
-											config: selectedXrayRelease.evidence.config_tested ? t('admin:servers.field.core_evidence_yes') : t('admin:servers.field.core_evidence_no'),
-											handshake: selectedXrayRelease.evidence.handshake_tested ? t('admin:servers.field.core_evidence_yes') : t('admin:servers.field.core_evidence_no'),
+											config: selectedCoreRelease.evidence.config_tested ? t('admin:servers.field.core_evidence_yes') : t('admin:servers.field.core_evidence_no'),
+											handshake: selectedCoreRelease.evidence.handshake_tested ? t('admin:servers.field.core_evidence_yes') : t('admin:servers.field.core_evidence_no'),
 										})}
 									</Typography>
-									{selectedXrayRelease.evidence.handshakes?.length ? (
+									{selectedCoreRelease.evidence.handshakes?.length ? (
 										<Typography variant="caption" component="div" sx={{ color: md.onSurfaceVariant }}>
 											{t('admin:servers.field.core_handshake_title')}{' '}
-											{selectedXrayRelease.evidence.handshakes.map((handshake, index) => (
+											{selectedCoreRelease.evidence.handshakes.map((handshake, index) => (
 												<Box component="span" key={`${handshake.client}-${handshake.version}-${handshake.profile}`} title={`${handshake.profile}; ${handshake.platform}`}>
 													{index > 0 ? ' · ' : ''}
 													{t(`admin:servers.core_client.${handshake.client}`)} {handshake.version}{' '}
@@ -1380,16 +1437,18 @@ export default function ServersView() {
           )}
         </DialogContent>
         <DialogActions>
-          <Button onClick={closeXrayDialog} disabled={upgrading !== null} variant="text">
+          <Button onClick={closeCoreDialog} disabled={upgrading !== null} variant="text">
             {t('common:actions.cancel')}
           </Button>
           <Button
-            onClick={submitXrayUpgrade}
+            onClick={submitCoreSelection}
             variant="contained"
-				disabled={upgrading !== null || (nativeCoreDialog && (xrayLoadingVersions || !xrayVersionPick))}
+				disabled={upgrading !== null || (nativeCoreDialog && (coreVersionsLoading || !coreVersionPick))}
             startIcon={upgrading !== null ? <CircularProgress size={16} color="inherit" /> : null}
           >
-            {t('admin:servers.action.upgrade', { defaultValue: '升级' })}
+            {nativeCoreDialog
+              ? t('admin:servers.action.select_core')
+              : t('admin:servers.action.upgrade', { defaultValue: '升级' })}
           </Button>
         </DialogActions>
       </Dialog>
