@@ -1727,19 +1727,24 @@ function InboundFormFields({ form, setForm, showMetadata, servers, onGenKeys, on
                     onChange={e => update('reality_spider_x', e.target.value)}
                     sx={{ flex: '1 1 180px' }} />}
                 </Box>
-                <Box>
-                  {switchControl(
-                    t('admin:nodes.create_dialog.reality_support_x25519mlkem768'),
-                    form.reality_support_x25519mlkem768,
-                    checked => setForm(prev => ({
+                <Box sx={{ display: 'flex', alignItems: 'flex-start' }}>
+                  <Switch size="small"
+                    checked={form.reality_support_x25519mlkem768}
+                    onChange={(_, checked) => setForm(prev => ({
                       ...prev,
                       reality_support_x25519mlkem768: checked,
                       reality_fingerprint: checked ? 'chrome' : prev.reality_fingerprint,
-                    })),
-                  )}
-                  <Typography sx={{ ml: 1.5, mt: -0.5, fontSize: 12, color: md.onSurfaceVariant }}>
-                    {t('admin:nodes.create_dialog.reality_support_x25519mlkem768_hint')}
-                  </Typography>
+                    }))}
+                    slotProps={{ input: { 'aria-label': t('admin:nodes.create_dialog.reality_support_x25519mlkem768') } }}
+                    sx={{ flexShrink: 0, mr: 1 }} />
+                  <Box sx={{ pt: 0.25 }}>
+                    <Typography sx={{ fontSize: 13, lineHeight: 1.5 }}>
+                      {t('admin:nodes.create_dialog.reality_support_x25519mlkem768')}
+                    </Typography>
+                    <Typography sx={{ mt: 0.25, fontSize: 12, color: md.onSurfaceVariant }}>
+                      {t('admin:nodes.create_dialog.reality_support_x25519mlkem768_hint')}
+                    </Typography>
+                  </Box>
                 </Box>
                 <TextField required size="small" fullWidth label={t('admin:nodes.create_dialog.private_key')}
                   value={form.private_key}
