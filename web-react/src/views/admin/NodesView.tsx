@@ -417,12 +417,9 @@ const EMPTY_INBOUND: InboundFormState = {
   reality_spider_x: '/ai',
   reality_xver: 0,
   reality_max_timediff: 0,
-  // Default new REALITY inbounds to minClientVer 0.0.0 so all client cores
-  // remain eligible. xray-core >= 26.7.11 treats an EMPTY minClientVer as
-  // "26.3.27", which rejects non-xray-core clients. Existing nodes are
-  // unaffected: parseInboundForEdit overrides this with the panel's real
-  // value. See docs/3xui-compat.md 2026-07-13.
-  reality_min_client: '0.0.0',
+  // Keep minClientVer empty by default. The input placeholder recommends
+  // "0.0.0" when users explicitly want to allow every client core.
+  reality_min_client: '',
   reality_max_client: '',
   ss_method: '2022-blake3-aes-256-gcm',
   ss_password: '',

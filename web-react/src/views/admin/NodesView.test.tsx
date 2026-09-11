@@ -58,8 +58,9 @@ it('limits REALITY fingerprints and locks chrome when X25519MLKEM768 is enabled'
   const fingerprint = within(dialog).getByRole('combobox', {
     name: 'admin:nodes.create_dialog.reality_fingerprint',
   })
-  expect(within(dialog).getByLabelText('admin:nodes.create_dialog.reality_min_client')
-    .getAttribute('placeholder')).toBe('0.0.0')
+  const minClientVersion = within(dialog).getByLabelText('admin:nodes.create_dialog.reality_min_client')
+  expect(minClientVersion.getAttribute('placeholder')).toBe('0.0.0')
+  expect((minClientVersion as HTMLInputElement).value).toBe('')
 
   fireEvent.mouseDown(fingerprint)
   const options = await screen.findAllByRole('option')
