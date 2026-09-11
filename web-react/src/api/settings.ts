@@ -79,6 +79,12 @@ export interface UISettings {
   timezone: string
   cron_traffic_pull_minutes: number
   cron_reconcile_minutes: number
+  /** Native-agent sync heartbeat. 0 uses the 30-second product default. */
+  node_poll_seconds: number
+  /** Native-agent full counter/report cadence. Lower values tighten the
+   * quota-overburn bound at the cost of more uplink bandwidth; 0 asks for a
+   * full enumeration on every sync. */
+  full_report_seconds: number
   /** Concurrency cap for parallel ListInbounds fan-out during traffic poll
    *  and reconcile. 0 / unset falls back to 8; values > 64 clamp down. */
   max_panel_concurrency: number

@@ -73,7 +73,8 @@ func TestCheckOneRecreatesAMissingClientWithTheUsersRealEnableState(t *testing.T
 			}
 			e := &domain.XUIClientEntry{PanelID: 10, InboundID: 7, ClientEmail: "u@psp.local"}
 
-			s.checkOne(context.Background(), tc.user, e, ce, nil, LevelFull)
+			s.checkOne(context.Background(), tc.user,
+				tc.user.Lifecycle(time.Now(), 0), e, ce, nil, LevelFull)
 			if len(syncer.added) != 1 {
 				t.Fatalf("expected exactly one recreate, got %d", len(syncer.added))
 			}

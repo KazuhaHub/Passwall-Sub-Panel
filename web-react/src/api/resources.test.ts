@@ -9,6 +9,7 @@ const http = vi.hoisted(() => ({
 vi.mock('./client', () => ({ client: http }))
 
 import * as groups from './groups'
+import * as nodeIssues from './nodeIssues'
 import * as rules from './rules'
 import * as syncTasks from './syncTasks'
 import * as templates from './templates'
@@ -96,6 +97,8 @@ describe('resource API contracts', () => {
     await syncTasks.retrySyncTask(5)
     await syncTasks.cancelSyncTask(5)
     await expect(syncTasks.purgeFinishedSyncTasks()).resolves.toEqual({ deleted: 4 })
+    await nodeIssues.listNodeIssues({ acknowledged: false, keyword: 'rejected' })
+    await nodeIssues.acknowledgeNodeIssue(9)
 
     expect(http.get).toHaveBeenCalledWith('/admin/groups', {
       params: { page: 1, page_size: 10 }, signal,
@@ -103,6 +106,7 @@ describe('resource API contracts', () => {
     expect(http.put).toHaveBeenCalledWith('/admin/rules/r', rule)
     expect(http.post).toHaveBeenCalledWith('/admin/templates/t/reset')
     expect(http.post).toHaveBeenCalledWith('/admin/sync-tasks/5/retry')
+    expect(http.post).toHaveBeenCalledWith('/admin/node-issues/9/acknowledge')
   })
 
   it('loads every group page for settings dropdowns', async () => {

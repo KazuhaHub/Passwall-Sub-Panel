@@ -320,6 +320,16 @@ export default function SettingsView() {
         pushSnack(t('admin:validation.non_negative_number') + ' (emergency_access_quota_gb)', 'warning'); return false
       }
     }
+    if (!Number.isInteger(settings.node_poll_seconds)
+      || settings.node_poll_seconds < 0 || settings.node_poll_seconds > 3600) {
+      pushSnack('node_poll_seconds must be an integer between 0 and 3600', 'warning')
+      return false
+    }
+    if (!Number.isInteger(settings.full_report_seconds)
+      || settings.full_report_seconds < 0 || settings.full_report_seconds > 86400) {
+      pushSnack('full_report_seconds must be an integer between 0 and 86400', 'warning')
+      return false
+    }
     // Announcement: if the admin enabled it but left the title or body
     // empty, the portal would render a chrome-less notice — protect against
     // accidental publishes.
@@ -898,6 +908,16 @@ export default function SettingsView() {
                 onChange={v => patch('cron_traffic_pull_minutes', v)} />
               <NumField label={t('settings.general.cron_reconcile_minutes')} value={settings.cron_reconcile_minutes}
                 onChange={v => patch('cron_reconcile_minutes', v)} />
+            </Pair>
+            <Pair>
+              <NumField label={t('settings.general.node_poll_seconds')}
+                value={settings.node_poll_seconds}
+                onChange={v => patch('node_poll_seconds', v)}
+                helperText={t('settings.general.node_poll_seconds_hint')} />
+              <NumField label={t('settings.general.full_report_seconds')}
+                value={settings.full_report_seconds}
+                onChange={v => patch('full_report_seconds', v)}
+                helperText={t('settings.general.full_report_seconds_hint')} />
             </Pair>
             <NumField label={t('settings.general.max_panel_concurrency')}
               value={settings.max_panel_concurrency}

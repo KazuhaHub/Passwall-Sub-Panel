@@ -204,7 +204,7 @@ func userStatusForNode(n *domain.Node) userNodeStatus {
 		}
 		port := relay.Port
 		if port <= 0 {
-			port = n.Port
+			port = n.DesiredPort
 		}
 		status := userRelayStatus{Name: strings.TrimSpace(relay.Name), Status: "unknown"}
 		for _, health := range n.RelayHealth {

@@ -257,13 +257,17 @@ type NodeRepo interface {
 	// write as UpdateTrafficCounters, so it never clobbers the health pass.
 	BatchUpdateTrafficCounters(ctx context.Context, nodes []*domain.Node) error
 	UpdateHealth(ctx context.Context, n *domain.Node) error
-	// UpdateInboundConfig writes only the v3.5 inbound-config snapshot
-	// columns (and the cached port/protocol the snapshot also bears). Same
+	// UpdateInboundConfig writes only the desired inbound-config snapshot
+	// columns, including desired_port/desired_protocol. Same
 	// column-scoped rationale as UpdateHealth / UpdateTrafficCounters:
 	// snapshot writers (admin create/update, reconcile backfill, post-push
 	// capture) must not clobber the health probe's port/HealthState/
 	// HealthCheckedAt columns it may be writing concurrently.
 	UpdateInboundConfig(ctx context.Context, n *domain.Node) error
+	// UpdateObservedEndpoint is the sole writer for the last reported endpoint.
+	// Its narrow value type cannot carry desired values, making the
+	// desired/observed ownership boundary enforceable by the compiler.
+	UpdateObservedEndpoint(ctx context.Context, nodeID int64, observed domain.NodeObservedEndpoint) error
 	// UpdateEnabled writes only the `enabled` column. Same column-scoped
 	// rationale as the writers above: SetEnabled / DeleteAndSync / reconcile's
 	// disappeared-inbound branch flip enabled on a snapshot loaded at cycle
@@ -371,41 +375,108 @@ type OwnershipRepo interface {
 }
 
 // PSPClientRepo persists the v3.9.0 first-class client model: domain.PSPClient
-// (one row per (user, panel, credClass), identified panel-wide by email) plus
-// its PSPClientInbound attachment junction. It is PSP's mirror of 3X-UI's
+// (stable identity = its database-minted ID; email and credClass are mutable
+// attributes) plus its PSPClientInbound attachment junction. It is PSP's mirror of 3X-UI's
 // clients + client_inbounds tables and supersedes OwnershipRepo's per-(user,
 // node) rows; the two coexist during the v3.9.0 migration window (sync / render
 // / reconcile move onto this repo in later phases). Added dormant in P4.0 — no
 // service wires it yet.
 type PSPClientRepo interface {
-	// Upsert creates or updates the client keyed by its panel-wide unique
-	// (PanelID, Email) and returns its ID (existing or new). Persists identity +
-	// credentials + counters; the attachment set is managed via SetInbounds.
-	Upsert(ctx context.Context, c *domain.PSPClient) (int64, error)
+	// Create mints a new stable row ID. UpdateDefinition requires that ID and
+	// updates only mutable definition/credential columns, preserving counters.
+	// Keeping these operations separate makes it impossible for a mutable email
+	// to silently choose between INSERT and UPDATE again.
+	Create(ctx context.Context, c *domain.PSPClient) (int64, error)
+	UpdateDefinition(ctx context.Context, c *domain.PSPClient) error
+	// UpdateDesiredLifecycleByUser is the single column-scoped minter for the
+	// lifecycle carried by all of a user's stable client rows.
+	UpdateDesiredLifecycleByUser(ctx context.Context, userID int64, lifecycle domain.UserLifecycle) error
 	GetByID(ctx context.Context, id int64) (*domain.PSPClient, error)
 	GetByEmail(ctx context.Context, panelID int64, email string) (*domain.PSPClient, error)
 	ListByUser(ctx context.Context, userID int64) ([]*domain.PSPClient, error)
 	// ListAll returns every psp_client — used by the Stage-1 reconcile pass to
 	// provision all shared clients in 3X-UI.
 	ListAll(ctx context.Context) ([]*domain.PSPClient, error)
-	// DeleteByEmail removes the client and (cascading) its attachment rows.
-	DeleteByEmail(ctx context.Context, panelID int64, email string) error
+	// DeleteByID removes the stable client row and its attachment rows.
+	DeleteByID(ctx context.Context, id int64) error
 
 	// SetInbounds reconciles the attachment set to the desired nodes via an
-	// additive diff: remove undesired, insert missing, keep surviving rows so
-	// their per-attachment Provisioned flag is preserved across a dual-write.
+	// additive diff: remove undesired, insert missing as pending, keep surviving
+	// rows so their per-attachment convergence state is preserved.
 	// An empty slice detaches the client from everything locally.
 	SetInbounds(ctx context.Context, clientID int64, inbounds []domain.PSPClientInbound) error
 	ListInbounds(ctx context.Context, clientID int64) ([]domain.PSPClientInbound, error)
-	// MarkInboundProvisioned sets the per-(client, node) Provisioned flag — the
-	// reconcile service calls it only after a 3X-UI read-back confirms the shared
-	// client is attached to that node's inbound. No-op if the row is absent.
-	MarkInboundProvisioned(ctx context.Context, clientID, nodeID int64, provisioned bool) error
+	// UpdateInboundState is the sole narrow writer of observed convergence. The
+	// native adapter supplies its applied version; legacy panel read-back uses
+	// version zero. No-op if the attachment row is absent.
+	UpdateInboundState(ctx context.Context, inbound domain.PSPClientInbound) error
 
 	// UpdateCounters / BatchUpdateCounters are the narrow counter-only writes for
 	// the traffic poll's end-of-cycle flush, mirroring OwnershipRepo.
 	UpdateCounters(ctx context.Context, c *domain.PSPClient) error
 	BatchUpdateCounters(ctx context.Context, items []*domain.PSPClient) error
+}
+
+// NodeAgentRepo persists native-agent identity and the three independent
+// desired/applied streams. MintStream accepts canonical JSON and performs the
+// compare-before-CAS rule: identical content returns minted=false and never
+// advances DesiredVersion.
+type NodeAgentRepo interface {
+	Create(ctx context.Context, agent *domain.NodeAgent) error
+	List(ctx context.Context) ([]*domain.NodeAgent, error)
+	GetByAgentID(ctx context.Context, agentID string) (*domain.NodeAgent, error)
+	GetByCredentialSHA256(ctx context.Context, digest string) (*domain.NodeAgent, error)
+	GetByPanelID(ctx context.Context, panelID int64) (*domain.NodeAgent, error)
+	UpdateCoreSelection(ctx context.Context, agentID, version string, allowRestrictedReality bool) error
+	TouchLastSeen(ctx context.Context, agentID string, seenAt time.Time) error
+	GetStream(ctx context.Context, agentID string, stream domain.NodeAgentStreamName) (*domain.NodeAgentStream, error)
+	ListStreams(ctx context.Context, agentID string) ([]*domain.NodeAgentStream, error)
+	MintStream(ctx context.Context, agentID string, stream domain.NodeAgentStreamName, canonicalBody []byte, now time.Time) (*domain.NodeAgentStream, bool, error)
+	RecordApplied(ctx context.Context, agentID string, stream domain.NodeAgentStreamName, epoch, version uint64, etag string, seenAt time.Time) error
+}
+
+// NativeAgentProvisioningRepo atomically creates and retires the local panel
+// identity plus its one native agent. The raw credential never crosses this
+// boundary; callers pass only its digest and return the raw value once.
+type NativeAgentProvisioningRepo interface {
+	Create(ctx context.Context, panel *domain.XUIPanel, agent *domain.NodeAgent) error
+	RotateCredential(ctx context.Context, panelID int64, credentialSHA256 string) (*domain.NodeAgent, error)
+	DeleteConverged(ctx context.Context, panelID int64) error
+}
+
+type NodeAgentIssueFilter struct {
+	Pagination
+	AgentID      string
+	Code         string
+	Acknowledged *bool
+}
+
+// NodeAgentIssueRepo is the durable handoff from node-owned observations to
+// operators. RecordBatch is idempotent by (agent, code, key, detail): a replay
+// advances LastSeenAt but never creates duplicate rows or clears review state.
+type NodeAgentIssueRepo interface {
+	RecordBatch(ctx context.Context, agentID string, issues []domain.NodeAgentIssue, seenAt time.Time) error
+	GetByID(ctx context.Context, id int64) (*domain.NodeAgentIssue, error)
+	List(ctx context.Context, filter NodeAgentIssueFilter) (items []*domain.NodeAgentIssue, total int64, err error)
+	Acknowledge(ctx context.Context, id int64, acknowledgedAt time.Time) error
+}
+
+// NativeDesiredClient is one stable PSP client and its desired listener
+// attachments, captured in the same database snapshot as NativeDesiredSnapshot.Nodes.
+type NativeDesiredClient struct {
+	Client   *domain.PSPClient
+	Inbounds []domain.PSPClientInbound
+}
+
+// NativeDesiredSnapshot is the transactionally consistent config/roster
+// closure used to mint the native agent's independently-versioned streams.
+type NativeDesiredSnapshot struct {
+	Nodes   []*domain.Node
+	Clients []NativeDesiredClient
+}
+
+type NativeDesiredSnapshotRepo interface {
+	Load(ctx context.Context, panelID int64) (*NativeDesiredSnapshot, error)
 }
 
 type TrafficRepo interface {
@@ -779,10 +850,21 @@ type UISettings struct {
 	// timezone — this knob is only for the system "calendar day" boundary.
 	Timezone string `yaml:"timezone" json:"timezone"`
 
-	// ---- Runtime tuning (restart required for changes to take effect) ----
-	// Background cron intervals; minutes. 0 keeps the previous default.
+	// ---- Runtime tuning (liveness differs by consumer) ----
+	// Background cron intervals; minutes. 0 keeps the previous default. The
+	// traffic interval is boot-resolved; reconcile re-reads its interval.
 	CronTrafficPullMinutes int `json:"cron_traffic_pull_minutes"`
 	CronReconcileMinutes   int `json:"cron_reconcile_minutes"`
+	// NodePollSeconds controls the native agent's sync heartbeat. Zero keeps
+	// the 30-second product default; PSP sends the effective value in every
+	// response so agents retain no independent polling policy.
+	NodePollSeconds int `json:"node_poll_seconds"`
+	// FullReportSeconds is the native-agent full-enumeration cadence. It is
+	// independent from the sync heartbeat: lowering it spends bandwidth for a
+	// fresher fleet-wide traffic numerator and therefore a tighter quota
+	// overburn bound. Zero is an intentional fail-safe value meaning every sync
+	// report is full; an absent setting defaults to 60 seconds in the KV repo.
+	FullReportSeconds int `json:"full_report_seconds"`
 
 	// MaxPanelConcurrency caps the fan-out of concurrent ListInbounds
 	// calls during traffic poll + reconcile (v2.2.5 perf path). 0 or
@@ -1455,31 +1537,35 @@ type OIDCConfigRepo interface {
 
 // Repos aggregates all repository ports for dependency injection.
 type Repos struct {
-	User           UserRepo
-	Group          GroupRepo
-	Node           NodeRepo
-	Separator      SeparatorRepo
-	Ownership      OwnershipRepo
-	PSPClient      PSPClientRepo
-	Traffic        TrafficRepo
-	NodeTraffic    NodeTrafficRepo
-	Audit          AuditRepo
-	AuthEvent      AuthEventRepo
-	AuthToken      AuthTokenRepo
-	WebAuthn       WebAuthnCredentialRepo
-	SubLog         SubLogRepo
-	SyncTask       SyncTaskRepo
-	RuleSet        RuleSetRepo
-	Template       TemplateRepo
-	Locale         LocaleRepo
-	XUIPanel       XUIPanelRepo
-	Settings       SettingsRepo
-	ScopeSettings  ScopeSettingsRepo
-	ScopedSettings ScopedSettings
-	Mail           MailRepo
-	SAMLConfig     SAMLConfigRepo
-	SAMLReplay     SAMLReplayRepo
-	OIDCConfig     OIDCConfigRepo
+	User                    UserRepo
+	Group                   GroupRepo
+	Node                    NodeRepo
+	Separator               SeparatorRepo
+	Ownership               OwnershipRepo
+	PSPClient               PSPClientRepo
+	NodeAgent               NodeAgentRepo
+	NativeAgentProvisioning NativeAgentProvisioningRepo
+	NodeAgentIssue          NodeAgentIssueRepo
+	NativeDesired           NativeDesiredSnapshotRepo
+	Traffic                 TrafficRepo
+	NodeTraffic             NodeTrafficRepo
+	Audit                   AuditRepo
+	AuthEvent               AuthEventRepo
+	AuthToken               AuthTokenRepo
+	WebAuthn                WebAuthnCredentialRepo
+	SubLog                  SubLogRepo
+	SyncTask                SyncTaskRepo
+	RuleSet                 RuleSetRepo
+	Template                TemplateRepo
+	Locale                  LocaleRepo
+	XUIPanel                XUIPanelRepo
+	Settings                SettingsRepo
+	ScopeSettings           ScopeSettingsRepo
+	ScopedSettings          ScopedSettings
+	Mail                    MailRepo
+	SAMLConfig              SAMLConfigRepo
+	SAMLReplay              SAMLReplayRepo
+	OIDCConfig              OIDCConfigRepo
 
 	Certificate   CertificateRepo
 	DNSCredential DNSCredentialRepo

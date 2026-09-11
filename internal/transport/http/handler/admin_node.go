@@ -46,14 +46,18 @@ type nodeDTO struct {
 	DisplayName   string `json:"display_name"`
 	ServerAddress string `json:"server_address"`
 	Flow          string `json:"flow,omitempty"`
-	// Protocol caches the upstream inbound protocol so the UI can gate
-	// protocol-specific fields (e.g. Flow is VLESS-only). Empty for rows
-	// imported before this column existed.
-	Protocol  string   `json:"protocol,omitempty"`
-	Region    string   `json:"region"`
-	Tags      []string `json:"tags"`
-	SortOrder int      `json:"sort_order"`
-	Enabled   bool     `json:"enabled"`
+	// Protocol remains a compatibility alias for DesiredProtocol. New clients
+	// should render desired and observed explicitly so rollout drift is visible.
+	Protocol         string   `json:"protocol,omitempty"`
+	DesiredProtocol  string   `json:"desired_protocol,omitempty"`
+	DesiredPort      int      `json:"desired_port,omitempty"`
+	ObservedProtocol string   `json:"observed_protocol,omitempty"`
+	ObservedPort     int      `json:"observed_port,omitempty"`
+	EndpointInSync   bool     `json:"endpoint_in_sync"`
+	Tags             []string `json:"tags"`
+	Region           string   `json:"region"`
+	SortOrder        int      `json:"sort_order"`
+	Enabled          bool     `json:"enabled"`
 	// Kind is "real" for 3X-UI-backed nodes (default for legacy rows) and
 	// "separator" for layout-only entries the admin uses to group the
 	// subscription list. Frontend uses it to style separator rows and
@@ -457,7 +461,7 @@ func (h *AdminNodeHandler) ImportExisting(c *gin.Context) {
 		DisplayName:     req.DisplayName,
 		ServerAddress:   req.ServerAddress,
 		Flow:            req.Flow,
-		Protocol:        strings.ToLower(req.Protocol),
+		DesiredProtocol: strings.ToLower(req.Protocol),
 		Region:          req.Region,
 		Tags:            req.Tags,
 		SortOrder:       req.SortOrder,
@@ -490,7 +494,7 @@ func (h *AdminNodeHandler) CreateInbound(c *gin.Context) {
 		DisplayName:     req.DisplayName,
 		ServerAddress:   req.ServerAddress,
 		Flow:            req.Flow,
-		Protocol:        strings.ToLower(req.Inbound.Protocol),
+		DesiredProtocol: strings.ToLower(req.Inbound.Protocol),
 		Region:          req.Region,
 		Tags:            req.Tags,
 		SortOrder:       req.SortOrder,
@@ -976,7 +980,12 @@ func (h *AdminNodeHandler) toNodeDTO(n *domain.Node, panelNames map[int64]string
 		DisplayName:        n.DisplayName,
 		ServerAddress:      n.ServerAddress,
 		Flow:               n.Flow,
-		Protocol:           n.Protocol,
+		Protocol:           n.DesiredProtocol,
+		DesiredProtocol:    n.DesiredProtocol,
+		DesiredPort:        n.DesiredPort,
+		ObservedProtocol:   n.ObservedProtocol,
+		ObservedPort:       n.ObservedPort,
+		EndpointInSync:     n.EndpointInSync(),
 		Region:             n.Region,
 		Tags:               n.Tags,
 		SortOrder:          n.SortOrder,

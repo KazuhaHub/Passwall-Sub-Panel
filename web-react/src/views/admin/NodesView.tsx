@@ -2751,6 +2751,37 @@ export default function NodesView() {
     )
   }
 
+  function endpointCell(n: Node) {
+    const desiredProtocol = n.desired_protocol || n.protocol || '—'
+    const desiredPort = n.desired_port && n.desired_port > 0 ? n.desired_port : '—'
+    const observedKnown = !!n.observed_protocol || !!(n.observed_port && n.observed_port > 0)
+    const observedProtocol = n.observed_protocol || '—'
+    const observedPort = n.observed_port && n.observed_port > 0 ? n.observed_port : '—'
+    const mismatch = observedKnown && !n.endpoint_in_sync
+    const tooltip = mismatch
+      ? t('admin:nodes.endpoint.mismatch', { defaultValue: '实际监听端点与期望配置不一致' })
+      : observedKnown
+        ? t('admin:nodes.endpoint.synced', { defaultValue: '实际端点与期望一致' })
+        : t('admin:nodes.endpoint.unobserved', { defaultValue: '尚未收到实际端点上报' })
+    return (
+      <Tooltip title={tooltip} arrow>
+        <Box sx={{ display: 'inline-flex', flexDirection: 'column', gap: 0.15, cursor: 'help' }}>
+          <Typography component="span" sx={{ fontSize: 12, lineHeight: 1.25, color: md.onSurface }}>
+            {t('admin:nodes.endpoint.desired_short', { defaultValue: '期' })} {desiredProtocol}:{desiredPort}
+          </Typography>
+          <Typography component="span" sx={{
+            fontSize: 12,
+            lineHeight: 1.25,
+            fontWeight: mismatch ? 700 : 400,
+            color: mismatch ? md.error : md.onSurfaceVariant,
+          }}>
+            {t('admin:nodes.endpoint.observed_short', { defaultValue: '实' })} {observedProtocol}:{observedPort}
+          </Typography>
+        </Box>
+      </Tooltip>
+    )
+  }
+
   // healthDot renders a colored dot for the node's most recent probe
   // outcome with a tooltip carrying the state label, the optional error
   // detail, and the timestamp of the last check. Disabled nodes get a
@@ -3262,6 +3293,7 @@ export default function NodesView() {
                   <TableCell>{t('admin:nodes.table.server_address')}</TableCell>
                   <TableCell>{t('admin:nodes.table.region')}</TableCell>
                   <TableCell>{t('admin:nodes.table.tags')}</TableCell>
+                  <TableCell>{t('admin:nodes.table.endpoint', { defaultValue: '端点（期望 / 实际）' })}</TableCell>
                   <TableCell align="center">{t('admin:nodes.table.health', { defaultValue: '状态' })}</TableCell>
                   <TableCell align="center">{t('admin:nodes.table.enabled')}</TableCell>
                   <TableCell align="right">{t('admin:nodes.table.actions')}</TableCell>
@@ -3269,12 +3301,12 @@ export default function NodesView() {
               </TableHead>
               <TableBody>
                 {loading && managed.length === 0 && (
-                  <TableRow><TableCell colSpan={11} sx={{ textAlign: 'center', py: 6 }}>
+                  <TableRow><TableCell colSpan={12} sx={{ textAlign: 'center', py: 6 }}>
                     <CircularProgress size={24} />
                   </TableCell></TableRow>
                 )}
                 {!loading && filteredManaged.length === 0 && (
-                  <TableRow><TableCell colSpan={11} sx={{ textAlign: 'center', py: 6, color: md.onSurfaceVariant }}>
+                  <TableRow><TableCell colSpan={12} sx={{ textAlign: 'center', py: 6, color: md.onSurfaceVariant }}>
                     {managed.length === 0 ? '—' : t('admin:nodes.managed_filter_empty')}
                   </TableCell></TableRow>
                 )}
@@ -3340,6 +3372,7 @@ export default function NodesView() {
                       <TableCell sx={{ fontSize: 13, color: md.onSurfaceVariant }}>{isSep ? '—' : n.server_address}</TableCell>
                       <TableCell sx={{ fontSize: 13 }}>{isSep && !n.region ? '—' : n.region}</TableCell>
                       <TableCell>{isSep && (!n.tags || n.tags.length === 0) ? '—' : tagsCell(n.tags)}</TableCell>
+                      <TableCell>{isSep ? '—' : endpointCell(n)}</TableCell>
                       <TableCell align="center">{isSep ? '—' : (
                         <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.75 }}>
                           {healthDot(n)}

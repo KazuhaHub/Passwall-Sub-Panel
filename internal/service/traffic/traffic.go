@@ -414,7 +414,8 @@ func (s *Service) PollOnce(ctx context.Context) (err error) {
 	// regardless of panel count, while the cap prevents tail-end
 	// regressions when admins eventually attach many panels.
 	type inboundCounter struct {
-		up, down int64
+		up, down     int64
+		counterEpoch uint64
 		// lastOnline is the most recent client-online unix-ms across echoes; the
 		// shared-metering pass carries it so a fully-migrated user's last_online_at
 		// keeps advancing (the per-node pass that used to source it is gone).
@@ -466,7 +467,7 @@ func (s *Service) PollOnce(ctx context.Context) (err error) {
 				stats[inb.ID] = inb.ClientStats
 				// Slim list keeps the inbound-level up/down; capture it as the
 				// node-traffic source (LIVE-VERIFIED reliable on 3.3.1).
-				counters[inb.ID] = inboundCounter{up: inb.Up, down: inb.Down}
+				counters[inb.ID] = inboundCounter{up: inb.Up, down: inb.Down, counterEpoch: inb.CounterEpoch}
 			}
 			// Who is connected right now, on this panel. Rides the slot
 			// this goroutine already holds rather than opening a second
@@ -622,7 +623,7 @@ func (s *Service) PollOnce(ctx context.Context) (err error) {
 			continue
 		}
 		for inboundID, ctr := range pd.counters {
-			if err := s.recordNodeStats(ctx, pid, inboundID, ctr.up, ctr.down, sink); err != nil {
+			if err := s.recordNodeStats(ctx, pid, inboundID, ctr.up, ctr.down, sink, ctr.counterEpoch); err != nil {
 				log.Warn("traffic poll node snapshot", "panel_id", pid, "inbound_id", inboundID, "err", err)
 			}
 		}
@@ -666,8 +667,9 @@ func (s *Service) PollOnce(ctx context.Context) (err error) {
 						// Shared aggregate is echoed identically per inbound; max guards
 						// a partial/stale echo. last-online is the most recent echo.
 						cur := m[t.Email]
-						if t.Up+t.Down > cur.up+cur.down {
-							cur.up, cur.down = t.Up, t.Down
+						if t.CounterEpoch > cur.counterEpoch ||
+							(t.CounterEpoch == cur.counterEpoch && t.Up+t.Down > cur.up+cur.down) {
+							cur.up, cur.down, cur.counterEpoch = t.Up, t.Down, t.CounterEpoch
 						}
 						if t.LastOnline > cur.lastOnline {
 							cur.lastOnline = t.LastOnline
@@ -682,7 +684,7 @@ func (s *Service) PollOnce(ctx context.Context) (err error) {
 				if !ok {
 					continue
 				}
-				delta := s.recordSharedClientStats(ctx, c, ct.up, ct.down, sink)
+				delta := s.recordSharedClientStats(ctx, c, ct.up, ct.down, sink, ct.counterEpoch)
 				// Advance last_online_at even when no NEW bytes accrued this cycle —
 				// the 3X-UI server-side timestamp is independent of our delta, and a
 				// migrated user has no per-node pass left to source it.
@@ -1099,8 +1101,18 @@ func (s *Service) recordClientStats(ctx context.Context, ownership *domain.XUICl
 // the user's quota total. No per-inbound ClientTrafficSnapshot is written — a
 // shared client spans many inbounds (the InboundID would be ambiguous) and
 // per-server usage is sourced from node counters, not per-client snapshots.
-func (s *Service) recordSharedClientStats(ctx context.Context, c *domain.PSPClient, up, down int64, sink *pollSink) trafficDelta {
+func (s *Service) recordSharedClientStats(ctx context.Context, c *domain.PSPClient, up, down int64, sink *pollSink, epochs ...uint64) trafficDelta {
 	totalBytes := up + down
+	var epoch uint64
+	if len(epochs) > 0 {
+		epoch = epochs[0]
+	}
+	if epoch > 0 && c.LastCounterEpoch != epoch {
+		c.LastRawUpBytes, c.LastRawDownBytes, c.LastRawTotalBytes = up, down, totalBytes
+		c.LastCounterEpoch = epoch
+		s.flushSharedCounters(ctx, c, sink)
+		return trafficDelta{hadPrev: c.LastCounterEpoch != 0}
+	}
 	hadPrev := c.LastRawUpBytes != 0 || c.LastRawDownBytes != 0 || c.LastRawTotalBytes != 0
 
 	// Seed-on-first-observation: adopt the current counter as the baseline with a
@@ -1119,8 +1131,14 @@ func (s *Service) recordSharedClientStats(ctx context.Context, c *domain.PSPClie
 		return trafficDelta{}
 	}
 
-	deltaUp := monotonicDelta(up, c.LastRawUpBytes)
-	deltaDown := monotonicDelta(down, c.LastRawDownBytes)
+	var deltaUp, deltaDown int64
+	if epoch > 0 {
+		deltaUp = max(up-c.LastRawUpBytes, 0)
+		deltaDown = max(down-c.LastRawDownBytes, 0)
+	} else {
+		deltaUp = monotonicDelta(up, c.LastRawUpBytes)
+		deltaDown = monotonicDelta(down, c.LastRawDownBytes)
+	}
 	// total = up + down by construction. Deriving it from the components (rather
 	// than a 3rd independent monotonicDelta on up+down) is reset-safe: when Xray
 	// resets up and down INDEPENDENTLY, the synthetic total may not cross its own
@@ -1685,7 +1703,7 @@ func (s *Service) UserServerUsage(ctx context.Context, userID int64) ([]ServerUs
 	// only the serverUsageFromShared branch and delete the ownership fallback below
 	// (and UserNodeUsage with it).
 	// v3.9.0: prefer the shared-client source. A migrated user's usage lives in
-	// psp_client (one row per (user, panel, credClass)) and they hold NO ownership
+	// psp_client (stable ID rows projected into the current partitions) and they hold NO ownership
 	// rows, so the legacy per-node aggregation below returns empty. Build per-server
 	// rows straight from psp_client when the user has any; pre-migration users (no
 	// psp_client yet) fall through to the ownership path so nothing regresses.
@@ -1791,7 +1809,7 @@ func (s *Service) serverUsageFromShared(ctx context.Context, clients []*domain.P
 // "delta = current value". An already-seeded node whose counter is byte-for-byte
 // unchanged this cycle is idle → skipped entirely (no snapshot, no Update),
 // mirroring the per-client zero-delta suppression.
-func (s *Service) recordNodeStats(ctx context.Context, panelID int64, inboundID int, up, down int64, sink *pollSink) error {
+func (s *Service) recordNodeStats(ctx context.Context, panelID int64, inboundID int, up, down int64, sink *pollSink, epochs ...uint64) error {
 	if s.nodes == nil || s.nodeTraffic == nil {
 		return nil
 	}
@@ -1805,13 +1823,17 @@ func (s *Service) recordNodeStats(ctx context.Context, panelID int64, inboundID 
 		return fmt.Errorf("lookup node: %w", err)
 	}
 	totalBytes := up + down
+	var epoch uint64
+	if len(epochs) > 0 {
+		epoch = epochs[0]
+	}
 
 	// Idle short-circuit: an already-seeded node whose inbound counter is
 	// identical to last poll moved no bytes → emit nothing (avoids one
 	// node_traffic_snapshots row + one counter write per poll for idle inbounds,
 	// which the dropped `matched>0` gate would otherwise produce). Excludes the
 	// first-seed poll (handled below, must persist) and resets (up != last).
-	if node.LastInboundSeeded &&
+	if node.LastInboundSeeded && (epoch == 0 || node.LastInboundCounterEpoch == epoch) &&
 		up == node.LastInboundUpBytes &&
 		down == node.LastInboundDownBytes &&
 		totalBytes == node.LastInboundTotalBytes {
@@ -1819,9 +1841,18 @@ func (s *Service) recordNodeStats(ctx context.Context, panelID int64, inboundID 
 	}
 
 	var dUp, dDown, dTotal int64
-	if node.LastInboundSeeded {
-		dUp = monotonicDelta(up, node.LastInboundUpBytes)
-		dDown = monotonicDelta(down, node.LastInboundDownBytes)
+	if epoch > 0 && node.LastInboundCounterEpoch != epoch {
+		dUp, dDown, dTotal = 0, 0, 0
+		node.LastInboundSeeded = true
+		node.LastInboundCounterEpoch = epoch
+	} else if node.LastInboundSeeded {
+		if epoch > 0 {
+			dUp = max(up-node.LastInboundUpBytes, 0)
+			dDown = max(down-node.LastInboundDownBytes, 0)
+		} else {
+			dUp = monotonicDelta(up, node.LastInboundUpBytes)
+			dDown = monotonicDelta(down, node.LastInboundDownBytes)
+		}
 		// Derive total from the components (reset-safe) — see recordSharedClientStats.
 		dTotal = dUp + dDown
 	} else {

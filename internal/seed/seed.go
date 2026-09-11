@@ -3,12 +3,14 @@
 // binary, so the panel can boot from an empty config dir whether it lives
 // on a freshly bind-mounted Docker volume or a clean systemd /opt/psp path.
 //
-// Existing files in the config dir are NEVER overwritten — admins may have
-// customized them and we must preserve that work. To restore a default that
-// was deleted, just remove the file and restart the binary.
+// Existing files in the config dir are never overwritten unless every file in
+// a versioned migration bundle is byte-for-byte identical to a known official
+// default. This lets untouched installations receive correctness fixes while
+// preserving any administrator customization.
 package seed
 
 import (
+	"crypto/sha256"
 	"embed"
 	"errors"
 	"fmt"
@@ -100,10 +102,10 @@ func findEmbedBySlug(subdir, slug string) ([]byte, string, error) {
 var ErrSeedNotFound = errors.New("seed: no embedded default for this slug")
 
 // Ensure walks the baked-in defaults and writes any file that is missing
-// under configDir. Directories are created as needed; existing files are
-// left alone.
+// under configDir. Existing files are preserved except for explicit,
+// hash-gated migrations of byte-identical former official defaults.
 func Ensure(configDir string) error {
-	return fs.WalkDir(defaultsFS, "files", func(path string, d fs.DirEntry, walkErr error) error {
+	if err := fs.WalkDir(defaultsFS, "files", func(path string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
@@ -134,5 +136,68 @@ func Ensure(configDir string) error {
 			return fmt.Errorf("write %s: %w", target, err)
 		}
 		return nil
-	})
+	}); err != nil {
+		return err
+	}
+	return upgradeUnmodifiedRoutingDefaults(configDir)
+}
+
+type managedDefaultUpdate struct {
+	relPath   string
+	oldSHA256 string
+	newBody   []byte
+}
+
+// upgradeUnmodifiedRoutingDefaults moves the original QUIC-reject defaults to
+// the independent QUIC/UDP selectors. The two files form one bundle: if either
+// contains administrator edits, neither is changed, avoiding a half-upgraded
+// routing policy. A file already at the new embedded version is also accepted,
+// so an interrupted two-file update completes on the next boot.
+func upgradeUnmodifiedRoutingDefaults(configDir string) error {
+	specs := []struct {
+		relPath   string
+		oldSHA256 string
+	}{
+		{"templates/default-mihomo.yaml", "13cd9b7b8d29447f86fd46503536e15359e07116c302d3b5364a66e879a84c3c"},
+		{"rulesets/default-rules.yaml", "01c4be93d1bb183336940faa8ed8ebf0f08110adee12327405ab659be282adbc"},
+	}
+	updates := make([]managedDefaultUpdate, 0, len(specs))
+	for _, spec := range specs {
+		body, err := defaultsFS.ReadFile("files/" + spec.relPath)
+		if err != nil {
+			return fmt.Errorf("read managed default files/%s: %w", spec.relPath, err)
+		}
+		updates = append(updates, managedDefaultUpdate{relPath: spec.relPath, oldSHA256: spec.oldSHA256, newBody: body})
+	}
+	return upgradeManagedDefaults(configDir, updates)
+}
+
+func upgradeManagedDefaults(configDir string, updates []managedDefaultUpdate) error {
+	needsWrite := make([]bool, len(updates))
+	for i, update := range updates {
+		body, err := os.ReadFile(filepath.Join(configDir, update.relPath))
+		if err != nil {
+			return fmt.Errorf("read managed default %s: %w", update.relPath, err)
+		}
+		currentHash := fmt.Sprintf("%x", sha256.Sum256(body))
+		newHash := fmt.Sprintf("%x", sha256.Sum256(update.newBody))
+		switch currentHash {
+		case newHash:
+			// Already upgraded (or newly created by Ensure).
+		case update.oldSHA256:
+			needsWrite[i] = true
+		default:
+			return nil // bundle contains an administrator customization
+		}
+	}
+	for i, update := range updates {
+		if !needsWrite[i] {
+			continue
+		}
+		target := filepath.Join(configDir, update.relPath)
+		if err := os.WriteFile(target, update.newBody, 0o644); err != nil {
+			return fmt.Errorf("upgrade managed default %s: %w", update.relPath, err)
+		}
+	}
+	return nil
 }

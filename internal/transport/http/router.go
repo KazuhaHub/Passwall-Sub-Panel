@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	nodeprotocol "github.com/KazuhaHub/passwall-node/protocol"
 	"github.com/gin-gonic/gin"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/config"
@@ -82,6 +83,7 @@ type Deps struct {
 	Mail       *mailer.Service
 	Reconcile  *reconcile.Service
 	Geo        *geo.Service
+	NodeSync   handler.NodeSyncService
 	Async      AsyncDispatcher
 
 	// SharedClients answers, for one user, which panels hold their clients and
@@ -166,10 +168,13 @@ func NewRouter(d Deps) stdhttp.Handler {
 	// helpers holding only an *http.Request (sub-URL inference, SAML SP entity
 	// URLs) can refuse to honour an attacker-supplied X-Forwarded-Host.
 	g.Use(middleware.ProxyTrust())
-	// 1 MiB body cap. Covers every admin write + the typical SAMLResponse
-	// (which is ~80 KiB). Audit middleware later does io.ReadAll(body) —
-	// without this cap that's a memory-exhaustion vector.
-	g.Use(middleware.BodyLimit(1 << 20))
+	// 1 MiB default body cap. It covers every admin write + the typical
+	// SAMLResponse (which is ~80 KiB); the node sync protocol has its own shared
+	// 16 MiB limit for full fleet reports. Audit middleware later does
+	// io.ReadAll(body) — without these caps that's a memory-exhaustion vector.
+	g.Use(middleware.BodyLimitByPath(1<<20, map[string]int64{
+		"/v1/node/sync": nodeprotocol.MaxSyncBodyBytes,
+	}))
 	// Audit middleware lives at the engine level so it covers admin
 	// endpoints AND the login attempt AND user self-service writes. The
 	// path/method filter inside the middleware short-circuits cheaply for
@@ -186,6 +191,17 @@ func NewRouter(d Deps) stdhttp.Handler {
 	// Public endpoints
 	g.GET("/health", handler.Health)
 	g.GET("/api/version", handler.Version)
+	if d.NodeSync != nil && d.Repos.NodeAgent != nil {
+		nodeAuth, err := handler.NewNodeBearerAuthenticator(d.Repos.NodeAgent)
+		if err != nil {
+			panic("configure native node authentication: " + err.Error())
+		}
+		nodeSync, err := handler.NewNodeSyncHandler(d.NodeSync, nodeAuth)
+		if err != nil {
+			panic("configure native node sync: " + err.Error())
+		}
+		g.POST("/v1/node/sync", gin.WrapH(nodeSync))
+	}
 
 	// Subscription handler — uses dynamic path from settings.
 	// The actual route is registered via NoRoute handler for dynamic path support.
@@ -568,12 +584,18 @@ func NewRouter(d Deps) stdhttp.Handler {
 		staffGroup.GET("/traffic/nodes/top", trafficH.NodesTop)
 		staffGroup.GET("/traffic/nodes/history", trafficH.NodesHistory)
 
-		servers := handler.NewAdminServersHandler(d.Repos.XUIPanel, d.Pool, d.Repos.Node, d.Repos.Audit, d.Async)
+		var invalidateRender func()
+		if d.Render != nil {
+			invalidateRender = d.Render.InvalidateAll
+		}
+		servers := handler.NewAdminServersHandler(d.Repos.XUIPanel, d.Pool, d.Repos.Node, d.Repos.Audit, d.Async, invalidateRender).
+			WithNativeAgentProvisioning(d.Repos.NativeAgentProvisioning)
 		// 3X-UI panel credentials live here — never operator.
 		adminGroup.GET("/servers", servers.List)
 		adminGroup.POST("/servers", servers.Create)
 		adminGroup.PUT("/servers/:id", servers.Update)
 		adminGroup.DELETE("/servers/:id", servers.Delete)
+		adminGroup.POST("/servers/:id/rotate-node-credential", servers.RotateNativeCredential)
 		adminGroup.POST("/servers/probe", servers.Test)
 		adminGroup.GET("/servers/:id/upgrade-preview", servers.UpgradePreview)
 		adminGroup.POST("/servers/:id/upgrade-panel", servers.UpgradePanel)
@@ -623,6 +645,10 @@ func NewRouter(d Deps) stdhttp.Handler {
 		staffGroup.POST("/sync-tasks/:id/retry", tasks.Retry)
 		staffGroup.POST("/sync-tasks/:id/cancel", tasks.Cancel)
 		adminGroup.POST("/sync-tasks/purge", tasks.PurgeFinished)
+
+		nodeIssues := handler.NewAdminNodeIssuesHandler(d.Repos.NodeAgentIssue)
+		staffGroup.GET("/node-issues", nodeIssues.List)
+		staffGroup.POST("/node-issues/:id/acknowledge", nodeIssues.Acknowledge)
 
 		subLogs := handler.NewAdminSubLogHandler(d.Repos.SubLog, d.Repos.Settings, d.Geo)
 		staffGroup.GET("/sub-logs", subLogs.List)

@@ -33,3 +33,17 @@ it('reopens node metadata from the update response without reloading the stale l
   const reopened = await editRow('new-name')
   expect(within(reopened).getByDisplayValue('new-name')).toBeTruthy()
 })
+
+it('shows desired and observed endpoints separately when they drift', async () => {
+  const drifted = {
+    ...node,
+    observed_protocol: 'trojan',
+    observed_port: 8443,
+    endpoint_in_sync: false,
+  }
+  installReads({ '/admin/nodes': list([drifted]) })
+  mount(<NodesView />)
+
+  expect(await screen.findByText(/vless:443/)).toBeTruthy()
+  expect(await screen.findByText(/trojan:8443/)).toBeTruthy()
+})

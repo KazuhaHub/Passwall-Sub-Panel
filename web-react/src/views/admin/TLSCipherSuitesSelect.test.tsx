@@ -3,8 +3,8 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { TLS_CIPHER_SUITES, TLSCipherSuitesSelect } from './TLSCipherSuitesSelect'
 
-// vitest.config.ts runs without `globals` or a setup file, so RTL's automatic
-// per-test cleanup is never registered — without this every extra case in this
+// vitest.config.ts runs without `globals`, so RTL's automatic per-test cleanup
+// is never registered — without this every extra case in this
 // file would query a DOM still holding the previous render's combobox.
 afterEach(cleanup)
 

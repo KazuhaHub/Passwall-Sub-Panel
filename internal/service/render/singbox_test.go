@@ -90,7 +90,7 @@ func TestEmitSingBoxSUIModernOutbounds(t *testing.T) {
 		t.Run(tc.protocol, func(t *testing.T) {
 			got, err := emitSingBoxOutbound("edge", node, user, &ports.Inbound{
 				Port: 443, Protocol: tc.protocol, Settings: tc.settings, StreamSettings: stream,
-			}, tc.email, nil)
+			}, tc.email, "", nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -109,13 +109,8 @@ func TestEmitSingBoxSUIModernOutbounds(t *testing.T) {
 // be silently dropped for sing-box.
 func TestBuildSingBoxRouteRules_NetworkUDP(t *testing.T) {
 	rules, _ := buildSingBoxRouteRules("- NETWORK,udp,🎮 UDP控制\n- MATCH,DIRECT\n")
-	// rules[0] sniff, rules[1] the built-in web-QUIC reject (higher priority);
-	// the NETWORK,udp catch-all route follows.
-	if len(rules) < 3 {
-		t.Fatalf("want sniff + quic-reject + udp rule, got %#v", rules)
-	}
-	if rules[1]["action"] != "reject" {
-		t.Fatalf("rules[1] should be the quic reject (higher priority than UDP控制): %#v", rules[1])
+	if len(rules) != 2 {
+		t.Fatalf("want sniff + udp rule, got %#v", rules)
 	}
 	var udp map[string]any
 	for _, r := range rules {
@@ -128,6 +123,38 @@ func TestBuildSingBoxRouteRules_NetworkUDP(t *testing.T) {
 	}
 	if udp["network"] != "udp" {
 		t.Fatalf("udp rule network = %v, want udp: %#v", udp["network"], udp)
+	}
+}
+
+func TestBuildSingBoxRouteRules_QUICAndUDPStayIndependent(t *testing.T) {
+	rules, _ := buildSingBoxRouteRules(`
+- AND,((NETWORK,UDP),(DST-PORT,443)),⚡ QUIC控制
+- NETWORK,udp,🎮 UDP控制
+- MATCH,🚀 节点选择
+`)
+	if len(rules) != 3 {
+		t.Fatalf("want sniff + quic + udp rules, got %#v", rules)
+	}
+	quic := rules[1]
+	if quic["action"] != "route" || quic["outbound"] != "⚡ QUIC控制" || quic["network"] != "udp" {
+		t.Fatalf("invalid QUIC route: %#v", quic)
+	}
+	ports, ok := quic["port"].([]int)
+	if !ok || len(ports) != 1 || ports[0] != 443 {
+		t.Fatalf("QUIC route port = %#v, want [443]", quic["port"])
+	}
+	if rules[2]["outbound"] != "🎮 UDP控制" || rules[2]["network"] != "udp" {
+		t.Fatalf("invalid general UDP route: %#v", rules[2])
+	}
+}
+
+func TestSingBoxPassContinuesInsteadOfBecomingDirect(t *testing.T) {
+	rules, final := buildSingBoxRouteRules("- NETWORK,udp,PASS\n- MATCH,🚀 节点选择\n")
+	if len(rules) != 1 || rules[0]["action"] != "sniff" || final != "🚀 节点选择" {
+		t.Fatalf("PASS must be omitted so matching continues: rules=%#v final=%q", rules, final)
+	}
+	if got := singBoxResolvedChoices([]string{"PASS", "DIRECT"}); len(got) != 1 || got[0] != "direct" {
+		t.Fatalf("PASS selector member must be omitted, got %#v", got)
 	}
 }
 
@@ -146,35 +173,30 @@ func TestBuildSingBoxRouteRules(t *testing.T) {
 	// inbound-field migration. After that: 4 parsed entries — GEOIP,CN is
 	// now mapped to a rule_set reference (geoip-cn) instead of being
 	// dropped, so the CN routing it expresses survives on sing-box 1.12+.
-	if len(rules) != 6 {
-		t.Fatalf("rules len = %d, want 6 (sniff + quic-reject + 4): %#v", len(rules), rules)
+	if len(rules) != 5 {
+		t.Fatalf("rules len = %d, want 5 (sniff + 4 parsed rules): %#v", len(rules), rules)
 	}
 	if got := rules[0]["action"]; got != "sniff" {
 		t.Fatalf("rules[0] action = %q, want sniff", got)
 	}
-	// rules[1] is the built-in web-QUIC (UDP 443) reject, highest priority.
-	if rules[1]["action"] != "reject" || rules[1]["network"] != "udp" {
-		t.Fatalf("rules[1] should be the udp/443 quic reject: %#v", rules[1])
-	}
-	if got := rules[2]["outbound"]; got != "🚀 节点选择" {
+	if got := rules[1]["outbound"]; got != "🚀 节点选择" {
 		t.Fatalf("domain suffix outbound = %q", got)
 	}
-	if got := rules[3]["outbound"]; got != "block" {
+	if got := rules[2]["outbound"]; got != "block" {
 		t.Fatalf("reject outbound = %q", got)
 	}
-	if _, ok := rules[4]["ip_cidr"]; !ok {
-		t.Fatalf("ip-cidr rule missing ip_cidr: %#v", rules[4])
+	if _, ok := rules[3]["ip_cidr"]; !ok {
+		t.Fatalf("ip-cidr rule missing ip_cidr: %#v", rules[3])
 	}
-	rs, ok := rules[5]["rule_set"].([]string)
+	rs, ok := rules[4]["rule_set"].([]string)
 	if !ok || len(rs) != 1 || rs[0] != "geoip-cn" {
-		t.Fatalf("GEOIP,CN should map to rule_set [geoip-cn]: %#v", rules[5])
+		t.Fatalf("GEOIP,CN should map to rule_set [geoip-cn]: %#v", rules[4])
 	}
-	if got := rules[5]["outbound"]; got != "🇨🇳 中国大陆" {
+	if got := rules[4]["outbound"]; got != "🇨🇳 中国大陆" {
 		t.Fatalf("geoip rule_set outbound = %q, want 🇨🇳 中国大陆", got)
 	}
-	// Routing rules (after sniff + the quic-reject) carry the explicit
-	// "action":"route" — the canonical sing-box form.
-	for i := 2; i < len(rules); i++ {
+	// Routing rules after sniff carry the canonical explicit route action.
+	for i := 1; i < len(rules); i++ {
 		if rules[i]["action"] != "route" {
 			t.Fatalf("rules[%d] must carry action:route (canonical), got %#v", i, rules[i])
 		}
@@ -190,13 +212,13 @@ func TestBuildSingBoxRouteRulesGeositeMapsToRuleSet(t *testing.T) {
 - GEOSITE,microsoft@cn,🇨🇳 中国大陆
 - MATCH,🐟 漏网之鱼
 `)
-	// sniff + quic-reject + geolocation-cn only; the @cn attribute rule is dropped.
-	if len(rules) != 3 {
-		t.Fatalf("rules len = %d, want 3 (sniff + quic-reject + geolocation-cn; @cn dropped): %#v", len(rules), rules)
+	// sniff + geolocation-cn only; the @cn attribute rule is dropped.
+	if len(rules) != 2 {
+		t.Fatalf("rules len = %d, want 2 (sniff + geolocation-cn; @cn dropped): %#v", len(rules), rules)
 	}
-	rs, ok := rules[2]["rule_set"].([]string)
+	rs, ok := rules[1]["rule_set"].([]string)
 	if !ok || len(rs) != 1 || rs[0] != "geosite-geolocation-cn" {
-		t.Fatalf("GEOSITE,geolocation-cn should map to rule_set [geosite-geolocation-cn]: %#v", rules[2])
+		t.Fatalf("GEOSITE,geolocation-cn should map to rule_set [geosite-geolocation-cn]: %#v", rules[1])
 	}
 }
 
@@ -304,18 +326,14 @@ func TestBuildSingBoxRouteRulesPersonalRulesFirst(t *testing.T) {
 	if final != "🎯 全球直连" {
 		t.Fatalf("final = %q, want personal MATCH target", final)
 	}
-	// rules[0] sniff, rules[1] the built-in web-QUIC reject; the personal rule
-	// follows them before MATCH terminates the loop.
-	if len(rules) != 3 {
-		t.Fatalf("rules len = %d, want 3 (sniff + quic-reject + personal): %#v", len(rules), rules)
+	// The personal rule follows sniff before MATCH terminates the loop.
+	if len(rules) != 2 {
+		t.Fatalf("rules len = %d, want 2 (sniff + personal): %#v", len(rules), rules)
 	}
 	if got := rules[0]["action"]; got != "sniff" {
 		t.Fatalf("rules[0] action = %q, want sniff", got)
 	}
-	if rules[1]["action"] != "reject" {
-		t.Fatalf("rules[1] should be the quic reject: %#v", rules[1])
-	}
-	if got := rules[2]["outbound"]; got != "💬 Ai平台" {
+	if got := rules[1]["outbound"]; got != "💬 Ai平台" {
 		t.Fatalf("personal rule outbound = %q", got)
 	}
 }

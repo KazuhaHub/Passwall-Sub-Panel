@@ -155,6 +155,32 @@ func TestBuildProxyGroupsYAML_UDPControl(t *testing.T) {
 	}
 }
 
+func TestBuildProxyGroupsYAML_QUICControlIsIndependent(t *testing.T) {
+	raw, err := buildProxyGroupsYAML("- AND,((NETWORK,UDP),(DST-PORT,443)),⚡ QUIC控制\n", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var groups []proxyGroup
+	if err := yaml.Unmarshal([]byte(raw), &groups); err != nil {
+		t.Fatal(err)
+	}
+	byName := map[string]proxyGroup{}
+	for _, group := range groups {
+		byName[group.Name] = group
+	}
+	quic, ok := byName["⚡ QUIC控制"]
+	if !ok {
+		t.Fatalf("QUIC selector missing: %#v", groups)
+	}
+	assertMemberStrings(t, quic.Proxies, []string{"🎮 UDP控制", "🚀 节点选择", "DIRECT", "REJECT"})
+	if _, ok := byName["🎮 UDP控制"]; !ok {
+		t.Fatalf("QUIC selector must pull in its UDP dependency: %#v", groups)
+	}
+	if _, ok := byName["🚀 节点选择"]; !ok {
+		t.Fatalf("QUIC selector must pull in its transitive node dependency: %#v", groups)
+	}
+}
+
 func TestBuildProxyGroupsYAMLDomesticServiceGroupHasNodeSelector(t *testing.T) {
 	raw, err := buildProxyGroupsYAML(`
 - DOMAIN-SUFFIX,apple.com,🍎 苹果服务
@@ -227,11 +253,13 @@ func TestApplyProxyGroupOrderUsesProjectDefaultAndAppendsUnknownGroups(t *testin
 		"🍎 苹果服务",
 		"🚀 节点选择",
 		"🇨🇳 中国大陆",
+		"⚡ QUIC控制",
 		"🎮 UDP控制",
 	}
 	got := applyProxyGroupOrder(targets, nil)
 	want := []string{
 		"🚀 节点选择",
+		"⚡ QUIC控制",
 		"🎮 UDP控制",
 		"🇨🇳 中国大陆",
 		"🍎 苹果服务",

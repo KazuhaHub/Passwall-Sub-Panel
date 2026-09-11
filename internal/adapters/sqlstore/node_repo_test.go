@@ -94,12 +94,12 @@ func TestNodeRepo_ProtocolRoundTrips(t *testing.T) {
 	repo, ctx := newNodeTestRepo(t)
 
 	n := &domain.Node{
-		PanelID:       1,
-		InboundID:     2,
-		DisplayName:   "SS-TCP",
-		ServerAddress: "node.example.com",
-		Protocol:      "shadowsocks",
-		Region:        "TW",
+		PanelID:         1,
+		InboundID:       2,
+		DisplayName:     "SS-TCP",
+		ServerAddress:   "node.example.com",
+		DesiredProtocol: "shadowsocks",
+		Region:          "TW",
 	}
 	if err := repo.Create(ctx, n); err != nil {
 		t.Fatalf("create: %v", err)
@@ -108,12 +108,12 @@ func TestNodeRepo_ProtocolRoundTrips(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
-	if got.Protocol != "shadowsocks" {
-		t.Fatalf("protocol = %q, want shadowsocks", got.Protocol)
+	if got.DesiredProtocol != "shadowsocks" {
+		t.Fatalf("desired protocol = %q, want shadowsocks", got.DesiredProtocol)
 	}
 
 	// Backfill / change path (mirrors UpdateInboundConfig switching protocol).
-	got.Protocol = "vless"
+	got.DesiredProtocol = "vless"
 	if err := repo.Update(ctx, got); err != nil {
 		t.Fatalf("update: %v", err)
 	}
@@ -121,8 +121,8 @@ func TestNodeRepo_ProtocolRoundTrips(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get after update: %v", err)
 	}
-	if again.Protocol != "vless" {
-		t.Fatalf("protocol after update = %q, want vless", again.Protocol)
+	if again.DesiredProtocol != "vless" {
+		t.Fatalf("desired protocol after update = %q, want vless", again.DesiredProtocol)
 	}
 }
 
@@ -184,7 +184,7 @@ func TestNodeRepo_RelaysRoundTrip(t *testing.T) {
 		InboundID:       2,
 		DisplayName:     "HK",
 		ServerAddress:   "land.example.com",
-		Protocol:        "vless",
+		DesiredProtocol: "vless",
 		Region:          "HK",
 		HideDirect:      true,
 		ShowRelayStatus: true,
@@ -266,7 +266,7 @@ func TestNodeRepo_InboundSecretsRoundTripEncrypted(t *testing.T) {
 
 	n := &domain.Node{
 		PanelID: 1, InboundID: 2, DisplayName: "ss2022", Region: "TW",
-		Protocol: "shadowsocks", Port: 8388,
+		DesiredProtocol: "shadowsocks", DesiredPort: 8388,
 		InboundSettings: inboundSettings,
 		StreamSettings:  streamSettings,
 	}
@@ -337,7 +337,7 @@ func TestNodeRepo_InboundSecretsLegacyPlaintextStillReads(t *testing.T) {
 	// Simulate a pre-v3.5 row by writing the columns directly (no encryption).
 	row := &nodeRow{
 		PanelID: 1, InboundID: 9, DisplayName: "legacy-ss", Region: "JP",
-		Protocol:        "shadowsocks",
+		DesiredProtocol: "shadowsocks",
 		InboundSettings: `{"method":"aes-128-gcm","password":"old-plain-psk"}`,
 		StreamSettings:  `{"network":"tcp"}`,
 	}
@@ -375,8 +375,8 @@ func TestNodeRepo_ProtocolEmptyForLegacyRows(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
-	if got.Protocol != "" {
-		t.Fatalf("protocol = %q, want empty", got.Protocol)
+	if got.DesiredProtocol != "" {
+		t.Fatalf("desired protocol = %q, want empty", got.DesiredProtocol)
 	}
 }
 
@@ -396,7 +396,7 @@ func TestNodeRepo_ProtocolEmptyForLegacyRows(t *testing.T) {
 // different ones. The invariant is ownership, not scoping — hence a test.
 func TestNodeRepo_UpdateHealthDoesNotWriteTheProbeTarget(t *testing.T) {
 	repo, ctx := newNodeTestRepo(t)
-	n := &domain.Node{PanelID: 1, InboundID: 2, DisplayName: "n", Port: 443, Protocol: "vless"}
+	n := &domain.Node{PanelID: 1, InboundID: 2, DisplayName: "n", DesiredPort: 443, DesiredProtocol: "vless"}
 	if err := repo.Create(ctx, n); err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -404,7 +404,7 @@ func TestNodeRepo_UpdateHealthDoesNotWriteTheProbeTarget(t *testing.T) {
 	// A health pass holding a STALE snapshot: it read the node before an admin
 	// moved the port, so its copy still carries the old value — and in the
 	// worst case (a pre-v3.5 row) a zero.
-	stale := &domain.Node{ID: n.ID, Port: 0, Protocol: "", HealthState: domain.NodeHealthUnreachable, HealthDetail: "probe failed"}
+	stale := &domain.Node{ID: n.ID, DesiredPort: 0, DesiredProtocol: "", HealthState: domain.NodeHealthUnreachable, HealthDetail: "probe failed"}
 	if err := repo.UpdateHealth(ctx, stale); err != nil {
 		t.Fatalf("health: %v", err)
 	}
@@ -413,11 +413,11 @@ func TestNodeRepo_UpdateHealthDoesNotWriteTheProbeTarget(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
-	if got.Port != 443 {
-		t.Errorf("port = %d, want 443 — a stale health pass reverted the probe target; at 0 reverse-push would send a broken listener to the panel", got.Port)
+	if got.DesiredPort != 443 {
+		t.Errorf("desired port = %d, want 443 — a stale health pass reverted the probe target; at 0 reverse-push would send a broken listener to the panel", got.DesiredPort)
 	}
-	if got.Protocol != "vless" {
-		t.Errorf("protocol = %q, want vless — a stale health pass reverted it", got.Protocol)
+	if got.DesiredProtocol != "vless" {
+		t.Errorf("desired protocol = %q, want vless — a stale health pass reverted it", got.DesiredProtocol)
 	}
 	// The verdict itself must still land, or the guard would have been bought
 	// by disabling the writer.

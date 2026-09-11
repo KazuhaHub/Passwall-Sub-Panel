@@ -9,63 +9,54 @@ import (
 )
 
 // fakePSPClientRepo is a minimal in-memory ports.PSPClientRepo for the
-// provisioner tests. Keyed by (panelID, email) like the real unique index.
+// provisioner tests. It is keyed only by the database-minted stable ID; email
+// is deliberately just a mutable field.
 type fakePSPClientRepo struct {
 	nextID   int64
-	clients  map[string]*domain.PSPClient        // key: panel|email
+	clients  map[int64]*domain.PSPClient
 	inbounds map[int64][]domain.PSPClientInbound // clientID -> attachments
 }
 
 func newFakeRepo() *fakePSPClientRepo {
-	return &fakePSPClientRepo{clients: map[string]*domain.PSPClient{}, inbounds: map[int64][]domain.PSPClientInbound{}}
+	return &fakePSPClientRepo{clients: map[int64]*domain.PSPClient{}, inbounds: map[int64][]domain.PSPClientInbound{}}
 }
 
-func key(panelID int64, email string) string { return email + "@@" + itoa(panelID) }
-func itoa(n int64) string {
-	if n == 0 {
-		return "0"
-	}
-	neg := n < 0
-	if neg {
-		n = -n
-	}
-	var b []byte
-	for n > 0 {
-		b = append([]byte{byte('0' + n%10)}, b...)
-		n /= 10
-	}
-	if neg {
-		b = append([]byte{'-'}, b...)
-	}
-	return string(b)
-}
-
-func (r *fakePSPClientRepo) Upsert(ctx context.Context, c *domain.PSPClient) (int64, error) {
-	k := key(c.PanelID, c.Email)
-	if ex, ok := r.clients[k]; ok {
-		// identity/credential update only — preserve counters (real-repo contract)
-		ex.UserID, ex.CredClass, ex.UUID, ex.Password = c.UserID, c.CredClass, c.UUID, c.Password
-		return ex.ID, nil
-	}
+func (r *fakePSPClientRepo) Create(ctx context.Context, c *domain.PSPClient) (int64, error) {
 	r.nextID++
 	cp := *c
 	cp.ID = r.nextID
-	r.clients[k] = &cp
+	r.clients[cp.ID] = &cp
 	return cp.ID, nil
 }
-func (r *fakePSPClientRepo) GetByID(ctx context.Context, id int64) (*domain.PSPClient, error) {
+func (r *fakePSPClientRepo) UpdateDefinition(ctx context.Context, c *domain.PSPClient) error {
+	ex, ok := r.clients[c.ID]
+	if !ok || ex.UserID != c.UserID || ex.PanelID != c.PanelID {
+		return domain.ErrNotFound
+	}
+	ex.Email, ex.CredClass, ex.UUID, ex.Password = c.Email, c.CredClass, c.UUID, c.Password
+	return nil
+}
+func (r *fakePSPClientRepo) UpdateDesiredLifecycleByUser(_ context.Context, userID int64, lifecycle domain.UserLifecycle) error {
 	for _, c := range r.clients {
-		if c.ID == id {
-			cp := *c
-			return &cp, nil
+		if c.UserID == userID {
+			c.SetDesiredLifecycle(lifecycle)
 		}
+	}
+	return nil
+}
+func (r *fakePSPClientRepo) GetByID(ctx context.Context, id int64) (*domain.PSPClient, error) {
+	if c, ok := r.clients[id]; ok {
+		cp := *c
+		return &cp, nil
 	}
 	return nil, domain.ErrNotFound
 }
 func (r *fakePSPClientRepo) GetByEmail(ctx context.Context, panelID int64, email string) (*domain.PSPClient, error) {
-	if c, ok := r.clients[key(panelID, email)]; ok {
-		cp := *c
-		return &cp, nil
+	for _, c := range r.clients {
+		if c.PanelID == panelID && c.Email == email {
+			cp := *c
+			return &cp, nil
+		}
 	}
 	return nil, domain.ErrNotFound
 }
@@ -87,12 +78,9 @@ func (r *fakePSPClientRepo) ListByUser(ctx context.Context, userID int64) ([]*do
 	}
 	return out, nil
 }
-func (r *fakePSPClientRepo) DeleteByEmail(ctx context.Context, panelID int64, email string) error {
-	k := key(panelID, email)
-	if c, ok := r.clients[k]; ok {
-		delete(r.inbounds, c.ID)
-		delete(r.clients, k)
-	}
+func (r *fakePSPClientRepo) DeleteByID(ctx context.Context, id int64) error {
+	delete(r.inbounds, id)
+	delete(r.clients, id)
 	return nil
 }
 func (r *fakePSPClientRepo) SetInbounds(ctx context.Context, clientID int64, inbounds []domain.PSPClientInbound) error {
@@ -102,21 +90,27 @@ func (r *fakePSPClientRepo) SetInbounds(ctx context.Context, clientID int64, inb
 func (r *fakePSPClientRepo) ListInbounds(ctx context.Context, clientID int64) ([]domain.PSPClientInbound, error) {
 	return r.inbounds[clientID], nil
 }
-func (r *fakePSPClientRepo) MarkInboundProvisioned(ctx context.Context, clientID, nodeID int64, provisioned bool) error {
-	for i := range r.inbounds[clientID] {
-		if r.inbounds[clientID][i].NodeID == nodeID {
-			r.inbounds[clientID][i].Provisioned = provisioned
+func (r *fakePSPClientRepo) UpdateInboundState(ctx context.Context, inbound domain.PSPClientInbound) error {
+	for i := range r.inbounds[inbound.ClientID] {
+		if r.inbounds[inbound.ClientID][i].NodeID == inbound.NodeID {
+			r.inbounds[inbound.ClientID][i].State = inbound.State
+			r.inbounds[inbound.ClientID][i].AppliedVersion = inbound.AppliedVersion
+			r.inbounds[inbound.ClientID][i].FirstFailedAt = inbound.FirstFailedAt
 		}
 	}
 	return nil
 }
 func (r *fakePSPClientRepo) UpdateCounters(ctx context.Context, c *domain.PSPClient) error {
-	if ex, _ := r.GetByID(ctx, c.ID); ex != nil {
-		for _, stored := range r.clients {
-			if stored.ID == c.ID {
-				stored.LifetimeTotalBytes = c.LifetimeTotalBytes
-			}
-		}
+	if stored, ok := r.clients[c.ID]; ok {
+		stored.LifetimeUpBytes = c.LifetimeUpBytes
+		stored.LifetimeDownBytes = c.LifetimeDownBytes
+		stored.LifetimeTotalBytes = c.LifetimeTotalBytes
+		stored.LastRawUpBytes = c.LastRawUpBytes
+		stored.LastRawDownBytes = c.LastRawDownBytes
+		stored.LastRawTotalBytes = c.LastRawTotalBytes
+		stored.PeriodBaselineUpBytes = c.PeriodBaselineUpBytes
+		stored.PeriodBaselineDownBytes = c.PeriodBaselineDownBytes
+		stored.PeriodBaselineTotalBytes = c.PeriodBaselineTotalBytes
 	}
 	return nil
 }
@@ -195,9 +189,9 @@ func TestSyncUser_AcrossPanelsAndPrunesLostServer(t *testing.T) {
 
 	// User reachable on two servers (panels 10 and 11).
 	nodes := []*domain.Node{
-		{ID: 1, PanelID: 10, Protocol: "vless"},
-		{ID: 2, PanelID: 10, Protocol: "trojan"},
-		{ID: 3, PanelID: 11, Protocol: "vless"},
+		{ID: 1, PanelID: 10, DesiredProtocol: "vless"},
+		{ID: 2, PanelID: 10, DesiredProtocol: "trojan"},
+		{ID: 3, PanelID: 11, DesiredProtocol: "vless"},
 	}
 	if _, err := svc.SyncUser(ctx, 42, "uuid-x", rules, nodes); err != nil {
 		t.Fatal(err)
@@ -209,7 +203,7 @@ func TestSyncUser_AcrossPanelsAndPrunesLostServer(t *testing.T) {
 	// User loses all access to panel 11 → its client must be pruned even though
 	// no node references panel 11 anymore.
 	if _, err := svc.SyncUser(ctx, 42, "uuid-x", rules, []*domain.Node{
-		{ID: 1, PanelID: 10, Protocol: "vless"},
+		{ID: 1, PanelID: 10, DesiredProtocol: "vless"},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -226,8 +220,8 @@ func TestSyncUser_SkipsSeparators(t *testing.T) {
 	svc := New(repo)
 	ctx := context.Background()
 	nodes := []*domain.Node{
-		{ID: 1, PanelID: 10, Protocol: "vless"},
-		{ID: 2, PanelID: 10, Kind: domain.NodeKindSeparator, Protocol: "vless"},
+		{ID: 1, PanelID: 10, DesiredProtocol: "vless"},
+		{ID: 2, PanelID: 10, Kind: domain.NodeKindSeparator, DesiredProtocol: "vless"},
 	}
 	if _, err := svc.SyncUser(ctx, 42, "uuid-x", rules, nodes); err != nil {
 		t.Fatal(err)
@@ -259,5 +253,121 @@ func TestSync_PreservesCountersAcrossResync(t *testing.T) {
 	got, _ := repo.GetByEmail(ctx, 10, "u42@psp.local")
 	if got.LifetimeTotalBytes != 5_000 {
 		t.Fatalf("re-sync clobbered usage: got %d, want preserved 5000", got.LifetimeTotalBytes)
+	}
+}
+
+func TestSync_PreservesStableRowAndBaselinesAcrossPartitionBoundary(t *testing.T) {
+	repo := newFakeRepo()
+	svc := New(repo)
+	ctx := context.Background()
+	ss2022 := clientplan.NodeCred{NodeID: 1, Protocol: domain.ProtoSS2022, SSMethod: "2022-blake3-aes-256-gcm"}
+	plainSS := clientplan.NodeCred{NodeID: 2, Protocol: domain.ProtoSS, SSMethod: "aes-256-gcm"}
+
+	if _, err := svc.Sync(ctx, 42, "uuid-x", 10, rules, []clientplan.NodeCred{ss2022}); err != nil {
+		t.Fatal(err)
+	}
+	before, err := repo.GetByEmail(ctx, 10, "u42@psp.local")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantID := before.ID
+	wantCounters := &domain.PSPClient{
+		ID:              wantID,
+		LifetimeUpBytes: 900, LifetimeDownBytes: 1100, LifetimeTotalBytes: 2000,
+		LastRawUpBytes: 90, LastRawDownBytes: 110, LastRawTotalBytes: 200,
+		PeriodBaselineUpBytes: 400, PeriodBaselineDownBytes: 500, PeriodBaselineTotalBytes: 900,
+	}
+	if err := repo.UpdateCounters(ctx, wantCounters); err != nil {
+		t.Fatal(err)
+	}
+
+	// 1→2: the SS-2022 row's email gains a partition suffix, but the stable
+	// ID and every counter baseline stay on the row that still serves node 1.
+	if _, err := svc.Sync(ctx, 42, "uuid-x", 10, rules, []clientplan.NodeCred{ss2022, plainSS}); err != nil {
+		t.Fatal(err)
+	}
+	afterSplit, err := repo.GetByID(ctx, wantID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if afterSplit.Email == "u42@psp.local" {
+		t.Fatalf("test did not cross 1→2 email boundary: %+v", afterSplit)
+	}
+	assertClientBaselines(t, afterSplit, wantCounters)
+	inbounds, _ := repo.ListInbounds(ctx, wantID)
+	if len(inbounds) != 1 || inbounds[0].NodeID != 1 {
+		t.Fatalf("stable row followed the wrong partition: %+v", inbounds)
+	}
+
+	// 2→1: removing the conflicting node returns the same row to the bare
+	// email; it must not delete/recreate it on the reverse boundary either.
+	if _, err := svc.Sync(ctx, 42, "uuid-x", 10, rules, []clientplan.NodeCred{ss2022}); err != nil {
+		t.Fatal(err)
+	}
+	afterMerge, err := repo.GetByEmail(ctx, 10, "u42@psp.local")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if afterMerge.ID != wantID {
+		t.Fatalf("2→1 replaced client row %d with %d", wantID, afterMerge.ID)
+	}
+	assertClientBaselines(t, afterMerge, wantCounters)
+}
+
+func TestSync_PreservesStableRowAndBaselinesAcrossDomainChange(t *testing.T) {
+	repo := newFakeRepo()
+	svc := New(repo)
+	ctx := context.Background()
+	nodes := []clientplan.NodeCred{
+		{NodeID: 1, Protocol: domain.ProtoSS2022, SSMethod: "2022-blake3-aes-256-gcm"},
+		{NodeID: 2, Protocol: domain.ProtoSS, SSMethod: "aes-256-gcm"},
+	}
+	if _, err := svc.Sync(ctx, 42, "uuid-x", 10, rules, nodes); err != nil {
+		t.Fatal(err)
+	}
+	before, _ := repo.ListByUser(ctx, 42)
+	if len(before) != 2 {
+		t.Fatalf("precondition: want two clients, got %+v", before)
+	}
+	wantByID := make(map[int64]*domain.PSPClient, len(before))
+	for i, c := range before {
+		n := int64(i + 1)
+		want := &domain.PSPClient{
+			ID:              c.ID,
+			LifetimeUpBytes: 10 * n, LifetimeDownBytes: 20 * n, LifetimeTotalBytes: 30 * n,
+			LastRawUpBytes: 4 * n, LastRawDownBytes: 5 * n, LastRawTotalBytes: 9 * n,
+			PeriodBaselineUpBytes: n, PeriodBaselineDownBytes: 2 * n, PeriodBaselineTotalBytes: 3 * n,
+		}
+		if err := repo.UpdateCounters(ctx, want); err != nil {
+			t.Fatal(err)
+		}
+		wantByID[c.ID] = want
+	}
+
+	if _, err := svc.Sync(ctx, 42, "uuid-x", 10, domain.EmailRules{Domain: "new.example"}, nodes); err != nil {
+		t.Fatal(err)
+	}
+	after, _ := repo.ListByUser(ctx, 42)
+	if len(after) != 2 {
+		t.Fatalf("domain change replaced the two-row plan: %+v", after)
+	}
+	for _, c := range after {
+		want, ok := wantByID[c.ID]
+		if !ok {
+			t.Fatalf("domain change minted an unexpected client ID %d", c.ID)
+		}
+		if c.Email[len(c.Email)-len("new.example"):] != "new.example" {
+			t.Fatalf("client %d email did not change domains: %q", c.ID, c.Email)
+		}
+		assertClientBaselines(t, c, want)
+	}
+}
+
+func assertClientBaselines(t *testing.T, got, want *domain.PSPClient) {
+	t.Helper()
+	if got.LifetimeUpBytes != want.LifetimeUpBytes || got.LifetimeDownBytes != want.LifetimeDownBytes || got.LifetimeTotalBytes != want.LifetimeTotalBytes ||
+		got.LastRawUpBytes != want.LastRawUpBytes || got.LastRawDownBytes != want.LastRawDownBytes || got.LastRawTotalBytes != want.LastRawTotalBytes ||
+		got.PeriodBaselineUpBytes != want.PeriodBaselineUpBytes || got.PeriodBaselineDownBytes != want.PeriodBaselineDownBytes || got.PeriodBaselineTotalBytes != want.PeriodBaselineTotalBytes {
+		t.Fatalf("counter baselines changed:\n got  %+v\n want %+v", got, want)
 	}
 }

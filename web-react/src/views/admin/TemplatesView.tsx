@@ -50,7 +50,7 @@ const EMPTY: Template = {
   slug: '', name: '', client_type: 'mihomo', is_default: false, rule_sets: [], content: '',
 }
 
-const BUILTIN_TARGETS = new Set(['DIRECT', 'REJECT', 'REJECT-DROP', 'REJECT-DROP-BIT', 'PASS'])
+const BUILTIN_TARGETS = new Set(['DIRECT', 'REJECT', 'REJECT-DROP', 'PASS'])
 
 function normalizeTarget(raw: string) { return raw.trim().replace(/^['"]|['"]$/g, ''); }
 

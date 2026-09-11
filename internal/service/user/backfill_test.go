@@ -71,7 +71,7 @@ func TestBackfillPSPClients(t *testing.T) {
 	svc := &Service{
 		users:    &bfUserRepo{users: users},
 		groups:   &bfGroupRepo{g: &domain.Group{ID: 1}},
-		selector: bfSelector{nodes: []*domain.Node{{ID: 10, PanelID: 1, Protocol: "vless"}}},
+		selector: bfSelector{nodes: []*domain.Node{{ID: 10, PanelID: 1, DesiredProtocol: "vless"}}},
 		settings: bfSettings{},
 		psp:      psp,
 	}

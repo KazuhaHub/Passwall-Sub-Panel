@@ -35,7 +35,7 @@ import (
 //
 // And which deliberately do NOT, because the poll owns them and render never
 // reads them: UpdateTrafficCounters, BatchUpdateTrafficCounters, UpdateHealth,
-// UpdateCertBinding. TestInvalidatingNodeRepoCoversEveryWriter pins both lists
+// UpdateObservedEndpoint, UpdateCertBinding. TestInvalidatingNodeRepoCoversEveryWriter pins both lists
 // so a writer added to ports.NodeRepo forces a decision rather than silently
 // defaulting to "no invalidation".
 type invalidatingNodeRepo struct {
@@ -67,6 +67,10 @@ func (r invalidatingNodeRepo) UpdateMetadata(ctx context.Context, n *domain.Node
 
 func (r invalidatingNodeRepo) UpdateInboundConfig(ctx context.Context, n *domain.Node) error {
 	return after(r.NodeRepo.UpdateInboundConfig(ctx, n), r.notify)
+}
+
+func (r invalidatingNodeRepo) UpdateObservedEndpoint(ctx context.Context, nodeID int64, observed domain.NodeObservedEndpoint) error {
+	return r.NodeRepo.UpdateObservedEndpoint(ctx, nodeID, observed)
 }
 
 func (r invalidatingNodeRepo) UpdateEnabled(ctx context.Context, id int64, enabled bool) error {

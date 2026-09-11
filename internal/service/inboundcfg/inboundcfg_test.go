@@ -66,7 +66,7 @@ func TestApplySpec(t *testing.T) {
 	}
 	ApplySpec(n, spec)
 
-	if n.Protocol != "vless" || n.Port != 443 || n.InboundListen != "0.0.0.0" || n.InboundRemark != "us-reality" {
+	if n.DesiredProtocol != "vless" || n.DesiredPort != 443 || n.InboundListen != "0.0.0.0" || n.InboundRemark != "us-reality" {
 		t.Fatalf("top-level mismatch: %+v", n)
 	}
 	if n.StreamSettings != spec.StreamSettings || n.Sniffing != spec.Sniffing || n.Allocate != spec.Allocate || n.InboundExpiryTime != 12345 {
@@ -80,7 +80,7 @@ func TestApplySpec(t *testing.T) {
 	}
 }
 
-func TestCaptureAndRoundTrip(t *testing.T) {
+func TestAdoptAndRoundTrip(t *testing.T) {
 	inb := &ports.Inbound{
 		Protocol:       "shadowsocks",
 		Port:           8388,
@@ -90,8 +90,8 @@ func TestCaptureAndRoundTrip(t *testing.T) {
 		StreamSettings: `{"network":"tcp"}`,
 	}
 	n := &domain.Node{ID: 1, Enabled: true}
-	Capture(n, inb)
-	if n.Protocol != "shadowsocks" || n.Port != 8388 || n.InboundListen != "127.0.0.1" {
+	Adopt(n, inb)
+	if n.DesiredProtocol != "shadowsocks" || n.DesiredPort != 8388 || n.InboundListen != "127.0.0.1" {
 		t.Fatalf("capture top-level mismatch: %+v", n)
 	}
 	if strings.Contains(n.InboundSettings, "clients") || !strings.Contains(n.InboundSettings, "aes-128-gcm") {
@@ -109,6 +109,17 @@ func TestCaptureAndRoundTrip(t *testing.T) {
 	}
 	if spec.StreamSettings != `{"network":"tcp"}` {
 		t.Fatalf("SpecFromNode stream mismatch: %+v", spec)
+	}
+}
+
+func TestCaptureUpdatesObservedWithoutChangingDesired(t *testing.T) {
+	n := &domain.Node{DesiredProtocol: "vless", DesiredPort: 443}
+	Capture(n, &ports.Inbound{Protocol: "trojan", Port: 8443, Settings: `{}`})
+	if n.DesiredProtocol != "vless" || n.DesiredPort != 443 {
+		t.Fatalf("observation changed desired endpoint: %+v", n)
+	}
+	if n.ObservedProtocol != "trojan" || n.ObservedPort != 8443 {
+		t.Fatalf("observed endpoint not captured: %+v", n)
 	}
 }
 
@@ -149,8 +160,8 @@ func TestInSync(t *testing.T) {
 		Settings: `{"decryption":"none","clients":[{"id":"x","email":"e"}]}`,
 	}
 	n := &domain.Node{
-		Port:            443,
-		Protocol:        "vless",
+		DesiredPort:     443,
+		DesiredProtocol: "vless",
 		StreamSettings:  `{"security":"tls","network":"ws"}`, // key order differs → still in sync
 		InboundSettings: `{"decryption":"none"}`,
 	}
@@ -167,7 +178,7 @@ func TestInSync(t *testing.T) {
 
 	// Port change is drift.
 	drift2 := *n
-	drift2.Port = 8443
+	drift2.DesiredPort = 8443
 	if InSync(&drift2, live) {
 		t.Fatalf("expected drift when port differs")
 	}
@@ -265,7 +276,7 @@ func TestSpecFromNodeStripsRealityFinalmaskTCP(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			// Port is set only to clear SpecFromNode's push guard; these cases
 			// are about stream-settings passthrough, not the port.
-			n := &domain.Node{Port: 443, StreamSettings: tc.stream}
+			n := &domain.Node{DesiredPort: 443, StreamSettings: tc.stream}
 			spec, err := SpecFromNode(n)
 			if err != nil {
 				t.Fatalf("SpecFromNode: %v", err)
@@ -303,7 +314,7 @@ func TestSpecFromNodeStripsRealityFinalmaskTCP(t *testing.T) {
 // byte-for-byte, so a stream shape we've never seen can still round-trip.
 func TestSpecFromNodePassesThroughUnparseableStream(t *testing.T) {
 	for _, s := range []string{"", "   ", "not json", `{"security":"reality"`, `[1,2,3]`, "null"} {
-		n := &domain.Node{Port: 443, StreamSettings: s}
+		n := &domain.Node{DesiredPort: 443, StreamSettings: s}
 		spec, err := SpecFromNode(n)
 		if err != nil {
 			t.Fatalf("SpecFromNode: %v", err)
@@ -362,7 +373,7 @@ func TestHasLocalConfigOnlyTrustsConvergedStates(t *testing.T) {
 // while reverse-push had no check of its own.
 func TestSpecFromNodeRefusesToPushAPortlessNode(t *testing.T) {
 	for _, port := range []int{0, -1} {
-		n := &domain.Node{ID: 7, Port: port, Protocol: "vless", InboundSettings: "{}"}
+		n := &domain.Node{ID: 7, DesiredPort: port, DesiredProtocol: "vless", InboundSettings: "{}"}
 		_, err := SpecFromNode(n)
 		if err == nil {
 			t.Fatalf("port=%d produced a pushable spec — this replaces a live listener with a broken one", port)
@@ -374,7 +385,7 @@ func TestSpecFromNodeRefusesToPushAPortlessNode(t *testing.T) {
 }
 
 func TestSpecFromNodeAllowsAValidPort(t *testing.T) {
-	n := &domain.Node{ID: 7, Port: 443, Protocol: "vless", InboundSettings: "{}"}
+	n := &domain.Node{ID: 7, DesiredPort: 443, DesiredProtocol: "vless", InboundSettings: "{}"}
 	spec, err := SpecFromNode(n)
 	if err != nil {
 		t.Fatalf("a node with a real port must be pushable: %v", err)

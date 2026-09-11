@@ -193,6 +193,10 @@
       "timezone_hint": "Used for traffic resets, user expire_at math, and the default timezone of the admin traffic chart. Subscription and end-user views always follow the browser's timezone.",
       "cron_traffic_pull_minutes": "Traffic poll interval (min)",
       "cron_reconcile_minutes": "Reconcile interval (min)",
+      "node_poll_seconds": "Native-node sync heartbeat (seconds)",
+      "node_poll_seconds_hint": "How quickly configuration and tasks reach native agents. 0 uses the 30-second default; PSP may temporarily request a faster retry when work is queued.",
+      "full_report_seconds": "Native-node full report period (seconds)",
+      "full_report_seconds_hint": "Lower values use more agent uplink bandwidth but reduce fleet-counter staleness, tightening the quota-overburn bound. 0 = send a full report on every sync.",
       "max_panel_concurrency": "Panel fan-out concurrency (traffic poll / reconcile)",
       "max_panel_concurrency_hint": "Maximum parallel ListInbounds fan-out across 3X-UI panels. 0 uses the built-in default of 8. Raising it does nothing for single-panel deployments; useful only with 5+ panels where 3X-UI has spare CPU. Values above 64 clamp down.",
       "audit_retention_days": "Audit log retention (days)",
@@ -743,6 +747,35 @@
     },
     "detail_title": "Task detail"
   },
+  "node_issues": {
+    "title": "Node issues",
+    "subtitle": "Durable conditions a native node could not reconcile. Acknowledgement records review; it does not claim recovery.",
+    "search": "Search agent, code, key or detail",
+    "search_action": "Search",
+    "refresh": "Refresh",
+    "empty": "No matching node issues.",
+    "acknowledge": "Acknowledge",
+    "acknowledged": "Issue acknowledged",
+    "filter": {
+      "all": "All review states",
+      "unacknowledged": "Needs review",
+      "acknowledged": "Acknowledged"
+    },
+    "state": {
+      "unacknowledged": "Needs review",
+      "acknowledged": "Acknowledged"
+    },
+    "table": {
+      "state": "Review state",
+      "code": "Stable code",
+      "agent": "Agent",
+      "key": "Object",
+      "detail": "Detail",
+      "first_seen": "First seen",
+      "last_seen": "Last seen",
+      "actions": "Actions"
+    }
+  },
   "geo_anomalies": {
     "intro": "Verdicts on each user's live source IPs combined across every panel. Only \"flagged\" means sustained; \"suspect\" is the ramp that has not reached the threshold yet. This is suspicion, not proof — split tunnelling, a corporate VPN and family abroad all produce it honestly. Nothing is enforced automatically.",
     "unwired": "Concurrent-location detection is not enabled in this deployment.",
@@ -1096,6 +1129,7 @@
       "flow": "Flow (optional)",
       "region": "Region",
       "tags": "Tags",
+      "endpoint": "Endpoint (desired / observed)",
       "sort_order": "Sort weight",
       "sort_order_hint": "0 = auto-append to the bottom"
     },
@@ -1255,6 +1289,13 @@
       "health": "Status",
       "enabled": "Enabled",
       "actions": "Actions"
+    },
+    "endpoint": {
+      "desired_short": "D",
+      "observed_short": "O",
+      "synced": "Observed endpoint matches desired state",
+      "mismatch": "Observed listening endpoint differs from desired state",
+      "unobserved": "No observed endpoint has been reported yet"
     },
     "health": {
       "ok": "Healthy",
@@ -1827,8 +1868,8 @@
     "cred_add_field": "Add field"
   },
   "servers": {
-    "title": "Servers (3X-UI)",
-    "subtitle": "Inbounds (nodes) are attached to a server. New nodes pick from this list.",
+    "title": "Servers and native nodes",
+    "subtitle": "Register an upstream panel or a PSP-native node, then attach inbounds from the Nodes page.",
     "create": "New server",
     "test_all": "Test all",
     "search_placeholder": "Search name / URL",
@@ -1851,7 +1892,13 @@
       "insecure_https": "Allow insecure HTTPS (Danger!)",
       "xray_version": "Target version",
       "xray_version_latest": "latest",
-      "xray_version_loading": "Loading available versions…"
+      "xray_version_loading": "Loading available versions…",
+      "core_catalog_unavailable": "The audited version catalog is unavailable. Installing an unknown version is blocked.",
+      "core_reality_matrix": "REALITY: Xray {{xray}} · Mihomo {{mihomo}} · sing-box {{singbox}} · URI {{uri}}",
+      "core_evidence": "Evidence: config validation {{config}} · real client handshakes {{handshake}}",
+      "core_evidence_yes": "complete",
+      "core_evidence_no": "not complete",
+      "core_handshake_title": "Tested matrix:"
     },
     "auth_method": {
       "token": "API Token",
@@ -1871,6 +1918,21 @@
       "unconfigured": "Not configured",
       "change": "Change",
       "insecure_https": "Enable when the panel uses a self-signed / mismatched cert. Scoped to this panel; the SSRF guard is unaffected."
+    },
+    "native": {
+      "outbound_hint": "A native node dials out to PSP. It needs no inbound management URL or upstream-panel credential; a one-time node credential is shown after creation.",
+      "created_title": "Save the native-node credential",
+      "once_warning": "This node credential is shown once. PSP stores only its digest and cannot recover it after this dialog closes. Save it first in a credential file with mode 0600.",
+      "agent_id": "Agent ID",
+      "credential": "One-time node credential",
+      "start_command": "Start command (write the credential file separately)",
+      "copy_credential": "Copy credential",
+      "copy_command": "Copy start command",
+      "saved_confirm": "I saved it securely",
+      "rotate_title": "Rotate native-node credential",
+      "rotate_warning": "Rotate the credential for {{name}}? The current credential stops working immediately. Its core keeps enforcing the last confirmed state offline until you replace the credential file and restart the agent.",
+      "rotate_confirm": "Rotate credential",
+      "rotated": "Credential rotated. Save the replacement before closing this dialog."
     },
     "table": {
       "name": "Server name",
@@ -1915,7 +1977,31 @@
       "upgrade": "Upgrade",
       "force_upgrade": "Force upgrade",
       "upgrade_panel": "Upgrade 3X-UI panel (Latest)",
-      "upgrade_xray": "Upgrade Xray"
+      "upgrade_xray": "Upgrade Xray",
+      "select_core": "Select Xray core version",
+      "rotate_node_credential": "Rotate node credential"
+    },
+    "core_tier": {
+      "recommended": "Recommended (broad compatibility)",
+      "verified": "Full handshakes verified",
+      "config_verified": "Config verified",
+      "restricted": "Restricted clients"
+    },
+    "core_support": {
+      "supported": "supported",
+      "supported_with_transform": "supported (automatic transform)",
+      "conditional": "conditionally supported",
+      "unsupported": "unsupported",
+      "unverified": "unverified"
+    },
+    "core_client": {
+      "xray": "Xray",
+      "mihomo": "Mihomo",
+      "sing_box": "sing-box"
+    },
+    "core_handshake_result": {
+      "pass": "passed",
+      "expected_failure": "confirmed incompatible"
     },
     "validate": {
       "url_required": "URL is required",
@@ -1934,6 +2020,7 @@
       "upgrade_panel_already_latest": "Already on the latest version ({{version}}); nothing to upgrade.",
       "upgrade_panel_blocked": "Upgrade refused: target {{latest}} is outside Passwall Panel's tested range (highest {{max}}). Upgrade Passwall Panel first.",
       "upgrade_xray_ok": "Xray upgraded to {{version}}",
+      "core_intent_saved": "Saved Xray {{version}} as desired; completion waits for the node to validate, switch, and report it",
       "batch_upgrade_xray_ok": "Upgraded Xray on {{count}} server(s) to latest",
       "batch_upgrade_xray_partial": "Upgraded Xray on {{ok}} server(s); {{fail}} failed",
       "batch_upgrade_panel_ok": "Initiated 3X-UI upgrade on {{count}} server(s); each runs a smoke probe in ~60s (results in the audit log)",
@@ -1956,7 +2043,11 @@
       "upgrade_force_title": "Target version not verified by Passwall Panel",
       "upgrade_force_message": "About to upgrade to {{latest}}. Passwall Panel's highest verified 3X-UI version is {{max}}. Forcing the upgrade may cause traffic poll, reconcile, and other critical flows to fail due to protocol or field changes. Recommend upgrading Passwall Panel to a release that supports this 3X-UI version first. Force upgrade anyway?",
       "upgrade_xray_title": "Upgrade Xray",
-      "upgrade_xray_message": "Install xray-core on {{name}}. Pick a target version below (defaults to latest). The panel itself stays up; only the xray child process restarts."
+      "upgrade_xray_message": "Install xray-core on {{name}}. Pick a target version below (defaults to latest). The panel itself stays up; only the xray child process restarts.",
+      "select_core_message": "Select an audited Xray release for {{name}}. The Node verifies source, SHA-256, and the current config before an atomic switch, and rolls back on startup failure.",
+      "restricted_core_title": "This release narrows REALITY client compatibility",
+      "restricted_core_message": "Xray {{version}}: {{summary}} sing-box REALITY nodes will be omitted from subscriptions; Mihomo is pinned to chrome with ML-KEM enabled. Accept this compatibility scope?",
+      "restricted_core_confirm": "Accept and select"
     }
   },
   "diagnostics": {

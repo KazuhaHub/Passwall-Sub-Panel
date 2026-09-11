@@ -36,7 +36,7 @@ func TestCoarseNodeStatus(t *testing.T) {
 func TestUserStatusForNode_RelayVisibilityAndSanitization(t *testing.T) {
 	checked := time.Date(2026, 7, 16, 12, 0, 0, 0, time.UTC)
 	n := &domain.Node{
-		DisplayName: "Tokyo", Region: "JP", Port: 443,
+		DisplayName: "Tokyo", Region: "JP", DesiredPort: 443,
 		HealthState: domain.NodeHealthOK, HealthCheckedAt: &checked,
 		HideDirect: true,
 		Relays: []domain.RelayLine{

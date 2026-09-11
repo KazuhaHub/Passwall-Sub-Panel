@@ -30,6 +30,7 @@ package reconcile
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -40,6 +41,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/safego"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/xrayspec"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/clientdoc"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/group"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/inboundcfg"
 )
@@ -85,6 +87,7 @@ type Service struct {
 	audit     ports.AuditRepo
 	pool      ports.XUIPool
 	syncer    ClientSyncer
+	clients   ports.PSPClientRepo
 
 	// axisAReversePush gates the v3.5 "PSP pushes its config back over 3X-UI
 	// drift" behavior in reconcileInboundConfig (the push uses
@@ -107,6 +110,10 @@ func New(users ports.UserRepo, ownership ports.OwnershipRepo, nodes ports.NodeRe
 		axisAReversePush: true,
 	}
 }
+
+// SetPSPClientRepo supplies the authoritative desired client rows. Nil keeps
+// the legacy fallback for isolated tests and upgrades before A2 backfill.
+func (s *Service) SetPSPClientRepo(clients ports.PSPClientRepo) { s.clients = clients }
 
 // Report summarises one reconciliation run.
 type Report struct {
@@ -165,6 +172,22 @@ type inboundCacheKey struct {
 func (s *Service) RunOnce(ctx context.Context, level Level) (*Report, error) {
 	report := &Report{}
 	cache := map[inboundCacheKey]*inboundCacheEntry{}
+	runNow := time.Now()
+	desiredByUser := map[int64]domain.UserLifecycle{}
+	if s.clients != nil {
+		if clients, err := s.clients.ListAll(ctx); err == nil {
+			for _, client := range clients {
+				if !client.DesiredMinted {
+					continue
+				}
+				if _, exists := desiredByUser[client.UserID]; !exists {
+					desiredByUser[client.UserID] = clientdoc.Mint(client, nil).Lifecycle()
+				}
+			}
+		} else {
+			log.Warn("reconcile: load desired client documents", "err", err)
+		}
+	}
 
 	rules := s.emailRules(ctx)
 	allNodes, _ := s.nodes.List(ctx)
@@ -245,6 +268,19 @@ func (s *Service) RunOnce(ctx context.Context, level Level) (*Report, error) {
 			ownershipByUser = nil
 		}
 		for _, u := range users {
+			want, ok := desiredByUser[u.ID]
+			if !ok && s.clients == nil {
+				// Transitional fallback only: once every user has a psp_client row,
+				// reconciliation consumes persisted intent exclusively.
+				want = u.Lifecycle(runNow, 0)
+				ok = true
+			}
+			if !ok {
+				// A repository exists but this user's desired document has not been
+				// minted yet (typical during an upgrade backfill). Unknown intent is
+				// never projected as a zero-value "disabled/unlimited" decision.
+				continue
+			}
 			entries, present := ownershipByUser[u.ID]
 			if !present && !batchOK {
 				// Batch failed for the whole page — fall back to the
@@ -261,7 +297,7 @@ func (s *Service) RunOnce(ctx context.Context, level Level) (*Report, error) {
 			// the nil to add the missing rows below, and the scan loop
 			// just does nothing for a user with no rows.
 			if level == LevelFull {
-				s.checkMissingOwnershipsWithCtx(ctx, u, report, cache, rules, allNodes,
+				s.checkMissingOwnershipsWithCtx(ctx, u, want, report, cache, rules, allNodes,
 					groupByID[u.GroupID], entries, batchOK)
 			}
 			for _, e := range entries {
@@ -279,7 +315,7 @@ func (s *Service) RunOnce(ctx context.Context, level Level) (*Report, error) {
 					})
 					continue
 				}
-				if issue, fixed := s.checkOne(ctx, u, e, ce,
+				if issue, fixed := s.checkOne(ctx, u, want, e, ce,
 					node, level); issue != nil {
 					issue.Fixed = fixed
 					if fixed {
@@ -335,6 +371,7 @@ func (s *Service) emailRules(ctx context.Context) domain.EmailRules {
 func (s *Service) checkMissingOwnershipsWithCtx(
 	ctx context.Context,
 	u *domain.User,
+	want domain.UserLifecycle,
 	report *Report,
 	cache map[inboundCacheKey]*inboundCacheEntry,
 	rules domain.EmailRules,
@@ -347,7 +384,7 @@ func (s *Service) checkMissingOwnershipsWithCtx(
 	// inside a live emergency window must have missing clients recreated (with
 	// the emergency push-expiry below), and a genuinely-expired user must not get
 	// a client recreated only for 3X-UI to disable it instantly. Mirrors checkOne.
-	if !u.EffectiveEnabled(time.Now()) {
+	if !want.Enable {
 		return
 	}
 	if g == nil {
@@ -411,8 +448,6 @@ func (s *Service) checkMissingOwnershipsWithCtx(
 		// window's future expiry wins over a past real expiry — recreating the
 		// client with the raw ExpireAt would let 3X-UI's expiry cron disable it
 		// immediately. Mirrors checkOne / the user provisioning path.
-		expireTime := u.PushExpireTime()
-
 		// AddClientToInbound recreates a missing client (best-effort drift
 		// recovery). It does NOT dedup/adopt an already-present client: if the
 		// client still exists upstream (e.g. a stale prefetch snapshot saw it
@@ -435,7 +470,7 @@ func (s *Service) checkMissingOwnershipsWithCtx(
 		// (unlike checkOne's), so Enable is genuinely known-true here rather
 		// than assumed.
 		err = s.syncer.AddClientToInbound(ctx, u.ID, n.PanelID, n.InboundID, protocol, ce.method, u.UUID, email, flow,
-			domain.UserLifecycle{Enable: true, ExpiryTime: expireTime, IPLimit: u.IPLimit, DeviceLimit: u.DeviceLimit}, 0)
+			want, 0)
 
 		fixed := err == nil
 		report.Issues = append(report.Issues, Issue{
@@ -618,7 +653,7 @@ func flowRenderDiverges(protocol domain.Protocol, n *domain.Node, storedFlow str
 	return storedFlow != ""
 }
 
-func (s *Service) checkOne(ctx context.Context, u *domain.User, e *domain.XUIClientEntry,
+func (s *Service) checkOne(ctx context.Context, u *domain.User, want domain.UserLifecycle, e *domain.XUIClientEntry,
 	ce *inboundCacheEntry, n *domain.Node, level Level) (*Issue, bool) {
 
 	if n != nil && (n.IsSeparator() || !n.Enabled) {
@@ -629,22 +664,9 @@ func (s *Service) checkOne(ctx context.Context, u *domain.User, e *domain.XUICli
 	found := xrayspec.FindClient(ce.clients, e.ClientEmail)
 	desiredFlow := resolveFlow(protocol, n, ce)
 
-	// Single source of truth for "what expire_time should 3X-UI see for
-	// this user" — same helper user.pushClientConfigToAll uses. Crucially
-	// includes the EmergencyUntil extension; without this, reconcile and
-	// the traffic poll fight over the same field (poll pushes the
-	// emergency-extended time, reconcile would push the raw ExpireAt
-	// back, poll pushes again, ad infinitum).
-	expireTime := u.PushExpireTime()
-	// Effective enable folds expiry + emergency into the admin's u.Enabled
-	// toggle, matching what 3X-UI itself derives from (enable + expiry_time)
-	// — without this, an expired-but-Enabled user gets stuck in a "panel
-	// pushes enable=true, 3X-UI's cron flips it back" loop on every cycle.
-	desiredEnable := u.EffectiveEnabled(time.Now())
-
 	// Check 1: existence
 	if found == nil {
-		// desiredEnable, NOT a hardcoded true. This recreates a client that went
+		// want.Enable, NOT a hardcoded true. This recreates a client that went
 		// missing, and it used to recreate it ENABLED regardless of the user's
 		// real state — so a suspended or expired account whose client vanished
 		// came back serving traffic, and stayed that way until Check 3 caught it
@@ -653,7 +675,7 @@ func (s *Service) checkOne(ctx context.Context, u *domain.User, e *domain.XUICli
 		// holding that line.
 		if err := s.syncer.AddClientToInbound(ctx, u.ID, e.PanelID, e.InboundID,
 			protocol, ce.method, u.UUID, e.ClientEmail, desiredFlow,
-			domain.UserLifecycle{Enable: desiredEnable, ExpiryTime: expireTime, IPLimit: u.IPLimit, DeviceLimit: u.DeviceLimit}, 0); err != nil {
+			want, e.LastRawTotalBytes); err != nil {
 			return &Issue{
 				PanelID:   e.PanelID,
 				PanelName: s.panelNameOf(e.PanelID), InboundID: e.InboundID, ClientEmail: e.ClientEmail,
@@ -668,10 +690,10 @@ func (s *Service) checkOne(ctx context.Context, u *domain.User, e *domain.XUICli
 	}
 
 	// Check 3: enable mismatch
-	if found.IsEnabled() != desiredEnable {
+	if found.IsEnabled() != want.Enable {
 		if err := s.syncer.SetOwnedClientEnable(ctx, e.PanelID, e.InboundID, e.ClientEmail,
 			protocol, ce.method, u.UUID, desiredFlow,
-			domain.UserLifecycle{Enable: desiredEnable, ExpiryTime: expireTime, IPLimit: u.IPLimit, DeviceLimit: u.DeviceLimit}, 0); err != nil {
+			want, e.LastRawTotalBytes); err != nil {
 			return &Issue{
 				PanelID:   e.PanelID,
 				PanelName: s.panelNameOf(e.PanelID), InboundID: e.InboundID, ClientEmail: e.ClientEmail,
@@ -693,7 +715,7 @@ func (s *Service) checkOne(ctx context.Context, u *domain.User, e *domain.XUICli
 	if protocol == domain.ProtoVLESS && desiredFlow != "" && found.Flow != desiredFlow {
 		if err := s.syncer.SetOwnedClientEnable(ctx, e.PanelID, e.InboundID, e.ClientEmail,
 			protocol, ce.method, u.UUID, desiredFlow,
-			domain.UserLifecycle{Enable: desiredEnable, ExpiryTime: expireTime, IPLimit: u.IPLimit, DeviceLimit: u.DeviceLimit}, 0); err != nil {
+			want, e.LastRawTotalBytes); err != nil {
 			return &Issue{
 				PanelID:   e.PanelID,
 				PanelName: s.panelNameOf(e.PanelID), InboundID: e.InboundID, ClientEmail: e.ClientEmail,
@@ -716,7 +738,7 @@ func (s *Service) checkOne(ctx context.Context, u *domain.User, e *domain.XUICli
 	if (protocol == domain.ProtoVLESS || protocol == domain.ProtoVMess) && found.ID != u.UUID {
 		if err := s.syncer.RotateClientUUID(ctx, e.PanelID, e.InboundID, e.ClientEmail,
 			protocol, ce.method, found.ID, u.UUID, desiredFlow,
-			domain.UserLifecycle{Enable: desiredEnable, ExpiryTime: expireTime, IPLimit: u.IPLimit, DeviceLimit: u.DeviceLimit}, 0); err != nil {
+			want, e.LastRawTotalBytes); err != nil {
 			return &Issue{
 				PanelID:   e.PanelID,
 				PanelName: s.panelNameOf(e.PanelID), InboundID: e.InboundID, ClientEmail: e.ClientEmail,
@@ -736,7 +758,7 @@ func (s *Service) checkOne(ctx context.Context, u *domain.User, e *domain.XUICli
 		if found.Password != expected {
 			if err := s.syncer.SetOwnedClientEnable(ctx, e.PanelID, e.InboundID, e.ClientEmail,
 				protocol, ce.method, u.UUID, desiredFlow,
-				domain.UserLifecycle{Enable: desiredEnable, ExpiryTime: expireTime, IPLimit: u.IPLimit, DeviceLimit: u.DeviceLimit}, 0); err != nil {
+				want, e.LastRawTotalBytes); err != nil {
 				return &Issue{
 					PanelID:   e.PanelID,
 					PanelName: s.panelNameOf(e.PanelID), InboundID: e.InboundID, ClientEmail: e.ClientEmail,
@@ -772,10 +794,10 @@ func (s *Service) checkOne(ctx context.Context, u *domain.User, e *domain.XUICli
 	// during the window right before the case it was built for. Narrow (needs
 	// an expiry drift to fire at all) but real; audited 2026-09-09, see
 	// docs/adr/0025-push-pull-decision-rule.md.
-	if found.ExpiryTime != expireTime {
+	if found.ExpiryTime != want.ExpiryTime {
 		if err := s.syncer.SetOwnedClientEnable(ctx, e.PanelID, e.InboundID, e.ClientEmail,
 			protocol, ce.method, u.UUID, desiredFlow,
-			domain.UserLifecycle{Enable: desiredEnable, ExpiryTime: expireTime, IPLimit: u.IPLimit, DeviceLimit: u.DeviceLimit}, 0); err != nil {
+			want, e.LastRawTotalBytes); err != nil {
 			return &Issue{
 				PanelID:   e.PanelID,
 				PanelName: s.panelNameOf(e.PanelID), InboundID: e.InboundID, ClientEmail: e.ClientEmail,
@@ -903,7 +925,7 @@ func (s *Service) checkNodes(ctx context.Context, report *Report, cache map[inbo
 // early returns, and per NODE rather than per client: Node.Flow is a node
 // column, so one blank produces one issue however many users are on it.
 func (s *Service) reportFlowRenderDivergence(n *domain.Node, entry *inboundCacheEntry, report *Report) {
-	if entry == nil || !flowRenderDiverges(domain.Protocol(n.Protocol), n, entry.flow) {
+	if entry == nil || !flowRenderDiverges(domain.Protocol(n.DesiredProtocol), n, entry.flow) {
 		return
 	}
 	report.Issues = append(report.Issues, Issue{
@@ -928,6 +950,18 @@ func (s *Service) reportFlowRenderDivergence(n *domain.Node, entry *inboundCache
 //     is overwritten — never a client. We then re-capture the post-push live
 //     config so a JSON normalisation by 3X-UI converges instead of looping.
 func (s *Service) reconcileInboundConfig(ctx context.Context, n *domain.Node, live *ports.Inbound, report *Report) {
+	// Observation is a separate axis from administrator intent. Persist it
+	// through the narrow writer before any early return so even a steady-state
+	// reconcile pass refreshes what the panel is actually serving.
+	observed := domain.NodeObservedEndpoint{Protocol: strings.ToLower(live.Protocol), Port: live.Port}
+	if n.ObservedPort != observed.Port || !strings.EqualFold(n.ObservedProtocol, observed.Protocol) {
+		if err := s.nodes.UpdateObservedEndpoint(ctx, n.ID, observed); err != nil {
+			s.recordInboundConfigEvent(ctx, report, n, "inbound_endpoint_observation_failed", err.Error(), false)
+		} else {
+			n.ObservedPort = observed.Port
+			n.ObservedProtocol = observed.Protocol
+		}
+	}
 	// Steady state — captured AND already in sync — is the overwhelmingly
 	// common case: do nothing, and notably skip the stale-read guard's extra
 	// DB round-trip. Only un-captured (backfill) or drifted nodes fall through
@@ -953,9 +987,11 @@ func (s *Service) reconcileInboundConfig(ctx context.Context, n *domain.Node, li
 		return
 	}
 	n = fresh
+	n.ObservedPort = observed.Port
+	n.ObservedProtocol = observed.Protocol
 
 	if n.ConfigSyncedAt == nil {
-		inboundcfg.Capture(n, live)
+		inboundcfg.Adopt(n, live)
 		// Column-scoped write: a concurrent health pass writes port/protocol
 		// from the same probe target, full-row Save would race with it.
 		if err := s.nodes.UpdateInboundConfig(ctx, n); err != nil {
@@ -978,7 +1014,7 @@ func (s *Service) reconcileInboundConfig(ctx context.Context, n *domain.Node, li
 	// reverted. `live` is the same snapshot InSync just compared against, so
 	// capturing it converges to in-sync with no extra fetch.
 	if !s.axisAReversePush {
-		inboundcfg.Capture(n, live)
+		inboundcfg.Adopt(n, live)
 		if err := s.nodes.UpdateInboundConfig(ctx, n); err != nil {
 			s.markConfigSyncStatePending(ctx, n)
 			s.recordInboundConfigEvent(ctx, report, n, "inbound_config_drift_adopt_failed", err.Error(), false)
@@ -1025,6 +1061,11 @@ func (s *Service) reconcileInboundConfig(ctx context.Context, n *domain.Node, li
 		return
 	}
 	inboundcfg.Capture(n, freshLive)
+	if err := s.nodes.UpdateObservedEndpoint(ctx, n.ID, n.ObservedEndpoint()); err != nil {
+		s.markConfigSyncStatePending(ctx, n)
+		s.recordInboundConfigEvent(ctx, report, n, "inbound_endpoint_observation_failed", err.Error(), false)
+		return
+	}
 	if err := s.nodes.UpdateInboundConfig(ctx, n); err != nil {
 		s.markConfigSyncStatePending(ctx, n)
 		s.recordInboundConfigEvent(ctx, report, n, "inbound_config_recapture_failed", err.Error(), false)

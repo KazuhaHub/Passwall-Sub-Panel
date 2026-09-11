@@ -212,7 +212,7 @@ func TestProbeRespectsDeadline(t *testing.T) {
 
 func TestCheckOnceMapsInconclusiveToItsOwnState(t *testing.T) {
 	repo := &fakeNodeRepo{nodes: []*domain.Node{
-		{ID: 1, PanelID: 10, InboundID: 1, Enabled: true, ServerAddress: "h.example", Port: 8443, Protocol: "hysteria2"},
+		{ID: 1, PanelID: 10, InboundID: 1, Enabled: true, ServerAddress: "h.example", DesiredPort: 8443, DesiredProtocol: "hysteria2"},
 	}}
 	s := New(repo)
 	s.probe = func(context.Context, string, string, int) error { return errProbeInconclusive }
@@ -245,7 +245,7 @@ func TestCheckOnceStillSeparatesUpFromDown(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			repo := &fakeNodeRepo{nodes: []*domain.Node{
-				{ID: 1, Enabled: true, ServerAddress: "h.example", Port: 443, Protocol: "vless"},
+				{ID: 1, Enabled: true, ServerAddress: "h.example", DesiredPort: 443, DesiredProtocol: "vless"},
 			}}
 			s := New(repo)
 			s.probe = func(context.Context, string, string, int) error { return tc.err }

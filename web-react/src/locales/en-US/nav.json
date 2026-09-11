@@ -12,6 +12,7 @@
     "traffic": "Traffic",
     "logs": "Logs",
     "sync_tasks": "Sync tasks",
+    "node_issues": "Node issues",
     "language_packs": "Language packs",
     "settings": "Settings",
     "diagnostics": "Diagnostics"

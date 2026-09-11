@@ -79,7 +79,10 @@ func (r *fakeNodeRepo) UpdateTrafficCounters(ctx context.Context, n *domain.Node
 func (r *fakeNodeRepo) BatchUpdateTrafficCounters(ctx context.Context, nodes []*domain.Node) error {
 	return nil
 }
-func (r *fakeNodeRepo) UpdateInboundConfig(ctx context.Context, n *domain.Node) error   { return nil }
+func (r *fakeNodeRepo) UpdateInboundConfig(ctx context.Context, n *domain.Node) error { return nil }
+func (r *fakeNodeRepo) UpdateObservedEndpoint(context.Context, int64, domain.NodeObservedEndpoint) error {
+	return nil
+}
 func (r *fakeNodeRepo) UpdateEnabled(ctx context.Context, id int64, enabled bool) error { return nil }
 func (r *fakeNodeRepo) UpdateCertBinding(_ context.Context, _ int64, _ domain.CertSource, _ int64) error {
 	return nil
@@ -111,7 +114,7 @@ func newWithProbe(repo ports.NodeRepo, ret error) (*Service, *[]string) {
 
 func TestCheckOnce_PortOpen_Up(t *testing.T) {
 	repo := &fakeNodeRepo{nodes: []*domain.Node{
-		{ID: 1, PanelID: 10, InboundID: 1, Enabled: true, ServerAddress: "a.example", Port: 443, Protocol: "vless"},
+		{ID: 1, PanelID: 10, InboundID: 1, Enabled: true, ServerAddress: "a.example", DesiredPort: 443, DesiredProtocol: "vless"},
 	}}
 	s, calls := newWithProbe(repo, nil)
 	if err := s.CheckOnce(context.Background()); err != nil {
@@ -123,8 +126,8 @@ func TestCheckOnce_PortOpen_Up(t *testing.T) {
 	if repo.updates[0].HealthCheckedAt == nil {
 		t.Fatal("HealthCheckedAt must be stamped every pass")
 	}
-	if repo.updates[0].Port != 443 {
-		t.Fatalf("port not preserved through persist: got %d, want 443", repo.updates[0].Port)
+	if repo.updates[0].DesiredPort != 443 {
+		t.Fatalf("desired port not preserved through persist: got %d, want 443", repo.updates[0].DesiredPort)
 	}
 	if len(*calls) != 1 || (*calls)[0] != "tcp a.example:443" {
 		t.Fatalf("probe calls = %v, want one tcp a.example:443", *calls)
@@ -133,7 +136,7 @@ func TestCheckOnce_PortOpen_Up(t *testing.T) {
 
 func TestCheckOnce_PortClosed_Down(t *testing.T) {
 	repo := &fakeNodeRepo{nodes: []*domain.Node{
-		{ID: 1, PanelID: 10, InboundID: 1, Enabled: true, ServerAddress: "a.example", Port: 443, Protocol: "vless"},
+		{ID: 1, PanelID: 10, InboundID: 1, Enabled: true, ServerAddress: "a.example", DesiredPort: 443, DesiredProtocol: "vless"},
 	}}
 	s, _ := newWithProbe(repo, errors.New("connection refused"))
 	if err := s.CheckOnce(context.Background()); err != nil {
@@ -146,7 +149,7 @@ func TestCheckOnce_PortClosed_Down(t *testing.T) {
 
 func TestCheckOnce_UDPProtocolProbedWithUDP(t *testing.T) {
 	repo := &fakeNodeRepo{nodes: []*domain.Node{
-		{ID: 1, PanelID: 10, InboundID: 1, Enabled: true, ServerAddress: "h.example", Port: 8443, Protocol: "hysteria2"},
+		{ID: 1, PanelID: 10, InboundID: 1, Enabled: true, ServerAddress: "h.example", DesiredPort: 8443, DesiredProtocol: "hysteria2"},
 	}}
 	s, calls := newWithProbe(repo, nil)
 	if err := s.CheckOnce(context.Background()); err != nil {
@@ -159,7 +162,7 @@ func TestCheckOnce_UDPProtocolProbedWithUDP(t *testing.T) {
 
 func TestCheckOnce_RelayHealthIncludesEnabledLines(t *testing.T) {
 	repo := &fakeNodeRepo{nodes: []*domain.Node{{
-		ID: 1, Enabled: true, ServerAddress: "landing.example", Port: 443, Protocol: "vless",
+		ID: 1, Enabled: true, ServerAddress: "landing.example", DesiredPort: 443, DesiredProtocol: "vless",
 		HideDirect: true, // force relay probing even when ShowRelayStatus is false
 		Relays: []domain.RelayLine{
 			{Name: "good", Address: "good.relay", Port: 8443, Enabled: true},
@@ -224,7 +227,7 @@ func TestCheckOnce_NoPortInRow_Unreachable(t *testing.T) {
 
 func TestCheckOnce_DisabledNodesSkipped(t *testing.T) {
 	repo := &fakeNodeRepo{nodes: []*domain.Node{
-		{ID: 1, PanelID: 10, InboundID: 1, Enabled: false, Port: 443, Protocol: "vless", HealthState: domain.NodeHealthOK},
+		{ID: 1, PanelID: 10, InboundID: 1, Enabled: false, DesiredPort: 443, DesiredProtocol: "vless", HealthState: domain.NodeHealthOK},
 	}}
 	s, _ := newWithProbe(repo, nil)
 	if err := s.CheckOnce(context.Background()); err != nil {

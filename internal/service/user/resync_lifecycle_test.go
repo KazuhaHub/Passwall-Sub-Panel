@@ -60,7 +60,7 @@ func TestResyncMembership_LifecycleFailureKeepsLegacy(t *testing.T) {
 	svc := &Service{
 		users:    &memoryUserRepo{byID: map[int64]*domain.User{7: disabled}},
 		groups:   &bfGroupRepo{g: &domain.Group{ID: 1}},
-		selector: bfSelector{nodes: []*domain.Node{{ID: 10, PanelID: 1, Protocol: "vless"}}},
+		selector: bfSelector{nodes: []*domain.Node{{ID: 10, PanelID: 1, DesiredProtocol: "vless"}}},
 		settings: bfSettings{},
 	}
 	mig := &resyncMigrator{}
@@ -86,7 +86,7 @@ func TestResyncMembership_LifecycleSuccessDeletesLegacy(t *testing.T) {
 	svc := &Service{
 		users:    &memoryUserRepo{byID: map[int64]*domain.User{8: u}},
 		groups:   &bfGroupRepo{g: &domain.Group{ID: 1}},
-		selector: bfSelector{nodes: []*domain.Node{{ID: 10, PanelID: 1, Protocol: "vless"}}},
+		selector: bfSelector{nodes: []*domain.Node{{ID: 10, PanelID: 1, DesiredProtocol: "vless"}}},
 		settings: bfSettings{},
 	}
 	mig := &resyncMigrator{}

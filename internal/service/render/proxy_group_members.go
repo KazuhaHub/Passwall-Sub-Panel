@@ -11,7 +11,7 @@ import (
 
 const maxProxyGroupMembers = 128
 
-var proxyGroupBuiltins = []string{"DIRECT", "REJECT", "REJECT-DROP", "REJECT-DROP-BIT", "PASS"}
+var proxyGroupBuiltins = []string{"DIRECT", "REJECT", "REJECT-DROP", "PASS"}
 
 // ProxyGroupIssue is returned by the draft inspector and save validator.
 // Errors block persistence; warnings describe references that are valid but

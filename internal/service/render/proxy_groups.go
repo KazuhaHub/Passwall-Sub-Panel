@@ -8,11 +8,10 @@ import (
 )
 
 var builtInRuleTargets = map[string]bool{
-	"DIRECT":          true,
-	"REJECT":          true,
-	"REJECT-DROP":     true,
-	"REJECT-DROP-BIT": true,
-	"PASS":            true,
+	"DIRECT":      true,
+	"REJECT":      true,
+	"REJECT-DROP": true,
+	"PASS":        true,
 }
 
 // defaultProxyGroupOrder preserves the original project ordering when a rule
@@ -20,6 +19,7 @@ var builtInRuleTargets = map[string]bool{
 // here are prepended in their first-occurrence order from the rule content.
 var defaultProxyGroupOrder = []string{
 	"🚀 节点选择",
+	"⚡ QUIC控制",
 	"🎮 UDP控制",
 	"🇨🇳 中国大陆",
 	"💬 Ai平台",
@@ -175,8 +175,8 @@ func withoutBuiltinExits(choices []string) []string {
 }
 
 func withRequiredProxyGroupDependencies(targets []string) []string {
-	hasNodeSelector := false
-	needsNodeSelector := false
+	hasNodeSelector, hasUDPSelector := false, false
+	needsNodeSelector, needsUDPSelector := false, false
 	for _, target := range targets {
 		// Exact match, not substring: a custom group merely CONTAINING the phrase
 		// (e.g. "美国节点选择") must not suppress the canonical "🚀 节点选择"
@@ -184,20 +184,35 @@ func withRequiredProxyGroupDependencies(targets []string) []string {
 		// dangling reference Clash-family clients reject.
 		if target == "🚀 节点选择" {
 			hasNodeSelector = true
-			continue
+		}
+		if target == "🎮 UDP控制" {
+			hasUDPSelector = true
 		}
 		for _, choice := range proxyGroupChoices(target) {
 			if choice == "🚀 节点选择" {
 				needsNodeSelector = true
-				break
+			}
+			if choice == "🎮 UDP控制" {
+				needsUDPSelector = true
 			}
 		}
 	}
-	if !needsNodeSelector || hasNodeSelector {
+	// The QUIC selector delegates to the UDP selector, whose own default
+	// delegates to the canonical node selector. Close that transitive
+	// dependency even when an administrator defines only a QUIC rule.
+	if needsUDPSelector && !hasUDPSelector {
+		needsNodeSelector = true
+	}
+	if (!needsNodeSelector || hasNodeSelector) && (!needsUDPSelector || hasUDPSelector) {
 		return targets
 	}
-	out := make([]string, 0, len(targets)+1)
-	out = append(out, "🚀 节点选择")
+	out := make([]string, 0, len(targets)+2)
+	if needsNodeSelector && !hasNodeSelector {
+		out = append(out, "🚀 节点选择")
+	}
+	if needsUDPSelector && !hasUDPSelector {
+		out = append(out, "🎮 UDP控制")
+	}
 	out = append(out, targets...)
 	return out
 }
@@ -242,12 +257,16 @@ func normalizeRulePart(raw string) string {
 
 func proxyGroupChoices(name string) []string {
 	switch {
+	case strings.Contains(name, "QUIC控制"):
+		// HTTP/3 over UDP/443 is independently selectable. Delegating to the
+		// general UDP selector first preserves one-knob operation, while the
+		// remaining members let a subscriber override QUIC without changing
+		// other UDP traffic. Avoid PASS here: sing-box has no equivalent and
+		// mapping it to DIRECT would create a platform-specific traffic leak.
+		return []string{"🎮 UDP控制", "🚀 节点选择", "DIRECT", "REJECT"}
 	case strings.Contains(name, "UDP控制"):
-		// UDP catch-all selector: pick where ALL (non-local) UDP goes at
-		// runtime — through the node (default), straight DIRECT (bypass proxy,
-		// e.g. when the node's UDP is poor), or REJECT (drop UDP → QUIC falls
-		// back to TCP). 🚀 节点选择 first so the default preserves today's
-		// behaviour (UDP proxied through the chosen node).
+		// General non-local UDP selector. HTTP/3 normally delegates here through
+		// the dedicated QUIC selector, but subscribers can override it there.
 		return []string{"🚀 节点选择", "DIRECT", "REJECT"}
 	case strings.Contains(name, "全球直连"):
 		return []string{"DIRECT"}
