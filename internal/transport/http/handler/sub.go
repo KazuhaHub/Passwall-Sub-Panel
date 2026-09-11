@@ -290,6 +290,10 @@ func (h *SubHandler) logSubAsync(userID int64, ip, ua, clientType string) {
 // HTTP caching is best-effort; the worst case of a collision is a stale
 // subscription delivered to one client for one revalidation window.
 func computeWeakETag(body []byte) string {
+	// The rendered subscription can contain proxy credentials, but this digest
+	// is only an HTTP cache validator: it is never stored as, or compared with,
+	// a password verifier. SHA-256 is appropriate for this non-password hash.
+	// codeql[go/weak-sensitive-data-hashing]
 	sum := sha256.Sum256(body)
 	return `W/"` + hex.EncodeToString(sum[:8]) + `"`
 }
