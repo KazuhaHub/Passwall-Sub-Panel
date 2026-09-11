@@ -23,6 +23,16 @@ type panelObservationRepo struct {
 	updates int
 }
 
+type coreObservationAgentRepo struct {
+	ports.NodeAgentRepo
+	engine domain.NodeCoreEngine
+}
+
+func (r *coreObservationAgentRepo) UpdateCoreObservation(_ context.Context, _ string, engine domain.NodeCoreEngine) error {
+	r.engine = engine
+	return nil
+}
+
 func (r *panelObservationRepo) GetByID(context.Context, int64) (*domain.XUIPanel, error) {
 	copy := *r.panel
 	return &copy, nil
@@ -41,21 +51,22 @@ func TestNativeCoreObservationPersistsAndInvalidatesRenderCache(t *testing.T) {
 		ID: 9, Kind: domain.PanelKindPSP, PanelVersion: "v0.1.0", XrayVersion: "26.7.28",
 	}}
 	invalidations := 0
-	service := &Service{panels: repo, invalidateRender: func() { invalidations++ }}
+	agents := &coreObservationAgentRepo{}
+	service := &Service{panels: repo, agents: agents, invalidateRender: func() { invalidations++ }}
 	now := time.Date(2026, time.September, 11, 12, 0, 0, 0, time.UTC)
 	agent := &domain.NodeAgent{AgentID: "agt_test", PanelID: 9}
 	if err := service.recordPanelObservation(t.Context(), agent, nodeprotocol.NodeReport{
-		AgentVersion: "v0.2.0", CoreVersion: "26.9.9", CoreState: "running",
+		AgentVersion: "v0.2.0", CoreEngine: "sing-box", CoreVersion: "1.14.0", CoreState: "running",
 	}, now); err != nil {
 		t.Fatal(err)
 	}
-	if repo.panel.PanelVersion != "v0.2.0" || repo.panel.XrayVersion != "26.9.9" || repo.updates != 1 || invalidations != 1 {
+	if repo.panel.PanelVersion != "v0.2.0" || repo.panel.XrayVersion != "1.14.0" || agents.engine != domain.NodeCoreSingBox || repo.updates != 1 || invalidations != 1 {
 		t.Fatalf("persisted panel=%+v updates=%d invalidations=%d", repo.panel, repo.updates, invalidations)
 	}
 	if err := service.recordPanelObservation(t.Context(), agent, nodeprotocol.NodeReport{}, now.Add(time.Second)); err != nil {
 		t.Fatal(err)
 	}
-	if repo.panel.PanelVersion != "v0.2.0" || repo.panel.XrayVersion != "26.9.9" || invalidations != 1 {
+	if repo.panel.PanelVersion != "v0.2.0" || repo.panel.XrayVersion != "1.14.0" || invalidations != 1 {
 		t.Fatalf("empty observation erased state or invalidated cache: panel=%+v invalidations=%d", repo.panel, invalidations)
 	}
 }
@@ -299,6 +310,12 @@ func TestBuildConfigCarriesExactRestrictedCoreAcknowledgement(t *testing.T) {
 	}
 	if _, err := buildConfig(&ports.NativeDesiredSnapshot{}, &domain.NodeAgent{DesiredCoreVersion: "latest"}); err == nil {
 		t.Fatal("latest unexpectedly minted")
+	}
+	singBox, err := buildConfig(&ports.NativeDesiredSnapshot{}, &domain.NodeAgent{
+		DesiredCoreEngine: domain.NodeCoreSingBox, DesiredCoreVersion: "1.14.0",
+	})
+	if err != nil || singBox.Core.Engine != "sing-box" || singBox.Core.Version != "1.14.0" || singBox.Core.AllowRestrictedReality {
+		t.Fatalf("sing-box core selection = (%+v, %v)", singBox.Core, err)
 	}
 }
 

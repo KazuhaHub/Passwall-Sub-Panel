@@ -234,14 +234,16 @@ Issue outbox 与调度循环均已落地；`cmd/contract-agent` 保留为不启�
 **明确排在最后。** §10 写得很清楚：不要先写 core 管理。
 前面几步的价值**全部**依赖 C2 的契约测试能跑起来；先写 core 会得到一堆没有验收标准的代码。
 
-**状态（2026-09-11）**：Xray 路径已完成。Passwall-Node 的生产 composition root 已接通
-`Compiler / Supervisor / Telemetry`、精确版本安装、完整配置编译、每轮至多一次 core transition、
-配置校验、原子切换/回滚、重启 digest 核验、Xray telemetry 与离线到期/配额执行。六平台二进制、
-Linux amd64/arm64 Docker 与 CI/Release 流程也已落地。REALITY 三客户端真实握手矩阵见 ADR 0029。
+**状态（2026-09-11）**：Xray 与 sing-box 路径均已完成。Passwall-Node 的生产 composition root
+已接通 `Compiler / Supervisor / Telemetry`、精确版本安装、完整配置编译、每轮至多一次 core
+transition、配置校验、原子切换/回滚、重启 digest 核验、两套 telemetry 与离线到期/配额执行。
+sing-box `1.14.0` 原生编译 VLESS、VMess、Trojan、Shadowsocks-2022，API 只绑定带持久随机 Bearer
+的回环地址，连接事件先进入 SQLite 幂等账本再汇总。六平台二进制、Linux amd64/arm64 Docker 与
+CI/Release 流程也已落地。REALITY 三客户端真实握手矩阵见 ADR 0029。
 
 PSP 已接通严格 Bearer `/v1/node/sync`，原生节点创建事务、一次性凭据展示、摘要落库、凭据轮换和
-收敛后安全删除均已闭合。后续的 sing-box、agent 自升级、RealityProbe 与任务 exactly-once 状态不属于
-本阶段的 Xray 完成条件。
+收敛后安全删除均已闭合。PSP 从同一审计目录选择 engine + exact version，并分开持久化 desired 与
+observed identity。后续的 agent 自升级、RealityProbe 与任务 exactly-once 状态不属于本阶段完成条件。
 
 ---
 

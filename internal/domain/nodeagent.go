@@ -2,6 +2,29 @@ package domain
 
 import "time"
 
+type NodeCoreEngine string
+
+const (
+	NodeCoreXray    NodeCoreEngine = "xray"
+	NodeCoreSingBox NodeCoreEngine = "sing-box"
+)
+
+func NormalizeNodeCoreEngine(engine NodeCoreEngine) NodeCoreEngine {
+	if engine == "" {
+		return NodeCoreXray
+	}
+	return engine
+}
+
+func (e NodeCoreEngine) Valid() bool {
+	switch e {
+	case NodeCoreXray, NodeCoreSingBox:
+		return true
+	default:
+		return false
+	}
+}
+
 // NodeAgent is PSP's durable identity for one native node process. AgentID is
 // minted at registration and never derived from an address; PanelID enforces
 // the protocol's one-agent-to-one-panel accounting scope. Only a SHA-256
@@ -12,8 +35,10 @@ type NodeAgent struct {
 	PanelID                int64
 	Epoch                  uint64
 	CredentialSHA256       string
+	DesiredCoreEngine      NodeCoreEngine
 	DesiredCoreVersion     string
 	AllowRestrictedReality bool
+	ObservedCoreEngine     NodeCoreEngine
 	LastSeen               *time.Time
 	CreatedAt              time.Time
 	UpdatedAt              time.Time

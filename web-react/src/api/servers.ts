@@ -6,6 +6,7 @@ export type CompatStatus = 'supported' | 'too_old' | 'untested' | 'unknown'
 
 export type XUIAuthMethod = '' | 'token' | 'password'
 export type PanelType = '3xui' | 'sui' | 'psp'
+export type NativeCoreEngine = 'xray' | 'sing-box'
 export type PanelCapability =
   | 'inbound.read' | 'inbound.write'
   | 'inbound.create' | 'inbound.update' | 'inbound.delete' | 'inbound.enable'
@@ -32,6 +33,12 @@ export interface Server {
   // strings + missing version_checked_at == "never probed".
   panel_version?: string
   xray_version?: string
+	/** Native nodes: actual engine/version last reported by the running daemon. */
+	core_engine?: NativeCoreEngine
+	core_version?: string
+	/** Native nodes: exact catalog selection PSP will continue delivering. */
+	desired_core_engine?: NativeCoreEngine
+	desired_core_version?: string
   version_checked_at?: string
   compat_status?: CompatStatus
   compat_message?: string
@@ -110,6 +117,8 @@ export interface TestResult {
   panel_version?: string
   xray_version?: string
   xray_state?: string
+	core_engine?: NativeCoreEngine
+	core_version?: string
   compat_status?: CompatStatus
   compat_message?: string
   version_checked_at?: string
@@ -254,13 +263,14 @@ export async function upgradePreview(id: number) {
 
 export interface UpgradeXrayResult {
   ok: boolean
+	engine?: NativeCoreEngine
   version?: string
   message?: string
   error?: string
 }
 
 export interface CoreRelease {
-	engine: string
+	engine: NativeCoreEngine
 	version: string
 	tier: 'recommended' | 'verified' | 'config_verified' | 'restricted'
 	prerelease: boolean
@@ -315,4 +325,24 @@ export async function upgradeXray(id: number, version?: string, options?: { conf
 export async function listXrayVersions(id: number) {
 	const { data } = await client.get<{ versions: string[]; releases?: CoreRelease[] }>(`/admin/servers/${id}/xray-versions`)
 	return { versions: data.versions ?? [], releases: data.releases ?? [] }
+}
+
+export async function listCoreReleases(id: number) {
+	const { data } = await client.get<{ releases?: CoreRelease[] }>(`/admin/servers/${id}/core-releases`)
+	return data.releases ?? []
+}
+
+export async function selectCore(
+	id: number,
+	engine: NativeCoreEngine,
+	version: string,
+	options?: { confirmRestricted?: boolean },
+) {
+	const body = {
+		engine,
+		version,
+		...(options?.confirmRestricted ? { confirm_restricted: true } : {}),
+	}
+	const { data } = await client.post<UpgradeXrayResult>(`/admin/servers/${id}/select-core`, body, { _skipErrorToast: true })
+	return data
 }

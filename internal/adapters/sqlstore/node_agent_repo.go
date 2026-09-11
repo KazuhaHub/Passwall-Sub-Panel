@@ -24,8 +24,10 @@ type nodeAgentRow struct {
 	PanelID                int64  `gorm:"not null;uniqueIndex"`
 	Epoch                  uint64 `gorm:"not null;default:1"`
 	CredentialSHA256       string `gorm:"size:64;not null;uniqueIndex"`
+	DesiredCoreEngine      string `gorm:"size:16;not null;default:'xray'"`
 	DesiredCoreVersion     string `gorm:"size:32;not null;default:''"`
 	AllowRestrictedReality bool   `gorm:"not null;default:false"`
+	ObservedCoreEngine     string `gorm:"size:16;not null;default:''"`
 	LastSeen               *time.Time
 	CreatedAt              time.Time
 	UpdatedAt              time.Time
@@ -83,6 +85,13 @@ func validateNewNodeAgent(agent *domain.NodeAgent) error {
 	if _, err := hex.DecodeString(agent.CredentialSHA256); err != nil {
 		return errors.New("create node agent: credential must be a SHA-256 hex digest")
 	}
+	agent.DesiredCoreEngine = domain.NormalizeNodeCoreEngine(agent.DesiredCoreEngine)
+	if !agent.DesiredCoreEngine.Valid() {
+		return errors.New("create node agent: desired core engine is unsupported")
+	}
+	if agent.ObservedCoreEngine != "" && !agent.ObservedCoreEngine.Valid() {
+		return errors.New("create node agent: observed core engine is unsupported")
+	}
 	agent.CredentialSHA256 = strings.ToLower(agent.CredentialSHA256)
 	return nil
 }
@@ -95,8 +104,10 @@ func createNodeAgentRows(tx *gorm.DB, agent *domain.NodeAgent) (*nodeAgentRow, e
 	row := &nodeAgentRow{
 		AgentID: agent.AgentID, PanelID: agent.PanelID, Epoch: epoch,
 		CredentialSHA256:       agent.CredentialSHA256,
+		DesiredCoreEngine:      string(agent.DesiredCoreEngine),
 		DesiredCoreVersion:     agent.DesiredCoreVersion,
 		AllowRestrictedReality: agent.AllowRestrictedReality,
+		ObservedCoreEngine:     string(agent.ObservedCoreEngine),
 		LastSeen:               agent.LastSeen,
 	}
 	if err := tx.Create(row).Error; err != nil {
@@ -118,8 +129,10 @@ func applyCreatedNodeAgent(agent *domain.NodeAgent, row *nodeAgentRow) {
 	agent.ID = row.ID
 	agent.Epoch = row.Epoch
 	agent.CredentialSHA256 = row.CredentialSHA256
+	agent.DesiredCoreEngine = domain.NormalizeNodeCoreEngine(domain.NodeCoreEngine(row.DesiredCoreEngine))
 	agent.DesiredCoreVersion = row.DesiredCoreVersion
 	agent.AllowRestrictedReality = row.AllowRestrictedReality
+	agent.ObservedCoreEngine = domain.NodeCoreEngine(row.ObservedCoreEngine)
 	agent.CreatedAt = row.CreatedAt
 	agent.UpdatedAt = row.UpdatedAt
 }
@@ -128,8 +141,10 @@ func rowToNodeAgent(row *nodeAgentRow) *domain.NodeAgent {
 	return &domain.NodeAgent{
 		ID: row.ID, AgentID: row.AgentID, PanelID: row.PanelID, Epoch: row.Epoch,
 		CredentialSHA256:       row.CredentialSHA256,
+		DesiredCoreEngine:      domain.NormalizeNodeCoreEngine(domain.NodeCoreEngine(row.DesiredCoreEngine)),
 		DesiredCoreVersion:     row.DesiredCoreVersion,
 		AllowRestrictedReality: row.AllowRestrictedReality,
+		ObservedCoreEngine:     domain.NodeCoreEngine(row.ObservedCoreEngine),
 		LastSeen:               row.LastSeen,
 		CreatedAt:              row.CreatedAt, UpdatedAt: row.UpdatedAt,
 	}
@@ -138,6 +153,21 @@ func rowToNodeAgent(row *nodeAgentRow) *domain.NodeAgent {
 func (r *nodeAgentRepo) List(ctx context.Context) ([]*domain.NodeAgent, error) {
 	var rows []nodeAgentRow
 	if err := r.db.WithContext(ctx).Order("id").Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	out := make([]*domain.NodeAgent, len(rows))
+	for i := range rows {
+		out[i] = rowToNodeAgent(&rows[i])
+	}
+	return out, nil
+}
+
+func (r *nodeAgentRepo) ListByPanelIDs(ctx context.Context, panelIDs []int64) ([]*domain.NodeAgent, error) {
+	if len(panelIDs) == 0 {
+		return []*domain.NodeAgent{}, nil
+	}
+	var rows []nodeAgentRow
+	if err := r.db.WithContext(ctx).Where("panel_id IN ?", panelIDs).Order("panel_id").Find(&rows).Error; err != nil {
 		return nil, err
 	}
 	out := make([]*domain.NodeAgent, len(rows))
@@ -185,21 +215,40 @@ func (r *nodeAgentRepo) GetByPanelID(ctx context.Context, panelID int64) (*domai
 	return rowToNodeAgent(&row), nil
 }
 
-func (r *nodeAgentRepo) UpdateCoreSelection(ctx context.Context, agentID, version string, allowRestrictedReality bool) error {
-	if agentID == "" || version == "" {
-		return errors.New("update node agent core selection: agent ID and version required")
+func (r *nodeAgentRepo) UpdateCoreSelection(ctx context.Context, agentID string, engine domain.NodeCoreEngine, version string, allowRestrictedReality bool) error {
+	engine = domain.NormalizeNodeCoreEngine(engine)
+	if agentID == "" || version == "" || !engine.Valid() {
+		return errors.New("update node agent core selection: agent ID, supported engine and version required")
 	}
 	result := r.db.WithContext(ctx).Model(&nodeAgentRow{}).Where("agent_id = ?", agentID).Updates(map[string]any{
+		"desired_core_engine":      string(engine),
 		"desired_core_version":     version,
 		"allow_restricted_reality": allowRestrictedReality,
 	})
+	return r.finishNodeAgentUpdate(ctx, agentID, result)
+}
+
+func (r *nodeAgentRepo) UpdateCoreObservation(ctx context.Context, agentID string, engine domain.NodeCoreEngine) error {
+	if agentID == "" || !engine.Valid() {
+		return errors.New("update node agent core observation: agent ID and supported engine required")
+	}
+	result := r.db.WithContext(ctx).Model(&nodeAgentRow{}).Where("agent_id = ?", agentID).
+		Update("observed_core_engine", string(engine))
+	return r.finishNodeAgentUpdate(ctx, agentID, result)
+}
+
+// finishNodeAgentUpdate distinguishes an absent row from an idempotent no-op.
+// MySQL normally reports only changed rows, so assigning the already-stored
+// engine can yield RowsAffected == 0 even though the agent still exists.
+func (r *nodeAgentRepo) finishNodeAgentUpdate(ctx context.Context, agentID string, result *gorm.DB) error {
 	if result.Error != nil {
 		return result.Error
 	}
-	if result.RowsAffected == 0 {
-		return domain.ErrNotFound
+	if result.RowsAffected > 0 {
+		return nil
 	}
-	return nil
+	_, err := r.GetByAgentID(ctx, agentID)
+	return err
 }
 
 func (r *nodeAgentRepo) TouchLastSeen(ctx context.Context, agentID string, seenAt time.Time) error {

@@ -1890,6 +1890,7 @@
       "remark": "Remark",
       "auth_method": "Auth method",
       "insecure_https": "Allow insecure HTTPS (Danger!)",
+      "core_engine": "Core engine",
       "xray_version": "Target version",
       "xray_version_latest": "latest",
       "xray_version_loading": "Loading available versions…",
@@ -1898,7 +1899,8 @@
       "core_evidence": "Evidence: config validation {{config}} · real client handshakes {{handshake}}",
       "core_evidence_yes": "complete",
       "core_evidence_no": "not complete",
-      "core_handshake_title": "Tested matrix:"
+      "core_handshake_title": "Tested matrix:",
+      "core_pending": "Pending → {{engine}} {{version}}"
     },
     "auth_method": {
       "token": "API Token",
@@ -1978,7 +1980,7 @@
       "force_upgrade": "Force upgrade",
       "upgrade_panel": "Upgrade 3X-UI panel (Latest)",
       "upgrade_xray": "Upgrade Xray",
-      "select_core": "Select Xray core version",
+      "select_core": "Select core and version",
       "rotate_node_credential": "Rotate node credential"
     },
     "core_tier": {
@@ -2020,7 +2022,7 @@
       "upgrade_panel_already_latest": "Already on the latest version ({{version}}); nothing to upgrade.",
       "upgrade_panel_blocked": "Upgrade refused: target {{latest}} is outside Passwall Panel's tested range (highest {{max}}). Upgrade Passwall Panel first.",
       "upgrade_xray_ok": "Xray upgraded to {{version}}",
-      "core_intent_saved": "Saved Xray {{version}} as desired; completion waits for the node to validate, switch, and report it",
+      "core_intent_saved": "Saved {{engine}} {{version}} as the desired core; completion waits for the node to validate, switch, and report it",
       "batch_upgrade_xray_ok": "Upgraded Xray on {{count}} server(s) to latest",
       "batch_upgrade_xray_partial": "Upgraded Xray on {{ok}} server(s); {{fail}} failed",
       "batch_upgrade_panel_ok": "Initiated 3X-UI upgrade on {{count}} server(s); each runs a smoke probe in ~60s (results in the audit log)",
@@ -2043,8 +2045,9 @@
       "upgrade_force_title": "Target version not verified by Passwall Panel",
       "upgrade_force_message": "About to upgrade to {{latest}}. Passwall Panel's highest verified 3X-UI version is {{max}}. Forcing the upgrade may cause traffic poll, reconcile, and other critical flows to fail due to protocol or field changes. Recommend upgrading Passwall Panel to a release that supports this 3X-UI version first. Force upgrade anyway?",
       "upgrade_xray_title": "Upgrade Xray",
+      "select_core_title": "Select node core",
       "upgrade_xray_message": "Install xray-core on {{name}}. Pick a target version below (defaults to latest). The panel itself stays up; only the xray child process restarts.",
-      "select_core_message": "Select an audited Xray release for {{name}}. The Node verifies source, SHA-256, and the current config before an atomic switch, and rolls back on startup failure.",
+      "select_core_message": "Select an audited core engine and exact release for {{name}}. The Node verifies source, SHA-256, and the current config before an atomic switch, and rolls back on startup failure.",
       "restricted_core_title": "This release narrows REALITY client compatibility",
       "restricted_core_message": "Xray {{version}}: {{summary}} sing-box REALITY nodes will be omitted from subscriptions; Mihomo is pinned to chrome with ML-KEM enabled. Accept this compatibility scope?",
       "restricted_core_confirm": "Accept and select"

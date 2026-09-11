@@ -9,7 +9,8 @@
 
 PSP 今天通过 3X-UI / S-UI 这两个第三方面板管理节点。这个项目**自研一个节点后端**替掉它们，
 理由和判据在 ADR 0024。**协议、PSP 原生适配器与生产同步路由已合流；C2 真 agent 契约测试已通过，
-Passwall-Node 的 Xray 生产 daemon、精确 core 目录、遥测、离线执法、六平台发布与 Docker 均已接通。**
+Passwall-Node 的 Xray / sing-box 生产 daemon、精确 core 目录、遥测、离线执法、六平台发布与 Docker
+均已接通，PSP 可分别选择已核验的 engine + exact version。**
 
 | | 在哪 |
 |---|---|
@@ -82,8 +83,8 @@ config/roster 覆盖度按本机闭包精确校验，directives 覆盖度则保�
 组合，节点不能用未来坐标或同版本错摘要污染收敛状态。协议包同时约束响应调度值，后台设置校验
 直接引用同一常量，避免控制面和 agent 各自维护不同上限。配额 pending delta 还会重新核验
 agent→panel→client 所有权，越权 client key 与已退役 agent 缓存都不能影响别的面板用户。
-跨仓模块发布闸已于 2026-09-11 完成：Passwall-Node revision `54705828baf3` 已进入 main，PSP
-依赖已更新到 `v0.0.0-20260911213024-54705828baf3`。关闭父目录 `go.work` 后，PSP 全量 Go
+跨仓模块发布闸已于 2026-09-11 完成：Passwall-Node revision `86c8daa2534e` 已进入 main，PSP
+依赖已更新到 `v0.0.0-20260911231658-86c8daa2534e`。关闭父目录 `go.work` 后，PSP 全量 Go
 测试、vet、关键路径 race、C2 真 agent 契约测试和六平台交叉编译均通过。
 
 管理端现在可直接创建 `panel_type=psp`：PSP 在一个事务中建立 panel、agent 和三条流，返回一次性的
@@ -91,11 +92,14 @@ agent ID / Bearer 凭据 / sync endpoint；数据库只存 SHA-256。原生节�
 立即吊销并轮换，新值同样只显示一次。删除采用 fail-closed 规则：仍有节点/客户端，或空 config/roster
 尚未由 agent 精确确认时，不能先删掉认证身份而留下一个继续服务、却再也接管不了的 core。
 
-Xray core 选择已改成声明式 desired state：PSP 原生节点只能从 Passwall-Node `corecatalog/` 的精确
-版本目录选择，`latest` 和未列入版本一律拒绝，受限版本要求管理员二次确认。PSP 选择器展示同一份
-兼容说明、REALITY 客户端矩阵和结构化实测证据。当前默认 `26.6.27`；`26.7.28` 经
+core 选择已改成声明式 desired state：PSP 原生节点从 Passwall-Node `corecatalog/` 同时选择 engine
+和精确版本；`latest`、未知 engine 和未列入版本一律拒绝，受限版本要求管理员二次确认。PSP 分开显示
+desired 与 agent 最后报告的 observed engine/version，切换完成前不把“已接受意图”伪装成“已运行”。
+选择器展示同一份兼容说明、REALITY 客户端矩阵和结构化实测证据。Xray 当前默认 `26.6.27`；`26.7.28` 经
 `minClientVer=0.0.0` 转换后 Xray/Mihomo/sing-box 均实测通过；`26.9.9` 的 Mihomo 输出固定
 `chrome + support-x25519mlkem768=true`，sing-box 订阅会省略该 REALITY 节点而不是下发一个死节点。
+sing-box 当前核验 `1.14.0`，原生编译 VLESS、VMess、Trojan、Shadowsocks-2022，并通过真实 REALITY
+握手矩阵；切换 engine/version/binary/启动参数是一个可回滚的原子部署身份。
 
 订阅默认规则已把 HTTP/3 常见的 `UDP/443` 与其他 UDP 分开：`⚡ QUIC控制` 默认委托
 `🎮 UDP控制`，用户也可分别选节点、直连或拒绝。规则位于私网/LAN 直连之后，不包含“中国直连、
@@ -116,8 +120,8 @@ Xray core 选择已改成声明式 desired state：PSP 原生节点只能从 Pas
   才发生的管理员/策略撤销；不增加租约或第二通道就只能等下次同步，属于 §9 的生产取舍。
 - **任务 #49**:异地并发被标记的账号该怎么处理。停在证据不足上，
   v1 的 `ip_shadow` 影子执行就是为了给它攒证据。
-- **§9 的剩余项**：sing-box core adapter、agent 自升级、带 exactly-once 结果状态的任务协议与
-  RealityProbe。当前未知 `tasks[]` 仍必须明确拒绝；不能为了这些后续能力放宽现有失败语义。
+- **§9 的剩余项**：agent 自升级、带 exactly-once 结果状态的任务协议与 RealityProbe。当前未知
+  `tasks[]` 仍必须明确拒绝；不能为了这些后续能力放宽现有失败语义。
 - **跨仓发布闸已完成（2026-09-11）**：Passwall-Node 先发布、PSP 再更新 pseudo-version，且已在
   `GOWORK=off` 下通过全量 Go 测试/vet、关键路径 race、C2 真 agent 契约测试及六平台交叉编译。
   前端 31 文件/208 测试和生产构建通过；浏览器 smoke 交由 PR 的 Linux Chrome job 做最终确认。

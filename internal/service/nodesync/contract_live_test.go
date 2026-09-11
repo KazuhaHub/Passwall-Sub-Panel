@@ -49,6 +49,16 @@ func TestLive_RealNodeAgentContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	repos := sqlstore.NewRepos(db)
+	digest := sha256.Sum256([]byte("contract-credential"))
+	agentRow := &domain.NodeAgent{
+		AgentID: "agt_contract", Epoch: 1, CredentialSHA256: hex.EncodeToString(digest[:]),
+	}
+	panel := &domain.XUIPanel{
+		Kind: domain.PanelKindPSP, Name: "contract-native", URL: "psp://" + agentRow.AgentID,
+	}
+	if err := repos.NativeAgentProvisioning.Create(ctx, panel, agentRow); err != nil {
+		t.Fatal(err)
+	}
 	limit := int64(1_000)
 	user := &domain.User{
 		UPN: "contract@example.test", Email: "contract@example.test",
@@ -61,7 +71,7 @@ func TestLive_RealNodeAgentContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	node := &domain.Node{
-		PanelID: 19, InboundID: 1, DisplayName: "contract", ServerAddress: "node.example.test",
+		PanelID: panel.ID, InboundID: 1, DisplayName: "contract", ServerAddress: "node.example.test",
 		DesiredProtocol: "vless", DesiredPort: 443, InboundListen: "0.0.0.0",
 		InboundRemark: "contract", InboundSettings: `{}`, StreamSettings: `{}`,
 		Sniffing: `{}`, Allocate: `{}`, Region: "CA", Enabled: true,
@@ -82,17 +92,9 @@ func TestLive_RealNodeAgentContract(t *testing.T) {
 	}}); err != nil {
 		t.Fatal(err)
 	}
-	digest := sha256.Sum256([]byte("contract-credential"))
-	agentRow := &domain.NodeAgent{
-		AgentID: "agt_contract", PanelID: node.PanelID, Epoch: 1,
-		CredentialSHA256: hex.EncodeToString(digest[:]),
-	}
-	if err := repos.NodeAgent.Create(ctx, agentRow); err != nil {
-		t.Fatal(err)
-	}
 	coordinator, err := nodesync.New(nodesync.Options{
 		Desired: repos.NativeDesired, Agents: repos.NodeAgent, Issues: repos.NodeAgentIssue, Users: repos.User,
-		Clients: repos.PSPClient, Nodes: repos.Node, Settings: repos.Settings,
+		Clients: repos.PSPClient, Nodes: repos.Node, Panels: repos.XUIPanel, Settings: repos.Settings,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -135,7 +137,14 @@ func TestLive_RealNodeAgentContract(t *testing.T) {
 	if err != nil || len(view.Inbounds) != 1 || len(view.Inbounds[0].ClientStats) != 1 {
 		t.Fatalf("real report did not reach PanelClient projection: (%+v, %v); output=%s", view, err, output)
 	}
-	adapter, err := pspnode.New(&domain.Panel{ID: node.PanelID, Kind: domain.PanelKindPSP}, coordinator, repos.Node, repos.NodeAgent)
+	if view.Status.CoreEngine != "xray" || view.Status.XrayVersion != "coreless" {
+		t.Fatalf("real report core identity = %+v; output=%s", view.Status, output)
+	}
+	observedAgent, err := repos.NodeAgent.GetByAgentID(ctx, agentRow.AgentID)
+	if err != nil || observedAgent.ObservedCoreEngine != domain.NodeCoreXray {
+		t.Fatalf("real report core observation = (%+v, %v); output=%s", observedAgent, err, output)
+	}
+	adapter, err := pspnode.New(panel, coordinator, repos.Node, repos.NodeAgent)
 	if err != nil {
 		t.Fatal(err)
 	}

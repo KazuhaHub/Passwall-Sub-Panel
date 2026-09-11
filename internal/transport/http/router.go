@@ -589,7 +589,8 @@ func NewRouter(d Deps) stdhttp.Handler {
 			invalidateRender = d.Render.InvalidateAll
 		}
 		servers := handler.NewAdminServersHandler(d.Repos.XUIPanel, d.Pool, d.Repos.Node, d.Repos.Audit, d.Async, invalidateRender).
-			WithNativeAgentProvisioning(d.Repos.NativeAgentProvisioning)
+			WithNativeAgentProvisioning(d.Repos.NativeAgentProvisioning).
+			WithNodeAgents(d.Repos.NodeAgent)
 		// 3X-UI panel credentials live here — never operator.
 		adminGroup.GET("/servers", servers.List)
 		adminGroup.POST("/servers", servers.Create)
@@ -601,6 +602,8 @@ func NewRouter(d Deps) stdhttp.Handler {
 		adminGroup.POST("/servers/:id/upgrade-panel", servers.UpgradePanel)
 		adminGroup.POST("/servers/:id/upgrade-xray", servers.UpgradeXray)
 		adminGroup.GET("/servers/:id/xray-versions", servers.ListXrayVersions)
+		adminGroup.GET("/servers/:id/core-releases", servers.ListCoreReleases)
+		adminGroup.POST("/servers/:id/select-core", servers.SelectCore)
 
 		// Node self-enrollment: the admin mints a one-time command here, the
 		// node runs it and calls the public routes near the end of this file.

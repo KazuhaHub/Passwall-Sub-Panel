@@ -54,8 +54,16 @@ func (c *Client) Capabilities() []ports.PanelCapability {
 	}
 }
 
-func (c *Client) GetCoreVersionList(context.Context) ([]string, error) {
-	releases, err := corecatalog.List("xray")
+func (c *Client) GetCoreVersionList(ctx context.Context) ([]string, error) {
+	return c.GetCoreVersionListForEngine(ctx, domain.NodeCoreXray)
+}
+
+func (c *Client) GetCoreVersionListForEngine(_ context.Context, engine domain.NodeCoreEngine) ([]string, error) {
+	engine = domain.NormalizeNodeCoreEngine(engine)
+	if !engine.Valid() {
+		return nil, errors.New("unsupported native core engine")
+	}
+	releases, err := corecatalog.List(string(engine))
 	if err != nil {
 		return nil, err
 	}
@@ -67,15 +75,30 @@ func (c *Client) GetCoreVersionList(context.Context) ([]string, error) {
 }
 
 func (c *Client) InstallCore(ctx context.Context, version string) error {
-	release, err := corecatalog.Resolve("xray", version)
+	release, err := corecatalog.Resolve(string(domain.NodeCoreXray), version)
 	if err != nil {
 		return err
+	}
+	return c.InstallCoreEngine(ctx, domain.NodeCoreXray, release.Version, release.RequiresConfirmation)
+}
+
+func (c *Client) InstallCoreEngine(ctx context.Context, engine domain.NodeCoreEngine, version string, allowRestrictedReality bool) error {
+	engine = domain.NormalizeNodeCoreEngine(engine)
+	if !engine.Valid() {
+		return errors.New("unsupported native core engine")
+	}
+	release, err := corecatalog.Resolve(string(engine), version)
+	if err != nil {
+		return err
+	}
+	if release.RequiresConfirmation != allowRestrictedReality {
+		return errors.New("native core restriction acknowledgement mismatch")
 	}
 	agent, err := c.agents.GetByPanelID(ctx, c.panelID)
 	if err != nil {
 		return err
 	}
-	return c.agents.UpdateCoreSelection(ctx, agent.AgentID, release.Version, release.RequiresConfirmation)
+	return c.agents.UpdateCoreSelection(ctx, agent.AgentID, engine, release.Version, allowRestrictedReality)
 }
 
 func (c *Client) ApplyIsAsynchronous() bool { return true }
