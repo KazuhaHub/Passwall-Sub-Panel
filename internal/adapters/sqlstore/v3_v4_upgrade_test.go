@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 
@@ -324,7 +325,18 @@ func TestV392Beta20SchemaUpgradePreservesNodeAndClientData(t *testing.T) {
 func v392ReadRows[T any](t *testing.T, db *gorm.DB) []T {
 	t.Helper()
 	var rows []T
-	if err := db.Order("id").Find(&rows).Error; err != nil {
+	// PostgreSQL/pgx caches SELECT * result shapes. These fixtures deliberately
+	// read both sides of DDL on one connection, unlike a normal panel boot.
+	// Use the same per-query simple protocol as the PostgreSQL GORM migrator;
+	// retain SELECT * so retired frozen fields become zero after column removal.
+	query := db.Order("id")
+	if db.Dialector.Name() == "postgres" {
+		query = query.Scopes(func(d *gorm.DB) *gorm.DB {
+			d.Statement.Vars = append([]any{pgx.QueryExecModeSimpleProtocol}, d.Statement.Vars...)
+			return d
+		})
+	}
+	if err := query.Find(&rows).Error; err != nil {
 		t.Fatal(err)
 	}
 	return rows
