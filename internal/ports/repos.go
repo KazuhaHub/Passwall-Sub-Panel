@@ -472,6 +472,9 @@ type NodeAgentTaskRepo interface {
 	// input returns domain.ErrConflict. New rows are admitted atomically under
 	// a per-agent queued+offered count/raw-input-byte quota; exhaustion returns
 	// domain.ErrResourceExhausted, but an exact replay still succeeds at capacity.
+	// Exact task-ID replays must also match the immutable Lifecycle snapshot.
+	// An idempotency-key alias returns the original task and original snapshot;
+	// it never recomputes its deadline or protection floor from today's policy.
 	CreateOrGet(ctx context.Context, task *domain.NodeAgentTask) (stored *domain.NodeAgentTask, created bool, err error)
 	GetByTaskID(ctx context.Context, taskID string) (*domain.NodeAgentTask, error)
 	// GetQuarantinedResult returns complete, integrity-validated agent-local
@@ -483,6 +486,8 @@ type NodeAgentTaskRepo interface {
 	// empty set offers nothing. maxTaskJSONBytes is the exact
 	// budget for the encoded JSON task array inside the already-built response,
 	// so only rows that can actually be sent are marked offered.
+	// Lifecycle-aware requests are excluded until the shared expiry wire and
+	// its capability negotiation have been published and integrated.
 	Offer(ctx context.Context, agentID string, eligibleKinds []string, limit, maxTaskJSONBytes int, offeredAt time.Time) ([]*domain.NodeAgentTask, error)
 	// CompleteBatch validates every result under the agent owner lock and locks
 	// only that agent's known task rows. Equal terminal replays are no-ops.

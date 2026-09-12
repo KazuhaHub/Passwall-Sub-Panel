@@ -44,6 +44,9 @@ type NodeAgentTask struct {
 	Status               NodeAgentTaskStatus
 	IdempotencyKeySHA256 *string
 	SupersedesTaskID     string
+	// Nil preserves legacy history without guessing expiry/retention. Non-nil
+	// is immutable original authorization/policy, not today's settings.
+	Lifecycle *NodeTaskLifecycleSnapshot
 	// Dispatch closure is orthogonal to result state. A queued task whose
 	// result unexpectedly arrived (or a restored task with quarantined evidence)
 	// is not safe to offer, but is not completed.

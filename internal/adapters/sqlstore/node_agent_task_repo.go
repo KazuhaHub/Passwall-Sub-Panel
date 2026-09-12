@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"database/sql/driver"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"sort"
 	"strings"
 	"time"
@@ -16,6 +18,7 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 	"gorm.io/gorm/logger"
+	"gorm.io/gorm/schema"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
@@ -35,6 +38,9 @@ type nodeAgentTaskRow struct {
 	// supported databases.
 	IdempotencyKeySHA256 *string `gorm:"size:64;uniqueIndex:uk_node_agent_task_idempotency,priority:2"`
 	SupersedesTaskID     string  `gorm:"size:128;index"`
+	// Nullable TEXT adds safely to populated databases without inventing
+	// deadlines for old tasks. All non-NULL reads/writes pass the strict codec.
+	Lifecycle            *nodeAgentTaskLifecycleJSON `gorm:"type:text"`
 	DispatchClosedAt     *time.Time
 	DispatchClosedReason string `gorm:"size:32;not null;default:''"`
 
@@ -54,6 +60,65 @@ type nodeAgentTaskRow struct {
 
 func (nodeAgentTaskRow) TableName() string { return "node_agent_tasks" }
 
+type nodeAgentTaskLifecycleJSON domain.NodeTaskLifecycleSnapshot
+
+func (nodeAgentTaskLifecycleJSON) GormDataType() string                          { return "text" }
+func (nodeAgentTaskLifecycleJSON) GormDBDataType(*gorm.DB, *schema.Field) string { return "text" }
+
+func (s nodeAgentTaskLifecycleJSON) Value() (driver.Value, error) {
+	snapshot := domain.NodeTaskLifecycleSnapshot(s)
+	if err := snapshot.Validate(); err != nil {
+		return nil, errors.New("native task lifecycle snapshot failed storage validation")
+	}
+	payload, err := json.Marshal(snapshot)
+	if err != nil {
+		return nil, errors.New("native task lifecycle snapshot could not be encoded")
+	}
+	return string(payload), nil
+}
+
+func (s *nodeAgentTaskLifecycleJSON) Scan(value any) error {
+	var payload []byte
+	switch raw := value.(type) {
+	case string:
+		payload = []byte(raw)
+	case []byte:
+		payload = raw
+	default:
+		return errors.New("native task lifecycle snapshot has invalid storage type")
+	}
+	var snapshot domain.NodeTaskLifecycleSnapshot
+	decoder := json.NewDecoder(bytes.NewReader(payload))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&snapshot); err != nil {
+		return errors.New("native task lifecycle snapshot could not be decoded")
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		return errors.New("native task lifecycle snapshot contains trailing data")
+	}
+	if err := snapshot.Validate(); err != nil {
+		return errors.New("native task lifecycle snapshot failed storage validation")
+	}
+	*s = nodeAgentTaskLifecycleJSON(snapshot)
+	return nil
+}
+
+func nodeAgentTaskLifecycleFromDomain(snapshot *domain.NodeTaskLifecycleSnapshot) *nodeAgentTaskLifecycleJSON {
+	if snapshot == nil {
+		return nil
+	}
+	copy := nodeAgentTaskLifecycleJSON(*snapshot)
+	return &copy
+}
+
+func (s *nodeAgentTaskLifecycleJSON) toDomain() *domain.NodeTaskLifecycleSnapshot {
+	if s == nil {
+		return nil
+	}
+	snapshot := domain.NodeTaskLifecycleSnapshot(*s)
+	return snapshot.Clone()
+}
+
 func (r *nodeAgentTaskRow) toDomain() *domain.NodeAgentTask {
 	if r == nil {
 		return nil
@@ -64,6 +129,7 @@ func (r *nodeAgentTaskRow) toDomain() *domain.NodeAgentTask {
 		Status:               domain.NodeAgentTaskStatus(r.Status),
 		IdempotencyKeySHA256: cloneStringPointer(r.IdempotencyKeySHA256),
 		SupersedesTaskID:     r.SupersedesTaskID,
+		Lifecycle:            r.Lifecycle.toDomain(),
 		DispatchClosedAt:     cloneTimePointer(r.DispatchClosedAt), DispatchClosedReason: r.DispatchClosedReason,
 		ResultOK:            cloneBoolPointer(r.ResultOK),
 		ResultIndeterminate: r.ResultIndeterminate,
@@ -81,6 +147,7 @@ func nodeAgentTaskFromDomain(task *domain.NodeAgentTask) *nodeAgentTaskRow {
 		Args: append([]byte{}, task.Args...), InputSHA256: task.InputSHA256,
 		Status: string(task.Status), IdempotencyKeySHA256: cloneStringPointer(task.IdempotencyKeySHA256),
 		SupersedesTaskID: task.SupersedesTaskID,
+		Lifecycle:        nodeAgentTaskLifecycleFromDomain(task.Lifecycle),
 		DispatchClosedAt: cloneTimePointer(task.DispatchClosedAt), DispatchClosedReason: task.DispatchClosedReason,
 		ResultOK:            cloneBoolPointer(task.ResultOK),
 		ResultIndeterminate: task.ResultIndeterminate,
@@ -333,6 +400,11 @@ func (r *nodeAgentTaskRepo) Offer(ctx context.Context, agentID string, eligibleK
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
 			Where("agent_id = ? AND status IN ? AND kind IN ? AND dispatch_closed_at IS NULL", agentID,
 				[]string{string(domain.NodeAgentTaskQueued), string(domain.NodeAgentTaskOffered)}, kinds).
+			// Temporary additive-release gate: before shared expiry wire and
+			// capable Node binaries ship, never offer protected requests to an
+			// older node that would ignore their latest-start deadline. Legacy
+			// fixtures retain the existing transport; no capability is invented.
+			Where("lifecycle IS NULL").
 			// A restored task row may have lost its dispatch closure after the
 			// node already received durable receipt. Evidence itself remains a
 			// fence; do not depend on the node replaying it again to stop offers.
@@ -631,6 +703,11 @@ func validateNewNodeAgentTask(task *domain.NodeAgentTask) error {
 	if task.Status == "" {
 		task.Status = domain.NodeAgentTaskQueued
 	}
+	if task.Lifecycle != nil {
+		if err := task.Lifecycle.Validate(); err != nil {
+			return err
+		}
+	}
 	if task.Status != domain.NodeAgentTaskQueued || task.ResultOK != nil || task.ResultIndeterminate || len(task.Result) != 0 ||
 		task.ResultErrorCode != "" || task.ResultError != "" || task.CompletedAt != nil ||
 		task.OfferCount != 0 || task.FirstOfferedAt != nil || task.LastOfferedAt != nil ||
@@ -659,7 +736,19 @@ func sameTaskRequest(stored, incoming *nodeAgentTaskRow, matchedByTaskID bool) b
 		!equalStringPointers(stored.IdempotencyKeySHA256, incoming.IdempotencyKeySHA256) {
 		return false
 	}
-	return !matchedByTaskID || stored.TaskID == incoming.TaskID
+	if !matchedByTaskID {
+		// A fresh-ID idempotency alias identifies the same logical input. Return
+		// the original snapshot, including legacy nil: a caller's recomputed
+		// deadline or changed settings must not extend that existing task.
+		return true
+	}
+	if stored.TaskID != incoming.TaskID {
+		return false
+	}
+	if stored.Lifecycle == nil || incoming.Lifecycle == nil {
+		return stored.Lifecycle == nil && incoming.Lifecycle == nil
+	}
+	return *stored.Lifecycle == *incoming.Lifecycle
 }
 
 func sameTerminalResult(stored *nodeAgentTaskRow, result domain.NodeAgentTaskResult) bool {
