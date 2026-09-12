@@ -22,6 +22,15 @@ Passwall-Node 的 Xray / sing-box 生产 daemon、精确 core 目录、遥测、
 
 ## 1. 已经定了的（不要重开）
 
+**发行渠道（2026-09-12）**：PSP 与 Passwall Node 使用 `main` + 短期功能分支 + PR/CI，
+不为稳定版／测试版另建长期分支。渠道对应 GitHub 的 Release／Pre-release；安装始终锁定
+准确 release tag，而不是分支或浮动标签。安装页面默认稳定渠道，管理员明确选择渠道和版本；
+暂无兼容正式版时不自动回落测试版。版本列表只纳入本版 PSP 明确登记兼容、官方已发布且具备
+对应安装资产的版本；登记源为 `internal/adapters/noderelease/reviewed.json`，编译进 PSP。
+新 Passwall Node 版本须先核验、登记并随新 PSP 版本发布，不能仅凭正式版标记推断兼容。
+现有服务器身份、凭据、已安装版本不随渠道选择改变，也不自动升级。`latest` 仍仅正式版，
+Docker `beta` 保持“最新的任意发行版（含正式版）”语义；Passwall Node 与代理内核目录分开。
+
 **架构**:自研后端是新增一个 `PanelKind`,**不是新架构**。节点管理、客户端下发、
 流量轮询、订阅渲染、异地并发检测全部不动。
 
