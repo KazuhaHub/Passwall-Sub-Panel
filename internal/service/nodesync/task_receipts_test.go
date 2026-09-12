@@ -75,7 +75,7 @@ func TestSyncDurableReceiptsSurviveLaterIssueAndStreamFailures(t *testing.T) {
 	repos := newReceiptTestRepos(t)
 	task := newReceiptTask(t, repos.NodeAgentTask, "task-receipt-offered")
 	now := time.Date(2026, 9, 12, 12, 0, 0, 0, time.UTC)
-	if _, err := repos.NodeAgentTask.Offer(t.Context(), task.AgentID, []string{task.Kind}, 1,
+	if _, err := repos.NodeAgentTask.Offer(t.Context(), task.AgentID, ports.NodeAgentTaskOfferSupport{EligibleKinds: []string{task.Kind}}, 1,
 		int(nodeprotocol.MaxSyncBodyBytes), now); err != nil {
 		t.Fatal(err)
 	}
@@ -185,7 +185,7 @@ func TestSyncNeverOfferedReceiptClosesDispatchWithoutReleasingQuota(t *testing.T
 	if _, _, err := repos.NodeAgentTask.CreateOrGet(t.Context(), overflow); !errors.Is(err, domain.ErrResourceExhausted) {
 		t.Fatalf("closed unresolved row no longer consumes active quota: %v", err)
 	}
-	offered, err := repos.NodeAgentTask.Offer(t.Context(), task.AgentID, []string{task.Kind},
+	offered, err := repos.NodeAgentTask.Offer(t.Context(), task.AgentID, ports.NodeAgentTaskOfferSupport{EligibleKinds: []string{task.Kind}},
 		nodeprotocol.MaxTasksPerResponse, int(nodeprotocol.MaxSyncBodyBytes), now.Add(time.Second))
 	if err != nil {
 		t.Fatal(err)

@@ -71,9 +71,12 @@ type NodeAgentTask struct {
 // node outbox. Kind and InputSHA256 bind it to the immutable request, not just
 // to an identifier which might have been restored or accidentally reused.
 type NodeAgentTaskResult struct {
-	TaskID        string
-	Kind          string
-	InputSHA256   string
+	TaskID      string
+	Kind        string
+	InputSHA256 string
+	// Immutable original latest-start deadline; zero belongs only to legacy
+	// identities without a lifecycle snapshot. It is not a completion TTL.
+	NotAfterMS    int64
 	OK            bool
 	Indeterminate bool
 	Result        []byte

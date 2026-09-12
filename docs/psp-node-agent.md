@@ -826,13 +826,16 @@ PSP 拨入时「这次没到」的证据由 PSP 的传输层产生，节点拨�
   不是执行 TTL 或已测量 SLA；设置更新不改 task/quarantine，尚未接入生产任务策略快照或
   清理器，不能据此宣称 retention / restore gate 闭合。旧记录不追溯缩短保护（ADR 0032）。
 - 任务仓储已支持可空、严格校验的不可变 Lifecycle 快照（签发/最晚开始、原始策略、保留保护
-  下限），exact ID 重放不能改快照、幂等别名不能延期。legacy 不猜删除时间；共享 expiry wire
-  发布并协商前带快照任务被仓储和 nodesync 投影双重阻止下发。生产 producer、清理及恢复
+  下限），exact ID 重放不能改快照、幂等别名不能延期。legacy 不猜删除时间；Node PR #7 先发布
+  `074e88af0f4e` 后 PSP 固定依赖，带快照任务只向同一轮 execution/expiry/kind 三重能力 agent
+  下发并原样回显 deadline。PSP 到期只关 dispatch，Node 无新鲜启动授权则 hold，未知 journal
+  不造结果、已有终态不依赖时钟重放。生产 producer、清理及恢复
   验收仍未完成（ADR 0032）。
 - 真实 task kind 暴露前仍必须闭合三项：PSP 与 Node 同义且双端执行的 expiry、覆盖
   outbox/离线/备份窗口的 terminal retention，以及 DB restore 后的
   task identity epoch 或 ID 禁止复用窗口。Node SQLite v8 也是回滚边界：v7 binary 会拒绝打开
-  `user_version=8` 的数据库，回滚必须恢复匹配的 DB 备份，不能只替换 executable。
+  `user_version=8` 的数据库，回滚必须恢复匹配的 DB 备份，不能只替换 executable。deadline
+  revision 的 v9 亦单向升级，并保留 v8 journal/outbox 原始 bytes。
 
 
 ## 10. 下一步

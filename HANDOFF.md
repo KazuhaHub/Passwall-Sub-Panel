@@ -136,7 +136,9 @@ sing-box 当前核验 `1.14.0`，原生编译 VLESS、VMess、Trojan、Shadowsoc
   全局设置（各 1–3650 天整数，完整结果保留不得短于另两个窗口）。修改不改已有 task/quarantine；
   任务仓储已支持不可变 `Lifecycle` 快照：原始签发/最晚开始时间、完整策略和结果保留保护下限；
   exact task-ID 重放比较整份快照，幂等键别名返回原任务、不重新延期。缺少快照的 legacy 记录
-  保持未知且不猜删除时间。带快照任务在共享 expiry wire 发布并协商前不下发；生产 producer、
+  保持未知且不猜删除时间。带快照任务只向同一报告同时声明 execution/expiry/kind 的 agent 下发，
+  原始 deadline 进入 task/result 身份；到期仅关闭 dispatch、不制造终态、不释放未决 active quota。
+  offered 的匹配晚结果仍可完成，never-offered 结果仍完整隔离。生产 producer、
   清理器与完整恢复机制仍未接通，不能将可配置策略当作已实现/已测量的恢复保障。
 - **任务 #49**:异地并发被标记的账号该怎么处理。停在证据不足上，
   v1 的 `ip_shadow` 影子执行就是为了给它攒证据。
@@ -163,8 +165,9 @@ sing-box 当前核验 `1.14.0`，原生编译 VLESS、VMess、Trojan、Shadowsoc
   `node-contract` job 从 `go.mod` 固定、`go.sum` 校验过的 Node 源码副本运行它与 C2 契约测试，
   禁用 `go.work`，不追另一仓库的浮动 main。
 - **开放第一个真实任务前仍有三道硬门**，不可用“随机 ID 冲突概率很低”替代：
-  1. 定义并实现双端 expiry：PSP 过期后不再 offer，Node 在副作用开始前也必须拒绝过期任务；已经
-     开始后失去确定结论要回报 `indeterminate`，不能伪装为普通失败；
+  1. 双端 latest-start expiry 基础设施已接通：PSP 到期关闭 dispatch，Node 接收/claim/handler 前
+     以新鲜区间检查；时间无法证明时 hold、未知 journal 不捏造结果。真实 handler 的执行期限、
+     取消与 Recover 仍需逐 kind 验收；完整 DB/VM restore 不能由时钟保护替代；
   2. 定义 terminal tombstone 保留期与清理器，保留期必须覆盖 Node outbox 重放、最长离线时间及
      备份恢复窗口；现有 quarantine 提供收存与 backpressure，不等于 retention 已闭合；
   3. 定义 DB restore 后的 task identity epoch / ID 禁止复用窗口。恢复旧备份既可能遗失已完成
@@ -173,6 +176,11 @@ sing-box 当前核验 `1.14.0`，原生编译 VLESS、VMess、Trojan、Shadowsoc
 - **Node v8 的回滚边界**：v8 SQLite 增加 durable task journal。旧 v7 binary 看到
   `PRAGMA user_version=8` 会以 “newer than supported” 直接拒绝启动；它不会只读运行或误写数据库。
   回滚必须同时恢复 v7 数据库备份（并处理上述 task identity 窗口），不能只替换二进制。
+- **deadline additive revision 已先发布 Node（2026-09-12）**：Node PR #7 的 `074e88af0f4e`
+  增加 `task.expiry.v1`、`not_after_ms`、新鲜时钟与 v9 journal；PSP 固定引用
+  `v0.0.0-20260912033439-074e88af0f4e`，不是本地 replace/go.work。v9 migration 保留 v8 五种状态
+  及原始 outbox bytes；旧 binary 拒绝新 DB，回滚需配套备份。Windows 暂不广告 expiry，core
+  同步仍可工作；两端仍无生产 task handler。
 - **任务基础的跨仓发布闸已完成（2026-09-11）**：Passwall-Node PR #6 先合并，PSP PR #38 再更新
   pseudo-version，并脱离父目录 `go.work` 通过上述测试与三库/六平台 CI。后续 expiry 等新的
   additive wire revision 仍必须按同一顺序先发布 Node、更新 PSP 依赖并重跑；本地 workspace

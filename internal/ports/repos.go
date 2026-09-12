@@ -463,6 +463,13 @@ type NodeAgentIssueRepo interface {
 	Acknowledge(ctx context.Context, id int64, acknowledgedAt time.Time) error
 }
 
+// NodeAgentTaskOfferSupport is derived from one current report, never the
+// latest-full observation cache. Expiry is infrastructure, not a task kind.
+type NodeAgentTaskOfferSupport struct {
+	EligibleKinds  []string
+	SupportsExpiry bool
+}
+
 // NodeAgentTaskRepo is the independent durable coordinator for calls executed
 // by native nodes. It must not share sync_tasks: offered work is deliberately
 // replayed until one immutable terminal result is accepted.
@@ -482,13 +489,15 @@ type NodeAgentTaskRepo interface {
 	GetQuarantinedResult(ctx context.Context, agentID, taskID string) (*domain.NodeAgentTaskResultQuarantine, error)
 	// Offer atomically marks queued rows as offered and returns both new and
 	// previously-offered rows without dispatch closure or agent-local quarantined
-	// evidence, in stable creation order. Only eligibleKinds may be returned; an
+	// evidence, in stable creation order. Only support.EligibleKinds may be returned; an
 	// empty set offers nothing. maxTaskJSONBytes is the exact
 	// budget for the encoded JSON task array inside the already-built response,
 	// so only rows that can actually be sent are marked offered.
-	// Lifecycle-aware requests are excluded until the shared expiry wire and
-	// its capability negotiation have been published and integrated.
-	Offer(ctx context.Context, agentID string, eligibleKinds []string, limit, maxTaskJSONBytes int, offeredAt time.Time) ([]*domain.NodeAgentTask, error)
+	// Protected requests also require SupportsExpiry from this same report.
+	// At/after their immutable deadline, close dispatch only; never manufacture
+	// a terminal result, erase evidence or release unresolved active quota.
+	// Expiry closure still runs when support or the payload budget is empty.
+	Offer(ctx context.Context, agentID string, support NodeAgentTaskOfferSupport, limit, maxTaskJSONBytes int, offeredAt time.Time) ([]*domain.NodeAgentTask, error)
 	// CompleteBatch validates every result under the agent owner lock and locks
 	// only that agent's known task rows. Equal terminal replays are no-ops.
 	// Unknown results are durably quarantined; matching queued results also close

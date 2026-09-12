@@ -169,7 +169,7 @@ func TestNodeAgentTaskActiveCountQuotaPreservesReplayAndConflictSemantics(t *tes
 			t.Fatalf("create %q = (created %v, %v)", task.TaskID, created, err)
 		}
 	}
-	if offered, err := repos.NodeAgentTask.Offer(ctx, first.AgentID, []string{first.Kind}, 1,
+	if offered, err := repos.NodeAgentTask.Offer(ctx, first.AgentID, ports.NodeAgentTaskOfferSupport{EligibleKinds: []string{first.Kind}}, 1,
 		int(nodeprotocol.MaxSyncBodyBytes), time.Now().UTC()); err != nil || len(offered) != 1 {
 		t.Fatalf("offer first task = (%+v, %v)", offered, err)
 	}
@@ -224,7 +224,7 @@ func TestNodeAgentTaskActiveByteQuotaCountsQueuedAndOfferedRawArgs(t *testing.T)
 			t.Fatalf("create %q = (created %v, %v)", task.TaskID, created, err)
 		}
 	}
-	if offered, err := repos.NodeAgentTask.Offer(ctx, first.AgentID, []string{first.Kind}, 1,
+	if offered, err := repos.NodeAgentTask.Offer(ctx, first.AgentID, ports.NodeAgentTaskOfferSupport{EligibleKinds: []string{first.Kind}}, 1,
 		int(nodeprotocol.MaxSyncBodyBytes), time.Now().UTC()); err != nil || len(offered) != 1 {
 		t.Fatalf("offer first task = (%+v, %v)", offered, err)
 	}
@@ -344,7 +344,7 @@ func TestNodeAgentTaskEveryTerminalStateReleasesActiveQuota(t *testing.T) {
 		if _, created, err := repos.NodeAgentTask.CreateOrGet(ctx, task); err != nil || !created {
 			t.Fatalf("create after earlier terminal state = (created %v, %v)", created, err)
 		}
-		if _, err := repos.NodeAgentTask.Offer(ctx, agentID, []string{task.Kind}, 1,
+		if _, err := repos.NodeAgentTask.Offer(ctx, agentID, ports.NodeAgentTaskOfferSupport{EligibleKinds: []string{task.Kind}}, 1,
 			int(nodeprotocol.MaxSyncBodyBytes), time.Now().UTC()); err != nil {
 			t.Fatal(err)
 		}
@@ -415,7 +415,7 @@ func TestNodeAgentTaskOwnerIdentityIsByteExactAcrossDatabaseCollations(t *testin
 	if _, _, err := repos.NodeAgentTask.CreateOrGet(ctx, failed); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := repos.NodeAgentTask.Offer(ctx, failed.AgentID, []string{failed.Kind}, nodeprotocol.MaxTasksPerResponse, int(nodeprotocol.MaxSyncBodyBytes), time.Now()); err != nil {
+	if _, err := repos.NodeAgentTask.Offer(ctx, failed.AgentID, ports.NodeAgentTaskOfferSupport{EligibleKinds: []string{failed.Kind}}, nodeprotocol.MaxTasksPerResponse, int(nodeprotocol.MaxSyncBodyBytes), time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	if err := repos.NodeAgentTask.CompleteBatch(ctx, failed.AgentID, []domain.NodeAgentTaskResult{{
@@ -490,18 +490,18 @@ func TestNodeAgentTaskOfferRetransmitsAndTerminalReplayIsIdempotent(t *testing.T
 		t.Fatal(err)
 	}
 	firstAt := time.Date(2026, 9, 11, 10, 0, 0, 0, time.UTC)
-	unsupported, err := repos.NodeAgentTask.Offer(ctx, task.AgentID, []string{"agent_upgrade.v1"}, 64, int(nodeprotocol.MaxSyncBodyBytes), firstAt)
+	unsupported, err := repos.NodeAgentTask.Offer(ctx, task.AgentID, ports.NodeAgentTaskOfferSupport{EligibleKinds: []string{"agent_upgrade.v1"}}, 64, int(nodeprotocol.MaxSyncBodyBytes), firstAt)
 	if err != nil || len(unsupported) != 0 {
 		t.Fatalf("unsupported offer = (%+v, %v)", unsupported, err)
 	}
 
-	first, err := repos.NodeAgentTask.Offer(ctx, task.AgentID, []string{task.Kind}, 64, int(nodeprotocol.MaxSyncBodyBytes), firstAt)
+	first, err := repos.NodeAgentTask.Offer(ctx, task.AgentID, ports.NodeAgentTaskOfferSupport{EligibleKinds: []string{task.Kind}}, 64, int(nodeprotocol.MaxSyncBodyBytes), firstAt)
 	if err != nil || len(first) != 1 || first[0].Status != domain.NodeAgentTaskOffered || first[0].OfferCount != 1 ||
 		first[0].FirstOfferedAt == nil || !first[0].FirstOfferedAt.Equal(firstAt) {
 		t.Fatalf("first offer = (%+v, %v)", first, err)
 	}
 	secondAt := firstAt.Add(time.Minute)
-	second, err := repos.NodeAgentTask.Offer(ctx, task.AgentID, []string{task.Kind}, 64, int(nodeprotocol.MaxSyncBodyBytes), secondAt)
+	second, err := repos.NodeAgentTask.Offer(ctx, task.AgentID, ports.NodeAgentTaskOfferSupport{EligibleKinds: []string{task.Kind}}, 64, int(nodeprotocol.MaxSyncBodyBytes), secondAt)
 	if err != nil || len(second) != 1 || second[0].OfferCount != 2 ||
 		second[0].FirstOfferedAt == nil || !second[0].FirstOfferedAt.Equal(firstAt) ||
 		second[0].LastOfferedAt == nil || !second[0].LastOfferedAt.Equal(secondAt) {
@@ -532,7 +532,7 @@ func TestNodeAgentTaskOfferRetransmitsAndTerminalReplayIsIdempotent(t *testing.T
 	if err := repos.NodeAgentTask.CompleteBatch(ctx, task.AgentID, []domain.NodeAgentTaskResult{result}, completedAt.Add(2*time.Hour)); !errors.Is(err, domain.ErrConflict) {
 		t.Fatalf("conflicting terminal replay = %v, want ErrConflict", err)
 	}
-	remaining, err := repos.NodeAgentTask.Offer(ctx, task.AgentID, []string{task.Kind}, 64, int(nodeprotocol.MaxSyncBodyBytes), completedAt.Add(3*time.Hour))
+	remaining, err := repos.NodeAgentTask.Offer(ctx, task.AgentID, ports.NodeAgentTaskOfferSupport{EligibleKinds: []string{task.Kind}}, 64, int(nodeprotocol.MaxSyncBodyBytes), completedAt.Add(3*time.Hour))
 	if err != nil || len(remaining) != 0 {
 		t.Fatalf("terminal task was re-offered = (%+v, %v)", remaining, err)
 	}
@@ -568,7 +568,7 @@ func TestNodeAgentTaskConcurrentOfferAndEqualCompletionRemainIdempotent(t *testi
 
 	offeredAt := time.Date(2026, 9, 11, 12, 0, 0, 0, time.UTC)
 	for _, err := range runConcurrently(func() error {
-		offered, err := repos.NodeAgentTask.Offer(ctx, task.AgentID, []string{task.Kind}, 1, int(nodeprotocol.MaxSyncBodyBytes), offeredAt)
+		offered, err := repos.NodeAgentTask.Offer(ctx, task.AgentID, ports.NodeAgentTaskOfferSupport{EligibleKinds: []string{task.Kind}}, 1, int(nodeprotocol.MaxSyncBodyBytes), offeredAt)
 		if err == nil && len(offered) != 1 {
 			return fmt.Errorf("offered %d tasks, want 1", len(offered))
 		}
@@ -615,10 +615,10 @@ func TestNodeAgentTaskCompleteBatchRejectsKnownConflictsAtomically(t *testing.T)
 			t.Fatal(err)
 		}
 	}
-	if offered, err := repos.NodeAgentTask.Offer(ctx, one.AgentID, []string{one.Kind}, 2, int(nodeprotocol.MaxSyncBodyBytes), time.Now().UTC()); err != nil || len(offered) != 2 {
+	if offered, err := repos.NodeAgentTask.Offer(ctx, one.AgentID, ports.NodeAgentTaskOfferSupport{EligibleKinds: []string{one.Kind}}, 2, int(nodeprotocol.MaxSyncBodyBytes), time.Now().UTC()); err != nil || len(offered) != 2 {
 		t.Fatalf("offer first pair = (%+v, %v)", offered, err)
 	}
-	if offered, err := repos.NodeAgentTask.Offer(ctx, foreign.AgentID, []string{foreign.Kind}, 1, int(nodeprotocol.MaxSyncBodyBytes), time.Now().UTC()); err != nil || len(offered) != 1 {
+	if offered, err := repos.NodeAgentTask.Offer(ctx, foreign.AgentID, ports.NodeAgentTaskOfferSupport{EligibleKinds: []string{foreign.Kind}}, 1, int(nodeprotocol.MaxSyncBodyBytes), time.Now().UTC()); err != nil || len(offered) != 1 {
 		t.Fatalf("offer foreign = (%+v, %v)", offered, err)
 	}
 	success := func(task *domain.NodeAgentTask) domain.NodeAgentTaskResult {
@@ -662,7 +662,7 @@ func TestNodeAgentTaskOfferHonorsAggregateWireBudgetAndStableOrder(t *testing.T)
 			t.Fatal(err)
 		}
 	}
-	offered, err := repos.NodeAgentTask.Offer(ctx, "agt_task_budget", []string{"reality_probe.v1"}, 64, int(nodeprotocol.MaxSyncBodyBytes), createdAt.Add(time.Minute))
+	offered, err := repos.NodeAgentTask.Offer(ctx, "agt_task_budget", ports.NodeAgentTaskOfferSupport{EligibleKinds: []string{"reality_probe.v1"}}, 64, int(nodeprotocol.MaxSyncBodyBytes), createdAt.Add(time.Minute))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -697,7 +697,7 @@ func TestNodeAgentTaskOfferMarksOnlyRowsThatFitExactJSONBudget(t *testing.T) {
 	}
 	exactArrayBytes := len("[]") + len(wire)
 	offeredAt := time.Date(2026, 9, 11, 11, 30, 0, 0, time.UTC)
-	tooSmall, err := repos.NodeAgentTask.Offer(ctx, task.AgentID, []string{task.Kind}, 1, exactArrayBytes-1, offeredAt)
+	tooSmall, err := repos.NodeAgentTask.Offer(ctx, task.AgentID, ports.NodeAgentTaskOfferSupport{EligibleKinds: []string{task.Kind}}, 1, exactArrayBytes-1, offeredAt)
 	if err != nil || len(tooSmall) != 0 {
 		t.Fatalf("too-small encoded budget = (%+v, %v)", tooSmall, err)
 	}
@@ -705,7 +705,7 @@ func TestNodeAgentTaskOfferMarksOnlyRowsThatFitExactJSONBudget(t *testing.T) {
 	if err != nil || stored.Status != domain.NodeAgentTaskQueued || stored.OfferCount != 0 {
 		t.Fatalf("task was marked without fitting response = (%+v, %v)", stored, err)
 	}
-	exact, err := repos.NodeAgentTask.Offer(ctx, task.AgentID, []string{task.Kind}, 1, exactArrayBytes, offeredAt)
+	exact, err := repos.NodeAgentTask.Offer(ctx, task.AgentID, ports.NodeAgentTaskOfferSupport{EligibleKinds: []string{task.Kind}}, 1, exactArrayBytes, offeredAt)
 	if err != nil || len(exact) != 1 || exact[0].Status != domain.NodeAgentTaskOffered {
 		t.Fatalf("exact encoded budget = (%+v, %v)", exact, err)
 	}
@@ -720,7 +720,7 @@ func TestNodeAgentTaskFailedRetryRequiresNewIDAndSameAgent(t *testing.T) {
 	if _, _, err := repos.NodeAgentTask.CreateOrGet(ctx, failed); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := repos.NodeAgentTask.Offer(ctx, failed.AgentID, []string{failed.Kind}, 1, int(nodeprotocol.MaxSyncBodyBytes), time.Now()); err != nil {
+	if _, err := repos.NodeAgentTask.Offer(ctx, failed.AgentID, ports.NodeAgentTaskOfferSupport{EligibleKinds: []string{failed.Kind}}, 1, int(nodeprotocol.MaxSyncBodyBytes), time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	failedResult := domain.NodeAgentTaskResult{
@@ -750,7 +750,7 @@ func TestNodeAgentTaskFailedRetryRequiresNewIDAndSameAgent(t *testing.T) {
 	if _, _, err := repos.NodeAgentTask.CreateOrGet(ctx, indeterminate); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := repos.NodeAgentTask.Offer(ctx, indeterminate.AgentID, []string{indeterminate.Kind}, 1, int(nodeprotocol.MaxSyncBodyBytes), time.Now()); err != nil {
+	if _, err := repos.NodeAgentTask.Offer(ctx, indeterminate.AgentID, ports.NodeAgentTaskOfferSupport{EligibleKinds: []string{indeterminate.Kind}}, 1, int(nodeprotocol.MaxSyncBodyBytes), time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	uncertainResult := domain.NodeAgentTaskResult{

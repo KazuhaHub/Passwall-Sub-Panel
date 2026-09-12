@@ -285,7 +285,7 @@ func TestKVSettingsNodeTaskPolicyChangesNeverCleanExistingEvidence(t *testing.T)
 	if _, _, err := repos.NodeAgentTask.CreateOrGet(ctx, terminal); err != nil {
 		t.Fatal(err)
 	}
-	if tasks, err := repos.NodeAgentTask.Offer(ctx, terminal.AgentID, []string{terminal.Kind}, 1, int(nodeprotocol.MaxSyncBodyBytes), old); err != nil || len(tasks) != 1 {
+	if tasks, err := repos.NodeAgentTask.Offer(ctx, terminal.AgentID, ports.NodeAgentTaskOfferSupport{EligibleKinds: []string{terminal.Kind}}, 1, int(nodeprotocol.MaxSyncBodyBytes), old); err != nil || len(tasks) != 1 {
 		t.Fatalf("offer = %d, %v", len(tasks), err)
 	}
 	if err := repos.NodeAgentTask.CompleteBatch(ctx, terminal.AgentID, []domain.NodeAgentTaskResult{{

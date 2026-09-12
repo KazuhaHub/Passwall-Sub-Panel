@@ -124,7 +124,8 @@ func safeNodeAgentTaskResultStorageError(err error) error {
 func taskResultToWire(result domain.NodeAgentTaskResult) nodeprotocol.TaskResult {
 	return nodeprotocol.TaskResult{
 		ID: result.TaskID, Kind: result.Kind, InputSHA256: result.InputSHA256,
-		OK: result.OK, Indeterminate: result.Indeterminate, Result: result.Result,
+		NotAfterMS: result.NotAfterMS,
+		OK:         result.OK, Indeterminate: result.Indeterminate, Result: result.Result,
 		ErrorCode: result.ErrorCode, Error: result.Error,
 	}
 }
@@ -132,7 +133,8 @@ func taskResultToWire(result domain.NodeAgentTaskResult) nodeprotocol.TaskResult
 func taskResultFromWire(result nodeprotocol.TaskResult) domain.NodeAgentTaskResult {
 	return domain.NodeAgentTaskResult{
 		TaskID: result.ID, Kind: result.Kind, InputSHA256: result.InputSHA256,
-		OK: result.OK, Indeterminate: result.Indeterminate, Result: append([]byte(nil), result.Result...),
+		NotAfterMS: result.NotAfterMS,
+		OK:         result.OK, Indeterminate: result.Indeterminate, Result: append([]byte(nil), result.Result...),
 		ErrorCode: result.ErrorCode, Error: result.Error,
 	}
 }
