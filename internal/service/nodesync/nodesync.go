@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -18,23 +19,30 @@ import (
 	nodeprotocol "github.com/KazuhaHub/passwall-node/protocol"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/keyedmutex"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 )
 
 const (
 	defaultNextPollSeconds = 30
 	defaultFullReportSecs  = 60
+	// Tasks is the last SyncResponse field and omitempty removes it from the
+	// no-task encoding. Its exact JSON field overhead is therefore this suffix.
+	syncTasksFieldJSONBytes = len(`,"tasks":`)
 )
 
 type Service struct {
 	desired  ports.NativeDesiredSnapshotRepo
 	agents   ports.NodeAgentRepo
 	issues   ports.NodeAgentIssueRepo
+	tasks    ports.NodeAgentTaskRepo
 	users    ports.UserRepo
 	clients  ports.PSPClientRepo
 	nodes    ports.NodeRepo
 	settings ports.SettingsReader
 	panels   ports.XUIPanelRepo
+
+	agentLocks keyedmutex.Map[string]
 
 	mu      sync.RWMutex
 	reports map[string]receivedFullReport
@@ -59,6 +67,7 @@ type Options struct {
 	Desired  ports.NativeDesiredSnapshotRepo
 	Agents   ports.NodeAgentRepo
 	Issues   ports.NodeAgentIssueRepo
+	Tasks    ports.NodeAgentTaskRepo
 	Users    ports.UserRepo
 	Clients  ports.PSPClientRepo
 	Nodes    ports.NodeRepo
@@ -68,16 +77,16 @@ type Options struct {
 }
 
 func New(options Options) (*Service, error) {
-	if options.Desired == nil || options.Agents == nil || options.Issues == nil || options.Users == nil ||
+	if options.Desired == nil || options.Agents == nil || options.Issues == nil || options.Tasks == nil || options.Users == nil ||
 		options.Clients == nil || options.Nodes == nil || options.Settings == nil {
-		return nil, errors.New("nodesync: desired, agents, issues, users, clients, nodes and settings are required")
+		return nil, errors.New("nodesync: desired, agents, issues, tasks, users, clients, nodes and settings are required")
 	}
 	now := options.Now
 	if now == nil {
 		now = time.Now
 	}
 	return &Service{
-		desired: options.Desired, agents: options.Agents, issues: options.Issues, users: options.Users,
+		desired: options.Desired, agents: options.Agents, issues: options.Issues, tasks: options.Tasks, users: options.Users,
 		clients: options.Clients, nodes: options.Nodes, settings: options.Settings,
 		panels:  options.Panels,
 		reports: make(map[string]receivedFullReport),
@@ -96,6 +105,12 @@ func (s *Service) Sync(ctx context.Context, report nodeprotocol.NodeReport) (nod
 	if err := nodeprotocol.ValidateNodeReport(report); err != nil {
 		return nodeprotocol.SyncResponse{}, fmt.Errorf("nodesync: invalid report: %w", err)
 	}
+	// A node has one ordered sync stream. Serializing by stable agent identity
+	// keeps complete -> applied observation -> mint -> offer in that order even
+	// when an HTTP retry overlaps the original request. Different agents remain
+	// fully concurrent.
+	unlock := s.agentLocks.Lock(report.AgentID)
+	defer unlock()
 	agent, err := s.agents.GetByAgentID(ctx, report.AgentID)
 	if err != nil {
 		return nodeprotocol.SyncResponse{}, fmt.Errorf("nodesync: resolve agent: %w", err)
@@ -134,13 +149,36 @@ func (s *Service) Sync(ctx context.Context, report nodeprotocol.NodeReport) (nod
 	if err != nil {
 		return nodeprotocol.SyncResponse{}, err
 	}
-
-	return nodeprotocol.SyncResponse{
+	response := nodeprotocol.SyncResponse{
 		Envelope:   envelope,
 		Config:     segmentFor(report.Have[nodeprotocol.StreamConfig], agent.Epoch, configStream, configBody),
 		Roster:     segmentFor(report.Have[nodeprotocol.StreamRoster], agent.Epoch, rosterStream, rosterBody),
 		Directives: segmentFor(report.Have[nodeprotocol.StreamDirectives], agent.Epoch, directivesStream, directivesBody),
-	}, nil
+	}
+	taskJSONBudget, err := availableTaskJSONBytes(response)
+	if err != nil {
+		return nodeprotocol.SyncResponse{}, err
+	}
+	tasks, hadFirstOffer, err := s.offerTasks(ctx, agent.AgentID, report.Capabilities, taskJSONBudget, now)
+	if err != nil {
+		return nodeprotocol.SyncResponse{}, err
+	}
+	response.Tasks = tasks
+	if hadFirstOffer {
+		response.Envelope.NextPollSeconds = 1
+	}
+
+	if err := nodeprotocol.ValidateSyncResponse(response); err != nil {
+		return nodeprotocol.SyncResponse{}, fmt.Errorf("nodesync: invalid response: %w", err)
+	}
+	encoded, err := json.Marshal(response)
+	if err != nil {
+		return nodeprotocol.SyncResponse{}, fmt.Errorf("nodesync: encode response: %w", err)
+	}
+	if int64(len(encoded)) > nodeprotocol.MaxSyncBodyBytes {
+		return nodeprotocol.SyncResponse{}, fmt.Errorf("nodesync: response exceeds %d bytes", nodeprotocol.MaxSyncBodyBytes)
+	}
+	return response, nil
 }
 
 func (s *Service) recordPanelObservation(ctx context.Context, agent *domain.NodeAgent, report nodeprotocol.NodeReport, now time.Time) error {
@@ -316,12 +354,25 @@ func segmentFor[T any](have nodeprotocol.StreamState, epoch uint64, stream *doma
 }
 
 func (s *Service) ingestReport(ctx context.Context, agent *domain.NodeAgent, snapshot *ports.NativeDesiredSnapshot, report nodeprotocol.NodeReport, now time.Time) error {
-	if len(report.TaskResults) != 0 {
-		// §9 has not defined task kinds or their durable PSP-side state yet. Do
-		// not acknowledge and discard an executed side effect: a non-2xx sync
-		// keeps the result in the agent's transactional outbox for a future
-		// implementation to consume.
-		return errors.New("nodesync: task result ingestion is not configured")
+	// CompleteBatch is atomic across every result in this report. The complete
+	// report is intentionally not one giant transaction: if a later issue,
+	// stream, or observation write fails, the agent retains its outbox because
+	// HTTP returns non-2xx and this immutable terminal batch replays as a no-op.
+	if err := nodeprotocol.ValidateTaskResults(report.TaskResults); err != nil {
+		return fmt.Errorf("nodesync: invalid task results: %w", err)
+	}
+	results := make([]domain.NodeAgentTaskResult, len(report.TaskResults))
+	for i := range report.TaskResults {
+		results[i] = domain.NodeAgentTaskResult{
+			TaskID: report.TaskResults[i].ID, Kind: report.TaskResults[i].Kind,
+			InputSHA256: report.TaskResults[i].InputSHA256, OK: report.TaskResults[i].OK,
+			Indeterminate: report.TaskResults[i].Indeterminate,
+			Result:        append([]byte(nil), report.TaskResults[i].Result...),
+			ErrorCode:     report.TaskResults[i].ErrorCode, Error: report.TaskResults[i].Error,
+		}
+	}
+	if err := s.tasks.CompleteBatch(ctx, agent.AgentID, results, now); err != nil {
+		return fmt.Errorf("nodesync: complete agent tasks: %w", err)
 	}
 	issues := make([]domain.NodeAgentIssue, len(report.Issues))
 	for i := range report.Issues {
@@ -358,7 +409,7 @@ func (s *Service) ingestReport(ctx context.Context, agent *domain.NodeAgent, sna
 	}
 	s.mu.Lock()
 	s.reports[agent.AgentID] = receivedFullReport{
-		report: cloneReport(report), receivedAtMS: now.UnixMilli(),
+		report: cloneObservationReport(report), receivedAtMS: now.UnixMilli(),
 	}
 	s.mu.Unlock()
 	return s.reconcileObjects(ctx, agent, snapshot, report, streams, now)
@@ -535,7 +586,97 @@ func cloneReport(in nodeprotocol.NodeReport) nodeprotocol.NodeReport {
 	out.Subjects = append([]nodeprotocol.SubjectObservation(nil), in.Subjects...)
 	out.Issues = append([]nodeprotocol.Issue(nil), in.Issues...)
 	out.TaskResults = append([]nodeprotocol.TaskResult(nil), in.TaskResults...)
+	for i := range out.TaskResults {
+		out.TaskResults[i].Result = append([]byte(nil), in.TaskResults[i].Result...)
+	}
+	out.Capabilities = append([]string(nil), in.Capabilities...)
 	return out
+}
+
+// cloneObservationReport keeps only state consumed after the request ends.
+// Issues and task results are one-shot durable events, while capabilities gate
+// only the current response. Retaining any of them in the latest-full cache
+// would pin up to several MiB per offline agent for no later computation.
+func cloneObservationReport(in nodeprotocol.NodeReport) nodeprotocol.NodeReport {
+	out := cloneReport(in)
+	out.Issues = nil
+	out.TaskResults = nil
+	out.Capabilities = nil
+	return out
+}
+
+func (s *Service) offerTasks(ctx context.Context, agentID string, capabilities []string, maxTaskJSONBytes int, now time.Time) ([]nodeprotocol.Task, bool, error) {
+	eligibleKinds := eligibleTaskKinds(capabilities)
+	if len(eligibleKinds) == 0 {
+		return []nodeprotocol.Task{}, false, nil
+	}
+	stored, err := s.tasks.Offer(ctx, agentID, eligibleKinds, nodeprotocol.MaxTasksPerResponse, maxTaskJSONBytes, now)
+	if err != nil {
+		return nil, false, fmt.Errorf("nodesync: offer agent tasks: %w", err)
+	}
+	tasks := make([]nodeprotocol.Task, len(stored))
+	hadFirstOffer := false
+	for i := range stored {
+		if stored[i].OfferCount == 1 {
+			hadFirstOffer = true
+		}
+		tasks[i] = nodeprotocol.Task{
+			ID: stored[i].TaskID, Kind: stored[i].Kind,
+			Args: append([]byte(nil), stored[i].Args...), InputSHA256: stored[i].InputSHA256,
+		}
+	}
+	if err := nodeprotocol.ValidateTasks(tasks); err != nil {
+		return nil, false, fmt.Errorf("nodesync: stored agent tasks are invalid: %w", err)
+	}
+	return tasks, hadFirstOffer, nil
+}
+
+func availableTaskJSONBytes(response nodeprotocol.SyncResponse) (int, error) {
+	response.Tasks = nil
+	encoded, err := json.Marshal(response)
+	if err != nil {
+		return 0, fmt.Errorf("nodesync: encode response without tasks: %w", err)
+	}
+	if int64(len(encoded)) > nodeprotocol.MaxSyncBodyBytes {
+		return 0, fmt.Errorf("nodesync: response without tasks exceeds %d bytes", nodeprotocol.MaxSyncBodyBytes)
+	}
+	remaining := int(nodeprotocol.MaxSyncBodyBytes) - len(encoded) - syncTasksFieldJSONBytes
+	if remaining < len("[]") {
+		return 0, nil
+	}
+	return remaining, nil
+}
+
+func eligibleTaskKinds(capabilities []string) []string {
+	capabilitySet := make(map[string]struct{}, len(capabilities))
+	for _, capability := range capabilities {
+		capabilitySet[capability] = struct{}{}
+	}
+	if !hasTaskExecutionCapability(capabilities) {
+		return nil
+	}
+	prefix := nodeprotocol.TaskCapability("")
+	kinds := make([]string, 0, len(capabilities))
+	for capability := range capabilitySet {
+		if capability == nodeprotocol.CapabilityTaskExecutionV1 || !strings.HasPrefix(capability, prefix) {
+			continue
+		}
+		kind := strings.TrimPrefix(capability, prefix)
+		if kind != "" && nodeprotocol.TaskCapability(kind) == capability {
+			kinds = append(kinds, kind)
+		}
+	}
+	sort.Strings(kinds)
+	return kinds
+}
+
+func hasTaskExecutionCapability(capabilities []string) bool {
+	for _, capability := range capabilities {
+		if capability == nodeprotocol.CapabilityTaskExecutionV1 {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Service) buildDirectives(ctx context.Context, agent *domain.NodeAgent, snapshot *ports.NativeDesiredSnapshot, current nodeprotocol.NodeReport, rosterVersion nodeprotocol.Version, now time.Time) (nodeprotocol.DirectivesBody, nodeprotocol.Envelope, error) {

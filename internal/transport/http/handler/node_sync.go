@@ -92,9 +92,15 @@ func (h *NodeSyncHandler) ServeHTTP(w http.ResponseWriter, request *http.Request
 		writeNodeError(w, http.StatusInternalServerError, errors.New("node sync failed"))
 		return
 	}
+	payload, err := json.Marshal(response)
+	if err != nil || int64(len(payload)) > nodeprotocol.MaxSyncBodyBytes {
+		log.Error("native node sync response encoding failed", "agent_id", agentID, "bytes", len(payload), "err", err)
+		writeNodeError(w, http.StatusInternalServerError, errors.New("node sync failed"))
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(response)
+	_, _ = w.Write(payload)
 }
 
 func writeNodeError(w http.ResponseWriter, status int, err error) {

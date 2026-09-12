@@ -1,9 +1,11 @@
 package nodesync
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"path/filepath"
 	"strings"
@@ -26,6 +28,18 @@ type panelObservationRepo struct {
 type coreObservationAgentRepo struct {
 	ports.NodeAgentRepo
 	engine domain.NodeCoreEngine
+}
+
+type switchableIssueRepo struct {
+	ports.NodeAgentIssueRepo
+	fail bool
+}
+
+func (r *switchableIssueRepo) RecordBatch(ctx context.Context, agentID string, issues []domain.NodeAgentIssue, seenAt time.Time) error {
+	if r.fail {
+		return errors.New("forced issue persistence failure")
+	}
+	return r.NodeAgentIssueRepo.RecordBatch(ctx, agentID, issues, seenAt)
 }
 
 func (r *coreObservationAgentRepo) UpdateCoreObservation(_ context.Context, _ string, engine domain.NodeCoreEngine) error {
@@ -68,6 +82,181 @@ func TestNativeCoreObservationPersistsAndInvalidatesRenderCache(t *testing.T) {
 	}
 	if repo.panel.PanelVersion != "v0.2.0" || repo.panel.XrayVersion != "1.14.0" || invalidations != 1 {
 		t.Fatalf("empty observation erased state or invalidated cache: panel=%+v invalidations=%d", repo.panel, invalidations)
+	}
+}
+
+func TestCloneObservationReportDropsOneShotFields(t *testing.T) {
+	report := nodeprotocol.NodeReport{
+		AgentID: "agt_cache", AgentVersion: "v1", Have: emptyProtocolHave(),
+		Objects:      []nodeprotocol.ObjectStatus{{Key: "cli_1"}},
+		Issues:       []nodeprotocol.Issue{{Code: "test"}},
+		Capabilities: []string{nodeprotocol.CapabilityTaskExecutionV1},
+		TaskResults: []nodeprotocol.TaskResult{{
+			ID: "task-cache", Kind: "reality_probe.v1",
+			InputSHA256: nodeprotocol.ComputeTaskInputSHA256("reality_probe.v1", nil),
+			OK:          true, Result: []byte("large one-shot payload"),
+		}},
+	}
+	cached := cloneObservationReport(report)
+	if cached.Issues != nil || cached.TaskResults != nil || cached.Capabilities != nil {
+		t.Fatalf("one-shot fields retained in observation cache: %+v", cached)
+	}
+	if cached.AgentVersion != report.AgentVersion || len(cached.Objects) != 1 || len(cached.Have) != 3 {
+		t.Fatalf("required observation fields were dropped: %+v", cached)
+	}
+}
+
+func TestAvailableTaskJSONBytesMatchesExactSyncResponseBoundary(t *testing.T) {
+	task := nodeprotocol.Task{
+		ID: "task-boundary", Kind: "reality_probe.v1", Args: []byte("payload"),
+	}
+	task.InputSHA256 = nodeprotocol.ComputeTaskInputSHA256(task.Kind, task.Args)
+	taskArray, err := json.Marshal([]nodeprotocol.Task{task})
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := nodeprotocol.SyncResponse{}
+	baseJSON, err := json.Marshal(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fillerBytes := int(nodeprotocol.MaxSyncBodyBytes) - len(baseJSON) - syncTasksFieldJSONBytes - len(taskArray)
+	if fillerBytes <= 0 {
+		t.Fatalf("test fixture cannot reach response boundary: filler=%d", fillerBytes)
+	}
+	base.Config.ETag = nodeprotocol.ETag(strings.Repeat("a", fillerBytes))
+	budget, err := availableTaskJSONBytes(base)
+	if err != nil || budget != len(taskArray) {
+		t.Fatalf("task JSON budget = (%d, %v), want %d", budget, err, len(taskArray))
+	}
+	base.Tasks = []nodeprotocol.Task{task}
+	encoded, err := json.Marshal(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if int64(len(encoded)) != nodeprotocol.MaxSyncBodyBytes {
+		t.Fatalf("encoded response bytes = %d, want exact boundary %d", len(encoded), nodeprotocol.MaxSyncBodyBytes)
+	}
+
+	base.Tasks = nil
+	base.Config.ETag += "a"
+	budget, err = availableTaskJSONBytes(base)
+	if err != nil || budget != len(taskArray)-1 {
+		t.Fatalf("one-byte-smaller task budget = (%d, %v), want %d", budget, err, len(taskArray)-1)
+	}
+}
+
+func TestSyncDispatchesDurableTasksOnlyWithBothCapabilitiesAndAcceptsReplay(t *testing.T) {
+	ctx := context.Background()
+	db, err := sqlstore.Open("sqlite", filepath.Join(t.TempDir(), "nodesync-tasks.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sqlstore.EnsureSchema(db); err != nil {
+		t.Fatal(err)
+	}
+	repos := sqlstore.NewRepos(db)
+	agent := &domain.NodeAgent{
+		AgentID: "agt_sync_tasks", PanelID: 909,
+		CredentialSHA256: nodeprotocol.ComputeTaskInputSHA256("agt_sync_tasks", nil),
+	}
+	if err := repos.NodeAgent.Create(ctx, agent); err != nil {
+		t.Fatal(err)
+	}
+	task := &domain.NodeAgentTask{
+		TaskID: "task-sync-1", AgentID: agent.AgentID, Kind: "reality_probe.v1",
+		Args: []byte(`{"target":"example.test:443"}`),
+	}
+	task.InputSHA256 = nodeprotocol.ComputeTaskInputSHA256(task.Kind, task.Args)
+	if _, _, err := repos.NodeAgentTask.CreateOrGet(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 9, 11, 13, 0, 0, 0, time.UTC)
+	issues := &switchableIssueRepo{NodeAgentIssueRepo: repos.NodeAgentIssue}
+	service, err := New(Options{
+		Desired: repos.NativeDesired, Agents: repos.NodeAgent, Issues: issues, Tasks: repos.NodeAgentTask,
+		Users: repos.User, Clients: repos.PSPClient, Nodes: repos.Node, Settings: repos.Settings,
+		Now: func() time.Time { return now },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	report := nodeprotocol.NodeReport{
+		AgentID: agent.AgentID, ProtocolVersion: nodeprotocol.ProtocolVersion1,
+		ReportedAtMS: now.UnixMilli(), Have: emptyProtocolHave(),
+	}
+
+	for name, capabilities := range map[string][]string{
+		"neither":   nil,
+		"base_only": {nodeprotocol.CapabilityTaskExecutionV1},
+		"kind_only": {nodeprotocol.TaskCapability(task.Kind)},
+	} {
+		t.Run(name, func(t *testing.T) {
+			report.Capabilities = capabilities
+			response, err := service.Sync(ctx, report)
+			if err != nil || len(response.Tasks) != 0 || response.Envelope.NextPollSeconds != defaultNextPollSeconds {
+				t.Fatalf("capability-gated response = (%+v, %v)", response, err)
+			}
+		})
+	}
+	stored, err := repos.NodeAgentTask.GetByTaskID(ctx, task.TaskID)
+	if err != nil || stored.Status != domain.NodeAgentTaskQueued || stored.OfferCount != 0 {
+		t.Fatalf("capability-gated task mutated = (%+v, %v)", stored, err)
+	}
+
+	report.Capabilities = []string{
+		nodeprotocol.CapabilityTaskExecutionV1,
+		nodeprotocol.TaskCapability(task.Kind),
+	}
+	offered, err := service.Sync(ctx, report)
+	if err != nil || len(offered.Tasks) != 1 || offered.Envelope.NextPollSeconds != 1 {
+		t.Fatalf("eligible task response = (%+v, %v)", offered, err)
+	}
+	if offered.Tasks[0].ID != task.TaskID || offered.Tasks[0].Kind != task.Kind ||
+		offered.Tasks[0].InputSHA256 != task.InputSHA256 || !bytes.Equal(offered.Tasks[0].Args, task.Args) {
+		t.Fatalf("wire task = %+v", offered.Tasks[0])
+	}
+	now = now.Add(time.Second)
+	repeated, err := service.Sync(ctx, report)
+	if err != nil || len(repeated.Tasks) != 1 || repeated.Tasks[0].ID != task.TaskID ||
+		repeated.Envelope.NextPollSeconds != defaultNextPollSeconds {
+		t.Fatalf("offered task was not retransmitted = (%+v, %v)", repeated.Tasks, err)
+	}
+
+	result := nodeprotocol.TaskResult{
+		ID: task.TaskID, Kind: task.Kind, InputSHA256: task.InputSHA256,
+		OK: true, Result: []byte(`{"reachable":true}`),
+	}
+	now = now.Add(time.Second)
+	report.Capabilities = nil // capabilities gate dispatch, never an already-executed result
+	report.TaskResults = []nodeprotocol.TaskResult{result}
+	issues.fail = true
+	if _, err := service.Sync(ctx, report); err == nil || !strings.Contains(err.Error(), "forced issue persistence failure") {
+		t.Fatalf("post-completion report failure = %v", err)
+	}
+	persisted, err := repos.NodeAgentTask.GetByTaskID(ctx, task.TaskID)
+	if err != nil || persisted.Status != domain.NodeAgentTaskSucceeded {
+		t.Fatalf("task result did not commit before later report failure = (%+v, %v)", persisted, err)
+	}
+	issues.fail = false
+	completed, err := service.Sync(ctx, report)
+	if err != nil || len(completed.Tasks) != 0 || completed.Envelope.NextPollSeconds != defaultNextPollSeconds {
+		t.Fatalf("task completion replay response = (%+v, %v)", completed, err)
+	}
+	now = now.Add(time.Second)
+	if _, err := service.Sync(ctx, report); err != nil {
+		t.Fatalf("equal outbox replay: %v", err)
+	}
+	result.Result = []byte(`{"reachable":false}`)
+	report.TaskResults = []nodeprotocol.TaskResult{result}
+	if _, err := service.Sync(ctx, report); !errors.Is(err, domain.ErrConflict) {
+		t.Fatalf("conflicting outbox replay = %v, want ErrConflict", err)
+	}
+
+	legacy := report
+	legacy.TaskResults = []nodeprotocol.TaskResult{{ID: task.TaskID, OK: true}}
+	if _, err := service.Sync(ctx, legacy); err == nil || !strings.Contains(err.Error(), "invalid task results") {
+		t.Fatalf("legacy-shaped task result = %v, want strict non-2xx error", err)
 	}
 }
 
@@ -129,7 +318,7 @@ func TestSyncMintsDocumentsThenIngestsAppliedObservation(t *testing.T) {
 	now := time.Date(2026, time.September, 10, 12, 0, 0, 0, time.UTC)
 	currentNow := now
 	service, err := New(Options{
-		Desired: repos.NativeDesired, Agents: repos.NodeAgent, Issues: repos.NodeAgentIssue, Users: repos.User,
+		Desired: repos.NativeDesired, Agents: repos.NodeAgent, Issues: repos.NodeAgentIssue, Tasks: repos.NodeAgentTask, Users: repos.User,
 		Clients: repos.PSPClient, Nodes: repos.Node, Settings: repos.Settings,
 		Now: func() time.Time { return currentNow },
 	})
@@ -287,10 +476,14 @@ func TestSyncMintsDocumentsThenIngestsAppliedObservation(t *testing.T) {
 	_, err = service.Sync(ctx, nodeprotocol.NodeReport{
 		AgentID: agent.AgentID, ProtocolVersion: nodeprotocol.ProtocolVersion1,
 		ReportedAtMS: now.Add(3 * time.Second).UnixMilli(), Partial: true, Have: have,
-		TaskResults: []nodeprotocol.TaskResult{{ID: "future-task", OK: true}},
+		Capabilities: []string{nodeprotocol.CapabilityTaskExecutionV1},
+		TaskResults: []nodeprotocol.TaskResult{{
+			ID: "future-task", Kind: "reality_probe.v1",
+			InputSHA256: nodeprotocol.ComputeTaskInputSHA256("reality_probe.v1", nil), OK: true,
+		}},
 	})
-	if err == nil || !strings.Contains(err.Error(), "task result ingestion is not configured") {
-		t.Fatalf("unsupported task result error = %v", err)
+	if err == nil || !strings.Contains(err.Error(), "unknown task") {
+		t.Fatalf("unknown task result error = %v", err)
 	}
 }
 

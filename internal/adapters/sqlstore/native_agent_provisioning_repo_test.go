@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	nodeprotocol "github.com/KazuhaHub/passwall-node/protocol"
+
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 )
 
@@ -60,6 +62,22 @@ func TestNativeAgentProvisioningIsAtomicAndDeletesOnlyAfterEmptyConvergence(t *t
 		agent.Epoch, emptyConfig.DesiredVersion, emptyConfig.DesiredETag, now.Add(time.Second)); err != nil {
 		t.Fatal(err)
 	}
+	activeTask := newTask("task-block-delete", agent.AgentID, "reality_probe.v1", []byte("probe"))
+	if _, _, err := repos.NodeAgentTask.CreateOrGet(ctx, activeTask); err != nil {
+		t.Fatal(err)
+	}
+	if err := repos.NativeAgentProvisioning.DeleteConverged(ctx, panel.ID); !errors.Is(err, domain.ErrConflict) {
+		t.Fatalf("delete with active native task = %v, want ErrConflict", err)
+	}
+	if _, err := repos.NodeAgentTask.Offer(ctx, agent.AgentID, []string{activeTask.Kind}, 1, int(nodeprotocol.MaxSyncBodyBytes), now.Add(2*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if err := repos.NodeAgentTask.CompleteBatch(ctx, agent.AgentID, []domain.NodeAgentTaskResult{{
+		TaskID: activeTask.TaskID, Kind: activeTask.Kind, InputSHA256: activeTask.InputSHA256,
+		OK: true, Result: []byte("done"),
+	}}, now.Add(3*time.Second)); err != nil {
+		t.Fatal(err)
+	}
 	if err := repos.NativeAgentProvisioning.DeleteConverged(ctx, panel.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -68,6 +86,63 @@ func TestNativeAgentProvisioningIsAtomicAndDeletesOnlyAfterEmptyConvergence(t *t
 	}
 	if _, err := repos.NodeAgent.GetByAgentID(ctx, agent.AgentID); err == nil {
 		t.Fatal("native agent remained after atomic deletion")
+	}
+	if _, err := repos.NodeAgentTask.GetByTaskID(ctx, activeTask.TaskID); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("terminal task tombstone remained after native agent deletion: %v", err)
+	}
+}
+
+func TestNativeAgentTaskCreateAndDeletionCannotProduceAnOrphan(t *testing.T) {
+	db, err := openTestDB(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := EnsureSchema(db); err != nil {
+		t.Fatal(err)
+	}
+	repos := NewRepos(db)
+	digest := sha256.Sum256([]byte("pspn_task_delete_race_0123456789abcdefghijklmnopqrstuvwxyz"))
+	panel := &domain.XUIPanel{Kind: domain.PanelKindPSP, Name: "native-task-race", URL: "psp://agt_task_delete_race"}
+	agent := &domain.NodeAgent{
+		AgentID: "agt_task_delete_race", CredentialSHA256: hex.EncodeToString(digest[:]), DesiredCoreVersion: "26.6.27",
+	}
+	ctx := context.Background()
+	if err := repos.NativeAgentProvisioning.Create(ctx, panel, agent); err != nil {
+		t.Fatal(err)
+	}
+	task := newTask("task-delete-race", agent.AgentID, "reality_probe.v1", []byte("probe"))
+	start := make(chan struct{})
+	createResult := make(chan error, 1)
+	deleteResult := make(chan error, 1)
+	go func() {
+		<-start
+		_, _, err := repos.NodeAgentTask.CreateOrGet(ctx, task)
+		createResult <- err
+	}()
+	go func() {
+		<-start
+		deleteResult <- repos.NativeAgentProvisioning.DeleteConverged(ctx, panel.ID)
+	}()
+	close(start)
+	createErr, deleteErr := <-createResult, <-deleteResult
+
+	switch {
+	case createErr == nil && errors.Is(deleteErr, domain.ErrConflict):
+		if _, err := repos.NodeAgent.GetByAgentID(ctx, agent.AgentID); err != nil {
+			t.Fatalf("winning task create lost its agent: %v", err)
+		}
+		if _, err := repos.NodeAgentTask.GetByTaskID(ctx, task.TaskID); err != nil {
+			t.Fatalf("winning task create was not durable: %v", err)
+		}
+	case deleteErr == nil && errors.Is(createErr, domain.ErrNotFound):
+		if _, err := repos.NodeAgentTask.GetByTaskID(ctx, task.TaskID); !errors.Is(err, domain.ErrNotFound) {
+			t.Fatalf("successful deletion left an orphan task: %v", err)
+		}
+		if _, err := repos.NodeAgent.GetByAgentID(ctx, agent.AgentID); !errors.Is(err, domain.ErrNotFound) {
+			t.Fatalf("successful deletion left agent identity: %v", err)
+		}
+	default:
+		t.Fatalf("create/delete race = create %v, delete %v; want exactly one valid winner", createErr, deleteErr)
 	}
 }
 

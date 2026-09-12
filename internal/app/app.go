@@ -254,7 +254,7 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 
 	panelRegistry := paneladapter.NewRegistry()
 	nativeSync, err := nodesync.New(nodesync.Options{
-		Desired: repos.NativeDesired, Agents: repos.NodeAgent, Issues: repos.NodeAgentIssue, Users: repos.User,
+		Desired: repos.NativeDesired, Agents: repos.NodeAgent, Issues: repos.NodeAgentIssue, Tasks: repos.NodeAgentTask, Users: repos.User,
 		Clients: repos.PSPClient, Nodes: repos.Node, Settings: repos.Settings, Panels: repos.XUIPanel,
 	})
 	if err != nil {

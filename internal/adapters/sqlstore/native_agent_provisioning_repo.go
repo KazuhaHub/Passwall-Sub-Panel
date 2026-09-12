@@ -11,6 +11,7 @@ import (
 
 	nodeprotocol "github.com/KazuhaHub/passwall-node/protocol"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 )
@@ -109,8 +110,18 @@ func (r *nativeAgentProvisioningRepo) DeleteConverged(ctx context.Context, panel
 			return fmt.Errorf("%w: panel is not a native node", domain.ErrValidation)
 		}
 		var agent nodeAgentRow
-		if err := tx.Where("panel_id = ?", panelID).First(&agent).Error; err != nil {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("panel_id = ?", panelID).First(&agent).Error; err != nil {
 			return fmt.Errorf("%w: native panel has no agent identity", domain.ErrValidation)
+		}
+		var activeTasks []nodeAgentTaskRow
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select("task_id").
+			Where("agent_id = ? AND status IN ?", agent.AgentID,
+				[]string{string(domain.NodeAgentTaskQueued), string(domain.NodeAgentTaskOffered)}).
+			Limit(1).Find(&activeTasks).Error; err != nil {
+			return err
+		}
+		if len(activeTasks) != 0 {
+			return fmt.Errorf("%w: native agent still has active task(s)", domain.ErrConflict)
 		}
 		var clientRefs int64
 		if err := tx.Model(&pspClientRow{}).Where("panel_id = ?", panelID).Count(&clientRefs).Error; err != nil {
@@ -138,6 +149,9 @@ func (r *nativeAgentProvisioningRepo) DeleteConverged(ctx context.Context, panel
 			return err
 		}
 		if err := tx.Where("agent_id = ?", agent.AgentID).Delete(&nodeAgentIssueRow{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("agent_id = ?", agent.AgentID).Delete(&nodeAgentTaskRow{}).Error; err != nil {
 			return err
 		}
 		if err := tx.Where("agent_id = ?", agent.AgentID).Delete(&nodeAgentStreamRow{}).Error; err != nil {

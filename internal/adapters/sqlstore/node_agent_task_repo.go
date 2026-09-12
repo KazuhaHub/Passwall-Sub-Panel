@@ -1,0 +1,536 @@
+package sqlstore
+
+import (
+	"bytes"
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"sort"
+	"strings"
+	"time"
+
+	nodeprotocol "github.com/KazuhaHub/passwall-node/protocol"
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
+
+	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
+)
+
+type nodeAgentTaskRow struct {
+	TaskID  string `gorm:"primaryKey;size:128;index:idx_node_agent_task_offer,priority:4"`
+	AgentID string `gorm:"size:64;not null;index:idx_node_agent_task_offer,priority:1;uniqueIndex:uk_node_agent_task_idempotency,priority:1"`
+	Kind    string `gorm:"size:96;not null"`
+	Args    []byte `gorm:"not null"`
+	// InputSHA256 binds both Kind and Args using the shared wire helper.
+	InputSHA256 string `gorm:"size:64;not null"`
+	Status      string `gorm:"size:16;not null;default:'queued';index:idx_node_agent_task_offer,priority:2;check:chk_node_agent_task_status,status IN ('queued','offered','succeeded','failed','indeterminate')"`
+
+	// A nil key means the caller deliberately opted out of request-level
+	// idempotency. SQL unique indexes permit multiple NULL values on all three
+	// supported databases.
+	IdempotencyKeySHA256 *string `gorm:"size:64;uniqueIndex:uk_node_agent_task_idempotency,priority:2"`
+	SupersedesTaskID     string  `gorm:"size:128;index"`
+
+	ResultOK            *bool
+	ResultIndeterminate bool `gorm:"not null;default:false"`
+	Result              []byte
+	ResultErrorCode     string `gorm:"size:128"`
+	ResultError         string `gorm:"type:text"`
+
+	OfferCount     int `gorm:"not null;default:0"`
+	FirstOfferedAt *time.Time
+	LastOfferedAt  *time.Time
+	CompletedAt    *time.Time `gorm:"index:idx_node_agent_task_completed"`
+	CreatedAt      time.Time  `gorm:"index:idx_node_agent_task_offer,priority:3"`
+	UpdatedAt      time.Time
+}
+
+func (nodeAgentTaskRow) TableName() string { return "node_agent_tasks" }
+
+func (r *nodeAgentTaskRow) toDomain() *domain.NodeAgentTask {
+	if r == nil {
+		return nil
+	}
+	return &domain.NodeAgentTask{
+		TaskID: r.TaskID, AgentID: r.AgentID, Kind: r.Kind,
+		Args: append([]byte(nil), r.Args...), InputSHA256: r.InputSHA256,
+		Status:               domain.NodeAgentTaskStatus(r.Status),
+		IdempotencyKeySHA256: cloneStringPointer(r.IdempotencyKeySHA256),
+		SupersedesTaskID:     r.SupersedesTaskID,
+		ResultOK:             cloneBoolPointer(r.ResultOK),
+		ResultIndeterminate:  r.ResultIndeterminate,
+		Result:               append([]byte(nil), r.Result...),
+		ResultErrorCode:      r.ResultErrorCode, ResultError: r.ResultError,
+		OfferCount: r.OfferCount, FirstOfferedAt: cloneTimePointer(r.FirstOfferedAt),
+		LastOfferedAt: cloneTimePointer(r.LastOfferedAt), CompletedAt: cloneTimePointer(r.CompletedAt),
+		CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
+	}
+}
+
+func nodeAgentTaskFromDomain(task *domain.NodeAgentTask) *nodeAgentTaskRow {
+	return &nodeAgentTaskRow{
+		TaskID: task.TaskID, AgentID: task.AgentID, Kind: task.Kind,
+		Args: append([]byte{}, task.Args...), InputSHA256: task.InputSHA256,
+		Status: string(task.Status), IdempotencyKeySHA256: cloneStringPointer(task.IdempotencyKeySHA256),
+		SupersedesTaskID:    task.SupersedesTaskID,
+		ResultOK:            cloneBoolPointer(task.ResultOK),
+		ResultIndeterminate: task.ResultIndeterminate,
+		Result:              append([]byte(nil), task.Result...),
+		ResultErrorCode:     task.ResultErrorCode, ResultError: task.ResultError,
+		OfferCount: task.OfferCount, FirstOfferedAt: cloneTimePointer(task.FirstOfferedAt),
+		LastOfferedAt: cloneTimePointer(task.LastOfferedAt), CompletedAt: cloneTimePointer(task.CompletedAt),
+		CreatedAt: task.CreatedAt, UpdatedAt: task.UpdatedAt,
+	}
+}
+
+type nodeAgentTaskRepo struct{ db *gorm.DB }
+
+func (r *nodeAgentTaskRepo) CreateOrGet(ctx context.Context, task *domain.NodeAgentTask) (*domain.NodeAgentTask, bool, error) {
+	if err := validateNewNodeAgentTask(task); err != nil {
+		return nil, false, err
+	}
+	incoming := nodeAgentTaskFromDomain(task)
+	var stored nodeAgentTaskRow
+	created := false
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := lockNodeAgentTaskOwner(tx, incoming.AgentID); err != nil {
+			return err
+		}
+		if incoming.SupersedesTaskID != "" {
+			var prior nodeAgentTaskRow
+			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+				Where("task_id = ?", incoming.SupersedesTaskID).First(&prior).Error; err != nil {
+				return fmt.Errorf("create native agent task: superseded task: %w", wrapNotFound(err))
+			}
+			// Default MySQL collations fold case. Task IDs are now canonical on
+			// the wire, but this exact check also protects upgraded databases
+			// containing rows written before that validator existed.
+			if prior.TaskID != incoming.SupersedesTaskID {
+				return fmt.Errorf("%w: superseded task ID must match stored identity exactly", domain.ErrConflict)
+			}
+			if prior.AgentID != incoming.AgentID || domain.NodeAgentTaskStatus(prior.Status) != domain.NodeAgentTaskFailed {
+				return fmt.Errorf("%w: superseded task must be a failed task for the same agent", domain.ErrConflict)
+			}
+		}
+
+		existing, matchedByTaskID, found, err := findNodeAgentTaskConflict(tx, incoming)
+		if err != nil {
+			return err
+		}
+		if found {
+			if !sameTaskRequest(existing, incoming, matchedByTaskID) {
+				return fmt.Errorf("%w: native agent task ID or idempotency key reused with different input", domain.ErrConflict)
+			}
+			stored = *existing
+			return nil
+		}
+
+		// MySQL cannot render GORM's empty DoNothing action as valid SQL. Use a
+		// dialect-aware no-op and never infer insertion from RowsAffected: MySQL's
+		// CLIENT_FOUND_ROWS setting changes that value for self-assignments.
+		if err := tx.Clauses(nodeAgentTaskInsertConflictClause(tx.Dialector.Name())).Create(incoming).Error; err != nil {
+			return err
+		}
+		existing, matchedByTaskID, found, err = findNodeAgentTaskConflict(tx, incoming)
+		if err != nil {
+			return err
+		}
+		if !found {
+			return errors.New("create native agent task: inserted row could not be read back")
+		}
+		if !sameTaskRequest(existing, incoming, matchedByTaskID) {
+			return fmt.Errorf("%w: native agent task ID or idempotency key reused concurrently with different input", domain.ErrConflict)
+		}
+		stored = *existing
+		created = true
+		return nil
+	})
+	if err != nil {
+		return nil, false, err
+	}
+	return stored.toDomain(), created, nil
+}
+
+func findNodeAgentTaskConflict(tx *gorm.DB, incoming *nodeAgentTaskRow) (*nodeAgentTaskRow, bool, bool, error) {
+	var stored nodeAgentTaskRow
+	err := tx.Where("task_id = ?", incoming.TaskID).First(&stored).Error
+	if err == nil {
+		return &stored, true, true, nil
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, false, false, fmt.Errorf("create native agent task: resolve task ID: %w", err)
+	}
+	if incoming.IdempotencyKeySHA256 == nil {
+		return nil, false, false, nil
+	}
+	err = tx.Where("agent_id = ? AND idempotency_key_sha256 = ?", incoming.AgentID, *incoming.IdempotencyKeySHA256).
+		First(&stored).Error
+	if err == nil {
+		return &stored, false, true, nil
+	}
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, false, false, nil
+	}
+	return nil, false, false, fmt.Errorf("create native agent task: resolve idempotency key: %w", err)
+}
+
+func nodeAgentTaskInsertConflictClause(dialect string) clause.OnConflict {
+	if dialect == "mysql" {
+		return clause.OnConflict{DoUpdates: clause.Assignments(map[string]any{
+			"task_id": clause.Column{Name: "task_id"},
+		})}
+	}
+	return clause.OnConflict{DoNothing: true}
+}
+
+func (r *nodeAgentTaskRepo) GetByTaskID(ctx context.Context, taskID string) (*domain.NodeAgentTask, error) {
+	if taskID == "" {
+		return nil, fmt.Errorf("%w: task ID is required", domain.ErrValidation)
+	}
+	var row nodeAgentTaskRow
+	if err := r.db.WithContext(ctx).Where("task_id = ?", taskID).First(&row).Error; err != nil {
+		return nil, wrapNotFound(err)
+	}
+	if row.TaskID != taskID {
+		return nil, fmt.Errorf("%w: native agent task", domain.ErrNotFound)
+	}
+	return row.toDomain(), nil
+}
+
+func (r *nodeAgentTaskRepo) Offer(ctx context.Context, agentID string, eligibleKinds []string, limit, maxTaskJSONBytes int, offeredAt time.Time) ([]*domain.NodeAgentTask, error) {
+	if agentID == "" {
+		return nil, fmt.Errorf("%w: agent ID is required", domain.ErrValidation)
+	}
+	if offeredAt.IsZero() {
+		return nil, fmt.Errorf("%w: offered time is required", domain.ErrValidation)
+	}
+	kinds := uniqueNonEmptyStrings(eligibleKinds)
+	if len(kinds) == 0 || maxTaskJSONBytes < len("[]") {
+		return []*domain.NodeAgentTask{}, nil
+	}
+	if limit <= 0 || limit > nodeprotocol.MaxTasksPerResponse {
+		limit = nodeprotocol.MaxTasksPerResponse
+	}
+	offeredAt = offeredAt.UTC()
+	rows := make([]nodeAgentTaskRow, 0, limit)
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := lockNodeAgentTaskOwner(tx, agentID); err != nil {
+			return err
+		}
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("agent_id = ? AND status IN ? AND kind IN ?", agentID,
+				[]string{string(domain.NodeAgentTaskQueued), string(domain.NodeAgentTaskOffered)}, kinds).
+			Order("created_at ASC, task_id ASC").Limit(limit).Find(&rows).Error; err != nil {
+			return err
+		}
+		bounded := make([]nodeAgentTaskRow, 0, len(rows))
+		totalArgs := 0
+		encodedTaskArrayBytes := len("[]")
+		for i := range rows {
+			wire := nodeprotocol.Task{
+				ID: rows[i].TaskID, Kind: rows[i].Kind,
+				Args: rows[i].Args, InputSHA256: rows[i].InputSHA256,
+			}
+			if err := nodeprotocol.ValidateTasks([]nodeprotocol.Task{wire}); err != nil {
+				return fmt.Errorf("offer native agent task %q: invalid stored task: %w", rows[i].TaskID, err)
+			}
+			if len(rows[i].Args) > nodeprotocol.MaxTaskArgsBytesPerResponse-totalArgs {
+				break
+			}
+			encoded, err := json.Marshal(wire)
+			if err != nil {
+				return fmt.Errorf("offer native agent task %q: encode: %w", rows[i].TaskID, err)
+			}
+			separatorBytes := 0
+			if len(bounded) != 0 {
+				separatorBytes = len(",")
+			}
+			if len(encoded)+separatorBytes > maxTaskJSONBytes-encodedTaskArrayBytes {
+				break
+			}
+			totalArgs += len(rows[i].Args)
+			encodedTaskArrayBytes += len(encoded) + separatorBytes
+			bounded = append(bounded, rows[i])
+		}
+		rows = bounded
+		wireTasks := make([]nodeprotocol.Task, len(rows))
+		for i := range rows {
+			wireTasks[i] = nodeprotocol.Task{
+				ID: rows[i].TaskID, Kind: rows[i].Kind,
+				Args: rows[i].Args, InputSHA256: rows[i].InputSHA256,
+			}
+		}
+		if err := nodeprotocol.ValidateTasks(wireTasks); err != nil {
+			return fmt.Errorf("offer native agent tasks: invalid batch: %w", err)
+		}
+		for i := range rows {
+			updates := map[string]any{
+				"last_offered_at": offeredAt,
+				"offer_count":     gorm.Expr("offer_count + 1"),
+			}
+			if domain.NodeAgentTaskStatus(rows[i].Status) == domain.NodeAgentTaskQueued {
+				updates["status"] = string(domain.NodeAgentTaskOffered)
+				updates["first_offered_at"] = offeredAt
+			}
+			result := tx.Model(&nodeAgentTaskRow{}).
+				Where("task_id = ? AND status IN ?", rows[i].TaskID,
+					[]string{string(domain.NodeAgentTaskQueued), string(domain.NodeAgentTaskOffered)}).
+				Updates(updates)
+			if result.Error != nil {
+				return result.Error
+			}
+			if result.RowsAffected != 1 {
+				return fmt.Errorf("offer native agent task %q: state changed concurrently", rows[i].TaskID)
+			}
+			rows[i].Status = string(domain.NodeAgentTaskOffered)
+			rows[i].OfferCount++
+			rows[i].LastOfferedAt = cloneTimePointer(&offeredAt)
+			if rows[i].FirstOfferedAt == nil {
+				rows[i].FirstOfferedAt = cloneTimePointer(&offeredAt)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*domain.NodeAgentTask, len(rows))
+	for i := range rows {
+		out[i] = rows[i].toDomain()
+	}
+	return out, nil
+}
+
+func (r *nodeAgentTaskRepo) CompleteBatch(ctx context.Context, agentID string, results []domain.NodeAgentTaskResult, completedAt time.Time) error {
+	if agentID == "" {
+		return fmt.Errorf("%w: agent ID is required", domain.ErrValidation)
+	}
+	if len(results) == 0 {
+		return nil
+	}
+	if completedAt.IsZero() {
+		return fmt.Errorf("%w: completion time is required", domain.ErrValidation)
+	}
+	ordered := append([]domain.NodeAgentTaskResult(nil), results...)
+	wireResults := make([]nodeprotocol.TaskResult, len(ordered))
+	for i := range ordered {
+		ordered[i].Result = append([]byte(nil), ordered[i].Result...)
+		wireResults[i] = nodeprotocol.TaskResult{
+			ID: ordered[i].TaskID, Kind: ordered[i].Kind, InputSHA256: ordered[i].InputSHA256,
+			OK: ordered[i].OK, Indeterminate: ordered[i].Indeterminate, Result: ordered[i].Result,
+			ErrorCode: ordered[i].ErrorCode, Error: ordered[i].Error,
+		}
+	}
+	if err := nodeprotocol.ValidateTaskResults(wireResults); err != nil {
+		return fmt.Errorf("%w: %v", domain.ErrValidation, err)
+	}
+	sort.Slice(ordered, func(i, j int) bool { return ordered[i].TaskID < ordered[j].TaskID })
+	for i := 1; i < len(ordered); i++ {
+		if ordered[i-1].TaskID == ordered[i].TaskID {
+			return fmt.Errorf("%w: duplicate task result %q", domain.ErrValidation, ordered[i].TaskID)
+		}
+	}
+	ids := make([]string, len(ordered))
+	resultByID := make(map[string]domain.NodeAgentTaskResult, len(ordered))
+	for i := range ordered {
+		ids[i] = ordered[i].TaskID
+		resultByID[ordered[i].TaskID] = ordered[i]
+	}
+	completedAt = completedAt.UTC()
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := lockNodeAgentTaskOwner(tx, agentID); err != nil {
+			return err
+		}
+		var rows []nodeAgentTaskRow
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("agent_id = ? AND task_id IN ?", agentID, ids).
+			Order("task_id ASC").Find(&rows).Error; err != nil {
+			return err
+		}
+		if len(rows) != len(ordered) {
+			return fmt.Errorf("%w: task result references an unknown task", domain.ErrConflict)
+		}
+
+		// Validate the complete batch before the first write. This is what makes
+		// one malformed result unable to partially acknowledge its neighbours.
+		for i := range rows {
+			result := resultByID[rows[i].TaskID]
+			if rows[i].AgentID != agentID {
+				return fmt.Errorf("%w: task result belongs to another agent", domain.ErrConflict)
+			}
+			if rows[i].Kind != result.Kind || rows[i].InputSHA256 != result.InputSHA256 {
+				return fmt.Errorf("%w: task result identity conflicts with offered input", domain.ErrConflict)
+			}
+			status := domain.NodeAgentTaskStatus(rows[i].Status)
+			switch {
+			case status == domain.NodeAgentTaskQueued:
+				return fmt.Errorf("%w: task result arrived before the task was offered", domain.ErrConflict)
+			case status.Terminal():
+				if !sameTerminalResult(&rows[i], result) {
+					return fmt.Errorf("%w: task result conflicts with the stored terminal result", domain.ErrConflict)
+				}
+			case status != domain.NodeAgentTaskOffered:
+				return fmt.Errorf("%w: task has invalid stored status %q", domain.ErrConflict, rows[i].Status)
+			}
+		}
+
+		for i := range rows {
+			if domain.NodeAgentTaskStatus(rows[i].Status).Terminal() {
+				continue
+			}
+			result := resultByID[rows[i].TaskID]
+			ok := result.OK
+			status := resultStatus(result)
+			updated := tx.Model(&nodeAgentTaskRow{}).
+				Where("task_id = ? AND status = ?", rows[i].TaskID, string(domain.NodeAgentTaskOffered)).
+				Updates(map[string]any{
+					"status":               string(status),
+					"result_ok":            &ok,
+					"result_indeterminate": result.Indeterminate,
+					"result":               append([]byte(nil), result.Result...),
+					"result_error_code":    result.ErrorCode,
+					"result_error":         result.Error,
+					"completed_at":         completedAt,
+				})
+			if updated.Error != nil {
+				return updated.Error
+			}
+			if updated.RowsAffected != 1 {
+				return fmt.Errorf("complete native agent task %q: state changed concurrently", rows[i].TaskID)
+			}
+		}
+		return nil
+	})
+}
+
+func validateNewNodeAgentTask(task *domain.NodeAgentTask) error {
+	if task == nil || task.TaskID == "" || task.AgentID == "" || task.Kind == "" {
+		return fmt.Errorf("%w: task ID, agent ID, and kind are required", domain.ErrValidation)
+	}
+	if len(task.AgentID) > 64 || len(task.SupersedesTaskID) > nodeprotocol.MaxTaskIDBytes {
+		return fmt.Errorf("%w: native agent task exceeds field size limits", domain.ErrValidation)
+	}
+	if task.Status == "" {
+		task.Status = domain.NodeAgentTaskQueued
+	}
+	if task.Status != domain.NodeAgentTaskQueued || task.ResultOK != nil || task.ResultIndeterminate || len(task.Result) != 0 ||
+		task.ResultErrorCode != "" || task.ResultError != "" || task.CompletedAt != nil ||
+		task.OfferCount != 0 || task.FirstOfferedAt != nil || task.LastOfferedAt != nil {
+		return fmt.Errorf("%w: a new native agent task must be pristine and queued", domain.ErrValidation)
+	}
+	if err := nodeprotocol.ValidateTasks([]nodeprotocol.Task{{
+		ID: task.TaskID, Kind: task.Kind, Args: task.Args, InputSHA256: task.InputSHA256,
+	}}); err != nil {
+		return fmt.Errorf("%w: %v", domain.ErrValidation, err)
+	}
+	if task.IdempotencyKeySHA256 != nil {
+		normalized := strings.ToLower(*task.IdempotencyKeySHA256)
+		if !validSHA256Hex(normalized) {
+			return fmt.Errorf("%w: idempotency key must be a SHA-256 hex digest", domain.ErrValidation)
+		}
+		task.IdempotencyKeySHA256 = &normalized
+	}
+	return nil
+}
+
+func sameTaskRequest(stored, incoming *nodeAgentTaskRow, matchedByTaskID bool) bool {
+	if stored.AgentID != incoming.AgentID || stored.Kind != incoming.Kind ||
+		stored.InputSHA256 != incoming.InputSHA256 || !bytes.Equal(stored.Args, incoming.Args) ||
+		stored.SupersedesTaskID != incoming.SupersedesTaskID ||
+		!equalStringPointers(stored.IdempotencyKeySHA256, incoming.IdempotencyKeySHA256) {
+		return false
+	}
+	return !matchedByTaskID || stored.TaskID == incoming.TaskID
+}
+
+func sameTerminalResult(stored *nodeAgentTaskRow, result domain.NodeAgentTaskResult) bool {
+	return domain.NodeAgentTaskStatus(stored.Status) == resultStatus(result) &&
+		stored.ResultOK != nil && *stored.ResultOK == result.OK && stored.ResultIndeterminate == result.Indeterminate &&
+		bytes.Equal(stored.Result, result.Result) && stored.ResultErrorCode == result.ErrorCode && stored.ResultError == result.Error
+}
+
+func resultStatus(result domain.NodeAgentTaskResult) domain.NodeAgentTaskStatus {
+	if result.Indeterminate {
+		return domain.NodeAgentTaskIndeterminate
+	}
+	if result.OK {
+		return domain.NodeAgentTaskSucceeded
+	}
+	return domain.NodeAgentTaskFailed
+}
+
+func validSHA256Hex(value string) bool {
+	if len(value) != sha256.Size*2 || value != strings.ToLower(value) {
+		return false
+	}
+	_, err := hex.DecodeString(value)
+	return err == nil
+}
+
+func lockNodeAgentTaskOwner(tx *gorm.DB, agentID string) error {
+	var agent nodeAgentRow
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+		Select("agent_id").Where("agent_id = ?", agentID).First(&agent).Error; err != nil {
+		return fmt.Errorf("native agent task owner: %w", wrapNotFound(err))
+	}
+	// Agent IDs predate the task protocol and may legitimately contain upper
+	// case. Do not normalize them: require byte identity after lookup so a
+	// case-insensitive MySQL collation cannot create a permanently uncompletable
+	// task under a spelling the agent never reports.
+	if agent.AgentID != agentID {
+		return fmt.Errorf("%w: agent ID must match stored identity exactly", domain.ErrConflict)
+	}
+	return nil
+}
+
+func uniqueNonEmptyStrings(values []string) []string {
+	seen := make(map[string]struct{}, len(values))
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	return out
+}
+
+func cloneStringPointer(value *string) *string {
+	if value == nil {
+		return nil
+	}
+	copy := *value
+	return &copy
+}
+
+func cloneBoolPointer(value *bool) *bool {
+	if value == nil {
+		return nil
+	}
+	copy := *value
+	return &copy
+}
+
+func cloneTimePointer(value *time.Time) *time.Time {
+	if value == nil {
+		return nil
+	}
+	copy := *value
+	return &copy
+}
+
+func equalStringPointers(left, right *string) bool {
+	if left == nil || right == nil {
+		return left == nil && right == nil
+	}
+	return *left == *right
+}
+
+var _ ports.NodeAgentTaskRepo = (*nodeAgentTaskRepo)(nil)
