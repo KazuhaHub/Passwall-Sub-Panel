@@ -22,11 +22,11 @@ PSP 通过 `/panel/api/*` 对接 3X-UI 面板。本文档维护两件事：
 
 | PSP 版本 | 最低 S-UI | 已实测通过 | 备注 |
 |---|---|---|---|
-| **v3.9.2+** | 未发布 | **1.6.0** | 实机验证（2026-09-09）。没有编译期 floor —— 与 `MinXUI` 的这个不对称是刻意的，理由见 `internal/version/compat_sui.go` |
+| **v3.9.2–v3.x / v4.x** | 未发布 | **1.6.1** | 当前适配器接口实机验证（2026-09-12），v3 沿用未变的接口契约；未运行历史发布二进制或完整代理流量链路。没有编译期 floor，理由见 `internal/version/compat_sui.go` |
 
 > S-UI 侧没有 `min_sui`：上限验过了，但「支持到多旧」从来没有人确立过，而 `CheckSUI` 只对**显式发布过的** floor 报 too_old。
 
-> 这张表是人看的速查；运行时真相源是 `docs/compat/v3.json`。`min_xui` 和 `max_tested_xui` 两个字段**都已接入运行时**(PSP 按需拉取并据此判 too_old / untested)。
+> 这张表是人看的速查；运行时按 PSP major 使用 `docs/compat/v3.json` 或 `docs/compat/v4.json`。`min_xui` 和 `max_tested_xui` 两个字段**都已接入运行时**(PSP 按需拉取并据此判 too_old / untested)。S-UI 使用对应的 `sui_entries`。
 
 **规则**:
 - "最低 3X-UI" = 该 PSP 版本能正常工作的最早 3X-UI 版本(低于这个会破)
@@ -34,6 +34,26 @@ PSP 通过 `/panel/api/*` 对接 3X-UI 面板。本文档维护两件事：
 - 任何高于"已实测通过"的 3X-UI 版本都属于**未知风险**——升级前先在一台 panel 上小流量验证
 
 ## 历史兼容性事件
+
+### 2026-09-12 / S-UI 1.6.1 适配器复核 → 已测上限 1.6.0 抬到 1.6.1
+
+[v1.6.1 发布说明](https://github.com/alireza0/s-ui/releases/tag/v1.6.1)与
+`v1.6.0..v1.6.1` 源码审查未发现 PSP 所用接口的破坏性变化：`Token` 认证、
+`/apiv2/save` 信封及 client/inbound JSON 字段保持兼容；状态响应仅增加
+`sbd.maintenance`。客户端 edit/editbulk 改为保留服务端流量计数，避免旧表单覆盖新计数。
+sing-box 仍为 1.14.0。
+
+从 v1.6.1 tag（`48a67a3`）及其固定的 frontend 子模块构建本地临时面板，
+使用 Go 1.26.7、上游 `test` 构建配置、darwin/arm64；该配置不含 Naive outbound，
+PSP 使用的 inbound/client API 未替换成 stub。现有 `TestLive_SUISurface` 全部通过，
+版本读回 1.6.1、内核运行。临时 Go test overlay 另验证了凭据、启停、到期、配额读回，
+批量创建/挂载/删除、editbulk 拒绝覆盖服务端计数，以及维护模式的 stop/running 状态解析。
+
+无需修改生产适配器；同时更新 v3、v4 清单。实测使用当前 PSP checkout，v3 根据未变的
+接口契约沿用此证据；没有另运行 v3/v4 发布二进制、已有面板数据库升级或完整代理流量与
+配额执法链路。新增 TLS spoofing、OpenVPN/OpenConnect endpoint TLS 不在 PSP 功能覆盖内。
+维护模式需要在 S-UI 中退出才能恢复代理服务；PSP 当前仅显示内核停止。
+登录失败限流及可信代理调整影响浏览器登录和来源地址识别，不影响 PSP Token 请求。
 
 ### 2026-09-10 / xray-core 26.9.8+ REALITY 要求 ML-KEM-first
 
