@@ -215,8 +215,11 @@ Issue outbox 与调度循环均已落地；`cmd/contract-agent` 保留为不启�
   与 SQLite 三层都必须拒绝。
 - **稳态响应不得重写 runtime**：已 applied、内容相同且 listener 文档未变的 client 直接跳过；
   pending / blocked / dependency 变化仍继续可重入收敛。
-- `tasks[]` 在 §9 定义执行与 exactly-once 状态之前必须明确拒绝，不能静默忽略；PSP 对未知
-  `task_results[]` 同理返回非 2xx，让两侧 outbox 保留证据。
+- **历史阶段（已关闭）**：在任务状态机尚未定义时，Node 明确拒绝 `tasks[]`，PSP 对任何
+  `task_results[]` 返回非 2xx，避免静默丢掉副作用证据。现在 durable transport 已定义：只有
+  同时声明 `task.execution.v1` 与 `task.<kind>` 的 agent 才会收到该 kind；PSP 稳定重发
+  `offered` 身份，Node 回报 `succeeded / failed / indeterminate`，PSP 对整批结果事务接收并允许
+  相同终态重放。未知、跨 agent、未下发、身份不符和终态冲突仍必须非 2xx。
 - 双向同步载荷共用协议包的 16 MiB 上限；Issue 诊断与 live IP 在节点进入持久化
   outbox/状态前分别做 UTF-8 安全截断与规范化，单个坏观测不能永久毒化后续报告。
 - 响应调度值在确认 outbox 前整体校验；PSP 也拒绝节点回报未曾铸造的未来 epoch/version
@@ -243,7 +246,33 @@ CI/Release 流程也已落地。REALITY 三客户端真实握手矩阵见 ADR 00
 
 PSP 已接通严格 Bearer `/v1/node/sync`，原生节点创建事务、一次性凭据展示、摘要落库、凭据轮换和
 收敛后安全删除均已闭合。PSP 从同一审计目录选择 engine + exact version，并分开持久化 desired 与
-observed identity。后续的 agent 自升级、RealityProbe 与任务 exactly-once 状态不属于本阶段完成条件。
+observed identity。durable task transport 与不可变终态收敛也已落地，但 RealityProbe 的生产入口/UI、
+agent 自升级及下面的任务上线硬门不属于本阶段完成条件。
+
+#### B4 — durable task transport 的边界与上线硬门
+
+**状态（2026-09-11）**：transport 已完成，真实 task kind 尚未对管理员或外部 API 开放。
+`node_agent_tasks` 与第三方面板写入失败用的 `sync_tasks` 是两套不同状态机。前者只持久化
+`queued / offered / succeeded / failed / indeterminate`；没有 `running`，因为 PSP 无法从一次
+断开的 HTTP 往返权威判断远端是否正在执行。`offered` 会按同一 `(id, kind, input_sha256, args)`
+稳定重发；结果接收不依赖 agent 本轮仍声明 capability，以允许执行期间升级/能力短暂消失。
+整批 `task_results` 是一个事务，但完整 report 不是一个跨仓储大事务：后续写入失败时以 Node
+immutable outbox 重放并由 PSP 的相同终态幂等来收敛。
+
+开放第一个 RealityProbe 或任何有副作用任务前，以下四项必须先有跨 PSP/Node 的失败路径测试：
+
+1. **per-agent active quota**：对 `queued + offered` 同时限制行数和原始 args 总字节；配额检查、创建
+   与 agent 删除共用同一 owner lock，防止离线 agent 造成无界数据库增长或扫描成本。
+2. **双端 expiry**：协议给出一个双方同义的执行截止条件；PSP 到期停止 offer，Node 在开始副作用前
+   再检查并拒绝。执行已开始而结论丢失时只能进入 `indeterminate`，不能当作可安全自动重试的 failed。
+3. **terminal retention**：定义 tombstone TTL 与清理器，TTL 至少覆盖 Node outbox 重放、最长支持的
+   离线窗口和数据库备份恢复窗口；否则迟到的相同终态会从幂等成功退化为 unknown-task 永久重试。
+4. **restore / ID reuse**：定义 task identity epoch 或明确的 ID 禁止复用窗口，并演练“PSP 恢复旧备份、
+   Node 保留新 journal/outbox”以及“备份复活 offered task”两种方向，避免旧结果完成新任务或副作用重跑。
+
+Node 的 SQLite v8 是一次明确的回滚边界：v7 binary 读取 `PRAGMA user_version=8` 后会以
+“newer than supported” 拒绝启动，不会进入只读或继续写库。回滚必须恢复匹配的 v7 数据库备份，
+并服从上面的 task identity / retention 约束，不能只替换 executable。
 
 ---
 

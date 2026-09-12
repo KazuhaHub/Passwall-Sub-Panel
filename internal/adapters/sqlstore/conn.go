@@ -121,6 +121,7 @@ func NewRepos(db *gorm.DB) ports.Repos {
 		NodeAgent:               &nodeAgentRepo{db: db},
 		NativeAgentProvisioning: &nativeAgentProvisioningRepo{db: db},
 		NodeAgentIssue:          &nodeAgentIssueRepo{db: db},
+		NodeAgentTask:           &nodeAgentTaskRepo{db: db},
 		NativeDesired:           &nativeDesiredRepo{db: db},
 		Traffic:                 &trafficRepo{db: db},
 		NodeTraffic:             &nodeTrafficRepo{db: db},

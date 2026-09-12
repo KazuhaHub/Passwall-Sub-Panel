@@ -806,8 +806,14 @@ PSP 拨入时「这次没到」的证据由 PSP 的传输层产生，节点拨�
   一起提交/回滚；native 节点不得依赖控制面机器上的本地证书路径。
 - 注册与认证已完成：创建时事务性铸造 panel + agent + 三条流，长期随机 Bearer 只展示一次，PSP
   仅存 SHA-256；生产路由按 digest 查 agent 且统一 401，管理端可立即吊销并轮换旧值。
-- 未实现的交互能力：RealityProbe、agent 自升级，以及拥有 exactly-once task result 状态前的任务。
-  当前收到非空 `tasks[]` 必须继续明确拒绝。
+- durable task transport 已实现：PSP 独立持久化
+  `queued / offered / succeeded / failed / indeterminate`，按 capability 下发同一不可变身份并整批
+  事务接收 terminal result；整个 report 仍依赖 Node immutable outbox 重放收敛，不声称跨仓储原子。
+  尚未实现的是 RealityProbe 与 agent 自升级的生产 API/UI。
+- 真实 task kind 暴露前必须先闭合四项：per-agent `queued + offered` 行数/字节 quota、PSP 与 Node
+  同义且双端执行的 expiry、覆盖 outbox/离线/备份窗口的 terminal retention，以及 DB restore 后的
+  task identity epoch 或 ID 禁止复用窗口。Node SQLite v8 也是回滚边界：v7 binary 会拒绝打开
+  `user_version=8` 的数据库，回滚必须恢复匹配的 DB 备份，不能只替换 executable。
 
 
 ## 10. 下一步
@@ -819,4 +825,5 @@ PSP 拨入时「这次没到」的证据由 PSP 的传输层产生，节点拨�
 1. 发布 Passwall-Node 新 revision/tag，保留六平台与容器 CI 证据。
 2. 把 PSP 的 `go.mod` pseudo-version 指向该 revision。
 3. 关闭父目录 `go.work`，跑 PSP 后端、前端、跨平台构建和 live contract 全套闸门。
-4. 后续能力按 §9 独立立项；不得把未知 task 当成功，也不得把未经目录核验的 core 版本暴露为可选项。
+4. 后续能力按 §9 独立立项；开放首个真实 task 前先完成 quota / expiry / retention / restore 四道
+   硬门，不得把未知或冲突结果当成功，也不得把未经目录核验的 core 版本暴露为可选项。

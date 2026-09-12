@@ -93,3 +93,24 @@ func TestNodeSyncHandlerHidesCoordinatorFailuresAndMarksThemRetryable(t *testing
 		t.Fatalf("coordinator failure = status %d body %s", response.Code, response.Body.String())
 	}
 }
+
+func TestNodeSyncHandlerRejectsOversizedCoordinatorResponse(t *testing.T) {
+	handler, err := NewNodeSyncHandler(nodeSyncServiceFunc(func(context.Context, nodeprotocol.NodeReport) (nodeprotocol.SyncResponse, error) {
+		return nodeprotocol.SyncResponse{
+			Config: nodeprotocol.Segment[nodeprotocol.ConfigBody]{
+				ETag: nodeprotocol.ETag(strings.Repeat("a", int(nodeprotocol.MaxSyncBodyBytes))),
+			},
+		}, nil
+	}), NodeAuthenticatorFunc(func(*http.Request) (string, error) { return "agt_expected", nil }))
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodPost, "/v1/node/sync", strings.NewReader(
+		`{"agent_id":"agt_expected","partial":false,"have":{"config":{"applied":{},"etag":""},"roster":{"applied":{},"etag":""},"directives":{"applied":{},"etag":""}}}`,
+	))
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusInternalServerError || strings.Contains(response.Body.String(), strings.Repeat("a", 64)) {
+		t.Fatalf("oversized coordinator response = status %d body %q", response.Code, response.Body.String())
+	}
+}

@@ -463,6 +463,27 @@ type NodeAgentIssueRepo interface {
 	Acknowledge(ctx context.Context, id int64, acknowledgedAt time.Time) error
 }
 
+// NodeAgentTaskRepo is the independent durable coordinator for calls executed
+// by native nodes. It must not share sync_tasks: offered work is deliberately
+// replayed until one immutable terminal result is accepted.
+type NodeAgentTaskRepo interface {
+	// CreateOrGet makes HTTP/API retries safe. Equal immutable input returns the
+	// existing row; reusing either a task ID or idempotency key for different
+	// input returns domain.ErrConflict.
+	CreateOrGet(ctx context.Context, task *domain.NodeAgentTask) (stored *domain.NodeAgentTask, created bool, err error)
+	GetByTaskID(ctx context.Context, taskID string) (*domain.NodeAgentTask, error)
+	// Offer atomically marks queued rows as offered and returns both new and
+	// previously-offered rows, in stable creation order. Only eligibleKinds may
+	// be returned; an empty set offers nothing. maxTaskJSONBytes is the exact
+	// budget for the encoded JSON task array inside the already-built response,
+	// so only rows that can actually be sent are marked offered.
+	Offer(ctx context.Context, agentID string, eligibleKinds []string, limit, maxTaskJSONBytes int, offeredAt time.Time) ([]*domain.NodeAgentTask, error)
+	// CompleteBatch validates every result under row locks before writing any of
+	// them. Equal terminal replays are no-ops; any unknown, cross-agent,
+	// never-offered, or conflicting result rolls back the complete batch.
+	CompleteBatch(ctx context.Context, agentID string, results []domain.NodeAgentTaskResult, completedAt time.Time) error
+}
+
 // NativeDesiredClient is one stable PSP client and its desired listener
 // attachments, captured in the same database snapshot as NativeDesiredSnapshot.Nodes.
 type NativeDesiredClient struct {
@@ -1548,6 +1569,7 @@ type Repos struct {
 	NodeAgent               NodeAgentRepo
 	NativeAgentProvisioning NativeAgentProvisioningRepo
 	NodeAgentIssue          NodeAgentIssueRepo
+	NodeAgentTask           NodeAgentTaskRepo
 	NativeDesired           NativeDesiredSnapshotRepo
 	Traffic                 TrafficRepo
 	NodeTraffic             NodeTrafficRepo

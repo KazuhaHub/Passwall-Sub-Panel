@@ -11,6 +11,7 @@ import (
 
 	nodeprotocol "github.com/KazuhaHub/passwall-node/protocol"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 )
@@ -100,7 +101,7 @@ func (r *nativeAgentProvisioningRepo) RotateCredential(ctx context.Context, pane
 // agent acknowledged those exact bytes; otherwise deleting its credential
 // could strand a still-serving core outside control-plane reach.
 func (r *nativeAgentProvisioningRepo) DeleteConverged(ctx context.Context, panelID int64) error {
-	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	return runTransactionWithRetry(ctx, r.db, func(tx *gorm.DB) error {
 		var panel xuiPanelRow
 		if err := tx.First(&panel, panelID).Error; err != nil {
 			return wrapNotFound(err)
@@ -108,9 +109,32 @@ func (r *nativeAgentProvisioningRepo) DeleteConverged(ctx context.Context, panel
 		if domain.NormalizePanelKind(domain.PanelKind(panel.Kind)) != domain.PanelKindPSP {
 			return fmt.Errorf("%w: panel is not a native node", domain.ErrValidation)
 		}
-		var agent nodeAgentRow
-		if err := tx.Where("panel_id = ?", panelID).First(&agent).Error; err != nil {
+		// Resolve through panel_id without taking an InnoDB secondary-index lock,
+		// then acquire the canonical agent_id owner lock used by task creation,
+		// offering, completion, and applied-state ingestion. Locking this same row
+		// through different unique indexes can otherwise deadlock when deletion
+		// later needs every secondary index entry.
+		var resolved nodeAgentRow
+		if err := tx.Where("panel_id = ?", panelID).First(&resolved).Error; err != nil {
 			return fmt.Errorf("%w: native panel has no agent identity", domain.ErrValidation)
+		}
+		locked, err := lockNodeAgentByAgentID(tx, resolved.AgentID)
+		if err != nil {
+			return err
+		}
+		if locked.ID != resolved.ID || locked.PanelID != panelID {
+			return fmt.Errorf("%w: native panel agent identity changed concurrently", domain.ErrConflict)
+		}
+		agent := *locked
+		var activeTasks []nodeAgentTaskRow
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select("task_id").
+			Where("agent_id = ? AND status IN ?", agent.AgentID,
+				[]string{string(domain.NodeAgentTaskQueued), string(domain.NodeAgentTaskOffered)}).
+			Limit(1).Find(&activeTasks).Error; err != nil {
+			return err
+		}
+		if len(activeTasks) != 0 {
+			return fmt.Errorf("%w: native agent still has active task(s)", domain.ErrConflict)
 		}
 		var clientRefs int64
 		if err := tx.Model(&pspClientRow{}).Where("panel_id = ?", panelID).Count(&clientRefs).Error; err != nil {
@@ -138,6 +162,9 @@ func (r *nativeAgentProvisioningRepo) DeleteConverged(ctx context.Context, panel
 			return err
 		}
 		if err := tx.Where("agent_id = ?", agent.AgentID).Delete(&nodeAgentIssueRow{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("agent_id = ?", agent.AgentID).Delete(&nodeAgentTaskRow{}).Error; err != nil {
 			return err
 		}
 		if err := tx.Where("agent_id = ?", agent.AgentID).Delete(&nodeAgentStreamRow{}).Error; err != nil {
