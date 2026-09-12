@@ -39,6 +39,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/health"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/mailer"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/node"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/nodeagentupgrade"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/nodesync"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/reconcile"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/render"
@@ -260,6 +261,16 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	if err != nil {
 		return nil, fmt.Errorf("native node sync: %w", err)
 	}
+	upgradeIDs, err := idgen.NewTaskIDMinter()
+	if err != nil {
+		return nil, fmt.Errorf("native agent upgrade task identity: %w", err)
+	}
+	nativeUpgrade, err := nodeagentupgrade.New(nodeagentupgrade.Options{
+		Panels: repos.XUIPanel, Agents: repos.NodeAgent, Tasks: repos.NodeAgentTask, Settings: repos.Settings, IDs: upgradeIDs,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("native agent upgrade service: %w", err)
+	}
 	if err := panelRegistry.Register(domain.PanelKind3XUI, func(p *domain.Panel) (ports.PanelClient, error) {
 		return xuiadapter.New(p)
 	}); err != nil {
@@ -469,6 +480,7 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 		Reconcile:        reconcileSvc,
 		Geo:              geoSvc,
 		NodeSync:         nativeSync,
+		NodeAgentUpgrade: nativeUpgrade,
 		SubPerIPPerMin:   sysSettings.SubPerIPPerMin,
 		LoginPerIPPerMin: sysSettings.LoginPerIPPerMin,
 	})

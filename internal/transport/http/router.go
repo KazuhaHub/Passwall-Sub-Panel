@@ -67,24 +67,25 @@ type Deps struct {
 	// same rows the traffic poll writes each cycle. Optional: a deployment
 	// without it gets a 503 from the endpoint rather than an empty list, so
 	// "nothing to report" stays distinguishable from "cannot report".
-	GeoRecords handler.GeoRecordLister
-	Pool       ports.XUIPool
-	Auth       *auth.Service
-	SAML       *auth.SAMLService
-	OIDC       *auth.OIDCService
-	User       *user.Service
-	Group      *group.Service
-	Node       *node.Service
-	Cert       *cert.Service
-	Render     *render.Service
-	Audit      *audit.Service
-	Sync       *syncsvc.Service
-	Traffic    *traffic.Service
-	Mail       *mailer.Service
-	Reconcile  *reconcile.Service
-	Geo        *geo.Service
-	NodeSync   handler.NodeSyncService
-	Async      AsyncDispatcher
+	GeoRecords       handler.GeoRecordLister
+	Pool             ports.XUIPool
+	Auth             *auth.Service
+	SAML             *auth.SAMLService
+	OIDC             *auth.OIDCService
+	User             *user.Service
+	Group            *group.Service
+	Node             *node.Service
+	Cert             *cert.Service
+	Render           *render.Service
+	Audit            *audit.Service
+	Sync             *syncsvc.Service
+	Traffic          *traffic.Service
+	Mail             *mailer.Service
+	Reconcile        *reconcile.Service
+	Geo              *geo.Service
+	NodeSync         handler.NodeSyncService
+	NodeAgentUpgrade handler.NativeAgentUpgradeService
+	Async            AsyncDispatcher
 
 	// SharedClients answers, for one user, which panels hold their clients and
 	// whether each can store the connection caps. Read-only; serves the
@@ -591,7 +592,8 @@ func NewRouter(d Deps) stdhttp.Handler {
 		servers := handler.NewAdminServersHandler(d.Repos.XUIPanel, d.Pool, d.Repos.Node, d.Repos.Audit, d.Async, invalidateRender).
 			WithNativeAgentProvisioning(d.Repos.NativeAgentProvisioning).
 			WithNodeAgents(d.Repos.NodeAgent).
-			WithNodeSettings(d.Repos.Settings)
+			WithNodeSettings(d.Repos.Settings).
+			WithNativeAgentUpgrade(d.NodeAgentUpgrade)
 		// 3X-UI panel credentials live here — never operator.
 		adminGroup.GET("/servers", servers.List)
 		adminGroup.POST("/servers", servers.Create)
@@ -602,6 +604,8 @@ func NewRouter(d Deps) stdhttp.Handler {
 		adminGroup.POST("/servers/:id/node-credential", servers.StoreNodeCredential)
 		adminGroup.POST("/servers/:id/node-install-script", servers.NodeInstallScript)
 		adminGroup.GET("/servers/:id/node-agent-status", servers.NodeAgentStatus)
+		adminGroup.POST("/servers/:id/upgrade-node-agent", servers.UpgradeNativeAgent)
+		adminGroup.GET("/servers/:id/node-agent-upgrades/:task_id", servers.GetNativeAgentUpgrade)
 		adminGroup.POST("/servers/probe", servers.Test)
 		adminGroup.GET("/servers/:id/upgrade-preview", servers.UpgradePreview)
 		adminGroup.POST("/servers/:id/upgrade-panel", servers.UpgradePanel)

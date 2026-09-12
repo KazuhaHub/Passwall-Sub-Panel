@@ -41,6 +41,7 @@ type AdminServersHandler struct {
 	native           ports.NativeAgentProvisioningRepo
 	agents           ports.NodeAgentRepo
 	nodeSettings     ports.SettingsRepo
+	nativeUpgrade    NativeAgentUpgradeService
 }
 
 func (h *AdminServersHandler) WithNativeAgentProvisioning(repo ports.NativeAgentProvisioningRepo) *AdminServersHandler {

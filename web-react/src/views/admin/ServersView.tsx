@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type MouseEvent } from 'react'
+import { NativeAgentUpgradeDialog } from './NativeAgentUpgradeDialog'
 import { Link as RouterLink } from 'react-router'
 import {
 	Alert,
@@ -170,6 +171,7 @@ export default function ServersView() {
   const [form, setForm] = useState<FormState>(EMPTY_FORM)
 	const [busy, setBusy] = useState(false)
 	const [nativeInstallationTarget, setNativeInstallationTarget] = useState<Server | null>(null)
+	const [nativeUpgradeTarget, setNativeUpgradeTarget] = useState<Server | null>(null)
 	const [nativeProvisioning, setNativeProvisioning] = useState<NativeServerProvisioning | null>(null)
   const nativeInstallationIntent = useRef(0)
   type ServerField = 'name' | 'url' | 'api_token' | 'password'
@@ -1344,6 +1346,10 @@ export default function ServersView() {
           <DownloadIcon fontSize="small" sx={{ mr: 1 }} />
           {t('admin:servers.action.install_node')}
         </MenuItem>}
+        {menuTarget?.panel_type === 'psp' && <MenuItem onClick={() => { setNativeUpgradeTarget(menuTarget); closeMenu() }}>
+          <UpgradeIcon fontSize="small" sx={{ mr: 1 }} />
+          {t('admin:servers.agent_upgrade.action')}
+        </MenuItem>}
         {hasCapability(menuTarget, 'panel.upgrade') && <MenuItem onClick={() => menuTarget && runUpgradePanel(menuTarget)}>
           <SystemUpdateIcon fontSize="small" sx={{ mr: 1 }} />
           {t('admin:servers.action.upgrade_panel', { defaultValue: '升级 3X-UI 面板（最新）' })}
@@ -1622,6 +1628,7 @@ export default function ServersView() {
           </Button>
         </DialogActions>
       </Dialog>
+      <NativeAgentUpgradeDialog server={nativeUpgradeTarget} onClose={() => { setNativeUpgradeTarget(null); refresh() }} />
       <NativeInstallationDialog
         server={nativeInstallationTarget}
         initialProvisioning={nativeProvisioning}
