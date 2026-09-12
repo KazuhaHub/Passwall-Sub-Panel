@@ -29,6 +29,11 @@ env:
   GOWORK: "off"
   GOTOOLCHAIN: "local"
 
+# Publisher jobs never restore/save shared dependency caches. Their immutable
+# checkout comes from the validated tag resolver, which security analysis
+# cannot infer as a trusted ref; keeping release inputs uncached also removes
+# cache-poisoning as a publication boundary. Ordinary PR CI caches are separate.
+
 permissions:
   contents: read
 
@@ -59,7 +64,7 @@ jobs:
           GOTOOLCHAIN: auto
         with:
           go-version-file: go.mod
-          cache-dependency-path: go.sum
+          cache: false
 
       - name: Verify exact preferred compiler
         run: |
@@ -114,6 +119,7 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: "24"
+          package-manager-cache: false
 
       - name: Test fail-closed publication guards
         run: node --test deploy/check_image_test.mjs deploy/check_build_test.mjs deploy/release_workflow_test.mjs
@@ -138,8 +144,7 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: "24"
-          cache: npm
-          cache-dependency-path: web-react/package-lock.json
+          package-manager-cache: false
 
       - name: Install dependencies
         working-directory: web-react
@@ -194,7 +199,7 @@ jobs:
           GOTOOLCHAIN: auto
         with:
           go-version-file: go.mod
-          cache-dependency-path: go.sum
+          cache: false
 
       - name: Verify exact preferred compiler
         run: |
@@ -413,6 +418,7 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: "24"
+          package-manager-cache: false
 
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v4

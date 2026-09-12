@@ -36,6 +36,23 @@ function literalScripts() {
   return scripts
 }
 
+function assertPublisherCachesDisabled(raw) {
+  assert(!raw.includes('actions/cache@'), 'publisher must not use a shared cache action')
+  assert(!/^\s*cache-(?:from|to):/m.test(raw), 'publisher must not import/export a shared container build cache')
+  const setups = [...raw.matchAll(/^        uses: actions\/setup-(go|node)@v6$/gm)]
+  assert(setups.length > 0, 'require publisher setup actions')
+  for (const setup of setups) {
+    // Inspect only this action's input block, never a following setup's flags.
+    const block = raw.slice(setup.index + setup[0].length).split(/\n      - |\n  [a-z][a-z-]*:\n/, 1)[0]
+    if (setup[1] === 'go') {
+      assert(/^          cache: false$/m.test(block), 'every publisher Go setup must explicitly disable its default shared cache')
+    } else {
+      assert(/^          package-manager-cache: false$/m.test(block), 'every publisher Node setup must disable automatic package-manager caching')
+      assert(!/^\s*(?:cache|cache-dependency-path):/m.test(block), 'publisher Node setup must not explicitly restore/save npm caches')
+    }
+  }
+}
+
 test('all literal release shell scripts parse without executing or publishing', () => {
   const scripts = literalScripts()
   assert(scripts.length >= 7)
@@ -99,4 +116,23 @@ test('write tokens are scoped to publisher jobs only', () => {
   for (const name of ['setup', 'web', 'build']) assert(!job(name).includes('contents: write'))
   assert(job('release').includes('permissions:\n      contents: write'))
   assert(job('docker').includes('permissions:\n      contents: read\n      packages: write'))
+})
+
+test('publisher explicitly disables every Go and Node shared dependency cache', () => {
+  assertPublisherCachesDisabled(workflow)
+})
+
+test('publisher cache guard rejects implicit defaults and explicit cache restoration', () => {
+  for (const [label, mutated] of [
+    ['implicit Go cache', workflow.replace('          cache: false\n', '')],
+    ['enabled Go cache', workflow.replace('          cache: false', '          cache: true')],
+    ['implicit Node cache', workflow.replace('          package-manager-cache: false\n', '')],
+    ['enabled Node cache', workflow.replace('          package-manager-cache: false', '          package-manager-cache: true')],
+    ['explicit npm cache', workflow.replace('          package-manager-cache: false', '          package-manager-cache: false\n          cache: npm')],
+    ['npm cache path', workflow.replace('          package-manager-cache: false', '          package-manager-cache: false\n          cache-dependency-path: web-react/package-lock.json')],
+    ['shared cache action', workflow + '\n      - uses: actions/cache@v4\n'],
+    ['shared image cache', workflow + '\n          cache-from: type=gha\n'],
+  ]) {
+    assert.throws(() => assertPublisherCachesDisabled(mutated), { name: 'AssertionError' }, label)
+  }
 })
