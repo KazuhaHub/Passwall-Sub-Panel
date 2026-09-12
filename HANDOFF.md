@@ -132,7 +132,9 @@ sing-box 当前核验 `1.14.0`，原生编译 VLESS、VMess、Trojan、Shadowsoc
   192-bit issuer + 不回绕的 uint64 CAS 序列；它尚未接入生产任务入口，不重写任何已有任务 ID。
   机制与边界见 [ADR 0031](docs/adr/0031-native-task-id-incarnations.md)。结果证据 quarantine 已实现；
   后续双端 expiry、retention 与完整恢复演练见 [ADR 0032](docs/adr/0032-native-task-lifecycle.md)；其中
-  离线对账/备份恢复窗口与完整结果保留期尚待所有者确认，不能当作已经实现或已测量的承诺。
+  离线对账/备份恢复窗口/完整结果保留期默认 **30/30/90 天**已获所有者确认，并已接入管理员
+  全局设置（各 1–3650 天整数，完整结果保留不得短于另两个窗口）。修改不改已有 task/quarantine；
+  尚未接入不可变任务策略快照或清理器，不能将可配置策略当作已实现/已测量的恢复保障。
 - **任务 #49**:异地并发被标记的账号该怎么处理。停在证据不足上，
   v1 的 `ip_shadow` 影子执行就是为了给它攒证据。
 - **任务 transport / durable result state 已闭合，真实任务尚未开放**：独立的

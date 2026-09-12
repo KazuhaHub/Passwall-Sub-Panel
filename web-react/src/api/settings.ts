@@ -85,6 +85,11 @@ export interface UISettings {
    * quota-overburn bound at the cost of more uplink bandwidth; 0 asks for a
    * full enumeration on every sync. */
   full_report_seconds: number
+  /** Native task lifecycle policy, in whole days (not execution TTL).
+   * Defaults: 30 / 30 / 90. Existing task protection is never shortened. */
+  node_task_offline_reconcile_days: number
+  node_task_backup_restore_days: number
+  node_task_result_retention_days: number
   /** Concurrency cap for parallel ListInbounds fan-out during traffic poll
    *  and reconcile. 0 / unset falls back to 8; values > 64 clamp down. */
   max_panel_concurrency: number

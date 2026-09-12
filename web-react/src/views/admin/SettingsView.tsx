@@ -271,6 +271,11 @@ export default function SettingsView() {
       sub_client_filter_mode: s.sub_client_filter_mode ?? 'blacklist',
       quick_links: s.quick_links ?? [],
       timezone: s.timezone ?? '',
+      // Older servers omit these keys. Preserve explicit (even invalid) values
+      // so an admin can see and correct them rather than silently replacing them.
+      node_task_offline_reconcile_days: s.node_task_offline_reconcile_days ?? 30,
+      node_task_backup_restore_days: s.node_task_backup_restore_days ?? 30,
+      node_task_result_retention_days: s.node_task_result_retention_days ?? 90,
     }
   }
 
@@ -328,6 +333,21 @@ export default function SettingsView() {
     if (!Number.isInteger(settings.full_report_seconds)
       || settings.full_report_seconds < 0 || settings.full_report_seconds > 86400) {
       pushSnack('full_report_seconds must be an integer between 0 and 86400', 'warning')
+      return false
+    }
+    for (const field of [
+      'node_task_offline_reconcile_days',
+      'node_task_backup_restore_days',
+      'node_task_result_retention_days',
+    ] as const) {
+      if (!Number.isInteger(settings[field]) || settings[field] < 1 || settings[field] > 3650) {
+        pushSnack(`${t(`settings.general.${field}`)}: ${t('settings.general.node_task_days_range')}`, 'warning')
+        return false
+      }
+    }
+    if (settings.node_task_result_retention_days < settings.node_task_offline_reconcile_days
+      || settings.node_task_result_retention_days < settings.node_task_backup_restore_days) {
+      pushSnack(t('settings.general.node_task_retention_minimum'), 'warning')
       return false
     }
     // Announcement: if the admin enabled it but left the title or body
@@ -953,6 +973,29 @@ export default function SettingsView() {
                   defaultValue: '剩余流量低于此百分比时发送邮件提醒。',
                 })} />
             </Pair>
+          </Section>
+
+          <Section title={t('settings.general.section_node_task_lifecycle')} md={md}>
+            <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant }}>
+              {t('settings.general.node_task_lifecycle_hint')}
+            </Typography>
+            <Pair>
+              <NumField label={t('settings.general.node_task_offline_reconcile_days')}
+                value={settings.node_task_offline_reconcile_days}
+                onChange={v => patch('node_task_offline_reconcile_days', v)} min={1} max={3650}
+                helperText={t('settings.general.node_task_offline_reconcile_days_hint')} />
+              <NumField label={t('settings.general.node_task_backup_restore_days')}
+                value={settings.node_task_backup_restore_days}
+                onChange={v => patch('node_task_backup_restore_days', v)} min={1} max={3650}
+                helperText={t('settings.general.node_task_backup_restore_days_hint')} />
+            </Pair>
+            <NumField label={t('settings.general.node_task_result_retention_days')}
+              value={settings.node_task_result_retention_days}
+              onChange={v => patch('node_task_result_retention_days', v)} min={1} max={3650}
+              helperText={t('settings.general.node_task_result_retention_days_hint')} />
+            <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant }}>
+              {t('settings.general.node_task_policy_safety_hint')}
+            </Typography>
           </Section>
 
           <Section title={t('settings.general.emergency_section')} md={md}>
@@ -2326,14 +2369,14 @@ function GroupRulesEditor({ value, onChange, groups, groupsLoaded, md }: {
   )
 }
 
-function NumField({ label, value, onChange, helperText, step }: { label: string; value: number; onChange: (v: number) => void; helperText?: string; step?: number | string }) {
+function NumField({ label, value, onChange, helperText, step, min = 0, max }: { label: string; value: number; onChange: (v: number) => void; helperText?: string; step?: number | string; min?: number; max?: number }) {
   // step defaults to 1 (integer fields: hours, count, ports, days). Pass
   // step="any" for fields that accept fractional values (e.g. GB quotas).
   return (
     <TextField fullWidth type="number" label={label}
       value={value} onChange={e => onChange(Number(e.target.value))}
       helperText={helperText} slotProps={{
-      htmlInput: { min: 0, step: step ?? 1 }
+      htmlInput: { min, max, step: step ?? 1 }
     }} />
   );
 }

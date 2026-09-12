@@ -8,6 +8,7 @@ import (
 	nodeprotocol "github.com/KazuhaHub/passwall-node/protocol"
 	"github.com/gin-gonic/gin"
 
+	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/jwtutil"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/panelpath"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/paneltz"
@@ -153,6 +154,47 @@ type settingsDTO struct {
 	TwoFAEmailResendCooldownSec int  `json:"twofa_email_resend_cooldown_sec"`
 	CodeResendCooldownSec       int  `json:"code_resend_cooldown_sec"`
 	Require2FAForStaff          bool `json:"require_2fa_for_staff"`
+
+	// Native task evidence policy; these settings do not themselves prune data.
+	NodeTaskOfflineReconcileDays int `json:"node_task_offline_reconcile_days"`
+	NodeTaskBackupRestoreDays    int `json:"node_task_backup_restore_days"`
+	NodeTaskResultRetentionDays  int `json:"node_task_result_retention_days"`
+}
+
+// Response values stay concrete numbers, while the new request fields are
+// presence-aware. Old clients omit them; JSON null deliberately has the same
+// keep-existing meaning as omission, never zero/unlimited or reset-to-default.
+// Explicit zero remains a nonnil pointer and fails the shared policy validator.
+type settingsRequest struct {
+	settingsDTO
+	NodeTaskOfflineReconcileDays *int `json:"node_task_offline_reconcile_days"`
+	NodeTaskBackupRestoreDays    *int `json:"node_task_backup_restore_days"`
+	NodeTaskResultRetentionDays  *int `json:"node_task_result_retention_days"`
+}
+
+func nodeTaskLifecyclePolicyFromSettings(s ports.UISettings) domain.NodeTaskLifecyclePolicy {
+	policy := s.NodeTaskLifecyclePolicy()
+	// SQL-backed settings normally supply defaults. Retain compatibility with
+	// pre-field settings snapshots/test doubles only when the whole policy is
+	// absent; a partially invalid policy must not silently become valid.
+	if policy == (domain.NodeTaskLifecyclePolicy{}) {
+		return domain.DefaultNodeTaskLifecyclePolicy()
+	}
+	return policy
+}
+
+func resolveNodeTaskLifecyclePolicy(req settingsRequest, prev ports.UISettings) (domain.NodeTaskLifecyclePolicy, error) {
+	policy := nodeTaskLifecyclePolicyFromSettings(prev)
+	if req.NodeTaskOfflineReconcileDays != nil {
+		policy.OfflineReconcileDays = *req.NodeTaskOfflineReconcileDays
+	}
+	if req.NodeTaskBackupRestoreDays != nil {
+		policy.BackupRestoreDays = *req.NodeTaskBackupRestoreDays
+	}
+	if req.NodeTaskResultRetentionDays != nil {
+		policy.ResultRetentionDays = *req.NodeTaskResultRetentionDays
+	}
+	return policy, policy.Validate()
 }
 
 func (h *AdminSettingsHandler) defaults() ports.UISettings {
@@ -160,11 +202,16 @@ func (h *AdminSettingsHandler) defaults() ports.UISettings {
 	// built-in DEFAULT_ICON fallback (see web-react/src/stores/site.ts).
 	// Filling them here would persist a panel-shipped path as if the admin
 	// had picked it, making it impossible to fall back to the bundled icon.
+	policy := domain.DefaultNodeTaskLifecyclePolicy()
 	return ports.UISettings{
 		LoginMode:   "dual",
 		SiteTitle:   "Kazuha Hub Passwall",
 		AppTitle:    "Passwall",
 		EmailDomain: "psp.local",
+
+		NodeTaskOfflineReconcileDays: policy.OfflineReconcileDays,
+		NodeTaskBackupRestoreDays:    policy.BackupRestoreDays,
+		NodeTaskResultRetentionDays:  policy.ResultRetentionDays,
 	}
 }
 
@@ -182,6 +229,7 @@ func (h *AdminSettingsHandler) Get(c *gin.Context) {
 // a newly-added field can't be echoed by one path and silently dropped by the
 // other (the drift that briefly broke the 2FA totp_enabled round-trip).
 func settingsToDTO(s ports.UISettings) settingsDTO {
+	policy := nodeTaskLifecyclePolicyFromSettings(s)
 	return settingsDTO{
 		LoginMode:                   s.LoginMode,
 		SiteTitle:                   s.SiteTitle,
@@ -281,11 +329,15 @@ func settingsToDTO(s ports.UISettings) settingsDTO {
 		TwoFAEmailResendCooldownSec:          s.TwoFAEmailResendCooldownSec,
 		CodeResendCooldownSec:                s.CodeResendCooldownSec,
 		Require2FAForStaff:                   s.Require2FAForStaff,
+
+		NodeTaskOfflineReconcileDays: policy.OfflineReconcileDays,
+		NodeTaskBackupRestoreDays:    policy.BackupRestoreDays,
+		NodeTaskResultRetentionDays:  policy.ResultRetentionDays,
 	}
 }
 
 func (h *AdminSettingsHandler) Put(c *gin.Context) {
-	var req settingsDTO
+	var req settingsRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -302,6 +354,11 @@ func (h *AdminSettingsHandler) Put(c *gin.Context) {
 	prev, prevErr := h.repo.Load(c.Request.Context(), h.defaults())
 	if prevErr != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": prevErr.Error()})
+		return
+	}
+	policy, policyErr := resolveNodeTaskLifecyclePolicy(req, prev)
+	if policyErr != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": policyErr.Error()})
 		return
 	}
 	s := ports.UISettings{
@@ -404,6 +461,10 @@ func (h *AdminSettingsHandler) Put(c *gin.Context) {
 		CodeResendCooldownSec:         req.CodeResendCooldownSec,
 		Require2FAForStaff:            req.Require2FAForStaff,
 		// GeoIPUpdateToken / CaptchaSecretKey resolved below ("empty = keep existing").
+
+		NodeTaskOfflineReconcileDays: policy.OfflineReconcileDays,
+		NodeTaskBackupRestoreDays:    policy.BackupRestoreDays,
+		NodeTaskResultRetentionDays:  policy.ResultRetentionDays,
 	}
 	var pathErr error
 	if s.PanelPath, pathErr = panelpath.Normalize(s.PanelPath); pathErr != nil {

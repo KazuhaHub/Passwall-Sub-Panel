@@ -12,6 +12,7 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
+	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 )
 
@@ -103,6 +104,25 @@ func (r *kvSettingsRepo) Load(ctx context.Context, defaults ports.UISettings) (p
 	if _, ok := byKey["runtime.node_poll_seconds"]; !ok && out.NodePollSeconds == 0 {
 		out.NodePollSeconds = defaultNodePollSeconds
 	}
+	// Unlike log retention, task-evidence windows do NOT give explicit zero a
+	// special meaning. Default only absent keys from the product policy (not a
+	// caller's branding/runtime fallback: that must not select support windows);
+	// malformed stored policy fails closed rather than silently shrinking a
+	// support promise. No cleanup consumes these settings until task-specific
+	// immutable retention deadlines and the remaining lifecycle gates exist.
+	policyDefaults := domain.DefaultNodeTaskLifecyclePolicy()
+	if _, ok := byKey["runtime.node_task_offline_reconcile_days"]; !ok {
+		out.NodeTaskOfflineReconcileDays = policyDefaults.OfflineReconcileDays
+	}
+	if _, ok := byKey["runtime.node_task_backup_restore_days"]; !ok {
+		out.NodeTaskBackupRestoreDays = policyDefaults.BackupRestoreDays
+	}
+	if _, ok := byKey["runtime.node_task_result_retention_days"]; !ok {
+		out.NodeTaskResultRetentionDays = policyDefaults.ResultRetentionDays
+	}
+	if err := out.NodeTaskLifecyclePolicy().Validate(); err != nil {
+		return defaults, fmt.Errorf("load native task lifecycle policy: %w", err)
+	}
 
 	return applyUISettingsDefaults(out, defaults), nil
 }
@@ -118,6 +138,25 @@ const (
 )
 
 func (r *kvSettingsRepo) Save(ctx context.Context, s ports.UISettings) error {
+	policy := s.NodeTaskLifecyclePolicy()
+	// Old in-process writers (notably migration and partial struct literals)
+	// know none of these fields and pass an all-zero group. Treat that group as
+	// OMITTED, not as a reset: preserve any administrator-selected policy in DB.
+	// The HTTP boundary distinguishes omission from an explicit zero and always
+	// passes a complete validated policy. A partially specified group is invalid.
+	omitTaskPolicy := policy == (domain.NodeTaskLifecyclePolicy{})
+	if omitTaskPolicy {
+		// Preserve the first-save contract of one row per descriptor. Defaults
+		// below are INSERT-only for absent policy keys, NEVER an UPDATE/reset.
+		policy = domain.DefaultNodeTaskLifecyclePolicy()
+		s.NodeTaskOfflineReconcileDays = policy.OfflineReconcileDays
+		s.NodeTaskBackupRestoreDays = policy.BackupRestoreDays
+		s.NodeTaskResultRetentionDays = policy.ResultRetentionDays
+	} else {
+		if err := policy.Validate(); err != nil {
+			return fmt.Errorf("save native task lifecycle policy: %w", err)
+		}
+	}
 	now := time.Now()
 	descriptors := settingDescriptors(&s)
 	rows := make([]settingRow, 0, len(descriptors))
@@ -166,8 +205,15 @@ func (r *kvSettingsRepo) Save(ctx context.Context, s ports.UISettings) error {
 
 		// (2) Existing → pure UPDATE (never mints an id). Missing → collect.
 		var missing []settingRow
+		var taskPolicyDefaults []settingRow
 		for i := range rows {
 			row := rows[i]
+			if omitTaskPolicy && isNodeTaskLifecycleSetting(row.Type, row.Name) {
+				if !have[row.Type+"\x00"+row.Name] {
+					taskPolicyDefaults = append(taskPolicyDefaults, row)
+				}
+				continue
+			}
 			if have[row.Type+"\x00"+row.Name] {
 				// map[string]any, NOT a struct: GORM's struct Updates skips zero
 				// values, so value="" / encrypted=false would silently not be
@@ -197,8 +243,31 @@ func (r *kvSettingsRepo) Save(ctx context.Context, s ports.UISettings) error {
 				return err
 			}
 		}
+		if len(taskPolicyDefaults) > 0 {
+			// A legacy writer can race the first explicit administrator save.
+			// INSERT ... DO NOTHING preserves a policy inserted after our
+			// existence read; generic DoUpdates would reset it to 30/30/90.
+			if err := tx.Clauses(clause.OnConflict{
+				Columns:   []clause.Column{{Name: "type"}, {Name: "name"}},
+				DoNothing: true,
+			}).Create(&taskPolicyDefaults).Error; err != nil {
+				return err
+			}
+		}
 		return nil
 	})
+}
+
+func isNodeTaskLifecycleSetting(typ, name string) bool {
+	if typ != "runtime" {
+		return false
+	}
+	switch name {
+	case "node_task_offline_reconcile_days", "node_task_backup_restore_days", "node_task_result_retention_days":
+		return true
+	default:
+		return false
+	}
 }
 
 // settingDescriptor is one (type, name) pair backed by a typed UISettings
@@ -357,6 +426,9 @@ func settingDescriptors(s *ports.UISettings) []settingDescriptor {
 		intField("runtime", "cron_reconcile_minutes", &s.CronReconcileMinutes),
 		intField("runtime", "node_poll_seconds", &s.NodePollSeconds),
 		intField("runtime", "full_report_seconds", &s.FullReportSeconds),
+		intField("runtime", "node_task_offline_reconcile_days", &s.NodeTaskOfflineReconcileDays),
+		intField("runtime", "node_task_backup_restore_days", &s.NodeTaskBackupRestoreDays),
+		intField("runtime", "node_task_result_retention_days", &s.NodeTaskResultRetentionDays),
 		intField("runtime", "max_panel_concurrency", &s.MaxPanelConcurrency),
 		boolField("runtime", "allow_user_personal_rules", &s.AllowUserPersonalRules),
 
