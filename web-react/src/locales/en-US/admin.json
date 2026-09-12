@@ -1879,6 +1879,30 @@
     "cred_add_field": "Add field"
   },
   "servers": {
+    "agent_upgrade": {
+      "action": "Upgrade PN agent",
+      "title": "Upgrade PN · {{name}}",
+      "warning": "Upgrading briefly interrupts proxy connections on this server. Confirm the release and maintenance window. Server, node and user identities remain unchanged.",
+      "requirements": "Requires Linux/systemd with the upgrade helper enabled. Older agents need one manual maintenance update; update Docker images on the host. Success requires the new process to synchronize and converge configuration. State-schema changes require manual migration.",
+      "current": "Current PN release (last reported)",
+      "target": "Target PN release",
+      "version_hint": "Use an already published exact release, not floating latest or beta tags. Downgrades are refused.",
+      "confirm": "Confirm and request upgrade",
+      "retry": "Retry the same upgrade request",
+      "refresh": "Check the original task again",
+      "request_failed": "The request outcome could not be confirmed. Retrying reuses the same identity and does not create another task.",
+      "poll_failed": "Status lookup failed; the original upgrade is not cancelled. Check it again.",
+      "task": "Task: {{id}}",
+      "state": {
+        "queued": "Queued, waiting for an upgrade-capable agent. Not upgraded yet.",
+        "offered": "Dispatched, awaiting evidence of the actual outcome.",
+        "dispatch_closed": "Start authorization expired; dispatch is closed. An already-started upgrade may still return a result. Check this task instead of creating another.",
+        "failed": "Upgrade failed. Inspect maintenance logs; the previous release was retained or restored.",
+        "manual_attention": "The outcome cannot be confirmed automatically. Inspect agent and upgrade-helper logs.",
+        "awaiting_observation": "Upgrade receipt received; waiting for a fresh target-version report.",
+        "verified": "Target restart, synchronization, configuration convergence and binary checksum verified."
+      }
+    },
     "title": "Servers and native nodes",
     "subtitle": "Register an upstream panel or a PSP-native node, then attach inbounds from the Nodes page.",
     "create": "New server",

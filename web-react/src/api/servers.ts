@@ -196,6 +196,34 @@ export async function getNativeAgentStatus(id: number, signal?: AbortSignal) {
   return data
 }
 
+export interface NativeAgentUpgrade {
+  task_id: string
+  agent_id: string
+  version: string
+  expected_version: string
+  status: 'queued' | 'offered' | 'succeeded' | 'failed' | 'indeterminate'
+  upgrade_state: 'queued' | 'offered' | 'dispatch_closed' | 'failed' | 'manual_attention' | 'awaiting_observation' | 'verified'
+  not_after_ms: number
+  dispatch_closed: boolean
+  dispatch_closed_reason?: string
+  binary_sha256?: string
+  observed_version?: string
+  last_seen?: string
+  completed_at?: string
+}
+
+export async function requestNativeAgentUpgrade(id: number, version: string, expectedVersion: string, key: string, signal?: AbortSignal) {
+  const { data } = await client.post<NativeAgentUpgrade>(`/admin/servers/${id}/upgrade-node-agent`,
+    { version, expected_version: expectedVersion }, { headers: { 'Idempotency-Key': key }, signal, _skipErrorToast: true })
+  return data
+}
+
+export async function getNativeAgentUpgrade(id: number, taskID: string, signal?: AbortSignal) {
+  const { data } = await client.get<NativeAgentUpgrade>(`/admin/servers/${id}/node-agent-upgrades/${encodeURIComponent(taskID)}`,
+    { signal, _skipErrorToast: true })
+  return data
+}
+
 export async function updateServer(id: number, req: UpdateServerRequest) {
   const { data } = await client.put<Server>(`/admin/servers/${id}`, req)
   return data
