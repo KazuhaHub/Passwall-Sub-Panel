@@ -185,7 +185,9 @@ sing-box 当前核验 `1.14.0`，原生编译 VLESS、VMess、Trojan、Shadowsoc
   pseudo-version，并脱离父目录 `go.work` 通过上述测试与三库/六平台 CI。后续 expiry 等新的
   additive wire revision 仍必须按同一顺序先发布 Node、更新 PSP 依赖并重跑；本地 workspace
   通过不能替代这道闸。
-- **`Passwall-Node` 的 licence**（README 写着 TBD）。
+- **`Passwall-Node` 的 licence 已确定**：Node 自有代码（包括 `protocol` 与 `corecatalog`）
+  采用 Apache-2.0，PSP 仍保持 AGPLv3。Node 原生发行档与 Docker 镜像携带 `LICENSE` / `NOTICE`；
+  独立内核与第三方组件各自保留原许可，不将项目归属声明当成完整第三方许可审计。
 
 ## 4. 这个项目的三条底线
 
