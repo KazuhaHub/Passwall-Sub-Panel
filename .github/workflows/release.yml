@@ -78,7 +78,7 @@ jobs:
           release_sha=$(git rev-parse --verify "refs/tags/${tag}^{commit}")
           test "$GITHUB_REF" = "refs/tags/$tag"
           test "$release_sha" = "$GITHUB_SHA"
-          gh api --paginate "repos/$GITHUB_REPOSITORY/releases" | jq -s -e --arg tag "$tag" 'add | all(.[]; .tag_name != $tag or .draft == true)' > /dev/null
+          gh api --paginate "repos/$GITHUB_REPOSITORY/releases" | jq -s -e --arg tag "$tag" 'add | all(.[]; .tag_name != $tag)' > /dev/null
           owner_lc=$(printf '%s' "$REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]')
           node deploy/check-image.mjs "$owner_lc/passwall-sub-panel" "$tag"
           echo "tag=${tag}" >> "$GITHUB_OUTPUT"
@@ -320,10 +320,10 @@ jobs:
           # self-update nudge (psp_upgrade alert) reads /releases/latest and must
           # only ever point at a STABLE release, never a beta.
           prerelease: ${{ contains(needs.setup.outputs.tag, '-') }}
-          generate_release_notes: true
+          generate_release_notes: false
           overwrite_files: false
           body_path: release_notes.md
-          append_body: true
+          append_body: false
           files: |
             dist/*
         env:
