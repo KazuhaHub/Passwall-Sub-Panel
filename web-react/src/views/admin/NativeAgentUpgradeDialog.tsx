@@ -82,7 +82,7 @@ export function NativeAgentUpgradeDialog({ server, onClose }: { server: Server |
       </Box>
     </DialogContent>
     <DialogActions>
-      <Button onClick={onClose} disabled={busy}>{t('common:close', { defaultValue: '关闭' })}</Button>
+      <Button onClick={onClose} disabled={busy}>{t('common:actions.close')}</Button>
       {!task && <Button variant="contained" onClick={() => void submit()} disabled={busy || !exact(version.trim()) || !exact(expected) || version.trim() === expected}>
         {busy && <CircularProgress size={16} sx={{ mr: 1 }} />}{t(error ? 'admin:servers.agent_upgrade.retry' : 'admin:servers.agent_upgrade.confirm')}
       </Button>}
