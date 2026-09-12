@@ -111,7 +111,7 @@ func TestNodeAgentTaskQueuedReceiptClosesDispatchWithoutReleasingActiveQuota(t *
 	if err != nil || q.Reason != domain.NodeAgentTaskQuarantineNeverOffered {
 		t.Fatalf("queued evidence reason: %v", err)
 	}
-	offered, err := repos.NodeAgentTask.Offer(ctx, agentID, []string{task.Kind}, 64, int(nodeprotocol.MaxSyncBodyBytes), seen.Add(time.Second))
+	offered, err := repos.NodeAgentTask.Offer(ctx, agentID, ports.NodeAgentTaskOfferSupport{EligibleKinds: []string{task.Kind}}, 64, int(nodeprotocol.MaxSyncBodyBytes), seen.Add(time.Second))
 	if err != nil || len(offered) != 0 {
 		t.Fatalf("closed task offered: (%d, %v)", len(offered), err)
 	}
@@ -190,7 +190,7 @@ func TestNodeAgentTaskQuarantineRestoredRowsNeverPromoteEvidence(t *testing.T) {
 	if err := db.Create(row).Error; err != nil {
 		t.Fatal(err)
 	}
-	if offered, err := repos.NodeAgentTask.Offer(ctx, agentID, []string{task.Kind}, 64, int(nodeprotocol.MaxSyncBodyBytes), first.Add(time.Second)); err != nil || len(offered) != 0 {
+	if offered, err := repos.NodeAgentTask.Offer(ctx, agentID, ports.NodeAgentTaskOfferSupport{EligibleKinds: []string{task.Kind}}, 64, int(nodeprotocol.MaxSyncBodyBytes), first.Add(time.Second)); err != nil || len(offered) != 0 {
 		t.Fatalf("restored row dispatched despite existing evidence fence: %v", err)
 	}
 	changed := result
@@ -209,7 +209,7 @@ func TestNodeAgentTaskQuarantineRestoredRowsNeverPromoteEvidence(t *testing.T) {
 	if err != nil || q.Reason != domain.NodeAgentTaskQuarantineUnknownTask || !q.FirstSeenAt.Equal(first) {
 		t.Fatalf("restored row rewrote evidence: %v", err)
 	}
-	if offered, err := repos.NodeAgentTask.Offer(ctx, agentID, []string{task.Kind}, 64, int(nodeprotocol.MaxSyncBodyBytes), first.Add(3*time.Second)); err != nil || len(offered) != 0 {
+	if offered, err := repos.NodeAgentTask.Offer(ctx, agentID, ports.NodeAgentTaskOfferSupport{EligibleKinds: []string{task.Kind}}, 64, int(nodeprotocol.MaxSyncBodyBytes), first.Add(3*time.Second)); err != nil || len(offered) != 0 {
 		t.Fatalf("restored closed row dispatched: %v", err)
 	}
 	ok := true
@@ -251,7 +251,7 @@ func TestNodeAgentTaskQuarantineQuotaAndWholeBatchAtomicity(t *testing.T) {
 			if _, _, err := repos.NodeAgentTask.CreateOrGet(ctx, offered); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := repos.NodeAgentTask.Offer(ctx, agentID, []string{offered.Kind}, 1, int(nodeprotocol.MaxSyncBodyBytes), first); err != nil {
+			if _, err := repos.NodeAgentTask.Offer(ctx, agentID, ports.NodeAgentTaskOfferSupport{EligibleKinds: []string{offered.Kind}}, 1, int(nodeprotocol.MaxSyncBodyBytes), first); err != nil {
 				t.Fatal(err)
 			}
 			if _, _, err := repos.NodeAgentTask.CreateOrGet(ctx, queued); err != nil {
@@ -512,7 +512,7 @@ func TestNodeAgentTaskQuarantineMixedValidReceiptAndKnownConflictAreAtomic(t *te
 		if _, _, err := repos.NodeAgentTask.CreateOrGet(ctx, task); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := repos.NodeAgentTask.Offer(ctx, task.AgentID, []string{task.Kind}, 1, int(nodeprotocol.MaxSyncBodyBytes), time.Now()); err != nil {
+		if _, err := repos.NodeAgentTask.Offer(ctx, task.AgentID, ports.NodeAgentTaskOfferSupport{EligibleKinds: []string{task.Kind}}, 1, int(nodeprotocol.MaxSyncBodyBytes), time.Now()); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -697,7 +697,7 @@ func TestNodeAgentTaskCompleteBatchNeverLogsOpaqueSQLValues(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if _, err := repos.NodeAgentTask.Offer(ctx, agentID, []string{one.Kind}, 2, int(nodeprotocol.MaxSyncBodyBytes), first); err != nil {
+	if _, err := repos.NodeAgentTask.Offer(ctx, agentID, ports.NodeAgentTaskOfferSupport{EligibleKinds: []string{one.Kind}}, 2, int(nodeprotocol.MaxSyncBodyBytes), first); err != nil {
 		t.Fatal(err)
 	}
 	spy := &nodeAgentTaskSQLSpy{}

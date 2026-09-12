@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -368,6 +369,7 @@ func (s *Service) ingestReport(ctx context.Context, agent *domain.NodeAgent, sna
 		results[i] = domain.NodeAgentTaskResult{
 			TaskID: report.TaskResults[i].ID, Kind: report.TaskResults[i].Kind,
 			InputSHA256: report.TaskResults[i].InputSHA256, OK: report.TaskResults[i].OK,
+			NotAfterMS:    report.TaskResults[i].NotAfterMS,
 			Indeterminate: report.TaskResults[i].Indeterminate,
 			Result:        append([]byte(nil), report.TaskResults[i].Result...),
 			ErrorCode:     report.TaskResults[i].ErrorCode, Error: report.TaskResults[i].Error,
@@ -608,24 +610,29 @@ func cloneObservationReport(in nodeprotocol.NodeReport) nodeprotocol.NodeReport 
 }
 
 func (s *Service) offerTasks(ctx context.Context, agentID string, capabilities []string, maxTaskJSONBytes int, now time.Time) ([]nodeprotocol.Task, bool, error) {
-	eligibleKinds := eligibleTaskKinds(capabilities)
-	if len(eligibleKinds) == 0 {
-		return []nodeprotocol.Task{}, false, nil
-	}
-	stored, err := s.tasks.Offer(ctx, agentID, eligibleKinds, nodeprotocol.MaxTasksPerResponse, maxTaskJSONBytes, now)
+	support := taskOfferSupport(capabilities)
+	// Even an old/capability-less agent or a full response budget must close
+	// expired dispatch. Expiry does not depend on permission to offer work.
+	stored, err := s.tasks.Offer(ctx, agentID, support, nodeprotocol.MaxTasksPerResponse, maxTaskJSONBytes, now)
 	if err != nil {
 		return nil, false, fmt.Errorf("nodesync: offer agent tasks: %w", err)
 	}
 	tasks := make([]nodeprotocol.Task, len(stored))
 	hadFirstOffer := false
 	for i := range stored {
-		// Lifecycle-aware requests must not lose their immutable deadline when
-		// projected onto the currently published, pre-expiry task wire. The SQL
-		// repository excludes them; keep the same fail-closed boundary here so
-		// a different port implementation cannot silently authorize old agents.
-		// Remove this gate only with the shared expiry revision and negotiation.
+		if stored[i] == nil {
+			return nil, false, fmt.Errorf("%w: task repository returned an empty identity", domain.ErrConflict)
+		}
+		deadline := int64(0)
 		if stored[i].Lifecycle != nil {
-			return nil, false, fmt.Errorf("%w: lifecycle-aware tasks require the shared expiry transport", domain.ErrConflict)
+			if !support.SupportsExpiry || stored[i].Lifecycle.Validate() != nil ||
+				stored[i].Lifecycle.NotAfterMS <= now.UnixMilli() {
+				return nil, false, fmt.Errorf("%w: lifecycle-aware task lacks valid current start authorization", domain.ErrConflict)
+			}
+			deadline = stored[i].Lifecycle.NotAfterMS
+		}
+		if !slices.Contains(support.EligibleKinds, stored[i].Kind) {
+			return nil, false, fmt.Errorf("%w: task kind is not supported by this report", domain.ErrConflict)
 		}
 		if stored[i].OfferCount == 1 {
 			hadFirstOffer = true
@@ -633,6 +640,7 @@ func (s *Service) offerTasks(ctx context.Context, agentID string, capabilities [
 		tasks[i] = nodeprotocol.Task{
 			ID: stored[i].TaskID, Kind: stored[i].Kind,
 			Args: append([]byte(nil), stored[i].Args...), InputSHA256: stored[i].InputSHA256,
+			NotAfterMS: deadline,
 		}
 	}
 	if err := nodeprotocol.ValidateTasks(tasks); err != nil {
@@ -668,7 +676,7 @@ func eligibleTaskKinds(capabilities []string) []string {
 	prefix := nodeprotocol.TaskCapability("")
 	kinds := make([]string, 0, len(capabilities))
 	for capability := range capabilitySet {
-		if capability == nodeprotocol.CapabilityTaskExecutionV1 || !strings.HasPrefix(capability, prefix) {
+		if capability == nodeprotocol.CapabilityTaskExecutionV1 || capability == nodeprotocol.CapabilityTaskExpiryV1 || !strings.HasPrefix(capability, prefix) {
 			continue
 		}
 		kind := strings.TrimPrefix(capability, prefix)
@@ -678,6 +686,13 @@ func eligibleTaskKinds(capabilities []string) []string {
 	}
 	sort.Strings(kinds)
 	return kinds
+}
+
+func taskOfferSupport(capabilities []string) ports.NodeAgentTaskOfferSupport {
+	return ports.NodeAgentTaskOfferSupport{
+		EligibleKinds:  eligibleTaskKinds(capabilities),
+		SupportsExpiry: hasTaskExecutionCapability(capabilities) && slices.Contains(capabilities, nodeprotocol.CapabilityTaskExpiryV1),
+	}
 }
 
 func hasTaskExecutionCapability(capabilities []string) bool {

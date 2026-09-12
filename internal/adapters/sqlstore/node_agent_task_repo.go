@@ -377,54 +377,109 @@ func (r *nodeAgentTaskRepo) GetByTaskID(ctx context.Context, taskID string) (*do
 	return row.toDomain(), nil
 }
 
-func (r *nodeAgentTaskRepo) Offer(ctx context.Context, agentID string, eligibleKinds []string, limit, maxTaskJSONBytes int, offeredAt time.Time) ([]*domain.NodeAgentTask, error) {
+func (r *nodeAgentTaskRepo) Offer(ctx context.Context, agentID string, support ports.NodeAgentTaskOfferSupport, limit, maxTaskJSONBytes int, offeredAt time.Time) ([]*domain.NodeAgentTask, error) {
 	if agentID == "" {
 		return nil, fmt.Errorf("%w: agent ID is required", domain.ErrValidation)
 	}
-	if offeredAt.IsZero() {
-		return nil, fmt.Errorf("%w: offered time is required", domain.ErrValidation)
+	if offeredAt.IsZero() || offeredAt.UnixMilli() <= 0 {
+		return nil, fmt.Errorf("%w: positive offered time is required", domain.ErrValidation)
 	}
-	kinds := uniqueNonEmptyStrings(eligibleKinds)
-	if len(kinds) == 0 || maxTaskJSONBytes < len("[]") {
-		return []*domain.NodeAgentTask{}, nil
+	kinds := make(map[string]bool, len(support.EligibleKinds))
+	for _, kind := range support.EligibleKinds {
+		kinds[kind] = kind != ""
 	}
 	if limit <= 0 || limit > nodeprotocol.MaxTasksPerResponse {
 		limit = nodeprotocol.MaxTasksPerResponse
 	}
 	offeredAt = offeredAt.UTC()
 	rows := make([]nodeAgentTaskRow, 0, limit)
-	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err := runTransactionWithRetry(ctx, r.db, func(tx *gorm.DB) error {
+		rows = rows[:0]
 		if _, err := lockNodeAgentByAgentID(tx, agentID); err != nil {
 			return err
 		}
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-			Where("agent_id = ? AND status IN ? AND kind IN ? AND dispatch_closed_at IS NULL", agentID,
-				[]string{string(domain.NodeAgentTaskQueued), string(domain.NodeAgentTaskOffered)}, kinds).
-			// Temporary additive-release gate: before shared expiry wire and
-			// capable Node binaries ship, never offer protected requests to an
-			// older node that would ignore their latest-start deadline. Legacy
-			// fixtures retain the existing transport; no capability is invented.
-			Where("lifecycle IS NULL").
-			// A restored task row may have lost its dispatch closure after the
-			// node already received durable receipt. Evidence itself remains a
-			// fence; do not depend on the node replaying it again to stop offers.
-			Where("NOT EXISTS (SELECT 1 FROM node_agent_task_result_quarantines q WHERE q.agent_id = node_agent_tasks.agent_id AND q.task_id = node_agent_tasks.task_id)").
-			Order("created_at ASC, task_id ASC").Limit(limit).Find(&rows).Error; err != nil {
+		// This is the first consistent read after the owner lock, including on
+		// MySQL REPEATABLE READ. All same-owner mutations share that lock. Resolve
+		// public IDs before locking full rows so the optimizer cannot lock a
+		// foreign owner's opaque input while filtering the global primary key.
+		// Scan the complete bounded open backlog before kind/count/wire filters:
+		// expired or unsupported tasks must not starve eligible rows behind them.
+		statuses := []string{string(domain.NodeAgentTaskQueued), string(domain.NodeAgentTaskOffered)}
+		var ownership []struct{ TaskID, AgentID string }
+		if err := tx.Model(&nodeAgentTaskRow{}).Select("task_id, agent_id").
+			Where("agent_id = ? AND status IN ? AND dispatch_closed_at IS NULL", agentID, statuses).
+			Order("created_at ASC, task_id ASC").Limit(int(defaultMaxActiveNodeAgentTasks) + 1).Find(&ownership).Error; err != nil {
 			return err
+		}
+		if len(ownership) > int(defaultMaxActiveNodeAgentTasks) {
+			return errors.New("offer native agent tasks: stored open backlog exceeds safety bound")
+		}
+		ownIDs := make([]string, 0, len(ownership))
+		knownIDs := make(map[string]bool, len(ownership))
+		for _, owner := range ownership {
+			if owner.AgentID != agentID {
+				return fmt.Errorf("%w: stored task owner does not match exactly", domain.ErrConflict)
+			}
+			ownIDs = append(ownIDs, owner.TaskID)
+			knownIDs[owner.TaskID] = true
+		}
+		if len(ownIDs) == 0 {
+			return nil
+		}
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("agent_id = ? AND task_id IN ? AND status IN ? AND dispatch_closed_at IS NULL", agentID, ownIDs, statuses).
+			Order("created_at ASC, task_id ASC").Find(&rows).Error; err != nil {
+			return err
+		}
+		if len(rows) != len(ownIDs) {
+			return fmt.Errorf("%w: stored task ownership changed concurrently", domain.ErrConflict)
+		}
+		var evidence []struct{ TaskID, AgentID string }
+		if err := tx.Model(&nodeAgentTaskResultQuarantineRow{}).Select("task_id, agent_id").
+			Where("agent_id = ? AND task_id IN ?", agentID, ownIDs).Find(&evidence).Error; err != nil {
+			return err
+		}
+		fenced := make(map[string]bool, len(evidence))
+		for _, q := range evidence {
+			if q.AgentID != agentID || !knownIDs[q.TaskID] {
+				return fmt.Errorf("%w: quarantined result identity does not match exactly", domain.ErrConflict)
+			}
+			fenced[q.TaskID] = true
 		}
 		bounded := make([]nodeAgentTaskRow, 0, len(rows))
 		totalArgs := 0
 		encodedTaskArrayBytes := len("[]")
 		for i := range rows {
-			wire := nodeprotocol.Task{
-				ID: rows[i].TaskID, Kind: rows[i].Kind,
-				Args: rows[i].Args, InputSHA256: rows[i].InputSHA256,
+			row := &rows[i]
+			if row.AgentID != agentID || !knownIDs[row.TaskID] {
+				return fmt.Errorf("%w: stored task identity does not match exactly", domain.ErrConflict)
 			}
+			if row.Lifecycle != nil && row.Lifecycle.NotAfterMS <= offeredAt.UnixMilli() {
+				// Expiry closes authorization to dispatch, not our knowledge of
+				// execution. Offered work may be running; queued work stays queued.
+				// Both continue consuming active quota until an actual result or
+				// explicit future reconciliation establishes a terminal outcome.
+				updated := tx.Model(&nodeAgentTaskRow{}).
+					Where("agent_id = ? AND task_id = ? AND status = ? AND dispatch_closed_at IS NULL", agentID, row.TaskID, row.Status).
+					Updates(map[string]any{"dispatch_closed_at": offeredAt, "dispatch_closed_reason": "task_authorization_expired"})
+				if updated.Error != nil {
+					return updated.Error
+				}
+				if updated.RowsAffected != 1 {
+					return errors.New("expire native agent task dispatch: state changed concurrently")
+				}
+				continue
+			}
+			if fenced[row.TaskID] || !kinds[row.Kind] || (row.Lifecycle != nil && !support.SupportsExpiry) ||
+				len(bounded) >= limit || maxTaskJSONBytes < len("[]") {
+				continue
+			}
+			wire := nodeAgentTaskToWire(row)
 			if err := nodeprotocol.ValidateTasks([]nodeprotocol.Task{wire}); err != nil {
 				return fmt.Errorf("offer native agent task %q: invalid stored task: %w", rows[i].TaskID, err)
 			}
 			if len(rows[i].Args) > nodeprotocol.MaxTaskArgsBytesPerResponse-totalArgs {
-				break
+				continue
 			}
 			encoded, err := json.Marshal(wire)
 			if err != nil {
@@ -435,7 +490,7 @@ func (r *nodeAgentTaskRepo) Offer(ctx context.Context, agentID string, eligibleK
 				separatorBytes = len(",")
 			}
 			if len(encoded)+separatorBytes > maxTaskJSONBytes-encodedTaskArrayBytes {
-				break
+				continue
 			}
 			totalArgs += len(rows[i].Args)
 			encodedTaskArrayBytes += len(encoded) + separatorBytes
@@ -444,10 +499,7 @@ func (r *nodeAgentTaskRepo) Offer(ctx context.Context, agentID string, eligibleK
 		rows = bounded
 		wireTasks := make([]nodeprotocol.Task, len(rows))
 		for i := range rows {
-			wireTasks[i] = nodeprotocol.Task{
-				ID: rows[i].TaskID, Kind: rows[i].Kind,
-				Args: rows[i].Args, InputSHA256: rows[i].InputSHA256,
-			}
+			wireTasks[i] = nodeAgentTaskToWire(&rows[i])
 		}
 		if err := nodeprotocol.ValidateTasks(wireTasks); err != nil {
 			return fmt.Errorf("offer native agent tasks: invalid batch: %w", err)
@@ -599,7 +651,7 @@ func (r *nodeAgentTaskRepo) CompleteBatch(ctx context.Context, agentID string, r
 		for _, result := range ordered {
 			row := ownByID[result.TaskID]
 			needsEvidence := row == nil
-			if row != nil && (row.Kind != result.Kind || row.InputSHA256 != result.InputSHA256) {
+			if row != nil && (row.Kind != result.Kind || row.InputSHA256 != result.InputSHA256 || nodeAgentTaskNotAfterMS(row) != result.NotAfterMS) {
 				return fmt.Errorf("%w: task result identity conflicts with offered input", domain.ErrConflict)
 			}
 			if row != nil {
@@ -714,8 +766,13 @@ func validateNewNodeAgentTask(task *domain.NodeAgentTask) error {
 		task.DispatchClosedAt != nil || task.DispatchClosedReason != "" {
 		return fmt.Errorf("%w: a new native agent task must be pristine and queued", domain.ErrValidation)
 	}
+	var notAfterMS int64
+	if task.Lifecycle != nil {
+		notAfterMS = task.Lifecycle.NotAfterMS
+	}
 	if err := nodeprotocol.ValidateTasks([]nodeprotocol.Task{{
 		ID: task.TaskID, Kind: task.Kind, Args: task.Args, InputSHA256: task.InputSHA256,
+		NotAfterMS: notAfterMS,
 	}}); err != nil {
 		return fmt.Errorf("%w: %v", domain.ErrValidation, err)
 	}
@@ -752,9 +809,24 @@ func sameTaskRequest(stored, incoming *nodeAgentTaskRow, matchedByTaskID bool) b
 }
 
 func sameTerminalResult(stored *nodeAgentTaskRow, result domain.NodeAgentTaskResult) bool {
-	return domain.NodeAgentTaskStatus(stored.Status) == resultStatus(result) &&
+	return nodeAgentTaskNotAfterMS(stored) == result.NotAfterMS &&
+		domain.NodeAgentTaskStatus(stored.Status) == resultStatus(result) &&
 		stored.ResultOK != nil && *stored.ResultOK == result.OK && stored.ResultIndeterminate == result.Indeterminate &&
 		bytes.Equal(stored.Result, result.Result) && stored.ResultErrorCode == result.ErrorCode && stored.ResultError == result.Error
+}
+
+func nodeAgentTaskNotAfterMS(task *nodeAgentTaskRow) int64 {
+	if task.Lifecycle == nil {
+		return 0
+	}
+	return task.Lifecycle.NotAfterMS
+}
+
+func nodeAgentTaskToWire(task *nodeAgentTaskRow) nodeprotocol.Task {
+	return nodeprotocol.Task{
+		ID: task.TaskID, Kind: task.Kind, Args: task.Args,
+		InputSHA256: task.InputSHA256, NotAfterMS: nodeAgentTaskNotAfterMS(task),
+	}
 }
 
 func resultStatus(result domain.NodeAgentTaskResult) domain.NodeAgentTaskStatus {

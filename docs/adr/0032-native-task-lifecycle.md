@@ -1,6 +1,6 @@
 # ADR 0032：原生任务的到期、结果证据与恢复边界
 
-- 状态：部分实现；有界结果收存、管理员策略设置及 PSP 不可变任务快照已实现；双端 expiry、清理与完整恢复验收未完成
+- 状态：部分实现；有界结果收存、管理员策略设置、PSP 不可变快照与双端 latest-start expiry 基础设施已实现；清理、逐 kind 契约及完整恢复验收未完成
 - 日期：2026-09-11
 
 ## 背景
@@ -121,10 +121,23 @@ nullable TEXT 没有默认值：升级不会给 legacy 任务猜 deadline。非 
 exact task-ID 重放必须匹配完整快照；使用新 ID 的同幂等键、同输入别名返回原任务与原快照，
 即使调用方用新设置重新计算了候选期限，也不会延长旧任务。输入/归属冲突仍拒绝。
 
-在共享 expiry wire 尚未发布和集成的当前阶段，仓储 Offer 排除带快照任务，nodesync 投影也
-拒绝把该 deadline 丢到 legacy wire。现有 legacy foundation 契约保留；当前仍无真实任务入口。
-这道临时门必须随 Node-first additive revision、PSP 固定版本依赖与双端失败测试一起替换，
-不能只删过滤条件或复制 capability 常量后就开放任务。
+**deadline additive revision 已集成**：先发布 Node PR #7 `074e88af0f4e`，PSP 再固定引用
+`v0.0.0-20260912033439-074e88af0f4e`；临时的非 NULL 快照禁下发门替换为同一报告的
+execution/expiry/kind 三重能力门。`not_after_ms` 与输入 identity 一起在 task/result/quarantine
+中精确回显、校验；legacy 0 不升级为新 deadline，旧隔离 JSON/SHA 不重写。
+
+Offer 在 agent owner-lock 内先解析有界 active 集合，再关闭截止已到的 dispatch，最后过滤
+capability/隔离证据并计算 count、args、含 deadline 的精确 JSON 预算。空 capability 或零预算也
+不逃过到期关闭；旧/不支持/已过期的前页不能挡住后续合法任务。仅锁已验证属于该 agent 的 task
+行，坏非 NULL 快照失败闭合，不退化为无截止 legacy。expiry 不判远端终态，仍保留 active quota；
+晚结果与恢复后隔离结果继续遵守原先的整批 receipt/身份/终态规则。
+
+Node 接收、writer reservation 内领取、handler 前再检查同一新鲜控制面时间区间；完全合法
+HTTP body/解码/边界校验后才 Observe，RTT 包含完整响应。故障、回退、过旧和溢出失效 anchor，
+保留已证明的历史 lower floor 但不延长 stale 授权。Linux/macOS 已核验包含休眠的 elapsed 源；
+Windows 禁用 expiry，core/heartbeat/结果 receipt 不因此停用。30 秒 anchor/RTT 与 1 秒
+uncertainty 是明确的运维保护余量，不是测量精度/SLA。v9 单向 migration 保留 v8 journal/outbox；
+重启必须取得新 anchor，DB/VM 回滚仍需独立 restore gate。当前仍无生产任务入口或清理器。
 
 ## 恢复与上线判据
 

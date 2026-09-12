@@ -281,13 +281,17 @@ quota 只检查新插入：满额时 exact task/idempotency replay 仍成功，�
 省略/null 保留既有配置，非法策略不写入；设置修改不改已有 task/quarantine，不启用清理。
 这些值不是 task execution TTL。仓储已有不可变 Lifecycle 快照（原始签发/截止、完整策略、
 截止加原保留期的保护下限），exact ID 重放比较整份快照、幂等别名返回原快照不延期；坏持久
-快照失败闭合、legacy 缺快照不猜删除时间。expiry wire 发布并协商前，带快照任务不会下发。
+快照失败闭合、legacy 缺快照不猜删除时间。Node PR #7 先发布 `074e88af0f4e` 后 PSP 固定依赖，
+带快照任务需同一报告 execution/expiry/kind 三重能力，deadline 在 task/result/quarantine 精确绑定。
+PSP 到期仅关闭 dispatch、保留 unresolved active quota；capability 为空或无 payload 预算也处理
+到期。Node 在接收、原子 claim 与 handler 前以新鲜时间区间检查；未知无 journal 不造终态，
+已运行不重新 Execute，合法开始后的晚完成仍返回真实结果。
 真实任务 producer、晚结果保护扩展、清理与完整恢复验收仍未接通。详见 ADR 0032。
 
 开放第一个 RealityProbe 或任何有副作用任务前，以下三项仍必须先有跨 PSP/Node 的失败路径测试：
 
-1. **双端 expiry**：协议给出一个双方同义的执行截止条件；PSP 到期停止 offer，Node 在开始副作用前
-   再检查并拒绝。执行已开始而结论丢失时只能进入 `indeterminate`，不能当作可安全自动重试的 failed。
+1. **双端 expiry 基础设施已接通**：最迟开始时间、三重能力、延迟/时钟失效/终态重放保护；
+   不等于 DB/VM restore 门禁或每种 handler 的执行时间、取消与 crash recovery 验收。
 2. **terminal retention**：定义 tombstone TTL 与清理器，TTL 至少覆盖 Node outbox 重放、最长支持的
    离线窗口和数据库备份恢复窗口；有界 quarantine 只是证据接收与 backpressure，不替代保留契约。
 3. **restore / ID reuse**：定义 task identity epoch 或明确的 ID 禁止复用窗口，并演练“PSP 恢复旧备份、
@@ -296,6 +300,7 @@ quota 只检查新插入：满额时 exact task/idempotency replay 仍成功，�
 Node 的 SQLite v8 是一次明确的回滚边界：v7 binary 读取 `PRAGMA user_version=8` 后会以
 “newer than supported” 拒绝启动，不会进入只读或继续写库。回滚必须恢复匹配的 v7 数据库备份，
 并服从上面的 task identity / retention 约束，不能只替换 executable。
+deadline revision 的 v9 同样单向升级；保留 v8 原始 journal/终态/outbox bytes，不重新隔离旧结果。
 
 ---
 

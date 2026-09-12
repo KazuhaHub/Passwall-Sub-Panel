@@ -69,7 +69,7 @@ func createHTTPReceiptTask(t *testing.T, tasks ports.NodeAgentTaskRepo, id, agen
 
 func offerHTTPReceiptTask(t *testing.T, tasks ports.NodeAgentTaskRepo, task *domain.NodeAgentTask, now time.Time) {
 	t.Helper()
-	if _, err := tasks.Offer(t.Context(), task.AgentID, []string{task.Kind}, nodeprotocol.MaxTasksPerResponse,
+	if _, err := tasks.Offer(t.Context(), task.AgentID, ports.NodeAgentTaskOfferSupport{EligibleKinds: []string{task.Kind}}, nodeprotocol.MaxTasksPerResponse,
 		int(nodeprotocol.MaxSyncBodyBytes), now); err != nil {
 		t.Fatal(err)
 	}

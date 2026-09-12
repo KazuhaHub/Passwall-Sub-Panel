@@ -12,6 +12,7 @@ import (
 	nodeprotocol "github.com/KazuhaHub/passwall-node/protocol"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 )
 
 func TestNativeAgentProvisioningIsAtomicAndDeletesOnlyAfterEmptyConvergence(t *testing.T) {
@@ -70,7 +71,7 @@ func TestNativeAgentProvisioningIsAtomicAndDeletesOnlyAfterEmptyConvergence(t *t
 	if err := repos.NativeAgentProvisioning.DeleteConverged(ctx, panel.ID); !errors.Is(err, domain.ErrConflict) {
 		t.Fatalf("delete with active native task = %v, want ErrConflict", err)
 	}
-	if _, err := repos.NodeAgentTask.Offer(ctx, agent.AgentID, []string{activeTask.Kind}, 1, int(nodeprotocol.MaxSyncBodyBytes), now.Add(2*time.Second)); err != nil {
+	if _, err := repos.NodeAgentTask.Offer(ctx, agent.AgentID, ports.NodeAgentTaskOfferSupport{EligibleKinds: []string{activeTask.Kind}}, 1, int(nodeprotocol.MaxSyncBodyBytes), now.Add(2*time.Second)); err != nil {
 		t.Fatal(err)
 	}
 	if err := repos.NodeAgentTask.CompleteBatch(ctx, agent.AgentID, []domain.NodeAgentTaskResult{{

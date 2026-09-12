@@ -13,6 +13,7 @@ import (
 	nodeprotocol "github.com/KazuhaHub/passwall-node/protocol"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 )
 
 func taskLifecycleSnapshot(t *testing.T, issued, deadline int64, policy domain.NodeTaskLifecyclePolicy) *domain.NodeTaskLifecycleSnapshot {
@@ -205,14 +206,14 @@ func TestNodeAgentTaskLifecycleProtectedRequestsStayQueuedAndConsumeQuota(t *tes
 		t.Fatal(err)
 	}
 	for _, offeredAt := range []time.Time{time.UnixMilli(1500).UTC(), time.UnixMilli(task.Lifecycle.FullResultRetainUntilMS + 1).UTC()} {
-		offered, err := repos.NodeAgentTask.Offer(t.Context(), task.AgentID, []string{task.Kind}, 64, int(nodeprotocol.MaxSyncBodyBytes), offeredAt)
+		offered, err := repos.NodeAgentTask.Offer(t.Context(), task.AgentID, ports.NodeAgentTaskOfferSupport{EligibleKinds: []string{task.Kind}}, 64, int(nodeprotocol.MaxSyncBodyBytes), offeredAt)
 		if err != nil || len(offered) != 0 {
 			t.Fatalf("protected request reached legacy transport = (%+v,%v)", offered, err)
 		}
 	}
 	stored, err := repos.NodeAgentTask.GetByTaskID(t.Context(), task.TaskID)
-	if err != nil || stored.Status != domain.NodeAgentTaskQueued || stored.OfferCount != 0 || stored.DispatchClosedAt != nil || *stored.Lifecycle != *task.Lifecycle {
-		t.Fatalf("temporary gate altered queued task = (%+v,%v)", stored, err)
+	if err != nil || stored.Status != domain.NodeAgentTaskQueued || stored.OfferCount != 0 || stored.DispatchClosedAt == nil || stored.DispatchClosedReason != "task_authorization_expired" || *stored.Lifecycle != *task.Lifecycle {
+		t.Fatalf("expiry closure altered queued outcome or snapshot = (%+v,%v)", stored, err)
 	}
 	extra := newTask("task-snapshot-quota-extra", task.AgentID, task.Kind, nil)
 	if _, _, err := repos.NodeAgentTask.CreateOrGet(t.Context(), extra); !errors.Is(err, domain.ErrResourceExhausted) {
@@ -236,7 +237,7 @@ func TestNodeAgentTaskLifecycleReceiptAndLateTerminalReplayDoNotRewriteSnapshot(
 					t.Fatal(err)
 				}
 			}
-			result := domain.NodeAgentTaskResult{TaskID: task.TaskID, Kind: task.Kind, InputSHA256: task.InputSHA256, OK: true, Result: []byte(`{"reachable":true}`)}
+			result := domain.NodeAgentTaskResult{TaskID: task.TaskID, Kind: task.Kind, InputSHA256: task.InputSHA256, NotAfterMS: task.Lifecycle.NotAfterMS, OK: true, Result: []byte(`{"reachable":true}`)}
 			late := time.UnixMilli(task.Lifecycle.FullResultRetainUntilMS + 86_400_000).UTC()
 			if err := repos.NodeAgentTask.CompleteBatch(t.Context(), task.AgentID, []domain.NodeAgentTaskResult{result}, late); err != nil {
 				t.Fatal(err)
@@ -344,10 +345,10 @@ func TestNodeAgentTaskLifecycleCorruptStoredJSONCannotBecomeLegacy(t *testing.T)
 			if err := repos.NodeAgentTask.CompleteBatch(t.Context(), task.AgentID, []domain.NodeAgentTaskResult{result}, time.Now().UTC()); err == nil {
 				t.Fatal("corrupt lifecycle accepted a receipt")
 			}
-			// Non-NULL rows (valid or corrupt) cannot pass the temporary legacy
-			// offer gate, so neither corruption nor receipt changes dispatch.
-			if offered, err := repos.NodeAgentTask.Offer(t.Context(), task.AgentID, []string{task.Kind}, 64, int(nodeprotocol.MaxSyncBodyBytes), time.Now().UTC()); err != nil || len(offered) != 0 {
-				t.Fatalf("corrupt protected row reached legacy transport = (%+v,%v)", offered, err)
+			// Unsupported protected rows are still decoded before expiry/filtering;
+			// corruption must never silently become legacy history.
+			if offered, err := repos.NodeAgentTask.Offer(t.Context(), task.AgentID, ports.NodeAgentTaskOfferSupport{EligibleKinds: []string{task.Kind}}, 64, int(nodeprotocol.MaxSyncBodyBytes), time.Now().UTC()); err == nil || offered != nil {
+				t.Fatalf("corrupt protected row did not fail closed = (%+v,%v)", offered, err)
 			}
 		})
 	}
