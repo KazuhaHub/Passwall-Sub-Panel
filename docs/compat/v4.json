@@ -1,0 +1,46 @@
+{
+  "schema_version": 2,
+  "major": 4,
+  "updated_at": "2026-09-12",
+  "entries": [
+    {
+      "psp_min": "v4.0.0",
+      "psp_max": "v4.99.99",
+      "min_xui": "3.4.2",
+      "max_tested_xui": "3.7.0",
+      "notes": "Initial v4 range inherits the existing v3.9.2-line adapter contract, not a new live-panel run of the v4 release binary. The compiled 3.4.2 floor remains necessary for POST /panel/api/server/scanRealityTargets; the 3.7.0 ceiling comes from the live PSP-adapter verification recorded in v3.json (shared-client, inbound, status and REALITY paths). Current source and request-shape tests retain that surface, including explicit panel-renewal-off fields and PSP-owned HWID limits. Register 3X-UI 3.7.0 with an admin-scoped API token; monitor/node-sync scopes do not cover PSP's API surface. Adopted hand-made finalmask inbounds may require re-saving after the upstream 3.6.0 migration. Panel/core upgrade endpoints were checked for route presence in the recorded verification, not executed. This manifest does not certify PN remote upgrades, traffic/quota end-to-end behaviour, or rollback of a migrated PSP database. Add a narrower entry first if a later v4 adapter changes its required contract."
+    }
+  ],
+  "sui_entries": [
+    {
+      "psp_min": "v4.0.0",
+      "psp_max": "v4.99.99",
+      "max_tested_sui": "1.6.0",
+      "notes": "Inherits the S-UI 1.6.0 live PSP-adapter verification recorded in v3.json (2026-09-09, TestLive_SUISurface), not a separate v4 release-binary run. Current adapter retains /apiv2 Token authentication, client/inbound read-modify-write and non-empty unique PSP client names. No verified minimum S-UI version is published, so no floor is invented. S-UI still lacks per-inbound enable, IP/device caps and the optional panel/core update, certificate and REALITY-scan capabilities; this ceiling does not claim those features are implemented."
+    }
+  ],
+  "xui_advisories": {
+    "3.5.0": {
+      "severity": "warning",
+      "affects_xray": true,
+      "text": "升级 3X-UI 到 3.5.0 会同时升级内置 Xray-core 到 v26.7.11 并重启内核。上游拒绝同时启用 Final Mask 与 REALITY 的 inbound；MTProto 会迁移到多客户端模型，且 tg:// 链接不再携带 remark。另有流量计数修复与 inbound 端口旧 UNIQUE 约束移除。PSP 适配器兼容依据沿用 v3 清单的既有验证记录，不代表对 V4 发布二进制另做实机验证。"
+    },
+    "3.6.0": {
+      "severity": "warning",
+      "affects_xray": true,
+      "text": "升级 3X-UI 到 3.6.0 会同时升级内置 Xray-core 到 v26.7.28 并重启内核。手工配置过 finalmask 的 inbound 请注意：XMC 格式从 usernames 改为 profiles，旧掩码需手工更新；REALITY inbound 的 finalmask.tcp 会被开机迁移删除。若该 inbound 已被 PSP 接管，旧配置快照可能持续 pending，请在 PSP 节点编辑器中重新保存；订阅只读 finalmask.udp，不受这处删除影响。PSP 自己创建的节点不受上述手工配置迁移影响。兼容依据是 v3 清单记录的既有适配器验证，而非 V4 发布二进制新实测。"
+    },
+    "3.7.0": {
+      "severity": "warning",
+      "affects_xray": false,
+      "text": "3X-UI 3.7.0 内置 Xray-core 仍锁定 3.6.0 的 commit（5ca6f4b / v26.7.28）。给 PSP 新建 API token 时必须使用 admin scope；monitor 和 node-sync scope 覆盖不了 PSP 的接口。旧 token 的空 scope 会由上游迁移补为 admin。不要在 3X-UI 中为 PSP 管理的客户端设置面板侧自动续期或流量重置周期：PSP 会主动关闭 resetDay/resetMax/trafficReset/trafficResetDay，避免面板改写 PSP 的到期与流量账本。HWID 上限 limitHwid 由 PSP 管理，应在 PSP 用户编辑界面设置，PSP 会覆盖面板侧改动；非 PSP 管理的客户端不受影响。兼容上限沿用 v3 清单记录的既有 3.7.0 适配器实机验证，并非 V4 发布二进制新实测。"
+    }
+  },
+  "sui_advisories": {
+    "1.6.0": {
+      "severity": "warning",
+      "affects_xray": true,
+      "text": "S-UI 1.6.0 会升级内置 sing-box 到 1.14 并重启内核，还会迁移全局 DNS、缓存、rule-set 和 TLS ACME 配置。legacy DNS address 过滤器及 DNS 规则 strategy 动作不会自动迁移，需要按上游提示手工转换。客户端名称从此不能为空、不能与其他客户端重名，保存时会去除首尾空格；PSP 的唯一客户端 email 满足这项要求。/apiv2、Token 认证和客户端/inbound 模型的兼容依据来自 v3 清单记录的既有 1.6.0 适配器实机验证，并非 V4 发布二进制新实测。"
+    }
+  }
+}

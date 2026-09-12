@@ -23,7 +23,7 @@ const compatCacheFile = "compat-cache.json"
 type compatCachePayload struct {
 	MaxTestedXUI string    `json:"max_tested_xui"`
 	CachedAt     time.Time `json:"cached_at"`
-	PSPVersion   string    `json:"psp_version"` // helps detect "cache from a different PSP build"
+	PSPVersion   string    `json:"psp_version"` // binds the range to this PSP major
 }
 
 var (
@@ -51,9 +51,12 @@ func getCacheDir() string {
 // BEFORE any RefreshRemoteCompat so PSP starts with the last-known-
 // good range even when offline. Missing file is not an error.
 //
-// PSP-version mismatch (cache from a different build) → ignore the
-// cached value. Hard requirement: a PSP v3.7 release with a different
-// MinXUI shouldn't run with v3.6's cached compat data.
+// Keep the last-known range across minor/patch builds in the SAME PSP
+// major, but never import another major's support claim. Each major has
+// an independent remote manifest, so a v4 boot must not apply v3's cache
+// while offline. Missing/unparseable build identity is also ignored: it
+// cannot establish which manifest produced the range. The compiled floor
+// remains the safety backstop until this major's remote fetch succeeds.
 func LoadCompatCache() error {
 	dir := getCacheDir()
 	if dir == "" {
@@ -70,20 +73,17 @@ func LoadCompatCache() error {
 	if err := json.Unmarshal(b, &p); err != nil {
 		return fmt.Errorf("decode compat cache: %w", err)
 	}
+	current, currentOK := parseSemver(Version)
+	cached, cachedOK := parseSemver(p.PSPVersion)
+	if !currentOK || !cachedOK || current[0] <= 0 || cached[0] != current[0] {
+		return nil // optional cache; unproven/wrong-major data is not active state
+	}
 	if _, ok := parseSemver(p.MaxTestedXUI); !ok {
 		return fmt.Errorf("cached max_tested_xui %q is unparseable", p.MaxTestedXUI)
 	}
-	// Apply the cached range regardless of whether p.PSPVersion matches
-	// the current binary. Reason: across PSP minor/patch upgrades the
-	// cached value is almost always still close to right (active range
-	// rarely shrinks across point releases), and the alternative —
-	// "ignore the cache" — leaves admin staring at CompatUnknown for
-	// every panel until the first network fetch lands. The boot probe
-	// fires RefreshRemoteCompat seconds later and overwrites this with
-	// the authoritative value, so worst-case admin sees stale-but-
-	// plausible compat for a few seconds after a PSP upgrade instead of
-	// blank "Unknown" tags. The PSPVersion field is kept in the file
-	// for future diagnostics.
+	// Point releases retain the useful offline range. A subsequent remote
+	// fetch still replaces it with the authoritative row for this build;
+	// cached data cannot lower the independently compiled MinXUI floor.
 	SetActiveMaxTestedXUI(p.MaxTestedXUI)
 	return nil
 }
@@ -91,8 +91,8 @@ func LoadCompatCache() error {
 // latestXUICacheFile is the on-disk cache for the global 3X-UI latest
 // release tag. Separate file from compat-cache.json because the tag is
 // PSP-version-independent — it only depends on what's been published
-// upstream — so the PSP-version mismatch check that invalidates
-// compat-cache across PSP upgrades would needlessly nuke this one too.
+// upstream — so the major-version check that isolates compat-cache
+// across PSP majors would needlessly nuke this one too.
 const latestXUICacheFile = "latest-xui-cache.json"
 
 type latestXUICachePayload struct {

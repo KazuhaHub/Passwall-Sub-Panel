@@ -115,6 +115,8 @@ jobs:
             # This verifies binary execution, not the panel's production startup.
             docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges --user 10001:10001 --entrypoint /app/psp "$image" --version
           done
+      - name: Publisher identity and fail-closed guard tests
+        run: node --test deploy/check_image_test.mjs deploy/check_build_test.mjs deploy/release_workflow_test.mjs
 
   web:
     name: web (typecheck + build + test)
@@ -200,6 +202,8 @@ jobs:
           test "$(go env GOVERSION)" = "$build_toolchain"
           test "$(go tool compile -V | awk '{ print $3 }')" = "$build_toolchain"
       - run: go vet ./...
+      - name: Reachable vulnerability check
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
       - name: test
         run: |
           set -o pipefail

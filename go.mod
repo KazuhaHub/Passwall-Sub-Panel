@@ -5,7 +5,7 @@ go 1.26.0
 toolchain go1.26.8
 
 require (
-	github.com/KazuhaHub/passwall-node v0.0.1-beta2
+	github.com/KazuhaHub/passwall-node v0.0.1-beta3
 	github.com/coreos/go-oidc/v3 v3.20.0
 	github.com/crewjam/saml v0.4.14
 	github.com/gin-gonic/gin v1.12.0
@@ -102,7 +102,7 @@ require (
 	github.com/hashicorp/go-retryablehttp v0.7.8 // indirect
 	github.com/jackc/pgpassfile v1.0.0 // indirect
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
-	github.com/jackc/pgx/v5 v5.9.2 // indirect
+	github.com/jackc/pgx/v5 v5.9.2
 	github.com/jackc/puddle/v2 v2.2.2 // indirect
 	github.com/jinzhu/inflection v1.0.0 // indirect
 	github.com/jinzhu/now v1.1.5 // indirect
