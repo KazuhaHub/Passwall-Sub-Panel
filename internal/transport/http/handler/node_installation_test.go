@@ -97,6 +97,7 @@ func installationRequest(h *AdminServersHandler, method, action, body, prefix st
 	group.GET("/servers/:id/node-installation", h.NodeInstallation)
 	group.POST("/servers/:id/node-credential", h.StoreNodeCredential)
 	group.POST("/servers/:id/node-install-script", h.NodeInstallScript)
+	group.POST("/servers/:id/node-installation-files", h.NodeInstallationFiles)
 	group.GET("/servers/:id/node-agent-status", h.NodeAgentStatus)
 	req := httptest.NewRequest(method, "https://panel.example/api/admin/servers/41/"+action, strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")

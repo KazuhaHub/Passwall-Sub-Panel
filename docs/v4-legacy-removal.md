@@ -1,5 +1,9 @@
 # V4：删除遗留 per-node 所有权模型
 
+> **本次增量清理范围（v4.0.0-beta.2）**：仅落实数据库历史迁移收敛与 V2→V3 CLI 退休，**没有删除仍必要的 Ownership/shared-client 上游 legacy 业务与收敛路径**。当前只读 schema 语义基线检查不是“上游已排空”的证明。已发布的 `v4.0.0-beta.1` 标签/镜像不变；实际范围见[清理登记](migration/v3-to-v4-cleanup.md)，部署见 [V4 升级指南](UPGRADE-v4.md)。
+>
+> 下文是原评审的历史记录；“今天”“机制不存在”“从来没有拒绝启动”等描述指当时，不代表当前源码没有数据库基线保护，也不表示下列全量删除方案已经实施。
+
 > 状态：**已完成穷尽映射与对抗性验证；今天只删掉了三处，其余全部阻塞。**
 > 关联：[inbound-ownership.md](inbound-ownership.md)、[v3.9.0-client-multi-inbound.md](v3.9.0-client-multi-inbound.md)、[ARCHITECTURE.md](ARCHITECTURE.md)。
 
@@ -38,7 +42,7 @@ copyOwnerships-style insert err = SQL logic error: no such table: user_xui_clien
 
 > **结论：V4 删除是一个发布工程问题，不是代码变更问题。** 删除本身是机械的，编译器会带着你走完。不存在的是「保证某台安装在运行假设它已迁移的代码之前，确实已经迁移完」的机制。
 
-（本次已修复：`sqlstore.EnsureLegacyOwnershipTable` + `copyOwnerships` 在**第一批真有行**时惰性建表——空导入不建表，否则那台安装会永远显得「未迁移」。回归测试见 `internal/migrate/ownership_schema_test.go`。）
+（V3 当时已修复：`sqlstore.EnsureLegacyOwnershipTable` + `copyOwnerships` 在**第一批真有行**时惰性建表——空导入不建表，否则那台安装会永远显得「未迁移」。历史回归测试保留在[冻结 V3 源码](https://github.com/KazuhaHub/Passwall-Sub-Panel/blob/v3.9.2/internal/migrate/ownership_schema_test.go)；这套 V2→V3 专用实现自 V4 beta2 起退休。）
 
 ## 3. 今天能删的
 

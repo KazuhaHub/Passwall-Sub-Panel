@@ -1,7 +1,7 @@
 # inbound 配置本地化与订阅渲染零回源（自 v3.5.0-beta.1 起实现）
 
 > 状态：**已实现（首个切片，v3.5.0-beta.1；客户端清零等安全修补在 v3.5.0-beta.2）**。后端写路径 / render / reconcile 轴 A 均已落地并有单测覆盖。
-> 关联：[ARCHITECTURE.md](ARCHITECTURE.md) §3.2 / §4 / §10 / §17；[internal/migrate/README.md](../internal/migrate/README.md)。
+> 关联：[ARCHITECTURE.md](ARCHITECTURE.md) §3.2 / §4 / §10 / §17；[V4 升级指南](UPGRADE-v4.md)。历史 V2→V3 工具说明保留于[冻结 V3 标签](https://github.com/KazuhaHub/Passwall-Sub-Panel/blob/v3.9.2/internal/migrate/README.md)。
 > 实现位置：映射逻辑统一在 [internal/service/inboundcfg](../internal/service/inboundcfg/)（node / render / reconcile 共用）。
 > 历史：原计划走 v4.0.0 major 切版，最终决定非破坏性、增量发布在 v3.5.x（升级无需迁移工具）。
 
@@ -230,7 +230,7 @@ render 生成 proxy 块（[protocols.go `emitProxy`](../internal/service/render/
 ### 阶段 6 · 文档与版本
 - [x] CHANGELOG（中文，v3.5.0-beta.1）。
 - [x] ARCHITECTURE.md 正文回写：§3.2 / §10.3 / §10.4.3（#7 改写 + 新增 #8 轴 A 配置漂移）/ §10.4.5 / §10.5.1 已改为 v3.5 现实（PSP 为 inbound 配置真相源），并标注撤销旧表述。
-- [ ] *TODO*：`internal/migrate/` 改写为 v3.x→v4.0.0 的迁移逻辑等到真正切下个 major 时再做（本特性非破坏性、增量发布）。
+- [x] V4 数据库历史迁移收敛（**v4.0.0-beta.2**）：删除 V2→V3 专用工具，必要的最终 V3→V4 桥接由正常启动执行，不改写成新的 `psp migrate`；必要的上游 Ownership 收敛仍保留，见 [升级指南](UPGRADE-v4.md)。已发布 beta1 标签/镜像不变。
 - [x] 编辑对话框 `GetInboundConfig` 改读本地快照（beta.6）：已捕获节点读本地、与 render/reconcile 一致，未捕获才回源；"是否有本地配置"统一为 `inboundcfg.HasLocalConfig`。
 - [x] 前端节点列表展示 `ConfigSyncState`（v3.9.1）：node DTO 加 `config_sync_state` / `config_synced_at`（[admin_node.go](../internal/transport/http/handler/admin_node.go)），NodesView「状态」列在健康圆点旁加一个方形同步指示（synced/drift/pending/未捕获，带 tooltip + 上次捕获时间），仅对启用的真实节点显示。
 

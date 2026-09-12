@@ -102,6 +102,24 @@ export interface NativeAgentStatus {
   configured_nodes: number
 }
 
+export type NativeInstallMethod = 'linux' | 'docker' | 'manual'
+export type NativeInstallOS = 'linux' | 'darwin' | 'windows'
+export type NativeInstallArch = 'amd64' | 'arm64'
+
+export interface NativeInstallationSelection {
+  method: NativeInstallMethod
+  os: NativeInstallOS
+  arch: NativeInstallArch
+}
+
+export interface NativeInstallationFiles {
+  method: 'docker' | 'manual'
+  os: NativeInstallOS
+  arch?: NativeInstallArch
+  files: { name: string; content: string; sensitive?: boolean }[]
+  steps: { id?: string; title: string; commands?: string[]; description?: string }[]
+}
+
 export interface UpdateServerRequest {
   panel_type?: PanelType
   name?: string
@@ -185,6 +203,14 @@ export async function importNativeCredential(id: number, credential: string, sig
 export async function createNativeInstallScript(id: number, version: string, signal?: AbortSignal) {
   const { data } = await client.post<string>(`/admin/servers/${id}/node-install-script`,
     { version }, { responseType: 'text', signal, _skipErrorToast: true },
+  )
+  return data
+}
+
+export async function createNativeInstallationFiles(id: number, version: string, selection: NativeInstallationSelection, signal?: AbortSignal) {
+  const { data } = await client.post<NativeInstallationFiles>(`/admin/servers/${id}/node-installation-files`,
+    { version, method: selection.method, ...(selection.method === 'manual' ? { os: selection.os, arch: selection.arch } : {}) },
+    { signal, _skipErrorToast: true },
   )
   return data
 }

@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"flag"
+	"fmt"
 	"log"
 	stdlog "log/slog"
 	"net/http"
@@ -19,7 +20,6 @@ import (
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/app"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/config"
-	"github.com/KazuhaHub/passwall-sub-panel/internal/migrate"
 	pkglog "github.com/KazuhaHub/passwall-sub-panel/internal/pkg/log"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/seed"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/upnnorm"
@@ -72,25 +72,23 @@ func ensureDirs(cfg *config.Config) {
 	}
 }
 
+const retiredMigrateMessage = "ERROR: psp migrate (V2→V3) was retired in V4. Use the frozen PSP v3.9.2 release to migrate V2→V3, then finish the V3 upgrade. The final V3 release (v3.9.2 / v3.9.2-beta.20) upgrades to V4 automatically on normal startup; no migrate command is needed."
+
 func main() {
-	// Subcommand dispatch. Currently only `migrate` is intercepted so a
-	// `psp` invocation with no args (or with --config) still falls through
-	// to the normal panel boot. Keeping this BEFORE config load / flag
-	// parsing means `migrate`'s own FlagSet owns its argv and doesn't
-	// collide with the panel's --config flag.
-	//
-	// Upgrade policy (see docs/ARCHITECTURE.md §16): the embedded migrator
-	// only handles the immediately previous major version → current. Older
-	// installs upgrade through each major in turn (vN-2 → vN-1 → vN).
+	// V4 no longer embeds the V2→V3 offline migrator. Keep its command name
+	// reserved BEFORE config load and flag parsing: flag.Parse ignores trailing
+	// positional arguments, so simply deleting the dispatch could accidentally
+	// start the panel (and migrate its configured database) instead of refusing.
 	if len(os.Args) > 1 && os.Args[1] == "migrate" {
-		os.Exit(migrate.Run(os.Args[2:]))
+		fmt.Fprintln(os.Stderr, retiredMigrateMessage)
+		os.Exit(2)
 	}
 	// `psp normalize-upn` folds stored login names to their canonical form.
 	// Operator-invoked rather than a boot migration: folding can violate the
 	// users.upn unique index on an install that already holds a near-duplicate
 	// pair, and neither aborting at boot nor silently rewriting an admin's
 	// login name is acceptable while the panel is coming up. Dry run unless
-	// --apply. Owns its own FlagSet, like migrate.
+	// --apply. Owns its own FlagSet, separate from panel boot flags.
 	if len(os.Args) > 1 && os.Args[1] == "normalize-upn" {
 		os.Exit(upnnorm.Run(os.Args[2:]))
 	}
@@ -104,13 +102,24 @@ func main() {
 		return
 	}
 
-	// Main panel flags. Subcommands above (migrate / version) own their own
-	// argv so flag.Parse() here only sees the panel boot path. --debug is a
+	// Main panel flags. Subcommands above are handled before flag.Parse(),
+	// which only sees the panel boot path. --debug is a
 	// shortcut equivalent to setting PSP_LOG_LEVEL=debug; both are honored
 	// (env first, flag last — flag wins on conflict).
 	cfgPathFlag := flag.String("config", "", "main config path")
 	debugFlag := flag.Bool("debug", false, "enable debug-level logging (equivalent to PSP_LOG_LEVEL=debug); unlocks per-stage timing in PollOnce and similar diagnostic logs")
 	flag.Parse()
+	// Also refuse unconsumed commands after boot flags, e.g. --config x migrate.
+	// Go's flag package stops at the first positional argument without an error;
+	// ignoring it would turn an attempted maintenance command into daemon boot.
+	if flag.NArg() != 0 {
+		if flag.Arg(0) == "migrate" {
+			fmt.Fprintln(os.Stderr, retiredMigrateMessage)
+		} else {
+			fmt.Fprintln(os.Stderr, "ERROR: unexpected positional arguments. Panel startup accepts only --config and --debug; commands (version / normalize-upn) must come first.")
+		}
+		os.Exit(2)
+	}
 
 	if os.Getenv("GIN_MODE") == "" {
 		gin.SetMode(gin.ReleaseMode)

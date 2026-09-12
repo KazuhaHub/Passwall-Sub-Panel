@@ -106,9 +106,9 @@ func (o LimitOverrides) InheritsDeviceLimit() bool { return o.DeviceLimit == nil
 // auto-provision — carries plain scalars where 0 has always meant "unlimited".
 // None of them has a way to say "inherit", so a 0 arriving here is not a
 // deliberate opt-out of the group's policy; it is the absence of an opinion.
-// Reading it as inherit is the same judgement migrateLimitsToTriState makes
-// about stored zeroes, and for the same reason: without a group layer to stand
-// against, a 0 never carried override intent.
+// Reading it as inherit applies only to this scalar creation API. Persisted
+// tri-state zeroes are explicit overrides and must never be reinterpreted by
+// startup repair or a later schema migration.
 //
 // A non-zero value is an explicit override, because the caller did choose it.
 //

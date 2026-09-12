@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -37,8 +36,8 @@ type userRow struct {
 	// Email previously carried `;index` but no callsite ever issued
 	// `WHERE email = ?` — every search is `LOWER(email) LIKE ?` which
 	// can't use a B-tree index. The index was pure write amplification
-	// on the busy users table. cleanupLegacyState drops the existing
-	// auto-named idx_users_email so upgraded installs reclaim it.
+	// on the busy users table. The V3 -> V4 bridge normalizes this
+	// app-owned obsolete index once, including failed best-effort V3 cleanup.
 	Email           string `gorm:"size:255"`
 	PasswordHash    string `gorm:"size:255"`
 	Role            string `gorm:"size:16;not null;default:user"`
@@ -52,7 +51,8 @@ type userRow struct {
 	// NULL = inherit from the group, 0 = explicitly unlimited, N = explicitly N.
 	// Without the third state 0 would be ambiguous the moment groups gained a
 	// policy, and reading it wrong invents a quota for a user who has none.
-	// See domain/limits.go and migrateLimitsToTriState below.
+	// See domain/limits.go. The supported V3 baseline already has this
+	// meaning; V4 must not reinterpret a deliberately-entered zero.
 	TrafficLimitBytes  *int64
 	IPLimit            *int
 	DeviceLimit        *int
@@ -346,7 +346,7 @@ type nodeRow struct {
 	LastTrafficTotalBytes int64  `gorm:"default:0"`
 	// v3.9.0 node-traffic baseline (sourced from the inbound counter; see
 	// domain.Node). AutoMigrate adds these defaulting to 0/false;
-	// backfillTrafficCounterNulls COALESCEs any NULLs on existing rows
+	// repairTrafficCounterNulls COALESCEs any NULLs on existing rows
 	// (defense-in-depth, symmetric with last_traffic_*). recordNodeStats seeds
 	// the live baseline on the first poll (LastInboundSeeded gate).
 	LastInboundUpBytes      int64  `gorm:"default:0"`
@@ -1086,7 +1086,7 @@ func (subLogRow) TableName() string { return "sub_logs" }
 // (traffic / health / reconcile) never see them and don't need a runtime
 // IsSeparator() check on every row. Replaces the pre-v3.0.0-beta.7 model
 // of mixing separators into `nodes` with a `kind` column + a synthetic
-// negative inbound_id; legacy rows are cleaned up by cleanupLegacyState.
+// negative inbound_id; V4 requires that V3 already migrated those rows.
 type separatorRow struct {
 	ID          int64  `gorm:"primaryKey;autoIncrement"`
 	DisplayName string `gorm:"size:255;not null"`
@@ -1472,32 +1472,8 @@ func (j *jsonRelayHealth) Scan(value any) error {
 
 // ---- Schema ----
 
-// schemaModels is every row struct AutoMigrate manages — the single source of
-// truth for both the migrator and the schema_guard_test (which reflects over it
-// to catch cross-dialect-incompatible column definitions before they reach a
-// real MySQL/Postgres).
-// EnsureLegacyOwnershipTable creates `user_xui_clients` if it is absent.
-//
-// The table is deliberately NOT in schemaModels (see the note there): a running
-// panel must never grow it back, because its absence is exactly what proves an
-// install finished the shared-client migration — DropIfMigrated drops it only
-// at zero rows, so the table being gone is a one-way, machine-checkable marker.
-//
-// The v2 -> v3 offline migrator is the one caller that legitimately needs it.
-// It runs EnsureSchema against a BLANK destination and then imports the source's
-// legacy per-node clients, which have nowhere to land otherwise. Exported rather
-// than done with a raw DDL string in the migrator so the columns cannot drift
-// from ownershipRow.
-//
-// Call this only when there is actually a row to write: creating an empty table
-// would make a freshly-imported install look un-migrated forever.
-func EnsureLegacyOwnershipTable(db *gorm.DB) error {
-	if db.Migrator().HasTable(&ownershipRow{}) {
-		return nil
-	}
-	return db.Migrator().CreateTable(&ownershipRow{})
-}
-
+// schemaModels is every current row managed by AutoMigrate and inspected by
+// schema_guard_test. Retired V2 tables are never created by the V4 binary.
 var schemaModels = []any{
 	&schemaMigrationRow{},
 	&userRow{},
@@ -1545,161 +1521,28 @@ var schemaModels = []any{
 	&certEventRow{},
 }
 
-// EnsureSchema keeps the database schema aligned with the current row structs.
-// Keep schema changes centralized here instead of adding one-off schema update
-// helpers for every new field.
+// EnsureSchema validates the supported input before performing any DDL, then
+// maintains the current schema and applies the bounded V3 -> V4 bridge.
 func EnsureSchema(db *gorm.DB) error {
-	if err := db.AutoMigrate(schemaModels...); err != nil {
+	empty, err := inspectSchemaBaseline(db)
+	if err != nil {
 		return err
 	}
-	if err := migratePSPClientIdentityIndex(db); err != nil {
-		return err
-	}
-	if err := migratePSPClientInboundState(db); err != nil {
-		return err
-	}
-	if err := backfillPSPClientInboundAppliedCredentials(db); err != nil {
-		return err
-	}
-	if err := migrateNodeEndpointState(db); err != nil {
-		return err
-	}
-	if err := backfillTrafficCounterNulls(db); err != nil {
-		return err
-	}
-	// After AutoMigrate (the columns must be nullable first) and before
-	// anything reads a user.
-	if err := migrateLimitsToTriState(db); err != nil {
-		return err
-	}
-	if err := seedBuiltinRoles(db); err != nil {
-		return err
-	}
-	return cleanupLegacyState(db)
-}
-
-const pspClientInboundAppliedCredentialsMigrationID = "psp_client_inbound_applied_credentials_v1"
-
-// backfillPSPClientInboundAppliedCredentials gives upgraded applied rows the
-// credential snapshot that was live at the migration boundary. Future desired
-// rotations may then advance psp_clients immediately while render continues to
-// serve this confirmed snapshot until convergence reports a newer roster.
-//
-// The row-wise GORM update is deliberate: unlike UPDATE ... FROM syntax it is
-// portable across SQLite, MySQL and PostgreSQL, and this runs only once.
-func backfillPSPClientInboundAppliedCredentials(db *gorm.DB) error {
-	return applyOnce(db, pspClientInboundAppliedCredentialsMigrationID, func(tx *gorm.DB) error {
-		var attachments []pspClientInboundRow
-		if err := tx.Where("state = ? AND applied_uuid = ?", string(domain.ClientApplyApplied), "").Find(&attachments).Error; err != nil {
+	if empty {
+		if err := beginEmptyV4Initialization(db); err != nil {
 			return err
 		}
-		if len(attachments) == 0 {
-			return nil
-		}
-		ids := make([]int64, 0, len(attachments))
-		seen := make(map[int64]struct{}, len(attachments))
-		for _, attachment := range attachments {
-			if _, ok := seen[attachment.ClientID]; !ok {
-				seen[attachment.ClientID] = struct{}{}
-				ids = append(ids, attachment.ClientID)
-			}
-		}
-		var clients []pspClientRow
-		if err := tx.Where("id IN ?", ids).Find(&clients).Error; err != nil {
-			return err
-		}
-		byID := make(map[int64]pspClientRow, len(clients))
-		for _, client := range clients {
-			byID[client.ID] = client
-		}
-		for _, attachment := range attachments {
-			client, ok := byID[attachment.ClientID]
-			if !ok {
-				continue
-			}
-			if err := tx.Model(&pspClientInboundRow{}).Where("id = ?", attachment.ID).Updates(map[string]any{
-				"applied_email": client.Email, "applied_uuid": client.UUID, "applied_password": client.Password,
-			}).Error; err != nil {
-				return err
-			}
-		}
-		return nil
-	})
-}
-
-// migratePSPClientIdentityIndex removes the v3.9.x unique (panel_id,email)
-// index. Email is an upstream projection: changing the configured domain or
-// crossing the one/two-partition boundary rewrites it, so it cannot determine
-// whether the durable psp_clients row (and its traffic baselines) survives.
-//
-// AutoMigrate creates the replacement non-unique lookup index declared on
-// pspClientRow but intentionally does not drop indexes removed from struct
-// tags. The explicit, fatal migration is therefore required on every supported
-// dialect; leaving the old uniqueness behind would make the new ID-keyed write
-// path fail precisely during a re-key. Existing rows are not rewritten, so
-// their database-minted IDs and every counter baseline remain byte-for-byte
-// intact. HasIndex makes this safe to run on every boot and on fresh installs.
-func migratePSPClientIdentityIndex(db *gorm.DB) error {
-	const legacyIndex = "uk_psp_client"
-	if !db.Migrator().HasIndex(&pspClientRow{}, legacyIndex) {
-		return nil
 	}
-	if err := db.Migrator().DropIndex(&pspClientRow{}, legacyIndex); err != nil {
-		return fmt.Errorf("drop legacy psp_clients email identity index: %w", err)
+	if err := autoMigrateCurrentSchema(db); err != nil {
+		return err
 	}
-	return nil
-}
-
-const pspClientInboundStateMigrationID = "psp_client_inbound_state_v4"
-
-// migratePSPClientInboundState reinterprets the old confirmation boolean into
-// the four-state convergence model exactly once. A false row was never proven
-// rejected; it therefore becomes pending and starts an observable clock at the
-// migration instant. The legacy column is dropped later by cleanupLegacyState,
-// after this transaction and its durable marker commit together.
-func migratePSPClientInboundState(db *gorm.DB) error {
-	legacyExists := db.Migrator().HasColumn(&pspClientInboundRow{}, "provisioned")
-	return applyOnce(db, pspClientInboundStateMigrationID, func(tx *gorm.DB) error {
-		if !legacyExists {
-			return nil
-		}
-		now := time.Now().UTC()
-		return tx.Exec(`
-UPDATE psp_client_inbounds
-SET
-	state = CASE WHEN provisioned = ? THEN ? ELSE ? END,
-	applied_version = 0,
-	first_failed_at = CASE
-		WHEN provisioned = ? THEN NULL
-		ELSE COALESCE(first_failed_at, ?)
-	END
-`, true, string(domain.ClientApplyApplied), string(domain.ClientApplyPending), true, now).Error
-	})
-}
-
-const nodeEndpointStateMigrationID = "node_endpoint_desired_observed_v4"
-
-// migrateNodeEndpointState splits the legacy ambiguous port/protocol pair into
-// explicit desired and observed columns. At the migration boundary the single
-// old value is the only fact available, so copying it to both sides preserves
-// behavior and begins in a converged state. Future reports can update only the
-// observed pair through NodeRepo.UpdateObservedEndpoint.
-func migrateNodeEndpointState(db *gorm.DB) error {
-	legacyPort := db.Migrator().HasColumn(&nodeRow{}, "port")
-	legacyProtocol := db.Migrator().HasColumn(&nodeRow{}, "protocol")
-	return applyOnce(db, nodeEndpointStateMigrationID, func(tx *gorm.DB) error {
-		if !legacyPort && !legacyProtocol {
-			return nil
-		}
-		assignments := make([]string, 0, 4)
-		if legacyPort {
-			assignments = append(assignments, "desired_port = port", "observed_port = port")
-		}
-		if legacyProtocol {
-			assignments = append(assignments, "desired_protocol = protocol", "observed_protocol = protocol")
-		}
-		return tx.Exec("UPDATE nodes SET " + strings.Join(assignments, ", ")).Error
-	})
+	if err := migrateV3ToV4(db); err != nil {
+		return err
+	}
+	if err := repairTrafficCounterNulls(db); err != nil {
+		return err
+	}
+	return seedBuiltinRoles(db)
 }
 
 // seedBuiltinRoles ensures the three built-in roles (RBAC v2) exist after
@@ -1784,146 +1627,13 @@ func seedBuiltinRoles(db *gorm.DB) error {
 	return nil
 }
 
-// cleanupLegacyState is the curated home for "one-time cleanups after a
-// breaking same-major schema evolution". Mirrors how MariaDB / Postgres
-// ship `pg_upgrade` finalize steps — every block is idempotent, version-
-// tagged, and gets evicted when the next major version ships (per
-// docs/ARCHITECTURE.md §16.4).
-//
-// Rules:
-//  1. Idempotent: re-running on a clean DB MUST be a no-op
-//  2. Version-tagged in the comment: makes the v(N+1) reset trivially safe
-//  3. NEVER auto-DROP an unknown table or column — admin custom state is
-//     out of scope; we only touch what we explicitly removed
-//  4. log.Warn when a block actually fires, so an upgrade leaves an
-//     audit trail in docker logs
-func cleanupLegacyState(db *gorm.DB) error {
-	// v3.0.0-beta.7: separators moved out of `nodes` (where they lived as
-	// rows with kind='separator' + a synthetic negative inbound_id) into
-	// the dedicated `nodes_separator` table. Drop any leftover rows so
-	// the post-upgrade panel doesn't show ghost separators that the new
-	// CRUD has no idea how to edit. Admins recreate under the new model.
-	var legacySeparators int64
-	if err := db.Model(&nodeRow{}).Where("kind = ?", "separator").Count(&legacySeparators).Error; err != nil {
-		// kind column might not exist on a very old install — that's fine,
-		// such installs go through `psp migrate` first which doesn't carry
-		// the column forward.
-		return nil
-	}
-	if legacySeparators > 0 {
-		if err := db.Where("kind = ?", "separator").Delete(&nodeRow{}).Error; err != nil {
-			return fmt.Errorf("cleanup legacy separators: %w", err)
-		}
-		fmt.Printf("[cleanupLegacyState] dropped %d legacy kind='separator' rows from `nodes`; recreate under the new `nodes_separator` table\n", legacySeparators)
-	}
-
-	// v3.0.0-rc.4: separator visibility model reshaped.
-	//   show_in_all_groups (bool) → mode (string: "global" / "node_bound")
-	//   group_ids (jsonInt64s)     → node_ids (jsonInt64s)
-	// AutoMigrate adds the new columns (with default mode="global") above;
-	// here we drop the now-unused legacy columns so prod libs don't carry
-	// orphan storage indefinitely. Existing rows surface as Mode=global —
-	// the prior "show_in_all_groups=false + group_ids=[...]" semantic
-	// translates to the safest default ("show everywhere") and the admin
-	// re-picks node_ids in the UI if they want node-bound visibility.
-	// Idempotent: each DropColumn guarded by HasColumn.
-	if db.Migrator().HasColumn(&separatorRow{}, "show_in_all_groups") {
-		fmt.Println("[cleanupLegacyState] dropping legacy column nodes_separator.show_in_all_groups (replaced by `mode`)")
-		if err := dropLegacyColumn(db, &separatorRow{}, "show_in_all_groups"); err != nil {
-			return fmt.Errorf("drop legacy show_in_all_groups: %w", err)
-		}
-	}
-	if db.Migrator().HasColumn(&separatorRow{}, "group_ids") {
-		fmt.Println("[cleanupLegacyState] dropping legacy column nodes_separator.group_ids (replaced by `node_ids`)")
-		if err := dropLegacyColumn(db, &separatorRow{}, "group_ids"); err != nil {
-			return fmt.Errorf("drop legacy group_ids: %w", err)
-		}
-	}
-
-	// v3.5.1-beta.2: sub_logs index restructured from two single-column
-	// auto-named indexes (`idx_sub_logs_user_id` + `idx_sub_logs_accessed_at`,
-	// generated by GORM's bare `gorm:"index"` tag) to a composite
-	// `idx_sub_user_time` + dedicated `idx_sub_accessed`. AutoMigrate
-	// creates the new pair but never drops the old; left in place they add
-	// write overhead on every sub_logs insert (which is the highest-rate
-	// table on the public sub endpoint). DropIndex is cross-dialect via
-	// GORM Migrator; HasIndex makes both blocks idempotent. Best-effort:
-	// on failure we log and continue rather than block startup — the
-	// redundancy is a perf wart, not a correctness one.
-	if db.Migrator().HasIndex(&subLogRow{}, "idx_sub_logs_user_id") {
-		fmt.Println("[cleanupLegacyState] dropping legacy single-column index sub_logs.idx_sub_logs_user_id (superseded by composite idx_sub_user_time)")
-		if err := db.Migrator().DropIndex(&subLogRow{}, "idx_sub_logs_user_id"); err != nil {
-			fmt.Printf("[cleanupLegacyState] WARN: drop legacy idx_sub_logs_user_id failed: %v (continuing — redundant index is harmless)\n", err)
-		}
-	}
-	if db.Migrator().HasIndex(&subLogRow{}, "idx_sub_logs_accessed_at") {
-		fmt.Println("[cleanupLegacyState] dropping legacy single-column index sub_logs.idx_sub_logs_accessed_at (superseded by dedicated idx_sub_accessed)")
-		if err := db.Migrator().DropIndex(&subLogRow{}, "idx_sub_logs_accessed_at"); err != nil {
-			fmt.Printf("[cleanupLegacyState] WARN: drop legacy idx_sub_logs_accessed_at failed: %v (continuing — redundant index is harmless)\n", err)
-		}
-	}
-
-	// v3.6.1-beta.6: users.email's auto-named idx_users_email is dead
-	// weight — no callsite issues `WHERE email = ?` (all searches go
-	// through `LOWER(email) LIKE ?`, which can't use a B-tree index).
-	// Pure write amplification on user upserts; drop it. Best-effort.
-	if db.Migrator().HasIndex(&userRow{}, "idx_users_email") {
-		fmt.Println("[cleanupLegacyState] dropping unused index users.idx_users_email (no callsite uses an equality predicate)")
-		if err := db.Migrator().DropIndex(&userRow{}, "idx_users_email"); err != nil {
-			fmt.Printf("[cleanupLegacyState] WARN: drop unused idx_users_email failed: %v (continuing — index is harmless beyond the wasted writes)\n", err)
-		}
-	}
-
-	// v4 native-agent convergence: the old bool could not distinguish pending,
-	// rejected or blocked work and therefore could never time out. Its values
-	// were translated transactionally by migratePSPClientInboundState above;
-	// keeping the column would leave two writable representations of one fact.
-	if db.Migrator().HasColumn(&pspClientInboundRow{}, "provisioned") {
-		fmt.Println("[cleanupLegacyState] dropping psp_client_inbounds.provisioned (replaced by four-state convergence)")
-		if err := dropLegacyColumn(db, &pspClientInboundRow{}, "provisioned"); err != nil {
-			return fmt.Errorf("drop legacy psp_client_inbounds.provisioned: %w", err)
-		}
-	}
-
-	// v4 native-agent convergence: the old endpoint pair mixed administrator
-	// intent with panel observations. migrateNodeEndpointState copied it to both
-	// explicit axes; retaining it would recreate an ambiguous third writer.
-	for _, legacy := range []string{"port", "protocol"} {
-		if !db.Migrator().HasColumn(&nodeRow{}, legacy) {
-			continue
-		}
-		fmt.Printf("[cleanupLegacyState] dropping nodes.%s (replaced by desired/observed endpoint columns)\n", legacy)
-		if err := dropLegacyColumn(db, &nodeRow{}, legacy); err != nil {
-			return fmt.Errorf("drop legacy nodes.%s: %w", legacy, err)
-		}
-	}
-
-	return nil
-}
-
-// The bundled SQLite engine supports native DROP COLUMN. The SQLite GORM
-// migrator instead rebuilds the table and loses independent indexes/triggers,
-// including uniqueness created by AutoMigrate earlier in the same boot. Native
-// ALTER preserves unrelated schema objects and rejects dependencies on a retired
-// column rather than silently deleting operator-managed state. These names come
-// only from the curated cleanup above, never request input.
-func dropLegacyColumn(db *gorm.DB, model any, column string) error {
-	if db.Dialector.Name() != "sqlite" {
-		return db.Migrator().DropColumn(model, column)
-	}
-	stmt := &gorm.Statement{DB: db}
-	if err := stmt.Parse(model); err != nil {
-		return err
-	}
-	return db.Exec("ALTER TABLE " + stmt.Quote(stmt.Schema.Table) + " DROP COLUMN " + stmt.Quote(column)).Error
-}
-
-// backfillTrafficCounterNulls zeroes any NULL traffic counters left by columns
+// repairTrafficCounterNulls is ongoing defensive data repair, not a version
+// conversion. It zeroes NULL traffic counters left by columns
 // that were added before they had a default. The WHERE clauses make this a
 // no-op once every row is non-NULL (the common case) — without them the UPDATE
 // rewrote EVERY users + nodes row on every single boot (pure write amplification
 // that grows with the deployment).
-func backfillTrafficCounterNulls(db *gorm.DB) error {
+func repairTrafficCounterNulls(db *gorm.DB) error {
 	if err := db.Exec(`
 UPDATE users
 SET
@@ -2001,42 +1711,5 @@ func applyOnce(db *gorm.DB, id string, fn func(tx *gorm.DB) error) error {
 			return fmt.Errorf("schema migration %s: %w", id, err)
 		}
 		return tx.Create(&schemaMigrationRow{ID: id, AppliedAt: time.Now().UTC()}).Error
-	})
-}
-
-// limitsTriStateMigrationID names the migration that gave the three
-// entitlement columns their third state.
-const limitsTriStateMigrationID = "limits_tristate_v3.9.3"
-
-// migrateLimitsToTriState reinterprets a stored 0 as "inherit from the group".
-//
-// Before this change 0 was the ONLY way to express "no limit", and there was no
-// group policy for a user value to stand against — so no stored 0 can carry the
-// intent "unlimited, in deliberate contrast to whatever my group says". That is
-// what makes the reinterpretation safe: it discards no information that ever
-// existed.
-//
-// It also makes the group layer reach the users who need it. Left as explicit
-// zeroes, every pre-existing user would silently opt out of their group's
-// policy, and an operator setting a group quota would find it applied to
-// nobody — the exact per-user drudgery this feature removes.
-//
-// Behaviour at the moment it runs is unchanged: every group starts stating
-// nothing (the new columns arrive NULL), so inherit resolves to unlimited,
-// which is what a 0 meant. Non-zero values are untouched and stay explicit
-// overrides.
-//
-// Each column is converted independently — a user may well have a real traffic
-// quota and no connection caps.
-func migrateLimitsToTriState(db *gorm.DB) error {
-	return applyOnce(db, limitsTriStateMigrationID, func(tx *gorm.DB) error {
-		for _, col := range []string{"traffic_limit_bytes", "ip_limit", "device_limit"} {
-			if err := tx.Exec(
-				"UPDATE users SET " + col + " = NULL WHERE " + col + " = 0",
-			).Error; err != nil {
-				return fmt.Errorf("column %s: %w", col, err)
-			}
-		}
-		return nil
 	})
 }
