@@ -13,6 +13,8 @@
 | [0025](0025-push-pull-decision-rule.md) | 推还是拉：决策规则，以及 PSP 今天为什么没有选择权 | 已接受（规则）；Q2a 的结论随 ADR 0024 解冻 |
 | [0029](0029-xray-reality-client-compatibility.md) | Xray core 升级按客户端兼容矩阵放行，不跟随 latest | 已接受（2026-09-10） |
 | [0030](0030-separate-quic-and-udp-controls.md) | QUIC 与普通 UDP 独立、无地区假设地控制 | 已接受（2026-09-11） |
+| [0031](0031-native-task-id-incarnations.md) | 原生任务 ID 使用新启动 incarnation，不跟随数据库回退 | 已接受（ID 机制；生命周期闸尚未完成） |
+| [0032](0032-native-task-lifecycle.md) | 原生任务的到期、结果证据与恢复边界 | 提案（支持窗口待确认） |
 
 > 编号从 0023 起始：更早的设计决策分散记录在 [ARCHITECTURE.md](../ARCHITECTURE.md)、各专题文档（如 [3xui-compat.md](../3xui-compat.md)、[panel-adapters.md](../panel-adapters.md)）以及提交历史中，尚未回溯整理为 ADR。新增决策请沿用此处的递增编号。
 
