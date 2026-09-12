@@ -55,6 +55,7 @@ func TestRespondPublicError_PreservesSentinels(t *testing.T) {
 	}{
 		{fmt.Errorf("%w: email is required", domain.ErrValidation), http.StatusBadRequest, "email is required"},
 		{domain.ErrConflict, http.StatusConflict, "Conflict"},
+		{domain.ErrResourceExhausted, http.StatusTooManyRequests, "Resource exhausted"},
 		{domain.ErrNotFound, http.StatusNotFound, "Not found"},
 	}
 	for _, tc := range cases {

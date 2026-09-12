@@ -88,9 +88,11 @@ Issue/stream/observed 写入仍是多个事务，任一失败依赖节点保留 
 组合，节点不能用未来坐标或同版本错摘要污染收敛状态。协议包同时约束响应调度值，后台设置校验
 直接引用同一常量，避免控制面和 agent 各自维护不同上限。配额 pending delta 还会重新核验
 agent→panel→client 所有权，越权 client key 与已退役 agent 缓存都不能影响别的面板用户。
-跨仓模块发布闸已于 2026-09-11 完成：Passwall-Node revision `86b565a98293` 已进入 main，PSP
-依赖已更新到 `v0.0.0-20260911234806-86b565a98293`。关闭父目录 `go.work` 后，PSP 全量 Go
-测试、vet、关键路径 race、C2 真 agent 契约测试和六平台交叉编译均通过。
+任务基础的跨仓模块发布闸已于 2026-09-11 完成：Passwall-Node PR #6 的 revision
+`83a91c39304e` 已进入 main，PSP PR #38 将依赖更新到
+`v0.0.0-20260912005623-83a91c39304e`。关闭父目录 `go.work` 后，PSP 全量 Go 测试、vet、
+关键路径 race、C2 真 agent 契约测试通过；GitHub CI 的 SQLite/MySQL/PostgreSQL、Web 与
+六平台交叉编译均通过。
 
 管理端现在可直接创建 `panel_type=psp`：PSP 在一个事务中建立 panel、agent 和三条流，返回一次性的
 agent ID / Bearer 凭据 / sync endpoint；数据库只存 SHA-256。原生节点只能编辑名称和备注，旧凭据可
@@ -129,22 +131,26 @@ sing-box 当前核验 `1.14.0`，原生编译 VLESS、VMess、Trojan、Shadowsoc
   `node_agent_tasks` 仓储覆盖 `queued / offered / succeeded / failed / indeterminate`，不会复用面向
   第三方面板重试的 `sync_tasks`。RealityProbe 管理 API/UI 与 agent 自升级仍未实现；当前没有任何
   生产入口创建真实任务。
-- **开放第一个真实任务前还有四道硬门**，不可用“随机 ID 冲突概率很低”替代：
-  1. 对每个 agent 同时限制 `queued + offered` 的行数与输入总字节，创建与删除共用 owner lock，
-     防止离线节点把数据库和每轮扫描无限撑大；
-  2. 定义并实现双端 expiry：PSP 过期后不再 offer，Node 在副作用开始前也必须拒绝过期任务；已经
+- **per-agent active task quota 已闭合（2026-09-11）**：`CreateOrGet` 在 owner-lock 事务内同时限制
+  `queued + offered` 为 **256 行 / 16 MiB 原始 args**；这相当于四个满额 offer window，是不可经
+  UI settings 动态放大的 compiled hard cap。创建、下发、完成与 agent 删除共用同一 owner lock，
+  不依赖缓存或可漂移的计数列。只有新插入占用 quota；满额时 exact task/idempotency replay 仍成功，
+  身份冲突仍是 `ErrConflict`，新工作超限则为 `ErrResourceExhausted`（HTTP 429）。三种终态均释放
+  active quota，但 tombstone 继续保留。这里限制的是原始输入，不是 JSON/base64 或数据库页占用。
+- **开放第一个真实任务前仍有三道硬门**，不可用“随机 ID 冲突概率很低”替代：
+  1. 定义并实现双端 expiry：PSP 过期后不再 offer，Node 在副作用开始前也必须拒绝过期任务；已经
      开始后失去确定结论要回报 `indeterminate`，不能伪装为普通失败；
-  3. 定义 terminal tombstone 保留期与清理器，保留期必须覆盖 Node outbox 重放、最长离线时间及
+  2. 定义 terminal tombstone 保留期与清理器，保留期必须覆盖 Node outbox 重放、最长离线时间及
      备份恢复窗口，不能让迟到的相同结果从幂等 200 退化成永久 unknown-task 500；
-  4. 定义 DB restore 后的 task identity epoch / ID 禁止复用窗口。恢复旧备份既可能遗失已完成
+  3. 定义 DB restore 后的 task identity epoch / ID 禁止复用窗口。恢复旧备份既可能遗失已完成
      tombstone，也可能复活曾经下发的任务；在恢复演练和跨仓测试通过前不得暴露有副作用的 kind。
 - **Node v8 的回滚边界**：v8 SQLite 增加 durable task journal。旧 v7 binary 看到
   `PRAGMA user_version=8` 会以 “newer than supported” 直接拒绝启动；它不会只读运行或误写数据库。
   回滚必须同时恢复 v7 数据库备份（并处理上述 task identity 窗口），不能只替换二进制。
-- **此前 C2/core 的跨仓发布闸已完成（2026-09-11）**：当时 Passwall-Node 先发布、PSP 再更新
-  pseudo-version，并在 `GOWORK=off` 下通过全量 Go 测试/vet、关键路径 race、C2 真 agent 契约测试
-  及六平台交叉编译。本轮 task wire 是新的 additive revision，合并前必须按同一顺序重新发布 Node、
-  更新 PSP 依赖并脱离父目录 `go.work` 重跑；本地 workspace 通过不能替代这道闸。
+- **任务基础的跨仓发布闸已完成（2026-09-11）**：Passwall-Node PR #6 先合并，PSP PR #38 再更新
+  pseudo-version，并脱离父目录 `go.work` 通过上述测试与三库/六平台 CI。后续 expiry 等新的
+  additive wire revision 仍必须按同一顺序先发布 Node、更新 PSP 依赖并重跑；本地 workspace
+  通过不能替代这道闸。
 - **`Passwall-Node` 的 licence**（README 写着 TBD）。
 
 ## 4. 这个项目的三条底线

@@ -251,7 +251,8 @@ agent 自升级及下面的任务上线硬门不属于本阶段完成条件。
 
 #### B4 — durable task transport 的边界与上线硬门
 
-**状态（2026-09-11）**：transport 已完成，真实 task kind 尚未对管理员或外部 API 开放。
+**状态（2026-09-11）**：transport 与 per-agent active quota 已完成，真实 task kind 尚未对管理员
+或外部 API 开放。
 `node_agent_tasks` 与第三方面板写入失败用的 `sync_tasks` 是两套不同状态机。前者只持久化
 `queued / offered / succeeded / failed / indeterminate`；没有 `running`，因为 PSP 无法从一次
 断开的 HTTP 往返权威判断远端是否正在执行。`offered` 会按同一 `(id, kind, input_sha256, args)`
@@ -259,15 +260,21 @@ agent 自升级及下面的任务上线硬门不属于本阶段完成条件。
 整批 `task_results` 是一个事务，但完整 report 不是一个跨仓储大事务：后续写入失败时以 Node
 immutable outbox 重放并由 PSP 的相同终态幂等来收敛。
 
-开放第一个 RealityProbe 或任何有副作用任务前，以下四项必须先有跨 PSP/Node 的失败路径测试：
+**per-agent active quota 已闭合**：`CreateOrGet` 在同一个 owner-lock 事务内，对 `queued + offered`
+同时限制 **256 行 / 16 MiB 原始 args**（四个满额 offer window）。这是 compiled hard cap，不是
+运行中可经 UI settings 放大的旋钮；动态设置还需要解决降额后的已有积压和 settings/owner 的锁序，
+不能以缓存读取替代原子 admission。创建、下发、完成与 agent 删除共用同一 owner lock，三库使用
+`COUNT(*)` 与 `COALESCE(SUM(LENGTH(args)), 0)` 计量原始 BLOB/bytea 字节，无需新增可漂移计数列。
+quota 只检查新插入：满额时 exact task/idempotency replay 仍成功，身份冲突仍是 `ErrConflict`，
+超限的新工作为 `ErrResourceExhausted`（HTTP 429）；任一终态释放 active quota，但不删除 tombstone。
 
-1. **per-agent active quota**：对 `queued + offered` 同时限制行数和原始 args 总字节；配额检查、创建
-   与 agent 删除共用同一 owner lock，防止离线 agent 造成无界数据库增长或扫描成本。
-2. **双端 expiry**：协议给出一个双方同义的执行截止条件；PSP 到期停止 offer，Node 在开始副作用前
+开放第一个 RealityProbe 或任何有副作用任务前，以下三项仍必须先有跨 PSP/Node 的失败路径测试：
+
+1. **双端 expiry**：协议给出一个双方同义的执行截止条件；PSP 到期停止 offer，Node 在开始副作用前
    再检查并拒绝。执行已开始而结论丢失时只能进入 `indeterminate`，不能当作可安全自动重试的 failed。
-3. **terminal retention**：定义 tombstone TTL 与清理器，TTL 至少覆盖 Node outbox 重放、最长支持的
+2. **terminal retention**：定义 tombstone TTL 与清理器，TTL 至少覆盖 Node outbox 重放、最长支持的
    离线窗口和数据库备份恢复窗口；否则迟到的相同终态会从幂等成功退化为 unknown-task 永久重试。
-4. **restore / ID reuse**：定义 task identity epoch 或明确的 ID 禁止复用窗口，并演练“PSP 恢复旧备份、
+3. **restore / ID reuse**：定义 task identity epoch 或明确的 ID 禁止复用窗口，并演练“PSP 恢复旧备份、
    Node 保留新 journal/outbox”以及“备份复活 offered task”两种方向，避免旧结果完成新任务或副作用重跑。
 
 Node 的 SQLite v8 是一次明确的回滚边界：v7 binary 读取 `PRAGMA user_version=8` 后会以

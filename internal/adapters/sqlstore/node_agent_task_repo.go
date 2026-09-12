@@ -87,7 +87,42 @@ func nodeAgentTaskFromDomain(task *domain.NodeAgentTask) *nodeAgentTaskRow {
 	}
 }
 
-type nodeAgentTaskRepo struct{ db *gorm.DB }
+// The active backlog is intentionally a compiled safety bound, not a live UI
+// setting. Dynamic lowering would need a separate over-limit state and would
+// put a settings-table read into this transaction's owner-lock order. Four
+// maximum-size offer windows allow useful offline buffering while bounding
+// PSP's active backlog and unacknowledged node inputs. Terminal retention is
+// a separate gate; this is not a bound on the complete task history.
+const (
+	defaultMaxActiveNodeAgentTasks    int64 = 256
+	defaultMaxActiveNodeAgentArgBytes int64 = 16 << 20
+)
+
+type nodeAgentTaskQuota struct {
+	MaxActiveTasks    int64
+	MaxActiveArgBytes int64
+}
+
+func defaultNodeAgentTaskQuota() nodeAgentTaskQuota {
+	return nodeAgentTaskQuota{
+		MaxActiveTasks:    defaultMaxActiveNodeAgentTasks,
+		MaxActiveArgBytes: defaultMaxActiveNodeAgentArgBytes,
+	}
+}
+
+type nodeAgentTaskRepo struct {
+	db    *gorm.DB
+	quota nodeAgentTaskQuota
+}
+
+func newNodeAgentTaskRepo(db *gorm.DB, quota nodeAgentTaskQuota) *nodeAgentTaskRepo {
+	return &nodeAgentTaskRepo{db: db, quota: quota}
+}
+
+type nodeAgentTaskActiveUsage struct {
+	Tasks    int64 `gorm:"column:active_tasks"`
+	ArgBytes int64 `gorm:"column:active_arg_bytes"`
+}
 
 func (r *nodeAgentTaskRepo) CreateOrGet(ctx context.Context, task *domain.NodeAgentTask) (*domain.NodeAgentTask, bool, error) {
 	if err := validateNewNodeAgentTask(task); err != nil {
@@ -132,6 +167,9 @@ func (r *nodeAgentTaskRepo) CreateOrGet(ctx context.Context, task *domain.NodeAg
 			stored = *existing
 			return nil
 		}
+		if err := r.enforceActiveQuota(tx, incoming); err != nil {
+			return err
+		}
 
 		// MySQL cannot render GORM's empty DoNothing action as valid SQL. Use a
 		// dialect-aware no-op and never infer insertion from RowsAffected: MySQL's
@@ -157,6 +195,49 @@ func (r *nodeAgentTaskRepo) CreateOrGet(ctx context.Context, task *domain.NodeAg
 		return nil, false, err
 	}
 	return stored.toDomain(), created, nil
+}
+
+// enforceActiveQuota runs after identity/idempotency replay resolution and
+// immediately before INSERT. The node_agents owner row is already locked, and
+// every task create/offer/complete plus native-agent deletion takes that same
+// lock first. This makes the aggregate and insertion one serial admission
+// decision per agent on SQLite, MySQL, and PostgreSQL without a denormalized
+// counter that could drift.
+func (r *nodeAgentTaskRepo) enforceActiveQuota(tx *gorm.DB, incoming *nodeAgentTaskRow) error {
+	var usage nodeAgentTaskActiveUsage
+	if err := tx.Model(&nodeAgentTaskRow{}).
+		Select("COUNT(*) AS active_tasks, COALESCE(SUM(LENGTH(args)), 0) AS active_arg_bytes").
+		Where("agent_id = ? AND status IN ?", incoming.AgentID,
+			[]string{string(domain.NodeAgentTaskQueued), string(domain.NodeAgentTaskOffered)}).
+		Scan(&usage).Error; err != nil {
+		return fmt.Errorf("measure native agent active task quota: %w", err)
+	}
+	return checkNodeAgentTaskActiveQuota(r.quota, usage, int64(len(incoming.Args)))
+}
+
+func checkNodeAgentTaskActiveQuota(quota nodeAgentTaskQuota, usage nodeAgentTaskActiveUsage, requestedArgBytes int64) error {
+	// Invalid internal configuration is fail-closed. In particular, zero never
+	// acquires a surprising "unlimited" meaning for a resource safety cap.
+	if quota.MaxActiveTasks <= 0 {
+		return fmt.Errorf("%w: native agent active task count quota is not positive", domain.ErrResourceExhausted)
+	}
+	if quota.MaxActiveArgBytes <= 0 {
+		return fmt.Errorf("%w: native agent active task byte quota is not positive", domain.ErrResourceExhausted)
+	}
+	if usage.Tasks < 0 || usage.ArgBytes < 0 || requestedArgBytes < 0 {
+		return errors.New("native agent active task quota contains a negative value")
+	}
+	if usage.Tasks >= quota.MaxActiveTasks {
+		return fmt.Errorf("%w: native agent active task count used=%d requested=1 limit=%d",
+			domain.ErrResourceExhausted, usage.Tasks, quota.MaxActiveTasks)
+	}
+	// Subtract before comparing so a corrupted or future wider database value
+	// cannot wrap an int64 addition and accidentally reopen admission.
+	if usage.ArgBytes > quota.MaxActiveArgBytes || requestedArgBytes > quota.MaxActiveArgBytes-usage.ArgBytes {
+		return fmt.Errorf("%w: native agent active task bytes used=%d requested=%d limit=%d",
+			domain.ErrResourceExhausted, usage.ArgBytes, requestedArgBytes, quota.MaxActiveArgBytes)
+	}
+	return nil
 }
 
 func findNodeAgentTaskConflict(tx *gorm.DB, incoming *nodeAgentTaskRow) (*nodeAgentTaskRow, bool, bool, error) {

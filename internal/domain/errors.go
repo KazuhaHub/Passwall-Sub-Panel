@@ -11,6 +11,10 @@ var (
 	ErrUnauthorized  = errors.New("unauthorized")
 	ErrForbidden     = errors.New("forbidden")
 	ErrConflict      = errors.New("conflict")
+	// ErrResourceExhausted means otherwise-valid work cannot be admitted
+	// because a bounded durable resource is full. Callers may retry after
+	// existing work has drained; HTTP transports should map it to 429.
+	ErrResourceExhausted = errors.New("resource exhausted")
 
 	// ErrSSONoAccount is returned by EnsureSSO when a non-admin SSO principal
 	// has no pre-provisioned account. The caller should redirect the user to a

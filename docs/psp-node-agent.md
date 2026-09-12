@@ -810,8 +810,13 @@ PSP 拨入时「这次没到」的证据由 PSP 的传输层产生，节点拨�
   `queued / offered / succeeded / failed / indeterminate`，按 capability 下发同一不可变身份并整批
   事务接收 terminal result；整个 report 仍依赖 Node immutable outbox 重放收敛，不声称跨仓储原子。
   尚未实现的是 RealityProbe 与 agent 自升级的生产 API/UI。
-- 真实 task kind 暴露前必须先闭合四项：per-agent `queued + offered` 行数/字节 quota、PSP 与 Node
-  同义且双端执行的 expiry、覆盖 outbox/离线/备份窗口的 terminal retention，以及 DB restore 后的
+- per-agent active quota 已闭合：PSP 在 owner-lock 事务内把 `queued + offered` 限为 **256 行 /
+  16 MiB 原始 args**（四个满额 offer window）。这是 compiled hard cap，不进可动态放大的 UI
+  settings；创建/下发/完成/删除使用同一 owner lock，只有新插入计入 quota，满额时 exact
+  task/idempotency replay 仍成功。新工作超限为 `ErrResourceExhausted`（HTTP 429），身份冲突仍是
+  `ErrConflict`；三种终态释放 active quota，但不清理 tombstone。
+- 真实 task kind 暴露前仍必须闭合三项：PSP 与 Node 同义且双端执行的 expiry、覆盖
+  outbox/离线/备份窗口的 terminal retention，以及 DB restore 后的
   task identity epoch 或 ID 禁止复用窗口。Node SQLite v8 也是回滚边界：v7 binary 会拒绝打开
   `user_version=8` 的数据库，回滚必须恢复匹配的 DB 备份，不能只替换 executable。
 
@@ -825,5 +830,5 @@ PSP 拨入时「这次没到」的证据由 PSP 的传输层产生，节点拨�
 1. 发布 Passwall-Node 新 revision/tag，保留六平台与容器 CI 证据。
 2. 把 PSP 的 `go.mod` pseudo-version 指向该 revision。
 3. 关闭父目录 `go.work`，跑 PSP 后端、前端、跨平台构建和 live contract 全套闸门。
-4. 后续能力按 §9 独立立项；开放首个真实 task 前先完成 quota / expiry / retention / restore 四道
-   硬门，不得把未知或冲突结果当成功，也不得把未经目录核验的 core 版本暴露为可选项。
+4. 后续能力按 §9 独立立项；quota gate 已闭合，开放首个真实 task 前仍须完成 expiry / retention /
+   restore 三道硬门，不得把未知或冲突结果当成功，也不得把未经目录核验的 core 版本暴露为可选项。
