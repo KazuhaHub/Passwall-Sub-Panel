@@ -123,6 +123,11 @@ sing-box 当前核验 `1.14.0`，原生编译 VLESS、VMess、Trojan、Shadowsoc
   `User.PushExpireTime → PSPClient.DesiredExpiryTime → Client.ExpiresAtMS`；Node runtime 在
   PSP 断线时仍按绝对截止时间本地停用，不等 roster 条目消失。真正无法预知的是断线之后
   才发生的管理员/策略撤销；不增加租约或第二通道就只能等下次同步，属于 §9 的生产取舍。
+- **任务 ID 铸造器已落地，但不表示 restore gate 已关闭**：`idgen.NewTaskIDMinter` 使用 fresh
+  192-bit issuer + 不回绕的 uint64 CAS 序列；它尚未接入生产任务入口，不重写任何已有任务 ID。
+  机制与边界见 [ADR 0031](docs/adr/0031-native-task-id-incarnations.md)。后续双端 expiry、结果证据
+  quarantine、retention 与恢复演练见 [ADR 0032 提案](docs/adr/0032-native-task-lifecycle.md)；其中
+  离线对账/备份恢复窗口与完整结果保留期尚待所有者确认，不能当作已经实现或已测量的承诺。
 - **任务 #49**:异地并发被标记的账号该怎么处理。停在证据不足上，
   v1 的 `ip_shadow` 影子执行就是为了给它攒证据。
 - **任务 transport / durable result state 已闭合，真实任务尚未开放**：独立的
