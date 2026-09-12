@@ -10,7 +10,8 @@ COPY web-react/ ./
 RUN npx tsc -b && npx vite build --outDir /web/dist --emptyOutDir
 
 # Stage 2 — build the Go binary with the SPA assets embedded.
-FROM golang:1.26.5-alpine AS go-builder
+FROM golang:1.26.8-alpine AS go-builder
+ENV GOWORK=off GOTOOLCHAIN=local
 RUN apk add --no-cache git
 WORKDIR /src
 COPY go.mod go.sum ./
@@ -44,7 +45,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build -trimpath \
 # su-exec is Alpine's ~10KB gosu equivalent; PUID/PGID (default 10001) align the
 # runtime UID with the host owner so ./config stays host-editable.
 # NOTE: keep this runtime stage in sync with Dockerfile.release (drift guard).
-FROM alpine:3.20
+FROM alpine:3.23.5
 RUN apk add --no-cache ca-certificates tzdata su-exec \
  && adduser -D -H -u 10001 psp
 # Pin the panel process to UTC so Go's time.Local matches the

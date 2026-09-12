@@ -2,7 +2,7 @@ module github.com/KazuhaHub/passwall-sub-panel
 
 go 1.26
 
-toolchain go1.26.5
+toolchain go1.26.8
 
 require (
 	github.com/coreos/go-oidc/v3 v3.20.0

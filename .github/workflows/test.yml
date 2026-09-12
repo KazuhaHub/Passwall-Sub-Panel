@@ -21,7 +21,56 @@ on:
   pull_request:
   workflow_dispatch:
 
+env:
+  GOWORK: "off"
+  GOTOOLCHAIN: "local"
+
 jobs:
+  container:
+    name: Docker source and release runtime baselines
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        # Allow toolchain selection; setup-go exports local after installation.
+        env:
+          GOTOOLCHAIN: auto
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Verify exact preferred compiler
+        run: |
+          set -eu
+          build_toolchain=$(awk '$1 == "toolchain" { print $2 }' go.mod)
+          test -n "$build_toolchain"
+          test "$(go env GOVERSION)" = "$build_toolchain"
+          test "$(go tool compile -V | awk '{ print $3 }')" = "$build_toolchain"
+      - name: Build both Docker paths and execute isolated binary version checks
+        run: |
+          set -euo pipefail
+          docker build --build-arg VERSION=ci --tag psp-source-check .
+          runtime_context=$(mktemp -d "$RUNNER_TEMP/psp-runtime-check.XXXXXX")
+          mkdir -p "$runtime_context/bin/linux-amd64"
+          container_id=$(docker create psp-source-check --version)
+          trap 'docker rm "$container_id" >/dev/null' EXIT
+          docker cp "$container_id:/app/psp" "$runtime_context/bin/linux-amd64/psp"
+          cp docker-entrypoint.sh "$runtime_context/"
+          build_toolchain=$(awk '$1 == "toolchain" { print $2 }' go.mod)
+          go version -m "$runtime_context/bin/linux-amd64/psp" | awk -v expected="$build_toolchain" 'NR == 1 { ok = ($NF == expected) } END { exit !ok }'
+          docker build -f Dockerfile.release --build-arg TARGETARCH=amd64 --tag psp-release-runtime-check "$runtime_context"
+          runtime_base=$(awk '$1 == "FROM" && $2 ~ /^alpine:/ { sub(/^alpine:/, "", $2); print $2 }' Dockerfile)
+          for image in psp-source-check psp-release-runtime-check; do
+            test "$(docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges --entrypoint /bin/cat "$image" /etc/alpine-release)" = "$runtime_base"
+            # Version exits before configuration, DB bootstrap or HTTP binding.
+            # This verifies binary execution, not the panel's production startup.
+            docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges --user 10001:10001 --entrypoint /app/psp "$image" --version
+          done
+
+  web:
+
   web:
     name: web (typecheck + build + test)
     runs-on: ubuntu-latest
@@ -51,10 +100,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
+        env:
+          GOTOOLCHAIN: auto
         with:
           go-version-file: go.mod
           cache: true
+      - name: Verify preferred compiler
+        run: |
+          set -eu
+          build_toolchain=$(awk '$1 == "toolchain" { print $2 }' go.mod)
+          test "$(go env GOVERSION)" = "$build_toolchain"
+          test "$(go tool compile -V | awk '{ print $3 }')" = "$build_toolchain"
       # Cross-compile the deployable binary for every release GOOS/GOARCH. The
       # binary is pure Go (CGO_ENABLED=0), so this is fast and needs no C
       # toolchains. The committed internal/web/dist/.gitkeep satisfies
@@ -81,11 +138,23 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
+        env:
+          GOTOOLCHAIN: auto
         with:
           go-version-file: go.mod
           cache: true
+      - name: Verify preferred compiler
+        run: |
+          set -eu
+          build_toolchain=$(awk '$1 == "toolchain" { print $2 }' go.mod)
+          test "$(go env GOVERSION)" = "$build_toolchain"
+          test "$(go tool compile -V | awk '{ print $3 }')" = "$build_toolchain"
       - run: go vet ./...
+      - name: Publisher registry guard tests
+        run: node --test deploy/check_image_test.mjs
+      - name: Reachable vulnerability check
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
       - name: test
         run: |
           set -o pipefail
@@ -119,10 +188,18 @@ jobs:
       PSP_TEST_DB_DSN: postgres://psp:psp@localhost:5432/psptest?sslmode=disable
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
+        env:
+          GOTOOLCHAIN: auto
         with:
           go-version-file: go.mod
           cache: true
+      - name: Verify preferred compiler
+        run: |
+          set -eu
+          build_toolchain=$(awk '$1 == "toolchain" { print $2 }' go.mod)
+          test "$(go env GOVERSION)" = "$build_toolchain"
+          test "$(go tool compile -V | awk '{ print $3 }')" = "$build_toolchain"
       - name: test
         run: |
           set -o pipefail
@@ -156,10 +233,18 @@ jobs:
       PSP_TEST_DB_DSN: root:psp@tcp(127.0.0.1:3306)/{schema}?parseTime=true&multiStatements=true
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
+        env:
+          GOTOOLCHAIN: auto
         with:
           go-version-file: go.mod
           cache: true
+      - name: Verify preferred compiler
+        run: |
+          set -eu
+          build_toolchain=$(awk '$1 == "toolchain" { print $2 }' go.mod)
+          test "$(go env GOVERSION)" = "$build_toolchain"
+          test "$(go tool compile -V | awk '{ print $3 }')" = "$build_toolchain"
       - name: test
         run: |
           set -o pipefail

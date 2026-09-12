@@ -26,8 +26,15 @@ on:
         type: string
 
 permissions:
-  contents: write
-  packages: write
+  contents: read
+
+env:
+  GOWORK: "off"
+  GOTOOLCHAIN: "local"
+
+concurrency:
+  group: release-passwall-sub-panel
+  cancel-in-progress: false
 
 jobs:
   setup:
@@ -36,19 +43,48 @@ jobs:
     outputs:
       tag: ${{ steps.tag.outputs.tag }}
       owner_lc: ${{ steps.tag.outputs.owner_lc }}
+      sha: ${{ steps.tag.outputs.sha }}
+      build_date: ${{ steps.tag.outputs.build_date }}
     steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
       - name: Resolve tag and owner
         id: tag
         shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REQUESTED_TAG: ${{ inputs.tag }}
+          REPOSITORY_OWNER: ${{ github.repository_owner }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            tag="${{ inputs.tag }}"
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            tag="$REQUESTED_TAG"
           else
             tag="${GITHUB_REF_NAME}"
           fi
-          owner_lc=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          tag_pattern='^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$'
+          [[ "$tag" =~ $tag_pattern ]] || exit 1
+          if [[ "$tag" == *-* ]]; then
+            IFS='.' read -r -a prerelease_parts <<< "${tag#*-}"
+            for part in "${prerelease_parts[@]}"; do
+              [[ ! "$part" =~ ^0[0-9]+$ ]] || exit 1
+            done
+          fi
+          release_sha=$(git rev-parse --verify "refs/tags/${tag}^{commit}")
+          test "$GITHUB_REF" = "refs/tags/$tag"
+          test "$release_sha" = "$GITHUB_SHA"
+          gh api --paginate "repos/$GITHUB_REPOSITORY/releases" | jq -s -e --arg tag "$tag" 'add | all(.[]; .tag_name != $tag or .draft == true)' > /dev/null
+          owner_lc=$(printf '%s' "$REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]')
+          node deploy/check-image.mjs "$owner_lc/passwall-sub-panel" "$tag"
           echo "tag=${tag}" >> "$GITHUB_OUTPUT"
           echo "owner_lc=${owner_lc}" >> "$GITHUB_OUTPUT"
+          echo "sha=${release_sha}" >> "$GITHUB_OUTPUT"
+          echo "build_date=$(date -u +%FT%TZ)" >> "$GITHUB_OUTPUT"
 
   web:
     name: Build web assets
@@ -57,6 +93,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.setup.outputs.sha }}
 
       - name: Set up Node.js
         uses: actions/setup-node@v6
@@ -108,12 +146,23 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.setup.outputs.sha }}
 
       - name: Set up Go
         uses: actions/setup-go@v6
+        env:
+          GOTOOLCHAIN: auto
         with:
-          go-version: "1.26.x"
+          go-version-file: go.mod
           cache-dependency-path: go.sum
+
+      - name: Verify preferred compiler
+        run: |
+          set -eu
+          build_toolchain=$(awk '$1 == "toolchain" { print $2 }' go.mod)
+          test "$(go env GOVERSION)" = "$build_toolchain"
+          test "$(go tool compile -V | awk '{ print $3 }')" = "$build_toolchain"
 
       - name: Download web bundle
         uses: actions/download-artifact@v8
@@ -128,17 +177,27 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: "0"
           VERSION: ${{ needs.setup.outputs.tag }}
-          COMMIT: ${{ github.sha }}
+          COMMIT: ${{ needs.setup.outputs.sha }}
+          BUILD_DATE: ${{ needs.setup.outputs.build_date }}
         run: |
           set -euo pipefail
           mkdir -p out
           short_sha="${COMMIT:0:7}"
-          build_date="$(date -u +%FT%TZ)"
           ldflags="-s -w"
           ldflags+=" -X github.com/KazuhaHub/passwall-sub-panel/internal/version.Version=${VERSION}"
           ldflags+=" -X github.com/KazuhaHub/passwall-sub-panel/internal/version.Commit=${short_sha}"
-          ldflags+=" -X github.com/KazuhaHub/passwall-sub-panel/internal/version.BuildDate=${build_date}"
+          ldflags+=" -X github.com/KazuhaHub/passwall-sub-panel/internal/version.BuildDate=${BUILD_DATE}"
           go build -trimpath -ldflags="${ldflags}" -o "out/psp${{ matrix.ext }}" ./cmd/panel
+          go version -m "out/psp${{ matrix.ext }}" | awk -v compiler="$(go env GOVERSION)" -v commit="$COMMIT" -v goos="$GOOS" -v goarch="$GOARCH" '
+            NR == 1 { toolchain = ($NF == compiler) }
+            $1 == "path" && $2 == "github.com/KazuhaHub/passwall-sub-panel/cmd/panel" { main = 1 }
+            $1 == "build" && $2 == "vcs.revision=" commit { revision = 1 }
+            $1 == "build" && $2 == "vcs.modified=false" { clean = 1 }
+            $1 == "build" && $2 == "CGO_ENABLED=0" { static = 1 }
+            $1 == "build" && $2 == "GOOS=" goos { os = 1 }
+            $1 == "build" && $2 == "GOARCH=" goarch { arch = 1 }
+            END { exit !(toolchain && main && revision && clean && static && os && arch) }
+          '
 
       - name: Upload binary
         uses: actions/upload-artifact@v7
@@ -152,9 +211,13 @@ jobs:
     name: Publish GitHub Release
     runs-on: ubuntu-latest
     needs: [setup, build]
+    permissions:
+      contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.setup.outputs.sha }}
 
       - name: Download all binaries
         uses: actions/download-artifact@v8
@@ -190,6 +253,7 @@ jobs:
             # README + example config are tracked — copy without swallowing
             # errors so a genuinely missing file fails the release loudly.
             cp README.md "${pkgdir}/"
+            cp LICENSE "${pkgdir}/"
             cp config/config.yaml.example "${pkgdir}/"
             # Bundle DEFAULT rulesets/templates from the committed seed dir.
             # config/templates and config/rulesets are git-ignored (runtime,
@@ -241,12 +305,15 @@ jobs:
           sha256sum -c SHA256SUMS.txt
           \`\`\`
           EOF
+          if [ -f "docs/releases/${VERSION}.md" ]; then
+            cat "docs/releases/${VERSION}.md" >> release_notes.md
+          fi
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ needs.setup.outputs.tag }}
-          target_commitish: ${{ github.sha }}
+          target_commitish: ${{ needs.setup.outputs.sha }}
           name: ${{ needs.setup.outputs.tag }}
           # Mark pre-release tags (anything with a "-beta"/"-rc"/... suffix) as a
           # GitHub pre-release so /releases/latest excludes them — PSP's in-app
@@ -254,6 +321,7 @@ jobs:
           # only ever point at a STABLE release, never a beta.
           prerelease: ${{ contains(needs.setup.outputs.tag, '-') }}
           generate_release_notes: true
+          overwrite_files: false
           body_path: release_notes.md
           append_body: true
           files: |
@@ -265,9 +333,14 @@ jobs:
     name: Publish container image
     runs-on: ubuntu-latest
     needs: [setup, build]
+    permissions:
+      contents: read
+      packages: write
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.setup.outputs.sha }}
 
       - name: Download linux/amd64 binary
         uses: actions/download-artifact@v8
@@ -312,8 +385,9 @@ jobs:
           labels: |
             org.opencontainers.image.title=passwall-sub-panel
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
-            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.revision=${{ needs.setup.outputs.sha }}
             org.opencontainers.image.version=${{ needs.setup.outputs.tag }}
+            org.opencontainers.image.licenses=AGPL-3.0
 
       - name: Build and push multi-arch image
         uses: docker/build-push-action@v7
