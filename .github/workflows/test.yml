@@ -70,8 +70,6 @@ jobs:
           done
 
   web:
-
-  web:
     name: web (typecheck + build + test)
     runs-on: ubuntu-latest
     steps:
