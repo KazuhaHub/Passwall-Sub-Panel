@@ -897,6 +897,15 @@ type UISettings struct {
 	// overburn bound. Zero is an intentional fail-safe value meaning every sync
 	// report is full; an absent setting defaults to 60 seconds in the KV repo.
 	FullReportSeconds int `json:"full_report_seconds"`
+	// Native-task evidence policy, in elapsed 24-hour days. Missing settings
+	// default to 30/30/90; explicit values must form a valid lifecycle policy.
+	// These use global/product policy, not Load caller fallbacks. They select
+	// policy for new tasks and never shorten existing protection. They do not
+	// enable task execution or cleanup: those
+	// require immutable per-task policy/deadline and the lifecycle rollout gates.
+	NodeTaskOfflineReconcileDays int `json:"node_task_offline_reconcile_days"`
+	NodeTaskBackupRestoreDays    int `json:"node_task_backup_restore_days"`
+	NodeTaskResultRetentionDays  int `json:"node_task_result_retention_days"`
 
 	// MaxPanelConcurrency caps the fan-out of concurrent ListInbounds
 	// calls during traffic poll + reconcile (v2.2.5 perf path). 0 or

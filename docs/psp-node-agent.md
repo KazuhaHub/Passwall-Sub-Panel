@@ -821,6 +821,10 @@ PSP 拨入时「这次没到」的证据由 PSP 的传输层产生，节点拨�
   settings；创建/下发/完成/删除使用同一 owner lock，只有新插入计入 quota，满额时 exact
   task/idempotency replay 仍成功。新工作超限为 `ErrResourceExhausted`（HTTP 429），身份冲突仍是
   `ErrConflict`；三种终态释放 active quota，但不清理 tombstone。
+- 管理员生命周期策略已可配置：默认离线自动对账/备份最大恢复年龄/完整结果保留为
+  **30/30/90 天**，各整数 1–3650，结果保留不得短于另两个窗口。这是已获确认的默认策略，
+  不是执行 TTL 或已测量 SLA；设置更新不改 task/quarantine，尚未接入生产任务策略快照或
+  清理器，不能据此宣称 retention / restore gate 闭合。旧记录不追溯缩短保护（ADR 0032）。
 - 真实 task kind 暴露前仍必须闭合三项：PSP 与 Node 同义且双端执行的 expiry、覆盖
   outbox/离线/备份窗口的 terminal retention，以及 DB restore 后的
   task identity epoch 或 ID 禁止复用窗口。Node SQLite v8 也是回滚边界：v7 binary 会拒绝打开

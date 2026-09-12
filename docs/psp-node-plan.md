@@ -276,6 +276,12 @@ result，完整保存在 `(agent_id, task_id)` 作用域的独立 quarantine；q
 quota 只检查新插入：满额时 exact task/idempotency replay 仍成功，身份冲突仍是 `ErrConflict`，
 超限的新工作为 `ErrResourceExhausted`（HTTP 429）；任一终态释放 active quota，但不删除 tombstone。
 
+**管理员生命周期策略设置已完成**：默认离线自动对账 30 天、备份最大恢复年龄 30 天、完整
+结果保留 90 天；管理页与管理员 API 可更改，整数 1–3650 天且结果保留覆盖另两个窗口。
+省略/null 保留既有配置，非法策略不写入；设置修改不改已有 task/quarantine，不启用清理。
+这些值不是 task execution TTL；真实任务 producer 的不可变策略/deadline 快照、保留保护与
+恢复验收仍未接通。旧窗口不因新设置追溯缩短，详见 ADR 0032。
+
 开放第一个 RealityProbe 或任何有副作用任务前，以下三项仍必须先有跨 PSP/Node 的失败路径测试：
 
 1. **双端 expiry**：协议给出一个双方同义的执行截止条件；PSP 到期停止 offer，Node 在开始副作用前
