@@ -30,9 +30,9 @@ env:
   GOTOOLCHAIN: "local"
 
 # Publisher jobs never restore/save shared dependency caches. Their immutable
-# checkout comes from the validated tag resolver, which security analysis
-# cannot infer as a trusted ref; keeping release inputs uncached also removes
-# cache-poisoning as a publication boundary. Ordinary PR CI caches are separate.
+# checkout uses the trusted workflow SHA. Setup proves that this SHA equals
+# the resolved release tag SHA; dispatch on a different ref is rejected.
+# Ordinary PR CI caches are separate from uncached publication inputs.
 
 permissions:
   contents: read
@@ -138,7 +138,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
         with:
-          ref: ${{ needs.setup.outputs.sha }}
+          ref: ${{ github.sha }}
 
       - name: Set up Node.js
         uses: actions/setup-node@v6
@@ -190,7 +190,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
         with:
-          ref: ${{ needs.setup.outputs.sha }}
+          ref: ${{ github.sha }}
 
       - name: Set up Go
         uses: actions/setup-go@v6
@@ -253,7 +253,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
         with:
-          ref: ${{ needs.setup.outputs.sha }}
+          ref: ${{ github.sha }}
 
       - name: Download all binaries
         uses: actions/download-artifact@v8
@@ -397,7 +397,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
         with:
-          ref: ${{ needs.setup.outputs.sha }}
+          ref: ${{ github.sha }}
 
       - name: Download linux/amd64 binary
         uses: actions/download-artifact@v8

@@ -73,9 +73,11 @@ test('release tag input uses env plus the pinned published canonical validator',
   }
 })
 
-test('every downstream job checks out immutable setup SHA and binaries share one stamp', () => {
+test('every downstream job checks out trusted immutable workflow SHA proven equal to release SHA', () => {
+  assert(job('setup').includes('test "$release_sha" = "$GITHUB_SHA"'))
   for (const name of ['web', 'build', 'release', 'docker']) {
-    assert(job(name).includes('ref: ${{ needs.setup.outputs.sha }}'), `${name} checkout is not pinned`)
+    assert(job(name).includes('ref: ${{ github.sha }}'), `${name} checkout is not pinned to the trusted workflow commit`)
+    assert(!job(name).includes('ref: ${{ needs.setup.outputs.sha }}'), 'resolver output must not become a privileged checkout input')
   }
   const build = job('build')
   assert(build.includes('COMMIT: ${{ needs.setup.outputs.sha }}'))
