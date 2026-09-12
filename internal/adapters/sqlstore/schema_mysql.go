@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/migrator"
 	"gorm.io/gorm/schema"
 )
 
@@ -21,10 +22,19 @@ func autoMigrateCurrentSchema(db *gorm.DB) error {
 type preservingMySQLSchemaDialect struct{ gorm.Dialector }
 
 func (dialect preservingMySQLSchemaDialect) Migrator(db *gorm.DB) gorm.Migrator {
-	return preservingMySQLSchemaMigrator{dialect.Dialector.Migrator(db)}
+	base := dialect.Dialector.Migrator(db)
+	return preservingMySQLSchemaMigrator{
+		Migrator:                   base,
+		BuildIndexOptionsInterface: base.(migrator.BuildIndexOptionsInterface),
+	}
 }
 
-type preservingMySQLSchemaMigrator struct{ gorm.Migrator }
+// GORM's table/index creation also asserts this optional interface. Forward
+// it as well as the mandatory migrator contract to the original MySQL driver.
+type preservingMySQLSchemaMigrator struct {
+	gorm.Migrator
+	migrator.BuildIndexOptionsInterface
+}
 
 func (preservingMySQLSchemaMigrator) MigrateColumnUnique(_ any, field *schema.Field, _ gorm.ColumnType) error {
 	// The MySQL driver calls any single-column unique index absent from this
