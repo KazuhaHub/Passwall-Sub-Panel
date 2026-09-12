@@ -254,7 +254,7 @@ func (s *Service) ListPaged(ctx context.Context, p ports.Pagination) ([]*domain.
 // internal/adapters/sqlstore/separator_repo.go) and are bound to groups by an
 // explicit list, not by tag_filter. The pre-v3.0.0-beta.7 design that
 // stashed them in `nodes` with kind='separator' + synthetic negative
-// inbound_id is gone — legacy rows are dropped by cleanupLegacyState.
+// inbound_id is gone — V4 validates that V3 already migrated those rows.
 //
 // These methods stay on node.Service rather than in their own package
 // because the operations are trivial pass-throughs to SeparatorRepo and

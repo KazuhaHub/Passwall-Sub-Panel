@@ -31,6 +31,13 @@ Passwall Sub Panel 是一个基于 Go + React 的代理订阅管理系统，通�
 
 **部署形态**：单文件 Go 二进制（前端 SPA 通过 `go:embed` 嵌入），可直接 `./psp` 启动，也提供 Docker 镜像。
 
+### 版本与升级入口
+
+- **V3 最终稳定版**：[v3.9.2](https://github.com/KazuhaHub/Passwall-Sub-Panel/releases/tag/v3.9.2)，与 `v3.9.2-beta.20` 共享最终 V3 数据库基线。
+- **V4 测试版**：[v4.0.0-beta.2](https://github.com/KazuhaHub/Passwall-Sub-Panel/releases/tag/v4.0.0-beta.2)，包含 Passwall Node 安装向导与历史迁移收敛；既有 beta1 标签和镜像保持不变。
+- **V3→V4 升级**：[V4 升级指南](docs/UPGRADE-v4.md)。V4 正常启动自动迁移；不要运行 `psp migrate`。使用后续迁移收敛版本前，先成功启动最终 V3，备份数据库、配置及原密钥。
+- **V2→V3 历史迁移**：[V3 数据库重构手册](docs/UPGRADE-v3.0.0.md)，仅使用冻结的 V3 工具；V4 不支持直接导入 V2 数据库。
+
 ## 功能特性
 
 ### 核心功能
@@ -256,7 +263,7 @@ dial tcp 127.0.0.1:2053: refusing connection to non-public address 127.0.0.1
 |---|---|---|
 | `:latest` | 最新**稳定版**（默认） | 生产 / 日常 |
 | `:beta` | **最前沿**——任何最新发布（预发布**或**稳定版） | 想一直用最新 |
-| `:v3.7.0` / `:v3.7.0-beta.17` | 钉死某个确切版本 | 不想自动滚动 |
+| `:v3.9.2` / `:v4.0.0-beta.2` | 钉死某个确切版本 | 受控升级 / 不想自动滚动 |
 
 切换通道只改 `docker-compose.yml` 里那一行 `image`，然后 `docker compose up -d`（`pull_policy: always` 会自动重拉）：
 
@@ -266,7 +273,7 @@ services:
     image: ghcr.io/kazuhahub/passwall-sub-panel:beta   # latest → beta
 ```
 
-> `:beta` 是「永远最新」而非「只有 beta」：在 `:beta` 上的部署，等稳定版（如 `v3.7.0`）发布后会**自动滚上稳定版**，之后再滚到下一个 beta。想固定在稳定轨就用 `:latest`，想钉死不动就用 `:vX.Y.Z`。
+> `:beta` 是「永远最新」而非「只有 beta」：重建并拉取镜像时可能跨到新的大版本。跨版本前先读对应升级指南并完成备份，生产受控升级优先使用确切版本标签；不要把上述切换通道操作当作无迁移风险的升级。
 >
 > 此外面板会在**管理员通知**里检测并提示 PSP 新稳定版（只提示稳定版、不催 beta），3X-UI 面板低于 PSP 已测最高支持版本时也会提示。
 

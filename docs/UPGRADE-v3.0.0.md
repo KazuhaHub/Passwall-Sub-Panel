@@ -1,5 +1,7 @@
 # 升级到 v3.0.0：数据库重构
 
+> **历史 V3 工具手册，不是 V4 操作指南。** 下文的 `psp migrate` 仅存在于冻结的 V3 二进制/镜像中；执行时固定使用 [v3.9.2](https://github.com/KazuhaHub/Passwall-Sub-Panel/releases/tag/v3.9.2)，不要从当前 `main` 构建或使用滚动 `:beta` 标签。`v4.0.0-beta.2` 起的迁移收敛已移除该工具，并对旧命令明确拒绝启动；已发布的 `v4.0.0-beta.1` 标签保持不变。V3→V4 请阅读 [V4 升级指南](UPGRADE-v4.md)，正常启动自动迁移。
+
 > v3.0.0 是一次破坏性的数据库 schema 重构（KV `settings` 主表、`xui_clients` 改名为 `user_xui_clients`、`panel_name` 冗余列删除、新增 `lifetime/last_raw/period_baseline` 字段等）。**v3.0.0 主程序只识别新 schema**，不会原地升级旧库。
 >
 > 升级方式：**side-by-side 新库**（参考 Cloudreve `drive → drive_v2` 升级模式）—— 旧库**永远不被新版主程序触碰**，可作为永久 backup；迁移由 v3.0.0 主程序自带的 `psp migrate` 子命令完成；admin 在 `config.yaml` 改一行 `database` 字段切换。
@@ -11,11 +13,11 @@
 按本项目的版本升级政策（详见 [docs/ARCHITECTURE.md §17](ARCHITECTURE.md)）：**不支持跨大版本跳级**。
 
 - 当前 ≤ v2.5.x → v3.0.0：本文档适用，一步完成
-- 当前 ≤ v2.5.x → v4.0.0：必须先按本文档升到 v3.0.0，再按 v4.0.0 文档升到 v4
+- 当前 ≤ v2.5.x → V4：先使用本文的冻结 V3 工具导入并成功启动最终 V3，再按 [V4 升级指南](UPGRADE-v4.md) 操作
 - 当前 v3.0.0 → v3.x.x（minor / patch）：直接换二进制，**不用跑 migrate**
-- 当前 v3.x.x → v4.0.0：跑 v4 的 `psp migrate`（届时由 v4 文档说明）
+- 当前 V3 → 迁移收敛后的 V4：先成功启动 `v3.9.2` / `v3.9.2-beta.20`，备份，再正常启动 V4；**不运行 `psp migrate`**
 
-minor / patch 升级不变 schema，按 [[feedback_semver]] 规则。
+V3 的 minor / patch 演进可能包含启动时的兼容 schema 转换；必须让最终 V3 成功启动，不能只下载其二进制后立即切到 V4。
 
 ---
 
@@ -25,7 +27,7 @@ minor / patch 升级不变 schema，按 [[feedback_semver]] 规则。
 
 2. **旧库零修改**。迁移程序只读旧库 → 写新库。旧库一行都不动，理论上随时可以切回旧版主程序。
 
-3. **迁移代码在主二进制里只保留到下一个 major 发版**。v3.x 二进制全程携带 `migrate` 子命令；v4.0.0 发版时该子命令被替换为 v3.x → v4 的迁移逻辑（不再支持 ≤ v2.5.x → v4 跳级，必须先升 v3）。详见 [docs/ARCHITECTURE.md §17](ARCHITECTURE.md)。
+3. **V2→V3 工具仅留在冻结 V3 与 Git 历史中**。`v4.0.0-beta.2` 起删除该工具；必要的最终 V3→V4 桥接由正常启动执行，不替换成另一个 `psp migrate` 子命令。详见 [docs/ARCHITECTURE.md §17](ARCHITECTURE.md)。
 
 4. **新库名 admin 自己定**。下面示例用 `psp_v3`（或 SQLite `panel_v3.db`），你可以叫任何名字；迁移程序通过 `--src` / `--dst` 参数接收。
 
@@ -72,16 +74,11 @@ docker exec psp grep '^jwt_secret' /app/config/config.yaml
 
 适用：直接跑 `psp` 二进制（systemd 或裸跑），数据存 SQLite 或 MySQL。
 
-### 2.1 编译新二进制
+### 2.1 准备冻结 V3 二进制
 
-迁移工具已内置为主程序的 `migrate` 子命令，**只需要一个二进制**：
+从 [v3.9.2 发行页](https://github.com/KazuhaHub/Passwall-Sub-Panel/releases/tag/v3.9.2) 下载对应平台的 `psp` 并核对发行校验和。迁移工具内置于该 V3 二进制的 `migrate` 子命令中。
 
-```bash
-cd /path/to/Passwall-Sub-Panel
-go build -o psp ./cmd/panel/
-```
-
-`scp` 到生产机。
+如果自行编译，使用隔离的 `v3.9.2` 标签源码，先构建前端再构建后端；**当前 `main` 已不提供此历史工具**。将核验过的 V3 二进制复制到生产机。
 
 ### 2.2 停旧版主程序 + 替换二进制
 
@@ -162,16 +159,18 @@ sudo journalctl -u psp -f
 
 ## 3. Docker 部署升级
 
-适用：通过 `docker compose up -d` 跑（official `ghcr.io/kazuhahub/passwall-sub-panel:latest` image）。
+适用：通过 Docker Compose 部署。历史迁移必须使用固定 V3 镜像，不使用滚动通道。
 
 ### 3.1 拉取新 image
 
+先将现有 Compose 的 PSP `image:` 固定为 `ghcr.io/kazuhahub/passwall-sub-panel:v3.9.2`，其余卷挂载、配置和环境变量保持不变，再执行：
+
 ```bash
 cd /opt/Passwall-Sub-Panel
-docker compose pull
+docker compose pull psp
 ```
 
-确认 image 已是 v3.0.0（标签 `latest` 或 `v3.0.0` / `v3.0.0-beta.X`）。
+确认实际使用的是冻结 `v3.9.2` 镜像；不要用 `:latest` / `:beta` 的未来指向来推断工具版本。
 
 ### 3.2 停容器
 
@@ -330,4 +329,4 @@ A: 正常 —— 迁移会保留旧的 `traffic_snapshots` 历史 + 用户的 `l
 
 **Q: 迁移代码什么时候从代码库里删除？**
 
-A: v3.x 二进制全程保留 `migrate` 子命令。等 v4.0.0 准备发版时，把 [internal/migrate/](../internal/migrate/) 里 ≤ v2.5.x → v3 的迁移逻辑替换为 v3.x → v4 的迁移逻辑（git history 是审计轨迹）。已经升级到 v3 的用户，从 v3 升级到 v4 时跑的是 v4 二进制里的新 migrate；想从 v2.5.x 跳到 v4 的用户必须先升 v3。
+A: `v4.0.0-beta.2` 起已删除 V2→V3 专用包；冻结 `v3.9.2` 标签和发行镜像仍提供此工具，Git 历史保留源码审计轨迹。最终 V3→V4 通过正常启动的有界桥接完成，不再运行 `psp migrate`。V2 必须先导入 V3 并成功启动最终 V3。

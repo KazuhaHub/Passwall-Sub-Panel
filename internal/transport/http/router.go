@@ -603,6 +603,7 @@ func NewRouter(d Deps) stdhttp.Handler {
 		adminGroup.GET("/servers/:id/node-installation", servers.NodeInstallation)
 		adminGroup.POST("/servers/:id/node-credential", servers.StoreNodeCredential)
 		adminGroup.POST("/servers/:id/node-install-script", servers.NodeInstallScript)
+		adminGroup.POST("/servers/:id/node-installation-files", servers.NodeInstallationFiles)
 		adminGroup.GET("/servers/:id/node-agent-status", servers.NodeAgentStatus)
 		adminGroup.POST("/servers/:id/upgrade-node-agent", servers.UpgradeNativeAgent)
 		adminGroup.GET("/servers/:id/node-agent-upgrades/:task_id", servers.GetNativeAgentUpgrade)

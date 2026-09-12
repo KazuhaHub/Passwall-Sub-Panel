@@ -34,9 +34,7 @@ func TestEnsureSchemaMigratesPSPClientIdentityWithoutLosingBaselines(t *testing.
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
-	if err := db.AutoMigrate(&legacyPSPClientIdentityRow{}); err != nil {
-		t.Fatalf("create legacy schema: %v", err)
-	}
+	seedV3Baseline(t, db)
 	legacy := legacyPSPClientIdentityRow{
 		UserID: 7, PanelID: 10, Email: "u7@old.example", CredClass: 1,
 		UUID: "uuid-7", Password: "pw-7",

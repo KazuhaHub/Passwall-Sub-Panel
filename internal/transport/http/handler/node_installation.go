@@ -90,8 +90,9 @@ func (h *AdminServersHandler) NodeInstallation(c *gin.Context) {
 	}
 }
 
-// Generic audit middleware records writes, not GETs. Recovery reads get a
-// dedicated metadata-only audit record before releasing the private value.
+// Generic write auditing runs after the response, so it cannot protect secret
+// delivery. Installation/recovery reads require metadata-only auditing before
+// releasing the private value, whether the route uses GET or POST.
 func (h *AdminServersHandler) auditNodeCredentialRead(c *gin.Context, panelID int64, agentID string) bool {
 	if h.audit == nil {
 		return true // optional only in test/degraded handler compositions
@@ -156,8 +157,43 @@ func (h *AdminServersHandler) NodeInstallScript(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "a canonical HTTPS PSP endpoint and exact published Node version are required"})
 		return
 	}
+	if !h.auditNodeCredentialRead(c, panel.ID, provisioning.AgentID) {
+		return
+	}
 	c.Header("Content-Disposition", "attachment; filename=passwall-node-install.sh")
 	c.Data(http.StatusOK, "text/plain; charset=utf-8", []byte(script))
+}
+
+// NodeInstallationFiles generates private administrator-delivered files, not a
+// public bootstrap URL. Retrieving materials never creates or rotates an agent.
+func (h *AdminServersHandler) NodeInstallationFiles(c *gin.Context) {
+	panel, ok := h.installationPanel(c)
+	if !ok {
+		return
+	}
+	var req nodeInstallationFilesRequest
+	if err := c.ShouldBindJSON(&req); err != nil || !req.normalize() {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "an exact Node release, supported installation method and platform are required"})
+		return
+	}
+	provisioning, ok := h.installation(c, panel)
+	if !ok {
+		return
+	}
+	// Reuse the released Node deployment package's canonical HTTPS, identity,
+	// credential and release validation; do not widen it for another method.
+	if _, err := deployment.RenderLinux(deployment.Options{
+		Endpoint: provisioning.Endpoint, AgentID: provisioning.AgentID,
+		Credential: provisioning.Credential, Version: req.Version,
+	}); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "a canonical HTTPS PSP endpoint and exact published Node version are required"})
+		return
+	}
+	if !h.auditNodeCredentialRead(c, panel.ID, provisioning.AgentID) {
+		return
+	}
+	result := renderNodeInstallationFiles(panel.ID, provisioning, req)
+	c.JSON(http.StatusOK, result)
 }
 
 type nodeAgentStatusResponse struct {

@@ -23,9 +23,7 @@ func TestNodeEndpointMigrationSplitsLegacyValueWithoutChangingBehavior(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.AutoMigrate(&legacyNodeEndpointRow{}); err != nil {
-		t.Fatal(err)
-	}
+	seedV3Baseline(t, db)
 	legacy := legacyNodeEndpointRow{
 		PanelID: 3, InboundID: 9, DisplayName: "legacy", Region: "JP",
 		Port: 8443, Protocol: "vless",

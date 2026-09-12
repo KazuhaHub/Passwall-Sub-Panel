@@ -22,10 +22,8 @@ func TestEnsureSchemaMigratesProvisionedBoolToFourState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.AutoMigrate(&pspClientRow{}, &legacyPSPClientInboundRow{}); err != nil {
-		t.Fatal(err)
-	}
-	if err := db.Create(&pspClientRow{
+	seedV3Baseline(t, db)
+	if err := db.Create(&v392Beta20ClientRow{
 		ID: 1, UserID: 2, PanelID: 3, Email: "u2@psp.local",
 		UUID: "00000000-0000-0000-0000-000000000002", Password: "applied-password",
 	}).Error; err != nil {

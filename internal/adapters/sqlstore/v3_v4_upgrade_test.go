@@ -24,7 +24,7 @@ import (
 // change and historical prose comments are omitted. The existing JSON SQL
 // wrappers used below have the same representation as that tag.
 //
-// This is a historical three-table migration fixture, not a current-model
+// These are historical migration models, not a current-model
 // database relabeled v3, and not a claim of full deployed-panel E2E coverage.
 type v392Beta20NodeRow struct {
 	ID                    int64  `gorm:"primaryKey;autoIncrement"`
@@ -116,11 +116,9 @@ func TestV392Beta20SchemaUpgradePreservesNodeAndClientData(t *testing.T) {
 	ConfigureSecretKey("v392-to-v4-fixture-key")
 	t.Cleanup(func() { ConfigureSecretKey("") })
 
-	// Only the three historical tables under test are created here. In
-	// particular, no current model or current EnsureSchema builds the source.
-	if err := db.AutoMigrate(&v392Beta20NodeRow{}, &v392Beta20ClientRow{}, &v392Beta20AttachmentRow{}); err != nil {
-		t.Fatalf("create frozen v3.9.2-beta.20 tables: %v", err)
-	}
+	// Eight frozen core tables and the actual V3 limits marker establish the
+	// accepted source. No current model or current EnsureSchema builds it.
+	seedV3Baseline(t, db)
 	if !db.Migrator().HasIndex(&v392Beta20ClientRow{}, "uk_psp_client") {
 		t.Fatal("fixture lost the historical unique email index")
 	}
@@ -407,7 +405,8 @@ func v4SQLiteOperatorObjects(t *testing.T, db *gorm.DB, table string) func() {
 // Frozen source: v3.0.0-rc.3, commit
 // 425e2257a7b4d1050cd446cf999541e46a282e10,
 // internal/adapters/mysql/schema.go: separatorRow. These legacy columns could
-// still be present in a later v3 database. This model has no independent
+// identify an unsupported older/partial source, not a supported V3 end state.
+// This model has no independent
 // declared indexes; its primary key and unrelated operator objects must survive.
 type v30RC3SeparatorRow struct {
 	ID              int64  `gorm:"primaryKey;autoIncrement"`
@@ -421,14 +420,12 @@ type v30RC3SeparatorRow struct {
 
 func (v30RC3SeparatorRow) TableName() string { return "nodes_separator" }
 
-func TestLegacySeparatorCleanupPreservesPrimaryKeyAndOperatorObjects(t *testing.T) {
+func TestV4BaselineRefusesLegacySeparatorWithoutChangingPrimaryKeyOrOperatorObjects(t *testing.T) {
 	db, err := openTestDB(t)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.AutoMigrate(&v30RC3SeparatorRow{}); err != nil {
-		t.Fatal(err)
-	}
+	seedV3BaselineWithSeparator(t, db, &v30RC3SeparatorRow{})
 	row := v30RC3SeparatorRow{
 		DisplayName: "legacy separator", SortOrder: 31, Enabled: true, ShowInAllGroups: true,
 		GroupIDs: jsonInt64s{7, 8}, CreatedAt: time.Date(2026, 7, 1, 2, 3, 4, 0, time.UTC),
@@ -441,19 +438,15 @@ func TestLegacySeparatorCleanupPreservesPrimaryKeyAndOperatorObjects(t *testing.
 	}
 	before := v392ReadRows[v30RC3SeparatorRow](t, db)[0]
 	verifyCustom := v4SQLiteOperatorObjects(t, db, "nodes_separator")
-	if err := EnsureSchema(db); err != nil {
-		t.Fatal(err)
-	}
+	refuseBaselineWithoutWrites(t, db)
 	for _, name := range []string{"show_in_all_groups", "group_ids"} {
-		if db.Migrator().HasColumn(&separatorRow{}, name) {
-			t.Fatalf("legacy separator column %s survived", name)
+		if !db.Migrator().HasColumn(&v30RC3SeparatorRow{}, name) {
+			t.Fatalf("refusal removed legacy separator column %s", name)
 		}
 	}
-	after := v392ReadRows[separatorRow](t, db)
-	if len(after) != 1 || after[0].ID != before.ID || after[0].DisplayName != before.DisplayName ||
-		after[0].SortOrder != before.SortOrder || after[0].Enabled == nil || *after[0].Enabled ||
-		!after[0].CreatedAt.Equal(before.CreatedAt) || after[0].Mode != "global" || len(after[0].NodeIDs) != 0 {
-		t.Fatal("separator cleanup changed retained data or legacy safe-default behavior")
+	after := v392ReadRows[v30RC3SeparatorRow](t, db)
+	if len(after) != 1 || !reflect.DeepEqual(after[0], before) {
+		t.Fatal("refusal changed historical separator data")
 	}
 	// Unlike node/attachment probes, this intentionally keeps ID to test the PK.
 	duplicate := after[0]
@@ -468,8 +461,8 @@ func TestLegacySeparatorCleanupPreservesPrimaryKeyAndOperatorObjects(t *testing.
 			t.Fatal("operator-owned separator trigger no longer executes after cleanup")
 		}
 	}
-	if err := EnsureSchema(db); err != nil {
-		t.Fatal(err)
+	if err := EnsureSchema(db); err == nil {
+		t.Fatal("repeat boot accepted an unsupported old separator schema")
 	}
 	verifyCustom()
 }
@@ -482,8 +475,6 @@ func TestSQLiteLegacyCleanupRefusesOperatorIndexOnRetiredColumn(t *testing.T) {
 		{"nodes", "port", &v392Beta20NodeRow{PanelID: 3, InboundID: 2, DisplayName: "guard", Region: "US", Port: 8443, Protocol: "vless"}},
 		{"nodes", "protocol", &v392Beta20NodeRow{PanelID: 3, InboundID: 2, DisplayName: "guard", Region: "US", Port: 8443, Protocol: "vless"}},
 		{"psp_client_inbounds", "provisioned", &v392Beta20AttachmentRow{ClientID: 1, NodeID: 2, Provisioned: true}},
-		{"nodes_separator", "show_in_all_groups", &v30RC3SeparatorRow{DisplayName: "guard", Enabled: true, ShowInAllGroups: true}},
-		{"nodes_separator", "group_ids", &v30RC3SeparatorRow{DisplayName: "guard", Enabled: true, GroupIDs: jsonInt64s{7, 8}}},
 	} {
 		t.Run(tc.table+"/"+tc.column, func(t *testing.T) {
 			db, err := openTestDB(t)
@@ -493,9 +484,7 @@ func TestSQLiteLegacyCleanupRefusesOperatorIndexOnRetiredColumn(t *testing.T) {
 			if db.Dialector.Name() != "sqlite" {
 				t.Skip("SQLite-specific operator schema dependency guard")
 			}
-			if err := db.AutoMigrate(tc.model); err != nil {
-				t.Fatal(err)
-			}
+			seedV3Baseline(t, db)
 			if err := db.Create(tc.model).Error; err != nil {
 				t.Fatal(err)
 			}
@@ -505,6 +494,14 @@ func TestSQLiteLegacyCleanupRefusesOperatorIndexOnRetiredColumn(t *testing.T) {
 			}
 			if err := EnsureSchema(db.Session(&gorm.Session{Logger: logger.Discard})); err == nil {
 				t.Fatal("cleanup silently destroyed or bypassed an operator dependency on a retired column")
+			}
+			// These markers were absent in the frozen source. Their presence
+			// proves this failed at V4 bridge cleanup, not merely preflight.
+			for _, marker := range []string{"node_endpoint_desired_observed_v4", "psp_client_inbound_state_v4", "psp_client_inbound_applied_credentials_v1"} {
+				var applied int64
+				if err := db.Table("schema_migrations").Where("id = ?", marker).Count(&applied).Error; err != nil || applied != 1 {
+					t.Fatalf("native DROP guard did not reach V4 bridge marker %s: %v", marker, err)
+				}
 			}
 			if !db.Migrator().HasColumn(tc.model, tc.column) || !db.Migrator().HasIndex(tc.model, "operator_retired_guard") {
 				t.Fatal("failed cleanup removed the operator index or its required column")

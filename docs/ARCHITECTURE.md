@@ -8,7 +8,7 @@
 
 ## v3.0.0 数据库重构
 
-> 升级到 v3.0.0 必读：[docs/UPGRADE-v3.0.0.md](UPGRADE-v3.0.0.md)。重构不可原地升级，需运行一次性迁移程序 `cmd/migrate-db-v2/`。
+> 本节为 V3 重构历史。V2→V3 使用冻结 V3 二进制中的 `psp migrate`，见 [历史手册](UPGRADE-v3.0.0.md)。自 V4 beta2 起不再携带该工具；迁移收敛策略见 §17 与 [V4 升级指南](UPGRADE-v4.md)。
 
 | 维度 | 重构前 (≤ v2.5.x) | 重构后 (v3.0.0+) |
 |---|---|---|
@@ -21,7 +21,7 @@
 | snapshot 语义 | `traffic_snapshots` / `node_traffic_snapshots` 存 lifetime，但 `client_traffic_snapshots` 存 raw counter（语义不一致） | **三表统一存 lifetime**；raw counter 作为 baseline 收纳进 `user_xui_clients.last_raw_*_bytes` |
 | period 用量计算 | `traffic.Service.periodUsage` + `mailer.Service.periodUsage` 各自 `LastBefore(period_start)` 随机点查（50 user 即 50 次 query/poll） | **`users.period_baseline_bytes` + `User.PeriodUsed()`**：lifetime - baseline，O(1) 内存计算；mailer 重复实现合并 |
 | 空 delta snapshot | 即使 client 没新流量也每轮写入 | **零 delta 跳过**：用户离线时 client snapshot 写入量约降至 1/3 |
-| 升级模式 | 原地 ALTER / DROP | **side-by-side 新库**（Cloudreve `drive`/`drive_v2` 模式）；v3.0.0 主程序只识别新 schema，旧库永久 backup；迁移由 `cmd/migrate-db-v2/` 一次性脚本完成（跑完即删） |
+| 升级模式 | 原地 ALTER / DROP | **side-by-side 新库**；V3 主程序只识别新 schema，旧库保留备份；使用冻结 V3 的 `psp migrate` 完成导入 |
 
 > 自 v3.0.0 起版本号回归标准 semver。下面两张表是 v3.0.0 语义化版本化**之前**的内部开发里程碑记录（v6/v7/v8 是历史内部代号，不是 semver），作为项目早期演进的存档保留，不再新增同类条目——v3.0.0 之后的变更一律进 [CHANGELOG.md](../CHANGELOG.md)，重大特性额外在本文档相应章节记录（如 §7 数据流、§9 API）。
 
@@ -384,7 +384,7 @@ func (s *Service) ensureInboundDeletable(ctx context.Context, panelID int64, inb
 | | `sync_tasks` | 同步任务（带状态/重试） |
 | | `mail_templates` | 邮件模板（按 kind 主键，多行） |
 
-**v3.0.0 升级迁移**：通过独立的 `cmd/migrate-db-v2/` 一次性程序完成。v3.0.0 主程序**完全不识别旧 schema**；旧库由 admin 手工保留作永久 backup，无原地 ALTER。详见 [docs/UPGRADE-v3.0.0.md](UPGRADE-v3.0.0.md) 与 `cmd/migrate-db-v2/README.md`。v3.0.0 → v3.9.0 之间的表结构演进全部靠 GORM AutoMigrate 增量加列/加表（无破坏性变更、无需迁移工具），详见各版本 [CHANGELOG.md](../CHANGELOG.md)。
+**V2→V3 历史升级迁移**：使用冻结 V3 二进制中的 `psp migrate` side-by-side 导入，旧库由管理员保留备份，无原地 ALTER，见 [历史手册](UPGRADE-v3.0.0.md)。V3 内部也有启动时的数据/结构转换，不只有 AutoMigrate；当前 V4 以最终 V3 语义为基线，不重放全部历史转换，见 §17。
 
 **SQL DDL（节选关键字段，完整定义以 [internal/adapters/sqlstore/schema.go](../internal/adapters/sqlstore/schema.go) 为准）**：
 
@@ -1663,63 +1663,50 @@ volumes:
 
 ### 17.1 大版本升级路径
 
-**不支持跨大版本跳级升级**。例如 v3.x → v5.x 必须先升级到 v4.x 再升级到 v5.x，每次只跨一个主版本（major）。
-
-每个 major 版本的二进制只携带 **N-1 → N** 的迁移逻辑。例：
+**以明确支持的数据库语义基线升级，不靠版本号猜测或补跑全部历史小步迁移。** 以下 V4 收敛策略从 `v4.0.0-beta.2` 起生效；已经发布的 `v4.0.0-beta.1` 标签和镜像不变。
 
 | 当前安装 | 目标 | 升级路径 |
 |---|---|---|
-| v2.5.x | v3.0.0 | 直接 `psp migrate`（v3.0.0 携带 ≤ v2.5.x → v3 迁移逻辑） |
-| v2.5.x | v5.0.0 | v2.5.x → **v3 → v4 → v5**，三步，每步分别跑该版本的 `psp migrate` |
-| v3.x | v4.0.0 | 直接 `psp migrate`（v4 携带 v3.x → v4 迁移逻辑） |
+| ≤ v2.5.x | 最终 V3 | 使用冻结 V3 的 `psp migrate` 做 side-by-side 导入，再成功启动 `v3.9.2`；见 [V3 历史手册](UPGRADE-v3.0.0.md) |
+| 更旧或未完成转换的 V3 数据库 | 迁移收敛后的 V4 | 先成功启动 `v3.9.2` / `v3.9.2-beta.20`，完成 V3 语义转换并备份，再正常启动 V4 |
+| 最终 V3 基线 | V4 | 正常启动自动执行有界 V3→V4 桥接，**不运行 `psp migrate`** |
+| 已成功启动并完成数据库转换的 `v4.0.0-beta.1` | 迁移收敛后的 V4 | 正常启动，复用既有 V4 状态迁移标记，补记统一完成标记；部分转换失败的 V4 库须检查现场，不能直接在同一库启动 V3 |
+| 新装或已完成 V4 基线 | V4 | 正常初始化或启动，不重放历史 V3 转换 |
 
-minor / patch 内升级**不需要**跑 migrate（按 [[feedback_semver]] 规则 minor 只加功能、patch 只修 bug，DB schema 只做 AutoMigrate 兼容的增量变更）。
+不支持 V2 直接升 V4。未来 major 的基线和迁移方式须在对应升级文档中明确，不能预先假定每个 major 都有同一种 `migrate` 子命令。详情见 [V4 升级指南](UPGRADE-v4.md)。
 
 ### 17.2 设计依据
 
-- **代码体积可控**：迁移代码一直累加会让二进制无限膨胀；只保留 N-1 让每次发版的迁移代码量稳定在数百行级别
-- **测试矩阵可控**：迁移路径只有"上一个 major → 当前"一条，CI 验证成本线性 O(1)
-- **每次迁移都被充分实战检验**：用户被迫逐步升级 → 每条迁移路径都被大量真实部署跑过
-- **同行业惯例**：PostgreSQL（pg_upgrade 只支持 N-1）、MariaDB、MongoDB、Cloudreve 都是这个政策
+- **规则不重解释**：最终 V3 已有额度三态，`NULL=继承`、`0=明确无限额`、正数=明确上限。V4 不再把用户后来输入的 `0` 改成 `NULL`。
+- **检查先于写入**：`AutoMigrate` 不能先把旧库补成“看起来像新库”，再猜测数据原意；不满足基线时必须只读拒绝。
+- **桥接有界、历史可查**：只保留支持路径必要的转换，旧 V2/V3 转换留在冻结发行版和 Git 历史中，不无限累加进当前启动路径。
+- **事实与期望分离**：数据库结构迁移和上游客户端实际应用/清理不是同一件事；不能为了删历史代码而绕过仍必要的上游收敛确认。
 
 ### 17.3 实现位置
 
-- 迁移逻辑作为主程序的 `migrate` 子命令：`psp migrate --src=<旧库> --dst=<新库>`
-- 代码位置：[internal/migrate/](../internal/migrate/)
-- 运行时安全：normal panel 启动路径不会调用 migrate 包的任何 runtime 逻辑
-- 当下一个 major（vN+1）发版时：删除 vN-1→vN 的迁移、新增 vN→vN+1 的迁移、额外内嵌 vN 全部 `cleanupLegacyState` 段（见 §17.4）
+- 只读基线检查：[schema_baseline.go](../internal/adapters/sqlstore/schema_baseline.go)。识别 8 张核心表、额度列 nullable、V3 额度迁移标记，以及已完成/中断的 V4 endpoint 与 attachment 表示；不是按旧二进制版本号判定。
+- 当前模型和启动编排：[schema.go](../internal/adapters/sqlstore/schema.go) 的 `EnsureSchema`。先检查，再 `AutoMigrate`，然后执行必要桥接、持续修复和角色种子。
+- 有界桥接：[schema_upgrade_v4.go](../internal/adapters/sqlstore/schema_upgrade_v4.go)。保留原 V4 子步骤标记，所有必要步骤成功后记录 `v3_to_v4_baseline_v1`；后续启动跳过旧桥接。
+- 新装初始化标记 `v4_schema_initializing_v1` 仅支持已确认没有 PSP 状态的新库 DDL 失败后重试，不是给旧库绕过检查的开关。
+- `cmd/panel/main.go` 保留退休命令保护：`psp migrate` 和未消费 positional 参数在配置加载/数据库初始化前退出，不能误启动 daemon。V2→V3 专用 `internal/migrate` 已从当前源码删除。
 
-### 17.4 同 major 内部演进：cleanupLegacyState
+### 17.4 迁移、持续修复与上游收敛的边界
 
-某些"破坏性"改动**不需要**走完整的 `psp migrate` 流水线——它们在同一个 major 内部发生（beta 期间尤其常见），目标是 admin 直接换二进制重启就完成迁移。
+V3 的 `cleanupLegacyState` 和 `0→NULL` 额度转换已从当前 V4 源码移除，不将整套 V3 小步迁移复制进另一个 CLI。更旧数据先交由冻结 V3 完成转换，V4 仅承接最终 V3 基线。
 
-这类一次性清理由 [internal/adapters/sqlstore/schema.go](../internal/adapters/sqlstore/schema.go) 的 **`cleanupLegacyState`** 函数承担，在 `EnsureSchema` 的 AutoMigrate 之后跑一次。
+V3 最后版本对三个旧应用索引只做 best-effort 删除，因此它们残留时仍可通过基线检查；V4 将固定的残留集合纳入一次性桥接，不在已完成 V4 的每次启动重复扫描。
 
-约束（必须严格遵守）：
+| 类别 | 当前处理 |
+|---|---|
+| V3 separator 旧行/旧列重解释 | 删除旧转换；未完成的 V3 separator 形态只读拒绝，先运行最终 V3 |
+| V3 额度三态转换 | 删除 `0→NULL` 转换；验证已转换标记及 nullable 列，保留明确无限额的 `0` |
+| V3 残留旧索引 | 一次性规范化 `idx_sub_logs_user_id`、`idx_sub_logs_accessed_at`、`idx_users_email` |
+| V4 client 身份、attachment、endpoint 状态 | 有界桥接，保留 ID、凭据、计数及原迁移标记 |
+| 流量计数 NULL | 当前数据的持续修复，不是历史版本迁移；继续保留 |
+| 内置角色 | 当前模型的不变量维护/种子，不属于旧迁移清理 |
+| Ownership / shared-client 上游应用与清理 | 仍是必要的运行时收敛，**本次未删除**；见 [清理登记](migration/v3-to-v4-cleanup.md) |
 
-1. **每段必须幂等**
-2. **每段必须挂版本注释**
-3. **严格 curated，绝不"自动 DROP 不认识的表"**
-4. **打 log**：每次实际命中了清理逻辑就 `log.Warn` 一条
-
-**大版本节点回收规则**：vN+1 发版时，`cleanupLegacyState` 里所有 vN.x 标签的段从 `EnsureSchema` 里**移除**，但**搬进 vN+1 的 `psp migrate` 子命令**，作为 vN→vN+1 迁移流程的必跑前序步骤。这样 admin 可以从 vN 任意 minor 直接升 vN+1，`cleanupLegacyState` 本身也不会无限增长（最多累积一个 major 内的演进）。
-
-**记录每一段**：加新段时同时在 [CHANGELOG.md](../CHANGELOG.md) 对应版本下记一笔"legacy cleanup: ..."。
-
-### 17.4.1 当前 cleanupLegacyState 段位 (registry)
-
-下次 major 发版（v4.0.0）时**整张表清空**——这些段搬进 v4 的 `psp migrate` 子命令。
-
-| 段标签 | 引入版本 | 解决的问题 | 搬迁到 |
-|---|---|---|---|
-| separator 表迁移 | v3.0.0-beta.7 | `nodes` 表里 `kind='separator'` 的行迁到独立 `nodes_separator` 表 | v4.0.0 migrate |
-| separator visibility 模型重塑 | v3.0.0-rc.4 | 把 `show_in_all_groups` (bool) + `group_ids` 替换成 `mode` (string) + `node_ids` | v4.0.0 migrate |
-| sub_logs 旧单列索引清理 | v3.6.0-beta.1 | 把 `sub_logs` 索引从两个独立单列升级到复合 + 独立索引，drop 旧索引 | v4.0.0 migrate |
-| users.email 索引清理 | v3.6.1-beta.6 | `idx_users_email` 是无用索引（无 `WHERE email=?` 等值查询），纯写放大；删除 | v4.0.0 migrate |
-
-**操作员视角**：每段都会在 PSP 启动时自动跑（幂等），新升级的部署看到对应 `[cleanupLegacyState]` 日志行就说明命中了；旧部署再启动就什么都不做。**不需要手动操作 DB**。
-
-**v4.0.0 实施者视角**：发 v4 时把上面这几段代码从 `cleanupLegacyState` 移除，原样复制进 [internal/migrate/](../internal/migrate/) 的 v3→v4 迁移流程开头。除本表外，v4.0.0 还需要正式删除遗留的 `user_xui_clients` 归属表 / `ports.OwnershipRepo` / 旧 `sub_client_rules`+`sub_import_clients` 兼容代码，完整清单见 [migration/v3-to-v4-cleanup.md](migration/v3-to-v4-cleanup.md)。
+结构 DDL 不处于一个跨数据库全包事务中，尤其 MySQL DDL 会隐式提交。每步可重试并保留转换标记，不代表失败会自动恢复旧库。代码仅显式删除明确登记的应用列/索引，但数据库原生删列可能修改或删除自定义依赖索引/约束，或因依赖报错；不承诺自定义 schema 的对象全部保留，升级前须检查并试迁移，见 [升级指南](UPGRADE-v4.md)。回滚需恢复升级前成套数据库、配置与密钥，不能只换回旧镜像。
 
 ---
 
@@ -1835,11 +1822,11 @@ minor / patch 内升级**不需要**跑 migrate（按 [[feedback_semver]] 规则
 - AuthSvc 接口设计成 pluggable（SAML / OIDC / LTI 各自实现 Provider）
 - `sso_provider` 字段已是自由字符串（`local` / `saml:*` / `oidc:*`），未来扩展 `lti:*` 无需改 schema
 
-### 19.2 v4.0.0 候选项（需要破坏性 schema 变更时才批量做）
+### 19.2 V4 清理边界与后续候选
 
-- 删除遗留 `user_xui_clients` 归属表 / `ports.OwnershipRepo` / `domain.XUIClientEntry`（完整清单见 [migration/v3-to-v4-cleanup.md](migration/v3-to-v4-cleanup.md)）
-- 删除 `sub_client_rules` / `sub_import_clients` 一次性兼容折叠代码（`sub_clients_legacy.go`）
-- `internal/migrate/` 从 v2.5.x→v3 迁移逻辑改写为 v3.x→v4 迁移逻辑
+- 数据库历史迁移与 V2→V3 CLI 退休从 `v4.0.0-beta.2` 起落实，必要的 V3→V4 桥接由正常启动执行，见 §17。
+- Ownership 相关类型和路径仍承接必要的上游收敛，本次未删除；只有替代路径及确认测试完备后才评估清理。
+- `sub_client_rules` / `sub_import_clients` 兼容折叠代码尚未清理，后续单独评估。范围及状态见 [登记清单](migration/v3-to-v4-cleanup.md)。
 
 ### 19.3 有意保持现状（非待办，已在设计评审中定为非目标）
 
