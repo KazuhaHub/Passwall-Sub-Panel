@@ -337,10 +337,9 @@ func (r *nodeAgentRepo) RecordApplied(ctx context.Context, agentID string, strea
 	}
 	seenAt = seenAt.UTC()
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var agent nodeAgentRow
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-			Where("agent_id = ?", agentID).First(&agent).Error; err != nil {
-			return wrapNotFound(err)
+		agent, err := lockNodeAgentByAgentID(tx, agentID)
+		if err != nil {
+			return err
 		}
 		if err := tx.Model(&nodeAgentRow{}).Where("id = ?", agent.ID).
 			Update("last_seen", seenAt).Error; err != nil {
@@ -380,6 +379,28 @@ func (r *nodeAgentRepo) RecordApplied(ctx context.Context, agentID string, strea
 			"last_seen":       seenAt,
 		}).Error
 	})
+}
+
+// lockNodeAgentByAgentID is the canonical owner-row lock for every transaction
+// that coordinates native-agent state. InnoDB also locks the secondary index
+// record used to reach a row. Entering the same row through panel_id in one
+// transaction and agent_id in another can therefore deadlock later when the
+// former deletes the row and needs the latter's secondary-index lock. Callers
+// that start from a panel ID must resolve AgentID with a non-locking read, then
+// enter this exact lock path.
+func lockNodeAgentByAgentID(tx *gorm.DB, agentID string) (*nodeAgentRow, error) {
+	var agent nodeAgentRow
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("agent_id = ?", agentID).First(&agent).Error; err != nil {
+		return nil, fmt.Errorf("node agent owner: %w", wrapNotFound(err))
+	}
+	// Agent IDs predate the task protocol and may legitimately contain upper
+	// case. Do not normalize them: require byte identity after lookup so a
+	// case-insensitive MySQL collation cannot alias two spellings.
+	if agent.AgentID != agentID {
+		return nil, fmt.Errorf("%w: agent ID must match stored identity exactly", domain.ErrConflict)
+	}
+	return &agent, nil
 }
 
 var _ ports.NodeAgentRepo = (*nodeAgentRepo)(nil)

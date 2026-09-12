@@ -96,8 +96,12 @@ func (r *nodeAgentTaskRepo) CreateOrGet(ctx context.Context, task *domain.NodeAg
 	incoming := nodeAgentTaskFromDomain(task)
 	var stored nodeAgentTaskRow
 	created := false
-	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := lockNodeAgentTaskOwner(tx, incoming.AgentID); err != nil {
+	err := runTransactionWithRetry(ctx, r.db, func(tx *gorm.DB) error {
+		// A prior attempt may have populated these before the database chose it
+		// as a deadlock victim. Only state from the committed attempt may escape.
+		stored = nodeAgentTaskRow{}
+		created = false
+		if _, err := lockNodeAgentByAgentID(tx, incoming.AgentID); err != nil {
 			return err
 		}
 		if incoming.SupersedesTaskID != "" {
@@ -218,7 +222,7 @@ func (r *nodeAgentTaskRepo) Offer(ctx context.Context, agentID string, eligibleK
 	offeredAt = offeredAt.UTC()
 	rows := make([]nodeAgentTaskRow, 0, limit)
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := lockNodeAgentTaskOwner(tx, agentID); err != nil {
+		if _, err := lockNodeAgentByAgentID(tx, agentID); err != nil {
 			return err
 		}
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
@@ -342,7 +346,7 @@ func (r *nodeAgentTaskRepo) CompleteBatch(ctx context.Context, agentID string, r
 	}
 	completedAt = completedAt.UTC()
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := lockNodeAgentTaskOwner(tx, agentID); err != nil {
+		if _, err := lockNodeAgentByAgentID(tx, agentID); err != nil {
 			return err
 		}
 		var rows []nodeAgentTaskRow
@@ -468,22 +472,6 @@ func validSHA256Hex(value string) bool {
 	}
 	_, err := hex.DecodeString(value)
 	return err == nil
-}
-
-func lockNodeAgentTaskOwner(tx *gorm.DB, agentID string) error {
-	var agent nodeAgentRow
-	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-		Select("agent_id").Where("agent_id = ?", agentID).First(&agent).Error; err != nil {
-		return fmt.Errorf("native agent task owner: %w", wrapNotFound(err))
-	}
-	// Agent IDs predate the task protocol and may legitimately contain upper
-	// case. Do not normalize them: require byte identity after lookup so a
-	// case-insensitive MySQL collation cannot create a permanently uncompletable
-	// task under a spelling the agent never reports.
-	if agent.AgentID != agentID {
-		return fmt.Errorf("%w: agent ID must match stored identity exactly", domain.ErrConflict)
-	}
-	return nil
 }
 
 func uniqueNonEmptyStrings(values []string) []string {

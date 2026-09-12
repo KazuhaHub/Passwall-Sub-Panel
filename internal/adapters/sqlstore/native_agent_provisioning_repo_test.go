@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -101,48 +102,58 @@ func TestNativeAgentTaskCreateAndDeletionCannotProduceAnOrphan(t *testing.T) {
 		t.Fatal(err)
 	}
 	repos := NewRepos(db)
-	digest := sha256.Sum256([]byte("pspn_task_delete_race_0123456789abcdefghijklmnopqrstuvwxyz"))
-	panel := &domain.XUIPanel{Kind: domain.PanelKindPSP, Name: "native-task-race", URL: "psp://agt_task_delete_race"}
-	agent := &domain.NodeAgent{
-		AgentID: "agt_task_delete_race", CredentialSHA256: hex.EncodeToString(digest[:]), DesiredCoreVersion: "26.6.27",
-	}
 	ctx := context.Background()
-	if err := repos.NativeAgentProvisioning.Create(ctx, panel, agent); err != nil {
-		t.Fatal(err)
-	}
-	task := newTask("task-delete-race", agent.AgentID, "reality_probe.v1", []byte("probe"))
-	start := make(chan struct{})
-	createResult := make(chan error, 1)
-	deleteResult := make(chan error, 1)
-	go func() {
-		<-start
-		_, _, err := repos.NodeAgentTask.CreateOrGet(ctx, task)
-		createResult <- err
-	}()
-	go func() {
-		<-start
-		deleteResult <- repos.NativeAgentProvisioning.DeleteConverged(ctx, panel.ID)
-	}()
-	close(start)
-	createErr, deleteErr := <-createResult, <-deleteResult
+	// Repeat against one schema so the MySQL job exercises the actual InnoDB
+	// secondary-index lock path enough times to catch a lock-order regression,
+	// without paying for another database and migration per attempt.
+	for attempt := 0; attempt < 16; attempt++ {
+		t.Run(fmt.Sprintf("attempt_%02d", attempt), func(t *testing.T) {
+			agentID := fmt.Sprintf("agt_task_delete_race_%02d", attempt)
+			digest := sha256.Sum256([]byte("pspn_task_delete_race_" + agentID))
+			panel := &domain.XUIPanel{
+				Kind: domain.PanelKindPSP, Name: fmt.Sprintf("native-task-race-%02d", attempt), URL: "psp://" + agentID,
+			}
+			agent := &domain.NodeAgent{
+				AgentID: agentID, CredentialSHA256: hex.EncodeToString(digest[:]), DesiredCoreVersion: "26.6.27",
+			}
+			if err := repos.NativeAgentProvisioning.Create(ctx, panel, agent); err != nil {
+				t.Fatal(err)
+			}
+			task := newTask(fmt.Sprintf("task-delete-race-%02d", attempt), agent.AgentID, "reality_probe.v1", []byte("probe"))
+			start := make(chan struct{})
+			createResult := make(chan error, 1)
+			deleteResult := make(chan error, 1)
+			go func() {
+				<-start
+				_, _, err := repos.NodeAgentTask.CreateOrGet(ctx, task)
+				createResult <- err
+			}()
+			go func() {
+				<-start
+				deleteResult <- repos.NativeAgentProvisioning.DeleteConverged(ctx, panel.ID)
+			}()
+			close(start)
+			createErr, deleteErr := <-createResult, <-deleteResult
 
-	switch {
-	case createErr == nil && errors.Is(deleteErr, domain.ErrConflict):
-		if _, err := repos.NodeAgent.GetByAgentID(ctx, agent.AgentID); err != nil {
-			t.Fatalf("winning task create lost its agent: %v", err)
-		}
-		if _, err := repos.NodeAgentTask.GetByTaskID(ctx, task.TaskID); err != nil {
-			t.Fatalf("winning task create was not durable: %v", err)
-		}
-	case deleteErr == nil && errors.Is(createErr, domain.ErrNotFound):
-		if _, err := repos.NodeAgentTask.GetByTaskID(ctx, task.TaskID); !errors.Is(err, domain.ErrNotFound) {
-			t.Fatalf("successful deletion left an orphan task: %v", err)
-		}
-		if _, err := repos.NodeAgent.GetByAgentID(ctx, agent.AgentID); !errors.Is(err, domain.ErrNotFound) {
-			t.Fatalf("successful deletion left agent identity: %v", err)
-		}
-	default:
-		t.Fatalf("create/delete race = create %v, delete %v; want exactly one valid winner", createErr, deleteErr)
+			switch {
+			case createErr == nil && errors.Is(deleteErr, domain.ErrConflict):
+				if _, err := repos.NodeAgent.GetByAgentID(ctx, agent.AgentID); err != nil {
+					t.Fatalf("winning task create lost its agent: %v", err)
+				}
+				if _, err := repos.NodeAgentTask.GetByTaskID(ctx, task.TaskID); err != nil {
+					t.Fatalf("winning task create was not durable: %v", err)
+				}
+			case deleteErr == nil && errors.Is(createErr, domain.ErrNotFound):
+				if _, err := repos.NodeAgentTask.GetByTaskID(ctx, task.TaskID); !errors.Is(err, domain.ErrNotFound) {
+					t.Fatalf("successful deletion left an orphan task: %v", err)
+				}
+				if _, err := repos.NodeAgent.GetByAgentID(ctx, agent.AgentID); !errors.Is(err, domain.ErrNotFound) {
+					t.Fatalf("successful deletion left agent identity: %v", err)
+				}
+			default:
+				t.Fatalf("create/delete race = create %v, delete %v; want exactly one valid winner", createErr, deleteErr)
+			}
+		})
 	}
 }
 
