@@ -44,7 +44,7 @@ var baselineColumns = map[string][]string{
 }
 
 func unsupportedSchemaBaseline(reason string) error {
-	return fmt.Errorf("unsupported PSP database baseline: %s; first upgrade and successfully start v3.9.2 (or v3.9.2-beta.20), then back up the database and configuration before starting V4; no schema changes were performed", reason)
+	return fmt.Errorf("unsupported PSP database baseline: %s; for an untouched V3 database, first upgrade and successfully start v3.9.2 (or v3.9.2-beta.20), then back up the database and configuration before starting V4; for a partially converted or modified V4 database, preserve and inspect the failure state, and restore the matching pre-V4 backup before returning to V3; no schema changes were performed by this baseline check", reason)
 }
 
 // inspectSchemaBaseline performs no writes, including no AutoMigrate. An old

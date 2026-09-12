@@ -1533,7 +1533,7 @@ func EnsureSchema(db *gorm.DB) error {
 			return err
 		}
 	}
-	if err := db.AutoMigrate(schemaModels...); err != nil {
+	if err := autoMigrateCurrentSchema(db); err != nil {
 		return err
 	}
 	if err := migrateV3ToV4(db); err != nil {

@@ -161,6 +161,24 @@ func TestV4BaselineIndexNormalizationPreservesReusedOperatorUniqueIndex(t *testi
 	v392RejectDuplicate(t, db, &duplicate, "operator UUID uniqueness")
 }
 
+func TestCurrentSchemaUsesUniqueIndexesInsteadOfColumnUniqueTags(t *testing.T) {
+	db, err := openTestDB(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, model := range schemaModels {
+		statement := &gorm.Statement{DB: db}
+		if err := statement.Parse(model); err != nil {
+			t.Fatal(err)
+		}
+		for _, field := range statement.Schema.Fields {
+			if field.Unique && !field.IgnoreMigration {
+				t.Fatalf("%s.%s uses column UNIQUE; MySQL schema migration requires explicit preserving support or uniqueIndex", statement.Schema.Table, field.DBName)
+			}
+		}
+	}
+}
+
 func TestPostgresV4IdentityIndexesAreIsolatedToCurrentSchema(t *testing.T) {
 	for _, currentSchema := range []string{"public", "psp.current"} {
 		for _, baseline := range []string{"v3", "fresh"} {
