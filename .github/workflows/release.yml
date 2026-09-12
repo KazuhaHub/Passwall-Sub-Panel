@@ -52,6 +52,7 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: "24"
+          package-manager-cache: false
       - name: Resolve tag and owner
         id: tag
         shell: bash
@@ -100,8 +101,7 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: "24"
-          cache: npm
-          cache-dependency-path: web-react/package-lock.json
+          package-manager-cache: false
 
       - name: Install dependencies
         working-directory: web-react
@@ -155,7 +155,7 @@ jobs:
           GOTOOLCHAIN: auto
         with:
           go-version-file: go.mod
-          cache-dependency-path: go.sum
+          cache: false
 
       - name: Verify preferred compiler
         run: |

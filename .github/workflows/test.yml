@@ -150,7 +150,7 @@ jobs:
           test "$(go tool compile -V | awk '{ print $3 }')" = "$build_toolchain"
       - run: go vet ./...
       - name: Publisher registry guard tests
-        run: node --test deploy/check_image_test.mjs
+        run: node --test deploy/check_image_test.mjs deploy/release_workflow_test.mjs
       - name: Reachable vulnerability check
         run: go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
       - name: test
