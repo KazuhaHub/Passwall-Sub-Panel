@@ -22,6 +22,43 @@ on:
   workflow_dispatch:
 
 jobs:
+  node-contract:
+    name: node contract (pinned published source)
+    runs-on: ubuntu-latest
+    env:
+      GOWORK: "off"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      # Exercise exactly the published Node revision consumed by PSP, not a
+      # floating main branch or a developer's go.work replacement. The live
+      # task test needs a writable test-only fixture inside that module; copy
+      # the checksum-verified source instead of modifying the module cache.
+      - name: real Node sync and durable result receipt
+        run: |
+          set -euo pipefail
+          go mod download github.com/KazuhaHub/passwall-node
+          node_module_dir=$(go list -m -f '{{.Dir}}' github.com/KazuhaHub/passwall-node)
+          test -n "$node_module_dir"
+          test -f "$node_module_dir/go.mod"
+          contract_repo=$(mktemp -d "$RUNNER_TEMP/psp-node-contract.XXXXXX")
+          cp -R "$node_module_dir/." "$contract_repo/"
+          chmod -R u+w "$contract_repo"
+          test -f "$contract_repo/go.mod"
+          PSP_LIVE_NODE_REPO="$contract_repo" go test -count=1 -timeout=5m \
+            ./internal/service/nodesync \
+            -run '^TestLive_RealNode(AgentContract|TaskEvidenceReceipt)$' -v \
+            2>&1 | tee node-contract-output.txt
+      - name: upload test output
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: node-contract-test-output
+          path: node-contract-output.txt
+
   web:
     name: web (typecheck + build + test)
     runs-on: ubuntu-latest

@@ -126,6 +126,17 @@ func (r *nativeAgentProvisioningRepo) DeleteConverged(ctx context.Context, panel
 			return fmt.Errorf("%w: native panel agent identity changed concurrently", domain.ErrConflict)
 		}
 		agent := *locked
+		// Earlier plain identity lookups can establish an old MySQL RR snapshot.
+		// This must be a current locking read after the owner lock, so a receipt
+		// committed by the previous owner-lock holder cannot be overlooked.
+		var evidence []nodeAgentTaskResultQuarantineRow
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select("agent_id, task_id").
+			Where("agent_id = ?", agent.AgentID).Limit(1).Find(&evidence).Error; err != nil {
+			return err
+		}
+		if len(evidence) != 0 {
+			return fmt.Errorf("%w: native agent still has quarantined result evidence", domain.ErrConflict)
+		}
 		var activeTasks []nodeAgentTaskRow
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select("task_id").
 			Where("agent_id = ? AND status IN ?", agent.AgentID,

@@ -474,15 +474,22 @@ type NodeAgentTaskRepo interface {
 	// domain.ErrResourceExhausted, but an exact replay still succeeds at capacity.
 	CreateOrGet(ctx context.Context, task *domain.NodeAgentTask) (stored *domain.NodeAgentTask, created bool, err error)
 	GetByTaskID(ctx context.Context, taskID string) (*domain.NodeAgentTask, error)
+	// GetQuarantinedResult returns complete, integrity-validated agent-local
+	// evidence, never an authoritative task outcome.
+	GetQuarantinedResult(ctx context.Context, agentID, taskID string) (*domain.NodeAgentTaskResultQuarantine, error)
 	// Offer atomically marks queued rows as offered and returns both new and
-	// previously-offered rows, in stable creation order. Only eligibleKinds may
-	// be returned; an empty set offers nothing. maxTaskJSONBytes is the exact
+	// previously-offered rows without dispatch closure or agent-local quarantined
+	// evidence, in stable creation order. Only eligibleKinds may be returned; an
+	// empty set offers nothing. maxTaskJSONBytes is the exact
 	// budget for the encoded JSON task array inside the already-built response,
 	// so only rows that can actually be sent are marked offered.
 	Offer(ctx context.Context, agentID string, eligibleKinds []string, limit, maxTaskJSONBytes int, offeredAt time.Time) ([]*domain.NodeAgentTask, error)
-	// CompleteBatch validates every result under row locks before writing any of
-	// them. Equal terminal replays are no-ops; any unknown, cross-agent,
-	// never-offered, or conflicting result rolls back the complete batch.
+	// CompleteBatch validates every result under the agent owner lock and locks
+	// only that agent's known task rows. Equal terminal replays are no-ops.
+	// Unknown results are durably quarantined; matching queued results also close
+	// dispatch without completing the task. Cross-agent, identity,
+	// terminal/evidence conflicts, or quarantine
+	// quota exhaustion roll back the complete batch, including normal results.
 	CompleteBatch(ctx context.Context, agentID string, results []domain.NodeAgentTaskResult, completedAt time.Time) error
 }
 

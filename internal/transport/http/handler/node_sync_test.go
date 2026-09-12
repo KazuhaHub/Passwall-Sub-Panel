@@ -7,8 +7,11 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	nodeprotocol "github.com/KazuhaHub/passwall-node/protocol"
+
+	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 )
 
 type nodeSyncServiceFunc func(context.Context, nodeprotocol.NodeReport) (nodeprotocol.SyncResponse, error)
@@ -91,6 +94,19 @@ func TestNodeSyncHandlerHidesCoordinatorFailuresAndMarksThemRetryable(t *testing
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusInternalServerError || strings.Contains(response.Body.String(), "private") {
 		t.Fatalf("coordinator failure = status %d body %s", response.Code, response.Body.String())
+	}
+}
+
+func TestNodeSyncHandlerMarksDurableReceiptCapacityExhaustionRetryable(t *testing.T) {
+	handler, err := NewNodeSyncHandler(nodeSyncServiceFunc(func(context.Context, nodeprotocol.NodeReport) (nodeprotocol.SyncResponse, error) {
+		return nodeprotocol.SyncResponse{}, errors.Join(domain.ErrResourceExhausted, errors.New("private quota detail"))
+	}), NodeAuthenticatorFunc(func(*http.Request) (string, error) { return "agt_http_receipts", nil }))
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := postHTTPReceiptReport(t, handler, time.Date(2026, 9, 12, 15, 0, 0, 0, time.UTC))
+	if response.Code != http.StatusTooManyRequests || strings.Contains(response.Body.String(), "private") {
+		t.Fatalf("receipt capacity failure = status %d body %s", response.Code, response.Body.String())
 	}
 }
 

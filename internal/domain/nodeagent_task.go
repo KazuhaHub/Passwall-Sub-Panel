@@ -44,6 +44,11 @@ type NodeAgentTask struct {
 	Status               NodeAgentTaskStatus
 	IdempotencyKeySHA256 *string
 	SupersedesTaskID     string
+	// Dispatch closure is orthogonal to result state. A queued task whose
+	// result unexpectedly arrived (or a restored task with quarantined evidence)
+	// is not safe to offer, but is not completed.
+	DispatchClosedAt     *time.Time
+	DispatchClosedReason string
 
 	ResultOK            *bool
 	ResultIndeterminate bool
@@ -71,4 +76,25 @@ type NodeAgentTaskResult struct {
 	Result        []byte
 	ErrorCode     string
 	Error         string
+}
+
+type NodeAgentTaskQuarantineReason string
+
+const (
+	NodeAgentTaskQuarantineUnknownTask  NodeAgentTaskQuarantineReason = "unknown_task"
+	NodeAgentTaskQuarantineNeverOffered NodeAgentTaskQuarantineReason = "never_offered"
+)
+
+// NodeAgentTaskResultQuarantine is immutable agent-local result evidence, not
+// a terminal task or a reservation of another agent's task ID. Payload is the
+// canonical wire JSON; Result is decoded from that same payload on reads.
+type NodeAgentTaskResultQuarantine struct {
+	AgentID       string
+	TaskID        string
+	Payload       []byte
+	PayloadSHA256 string
+	Reason        NodeAgentTaskQuarantineReason
+	Result        NodeAgentTaskResult
+	FirstSeenAt   time.Time
+	LastSeenAt    time.Time
 }
