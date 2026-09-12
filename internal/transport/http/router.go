@@ -590,13 +590,18 @@ func NewRouter(d Deps) stdhttp.Handler {
 		}
 		servers := handler.NewAdminServersHandler(d.Repos.XUIPanel, d.Pool, d.Repos.Node, d.Repos.Audit, d.Async, invalidateRender).
 			WithNativeAgentProvisioning(d.Repos.NativeAgentProvisioning).
-			WithNodeAgents(d.Repos.NodeAgent)
+			WithNodeAgents(d.Repos.NodeAgent).
+			WithNodeSettings(d.Repos.Settings)
 		// 3X-UI panel credentials live here — never operator.
 		adminGroup.GET("/servers", servers.List)
 		adminGroup.POST("/servers", servers.Create)
 		adminGroup.PUT("/servers/:id", servers.Update)
 		adminGroup.DELETE("/servers/:id", servers.Delete)
 		adminGroup.POST("/servers/:id/rotate-node-credential", servers.RotateNativeCredential)
+		adminGroup.GET("/servers/:id/node-installation", servers.NodeInstallation)
+		adminGroup.POST("/servers/:id/node-credential", servers.StoreNodeCredential)
+		adminGroup.POST("/servers/:id/node-install-script", servers.NodeInstallScript)
+		adminGroup.GET("/servers/:id/node-agent-status", servers.NodeAgentStatus)
 		adminGroup.POST("/servers/probe", servers.Test)
 		adminGroup.GET("/servers/:id/upgrade-preview", servers.UpgradePreview)
 		adminGroup.POST("/servers/:id/upgrade-panel", servers.UpgradePanel)

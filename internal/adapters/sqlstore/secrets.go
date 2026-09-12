@@ -2,6 +2,7 @@ package sqlstore
 
 import (
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -12,7 +13,7 @@ const secretPrefix = "enc:v1:"
 
 var dbSecretKey []byte
 
-// ConfigureSecretKey installs the process-wide key material used by MySQL
+// ConfigureSecretKey installs the process-wide key material used by database
 // repositories to encrypt sensitive string fields before saving them.
 func ConfigureSecretKey(material string) {
 	material = strings.TrimSpace(material)
@@ -24,6 +25,31 @@ func ConfigureSecretKey(material string) {
 	key := make([]byte, len(sum))
 	copy(key, sum[:])
 	dbSecretKey = key
+}
+
+// Native credentials must never use the legacy plaintext fallback or its
+// enc:v1: pass-through. A raw bearer may itself start with that prefix, and
+// must still be encrypted as plaintext rather than mistaken for stored data.
+func encryptNativeCredential(raw string) (string, error) {
+	if len(dbSecretKey) == 0 {
+		return "", errors.New("native credential encryption requires a configured encryption key")
+	}
+	ciphertext, err := pspcrypto.EncryptString(dbSecretKey, raw)
+	if err != nil {
+		return "", errors.New("native credential encryption failed")
+	}
+	return secretPrefix + ciphertext, nil
+}
+
+func decryptNativeCredential(stored string) (string, error) {
+	if !strings.HasPrefix(stored, secretPrefix) || len(dbSecretKey) == 0 {
+		return "", errors.New("native credential requires encrypted storage and its configured encryption key")
+	}
+	raw, err := pspcrypto.DecryptString(dbSecretKey, strings.TrimPrefix(stored, secretPrefix))
+	if err != nil {
+		return "", errors.New("native credential decryption failed; verify the configured encryption key")
+	}
+	return raw, nil
 }
 
 func encryptSecret(plaintext string) (string, error) {

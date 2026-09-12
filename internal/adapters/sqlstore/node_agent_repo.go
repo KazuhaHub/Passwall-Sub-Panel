@@ -19,15 +19,18 @@ import (
 )
 
 type nodeAgentRow struct {
-	ID                     int64  `gorm:"primaryKey;autoIncrement"`
-	AgentID                string `gorm:"size:64;not null;uniqueIndex"`
-	PanelID                int64  `gorm:"not null;uniqueIndex"`
-	Epoch                  uint64 `gorm:"not null;default:1"`
-	CredentialSHA256       string `gorm:"size:64;not null;uniqueIndex"`
-	DesiredCoreEngine      string `gorm:"size:16;not null;default:'xray'"`
-	DesiredCoreVersion     string `gorm:"size:32;not null;default:''"`
-	AllowRestrictedReality bool   `gorm:"not null;default:false"`
-	ObservedCoreEngine     string `gorm:"size:16;not null;default:''"`
+	ID               int64  `gorm:"primaryKey;autoIncrement"`
+	AgentID          string `gorm:"size:64;not null;uniqueIndex"`
+	PanelID          int64  `gorm:"not null;uniqueIndex"`
+	Epoch            uint64 `gorm:"not null;default:1"`
+	CredentialSHA256 string `gorm:"size:64;not null;uniqueIndex"`
+	// Nullable TEXT preserves digest-only legacy records. This private field
+	// is omitted by ordinary agent reads and never mapped into domain.NodeAgent.
+	CredentialCiphertext   *string `gorm:"type:text" json:"-"`
+	DesiredCoreEngine      string  `gorm:"size:16;not null;default:'xray'"`
+	DesiredCoreVersion     string  `gorm:"size:32;not null;default:''"`
+	AllowRestrictedReality bool    `gorm:"not null;default:false"`
+	ObservedCoreEngine     string  `gorm:"size:16;not null;default:''"`
 	LastSeen               *time.Time
 	CreatedAt              time.Time
 	UpdatedAt              time.Time
@@ -152,7 +155,7 @@ func rowToNodeAgent(row *nodeAgentRow) *domain.NodeAgent {
 
 func (r *nodeAgentRepo) List(ctx context.Context) ([]*domain.NodeAgent, error) {
 	var rows []nodeAgentRow
-	if err := r.db.WithContext(ctx).Order("id").Find(&rows).Error; err != nil {
+	if err := r.db.WithContext(ctx).Omit("CredentialCiphertext").Order("id").Find(&rows).Error; err != nil {
 		return nil, err
 	}
 	out := make([]*domain.NodeAgent, len(rows))
@@ -167,7 +170,7 @@ func (r *nodeAgentRepo) ListByPanelIDs(ctx context.Context, panelIDs []int64) ([
 		return []*domain.NodeAgent{}, nil
 	}
 	var rows []nodeAgentRow
-	if err := r.db.WithContext(ctx).Where("panel_id IN ?", panelIDs).Order("panel_id").Find(&rows).Error; err != nil {
+	if err := r.db.WithContext(ctx).Omit("CredentialCiphertext").Where("panel_id IN ?", panelIDs).Order("panel_id").Find(&rows).Error; err != nil {
 		return nil, err
 	}
 	out := make([]*domain.NodeAgent, len(rows))
@@ -190,7 +193,7 @@ func streamRowToDomain(row *nodeAgentStreamRow) *domain.NodeAgentStream {
 
 func (r *nodeAgentRepo) GetByAgentID(ctx context.Context, agentID string) (*domain.NodeAgent, error) {
 	var row nodeAgentRow
-	if err := r.db.WithContext(ctx).Where("agent_id = ?", agentID).First(&row).Error; err != nil {
+	if err := r.db.WithContext(ctx).Omit("CredentialCiphertext").Where("agent_id = ?", agentID).First(&row).Error; err != nil {
 		return nil, wrapNotFound(err)
 	}
 	return rowToNodeAgent(&row), nil
@@ -201,7 +204,7 @@ func (r *nodeAgentRepo) GetByCredentialSHA256(ctx context.Context, digest string
 		return nil, domain.ErrNotFound
 	}
 	var row nodeAgentRow
-	if err := r.db.WithContext(ctx).Where("credential_sha256 = ?", strings.ToLower(digest)).First(&row).Error; err != nil {
+	if err := r.db.WithContext(ctx).Omit("CredentialCiphertext").Where("credential_sha256 = ?", strings.ToLower(digest)).First(&row).Error; err != nil {
 		return nil, wrapNotFound(err)
 	}
 	return rowToNodeAgent(&row), nil
@@ -209,7 +212,7 @@ func (r *nodeAgentRepo) GetByCredentialSHA256(ctx context.Context, digest string
 
 func (r *nodeAgentRepo) GetByPanelID(ctx context.Context, panelID int64) (*domain.NodeAgent, error) {
 	var row nodeAgentRow
-	if err := r.db.WithContext(ctx).Where("panel_id = ?", panelID).First(&row).Error; err != nil {
+	if err := r.db.WithContext(ctx).Omit("CredentialCiphertext").Where("panel_id = ?", panelID).First(&row).Error; err != nil {
 		return nil, wrapNotFound(err)
 	}
 	return rowToNodeAgent(&row), nil
@@ -390,7 +393,7 @@ func (r *nodeAgentRepo) RecordApplied(ctx context.Context, agentID string, strea
 // enter this exact lock path.
 func lockNodeAgentByAgentID(tx *gorm.DB, agentID string) (*nodeAgentRow, error) {
 	var agent nodeAgentRow
-	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+	if err := tx.Omit("CredentialCiphertext").Clauses(clause.Locking{Strength: "UPDATE"}).
 		Where("agent_id = ?", agentID).First(&agent).Error; err != nil {
 		return nil, fmt.Errorf("node agent owner: %w", wrapNotFound(err))
 	}

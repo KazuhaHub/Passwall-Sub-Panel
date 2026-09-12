@@ -438,11 +438,23 @@ type NodeAgentRepo interface {
 }
 
 // NativeAgentProvisioningRepo atomically creates and retires the local panel
-// identity plus its one native agent. The raw credential never crosses this
-// boundary; callers pass only its digest and return the raw value once.
+// identity plus its one native agent. Authentication uses only the digest;
+// recoverable credentials cross this narrow admin-only boundary, never the
+// ordinary NodeAgent/domain read side. Secret writes require at-rest encryption.
 type NativeAgentProvisioningRepo interface {
 	Create(ctx context.Context, panel *domain.XUIPanel, agent *domain.NodeAgent) error
+	// CreateWithCredential stores the verifier and its encrypted recoverable
+	// value in the same transaction as the new panel, agent and streams.
+	CreateWithCredential(ctx context.Context, panel *domain.XUIPanel, agent *domain.NodeAgent, raw string) error
+	// Digest-only rotation deliberately clears any previously recoverable value.
 	RotateCredential(ctx context.Context, panelID int64, credentialSHA256 string) (*domain.NodeAgent, error)
+	RotateCredentialWithSecret(ctx context.Context, panelID int64, raw string) (*domain.NodeAgent, error)
+	// StoreCredential backfills an existing verifier without changing identity
+	// or rotating it. A mismatched raw credential returns domain.ErrConflict.
+	StoreCredential(ctx context.Context, panelID int64, raw string) error
+	// GetCredential returns domain.ErrNotFound for digest-only legacy records;
+	// it never reconstructs/rotates a missing secret or accepts plaintext storage.
+	GetCredential(ctx context.Context, panelID int64) (string, error)
 	DeleteConverged(ctx context.Context, panelID int64) error
 }
 

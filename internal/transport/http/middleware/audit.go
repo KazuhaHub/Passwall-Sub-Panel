@@ -256,7 +256,7 @@ func redact(v any) any {
 func isSensitiveKey(k string) bool {
 	k = strings.ToLower(k)
 	sensitive := []string{
-		"password", "token", "secret", "uuid", "api_token", "sub_token",
+		"password", "token", "secret", "credential", "uuid", "api_token", "sub_token",
 		"client_secret", "key_pem", "private_key", "refresh_token", "access_token",
 	}
 	for _, s := range sensitive {

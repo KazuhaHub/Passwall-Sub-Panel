@@ -27,8 +27,9 @@ func (e NodeCoreEngine) Valid() bool {
 
 // NodeAgent is PSP's durable identity for one native node process. AgentID is
 // minted at registration and never derived from an address; PanelID enforces
-// the protocol's one-agent-to-one-panel accounting scope. Only a SHA-256
-// credential digest is persisted, never the bearer credential itself.
+// the protocol's one-agent-to-one-panel accounting scope. Authentication and
+// ordinary domain reads expose only a SHA-256 credential digest. A separate
+// encrypted recovery copy is accessed through the admin provisioning port.
 type NodeAgent struct {
 	ID                     int64
 	AgentID                string

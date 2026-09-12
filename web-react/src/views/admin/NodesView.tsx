@@ -492,11 +492,13 @@ const VLESS_FLOWS = ['', 'xtls-rprx-vision', 'xtls-rprx-vision-udp443']
 // admin port are irrelevant to clients. Best-effort: prepends a scheme when
 // the stored URL omits one, and returns "" on anything unparseable so the
 // caller just leaves the field blank.
-function hostFromURL(raw: string): string {
+export function hostFromURL(raw: string): string {
   if (!raw) return ''
   try {
     const u = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(raw) ? raw : `https://${raw}`)
-    return u.hostname
+    // PSP URLs identify the agent, not a public proxy host. The operator must
+    // supply the actual node address instead of leaking an agent ID into subscriptions.
+    return u.protocol === 'psp:' ? '' : u.hostname
   } catch {
     return ''
   }

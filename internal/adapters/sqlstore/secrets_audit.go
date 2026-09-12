@@ -32,6 +32,7 @@ func AuditSecretsAtRest(db *gorm.DB) {
 	}{
 		{"xui_panels", "api_token", "3X-UI panel API token"},
 		{"xui_panels", "password", "3X-UI panel password"},
+		{"node_agents", "credential_ciphertext", "PSP native recoverable credential"},
 		{"saml_settings", "sp_private_key", "SAML SP private key"},
 		{"oidc_settings", "client_secret", "OIDC client secret"},
 		{"mail_settings", "smtp_password", "SMTP password"},

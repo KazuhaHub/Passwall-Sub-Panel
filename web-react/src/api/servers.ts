@@ -90,9 +90,16 @@ export interface CreateServerRequest {
 export interface NativeServerProvisioning {
 	server: Server
 	agent_id: string
-	/** Returned exactly once; PSP persists only its SHA-256 digest. */
+	/** Long-lived secret, returned only by administrator provisioning routes. Never part of Server lists. */
 	credential: string
 	endpoint: string
+}
+
+export interface NativeAgentStatus {
+  state: 'waiting' | 'offline' | 'unconfigured' | 'applying' | 'running' | 'error'
+  last_seen?: string
+  core_state?: string
+  configured_nodes: number
 }
 
 export interface UpdateServerRequest {
@@ -159,6 +166,34 @@ export async function createServer(req: CreateServerRequest) {
 export async function rotateNativeCredential(id: number) {
 	const { data } = await client.post<NativeServerProvisioning>(`/admin/servers/${id}/rotate-node-credential`)
 	return data
+}
+
+export async function getNativeInstallation(id: number, signal?: AbortSignal) {
+  const { data } = await client.get<NativeServerProvisioning>(`/admin/servers/${id}/node-installation`, {
+    signal, _skipErrorToast: true,
+  })
+  return data
+}
+
+export async function importNativeCredential(id: number, credential: string, signal?: AbortSignal) {
+  const { data } = await client.post<{ ok: boolean }>(`/admin/servers/${id}/node-credential`,
+    { credential }, { signal, _skipErrorToast: true },
+  )
+  return data
+}
+
+export async function createNativeInstallScript(id: number, version: string, signal?: AbortSignal) {
+  const { data } = await client.post<string>(`/admin/servers/${id}/node-install-script`,
+    { version }, { responseType: 'text', signal, _skipErrorToast: true },
+  )
+  return data
+}
+
+export async function getNativeAgentStatus(id: number, signal?: AbortSignal) {
+  const { data } = await client.get<NativeAgentStatus>(`/admin/servers/${id}/node-agent-status`, {
+    signal, _skipErrorToast: true,
+  })
+  return data
 }
 
 export async function updateServer(id: number, req: UpdateServerRequest) {
