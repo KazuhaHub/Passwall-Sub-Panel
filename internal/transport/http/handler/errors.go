@@ -24,6 +24,7 @@ import (
 //	ErrForbidden         → 403, "Forbidden"
 //	ErrNotFound          → 404, "Not found"
 //	ErrConflict          → 409, "Conflict"
+//	ErrResourceExhausted → 429, "Resource exhausted"
 //	ErrSSONoAccount      → 404, "No SSO-linked account for this identity"
 //	ErrSSOAccountConflict→ 409, "SSO identity conflicts with an existing account"
 //	default              → 500, "Internal server error"
@@ -68,6 +69,8 @@ func respondErrorDetail(c *gin.Context, err error, leakDetail bool) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Not found"})
 	case errors.Is(err, domain.ErrConflict):
 		c.JSON(http.StatusConflict, gin.H{"error": "Conflict"})
+	case errors.Is(err, domain.ErrResourceExhausted):
+		c.JSON(http.StatusTooManyRequests, gin.H{"error": "Resource exhausted"})
 	case errors.Is(err, domain.ErrAlreadyExists):
 		c.JSON(http.StatusConflict, gin.H{"error": "Already exists"})
 	case errors.Is(err, domain.ErrSSONoAccount):

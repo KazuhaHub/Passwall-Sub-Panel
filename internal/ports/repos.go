@@ -469,7 +469,9 @@ type NodeAgentIssueRepo interface {
 type NodeAgentTaskRepo interface {
 	// CreateOrGet makes HTTP/API retries safe. Equal immutable input returns the
 	// existing row; reusing either a task ID or idempotency key for different
-	// input returns domain.ErrConflict.
+	// input returns domain.ErrConflict. New rows are admitted atomically under
+	// a per-agent queued+offered count/raw-input-byte quota; exhaustion returns
+	// domain.ErrResourceExhausted, but an exact replay still succeeds at capacity.
 	CreateOrGet(ctx context.Context, task *domain.NodeAgentTask) (stored *domain.NodeAgentTask, created bool, err error)
 	GetByTaskID(ctx context.Context, taskID string) (*domain.NodeAgentTask, error)
 	// Offer atomically marks queued rows as offered and returns both new and
