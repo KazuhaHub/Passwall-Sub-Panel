@@ -1829,13 +1829,13 @@ func cleanupLegacyState(db *gorm.DB) error {
 	// Idempotent: each DropColumn guarded by HasColumn.
 	if db.Migrator().HasColumn(&separatorRow{}, "show_in_all_groups") {
 		fmt.Println("[cleanupLegacyState] dropping legacy column nodes_separator.show_in_all_groups (replaced by `mode`)")
-		if err := db.Migrator().DropColumn(&separatorRow{}, "show_in_all_groups"); err != nil {
+		if err := dropLegacyColumn(db, &separatorRow{}, "show_in_all_groups"); err != nil {
 			return fmt.Errorf("drop legacy show_in_all_groups: %w", err)
 		}
 	}
 	if db.Migrator().HasColumn(&separatorRow{}, "group_ids") {
 		fmt.Println("[cleanupLegacyState] dropping legacy column nodes_separator.group_ids (replaced by `node_ids`)")
-		if err := db.Migrator().DropColumn(&separatorRow{}, "group_ids"); err != nil {
+		if err := dropLegacyColumn(db, &separatorRow{}, "group_ids"); err != nil {
 			return fmt.Errorf("drop legacy group_ids: %w", err)
 		}
 	}
@@ -1880,7 +1880,7 @@ func cleanupLegacyState(db *gorm.DB) error {
 	// keeping the column would leave two writable representations of one fact.
 	if db.Migrator().HasColumn(&pspClientInboundRow{}, "provisioned") {
 		fmt.Println("[cleanupLegacyState] dropping psp_client_inbounds.provisioned (replaced by four-state convergence)")
-		if err := db.Migrator().DropColumn(&pspClientInboundRow{}, "provisioned"); err != nil {
+		if err := dropLegacyColumn(db, &pspClientInboundRow{}, "provisioned"); err != nil {
 			return fmt.Errorf("drop legacy psp_client_inbounds.provisioned: %w", err)
 		}
 	}
@@ -1893,12 +1893,29 @@ func cleanupLegacyState(db *gorm.DB) error {
 			continue
 		}
 		fmt.Printf("[cleanupLegacyState] dropping nodes.%s (replaced by desired/observed endpoint columns)\n", legacy)
-		if err := db.Migrator().DropColumn(&nodeRow{}, legacy); err != nil {
+		if err := dropLegacyColumn(db, &nodeRow{}, legacy); err != nil {
 			return fmt.Errorf("drop legacy nodes.%s: %w", legacy, err)
 		}
 	}
 
 	return nil
+}
+
+// The bundled SQLite engine supports native DROP COLUMN. The SQLite GORM
+// migrator instead rebuilds the table and loses independent indexes/triggers,
+// including uniqueness created by AutoMigrate earlier in the same boot. Native
+// ALTER preserves unrelated schema objects and rejects dependencies on a retired
+// column rather than silently deleting operator-managed state. These names come
+// only from the curated cleanup above, never request input.
+func dropLegacyColumn(db *gorm.DB, model any, column string) error {
+	if db.Dialector.Name() != "sqlite" {
+		return db.Migrator().DropColumn(model, column)
+	}
+	stmt := &gorm.Statement{DB: db}
+	if err := stmt.Parse(model); err != nil {
+		return err
+	}
+	return db.Exec("ALTER TABLE " + stmt.Quote(stmt.Schema.Table) + " DROP COLUMN " + stmt.Quote(column)).Error
 }
 
 // backfillTrafficCounterNulls zeroes any NULL traffic counters left by columns

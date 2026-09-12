@@ -6,7 +6,7 @@ name: Release
 # amd64 + docker arm64 under QEMU) and the linux binaries four times. Here:
 #
 #   web         → builds the SPA once
-#   build       → cross-compiles 5 platforms natively in parallel (matrix)
+#   build       → cross-compiles 6 platforms natively in parallel (matrix)
 #   release     → packages tarballs/zips + checksums and publishes the Release
 #   docker      → reuses the linux/amd64 + linux/arm64 binaries to push a
 #                 multi-arch image (no compilation inside the container build)
@@ -30,29 +30,99 @@ env:
   GOTOOLCHAIN: "local"
 
 permissions:
-  contents: write
-  packages: write
+  contents: read
+
+# Serialize publishers, including rolling-channel updates. Do not cancel an
+# in-flight upload and then silently replace that version from another run.
+concurrency:
+  group: release-passwall-sub-panel
+  cancel-in-progress: false
 
 jobs:
   setup:
-    name: Resolve tag
+    name: Resolve release identity
     runs-on: ubuntu-latest
     outputs:
-      tag: ${{ steps.tag.outputs.tag }}
-      owner_lc: ${{ steps.tag.outputs.owner_lc }}
+      tag: ${{ steps.identity.outputs.tag }}
+      owner_lc: ${{ steps.identity.outputs.owner_lc }}
+      sha: ${{ steps.identity.outputs.sha }}
+      build_date: ${{ steps.identity.outputs.build_date }}
     steps:
-      - name: Resolve tag and owner
-        id: tag
-        shell: bash
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        env:
+          GOTOOLCHAIN: auto
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Verify exact preferred compiler
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            tag="${{ inputs.tag }}"
+          set -eu
+          build_toolchain=$(awk '$1 == "toolchain" { print $2 }' go.mod)
+          test -n "$build_toolchain"
+          test "$(go env GOVERSION)" = "$build_toolchain"
+          test "$(go tool compile -V | awk '{ print $3 }')" = "$build_toolchain"
+
+      - name: Resolve tag and owner
+        id: identity
+        shell: bash
+        env:
+          REQUESTED_TAG: ${{ inputs.tag }}
+          EVENT_NAME: ${{ github.event_name }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            tag="$REQUESTED_TAG"
           else
             tag="${GITHUB_REF_NAME}"
           fi
-          owner_lc=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          # Use the pinned, published Node installer/publisher tag authority,
+          # not a second PSP regex or an automatically resolved latest version.
+          go run github.com/KazuhaHub/passwall-node/deployment/cmd/release-tag "$tag"
+          test "$GITHUB_REF" = "refs/tags/${tag}" || {
+            echo 'select the exact release tag ref for dispatch' >&2
+            exit 1
+          }
+          release_sha=$(git rev-parse --verify "refs/tags/${tag}^{commit}")
+          test "$release_sha" = "$GITHUB_SHA" || {
+            echo 'release tag does not identify this workflow commit' >&2
+            exit 1
+          }
+          # API errors fail closed. A fresh run must not replace an existing
+          # published release; failed jobs may retry within this run.
+          export RELEASE_TAG="$tag"
+          existing=$(gh api --paginate "repos/${GITHUB_REPOSITORY}/releases" \
+            --jq '.[] | select(.tag_name == env.RELEASE_TAG) | .id')
+          test -z "$existing" || {
+            echo 'this release already exists; use a new version' >&2
+            exit 1
+          }
+          owner_lc=$(printf '%s' "$GITHUB_REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]')
           echo "tag=${tag}" >> "$GITHUB_OUTPUT"
           echo "owner_lc=${owner_lc}" >> "$GITHUB_OUTPUT"
+          echo "sha=${release_sha}" >> "$GITHUB_OUTPUT"
+          echo "build_date=$(date -u +%FT%TZ)" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Node.js for immutable image preflight
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+
+      - name: Test fail-closed publication guards
+        run: node --test deploy/check_image_test.mjs deploy/check_build_test.mjs deploy/release_workflow_test.mjs
+
+      - name: Refuse an already published exact image tag
+        env:
+          IMAGE_OWNER: ${{ steps.identity.outputs.owner_lc }}
+          RELEASE_VERSION: ${{ steps.identity.outputs.tag }}
+        run: node deploy/check-image.mjs "${IMAGE_OWNER}/passwall-sub-panel" "$RELEASE_VERSION"
 
   web:
     name: Build web assets
@@ -61,6 +131,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.setup.outputs.sha }}
 
       - name: Set up Node.js
         uses: actions/setup-node@v6
@@ -112,6 +184,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.setup.outputs.sha }}
 
       - name: Set up Go
         uses: actions/setup-go@v6
@@ -143,17 +217,18 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: "0"
           VERSION: ${{ needs.setup.outputs.tag }}
-          COMMIT: ${{ github.sha }}
+          COMMIT: ${{ needs.setup.outputs.sha }}
+          BUILD_DATE: ${{ needs.setup.outputs.build_date }}
         run: |
           set -euo pipefail
           mkdir -p out
           short_sha="${COMMIT:0:7}"
-          build_date="$(date -u +%FT%TZ)"
           ldflags="-s -w"
           ldflags+=" -X github.com/KazuhaHub/passwall-sub-panel/internal/version.Version=${VERSION}"
           ldflags+=" -X github.com/KazuhaHub/passwall-sub-panel/internal/version.Commit=${short_sha}"
-          ldflags+=" -X github.com/KazuhaHub/passwall-sub-panel/internal/version.BuildDate=${build_date}"
+          ldflags+=" -X github.com/KazuhaHub/passwall-sub-panel/internal/version.BuildDate=${BUILD_DATE}"
           go build -trimpath -ldflags="${ldflags}" -o "out/psp${{ matrix.ext }}" ./cmd/panel
+          sh deploy/check-build.sh "out/psp${{ matrix.ext }}" "$GOOS" "$GOARCH" "$COMMIT"
 
       - name: Upload binary
         uses: actions/upload-artifact@v7
@@ -167,9 +242,13 @@ jobs:
     name: Publish GitHub Release
     runs-on: ubuntu-latest
     needs: [setup, build]
+    permissions:
+      contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.setup.outputs.sha }}
 
       - name: Download all binaries
         uses: actions/download-artifact@v8
@@ -184,6 +263,9 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist build
+
+          set -- artifacts/psp-*
+          test "$#" = 6 || { echo 'require exactly six release artifacts' >&2; exit 1; }
 
           for dir in artifacts/psp-*; do
             name_part="${dir#artifacts/psp-}"      # e.g. linux-amd64
@@ -204,7 +286,7 @@ jobs:
 
             # README + example config are tracked — copy without swallowing
             # errors so a genuinely missing file fails the release loudly.
-            cp README.md "${pkgdir}/"
+            cp LICENSE README.md "${pkgdir}/"
             cp config/config.yaml.example "${pkgdir}/"
             # Bundle DEFAULT rulesets/templates from the committed seed dir.
             # config/templates and config/rulesets are git-ignored (runtime,
@@ -229,6 +311,7 @@ jobs:
           VERSION: ${{ needs.setup.outputs.tag }}
           OWNER_LC: ${{ needs.setup.outputs.owner_lc }}
         run: |
+          set -euo pipefail
           # The :latest tag is pushed for STABLE releases only (see the docker
           # job's metadata rules). Offering it in a pre-release's notes hands
           # the reader a command that silently installs the previous stable
@@ -257,11 +340,31 @@ jobs:
           \`\`\`
           EOF
 
+          # A reviewed per-version note supplements generated commit notes.
+          note="docs/releases/${VERSION}.md"
+          if [ -f "$note" ]; then
+            printf '\n' >> release_notes.md
+            cat "$note" >> release_notes.md
+          fi
+
+      - name: Recheck immutable tag before publication
+        shell: bash
+        env:
+          VERSION: ${{ needs.setup.outputs.tag }}
+          COMMIT: ${{ needs.setup.outputs.sha }}
+        run: |
+          set -euo pipefail
+          git fetch --force --no-tags origin "refs/tags/${VERSION}:refs/tags/${VERSION}"
+          test "$(git rev-parse --verify "refs/tags/${VERSION}^{commit}")" = "$COMMIT" || {
+            echo 'release tag changed during the build; refusing publication' >&2
+            exit 1
+          }
+
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ needs.setup.outputs.tag }}
-          target_commitish: ${{ github.sha }}
+          target_commitish: ${{ needs.setup.outputs.sha }}
           name: ${{ needs.setup.outputs.tag }}
           # Mark pre-release tags (anything with a "-beta"/"-rc"/... suffix) as a
           # GitHub pre-release so /releases/latest excludes them — PSP's in-app
@@ -271,6 +374,8 @@ jobs:
           generate_release_notes: true
           body_path: release_notes.md
           append_body: true
+          overwrite_files: false
+          fail_on_unmatched_files: true
           files: |
             dist/*
         env:
@@ -280,9 +385,14 @@ jobs:
     name: Publish container image
     runs-on: ubuntu-latest
     needs: [setup, build]
+    permissions:
+      contents: read
+      packages: write
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.setup.outputs.sha }}
 
       - name: Download linux/amd64 binary
         uses: actions/download-artifact@v8
@@ -298,6 +408,11 @@ jobs:
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
+
+      - name: Set up Node.js for immutable image preflight
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
 
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v4
@@ -327,8 +442,28 @@ jobs:
           labels: |
             org.opencontainers.image.title=passwall-sub-panel
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
-            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.revision=${{ needs.setup.outputs.sha }}
             org.opencontainers.image.version=${{ needs.setup.outputs.tag }}
+            org.opencontainers.image.licenses=AGPL-3.0
+
+      - name: Recheck immutable tag before image publication
+        shell: bash
+        env:
+          VERSION: ${{ needs.setup.outputs.tag }}
+          COMMIT: ${{ needs.setup.outputs.sha }}
+        run: |
+          set -euo pipefail
+          git fetch --force --no-tags origin "refs/tags/${VERSION}:refs/tags/${VERSION}"
+          test "$(git rev-parse --verify "refs/tags/${VERSION}^{commit}")" = "$COMMIT" || {
+            echo 'release tag changed during the build; refusing image publication' >&2
+            exit 1
+          }
+
+      - name: Refuse an already published exact image tag
+        env:
+          IMAGE_OWNER: ${{ needs.setup.outputs.owner_lc }}
+          RELEASE_VERSION: ${{ needs.setup.outputs.tag }}
+        run: node deploy/check-image.mjs "${IMAGE_OWNER}/passwall-sub-panel" "$RELEASE_VERSION"
 
       - name: Build and push multi-arch image
         uses: docker/build-push-action@v7
