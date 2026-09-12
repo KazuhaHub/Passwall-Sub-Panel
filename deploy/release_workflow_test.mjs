@@ -13,7 +13,7 @@ test('V3 publisher cannot share npm or Go caches', () => {
 })
 
 test('V3 publisher binds each downstream checkout to the exact setup commit', () => {
-  assert.equal((workflow.match(/ref: \$\{\{ needs.setup.outputs.sha \}\}/g) ?? []).length, 4)
+  assert.equal((workflow.match(/ref: \$\{\{ github.sha \}\}/g) ?? []).length, 4)
   assert(workflow.includes('test "$GITHUB_REF" = "refs/tags/$tag"'))
   assert(workflow.includes('test "$release_sha" = "$GITHUB_SHA"'))
   assert(workflow.includes('COMMIT: ${{ needs.setup.outputs.sha }}'))

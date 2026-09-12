@@ -95,7 +95,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
         with:
-          ref: ${{ needs.setup.outputs.sha }}
+          ref: ${{ github.sha }}
 
       - name: Set up Node.js
         uses: actions/setup-node@v6
@@ -147,7 +147,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
         with:
-          ref: ${{ needs.setup.outputs.sha }}
+          ref: ${{ github.sha }}
 
       - name: Set up Go
         uses: actions/setup-go@v6
@@ -217,7 +217,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
         with:
-          ref: ${{ needs.setup.outputs.sha }}
+          ref: ${{ github.sha }}
 
       - name: Download all binaries
         uses: actions/download-artifact@v8
@@ -340,7 +340,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
         with:
-          ref: ${{ needs.setup.outputs.sha }}
+          ref: ${{ github.sha }}
 
       - name: Download linux/amd64 binary
         uses: actions/download-artifact@v8
