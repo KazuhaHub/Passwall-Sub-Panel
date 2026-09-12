@@ -15,15 +15,15 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/idgen"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/log"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/panelpath"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/transport/http/middleware"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/version"
 )
 
-// AdminServersHandler exposes CRUD for 3X-UI server connections under
-// /api/admin/servers. A "server" is a 3X-UI panel URL + credentials stored
-// in the DB; nodes reference a server by ID when admin creates or imports
-// inbounds.
+// AdminServersHandler exposes CRUD for upstream panels and native PSP servers
+// under /api/admin/servers. Nodes reference a stable server ID independently
+// of installing a native agent or changing its machine address.
 //
 // Mutations keep the DB and the in-memory XUIPool in lockstep so changes
 // take effect immediately without restarting the panel binary.
@@ -40,6 +40,7 @@ type AdminServersHandler struct {
 	invalidateRender func()
 	native           ports.NativeAgentProvisioningRepo
 	agents           ports.NodeAgentRepo
+	nodeSettings     ports.SettingsRepo
 }
 
 func (h *AdminServersHandler) WithNativeAgentProvisioning(repo ports.NativeAgentProvisioningRepo) *AdminServersHandler {
@@ -49,6 +50,11 @@ func (h *AdminServersHandler) WithNativeAgentProvisioning(repo ports.NativeAgent
 
 func (h *AdminServersHandler) WithNodeAgents(repo ports.NodeAgentRepo) *AdminServersHandler {
 	h.agents = repo
+	return h
+}
+
+func (h *AdminServersHandler) WithNodeSettings(repo ports.SettingsRepo) *AdminServersHandler {
+	h.nodeSettings = repo
 	return h
 }
 
@@ -309,7 +315,7 @@ func (h *AdminServersHandler) createNative(c *gin.Context, req serverCreateReque
 		DesiredCoreEngine:  domain.NodeCoreXray,
 		DesiredCoreVersion: release.Version,
 	}
-	if err := h.native.Create(c.Request.Context(), panel, agent); err != nil {
+	if err := h.native.CreateWithCredential(c.Request.Context(), panel, agent, credential); err != nil {
 		mapServerError(c, err)
 		return
 	}
@@ -320,14 +326,16 @@ func (h *AdminServersHandler) createNative(c *gin.Context, req serverCreateReque
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Register native node in pool: " + err.Error()})
 		return
 	}
+	privateNodeResponse(c)
 	c.JSON(http.StatusCreated, nativeServerCreateResponse{
 		Server: h.toServerDTO(c.Request.Context(), panel), AgentID: agentID, Credential: credential,
-		Endpoint: base + "/v1/node/sync",
+		Endpoint: panelpath.PanelURL(base, panelpath.FromRequest(c.Request), "/v1/node/sync"),
 	})
 }
 
 // RotateNativeCredential invalidates the old native-agent credential and
-// returns the replacement exactly once. No agent identity or convergence
+// returns and encrypts the replacement for later installation retrieval.
+// No agent identity or convergence
 // coordinate changes, so a restarted daemon resumes its existing state.
 func (h *AdminServersHandler) RotateNativeCredential(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
@@ -353,12 +361,12 @@ func (h *AdminServersHandler) RotateNativeCredential(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "cannot derive a safe public PSP endpoint from this request"})
 		return
 	}
-	credential, digest, err := newNativeCredential()
+	credential, _, err := newNativeCredential()
 	if err != nil {
 		respondError(c, err)
 		return
 	}
-	agent, err := h.native.RotateCredential(c.Request.Context(), id, digest)
+	agent, err := h.native.RotateCredentialWithSecret(c.Request.Context(), id, credential)
 	if err != nil {
 		mapServerError(c, err)
 		return
@@ -370,9 +378,10 @@ func (h *AdminServersHandler) RotateNativeCredential(c *gin.Context) {
 			At:     time.Now(),
 		})
 	}
+	privateNodeResponse(c)
 	c.JSON(http.StatusOK, nativeServerCreateResponse{
 		Server: h.toServerDTO(c.Request.Context(), panel), AgentID: agent.AgentID, Credential: credential,
-		Endpoint: base + "/v1/node/sync",
+		Endpoint: panelpath.PanelURL(base, panelpath.FromRequest(c.Request), "/v1/node/sync"),
 	})
 }
 

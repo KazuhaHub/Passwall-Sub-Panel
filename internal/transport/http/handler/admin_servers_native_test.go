@@ -28,8 +28,39 @@ func (nativeProvisioningPanelRepo) GetByID(_ context.Context, id int64) (*domain
 
 type nativeProvisioningRepoStub struct {
 	ports.NativeAgentProvisioningRepo
-	panel *domain.XUIPanel
-	agent *domain.NodeAgent
+	panel      *domain.XUIPanel
+	agent      *domain.NodeAgent
+	credential string
+}
+
+func (r *nativeProvisioningRepoStub) CreateWithCredential(ctx context.Context, panel *domain.XUIPanel, agent *domain.NodeAgent, raw string) error {
+	r.credential = raw
+	return r.Create(ctx, panel, agent)
+}
+
+func (r *nativeProvisioningRepoStub) RotateCredentialWithSecret(ctx context.Context, panelID int64, raw string) (*domain.NodeAgent, error) {
+	r.credential = raw
+	digest := sha256.Sum256([]byte(raw))
+	return r.RotateCredential(ctx, panelID, hex.EncodeToString(digest[:]))
+}
+
+func (r *nativeProvisioningRepoStub) GetCredential(context.Context, int64) (string, error) {
+	if r.credential == "" {
+		return "", domain.ErrNotFound
+	}
+	return r.credential, nil
+}
+
+func (r *nativeProvisioningRepoStub) StoreCredential(_ context.Context, _ int64, raw string) error {
+	if r.agent == nil {
+		return domain.ErrNotFound
+	}
+	digest := sha256.Sum256([]byte(raw))
+	if hex.EncodeToString(digest[:]) != r.agent.CredentialSHA256 {
+		return domain.ErrConflict
+	}
+	r.credential = raw
+	return nil
 }
 
 func (r *nativeProvisioningRepoStub) Create(_ context.Context, panel *domain.XUIPanel, agent *domain.NodeAgent) error {
@@ -61,7 +92,7 @@ func (p *nativeProvisioningPool) Add(panel *domain.Panel) error {
 	return nil
 }
 
-func TestAdminServersCreateNativeReturnsCredentialOnceAndStoresOnlyDigest(t *testing.T) {
+func TestAdminServersCreateNativeReturnsRecoverableCredentialAndDigestOnlyAgent(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	provisioning := &nativeProvisioningRepoStub{}
 	pool := &nativeProvisioningPool{}
@@ -95,7 +126,7 @@ func TestAdminServersCreateNativeReturnsCredentialOnceAndStoresOnlyDigest(t *tes
 	}
 }
 
-func TestAdminServersRotateNativeCredentialReturnsNewSecretAndPersistsOnlyDigest(t *testing.T) {
+func TestAdminServersRotateNativeCredentialReturnsRecoverableSecretAndDigestOnlyAgent(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	provisioning := &nativeProvisioningRepoStub{}
 	handler := NewAdminServersHandler(nativeProvisioningPanelRepo{}, &nativeProvisioningPool{}, nil, nil, nil, nil).

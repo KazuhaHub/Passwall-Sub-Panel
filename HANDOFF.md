@@ -97,10 +97,25 @@ agent→panel→client 所有权，越权 client key 与已退役 agent 缓存�
 关键路径 race、C2 真 agent 契约测试通过；GitHub CI 的 SQLite/MySQL/PostgreSQL、Web 与
 六平台交叉编译均通过。
 
-管理端现在可直接创建 `panel_type=psp`：PSP 在一个事务中建立 panel、agent 和三条流，返回一次性的
-agent ID / Bearer 凭据 / sync endpoint；数据库只存 SHA-256。原生节点只能编辑名称和备注，旧凭据可
-立即吊销并轮换，新值同样只显示一次。删除采用 fail-closed 规则：仍有节点/客户端，或空 config/roster
+管理端现在可直接创建 `panel_type=psp`：PSP 在一个事务中建立 panel、agent、三条流和凭据加密副本；
+认证读 SHA-256，普通 Agent/API 不读取密文。管理员可再次取回同一 AgentID / Bearer 凭据 /
+sync endpoint，重装不新建 server/node/client 行。原生节点只能编辑名称和备注，旧凭据的立即吊销
+与轮换仍须显式操作。删除采用 fail-closed 规则：仍有节点/客户端，或空 config/roster
 尚未由 agent 精确确认时，不能先删掉认证身份而留下一个继续服务、却再也接管不了的 core。
+
+**安装/重装页面（2026-09-12）**：默认私有 Linux 二进制 + systemd 脚本，手动安装和 Linux Docker
+Compose 作为替代；代理节点仍单独添加/配置。安装接口均属现有管理员认证/角色/2FA 路由，秘密
+响应 `no-store`，凭据补录请求审计脱敏；重新查看凭据有 metadata-only 审计，审计失败不释放秘密。
+旧摘要-only 记录无法逆推原文：补回匹配原凭据或明确轮换，不自动改变身份。加密 key 必须与数据库
+一同备份；缺 key/错误 key/损坏密文均不回落明文。页面按新鲜报告、core/listener 实际应用和当前
+epoch 三流确认显示 waiting/offline/unconfigured/applying/running/error，不把心跳冒充 ready。
+旧实例须先停，公网代理地址改变仍须更新节点；全新 Node 数据目录重新 seed 计数 baseline，PSP
+已有累计及周期用量保留。首个可下载 Node Release 尚未发布，因此程序版本不默认一个不存在的
+tag；module 发布和双仓 CI 通过不代表已经上线或完成真实 Linux/systemd 部署验收。
+
+Node 安装包代码已先通过 PR #9 合入 `36c7f0b10a26`；PSP 固定引用
+`v0.0.0-20260912065610-36c7f0b10a26`。新的 C2 测试会在同一次验收中以全新 Node SQLite
+再次接回原 AgentID，核验稳定行身份及 config/roster 内容；动态 directives 允许因新计数视图重铸。
 
 core 选择已改成声明式 desired state：PSP 原生节点从 Passwall-Node `corecatalog/` 同时选择 engine
 和精确版本；`latest`、未知 engine 和未列入版本一律拒绝，受限版本要求管理员二次确认。PSP 分开显示

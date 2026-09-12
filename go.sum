@@ -31,8 +31,8 @@ github.com/AzureAD/microsoft-authentication-extensions-for-go/cache v0.1.1/go.mo
 github.com/AzureAD/microsoft-authentication-library-for-go v1.6.0 h1:XRzhVemXdgvJqCH0sFfrBUTnUJSBrBf7++ypk+twtRs=
 github.com/AzureAD/microsoft-authentication-library-for-go v1.6.0/go.mod h1:HKpQxkWaGLJ+D/5H8QRpyQXA1eKjxkFlOMwck5+33Jk=
 github.com/BurntSushi/toml v0.3.1/go.mod h1:xHWCNGjB5oqiDr8zfno3MHue2Ht5sIBksp03qcyfWMU=
-github.com/KazuhaHub/passwall-node v0.0.0-20260912051501-deb46a51b263 h1:Okf5k6MJjM9uu7sWVyGUYoHa98drmd4bDRUgGsjKr70=
-github.com/KazuhaHub/passwall-node v0.0.0-20260912051501-deb46a51b263/go.mod h1:o+295ASQe1p/Ewg85+0b4b6pCnc4s1H9mCfmqBge8w8=
+github.com/KazuhaHub/passwall-node v0.0.0-20260912065610-36c7f0b10a26 h1:yoNt7qgaLAg8qP9897Yoes1x4AHHIitswvR/5EKjVx0=
+github.com/KazuhaHub/passwall-node v0.0.0-20260912065610-36c7f0b10a26/go.mod h1:o+295ASQe1p/Ewg85+0b4b6pCnc4s1H9mCfmqBge8w8=
 github.com/alibabacloud-go/alibabacloud-gateway-pop v0.0.6 h1:eIf+iGJxdU4U9ypaUfbtOWCsZSbTb8AUHvyPrxu6mAA=
 github.com/alibabacloud-go/alibabacloud-gateway-pop v0.0.6/go.mod h1:4EUIoxs/do24zMOGGqYVWgw0s9NtiylnJglOeEB5UJo=
 github.com/alibabacloud-go/alibabacloud-gateway-spi v0.0.4/go.mod h1:sCavSAvdzOjul4cEqeVtvlSaSScfNsTQ+46HwlTL1hc=

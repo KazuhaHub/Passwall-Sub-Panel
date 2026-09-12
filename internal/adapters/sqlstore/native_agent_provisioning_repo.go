@@ -12,6 +12,7 @@ import (
 	nodeprotocol "github.com/KazuhaHub/passwall-node/protocol"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
+	"gorm.io/gorm/logger"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 )
@@ -19,6 +20,25 @@ import (
 type nativeAgentProvisioningRepo struct{ db *gorm.DB }
 
 func (r *nativeAgentProvisioningRepo) Create(ctx context.Context, panel *domain.XUIPanel, agent *domain.NodeAgent) error {
+	return r.create(ctx, panel, agent, nil)
+}
+
+func (r *nativeAgentProvisioningRepo) CreateWithCredential(ctx context.Context, panel *domain.XUIPanel, agent *domain.NodeAgent, raw string) error {
+	digest, err := nativeCredentialDigest(raw)
+	if err != nil {
+		return err
+	}
+	if agent == nil || strings.ToLower(agent.CredentialSHA256) != digest {
+		return fmt.Errorf("%w: native credential does not match its verifier", domain.ErrConflict)
+	}
+	ciphertext, err := encryptNativeCredential(raw)
+	if err != nil {
+		return err
+	}
+	return safeNativeCredentialStorageError(r.create(ctx, panel, agent, &ciphertext))
+}
+
+func (r *nativeAgentProvisioningRepo) create(ctx context.Context, panel *domain.XUIPanel, agent *domain.NodeAgent, ciphertext *string) error {
 	if panel == nil || agent == nil || panel.ID != 0 || agent.ID != 0 || agent.PanelID != 0 {
 		return errors.New("provision native agent: new panel and agent are required")
 	}
@@ -39,12 +59,25 @@ func (r *nativeAgentProvisioningRepo) Create(ctx context.Context, panel *domain.
 	}
 	var agentRow *nodeAgentRow
 	err = r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// Never interpolate encrypted credentials into SQL error/slow logs.
+		tx = tx.Session(&gorm.Session{Logger: logger.Discard})
 		if err := tx.Create(panelRow).Error; err != nil {
 			return err
 		}
 		copyAgent.PanelID = panelRow.ID
 		agentRow, err = createNodeAgentRows(tx, &copyAgent)
-		return err
+		if err != nil || ciphertext == nil {
+			return err
+		}
+		result := tx.Model(&nodeAgentRow{}).Where("id = ?", agentRow.ID).
+			Update("credential_ciphertext", *ciphertext)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return fmt.Errorf("%w: new native credential recovery copy was not persisted", domain.ErrConflict)
+		}
+		return nil
 	})
 	if err != nil {
 		return err
@@ -68,32 +101,174 @@ func (r *nativeAgentProvisioningRepo) RotateCredential(ctx context.Context, pane
 		return nil, fmt.Errorf("%w: credential must be a SHA-256 hex digest", domain.ErrValidation)
 	}
 
-	var updated nodeAgentRow
-	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var panel xuiPanelRow
-		if err := tx.First(&panel, panelID).Error; err != nil {
-			return wrapNotFound(err)
+	return r.rotateCredential(ctx, panelID, credentialSHA256, nil)
+}
+
+func (r *nativeAgentProvisioningRepo) RotateCredentialWithSecret(ctx context.Context, panelID int64, raw string) (*domain.NodeAgent, error) {
+	digest, err := nativeCredentialDigest(raw)
+	if err != nil {
+		return nil, err
+	}
+	ciphertext, err := encryptNativeCredential(raw)
+	if err != nil {
+		return nil, err
+	}
+	return r.rotateCredential(ctx, panelID, digest, &ciphertext)
+}
+
+func (r *nativeAgentProvisioningRepo) rotateCredential(ctx context.Context, panelID int64, digest string, ciphertext *string) (*domain.NodeAgent, error) {
+	var updated *nodeAgentRow
+	err := runTransactionWithRetry(ctx, r.db, func(tx *gorm.DB) error {
+		tx = tx.Session(&gorm.Session{Logger: logger.Discard})
+		var err error
+		updated, err = lockNativeCredentialOwner(tx, panelID)
+		if err != nil {
+			return err
 		}
-		if domain.NormalizePanelKind(domain.PanelKind(panel.Kind)) != domain.PanelKindPSP {
-			return fmt.Errorf("%w: panel is not a native node", domain.ErrValidation)
+		// Both values change together, including clearing the recovery copy for
+		// digest-only rotation. Do not let StoreCredential resurrect an old raw
+		// value after a concurrent rotation has replaced its verifier.
+		result := tx.Model(&nodeAgentRow{}).Where("id = ? AND credential_sha256 = ?", updated.ID, updated.CredentialSHA256).
+			Updates(map[string]any{"credential_sha256": digest, "credential_ciphertext": ciphertext})
+		if result.Error != nil {
+			return result.Error
 		}
-		if err := tx.Where("panel_id = ?", panelID).First(&updated).Error; err != nil {
-			return fmt.Errorf("%w: native panel has no agent identity", domain.ErrValidation)
+		// MySQL reports zero for a valid no-op without CLIENT_FOUND_ROWS. The
+		// locked owner's existence was already proven; read back exact identity
+		// instead of treating changed-row count as an insertion/existence oracle.
+		if err := tx.Omit("CredentialCiphertext").First(updated, updated.ID).Error; err != nil {
+			return err
 		}
-		result := tx.Model(&nodeAgentRow{}).Where("id = ?", updated.ID).
-			Update("credential_sha256", credentialSHA256)
+		if updated.CredentialSHA256 != digest {
+			return fmt.Errorf("%w: native verifier changed concurrently", domain.ErrConflict)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, safeNativeCredentialStorageError(err)
+	}
+	return rowToNodeAgent(updated), nil
+}
+
+func (r *nativeAgentProvisioningRepo) StoreCredential(ctx context.Context, panelID int64, raw string) error {
+	digest, err := nativeCredentialDigest(raw)
+	if err != nil {
+		return err
+	}
+	ciphertext, err := encryptNativeCredential(raw)
+	if err != nil {
+		return err
+	}
+	err = runTransactionWithRetry(ctx, r.db, func(tx *gorm.DB) error {
+		tx = tx.Session(&gorm.Session{Logger: logger.Discard})
+		owner, err := lockNativeCredentialOwner(tx, panelID)
+		if err != nil {
+			return err
+		}
+		if owner.CredentialSHA256 != digest {
+			return fmt.Errorf("%w: native credential does not match the current verifier", domain.ErrConflict)
+		}
+		result := tx.Model(&nodeAgentRow{}).Where("id = ? AND credential_sha256 = ?", owner.ID, digest).
+			Update("credential_ciphertext", ciphertext)
 		if result.Error != nil {
 			return result.Error
 		}
 		if result.RowsAffected != 1 {
-			return domain.ErrNotFound
+			return fmt.Errorf("%w: native verifier changed concurrently", domain.ErrConflict)
 		}
-		return tx.First(&updated, updated.ID).Error
+		return nil
 	})
+	return safeNativeCredentialStorageError(err)
+}
+
+func (r *nativeAgentProvisioningRepo) GetCredential(ctx context.Context, panelID int64) (string, error) {
+	var raw string
+	err := runTransactionWithRetry(ctx, r.db, func(tx *gorm.DB) error {
+		raw = ""
+		tx = tx.Session(&gorm.Session{Logger: logger.Discard})
+		owner, err := lockNativeCredentialOwner(tx, panelID)
+		if err != nil {
+			return err
+		}
+		var secret struct{ CredentialCiphertext *string }
+		// The preliminary panel/owner lookup may have established an older
+		// MySQL RR snapshot. Read the recovery copy using a current locking
+		// read after the owner lock, not that older snapshot's credential pair.
+		if err := tx.Model(&nodeAgentRow{}).Select("credential_ciphertext").Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("id = ?", owner.ID).Take(&secret).Error; err != nil {
+			return err
+		}
+		if secret.CredentialCiphertext == nil {
+			return fmt.Errorf("%w: native credential recovery copy is unavailable", domain.ErrNotFound)
+		}
+		raw, err = decryptNativeCredential(*secret.CredentialCiphertext)
+		if err != nil {
+			return err
+		}
+		digest, err := nativeCredentialDigest(raw)
+		if err != nil || digest != owner.CredentialSHA256 {
+			raw = ""
+			return errors.New("native credential recovery copy failed integrity validation")
+		}
+		return nil
+	})
+	if err != nil {
+		return "", safeNativeCredentialStorageError(err)
+	}
+	return raw, nil
+}
+
+func nativeCredentialDigest(raw string) (string, error) {
+	if len(raw) < nodeprotocol.MinNodeCredentialBytes || len(raw) > nodeprotocol.MaxNodeCredentialBytes {
+		return "", fmt.Errorf("%w: native credential exceeds allowed size bounds", domain.ErrValidation)
+	}
+	for i := range raw {
+		if raw[i] < 0x21 || raw[i] > 0x7e {
+			return "", fmt.Errorf("%w: native credential must contain canonical printable ASCII", domain.ErrValidation)
+		}
+	}
+	sum := sha256.Sum256([]byte(raw))
+	return hex.EncodeToString(sum[:]), nil
+}
+
+func lockNativeCredentialOwner(tx *gorm.DB, panelID int64) (*nodeAgentRow, error) {
+	if panelID <= 0 {
+		return nil, fmt.Errorf("%w: native panel ID must be positive", domain.ErrValidation)
+	}
+	var panel xuiPanelRow
+	if err := tx.Select("id, kind").First(&panel, panelID).Error; err != nil {
+		return nil, wrapNotFound(err)
+	}
+	if domain.NormalizePanelKind(domain.PanelKind(panel.Kind)) != domain.PanelKindPSP {
+		return nil, fmt.Errorf("%w: panel is not a native node", domain.ErrValidation)
+	}
+	var resolved nodeAgentRow
+	if err := tx.Select("id, agent_id, panel_id").Where("panel_id = ?", panelID).First(&resolved).Error; err != nil {
+		return nil, wrapNotFound(err)
+	}
+	owner, err := lockNodeAgentByAgentID(tx, resolved.AgentID)
 	if err != nil {
 		return nil, err
 	}
-	return rowToNodeAgent(&updated), nil
+	if owner.ID != resolved.ID || owner.PanelID != panelID {
+		return nil, fmt.Errorf("%w: native agent identity changed concurrently", domain.ErrConflict)
+	}
+	return owner, nil
+}
+
+type nativeCredentialStorageError struct{ cause error }
+
+func (*nativeCredentialStorageError) Error() string {
+	return "native credential storage operation failed"
+}
+func (e *nativeCredentialStorageError) Unwrap() error { return e.cause }
+
+func safeNativeCredentialStorageError(err error) error {
+	if err == nil || errors.Is(err, domain.ErrValidation) || errors.Is(err, domain.ErrConflict) ||
+		errors.Is(err, domain.ErrNotFound) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return err
+	}
+	return &nativeCredentialStorageError{cause: err}
 }
 
 // DeleteConverged retires both identities in one transaction. A native panel
@@ -115,7 +290,7 @@ func (r *nativeAgentProvisioningRepo) DeleteConverged(ctx context.Context, panel
 		// through different unique indexes can otherwise deadlock when deletion
 		// later needs every secondary index entry.
 		var resolved nodeAgentRow
-		if err := tx.Where("panel_id = ?", panelID).First(&resolved).Error; err != nil {
+		if err := tx.Select("id, agent_id, panel_id").Where("panel_id = ?", panelID).First(&resolved).Error; err != nil {
 			return fmt.Errorf("%w: native panel has no agent identity", domain.ErrValidation)
 		}
 		locked, err := lockNodeAgentByAgentID(tx, resolved.AgentID)

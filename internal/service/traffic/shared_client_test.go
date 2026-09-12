@@ -183,3 +183,22 @@ func TestRecordSharedClientStats_NativeEpochResetSeedsThenAccrues(t *testing.T) 
 		t.Fatalf("same-epoch decrease must not charge: delta=%+v client=%+v", malformed, c)
 	}
 }
+
+func TestRecordSharedClientStats_ReinstallationEpochNeedNotIncrease(t *testing.T) {
+	s := &Service{}
+	c := &domain.PSPClient{
+		ID: 4, LifetimeUpBytes: 100, LifetimeDownBytes: 200, LifetimeTotalBytes: 300,
+		LastRawUpBytes: 900, LastRawDownBytes: 800, LastRawTotalBytes: 1700,
+		LastCounterEpoch: 9000, PeriodBaselineTotalBytes: 50,
+	}
+	// A new data directory receives an independent counter namespace. Equality,
+	// not global numeric ordering, identifies a continued cumulative counter.
+	reset := s.recordSharedClientStats(t.Context(), c, 10, 20, &pollSink{}, 2)
+	if reset.total != 0 || c.LifetimeTotalBytes != 300 || c.PeriodBaselineTotalBytes != 50 || c.LastCounterEpoch != 2 {
+		t.Fatalf("reinstall reset lost PSP usage or charged old baseline: %+v %+v", reset, c)
+	}
+	delta := s.recordSharedClientStats(t.Context(), c, 15, 27, &pollSink{}, 2)
+	if delta.total != 12 || c.LifetimeTotalBytes != 312 || c.PeriodBaselineTotalBytes != 50 {
+		t.Fatalf("reinstalled counter did not accrue: %+v %+v", delta, c)
+	}
+}

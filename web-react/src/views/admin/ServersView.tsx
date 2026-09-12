@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useState, type FormEvent, type MouseEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type MouseEvent } from 'react'
+import { Link as RouterLink } from 'react-router'
 import {
 	Alert,
   Box,
@@ -39,6 +40,7 @@ import VisibilityIcon from '@mui/icons-material/Visibility'
 import VisibilityOffIcon from '@mui/icons-material/VisibilityOff'
 import ContentCopyIcon from '@mui/icons-material/ContentCopy'
 import VpnKeyIcon from '@mui/icons-material/VpnKeyOutlined'
+import DownloadIcon from '@mui/icons-material/DownloadOutlined'
 import { useTranslation } from 'react-i18next'
 import { allSettledLimited } from '@/utils/promises'
 
@@ -49,7 +51,11 @@ import UpgradeIcon from '@mui/icons-material/Upgrade'
 
 import {
   createServer,
+  createNativeInstallScript,
   deleteServer,
+	getNativeAgentStatus,
+	getNativeInstallation,
+	importNativeCredential,
 	listCoreReleases,
   listServers,
   listXrayVersions,
@@ -62,6 +68,7 @@ import {
   upgradeXray,
 	type Server,
 	type NativeServerProvisioning,
+	type NativeAgentStatus,
 	type NativeCoreEngine,
   type PanelCapability,
   type PanelType,
@@ -162,10 +169,9 @@ export default function ServersView() {
   const [editing, setEditing] = useState<Server | null>(null)
   const [form, setForm] = useState<FormState>(EMPTY_FORM)
 	const [busy, setBusy] = useState(false)
+	const [nativeInstallationTarget, setNativeInstallationTarget] = useState<Server | null>(null)
 	const [nativeProvisioning, setNativeProvisioning] = useState<NativeServerProvisioning | null>(null)
-	const nativeStartCommand = nativeProvisioning
-		? `passwall-node --endpoint ${nativeProvisioning.endpoint} --agent-id ${nativeProvisioning.agent_id} --credential-file /etc/passwall-node/credential --data-dir /var/lib/passwall-node${nativeProvisioning.endpoint.startsWith('http://') ? ' --allow-insecure-http' : ''}`
-		: ''
+  const nativeInstallationIntent = useRef(0)
   type ServerField = 'name' | 'url' | 'api_token' | 'password'
   const [fieldErr, setFieldErr] = useState<FieldErrors<ServerField>>({})
 
@@ -511,6 +517,7 @@ export default function ServersView() {
   }
 
 	async function rotateCredential(s: Server) {
+		const installationIntent = nativeInstallationIntent.current
 		closeMenu()
 		const accepted = await confirm({
 			title: t('admin:servers.native.rotate_title'),
@@ -522,7 +529,10 @@ export default function ServersView() {
 		setUpgrading(s.id)
 		try {
 			const provisioned = await rotateNativeCredential(s.id)
-			setNativeProvisioning(provisioned)
+      // The server may have committed this rotation after the administrator
+      // closed or switched installation dialogs. Keep that newer UI intent;
+      // its credential can be retrieved later by explicitly reopening the node.
+			if (installationIntent === nativeInstallationIntent.current) openNativeInstallation(provisioned.server, provisioned)
 			pushSnack(t('admin:servers.native.rotated'), 'success')
 		} catch (err) {
 			const message = (err as { response?: { data?: { error?: string } }; message?: string }).response?.data?.error
@@ -533,6 +543,19 @@ export default function ServersView() {
 			setUpgrading(null)
 		}
 	}
+
+  function openNativeInstallation(server: Server, provisioned: NativeServerProvisioning | null = null) {
+    nativeInstallationIntent.current += 1
+    closeMenu()
+    setNativeProvisioning(provisioned)
+    setNativeInstallationTarget(server)
+  }
+
+  function closeNativeInstallation() {
+    nativeInstallationIntent.current += 1
+    setNativeInstallationTarget(null)
+    setNativeProvisioning(null)
+  }
 
   function openCreate() {
     setEditing(null)
@@ -615,7 +638,7 @@ export default function ServersView() {
 					auth_method: form.auth_method,
 					insecure_https: form.insecure_https,
 				})
-			if ('server' in created) setNativeProvisioning(created)
+			if ('server' in created) openNativeInstallation(created.server, created)
         pushSnack(t('admin:servers.toast.created'), 'success')
       }
       setDialogOpen(false)
@@ -1287,7 +1310,7 @@ export default function ServersView() {
                         "update available" hint lives in the Version
                         column (see versionCell), not on this button,
                         so the kebab stays neutral. */}
-                    {(s.capabilities?.includes('panel.upgrade') || s.capabilities?.includes('core.upgrade')) && <IconButton
+                    {(s.panel_type === 'psp' || s.capabilities?.includes('panel.upgrade') || s.capabilities?.includes('core.upgrade')) && <IconButton
                       size="small"
                       onClick={e => openMenu(e, s)}
                       disabled={upgrading === s.id}
@@ -1317,6 +1340,10 @@ export default function ServersView() {
         anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
         transformOrigin={{ vertical: 'top', horizontal: 'right' }}
       >
+        {menuTarget?.panel_type === 'psp' && <MenuItem onClick={() => openNativeInstallation(menuTarget)}>
+          <DownloadIcon fontSize="small" sx={{ mr: 1 }} />
+          {t('admin:servers.action.install_node')}
+        </MenuItem>}
         {hasCapability(menuTarget, 'panel.upgrade') && <MenuItem onClick={() => menuTarget && runUpgradePanel(menuTarget)}>
           <SystemUpdateIcon fontSize="small" sx={{ mr: 1 }} />
           {t('admin:servers.action.upgrade_panel', { defaultValue: '升级 3X-UI 面板（最新）' })}
@@ -1500,7 +1527,7 @@ export default function ServersView() {
 
             {form.panel_type === 'psp' ? (
               <Alert severity="info">
-                {t('admin:servers.native.outbound_hint', { defaultValue: '原生节点主动连接 PSP，不需要填写入站 URL 或上游面板凭据。创建后会显示一次性节点凭据。' })}
+                {t('admin:servers.native.outbound_hint')}
               </Alert>
             ) : <>
               <TextField
@@ -1595,59 +1622,269 @@ export default function ServersView() {
           </Button>
         </DialogActions>
       </Dialog>
-		<Dialog
-			open={!!nativeProvisioning}
-			onClose={() => undefined}
-			slotProps={{ paper: { sx: { borderRadius: 3, bgcolor: md.surfaceContainerHigh, width: 680, maxWidth: '94vw' } } }}
-		>
-			<DialogTitle>{t('admin:servers.native.created_title', { defaultValue: '保存原生节点凭据' })}</DialogTitle>
-			<DialogContent sx={{ display: 'flex', flexDirection: 'column', gap: 2, pt: '12px !important' }}>
-				<Alert severity="warning">
-					{t('admin:servers.native.once_warning', { defaultValue: '节点凭据只显示这一次。PSP 只保存摘要，关闭后无法找回；请先写入权限为 0600 的凭据文件。' })}
-				</Alert>
-				<TextField
-					label={t('admin:servers.native.agent_id', { defaultValue: 'Agent ID' })}
-					value={nativeProvisioning?.agent_id ?? ''}
-					fullWidth slotProps={{ input: { readOnly: true } }}
-				/>
-				<TextField
-					label={t('admin:servers.native.credential', { defaultValue: '一次性节点凭据' })}
-					value={nativeProvisioning?.credential ?? ''}
-					fullWidth slotProps={{
-						input: {
-							readOnly: true,
-							endAdornment: <InputAdornment position="end">
-								<IconButton onClick={() => void copyToClipboard(nativeProvisioning?.credential ?? '')} size="small">
-									<ContentCopyIcon fontSize="small" />
-								</IconButton>
-							</InputAdornment>,
-						},
-					}}
-				/>
-				<TextField
-					label={t('admin:servers.native.start_command', { defaultValue: '启动命令（凭据文件需另行写入）' })}
-					value={nativeStartCommand}
-					fullWidth multiline minRows={3} slotProps={{ input: { readOnly: true } }}
-				/>
-				<Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
-					<Button variant="outlined" startIcon={<ContentCopyIcon />}
-						onClick={() => void copyToClipboard(nativeProvisioning?.credential ?? '')}>
-						{t('admin:servers.native.copy_credential', { defaultValue: '复制凭据' })}
-					</Button>
-					<Button variant="outlined" startIcon={<ContentCopyIcon />}
-						onClick={() => void copyToClipboard(nativeStartCommand)}>
-						{t('admin:servers.native.copy_command', { defaultValue: '复制启动命令' })}
-					</Button>
-				</Box>
-			</DialogContent>
-			<DialogActions>
-				<Button variant="contained" onClick={() => setNativeProvisioning(null)}>
-					{t('admin:servers.native.saved_confirm', { defaultValue: '我已安全保存' })}
-				</Button>
-			</DialogActions>
-		</Dialog>
+      <NativeInstallationDialog
+        server={nativeInstallationTarget}
+        initialProvisioning={nativeProvisioning}
+        onClose={closeNativeInstallation}
+        onRotate={server => void rotateCredential(server)}
+        rotating={upgrading === nativeInstallationTarget?.id}
+      />
     </Box>
   );
+}
+
+export function isNodeReleaseVersion(version: string): boolean {
+  if (!/^v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/.test(version)) return false
+  const prerelease = version.slice(version.indexOf('-') + 1)
+  return !version.includes('-') || prerelease.split('.').every(segment => !/^0\d+$/.test(segment))
+}
+
+function installationErrorMessage(error: unknown, fallback: string): string {
+  const err = error as { response?: { data?: unknown }; message?: string } | null | undefined
+  let data = err?.response?.data
+  if (typeof data === 'string') {
+    try { data = JSON.parse(data) as unknown } catch { return fallback }
+  }
+  if (data && typeof data === 'object' && 'error' in data && typeof data.error === 'string') return data.error
+  return err?.message ?? fallback
+}
+
+function isCredentialUnavailable(error: unknown): boolean {
+  const err = error as { response?: { status?: number; data?: { code?: string } } } | null | undefined
+  return err?.response?.status === 409 && err.response.data?.code === 'node_credential_unavailable'
+}
+
+function shellQuote(value: string): string {
+  return `'${value.replaceAll("'", "'\\''")}'`
+}
+
+interface NativeInstallationDialogProps {
+  server: Server | null
+  initialProvisioning: NativeServerProvisioning | null
+  onClose: () => void
+  onRotate: (server: Server) => void
+  rotating?: boolean
+}
+
+// Installation secrets live only in this open administrator dialog. Reopening
+// reads the same identity/credential; rotation is an explicit, separate action.
+export function NativeInstallationDialog({ server, initialProvisioning, onClose, onRotate, rotating = false }: NativeInstallationDialogProps) {
+  const { t } = useTranslation(['admin', 'common'])
+  const md = useTheme().palette.md
+  const [provisioning, setProvisioning] = useState<NativeServerProvisioning | null>(null)
+  const [installationLoading, setInstallationLoading] = useState(false)
+  const [installationError, setInstallationError] = useState('')
+  const [credentialUnavailable, setCredentialUnavailable] = useState(false)
+  const [oldCredential, setOldCredential] = useState('')
+  const [credentialBusy, setCredentialBusy] = useState(false)
+  const [credentialError, setCredentialError] = useState('')
+  const [version, setVersion] = useState('')
+  const [scriptBusy, setScriptBusy] = useState<'copy' | 'download' | ''>('')
+  const [scriptError, setScriptError] = useState('')
+  const [status, setStatus] = useState<NativeAgentStatus | null>(null)
+  const [statusError, setStatusError] = useState('')
+  const [installationReload, setInstallationReload] = useState(0)
+  const credentialRequest = useRef<AbortController | null>(null)
+  const scriptRequest = useRef<AbortController | null>(null)
+  const serverID = server?.id
+  const versionValid = isNodeReleaseVersion(version.trim())
+
+  useEffect(() => {
+    const controller = new AbortController()
+    setProvisioning(initialProvisioning)
+    setInstallationError('')
+    setCredentialUnavailable(false)
+    setOldCredential('')
+    setCredentialError('')
+    setCredentialBusy(false)
+    setVersion('')
+    setScriptError('')
+    setScriptBusy('')
+    setInstallationLoading(serverID !== undefined && !initialProvisioning)
+    if (serverID !== undefined && !initialProvisioning) {
+      void getNativeInstallation(serverID, controller.signal).then(data => {
+        if (!controller.signal.aborted) setProvisioning(data)
+      }).catch(error => {
+        if (controller.signal.aborted) return
+        if (isCredentialUnavailable(error)) setCredentialUnavailable(true)
+        else setInstallationError(installationErrorMessage(error, t('admin:servers.native.installation_failed')))
+      }).finally(() => {
+        if (!controller.signal.aborted) setInstallationLoading(false)
+      })
+    }
+    return () => {
+      controller.abort()
+      credentialRequest.current?.abort()
+      scriptRequest.current?.abort()
+    }
+    // Request lifetime is scoped to this installation identity, not translated labels.
+  }, [serverID, initialProvisioning, installationReload])
+
+  useEffect(() => {
+    setStatus(null)
+    setStatusError('')
+    if (serverID === undefined) return
+    const controller = new AbortController()
+    let timer: ReturnType<typeof setTimeout> | undefined
+    async function poll() {
+      try {
+        const next = await getNativeAgentStatus(serverID!, controller.signal)
+        if (!controller.signal.aborted) {
+          setStatus(next)
+          setStatusError('')
+        }
+      } catch (error) {
+        if (!controller.signal.aborted) setStatusError(installationErrorMessage(error, t('admin:servers.native.status_failed')))
+      } finally {
+        if (!controller.signal.aborted) timer = setTimeout(() => void poll(), 4000)
+      }
+    }
+    void poll()
+    return () => { controller.abort(); if (timer !== undefined) clearTimeout(timer) }
+  }, [serverID])
+
+  async function saveOldCredential() {
+    if (!server || !oldCredential.trim() || credentialBusy) return
+    const controller = new AbortController()
+    credentialRequest.current = controller
+    setCredentialBusy(true)
+    setCredentialError('')
+    try {
+      await importNativeCredential(server.id, oldCredential.trim(), controller.signal)
+      const data = await getNativeInstallation(server.id, controller.signal)
+      if (!controller.signal.aborted) {
+        setProvisioning(data)
+        setCredentialUnavailable(false)
+        setOldCredential('')
+      }
+    } catch (error) {
+      if (!controller.signal.aborted) setCredentialError(installationErrorMessage(error, t('admin:servers.native.import_failed')))
+    } finally {
+      if (!controller.signal.aborted) setCredentialBusy(false)
+    }
+  }
+
+  async function deliverScript(action: 'copy' | 'download') {
+    if (!server || !provisioning || !versionValid || scriptBusy) return
+    const controller = new AbortController()
+    scriptRequest.current = controller
+    setScriptBusy(action)
+    setScriptError('')
+    try {
+      const script = await createNativeInstallScript(server.id, version.trim(), controller.signal)
+      if (controller.signal.aborted) return
+      if (typeof script !== 'string' || !script.trim()) throw new Error(t('admin:servers.native.script_failed'))
+      if (action === 'copy') await copyToClipboard(script)
+      else {
+        const url = URL.createObjectURL(new Blob([script], { type: 'text/x-shellscript;charset=utf-8' }))
+        try {
+          const link = document.createElement('a')
+          link.href = url
+          link.download = `passwall-node-install-${provisioning.agent_id}.sh`
+          document.body.appendChild(link)
+          link.click()
+          link.remove()
+        } finally { URL.revokeObjectURL(url) }
+      }
+    } catch (error) {
+      if (!controller.signal.aborted) setScriptError(installationErrorMessage(error, t('admin:servers.native.script_failed')))
+    } finally {
+      if (!controller.signal.aborted) setScriptBusy('')
+    }
+  }
+
+  const manualCommand = provisioning
+    ? `chmod 0600 ./credential\nsudo install -m 0600 -o passwall-node -g passwall-node ./credential /opt/passwall-node/config/credential\nsudo systemctl restart passwall-node`
+    : ''
+  const startCommand = provisioning
+    ? `sudo systemctl stop passwall-node &&\nsudo -u passwall-node /opt/passwall-node/bin/passwall-node --endpoint ${shellQuote(provisioning.endpoint)} --agent-id ${shellQuote(provisioning.agent_id)} --credential-file /opt/passwall-node/config/credential --data-dir /opt/passwall-node/data${provisioning.endpoint.startsWith('http://') ? ' --allow-insecure-http' : ''}`
+    : ''
+  const statusSeverity = status?.state === 'running' ? 'success' : status?.state === 'error' ? 'error' : status?.state === 'offline' ? 'warning' : 'info'
+
+  return <Dialog
+    open={!!server} onClose={onClose} maxWidth={false}
+    slotProps={{ paper: { sx: { borderRadius: 3, bgcolor: md.surfaceContainerHigh, width: 760, maxWidth: '94vw' } } }}
+  >
+    <DialogTitle>{t('admin:servers.native.install_title', { name: server?.name ?? '' })}</DialogTitle>
+    <DialogContent sx={{ display: 'flex', flexDirection: 'column', gap: 2, pt: '12px !important' }}>
+      <Alert severity="warning">{t('admin:servers.native.private_warning')}</Alert>
+      <Typography variant="body2">{t('admin:servers.native.install_method')}</Typography>
+      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+        <Typography variant="subtitle1">{t('admin:servers.native.status_title')}</Typography>
+        {statusError && <Alert severity="warning">{t('admin:servers.native.status_stale')} {statusError}</Alert>}
+        <Alert severity={statusSeverity}>
+          {t(`admin:servers.native.agent_status.${status?.state ?? 'checking'}`)}
+          {status?.last_seen && <Typography variant="body2">{t('admin:servers.native.last_seen', { time: status.last_seen })}</Typography>}
+          {status && <Typography variant="body2">{t('admin:servers.native.configured_nodes', { count: status.configured_nodes })}</Typography>}
+          {status?.core_state && <Typography variant="body2">{t('admin:servers.native.core_state', { state: status.core_state })}</Typography>}
+        </Alert>
+        <Typography variant="body2">{t('admin:servers.native.heartbeat_hint')}</Typography>
+      </Box>
+      {installationLoading && <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}><CircularProgress size={18} />{t('admin:servers.native.installation_loading')}</Box>}
+      {installationError && <Alert severity="error" action={<Button color="inherit" onClick={() => setInstallationReload(value => value + 1)}>{t('common:actions.retry')}</Button>}>{installationError}</Alert>}
+      {credentialUnavailable && <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+        <Alert severity="warning">{t('admin:servers.native.legacy_credential_hint')}</Alert>
+        <TextField label={t('admin:servers.native.old_credential')} type="password" value={oldCredential}
+          autoComplete="off" onChange={event => setOldCredential(event.target.value)} disabled={credentialBusy} fullWidth />
+        {credentialError && <Alert severity="error">{credentialError}</Alert>}
+        <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+          <Button variant="contained" disabled={!oldCredential.trim() || credentialBusy || rotating} onClick={() => void saveOldCredential()}>
+            {t('admin:servers.native.import_credential')}
+          </Button>
+          <Button variant="outlined" startIcon={<VpnKeyIcon />} disabled={credentialBusy || rotating} onClick={() => server && onRotate(server)}>
+            {t('admin:servers.action.rotate_node_credential')}
+          </Button>
+        </Box>
+      </Box>}
+      {provisioning && <>
+        <TextField label={t('admin:servers.native.agent_id')} value={provisioning.agent_id} fullWidth slotProps={{ input: { readOnly: true } }} />
+        <TextField label={t('admin:servers.native.endpoint')} value={provisioning.endpoint} fullWidth slotProps={{ input: { readOnly: true } }} />
+        <TextField label={t('admin:servers.native.credential')} type="password" value={provisioning.credential}
+          autoComplete="off" fullWidth slotProps={{ input: { readOnly: true } }} />
+        {provisioning.endpoint.startsWith('http://') && <Alert severity="warning">{t('admin:servers.native.http_warning')}</Alert>}
+        <TextField label={t('admin:servers.native.agent_version')} placeholder="vX.Y.Z" value={version}
+          onChange={event => { setVersion(event.target.value); setScriptError('') }} disabled={!!scriptBusy}
+          error={!!version && !versionValid}
+          helperText={t(version && !versionValid ? 'admin:servers.native.version_invalid' : 'admin:servers.native.version_hint')} fullWidth />
+        <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+          <Button variant="contained" startIcon={scriptBusy ? <CircularProgress size={16} color="inherit" /> : <DownloadIcon />}
+            disabled={!versionValid || !!scriptBusy || rotating} onClick={() => void deliverScript('download')}>
+            {t('admin:servers.native.download_script')}
+          </Button>
+          <Button variant="outlined" startIcon={<ContentCopyIcon />} disabled={!versionValid || !!scriptBusy || rotating} onClick={() => void deliverScript('copy')}>
+            {t('admin:servers.native.copy_script')}
+          </Button>
+          <Button component="a" href="https://github.com/KazuhaHub/Passwall-Node/releases" target="_blank" rel="noopener noreferrer">
+            {t('admin:servers.native.releases')}
+          </Button>
+        </Box>
+        {scriptError && <Alert severity="error">{scriptError}</Alert>}
+        <Typography variant="body2">{t('admin:servers.native.run_script_hint')}</Typography>
+        <TextField label={t('admin:servers.native.run_script_command')} value={`chmod 0600 ./passwall-node-install-${provisioning.agent_id}.sh\nsudo bash ./passwall-node-install-${provisioning.agent_id}.sh`}
+          fullWidth multiline minRows={2} slotProps={{ input: { readOnly: true } }} />
+        <Typography variant="body2">{t('admin:servers.native.manual_hint')}</Typography>
+        <Button component="a" href="https://github.com/KazuhaHub/Passwall-Node/blob/main/README.md#run-the-production-daemon" target="_blank" rel="noopener noreferrer" sx={{ alignSelf: 'flex-start' }}>
+          {t('admin:servers.native.manual_docs')}
+        </Button>
+        <TextField label={t('admin:servers.native.credential_file_command')} value={manualCommand} fullWidth multiline minRows={3} slotProps={{ input: { readOnly: true } }} />
+        <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+          <Button variant="outlined" startIcon={<ContentCopyIcon />} onClick={() => void copyToClipboard(provisioning.credential)}>{t('admin:servers.native.copy_credential')}</Button>
+          <Button variant="outlined" startIcon={<ContentCopyIcon />} onClick={() => void copyToClipboard(manualCommand)}>{t('admin:servers.native.copy_file_command')}</Button>
+        </Box>
+        <TextField label={t('admin:servers.native.start_command')} value={startCommand} fullWidth multiline minRows={3} slotProps={{ input: { readOnly: true } }} />
+        <Typography variant="body2">{t('admin:servers.native.docker_hint')}</Typography>
+        <Button component="a" href="https://github.com/KazuhaHub/Passwall-Node/blob/main/compose.example.yaml" target="_blank" rel="noopener noreferrer" sx={{ alignSelf: 'flex-start' }}>
+          {t('admin:servers.native.docker_docs')}
+        </Button>
+      </>}
+    </DialogContent>
+    <DialogActions sx={{ flexWrap: 'wrap', gap: 1 }}>
+      <Button onClick={onClose}>{t('common:actions.close')}</Button>
+      <Button component={RouterLink} to="/admin/nodes" variant={status?.state === 'running' ? 'contained' : 'outlined'} onClick={onClose}>
+        {t('admin:servers.native.configure_nodes')}
+      </Button>
+    </DialogActions>
+  </Dialog>
 }
 
 interface SecretFieldProps {

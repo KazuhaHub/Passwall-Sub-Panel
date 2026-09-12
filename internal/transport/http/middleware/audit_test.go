@@ -75,6 +75,14 @@ func TestCaptureRequestBody_ValidJSONRedacts(t *testing.T) {
 	}
 }
 
+func TestCaptureRequestBody_NativeCredentialBackfillRedactedRecursively(t *testing.T) {
+	got := captureBodyFor(t, "application/json", `{"credential":"private-node-secret","nested":[{"node_credential":"second-private-secret"}],"version":"v0.1.0"}`)
+	s := mustJSON(t, got)
+	if strings.Contains(s, "private-node-secret") || strings.Contains(s, "second-private-secret") || !strings.Contains(s, "[REDACTED]") || !strings.Contains(s, "v0.1.0") {
+		t.Fatalf("native credential audit redaction failed: %s", s)
+	}
+}
+
 func TestShouldAuditPath_AdminWrites(t *testing.T) {
 	cases := []struct {
 		method, path string
@@ -204,7 +212,7 @@ func TestActionName(t *testing.T) {
 }
 
 func TestIsSensitiveKey(t *testing.T) {
-	for _, k := range []string{"password", "api_token", "sub_token", "uuid", "client_secret", "private_key", "PASSWORD", "RefreshToken"} {
+	for _, k := range []string{"password", "api_token", "sub_token", "credential", "node_credential", "uuid", "client_secret", "private_key", "PASSWORD", "RefreshToken"} {
 		if !isSensitiveKey(k) {
 			t.Errorf("key %q should be sensitive (case-insensitive match)", k)
 		}
