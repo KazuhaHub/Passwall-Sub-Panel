@@ -17,9 +17,9 @@ const MaxNodeTaskLifecycleDays = 10 * 365
 // derive an existing task's safety deadline from today's mutable settings.
 // Identity tombstones have no automatic physical-deletion policy in v1.
 type NodeTaskLifecyclePolicy struct {
-	OfflineReconcileDays int
-	BackupRestoreDays    int
-	ResultRetentionDays  int
+	OfflineReconcileDays int `json:"offline_reconcile_days"`
+	BackupRestoreDays    int `json:"backup_restore_days"`
+	ResultRetentionDays  int `json:"result_retention_days"`
 }
 
 func DefaultNodeTaskLifecyclePolicy() NodeTaskLifecyclePolicy {

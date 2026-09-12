@@ -619,6 +619,14 @@ func (s *Service) offerTasks(ctx context.Context, agentID string, capabilities [
 	tasks := make([]nodeprotocol.Task, len(stored))
 	hadFirstOffer := false
 	for i := range stored {
+		// Lifecycle-aware requests must not lose their immutable deadline when
+		// projected onto the currently published, pre-expiry task wire. The SQL
+		// repository excludes them; keep the same fail-closed boundary here so
+		// a different port implementation cannot silently authorize old agents.
+		// Remove this gate only with the shared expiry revision and negotiation.
+		if stored[i].Lifecycle != nil {
+			return nil, false, fmt.Errorf("%w: lifecycle-aware tasks require the shared expiry transport", domain.ErrConflict)
+		}
 		if stored[i].OfferCount == 1 {
 			hadFirstOffer = true
 		}
