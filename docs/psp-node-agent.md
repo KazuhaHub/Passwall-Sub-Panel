@@ -808,8 +808,14 @@ PSP 拨入时「这次没到」的证据由 PSP 的传输层产生，节点拨�
   仅存 SHA-256；生产路由按 digest 查 agent 且统一 401，管理端可立即吊销并轮换旧值。
 - durable task transport 已实现：PSP 独立持久化
   `queued / offered / succeeded / failed / indeterminate`，按 capability 下发同一不可变身份并整批
-  事务接收 terminal result；整个 report 仍依赖 Node immutable outbox 重放收敛，不声称跨仓储原子。
+  事务接收 terminal result；身份完整的 unknown/身份匹配的 queued 结果进入有界 durable
+  quarantine，后者关闭 dispatch 但保持 unresolved、仍占 active quota。2xx 是完整证据 receipt，
+  不是把隔离证据自动判作任务终态；整个 report 仍依赖 Node immutable outbox 重放收敛，不声称跨仓储原子。
   尚未实现的是 RealityProbe 与 agent 自升级的生产 API/UI。
+- quarantine 以 `(agent_id, task_id)` 隔离，保存完整 canonical JSON 与摘要/原因/接收时间；
+  每 agent hard cap **256 行 / 16 MiB JSON**，满额整批回滚并返回 429，精确重放仍成功。
+  跨 agent/身份/终态冲突仍拒绝；隔离 ID 只 fence 同 agent 的新任务，有隔离证据禁止删除 agent。
+  无人工核对 API/UI、自动晋升或清理器；不代替完整 retention / restore gate（ADR 0032 §2）。
 - per-agent active quota 已闭合：PSP 在 owner-lock 事务内把 `queued + offered` 限为 **256 行 /
   16 MiB 原始 args**（四个满额 offer window）。这是 compiled hard cap，不进可动态放大的 UI
   settings；创建/下发/完成/删除使用同一 owner lock，只有新插入计入 quota，满额时 exact

@@ -10,6 +10,7 @@ import (
 
 	nodeprotocol "github.com/KazuhaHub/passwall-node/protocol"
 
+	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/log"
 )
 
@@ -86,10 +87,15 @@ func (h *NodeSyncHandler) ServeHTTP(w http.ResponseWriter, request *http.Request
 	response, err := h.service.Sync(request.Context(), report)
 	if err != nil {
 		// The untrusted shape was already validated above. Everything after this
-		// boundary is repository/coordinator failure and must be retryable by the
-		// node, not mislabeled as a bad request or echoed with DB detail.
+		// boundary must leave the node's immutable outbox retryable. In particular,
+		// evidence capacity cannot be acknowledged until durable receipt succeeds.
+		// Never echo repository detail or untrusted result content to the caller.
 		log.Error("native node sync failed", "agent_id", agentID, "err", err)
-		writeNodeError(w, http.StatusInternalServerError, errors.New("node sync failed"))
+		status := http.StatusInternalServerError
+		if errors.Is(err, domain.ErrResourceExhausted) {
+			status = http.StatusTooManyRequests
+		}
+		writeNodeError(w, status, errors.New("node sync failed"))
 		return
 	}
 	payload, err := json.Marshal(response)

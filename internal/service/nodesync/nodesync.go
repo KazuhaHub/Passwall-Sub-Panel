@@ -357,7 +357,9 @@ func (s *Service) ingestReport(ctx context.Context, agent *domain.NodeAgent, sna
 	// CompleteBatch is atomic across every result in this report. The complete
 	// report is intentionally not one giant transaction: if a later issue,
 	// stream, or observation write fails, the agent retains its outbox because
-	// HTTP returns non-2xx and this immutable terminal batch replays as a no-op.
+	// HTTP returns non-2xx and the immutable batch replays against its durable
+	// terminal records or quarantined evidence. A receipt does not imply that
+	// quarantined evidence is an authoritative task outcome.
 	if err := nodeprotocol.ValidateTaskResults(report.TaskResults); err != nil {
 		return fmt.Errorf("nodesync: invalid task results: %w", err)
 	}

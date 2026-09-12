@@ -251,14 +251,22 @@ agent 自升级及下面的任务上线硬门不属于本阶段完成条件。
 
 #### B4 — durable task transport 的边界与上线硬门
 
-**状态（2026-09-11）**：transport 与 per-agent active quota 已完成，真实 task kind 尚未对管理员
+**状态（2026-09-11）**：transport、per-agent active quota 与有界结果 quarantine 已完成，真实 task kind 尚未对管理员
 或外部 API 开放。
 `node_agent_tasks` 与第三方面板写入失败用的 `sync_tasks` 是两套不同状态机。前者只持久化
 `queued / offered / succeeded / failed / indeterminate`；没有 `running`，因为 PSP 无法从一次
 断开的 HTTP 往返权威判断远端是否正在执行。`offered` 会按同一 `(id, kind, input_sha256, args)`
 稳定重发；结果接收不依赖 agent 本轮仍声明 capability，以允许执行期间升级/能力短暂消失。
 整批 `task_results` 是一个事务，但完整 report 不是一个跨仓储大事务：后续写入失败时以 Node
-immutable outbox 重放并由 PSP 的相同终态幂等来收敛。
+immutable outbox 重放并由 PSP 的相同终态/隔离证据幂等来收敛。
+
+**单边恢复的结果收存已闭合**：身份完整的 unknown result，或身份匹配但 task 仍为 queued 的
+result，完整保存在 `(agent_id, task_id)` 作用域的独立 quarantine；queued 同时关闭 dispatch，
+保持 unresolved、仍占 active quota。整批正式完成与隔离接收原子提交，2xx 是证据 receipt，不
+是把 unverified result 当执行结论。每 agent hard cap 为 **256 行 / 16 MiB canonical JSON**；
+满额整批回滚并返回 429，精确 payload 重放不消耗新增容量。所有权/身份/终态冲突仍非 2xx，
+隔离 ID 仅阻止同 agent 新建同 ID，不能预占其他 agent 的任务。隔离证据阻止 agent 删除；暂无
+人工核对 API/UI、自动晋升或清理。见 ADR 0032 §2，不能因此宣称完整 restore gate 已关闭。
 
 **per-agent active quota 已闭合**：`CreateOrGet` 在同一个 owner-lock 事务内，对 `queued + offered`
 同时限制 **256 行 / 16 MiB 原始 args**（四个满额 offer window）。这是 compiled hard cap，不是
@@ -273,7 +281,7 @@ quota 只检查新插入：满额时 exact task/idempotency replay 仍成功，�
 1. **双端 expiry**：协议给出一个双方同义的执行截止条件；PSP 到期停止 offer，Node 在开始副作用前
    再检查并拒绝。执行已开始而结论丢失时只能进入 `indeterminate`，不能当作可安全自动重试的 failed。
 2. **terminal retention**：定义 tombstone TTL 与清理器，TTL 至少覆盖 Node outbox 重放、最长支持的
-   离线窗口和数据库备份恢复窗口；否则迟到的相同终态会从幂等成功退化为 unknown-task 永久重试。
+   离线窗口和数据库备份恢复窗口；有界 quarantine 只是证据接收与 backpressure，不替代保留契约。
 3. **restore / ID reuse**：定义 task identity epoch 或明确的 ID 禁止复用窗口，并演练“PSP 恢复旧备份、
    Node 保留新 journal/outbox”以及“备份复活 offered task”两种方向，避免旧结果完成新任务或副作用重跑。
 

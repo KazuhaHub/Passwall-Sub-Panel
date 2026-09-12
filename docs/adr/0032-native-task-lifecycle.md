@@ -1,6 +1,6 @@
 # ADR 0032：原生任务的到期、结果证据与恢复边界
 
-- 状态：提案；时间窗口待所有者确认，实现与跨仓验收均未完成
+- 状态：部分实现；§2 有界结果收存已实现，其余生命周期机制与完整恢复验收未完成；时间窗口待所有者确认
 - 日期：2026-09-11
 
 ## 背景
@@ -44,6 +44,21 @@ terminal 冲突仍不能被当作成功。
 2xx；失败仍整批重放。Node 的 delivered 表示证据已交付，不代表 PSP 将隔离结果用于任务终态。
 当前无需为此增加逐结果 ACK；如果未来允许部分接收/选择性重试，必须重新设计确认协议。
 quarantine 满额必须 backpressure，不得为保持 heartbeat 返回成功而静默丢弃结果。
+
+**已实现的收存边界**：独立表以 `(agent_id, task_id)` 为主键，保存完整 canonical wire result、
+SHA-256、`unknown_task` / `never_offered` 原因与首次/最近接收时间。每 agent compiled hard cap
+为 256 行 / 16 MiB canonical JSON；满额时整批回滚、HTTP 429，精确重放不占新容量。
+旧式缺少 kind/input digest 的结果不能冒充完整证据；已知跨 agent 身份仍拒绝，不能利用隔离
+绕过所有权。隔离 ID 只 fence 同 agent 的新建任务，不能由一个 agent 预占别人的未来 TaskID。
+已有隔离证据的冲突 payload 不得覆盖，也不得因任务行后来恢复而绕过冲突检查。
+恢复的匹配 queued/offered 行仅关闭 dispatch，不自动将隔离证据晋升为任务终态。
+Offer 同时检查同 agent 的隔离 ID；即使恢复行丢失了 dispatch 关闭标记，也不依赖 Node 重新
+送一次已确认的结果才停止下发。
+
+queued 收到匹配结果时以独立字段关闭 dispatch，仍保留 unresolved 状态及 active quota。
+有隔离证据时 agent 删除 fail closed；尚无人工核对 API/UI、自动晋升任务终态或证据清理器。
+这里不扩大现有“无隔离证据、已收敛且无 active task”的 agent 删除行为，也不表示 §3 历史
+保留机制已完成。整个 report 后续失败仍返回非 2xx，下一轮重放已提交的结果证据。
 
 ### 3. 保留期不能短于安全期限
 

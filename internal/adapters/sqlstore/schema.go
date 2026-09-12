@@ -1515,6 +1515,7 @@ var schemaModels = []any{
 	&nodeAgentStreamRow{},
 	&nodeAgentIssueRow{},
 	&nodeAgentTaskRow{},
+	&nodeAgentTaskResultQuarantineRow{},
 	&trafficRow{},
 	&clientTrafficRow{},
 	&nodeTrafficRow{},

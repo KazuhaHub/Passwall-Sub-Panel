@@ -79,9 +79,12 @@ config/roster 覆盖度按本机闭包精确校验，directives 覆盖度则保�
 任务通道现已从“未知即拒绝”推进到独立的 durable coordinator：PSP 只向本轮同时声明
 `task.execution.v1` 与 `task.<kind>` 的 agent 下发，`queued` 第一次成为 `offered` 时临时把下一轮压到
 1 秒，之后稳定重发同一 `(id, kind, input_sha256, args)`，不持久化或猜测 `running`。节点回报的
-`succeeded` / `failed` / `indeterminate` 结果按整批事务接收；同一终态可重放，未知、跨 agent、
-未下发、身份不符或终态冲突都会令本轮非 2xx。这里只承诺 **task-results 整批原子**：报告后续的
+`succeeded` / `failed` / `indeterminate` 结果按整批事务接收；同一终态可重放。身份完整但找不到
+任务的结果，或身份匹配但备份中仍为 queued 的结果，完整持久化到独立 quarantine；后者同时
+关闭 dispatch，却不制造执行终态。跨 agent、身份不符或终态冲突仍令本轮非 2xx。
+这里只承诺 **task-results 整批原子**：正式终态、隔离证据与 dispatch 关闭一起提交；报告后续的
 Issue/stream/observed 写入仍是多个事务，任一失败依赖节点保留 immutable outbox 并重放来收敛。
+2xx 只表示证据已可靠接收，不表示隔离结果已经过人工核对或成为任务终态。
 全量计数的新鲜度只读 PSP 的实际接收时间，不信任 agent 自报时钟；缓存过期会令
 `want_full_report=true`，有限额客户端在刷新前保持关闭。
 双向同步载荷共用协议包的 16 MiB 上限；PSP 只接受自己确实铸造过的 applied epoch/version/ETag
@@ -127,8 +130,8 @@ sing-box 当前核验 `1.14.0`，原生编译 VLESS、VMess、Trojan、Shadowsoc
   才发生的管理员/策略撤销；不增加租约或第二通道就只能等下次同步，属于 §9 的生产取舍。
 - **任务 ID 铸造器已落地，但不表示 restore gate 已关闭**：`idgen.NewTaskIDMinter` 使用 fresh
   192-bit issuer + 不回绕的 uint64 CAS 序列；它尚未接入生产任务入口，不重写任何已有任务 ID。
-  机制与边界见 [ADR 0031](docs/adr/0031-native-task-id-incarnations.md)。后续双端 expiry、结果证据
-  quarantine、retention 与恢复演练见 [ADR 0032 提案](docs/adr/0032-native-task-lifecycle.md)；其中
+  机制与边界见 [ADR 0031](docs/adr/0031-native-task-id-incarnations.md)。结果证据 quarantine 已实现；
+  后续双端 expiry、retention 与完整恢复演练见 [ADR 0032](docs/adr/0032-native-task-lifecycle.md)；其中
   离线对账/备份恢复窗口与完整结果保留期尚待所有者确认，不能当作已经实现或已测量的承诺。
 - **任务 #49**:异地并发被标记的账号该怎么处理。停在证据不足上，
   v1 的 `ip_shadow` 影子执行就是为了给它攒证据。
@@ -142,13 +145,26 @@ sing-box 当前核验 `1.14.0`，原生编译 VLESS、VMess、Trojan、Shadowsoc
   不依赖缓存或可漂移的计数列。只有新插入占用 quota；满额时 exact task/idempotency replay 仍成功，
   身份冲突仍是 `ErrConflict`，新工作超限则为 `ErrResourceExhausted`（HTTP 429）。三种终态均释放
   active quota，但 tombstone 继续保留。这里限制的是原始输入，不是 JSON/base64 或数据库页占用。
+- **恢复后的结果收存已闭合（2026-09-11）**：quarantine 以 `(agent_id, task_id)` 为主键，完整保存
+  canonical wire result、SHA-256、原因和首次/最近接收时间。它是未核实证据，不是任务表；一个
+  agent 不能靠猜 TaskID 占用其他 agent 的身份。相同 payload 重放成功，冲突不覆盖旧证据；同
+  agent 的隔离 ID 不得用于新建任务。后来恢复的匹配 queued/offered 行只关闭 dispatch，不自动
+  晋升隔离证据为终态；即使恢复行尚无关闭标记，已有隔离证据也会阻止 Offer。独立 hard cap
+  为每 agent **256 行 / 16 MiB canonical JSON**，
+  满额整批回滚并返回 HTTP 429，绝不先 ACK 再丢结果。关闭 dispatch 的 queued 任务仍占 active
+  quota；有隔离证据的 agent 不可删除。暂不提供人工核对 API/UI 或证据清理器。
+  `TestLive_RealNodeTaskEvidenceReceipt` 覆盖真实 Node worker/journal/outbox/HTTP 的丢行与丢 ACK
+  路径；最后一步为真实 Processor 的本地原响应重放，不冒充完整备份恢复演练。CI 的
+  `node-contract` job 从 `go.mod` 固定、`go.sum` 校验过的 Node 源码副本运行它与 C2 契约测试，
+  禁用 `go.work`，不追另一仓库的浮动 main。
 - **开放第一个真实任务前仍有三道硬门**，不可用“随机 ID 冲突概率很低”替代：
   1. 定义并实现双端 expiry：PSP 过期后不再 offer，Node 在副作用开始前也必须拒绝过期任务；已经
      开始后失去确定结论要回报 `indeterminate`，不能伪装为普通失败；
   2. 定义 terminal tombstone 保留期与清理器，保留期必须覆盖 Node outbox 重放、最长离线时间及
-     备份恢复窗口，不能让迟到的相同结果从幂等 200 退化成永久 unknown-task 500；
+     备份恢复窗口；现有 quarantine 提供收存与 backpressure，不等于 retention 已闭合；
   3. 定义 DB restore 后的 task identity epoch / ID 禁止复用窗口。恢复旧备份既可能遗失已完成
-     tombstone，也可能复活曾经下发的任务；在恢复演练和跨仓测试通过前不得暴露有副作用的 kind。
+     tombstone，也可能复活曾经下发的任务。当前单边丢行/丢 offer 标记的接收测试不替代完整
+     restore-finalize、Node/双端回滚演练；全部通过前不得暴露有副作用的 kind。
 - **Node v8 的回滚边界**：v8 SQLite 增加 durable task journal。旧 v7 binary 看到
   `PRAGMA user_version=8` 会以 “newer than supported” 直接拒绝启动；它不会只读运行或误写数据库。
   回滚必须同时恢复 v7 数据库备份（并处理上述 task identity 窗口），不能只替换二进制。

@@ -482,8 +482,15 @@ func TestSyncMintsDocumentsThenIngestsAppliedObservation(t *testing.T) {
 			InputSHA256: nodeprotocol.ComputeTaskInputSHA256("reality_probe.v1", nil), OK: true,
 		}},
 	})
-	if err == nil || !strings.Contains(err.Error(), "unknown task") {
-		t.Fatalf("unknown task result error = %v", err)
+	if err != nil {
+		t.Fatalf("unknown task result receipt: %v", err)
+	}
+	quarantined, err := repos.NodeAgentTask.GetQuarantinedResult(ctx, agent.AgentID, "future-task")
+	if err != nil || quarantined.Reason != domain.NodeAgentTaskQuarantineUnknownTask || !quarantined.Result.OK {
+		t.Fatalf("unknown result was not durably quarantined = (%+v, %v)", quarantined, err)
+	}
+	if _, err := repos.NodeAgentTask.GetByTaskID(ctx, "future-task"); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("unknown result created a task: %v", err)
 	}
 }
 

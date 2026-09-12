@@ -601,7 +601,7 @@ func TestNodeAgentTaskConcurrentOfferAndEqualCompletionRemainIdempotent(t *testi
 	}
 }
 
-func TestNodeAgentTaskCompleteBatchRejectsUnknownCrossAgentAndNeverOfferedAtomically(t *testing.T) {
+func TestNodeAgentTaskCompleteBatchRejectsKnownConflictsAtomically(t *testing.T) {
 	repos := newTaskTestRepos(t)
 	ctx := context.Background()
 	createTaskTestAgent(t, repos, "agt_task_batch_a", 703)
@@ -631,18 +631,6 @@ func TestNodeAgentTaskCompleteBatchRejectsUnknownCrossAgentAndNeverOfferedAtomic
 			t.Fatalf("task %q changed despite batch rollback: (%+v, %v)", taskID, stored, err)
 		}
 	}
-
-	unknown := success(two)
-	unknown.TaskID = "task-batch-unknown"
-	if err := repos.NodeAgentTask.CompleteBatch(ctx, one.AgentID, []domain.NodeAgentTaskResult{success(one), unknown}, time.Now()); !errors.Is(err, domain.ErrConflict) {
-		t.Fatalf("unknown result = %v, want ErrConflict", err)
-	}
-	assertStillOffered(one.TaskID)
-
-	if err := repos.NodeAgentTask.CompleteBatch(ctx, one.AgentID, []domain.NodeAgentTaskResult{success(one), success(queued)}, time.Now()); !errors.Is(err, domain.ErrConflict) {
-		t.Fatalf("never-offered result = %v, want ErrConflict", err)
-	}
-	assertStillOffered(one.TaskID)
 
 	if err := repos.NodeAgentTask.CompleteBatch(ctx, one.AgentID, []domain.NodeAgentTaskResult{success(one), success(foreign)}, time.Now()); !errors.Is(err, domain.ErrConflict) {
 		t.Fatalf("cross-agent result = %v, want ErrConflict", err)
