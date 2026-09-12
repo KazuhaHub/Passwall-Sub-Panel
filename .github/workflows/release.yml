@@ -25,6 +25,10 @@ on:
         required: true
         type: string
 
+env:
+  GOWORK: "off"
+  GOTOOLCHAIN: "local"
+
 permissions:
   contents: write
   packages: write
@@ -111,9 +115,20 @@ jobs:
 
       - name: Set up Go
         uses: actions/setup-go@v6
+        # Allow toolchain selection; setup-go exports local after installation.
+        env:
+          GOTOOLCHAIN: auto
         with:
-          go-version: "1.26.x"
+          go-version-file: go.mod
           cache-dependency-path: go.sum
+
+      - name: Verify exact preferred compiler
+        run: |
+          set -eu
+          build_toolchain=$(awk '$1 == "toolchain" { print $2 }' go.mod)
+          test -n "$build_toolchain"
+          test "$(go env GOVERSION)" = "$build_toolchain"
+          test "$(go tool compile -V | awk '{ print $3 }')" = "$build_toolchain"
 
       - name: Download web bundle
         uses: actions/download-artifact@v8

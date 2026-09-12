@@ -1,11 +1,11 @@
 module github.com/KazuhaHub/passwall-sub-panel
 
-go 1.26
+go 1.26.0
 
-toolchain go1.26.5
+toolchain go1.26.8
 
 require (
-	github.com/KazuhaHub/passwall-node v0.0.0-20260912065610-36c7f0b10a26
+	github.com/KazuhaHub/passwall-node v0.0.1-beta2
 	github.com/coreos/go-oidc/v3 v3.20.0
 	github.com/crewjam/saml v0.4.14
 	github.com/gin-gonic/gin v1.12.0

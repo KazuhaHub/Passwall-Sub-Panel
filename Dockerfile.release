@@ -7,7 +7,7 @@
 # automatic TARGETARCH. No Go or Node toolchain runs inside this image, which
 # is why multi-arch builds finish in a minute or two instead of needing QEMU
 # to emulate a full Go + npm pipeline.
-FROM alpine:3.20
+FROM alpine:3.24.1
 ARG TARGETARCH
 # The image STARTS as root and docker-entrypoint.sh self-heals ownership of the
 # bind-mounted /app/config (Docker never chowns a bind mount, so a fresh or
