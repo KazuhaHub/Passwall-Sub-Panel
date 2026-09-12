@@ -85,6 +85,7 @@ type Deps struct {
 	Geo              *geo.Service
 	NodeSync         handler.NodeSyncService
 	NodeAgentUpgrade handler.NativeAgentUpgradeService
+	NodeReleases     ports.NodeReleaseCatalog
 	Async            AsyncDispatcher
 
 	// SharedClients answers, for one user, which panels hold their clients and
@@ -593,9 +594,11 @@ func NewRouter(d Deps) stdhttp.Handler {
 			WithNativeAgentProvisioning(d.Repos.NativeAgentProvisioning).
 			WithNodeAgents(d.Repos.NodeAgent).
 			WithNodeSettings(d.Repos.Settings).
-			WithNativeAgentUpgrade(d.NodeAgentUpgrade)
+			WithNativeAgentUpgrade(d.NodeAgentUpgrade).
+			WithNodeReleaseCatalog(d.NodeReleases)
 		// 3X-UI panel credentials live here — never operator.
 		adminGroup.GET("/servers", servers.List)
+		adminGroup.GET("/servers/node-releases", servers.ListNodeReleases)
 		adminGroup.POST("/servers", servers.Create)
 		adminGroup.PUT("/servers/:id", servers.Update)
 		adminGroup.DELETE("/servers/:id", servers.Delete)

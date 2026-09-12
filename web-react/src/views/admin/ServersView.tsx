@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type MouseEvent } from 'react'
 import { NativeAgentUpgradeDialog } from './NativeAgentUpgradeDialog'
+import NodeReleaseSelector from '@/components/NodeReleaseSelector'
 import { Link as RouterLink } from 'react-router'
 import {
 	Alert,
@@ -1915,7 +1916,7 @@ export function NativeInstallationDialog({ server, initialProvisioning, onClose,
   const content = <>
     <DialogContent sx={{ display: 'flex', flexDirection: 'column', gap: 2, pt: '12px !important' }}>
       <Alert severity="warning">{t('admin:servers.native.private_warning')}</Alert>
-      <NativeInstallationMethodFields selection={selection} disabled={rotating} onChange={next => { invalidateMaterials(); setSelection(next) }} />
+      <NativeInstallationMethodFields selection={selection} disabled={rotating} onChange={next => { invalidateMaterials(); setVersion(''); setSelection(next) }} />
       <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
         <Typography variant="subtitle1">{t('admin:servers.native.status_title')}</Typography>
         {statusError && <Alert severity="warning">{t('admin:servers.native.status_stale')} {statusError}</Alert>}
@@ -1949,10 +1950,8 @@ export function NativeInstallationDialog({ server, initialProvisioning, onClose,
         <TextField label={t('admin:servers.native.credential')} type="password" value={provisioning.credential}
           autoComplete="off" fullWidth slotProps={{ input: { readOnly: true } }} />
         {provisioning.endpoint.startsWith('http://') && <Alert severity="warning">{t('admin:servers.native.http_warning')}</Alert>}
-        <TextField label={t('admin:servers.native.agent_version')} placeholder="vX.Y.Z" value={version}
-          onChange={event => { invalidateMaterials(); setVersion(event.target.value) }} disabled={rotating}
-          error={!!version && !versionValid}
-          helperText={t(version && !versionValid ? 'admin:servers.native.version_invalid' : 'admin:servers.native.version_hint')} fullWidth />
+        <NodeReleaseSelector key={serverID} enabled={!!server} selection={selection} value={version}
+          onChange={next => { invalidateMaterials(); setVersion(next) }} disabled={rotating} />
         <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
           {selection.method === 'linux' ? <>
           <Button variant="contained" startIcon={scriptBusy ? <CircularProgress size={16} color="inherit" /> : <DownloadIcon />}

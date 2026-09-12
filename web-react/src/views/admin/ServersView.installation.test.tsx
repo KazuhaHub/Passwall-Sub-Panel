@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { NodeReleaseCatalog } from '@/api/nodeReleases'
 import type { NativeAgentStatus, NativeInstallationFiles, NativeServerProvisioning, Server } from '@/api/servers'
 import { api, installReads, list, mount } from '@/test/adminSaveHarness'
 import ConfirmHost from '@/components/ConfirmHost'
@@ -9,6 +10,21 @@ import { hostFromURL } from './NodesView'
 
 const copy = vi.hoisted(() => vi.fn().mockResolvedValue(true))
 vi.mock('@/utils/clipboard', () => ({ copyToClipboard: copy }))
+const releaseReads = vi.hoisted(() => vi.fn())
+vi.mock('@/api/nodeReleases', () => ({ listNodeReleases: releaseReads }))
+
+const releaseCatalog: NodeReleaseCatalog = {
+  checked_at: '2026-09-12T13:00:00Z',
+  releases: ['v1.2.3', 'v1.2.3-beta.2', 'v1.2.3-beta.1'].map(version => ({
+    version, channel: version.includes('-') ? 'testing' : 'stable',
+    published_at: '2026-09-12T12:00:00Z', notes: 'Reviewed contract fixture',
+    release_url: `https://github.com/KazuhaHub/Passwall-Node/releases/tag/${version}`,
+    methods: ['linux', 'docker', 'manual'],
+    platforms: (['linux', 'darwin', 'windows'] as const).flatMap(os =>
+      (['amd64', 'arm64'] as const).map(arch => ({ os, arch }))),
+  })),
+}
+beforeEach(() => releaseReads.mockResolvedValue(releaseCatalog))
 
 const nativeServer: Server = {
   id: 7, name: 'test-native', panel_type: 'psp', url: 'psp://agt_7', capabilities: [],
@@ -28,7 +44,18 @@ function reads(status: NativeAgentStatus = waiting) {
 }
 
 function versionInput(): HTMLInputElement {
-  return screen.getByLabelText('admin:servers.native.agent_version')
+  return screen.getByRole('combobox', { name: 'admin:servers.native.agent_version' }).parentElement!.querySelector('input')!
+}
+
+async function selectVersion(version: string) {
+  const channel = version.includes('-') ? 'testing' : 'stable'
+  const channelSelect = await screen.findByRole('combobox', { name: 'admin:servers.native.release_channel' })
+  fireEvent.mouseDown(channelSelect)
+  fireEvent.click(await screen.findByRole('option', { name: `admin:servers.native.release_${channel}` }))
+  const versionSelect = screen.getByRole('combobox', { name: 'admin:servers.native.agent_version' })
+  await waitFor(() => expect(versionSelect.getAttribute('aria-disabled')).not.toBe('true'))
+  fireEvent.mouseDown(versionSelect)
+  fireEvent.click(await screen.findByRole('option', { name: version }))
 }
 
 function copyScript(): HTMLButtonElement {
@@ -246,12 +273,10 @@ describe('PSP Node installation', () => {
     mount(<NativeInstallationDialog server={nativeServer} initialProvisioning={provisioning} onClose={vi.fn()} onRotate={vi.fn()} />)
     await screen.findByText('admin:servers.native.agent_status.unconfigured')
     expect(screen.queryByText('admin:servers.native.agent_status.running')).toBeNull()
-    for (const version of ['', 'latest', '1.2.3', 'v01.2.3', 'v1.2.3-beta.01', 'https://example.test/v1.2.3']) {
-      fireEvent.change(versionInput(), { target: { value: version } })
-      expect(copyScript().disabled).toBe(true)
-    }
+    expect(copyScript().disabled).toBe(true)
+    expect(screen.queryByRole('textbox', { name: 'admin:servers.native.agent_version' })).toBeNull()
     expect(api.post).not.toHaveBeenCalled()
-    fireEvent.change(versionInput(), { target: { value: 'v1.2.3-beta.1' } })
+    await selectVersion('v1.2.3-beta.1')
     fireEvent.click(copyScript())
     await waitFor(() => expect(copy).toHaveBeenCalledWith(`#!/bin/sh\n# ${provisioning.credential}\n`))
     expect(api.post).toHaveBeenCalledWith('/admin/servers/7/node-install-script', { version: 'v1.2.3-beta.1' }, expect.objectContaining({ responseType: 'text' }))
@@ -261,15 +286,15 @@ describe('PSP Node installation', () => {
     expect(run).not.toContain(provisioning.credential)
   })
 
-  it('preserves the same identity, private credential and entered version when switching installation methods', async () => {
+  it('preserves identity and private credential but requires version confirmation after changing installation methods', async () => {
     reads()
     mount(<NativeInstallationDialog server={nativeServer} initialProvisioning={provisioning} onClose={vi.fn()} onRotate={vi.fn()} />)
-    fireEvent.change(versionInput(), { target: { value: 'v1.2.3-beta.1' } })
+    await selectVersion('v1.2.3-beta.1')
     for (const method of ['docker', 'manual', 'linux'] as const) {
       await selectMethod(method)
       expect((screen.getByLabelText('admin:servers.native.agent_id') as HTMLInputElement).value).toBe(provisioning.agent_id)
       expect((screen.getByLabelText('admin:servers.native.credential') as HTMLInputElement).value).toBe(provisioning.credential)
-      expect(versionInput().value).toBe('v1.2.3-beta.1')
+      expect(versionInput().value).toBe('')
       expect(screen.getByRole('combobox', { name: 'admin:servers.native.method_label' }).textContent).toBe(`admin:servers.native.method.${method}`)
     }
     expect(api.post).not.toHaveBeenCalled()
@@ -281,7 +306,7 @@ describe('PSP Node installation', () => {
     let finish!: (response: { data: string }) => void
     api.post.mockReturnValue(new Promise<{ data: string }>(resolve => { finish = resolve }))
     mount(<NativeInstallationDialog server={nativeServer} initialProvisioning={provisioning} onClose={vi.fn()} onRotate={vi.fn()} />)
-    fireEvent.change(versionInput(), { target: { value: 'v1.2.3' } })
+    await selectVersion('v1.2.3')
     fireEvent.click(copyScript())
     await waitFor(() => expect(api.post).toHaveBeenCalledWith('/admin/servers/7/node-install-script', { version: 'v1.2.3' }, expect.objectContaining({ signal: expect.any(AbortSignal) })))
     const request = api.post.mock.calls.find(([url]) => url === '/admin/servers/7/node-install-script')!
@@ -289,10 +314,31 @@ describe('PSP Node installation', () => {
     expect(request[2].signal.aborted).toBe(true)
     await act(async () => { finish({ data: `#!/bin/sh\n# obsolete ${provisioning.credential}\n` }) })
     expect(copy).not.toHaveBeenCalled()
-    expect(versionInput().value).toBe('v1.2.3')
+    expect(versionInput().value).toBe('')
     expect((screen.getByLabelText('admin:servers.native.credential') as HTMLInputElement).value).toBe(provisioning.credential)
     await selectMethod('linux')
-    expect(copyScript().disabled).toBe(false)
+    expect(copyScript().disabled).toBe(true)
+  })
+
+  it('aborts a pending private script when switching release channels without rotating the node identity', async () => {
+    reads()
+    let finish!: (response: { data: string }) => void
+    api.post.mockReturnValue(new Promise<{ data: string }>(resolve => { finish = resolve }))
+    mount(<NativeInstallationDialog server={nativeServer} initialProvisioning={provisioning} onClose={vi.fn()} onRotate={vi.fn()} />)
+    await selectVersion('v1.2.3-beta.1')
+    fireEvent.click(copyScript())
+    await waitFor(() => expect(api.post).toHaveBeenCalledTimes(1))
+    const request = api.post.mock.calls[0][2]
+    fireEvent.mouseDown(screen.getByRole('combobox', { name: 'admin:servers.native.release_channel' }))
+    fireEvent.click(await screen.findByRole('option', { name: 'admin:servers.native.release_stable' }))
+    expect(request.signal.aborted).toBe(true)
+    expect(versionInput().value).toBe('')
+    expect(copyScript().disabled).toBe(true)
+    await act(async () => { finish({ data: `#!/bin/sh\n# obsolete ${provisioning.credential}\n` }) })
+    expect(copy).not.toHaveBeenCalled()
+    expect((screen.getByLabelText('admin:servers.native.agent_id') as HTMLInputElement).value).toBe(provisioning.agent_id)
+    expect((screen.getByLabelText('admin:servers.native.credential') as HTMLInputElement).value).toBe(provisioning.credential)
+    expect(api.post.mock.calls.some(([url]) => String(url).includes('rotate-node-credential'))).toBe(false)
   })
 
   it.each(['docker', 'manual'] as const)('shows and copies the exact %s private files and secret-free startup steps', async method => {
@@ -301,7 +347,7 @@ describe('PSP Node installation', () => {
     api.post.mockResolvedValue({ data: materials })
     mount(<NativeInstallationDialog server={nativeServer} initialProvisioning={provisioning} onClose={vi.fn()} onRotate={vi.fn()} />)
     await selectMethod(method)
-    fireEvent.change(versionInput(), { target: { value: 'v1.2.3-beta.1' } })
+    await selectVersion('v1.2.3-beta.1')
     fireEvent.click(screen.getByRole('button', { name: 'admin:servers.native.generate_files' }))
     await screen.findAllByLabelText('admin:servers.native.file_content')
     expect(api.post).toHaveBeenCalledWith('/admin/servers/7/node-installation-files', {
@@ -338,7 +384,7 @@ describe('PSP Node installation', () => {
     })
     mount(<NativeInstallationDialog server={nativeServer} initialProvisioning={provisioning} onClose={vi.fn()} onRotate={vi.fn()} />)
     await selectMethod('docker')
-    fireEvent.change(versionInput(), { target: { value: 'v1.2.3-beta.1' } })
+    await selectVersion('v1.2.3-beta.1')
     fireEvent.click(screen.getByRole('button', { name: 'admin:servers.native.generate_files' }))
     await screen.findAllByLabelText('admin:servers.native.file_content')
     fireEvent.click(screen.getAllByRole('button', { name: 'admin:servers.native.download_file' })[0])
@@ -364,12 +410,13 @@ describe('PSP Node installation', () => {
       : Promise.resolve({ data: manual }))
     mount(<NativeInstallationDialog server={nativeServer} initialProvisioning={provisioning} onClose={vi.fn()} onRotate={vi.fn()} />)
     await selectMethod('docker')
-    fireEvent.change(versionInput(), { target: { value: 'v1.2.3-beta.1' } })
+    await selectVersion('v1.2.3-beta.1')
     fireEvent.click(screen.getByRole('button', { name: 'admin:servers.native.generate_files' }))
     await waitFor(() => expect(api.post).toHaveBeenCalledTimes(1))
     const oldRequest = api.post.mock.calls[0][2]
     await selectMethod('manual')
     expect(oldRequest.signal.aborted).toBe(true)
+    await selectVersion('v1.2.3-beta.1')
     fireEvent.click(screen.getByRole('button', { name: 'admin:servers.native.generate_files' }))
     await screen.findAllByLabelText('admin:servers.native.file_content')
     await act(async () => { finishDocker({ data: obsolete }) })
@@ -398,7 +445,7 @@ describe('PSP Node installation', () => {
     await openInstallation(nativeServer)
     await screen.findByLabelText('admin:servers.native.credential')
     await selectMethod('docker')
-    fireEvent.change(versionInput(), { target: { value: 'v1.2.3-beta.1' } })
+    await selectVersion('v1.2.3-beta.1')
     fireEvent.click(screen.getByRole('button', { name: 'admin:servers.native.generate_files' }))
     await waitFor(() => expect(api.post.mock.calls.filter(([url]) => String(url).endsWith('/node-installation-files'))).toHaveLength(1))
     const oldRequest = api.post.mock.calls.find(([url]) => String(url).endsWith('/node-installation-files'))![2]
@@ -426,7 +473,7 @@ describe('PSP Node installation', () => {
     fireEvent.click(await screen.findByRole('option', { name: `admin:servers.native.platform.${os}` }))
     fireEvent.mouseDown(screen.getByRole('combobox', { name: 'admin:servers.native.architecture' }))
     fireEvent.click(await screen.findByRole('option', { name: /^arm64\b/ }))
-    fireEvent.change(versionInput(), { target: { value: 'v1.2.3-beta.1' } })
+    await selectVersion('v1.2.3-beta.1')
     fireEvent.click(screen.getByRole('button', { name: 'admin:servers.native.generate_files' }))
     await screen.findAllByLabelText('admin:servers.native.file_content')
     expect(api.post).toHaveBeenCalledWith('/admin/servers/7/node-installation-files', {
@@ -441,10 +488,10 @@ describe('PSP Node installation', () => {
     api.post.mockResolvedValue({ data: generatedFiles('docker') })
     mount(<NativeInstallationDialog server={nativeServer} initialProvisioning={provisioning} onClose={vi.fn()} onRotate={vi.fn()} />)
     await selectMethod('docker')
-    fireEvent.change(versionInput(), { target: { value: 'v1.2.3-beta.1' } })
+    await selectVersion('v1.2.3-beta.1')
     fireEvent.click(screen.getByRole('button', { name: 'admin:servers.native.generate_files' }))
     await screen.findAllByLabelText('admin:servers.native.file_content')
-    fireEvent.change(versionInput(), { target: { value: 'v1.2.3-beta.2' } })
+    await selectVersion('v1.2.3-beta.2')
     expect(screen.queryByLabelText('admin:servers.native.file_content')).toBeNull()
     expect(screen.queryByRole('button', { name: 'admin:servers.native.copy_file' })).toBeNull()
     expect(screen.getByRole('button', { name: 'admin:servers.native.generate_files' }).getAttribute('disabled')).toBeNull()
@@ -457,7 +504,7 @@ describe('PSP Node installation', () => {
     api.post.mockRejectedValue({ response: { status: 400, data: { error: 'Chosen release unavailable' } } })
     mount(<NativeInstallationDialog server={nativeServer} initialProvisioning={provisioning} onClose={vi.fn()} onRotate={vi.fn()} />)
     await selectMethod('docker')
-    fireEvent.change(versionInput(), { target: { value: 'v1.2.3-beta.1' } })
+    await selectVersion('v1.2.3-beta.1')
     fireEvent.click(screen.getByRole('button', { name: 'admin:servers.native.generate_files' }))
     await screen.findByText('Chosen release unavailable')
     expect(screen.queryByLabelText('admin:servers.native.file_content')).toBeNull()
@@ -478,7 +525,7 @@ describe('PSP Node installation', () => {
     api.post.mockResolvedValue({ data: materials })
     mount(<NativeInstallationDialog server={nativeServer} initialProvisioning={provisioning} onClose={vi.fn()} onRotate={vi.fn()} />)
     await selectMethod(method)
-    fireEvent.change(versionInput(), { target: { value: 'v1.2.3-beta.1' } })
+    await selectVersion('v1.2.3-beta.1')
     fireEvent.click(screen.getByRole('button', { name: 'admin:servers.native.generate_files' }))
     await screen.findByText('admin:servers.native.files_failed')
     expect(screen.queryByLabelText('admin:servers.native.file_content')).toBeNull()
@@ -498,7 +545,7 @@ describe('PSP Node installation', () => {
     api.post.mockResolvedValue({ data: materials })
     mount(<NativeInstallationDialog server={nativeServer} initialProvisioning={provisioning} onClose={vi.fn()} onRotate={vi.fn()} />)
     await selectMethod('docker')
-    fireEvent.change(versionInput(), { target: { value: 'v1.2.3-beta.1' } })
+    await selectVersion('v1.2.3-beta.1')
     fireEvent.click(screen.getByRole('button', { name: 'admin:servers.native.generate_files' }))
     const step = await screen.findByRole('region', { name: 'Private files' })
     fireEvent.click(within(step).getAllByRole('button', { name: 'admin:servers.native.copy_step' })[0])
@@ -545,7 +592,7 @@ describe('PSP Node installation', () => {
       downloads.push({ file: this.download, url: this.href })
     })
     mount(<NativeInstallationDialog server={nativeServer} initialProvisioning={provisioning} onClose={vi.fn()} onRotate={vi.fn()} />)
-    fireEvent.change(versionInput(), { target: { value: 'v1.2.3' } })
+    await selectVersion('v1.2.3')
     fireEvent.click(screen.getByRole('button', { name: 'admin:servers.native.download_script' }))
     await waitFor(() => expect(downloads).toEqual([{ file: 'passwall-node-install-agt_7.sh', url: 'blob:private-install-script' }]))
     expect(createURL).toHaveBeenCalledWith(expect.any(Blob))
@@ -557,7 +604,7 @@ describe('PSP Node installation', () => {
     reads()
     api.post.mockRejectedValue({ response: { status: 400, data: '{"error":"Release has no installation assets"}' } })
     mount(<NativeInstallationDialog server={nativeServer} initialProvisioning={provisioning} onClose={vi.fn()} onRotate={vi.fn()} />)
-    fireEvent.change(versionInput(), { target: { value: 'v1.2.3' } })
+    await selectVersion('v1.2.3')
     fireEvent.click(copyScript())
     await screen.findByText('Release has no installation assets')
     expect(copy).not.toHaveBeenCalled()
@@ -567,6 +614,10 @@ describe('PSP Node installation', () => {
 })
 
 describe('native installation inputs', () => {
+  it.each(['', 'latest', '1.2.3', 'v01.2.3', 'v1.2.3-beta.01', 'https://example.test/v1.2.3'])('rejects noncanonical release version %s', version => {
+    expect(isNodeReleaseVersion(version)).toBe(false)
+  })
+
   it.each(['v0.1.0', 'v1.2.3', 'v1.2.3-beta.1', 'v1.2.3-rc-1'])('accepts canonical release version %s', version => {
     expect(isNodeReleaseVersion(version)).toBe(true)
   })

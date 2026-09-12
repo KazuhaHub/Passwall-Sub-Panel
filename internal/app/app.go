@@ -446,6 +446,10 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	trafficSvc.SetGeoStreakStore(geoStreaks)
 
 	// --- transport layer ---
+	nodeReleases, err := newNodeReleaseCatalog(version.Version)
+	if err != nil {
+		return nil, err
+	}
 	httpHandler := httptransport.NewRouter(httptransport.Deps{
 		Async:      dispatcher,
 		Cfg:        cfg,
@@ -481,6 +485,7 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 		Geo:              geoSvc,
 		NodeSync:         nativeSync,
 		NodeAgentUpgrade: nativeUpgrade,
+		NodeReleases:     nodeReleases,
 		SubPerIPPerMin:   sysSettings.SubPerIPPerMin,
 		LoginPerIPPerMin: sysSettings.LoginPerIPPerMin,
 	})
