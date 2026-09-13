@@ -109,6 +109,9 @@ type dueTasks struct {
 func (d *dueTasks) ListDue(context.Context, time.Time, int) ([]*domain.SyncTask, error) {
 	return []*domain.SyncTask{d.task}, nil
 }
+func (d *dueTasks) GetByID(context.Context, int64) (*domain.SyncTask, error) {
+	return d.task, nil
+}
 func (d *dueTasks) MarkRunning(context.Context, int64) (bool, error) { return true, nil }
 func (d *dueTasks) Cancel(context.Context, int64) error              { d.cancelled = true; return nil }
 func (d *dueTasks) MarkRetry(context.Context, int64, string, time.Time) error {

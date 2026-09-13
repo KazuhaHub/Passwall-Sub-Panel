@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type MouseEvent } from 'react'
 import { NativeAgentUpgradeDialog } from './NativeAgentUpgradeDialog'
+import { NodeMigrationPreviewDialog } from './NodeMigrationPreviewDialog'
 import NodeReleaseSelector from '@/components/NodeReleaseSelector'
 import { Link as RouterLink } from 'react-router'
 import {
@@ -93,6 +94,7 @@ import { SortableTableCell } from '@/components/SortableTableCell'
 import { usePaged } from '@/hooks/usePaged'
 import { ipCapBadgeTone, type IPCapTone } from '@/utils/capabilities'
 import { copyToClipboard } from '@/utils/clipboard'
+import { useCan } from '@/utils/permissions'
 import {
   type FieldErrors,
   firstError,
@@ -147,6 +149,7 @@ export default function ServersView() {
   const theme = useTheme()
   const md = theme.palette.md
   const { t, i18n } = useTranslation(['admin', 'common'])
+  const canConfigure = useCan('config.write')
 
   const [search, setSearch] = useState('')
   const [probeStates, setProbeStates] = useState<Record<number, ProbeState>>({})
@@ -181,6 +184,7 @@ export default function ServersView() {
 	const [busy, setBusy] = useState(false)
 	const [nativeInstallationTarget, setNativeInstallationTarget] = useState<Server | null>(null)
 	const [nativeUpgradeTarget, setNativeUpgradeTarget] = useState<Server | null>(null)
+  const [migrationTarget, setMigrationTarget] = useState<Server | null>(null)
 	const [nativeProvisioning, setNativeProvisioning] = useState<NativeServerProvisioning | null>(null)
   const [nativeCreationFlow, setNativeCreationFlow] = useState(false)
   const [installationSelection, setInstallationSelection] = useState<NativeInstallationSelection>(DEFAULT_INSTALLATION)
@@ -1334,7 +1338,7 @@ export default function ServersView() {
                         "update available" hint lives in the Version
                         column (see versionCell), not on this button,
                         so the kebab stays neutral. */}
-                    {(s.panel_type === 'psp' || s.capabilities?.includes('panel.upgrade') || s.capabilities?.includes('core.upgrade')) && <IconButton
+                    {(s.panel_type === 'psp' || (s.panel_type === '3xui' && canConfigure) || s.capabilities?.includes('panel.upgrade') || s.capabilities?.includes('core.upgrade')) && <IconButton
                       size="small"
                       onClick={e => openMenu(e, s)}
                       disabled={upgrading === s.id}
@@ -1364,6 +1368,10 @@ export default function ServersView() {
         anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
         transformOrigin={{ vertical: 'top', horizontal: 'right' }}
       >
+        {menuTarget?.panel_type === '3xui' && canConfigure && <MenuItem onClick={() => { setMigrationTarget(menuTarget); closeMenu() }}>
+          <UpgradeIcon fontSize="small" sx={{ mr: 1 }} />
+          {t('admin:servers.migration.action')}
+        </MenuItem>}
         {menuTarget?.panel_type === 'psp' && <MenuItem onClick={() => openNativeInstallation(menuTarget)}>
           <DownloadIcon fontSize="small" sx={{ mr: 1 }} />
           {t('admin:servers.action.install_node')}
@@ -1666,6 +1674,7 @@ export default function ServersView() {
         </>}
       </Dialog>
       <NativeAgentUpgradeDialog server={nativeUpgradeTarget} onClose={() => { setNativeUpgradeTarget(null); refresh() }} />
+      <NodeMigrationPreviewDialog key={migrationTarget?.id ?? 'closed'} server={migrationTarget} onClose={() => setMigrationTarget(null)} />
       <NativeInstallationDialog
         server={nativeCreationFlow ? null : nativeInstallationTarget}
         initialProvisioning={nativeCreationFlow ? null : nativeProvisioning}

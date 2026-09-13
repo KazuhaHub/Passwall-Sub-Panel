@@ -107,6 +107,26 @@ func TestUnknownPositionalArgsDoNotInitializePanel(t *testing.T) {
 	}
 }
 
+func TestServerMigrationDispatchNeverInitializesPanel(t *testing.T) {
+	for _, args := range [][]string{{"migrate-server", "--help"}, {"migrate-server"}, {"migrate-server", "--server-id", "12", "--apply"}, {"--config", "x.yaml", "migrate-server"}} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			dir := t.TempDir()
+			out, code := runPanelCLI(t, dir, args...)
+			want := 2
+			if len(args) == 2 && args[1] == "--help" {
+				want = 0
+			}
+			if code != want {
+				t.Fatalf("code=%d want=%d %s", code, want, out)
+			}
+			entries, err := os.ReadDir(dir)
+			if err != nil || len(entries) != 0 {
+				t.Fatalf("maintenance started/configured panel: %v err=%v", entries, err)
+			}
+		})
+	}
+}
+
 func TestRetiredMigrateDoesNotLoadExistingConfig(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")

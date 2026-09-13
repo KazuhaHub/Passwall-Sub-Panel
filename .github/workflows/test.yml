@@ -64,7 +64,7 @@ jobs:
           test -f "$contract_repo/go.mod"
           PSP_LIVE_NODE_REPO="$contract_repo" go test -count=1 -timeout=5m \
             ./internal/service/nodesync \
-            -run '^TestLive_RealNode(AgentContract|TaskEvidenceReceipt|TaskExpiryContract)$' -v \
+            -run '^TestLive_RealNode(AgentContract|MigratedServerContract|TaskEvidenceReceipt|TaskExpiryContract)$' -v \
             2>&1 | tee node-contract-output.txt
       - name: upload test output
         if: failure()

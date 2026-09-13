@@ -22,6 +22,15 @@ Passwall-Node 的 Xray / sing-box 生产 daemon、精确 core 目录、遥测、
 
 ## 1. 已经定了的（不要重开）
 
+**现有 3X-UI 服务器迁移（2026-09-12，开发完成待发布）**：新增管理员只读预检菜单与
+`psp migrate-server` 离线命令，保留原服务器／节点／客户端／挂载 ID、受管配置与凭据、
+分组排序及历史流量。先备份数据库和配置，完全停止所有共用数据库的 PSP 实例与旧 Xray，
+再以预检指纹执行原子转换；重启后对原服务器使用安装／重装，不重复添加记录。
+仅迁移可核验的 PSP-managed Xray 四协议快照；不迁移第三方全局配置／手工对象／外部文件，
+依赖缺失或未确认变更明确阻断。旧节点动作进入不可重试的 `retired` 终态，不引入通用恢复流程。
+S-UI 尚未开放：现有快照是有损投影，需要原始 inbound/TLS 比对与真实 sing-box 版本核验。
+操作与边界见 [`docs/server-migration.md`](docs/server-migration.md)。未操作线上部署。
+
 **发行渠道（2026-09-12）**：PSP 与 Passwall Node 使用 `main` + 短期功能分支 + PR/CI，
 不为稳定版／测试版另建长期分支。渠道对应 GitHub 的 Release／Pre-release；安装始终锁定
 准确 release tag，而不是分支或浮动标签。安装页面默认稳定渠道，管理员明确选择渠道和版本；

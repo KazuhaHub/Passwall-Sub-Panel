@@ -44,6 +44,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/reconcile"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/render"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/rollup"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/servermigration"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/sharedclient"
 	syncsvc "github.com/KazuhaHub/passwall-sub-panel/internal/service/sync"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/traffic"
@@ -486,6 +487,7 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 		NodeSync:         nativeSync,
 		NodeAgentUpgrade: nativeUpgrade,
 		NodeReleases:     nodeReleases,
+		ServerMigration:  servermigration.New(repos.ServerMigration),
 		SubPerIPPerMin:   sysSettings.SubPerIPPerMin,
 		LoginPerIPPerMin: sysSettings.LoginPerIPPerMin,
 	})
