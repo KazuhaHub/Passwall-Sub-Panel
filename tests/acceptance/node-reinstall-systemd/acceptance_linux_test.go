@@ -24,6 +24,7 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -70,6 +71,8 @@ type fixture struct {
 	panelID, nodeID, clientID, userID, groupID          int64
 	credential, agentID, adminToken, nonce, dir, caPath string
 	pausedPID                                           int
+	syncMu                                              sync.Mutex
+	syncStatuses                                        map[int]int
 }
 
 func TestDisposableSystemdNodeReinstall(t *testing.T) {
@@ -170,7 +173,7 @@ func newFixture(t *testing.T, ctx context.Context) *fixture {
 	var random [24]byte
 	_, err := rand.Read(random[:])
 	must(t, err, "fixture random identity")
-	f := &fixture{t: t, ctx: ctx, nonce: hex.EncodeToString(random[:8]), adminToken: hex.EncodeToString(random[8:]), dir: t.TempDir()}
+	f := &fixture{t: t, ctx: ctx, nonce: hex.EncodeToString(random[:8]), adminToken: hex.EncodeToString(random[8:]), dir: t.TempDir(), syncStatuses: map[int]int{}}
 	db, err := sqlstore.OpenQuiet("sqlite", filepath.Join(f.dir, "psp.db"))
 	must(t, err, "open fixture SQLite")
 	must(t, sqlstore.EnsureSchema(db), "create fixture schema")
@@ -235,7 +238,12 @@ func newFixture(t *testing.T, ctx context.Context) *fixture {
 	admin.POST("/servers/:id/node-migration-command", bootstrap.MintMigration)
 	r.GET("/node-bootstrap/:token", bootstrap.Download)
 	r.POST("/api/node-bootstrap/complete", bootstrap.Complete)
-	r.POST("/v1/node/sync", gin.WrapH(syncHandler))
+	r.POST("/v1/node/sync", func(c *gin.Context) {
+		syncHandler.ServeHTTP(c.Writer, c.Request)
+		f.syncMu.Lock()
+		f.syncStatuses[c.Writer.Status()]++
+		f.syncMu.Unlock()
+	})
 	f.server = httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, rq *http.Request) {
 		const prefix = "/private-panel"
 		if !strings.HasPrefix(rq.URL.Path, prefix+"/") {
@@ -351,7 +359,87 @@ func (f *fixture) waitReady() {
 		}
 		time.Sleep(time.Second)
 	}
+	f.readinessDiagnostics()
 	f.t.Fatalf("timed out waiting for actual published Node/core applied streams (systemd state=%s)", f.systemd("passwall-node.service", "ActiveState"))
+}
+
+// Retain classifications, never raw reports, errors, URLs, ETags, config or
+// journal text. The disposable VM disappears after failure, so these bounded
+// facts distinguish transport/authentication from real-core convergence.
+func (f *fixture) readinessDiagnostics() {
+	f.t.Helper()
+	f.syncMu.Lock()
+	statuses := make(map[int]int, len(f.syncStatuses))
+	for k, v := range f.syncStatuses {
+		statuses[k] = v
+	}
+	f.syncMu.Unlock()
+	f.t.Logf("readiness diagnostics: sync_http_status_counts=%v", statuses)
+	a, err := f.repos.NodeAgent.GetByPanelID(f.ctx, f.panelID)
+	if err == nil && a != nil {
+		f.t.Logf("readiness diagnostics: agent_seen=%t observed_core_is_xray=%t epoch=%d", a.LastSeen != nil, a.ObservedCoreEngine == domain.NodeCoreXray, a.Epoch)
+	} else {
+		f.t.Log("readiness diagnostics: agent_lookup_failed=true")
+	}
+	streams, err := f.repos.NodeAgent.ListStreams(f.ctx, f.agentID)
+	if err == nil {
+		for _, s := range streams {
+			if !s.Stream.Valid() {
+				continue
+			}
+			f.t.Logf("readiness diagnostics: stream=%s desired=%d applied=%d applied_epoch=%d etag_matches=%t", s.Stream, s.DesiredVersion, s.AppliedVersion, s.AppliedEpoch, s.DesiredETag != "" && s.DesiredETag == s.AppliedETag)
+		}
+	}
+	attachments, err := f.repos.PSPClient.ListInbounds(f.ctx, f.clientID)
+	if err == nil {
+		f.t.Logf("readiness diagnostics: attachment_count=%d", len(attachments))
+		for _, a := range attachments {
+			f.t.Logf("readiness diagnostics: attachment_applied=%t attachment_pending=%t attachment_rejected=%t attachment_blocked=%t", a.Applied(), a.State == domain.ClientApplyPending, a.State == domain.ClientApplyRejected, a.State == domain.ClientApplyBlocked)
+		}
+	}
+	snapshot, err := f.coordinator.NativePanelSnapshot(f.ctx, f.panelID)
+	if err == nil && snapshot != nil {
+		f.t.Logf("readiness diagnostics: full_snapshot_present=true inbounds=%d clients=%d node_version_expected=%t core_version_expected=%t core_running=%t", len(snapshot.Inbounds), len(snapshot.Clients), snapshot.Status.PanelVersion == nodeVersion, snapshot.Status.XrayVersion == coreVersion, snapshot.Status.XrayState == "running")
+	} else {
+		f.t.Logf("readiness diagnostics: full_snapshot_present=false snapshot_not_found=%t", errors.Is(err, domain.ErrNotFound))
+	}
+	n, err := f.repos.Node.GetByID(f.ctx, f.nodeID)
+	if err == nil {
+		conn, e := net.DialTimeout("tcp", "127.0.0.1:"+strconv.Itoa(n.DesiredPort), time.Second)
+		if e == nil {
+			_ = conn.Close()
+		}
+		f.t.Logf("readiness diagnostics: desired_listener_tcp_open=%t", e == nil)
+	}
+	environment, err := os.ReadFile(nodeRoot + "/config/environment")
+	f.t.Logf("readiness diagnostics: installed_endpoint_matches=%t", err == nil && bytes.Contains(environment, []byte(f.server.URL+"/private-panel/v1/node/sync")))
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	journal, err := exec.CommandContext(ctx, "journalctl", "--unit=passwall-node.service", "--no-pager", "--output=cat", "--lines=100").Output()
+	if err != nil {
+		f.t.Log("readiness diagnostics: bounded_journal_unavailable=true")
+		return
+	}
+	journal = bytes.ToLower(journal)
+	for _, category := range []struct {
+		name    string
+		needles []string
+	}{
+		{"tls_unknown_ca", []string{"unknown authority", "unknown ca"}},
+		{"tls_certificate_error", []string{"x509:", "certificate verification", "certificate is not valid"}},
+		{"http_unauthorized", []string{"status 401", "status=401", "unauthorized"}},
+		{"connection_refused", []string{"connection refused"}},
+		{"permission_denied", []string{"permission denied"}},
+		{"core_install_error", []string{"install core", "core install", "download", "checksum"}},
+		{"configuration_error", []string{"configuration", "compile", "config test", "invalid config"}},
+		{"sync_error", []string{"sync failed", "sync error", "sync: ", "sync request"}},
+	} {
+		found := false
+		for _, needle := range category.needles {
+			found = found || bytes.Contains(journal, []byte(needle))
+		}
+		f.t.Logf("readiness diagnostics: journal_category_%s=%t", category.name, found)
+	}
 }
 
 type retained struct {
