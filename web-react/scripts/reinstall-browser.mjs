@@ -11,15 +11,21 @@ import { extname, join, resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 const PLAYWRIGHT_VERSION = '1.63.0'; // Verified published through npm view.
+// Preview serves disposable API fixtures and the real built SPA. It does not
+// launch or automate a browser; the desktop browser tools own that interaction.
+const previewOnly = process.argv[2] === '--preview';
 const packageDirectory = process.argv[2] && resolve(process.argv[2]);
-assert(packageDirectory && process.argv.length === 3,
-  'usage: node web-react/scripts/reinstall-browser.mjs /ABS/PATH/node_modules/playwright');
-assert.equal(process.platform, 'linux', 'This acceptance gate requires a genuine Linux browser run.');
-const installedPackage = JSON.parse(await readFile(join(packageDirectory, 'package.json'), 'utf8'));
-assert.equal(installedPackage.name, 'playwright');
-assert.equal(installedPackage.version, PLAYWRIGHT_VERSION, 'Use the verified exact test-only Playwright version.');
-const { chromium } = await import(pathToFileURL(join(packageDirectory, 'index.mjs')).href);
-const { expect } = await import(pathToFileURL(join(packageDirectory, 'test.mjs')).href);
+let chromium, expect;
+if (!previewOnly) {
+  assert(packageDirectory && process.argv.length === 3,
+    'usage: node web-react/scripts/reinstall-browser.mjs /ABS/PATH/node_modules/playwright | --preview');
+  assert.equal(process.platform, 'linux', 'This acceptance gate requires a genuine Linux browser run.');
+  const installedPackage = JSON.parse(await readFile(join(packageDirectory, 'package.json'), 'utf8'));
+  assert.equal(installedPackage.name, 'playwright');
+  assert.equal(installedPackage.version, PLAYWRIGHT_VERSION, 'Use the verified exact test-only Playwright version.');
+  ({ chromium } = await import(pathToFileURL(join(packageDirectory, 'index.mjs')).href));
+  ({ expect } = await import(pathToFileURL(join(packageDirectory, 'test.mjs')).href));
+}
 
 const dist = resolve(import.meta.dirname, '../../internal/web/dist');
 const indexHTML = await readFile(join(dist, 'index.html'), 'utf8');
@@ -53,9 +59,11 @@ const fingerprint = 'a'.repeat(64);
 const requests = [];
 const failures = [];
 let origin;
-const commandFor = id => `sudo bash -c 'printf fixture-node-host-only-${id}'`;
+const commandFor = id => previewOnly
+  ? `bash -c 'set +a +x; umask 077; unset s; s=$(curl -qf --proto =https -m 30 --max-filesize 1048576 "$1") && [[ $s ]] && bash -n <<<"$s" 2>/dev/null && bash <<<"$s"' -- 'https://fixture-panel.invalid/node-bootstrap/${'a'.repeat(43)}'`
+  : `sudo bash -c 'printf fixture-node-host-only-${id}'`;
 const provisioning = id => ({ server: servers.find(server => server.id === id), agent_id: `fixture-agent-${id}`,
-  credential, endpoint: `${origin}/v1/node/sync` });
+  credential, endpoint: previewOnly ? 'https://fixture-panel.invalid/v1/node/sync' : `${origin}/v1/node/sync` });
 const command = id => ({ server_id: id, command: commandFor(id), expires_at: new Date(Date.now() + 900_000).toISOString() });
 const count = (method, pathname) => requests.filter(request => request.method === method && request.pathname === pathname).length;
 function reply(response, value) {
@@ -132,7 +140,13 @@ const server = createServer(async (request, response) => {
     if (url.pathname.startsWith('/api/')) return await fixture(request, response, url);
     if (url.pathname === '/admin/servers' || url.pathname === '/') {
       response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-      response.end(indexHTML.replace('<!-- PSP_PANEL_BASE -->', '<base href="/"><meta name="psp-panel-path" content="">'));
+      let html = indexHTML.replace('<!-- PSP_PANEL_BASE -->', '<base href="/"><meta name="psp-panel-path" content="">');
+      if (previewOnly) html = html.replace('</head>', `<script>
+localStorage.setItem('psp-lang', 'zh-CN');
+localStorage.setItem('psp_access', 'fixture-admin-access');
+localStorage.setItem('psp_user', JSON.stringify({ userId: 1, upn: 'fixture-admin', displayName: 'Isolated preview', role: 'admin' }));
+</script></head>`);
+      response.end(html);
       return;
     }
     const candidate = resolve(dist, `.${decodeURIComponent(url.pathname)}`);
@@ -150,6 +164,10 @@ let browser;
 try {
   await new Promise(resolveListen => server.listen(0, '127.0.0.1', resolveListen));
   origin = `http://127.0.0.1:${server.address().port}`;
+  if (previewOnly) {
+    console.log(`Isolated built-SPA preview (no real installation): ${origin}/admin/servers`);
+    await new Promise(done => { process.once('SIGINT', done); process.once('SIGTERM', done); });
+  } else {
   browser = await chromium.launch({ headless: true, timeout: 30_000, args: ['--no-sandbox', '--disable-dev-shm-usage'] });
   const context = await browser.newContext({ viewport: { width: 1440, height: 1100 }, locale: 'en-US', serviceWorkers: 'block' });
   await context.grantPermissions(['clipboard-read', 'clipboard-write'], { origin });
@@ -196,8 +214,22 @@ try {
     const field = dialog.getByLabel(s('native.install_command'), { exact: true });
     await expect(field).toHaveValue(expected);
     await expect(field).toHaveAttribute('readonly', '');
+    await expect(field).toHaveJSProperty('tagName', 'INPUT');
     await dialog.getByRole('button', { name: s('native.copy_command'), exact: true }).click();
     await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(expected);
+    await expect(dialog.getByText(s('native.copied'), { exact: true })).toBeVisible();
+  }
+  async function inspectOriginalIdentity(dialog) {
+    const advanced = dialog.getByRole('button', { name: s('native.advanced'), exact: true });
+    await expect(advanced).toHaveAttribute('aria-expanded', 'false');
+    await expect(dialog.getByLabel(s('native.credential'), { exact: true })).toHaveCount(0);
+    await advanced.focus();
+    await page.keyboard.press('Enter');
+    await expect(advanced).toHaveAttribute('aria-expanded', 'true');
+    await expect(dialog.getByLabel(s('native.agent_id'), { exact: true })).toHaveValue('fixture-agent-7');
+    await expect(dialog.getByLabel(s('native.credential'), { exact: true })).toHaveValue(credential);
+    await advanced.click();
+    await expect(advanced).toHaveAttribute('aria-expanded', 'false');
   }
   await page.goto(`${origin}/admin/servers?lang=en-US`);
   await expect(page.getByRole('heading', { name: s('title'), exact: true })).toBeVisible();
@@ -238,8 +270,7 @@ try {
   await page.getByRole('option', { name: 'Passwall Node', exact: true }).click();
   await pn.getByRole('button', { name: s('install_reinstall.continue'), exact: true }).click();
   let dialog = page.getByRole('dialog');
-  await expect(dialog.getByLabel(s('native.agent_id'), { exact: true })).toHaveValue('fixture-agent-7');
-  await expect(dialog.getByLabel(s('native.credential'), { exact: true })).toHaveValue(credential);
+  await inspectOriginalIdentity(dialog);
   await expect(dialog.getByRole('button', { name: s('native.generate_command'), exact: true })).toBeDisabled();
   await selectReviewedRelease(dialog);
   await dialog.getByRole('button', { name: s('native.generate_command'), exact: true }).click();
@@ -256,8 +287,7 @@ try {
   assert.equal(count('PUT', '/api/admin/servers/7'), 1, 'The saved update preference must address the original PN ID.');
   await (await openChooser(servers[0])).getByRole('button', { name: s('install_reinstall.continue'), exact: true }).click();
   dialog = page.getByRole('dialog');
-  await expect(dialog.getByLabel(s('native.credential'), { exact: true })).toHaveValue(credential);
-  await expect(dialog.getByLabel(s('native.agent_id'), { exact: true })).toHaveValue('fixture-agent-7');
+  await inspectOriginalIdentity(dialog);
   await expect(dialog.getByRole('combobox', { name: s('native.release_channel'), exact: true })).toHaveText(s('native.release_testing'));
   await expect(dialog.getByRole('combobox', { name: s('native.agent_version'), exact: true }).locator('..').locator('input')).toHaveValue('');
   await expect(dialog.getByRole('button', { name: s('native.generate_command'), exact: true })).toBeDisabled();
@@ -283,7 +313,12 @@ try {
   dialog = page.getByRole('dialog');
   await expect(dialog.getByText(s('migration.ready'), { exact: true })).toBeVisible();
   await expect(dialog.getByText(s('migration.online_hint'), { exact: true })).toBeVisible();
+  const migrationDetails = dialog.getByRole('button', { name: s('migration.details'), exact: true });
+  await expect(migrationDetails).toHaveAttribute('aria-expanded', 'false');
+  await expect(dialog.getByText(s('migration.node_command_hint'), { exact: true })).toHaveCount(0);
+  await migrationDetails.click();
   await expect(dialog.getByText(s('migration.node_command_hint'), { exact: true })).toContainText('not on the PSP host');
+  await migrationDetails.click();
   assert(!/migrate-server|docker compose stop|--all-psp-stopped/.test(await dialog.innerText()), 'Online default must not show offline PSP commands.');
   const generate = dialog.getByRole('button', { name: s('migration.generate_node_command'), exact: true });
   await expect(generate).toBeDisabled();
@@ -319,6 +354,7 @@ try {
   await context.close();
   assert.deepEqual(failures, [], 'Browser/fixture errors are acceptance failures.');
   console.log('PASS: real Linux Chromium built-SPA acceptance: original backends, PN defaults/full name, truthful manual recovery, fixed identity, reviewed-release consent and node-host command/copy.');
+  }
 } finally {
   await browser?.close();
   await new Promise(resolveClose => server.close(resolveClose));

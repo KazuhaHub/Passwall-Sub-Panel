@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { Alert, Box, Button, CircularProgress, Link, MenuItem, Stack, TextField, Typography } from '@mui/material'
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
+import { Accordion, AccordionDetails, AccordionSummary, Alert, Box, Button, CircularProgress, Link, MenuItem, Stack, TextField, Typography } from '@mui/material'
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import { useTranslation } from 'react-i18next'
 import { listNodeReleases, type NodeRelease, type NodeReleaseChannel } from '@/api/nodeReleases'
 import type { NativeInstallationSelection } from '@/api/servers'
@@ -12,6 +13,8 @@ export interface NodeReleaseSelectorProps {
   disabled?: boolean
   /** Saved preference supplies the opening channel only; temporary changes never persist here. */
   initialChannel?: NodeReleaseChannel
+  /** Installation keeps publication metadata folded; upgrades retain their full review surface. */
+  compact?: boolean
 }
 
 function supportsSelection(release: NodeRelease, selection: NativeInstallationSelection): boolean {
@@ -33,8 +36,9 @@ function officialReleaseURL(release: NodeRelease): string | undefined {
   return release.release_url === expected ? expected : undefined
 }
 
-export default function NodeReleaseSelector({ enabled, selection, value, onChange, disabled = false, initialChannel = 'stable' }: NodeReleaseSelectorProps) {
+export default function NodeReleaseSelector({ enabled, selection, value, onChange, disabled = false, initialChannel = 'stable', compact = false }: NodeReleaseSelectorProps) {
   const { t, i18n } = useTranslation(['admin', 'common'])
+  const reviewID = useId()
   const [channel, setChannel] = useState<NodeReleaseChannel>(initialChannel)
   const [releases, setReleases] = useState<NodeRelease[] | null>(null)
   const [loading, setLoading] = useState(false)
@@ -100,7 +104,18 @@ export default function NodeReleaseSelector({ enabled, selection, value, onChang
     ? published.toLocaleDateString(i18n.language, { timeZone: 'UTC' })
     : ''
 
+  const details = selected && <Stack spacing={0.5}>
+    {publishedLabel && <Typography variant="body2" color="text.secondary">
+      {t('admin:servers.native.release_published', { date: publishedLabel })}
+    </Typography>}
+    {selected.notes && <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{selected.notes}</Typography>}
+    {selectedURL && <Link href={selectedURL} target="_blank" rel="noopener noreferrer" variant="body2">
+      {t('admin:servers.native.release_details')}
+    </Link>}
+  </Stack>
+
   return <Stack spacing={1.5}>
+    <Stack direction={compact ? { xs: 'column', sm: 'row' } : 'column'} spacing={1.5}>
     <TextField select fullWidth label={t('admin:servers.native.release_channel')} value={channel} disabled={disabled}
       onChange={event => {
         const next = event.target.value as NodeReleaseChannel
@@ -112,6 +127,19 @@ export default function NodeReleaseSelector({ enabled, selection, value, onChang
       <MenuItem value="stable">{t('admin:servers.native.release_stable')}</MenuItem>
       <MenuItem value="testing">{t('admin:servers.native.release_testing')}</MenuItem>
     </TextField>
+    <TextField select fullWidth label={t('admin:servers.native.agent_version')} value={selected ? value : ''}
+      disabled={disabled || loading || failed || options.length === 0}
+      helperText={compact ? undefined : t('admin:servers.native.release_version_hint')}
+      onChange={event => {
+        const next = event.target.value
+        if (next === '' || options.some(release => release.version === next)) onChangeRef.current(next)
+      }}>
+      <MenuItem value="">{t('admin:servers.native.release_choose_version')}</MenuItem>
+      {options.map((release, index) => <MenuItem key={release.version} value={release.version} aria-label={release.version}>
+        {release.version}{index === 0 ? ` (${t('admin:servers.native.release_recommended')})` : ''}
+      </MenuItem>)}
+    </TextField>
+    </Stack>
     {loading && <Box role="status" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
       <CircularProgress size={18} />
       <Typography variant="body2">{t('admin:servers.native.release_loading')}</Typography>
@@ -123,26 +151,11 @@ export default function NodeReleaseSelector({ enabled, selection, value, onChang
     {!loading && !failed && releases !== null && options.length === 0 && <Alert severity="info">
       {t(channel === 'stable' ? 'admin:servers.native.release_no_stable' : 'admin:servers.native.release_no_testing')}
     </Alert>}
-    <TextField select fullWidth label={t('admin:servers.native.agent_version')} value={selected ? value : ''}
-      disabled={disabled || loading || failed || options.length === 0}
-      helperText={t('admin:servers.native.release_version_hint')}
-      onChange={event => {
-        const next = event.target.value
-        if (next === '' || options.some(release => release.version === next)) onChangeRef.current(next)
-      }}>
-      <MenuItem value="">{t('admin:servers.native.release_choose_version')}</MenuItem>
-      {options.map((release, index) => <MenuItem key={release.version} value={release.version} aria-label={release.version}>
-        {release.version}{index === 0 ? ` (${t('admin:servers.native.release_recommended')})` : ''}
-      </MenuItem>)}
-    </TextField>
-    {selected && <Stack spacing={0.5}>
-      {publishedLabel && <Typography variant="body2" color="text.secondary">
-        {t('admin:servers.native.release_published', { date: publishedLabel })}
-      </Typography>}
-      {selected.notes && <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{selected.notes}</Typography>}
-      {selectedURL && <Link href={selectedURL} target="_blank" rel="noopener noreferrer" variant="body2">
-        {t('admin:servers.native.release_details')}
-      </Link>}
-    </Stack>}
+    {details && (compact ? <Accordion key={value} disableGutters elevation={0} slotProps={{ transition: { unmountOnExit: true } }}>
+      <AccordionSummary id={reviewID} aria-controls={`${reviewID}-details`} expandIcon={<ExpandMoreIcon />}>
+        <Typography variant="body2">{t('admin:servers.native.release_review')}</Typography>
+      </AccordionSummary>
+      <AccordionDetails>{details}</AccordionDetails>
+    </Accordion> : details)}
   </Stack>
 }

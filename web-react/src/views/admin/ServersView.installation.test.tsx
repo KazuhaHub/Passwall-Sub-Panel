@@ -60,7 +60,22 @@ async function selectVersion(version: string) {
 }
 
 function copyScript(): HTMLButtonElement {
+  const advanced = screen.queryByRole('button', { name: 'admin:servers.native.advanced' })
+  if (advanced?.getAttribute('aria-expanded') === 'false') fireEvent.click(advanced)
   return screen.getByRole('button', { name: 'admin:servers.native.copy_script' })
+}
+
+async function showIdentity() {
+  const advanced = await screen.findByRole('button', { name: 'admin:servers.native.advanced' })
+  if (advanced.getAttribute('aria-expanded') === 'false') fireEvent.click(advanced)
+  return screen.findByLabelText('admin:servers.native.credential')
+}
+
+function mountExpanded(component: Parameters<typeof mount>[0]) {
+  const view = mount(component)
+  const advanced = screen.queryByRole('button', { name: 'admin:servers.native.advanced' })
+  if (advanced?.getAttribute('aria-expanded') === 'false') fireEvent.click(advanced)
+  return view
 }
 
 async function selectMethod(method: 'linux' | 'docker' | 'manual', container: HTMLElement = document.body) {
@@ -105,6 +120,37 @@ function materialPreviews(materials: NativeInstallationFiles): string[] {
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); vi.restoreAllMocks() })
 
 describe('Passwall Node installation', () => {
+  it('keeps identity, credentials and full scripts folded by default, with a labeled advanced control and one-line command feedback', async () => {
+    reads()
+    const generated = { server_id: 7, command: 'curl -fsSL https://panel.test/bootstrap/private-ticket -o /tmp/install',
+      expires_at: new Date(Date.now() + 15 * 60_000).toISOString() }
+    api.post.mockResolvedValue({ data: generated })
+    copy.mockResolvedValue(false)
+    mount(<NativeInstallationDialog server={nativeServer} initialProvisioning={provisioning} onClose={vi.fn()} onRotate={vi.fn()} />)
+    expect(screen.queryByLabelText('admin:servers.native.credential')).toBeNull()
+    expect(screen.queryByLabelText('admin:servers.native.agent_id')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'admin:servers.native.copy_script' })).toBeNull()
+    expect(screen.queryByText('admin:servers.native.method_hint.linux')).toBeNull()
+    expect(screen.getByText('admin:servers.native.reinstall_safety')).toBeTruthy()
+    const advanced = screen.getByRole('button', { name: 'admin:servers.native.advanced' })
+    expect(advanced.tagName).toBe('BUTTON')
+    expect(advanced.getAttribute('aria-expanded')).toBe('false')
+    expect(advanced.getAttribute('tabindex')).not.toBe('-1')
+    await selectVersion('v1.2.3')
+    expect(screen.queryByText('Reviewed contract fixture')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'admin:servers.native.generate_command' }))
+    const field = await screen.findByRole('textbox', { name: 'admin:servers.native.install_command' }) as HTMLInputElement
+    expect(field.tagName).toBe('INPUT')
+    expect(field.readOnly).toBe(true)
+    fireEvent.click(screen.getByRole('button', { name: 'admin:servers.native.copy_command' }))
+    await screen.findByText('admin:servers.native.copy_failed')
+    expect(field.value).toBe(generated.command)
+    fireEvent.click(advanced)
+    expect(advanced.getAttribute('aria-expanded')).toBe('true')
+    expect((await screen.findByLabelText('admin:servers.native.credential') as HTMLInputElement).value).toBe(provisioning.credential)
+    expect(api.post).toHaveBeenCalledTimes(1)
+    expect(api.put).not.toHaveBeenCalled()
+  })
   it.each(['stable', 'beta'] as const)('saves a PN %s preference on the original record and reopens Edit with the saved response', async preference => {
     const saved = { ...nativeServer, update_channel: preference }
     reads()
@@ -133,7 +179,7 @@ describe('Passwall Node installation', () => {
     mount(<ServersView />)
     await openInstallation(nativeServer)
     const channel = preference === 'beta' ? 'testing' : 'stable'
-    await screen.findByLabelText('admin:servers.native.credential')
+    await showIdentity()
     expect(screen.getByRole('combobox', { name: 'admin:servers.native.release_channel' }).textContent).toBe(`admin:servers.native.release_${channel}`)
     expect(versionInput().value).toBe('')
     expect((screen.getByLabelText('admin:servers.native.credential') as HTMLInputElement).value).toBe(provisioning.credential)
@@ -145,7 +191,7 @@ describe('Passwall Node installation', () => {
     fireEvent.click(screen.getByRole('button', { name: 'common:actions.close' }))
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
     await openInstallation(nativeServer)
-    await screen.findByLabelText('admin:servers.native.credential')
+    await showIdentity()
     expect(screen.getByRole('combobox', { name: 'admin:servers.native.release_channel' }).textContent).toBe(`admin:servers.native.release_${channel}`)
     expect(api.put).not.toHaveBeenCalled()
   })
@@ -160,7 +206,7 @@ describe('Passwall Node installation', () => {
     fireEvent.click(await screen.findByRole('option', { name: 'admin:servers.native.release_testing' }))
     fireEvent.change(within(dialog).getByRole('textbox', { name: /admin:servers.field.name/ }), { target: { value: nativeServer.name } })
     fireEvent.click(within(dialog).getByRole('button', { name: 'admin:servers.native.create_continue' }))
-    await screen.findByLabelText('admin:servers.native.credential')
+    await showIdentity()
     expect(api.post).toHaveBeenCalledWith('/admin/servers', { name: nativeServer.name, panel_type: 'psp', remark: undefined, update_channel: 'beta' })
     expect(screen.getByRole('combobox', { name: 'admin:servers.native.release_channel' }).textContent).toBe('admin:servers.native.release_testing')
     expect(versionInput().value).toBe('')
@@ -192,17 +238,17 @@ describe('Passwall Node installation', () => {
     const generated = { server_id: nativeServer.id, command: 'curl -fsSL https://panel.test/private-once | sudo bash',
       expires_at: new Date(Date.now() + 15 * 60_000).toISOString() }
     api.post.mockResolvedValue({ data: generated })
-    mount(<NativeInstallationDialog server={nativeServer} initialProvisioning={provisioning} onClose={vi.fn()} onRotate={vi.fn()} />)
+    mountExpanded(<NativeInstallationDialog server={nativeServer} initialProvisioning={provisioning} onClose={vi.fn()} onRotate={vi.fn()} />)
     const button = screen.getByRole('button', { name: 'admin:servers.native.generate_command' }) as HTMLButtonElement
     expect(button.disabled).toBe(true)
     fireEvent.click(button)
     expect(api.post).not.toHaveBeenCalled()
     await selectVersion('v1.2.3')
     fireEvent.click(button)
-    const command = await screen.findByLabelText('admin:servers.native.install_command') as HTMLTextAreaElement
+    const command = await screen.findByLabelText('admin:servers.native.install_command') as HTMLInputElement
     expect(command.value).toBe(generated.command)
     expect(command.readOnly).toBe(true)
-    expect(screen.getByText('admin:servers.native.command_expires')).toBeTruthy()
+    expect(screen.getByText('admin:servers.native.command_safety')).toBeTruthy()
     expect(api.post).toHaveBeenCalledWith('/admin/servers/7/node-install-command', { version: 'v1.2.3' }, expect.objectContaining({ signal: expect.any(AbortSignal) }))
     fireEvent.click(screen.getByRole('button', { name: 'admin:servers.native.copy_command' }))
     await waitFor(() => expect(copy).toHaveBeenCalledWith(generated.command))
@@ -214,7 +260,7 @@ describe('Passwall Node installation', () => {
 
   it('cannot request a one-click command for an arbitrary unreviewed version injected into the selection', async () => {
     reads()
-    mount(<NativeInstallationDialog server={nativeServer} initialProvisioning={provisioning} onClose={vi.fn()} onRotate={vi.fn()} />)
+    mountExpanded(<NativeInstallationDialog server={nativeServer} initialProvisioning={provisioning} onClose={vi.fn()} onRotate={vi.fn()} />)
     await waitFor(() => expect(screen.getByRole('combobox', { name: 'admin:servers.native.agent_version' }).getAttribute('aria-disabled')).not.toBe('true'))
     fireEvent.change(versionInput(), { target: { value: 'v99.99.99' } })
     expect(versionInput().value).toBe('')
@@ -226,7 +272,7 @@ describe('Passwall Node installation', () => {
 
   it('does not request a command when the loaded provisioning belongs to another server identity', async () => {
     reads()
-    mount(<NativeInstallationDialog server={nativeServer} initialProvisioning={{ ...provisioning,
+    mountExpanded(<NativeInstallationDialog server={nativeServer} initialProvisioning={{ ...provisioning,
       server: { ...nativeServer, id: 8 } }} onClose={vi.fn()} onRotate={vi.fn()} />)
     await selectVersion('v1.2.3')
     const button = screen.getByRole('button', { name: 'admin:servers.native.generate_command' }) as HTMLButtonElement
@@ -239,7 +285,7 @@ describe('Passwall Node installation', () => {
     reads()
     api.post.mockImplementation(async () => ({ data: { server_id: 7, command: 'short-lived command',
       expires_at: new Date(Date.now() + 500).toISOString() } }))
-    mount(<NativeInstallationDialog server={nativeServer} initialProvisioning={provisioning} onClose={vi.fn()} onRotate={vi.fn()} />)
+    mountExpanded(<NativeInstallationDialog server={nativeServer} initialProvisioning={provisioning} onClose={vi.fn()} onRotate={vi.fn()} />)
     await selectVersion('v1.2.3')
     fireEvent.click(screen.getByRole('button', { name: 'admin:servers.native.generate_command' }))
     await screen.findByLabelText('admin:servers.native.install_command')
@@ -273,13 +319,14 @@ describe('Passwall Node installation', () => {
       fireEvent.click(screen.getByRole('button', { name: 'common:actions.close' }))
       await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
       await openInstallation(change === 'server' ? secondServer : nativeServer)
-      await screen.findByLabelText('admin:servers.native.credential')
+      await showIdentity()
     }
     expect(request.signal.aborted).toBe(true)
     await act(async () => { finish({ data: { server_id: 7, command: 'obsolete private command',
       expires_at: new Date(Date.now() + 15 * 60_000).toISOString() } }) })
     expect(screen.queryByLabelText('admin:servers.native.install_command')).toBeNull()
     expect(copy).not.toHaveBeenCalled()
+    await showIdentity()
     expect((screen.getByLabelText('admin:servers.native.credential') as HTMLInputElement).value)
       .toBe(change === 'server' ? secondProvisioning.credential : provisioning.credential)
   })
@@ -289,7 +336,7 @@ describe('Passwall Node installation', () => {
     api.post.mockResolvedValue({ data: { server_id: invalid === 'wrong-server' ? 8 : 7,
       command: invalid === 'empty' ? '' : 'private command',
       expires_at: new Date(Date.now() + (invalid === 'expired' ? -60_000 : 15 * 60_000)).toISOString() } })
-    mount(<NativeInstallationDialog server={nativeServer} initialProvisioning={provisioning} onClose={vi.fn()} onRotate={vi.fn()} />)
+    mountExpanded(<NativeInstallationDialog server={nativeServer} initialProvisioning={provisioning} onClose={vi.fn()} onRotate={vi.fn()} />)
     await selectVersion('v1.2.3')
     fireEvent.click(screen.getByRole('button', { name: 'admin:servers.native.generate_command' }))
     await screen.findByText('admin:servers.native.command_failed')
@@ -321,7 +368,7 @@ describe('Passwall Node installation', () => {
     expect(screen.getByText('admin:servers.native.private_warning')).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: 'common:actions.close' }))
     await openInstallation(nativeServer)
-    await screen.findByLabelText('admin:servers.native.credential')
+    await showIdentity()
     expect((screen.getByLabelText('admin:servers.native.credential') as HTMLInputElement).value).toBe(provisioning.credential)
     expect((screen.getByLabelText('admin:servers.native.agent_id') as HTMLInputElement).value).toBe(provisioning.agent_id)
     expect(api.get.mock.calls.filter(([url]) => url === '/admin/servers/7/node-installation').length).toBeGreaterThanOrEqual(2)
@@ -382,7 +429,7 @@ describe('Passwall Node installation', () => {
     }
     fireEvent.change(within(createDialog).getByRole('textbox', { name: /admin:servers.field.name/ }), { target: { value: nativeServer.name } })
     fireEvent.click(within(createDialog).getByRole('button', { name: 'admin:servers.native.create_continue' }))
-    await screen.findByLabelText('admin:servers.native.agent_id')
+    await showIdentity()
     expect(screen.getByRole('dialog')).toBe(createDialog)
     expect(screen.queryByRole('button', { name: 'admin:servers.native.create_continue' })).toBeNull()
     expect(screen.getByRole('combobox', { name: 'admin:servers.native.method_label' }).textContent).toBe(`admin:servers.native.method.${method}`)
@@ -450,7 +497,7 @@ describe('Passwall Node installation', () => {
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
     if (switchToAnother) {
       await openInstallation(secondServer)
-      await screen.findByLabelText('admin:servers.native.credential')
+      await showIdentity()
       expect((screen.getByLabelText('admin:servers.native.agent_id') as HTMLInputElement).value).toBe('agt_8')
     }
 
@@ -466,7 +513,7 @@ describe('Passwall Node installation', () => {
 
     // An explicit later GET recovers the committed credential on the same ID.
     await openInstallation(nativeServer)
-    await screen.findByLabelText('admin:servers.native.credential')
+    await showIdentity()
     expect((screen.getByLabelText('admin:servers.native.agent_id') as HTMLInputElement).value).toBe('agt_7')
     expect((screen.getByLabelText('admin:servers.native.credential') as HTMLInputElement).value).toBe(rotatedProvisioning.credential)
     expect(api.post.mock.calls.filter(([url]) => url === '/admin/servers/7/rotate-node-credential')).toHaveLength(1)
@@ -481,7 +528,7 @@ describe('Passwall Node installation', () => {
     })
     api.post.mockImplementation(async () => { imported = true; return { data: { ok: true } } })
     const onRotate = vi.fn()
-    mount(<NativeInstallationDialog server={nativeServer} initialProvisioning={null} onClose={vi.fn()} onRotate={onRotate} />)
+    mountExpanded(<NativeInstallationDialog server={nativeServer} initialProvisioning={null} onClose={vi.fn()} onRotate={onRotate} />)
     await screen.findByText('admin:servers.native.legacy_credential_hint')
     expect(screen.queryByLabelText('admin:servers.native.agent_version')).toBeNull()
     fireEvent.change(screen.getByLabelText('admin:servers.native.old_credential'), { target: { value: provisioning.credential } })
@@ -495,7 +542,7 @@ describe('Passwall Node installation', () => {
   it('requires an exact release version, copies the private script, and never puts credentials in commands or URLs', async () => {
     reads({ state: 'unconfigured', configured_nodes: 0, last_seen: '2026-09-12T08:00:00Z' })
     api.post.mockResolvedValue({ data: `#!/bin/sh\n# ${provisioning.credential}\n` })
-    mount(<NativeInstallationDialog server={nativeServer} initialProvisioning={provisioning} onClose={vi.fn()} onRotate={vi.fn()} />)
+    mountExpanded(<NativeInstallationDialog server={nativeServer} initialProvisioning={provisioning} onClose={vi.fn()} onRotate={vi.fn()} />)
     await screen.findByText('admin:servers.native.agent_status.unconfigured')
     expect(screen.queryByText('admin:servers.native.agent_status.running')).toBeNull()
     expect(copyScript().disabled).toBe(true)
@@ -513,7 +560,7 @@ describe('Passwall Node installation', () => {
 
   it('preserves identity and private credential but requires version confirmation after changing installation methods', async () => {
     reads()
-    mount(<NativeInstallationDialog server={nativeServer} initialProvisioning={provisioning} onClose={vi.fn()} onRotate={vi.fn()} />)
+    mountExpanded(<NativeInstallationDialog server={nativeServer} initialProvisioning={provisioning} onClose={vi.fn()} onRotate={vi.fn()} />)
     await selectVersion('v1.2.3-beta.1')
     for (const method of ['docker', 'manual', 'linux'] as const) {
       await selectMethod(method)
@@ -530,7 +577,7 @@ describe('Passwall Node installation', () => {
     reads()
     let finish!: (response: { data: string }) => void
     api.post.mockReturnValue(new Promise<{ data: string }>(resolve => { finish = resolve }))
-    mount(<NativeInstallationDialog server={nativeServer} initialProvisioning={provisioning} onClose={vi.fn()} onRotate={vi.fn()} />)
+    mountExpanded(<NativeInstallationDialog server={nativeServer} initialProvisioning={provisioning} onClose={vi.fn()} onRotate={vi.fn()} />)
     await selectVersion('v1.2.3')
     fireEvent.click(copyScript())
     await waitFor(() => expect(api.post).toHaveBeenCalledWith('/admin/servers/7/node-install-script', { version: 'v1.2.3' }, expect.objectContaining({ signal: expect.any(AbortSignal) })))
@@ -549,7 +596,7 @@ describe('Passwall Node installation', () => {
     reads()
     let finish!: (response: { data: string }) => void
     api.post.mockReturnValue(new Promise<{ data: string }>(resolve => { finish = resolve }))
-    mount(<NativeInstallationDialog server={nativeServer} initialProvisioning={provisioning} onClose={vi.fn()} onRotate={vi.fn()} />)
+    mountExpanded(<NativeInstallationDialog server={nativeServer} initialProvisioning={provisioning} onClose={vi.fn()} onRotate={vi.fn()} />)
     await selectVersion('v1.2.3-beta.1')
     fireEvent.click(copyScript())
     await waitFor(() => expect(api.post).toHaveBeenCalledTimes(1))
@@ -570,7 +617,7 @@ describe('Passwall Node installation', () => {
     reads()
     const materials = generatedFiles(method)
     api.post.mockResolvedValue({ data: materials })
-    mount(<NativeInstallationDialog server={nativeServer} initialProvisioning={provisioning} onClose={vi.fn()} onRotate={vi.fn()} />)
+    mountExpanded(<NativeInstallationDialog server={nativeServer} initialProvisioning={provisioning} onClose={vi.fn()} onRotate={vi.fn()} />)
     await selectMethod(method)
     await selectVersion('v1.2.3-beta.1')
     fireEvent.click(screen.getByRole('button', { name: 'admin:servers.native.generate_files' }))
@@ -607,7 +654,7 @@ describe('Passwall Node installation', () => {
     vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
       downloads.push({ file: this.download, url: this.href })
     })
-    mount(<NativeInstallationDialog server={nativeServer} initialProvisioning={provisioning} onClose={vi.fn()} onRotate={vi.fn()} />)
+    mountExpanded(<NativeInstallationDialog server={nativeServer} initialProvisioning={provisioning} onClose={vi.fn()} onRotate={vi.fn()} />)
     await selectMethod('docker')
     await selectVersion('v1.2.3-beta.1')
     fireEvent.click(screen.getByRole('button', { name: 'admin:servers.native.generate_files' }))
@@ -633,7 +680,7 @@ describe('Passwall Node installation', () => {
     api.post.mockImplementation((_url: string, body: { method: string }) => body.method === 'docker'
       ? new Promise<{ data: NativeInstallationFiles }>(resolve => { finishDocker = resolve })
       : Promise.resolve({ data: manual }))
-    mount(<NativeInstallationDialog server={nativeServer} initialProvisioning={provisioning} onClose={vi.fn()} onRotate={vi.fn()} />)
+    mountExpanded(<NativeInstallationDialog server={nativeServer} initialProvisioning={provisioning} onClose={vi.fn()} onRotate={vi.fn()} />)
     await selectMethod('docker')
     await selectVersion('v1.2.3-beta.1')
     fireEvent.click(screen.getByRole('button', { name: 'admin:servers.native.generate_files' }))
@@ -668,7 +715,7 @@ describe('Passwall Node installation', () => {
       : Promise.resolve({ data: { ok: true } }))
     mount(<ServersView />)
     await openInstallation(nativeServer)
-    await screen.findByLabelText('admin:servers.native.credential')
+    await showIdentity()
     await selectMethod('docker')
     await selectVersion('v1.2.3-beta.1')
     fireEvent.click(screen.getByRole('button', { name: 'admin:servers.native.generate_files' }))
@@ -678,7 +725,7 @@ describe('Passwall Node installation', () => {
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
     expect(oldRequest.signal.aborted).toBe(true)
     await openInstallation(secondServer)
-    await screen.findByLabelText('admin:servers.native.credential')
+    await showIdentity()
     await selectMethod('docker')
     await act(async () => { finish({ data: generatedFiles('docker') }) })
     expect((screen.getByLabelText('admin:servers.native.agent_id') as HTMLInputElement).value).toBe(secondProvisioning.agent_id)
@@ -692,7 +739,7 @@ describe('Passwall Node installation', () => {
     reads()
     const materials: NativeInstallationFiles = { ...generatedFiles('manual'), os, arch: 'arm64' }
     api.post.mockResolvedValue({ data: materials })
-    mount(<NativeInstallationDialog server={nativeServer} initialProvisioning={provisioning} onClose={vi.fn()} onRotate={vi.fn()} />)
+    mountExpanded(<NativeInstallationDialog server={nativeServer} initialProvisioning={provisioning} onClose={vi.fn()} onRotate={vi.fn()} />)
     await selectMethod('manual')
     fireEvent.mouseDown(screen.getByRole('combobox', { name: 'admin:servers.native.platform_label' }))
     fireEvent.click(await screen.findByRole('option', { name: `admin:servers.native.platform.${os}` }))
@@ -711,7 +758,7 @@ describe('Passwall Node installation', () => {
   it('invalidates displayed files after a release change instead of allowing obsolete files to be copied', async () => {
     reads()
     api.post.mockResolvedValue({ data: generatedFiles('docker') })
-    mount(<NativeInstallationDialog server={nativeServer} initialProvisioning={provisioning} onClose={vi.fn()} onRotate={vi.fn()} />)
+    mountExpanded(<NativeInstallationDialog server={nativeServer} initialProvisioning={provisioning} onClose={vi.fn()} onRotate={vi.fn()} />)
     await selectMethod('docker')
     await selectVersion('v1.2.3-beta.1')
     fireEvent.click(screen.getByRole('button', { name: 'admin:servers.native.generate_files' }))
@@ -727,7 +774,7 @@ describe('Passwall Node installation', () => {
   it('keeps a generation failure local and retryable without rendering or copying an error as a private file', async () => {
     reads()
     api.post.mockRejectedValue({ response: { status: 400, data: { error: 'Chosen release unavailable' } } })
-    mount(<NativeInstallationDialog server={nativeServer} initialProvisioning={provisioning} onClose={vi.fn()} onRotate={vi.fn()} />)
+    mountExpanded(<NativeInstallationDialog server={nativeServer} initialProvisioning={provisioning} onClose={vi.fn()} onRotate={vi.fn()} />)
     await selectMethod('docker')
     await selectVersion('v1.2.3-beta.1')
     fireEvent.click(screen.getByRole('button', { name: 'admin:servers.native.generate_files' }))
@@ -748,7 +795,7 @@ describe('Passwall Node installation', () => {
     if (field === 'os') materials.os = 'windows'
     else materials.arch = 'arm64'
     api.post.mockResolvedValue({ data: materials })
-    mount(<NativeInstallationDialog server={nativeServer} initialProvisioning={provisioning} onClose={vi.fn()} onRotate={vi.fn()} />)
+    mountExpanded(<NativeInstallationDialog server={nativeServer} initialProvisioning={provisioning} onClose={vi.fn()} onRotate={vi.fn()} />)
     await selectMethod(method)
     await selectVersion('v1.2.3-beta.1')
     fireEvent.click(screen.getByRole('button', { name: 'admin:servers.native.generate_files' }))
@@ -768,7 +815,7 @@ describe('Passwall Node installation', () => {
     const command = '  printf "%s\\n" "$NODE_AGENT_ID"\n'
     materials.steps[0].commands = [command, 'docker compose ps']
     api.post.mockResolvedValue({ data: materials })
-    mount(<NativeInstallationDialog server={nativeServer} initialProvisioning={provisioning} onClose={vi.fn()} onRotate={vi.fn()} />)
+    mountExpanded(<NativeInstallationDialog server={nativeServer} initialProvisioning={provisioning} onClose={vi.fn()} onRotate={vi.fn()} />)
     await selectMethod('docker')
     await selectVersion('v1.2.3-beta.1')
     fireEvent.click(screen.getByRole('button', { name: 'admin:servers.native.generate_files' }))
@@ -784,7 +831,7 @@ describe('Passwall Node installation', () => {
     let status: NativeAgentStatus = waiting
     api.get.mockImplementation(async () => ({ data: status }))
     const onClose = vi.fn()
-    const view = mount(<NativeInstallationDialog server={nativeServer} initialProvisioning={provisioning} onClose={onClose} onRotate={vi.fn()} />)
+    const view = mountExpanded(<NativeInstallationDialog server={nativeServer} initialProvisioning={provisioning} onClose={onClose} onRotate={vi.fn()} />)
     await act(async () => {})
     expect(screen.getByText('admin:servers.native.agent_status.waiting')).toBeTruthy()
     status = { state: 'applying', configured_nodes: 1, last_seen: '2026-09-12T08:00:00Z' }
@@ -816,7 +863,7 @@ describe('Passwall Node installation', () => {
     vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
       downloads.push({ file: this.download, url: this.href })
     })
-    mount(<NativeInstallationDialog server={nativeServer} initialProvisioning={provisioning} onClose={vi.fn()} onRotate={vi.fn()} />)
+    mountExpanded(<NativeInstallationDialog server={nativeServer} initialProvisioning={provisioning} onClose={vi.fn()} onRotate={vi.fn()} />)
     await selectVersion('v1.2.3')
     fireEvent.click(screen.getByRole('button', { name: 'admin:servers.native.download_script' }))
     await waitFor(() => expect(downloads).toEqual([{ file: 'passwall-node-install-agt_7.sh', url: 'blob:private-install-script' }]))
@@ -828,7 +875,7 @@ describe('Passwall Node installation', () => {
   it('renders a plain-text API failure locally without downloading or copying it', async () => {
     reads()
     api.post.mockRejectedValue({ response: { status: 400, data: '{"error":"Release has no installation assets"}' } })
-    mount(<NativeInstallationDialog server={nativeServer} initialProvisioning={provisioning} onClose={vi.fn()} onRotate={vi.fn()} />)
+    mountExpanded(<NativeInstallationDialog server={nativeServer} initialProvisioning={provisioning} onClose={vi.fn()} onRotate={vi.fn()} />)
     await selectVersion('v1.2.3')
     fireEvent.click(copyScript())
     await screen.findByText('Release has no installation assets')

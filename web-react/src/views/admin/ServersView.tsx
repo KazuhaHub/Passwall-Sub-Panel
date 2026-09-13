@@ -1,11 +1,15 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type MouseEvent } from 'react'
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type FormEvent, type MouseEvent } from 'react'
 import { NativeAgentUpgradeDialog } from './NativeAgentUpgradeDialog'
 import { NodeMigrationPreviewDialog } from './NodeMigrationPreviewDialog'
 import { ReinstallBackendDialog } from './ReinstallBackendDialog'
 import NodeReleaseSelector from '@/components/NodeReleaseSelector'
+import NodeInstallCommand from '@/components/NodeInstallCommand'
 import { Link as RouterLink } from 'react-router'
 import {
 	Alert,
+  Accordion,
+  AccordionDetails,
+  AccordionSummary,
   Box,
   Button,
   Card,
@@ -48,6 +52,7 @@ import VisibilityOffIcon from '@mui/icons-material/VisibilityOff'
 import ContentCopyIcon from '@mui/icons-material/ContentCopy'
 import VpnKeyIcon from '@mui/icons-material/VpnKeyOutlined'
 import DownloadIcon from '@mui/icons-material/DownloadOutlined'
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import { useTranslation } from 'react-i18next'
 import { allSettledLimited } from '@/utils/promises'
 
@@ -1696,7 +1701,10 @@ export default function ServersView() {
         onNativeMigration={server => { setReinstallTarget(null); setMigrationTarget(server) }}
         onConfigure={server => { setReinstallTarget(null); openEdit(server) }}
       />
-      <NodeMigrationPreviewDialog key={migrationTarget?.id ?? 'closed'} server={migrationTarget} onClose={() => { setMigrationTarget(null); load() }} />
+      <NodeMigrationPreviewDialog key={migrationTarget?.id ?? 'closed'}
+        server={migrationTarget ? items.find(item => item.id === migrationTarget.id) ?? migrationTarget : null}
+        onRefreshServer={load} onClose={() => { setMigrationTarget(null); load() }}
+        onNativeInstall={server => { setMigrationTarget(null); openNativeInstallation(server) }} />
       <NativeInstallationDialog
         server={nativeCreationFlow ? null : nativeInstallationTarget}
         initialProvisioning={nativeCreationFlow ? null : nativeProvisioning}
@@ -1708,10 +1716,11 @@ export default function ServersView() {
   );
 }
 
-function NativeInstallationMethodFields({ selection, onChange, disabled = false }: {
+function NativeInstallationMethodFields({ selection, onChange, disabled = false, compact = false }: {
   selection: NativeInstallationSelection
   onChange: (selection: NativeInstallationSelection) => void
   disabled?: boolean
+  compact?: boolean
 }) {
   const { t } = useTranslation('admin')
   return <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
@@ -1730,10 +1739,10 @@ function NativeInstallationMethodFields({ selection, onChange, disabled = false 
         <MenuItem value="arm64">arm64 (aarch64)</MenuItem>
       </TextField>
     </Box>}
-    <Alert severity="info" sx={{ whiteSpace: 'pre-line' }}>
+    {!compact && <Alert severity="info" sx={{ whiteSpace: 'pre-line' }}>
       {t(`admin:servers.native.method_hint.${selection.method}`)}
       <Typography variant="body2" sx={{ mt: 1, whiteSpace: 'pre-line' }}>{t(`admin:servers.native.method_steps.${selection.method}`)}</Typography>
-    </Alert>
+    </Alert>}
   </Box>
 }
 
@@ -1785,6 +1794,7 @@ interface NativeInstallationDialogProps {
 // reads the same identity/credential; rotation is an explicit, separate action.
 export function NativeInstallationDialog({ server, initialProvisioning, onClose, onRotate, rotating = false, embedded = false, newServer = false, initialSelection = DEFAULT_INSTALLATION }: NativeInstallationDialogProps) {
   const { t } = useTranslation(['admin', 'common'])
+  const advancedID = useId()
   const canConfigure = useCan('config.write')
   const md = useTheme().palette.md
   const [provisioning, setProvisioning] = useState<NativeServerProvisioning | null>(null)
@@ -1808,6 +1818,7 @@ export function NativeInstallationDialog({ server, initialProvisioning, onClose,
   const [status, setStatus] = useState<NativeAgentStatus | null>(null)
   const [statusError, setStatusError] = useState('')
   const [installationReload, setInstallationReload] = useState(0)
+  const [advanced, setAdvanced] = useState(false)
   const credentialRequest = useRef<AbortController | null>(null)
   const scriptRequest = useRef<AbortController | null>(null)
   const filesRequest = useRef<AbortController | null>(null)
@@ -1834,6 +1845,7 @@ export function NativeInstallationDialog({ server, initialProvisioning, onClose,
     setCommandBusy(false)
     setCommandError('')
     setCommandExpired(false)
+    setAdvanced(false)
     setInstallationLoading(serverID !== undefined && !initialProvisioning)
     if (serverID !== undefined && !initialProvisioning) {
       void getNativeInstallation(serverID, controller.signal).then(data => {
@@ -1958,7 +1970,7 @@ export function NativeInstallationDialog({ server, initialProvisioning, onClose,
       const result = await createNodeInstallCommand(server.id, { version: version.trim() }, controller.signal)
       if (controller.signal.aborted) return
       if (result.server_id !== server.id || typeof result.command !== 'string' || !result.command.trim() ||
-        result.command.length > 8192 || result.command.includes('\0') ||
+        result.command.length > 8192 || /[\0\r\n]/.test(result.command) ||
         typeof result.expires_at !== 'string' || !Number.isFinite(Date.parse(result.expires_at)) ||
         Date.parse(result.expires_at) <= Date.now()) throw new Error(t('admin:servers.native.command_failed'))
       setInstallCommand({ command: result.command, expires_at: result.expires_at })
@@ -1996,22 +2008,14 @@ export function NativeInstallationDialog({ server, initialProvisioning, onClose,
 
   const content = <>
     <DialogContent sx={{ display: 'flex', flexDirection: 'column', gap: 2, pt: '12px !important' }}>
-      {server && !newServer && <Alert severity="info">{t('admin:servers.passwall_node_install.existing_hint')}</Alert>}
-      <Alert severity="warning">{t('admin:servers.native.private_warning')}</Alert>
-      <NativeInstallationMethodFields selection={selection} disabled={rotating} onChange={next => { invalidateMaterials(); setVersion(''); setSelection(next) }} />
-      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-        <Typography variant="subtitle1">{t('admin:servers.native.status_title')}</Typography>
-        {statusError && <Alert severity="warning">{t('admin:servers.native.status_stale')} {statusError}</Alert>}
-        <Alert severity={statusSeverity}>
-          {t(`admin:servers.native.agent_status.${status?.state ?? 'checking'}`)}
-          {status?.last_seen && <Typography variant="body2">{t('admin:servers.native.last_seen', { time: status.last_seen })}</Typography>}
-          {status && <Typography variant="body2">{t('admin:servers.native.configured_nodes', { count: status.configured_nodes })}</Typography>}
-          {status?.core_state && <Typography variant="body2">{t('admin:servers.native.core_state', { state: status.core_state })}</Typography>}
-        </Alert>
-        <Typography variant="body2">{t('admin:servers.native.heartbeat_hint')}</Typography>
-      </Box>
-      {installationLoading && <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}><CircularProgress size={18} />{t('admin:servers.native.installation_loading')}</Box>}
-      {installationError && <Alert severity="error" action={<Button color="inherit" onClick={() => setInstallationReload(value => value + 1)}>{t('common:actions.retry')}</Button>}>{installationError}</Alert>}
+      <NativeInstallationMethodFields compact selection={selection} disabled={rotating}
+        onChange={next => { invalidateMaterials(); setVersion(''); setSelection(next) }} />
+      {server && !newServer && <Typography variant="body2" color="text.secondary">{t('admin:servers.native.reinstall_safety')}</Typography>}
+      {installationLoading && <Box role="status" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+        <CircularProgress size={18} />{t('admin:servers.native.installation_loading')}
+      </Box>}
+      {installationError && <Alert severity="error" action={<Button color="inherit" onClick={() => setInstallationReload(value => value + 1)}>
+        {t('common:actions.retry')}</Button>}>{installationError}</Alert>}
       {credentialUnavailable && <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
         <Alert severity="warning">{t('admin:servers.native.legacy_credential_hint')}</Alert>
         <TextField label={t('admin:servers.native.old_credential')} type="password" value={oldCredential}
@@ -2027,68 +2031,86 @@ export function NativeInstallationDialog({ server, initialProvisioning, onClose,
         </Box>
       </Box>}
       {provisioning && <>
-        <TextField label={t('admin:servers.native.agent_id')} value={provisioning.agent_id} fullWidth slotProps={{ input: { readOnly: true } }} />
-        <TextField label={t('admin:servers.native.endpoint')} value={provisioning.endpoint} fullWidth slotProps={{ input: { readOnly: true } }} />
-        <TextField label={t('admin:servers.native.credential')} type="password" value={provisioning.credential}
-          autoComplete="off" fullWidth slotProps={{ input: { readOnly: true } }} />
-        {provisioning.endpoint.startsWith('http://') && <Alert severity="warning">{t('admin:servers.native.http_warning')}</Alert>}
-        <NodeReleaseSelector key={serverID} enabled={!!server} selection={selection} value={version}
+        <NodeReleaseSelector compact key={serverID} enabled={!!server} selection={selection} value={version}
           initialChannel={server?.update_channel === 'beta' ? 'testing' : 'stable'}
           onChange={next => { invalidateMaterials(); setVersion(next) }} disabled={rotating} />
-        <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
-          {selection.method === 'linux' ? <>
-          <Button variant="contained" disabled={!canConfigure || provisioning.server.id !== serverID || !versionValid || commandBusy || rotating}
-            startIcon={commandBusy ? <CircularProgress size={16} color="inherit" /> : <DownloadIcon />}
-            onClick={() => void generateInstallCommand()}>{t('admin:servers.native.generate_command')}</Button>
-          </> : <Button variant="contained" disabled={!versionValid || filesBusy || rotating}
-            startIcon={filesBusy ? <CircularProgress size={16} color="inherit" /> : <DownloadIcon />} onClick={() => void generateFiles()}>
-            {t('admin:servers.native.generate_files')}
-          </Button>}
-          <Button component="a" href="https://github.com/KazuhaHub/Passwall-Node/releases" target="_blank" rel="noopener noreferrer">
-            {t('admin:servers.native.releases')}
-          </Button>
-        </Box>
-        {scriptError && <Alert severity="error">{scriptError}</Alert>}
-        {filesError && <Alert severity="error">{filesError}</Alert>}
-        {selection.method === 'linux' ? <>
-        <Typography variant="body2">{t('admin:servers.native.command_hint')}</Typography>
+        {provisioning.endpoint.startsWith('http://') && <Alert severity="warning">{t('admin:servers.native.http_warning')}</Alert>}
+        <Button variant="contained" sx={{ alignSelf: 'flex-start' }}
+          disabled={selection.method === 'linux'
+            ? !canConfigure || provisioning.server.id !== serverID || !versionValid || commandBusy || rotating
+            : !versionValid || filesBusy || rotating}
+          startIcon={commandBusy || filesBusy ? <CircularProgress size={16} color="inherit" /> : <DownloadIcon />}
+          onClick={() => void (selection.method === 'linux' ? generateInstallCommand() : generateFiles())}>
+          {t(selection.method === 'linux' ? 'admin:servers.native.generate_command' : 'admin:servers.native.generate_files')}
+        </Button>
         {commandError && <Alert severity="error">{commandError}</Alert>}
-        {installCommand && <>
-          <TextField label={t('admin:servers.native.install_command')} value={installCommand.command}
-            autoComplete="off" fullWidth multiline minRows={2} maxRows={8}
-            slotProps={{ input: { readOnly: true, sx: { fontFamily: 'monospace', fontSize: 13 } } }} />
-          <Alert severity={commandExpired ? 'warning' : 'info'}>{t(commandExpired
-            ? 'admin:servers.native.command_expired' : 'admin:servers.native.command_expires', { time: installCommand.expires_at })}</Alert>
-          <Button variant="outlined" startIcon={<ContentCopyIcon />} sx={{ alignSelf: 'flex-start' }} disabled={commandExpired}
-            onClick={() => {
-              if (Date.parse(installCommand.expires_at) <= Date.now()) { setCommandExpired(true); return }
-              void copyToClipboard(installCommand.command)
-            }}>{t('admin:servers.native.copy_command')}</Button>
+        {filesError && <Alert severity="error">{filesError}</Alert>}
+        {selection.method === 'linux' && installCommand && <NodeInstallCommand command={installCommand.command}
+          expiresAt={installCommand.expires_at} disabled={commandExpired} onExpired={() => setCommandExpired(true)} />}
+        {selection.method !== 'linux' && files && <>
+          <Typography variant="body2">{t('admin:servers.native.files_ready')}</Typography>
+          <Typography variant="caption" color="text.secondary">{t('admin:servers.native.files_advanced_hint')}</Typography>
+          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+            {files.files.map(file => <Button key={file.name} variant="outlined" startIcon={<DownloadIcon />}
+              onClick={() => downloadInstallationFile(file.name, file.content)}>
+              {t('admin:servers.native.download_file', { name: file.name })}
+            </Button>)}
+          </Box>
         </>}
-        <Typography variant="subtitle2">{t('admin:servers.native.private_script_advanced')}</Typography>
-        <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
-          <Button variant="outlined" startIcon={scriptBusy ? <CircularProgress size={16} color="inherit" /> : <DownloadIcon />}
-            disabled={!versionValid || !!scriptBusy || rotating} onClick={() => void deliverScript('download')}>
-            {t('admin:servers.native.download_script')}
-          </Button>
-          <Button variant="outlined" startIcon={<ContentCopyIcon />} disabled={!versionValid || !!scriptBusy || rotating} onClick={() => void deliverScript('copy')}>
-            {t('admin:servers.native.copy_script')}
-          </Button>
-        </Box>
-        <Typography variant="body2">{t('admin:servers.native.run_script_hint')}</Typography>
-        <TextField label={t('admin:servers.native.run_script_command')} value={`chmod 0600 ./passwall-node-install-${provisioning.agent_id}.sh\nsudo bash ./passwall-node-install-${provisioning.agent_id}.sh`}
-          fullWidth multiline minRows={2} slotProps={{ input: { readOnly: true } }} />
-        </> : <>
-          <Typography variant="body2">{t(selection.method === 'manual' ? 'admin:servers.native.manual_platform_hint' : 'admin:servers.native.docker_hint')}</Typography>
-          {files && <>
-            <Alert severity="success">{t('admin:servers.native.files_ready')}</Alert>
-            <Typography variant="body2">{t('admin:servers.native.downloads_hint')}</Typography>
+      </>}
+      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+        <Typography variant="subtitle2">{t('admin:servers.native.status_title')}</Typography>
+        {statusError && <Alert severity="warning">{t('admin:servers.native.status_stale')} {statusError}</Alert>}
+        <Alert severity={statusSeverity}>
+          {t(`admin:servers.native.agent_status.${status?.state ?? 'checking'}`)}
+          <Typography variant="body2">{t(`admin:servers.native.status_next.${status?.state ?? 'checking'}`)}</Typography>
+        </Alert>
+      </Box>
+      {provisioning && <Accordion expanded={advanced} onChange={(_event, expanded) => setAdvanced(expanded)}
+        disableGutters elevation={0} slotProps={{ transition: { unmountOnExit: true } }}>
+        <AccordionSummary id={advancedID} aria-controls={`${advancedID}-details`} expandIcon={<ExpandMoreIcon />}>
+          <Typography variant="body2">{t('admin:servers.native.advanced')}</Typography>
+        </AccordionSummary>
+        <AccordionDetails sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+          {server && !newServer && <Typography variant="body2">{t('admin:servers.passwall_node_install.existing_hint')}</Typography>}
+          <Typography variant="body2">{t('admin:servers.native.private_warning')}</Typography>
+          <TextField label={t('admin:servers.native.agent_id')} value={provisioning.agent_id} fullWidth slotProps={{ input: { readOnly: true } }} />
+          <TextField label={t('admin:servers.native.endpoint')} value={provisioning.endpoint} fullWidth slotProps={{ input: { readOnly: true } }} />
+          <TextField label={t('admin:servers.native.credential')} type="password" value={provisioning.credential}
+            autoComplete="off" fullWidth slotProps={{ input: { readOnly: true } }} />
+          <Typography variant="body2" sx={{ whiteSpace: 'pre-line' }}>{t(`admin:servers.native.method_hint.${selection.method}`)}</Typography>
+          <Typography variant="body2" sx={{ whiteSpace: 'pre-line' }}>{t(`admin:servers.native.method_steps.${selection.method}`)}</Typography>
+          {status?.last_seen && <Typography variant="body2">{t('admin:servers.native.last_seen', { time: status.last_seen })}</Typography>}
+          {status && <Typography variant="body2">{t('admin:servers.native.configured_nodes', { count: status.configured_nodes })}</Typography>}
+          {status?.core_state && <Typography variant="body2">{t('admin:servers.native.core_state', { state: status.core_state })}</Typography>}
+          <Typography variant="body2">{t('admin:servers.native.heartbeat_hint')}</Typography>
+          <Button component="a" sx={{ alignSelf: 'flex-start' }} href="https://github.com/KazuhaHub/Passwall-Node/releases"
+            target="_blank" rel="noopener noreferrer">{t('admin:servers.native.releases')}</Button>
+          {selection.method === 'linux' ? <>
+            <Typography variant="subtitle2">{t('admin:servers.native.private_script_advanced')}</Typography>
+            {scriptError && <Alert severity="error">{scriptError}</Alert>}
+            <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+              <Button variant="outlined" startIcon={scriptBusy ? <CircularProgress size={16} color="inherit" /> : <DownloadIcon />}
+                disabled={!versionValid || !!scriptBusy || rotating} onClick={() => void deliverScript('download')}>
+                {t('admin:servers.native.download_script')}
+              </Button>
+              <Button variant="outlined" startIcon={<ContentCopyIcon />} disabled={!versionValid || !!scriptBusy || rotating} onClick={() => void deliverScript('copy')}>
+                {t('admin:servers.native.copy_script')}
+              </Button>
+            </Box>
+            <Typography variant="body2">{t('admin:servers.native.run_script_hint')}</Typography>
+            <TextField label={t('admin:servers.native.run_script_command')}
+              value={`chmod 0600 ./passwall-node-install-${provisioning.agent_id}.sh\nsudo bash ./passwall-node-install-${provisioning.agent_id}.sh`}
+              fullWidth multiline minRows={2} slotProps={{ input: { readOnly: true } }} />
+          </> : <>
+            <Typography variant="body2">{t(selection.method === 'manual' ? 'admin:servers.native.manual_platform_hint' : 'admin:servers.native.docker_hint')}</Typography>
+            {files && <>
+              <Typography variant="body2">{t('admin:servers.native.downloads_hint')}</Typography>
             {files.files.map(file => <Box component="section" aria-label={file.name} key={file.name} sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
               <TextField label={t('admin:servers.native.file_content', { name: file.name })} value={file.content}
                 type={file.sensitive ? 'password' : 'text'} multiline={!file.sensitive} minRows={file.sensitive ? undefined : 2} maxRows={file.sensitive ? undefined : 10}
                 autoComplete="off" fullWidth slotProps={{ input: { readOnly: true, sx: { fontFamily: 'monospace', fontSize: 13 } } }} />
               <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
-                <Button variant="outlined" startIcon={<DownloadIcon />} onClick={() => downloadInstallationFile(file.name, file.content)}>{t('admin:servers.native.download_file', { name: file.name })}</Button>
                 <Button startIcon={<ContentCopyIcon />} onClick={() => void copyToClipboard(file.content)}>{t('admin:servers.native.copy_file', { name: file.name })}</Button>
               </Box>
             </Box>)}
@@ -2101,9 +2123,11 @@ export function NativeInstallationDialog({ server, initialProvisioning, onClose,
                 <Button sx={{ alignSelf: 'flex-start' }} startIcon={<ContentCopyIcon />} onClick={() => void copyToClipboard(command)}>{t('admin:servers.native.copy_step')}</Button>
               </Box>)}
             </Box>)}
+
+            </>}
           </>}
-        </>}
-      </>}
+        </AccordionDetails>
+      </Accordion>}
     </DialogContent>
     <DialogActions sx={{ flexWrap: 'wrap', gap: 1 }}>
       <Button onClick={onClose}>{t('common:actions.close')}</Button>

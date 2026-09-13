@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -186,7 +187,7 @@ func mintBootstrap(t *testing.T, f *bootstrapFixture, migration bool) (string, *
 	if err := json.Unmarshal(w.Body.Bytes(), &data); err != nil {
 		t.Fatal(err)
 	}
-	if data.ServerID != 41 || data.Expires.IsZero() || strings.Contains(data.Command, "pspn_") || !strings.Contains(data.Command, "/private-panel/node-bootstrap/") || !strings.Contains(data.Command, "bash -n") || !strings.Contains(data.Command, "--proto") {
+	if data.ServerID != 41 || data.Expires.IsZero() || len(data.Command) > 320 || strings.ContainsAny(data.Command, "\r\n\x00") || strings.Contains(data.Command, "pspn_") || !strings.Contains(data.Command, "/private-panel/node-bootstrap/") || !strings.Contains(data.Command, "bash -n") || !strings.Contains(data.Command, "--proto") {
 		t.Fatalf("invalid private command: %+v", data)
 	}
 	match := commandToken.FindStringSubmatch(data.Command)
@@ -201,7 +202,7 @@ func TestNodeBootstrapNativeOneUseIdentityAndPrivateAudit(t *testing.T) {
 	raw := f.provisioning.credential
 	token, _ := mintBootstrap(t, f, false)
 	w := f.request(http.MethodGet, "/node-bootstrap/"+token, "", "")
-	if w.Code != 200 || !strings.Contains(w.Body.String(), raw) || w.Header().Get("Cache-Control") != "no-store, private" {
+	if w.Code != 200 || !strings.Contains(w.Body.String(), raw) || w.Header().Get("Cache-Control") != "no-store, private" || w.Header().Get("Content-Length") != strconv.Itoa(w.Body.Len()) {
 		t.Fatalf("download: %d", w.Code)
 	}
 	if len(f.audit.entries) != 2 {
