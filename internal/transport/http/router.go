@@ -85,6 +85,8 @@ type Deps struct {
 	Geo              *geo.Service
 	NodeSync         handler.NodeSyncService
 	NodeAgentUpgrade handler.NativeAgentUpgradeService
+	NodeReleases     ports.NodeReleaseCatalog
+	ServerMigration  handler.ServerMigrationPreviewer
 	Async            AsyncDispatcher
 
 	// SharedClients answers, for one user, which panels hold their clients and
@@ -593,14 +595,24 @@ func NewRouter(d Deps) stdhttp.Handler {
 			WithNativeAgentProvisioning(d.Repos.NativeAgentProvisioning).
 			WithNodeAgents(d.Repos.NodeAgent).
 			WithNodeSettings(d.Repos.Settings).
-			WithNativeAgentUpgrade(d.NodeAgentUpgrade)
+			WithNativeAgentUpgrade(d.NodeAgentUpgrade).
+			WithNodeReleaseCatalog(d.NodeReleases).
+			WithServerMigrationPreviewer(d.ServerMigration)
 		// 3X-UI panel credentials live here — never operator.
 		adminGroup.GET("/servers", servers.List)
+		adminGroup.GET("/servers/node-releases", servers.ListNodeReleases)
 		adminGroup.POST("/servers", servers.Create)
 		adminGroup.PUT("/servers/:id", servers.Update)
 		adminGroup.DELETE("/servers/:id", servers.Delete)
 		adminGroup.POST("/servers/:id/rotate-node-credential", servers.RotateNativeCredential)
 		adminGroup.GET("/servers/:id/node-installation", servers.NodeInstallation)
+		adminGroup.GET("/servers/:id/node-migration-preview", servers.NodeMigrationPreview)
+		// A missing API method otherwise reaches the SPA fallback (possibly
+		// HTTP 200). Explicitly refuse an attempted online conversion.
+		adminGroup.POST("/servers/:id/node-migration-preview", func(c *gin.Context) {
+			c.Header("Allow", "GET")
+			c.JSON(stdhttp.StatusMethodNotAllowed, gin.H{"error": "server migration must run offline with psp migrate-server"})
+		})
 		adminGroup.POST("/servers/:id/node-credential", servers.StoreNodeCredential)
 		adminGroup.POST("/servers/:id/node-install-script", servers.NodeInstallScript)
 		adminGroup.POST("/servers/:id/node-installation-files", servers.NodeInstallationFiles)

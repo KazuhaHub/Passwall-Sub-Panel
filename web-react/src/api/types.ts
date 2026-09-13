@@ -202,7 +202,7 @@ export interface RelayLine {
   enabled: boolean
 }
 
-export type SyncTaskStatus = 'pending' | 'running' | 'succeeded' | 'canceled'
+export type SyncTaskStatus = 'pending' | 'running' | 'succeeded' | 'canceled' | 'retired'
 export type SyncTaskType =
   | 'user_delete'
   | 'user_resync'

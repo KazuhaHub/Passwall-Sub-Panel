@@ -1,0 +1,19 @@
+{
+  "releases": [
+    {
+      "version": "v0.0.1-beta3",
+      "psp_major": 4,
+      "notes": "Reviewed PSP v4 agent protocol and exact release packaging. Remote upgrades require Linux/systemd, the upgrade helper, and unchanged state schema 9. Docker uses container-managed updates. Docker and Windows end-to-end installation has not been verified.",
+      "methods": ["linux", "docker", "manual"],
+      "platforms": [
+        {"os": "linux", "arch": "amd64"},
+        {"os": "linux", "arch": "arm64"},
+        {"os": "darwin", "arch": "amd64"},
+        {"os": "darwin", "arch": "arm64"},
+        {"os": "windows", "arch": "amd64"},
+        {"os": "windows", "arch": "arm64"}
+      ],
+      "docker_published_tag": "v0.0.1-beta3"
+    }
+  ]
+}

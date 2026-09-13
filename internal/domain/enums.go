@@ -171,4 +171,7 @@ const (
 	SyncTaskRunning   SyncTaskStatus = "running"
 	SyncTaskSucceeded SyncTaskStatus = "succeeded"
 	SyncTaskCanceled  SyncTaskStatus = "canceled"
+	// Retired tasks belong to a previous server backend. Unlike Canceled, this
+	// terminal state cannot be explicitly retried against its replacement.
+	SyncTaskRetired SyncTaskStatus = "retired"
 )

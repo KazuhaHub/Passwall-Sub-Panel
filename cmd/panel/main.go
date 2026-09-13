@@ -22,6 +22,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/config"
 	pkglog "github.com/KazuhaHub/passwall-sub-panel/internal/pkg/log"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/seed"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/servermigrate"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/upnnorm"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/version"
 )
@@ -92,6 +93,9 @@ func main() {
 	if len(os.Args) > 1 && os.Args[1] == "normalize-upn" {
 		os.Exit(upnnorm.Run(os.Args[2:]))
 	}
+	if len(os.Args) > 1 && os.Args[1] == "migrate-server" {
+		os.Exit(servermigrate.Run(os.Args[2:]))
+	}
 	// `psp version` prints the version then exits — useful in scripts /
 	// CI to confirm the deployed binary matches the release tag.
 	if len(os.Args) > 1 && (os.Args[1] == "version" || os.Args[1] == "--version" || os.Args[1] == "-v") {
@@ -116,7 +120,7 @@ func main() {
 		if flag.Arg(0) == "migrate" {
 			fmt.Fprintln(os.Stderr, retiredMigrateMessage)
 		} else {
-			fmt.Fprintln(os.Stderr, "ERROR: unexpected positional arguments. Panel startup accepts only --config and --debug; commands (version / normalize-upn) must come first.")
+			fmt.Fprintln(os.Stderr, "ERROR: unexpected positional arguments. Panel startup accepts only --config and --debug; commands (version / normalize-upn / migrate-server) must come first.")
 		}
 		os.Exit(2)
 	}

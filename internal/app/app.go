@@ -44,6 +44,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/reconcile"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/render"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/rollup"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/servermigration"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/sharedclient"
 	syncsvc "github.com/KazuhaHub/passwall-sub-panel/internal/service/sync"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/traffic"
@@ -446,6 +447,10 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	trafficSvc.SetGeoStreakStore(geoStreaks)
 
 	// --- transport layer ---
+	nodeReleases, err := newNodeReleaseCatalog(version.Version)
+	if err != nil {
+		return nil, err
+	}
 	httpHandler := httptransport.NewRouter(httptransport.Deps{
 		Async:      dispatcher,
 		Cfg:        cfg,
@@ -481,6 +486,8 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 		Geo:              geoSvc,
 		NodeSync:         nativeSync,
 		NodeAgentUpgrade: nativeUpgrade,
+		NodeReleases:     nodeReleases,
+		ServerMigration:  servermigration.New(repos.ServerMigration),
 		SubPerIPPerMin:   sysSettings.SubPerIPPerMin,
 		LoginPerIPPerMin: sysSettings.LoginPerIPPerMin,
 	})

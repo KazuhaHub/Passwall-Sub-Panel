@@ -867,6 +867,24 @@ func (s *Service) ProcessDueTasks(ctx context.Context, limit int) error {
 }
 
 func (s *Service) runNodeTask(ctx context.Context, task *domain.SyncTask) error {
+	if task.Status == domain.SyncTaskRetired {
+		return nil
+	}
+	if task.ID > 0 && s.tasks != nil {
+		// ListDue may have returned this pointer before an offline conversion
+		// retired its persisted row. Recheck before either create or delete;
+		// even a purged tombstone must not resurrect the cached payload.
+		current, err := s.tasks.GetByID(ctx, task.ID)
+		if errors.Is(err, domain.ErrNotFound) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if current == nil || current.Status == domain.SyncTaskRetired {
+			return nil
+		}
+	}
 	if task.Type == domain.SyncTaskNodeCreate {
 		return s.runNodeCreateTask(ctx, task)
 	}

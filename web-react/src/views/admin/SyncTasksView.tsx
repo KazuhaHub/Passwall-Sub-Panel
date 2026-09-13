@@ -55,7 +55,7 @@ function initialPageSize(): number {
   } catch { return 25 }
 }
 
-const STATUSES: SyncTaskStatus[] = ['pending', 'running', 'succeeded', 'canceled']
+const STATUSES: SyncTaskStatus[] = ['pending', 'running', 'succeeded', 'canceled', 'retired']
 const TYPES: SyncTaskType[] = [
   'user_delete', 'user_resync', 'user_push_config',
   'node_create', 'node_delete', 'node_set_enabled', 'node_update',
@@ -101,6 +101,7 @@ export default function SyncTasksView() {
   const [detail, setDetail] = useState<SyncTask | null>(null)
 
   const pendingCount = useMemo(() => items.filter(r => statusOf(r) === 'pending').length, [items])
+  const actionableItems = items.filter(r => statusOf(r) !== 'retired')
 
   useEffect(() => { void load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -118,7 +119,7 @@ export default function SyncTasksView() {
   }
 
   function toggleAll(checked: boolean) {
-    setSelected(checked ? new Set(items.map(idOf)) : new Set())
+    setSelected(checked ? new Set(actionableItems.map(idOf)) : new Set())
   }
   function toggleOne(id: number, checked: boolean) {
     setSelected(prev => {
@@ -128,11 +129,11 @@ export default function SyncTasksView() {
     })
   }
 
-  async function retry(r: SyncTask) { await retrySyncTask(idOf(r)); await load() }
-  async function cancel(r: SyncTask) { await cancelSyncTask(idOf(r)); await load() }
+  async function retry(r: SyncTask) { if (statusOf(r) === 'retired') return; await retrySyncTask(idOf(r)); await load() }
+  async function cancel(r: SyncTask) { if (statusOf(r) === 'retired') return; await cancelSyncTask(idOf(r)); await load() }
 
   async function batchRetry() {
-    const rows = items.filter(r => selected.has(idOf(r)))
+    const rows = actionableItems.filter(r => selected.has(idOf(r)))
     if (!rows.length) return
     setBatchBusy('retry')
     try {
@@ -145,7 +146,7 @@ export default function SyncTasksView() {
   }
 
   async function batchCancel() {
-    const rows = items.filter(r => selected.has(idOf(r)))
+    const rows = actionableItems.filter(r => selected.has(idOf(r)))
     if (!rows.length) return
     const ok = await confirm({
       title: t('admin:sync_tasks.confirm.batch_cancel_title'),
@@ -189,7 +190,7 @@ export default function SyncTasksView() {
     }}>{s ? t(`admin:sync_tasks.status.${s}`) : '-'}</Box>
   }
 
-  const allChecked = items.length > 0 && items.every(r => selected.has(idOf(r)))
+  const allChecked = actionableItems.length > 0 && actionableItems.every(r => selected.has(idOf(r)))
   const someChecked = selected.size > 0 && !allChecked
 
   return (
@@ -247,7 +248,7 @@ export default function SyncTasksView() {
               <TableRow sx={{ '& th': { color: md.onSurfaceVariant, fontWeight: 500, fontSize: 12, textTransform: 'uppercase', letterSpacing: '.5px', borderBottom: `1px solid ${md.outlineVariant}`, whiteSpace: 'nowrap' } }}>
                 <TableCell padding="checkbox">
                   <Checkbox indeterminate={someChecked} checked={allChecked}
-                    onChange={(_, c) => toggleAll(c)} disabled={items.length === 0} />
+                    onChange={(_, c) => toggleAll(c)} disabled={actionableItems.length === 0} />
                 </TableCell>
                 <TableCell>{t('admin:sync_tasks.table.id')}</TableCell>
                 <TableCell>{t('admin:sync_tasks.table.status')}</TableCell>
@@ -272,7 +273,7 @@ export default function SyncTasksView() {
                 return (
                   <TableRow key={id} hover sx={{ '& td': { borderBottom: `1px solid ${md.outlineVariant}`, whiteSpace: 'nowrap' } }}>
                     <TableCell padding="checkbox">
-                      <Checkbox checked={selected.has(id)} onChange={(_, c) => toggleOne(id, c)} />
+                      <Checkbox checked={selected.has(id)} disabled={statusOf(r) === 'retired'} onChange={(_, c) => toggleOne(id, c)} />
                     </TableCell>
                     <TableCell sx={{ fontSize: 13, color: md.onSurfaceVariant }}>{id}</TableCell>
                     <TableCell>{statusBadge(statusOf(r))}</TableCell>
@@ -291,12 +292,12 @@ export default function SyncTasksView() {
                         </IconButton>
                       </Tooltip>
                       <Tooltip title={t('admin:sync_tasks.action.retry')}>
-                        <IconButton size="small" onClick={() => retry(r)}><ReplayIcon fontSize="small" /></IconButton>
+                        <span><IconButton size="small" aria-label={t('admin:sync_tasks.action.retry')} disabled={statusOf(r) === 'retired'} onClick={() => retry(r)}><ReplayIcon fontSize="small" /></IconButton></span>
                       </Tooltip>
                       <Tooltip title={t('admin:sync_tasks.action.cancel')}>
-                        <IconButton size="small" onClick={() => cancel(r)} sx={{ color: md.error }}>
+                        <span><IconButton size="small" aria-label={t('admin:sync_tasks.action.cancel')} disabled={statusOf(r) === 'retired'} onClick={() => cancel(r)} sx={{ color: md.error }}>
                           <CloseIcon fontSize="small" />
-                        </IconButton>
+                        </IconButton></span>
                       </Tooltip>
                     </TableCell>
                   </TableRow>
