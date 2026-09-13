@@ -15,8 +15,8 @@
     {
       "psp_min": "v4.0.0",
       "psp_max": "v4.99.99",
-      "max_tested_sui": "1.6.0",
-      "notes": "Inherits the S-UI 1.6.0 live PSP-adapter verification recorded in v3.json (2026-09-09, TestLive_SUISurface), not a separate v4 release-binary run. Current adapter retains /apiv2 Token authentication, client/inbound read-modify-write and non-empty unique PSP client names. No verified minimum S-UI version is published, so no floor is invented. S-UI still lacks per-inbound enable, IP/device caps and the optional panel/core update, certificate and REALITY-scan capabilities; this ceiling does not claim those features are implemented."
+      "max_tested_sui": "1.6.1",
+      "notes": "S-UI 1.6.1 live adapter verification (2026-09-12) used the current PSP checkout against a fresh scratch panel built from tag 48a67a3, its pinned frontend, Go 1.26.7 and upstream test profile on darwin/arm64 (Naive outbound omitted). TestLive_SUISurface passed; temporary overlay checks also confirmed credential/enable/expiry/quota read-back, bulk create/attach/delete, server-owned traffic-counter preservation and maintenance stop/running status parsing. /apiv2 Token authentication, save envelopes and client/inbound JSON fields remain compatible across 1.6.0..1.6.1; sing-box remains 1.14.0. This is current-adapter verification, not a v4 release-binary run, existing-database upgrade test or proxy traffic/quota end-to-end certification. No verified minimum S-UI version is published. New TLS spoofing and OpenVPN/OpenConnect endpoint TLS are outside PSP feature coverage; per-inbound enable, IP/device caps and optional panel/core update, certificate and REALITY-scan capabilities remain unsupported. The historical 1.6.0 verification remains recorded in v3.json."
     }
   ],
   "xui_advisories": {
@@ -41,6 +41,11 @@
       "severity": "warning",
       "affects_xray": true,
       "text": "S-UI 1.6.0 会升级内置 sing-box 到 1.14 并重启内核，还会迁移全局 DNS、缓存、rule-set 和 TLS ACME 配置。legacy DNS address 过滤器及 DNS 规则 strategy 动作不会自动迁移，需要按上游提示手工转换。客户端名称从此不能为空、不能与其他客户端重名，保存时会去除首尾空格；PSP 的唯一客户端 email 满足这项要求。/apiv2、Token 认证和客户端/inbound 模型的兼容依据来自 v3 清单记录的既有 1.6.0 适配器实机验证，并非 V4 发布二进制新实测。"
+    },
+    "1.6.1": {
+      "severity": "info",
+      "affects_xray": false,
+      "text": "S-UI 1.6.1 内置 sing-box 仍为 1.14.0。PSP 已在临时 1.6.1 面板上完成现有适配器接口验证，Token 认证及客户端、入站读写兼容，无需修改适配器。新增维护模式会主动停止内核并保持停止，需在 S-UI 中退出维护模式才能恢复服务；PSP 当前显示内核停止状态。浏览器登录失败 10 次会锁定来源地址 10 分钟，公开地址的反向代理不再受信任，可能影响登录日志和限流的来源地址识别；这些调整不影响 PSP 的 Token 请求。新增 TLS spoofing 与 OpenVPN/OpenConnect endpoint TLS 不属于 PSP 已支持的功能，本次验证也不代表完整代理流量、配额执法或已有数据库升级验证。"
     }
   }
 }
