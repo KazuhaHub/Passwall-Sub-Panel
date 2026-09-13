@@ -110,6 +110,54 @@ func (r *xuiPanelRepo) Save(ctx context.Context, p *domain.XUIPanel) error {
 	return nil
 }
 
+// UpdateNativeMetadata is an optional narrow HTTP metadata writer. Never
+// rewrite identity, credentials or concurrently refreshed version/probe fields
+// when an administrator only changes a native server's display/preference.
+// Input channel validation belongs to the HTTP boundary: rollback must be able
+// to restore the exact empty/unknown preference read from an existing row.
+func (r *xuiPanelRepo) UpdateNativeMetadata(ctx context.Context, id int64, name, remark *string, channel *domain.PanelUpdateChannel) error {
+	if id <= 0 || (name != nil && *name == "") {
+		return fmt.Errorf("%w: invalid native server metadata", domain.ErrValidation)
+	}
+	updates := map[string]any{}
+	if name != nil {
+		updates["name"] = *name
+	}
+	if remark != nil {
+		updates["remark"] = *remark
+	}
+	if channel != nil {
+		updates["update_channel"] = string(*channel)
+	}
+	db := r.db.WithContext(ctx)
+	var row xuiPanelRow
+	if err := db.Select("id", "kind").First(&row, id).Error; err != nil {
+		return wrapNotFound(err)
+	}
+	if domain.NormalizePanelKind(domain.PanelKind(row.Kind)) != domain.PanelKindPSP {
+		return fmt.Errorf("%w: native metadata requires a Passwall Node server", domain.ErrValidation)
+	}
+	if len(updates) == 0 {
+		return nil
+	}
+	result := db.Model(&xuiPanelRow{}).Where("id = ? AND kind = ?", id, string(domain.PanelKindPSP)).Updates(updates)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		// MySQL may report zero changed rows for a no-op; distinguish that from
+		// deletion/backend change instead of claiming a missing row was saved.
+		var current xuiPanelRow
+		if err := db.Select("id", "kind").First(&current, id).Error; err != nil {
+			return wrapNotFound(err)
+		}
+		if domain.NormalizePanelKind(domain.PanelKind(current.Kind)) != domain.PanelKindPSP {
+			return fmt.Errorf("%w: native server backend changed", domain.ErrConflict)
+		}
+	}
+	return nil
+}
+
 // Delete removes a panel row, but refuses the operation when any nodes
 // or owned client rows still point at it. AutoMigrate doesn't emit FK
 // constraints, so without this app-level guard a delete would leave

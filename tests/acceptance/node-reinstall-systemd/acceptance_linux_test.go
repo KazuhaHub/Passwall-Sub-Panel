@@ -77,6 +77,7 @@ type fixture struct {
 	pausedPID                                           int
 	syncMu                                              sync.Mutex
 	syncStatuses                                        map[int]int
+	requiredSeenAfter                                   time.Time
 }
 
 func TestDisposableSystemdNodeReinstall(t *testing.T) {
@@ -306,6 +307,10 @@ func (f *fixture) mint(migration bool) string {
 
 func (f *fixture) runCommand(command string) error {
 	// Deliberately do not print the command, ticket, private script, or journal.
+	// Readiness must be a new durable PSP receipt after this attempt, not the
+	// previous machine's still-fresh heartbeat/full-report cache. Node-supplied
+	// ReportedAt is deliberately not an authority for this installation boundary.
+	f.requiredSeenAfter = time.Now().UTC()
 	cmd := exec.CommandContext(f.ctx, "bash", "-c", command)
 	cmd.Env = append(os.Environ(), "BASH_ENV=", "ENV=")
 	output, err := cmd.CombinedOutput()
@@ -349,7 +354,7 @@ func (f *fixture) waitReady() {
 		a, err := f.repos.NodeAgent.GetByPanelID(f.ctx, f.panelID)
 		attachments, e2 := f.repos.PSPClient.ListInbounds(f.ctx, f.clientID)
 		streams, e3 := f.repos.NodeAgent.ListStreams(f.ctx, f.agentID)
-		all := err == nil && e2 == nil && e3 == nil && a.LastSeen != nil && time.Since(*a.LastSeen) < 90*time.Second && len(attachments) == 1 && attachments[0].Applied() && len(streams) == 3
+		all := err == nil && e2 == nil && e3 == nil && a.LastSeen != nil && a.LastSeen.After(f.requiredSeenAfter) && time.Since(*a.LastSeen) < 90*time.Second && len(attachments) == 1 && attachments[0].Applied() && len(streams) == 3
 		if a != nil {
 			for _, s := range streams {
 				all = all && s.DesiredVersion > 0 && s.AppliedVersion == s.DesiredVersion && s.AppliedEpoch == a.Epoch && s.AppliedETag == s.DesiredETag
@@ -381,7 +386,7 @@ func (f *fixture) readinessDiagnostics() {
 	f.t.Logf("readiness diagnostics: sync_http_status_counts=%v", statuses)
 	a, err := f.repos.NodeAgent.GetByPanelID(f.ctx, f.panelID)
 	if err == nil && a != nil {
-		f.t.Logf("readiness diagnostics: agent_seen=%t observed_core_is_xray=%t epoch=%d", a.LastSeen != nil, a.ObservedCoreEngine == domain.NodeCoreXray, a.Epoch)
+		f.t.Logf("readiness diagnostics: agent_seen=%t agent_seen_after_command=%t observed_core_is_xray=%t epoch=%d", a.LastSeen != nil, a.LastSeen != nil && a.LastSeen.After(f.requiredSeenAfter), a.ObservedCoreEngine == domain.NodeCoreXray, a.Epoch)
 	} else {
 		f.t.Log("readiness diagnostics: agent_lookup_failed=true")
 	}
@@ -661,25 +666,63 @@ func (f *fixture) proxyHTTP() {
 		f.t.Fatalf("expected one real Xray binary, found %d", len(binaries))
 	}
 	port := freePort(f.t)
-	config := map[string]any{"log": map[string]any{"loglevel": "none"}, "inbounds": []any{map[string]any{"listen": "127.0.0.1", "port": port, "protocol": "socks", "settings": map[string]any{"auth": "noauth", "udp": false}}}, "outbounds": []any{map[string]any{"protocol": "vless", "settings": map[string]any{"vnext": []any{map[string]any{"address": "127.0.0.1", "port": n.DesiredPort, "users": []any{map[string]any{"id": "22222222-2222-4222-8222-222222222222", "encryption": "none"}}}}}, "streamSettings": map[string]any{"network": "tcp", "security": "none"}}}}
+	config := map[string]any{"log": map[string]any{"loglevel": "error"}, "inbounds": []any{map[string]any{"listen": "127.0.0.1", "port": port, "protocol": "socks", "settings": map[string]any{"auth": "noauth", "udp": false}}}, "outbounds": []any{map[string]any{"protocol": "vless", "settings": map[string]any{"vnext": []any{map[string]any{"address": "127.0.0.1", "port": n.DesiredPort, "users": []any{map[string]any{"id": "22222222-2222-4222-8222-222222222222", "encryption": "none"}}}}}, "streamSettings": map[string]any{"network": "tcp", "security": "none"}}}}
 	encoded, err := json.Marshal(config)
 	must(f.t, err, "encode local real client config")
 	path := filepath.Join(f.dir, "private-client.json")
 	must(f.t, os.WriteFile(path, encoded, 0o600), "write private client config")
-	cmd := exec.CommandContext(f.ctx, binaries[0], "run", "-c", path)
-	cmd.Stdout = io.Discard
-	cmd.Stderr = io.Discard
+	validateCtx, validateCancel := context.WithTimeout(f.ctx, 5*time.Second)
+	validateOutput, validateErr := exec.CommandContext(validateCtx, binaries[0], "run", "-test", "-config", path).CombinedOutput()
+	validateCancel()
+	f.t.Logf("proxy diagnostics: client_config_valid=%t", validateErr == nil)
+	if validateErr != nil {
+		f.proxyErrorCategories("client_validation", string(validateOutput))
+		f.t.Fatal("real Xray rejected fixture client configuration (private diagnostics withheld)")
+	}
+	privateLog, err := os.OpenFile(filepath.Join(f.dir, "private-client.log"), os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
+	must(f.t, err, "open private client diagnostics")
+	defer privateLog.Close()
+	cmd := exec.CommandContext(f.ctx, binaries[0], "run", "-config", path)
+	cmd.Stdout = privateLog
+	cmd.Stderr = privateLog
 	must(f.t, cmd.Start(), "start real VLESS client core")
-	defer func() { _ = cmd.Process.Kill(); _ = cmd.Wait() }()
+	stopped := false
+	stop := func() {
+		if !stopped {
+			_ = cmd.Process.Kill()
+			_ = cmd.Wait()
+			stopped = true
+		}
+	}
+	defer stop()
+	// A direct request validates only the isolated target fixture, never the proxy.
+	direct := &http.Client{Timeout: 2 * time.Second, Transport: &http.Transport{Proxy: nil}}
+	directResp, directErr := direct.Get(target.URL)
+	directOK := false
+	if directErr == nil {
+		body, readErr := io.ReadAll(io.LimitReader(directResp.Body, 4096))
+		_ = directResp.Body.Close()
+		directOK = readErr == nil && directResp.StatusCode == http.StatusOK && directResp.Header.Get("X-PSP-Acceptance") == f.nonce && string(body) == "real VLESS proxy "+f.nonce
+	}
+	direct.CloseIdleConnections()
+	f.t.Logf("proxy diagnostics: direct_target_fixture_valid=%t (not proxy acceptance)", directOK)
+	if !directOK {
+		f.t.Fatal("isolated target fixture failed its independent direct sanity check")
+	}
 	proxy, err := url.Parse("socks5://127.0.0.1:" + strconv.Itoa(port))
 	must(f.t, err, "local SOCKS URL")
 	client := &http.Client{Timeout: 10 * time.Second, Transport: &http.Transport{Proxy: http.ProxyURL(proxy), TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12}}}
 	defer client.CloseIdleConnections()
 	deadline := time.Now().Add(15 * time.Second)
+	var lastErr error
+	statusCounts := map[int]int{}
 	for time.Now().Before(deadline) {
 		resp, e := client.Get(target.URL)
+		lastErr = e
 		if e == nil {
+			statusCounts[resp.StatusCode]++
 			body, readErr := io.ReadAll(io.LimitReader(resp.Body, 4096))
+			lastErr = readErr
 			_ = resp.Body.Close()
 			if readErr == nil && resp.StatusCode == 200 && resp.Header.Get("X-PSP-Acceptance") == f.nonce && string(body) == "real VLESS proxy "+f.nonce {
 				return
@@ -687,7 +730,75 @@ func (f *fixture) proxyHTTP() {
 		}
 		time.Sleep(250 * time.Millisecond)
 	}
+	listener, listenErr := net.DialTimeout("tcp", "127.0.0.1:"+strconv.Itoa(port), time.Second)
+	if listener != nil {
+		_ = listener.Close()
+	}
+	processState, procErr := os.ReadFile("/proc/" + strconv.Itoa(cmd.Process.Pid) + "/stat")
+	alive := procErr == nil
+	if split := bytes.LastIndexByte(processState, ')'); split >= 0 && split+2 < len(processState) {
+		alive = alive && processState[split+2] != 'Z' && processState[split+2] != 'X'
+	}
+	f.t.Logf("proxy diagnostics: client_alive=%t socks_listener_open=%t http_status_counts=%v", alive, listenErr == nil, statusCounts)
+	if lastErr != nil {
+		f.proxyErrorCategories("last_request", lastErr.Error())
+	}
+	stop()
+	privateOutput, _ := os.ReadFile(filepath.Join(f.dir, "private-client.log"))
+	f.proxyErrorCategories("client_log", string(privateOutput))
+	f.proxyServerDiagnostics(n.DesiredPort)
+	f.readinessDiagnostics()
 	f.t.Fatal("actual VLESS client/server HTTP handshake failed")
+}
+
+// Classifications deliberately omit raw private logs, credentials, config and URLs.
+func (f *fixture) proxyErrorCategories(source, private string) {
+	lower := strings.ToLower(private)
+	for _, category := range []string{"timeout", "connection refused", "connection reset", "eof", "socks", "authentication", "configuration", "unknown flag", "address already in use", "invalid"} {
+		f.t.Logf("proxy diagnostics: %s_category_%s=%t", source, strings.ReplaceAll(category, " ", "_"), strings.Contains(lower, category))
+	}
+}
+
+func (f *fixture) proxyServerDiagnostics(expectedPort int) {
+	query := func(sql string) ([]byte, bool) {
+		ctx, cancel := context.WithTimeout(f.ctx, 5*time.Second)
+		defer cancel()
+		data, err := exec.CommandContext(ctx, "sqlite3", "-readonly", nodeRoot+"/data/state.db", sql).Output()
+		return data, err == nil
+	}
+	data, readOK := query("SELECT CAST(artifact AS TEXT) FROM core_deployment WHERE id=1;")
+	var artifact struct {
+		Inbounds []struct {
+			Listen   string `json:"listen"`
+			Port     int    `json:"port"`
+			Protocol string `json:"protocol"`
+			Settings struct {
+				Clients []struct {
+					ID string `json:"id"`
+				} `json:"clients"`
+			} `json:"settings"`
+		} `json:"inbounds"`
+	}
+	parseOK := readOK && json.Unmarshal(data, &artifact) == nil
+	listenerMatch, uuidMatch, clients := false, false, 0
+	for _, inbound := range artifact.Inbounds {
+		if inbound.Port == expectedPort && inbound.Listen == "127.0.0.1" && inbound.Protocol == "vless" {
+			listenerMatch = true
+			clients += len(inbound.Settings.Clients)
+			for _, client := range inbound.Settings.Clients {
+				uuidMatch = uuidMatch || client.ID == "22222222-2222-4222-8222-222222222222"
+			}
+		}
+	}
+	f.t.Logf("proxy diagnostics: confirmed_artifact_read=%t parsed=%t listener_matches=%t configured_clients=%d fixture_uuid_matches=%t", readOK, parseOK, listenerMatch, clients, uuidMatch)
+	data, runtimeOK := query("SELECT COUNT(*), COALESCE(SUM(present),0), COALESCE(SUM(gate='closed'),0), COALESCE(SUM(gate='unconfigured'),0), COALESCE(SUM(headroom_bytes IS NULL),0) FROM client_runtime;")
+	var total, present, closed, unconfigured, unlimited int
+	numericOK := false
+	if runtimeOK {
+		count, err := fmt.Sscanf(strings.TrimSpace(string(data)), "%d|%d|%d|%d|%d", &total, &present, &closed, &unconfigured, &unlimited)
+		numericOK = err == nil && count == 5
+	}
+	f.t.Logf("proxy diagnostics: client_runtime_read=%t numeric=%t total=%d present=%d closed=%d unconfigured=%d unlimited=%d", runtimeOK, numericOK, total, present, closed, unconfigured, unlimited)
 }
 
 func (f *fixture) removeOwnedNode() {

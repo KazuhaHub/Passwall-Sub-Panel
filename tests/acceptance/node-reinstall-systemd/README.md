@@ -22,7 +22,9 @@ Required checks are:
 - Standard x-ui unit/config/database backup and shutdown, then recovery after an
   intentional installer-lock failure, without restarting the old backend.
 - Real Node service, real Xray 26.6.27, applied config/roster/directives, and an
-  HTTP request through a real VLESS client/server pair.
+  HTTP request through a real VLESS client/server pair. Durable PSP heartbeat
+  receipt must be newer than the installation command, not a cached old-machine
+  acknowledgement or node-supplied timestamp.
 - Ordinary reinstall preserves the service PID, fixed credential, static files,
   SQLite state bytes/inode while paused, and PSP IDs/credentials/counter history.
 - Removing only this run's owned Node installation simulates an OS reinstall;

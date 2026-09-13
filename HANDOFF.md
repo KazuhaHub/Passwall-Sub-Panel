@@ -26,6 +26,9 @@ Passwall-Node 的 Xray / sing-box 生产 daemon、精确 core 目录、遥测、
 Passwall Node／3X-UI／S-UI，已有记录默认原后端；新建默认完整名称 Passwall Node。
 Passwall Node 重装复用固定身份、凭据和原记录，默认生成 15 分钟、单次下载的私有节点端命令，
 精确版本必须来自已审核发行目录；手动／Docker 与高级私有脚本仍保留。
+Passwall Node 服务器可在新建／编辑时保存 `update_channel=stable|beta`；新建与旧记录默认 Stable，
+省略字段不改已有偏好。安装／远程升级选择器按此初始化，但仍明确选择审核版本；临时频道切换
+不偷偷落库，不自动升级或更改身份、凭据、核心版本。第三方记录不冒充支持这一 Node 更新策略。
 3X-UI → Passwall Node 默认节点机执行一条命令：支持标准 root-owned Linux amd64/arm64
 systemd x-ui 或干净重装系统，先验证备份／停用并保留旧安装，再通过单独限时授权通知 PSP。
 仅限管理员确认共用数据库只有一个 PSP 进程；operationgate 排空同步／后台／脱离请求的写入，
@@ -34,7 +37,7 @@ systemd x-ui 或干净重装系统，先验证备份／停用并保留旧安装�
 3X-UI／S-UI 原后端重装提供官方手动步骤、原服务器连接配置入口，不冒充自动恢复配置；
 S-UI → PN 和其他未证明无损的后端转换明确不支持。没有操作线上节点。
 详情以源码与 [`docs/server-migration.md`](docs/server-migration.md) 当前默认流程为准。
-本地验证：前端 339 项与生产构建、Go 全量测试／vet、关键路径 race、六平台编译通过；
+本地验证：前端 346 项与生产构建、Go 全量测试／vet、关键路径 race、六平台编译通过；
 固定发布模块 `v0.0.1-beta3` 的普通／迁移后真实 agent 同步契约通过（不是真实 core 握手）。
 节点包装器 21 个隔离替身情景与 race 通过；自定义 systemd 文件系统映射在备份／停服前拒绝，
 避免误备份宿主机上同名、却不是服务实际使用的数据库。

@@ -6,6 +6,7 @@ export type CompatStatus = 'supported' | 'too_old' | 'untested' | 'unknown'
 
 export type XUIAuthMethod = '' | 'token' | 'password'
 export type PanelType = '3xui' | 'sui' | 'psp'
+export type NodeUpdateChannel = 'stable' | 'beta'
 export type NativeCoreEngine = 'xray' | 'sing-box'
 export type PanelCapability =
   | 'inbound.read' | 'inbound.write'
@@ -17,6 +18,8 @@ export type PanelCapability =
 export interface Server {
   id: number
   panel_type: PanelType
+  /** Saved Passwall Node release preference; legacy omission means stable. Not automatic upgrades. */
+  update_channel?: NodeUpdateChannel
   capabilities: PanelCapability[]
   name: string
   url: string
@@ -77,6 +80,7 @@ export type IPLimitEnforcement =
 
 export interface CreateServerRequest {
 	panel_type?: PanelType
+	update_channel?: NodeUpdateChannel
 	name: string
 	url?: string
   api_token?: string
@@ -122,6 +126,7 @@ export interface NativeInstallationFiles {
 
 export interface UpdateServerRequest {
   panel_type?: PanelType
+  update_channel?: NodeUpdateChannel
   name?: string
   url?: string
   api_token?: string

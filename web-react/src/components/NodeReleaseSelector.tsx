@@ -10,6 +10,8 @@ export interface NodeReleaseSelectorProps {
   value: string
   onChange: (version: string) => void
   disabled?: boolean
+  /** Saved preference supplies the opening channel only; temporary changes never persist here. */
+  initialChannel?: NodeReleaseChannel
 }
 
 function supportsSelection(release: NodeRelease, selection: NativeInstallationSelection): boolean {
@@ -31,9 +33,9 @@ function officialReleaseURL(release: NodeRelease): string | undefined {
   return release.release_url === expected ? expected : undefined
 }
 
-export default function NodeReleaseSelector({ enabled, selection, value, onChange, disabled = false }: NodeReleaseSelectorProps) {
+export default function NodeReleaseSelector({ enabled, selection, value, onChange, disabled = false, initialChannel = 'stable' }: NodeReleaseSelectorProps) {
   const { t, i18n } = useTranslation(['admin', 'common'])
-  const [channel, setChannel] = useState<NodeReleaseChannel>('stable')
+  const [channel, setChannel] = useState<NodeReleaseChannel>(initialChannel)
   const [releases, setReleases] = useState<NodeRelease[] | null>(null)
   const [loading, setLoading] = useState(false)
   const [failed, setFailed] = useState(false)
@@ -49,6 +51,11 @@ export default function NodeReleaseSelector({ enabled, selection, value, onChang
   }, [onChange, value])
 
   useEffect(() => {
+    setChannel(initialChannel)
+    if (valueRef.current) onChangeRef.current('')
+  }, [enabled, initialChannel])
+
+  useEffect(() => {
     if (previousSelection.current !== selectionKey) {
       previousSelection.current = selectionKey
       onChangeRef.current('')
@@ -62,7 +69,6 @@ export default function NodeReleaseSelector({ enabled, selection, value, onChang
     if (valueRef.current) onChangeRef.current('')
     if (!enabled) {
       setLoading(false)
-      setChannel('stable')
       return () => controller.abort()
     }
     setLoading(true)

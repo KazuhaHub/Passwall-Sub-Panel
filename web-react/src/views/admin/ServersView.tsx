@@ -83,6 +83,7 @@ import {
   type NativeInstallationFiles,
   type PanelCapability,
   type PanelType,
+  type NodeUpdateChannel,
 	type CoreRelease,
   type UpgradePreviewResult,
   type XUIAuthMethod,
@@ -115,6 +116,7 @@ interface ProbeState {
 
 interface FormState {
   panel_type: PanelType
+  update_channel: NodeUpdateChannel
   name: string
   url: string
   api_token: string
@@ -132,6 +134,7 @@ interface FormState {
 const EMPTY_FORM: FormState = {
   name: '', url: '', api_token: '', username: '', password: '', remark: '',
   panel_type: 'psp',
+  update_channel: 'stable',
   auth_method: 'token', insecure_https: false,
   change_api_token: false, change_password: false,
   show_api_token: false, show_password: false,
@@ -597,6 +600,7 @@ export default function ServersView() {
       ...EMPTY_FORM,
       name: s.name,
       panel_type: s.panel_type ?? '3xui',
+      update_channel: s.update_channel === 'beta' ? 'beta' : 'stable',
       url: s.url,
       username: s.username ?? '',
       remark: s.remark ?? '',
@@ -638,7 +642,7 @@ export default function ServersView() {
 		let continueInstallation = false
 		if (editing) {
 			const req: UpdateServerRequest = editing.panel_type === 'psp'
-				? { name: form.name, remark: form.remark }
+				? { name: form.name, remark: form.remark, update_channel: form.update_channel }
 				: {
 					panel_type: form.panel_type,
 					url: form.url,
@@ -655,7 +659,7 @@ export default function ServersView() {
         pushSnack(t('admin:servers.toast.saved'), 'success')
       } else {
 			const created = await createServer(form.panel_type === 'psp'
-				? { name: form.name, panel_type: 'psp', remark: form.remark || undefined }
+				? { name: form.name, panel_type: 'psp', remark: form.remark || undefined, update_channel: form.update_channel }
 				: {
 					name: form.name, url: form.url,
 					panel_type: form.panel_type,
@@ -1579,6 +1583,12 @@ export default function ServersView() {
 
             {form.panel_type === 'psp' ? (
               <>
+              <TextField select fullWidth label={t('admin:servers.field.update_channel')} value={form.update_channel}
+                disabled={busy} helperText={t('admin:servers.hint.update_channel')}
+                onChange={event => setForm({ ...form, update_channel: event.target.value as NodeUpdateChannel })}>
+                <MenuItem value="stable">{t('admin:servers.native.release_stable')}</MenuItem>
+                <MenuItem value="beta">{t('admin:servers.native.release_testing')}</MenuItem>
+              </TextField>
               <Alert severity="info">
                 {t('admin:servers.native.outbound_hint')}
               </Alert>
@@ -2023,6 +2033,7 @@ export function NativeInstallationDialog({ server, initialProvisioning, onClose,
           autoComplete="off" fullWidth slotProps={{ input: { readOnly: true } }} />
         {provisioning.endpoint.startsWith('http://') && <Alert severity="warning">{t('admin:servers.native.http_warning')}</Alert>}
         <NodeReleaseSelector key={serverID} enabled={!!server} selection={selection} value={version}
+          initialChannel={server?.update_channel === 'beta' ? 'testing' : 'stable'}
           onChange={next => { invalidateMaterials(); setVersion(next) }} disabled={rotating} />
         <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
           {selection.method === 'linux' ? <>

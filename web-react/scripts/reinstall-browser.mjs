@@ -39,13 +39,13 @@ const closeName = text('common:actions.close');
 const labels = { psp: 'Passwall Node', '3xui': '3X-UI', sui: 'S-UI' };
 const servers = [
   { id: 7, panel_type: 'psp', name: 'Fixture Passwall Node', url: 'psp://fixture-agent-7',
-    capabilities: ['core.upgrade'], auth_method: '', has_api_token: false },
+    capabilities: ['core.upgrade'], auth_method: '', has_api_token: false, update_channel: 'stable' },
   { id: 17, panel_type: '3xui', name: 'Fixture 3X-UI', url: 'https://fixture-3x.invalid',
     capabilities: ['panel.upgrade', 'core.upgrade'], auth_method: 'token', has_api_token: true },
   { id: 27, panel_type: 'sui', name: 'Fixture S-UI', url: 'https://fixture-sui.invalid',
     capabilities: [], auth_method: 'token', has_api_token: true },
 ].map(server => ({ has_password: false, insecure_https: false, core_version: '26.6.27',
-  xray_version: '26.6.27', panel_version: server.panel_type === '3xui' ? '3.7.0' : '',
+  xray_version: '26.6.27', panel_version: server.panel_type === '3xui' ? '3.7.0' : server.panel_type === 'psp' ? 'v0.0.1-beta2 (fixture)' : '',
   compat_status: 'supported', ...server }));
 const credential = 'fixture-fixed-node-credential-not-production';
 const version = 'v0.0.1-beta3';
@@ -115,6 +115,11 @@ async function fixture(request, response, url) {
     assert.deepEqual(body, { panel_type: original.panel_type, url: original.url, name: original.name,
       username: '', remark: '', auth_method: 'token', insecure_https: false });
     return reply(response, original);
+  }
+  if (method === 'PUT' && pathname === '/api/admin/servers/7') {
+    assert.deepEqual(body, { name: servers[0].name, remark: '', update_channel: 'beta' });
+    servers[0].update_channel = 'beta';
+    return reply(response, servers[0]);
   }
   throw new Error(`Unexpected API/write: ${method} ${pathname}`);
 }
@@ -218,6 +223,7 @@ try {
     await dialog.getByRole('button', { name: s('install_reinstall.configure_original'), exact: true }).click();
     await expect(page.getByRole('heading', { name: text('admin:servers.edit_title', { name: record.name }), exact: true })).toBeVisible();
     await expect(page.getByRole('dialog').getByRole('combobox', { name: s('field.panel_type'), exact: true })).toHaveAttribute('aria-disabled', 'true');
+    await expect(page.getByRole('dialog').getByRole('combobox', { name: s('field.update_channel'), exact: true })).toHaveCount(0);
     await expect(page.getByRole('dialog').getByLabel(s('field.url'), { exact: false })).toHaveValue(record.url);
     await page.getByRole('dialog').getByRole('button', { name: text('common:actions.ok'), exact: true }).click();
     await expect(page.getByRole('dialog')).toHaveCount(0);
@@ -239,10 +245,33 @@ try {
   await dialog.getByRole('button', { name: s('native.generate_command'), exact: true }).click();
   await copyAndCheck(dialog, commandFor(7));
   await dialog.getByRole('button', { name: closeName, exact: true }).click();
+  const originalPNRow = page.getByRole('row').filter({ has: page.getByText(servers[0].name, { exact: true }) });
+  await originalPNRow.getByRole('button', { name: s('action.edit'), exact: true }).click();
+  dialog = page.getByRole('dialog');
+  await expect(dialog.getByRole('combobox', { name: s('field.update_channel'), exact: true })).toHaveText(s('native.release_stable'));
+  await dialog.getByRole('combobox', { name: s('field.update_channel'), exact: true }).click();
+  await page.getByRole('option', { name: s('native.release_testing'), exact: true }).click();
+  await dialog.getByRole('button', { name: text('common:actions.ok'), exact: true }).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  assert.equal(count('PUT', '/api/admin/servers/7'), 1, 'The saved update preference must address the original PN ID.');
   await (await openChooser(servers[0])).getByRole('button', { name: s('install_reinstall.continue'), exact: true }).click();
   dialog = page.getByRole('dialog');
   await expect(dialog.getByLabel(s('native.credential'), { exact: true })).toHaveValue(credential);
   await expect(dialog.getByLabel(s('native.agent_id'), { exact: true })).toHaveValue('fixture-agent-7');
+  await expect(dialog.getByRole('combobox', { name: s('native.release_channel'), exact: true })).toHaveText(s('native.release_testing'));
+  await expect(dialog.getByRole('combobox', { name: s('native.agent_version'), exact: true }).locator('..').locator('input')).toHaveValue('');
+  await expect(dialog.getByRole('button', { name: s('native.generate_command'), exact: true })).toBeDisabled();
+  // A temporary override must not save a second preference or replace identity.
+  await dialog.getByRole('combobox', { name: s('native.release_channel'), exact: true }).click();
+  await page.getByRole('option', { name: s('native.release_stable'), exact: true }).click();
+  assert.equal(count('PUT', '/api/admin/servers/7'), 1);
+  await dialog.getByRole('button', { name: closeName, exact: true }).click();
+  await originalPNRow.getByRole('button', { name: s('action.more'), exact: true }).click();
+  await page.getByRole('menuitem', { name: s('agent_upgrade.action'), exact: true }).click();
+  dialog = page.getByRole('dialog');
+  await expect(dialog.getByRole('combobox', { name: s('native.release_channel'), exact: true })).toHaveText(s('native.release_testing'));
+  await expect(dialog.getByRole('button', { name: s('agent_upgrade.confirm'), exact: true })).toBeDisabled();
+  await expect(dialog.getByRole('combobox', { name: s('native.agent_version'), exact: true }).locator('..').locator('input')).toHaveValue('');
   await dialog.getByRole('button', { name: closeName, exact: true }).click();
 
   const migration = await openChooser(servers[1]);
@@ -272,6 +301,7 @@ try {
   await page.getByRole('button', { name: s('create'), exact: true }).click();
   dialog = page.getByRole('dialog');
   await expect(dialog.getByRole('combobox', { name: s('field.panel_type'), exact: true })).toHaveText('Passwall Node');
+  await expect(dialog.getByRole('combobox', { name: s('field.update_channel'), exact: true })).toHaveText(s('native.release_stable'));
   await dialog.getByRole('combobox', { name: s('field.panel_type'), exact: true }).click();
   await expect(page.getByRole('option')).toHaveText(['Passwall Node', '3X-UI', 'S-UI']);
   await page.getByRole('option', { name: 'Passwall Node', exact: true }).click();
@@ -280,7 +310,7 @@ try {
   assert.equal(count('POST', '/api/admin/servers'), 0, 'Reinstallation must not create a server record.');
   assert.equal(requests.some(request => /rotate-node|node-credential$/.test(request.pathname)), false, 'Reinstallation must not rotate/import credentials.');
   assert.deepEqual(requests.filter(request => request.method === 'PUT').map(request => request.pathname),
-    ['/api/admin/servers/17', '/api/admin/servers/27'], 'Only explicit original-ID manual configuration may update a record.');
+    ['/api/admin/servers/17', '/api/admin/servers/27', '/api/admin/servers/7'], 'Only explicit original-ID configuration or preference saving may update a record.');
   assert.equal(requests.some(request => ['PATCH', 'DELETE'].includes(request.method)), false, 'No record deletion or arbitrary patch is allowed.');
   assert.equal(count('POST', '/api/admin/servers/7/node-install-command'), 1);
   assert.equal(count('POST', '/api/admin/servers/17/node-migration-command'), 1);
