@@ -53,3 +53,19 @@ func TestMigrationPreflightCPUAndIdleSystemdJobContracts(t *testing.T) {
 		`case "$(uname -m)" in`, "for tool in ", `--property=Job --value`,
 		"timeout 90 systemctl stop x-ui.service", "http_result=$(curl ")
 }
+
+func TestMigrationPreflightRefusesFilesystemRemappingBeforeBackup(t *testing.T) {
+	const properties = "RootDirectory RootImage BindPaths BindReadOnlyPaths TemporaryFileSystem MountImages ExtensionImages ExtensionDirectories JoinsNamespaceOf"
+	for _, required := range []string{
+		"for property in " + properties + "; do",
+		`mapping=$(systemctl show x-ui.service --property="$property" --value 2>/dev/null) || fail`,
+		`[[ "$mapping" == '' ]] || fail`,
+	} {
+		if !strings.Contains(linuxMigrationTemplate, required) {
+			t.Errorf("missing fail-closed filesystem namespace inspection: %s", required)
+		}
+	}
+	assertBootstrapOrder(t, linuxMigrationTemplate,
+		"for property in "+properties+"; do", "has_old=true",
+		"timeout 120 sqlite3 /etc/x-ui/x-ui.db", "timeout 90 systemctl stop x-ui.service", "http_result=$(curl ")
+}

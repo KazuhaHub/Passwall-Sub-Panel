@@ -102,6 +102,15 @@ case "$load_state" in
         [[ ! -e /etc/default/x-ui && ! -L /etc/default/x-ui ]] || fail 'x-ui environment/database overrides require manual backup and migration'
         environment=$(systemctl show x-ui.service --property=Environment --value 2>/dev/null) || fail 'cannot inspect x-ui environment'
         [[ "$environment" == '' || "$environment" == XRAY_VMESS_AEAD_FORCED=false ]] || fail 'custom x-ui environment/database paths require manual migration'
+        # Matching ExecStart/WorkingDirectory strings do not prove that the
+        # service sees the host's files. A chroot/image, bind mount or joined
+        # namespace could redirect the same /etc/x-ui path to another database,
+        # making a successful host SQLite backup the wrong backup. Refuse such
+        # deployments rather than stopping a service whose data we cannot back up.
+        for property in RootDirectory RootImage BindPaths BindReadOnlyPaths TemporaryFileSystem MountImages ExtensionImages ExtensionDirectories JoinsNamespaceOf; do
+            mapping=$(systemctl show x-ui.service --property="$property" --value 2>/dev/null) || fail 'cannot inspect x-ui filesystem namespace; no services were changed'
+            [[ "$mapping" == '' ]] || fail 'custom x-ui filesystem namespaces require manual backup and migration; no services were changed'
+        done
         has_old=true
         ;;
     *) fail 'unknown x-ui deployment requires manual shutdown and installation; no services were changed' ;;

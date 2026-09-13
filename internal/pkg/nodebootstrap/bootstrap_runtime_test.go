@@ -26,19 +26,22 @@ func TestLinuxMigrationStubRuntime(t *testing.T) {
 		t.Skip("chmod is not available")
 	}
 	for _, scenario := range []struct {
-		name        string
-		deployment  string
-		http        string
-		residual    bool
-		core        bool
-		symlink     bool
-		container   bool
-		arch        string
-		job         string
-		missingTool string
-		wantOK      bool
-		wantStop    bool
-		wantCurl    bool
+		name            string
+		deployment      string
+		http            string
+		residual        bool
+		core            bool
+		symlink         bool
+		container       bool
+		arch            string
+		job             string
+		missingTool     string
+		mappingProperty string
+		mappingValue    string
+		failedProperty  string
+		wantOK          bool
+		wantStop        bool
+		wantCurl        bool
 	}{
 		{name: "clean system", deployment: "not-found", http: "200", wantOK: true, wantCurl: true},
 		{name: "HTTP failure never executes payload", deployment: "not-found", http: "500", wantCurl: true},
@@ -56,6 +59,9 @@ func TestLinuxMigrationStubRuntime(t *testing.T) {
 		{name: "supported clean arm64", deployment: "not-found", arch: "aarch64", http: "200", wantOK: true, wantCurl: true},
 		{name: "old host has pending systemd job", deployment: "loaded", job: "123", http: "200"},
 		{name: "standard idle Job property empty", deployment: "loaded", job: "idle-empty", http: "200", wantOK: true, wantStop: true, wantCurl: true},
+		{name: "custom root directory never backs up or stops host database", deployment: "loaded", mappingProperty: "RootDirectory", mappingValue: "/srv/x-ui-root", http: "200"},
+		{name: "custom database bind mount never backs up or stops host database", deployment: "loaded", mappingProperty: "BindPaths", mappingValue: "/srv/alternate-x-ui:/etc/x-ui", http: "200"},
+		{name: "filesystem namespace inspection failure", deployment: "loaded", failedProperty: "RootImage", http: "200"},
 		{name: "missing installer useradd on old host", deployment: "loaded", missingTool: "useradd", http: "200"},
 		{name: "missing installer checksum tool on clean host", deployment: "not-found", missingTool: "sha256sum", http: "200"},
 	} {
@@ -131,6 +137,11 @@ case "$3" in
 --property=ExecStartPre|--property=ExecStartPost|--property=ExecStop|--property=ExecStopPost) printf '\n';;
 --property=EnvironmentFiles) printf '\n';;
 --property=Environment) printf 'XRAY_VMESS_AEAD_FORCED=false\n';;
+--property=RootDirectory|--property=RootImage|--property=BindPaths|--property=BindReadOnlyPaths|--property=TemporaryFileSystem|--property=MountImages|--property=ExtensionImages|--property=ExtensionDirectories|--property=JoinsNamespaceOf)
+property=${3#--property=}
+[[ "$property" != "$HARNESS_FAILED_PROPERTY" ]] || exit 103
+if [[ "$property" == "$HARNESS_MAPPING_PROPERTY" ]]; then printf '%s\n' "$HARNESS_MAPPING_VALUE"; else printf '\n'; fi
+;;
 --property=MainPID|--property=ControlPID) printf '0\n';;
 --property=ActiveState) printf 'inactive\n';;
 *) exit 94;;
@@ -181,7 +192,7 @@ printf '%s text/plain; charset=utf-8' "$HARNESS_HTTP"
 			if job == "" {
 				job = "0"
 			}
-			command.Env = append(os.Environ(), "PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"), "HARNESS_ROOT="+root, "HARNESS_DEPLOYMENT="+scenario.deployment, "HARNESS_HTTP="+scenario.http, "HARNESS_TICKET="+token, "HARNESS_ARCH="+arch, "HARNESS_JOB="+job, "HARNESS_MISSING_TOOL="+scenario.missingTool)
+			command.Env = append(os.Environ(), "PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"), "HARNESS_ROOT="+root, "HARNESS_DEPLOYMENT="+scenario.deployment, "HARNESS_HTTP="+scenario.http, "HARNESS_TICKET="+token, "HARNESS_ARCH="+arch, "HARNESS_JOB="+job, "HARNESS_MISSING_TOOL="+scenario.missingTool, "HARNESS_MAPPING_PROPERTY="+scenario.mappingProperty, "HARNESS_MAPPING_VALUE="+scenario.mappingValue, "HARNESS_FAILED_PROPERTY="+scenario.failedProperty)
 			output, err := command.CombinedOutput()
 			if (err == nil) != scenario.wantOK {
 				t.Fatalf("success=%v, want %v: %s", err == nil, scenario.wantOK, output)
@@ -216,6 +227,12 @@ printf '%s text/plain; charset=utf-8' "$HARNESS_HTTP"
 							t.Fatalf("final stopped-state backup missing: %s", name)
 						}
 					}
+				}
+			}
+			if scenario.mappingProperty != "" || scenario.failedProperty != "" {
+				backups, _ := filepath.Glob(filepath.Join(root, "var/backups/passwall-node-migration/backup.*"))
+				if len(backups) != 0 {
+					t.Fatal("unsupported or unverified namespace reached host database backup")
 				}
 			}
 			privateWork, _ := filepath.Glob(filepath.Join(root, "var/backups/passwall-node-migration/.bootstrap.*"))

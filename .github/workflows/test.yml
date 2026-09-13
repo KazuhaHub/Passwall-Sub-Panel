@@ -121,6 +121,8 @@ jobs:
   web:
     name: web (typecheck + build + test)
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
       - name: Set up Node.js
@@ -138,6 +140,13 @@ jobs:
       - name: production browser smoke
         working-directory: web-react
         run: npm run smoke:dist
+      - name: Real Chromium server reinstallation flows (isolated fixtures)
+        run: |
+          set -euo pipefail
+          browser_acceptance_dir=$(mktemp -d "$RUNNER_TEMP/psp-reinstall-browser.XXXXXX")
+          npm install --prefix "$browser_acceptance_dir" --no-package-lock --ignore-scripts playwright@1.63.0
+          node "$browser_acceptance_dir/node_modules/playwright/cli.js" install --with-deps chromium
+          node web-react/scripts/reinstall-browser.mjs "$browser_acceptance_dir/node_modules/playwright"
       - name: unit tests
         working-directory: web-react
         run: npm run test
