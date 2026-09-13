@@ -31,6 +31,23 @@ func TestHasLocalConfig(t *testing.T) {
 	}
 }
 
+func TestHasStoredConfigIsIndependentOfConvergence(t *testing.T) {
+	now := time.Now()
+	if HasStoredConfig(nil) {
+		t.Fatal("nil node must have no stored configuration")
+	}
+	for _, state := range []string{domain.ConfigSyncNeverCaptured, domain.ConfigSyncSynced, domain.ConfigSyncPending, domain.ConfigSyncFailed, domain.ConfigSyncDrift, "unknown"} {
+		t.Run(state, func(t *testing.T) {
+			if HasStoredConfig(&domain.Node{ConfigSyncState: state}) {
+				t.Fatal("state alone must not manufacture a captured configuration")
+			}
+			if !HasStoredConfig(&domain.Node{ConfigSyncedAt: &now, ConfigSyncState: state}) {
+				t.Fatal("captured intent must remain readable independently of convergence")
+			}
+		})
+	}
+}
+
 func TestStripClients(t *testing.T) {
 	// SS-2022: method + server PSK live alongside clients[] and MUST survive.
 	in := `{"method":"2022-blake3-aes-256-gcm","password":"server-psk","clients":[{"email":"u1-n3@d","password":"upsk"}]}`

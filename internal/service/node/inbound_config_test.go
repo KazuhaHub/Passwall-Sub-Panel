@@ -353,27 +353,32 @@ func TestImportExisting_TakesOwnership(t *testing.T) {
 // ---- GetInboundConfig reads the local snapshot (v3.5 source-of-truth) ----
 
 // A captured node's edit dialog must read the local snapshot, never live 3X-UI,
-// so the form, render and reconcile all agree. The pool errors here to prove it
-// is never consulted.
+// even when its runtime state has not converged. The pool errors here to prove
+// it is never consulted; desired and observed endpoints deliberately disagree.
 func TestGetInboundConfig_LocalSnapshot(t *testing.T) {
 	now := time.Now()
-	repo := &captureNodeRepo{node: &domain.Node{
-		ID: 1, PanelID: 1, InboundID: 3,
-		DesiredProtocol: "vless",
-		DesiredPort:     443,
-		StreamSettings:  `{"network":"ws"}`,
-		InboundSettings: `{"decryption":"none"}`,
-		ConfigSyncedAt:  &now,
-		ConfigSyncState: "synced",
-	}}
-	svc := &Service{nodes: repo, pool: stubXUIPool{err: errPanelDown{}}}
-
-	inb, err := svc.GetInboundConfig(context.Background(), 1)
-	if err != nil {
-		t.Fatalf("GetInboundConfig (local) = %v, want nil (must not hit the pool)", err)
-	}
-	if inb.Protocol != "vless" || inb.Port != 443 || inb.StreamSettings != `{"network":"ws"}` {
-		t.Fatalf("expected the local snapshot, got %+v", inb)
+	for _, state := range []string{domain.ConfigSyncNeverCaptured, domain.ConfigSyncSynced, domain.ConfigSyncPending, domain.ConfigSyncFailed, domain.ConfigSyncDrift} {
+		t.Run(state, func(t *testing.T) {
+			repo := &captureNodeRepo{node: &domain.Node{
+				ID: 1, PanelID: 1, InboundID: 3,
+				DesiredProtocol: "vless", DesiredPort: 443,
+				ObservedProtocol: "trojan", ObservedPort: 8443,
+				StreamSettings:  `{"network":"ws"}`,
+				InboundSettings: `{"decryption":"none"}`,
+				ConfigSyncedAt:  &now, ConfigSyncState: state,
+			}}
+			svc := &Service{nodes: repo, pool: stubXUIPool{err: errPanelDown{}}}
+			inb, err := svc.GetInboundConfig(context.Background(), 1)
+			if err != nil {
+				t.Fatalf("GetInboundConfig (local) = %v, want nil (must not hit the pool)", err)
+			}
+			if inb.Protocol != "vless" || inb.Port != 443 || inb.StreamSettings != `{"network":"ws"}` || inb.Settings != `{"decryption":"none"}` {
+				t.Fatalf("expected the captured intent, got %+v", inb)
+			}
+			if repo.node.ConfigSyncState != state {
+				t.Fatal("reading intent must not mark runtime configuration synchronized")
+			}
+		})
 	}
 }
 
