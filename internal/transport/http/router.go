@@ -15,6 +15,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/jwtutil"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/log"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/operationgate"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/panelpath"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/alert"
@@ -61,8 +62,9 @@ type AsyncDispatcher interface {
 // Deps bundles every dependency the HTTP layer needs. App-startup wiring
 // populates this and passes it to NewRouter.
 type Deps struct {
-	Cfg   *config.Config
-	Repos ports.Repos
+	OperationGate *operationgate.Gate
+	Cfg           *config.Config
+	Repos         ports.Repos
 	// GeoRecords is the read side of the concurrent-location detector, the
 	// same rows the traffic poll writes each cycle. Optional: a deployment
 	// without it gets a 503 from the endpoint rather than an empty list, so
@@ -156,7 +158,10 @@ func NewRouter(d Deps) stdhttp.Handler {
 	// your real proxy/CDN ranges (or set it to "none" when listening directly)
 	// for a trustworthy client IP. See the trustedProxies doc below.
 	g.RemoteIPHeaders = []string{"CF-Connecting-IP", "X-Real-IP", "X-Forwarded-For"}
-	g.Use(gin.Logger(), gin.Recovery())
+	g.Use(gin.LoggerWithConfig(gin.LoggerConfig{Skip: func(c *gin.Context) bool {
+		// Delivery URLs contain transient bearer material; audit metadata only.
+		return strings.HasPrefix(c.Request.URL.Path, "/node-bootstrap/")
+	}}), gin.Recovery())
 	// Security headers (HSTS / X-Frame-Options / X-Content-Type-Options /
 	// Referrer-Policy / CSP). Mounted early so every later handler — SPA
 	// fallback, SAML metadata, sub render — picks them up by default.
@@ -171,6 +176,7 @@ func NewRouter(d Deps) stdhttp.Handler {
 	// helpers holding only an *http.Request (sub-URL inference, SAML SP entity
 	// URLs) can refuse to honour an attacker-supplied X-Forwarded-Host.
 	g.Use(middleware.ProxyTrust())
+	g.Use(middleware.BackendOperationGate(d.OperationGate))
 	// 1 MiB default body cap. It covers every admin write + the typical
 	// SAMLResponse (which is ~80 KiB); the node sync protocol has its own shared
 	// 16 MiB limit for full fleet reports. Audit middleware later does
@@ -217,6 +223,7 @@ func NewRouter(d Deps) stdhttp.Handler {
 	// admin block because one of its three routes is admin-only and two are
 	// public, and they must share the same token store.
 	enrollPublic := handler.NewNodeEnrollHandler(d.Repos.AuthToken, d.Repos.XUIPanel, d.Pool, d.EnrollProbe)
+	var bootstrapPublic *handler.NodeBootstrapHandler
 
 	subHandler := handler.NewSubHandler(d.User, d.Render, d.Repos.SubLog, d.Repos.ScopedSettings, d.Repos.User, d.Mail, d.Async)
 	subLimiter := middleware.NewPerIPLimiter(d.SubPerIPPerMin, time.Minute)
@@ -598,6 +605,7 @@ func NewRouter(d Deps) stdhttp.Handler {
 			WithNativeAgentUpgrade(d.NodeAgentUpgrade).
 			WithNodeReleaseCatalog(d.NodeReleases).
 			WithServerMigrationPreviewer(d.ServerMigration)
+		bootstrapPublic = handler.NewNodeBootstrapHandler(servers, d.Repos.ServerMigration, d.OperationGate)
 		// 3X-UI panel credentials live here — never operator.
 		adminGroup.GET("/servers", servers.List)
 		adminGroup.GET("/servers/node-releases", servers.ListNodeReleases)
@@ -606,12 +614,14 @@ func NewRouter(d Deps) stdhttp.Handler {
 		adminGroup.DELETE("/servers/:id", servers.Delete)
 		adminGroup.POST("/servers/:id/rotate-node-credential", servers.RotateNativeCredential)
 		adminGroup.GET("/servers/:id/node-installation", servers.NodeInstallation)
+		adminGroup.POST("/servers/:id/node-install-command", bootstrapPublic.MintInstall)
+		adminGroup.POST("/servers/:id/node-migration-command", bootstrapPublic.MintMigration)
 		adminGroup.GET("/servers/:id/node-migration-preview", servers.NodeMigrationPreview)
 		// A missing API method otherwise reaches the SPA fallback (possibly
 		// HTTP 200). Explicitly refuse an attempted online conversion.
 		adminGroup.POST("/servers/:id/node-migration-preview", func(c *gin.Context) {
 			c.Header("Allow", "GET")
-			c.JSON(stdhttp.StatusMethodNotAllowed, gin.H{"error": "server migration must run offline with psp migrate-server"})
+			c.JSON(stdhttp.StatusMethodNotAllowed, gin.H{"error": "migration preview is read-only; generate a node migration command"})
 		})
 		adminGroup.POST("/servers/:id/node-credential", servers.StoreNodeCredential)
 		adminGroup.POST("/servers/:id/node-install-script", servers.NodeInstallScript)
@@ -697,6 +707,10 @@ func NewRouter(d Deps) stdhttp.Handler {
 	// authentication, and it is consumed on presentation.
 	g.GET("/enroll/:token", enrollPublic.Script)
 	g.POST("/api/enroll/:token", enrollPublic.Callback)
+	if bootstrapPublic != nil {
+		g.GET("/node-bootstrap/:token", bootstrapPublic.Download)
+		g.POST("/api/node-bootstrap/complete", bootstrapPublic.Complete)
+	}
 
 	// Static SPA bundle (embedded). Must be registered last so /api and
 	// subscription path keep precedence.

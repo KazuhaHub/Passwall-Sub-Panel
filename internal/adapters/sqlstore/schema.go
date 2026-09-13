@@ -890,6 +890,9 @@ type xuiPanelRow struct {
 	Username string `gorm:"size:255"`
 	Password string `gorm:"type:text"`
 	Remark   string `gorm:"size:255"`
+	// Additive preference; empty legacy values are effectively stable. Keep raw
+	// values so omitted edits cannot erase preferences written by newer builds.
+	UpdateChannel string `gorm:"size:16;not null;default:''"`
 	// AuthMethod: "" (auto) / "token" / "password"; InsecureSkipVerify skips TLS
 	// cert checks for this panel. AutoMigrate adds both; empty/false on legacy rows.
 	AuthMethod         string `gorm:"size:16;default:''"`
@@ -1027,6 +1030,7 @@ func (r *xuiPanelRow) toDomain() (*domain.XUIPanel, error) {
 		Username:           r.Username,
 		Password:           password,
 		Remark:             r.Remark,
+		UpdateChannel:      domain.PanelUpdateChannel(r.UpdateChannel),
 		AuthMethod:         domain.XUIAuthMethod(r.AuthMethod),
 		InsecureSkipVerify: r.InsecureSkipVerify,
 		PanelVersion:       r.PanelVersion,
@@ -1058,6 +1062,7 @@ func xuiPanelFromDomain(p *domain.XUIPanel) (*xuiPanelRow, error) {
 		Username:           p.Username,
 		Password:           password,
 		Remark:             p.Remark,
+		UpdateChannel:      string(p.UpdateChannel),
 		AuthMethod:         string(p.AuthMethod),
 		InsecureSkipVerify: p.InsecureSkipVerify,
 		PanelVersion:       p.PanelVersion,

@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const http = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn() }))
 vi.mock('./client', () => ({ client: http }))
 
-import { createNativeInstallScript, getNativeAgentStatus, getNativeInstallation, importNativeCredential } from './servers'
+import { createNativeInstallScript, createNodeInstallCommand, createNodeMigrationCommand, getNativeAgentStatus, getNativeInstallation, importNativeCredential } from './servers'
 
 beforeEach(() => {
   vi.clearAllMocks()
@@ -12,6 +12,17 @@ beforeEach(() => {
 })
 
 describe('administrator Node installation API', () => {
+  it('mints abortable commands with reviewed selection and migration confirmations in request bodies', async () => {
+    const signal = new AbortController().signal
+    const command = { server_id: 7, command: 'private short-lived command', expires_at: '2026-09-12T22:15:00Z' }
+    http.post.mockResolvedValue({ data: command })
+    await expect(createNodeInstallCommand(7, { version: 'v0.0.1-beta3' }, signal)).resolves.toEqual(command)
+    const input = { version: 'v0.0.1-beta3', core_version: '26.6.27', fingerprint: 'a'.repeat(64),
+      allow_restricted_reality: false, managed_only: true as const, confirm_single_instance: true as const }
+    await expect(createNodeMigrationCommand(7, input, signal)).resolves.toEqual(command)
+    expect(http.post).toHaveBeenCalledWith('/admin/servers/7/node-install-command', { version: 'v0.0.1-beta3' }, { signal, _skipErrorToast: true })
+    expect(http.post).toHaveBeenCalledWith('/admin/servers/7/node-migration-command', input, { signal, _skipErrorToast: true })
+  })
   it('uses abortable administrator GETs and returns their DTOs without issuing credentials', async () => {
     const signal = new AbortController().signal
     const installation = { server: { id: 7 }, agent_id: 'agt_7', credential: 'existing-secret', endpoint: 'https://panel.test/v1/node/sync' }

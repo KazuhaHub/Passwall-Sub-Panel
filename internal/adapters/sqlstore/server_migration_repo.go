@@ -20,9 +20,10 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 )
 
-// This adapter is deliberately not a live pool mutation. Its caller must stop
-// every PSP instance before Apply, so no old adapter response can commit after
-// the transaction and no new old-backend task can appear after retirement.
+// This adapter is not a pool mutation. Its caller must stop all PSP instances
+// OR drain the single-instance live operation gate before Apply, and replace
+// the pool before releasing admission. Old responses and detached writers must
+// not commit after conversion or create new old-backend tasks after retirement.
 type serverMigrationRepo struct{ db *gorm.DB }
 
 func (r *serverMigrationRepo) Load(ctx context.Context, panelID int64) (*domain.ServerMigrationSnapshot, error) {

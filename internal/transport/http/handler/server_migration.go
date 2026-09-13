@@ -11,8 +11,9 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 )
 
-// Only the read side is available to live HTTP handlers. Applying a backend
-// conversion requires the separate, stopped-panel maintenance command.
+// This endpoint is always read-only. A separate ticket-authenticated node
+// callback can apply under the single-instance operation gate; the offline
+// maintenance command remains an advanced fallback for stopped deployments.
 type ServerMigrationPreviewer interface {
 	Preview(context.Context, int64, string, bool) (*domain.ServerMigrationPreview, error)
 }

@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
-import { Alert, Box, Button, CircularProgress, Dialog, DialogActions, DialogContent, DialogTitle, Link, TextField, Typography } from '@mui/material'
+import { Alert, Box, Button, CircularProgress, Dialog, DialogActions, DialogContent, DialogTitle, TextField, Typography } from '@mui/material'
 import { useTranslation } from 'react-i18next'
 import { getNativeAgentUpgrade, requestNativeAgentUpgrade, type NativeAgentUpgrade, type Server } from '@/api/servers'
+import NodeReleaseSelector from '@/components/NodeReleaseSelector'
 
 export function NativeAgentUpgradeDialog({ server, onClose }: { server: Server | null, onClose: () => void }) {
   const { t } = useTranslation()
@@ -19,7 +20,7 @@ export function NativeAgentUpgradeDialog({ server, onClose }: { server: Server |
     requestController.current?.abort()
     setVersion(''); setTask(null); setBusy(false); setError(''); key.current = ''
     return () => requestController.current?.abort()
-  }, [server?.id])
+  }, [server?.id, server?.update_channel])
 
   useEffect(() => {
     if (!server || !task || ['verified', 'failed', 'manual_attention', 'dispatch_closed'].includes(task.upgrade_state)) return
@@ -40,7 +41,7 @@ export function NativeAgentUpgradeDialog({ server, onClose }: { server: Server |
   }, [server?.id, task?.task_id, task?.upgrade_state, retry, t])
 
   async function submit() {
-    if (!server || busy || task) return
+    if (!server || busy || task || !exact(version.trim()) || !exact(expected) || version.trim() === expected) return
     if (!key.current) key.current = crypto.randomUUID()
     const controller = new AbortController(); requestController.current = controller
     setBusy(true); setError('')
@@ -59,10 +60,10 @@ export function NativeAgentUpgradeDialog({ server, onClose }: { server: Server |
         <Alert severity="warning">{t('admin:servers.agent_upgrade.warning')}</Alert>
         <Typography variant="body2">{t('admin:servers.agent_upgrade.requirements')}</Typography>
         <TextField label={t('admin:servers.agent_upgrade.current')} value={expected} slotProps={{ input: { readOnly: true } }} />
-        <TextField label={t('admin:servers.agent_upgrade.target')} placeholder="v0.0.1-beta3" value={version}
-          onChange={event => { setVersion(event.target.value); if (!error) key.current = '' }} disabled={busy || !!task || !!error}
-          helperText={t('admin:servers.agent_upgrade.version_hint')} />
-        <Link href="https://github.com/KazuhaHub/Passwall-Node/releases" target="_blank" rel="noopener noreferrer">{t('admin:servers.native.releases')}</Link>
+        <NodeReleaseSelector key={server?.id} enabled={!!server} selection={{ method: 'linux', os: 'linux', arch: 'amd64' }}
+          initialChannel={server?.update_channel === 'beta' ? 'testing' : 'stable'} value={version}
+          onChange={next => { setVersion(next); if (!error) key.current = '' }} disabled={busy || !!task || !!error} />
+        <Typography variant="body2">{t('admin:servers.agent_upgrade.version_hint')}</Typography>
         {error && <Alert severity="error">{error}</Alert>}
         {task && <>
           <Alert severity={task.upgrade_state === 'verified' ? 'success' : ['failed', 'manual_attention', 'dispatch_closed'].includes(task.upgrade_state) ? 'warning' : 'info'}>

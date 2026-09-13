@@ -3,7 +3,7 @@ import { useState } from 'react'
 import { act, fireEvent, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { api, installReads, mount } from '@/test/adminSaveHarness'
-import type { NodeRelease, NodeReleaseCatalog } from '@/api/nodeReleases'
+import type { NodeRelease, NodeReleaseCatalog, NodeReleaseChannel } from '@/api/nodeReleases'
 import type { NativeInstallationSelection } from '@/api/servers'
 import NodeReleaseSelector from './NodeReleaseSelector'
 
@@ -28,13 +28,15 @@ function reads(releases: NodeRelease[]) {
   installReads({ [endpoint]: { releases, checked_at: '2026-09-12T13:00:00Z' } satisfies NodeReleaseCatalog })
 }
 
-function Controlled({ enabled = true, selection = linux, disabled = false }: {
-  enabled?: boolean; selection?: NativeInstallationSelection; disabled?: boolean
+function Controlled({ enabled = true, selection = linux, disabled = false, initialChannel = 'stable' }: {
+  enabled?: boolean; selection?: NativeInstallationSelection; disabled?: boolean; initialChannel?: NodeReleaseChannel
 }) {
   const [version, setVersion] = useState('')
+  const [, refresh] = useState(0)
   return <>
-    <NodeReleaseSelector enabled={enabled} selection={selection} value={version} onChange={setVersion} disabled={disabled} />
+    <NodeReleaseSelector enabled={enabled} selection={selection} value={version} onChange={setVersion} disabled={disabled} initialChannel={initialChannel} />
     <span data-testid="selected-version">{version}</span>
+    <button onClick={() => refresh(value => value + 1)}>refresh selector parent</button>
   </>
 }
 
@@ -51,6 +53,27 @@ const chooseVersion = (version: string) => choose('admin:servers.native.agent_ve
 const chooseTesting = () => choose('admin:servers.native.release_channel', 'admin:servers.native.release_testing')
 
 describe('Passwall Node release selection', () => {
+  it('opens the saved testing preference without preselecting a version or making any secret/write request', async () => {
+    reads([testing, stable])
+    const view = mount(<Controlled initialChannel="testing" />)
+    await waitFor(() => expect(screen.queryByRole('status')).toBeNull())
+    expect(screen.getByRole('combobox', { name: 'admin:servers.native.release_channel' }).textContent).toBe('admin:servers.native.release_testing')
+    expect(selected()).toBe('')
+    await choose('admin:servers.native.release_channel', 'admin:servers.native.release_stable')
+    await chooseVersion(stable.version)
+    fireEvent.click(screen.getByRole('button', { name: 'refresh selector parent' }))
+    expect(selected()).toBe(stable.version)
+    expect(screen.getByRole('combobox', { name: 'admin:servers.native.release_channel' }).textContent).toBe('admin:servers.native.release_stable')
+    view.rerender(<Controlled enabled={false} initialChannel="testing" />)
+    view.rerender(<Controlled initialChannel="testing" />)
+    await waitFor(() => expect(screen.queryByRole('status')).toBeNull())
+    expect(selected()).toBe('')
+    expect(screen.getByRole('combobox', { name: 'admin:servers.native.release_channel' }).textContent).toBe('admin:servers.native.release_testing')
+    expect(api.get.mock.calls.every(([url]) => url === endpoint)).toBe(true)
+    expect(api.post).not.toHaveBeenCalled()
+    expect(api.put).not.toHaveBeenCalled()
+  })
+
   it('starts stable and does not silently fall back when only testing releases exist', async () => {
     reads([testing])
     mount(<Controlled />)

@@ -77,15 +77,16 @@ func NewAdminServersHandler(repo ports.XUIPanelRepo, pool ports.XUIPool, nodes p
 // connection" trigger. Native nodes additionally expose desired core identity
 // from NodeAgent separately from the last observed runtime identity.
 type serverDTO struct {
-	ID           int64                   `json:"id"`
-	Kind         string                  `json:"panel_type"`
-	Capabilities []ports.PanelCapability `json:"capabilities"`
-	Name         string                  `json:"name"`
-	URL          string                  `json:"url"`
-	Username     string                  `json:"username,omitempty"`
-	Remark       string                  `json:"remark,omitempty"`
-	HasAPIToken  bool                    `json:"has_api_token"`
-	HasPassword  bool                    `json:"has_password"`
+	ID            int64                   `json:"id"`
+	Kind          string                  `json:"panel_type"`
+	Capabilities  []ports.PanelCapability `json:"capabilities"`
+	Name          string                  `json:"name"`
+	URL           string                  `json:"url"`
+	Username      string                  `json:"username,omitempty"`
+	Remark        string                  `json:"remark,omitempty"`
+	UpdateChannel string                  `json:"update_channel,omitempty"`
+	HasAPIToken   bool                    `json:"has_api_token"`
+	HasPassword   bool                    `json:"has_password"`
 	// AuthMethod is the EFFECTIVE auth mode ("token" | "password") so the edit
 	// form pre-selects correctly — resolved from the stored method, falling back
 	// to inference for legacy rows. InsecureHTTPS skips TLS cert verification.
@@ -122,15 +123,16 @@ type serverDTO struct {
 }
 
 type serverCreateRequest struct {
-	Kind          string `json:"panel_type"`
-	Name          string `json:"name" binding:"required"`
-	URL           string `json:"url"`
-	APIToken      string `json:"api_token"`
-	Username      string `json:"username"`
-	Password      string `json:"password"`
-	Remark        string `json:"remark"`
-	AuthMethod    string `json:"auth_method"` // "" (auto) | "token" | "password"
-	InsecureHTTPS bool   `json:"insecure_https"`
+	Kind          string  `json:"panel_type"`
+	Name          string  `json:"name" binding:"required"`
+	URL           string  `json:"url"`
+	APIToken      string  `json:"api_token"`
+	Username      string  `json:"username"`
+	Password      string  `json:"password"`
+	Remark        string  `json:"remark"`
+	AuthMethod    string  `json:"auth_method"` // "" (auto) | "token" | "password"
+	InsecureHTTPS bool    `json:"insecure_https"`
+	UpdateChannel *string `json:"update_channel,omitempty"`
 }
 
 type nativeServerCreateResponse struct {
@@ -162,6 +164,7 @@ type serverUpdateRequest struct {
 	Remark        *string `json:"remark,omitempty"`
 	AuthMethod    *string `json:"auth_method,omitempty"`
 	InsecureHTTPS *bool   `json:"insecure_https,omitempty"`
+	UpdateChannel *string `json:"update_channel,omitempty"`
 }
 
 // validAuthMethod gates the auth_method input to the known values.
@@ -232,6 +235,10 @@ func (h *AdminServersHandler) Create(c *gin.Context) {
 		return
 	}
 	kind := domain.NormalizePanelKind(domain.PanelKind(req.Kind))
+	if req.UpdateChannel != nil && (kind != domain.PanelKindPSP || !domain.PanelUpdateChannel(*req.UpdateChannel).Valid()) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "update_channel must be stable or beta for a Passwall Node server"})
+		return
+	}
 	if validator, ok := h.pool.(ports.PanelKindValidator); ok && !validator.SupportsKind(kind) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Unknown panel_type: " + string(kind)})
 		return
@@ -311,7 +318,10 @@ func (h *AdminServersHandler) createNative(c *gin.Context, req serverCreateReque
 	}
 	panel := &domain.XUIPanel{
 		Kind: domain.PanelKindPSP, Name: req.Name, URL: "psp://" + agentID,
-		Remark: req.Remark,
+		Remark: req.Remark, UpdateChannel: domain.PanelUpdateStable,
+	}
+	if req.UpdateChannel != nil {
+		panel.UpdateChannel = domain.PanelUpdateChannel(*req.UpdateChannel)
 	}
 	agent := &domain.NodeAgent{
 		AgentID: agentID, CredentialSHA256: digest,
@@ -418,8 +428,15 @@ func (h *AdminServersHandler) Update(c *gin.Context) {
 	}
 	if existing.Kind == domain.PanelKindPSP && (req.URL != nil || req.APIToken != nil || req.Username != nil ||
 		req.Password != nil || req.AuthMethod != nil || req.InsecureHTTPS != nil) {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Only name and remark can be edited for a PSP native node"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Only name, remark and update_channel can be edited for a Passwall Node server"})
 		return
+	}
+	if req.UpdateChannel != nil {
+		if domain.NormalizePanelKind(existing.Kind) != domain.PanelKindPSP || !domain.PanelUpdateChannel(*req.UpdateChannel).Valid() {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "update_channel must be stable or beta for a Passwall Node server"})
+			return
+		}
+		existing.UpdateChannel = domain.PanelUpdateChannel(*req.UpdateChannel)
 	}
 	if req.Name != nil {
 		existing.Name = *req.Name
@@ -457,7 +474,29 @@ func (h *AdminServersHandler) Update(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "S-UI requires API token authentication"})
 		return
 	}
-	if err := h.repo.Save(c.Request.Context(), existing); err != nil {
+	// Production implements the optional scoped writer. Preserve legacy test
+	// doubles without expanding their mandatory repo interface; native writes
+	// and their rollback must never clobber runtime probe/identity columns.
+	persist := func(panel *domain.Panel) error {
+		if writer, ok := h.repo.(interface {
+			UpdateNativeMetadata(context.Context, int64, *string, *string, *domain.PanelUpdateChannel) error
+		}); ok && domain.NormalizePanelKind(before.Kind) == domain.PanelKindPSP {
+			var name, remark *string
+			var channel *domain.PanelUpdateChannel
+			if req.Name != nil {
+				name = &panel.Name
+			}
+			if req.Remark != nil {
+				remark = &panel.Remark
+			}
+			if req.UpdateChannel != nil {
+				channel = &panel.UpdateChannel
+			}
+			return writer.UpdateNativeMetadata(c.Request.Context(), id, name, remark, channel)
+		}
+		return h.repo.Save(c.Request.Context(), panel)
+	}
+	if err := persist(existing); err != nil {
 		mapServerError(c, err)
 		return
 	}
@@ -473,7 +512,7 @@ func (h *AdminServersHandler) Update(c *gin.Context) {
 		Replace(*domain.XUIPanel) error
 	}); ok {
 		if err := rp.Replace(existing); err != nil {
-			if rollbackErr := h.repo.Save(c.Request.Context(), &before); rollbackErr != nil {
+			if rollbackErr := persist(&before); rollbackErr != nil {
 				log.Error("admin server update rollback failed", "panel_id", id, "err", rollbackErr)
 			}
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Re-register in pool: " + err.Error()})
@@ -483,7 +522,7 @@ func (h *AdminServersHandler) Update(c *gin.Context) {
 		_ = h.pool.Remove(id)
 		if err := h.pool.Add(existing); err != nil {
 			_ = h.pool.Add(&before)
-			if rollbackErr := h.repo.Save(c.Request.Context(), &before); rollbackErr != nil {
+			if rollbackErr := persist(&before); rollbackErr != nil {
 				log.Error("admin server update rollback failed", "panel_id", id, "err", rollbackErr)
 			}
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Re-register in pool: " + err.Error()})
@@ -1331,6 +1370,7 @@ func toServerDTO(p *domain.XUIPanel) serverDTO {
 		VersionCheckedAt: p.VersionCheckedAt,
 	}
 	if domain.NormalizePanelKind(p.Kind) == domain.PanelKindPSP {
+		dto.UpdateChannel = string(p.UpdateChannel.Effective())
 		dto.URL = ""
 		dto.AuthMethod = ""
 	}

@@ -1189,6 +1189,9 @@ type Panel struct {
 	Username string // fallback: 3X-UI panel username/password cookie session
 	Password string
 	Remark   string
+	// UpdateChannel is a Passwall Node-only release preference, not an automatic
+	// update policy. Empty legacy values resolve to stable via Effective().
+	UpdateChannel PanelUpdateChannel
 	// AuthMethod chooses Bearer-token vs username/password explicitly. Empty
 	// (XUIAuthAuto) keeps the legacy infer-from-presence behavior for rows
 	// written before this field existed.

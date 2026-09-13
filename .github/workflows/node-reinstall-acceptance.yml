@@ -1,0 +1,71 @@
+name: Node reinstall systemd acceptance
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'internal/pkg/nodebootstrap/**'
+      - 'internal/pkg/operationgate/**'
+      - 'internal/transport/http/handler/node_bootstrap*'
+      - 'internal/adapters/sqlstore/server_migration*'
+      - 'tests/acceptance/node-reinstall-systemd/**'
+      - '.github/workflows/node-reinstall-acceptance.yml'
+      - '.github/workflows/test.yml'
+      - 'web-react/scripts/reinstall-browser.mjs'
+  pull_request:
+    paths:
+      - 'internal/pkg/nodebootstrap/**'
+      - 'internal/pkg/operationgate/**'
+      - 'internal/transport/http/handler/node_bootstrap*'
+      - 'internal/adapters/sqlstore/server_migration*'
+      - 'tests/acceptance/node-reinstall-systemd/**'
+      - '.github/workflows/node-reinstall-acceptance.yml'
+      - '.github/workflows/test.yml'
+      - 'web-react/scripts/reinstall-browser.mjs'
+
+permissions:
+  contents: read
+
+jobs:
+  systemd:
+    name: Ubuntu 24.04 / published Node beta3
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.8'
+          cache: true
+      - name: Install fixture prerequisites
+        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends sqlite3 gcc
+      - name: Build isolated acceptance driver
+        env:
+          GOWORK: 'off'
+          GOTOOLCHAIN: go1.26.8
+        run: |
+          test "$(go env GOVERSION)" = go1.26.8
+          go test -c -tags node_reinstall_acceptance -o "$RUNNER_TEMP/node-reinstall-acceptance.test" ./tests/acceptance/node-reinstall-systemd
+      - name: Run actual systemd acceptance (no production host)
+        env:
+          PSP_NODE_REINSTALL_EPHEMERAL: 'yes'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_ACTIONS" = true
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          sudo --preserve-env=GITHUB_ACTIONS,RUNNER_ENVIRONMENT,PSP_NODE_REINSTALL_EPHEMERAL \
+            "$RUNNER_TEMP/node-reinstall-acceptance.test" -test.v -test.run '^TestDisposableSystemdNodeReinstall$' -test.timeout 24m \
+            > "$RUNNER_TEMP/node-reinstall-acceptance.log" 2>&1
+          cat "$RUNNER_TEMP/node-reinstall-acceptance.log"
+          test "$(grep -c '^--- PASS: TestDisposableSystemdNodeReinstall ' "$RUNNER_TEMP/node-reinstall-acceptance.log")" = 1
+          ! grep -q -- '--- SKIP:' "$RUNNER_TEMP/node-reinstall-acceptance.log"
+      - name: Retain bounded acceptance evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: node-reinstall-systemd-evidence
+          path: ${{ runner.temp }}/node-reinstall-acceptance.log
+          if-no-files-found: error
+          retention-days: 14

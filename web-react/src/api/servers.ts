@@ -6,6 +6,7 @@ export type CompatStatus = 'supported' | 'too_old' | 'untested' | 'unknown'
 
 export type XUIAuthMethod = '' | 'token' | 'password'
 export type PanelType = '3xui' | 'sui' | 'psp'
+export type NodeUpdateChannel = 'stable' | 'beta'
 export type NativeCoreEngine = 'xray' | 'sing-box'
 export type PanelCapability =
   | 'inbound.read' | 'inbound.write'
@@ -17,6 +18,8 @@ export type PanelCapability =
 export interface Server {
   id: number
   panel_type: PanelType
+  /** Saved Passwall Node release preference; legacy omission means stable. Not automatic upgrades. */
+  update_channel?: NodeUpdateChannel
   capabilities: PanelCapability[]
   name: string
   url: string
@@ -77,6 +80,7 @@ export type IPLimitEnforcement =
 
 export interface CreateServerRequest {
 	panel_type?: PanelType
+	update_channel?: NodeUpdateChannel
 	name: string
 	url?: string
   api_token?: string
@@ -122,6 +126,7 @@ export interface NativeInstallationFiles {
 
 export interface UpdateServerRequest {
   panel_type?: PanelType
+  update_channel?: NodeUpdateChannel
   name?: string
   url?: string
   api_token?: string
@@ -204,6 +209,31 @@ export async function createNativeInstallScript(id: number, version: string, sig
   const { data } = await client.post<string>(`/admin/servers/${id}/node-install-script`,
     { version }, { responseType: 'text', signal, _skipErrorToast: true },
   )
+  return data
+}
+
+export interface NodeInstallCommand {
+  server_id: number
+  command: string
+  expires_at: string
+}
+
+export async function createNodeInstallCommand(id: number, input: { version: string }, signal?: AbortSignal) {
+  const { data } = await client.post<NodeInstallCommand>(`/admin/servers/${id}/node-install-command`, input,
+    { signal, _skipErrorToast: true })
+  return data
+}
+
+export async function createNodeMigrationCommand(id: number, input: {
+  version: string
+  fingerprint: string
+  core_version: string
+  allow_restricted_reality: boolean
+  managed_only: true
+  confirm_single_instance: true
+}, signal?: AbortSignal) {
+  const { data } = await client.post<NodeInstallCommand>(`/admin/servers/${id}/node-migration-command`, input,
+    { signal, _skipErrorToast: true })
   return data
 }
 

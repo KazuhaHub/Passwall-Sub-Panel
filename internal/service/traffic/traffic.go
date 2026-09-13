@@ -14,6 +14,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/log"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/metrics"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/operationgate"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/paneltz"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/safego"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
@@ -94,7 +95,8 @@ type Service struct {
 	// lives on App, which Build() constructs AFTER the services. nil =
 	// "fire and forget without tracking" (legacy behaviour, kept so unit
 	// tests that don't care about shutdown don't have to wire a WG).
-	bgWG *sync.WaitGroup
+	bgWG          *sync.WaitGroup
+	operationGate *operationgate.Gate
 
 	// pollCfgMu + pollCfgCache hold the most recent successfully-loaded
 	// UISettings so a transient settings.Load failure inside PollOnce
@@ -111,6 +113,10 @@ type Service struct {
 // tolerated and degrades to "fire and forget" — same semantics as before this
 // method existed. (Suspend/resume emails now fire from user.Service, not here.)
 func (s *Service) SetBgWG(wg *sync.WaitGroup) { s.bgWG = wg }
+
+// Detached floor pushes need their own admission: the poll can return before
+// they start, so its read permit cannot protect their later database writes.
+func (s *Service) SetOperationGate(gate *operationgate.Gate) { s.operationGate = gate }
 
 // SetConfigPusher wires the late-bound config pusher. Same late-binding
 // pattern as user.Service.SetTrafficUsage — needed because both services
@@ -1536,7 +1542,7 @@ func (s *Service) recordAndEnforceWith(ctx context.Context, u *domain.User, tota
 			<-s.pushSem
 			metrics.PushSemInflight.Dec()
 		}()
-		if err := s.configPusher.PushClientConfig(context.Background(), uid); err != nil {
+		if err := s.operationGate.RunRead(context.Background(), func(ctx context.Context) error { return s.configPusher.PushClientConfig(ctx, uid) }); err != nil {
 			log.Warn("traffic floor push failed", "user_id", uid, "err", err)
 		}
 	})
