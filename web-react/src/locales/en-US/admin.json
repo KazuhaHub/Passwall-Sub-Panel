@@ -2062,6 +2062,7 @@
     "hint": {
       "name": "Display name; the internal reference uses the database ID.",
       "update_channel": "Saved preference for opening installation and upgrade version lists. Stable is the default; Beta requires choosing an exact reviewed release. Saving does not install, upgrade, or change server/node identities or credentials. Temporary channel selections in dialogs are not saved.",
+      "update_channel_short": "Default version-list channel only; saving does not upgrade the node.",
       "configured": "Configured (kept unchanged)",
       "unconfigured": "Not configured",
       "change": "Change",
@@ -2069,8 +2070,8 @@
     },
     "native": {
       "outbound_hint": "Passwall Node connects outbound to Passwall Sub Panel. It needs no inbound management URL or upstream-panel credential. Enter server details and select an installation method, then generate files for that server. Configure inbounds separately on the Nodes page.",
-      "step_details": "Server details",
-      "step_install": "Install Passwall Node",
+      "create_record_hint": "Create the server record first; the next page generates its installation command. Configure inbounds separately on Nodes.",
+      "metadata_details": "Optional remark and technical details",
       "create_continue": "Create and continue to installation",
       "method_label": "Choose installation method",
       "method": {

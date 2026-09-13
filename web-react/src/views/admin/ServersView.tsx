@@ -27,9 +27,6 @@ import {
   Menu,
   MenuItem,
   Select,
-  Step,
-  StepLabel,
-  Stepper,
   Switch,
   Table,
   TableBody,
@@ -159,6 +156,7 @@ export default function ServersView() {
   const theme = useTheme()
   const md = theme.palette.md
   const { t, i18n } = useTranslation(['admin', 'common'])
+  const metadataDetailsID = useId()
   const canConfigure = useCan('config.write')
 
   const [search, setSearch] = useState('')
@@ -189,6 +187,7 @@ export default function ServersView() {
 		: legacyXrayVersions
 
   const [dialogOpen, setDialogOpen] = useState(false)
+  const [metadataDetailsOpen, setMetadataDetailsOpen] = useState(false)
   const [editing, setEditing] = useState<Server | null>(null)
   const [form, setForm] = useState<FormState>(EMPTY_FORM)
 	const [busy, setBusy] = useState(false)
@@ -595,6 +594,7 @@ export default function ServersView() {
     setInstallationSelection(DEFAULT_INSTALLATION)
     setForm({ ...EMPTY_FORM, change_api_token: true, change_password: true })
     setFieldErr({})
+    setMetadataDetailsOpen(false)
     setDialogOpen(true)
   }
 
@@ -613,6 +613,7 @@ export default function ServersView() {
       insecure_https: !!s.insecure_https,
     })
     setFieldErr({})
+    setMetadataDetailsOpen(false)
     setDialogOpen(true)
   }
 
@@ -1541,10 +1542,6 @@ export default function ServersView() {
           {nativeCreationFlow
             ? t('admin:servers.passwall_node_install.title', { name: nativeInstallationTarget?.name ?? '' })
             : editing ? t('admin:servers.edit_title', { name: editing.name }) : t('admin:servers.create')}
-          {!editing && form.panel_type === 'psp' && <Stepper activeStep={nativeCreationFlow ? 1 : 0} sx={{ mt: 2 }}>
-            <Step><StepLabel>{t('admin:servers.native.step_details')}</StepLabel></Step>
-            <Step><StepLabel>{t('admin:servers.native.step_install')}</StepLabel></Step>
-          </Stepper>}
         </DialogTitle>
         {nativeCreationFlow ? <NativeInstallationDialog
           embedded newServer server={nativeInstallationTarget} initialProvisioning={nativeProvisioning}
@@ -1559,6 +1556,7 @@ export default function ServersView() {
               disabled={!!editing || busy}
               onChange={e => {
                 const panelType = e.target.value as PanelType
+                setMetadataDetailsOpen(false)
                 setForm(prev => panelType === 'sui'
                   ? {
                       ...prev, panel_type: panelType, auth_method: 'token', username: '', password: '',
@@ -1577,27 +1575,42 @@ export default function ServersView() {
               <MenuItem value="sui">S-UI</MenuItem>
             </TextField>
             <TextField
-              fullWidth required
+              fullWidth required autoFocus={!editing}
               label={t('admin:servers.field.name')}
               placeholder={t('admin:servers.placeholder.name')}
               value={form.name}
               onChange={e => setForm({ ...form, name: e.target.value })}
               error={!!fieldErr.name}
-              helperText={fieldErr.name ? t(`admin:${fieldErr.name}`) : t('admin:servers.hint.name')}
+              helperText={fieldErr.name ? t(`admin:${fieldErr.name}`) : form.panel_type === 'psp' ? undefined : t('admin:servers.hint.name')}
             />
 
             {form.panel_type === 'psp' ? (
               <>
-              <TextField select fullWidth label={t('admin:servers.field.update_channel')} value={form.update_channel}
-                disabled={busy} helperText={t('admin:servers.hint.update_channel')}
-                onChange={event => setForm({ ...form, update_channel: event.target.value as NodeUpdateChannel })}>
-                <MenuItem value="stable">{t('admin:servers.native.release_stable')}</MenuItem>
-                <MenuItem value="beta">{t('admin:servers.native.release_testing')}</MenuItem>
-              </TextField>
-              <Alert severity="info">
-                {t('admin:servers.native.outbound_hint')}
-              </Alert>
-              {!editing && <NativeInstallationMethodFields selection={installationSelection} onChange={setInstallationSelection} disabled={busy} />}
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+                {!editing && <Box sx={{ flex: 1, minWidth: 0 }}>
+                  <NativeInstallationMethodFields compact selection={installationSelection} onChange={setInstallationSelection} disabled={busy} />
+                </Box>}
+                <TextField select fullWidth label={t('admin:servers.field.update_channel')} value={form.update_channel}
+                  sx={{ flex: 1, minWidth: 0 }} disabled={busy}
+                  helperText={editing ? t('admin:servers.hint.update_channel_short') : undefined}
+                  onChange={event => setForm({ ...form, update_channel: event.target.value as NodeUpdateChannel })}>
+                  <MenuItem value="stable">{t('admin:servers.native.release_stable')}</MenuItem>
+                  <MenuItem value="beta">{t('admin:servers.native.release_testing')}</MenuItem>
+                </TextField>
+              </Box>
+              {!editing && <Typography variant="body2" color="text.secondary">{t('admin:servers.native.create_record_hint')}</Typography>}
+              <Accordion expanded={metadataDetailsOpen} onChange={(_event, expanded) => setMetadataDetailsOpen(expanded)}
+                disableGutters elevation={0} slotProps={{ transition: { unmountOnExit: true } }}>
+                <AccordionSummary id={metadataDetailsID} aria-controls={`${metadataDetailsID}-details`} expandIcon={<ExpandMoreIcon />}>
+                  <Typography variant="body2">{t('admin:servers.native.metadata_details')}</Typography>
+                </AccordionSummary>
+                <AccordionDetails sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+                  <TextField fullWidth label={t('admin:servers.field.remark')} value={form.remark}
+                    onChange={event => setForm({ ...form, remark: event.target.value })} />
+                  <Typography variant="body2">{t('admin:servers.hint.update_channel')}</Typography>
+                  <Typography variant="body2">{t('admin:servers.native.outbound_hint')}</Typography>
+                </AccordionDetails>
+              </Accordion>
               </>
             ) : <>
               {!editing && <Alert severity="info">{t('admin:servers.install_reinstall.new_manual')}</Alert>}
@@ -1672,12 +1685,12 @@ export default function ServersView() {
               </Box>
             </>}
 
-            <TextField
+            {form.panel_type !== 'psp' && <TextField
               fullWidth
               label={t('admin:servers.field.remark')}
               value={form.remark}
               onChange={e => setForm({ ...form, remark: e.target.value })}
-            />
+            />}
           </Box>
         </DialogContent>
         <DialogActions>

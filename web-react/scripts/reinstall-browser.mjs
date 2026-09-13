@@ -14,6 +14,8 @@ const PLAYWRIGHT_VERSION = '1.63.0'; // Verified published through npm view.
 // Preview serves disposable API fixtures and the real built SPA. It does not
 // launch or automate a browser; the desktop browser tools own that interaction.
 const previewOnly = process.argv[2] === '--preview';
+const previewPort = previewOnly ? Number(process.env.PSP_FIXTURE_PREVIEW_PORT ?? 0) : 0;
+assert(Number.isInteger(previewPort) && previewPort >= 0 && previewPort <= 65535, 'Invalid preview-only loopback port.');
 const packageDirectory = process.argv[2] && resolve(process.argv[2]);
 let chromium, expect;
 if (!previewOnly) {
@@ -58,6 +60,9 @@ const version = 'v0.0.1-beta3';
 const fingerprint = 'a'.repeat(64);
 const requests = [];
 const failures = [];
+// Desktop preview additions are disposable and never broaden the release gate's
+// allowed writes. Creating a fixture only creates an in-memory server record.
+const previewCreatedIDs = new Set();
 let origin;
 const commandFor = id => previewOnly
   ? `bash -c 'set +a +x; umask 077; unset s; s=$(curl -qf --proto =https -m 30 --max-filesize 1048576 "$1") && [[ $s ]] && bash -n <<<"$s" 2>/dev/null && bash <<<"$s"' -- 'https://fixture-panel.invalid/node-bootstrap/${'a'.repeat(43)}'`
@@ -95,6 +100,11 @@ async function fixture(request, response, url) {
     });
     if (pathname === '/api/admin/servers/7/node-installation') return reply(response, provisioning(7));
     if (pathname === '/api/admin/servers/7/node-agent-status') return reply(response, { state: 'running', core_state: 'running', configured_nodes: 3 });
+    const createdRead = previewOnly && pathname.match(/^\/api\/admin\/servers\/(\d+)\/(node-installation|node-agent-status)$/);
+    if (createdRead && previewCreatedIDs.has(Number(createdRead[1]))) {
+      return reply(response, createdRead[2] === 'node-installation'
+        ? provisioning(Number(createdRead[1])) : { state: 'waiting', configured_nodes: 0 });
+    }
     if (pathname === '/api/admin/servers/17/node-migration-preview') return reply(response, {
       server_id: 17, server_name: servers[1].name, core_version: '26.6.27', recommended_core_version: '26.6.27',
       core_requires_ack: false, allow_restricted_reality: false, fingerprint, node_count: 3, client_count: 5,
@@ -102,14 +112,34 @@ async function fixture(request, response, url) {
     });
   }
   if (method === 'POST') {
+    if (previewOnly && pathname === '/api/admin/servers') {
+      assert(previewCreatedIDs.size < 10, 'Preview server limit reached. Restart the disposable preview.');
+      assert(body?.panel_type === 'psp' && typeof body.name === 'string' && body.name.trim() && body.name.length <= 64);
+      assert(['stable', 'beta'].includes(body.update_channel));
+      assert(Object.keys(body).every(key => ['name', 'panel_type', 'remark', 'update_channel'].includes(key)));
+      assert(body.remark === undefined || typeof body.remark === 'string' && body.remark.length <= 1024);
+      const id = 47 + previewCreatedIDs.size;
+      servers.push({ id, panel_type: 'psp', name: body.name, remark: body.remark ?? '', url: `psp://fixture-agent-${id}`,
+        capabilities: ['core.upgrade'], auth_method: '', has_api_token: false, has_password: false,
+        insecure_https: false, update_channel: body.update_channel, panel_version: '', core_version: '', xray_version: '' });
+      previewCreatedIDs.add(id);
+      return reply(response, provisioning(id));
+    }
     if (pathname === '/api/admin/servers/probe') {
       assert(servers.some(record => record.id === body?.id), 'Probe must address an original fixture server.');
       assert.deepEqual(body, { id: body.id }, 'The aggregate probe API accepts only its server ID.');
-      return reply(response, { ok: true, inbound_count: 3 });
+      return reply(response, previewCreatedIDs.has(body.id)
+        ? { ok: false, inbound_count: 0, error: 'Isolated fixture: waiting for node heartbeat' }
+        : { ok: true, inbound_count: 3 });
     }
     if (pathname === '/api/admin/servers/7/node-install-command') {
       assert.deepEqual(body, { version });
       return reply(response, command(7));
+    }
+    const createdCommand = previewOnly && pathname.match(/^\/api\/admin\/servers\/(\d+)\/node-install-command$/);
+    if (createdCommand && previewCreatedIDs.has(Number(createdCommand[1]))) {
+      assert.deepEqual(body, { version });
+      return reply(response, command(Number(createdCommand[1])));
     }
     if (pathname === '/api/admin/servers/17/node-migration-command') {
       assert.deepEqual(body, { version, fingerprint, core_version: '26.6.27',
@@ -140,7 +170,8 @@ const server = createServer(async (request, response) => {
     if (url.pathname.startsWith('/api/')) return await fixture(request, response, url);
     if (url.pathname === '/admin/servers' || url.pathname === '/') {
       response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-      let html = indexHTML.replace('<!-- PSP_PANEL_BASE -->', '<base href="/"><meta name="psp-panel-path" content="">');
+      const currentIndex = previewOnly ? await readFile(join(dist, 'index.html'), 'utf8') : indexHTML;
+      let html = currentIndex.replace('<!-- PSP_PANEL_BASE -->', '<base href="/"><meta name="psp-panel-path" content="">');
       if (previewOnly) html = html.replace('</head>', `<script>
 localStorage.setItem('psp-lang', 'zh-CN');
 localStorage.setItem('psp_access', 'fixture-admin-access');
@@ -162,7 +193,7 @@ localStorage.setItem('psp_user', JSON.stringify({ userId: 1, upn: 'fixture-admin
 
 let browser;
 try {
-  await new Promise(resolveListen => server.listen(0, '127.0.0.1', resolveListen));
+  await new Promise(resolveListen => server.listen(previewPort, '127.0.0.1', resolveListen));
   origin = `http://127.0.0.1:${server.address().port}`;
   if (previewOnly) {
     console.log(`Isolated built-SPA preview (no real installation): ${origin}/admin/servers`);
