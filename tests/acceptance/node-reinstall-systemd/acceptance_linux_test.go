@@ -320,8 +320,35 @@ func (f *fixture) runCommand(command string) error {
 	if f.credential != "" && bytes.Contains(output, []byte(f.credential)) {
 		f.t.Fatal("private command leaked fixed credential; diagnostics withheld")
 	}
+	if err != nil {
+		// Classification contains only known booleans/numbers. Never log the
+		// command, raw output, URL, token, script or error string.
+		classification, marshalErr := json.Marshal(classifyCommandFailure(output, err))
+		if marshalErr == nil {
+			f.t.Logf("command failure diagnostics: %s", classification)
+		}
+		f.commandFailureUnitStates()
+	}
 	return err
 }
+
+func (f *fixture) commandFailureUnitStates() {
+	// Read only fixed unit names, with a five-second bound for the entire
+	// diagnostic batch. No journal, process command line or unit body is logged.
+	ctx, cancel := context.WithTimeout(f.ctx, 5*time.Second)
+	defer cancel()
+	for _, unit := range []string{"passwall-node.service", "passwall-node-upgrade.path", "passwall-node-upgrade.service"} {
+		for _, property := range []string{"LoadState", "ActiveState"} {
+			output, err := exec.CommandContext(ctx, "systemctl", "show", unit, "--property="+property, "--value").Output()
+			state := "unavailable"
+			if err == nil {
+				state = classifyUnitState(property, output)
+			}
+			f.t.Logf("command failure diagnostics: unit=%s property=%s state=%s", unit, property, state)
+		}
+	}
+}
+
 func (f *fixture) command(name string, args ...string) error {
 	return exec.CommandContext(f.ctx, name, args...).Run()
 }
