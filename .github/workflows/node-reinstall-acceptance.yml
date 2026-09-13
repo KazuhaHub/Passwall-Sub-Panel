@@ -11,6 +11,8 @@ on:
       - 'internal/adapters/sqlstore/server_migration*'
       - 'tests/acceptance/node-reinstall-systemd/**'
       - '.github/workflows/node-reinstall-acceptance.yml'
+      - '.github/workflows/test.yml'
+      - 'web-react/scripts/reinstall-browser.mjs'
   pull_request:
     paths:
       - 'internal/pkg/nodebootstrap/**'
@@ -19,6 +21,8 @@ on:
       - 'internal/adapters/sqlstore/server_migration*'
       - 'tests/acceptance/node-reinstall-systemd/**'
       - '.github/workflows/node-reinstall-acceptance.yml'
+      - '.github/workflows/test.yml'
+      - 'web-react/scripts/reinstall-browser.mjs'
 
 permissions:
   contents: read

@@ -94,7 +94,11 @@ async function fixture(request, response, url) {
     });
   }
   if (method === 'POST') {
-    if (/^\/api\/admin\/servers\/(7|17|27)\/probe$/.test(pathname)) return reply(response, { ok: true, inbound_count: 3 });
+    if (pathname === '/api/admin/servers/probe') {
+      assert(servers.some(record => record.id === body?.id), 'Probe must address an original fixture server.');
+      assert.deepEqual(body, { id: body.id }, 'The aggregate probe API accepts only its server ID.');
+      return reply(response, { ok: true, inbound_count: 3 });
+    }
     if (pathname === '/api/admin/servers/7/node-install-command') {
       assert.deepEqual(body, { version });
       return reply(response, command(7));
@@ -280,6 +284,8 @@ try {
   assert.equal(requests.some(request => ['PATCH', 'DELETE'].includes(request.method)), false, 'No record deletion or arbitrary patch is allowed.');
   assert.equal(count('POST', '/api/admin/servers/7/node-install-command'), 1);
   assert.equal(count('POST', '/api/admin/servers/17/node-migration-command'), 1);
+  assert.deepEqual(requests.filter(request => request.method === 'POST' && request.pathname === '/api/admin/servers/probe')
+    .map(request => request.body.id).sort((a, b) => a - b), [7, 17, 27], 'Automatic probes must target only the original visible IDs.');
   await context.close();
   assert.deepEqual(failures, [], 'Browser/fixture errors are acceptance failures.');
   console.log('PASS: real Linux Chromium built-SPA acceptance: original backends, PN defaults/full name, truthful manual recovery, fixed identity, reviewed-release consent and node-host command/copy.');
