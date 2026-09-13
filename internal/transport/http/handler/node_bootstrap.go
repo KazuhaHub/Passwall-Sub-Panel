@@ -234,8 +234,6 @@ func (h *NodeBootstrapHandler) MintMigration(c *gin.Context) {
 	h.mintResponse(c, t)
 }
 
-func shellWord(value string) string { return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'" }
-
 func (h *NodeBootstrapHandler) mintResponse(c *gin.Context, t *bootstrapTicket) {
 	if !h.audit(c, t, "node_bootstrap_mint") {
 		return
@@ -246,9 +244,11 @@ func (h *NodeBootstrapHandler) mintResponse(c *gin.Context, t *bootstrapTicket) 
 		return
 	}
 	download := panelpath.PanelURL(enrollBaseURL(c), panelpath.FromRequest(c.Request), "/node-bootstrap/"+token)
-	// Download to a private complete file and check HTTP and bash syntax BEFORE
-	// execution. Never pipe a partial response directly into a root shell.
-	command := "bash -c " + shellWord("set +x; set -euo pipefail; umask 077; command -v curl >/dev/null; task_dir=$(mktemp -d); trap 'rm -f -- \"$task_dir/install.sh\"; rmdir -- \"$task_dir\"' EXIT; curl --disable --fail --silent --show-error --proto '=https' --connect-timeout 10 --max-time 30 --max-filesize 1048576 "+shellWord(download)+" -o \"$task_dir/install.sh\"; bash -n \"$task_dir/install.sh\"; bash \"$task_dir/install.sh\"")
+	command, err := nodebootstrap.InstallCommand(download)
+	if err != nil {
+		bootstrapError(c, http.StatusBadRequest, "a canonical HTTPS installation URL is required")
+		return
+	}
 	privateNodeResponse(c)
 	c.JSON(http.StatusOK, gin.H{"server_id": t.serverID, "command": command, "expires_at": t.expires.UTC()})
 }
@@ -281,7 +281,14 @@ func (h *NodeBootstrapHandler) Download(c *gin.Context) {
 	if !h.audit(c, t, "node_bootstrap_download") {
 		return
 	}
+	// Older curl releases can enforce --max-filesize only when the response
+	// announces its size. Keep this bounded script response explicitly framed.
+	if len(script) == 0 || len(script) > 1048576 {
+		bootstrapError(c, http.StatusServiceUnavailable, "installation script is unavailable")
+		return
+	}
 	t.downloaded = true
+	c.Header("Content-Length", strconv.Itoa(len(script)))
 	c.Data(http.StatusOK, "text/plain; charset=utf-8", []byte(script))
 }
 

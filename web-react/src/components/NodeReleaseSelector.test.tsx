@@ -28,13 +28,13 @@ function reads(releases: NodeRelease[]) {
   installReads({ [endpoint]: { releases, checked_at: '2026-09-12T13:00:00Z' } satisfies NodeReleaseCatalog })
 }
 
-function Controlled({ enabled = true, selection = linux, disabled = false, initialChannel = 'stable' }: {
-  enabled?: boolean; selection?: NativeInstallationSelection; disabled?: boolean; initialChannel?: NodeReleaseChannel
+function Controlled({ enabled = true, selection = linux, disabled = false, initialChannel = 'stable', compact = false }: {
+  enabled?: boolean; selection?: NativeInstallationSelection; disabled?: boolean; initialChannel?: NodeReleaseChannel; compact?: boolean
 }) {
   const [version, setVersion] = useState('')
   const [, refresh] = useState(0)
   return <>
-    <NodeReleaseSelector enabled={enabled} selection={selection} value={version} onChange={setVersion} disabled={disabled} initialChannel={initialChannel} />
+    <NodeReleaseSelector enabled={enabled} selection={selection} value={version} onChange={setVersion} disabled={disabled} initialChannel={initialChannel} compact={compact} />
     <span data-testid="selected-version">{version}</span>
     <button onClick={() => refresh(value => value + 1)}>refresh selector parent</button>
   </>
@@ -53,6 +53,23 @@ const chooseVersion = (version: string) => choose('admin:servers.native.agent_ve
 const chooseTesting = () => choose('admin:servers.native.release_channel', 'admin:servers.native.release_testing')
 
 describe('Passwall Node release selection', () => {
+  it('folds publication notes behind an accessible summary only on the compact installation surface', async () => {
+    reads([stable])
+    mount(<Controlled compact />)
+    await chooseVersion(stable.version)
+    expect(screen.queryByText(stable.notes)).toBeNull()
+    expect(screen.queryByRole('link', { name: 'admin:servers.native.release_details' })).toBeNull()
+    const summary = screen.getByRole('button', { name: 'admin:servers.native.release_review' })
+    expect(summary.tagName).toBe('BUTTON')
+    expect(summary.getAttribute('aria-expanded')).toBe('false')
+    expect(summary.getAttribute('tabindex')).not.toBe('-1')
+    fireEvent.click(summary)
+    expect(summary.getAttribute('aria-expanded')).toBe('true')
+    expect(await screen.findByText(stable.notes)).toBeTruthy()
+    expect(screen.getByRole('link', { name: 'admin:servers.native.release_details' }).getAttribute('href')).toBe(stable.release_url)
+    expect(selected()).toBe(stable.version)
+    expect(api.post).not.toHaveBeenCalled()
+  })
   it('opens the saved testing preference without preselecting a version or making any secret/write request', async () => {
     reads([testing, stable])
     const view = mount(<Controlled initialChannel="testing" />)

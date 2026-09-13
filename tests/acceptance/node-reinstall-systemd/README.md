@@ -10,10 +10,17 @@ bootstrap handlers, Bearer authenticator, SQLite repositories, operation gate,
 adapter pool, and node-sync coordinator. A fixture-only administrator token and
 a pinned catalog entry replace the surrounding login/release-discovery UI; they
 do not replace the downloaded installer, node binary, core runtime, or systemd.
-The installer downloads the already-published **v0.0.1-beta3** Node archive and
-verifies its release checksum and exact executable version.
+The installer targets the exact **v0.0.1-beta4** Node archive. Run this candidate
+only after that release is published and its tag/build identity is verified;
+the installer verifies its release checksum and exact executable version.
 Its executable and observed report must also match the publisher's exact
-`v0.0.1-beta3 (91c36bf)` build stamp, not merely a bare version string.
+`v0.0.1-beta4 (4b40af2)` build stamp, not merely a bare version string. The
+published annotated tag peels to `4b40af2e162a9510a33a243e06dd446ec24afcd5`;
+formal Node installation and native container acceptance on both architectures
+must pass before registering this revision. The installer adds
+terminal-stage/download feedback and bounded systemd process checks. Its
+startup-only success is not sync/core/proxy evidence; the checks below separately
+require the real Node, core and proxy path to work.
 
 Required checks are:
 

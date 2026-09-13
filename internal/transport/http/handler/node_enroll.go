@@ -5,9 +5,9 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
-	"fmt"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -16,6 +16,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/idgen"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/log"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/nodebootstrap"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/safehttp"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/transport/http/middleware"
@@ -77,6 +78,7 @@ type enrollTokenResponse struct {
 // The token is stored hashed and attributed to the admin who asked for it, so
 // the audit trail names a person rather than "the enrollment endpoint".
 func (h *NodeEnrollHandler) Mint(c *gin.Context) {
+	privateNodeResponse(c)
 	if h.probe == nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "node enrollment is not wired in this build"})
 		return
@@ -92,6 +94,18 @@ func (h *NodeEnrollHandler) Mint(c *gin.Context) {
 		respondError(c, err)
 		return
 	}
+	base := enrollBaseURL(c)
+	// Enrollment follows the same HTTPS-only, complete-download launcher as
+	// Passwall Node installation. Refuse before persisting a usable token.
+	if !EnrollBaseAllowed(base) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "a canonical HTTPS enrollment URL is required"})
+		return
+	}
+	command, err := nodebootstrap.InstallCommand(base + "/enroll/" + raw)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "a canonical HTTPS enrollment URL is required"})
+		return
+	}
 	now := time.Now()
 	tok := &domain.AuthToken{
 		UserID:    uid,
@@ -104,10 +118,11 @@ func (h *NodeEnrollHandler) Mint(c *gin.Context) {
 		respondError(c, err)
 		return
 	}
-	base := enrollBaseURL(c)
 	c.JSON(http.StatusOK, enrollTokenResponse{
-		Command:   fmt.Sprintf("bash <(curl -fsSL %s/enroll/%s)", base, raw),
-		Cautious:  fmt.Sprintf("curl -fsSL %s/enroll/%s -o psp-enroll.sh && sha256sum psp-enroll.sh && less psp-enroll.sh && bash psp-enroll.sh", base, raw),
+		Command: command,
+		// Retain the old API field without a second unsafe streaming or
+		// predictable downloaded-file path.
+		Cautious:  command,
 		ExpiresAt: tok.ExpiresAt,
 	})
 }
@@ -119,6 +134,7 @@ func (h *NodeEnrollHandler) Mint(c *gin.Context) {
 // enforces anything), and checking here would turn this route into an oracle
 // that answers "is this token still good" to anyone who asks.
 func (h *NodeEnrollHandler) Script(c *gin.Context) {
+	privateNodeResponse(c)
 	token := c.Param("token")
 	if !validEnrollToken(token) {
 		c.String(http.StatusBadRequest, "# invalid enrollment token\n")
@@ -132,9 +148,14 @@ func (h *NodeEnrollHandler) Script(c *gin.Context) {
 		c.String(http.StatusBadRequest, "# refusing to build a script for this host\n")
 		return
 	}
-	c.Header("Content-Type", "text/x-shellscript; charset=utf-8")
-	c.Header("Cache-Control", "no-store")
-	c.String(http.StatusOK, renderEnrollScript(base, token))
+	script := renderEnrollScript(base, token)
+	if len(script) == 0 || len(script) > 1048576 {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "enrollment script is unavailable"})
+		return
+	}
+	// curl before 8.4 enforces --max-filesize only for known response sizes.
+	c.Header("Content-Length", strconv.Itoa(len(script)))
+	c.Data(http.StatusOK, "text/x-shellscript; charset=utf-8", []byte(script))
 }
 
 // validEnrollToken keeps obviously-malformed input out of the script body,

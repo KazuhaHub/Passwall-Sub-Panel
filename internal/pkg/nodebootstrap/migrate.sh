@@ -8,13 +8,14 @@ umask 077
 fail() { printf '%s\n' "Passwall Node migration: $1" >&2; exit 1; }
 say() { printf '%s\n' "Passwall Node migration: $1"; }
 
+say '[1/4] Checking this node host and existing services...'
 [[ "$(id -u)" == 0 ]] || fail 'run as root; no services were changed'
 [[ "$(uname -s)" == Linux ]] || fail 'only Linux/systemd is supported; use the manual installation instructions'
 case "$(uname -m)" in
     x86_64|amd64|aarch64|arm64) ;;
     *) fail 'only amd64 and arm64 are supported by the reviewed Node installer; no services were changed or PSP conversion requested' ;;
 esac
-for tool in curl systemctl systemd-detect-virt stat readlink find tar timeout mktemp install chmod cp rm rmdir flock bash sha256sum awk getent useradd chown cmp mv mkdir; do
+for tool in curl systemctl systemd-detect-virt stat readlink find tar timeout sleep mktemp install chmod cp rm rmdir flock bash sha256sum awk getent useradd chown cmp mv mkdir; do
     command -v "$tool" >/dev/null 2>&1 || fail "required tool missing: $tool; install it and rerun before any service is changed"
 done
 [[ -d /run/systemd/system && ! -L /run/systemd/system ]] || fail 'systemd is not running; container/unknown deployments require manual shutdown and installation'
@@ -144,6 +145,7 @@ trap cleanup EXIT
 trap 'exit 1' HUP INT TERM
 
 if [[ "$has_old" == true ]]; then
+    say '[2/4] Backing up the old configuration, then stopping x-ui...'
     # A checked enumeration avoids silently ignoring errors from a process
     # substitution. Never dereference links or copy special configuration files.
     find -P /etc/x-ui -xdev -print0 > "$work/config-paths" || fail 'cannot enumerate old configuration; no services were changed'
@@ -173,6 +175,7 @@ if [[ "$has_old" == true ]]; then
     tar -C /etc/x-ui --exclude=./x-ui.db --exclude=./x-ui.db-wal --exclude=./x-ui.db-shm -cf "$backup/final-etc-x-ui.tar" . || fail 'final configuration backup failed; no PSP conversion was requested'
     chmod 0600 -- "$backup/final-x-ui.db" "$backup/final-etc-x-ui.tar"
 else
+    say '[2/4] Clean system: no old installation needs backup or shutdown.'
     say 'clean systemd node confirmed; there is no old x-ui service/configuration to stop or remove'
 fi
 
@@ -182,6 +185,7 @@ printf 'Authorization: Bearer %s\n' @@TICKET@@ > "$work/authorization"
 chmod 0600 -- "$work/authorization"
 : > "$work/install.sh"
 chmod 0600 -- "$work/install.sh"
+say '[3/4] Asking PSP to convert this same server; this can take up to 90 seconds...'
 http_result=$(curl --disable --silent --show-error --proto '=https' --proto-redir '=https' --connect-timeout 10 --max-time 90 --max-filesize 1048576 \
     --request POST --header "@$work/authorization" --header 'Content-Type: application/json' \
     --data '{"old_backend_stopped":true}' --output "$work/install.sh" --write-out '%{http_code} %{content_type}' \
@@ -193,5 +197,9 @@ content_type=${http_result#* }
 bash -n "$work/install.sh" 2>/dev/null || fail 'PSP returned an invalid installation script; use the PSP recovery instructions'
 rm -f -- "$work/authorization"
 say 'PSP accepted conversion; executing its exact-version private Passwall Node installer'
+say '[4/4] Installing Passwall Node. Follow the installer progress below...'
 bash "$work/install.sh" || fail 'installation failed after PSP conversion; keep backups and use PSP installation instructions for the same server identity (do not re-enable old x-ui automatically)'
-say 'installation script completed; this does not prove proxy readiness. Verify this server status, applied nodes/core and an actual proxy connection in PSP. Old x-ui remains installed and disabled.'
+say 'Installation completed. Return to PSP and check this server is online, its nodes/core are applied, then test an actual proxy connection.'
+if [[ "$has_old" == true ]]; then
+    say "Old x-ui remains installed and disabled; backups are retained under $backup."
+fi

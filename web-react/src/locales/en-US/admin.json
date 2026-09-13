@@ -1149,7 +1149,12 @@
     "edit_inbound_dialog": {
       "title": "Edit inbound config",
       "load_failed": "Failed to load existing inbound: {{error}}",
-      "unsupported": "Visual editor only supports VLESS / SS-2022 inbounds.",
+      "unsupported": "This inbound protocol is not supported by the editor. Supported: VLESS, VMess, Trojan, Shadowsocks 2022, Hysteria2, AnyTLS, TUIC and Naive. Keep the original protocol and configuration; do not recreate the node to edit it.",
+      "unsupported_ss_method": "This Shadowsocks method is not supported by the structured editor. Only 2022-blake3-aes-128-gcm, 2022-blake3-aes-256-gcm and 2022-blake3-chacha20-poly1305 are supported. Legacy or unknown methods are not converted to VLESS; keep their original configuration.",
+      "missing_configuration": "No readable inbound configuration is available for this node.",
+      "invalid_configuration": "The inbound configuration is incomplete or invalid.",
+      "load_next": "Check this node's saved configuration or the original server connection, then retry. No editable defaults or changes were created.",
+      "sync_notice": "Editing the saved target configuration; synchronization has not been confirmed. Saving does not prove the proxy core is running.",
       "saved": "Inbound config saved"
     },
     "create_dialog": {
@@ -1910,7 +1915,15 @@
       "existing_hint": "Reinstallation reuses the same server, nodes and fixed credential; no new record or PSP shutdown is required. Follow the existing installer checks and stop the old node instance before reusing its identity. This is not a replacement for remote upgrades."
     },
     "migration": {
-      "online_hint": "This is a read-only preview for changing the original 3X-UI server to Passwall Node. Choosing a backend or generating a command does not complete the conversion. The node-host command must be executed and confirmed before the original record can switch backends; do not add another server or stop PSP for this supported online flow.",
+      "online_hint": "3X-UI → Passwall Node. Read-only checks first; the original server changes only after the node-host command is executed and confirmed.",
+      "details": "Scope, deployment and compatibility details",
+      "deployment_safety": "Node-host takeover supports standard Linux/systemd x-ui or a cleanly reinstalled OS only. Prevent upgrades or automation from restarting the old service; custom/container deployments require manual handling.",
+      "already_native": "This same server is already Passwall Node. No backend conversion is needed; continue installation / reinstall with its original identity.",
+      "continue_native_install": "Continue Passwall Node installation / reinstall",
+      "unsupported_next": "Close this preview and reopen Install / reinstall. Choose the server's original backend for its manual installation and recovery guide.",
+      "source_changed_next": "The server backend has changed. Refresh its original record, then reopen Install / reinstall; an existing Passwall Node uses reinstallation, not another conversion.",
+      "resolve_nodes": "Open Nodes to capture / synchronize configuration",
+      "command_next": "After running the command, refresh this original server and verify its agent, core and actual client connection. Generating a command does not confirm installation.",
       "node_command_hint": "Run the one-click command as root on THIS NODE HOST, not on the PSP host. Its private script-delivery token can be used once and expires after 15 minutes. Installation success is not proof that proxy service is ready: verify the original server's agent, core, managed nodes and client access afterwards.",
       "single_instance_confirmation": "I confirm exactly one PSP process uses this database in this deployment. Multi-instance deployments are not supported by this online conversion.",
       "generate_node_command": "Generate node-host conversion and installation command",
@@ -2054,6 +2067,7 @@
     "hint": {
       "name": "Display name; the internal reference uses the database ID.",
       "update_channel": "Saved preference for opening installation and upgrade version lists. Stable is the default; Beta requires choosing an exact reviewed release. Saving does not install, upgrade, or change server/node identities or credentials. Temporary channel selections in dialogs are not saved.",
+      "update_channel_short": "Default version-list channel only; saving does not upgrade the node.",
       "configured": "Configured (kept unchanged)",
       "unconfigured": "Not configured",
       "change": "Change",
@@ -2061,8 +2075,8 @@
     },
     "native": {
       "outbound_hint": "Passwall Node connects outbound to Passwall Sub Panel. It needs no inbound management URL or upstream-panel credential. Enter server details and select an installation method, then generate files for that server. Configure inbounds separately on the Nodes page.",
-      "step_details": "Server details",
-      "step_install": "Install Passwall Node",
+      "create_record_hint": "Create the server record first; the next page generates its installation command. Configure inbounds separately on Nodes.",
+      "metadata_details": "Optional remark and technical details",
       "create_continue": "Create and continue to installation",
       "method_label": "Choose installation method",
       "method": {
@@ -2155,6 +2169,13 @@
       "release_recommended": "Recommended",
       "release_published": "Published {{date}} (UTC)",
       "release_details": "Passwall Node release details",
+      "release_review": "Release notes and publication details",
+      "advanced": "Advanced: identity, private files and instructions",
+      "reinstall_safety": "Reinstallation keeps the original nodes and configuration. Stop the old node instance first.",
+      "files_advanced_hint": "Keep these files private. Open Advanced for the required verification and installation steps.",
+      "command_safety": "Private, single-use command · run as root on the node host, not PSP · expires {{time}}",
+      "copied": "Command copied. Run it on the intended node host.",
+      "copy_failed": "Copy failed. Select and copy the command manually, or allow clipboard access and retry.",
       "version_hint": "No version is preselected. Enter an exact published version with installation assets, such as v1.0.0 or v1.0.0-beta.1. Installation is unavailable before publication. Select the core version separately in the server menu.",
       "version_invalid": "Enter an exact vX.Y.Z or vX.Y.Z-beta.1 version. Do not use latest, spaces, or a download URL.",
       "generate_command": "Generate node-host one-click command",
@@ -2178,7 +2199,7 @@
       "http_warning": "This sync endpoint uses plaintext HTTP and may expose credentials to network observers. Use only on a trusted test network; configure a publicly reachable HTTPS sync endpoint for production first.",
       "docker_hint": "Docker requires Linux Docker Engine, Compose 2.30.0 or newer, and host networking. Use the generated Compose and private credential files; Compose's raw environment-file format preserves the sync endpoint's literal characters. Start with the provided commands and preserve the data directory. Windows container host networking is unsupported. Upgrade the container through its Compose deployment instructions, not reinstallation.",
       "docker_docs": "View Linux Compose example",
-      "status_title": "Node runtime status (refreshes every 4 seconds)",
+      "status_title": "Passwall Node status",
       "status_failed": "Could not read runtime status.",
       "status_stale": "Status refresh failed. The status below is the last successfully read value.",
       "last_seen": "Last heartbeat: {{time}}",
@@ -2186,6 +2207,15 @@
       "core_state": "Core runtime state: {{state}}",
       "heartbeat_hint": "A heartbeat means the agent connected, not that the proxy core is running. Go to Nodes to enter the real public address and add an inbound. The Agent ID is not a proxy address.",
       "configure_nodes": "Go to node configuration",
+      "status_next": {
+        "checking": "Reading the original server's reported status; no installation success has been confirmed.",
+        "waiting": "Run the command on the node host, then wait for its first connection.",
+        "offline": "Check this node's service and network connection; its last confirmed proxy state may still be enforced offline.",
+        "unconfigured": "Go to Nodes to add or check an inbound with its real public address and port.",
+        "applying": "Wait for the core to confirm the requested configuration.",
+        "running": "Core running does not prove client access. Verify the original nodes and an actual proxy connection.",
+        "error": "Inspect this node's service/core logs and correct its configuration; do not add a replacement server."
+      },
       "agent_status": {
         "checking": "Reading status…",
         "waiting": "Waiting for the first heartbeat",

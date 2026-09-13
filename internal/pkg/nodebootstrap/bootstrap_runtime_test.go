@@ -200,6 +200,21 @@ printf '%s text/plain; charset=utf-8' "$HARNESS_HTTP"
 			if strings.Contains(string(output), token) {
 				t.Fatal("authorization leaked to stdout/stderr")
 			}
+			if scenario.wantOK {
+				previous := -1
+				for _, phase := range []string{"[1/4]", "[2/4]", "[3/4]", "[4/4]", "Installation completed."} {
+					position := strings.Index(string(output), phase)
+					if position <= previous {
+						t.Fatalf("missing or out-of-order progress phase: %s", phase)
+					}
+					previous = position
+				}
+				if strings.Contains(string(output), "Old x-ui remains installed and disabled") != scenario.wantStop {
+					t.Fatal("completion incorrectly claims an old installation exists")
+				}
+			} else if strings.Contains(string(output), "Installation completed.") {
+				t.Fatal("failed installation printed a success message")
+			}
 			if exists(filepath.Join(root, "executed")) != scenario.wantOK {
 				t.Fatalf("untrusted/failing response executed=%v", exists(filepath.Join(root, "executed")))
 			}

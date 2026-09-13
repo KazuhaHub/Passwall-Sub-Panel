@@ -32,15 +32,40 @@ func RenderLinuxMigration(options Options) (string, error) {
 	if !ticketPattern.MatchString(options.Token) {
 		return "", fmt.Errorf("invalid bootstrap authorization: %w", domain.ErrValidation)
 	}
-	if len(options.CompletionURL) == 0 || len(options.CompletionURL) > 2048 || strings.ContainsAny(options.CompletionURL, "\\ \t\r\n") {
+	endpoint, err := privateEndpoint(options.CompletionURL)
+	if err != nil {
+		return "", err
+	}
+	replacer := strings.NewReplacer("@@COMPLETION_URL@@", shellQuote(endpoint), "@@TICKET@@", shellQuote(options.Token))
+	return replacer.Replace(linuxMigrationTemplate), nil
+}
+
+// InstallCommand buffers the complete successful HTTPS response, checks syntax,
+// then executes it on stdin. Bash may implement here-strings using temporary
+// files, so a private umask applies before fetching or creating shell input.
+// No partial network transfer is executed and no installer file is left behind.
+func InstallCommand(downloadURL string) (string, error) {
+	endpoint, err := privateEndpoint(downloadURL)
+	if err != nil {
+		return "", err
+	}
+	// Disable allexport and unset first: inherited settings must not export the
+	// private script to child processes. The URL is a separate shell word
+	// to avoid nested quote escapes in the user-facing command.
+	body := `set +a +x; umask 077; unset s; s=$(curl -qf --proto =https -m 30 --max-filesize 1048576 "$1") && [[ $s ]] && bash -n <<<"$s" 2>/dev/null && bash <<<"$s"`
+	return "bash -c " + shellQuote(body) + " -- " + shellQuote(endpoint), nil
+}
+
+func privateEndpoint(value string) (string, error) {
+	if len(value) == 0 || len(value) > 2048 || strings.ContainsAny(value, "\\ \t\r\n") {
 		return "", fmt.Errorf("invalid bootstrap completion endpoint: %w", domain.ErrValidation)
 	}
-	for _, character := range options.CompletionURL {
+	for _, character := range value {
 		if character < 0x20 || character == 0x7f {
 			return "", fmt.Errorf("invalid bootstrap completion endpoint: %w", domain.ErrValidation)
 		}
 	}
-	endpoint, err := url.Parse(options.CompletionURL)
+	endpoint, err := url.Parse(value)
 	if err != nil || endpoint.Scheme != "https" || endpoint.Hostname() == "" || endpoint.Opaque != "" || endpoint.User != nil || endpoint.RawQuery != "" || endpoint.ForceQuery || endpoint.Fragment != "" || endpoint.RawFragment != "" || !strings.HasPrefix(endpoint.Path, "/") {
 		return "", fmt.Errorf("invalid bootstrap completion endpoint: %w", domain.ErrValidation)
 	}
@@ -50,8 +75,7 @@ func RenderLinuxMigration(options Options) (string, error) {
 			return "", fmt.Errorf("invalid bootstrap completion endpoint: %w", domain.ErrValidation)
 		}
 	}
-	replacer := strings.NewReplacer("@@COMPLETION_URL@@", shellQuote(endpoint.String()), "@@TICKET@@", shellQuote(options.Token))
-	return replacer.Replace(linuxMigrationTemplate), nil
+	return endpoint.String(), nil
 }
 
 func shellQuote(value string) string {

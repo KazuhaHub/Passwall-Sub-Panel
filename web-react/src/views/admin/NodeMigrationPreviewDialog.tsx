@@ -1,9 +1,11 @@
-import { useEffect, useRef, useState } from 'react'
-import { Alert, Box, Button, Checkbox, CircularProgress, Dialog, DialogActions, DialogContent, DialogTitle, FormControlLabel, Stack, TextField, Typography } from '@mui/material'
+import { useEffect, useId, useRef, useState } from 'react'
+import { Accordion, AccordionDetails, AccordionSummary, Alert, Box, Button, Checkbox, CircularProgress, Dialog, DialogActions, DialogContent, DialogTitle, FormControlLabel, Stack, Typography } from '@mui/material'
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
+import { Link as RouterLink } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import { createNodeMigrationCommand, getNodeMigrationPreview, type NativeInstallationSelection, type NodeMigrationIssue, type NodeMigrationPreview, type Server } from '@/api/servers'
 import NodeReleaseSelector from '@/components/NodeReleaseSelector'
-import { copyToClipboard } from '@/utils/clipboard'
+import NodeInstallCommand from '@/components/NodeInstallCommand'
 import { useCan } from '@/utils/permissions'
 
 const knownIssues = new Set([
@@ -44,8 +46,14 @@ interface IssuedCommand {
   expired: boolean
 }
 
-export function NodeMigrationPreviewDialog({ server, onClose }: { server: Server | null; onClose: () => void }) {
+export function NodeMigrationPreviewDialog({ server, onClose, onRefreshServer, onNativeInstall }: {
+  server: Server | null
+  onClose: () => void
+  onRefreshServer?: () => void
+  onNativeInstall?: (server: Server) => void
+}) {
   const { t } = useTranslation(['admin', 'common'])
+  const detailsID = useId()
   const canRead = useCan('config.write')
   const serverID = server?.id
   const [loadedPreview, setLoadedPreview] = useState<{ binding: string; value: NodeMigrationPreview } | null>(null)
@@ -60,6 +68,9 @@ export function NodeMigrationPreviewDialog({ server, onClose }: { server: Server
   const [commandError, setCommandError] = useState('')
   const previewRequest = useRef<AbortController | null>(null)
   const commandRequest = useRef<AbortController | null>(null)
+  const refreshServer = useRef(onRefreshServer)
+  refreshServer.current = onRefreshServer
+  const refreshedBinding = useRef('')
   const selectedCore = choice.serverID === serverID ? choice.core : ''
   const acknowledged = choice.serverID === serverID && choice.acknowledge
   const version = releaseChoice.serverID === serverID ? releaseChoice.version : ''
@@ -134,7 +145,7 @@ export function NodeMigrationPreviewDialog({ server, onClose }: { server: Server
       return () => controller.abort()
     }
     if (server?.panel_type !== '3xui') {
-      setError('admin:servers.migration.unsupported_server')
+      setError(server?.panel_type === 'psp' ? 'admin:servers.migration.already_native' : 'admin:servers.migration.unsupported_server')
       return () => controller.abort()
     }
     setLoading(true)
@@ -158,6 +169,16 @@ export function NodeMigrationPreviewDialog({ server, onClose }: { server: Server
     return () => controller.abort()
   }, [serverID, server?.panel_type, canRead, selectedCore, acknowledged, retry, previewBinding])
 
+  useEffect(() => {
+    // A previous conversion may have changed this same record while the dialog
+    // was open. Refresh the live row once, never treat a stale 3X-UI snapshot as
+    // authority to issue another conversion ticket.
+    if (preview?.blockers.some(issue => issue.code === 'source_not_3xui') && refreshedBinding.current !== previewBinding) {
+      refreshedBinding.current = previewBinding
+      refreshServer.current?.()
+    }
+  }, [preview, previewBinding])
+
   async function generateCommand() {
     if (!canGenerate || !preview || !serverID || commandBusy || activeBinding.current !== commandBinding) return
     clearCommand()
@@ -173,6 +194,7 @@ export function NodeMigrationPreviewDialog({ server, onClose }: { server: Server
       }, controller.signal)
       if (controller.signal.aborted || commandRequest.current !== controller || activeBinding.current !== binding) return
       if (result.server_id !== serverID || typeof result.command !== 'string' || !result.command.trim() ||
+        result.command.length > 8192 || /[\0\r\n]/.test(result.command) ||
         typeof result.expires_at !== 'string' || !Number.isFinite(Date.parse(result.expires_at)) ||
         Date.parse(result.expires_at) <= Date.now()) throw new Error('Invalid migration command')
       setIssuedCommand({ binding, command: result.command, expires_at: result.expires_at, expired: false })
@@ -197,20 +219,24 @@ export function NodeMigrationPreviewDialog({ server, onClose }: { server: Server
     return references.length ? `${message} (${references.join(', ')})` : message
   }
 
+  const criticalWarnings = preview?.warnings.filter(issue => ['restricted_core', 'reality_compatibility_normalization',
+    'core_version_changed', 'connection_limits_not_enforced'].includes(issue.code)) ?? []
+  const detailsWarnings = preview?.warnings.filter(issue => !criticalWarnings.includes(issue)) ?? []
+
   return <Dialog open={!!server} onClose={closeDialog} fullWidth maxWidth="md">
     <DialogTitle>{t('admin:servers.install_reinstall.title', { name: server?.name ?? '' })}</DialogTitle>
     <DialogContent>
       <Stack spacing={2} sx={{ pt: 1 }}>
-        <Alert severity="info">{t('admin:servers.migration.online_hint')}</Alert>
-        <Typography variant="body2">{t('admin:servers.migration.preserved')}</Typography>
-        <Typography variant="body2">{t('admin:servers.migration.scope')}</Typography>
-        <Alert severity="warning">{t('admin:servers.migration.supported_deployment_hint')}</Alert>
-        {supported && <NodeReleaseSelector key={serverID} enabled={!!server} selection={installationSelection} value={version}
+        {supported && <Typography variant="body2" color="text.secondary">{t('admin:servers.migration.online_hint')}</Typography>}
+        {supported && <NodeReleaseSelector compact key={serverID} enabled={!!server} selection={installationSelection} value={version}
           onChange={next => { clearCommand(); setReleaseChoice({ serverID, version: next }) }} />}
         {loading && <Box role="status" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
           <CircularProgress size={18} /><Typography variant="body2">{t('admin:servers.migration.loading')}</Typography>
         </Box>}
-        {error && <Alert severity="error">{t(error)}</Alert>}
+        {error && <Alert severity={server?.panel_type === 'psp' && canRead ? 'info' : 'error'}>{t(error)}</Alert>}
+        {server?.panel_type === 'psp' && canRead && onNativeInstall && <Button variant="contained" sx={{ alignSelf: 'flex-start' }}
+          onClick={() => { closeDialog(); onNativeInstall(server) }}>{t('admin:servers.migration.continue_native_install')}</Button>}
+        {error && server?.panel_type !== 'psp' && !supported && <Typography variant="body2">{t('admin:servers.migration.unsupported_next')}</Typography>}
         {preview && canRead && <>
           <Typography variant="body2">{t('admin:servers.migration.summary', {
             server: preview.server_id, nodes: preview.node_count, clients: preview.client_count, core: preview.core_version,
@@ -219,9 +245,16 @@ export function NodeMigrationPreviewDialog({ server, onClose }: { server: Server
             <Typography variant="subtitle2">{t('admin:servers.migration.blockers')}</Typography>
             {preview.blockers.map((issue, index) => <Typography variant="body2" key={`${issue.code}:${index}`}>{issueMessage(issue)}</Typography>)}
           </Alert>}
-          {preview.warnings.length > 0 && <Alert severity="warning">
+          {preview.blockers.some(issue => issue.code === 'config_not_synced' || issue.code === 'missing_snapshot') &&
+            <Button component={RouterLink} to="/admin/nodes" sx={{ alignSelf: 'flex-start' }} variant="outlined" onClick={closeDialog}>
+              {t('admin:servers.migration.resolve_nodes')}
+            </Button>}
+          {preview.blockers.some(issue => issue.code === 'source_not_3xui') && <Typography variant="body2">
+            {t('admin:servers.migration.source_changed_next')}
+          </Typography>}
+          {criticalWarnings.length > 0 && <Alert severity="warning">
             <Typography variant="subtitle2">{t('admin:servers.migration.warnings')}</Typography>
-            {preview.warnings.map((issue, index) => <Typography variant="body2" key={`${issue.code}:${index}`}>{issueMessage(issue)}</Typography>)}
+            {criticalWarnings.map((issue, index) => <Typography variant="body2" key={`${issue.code}:${index}`}>{issueMessage(issue)}</Typography>)}
           </Alert>}
           {preview.core_requires_ack && <FormControlLabel sx={{ mx: 0 }}
             control={<Checkbox checked={acknowledged} onChange={(_event, checked) => {
@@ -235,7 +268,8 @@ export function NodeMigrationPreviewDialog({ server, onClose }: { server: Server
               setChoice({ serverID, core: preview.recommended_core_version!, acknowledge: false })
             }}>{t('admin:servers.migration.use_recommended_core', { version: preview.recommended_core_version })}</Button>}
           {ready ? <>
-            <Alert severity="success">{t('admin:servers.migration.ready')}</Alert>
+            <Typography variant="body2" color="success.main">{t('admin:servers.migration.ready')}</Typography>
+            <Typography variant="body2">{t('admin:servers.migration.deployment_safety')}</Typography>
             <FormControlLabel sx={{ mx: 0 }} control={<Checkbox checked={managedOnly} onChange={(_event, checked) => {
               clearCommand()
               setConfirmation({ serverID, managedOnly: checked, singleInstance })
@@ -247,27 +281,27 @@ export function NodeMigrationPreviewDialog({ server, onClose }: { server: Server
           </> : preview.can_migrate && <Alert severity="error">{t('admin:servers.migration.invalid_command')}</Alert>}
         </>}
         {supported && <>
-          <Typography variant="body2">{t('admin:servers.migration.node_command_hint')}</Typography>
-          <Alert severity="warning">{t('admin:servers.native.private_warning')}</Alert>
           <Button variant="contained" sx={{ alignSelf: 'flex-start' }} disabled={!canGenerate || commandBusy}
             startIcon={commandBusy ? <CircularProgress size={16} color="inherit" /> : undefined}
             onClick={() => void generateCommand()}>{t('admin:servers.migration.generate_node_command')}</Button>
           {commandError && <Alert severity="error">{t(commandError)}</Alert>}
-          {command && <>
-            {!command.expired && <TextField fullWidth multiline label={t('admin:servers.native.install_command')} value={command.command}
-              autoComplete="off" slotProps={{ input: { readOnly: true } }} sx={{ '& textarea': { fontFamily: 'monospace', fontSize: 13 } }} />}
-            <Alert severity={command.expired ? 'warning' : 'info'}>{t(command.expired
-              ? 'admin:servers.native.command_expired' : 'admin:servers.native.command_expires', { time: command.expires_at })}</Alert>
-            <Button variant="outlined" sx={{ alignSelf: 'flex-start' }} disabled={command.expired || !canGenerate}
-              onClick={() => {
-                if (!canGenerate || activeBinding.current !== command.binding || command.expired) return
-                if (Date.parse(command.expires_at) <= Date.now()) {
-                  setIssuedCommand({ ...command, command: '', expired: true })
-                  return
-                }
-                void copyToClipboard(command.command)
-              }}>{t('admin:servers.native.copy_command')}</Button>
-          </>}
+          {command && <NodeInstallCommand key={command.binding} command={command.command} expiresAt={command.expires_at}
+            disabled={command.expired || !canGenerate} onExpired={() => setIssuedCommand({ ...command, command: '', expired: true })} />}
+          {command && !command.expired && <Typography variant="body2">{t('admin:servers.migration.command_next')}</Typography>}
+          <Accordion disableGutters elevation={0} slotProps={{ transition: { unmountOnExit: true } }}>
+            <AccordionSummary id={detailsID} aria-controls={`${detailsID}-details`} expandIcon={<ExpandMoreIcon />}>
+              <Typography variant="body2">{t('admin:servers.migration.details')}</Typography>
+            </AccordionSummary>
+            <AccordionDetails>
+              <Stack spacing={1.5}>
+                <Typography variant="body2">{t('admin:servers.migration.preserved')}</Typography>
+                <Typography variant="body2">{t('admin:servers.migration.scope')}</Typography>
+                <Typography variant="body2">{t('admin:servers.migration.supported_deployment_hint')}</Typography>
+                <Typography variant="body2">{t('admin:servers.migration.node_command_hint')}</Typography>
+                {detailsWarnings.map((issue, index) => <Typography variant="body2" key={`${issue.code}:${index}`}>{issueMessage(issue)}</Typography>)}
+              </Stack>
+            </AccordionDetails>
+          </Accordion>
         </>}
       </Stack>
     </DialogContent>

@@ -252,7 +252,7 @@ func stripRealityFinalmaskTCP(streamSettings string) string {
 // a stale comment on the arm that silently governs render is how a live path
 // gets read as dead code.
 func HasLocalConfig(n *domain.Node) bool {
-	if n == nil || n.ConfigSyncedAt == nil {
+	if !HasStoredConfig(n) {
 		return false
 	}
 	switch n.ConfigSyncState {
@@ -261,6 +261,13 @@ func HasLocalConfig(n *domain.Node) bool {
 	default:
 		return false
 	}
+}
+
+// HasStoredConfig identifies captured, PSP-owned configuration. Admin editing
+// uses this intent even while a push is pending, failed or drifting; runtime
+// consumers must still use HasLocalConfig to require convergence.
+func HasStoredConfig(n *domain.Node) bool {
+	return n != nil && n.ConfigSyncedAt != nil
 }
 
 // InboundFromNode reconstructs a ports.Inbound for the renderer from the node

@@ -87,6 +87,15 @@ func fixtureCatalog(t *testing.T, transport roundTripFunc, now func() time.Time)
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Semantic single-release HTTP fixtures must not inherit additional
+	// production registry entries as compatibility reviews are appended.
+	for _, reviewed := range catalog.reviewed {
+		if reviewed.Version == fixtureVersion {
+			catalog.reviewed = []reviewedRelease{reviewed}
+			return catalog
+		}
+	}
+	t.Fatalf("single-release fixture is no longer reviewed: %s", fixtureVersion)
 	return catalog
 }
 
@@ -161,7 +170,11 @@ func TestNewUsesOnlyReviewedMajorAndDoesNotFetch(t *testing.T) {
 			t.Fatal("New must not contact the release source")
 		}
 		if major == 0 || major == 4 {
-			if len(catalog.reviewed) != 1 || catalog.reviewed[0].Version != fixtureVersion {
+			versions := make([]string, len(catalog.reviewed))
+			for i, reviewed := range catalog.reviewed {
+				versions[i] = reviewed.Version
+			}
+			if !reflect.DeepEqual(versions, []string{fixtureVersion, "v0.0.1-beta4"}) {
 				t.Fatalf("unexpected current registry: %+v", catalog.reviewed)
 			}
 			continue
@@ -174,6 +187,38 @@ func TestNewUsesOnlyReviewedMajorAndDoesNotFetch(t *testing.T) {
 	}
 	if _, err := New(Options{PSPMajor: -1}); err == nil {
 		t.Fatal("negative PSP major accepted")
+	}
+}
+
+func TestCatalogFullReviewedRegistryRetainsBeta3AndListsBeta4First(t *testing.T) {
+	var requested []string
+	catalog, err := New(Options{
+		HTTPClient: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			version, ok := strings.CutPrefix(req.URL.String(), "https://api.github.com/repos/KazuhaHub/Passwall-Node/releases/tags/")
+			if !ok || (version != fixtureVersion && version != "v0.0.1-beta4") {
+				t.Fatalf("registry requested an unreviewed endpoint: %s", req.URL)
+			}
+			requested = append(requested, version)
+			return fixtureResponse(req, http.StatusOK, fixtureBody(t, fixtureRelease(version))), nil
+		})},
+		Now: func() time.Time { return fixtureNow }, PSPMajor: 4,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	list, err := catalog.List(context.Background())
+	if err != nil || !reflect.DeepEqual(requested, []string{fixtureVersion, "v0.0.1-beta4"}) || len(list.Releases) != 2 || !list.CheckedAt.Equal(fixtureNow) {
+		t.Fatalf("full registry requests=%v list=%+v err=%v", requested, list, err)
+	}
+	for i, version := range []string{"v0.0.1-beta4", fixtureVersion} {
+		entry := list.Releases[i]
+		if entry.Version != version || entry.Channel != "testing" || entry.ReleaseURL != "https://github.com/KazuhaHub/Passwall-Node/releases/tag/"+version ||
+			!reflect.DeepEqual(entry.Methods, []string{"linux", "docker", "manual"}) || !reflect.DeepEqual(entry.Platforms, fixturePlatforms) {
+			t.Fatalf("full registry did not retain exact reviewed installation availability: %+v", entry)
+		}
+	}
+	if !strings.Contains(list.Releases[0].Notes, "startup does not prove PSP sync, core or proxy readiness") {
+		t.Fatal("beta4 review lost the startup-only limitation")
 	}
 }
 

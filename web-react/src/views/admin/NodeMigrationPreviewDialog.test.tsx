@@ -50,7 +50,7 @@ async function chooseBackend(backend: string) {
   fireEvent.mouseDown(screen.getByRole('combobox', { name: 'admin:servers.install_reinstall.backend' }))
   fireEvent.click(await screen.findByRole('option', { name: backend }))
 }
-function command() { return screen.queryByLabelText('admin:servers.native.install_command') as HTMLTextAreaElement | null }
+function command() { return screen.queryByLabelText('admin:servers.native.install_command') as HTMLInputElement | null }
 function generateButton() { return screen.getByRole('button', { name: 'admin:servers.migration.generate_node_command' }) as HTMLButtonElement }
 async function selectVersion(version = 'v0.0.1') {
   const channel = version.includes('-') ? 'testing' : 'stable'
@@ -84,7 +84,12 @@ describe('3X-UI to Passwall Node node-host migration command', () => {
     await screen.findByText('admin:servers.migration.ready')
     expect(screen.getByRole('heading', { name: 'admin:servers.install_reinstall.title' })).toBeTruthy()
     expect(screen.getByText('admin:servers.migration.online_hint')).toBeTruthy()
-    expect(screen.getByText('admin:servers.migration.supported_deployment_hint')).toBeTruthy()
+    expect(screen.queryByText('admin:servers.migration.supported_deployment_hint')).toBeNull()
+    expect(screen.queryByText('admin:servers.migration.preserved')).toBeNull()
+    const details = screen.getByRole('button', { name: 'admin:servers.migration.details' })
+    expect(details.getAttribute('aria-expanded')).toBe('false')
+    fireEvent.click(details)
+    expect(await screen.findByText('admin:servers.migration.supported_deployment_hint')).toBeTruthy()
     expect(screen.getByText('admin:servers.migration.preserved')).toBeTruthy()
     expect(screen.queryByLabelText('admin:servers.native.credential')).toBeNull()
     expect(screen.queryByLabelText('admin:servers.migration.cli_command')).toBeNull()
@@ -274,9 +279,39 @@ describe('3X-UI to Passwall Node node-host migration command', () => {
     expect(releaseReads).not.toHaveBeenCalled()
     useAuthStore.setState({ role: 'admin' })
     view.rerender(<NodeMigrationPreviewDialog server={{ ...server, panel_type: 'psp' }} onClose={vi.fn()} />)
-    await screen.findByText('admin:servers.migration.unsupported_server')
+    await screen.findByText('admin:servers.migration.already_native')
     expect(api.get).not.toHaveBeenCalled()
     expect(releaseReads).not.toHaveBeenCalled()
+  })
+  it('keeps pending configuration blockers visible with a direct Nodes action even when compatibility details are folded', async () => {
+    reads({ ...preview, blockers: [{ code: 'config_not_synced', node_id: 3 }], can_migrate: false })
+    mount(<NodeMigrationPreviewDialog server={server} onClose={vi.fn()} />)
+    expect(await screen.findByText(/admin:servers.migration.issue.config_not_synced/)).toBeTruthy()
+    expect(screen.getByRole('link', { name: 'admin:servers.migration.resolve_nodes' }).getAttribute('href')).toBe('/admin/nodes')
+    expect(screen.getByRole('button', { name: 'admin:servers.migration.details' }).getAttribute('aria-expanded')).toBe('false')
+    expect(generateButton().disabled).toBe(true)
+    expect(command()).toBeNull()
+    expect(api.post).not.toHaveBeenCalled()
+  })
+  it('refreshes a changed source once and offers installation on the same confirmed native identity without another migration preview', async () => {
+    reads({ ...preview, blockers: [{ code: 'source_not_3xui' }], can_migrate: false })
+    const refresh = vi.fn()
+    const install = vi.fn()
+    const onClose = vi.fn()
+    const view = mount(<NodeMigrationPreviewDialog server={server} onClose={onClose} onRefreshServer={refresh} onNativeInstall={install} />)
+    await screen.findByText('admin:servers.migration.issue.source_not_3xui')
+    await waitFor(() => expect(refresh).toHaveBeenCalledOnce())
+    const initialRequests = api.get.mock.calls.filter(([url]) => url === endpoint).length
+    const native = { ...server, panel_type: 'psp' as const, url: 'psp://original-agent-7' }
+    view.rerender(<NodeMigrationPreviewDialog server={native} onClose={onClose} onRefreshServer={refresh} onNativeInstall={install} />)
+    await screen.findByText('admin:servers.migration.already_native')
+    expect(screen.queryByText('admin:servers.migration.issue.source_not_3xui')).toBeNull()
+    expect(screen.queryByRole('combobox', { name: 'admin:servers.native.agent_version' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'admin:servers.migration.continue_native_install' }))
+    expect(install).toHaveBeenCalledWith(native)
+    expect(onClose).toHaveBeenCalledOnce()
+    expect(api.get.mock.calls.filter(([url]) => url === endpoint)).toHaveLength(initialRequests)
+    expect(api.post).not.toHaveBeenCalled()
   })
   it.each([{ server_id: 8 }, { command: '' }, { expires_at: 'bad-date' }, { expires_at: '2020-01-01T00:00:00Z' }])('rejects invalid issued command material: %j', async invalid => {
     reads()

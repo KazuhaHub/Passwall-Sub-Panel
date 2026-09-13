@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type Dispatch, type SetStateAction } from 'react'
 import {
   Autocomplete,
+  Alert,
   createFilterOptions,
   Box,
   Button,
@@ -927,8 +928,8 @@ function parseInboundForEdit(node: Node, ib: InboundDetail): InboundFormState {
   const tproxyVal = stringValue(sockopt.tproxy) as InboundFormState['sockopt_tproxy']
 
   // Map 3X-UI's wire-level protocol name back onto our CreateProtocol enum.
-  // Shadowsocks splits between legacy SS and SS-2022 based on the method
-  // prefix; everything else maps 1:1.
+  // Only the three allowlisted SS-2022 methods reach this structured parser;
+  // legacy Shadowsocks must never be silently mapped onto VLESS.
   let protocol: CreateProtocol = 'vless'
   switch (ib.protocol) {
     case 'vmess': protocol = 'vmess'; break
@@ -938,7 +939,7 @@ function parseInboundForEdit(node: Node, ib: InboundDetail): InboundFormState {
     case 'tuic': protocol = 'tuic'; break
     case 'naive': protocol = 'naive'; break
     case 'shadowsocks':
-      protocol = stringValue(settings.method).startsWith('2022-') ? 'ss2022' : 'vless'
+      protocol = 'ss2022'
       break
     case 'vless':
     default:
@@ -2391,9 +2392,14 @@ export default function NodesView() {
   const [editInboundBusy, setEditInboundBusy] = useState(false)
   const [editInboundLoading, setEditInboundLoading] = useState(false)
   const [editInboundForm, setEditInboundForm] = useState<InboundFormState>(EMPTY_INBOUND)
-  const [editInboundUnsupported, setEditInboundUnsupported] = useState(false)
+  const [editInboundUnsupported, setEditInboundUnsupported] = useState<'' | 'protocol' | 'ss_method'>('')
+  const [editInboundLoadError, setEditInboundLoadError] = useState('')
+  const [editInboundReady, setEditInboundReady] = useState(false)
+  const [editInboundSyncNotice, setEditInboundSyncNotice] = useState(false)
+  const editInboundIntent = useRef(0)
   const [editInboundGenBusy, setEditInboundGenBusy] = useState(false)
   const [editingInboundNode, setEditingInboundNode] = useState<Node | null>(null)
+  useEffect(() => () => { editInboundIntent.current += 1 }, [])
   // Advanced-mode toggle is per-dialog UI state, not part of the form
   // (it doesn't persist to backend). Tracked separately so opening edit
   // doesn't carry the create dialog's mode.
@@ -2980,56 +2986,85 @@ export default function NodesView() {
   }
 
   async function openEditInbound(n: Node) {
+    const intent = ++editInboundIntent.current
     setEditingInboundNode(n)
-    setEditInboundUnsupported(false)
+    setEditInboundUnsupported('')
+    setEditInboundLoadError('')
+    setEditInboundReady(false)
+    setEditInboundSyncNotice(false)
     setEditInboundLoading(true)
+    setEditInboundGenBusy(false)
     setEditAdvanced(false)
     setEditInboundOpen(true)
-    setEditInboundForm({
-      ...EMPTY_INBOUND,
-      panel_id: n.panel_id,
-      display_name: n.display_name,
-      server_address: n.server_address,
-      region: n.region,
-      tags_text: (n.tags ?? []).join(', '),
-      sort_order: n.sort_order,
-      vless_flow: n.flow ?? 'xtls-rprx-vision',
-      enable: n.enabled,
-    })
+    // Clear the previous form, but do not render editable defaults while the
+    // requested configuration is missing. A metadata row is not an inbound.
+    setEditInboundForm(EMPTY_INBOUND)
     try {
       const detail = await getNode(n.id)
+      if (editInboundIntent.current !== intent) return
+      if (detail.node?.id !== n.id) throw new Error(t('admin:nodes.edit_inbound_dialog.invalid_configuration'))
+      setEditingInboundNode(detail.node)
       if (!detail.inbound) {
-        setEditInboundUnsupported(true)
+        setEditInboundLoadError(detail.inbound_error || t('admin:nodes.edit_inbound_dialog.missing_configuration'))
         return
       }
       const ib = detail.inbound
+      if (typeof ib.protocol !== 'string' || !ib.protocol.trim() ||
+          typeof ib.port !== 'number' || !Number.isInteger(ib.port) || ib.port < 1 || ib.port > 65535) {
+        throw new Error(t('admin:nodes.edit_inbound_dialog.invalid_configuration'))
+      }
       if (ib.protocol !== 'vless' && ib.protocol !== 'shadowsocks' &&
           ib.protocol !== 'vmess' && ib.protocol !== 'trojan' &&
           ib.protocol !== 'hysteria2' && ib.protocol !== 'anytls' &&
           ib.protocol !== 'tuic' && ib.protocol !== 'naive') {
-        setEditInboundUnsupported(true)
+        setEditInboundUnsupported('protocol')
         return
       }
-      setEditingInboundNode(detail.node)
+      // Malformed snapshots are read failures, not unsupported protocols. The
+      // forgiving parser below is only safe after verifying JSON object shape.
+      for (const raw of [ib.settings, ib.stream_settings, ib.sniffing]) {
+        if (typeof raw !== 'string') throw new Error(t('admin:nodes.edit_inbound_dialog.invalid_configuration'))
+        const value: unknown = JSON.parse(raw || '{}')
+        if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(t('admin:nodes.edit_inbound_dialog.invalid_configuration'))
+      }
+      if (ib.protocol === 'shadowsocks') {
+        const method = parseJSONSafe(ib.settings).method
+        if (!SS2022_METHODS.some(candidate => candidate.value === method)) {
+          setEditInboundUnsupported('ss_method')
+          return
+        }
+      }
       setEditInboundForm(parseInboundForEdit(detail.node, ib as InboundDetail))
+      setEditInboundSyncNotice(['pending', 'drift', 'failed'].includes(detail.node.config_sync_state || '') || !!detail.inbound_error)
+      setEditInboundReady(true)
     } catch (err) {
-      const msg = (err as { message?: string }).message ?? 'unknown'
-      pushSnack(t('admin:nodes.edit_inbound_dialog.load_failed', { error: msg }), 'error')
-      setEditInboundOpen(false)
-    } finally { setEditInboundLoading(false) }
+      if (editInboundIntent.current !== intent) return
+      const reason = err as { response?: { data?: { error?: string } }; message?: string }
+      setEditInboundLoadError(reason.response?.data?.error || reason.message || t('admin:nodes.edit_inbound_dialog.missing_configuration'))
+    } finally { if (editInboundIntent.current === intent) setEditInboundLoading(false) }
+  }
+
+  function closeEditInbound() {
+    editInboundIntent.current += 1
+    setEditInboundOpen(false)
+    setEditInboundReady(false)
+    setEditInboundForm(EMPTY_INBOUND)
   }
 
   async function genKeysForEdit() {
+    if (!editInboundReady) return
+    const intent = editInboundIntent.current
     setEditInboundGenBusy(true)
     try {
       const kp = await generateRealityKeypair()
+      if (editInboundIntent.current !== intent) return
       setEditInboundForm(f => ({
         ...f,
         private_key: kp.private_key,
         public_key: kp.public_key,
         short_ids_text: kp.short_id,
       }))
-    } finally { setEditInboundGenBusy(false) }
+    } finally { if (editInboundIntent.current === intent) setEditInboundGenBusy(false) }
   }
 
   function genSSPasswordEdit() {
@@ -3039,7 +3074,7 @@ export default function NodesView() {
 
   async function submitEditInbound(e: FormEvent) {
     e.preventDefault()
-    if (!editingInboundNode) return
+    if (!editingInboundNode || !editInboundReady || editInboundLoading || editInboundLoadError || editInboundUnsupported || editInboundBusy) return
     const f = editInboundForm
     const panelType = servers.find(s => s.id === editingInboundNode.panel_id)?.panel_type ?? '3xui'
     if (editAdvanced) {
@@ -3107,7 +3142,7 @@ export default function NodesView() {
         }
       } catch { /* toast via interceptor */ }
       pushSnack(t('admin:nodes.edit_inbound_dialog.saved'), 'success')
-      setEditInboundOpen(false)
+      closeEditInbound()
       void load().catch(() => {})
     } finally { setEditInboundBusy(false) }
   }
@@ -3603,7 +3638,7 @@ export default function NodesView() {
         </DialogActions>
       </Dialog>
       {/* Edit Inbound config dialog (multi-protocol) */}
-      <Dialog open={editInboundOpen} onClose={() => !editInboundBusy && setEditInboundOpen(false)}
+      <Dialog open={editInboundOpen} onClose={() => !editInboundBusy && closeEditInbound()}
         slotProps={{
           paper: { sx: { borderRadius: 3, bgcolor: md.surfaceContainerHigh, width: 800, maxWidth: '95vw' } }
         }}>
@@ -3613,12 +3648,20 @@ export default function NodesView() {
         <DialogContent sx={{ pt: 1 }}>
           {editInboundLoading ? (
             <Box sx={{ display: 'grid', placeItems: 'center', py: 4 }}><CircularProgress size={24} /></Box>
+          ) : editInboundLoadError ? (
+            <Alert severity="error">
+              {t('admin:nodes.edit_inbound_dialog.load_failed', { error: editInboundLoadError })}
+              <Typography variant="body2">{t('admin:nodes.edit_inbound_dialog.load_next')}</Typography>
+            </Alert>
           ) : editInboundUnsupported ? (
             <Typography sx={{ color: md.onSurfaceVariant, py: 2 }}>
-              {t('admin:nodes.edit_inbound_dialog.unsupported')}
+              {t(editInboundUnsupported === 'ss_method' ? 'admin:nodes.edit_inbound_dialog.unsupported_ss_method' : 'admin:nodes.edit_inbound_dialog.unsupported')}
             </Typography>
-          ) : (
+          ) : editInboundReady ? (
             <Box component="form" id="edit-inbound-form" onSubmit={submitEditInbound}>
+              {editInboundSyncNotice && <Typography variant="body2" sx={{ color: md.onSurfaceVariant, mb: 1.5 }}>
+                {t('admin:nodes.edit_inbound_dialog.sync_notice')}
+              </Typography>}
               <InboundFormFields form={editInboundForm} setForm={setEditInboundForm}
                 showMetadata={false}
                 scanSourceName={editingInboundNode?.panel_name}
@@ -3632,11 +3675,13 @@ export default function NodesView() {
                 allowRealityScan={!!editingInboundNode && panelSupports(editingInboundNode.panel_id, 'reality.scan')}
               />
             </Box>
-          )}
+          ) : null}
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setEditInboundOpen(false)} disabled={editInboundBusy} variant="text">{t('common:actions.cancel')}</Button>
-          {!editInboundUnsupported && !editInboundLoading && (
+          <Button onClick={closeEditInbound} disabled={editInboundBusy} variant="text">{t('common:actions.cancel')}</Button>
+          {!!editInboundLoadError && <Button variant="outlined" disabled={editInboundLoading || !editingInboundNode}
+            onClick={() => editingInboundNode && void openEditInbound(editingInboundNode)}>{t('common:actions.retry')}</Button>}
+          {editInboundReady && !editInboundUnsupported && !editInboundLoading && !editInboundLoadError && (
             <Button type="submit" form="edit-inbound-form" variant="contained" disabled={editInboundBusy}
               startIcon={editInboundBusy ? <CircularProgress size={16} color="inherit" /> : null}>
               {t('common:actions.ok')}
