@@ -58,15 +58,17 @@ func TestShippedCompatManifestRangesAndAdvisories(t *testing.T) {
 				}
 			}
 			sui, ok := lookupSUIForPSPVersion(payload, fmt.Sprintf("v%d.9.2", major))
-			if !ok || sui.MaxTestedSUI != "1.6.1" || sui.MinSUI != "" {
-				t.Fatalf("SUI 1.6.1 ceiling missing or an unverified floor was introduced: %#v found=%v", sui, ok)
+			if !ok || sui.MaxTestedSUI != "1.6.2" || sui.MinSUI != "" {
+				t.Fatalf("SUI 1.6.2 ceiling missing or an unverified floor was introduced: %#v found=%v", sui, ok)
 			}
 			if !payload.SUIAdvisories["1.6.0"].AffectsXray {
 				t.Fatal("SUI 1.6.0 core migration warning must remain available")
 			}
-			advisory, ok := payload.SUIAdvisories["1.6.1"]
-			if !ok || advisory.Severity != "info" || advisory.AffectsXray || advisory.Text == "" {
-				t.Fatal("SUI 1.6.1 advisory must describe the unchanged core and new maintenance/login behaviour")
+			for _, key := range []string{"1.6.1", "1.6.2"} {
+				advisory, ok := payload.SUIAdvisories[key]
+				if !ok || advisory.Severity != "info" || advisory.AffectsXray || advisory.Text == "" {
+					t.Fatalf("SUI %s must retain its unchanged-core upgrade information", key)
+				}
 			}
 		})
 	}
@@ -80,7 +82,7 @@ func TestCompatV4ReleaseRange(t *testing.T) {
 			t.Fatalf("V4 initial XUI contract for %q: %#v found=%v", version, xui, ok)
 		}
 		sui, ok := lookupSUIForPSPVersion(payload, version)
-		if !ok || sui.MinSUI != "" || sui.MaxTestedSUI != "1.6.1" {
+		if !ok || sui.MinSUI != "" || sui.MaxTestedSUI != "1.6.2" {
 			t.Fatalf("V4 must retain the verified SUI ceiling without inventing a floor: %q %#v found=%v", version, sui, ok)
 		}
 	}
@@ -142,7 +144,7 @@ func TestCompatV4FetchAppliesPublishedShape(t *testing.T) {
 	if err := fetchAndApply(context.Background(), url); err != nil {
 		t.Fatal(err)
 	}
-	if ActiveMinXUI() != MinXUI || ActiveMaxTestedXUI() != "3.7.0" || ActiveMinSUI() != "" || ActiveMaxTestedSUI() != "1.6.1" {
+	if ActiveMinXUI() != MinXUI || ActiveMaxTestedXUI() != "3.7.0" || ActiveMinSUI() != "" || ActiveMaxTestedSUI() != "1.6.2" {
 		t.Fatal("runtime did not apply the V4 XUI/SUI bounds")
 	}
 	if a, ok := LookupXUIAdvisory("v3.7.0"); !ok || a.AffectsXray || a.Text == "" {
@@ -153,6 +155,9 @@ func TestCompatV4FetchAppliesPublishedShape(t *testing.T) {
 	}
 	if a, ok := LookupSUIAdvisory("v1.6.1"); !ok || a.AffectsXray || a.Severity != "info" || a.Text == "" {
 		t.Fatal("runtime lost the SUI 1.6.1 maintenance/login advisory")
+	}
+	if a, ok := LookupSUIAdvisory("v1.6.2"); !ok || a.AffectsXray || a.Severity != "info" || a.Text == "" {
+		t.Fatal("runtime lost the SUI 1.6.2 settings-save advisory")
 	}
 	cache, err := os.ReadFile(filepath.Join(dir, compatCacheFile))
 	if err != nil {
