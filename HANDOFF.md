@@ -22,6 +22,17 @@ Passwall-Node 的 Xray / sing-box 生产 daemon、精确 core 目录、遥测、
 
 ## 1. 已经定了的（不要重开）
 
+**现有 3X-UI 服务器迁移（2026-09-12，纳入 v4.0.0-beta.4）**：统一管理员“安装 Passwall Node”入口与
+`psp migrate-server` 离线命令，保留原服务器／节点／客户端／挂载 ID、受管配置与凭据、
+分组排序及历史流量。先备份数据库和配置，完全停止所有共用数据库的 PSP 实例与旧 Xray，
+再以预检指纹执行原子转换；重启后对原服务器使用“安装 Passwall Node”，不重复添加记录。
+原生 Passwall Node 重装复用同一安装入口、固定身份与凭据，不执行迁移命令，也不要求停止 PSP；
+Linux、手动、Docker 安装及旧固定凭据导入能力保留，不另建一套重装流程。
+仅迁移可核验的 PSP-managed Xray 四协议快照；不迁移第三方全局配置／手工对象／外部文件，
+依赖缺失或未确认变更明确阻断。旧节点动作进入不可重试的 `retired` 终态，不引入通用恢复流程。
+S-UI 尚未开放：现有快照是有损投影，需要原始 inbound/TLS 比对与真实 sing-box 版本核验。
+操作与边界见 [`docs/server-migration.md`](docs/server-migration.md)。未操作线上部署。
+
 **发行渠道（2026-09-12）**：PSP 与 Passwall Node 使用 `main` + 短期功能分支 + PR/CI，
 不为稳定版／测试版另建长期分支。渠道对应 GitHub 的 Release／Pre-release；安装始终锁定
 准确 release tag，而不是分支或浮动标签。安装页面默认稳定渠道，管理员明确选择渠道和版本；
@@ -112,7 +123,7 @@ sync endpoint，重装不新建 server/node/client 行。原生节点只能编�
 与轮换仍须显式操作。删除采用 fail-closed 规则：仍有节点/客户端，或空 config/roster
 尚未由 agent 精确确认时，不能先删掉认证身份而留下一个继续服务、却再也接管不了的 core。
 
-**安装/重装页面（2026-09-12）**：默认私有 Linux 二进制 + systemd 脚本，手动安装和 Linux Docker
+**统一安装页面（2026-09-12）**：默认私有 Linux 二进制 + systemd 脚本，手动安装和 Linux Docker
 Compose 作为替代；代理节点仍单独添加/配置。安装接口均属现有管理员认证/角色/2FA 路由，秘密
 响应 `no-store`，凭据补录请求审计脱敏；重新查看凭据有 metadata-only 审计，审计失败不释放秘密。
 旧摘要-only 记录无法逆推原文：补回匹配原凭据或明确轮换，不自动改变身份。加密 key 必须与数据库

@@ -222,6 +222,40 @@ export async function getNativeAgentStatus(id: number, signal?: AbortSignal) {
   return data
 }
 
+export interface NodeMigrationIssue {
+  code: string
+  node_id?: number
+  client_id?: number
+}
+
+/** Read-only inspection of PSP-managed data; never includes credentials. */
+export interface NodeMigrationPreview {
+  server_id: number
+  server_name: string
+  core_version: string
+  recommended_core_version: string
+  core_requires_ack: boolean
+  allow_restricted_reality: boolean
+  fingerprint: string
+  node_count: number
+  client_count: number
+  blockers: NodeMigrationIssue[]
+  warnings: NodeMigrationIssue[]
+  can_migrate: boolean
+}
+
+export interface NodeMigrationPreviewOptions {
+  core_version?: string
+  allow_restricted_reality?: boolean
+}
+
+export async function getNodeMigrationPreview(id: number, signal?: AbortSignal, options: NodeMigrationPreviewOptions = {}) {
+  const { data } = await client.get<NodeMigrationPreview>(`/admin/servers/${id}/node-migration-preview`, {
+    params: options, signal, _skipErrorToast: true,
+  })
+  return data
+}
+
 export interface NativeAgentUpgrade {
   task_id: string
   agent_id: string

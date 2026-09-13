@@ -6,6 +6,14 @@ small improvement).
 
 ## 未发布
 
+## v4.0.0-beta.4 — 2026-09-12
+
+- 统一管理员“安装 Passwall Node”入口：原生节点复用原身份和固定凭据，3X-UI 先做只读迁移预检；保留 Linux/systemd、Docker 和手动安装，不另设重复重装入口。
+- 新增 `psp migrate-server` 离线原子转换，保留原服务器、节点、客户端及挂载 ID、受管配置和已确认凭据、分组排序及历史流量；要求预检指纹、核验过的准确 Xray 版本，以及已停止所有 PSP 实例和旧 Xray 的明确确认。
+- 严格阻断未确认配置、凭据冲突、未迁移依赖、unsupported inbound 到期时间和 REALITY + 非空 `finalmask.tcp`；不默默删配置或宣称连接/IP/设备限制完全等价。
+- 转换服务器的旧节点动作保留为不可重试的 `retired` 状态，阻止旧任务迟到或被手动重试后写入新后端；不取消其他服务器或普通用户/邮件/证书任务。
+- S-UI 迁移未开放；Passwall Node 程序仍为 `v0.0.1-beta3`，本次不发布或自动升级节点。维护步骤和验证边界见 [beta4 发行说明](docs/releases/v4.0.0-beta.4.md)。
+
 ## v4.0.0-beta.2 — 2026-09-12
 
 ### Passwall Node 安装向导

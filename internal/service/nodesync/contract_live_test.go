@@ -38,6 +38,17 @@ import (
 //	PSP_LIVE_NODE_REPO=/absolute/path/to/Passwall-Node \
 //	  go test ./internal/service/nodesync -run TestLive_RealNodeAgentContract -v
 func TestLive_RealNodeAgentContract(t *testing.T) {
+	runRealNodeAgentContract(t, false)
+}
+
+// This variant starts from an applied 3X-UI record, performs the actual offline
+// SQL conversion, and exercises the same published Node receiver/report path.
+// It verifies identity/credential rehydration, not a real core handshake.
+func TestLive_RealNodeMigratedServerContract(t *testing.T) {
+	runRealNodeAgentContract(t, true)
+}
+
+func runRealNodeAgentContract(t *testing.T, migrate bool) {
 	nodeRepoPath := os.Getenv("PSP_LIVE_NODE_REPO")
 	if nodeRepoPath == "" {
 		t.Skip("set PSP_LIVE_NODE_REPO to run the real Passwall-Node contract test")
@@ -56,15 +67,24 @@ func TestLive_RealNodeAgentContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	repos := sqlstore.NewRepos(db)
-	digest := sha256.Sum256([]byte("contract-credential"))
+	credential := "pspn_0123456789abcdefghijklmnopqrstuvwxyzABCDEFG"
+	digest := sha256.Sum256([]byte(credential))
 	agentRow := &domain.NodeAgent{
 		AgentID: "agt_contract", Epoch: 1, CredentialSHA256: hex.EncodeToString(digest[:]),
+		DesiredCoreEngine: domain.NodeCoreXray, DesiredCoreVersion: "26.6.27",
 	}
 	panel := &domain.XUIPanel{
 		Kind: domain.PanelKindPSP, Name: "contract-native", URL: "psp://" + agentRow.AgentID,
 	}
-	if err := repos.NativeAgentProvisioning.Create(ctx, panel, agentRow); err != nil {
-		t.Fatal(err)
+	if migrate {
+		panel.Kind, panel.URL, panel.XrayVersion = domain.PanelKind3XUI, "https://old.example.test", "26.6.27"
+		if err := repos.XUIPanel.Save(ctx, panel); err != nil {
+			t.Fatal(err)
+		}
+	} else {
+		if err := repos.NativeAgentProvisioning.Create(ctx, panel, agentRow); err != nil {
+			t.Fatal(err)
+		}
 	}
 	limit := int64(1_000)
 	user := &domain.User{
@@ -83,6 +103,11 @@ func TestLive_RealNodeAgentContract(t *testing.T) {
 		InboundRemark: "contract", InboundSettings: `{}`, StreamSettings: `{}`,
 		Sniffing: `{}`, Allocate: `{}`, Region: "CA", Enabled: true,
 	}
+	if migrate {
+		now := time.Now().UTC()
+		node.ObservedProtocol, node.ObservedPort = node.DesiredProtocol, node.DesiredPort
+		node.ConfigSyncedAt, node.ConfigSyncState = &now, domain.ConfigSyncSynced
+	}
 	if err := repos.Node.Create(ctx, node); err != nil {
 		t.Fatal(err)
 	}
@@ -94,10 +119,39 @@ func TestLive_RealNodeAgentContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := repos.PSPClient.SetInbounds(ctx, client.ID, []domain.PSPClientInbound{{
-		ClientID: client.ID, NodeID: node.ID, State: domain.ClientApplyPending,
-	}}); err != nil {
+	attachment := domain.PSPClientInbound{ClientID: client.ID, NodeID: node.ID, State: domain.ClientApplyPending}
+	if migrate {
+		attachment.State, attachment.AppliedVersion = domain.ClientApplyApplied, 1
+		attachment.AppliedEmail, attachment.AppliedUUID, attachment.AppliedPassword = client.Email, client.UUID, client.Password
+	}
+	if err := repos.PSPClient.SetInbounds(ctx, client.ID, []domain.PSPClientInbound{attachment}); err != nil {
 		t.Fatal(err)
+	}
+	if migrate {
+		if err := repos.PSPClient.UpdateInboundState(ctx, attachment); err != nil {
+			t.Fatal(err)
+		}
+		sqlstore.ConfigureSecretKey("test-only-migration-contract-key")
+		defer sqlstore.ConfigureSecretKey("")
+		agentRow.PanelID = panel.ID
+		snapshot, err := repos.ServerMigration.Load(ctx, panel.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if blockers := snapshot.Blockers(); len(blockers) != 0 {
+			t.Fatalf("migration fixture blockers: %+v", blockers)
+		}
+		if err := repos.ServerMigration.Apply(ctx, panel.ID, snapshot.Fingerprint(agentRow.DesiredCoreVersion, false), agentRow, credential); err != nil {
+			t.Fatal(err)
+		}
+		pending, err := repos.PSPClient.ListInbounds(ctx, client.ID)
+		if err != nil || len(pending) != 1 || pending[0].Applied() || pending[0].AppliedUUID != user.UUID || pending[0].AppliedPassword != client.Password {
+			t.Fatal("offline conversion forged an applied state or changed confirmed credentials")
+		}
+		panel, err = repos.XUIPanel.GetByID(ctx, panel.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
 	}
 	coordinator, err := nodesync.New(nodesync.Options{
 		Desired: repos.NativeDesired, Agents: repos.NodeAgent, Issues: repos.NodeAgentIssue, Tasks: repos.NodeAgentTask, Users: repos.User,

@@ -25,9 +25,6 @@ import (
 //
 // Call EnsureSchema(db) separately to create the required tables.
 func Open(kind, dsn string) (*gorm.DB, error) {
-	if dsn == "" {
-		return nil, fmt.Errorf("empty database dsn")
-	}
 	// GORM's default logger treats `ErrRecordNotFound` as a warning and
 	// prints the full SQL to stderr. That's fine for general debugging but
 	// half this codebase calls First() with the explicit expectation that
@@ -43,6 +40,20 @@ func Open(kind, dsn string) (*gorm.DB, error) {
 			Colorful:                  false,
 		},
 	)
+	return openWithLogger(kind, dsn, gormLogger)
+}
+
+// OpenQuiet keeps driver initialization diagnostics out of maintenance
+// output: errors may carry a connection string. Callers must also return a
+// sanitized message rather than printing the raw error.
+func OpenQuiet(kind, dsn string) (*gorm.DB, error) {
+	return openWithLogger(kind, dsn, logger.Discard)
+}
+
+func openWithLogger(kind, dsn string, gormLogger logger.Interface) (*gorm.DB, error) {
+	if dsn == "" {
+		return nil, fmt.Errorf("empty database dsn")
+	}
 	cfg := &gorm.Config{Logger: gormLogger}
 
 	var db *gorm.DB
@@ -120,6 +131,7 @@ func NewRepos(db *gorm.DB) ports.Repos {
 		PSPClient:               &pspClientRepo{db: db},
 		NodeAgent:               &nodeAgentRepo{db: db},
 		NativeAgentProvisioning: &nativeAgentProvisioningRepo{db: db},
+		ServerMigration:         &serverMigrationRepo{db: db},
 		NodeAgentIssue:          &nodeAgentIssueRepo{db: db},
 		NodeAgentTask:           newNodeAgentTaskRepo(db, defaultNodeAgentTaskQuota()),
 		NativeDesired:           &nativeDesiredRepo{db: db},

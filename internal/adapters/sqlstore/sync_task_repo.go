@@ -2,6 +2,8 @@ package sqlstore
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"time"
 
 	"gorm.io/gorm"
@@ -133,7 +135,8 @@ func (r *syncTaskRepo) MarkRunning(ctx context.Context, id int64) (bool, error) 
 
 func (r *syncTaskRepo) MarkSucceeded(ctx context.Context, id int64) error {
 	now := time.Now()
-	return r.db.WithContext(ctx).Model(&syncTaskRow{}).Where("id = ? AND status <> ?", id, string(domain.SyncTaskCanceled)).
+	return r.db.WithContext(ctx).Model(&syncTaskRow{}).Where("id = ? AND status NOT IN ?", id,
+		[]string{string(domain.SyncTaskCanceled), string(domain.SyncTaskRetired)}).
 		Updates(map[string]any{
 			"status":      string(domain.SyncTaskSucceeded),
 			"last_error":  "",
@@ -142,7 +145,8 @@ func (r *syncTaskRepo) MarkSucceeded(ctx context.Context, id int64) error {
 }
 
 func (r *syncTaskRepo) MarkRetry(ctx context.Context, id int64, lastError string, nextRunAt time.Time) error {
-	return r.db.WithContext(ctx).Model(&syncTaskRow{}).Where("id = ? AND status <> ?", id, string(domain.SyncTaskCanceled)).
+	return r.db.WithContext(ctx).Model(&syncTaskRow{}).Where("id = ? AND status NOT IN ?", id,
+		[]string{string(domain.SyncTaskCanceled), string(domain.SyncTaskRetired)}).
 		Updates(map[string]any{
 			"status":      string(domain.SyncTaskPending),
 			"last_error":  lastError,
@@ -162,13 +166,29 @@ func (r *syncTaskRepo) Cancel(ctx context.Context, id int64) error {
 }
 
 func (r *syncTaskRepo) RetryNow(ctx context.Context, id int64) error {
-	return r.db.WithContext(ctx).Model(&syncTaskRow{}).Where("id = ?", id).
+	// Keep the retirement predicate on the UPDATE itself: a preceding read
+	// alone would allow maintenance to retire the task between read and write.
+	result := r.db.WithContext(ctx).Model(&syncTaskRow{}).Where("id = ? AND status <> ?", id, string(domain.SyncTaskRetired)).
 		Updates(map[string]any{
 			"status":      string(domain.SyncTaskPending),
 			"last_error":  "",
 			"next_run_at": time.Now(),
 			"finished_at": nil,
-		}).Error
+		})
+	if result.Error != nil || result.RowsAffected > 0 {
+		return result.Error
+	}
+	var row syncTaskRow
+	if err := r.db.WithContext(ctx).Select("id, status").First(&row, id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return domain.ErrNotFound
+		}
+		return err
+	}
+	if row.Status == string(domain.SyncTaskRetired) {
+		return fmt.Errorf("%w: task belongs to a retired server backend", domain.ErrConflict)
+	}
+	return nil
 }
 
 func (r *syncTaskRepo) ResetRunning(ctx context.Context) error {

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type MouseEvent } from 'react'
 import { NativeAgentUpgradeDialog } from './NativeAgentUpgradeDialog'
+import { NodeMigrationPreviewDialog } from './NodeMigrationPreviewDialog'
 import NodeReleaseSelector from '@/components/NodeReleaseSelector'
 import { Link as RouterLink } from 'react-router'
 import {
@@ -93,6 +94,7 @@ import { SortableTableCell } from '@/components/SortableTableCell'
 import { usePaged } from '@/hooks/usePaged'
 import { ipCapBadgeTone, type IPCapTone } from '@/utils/capabilities'
 import { copyToClipboard } from '@/utils/clipboard'
+import { useCan } from '@/utils/permissions'
 import {
   type FieldErrors,
   firstError,
@@ -147,6 +149,7 @@ export default function ServersView() {
   const theme = useTheme()
   const md = theme.palette.md
   const { t, i18n } = useTranslation(['admin', 'common'])
+  const canConfigure = useCan('config.write')
 
   const [search, setSearch] = useState('')
   const [probeStates, setProbeStates] = useState<Record<number, ProbeState>>({})
@@ -181,6 +184,7 @@ export default function ServersView() {
 	const [busy, setBusy] = useState(false)
 	const [nativeInstallationTarget, setNativeInstallationTarget] = useState<Server | null>(null)
 	const [nativeUpgradeTarget, setNativeUpgradeTarget] = useState<Server | null>(null)
+  const [migrationTarget, setMigrationTarget] = useState<Server | null>(null)
 	const [nativeProvisioning, setNativeProvisioning] = useState<NativeServerProvisioning | null>(null)
   const [nativeCreationFlow, setNativeCreationFlow] = useState(false)
   const [installationSelection, setInstallationSelection] = useState<NativeInstallationSelection>(DEFAULT_INSTALLATION)
@@ -1334,7 +1338,7 @@ export default function ServersView() {
                         "update available" hint lives in the Version
                         column (see versionCell), not on this button,
                         so the kebab stays neutral. */}
-                    {(s.panel_type === 'psp' || s.capabilities?.includes('panel.upgrade') || s.capabilities?.includes('core.upgrade')) && <IconButton
+                    {(canConfigure || s.panel_type === 'psp' || s.capabilities?.includes('panel.upgrade') || s.capabilities?.includes('core.upgrade')) && <IconButton
                       size="small"
                       onClick={e => openMenu(e, s)}
                       disabled={upgrading === s.id}
@@ -1364,9 +1368,21 @@ export default function ServersView() {
         anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
         transformOrigin={{ vertical: 'top', horizontal: 'right' }}
       >
-        {menuTarget?.panel_type === 'psp' && <MenuItem onClick={() => openNativeInstallation(menuTarget)}>
-          <DownloadIcon fontSize="small" sx={{ mr: 1 }} />
-          {t('admin:servers.action.install_node')}
+        {menuTarget && canConfigure && <MenuItem disabled={menuTarget.panel_type === 'sui'}
+          aria-label={t('admin:servers.passwall_node_install.action')}
+          aria-describedby={menuTarget.panel_type === 'sui' ? 'passwall-node-sui-unsupported' : undefined}
+          sx={{ display: 'block' }} onClick={() => {
+            if (!canConfigure || !menuTarget || menuTarget.panel_type === 'sui') return
+            if (menuTarget.panel_type === 'psp') openNativeInstallation(menuTarget)
+            else if (menuTarget.panel_type === '3xui') { setMigrationTarget(menuTarget); closeMenu() }
+          }}>
+          <Box sx={{ display: 'flex', alignItems: 'center' }}>
+            <DownloadIcon fontSize="small" sx={{ mr: 1 }} />
+            {t('admin:servers.passwall_node_install.action')}
+          </Box>
+          {menuTarget.panel_type === 'sui' && <Typography variant="caption" id="passwall-node-sui-unsupported" sx={{ display: 'block', ml: 3.5, whiteSpace: 'normal', maxWidth: 320 }}>
+            {t('admin:servers.passwall_node_install.sui_unsupported')}
+          </Typography>}
         </MenuItem>}
         {menuTarget?.panel_type === 'psp' && <MenuItem onClick={() => { setNativeUpgradeTarget(menuTarget); closeMenu() }}>
           <UpgradeIcon fontSize="small" sx={{ mr: 1 }} />
@@ -1517,7 +1533,7 @@ export default function ServersView() {
       >
         <DialogTitle>
           {nativeCreationFlow
-            ? t('admin:servers.native.install_title', { name: nativeInstallationTarget?.name ?? '' })
+            ? t('admin:servers.passwall_node_install.title', { name: nativeInstallationTarget?.name ?? '' })
             : editing ? t('admin:servers.edit_title', { name: editing.name }) : t('admin:servers.create')}
           {!editing && form.panel_type === 'psp' && <Stepper activeStep={nativeCreationFlow ? 1 : 0} sx={{ mt: 2 }}>
             <Step><StepLabel>{t('admin:servers.native.step_details')}</StepLabel></Step>
@@ -1525,7 +1541,7 @@ export default function ServersView() {
           </Stepper>}
         </DialogTitle>
         {nativeCreationFlow ? <NativeInstallationDialog
-          embedded server={nativeInstallationTarget} initialProvisioning={nativeProvisioning}
+          embedded newServer server={nativeInstallationTarget} initialProvisioning={nativeProvisioning}
           initialSelection={installationSelection} onClose={closeNativeInstallation}
           onRotate={server => void rotateCredential(server)} rotating={upgrading === nativeInstallationTarget?.id}
         /> : <>
@@ -1666,6 +1682,7 @@ export default function ServersView() {
         </>}
       </Dialog>
       <NativeAgentUpgradeDialog server={nativeUpgradeTarget} onClose={() => { setNativeUpgradeTarget(null); refresh() }} />
+      <NodeMigrationPreviewDialog key={migrationTarget?.id ?? 'closed'} server={migrationTarget} onClose={() => setMigrationTarget(null)} />
       <NativeInstallationDialog
         server={nativeCreationFlow ? null : nativeInstallationTarget}
         initialProvisioning={nativeCreationFlow ? null : nativeProvisioning}
@@ -1746,12 +1763,13 @@ interface NativeInstallationDialogProps {
   onRotate: (server: Server) => void
   rotating?: boolean
   embedded?: boolean
+  newServer?: boolean
   initialSelection?: NativeInstallationSelection
 }
 
 // Installation secrets live only in this open administrator dialog. Reopening
 // reads the same identity/credential; rotation is an explicit, separate action.
-export function NativeInstallationDialog({ server, initialProvisioning, onClose, onRotate, rotating = false, embedded = false, initialSelection = DEFAULT_INSTALLATION }: NativeInstallationDialogProps) {
+export function NativeInstallationDialog({ server, initialProvisioning, onClose, onRotate, rotating = false, embedded = false, newServer = false, initialSelection = DEFAULT_INSTALLATION }: NativeInstallationDialogProps) {
   const { t } = useTranslation(['admin', 'common'])
   const md = useTheme().palette.md
   const [provisioning, setProvisioning] = useState<NativeServerProvisioning | null>(null)
@@ -1915,6 +1933,7 @@ export function NativeInstallationDialog({ server, initialProvisioning, onClose,
 
   const content = <>
     <DialogContent sx={{ display: 'flex', flexDirection: 'column', gap: 2, pt: '12px !important' }}>
+      {server && !newServer && <Alert severity="info">{t('admin:servers.passwall_node_install.existing_hint')}</Alert>}
       <Alert severity="warning">{t('admin:servers.native.private_warning')}</Alert>
       <NativeInstallationMethodFields selection={selection} disabled={rotating} onChange={next => { invalidateMaterials(); setVersion(''); setSelection(next) }} />
       <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
@@ -2012,7 +2031,7 @@ export function NativeInstallationDialog({ server, initialProvisioning, onClose,
   if (embedded) return content
   return <Dialog open={!!server} onClose={onClose} maxWidth={false}
     slotProps={{ paper: { sx: { borderRadius: 3, bgcolor: md.surfaceContainerHigh, width: 760, maxWidth: '94vw' } } }}>
-    <DialogTitle>{t('admin:servers.native.install_title', { name: server?.name ?? '' })}</DialogTitle>
+    <DialogTitle>{t('admin:servers.passwall_node_install.title', { name: server?.name ?? '' })}</DialogTitle>
     {content}
   </Dialog>
 }

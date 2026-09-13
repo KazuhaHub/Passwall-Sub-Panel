@@ -1612,6 +1612,7 @@ type Repos struct {
 	PSPClient               PSPClientRepo
 	NodeAgent               NodeAgentRepo
 	NativeAgentProvisioning NativeAgentProvisioningRepo
+	ServerMigration         ServerMigrationRepo
 	NodeAgentIssue          NodeAgentIssueRepo
 	NodeAgentTask           NodeAgentTaskRepo
 	NativeDesired           NativeDesiredSnapshotRepo

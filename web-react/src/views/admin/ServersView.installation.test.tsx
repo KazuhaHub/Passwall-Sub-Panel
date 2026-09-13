@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { NodeReleaseCatalog } from '@/api/nodeReleases'
 import type { NativeAgentStatus, NativeInstallationFiles, NativeServerProvisioning, Server } from '@/api/servers'
 import { api, installReads, list, mount } from '@/test/adminSaveHarness'
+import { useAuthStore } from '@/stores/auth'
 import ConfirmHost from '@/components/ConfirmHost'
 import ServersView, { isNodeReleaseVersion, NativeInstallationDialog } from './ServersView'
 import { hostFromURL } from './NodesView'
@@ -70,7 +71,7 @@ async function selectMethod(method: 'linux' | 'docker' | 'manual', container: HT
 async function openInstallation(server: Server) {
   const row = (await screen.findByText(server.name)).closest('tr')!
   fireEvent.click(await within(row).findByRole('button', { name: 'admin:servers.action.more' }))
-  fireEvent.click(await screen.findByRole('menuitem', { name: 'admin:servers.action.install_node' }))
+  fireEvent.click(await screen.findByRole('menuitem', { name: 'admin:servers.passwall_node_install.action' }))
 }
 
 function generatedFiles(method: 'docker' | 'manual'): NativeInstallationFiles {
@@ -102,20 +103,45 @@ function materialPreviews(materials: NativeInstallationFiles): string[] {
 
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); vi.restoreAllMocks() })
 
-describe('PSP Node installation', () => {
-  it('opens Install/Reinstall even without upgrade capabilities and never rotates on reopen', async () => {
+describe('Passwall Node installation', () => {
+  it('opens the unified install entry without upgrade capabilities and reuses the original identity and credential on reopen', async () => {
     reads()
     mount(<ServersView />)
     const row = (await screen.findByText(nativeServer.name)).closest('tr')!
     fireEvent.click(within(row).getByRole('button', { name: 'admin:servers.action.more' }))
-    fireEvent.click(await screen.findByRole('menuitem', { name: 'admin:servers.action.install_node' }))
+    expect(screen.getAllByRole('menuitem', { name: 'admin:servers.passwall_node_install.action' })).toHaveLength(1)
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'admin:servers.passwall_node_install.action' }))
     await screen.findByLabelText('admin:servers.native.agent_version')
     expect(versionInput().value).toBe('')
     expect(copyScript().disabled).toBe(true)
     expect((screen.getByLabelText('admin:servers.native.credential') as HTMLInputElement).value).toBe(provisioning.credential)
+    expect((screen.getByLabelText('admin:servers.native.agent_id') as HTMLInputElement).value).toBe(provisioning.agent_id)
+    expect(screen.getByRole('heading', { name: 'admin:servers.passwall_node_install.title' })).toBeTruthy()
+    expect(screen.getByText('admin:servers.passwall_node_install.existing_hint')).toBeTruthy()
+    expect(screen.queryByLabelText('admin:servers.migration.cli_command')).toBeNull()
     expect(api.get).toHaveBeenCalledWith('/admin/servers/7/node-installation', expect.objectContaining({ signal: expect.any(AbortSignal) }))
     expect(api.post.mock.calls.some(([url]) => String(url).includes('rotate-node-credential'))).toBe(false)
     expect(screen.getByText('admin:servers.native.private_warning')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'common:actions.close' }))
+    await openInstallation(nativeServer)
+    await screen.findByLabelText('admin:servers.native.credential')
+    expect((screen.getByLabelText('admin:servers.native.credential') as HTMLInputElement).value).toBe(provisioning.credential)
+    expect((screen.getByLabelText('admin:servers.native.agent_id') as HTMLInputElement).value).toBe(provisioning.agent_id)
+    expect(api.get.mock.calls.filter(([url]) => url === '/admin/servers/7/node-installation').length).toBeGreaterThanOrEqual(2)
+    expect(api.get.mock.calls.some(([url]) => String(url).includes('node-migration-preview'))).toBe(false)
+    expect(api.post.mock.calls.every(([url]) => url === '/admin/servers/probe')).toBe(true)
+    expect(api.put).not.toHaveBeenCalled()
+    expect(api.delete).not.toHaveBeenCalled()
+  })
+
+  it('hides the unified install entry for a non-administrator without reading fixed credentials', async () => {
+    reads()
+    useAuthStore.setState({ role: 'operator' })
+    mount(<ServersView />)
+    const row = (await screen.findByText(nativeServer.name)).closest('tr')!
+    fireEvent.click(within(row).getByRole('button', { name: 'admin:servers.action.more' }))
+    expect(screen.queryByRole('menuitem', { name: 'admin:servers.passwall_node_install.action' })).toBeNull()
+    expect(api.get.mock.calls.some(([url]) => String(url).endsWith('/node-installation') || String(url).includes('node-migration-preview'))).toBe(false)
   })
 
   it('defaults to Passwall Node first and continues to Linux installation in the same dialog after one create', async () => {
@@ -139,6 +165,8 @@ describe('PSP Node installation', () => {
     expect(api.post.mock.calls.filter(([url]) => url === '/admin/servers')).toHaveLength(1)
     expect(screen.getByRole('combobox', { name: 'admin:servers.native.method_label' }).textContent).toBe('admin:servers.native.method.linux')
     expect(versionInput().value).toBe('')
+    expect(screen.getByRole('heading', { name: /^admin:servers\.passwall_node_install\.title/ })).toBeTruthy()
+    expect(screen.queryByText('admin:servers.passwall_node_install.existing_hint')).toBeNull()
     expect(api.get.mock.calls.some(([url]) => String(url).endsWith('/node-installation'))).toBe(false)
   })
 
