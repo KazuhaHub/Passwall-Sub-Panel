@@ -56,7 +56,7 @@ const servers = [
   xray_version: '26.6.27', panel_version: server.panel_type === '3xui' ? '3.7.0' : server.panel_type === 'psp' ? 'v0.0.1-beta2 (fixture)' : '',
   compat_status: 'supported', ...server }));
 const credential = 'fixture-fixed-node-credential-not-production';
-const version = 'v0.0.1-beta3';
+const version = 'v0.0.1-beta4';
 const fingerprint = 'a'.repeat(64);
 const requests = [];
 const failures = [];

@@ -5,6 +5,9 @@ on:
   push:
     branches: [main]
     paths:
+      - 'go.mod'
+      - 'go.sum'
+      - 'internal/adapters/noderelease/**'
       - 'internal/pkg/nodebootstrap/**'
       - 'internal/pkg/operationgate/**'
       - 'internal/transport/http/handler/node_bootstrap*'
@@ -15,6 +18,9 @@ on:
       - 'web-react/scripts/reinstall-browser.mjs'
   pull_request:
     paths:
+      - 'go.mod'
+      - 'go.sum'
+      - 'internal/adapters/noderelease/**'
       - 'internal/pkg/nodebootstrap/**'
       - 'internal/pkg/operationgate/**'
       - 'internal/transport/http/handler/node_bootstrap*'
@@ -29,7 +35,7 @@ permissions:
 
 jobs:
   systemd:
-    name: Ubuntu 24.04 / published Node beta3
+    name: Ubuntu 24.04 / published Node beta4
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:

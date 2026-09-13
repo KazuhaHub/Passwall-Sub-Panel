@@ -49,11 +49,11 @@ const (
 	nodeUnit    = "/etc/systemd/system/passwall-node.service"
 	installLock = "/opt/.passwall-node-install.lock"
 	ownerMarker = nodeRoot + "/.psp-disposable-reinstall-owner"
-	nodeVersion = "v0.0.1-beta3"
-	// The published beta3 annotated tag peels to 91c36bffeae2742784a8fc7a91cab845062a7a1a.
+	nodeVersion = "v0.0.1-beta4"
+	// The published beta4 annotated tag peels to 4b40af2e162a9510a33a243e06dd446ec24afcd5.
 	// The publisher stamps short7; the daemon reports version.String(), not a
 	// bare version. Pin the real identity rather than accepting an arbitrary suffix.
-	nodeReportedIdentity = "v0.0.1-beta3 (91c36bf)"
+	nodeReportedIdentity = "v0.0.1-beta4 (4b40af2)"
 	coreVersion          = "26.6.27"
 )
 
@@ -82,6 +82,9 @@ type fixture struct {
 
 func TestDisposableSystemdNodeReinstall(t *testing.T) {
 	assertDisposable(t)
+	if strings.Contains(nodeReportedIdentity, "_PENDING") {
+		t.Fatal("fill the exact verified published beta4 build identity before running acceptance")
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
 	defer cancel()
 	gin.SetMode(gin.ReleaseMode)
