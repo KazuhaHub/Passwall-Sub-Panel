@@ -25,6 +25,13 @@ Required checks are:
   HTTP request through a real VLESS client/server pair. Durable PSP heartbeat
   receipt must be newer than the installation command, not a cached old-machine
   acknowledgement or node-supplied timestamp.
+- The nonce HTTP target binds only a run-owned documentation IPv6 `/128` on
+  `lo`, with an explicitly verified exact `local` route. The pinned upstream
+  [Xray 26.6.27 freedom safety rule](https://github.com/XTLS/Xray-core/blob/v26.6.27/proxy/freedom/freedom.go)
+  intentionally blackholes loopback/private destinations; this isolated target
+  keeps the production core's protection unchanged. IPv6/route failures fail
+  the gate, with no external/wildcard target or skipped/fallback test. Cleanup
+  closes the target and removes only the exact address this run added.
 - Ordinary reinstall preserves the service PID, fixed credential, static files,
   SQLite state bytes/inode while paused, and PSP IDs/credentials/counter history.
 - Removing only this run's owned Node installation simulates an OS reinstall;

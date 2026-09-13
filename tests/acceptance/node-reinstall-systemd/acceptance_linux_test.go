@@ -647,11 +647,8 @@ func (f *fixture) checkPrivacy() {
 func (f *fixture) proxyHTTP() {
 	n, err := f.repos.Node.GetByID(f.ctx, f.nodeID)
 	must(f.t, err, "proxy inbound port")
-	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("X-PSP-Acceptance", f.nonce)
-		_, _ = io.WriteString(w, "real VLESS proxy "+f.nonce)
-	}))
-	defer target.Close()
+	target, closeTarget := f.proxyTarget()
+	defer closeTarget()
 	var binaries []string
 	must(f.t, filepath.WalkDir(nodeRoot+"/data", func(path string, e os.DirEntry, err error) error {
 		if err != nil {
@@ -749,6 +746,74 @@ func (f *fixture) proxyHTTP() {
 	f.proxyServerDiagnostics(n.DesiredPort)
 	f.readinessDiagnostics()
 	f.t.Fatal("actual VLESS client/server HTTP handshake failed")
+}
+
+// Xray 26.6.27 deliberately blackholes loopback/private freedom destinations.
+// Use only an owned documentation IPv6 /128 with a proven local loopback route,
+// not a production-core exception, wildcard binding, or an external destination.
+func (f *fixture) proxyTarget() (*httptest.Server, func()) {
+	address := net.ParseIP("2001:db8:0:0:" + f.nonce[:4] + ":" + f.nonce[4:8] + ":" + f.nonce[8:12] + ":" + f.nonce[12:])
+	if address == nil {
+		f.t.Fatal("invalid owned documentation IPv6 fixture address")
+	}
+	ip := address.String()
+	cidr := ip + "/128"
+	ctx, cancel := context.WithTimeout(f.ctx, 5*time.Second)
+	addresses, err := exec.CommandContext(ctx, "ip", "-j", "-6", "addr", "show", "dev", "lo").Output()
+	cancel()
+	must(f.t, err, "read existing local IPv6 fixture addresses")
+	var existing []struct {
+		AddrInfo []struct {
+			Local string `json:"local"`
+		} `json:"addr_info"`
+	}
+	must(f.t, json.Unmarshal(addresses, &existing), "parse existing local IPv6 fixture addresses")
+	for _, device := range existing {
+		for _, entry := range device.AddrInfo {
+			if address.Equal(net.ParseIP(entry.Local)) {
+				f.t.Fatal("refusing pre-existing exact documentation IPv6 fixture address")
+			}
+		}
+	}
+	must(f.t, f.command("ip", "-6", "addr", "add", cidr, "dev", "lo", "scope", "host", "nodad"), "add exact owned documentation IPv6 fixture address")
+	var target *httptest.Server
+	var once sync.Once
+	cleanup := func() {
+		once.Do(func() {
+			if target != nil {
+				target.Close()
+			}
+			// t.Cleanup also runs after the main test's cancellation on fatal
+			// pre-return failures; the exact scoped cleanup has its own bound.
+			cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cleanupCancel()
+			must(f.t, exec.CommandContext(cleanupCtx, "ip", "-6", "addr", "del", cidr, "dev", "lo").Run(), "remove exact owned documentation IPv6 fixture address")
+		})
+	}
+	// Also clean up on a fatal route/bind failure before the caller receives it.
+	f.t.Cleanup(cleanup)
+	ctx, cancel = context.WithTimeout(f.ctx, 5*time.Second)
+	routeData, err := exec.CommandContext(ctx, "ip", "-j", "-6", "route", "get", ip).Output()
+	cancel()
+	must(f.t, err, "prove owned documentation IPv6 route")
+	var routes []struct {
+		Type string `json:"type"`
+		Dev  string `json:"dev"`
+		Dst  string `json:"dst"`
+	}
+	must(f.t, json.Unmarshal(routeData, &routes), "parse owned documentation IPv6 route")
+	if len(routes) != 1 || routes[0].Type != "local" || routes[0].Dev != "lo" || !address.Equal(net.ParseIP(routes[0].Dst)) {
+		f.t.Fatal("refusing documentation IPv6 fixture without exact local loopback route")
+	}
+	listener, err := net.Listen("tcp6", net.JoinHostPort(ip, "0"))
+	must(f.t, err, "bind only exact owned documentation IPv6 fixture address")
+	target = &httptest.Server{Listener: listener, Config: &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-PSP-Acceptance", f.nonce)
+		_, _ = io.WriteString(w, "real VLESS proxy "+f.nonce)
+	})}}
+	target.Start()
+	f.t.Log("proxy diagnostics: owned_documentation_ipv6=true route_local_loopback=true target_bound_exact_tcp6=true")
+	return target, cleanup
 }
 
 // Classifications deliberately omit raw private logs, credentials, config and URLs.
