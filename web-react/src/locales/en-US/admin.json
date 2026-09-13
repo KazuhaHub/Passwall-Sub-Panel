@@ -1149,7 +1149,12 @@
     "edit_inbound_dialog": {
       "title": "Edit inbound config",
       "load_failed": "Failed to load existing inbound: {{error}}",
-      "unsupported": "Visual editor only supports VLESS / SS-2022 inbounds.",
+      "unsupported": "This inbound protocol is not supported by the editor. Supported: VLESS, VMess, Trojan, Shadowsocks 2022, Hysteria2, AnyTLS, TUIC and Naive. Keep the original protocol and configuration; do not recreate the node to edit it.",
+      "unsupported_ss_method": "This Shadowsocks method is not supported by the structured editor. Only 2022-blake3-aes-128-gcm, 2022-blake3-aes-256-gcm and 2022-blake3-chacha20-poly1305 are supported. Legacy or unknown methods are not converted to VLESS; keep their original configuration.",
+      "missing_configuration": "No readable inbound configuration is available for this node.",
+      "invalid_configuration": "The inbound configuration is incomplete or invalid.",
+      "load_next": "Check this node's saved configuration or the original server connection, then retry. No editable defaults or changes were created.",
+      "sync_notice": "Editing the saved target configuration; synchronization has not been confirmed. Saving does not prove the proxy core is running.",
       "saved": "Inbound config saved"
     },
     "create_dialog": {

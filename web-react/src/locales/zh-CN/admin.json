@@ -1126,7 +1126,12 @@
     "edit_inbound_dialog": {
       "title": "编辑 Inbound 配置",
       "load_failed": "加载现有 inbound 失败：{{error}}",
-      "unsupported": "该 inbound 协议暂不支持可视化编辑（仅支持 VLESS / SS-2022）",
+      "unsupported": "此 inbound 协议不支持编辑。当前支持 VLESS、VMess、Trojan、Shadowsocks 2022、Hysteria2、AnyTLS、TUIC 和 Naive。请保留原协议与配置，不要为编辑而重新创建节点。",
+      "unsupported_ss_method": "此 Shadowsocks 加密方式不支持结构化编辑，仅支持 2022-blake3-aes-128-gcm、2022-blake3-aes-256-gcm 和 2022-blake3-chacha20-poly1305。不会把旧版或未知加密方式转换成 VLESS，请保留原配置。",
+      "missing_configuration": "此节点暂无可读取的 inbound 配置。",
+      "invalid_configuration": "Inbound 配置不完整或无效。",
+      "load_next": "请检查该节点已保存的配置或原服务器连接后重试；未生成可编辑的默认配置，也未提交任何更改。",
+      "sync_notice": "正在编辑已保存的目标配置，尚未确认同步；保存不代表代理内核已经运行。",
       "saved": "Inbound 配置已保存"
     },
     "create_dialog": {
