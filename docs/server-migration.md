@@ -1,8 +1,12 @@
 # Migrate an existing 3X-UI server to Passwall Node
 
 This is a stopped-panel maintenance operation, not an online panel-type edit.
-The administrator's Servers menu provides **Migrate to Passwall Node** as a
-read-only preflight. It does not stop services or change the database.
+The administrator's Servers menu has one **Install Passwall Node** entry. On a
+3X-UI server it opens a read-only migration preflight; on an existing Passwall
+Node server it opens the same installation methods used for initial setup.
+Opening either flow does not stop services or change the server identity.
+Ordinary Passwall Node reinstallation does not run this migration command or
+require stopping PSP. S-UI migration is not yet available.
 
 ## What stays the same
 
@@ -24,6 +28,11 @@ Uncaptured/unconfirmed configuration, credential rotations, cross-server/orphan
 attachments, unsupported inbound expiry, external certificate/key files and
 detected local/global dependencies block conversion. Protocol/environment
 validation is not a substitute for testing the actual installed core.
+REALITY with a nonempty `finalmask.tcp` also blocks conversion: the old upstream
+push normalizes this field away, whereas Passwall Node would pass it to Xray.
+Clean it on the original node, recapture and confirm the configuration before
+migrating; the conversion does not silently strip fields. See the upstream
+[Xray issue](https://github.com/XTLS/Xray-core/issues/6453) for the reported crash.
 
 Global routing, DNS, outbounds, manually created clients/inbounds and external
 files are **not** migrated. Before accepting `--managed-only`, verify that the
@@ -52,8 +61,8 @@ verified actual sing-box version before lossless conversion can be offered.
 5. Run a dry preview using the same PSP binary/image, config, database and env.
    Dry run is the default. Copy its fingerprint if the online preview became stale.
 6. Run `--apply` with that fingerprint, exact core version and the three explicit
-   operational confirmations. Restart PSP, then use **Install / Reinstall Passwall
-   Node** on the **same server record**. Do not add another server or rebuild nodes.
+   operational confirmations. Restart PSP, then use **Install Passwall Node**
+   on the **same server record**. Do not add another server or rebuild nodes.
 7. Confirm the real agent/core reports running and applied config/client state;
    test subscriptions and connections before declaring the migration complete.
 

@@ -13,6 +13,7 @@ const knownIssues = new Set([
   'duplicate_username', 'missing_attachment', 'orphan_attachment', 'duplicate_attachment', 'flow_conflict',
   'global_config_dependency', 'fallback_environment_dependency', 'socket_environment_dependency',
   'connection_limits_not_enforced', 'restricted_core', 'reality_compatibility_normalization',
+  'unsafe_reality_finalmask_tcp',
 ])
 const issueAliases: Record<string, string> = {
   legacy_ownership_pending: 'legacy_ownership', inbound_expiry_unsupported: 'inbound_expiry',
@@ -102,7 +103,7 @@ export function NodeMigrationPreviewDialog({ server, onClose }: { server: Server
   }
 
   return <Dialog open={!!server} onClose={onClose} fullWidth maxWidth="md">
-    <DialogTitle>{t('admin:servers.migration.title', { name: server?.name ?? '' })}</DialogTitle>
+    <DialogTitle>{t('admin:servers.passwall_node_install.title', { name: server?.name ?? '' })}</DialogTitle>
     <DialogContent>
       <Stack spacing={2} sx={{ pt: 1 }}>
         <Alert severity="info">{t('admin:servers.migration.preview_only')}</Alert>

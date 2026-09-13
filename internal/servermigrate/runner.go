@@ -57,7 +57,7 @@ func run(ctx context.Context, args []string, out, errOut io.Writer, open opener)
 		fmt.Fprintln(errOut, "Only PSP-managed snapshots migrate. Global routing/DNS/outbounds, manual")
 		fmt.Fprintln(errOut, "clients/inbounds and external files do not. Verify no required dependency is lost.")
 		fmt.Fprintln(errOut, "A configuration change since preview is rejected; rerun preview instead of guessing.")
-		fmt.Fprintln(errOut, "Restart PSP after conversion, then use Install / Reinstall on the SAME server.")
+		fmt.Fprintln(errOut, "Restart PSP after conversion, then use Install Passwall Node on the SAME server.")
 		fs.PrintDefaults()
 	}
 	id := fs.Int64("server-id", 0, "existing 3X-UI server database ID")
@@ -142,7 +142,7 @@ func run(ctx context.Context, args []string, out, errOut io.Writer, open opener)
 		fmt.Fprintln(errOut, "ERROR: conversion result could not be confirmed; inspect the original server record/current database state before retrying or restarting old Xray. Do not delete or recreate the server.")
 		return 1
 	}
-	fmt.Fprintf(out, "Converted server %d in place. Restart PSP, then open this SAME server's Install / Reinstall Passwall Node action. Its fixed installation credential is stored encrypted, not printed here.\n", *id)
+	fmt.Fprintf(out, "Converted server %d in place. Restart PSP, then open this SAME server's Install Passwall Node action. Its fixed installation credential is stored encrypted, not printed here.\n", *id)
 	fmt.Fprintln(out, "Historical traffic is retained; bytes not polled from old Xray before it stopped cannot be recovered. Wait for the real node/core to report applied state before treating migration as complete.")
 	return 0
 }

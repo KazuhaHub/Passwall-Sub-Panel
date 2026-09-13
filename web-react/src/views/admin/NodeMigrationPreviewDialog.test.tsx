@@ -34,8 +34,12 @@ describe('3X-UI to Passwall Node read-only migration preview', () => {
     reads()
     mount(<ServersView />)
     await openMenu(server)
-    fireEvent.click(await screen.findByRole('menuitem', { name: 'admin:servers.migration.action' }))
+    expect(screen.getAllByRole('menuitem', { name: 'admin:servers.passwall_node_install.action' })).toHaveLength(1)
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'admin:servers.passwall_node_install.action' }))
     await screen.findByText('admin:servers.migration.ready')
+    expect(screen.getByRole('heading', { name: 'admin:servers.passwall_node_install.title' })).toBeTruthy()
+    expect(screen.getByText('admin:servers.migration.preview_only')).toBeTruthy()
+    expect(screen.queryByLabelText('admin:servers.native.credential')).toBeNull()
     expect(cli()?.value).toBe(`psp migrate-server --server-id 7 --core-version 26.6.27 --expected-fingerprint ${'a'.repeat(64)} --all-psp-stopped --old-xray-stopped --managed-only --apply`)
     const docker = screen.getByLabelText('admin:servers.migration.docker_commands') as HTMLTextAreaElement
     expect(docker.value).toContain('docker compose stop YOUR_PSP_SERVICE')
@@ -53,17 +57,22 @@ describe('3X-UI to Passwall Node read-only migration preview', () => {
     expect(api.delete).not.toHaveBeenCalled()
   })
 
-  it('does not offer migration for Passwall Node or S-UI records', async () => {
+  it('uses the same entry for Passwall Node and explicitly disables unsupported S-UI installation', async () => {
     const native: Server = { ...server, id: 8, name: 'native-node', panel_type: 'psp', capabilities: [] }
-    const sui: Server = { ...server, id: 9, name: 'sui-node', panel_type: 'sui', capabilities: ['panel.upgrade'] }
+    const sui: Server = { ...server, id: 9, name: 'sui-node', panel_type: 'sui', capabilities: [] }
     reads(preview, [native, sui])
     mount(<ServersView />)
     await openMenu(native)
-    expect(screen.queryByRole('menuitem', { name: 'admin:servers.migration.action' })).toBeNull()
+    expect(screen.getByRole('menuitem', { name: 'admin:servers.passwall_node_install.action' }).getAttribute('aria-disabled')).not.toBe('true')
     fireEvent.keyDown(screen.getByRole('menu'), { key: 'Escape' })
     await openMenu(sui)
-    expect(screen.queryByRole('menuitem', { name: 'admin:servers.migration.action' })).toBeNull()
+    const unsupported = screen.getByRole('menuitem', { name: 'admin:servers.passwall_node_install.action' })
+    expect(unsupported.getAttribute('aria-disabled')).toBe('true')
+    expect(screen.getByText('admin:servers.passwall_node_install.sui_unsupported')).toBeTruthy()
+    fireEvent.click(unsupported)
     expect(api.get.mock.calls.some(([url]) => String(url).includes('node-migration-preview'))).toBe(false)
+    expect(api.get.mock.calls.some(([url]) => String(url).endsWith('/node-installation'))).toBe(false)
+    expect(api.post.mock.calls.every(([url]) => url === '/admin/servers/probe')).toBe(true)
   })
 
   it('hides the migration menu from operators even when other server actions exist', async () => {
@@ -71,7 +80,7 @@ describe('3X-UI to Passwall Node read-only migration preview', () => {
     useAuthStore.setState({ role: 'operator' })
     mount(<ServersView />)
     await openMenu(server)
-    expect(screen.queryByRole('menuitem', { name: 'admin:servers.migration.action' })).toBeNull()
+    expect(screen.queryByRole('menuitem', { name: 'admin:servers.passwall_node_install.action' })).toBeNull()
     expect(api.get.mock.calls.some(([url]) => String(url).includes('node-migration-preview'))).toBe(false)
   })
 
@@ -96,13 +105,14 @@ describe('3X-UI to Passwall Node read-only migration preview', () => {
       'external_file_dependency', 'global_config_dependency', 'local_fallback_dependency',
       'fallback_environment_dependency', 'socket_environment_dependency', 'connection_limits_not_enforced',
       'core_not_verified', 'core_ack_required', 'restricted_core', 'reality_compatibility_normalization',
-      'core_version_changed', 'managed_scope',
+      'core_version_changed', 'managed_scope', 'unsafe_reality_finalmask_tcp',
     ]
     reads({ ...preview, blockers: codes.map(code => ({ code })), can_migrate: false })
     mount(<NodeMigrationPreviewDialog server={server} onClose={() => {}} />)
     await screen.findByText('admin:servers.migration.blockers')
     expect(screen.queryByText('admin:servers.migration.issue.unknown')).toBeNull()
     expect(screen.getByText('admin:servers.migration.issue.duplicate_listener_binding')).toBeTruthy()
+    expect(screen.getByText('admin:servers.migration.issue.unsafe_reality_finalmask_tcp')).toBeTruthy()
     expect(screen.getByText('admin:servers.migration.issue.connection_limits_not_enforced')).toBeTruthy()
     expect(screen.getByText('admin:servers.migration.issue.reality_compatibility_normalization')).toBeTruthy()
     expect(cli()).toBeNull()

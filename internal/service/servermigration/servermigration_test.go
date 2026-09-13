@@ -55,6 +55,40 @@ func TestSnapshotPreservesSupportedSelfContainedConfigurations(t *testing.T) {
 	}
 }
 
+func TestSnapshotRealityFinalmaskTCPRequiresExplicitCleanup(t *testing.T) {
+	for _, test := range []struct {
+		name, security, finalmask string
+		unsafe                    bool
+	}{
+		{"unsafe_tcp", "reality", `{"tcp":[{"type":"fragment"}]}`, true},
+		{"unsafe_tcp_with_udp", "reality", `{"tcp":[{"type":"fragment"}],"udp":[{"type":"salamander"}]}`, true},
+		{"empty_tcp", "reality", `{"tcp":[]}`, false},
+		{"udp_only", "reality", `{"udp":[{"type":"salamander"}]}`, false},
+		{"empty_tcp_with_udp", "reality", `{"tcp":[],"udp":[{"type":"salamander"}]}`, false},
+		{"non_reality", "tls", `{"tcp":[{"type":"fragment"}]}`, false},
+	} {
+		for _, enabled := range []bool{true, false} {
+			t.Run(test.name+"/enabled="+map[bool]string{true: "true", false: "false"}[enabled], func(t *testing.T) {
+				snapshot := migrationFixture()
+				snapshot.Nodes[0].Enabled = enabled
+				snapshot.Nodes[0].StreamSettings = `{"network":"tcp","security":"` + test.security + `","finalmask":` + test.finalmask + `}`
+				original := snapshot.Nodes[0].StreamSettings
+				issues := snapshot.Blockers()
+				if test.unsafe {
+					if len(issues) != 1 || issues[0] != (domain.MigrationIssue{Code: "unsafe_reality_finalmask_tcp", NodeID: snapshot.Nodes[0].ID}) {
+						t.Fatalf("unsafe REALITY/TCP mask not precisely blocked: %+v", issues)
+					}
+				} else if len(issues) != 0 {
+					t.Fatalf("safe mask combination blanket rejected: %+v", issues)
+				}
+				if snapshot.Nodes[0].StreamSettings != original {
+					t.Fatal("preflight silently cleaned or otherwise rewrote the snapshot")
+				}
+			})
+		}
+	}
+}
+
 func TestSnapshotFingerprintStableAndExcludesObservations(t *testing.T) {
 	s := migrationFixture()
 	want := s.Fingerprint("26.7.28", false)

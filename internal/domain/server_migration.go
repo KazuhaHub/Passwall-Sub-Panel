@@ -211,6 +211,14 @@ func (s *ServerMigrationSnapshot) Blockers() []MigrationIssue {
 				add("invalid_config", n.ID, 0)
 				continue
 			}
+			if i == 1 && unsafeMigrationRealityFinalmaskTCP(object) {
+				// The old 3X-UI push strips this combination, while PN forwards
+				// streamSettings verbatim. Xray 26.6.27 (a selectable release)
+				// panics on its first REALITY connection with a TCP mask
+				// (XTLS/Xray-core#6453). Do not silently restore a hazardous
+				// stale snapshot, or silently delete the administrator's intent.
+				add("unsafe_reality_finalmask_tcp", n.ID, 0)
+			}
 			if _, exists := object["clients"]; exists {
 				add("snapshot_contains_clients", n.ID, 0)
 			}
@@ -353,6 +361,16 @@ func canonicalMigrationJSON(raw string) string {
 	}
 	encoded, _ := json.Marshal(object)
 	return string(encoded)
+}
+
+func unsafeMigrationRealityFinalmaskTCP(stream map[string]any) bool {
+	security, _ := stream["security"].(string)
+	if !strings.EqualFold(strings.TrimSpace(security), "reality") {
+		return false
+	}
+	finalmask, _ := stream["finalmask"].(map[string]any)
+	tcp, _ := finalmask["tcp"].([]any)
+	return len(tcp) > 0
 }
 
 func migrationConfigDependencies(object map[string]any) []string {

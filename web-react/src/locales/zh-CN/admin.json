@@ -1880,10 +1880,14 @@
     "cred_add_field": "添加字段"
   },
   "servers": {
+    "passwall_node_install": {
+      "action": "安装 Passwall Node",
+      "title": "安装 Passwall Node · {{name}}",
+      "existing_hint": "重装复用原服务器、节点及固定凭据，无需重新添加，也不要求停止 PSP。仍须遵守安装器检查并停止旧节点实例后再复用身份；此入口不替代远程升级。",
+      "sui_unsupported": "暂不支持为现有 S-UI 服务器安装 Passwall Node，不会执行迁移或转换。"
+    },
     "migration": {
-      "action": "迁移到 Passwall Node",
-      "title": "迁移到 Passwall Node · {{name}}",
-      "preview_only": "此页面仅提供只读预检，不会在线转换服务器，也不会下发安装任务。",
+      "preview_only": "现有 3X-UI 服务器须先完成离线迁移，再安装 Passwall Node。此页面仅提供只读迁移预检，不直接生成安装脚本，不会在线转换服务器或下发安装任务。",
       "preserved": "迁移成功后保留原服务器、节点与客户端 ID、订阅地址和端口、代理凭据、分组、排序及历史流量。不要另加服务器或重建节点。",
       "scope": "仅迁移 PSP 管理的数据库快照与客户端，不导入手动添加的客户端／入站、全局 DNS、路由、出站和外部文件。--managed-only 表示明确确认这些受管节点不依赖上述未迁移对象或配置，并非授权删除其他配置。",
       "maintenance": "请先备份数据库、配置及加密密钥。正式执行前，必须停止使用该数据库的所有 PSP 实例，并停止此服务器上旧的 Xray 进程。仅 3X-UI 面板离线不代表 Xray 已停止。迁移期间代理服务会中断。",
@@ -1903,7 +1907,7 @@
       "cli_command": "离线 PSP CLI 命令",
       "docker_instructions": "Docker Compose：将 YOUR_PSP_SERVICE 替换为实际面板服务名（不是容器名），在其 Compose 目录运行，并使用相同镜像、配置与数据库。其他 PSP 实例须另行停止，节点机上的旧 Xray 也须停止。仅一次性命令成功后才启动面板；失败时不要盲目执行整段命令。",
       "docker_commands": "Docker Compose 一次性执行示例",
-      "after_restart": "重启 PSP 后，在这台原服务器的菜单中选择“安装／重装”，安装 Passwall Node。保留原服务器记录及节点，无需重新添加。",
+      "after_restart": "重启 PSP 后，在这台原服务器的菜单中选择“安装 Passwall Node”。保留原服务器记录及节点，无需重新添加。",
       "invalid_command": "预检未返回安全且已完整确认的迁移标识。请重新预检；此处不展示正式执行命令。",
       "issue": {
         "missing_snapshot": "节点缺少 PSP 管理的入站快照，请先抓取并核验配置。",
@@ -1943,6 +1947,7 @@
         "connection_limits_not_enforced": "受管客户端配置了 Passwall Node 当前不执行的 IP／设备限制，请核对这一策略差异。",
         "restricted_core": "已主动确认的 Xray 版本存在已核验客户端兼容性限制，不代表所有客户端均兼容。",
         "reality_compatibility_normalization": "会按所选核验内核规范化 REALITY 客户端兼容参数，请在切换前核对客户端兼容性。",
+        "unsafe_reality_finalmask_tcp": "REALITY 配置含非空 finalmask.tcp，请在原节点清理后重新抓取并确认配置，再执行迁移；不会静默删除字段。",
         "unknown": "其他迁移问题：{{code}}。请在正式执行前核对。"
       }
     },
@@ -2025,7 +2030,6 @@
     },
     "native": {
       "outbound_hint": "Passwall Node 主动连接 Passwall Sub Panel，不需要入站管理 URL 或上游面板凭据。先填写服务器信息并选择安装方式，再生成该服务器的专属安装文件；inbound 在节点页面单独配置。",
-      "created_title": "安装 Passwall Node",
       "step_details": "服务器信息",
       "step_install": "安装 Passwall Node",
       "create_continue": "创建并继续安装",
@@ -2087,7 +2091,6 @@
         "docker": "1. 保存服务器并生成专属 Compose 与私有凭据文件。\n2. 将全部文件放入目标 Linux 服务器的私有目录，执行提供的 Compose 命令。\n3. 保留数据目录，确认容器与心跳后单独配置 inbound。",
         "manual": "1. 选择平台和准确版本，下载对应发行档及 SHA256 校验和并核验。\n2. 解压程序，将全部安装文件放入同一私有目录，并限制凭据文件读取权限。\n3. 核对 Passwall Node 版本，以提供的命令前台运行；确认心跳后再单独配置 inbound。"
       },
-      "once_warning": "这是长期节点凭据与包含凭据的私有安装文件。请勿分享、上传日志或提交到 Git；管理员可从安装/重装重新读取。",
       "agent_id": "Agent ID",
       "credential": "长期节点凭据",
       "endpoint": "Passwall Sub Panel 同步地址",
@@ -2099,7 +2102,6 @@
       "rotate_warning": "确定轮换「{{name}}」的凭据？当前凭据会立即失效；在替换凭据文件并重启 agent 前，core 会离线执行最后一次确认的状态。",
       "rotate_confirm": "轮换凭据",
       "rotated": "凭据已轮换。请替换节点上的私有凭据文件并重启服务。",
-      "install_title": "安装 / 重装 Passwall Node — {{name}}",
       "private_warning": "专属安装文件包含长期节点凭据，请作为私有文件保管。请勿分享、上传日志或提交到 Git；仅在目标服务器使用。重新打开本窗口不会轮换凭据。",
       "install_method": "推荐 Linux 二进制＋systemd，也可选择 Docker 或手动安装。systemd 方式使用专用 passwall-node 用户；程序、配置和数据分别保存在 /opt/passwall-node/bin、config、data，凭据文件权限为 0600。",
       "installation_loading": "正在读取安装配置…",
@@ -2200,8 +2202,7 @@
       "upgrade_panel": "升级 3X-UI 面板（最新）",
       "upgrade_xray": "升级 Xray",
       "select_core": "选择内核与版本",
-      "rotate_node_credential": "轮换节点凭据",
-      "install_node": "安装 / 重装 Passwall Node"
+      "rotate_node_credential": "轮换节点凭据"
     },
     "core_tier": {
       "recommended": "推荐（多客户端兼容）",
