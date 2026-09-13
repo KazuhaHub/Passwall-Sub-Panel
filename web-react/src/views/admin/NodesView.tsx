@@ -3009,6 +3009,10 @@ export default function NodesView() {
         return
       }
       const ib = detail.inbound
+      if (typeof ib.protocol !== 'string' || !ib.protocol.trim() ||
+          typeof ib.port !== 'number' || !Number.isInteger(ib.port) || ib.port < 1 || ib.port > 65535) {
+        throw new Error(t('admin:nodes.edit_inbound_dialog.invalid_configuration'))
+      }
       if (ib.protocol !== 'vless' && ib.protocol !== 'shadowsocks' &&
           ib.protocol !== 'vmess' && ib.protocol !== 'trojan' &&
           ib.protocol !== 'hysteria2' && ib.protocol !== 'anytls' &&

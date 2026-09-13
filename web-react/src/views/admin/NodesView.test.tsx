@@ -61,6 +61,14 @@ it.each([
   ['an upstream read error', { node, clients: [], inbound_error: 'agent is unavailable' }],
   ['malformed saved JSON', { node, clients: [], inbound: { ...inbound, settings: '{' } }],
   ['a non-object saved JSON', { node, clients: [], inbound: { ...inbound, stream_settings: '[]' } }],
+  ['a missing protocol', { node, clients: [], inbound: { ...inbound, protocol: undefined } }],
+  ['a blank protocol', { node, clients: [], inbound: { ...inbound, protocol: '' } }],
+  ['a whitespace-only protocol', { node, clients: [], inbound: { ...inbound, protocol: '   ' } }],
+  ['a missing port', { node, clients: [], inbound: { ...inbound, port: undefined } }],
+  ['a zero port', { node, clients: [], inbound: { ...inbound, port: 0 } }],
+  ['an out-of-range port', { node, clients: [], inbound: { ...inbound, port: 65536 } }],
+  ['a non-number port', { node, clients: [], inbound: { ...inbound, port: '443' } }],
+  ['a fractional port', { node, clients: [], inbound: { ...inbound, port: 443.5 } }],
 ])('shows a retryable read failure rather than unsupported protocol for %s', async (_, detail) => {
   installReads({ '/admin/nodes': list([node]), '/admin/nodes/1': detail })
   mount(<NodesView />)
