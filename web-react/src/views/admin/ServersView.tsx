@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type MouseEvent } from 'react'
 import { NativeAgentUpgradeDialog } from './NativeAgentUpgradeDialog'
 import { NodeMigrationPreviewDialog } from './NodeMigrationPreviewDialog'
+import { ReinstallBackendDialog } from './ReinstallBackendDialog'
 import NodeReleaseSelector from '@/components/NodeReleaseSelector'
 import { Link as RouterLink } from 'react-router'
 import {
@@ -59,6 +60,7 @@ import {
   createServer,
   createNativeInstallScript,
   createNativeInstallationFiles,
+  createNodeInstallCommand,
   deleteServer,
 	getNativeAgentStatus,
 	getNativeInstallation,
@@ -185,6 +187,7 @@ export default function ServersView() {
 	const [nativeInstallationTarget, setNativeInstallationTarget] = useState<Server | null>(null)
 	const [nativeUpgradeTarget, setNativeUpgradeTarget] = useState<Server | null>(null)
   const [migrationTarget, setMigrationTarget] = useState<Server | null>(null)
+  const [reinstallTarget, setReinstallTarget] = useState<Server | null>(null)
 	const [nativeProvisioning, setNativeProvisioning] = useState<NativeServerProvisioning | null>(null)
   const [nativeCreationFlow, setNativeCreationFlow] = useState(false)
   const [installationSelection, setInstallationSelection] = useState<NativeInstallationSelection>(DEFAULT_INSTALLATION)
@@ -1368,21 +1371,15 @@ export default function ServersView() {
         anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
         transformOrigin={{ vertical: 'top', horizontal: 'right' }}
       >
-        {menuTarget && canConfigure && <MenuItem disabled={menuTarget.panel_type === 'sui'}
-          aria-label={t('admin:servers.passwall_node_install.action')}
-          aria-describedby={menuTarget.panel_type === 'sui' ? 'passwall-node-sui-unsupported' : undefined}
-          sx={{ display: 'block' }} onClick={() => {
-            if (!canConfigure || !menuTarget || menuTarget.panel_type === 'sui') return
-            if (menuTarget.panel_type === 'psp') openNativeInstallation(menuTarget)
-            else if (menuTarget.panel_type === '3xui') { setMigrationTarget(menuTarget); closeMenu() }
+        {menuTarget && canConfigure && <MenuItem
+          aria-label={t('admin:servers.install_reinstall.action')}
+          onClick={() => {
+            if (!canConfigure || !menuTarget) return
+            setReinstallTarget(menuTarget)
+            closeMenu()
           }}>
-          <Box sx={{ display: 'flex', alignItems: 'center' }}>
-            <DownloadIcon fontSize="small" sx={{ mr: 1 }} />
-            {t('admin:servers.passwall_node_install.action')}
-          </Box>
-          {menuTarget.panel_type === 'sui' && <Typography variant="caption" id="passwall-node-sui-unsupported" sx={{ display: 'block', ml: 3.5, whiteSpace: 'normal', maxWidth: 320 }}>
-            {t('admin:servers.passwall_node_install.sui_unsupported')}
-          </Typography>}
+          <DownloadIcon fontSize="small" sx={{ mr: 1 }} />
+          {t('admin:servers.install_reinstall.action')}
         </MenuItem>}
         {menuTarget?.panel_type === 'psp' && <MenuItem onClick={() => { setNativeUpgradeTarget(menuTarget); closeMenu() }}>
           <UpgradeIcon fontSize="small" sx={{ mr: 1 }} />
@@ -1588,6 +1585,7 @@ export default function ServersView() {
               {!editing && <NativeInstallationMethodFields selection={installationSelection} onChange={setInstallationSelection} disabled={busy} />}
               </>
             ) : <>
+              {!editing && <Alert severity="info">{t('admin:servers.install_reinstall.new_manual')}</Alert>}
               <TextField
                 fullWidth required
                 label={t('admin:servers.field.url')}
@@ -1682,7 +1680,13 @@ export default function ServersView() {
         </>}
       </Dialog>
       <NativeAgentUpgradeDialog server={nativeUpgradeTarget} onClose={() => { setNativeUpgradeTarget(null); refresh() }} />
-      <NodeMigrationPreviewDialog key={migrationTarget?.id ?? 'closed'} server={migrationTarget} onClose={() => setMigrationTarget(null)} />
+      <ReinstallBackendDialog key={`reinstall-${reinstallTarget?.id ?? 'closed'}`} server={reinstallTarget}
+        onClose={() => setReinstallTarget(null)}
+        onNativeInstall={server => { setReinstallTarget(null); openNativeInstallation(server) }}
+        onNativeMigration={server => { setReinstallTarget(null); setMigrationTarget(server) }}
+        onConfigure={server => { setReinstallTarget(null); openEdit(server) }}
+      />
+      <NodeMigrationPreviewDialog key={migrationTarget?.id ?? 'closed'} server={migrationTarget} onClose={() => { setMigrationTarget(null); load() }} />
       <NativeInstallationDialog
         server={nativeCreationFlow ? null : nativeInstallationTarget}
         initialProvisioning={nativeCreationFlow ? null : nativeProvisioning}
@@ -1771,6 +1775,7 @@ interface NativeInstallationDialogProps {
 // reads the same identity/credential; rotation is an explicit, separate action.
 export function NativeInstallationDialog({ server, initialProvisioning, onClose, onRotate, rotating = false, embedded = false, newServer = false, initialSelection = DEFAULT_INSTALLATION }: NativeInstallationDialogProps) {
   const { t } = useTranslation(['admin', 'common'])
+  const canConfigure = useCan('config.write')
   const md = useTheme().palette.md
   const [provisioning, setProvisioning] = useState<NativeServerProvisioning | null>(null)
   const [installationLoading, setInstallationLoading] = useState(false)
@@ -1782,6 +1787,10 @@ export function NativeInstallationDialog({ server, initialProvisioning, onClose,
   const [version, setVersion] = useState('')
   const [scriptBusy, setScriptBusy] = useState<'copy' | 'download' | ''>('')
   const [scriptError, setScriptError] = useState('')
+  const [installCommand, setInstallCommand] = useState<{ command: string; expires_at: string } | null>(null)
+  const [commandBusy, setCommandBusy] = useState(false)
+  const [commandError, setCommandError] = useState('')
+  const [commandExpired, setCommandExpired] = useState(false)
   const [selection, setSelection] = useState<NativeInstallationSelection>(initialSelection)
   const [files, setFiles] = useState<NativeInstallationFiles | null>(null)
   const [filesBusy, setFilesBusy] = useState(false)
@@ -1792,6 +1801,7 @@ export function NativeInstallationDialog({ server, initialProvisioning, onClose,
   const credentialRequest = useRef<AbortController | null>(null)
   const scriptRequest = useRef<AbortController | null>(null)
   const filesRequest = useRef<AbortController | null>(null)
+  const commandRequest = useRef<AbortController | null>(null)
   const serverID = server?.id
   const versionValid = isNodeReleaseVersion(version.trim())
 
@@ -1810,6 +1820,10 @@ export function NativeInstallationDialog({ server, initialProvisioning, onClose,
     setFilesError('')
     setScriptError('')
     setScriptBusy('')
+    setInstallCommand(null)
+    setCommandBusy(false)
+    setCommandError('')
+    setCommandExpired(false)
     setInstallationLoading(serverID !== undefined && !initialProvisioning)
     if (serverID !== undefined && !initialProvisioning) {
       void getNativeInstallation(serverID, controller.signal).then(data => {
@@ -1827,9 +1841,19 @@ export function NativeInstallationDialog({ server, initialProvisioning, onClose,
       credentialRequest.current?.abort()
       scriptRequest.current?.abort()
       filesRequest.current?.abort()
+      commandRequest.current?.abort()
     }
     // Request lifetime is scoped to this installation identity, not translated labels.
   }, [serverID, initialProvisioning, installationReload])
+
+  useEffect(() => {
+    if (!installCommand) return
+    const remaining = Date.parse(installCommand.expires_at) - Date.now()
+    setCommandExpired(remaining <= 0)
+    if (remaining <= 0) return
+    const timer = setTimeout(() => setCommandExpired(true), Math.min(remaining, 2_147_483_647))
+    return () => clearTimeout(timer)
+  }, [installCommand])
 
   useEffect(() => {
     setStatus(null)
@@ -1899,11 +1923,40 @@ export function NativeInstallationDialog({ server, initialProvisioning, onClose,
   function invalidateMaterials() {
     scriptRequest.current?.abort()
     filesRequest.current?.abort()
+    commandRequest.current?.abort()
+    setInstallCommand(null)
+    setCommandBusy(false)
+    setCommandError('')
+    setCommandExpired(false)
     setScriptBusy('')
     setScriptError('')
     setFiles(null)
     setFilesBusy(false)
     setFilesError('')
+  }
+
+  async function generateInstallCommand() {
+    if (!canConfigure || !server || provisioning?.server.id !== server.id || !versionValid ||
+      selection.method !== 'linux' || commandBusy || rotating) return
+    const controller = new AbortController()
+    commandRequest.current = controller
+    setCommandBusy(true)
+    setCommandError('')
+    setInstallCommand(null)
+    setCommandExpired(false)
+    try {
+      const result = await createNodeInstallCommand(server.id, { version: version.trim() }, controller.signal)
+      if (controller.signal.aborted) return
+      if (result.server_id !== server.id || typeof result.command !== 'string' || !result.command.trim() ||
+        result.command.length > 8192 || result.command.includes('\0') ||
+        typeof result.expires_at !== 'string' || !Number.isFinite(Date.parse(result.expires_at)) ||
+        Date.parse(result.expires_at) <= Date.now()) throw new Error(t('admin:servers.native.command_failed'))
+      setInstallCommand({ command: result.command, expires_at: result.expires_at })
+    } catch (error) {
+      if (!controller.signal.aborted) setCommandError(installationErrorMessage(error, t('admin:servers.native.command_failed')))
+    } finally {
+      if (!controller.signal.aborted) setCommandBusy(false)
+    }
   }
 
   async function generateFiles() {
@@ -1973,13 +2026,9 @@ export function NativeInstallationDialog({ server, initialProvisioning, onClose,
           onChange={next => { invalidateMaterials(); setVersion(next) }} disabled={rotating} />
         <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
           {selection.method === 'linux' ? <>
-          <Button variant="contained" startIcon={scriptBusy ? <CircularProgress size={16} color="inherit" /> : <DownloadIcon />}
-            disabled={!versionValid || !!scriptBusy || rotating} onClick={() => void deliverScript('download')}>
-            {t('admin:servers.native.download_script')}
-          </Button>
-          <Button variant="outlined" startIcon={<ContentCopyIcon />} disabled={!versionValid || !!scriptBusy || rotating} onClick={() => void deliverScript('copy')}>
-            {t('admin:servers.native.copy_script')}
-          </Button>
+          <Button variant="contained" disabled={!canConfigure || provisioning.server.id !== serverID || !versionValid || commandBusy || rotating}
+            startIcon={commandBusy ? <CircularProgress size={16} color="inherit" /> : <DownloadIcon />}
+            onClick={() => void generateInstallCommand()}>{t('admin:servers.native.generate_command')}</Button>
           </> : <Button variant="contained" disabled={!versionValid || filesBusy || rotating}
             startIcon={filesBusy ? <CircularProgress size={16} color="inherit" /> : <DownloadIcon />} onClick={() => void generateFiles()}>
             {t('admin:servers.native.generate_files')}
@@ -1991,6 +2040,30 @@ export function NativeInstallationDialog({ server, initialProvisioning, onClose,
         {scriptError && <Alert severity="error">{scriptError}</Alert>}
         {filesError && <Alert severity="error">{filesError}</Alert>}
         {selection.method === 'linux' ? <>
+        <Typography variant="body2">{t('admin:servers.native.command_hint')}</Typography>
+        {commandError && <Alert severity="error">{commandError}</Alert>}
+        {installCommand && <>
+          <TextField label={t('admin:servers.native.install_command')} value={installCommand.command}
+            autoComplete="off" fullWidth multiline minRows={2} maxRows={8}
+            slotProps={{ input: { readOnly: true, sx: { fontFamily: 'monospace', fontSize: 13 } } }} />
+          <Alert severity={commandExpired ? 'warning' : 'info'}>{t(commandExpired
+            ? 'admin:servers.native.command_expired' : 'admin:servers.native.command_expires', { time: installCommand.expires_at })}</Alert>
+          <Button variant="outlined" startIcon={<ContentCopyIcon />} sx={{ alignSelf: 'flex-start' }} disabled={commandExpired}
+            onClick={() => {
+              if (Date.parse(installCommand.expires_at) <= Date.now()) { setCommandExpired(true); return }
+              void copyToClipboard(installCommand.command)
+            }}>{t('admin:servers.native.copy_command')}</Button>
+        </>}
+        <Typography variant="subtitle2">{t('admin:servers.native.private_script_advanced')}</Typography>
+        <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+          <Button variant="outlined" startIcon={scriptBusy ? <CircularProgress size={16} color="inherit" /> : <DownloadIcon />}
+            disabled={!versionValid || !!scriptBusy || rotating} onClick={() => void deliverScript('download')}>
+            {t('admin:servers.native.download_script')}
+          </Button>
+          <Button variant="outlined" startIcon={<ContentCopyIcon />} disabled={!versionValid || !!scriptBusy || rotating} onClick={() => void deliverScript('copy')}>
+            {t('admin:servers.native.copy_script')}
+          </Button>
+        </Box>
         <Typography variant="body2">{t('admin:servers.native.run_script_hint')}</Typography>
         <TextField label={t('admin:servers.native.run_script_command')} value={`chmod 0600 ./passwall-node-install-${provisioning.agent_id}.sh\nsudo bash ./passwall-node-install-${provisioning.agent_id}.sh`}
           fullWidth multiline minRows={2} slotProps={{ input: { readOnly: true } }} />
@@ -2031,7 +2104,7 @@ export function NativeInstallationDialog({ server, initialProvisioning, onClose,
   if (embedded) return content
   return <Dialog open={!!server} onClose={onClose} maxWidth={false}
     slotProps={{ paper: { sx: { borderRadius: 3, bgcolor: md.surfaceContainerHigh, width: 760, maxWidth: '94vw' } } }}>
-    <DialogTitle>{t('admin:servers.passwall_node_install.title', { name: server?.name ?? '' })}</DialogTitle>
+    <DialogTitle>{t(newServer ? 'admin:servers.passwall_node_install.title' : 'admin:servers.install_reinstall.title', { name: server?.name ?? '' })}</DialogTitle>
     {content}
   </Dialog>
 }

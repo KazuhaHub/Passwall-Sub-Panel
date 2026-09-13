@@ -22,6 +22,24 @@ Passwall-Node 的 Xray / sing-box 生产 daemon、精确 core 目录、遥测、
 
 ## 1. 已经定了的（不要重开）
 
+**统一安装／重新安装与节点端命令（2026-09-12，本次开发，尚未发布）**：更多菜单统一入口可选择
+Passwall Node／3X-UI／S-UI，已有记录默认原后端；新建默认完整名称 Passwall Node。
+Passwall Node 重装复用固定身份、凭据和原记录，默认生成 15 分钟、单次下载的私有节点端命令，
+精确版本必须来自已审核发行目录；手动／Docker 与高级私有脚本仍保留。
+3X-UI → Passwall Node 默认节点机执行一条命令：支持标准 root-owned Linux amd64/arm64
+systemd x-ui 或干净重装系统，先验证备份／停用并保留旧安装，再通过单独限时授权通知 PSP。
+仅限管理员确认共用数据库只有一个 PSP 进程；operationgate 排空同步／后台／脱离请求的写入，
+原子指纹转换后替换 pool 才恢复准入。回调幂等延续同一身份；未知提交／pool 故障移除旧适配器，
+失败不假称回滚，不自动重启旧 Xray。多实例／自定义部署使用停机 CLI 高级路径。
+3X-UI／S-UI 原后端重装提供官方手动步骤、原服务器连接配置入口，不冒充自动恢复配置；
+S-UI → PN 和其他未证明无损的后端转换明确不支持。没有操作线上节点或发布新发行版。
+详情以源码与 [`docs/server-migration.md`](docs/server-migration.md) 当前默认流程为准。
+本地验证：前端 339 项与生产构建、Go 全量测试／vet、关键路径 race、六平台编译通过；
+固定发布模块 `v0.0.1-beta3` 的普通／迁移后真实 agent 同步契约通过（不是真实 core 握手）。
+节点包装器 18 个隔离替身情景与 race 通过，没有运行真实 systemd／生产节点迁移。
+本机 Chrome 冒烟检查因 `CVDisplayLinkCreateWithCGDisplay` 错误、30 秒 runner 超时未完成，
+没有放宽 timeout 或宣称通过；发布前仍须通过浏览器检查与目标节点验收。
+
 **现有 3X-UI 服务器迁移（2026-09-12，纳入 v4.0.0-beta.4）**：统一管理员“安装 Passwall Node”入口与
 `psp migrate-server` 离线命令，保留原服务器／节点／客户端／挂载 ID、受管配置与凭据、
 分组排序及历史流量。先备份数据库和配置，完全停止所有共用数据库的 PSP 实例与旧 Xray，

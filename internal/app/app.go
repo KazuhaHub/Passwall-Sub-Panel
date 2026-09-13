@@ -27,6 +27,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/jwtutil"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/log"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/metrics"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/operationgate"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/safego"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 
@@ -58,8 +59,9 @@ import (
 // App's background context + WaitGroup. Constructed during Build so
 // handlers receive the live channels at wiring time.
 type asyncDispatcher struct {
-	ctx context.Context
-	wg  *sync.WaitGroup
+	ctx  context.Context
+	wg   *sync.WaitGroup
+	gate *operationgate.Gate
 }
 
 // sharedMigratorAdapter adapts sharedclient.Service (whose methods return result
@@ -99,27 +101,32 @@ func (a *asyncDispatcher) Go(name string, fn func(ctx context.Context)) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	safego.GoTracked(a.wg, name, func() { fn(ctx) })
+	safego.GoTracked(a.wg, name, func() {
+		if err := a.gate.RunRead(ctx, func(ctx context.Context) error { fn(ctx); return nil }); err != nil && ctx.Err() == nil {
+			log.Warn("background operation admission failed", "name", name)
+		}
+	})
 }
 
 // App holds everything assembled for serving. Run() blocks on
 // ListenAndServe and runs the background workers in goroutines; Shutdown
 // cancels both.
 type App struct {
-	cfg       *config.Config
-	server    *http.Server
-	traffic   *traffic.Service
-	reconcile *reconcile.Service
-	user      *user.Service
-	node      *node.Service
-	cert      *cert.Service
-	audit     *audit.Service
-	mail      *mailer.Service
-	health    *health.Service
-	geo       *geo.Service
-	render    *render.Service
-	settings  ports.SettingsRepo
-	syncTasks ports.SyncTaskRepo
+	operationGate *operationgate.Gate
+	cfg           *config.Config
+	server        *http.Server
+	traffic       *traffic.Service
+	reconcile     *reconcile.Service
+	user          *user.Service
+	node          *node.Service
+	cert          *cert.Service
+	audit         *audit.Service
+	mail          *mailer.Service
+	health        *health.Service
+	geo           *geo.Service
+	render        *render.Service
+	settings      ports.SettingsRepo
+	syncTasks     ports.SyncTaskRepo
 	// trafficRepo / nodeTraffic kept for the retention cron — PruneBefore is
 	// outside traffic.Service's surface (it's a maintenance concern, not a
 	// poll-cycle concern), so app.go reaches into the repos directly.
@@ -414,16 +421,18 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	// fire bgCancel even if Run never started.
 	bgCtx, cancel := context.WithCancel(context.Background())
 	a := &App{
-		cfg:       cfg,
-		bgCancel:  cancel,
-		bgRootCtx: bgCtx,
-		render:    renderSvc,
+		operationGate: operationgate.New(),
+		cfg:           cfg,
+		bgCancel:      cancel,
+		bgRootCtx:     bgCtx,
+		render:        renderSvc,
 	}
-	dispatcher := &asyncDispatcher{ctx: bgCtx, wg: &a.bgWG}
+	dispatcher := &asyncDispatcher{ctx: bgCtx, wg: &a.bgWG, gate: a.operationGate}
 	// Wire traffic.Service into the panel-wide WaitGroup. Its async
 	// floor-push + quota-event email goroutines (`safego.GoTracked`)
 	// now register with bgWG so App.Shutdown drains them before exit.
 	trafficSvc.SetBgWG(&a.bgWG)
+	trafficSvc.SetOperationGate(a.operationGate)
 	// Route the handler-triggered group-member resync through the tracked
 	// dispatcher so Shutdown drains it (it was an untracked safego.Go).
 	userSvc.SetBackgroundRunner(dispatcher.Go)
@@ -452,11 +461,12 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 		return nil, err
 	}
 	httpHandler := httptransport.NewRouter(httptransport.Deps{
-		Async:      dispatcher,
-		Cfg:        cfg,
-		Repos:      repos,
-		GeoRecords: geoStreaks,
-		Pool:       pool,
+		OperationGate: a.operationGate,
+		Async:         dispatcher,
+		Cfg:           cfg,
+		Repos:         repos,
+		GeoRecords:    geoStreaks,
+		Pool:          pool,
 		// Same service the push path uses, so the capabilities the edit form
 		// reports are read through the identical check that gates the write.
 		SharedClients: sharedClientSvc,
@@ -600,7 +610,13 @@ func (a *App) Run() error {
 		if a.user == nil {
 			return
 		}
-		if n, err := a.user.EnqueueSharedMigration(bgCtx); err != nil {
+		var n int
+		err := a.operationGate.RunRead(bgCtx, func(ctx context.Context) error {
+			var err error
+			n, err = a.user.EnqueueSharedMigration(ctx)
+			return err
+		})
+		if err != nil {
 			log.Warn("shared-client migration enqueue failed", "err", err)
 		} else if n > 0 {
 			log.Info("shared-client migration started", "users_enqueued", n)
@@ -610,7 +626,12 @@ func (a *App) Run() error {
 		// done=true (dropped / fresh install / already gone) breaks out; otherwise
 		// re-check while the queue drains. bgCtx cancels on shutdown.
 		for {
-			done, err := a.repos.Ownership.DropIfMigrated(bgCtx)
+			var done bool
+			err := a.operationGate.RunRead(bgCtx, func(ctx context.Context) error {
+				var err error
+				done, err = a.repos.Ownership.DropIfMigrated(ctx)
+				return err
+			})
 			if err != nil {
 				log.Warn("shared-client migration table drop", "err", err)
 			} else if done {
@@ -632,7 +653,13 @@ func (a *App) Run() error {
 		// already-migrated clients have 0 ownership rows — so the drain returns
 		// immediately and the heal runs at once; the reconcile-loop heal is the
 		// steady-state backstop. No-op-skips keep it read-only when there's no drift.
-		if healed, err := a.user.HealSharedClients(bgCtx); err != nil {
+		var healed int
+		err = a.operationGate.RunRead(bgCtx, func(ctx context.Context) error {
+			var err error
+			healed, err = a.user.HealSharedClients(ctx)
+			return err
+		})
+		if err != nil {
 			log.Warn("shared-client boot heal", "repaired", healed, "err", err)
 		} else if healed > 0 {
 			log.Info("shared-client boot heal pass", "verified_or_repaired", healed)
@@ -656,7 +683,7 @@ func (a *App) runHealthLoop(ctx context.Context) {
 	log.Info("node health check loop started", "interval", a.healthInterval.String())
 	// Run once immediately so the first health dots appear without waiting a full
 	// interval (mirrors the old health.Service.Loop initial run).
-	if err := a.health.CheckOnce(ctx); err != nil && ctx.Err() == nil {
+	if err := a.operationGate.RunRead(ctx, a.health.CheckOnce); err != nil && ctx.Err() == nil {
 		log.Warn("health checker initial run", "err", err)
 	}
 	t := time.NewTicker(a.healthInterval)
@@ -673,7 +700,7 @@ func (a *App) runHealthLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			if err := a.health.CheckOnce(ctx); err != nil && ctx.Err() == nil {
+			if err := a.operationGate.RunRead(ctx, a.health.CheckOnce); err != nil && ctx.Err() == nil {
 				log.Warn("health checker tick", "err", err)
 			}
 		}
@@ -688,6 +715,11 @@ func (a *App) runHealthLoop(ctx context.Context) {
 // an unreachable panel just gets its versions cleared and a Warn line, the
 // remaining panels continue.
 func (a *App) probePanelVersionsOnce(ctx context.Context) {
+	ctx, release, admissionErr := a.operationGate.Read(ctx)
+	if admissionErr != nil {
+		return
+	}
+	defer release()
 	if a.xuiPool == nil || a.repos.XUIPanel == nil {
 		return
 	}
@@ -974,7 +1006,7 @@ func (a *App) runCertRenewalLoop(ctx context.Context) {
 		set, err := a.settings.Load(ctx, ports.UISettings{})
 		if err == nil {
 			a.cert.SetRenewBeforeDays(set.CertRenewBeforeDays)
-			if serr := a.cert.ScanDueRenewals(ctx); serr != nil {
+			if serr := a.operationGate.RunRead(ctx, a.cert.ScanDueRenewals); serr != nil {
 				log.Warn("cert renewal scan", "err", serr)
 			}
 		}
@@ -1308,14 +1340,14 @@ func (a *App) runSyncTaskLoop(ctx context.Context) {
 	defer t.Stop()
 	log.Info("sync task loop started", "interval", interval.String())
 	for {
-		if err := a.user.ProcessDueTasks(ctx, 20); err != nil {
+		if err := a.operationGate.RunRead(ctx, func(ctx context.Context) error { return a.user.ProcessDueTasks(ctx, 20) }); err != nil {
 			log.Warn("user sync tasks", "err", err)
 		}
-		if err := a.node.ProcessDueTasks(ctx, 20); err != nil {
+		if err := a.operationGate.RunRead(ctx, func(ctx context.Context) error { return a.node.ProcessDueTasks(ctx, 20) }); err != nil {
 			log.Warn("node sync tasks", "err", err)
 		}
 		if a.cert != nil {
-			if err := a.cert.ProcessDueTasks(ctx, 20); err != nil {
+			if err := a.operationGate.RunRead(ctx, func(ctx context.Context) error { return a.cert.ProcessDueTasks(ctx, 20) }); err != nil {
 				log.Warn("cert sync tasks", "err", err)
 			}
 		}
@@ -1413,7 +1445,7 @@ func (a *App) runTrafficLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			if err := a.traffic.PollOnce(ctx); err != nil {
+			if err := a.operationGate.RunRead(ctx, a.traffic.PollOnce); err != nil {
 				log.Warn("traffic poll", "err", err)
 			}
 			// Roll up immediately after the poll so the hourly tables (the sole
@@ -1485,38 +1517,45 @@ func (a *App) runReconcileLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			tick++
-			report, err := a.reconcile.RunOnce(ctx, reconcile.LevelFull)
-			if err != nil {
-				log.Warn("reconcile run", "err", err)
-				// fall through: the shared-client heal is independent of the
-				// per-node reconcile and worth running even if that errored.
-			} else if report.Scanned > 0 || len(report.Issues) > 0 {
-				log.Info("reconcile pass",
-					"scanned", report.Scanned, "fixed", report.Fixed, "issues", len(report.Issues))
-			}
-			// Detect the migration→done transition once, then cache it: a no-longer-
-			// migrating panel must not re-query every tick, and the table is dropped
-			// post-migration so it never flips back.
-			if !migrationComplete {
-				if done, derr := a.user.SharedMigrationComplete(ctx); derr == nil && done {
-					migrationComplete = true
-					log.Info("shared-client migration complete; heal drops to drift-backstop cadence",
-						"every_ticks", sharedHealBackstopEvery)
+			func() {
+				ctx, release, err := a.operationGate.Read(ctx)
+				if err != nil {
+					return
 				}
-			}
-			// v3.9.0: heal shared-client drift the per-node reconcile can't see (the
-			// ownership table is dropped post-migration). No-op-skips make a no-drift
-			// sweep read-only (no Xray restarts), but it still costs a GetClient +
-			// per-panel client list per user, so once migration is complete we run it
-			// only every Nth tick rather than every tick.
-			if shouldRunSharedHeal(tick, migrationComplete) {
-				if healed, herr := a.user.HealSharedClients(ctx); herr != nil {
-					log.Warn("shared-client heal", "repaired", healed, "err", herr)
-				} else if healed > 0 {
-					log.Debug("shared-client heal pass", "verified_or_repaired", healed)
+				defer release()
+				tick++
+				report, err := a.reconcile.RunOnce(ctx, reconcile.LevelFull)
+				if err != nil {
+					log.Warn("reconcile run", "err", err)
+					// fall through: the shared-client heal is independent of the
+					// per-node reconcile and worth running even if that errored.
+				} else if report.Scanned > 0 || len(report.Issues) > 0 {
+					log.Info("reconcile pass",
+						"scanned", report.Scanned, "fixed", report.Fixed, "issues", len(report.Issues))
 				}
-			}
+				// Detect the migration→done transition once, then cache it: a no-longer-
+				// migrating panel must not re-query every tick, and the table is dropped
+				// post-migration so it never flips back.
+				if !migrationComplete {
+					if done, derr := a.user.SharedMigrationComplete(ctx); derr == nil && done {
+						migrationComplete = true
+						log.Info("shared-client migration complete; heal drops to drift-backstop cadence",
+							"every_ticks", sharedHealBackstopEvery)
+					}
+				}
+				// v3.9.0: heal shared-client drift the per-node reconcile can't see (the
+				// ownership table is dropped post-migration). No-op-skips make a no-drift
+				// sweep read-only (no Xray restarts), but it still costs a GetClient +
+				// per-panel client list per user, so once migration is complete we run it
+				// only every Nth tick rather than every tick.
+				if shouldRunSharedHeal(tick, migrationComplete) {
+					if healed, herr := a.user.HealSharedClients(ctx); herr != nil {
+						log.Warn("shared-client heal", "repaired", healed, "err", herr)
+					} else if healed > 0 {
+						log.Debug("shared-client heal pass", "verified_or_repaired", healed)
+					}
+				}
+			}()
 		}
 	}
 }

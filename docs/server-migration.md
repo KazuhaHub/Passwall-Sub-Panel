@@ -1,12 +1,54 @@
 # Migrate an existing 3X-UI server to Passwall Node
 
-This is a stopped-panel maintenance operation, not an online panel-type edit.
-The administrator's Servers menu has one **Install Passwall Node** entry. On a
-3X-UI server it opens a read-only migration preflight; on an existing Passwall
-Node server it opens the same installation methods used for initial setup.
+The administrator's Servers menu has one **Install / Reinstall** entry with
+a backend chooser. An existing record defaults to its current backend; a new
+server defaults to Passwall Node. Choosing 3X-UI → Passwall Node opens a read-only
+migration preflight; an existing Passwall Node opens the installation methods.
 Opening either flow does not stop services or change the server identity.
-Ordinary Passwall Node reinstallation does not run this migration command or
-require stopping PSP. S-UI migration is not yet available.
+Ordinary Passwall Node reinstallation does not convert a backend or require
+stopping PSP. S-UI conversion is not yet available. Same-backend 3X-UI/S-UI
+reinstallation offers official manual instructions and editing the **original**
+connection record; it does not claim that updating a Token restores configuration.
+
+## Default: one command on the node host
+
+This online workflow supports **exactly one PSP process using the database**.
+Confirm this explicitly; an in-process admission gate is not a distributed lock.
+Multiple instances must use the stopped-deployment fallback below.
+
+1. Back up the PSP database and configuration/key material. Review the managed-only
+   scope and every preflight warning/blocker. Choose an exact reviewed Node release
+   and exact verified Xray core. Opening or generating the command changes no rows.
+2. Ensure there are no panel/core upgrade jobs or external automation that could
+   restart the old service. Generate the private command and run it as root **on
+   the node**, not on the PSP host. The delivery URL expires after 15 minutes and
+   downloads once; it contains a temporary authorization, not the fixed credential.
+3. The wrapper supports standard, root-owned Linux amd64/arm64 `x-ui.service`
+   deployments or a clean systemd host after OS reinstallation. It checks required
+   tools/deployment, verifies consistent SQLite/config/unit backups, then stops
+   and disables the old service. The old installation and private backups remain.
+   Custom units, containers, partial installations, unsafe paths or identifiable
+   remaining cores require manual handling; unknown processes are never killed.
+4. The node calls PSP with a separate expiring authorization. PSP drains admitted
+   HTTP/background operations including their subsequent writes, rechecks the
+   fingerprint in its atomic conversion, and replaces the backend adapter before
+   readmission. The node receives an exact-version private installer containing
+   the credential for the **same** server record.
+5. A retry of this callback within its lifetime returns the same identity and
+   credential, not another agent. A failed/ambiguous commit or adapter replacement
+   fails closed. Inspect the original record, regenerate its installation materials
+   if it is already Passwall Node, and never blindly re-enable old Xray. A download
+   lost before execution can be regenerated without rotating a native identity.
+6. Confirm the actual agent/core, config/client application and a proxy connection.
+   A successful installer or heartbeat alone does not establish proxy readiness.
+
+The command is sensitive. Do not share it or run with shell tracing; consider
+terminal history and configure reverse-proxy access logs not to retain delivery
+tokens. PSP omits these URLs from its own request-path logs and performs mandatory
+metadata-only auditing before issuing or delivering a bootstrap script.
+Restarting PSP invalidates outstanding delivery commands, not node credentials.
+There is no automatic VM/database rollback, old-install uninstall or distributed
+recovery workflow.
 
 ## What stays the same
 
@@ -46,7 +88,7 @@ sing-box-to-Xray projection and does not establish whether omitted raw transport
 or TLS fields are empty. S-UI migration needs raw inbound/TLS comparison and a
 verified actual sing-box version before lossless conversion can be offered.
 
-## Maintenance sequence
+## Advanced fallback: stopped-deployment CLI
 
 1. Successfully start the current V4 PSP version normally before maintenance.
    Use the preflight to review every blocker/warning and select the exact core.
@@ -61,8 +103,9 @@ verified actual sing-box version before lossless conversion can be offered.
 5. Run a dry preview using the same PSP binary/image, config, database and env.
    Dry run is the default. Copy its fingerprint if the online preview became stale.
 6. Run `--apply` with that fingerprint, exact core version and the three explicit
-   operational confirmations. Restart PSP, then use **Install Passwall Node**
-   on the **same server record**. Do not add another server or rebuild nodes.
+   operational confirmations. Restart PSP, then use **Install / Reinstall**
+   and choose Passwall Node on the **same server record**. Do not add another
+   server or rebuild nodes.
 7. Confirm the real agent/core reports running and applied config/client state;
    test subscriptions and connections before declaring the migration complete.
 

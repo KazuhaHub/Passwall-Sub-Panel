@@ -1,7 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Alert, Box, Button, Checkbox, CircularProgress, Dialog, DialogActions, DialogContent, DialogTitle, FormControlLabel, Stack, TextField, Typography } from '@mui/material'
 import { useTranslation } from 'react-i18next'
-import { getNodeMigrationPreview, type NodeMigrationIssue, type NodeMigrationPreview, type Server } from '@/api/servers'
+import { createNodeMigrationCommand, getNodeMigrationPreview, type NativeInstallationSelection, type NodeMigrationIssue, type NodeMigrationPreview, type Server } from '@/api/servers'
+import NodeReleaseSelector from '@/components/NodeReleaseSelector'
+import { copyToClipboard } from '@/utils/clipboard'
 import { useCan } from '@/utils/permissions'
 
 const knownIssues = new Set([
@@ -26,33 +28,101 @@ function coreToken(version: string): boolean {
   return /^v?[0-9]+\.[0-9]+\.[0-9]+(?:-[A-Za-z0-9.-]+)?$/.test(version)
 }
 
-function migrationArguments(preview: NodeMigrationPreview, serverID: number, acknowledged: boolean): string | undefined {
-  // The dialog is informational, but copied commands must still be safe in
-  // any shell. Only bounded numeric IDs/version tokens/SHA-256 are inserted.
-  if (!preview.can_migrate || preview.blockers.length !== 0 || preview.server_id !== serverID ||
+function eligiblePreview(preview: NodeMigrationPreview, serverID: number, acknowledged: boolean): boolean {
+  if (preview.can_migrate !== true || preview.blockers.length !== 0 || preview.server_id !== serverID ||
     !Number.isSafeInteger(serverID) || serverID <= 0 || !coreToken(preview.core_version) ||
     !/^[a-f0-9]{64}$/.test(preview.fingerprint) ||
-    (preview.core_requires_ack && (!acknowledged || !preview.allow_restricted_reality))) return undefined
-  return `migrate-server --server-id ${serverID} --core-version ${preview.core_version} --expected-fingerprint ${preview.fingerprint}` +
-    (preview.core_requires_ack && acknowledged ? ' --allow-restricted-reality' : '') +
-    ' --all-psp-stopped --old-xray-stopped --managed-only --apply'
+    (preview.core_requires_ack && (!acknowledged || !preview.allow_restricted_reality))) return false
+  return true
+}
+
+const installationSelection: NativeInstallationSelection = { method: 'linux', os: 'linux', arch: 'amd64' }
+interface IssuedCommand {
+  binding: string
+  command: string
+  expires_at: string
+  expired: boolean
 }
 
 export function NodeMigrationPreviewDialog({ server, onClose }: { server: Server | null; onClose: () => void }) {
   const { t } = useTranslation(['admin', 'common'])
   const canRead = useCan('config.write')
   const serverID = server?.id
-  const [preview, setPreview] = useState<NodeMigrationPreview | null>(null)
+  const [loadedPreview, setLoadedPreview] = useState<{ binding: string; value: NodeMigrationPreview } | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [retry, setRetry] = useState(0)
   const [choice, setChoice] = useState<{ serverID?: number; core: string; acknowledge: boolean }>({ core: '', acknowledge: false })
+  const [releaseChoice, setReleaseChoice] = useState<{ serverID?: number; version: string }>({ version: '' })
+  const [confirmation, setConfirmation] = useState<{ serverID?: number; managedOnly: boolean; singleInstance: boolean }>({ managedOnly: false, singleInstance: false })
+  const [issuedCommand, setIssuedCommand] = useState<IssuedCommand | null>(null)
+  const [commandBusy, setCommandBusy] = useState(false)
+  const [commandError, setCommandError] = useState('')
+  const previewRequest = useRef<AbortController | null>(null)
+  const commandRequest = useRef<AbortController | null>(null)
   const selectedCore = choice.serverID === serverID ? choice.core : ''
   const acknowledged = choice.serverID === serverID && choice.acknowledge
+  const version = releaseChoice.serverID === serverID ? releaseChoice.version : ''
+  const managedOnly = confirmation.serverID === serverID && confirmation.managedOnly
+  const singleInstance = confirmation.serverID === serverID && confirmation.singleInstance
+  const supported = canRead && server?.panel_type === '3xui'
+  const previewBinding = `${serverID}:${server?.panel_type}:${canRead}:${selectedCore}:${acknowledged}:${retry}`
+  // Bind rendered data as well as requests: a changed selection must hide old
+  // previews/tickets in the render preceding effect cleanup, not one tick later.
+  const preview = loadedPreview?.binding === previewBinding ? loadedPreview.value : null
+  const commandBinding = `${previewBinding}:${preview?.fingerprint ?? ''}:${version}:${managedOnly}:${singleInstance}`
+  const activeBinding = useRef(commandBinding)
+  activeBinding.current = commandBinding
+  const command = issuedCommand?.binding === commandBinding ? issuedCommand : null
+  const ready = !!(supported && preview && serverID && eligiblePreview(preview, serverID, acknowledged))
+  const canGenerate = ready && /^v[0-9]+\.[0-9]+\.[0-9]+(?:-[A-Za-z0-9.-]+)?$/.test(version) && managedOnly && singleInstance
+
+  function clearCommand() {
+    commandRequest.current?.abort()
+    commandRequest.current = null
+    setIssuedCommand(null)
+    setCommandBusy(false)
+    setCommandError('')
+  }
+
+  function closeDialog() {
+    previewRequest.current?.abort()
+    clearCommand()
+    setLoadedPreview(null)
+    setReleaseChoice({ version: '' })
+    setConfirmation({ managedOnly: false, singleInstance: false })
+    setChoice({ core: '', acknowledge: false })
+    onClose()
+  }
+
+  useEffect(() => {
+    setReleaseChoice({ serverID, version: '' })
+    setConfirmation({ serverID, managedOnly: false, singleInstance: false })
+    setChoice({ serverID, core: '', acknowledge: false })
+  }, [serverID])
+
+  useEffect(() => {
+    clearCommand()
+    return () => commandRequest.current?.abort()
+  }, [commandBinding])
+
+  useEffect(() => {
+    if (!command || command.expired) return
+    const currentCommand = command
+    const remaining = Date.parse(currentCommand.expires_at) - Date.now()
+    function expire() {
+      // Remove the bearer-ticket material from memory as well as disabling copy.
+      setIssuedCommand(current => current?.binding === currentCommand.binding ? { ...current, command: '', expired: true } : current)
+    }
+    if (remaining <= 0) { expire(); return }
+    const timer = setTimeout(expire, Math.min(remaining, 2_147_483_647))
+    return () => clearTimeout(timer)
+  }, [command])
 
   useEffect(() => {
     const controller = new AbortController()
-    setPreview(null)
+    previewRequest.current = controller
+    setLoadedPreview(null)
     setError('')
     setLoading(false)
     if (!serverID) {
@@ -73,10 +143,11 @@ export function NodeMigrationPreviewDialog({ server, onClose }: { server: Server
       ...(acknowledged ? { allow_restricted_reality: true } : {}),
     }).then(result => {
       if (controller.signal.aborted) return
-      if (result.server_id !== serverID || !Array.isArray(result.blockers) || !Array.isArray(result.warnings)) {
+      if (result.server_id !== serverID || !Array.isArray(result.blockers) || !Array.isArray(result.warnings) ||
+        (selectedCore && result.core_version !== selectedCore)) {
         throw new Error('Invalid migration preview')
       }
-      setPreview(result)
+      setLoadedPreview({ binding: previewBinding, value: result })
     }).catch((reason: unknown) => {
       if (controller.signal.aborted) return
       const status = (reason as { response?: { status?: number } })?.response?.status
@@ -85,10 +156,34 @@ export function NodeMigrationPreviewDialog({ server, onClose }: { server: Server
       if (!controller.signal.aborted) setLoading(false)
     })
     return () => controller.abort()
-  }, [serverID, server?.panel_type, canRead, selectedCore, acknowledged, retry])
+  }, [serverID, server?.panel_type, canRead, selectedCore, acknowledged, retry, previewBinding])
 
-  const args = canRead && server?.panel_type === '3xui' && preview && serverID ? migrationArguments(preview, serverID, acknowledged) : undefined
-  const docker = args ? `docker compose stop YOUR_PSP_SERVICE &&\ndocker compose run --rm --no-deps YOUR_PSP_SERVICE ${args} &&\ndocker compose start YOUR_PSP_SERVICE` : ''
+  async function generateCommand() {
+    if (!canGenerate || !preview || !serverID || commandBusy || activeBinding.current !== commandBinding) return
+    clearCommand()
+    const controller = new AbortController()
+    const binding = commandBinding
+    commandRequest.current = controller
+    setCommandBusy(true)
+    try {
+      const result = await createNodeMigrationCommand(serverID, {
+        version, fingerprint: preview.fingerprint, core_version: preview.core_version,
+        allow_restricted_reality: preview.core_requires_ack && acknowledged && preview.allow_restricted_reality,
+        managed_only: true, confirm_single_instance: true,
+      }, controller.signal)
+      if (controller.signal.aborted || commandRequest.current !== controller || activeBinding.current !== binding) return
+      if (result.server_id !== serverID || typeof result.command !== 'string' || !result.command.trim() ||
+        typeof result.expires_at !== 'string' || !Number.isFinite(Date.parse(result.expires_at)) ||
+        Date.parse(result.expires_at) <= Date.now()) throw new Error('Invalid migration command')
+      setIssuedCommand({ binding, command: result.command, expires_at: result.expires_at, expired: false })
+    } catch (reason: unknown) {
+      if (controller.signal.aborted || commandRequest.current !== controller || activeBinding.current !== binding) return
+      const status = (reason as { response?: { status?: number } })?.response?.status
+      setCommandError(status === 403 ? 'admin:servers.migration.forbidden' : 'admin:servers.migration.command_failed')
+    } finally {
+      if (!controller.signal.aborted && commandRequest.current === controller) setCommandBusy(false)
+    }
+  }
 
   function issueMessage(issue: NodeMigrationIssue) {
     const code = issueAliases[issue.code] ?? issue.code
@@ -102,14 +197,16 @@ export function NodeMigrationPreviewDialog({ server, onClose }: { server: Server
     return references.length ? `${message} (${references.join(', ')})` : message
   }
 
-  return <Dialog open={!!server} onClose={onClose} fullWidth maxWidth="md">
-    <DialogTitle>{t('admin:servers.passwall_node_install.title', { name: server?.name ?? '' })}</DialogTitle>
+  return <Dialog open={!!server} onClose={closeDialog} fullWidth maxWidth="md">
+    <DialogTitle>{t('admin:servers.install_reinstall.title', { name: server?.name ?? '' })}</DialogTitle>
     <DialogContent>
       <Stack spacing={2} sx={{ pt: 1 }}>
-        <Alert severity="info">{t('admin:servers.migration.preview_only')}</Alert>
+        <Alert severity="info">{t('admin:servers.migration.online_hint')}</Alert>
         <Typography variant="body2">{t('admin:servers.migration.preserved')}</Typography>
         <Typography variant="body2">{t('admin:servers.migration.scope')}</Typography>
-        <Alert severity="warning">{t('admin:servers.migration.maintenance')}</Alert>
+        <Alert severity="warning">{t('admin:servers.migration.supported_deployment_hint')}</Alert>
+        {supported && <NodeReleaseSelector key={serverID} enabled={!!server} selection={installationSelection} value={version}
+          onChange={next => { clearCommand(); setReleaseChoice({ serverID, version: next }) }} />}
         {loading && <Box role="status" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
           <CircularProgress size={18} /><Typography variant="body2">{t('admin:servers.migration.loading')}</Typography>
         </Box>}
@@ -128,23 +225,49 @@ export function NodeMigrationPreviewDialog({ server, onClose }: { server: Server
           </Alert>}
           {preview.core_requires_ack && <FormControlLabel sx={{ mx: 0 }}
             control={<Checkbox checked={acknowledged} onChange={(_event, checked) => {
+              clearCommand()
               setChoice({ serverID, core: selectedCore, acknowledge: checked })
             }} />}
             label={t('admin:servers.migration.ack_restricted_core')} />}
           {preview.recommended_core_version && coreToken(preview.recommended_core_version) && preview.recommended_core_version !== preview.core_version &&
             <Button variant="outlined" onClick={() => {
+              clearCommand()
               setChoice({ serverID, core: preview.recommended_core_version!, acknowledge: false })
             }}>{t('admin:servers.migration.use_recommended_core', { version: preview.recommended_core_version })}</Button>}
-          {args ? <>
+          {ready ? <>
             <Alert severity="success">{t('admin:servers.migration.ready')}</Alert>
-            <Typography variant="body2">{t('admin:servers.migration.cli_instructions')}</Typography>
-            <TextField fullWidth multiline label={t('admin:servers.migration.cli_command')} value={`psp ${args}`}
-              slotProps={{ input: { readOnly: true } }} sx={{ '& textarea': { fontFamily: 'monospace', fontSize: 13 } }} />
-            <Typography variant="body2">{t('admin:servers.migration.docker_instructions')}</Typography>
-            <TextField fullWidth multiline label={t('admin:servers.migration.docker_commands')} value={docker}
-              slotProps={{ input: { readOnly: true } }} sx={{ '& textarea': { fontFamily: 'monospace', fontSize: 13 } }} />
-            <Typography variant="body2">{t('admin:servers.migration.after_restart')}</Typography>
+            <FormControlLabel sx={{ mx: 0 }} control={<Checkbox checked={managedOnly} onChange={(_event, checked) => {
+              clearCommand()
+              setConfirmation({ serverID, managedOnly: checked, singleInstance })
+            }} />} label={t('admin:servers.migration.ack_managed_only')} />
+            <FormControlLabel sx={{ mx: 0 }} control={<Checkbox checked={singleInstance} onChange={(_event, checked) => {
+              clearCommand()
+              setConfirmation({ serverID, managedOnly, singleInstance: checked })
+            }} />} label={t('admin:servers.migration.single_instance_confirmation')} />
           </> : preview.can_migrate && <Alert severity="error">{t('admin:servers.migration.invalid_command')}</Alert>}
+        </>}
+        {supported && <>
+          <Typography variant="body2">{t('admin:servers.migration.node_command_hint')}</Typography>
+          <Alert severity="warning">{t('admin:servers.native.private_warning')}</Alert>
+          <Button variant="contained" sx={{ alignSelf: 'flex-start' }} disabled={!canGenerate || commandBusy}
+            startIcon={commandBusy ? <CircularProgress size={16} color="inherit" /> : undefined}
+            onClick={() => void generateCommand()}>{t('admin:servers.migration.generate_node_command')}</Button>
+          {commandError && <Alert severity="error">{t(commandError)}</Alert>}
+          {command && <>
+            {!command.expired && <TextField fullWidth multiline label={t('admin:servers.native.install_command')} value={command.command}
+              autoComplete="off" slotProps={{ input: { readOnly: true } }} sx={{ '& textarea': { fontFamily: 'monospace', fontSize: 13 } }} />}
+            <Alert severity={command.expired ? 'warning' : 'info'}>{t(command.expired
+              ? 'admin:servers.native.command_expired' : 'admin:servers.native.command_expires', { time: command.expires_at })}</Alert>
+            <Button variant="outlined" sx={{ alignSelf: 'flex-start' }} disabled={command.expired || !canGenerate}
+              onClick={() => {
+                if (!canGenerate || activeBinding.current !== command.binding || command.expired) return
+                if (Date.parse(command.expires_at) <= Date.now()) {
+                  setIssuedCommand({ ...command, command: '', expired: true })
+                  return
+                }
+                void copyToClipboard(command.command)
+              }}>{t('admin:servers.native.copy_command')}</Button>
+          </>}
         </>}
       </Stack>
     </DialogContent>
@@ -152,7 +275,7 @@ export function NodeMigrationPreviewDialog({ server, onClose }: { server: Server
       <Button onClick={() => setRetry(current => current + 1)} disabled={loading || !canRead || server?.panel_type !== '3xui'}>
         {t('common:actions.retry')}
       </Button>
-      <Button onClick={onClose}>{t('common:actions.close')}</Button>
+      <Button onClick={closeDialog}>{t('common:actions.close')}</Button>
     </DialogActions>
   </Dialog>
 }

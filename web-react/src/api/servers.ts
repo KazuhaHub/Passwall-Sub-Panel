@@ -207,6 +207,31 @@ export async function createNativeInstallScript(id: number, version: string, sig
   return data
 }
 
+export interface NodeInstallCommand {
+  server_id: number
+  command: string
+  expires_at: string
+}
+
+export async function createNodeInstallCommand(id: number, input: { version: string }, signal?: AbortSignal) {
+  const { data } = await client.post<NodeInstallCommand>(`/admin/servers/${id}/node-install-command`, input,
+    { signal, _skipErrorToast: true })
+  return data
+}
+
+export async function createNodeMigrationCommand(id: number, input: {
+  version: string
+  fingerprint: string
+  core_version: string
+  allow_restricted_reality: boolean
+  managed_only: true
+  confirm_single_instance: true
+}, signal?: AbortSignal) {
+  const { data } = await client.post<NodeInstallCommand>(`/admin/servers/${id}/node-migration-command`, input,
+    { signal, _skipErrorToast: true })
+  return data
+}
+
 export async function createNativeInstallationFiles(id: number, version: string, selection: NativeInstallationSelection, signal?: AbortSignal) {
   const { data } = await client.post<NativeInstallationFiles>(`/admin/servers/${id}/node-installation-files`,
     { version, method: selection.method, ...(selection.method === 'manual' ? { os: selection.os, arch: selection.arch } : {}) },
