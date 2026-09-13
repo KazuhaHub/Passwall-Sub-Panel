@@ -12,6 +12,8 @@ a pinned catalog entry replace the surrounding login/release-discovery UI; they
 do not replace the downloaded installer, node binary, core runtime, or systemd.
 The installer downloads the already-published **v0.0.1-beta3** Node archive and
 verifies its release checksum and exact executable version.
+Its executable and observed report must also match the publisher's exact
+`v0.0.1-beta3 (91c36bf)` build stamp, not merely a bare version string.
 
 Required checks are:
 

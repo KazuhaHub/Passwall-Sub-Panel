@@ -50,7 +50,11 @@ const (
 	installLock = "/opt/.passwall-node-install.lock"
 	ownerMarker = nodeRoot + "/.psp-disposable-reinstall-owner"
 	nodeVersion = "v0.0.1-beta3"
-	coreVersion = "26.6.27"
+	// The published beta3 annotated tag peels to 91c36bffeae2742784a8fc7a91cab845062a7a1a.
+	// The publisher stamps short7; the daemon reports version.String(), not a
+	// bare version. Pin the real identity rather than accepting an arbitrary suffix.
+	nodeReportedIdentity = "v0.0.1-beta3 (91c36bf)"
+	coreVersion          = "26.6.27"
 )
 
 // These fixture pins select a reviewed release, not a floating latest build.
@@ -353,7 +357,7 @@ func (f *fixture) waitReady() {
 		}
 		if all {
 			snapshot, e := f.coordinator.NativePanelSnapshot(f.ctx, f.panelID)
-			if e == nil && snapshot != nil && len(snapshot.Inbounds) == 1 && len(snapshot.Clients) == 1 && snapshot.Status.PanelVersion == nodeVersion && snapshot.Status.XrayVersion == coreVersion && snapshot.Status.XrayState == "running" {
+			if e == nil && snapshot != nil && len(snapshot.Inbounds) == 1 && len(snapshot.Clients) == 1 && snapshot.Status.PanelVersion == nodeReportedIdentity && snapshot.Status.XrayVersion == coreVersion && snapshot.Status.XrayState == "running" {
 				return
 			}
 		}
@@ -399,7 +403,7 @@ func (f *fixture) readinessDiagnostics() {
 	}
 	snapshot, err := f.coordinator.NativePanelSnapshot(f.ctx, f.panelID)
 	if err == nil && snapshot != nil {
-		f.t.Logf("readiness diagnostics: full_snapshot_present=true inbounds=%d clients=%d node_version_expected=%t core_version_expected=%t core_running=%t", len(snapshot.Inbounds), len(snapshot.Clients), snapshot.Status.PanelVersion == nodeVersion, snapshot.Status.XrayVersion == coreVersion, snapshot.Status.XrayState == "running")
+		f.t.Logf("readiness diagnostics: full_snapshot_present=true inbounds=%d clients=%d node_version_expected=%t core_version_expected=%t core_running=%t", len(snapshot.Inbounds), len(snapshot.Clients), snapshot.Status.PanelVersion == nodeReportedIdentity, snapshot.Status.XrayVersion == coreVersion, snapshot.Status.XrayState == "running")
 	} else {
 		f.t.Logf("readiness diagnostics: full_snapshot_present=false snapshot_not_found=%t", errors.Is(err, domain.ErrNotFound))
 	}
@@ -613,6 +617,11 @@ func (f *fixture) manifest(paths []string, inode bool) map[string]string {
 	return result
 }
 func (f *fixture) checkPrivacy() {
+	version, err := exec.CommandContext(f.ctx, nodeRoot+"/bin/passwall-node", "--version").Output()
+	must(f.t, err, "verify published binary build identity")
+	if strings.TrimSpace(string(version)) != nodeReportedIdentity {
+		f.t.Fatal("installed binary does not match exact published Node build identity")
+	}
 	pid := f.systemd("passwall-node.service", "MainPID")
 	for _, path := range []string{"/proc/" + pid + "/cmdline", "/proc/" + pid + "/environ", nodeUnit, nodeRoot + "/config/environment"} {
 		data, err := os.ReadFile(path)
