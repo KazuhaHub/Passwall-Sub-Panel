@@ -70,6 +70,16 @@ func TestShippedCompatManifestRangesAndAdvisories(t *testing.T) {
 					t.Fatalf("SUI %s must retain its unchanged-core upgrade information", key)
 				}
 			}
+			// Current-source live evidence includes a fix absent from published
+			// binaries. Do not silently certify those binaries via a remote bump.
+			xui, ok := lookupForPSPVersion(payload, fmt.Sprintf("v%d.9.2", major))
+			if !ok || xui.MaxTestedXUI != "3.7.0" {
+				t.Fatalf("unpatched release ceiling changed: %#v found=%v", xui, ok)
+			}
+			advisory, ok := payload.Advisories["3.8.0"]
+			if !ok || advisory.Severity != "warning" || !advisory.AffectsXray || advisory.Text == "" {
+				t.Fatal("XUI 3.8.0 must warn about the bundled-core upgrade and unpublished fix")
+			}
 		})
 	}
 }
@@ -149,6 +159,9 @@ func TestCompatV4FetchAppliesPublishedShape(t *testing.T) {
 	}
 	if a, ok := LookupXUIAdvisory("v3.7.0"); !ok || a.AffectsXray || a.Text == "" {
 		t.Fatal("runtime lost the canonical XUI advisory")
+	}
+	if a, ok := LookupXUIAdvisory("v3.8.0"); !ok || !a.AffectsXray || a.Severity != "warning" || a.Text == "" {
+		t.Fatal("runtime lost the XUI 3.8.0 core upgrade warning")
 	}
 	if a, ok := LookupSUIAdvisory("v1.6.0"); !ok || !a.AffectsXray || a.Text == "" {
 		t.Fatal("runtime lost the canonical SUI advisory")

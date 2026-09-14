@@ -1355,7 +1355,7 @@
       "reality_fingerprint": "Fingerprint",
       "reality_spider_x": "spiderX path",
       "reality_min_client": "Min client version",
-      "reality_min_client_hint": "In Xray-core ≥ 26.7.11, leaving this empty defaults to 26.3.27 server-side, which rejects mihomo/Clash Verge and older cores. Set 1.0.0 to allow all clients.",
+      "reality_min_client_hint": "Xray-core 26.7.11–26.7.28 defaults an empty value to 26.3.27; 26.9.8+ leaves the version floor disabled when empty. Set 1.0.0 to avoid the older cores' default floor. This does not bypass REALITY's ML-KEM requirements.",
       "reality_max_client": "Max client version",
       "reality_keys": "Reality keypair",
       "gen_keys": "Generate keypair",

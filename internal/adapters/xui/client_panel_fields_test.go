@@ -1,7 +1,10 @@
 package xui
 
 import (
+	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"sort"
 	"testing"
 
@@ -159,6 +162,80 @@ func TestSpecToRaw_PinsInboundPanelFields(t *testing.T) {
 	// PSP creates or updates would assert a rank it does not own.
 	if _, present := body["subSortIndex"]; present {
 		t.Error("specToRaw must not carry subSortIndex — UpdateInbound echoes the live value instead")
+	}
+}
+
+// 3X-UI 3.8.0 accepts negative subscription ranks. Its full-row update still
+// normalizes an omitted/zero rank to 1, so an unrelated PSP edit must carry
+// negative ranks through the read-modify-write just like positive ones.
+func TestUpdateInboundPreservesPanelSubSortIndex(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		rank          int
+		published     bool
+		wantRank      int
+		wantUpdateKey bool
+	}{
+		{"positive", 7, true, 7, true},
+		{"negative", -3, true, -3, true},
+		{"zero normalizes", 0, true, 1, false},
+		{"older panel omits field", 0, false, 1, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rank, published := tc.rank, tc.published
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				switch {
+				case r.Method == http.MethodGet && r.URL.Path == "/panel/api/inbounds/get/7":
+					inbound := map[string]any{"id": 7, "settings": map[string]any{"clients": []any{}}}
+					if published {
+						inbound["subSortIndex"] = rank
+					}
+					_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "obj": inbound})
+				case r.Method == http.MethodPost && r.URL.Path == "/panel/api/inbounds/update/7":
+					var body map[string]json.RawMessage
+					if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+						t.Errorf("decode update: %v", err)
+						http.Error(w, "invalid body", http.StatusBadRequest)
+						return
+					}
+					raw, present := body["subSortIndex"]
+					if present != tc.wantUpdateKey {
+						t.Errorf("update subSortIndex present = %v, want %v", present, tc.wantUpdateKey)
+					}
+					// Model the upstream full-row save: omission binds zero, which
+					// is normalized to 1; a negative value remains unchanged.
+					rank = 0
+					if present {
+						if err := json.Unmarshal(raw, &rank); err != nil {
+							t.Errorf("decode subSortIndex: %v", err)
+						}
+					}
+					if rank == 0 {
+						rank = 1
+					}
+					published = true
+					_ = json.NewEncoder(w).Encode(map[string]any{"success": true})
+				default:
+					t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+					http.NotFound(w, r)
+				}
+			}))
+			defer srv.Close()
+			c := &Client{baseURL: srv.URL, http: srv.Client(), apiToken: "t"}
+			if err := c.UpdateInbound(context.Background(), 7, ports.InboundSpec{
+				Remark: "edited", Enable: true, Port: 443, Protocol: "vless", Settings: `{"clients":[]}`,
+			}); err != nil {
+				t.Fatalf("UpdateInbound: %v", err)
+			}
+			got, err := c.GetInbound(context.Background(), 7)
+			if err != nil {
+				t.Fatalf("GetInbound after update: %v", err)
+			}
+			if got.SubSortIndex != tc.wantRank {
+				t.Fatalf("stored subSortIndex = %d, want %d", got.SubSortIndex, tc.wantRank)
+			}
+		})
 	}
 }
 
