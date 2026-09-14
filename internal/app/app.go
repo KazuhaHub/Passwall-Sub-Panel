@@ -385,14 +385,15 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	reconcileSvc.SetPSPClientRepo(repos.PSPClient)
 	healthSvc := health.New(repos.Node)
 	renderSvc := render.New(repos, pool, groupSvc)
-	nativeSync.SetRenderInvalidator(renderSvc.InvalidateAll)
-	// Ordering nodes and standalone separators changes every affected
-	// subscription. Clear both cache layers after the DB transaction commits so
-	// the next client refresh sees the new merged order immediately.
-	nodeSvc.SetSubscriptionInvalidator(func() {
+	// Node configuration confirmations and ordering changes affect both the
+	// enabled-node snapshots and final subscriptions. Clear both cache layers
+	// after the DB write commits so the next refresh sees the current nodes.
+	invalidateSubscriptions := func() {
 		groupSvc.InvalidateNodeCache()
 		renderSvc.InvalidateAll()
-	})
+	}
+	nativeSync.SetRenderInvalidator(invalidateSubscriptions)
+	nodeSvc.SetSubscriptionInvalidator(invalidateSubscriptions)
 	// Geo IP resolution for access-log region display — fully offline against a
 	// local .mmdb in <ConfigDir>/geoip/. No per-IP external calls. Reads
 	// enabled/active-file live from settings and hot-reloads the DB on change.

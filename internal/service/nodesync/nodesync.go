@@ -226,18 +226,7 @@ func (s *Service) mint(ctx context.Context, agent *domain.NodeAgent, stream doma
 	return stored, nil
 }
 
-type listenerConfig struct {
-	Enabled        bool   `json:"enabled"`
-	Listen         string `json:"listen"`
-	Port           int    `json:"port"`
-	Protocol       string `json:"protocol"`
-	Remark         string `json:"remark"`
-	Settings       string `json:"settings"`
-	StreamSettings string `json:"stream_settings"`
-	Sniffing       string `json:"sniffing"`
-	Allocate       string `json:"allocate"`
-	ExpiryTime     int64  `json:"expiry_time"`
-}
+type listenerConfig = domain.NodeConfigIntent
 
 func buildConfig(snapshot *ports.NativeDesiredSnapshot, agent *domain.NodeAgent) (nodeprotocol.ConfigBody, error) {
 	engine := domain.NodeCoreXray
@@ -274,12 +263,7 @@ func buildConfig(snapshot *ports.NativeDesiredSnapshot, agent *domain.NodeAgent)
 		if node == nil {
 			continue
 		}
-		raw, err := json.Marshal(listenerConfig{
-			Enabled: node.Enabled, Listen: node.InboundListen, Port: node.DesiredPort,
-			Protocol: node.DesiredProtocol, Remark: node.InboundRemark,
-			Settings: node.InboundSettings, StreamSettings: node.StreamSettings,
-			Sniffing: node.Sniffing, Allocate: node.Allocate, ExpiryTime: node.InboundExpiryTime,
-		})
+		raw, err := json.Marshal(node.ConfigIntent())
 		if err != nil {
 			return nodeprotocol.ConfigBody{}, fmt.Errorf("nodesync: encode listener %d: %w", node.ID, err)
 		}
@@ -518,10 +502,18 @@ func (s *Service) reconcileObjects(ctx context.Context, agent *domain.NodeAgent,
 			if !exists || !existed || status.State != nodeprotocol.ObjectApplied || !sameListenerIntent(applied, node) {
 				continue
 			}
-			if err := s.nodes.UpdateObservedEndpoint(ctx, node.ID, domain.NodeObservedEndpoint{
-				Protocol: node.DesiredProtocol, Port: node.DesiredPort,
-			}); err != nil {
-				return fmt.Errorf("nodesync: update listener %d observed endpoint: %w", node.ID, err)
+			// An asynchronous push stays pending until this full, current applied
+			// receipt arrives. Compare again under the repository's row lock: an
+			// admin edit can occur after the desired snapshot above was loaded.
+			// Neither a heartbeat nor an old receipt may clear that newer intent.
+			changed, err := s.nodes.ConfirmAppliedConfig(ctx, node.ID, agent.PanelID, applied)
+			if err != nil {
+				return fmt.Errorf("nodesync: confirm listener %d applied config: %w", node.ID, err)
+			}
+			// Render gates local snapshots on convergence. Refresh it on the
+			// transition, not on every periodic replay of an applied receipt.
+			if changed && s.invalidateRender != nil {
+				s.invalidateRender()
 			}
 		}
 	}
@@ -545,11 +537,7 @@ func sameProtocolClient(a, b nodeprotocol.Client) bool {
 }
 
 func sameListenerIntent(applied listenerConfig, node *domain.Node) bool {
-	return node != nil && applied.Enabled == node.Enabled && applied.Listen == node.InboundListen &&
-		applied.Port == node.DesiredPort && applied.Protocol == node.DesiredProtocol &&
-		applied.Remark == node.InboundRemark && applied.Settings == node.InboundSettings &&
-		applied.StreamSettings == node.StreamSettings && applied.Sniffing == node.Sniffing &&
-		applied.Allocate == node.Allocate && applied.ExpiryTime == node.InboundExpiryTime
+	return node != nil && applied == node.ConfigIntent()
 }
 
 func objectStatuses(all []nodeprotocol.ObjectStatus, stream string) map[string]nodeprotocol.ObjectStatus {
