@@ -416,12 +416,11 @@ const EMPTY_INBOUND: InboundFormState = {
   reality_spider_x: '/ai',
   reality_xver: 0,
   reality_max_timediff: 0,
-  // Default new REALITY inbounds to minClientVer 1.0.0 (= no version gate).
-  // xray-core >= 26.7.11 treats an EMPTY minClientVer as "26.3.27", which
-  // rejects mihomo/Clash Verge (hardcoded client version 1.8.2) and older
-  // cores — so an empty default silently breaks every new node. Existing
-  // nodes are unaffected: parseInboundForEdit overrides this with the panel's
-  // real value. See docs/3xui-compat.md 2026-07-13.
+  // Keep an explicit 1.0.0 floor for older Xray cores: 26.7.11–26.7.28
+  // default an empty minClientVer to 26.3.27, rejecting older client versions.
+  // In 26.9.8+ an empty value has no version floor. This version setting does
+  // not bypass REALITY's ML-KEM requirements. Existing nodes use the panel's
+  // actual value through parseInboundForEdit.
   reality_min_client: '1.0.0',
   reality_max_client: '',
   ss_method: '2022-blake3-aes-256-gcm',
@@ -1733,13 +1732,11 @@ function InboundFormFields({ form, setForm, showMetadata, servers, onGenKeys, on
                   value={form.short_ids_text}
                   onChange={e => update('short_ids_text', e.target.value)}
                   sx={{ '& input': { fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace', fontSize: 13, py: 1.25 } }} />
-                {/* minClientVer / maxClientVer gate the REALITY handshake by the
-                    client's self-reported xray-core version. Both empty = no gate
-                    (pre-3.5 behavior). IMPORTANT: xray-core >= 26.7.11 changed an
-                    EMPTY minClientVer to default to "26.3.27" server-side, which
-                    rejects mihomo/Clash-Verge (they hardcode client version 1.8.2)
-                    and any older core — set minClientVer to "1.0.0" to restore the
-                    open behavior. See docs/3xui-compat.md 2026-07-13. */}
+                {/* These fields gate the client's self-reported Xray version.
+                    Xray 26.7.11–26.7.28 defaults empty minClientVer to 26.3.27;
+                    26.9.8+ leaves the floor disabled when empty. Explicit 1.0.0
+                    avoids the older cores' default floor, while REALITY's
+                    ML-KEM requirements apply independently. */}
                 {effectivePanelType === '3xui' && <Box sx={{ display: 'flex', gap: 1.5, flexWrap: 'wrap' }}>
                   <TextField size="small" label={t('admin:nodes.create_dialog.reality_min_client')}
                     placeholder="1.0.0"

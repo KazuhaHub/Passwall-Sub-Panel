@@ -1,14 +1,14 @@
 {
   "schema_version": 2,
   "major": 4,
-  "updated_at": "2026-09-13",
+  "updated_at": "2026-09-14",
   "entries": [
     {
       "psp_min": "v4.0.0",
       "psp_max": "v4.99.99",
       "min_xui": "3.4.2",
       "max_tested_xui": "3.7.0",
-      "notes": "Initial v4 range inherits the existing v3.9.2-line adapter contract, not a new live-panel run of the v4 release binary. The compiled 3.4.2 floor remains necessary for POST /panel/api/server/scanRealityTargets; the 3.7.0 ceiling comes from the live PSP-adapter verification recorded in v3.json (shared-client, inbound, status and REALITY paths). Current source and request-shape tests retain that surface, including explicit panel-renewal-off fields and PSP-owned HWID limits. Register 3X-UI 3.7.0 with an admin-scoped API token; monitor/node-sync scopes do not cover PSP's API surface. Adopted hand-made finalmask inbounds may require re-saving after the upstream 3.6.0 migration. Panel/core upgrade endpoints were checked for route presence in the recorded verification, not executed. This manifest does not certify PN remote upgrades, traffic/quota end-to-end behaviour, or rollback of a migrated PSP database. Add a narrower entry first if a later v4 adapter changes its required contract."
+      "notes": "3.8.0 review (2026-09-14 UTC): current PSP source at 06073ca plus the negative-subSortIndex preservation fix was live-verified against fresh upstream tag 837addf and official Xray 26.9.9 on darwin/arm64. The live surface, IP/HWID limits, REALITY scan, seeded-counter traffic-floor matrix and supplemental negative-rank/shared-client checks passed. This fix is absent from published v4.0.0-beta.1..beta.8; the v3 release renderer also lacks the current REALITY ML-KEM adaptation. Keep the published 3.7.0 ceiling unchanged rather than applying current-source evidence to unpatched binaries. Numeric manifest matching does not distinguish v4.0.0 prereleases. See docs/3xui-compat.md for the verification scope and upgrade advisory. Initial v4 range inherits the existing v3.9.2-line adapter contract, not a new live-panel run of the v4 release binary. The compiled 3.4.2 floor remains necessary for POST /panel/api/server/scanRealityTargets; the 3.7.0 ceiling comes from the live PSP-adapter verification recorded in v3.json (shared-client, inbound, status and REALITY paths). Current source and request-shape tests retain that surface, including explicit panel-renewal-off fields and PSP-owned HWID limits. Register 3X-UI 3.7.0 with an admin-scoped API token; monitor/node-sync scopes do not cover PSP's API surface. Adopted hand-made finalmask inbounds may require re-saving after the upstream 3.6.0 migration. Panel/core upgrade endpoints were checked for route presence in the recorded verification, not executed. This manifest does not certify PN remote upgrades, traffic/quota end-to-end behaviour, or rollback of a migrated PSP database. Add a narrower entry first if a later v4 adapter changes its required contract."
     }
   ],
   "sui_entries": [
@@ -34,6 +34,11 @@
       "severity": "warning",
       "affects_xray": false,
       "text": "3X-UI 3.7.0 内置 Xray-core 仍锁定 3.6.0 的 commit（5ca6f4b / v26.7.28）。给 PSP 新建 API token 时必须使用 admin scope；monitor 和 node-sync scope 覆盖不了 PSP 的接口。旧 token 的空 scope 会由上游迁移补为 admin。不要在 3X-UI 中为 PSP 管理的客户端设置面板侧自动续期或流量重置周期：PSP 会主动关闭 resetDay/resetMax/trafficReset/trafficResetDay，避免面板改写 PSP 的到期与流量账本。HWID 上限 limitHwid 由 PSP 管理，应在 PSP 用户编辑界面设置，PSP 会覆盖面板侧改动；非 PSP 管理的客户端不受影响。兼容上限沿用 v3 清单记录的既有 3.7.0 适配器实机验证，并非 V4 发布二进制新实测。"
+    },
+    "3.8.0": {
+      "severity": "warning",
+      "affects_xray": true,
+      "text": "3X-UI 3.8.0 会升级内置 Xray-core 到 26.9.9、重启内核，并迁移全局 Xray 模板中的 outbound/DNS 配置。PSP 当前源码已有 REALITY ML-KEM-first 适配：Mihomo 订阅使用 chrome 指纹及 support-x25519mlkem768，请使用支持这些选项的客户端并刷新订阅；sing-box 输出会省略受影响的 REALITY 节点。已发布 PSP v4.0.0-beta.1–beta.8 编辑负数 subSortIndex 时仍会将排序重置为 1，需使用包含本次修复的 PSP 构建；当前源码实机验证不代表旧发布版本已修复，兼容上限暂保持 3.7.0。新增 TUIC sidecar、AmneziaWG 等功能不属于 PSP 已支持的 3X-UI 功能。"
     }
   },
   "sui_advisories": {

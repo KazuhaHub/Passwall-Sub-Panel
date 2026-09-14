@@ -30,10 +30,54 @@ PSP 通过 `/panel/api/*` 对接 3X-UI 面板。本文档维护两件事：
 
 **规则**:
 - "最低 3X-UI" = 该 PSP 版本能正常工作的最早 3X-UI 版本(低于这个会破)
-- "已实测通过" = 在该版本上真实跑过 traffic poll / reconcile / render 全套
+- "已实测通过" = 适配器已验证的接口上限，具体构建、测试及功能边界见对应验证记录；不代表完整代理流量或已有数据库升级验证
 - 任何高于"已实测通过"的 3X-UI 版本都属于**未知风险**——升级前先在一台 panel 上小流量验证
 
 ## 历史兼容性事件
+
+### 2026-09-14 UTC / 3X-UI 3.8.0 复核 → 需要 PSP 修复，发布上限暂保持 3.7.0
+
+[v3.8.0](https://github.com/MHSanaei/3x-ui/releases/tag/v3.8.0) 将内置 Xray
+升级到 **26.9.9**，新增 TUIC sidecar，并迁移全局 `xrayTemplateConfig` 中的
+outbound/DNS 旧字段。PSP 管理的是 inbound 快照，不写这些全局 outbound，
+现有 REALITY `finalmask.tcp` 清理仍适用，无需增加快照迁移。
+
+发现并修复一处入站更新回归：3.8.0 允许负数 `subSortIndex`，PSP 原来只回传
+正数值，编辑上游排序为 `-3` 的入站会漏传该字段，上游将其重置为 `1`。
+现在回传所有非零排序值；零值及旧面板缺失字段仍保留原处理。增加 HTTP
+读写回读回归测试，覆盖正数、负数、零值与旧面板缺失字段。
+
+当前 v4 源码已有 26.9.8+ REALITY 的 ML-KEM-first 适配：Mihomo 使用
+`client-fingerprint: chrome` 与 `support-x25519mlkem768: true`，已知不兼容的
+sing-box 输出省略对应 REALITY 节点。应使用支持这些选项的客户端并刷新订阅。
+`minClientVer` 留空在 26.9.8+ 不设最低版本，旧 26.7.11–26.7.28 则默认为
+26.3.27；PSP 保留显式 `1.0.0` 默认值，修正中英文提示。这一设置不绕过 ML-KEM 要求。
+
+实机验证使用 PSP checkout `06073ca` 加本次修复、3X-UI tag `837addf`、
+Go 1.27.1、darwin/arm64 及校验官方 SHA-256 的 Xray 26.9.9 `52a412d`，
+启动全新本地 SQLite 面板。仅嵌入 SPA 首页占位文件以运行 API；面板 API 和
+内核均未替换成 stub。`TestLive_XUISurface`、`TestLive_XUIConnectionLimits`
+及 `TestLive_XUIRealityScan` 通过，版本读回 3.8.0/26.9.9、内核运行，
+GitHub 更新信息、内核版本列表和远端 REALITY 扫描均实际返回成功。
+
+`TestLive_XUITrafficFloorMatrix` 的五组检查全部通过：55%/90% 用量不会误停，
+老客户端进入新周期仍可使用；耗尽后增加计数会被面板停用，随用量增长推送的
+总上限保持稳定。该测试直接向临时 SQLite 写入累计计数，通过真实适配器推送
+PSP 的 period/lifetime 换算结果，并等待真实面板停用扫描，不发送代理流量。
+临时 Go test overlay 另验证 `-3` 排序在更新后保留、禁用状态创建读回正确，
+并用两个禁用入站实际运行五项共享客户端/迁移/批量删除/并发写检查，无跳过项。
+
+这次是当前源码与全新面板验证，未运行 PSP 发布二进制、已有面板数据库升级、
+完整代理连接或完整 PSP traffic/reconcile 链路，也未构建或验证上游 SPA。
+面板/内核升级的破坏性接口只核对源码路由，未执行。
+新 TUIC sidecar、AmneziaWG outbound 和 native UDP hopping 不属于 PSP 当前
+3X-UI 功能覆盖；PSP 的 S-UI TUIC 支持不代表已支持 3X-UI TUIC。
+
+**v3/v4 运行时上限均暂保持 3.7.0，新增 3.8.0 升级警告。** 已发布 v3
+缺少当前 REALITY 适配，已发布 v4 beta（包括 beta.8）仍有负数排序缺陷。
+兼容清单按数字版本匹配，不能区分 `v4.0.0-beta.N` 与 `v4.0.0`；不能把当前
+源码测试结果套用于这些旧二进制。包含修复的 PSP 构建与可区分的版本范围明确后，
+再发布相应上限。
 
 ### 2026-09-13 UTC / S-UI 1.6.2 设置修复复核 → 已测上限 1.6.1 抬到 1.6.2
 

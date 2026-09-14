@@ -1330,7 +1330,7 @@
       "reality_fingerprint": "Fingerprint",
       "reality_spider_x": "spiderX 路径",
       "reality_min_client": "最低客户端版本",
-      "reality_min_client_hint": "在 Xray-core ≥ 26.7.11 中，此项留空会被服务端默认成 26.3.27，导致 mihomo/Clash Verge 等客户端连不上。填 1.0.0 放行所有客户端。",
+      "reality_min_client_hint": "Xray-core 26.7.11–26.7.28 将留空默认成 26.3.27；26.9.8 起留空不设最低版本。填 1.0.0 可避免旧内核的默认版本限制，但不会绕过 REALITY 的 ML-KEM 要求。",
       "reality_max_client": "最高客户端版本",
       "reality_keys": "Reality 密钥对",
       "gen_keys": "生成 keypair",
