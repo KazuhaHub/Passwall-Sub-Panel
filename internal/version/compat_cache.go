@@ -95,6 +95,8 @@ func LoadCompatCache() error {
 // across PSP majors would needlessly nuke this one too.
 const latestXUICacheFile = "latest-xui-cache.json"
 
+const latestSUICacheFile = "latest-sui-cache.json"
+
 type latestXUICachePayload struct {
 	Tag      string    `json:"tag"`
 	CachedAt time.Time `json:"cached_at"`
@@ -153,6 +155,56 @@ func saveLatestXUICache(tag string) error {
 	if err := os.Rename(tmp, target); err != nil {
 		_ = os.Remove(tmp)
 		return fmt.Errorf("rename cache: %w", err)
+	}
+	return nil
+}
+
+// LoadLatestSUICache restores the optional stable S-UI snapshot before any
+// background fetch. Like the upstream 3X-UI tag, it is PSP-major-independent.
+func LoadLatestSUICache() error {
+	dir := getCacheDir()
+	if dir == "" {
+		return nil
+	}
+	body, err := os.ReadFile(filepath.Join(dir, latestSUICacheFile))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("read latest-sui cache: %w", err)
+	}
+	var payload latestXUICachePayload
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return fmt.Errorf("decode latest-sui cache: %w", err)
+	}
+	tag, ok := acceptLatestPSPStable(payload.Tag, false)
+	if !ok {
+		return fmt.Errorf("cached S-UI tag %q is not a usable stable version", payload.Tag)
+	}
+	SetLatestSUI(tag)
+	return nil
+}
+
+func saveLatestSUICache(tag string) error {
+	dir := getCacheDir()
+	if dir == "" {
+		return nil
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("ensure latest-sui cache dir: %w", err)
+	}
+	body, err := json.MarshalIndent(latestXUICachePayload{Tag: tag, CachedAt: time.Now()}, "", "  ")
+	if err != nil {
+		return fmt.Errorf("encode latest-sui cache: %w", err)
+	}
+	target := filepath.Join(dir, latestSUICacheFile)
+	tmp := target + ".tmp"
+	if err := os.WriteFile(tmp, body, 0o644); err != nil {
+		return fmt.Errorf("write latest-sui cache: %w", err)
+	}
+	if err := os.Rename(tmp, target); err != nil {
+		_ = os.Remove(tmp)
+		return fmt.Errorf("rename latest-sui cache: %w", err)
 	}
 	return nil
 }

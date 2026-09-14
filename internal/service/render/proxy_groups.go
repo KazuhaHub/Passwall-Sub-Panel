@@ -19,8 +19,8 @@ var builtInRuleTargets = map[string]bool{
 // here are prepended in their first-occurrence order from the rule content.
 var defaultProxyGroupOrder = []string{
 	"🚀 节点选择",
-	"⚡ QUIC控制",
 	"🎮 UDP控制",
+	"⚡ QUIC控制",
 	"🇨🇳 中国大陆",
 	"💬 Ai平台",
 	"📹 油管视频",
@@ -265,9 +265,11 @@ func proxyGroupChoices(name string) []string {
 		// mapping it to DIRECT would create a platform-specific traffic leak.
 		return []string{"🎮 UDP控制", "🚀 节点选择", "DIRECT", "REJECT"}
 	case strings.Contains(name, "UDP控制"):
-		// General non-local UDP selector. HTTP/3 normally delegates here through
-		// the dedicated QUIC selector, but subscribers can override it there.
-		return []string{"🚀 节点选择", "DIRECT", "REJECT"}
+		// General non-local UDP defaults to the local DIRECT exit, independently
+		// of the main node selection. This allows UDP; it does not block it or
+		// promise a proxied source IP. HTTP/3 delegates here by default, while
+		// either selector can still be overridden independently by subscribers.
+		return []string{"DIRECT", "🚀 节点选择", "REJECT"}
 	case strings.Contains(name, "全球直连"):
 		return []string{"DIRECT"}
 	case strings.Contains(name, "广告拦截") || strings.Contains(name, "应用净化"):

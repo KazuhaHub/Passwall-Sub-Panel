@@ -7,6 +7,8 @@ export interface PagedTableFooterProps {
   pageSize: number
   onPageChange: (n: number) => void
   onPageSizeChange: (n: number) => void
+  /** Disable pagination while an operation is using the current-page selection. */
+  disabled?: boolean
   /** Allowed page sizes. Defaults to [10, 25, 50, 100]. */
   rowsPerPageOptions?: number[]
 }
@@ -27,6 +29,7 @@ export function PagedTableFooter(props: PagedTableFooterProps) {
     <TablePagination
       component="div"
       count={props.total}
+      disabled={props.disabled}
       // MUI TablePagination is 0-indexed for the page prop; we expose
       // 1-indexed externally to match the URL + backend convention.
       page={Math.max(0, props.page - 1)}

@@ -473,6 +473,7 @@ type NodeAgentIssueFilter struct {
 	AgentID      string
 	Code         string
 	Acknowledged *bool
+	View         domain.NodeAgentIssueView
 }
 
 // NodeAgentIssueRepo is the durable handoff from node-owned observations to
@@ -483,6 +484,20 @@ type NodeAgentIssueRepo interface {
 	GetByID(ctx context.Context, id int64) (*domain.NodeAgentIssue, error)
 	List(ctx context.Context, filter NodeAgentIssueFilter) (items []*domain.NodeAgentIssue, total int64, err error)
 	Acknowledge(ctx context.Context, id int64, acknowledgedAt time.Time) error
+}
+
+// NodeAgentIssueServer contains only public display metadata, never credentials.
+// It is not part of an issue's durable identity or acknowledgement state.
+type NodeAgentIssueServer struct {
+	ServerID   int64
+	ServerName string
+}
+
+// NodeAgentIssueServerRepo optionally enriches an issue page in one batch.
+// Keeping this outside the mandatory issue contract preserves lightweight
+// repositories and allows the inbox to remain usable when labels are unavailable.
+type NodeAgentIssueServerRepo interface {
+	ListIssueServers(ctx context.Context, agentIDs []string) (map[string]NodeAgentIssueServer, error)
 }
 
 // NodeAgentTaskOfferSupport is derived from one current report, never the

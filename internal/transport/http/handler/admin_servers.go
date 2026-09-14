@@ -107,6 +107,7 @@ type serverDTO struct {
 	// panel — the latest tag is panel-independent and storing it per row
 	// would just be N copies of the same string going stale together.
 	LatestXUIVersion string `json:"latest_xui_version,omitempty"`
+	LatestSUIVersion string `json:"latest_sui_version,omitempty"`
 	UpdateAvailable  bool   `json:"update_available,omitempty"`
 	// IPLimitEnforcement is what the node's fail2ban probe concluded about the
 	// concurrent-IP cap: whether a limit pushed here is acted on at all. It is
@@ -197,6 +198,12 @@ func (h *AdminServersHandler) List(c *gin.Context) {
 	if err != nil {
 		respondError(c, err)
 		return
+	}
+	for _, panel := range panels {
+		if panel != nil && domain.NormalizePanelKind(panel.Kind) == domain.PanelKindSUI {
+			h.refreshLatestSUI()
+			break
+		}
 	}
 	agentsByPanel := make(map[int64]*domain.NodeAgent)
 	if h.agents != nil {
@@ -555,7 +562,11 @@ func (h *AdminServersHandler) Test(c *gin.Context) {
 		return
 	}
 	isXUI := domain.NormalizePanelKind(panel.Kind) == domain.PanelKind3XUI
+	isSUI := domain.NormalizePanelKind(panel.Kind) == domain.PanelKindSUI
 	isNative := domain.NormalizePanelKind(panel.Kind) == domain.PanelKindPSP
+	if isSUI {
+		h.refreshLatestSUI()
+	}
 	// The compat (v3.json) tested range is fetched REACTIVELY — not here, but
 	// only if the panel probed below turns out to sit outside the cached range
 	// (see the CheckXUI block). A supported fleet makes zero GitHub compat calls.
@@ -646,6 +657,10 @@ func (h *AdminServersHandler) Test(c *gin.Context) {
 		if latest := version.LatestXUI(); isXUI && latest != "" {
 			resp["latest_xui_version"] = latest
 			resp["update_available"] = version.IsXUIUpdateAvailable(status.PanelVersion)
+		}
+		if latest := version.LatestSUI(); isSUI && latest != "" {
+			resp["latest_sui_version"] = latest
+			resp["update_available"] = version.IsSUIUpdateAvailable(status.PanelVersion)
 		}
 		// Same click, same reason: an admin who just installed fail2ban on the
 		// node should not have to wait out the next traffic-poll probe to see the
@@ -1408,7 +1423,26 @@ func toServerDTO(p *domain.XUIPanel) serverDTO {
 		dto.LatestXUIVersion = latest
 		dto.UpdateAvailable = version.IsXUIUpdateAvailable(p.PanelVersion)
 	}
+	if latest := version.LatestSUI(); domain.NormalizePanelKind(p.Kind) == domain.PanelKindSUI && latest != "" && p.PanelVersion != "" {
+		dto.LatestSUIVersion = latest
+		dto.UpdateAvailable = version.IsSUIUpdateAvailable(p.PanelVersion)
+	}
 	return dto
+}
+
+// Latest release availability is not part of testing node connectivity. Keep
+// GitHub latency off List/Test, use the app-owned dispatcher for shutdown/panic
+// handling, and share the throttled snapshot across all S-UI server rows.
+// A nil dispatcher deliberately leaves this optional hint cache-only.
+func (h *AdminServersHandler) refreshLatestSUI() {
+	if h.async == nil {
+		return
+	}
+	h.async.Go("admin-servers.latest-sui", func(ctx context.Context) {
+		if err := version.RefreshLatestSUI(ctx); err != nil {
+			log.Debug("admin servers: refresh latest S-UI failed", "err", err)
+		}
+	})
 }
 
 // refreshIPLimitEnforcement re-probes one node's fail2ban preconditions and

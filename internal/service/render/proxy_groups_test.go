@@ -125,7 +125,7 @@ func TestBuildProxyGroupsYAMLSelectedServicesDefaultToNodeSelector(t *testing.T)
 
 // TestBuildProxyGroupsYAML_UDPControl pins the 🎮 UDP控制 catch-all selector
 // derived from a `NETWORK,udp,🎮 UDP控制` rule: candidates are
-// [🚀 节点选择, DIRECT, REJECT] in that order (node = default).
+// [DIRECT, 🚀 节点选择, REJECT] in that order (direct = default).
 func TestBuildProxyGroupsYAML_UDPControl(t *testing.T) {
 	raw, err := buildProxyGroupsYAML("- NETWORK,udp,🎮 UDP控制\n", nil)
 	if err != nil {
@@ -144,7 +144,7 @@ func TestBuildProxyGroupsYAML_UDPControl(t *testing.T) {
 	if g == nil {
 		t.Fatalf("🎮 UDP控制 group missing: %#v", groups)
 	}
-	want := []string{"🚀 节点选择", "DIRECT", "REJECT"}
+	want := []string{"DIRECT", "🚀 节点选择", "REJECT"}
 	if len(g.Proxies) != len(want) {
 		t.Fatalf("UDP控制 proxies = %#v, want %#v", g.Proxies, want)
 	}
@@ -259,8 +259,8 @@ func TestApplyProxyGroupOrderUsesProjectDefaultAndAppendsUnknownGroups(t *testin
 	got := applyProxyGroupOrder(targets, nil)
 	want := []string{
 		"🚀 节点选择",
-		"⚡ QUIC控制",
 		"🎮 UDP控制",
+		"⚡ QUIC控制",
 		"🇨🇳 中国大陆",
 		"🍎 苹果服务",
 		"🐟 漏网之鱼",

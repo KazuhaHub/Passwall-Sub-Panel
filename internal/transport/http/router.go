@@ -609,6 +609,7 @@ func NewRouter(d Deps) stdhttp.Handler {
 		// 3X-UI panel credentials live here — never operator.
 		adminGroup.GET("/servers", servers.List)
 		adminGroup.GET("/servers/node-releases", servers.ListNodeReleases)
+		adminGroup.GET("/servers/sui-release", servers.GetSUIRelease)
 		adminGroup.POST("/servers", servers.Create)
 		adminGroup.PUT("/servers/:id", servers.Update)
 		adminGroup.DELETE("/servers/:id", servers.Delete)
