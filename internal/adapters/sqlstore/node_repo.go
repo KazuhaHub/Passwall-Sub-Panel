@@ -2,9 +2,12 @@ package sqlstore
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"time"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
@@ -219,6 +222,54 @@ func (r *nodeRepo) UpdateObservedEndpoint(ctx context.Context, nodeID int64, obs
 			"observed_port":     observed.Port,
 			"observed_protocol": observed.Protocol,
 		}).Error
+}
+
+// ConfirmAppliedConfig clears pending state only while the acknowledged
+// listener intent still matches the current row. Locking the row keeps an admin
+// edit from landing between the comparison and the narrow acknowledgment write.
+// SQLite omits FOR UPDATE; its transaction and single-connection pool serialize
+// local writers, and any transaction conflict is returned rather than bypassed.
+func (r *nodeRepo) ConfirmAppliedConfig(ctx context.Context, nodeID, panelID int64, expected domain.NodeConfigIntent) (bool, error) {
+	changed := false
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		read := tx.Where("id = ? AND panel_id = ?", nodeID, panelID)
+		if tx.Dialector.Name() != "sqlite" {
+			read = read.Clauses(clause.Locking{Strength: "UPDATE"})
+		}
+		var row nodeRow
+		if err := read.First(&row).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil
+			}
+			return err
+		}
+		current, err := row.toDomain()
+		if err != nil {
+			return err
+		}
+		if current.ConfigIntent() != expected {
+			return nil
+		}
+		if current.ConfigSyncState == domain.ConfigSyncSynced && current.ConfigPendingSince == nil &&
+			current.ObservedPort == expected.Port && current.ObservedProtocol == expected.Protocol {
+			return nil
+		}
+		current.SetConfigSyncState(domain.ConfigSyncSynced, time.Time{})
+		result := tx.Model(&nodeRow{}).
+			Where("id = ? AND panel_id = ?", nodeID, panelID).
+			Updates(map[string]any{
+				"observed_port":        expected.Port,
+				"observed_protocol":    expected.Protocol,
+				"config_sync_state":    current.ConfigSyncState,
+				"config_pending_since": current.ConfigPendingSince,
+			})
+		changed = result.RowsAffected > 0
+		return result.Error
+	})
+	if err != nil {
+		return false, err
+	}
+	return changed, nil
 }
 
 // UpdateEnabled writes only the `enabled` column (see UpdateHealth for the

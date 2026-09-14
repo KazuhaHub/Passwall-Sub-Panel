@@ -21,6 +21,9 @@ func (countingNodeRepo) UpdateInboundConfig(context.Context, *domain.Node) error
 func (countingNodeRepo) UpdateObservedEndpoint(context.Context, int64, domain.NodeObservedEndpoint) error {
 	return nil
 }
+func (countingNodeRepo) ConfirmAppliedConfig(context.Context, int64, int64, domain.NodeConfigIntent) (bool, error) {
+	return true, nil
+}
 func (countingNodeRepo) UpdateEnabled(context.Context, int64, bool) error          { return nil }
 func (countingNodeRepo) UpdateTrafficCounters(context.Context, *domain.Node) error { return nil }
 func (countingNodeRepo) UpdateHealth(context.Context, *domain.Node) error          { return nil }
@@ -44,6 +47,7 @@ func TestInvalidatingNodeRepoCoversEveryWriter(t *testing.T) {
 	// Writers the decorator MUST wrap.
 	subscriptionVisible := []string{
 		"BatchUpdateSortOrder",
+		"ConfirmAppliedConfig",
 		"Create",
 		"Delete",
 		"Update",
@@ -124,7 +128,7 @@ func TestInvalidatingNodeRepoCoversEveryWriter(t *testing.T) {
 // nothing to say about.
 func isWriter(name string) bool {
 	switch {
-	case name == "Create", name == "Update", name == "Delete":
+	case name == "Create", name == "Update", name == "Delete", name == "ConfirmAppliedConfig":
 		return true
 	case len(name) > 6 && name[:6] == "Update":
 		return true
@@ -190,6 +194,43 @@ func TestInvalidationSkippedOnAFailedWrite(t *testing.T) {
 	}
 	if !fired {
 		t.Fatal("a successful write must invalidate")
+	}
+}
+
+type configConfirmationResultRepo struct {
+	ports.NodeRepo
+	changed bool
+	err     error
+}
+
+func (r configConfirmationResultRepo) ConfirmAppliedConfig(context.Context, int64, int64, domain.NodeConfigIntent) (bool, error) {
+	return r.changed, r.err
+}
+
+func TestConfigConfirmationInvalidatesOnlyOnSuccessfulChange(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		changed bool
+		err     error
+		want    int
+	}{
+		{"confirmed", true, nil, 1},
+		{"already_confirmed_or_stale", false, nil, 0},
+		{"failed", false, context.DeadlineExceeded, 0},
+		{"failed_after_change", true, context.DeadlineExceeded, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			invalidations := 0
+			repo := invalidatingNodeRepo{
+				NodeRepo: configConfirmationResultRepo{changed: tc.changed, err: tc.err},
+				notify:   func() { invalidations++ },
+			}
+			changed, err := repo.ConfirmAppliedConfig(t.Context(), 1, 9, domain.NodeConfigIntent{})
+			if changed != tc.changed || err != tc.err || invalidations != tc.want {
+				t.Fatalf("confirmation: changed=%t error=%v invalidations=%d, want changed=%t error=%v invalidations=%d",
+					changed, err, invalidations, tc.changed, tc.err, tc.want)
+			}
+		})
 	}
 }
 

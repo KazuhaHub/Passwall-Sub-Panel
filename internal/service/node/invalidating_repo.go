@@ -31,6 +31,7 @@ import (
 //	UpdateMetadata                      display name, address, region, tags
 //	UpdateEnabled                       the node enters or leaves the output
 //	UpdateInboundConfig                 protocol, port, TLS, stream settings
+//	ConfirmAppliedConfig                a native snapshot becomes usable
 //	BatchUpdateSortOrder                the order clients see
 //
 // And which deliberately do NOT, because the poll owns them and render never
@@ -71,6 +72,14 @@ func (r invalidatingNodeRepo) UpdateInboundConfig(ctx context.Context, n *domain
 
 func (r invalidatingNodeRepo) UpdateObservedEndpoint(ctx context.Context, nodeID int64, observed domain.NodeObservedEndpoint) error {
 	return r.NodeRepo.UpdateObservedEndpoint(ctx, nodeID, observed)
+}
+
+func (r invalidatingNodeRepo) ConfirmAppliedConfig(ctx context.Context, nodeID, panelID int64, expected domain.NodeConfigIntent) (bool, error) {
+	changed, err := r.NodeRepo.ConfirmAppliedConfig(ctx, nodeID, panelID, expected)
+	if err == nil && changed && r.notify != nil {
+		r.notify()
+	}
+	return changed, err
 }
 
 func (r invalidatingNodeRepo) UpdateEnabled(ctx context.Context, id int64, enabled bool) error {

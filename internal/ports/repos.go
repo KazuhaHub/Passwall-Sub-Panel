@@ -264,10 +264,20 @@ type NodeRepo interface {
 	// capture) must not clobber the health probe's port/HealthState/
 	// HealthCheckedAt columns it may be writing concurrently.
 	UpdateInboundConfig(ctx context.Context, n *domain.Node) error
-	// UpdateObservedEndpoint is the sole writer for the last reported endpoint.
+	// UpdateObservedEndpoint writes the last reported endpoint without claiming
+	// that the full listener configuration has converged.
 	// Its narrow value type cannot carry desired values, making the
 	// desired/observed ownership boundary enforceable by the compiler.
 	UpdateObservedEndpoint(ctx context.Context, nodeID int64, observed domain.NodeObservedEndpoint) error
+	// ConfirmAppliedConfig is for a validated full native receipt of the current
+	// minted config. Under a row lock it compares the PSP-owned expected intent
+	// with the current node, then writes only the observed endpoint and config
+	// confirmation state (synced, no pending age). Deleted/rebound/edited nodes
+	// are a no-op; storage errors must propagate so the receipt can be retried.
+	// The expected intent is a guard, not a desired snapshot to persist.
+	// changed is false for an already-confirmed receipt as well as a no-op,
+	// allowing subscription invalidation only when this write changes state.
+	ConfirmAppliedConfig(ctx context.Context, nodeID, panelID int64, expected domain.NodeConfigIntent) (changed bool, err error)
 	// UpdateEnabled writes only the `enabled` column. Same column-scoped
 	// rationale as the writers above: SetEnabled / DeleteAndSync / reconcile's
 	// disappeared-inbound branch flip enabled on a snapshot loaded at cycle

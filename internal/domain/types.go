@@ -487,8 +487,9 @@ type Node struct {
 	// ObservedProtocol / ObservedPort are the most recently confirmed values on
 	// the serving node/panel. They may legitimately differ from desired while a
 	// rollout is pending or rejected. NodeObservedEndpoint is the deliberately
-	// narrow write shape used by report/probe paths, so those paths cannot even
-	// carry desired columns to the repository.
+	// narrow write shape used by report/probe paths. Native applied receipts
+	// additionally compare a PSP-owned ConfigIntent guard; that guard is never
+	// written back as desired state.
 	ObservedProtocol string
 	ObservedPort     int
 	Region           string
