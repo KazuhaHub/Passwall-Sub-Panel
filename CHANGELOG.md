@@ -4,7 +4,7 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 semver per `feedback_semver` (major = refactor, minor = feature, patch = fix +
 small improvement).
 
-## v4.0.0-beta.9 — 2026-09-15
+## v4.0.0-beta.9 — 2026-09-14
 
 - 修复 3X-UI 3.8.0 允许负数 `subSortIndex` 后，PSP 编辑入站会把负数排序重置为 1 的问题；兼容性验证记录见 [beta9 发行说明](docs/releases/v4.0.0-beta.9.md)。
 - 更新 3X-UI 3.8.0 的内核升级、REALITY 客户端和功能边界提示；运行时已测上限暂保持 3.7.0，避免将未含本修复的既有 beta 误标为已支持。
