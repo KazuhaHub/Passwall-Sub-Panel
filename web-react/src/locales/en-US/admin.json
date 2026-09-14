@@ -761,23 +761,112 @@
   },
   "node_issues": {
     "title": "Node issues",
-    "subtitle": "Durable conditions a native node could not reconcile. Acknowledgement records review; it does not claim recovery.",
-    "search": "Search agent, code, key or detail",
+    "subtitle": "Review important node reports. Routine startup records are kept under Diagnostics.",
+    "view": {
+      "label": "Show",
+      "attention": "Important issues",
+      "diagnostic": "Diagnostics",
+      "all": "All records"
+    },
+    "empty_attention": "No important reports need review. Startup records remain available under Diagnostics.",
+    "technical_details": "Technical details and original logs",
+    "unlinked_hint": "Server link unavailable; identity is kept in details.",
+    "startup_title": "Node startup records",
+    "startup_action": "Recorded while the core was starting; check current server status if startup did not complete.",
+    "category_titles": {
+      "statistics": "Node statistics could not be read",
+      "sync": "Configuration or clients could not be synchronized",
+      "tasks": "Task status needs checking",
+      "other": "Other reports need checking"
+    },
+    "category_actions": {
+      "statistics": "Check the server's current core status. If it is running, inspect telemetry details.",
+      "sync": "Check server connectivity and node configuration before retrying synchronization.",
+      "tasks": "Check the task status before retrying. Do not bypass its safety checks.",
+      "other": "The report type is not recognized. Check the server and expand technical details to investigate."
+    },
+    "search": "Search server, code, object or detail",
     "search_action": "Search",
     "refresh": "Refresh",
     "empty": "No matching node issues.",
-    "acknowledge": "Acknowledge",
-    "acknowledged": "Issue acknowledged",
+    "acknowledge": "Mark as reviewed",
+    "acknowledged": "Marked as reviewed",
+    "view_details": "Details",
+    "open_details": "View {{problem}} on {{server}}",
+    "clear_search": "Clear search",
+    "loading": "Loading node issues",
+    "load_failed": "Could not load reports. Refresh to try again; any displayed records are from the previous result.",
+    "empty_review": "No reports need review.",
+    "page_summary": "This page: {{records}} grouped into {{groups}}",
+    "record_count_one": "{{count}} record",
+    "record_count_other": "{{count}} records",
+    "group_count_one": "{{count}} summary",
+    "group_count_other": "{{count}} summaries",
+    "review_notice": "Reviewed does not mean recovered. These reports are not a live health check.",
+    "detail_scope": "{{records}} from this page. Original logs are folded below. Reviewed does not mean recovered.",
+    "mobile_meta": "{{records}} · Last seen {{time}} {{timezone}}",
+    "server_id": "Server #{{id}}",
+    "record_id": "Report #{{id}}",
+    "unknown_server": "Unlinked node agent",
+    "unknown_title": "Other node issue",
+    "reviewed_at": "Reviewed at",
+    "bulk": {
+      "select_page": "Select all unreviewed reports on this page",
+      "select_group": "Select unreviewed reports for {{problem}} on {{server}} from this page",
+      "select_record": "Select report #{{id}}",
+      "selected": "Selected: {{records}}",
+      "clear": "Clear selection",
+      "acknowledge": "Mark selected as reviewed",
+      "confirm_title": "Review selected reports",
+      "confirm_message": "Mark the selected {{records}} from this page as reviewed, including folded records? This does not delete reports or repair the node.",
+      "progress": "Processed {{done}} / {{total}} reports",
+      "done": "Marked {{records}} as reviewed",
+      "partial": "Reviewed {{ok}}; {{fail}} failed. Failed reports still on this page remain selected for retry."
+    },
+    "code_titles": {
+      "core_telemetry_failed": "Core statistics unavailable",
+      "core_convergence_failed": "Core changes could not be applied",
+      "object_pending_timeout": "Changes not applied in time",
+      "object_rejected_timeout": "Changes remain rejected",
+      "segment_rejected": "Configuration document rejected",
+      "roster_ahead_of_config": "Client list is waiting for configuration",
+      "attachment_unknown_listener": "Client references a missing listener",
+      "directives_ahead_of_roster": "Policy is waiting for the client list",
+      "directive_unknown_client": "Policy references a missing client",
+      "report_missing_object": "Node report is incomplete",
+      "task_identity_conflict": "Task identity conflict",
+      "task_replay_fenced": "Task replay was prevented",
+      "legacy_task_result_quarantined": "Legacy task result isolated"
+    },
+    "code_summaries": {
+      "core_telemetry_failed": "The node could not read core state or traffic counters.",
+      "core_convergence_failed": "The core did not accept the requested runtime changes.",
+      "object_pending_timeout": "A configuration or client object stayed pending past its deadline.",
+      "object_rejected_timeout": "A rejected object stayed unchanged and needs review.",
+      "segment_rejected": "The node rejected a received configuration document.",
+      "roster_ahead_of_config": "The client list depends on a configuration not yet received.",
+      "attachment_unknown_listener": "The client list references a listener missing from configuration.",
+      "directives_ahead_of_roster": "The policy depends on a client list not yet received.",
+      "directive_unknown_client": "The policy references a client missing from the client list.",
+      "report_missing_object": "A required object was absent from a full node report.",
+      "task_identity_conflict": "One task ID was used with different operation inputs.",
+      "task_replay_fenced": "The node could not prove a safe fresh task start.",
+      "legacy_task_result_quarantined": "An old task result lacks a verifiable operation identity."
+    },
     "filter": {
       "all": "All review states",
       "unacknowledged": "Needs review",
-      "acknowledged": "Acknowledged"
+      "acknowledged": "Reviewed"
     },
     "state": {
       "unacknowledged": "Needs review",
-      "acknowledged": "Acknowledged"
+      "acknowledged": "Reviewed",
+      "mixed": "Partially reviewed"
     },
     "table": {
+      "problem": "Issue",
+      "server": "Server",
+      "records": "Records",
       "state": "Review state",
       "code": "Stable code",
       "agent": "Agent",
@@ -1886,8 +1975,8 @@
   },
   "servers": {
     "install_reinstall": {
-      "action": "Install / reinstall",
-      "title": "Install / reinstall · {{name}}",
+      "action": "Install / Reinstall",
+      "title": "Install / Reinstall · {{name}}",
       "backend": "Target backend",
       "original": "Original server #{{id}} · {{backend}}. Keep this record and its existing nodes.",
       "forbidden": "Only a Global Administrator can install, reinstall or change this server's backend.",
@@ -1920,8 +2009,8 @@
       "deployment_safety": "Node-host takeover supports standard Linux/systemd x-ui or a cleanly reinstalled OS only. Prevent upgrades or automation from restarting the old service; custom/container deployments require manual handling.",
       "already_native": "This same server is already Passwall Node. No backend conversion is needed; continue installation / reinstall with its original identity.",
       "continue_native_install": "Continue Passwall Node installation / reinstall",
-      "unsupported_next": "Close this preview and reopen Install / reinstall. Choose the server's original backend for its manual installation and recovery guide.",
-      "source_changed_next": "The server backend has changed. Refresh its original record, then reopen Install / reinstall; an existing Passwall Node uses reinstallation, not another conversion.",
+      "unsupported_next": "Close this preview and reopen Install / Reinstall. Choose the server's original backend for its manual installation and recovery guide.",
+      "source_changed_next": "The server backend has changed. Refresh its original record, then reopen Install / Reinstall; an existing Passwall Node uses reinstallation, not another conversion.",
       "resolve_nodes": "Open Nodes to capture / synchronize configuration",
       "command_next": "After running the command, refresh this original server and verify its agent, core and actual client connection. Generating a command does not confirm installation.",
       "node_command_hint": "Run the one-click command as root on THIS NODE HOST, not on the PSP host. Its private script-delivery token can be used once and expires after 15 minutes. Installation success is not proof that proxy service is ready: verify the original server's agent, core, managed nodes and client access afterwards.",
@@ -1996,6 +2085,7 @@
     },
     "agent_upgrade": {
       "action": "Upgrade Passwall Node",
+      "available": "Upgrade Passwall Node to {{version}}",
       "title": "Upgrade Passwall Node · {{name}}",
       "warning": "Upgrading briefly interrupts proxy connections on this server. Confirm the release and maintenance window. Server, node and user identities remain unchanged.",
       "requirements": "Requires Linux/systemd with the upgrade helper enabled. Older agents need one manual maintenance update; update Docker images on the host. Success requires the new process to synchronize and converge configuration. State-schema changes require manual migration.",
@@ -2016,6 +2106,10 @@
         "awaiting_observation": "Upgrade receipt received; waiting for a fresh target-version report.",
         "verified": "Target restart, synchronization, configuration convergence and binary checksum verified."
       }
+    },
+    "sui_update": {
+      "available": "View S-UI {{version}} release",
+      "manual_hint": "View the official release. S-UI requires a manual update on its server; remote upgrades are not supported."
     },
     "title": "Servers and Passwall Node",
     "subtitle": "Register an upstream panel or Passwall Node, then attach inbounds from the Nodes page.",
@@ -2190,6 +2284,7 @@
       "copy_script": "Copy private install script",
       "script_failed": "Could not generate the install script. Check that the version is published with installation assets.",
       "releases": "View Passwall Node releases",
+      "update_check_failed": "Update check failed",
       "run_script_hint": "Transfer the complete script as a private file to the intended Linux server, then run the commands below. Do not put credentials in a URL or use curl | bash. Reinstallation preserves identity and data and does not create inbounds; existing installations must keep the same identity, endpoint, credential, and application version. Use the separate remote-upgrade action for supported Linux / systemd nodes instead of changing versions through reinstallation.",
       "run_script_command": "Run on the intended node",
       "manual_hint": "Manual installation uses your platform's exact archive and SHA256 checksum. Follow the generated files and commands to verify, extract, save private credentials, and run in the foreground; it does not install systemd. For existing installations, update the credential file privately, never through command arguments or shell history. If a systemd service already exists on the target, stop it before foreground debugging and restore it afterward. Never run multiple instances concurrently.",

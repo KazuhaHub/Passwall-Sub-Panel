@@ -130,7 +130,7 @@ type Deps struct {
 	Certs    CertLister
 	Events   EventCounter
 	Settings SettingsLoader
-	// UpgradeFor reports the 3X-UI version a panel running `current` should be
+	// UpgradeFor reports the 3X-UI version a 3X-UI panel running `current` should be
 	// nudged to upgrade to, or ("", false) when it's already at/above PSP's tested
 	// ceiling. (v3.7.0: this is PSP's max_tested_xui, not the upstream latest — we
 	// only nudge up to what PSP has verified.) nil → no panel_upgrade alerts.
@@ -239,6 +239,11 @@ func (s *Service) panelUpgrades(ctx context.Context) []Alert {
 	}
 	var out []Alert
 	for _, p := range panels {
+		// Version strings belong to different products. This callback and the
+		// panel_upgrade notification are 3X-UI-specific, not generic server updates.
+		if domain.NormalizePanelKind(p.Kind) != domain.PanelKind3XUI {
+			continue
+		}
 		latest, ok := s.d.UpgradeFor(p.PanelVersion)
 		if !ok {
 			continue

@@ -19,6 +19,12 @@ type AdminNodeIssuesHandler struct {
 	repo ports.NodeAgentIssueRepo
 }
 
+type nodeAgentIssueDTO struct {
+	*domain.NodeAgentIssue
+	ServerID   int64  `json:"server_id,omitempty"`
+	ServerName string `json:"server_name,omitempty"`
+}
+
 func NewAdminNodeIssuesHandler(repo ports.NodeAgentIssueRepo) *AdminNodeIssuesHandler {
 	return &AdminNodeIssuesHandler{repo: repo}
 }
@@ -29,6 +35,13 @@ func (h *AdminNodeIssuesHandler) List(c *gin.Context) {
 		Pagination: p,
 		AgentID:    c.Query("agent_id"),
 		Code:       c.Query("code"),
+		View:       domain.NodeAgentIssueView(c.Query("view")),
+	}
+	switch filter.View {
+	case "", domain.NodeAgentIssueViewAll, domain.NodeAgentIssueViewAttention, domain.NodeAgentIssueViewDiagnostic:
+	default:
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid node issue view"})
+		return
 	}
 	if raw := c.Query("acknowledged"); raw != "" {
 		value, err := strconv.ParseBool(raw)
@@ -43,7 +56,31 @@ func (h *AdminNodeIssuesHandler) List(c *gin.Context) {
 		respondError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, pagedEnvelope(items, total, p))
+	var labels map[string]ports.NodeAgentIssueServer
+	if metadata, ok := h.repo.(ports.NodeAgentIssueServerRepo); ok && len(items) > 0 {
+		agentIDs := make([]string, 0, len(items))
+		seen := make(map[string]bool, len(items))
+		for _, issue := range items {
+			if issue != nil && !seen[issue.AgentID] {
+				seen[issue.AgentID] = true
+				agentIDs = append(agentIDs, issue.AgentID)
+			}
+		}
+		// Labels are helpful context, not a prerequisite for reviewing the durable
+		// report. A failed optional lookup must not make the issue inbox disappear.
+		if result, err := metadata.ListIssueServers(c.Request.Context(), agentIDs); err == nil {
+			labels = result
+		}
+	}
+	dtos := make([]nodeAgentIssueDTO, len(items))
+	for i, issue := range items {
+		dtos[i].NodeAgentIssue = issue
+		if issue != nil {
+			label := labels[issue.AgentID]
+			dtos[i].ServerID, dtos[i].ServerName = label.ServerID, label.ServerName
+		}
+	}
+	c.JSON(http.StatusOK, pagedEnvelope(dtos, total, p))
 }
 
 func (h *AdminNodeIssuesHandler) Acknowledge(c *gin.Context) {

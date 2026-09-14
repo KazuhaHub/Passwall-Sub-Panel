@@ -246,6 +246,9 @@ export interface SyncTask {
 export interface NodeAgentIssue {
 	id: number
 	agent_id: string
+	/** Optional server display metadata; durable issue identity stays agent_id. */
+	server_id?: number
+	server_name?: string
 	code: string
 	key?: string
 	detail?: string

@@ -2,6 +2,7 @@ package alert
 
 import (
 	"context"
+	"strconv"
 	"testing"
 	"time"
 
@@ -120,6 +121,84 @@ func TestPanelUpgradeAlerts(t *testing.T) {
 	a := up[0]
 	if a.Severity != SeverityInfo || a.TargetID != 5 || a.CurrentVersion != "3.2.6" || a.LatestVersion != "3.2.8" {
 		t.Fatalf("panel_upgrade fields wrong: %+v", a)
+	}
+}
+
+func TestPanelUpgradeAlertsSkipOtherProducts(t *testing.T) {
+	for _, tt := range []struct {
+		name    string
+		kind    domain.PanelKind
+		version string
+	}{
+		// The beta7 screenshot compared this Passwall Node build to 3X-UI 3.7.0.
+		{"passwall_node_beta7_screenshot", domain.PanelKindPSP, "v0.0.1-beta4 (4b40af2)"},
+		// Conversion can temporarily retain the previous upstream panel version.
+		{"passwall_node_with_stale_xui_version", domain.PanelKindPSP, "3.4.2"},
+		{"s_ui", domain.PanelKindSUI, "1.3.0"},
+		{"unknown_kind_with_xui_like_version", domain.PanelKind("future-panel"), "3.4.2"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			calls := 0
+			svc := New(Deps{
+				Panels: stubPanels{panels: []*domain.XUIPanel{{
+					ID: 1, Kind: tt.kind, Name: "Canada BC Danika Home - Telus", PanelVersion: tt.version,
+				}}},
+				UpgradeFor: func(string) (string, bool) {
+					calls++
+					return "3.7.0", true
+				},
+			})
+			alerts, counts := svc.List(context.Background())
+			if calls != 0 {
+				t.Fatalf("3X-UI upgrade callback called %d times for kind %q", calls, tt.kind)
+			}
+			if len(alerts) != 0 || counts != (Counts{}) {
+				t.Fatalf("another product generated 3X-UI alerts or badge counts: alerts=%+v counts=%+v", alerts, counts)
+			}
+		})
+	}
+}
+
+func TestPanelUpgradeAlertsMixedKindsPreserve3XUIAndLegacy(t *testing.T) {
+	now := time.Date(2026, 9, 14, 12, 0, 0, 0, time.UTC)
+	var compared []string
+	svc := newSvc(Deps{
+		Panels: stubPanels{panels: []*domain.XUIPanel{
+			{ID: 1, Kind: domain.PanelKindPSP, Name: "Canada BC Danika Home - Telus", PanelVersion: "v0.0.1-beta4 (4b40af2)"},
+			{ID: 2, Kind: domain.PanelKindSUI, Name: "S-UI", PanelVersion: "1.3.0"},
+			{ID: 3, Kind: domain.PanelKind("future-panel"), Name: "Unknown", PanelVersion: "3.4.2"},
+			{ID: 4, Kind: domain.PanelKind3XUI, Name: "China Shanghai - Aliyun", PanelVersion: "3.4.2"},
+			{ID: 5, Name: "Legacy 3X-UI", PanelVersion: "3.4.2"},
+			{ID: 6, Kind: domain.PanelKind3XUI, Name: "Current 3X-UI", PanelVersion: "3.7.0"},
+		}},
+		UpgradeFor: func(current string) (string, bool) {
+			compared = append(compared, current)
+			return "3.7.0", current == "3.4.2"
+		},
+		Nodes:    stubNodes{nodes: []*domain.Node{{ID: 7, Enabled: true, HealthState: domain.NodeHealthUnreachable}}},
+		Certs:    stubCerts{active: []*domain.TLSCertificate{{ID: 8, Name: "expiring", Status: domain.CertStatusActive, NotAfter: tPtr(now.Add(3 * 24 * time.Hour))}}},
+		Settings: stubSettings{s: ports.UISettings{CertRenewBeforeDays: 14}},
+	}, now)
+	alerts, counts := svc.List(context.Background())
+	if len(compared) != 3 || compared[0] != "3.4.2" || compared[1] != "3.4.2" || compared[2] != "3.7.0" {
+		t.Fatalf("only normalized 3X-UI versions should be compared, got %q", compared)
+	}
+	up := byType(alerts, TypePanelUpgrade)
+	if len(up) != 2 {
+		t.Fatalf("want 2 upgrades for explicit and legacy 3X-UI rows, got %+v", up)
+	}
+	for i, panel := range []struct {
+		id   int64
+		name string
+	}{{4, "China Shanghai - Aliyun"}, {5, "Legacy 3X-UI"}} {
+		a := up[i]
+		if a.Key != "panel_upgrade:"+strconv.FormatInt(panel.id, 10)+":3.7.0" || a.TargetID != panel.id || a.TargetName != panel.name ||
+			a.Type != TypePanelUpgrade || a.Severity != SeverityInfo || a.CurrentVersion != "3.4.2" || a.LatestVersion != "3.7.0" {
+			t.Fatalf("3X-UI upgrade fields changed: %+v", a)
+		}
+	}
+	if counts != (Counts{Error: 1, Warning: 1, Info: 2}) {
+		t.Fatalf("badge counts must exclude false upgrades and retain other categories, got %+v", counts)
 	}
 }
 

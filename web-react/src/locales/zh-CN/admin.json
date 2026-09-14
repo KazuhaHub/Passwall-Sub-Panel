@@ -761,13 +761,96 @@
   },
   "node_issues": {
     "title": "节点问题",
-    "subtitle": "原生节点无法自行调和并已持久化的问题。确认表示已查看，不代表节点已经恢复。",
-    "search": "搜索 Agent、代码、对象或详情",
+    "subtitle": "优先查看重要问题；普通启动记录保留在“诊断记录”中。",
+    "view": {
+      "label": "显示内容",
+      "attention": "重要问题",
+      "diagnostic": "诊断记录",
+      "all": "全部记录"
+    },
+    "empty_attention": "没有待查看的重要问题。普通启动记录可在“诊断记录”中查看。",
+    "technical_details": "技术详情与原始日志",
+    "unlinked_hint": "服务器关联不可用；原身份保留在详情中。",
+    "startup_title": "节点启动记录",
+    "startup_action": "这是内核启动期间的记录；若启动未完成，请检查服务器当前状态。",
+    "category_titles": {
+      "statistics": "无法读取节点统计",
+      "sync": "配置或客户端未能同步",
+      "tasks": "任务状态需要核对",
+      "other": "其他待检查的上报"
+    },
+    "category_actions": {
+      "statistics": "先检查服务器当前内核状态；若已运行，再查看统计采集详情。",
+      "sync": "先检查服务器连接和节点配置，再重试同步。",
+      "tasks": "重试前先核对任务状态，不要跳过安全检查。",
+      "other": "尚不能识别此类上报；请检查服务器，并展开技术详情排查。"
+    },
+    "search": "搜索服务器、代码、对象或详情",
     "search_action": "搜索",
     "refresh": "刷新",
     "empty": "没有匹配的节点问题。",
     "acknowledge": "确认已查看",
     "acknowledged": "已确认查看",
+    "view_details": "详情",
+    "open_details": "查看 {{server}} 的{{problem}}",
+    "clear_search": "清空搜索",
+    "loading": "正在加载节点问题",
+    "load_failed": "无法加载记录，请刷新重试；当前显示的记录可能来自上一次查询。",
+    "empty_review": "没有待查看的记录。",
+    "page_summary": "本页 {{records}}，归为 {{groups}}",
+    "record_count_other": "{{count}} 条记录",
+    "group_count_other": "{{count}} 组问题摘要",
+    "review_notice": "已查看不代表已恢复；这些上报记录不是实时健康检查。",
+    "detail_scope": "本页共 {{records}}；原始日志在下方折叠保留。已查看不代表已恢复。",
+    "mobile_meta": "{{records}} · 最近出现 {{time}} {{timezone}}",
+    "server_id": "服务器 #{{id}}",
+    "record_id": "上报记录 #{{id}}",
+    "unknown_server": "未关联的节点 Agent",
+    "unknown_title": "其他节点问题",
+    "reviewed_at": "查看时间",
+    "bulk": {
+      "select_page": "全选本页待查看",
+      "select_group": "选择 {{server}} 的{{problem}}在本页的待查看记录",
+      "select_record": "选择上报记录 #{{id}}",
+      "selected": "已选 {{records}}",
+      "clear": "取消选择",
+      "acknowledge": "批量确认已查看",
+      "confirm_title": "批量确认查看",
+      "confirm_message": "将所选的 {{records}} 标记为已查看？仅包含本页记录（含折叠记录），不会删除记录或修复节点。",
+      "progress": "已处理 {{done}} / {{total}} 条记录",
+      "done": "已将 {{records}} 标记为已查看",
+      "partial": "已确认 {{ok}} 条，{{fail}} 条失败；仍在本页的失败记录保留勾选，可重试。"
+    },
+    "code_titles": {
+      "core_telemetry_failed": "无法读取内核状态或流量",
+      "core_convergence_failed": "内核变更未能应用",
+      "object_pending_timeout": "变更应用超时",
+      "object_rejected_timeout": "变更持续被拒绝",
+      "segment_rejected": "配置文档被拒绝",
+      "roster_ahead_of_config": "客户端列表等待配置",
+      "attachment_unknown_listener": "客户端引用的入站不存在",
+      "directives_ahead_of_roster": "策略等待客户端列表",
+      "directive_unknown_client": "策略引用的客户端不存在",
+      "report_missing_object": "节点报告不完整",
+      "task_identity_conflict": "任务身份冲突",
+      "task_replay_fenced": "任务重放已阻止",
+      "legacy_task_result_quarantined": "旧任务结果已隔离"
+    },
+    "code_summaries": {
+      "core_telemetry_failed": "节点未能读取内核运行状态或流量计数。",
+      "core_convergence_failed": "内核未能应用所要求的运行配置。",
+      "object_pending_timeout": "配置或客户端对象超过期限后仍等待应用。",
+      "object_rejected_timeout": "被拒绝的对象持续未变更，需要人工查看。",
+      "segment_rejected": "节点拒绝了收到的配置文档。",
+      "roster_ahead_of_config": "客户端列表依赖的配置尚未收到。",
+      "attachment_unknown_listener": "客户端列表引用的入站不在配置中。",
+      "directives_ahead_of_roster": "策略依赖的客户端列表尚未收到。",
+      "directive_unknown_client": "策略引用的客户端不在列表中。",
+      "report_missing_object": "完整节点报告缺少应有的对象。",
+      "task_identity_conflict": "同一个任务 ID 对应了不同的操作参数。",
+      "task_replay_fenced": "节点未能确认该任务可以安全开始执行。",
+      "legacy_task_result_quarantined": "旧任务结果缺少可核验的操作身份。"
+    },
     "filter": {
       "all": "全部查看状态",
       "unacknowledged": "待查看",
@@ -775,9 +858,13 @@
     },
     "state": {
       "unacknowledged": "待查看",
-      "acknowledged": "已查看"
+      "acknowledged": "已查看",
+      "mixed": "部分已查看"
     },
     "table": {
+      "problem": "问题",
+      "server": "服务器",
+      "records": "记录数",
       "state": "查看状态",
       "code": "稳定代码",
       "agent": "Agent",
@@ -1996,6 +2083,7 @@
     },
     "agent_upgrade": {
       "action": "升级 Passwall Node",
+      "available": "升级 Passwall Node 至 {{version}}",
       "title": "升级 Passwall Node · {{name}}",
       "warning": "升级会短暂中断此服务器的代理连接。请确认目标版本及维护时段；不会更改服务器、节点或用户身份。",
       "requirements": "仅支持已启用升级助手的 Linux/systemd 安装。旧版本需先手动维护一次；Docker 请在宿主机更新镜像。新进程重新同步并完成配置收敛后才算成功；数据库格式改变时需手动迁移。",
@@ -2016,6 +2104,10 @@
         "awaiting_observation": "已收到升级收据，等待目标版本的新鲜上报。",
         "verified": "已确认目标版本重启、同步及配置收敛，并核对二进制校验和。"
       }
+    },
+    "sui_update": {
+      "available": "查看 S-UI {{version}} 发行版本",
+      "manual_hint": "查看官方发行版本。S-UI 需在服务器上手动更新，不支持远程一键升级。"
     },
     "title": "服务器与 Passwall Node",
     "subtitle": "在这里注册上游面板或 Passwall Node，再到节点页面添加 inbound。",
@@ -2190,6 +2282,7 @@
       "copy_script": "复制私有安装脚本",
       "script_failed": "无法生成安装脚本，请确认版本已发布且包含安装资产。",
       "releases": "查看 Passwall Node 发布版本",
+      "update_check_failed": "检查更新失败",
       "run_script_hint": "把完整脚本作为私有文件传到目标 Linux 服务器，再执行下方命令。不要把凭据放进 URL，也不要使用 curl | bash。重装保留身份和数据，不会自动创建 inbound；已有安装必须使用相同身份、同步地址、凭据及程序版本。已支持的 Linux / systemd 节点通过独立远程升级入口更换程序版本，不要用重装替代升级。",
       "run_script_command": "在目标节点执行",
       "manual_hint": "手动方式使用对应平台的准确发行档及 SHA256 校验和，按生成的文件与命令核验、解压、保存私有凭据后前台运行，不安装 systemd。已有安装更新凭据时请私下写入 credential 文件，不要放进命令参数或 shell 历史。若目标已有 systemd 服务，前台调试前先停止它，调试结束后再恢复原服务；不要同时运行多个实例。",

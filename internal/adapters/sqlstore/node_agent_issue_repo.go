@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -90,6 +91,18 @@ func (r *nodeAgentIssueRepo) GetByID(ctx context.Context, id int64) (*domain.Nod
 
 func (r *nodeAgentIssueRepo) List(ctx context.Context, filter ports.NodeAgentIssueFilter) ([]*domain.NodeAgentIssue, int64, error) {
 	query := r.db.WithContext(ctx).Model(&nodeAgentIssueRow{})
+	switch filter.View {
+	case "", domain.NodeAgentIssueViewAll:
+		// Existing callers retain the complete inbox, including diagnostics.
+	case domain.NodeAgentIssueViewAttention, domain.NodeAgentIssueViewDiagnostic:
+		predicate, args := nodeAgentIssueDiagnosticPredicate(r.db.Dialector.Name())
+		if filter.View == domain.NodeAgentIssueViewAttention {
+			predicate = "NOT (" + predicate + ")"
+		}
+		query = query.Where(predicate, args...)
+	default:
+		return nil, 0, fmt.Errorf("%w: invalid node issue view", domain.ErrValidation)
+	}
 	if filter.AgentID != "" {
 		query = query.Where("agent_id = ?", filter.AgentID)
 	}
@@ -104,7 +117,15 @@ func (r *nodeAgentIssueRepo) List(ctx context.Context, filter ports.NodeAgentIss
 		}
 	}
 	if like := keywordLike(filter.Keyword); like != "" {
-		query = query.Where(likeCols("agent_id", "code", "object_key", "detail"), like, like, like, like)
+		// The correlated lookup makes the displayed server name searchable without
+		// duplicating issue rows or fetching/decrypting panel credentials. Historical
+		// issues whose agent or native server has been deleted still match raw fields.
+		serverNameMatch := "EXISTS (SELECT 1 FROM node_agents AS issue_agents " +
+			"JOIN xui_panels AS issue_servers ON issue_servers.id = issue_agents.panel_id " +
+			"WHERE issue_agents.agent_id = node_agent_issues.agent_id AND issue_servers.kind = ? AND " +
+			likeCols("issue_servers.name") + ")"
+		query = query.Where("("+likeCols("agent_id", "code", "object_key", "detail")+") OR "+serverNameMatch,
+			like, like, like, like, string(domain.PanelKindPSP), like)
 	}
 	var total int64
 	if err := query.Count(&total).Error; err != nil {
@@ -129,6 +150,51 @@ func (r *nodeAgentIssueRepo) List(ctx context.Context, filter ports.NodeAgentIss
 	return out, total, nil
 }
 
+func nodeAgentIssueDiagnosticPredicate(dialect string) (string, []any) {
+	// Exact matching must not inherit MySQL's case-insensitive or space-padding
+	// collation. The other supported dialects use an explicit binary/C collation.
+	// Only these fixed column expressions vary; report values remain parameters.
+	code, detail := "code COLLATE BINARY", "detail COLLATE BINARY"
+	switch dialect {
+	case "mysql":
+		code, detail = "CAST(code AS BINARY)", "CAST(detail AS BINARY)"
+	case "postgres":
+		code, detail = `code COLLATE "C"`, `detail COLLATE "C"`
+	}
+	signatures := domain.NodeAgentIssueDiagnosticSignatures()
+	pairs := make([]string, 0, len(signatures))
+	args := make([]any, 0, len(signatures)*2)
+	for _, signature := range signatures {
+		pairs = append(pairs, "("+code+" = ? AND "+detail+" = ?)")
+		args = append(args, signature.Code, signature.Detail)
+	}
+	return "(" + strings.Join(pairs, " OR ") + ")", args
+}
+
+func (r *nodeAgentIssueRepo) ListIssueServers(ctx context.Context, agentIDs []string) (map[string]ports.NodeAgentIssueServer, error) {
+	labels := make(map[string]ports.NodeAgentIssueServer)
+	if len(agentIDs) == 0 {
+		return labels, nil
+	}
+	var rows []struct {
+		AgentID    string
+		ServerID   int64
+		ServerName string
+	}
+	// Select only the labels needed by this page. Ordinary Panel.List reads and
+	// decrypts credentials, which this staff-visible display path does not need.
+	if err := r.db.WithContext(ctx).Table("node_agents AS issue_agents").
+		Select("issue_agents.agent_id, issue_servers.id AS server_id, issue_servers.name AS server_name").
+		Joins("JOIN xui_panels AS issue_servers ON issue_servers.id = issue_agents.panel_id AND issue_servers.kind = ?", string(domain.PanelKindPSP)).
+		Where("issue_agents.agent_id IN ?", agentIDs).Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	for _, row := range rows {
+		labels[row.AgentID] = ports.NodeAgentIssueServer{ServerID: row.ServerID, ServerName: row.ServerName}
+	}
+	return labels, nil
+}
+
 func (r *nodeAgentIssueRepo) Acknowledge(ctx context.Context, id int64, acknowledgedAt time.Time) error {
 	result := r.db.WithContext(ctx).Model(&nodeAgentIssueRow{}).Where("id = ?", id).
 		Update("acknowledged_at", acknowledgedAt.UTC())
@@ -142,3 +208,4 @@ func (r *nodeAgentIssueRepo) Acknowledge(ctx context.Context, id int64, acknowle
 }
 
 var _ ports.NodeAgentIssueRepo = (*nodeAgentIssueRepo)(nil)
+var _ ports.NodeAgentIssueServerRepo = (*nodeAgentIssueRepo)(nil)

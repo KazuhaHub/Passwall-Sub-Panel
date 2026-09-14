@@ -92,6 +92,8 @@ async function fixture(request, response, url) {
     if (pathname === '/api/version') return reply(response, { version: 'fixture', commit: 'fixture', build_date: '' });
     if (pathname === '/api/admin/alerts') return reply(response, { alerts: [], counts: { error: 0, warning: 0, info: 0 } });
     if (pathname === '/api/admin/servers') return reply(response, { items: servers, total: servers.length, page: 1, page_size: 25 });
+    // Match GetSUIRelease's read-only metadata DTO; no upstream request is made.
+    if (pathname === '/api/admin/servers/sui-release') return reply(response, { version: 'v1.6.2' });
     if (pathname === '/api/admin/servers/node-releases') return reply(response, {
       checked_at: new Date().toISOString(), releases: [{ version, channel: 'testing',
         published_at: '2026-09-12T12:00:00Z', notes: 'Reviewed browser acceptance fixture',
@@ -374,6 +376,7 @@ try {
   await dialog.getByRole('button', { name: text('common:actions.cancel'), exact: true }).click();
 
   assert.equal(count('POST', '/api/admin/servers'), 0, 'Reinstallation must not create a server record.');
+  assert(count('GET', '/api/admin/servers/sui-release') > 0, 'The visible S-UI server must request read-only release metadata.');
   assert.equal(requests.some(request => /rotate-node|node-credential$/.test(request.pathname)), false, 'Reinstallation must not rotate/import credentials.');
   assert.deepEqual(requests.filter(request => request.method === 'PUT').map(request => request.pathname),
     ['/api/admin/servers/17', '/api/admin/servers/27', '/api/admin/servers/7'], 'Only explicit original-ID configuration or preference saving may update a record.');

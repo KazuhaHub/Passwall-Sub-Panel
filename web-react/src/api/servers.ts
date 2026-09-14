@@ -1,5 +1,13 @@
 import { client } from './client'
 
+/** Shared stable-release metadata; never issues a credential or upgrade. */
+export async function getSUIRelease(signal?: AbortSignal): Promise<{ version: string }> {
+  const { data } = await client.get<{ version: string }>('/admin/servers/sui-release', {
+    signal, _skipErrorToast: true,
+  })
+  return data
+}
+
 // CompatStatus mirrors internal/version.CompatStatus.String() — keep in
 // sync if either side changes.
 export type CompatStatus = 'supported' | 'too_old' | 'untested' | 'unknown'
@@ -45,10 +53,10 @@ export interface Server {
   version_checked_at?: string
   compat_status?: CompatStatus
   compat_message?: string
-  // Upstream-update snapshot (v3.6.0-beta.8). 3X-UI itself queries GitHub
-  // and returns these via /getPanelUpdateInfo — Passwall Panel doesn't
-  // touch GitHub for this. Drives the ⋮ kebab "new version" badge.
+  // Derived from PSP's shared official upstream-release snapshots. These
+  // advertise versions, not remote-upgrade capabilities (S-UI is manual).
   latest_xui_version?: string
+  latest_sui_version?: string
   update_available?: boolean
   /**
    * What the node's fail2ban probe concluded about the concurrent-IP cap.
@@ -156,6 +164,7 @@ export interface TestResult {
   // click. Absent on GetPanelUpdateInfo failure (3X-UI can't reach
   // GitHub, etc.) — UI keeps the previously-cached values in items.
   latest_xui_version?: string
+  latest_sui_version?: string
   update_available?: boolean
   /**
    * Refreshed on the same click, so an admin who just installed fail2ban does

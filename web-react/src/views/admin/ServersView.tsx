@@ -55,8 +55,10 @@ import { allSettledLimited } from '@/utils/promises'
 
 import WarningAmberIcon from '@mui/icons-material/WarningAmber'
 import MoreVertIcon from '@mui/icons-material/MoreVert'
-import SystemUpdateIcon from '@mui/icons-material/SystemUpdateAlt'
-import UpgradeIcon from '@mui/icons-material/Upgrade'
+import UpgradeIcon from '@mui/icons-material/UploadOutlined'
+import { listNodeReleases, type NodeRelease } from '@/api/nodeReleases'
+import { newerNodeRelease } from '@/utils/nodeReleaseUpdate'
+import { newerSUIRelease } from '@/utils/suiReleaseUpdate'
 
 import {
   createServer,
@@ -69,6 +71,7 @@ import {
 	importNativeCredential,
 	listCoreReleases,
   listServers,
+  getSUIRelease,
   listXrayVersions,
 	rotateNativeCredential,
 	selectCore,
@@ -199,6 +202,10 @@ export default function ServersView() {
   const [nativeCreationFlow, setNativeCreationFlow] = useState(false)
   const [installationSelection, setInstallationSelection] = useState<NativeInstallationSelection>(DEFAULT_INSTALLATION)
   const nativeInstallationIntent = useRef(0)
+  const [nodeReleases, setNodeReleases] = useState<NodeRelease[] | null>(null)
+  const [nodeReleaseCheckFailed, setNodeReleaseCheckFailed] = useState(false)
+  const [nodeReleaseCheck, setNodeReleaseCheck] = useState(0)
+  const [suiReleaseVersion, setSUIReleaseVersion] = useState<string | null>(null)
   type ServerField = 'name' | 'url' | 'api_token' | 'password'
   const [fieldErr, setFieldErr] = useState<FieldErrors<ServerField>>({})
 
@@ -233,6 +240,37 @@ export default function ServersView() {
   // content updates don't retrigger us; the effect fires exactly once
   // per page / search / sort change, which is what we want.
   const pageIdsKey = useMemo(() => items.map(s => s.id).join('|'), [items])
+  const hasNativeServers = items.some(s => s.panel_type === 'psp')
+  const hasSUIServers = items.some(s => s.panel_type === 'sui')
+  useEffect(() => {
+    const controller = new AbortController()
+    setNodeReleases(null)
+    setNodeReleaseCheckFailed(false)
+    if (hasNativeServers) {
+      // One shared metadata read per page, not one GitHub request per server.
+      // The backend caches and validates the reviewed, published catalog.
+      void listNodeReleases(controller.signal).then(catalog => {
+        if (controller.signal.aborted) return
+        if (!Array.isArray(catalog.releases)) throw new Error('Invalid Node release catalog')
+        setNodeReleases(catalog.releases)
+      }).catch(() => {
+        if (!controller.signal.aborted) setNodeReleaseCheckFailed(true)
+      })
+    }
+    return () => controller.abort()
+  }, [hasNativeServers, pageIdsKey, nodeReleaseCheck])
+  useEffect(() => {
+    const controller = new AbortController()
+    setSUIReleaseVersion(null)
+    if (hasSUIServers) {
+      // Await shared release metadata separately from connection probes: on
+      // a cold cache, GitHub finishing later must still update this page.
+      void getSUIRelease(controller.signal).then(metadata => {
+        if (!controller.signal.aborted && typeof metadata.version === 'string') setSUIReleaseVersion(metadata.version)
+      }).catch(() => { /* Keep any useful last-known-good fields in the server DTO. */ })
+    }
+    return () => controller.abort()
+  }, [hasSUIServers, pageIdsKey, nodeReleaseCheck])
   useEffect(() => {
     void allSettledLimited(items, s => probeServer(s))
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -248,7 +286,7 @@ export default function ServersView() {
   const allChecked = items.length > 0 && items.every(s => selected.has(s.id))
   const someChecked = items.some(s => selected.has(s.id)) && !allChecked
 
-  function load() { refresh() }
+  function load() { refresh(); setNodeReleaseCheck(n => n + 1) }
 
   function stateFor(s: Server): ProbeState {
     return probeStates[s.id] ?? { status: credentialsConfigured(s) ? 'unknown' : 'unconfigured' }
@@ -274,7 +312,8 @@ export default function ServersView() {
         // next traffic-poll tick. Absent means the probe produced nothing usable
         // and the stored state was deliberately left alone — keep the old
         // value rather than blanking the badge on a blip.
-        if (r.panel_version !== undefined || r.compat_status || r.ip_limit_enforcement) {
+        if (r.panel_version !== undefined || r.compat_status || r.ip_limit_enforcement ||
+          r.latest_xui_version !== undefined || r.latest_sui_version !== undefined || r.update_available !== undefined) {
           mutateItems(prev => prev.map(it => it.id === s.id ? {
             ...it,
             panel_version: r.panel_version ?? it.panel_version,
@@ -284,6 +323,9 @@ export default function ServersView() {
             version_checked_at: r.version_checked_at ?? it.version_checked_at,
             compat_status: r.compat_status ?? it.compat_status,
             compat_message: r.compat_message ?? it.compat_message,
+            latest_xui_version: r.latest_xui_version ?? it.latest_xui_version,
+            latest_sui_version: r.latest_sui_version ?? it.latest_sui_version,
+            update_available: r.update_available ?? it.update_available,
             ip_limit_enforcement: r.ip_limit_enforcement ?? it.ip_limit_enforcement,
           } : it))
         }
@@ -974,24 +1016,40 @@ export default function ServersView() {
     // the ⋮ kebab told admin "something is new" but they had to hover
     // to learn what — too vague to act on). Tertiary-container coloring
     // keeps it informational, not alarming.
-    const updateChip = s.update_available && s.latest_xui_version && (
-      <Box sx={{
+    const nativeUpdate = s.panel_type === 'psp' && nodeReleases ? newerNodeRelease(s, nodeReleases) : undefined
+    const upstreamUpdateVersion = s.panel_type === 'sui' ? s.latest_sui_version : s.latest_xui_version
+    const updateVersion = s.panel_type === 'psp' ? nativeUpdate?.version
+      : s.panel_type === 'sui' && suiReleaseVersion ? newerSUIRelease(s.panel_version, suiReleaseVersion)
+      : s.update_available ? upstreamUpdateVersion : undefined
+    const updateChipStyle = {
         display: 'inline-block', px: 1, py: 0.125,
         borderRadius: 1, fontSize: 11, fontWeight: 500,
         bgcolor: md.tertiaryContainer, color: md.onTertiaryContainer,
         whiteSpace: 'nowrap', mt: 0.25, ml: badge ? 0.5 : 0,
-      }}>
-        {t('admin:servers.update_available_chip', {
-          latest: s.latest_xui_version,
-          defaultValue: '可升级 → {{latest}}',
-        })}
-      </Box>
-    )
+    }
+    const updateLabel = updateVersion && t('admin:servers.update_available_chip', {
+      latest: updateVersion,
+      defaultValue: '可升级 → {{latest}}',
+    })
+    const updateChip = updateVersion && (s.panel_type === 'psp' && canConfigure
+      ? <Button size="small" sx={{ ...updateChipStyle, minWidth: 0, lineHeight: 1.5 }}
+          aria-label={t('admin:servers.agent_upgrade.available', { version: updateVersion })}
+          onClick={() => setNativeUpgradeTarget(s)}>{updateLabel}</Button>
+      : s.panel_type === 'sui'
+        ? <Tooltip title={t('admin:servers.sui_update.manual_hint')}>
+            <Button component="a" size="small" href="https://github.com/alireza0/s-ui/releases/latest"
+              target="_blank" rel="noopener noreferrer"
+              sx={{ ...updateChipStyle, minWidth: 0, lineHeight: 1.5 }}
+              aria-label={t('admin:servers.sui_update.available', { version: updateVersion })}>{updateLabel}</Button>
+          </Tooltip>
+        : <Box sx={updateChipStyle}>{updateLabel}</Box>)
     const stacked = (
       <Box>
         {versionText}
         {badge}
         {updateChip}
+        {s.panel_type === 'psp' && nodeReleaseCheckFailed && <Typography
+          variant="caption" color="text.secondary">{t('admin:servers.native.update_check_failed')}</Typography>}
       </Box>
     )
     if (s.compat_message) {
@@ -1212,7 +1270,7 @@ export default function ServersView() {
           </Button>
           <Button
             size="small" variant="text"
-            startIcon={batchBusy === 'upgrade_xray' ? <CircularProgress size={14} /> : <SystemUpdateIcon />}
+            startIcon={batchBusy === 'upgrade_xray' ? <CircularProgress size={14} /> : <UpgradeIcon />}
             disabled={batchBusy !== '' || !selectedCanUpgradeCore}
             onClick={batchUpgradeXray}
             sx={{ color: 'inherit' }}
@@ -1396,11 +1454,11 @@ export default function ServersView() {
           {t('admin:servers.agent_upgrade.action')}
         </MenuItem>}
         {hasCapability(menuTarget, 'panel.upgrade') && <MenuItem onClick={() => menuTarget && runUpgradePanel(menuTarget)}>
-          <SystemUpdateIcon fontSize="small" sx={{ mr: 1 }} />
+          <UpgradeIcon fontSize="small" sx={{ mr: 1 }} />
           {t('admin:servers.action.upgrade_panel', { defaultValue: '升级 3X-UI 面板（最新）' })}
         </MenuItem>}
         {hasCapability(menuTarget, 'core.upgrade') && <MenuItem onClick={() => menuTarget && openCoreDialog(menuTarget)}>
-          <SystemUpdateIcon fontSize="small" sx={{ mr: 1 }} />
+          <UpgradeIcon fontSize="small" sx={{ mr: 1 }} />
 						{menuTarget?.panel_type === 'psp'
 							? t('admin:servers.action.select_core')
 							: t('admin:servers.action.upgrade_xray')}

@@ -193,6 +193,9 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	if err := version.LoadLatestXUICache(); err != nil {
 		log.Warn("load latest-xui cache (will recover on first refresh)", "err", err)
 	}
+	if err := version.LoadLatestSUICache(); err != nil {
+		log.Warn("load latest-sui cache (will recover on first refresh)", "err", err)
+	}
 
 	// --- adapter layer ---
 	db, err := sqlstore.Open(cfg.DBKind(), cfg.DBDSN())

@@ -8,13 +8,20 @@ export interface NodeIssueListParams {
   agent_id?: string
   code?: string
   acknowledged?: boolean
+  view?: 'attention' | 'diagnostic' | 'all'
 }
 
-export async function listNodeIssues(params: NodeIssueListParams = {}) {
-  const { data } = await client.get<ListResponse<NodeAgentIssue>>('/admin/node-issues', { params })
+export async function listNodeIssues(params: NodeIssueListParams = {}, signal?: AbortSignal) {
+  const { data } = await client.get<ListResponse<NodeAgentIssue>>('/admin/node-issues', { params, signal })
   return data
 }
 
-export async function acknowledgeNodeIssue(id: number) {
-  await client.post(`/admin/node-issues/${id}/acknowledge`)
+export async function acknowledgeNodeIssue(id: number, options?: { quiet?: boolean }) {
+  const url = `/admin/node-issues/${id}/acknowledge`
+  // Bulk review owns aggregate feedback; individual failures must still reject.
+  if (options?.quiet) {
+    await client.post(url, undefined, { _skipErrorToast: true })
+  } else {
+    await client.post(url)
+  }
 }

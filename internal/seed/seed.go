@@ -17,6 +17,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 
 	"gopkg.in/yaml.v3"
 )
@@ -143,31 +144,33 @@ func Ensure(configDir string) error {
 }
 
 type managedDefaultUpdate struct {
-	relPath   string
-	oldSHA256 string
-	newBody   []byte
+	relPath    string
+	oldSHA256s []string
+	newBody    []byte
 }
 
-// upgradeUnmodifiedRoutingDefaults moves the original QUIC-reject defaults to
-// the independent QUIC/UDP selectors. The two files form one bundle: if either
+// upgradeUnmodifiedRoutingDefaults upgrades known official routing defaults to
+// the current independent QUIC/UDP selectors. The two files form one bundle: if either
 // contains administrator edits, neither is changed, avoiding a half-upgraded
 // routing policy. A file already at the new embedded version is also accepted,
 // so an interrupted two-file update completes on the next boot.
 func upgradeUnmodifiedRoutingDefaults(configDir string) error {
-	specs := []struct {
-		relPath   string
-		oldSHA256 string
-	}{
-		{"templates/default-mihomo.yaml", "13cd9b7b8d29447f86fd46503536e15359e07116c302d3b5364a66e879a84c3c"},
-		{"rulesets/default-rules.yaml", "01c4be93d1bb183336940faa8ed8ebf0f08110adee12327405ab659be282adbc"},
+	updates := []managedDefaultUpdate{
+		{relPath: "templates/default-mihomo.yaml", oldSHA256s: []string{
+			"13cd9b7b8d29447f86fd46503536e15359e07116c302d3b5364a66e879a84c3c",
+		}},
+		{relPath: "rulesets/default-rules.yaml", oldSHA256s: []string{
+			"01c4be93d1bb183336940faa8ed8ebf0f08110adee12327405ab659be282adbc",
+			// Independent selectors with QUIC displayed before UDP, through v4.0.0-beta.7.
+			"81ca6e2e15c700478b8a15b59ef006f4f2b46043b587484b6b6238b7dee039c3",
+		}},
 	}
-	updates := make([]managedDefaultUpdate, 0, len(specs))
-	for _, spec := range specs {
-		body, err := defaultsFS.ReadFile("files/" + spec.relPath)
+	for i := range updates {
+		body, err := defaultsFS.ReadFile("files/" + updates[i].relPath)
 		if err != nil {
-			return fmt.Errorf("read managed default files/%s: %w", spec.relPath, err)
+			return fmt.Errorf("read managed default files/%s: %w", updates[i].relPath, err)
 		}
-		updates = append(updates, managedDefaultUpdate{relPath: spec.relPath, oldSHA256: spec.oldSHA256, newBody: body})
+		updates[i].newBody = body
 	}
 	return upgradeManagedDefaults(configDir, updates)
 }
@@ -181,10 +184,10 @@ func upgradeManagedDefaults(configDir string, updates []managedDefaultUpdate) er
 		}
 		currentHash := fmt.Sprintf("%x", sha256.Sum256(body))
 		newHash := fmt.Sprintf("%x", sha256.Sum256(update.newBody))
-		switch currentHash {
-		case newHash:
+		switch {
+		case currentHash == newHash:
 			// Already upgraded (or newly created by Ensure).
-		case update.oldSHA256:
+		case slices.Contains(update.oldSHA256s, currentHash):
 			needsWrite[i] = true
 		default:
 			return nil // bundle contains an administrator customization
