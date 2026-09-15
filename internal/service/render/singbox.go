@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/url"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -24,7 +25,8 @@ func (s *Service) renderSingBox(ctx context.Context, u *domain.User, tpl *domain
 		return nil, fmt.Errorf("marshal sing-box outbounds: %w", err)
 	}
 
-	rules, finalOutbound := buildSingBoxRouteRules(u.PersonalRules, rulesCommon)
+	passThroughGroups := singBoxPassThroughProxyGroups(items, proxyGroupMembers, u.PersonalRules, rulesCommon)
+	rules, finalOutbound := buildSingBoxRouteRulesWithPassThrough(passThroughGroups, u.PersonalRules, rulesCommon)
 	rulesJSON, err := marshalJSONBlock(rules)
 	if err != nil {
 		return nil, fmt.Errorf("marshal sing-box route rules: %w", err)
@@ -377,13 +379,23 @@ func buildSingBoxSelectorOutboundsWithMembers(rules string, items []renderItem, 
 	targets := withRequiredProxyGroupDependencies(ruleTargetsInOrder(rules))
 	targets = withConfiguredProxyGroupDependencies(targets, memberConfigs)
 	targets = applyProxyGroupOrder(targets, preferredOrder)
+	passThroughGroups := singBoxPassThroughProxyGroups(items, memberConfigs, rules)
 	out := make([]map[string]any, 0, len(targets))
 	for _, target := range targets {
 		members := defaultMembersForTarget(target)
 		if configured, ok := memberConfigs[target]; ok {
 			members = configured
 		}
-		choices := singBoxResolvedChoices(resolveConfiguredMembers(members, items))
+		resolved := resolveConfiguredMembers(members, items)
+		// sing-box has no PASS outbound. When PASS is the effective default,
+		// route compilation omits rules targeting this group so matching really
+		// continues. Do not emit an unreachable selector whose displayed default
+		// would misleadingly become the next non-PASS member.
+		if passThroughGroups[target] {
+			continue
+		}
+		resolved = slices.DeleteFunc(resolved, func(choice string) bool { return passThroughGroups[choice] })
+		choices := singBoxResolvedChoices(resolved)
 		if len(choices) == 0 {
 			choices = []string{"direct"}
 		}
@@ -436,6 +448,60 @@ func singBoxSelectorChoices(raw []string, nodeTags []string) []string {
 }
 
 func buildSingBoxRouteRules(ruleParts ...string) ([]map[string]any, string) {
+	return buildSingBoxRouteRulesWithPassThrough(nil, ruleParts...)
+}
+
+// singBoxPassThroughProxyGroups identifies selector targets whose effective
+// first member is Mihomo's PASS. sing-box has no equivalent outbound; callers
+// preserve the semantics by omitting matching route rules for these targets.
+func singBoxPassThroughProxyGroups(items []renderItem, memberConfigs map[string][]domain.ProxyGroupMember, ruleParts ...string) map[string]bool {
+	rules := strings.Join(ruleParts, "\n")
+	targets := withRequiredProxyGroupDependencies(ruleTargetsInOrder(rules))
+	targets = withConfiguredProxyGroupDependencies(targets, memberConfigs)
+	resolvedByTarget := make(map[string][]string, len(targets))
+	for _, target := range targets {
+		members := defaultMembersForTarget(target)
+		if configured, ok := memberConfigs[target]; ok {
+			members = configured
+		}
+		resolvedByTarget[target] = resolveConfiguredMembers(members, items)
+	}
+	result := make(map[string]bool)
+	visiting := make(map[string]bool)
+	var defaultsToPass func(string) bool
+	defaultsToPass = func(target string) bool {
+		if result[target] {
+			return true
+		}
+		if visiting[target] {
+			return false
+		}
+		resolved := resolvedByTarget[target]
+		if len(resolved) == 0 {
+			return false
+		}
+		if resolved[0] == "PASS" {
+			result[target] = true
+			return true
+		}
+		if _, group := resolvedByTarget[resolved[0]]; !group {
+			return false
+		}
+		visiting[target] = true
+		pass := defaultsToPass(resolved[0])
+		delete(visiting, target)
+		if pass {
+			result[target] = true
+		}
+		return pass
+	}
+	for _, target := range targets {
+		defaultsToPass(target)
+	}
+	return result
+}
+
+func buildSingBoxRouteRulesWithPassThrough(passThroughGroups map[string]bool, ruleParts ...string) ([]map[string]any, string) {
 	// Legacy inbound `sniff: true` was deprecated in sing-box 1.11.0
 	// and removed in 1.13.0; the migration is a global sniff action
 	// at the head of route.rules — match-all, runs before subsequent
@@ -447,6 +513,9 @@ func buildSingBoxRouteRules(ruleParts ...string) ([]map[string]any, string) {
 		for _, rawLine := range strings.Split(part, "\n") {
 			kind, value, target, ok := parseClashRuleLine(rawLine)
 			if !ok {
+				continue
+			}
+			if passThroughGroups[target] {
 				continue
 			}
 			outbound := singBoxOutboundTag(target)

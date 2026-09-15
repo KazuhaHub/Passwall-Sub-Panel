@@ -63,6 +63,7 @@ func TestRoutingDefaultMigrationSourcesExistAndChanged(t *testing.T) {
 		"rulesets/default-rules.yaml": {
 			"01c4be93d1bb183336940faa8ed8ebf0f08110adee12327405ab659be282adbc",
 			"81ca6e2e15c700478b8a15b59ef006f4f2b46043b587484b6b6238b7dee039c3",
+			"caf6d32b70f2ae4a66b5879e409280caa3552a1121a8bc137164e1c32efa112d",
 		},
 	}
 	for relPath, oldHashes := range checks {
@@ -92,10 +93,26 @@ func TestEnsureUpgradesPreviousIndependentRoutingDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Reconstruct the prior official prefix without duplicating the unchanged
-	// 9,000-line ruleset. The independently recorded published hash below proves
-	// the reconstructed bytes really are beta.7, not the current default.
-	previousRules := []byte(strings.NewReplacer(
+	// Reconstruct prior official prefixes without copying the unchanged
+	// 9,000-line tail. Their pinned hashes prove they are published defaults.
+	previousDirectRules := []byte(strings.NewReplacer(
+		"  # HTTP/3's usual transport (UDP/443) has its own runtime selector. It defaults\n"+
+			"  # to DIRECT so a slow UDP-capable proxy does not stall normal web browsing;\n"+
+			"  # a subscriber can independently select the proxy or REJECT (which lets\n"+
+			"  # browsers fall back to TCP).\n",
+		"  # HTTP/3's usual transport (UDP/443) has its own runtime selector. It defaults\n"+
+			"  # to the general UDP selector (DIRECT), but a subscriber can independently force the\n"+
+			"  # selected proxy, DIRECT, or REJECT (which lets browsers fall back to TCP).\n",
+		"  # All remaining non-local UDP -> the 🎮 UDP控制 selector, default PASS.\n"+
+			"  # PASS continues through the later domain/region rules, so each service keeps\n"+
+			"  # its normal routing decision instead of all UDP being forced direct or proxy.\n",
+		"  # All remaining non-local UDP -> the 🎮 UDP控制 selector, default DIRECT.\n"+
+			"  # UDP stays enabled and uses the local exit IP even when the main node is a proxy.\n",
+	).Replace(string(rules)))
+	if got := testSHA256(previousDirectRules); got != "caf6d32b70f2ae4a66b5879e409280caa3552a1121a8bc137164e1c32efa112d" {
+		t.Fatalf("previous direct-default rules hash = %s", got)
+	}
+	previousBeta7Rules := []byte(strings.NewReplacer(
 		"  - '🎮 UDP控制'\n  - '⚡ QUIC控制'\n", "  - '⚡ QUIC控制'\n  - '🎮 UDP控制'\n",
 		"to the general UDP selector (DIRECT), but", "to the general UDP selector, but",
 		"  # All remaining non-local UDP -> the 🎮 UDP控制 selector, default DIRECT.\n"+
@@ -103,23 +120,25 @@ func TestEnsureUpgradesPreviousIndependentRoutingDefaults(t *testing.T) {
 			"  # Group display order is UDP then QUIC; matching must remain QUIC then UDP.\n"+
 			"  # Both rules\n",
 		"  # All remaining non-local UDP -> the 🎮 UDP控制 selector. Both rules\n",
-	).Replace(string(rules)))
-	if got := testSHA256(previousRules); got != "81ca6e2e15c700478b8a15b59ef006f4f2b46043b587484b6b6238b7dee039c3" {
-		t.Fatalf("previous official rules hash = %s", got)
+	).Replace(string(previousDirectRules)))
+	if got := testSHA256(previousBeta7Rules); got != "81ca6e2e15c700478b8a15b59ef006f4f2b46043b587484b6b6238b7dee039c3" {
+		t.Fatalf("previous beta.7 rules hash = %s", got)
 	}
 	for _, tc := range []struct {
 		name              string
+		sourceRules       []byte
 		customizeTemplate bool
 		customizeRules    bool
 	}{
-		{name: "untouched beta.7 defaults upgrade"},
-		{name: "customized template preserves whole bundle", customizeTemplate: true},
-		{name: "customized rules preserve whole bundle", customizeRules: true},
+		{name: "untouched direct defaults upgrade", sourceRules: previousDirectRules},
+		{name: "untouched beta.7 defaults upgrade", sourceRules: previousBeta7Rules},
+		{name: "customized template preserves whole bundle", sourceRules: previousDirectRules, customizeTemplate: true},
+		{name: "customized rules preserve whole bundle", sourceRules: previousDirectRules, customizeRules: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()
 			oldTemplate := append([]byte(nil), template...)
-			oldRules := append([]byte(nil), previousRules...)
+			oldRules := append([]byte(nil), tc.sourceRules...)
 			if tc.customizeTemplate {
 				oldTemplate = append(oldTemplate, []byte("# administrator customization\n")...)
 			}
