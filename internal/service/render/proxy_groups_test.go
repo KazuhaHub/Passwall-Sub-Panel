@@ -125,7 +125,8 @@ func TestBuildProxyGroupsYAMLSelectedServicesDefaultToNodeSelector(t *testing.T)
 
 // TestBuildProxyGroupsYAML_UDPControl pins the 🎮 UDP控制 catch-all selector
 // derived from a `NETWORK,udp,🎮 UDP控制` rule: candidates are
-// [DIRECT, 🚀 节点选择, REJECT] in that order (direct = default).
+// [PASS, 🚀 节点选择, DIRECT, REJECT] in that order. PASS lets
+// later service rules decide the route instead of forcing all UDP one way.
 func TestBuildProxyGroupsYAML_UDPControl(t *testing.T) {
 	raw, err := buildProxyGroupsYAML("- NETWORK,udp,🎮 UDP控制\n", nil)
 	if err != nil {
@@ -144,7 +145,7 @@ func TestBuildProxyGroupsYAML_UDPControl(t *testing.T) {
 	if g == nil {
 		t.Fatalf("🎮 UDP控制 group missing: %#v", groups)
 	}
-	want := []string{"DIRECT", "🚀 节点选择", "REJECT"}
+	want := []string{"PASS", "🚀 节点选择", "DIRECT", "REJECT"}
 	if len(g.Proxies) != len(want) {
 		t.Fatalf("UDP控制 proxies = %#v, want %#v", g.Proxies, want)
 	}
@@ -172,12 +173,12 @@ func TestBuildProxyGroupsYAML_QUICControlIsIndependent(t *testing.T) {
 	if !ok {
 		t.Fatalf("QUIC selector missing: %#v", groups)
 	}
-	assertMemberStrings(t, quic.Proxies, []string{"🎮 UDP控制", "🚀 节点选择", "DIRECT", "REJECT"})
-	if _, ok := byName["🎮 UDP控制"]; !ok {
-		t.Fatalf("QUIC selector must pull in its UDP dependency: %#v", groups)
+	assertMemberStrings(t, quic.Proxies, []string{"DIRECT", "🚀 节点选择", "REJECT"})
+	if _, ok := byName["🎮 UDP控制"]; ok {
+		t.Fatalf("independent QUIC selector must not invent a UDP dependency: %#v", groups)
 	}
 	if _, ok := byName["🚀 节点选择"]; !ok {
-		t.Fatalf("QUIC selector must pull in its transitive node dependency: %#v", groups)
+		t.Fatalf("QUIC selector must pull in its node dependency: %#v", groups)
 	}
 }
 

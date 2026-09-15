@@ -197,9 +197,8 @@ func withRequiredProxyGroupDependencies(targets []string) []string {
 			}
 		}
 	}
-	// The QUIC selector delegates to the UDP selector, whose own default
-	// delegates to the canonical node selector. Close that transitive
-	// dependency even when an administrator defines only a QUIC rule.
+	// Close the transitive dependency if a built-in selector references the UDP
+	// selector: UDP's own alternatives also reference the canonical node group.
 	if needsUDPSelector && !hasUDPSelector {
 		needsNodeSelector = true
 	}
@@ -258,18 +257,15 @@ func normalizeRulePart(raw string) string {
 func proxyGroupChoices(name string) []string {
 	switch {
 	case strings.Contains(name, "QUIC控制"):
-		// HTTP/3 over UDP/443 is independently selectable. Delegating to the
-		// general UDP selector first preserves one-knob operation, while the
-		// remaining members let a subscriber override QUIC without changing
-		// other UDP traffic. Avoid PASS here: sing-box has no equivalent and
-		// mapping it to DIRECT would create a platform-specific traffic leak.
-		return []string{"🎮 UDP控制", "🚀 节点选择", "DIRECT", "REJECT"}
-	case strings.Contains(name, "UDP控制"):
-		// General non-local UDP defaults to the local DIRECT exit, independently
-		// of the main node selection. This allows UDP; it does not block it or
-		// promise a proxied source IP. HTTP/3 delegates here by default, while
-		// either selector can still be overridden independently by subscribers.
+		// HTTP/3 over UDP/443 is independent from general UDP. Direct is the
+		// conservative default: it avoids a slow UDP-capable proxy making normal
+		// web browsing stall, while users can still proxy or reject QUIC.
 		return []string{"DIRECT", "🚀 节点选择", "REJECT"}
+	case strings.Contains(name, "UDP控制"):
+		// PASS keeps evaluating later domain/region rules, so non-QUIC UDP follows
+		// the same policy as the corresponding service instead of being forced
+		// through a potentially slow UDP proxy or leaked through DIRECT.
+		return []string{"PASS", "🚀 节点选择", "DIRECT", "REJECT"}
 	case strings.Contains(name, "全球直连"):
 		return []string{"DIRECT"}
 	case strings.Contains(name, "广告拦截") || strings.Contains(name, "应用净化"):
