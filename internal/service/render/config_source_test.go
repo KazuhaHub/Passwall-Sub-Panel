@@ -30,6 +30,8 @@ type renderPanelRepo struct {
 	ports.XUIPanelRepo
 	version  string
 	versions map[int64]string
+	kind     domain.PanelKind
+	kinds    map[int64]domain.PanelKind
 }
 
 func (r renderPanelRepo) GetByID(_ context.Context, id int64) (*domain.XUIPanel, error) {
@@ -37,7 +39,11 @@ func (r renderPanelRepo) GetByID(_ context.Context, id int64) (*domain.XUIPanel,
 	if resolved, ok := r.versions[id]; ok {
 		version = resolved
 	}
-	return &domain.XUIPanel{ID: id, XrayVersion: version}, nil
+	kind := r.kind
+	if resolved, ok := r.kinds[id]; ok {
+		kind = resolved
+	}
+	return &domain.XUIPanel{ID: id, Kind: kind, XrayVersion: version}, nil
 }
 
 func (r renderCredentialRepo) ListByUser(_ context.Context, userID int64) ([]*domain.PSPClient, error) {
@@ -164,6 +170,30 @@ func TestBuildProxies_LocalConfig_ZeroFetch(t *testing.T) {
 	ro, ok := got["reality-opts"].(map[string]any)
 	if !ok || ro["public-key"] != "aPubKey" || ro["short-id"] != "abcd" {
 		t.Fatalf("reality-opts mismatch: %#v", got["reality-opts"])
+	}
+}
+
+func TestBuildProxiesNativeNodeWaitsForAppliedCredential(t *testing.T) {
+	node := vlessRealityNode(true)
+	repo := renderCredentialRepo{
+		client: &domain.PSPClient{ID: 11, UserID: 5, UUID: "not-yet-applied"},
+		attachments: []domain.PSPClientInbound{{
+			ClientID: 11, NodeID: node.ID, State: domain.ClientApplyPending,
+		}},
+	}
+	s := &Service{
+		repos: ports.Repos{
+			Settings:  fakeSettings{ports.UISettings{EmailDomain: "kazuha.org"}},
+			PSPClient: repo,
+			XUIPanel:  renderPanelRepo{kind: domain.PanelKindPSP},
+		},
+		pool: panicPool{},
+	}
+	u := &domain.User{ID: 5, UUID: "user-fallback-must-not-render"}
+	out := s.buildProxies(context.Background(), u, []renderItem{{name: "US-1", node: node}}, ports.UISettings{EmailDomain: "kazuha.org"})
+
+	if len(out) != 1 || out[0]["name"] != "PSP-NoNodes" {
+		t.Fatalf("native node rendered an unconfirmed fallback credential: %#v", out)
 	}
 }
 
@@ -318,6 +348,7 @@ func TestBuildProxiesKeepsLastAppliedCredentialWhileNewRosterIsPending(t *testin
 		repos: ports.Repos{
 			Settings:  fakeSettings{ports.UISettings{EmailDomain: "new.example"}},
 			PSPClient: repo,
+			XUIPanel:  renderPanelRepo{kind: domain.PanelKindPSP},
 		},
 		pool: panicPool{},
 	}

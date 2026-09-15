@@ -325,6 +325,8 @@ func TestSyncMintsDocumentsThenIngestsAppliedObservation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	invalidations := 0
+	service.SetRenderInvalidator(func() { invalidations++ })
 
 	first, err := service.Sync(ctx, nodeprotocol.NodeReport{
 		AgentID: agent.AgentID, ProtocolVersion: nodeprotocol.ProtocolVersion1,
@@ -357,9 +359,67 @@ func TestSyncMintsDocumentsThenIngestsAppliedObservation(t *testing.T) {
 		nodeprotocol.StreamRoster:     {Applied: first.Roster.Version, ETag: first.Roster.ETag},
 		nodeprotocol.StreamDirectives: {Applied: first.Directives.Version, ETag: first.Directives.ETag},
 	}
-	second, err := service.Sync(ctx, nodeprotocol.NodeReport{
+	closed, err := service.Sync(ctx, nodeprotocol.NodeReport{
 		AgentID: agent.AgentID, ProtocolVersion: nodeprotocol.ProtocolVersion1,
 		ReportedAtMS: now.Add(time.Second).UnixMilli(), Have: have,
+		AgentVersion: "v0.1.0", CoreVersion: "v25", CoreState: "running",
+		Objects: []nodeprotocol.ObjectStatus{
+			{Stream: nodeprotocol.StreamConfig, Key: string(nodeprotocol.NewListenerKey(node.ID)), State: nodeprotocol.ObjectApplied, SinceVersion: first.Config.Version},
+			{Stream: nodeprotocol.StreamRoster, Key: string(nodeprotocol.NewClientKey(client.ID)), State: nodeprotocol.ObjectApplied, SinceVersion: first.Roster.Version},
+		},
+		ListenerCounters: []nodeprotocol.ListenerCounters{{
+			Key: nodeprotocol.NewListenerKey(node.ID), Present: true, UpBytes: 40, DownBytes: 60, CounterEpoch: 1,
+		}},
+		Clients: []nodeprotocol.ClientCounters{{
+			Key: nodeprotocol.NewClientKey(client.ID), Present: false,
+			UpBytes: 70, DownBytes: 80, CounterEpoch: 1, Gate: nodeprotocol.GateClosed,
+		}},
+		Issues: []nodeprotocol.Issue{{
+			Code: nodeprotocol.IssueObjectRejectedTimeout, Key: string(nodeprotocol.NewClientKey(client.ID)),
+			Detail: "roster object has remained rejected",
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if invalidations != 1 {
+		t.Fatalf("first applied listener and roster credentials invalidated render cache %d times, want 1", invalidations)
+	}
+	if !closed.Config.Unchanged || closed.Config.Body != nil || !closed.Roster.Unchanged || closed.Roster.Body != nil {
+		t.Fatalf("stable documents were not conditionally skipped: %+v", closed)
+	}
+	if closed.Directives.Body == nil || closed.Directives.Body.Quota[0].BaselineBytes != 150 ||
+		closed.Directives.Body.Quota[0].HeadroomBytes == nil || *closed.Directives.Body.Quota[0].HeadroomBytes != limit {
+		t.Fatalf("a reported counter behind a closed local gate must reopen without losing its baseline: %+v", closed.Directives)
+	}
+	if closed.Envelope.OverburnHeadroomBytes != limit || closed.Envelope.NumeratorAsOfMS != now.UnixMilli() {
+		t.Fatalf("quota exposure/freshness envelope = %+v", closed.Envelope)
+	}
+	if closed.Directives.Body.IPShadow[0].IPLimit != ipLimit {
+		t.Fatalf("IP shadow limit = %d, want %d", closed.Directives.Body.IPShadow[0].IPLimit, ipLimit)
+	}
+	// Present=false means the quota gate omitted the client from the running
+	// core. Its applied roster identity must remain readable through the native
+	// adapter facade, otherwise every lifecycle refresh reports a false
+	// credential mismatch and subscriptions cannot pin the accepted UUID.
+	panelView, err := service.NativePanelSnapshot(ctx, 9)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if detail := panelView.Clients[client.Email]; detail.ID != client.UUID || len(detail.InboundIDs) != 1 {
+		t.Fatalf("quota-closed applied identity missing from native panel view: %+v", detail)
+	}
+
+	haveAfterClosed := make(map[string]nodeprotocol.StreamState, len(have))
+	for stream, state := range have {
+		haveAfterClosed[stream] = state
+	}
+	haveAfterClosed[nodeprotocol.StreamDirectives] = nodeprotocol.StreamState{
+		Applied: closed.Directives.Version, ETag: closed.Directives.ETag,
+	}
+	second, err := service.Sync(ctx, nodeprotocol.NodeReport{
+		AgentID: agent.AgentID, ProtocolVersion: nodeprotocol.ProtocolVersion1,
+		ReportedAtMS: now.Add(2 * time.Second).UnixMilli(), Have: haveAfterClosed,
 		AgentVersion: "v0.1.0", CoreVersion: "v25", CoreState: "running",
 		Objects: []nodeprotocol.ObjectStatus{
 			{Stream: nodeprotocol.StreamConfig, Key: string(nodeprotocol.NewListenerKey(node.ID)), State: nodeprotocol.ObjectApplied, SinceVersion: first.Config.Version},
@@ -373,26 +433,9 @@ func TestSyncMintsDocumentsThenIngestsAppliedObservation(t *testing.T) {
 			UpBytes: 70, DownBytes: 80, CounterEpoch: 1, Gate: nodeprotocol.GateUnconfigured,
 			LiveIPs: []string{"203.0.113.2", "203.0.113.1"},
 		}},
-		Issues: []nodeprotocol.Issue{{
-			Code: nodeprotocol.IssueObjectRejectedTimeout, Key: string(nodeprotocol.NewClientKey(client.ID)),
-			Detail: "roster object has remained rejected",
-		}},
 	})
 	if err != nil {
 		t.Fatal(err)
-	}
-	if !second.Config.Unchanged || second.Config.Body != nil || !second.Roster.Unchanged || second.Roster.Body != nil {
-		t.Fatalf("stable documents were not conditionally skipped: %+v", second)
-	}
-	if second.Directives.Body == nil || second.Directives.Body.Quota[0].BaselineBytes != 150 ||
-		second.Directives.Body.Quota[0].HeadroomBytes == nil || *second.Directives.Body.Quota[0].HeadroomBytes != limit {
-		t.Fatalf("first counter observation must seed baseline and retain full headroom: %+v", second.Directives)
-	}
-	if second.Envelope.OverburnHeadroomBytes != limit || second.Envelope.NumeratorAsOfMS != now.UnixMilli() {
-		t.Fatalf("quota exposure/freshness envelope = %+v", second.Envelope)
-	}
-	if second.Directives.Body.IPShadow[0].IPLimit != ipLimit {
-		t.Fatalf("IP shadow limit = %d, want %d", second.Directives.Body.IPShadow[0].IPLimit, ipLimit)
 	}
 	currentNow = now.Add(46 * time.Second)
 	staleHave := make(map[string]nodeprotocol.StreamState, len(have))
@@ -422,7 +465,7 @@ func TestSyncMintsDocumentsThenIngestsAppliedObservation(t *testing.T) {
 	if err != nil || storedNode.ObservedPort != node.DesiredPort || storedNode.ObservedProtocol != node.DesiredProtocol {
 		t.Fatalf("observed endpoint = (%+v, %v)", storedNode, err)
 	}
-	panelView, err := service.NativePanelSnapshot(ctx, 9)
+	panelView, err = service.NativePanelSnapshot(ctx, 9)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -544,7 +587,9 @@ func TestPendingUsageRejectsCrossPanelCounterSpoofing(t *testing.T) {
 	service := &Service{
 		reports: map[string]receivedFullReport{
 			"agent-a": {report: nodeprotocol.NodeReport{Clients: []nodeprotocol.ClientCounters{
-				{Key: nodeprotocol.NewClientKey(1), Present: true, CounterEpoch: 1, UpBytes: 10, DownBytes: 20},
+				// A quota-closed client is absent from the core but its reported
+				// durable counter remains part of the uncommitted usage floor.
+				{Key: nodeprotocol.NewClientKey(1), Present: false, CounterEpoch: 1, UpBytes: 10, DownBytes: 20},
 				{Key: nodeprotocol.NewClientKey(2), Present: true, CounterEpoch: 1, UpBytes: 400, DownBytes: 500},
 			}}},
 			"agent-b": {report: nodeprotocol.NodeReport{Clients: []nodeprotocol.ClientCounters{

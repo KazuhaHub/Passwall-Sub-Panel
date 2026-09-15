@@ -405,6 +405,7 @@ func (s *Service) ingestReport(ctx context.Context, agent *domain.NodeAgent, sna
 
 func (s *Service) reconcileObjects(ctx context.Context, agent *domain.NodeAgent, snapshot *ports.NativeDesiredSnapshot, report nodeprotocol.NodeReport, streams map[string]*domain.NodeAgentStream, now time.Time) error {
 	missing := make([]domain.NodeAgentIssue, 0)
+	renderCredentialsChanged := false
 	rosterHave := report.Have[nodeprotocol.StreamRoster]
 	rosterCurrent := streams[nodeprotocol.StreamRoster]
 	if rosterCurrent != nil && rosterHave.Applied.Epoch == agent.Epoch && string(rosterHave.ETag) == rosterCurrent.DesiredETag {
@@ -462,6 +463,11 @@ func (s *Service) reconcileObjects(ctx context.Context, agent *domain.NodeAgent,
 					update.AppliedEmail = appliedClient.Credentials.Username
 					update.AppliedUUID = appliedClient.Credentials.UUID
 					update.AppliedPassword = appliedClient.Credentials.Password
+					if attachment.AppliedEmail != update.AppliedEmail ||
+						attachment.AppliedUUID != update.AppliedUUID ||
+						attachment.AppliedPassword != update.AppliedPassword {
+						renderCredentialsChanged = true
+					}
 				}
 				if err := s.clients.UpdateInboundState(ctx, update); err != nil {
 					return fmt.Errorf("nodesync: update client %d attachment %d: %w", clientID, attachment.NodeID, err)
@@ -469,7 +475,6 @@ func (s *Service) reconcileObjects(ctx context.Context, agent *domain.NodeAgent,
 			}
 		}
 	}
-
 	configHave := report.Have[nodeprotocol.StreamConfig]
 	configCurrent := streams[nodeprotocol.StreamConfig]
 	if configCurrent != nil && configHave.Applied.Epoch == agent.Epoch && string(configHave.ETag) == configCurrent.DesiredETag {
@@ -512,10 +517,13 @@ func (s *Service) reconcileObjects(ctx context.Context, agent *domain.NodeAgent,
 			}
 			// Render gates local snapshots on convergence. Refresh it on the
 			// transition, not on every periodic replay of an applied receipt.
-			if changed && s.invalidateRender != nil {
-				s.invalidateRender()
+			if changed {
+				renderCredentialsChanged = true
 			}
 		}
+	}
+	if renderCredentialsChanged && s.invalidateRender != nil {
+		s.invalidateRender()
 	}
 	if err := s.issues.RecordBatch(ctx, agent.AgentID, missing, now); err != nil {
 		return fmt.Errorf("nodesync: record missing report objects: %w", err)
@@ -761,16 +769,21 @@ func (s *Service) buildDirectives(ctx context.Context, agent *domain.NodeAgent, 
 		}
 		counter, counterKnown := counters[client.ID]
 		baseline := int64(0)
-		if counterKnown && counter.Present {
+		if counterKnown {
 			baseline = nonNegativeSum(counter.UpBytes, counter.DownBytes)
 		}
 		entry := nodeprotocol.QuotaEntry{Client: nodeprotocol.NewClientKey(client.ID), BaselineBytes: baseline}
 		if user.TrafficLimitBytes > 0 {
-			// A limited client whose current cumulative counter is unknown is
-			// closed until a full report proves the row exists. Treating unknown
-			// as zero would hand out a fresh full-period grant after cache loss.
+			// A limited client whose current cumulative counter is absent from a
+			// full report is closed. An explicitly reported counter remains known
+			// when Present=false: that flag means the local quota gate omitted the
+			// client from the running core, not that its durable counter vanished.
+			// Requiring Present here deadlocks first installation: PSP sends zero
+			// headroom while the counter is initially unknown, the node closes the
+			// client, then every subsequent report says Present=false and PSP never
+			// sends the non-zero grant that could open it.
 			remaining := int64(0)
-			if hasFull && counterKnown && counter.Present {
+			if hasFull && counterKnown {
 				remaining = saturatingSub(user.TrafficLimitBytes, saturatingAdd(user.PeriodUsed(), pendingByUser[user.ID]))
 			}
 			entry.HeadroomBytes = int64Pointer(remaining)
@@ -956,7 +969,7 @@ func (s *Service) pendingUsage(clients map[int64]*domain.PSPClient, agents []*do
 		}
 		for _, counter := range report.Clients {
 			id, err := counter.Key.RowID()
-			if err != nil || !counter.Present {
+			if err != nil {
 				continue
 			}
 			client := clients[id]
@@ -1145,11 +1158,16 @@ func (s *Service) NativePanelSnapshot(ctx context.Context, panelID int64) (*port
 		if client == nil {
 			continue
 		}
-		counter, present := clientCounters[client.ID]
+		counter, reported := clientCounters[client.ID]
 		object := statusByStream[nodeprotocol.StreamRoster][string(nodeprotocol.NewClientKey(client.ID))]
-		if !rosterCurrent || !present || !counter.Present || object.State != nodeprotocol.ObjectApplied {
+		if !rosterCurrent || !reported || object.State != nodeprotocol.ObjectApplied {
 			continue
 		}
+		// Present describes membership in the running core, not whether the
+		// applied roster identity exists. A locally closed quota gate removes a
+		// client from Xray while retaining its durable identity and counters. The
+		// PanelClient facade must still expose that identity so lifecycle writes,
+		// subscription credential pinning and final traffic accounting converge.
 		detail := ports.ClientDetail{
 			ID: client.UUID, Email: client.Email, Enable: client.DesiredEnable,
 			Password: client.Password, Auth: client.UUID, ExpiryTime: client.DesiredExpiryTime,
