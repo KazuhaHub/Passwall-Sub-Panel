@@ -33,6 +33,7 @@ import (
 func (s *Service) renderURIList(ctx context.Context, u *domain.User, items []renderItem, st ports.UISettings) (*Output, error) {
 	emailRules := domain.EmailRules{Domain: st.EmailDomain}
 	appliedCredentials := s.appliedClientCredentialsByNode(ctx, u)
+	nativePanels := s.nativePanelIDs(ctx, items)
 
 	// Local snapshot for captured nodes, one batched ListInbounds per panel for
 	// the un-captured transition-window remainder. See resolveInbounds.
@@ -56,6 +57,13 @@ func (s *Service) renderURIList(ctx context.Context, u *domain.User, items []ren
 			log.Warn("uri-list: skip node, inbound config unavailable (no local snapshot and live fetch failed)",
 				"node_id", it.node.ID)
 			continue
+		}
+		if _, native := nativePanels[it.node.PanelID]; native {
+			if _, applied := appliedCredentials[it.node.ID]; !applied {
+				log.Warn("uri-list: skip native node until client credentials are confirmed applied",
+					"node_id", it.node.ID, "panel_id", it.node.PanelID, "user_id", u.ID)
+				continue
+			}
 		}
 		renderUser, userEmail, appliedPassword := renderIdentityForNode(u, it.node.ID, emailRules, appliedCredentials)
 		// it.name (not DisplayName) carries the layout-applied name — the

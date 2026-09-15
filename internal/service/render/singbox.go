@@ -85,6 +85,7 @@ func (s *Service) buildSingBoxOutbounds(ctx context.Context, u *domain.User, ite
 	// WireGuard dispatcher can look up the user's peer entry by email.
 	emailRules := domain.EmailRules{Domain: st.EmailDomain}
 	appliedCredentials := s.appliedClientCredentialsByNode(ctx, u)
+	nativePanels := s.nativePanelIDs(ctx, items)
 
 	// Local snapshot for captured nodes, one batched ListInbounds per panel for
 	// the un-captured transition-window remainder. See resolveInbounds.
@@ -117,6 +118,13 @@ func (s *Service) buildSingBoxOutbounds(ctx context.Context, u *domain.User, ite
 			log.Warn("render: skip node, inbound config unavailable (no local snapshot and live fetch failed)",
 				"node_id", it.node.ID, "panel_id", it.node.PanelID, "inbound_id", it.node.InboundID)
 			continue
+		}
+		if _, native := nativePanels[it.node.PanelID]; native {
+			if _, applied := appliedCredentials[it.node.ID]; !applied {
+				log.Warn("render: skip native node until client credentials are confirmed applied",
+					"node_id", it.node.ID, "panel_id", it.node.PanelID, "user_id", u.ID)
+				continue
+			}
 		}
 		if mlkemFirstRealityByPanel[it.node.PanelID] && inboundUsesReality(inb) {
 			// Xray 26.9.8+ hard-requires the X25519MLKEM768 key share. Current

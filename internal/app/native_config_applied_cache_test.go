@@ -108,14 +108,29 @@ func TestBuildNativeConfigAppliedInvalidatesBothSubscriptionCacheLayers(t *testi
 	if err := a.repos.User.Create(ctx, user); err != nil {
 		t.Fatal(err)
 	}
+	client := &domain.PSPClient{
+		UserID: user.ID, PanelID: panel.ID, Email: "u-cache@psp.local",
+		UUID: user.UUID, Password: "fixture-password",
+	}
+	client.SetDesiredLifecycle(domain.UserLifecycle{Enable: true})
+	client.ID, err = a.repos.PSPClient.Create(ctx, client)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := a.repos.PSPClient.SetInbounds(ctx, client.ID, []domain.PSPClientInbound{{
+		ClientID: client.ID, NodeID: node.ID, State: domain.ClientApplyPending,
+	}}); err != nil {
+		t.Fatal(err)
+	}
 	have := map[string]nodeprotocol.StreamState{
 		nodeprotocol.StreamConfig: {}, nodeprotocol.StreamRoster: {}, nodeprotocol.StreamDirectives: {},
 	}
 	initial := syncNativeCacheFixture(t, a, credential, nodeprotocol.NodeReport{
 		AgentID: agent.AgentID, ProtocolVersion: nodeprotocol.ProtocolVersion1, Have: have,
 	})
-	if initial.Config.Body == nil || len(initial.Config.Body.Listeners) != 1 {
-		t.Fatal("native fixture did not mint its pending listener")
+	if initial.Config.Body == nil || len(initial.Config.Body.Listeners) != 1 ||
+		initial.Roster.Body == nil || len(initial.Roster.Body.Clients) != 1 {
+		t.Fatal("native fixture did not mint its pending listener and roster identity")
 	}
 	// URI-list needs no on-disk template. This warms both actual cache layers:
 	// group.NodesFor retains a pending Node; render retains the empty output.
@@ -133,12 +148,19 @@ func TestBuildNativeConfigAppliedInvalidatesBothSubscriptionCacheLayers(t *testi
 		t.Fatal("fixture did not warm the actual final-output cache")
 	}
 	have[nodeprotocol.StreamConfig] = nodeprotocol.StreamState{Applied: initial.Config.Version, ETag: initial.Config.ETag}
+	have[nodeprotocol.StreamRoster] = nodeprotocol.StreamState{Applied: initial.Roster.Version, ETag: initial.Roster.ETag}
 	ack := nodeprotocol.NodeReport{
 		AgentID: agent.AgentID, ProtocolVersion: nodeprotocol.ProtocolVersion1, Have: have,
-		Objects: []nodeprotocol.ObjectStatus{{
-			Stream: nodeprotocol.StreamConfig, Key: string(nodeprotocol.NewListenerKey(node.ID)),
-			State: nodeprotocol.ObjectApplied, SinceVersion: initial.Config.Version,
-		}},
+		Objects: []nodeprotocol.ObjectStatus{
+			{
+				Stream: nodeprotocol.StreamConfig, Key: string(nodeprotocol.NewListenerKey(node.ID)),
+				State: nodeprotocol.ObjectApplied, SinceVersion: initial.Config.Version,
+			},
+			{
+				Stream: nodeprotocol.StreamRoster, Key: string(nodeprotocol.NewClientKey(client.ID)),
+				State: nodeprotocol.ObjectApplied, SinceVersion: initial.Roster.Version,
+			},
+		},
 	}
 	syncNativeCacheFixture(t, a, credential, ack)
 	confirmed, err := a.repos.Node.GetByID(ctx, node.ID)

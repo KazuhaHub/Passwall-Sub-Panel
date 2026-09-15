@@ -283,6 +283,7 @@ func (s *Service) buildProxies(ctx context.Context, u *domain.User, items []rend
 	// node), so the rules can be reused across the loop.
 	emailRules := domain.EmailRules{Domain: st.EmailDomain}
 	appliedCredentials := s.appliedClientCredentialsByNode(ctx, u)
+	nativePanels := s.nativePanelIDs(ctx, items)
 
 	// Captured nodes render from the local snapshot (zero 3X-UI calls), so a
 	// subscription still renders while 3X-UI is unreachable; un-captured nodes
@@ -302,6 +303,13 @@ func (s *Service) buildProxies(ctx context.Context, u *domain.User, items []rend
 			log.Warn("render: skip node, inbound config unavailable (no local snapshot and live fetch failed)",
 				"node_id", it.node.ID, "panel_id", it.node.PanelID, "inbound_id", it.node.InboundID)
 			continue
+		}
+		if _, native := nativePanels[it.node.PanelID]; native {
+			if _, applied := appliedCredentials[it.node.ID]; !applied {
+				log.Warn("render: skip native node until client credentials are confirmed applied",
+					"node_id", it.node.ID, "panel_id", it.node.PanelID, "user_id", u.ID)
+				continue
+			}
 		}
 		renderUser, userEmail, appliedPassword := renderIdentityForNode(u, it.node.ID, emailRules, appliedCredentials)
 		block, err := emitProxy(it.name, it.node, renderUser, inb, userEmail, appliedPassword, it.relay,
@@ -327,6 +335,36 @@ func (s *Service) buildProxies(ctx context.Context, u *domain.User, items []rend
 			"user_id", u.ID, "items_considered", len(items))
 	}
 	return withSentinelIfEmpty(out)
+}
+
+// nativePanelIDs resolves the panels whose data plane is managed by Passwall
+// Node. Unlike legacy panel adapters, a native node has no independently
+// provisioned fallback credential: until its roster receipt confirms this
+// user's attachment, rendering user.UUID would publish an identity the node
+// has never accepted. Panel lookup is local DB I/O and deduplicated per render.
+func (s *Service) nativePanelIDs(ctx context.Context, items []renderItem) map[int64]struct{} {
+	result := make(map[int64]struct{})
+	if s.repos.XUIPanel == nil {
+		return result
+	}
+	wanted := make(map[int64]struct{})
+	for _, item := range items {
+		if !item.isSeparator && item.node != nil {
+			wanted[item.node.PanelID] = struct{}{}
+		}
+	}
+	for panelID := range wanted {
+		panel, err := s.repos.XUIPanel.GetByID(ctx, panelID)
+		if err != nil {
+			log.Warn("render: cannot resolve panel kind for credential convergence gate",
+				"panel_id", panelID, "err", err)
+			continue
+		}
+		if domain.NormalizePanelKind(panel.Kind) == domain.PanelKindPSP {
+			result[panelID] = struct{}{}
+		}
+	}
+	return result
 }
 
 // mlkemFirstRealityPanels resolves only panels that contribute a REALITY
