@@ -158,10 +158,7 @@ func NewRouter(d Deps) stdhttp.Handler {
 	// your real proxy/CDN ranges (or set it to "none" when listening directly)
 	// for a trustworthy client IP. See the trustedProxies doc below.
 	g.RemoteIPHeaders = []string{"CF-Connecting-IP", "X-Real-IP", "X-Forwarded-For"}
-	g.Use(gin.LoggerWithConfig(gin.LoggerConfig{Skip: func(c *gin.Context) bool {
-		// Delivery URLs contain transient bearer material; audit metadata only.
-		return strings.HasPrefix(c.Request.URL.Path, "/node-bootstrap/")
-	}}), gin.Recovery())
+	g.Use(newAccessLogger(nil), gin.Recovery())
 	// Security headers (HSTS / X-Frame-Options / X-Content-Type-Options /
 	// Referrer-Policy / CSP). Mounted early so every later handler — SPA
 	// fallback, SAML metadata, sub render — picks them up by default.
@@ -706,10 +703,13 @@ func NewRouter(d Deps) stdhttp.Handler {
 	//
 	// POST /api/enroll/:token is the callback. The one-time token IS the
 	// authentication, and it is consumed on presentation.
-	g.GET("/enroll/:token", enrollPublic.Script)
-	g.POST("/api/enroll/:token", enrollPublic.Callback)
+	enrollScript := credentialBearingRoutes[enrollScriptRoute]
+	g.Handle(enrollScript.method, enrollScript.pattern, enrollPublic.Script)
+	enrollCallback := credentialBearingRoutes[enrollCallbackRoute]
+	g.Handle(enrollCallback.method, enrollCallback.pattern, enrollPublic.Callback)
 	if bootstrapPublic != nil {
-		g.GET("/node-bootstrap/:token", bootstrapPublic.Download)
+		bootstrapDownload := credentialBearingRoutes[bootstrapDownloadRoute]
+		g.Handle(bootstrapDownload.method, bootstrapDownload.pattern, bootstrapPublic.Download)
 		g.POST("/api/node-bootstrap/complete", bootstrapPublic.Complete)
 	}
 
