@@ -154,7 +154,9 @@ func TestNodeAgentProtocolObservationIsCanonicalAndColumnScoped(t *testing.T) {
 	if err := repo.Create(ctx, agent); err != nil {
 		t.Fatal(err)
 	}
-	observedAt := time.Date(2026, 9, 16, 12, 0, 0, 123, time.UTC)
+	// SQL timestamp precision differs across supported dialects. Protocol
+	// observations only need wall-clock ordering, so keep the fixture portable.
+	observedAt := time.Date(2026, 9, 16, 12, 0, 0, 0, time.UTC)
 	capabilities := []string{
 		nodeprotocol.TaskCapability(nodeprotocol.TaskKindAgentUpgradeV1),
 		nodeprotocol.CapabilityTaskExpiryV1,
