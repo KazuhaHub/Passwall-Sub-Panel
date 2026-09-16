@@ -1,6 +1,10 @@
 package domain
 
-import "time"
+import (
+	"time"
+
+	nodeprotocol "github.com/KazuhaHub/passwall-node/protocol"
+)
 
 type NodeCoreEngine string
 
@@ -114,5 +118,5 @@ type NodeAgentStream struct {
 // Converged compares content identity, never version. This correctly treats an
 // A/B/A rollback as converged when the agent still holds byte-identical A.
 func (s *NodeAgentStream) Converged() bool {
-	return s != nil && s.DesiredETag != "" && s.DesiredETag == s.AppliedETag
+	return s != nil && nodeprotocol.Converged(nodeprotocol.ETag(s.AppliedETag), nodeprotocol.ETag(s.DesiredETag))
 }

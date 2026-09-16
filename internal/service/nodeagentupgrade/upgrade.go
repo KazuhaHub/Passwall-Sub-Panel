@@ -11,11 +11,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"regexp"
-	"strings"
 	"time"
 
+	"github.com/KazuhaHub/passwall-node/deployment"
 	nodeprotocol "github.com/KazuhaHub/passwall-node/protocol"
 	"golang.org/x/mod/semver"
 
@@ -23,27 +22,15 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 )
 
-// These additive DTOs intentionally do not depend on unpublished Node exports.
-// Keep their wire shape aligned with the agent.upgrade.v1 handler when its
-// official module revision is consumed. No arbitrary URL or command is input.
-const Kind = "agent.upgrade.v1"
+const Kind = nodeprotocol.TaskKindAgentUpgradeV1
 
 const (
 	startAuthorization   = 10 * time.Minute
 	observationFreshness = 2 * time.Minute
 )
 
-type Request struct {
-	Version         string `json:"version"`
-	ExpectedVersion string `json:"expected_version"`
-}
-
-type Result struct {
-	Version         string `json:"version"`
-	PreviousVersion string `json:"previous_version"`
-	BinarySHA256    string `json:"binary_sha256"`
-	Restarted       bool   `json:"restarted"`
-}
+type Request = nodeprotocol.AgentUpgradeArgs
+type Result = nodeprotocol.AgentUpgradeResult
 
 type Status struct {
 	TaskID               string                     `json:"task_id"`
@@ -85,48 +72,31 @@ func New(options Options) (*Service, error) {
 }
 
 var (
-	releaseVersion   = regexp.MustCompile(`^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$`)
 	requestKey       = regexp.MustCompile(`^[A-Za-z0-9_.:-]{16,128}$`)
 	binaryDigest     = regexp.MustCompile(`^[0-9a-f]{64}$`)
 	observedIdentity = regexp.MustCompile(`^(v[^ ]+)(?: \([0-9a-f]{7,40}\))?$`)
 )
 
-func (r Request) Validate() error {
-	if !canonicalVersion(r.Version) || !canonicalVersion(r.ExpectedVersion) {
+func validateRequest(request Request) error {
+	if !deployment.ValidReleaseVersion(request.Version) || !deployment.ValidReleaseVersion(request.ExpectedVersion) {
 		return fmt.Errorf("%w: exact canonical target and expected Node versions are required", domain.ErrValidation)
 	}
-	if semver.Compare(r.Version, r.ExpectedVersion) <= 0 {
+	if semver.Compare(request.Version, request.ExpectedVersion) <= 0 {
 		return fmt.Errorf("%w: native upgrade target must be newer than its expected current version", domain.ErrValidation)
 	}
 	return nil
 }
 
 func DecodeRequest(payload []byte) (Request, error) {
-	var request Request
-	if err := strictJSON(payload, &request); err != nil {
+	request, err := nodeprotocol.DecodeAgentUpgradeArgs(payload)
+	if err != nil {
 		return Request{}, fmt.Errorf("%w: invalid native upgrade request shape", domain.ErrValidation)
 	}
-	return request, request.Validate()
-}
-
-func canonicalVersion(value string) bool {
-	if len(value) > 128 || !releaseVersion.MatchString(value) {
-		return false
-	}
-	_, prerelease, present := strings.Cut(value, "-")
-	if !present {
-		return true
-	}
-	for _, part := range strings.Split(prerelease, ".") {
-		if len(part) > 1 && part[0] == '0' && strings.Trim(part, "0123456789") == "" {
-			return false
-		}
-	}
-	return true
+	return request, validateRequest(request)
 }
 
 func (s *Service) Request(ctx context.Context, panelID int64, request Request, key string) (*Status, bool, error) {
-	if err := request.Validate(); err != nil {
+	if err := validateRequest(request); err != nil {
 		return nil, false, err
 	}
 	if !requestKey.MatchString(key) {
@@ -228,8 +198,8 @@ func (s *Service) status(task *domain.NodeAgentTask, panel *domain.XUIPanel, age
 	if nodeprotocol.ValidateTasks([]nodeprotocol.Task{{ID: task.TaskID, Kind: Kind, Args: task.Args, InputSHA256: task.InputSHA256, NotAfterMS: task.Lifecycle.NotAfterMS}}) != nil {
 		return nil, fmt.Errorf("%w: native upgrade task wire identity is invalid", domain.ErrConflict)
 	}
-	var request Request
-	if strictJSON(task.Args, &request) != nil || request.Validate() != nil {
+	request, decodeErr := nodeprotocol.DecodeAgentUpgradeArgs(task.Args)
+	if decodeErr != nil || validateRequest(request) != nil {
 		return nil, fmt.Errorf("%w: native upgrade task stored input is invalid", domain.ErrConflict)
 	}
 	canonicalArgs, _ := json.Marshal(request)
@@ -249,7 +219,7 @@ func (s *Service) status(task *domain.NodeAgentTask, panel *domain.XUIPanel, age
 			status.DispatchClosedReason = "dispatch_closed"
 		}
 	}
-	if identity := observedIdentity.FindStringSubmatch(panel.PanelVersion); len(identity) == 2 && canonicalVersion(identity[1]) {
+	if identity := observedIdentity.FindStringSubmatch(panel.PanelVersion); len(identity) == 2 && deployment.ValidReleaseVersion(identity[1]) {
 		status.ObservedVersion = identity[1]
 	}
 	switch task.Status {
@@ -262,9 +232,9 @@ func (s *Service) status(task *domain.NodeAgentTask, panel *domain.XUIPanel, age
 	case domain.NodeAgentTaskIndeterminate:
 		status.UpgradeState = "manual_attention"
 	case domain.NodeAgentTaskSucceeded:
-		var result Result
+		result, decodeErr := nodeprotocol.DecodeAgentUpgradeResult(task.Result)
 		if task.ResultOK == nil || !*task.ResultOK || task.ResultIndeterminate || task.CompletedAt == nil ||
-			strictJSON(task.Result, &result) != nil || !result.Restarted || !binaryDigest.MatchString(result.BinarySHA256) ||
+			decodeErr != nil || !result.Restarted || !binaryDigest.MatchString(result.BinarySHA256) ||
 			result.Version != request.Version || result.PreviousVersion != request.ExpectedVersion {
 			status.UpgradeState = "manual_attention"
 			break
@@ -282,46 +252,6 @@ func (s *Service) status(task *domain.NodeAgentTask, panel *domain.XUIPanel, age
 		status.UpgradeState = "dispatch_closed"
 	}
 	return status, nil
-}
-
-func strictJSON(payload []byte, target any) error {
-	var allowed map[string]bool
-	switch target.(type) {
-	case *Request:
-		allowed = map[string]bool{"version": true, "expected_version": true}
-	case *Result:
-		allowed = map[string]bool{"version": true, "previous_version": true, "binary_sha256": true, "restarted": true}
-	default:
-		return errors.New("invalid upgrade metadata target")
-	}
-	decoder := json.NewDecoder(bytes.NewReader(payload))
-	opening, err := decoder.Token()
-	if err != nil || opening != json.Delim('{') {
-		return errors.New("invalid structured upgrade metadata")
-	}
-	seen := make(map[string]bool, len(allowed))
-	for decoder.More() {
-		token, err := decoder.Token()
-		key, ok := token.(string)
-		if err != nil || !ok || !allowed[key] || seen[key] {
-			return errors.New("invalid upgrade metadata fields")
-		}
-		seen[key] = true
-		var value json.RawMessage
-		if decoder.Decode(&value) != nil {
-			return errors.New("invalid upgrade metadata value")
-		}
-	}
-	if closing, err := decoder.Token(); err != nil || closing != json.Delim('}') || len(seen) != len(allowed) {
-		return errors.New("invalid upgrade metadata fields")
-	}
-	if err := decoder.Decode(&struct{}{}); err != io.EOF {
-		return errors.New("invalid trailing upgrade metadata")
-	}
-	if err := json.Unmarshal(payload, target); err != nil {
-		return errors.New("invalid upgrade metadata types")
-	}
-	return nil
 }
 
 func freshAt(seen, completed *time.Time, now time.Time) bool {

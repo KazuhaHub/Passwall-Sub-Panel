@@ -77,7 +77,7 @@ func TestUpgradeRequestRequiresAnExactNewerRelease(t *testing.T) {
 		{"v0.0.2+build", "v0.0.1", false},
 		{"latest", "v0.0.1", false},
 	} {
-		err := (Request{Version: tc.target, ExpectedVersion: tc.expected}).Validate()
+		err := validateRequest(Request{Version: tc.target, ExpectedVersion: tc.expected})
 		if tc.valid && err != nil || !tc.valid && !errors.Is(err, domain.ErrValidation) {
 			t.Fatalf("target=%s expected=%s valid=%t error=%v", tc.target, tc.expected, tc.valid, err)
 		}

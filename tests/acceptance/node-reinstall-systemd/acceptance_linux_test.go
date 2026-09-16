@@ -216,7 +216,7 @@ func newFixture(t *testing.T, ctx context.Context) *fixture {
 	attachment := domain.PSPClientInbound{ClientID: f.clientID, NodeID: node.ID, State: domain.ClientApplyApplied, AppliedVersion: 1, AppliedEmail: client.Email, AppliedUUID: client.UUID, AppliedPassword: client.Password}
 	must(t, f.repos.PSPClient.SetInbounds(ctx, f.clientID, []domain.PSPClientInbound{attachment}), "attach original client")
 	must(t, f.repos.PSPClient.UpdateInboundState(ctx, attachment), "record old applied credentials")
-	f.coordinator, err = nodesync.New(nodesync.Options{Desired: f.repos.NativeDesired, Agents: f.repos.NodeAgent, Issues: f.repos.NodeAgentIssue, Tasks: f.repos.NodeAgentTask, Users: f.repos.User, Clients: f.repos.PSPClient, Nodes: f.repos.Node, Settings: f.repos.Settings, Panels: f.repos.XUIPanel})
+	f.coordinator, err = nodesync.New(nodesync.Options{Desired: f.repos.NativeDesired, Agents: f.repos.NodeAgent, Issues: f.repos.NodeAgentIssue, Tasks: f.repos.NodeAgentTask, Users: f.repos.User, Clients: f.repos.PSPClient, Nodes: f.repos.Node, Settings: f.repos.ScopedSettings, Panels: f.repos.XUIPanel})
 	must(t, err, "production node coordinator")
 	registry := paneladapter.NewRegistry()
 	must(t, registry.Register(domain.PanelKind3XUI, func(p *domain.Panel) (ports.PanelClient, error) { return xui.New(p) }), "old adapter registry")
@@ -387,7 +387,7 @@ func (f *fixture) waitReady() {
 		all := err == nil && e2 == nil && e3 == nil && a.LastSeen != nil && a.LastSeen.After(f.requiredSeenAfter) && time.Since(*a.LastSeen) < 90*time.Second && len(attachments) == 1 && attachments[0].Applied() && len(streams) == 3
 		if a != nil {
 			for _, s := range streams {
-				all = all && s.DesiredVersion > 0 && s.AppliedVersion == s.DesiredVersion && s.AppliedEpoch == a.Epoch && s.AppliedETag == s.DesiredETag
+				all = all && s.DesiredVersion > 0 && s.AppliedEpoch == a.Epoch && s.Converged()
 			}
 		}
 		if all {
@@ -426,7 +426,7 @@ func (f *fixture) readinessDiagnostics() {
 			if !s.Stream.Valid() {
 				continue
 			}
-			f.t.Logf("readiness diagnostics: stream=%s desired=%d applied=%d applied_epoch=%d etag_matches=%t", s.Stream, s.DesiredVersion, s.AppliedVersion, s.AppliedEpoch, s.DesiredETag != "" && s.DesiredETag == s.AppliedETag)
+			f.t.Logf("readiness diagnostics: stream=%s desired=%d applied=%d applied_epoch=%d converged=%t", s.Stream, s.DesiredVersion, s.AppliedVersion, s.AppliedEpoch, s.Converged())
 		}
 	}
 	attachments, err := f.repos.PSPClient.ListInbounds(f.ctx, f.clientID)
