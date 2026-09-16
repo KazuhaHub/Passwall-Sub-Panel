@@ -1106,7 +1106,7 @@ func (s *Service) NativePanelSnapshot(ctx context.Context, panelID int64) (*port
 	}
 	report, receivedAtMS, ok := s.fullReport(agent.AgentID)
 	if !ok {
-		return nil, domain.ErrNotFound
+		return nil, ports.ErrNativePanelSnapshotMissing
 	}
 	settings, err := s.settings.Load(ctx, ports.UISettings{
 		NodePollSeconds: defaultNextPollSeconds, FullReportSeconds: defaultFullReportSecs,
@@ -1123,14 +1123,14 @@ func (s *Service) NativePanelSnapshot(ctx context.Context, panelID int64) (*port
 	// Three missed polls absorb ordinary jitter without letting a dead agent's
 	// last snapshot look live forever.
 	if agent.OfflineAt(now, 3*time.Duration(pollSeconds)*time.Second) {
-		return nil, domain.ErrNotFound
+		return nil, ports.ErrNativePanelAgentOffline
 	}
 	// Full enumerations are independently paced. Allow one additional poll of
 	// scheduling/network jitter beyond the effective discrete full cadence;
 	// after that, absent objects and counters are unknowable, not healthy zeroes.
 	fullFreshnessSeconds := effectiveFullReportPeriod(settings.FullReportSeconds, pollSeconds) + pollSeconds
 	if fullReportStale(receivedAtMS, now, fullFreshnessSeconds) {
-		return nil, domain.ErrNotFound
+		return nil, ports.ErrNativePanelSnapshotStale
 	}
 	desired, err := s.desired.Load(ctx, panelID)
 	if err != nil {

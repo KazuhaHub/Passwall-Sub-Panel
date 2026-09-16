@@ -3,6 +3,7 @@ package ports
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 )
@@ -18,6 +19,15 @@ var ErrXUIEndpointUnsupported = errors.New("3X-UI endpoint unsupported on this p
 // an optional operation. It is distinct from a version-gated endpoint missing
 // on an otherwise capable backend.
 var ErrPanelCapabilityUnsupported = errors.New("panel capability unsupported")
+
+// Native snapshot unavailability is split by cause so callers never have to
+// infer "empty" from an unreadable native panel. Each sentinel still wraps
+// domain.ErrNotFound for existing classification at transport/service edges.
+var (
+	ErrNativePanelSnapshotMissing = fmt.Errorf("native panel has no cached full report: %w", domain.ErrNotFound)
+	ErrNativePanelAgentOffline    = fmt.Errorf("native panel agent is offline: %w", domain.ErrNotFound)
+	ErrNativePanelSnapshotStale   = fmt.Errorf("native panel full report is stale: %w", domain.ErrNotFound)
+)
 
 // PanelCapability is a stable, serialisable feature identifier. The admin API
 // exposes these values so clients can hide actions a backend cannot perform.

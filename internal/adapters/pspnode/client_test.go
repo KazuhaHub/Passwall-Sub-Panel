@@ -14,17 +14,6 @@ type snapshotReader struct {
 	err      error
 }
 
-func TestGetServerStatusDoesNotHideMissingAgentReport(t *testing.T) {
-	client, err := New(&domain.Panel{ID: 9, Kind: domain.PanelKindPSP},
-		snapshotReader{err: domain.ErrNotFound}, nodeRepo{}, &agentRepo{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := client.GetServerStatus(context.Background()); !errors.Is(err, domain.ErrNotFound) {
-		t.Fatalf("missing report status error = %v", err)
-	}
-}
-
 func (r snapshotReader) NativePanelSnapshot(context.Context, int64) (*ports.NativePanelSnapshot, error) {
 	return r.snapshot, r.err
 }
@@ -54,6 +43,71 @@ func (r *agentRepo) UpdateCoreSelection(_ context.Context, _ string, engine doma
 }
 
 func (r nodeRepo) List(context.Context) ([]*domain.Node, error) { return r.nodes, nil }
+
+func TestReadFacadePreservesUnavailableSnapshotAndObservedEmpty(t *testing.T) {
+	reads := map[string]func(*Client) error{
+		"inbounds": func(client *Client) error {
+			_, err := client.ListInbounds(context.Background())
+			return err
+		},
+		"slim-inbounds": func(client *Client) error {
+			_, err := client.ListInboundsSlim(context.Background())
+			return err
+		},
+		"client": func(client *Client) error {
+			_, err := client.GetClient(context.Background(), "client@psp")
+			return err
+		},
+		"client-inbounds": func(client *Client) error {
+			_, err := client.ListClientInbounds(context.Background())
+			return err
+		},
+		"live-ips": func(client *Client) error {
+			_, err := client.ListLiveClientIPs(context.Background())
+			return err
+		},
+		"status": func(client *Client) error {
+			_, err := client.GetServerStatus(context.Background())
+			return err
+		},
+	}
+	conditions := map[string]error{
+		"missing": ports.ErrNativePanelSnapshotMissing,
+		"offline": ports.ErrNativePanelAgentOffline,
+		"stale":   ports.ErrNativePanelSnapshotStale,
+	}
+	for condition, unavailable := range conditions {
+		client, err := New(&domain.Panel{ID: 9, Kind: domain.PanelKindPSP},
+			snapshotReader{err: unavailable}, nodeRepo{}, &agentRepo{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for name, read := range reads {
+			t.Run(condition+"/"+name, func(t *testing.T) {
+				err := read(client)
+				if !errors.Is(err, unavailable) || !errors.Is(err, domain.ErrNotFound) {
+					t.Fatalf("unavailable snapshot error = %v", err)
+				}
+			})
+		}
+	}
+
+	empty := &ports.NativePanelSnapshot{
+		Clients: make(map[string]ports.ClientDetail), LiveClientIPs: make(map[string][]string),
+	}
+	client, err := New(&domain.Panel{ID: 9, Kind: domain.PanelKindPSP},
+		snapshotReader{snapshot: empty}, nodeRepo{}, &agentRepo{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, read := range reads {
+		t.Run("observed-empty/"+name, func(t *testing.T) {
+			if err := read(client); err != nil {
+				t.Fatalf("observed empty snapshot rejected: %v", err)
+			}
+		})
+	}
+}
 
 func TestClientProjectsObservedSnapshotAndKeepsWritesAsIntent(t *testing.T) {
 	reader := snapshotReader{snapshot: &ports.NativePanelSnapshot{

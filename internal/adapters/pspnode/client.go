@@ -104,17 +104,9 @@ func (c *Client) InstallCoreEngine(ctx context.Context, engine domain.NodeCoreEn
 func (c *Client) ApplyIsAsynchronous() bool { return true }
 
 func (c *Client) snapshot(ctx context.Context) (*ports.NativePanelSnapshot, error) {
-	snapshot, err := c.reader.NativePanelSnapshot(ctx, c.panelID)
-	if errors.Is(err, domain.ErrNotFound) {
-		return &ports.NativePanelSnapshot{
-			Clients:       make(map[string]ports.ClientDetail),
-			LiveClientIPs: make(map[string][]string),
-		}, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	return snapshot, nil
+	// Missing, offline and stale all mean "no reading", never "observed
+	// empty". Preserve the coordinator's reason for every facade caller.
+	return c.reader.NativePanelSnapshot(ctx, c.panelID)
 }
 
 func (c *Client) ListInbounds(ctx context.Context) ([]ports.Inbound, error) {
@@ -224,11 +216,7 @@ func (c *Client) BulkCreateClients(_ context.Context, items []ports.BulkCreateCl
 }
 
 func (c *Client) GetServerStatus(ctx context.Context) (*ports.ServerStatus, error) {
-	// Unlike list/read compatibility calls, status must not convert "no full
-	// report yet" into an empty successful snapshot. The admin connection test
-	// and health indicator need offline to remain distinguishable from a live
-	// zero-inbound node.
-	snapshot, err := c.reader.NativePanelSnapshot(ctx, c.panelID)
+	snapshot, err := c.snapshot(ctx)
 	if err != nil {
 		return nil, err
 	}

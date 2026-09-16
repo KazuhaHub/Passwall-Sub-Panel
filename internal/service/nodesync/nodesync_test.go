@@ -327,6 +327,9 @@ func TestSyncMintsDocumentsThenIngestsAppliedObservation(t *testing.T) {
 	}
 	invalidations := 0
 	service.SetRenderInvalidator(func() { invalidations++ })
+	if _, err := service.NativePanelSnapshot(ctx, agent.PanelID); !errors.Is(err, ports.ErrNativePanelSnapshotMissing) || !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("missing full report error = %v", err)
+	}
 
 	first, err := service.Sync(ctx, nodeprotocol.NodeReport{
 		AgentID: agent.AgentID, ProtocolVersion: nodeprotocol.ProtocolVersion1,
@@ -438,6 +441,9 @@ func TestSyncMintsDocumentsThenIngestsAppliedObservation(t *testing.T) {
 		t.Fatal(err)
 	}
 	currentNow = now.Add(46 * time.Second)
+	if _, err := service.NativePanelSnapshot(ctx, agent.PanelID); !errors.Is(err, ports.ErrNativePanelAgentOffline) || !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("offline agent snapshot error = %v", err)
+	}
 	staleHave := make(map[string]nodeprotocol.StreamState, len(have))
 	for stream, state := range have {
 		staleHave[stream] = state
@@ -480,7 +486,7 @@ func TestSyncMintsDocumentsThenIngestsAppliedObservation(t *testing.T) {
 	// cadence and one 15s poll of jitter allowance it must no longer back the
 	// panel read facade, even though the partial heartbeat at +46s is still live.
 	currentNow = now.Add(61 * time.Second)
-	if _, err := service.NativePanelSnapshot(ctx, 9); !errors.Is(err, domain.ErrNotFound) {
+	if _, err := service.NativePanelSnapshot(ctx, 9); !errors.Is(err, ports.ErrNativePanelSnapshotStale) || !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("stale full report remained readable: %v", err)
 	}
 	currentNow = now
