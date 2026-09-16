@@ -83,7 +83,7 @@ func TestSyncDurableReceiptsSurviveLaterIssueAndStreamFailures(t *testing.T) {
 	agents := &receiptAppliedAgentRepo{NodeAgentRepo: repos.NodeAgent}
 	service, err := New(Options{
 		Desired: repos.NativeDesired, Agents: agents, Issues: issues, Tasks: repos.NodeAgentTask,
-		Users: repos.User, Clients: repos.PSPClient, Nodes: repos.Node, Settings: repos.Settings,
+		Users: repos.User, Clients: repos.PSPClient, Nodes: repos.Node, Settings: repos.ScopedSettings,
 		Now: func() time.Time { return now },
 	})
 	if err != nil {
@@ -148,7 +148,7 @@ func TestSyncNeverOfferedReceiptClosesDispatchWithoutReleasingQuota(t *testing.T
 	now := time.Date(2026, 9, 12, 13, 0, 0, 0, time.UTC)
 	service, err := New(Options{
 		Desired: repos.NativeDesired, Agents: repos.NodeAgent, Issues: repos.NodeAgentIssue, Tasks: repos.NodeAgentTask,
-		Users: repos.User, Clients: repos.PSPClient, Nodes: repos.Node, Settings: repos.Settings,
+		Users: repos.User, Clients: repos.PSPClient, Nodes: repos.Node, Settings: repos.ScopedSettings,
 		Now: func() time.Time { return now },
 	})
 	if err != nil {

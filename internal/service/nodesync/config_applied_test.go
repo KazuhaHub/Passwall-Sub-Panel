@@ -73,7 +73,7 @@ func newConfigAppliedFixture(t *testing.T) *configAppliedFixture {
 	f := &configAppliedFixture{db: db, repos: &repos, agent: agent, node: node, now: now}
 	f.service, err = New(Options{
 		Desired: repos.NativeDesired, Agents: repos.NodeAgent, Issues: repos.NodeAgentIssue, Tasks: repos.NodeAgentTask,
-		Users: repos.User, Clients: repos.PSPClient, Nodes: repos.Node, Settings: repos.Settings,
+		Users: repos.User, Clients: repos.PSPClient, Nodes: repos.Node, Settings: repos.ScopedSettings,
 		Now: func() time.Time { return f.now },
 	})
 	if err != nil {

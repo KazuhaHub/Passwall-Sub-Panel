@@ -175,7 +175,7 @@ func TestSyncDispatchesDurableTasksOnlyWithBothCapabilitiesAndAcceptsReplay(t *t
 	issues := &switchableIssueRepo{NodeAgentIssueRepo: repos.NodeAgentIssue}
 	service, err := New(Options{
 		Desired: repos.NativeDesired, Agents: repos.NodeAgent, Issues: issues, Tasks: repos.NodeAgentTask,
-		Users: repos.User, Clients: repos.PSPClient, Nodes: repos.Node, Settings: repos.Settings,
+		Users: repos.User, Clients: repos.PSPClient, Nodes: repos.Node, Settings: repos.ScopedSettings,
 		Now: func() time.Time { return now },
 	})
 	if err != nil {
@@ -319,7 +319,7 @@ func TestSyncMintsDocumentsThenIngestsAppliedObservation(t *testing.T) {
 	currentNow := now
 	service, err := New(Options{
 		Desired: repos.NativeDesired, Agents: repos.NodeAgent, Issues: repos.NodeAgentIssue, Tasks: repos.NodeAgentTask, Users: repos.User,
-		Clients: repos.PSPClient, Nodes: repos.Node, Settings: repos.Settings,
+		Clients: repos.PSPClient, Nodes: repos.Node, Settings: repos.ScopedSettings,
 		Now: func() time.Time { return currentNow },
 	})
 	if err != nil {
