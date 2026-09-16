@@ -105,7 +105,7 @@ type Service struct {
 // model. Implemented by clientprov.Service; kept as a local interface so the
 // user service stays decoupled and nil-tolerant. See SyncUser.
 type PSPClientProvisioner interface {
-	SyncUser(ctx context.Context, userID int64, userUUID string, rules domain.EmailRules, desiredNodes []*domain.Node) (pruned map[int64][]string, err error)
+	SyncUser(ctx context.Context, userID int64, userUUID string, rules domain.EmailRules, desiredNodes []*domain.Node) (retired map[int64][]string, err error)
 }
 
 // SetPSPProvisioner late-binds the v3.9.0 shadow dual-write (mirrors the other
@@ -2147,10 +2147,10 @@ func (s *Service) ResyncMembership(ctx context.Context, userID int64) error {
 	// ones — and delete the user's legacy per-node clients. Render derives the
 	// SAME credentials the shared client stores (silent), so this never disrupts a
 	// live connection. (Replaces the old per-node ADD/UPDATE/DEL ownership diff.)
-	var prunedClients map[int64][]string
+	var retiredClients map[int64][]string
 	if s.psp != nil {
-		pruned, err := s.psp.SyncUser(ctx, u.ID, u.UUID, rules, desiredNodes)
-		prunedClients = pruned
+		retired, err := s.psp.SyncUser(ctx, u.ID, u.UUID, rules, desiredNodes)
+		retiredClients = retired
 		if err != nil {
 			if firstErr == nil {
 				firstErr = fmt.Errorf("psp dual-write: %w", err)
@@ -2196,11 +2196,11 @@ func (s *Service) ResyncMembership(ctx context.Context, userID int64) error {
 		}
 	}
 	if provisioned && lifeErr == nil && s.migrator != nil {
-		// The merged/current shared client(s) are now live, so it's safe to remove
-		// the 3X-UI clients the dual-write pruned (old per-class clients the v3.9.0
-		// merge collapsed, or clients on a panel/node the user left). Same ordering
-		// rationale as the legacy delete: new client up first, then drop the old.
-		s.deletePrunedSharedClients(ctx, prunedClients)
+		// The merged/current shared client(s) are now live (or an empty plan has
+		// deliberately detached every local attachment), so it is safe to remove
+		// the retired upstream projections. Stable counter rows for an empty plan
+		// remain in PSP for a later re-add.
+		s.deleteRetiredSharedClients(ctx, retiredClients)
 		if err := s.migrator.DeleteLegacyForUser(ctx, u.ID); err != nil {
 			if firstErr == nil {
 				firstErr = fmt.Errorf("delete legacy: %w", err)
@@ -2211,21 +2211,21 @@ func (s *Service) ResyncMembership(ctx context.Context, userID int64) error {
 	return firstErr
 }
 
-// deletePrunedSharedClients removes from 3X-UI the shared clients whose psp_client
-// rows the dual-write pruned (clientprov.Sync returns their emails per panel). The
-// DB row is already gone; this deletes the now-orphaned 3X-UI client so a merge or
-// a node/panel removal leaves no stray client. Best-effort: a panel that's
-// unreachable is retried on the next resync. Delete is by email (panel-wide).
-func (s *Service) deletePrunedSharedClients(ctx context.Context, pruned map[int64][]string) {
-	for panelID, emails := range pruned {
+// deleteRetiredSharedClients removes live upstream projections that the desired
+// plan no longer serves. Their DB rows may have been pruned after a repartition,
+// or retained without attachments to preserve counters across an empty node
+// intersection. Best-effort: a panel that's unreachable is retried on the next
+// resync. Delete is by email (panel-wide).
+func (s *Service) deleteRetiredSharedClients(ctx context.Context, retired map[int64][]string) {
+	for panelID, emails := range retired {
 		cli, err := s.pool.Get(panelID)
 		if err != nil {
-			log.Warn("delete pruned shared client: pool get", "panel_id", panelID, "err", err)
+			log.Warn("delete retired shared client: pool get", "panel_id", panelID, "err", err)
 			continue
 		}
 		for _, email := range emails {
 			if err := cli.DelClientByEmail(ctx, email); err != nil {
-				log.Warn("delete pruned shared client", "panel_id", panelID, "email", email, "err", err)
+				log.Warn("delete retired shared client", "panel_id", panelID, "email", email, "err", err)
 			}
 		}
 	}
