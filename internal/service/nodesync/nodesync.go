@@ -40,7 +40,7 @@ type Service struct {
 	users    ports.UserRepo
 	clients  ports.PSPClientRepo
 	nodes    ports.NodeRepo
-	settings ports.SettingsReader
+	settings ports.ScopedSettings
 	panels   ports.XUIPanelRepo
 
 	agentLocks keyedmutex.Map[string]
@@ -72,7 +72,7 @@ type Options struct {
 	Users    ports.UserRepo
 	Clients  ports.PSPClientRepo
 	Nodes    ports.NodeRepo
-	Settings ports.SettingsReader
+	Settings ports.ScopedSettings
 	Panels   ports.XUIPanelRepo
 	Now      func() time.Time
 }
@@ -754,6 +754,7 @@ func (s *Service) buildDirectives(ctx context.Context, agent *domain.NodeAgent, 
 		Quota:            make([]nodeprotocol.QuotaEntry, 0, len(snapshot.Clients)),
 	}
 	users := make(map[int64]*domain.User)
+	emergencyQuotaGBByUser := make(map[int64]float64)
 	for _, desired := range snapshot.Clients {
 		client := desired.Client
 		if client == nil {
@@ -773,7 +774,39 @@ func (s *Service) buildDirectives(ctx context.Context, agent *domain.NodeAgent, 
 			baseline = nonNegativeSum(counter.UpBytes, counter.DownBytes)
 		}
 		entry := nodeprotocol.QuotaEntry{Client: nodeprotocol.NewClientKey(client.ID), BaselineBytes: baseline}
-		if user.TrafficLimitBytes > 0 {
+		if user.EmergencyActive(now) {
+			// Emergency access deliberately overrides an already-exhausted normal
+			// period. Re-measure from the lifetime snapshot taken when the window
+			// opened, and include fleet usage observed by agents but not yet folded
+			// into the user row. This is the native equivalent of user.emergencyFloor.
+			//
+			// A zero emergency quota is an intentional unlimited window, represented
+			// by nil headroom. A finite quota still fails closed until this agent has
+			// supplied its current cumulative counter, exactly like the normal limit.
+			quotaGB, loaded := emergencyQuotaGBByUser[user.ID]
+			if !loaded {
+				effective, loadErr := s.settings.LoadForUser(ctx, user, ports.UISettings{
+					EmergencyAccessQuotaGB: settings.EmergencyAccessQuotaGB,
+				})
+				if loadErr != nil {
+					return nodeprotocol.DirectivesBody{}, nodeprotocol.Envelope{}, fmt.Errorf("nodesync: load emergency settings for user %d: %w", user.ID, loadErr)
+				}
+				quotaGB = effective.EmergencyAccessQuotaGB
+				emergencyQuotaGBByUser[user.ID] = quotaGB
+			}
+			if quotaGB > 0 {
+				remaining := int64(0)
+				if hasFull && counterKnown {
+					quotaBytes := int64(quotaGB * float64(int64(1)<<30))
+					used := user.LifetimeTotalBytes - user.EmergencyBaselineBytes
+					if used < 0 {
+						used = 0
+					}
+					remaining = saturatingSub(quotaBytes, saturatingAdd(used, pendingByUser[user.ID]))
+				}
+				entry.HeadroomBytes = int64Pointer(remaining)
+			}
+		} else if user.TrafficLimitBytes > 0 {
 			// A limited client whose current cumulative counter is absent from a
 			// full report is closed. An explicitly reported counter remains known
 			// when Present=false: that flag means the local quota gate omitted the
@@ -787,6 +820,11 @@ func (s *Service) buildDirectives(ctx context.Context, agent *domain.NodeAgent, 
 				remaining = saturatingSub(user.TrafficLimitBytes, saturatingAdd(user.PeriodUsed(), pendingByUser[user.ID]))
 			}
 			entry.HeadroomBytes = int64Pointer(remaining)
+		}
+		// The emergency window changes the current grant, not the next regular
+		// period. Keep the advance rollover authorization so an offline panel does
+		// not leave the user closed when a new paid period begins.
+		if user.TrafficLimitBytes > 0 {
 			if periodEnd := nextPeriodEnd(periodNow, user.TrafficResetPeriod); !periodEnd.IsZero() {
 				entry.PeriodEndsAtMS = periodEnd.UnixMilli()
 				entry.NextPeriodHeadroomBytes = int64Pointer(user.TrafficLimitBytes)

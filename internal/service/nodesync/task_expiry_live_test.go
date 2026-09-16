@@ -99,7 +99,7 @@ func TestLive_RealNodeTaskExpiryContract(t *testing.T) {
 			coordinator, err := nodesync.New(nodesync.Options{
 				Desired: repos.NativeDesired, Agents: repos.NodeAgent, Issues: repos.NodeAgentIssue,
 				Tasks: repos.NodeAgentTask, Users: repos.User, Clients: repos.PSPClient,
-				Nodes: repos.Node, Panels: repos.XUIPanel, Settings: repos.Settings,
+				Nodes: repos.Node, Panels: repos.XUIPanel, Settings: repos.ScopedSettings,
 				Now: func() time.Time { return time.UnixMilli(nowMS.Load()) },
 			})
 			if err != nil {
