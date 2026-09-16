@@ -11,7 +11,8 @@ PSP 通过 `/panel/api/*` 对接 3X-UI 面板。本文档维护两件事：
 |---|---|---|---|
 | **v4.0.0-beta.9+ / v4 stable** | **3.4.2** | **3.8.5** | beta.9 已包含负数 `subSortIndex` 修复及 REALITY ML-KEM 订阅适配；schema-v3 overlay 精确区分 prerelease |
 | **v4.0.0-beta.1–beta.8** | **3.4.2** | 3.7.0 | 历史二进制缺少 3X-UI 3.8.x 所需修复，不随远程清单误抬上限 |
-| **v3.9.1+** | **3.4.2** | 3.7.0 | 新增由所选节点执行的 REALITY 目标扫描；依赖 3.4.2 首次提供的 `/server/scanRealityTargets`，不做 PSP 本机回退 |
+| **v3.9.3+** | **3.4.2** | **3.8.5** | V3 稳定维护线；补齐 Xray 26.9.8+ REALITY ML-KEM 订阅处理，并保留 3X-UI 3.8.x 的负数 `subSortIndex` |
+| **v3.9.1–v3.9.2** | **3.4.2** | 3.7.0 | 新增由所选节点执行的 REALITY 目标扫描；旧发行版没有 3.8.x 所需的两项兼容修复 |
 | **v3.9.0** | **3.3.0** | 3.7.0 | 共享 client 模型历史版本；保留其原始 3.3.0 floor，不因 3.9.1 新功能反向收紧 |
 | **v3.6.2 – v3.8.x** | **3.2.0** | 3.7.0 | 每节点 client(一级 `/clients/*` API),**硬切 ≥ 3.2.0**;per-node 路径是 shared 路径子集 |
 | v3.6.0 – v3.6.1 | 3.1.0 | 3.1.0 | 仍走 inbound-scoped 端点;别跑在 3.2.0 上,先升 PSP 到 v3.6.2 |
@@ -37,28 +38,17 @@ PSP 通过 `/panel/api/*` 对接 3X-UI 面板。本文档维护两件事：
 
 ## 历史兼容性事件
 
-### 2026-09-16 UTC / 3X-UI 3.8.5 与 S-UI 1.6.3 实机复核
+### 2026-09-16 UTC / 3X-UI 3.8.5、S-UI 1.6.3 与 V3 稳定维护线
 
-3X-UI [v3.8.5](https://github.com/MHSanaei/3x-ui/releases/tag/v3.8.5) 保持
-Xray 26.9.9，主要修复 3.8.0 后的面板、节点和内核运行问题；PSP 使用的
-`/panel/api` 路由没有删除或改形。用 tag `7ef22f94` 构建 darwin/arm64 临时面板，
-PSP checkout `2440112` 的 `TestLive_XUISurface`、`TestLive_XUIConnectionLimits`
-与 `TestLive_XUIRealityScan` 全部通过，覆盖状态、更新信息、证书路径、入站完整生命周期、
-共享/旧式客户端生命周期、批量操作、连接上限和 REALITY 扫描。版本读回
-3.8.5 / 26.9.9，临时对象已清理。无需新增适配器代码。
+V3 从 `v3.9.2` 分叉到长期维护分支 `release/v3`。V3 只接受兼容性和稳定性修复，数据库模型保持不变，不包含 V4 的原生节点后端或迁移。
 
-PSP beta.9 已包含 3.8.x 所需的负数 `subSortIndex` 保留修复，beta.1–beta.8
-没有。原 schema-v2 清单会丢弃 `-beta.N` 后缀，无法安全抬上限。本次保留
-`v4.json` 的保守范围供旧二进制读取，并增加 `v4-ranges.json` schema v3 overlay；
-新构建按完整 SemVer 将 beta.9+ 与 stable 认证到 3.8.5，历史 beta 仍停在 3.7.0。
-v3 因缺少 REALITY ML-KEM 订阅适配仍保持 3.7.0。
+3X-UI [v3.8.5](https://github.com/MHSanaei/3x-ui/releases/tag/v3.8.5) 保持 Xray 26.9.9。面板 API 与 PSP 既有适配器兼容，但 Xray 26.9.9 要求 REALITY ClientHello 以 `X25519MLKEM768` key share 开头。V3.9.3 回移订阅处理：Mihomo 根据缓存的 Xray 版本，仅对 26.9.8+ 的 REALITY 节点输出 `client-fingerprint: chrome` 与 `reality-opts.support-x25519mlkem768: true`；当前 sing-box 没有等价开关，因此省略这类已知不可用节点。另将入站更新的 `subSortIndex` 保留条件从正数改为非零，覆盖 3.8.x 新允许的负排序。
 
-S-UI [v1.6.3](https://github.com/alireza0/s-ui/releases/tag/v1.6.3) 将 sing-box
-升级到 1.14.1，新增实时会话查询/断开和 Snell 多用户支持，并修复客户端重新启用后
-被流量重置逻辑再次停用的问题。用 tag `13abbdc4` 在现有 1.6.2 scratch 数据库上启动，
-`TestLive_SUISurface` 全部通过：Token、状态、入站及客户端增删改查/挂载均兼容。
-新增 API 为附加项，Client/Inbound 存储形状未变，因此无需修改 S-UI 适配器；v3/v4
-已测上限均抬到 1.6.3。验证未覆盖完整代理流量或配额执法。
+本次用 **V3 分支本身**连接 tag `7ef22f94` 构建的真实 3X-UI 3.8.5 / Xray 26.9.9。完整接口、REALITY 扫描、连接限制、五组流量底线、批量启停、共享客户端迁移、批量删除和并发写入测试全部通过；共享客户端测试使用两个真实禁用入站，无跳过项。面板回报 `panelVersion=3.8.5`、`xrayVersion=26.9.9`，扫描确认 `CurveID=X25519MLKEM768`。因此只有 v3.9.3+ 的新窄范围将 `max_tested_xui` 提升到 3.8.5；v3.9.1–v3.9.2 继续保持 3.7.0。
+
+V4 beta.9 已包含同类修复。原 schema-v2 清单会丢弃 `-beta.N` 后缀，因此 `v4.json` 保持保守范围供旧二进制读取，`v4-ranges.json` schema-v3 overlay 则让新构建按完整 SemVer 将 beta.9+ 与 stable 认证到 3.8.5；历史 beta 仍停在 3.7.0。
+
+S-UI [v1.6.3](https://github.com/alireza0/s-ui/releases/tag/v1.6.3) 将 sing-box 升级到 1.14.1，新增实时会话查询/断开和 Snell 多用户支持，并修复客户端重新启用后被流量重置逻辑再次停用的问题。同一 V3 分支在由 1.6.2 数据库升级而来的真实 1.6.3 面板上通过 `TestLive_SUISurface` 和 `TestLive_SUIBulkSetEnabled`：Token、状态、入站及客户端完整生命周期、批量启停与凭据保留均兼容。新增 API 为附加项，Client/Inbound 存储形状未变，无需修改 S-UI 适配器；v3/v4 已测上限均抬到 1.6.3。验证未覆盖完整代理流量。
 
 ### 2026-09-14 UTC / 3X-UI 3.8.0 复核 → 需要 PSP 修复，发布上限暂保持 3.7.0
 

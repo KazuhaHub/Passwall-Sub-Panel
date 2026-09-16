@@ -1,5 +1,5 @@
 {
-  "_doc": "PSP × 3X-UI compatibility ranges for the v3.x PSP series. PSP pulls THIS file (docs/compat/v3.json) on demand from any v3.x build because it parses its own version, extracts major=3, and fetches the matching v<MAJOR>.json. Per-major split (v3.6.0-beta.7) keeps each file naturally bounded — when PSP ships v4.0, create v4.json and leave this file frozen. Inside one file, entries is an ordered list and matching is FIRST-MATCH-WINS, so put narrower / newer ranges earlier. Bumping max_tested_xui here ships PSP a wider tested range with zero PSP release. See docs/3xui-compat.md for the human procedure when validating a new 3X-UI release.",
+  "_doc": "PSP × 3X-UI compatibility ranges for the v3.x PSP series. PSP pulls THIS file (docs/compat/v3.json) on demand from any v3.x build because it parses its own version, extracts major=3, and fetches the matching v<MAJOR>.json. V3 code is maintained on release/v3, while this manifest remains on main because deployed V3 binaries fetch it from there. Inside one file, entries is an ordered list and matching is FIRST-MATCH-WINS, so put narrower / newer ranges earlier. Bumping max_tested_xui here ships PSP a wider tested range with zero PSP release. See docs/3xui-compat.md for the human procedure when validating a new 3X-UI release.",
   "schema_version": 2,
   "major": 3,
   "updated_at": "2026-09-16",
@@ -23,12 +23,12 @@
     "3.8.0": {
       "severity": "warning",
       "affects_xray": true,
-      "text": "3X-UI 3.8.0 会升级内置 Xray-core 到 26.9.9、重启内核，并迁移全局 Xray 模板中的 outbound/DNS 配置。26.9.8+ 的 REALITY 要求 ML-KEM-first；已发布 PSP v3 不含当前 v4 的订阅适配，不能据此宣称 v3 已兼容 3.8.0。当前源码复核另发现：未含本次修复的 PSP 编辑负数 subSortIndex 的入站会将其排序重置为 1；修复需包含于所用 PSP 构建。兼容上限暂保持 3.7.0。新增 TUIC sidecar、AmneziaWG 等功能不属于 PSP 已支持的 3X-UI 功能。"
+      "text": "3X-UI 3.8.0 会升级内置 Xray-core 到 26.9.9、重启内核，并迁移全局 Xray 模板中的 outbound/DNS 配置。Xray 26.9.8+ 的 REALITY 要求 ML-KEM-first；PSP v3.9.3 起会为 Mihomo 输出 chrome 指纹及 support-x25519mlkem768，并从 sing-box 输出中省略当前已知不兼容的 REALITY 节点。3X-UI 3.8.x 允许负数 subSortIndex，v3.9.3 会在入站编辑时保留该值。新增 TUIC sidecar、AmneziaWG 等功能不属于 PSP 已支持的 3X-UI 功能。"
     },
     "3.8.5": {
       "severity": "warning",
       "affects_xray": true,
-      "text": "3X-UI 3.8.5 保持 Xray-core 26.9.9，并修复 3.8.0 后续问题；当前 v4 适配器实机验证通过。但已发布 PSP v3 缺少 26.9.8+ REALITY 订阅处理及负数 subSortIndex 修复，因此 v3 的认证上限仍为 3.7.0。请先升级到 PSP v4.0.0-beta.9 或更新版本，再升级 3X-UI。"
+      "text": "3X-UI 3.8.5 保持 Xray-core 26.9.9，并修复 3.8.0 后续问题。PSP v3.9.3 已针对该版本完成适配器实机验证及 REALITY ML-KEM、负数 subSortIndex 回归测试；更早的 PSP v3 版本仍只认证到 3X-UI 3.7.0。升级 3X-UI 前请先升级 PSP。"
     }
   },
   "sui_entries_doc": "S-UI counterpart of `entries` (version.CheckSUI). Same first-match-wins matching on [psp_min, psp_max]; fields are min_sui (OPTIONAL) and max_tested_sui (REQUIRED). Unlike min_xui there is no compiled MinSUI backstop to fall back on — see internal/version/compat_sui.go for why that asymmetry is deliberate. While no row matches the running build, ActiveMaxTestedSUI() is \"\", CheckSUI returns unknown, and the Servers page shows NO compat badge for S-UI panels (identical to the behaviour before S-UI gating existed). Adding a verified row turns the gate on for every deployed PSP of that version range with NO PSP release, exactly like bumping max_tested_xui. TO ADD A ROW: validate a real S-UI panel against the endpoints internal/adapters/sui/*.go calls, preferably by pointing TestLive_SUISurface (internal/adapters/sui/client_live_test.go, env-gated on PSP_LIVE_SUI_URL / PSP_LIVE_SUI_TOKEN) at it so the adapter itself is what gets exercised, then append {psp_min, psp_max, max_tested_sui, notes} and state in notes whether the result is LIVE-PANEL VERIFIED or SOURCE-VERIFIED, mirroring the evidence standard the entries below hold themselves to. Do NOT populate this from release notes alone. Mind the pre-release caveat: parseSemver strips -beta.N, so a range cannot separate a fixed beta from a broken one inside the same patch line — when a verification depends on an unreleased adapter fix, start psp_min at the patch release that carries it.",
@@ -37,7 +37,7 @@
       "psp_min": "v3.9.2",
       "psp_max": "v3.99.99",
       "max_tested_sui": "1.6.3",
-      "notes": "CEILING 1.6.2 -> 1.6.3 LIVE-PANEL VERIFIED (2026-09-16 UTC): PSP main at 2440112 passed TestLive_SUISurface against S-UI tag 13abbdc4 and sing-box 1.14.1 on darwin/arm64 after upgrading the existing 1.6.2 scratch database. Token authentication, status, inbound/client create-read-update-attach-detach-delete and cleanup all passed. Source review found no removed PSP-used route or changed Client/Inbound storage shape: sessions and closeSessions are additive, Snell multi-user support adds a protocol branch, and the reset-traffic fix stays inside S-UI. No production adapter changes were required. This v3 range inherits the unchanged adapter contract; no historical v3 release binary, full proxy traffic, or quota enforcement run was performed. No S-UI floor or additional optional capability is claimed. Historical 1.6.0-1.6.2 evidence remains in repository history and docs/3xui-compat.md."
+      "notes": "CEILING 1.6.3 LIVE-PANEL VERIFIED ON THE V3 MAINTENANCE BRANCH (2026-09-16 UTC). The exact V3 code passed TestLive_SUISurface and TestLive_SUIBulkSetEnabled against S-UI 1.6.3 / sing-box 1.14.1 after starting from the existing 1.6.2 scratch database. Token authentication, status, inbound and client create-read-update-attach-detach-delete, bulk disable/re-enable, credential preservation, missing-client handling and cleanup all passed. Source review found no removed PSP-used route or changed Client/Inbound storage shape: traffic sessions and closeSessions are additive, Snell multi-user support adds a protocol branch, and the reset-traffic fix remains internal to S-UI. No production adapter change, S-UI minimum floor or additional optional capability is claimed. The v3.9.2 floor remains because that release first included the explicit links:[] required for S-UI client creation. Historical 1.4.1-1.6.2 evidence remains in repository history and docs/3xui-compat.md."
     }
   ],
   "sui_advisories_doc": "S-UI counterpart of xui_advisories (version.LookupSUIAdvisory), keyed by the S-UI version being upgraded TO. Empty for the same reason as sui_entries.",
@@ -64,6 +64,13 @@
     }
   },
   "entries": [
+    {
+      "psp_min": "v3.9.3",
+      "psp_max": "v3.99.99",
+      "min_xui": "3.4.2",
+      "max_tested_xui": "3.8.5",
+      "notes": "V3 STABLE MAINTENANCE RANGE (2026-09-16 UTC). PSP v3.9.3 backports the two compatibility changes required beyond the unchanged 3X-UI HTTP surface: Mihomo REALITY output opts in to X25519MLKEM768 for observed Xray >=26.9.8 while known-incompatible sing-box REALITY outbounds are omitted, and inbound read-modify-write preserves negative subSortIndex values accepted by 3X-UI 3.8.x. The adapter surface was live-verified against 3X-UI 3.8.5 / Xray 26.9.9 using this V3 branch; focused tests pin ML-KEM selection per cached panel Xray version, the conservative unknown-version fallback, sing-box omission, and positive/negative/absent subscription-rank behavior. The 3.4.2 floor remains required by the REALITY target scanner. Older published V3 binaries continue matching the following 3.7.0 ceiling and are not retroactively certified."
+    },
     {
       "psp_min": "v3.9.1",
       "psp_max": "v3.99.99",
