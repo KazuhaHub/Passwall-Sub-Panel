@@ -145,6 +145,7 @@ jobs:
           - v0.0.1-beta2
           - v0.0.1-beta3
           - v0.0.1-beta4
+          - v0.0.1-beta5
     steps:
       - name: Checkout trusted panel source
         uses: actions/checkout@v6

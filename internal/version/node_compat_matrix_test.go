@@ -51,7 +51,7 @@ func TestNodeV4CompatibilityMatrixMatchesSharedProtocolPolicy(t *testing.T) {
 		t.Fatalf("upgrade capability matrix = %v, shared policy = %v",
 			matrix.Features.AgentUpgradeV1.RequiredCapabilities, nodeprotocol.AgentUpgradeCapabilities())
 	}
-	wantReleases := []string{"v0.0.1-beta1", "v0.0.1-beta2", "v0.0.1-beta3", "v0.0.1-beta4"}
+	wantReleases := []string{"v0.0.1-beta1", "v0.0.1-beta2", "v0.0.1-beta3", "v0.0.1-beta4", "v0.0.1-beta5"}
 	if len(matrix.ReleasedNodes) != len(wantReleases) {
 		t.Fatalf("released node matrix has %d rows, want %d", len(matrix.ReleasedNodes), len(wantReleases))
 	}
@@ -62,7 +62,11 @@ func TestNodeV4CompatibilityMatrixMatchesSharedProtocolPolicy(t *testing.T) {
 		if i < 2 && (release.RemoteUpgrade != "unsupported" || len(release.UpgradeMethods) != 0) {
 			t.Fatalf("legacy release unexpectedly promises remote upgrade: %+v", release)
 		}
-		if i >= 2 && (release.RemoteUpgrade != "conditional" || !reflect.DeepEqual(release.UpgradeMethods, []string{"linux-systemd"})) {
+		wantMethods := []string{"linux-systemd"}
+		if release.Version == "v0.0.1-beta5" {
+			wantMethods = append(wantMethods, "managed-docker")
+		}
+		if i >= 2 && (release.RemoteUpgrade != "conditional" || !reflect.DeepEqual(release.UpgradeMethods, wantMethods)) {
 			t.Fatalf("upgrade-capable release matrix drifted: %+v", release)
 		}
 	}

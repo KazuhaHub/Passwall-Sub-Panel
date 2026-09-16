@@ -47,7 +47,10 @@ const closeName = text('common:actions.close');
 const labels = { psp: 'Passwall Node', '3xui': '3X-UI', sui: 'S-UI' };
 const servers = [
   { id: 7, panel_type: 'psp', name: 'Fixture Passwall Node', url: 'psp://fixture-agent-7',
-    capabilities: ['core.upgrade'], auth_method: '', has_api_token: false, update_channel: 'stable' },
+    capabilities: ['core.upgrade'], auth_method: '', has_api_token: false, update_channel: 'stable',
+    node_protocol_version: 1, node_effective_protocol_version: 1,
+    node_capabilities: ['task.execution.v1', 'task.expiry.v1', 'task.agent.upgrade.v1'],
+    node_compatibility: 'compatible', node_upgrade_ready: true },
   { id: 17, panel_type: '3xui', name: 'Fixture 3X-UI', url: 'https://fixture-3x.invalid',
     capabilities: ['panel.upgrade', 'core.upgrade'], auth_method: 'token', has_api_token: true },
   { id: 27, panel_type: 'sui', name: 'Fixture S-UI', url: 'https://fixture-sui.invalid',

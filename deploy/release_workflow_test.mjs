@@ -126,7 +126,7 @@ test('publisher explicitly disables every Go and Node shared dependency cache', 
 
 test('release compatibility gate covers every retained Passwall Node release', () => {
   const compatibility = job('node-compatibility')
-  for (const version of ['v0.0.1-beta1', 'v0.0.1-beta2', 'v0.0.1-beta3', 'v0.0.1-beta4']) {
+  for (const version of ['v0.0.1-beta1', 'v0.0.1-beta2', 'v0.0.1-beta3', 'v0.0.1-beta4', 'v0.0.1-beta5']) {
     assert(compatibility.includes(`          - ${version}`), `missing ${version} from release compatibility matrix`)
   }
   assert(compatibility.includes('TestLive_RealNode(AgentContract|MigratedServerContract|TaskEvidenceReceipt|TaskExpiryContract)'))
