@@ -2086,7 +2086,7 @@
       "available": "升级 Passwall Node 至 {{version}}",
       "title": "升级 Passwall Node · {{name}}",
       "warning": "升级会短暂中断此服务器的代理连接。请确认目标版本及维护时段；不会更改服务器、节点或用户身份。",
-      "requirements": "仅支持已启用升级助手的 Linux/systemd 安装。旧版本需先手动维护一次；Docker 请在宿主机更新镜像。新进程重新同步并完成配置收敛后才算成功；数据库格式改变时需手动迁移。",
+      "requirements": "需要已启用升级助手的 Linux/systemd，或使用面板生成的双服务 Compose 安装。旧版本需先手动维护一次。新进程重新同步并完成配置收敛后才算成功；Docker 失败时会自动恢复保留的旧容器。数据库格式改变时仍需手动迁移。",
       "current": "当前 Passwall Node 版本（最近上报）",
       "version_hint": "从所选频道选择已审核、已发布的精确版本；不接受 latest、beta 等浮动标签，不允许降级。此处切换频道仅临时生效；保存默认频道请编辑服务器。",
       "confirm": "确认并下发升级",
@@ -2178,7 +2178,7 @@
       },
       "method_hint": {
         "linux": "适合启用 systemd 的 Linux 服务器，需要 root 权限。保存服务器后下载私有脚本，传到目标机器执行；脚本安装固定版本并配置专用用户与服务。",
-        "docker": "需要 Linux Docker Engine、Compose 2.30.0 或更高版本，以及 host 网络。生成的 Compose 默认跟随所选 latest/beta 频道，也可锁定精确版本用于回滚。将私有文件传到目标机器后启动容器，并保留持久化数据。",
+        "docker": "需要 Linux Docker Engine、Compose 2.30.0 或更高版本，以及 host 网络。生成的双服务 Compose 默认跟随所选 latest/beta 频道，并支持远程升级与自动回滚。只有隔离的 updater 会挂载等同 root 权限的 Docker socket；非 root Agent 不会挂载。",
         "manual": "支持 Linux / macOS / Windows 的 amd64 / arm64 前台运行。选择平台及准确版本，下载发行档和 SHA256 校验和，核验后解压并配置私有凭据；不安装 systemd 服务。"
       },
       "method_version_hint": "先选择安装方式并保存服务器，再生成该服务器的专属安装文件。切换安装方式不会轮换凭据或改变服务器身份。",
@@ -2212,8 +2212,8 @@
         "docker": {
           "prepare": "使用所选架构的 Linux Docker Engine 与 Compose 2.30.0 或更高版本。新建私有目录，将 compose.yaml、node.env、node-credential 按原文件名放在同一目录；不要覆盖已有安装。重装或更新须保留同一 Compose 项目及数据卷；复用身份前先停止旧机器。",
           "credential": "通过私有渠道传输文件，并限制读取权限。不要将凭据放进命令参数、环境变量、命令追踪、shell 历史或共享日志。检查 Compose 版本并验证配置，任何命令失败都先停止。",
-          "start": "入口初始化短暂使用必要的文件权限与降权能力，随后守护进程以专用非 root 账号运行并清空有效能力；这不表示容器的能力边界集合为空。动态监听需要 host 网络。除非 Linux 主机明确允许非 root 使用低端口，否则选择空闲的 1024 或以上端口。不要使用特权容器或挂载 Docker socket。",
-          "check": "核对程序版本和 Passwall Sub Panel 中的 Agent 状态，再单独配置节点；心跳不代表代理内核已运行。Docker 由主机管理容器更新，不使用 Linux / systemd 远程升级助手。备份私有安装目录与数据卷，更新时不要运行 docker compose down --volumes。"
+          "start": "启动生成的两个服务。Agent 仅在入口初始化时使用必要的文件权限与降权能力，随后以专用非 root 账号运行；动态监听使用 host 网络。隔离的 updater 不使用网络，并且只有它会挂载等同 root 权限的 Docker socket。不要把 socket 挂进 Agent，也不要使用特权容器。",
+          "check": "核对两个服务、程序版本和 Passwall Sub Panel 中的 Agent 状态，再单独配置节点；心跳不代表代理内核已运行。updater 只接受官方精确版本，替换容器未完成同步与配置收敛时会恢复保留的旧容器。备份私有目录与数据卷，更新时不要运行 docker compose down --volumes。"
         },
         "manual": {
           "prepare": "使用所选系统与架构的非特权账号及对应工具：Linux / macOS 需要 curl、tar、awk 和 SHA-256 工具；Windows 需要标准非管理员账号、NTFS、curl.exe，以及 PowerShell 5.1＋.NET Framework 4.7.2 或更高版本，或 PowerShell 7。新建并保护私有目录，通过私有渠道将 node-credential 和 node-config.json 按原文件名保存；不要覆盖现有安装或数据。",
@@ -2225,7 +2225,7 @@
       },
       "method_steps": {
         "linux": "1. 保存服务器并生成固定版本的私有安装脚本。\n2. 将脚本传到目标 Linux 服务器，以 root 权限执行提供的命令。\n3. 确认服务与心跳后，前往节点页面单独配置 inbound。",
-        "docker": "1. 保存服务器并生成专属 Compose 与私有凭据文件。\n2. 将全部文件放入目标 Linux 服务器的私有目录，执行提供的 Compose 命令。\n3. 保留数据目录，确认容器与心跳后单独配置 inbound。",
+        "docker": "1. 保存服务器并生成专属 Compose 与私有凭据文件。\n2. 将全部文件放入目标 Linux 服务器的私有目录，启动 Agent 与隔离的 updater。\n3. 保留数据卷，确认两个服务与心跳后单独配置 inbound。",
         "manual": "1. 选择平台和准确版本，下载对应发行档及 SHA256 校验和并核验。\n2. 解压程序，将全部安装文件放入同一私有目录，并限制凭据文件读取权限。\n3. 核对 Passwall Node 版本，以提供的命令前台运行；确认心跳后再单独配置 inbound。"
       },
       "agent_id": "Agent ID",
@@ -2293,7 +2293,7 @@
       "credential_file_command": "已有安装的私有凭据文件替换命令",
       "copy_file_command": "复制文件替换命令",
       "http_warning": "当前同步地址使用明文 HTTP，凭据可能被监听。仅用于受信测试网络；生产环境请先配置公开可达的 HTTPS 同步地址。",
-      "docker_hint": "Docker 方式要求 Linux Docker Engine、Compose 2.30.0 或更高版本与 host 网络。使用生成的专属 Compose 和私有凭据文件；Compose 的 raw 环境文件格式用于保留同步地址中的原始字符。按提供的命令启动并保留数据目录，不支持 Windows 容器 host 网络。容器升级按 Compose 部署说明执行，不把重装当作升级。",
+      "docker_hint": "Docker 方式要求 Linux Docker Engine、Compose 2.30.0 或更高版本与 host 网络。使用生成的 Compose 和私有文件：Agent 以非 root 运行，隔离的 updater 挂载等同 root 权限的 Docker socket，用于认证远程升级与自动回滚。保留数据卷，绝不要把 socket 挂进 Agent；不支持 Windows 容器 host 网络。",
       "docker_docs": "查看 Linux Compose 示例",
       "status_title": "Passwall Node 状态",
       "status_failed": "无法读取运行状态。",
