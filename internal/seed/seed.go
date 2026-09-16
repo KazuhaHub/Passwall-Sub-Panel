@@ -165,6 +165,8 @@ func upgradeUnmodifiedRoutingDefaults(configDir string) error {
 			"81ca6e2e15c700478b8a15b59ef006f4f2b46043b587484b6b6238b7dee039c3",
 			// UDP then QUIC display order, with both selectors defaulting DIRECT.
 			"caf6d32b70f2ae4a66b5879e409280caa3552a1121a8bc137164e1c32efa112d",
+			// UDP defaults PASS and QUIC defaults DIRECT, through v4.0.0-beta.10.
+			"1eab50bef8b214380cceaabacf89d1a4ec5b223193b853a53466274fac73fbe2",
 		}},
 	}
 	for i := range updates {

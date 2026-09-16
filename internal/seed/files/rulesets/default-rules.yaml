@@ -51,9 +51,8 @@ content: |
   - IP-CIDR6,fe80::/10,🎯 全球直连,no-resolve
   - IP-CIDR6,fd00::/8,🎯 全球直连,no-resolve
   # HTTP/3's usual transport (UDP/443) has its own runtime selector. It defaults
-  # to DIRECT so a slow UDP-capable proxy does not stall normal web browsing;
-  # a subscriber can independently select the proxy or REJECT (which lets
-  # browsers fall back to TCP).
+  # to REJECT so browsers immediately fall back to TCP instead of stalling on
+  # a slow UDP path; a subscriber can independently select the proxy or DIRECT.
   # This intentionally contains no country assumption: overseas users and
   # return-to-China profiles need the same safe controls in the opposite
   # direction. Non-443 QUIC is handled by the general UDP selector below.

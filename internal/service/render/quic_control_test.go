@@ -32,7 +32,7 @@ func TestSeedRulesSeparateQUICFromGeneralUDP(t *testing.T) {
 	}
 }
 
-func TestSeedControlsDefaultToDirectQUICAndPassUDP(t *testing.T) {
+func TestSeedControlsDefaultToRejectQUICAndPassUDP(t *testing.T) {
 	body, err := os.ReadFile("../../seed/files/rulesets/default-rules.yaml")
 	if err != nil {
 		t.Fatal(err)
@@ -66,10 +66,10 @@ func TestSeedControlsDefaultToDirectQUICAndPassUDP(t *testing.T) {
 			}
 			assertMemberStrings(t, []string{groups[0].Name, groups[1].Name, groups[2].Name}, []string{"🚀 节点选择", "🎮 UDP控制", "⚡ QUIC控制"})
 			assertMemberStrings(t, groups[1].Proxies, []string{"PASS", "🚀 节点选择", "DIRECT", "REJECT"})
-			assertMemberStrings(t, groups[2].Proxies, []string{"DIRECT", "🚀 节点选择", "REJECT"})
+			assertMemberStrings(t, groups[2].Proxies, []string{"REJECT", "🚀 节点选择", "DIRECT"})
 
 			// sing-box has no PASS outbound. Its equivalent default omits the UDP
-			// catch-all and selector, while retaining direct-default QUIC.
+			// catch-all and selector, while retaining rejected-by-default QUIC.
 			outbounds := buildSingBoxSelectorOutboundsWithMembers(defaults.Content, items, tc.order, nil)
 			if len(outbounds) < 2 {
 				t.Fatalf("missing sing-box control groups: %#v", outbounds)
@@ -79,8 +79,8 @@ func TestSeedControlsDefaultToDirectQUICAndPassUDP(t *testing.T) {
 					t.Fatalf("sing-box group[%d] = %#v, want %s", i, outbounds[i], name)
 				}
 			}
-			if outbounds[1]["default"] != "direct" {
-				t.Fatalf("sing-box QUIC default must be direct: %#v", outbounds)
+			if outbounds[1]["default"] != "block" {
+				t.Fatalf("sing-box QUIC default must be block: %#v", outbounds)
 			}
 		})
 	}
