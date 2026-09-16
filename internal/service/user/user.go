@@ -1714,19 +1714,23 @@ func (s *Service) UpdateProfile(ctx context.Context, userID int64, in UpdateInpu
 	if in.Email != nil {
 		u.Email = *in.Email
 	}
-	if err := s.updateUser(ctx, u); err != nil {
-		return err
-	}
 	// The limit block above wrote u.Limits (what is stored); the resolved
 	// fields beside it still hold what was loaded. Everything below reads the
 	// RESOLVED quota — the traffic auto-disable check most of all — so they
-	// must be brought up to date here, before the first reader, not on the way
-	// out to the push.
+	// must be brought up to date before either persistence or the first reader.
+	// Resolving first also keeps a transient group-policy read failure from
+	// partially saving the profile and then returning an error before its panel
+	// enforcement can be updated.
 	//
 	// Getting this wrong is not subtle: raising an exhausted user's quota
 	// would leave TrafficExceeded() judging against the OLD limit, so the
 	// service stayed disabled and the admin's edit appeared to do nothing.
-	s.resolveUserLimits(ctx, u)
+	if err := s.resolveUserLimits(ctx, u); err != nil {
+		return err
+	}
+	if err := s.updateUser(ctx, u); err != nil {
+		return err
+	}
 	now := time.Now()
 	serviceStateChanged := false
 	if u.ServiceDisabledReason == domain.DisabledExpired && !u.IsExpired(now) {
@@ -3026,19 +3030,24 @@ func extractDefaultFlow(settingsJSON string) string {
 // resolved quota to decide whether a traffic auto-disable should lift, and
 // pushes the resolved caps to the panels.
 //
-// A group that cannot be read resolves to "states nothing", i.e. unlimited.
-// Same reasoning as the repository's cache: cutting a paying user off because
-// of a transient failure is the worse mistake, and PSP meters independently.
-func (s *Service) resolveUserLimits(ctx context.Context, u *domain.User) {
+// A missing group resolves to "states nothing", i.e. unlimited. A repository
+// failure remains an error: zero is a legitimate policy, so substituting it for
+// "unknown" would make the caller push unlimited access to panels and nodes.
+func (s *Service) resolveUserLimits(ctx context.Context, u *domain.User) error {
 	if u == nil {
-		return
+		return nil
 	}
 	var gl domain.GroupLimits
 	if u.GroupID != 0 && s.groups != nil {
-		if g, err := s.groups.GetByID(ctx, u.GroupID); err == nil && g != nil {
+		g, err := s.groups.GetByID(ctx, u.GroupID)
+		if err != nil && !errors.Is(err, domain.ErrNotFound) {
+			return fmt.Errorf("resolve limits for user %d: load group %d: %w", u.ID, u.GroupID, err)
+		}
+		if err == nil && g != nil {
 			gl = g.Limits
 		}
 	}
 	eff := domain.ResolveLimits(u.Limits, gl)
 	u.TrafficLimitBytes, u.IPLimit, u.DeviceLimit = eff.TrafficLimitBytes, eff.IPLimit, eff.DeviceLimit
+	return nil
 }

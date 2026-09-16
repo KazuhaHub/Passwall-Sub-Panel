@@ -2,6 +2,7 @@ package nodesync
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -37,9 +38,13 @@ func (s emergencyDirectiveSettings) LoadForUser(ctx context.Context, user *domai
 type emergencyDirectiveUsers struct {
 	ports.UserRepo
 	user *domain.User
+	err  error
 }
 
 func (r emergencyDirectiveUsers) GetByID(context.Context, int64) (*domain.User, error) {
+	if r.err != nil {
+		return nil, r.err
+	}
 	return r.user, nil
 }
 
@@ -59,6 +64,32 @@ type emergencyDirectiveAgents struct {
 
 func (r emergencyDirectiveAgents) List(context.Context) ([]*domain.NodeAgent, error) {
 	return []*domain.NodeAgent{r.agent}, nil
+}
+
+func TestBuildDirectivesUserLoadFailureEmitsNoQuota(t *testing.T) {
+	wantErr := errors.New("group limits unavailable")
+	client := &domain.PSPClient{ID: 11, UserID: 7, PanelID: 9}
+	agent := &domain.NodeAgent{AgentID: "agt_failed_limits", PanelID: client.PanelID}
+	service := &Service{
+		users:   emergencyDirectiveUsers{err: wantErr},
+		clients: emergencyDirectiveClients{client: client},
+		agents:  emergencyDirectiveAgents{agent: agent},
+		settings: emergencyDirectiveSettings{
+			global: ports.UISettings{},
+		},
+		reports: make(map[string]receivedFullReport),
+		anchors: make(map[int64]nodeprotocol.ClientCounters),
+		grants:  make(map[string]map[nodeprotocol.ClientKey]int64),
+	}
+	body, _, err := service.buildDirectives(t.Context(), agent, &ports.NativeDesiredSnapshot{
+		Clients: []ports.NativeDesiredClient{{Client: client}},
+	}, nodeprotocol.NodeReport{}, nodeprotocol.Version{Epoch: 1, Version: 1}, time.Now())
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("buildDirectives error = %v, want wrapped %v", err, wantErr)
+	}
+	if len(body.Quota) != 0 {
+		t.Fatalf("failed user load emitted quota directives: %+v", body.Quota)
+	}
 }
 
 // TestBuildDirectivesEmergencyAccessOverridesExhaustedPeriod pins the native

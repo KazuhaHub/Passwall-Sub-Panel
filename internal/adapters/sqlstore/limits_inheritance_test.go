@@ -3,6 +3,7 @@ package sqlstore
 import (
 	"context"
 	"testing"
+	"time"
 
 	"gorm.io/gorm"
 
@@ -141,6 +142,72 @@ func TestGroupLimitEditReachesMembersImmediately(t *testing.T) {
 	}
 	if got.IPLimit != 7 {
 		t.Fatalf("IPLimit = %d, want 7 — the group write did not invalidate the cache", got.IPLimit)
+	}
+}
+
+// An invalidation deliberately makes the next read authoritative. If that
+// read fails, returning GroupLimits{} would be indistinguishable from an
+// explicit unlimited policy and callers could push it to panels/native nodes.
+// Propagate instead so those callers leave the last known enforcement intact.
+func TestColdGroupLimitsCacheReadFailurePropagates(t *testing.T) {
+	db, err := openTestDB(t)
+	if err != nil {
+		t.Skipf("no test DB: %v", err)
+	}
+	if err := EnsureSchema(db); err != nil {
+		t.Fatalf("schema: %v", err)
+	}
+	ur, gr := reposFor(t, db)
+	ctx := context.Background()
+
+	g := seedGroup(t, gr, "metered", domain.GroupLimits{TrafficLimitBytes: i64p(100 << 30)})
+	u := seedUser(t, ur, "cold-cache", g.ID, domain.LimitOverrides{})
+	if got, err := ur.GetByID(ctx, u.ID); err != nil || got.TrafficLimitBytes != 100<<30 {
+		t.Fatalf("warm cache precondition: user=%+v err=%v", got, err)
+	}
+
+	// Group writes take this same invalidation path. Remove the table after it
+	// so the user row still loads but the policy refresh deterministically fails.
+	ur.groupLimits.invalidate()
+	if err := db.Migrator().DropTable(&groupRow{}); err != nil {
+		t.Fatalf("drop groups table: %v", err)
+	}
+	got, err := ur.GetByID(ctx, u.ID)
+	if err == nil {
+		t.Fatalf("cold-cache read failure returned a configured user instead of an error: %+v", got)
+	}
+}
+
+// A refresh failure is different when a last-known policy exists: retaining
+// that stale value preserves enforcement and availability at the same time.
+func TestWarmGroupLimitsCacheReadFailureServesLastKnownPolicy(t *testing.T) {
+	db, err := openTestDB(t)
+	if err != nil {
+		t.Skipf("no test DB: %v", err)
+	}
+	if err := EnsureSchema(db); err != nil {
+		t.Fatalf("schema: %v", err)
+	}
+	ur, gr := reposFor(t, db)
+	ctx := context.Background()
+
+	g := seedGroup(t, gr, "last-known", domain.GroupLimits{TrafficLimitBytes: i64p(75 << 30)})
+	u := seedUser(t, ur, "warm-cache", g.ID, domain.LimitOverrides{})
+	if _, err := ur.GetByID(ctx, u.ID); err != nil {
+		t.Fatalf("warm cache: %v", err)
+	}
+	ur.groupLimits.mu.Lock()
+	ur.groupLimits.loadedAt = time.Now().Add(-2 * groupLimitsTTL)
+	ur.groupLimits.mu.Unlock()
+	if err := db.Migrator().DropTable(&groupRow{}); err != nil {
+		t.Fatalf("drop groups table: %v", err)
+	}
+	got, err := ur.GetByID(ctx, u.ID)
+	if err != nil {
+		t.Fatalf("last-known policy should survive refresh failure: %v", err)
+	}
+	if got.TrafficLimitBytes != 75<<30 {
+		t.Fatalf("TrafficLimitBytes = %d, want last-known %d", got.TrafficLimitBytes, int64(75<<30))
 	}
 }
 
