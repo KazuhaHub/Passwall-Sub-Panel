@@ -27,21 +27,20 @@ func New(clients ports.PSPClientRepo) *Service { return &Service{clients: client
 //   - carry persisted row IDs onto the closest desired attachment partition,
 //     update those rows by ID, and create only genuinely additional rows;
 //   - delete any of the user's clients ON THIS PANEL that the desired set no
-//     longer includes — a credential class that no longer applies, or (when
-//     nodes is empty) every client on the panel because access was revoked.
+//     longer includes because a credential class no longer applies;
+//   - when nodes is empty, detach every client but retain its stable row and
+//     counters. The returned emails tell the caller to remove the live upstream
+//     projection without erasing PSP's cumulative-counter baseline.
 //
 // It is idempotent: a no-change call updates the same IDs and deletes nothing.
 // Credentials and attachments are authoritative here; the per-client traffic
 // counters are owned by the poll — PSPClientRepo.UpdateDefinition updates only
 // mutable definition/credential columns, so a dual-write never clobbers usage.
 // Sync reconciles the user's psp_client rows on ONE panel to clientplan.Build's
-// desired set and RETURNS the emails of the psp_clients it pruned (rows the new
-// plan no longer wants). The prune here is DB-only — this is the shadow dual-write,
-// it never touches 3X-UI — so the reconcile caller must delete the corresponding
-// 3X-UI clients. A pruned email arises when a node leaves the user's group, a whole
-// panel is dropped, OR the partition grouping changes (the v3.9.0 merge collapses a
-// user's per-class clients into one); in every case the old 3X-UI client is now an
-// orphan and must be removed by the caller.
+// desired set and RETURNS the emails of live upstream projections it retired.
+// This is the DB-only shadow dual-write, so the caller must remove those emails
+// from the panel. A retired email either belongs to a stale row pruned after a
+// non-empty repartition, or to a retained row whose attachments became empty.
 func (s *Service) Sync(ctx context.Context, userID int64, userUUID string, panelID int64, rules domain.EmailRules, nodes []clientplan.NodeCred) ([]string, error) {
 	allExisting, err := s.clients.ListByUser(ctx, userID)
 	if err != nil {
@@ -69,6 +68,16 @@ func (s *Service) Sync(ctx context.Context, userID int64, userUUID string, panel
 		})
 	}
 	desired := clientplan.Build(userID, userUUID, panelID, rules, nodes, stable)
+	if len(desired) == 0 {
+		retired := make([]string, 0, len(existing))
+		for _, e := range existing {
+			if err := s.clients.SetInbounds(ctx, e.ID, nil); err != nil {
+				return retired, fmt.Errorf("detach retired client %s: %w", e.Email, err)
+			}
+			retired = append(retired, e.Email)
+		}
+		return retired, nil
+	}
 
 	keep := make(map[int64]struct{}, len(desired))
 	for _, d := range desired {
@@ -109,12 +118,11 @@ func (s *Service) Sync(ctx context.Context, userID int64, userUUID string, panel
 // SyncUser reconciles ALL of a user's psp_clients across every panel from their
 // desired nodes (the group selector's output). It buckets nodes by panel and
 // calls Sync per panel; it ALSO calls Sync (with no nodes) for any panel where
-// the user still holds a client but now has zero desired nodes, so a user who
-// lost access to a whole server gets that server's client pruned. Separators and
-// undeterminable-protocol nodes are dropped by NodeCredsFromNodes. Returns, per
-// panel, the emails of the psp_clients it pruned (so the reconcile caller can
-// delete the now-orphaned 3X-UI clients), plus the first per-panel error (it
-// attempts every panel regardless).
+// the user still holds a client but now has zero desired nodes, so access is
+// retired upstream while the stable counter rows survive for a later re-add.
+// Separators and undeterminable-protocol nodes are dropped by NodeCredsFromNodes.
+// Returns, per panel, the emails to remove upstream, plus the first per-panel
+// error (it attempts every panel regardless).
 func (s *Service) SyncUser(ctx context.Context, userID int64, userUUID string, rules domain.EmailRules, desiredNodes []*domain.Node) (map[int64][]string, error) {
 	byPanel := map[int64][]*domain.Node{}
 	for _, n := range desiredNodes {
@@ -125,7 +133,7 @@ func (s *Service) SyncUser(ctx context.Context, userID int64, userUUID string, r
 	}
 
 	// Union the desired panels with the panels the user currently has clients on,
-	// so a now-empty panel is visited and pruned.
+	// so a now-empty panel is visited and retired without deleting its counters.
 	panels := make(map[int64]struct{}, len(byPanel))
 	for p := range byPanel {
 		panels[p] = struct{}{}
@@ -138,17 +146,17 @@ func (s *Service) SyncUser(ctx context.Context, userID int64, userUUID string, r
 		panels[c.PanelID] = struct{}{}
 	}
 
-	pruned := map[int64][]string{}
+	retired := map[int64][]string{}
 	var firstErr error
 	for panelID := range panels {
-		creds := clientplan.NodeCredsFromNodes(byPanel[panelID]) // empty slice → prunes the panel
+		creds := clientplan.NodeCredsFromNodes(byPanel[panelID]) // empty slice → retires live access
 		p, serr := s.Sync(ctx, userID, userUUID, panelID, rules, creds)
 		if len(p) > 0 {
-			pruned[panelID] = p
+			retired[panelID] = p
 		}
 		if serr != nil && firstErr == nil {
 			firstErr = serr
 		}
 	}
-	return pruned, firstErr
+	return retired, firstErr
 }

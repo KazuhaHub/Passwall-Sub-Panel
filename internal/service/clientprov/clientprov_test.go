@@ -111,6 +111,7 @@ func (r *fakePSPClientRepo) UpdateCounters(ctx context.Context, c *domain.PSPCli
 		stored.PeriodBaselineUpBytes = c.PeriodBaselineUpBytes
 		stored.PeriodBaselineDownBytes = c.PeriodBaselineDownBytes
 		stored.PeriodBaselineTotalBytes = c.PeriodBaselineTotalBytes
+		stored.LastCounterEpoch = c.LastCounterEpoch
 	}
 	return nil
 }
@@ -145,22 +146,56 @@ func TestSync_CreatesSharedClientAndAttachments(t *testing.T) {
 	}
 }
 
-func TestSync_PrunesClientWhenAccessRevoked(t *testing.T) {
+func TestSyncUser_EmptyIntersectionPreservesCountersAndRetiresProjection(t *testing.T) {
 	repo := newFakeRepo()
 	svc := New(repo)
 	ctx := context.Background()
-	// Initially the user has access to a node on panel 10.
-	_, _ = svc.Sync(ctx, 42, "uuid-x", 10, rules, []clientplan.NodeCred{{NodeID: 1, Protocol: domain.ProtoVLESS}})
-	if _, err := repo.GetByEmail(ctx, 10, "u42@psp.local"); err != nil {
-		t.Fatalf("precondition: client should exist: %v", err)
-	}
-	// Access revoked (no nodes) → the panel's client is pruned.
-	if _, err := svc.Sync(ctx, 42, "uuid-x", 10, rules, nil); err != nil {
+	nodes := []*domain.Node{{ID: 1, PanelID: 10, DesiredProtocol: "vless"}}
+	if _, err := svc.SyncUser(ctx, 42, "uuid-x", rules, nodes); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := repo.GetByEmail(ctx, 10, "u42@psp.local"); err == nil {
-		t.Fatal("client should have been pruned after access revoked")
+	before, err := repo.GetByEmail(ctx, 10, "u42@psp.local")
+	if err != nil {
+		t.Fatal(err)
 	}
+	want := &domain.PSPClient{
+		ID:              before.ID,
+		LifetimeUpBytes: 900, LifetimeDownBytes: 1100, LifetimeTotalBytes: 2000,
+		LastRawUpBytes: 90, LastRawDownBytes: 110, LastRawTotalBytes: 200,
+		PeriodBaselineUpBytes: 400, PeriodBaselineDownBytes: 500, PeriodBaselineTotalBytes: 900,
+		LastCounterEpoch: 7,
+	}
+	if err := repo.UpdateCounters(ctx, want); err != nil {
+		t.Fatal(err)
+	}
+
+	retired, err := svc.SyncUser(ctx, 42, "uuid-x", rules, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := retired[10]; len(got) != 1 || got[0] != before.Email {
+		t.Fatalf("upstream retirement signal = %v, want %q", got, before.Email)
+	}
+	detached, err := repo.GetByID(ctx, before.ID)
+	if err != nil {
+		t.Fatalf("empty intersection deleted stable row %d: %v", before.ID, err)
+	}
+	assertClientBaselines(t, detached, want)
+	if inbounds, _ := repo.ListInbounds(ctx, before.ID); len(inbounds) != 0 {
+		t.Fatalf("retired client kept local attachments: %+v", inbounds)
+	}
+
+	if _, err := svc.SyncUser(ctx, 42, "uuid-x", rules, nodes); err != nil {
+		t.Fatal(err)
+	}
+	restored, err := repo.GetByEmail(ctx, 10, "u42@psp.local")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if restored.ID != before.ID {
+		t.Fatalf("re-add replaced stable row %d with %d", before.ID, restored.ID)
+	}
+	assertClientBaselines(t, restored, want)
 }
 
 func TestSync_DoesNotTouchOtherPanels(t *testing.T) {
@@ -182,7 +217,7 @@ func TestSync_DoesNotTouchOtherPanels(t *testing.T) {
 	}
 }
 
-func TestSyncUser_AcrossPanelsAndPrunesLostServer(t *testing.T) {
+func TestSyncUser_AcrossPanelsAndRetiresLostServer(t *testing.T) {
 	repo := newFakeRepo()
 	svc := New(repo)
 	ctx := context.Background()
@@ -200,15 +235,23 @@ func TestSyncUser_AcrossPanelsAndPrunesLostServer(t *testing.T) {
 		t.Fatalf("want 2 clients (one per server), got %d", len(list))
 	}
 
-	// User loses all access to panel 11 → its client must be pruned even though
-	// no node references panel 11 anymore.
-	if _, err := svc.SyncUser(ctx, 42, "uuid-x", rules, []*domain.Node{
+	// User loses all access to panel 11 → its live projection must be retired
+	// even though no node references panel 11 anymore, while the counter row stays.
+	retired, err := svc.SyncUser(ctx, 42, "uuid-x", rules, []*domain.Node{
 		{ID: 1, PanelID: 10, DesiredProtocol: "vless"},
-	}); err != nil {
+	})
+	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := repo.GetByEmail(ctx, 11, "u42@psp.local"); err == nil {
-		t.Fatal("panel-11 client should have been pruned after losing access")
+	panel11, err := repo.GetByEmail(ctx, 11, "u42@psp.local")
+	if err != nil {
+		t.Fatalf("panel-11 counter row must survive lost access: %v", err)
+	}
+	if got := retired[11]; len(got) != 1 || got[0] != panel11.Email {
+		t.Fatalf("panel-11 upstream retirement signal = %v", got)
+	}
+	if inbounds, _ := repo.ListInbounds(ctx, panel11.ID); len(inbounds) != 0 {
+		t.Fatalf("panel-11 retired attachments = %+v", inbounds)
 	}
 	if _, err := repo.GetByEmail(ctx, 10, "u42@psp.local"); err != nil {
 		t.Fatalf("panel-10 client should remain: %v", err)
@@ -367,7 +410,8 @@ func assertClientBaselines(t *testing.T, got, want *domain.PSPClient) {
 	t.Helper()
 	if got.LifetimeUpBytes != want.LifetimeUpBytes || got.LifetimeDownBytes != want.LifetimeDownBytes || got.LifetimeTotalBytes != want.LifetimeTotalBytes ||
 		got.LastRawUpBytes != want.LastRawUpBytes || got.LastRawDownBytes != want.LastRawDownBytes || got.LastRawTotalBytes != want.LastRawTotalBytes ||
-		got.PeriodBaselineUpBytes != want.PeriodBaselineUpBytes || got.PeriodBaselineDownBytes != want.PeriodBaselineDownBytes || got.PeriodBaselineTotalBytes != want.PeriodBaselineTotalBytes {
+		got.PeriodBaselineUpBytes != want.PeriodBaselineUpBytes || got.PeriodBaselineDownBytes != want.PeriodBaselineDownBytes || got.PeriodBaselineTotalBytes != want.PeriodBaselineTotalBytes ||
+		got.LastCounterEpoch != want.LastCounterEpoch {
 		t.Fatalf("counter baselines changed:\n got  %+v\n want %+v", got, want)
 	}
 }
