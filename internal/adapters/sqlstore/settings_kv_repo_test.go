@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	nodeprotocol "github.com/KazuhaHub/passwall-node/protocol"
 	"gorm.io/gorm"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
@@ -314,8 +315,8 @@ func TestKVSettingsDefaultsOnEmpty(t *testing.T) {
 	if !hasApps {
 		t.Errorf("default registry should include families with import apps")
 	}
-	if out.NodePollSeconds != 30 || out.FullReportSeconds != 60 {
-		t.Fatalf("native-agent cadence defaults = (%d, %d), want (30, 60)", out.NodePollSeconds, out.FullReportSeconds)
+	if out.NodePollSeconds != nodeprotocol.DefaultNextPollSeconds || out.FullReportSeconds != nodeprotocol.DefaultFullReportSeconds {
+		t.Fatalf("native-agent cadence defaults = (%d, %d), want (%d, %d)", out.NodePollSeconds, out.FullReportSeconds, nodeprotocol.DefaultNextPollSeconds, nodeprotocol.DefaultFullReportSeconds)
 	}
 	// Both zeros are deliberate wire semantics, not missing values: poll zero
 	// asks the coordinator to use its safe 30-second fallback, while full-report

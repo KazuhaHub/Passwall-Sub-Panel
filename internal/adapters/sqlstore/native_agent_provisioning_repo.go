@@ -377,7 +377,7 @@ func requireEmptyConvergedNativeStreams(tx *gorm.DB, agentID string) error {
 		if stream.DesiredETag == "" {
 			continue // Never delivered; the node could not have served this stream.
 		}
-		if stream.DesiredETag != stream.AppliedETag {
+		if !nodeprotocol.Converged(nodeprotocol.ETag(stream.AppliedETag), nodeprotocol.ETag(stream.DesiredETag)) {
 			return fmt.Errorf("%w: native %s stream has not converged", domain.ErrValidation, stream.Stream)
 		}
 		switch domain.NodeAgentStreamName(stream.Stream) {

@@ -25,8 +25,6 @@ import (
 )
 
 const (
-	defaultNextPollSeconds = 30
-	defaultFullReportSecs  = 60
 	// Tasks is the last SyncResponse field and omitempty removes it from the
 	// no-task encoding. Its exact JSON field overhead is therefore this suffix.
 	syncTasksFieldJSONBytes = len(`,"tasks":`)
@@ -702,7 +700,7 @@ func hasTaskExecutionCapability(capabilities []string) bool {
 
 func (s *Service) buildDirectives(ctx context.Context, agent *domain.NodeAgent, snapshot *ports.NativeDesiredSnapshot, current nodeprotocol.NodeReport, rosterVersion nodeprotocol.Version, now time.Time) (nodeprotocol.DirectivesBody, nodeprotocol.Envelope, error) {
 	settings, err := s.settings.Load(ctx, ports.UISettings{
-		NodePollSeconds: defaultNextPollSeconds, FullReportSeconds: defaultFullReportSecs,
+		NodePollSeconds: nodeprotocol.DefaultNextPollSeconds, FullReportSeconds: nodeprotocol.DefaultFullReportSeconds,
 	})
 	if err != nil {
 		return nodeprotocol.DirectivesBody{}, nodeprotocol.Envelope{}, fmt.Errorf("nodesync: load settings: %w", err)
@@ -717,9 +715,9 @@ func (s *Service) buildDirectives(ctx context.Context, agent *domain.NodeAgent, 
 	}
 	nextPollSeconds := settings.NodePollSeconds
 	if nextPollSeconds <= 0 {
-		nextPollSeconds = defaultNextPollSeconds
+		nextPollSeconds = nodeprotocol.DefaultNextPollSeconds
 	}
-	fullFreshnessSeconds := effectiveFullReportPeriod(settings.FullReportSeconds, nextPollSeconds)
+	fullFreshnessSeconds := nodeprotocol.EffectiveFullReportPeriod(settings.FullReportSeconds, nextPollSeconds)
 	report, receivedAtMS, hasFull := s.fullReport(agent.AgentID)
 	if !current.Partial {
 		report, receivedAtMS, hasFull = current, now.UnixMilli(), true
@@ -964,20 +962,6 @@ func (s *Service) fullReport(agentID string) (nodeprotocol.NodeReport, int64, bo
 	return cloneReport(received.report), received.receivedAtMS, ok
 }
 
-// effectiveFullReportPeriod mirrors the runner's discrete polling schedule.
-// A requested 45-second full interval on a 30-second poll actually produces a
-// full report every 60 seconds; zero means every poll, not "never stale".
-func effectiveFullReportPeriod(fullReportSeconds, pollSeconds int) int {
-	if pollSeconds <= 0 {
-		pollSeconds = defaultNextPollSeconds
-	}
-	if fullReportSeconds <= 0 {
-		return pollSeconds
-	}
-	steps := (fullReportSeconds + pollSeconds - 1) / pollSeconds
-	return steps * pollSeconds
-}
-
 func fullReportStale(receivedAtMS int64, now time.Time, freshnessSeconds int) bool {
 	if receivedAtMS <= 0 || freshnessSeconds <= 0 {
 		return true
@@ -1109,14 +1093,14 @@ func (s *Service) NativePanelSnapshot(ctx context.Context, panelID int64) (*port
 		return nil, ports.ErrNativePanelSnapshotMissing
 	}
 	settings, err := s.settings.Load(ctx, ports.UISettings{
-		NodePollSeconds: defaultNextPollSeconds, FullReportSeconds: defaultFullReportSecs,
+		NodePollSeconds: nodeprotocol.DefaultNextPollSeconds, FullReportSeconds: nodeprotocol.DefaultFullReportSeconds,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("native panel snapshot: load cadence: %w", err)
 	}
 	pollSeconds := settings.NodePollSeconds
 	if pollSeconds <= 0 {
-		pollSeconds = defaultNextPollSeconds
+		pollSeconds = nodeprotocol.DefaultNextPollSeconds
 	}
 	now := s.now().UTC()
 	// Liveness is based only on the durable receipt time of any heartbeat.
@@ -1128,7 +1112,7 @@ func (s *Service) NativePanelSnapshot(ctx context.Context, panelID int64) (*port
 	// Full enumerations are independently paced. Allow one additional poll of
 	// scheduling/network jitter beyond the effective discrete full cadence;
 	// after that, absent objects and counters are unknowable, not healthy zeroes.
-	fullFreshnessSeconds := effectiveFullReportPeriod(settings.FullReportSeconds, pollSeconds) + pollSeconds
+	fullFreshnessSeconds := nodeprotocol.EffectiveFullReportPeriod(settings.FullReportSeconds, pollSeconds) + pollSeconds
 	if fullReportStale(receivedAtMS, now, fullFreshnessSeconds) {
 		return nil, ports.ErrNativePanelSnapshotStale
 	}

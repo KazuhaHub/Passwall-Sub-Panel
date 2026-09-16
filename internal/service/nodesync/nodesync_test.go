@@ -194,7 +194,7 @@ func TestSyncDispatchesDurableTasksOnlyWithBothCapabilitiesAndAcceptsReplay(t *t
 		t.Run(name, func(t *testing.T) {
 			report.Capabilities = capabilities
 			response, err := service.Sync(ctx, report)
-			if err != nil || len(response.Tasks) != 0 || response.Envelope.NextPollSeconds != defaultNextPollSeconds {
+			if err != nil || len(response.Tasks) != 0 || response.Envelope.NextPollSeconds != nodeprotocol.DefaultNextPollSeconds {
 				t.Fatalf("capability-gated response = (%+v, %v)", response, err)
 			}
 		})
@@ -219,7 +219,7 @@ func TestSyncDispatchesDurableTasksOnlyWithBothCapabilitiesAndAcceptsReplay(t *t
 	now = now.Add(time.Second)
 	repeated, err := service.Sync(ctx, report)
 	if err != nil || len(repeated.Tasks) != 1 || repeated.Tasks[0].ID != task.TaskID ||
-		repeated.Envelope.NextPollSeconds != defaultNextPollSeconds {
+		repeated.Envelope.NextPollSeconds != nodeprotocol.DefaultNextPollSeconds {
 		t.Fatalf("offered task was not retransmitted = (%+v, %v)", repeated.Tasks, err)
 	}
 
@@ -240,7 +240,7 @@ func TestSyncDispatchesDurableTasksOnlyWithBothCapabilitiesAndAcceptsReplay(t *t
 	}
 	issues.fail = false
 	completed, err := service.Sync(ctx, report)
-	if err != nil || len(completed.Tasks) != 0 || completed.Envelope.NextPollSeconds != defaultNextPollSeconds {
+	if err != nil || len(completed.Tasks) != 0 || completed.Envelope.NextPollSeconds != nodeprotocol.DefaultNextPollSeconds {
 		t.Fatalf("task completion replay response = (%+v, %v)", completed, err)
 	}
 	now = now.Add(time.Second)
@@ -670,25 +670,6 @@ func TestAggregateCoverageUsesPSPOwnNativeRowsAndTagsStaleEntries(t *testing.T) 
 	coverage, oldest = service.aggregateCoverage(clients, agents, 60, now)
 	if coverage.EntriesStale != 2 || oldest != 0 {
 		t.Fatalf("missing agent report coverage = (%+v, %d), want stale rows and unknown aggregate timestamp", coverage, oldest)
-	}
-}
-
-func TestEffectiveFullReportPeriodMatchesDiscretePollSchedule(t *testing.T) {
-	tests := []struct {
-		name             string
-		full, poll, want int
-	}{
-		{name: "every poll", full: 0, poll: 30, want: 30},
-		{name: "exact multiple", full: 60, poll: 30, want: 60},
-		{name: "round up to poll", full: 45, poll: 30, want: 60},
-		{name: "full faster than poll", full: 10, poll: 30, want: 30},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := effectiveFullReportPeriod(tt.full, tt.poll); got != tt.want {
-				t.Fatalf("effective period = %d, want %d", got, tt.want)
-			}
-		})
 	}
 }
 

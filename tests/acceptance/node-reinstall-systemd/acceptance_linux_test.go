@@ -387,7 +387,7 @@ func (f *fixture) waitReady() {
 		all := err == nil && e2 == nil && e3 == nil && a.LastSeen != nil && a.LastSeen.After(f.requiredSeenAfter) && time.Since(*a.LastSeen) < 90*time.Second && len(attachments) == 1 && attachments[0].Applied() && len(streams) == 3
 		if a != nil {
 			for _, s := range streams {
-				all = all && s.DesiredVersion > 0 && s.AppliedVersion == s.DesiredVersion && s.AppliedEpoch == a.Epoch && s.AppliedETag == s.DesiredETag
+				all = all && s.DesiredVersion > 0 && s.AppliedEpoch == a.Epoch && s.Converged()
 			}
 		}
 		if all {
@@ -426,7 +426,7 @@ func (f *fixture) readinessDiagnostics() {
 			if !s.Stream.Valid() {
 				continue
 			}
-			f.t.Logf("readiness diagnostics: stream=%s desired=%d applied=%d applied_epoch=%d etag_matches=%t", s.Stream, s.DesiredVersion, s.AppliedVersion, s.AppliedEpoch, s.DesiredETag != "" && s.DesiredETag == s.AppliedETag)
+			f.t.Logf("readiness diagnostics: stream=%s desired=%d applied=%d applied_epoch=%d converged=%t", s.Stream, s.DesiredVersion, s.AppliedVersion, s.AppliedEpoch, s.Converged())
 		}
 	}
 	attachments, err := f.repos.PSPClient.ListInbounds(f.ctx, f.clientID)

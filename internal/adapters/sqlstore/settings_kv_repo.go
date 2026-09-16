@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"time"
 
+	nodeprotocol "github.com/KazuhaHub/passwall-node/protocol"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
@@ -99,10 +100,10 @@ func (r *kvSettingsRepo) Load(ctx context.Context, defaults ports.UISettings) (p
 	// receives the 60-second product default. Do this by key presence rather
 	// than applyUISettingsDefaults, which cannot distinguish those two states.
 	if _, ok := byKey["runtime.full_report_seconds"]; !ok && out.FullReportSeconds == 0 {
-		out.FullReportSeconds = defaultFullReportSeconds
+		out.FullReportSeconds = nodeprotocol.DefaultFullReportSeconds
 	}
 	if _, ok := byKey["runtime.node_poll_seconds"]; !ok && out.NodePollSeconds == 0 {
-		out.NodePollSeconds = defaultNodePollSeconds
+		out.NodePollSeconds = nodeprotocol.DefaultNextPollSeconds
 	}
 	// Unlike log retention, task-evidence windows do NOT give explicit zero a
 	// special meaning. Default only absent keys from the product policy (not a
@@ -133,8 +134,6 @@ const (
 	defaultTrafficHistoryDays     = 730 // 2y: 2x the longest "last 1 year" chart range
 	defaultSubLogRetentionDays    = 7
 	defaultAuthEventRetentionDays = 90 // compliance-friendly default; admin may lower or set 0=forever
-	defaultNodePollSeconds        = 30
-	defaultFullReportSeconds      = 60
 )
 
 func (r *kvSettingsRepo) Save(ctx context.Context, s ports.UISettings) error {

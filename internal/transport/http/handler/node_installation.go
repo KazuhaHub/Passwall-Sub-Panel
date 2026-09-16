@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/KazuhaHub/passwall-node/deployment"
+	nodeprotocol "github.com/KazuhaHub/passwall-node/protocol"
 	"github.com/gin-gonic/gin"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
@@ -240,7 +241,7 @@ func (h *AdminServersHandler) nodeAgentStatus(ctx context.Context, panelID int64
 	if agent.LastSeen == nil {
 		return result, nil
 	}
-	poll := 30
+	poll := nodeprotocol.DefaultNextPollSeconds
 	if h.nodeSettings != nil {
 		settings, err := h.nodeSettings.Load(ctx, ports.UISettings{NodePollSeconds: poll})
 		if err != nil {

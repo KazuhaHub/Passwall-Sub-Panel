@@ -40,7 +40,7 @@ func TestSyncDoesNotAuthorizeLifecycleTaskWithoutExpiryCapability(t *testing.T) 
 	for _, at := range []time.Time{now, now.Add(2 * time.Minute), now.Add(100 * 24 * time.Hour)} {
 		now = at
 		response, err := service.Sync(t.Context(), report)
-		if err != nil || len(response.Tasks) != 0 || response.Envelope.NextPollSeconds != defaultNextPollSeconds {
+		if err != nil || len(response.Tasks) != 0 || response.Envelope.NextPollSeconds != nodeprotocol.DefaultNextPollSeconds {
 			t.Fatalf("pre-expiry wire authorized protected request at %v: response=%+v err=%v", at, response, err)
 		}
 		stored, err := repos.NodeAgentTask.GetByTaskID(t.Context(), protected.TaskID)
@@ -151,7 +151,7 @@ func TestSyncLifecycleDispatchRequiresCurrentTripleCapabilityAndEchoesDeadline(t
 					!stored.CompletedAt.Equal(now) || !reflect.DeepEqual(stored.Lifecycle, snapshot) {
 					t.Fatalf("late outcome changed original authorization: %+v err=%v", stored, err)
 				}
-			} else if len(response.Tasks) != 0 || response.Envelope.NextPollSeconds != defaultNextPollSeconds {
+			} else if len(response.Tasks) != 0 || response.Envelope.NextPollSeconds != nodeprotocol.DefaultNextPollSeconds {
 				t.Fatalf("missing capability authorized work: %+v", response)
 			}
 		})
