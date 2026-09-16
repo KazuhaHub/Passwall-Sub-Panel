@@ -2,6 +2,7 @@ package user
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
@@ -29,10 +30,14 @@ import (
 // resolution uses) and slug (what SSO JIT uses to place the new user).
 type policyGroupRepo struct {
 	ports.GroupRepo
-	g *domain.Group
+	g   *domain.Group
+	err error
 }
 
 func (r *policyGroupRepo) GetByID(context.Context, int64) (*domain.Group, error) {
+	if r.err != nil {
+		return nil, r.err
+	}
 	return r.g, nil
 }
 
@@ -101,7 +106,9 @@ func TestEnsureSSOStatedTrafficDefaultDoesNotPinTheConnectionCaps(t *testing.T) 
 	if !u.Limits.InheritsIPLimit() || !u.Limits.InheritsDeviceLimit() {
 		t.Fatalf("stating a traffic default pinned the connection caps too: %+v", u.Limits)
 	}
-	svc.resolveUserLimits(context.Background(), u)
+	if err := svc.resolveUserLimits(context.Background(), u); err != nil {
+		t.Fatal(err)
+	}
 	if u.TrafficLimitBytes != 50<<30 {
 		t.Fatalf("traffic = %d, want the stated 50 GiB to win over the group's 100", u.TrafficLimitBytes)
 	}
@@ -133,9 +140,23 @@ func TestCreateLocalWithNoStatedLimitsInherits(t *testing.T) {
 
 func assertResolvesToGroupPolicy(t *testing.T, u *domain.User, svc *Service) {
 	t.Helper()
-	svc.resolveUserLimits(context.Background(), u)
+	if err := svc.resolveUserLimits(context.Background(), u); err != nil {
+		t.Fatal(err)
+	}
 	if u.TrafficLimitBytes != 100<<30 || u.IPLimit != 3 || u.DeviceLimit != 5 {
 		t.Fatalf("resolved to %d/%d/%d, want the group's 100GiB/3/5", u.TrafficLimitBytes, u.IPLimit, u.DeviceLimit)
+	}
+}
+
+func TestResolveUserLimitsPropagatesGroupReadFailure(t *testing.T) {
+	wantErr := errors.New("group database unavailable")
+	u := &domain.User{ID: 9, GroupID: 7, TrafficLimitBytes: 123, IPLimit: 4, DeviceLimit: 5}
+	svc := &Service{groups: &policyGroupRepo{err: wantErr}}
+	if err := svc.resolveUserLimits(context.Background(), u); !errors.Is(err, wantErr) {
+		t.Fatalf("resolveUserLimits error = %v, want wrapped %v", err, wantErr)
+	}
+	if u.TrafficLimitBytes != 123 || u.IPLimit != 4 || u.DeviceLimit != 5 {
+		t.Fatalf("failed resolution overwrote last-known values: %+v", u)
 	}
 }
 

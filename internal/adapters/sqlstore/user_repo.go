@@ -25,18 +25,18 @@ type userRepo struct {
 // resolve fills u's effective limit fields. Every userRow -> domain.User
 // conversion in this file goes through resolve or resolveAll; a path that
 // skips it hands the caller a user whose limits all read as unlimited.
-func (r *userRepo) resolve(u *domain.User) *domain.User {
+func (r *userRepo) resolve(ctx context.Context, u *domain.User) (*domain.User, error) {
 	if r.groupLimits == nil {
-		return u
+		return u, nil
 	}
-	return r.groupLimits.resolve(u)
+	return r.groupLimits.resolve(ctx, u)
 }
 
-func (r *userRepo) resolveAll(us []*domain.User) []*domain.User {
+func (r *userRepo) resolveAll(ctx context.Context, us []*domain.User) ([]*domain.User, error) {
 	if r.groupLimits == nil {
-		return us
+		return us, nil
 	}
-	return r.groupLimits.resolveAll(us)
+	return r.groupLimits.resolveAll(ctx, us)
 }
 
 func (r *userRepo) Create(ctx context.Context, u *domain.User) error {
@@ -248,9 +248,9 @@ func (r *userRepo) ListExpiringBetween(ctx context.Context, from, to time.Time, 
 	}
 	out := make([]*domain.User, len(rows))
 	for i := range rows {
-		out[i] = r.resolve(rows[i].toDomain())
+		out[i] = rows[i].toDomain()
 	}
-	return out, nil
+	return r.resolveAll(ctx, out)
 }
 
 // AdvanceBlockViolation atomically advances the blocked-client violation count
@@ -453,7 +453,7 @@ func (r *userRepo) GetByID(ctx context.Context, id int64) (*domain.User, error) 
 	if err := r.db.WithContext(ctx).First(&row, id).Error; err != nil {
 		return nil, wrapNotFound(err)
 	}
-	return r.resolve(row.toDomain()), nil
+	return r.resolve(ctx, row.toDomain())
 }
 
 // GetByUPN resolves a login username, tolerating the case and whitespace
@@ -483,7 +483,7 @@ func (r *userRepo) GetByUPN(ctx context.Context, upn string) (*domain.User, erro
 	trimmed := strings.TrimSpace(upn)
 	row, err := r.getByUPNExact(ctx, trimmed)
 	if err == nil {
-		return r.resolve(row.toDomain()), nil
+		return r.resolve(ctx, row.toDomain())
 	}
 	if !errors.Is(err, domain.ErrNotFound) {
 		// A transport / driver failure must not be silently retried as if it
@@ -499,7 +499,7 @@ func (r *userRepo) GetByUPN(ctx context.Context, upn string) (*domain.User, erro
 	if err != nil {
 		return nil, err
 	}
-	return r.resolve(row.toDomain()), nil
+	return r.resolve(ctx, row.toDomain())
 }
 
 func (r *userRepo) getByUPNExact(ctx context.Context, upn string) (*userRow, error) {
@@ -549,7 +549,7 @@ func (r *userRepo) GetBySSO(ctx context.Context, provider, subject string) (*dom
 		First(&row).Error; err != nil {
 		return nil, wrapNotFound(err)
 	}
-	return r.resolve(row.toDomain()), nil
+	return r.resolve(ctx, row.toDomain())
 }
 
 func (r *userRepo) GetBySubToken(ctx context.Context, token string) (*domain.User, error) {
@@ -557,7 +557,7 @@ func (r *userRepo) GetBySubToken(ctx context.Context, token string) (*domain.Use
 	if err := r.db.WithContext(ctx).Where("sub_token = ?", token).First(&row).Error; err != nil {
 		return nil, wrapNotFound(err)
 	}
-	return r.resolve(row.toDomain()), nil
+	return r.resolve(ctx, row.toDomain())
 }
 
 func (r *userRepo) List(ctx context.Context, filter ports.UserFilter) ([]*domain.User, int64, error) {
@@ -591,9 +591,13 @@ func (r *userRepo) List(ctx context.Context, filter ports.UserFilter) ([]*domain
 	}
 	out := make([]*domain.User, len(rows))
 	for i := range rows {
-		out[i] = r.resolve(rows[i].toDomain())
+		out[i] = rows[i].toDomain()
 	}
-	return out, total, nil
+	resolved, err := r.resolveAll(ctx, out)
+	if err != nil {
+		return nil, 0, err
+	}
+	return resolved, total, nil
 }
 
 // accountAccessScope applies the same account-axis interpretation as
@@ -628,7 +632,7 @@ func (r *userRepo) ListByGroup(ctx context.Context, groupID int64) ([]*domain.Us
 	}
 	out := make([]*domain.User, len(rows))
 	for i := range rows {
-		out[i] = r.resolve(rows[i].toDomain())
+		out[i] = rows[i].toDomain()
 	}
-	return out, nil
+	return r.resolveAll(ctx, out)
 }

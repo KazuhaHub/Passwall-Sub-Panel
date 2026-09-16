@@ -1,6 +1,8 @@
 package sqlstore
 
 import (
+	"context"
+	"fmt"
 	"sync"
 	"time"
 
@@ -38,25 +40,21 @@ func newGroupLimitsCache(db *gorm.DB) *groupLimitsCache {
 	return &groupLimitsCache{db: db}
 }
 
-// get returns one group's policy. A missing group, an unreadable table, or a
-// group ID of 0 all resolve to "states nothing", which resolves in turn to
-// unlimited.
-//
-// Failing open is deliberate. The alternative — treating an unreadable policy
-// as some limit — would cut off paying users because of a transient database
-// error, and the panel-side cap is a safety net rather than the primary
-// enforcement (PSP itself still meters and disables). Erring toward letting a
-// user through is the right side to miss on.
-func (c *groupLimitsCache) get(groupID int64) domain.GroupLimits {
+// get returns one group's policy. A missing group or group ID of 0 resolves to
+// "states nothing" (unlimited). A refresh failure serves a previously loaded
+// value, but a cold-cache failure is returned: zero is a legitimate policy and
+// must not be used to disguise "unknown". Callers then skip their operation,
+// which leaves the last panel/node enforcement state intact.
+func (c *groupLimitsCache) get(ctx context.Context, groupID int64) (domain.GroupLimits, error) {
 	if groupID == 0 {
-		return domain.GroupLimits{}
+		return domain.GroupLimits{}, nil
 	}
 	c.mu.RLock()
 	fresh := c.byGroup != nil && time.Since(c.loadedAt) < groupLimitsTTL
 	if fresh {
 		l := c.byGroup[groupID]
 		c.mu.RUnlock()
-		return l
+		return l, nil
 	}
 	c.mu.RUnlock()
 
@@ -64,17 +62,18 @@ func (c *groupLimitsCache) get(groupID int64) domain.GroupLimits {
 	defer c.mu.Unlock()
 	// Re-check: another goroutine may have refreshed while we waited.
 	if c.byGroup != nil && time.Since(c.loadedAt) < groupLimitsTTL {
-		return c.byGroup[groupID]
+		return c.byGroup[groupID], nil
 	}
 	var rows []groupRow
-	if err := c.db.Select("id", "traffic_limit_bytes", "ip_limit", "device_limit").
+	if err := c.db.WithContext(ctx).Select("id", "traffic_limit_bytes", "ip_limit", "device_limit").
 		Find(&rows).Error; err != nil {
-		// Keep serving whatever we last had rather than flapping every
-		// caller to unlimited on one blip; only a cold cache fails open.
+		// Keep serving whatever we last had rather than failing every caller
+		// on one blip. With no known value, propagate the failure instead of
+		// fabricating the legitimate zero/unlimited policy.
 		if c.byGroup != nil {
-			return c.byGroup[groupID]
+			return c.byGroup[groupID], nil
 		}
-		return domain.GroupLimits{}
+		return domain.GroupLimits{}, fmt.Errorf("load group limits: %w", err)
 	}
 	m := make(map[int64]domain.GroupLimits, len(rows))
 	for _, r := range rows {
@@ -85,7 +84,7 @@ func (c *groupLimitsCache) get(groupID int64) domain.GroupLimits {
 		}
 	}
 	c.byGroup, c.loadedAt = m, time.Now()
-	return m[groupID]
+	return m[groupID], nil
 }
 
 // invalidate drops the cache so the next read reloads. Called by the group
@@ -104,20 +103,26 @@ func (c *groupLimitsCache) invalidate() {
 // new one appears and forgets to, that user reads as unlimited on all three
 // counts — which is why the repo funnels row mapping through resolveUsers
 // rather than letting callers call toDomain directly.
-func (c *groupLimitsCache) resolve(u *domain.User) *domain.User {
+func (c *groupLimitsCache) resolve(ctx context.Context, u *domain.User) (*domain.User, error) {
 	if u == nil {
-		return nil
+		return nil, nil
 	}
-	eff := domain.ResolveLimits(u.Limits, c.get(u.GroupID))
+	limits, err := c.get(ctx, u.GroupID)
+	if err != nil {
+		return nil, err
+	}
+	eff := domain.ResolveLimits(u.Limits, limits)
 	u.TrafficLimitBytes = eff.TrafficLimitBytes
 	u.IPLimit = eff.IPLimit
 	u.DeviceLimit = eff.DeviceLimit
-	return u
+	return u, nil
 }
 
-func (c *groupLimitsCache) resolveAll(us []*domain.User) []*domain.User {
+func (c *groupLimitsCache) resolveAll(ctx context.Context, us []*domain.User) ([]*domain.User, error) {
 	for _, u := range us {
-		c.resolve(u)
+		if _, err := c.resolve(ctx, u); err != nil {
+			return nil, err
+		}
 	}
-	return us
+	return us, nil
 }
