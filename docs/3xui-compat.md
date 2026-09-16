@@ -9,6 +9,8 @@ PSP 通过 `/panel/api/*` 对接 3X-UI 面板。本文档维护两件事：
 
 | PSP 版本 | 最低 3X-UI | 已实测通过 | 备注 |
 |---|---|---|---|
+| **v4.0.0-beta.9+ / v4 stable** | **3.4.2** | **3.8.5** | beta.9 已包含负数 `subSortIndex` 修复及 REALITY ML-KEM 订阅适配；schema-v3 overlay 精确区分 prerelease |
+| **v4.0.0-beta.1–beta.8** | **3.4.2** | 3.7.0 | 历史二进制缺少 3X-UI 3.8.x 所需修复，不随远程清单误抬上限 |
 | **v3.9.1+** | **3.4.2** | 3.7.0 | 新增由所选节点执行的 REALITY 目标扫描；依赖 3.4.2 首次提供的 `/server/scanRealityTargets`，不做 PSP 本机回退 |
 | **v3.9.0** | **3.3.0** | 3.7.0 | 共享 client 模型历史版本；保留其原始 3.3.0 floor，不因 3.9.1 新功能反向收紧 |
 | **v3.6.2 – v3.8.x** | **3.2.0** | 3.7.0 | 每节点 client(一级 `/clients/*` API),**硬切 ≥ 3.2.0**;per-node 路径是 shared 路径子集 |
@@ -22,11 +24,11 @@ PSP 通过 `/panel/api/*` 对接 3X-UI 面板。本文档维护两件事：
 
 | PSP 版本 | 最低 S-UI | 已实测通过 | 备注 |
 |---|---|---|---|
-| **v3.9.2–v3.x / v4.x** | 未发布 | **1.6.2** | 当前适配器接口实机验证（2026-09-13 UTC），v3 沿用未变的接口契约；未运行历史发布二进制或完整代理流量链路。没有编译期 floor，理由见 `internal/version/compat_sui.go` |
+| **v3.9.2–v3.x / v4.x** | 未发布 | **1.6.3** | 当前适配器接口实机验证（2026-09-16 UTC），v3 沿用未变的接口契约；未运行历史发布二进制或完整代理流量链路。没有编译期 floor，理由见 `internal/version/compat_sui.go` |
 
 > S-UI 侧没有 `min_sui`：上限验过了，但「支持到多旧」从来没有人确立过，而 `CheckSUI` 只对**显式发布过的** floor 报 too_old。
 
-> 这张表是人看的速查；运行时按 PSP major 使用 `docs/compat/v3.json` 或 `docs/compat/v4.json`。`min_xui` 和 `max_tested_xui` 两个字段**都已接入运行时**(PSP 按需拉取并据此判 too_old / untested)。S-UI 使用对应的 `sui_entries`。
+> 这张表是人看的速查；运行时按 PSP major 使用 `docs/compat/v3.json` 或 `docs/compat/v4.json`。v4 基础清单另指向 `v4-ranges.json`：新版本读取 prerelease-aware 范围，旧 beta 忽略该字段并继续使用保守基础范围。`min_xui` 和 `max_tested_xui` 两个字段**都已接入运行时**(PSP 按需拉取并据此判 too_old / untested)。S-UI 使用对应的 `sui_entries`。
 
 **规则**:
 - "最低 3X-UI" = 该 PSP 版本能正常工作的最早 3X-UI 版本(低于这个会破)
@@ -34,6 +36,29 @@ PSP 通过 `/panel/api/*` 对接 3X-UI 面板。本文档维护两件事：
 - 任何高于"已实测通过"的 3X-UI 版本都属于**未知风险**——升级前先在一台 panel 上小流量验证
 
 ## 历史兼容性事件
+
+### 2026-09-16 UTC / 3X-UI 3.8.5 与 S-UI 1.6.3 实机复核
+
+3X-UI [v3.8.5](https://github.com/MHSanaei/3x-ui/releases/tag/v3.8.5) 保持
+Xray 26.9.9，主要修复 3.8.0 后的面板、节点和内核运行问题；PSP 使用的
+`/panel/api` 路由没有删除或改形。用 tag `7ef22f94` 构建 darwin/arm64 临时面板，
+PSP checkout `2440112` 的 `TestLive_XUISurface`、`TestLive_XUIConnectionLimits`
+与 `TestLive_XUIRealityScan` 全部通过，覆盖状态、更新信息、证书路径、入站完整生命周期、
+共享/旧式客户端生命周期、批量操作、连接上限和 REALITY 扫描。版本读回
+3.8.5 / 26.9.9，临时对象已清理。无需新增适配器代码。
+
+PSP beta.9 已包含 3.8.x 所需的负数 `subSortIndex` 保留修复，beta.1–beta.8
+没有。原 schema-v2 清单会丢弃 `-beta.N` 后缀，无法安全抬上限。本次保留
+`v4.json` 的保守范围供旧二进制读取，并增加 `v4-ranges.json` schema v3 overlay；
+新构建按完整 SemVer 将 beta.9+ 与 stable 认证到 3.8.5，历史 beta 仍停在 3.7.0。
+v3 因缺少 REALITY ML-KEM 订阅适配仍保持 3.7.0。
+
+S-UI [v1.6.3](https://github.com/alireza0/s-ui/releases/tag/v1.6.3) 将 sing-box
+升级到 1.14.1，新增实时会话查询/断开和 Snell 多用户支持，并修复客户端重新启用后
+被流量重置逻辑再次停用的问题。用 tag `13abbdc4` 在现有 1.6.2 scratch 数据库上启动，
+`TestLive_SUISurface` 全部通过：Token、状态、入站及客户端增删改查/挂载均兼容。
+新增 API 为附加项，Client/Inbound 存储形状未变，因此无需修改 S-UI 适配器；v3/v4
+已测上限均抬到 1.6.3。验证未覆盖完整代理流量或配额执法。
 
 ### 2026-09-14 UTC / 3X-UI 3.8.0 复核 → 需要 PSP 修复，发布上限暂保持 3.7.0
 
@@ -432,8 +457,10 @@ PSP `rawInbound` 这四个字段定义为 Go `string`,`json.Unmarshal` 一个 ob
 
 ## 维护 `docs/compat/v<MAJOR>.json` 的 SOP
 
-每个 PSP major 一个 JSON 文件(v3.x 都拉 `docs/compat/v3.json`,v4.x 都拉 `v4.json`)。
+每个 PSP major 一个基础 JSON 文件(v3.x 都拉 `docs/compat/v3.json`,v4.x 都拉 `v4.json`)。
 这是 v3.6.0-beta.7 引入的 per-major 分文件设计,理由见 ARCHITECTURE.md。
+基础文件可用 `range_overlay` 指向同源 schema-v3 范围文件；旧版本忽略该字段，新版本据此
+按完整 SemVer 区分 prerelease。升级 overlay 失败时不会部分应用新范围。
 
 ### 什么时候会有人告诉你该改了（2026-09-09 起自动化）
 
@@ -488,8 +515,8 @@ PSP `rawInbound` 这四个字段定义为 Go `string`,`json.Unmarshal` 一个 ob
 ### entries 数组语义
 
 - 每个 entry 是 PSP 版本的**闭区间** `[psp_min, psp_max]`(含两端)
-- `psp_min` / `psp_max` 端点**只写 stable semver** `vX.Y.Z`,**不带** pre-release suffix
-  (PSP 比对时会丢自己 version 的 `-beta.x` 后缀,把 `v3.6.0-beta.7` 当成 `v3.6.0` 匹配)
+- schema-v2 基础文件的 `psp_min` / `psp_max` 端点只写 stable semver `vX.Y.Z`；
+  schema-v3 overlay 使用完整 SemVer，可写 `v4.0.0-beta.9` 这类端点并按数字 prerelease 标识比较
 - **first-match-wins** ── 数组顺序就是优先级,narrower / 更新的 entry 放前
 - 重叠 OK,顺序决定胜出
 

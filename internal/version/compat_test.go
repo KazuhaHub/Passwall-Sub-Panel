@@ -240,6 +240,49 @@ func TestLookupForPSPVersion_RangeMatchAndFirstWins(t *testing.T) {
 	}
 }
 
+func TestLookupForPSPVersion_Schema3DistinguishesPrereleases(t *testing.T) {
+	payload := remoteCompatPayload{
+		SchemaVersion: rangeOverlaySchemaVersion,
+		Major:         4,
+		Entries: []remoteCompatPSPEntry{
+			{PSPMin: "v4.0.0-beta.9", PSPMax: "v4.0.0-beta.99", MaxTestedXUI: "3.8.5"},
+			{PSPMin: "v4.0.0", PSPMax: "v4.99.99", MaxTestedXUI: "3.8.5"},
+			{PSPMin: "v4.0.0-beta.1", PSPMax: "v4.0.0-beta.8", MaxTestedXUI: "3.7.0"},
+		},
+	}
+	cases := []struct {
+		version string
+		want    string
+		ok      bool
+	}{
+		{"v4.0.0-beta.1", "3.7.0", true},
+		{"v4.0.0-beta.8", "3.7.0", true},
+		{"v4.0.0-beta.9", "3.8.5", true},
+		{"v4.0.0-beta.10", "3.8.5", true},
+		{"v4.0.0", "3.8.5", true},
+		{"v4.0.1", "3.8.5", true},
+		{"v4.0.0-alpha.99", "", false},
+	}
+	for _, tc := range cases {
+		entry, ok := lookupForPSPVersion(payload, tc.version)
+		if ok != tc.ok || (ok && entry.MaxTestedXUI != tc.want) {
+			t.Fatalf("lookupForPSPVersion(%q) = (%q,%v), want (%q,%v)", tc.version, entry.MaxTestedXUI, ok, tc.want, tc.ok)
+		}
+	}
+}
+
+func TestResolveRangeOverlayURLStaysOnManifestOrigin(t *testing.T) {
+	got, err := resolveRangeOverlayURL("https://example.test/compat/v4.json", "v4-ranges.json")
+	if err != nil || got != "https://example.test/compat/v4-ranges.json" {
+		t.Fatalf("relative overlay = %q, %v", got, err)
+	}
+	for _, ref := range []string{"https://evil.test/ranges.json", "//evil.test/ranges.json"} {
+		if got, err := resolveRangeOverlayURL("https://example.test/compat/v4.json", ref); err == nil {
+			t.Fatalf("cross-origin overlay %q resolved to %q", ref, got)
+		}
+	}
+}
+
 func contains(s, sub string) bool {
 	for i := 0; i+len(sub) <= len(s); i++ {
 		if s[i:i+len(sub)] == sub {

@@ -1,7 +1,7 @@
 name: Upstream compat watch
 
 # Watches 3X-UI and S-UI for releases past the tested ceilings in
-# docs/compat/v3.json.
+# the active v4 prerelease-aware range overlay.
 #
 # WHY THIS IS A JOB AND NOT A CHECKLIST ITEM: that ceiling is the only compat
 # fact that goes stale with nobody editing anything — it is a claim about an
@@ -68,7 +68,7 @@ jobs:
           set -e
           case "$code" in
             0) echo "::notice::Both upstream ceilings are current." ;;
-            1) echo "::error::An upstream has released past its tested ceiling. Do the live-panel review in docs/3xui-compat.md before moving the number in docs/compat/v3.json." ;;
+            1) echo "::error::An upstream has released past its tested ceiling. Do the live-panel review in docs/3xui-compat.md before moving the number in docs/compat/v4-ranges.json." ;;
             2) echo "::error::The ceiling comparison could not be made — the watcher itself needs attention (upstream repo moved, API shape changed, or rate limited). This is NOT a clean bill of health." ;;
             *) echo "::error::compatwatch exited $code" ;;
           esac
