@@ -44,7 +44,8 @@ func (r *serverMigrationRepo) Load(ctx context.Context, panelID int64) (*domain.
 
 func (r *serverMigrationRepo) Apply(ctx context.Context, panelID int64, expectedFingerprint string, agent *domain.NodeAgent, credential string) error {
 	if panelID <= 0 || expectedFingerprint == "" || agent == nil || agent.ID != 0 || agent.PanelID != panelID ||
-		(agent.Epoch != 0 && agent.Epoch != 1) || agent.LastSeen != nil || agent.ObservedCoreEngine != "" {
+		(agent.Epoch != 0 && agent.Epoch != 1) || agent.LastSeen != nil || agent.ObservedCoreEngine != "" ||
+		agent.ObservedProtocolVersion != 0 || len(agent.ObservedCapabilities) != 0 || agent.ProtocolObservedAt != nil {
 		return fmt.Errorf("%w: offline conversion requires a new agent for the existing server", domain.ErrValidation)
 	}
 	copyAgent := *agent

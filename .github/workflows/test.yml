@@ -26,6 +26,51 @@ env:
   GOTOOLCHAIN: "local"
 
 jobs:
+  node-compatibility:
+    name: node compatibility (${{ matrix.node_version }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        node_version:
+          - v0.0.1-beta1
+          - v0.0.1-beta2
+          - v0.0.1-beta3
+          - v0.0.1-beta4
+          - v0.0.1-beta5
+    steps:
+      - uses: actions/checkout@v6
+      - name: Checkout released Passwall Node
+        uses: actions/checkout@v6
+        with:
+          repository: KazuhaHub/Passwall-Node
+          ref: ${{ matrix.node_version }}
+          path: .compat/passwall-node
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        env:
+          GOTOOLCHAIN: auto
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Verify exact preferred compiler
+        run: |
+          set -eu
+          build_toolchain=$(awk '$1 == "toolchain" { print $2 }' go.mod)
+          test -n "$build_toolchain"
+          test "$(go env GOVERSION)" = "$build_toolchain"
+          test "$(go tool compile -V | awk '{ print $3 }')" = "$build_toolchain"
+      - name: Exercise the released wire contract
+        env:
+          PSP_LIVE_NODE_REPO: ${{ github.workspace }}/.compat/passwall-node
+        run: |
+          set -euo pipefail
+          go test -count=1 -timeout=5m ./internal/service/nodesync \
+            -run '^TestLive_RealNode(AgentContract|MigratedServerContract|TaskEvidenceReceipt|TaskExpiryContract)$' -v
+
   node-contract:
     name: node contract (pinned published source)
     runs-on: ubuntu-latest

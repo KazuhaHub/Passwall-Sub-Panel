@@ -2088,7 +2088,7 @@
       "available": "Upgrade Passwall Node to {{version}}",
       "title": "Upgrade Passwall Node · {{name}}",
       "warning": "Upgrading briefly interrupts proxy connections on this server. Confirm the release and maintenance window. Server, node and user identities remain unchanged.",
-      "requirements": "Requires Linux/systemd with the upgrade helper enabled. Older agents need one manual maintenance update; update Docker images on the host. Success requires the new process to synchronize and converge configuration. State-schema changes require manual migration.",
+      "requirements": "Requires an enabled upgrade helper: Linux/systemd, or Docker installed from the generated two-service Compose. Older agents need one manual maintenance update. Success requires the new process to synchronize and converge configuration; Docker automatically restores the retained previous container on failure. State-schema changes require manual migration.",
       "current": "Current Passwall Node release (last reported)",
       "version_hint": "Choose an exact reviewed, published release from the selected channel. Floating latest or beta tags and downgrades are refused. Channel changes here are temporary; save the server's update channel in Edit.",
       "confirm": "Confirm and request upgrade",
@@ -2168,6 +2168,16 @@
       "insecure_https": "Enable when the panel uses a self-signed / mismatched cert. Scoped to this panel; the SSRF guard is unaffected."
     },
     "native": {
+      "compatibility": {
+        "compatible": "Compatible",
+        "limited": "Compatible · manual upgrade",
+        "incompatible": "Incompatible",
+        "unknown": "Compatibility unknown",
+        "compatible_detail": "Protocol v{{protocol}} is supported and this Node currently advertises all remote-upgrade capabilities.",
+        "limited_detail": "Node synchronization is compatible, but remote upgrade is unavailable. Update this Node manually once or enable its upgrade helper.",
+        "incompatible_detail": "This Node protocol has not been reviewed for this Passwall Sub Panel release. Remote upgrade is blocked.",
+        "unknown_detail": "No authenticated protocol observation has been saved yet. Wait for a successful Node check-in."
+      },
       "outbound_hint": "Passwall Node connects outbound to Passwall Sub Panel. It needs no inbound management URL or upstream-panel credential. Enter server details and select an installation method, then generate files for that server. Configure inbounds separately on the Nodes page.",
       "create_record_hint": "Create the server record first; the next page generates its installation command. Configure inbounds separately on Nodes.",
       "metadata_details": "Optional remark and technical details",
@@ -2180,7 +2190,7 @@
       },
       "method_hint": {
         "linux": "For Linux servers running systemd; root privileges are required. Save the server, download its private script, and transfer it to the target machine. The script installs an exact release with a dedicated user and service.",
-        "docker": "Requires Linux Docker Engine, Compose 2.30.0 or newer, and host networking. The generated Compose follows the selected latest/beta channel by default; an exact release can be pinned for rollback. Transfer the private files to the target machine, start the container, and preserve persistent data.",
+        "docker": "Requires Linux Docker Engine, Compose 2.30.0 or newer, and host networking. The generated two-service Compose follows the selected latest/beta channel by default and enables remote upgrades with automatic rollback. The isolated updater alone receives the root-equivalent Docker socket; the Agent stays non-root and never receives it.",
         "manual": "Foreground operation on Linux / macOS / Windows, amd64 / arm64. Choose the platform and exact release, download its archive and SHA256 checksum, verify and extract it, then configure private credentials. No systemd service is installed."
       },
       "method_version_hint": "Choose an installation method and save the server before generating its installation files. Switching methods does not rotate credentials or change the server identity.",
@@ -2214,8 +2224,8 @@
         "docker": {
           "prepare": "Use Linux Docker Engine and Compose 2.30.0 or newer on the selected architecture. Create a private directory and save compose.yaml, node.env, and node-credential together under their exact names; do not overwrite an existing installation. Preserve the same Compose project and data volume when reinstalling or updating. Stop the old machine before reusing its identity.",
           "credential": "Transfer files through a private channel and restrict read access. Never put credentials in command arguments, environment variables, tracing, shell history, or shared logs. Check the Compose version and validate its configuration; stop if any command fails.",
-          "start": "The entrypoint briefly uses the capabilities needed for file initialization and privilege dropping. The daemon then runs as its dedicated non-root account with effective capabilities cleared; this does not mean the container's capability bounding set is empty. Dynamic listeners require host networking. Choose free ports at or above 1024 unless the Linux host explicitly permits non-root low ports. Do not use a privileged container or mount the Docker socket.",
-          "check": "Check the application version and Agent status in Passwall Sub Panel, then configure nodes separately; a heartbeat does not prove the proxy core is running. Docker uses host-managed container updates, not the Linux / systemd remote upgrade helper. Back up the private installation directory and data volume; never use docker compose down --volumes to update."
+          "start": "Start both generated services. The Agent briefly uses only the capabilities needed for file initialization and privilege dropping, then runs as its dedicated non-root account; dynamic listeners require host networking. The isolated updater has no network and alone receives the root-equivalent Docker socket. Never mount that socket into the Agent or use privileged containers.",
+          "check": "Check both services, the application version and Agent status in Passwall Sub Panel, then configure nodes separately; a heartbeat does not prove the proxy core is running. The updater accepts official exact releases only and restores the retained previous container unless the replacement synchronizes and converges. Back up the private directory and data volume; never use docker compose down --volumes to update."
         },
         "manual": {
           "prepare": "Use an unprivileged account and the appropriate tools on the selected OS and architecture: Linux / macOS require curl, tar, awk, and a SHA-256 tool; Windows requires a standard non-administrator account, NTFS, curl.exe, and either PowerShell 5.1 with .NET Framework 4.7.2 or newer, or PowerShell 7. Create and protect a new private directory, then transfer node-credential and node-config.json there under their exact names. Do not overwrite existing installation or data.",
@@ -2227,7 +2237,7 @@
       },
       "method_steps": {
         "linux": "1. Save the server and generate the private script for an exact release.\n2. Transfer the script to the target Linux server and run the provided commands as root.\n3. Confirm the service and heartbeat, then configure inbounds separately on the Nodes page.",
-        "docker": "1. Save the server and generate its Compose and private credential files.\n2. Place all files in a private directory on the target Linux server and run the provided Compose commands.\n3. Preserve the data directory, confirm the container and heartbeat, then configure inbounds separately.",
+        "docker": "1. Save the server and generate its Compose and private credential files.\n2. Place all files in a private directory on the target Linux server and start the Agent plus isolated updater.\n3. Preserve the data volume, confirm both services and the heartbeat, then configure inbounds separately.",
         "manual": "1. Select the platform and exact release, download the matching archive and SHA256 checksum, and verify them.\n2. Extract the application, keep all installation files in one private directory, and restrict access to the credential file.\n3. Check the Passwall Node version and run the provided foreground command; confirm the heartbeat before configuring inbounds separately."
       },
       "agent_id": "Agent ID",
@@ -2295,7 +2305,7 @@
       "credential_file_command": "Replace the private credential file in an existing installation",
       "copy_file_command": "Copy file replacement commands",
       "http_warning": "This sync endpoint uses plaintext HTTP and may expose credentials to network observers. Use only on a trusted test network; configure a publicly reachable HTTPS sync endpoint for production first.",
-      "docker_hint": "Docker requires Linux Docker Engine, Compose 2.30.0 or newer, and host networking. Use the generated Compose and private credential files; Compose's raw environment-file format preserves the sync endpoint's literal characters. Start with the provided commands and preserve the data directory. Windows container host networking is unsupported. Upgrade the container through its Compose deployment instructions, not reinstallation.",
+      "docker_hint": "Docker requires Linux Docker Engine, Compose 2.30.0 or newer, and host networking. Use the generated Compose and private files: the Agent stays non-root, while an isolated updater receives the root-equivalent Docker socket for authenticated remote upgrades and automatic rollback. Preserve the data volume and never mount the socket into the Agent. Windows container host networking is unsupported.",
       "docker_docs": "View Linux Compose example",
       "status_title": "Passwall Node status",
       "status_failed": "Could not read runtime status.",

@@ -8,7 +8,9 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
+	nodeprotocol "github.com/KazuhaHub/passwall-node/protocol"
 	"github.com/gin-gonic/gin"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
@@ -213,12 +215,14 @@ func TestNativeCoreSelectionRequiresExactRestrictionAcknowledgement(t *testing.T
 
 func TestServerListSeparatesDesiredAndObservedNativeCoreWithoutPerRowQueries(t *testing.T) {
 	gin.SetMode(gin.TestMode)
+	protocolObservedAt := time.Date(2026, 9, 16, 12, 0, 0, 0, time.UTC)
 	panel := &domain.XUIPanel{
 		ID: 9, Kind: domain.PanelKindPSP, Name: "native", PanelVersion: "v0.2.0", XrayVersion: "26.6.27",
 	}
 	agents := &nativeCoreAgentRepo{agents: []*domain.NodeAgent{{
 		PanelID: 9, DesiredCoreEngine: domain.NodeCoreSingBox, DesiredCoreVersion: "1.14.0",
-		ObservedCoreEngine: domain.NodeCoreXray,
+		ObservedCoreEngine: domain.NodeCoreXray, ObservedProtocolVersion: nodeprotocol.ProtocolVersion1,
+		ObservedCapabilities: nodeprotocol.AgentUpgradeCapabilities(), ProtocolObservedAt: &protocolObservedAt,
 	}}}
 	handler := &AdminServersHandler{
 		repo: nativeCoreListPanelRepo{panels: []*domain.XUIPanel{panel}},
@@ -247,5 +251,41 @@ func TestServerListSeparatesDesiredAndObservedNativeCoreWithoutPerRowQueries(t *
 	if got.CoreEngine != "xray" || got.CoreVersion != "26.6.27" ||
 		got.DesiredCoreEngine != "sing-box" || got.DesiredCoreVersion != "1.14.0" {
 		t.Fatalf("native core identity = %+v", got)
+	}
+	if got.NodeCompatibility != "compatible" || !got.NodeUpgradeReady ||
+		got.NodeProtocolVersion == nil || *got.NodeProtocolVersion != 1 ||
+		got.NodeEffectiveProtocolVersion == nil || *got.NodeEffectiveProtocolVersion != 1 ||
+		got.NodeProtocolObservedAt == nil || !got.NodeProtocolObservedAt.Equal(protocolObservedAt) {
+		t.Fatalf("native compatibility = %+v", got)
+	}
+}
+
+func TestNativeCompatibilityDTOStatesAreFailClosed(t *testing.T) {
+	panel := &domain.XUIPanel{ID: 9, Kind: domain.PanelKindPSP, Name: "native"}
+	handler := &AdminServersHandler{pool: fakeWebCertPool{client: &nativeCoreClientStub{}}}
+	observedAt := time.Date(2026, 9, 16, 13, 0, 0, 0, time.UTC)
+	for _, test := range []struct {
+		name         string
+		agent        *domain.NodeAgent
+		want         string
+		upgradeReady bool
+	}{
+		{name: "unknown", agent: &domain.NodeAgent{}, want: "unknown"},
+		{name: "base sync remains compatible but upgrade is limited", agent: &domain.NodeAgent{
+			ObservedProtocolVersion: 1, ObservedCapabilities: []string{nodeprotocol.CapabilityTaskExecutionV1}, ProtocolObservedAt: &observedAt,
+		}, want: "limited"},
+		{name: "reviewed upgrade capability set", agent: &domain.NodeAgent{
+			ObservedProtocolVersion: 1, ObservedCapabilities: nodeprotocol.AgentUpgradeCapabilities(), ProtocolObservedAt: &observedAt,
+		}, want: "compatible", upgradeReady: true},
+		{name: "unreviewed generation", agent: &domain.NodeAgent{
+			ObservedProtocolVersion: 2, ObservedCapabilities: nodeprotocol.AgentUpgradeCapabilities(), ProtocolObservedAt: &observedAt,
+		}, want: "incompatible"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			got := handler.toServerDTOWithAgent(panel, test.agent)
+			if got.NodeCompatibility != test.want || got.NodeUpgradeReady != test.upgradeReady {
+				t.Fatalf("compatibility = %+v", got)
+			}
+		})
 	}
 }

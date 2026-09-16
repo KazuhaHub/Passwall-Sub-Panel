@@ -950,7 +950,7 @@ export default function ServersView() {
   // from "probed and ok". Compat colors mirror Material's container roles
   // for consistency with statusBadge.
   function versionCell(s: Server) {
-		if (!s.panel_version && (s.panel_type !== 'psp' || !s.desired_core_version)) {
+		if (!s.panel_version && (s.panel_type !== 'psp' || (!s.desired_core_version && !s.node_compatibility))) {
       return <Typography sx={{ fontSize: 13, color: md.onSurfaceVariant }}>—</Typography>
     }
 		const pendingCoreSelection = s.panel_type === 'psp' && !!s.desired_core_version &&
@@ -958,7 +958,30 @@ export default function ServersView() {
     let bg = md.tertiaryContainer
     let fg = md.onTertiaryContainer
     let label: string | null = null
-		if (s.panel_type !== 'psp') {
+		if (s.panel_type === 'psp') {
+			switch (s.node_compatibility) {
+			case 'compatible':
+				bg = md.tertiaryContainer
+				fg = md.onTertiaryContainer
+				label = t('admin:servers.native.compatibility.compatible')
+				break
+			case 'limited':
+				bg = md.secondaryContainer
+				fg = md.onSecondaryContainer
+				label = t('admin:servers.native.compatibility.limited')
+				break
+			case 'incompatible':
+				bg = md.errorContainer
+				fg = md.onErrorContainer
+				label = t('admin:servers.native.compatibility.incompatible')
+				break
+			case 'unknown':
+			default:
+				bg = md.surfaceContainerHighest
+				fg = md.onSurfaceVariant
+				label = t('admin:servers.native.compatibility.unknown')
+			}
+		} else {
 			switch (s.compat_status) {
       case 'supported':
         // No badge — clean state. The version text alone suffices.
@@ -1031,18 +1054,20 @@ export default function ServersView() {
       latest: updateVersion,
       defaultValue: '可升级 → {{latest}}',
     })
-    const updateChip = updateVersion && (s.panel_type === 'psp' && canConfigure
+    const updateChip = updateVersion && (s.panel_type === 'psp' && canConfigure && s.node_upgrade_ready
       ? <Button size="small" sx={{ ...updateChipStyle, minWidth: 0, lineHeight: 1.5 }}
           aria-label={t('admin:servers.agent_upgrade.available', { version: updateVersion })}
           onClick={() => setNativeUpgradeTarget(s)}>{updateLabel}</Button>
-      : s.panel_type === 'sui'
+        : s.panel_type === 'sui'
         ? <Tooltip title={t('admin:servers.sui_update.manual_hint')}>
             <Button component="a" size="small" href="https://github.com/alireza0/s-ui/releases/latest"
               target="_blank" rel="noopener noreferrer"
               sx={{ ...updateChipStyle, minWidth: 0, lineHeight: 1.5 }}
               aria-label={t('admin:servers.sui_update.available', { version: updateVersion })}>{updateLabel}</Button>
           </Tooltip>
-        : <Box sx={updateChipStyle}>{updateLabel}</Box>)
+        : s.panel_type === 'psp' && canConfigure
+          ? <Box sx={updateChipStyle}>{updateLabel}</Box>
+          : <Box sx={updateChipStyle}>{updateLabel}</Box>)
     const stacked = (
       <Box>
         {versionText}
@@ -1052,8 +1077,13 @@ export default function ServersView() {
           variant="caption" color="text.secondary">{t('admin:servers.native.update_check_failed')}</Typography>}
       </Box>
     )
-    if (s.compat_message) {
-      return <Tooltip title={s.compat_message} placement="top"><span>{stacked}</span></Tooltip>
+    const compatibilityMessage = s.panel_type === 'psp'
+		? t(`admin:servers.native.compatibility.${s.node_compatibility ?? 'unknown'}_detail`, {
+			protocol: s.node_effective_protocol_version ?? '—',
+		})
+		: s.compat_message
+    if (compatibilityMessage) {
+      return <Tooltip title={compatibilityMessage} placement="top"><span>{stacked}</span></Tooltip>
     }
     return stacked
   }
@@ -1449,7 +1479,8 @@ export default function ServersView() {
           <DownloadIcon fontSize="small" sx={{ mr: 1 }} />
           {t('admin:servers.install_reinstall.action')}
         </MenuItem>}
-        {menuTarget?.panel_type === 'psp' && <MenuItem onClick={() => { setNativeUpgradeTarget(menuTarget); closeMenu() }}>
+        {menuTarget?.panel_type === 'psp' && <MenuItem disabled={!menuTarget.node_upgrade_ready}
+          onClick={() => { setNativeUpgradeTarget(menuTarget); closeMenu() }}>
           <UpgradeIcon fontSize="small" sx={{ mr: 1 }} />
           {t('admin:servers.agent_upgrade.action')}
         </MenuItem>}

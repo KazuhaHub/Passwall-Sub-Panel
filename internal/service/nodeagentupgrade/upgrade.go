@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/KazuhaHub/passwall-node/deployment"
@@ -105,6 +106,19 @@ func (s *Service) Request(ctx context.Context, panelID int64, request Request, k
 	panel, agent, err := s.owner(ctx, panelID)
 	if err != nil {
 		return nil, false, err
+	}
+	compatibility, observed := agent.ProtocolCompatibility()
+	if !observed {
+		return nil, false, fmt.Errorf("%w: native agent compatibility has not been observed; wait for a successful check-in", domain.ErrValidation)
+	}
+	if !compatibility.ProtocolSupported {
+		return nil, false, fmt.Errorf("%w: native agent protocol version %d is outside the reviewed range %d..%d",
+			domain.ErrValidation, compatibility.EffectiveProtocolVersion,
+			nodeprotocol.MinSupportedProtocolVersion, nodeprotocol.MaxSupportedProtocolVersion)
+	}
+	if !compatibility.AgentUpgrade {
+		return nil, false, fmt.Errorf("%w: native agent does not currently advertise remote-upgrade capabilities: %s",
+			domain.ErrValidation, strings.Join(compatibility.MissingAgentUpgrade, ", "))
 	}
 	defaults := domain.DefaultNodeTaskLifecyclePolicy()
 	settings, err := s.options.Settings.Load(ctx, ports.UISettings{

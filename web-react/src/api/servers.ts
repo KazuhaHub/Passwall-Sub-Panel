@@ -16,6 +16,7 @@ export type XUIAuthMethod = '' | 'token' | 'password'
 export type PanelType = '3xui' | 'sui' | 'psp'
 export type NodeUpdateChannel = 'stable' | 'beta'
 export type NativeCoreEngine = 'xray' | 'sing-box'
+export type NativeCompatibilityStatus = 'unknown' | 'compatible' | 'limited' | 'incompatible'
 export type PanelCapability =
   | 'inbound.read' | 'inbound.write'
   | 'inbound.create' | 'inbound.update' | 'inbound.delete' | 'inbound.enable'
@@ -50,6 +51,14 @@ export interface Server {
 	/** Native nodes: exact catalog selection PSP will continue delivering. */
 	desired_core_engine?: NativeCoreEngine
 	desired_core_version?: string
+  /** Most recent authenticated Node wire/capability observation. */
+  node_protocol_version?: number
+  node_effective_protocol_version?: number
+  node_capabilities?: string[]
+  node_compatibility?: NativeCompatibilityStatus
+  node_upgrade_ready?: boolean
+  node_missing_capabilities?: string[]
+  node_protocol_observed_at?: string
   version_checked_at?: string
   compat_status?: CompatStatus
   compat_message?: string

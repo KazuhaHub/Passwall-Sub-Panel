@@ -18,6 +18,7 @@ vi.mock('./NativeAgentUpgradeDialog', () => ({
 const native: Server = {
   id: 7, name: 'native beta', panel_type: 'psp', update_channel: 'beta',
   panel_version: 'v0.0.1-beta3 (abcdef0)', url: '', capabilities: ['core.upgrade'],
+  node_compatibility: 'compatible', node_upgrade_ready: true,
   auth_method: '', has_api_token: false, has_password: false, insecure_https: false,
 }
 const catalog: NodeReleaseCatalog = {
@@ -98,6 +99,19 @@ describe('Server update hints and paired tray icons', () => {
     expect(screen.queryByRole('button', { name: 'admin:servers.agent_upgrade.available' })).toBeNull()
     expect(screen.queryByRole('dialog', { name: 'native-upgrade-preview' })).toBeNull()
     expect(upgradeWrites()).toHaveLength(0)
+  })
+
+  it('shows limited Node compatibility and blocks remote upgrade without hiding release metadata', async () => {
+    const limited = { ...native, node_compatibility: 'limited' as const, node_upgrade_ready: false }
+    installReads({ '/admin/servers': list([limited]) })
+    mount(<ServersView />)
+    const row = await rowFor(limited.name)
+    expect(within(row).getByText('admin:servers.native.compatibility.limited')).toBeTruthy()
+    expect(within(row).getByText('admin:servers.update_available_chip')).toBeTruthy()
+    expect(within(row).queryByRole('button', { name: 'admin:servers.agent_upgrade.available' })).toBeNull()
+    fireEvent.click(within(row).getByRole('button', { name: 'admin:servers.action.more' }))
+    expect(screen.getByRole('menuitem', { name: 'admin:servers.agent_upgrade.action' }).getAttribute('aria-disabled')).toBe('true')
+    expect(screen.queryByRole('dialog', { name: 'native-upgrade-preview' })).toBeNull()
   })
 
   it('links the S-UI hint to its official release without pretending it supports remote upgrades, preserving the 3X-UI hint', async () => {

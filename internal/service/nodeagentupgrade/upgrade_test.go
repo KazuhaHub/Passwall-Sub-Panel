@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	nodeprotocol "github.com/KazuhaHub/passwall-node/protocol"
+
 	"github.com/KazuhaHub/passwall-sub-panel/internal/adapters/sqlstore"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/idgen"
@@ -25,6 +27,10 @@ type upgradeFixture struct {
 }
 
 func newUpgradeFixture(t *testing.T) *upgradeFixture {
+	return newUpgradeFixtureWithObservation(t, true)
+}
+
+func newUpgradeFixtureWithObservation(t *testing.T, observed bool) *upgradeFixture {
 	t.Helper()
 	db, err := sqlstore.Open("sqlite", filepath.Join(t.TempDir(), "upgrade.db"))
 	if err != nil {
@@ -37,7 +43,15 @@ func newUpgradeFixture(t *testing.T) *upgradeFixture {
 	}
 	repos := sqlstore.NewRepos(db)
 	panel := &domain.XUIPanel{Kind: domain.PanelKindPSP, Name: "upgrade fixture", URL: "psp://agt_upgrade"}
-	agent := &domain.NodeAgent{AgentID: "agt_upgrade", CredentialSHA256: strings.Repeat("a", 64)}
+	observedAt := time.Now().UTC().Truncate(time.Millisecond)
+	agent := &domain.NodeAgent{
+		AgentID: "agt_upgrade", CredentialSHA256: strings.Repeat("a", 64),
+	}
+	if observed {
+		agent.ObservedProtocolVersion = nodeprotocol.ProtocolVersion1
+		agent.ObservedCapabilities = nodeprotocol.AgentUpgradeCapabilities()
+		agent.ProtocolObservedAt = &observedAt
+	}
 	if err := repos.NativeAgentProvisioning.Create(context.Background(), panel, agent); err != nil {
 		t.Fatal(err)
 	}
@@ -81,6 +95,34 @@ func TestUpgradeRequestRequiresAnExactNewerRelease(t *testing.T) {
 		if tc.valid && err != nil || !tc.valid && !errors.Is(err, domain.ErrValidation) {
 			t.Fatalf("target=%s expected=%s valid=%t error=%v", tc.target, tc.expected, tc.valid, err)
 		}
+	}
+}
+
+func TestUpgradeRequestRequiresDurableCompatibleAgentObservation(t *testing.T) {
+	for _, test := range []struct {
+		name         string
+		protocol     int
+		capabilities []string
+		observed     bool
+		want         string
+	}{
+		{name: "never observed", want: "has not been observed"},
+		{name: "base sync only", protocol: 1, capabilities: []string{nodeprotocol.CapabilityTaskExecutionV1, nodeprotocol.CapabilityTaskExpiryV1}, observed: true, want: nodeprotocol.TaskCapability(nodeprotocol.TaskKindAgentUpgradeV1)},
+		{name: "upgrade kind without task expiry", protocol: 1, capabilities: []string{nodeprotocol.CapabilityTaskExecutionV1, nodeprotocol.TaskCapability(nodeprotocol.TaskKindAgentUpgradeV1)}, observed: true, want: nodeprotocol.CapabilityTaskExpiryV1},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			f := newUpgradeFixtureWithObservation(t, test.observed)
+			if test.observed {
+				err := f.repos.NodeAgent.UpdateProtocolObservation(context.Background(), f.agent.AgentID, test.protocol, test.capabilities, f.now)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			_, _, err := f.service.Request(context.Background(), f.panel.ID, validUpgradeRequest, upgradeRequestKey)
+			if !errors.Is(err, domain.ErrValidation) || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("request error = %v, want validation containing %q", err, test.want)
+			}
+		})
 	}
 }
 

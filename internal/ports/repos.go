@@ -440,6 +440,7 @@ type NodeAgentRepo interface {
 	GetByPanelID(ctx context.Context, panelID int64) (*domain.NodeAgent, error)
 	UpdateCoreSelection(ctx context.Context, agentID string, engine domain.NodeCoreEngine, version string, allowRestrictedReality bool) error
 	UpdateCoreObservation(ctx context.Context, agentID string, engine domain.NodeCoreEngine) error
+	UpdateProtocolObservation(ctx context.Context, agentID string, protocolVersion int, capabilities []string, observedAt time.Time) error
 	TouchLastSeen(ctx context.Context, agentID string, seenAt time.Time) error
 	GetStream(ctx context.Context, agentID string, stream domain.NodeAgentStreamName) (*domain.NodeAgentStream, error)
 	ListStreams(ctx context.Context, agentID string) ([]*domain.NodeAgentStream, error)

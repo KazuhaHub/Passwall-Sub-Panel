@@ -65,11 +65,17 @@ func renderNodeInstallationFiles(panelID int64, p nativeServerCreateResponse, r 
 		if r.Arch != "" {
 			platformLine = "    platform: linux/" + r.Arch + "\n"
 		}
+		agentContainer := fmt.Sprintf("passwall-node-server-%d-agent", panelID)
+		updaterContainer := fmt.Sprintf("passwall-node-server-%d-updater", panelID)
 		compose := fmt.Sprintf(`name: passwall-node-server-%d
 services:
   passwall-node:
+    container_name: %s
     image: ghcr.io/kazuhahub/passwall-node:%s
 %s    restart: unless-stopped
+    depends_on:
+      passwall-node-updater:
+        condition: service_started
     network_mode: host
     env_file:
       - path: ./node.env
@@ -78,6 +84,11 @@ services:
       - node_credential
     volumes:
       - passwall-node-data:/var/lib/passwall-node
+      - passwall-node-upgrades:/run/passwall-node-upgrades
+    labels:
+      io.kazuhahub.passwall-node.managed: "true"
+      io.kazuhahub.passwall-node.role: agent
+      io.kazuhahub.passwall-node.agent-id: %q
     read_only: true
     tmpfs:
       - /run/passwall-node:size=64k,mode=0700
@@ -96,22 +107,48 @@ services:
     security_opt:
       - no-new-privileges:true
     stop_grace_period: 30s
+
+  passwall-node-updater:
+    container_name: %s
+    image: ghcr.io/kazuhahub/passwall-node:%s
+%s    command: ["--run-docker-upgrade-helper"]
+    restart: unless-stopped
+    network_mode: none
+    environment:
+      PSP_NODE_UPGRADE_TARGET_CONTAINER: %s
+      PSP_NODE_UPGRADE_TARGET_AGENT_ID: %q
+      PUID: "10001"
+      PGID: "10001"
+    volumes:
+      # Docker socket access is root-equivalent. It belongs only to this
+      # isolated updater; never mount it into the network-facing Agent.
+      - /var/run/docker.sock:/var/run/docker.sock
+      - passwall-node-upgrades:/run/passwall-node-upgrades
+    read_only: true
+    tmpfs:
+      - /tmp:size=4m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 15s
 secrets:
   node_credential:
     file: ./node-credential
 volumes:
   passwall-node-data:
-`, panelID, r.Version, platformLine)
+  passwall-node-upgrades:
+`, panelID, agentContainer, r.Version, platformLine, p.AgentID, updaterContainer, r.Version, platformLine, agentContainer, p.AgentID)
 		result.Files = []nodeInstallationFile{
 			{Name: "compose.yaml", Content: compose},
-			{Name: "node.env", Content: "PSP_NODE_ENDPOINT=" + p.Endpoint + "\nPSP_NODE_AGENT_ID=" + p.AgentID + "\nPSP_NODE_ALLOW_INSECURE_HTTP=false\n"},
+			{Name: "node.env", Content: "PSP_NODE_ENDPOINT=" + p.Endpoint + "\nPSP_NODE_AGENT_ID=" + p.AgentID + "\nPSP_NODE_ALLOW_INSECURE_HTTP=false\nPSP_NODE_DOCKER_REMOTE_UPGRADE=true\n"},
 			credential,
 		}
 		result.Steps = []nodeInstallationStep{
 			{ID: "prepare", Title: "Prepare a private installation directory", Description: "Use Linux Docker Engine and Docker Compose >=2.30.0. Unless an architecture was explicitly selected, the multi-platform image selects the host architecture. Save all three generated files with their exact names in the same private directory. This is a first-install guide; preserve the same Compose project and data volume when reinstalling or updating. Stop the old machine before reusing this identity.", Commands: []string{"set -eu\numask 077\nmkdir ./passwall-node-install\nchmod 0700 ./passwall-node-install\ncd ./passwall-node-install"}},
 			{ID: "credential", Title: "Protect the credential file", Description: "Transfer the files through a private channel. Never put the credential in command arguments, environment variables, tracing, shell history or shared logs.", Commands: []string{"set -eu\nchmod 0600 ./node-credential ./node.env ./compose.yaml\ndocker compose version\ndocker compose -f compose.yaml config --quiet"}},
-			{ID: "start", Title: "Pull and start the selected container image", Description: "The default latest/beta tag follows the selected release channel; an exact version stays pinned for rollback. Pull and recreate the service to apply a newer image in the same channel. The container drops to its dedicated non-root UID. Host networking is required for PSP-managed dynamic listeners. Choose free listener ports >=1024 unless the Linux host explicitly permits non-root low ports. Do not use a privileged container or mount the Docker socket.", Commands: []string{"set -eu\ndocker compose -f compose.yaml pull passwall-node\ndocker compose -f compose.yaml up -d --no-deps passwall-node"}},
-			{ID: "check", Title: "Verify the version and connect to PSP", Description: "Check the reported version and Agent status in PSP, then configure nodes separately. Agent heartbeat alone is not proof of a running proxy core. Docker uses host-managed container updates, not the built-in Linux/systemd remote upgrade helper. Back up this private directory and the persistent data volume; never run compose down --volumes to update.", Commands: []string{"set -eu\ndocker compose -f compose.yaml exec -T passwall-node /usr/local/bin/passwall-node --version\ndocker compose -f compose.yaml ps passwall-node"}},
+			{ID: "start", Title: "Pull and start the selected container image", Description: "The default latest/beta tag follows the selected release channel; an exact version stays pinned for rollback. Start both services: the network-facing Agent runs as a dedicated non-root UID, while the isolated updater alone receives the root-equivalent Docker socket. Host networking is required only by the Agent for PSP-managed dynamic listeners. Choose free listener ports >=1024 unless the Linux host explicitly permits non-root low ports. Do not use a privileged container or mount the Docker socket into the Agent.", Commands: []string{"set -eu\ndocker compose -f compose.yaml pull passwall-node passwall-node-updater\ndocker compose -f compose.yaml up -d"}},
+			{ID: "check", Title: "Verify the version and connect to PSP", Description: "Check both services, the reported version and Agent status in PSP, then configure nodes separately. Agent heartbeat alone is not proof of a running proxy core. The updater enables authenticated remote upgrades with automatic rollback; it accepts official exact releases only and never receives the node credential. Back up this private directory and the persistent data volume; never run compose down --volumes to update.", Commands: []string{"set -eu\ndocker compose -f compose.yaml exec -T passwall-node /usr/local/bin/passwall-node --version\ndocker compose -f compose.yaml ps passwall-node passwall-node-updater"}},
 		}
 		return result
 	}

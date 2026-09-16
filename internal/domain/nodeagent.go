@@ -35,18 +35,32 @@ func (e NodeCoreEngine) Valid() bool {
 // ordinary domain reads expose only a SHA-256 credential digest. A separate
 // encrypted recovery copy is accessed through the admin provisioning port.
 type NodeAgent struct {
-	ID                     int64
-	AgentID                string
-	PanelID                int64
-	Epoch                  uint64
-	CredentialSHA256       string
-	DesiredCoreEngine      NodeCoreEngine
-	DesiredCoreVersion     string
-	AllowRestrictedReality bool
-	ObservedCoreEngine     NodeCoreEngine
-	LastSeen               *time.Time
-	CreatedAt              time.Time
-	UpdatedAt              time.Time
+	ID                      int64
+	AgentID                 string
+	PanelID                 int64
+	Epoch                   uint64
+	CredentialSHA256        string
+	ObservedProtocolVersion int
+	ObservedCapabilities    []string
+	ProtocolObservedAt      *time.Time
+	DesiredCoreEngine       NodeCoreEngine
+	DesiredCoreVersion      string
+	AllowRestrictedReality  bool
+	ObservedCoreEngine      NodeCoreEngine
+	LastSeen                *time.Time
+	CreatedAt               time.Time
+	UpdatedAt               time.Time
+}
+
+// ProtocolCompatibility returns the shared PSP/Node compatibility decision
+// for the most recent authenticated report. The bool is false until at least
+// one report has been persisted; a zero protocol version after that point is
+// the explicitly supported legacy spelling of protocol v1.
+func (a *NodeAgent) ProtocolCompatibility() (nodeprotocol.Compatibility, bool) {
+	if a == nil || a.ProtocolObservedAt == nil {
+		return nodeprotocol.Compatibility{}, false
+	}
+	return nodeprotocol.AssessCompatibility(a.ObservedProtocolVersion, a.ObservedCapabilities), true
 }
 
 // NodeAgentIssue is an operator-visible condition reported by a native agent.

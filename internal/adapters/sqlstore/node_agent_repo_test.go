@@ -5,9 +5,13 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"reflect"
+	"sort"
 	"strings"
 	"testing"
 	"time"
+
+	nodeprotocol "github.com/KazuhaHub/passwall-node/protocol"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 )
@@ -130,6 +134,59 @@ func TestNodeAgentCoreSelectionUsesColumnScopedUpdate(t *testing.T) {
 	}
 	if err := repo.UpdateCoreObservation(ctx, "agt_missing", domain.NodeCoreXray); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("missing agent observation error = %v", err)
+	}
+}
+
+func TestNodeAgentProtocolObservationIsCanonicalAndColumnScoped(t *testing.T) {
+	db, err := openTestDB(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := EnsureSchema(db); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	repo := NewRepos(db).NodeAgent
+	agent := &domain.NodeAgent{
+		AgentID: "agt_protocol", PanelID: 151, CredentialSHA256: strings.Repeat("34", 32),
+		DesiredCoreVersion: "26.7.28",
+	}
+	if err := repo.Create(ctx, agent); err != nil {
+		t.Fatal(err)
+	}
+	// SQL timestamp precision differs across supported dialects. Protocol
+	// observations only need wall-clock ordering, so keep the fixture portable.
+	observedAt := time.Date(2026, 9, 16, 12, 0, 0, 0, time.UTC)
+	capabilities := []string{
+		nodeprotocol.TaskCapability(nodeprotocol.TaskKindAgentUpgradeV1),
+		nodeprotocol.CapabilityTaskExpiryV1,
+		nodeprotocol.CapabilityTaskExecutionV1,
+	}
+	if err := repo.UpdateProtocolObservation(ctx, agent.AgentID, nodeprotocol.ProtocolVersion1, capabilities, observedAt); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := repo.GetByAgentID(ctx, agent.AgentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantCapabilities := nodeprotocol.AgentUpgradeCapabilities()
+	sort.Strings(wantCapabilities)
+	if loaded.ObservedProtocolVersion != nodeprotocol.ProtocolVersion1 ||
+		!reflect.DeepEqual(loaded.ObservedCapabilities, wantCapabilities) ||
+		loaded.ProtocolObservedAt == nil || !loaded.ProtocolObservedAt.Equal(observedAt) ||
+		loaded.DesiredCoreVersion != agent.DesiredCoreVersion || loaded.CredentialSHA256 != agent.CredentialSHA256 {
+		t.Fatalf("protocol observation = %+v, want caps=%v at=%v", loaded, wantCapabilities, observedAt)
+	}
+	if err := repo.UpdateProtocolObservation(ctx, agent.AgentID, 0, nil, observedAt.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err = repo.GetByAgentID(ctx, agent.AgentID)
+	if err != nil || loaded.ProtocolObservedAt == nil || !loaded.ProtocolObservedAt.Equal(observedAt.Add(time.Minute)) ||
+		loaded.ObservedProtocolVersion != 0 || len(loaded.ObservedCapabilities) != 0 {
+		t.Fatalf("withdrawn capabilities = (%+v, %v)", loaded, err)
+	}
+	if err := repo.UpdateProtocolObservation(ctx, "agt_missing", 1, nil, observedAt); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("missing agent protocol observation error = %v", err)
 	}
 }
 
