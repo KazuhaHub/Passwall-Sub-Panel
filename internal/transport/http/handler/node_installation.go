@@ -250,7 +250,22 @@ func (h *AdminServersHandler) nodeAgentStatus(ctx context.Context, panelID int64
 			poll = settings.NodePollSeconds
 		}
 	}
-	if agent.OfflineAt(now, 3*time.Duration(poll)*time.Second) {
+	silence := 3 * time.Duration(poll) * time.Second
+	if agent.OfflineAt(now, silence) {
+		// A restart of the PANEL is not evidence about the NODE. last_seen is
+		// durable, but it stops advancing while PSP is down, so any outage longer
+		// than the silence window minus one poll leaves every healthy agent
+		// looking dead the moment PSP returns — which is what an operator saw.
+		//
+		// Until this process has been listening for a full window, PSP genuinely
+		// cannot tell "gone" from "not heard from yet", and reporting "offline"
+		// states a failure it has not established. Report the uncertainty under
+		// its own name instead; it resolves itself on the node's next check-in,
+		// or hardens into offline once the window has actually elapsed.
+		if now.Sub(h.startedAt) < silence {
+			result.State = "awaiting_checkin"
+			return result, nil
+		}
 		result.State = "offline"
 		return result, nil
 	}

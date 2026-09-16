@@ -2303,6 +2303,7 @@
       "status_next": {
         "checking": "正在读取原服务器上报的状态，尚未确认安装成功。",
         "waiting": "请在节点机执行命令，等待首次连接。",
+        "awaiting_checkin": "面板刚重启，还没收到这个节点的回报。这不代表节点离线——面板停机期间节点的静默不能作为判据。静默超过上限后才会转为「Agent 离线」。",
         "offline": "检查该节点的服务及网络；离线时可能仍在执行最近确认的代理状态。",
         "unconfigured": "前往节点页面添加或检查 inbound，并填写真实公网地址与端口。",
         "applying": "请等待内核确认目标配置已生效。",
@@ -2312,6 +2313,7 @@
       "agent_status": {
         "checking": "正在读取状态…",
         "waiting": "等待首次心跳",
+        "awaiting_checkin": "等待节点回报",
         "offline": "Agent 离线",
         "unconfigured": "Agent 已连接，尚未配置可运行的 inbound",
         "applying": "Agent 正在应用配置，尚未确认运行",

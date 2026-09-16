@@ -2305,6 +2305,7 @@
       "status_next": {
         "checking": "Reading the original server's reported status; no installation success has been confirmed.",
         "waiting": "Run the command on the node host, then wait for its first connection.",
+        "awaiting_checkin": "The panel restarted recently and has not heard from this node yet. This is not evidence the node is down: silence during the panel’s own downtime says nothing about the node. It becomes offline only once the panel has been listening for a full silence window.",
         "offline": "Check this node's service and network connection; its last confirmed proxy state may still be enforced offline.",
         "unconfigured": "Go to Nodes to add or check an inbound with its real public address and port.",
         "applying": "Wait for the core to confirm the requested configuration.",
@@ -2314,6 +2315,7 @@
       "agent_status": {
         "checking": "Reading status…",
         "waiting": "Waiting for the first heartbeat",
+        "awaiting_checkin": "Awaiting node check-in",
         "offline": "Agent offline",
         "unconfigured": "Agent connected; no runnable inbound configured yet",
         "applying": "Agent applying configuration; runtime not yet confirmed",

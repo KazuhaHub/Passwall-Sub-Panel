@@ -108,7 +108,14 @@ export interface NativeServerProvisioning {
 }
 
 export interface NativeAgentStatus {
-  state: 'waiting' | 'offline' | 'unconfigured' | 'applying' | 'running' | 'error'
+  /**
+   * Mirrors nodeAgentStatusResponse.State in node_installation.go. Three of these
+   * are distinct kinds of "not reporting" and must stay distinct: `waiting` has
+   * never connected, `awaiting_checkin` means the PANEL restarted and has not
+   * listened long enough to judge, and `offline` is the agent actually having
+   * gone silent. Different causes, different operator actions.
+   */
+  state: 'waiting' | 'awaiting_checkin' | 'offline' | 'unconfigured' | 'applying' | 'running' | 'error'
   last_seen?: string
   core_state?: string
   configured_nodes: number
