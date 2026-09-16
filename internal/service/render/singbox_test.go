@@ -130,7 +130,7 @@ func TestBuildSingBoxRouteRules_QUICAndUDPStayIndependent(t *testing.T) {
 	passThrough := singBoxPassThroughProxyGroups(nil, nil, raw)
 	rules, _ := buildSingBoxRouteRulesWithPassThrough(passThrough, raw)
 	if len(rules) != 2 {
-		t.Fatalf("want sniff + direct-default QUIC; UDP PASS must be omitted, got %#v", rules)
+		t.Fatalf("want sniff + rejected-by-default QUIC; UDP PASS must be omitted, got %#v", rules)
 	}
 	quic := rules[1]
 	if quic["action"] != "route" || quic["outbound"] != "⚡ QUIC控制" || quic["network"] != "udp" {
@@ -145,8 +145,8 @@ func TestBuildSingBoxRouteRules_QUICAndUDPStayIndependent(t *testing.T) {
 	for _, selector := range selectors {
 		if selector["tag"] == "⚡ QUIC控制" {
 			quicSelectorFound = true
-			if selector["default"] != "direct" {
-				t.Fatalf("QUIC selector default = %#v, want direct", selector["default"])
+			if selector["default"] != "block" {
+				t.Fatalf("QUIC selector default = %#v, want block", selector["default"])
 			}
 		}
 		if selector["tag"] == "🎮 UDP控制" {

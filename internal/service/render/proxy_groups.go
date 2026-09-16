@@ -257,10 +257,10 @@ func normalizeRulePart(raw string) string {
 func proxyGroupChoices(name string) []string {
 	switch {
 	case strings.Contains(name, "QUIC控制"):
-		// HTTP/3 over UDP/443 is independent from general UDP. Direct is the
-		// conservative default: it avoids a slow UDP-capable proxy making normal
-		// web browsing stall, while users can still proxy or reject QUIC.
-		return []string{"DIRECT", "🚀 节点选择", "REJECT"}
+		// HTTP/3 over UDP/443 is independent from general UDP. REJECT is the
+		// conservative default: browsers immediately fall back to TCP instead of
+		// stalling on a slow UDP path. Users can still opt into proxying or DIRECT.
+		return []string{"REJECT", "🚀 节点选择", "DIRECT"}
 	case strings.Contains(name, "UDP控制"):
 		// PASS keeps evaluating later domain/region rules, so non-QUIC UDP follows
 		// the same policy as the corresponding service instead of being forced

@@ -173,7 +173,7 @@ func TestBuildProxyGroupsYAML_QUICControlIsIndependent(t *testing.T) {
 	if !ok {
 		t.Fatalf("QUIC selector missing: %#v", groups)
 	}
-	assertMemberStrings(t, quic.Proxies, []string{"DIRECT", "🚀 节点选择", "REJECT"})
+	assertMemberStrings(t, quic.Proxies, []string{"REJECT", "🚀 节点选择", "DIRECT"})
 	if _, ok := byName["🎮 UDP控制"]; ok {
 		t.Fatalf("independent QUIC selector must not invent a UDP dependency: %#v", groups)
 	}

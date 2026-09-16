@@ -64,6 +64,7 @@ func TestRoutingDefaultMigrationSourcesExistAndChanged(t *testing.T) {
 			"01c4be93d1bb183336940faa8ed8ebf0f08110adee12327405ab659be282adbc",
 			"81ca6e2e15c700478b8a15b59ef006f4f2b46043b587484b6b6238b7dee039c3",
 			"caf6d32b70f2ae4a66b5879e409280caa3552a1121a8bc137164e1c32efa112d",
+			"1eab50bef8b214380cceaabacf89d1a4ec5b223193b853a53466274fac73fbe2",
 		},
 	}
 	for relPath, oldHashes := range checks {
@@ -93,6 +94,18 @@ func TestEnsureUpgradesPreviousIndependentRoutingDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	previousBeta10Rules := []byte(strings.NewReplacer(
+		"  # HTTP/3's usual transport (UDP/443) has its own runtime selector. It defaults\n"+
+			"  # to REJECT so browsers immediately fall back to TCP instead of stalling on\n"+
+			"  # a slow UDP path; a subscriber can independently select the proxy or DIRECT.\n",
+		"  # HTTP/3's usual transport (UDP/443) has its own runtime selector. It defaults\n"+
+			"  # to DIRECT so a slow UDP-capable proxy does not stall normal web browsing;\n"+
+			"  # a subscriber can independently select the proxy or REJECT (which lets\n"+
+			"  # browsers fall back to TCP).\n",
+	).Replace(string(rules)))
+	if got := testSHA256(previousBeta10Rules); got != "1eab50bef8b214380cceaabacf89d1a4ec5b223193b853a53466274fac73fbe2" {
+		t.Fatalf("previous beta.10 rules hash = %s", got)
+	}
 	// Reconstruct prior official prefixes without copying the unchanged
 	// 9,000-line tail. Their pinned hashes prove they are published defaults.
 	previousDirectRules := []byte(strings.NewReplacer(
@@ -108,7 +121,7 @@ func TestEnsureUpgradesPreviousIndependentRoutingDefaults(t *testing.T) {
 			"  # its normal routing decision instead of all UDP being forced direct or proxy.\n",
 		"  # All remaining non-local UDP -> the 🎮 UDP控制 selector, default DIRECT.\n"+
 			"  # UDP stays enabled and uses the local exit IP even when the main node is a proxy.\n",
-	).Replace(string(rules)))
+	).Replace(string(previousBeta10Rules)))
 	if got := testSHA256(previousDirectRules); got != "caf6d32b70f2ae4a66b5879e409280caa3552a1121a8bc137164e1c32efa112d" {
 		t.Fatalf("previous direct-default rules hash = %s", got)
 	}
@@ -130,10 +143,11 @@ func TestEnsureUpgradesPreviousIndependentRoutingDefaults(t *testing.T) {
 		customizeTemplate bool
 		customizeRules    bool
 	}{
+		{name: "untouched beta.10 defaults upgrade", sourceRules: previousBeta10Rules},
 		{name: "untouched direct defaults upgrade", sourceRules: previousDirectRules},
 		{name: "untouched beta.7 defaults upgrade", sourceRules: previousBeta7Rules},
-		{name: "customized template preserves whole bundle", sourceRules: previousDirectRules, customizeTemplate: true},
-		{name: "customized rules preserve whole bundle", sourceRules: previousDirectRules, customizeRules: true},
+		{name: "customized template preserves whole bundle", sourceRules: previousBeta10Rules, customizeTemplate: true},
+		{name: "customized rules preserve whole bundle", sourceRules: previousBeta10Rules, customizeRules: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()
