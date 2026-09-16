@@ -2160,8 +2160,8 @@
     "update_available_chip": "Update → {{latest}}",
     "hint": {
       "name": "Display name; the internal reference uses the database ID.",
-      "update_channel": "Saved preference for opening installation and upgrade version lists. Stable is the default; Beta requires choosing an exact reviewed release. Saving does not install, upgrade, or change server/node identities or credentials. Temporary channel selections in dialogs are not saved.",
-      "update_channel_short": "Default version-list channel only; saving does not upgrade the node.",
+      "update_channel": "Saved preference for installation and upgrade lists. Docker files follow latest for Stable or beta for Testing by default; manual and systemd installation still use an exact reviewed release. Saving does not install, upgrade, or change server/node identities or credentials. Temporary channel selections in dialogs are not saved.",
+      "update_channel_short": "Default release channel; Docker files follow its image tag, but saving does not upgrade the node.",
       "configured": "Configured (kept unchanged)",
       "unconfigured": "Not configured",
       "change": "Change",
@@ -2180,7 +2180,7 @@
       },
       "method_hint": {
         "linux": "For Linux servers running systemd; root privileges are required. Save the server, download its private script, and transfer it to the target machine. The script installs an exact release with a dedicated user and service.",
-        "docker": "Requires Linux Docker Engine, Compose 2.30.0 or newer, and host networking. Save the server to generate its Compose and private credential files, transfer them to the target machine, and start the container. Preserve persistent data.",
+        "docker": "Requires Linux Docker Engine, Compose 2.30.0 or newer, and host networking. The generated Compose follows the selected latest/beta channel by default; an exact release can be pinned for rollback. Transfer the private files to the target machine, start the container, and preserve persistent data.",
         "manual": "Foreground operation on Linux / macOS / Windows, amd64 / arm64. Choose the platform and exact release, download its archive and SHA256 checksum, verify and extract it, then configure private credentials. No systemd service is installed."
       },
       "method_version_hint": "Choose an installation method and save the server before generating its installation files. Switching methods does not rotate credentials or change the server identity.",
@@ -2259,8 +2259,11 @@
       "release_no_stable": "No compatible stable release is available for this installation method and platform. Select the testing channel explicitly if needed.",
       "release_no_testing": "No compatible testing release is available for this installation method and platform.",
       "release_version_hint": "Choose an exact published version. Channel selection does not upgrade existing nodes. Select the proxy core separately in the server menu.",
+      "release_version_hint_docker": "Follow the selected channel by default so future pulls need no Compose edit, or pin an exact version for rollback. Pull and recreate the service to apply an update.",
       "release_choose_version": "Choose a version",
       "release_recommended": "Recommended",
+      "release_follow_stable": "Follow Stable (latest)",
+      "release_follow_testing": "Follow Beta / Testing (beta)",
       "release_published": "Published {{date}} (UTC)",
       "release_details": "Passwall Node release details",
       "release_review": "Release notes and publication details",

@@ -181,13 +181,20 @@ func (h *AdminServersHandler) NodeInstallationFiles(c *gin.Context) {
 	if !ok {
 		return
 	}
-	// Reuse the released Node deployment package's canonical HTTPS, identity,
-	// credential and release validation; do not widen it for another method.
+	// Reuse the released Node deployment package's canonical HTTPS, identity and
+	// credential validation. Floating image tags are Docker-only and were
+	// already reduced to the closed latest/beta set by req.normalize; use a
+	// harmless canonical release solely for validation because RenderLinux
+	// intentionally accepts exact native archive versions only.
+	validationVersion := req.Version
+	if validationVersion == "latest" || validationVersion == "beta" {
+		validationVersion = "v0.0.0"
+	}
 	if _, err := deployment.RenderLinux(deployment.Options{
 		Endpoint: provisioning.Endpoint, AgentID: provisioning.AgentID,
-		Credential: provisioning.Credential, Version: req.Version,
+		Credential: provisioning.Credential, Version: validationVersion,
 	}); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "a canonical HTTPS PSP endpoint and exact published Node version are required"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "a canonical HTTPS PSP endpoint and supported Node image selection are required"})
 		return
 	}
 	if !h.auditNodeCredentialRead(c, panel.ID, provisioning.AgentID) {

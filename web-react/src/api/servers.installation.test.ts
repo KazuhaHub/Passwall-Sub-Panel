@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const http = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn() }))
 vi.mock('./client', () => ({ client: http }))
 
-import { createNativeInstallScript, createNodeInstallCommand, createNodeMigrationCommand, getNativeAgentStatus, getNativeInstallation, importNativeCredential } from './servers'
+import { createNativeInstallationFiles, createNativeInstallScript, createNodeInstallCommand, createNodeMigrationCommand, getNativeAgentStatus, getNativeInstallation, importNativeCredential } from './servers'
 
 beforeEach(() => {
   vi.clearAllMocks()
@@ -42,5 +42,15 @@ describe('administrator Node installation API', () => {
     expect(http.post).toHaveBeenCalledWith('/admin/servers/7/node-credential', { credential: 'original-secret' }, { signal, _skipErrorToast: true })
     expect(http.post).toHaveBeenCalledWith('/admin/servers/7/node-install-script', { version: 'v1.2.3-beta.1' }, { responseType: 'text', signal, _skipErrorToast: true })
     expect(http.post.mock.calls.every(([url]) => !String(url).includes('secret'))).toBe(true)
+  })
+
+  it('passes a reviewed Docker channel tag without adding manual platform fields', async () => {
+    const signal = new AbortController().signal
+    const files = { method: 'docker', os: 'linux', files: [], steps: [] }
+    http.post.mockResolvedValueOnce({ data: files })
+    await expect(createNativeInstallationFiles(7, 'beta', { method: 'docker', os: 'linux', arch: 'amd64' }, signal)).resolves.toEqual(files)
+    expect(http.post).toHaveBeenCalledWith('/admin/servers/7/node-installation-files', {
+      version: 'beta', method: 'docker',
+    }, { signal, _skipErrorToast: true })
   })
 })

@@ -113,6 +113,8 @@ func TestNodeInstallationFilesRejectsUnsupportedInputsAndNonAdministrators(t *te
 	h, repo := installationFixture(t)
 	for _, body := range []string{
 		`{"method":"manual","version":"latest"}`,
+		`{"method":"manual","version":"beta"}`,
+		`{"method":"docker","version":"edge"}`,
 		`{"method":"manual","version":"v0.01.0"}`,
 		`{"method":"manual","version":"v0.0.1;id"}`,
 		`{"method":"manual","version":"v0.0.1","arch":"amd64;id"}`,
@@ -184,10 +186,10 @@ func TestNodeInstallationFilesAuditContainsMetadataNotGeneratedSecrets(t *testin
 	}
 }
 
-func TestNodeInstallationFilesDockerIsPinnedAndPreservesLiteralEndpoint(t *testing.T) {
+func TestNodeInstallationFilesDockerTracksReviewedChannelAndPreservesLiteralEndpoint(t *testing.T) {
 	_, repo := installationFixture(t)
 	p := nativeServerCreateResponse{AgentID: repo.agent.AgentID, Credential: repo.credential, Endpoint: "https://panel.example/a$VAR'path/v1/node/sync"}
-	result := renderNodeInstallationFiles(41, p, nodeInstallationFilesRequest{Method: "docker", Version: "v0.0.1-beta3", OS: "linux", Arch: "arm64"})
+	result := renderNodeInstallationFiles(41, p, nodeInstallationFilesRequest{Method: "docker", Version: "beta", OS: "linux", Arch: "arm64"})
 	var compose, env string
 	for _, file := range result.Files {
 		switch file.Name {
@@ -197,13 +199,13 @@ func TestNodeInstallationFilesDockerIsPinnedAndPreservesLiteralEndpoint(t *testi
 			env = file.Content
 		}
 	}
-	for _, required := range []string{"name: passwall-node-server-41", "image: ghcr.io/kazuhahub/passwall-node:v0.0.1-beta3", "platform: linux/arm64", "format: raw", "network_mode: host", "file: ./node-credential", "passwall-node-data:/var/lib/passwall-node", "read_only: true", "no-new-privileges:true", "    cap_drop:\n      - ALL\n", "    cap_add:\n      - CHOWN\n      - DAC_OVERRIDE\n      - FOWNER\n      - SETGID\n      - SETUID\n"} {
+	for _, required := range []string{"name: passwall-node-server-41", "image: ghcr.io/kazuhahub/passwall-node:beta", "platform: linux/arm64", "format: raw", "network_mode: host", "file: ./node-credential", "passwall-node-data:/var/lib/passwall-node", "read_only: true", "no-new-privileges:true", "    cap_drop:\n      - ALL\n", "    cap_add:\n      - CHOWN\n      - DAC_OVERRIDE\n      - FOWNER\n      - SETGID\n      - SETUID\n"} {
 		if !strings.Contains(compose, required) {
 			t.Fatalf("production compose requirement absent: %s", required)
 		}
 	}
-	if strings.Contains(compose, "latest") || strings.Contains(compose, "privileged:") || strings.Contains(compose, "docker.sock") || strings.Contains(compose, p.Endpoint) || !strings.Contains(env, "PSP_NODE_ENDPOINT="+p.Endpoint+"\n") {
-		t.Fatal("compose was floating, privileged or interpolated the endpoint")
+	if strings.Contains(compose, "privileged:") || strings.Contains(compose, "docker.sock") || strings.Contains(compose, p.Endpoint) || !strings.Contains(env, "PSP_NODE_ENDPOINT="+p.Endpoint+"\n") {
+		t.Fatal("compose was privileged or interpolated the endpoint")
 	}
 	if strings.Count(compose, "      - ALL\n") != 1 || !strings.Contains(compose, "permitted/effective capability sets of the non-root daemon") {
 		t.Fatal("capabilities were not limited to the documented entrypoint transition")
@@ -216,6 +218,16 @@ func TestNodeInstallationFilesDockerIsPinnedAndPreservesLiteralEndpoint(t *testi
 	}
 	if !strings.Contains(protect, "chmod 0600 ./node-credential ./node.env ./compose.yaml") {
 		t.Fatal("entrypoint compatibility weakened host credential permissions")
+	}
+}
+
+func TestNodeInstallationFilesDockerAllowsStableChannelAndExactPin(t *testing.T) {
+	h, _ := installationFixture(t)
+	for _, version := range []string{"latest", "beta", "v0.0.1-beta3"} {
+		w := installationRequest(h, http.MethodPost, "node-installation-files", `{"method":"docker","version":"`+version+`"}`, "", domain.RoleAdmin)
+		if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "ghcr.io/kazuhahub/passwall-node:"+version) {
+			t.Fatalf("Docker image selection %q was not preserved: status=%d body=%s", version, w.Code, w.Body.String())
+		}
 	}
 }
 

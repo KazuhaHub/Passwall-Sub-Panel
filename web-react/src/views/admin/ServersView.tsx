@@ -1823,6 +1823,10 @@ export function isNodeReleaseVersion(version: string): boolean {
   return !version.includes('-') || prerelease.split('.').every(segment => !/^0\d+$/.test(segment))
 }
 
+function isNodeDockerImageSelection(version: string): boolean {
+  return version === 'latest' || version === 'beta' || isNodeReleaseVersion(version)
+}
+
 function installationErrorMessage(error: unknown, fallback: string): string {
   const err = error as { response?: { data?: unknown }; message?: string } | null | undefined
   let data = err?.response?.data
@@ -1895,7 +1899,9 @@ export function NativeInstallationDialog({ server, initialProvisioning, onClose,
   const filesRequest = useRef<AbortController | null>(null)
   const commandRequest = useRef<AbortController | null>(null)
   const serverID = server?.id
-  const versionValid = isNodeReleaseVersion(version.trim())
+  const versionValid = selection.method === 'docker'
+    ? isNodeDockerImageSelection(version.trim())
+    : isNodeReleaseVersion(version.trim())
 
   useEffect(() => {
     const controller = new AbortController()

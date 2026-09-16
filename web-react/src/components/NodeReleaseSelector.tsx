@@ -93,10 +93,18 @@ export default function NodeReleaseSelector({ enabled, selection, value, onChang
   ), [releases, channel, selection])
   const selected = options.find(release => release.version === value)
   const selectedURL = selected ? officialReleaseURL(selected) : undefined
+  const channelTag = channel === 'stable' ? 'latest' : 'beta'
+  const followsDockerChannel = selection.method === 'docker' && value === channelTag && options.length > 0
+  const acceptedValue = !!selected || followsDockerChannel
 
   useEffect(() => {
-    if (value && !selected) onChangeRef.current('')
-  }, [value, selected])
+    if (!enabled || loading || failed || releases === null) return
+    if (selection.method === 'docker' && options.length > 0 && !value) {
+      onChangeRef.current(channelTag)
+      return
+    }
+    if (value && !acceptedValue) onChangeRef.current('')
+  }, [acceptedValue, channelTag, enabled, failed, loading, options.length, releases, selection.method, value])
 
   if (!enabled) return null
   const published = selected && new Date(selected.published_at)
@@ -127,16 +135,22 @@ export default function NodeReleaseSelector({ enabled, selection, value, onChang
       <MenuItem value="stable">{t('admin:servers.native.release_stable')}</MenuItem>
       <MenuItem value="testing">{t('admin:servers.native.release_testing')}</MenuItem>
     </TextField>
-    <TextField select fullWidth label={t('admin:servers.native.agent_version')} value={selected ? value : ''}
+    <TextField select fullWidth label={t('admin:servers.native.agent_version')} value={acceptedValue ? value : ''}
       disabled={disabled || loading || failed || options.length === 0}
-      helperText={compact ? undefined : t('admin:servers.native.release_version_hint')}
+      helperText={compact ? undefined : t(selection.method === 'docker'
+        ? 'admin:servers.native.release_version_hint_docker'
+        : 'admin:servers.native.release_version_hint')}
       onChange={event => {
         const next = event.target.value
-        if (next === '' || options.some(release => release.version === next)) onChangeRef.current(next)
+        if (next === '' || (selection.method === 'docker' && next === channelTag) || options.some(release => release.version === next)) onChangeRef.current(next)
       }}>
       <MenuItem value="">{t('admin:servers.native.release_choose_version')}</MenuItem>
-      {options.map((release, index) => <MenuItem key={release.version} value={release.version} aria-label={release.version}>
-        {release.version}{index === 0 ? ` (${t('admin:servers.native.release_recommended')})` : ''}
+      {selection.method === 'docker' && options.length > 0 && <MenuItem value={channelTag} aria-label={channelTag}>
+        {t(channel === 'stable' ? 'admin:servers.native.release_follow_stable' : 'admin:servers.native.release_follow_testing')}
+        {` (${t('admin:servers.native.release_recommended')})`}
+      </MenuItem>}
+      {options.map(release => <MenuItem key={release.version} value={release.version} aria-label={release.version}>
+        {release.version}
       </MenuItem>)}
     </TextField>
     </Stack>

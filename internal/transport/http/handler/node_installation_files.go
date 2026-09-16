@@ -16,7 +16,8 @@ type nodeInstallationFilesRequest struct {
 }
 
 func (r *nodeInstallationFilesRequest) normalize() bool {
-	if !deployment.ValidReleaseVersion(r.Version) || (r.Method != "docker" && r.Method != "manual") {
+	if (r.Method != "docker" && r.Method != "manual") ||
+		(!deployment.ValidReleaseVersion(r.Version) && !(r.Method == "docker" && (r.Version == "latest" || r.Version == "beta"))) {
 		return false
 	}
 	if r.OS == "" {
@@ -109,7 +110,7 @@ volumes:
 		result.Steps = []nodeInstallationStep{
 			{ID: "prepare", Title: "Prepare a private installation directory", Description: "Use Linux Docker Engine and Docker Compose >=2.30.0. Unless an architecture was explicitly selected, the multi-platform image selects the host architecture. Save all three generated files with their exact names in the same private directory. This is a first-install guide; preserve the same Compose project and data volume when reinstalling or updating. Stop the old machine before reusing this identity.", Commands: []string{"set -eu\numask 077\nmkdir ./passwall-node-install\nchmod 0700 ./passwall-node-install\ncd ./passwall-node-install"}},
 			{ID: "credential", Title: "Protect the credential file", Description: "Transfer the files through a private channel. Never put the credential in command arguments, environment variables, tracing, shell history or shared logs.", Commands: []string{"set -eu\nchmod 0600 ./node-credential ./node.env ./compose.yaml\ndocker compose version\ndocker compose -f compose.yaml config --quiet"}},
-			{ID: "start", Title: "Pull and start the fixed container release", Description: "The container drops to its dedicated non-root UID. Host networking is required for PSP-managed dynamic listeners. Choose free listener ports >=1024 unless the Linux host explicitly permits non-root low ports. Do not use a privileged container or mount the Docker socket.", Commands: []string{"set -eu\ndocker compose -f compose.yaml pull passwall-node\ndocker compose -f compose.yaml up -d --no-deps passwall-node"}},
+			{ID: "start", Title: "Pull and start the selected container image", Description: "The default latest/beta tag follows the selected release channel; an exact version stays pinned for rollback. Pull and recreate the service to apply a newer image in the same channel. The container drops to its dedicated non-root UID. Host networking is required for PSP-managed dynamic listeners. Choose free listener ports >=1024 unless the Linux host explicitly permits non-root low ports. Do not use a privileged container or mount the Docker socket.", Commands: []string{"set -eu\ndocker compose -f compose.yaml pull passwall-node\ndocker compose -f compose.yaml up -d --no-deps passwall-node"}},
 			{ID: "check", Title: "Verify the version and connect to PSP", Description: "Check the reported version and Agent status in PSP, then configure nodes separately. Agent heartbeat alone is not proof of a running proxy core. Docker uses host-managed container updates, not the built-in Linux/systemd remote upgrade helper. Back up this private directory and the persistent data volume; never run compose down --volumes to update.", Commands: []string{"set -eu\ndocker compose -f compose.yaml exec -T passwall-node /usr/local/bin/passwall-node --version\ndocker compose -f compose.yaml ps passwall-node"}},
 		}
 		return result

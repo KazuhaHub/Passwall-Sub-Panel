@@ -2158,8 +2158,8 @@
     "update_available_chip": "可升级 → {{latest}}",
     "hint": {
       "name": "显示名称，可修改；内部关联使用数据库 ID",
-      "update_channel": "保存安装与升级版本列表的默认频道，默认稳定版；Beta 仍需选择已审核的精确版本。保存不会执行安装或升级，也不会更改服务器、节点身份或凭据。弹窗内临时切换频道不会自动保存。",
-      "update_channel_short": "仅设置版本列表的默认频道，保存不会自动升级节点。",
+      "update_channel": "保存安装与升级列表的默认频道。Docker 文件默认以 latest 跟随稳定版、以 beta 跟随测试版；手动与 systemd 安装仍使用已审核的精确版本。保存不会执行安装或升级，也不会更改服务器、节点身份或凭据。弹窗内临时切换频道不会自动保存。",
+      "update_channel_short": "默认发布频道；Docker 文件跟随对应镜像标签，但保存不会自动升级节点。",
       "configured": "已配置（保持不变）",
       "unconfigured": "未配置",
       "change": "修改",
@@ -2178,7 +2178,7 @@
       },
       "method_hint": {
         "linux": "适合启用 systemd 的 Linux 服务器，需要 root 权限。保存服务器后下载私有脚本，传到目标机器执行；脚本安装固定版本并配置专用用户与服务。",
-        "docker": "需要 Linux Docker Engine、Compose 2.30.0 或更高版本，以及 host 网络。保存服务器后生成专属 Compose 和私有凭据文件，传到目标机器后启动容器；保留持久化数据。",
+        "docker": "需要 Linux Docker Engine、Compose 2.30.0 或更高版本，以及 host 网络。生成的 Compose 默认跟随所选 latest/beta 频道，也可锁定精确版本用于回滚。将私有文件传到目标机器后启动容器，并保留持久化数据。",
         "manual": "支持 Linux / macOS / Windows 的 amd64 / arm64 前台运行。选择平台及准确版本，下载发行档和 SHA256 校验和，核验后解压并配置私有凭据；不安装 systemd 服务。"
       },
       "method_version_hint": "先选择安装方式并保存服务器，再生成该服务器的专属安装文件。切换安装方式不会轮换凭据或改变服务器身份。",
@@ -2257,8 +2257,11 @@
       "release_no_stable": "此安装方式和平台暂无兼容正式版。如需预发布版本，请主动选择测试版。",
       "release_no_testing": "此安装方式和平台暂无兼容测试版。",
       "release_version_hint": "选择已发布的具体版本。切换渠道不会升级现有节点；代理内核请在服务器菜单中单独选择。",
+      "release_version_hint_docker": "默认跟随所选渠道，后续拉取升级无需修改 Compose；需要回滚时也可锁定具体版本。执行拉取并重建服务后才会应用更新。",
       "release_choose_version": "请选择具体版本",
       "release_recommended": "推荐",
+      "release_follow_stable": "跟随稳定版（latest）",
+      "release_follow_testing": "跟随 Beta / 测试版（beta）",
       "release_published": "发布于 {{date}}（UTC）",
       "release_details": "Passwall Node 发布详情",
       "release_review": "版本说明与发布详情",

@@ -105,6 +105,21 @@ describe('Passwall Node release selection', () => {
     expect(api.post).not.toHaveBeenCalled()
   })
 
+  it('defaults Docker to the selected floating channel tag and still allows an exact rollback pin', async () => {
+    reads([testing, stable])
+    mount(<Controlled selection={{ ...linux, method: 'docker' }} initialChannel="testing" />)
+    await waitFor(() => expect(selected()).toBe('beta'))
+    expect(screen.getByRole('combobox', { name: 'admin:servers.native.agent_version' }).textContent)
+      .toContain('admin:servers.native.release_follow_testing')
+    await chooseVersion(testing.version)
+    expect(selected()).toBe(testing.version)
+    await choose('admin:servers.native.release_channel', 'admin:servers.native.release_stable')
+    await waitFor(() => expect(selected()).toBe('latest'))
+    expect(screen.getByRole('combobox', { name: 'admin:servers.native.agent_version' }).textContent)
+      .toContain('admin:servers.native.release_follow_stable')
+    expect(api.post).not.toHaveBeenCalled()
+  })
+
   it('requires an exact version choice and displays the official link, date, and plain-text compatibility notes', async () => {
     reads([{ ...stable, notes: '<script>alert("not HTML")</script>\nReviewed contract.' }])
     mount(<Controlled />)

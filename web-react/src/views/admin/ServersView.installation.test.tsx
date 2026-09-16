@@ -306,6 +306,26 @@ describe('Passwall Node installation', () => {
     expect(api.post).toHaveBeenCalledTimes(1)
   })
 
+  it.each([
+    ['stable', 'latest'],
+    ['beta', 'beta'],
+  ] as const)('generates Docker files that follow the saved %s channel by default', async (preference, imageTag) => {
+    const server = { ...nativeServer, update_channel: preference }
+    installReads({ '/admin/servers/7/node-agent-status': waiting })
+    api.post.mockResolvedValue({ data: generatedFiles('docker') })
+    mount(<NativeInstallationDialog server={server} initialProvisioning={{ ...provisioning, server }}
+      onClose={vi.fn()} onRotate={vi.fn()} />)
+    await selectMethod('docker')
+    await waitFor(() => expect(versionInput().value).toBe(imageTag))
+    const generate = screen.getByRole('button', { name: 'admin:servers.native.generate_files' }) as HTMLButtonElement
+    expect(generate.disabled).toBe(false)
+    fireEvent.click(generate)
+    await waitFor(() => expect(api.post).toHaveBeenCalledWith('/admin/servers/7/node-installation-files', {
+      version: imageTag, method: 'docker',
+    }, expect.objectContaining({ signal: expect.any(AbortSignal) })))
+    await screen.findByText('admin:servers.native.files_ready')
+  })
+
   it.each([['3xui', '3X-UI'], ['sui', 'S-UI']] as const)('opens one existing %s install/reinstall entry with its original backend and configures that same record', async (panelType, label) => {
     const upstream: Server = { ...nativeServer, panel_type: panelType, auth_method: 'token', url: 'https://upstream.test', has_api_token: true }
     installReads({ '/admin/servers': list([upstream]) })
@@ -651,7 +671,7 @@ describe('Passwall Node installation', () => {
     expect(run).not.toContain(provisioning.credential)
   })
 
-  it('preserves identity and private credential but requires version confirmation after changing installation methods', async () => {
+  it('preserves identity and private credential while Docker follows the selected release channel', async () => {
     reads()
     mountExpanded(<NativeInstallationDialog server={nativeServer} initialProvisioning={provisioning} onClose={vi.fn()} onRotate={vi.fn()} />)
     await selectVersion('v1.2.3-beta.1')
@@ -659,7 +679,7 @@ describe('Passwall Node installation', () => {
       await selectMethod(method)
       expect((screen.getByLabelText('admin:servers.native.agent_id') as HTMLInputElement).value).toBe(provisioning.agent_id)
       expect((screen.getByLabelText('admin:servers.native.credential') as HTMLInputElement).value).toBe(provisioning.credential)
-      expect(versionInput().value).toBe('')
+      expect(versionInput().value).toBe(method === 'docker' ? 'beta' : '')
       expect(screen.getByRole('combobox', { name: 'admin:servers.native.method_label' }).textContent).toBe(`admin:servers.native.method.${method}`)
     }
     expect(api.post).not.toHaveBeenCalled()
@@ -823,7 +843,7 @@ describe('Passwall Node installation', () => {
     await act(async () => { finish({ data: generatedFiles('docker') }) })
     expect((screen.getByLabelText('admin:servers.native.agent_id') as HTMLInputElement).value).toBe(secondProvisioning.agent_id)
     expect((screen.getByLabelText('admin:servers.native.credential') as HTMLInputElement).value).toBe(secondProvisioning.credential)
-    expect(versionInput().value).toBe('')
+    expect(versionInput().value).toBe('latest')
     expect(screen.queryByLabelText('admin:servers.native.file_content')).toBeNull()
     expect(copy).not.toHaveBeenCalled()
   })
