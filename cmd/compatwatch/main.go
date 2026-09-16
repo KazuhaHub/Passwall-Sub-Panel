@@ -1,5 +1,5 @@
 // Command compatwatch reports whether either upstream panel has shipped a
-// release past the tested ceiling in docs/compat/v3.json.
+// release past the tested ceiling in the active v4 range overlay.
 //
 // It exists because that ceiling is the one compat fact that rots without
 // anybody touching the repo. Its consequence is not cosmetic: PSP refuses a
@@ -41,7 +41,7 @@ var upstreams = []struct {
 	{Name: "S-UI", Repo: "alireza0/s-ui"},
 }
 
-const compatPath = "docs/compat/v3.json"
+const compatPath = "docs/compat/v4-ranges.json"
 
 // fetchAttempts exists to keep the job from crying wolf. A single GitHub blip
 // would otherwise mark the ceiling unreadable, and a watcher that goes red on

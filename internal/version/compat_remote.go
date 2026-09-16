@@ -6,10 +6,14 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
+
+	"golang.org/x/mod/semver"
 )
 
 // defaultRemoteCompatURLBase is the GitHub raw path under which per-major
@@ -39,12 +43,18 @@ const httpFetchTimeout = 8 * time.Second
 // per-major JSON file to fetch and to validate the file's `major` field.
 var pspMajorRe = regexp.MustCompile(`^v?(\d+)\.`)
 
-// schemaVersion is what the on-disk JSON files must carry. Bumped to 2
+// schemaVersion is what the base per-major JSON files must carry. Bumped to 2
 // when the v3.6.0-beta.7 redesign switched from a single-file map keyed
 // by "vX.Y" to per-major files + entries array + psp_min/psp_max range
-// per row. A future PSP that wants to support a newer schema can still
-// read v2 by branching on this field.
+// per row.
 const schemaVersion = 2
+
+// rangeOverlaySchemaVersion adds full SemVer matching for PSP range endpoints,
+// including prerelease identifiers. The base manifest remains schema v2 so old
+// PSP binaries keep reading their conservative ranges; builds that understand
+// this overlay can distinguish v4.0.0-beta.8 from beta.9 without silently
+// certifying the older binary.
+const rangeOverlaySchemaVersion = 3
 
 // remoteCompatPayload mirrors docs/compat/v<MAJOR>.json (schema_version 2):
 //
@@ -81,12 +91,16 @@ type remoteCompatPayload struct {
 	SUIEntries []remoteCompatSUIEntry `json:"sui_entries,omitempty"`
 	// SUIAdvisories mirrors Advisories for S-UI releases.
 	SUIAdvisories map[string]XUIAdvisory `json:"sui_advisories,omitempty"`
+	// RangeOverlay points to an optional same-origin schema-v3 document whose
+	// entries replace only the XUI/SUI ranges. Advisories stay in this base
+	// document so old readers retain the full upgrade guidance.
+	RangeOverlay string `json:"range_overlay,omitempty"`
 }
 
-// remoteCompatPSPEntry covers one PSP version range. psp_min / psp_max
-// are closed-interval semver endpoints (stable form: "vX.Y.Z", no
-// pre-release suffix — matching the convention that pre-release builds
-// fall into the same row as the stable they target).
+// remoteCompatPSPEntry covers one PSP version range. In a schema-v2 base
+// manifest psp_min / psp_max are stable-form closed interval endpoints and
+// prereleases match the stable they target. A schema-v3 range overlay compares
+// the full SemVer, allowing a fixed beta to be separated from earlier builds.
 type remoteCompatPSPEntry struct {
 	PSPMin       string `json:"psp_min"`
 	PSPMax       string `json:"psp_max"`
@@ -222,35 +236,12 @@ func pspMajor(v string) (int, bool) {
 }
 
 func fetchAndApply(ctx context.Context, url string) error {
-	fetchCtx, cancel := context.WithTimeout(ctx, httpFetchTimeout)
-	defer cancel()
-	req, err := http.NewRequestWithContext(fetchCtx, http.MethodGet, url, nil)
+	payload, err := fetchCompatPayload(ctx, url)
 	if err != nil {
-		return fmt.Errorf("build request: %w", err)
-	}
-	req.Header.Set("Accept", "application/json")
-	// Reuses the shared safehttp-guarded client declared in
-	// latest_xui.go (same package). Pre-v3.6.1-beta.3 this used
-	// http.DefaultClient, which would happily follow an admin-supplied
-	// urlOverride into loopback / link-local addresses.
-	resp, err := httpClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("fetch %s: %w", url, err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("fetch %s: HTTP %d", url, resp.StatusCode)
-	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20)) // 1 MiB cap
-	if err != nil {
-		return fmt.Errorf("read body: %w", err)
-	}
-	var payload remoteCompatPayload
-	if err := json.Unmarshal(body, &payload); err != nil {
-		return fmt.Errorf("decode JSON: %w", err)
+		return err
 	}
 	if payload.SchemaVersion != schemaVersion {
-		return fmt.Errorf("compat JSON schema_version %d, this PSP build only supports %d", payload.SchemaVersion, schemaVersion)
+		return fmt.Errorf("compat JSON schema_version %d, this PSP build only supports base schema %d", payload.SchemaVersion, schemaVersion)
 	}
 	currentMajor, ok := pspMajor(Version)
 	if !ok {
@@ -264,6 +255,31 @@ func fetchAndApply(ctx context.Context, url string) error {
 		// the wrong major's range.
 		return fmt.Errorf("compat JSON declares major=%d but this PSP is major=%d (wrong file at URL?)", payload.Major, currentMajor)
 	}
+
+	// New readers can opt into prerelease-aware ranges without changing the
+	// schema-v2 base file old readers consume. Fetch and validate the overlay
+	// before mutating active state so a missing or malformed overlay cannot
+	// partially install a new range.
+	if payload.RangeOverlay != "" {
+		overlayURL, err := resolveRangeOverlayURL(url, payload.RangeOverlay)
+		if err != nil {
+			return err
+		}
+		overlay, err := fetchCompatPayload(ctx, overlayURL)
+		if err != nil {
+			return fmt.Errorf("fetch range overlay: %w", err)
+		}
+		if overlay.SchemaVersion != rangeOverlaySchemaVersion {
+			return fmt.Errorf("compat range overlay schema_version %d, want %d", overlay.SchemaVersion, rangeOverlaySchemaVersion)
+		}
+		if overlay.Major != currentMajor {
+			return fmt.Errorf("compat range overlay declares major=%d but this PSP is major=%d", overlay.Major, currentMajor)
+		}
+		payload.SchemaVersion = overlay.SchemaVersion
+		payload.Entries = overlay.Entries
+		payload.SUIEntries = overlay.SUIEntries
+	}
+
 	entry, ok := lookupForPSPVersion(payload, Version)
 	if !ok {
 		return fmt.Errorf("no compat entry covers PSP %q in %d entries (range gap — bump the JSON)",
@@ -290,6 +306,56 @@ func fetchAndApply(ctx context.Context, url string) error {
 	applySUICompat(payload)
 	_ = saveCompatCache(entry.MaxTestedXUI)
 	return nil
+}
+
+func fetchCompatPayload(ctx context.Context, url string) (remoteCompatPayload, error) {
+	fetchCtx, cancel := context.WithTimeout(ctx, httpFetchTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(fetchCtx, http.MethodGet, url, nil)
+	if err != nil {
+		return remoteCompatPayload{}, fmt.Errorf("build request: %w", err)
+	}
+	req.Header.Set("Accept", "application/json")
+	// Reuses the shared safehttp-guarded client declared in
+	// latest_xui.go (same package). Pre-v3.6.1-beta.3 this used
+	// http.DefaultClient, which would happily follow an admin-supplied
+	// urlOverride into loopback / link-local addresses.
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return remoteCompatPayload{}, fmt.Errorf("fetch %s: %w", url, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return remoteCompatPayload{}, fmt.Errorf("fetch %s: HTTP %d", url, resp.StatusCode)
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20)) // 1 MiB cap
+	if err != nil {
+		return remoteCompatPayload{}, fmt.Errorf("read body: %w", err)
+	}
+	var payload remoteCompatPayload
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return remoteCompatPayload{}, fmt.Errorf("decode JSON: %w", err)
+	}
+	return payload, nil
+}
+
+func resolveRangeOverlayURL(baseURL, ref string) (string, error) {
+	base, err := url.Parse(baseURL)
+	if err != nil {
+		return "", fmt.Errorf("parse compat base URL: %w", err)
+	}
+	overlay, err := url.Parse(strings.TrimSpace(ref))
+	if err != nil {
+		return "", fmt.Errorf("parse compat range_overlay: %w", err)
+	}
+	if overlay.IsAbs() || overlay.Host != "" || overlay.User != nil {
+		return "", fmt.Errorf("compat range_overlay must be a relative same-origin URL")
+	}
+	resolved := base.ResolveReference(overlay)
+	if resolved.Scheme != base.Scheme || resolved.Host != base.Host {
+		return "", fmt.Errorf("compat range_overlay resolved outside the base origin")
+	}
+	return resolved.String(), nil
 }
 
 // applySUICompat installs the S-UI bounds for this PSP version, or CLEARS them
@@ -329,6 +395,23 @@ func applySUICompat(payload remoteCompatPayload) {
 // lookupSUIForPSPVersion is lookupForPSPVersion over sui_entries: same
 // document-order, first-match-wins, skip-malformed-rows semantics.
 func lookupSUIForPSPVersion(payload remoteCompatPayload, pspVersion string) (remoteCompatSUIEntry, bool) {
+	if payload.SchemaVersion >= rangeOverlaySchemaVersion {
+		pv, ok := canonicalPSPSemver(pspVersion)
+		if !ok {
+			return remoteCompatSUIEntry{}, false
+		}
+		for _, e := range payload.SUIEntries {
+			lo, lok := canonicalPSPSemver(e.PSPMin)
+			hi, hok := canonicalPSPSemver(e.PSPMax)
+			if !lok || !hok || semver.Compare(lo, hi) > 0 {
+				continue
+			}
+			if semver.Compare(pv, lo) >= 0 && semver.Compare(pv, hi) <= 0 {
+				return e, true
+			}
+		}
+		return remoteCompatSUIEntry{}, false
+	}
 	pv, ok := parseSemver(pspVersion)
 	if !ok {
 		return remoteCompatSUIEntry{}, false
@@ -352,6 +435,23 @@ func lookupSUIForPSPVersion(payload remoteCompatPayload, pspVersion string) (rem
 // JSON puts narrower / newer ranges earlier so a more-specific entry
 // shadows a broader one.
 func lookupForPSPVersion(payload remoteCompatPayload, pspVersion string) (remoteCompatPSPEntry, bool) {
+	if payload.SchemaVersion >= rangeOverlaySchemaVersion {
+		pv, ok := canonicalPSPSemver(pspVersion)
+		if !ok {
+			return remoteCompatPSPEntry{}, false
+		}
+		for _, e := range payload.Entries {
+			lo, lok := canonicalPSPSemver(e.PSPMin)
+			hi, hok := canonicalPSPSemver(e.PSPMax)
+			if !lok || !hok || semver.Compare(lo, hi) > 0 {
+				continue
+			}
+			if semver.Compare(pv, lo) >= 0 && semver.Compare(pv, hi) <= 0 {
+				return e, true
+			}
+		}
+		return remoteCompatPSPEntry{}, false
+	}
 	pv, ok := parseSemver(pspVersion)
 	if !ok {
 		return remoteCompatPSPEntry{}, false
@@ -373,4 +473,16 @@ func lookupForPSPVersion(payload remoteCompatPayload, pspVersion string) (remote
 		}
 	}
 	return remoteCompatPSPEntry{}, false
+}
+
+func canonicalPSPSemver(v string) (string, bool) {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return "", false
+	}
+	if v[0] != 'v' {
+		v = "v" + v
+	}
+	v = semver.Canonical(v)
+	return v, v != ""
 }
