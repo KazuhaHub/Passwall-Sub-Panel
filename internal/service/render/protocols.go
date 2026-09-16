@@ -24,7 +24,7 @@ import (
 // Returns (nil, nil) when the protocol is recognised but not yet supported;
 // returns (nil, err) on configuration errors such as a missing server
 // address. Callers skip the node on either nil return value.
-func emitProxy(displayName string, n *domain.Node, u *domain.User, inb *ports.Inbound, userEmail string, relay *domain.RelayLine) (map[string]any, error) {
+func emitProxy(displayName string, n *domain.Node, u *domain.User, inb *ports.Inbound, userEmail string, relay *domain.RelayLine, mihomoMLKEM bool) (map[string]any, error) {
 	var settings xuiInboundSettings
 	_ = json.Unmarshal([]byte(inb.Settings), &settings)
 	var stream xuiStreamSettings
@@ -51,7 +51,7 @@ func emitProxy(displayName string, n *domain.Node, u *domain.User, inb *ports.In
 
 	switch protocol {
 	case domain.ProtoVLESS:
-		return emitVLESS(base, u.UUID, stream, n.Flow), nil
+		return emitVLESS(base, u.UUID, stream, n.Flow, mihomoMLKEM), nil
 	case domain.ProtoVMess:
 		return emitVMess(base, u.UUID, stream), nil
 	case domain.ProtoTrojan:
@@ -145,7 +145,7 @@ func emitSeparator(name string) map[string]any {
 	}
 }
 
-func emitVLESS(base map[string]any, uuid string, stream xuiStreamSettings, flow string) map[string]any {
+func emitVLESS(base map[string]any, uuid string, stream xuiStreamSettings, flow string, mihomoMLKEM bool) map[string]any {
 	base["type"] = "vless"
 	base["uuid"] = uuid
 	base["network"] = defaultStr(stream.Network, "tcp")
@@ -162,7 +162,14 @@ func emitVLESS(base map[string]any, uuid string, stream xuiStreamSettings, flow 
 	case "reality":
 		base["tls"] = true
 		if stream.RealitySettings != nil {
-			base["client-fingerprint"] = defaultStr(stream.RealitySettings.Settings.Fingerprint, "chrome")
+			fingerprint := defaultStr(stream.RealitySettings.Settings.Fingerprint, "chrome")
+			if mihomoMLKEM {
+				// Xray 26.9.8+ rejects a REALITY ClientHello unless its first
+				// key share is X25519MLKEM768. Mihomo's opt-in preserves that
+				// share, and chrome is the audited fingerprint that supplies it.
+				fingerprint = "chrome"
+			}
+			base["client-fingerprint"] = fingerprint
 			base["servername"] = first(stream.RealitySettings.ServerNames)
 			// publicKey is what the client actually needs. Modern 3X-UI stores
 			// it alongside privateKey under realitySettings.settings.publicKey.
@@ -174,10 +181,14 @@ func emitVLESS(base map[string]any, uuid string, stream xuiStreamSettings, flow 
 					pub = derived
 				}
 			}
-			base["reality-opts"] = map[string]any{
+			realityOptions := map[string]any{
 				"public-key": pub,
 				"short-id":   first(stream.RealitySettings.ShortIds),
 			}
+			if mihomoMLKEM {
+				realityOptions["support-x25519mlkem768"] = true
+			}
+			base["reality-opts"] = realityOptions
 		}
 	case "tls":
 		base["tls"] = true

@@ -89,6 +89,7 @@ func (s *Service) buildSingBoxOutbounds(ctx context.Context, u *domain.User, ite
 	// Local snapshot for captured nodes, one batched ListInbounds per panel for
 	// the un-captured transition-window remainder. See resolveInbounds.
 	inboundByNode := s.resolveInbounds(ctx, items, st)
+	mlkemFirstRealityByPanel := s.mlkemFirstRealityPanels(ctx, items, inboundByNode)
 
 	selectorItems := make([]renderItem, 0, len(items))
 	for _, it := range items {
@@ -117,6 +118,14 @@ func (s *Service) buildSingBoxOutbounds(ctx context.Context, u *domain.User, ite
 				"node_id", it.node.ID, "panel_id", it.node.PanelID, "inbound_id", it.node.InboundID)
 			continue
 		}
+		if mlkemFirstRealityByPanel[it.node.PanelID] && inboundUsesReality(inb) {
+			// Xray 26.9.8+ requires the X25519MLKEM768 key share. Current
+			// sing-box filters it and has no equivalent opt-in, so publishing
+			// this outbound would create a green-looking dead node.
+			log.Warn("render: skip REALITY node incompatible with sing-box client",
+				"node_id", it.node.ID, "panel_id", it.node.PanelID)
+			continue
+		}
 		userEmail := clientEmailForNode(u, it.node.ID, emailRules, sharedEmails)
 		block, err := emitSingBoxOutbound(it.name, it.node, u, inb, userEmail, it.relay)
 		if err != nil {
@@ -135,6 +144,14 @@ func (s *Service) buildSingBoxOutbounds(ctx context.Context, u *domain.User, ite
 	rules := strings.TrimSpace(strings.Join(ruleParts, "\n"))
 	out = append(out, buildSingBoxSelectorOutboundsWithMembers(rules, selectorItems, preferredOrder, memberConfigs)...)
 	return out
+}
+
+func inboundUsesReality(inbound *ports.Inbound) bool {
+	if inbound == nil {
+		return false
+	}
+	var stream xuiStreamSettings
+	return json.Unmarshal([]byte(inbound.StreamSettings), &stream) == nil && strings.EqualFold(stream.Security, "reality")
 }
 
 func emitSingBoxOutbound(tag string, n *domain.Node, u *domain.User, inb *ports.Inbound, userEmail string, relay *domain.RelayLine) (map[string]any, error) {

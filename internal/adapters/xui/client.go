@@ -692,10 +692,10 @@ func (c *Client) UpdateInbound(ctx context.Context, id int, spec ports.InboundSp
 	// would — there is no desired value to diverge from.
 	//
 	// Costs no extra round-trip: UpdateInbound already had to read the live
-	// inbound to re-inject settings.clients[]; this rides that same read. Guarded
-	// on > 0 so a panel that predates the field (it decodes as 0) is sent nothing
-	// and keeps the old omit-and-normalise behaviour.
-	if live.SubSortIndex > 0 {
+	// inbound to re-inject settings.clients[]; this rides that same read. 3X-UI
+	// 3.8.0 permits negative ranks too, so preserve every nonzero value. An absent
+	// field still decodes as 0 and keeps the old omit-and-normalise behaviour.
+	if live.SubSortIndex != 0 {
 		body["subSortIndex"] = live.SubSortIndex
 	}
 	return c.doJSON(ctx, http.MethodPost, "/panel/api/inbounds/update/"+strconv.Itoa(id), body, nil)

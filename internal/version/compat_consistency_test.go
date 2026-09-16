@@ -56,3 +56,37 @@ func TestMinXUIConstMatchesCompatJSON(t *testing.T) {
 			MinXUI, newest.PSPMin, newest.PSPMax, newest.MinXUI)
 	}
 }
+
+func TestV3StableMaintenanceRanges(t *testing.T) {
+	path := filepath.Join("..", "..", "docs", "compat", "v3.json")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	var payload remoteCompatPayload
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		t.Fatalf("parse %s: %v", path, err)
+	}
+
+	for _, tc := range []struct {
+		version string
+		wantMax string
+	}{
+		{version: "v3.9.2", wantMax: "3.7.0"},
+		{version: "v3.9.3", wantMax: "3.8.5"},
+		{version: "v3.10.0", wantMax: "3.8.5"},
+	} {
+		entry, ok := lookupForPSPVersion(payload, tc.version)
+		if !ok {
+			t.Fatalf("no 3X-UI range for %s", tc.version)
+		}
+		if entry.MaxTestedXUI != tc.wantMax {
+			t.Fatalf("%s max_tested_xui = %q, want %q", tc.version, entry.MaxTestedXUI, tc.wantMax)
+		}
+	}
+
+	sui, ok := lookupSUIForPSPVersion(payload, "v3.9.3")
+	if !ok || sui.MaxTestedSUI != "1.6.3" {
+		t.Fatalf("v3.9.3 S-UI range = %#v, ok=%v; want ceiling 1.6.3", sui, ok)
+	}
+}

@@ -19,6 +19,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/log"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/panelpath"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/paneltz"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/xraycompat"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 )
 
@@ -288,6 +289,7 @@ func (s *Service) buildProxies(ctx context.Context, u *domain.User, items []rend
 	// (transition window) batch into one ListInbounds per panel. See
 	// resolveInbounds.
 	inboundByNode := s.resolveInbounds(ctx, items, st)
+	mlkemFirstRealityByPanel := s.mlkemFirstRealityPanels(ctx, items, inboundByNode)
 
 	out := make([]map[string]any, 0, len(items))
 	for _, it := range items {
@@ -302,7 +304,8 @@ func (s *Service) buildProxies(ctx context.Context, u *domain.User, items []rend
 			continue
 		}
 		userEmail := clientEmailForNode(u, it.node.ID, emailRules, sharedEmails)
-		block, err := emitProxy(it.name, it.node, u, inb, userEmail, it.relay)
+		block, err := emitProxy(it.name, it.node, u, inb, userEmail, it.relay,
+			mlkemFirstRealityByPanel[it.node.PanelID])
 		if err != nil {
 			log.Warn("render: skip node, emit failed", "node_id", it.node.ID, "err", err)
 			continue
@@ -324,6 +327,36 @@ func (s *Service) buildProxies(ctx context.Context, u *domain.User, items []rend
 			"user_id", u.ID, "items_considered", len(items))
 	}
 	return withSentinelIfEmpty(out)
+}
+
+// mlkemFirstRealityPanels resolves only panels that contribute a REALITY
+// outbound to this render. The version snapshot is maintained by the existing
+// boot/manual/post-upgrade probes, so subscription generation stays local.
+// Unknown versions retain the legacy output instead of guessing.
+func (s *Service) mlkemFirstRealityPanels(ctx context.Context, items []renderItem, inbounds map[int64]*ports.Inbound) map[int64]bool {
+	if s.repos.XUIPanel == nil {
+		return nil
+	}
+	wanted := make(map[int64]struct{})
+	for _, item := range items {
+		if item.isSeparator || item.node == nil {
+			continue
+		}
+		if inboundUsesReality(inbounds[item.node.ID]) {
+			wanted[item.node.PanelID] = struct{}{}
+		}
+	}
+	result := make(map[int64]bool, len(wanted))
+	for panelID := range wanted {
+		panel, err := s.repos.XUIPanel.GetByID(ctx, panelID)
+		if err != nil {
+			log.Warn("render: cannot resolve Xray version for REALITY client compatibility",
+				"panel_id", panelID, "err", err)
+			continue
+		}
+		result[panelID] = xraycompat.MihomoNeedsMLKEM(panel.XrayVersion)
+	}
+	return result
 }
 
 // sharedClientEmailsByNode resolves the first-class PSP client actually

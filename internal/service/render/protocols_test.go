@@ -72,20 +72,20 @@ func TestEmitVLESS_FlowVerbatim(t *testing.T) {
 	reality := xuiStreamSettings{Network: "tcp", Security: "reality", RealitySettings: &xuiRealitySettings{}}
 
 	// Empty flow on a REALITY inbound → no "flow" key at all.
-	got := emitVLESS(map[string]any{"name": "n"}, "uuid-1", reality, "")
+	got := emitVLESS(map[string]any{"name": "n"}, "uuid-1", reality, "", false)
 	if v, ok := got["flow"]; ok {
 		t.Fatalf("empty flow must not be defaulted, got flow=%v", v)
 	}
 
 	// Explicit flow → emitted verbatim.
-	got = emitVLESS(map[string]any{"name": "n"}, "uuid-1", reality, "xtls-rprx-vision")
+	got = emitVLESS(map[string]any{"name": "n"}, "uuid-1", reality, "xtls-rprx-vision", false)
 	if got["flow"] != "xtls-rprx-vision" {
 		t.Fatalf("flow = %v, want xtls-rprx-vision", got["flow"])
 	}
 
 	// Flow is honored regardless of security (e.g. vision over plain TLS).
 	tls := xuiStreamSettings{Network: "tcp", Security: "tls", TLSSettings: &xuiTLSSettings{ServerName: "x"}}
-	got = emitVLESS(map[string]any{"name": "n"}, "uuid-1", tls, "xtls-rprx-vision-udp443")
+	got = emitVLESS(map[string]any{"name": "n"}, "uuid-1", tls, "xtls-rprx-vision-udp443", false)
 	if got["flow"] != "xtls-rprx-vision-udp443" {
 		t.Fatalf("flow = %v, want xtls-rprx-vision-udp443", got["flow"])
 	}
@@ -97,7 +97,7 @@ func TestEmitTLS_AllowInsecure(t *testing.T) {
 	tls := xuiStreamSettings{Network: "tcp", Security: "tls",
 		TLSSettings: &xuiTLSSettings{ServerName: "x", AllowInsecure: true}}
 
-	if got := emitVLESS(map[string]any{"name": "n"}, "uuid", tls, ""); got["skip-cert-verify"] != true {
+	if got := emitVLESS(map[string]any{"name": "n"}, "uuid", tls, "", false); got["skip-cert-verify"] != true {
 		t.Fatalf("vless skip-cert-verify = %v, want true", got["skip-cert-verify"])
 	}
 	if got := emitVMess(map[string]any{"name": "n"}, "uuid", tls); got["skip-cert-verify"] != true {
@@ -109,7 +109,7 @@ func TestEmitTLS_AllowInsecure(t *testing.T) {
 
 	// Default (allowInsecure absent) stays false.
 	safe := xuiStreamSettings{Network: "tcp", Security: "tls", TLSSettings: &xuiTLSSettings{ServerName: "x"}}
-	if got := emitVLESS(map[string]any{"name": "n"}, "uuid", safe, ""); got["skip-cert-verify"] != false {
+	if got := emitVLESS(map[string]any{"name": "n"}, "uuid", safe, "", false); got["skip-cert-verify"] != false {
 		t.Fatalf("vless skip-cert-verify = %v, want false", got["skip-cert-verify"])
 	}
 }

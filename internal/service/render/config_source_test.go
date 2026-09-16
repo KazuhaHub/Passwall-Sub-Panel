@@ -20,6 +20,15 @@ func (f fakeSettings) Load(_ context.Context, _ ports.UISettings) (ports.UISetti
 }
 func (f fakeSettings) Save(_ context.Context, _ ports.UISettings) error { return nil }
 
+type renderPanelRepo struct {
+	ports.XUIPanelRepo
+	xrayVersion string
+}
+
+func (r renderPanelRepo) GetByID(_ context.Context, id int64) (*domain.XUIPanel, error) {
+	return &domain.XUIPanel{ID: id, XrayVersion: r.xrayVersion}, nil
+}
+
 // panicPool fails the test if any pool access happens — used to prove that a
 // node with a local config snapshot triggers zero 3X-UI calls.
 type panicPool struct{}
@@ -130,6 +139,82 @@ func TestBuildProxies_LocalConfig_ZeroFetch(t *testing.T) {
 	ro, ok := got["reality-opts"].(map[string]any)
 	if !ok || ro["public-key"] != "aPubKey" || ro["short-id"] != "abcd" {
 		t.Fatalf("reality-opts mismatch: %#v", got["reality-opts"])
+	}
+}
+
+func TestBuildProxiesAppliesMLKEMForNewXrayReality(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		xrayVersion string
+		wantMLKEM   bool
+	}{
+		{name: "legacy Xray", xrayVersion: "26.7.28", wantMLKEM: false},
+		{name: "unknown Xray", xrayVersion: "latest", wantMLKEM: false},
+		{name: "ML-KEM-first Xray", xrayVersion: "26.9.9", wantMLKEM: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			node := vlessRealityNode(true)
+			node.StreamSettings = `{"network":"tcp","security":"reality",` +
+				`"realitySettings":{"serverNames":["www.microsoft.com"],"shortIds":["abcd"],` +
+				`"settings":{"publicKey":"aPubKey","fingerprint":"firefox"}}}`
+			s := &Service{
+				repos: ports.Repos{
+					Settings: fakeSettings{ports.UISettings{EmailDomain: "kazuha.org"}},
+					XUIPanel: renderPanelRepo{xrayVersion: tc.xrayVersion},
+				},
+				pool: panicPool{},
+			}
+			out := s.buildProxies(context.Background(), &domain.User{ID: 5, UUID: "uuid-of-user-5"},
+				[]renderItem{{name: "US-1", node: node}}, ports.UISettings{EmailDomain: "kazuha.org"})
+			if len(out) != 1 {
+				t.Fatalf("want one proxy, got %#v", out)
+			}
+			reality := out[0]["reality-opts"].(map[string]any)
+			_, gotMLKEM := reality["support-x25519mlkem768"]
+			if gotMLKEM != tc.wantMLKEM {
+				t.Fatalf("support-x25519mlkem768 present = %v, want %v: %#v", gotMLKEM, tc.wantMLKEM, out[0])
+			}
+			wantFingerprint := "firefox"
+			if tc.wantMLKEM {
+				wantFingerprint = "chrome"
+			}
+			if got := out[0]["client-fingerprint"]; got != wantFingerprint {
+				t.Fatalf("client-fingerprint = %#v, want %q", got, wantFingerprint)
+			}
+		})
+	}
+}
+
+func TestBuildSingBoxOutboundsOmitsMLKEMFirstReality(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		xrayVersion string
+		wantNode    bool
+	}{
+		{name: "older Xray remains", xrayVersion: "26.7.28", wantNode: true},
+		{name: "ML-KEM-first Xray omitted", xrayVersion: "26.9.9", wantNode: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			node := vlessRealityNode(true)
+			s := &Service{
+				repos: ports.Repos{
+					Settings: fakeSettings{ports.UISettings{EmailDomain: "kazuha.org"}},
+					XUIPanel: renderPanelRepo{xrayVersion: tc.xrayVersion},
+				},
+				pool: panicPool{},
+			}
+			out := s.buildSingBoxOutbounds(context.Background(), &domain.User{ID: 5, UUID: "uuid-of-user-5"},
+				[]renderItem{{name: "US-1", node: node}}, nil, nil, ports.UISettings{EmailDomain: "kazuha.org"})
+			gotNode := false
+			for _, outbound := range out {
+				if outbound["tag"] == "US-1" {
+					gotNode = true
+				}
+			}
+			if gotNode != tc.wantNode {
+				t.Fatalf("sing-box REALITY node present = %v, want %v: %#v", gotNode, tc.wantNode, out)
+			}
+		})
 	}
 }
 

@@ -70,6 +70,8 @@ jobs:
           fi
           tag_pattern='^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$'
           [[ "$tag" =~ $tag_pattern ]] || exit 1
+          v3_stable_pattern='^v3\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
+          [[ "$tag" =~ $v3_stable_pattern ]] || exit 1
           if [[ "$tag" == *-* ]]; then
             IFS='.' read -r -a prerelease_parts <<< "${tag#*-}"
             for part in "${prerelease_parts[@]}"; do
@@ -371,17 +373,11 @@ jobs:
           images: ghcr.io/${{ needs.setup.outputs.owner_lc }}/passwall-sub-panel
           tags: |
             type=raw,value=${{ needs.setup.outputs.tag }}
-            # Two rolling channels:
-            #   :latest → newest STABLE only. Mirrors GitHub /releases/latest and
-            #             PSP's in-app self-update nudge, so a :latest deploy never
-            #             sees a pre-release.
-            #   :beta   → the leading edge. Applied to EVERY release (pre-release
-            #             AND stable), so it always points at the most recent
-            #             build. A :beta deploy therefore auto-rolls forward onto a
-            #             stable once that stable is the newest release, then onto
-            #             the next beta — "always newest", not "betas only".
+            # V3 is a stable maintenance line. Its releases update :latest and
+            # the V3-only rolling tag, but never :beta: that channel belongs to
+            # the active V4 pre-release line and must not be rolled back to V3.
             type=raw,value=latest,enable=${{ startsWith(needs.setup.outputs.tag, 'v') && !contains(needs.setup.outputs.tag, '-') }}
-            type=raw,value=beta,enable=${{ startsWith(needs.setup.outputs.tag, 'v') }}
+            type=raw,value=v3,enable=${{ startsWith(needs.setup.outputs.tag, 'v3.') && !contains(needs.setup.outputs.tag, '-') }}
           labels: |
             org.opencontainers.image.title=passwall-sub-panel
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
