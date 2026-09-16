@@ -82,6 +82,11 @@ func installationFixture(t *testing.T) (*AdminServersHandler, *nativeProvisionin
 	r := &nativeProvisioningRepoStub{agent: agent, credential: raw}
 	h := NewAdminServersHandler(nativeProvisioningPanelRepo{}, &nativeProvisioningPool{}, nil, nil, nil, nil).
 		WithNativeAgentProvisioning(r).WithNodeAgents(installationAgents{agent: agent})
+	// The constructor stamps startedAt from the wall clock, but these tests inject a
+	// fixed `now`. Comparing the two would make the liveness verdict depend on the
+	// real date, so pin it far enough back that "the panel has been listening" holds
+	// for every case that does not deliberately say otherwise.
+	h.startedAt = time.Unix(0, 0).UTC()
 	return h, r
 }
 
@@ -220,6 +225,55 @@ func TestNodeAgentStatusRequiresFreshRuntimeAndConvergence(t *testing.T) {
 			got, err := h.nodeAgentStatus(t.Context(), 41, now)
 			if err != nil || got.State != tc.want || got.ConfiguredNodes != tc.nodes {
 				t.Fatalf("state=%s err=%v want=%s", got.State, err, tc.want)
+			}
+		})
+	}
+}
+
+// A restart of the PANEL is not evidence about the NODE. last_seen is durable but
+// stops advancing while PSP is down, so an outage longer than the silence window
+// leaves every healthy agent looking dead the moment PSP returns — an operator hit
+// exactly this and reported the fleet as disconnected when nothing was wrong.
+//
+// The rule under test: "offline" may only be asserted once THIS process has been
+// listening for a full silence window. Before that, not-heard-from is reported as
+// its own state rather than as a failure PSP has not established.
+//
+// The three unknowns must stay three. "never connected", "panel has not listened
+// long enough" and "agent has gone silent" have different causes and different
+// operator actions; collapsing any pair of them is the defect this guards.
+func TestNodeAgentStatusDoesNotBlameTheNodeForThePanelsOwnDowntime(t *testing.T) {
+	now := time.Date(2026, 9, 16, 12, 0, 0, 0, time.UTC)
+	stale := now.Add(-91 * time.Second) // beyond 3 x the 30s poll
+	fresh := now.Add(-5 * time.Second)
+	for _, tc := range []struct {
+		name  string
+		seen  *time.Time
+		upFor time.Duration
+		want  string
+	}{
+		{name: "silent agent, panel listening long enough", seen: &stale, upFor: 10 * time.Minute, want: "offline"},
+		{name: "silent agent, panel only just restarted", seen: &stale, upFor: 3 * time.Second, want: "awaiting_checkin"},
+		{name: "panel exactly one window old", seen: &stale, upFor: 90 * time.Second, want: "offline"},
+		// The new branch must not swallow an agent that IS reporting.
+		{name: "fresh agent, panel only just restarted", seen: &fresh, upFor: 3 * time.Second, want: "applying"},
+		// Never-connected keeps its own answer: nothing was ever installed here,
+		// which is a different problem with a different fix.
+		{name: "never connected, panel only just restarted", seen: nil, upFor: 3 * time.Second, want: "waiting"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h, r := installationFixture(t)
+			r.agent.LastSeen = tc.seen
+			h.startedAt = now.Add(-tc.upFor)
+			h.agents = installationAgents{agent: r.agent}
+			h.nodes = installationNodes{nodes: []*domain.Node{{PanelID: 41, Enabled: true}}}
+			h.pool = installationPool{client: installationClient{err: domain.ErrNotFound}}
+			got, err := h.nodeAgentStatus(t.Context(), 41, now)
+			if err != nil {
+				t.Fatalf("nodeAgentStatus: %v", err)
+			}
+			if got.State != tc.want {
+				t.Fatalf("state=%q want %q (agent last seen %v, panel up for %v)", got.State, tc.want, tc.seen, tc.upFor)
 			}
 		})
 	}

@@ -44,6 +44,14 @@ type AdminServersHandler struct {
 	nativeUpgrade    NativeAgentUpgradeService
 	nodeReleases     ports.NodeReleaseCatalog
 	serverMigration  ServerMigrationPreviewer
+
+	// startedAt is when THIS PSP process began listening. It exists because a
+	// node's silence during the panel's own downtime is not evidence about the
+	// node: until the process has been up for a full silence window, "I have not
+	// heard from it" and "it is gone" are the same observation. The zero value
+	// reads as "up long enough", which keeps the pre-existing verdict for any
+	// handler built without the constructor.
+	startedAt time.Time
 }
 
 func (h *AdminServersHandler) WithNativeAgentProvisioning(repo ports.NativeAgentProvisioningRepo) *AdminServersHandler {
@@ -64,6 +72,7 @@ func (h *AdminServersHandler) WithNodeSettings(repo ports.SettingsRepo) *AdminSe
 func NewAdminServersHandler(repo ports.XUIPanelRepo, pool ports.XUIPool, nodes ports.NodeRepo, audit ports.AuditRepo, async AsyncDispatcher, invalidateRender func()) *AdminServersHandler {
 	return &AdminServersHandler{
 		repo: repo, pool: pool, nodes: nodes, audit: audit, async: async, invalidateRender: invalidateRender,
+		startedAt: time.Now().UTC(),
 	}
 }
 
