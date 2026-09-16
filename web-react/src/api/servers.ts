@@ -26,7 +26,7 @@ export type PanelCapability =
 export interface Server {
   id: number
   panel_type: PanelType
-  /** Saved Passwall Node release preference; legacy omission means stable. Not automatic upgrades. */
+  /** Saved Passwall Node release preference; legacy omission means stable. Docker installation files follow its floating image tag by default. */
   update_channel?: NodeUpdateChannel
   capabilities: PanelCapability[]
   name: string
