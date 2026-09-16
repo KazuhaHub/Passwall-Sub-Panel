@@ -99,17 +99,24 @@ type serverDTO struct {
 	// AuthMethod is the EFFECTIVE auth mode ("token" | "password") so the edit
 	// form pre-selects correctly — resolved from the stored method, falling back
 	// to inference for legacy rows. InsecureHTTPS skips TLS cert verification.
-	AuthMethod         string     `json:"auth_method"`
-	InsecureHTTPS      bool       `json:"insecure_https"`
-	PanelVersion       string     `json:"panel_version,omitempty"`
-	XrayVersion        string     `json:"xray_version,omitempty"`
-	CoreEngine         string     `json:"core_engine,omitempty"`
-	CoreVersion        string     `json:"core_version,omitempty"`
-	DesiredCoreEngine  string     `json:"desired_core_engine,omitempty"`
-	DesiredCoreVersion string     `json:"desired_core_version,omitempty"`
-	VersionCheckedAt   *time.Time `json:"version_checked_at,omitempty"`
-	CompatStatus       string     `json:"compat_status,omitempty"`  // "supported" | "too_old" | "untested" | "unknown"
-	CompatMessage      string     `json:"compat_message,omitempty"` // human-readable, for tooltip / banner
+	AuthMethod                   string     `json:"auth_method"`
+	InsecureHTTPS                bool       `json:"insecure_https"`
+	PanelVersion                 string     `json:"panel_version,omitempty"`
+	XrayVersion                  string     `json:"xray_version,omitempty"`
+	CoreEngine                   string     `json:"core_engine,omitempty"`
+	CoreVersion                  string     `json:"core_version,omitempty"`
+	DesiredCoreEngine            string     `json:"desired_core_engine,omitempty"`
+	DesiredCoreVersion           string     `json:"desired_core_version,omitempty"`
+	NodeProtocolVersion          *int       `json:"node_protocol_version,omitempty"`
+	NodeEffectiveProtocolVersion *int       `json:"node_effective_protocol_version,omitempty"`
+	NodeCapabilities             []string   `json:"node_capabilities,omitempty"`
+	NodeCompatibility            string     `json:"node_compatibility,omitempty"` // unknown | compatible | limited | incompatible
+	NodeUpgradeReady             bool       `json:"node_upgrade_ready,omitempty"`
+	NodeMissingCapabilities      []string   `json:"node_missing_capabilities,omitempty"`
+	NodeProtocolObservedAt       *time.Time `json:"node_protocol_observed_at,omitempty"`
+	VersionCheckedAt             *time.Time `json:"version_checked_at,omitempty"`
+	CompatStatus                 string     `json:"compat_status,omitempty"`  // "supported" | "too_old" | "untested" | "unknown"
+	CompatMessage                string     `json:"compat_message,omitempty"` // human-readable, for tooltip / banner
 	// LatestXUIVersion / UpdateAvailable are derived per-request from the
 	// PSP-wide version.LatestXUI() snapshot (one GitHub query feeds every
 	// row) compared against this panel's PanelVersion. NOT persisted per
@@ -1506,10 +1513,29 @@ func (h *AdminServersHandler) toServerDTOWithAgent(p *domain.Panel, agent *domai
 	dto := toServerDTO(p)
 	if domain.NormalizePanelKind(p.Kind) == domain.PanelKindPSP {
 		dto.CoreVersion = p.XrayVersion
+		dto.NodeCompatibility = "unknown"
 		if agent != nil {
 			dto.CoreEngine = string(agent.ObservedCoreEngine)
 			dto.DesiredCoreEngine = string(domain.NormalizeNodeCoreEngine(agent.DesiredCoreEngine))
 			dto.DesiredCoreVersion = agent.DesiredCoreVersion
+			if compatibility, observed := agent.ProtocolCompatibility(); observed {
+				reported := compatibility.ReportedProtocolVersion
+				effective := compatibility.EffectiveProtocolVersion
+				dto.NodeProtocolVersion = &reported
+				dto.NodeEffectiveProtocolVersion = &effective
+				dto.NodeCapabilities = append([]string(nil), agent.ObservedCapabilities...)
+				dto.NodeProtocolObservedAt = agent.ProtocolObservedAt
+				dto.NodeMissingCapabilities = append([]string(nil), compatibility.MissingAgentUpgrade...)
+				switch {
+				case !compatibility.ProtocolSupported:
+					dto.NodeCompatibility = "incompatible"
+				case compatibility.AgentUpgrade:
+					dto.NodeCompatibility = "compatible"
+					dto.NodeUpgradeReady = true
+				default:
+					dto.NodeCompatibility = "limited"
+				}
+			}
 		}
 	}
 	client, err := h.pool.Get(p.ID)

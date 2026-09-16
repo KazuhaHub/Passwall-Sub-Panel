@@ -346,6 +346,12 @@ func (s *Service) ingestReport(ctx context.Context, agent *domain.NodeAgent, sna
 	if err := nodeprotocol.ValidateTaskResults(report.TaskResults); err != nil {
 		return fmt.Errorf("nodesync: invalid task results: %w", err)
 	}
+	// Capabilities are a current fact, not a sticky promise. Persist every
+	// authenticated report, including an empty set, so disabling or removing an
+	// upgrade helper immediately revokes future task admission.
+	if err := s.agents.UpdateProtocolObservation(ctx, agent.AgentID, report.ProtocolVersion, report.Capabilities, now); err != nil {
+		return fmt.Errorf("nodesync: record protocol observation: %w", err)
+	}
 	results := make([]domain.NodeAgentTaskResult, len(report.TaskResults))
 	for i := range report.TaskResults {
 		results[i] = domain.NodeAgentTaskResult{

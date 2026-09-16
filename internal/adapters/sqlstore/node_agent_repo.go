@@ -8,9 +8,11 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"sort"
 	"strings"
 	"time"
 
+	nodeprotocol "github.com/KazuhaHub/passwall-node/protocol"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
@@ -26,14 +28,17 @@ type nodeAgentRow struct {
 	CredentialSHA256 string `gorm:"size:64;not null;uniqueIndex"`
 	// Nullable TEXT preserves digest-only legacy records. This private field
 	// is omitted by ordinary agent reads and never mapped into domain.NodeAgent.
-	CredentialCiphertext   *string `gorm:"type:text" json:"-"`
-	DesiredCoreEngine      string  `gorm:"size:16;not null;default:'xray'"`
-	DesiredCoreVersion     string  `gorm:"size:32;not null;default:''"`
-	AllowRestrictedReality bool    `gorm:"not null;default:false"`
-	ObservedCoreEngine     string  `gorm:"size:16;not null;default:''"`
-	LastSeen               *time.Time
-	CreatedAt              time.Time
-	UpdatedAt              time.Time
+	CredentialCiphertext    *string     `gorm:"type:text" json:"-"`
+	ObservedProtocolVersion int         `gorm:"not null;default:0"`
+	ObservedCapabilities    jsonStrings `gorm:"type:text"`
+	ProtocolObservedAt      *time.Time
+	DesiredCoreEngine       string `gorm:"size:16;not null;default:'xray'"`
+	DesiredCoreVersion      string `gorm:"size:32;not null;default:''"`
+	AllowRestrictedReality  bool   `gorm:"not null;default:false"`
+	ObservedCoreEngine      string `gorm:"size:16;not null;default:''"`
+	LastSeen                *time.Time
+	CreatedAt               time.Time
+	UpdatedAt               time.Time
 }
 
 func (nodeAgentRow) TableName() string { return "node_agents" }
@@ -95,6 +100,22 @@ func validateNewNodeAgent(agent *domain.NodeAgent) error {
 	if agent.ObservedCoreEngine != "" && !agent.ObservedCoreEngine.Valid() {
 		return errors.New("create node agent: observed core engine is unsupported")
 	}
+	if agent.ProtocolObservedAt == nil {
+		if agent.ObservedProtocolVersion != 0 || len(agent.ObservedCapabilities) != 0 {
+			return errors.New("create node agent: protocol observation time is required with observed protocol data")
+		}
+	} else {
+		if agent.ProtocolObservedAt.IsZero() {
+			return errors.New("create node agent: protocol observation time is invalid")
+		}
+		canonical, err := canonicalProtocolCapabilities(agent.ObservedProtocolVersion, agent.ObservedCapabilities)
+		if err != nil {
+			return fmt.Errorf("create node agent: %w", err)
+		}
+		agent.ObservedCapabilities = canonical
+		observedAt := agent.ProtocolObservedAt.UTC()
+		agent.ProtocolObservedAt = &observedAt
+	}
 	agent.CredentialSHA256 = strings.ToLower(agent.CredentialSHA256)
 	return nil
 }
@@ -106,12 +127,15 @@ func createNodeAgentRows(tx *gorm.DB, agent *domain.NodeAgent) (*nodeAgentRow, e
 	}
 	row := &nodeAgentRow{
 		AgentID: agent.AgentID, PanelID: agent.PanelID, Epoch: epoch,
-		CredentialSHA256:       agent.CredentialSHA256,
-		DesiredCoreEngine:      string(agent.DesiredCoreEngine),
-		DesiredCoreVersion:     agent.DesiredCoreVersion,
-		AllowRestrictedReality: agent.AllowRestrictedReality,
-		ObservedCoreEngine:     string(agent.ObservedCoreEngine),
-		LastSeen:               agent.LastSeen,
+		CredentialSHA256:        agent.CredentialSHA256,
+		ObservedProtocolVersion: agent.ObservedProtocolVersion,
+		ObservedCapabilities:    append(jsonStrings(nil), agent.ObservedCapabilities...),
+		ProtocolObservedAt:      agent.ProtocolObservedAt,
+		DesiredCoreEngine:       string(agent.DesiredCoreEngine),
+		DesiredCoreVersion:      agent.DesiredCoreVersion,
+		AllowRestrictedReality:  agent.AllowRestrictedReality,
+		ObservedCoreEngine:      string(agent.ObservedCoreEngine),
+		LastSeen:                agent.LastSeen,
 	}
 	if err := tx.Create(row).Error; err != nil {
 		return nil, err
@@ -132,6 +156,9 @@ func applyCreatedNodeAgent(agent *domain.NodeAgent, row *nodeAgentRow) {
 	agent.ID = row.ID
 	agent.Epoch = row.Epoch
 	agent.CredentialSHA256 = row.CredentialSHA256
+	agent.ObservedProtocolVersion = row.ObservedProtocolVersion
+	agent.ObservedCapabilities = append([]string(nil), row.ObservedCapabilities...)
+	agent.ProtocolObservedAt = row.ProtocolObservedAt
 	agent.DesiredCoreEngine = domain.NormalizeNodeCoreEngine(domain.NodeCoreEngine(row.DesiredCoreEngine))
 	agent.DesiredCoreVersion = row.DesiredCoreVersion
 	agent.AllowRestrictedReality = row.AllowRestrictedReality
@@ -143,13 +170,16 @@ func applyCreatedNodeAgent(agent *domain.NodeAgent, row *nodeAgentRow) {
 func rowToNodeAgent(row *nodeAgentRow) *domain.NodeAgent {
 	return &domain.NodeAgent{
 		ID: row.ID, AgentID: row.AgentID, PanelID: row.PanelID, Epoch: row.Epoch,
-		CredentialSHA256:       row.CredentialSHA256,
-		DesiredCoreEngine:      domain.NormalizeNodeCoreEngine(domain.NodeCoreEngine(row.DesiredCoreEngine)),
-		DesiredCoreVersion:     row.DesiredCoreVersion,
-		AllowRestrictedReality: row.AllowRestrictedReality,
-		ObservedCoreEngine:     domain.NodeCoreEngine(row.ObservedCoreEngine),
-		LastSeen:               row.LastSeen,
-		CreatedAt:              row.CreatedAt, UpdatedAt: row.UpdatedAt,
+		CredentialSHA256:        row.CredentialSHA256,
+		ObservedProtocolVersion: row.ObservedProtocolVersion,
+		ObservedCapabilities:    append([]string(nil), row.ObservedCapabilities...),
+		ProtocolObservedAt:      row.ProtocolObservedAt,
+		DesiredCoreEngine:       domain.NormalizeNodeCoreEngine(domain.NodeCoreEngine(row.DesiredCoreEngine)),
+		DesiredCoreVersion:      row.DesiredCoreVersion,
+		AllowRestrictedReality:  row.AllowRestrictedReality,
+		ObservedCoreEngine:      domain.NodeCoreEngine(row.ObservedCoreEngine),
+		LastSeen:                row.LastSeen,
+		CreatedAt:               row.CreatedAt, UpdatedAt: row.UpdatedAt,
 	}
 }
 
@@ -238,6 +268,39 @@ func (r *nodeAgentRepo) UpdateCoreObservation(ctx context.Context, agentID strin
 	result := r.db.WithContext(ctx).Model(&nodeAgentRow{}).Where("agent_id = ?", agentID).
 		Update("observed_core_engine", string(engine))
 	return r.finishNodeAgentUpdate(ctx, agentID, result)
+}
+
+func (r *nodeAgentRepo) UpdateProtocolObservation(ctx context.Context, agentID string, protocolVersion int, capabilities []string, observedAt time.Time) error {
+	if agentID == "" || observedAt.IsZero() {
+		return errors.New("update node agent protocol observation: valid agent ID, protocol version and observation time required")
+	}
+	canonical, err := canonicalProtocolCapabilities(protocolVersion, capabilities)
+	if err != nil {
+		return fmt.Errorf("update node agent protocol observation: %w", err)
+	}
+	result := r.db.WithContext(ctx).Model(&nodeAgentRow{}).Where("agent_id = ?", agentID).Updates(map[string]any{
+		"observed_protocol_version": protocolVersion,
+		"observed_capabilities":     jsonStrings(canonical),
+		"protocol_observed_at":      observedAt.UTC(),
+	})
+	return r.finishNodeAgentUpdate(ctx, agentID, result)
+}
+
+func canonicalProtocolCapabilities(protocolVersion int, capabilities []string) ([]string, error) {
+	if protocolVersion < 0 || protocolVersion > nodeprotocol.MaxSupportedProtocolVersion {
+		return nil, errors.New("protocol version is unsupported")
+	}
+	if len(capabilities) > nodeprotocol.MaxCapabilitiesPerReport {
+		return nil, fmt.Errorf("capabilities exceeds maximum of %d", nodeprotocol.MaxCapabilitiesPerReport)
+	}
+	canonical := append([]string(nil), capabilities...)
+	sort.Strings(canonical)
+	for i, capability := range canonical {
+		if strings.TrimSpace(capability) == "" || (i > 0 && canonical[i-1] == capability) {
+			return nil, errors.New("capabilities must be nonempty and unique")
+		}
+	}
+	return canonical, nil
 }
 
 // finishNodeAgentUpdate distinguishes an absent row from an idempotent no-op.

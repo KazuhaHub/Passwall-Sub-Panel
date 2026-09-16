@@ -2168,6 +2168,16 @@
       "insecure_https": "Enable when the panel uses a self-signed / mismatched cert. Scoped to this panel; the SSRF guard is unaffected."
     },
     "native": {
+      "compatibility": {
+        "compatible": "Compatible",
+        "limited": "Compatible · manual upgrade",
+        "incompatible": "Incompatible",
+        "unknown": "Compatibility unknown",
+        "compatible_detail": "Protocol v{{protocol}} is supported and this Node currently advertises all remote-upgrade capabilities.",
+        "limited_detail": "Node synchronization is compatible, but remote upgrade is unavailable. Update this Node manually once or enable its upgrade helper.",
+        "incompatible_detail": "This Node protocol has not been reviewed for this Passwall Sub Panel release. Remote upgrade is blocked.",
+        "unknown_detail": "No authenticated protocol observation has been saved yet. Wait for a successful Node check-in."
+      },
       "outbound_hint": "Passwall Node connects outbound to Passwall Sub Panel. It needs no inbound management URL or upstream-panel credential. Enter server details and select an installation method, then generate files for that server. Configure inbounds separately on the Nodes page.",
       "create_record_hint": "Create the server record first; the next page generates its installation command. Configure inbounds separately on Nodes.",
       "metadata_details": "Optional remark and technical details",

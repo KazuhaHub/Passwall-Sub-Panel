@@ -2166,6 +2166,16 @@
       "insecure_https": "面板使用自签名 / 域名不匹配证书时开启。仅对该面板生效，不影响 SSRF 防护。"
     },
     "native": {
+      "compatibility": {
+        "compatible": "兼容",
+        "limited": "兼容 · 需手动升级",
+        "incompatible": "不兼容",
+        "unknown": "兼容状态未知",
+        "compatible_detail": "协议 v{{protocol}} 已支持，且此节点当前已上报完整远程升级能力。",
+        "limited_detail": "节点同步兼容，但当前不能远程升级。请手动更新一次节点，或启用其升级助手。",
+        "incompatible_detail": "当前 Passwall Sub Panel 版本尚未验证此节点协议，已阻止远程升级。",
+        "unknown_detail": "尚未保存通过身份验证的协议上报，请等待节点成功连接一次。"
+      },
       "outbound_hint": "Passwall Node 主动连接 Passwall Sub Panel，不需要入站管理 URL 或上游面板凭据。先填写服务器信息并选择安装方式，再生成该服务器的专属安装文件；inbound 在节点页面单独配置。",
       "create_record_hint": "先创建服务器记录，下一页生成安装命令；inbound 在节点页面单独配置。",
       "metadata_details": "可选备注与技术说明",

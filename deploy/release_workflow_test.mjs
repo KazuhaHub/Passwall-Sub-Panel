@@ -75,7 +75,7 @@ test('release tag input uses env plus the pinned published canonical validator',
 
 test('every downstream job checks out trusted immutable workflow SHA proven equal to release SHA', () => {
   assert(job('setup').includes('test "$release_sha" = "$GITHUB_SHA"'))
-  for (const name of ['web', 'build', 'release', 'docker']) {
+  for (const name of ['node-compatibility', 'web', 'build', 'release', 'docker']) {
     assert(job(name).includes('ref: ${{ github.sha }}'), `${name} checkout is not pinned to the trusted workflow commit`)
     assert(!job(name).includes('ref: ${{ needs.setup.outputs.sha }}'), 'resolver output must not become a privileged checkout input')
   }
@@ -115,13 +115,23 @@ test('write tokens are scoped to publisher jobs only', () => {
   const global = workflow.slice(0, workflow.indexOf('\njobs:'))
   assert(global.includes('permissions:\n  contents: read'))
   assert(!global.includes('packages: write'))
-  for (const name of ['setup', 'web', 'build']) assert(!job(name).includes('contents: write'))
+  for (const name of ['setup', 'node-compatibility', 'web', 'build']) assert(!job(name).includes('contents: write'))
   assert(job('release').includes('permissions:\n      contents: write'))
   assert(job('docker').includes('permissions:\n      contents: read\n      packages: write'))
 })
 
 test('publisher explicitly disables every Go and Node shared dependency cache', () => {
   assertPublisherCachesDisabled(workflow)
+})
+
+test('release compatibility gate covers every retained Passwall Node release', () => {
+  const compatibility = job('node-compatibility')
+  for (const version of ['v0.0.1-beta1', 'v0.0.1-beta2', 'v0.0.1-beta3', 'v0.0.1-beta4']) {
+    assert(compatibility.includes(`          - ${version}`), `missing ${version} from release compatibility matrix`)
+  }
+  assert(compatibility.includes('TestLive_RealNode(AgentContract|MigratedServerContract|TaskEvidenceReceipt|TaskExpiryContract)'))
+  assert(job('release').includes('needs: [setup, build, node-compatibility]'))
+  assert(job('docker').includes('needs: [setup, build, node-compatibility]'))
 })
 
 test('publisher cache guard rejects implicit defaults and explicit cache restoration', () => {

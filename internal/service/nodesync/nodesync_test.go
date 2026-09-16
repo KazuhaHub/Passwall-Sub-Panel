@@ -216,6 +216,11 @@ func TestSyncDispatchesDurableTasksOnlyWithBothCapabilitiesAndAcceptsReplay(t *t
 		offered.Tasks[0].InputSHA256 != task.InputSHA256 || !bytes.Equal(offered.Tasks[0].Args, task.Args) {
 		t.Fatalf("wire task = %+v", offered.Tasks[0])
 	}
+	observed, err := repos.NodeAgent.GetByAgentID(ctx, agent.AgentID)
+	if err != nil || observed.ProtocolObservedAt == nil || observed.ObservedProtocolVersion != nodeprotocol.ProtocolVersion1 ||
+		strings.Join(observed.ObservedCapabilities, ",") != strings.Join([]string{nodeprotocol.CapabilityTaskExecutionV1, nodeprotocol.TaskCapability(task.Kind)}, ",") {
+		t.Fatalf("persisted protocol observation = (%+v, %v)", observed, err)
+	}
 	now = now.Add(time.Second)
 	repeated, err := service.Sync(ctx, report)
 	if err != nil || len(repeated.Tasks) != 1 || repeated.Tasks[0].ID != task.TaskID ||
@@ -242,6 +247,10 @@ func TestSyncDispatchesDurableTasksOnlyWithBothCapabilitiesAndAcceptsReplay(t *t
 	completed, err := service.Sync(ctx, report)
 	if err != nil || len(completed.Tasks) != 0 || completed.Envelope.NextPollSeconds != nodeprotocol.DefaultNextPollSeconds {
 		t.Fatalf("task completion replay response = (%+v, %v)", completed, err)
+	}
+	observed, err = repos.NodeAgent.GetByAgentID(ctx, agent.AgentID)
+	if err != nil || observed.ProtocolObservedAt == nil || len(observed.ObservedCapabilities) != 0 {
+		t.Fatalf("capability withdrawal did not replace durable observation = (%+v, %v)", observed, err)
 	}
 	now = now.Add(time.Second)
 	if _, err := service.Sync(ctx, report); err != nil {

@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "panel_major": 4,
+  "updated_at": "2026-09-16",
+  "wire": {
+    "endpoint": "/v1/node/sync",
+    "min_protocol_version": 1,
+    "max_protocol_version": 1,
+    "legacy_zero_maps_to": 1
+  },
+  "features": {
+    "agent_upgrade_v1": {
+      "required_capabilities": [
+        "task.execution.v1",
+        "task.expiry.v1",
+        "task.agent.upgrade.v1"
+      ]
+    }
+  },
+  "released_nodes": [
+    {
+      "version": "v0.0.1-beta1",
+      "protocol_version": 1,
+      "base_sync": "supported",
+      "remote_upgrade": "unsupported"
+    },
+    {
+      "version": "v0.0.1-beta2",
+      "protocol_version": 1,
+      "base_sync": "supported",
+      "remote_upgrade": "unsupported"
+    },
+    {
+      "version": "v0.0.1-beta3",
+      "protocol_version": 1,
+      "base_sync": "supported",
+      "remote_upgrade": "conditional",
+      "upgrade_methods": ["linux-systemd"]
+    },
+    {
+      "version": "v0.0.1-beta4",
+      "protocol_version": 1,
+      "base_sync": "supported",
+      "remote_upgrade": "conditional",
+      "upgrade_methods": ["linux-systemd"]
+    }
+  ]
+}
