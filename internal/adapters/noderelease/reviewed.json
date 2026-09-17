@@ -29,6 +29,36 @@
         {"os": "windows", "arch": "arm64"}
       ],
       "docker_published_tag": "v0.0.1-beta4"
+    },
+    {
+      "version": "v0.0.1-beta6",
+      "psp_major": 4,
+      "notes": "Reviewed PSP v4 agent protocol, pn management workflow, Docker remote upgrades and exact release packaging. Manual packages cover Linux, macOS and Windows on amd64 and arm64.",
+      "methods": ["linux", "docker", "manual"],
+      "platforms": [
+        {"os": "linux", "arch": "amd64"},
+        {"os": "linux", "arch": "arm64"},
+        {"os": "darwin", "arch": "amd64"},
+        {"os": "darwin", "arch": "arm64"},
+        {"os": "windows", "arch": "amd64"},
+        {"os": "windows", "arch": "arm64"}
+      ],
+      "docker_published_tag": "v0.0.1-beta6"
+    },
+    {
+      "version": "v0.0.1-beta7",
+      "psp_major": 4,
+      "notes": "Reviewed PSP v4 agent protocol, exact release packaging and managed Docker upgrades. The public Linux installer defaults to Stable, supports explicit Beta and install-only modes, and can install from an already verified offline release package. Container startup and Agent logs include timestamps and actionable credential/data mount diagnostics.",
+      "methods": ["linux", "docker", "manual"],
+      "platforms": [
+        {"os": "linux", "arch": "amd64"},
+        {"os": "linux", "arch": "arm64"},
+        {"os": "darwin", "arch": "amd64"},
+        {"os": "darwin", "arch": "arm64"},
+        {"os": "windows", "arch": "amd64"},
+        {"os": "windows", "arch": "arm64"}
+      ],
+      "docker_published_tag": "v0.0.1-beta7"
     }
   ]
 }

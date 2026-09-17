@@ -49,12 +49,18 @@ type nodeInstallationStep struct {
 	Commands    []string `json:"commands,omitempty"`
 }
 
+type nodeInstallationDownload struct {
+	Name string `json:"name"`
+	URL  string `json:"url"`
+}
+
 type nodeInstallationFilesResponse struct {
-	Method string                 `json:"method"`
-	OS     string                 `json:"os"`
-	Arch   string                 `json:"arch,omitempty"`
-	Files  []nodeInstallationFile `json:"files"`
-	Steps  []nodeInstallationStep `json:"steps"`
+	Method    string                     `json:"method"`
+	OS        string                     `json:"os"`
+	Arch      string                     `json:"arch,omitempty"`
+	Files     []nodeInstallationFile     `json:"files"`
+	Downloads []nodeInstallationDownload `json:"downloads,omitempty"`
+	Steps     []nodeInstallationStep     `json:"steps"`
 }
 
 func renderNodeInstallationFiles(panelID int64, p nativeServerCreateResponse, r nodeInstallationFilesRequest) nodeInstallationFilesResponse {
@@ -75,6 +81,11 @@ func renderNodeInstallationFiles(panelID int64, p nativeServerCreateResponse, r 
     container_name: %s
     image: ghcr.io/kazuhahub/passwall-node:%s
 %s    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     network_mode: host
     environment:
       PSP_NODE_ENDPOINT: %s
@@ -100,6 +111,11 @@ func renderNodeInstallationFiles(panelID int64, p nativeServerCreateResponse, r 
     image: ghcr.io/kazuhahub/passwall-node:%s
 %s    command: ["--run-docker-upgrade-helper"]
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     network_mode: none
     environment:
       PSP_NODE_UPGRADE_TARGET_CONTAINER: %s
@@ -133,8 +149,8 @@ func renderNodeInstallationFiles(panelID int64, p nativeServerCreateResponse, r 
 			upgradeSummary = "The updater enables authenticated remote upgrades with automatic rollback; it accepts official exact releases only and never receives the node credential."
 		}
 		result.Steps = []nodeInstallationStep{
-			{ID: "prepare", Title: "Prepare a private installation directory", Description: "Use Linux Docker Engine with a standard Compose implementation. Unless an architecture was explicitly selected, the multi-platform image selects the host architecture. Save compose.yaml and node-credential with their exact names in the same private project directory before validating or deploying. NAS project editors must use that directory as the project path. Preserve the same project and data volume when reinstalling or updating. Stop the old machine before reusing this identity.", Commands: []string{"set -eu\numask 077\nmkdir ./passwall-node-install\nchmod 0700 ./passwall-node-install\ncd ./passwall-node-install"}},
-			{ID: "credential", Title: "Protect the credential file", Description: "Transfer the files through a private channel. Never put the credential in command arguments, environment variables, tracing, shell history or shared logs.", Commands: []string{"set -eu\nchmod 0600 ./node-credential ./compose.yaml\ndocker compose version\ndocker compose -f compose.yaml config --quiet"}},
+			{ID: "prepare", Title: "Prepare a private installation directory", Description: "Use Linux Docker Engine with a standard Compose implementation. Unless an architecture was explicitly selected, the multi-platform image selects the host architecture. Save compose.yaml and node-credential with their exact names in the same private project directory before validating or deploying. NAS project editors must use that directory as the project path. Keep the generated named data volume unless you deliberately configure a bind directory and matching PUID/PGID. Preserve the same project and data volume when reinstalling or updating. Stop the old machine before reusing this identity.", Commands: []string{"set -eu\numask 077\nmkdir ./passwall-node-install\nchmod 0700 ./passwall-node-install\ncd ./passwall-node-install"}},
+			{ID: "credential", Title: "Protect the credential file", Description: "Transfer the files through a private channel. The credential must exist as a regular file before Compose starts; otherwise Docker may create a directory at the bind source and the Agent will refuse it. Never put the credential in command arguments, environment variables, tracing, shell history or shared logs.", Commands: []string{"set -eu\n[ -f ./node-credential ] && [ ! -L ./node-credential ] || { printf 'node-credential must be a regular non-symlink file before Docker starts\\n' >&2; exit 1; }\nchmod 0600 ./node-credential ./compose.yaml\ndocker compose version\ndocker compose -f compose.yaml config --quiet"}},
 			{ID: "start", Title: "Pull and start the selected container image", Description: "The default latest/beta tag follows the selected release channel; an exact version stays pinned for rollback. Start " + serviceSummary + ". Host networking is required by the Agent for PSP-managed dynamic listeners. Choose free listener ports >=1024 unless the Linux host explicitly permits non-root low ports. Do not use a privileged container or mount the Docker socket into the Agent.", Commands: []string{startCommand}},
 			{ID: "check", Title: "Verify the version and connect to PSP", Description: "Check the generated service or services, the reported version and Agent status in PSP, then configure nodes separately. Agent heartbeat alone is not proof of a running proxy core. " + upgradeSummary + " Back up this private directory and the persistent data volume; never run compose down --volumes to update.", Commands: []string{checkCommand}},
 		}
@@ -151,12 +167,26 @@ func renderNodeInstallationFiles(panelID int64, p nativeServerCreateResponse, r 
 		Arch     string `json:"arch"`
 	}{p.Endpoint, p.AgentID, r.Version, r.OS, r.Arch}, "", "  ")
 	result.Files = []nodeInstallationFile{{Name: "node-config.json", Content: string(config) + "\n"}, credential}
+	result.Downloads = manualReleaseDownloads(r)
 	if r.OS == "windows" {
 		result.Steps = manualWindowsSteps(p, r)
 	} else {
 		result.Steps = manualUnixSteps(p, r)
 	}
 	return result
+}
+
+func manualReleaseDownloads(r nodeInstallationFilesRequest) []nodeInstallationDownload {
+	ext := ".tar.gz"
+	if r.OS == "windows" {
+		ext = ".zip"
+	}
+	asset := "passwall-node_" + r.Version + "_" + r.OS + "_" + r.Arch + ext
+	base := "https://github.com/KazuhaHub/Passwall-Node/releases/download/" + r.Version + "/"
+	return []nodeInstallationDownload{
+		{Name: asset, URL: base + asset},
+		{Name: "SHA256SUMS.txt", URL: base + "SHA256SUMS.txt"},
+	}
 }
 
 func composeYAMLString(value string) string {
@@ -174,17 +204,16 @@ func nodeInstallPowerShellQuote(value string) string {
 func manualUnixSteps(p nativeServerCreateResponse, r nodeInstallationFilesRequest) []nodeInstallationStep {
 	packageName := "passwall-node_" + r.Version + "_" + r.OS + "_" + r.Arch
 	asset := packageName + ".tar.gz"
-	base := "https://github.com/KazuhaHub/Passwall-Node/releases/download/" + r.Version
 	check := "sha256sum --check --status selected.sha256"
 	if r.OS == "darwin" {
 		check = "shasum -a 256 --check selected.sha256"
 	}
-	download := fmt.Sprintf(`set -eu
+	verify := fmt.Sprintf(`set -eu
 umask 077
-curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' --tlsv1.2 --connect-timeout 15 --max-time 120 --output SHA256SUMS.txt %s
-curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' --tlsv1.2 --connect-timeout 15 --max-time 300 --output %s %s
+[ -f SHA256SUMS.txt ] && [ ! -L SHA256SUMS.txt ] || { printf 'Transfer SHA256SUMS.txt into this directory first\n' >&2; exit 1; }
+[ -f %s ] && [ ! -L %s ] || { printf 'Transfer the selected release archive into this directory first\n' >&2; exit 1; }
 awk -v name=%s '$2 == name || $2 == "*" name { count++; sum=$1; if (NF != 2) bad=1 } END { if (bad || count != 1 || length(sum) != 64 || sum ~ /[^0-9a-fA-F]/) exit 1; print sum "  " name }' SHA256SUMS.txt > selected.sha256
-%s`, nodeInstallShellQuote(base+"/SHA256SUMS.txt"), nodeInstallShellQuote(asset), nodeInstallShellQuote(base+"/"+asset), nodeInstallShellQuote(asset), check)
+%s`, nodeInstallShellQuote(asset), nodeInstallShellQuote(asset), nodeInstallShellQuote(asset), check)
 	extract := fmt.Sprintf(`set -eu
 umask 077
 package=%s
@@ -206,8 +235,8 @@ reported=$(./passwall-node --version)
 [ "${reported%%%% *}" = %s ] || { printf 'Binary release version mismatch\n' >&2; exit 1; }
 ./passwall-node --endpoint %s --agent-id %s --credential-file "$(pwd -P)/node-credential" --data-dir "$(pwd -P)/data"`, nodeInstallShellQuote(r.Version), nodeInstallShellQuote(p.Endpoint), nodeInstallShellQuote(p.AgentID))
 	return []nodeInstallationStep{
-		{ID: "prepare", Title: "Prepare a private installation directory", Description: "Use a non-root account on the selected OS/architecture with curl, tar, awk and the platform SHA-256 tool. Create a NEW directory and save node-credential and node-config.json there under their exact names through a private channel. Do not overwrite an existing installation or data directory.", Commands: []string{"set -eu\numask 077\nmkdir ./passwall-node-manual\nchmod 0700 ./passwall-node-manual\ncd ./passwall-node-manual"}},
-		{ID: "download_verify", Title: "Download and verify the exact release", Description: "Download only from the official fixed release tag and require one exact checksum entry. SHA-256 verifies corruption against the same trusted HTTPS publisher, not an independent signature. Stop if any command fails.", Commands: []string{download}},
+		{ID: "prepare", Title: "Prepare a private installation directory", Description: "On a connected administrator device, download the two exact release files listed by PSP and transfer them together with node-credential and node-config.json through a trusted channel. On the target, use a non-root account with tar, awk and the platform SHA-256 tool. Create a NEW directory and keep every file under its exact name. The target host does not need GitHub access.", Commands: []string{"set -eu\numask 077\nmkdir ./passwall-node-manual\nchmod 0700 ./passwall-node-manual\ncd ./passwall-node-manual"}},
+		{ID: "download_verify", Title: "Verify the transferred release files", Description: "Require one exact checksum entry for the selected archive. SHA-256 verifies corruption against the same trusted release publisher, not an independent signature. This command performs no network access; stop if it fails.", Commands: []string{verify}},
 		{ID: "extract", Title: "Read only the required regular release members", Description: "Never extract arbitrary archive paths, links or ownership into system directories. This reads only the exact binary, LICENSE and NOTICE into the new private directory.", Commands: []string{extract}},
 		{ID: "credential", Title: "Protect the credential and state", Description: "node-config.json records the non-secret installation values; it is not a daemon configuration-file flag. Never paste the credential into commands or logs. The data directory retains identity, SQLite counters, downloaded cores and confirmed runtime state. Back up matching credential/config and data before manual updates.", Commands: []string{"set -eu\nchmod 0600 ./node-credential ./node-config.json\nmkdir ./data\nchmod 0700 ./data"}},
 		{ID: "run", Title: "Verify the binary version and run in the foreground", Description: "Keep this terminal open. Configure PSP nodes separately after the Agent connects. Use free listener ports >=1024 for this unprivileged mode. This manual mode does not install systemd or the remote upgrade helper; for long-running Linux service use the separate recommended Linux/systemd installer. Stop the old machine before reusing the same credential.", Commands: []string{run}},
@@ -217,20 +246,21 @@ reported=$(./passwall-node --version)
 func manualWindowsSteps(_ nativeServerCreateResponse, r nodeInstallationFilesRequest) []nodeInstallationStep {
 	packageName := "passwall-node_" + r.Version + "_windows_" + r.Arch
 	asset := packageName + ".zip"
-	base := "https://github.com/KazuhaHub/Passwall-Node/releases/download/" + r.Version
-	download := fmt.Sprintf(`$ErrorActionPreference = 'Stop'
-& curl.exe --fail --silent --show-error --location --proto '=https' --proto-redir '=https' --tlsv1.2 --connect-timeout 15 --max-time 120 --output SHA256SUMS.txt %s
-if ($LASTEXITCODE -ne 0) { throw 'Checksum download failed' }
-& curl.exe --fail --silent --show-error --location --proto '=https' --proto-redir '=https' --tlsv1.2 --connect-timeout 15 --max-time 300 --output %s %s
-if ($LASTEXITCODE -ne 0) { throw 'Release download failed' }
+	verify := fmt.Sprintf(`$ErrorActionPreference = 'Stop'
 $asset = %s
+$required = @('SHA256SUMS.txt', $asset)
+foreach ($name in $required) {
+  if (-not [IO.File]::Exists((Join-Path (Get-Location).Path $name))) { throw ('Transfer the required release file first: ' + $name) }
+  $item = Get-Item -Force -LiteralPath $name
+  if ($item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw ('Release input is not a regular file: ' + $name) }
+}
 $entries = [Collections.Generic.List[string[]]]::new()
 foreach ($line in [IO.File]::ReadAllLines((Join-Path (Get-Location).Path 'SHA256SUMS.txt'))) {
   $parts = $line.Trim() -split '\s+'
   if ($parts.Length -ge 2 -and ($parts[1] -ceq $asset -or $parts[1] -ceq ('*' + $asset))) { $entries.Add([string[]]$parts) }
 }
 if ($entries.Count -ne 1 -or $entries[0].Length -ne 2 -or $entries[0][0] -cnotmatch '^[0-9a-fA-F]{64}$') { throw 'Missing, duplicate or invalid checksum entry' }
-if ((Get-FileHash -Algorithm SHA256 -LiteralPath $asset).Hash -ine $entries[0][0]) { throw 'Release checksum mismatch' }`, nodeInstallPowerShellQuote(base+"/SHA256SUMS.txt"), nodeInstallPowerShellQuote(asset), nodeInstallPowerShellQuote(base+"/"+asset), nodeInstallPowerShellQuote(asset))
+if ((Get-FileHash -Algorithm SHA256 -LiteralPath $asset).Hash -ine $entries[0][0]) { throw 'Release checksum mismatch' }`, nodeInstallPowerShellQuote(asset))
 	extract := fmt.Sprintf(`$ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 if ($null -eq [IO.Compression.ZipArchiveEntry].GetProperty('ExternalAttributes')) { throw 'Archive member validation requires .NET Framework 4.7.2 or later, or modern PowerShell 7' }
@@ -251,7 +281,7 @@ try {
   }
 } finally { $archive.Dispose() }`, nodeInstallPowerShellQuote(asset), nodeInstallPowerShellQuote(packageName))
 	return []nodeInstallationStep{
-		{ID: "prepare", Title: "Prepare a private installation directory", Description: "Use a standard non-administrator account, NTFS, curl.exe and Windows PowerShell >=5.1 with .NET Framework >=4.7.2, or modern PowerShell 7, on the selected Windows architecture. Create a NEW directory, protect its ACL, then save the two generated files there under their exact names through a private channel. Do not target existing state.", Commands: []string{`$ErrorActionPreference = 'Stop'
+		{ID: "prepare", Title: "Prepare a private installation directory", Description: "On a connected administrator device, download the two exact release files listed by PSP and transfer them together with the generated files through a trusted channel. On the target, use a standard non-administrator account, NTFS and Windows PowerShell >=5.1 with .NET Framework >=4.7.2, or modern PowerShell 7. The target host does not need GitHub access.", Commands: []string{`$ErrorActionPreference = 'Stop'
 $directory = Join-Path (Get-Location).Path 'passwall-node-manual'
 if (Test-Path -LiteralPath $directory) { throw 'Installation directory already exists; inspect it manually' }
 New-Item -ItemType Directory -Path $directory | Out-Null
@@ -262,7 +292,7 @@ $acl.SetAccessRuleProtection($true, $false)
 $acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new($owner, 'FullControl', 'ContainerInherit,ObjectInherit', 'None', 'Allow'))
 Set-Acl -LiteralPath $directory -AclObject $acl
 Set-Location -LiteralPath $directory`}},
-		{ID: "download_verify", Title: "Download and verify the exact release", Description: "Use the official fixed HTTPS tag only, require one exact SHA-256 entry and stop on any failure. Checksums trust the same release publisher, not an independent signature.", Commands: []string{download}},
+		{ID: "download_verify", Title: "Verify the transferred release files", Description: "Require one exact SHA-256 entry for the selected archive and stop on any failure. This command performs no network access. Checksums trust the same release publisher, not an independent signature.", Commands: []string{verify}},
 		{ID: "extract", Title: "Read only the required regular release members", Description: "This reads only the exact binary, LICENSE and NOTICE; it does not unpack arbitrary paths or links and refuses existing destination files.", Commands: []string{extract}},
 		{ID: "credential", Title: "Protect the credential and state", Description: "Never put the credential in command arguments, environment variables, tracing or shared logs. Keep node-config.json, node-credential and the persistent data directory together in private backups before manual updates.", Commands: []string{`$ErrorActionPreference = 'Stop'
 $owner = [Security.Principal.WindowsIdentity]::GetCurrent().User

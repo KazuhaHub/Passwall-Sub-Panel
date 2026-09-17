@@ -2185,13 +2185,15 @@
       "method_label": "Choose installation method",
       "method": {
         "linux": "Panel one-click installation (recommended)",
+        "github": "Public GitHub installer",
         "docker": "Docker",
-        "manual": "GitHub interactive installation"
+        "manual": "Manual / offline package"
       },
       "method_hint": {
         "linux": "For Linux servers running systemd. The panel generates one short, private, server-specific command that installs an exact release with a dedicated user and service.",
+        "github": "Run one public command on a Linux/systemd host. By default it installs the newest selected channel and immediately asks for the PSP connection values; an install-only command is also available.",
         "docker": "Requires Linux Docker Engine, standard Docker Compose, and host networking. The default one-service Compose uses conservative syntax for NAS project editors and follows the selected latest/beta channel. Docker remote upgrade is an explicit advanced option because its isolated updater requires the root-equivalent Docker socket.",
-        "manual": "Install the official Linux/systemd package from the public GitHub repository, then enter this server's endpoint, Agent ID and credential in the interactive setup. No secret is embedded in the public command."
+        "manual": "Choose an exact reviewed package for Linux, macOS or Windows. Download it on a connected device, transfer it with the generated identity files, then verify and run it without requiring GitHub access on the target host."
       },
       "method_version_hint": "Choose an installation method and save the server before generating its installation files. Switching methods does not rotate credentials or change the server identity.",
       "platform_label": "Operating system",
@@ -2206,13 +2208,14 @@
       "files_ready": "Installation materials are ready. Save them securely and use them only on the intended server.",
       "file_content": "Installation file: {{name}}",
       "download_file": "Download {{name}}",
+      "download_release_file": "Open official {{name}}",
       "copy_file": "Copy {{name}}",
       "command_label": "Step {{number}}: {{title}}",
       "copy_step": "Copy this step's commands",
       "downloads_hint": "Save all files together in a private directory on the target server. Set the credential file to mode 0600 on Linux / macOS; restrict Windows access to the runtime account. Do not share files, upload them to logs, or commit them to Git.",
-      "manual_platform_hint": "Manual installation runs in the foreground on Linux / macOS / Windows, amd64 / arm64; it does not install systemd. Download the exact release archive and SHA256 checksum, verify, extract, save private credentials, then check the application version and start it. Set the credential file to mode 0600 on Linux / macOS; restrict Windows access to the runtime account. Preserve the original identity and data, and never run multiple Passwall Node instances concurrently.",
+      "manual_platform_hint": "Manual/offline installation runs in the foreground on Linux / macOS / Windows, amd64 / arm64; it does not install systemd. Download the exact archive and SHA256SUMS.txt on a connected administrator device, transfer them with the two generated identity files, then verify and run entirely offline on the target. Preserve the original identity and data, and never run multiple Passwall Node instances concurrently.",
       "step_title": {
-        "download_verify": "Download and verify release files",
+        "download_verify": "Verify transferred release files",
         "extract": "Extract the application",
         "credential": "Save private credentials",
         "run": "Check the version and run in the foreground",
@@ -2222,14 +2225,14 @@
       },
       "step_description": {
         "docker": {
-          "prepare": "Use Linux Docker Engine with a standard Compose implementation. Create a private project directory and save compose.yaml and node-credential together under their exact names before validation or deployment. NAS project editors must use that directory as the project path. Preserve the same project and data volume when reinstalling or updating. Stop the old machine before reusing its identity.",
+          "prepare": "Use Linux Docker Engine with a standard Compose implementation. Create a private project directory and save compose.yaml and node-credential together under their exact names before validation or deployment. The credential stays read-only; data must stay writable. Keep the generated named data volume on NAS unless you intentionally configure a bind directory and matching PUID/PGID. Preserve the same project and data volume when reinstalling or updating.",
           "credential": "Transfer files through a private channel and restrict read access. Never put credentials in command arguments, environment variables, tracing, shell history, or shared logs. Check the Compose version and validate its configuration; stop if any command fails.",
           "start": "Start the generated Agent service. If the advanced remote-upgrade option was enabled, the generated isolated updater also starts with no network and alone receives the root-equivalent Docker socket. Dynamic listeners require host networking. Never mount the socket into the Agent or use privileged containers.",
           "check": "Check the generated service or services, the application version and Agent status in Passwall Sub Panel, then configure nodes separately; a heartbeat does not prove the proxy core is running. When enabled, the updater accepts official exact releases only and restores the retained previous container unless the replacement synchronizes and converges. Back up the private directory and data volume; never use docker compose down --volumes to update."
         },
         "manual": {
-          "prepare": "Use an unprivileged account and the appropriate tools on the selected OS and architecture: Linux / macOS require curl, tar, awk, and a SHA-256 tool; Windows requires a standard non-administrator account, NTFS, curl.exe, and either PowerShell 5.1 with .NET Framework 4.7.2 or newer, or PowerShell 7. Create and protect a new private directory, then transfer node-credential and node-config.json there under their exact names. Do not overwrite existing installation or data.",
-          "download_verify": "Download only from the official fixed HTTPS release tag and require exactly one SHA-256 entry matching the selected archive. Checksums verify file integrity against the same trusted release publisher, not an independent digital signature. Stop if any command fails.",
+          "prepare": "Use a connected administrator device to download the exact two public release files shown here, then transfer them with node-credential and node-config.json through a trusted channel. The target needs only local archive and checksum tools; it does not need GitHub access. Do not overwrite an existing installation or data directory.",
+          "download_verify": "Verify the already transferred archive against exactly one matching SHA-256 entry. The command performs no network access. Checksums verify integrity against the same trusted release publisher, not an independent digital signature. Stop if it fails.",
           "extract": "Read only the exact application binary, LICENSE, and NOTICE as regular files from the selected archive. Windows requires PowerShell 5.1 with .NET Framework 4.7.2 or newer, or PowerShell 7, to inspect ZIP entry attributes; stop rather than skip checks if that capability is unavailable. Never extract arbitrary paths, links, or file ownership into system directories. If a destination already exists, stop and inspect it manually.",
           "credential": "node-config.json records non-sensitive installation values; it is not a daemon configuration loaded through --config. Never put credentials in command arguments, environment variables, tracing, shell history, or logs. The persistent data directory retains identity, SQLite counters, downloaded cores, and confirmed runtime state. Before manual updates, back up matching credentials, the installation record, and data together.",
           "run": "Check the application version, then run in the foreground and keep this terminal open. Configure nodes separately in Passwall Sub Panel after the Agent connects. Use free ports at or above 1024 for unprivileged Linux / macOS operation. This method registers no system service and installs neither systemd nor the remote upgrade helper; use the recommended installer for a long-running Linux service. Stop the old machine before reusing its credential."
@@ -2237,8 +2240,9 @@
       },
       "method_steps": {
         "linux": "1. Save the server and generate the private script for an exact release.\n2. Transfer the script to the target Linux server and run the provided commands as root.\n3. Confirm the service and heartbeat, then configure inbounds separately on the Nodes page.",
+        "github": "1. Run the default public command on the target Linux/systemd host; it uses Stable unless this server's saved channel is Beta.\n2. Enter the endpoint, Agent ID and credential shown here when prompted.\n3. Use the install-only command when configuration must be deferred; finish later with sudo pn connect.",
         "docker": "1. Save the server and generate its Compose and private credential files.\n2. Put both files in the same private project directory and start the Agent; enable the updater only from Advanced when remote upgrades are required.\n3. Preserve the project and data volume, confirm the generated service(s) and heartbeat, then configure inbounds separately.",
-        "manual": "1. Run the public GitHub command on the target Linux/systemd host.\n2. Choose Stable or Beta, then enter the endpoint, Agent ID and credential shown here when prompted.\n3. Confirm the service and heartbeat; use pn connect later if interactive setup was interrupted."
+        "manual": "1. Select the target OS, architecture and exact reviewed release, then generate all server-specific files.\n2. Download the listed public release files on a connected device and transfer all four files to the target.\n3. Follow the offline verification and foreground-run steps in Advanced; no target-side GitHub access is required."
       },
       "agent_id": "Agent ID",
       "credential": "Long-lived node credential",
@@ -2247,12 +2251,15 @@
       "copy_credential": "Copy credential",
       "copy_endpoint": "Copy endpoint",
       "copy_agent_id": "Copy Agent ID",
-      "github_manual_summary": "This public GitHub installer contains no server credential. It installs the selected public release interactively, then runs pn connect so you can enter the three values shown below without placing the credential in shell history.",
-      "github_install_command": "Public GitHub installation command",
+      "github_manual_summary": "The default public command installs Passwall Node and immediately opens the private pn connect prompts. It contains no server credential. Use the install-only command only when configuration must be postponed.",
+      "github_install_command": "Public GitHub install and configure command",
+      "github_install_only_command": "Optional: install only",
       "copy_github_command": "Copy GitHub command",
+      "copy_github_install_only_command": "Copy install-only command",
       "github_values_title": "Enter these values when pn connect prompts",
       "github_connect_hint": "If the installation finishes before configuration, run sudo pn connect. For an already configured node, pn connect refuses to overwrite its identity; use the separately confirmed pn rebind workflow only when intentionally replacing it.",
       "github_advanced_hint": "The public installer is Linux/systemd-only and supports amd64 and arm64. It refuses existing installations and unrelated pn commands, verifies the selected release archive, installs the daemon and management menu together, and keeps credentials out of the installation command.",
+      "offline_summary": "PSP provides all connection values and private files. Download the two exact public release files below on a connected device, transfer all files to the target, then follow the offline steps in Advanced.",
       "copy_command": "Copy start command",
       "saved_confirm": "I saved it securely",
       "rotate_title": "Rotate Passwall Node credential",
@@ -2315,7 +2322,7 @@
       "credential_file_command": "Replace the private credential file in an existing installation",
       "copy_file_command": "Copy file replacement commands",
       "http_warning": "This sync endpoint uses plaintext HTTP and may expose credentials to network observers. Use only on a trusted test network; configure a publicly reachable HTTPS sync endpoint for production first.",
-      "docker_hint": "Docker requires Linux Docker Engine, standard Compose, and host networking. The default one-service file uses conservative syntax for NAS project editors. Remote upgrade is off by default; enable it above only when this trusted host may expose its root-equivalent Docker socket to the isolated updater. Preserve the project and data volume. Windows container host networking is unsupported.",
+      "docker_hint": "Docker requires Linux Docker Engine, standard Compose, and host networking. The generated credential mount is correctly read-only; the named data volume is writable and avoids common NAS bind-directory permission failures. The Agent emits timestamped structured log lines and Docker rotates three 10 MiB log files. Remote upgrade is off by default; enable it only on a trusted host.",
       "docker_docs": "View Linux Compose example",
       "status_title": "Passwall Node status",
       "status_failed": "Could not read runtime status.",

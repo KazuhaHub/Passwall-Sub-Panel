@@ -197,7 +197,7 @@ func TestNodeInstallationFilesDockerDefaultsToPortableSingleServiceCompose(t *te
 			compose = file.Content
 		}
 	}
-	for _, required := range []string{"services:\n", "container_name: passwall-node-server-41-agent", "image: ghcr.io/kazuhahub/passwall-node:beta", "platform: linux/arm64", "network_mode: host", "PSP_NODE_ENDPOINT: \"https://panel.example/a$$VAR'path/v1/node/sync\"", "PSP_NODE_DOCKER_REMOTE_UPGRADE: \"false\"", "./node-credential:/run/secrets/node_credential:ro", "passwall-node-data:/var/lib/passwall-node"} {
+	for _, required := range []string{"services:\n", "container_name: passwall-node-server-41-agent", "image: ghcr.io/kazuhahub/passwall-node:beta", "platform: linux/arm64", "network_mode: host", "PSP_NODE_ENDPOINT: \"https://panel.example/a$$VAR'path/v1/node/sync\"", "PSP_NODE_DOCKER_REMOTE_UPGRADE: \"false\"", "./node-credential:/run/secrets/node_credential:ro", "passwall-node-data:/var/lib/passwall-node", "driver: json-file", "max-size: \"10m\"", "max-file: \"3\""} {
 		if !strings.Contains(compose, required) {
 			t.Fatalf("portable compose requirement absent: %s\n%s", required, compose)
 		}
@@ -221,7 +221,7 @@ func TestNodeInstallationFilesDockerDefaultsToPortableSingleServiceCompose(t *te
 			protect = strings.Join(step.Commands, "\n")
 		}
 	}
-	if !strings.Contains(protect, "chmod 0600 ./node-credential ./compose.yaml") || strings.Contains(protect, "node.env") {
+	if !strings.Contains(protect, "[ -f ./node-credential ]") || !strings.Contains(protect, "[ ! -L ./node-credential ]") || !strings.Contains(protect, "chmod 0600 ./node-credential ./compose.yaml") || strings.Contains(protect, "node.env") {
 		t.Fatal("entrypoint compatibility weakened host credential permissions")
 	}
 }
@@ -304,11 +304,11 @@ func TestNodeInstallationFilesManualExactArchivesAndSafeQuoting(t *testing.T) {
 	p := nativeServerCreateResponse{AgentID: repo.agent.AgentID, Credential: repo.credential, Endpoint: "https://panel.example/a'$(touch-not-a-command)/v1/node/sync"}
 	for _, platform := range []string{"linux", "darwin", "windows"} {
 		result := renderNodeInstallationFiles(41, p, nodeInstallationFilesRequest{Method: "manual", Version: "v0.0.1-beta3", OS: platform, Arch: "arm64"})
-		var download, extract, run string
+		var verify, extract, run string
 		for _, step := range result.Steps {
 			switch step.ID {
 			case "download_verify":
-				download = strings.Join(step.Commands, "\n")
+				verify = strings.Join(step.Commands, "\n")
 			case "extract":
 				extract = strings.Join(step.Commands, "\n")
 			case "run":
@@ -319,14 +319,20 @@ func TestNodeInstallationFilesManualExactArchivesAndSafeQuoting(t *testing.T) {
 		ext := ".tar.gz"
 		if platform == "windows" {
 			ext = ".zip"
-			if !strings.Contains(extract, "FileMode]::CreateNew") || !strings.Contains(extract, "ExternalAttributes") || !strings.Contains(download, "$entries.Count -ne 1") || !strings.Contains(run, "ConvertFrom-Json") {
+			if !strings.Contains(extract, "FileMode]::CreateNew") || !strings.Contains(extract, "ExternalAttributes") || !strings.Contains(verify, "$entries.Count -ne 1") || !strings.Contains(run, "ConvertFrom-Json") {
 				t.Fatal("Windows guide did not retain strict checksum/member/data parsing")
 			}
-		} else if !strings.Contains(run, nodeInstallShellQuote(p.Endpoint)) || !strings.Contains(download, "count != 1") || !strings.Contains(extract, "tar -xOzf") || strings.Contains(extract, "tar -xzf") {
+		} else if !strings.Contains(run, nodeInstallShellQuote(p.Endpoint)) || !strings.Contains(verify, "count != 1") || !strings.Contains(extract, "tar -xOzf") || strings.Contains(extract, "tar -xzf") {
 			t.Fatal("Unix guide weakened literal argv or safe member extraction")
 		}
-		if !strings.Contains(download, "passwall-node_v0.0.1-beta3_"+platform+"_arm64"+ext) || !strings.Contains(download, "https://github.com/KazuhaHub/Passwall-Node/releases/download/v0.0.1-beta3/") || !strings.Contains(download, "--proto-redir '=https'") || !strings.Contains(run, "--credential-file") {
-			t.Fatal("manual guide did not use the fixed release/archive/credential-file")
+		asset := "passwall-node_v0.0.1-beta3_" + platform + "_arm64" + ext
+		if !strings.Contains(verify, asset) || strings.Contains(verify, "curl") || strings.Contains(verify, "https://") || !strings.Contains(run, "--credential-file") {
+			t.Fatal("manual guide did not use the fixed offline archive/credential-file")
+		}
+		if len(result.Downloads) != 2 || result.Downloads[0].Name != asset ||
+			result.Downloads[0].URL != "https://github.com/KazuhaHub/Passwall-Node/releases/download/v0.0.1-beta3/"+asset ||
+			result.Downloads[1].Name != "SHA256SUMS.txt" || !strings.HasSuffix(result.Downloads[1].URL, "/SHA256SUMS.txt") {
+			t.Fatal("manual response did not expose the exact release downloads")
 		}
 	}
 	if nodeInstallPowerShellQuote("a'b") != "'a''b'" {

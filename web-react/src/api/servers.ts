@@ -130,7 +130,7 @@ export interface NativeAgentStatus {
   configured_nodes: number
 }
 
-export type NativeInstallMethod = 'linux' | 'docker' | 'manual'
+export type NativeInstallMethod = 'linux' | 'github' | 'docker' | 'manual'
 export type NativeInstallOS = 'linux' | 'darwin' | 'windows'
 export type NativeInstallArch = 'amd64' | 'arm64'
 
@@ -146,6 +146,7 @@ export interface NativeInstallationFiles {
   os: NativeInstallOS
   arch?: NativeInstallArch
   files: { name: string; content: string; sensitive?: boolean }[]
+  downloads?: { name: string; url: string }[]
   steps: { id?: string; title: string; commands?: string[]; description?: string }[]
 }
 
