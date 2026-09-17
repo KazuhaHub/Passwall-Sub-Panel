@@ -59,6 +59,21 @@
         {"os": "windows", "arch": "arm64"}
       ],
       "docker_published_tag": "v0.0.1-beta7"
+    },
+    {
+      "version": "v0.0.1-beta8",
+      "psp_major": 4,
+      "notes": "Reviewed PSP v4 agent protocol, exact release packaging and managed Docker upgrades. Docker deployments use explicit project directories: ./config for the read-only credential, ./data for persistent writable state, and ./upgrades only when the updater is enabled. This avoids NAS Compose implementations creating a missing file bind source as a directory.",
+      "methods": ["linux", "docker", "manual"],
+      "platforms": [
+        {"os": "linux", "arch": "amd64"},
+        {"os": "linux", "arch": "arm64"},
+        {"os": "darwin", "arch": "amd64"},
+        {"os": "darwin", "arch": "arm64"},
+        {"os": "windows", "arch": "amd64"},
+        {"os": "windows", "arch": "arm64"}
+      ],
+      "docker_published_tag": "v0.0.1-beta8"
     }
   ]
 }
