@@ -2173,7 +2173,7 @@
         "limited": "兼容 · 需手动升级",
         "incompatible": "不兼容",
         "unknown": "兼容状态未知",
-        "compatible_detail": "协议 v{{protocol}} 已支持 · 可远程升级。",
+        "compatible_detail": "兼容 · 可远程升级",
         "limited_detail": "节点同步兼容，但当前不能远程升级。请手动更新一次节点，或启用其升级助手。",
         "incompatible_detail": "当前 Passwall Sub Panel 版本尚未验证此节点协议，已阻止远程升级。",
         "unknown_detail": "尚未保存通过身份验证的协议上报，请等待节点成功连接一次。"
