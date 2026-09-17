@@ -321,6 +321,7 @@ jobs:
                 ([range(0; $shard_count) | {shard: ., packages: []}];
                  .[$item.key % $shard_count].packages += [$item.value])
             | map({shard: (.shard + 1 | tostring), packages: .packages})
+            | {include: .}
           ' > matrix.json
           echo "matrix=$(<matrix.json)" >> "$GITHUB_OUTPUT"
 
