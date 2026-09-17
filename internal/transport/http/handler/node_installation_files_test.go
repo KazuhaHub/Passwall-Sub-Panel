@@ -20,6 +20,7 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	"gopkg.in/yaml.v3"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/audit"
@@ -186,35 +187,33 @@ func TestNodeInstallationFilesAuditContainsMetadataNotGeneratedSecrets(t *testin
 	}
 }
 
-func TestNodeInstallationFilesDockerTracksReviewedChannelAndPreservesLiteralEndpoint(t *testing.T) {
+func TestNodeInstallationFilesDockerDefaultsToPortableSingleServiceCompose(t *testing.T) {
 	_, repo := installationFixture(t)
 	p := nativeServerCreateResponse{AgentID: repo.agent.AgentID, Credential: repo.credential, Endpoint: "https://panel.example/a$VAR'path/v1/node/sync"}
 	result := renderNodeInstallationFiles(41, p, nodeInstallationFilesRequest{Method: "docker", Version: "beta", OS: "linux", Arch: "arm64"})
-	var compose, env string
+	var compose string
 	for _, file := range result.Files {
-		switch file.Name {
-		case "compose.yaml":
+		if file.Name == "compose.yaml" {
 			compose = file.Content
-		case "node.env":
-			env = file.Content
 		}
 	}
-	for _, required := range []string{"name: passwall-node-server-41", "container_name: passwall-node-server-41-agent", "container_name: passwall-node-server-41-updater", "image: ghcr.io/kazuhahub/passwall-node:beta", "platform: linux/arm64", "condition: service_started", "format: raw", "network_mode: host", "network_mode: none", "file: ./node-credential", "passwall-node-data:/var/lib/passwall-node", "passwall-node-upgrades:/run/passwall-node-upgrades", "io.kazuhahub.passwall-node.managed: \"true\"", "io.kazuhahub.passwall-node.agent-id: \"" + p.AgentID + "\"", "command: [\"--run-docker-upgrade-helper\"]", "PSP_NODE_UPGRADE_TARGET_CONTAINER: passwall-node-server-41-agent", "/var/run/docker.sock:/var/run/docker.sock", "read_only: true", "no-new-privileges:true", "    cap_drop:\n      - ALL\n", "    cap_add:\n      - CHOWN\n      - DAC_OVERRIDE\n      - FOWNER\n      - SETGID\n      - SETUID\n"} {
+	for _, required := range []string{"services:\n", "container_name: passwall-node-server-41-agent", "image: ghcr.io/kazuhahub/passwall-node:beta", "platform: linux/arm64", "network_mode: host", "PSP_NODE_ENDPOINT: \"https://panel.example/a$$VAR'path/v1/node/sync\"", "PSP_NODE_DOCKER_REMOTE_UPGRADE: \"false\"", "./node-credential:/run/secrets/node_credential:ro", "passwall-node-data:/var/lib/passwall-node"} {
 		if !strings.Contains(compose, required) {
-			t.Fatalf("production compose requirement absent: %s", required)
+			t.Fatalf("portable compose requirement absent: %s\n%s", required, compose)
 		}
 	}
-	agentService := strings.Split(compose, "\n  passwall-node-updater:")[0]
-	if strings.Contains(compose, "privileged:") || strings.Contains(agentService, "docker.sock") || strings.Contains(compose, p.Endpoint) ||
-		!strings.Contains(env, "PSP_NODE_ENDPOINT="+p.Endpoint+"\n") || !strings.Contains(env, "PSP_NODE_DOCKER_REMOTE_UPGRADE=true\n") {
-		t.Fatal("compose was privileged or interpolated the endpoint")
+	if len(result.Files) != 2 || strings.HasPrefix(compose, "name:") || strings.Contains(compose, "passwall-node-updater") ||
+		strings.Contains(compose, "docker.sock") || strings.Contains(compose, "env_file:") || strings.Contains(compose, "format: raw") ||
+		strings.Contains(compose, p.Endpoint) || strings.Contains(compose, "privileged:") {
+		t.Fatalf("default compose included an unsupported or advanced setting:\n%s", compose)
 	}
-	if strings.Count(compose, "      - ALL\n") != 2 || strings.Count(compose, "/var/run/docker.sock:/var/run/docker.sock") != 1 || !strings.Contains(compose, "permitted/effective capability sets of the non-root daemon") {
-		t.Fatal("capabilities were not limited to the documented entrypoint transition")
+	var document map[string]any
+	if err := yaml.Unmarshal([]byte(compose), &document); err != nil {
+		t.Fatalf("generated compose is not valid YAML: %v", err)
 	}
-	if !strings.Contains(strings.Join(result.Steps[2].Commands, "\n"), "pull passwall-node passwall-node-updater") ||
-		!strings.Contains(strings.Join(result.Steps[3].Commands, "\n"), "ps passwall-node passwall-node-updater") {
-		t.Fatal("installation steps did not start and verify the updater")
+	if !strings.Contains(strings.Join(result.Steps[2].Commands, "\n"), "up -d passwall-node") ||
+		strings.Contains(strings.Join(result.Steps[2].Commands, "\n"), "passwall-node-updater") {
+		t.Fatal("default installation steps did not remain agent-only")
 	}
 	var protect string
 	for _, step := range result.Steps {
@@ -222,8 +221,38 @@ func TestNodeInstallationFilesDockerTracksReviewedChannelAndPreservesLiteralEndp
 			protect = strings.Join(step.Commands, "\n")
 		}
 	}
-	if !strings.Contains(protect, "chmod 0600 ./node-credential ./node.env ./compose.yaml") {
+	if !strings.Contains(protect, "chmod 0600 ./node-credential ./compose.yaml") || strings.Contains(protect, "node.env") {
 		t.Fatal("entrypoint compatibility weakened host credential permissions")
+	}
+}
+
+func TestNodeInstallationFilesDockerRemoteUpgradeIsExplicitAdvancedOption(t *testing.T) {
+	_, repo := installationFixture(t)
+	p := nativeServerCreateResponse{AgentID: repo.agent.AgentID, Credential: repo.credential, Endpoint: "https://panel.example/v1/node/sync"}
+	result := renderNodeInstallationFiles(41, p, nodeInstallationFilesRequest{
+		Method: "docker", Version: "beta", OS: "linux", DockerRemoteUpgrade: true,
+	})
+	var compose string
+	for _, file := range result.Files {
+		if file.Name == "compose.yaml" {
+			compose = file.Content
+		}
+	}
+	for _, required := range []string{"passwall-node-updater:", "depends_on:\n      - passwall-node-updater", "PSP_NODE_DOCKER_REMOTE_UPGRADE: \"true\"", "network_mode: none", "command: [\"--run-docker-upgrade-helper\"]", "PSP_NODE_UPGRADE_TARGET_CONTAINER: passwall-node-server-41-agent", "/var/run/docker.sock:/var/run/docker.sock", "passwall-node-upgrades:/run/passwall-node-upgrades"} {
+		if !strings.Contains(compose, required) {
+			t.Fatalf("advanced Docker upgrade requirement absent: %s\n%s", required, compose)
+		}
+	}
+	if strings.HasPrefix(compose, "name:") || strings.Contains(compose, "format: raw") || strings.Contains(compose, "condition: service_started") || strings.Contains(compose, "privileged:") {
+		t.Fatalf("advanced compose regressed NAS-compatible syntax:\n%s", compose)
+	}
+	var document map[string]any
+	if err := yaml.Unmarshal([]byte(compose), &document); err != nil {
+		t.Fatalf("generated advanced compose is not valid YAML: %v", err)
+	}
+	if !strings.Contains(strings.Join(result.Steps[2].Commands, "\n"), "pull passwall-node passwall-node-updater") ||
+		!strings.Contains(strings.Join(result.Steps[3].Commands, "\n"), "ps passwall-node passwall-node-updater") {
+		t.Fatal("advanced installation steps did not start and verify the updater")
 	}
 }
 

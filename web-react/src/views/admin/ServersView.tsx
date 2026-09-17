@@ -2186,6 +2186,17 @@ export function NativeInstallationDialog({ server, initialProvisioning, onClose,
           <TextField label={t('admin:servers.native.endpoint')} value={provisioning.endpoint} fullWidth slotProps={{ input: { readOnly: true } }} />
           <TextField label={t('admin:servers.native.credential')} type="password" value={provisioning.credential}
             autoComplete="off" fullWidth slotProps={{ input: { readOnly: true } }} />
+          {selection.method === 'docker' && <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
+            <FormControlLabel control={<Switch checked={!!selection.dockerRemoteUpgrade} disabled={rotating}
+              onChange={event => {
+                invalidateMaterials()
+                setSelection(current => ({ ...current, dockerRemoteUpgrade: event.target.checked }))
+              }} />}
+              label={t('admin:servers.native.docker_remote_upgrade')} />
+            <Typography variant="caption" color="text.secondary">
+              {t('admin:servers.native.docker_remote_upgrade_hint')}
+            </Typography>
+          </Box>}
           <Typography variant="body2" sx={{ whiteSpace: 'pre-line' }}>{t(`admin:servers.native.method_hint.${selection.method}`)}</Typography>
           <Typography variant="body2" sx={{ whiteSpace: 'pre-line' }}>{t(`admin:servers.native.method_steps.${selection.method}`)}</Typography>
           {status?.last_seen && <Typography variant="body2">{t('admin:servers.native.last_seen', { time: status.last_seen })}</Typography>}
