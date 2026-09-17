@@ -179,7 +179,7 @@ describe('Passwall Node installation', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: 'admin:servers.native.create_continue' }))
     await screen.findByRole('combobox', { name: 'admin:servers.native.agent_version' })
     expect(api.post).toHaveBeenCalledWith('/admin/servers', { name: nativeServer.name, panel_type: 'psp', remark: 'optional note', update_channel: 'beta' })
-    expect(versionInput().value).toBe('')
+    await waitFor(() => expect(versionInput().value).toBe('v1.2.3-beta.2'))
     expect(api.post).toHaveBeenCalledTimes(1)
   })
 
@@ -298,7 +298,7 @@ describe('Passwall Node installation', () => {
     const channel = preference === 'beta' ? 'testing' : 'stable'
     await showIdentity()
     expect(screen.getByRole('combobox', { name: 'admin:servers.native.release_channel' }).textContent).toBe(`admin:servers.native.release_${channel}`)
-    expect(versionInput().value).toBe('')
+    expect(versionInput().value).toBe(preference === 'beta' ? 'v1.2.3-beta.2' : 'v1.2.3')
     expect((screen.getByLabelText('admin:servers.native.credential') as HTMLInputElement).value).toBe(provisioning.credential)
     expect((screen.getByLabelText('admin:servers.native.agent_id') as HTMLInputElement).value).toBe(provisioning.agent_id)
     fireEvent.mouseDown(screen.getByRole('combobox', { name: 'admin:servers.native.release_channel' }))
@@ -326,7 +326,7 @@ describe('Passwall Node installation', () => {
     await showIdentity()
     expect(api.post).toHaveBeenCalledWith('/admin/servers', { name: nativeServer.name, panel_type: 'psp', remark: undefined, update_channel: 'beta' })
     expect(screen.getByRole('combobox', { name: 'admin:servers.native.release_channel' }).textContent).toBe('admin:servers.native.release_testing')
-    expect(versionInput().value).toBe('')
+    expect(versionInput().value).toBe('v1.2.3-beta.2')
     expect(api.post).toHaveBeenCalledTimes(1)
   })
 
@@ -413,15 +413,14 @@ describe('Passwall Node installation', () => {
     expect(api.put).not.toHaveBeenCalled()
   })
 
-  it('cannot request a one-click command for an arbitrary unreviewed version injected into the selection', async () => {
+  it('does not replace the automatic reviewed version with an arbitrary unreviewed input', async () => {
     reads()
     mountExpanded(<NativeInstallationDialog server={nativeServer} initialProvisioning={provisioning} onClose={vi.fn()} onRotate={vi.fn()} />)
     await waitFor(() => expect(screen.getByRole('combobox', { name: 'admin:servers.native.agent_version' }).getAttribute('aria-disabled')).not.toBe('true'))
     fireEvent.change(versionInput(), { target: { value: 'v99.99.99' } })
-    expect(versionInput().value).toBe('')
+    expect(versionInput().value).toBe('v1.2.3')
     const button = screen.getByRole('button', { name: 'admin:servers.native.generate_command' }) as HTMLButtonElement
-    expect(button.disabled).toBe(true)
-    fireEvent.click(button)
+    expect(button.disabled).toBe(false)
     expect(api.post).not.toHaveBeenCalled()
   })
 
@@ -511,8 +510,8 @@ describe('Passwall Node installation', () => {
     expect(api.get.mock.calls.some(([url]) => String(url).includes('node-installation'))).toBe(false)
     fireEvent.click(screen.getByRole('button', { name: 'admin:servers.install_reinstall.continue' }))
     await screen.findByLabelText('admin:servers.native.agent_version')
-    expect(versionInput().value).toBe('')
-    expect(copyScript().disabled).toBe(true)
+    expect(versionInput().value).toBe('v1.2.3')
+    expect(copyScript().disabled).toBe(false)
     expect((screen.getByLabelText('admin:servers.native.credential') as HTMLInputElement).value).toBe(provisioning.credential)
     expect((screen.getByLabelText('admin:servers.native.agent_id') as HTMLInputElement).value).toBe(provisioning.agent_id)
     expect(screen.getByRole('heading', { name: 'admin:servers.install_reinstall.title' })).toBeTruthy()
@@ -700,7 +699,8 @@ describe('Passwall Node installation', () => {
     mountExpanded(<NativeInstallationDialog server={nativeServer} initialProvisioning={provisioning} onClose={vi.fn()} onRotate={vi.fn()} />)
     await screen.findByText('admin:servers.native.agent_status.unconfigured')
     expect(screen.queryByText('admin:servers.native.agent_status.running')).toBeNull()
-    expect(copyScript().disabled).toBe(true)
+    expect(versionInput().value).toBe('v1.2.3')
+    expect(copyScript().disabled).toBe(false)
     expect(screen.queryByRole('textbox', { name: 'admin:servers.native.agent_version' })).toBeNull()
     expect(api.post).not.toHaveBeenCalled()
     await selectVersion('v1.2.3-beta.1')
@@ -725,7 +725,7 @@ describe('Passwall Node installation', () => {
         expect(screen.queryByLabelText('admin:servers.native.agent_version')).toBeNull()
         expect((screen.getByLabelText('admin:servers.native.github_install_command') as HTMLTextAreaElement).value).toBe(PUBLIC_NODE_INSTALL_COMMAND)
       } else {
-        expect(versionInput().value).toBe(method === 'docker' ? 'beta' : '')
+        await waitFor(() => expect(versionInput().value).toBe(method === 'docker' ? 'beta' : 'v1.2.3'))
       }
       expect(screen.getByRole('combobox', { name: 'admin:servers.native.method_label' }).textContent).toBe(`admin:servers.native.method.${method}`)
     }
@@ -765,8 +765,8 @@ describe('Passwall Node installation', () => {
     fireEvent.mouseDown(screen.getByRole('combobox', { name: 'admin:servers.native.release_channel' }))
     fireEvent.click(await screen.findByRole('option', { name: 'admin:servers.native.release_stable' }))
     expect(request.signal.aborted).toBe(true)
-    expect(versionInput().value).toBe('')
-    expect(copyScript().disabled).toBe(true)
+    expect(versionInput().value).toBe('v1.2.3')
+    expect(copyScript().disabled).toBe(false)
     await act(async () => { finish({ data: `#!/bin/sh\n# obsolete ${provisioning.credential}\n` }) })
     expect(copy).not.toHaveBeenCalled()
     expect((screen.getByLabelText('admin:servers.native.agent_id') as HTMLInputElement).value).toBe(provisioning.agent_id)

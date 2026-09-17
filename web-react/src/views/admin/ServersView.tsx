@@ -2183,7 +2183,7 @@ export function NativeInstallationDialog({ server, initialProvisioning, onClose,
       {provisioning && <>
         {selection.method !== 'github' && <NodeReleaseSelector compact key={serverID} enabled={!!server} selection={selection} value={version}
           initialChannel={server?.update_channel === 'beta' ? 'testing' : 'stable'}
-          onChange={next => { invalidateMaterials(); setVersion(next) }} disabled={rotating} />}
+          onChange={next => { invalidateMaterials(); setVersion(next) }} autoSelectLatest disabled={rotating} />}
         {provisioning.endpoint.startsWith('http://') && <Alert severity="warning">{t('admin:servers.native.http_warning')}</Alert>}
         {selection.method === 'github' ? <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
           <Alert severity="info">{t('admin:servers.native.github_manual_summary')}</Alert>
@@ -2265,12 +2265,13 @@ export function NativeInstallationDialog({ server, initialProvisioning, onClose,
               autoComplete="off" fullWidth slotProps={{ input: { readOnly: true } }} />
           </>}
           {selection.method === 'docker' && <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
-            <FormControlLabel control={<Switch checked={!!selection.dockerRemoteUpgrade} disabled={rotating}
+            <FormControlLabel labelPlacement="start" control={<Switch checked={!!selection.dockerRemoteUpgrade} disabled={rotating}
               onChange={event => {
                 invalidateMaterials()
                 setSelection(current => ({ ...current, dockerRemoteUpgrade: event.target.checked }))
               }} />}
-              label={t('admin:servers.native.docker_remote_upgrade')} />
+              label={t('admin:servers.native.docker_remote_upgrade')}
+              sx={{ m: 0, width: '100%', justifyContent: 'space-between', alignItems: 'center' }} />
             <Typography variant="caption" color="text.secondary">
               {t('admin:servers.native.docker_remote_upgrade_hint')}
             </Typography>
