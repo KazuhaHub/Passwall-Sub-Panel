@@ -66,7 +66,7 @@ Passwall Sub Panel 的普通 CI 继续测试当前固定的 Node 依赖；发布
 
 - 升级数据库会新增三列，旧行状态为 `unknown`，节点下一次连接后自动填充，无需重新添加服务器。
 - beta1/beta2 继续完成 v1 基本同步，但因为没有升级能力显示 `limited`；beta3/beta4 只有启用其
-  Linux/systemd 助手时才显示 `compatible`；beta5 至 beta8 同时支持受管 systemd 和受管 Docker 升级。
+  Linux/systemd 助手时才显示 `compatible`；beta5 至 beta9 同时支持受管 systemd 和受管 Docker 升级。
 - Docker 远程升级只能建立在相同准入上；默认单服务 Compose 不启用此能力，管理员在安装弹窗“高级”中
   显式选择并生成双服务 Compose、实际运行 updater 后，Node 才会报告升级能力。
 - 发布耗时增加，因为每个保留的旧 release 都要运行真实 wire contract；这是防止“一次面板升级使整批
