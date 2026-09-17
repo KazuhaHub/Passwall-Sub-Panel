@@ -4,11 +4,11 @@ name: Test
 # check. The build job cross-compiles the deployable binary for every release
 # GOOS/GOARCH (CGO off, pure Go) so a platform-specific build break is caught
 # here on push/PR instead of only when a release tag is cut. Go static checks
-# and non-database tests each run once. The SQLite, PostgreSQL and MySQL jobs
-# run the DB-adapter package separately; server dialects reuse an initialized
-# schema for ordinary repository tests while migration/DDL tests retain fresh
-# databases. Every Go test invocation bypasses the Go result cache and uploads
-# output on failure.
+# run once. The canonical SQLite job runs the whole Go suite under the race
+# detector. PostgreSQL and MySQL run the DB-adapter package separately; those
+# server dialects reuse an initialized schema for ordinary repository tests
+# while migration/DDL tests retain fresh databases. Every Go test invocation
+# bypasses the Go result cache and uploads output on failure.
 
 on:
   push:
@@ -292,41 +292,8 @@ jobs:
       - name: Reachable vulnerability check
         run: go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
 
-  go:
-    name: go (non-database tests)
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-go@v6
-        # Allow toolchain selection; setup-go exports local after installation.
-        env:
-          GOTOOLCHAIN: auto
-        with:
-          go-version-file: go.mod
-          cache: true
-      - name: Verify exact preferred compiler
-        run: |
-          set -eu
-          build_toolchain=$(awk '$1 == "toolchain" { print $2 }' go.mod)
-          test -n "$build_toolchain"
-          test "$(go env GOVERSION)" = "$build_toolchain"
-          test "$(go tool compile -V | awk '{ print $3 }')" = "$build_toolchain"
-      - name: test
-        run: |
-          set -euo pipefail
-          mapfile -t packages < <(go list ./... | grep -v '/internal/adapters/sqlstore$')
-          test "${#packages[@]}" -gt 0
-          go test -count=1 -timeout=8m "${packages[@]}" 2>&1 | tee go-test-output.txt
-      - name: upload test output
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: go-test-output
-          path: go-test-output.txt
-
   sqlite:
-    name: sqlite (sqlstore dialect)
+    name: sqlite (full suite, race)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -348,7 +315,9 @@ jobs:
       - name: test
         run: |
           set -o pipefail
-          go test -count=1 -timeout=8m ./internal/adapters/sqlstore/... 2>&1 | tee test-output.txt
+          # Keep one canonical full-suite race run. PostgreSQL/MySQL below focus
+          # on dialect correctness without multiplying race-detector runtime.
+          go test -race -count=1 -timeout=8m ./... 2>&1 | tee test-output.txt
       - name: upload test output
         if: failure()
         uses: actions/upload-artifact@v4
