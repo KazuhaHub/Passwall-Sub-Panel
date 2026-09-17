@@ -955,6 +955,13 @@ export default function ServersView() {
     })
   }
 
+  function splitVersionIdentity(value: string | undefined): { display: string; commit?: string } {
+    const full = value?.trim() ?? ''
+    const match = full.match(/^(.*?)\s+\(([0-9a-f]{7,40})\)$/i)
+    if (!match) return { display: full }
+    return { display: match[1], commit: match[2] }
+  }
+
   // versionCell renders the 3X-UI + Xray version pair plus compatibility
   // state. A healthy native Node is intentionally quiet; limited, unknown
   // and incompatible states remain visible because they change the next
@@ -1016,11 +1023,26 @@ export default function ServersView() {
         label = t('admin:servers.compat.unknown', { defaultValue: '无法识别' })
 			}
 		}
+		const versionIdentity = splitVersionIdentity(s.panel_version)
+		const versionTooltip = versionIdentity.commit && (
+			<Box sx={{ fontSize: 11, lineHeight: 1.5 }}>
+				<Box>{versionIdentity.display}</Box>
+				<Box>commit: {versionIdentity.commit}</Box>
+			</Box>
+		)
     const versionText = (
       <Box sx={{ display: 'flex', flexDirection: 'column', lineHeight: 1.3 }}>
-        <Typography sx={{ fontSize: 13, fontWeight: 500 }}>
-					{s.panel_type === 'sui' ? 'S-UI' : s.panel_type === 'psp' ? 'Passwall Node' : '3X-UI'} {s.panel_version ?? ''}
-        </Typography>
+				{versionTooltip ? (
+					<Tooltip placement="top" title={versionTooltip}>
+						<Typography component="span" sx={{ display: 'block', fontSize: 13, fontWeight: 500 }}>
+							{s.panel_type === 'sui' ? 'S-UI' : s.panel_type === 'psp' ? 'Passwall Node' : '3X-UI'} {versionIdentity.display}
+						</Typography>
+					</Tooltip>
+				) : (
+					<Typography component="span" sx={{ display: 'block', fontSize: 13, fontWeight: 500 }}>
+						{s.panel_type === 'sui' ? 'S-UI' : s.panel_type === 'psp' ? 'Passwall Node' : '3X-UI'} {versionIdentity.display}
+					</Typography>
+				)}
         {(s.panel_type === 'psp' ? s.core_version : s.xray_version) && (
           <Typography sx={{ fontSize: 11, color: md.onSurfaceVariant }}>
 						{s.panel_type === 'psp'
