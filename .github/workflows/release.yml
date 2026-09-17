@@ -54,7 +54,7 @@ jobs:
       build_date: ${{ steps.identity.outputs.build_date }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -154,11 +154,11 @@ jobs:
           - v0.0.1-beta9
     steps:
       - name: Checkout trusted panel source
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
       - name: Checkout released Passwall Node
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: KazuhaHub/Passwall-Node
           ref: ${{ matrix.node_version }}
@@ -192,7 +192,7 @@ jobs:
     needs: setup
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
 
@@ -244,7 +244,7 @@ jobs:
           - { goos: windows, goarch: arm64, ext: ".exe" }
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
 
@@ -307,7 +307,7 @@ jobs:
       contents: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
 
@@ -451,7 +451,7 @@ jobs:
       packages: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
 
