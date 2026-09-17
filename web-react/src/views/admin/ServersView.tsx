@@ -2119,7 +2119,9 @@ export function NativeInstallationDialog({ server, initialProvisioning, onClose,
       const expectedOS = selection.method === 'manual' ? selection.os : 'linux'
       if (result.method !== selection.method || result.os !== expectedOS ||
         !Array.isArray(result.files) || !result.files.length ||
-        result.files.some(file => !/^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/.test(file.name) || typeof file.content !== 'string') ||
+        result.files.some(file => !/^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/.test(file.name) ||
+          (file.destination !== undefined && !/^(?:[A-Za-z0-9][A-Za-z0-9._-]{0,99}\/)?[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/.test(file.destination)) ||
+          typeof file.content !== 'string') ||
         !Array.isArray(result.steps) || (selection.method === 'manual' &&
           (!Array.isArray(result.downloads) || result.downloads.length !== 2 ||
             result.downloads.some(download => !isOfficialNodeReleaseDownload(download, version.trim()))))) {
@@ -2212,7 +2214,7 @@ export function NativeInstallationDialog({ server, initialProvisioning, onClose,
           <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
             {files.files.map(file => <Button key={file.name} variant="outlined" startIcon={<DownloadIcon />}
               onClick={() => downloadInstallationFile(file.name, file.content)}>
-              {t('admin:servers.native.download_file', { name: file.name })}
+              {t('admin:servers.native.download_file', { name: file.destination ?? file.name })}
             </Button>)}
             {files.downloads?.map(download => <Button key={download.name} component="a" href={download.url}
               target="_blank" rel="noopener noreferrer" variant="outlined" startIcon={<DownloadIcon />}>
@@ -2282,12 +2284,12 @@ export function NativeInstallationDialog({ server, initialProvisioning, onClose,
             <Typography variant="body2">{t(selection.method === 'docker' ? 'admin:servers.native.docker_hint' : 'admin:servers.native.manual_platform_hint')}</Typography>
             {files && <>
               <Typography variant="body2">{t('admin:servers.native.downloads_hint')}</Typography>
-            {files.files.map(file => <Box component="section" aria-label={file.name} key={file.name} sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-              <TextField label={t('admin:servers.native.file_content', { name: file.name })} value={file.content}
+            {files.files.map(file => <Box component="section" aria-label={file.destination ?? file.name} key={file.name} sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+              <TextField label={t('admin:servers.native.file_content', { name: file.destination ?? file.name })} value={file.content}
                 type={file.sensitive ? 'password' : 'text'} multiline={!file.sensitive} minRows={file.sensitive ? undefined : 2} maxRows={file.sensitive ? undefined : 10}
                 autoComplete="off" fullWidth slotProps={{ input: { readOnly: true, sx: { fontFamily: 'monospace', fontSize: 13 } } }} />
               <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
-                <Button startIcon={<ContentCopyIcon />} onClick={() => void copyToClipboard(file.content)}>{t('admin:servers.native.copy_file', { name: file.name })}</Button>
+                <Button startIcon={<ContentCopyIcon />} onClick={() => void copyToClipboard(file.content)}>{t('admin:servers.native.copy_file', { name: file.destination ?? file.name })}</Button>
               </Box>
             </Box>)}
             {files.steps.map((step, index) => <Box component="section" aria-label={step.id ?? step.title} key={step.id ?? index} sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>

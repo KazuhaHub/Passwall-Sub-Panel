@@ -94,11 +94,11 @@ function generatedFiles(): NativeInstallationFiles {
   return {
     method: 'docker', os: 'linux',
     files: [
-      { name: 'credential', content: `${provisioning.credential}\n`, sensitive: true },
-      { name: 'compose.yaml', content: 'services:\n  node:\n    image: ghcr.io/kazuhahub/passwall-node:v1.2.3-beta.1\n    network_mode: host\n' },
+      { name: 'node-credential.txt', destination: 'config/node-credential.txt', content: `${provisioning.credential}\n`, sensitive: true },
+      { name: 'compose.yaml', destination: 'compose.yaml', content: 'services:\n  node:\n    image: ghcr.io/kazuhahub/passwall-node:v1.2.3-beta.1\n    network_mode: host\n' },
     ],
     steps: [
-      { title: 'Private files', commands: ['chmod 0600 ./credential'] },
+      { title: 'Private files', commands: ['chmod 0600 ./config/node-credential.txt'] },
       { title: 'Start the node', commands: ['docker compose up -d'] },
     ],
   }
@@ -110,7 +110,7 @@ function generatedManualFiles(): NativeInstallationFiles {
   return {
     method: 'manual', os: 'linux', arch: 'amd64',
     files: [
-      { name: 'node-credential', content: `${provisioning.credential}\n`, sensitive: true },
+      { name: 'node-credential.txt', content: `${provisioning.credential}\n`, sensitive: true },
       { name: 'node-config.json', content: JSON.stringify({ endpoint: provisioning.endpoint, agent_id: provisioning.agent_id, version }) },
     ],
     downloads: [
@@ -787,7 +787,7 @@ describe('Passwall Node installation', () => {
       version: 'v1.2.3-beta.1', method: 'docker',
     }, expect.objectContaining({ signal: expect.any(AbortSignal) }))
     expect(materialContents()).toEqual(materialPreviews(materials))
-    const privateFile = within(screen.getByRole('region', { name: 'credential' })).getByLabelText('admin:servers.native.file_content') as HTMLInputElement
+    const privateFile = within(screen.getByRole('region', { name: 'config/node-credential.txt' })).getByLabelText('admin:servers.native.file_content') as HTMLInputElement
     expect(privateFile.type).toBe('password')
     expect(privateFile.readOnly).toBe(true)
     const commands = screen.getAllByLabelText('admin:servers.native.command_label').map(input => (input as HTMLTextAreaElement).value)
@@ -821,7 +821,7 @@ describe('Passwall Node installation', () => {
     fireEvent.click(screen.getByRole('button', { name: 'admin:servers.native.generate_files' }))
     await screen.findAllByLabelText('admin:servers.native.file_content')
     fireEvent.click(screen.getAllByRole('button', { name: 'admin:servers.native.download_file' })[0])
-    await waitFor(() => expect(downloads).toEqual([{ file: 'credential', url: 'blob:private-install-file' }]))
+    await waitFor(() => expect(downloads).toEqual([{ file: 'node-credential.txt', url: 'blob:private-install-file' }]))
     const content = await new Promise<string>((resolve, reject) => {
       const reader = new FileReader()
       reader.onload = () => resolve(String(reader.result))
