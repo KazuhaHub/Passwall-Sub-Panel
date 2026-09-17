@@ -70,7 +70,9 @@ func renderNodeInstallationFiles(panelID int64, p nativeServerCreateResponse, r 
 	if r.Method == "docker" {
 		// Keep the default file within the conservative Compose subset understood by
 		// NAS project editors as well as Docker Compose itself. Endpoint and agent ID
-		// are not secrets; the long-lived credential remains a read-only host file.
+		// are not secrets; the long-lived credential remains a read-only file inside
+		// a host configuration directory. Every relative bind source is a directory,
+		// so NAS Compose implementations can never turn an intended file into one.
 		// Compose treats $$ as a literal $, so quote after escaping interpolation.
 		platformLine := ""
 		if r.Arch != "" {
@@ -88,15 +90,20 @@ func renderNodeInstallationFiles(panelID int64, p nativeServerCreateResponse, r 
       PSP_NODE_AGENT_ID: %s
       PSP_NODE_ALLOW_INSECURE_HTTP: "false"
       PSP_NODE_DOCKER_REMOTE_UPGRADE: %q
+      PSP_NODE_CREDENTIAL_FILE: /run/secrets/passwall-node/node-credential.txt
     volumes:
-      - ./node-credential.txt:/run/secrets/node_credential:ro
-      - passwall-node-data:/var/lib/passwall-node
+      # Relative host paths are directories only. Put node-credential.txt
+      # inside ./config before starting the service.
+      - ./config:/run/secrets/passwall-node:ro
+      # Persist the SQLite database, downloaded cores, generated core
+      # configuration and runtime state in a visible host directory.
+      - ./data:/var/lib/passwall-node
     stop_grace_period: 30s
 `, agentContainer, r.Version, platformLine, composeYAMLString(p.Endpoint), composeYAMLString(p.AgentID), fmt.Sprint(r.DockerRemoteUpgrade))
 		if r.DockerRemoteUpgrade {
 			updaterContainer := fmt.Sprintf("passwall-node-server-%d-updater", panelID)
 			compose = strings.Replace(compose, "    network_mode: host\n", "    depends_on:\n      - passwall-node-updater\n    network_mode: host\n", 1)
-			compose = strings.Replace(compose, "      - passwall-node-data:/var/lib/passwall-node\n", "      - passwall-node-data:/var/lib/passwall-node\n      - passwall-node-upgrades:/run/passwall-node-upgrades\n", 1)
+			compose = strings.Replace(compose, "      - ./data:/var/lib/passwall-node\n", "      - ./data:/var/lib/passwall-node\n      - ./upgrades:/run/passwall-node-upgrades\n", 1)
 			compose += fmt.Sprintf(`    labels:
       io.kazuhahub.passwall-node.managed: "true"
       io.kazuhahub.passwall-node.role: agent
@@ -117,13 +124,9 @@ func renderNodeInstallationFiles(panelID int64, p nativeServerCreateResponse, r 
       # Docker socket access is root-equivalent. It belongs only to this
       # isolated updater; never mount it into the network-facing Agent.
       - /var/run/docker.sock:/var/run/docker.sock
-      - passwall-node-upgrades:/run/passwall-node-upgrades
+      - ./upgrades:/run/passwall-node-upgrades
     stop_grace_period: 15s
 `, composeYAMLString(p.AgentID), updaterContainer, r.Version, platformLine, agentContainer, composeYAMLString(p.AgentID))
-		}
-		compose += "volumes:\n  passwall-node-data:\n"
-		if r.DockerRemoteUpgrade {
-			compose += "  passwall-node-upgrades:\n"
 		}
 		result.Files = []nodeInstallationFile{
 			{Name: "compose.yaml", Content: compose},
@@ -133,17 +136,21 @@ func renderNodeInstallationFiles(panelID int64, p nativeServerCreateResponse, r 
 		startCommand := "set -eu\ndocker compose -f compose.yaml pull passwall-node\ndocker compose -f compose.yaml up -d passwall-node"
 		checkCommand := "set -eu\ndocker compose -f compose.yaml exec -T passwall-node /usr/local/bin/passwall-node --version\ndocker compose -f compose.yaml ps passwall-node"
 		upgradeSummary := "Docker remote upgrade is disabled by default; enable the advanced option and regenerate if this host may expose its Docker socket to the isolated updater."
+		prepareCommand := "set -eu\numask 077\nmkdir ./passwall-node-install\nchmod 0700 ./passwall-node-install\ncd ./passwall-node-install\nmkdir -p ./config ./data\nchmod 0700 ./config ./data"
+		dataSummary := "The SQLite database, downloaded cores, generated core configuration and runtime state are stored under ./data."
 		if r.DockerRemoteUpgrade {
 			serviceSummary = "the Agent and isolated updater services"
 			startCommand = "set -eu\ndocker compose -f compose.yaml pull passwall-node passwall-node-updater\ndocker compose -f compose.yaml up -d"
 			checkCommand = "set -eu\ndocker compose -f compose.yaml exec -T passwall-node /usr/local/bin/passwall-node --version\ndocker compose -f compose.yaml ps passwall-node passwall-node-updater"
 			upgradeSummary = "The updater enables authenticated remote upgrades with automatic rollback; it accepts official exact releases only and never receives the node credential."
+			prepareCommand = "set -eu\numask 077\nmkdir ./passwall-node-install\nchmod 0700 ./passwall-node-install\ncd ./passwall-node-install\nmkdir -p ./config ./data ./upgrades\nchmod 0700 ./config ./data ./upgrades"
+			dataSummary += " Upgrade staging and rollback data are stored under ./upgrades."
 		}
 		result.Steps = []nodeInstallationStep{
-			{ID: "prepare", Title: "Prepare a private installation directory", Description: "Use Linux Docker Engine with a standard Compose implementation. Unless an architecture was explicitly selected, the multi-platform image selects the host architecture. Save compose.yaml and node-credential.txt with their exact names in the same private project directory before validating or deploying. NAS project editors must use that directory as the project path. Preserve the same project and data volume when reinstalling or updating. Stop the old machine before reusing this identity.", Commands: []string{"set -eu\numask 077\nmkdir ./passwall-node-install\nchmod 0700 ./passwall-node-install\ncd ./passwall-node-install"}},
-			{ID: "credential", Title: "Protect the credential file", Description: "Transfer the files through a private channel. Never put the credential in command arguments, environment variables, tracing, shell history or shared logs.", Commands: []string{"set -eu\nchmod 0600 ./node-credential.txt ./compose.yaml\ndocker compose version\ndocker compose -f compose.yaml config --quiet"}},
+			{ID: "prepare", Title: "Prepare a private installation directory", Description: "Use Linux Docker Engine with a standard Compose implementation. Unless an architecture was explicitly selected, the multi-platform image selects the host architecture. Save compose.yaml in the project root and node-credential.txt as ./config/node-credential.txt before validating or deploying. NAS project editors must use the project root as the project path. Every generated ./xxxx bind source is a directory, never a file. " + dataSummary + " Preserve the same project directory when reinstalling or updating. Stop the old machine before reusing this identity.", Commands: []string{prepareCommand}},
+			{ID: "credential", Title: "Protect the credential file", Description: "Transfer the files through a private channel. Place the downloaded node-credential.txt inside ./config. Never put the credential in command arguments, environment variables, tracing, shell history or shared logs.", Commands: []string{"set -eu\ntest -f ./config/node-credential.txt || { printf './config/node-credential.txt must be a regular file\\n' >&2; exit 1; }\nchmod 0600 ./config/node-credential.txt ./compose.yaml\ndocker compose version\ndocker compose -f compose.yaml config --quiet"}},
 			{ID: "start", Title: "Pull and start the selected container image", Description: "The default latest/beta tag follows the selected release channel; an exact version stays pinned for rollback. Start " + serviceSummary + ". Host networking is required by the Agent for PSP-managed dynamic listeners. Choose free listener ports >=1024 unless the Linux host explicitly permits non-root low ports. Do not use a privileged container or mount the Docker socket into the Agent.", Commands: []string{startCommand}},
-			{ID: "check", Title: "Verify the version and connect to PSP", Description: "Check the generated service or services, the reported version and Agent status in PSP, then configure nodes separately. Agent heartbeat alone is not proof of a running proxy core. " + upgradeSummary + " Back up this private directory and the persistent data volume; never run compose down --volumes to update.", Commands: []string{checkCommand}},
+			{ID: "check", Title: "Verify the version and connect to PSP", Description: "Check the generated service or services, the reported version and Agent status in PSP, then configure nodes separately. Agent heartbeat alone is not proof of a running proxy core. " + upgradeSummary + " Back up this private project directory, including ./data and ./upgrades when present.", Commands: []string{checkCommand}},
 		}
 		return result
 	}

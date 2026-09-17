@@ -2220,10 +2220,10 @@
       },
       "step_description": {
         "docker": {
-          "prepare": "使用 Linux Docker Engine 与标准 Compose。新建私有项目目录，在校验或部署前将 compose.yaml、node-credential.txt 按原文件名放在同一目录。NAS 项目编辑器必须把该目录设为项目路径。重装或更新须保留同一项目及数据卷；复用身份前先停止旧机器。",
-          "credential": "通过私有渠道传输文件，并限制读取权限。不要将凭据放进命令参数、环境变量、命令追踪、shell 历史或共享日志。检查 Compose 版本并验证配置，任何命令失败都先停止。",
+          "prepare": "使用 Linux Docker Engine 与标准 Compose。新建私有项目目录，在校验或部署前将 compose.yaml 放在项目根目录，并将 node-credential.txt 保存为 ./config/node-credential.txt。NAS 项目编辑器必须把项目根目录设为项目路径。生成配置里的所有 ./xxxx 挂载源都只代表目录，绝不代表文件。SQLite 数据库、下载的核心、生成的核心配置和运行状态保存在 ./data；启用远程升级后，升级暂存数据保存在 ./upgrades。重装或更新须保留整个项目目录；复用身份前先停止旧机器。",
+          "credential": "通过私有渠道传输文件，将 node-credential.txt 放入 ./config，并限制读取权限。不要将凭据放进命令参数、环境变量、命令追踪、shell 历史或共享日志。检查 Compose 版本并验证配置，任何命令失败都先停止。",
           "start": "启动生成的 Agent 服务。若已开启高级远程升级选项，还会启动无网络的隔离 updater，并且只有它会挂载等同 root 权限的 Docker socket。动态监听使用 host 网络。不要把 socket 挂进 Agent，也不要使用特权容器。",
-          "check": "核对生成的服务、程序版本和 Passwall Sub Panel 中的 Agent 状态，再单独配置节点；心跳不代表代理内核已运行。启用 updater 时，它只接受官方精确版本，替换容器未完成同步与配置收敛时会恢复保留的旧容器。备份私有目录与数据卷，更新时不要运行 docker compose down --volumes。"
+          "check": "核对生成的服务、程序版本和 Passwall Sub Panel 中的 Agent 状态，再单独配置节点；心跳不代表代理内核已运行。启用 updater 时，它只接受官方精确版本，替换容器未完成同步与配置收敛时会恢复保留的旧容器。备份整个私有项目目录，包括 ./config、./data，以及存在时的 ./upgrades。"
         },
         "manual": {
           "prepare": "使用所选系统与架构的非特权账号及对应工具：Linux / macOS 需要 curl、tar、awk 和 SHA-256 工具；Windows 需要标准非管理员账号、NTFS、curl.exe，以及 PowerShell 5.1＋.NET Framework 4.7.2 或更高版本，或 PowerShell 7。新建并保护私有目录，通过私有渠道将 node-credential 和 node-config.json 按原文件名保存；不要覆盖现有安装或数据。",
@@ -2235,7 +2235,7 @@
       },
       "method_steps": {
         "linux": "1. 保存服务器并生成固定版本的私有安装脚本。\n2. 将脚本传到目标 Linux 服务器，以 root 权限执行提供的命令。\n3. 确认服务与心跳后，前往节点页面单独配置 inbound。",
-        "docker": "1. 保存服务器并生成专属 Compose 与私有凭据文件。\n2. 将两个文件放入同一私有项目目录并启动 Agent；仅在需要远程升级时从“高级”启用 updater。\n3. 保留项目及数据卷，确认生成的服务与心跳后单独配置 inbound。",
+        "docker": "1. 保存服务器并生成专属 Compose 与私有凭据文件。\n2. 将 compose.yaml 放入项目根目录、node-credential.txt 放入 ./config 后启动 Agent；仅在需要远程升级时从“高级”启用 updater。\n3. 保留整个项目目录，确认生成的服务与心跳后单独配置 inbound。",
         "manual": "1. 选择平台和准确版本，下载对应发行档及 SHA256 校验和并核验。\n2. 解压程序，将全部安装文件放入同一私有目录，并限制凭据文件读取权限。\n3. 核对 Passwall Node 版本，以提供的命令前台运行；确认心跳后再单独配置 inbound。"
       },
       "agent_id": "Agent ID",
@@ -2305,7 +2305,7 @@
       "credential_file_command": "已有安装的私有凭据文件替换命令",
       "copy_file_command": "复制文件替换命令",
       "http_warning": "当前同步地址使用明文 HTTP，凭据可能被监听。仅用于受信测试网络；生产环境请先配置公开可达的 HTTPS 同步地址。",
-      "docker_hint": "Docker 方式要求 Linux Docker Engine、标准 Compose 与 host 网络。默认单服务文件使用兼容 NAS 项目编辑器的保守语法。远程升级默认关闭；仅当此受信主机允许把等同 root 权限的 Docker socket 交给隔离 updater 时再在上方启用。保留项目和数据卷；不支持 Windows 容器 host 网络。",
+      "docker_hint": "Docker 方式要求 Linux Docker Engine、标准 Compose 与 host 网络。所有 ./xxxx 挂载源都只代表目录：./config 存放凭据，./data 存放持久化状态。远程升级默认关闭；仅当此受信主机允许把等同 root 权限的 Docker socket 交给隔离 updater 时再在上方启用，其暂存目录为 ./upgrades。请保留整个项目目录；不支持 Windows 容器 host 网络。",
       "docker_docs": "查看 Linux Compose 示例",
       "status_title": "Passwall Node 状态",
       "status_failed": "无法读取运行状态。",

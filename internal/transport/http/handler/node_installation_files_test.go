@@ -201,20 +201,23 @@ func TestNodeInstallationFilesDockerDefaultsToPortableSingleServiceCompose(t *te
 			compose = file.Content
 		}
 	}
-	for _, required := range []string{"services:\n", "container_name: passwall-node-server-41-agent", "image: ghcr.io/kazuhahub/passwall-node:beta", "platform: linux/arm64", "network_mode: host", "PSP_NODE_ENDPOINT: \"https://panel.example/a$$VAR'path/v1/node/sync\"", "PSP_NODE_DOCKER_REMOTE_UPGRADE: \"false\"", "./node-credential.txt:/run/secrets/node_credential:ro", "passwall-node-data:/var/lib/passwall-node"} {
+	for _, required := range []string{"services:\n", "container_name: passwall-node-server-41-agent", "image: ghcr.io/kazuhahub/passwall-node:beta", "platform: linux/arm64", "network_mode: host", "PSP_NODE_ENDPOINT: \"https://panel.example/a$$VAR'path/v1/node/sync\"", "PSP_NODE_DOCKER_REMOTE_UPGRADE: \"false\"", "PSP_NODE_CREDENTIAL_FILE: /run/secrets/passwall-node/node-credential.txt", "./config:/run/secrets/passwall-node:ro", "./data:/var/lib/passwall-node"} {
 		if !strings.Contains(compose, required) {
 			t.Fatalf("portable compose requirement absent: %s\n%s", required, compose)
 		}
 	}
 	if len(result.Files) != 2 || strings.HasPrefix(compose, "name:") || strings.Contains(compose, "passwall-node-updater") ||
 		strings.Contains(compose, "docker.sock") || strings.Contains(compose, "env_file:") || strings.Contains(compose, "format: raw") ||
-		strings.Contains(compose, p.Endpoint) || strings.Contains(compose, "privileged:") {
+		strings.Contains(compose, p.Endpoint) || strings.Contains(compose, "privileged:") || strings.Contains(compose, "./node-credential.txt:") ||
+		strings.Contains(compose, "source: ./node-credential.txt") || strings.Contains(compose, "create_host_path:") ||
+		strings.Contains(compose, "passwall-node-data") || strings.Contains(compose, "\nvolumes:\n") {
 		t.Fatalf("default compose included an unsupported or advanced setting:\n%s", compose)
 	}
 	var document map[string]any
 	if err := yaml.Unmarshal([]byte(compose), &document); err != nil {
 		t.Fatalf("generated compose is not valid YAML: %v", err)
 	}
+	assertDockerRelativeBindDirectories(t, compose, "./config", "./data")
 	if !strings.Contains(strings.Join(result.Steps[2].Commands, "\n"), "up -d passwall-node") ||
 		strings.Contains(strings.Join(result.Steps[2].Commands, "\n"), "passwall-node-updater") {
 		t.Fatal("default installation steps did not remain agent-only")
@@ -225,8 +228,11 @@ func TestNodeInstallationFilesDockerDefaultsToPortableSingleServiceCompose(t *te
 			protect = strings.Join(step.Commands, "\n")
 		}
 	}
-	if !strings.Contains(protect, "chmod 0600 ./node-credential.txt ./compose.yaml") || strings.Contains(protect, "node.env") {
+	if !strings.Contains(protect, "test -f ./config/node-credential.txt") || !strings.Contains(protect, "chmod 0600 ./config/node-credential.txt ./compose.yaml") || strings.Contains(protect, "node.env") {
 		t.Fatal("entrypoint compatibility weakened host credential permissions")
+	}
+	if !strings.Contains(strings.Join(result.Steps[0].Commands, "\n"), "mkdir -p ./config ./data") {
+		t.Fatal("default installation steps did not prepare the host data directory")
 	}
 }
 
@@ -242,7 +248,7 @@ func TestNodeInstallationFilesDockerRemoteUpgradeIsExplicitAdvancedOption(t *tes
 			compose = file.Content
 		}
 	}
-	for _, required := range []string{"passwall-node-updater:", "depends_on:\n      - passwall-node-updater", "PSP_NODE_DOCKER_REMOTE_UPGRADE: \"true\"", "network_mode: none", "command: [\"--run-docker-upgrade-helper\"]", "PSP_NODE_UPGRADE_TARGET_CONTAINER: passwall-node-server-41-agent", "/var/run/docker.sock:/var/run/docker.sock", "passwall-node-upgrades:/run/passwall-node-upgrades"} {
+	for _, required := range []string{"passwall-node-updater:", "depends_on:\n      - passwall-node-updater", "PSP_NODE_DOCKER_REMOTE_UPGRADE: \"true\"", "network_mode: none", "command: [\"--run-docker-upgrade-helper\"]", "PSP_NODE_UPGRADE_TARGET_CONTAINER: passwall-node-server-41-agent", "/var/run/docker.sock:/var/run/docker.sock", "./upgrades:/run/passwall-node-upgrades"} {
 		if !strings.Contains(compose, required) {
 			t.Fatalf("advanced Docker upgrade requirement absent: %s\n%s", required, compose)
 		}
@@ -250,13 +256,54 @@ func TestNodeInstallationFilesDockerRemoteUpgradeIsExplicitAdvancedOption(t *tes
 	if strings.HasPrefix(compose, "name:") || strings.Contains(compose, "format: raw") || strings.Contains(compose, "condition: service_started") || strings.Contains(compose, "privileged:") {
 		t.Fatalf("advanced compose regressed NAS-compatible syntax:\n%s", compose)
 	}
+	if strings.Count(compose, "./upgrades:/run/passwall-node-upgrades") != 2 || strings.Contains(compose, "passwall-node-upgrades:") || strings.Contains(compose, "\nvolumes:\n") {
+		t.Fatalf("advanced compose did not use one visible host upgrade directory for both services:\n%s", compose)
+	}
 	var document map[string]any
 	if err := yaml.Unmarshal([]byte(compose), &document); err != nil {
 		t.Fatalf("generated advanced compose is not valid YAML: %v", err)
 	}
+	assertDockerRelativeBindDirectories(t, compose, "./config", "./data", "./upgrades")
 	if !strings.Contains(strings.Join(result.Steps[2].Commands, "\n"), "pull passwall-node passwall-node-updater") ||
 		!strings.Contains(strings.Join(result.Steps[3].Commands, "\n"), "ps passwall-node passwall-node-updater") {
 		t.Fatal("advanced installation steps did not start and verify the updater")
+	}
+	if !strings.Contains(strings.Join(result.Steps[0].Commands, "\n"), "mkdir -p ./config ./data ./upgrades") {
+		t.Fatal("advanced installation steps did not prepare host data directories")
+	}
+}
+
+func assertDockerRelativeBindDirectories(t *testing.T, compose string, allowed ...string) {
+	t.Helper()
+	var document struct {
+		Services map[string]struct {
+			Volumes []string `yaml:"volumes"`
+		} `yaml:"services"`
+	}
+	if err := yaml.Unmarshal([]byte(compose), &document); err != nil {
+		t.Fatalf("generated compose is not valid YAML: %v", err)
+	}
+	want := make(map[string]bool, len(allowed))
+	for _, source := range allowed {
+		want[source] = true
+	}
+	seen := make(map[string]bool, len(allowed))
+	for serviceName, service := range document.Services {
+		for _, mount := range service.Volumes {
+			source := strings.SplitN(mount, ":", 2)[0]
+			if !strings.HasPrefix(source, "./") {
+				continue
+			}
+			if !want[source] {
+				t.Fatalf("service %s uses relative bind source %q; generated ./xxxx sources must be known directories", serviceName, source)
+			}
+			seen[source] = true
+		}
+	}
+	for source := range want {
+		if !seen[source] {
+			t.Fatalf("expected relative host directory %q was not mounted", source)
+		}
 	}
 }
 
