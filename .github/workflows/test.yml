@@ -25,6 +25,9 @@ env:
   GOWORK: "off"
   GOTOOLCHAIN: "local"
 
+permissions:
+  contents: read
+
 jobs:
   node-compatibility:
     name: node compatibility (${{ matrix.node_version }})
