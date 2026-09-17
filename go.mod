@@ -64,7 +64,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/ssooidc v1.35.20 // indirect
 	github.com/aws/aws-sdk-go-v2/service/sts v1.42.0 // indirect
 	github.com/aws/smithy-go v1.25.0 // indirect
-	github.com/beevik/etree v1.6.0 // indirect
+	github.com/beevik/etree v1.7.0 // indirect
 	github.com/boombuler/barcode v1.0.1 // indirect
 	github.com/bytedance/gopkg v0.1.3 // indirect
 	github.com/bytedance/sonic v1.15.0 // indirect
@@ -131,7 +131,7 @@ require (
 	github.com/quic-go/qpack v0.6.0 // indirect
 	github.com/quic-go/quic-go v0.59.1 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
-	github.com/russellhaering/goxmldsig v1.6.0 // indirect
+	github.com/russellhaering/goxmldsig v1.6.1 // indirect
 	github.com/shopspring/decimal v1.4.0 // indirect
 	github.com/tinylib/msgp v1.6.4 // indirect
 	github.com/tjfoc/gmsm v1.4.1 // indirect
