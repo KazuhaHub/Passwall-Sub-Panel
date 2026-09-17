@@ -168,6 +168,9 @@ func postgresDSNWithSearchPath(dsn, schemaName string) string {
 func openIsolatedMySQLTestDB(t *testing.T) (*gorm.DB, error) {
 	t.Helper()
 	base := os.Getenv("PSP_TEST_DB_DSN")
+	if reuseServerTestSchema() {
+		return reusableBlankMySQLTestDBs.openBlankMySQL(t, base)
+	}
 	dbName := uniqueTestNamespace()
 	dsn, err := createServerTestDatabase("mysql", base, dbName)
 	if err != nil {
@@ -251,10 +254,11 @@ type reusableServerTestPool struct {
 }
 
 var reusableServerTestDBs reusableServerTestPool
+var reusableBlankMySQLTestDBs reusableServerTestPool
 
 func (p *reusableServerTestPool) open(t *testing.T, kind, base string) (*gorm.DB, error) {
 	t.Helper()
-	lease, err := p.acquire(kind, base)
+	lease, err := p.acquire(kind, base, newReusableServerTestDatabase)
 	if err != nil {
 		return nil, err
 	}
@@ -278,7 +282,37 @@ func (p *reusableServerTestPool) open(t *testing.T, kind, base string) (*gorm.DB
 	return db, nil
 }
 
-func (p *reusableServerTestPool) acquire(kind, base string) (*reusableServerTestDatabase, error) {
+// openBlankMySQL leases a database whose table namespace starts empty. Schema
+// and migration tests may freely create, alter and drop tables; cleanup drops
+// all remaining tables in one statement before returning the database to the
+// pool. This preserves an empty-database boundary without paying for dozens of
+// CREATE/DROP DATABASE cycles, whose fsync latency varies heavily on CI hosts.
+func (p *reusableServerTestPool) openBlankMySQL(t *testing.T, base string) (*gorm.DB, error) {
+	t.Helper()
+	lease, err := p.acquire("mysql", base, newBlankMySQLTestDatabase)
+	if err != nil {
+		return nil, err
+	}
+	db, err := Open("mysql", lease.dsn)
+	if err != nil {
+		p.release(lease)
+		return nil, err
+	}
+	t.Cleanup(func() {
+		closeGormDB(db)
+		if err := resetBlankMySQLTestDatabase(lease); err != nil {
+			lease.discarded = true
+			t.Errorf("reset blank MySQL test database: %v", err)
+			return
+		}
+		p.release(lease)
+	})
+	return db, nil
+}
+
+type serverTestDatabaseFactory func(kind, base string) (*reusableServerTestDatabase, error)
+
+func (p *reusableServerTestPool) acquire(kind, base string, create serverTestDatabaseFactory) (*reusableServerTestDatabase, error) {
 	p.mu.Lock()
 	for i := len(p.idle) - 1; i >= 0; i-- {
 		candidate := p.idle[i]
@@ -290,7 +324,7 @@ func (p *reusableServerTestPool) acquire(kind, base string) (*reusableServerTest
 	}
 	p.mu.Unlock()
 
-	created, err := newReusableServerTestDatabase(kind, base)
+	created, err := create(kind, base)
 	if err != nil {
 		return nil, err
 	}
@@ -298,6 +332,20 @@ func (p *reusableServerTestPool) acquire(kind, base string) (*reusableServerTest
 	p.all = append(p.all, created)
 	p.mu.Unlock()
 	return created, nil
+}
+
+func newBlankMySQLTestDatabase(kind, base string) (*reusableServerTestDatabase, error) {
+	if kind != "mysql" {
+		return nil, fmt.Errorf("blank test database does not support %q", kind)
+	}
+	dbName := uniqueTestNamespace()
+	dsn, err := createServerTestDatabase(kind, base, dbName)
+	if err != nil {
+		return nil, err
+	}
+	return &reusableServerTestDatabase{
+		kind: kind, baseDSN: base, name: dbName, dsn: dsn,
+	}, nil
 }
 
 func (p *reusableServerTestPool) release(db *reusableServerTestDatabase) {
@@ -423,6 +471,46 @@ func clearMySQLTables(db *gorm.DB, tables []string) (result error) {
 	return nil
 }
 
+func resetBlankMySQLTestDatabase(lease *reusableServerTestDatabase) error {
+	db, err := Open("mysql", lease.dsn)
+	if err != nil {
+		return err
+	}
+	defer closeGormDB(db)
+	tables, err := db.Migrator().GetTables()
+	if err != nil {
+		return err
+	}
+	if len(tables) == 0 {
+		return nil
+	}
+
+	sqlDB, err := db.DB()
+	if err != nil {
+		return err
+	}
+	conn, err := sqlDB.Conn(context.Background())
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	if _, err := conn.ExecContext(context.Background(), "SET FOREIGN_KEY_CHECKS=0"); err != nil {
+		return err
+	}
+	quoted := make([]string, 0, len(tables))
+	for _, table := range tables {
+		quoted = append(quoted, "`"+strings.ReplaceAll(table, "`", "``")+"`")
+	}
+	if _, err := conn.ExecContext(context.Background(), "DROP TABLE IF EXISTS "+strings.Join(quoted, ", ")); err != nil {
+		_, _ = conn.ExecContext(context.Background(), "SET FOREIGN_KEY_CHECKS=1")
+		return err
+	}
+	if _, err := conn.ExecContext(context.Background(), "SET FOREIGN_KEY_CHECKS=1"); err != nil {
+		return err
+	}
+	return nil
+}
+
 func truncatePostgresTables(db *gorm.DB, tables []string) error {
 	quoted := make([]string, 0, len(tables))
 	for _, table := range tables {
@@ -445,8 +533,17 @@ func closeGormDB(db *gorm.DB) {
 
 func TestMain(m *testing.M) {
 	code := m.Run()
+	var cleanupErrors []error
 	if err := reusableServerTestDBs.close(); err != nil {
-		fmt.Fprintln(os.Stderr, err)
+		cleanupErrors = append(cleanupErrors, err)
+	}
+	if err := reusableBlankMySQLTestDBs.close(); err != nil {
+		cleanupErrors = append(cleanupErrors, err)
+	}
+	if len(cleanupErrors) > 0 {
+		for _, err := range cleanupErrors {
+			fmt.Fprintln(os.Stderr, err)
+		}
 		if code == 0 {
 			code = 1
 		}
