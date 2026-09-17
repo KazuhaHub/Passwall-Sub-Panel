@@ -56,6 +56,7 @@ import { allSettledLimited } from '@/utils/promises'
 import WarningAmberIcon from '@mui/icons-material/WarningAmber'
 import MoreVertIcon from '@mui/icons-material/MoreVert'
 import UpgradeIcon from '@mui/icons-material/UploadOutlined'
+import TuneIcon from '@mui/icons-material/TuneOutlined'
 import { listNodeReleases, type NodeRelease } from '@/api/nodeReleases'
 import { newerNodeRelease } from '@/utils/nodeReleaseUpdate'
 import { newerSUIRelease } from '@/utils/suiReleaseUpdate'
@@ -1062,7 +1063,7 @@ export default function ServersView() {
     }
     const updateLabel = updateVersion && t('admin:servers.update_available_chip', {
       latest: updateVersion,
-      defaultValue: '可升级 → {{latest}}',
+      defaultValue: 'Update available: {{latest}}',
     })
     const updateChip = updateVersion && (s.panel_type === 'psp' && canConfigure && s.node_upgrade_ready
       ? <Button size="small" sx={{ ...updateChipStyle, minWidth: 0, lineHeight: 1.5 }}
@@ -1381,18 +1382,17 @@ export default function ServersView() {
                 <SortableTableCell column="panel_version" activeColumn={sortBy} activeDir={sortDir} onSort={setSort}>
                   {t('admin:servers.table.version', { defaultValue: '版本' })}
                 </SortableTableCell>
-                <TableCell>{t('admin:servers.table.remark')}</TableCell>
                 <TableCell align="right">{t('admin:servers.table.actions')}</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
               {loading && items.length === 0 && (
-                <TableRow><TableCell colSpan={7} sx={{ textAlign: 'center', py: 6 }}>
+                <TableRow><TableCell colSpan={6} sx={{ textAlign: 'center', py: 6 }}>
                   <CircularProgress size={24} />
                 </TableCell></TableRow>
               )}
               {!loading && items.length === 0 && (
-                <TableRow><TableCell colSpan={7} sx={{ textAlign: 'center', py: 6, color: md.onSurfaceVariant }}>
+                <TableRow><TableCell colSpan={6} sx={{ textAlign: 'center', py: 6, color: md.onSurfaceVariant }}>
                   —
                 </TableCell></TableRow>
               )}
@@ -1426,7 +1426,6 @@ export default function ServersView() {
                     {ipCapBadge(s)}
                   </TableCell>
                   <TableCell sx={{ whiteSpace: 'nowrap' }}>{versionCell(s)}</TableCell>
-                  <TableCell sx={{ color: md.onSurfaceVariant, fontSize: 13 }}>{s.remark || '—'}</TableCell>
                   <TableCell align="right" sx={{ whiteSpace: 'nowrap' }}>
                     <Button
                       size="small" variant="text"
@@ -1499,7 +1498,9 @@ export default function ServersView() {
           {t('admin:servers.action.upgrade_panel', { defaultValue: '升级 3X-UI 面板（最新）' })}
         </MenuItem>}
         {hasCapability(menuTarget, 'core.upgrade') && <MenuItem onClick={() => menuTarget && openCoreDialog(menuTarget)}>
-          <UpgradeIcon fontSize="small" sx={{ mr: 1 }} />
+          {menuTarget?.panel_type === 'psp'
+            ? <TuneIcon fontSize="small" sx={{ mr: 1 }} />
+            : <UpgradeIcon fontSize="small" sx={{ mr: 1 }} />}
 						{menuTarget?.panel_type === 'psp'
 							? t('admin:servers.action.select_core')
 							: t('admin:servers.action.upgrade_xray')}

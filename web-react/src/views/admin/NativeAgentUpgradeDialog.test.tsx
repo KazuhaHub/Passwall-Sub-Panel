@@ -14,6 +14,14 @@ const catalog = { releases: [{ version: queued.version, channel: 'testing', publ
 beforeEach(() => installReads({ '/admin/servers/node-releases': catalog,
   '/admin/servers/7/node-agent-upgrades/upgrade-test': queued }))
 
+it('preselects the newest reviewed release on the upgrade page', async () => {
+  mount(<NativeAgentUpgradeDialog server={{ ...server, update_channel: 'beta' }} onClose={() => {}} />)
+  const field = screen.getByRole('combobox', { name: 'admin:servers.native.agent_version' })
+  await waitFor(() => expect(field.textContent).toContain(queued.version))
+  expect((screen.getByRole('button', { name: 'admin:servers.agent_upgrade.confirm' }) as HTMLButtonElement).disabled).toBe(false)
+  expect(api.post).not.toHaveBeenCalled()
+})
+
 async function selectRelease(savedBeta = false) {
   if (!savedBeta) {
     await screen.findByText('admin:servers.native.release_no_stable')

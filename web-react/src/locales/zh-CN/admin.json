@@ -2157,7 +2157,7 @@
       "username": "admin（仅在用密码登录时）",
       "password": "API Token 优先；填密码作为兜底"
     },
-    "update_available_chip": "可升级 → {{latest}}",
+    "update_available_chip": "可用更新：{{latest}}",
     "hint": {
       "name": "显示名称，可修改；内部关联使用数据库 ID",
       "update_channel": "保存安装与升级列表的默认频道。Docker 文件默认以 latest 跟随稳定版、以 beta 跟随测试版；手动与 systemd 安装仍使用已审核的精确版本。保存不会执行安装或升级，也不会更改服务器、节点身份或凭据。弹窗内临时切换频道不会自动保存。",
