@@ -8,6 +8,9 @@
 > <https://github.com/KazuhaHub/Passwall-Node> 的 `protocol/` 包。**这份计划不重开任何已定的决定**；
 > 要推翻某一条，去改设计文档并写下理由，不要在实现里悄悄绕过。
 
+> 已冻结的无特权主机可观测性后续范围见
+> [psp-node-rootless-observability-plan.md](psp-node-rootless-observability-plan.md)。
+
 ## 1. 推还是拉：一句话和一张表
 
 **一句话：节点主动连面板，但面板说了算。**
