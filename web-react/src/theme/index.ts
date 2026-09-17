@@ -11,7 +11,7 @@ declare module '@mui/material/styles' {
   }
 }
 
-// The two built-in languages are 'zh-CN' | 'en-US', but runtime-uploaded
+// The built-in languages are 'zh-CN' | 'zh-TW' | 'en-US', but runtime-uploaded
 // language packs can register any code, so AppLanguage is a plain string.
 export type AppLanguage = string
 
@@ -22,6 +22,7 @@ export type AppLanguage = string
 // pack, so only a few built-in widget labels are affected.
 const MUI_LOCALE_MAP: Record<string, object> = {
   'zh-CN': muiLocales.zhCN,
+  'zh-TW': muiLocales.zhTW,
   'en-US': muiLocales.enUS,
 }
 

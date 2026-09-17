@@ -2,8 +2,8 @@ package domain
 
 // LocalePack is a runtime-uploaded UI language pack. Operators upload one JSON
 // file per language; it is stored as <ConfigDir>/locales/<code>.json and served
-// to the SPA, which registers it on top of the two compiled-in built-ins
-// (zh-CN / en-US) via i18next.addResourceBundle. Packs are purely additive: the
+// to the SPA, which registers it on top of the three compiled-in built-ins
+// (zh-CN / zh-TW / en-US) via i18next.addResourceBundle. Packs are purely additive: the
 // built-ins live in the JS bundle and can never be overwritten or deleted, so
 // there is no "reset to default" concept for uploaded languages.
 type LocalePack struct {

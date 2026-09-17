@@ -10,15 +10,15 @@ import { NAMESPACES, flatten, I18N_STATIC_OPTIONS, type Nested } from './options
 // The exported "base template" stamps this into `psp_language_pack`.
 export const LANGUAGE_PACK_FORMAT = 1
 
-// The two built-in languages are compiled into the bundle. Runtime-uploaded
+// The built-in languages are compiled into the bundle. Runtime-uploaded
 // packs are appended to SUPPORTED_LANGUAGES at boot (see loadManifest), so this
 // is a MUTABLE array — call sites read it by reference. Keep the built-ins first.
-export const SUPPORTED_LANGUAGES: AppLanguage[] = ['zh-CN', 'en-US']
+export const SUPPORTED_LANGUAGES: AppLanguage[] = ['zh-CN', 'zh-TW', 'en-US']
 
 // The codes that live in the JS bundle (via the glob below). Everything else is
 // a server-supplied pack fetched over HTTP. Kept in sync with the backend's
 // reserved-code list.
-const BUILTIN_LANGUAGES = new Set<AppLanguage>(['zh-CN', 'en-US'])
+const BUILTIN_LANGUAGES = new Set<AppLanguage>(['zh-CN', 'zh-TW', 'en-US'])
 
 export function isBuiltinLanguage(lang: string): boolean {
   return BUILTIN_LANGUAGES.has(lang)
@@ -67,6 +67,7 @@ function resolveInitialLanguage(): AppLanguage {
       if (stored && SUPPORTED_LANGUAGES.includes(stored as AppLanguage)) return stored as AppLanguage
     } catch { /* localStorage disabled — fall through */ }
     const nav = (window.navigator?.language || '').toLowerCase()
+    if (/^zh-(tw|hk|mo)|^zh-hant/.test(nav)) return 'zh-TW'
     if (nav.startsWith('zh')) return 'zh-CN'
     if (nav.startsWith('en')) return 'en-US'
   }
@@ -119,7 +120,7 @@ export async function loadBuiltinSource(lang: AppLanguage): Promise<Record<strin
 // loadManifest fetches the uploaded-pack list and folds it into SUPPORTED_LANGUAGES
 // BEFORE i18n.init — i18next rejects changeLanguage to codes outside supportedLngs,
 // so the whitelist must already contain server codes. Never throws: a manifest
-// failure just leaves the two built-ins available.
+// failure just leaves the three built-ins available.
 async function loadManifest(): Promise<void> {
   try {
     const langs = await fetchLanguages()
