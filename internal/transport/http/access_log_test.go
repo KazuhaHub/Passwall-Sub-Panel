@@ -6,26 +6,9 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/gin-gonic/gin"
 )
-
-func TestAccessLoggerUsesXrayStyleLine(t *testing.T) {
-	params := gin.LogFormatterParams{
-		TimeStamp:  time.Date(2026, 9, 16, 3, 4, 5, 600, time.FixedZone("local", -7*60*60)),
-		StatusCode: 200,
-		Latency:    1250 * time.Microsecond,
-		ClientIP:   "192.0.2.10",
-		Method:     stdhttp.MethodGet,
-		Path:       "/api/health",
-	}
-
-	want := "2026/09/16 10:04:05.000000 [Info] passwall-sub-panel: http request status=200 method=GET path=/api/health latency=1.25ms client_ip=192.0.2.10\n"
-	if got := xrayAccessLogFormatter(params); got != want {
-		t.Fatalf("access log = %q, want %q", got, want)
-	}
-}
 
 func TestAccessLoggerSuppressesCredentialBearingPaths(t *testing.T) {
 	gin.SetMode(gin.TestMode)

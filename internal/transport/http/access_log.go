@@ -1,11 +1,8 @@
 package http
 
 import (
-	"fmt"
 	"io"
 	stdhttp "net/http"
-	"os"
-	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -33,46 +30,11 @@ var credentialBearingRoutes = [...]credentialBearingRoute{
 }
 
 func newAccessLogger(output io.Writer) gin.HandlerFunc {
-	if output == nil {
-		output = os.Stdout
-	}
-	cfg := gin.LoggerConfig{
-		Formatter: xrayAccessLogFormatter,
-		Output:    output,
-		Skip:      skipCredentialBearingAccessLog,
+	cfg := gin.LoggerConfig{Skip: skipCredentialBearingAccessLog}
+	if output != nil {
+		cfg.Output = output
 	}
 	return gin.LoggerWithConfig(cfg)
-}
-
-func xrayAccessLogFormatter(params gin.LogFormatterParams) string {
-	line := fmt.Sprintf("%s [Info] passwall-sub-panel: http request status=%d method=%s path=%s latency=%s client_ip=%s",
-		params.TimeStamp.UTC().Format("2006/01/02 15:04:05.000000"),
-		params.StatusCode,
-		params.Method,
-		quoteAccessLogValue(params.Path),
-		quoteAccessLogValue(params.Latency.String()),
-		quoteAccessLogValue(params.ClientIP),
-	)
-	if params.ErrorMessage != "" {
-		line += " error=" + quoteAccessLogValue(sanitizeAccessLogValue(params.ErrorMessage))
-	}
-	return line + "\n"
-}
-
-func quoteAccessLogValue(value string) string {
-	if value == "" {
-		return `""`
-	}
-	if strings.IndexFunc(value, func(r rune) bool {
-		return r == '\r' || r == '\n' || r == ' ' || r == '\t' || r == '=' || r == '"' || r == '\\'
-	}) == -1 {
-		return value
-	}
-	return strconv.Quote(value)
-}
-
-func sanitizeAccessLogValue(value string) string {
-	return strings.NewReplacer("\r\n", `\n`, "\n", `\n`, "\r", `\r`).Replace(value)
 }
 
 func skipCredentialBearingAccessLog(c *gin.Context) bool {
