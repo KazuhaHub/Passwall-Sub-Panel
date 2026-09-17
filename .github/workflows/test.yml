@@ -37,7 +37,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@v7
         env:
           GOTOOLCHAIN: auto
         with:
@@ -91,7 +91,7 @@ jobs:
       GOWORK: "off"
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@v7
         # Allow toolchain selection; setup-go exports local after installation.
         env:
           GOTOOLCHAIN: auto
@@ -139,7 +139,7 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@v7
         # Allow toolchain selection; setup-go exports local after installation.
         env:
           GOTOOLCHAIN: auto
@@ -226,7 +226,7 @@ jobs:
           - { goos: windows, goarch: arm64 }
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@v7
         # Allow toolchain selection; setup-go exports local after installation.
         env:
           GOTOOLCHAIN: auto
@@ -274,7 +274,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@v7
         # Allow toolchain selection; setup-go exports local after installation.
         env:
           GOTOOLCHAIN: auto
@@ -298,7 +298,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@v7
         # Allow toolchain selection; setup-go exports local after installation.
         env:
           GOTOOLCHAIN: auto
@@ -349,7 +349,7 @@ jobs:
       PSP_TEST_DB_REUSE_SCHEMA: "true"
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@v7
         # Allow toolchain selection; setup-go exports local after installation.
         env:
           GOTOOLCHAIN: auto
@@ -398,7 +398,7 @@ jobs:
       PSP_TEST_DB_REUSE_SCHEMA: "true"
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@v7
         # Allow toolchain selection; setup-go exports local after installation.
         env:
           GOTOOLCHAIN: auto
