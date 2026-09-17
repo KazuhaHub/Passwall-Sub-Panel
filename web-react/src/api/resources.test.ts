@@ -79,7 +79,7 @@ describe('resource API contracts', () => {
     await groups.updateGroupLayout(2, { columns: 2 } as never)
     await groups.deleteGroup(2)
 
-    const rule = { slug: 'r', name: 'Rule', sort: 1, enabled: true, proxy_group_order: [], content: '' }
+    const rule = { slug: 'r', name: 'Rule', sort: 1, enabled: true, direct_subscription_domain: false, proxy_group_order: [], content: '' }
     await rules.listRuleSets({ keyword: 'r' }, signal)
     await rules.getRuleSet('r')
     await rules.saveRuleSet(rule)

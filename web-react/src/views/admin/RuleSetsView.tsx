@@ -51,7 +51,7 @@ import ProxyGroupMembersEditor from '@/components/ProxyGroupMembersEditor'
 const CodeEditor = lazy(() => import('@/components/CodeEditor'))
 
 const EMPTY: RuleSet = {
-  slug: '', name: '', sort: 100, enabled: true, proxy_group_order: [], proxy_group_members: {}, proxy_group_options: {}, content: '',
+  slug: '', name: '', sort: 100, enabled: true, direct_subscription_domain: false, proxy_group_order: [], proxy_group_members: {}, proxy_group_options: {}, content: '',
 }
 
 function cloneProxyGroupMembers(members: RuleSet['proxy_group_members']): NonNullable<RuleSet['proxy_group_members']> {
@@ -437,7 +437,15 @@ export default function RuleSetsView() {
                 control={<Switch checked={form.enabled} onChange={(_, c) => setForm({ ...form, enabled: c })} />}
                 sx={{ ml: 1, '& .MuiFormControlLabel-label': { ml: 1.5 } }}
               />
+              <FormControlLabel
+                label={t('admin:rules.field.direct_subscription_domain')}
+                control={<Switch checked={form.direct_subscription_domain} onChange={(_, c) => setForm({ ...form, direct_subscription_domain: c })} />}
+                sx={{ ml: 1, '& .MuiFormControlLabel-label': { ml: 1.5 } }}
+              />
             </Box>
+            <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant, mt: -1 }}>
+              {t('admin:rules.hint.direct_subscription_domain')}
+            </Typography>
             <Box>
               <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant, mb: 0.5 }}>
                 {t('admin:rules.field.content')}

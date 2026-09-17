@@ -7,6 +7,7 @@ package render
 import (
 	"context"
 	"fmt"
+	"net"
 	"net/url"
 	"sort"
 	"strconv"
@@ -154,7 +155,7 @@ func (s *Service) RenderForUser(ctx context.Context, u *domain.User, ct domain.C
 		return nil, fmt.Errorf("marshal proxies: %w", err)
 	}
 
-	rulesCommon, proxyGroupOrder, proxyGroupMembers, proxyGroupOptions, err := s.resolveRulesCommon(ctx, tpl)
+	rulesCommon, proxyGroupOrder, proxyGroupMembers, proxyGroupOptions, err := s.resolveRulesCommon(ctx, tpl, st)
 	if err != nil {
 		return nil, fmt.Errorf("resolve rules: %w", err)
 	}
@@ -595,13 +596,15 @@ recv:
 	return out
 }
 
-func (s *Service) resolveRulesCommon(ctx context.Context, tpl *domain.Template) (string, []string, map[string][]domain.ProxyGroupMember, map[string]domain.ProxyGroupOptions, error) {
+func (s *Service) resolveRulesCommon(ctx context.Context, tpl *domain.Template, st ports.UISettings) (string, []string, map[string][]domain.ProxyGroupMember, map[string]domain.ProxyGroupOptions, error) {
 	slugs := tpl.RuleSets
 	if len(slugs) == 0 {
 		log.Debug("render: no rule_sets configured for template", "template", tpl.Slug)
 		return "", nil, nil, nil, nil
 	}
 	parts := make([]string, 0, len(slugs))
+	directSubscriptionRule := subscriptionDirectRule(st.SubBaseURL)
+	directSubscriptionRequested := false
 	proxyGroupOrder := []string{}
 	seenOrder := map[string]bool{}
 	proxyGroupMembers := map[string][]domain.ProxyGroupMember{}
@@ -615,6 +618,9 @@ func (s *Service) resolveRulesCommon(ctx context.Context, tpl *domain.Template) 
 		if !rs.Enabled {
 			log.Debug("render: skip disabled rule_set", "slug", slug)
 			continue
+		}
+		if rs.DirectSubscriptionDomain && directSubscriptionRule != "" {
+			directSubscriptionRequested = true
 		}
 		content := strings.TrimRight(rs.Content, "\n")
 		if content == "" {
@@ -643,9 +649,39 @@ func (s *Service) resolveRulesCommon(ctx context.Context, tpl *domain.Template) 
 		}
 		log.Debug("render: loaded rule_set", "slug", slug, "lines", strings.Count(content, "\n")+1)
 	}
+	if directSubscriptionRequested {
+		// Keep the generated exception at the head of the common rules. Personal
+		// rules still remain ahead of rules_common by template design, while this
+		// rule always wins over a later MATCH or broad catch-all in a ruleset.
+		parts = append([]string{directSubscriptionRule}, parts...)
+	}
 	result := strings.Join(parts, "\n")
 	log.Debug("render: rules_common resolved", "total_length", len(result), "rule_sets", len(parts))
 	return result, proxyGroupOrder, proxyGroupMembers, proxyGroupOptions, nil
+}
+
+// subscriptionDirectRule returns the client rule that keeps the PSP
+// subscription endpoint reachable without the proxy when a bound ruleset asks
+// for it. The URL is read from the live settings at render time, so the rule
+// follows a public subscription-domain change without editing every ruleset.
+// An empty or malformed base URL produces no rule; relative subscription URLs
+// have no hostname that can be matched by a client rule.
+func subscriptionDirectRule(baseURL string) string {
+	u, err := url.Parse(strings.TrimSpace(baseURL))
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" {
+		return ""
+	}
+	host := strings.TrimSuffix(strings.ToLower(strings.TrimSpace(u.Hostname())), ".")
+	if host == "" || strings.ContainsAny(host, ", \t\r\n") {
+		return ""
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		if ip4 := ip.To4(); ip4 != nil {
+			return fmt.Sprintf("- IP-CIDR,%s/32,DIRECT,no-resolve", ip4.String())
+		}
+		return fmt.Sprintf("- IP-CIDR6,%s/128,DIRECT,no-resolve", ip.String())
+	}
+	return "- DOMAIN-SUFFIX," + host + ",DIRECT"
 }
 
 // mergeFirstProxyGroupMembers applies template rule-set precedence: once a

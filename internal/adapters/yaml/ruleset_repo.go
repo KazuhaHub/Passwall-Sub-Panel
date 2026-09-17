@@ -48,14 +48,15 @@ func NewRuleSetRepo(configDir string) (*RuleSetRepo, error) {
 }
 
 type ruleSetFile struct {
-	Slug              string                               `yaml:"slug"`
-	Name              string                               `yaml:"name"`
-	Sort              int                                  `yaml:"sort"`
-	Enabled           bool                                 `yaml:"enabled"`
-	ProxyGroupOrder   []string                             `yaml:"proxy_group_order"`
-	ProxyGroupMembers map[string][]domain.ProxyGroupMember `yaml:"proxy_group_members,omitempty"`
-	ProxyGroupOptions map[string]domain.ProxyGroupOptions  `yaml:"proxy_group_options,omitempty"`
-	Content           string                               `yaml:"content"`
+	Slug                     string                               `yaml:"slug"`
+	Name                     string                               `yaml:"name"`
+	Sort                     int                                  `yaml:"sort"`
+	Enabled                  bool                                 `yaml:"enabled"`
+	DirectSubscriptionDomain bool                                 `yaml:"direct_subscription_domain,omitempty"`
+	ProxyGroupOrder          []string                             `yaml:"proxy_group_order"`
+	ProxyGroupMembers        map[string][]domain.ProxyGroupMember `yaml:"proxy_group_members,omitempty"`
+	ProxyGroupOptions        map[string]domain.ProxyGroupOptions  `yaml:"proxy_group_options,omitempty"`
+	Content                  string                               `yaml:"content"`
 }
 
 func (r *RuleSetRepo) List(ctx context.Context) ([]*domain.RuleSet, error) {
@@ -147,14 +148,15 @@ func (r *RuleSetRepo) Save(ctx context.Context, rs *domain.RuleSet) error {
 		return err
 	}
 	doc := ruleSetFile{
-		Slug:              rs.Slug,
-		Name:              rs.Name,
-		Sort:              rs.Sort,
-		Enabled:           rs.Enabled,
-		ProxyGroupOrder:   rs.ProxyGroupOrder,
-		ProxyGroupMembers: rs.ProxyGroupMembers,
-		ProxyGroupOptions: rs.ProxyGroupOptions,
-		Content:           rs.Content,
+		Slug:                     rs.Slug,
+		Name:                     rs.Name,
+		Sort:                     rs.Sort,
+		Enabled:                  rs.Enabled,
+		DirectSubscriptionDomain: rs.DirectSubscriptionDomain,
+		ProxyGroupOrder:          rs.ProxyGroupOrder,
+		ProxyGroupMembers:        rs.ProxyGroupMembers,
+		ProxyGroupOptions:        rs.ProxyGroupOptions,
+		Content:                  rs.Content,
 	}
 	if err := writeYAML(p, doc); err != nil {
 		return err
@@ -237,14 +239,15 @@ func (r *RuleSetRepo) readFile(path string) (*domain.RuleSet, error) {
 			return nil, err
 		}
 		rs := &domain.RuleSet{
-			Slug:              doc.Slug,
-			Name:              doc.Name,
-			Sort:              doc.Sort,
-			Enabled:           doc.Enabled,
-			ProxyGroupOrder:   doc.ProxyGroupOrder,
-			ProxyGroupMembers: doc.ProxyGroupMembers,
-			ProxyGroupOptions: doc.ProxyGroupOptions,
-			Content:           doc.Content,
+			Slug:                     doc.Slug,
+			Name:                     doc.Name,
+			Sort:                     doc.Sort,
+			Enabled:                  doc.Enabled,
+			DirectSubscriptionDomain: doc.DirectSubscriptionDomain,
+			ProxyGroupOrder:          doc.ProxyGroupOrder,
+			ProxyGroupMembers:        doc.ProxyGroupMembers,
+			ProxyGroupOptions:        doc.ProxyGroupOptions,
+			Content:                  doc.Content,
 		}
 		r.cache.Store(path, ruleSetCacheEntry{mtime: st.ModTime(), value: rs})
 		return rs, nil
@@ -258,13 +261,14 @@ func (r *RuleSetRepo) readFile(path string) (*domain.RuleSet, error) {
 		return nil, err
 	}
 	return &domain.RuleSet{
-		Slug:              doc.Slug,
-		Name:              doc.Name,
-		Sort:              doc.Sort,
-		Enabled:           doc.Enabled,
-		ProxyGroupOrder:   doc.ProxyGroupOrder,
-		ProxyGroupMembers: doc.ProxyGroupMembers,
-		ProxyGroupOptions: doc.ProxyGroupOptions,
-		Content:           doc.Content,
+		Slug:                     doc.Slug,
+		Name:                     doc.Name,
+		Sort:                     doc.Sort,
+		Enabled:                  doc.Enabled,
+		DirectSubscriptionDomain: doc.DirectSubscriptionDomain,
+		ProxyGroupOrder:          doc.ProxyGroupOrder,
+		ProxyGroupMembers:        doc.ProxyGroupMembers,
+		ProxyGroupOptions:        doc.ProxyGroupOptions,
+		Content:                  doc.Content,
 	}, nil
 }

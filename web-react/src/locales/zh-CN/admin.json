@@ -998,6 +998,7 @@
       "name": "名称",
       "sort": "排序",
       "enabled": "启用",
+      "direct_subscription_domain": "DIRECT 订阅域名",
       "proxy_group_order": "策略组顺序",
       "content": "规则内容"
     },
@@ -1008,7 +1009,8 @@
       "content": "- DOMAIN-SUFFIX,example.com,DIRECT"
     },
     "hint": {
-      "proxy_group_order": "可留空；一行一个策略组名。未列出的策略组会放在开头，并保持规则内容中的首次出现顺序。"
+      "proxy_group_order": "可留空；一行一个策略组名。未列出的策略组会放在开头，并保持规则内容中的首次出现顺序。",
+      "direct_subscription_domain": "开启后，会在该规则集前面自动生成 DOMAIN-SUFFIX,<订阅域名>,DIRECT。未配置有效的订阅 Base URL 时不会生成；关闭后订阅更新按其它规则处理。"
     },
     "tabs": {
       "rules": "规则内容",
