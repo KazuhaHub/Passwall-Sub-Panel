@@ -2159,7 +2159,7 @@
       "username": "admin (only when using password login)",
       "password": "API Token preferred; password as fallback"
     },
-    "update_available_chip": "Update available: {{latest}}",
+    "update_available": "Update available: {{latest}}",
     "hint": {
       "name": "Display name; the internal reference uses the database ID.",
       "update_channel": "Saved preference for installation and upgrade lists. Docker files follow latest for Stable or beta for Testing by default; manual and systemd installation still use an exact reviewed release. Saving does not install, upgrade, or change server/node identities or credentials. Temporary channel selections in dialogs are not saved.",
@@ -2175,7 +2175,7 @@
         "limited": "Compatible · manual upgrade",
         "incompatible": "Incompatible",
         "unknown": "Compatibility unknown",
-        "compatible_detail": "Protocol v{{protocol}} is supported and this Node currently advertises all remote-upgrade capabilities.",
+        "compatible_detail": "Compatible · remote upgrade ready.",
         "limited_detail": "Node synchronization is compatible, but remote upgrade is unavailable. Update this Node manually once or enable its upgrade helper.",
         "incompatible_detail": "This Node protocol has not been reviewed for this Passwall Sub Panel release. Remote upgrade is blocked.",
         "unknown_detail": "No authenticated protocol observation has been saved yet. Wait for a successful Node check-in."

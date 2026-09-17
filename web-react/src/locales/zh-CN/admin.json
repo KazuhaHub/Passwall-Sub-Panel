@@ -2157,7 +2157,7 @@
       "username": "admin（仅在用密码登录时）",
       "password": "API Token 优先；填密码作为兜底"
     },
-    "update_available_chip": "可用更新：{{latest}}",
+    "update_available": "可用更新：{{latest}}",
     "hint": {
       "name": "显示名称，可修改；内部关联使用数据库 ID",
       "update_channel": "保存安装与升级列表的默认频道。Docker 文件默认以 latest 跟随稳定版、以 beta 跟随测试版；手动与 systemd 安装仍使用已审核的精确版本。保存不会执行安装或升级，也不会更改服务器、节点身份或凭据。弹窗内临时切换频道不会自动保存。",
@@ -2173,7 +2173,7 @@
         "limited": "兼容 · 需手动升级",
         "incompatible": "不兼容",
         "unknown": "兼容状态未知",
-        "compatible_detail": "协议 v{{protocol}} 已支持，且此节点当前已上报完整远程升级能力。",
+        "compatible_detail": "兼容 · 可远程升级",
         "limited_detail": "节点同步兼容，但当前不能远程升级。请手动更新一次节点，或启用其升级助手。",
         "incompatible_detail": "当前 Passwall Sub Panel 版本尚未验证此节点协议，已阻止远程升级。",
         "unknown_detail": "尚未保存通过身份验证的协议上报，请等待节点成功连接一次。"

@@ -955,13 +955,23 @@ export default function ServersView() {
     })
   }
 
-  // versionCell renders the 3X-UI + Xray version pair plus a compat badge
-  // when the panel's reported version falls outside PSP's supported range.
+  function splitVersionIdentity(value: string | undefined): { display: string; commit?: string } {
+    const full = value?.trim() ?? ''
+    const match = full.match(/^(.*?)\s+\(([0-9a-f]{7,40})\)$/i)
+    if (!match) return { display: full }
+    return { display: match[1], commit: match[2] }
+  }
+
+  // versionCell renders the 3X-UI + Xray version pair plus compatibility
+  // state. A healthy native Node is intentionally quiet; limited, unknown
+  // and incompatible states remain visible because they change the next
+  // action an administrator can take.
   // Empty state ("never probed") shows an em-dash so it's visually distinct
   // from "probed and ok". Compat colors mirror Material's container roles
   // for consistency with statusBadge.
   function versionCell(s: Server) {
-		if (!s.panel_version && (s.panel_type !== 'psp' || (!s.desired_core_version && !s.node_compatibility))) {
+    const nativeStatusVisible = s.panel_type === 'psp' && s.node_compatibility !== undefined && s.node_compatibility !== 'compatible'
+		if (!s.panel_version && (s.panel_type !== 'psp' || (!s.desired_core_version && !nativeStatusVisible))) {
       return <Typography sx={{ fontSize: 13, color: md.onSurfaceVariant }}>—</Typography>
     }
 		const pendingCoreSelection = s.panel_type === 'psp' && !!s.desired_core_version &&
@@ -972,13 +982,12 @@ export default function ServersView() {
 		if (s.panel_type === 'psp') {
 			switch (s.node_compatibility) {
 			case 'compatible':
-				bg = md.tertiaryContainer
-				fg = md.onTertiaryContainer
-				label = t('admin:servers.native.compatibility.compatible')
 				break
 			case 'limited':
-				bg = md.secondaryContainer
-				fg = md.onSecondaryContainer
+				// M3 has no built-in warning role for the baseline-purple palette;
+				// match the amber warning pair used by the global announcement UI.
+				bg = theme.palette.mode === 'dark' ? '#3F2E00' : '#FFF8E1'
+				fg = theme.palette.mode === 'dark' ? '#FFE49A' : '#7A5C00'
 				label = t('admin:servers.native.compatibility.limited')
 				break
 			case 'incompatible':
@@ -1014,11 +1023,36 @@ export default function ServersView() {
         label = t('admin:servers.compat.unknown', { defaultValue: '无法识别' })
 			}
 		}
+		const versionIdentity = splitVersionIdentity(s.panel_version)
+		const compatibilityMessage = s.panel_type === 'psp'
+			? s.node_compatibility
+				? t(`admin:servers.native.compatibility.${s.node_compatibility}_detail`, {
+						protocol: s.node_effective_protocol_version ?? '—',
+					})
+				: undefined
+			: s.compat_message
+		const versionTooltip = (versionIdentity.commit || compatibilityMessage) && (
+			<Box sx={{ fontSize: 11, lineHeight: 1.5 }}>
+				{versionIdentity.display && <Box>{versionIdentity.display}</Box>}
+				{versionIdentity.commit && <Box>commit: {versionIdentity.commit}</Box>}
+				{compatibilityMessage && <Box sx={{ mt: 0.5 }}>{compatibilityMessage}</Box>}
+			</Box>
+		)
     const versionText = (
       <Box sx={{ display: 'flex', flexDirection: 'column', lineHeight: 1.3 }}>
-        <Typography sx={{ fontSize: 13, fontWeight: 500 }}>
-					{s.panel_type === 'sui' ? 'S-UI' : s.panel_type === 'psp' ? 'Passwall Node' : '3X-UI'} {s.panel_version ?? ''}
-        </Typography>
+				{versionTooltip ? (
+					<Tooltip placement="top" title={versionTooltip}>
+						<Box component="span" sx={{ display: 'block' }}>
+							<Typography component="span" sx={{ display: 'block', fontSize: 13, fontWeight: 500 }}>
+								{s.panel_type === 'sui' ? 'S-UI' : s.panel_type === 'psp' ? 'Passwall Node' : '3X-UI'} {versionIdentity.display}
+							</Typography>
+						</Box>
+					</Tooltip>
+				) : (
+					<Typography component="span" sx={{ display: 'block', fontSize: 13, fontWeight: 500 }}>
+						{s.panel_type === 'sui' ? 'S-UI' : s.panel_type === 'psp' ? 'Passwall Node' : '3X-UI'} {versionIdentity.display}
+					</Typography>
+				)}
         {(s.panel_type === 'psp' ? s.core_version : s.xray_version) && (
           <Typography sx={{ fontSize: 11, color: md.onSurfaceVariant }}>
 						{s.panel_type === 'psp'
@@ -1038,64 +1072,49 @@ export default function ServersView() {
     )
     const badge = label && (
       <Box sx={{
-        display: 'inline-block', px: 1, py: 0.125,
-        borderRadius: 1, fontSize: 11, fontWeight: 500,
-        bgcolor: bg, color: fg, whiteSpace: 'nowrap', mt: 0.25,
+        display: 'inline-block', px: 1.25, py: 0.25,
+        borderRadius: 1, fontSize: 12, fontWeight: 500,
+        bgcolor: bg, color: fg, whiteSpace: 'nowrap',
       }}>
         {label}
       </Box>
     )
-    // Update-available chip lives inside the Version column so the
-    // target version is visible at a glance (the previous red-dot on
-    // the ⋮ kebab told admin "something is new" but they had to hover
-    // to learn what — too vague to act on). Tertiary-container coloring
-    // keeps it informational, not alarming.
+    // Keep the target release visible in the Version column as an
+    // informational hint. Upgrade actions remain in the row menu and batch
+    // toolbar so this text does not compete with the actual controls.
     const nativeUpdate = s.panel_type === 'psp' && nodeReleases ? newerNodeRelease(s, nodeReleases) : undefined
     const upstreamUpdateVersion = s.panel_type === 'sui' ? s.latest_sui_version : s.latest_xui_version
     const updateVersion = s.panel_type === 'psp' ? nativeUpdate?.version
       : s.panel_type === 'sui' && suiReleaseVersion ? newerSUIRelease(s.panel_version, suiReleaseVersion)
       : s.update_available ? upstreamUpdateVersion : undefined
     const updateChipStyle = {
-        display: 'inline-block', px: 1, py: 0.125,
-        borderRadius: 1, fontSize: 11, fontWeight: 500,
-        bgcolor: md.tertiaryContainer, color: md.onTertiaryContainer,
-        whiteSpace: 'nowrap', mt: 0.25, ml: badge ? 0.5 : 0,
+      display: 'inline-block', px: 1.25, py: 0.25,
+      borderRadius: 1, fontSize: 12, fontWeight: 500,
+      bgcolor: md.tertiaryContainer, color: md.onTertiaryContainer,
+      whiteSpace: 'nowrap',
     }
-    const updateLabel = updateVersion && t('admin:servers.update_available_chip', {
+    const updateLabel = updateVersion && t('admin:servers.update_available', {
       latest: updateVersion,
       defaultValue: 'Update available: {{latest}}',
     })
-    const updateChip = updateVersion && (s.panel_type === 'psp' && canConfigure && s.node_upgrade_ready
-      ? <Button size="small" sx={{ ...updateChipStyle, minWidth: 0, lineHeight: 1.5 }}
-          aria-label={t('admin:servers.agent_upgrade.available', { version: updateVersion })}
-          onClick={() => setNativeUpgradeTarget(s)}>{updateLabel}</Button>
-        : s.panel_type === 'sui'
-        ? <Tooltip title={t('admin:servers.sui_update.manual_hint')}>
-            <Button component="a" size="small" href="https://github.com/alireza0/s-ui/releases/latest"
-              target="_blank" rel="noopener noreferrer"
-              sx={{ ...updateChipStyle, minWidth: 0, lineHeight: 1.5 }}
-              aria-label={t('admin:servers.sui_update.available', { version: updateVersion })}>{updateLabel}</Button>
-          </Tooltip>
-        : s.panel_type === 'psp' && canConfigure
-          ? <Box sx={updateChipStyle}>{updateLabel}</Box>
-          : <Box sx={updateChipStyle}>{updateLabel}</Box>)
+    const updateHint = updateLabel && (
+      <Box sx={updateChipStyle}>
+        {updateLabel}
+      </Box>
+    )
     const stacked = (
       <Box>
         {versionText}
-        {badge}
-        {updateChip}
+        {(badge || updateHint) && (
+          <Box sx={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 0.5, mt: 0.25 }}>
+            {badge}
+            {updateHint}
+          </Box>
+        )}
         {s.panel_type === 'psp' && nodeReleaseCheckFailed && <Typography
           variant="caption" color="text.secondary">{t('admin:servers.native.update_check_failed')}</Typography>}
       </Box>
     )
-    const compatibilityMessage = s.panel_type === 'psp'
-		? t(`admin:servers.native.compatibility.${s.node_compatibility ?? 'unknown'}_detail`, {
-			protocol: s.node_effective_protocol_version ?? '—',
-		})
-		: s.compat_message
-    if (compatibilityMessage) {
-      return <Tooltip title={compatibilityMessage} placement="top"><span>{stacked}</span></Tooltip>
-    }
     return stacked
   }
 
