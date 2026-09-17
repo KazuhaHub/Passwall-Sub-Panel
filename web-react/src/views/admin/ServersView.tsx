@@ -1024,19 +1024,29 @@ export default function ServersView() {
 			}
 		}
 		const versionIdentity = splitVersionIdentity(s.panel_version)
-		const versionTooltip = versionIdentity.commit && (
+		const compatibilityMessage = s.panel_type === 'psp'
+			? s.node_compatibility
+				? t(`admin:servers.native.compatibility.${s.node_compatibility}_detail`, {
+						protocol: s.node_effective_protocol_version ?? '—',
+					})
+				: undefined
+			: s.compat_message
+		const versionTooltip = (versionIdentity.commit || compatibilityMessage) && (
 			<Box sx={{ fontSize: 11, lineHeight: 1.5 }}>
-				<Box>{versionIdentity.display}</Box>
-				<Box>commit: {versionIdentity.commit}</Box>
+				{versionIdentity.display && <Box>{versionIdentity.display}</Box>}
+				{versionIdentity.commit && <Box>commit: {versionIdentity.commit}</Box>}
+				{compatibilityMessage && <Box sx={{ mt: 0.5 }}>{compatibilityMessage}</Box>}
 			</Box>
 		)
     const versionText = (
       <Box sx={{ display: 'flex', flexDirection: 'column', lineHeight: 1.3 }}>
 				{versionTooltip ? (
 					<Tooltip placement="top" title={versionTooltip}>
-						<Typography component="span" sx={{ display: 'block', fontSize: 13, fontWeight: 500 }}>
-							{s.panel_type === 'sui' ? 'S-UI' : s.panel_type === 'psp' ? 'Passwall Node' : '3X-UI'} {versionIdentity.display}
-						</Typography>
+						<Box component="span" sx={{ display: 'block' }}>
+							<Typography component="span" sx={{ display: 'block', fontSize: 13, fontWeight: 500 }}>
+								{s.panel_type === 'sui' ? 'S-UI' : s.panel_type === 'psp' ? 'Passwall Node' : '3X-UI'} {versionIdentity.display}
+							</Typography>
+						</Box>
 					</Tooltip>
 				) : (
 					<Typography component="span" sx={{ display: 'block', fontSize: 13, fontWeight: 500 }}>
@@ -1105,16 +1115,6 @@ export default function ServersView() {
           variant="caption" color="text.secondary">{t('admin:servers.native.update_check_failed')}</Typography>}
       </Box>
     )
-    const compatibilityMessage = s.panel_type === 'psp'
-      ? s.node_compatibility && s.node_compatibility !== 'compatible'
-        ? t(`admin:servers.native.compatibility.${s.node_compatibility}_detail`, {
-            protocol: s.node_effective_protocol_version ?? '—',
-          })
-        : undefined
-      : s.compat_message
-    if (compatibilityMessage) {
-      return <Tooltip title={compatibilityMessage} placement="top"><span>{stacked}</span></Tooltip>
-    }
     return stacked
   }
 
