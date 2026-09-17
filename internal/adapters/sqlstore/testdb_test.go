@@ -58,10 +58,12 @@ func reuseServerTestSchema() bool {
 	}
 }
 
-// openIsolatedTestDB always creates a fresh database. Keep this path explicit
+// openIsolatedTestDB always creates a fresh namespace. Keep this path explicit
 // in tests whose subject is initialization, migration, DDL failure recovery or
 // an actually empty database; sharing a prepared schema would invalidate what
-// those tests claim to prove.
+// those tests claim to prove. PostgreSQL uses a schema instead of a database:
+// DROP DATABASE forces a checkpoint, which made the schema-heavy CI suite
+// spend minutes syncing disposable data.
 func openIsolatedTestDB(t *testing.T) (*gorm.DB, error) {
 	t.Helper()
 	var (
@@ -98,13 +100,50 @@ func uniqueTestNamespace() string {
 func openIsolatedPostgresTestDB(t *testing.T) (*gorm.DB, error) {
 	t.Helper()
 	base := os.Getenv("PSP_TEST_DB_DSN")
+	schemaName := uniqueTestNamespace()
+	admin, err := Open("postgres", base)
+	if err != nil {
+		return nil, err
+	}
+	if err := admin.Exec(`CREATE SCHEMA "` + schemaName + `"`).Error; err != nil {
+		closeGormDB(admin)
+		return nil, err
+	}
+	closeGormDB(admin)
+	t.Cleanup(func() {
+		admin, err := Open("postgres", base)
+		if err != nil {
+			t.Errorf("open PostgreSQL schema cleanup connection: %v", err)
+			return
+		}
+		defer closeGormDB(admin)
+		if err := admin.Exec(`DROP SCHEMA IF EXISTS "` + schemaName + `" CASCADE`).Error; err != nil {
+			t.Errorf("drop PostgreSQL test schema %s: %v", schemaName, err)
+		}
+	})
+	return Open("postgres", postgresDSNWithSearchPath(base, schemaName))
+}
+
+// openDatabaseIsolatedTestDB is reserved for tests that intentionally switch
+// between public and non-public PostgreSQL schemas. Ordinary migration tests
+// should use openIsolatedTestDB so cleanup does not force a server checkpoint.
+func openDatabaseIsolatedTestDB(t *testing.T) (*gorm.DB, error) {
+	t.Helper()
+	if os.Getenv("PSP_TEST_DB_KIND") != "postgres" {
+		return openIsolatedTestDB(t)
+	}
+	base := os.Getenv("PSP_TEST_DB_DSN")
 	dbName := uniqueTestNamespace()
 	dsn, err := createServerTestDatabase("postgres", base, dbName)
 	if err != nil {
 		return nil, err
 	}
 	t.Cleanup(func() { _ = dropServerTestDatabase("postgres", base, dbName) })
-	return Open("postgres", dsn)
+	db, err := Open("postgres", dsn)
+	if err == nil {
+		t.Cleanup(func() { closeGormDB(db) })
+	}
+	return db, err
 }
 
 // swapPostgresDBName rewrites the database segment of a postgres:// URL DSN.
@@ -114,6 +153,16 @@ func swapPostgresDBName(dsn, dbName string) string {
 		return u.String()
 	}
 	return dsn
+}
+
+func postgresDSNWithSearchPath(dsn, schemaName string) string {
+	if u, err := url.Parse(dsn); err == nil && u.Scheme != "" {
+		query := u.Query()
+		query.Set("search_path", schemaName)
+		u.RawQuery = query.Encode()
+		return u.String()
+	}
+	return strings.TrimSpace(dsn) + " search_path=" + schemaName
 }
 
 func openIsolatedMySQLTestDB(t *testing.T) (*gorm.DB, error) {

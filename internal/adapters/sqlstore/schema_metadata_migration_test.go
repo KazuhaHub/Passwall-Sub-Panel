@@ -183,7 +183,7 @@ func TestPostgresV4IdentityIndexesAreIsolatedToCurrentSchema(t *testing.T) {
 	for _, currentSchema := range []string{"public", "psp.current"} {
 		for _, baseline := range []string{"v3", "fresh"} {
 			t.Run(currentSchema+"/"+baseline, func(t *testing.T) {
-				db, err := openIsolatedTestDB(t)
+				db, err := openDatabaseIsolatedTestDB(t)
 				if err != nil {
 					t.Fatal(err)
 				}
