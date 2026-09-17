@@ -16,7 +16,7 @@ import (
 // diagnostic that skips itself on a bad day is worse than useless because its
 // silence reads as "clean".
 func TestAuditUPNCanonicalizationSurvivesMissingTable(t *testing.T) {
-	db, err := openTestDB(t)
+	db, err := openIsolatedTestDB(t)
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
@@ -36,7 +36,7 @@ func TestAuditUPNCanonicalizationCountsCollisionsAndNonCanonical(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
-	if err := EnsureSchema(db); err != nil {
+	if err := ensureTestSchema(db); err != nil {
 		t.Fatalf("schema: %v", err)
 	}
 	requireCaseSensitiveUPNIndex(t, db)
@@ -77,7 +77,7 @@ func TestAuditUPNCanonicalizationSilentOnCleanInstall(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
-	if err := EnsureSchema(db); err != nil {
+	if err := ensureTestSchema(db); err != nil {
 		t.Fatalf("schema: %v", err)
 	}
 	repos := NewRepos(db)

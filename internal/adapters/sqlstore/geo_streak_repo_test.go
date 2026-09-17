@@ -18,7 +18,7 @@ func newStreakRepo(t *testing.T) *GeoStreakRepo {
 	if err != nil {
 		t.Fatalf("open test db: %v", err)
 	}
-	if err := EnsureSchema(db); err != nil {
+	if err := ensureTestSchema(db); err != nil {
 		t.Fatalf("ensure schema: %v", err)
 	}
 	return NewGeoStreakRepo(db)
@@ -53,7 +53,7 @@ func TestGeoStreakRepo_FlagSurvivesAReopen(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
-	if err := EnsureSchema(db); err != nil {
+	if err := ensureTestSchema(db); err != nil {
 		t.Fatalf("ensure schema: %v", err)
 	}
 	ctx := context.Background()

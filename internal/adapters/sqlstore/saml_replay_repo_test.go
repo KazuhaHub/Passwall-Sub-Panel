@@ -13,7 +13,7 @@ func newSAMLReplayRepo(t *testing.T) *samlReplayRepo {
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
-	if err := EnsureSchema(db); err != nil {
+	if err := ensureTestSchema(db); err != nil {
 		t.Fatalf("schema: %v", err)
 	}
 	t.Cleanup(func() {
@@ -57,7 +57,7 @@ func TestSAMLReplayRepo_SurvivesProcessRestart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
-	if err := EnsureSchema(db); err != nil {
+	if err := ensureTestSchema(db); err != nil {
 		t.Fatalf("schema: %v", err)
 	}
 	t.Cleanup(func() {

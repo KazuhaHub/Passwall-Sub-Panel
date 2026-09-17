@@ -44,7 +44,7 @@ func TestSAMLGroupRulesRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Skipf("no test DB: %v", err)
 	}
-	if err := EnsureSchema(db); err != nil {
+	if err := ensureTestSchema(db); err != nil {
 		t.Fatalf("schema: %v", err)
 	}
 	repo := &samlConfigRepo{db: db}
@@ -86,7 +86,7 @@ func TestOIDCGroupRulesRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Skipf("no test DB: %v", err)
 	}
-	if err := EnsureSchema(db); err != nil {
+	if err := ensureTestSchema(db); err != nil {
 		t.Fatalf("schema: %v", err)
 	}
 	repo := &oidcConfigRepo{db: db}
@@ -116,7 +116,7 @@ func TestGroupRulesAbsentColumnDecodesAsEmpty(t *testing.T) {
 	if err != nil {
 		t.Skipf("no test DB: %v", err)
 	}
-	if err := EnsureSchema(db); err != nil {
+	if err := ensureTestSchema(db); err != nil {
 		t.Fatalf("schema: %v", err)
 	}
 	repo := &samlConfigRepo{db: db}

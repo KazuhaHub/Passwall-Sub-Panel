@@ -11,7 +11,7 @@ import (
 // immutable Global Administrator keeps slug "admin" and holds the wildcard, and
 // operator/user are seeded editable.
 func TestSeedBuiltinRoles(t *testing.T) {
-	db, err := openTestDB(t)
+	db, err := openIsolatedTestDB(t)
 	if err != nil {
 		t.Fatalf("openTestDB: %v", err)
 	}
@@ -58,7 +58,7 @@ func TestSeedBuiltinRoles(t *testing.T) {
 // TestSeedBuiltinRolesIdempotent asserts a second EnsureSchema is a no-op on the
 // role set (boot re-run safety).
 func TestSeedBuiltinRolesIdempotent(t *testing.T) {
-	db, err := openTestDB(t)
+	db, err := openIsolatedTestDB(t)
 	if err != nil {
 		t.Fatalf("openTestDB: %v", err)
 	}
@@ -80,7 +80,7 @@ func TestSeedBuiltinRolesIdempotent(t *testing.T) {
 // TestSeedPreservesEditableRoleEdits asserts an admin's edit to an editable
 // built-in (operator) survives a reboot — insert-if-absent, never overwrite.
 func TestSeedPreservesEditableRoleEdits(t *testing.T) {
-	db, err := openTestDB(t)
+	db, err := openIsolatedTestDB(t)
 	if err != nil {
 		t.Fatalf("openTestDB: %v", err)
 	}
@@ -110,7 +110,7 @@ func TestSeedPreservesEditableRoleEdits(t *testing.T) {
 // or lost its immutable flag, boot repairs it — no GA can silently lose power
 // with no recovery role (invariant #1 / M4).
 func TestSeedSelfHealsGlobalAdmin(t *testing.T) {
-	db, err := openTestDB(t)
+	db, err := openIsolatedTestDB(t)
 	if err != nil {
 		t.Fatalf("openTestDB: %v", err)
 	}

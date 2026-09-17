@@ -34,7 +34,7 @@ func TestBoolDefaultsCanStoreFalse(t *testing.T) {
 	}
 	sqlDB, _ := db.DB()
 	t.Cleanup(func() { _ = sqlDB.Close() })
-	if err := EnsureSchema(db); err != nil {
+	if err := ensureTestSchema(db); err != nil {
 		t.Fatalf("schema: %v", err)
 	}
 	ctx := context.Background()

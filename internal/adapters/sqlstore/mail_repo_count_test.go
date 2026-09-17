@@ -21,7 +21,7 @@ func TestMailRepoCountSentInWindow(t *testing.T) {
 			_ = sqlDB.Close()
 		}
 	})
-	if err := EnsureSchema(db); err != nil {
+	if err := ensureTestSchema(db); err != nil {
 		t.Fatalf("schema: %v", err)
 	}
 	repo := &mailRepo{db: db}
@@ -80,7 +80,7 @@ func TestMailRepoReserveSentSlot(t *testing.T) {
 			_ = sqlDB.Close()
 		}
 	})
-	if err := EnsureSchema(db); err != nil {
+	if err := ensureTestSchema(db); err != nil {
 		t.Fatalf("schema: %v", err)
 	}
 	repo := &mailRepo{db: db}

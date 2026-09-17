@@ -47,7 +47,7 @@ func seedUser(t *testing.T, ur *userRepo, upn string, groupID int64, lim domain.
 // The end-to-end promise: a user with no override of their own takes the
 // group's entitlements, and one with an override keeps it.
 func TestLimitsInheritFromGroup(t *testing.T) {
-	db, err := openTestDB(t)
+	db, err := openIsolatedTestDB(t)
 	if err != nil {
 		t.Skipf("no test DB: %v", err)
 	}
@@ -114,7 +114,7 @@ func TestLimitsInheritFromGroup(t *testing.T) {
 // Editing a group's policy must reach its members at once, not after the cache
 // TTL. The two repos share one cache precisely so a write can invalidate it.
 func TestGroupLimitEditReachesMembersImmediately(t *testing.T) {
-	db, err := openTestDB(t)
+	db, err := openIsolatedTestDB(t)
 	if err != nil {
 		t.Skipf("no test DB: %v", err)
 	}
@@ -150,7 +150,7 @@ func TestGroupLimitEditReachesMembersImmediately(t *testing.T) {
 // explicit unlimited policy and callers could push it to panels/native nodes.
 // Propagate instead so those callers leave the last known enforcement intact.
 func TestColdGroupLimitsCacheReadFailurePropagates(t *testing.T) {
-	db, err := openTestDB(t)
+	db, err := openIsolatedTestDB(t)
 	if err != nil {
 		t.Skipf("no test DB: %v", err)
 	}
@@ -181,7 +181,7 @@ func TestColdGroupLimitsCacheReadFailurePropagates(t *testing.T) {
 // A refresh failure is different when a last-known policy exists: retaining
 // that stale value preserves enforcement and availability at the same time.
 func TestWarmGroupLimitsCacheReadFailureServesLastKnownPolicy(t *testing.T) {
-	db, err := openTestDB(t)
+	db, err := openIsolatedTestDB(t)
 	if err != nil {
 		t.Skipf("no test DB: %v", err)
 	}
@@ -214,7 +214,7 @@ func TestWarmGroupLimitsCacheReadFailureServesLastKnownPolicy(t *testing.T) {
 // A user whose group was deleted must keep working, resolving to unlimited
 // rather than erroring or holding a stale cap.
 func TestLimitsSurviveGroupDeletion(t *testing.T) {
-	db, err := openTestDB(t)
+	db, err := openIsolatedTestDB(t)
 	if err != nil {
 		t.Skipf("no test DB: %v", err)
 	}
@@ -252,7 +252,7 @@ func TestLimitsSurviveGroupDeletion(t *testing.T) {
 //
 // userFromDomain reads u.Limits and never the resolved fields. This pins it.
 func TestSaveDoesNotPinAnInheritingUser(t *testing.T) {
-	db, err := openTestDB(t)
+	db, err := openIsolatedTestDB(t)
 	if err != nil {
 		t.Skipf("no test DB: %v", err)
 	}

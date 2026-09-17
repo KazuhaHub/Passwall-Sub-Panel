@@ -20,7 +20,7 @@ func TestNodeAgentIssueRepoDeduplicatesPreservesReviewAndFilters(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := EnsureSchema(db); err != nil {
+	if err := ensureTestSchema(db); err != nil {
 		t.Fatal(err)
 	}
 	repo := NewRepos(db).NodeAgentIssue
@@ -85,7 +85,7 @@ func TestNodeAgentIssueServerLabelsAreBatchProjectedNativeMetadata(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := EnsureSchema(db); err != nil {
+	if err := ensureTestSchema(db); err != nil {
 		t.Fatal(err)
 	}
 	// Deliberately unreadable ciphertext proves that issue labels never go through
@@ -126,7 +126,7 @@ func TestNodeAgentIssueKeywordMatchesNativeServerAndLiteralRawFields(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := EnsureSchema(db); err != nil {
+	if err := ensureTestSchema(db); err != nil {
 		t.Fatal(err)
 	}
 	panels := []xuiPanelRow{
@@ -194,7 +194,7 @@ func TestNodeAgentIssueViewsFilterBeforeCountAndPaginationWithoutChangingReports
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := EnsureSchema(db); err != nil {
+	if err := ensureTestSchema(db); err != nil {
 		t.Fatal(err)
 	}
 	panels := []xuiPanelRow{

@@ -20,7 +20,7 @@ func TestSeparatorRepoCreate_RepeatsForReportedBug(t *testing.T) {
 	// still open — t.TempDir's auto-cleanup would otherwise fail.
 	sqlDB, _ := db.DB()
 	t.Cleanup(func() { _ = sqlDB.Close() })
-	if err := EnsureSchema(db); err != nil {
+	if err := ensureTestSchema(db); err != nil {
 		t.Fatalf("schema: %v", err)
 	}
 	repo := &separatorRepo{db: db}

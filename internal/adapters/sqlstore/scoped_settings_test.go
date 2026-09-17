@@ -19,7 +19,7 @@ func newScopedTestRepos(t *testing.T) (ports.SettingsRepo, *kvScopeSettingsRepo,
 			_ = sqlDB.Close()
 		}
 	})
-	if err := EnsureSchema(db); err != nil {
+	if err := ensureTestSchema(db); err != nil {
 		t.Fatalf("schema: %v", err)
 	}
 	global := newKVSettingsRepo(db)

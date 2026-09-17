@@ -18,7 +18,7 @@ type legacyPSPClientInboundRow struct {
 func (legacyPSPClientInboundRow) TableName() string { return "psp_client_inbounds" }
 
 func TestEnsureSchemaMigratesProvisionedBoolToFourState(t *testing.T) {
-	db, err := openTestDB(t)
+	db, err := openIsolatedTestDB(t)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -37,7 +37,7 @@ func newUPNTestDB(t *testing.T) (*gorm.DB, func() []string) {
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
-	if err := EnsureSchema(db); err != nil {
+	if err := ensureTestSchema(db); err != nil {
 		t.Fatalf("schema: %v", err)
 	}
 	return db, func() []string {

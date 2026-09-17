@@ -22,7 +22,7 @@ func TestAuditRepoSearch(t *testing.T) {
 			_ = sqlDB.Close()
 		}
 	})
-	if err := EnsureSchema(db); err != nil {
+	if err := ensureTestSchema(db); err != nil {
 		t.Fatalf("schema: %v", err)
 	}
 	repo := &auditRepo{db: db}
@@ -82,7 +82,7 @@ func TestAuditRepoSearchEscapesLikeMeta(t *testing.T) {
 			_ = sqlDB.Close()
 		}
 	})
-	if err := EnsureSchema(db); err != nil {
+	if err := ensureTestSchema(db); err != nil {
 		t.Fatalf("schema: %v", err)
 	}
 	repo := &auditRepo{db: db}

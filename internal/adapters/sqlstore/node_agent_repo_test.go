@@ -21,7 +21,7 @@ func TestNodeAgentCreateMintsAllStreamsAndStoresOnlyDigest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := EnsureSchema(db); err != nil {
+	if err := ensureTestSchema(db); err != nil {
 		t.Fatal(err)
 	}
 	repo := NewRepos(db).NodeAgent
@@ -69,7 +69,7 @@ func TestNodeAgentCredentialLookupUsesDigestAndDigestIsUnique(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := EnsureSchema(db); err != nil {
+	if err := ensureTestSchema(db); err != nil {
 		t.Fatal(err)
 	}
 	repo := NewRepos(db).NodeAgent
@@ -94,7 +94,7 @@ func TestNodeAgentCoreSelectionUsesColumnScopedUpdate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := EnsureSchema(db); err != nil {
+	if err := ensureTestSchema(db); err != nil {
 		t.Fatal(err)
 	}
 	ctx := context.Background()
@@ -142,7 +142,7 @@ func TestNodeAgentProtocolObservationIsCanonicalAndColumnScoped(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := EnsureSchema(db); err != nil {
+	if err := ensureTestSchema(db); err != nil {
 		t.Fatal(err)
 	}
 	ctx := context.Background()
@@ -195,7 +195,7 @@ func TestNodeAgentMintStreamIsContentIdempotentAndConvergesByETag(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := EnsureSchema(db); err != nil {
+	if err := ensureTestSchema(db); err != nil {
 		t.Fatal(err)
 	}
 	ctx := context.Background()
@@ -258,7 +258,7 @@ func TestNodeAgentRejectsPlaintextCredential(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := EnsureSchema(db); err != nil {
+	if err := ensureTestSchema(db); err != nil {
 		t.Fatal(err)
 	}
 	err = NewRepos(db).NodeAgent.Create(context.Background(), &domain.NodeAgent{
@@ -274,7 +274,7 @@ func TestNodeAgentRecordAppliedRejectsStatePSPNeverMinted(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := EnsureSchema(db); err != nil {
+	if err := ensureTestSchema(db); err != nil {
 		t.Fatal(err)
 	}
 	ctx := context.Background()

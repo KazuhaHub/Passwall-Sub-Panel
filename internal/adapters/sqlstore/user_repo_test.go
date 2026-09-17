@@ -14,7 +14,7 @@ func TestCreateUsersWithUPN(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
-	if err := EnsureSchema(db); err != nil {
+	if err := ensureTestSchema(db); err != nil {
 		t.Fatalf("schema: %v", err)
 	}
 	sqlDB, err := db.DB()
@@ -69,7 +69,7 @@ func TestUpdateTrafficStatePreservesEmergency(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
-	if err := EnsureSchema(db); err != nil {
+	if err := ensureTestSchema(db); err != nil {
 		t.Fatalf("schema: %v", err)
 	}
 	t.Cleanup(func() {
@@ -133,7 +133,7 @@ func TestUpdateTrafficStatePreservesEmergency(t *testing.T) {
 func timeNowUTCPlusHour() time.Time { return time.Now().UTC().Add(time.Hour) }
 
 func TestEnsureSchemaDoesNotMigrateLegacyDisabledUsers(t *testing.T) {
-	db, err := openTestDB(t)
+	db, err := openIsolatedTestDB(t)
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
@@ -191,7 +191,7 @@ func TestUpdateServiceStateDoesNotTouchAccountState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
-	if err := EnsureSchema(db); err != nil {
+	if err := ensureTestSchema(db); err != nil {
 		t.Fatalf("schema: %v", err)
 	}
 	t.Cleanup(func() {
@@ -268,7 +268,7 @@ func TestBatchUpdateTrafficState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
-	if err := EnsureSchema(db); err != nil {
+	if err := ensureTestSchema(db); err != nil {
 		t.Fatalf("schema: %v", err)
 	}
 	t.Cleanup(func() {
@@ -375,7 +375,7 @@ func TestListSearchIsCaseInsensitive(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
-	if err := EnsureSchema(db); err != nil {
+	if err := ensureTestSchema(db); err != nil {
 		t.Fatalf("schema: %v", err)
 	}
 	sqlDB, _ := db.DB()

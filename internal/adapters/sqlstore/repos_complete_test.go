@@ -22,7 +22,7 @@ func TestNewReposPopulatesEveryDBRepo(t *testing.T) {
 			_ = s.Close()
 		}
 	})
-	if err := EnsureSchema(db); err != nil {
+	if err := ensureTestSchema(db); err != nil {
 		t.Fatalf("schema: %v", err)
 	}
 

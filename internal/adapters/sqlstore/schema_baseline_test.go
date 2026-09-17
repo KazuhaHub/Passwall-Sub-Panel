@@ -154,7 +154,7 @@ func seedV3BaselineWithSeparator(t *testing.T, db *gorm.DB, separator any) {
 }
 
 func TestV4BaselineDoesNotReinterpretHistoricalLimitsIdentityAndDisableState(t *testing.T) {
-	db, err := openTestDB(t)
+	db, err := openIsolatedTestDB(t)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -310,7 +310,7 @@ func refuseBaselineWithoutWrites(t *testing.T, db *gorm.DB) {
 func TestV4BaselineRefusesMissingCoreTablesAndMarkerWithoutWrites(t *testing.T) {
 	for _, table := range []string{"schema_migrations", "users", "groups_", "xui_panels", "nodes", "psp_clients", "psp_client_inbounds", "nodes_separator"} {
 		t.Run(table, func(t *testing.T) {
-			db, err := openTestDB(t)
+			db, err := openIsolatedTestDB(t)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -322,7 +322,7 @@ func TestV4BaselineRefusesMissingCoreTablesAndMarkerWithoutWrites(t *testing.T) 
 		})
 	}
 	t.Run("limits-marker", func(t *testing.T) {
-		db, err := openTestDB(t)
+		db, err := openIsolatedTestDB(t)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -355,7 +355,7 @@ func TestV4BaselineRefusesNonNullableLimitsWithoutWrites(t *testing.T) {
 	}{{"users", &nonNullableBaselineUserLimits{}}, {"groups_", &nonNullableBaselineGroupLimits{}}} {
 		for _, field := range []string{"TrafficLimitBytes", "IPLimit", "DeviceLimit"} {
 			t.Run(table.name+"/"+field, func(t *testing.T) {
-				db, err := openTestDB(t)
+				db, err := openIsolatedTestDB(t)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -377,7 +377,7 @@ func TestV4BaselineRefusesMissingCoreColumnsAndContradictoryEndpointOrAttachment
 		{"nodes", "port"}, {"nodes", "protocol"}, {"psp_client_inbounds", "provisioned"},
 	} {
 		t.Run(test.table+"/"+test.column, func(t *testing.T) {
-			db, err := openTestDB(t)
+			db, err := openIsolatedTestDB(t)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -394,7 +394,7 @@ func TestV4BaselineRefusesMissingCoreColumnsAndContradictoryEndpointOrAttachment
 }
 
 func TestV4BaselineRefusesUnfinishedSeparatorRowsWithoutWrites(t *testing.T) {
-	db, err := openTestDB(t)
+	db, err := openIsolatedTestDB(t)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -408,7 +408,7 @@ func TestV4BaselineRefusesUnfinishedSeparatorRowsWithoutWrites(t *testing.T) {
 }
 
 func TestV4FreshSchemaDoesNotInventHistoricalLimitsMigration(t *testing.T) {
-	db, err := openTestDB(t)
+	db, err := openIsolatedTestDB(t)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -437,7 +437,7 @@ func TestV4FreshSchemaDoesNotInventHistoricalLimitsMigration(t *testing.T) {
 }
 
 func TestV4InterruptedEmptyInitializationCanResume(t *testing.T) {
-	db, err := openTestDB(t)
+	db, err := openIsolatedTestDB(t)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -463,7 +463,7 @@ func TestV4InterruptedEmptyInitializationCanResume(t *testing.T) {
 }
 
 func TestV4EarliestEmptySchemaMigrationsDDLInterruptionCanResume(t *testing.T) {
-	db, err := openTestDB(t)
+	db, err := openIsolatedTestDB(t)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -498,7 +498,7 @@ func TestV4CompletedMigrationMarkerWithMissingTargetColumnRefusesBeforeDDLOrWrit
 		{"psp_client_inbounds", "applied_password", "psp_client_inbound_applied_credentials_v1", &v400Beta1AttachmentRow{}},
 	} {
 		t.Run(test.table+"/"+test.column, func(t *testing.T) {
-			db, err := openTestDB(t)
+			db, err := openIsolatedTestDB(t)
 			if err != nil {
 				t.Fatal(err)
 			}

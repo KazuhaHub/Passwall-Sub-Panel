@@ -14,7 +14,7 @@ func TestAuthEventRepo(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
-	if err := EnsureSchema(db); err != nil {
+	if err := ensureTestSchema(db); err != nil {
 		t.Fatalf("schema: %v", err)
 	}
 	// Close the SQLite handle before t.TempDir cleanup, else Windows can't
@@ -96,7 +96,7 @@ func TestAuthEventRecentFailures(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
-	if err := EnsureSchema(db); err != nil {
+	if err := ensureTestSchema(db); err != nil {
 		t.Fatalf("schema: %v", err)
 	}
 	t.Cleanup(func() {
@@ -175,7 +175,7 @@ func TestAuthEventCountByReasonSince(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
-	if err := EnsureSchema(db); err != nil {
+	if err := ensureTestSchema(db); err != nil {
 		t.Fatalf("schema: %v", err)
 	}
 	t.Cleanup(func() {

@@ -21,7 +21,7 @@ func newCertReposTest(t *testing.T) (ports.Repos, *gorm.DB, context.Context) {
 	}
 	sqlDB, _ := db.DB()
 	t.Cleanup(func() { _ = sqlDB.Close() })
-	if err := EnsureSchema(db); err != nil {
+	if err := ensureTestSchema(db); err != nil {
 		t.Fatalf("schema: %v", err)
 	}
 	return NewRepos(db), db, context.Background()

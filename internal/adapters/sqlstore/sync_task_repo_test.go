@@ -23,7 +23,7 @@ func TestSyncTaskMarkRunningReportsClaim(t *testing.T) {
 			_ = sqlDB.Close()
 		}
 	})
-	if err := EnsureSchema(db); err != nil {
+	if err := ensureTestSchema(db); err != nil {
 		t.Fatalf("schema: %v", err)
 	}
 	repo := &syncTaskRepo{db: db}

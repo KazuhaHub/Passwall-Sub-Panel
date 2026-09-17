@@ -30,7 +30,7 @@ type legacyPSPClientIdentityRow struct {
 func (legacyPSPClientIdentityRow) TableName() string { return "psp_clients" }
 
 func TestEnsureSchemaMigratesPSPClientIdentityWithoutLosingBaselines(t *testing.T) {
-	db, err := openTestDB(t)
+	db, err := openIsolatedTestDB(t)
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}

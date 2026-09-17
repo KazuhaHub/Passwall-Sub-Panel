@@ -17,7 +17,7 @@ func retiredSyncTaskTestRepo(t *testing.T) *syncTaskRepo {
 	if err != nil {
 		t.Fatalf("open test database: %v", err)
 	}
-	if err := EnsureSchema(db); err != nil {
+	if err := ensureTestSchema(db); err != nil {
 		t.Fatalf("ensure schema: %v", err)
 	}
 	return &syncTaskRepo{db: db}

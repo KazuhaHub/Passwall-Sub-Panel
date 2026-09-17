@@ -15,7 +15,7 @@ func TestUserAccountAccessCountsAndFiltersLegacyServiceRowsAsActive(t *testing.T
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
-	if err := EnsureSchema(db); err != nil {
+	if err := ensureTestSchema(db); err != nil {
 		t.Fatalf("schema: %v", err)
 	}
 	if sqlDB, err := db.DB(); err == nil {

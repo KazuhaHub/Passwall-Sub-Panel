@@ -109,7 +109,7 @@ type v392Beta20AttachmentRow struct {
 func (v392Beta20AttachmentRow) TableName() string { return "psp_client_inbounds" }
 
 func TestV392Beta20SchemaUpgradePreservesNodeAndClientData(t *testing.T) {
-	db, err := openTestDB(t)
+	db, err := openIsolatedTestDB(t)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -421,7 +421,7 @@ type v30RC3SeparatorRow struct {
 func (v30RC3SeparatorRow) TableName() string { return "nodes_separator" }
 
 func TestV4BaselineRefusesLegacySeparatorWithoutChangingPrimaryKeyOrOperatorObjects(t *testing.T) {
-	db, err := openTestDB(t)
+	db, err := openIsolatedTestDB(t)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -477,7 +477,7 @@ func TestSQLiteLegacyCleanupRefusesOperatorIndexOnRetiredColumn(t *testing.T) {
 		{"psp_client_inbounds", "provisioned", &v392Beta20AttachmentRow{ClientID: 1, NodeID: 2, Provisioned: true}},
 	} {
 		t.Run(tc.table+"/"+tc.column, func(t *testing.T) {
-			db, err := openTestDB(t)
+			db, err := openIsolatedTestDB(t)
 			if err != nil {
 				t.Fatal(err)
 			}

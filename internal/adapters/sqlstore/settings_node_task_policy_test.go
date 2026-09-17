@@ -29,7 +29,7 @@ func nodeTaskPolicyTestDB(t *testing.T) *gorm.DB {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := EnsureSchema(db); err != nil {
+	if err := ensureTestSchema(db); err != nil {
 		t.Fatal(err)
 	}
 	return db

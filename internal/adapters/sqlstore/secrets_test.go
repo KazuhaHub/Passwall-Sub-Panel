@@ -16,7 +16,7 @@ func TestXUIPanelSecretsEncryptedAtRest(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
-	if err := EnsureSchema(db); err != nil {
+	if err := ensureTestSchema(db); err != nil {
 		t.Fatalf("schema: %v", err)
 	}
 	sqlDB, err := db.DB()
@@ -72,7 +72,7 @@ func TestXUIPanelAuthFieldsRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
-	if err := EnsureSchema(db); err != nil {
+	if err := ensureTestSchema(db); err != nil {
 		t.Fatalf("schema: %v", err)
 	}
 	sqlDB, _ := db.DB()
@@ -216,7 +216,7 @@ func TestCountPlaintextEncryptedSettings(t *testing.T) {
 		t.Fatalf("open sqlite: %v", err)
 	}
 	t.Cleanup(func() { closeGormDB(db) })
-	if err := EnsureSchema(db); err != nil {
+	if err := ensureTestSchema(db); err != nil {
 		t.Fatalf("schema: %v", err)
 	}
 	rows := []settingRow{

@@ -92,7 +92,7 @@ func TestNodeAgentTaskSchemaRejectsInvalidStatusAndNullArgs(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := EnsureSchema(db); err != nil {
+			if err := ensureTestSchema(db); err != nil {
 				t.Fatal(err)
 			}
 			repos := NewRepos(db)
@@ -786,7 +786,7 @@ func newTaskTestRepos(t *testing.T) ports.Repos {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := EnsureSchema(db); err != nil {
+	if err := ensureTestSchema(db); err != nil {
 		t.Fatal(err)
 	}
 	return NewRepos(db)
@@ -798,7 +798,7 @@ func newTaskTestReposWithQuota(t *testing.T, quota nodeAgentTaskQuota) (ports.Re
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := EnsureSchema(db); err != nil {
+	if err := ensureTestSchema(db); err != nil {
 		t.Fatal(err)
 	}
 	repos := NewRepos(db)
