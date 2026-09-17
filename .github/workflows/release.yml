@@ -59,7 +59,7 @@ jobs:
           fetch-depth: 0
 
       - name: Set up Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         env:
           GOTOOLCHAIN: auto
         with:
@@ -165,7 +165,7 @@ jobs:
           path: .compat/passwall-node
           persist-credentials: false
       - name: Set up Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         env:
           GOTOOLCHAIN: auto
         with:
@@ -249,7 +249,7 @@ jobs:
           ref: ${{ github.sha }}
 
       - name: Set up Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         # Allow toolchain selection; setup-go exports local after installation.
         env:
           GOTOOLCHAIN: auto
