@@ -145,7 +145,7 @@ export interface NativeInstallationFiles {
   method: 'docker' | 'manual'
   os: NativeInstallOS
   arch?: NativeInstallArch
-  files: { name: string; content: string; sensitive?: boolean }[]
+  files: { name: string; destination?: string; content: string; sensitive?: boolean }[]
   downloads?: { name: string; url: string }[]
   steps: { id?: string; title: string; commands?: string[]; description?: string }[]
 }

@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "panel_major": 4,
-  "updated_at": "2026-09-16",
+  "updated_at": "2026-09-17",
   "wire": {
     "endpoint": "/v1/node/sync",
     "min_protocol_version": 1,
@@ -60,6 +60,13 @@
     },
     {
       "version": "v0.0.1-beta7",
+      "protocol_version": 1,
+      "base_sync": "supported",
+      "remote_upgrade": "conditional",
+      "upgrade_methods": ["linux-systemd", "managed-docker"]
+    },
+    {
+      "version": "v0.0.1-beta8",
       "protocol_version": 1,
       "base_sync": "supported",
       "remote_upgrade": "conditional",

@@ -2212,7 +2212,7 @@
       "copy_file": "复制 {{name}}",
       "command_label": "步骤 {{number}}：{{title}}",
       "copy_step": "复制此步骤命令",
-      "downloads_hint": "将所有文件保存到目标服务器的同一个私有目录。凭据文件在 Linux / macOS 使用 0600 权限，Windows 限制为运行账号可读取；不要分享、上传日志或提交到 Git。",
+      "downloads_hint": "请按面板显示的目标位置保存各文件。Docker 的 compose.yaml 放在项目根目录，node-credential.txt 放入 ./config，./data 是可写持久化目录。凭据文件在 Linux / macOS 使用 0600 权限，Windows 限制为运行账号可读取；不要分享、上传日志或提交到 Git。",
       "manual_platform_hint": "手动 / 离线方式支持 Linux / macOS / Windows 的 amd64 / arm64，均以前台命令运行，不安装 systemd。先在可联网的管理设备下载准确发行档与 SHA256SUMS.txt，连同两个身份文件传到目标机，再完全离线校验并运行。保留原身份与数据，不要同时运行多个实例。",
       "step_title": {
         "download_verify": "核验已传入的发行文件",
@@ -2225,13 +2225,13 @@
       },
       "step_description": {
         "docker": {
-          "prepare": "使用 Linux Docker Engine 与标准 Compose。新建私有项目目录，在校验或部署前将 compose.yaml、node-credential 按原文件名放在同一目录。凭据保持只读，数据必须可写；NAS 上建议保留生成的命名数据卷，除非你明确配置了绑定目录及匹配的 PUID/PGID。重装或更新须保留同一项目及数据卷。",
-          "credential": "通过私有渠道传输文件，并限制读取权限。不要将凭据放进命令参数、环境变量、命令追踪、shell 历史或共享日志。检查 Compose 版本并验证配置，任何命令失败都先停止。",
+          "prepare": "使用 Linux Docker Engine 与标准 Compose。新建包含 ./config 和 ./data 的私有项目目录；compose.yaml 放在项目根目录，node-credential.txt 必须保存为 ./config/node-credential.txt 后再校验或部署。Compose 对 config 只读、对 data 可写。重装或更新须保留整个项目目录。",
+          "credential": "通过私有渠道传输 node-credential.txt，放入 ./config 并限制读取权限。生成的校验会在 Compose 启动前拒绝符号链接、目录或缺失的凭据路径。不要将凭据放进命令参数、环境变量、命令追踪、shell 历史或共享日志。",
           "start": "启动生成的 Agent 服务。若已开启高级远程升级选项，还会启动无网络的隔离 updater，并且只有它会挂载等同 root 权限的 Docker socket。动态监听使用 host 网络。不要把 socket 挂进 Agent，也不要使用特权容器。",
-          "check": "核对生成的服务、程序版本和 Passwall Sub Panel 中的 Agent 状态，再单独配置节点；心跳不代表代理内核已运行。启用 updater 时，它只接受官方精确版本，替换容器未完成同步与配置收敛时会恢复保留的旧容器。备份私有目录与数据卷，更新时不要运行 docker compose down --volumes。"
+          "check": "核对生成的服务、程序版本和 Passwall Sub Panel 中的 Agent 状态，再单独配置节点；心跳不代表代理内核已运行。启用 updater 时，它只接受官方精确版本，替换容器未完成同步与配置收敛时会恢复保留的旧容器。备份整个项目目录，尤其是 config 与 data。"
         },
         "manual": {
-          "prepare": "在可联网的管理设备下载页面列出的两个准确公开发行文件，再通过可信渠道把它们与 node-credential、node-config.json 一并传到目标机。目标机只需本地解压与校验工具，不需要访问 GitHub；不要覆盖已有安装或数据目录。",
+          "prepare": "在可联网的管理设备下载页面列出的两个准确公开发行文件，再通过可信渠道把它们与 node-credential.txt、node-config.json 一并传到目标机。目标机只需本地解压与校验工具，不需要访问 GitHub；不要覆盖已有安装或数据目录。",
           "download_verify": "使用恰好一条匹配记录核验已经传入的发行档；命令不会访问网络。校验和验证相对于同一受信发行方的完整性，不是独立数字签名；失败时立即停止。",
           "extract": "只读取所选发行档中的准确程序文件、LICENSE 和 NOTICE，且必须是普通文件。Windows 需要 PowerShell 5.1＋.NET Framework 4.7.2 或更高版本，或 PowerShell 7，以检查 ZIP 条目属性；缺少该能力时停止，不跳过安全检查。不要解压任意路径、链接或文件所有权到系统目录；目标文件已经存在时停止并人工检查。",
           "credential": "node-config.json 只是非敏感安装参数记录，不是供 daemon 通过 --config 加载的配置。不要将凭据放进命令参数、环境变量、命令追踪、shell 历史或日志。持久化 data 目录保存身份、SQLite 计数、已下载内核及已确认运行状态；手动更新前一起备份匹配的凭据、安装记录和数据。",
@@ -2241,7 +2241,7 @@
       "method_steps": {
         "linux": "1. 保存服务器并生成固定版本的私有安装脚本。\n2. 将脚本传到目标 Linux 服务器，以 root 权限执行提供的命令。\n3. 确认服务与心跳后，前往节点页面单独配置 inbound。",
         "github": "1. 在目标 Linux/systemd 主机执行默认公开命令；除非这台服务器已保存为 Beta 频道，否则使用稳定版。\n2. 按提示输入这里显示的同步地址、Agent ID 与凭据。\n3. 需要稍后配置时才使用“仅安装”命令，之后运行 sudo pn connect 完成对接。",
-        "docker": "1. 保存服务器并生成专属 Compose 与私有凭据文件。\n2. 将两个文件放入同一私有项目目录并启动 Agent；仅在需要远程升级时从“高级”启用 updater。\n3. 保留项目及数据卷，确认生成的服务与心跳后单独配置 inbound。",
+        "docker": "1. 保存服务器并生成 compose.yaml 与 node-credential.txt。\n2. compose.yaml 放项目根目录，node-credential.txt 放进 ./config，并保留生成的 ./data；仅在需要远程升级时从“高级”启用 updater。\n3. 保留整个项目目录，确认生成的服务与心跳后单独配置 inbound。",
         "manual": "1. 选择目标系统、架构和已审核的准确版本，再生成全部专属文件。\n2. 在可联网设备下载列出的两个公开发行文件，把四个文件一起传到目标机。\n3. 按“高级”中的离线核验与前台运行步骤操作；目标机不需要访问 GitHub。"
       },
       "agent_id": "Agent ID",
@@ -2322,7 +2322,7 @@
       "credential_file_command": "已有安装的私有凭据文件替换命令",
       "copy_file_command": "复制文件替换命令",
       "http_warning": "当前同步地址使用明文 HTTP，凭据可能被监听。仅用于受信测试网络；生产环境请先配置公开可达的 HTTPS 同步地址。",
-      "docker_hint": "Docker 方式要求 Linux Docker Engine、标准 Compose 与 host 网络。生成的凭据挂载保持只读是正确的；命名数据卷可写，并能避开常见 NAS 绑定目录权限问题。Agent 日志带结构化时间，Docker 默认轮转 3 个 10 MiB 日志文件。远程升级默认关闭，只在受信主机启用。",
+      "docker_hint": "Docker 方式要求 Linux Docker Engine、标准 Compose 与 host 网络。生成的宿主机挂载全部使用明确目录：./config 只读、./data 可写；启用 updater 时另用 ./upgrades。Agent 启动时会先修复 data 所有权，再降权运行；日志带结构化时间，Docker 默认轮转 3 个 10 MiB 日志文件。远程升级默认关闭，只在受信主机启用。",
       "docker_docs": "查看 Linux Compose 示例",
       "status_title": "Passwall Node 状态",
       "status_failed": "无法读取运行状态。",

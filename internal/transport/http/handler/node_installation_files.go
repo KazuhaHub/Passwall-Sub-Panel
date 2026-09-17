@@ -37,9 +37,10 @@ func (r *nodeInstallationFilesRequest) normalize() bool {
 }
 
 type nodeInstallationFile struct {
-	Name      string `json:"name"`
-	Content   string `json:"content"`
-	Sensitive bool   `json:"sensitive,omitempty"`
+	Name        string `json:"name"`
+	Destination string `json:"destination,omitempty"`
+	Content     string `json:"content"`
+	Sensitive   bool   `json:"sensitive,omitempty"`
 }
 
 type nodeInstallationStep struct {
@@ -65,8 +66,9 @@ type nodeInstallationFilesResponse struct {
 
 func renderNodeInstallationFiles(panelID int64, p nativeServerCreateResponse, r nodeInstallationFilesRequest) nodeInstallationFilesResponse {
 	result := nodeInstallationFilesResponse{Method: r.Method, OS: r.OS, Arch: r.Arch}
-	credential := nodeInstallationFile{Name: "node-credential", Content: p.Credential + "\n", Sensitive: true}
+	credential := nodeInstallationFile{Name: "node-credential.txt", Content: p.Credential + "\n", Sensitive: true}
 	if r.Method == "docker" {
+		credential.Destination = "config/node-credential.txt"
 		// Keep the default file within the conservative Compose subset understood by
 		// NAS project editors as well as Docker Compose itself. Endpoint and agent ID
 		// are not secrets; the long-lived credential remains a read-only host file.
@@ -92,15 +94,16 @@ func renderNodeInstallationFiles(panelID int64, p nativeServerCreateResponse, r 
       PSP_NODE_AGENT_ID: %s
       PSP_NODE_ALLOW_INSECURE_HTTP: "false"
       PSP_NODE_DOCKER_REMOTE_UPGRADE: %q
+      PSP_NODE_CREDENTIAL_FILE: /run/secrets/passwall-node/node-credential.txt
     volumes:
-      - ./node-credential:/run/secrets/node_credential:ro
-      - passwall-node-data:/var/lib/passwall-node
+      - ./config:/run/secrets/passwall-node:ro
+      - ./data:/var/lib/passwall-node
     stop_grace_period: 30s
 `, agentContainer, r.Version, platformLine, composeYAMLString(p.Endpoint), composeYAMLString(p.AgentID), fmt.Sprint(r.DockerRemoteUpgrade))
 		if r.DockerRemoteUpgrade {
 			updaterContainer := fmt.Sprintf("passwall-node-server-%d-updater", panelID)
 			compose = strings.Replace(compose, "    network_mode: host\n", "    depends_on:\n      - passwall-node-updater\n    network_mode: host\n", 1)
-			compose = strings.Replace(compose, "      - passwall-node-data:/var/lib/passwall-node\n", "      - passwall-node-data:/var/lib/passwall-node\n      - passwall-node-upgrades:/run/passwall-node-upgrades\n", 1)
+			compose = strings.Replace(compose, "      - ./data:/var/lib/passwall-node\n", "      - ./data:/var/lib/passwall-node\n      - ./upgrades:/run/passwall-node-upgrades\n", 1)
 			compose += fmt.Sprintf(`    labels:
       io.kazuhahub.passwall-node.managed: "true"
       io.kazuhahub.passwall-node.role: agent
@@ -126,16 +129,12 @@ func renderNodeInstallationFiles(panelID int64, p nativeServerCreateResponse, r 
       # Docker socket access is root-equivalent. It belongs only to this
       # isolated updater; never mount it into the network-facing Agent.
       - /var/run/docker.sock:/var/run/docker.sock
-      - passwall-node-upgrades:/run/passwall-node-upgrades
+      - ./upgrades:/run/passwall-node-upgrades
     stop_grace_period: 15s
 `, composeYAMLString(p.AgentID), updaterContainer, r.Version, platformLine, agentContainer, composeYAMLString(p.AgentID))
 		}
-		compose += "volumes:\n  passwall-node-data:\n"
-		if r.DockerRemoteUpgrade {
-			compose += "  passwall-node-upgrades:\n"
-		}
 		result.Files = []nodeInstallationFile{
-			{Name: "compose.yaml", Content: compose},
+			{Name: "compose.yaml", Destination: "compose.yaml", Content: compose},
 			credential,
 		}
 		serviceSummary := "the Agent service"
@@ -148,11 +147,15 @@ func renderNodeInstallationFiles(panelID int64, p nativeServerCreateResponse, r 
 			checkCommand = "set -eu\ndocker compose -f compose.yaml exec -T passwall-node /usr/local/bin/passwall-node --version\ndocker compose -f compose.yaml ps passwall-node passwall-node-updater"
 			upgradeSummary = "The updater enables authenticated remote upgrades with automatic rollback; it accepts official exact releases only and never receives the node credential."
 		}
+		prepareCommand := "set -eu\numask 077\nmkdir -p ./passwall-node-install/config ./passwall-node-install/data\nchmod 0700 ./passwall-node-install ./passwall-node-install/config ./passwall-node-install/data\ncd ./passwall-node-install"
+		if r.DockerRemoteUpgrade {
+			prepareCommand = "set -eu\numask 077\nmkdir -p ./passwall-node-install/config ./passwall-node-install/data ./passwall-node-install/upgrades\nchmod 0700 ./passwall-node-install ./passwall-node-install/config ./passwall-node-install/data ./passwall-node-install/upgrades\ncd ./passwall-node-install"
+		}
 		result.Steps = []nodeInstallationStep{
-			{ID: "prepare", Title: "Prepare a private installation directory", Description: "Use Linux Docker Engine with a standard Compose implementation. Unless an architecture was explicitly selected, the multi-platform image selects the host architecture. Save compose.yaml and node-credential with their exact names in the same private project directory before validating or deploying. NAS project editors must use that directory as the project path. Keep the generated named data volume unless you deliberately configure a bind directory and matching PUID/PGID. Preserve the same project and data volume when reinstalling or updating. Stop the old machine before reusing this identity.", Commands: []string{"set -eu\numask 077\nmkdir ./passwall-node-install\nchmod 0700 ./passwall-node-install\ncd ./passwall-node-install"}},
-			{ID: "credential", Title: "Protect the credential file", Description: "Transfer the files through a private channel. The credential must exist as a regular file before Compose starts; otherwise Docker may create a directory at the bind source and the Agent will refuse it. Never put the credential in command arguments, environment variables, tracing, shell history or shared logs.", Commands: []string{"set -eu\n[ -f ./node-credential ] && [ ! -L ./node-credential ] || { printf 'node-credential must be a regular non-symlink file before Docker starts\\n' >&2; exit 1; }\nchmod 0600 ./node-credential ./compose.yaml\ndocker compose version\ndocker compose -f compose.yaml config --quiet"}},
+			{ID: "prepare", Title: "Prepare the project directories", Description: "Use Linux Docker Engine with a standard Compose implementation. Unless an architecture was explicitly selected, the multi-platform image selects the host architecture. Use this directory as the NAS project path. Save compose.yaml in its root, save node-credential.txt under config, and preserve config and data together when reinstalling or updating. Stop the old machine before reusing this identity.", Commands: []string{prepareCommand}},
+			{ID: "credential", Title: "Place and protect the credential file", Description: "Move the downloaded node-credential.txt into ./config before Compose starts. Compose mounts the complete config directory read-only and the complete data directory read-write, so Docker never interprets a missing credential filename as a directory bind source. Never put the credential in command arguments, environment variables, tracing, shell history or shared logs.", Commands: []string{"set -eu\n[ -d ./config ] && [ ! -L ./config ] || { printf './config must be a real directory\\n' >&2; exit 1; }\n[ -d ./data ] && [ ! -L ./data ] || { printf './data must be a real directory\\n' >&2; exit 1; }\n[ -f ./config/node-credential.txt ] && [ ! -L ./config/node-credential.txt ] || { printf './config/node-credential.txt must be a regular non-symlink file before Docker starts\\n' >&2; exit 1; }\nchmod 0600 ./config/node-credential.txt ./compose.yaml\ndocker compose version\ndocker compose -f compose.yaml config --quiet"}},
 			{ID: "start", Title: "Pull and start the selected container image", Description: "The default latest/beta tag follows the selected release channel; an exact version stays pinned for rollback. Start " + serviceSummary + ". Host networking is required by the Agent for PSP-managed dynamic listeners. Choose free listener ports >=1024 unless the Linux host explicitly permits non-root low ports. Do not use a privileged container or mount the Docker socket into the Agent.", Commands: []string{startCommand}},
-			{ID: "check", Title: "Verify the version and connect to PSP", Description: "Check the generated service or services, the reported version and Agent status in PSP, then configure nodes separately. Agent heartbeat alone is not proof of a running proxy core. " + upgradeSummary + " Back up this private directory and the persistent data volume; never run compose down --volumes to update.", Commands: []string{checkCommand}},
+			{ID: "check", Title: "Verify the version and connect to PSP", Description: "Check the generated service or services, the reported version and Agent status in PSP, then configure nodes separately. Agent heartbeat alone is not proof of a running proxy core. " + upgradeSummary + " Back up the complete private project directory, especially config and data, before updating or reinstalling.", Commands: []string{checkCommand}},
 		}
 		return result
 	}
@@ -233,12 +236,12 @@ chmod 0755 ./passwall-node`, nodeInstallShellQuote(packageName), nodeInstallShel
 [ "$(id -u)" -ne 0 ] || { printf 'Run the manual daemon as a non-root user\n' >&2; exit 1; }
 reported=$(./passwall-node --version)
 [ "${reported%%%% *}" = %s ] || { printf 'Binary release version mismatch\n' >&2; exit 1; }
-./passwall-node --endpoint %s --agent-id %s --credential-file "$(pwd -P)/node-credential" --data-dir "$(pwd -P)/data"`, nodeInstallShellQuote(r.Version), nodeInstallShellQuote(p.Endpoint), nodeInstallShellQuote(p.AgentID))
+./passwall-node --endpoint %s --agent-id %s --credential-file "$(pwd -P)/node-credential.txt" --data-dir "$(pwd -P)/data"`, nodeInstallShellQuote(r.Version), nodeInstallShellQuote(p.Endpoint), nodeInstallShellQuote(p.AgentID))
 	return []nodeInstallationStep{
-		{ID: "prepare", Title: "Prepare a private installation directory", Description: "On a connected administrator device, download the two exact release files listed by PSP and transfer them together with node-credential and node-config.json through a trusted channel. On the target, use a non-root account with tar, awk and the platform SHA-256 tool. Create a NEW directory and keep every file under its exact name. The target host does not need GitHub access.", Commands: []string{"set -eu\numask 077\nmkdir ./passwall-node-manual\nchmod 0700 ./passwall-node-manual\ncd ./passwall-node-manual"}},
+		{ID: "prepare", Title: "Prepare a private installation directory", Description: "On a connected administrator device, download the two exact release files listed by PSP and transfer them together with node-credential.txt and node-config.json through a trusted channel. On the target, use a non-root account with tar, awk and the platform SHA-256 tool. Create a NEW directory and keep every file under its exact name. The target host does not need GitHub access.", Commands: []string{"set -eu\numask 077\nmkdir ./passwall-node-manual\nchmod 0700 ./passwall-node-manual\ncd ./passwall-node-manual"}},
 		{ID: "download_verify", Title: "Verify the transferred release files", Description: "Require one exact checksum entry for the selected archive. SHA-256 verifies corruption against the same trusted release publisher, not an independent signature. This command performs no network access; stop if it fails.", Commands: []string{verify}},
 		{ID: "extract", Title: "Read only the required regular release members", Description: "Never extract arbitrary archive paths, links or ownership into system directories. This reads only the exact binary, LICENSE and NOTICE into the new private directory.", Commands: []string{extract}},
-		{ID: "credential", Title: "Protect the credential and state", Description: "node-config.json records the non-secret installation values; it is not a daemon configuration-file flag. Never paste the credential into commands or logs. The data directory retains identity, SQLite counters, downloaded cores and confirmed runtime state. Back up matching credential/config and data before manual updates.", Commands: []string{"set -eu\nchmod 0600 ./node-credential ./node-config.json\nmkdir ./data\nchmod 0700 ./data"}},
+		{ID: "credential", Title: "Protect the credential and state", Description: "node-config.json records the non-secret installation values; it is not a daemon configuration-file flag. Never paste the credential into commands or logs. The data directory retains identity, SQLite counters, downloaded cores and confirmed runtime state. Back up matching credential/config and data before manual updates.", Commands: []string{"set -eu\nchmod 0600 ./node-credential.txt ./node-config.json\nmkdir ./data\nchmod 0700 ./data"}},
 		{ID: "run", Title: "Verify the binary version and run in the foreground", Description: "Keep this terminal open. Configure PSP nodes separately after the Agent connects. Use free listener ports >=1024 for this unprivileged mode. This manual mode does not install systemd or the remote upgrade helper; for long-running Linux service use the separate recommended Linux/systemd installer. Stop the old machine before reusing the same credential.", Commands: []string{run}},
 	}
 }
@@ -294,9 +297,9 @@ Set-Acl -LiteralPath $directory -AclObject $acl
 Set-Location -LiteralPath $directory`}},
 		{ID: "download_verify", Title: "Verify the transferred release files", Description: "Require one exact SHA-256 entry for the selected archive and stop on any failure. This command performs no network access. Checksums trust the same release publisher, not an independent signature.", Commands: []string{verify}},
 		{ID: "extract", Title: "Read only the required regular release members", Description: "This reads only the exact binary, LICENSE and NOTICE; it does not unpack arbitrary paths or links and refuses existing destination files.", Commands: []string{extract}},
-		{ID: "credential", Title: "Protect the credential and state", Description: "Never put the credential in command arguments, environment variables, tracing or shared logs. Keep node-config.json, node-credential and the persistent data directory together in private backups before manual updates.", Commands: []string{`$ErrorActionPreference = 'Stop'
+		{ID: "credential", Title: "Protect the credential and state", Description: "Never put the credential in command arguments, environment variables, tracing or shared logs. Keep node-config.json, node-credential.txt and the persistent data directory together in private backups before manual updates.", Commands: []string{`$ErrorActionPreference = 'Stop'
 $owner = [Security.Principal.WindowsIdentity]::GetCurrent().User
-foreach ($file in @('node-credential', 'node-config.json')) {
+foreach ($file in @('node-credential.txt', 'node-config.json')) {
   $acl = [Security.AccessControl.FileSecurity]::new()
   $acl.SetOwner($owner)
   $acl.SetAccessRuleProtection($true, $false)
@@ -309,7 +312,7 @@ New-Item -ItemType Directory -Path '.\data' | Out-Null`}},
 $config = Get-Content -Raw -LiteralPath '.\node-config.json' | ConvertFrom-Json
 $reported = & '.\passwall-node.exe' --version
 if ($LASTEXITCODE -ne 0 -or (($reported -join ' ') -split '\s+')[0] -cne %s) { throw 'Binary release version mismatch' }
-$credentialPath = (Resolve-Path -LiteralPath '.\node-credential').Path
+$credentialPath = (Resolve-Path -LiteralPath '.\node-credential.txt').Path
 $dataPath = (Resolve-Path -LiteralPath '.\data').Path
 & '.\passwall-node.exe' --endpoint $config.endpoint --agent-id $config.agent_id --credential-file $credentialPath --data-dir $dataPath
 if ($LASTEXITCODE -ne 0) { throw 'Node daemon stopped with an error' }`, nodeInstallPowerShellQuote(r.Version))}},
