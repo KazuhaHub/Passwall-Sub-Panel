@@ -36,11 +36,27 @@ function literalScripts() {
   return scripts
 }
 
+// Floor for actions/setup-go and actions/setup-node. Below this the inputs this
+// guard relies on (cache: false, package-manager-cache: false) are not
+// available, so an older major is a real failure rather than a version bump.
+const MIN_SETUP_ACTION_MAJOR = 6
+
 function assertPublisherCachesDisabled(raw) {
   assert(!raw.includes('actions/cache@'), 'publisher must not use a shared cache action')
   assert(!/^\s*cache-(?:from|to):/m.test(raw), 'publisher must not import/export a shared container build cache')
-  const setups = [...raw.matchAll(/^        uses: actions\/setup-(go|node)@v6$/gm)]
+  // The major is matched, not pinned: pinning it meant every Dependabot bump of
+  // setup-go/setup-node silently shrank what this guard inspected -- and once
+  // BOTH were bumped, matched nothing and failed outright. What the guard is
+  // actually for is that each setup disables its shared cache, so it accepts
+  // any major at or above the floor and still refuses the ones below it.
+  const setups = [...raw.matchAll(/^        uses: actions\/setup-(go|node)@v(\d+)$/gm)]
   assert(setups.length > 0, 'require publisher setup actions')
+  for (const setup of setups) {
+    assert(
+      Number(setup[2]) >= MIN_SETUP_ACTION_MAJOR,
+      `publisher setup-${setup[1]} must be at least v${MIN_SETUP_ACTION_MAJOR}, found v${setup[2]}`,
+    )
+  }
   for (const setup of setups) {
     // Inspect only this action's input block, never a following setup's flags.
     const block = raw.slice(setup.index + setup[0].length).split(/\n      - |\n  [a-z][a-z-]*:\n/, 1)[0]

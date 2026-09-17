@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -104,9 +105,9 @@ func validateBuildBaselineWorkflow(raw string) error {
 				continue
 			}
 			setups++
-			if step.Uses != "actions/setup-go@v6" || step.Env["GOTOOLCHAIN"] != "auto" ||
+			if !setupGoMajorAtLeast(step.Uses, minSetupGoMajor) || step.Env["GOTOOLCHAIN"] != "auto" ||
 				step.With["go-version-file"] != "go.mod" || step.With["go-version"] != "" || step.If != "" {
-				return fmt.Errorf("job %s setup-go must unconditionally select go.mod's preferred toolchain using v6 and action-local auto", name)
+				return fmt.Errorf("job %s setup-go must unconditionally select go.mod's preferred toolchain using v%d or newer and action-local auto", name, minSetupGoMajor)
 			}
 			if index+1 >= len(job.Steps) {
 				return fmt.Errorf("job %s has no actual compiler verification after setup-go", name)
@@ -121,6 +122,24 @@ func validateBuildBaselineWorkflow(raw string) error {
 		return fmt.Errorf("build workflow has no pinned Go setup")
 	}
 	return nil
+}
+
+// minSetupGoMajor is the oldest actions/setup-go this guard accepts. Below it
+// the action-local GOTOOLCHAIN handling this test depends on is not available,
+// so an older major is a real failure. Newer majors are fine: pinning the
+// version exactly meant every routine bump of the action failed a test that is
+// really about the toolchain selection beside it.
+const minSetupGoMajor = 6
+
+var setupGoRef = regexp.MustCompile(`^actions/setup-go@v(\d+)$`)
+
+func setupGoMajorAtLeast(uses string, min int) bool {
+	m := setupGoRef.FindStringSubmatch(uses)
+	if m == nil {
+		return false
+	}
+	major, err := strconv.Atoi(m[1])
+	return err == nil && major >= min
 }
 
 func hasBuildBaselineCompilerGate(run string) bool {

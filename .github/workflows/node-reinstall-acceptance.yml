@@ -43,7 +43,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: actions/setup-go@v6
         with:
           go-version: '1.26.8'
@@ -72,7 +72,7 @@ jobs:
           ! grep -q -- '--- SKIP:' "$RUNNER_TEMP/node-reinstall-acceptance.log"
       - name: Retain bounded acceptance evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: node-reinstall-systemd-evidence
           path: ${{ runner.temp }}/node-reinstall-acceptance.log
