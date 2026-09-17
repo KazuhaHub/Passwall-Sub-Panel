@@ -36,7 +36,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: actions/setup-go@v6
         env:
           GOTOOLCHAIN: auto
@@ -90,7 +90,7 @@ jobs:
     env:
       GOWORK: "off"
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: actions/setup-go@v6
         # Allow toolchain selection; setup-go exports local after installation.
         env:
@@ -138,7 +138,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: actions/setup-go@v6
         # Allow toolchain selection; setup-go exports local after installation.
         env:
@@ -183,7 +183,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Set up Node.js
         uses: actions/setup-node@v6
         with:
@@ -225,7 +225,7 @@ jobs:
           - { goos: windows, goarch: amd64 }
           - { goos: windows, goarch: arm64 }
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: actions/setup-go@v6
         # Allow toolchain selection; setup-go exports local after installation.
         env:
@@ -273,7 +273,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: actions/setup-go@v6
         # Allow toolchain selection; setup-go exports local after installation.
         env:
@@ -297,7 +297,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: actions/setup-go@v6
         # Allow toolchain selection; setup-go exports local after installation.
         env:
@@ -348,7 +348,7 @@ jobs:
       PSP_TEST_DB_DSN: postgres://psp:psp@localhost:5432/psptest?sslmode=disable
       PSP_TEST_DB_REUSE_SCHEMA: "true"
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: actions/setup-go@v6
         # Allow toolchain selection; setup-go exports local after installation.
         env:
@@ -397,7 +397,7 @@ jobs:
       PSP_TEST_DB_DSN: root:psp@tcp(127.0.0.1:3306)/{schema}?parseTime=true&multiStatements=true
       PSP_TEST_DB_REUSE_SCHEMA: "true"
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: actions/setup-go@v6
         # Allow toolchain selection; setup-go exports local after installation.
         env:
