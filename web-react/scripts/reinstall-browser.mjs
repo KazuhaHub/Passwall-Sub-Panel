@@ -336,8 +336,11 @@ try {
   await page.getByRole('menuitem', { name: s('agent_upgrade.action'), exact: true }).click();
   dialog = page.getByRole('dialog');
   await expect(dialog.getByRole('combobox', { name: s('native.release_channel'), exact: true })).toHaveText(s('native.release_testing'));
-  await expect(dialog.getByRole('button', { name: s('agent_upgrade.confirm'), exact: true })).toBeDisabled();
-  await expect(dialog.getByRole('combobox', { name: s('native.agent_version'), exact: true }).locator('..').locator('input')).toHaveValue('');
+  // The upgrade surface selects the newest reviewed release in the saved
+  // channel automatically; the administrator can still change it before
+  // confirming the request.
+  await expect(dialog.getByRole('button', { name: s('agent_upgrade.confirm'), exact: true })).toBeEnabled();
+  await expect(dialog.getByRole('combobox', { name: s('native.agent_version'), exact: true }).locator('..').locator('input')).toHaveValue(version);
   await dialog.getByRole('button', { name: closeName, exact: true }).click();
 
   const migration = await openChooser(servers[1]);
