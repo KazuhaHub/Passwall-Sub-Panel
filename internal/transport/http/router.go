@@ -310,7 +310,11 @@ func NewRouter(d Deps) stdhttp.Handler {
 		// doesn't need a restart for the routes to appear.
 		samlHandler := handler.NewAuthSAMLHandler(d.SAML, d.Auth, d.User, d.Repos.AuthEvent)
 		authGroup.GET("/saml/login", samlHandler.Login)
-		authGroup.POST("/saml/acs", samlHandler.ACS)
+		// ACS is unauthenticated and parses attacker-supplied XML. Non-exclusive
+		// canonicalisation of a SignedInfo still costs O(depth^2) memory below
+		// etree's 1024-node depth cap (~52 MiB from a 7 KiB body), so the per-IP
+		// limiter is what bounds concurrent amplification. See GHSA-qhrp-hfff-vphr.
+		authGroup.POST("/saml/acs", loginLimiter.Handler(), samlHandler.ACS)
 		authGroup.GET("/saml/metadata", samlHandler.Metadata)
 
 		oidcHandler := handler.NewAuthOIDCHandler(d.OIDC, d.Auth, d.User, d.Repos.AuthEvent)
