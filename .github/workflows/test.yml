@@ -199,8 +199,18 @@ jobs:
         run: npm run test
 
   build:
-    name: build (cross-compile release targets)
+    name: build (${{ matrix.goos }}/${{ matrix.goarch }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { goos: linux,   goarch: amd64 }
+          - { goos: linux,   goarch: arm64 }
+          - { goos: darwin,  goarch: amd64 }
+          - { goos: darwin,  goarch: arm64 }
+          - { goos: windows, goarch: amd64 }
+          - { goos: windows, goarch: arm64 }
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v6
@@ -217,26 +227,19 @@ jobs:
           test -n "$build_toolchain"
           test "$(go env GOVERSION)" = "$build_toolchain"
           test "$(go tool compile -V | awk '{ print $3 }')" = "$build_toolchain"
-      # Cross-compile the deployable binary for every release GOOS/GOARCH. The
-      # binary is pure Go (CGO_ENABLED=0), so this is fast and needs no C
-      # toolchains. The committed internal/web/dist/.gitkeep satisfies
-      # //go:embed all:dist, so no SPA build is required just to confirm the Go
-      # binary links — the web job covers the SPA build separately. Output is
-      # discarded (-o /dev/null); we only care that every target compiles.
+      # Cross-compile the deployable binary for one release GOOS/GOARCH. The
+      # matrix runs each target independently and in parallel. The binary is
+      # pure Go (CGO_ENABLED=0), so this needs no C toolchain. The committed
+      # internal/web/dist/.gitkeep satisfies //go:embed all:dist, so no SPA
+      # build is required just to confirm the Go binary links — the web job
+      # covers the SPA build separately. Output is discarded (-o /dev/null);
+      # we only care that this target compiles.
       - name: cross-compile ./cmd/panel
-        run: |
-          set -uo pipefail
-          fail=0
-          for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64; do
-            if GOOS="${target%/*}" GOARCH="${target#*/}" CGO_ENABLED=0 \
-                 go build -trimpath -ldflags="-s -w" -o /dev/null ./cmd/panel; then
-              echo "✓ ${target}"
-            else
-              echo "✗ ${target}"
-              fail=1
-            fi
-          done
-          exit "$fail"
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+        run: go build -trimpath -ldflags="-s -w" -o /dev/null ./cmd/panel
 
   sqlite:
     name: sqlite (full suite)
