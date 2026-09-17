@@ -2182,14 +2182,14 @@
       "create_continue": "创建并继续安装",
       "method_label": "选择安装方式",
       "method": {
-        "linux": "Linux 二进制＋systemd（推荐）",
+        "linux": "面板一键安装（推荐）",
         "docker": "Docker",
-        "manual": "手动安装"
+        "manual": "GitHub 交互安装"
       },
       "method_hint": {
-        "linux": "适合启用 systemd 的 Linux 服务器，需要 root 权限。保存服务器后下载私有脚本，传到目标机器执行；脚本安装固定版本并配置专用用户与服务。",
+        "linux": "适合启用 systemd 的 Linux 服务器。面板会生成一条简短、私有且仅用于这台服务器的一键命令，安装固定版本并配置专用用户与服务。",
         "docker": "需要 Linux Docker Engine、标准 Docker Compose 与 host 网络。默认生成使用保守语法的单服务 Compose，可兼容 NAS 项目编辑器并跟随所选 latest/beta 频道。Docker 远程升级是显式高级选项，因为隔离 updater 需要挂载等同 root 权限的 Docker socket。",
-        "manual": "支持 Linux / macOS / Windows 的 amd64 / arm64 前台运行。选择平台及准确版本，下载发行档和 SHA256 校验和，核验后解压并配置私有凭据；不安装 systemd 服务。"
+        "manual": "从公开 GitHub 仓库安装官方 Linux/systemd 版本，再在交互流程中填入此服务器的同步地址、Agent ID 与凭据；公开命令本身不包含任何私密信息。"
       },
       "method_version_hint": "先选择安装方式并保存服务器，再生成该服务器的专属安装文件。切换安装方式不会轮换凭据或改变服务器身份。",
       "platform_label": "操作系统",
@@ -2236,13 +2236,21 @@
       "method_steps": {
         "linux": "1. 保存服务器并生成固定版本的私有安装脚本。\n2. 将脚本传到目标 Linux 服务器，以 root 权限执行提供的命令。\n3. 确认服务与心跳后，前往节点页面单独配置 inbound。",
         "docker": "1. 保存服务器并生成专属 Compose 与私有凭据文件。\n2. 将两个文件放入同一私有项目目录并启动 Agent；仅在需要远程升级时从“高级”启用 updater。\n3. 保留项目及数据卷，确认生成的服务与心跳后单独配置 inbound。",
-        "manual": "1. 选择平台和准确版本，下载对应发行档及 SHA256 校验和并核验。\n2. 解压程序，将全部安装文件放入同一私有目录，并限制凭据文件读取权限。\n3. 核对 Passwall Node 版本，以提供的命令前台运行；确认心跳后再单独配置 inbound。"
+        "manual": "1. 在目标 Linux/systemd 主机执行公开 GitHub 命令。\n2. 选择稳定版或 Beta，再按提示输入此处显示的同步地址、Agent ID 与凭据。\n3. 确认服务与心跳；若交互配置中断，之后运行 pn connect 继续。"
       },
       "agent_id": "Agent ID",
       "credential": "长期节点凭据",
       "endpoint": "Passwall Sub Panel 同步地址",
       "start_command": "Linux 前台启动命令（请先停止 systemd 服务，避免同时运行）",
       "copy_credential": "复制凭据",
+      "copy_endpoint": "复制同步地址",
+      "copy_agent_id": "复制 Agent ID",
+      "github_manual_summary": "公开 GitHub 安装器不包含任何服务器凭据。它以交互方式安装所选公开版本，再调用 pn connect，让你填写下方三项信息；凭据不会进入 shell 历史。",
+      "github_install_command": "公开 GitHub 安装命令",
+      "copy_github_command": "复制 GitHub 命令",
+      "github_values_title": "pn connect 提示时填入以下信息",
+      "github_connect_hint": "如果程序安装完成但尚未配置，请运行 sudo pn connect。已配置节点不会被 pn connect 覆盖；只有明确更换身份时才使用另行确认的 pn rebind。",
+      "github_advanced_hint": "公开安装器仅支持 Linux/systemd 的 amd64 与 arm64。它拒绝覆盖已有安装或无关 pn 命令，校验所选发行档，并让 daemon 与管理菜单一起安装和升级；安装命令不携带凭据。",
       "copy_command": "复制启动命令",
       "saved_confirm": "我已安全保存",
       "rotate_title": "轮换 Passwall Node 凭据",
