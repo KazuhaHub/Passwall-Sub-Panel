@@ -6,7 +6,7 @@ import type { NativeAgentStatus, NativeInstallationFiles, NativeServerProvisioni
 import { api, installReads, list, mount } from '@/test/adminSaveHarness'
 import { useAuthStore } from '@/stores/auth'
 import ConfirmHost from '@/components/ConfirmHost'
-import ServersView, { isNodeReleaseVersion, NativeInstallationDialog } from './ServersView'
+import ServersView, { isNodeReleaseVersion, NativeInstallationDialog, PUBLIC_NODE_INSTALL_COMMAND } from './ServersView'
 import { hostFromURL } from './NodesView'
 
 const copy = vi.hoisted(() => vi.fn().mockResolvedValue(true))
@@ -90,19 +90,16 @@ async function openInstallation(server: Server) {
   fireEvent.click(await screen.findByRole('button', { name: 'admin:servers.install_reinstall.continue' }))
 }
 
-function generatedFiles(method: 'docker' | 'manual'): NativeInstallationFiles {
+function generatedFiles(): NativeInstallationFiles {
   return {
-    method, os: 'linux', ...(method === 'manual' ? { arch: 'amd64' as const } : {}),
+    method: 'docker', os: 'linux',
     files: [
       { name: 'credential', content: `${provisioning.credential}\n`, sensitive: true },
-      { name: method === 'docker' ? 'compose.yaml' : 'node.env', content: method === 'docker'
-        ? 'services:\n  node:\n    image: ghcr.io/kazuhahub/passwall-node:v1.2.3-beta.1\n    network_mode: host\n'
-        : `NODE_ENDPOINT=${provisioning.endpoint}\nNODE_AGENT_ID=${provisioning.agent_id}\n` },
+      { name: 'compose.yaml', content: 'services:\n  node:\n    image: ghcr.io/kazuhahub/passwall-node:v1.2.3-beta.1\n    network_mode: host\n' },
     ],
     steps: [
       { title: 'Private files', commands: ['chmod 0600 ./credential'] },
-      { title: 'Start the node', commands: [method === 'docker' ? 'docker compose up -d'
-        : `./passwall-node --endpoint '${provisioning.endpoint}' --agent-id '${provisioning.agent_id}' --credential-file ./credential --data-dir ./data`] },
+      { title: 'Start the node', commands: ['docker compose up -d'] },
     ],
   }
 }
@@ -312,7 +309,7 @@ describe('Passwall Node installation', () => {
   ] as const)('generates Docker files that follow the saved %s channel by default', async (preference, imageTag) => {
     const server = { ...nativeServer, update_channel: preference }
     installReads({ '/admin/servers/7/node-agent-status': waiting })
-    api.post.mockResolvedValue({ data: generatedFiles('docker') })
+    api.post.mockResolvedValue({ data: generatedFiles() })
     mount(<NativeInstallationDialog server={server} initialProvisioning={{ ...provisioning, server }}
       onClose={vi.fn()} onRotate={vi.fn()} />)
     await selectMethod('docker')
@@ -328,7 +325,7 @@ describe('Passwall Node installation', () => {
 
   it('keeps the Docker upgrade helper off by default and adds it only from Advanced', async () => {
     installReads({ '/admin/servers/7/node-agent-status': waiting })
-    api.post.mockResolvedValue({ data: generatedFiles('docker') })
+    api.post.mockResolvedValue({ data: generatedFiles() })
     mount(<NativeInstallationDialog server={nativeServer} initialProvisioning={provisioning}
       onClose={vi.fn()} onRotate={vi.fn()} />)
     await selectMethod('docker')
@@ -552,12 +549,6 @@ describe('Passwall Node installation', () => {
     fireEvent.click(screen.getByRole('button', { name: 'admin:servers.create' }))
     const createDialog = await screen.findByRole('dialog')
     await selectMethod(method, createDialog)
-    if (method === 'manual') {
-      fireEvent.mouseDown(within(createDialog).getByRole('combobox', { name: 'admin:servers.native.platform_label' }))
-      fireEvent.click(await screen.findByRole('option', { name: 'admin:servers.native.platform.darwin' }))
-      fireEvent.mouseDown(within(createDialog).getByRole('combobox', { name: 'admin:servers.native.architecture' }))
-      fireEvent.click(await screen.findByRole('option', { name: /^arm64\b/ }))
-    }
     fireEvent.change(within(createDialog).getByRole('textbox', { name: /admin:servers.field.name/ }), { target: { value: nativeServer.name } })
     fireEvent.click(within(createDialog).getByRole('button', { name: 'admin:servers.native.create_continue' }))
     await showIdentity()
@@ -565,8 +556,10 @@ describe('Passwall Node installation', () => {
     expect(screen.queryByRole('button', { name: 'admin:servers.native.create_continue' })).toBeNull()
     expect(screen.getByRole('combobox', { name: 'admin:servers.native.method_label' }).textContent).toBe(`admin:servers.native.method.${method}`)
     if (method === 'manual') {
-      expect(screen.getByRole('combobox', { name: 'admin:servers.native.platform_label' }).textContent).toBe('admin:servers.native.platform.darwin')
-      expect(screen.getByRole('combobox', { name: 'admin:servers.native.architecture' }).textContent).toBe('arm64 (aarch64)')
+      expect((screen.getByLabelText('admin:servers.native.github_install_command') as HTMLTextAreaElement).value).toBe(PUBLIC_NODE_INSTALL_COMMAND)
+      expect(screen.queryByRole('combobox', { name: 'admin:servers.native.release_channel' })).toBeNull()
+      expect(screen.queryByRole('combobox', { name: 'admin:servers.native.platform_label' })).toBeNull()
+      expect(screen.queryByRole('combobox', { name: 'admin:servers.native.architecture' })).toBeNull()
     }
     expect((screen.getByLabelText('admin:servers.native.agent_id') as HTMLInputElement).value).toBe(provisioning.agent_id)
     expect((screen.getByLabelText('admin:servers.native.credential') as HTMLInputElement).value).toBe(provisioning.credential)
@@ -697,7 +690,12 @@ describe('Passwall Node installation', () => {
       await selectMethod(method)
       expect((screen.getByLabelText('admin:servers.native.agent_id') as HTMLInputElement).value).toBe(provisioning.agent_id)
       expect((screen.getByLabelText('admin:servers.native.credential') as HTMLInputElement).value).toBe(provisioning.credential)
-      expect(versionInput().value).toBe(method === 'docker' ? 'beta' : '')
+      if (method === 'manual') {
+        expect(screen.queryByLabelText('admin:servers.native.agent_version')).toBeNull()
+        expect((screen.getByLabelText('admin:servers.native.github_install_command') as HTMLTextAreaElement).value).toBe(PUBLIC_NODE_INSTALL_COMMAND)
+      } else {
+        expect(versionInput().value).toBe(method === 'docker' ? 'beta' : '')
+      }
       expect(screen.getByRole('combobox', { name: 'admin:servers.native.method_label' }).textContent).toBe(`admin:servers.native.method.${method}`)
     }
     expect(api.post).not.toHaveBeenCalled()
@@ -717,7 +715,8 @@ describe('Passwall Node installation', () => {
     expect(request[2].signal.aborted).toBe(true)
     await act(async () => { finish({ data: `#!/bin/sh\n# obsolete ${provisioning.credential}\n` }) })
     expect(copy).not.toHaveBeenCalled()
-    expect(versionInput().value).toBe('')
+    expect(screen.queryByLabelText('admin:servers.native.agent_version')).toBeNull()
+    expect((screen.getByLabelText('admin:servers.native.github_install_command') as HTMLTextAreaElement).value).toBe(PUBLIC_NODE_INSTALL_COMMAND)
     expect((screen.getByLabelText('admin:servers.native.credential') as HTMLInputElement).value).toBe(provisioning.credential)
     await selectMethod('linux')
     expect(copyScript().disabled).toBe(true)
@@ -744,17 +743,17 @@ describe('Passwall Node installation', () => {
     expect(api.post.mock.calls.some(([url]) => String(url).includes('rotate-node-credential'))).toBe(false)
   })
 
-  it.each(['docker', 'manual'] as const)('shows and copies the exact %s private files and secret-free startup steps', async method => {
+  it('shows and copies the exact Docker private files and secret-free startup steps', async () => {
     reads()
-    const materials = generatedFiles(method)
+    const materials = generatedFiles()
     api.post.mockResolvedValue({ data: materials })
     mountExpanded(<NativeInstallationDialog server={nativeServer} initialProvisioning={provisioning} onClose={vi.fn()} onRotate={vi.fn()} />)
-    await selectMethod(method)
+    await selectMethod('docker')
     await selectVersion('v1.2.3-beta.1')
     fireEvent.click(screen.getByRole('button', { name: 'admin:servers.native.generate_files' }))
     await screen.findAllByLabelText('admin:servers.native.file_content')
     expect(api.post).toHaveBeenCalledWith('/admin/servers/7/node-installation-files', {
-      version: 'v1.2.3-beta.1', method, ...(method === 'manual' ? { os: 'linux', arch: 'amd64' } : {}),
+      version: 'v1.2.3-beta.1', method: 'docker',
     }, expect.objectContaining({ signal: expect.any(AbortSignal) }))
     expect(materialContents()).toEqual(materialPreviews(materials))
     const privateFile = within(screen.getByRole('region', { name: 'credential' })).getByLabelText('admin:servers.native.file_content') as HTMLInputElement
@@ -772,7 +771,7 @@ describe('Passwall Node installation', () => {
 
   it('downloads a generated private file with exact bytes and revokes its temporary blob URL', async () => {
     reads()
-    const materials = generatedFiles('docker')
+    const materials = generatedFiles()
     api.post.mockResolvedValue({ data: materials })
     const createURL = vi.fn().mockReturnValue('blob:private-install-file')
     const revokeURL = vi.fn()
@@ -803,14 +802,11 @@ describe('Passwall Node installation', () => {
     expect(document.querySelector('a[download]')).toBeNull()
   })
 
-  it('keeps new manual materials when an aborted Docker generation resolves after switching methods', async () => {
+  it('aborts pending Docker generation when switching to the static GitHub workflow and ignores the obsolete response', async () => {
     reads()
     let finishDocker!: (response: { data: NativeInstallationFiles }) => void
-    const manual = generatedFiles('manual')
-    const obsolete = { ...generatedFiles('docker'), files: [{ name: 'obsolete.yaml', content: 'obsolete private response' }] }
-    api.post.mockImplementation((_url: string, body: { method: string }) => body.method === 'docker'
-      ? new Promise<{ data: NativeInstallationFiles }>(resolve => { finishDocker = resolve })
-      : Promise.resolve({ data: manual }))
+    const obsolete = { ...generatedFiles(), files: [{ name: 'obsolete.yaml', content: 'obsolete private response' }] }
+    api.post.mockImplementation(() => new Promise<{ data: NativeInstallationFiles }>(resolve => { finishDocker = resolve }))
     mountExpanded(<NativeInstallationDialog server={nativeServer} initialProvisioning={provisioning} onClose={vi.fn()} onRotate={vi.fn()} />)
     await selectMethod('docker')
     await selectVersion('v1.2.3-beta.1')
@@ -819,11 +815,10 @@ describe('Passwall Node installation', () => {
     const oldRequest = api.post.mock.calls[0][2]
     await selectMethod('manual')
     expect(oldRequest.signal.aborted).toBe(true)
-    await selectVersion('v1.2.3-beta.1')
-    fireEvent.click(screen.getByRole('button', { name: 'admin:servers.native.generate_files' }))
-    await screen.findAllByLabelText('admin:servers.native.file_content')
+    expect((screen.getByLabelText('admin:servers.native.github_install_command') as HTMLTextAreaElement).value).toBe(PUBLIC_NODE_INSTALL_COMMAND)
+    expect(screen.queryByRole('button', { name: 'admin:servers.native.generate_files' })).toBeNull()
     await act(async () => { finishDocker({ data: obsolete }) })
-    expect(materialContents()).toEqual(materialPreviews(manual))
+    expect(screen.queryByLabelText('admin:servers.native.file_content')).toBeNull()
     expect(screen.queryByText('obsolete.yaml')).toBeNull()
     expect((screen.getByLabelText('admin:servers.native.agent_id') as HTMLInputElement).value).toBe(provisioning.agent_id)
     expect((screen.getByLabelText('admin:servers.native.credential') as HTMLInputElement).value).toBe(provisioning.credential)
@@ -858,7 +853,7 @@ describe('Passwall Node installation', () => {
     await openInstallation(secondServer)
     await showIdentity()
     await selectMethod('docker')
-    await act(async () => { finish({ data: generatedFiles('docker') }) })
+    await act(async () => { finish({ data: generatedFiles() }) })
     expect((screen.getByLabelText('admin:servers.native.agent_id') as HTMLInputElement).value).toBe(secondProvisioning.agent_id)
     expect((screen.getByLabelText('admin:servers.native.credential') as HTMLInputElement).value).toBe(secondProvisioning.credential)
     expect(versionInput().value).toBe('latest')
@@ -866,29 +861,42 @@ describe('Passwall Node installation', () => {
     expect(copy).not.toHaveBeenCalled()
   })
 
-  it.each(['linux', 'darwin', 'windows'] as const)('generates manual files for the selected %s arm64 target', async os => {
+  it('uses the public GitHub installer for manual setup without release, OS, architecture, or file-generation requests', async () => {
     reads()
-    const materials: NativeInstallationFiles = { ...generatedFiles('manual'), os, arch: 'arm64' }
-    api.post.mockResolvedValue({ data: materials })
     mountExpanded(<NativeInstallationDialog server={nativeServer} initialProvisioning={provisioning} onClose={vi.fn()} onRotate={vi.fn()} />)
     await selectMethod('manual')
-    fireEvent.mouseDown(screen.getByRole('combobox', { name: 'admin:servers.native.platform_label' }))
-    fireEvent.click(await screen.findByRole('option', { name: `admin:servers.native.platform.${os}` }))
-    fireEvent.mouseDown(screen.getByRole('combobox', { name: 'admin:servers.native.architecture' }))
-    fireEvent.click(await screen.findByRole('option', { name: /^arm64\b/ }))
-    await selectVersion('v1.2.3-beta.1')
-    fireEvent.click(screen.getByRole('button', { name: 'admin:servers.native.generate_files' }))
-    await screen.findAllByLabelText('admin:servers.native.file_content')
-    expect(api.post).toHaveBeenCalledWith('/admin/servers/7/node-installation-files', {
-      version: 'v1.2.3-beta.1', method: 'manual', os, arch: 'arm64',
-    }, expect.objectContaining({ signal: expect.any(AbortSignal) }))
+    expect((screen.getByLabelText('admin:servers.native.github_install_command') as HTMLTextAreaElement).value).toBe(PUBLIC_NODE_INSTALL_COMMAND)
+    expect(screen.queryByRole('combobox', { name: 'admin:servers.native.release_channel' })).toBeNull()
+    expect(screen.queryByRole('combobox', { name: 'admin:servers.native.agent_version' })).toBeNull()
+    expect(screen.queryByRole('combobox', { name: 'admin:servers.native.platform_label' })).toBeNull()
+    expect(screen.queryByRole('combobox', { name: 'admin:servers.native.architecture' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'admin:servers.native.generate_files' })).toBeNull()
+    expect(api.post).not.toHaveBeenCalled()
     expect((screen.getByLabelText('admin:servers.native.agent_id') as HTMLInputElement).value).toBe(provisioning.agent_id)
     expect((screen.getByLabelText('admin:servers.native.credential') as HTMLInputElement).value).toBe(provisioning.credential)
   })
 
+  it('copies the public command and each connection value separately without embedding the credential in the command', async () => {
+    reads()
+    mount(<NativeInstallationDialog server={nativeServer} initialProvisioning={provisioning} onClose={vi.fn()} onRotate={vi.fn()} />)
+    await selectMethod('manual')
+    expect(PUBLIC_NODE_INSTALL_COMMAND).not.toContain(provisioning.credential)
+    fireEvent.click(screen.getByRole('button', { name: 'admin:servers.native.copy_github_command' }))
+    fireEvent.click(screen.getByRole('button', { name: 'admin:servers.native.copy_endpoint' }))
+    fireEvent.click(screen.getByRole('button', { name: 'admin:servers.native.copy_agent_id' }))
+    fireEvent.click(screen.getByRole('button', { name: 'admin:servers.native.copy_credential' }))
+    await waitFor(() => expect(copy.mock.calls.map(([value]) => value)).toEqual([
+      PUBLIC_NODE_INSTALL_COMMAND,
+      provisioning.endpoint,
+      provisioning.agent_id,
+      provisioning.credential,
+    ]))
+    expect(api.post).not.toHaveBeenCalled()
+  })
+
   it('invalidates displayed files after a release change instead of allowing obsolete files to be copied', async () => {
     reads()
-    api.post.mockResolvedValue({ data: generatedFiles('docker') })
+    api.post.mockResolvedValue({ data: generatedFiles() })
     mountExpanded(<NativeInstallationDialog server={nativeServer} initialProvisioning={provisioning} onClose={vi.fn()} onRotate={vi.fn()} />)
     await selectMethod('docker')
     await selectVersion('v1.2.3-beta.1')
@@ -916,18 +924,13 @@ describe('Passwall Node installation', () => {
     expect(screen.getByRole('dialog')).toBeTruthy()
   })
 
-  it.each([
-    ['manual', 'os'],
-    ['manual', 'arch'],
-    ['docker', 'os'],
-  ] as const)('rejects a successful %s response with the wrong %s before exposing private files', async (method, field) => {
+  it('rejects a successful Docker response with the wrong OS before exposing private files', async () => {
     reads()
-    const materials = generatedFiles(method)
-    if (field === 'os') materials.os = 'windows'
-    else materials.arch = 'arm64'
+    const materials = generatedFiles()
+    materials.os = 'windows'
     api.post.mockResolvedValue({ data: materials })
     mountExpanded(<NativeInstallationDialog server={nativeServer} initialProvisioning={provisioning} onClose={vi.fn()} onRotate={vi.fn()} />)
-    await selectMethod(method)
+    await selectMethod('docker')
     await selectVersion('v1.2.3-beta.1')
     fireEvent.click(screen.getByRole('button', { name: 'admin:servers.native.generate_files' }))
     await screen.findByText('admin:servers.native.files_failed')
@@ -942,7 +945,7 @@ describe('Passwall Node installation', () => {
 
   it('copies an individual step command verbatim rather than trimming or joining another command', async () => {
     reads()
-    const materials = generatedFiles('docker')
+    const materials = generatedFiles()
     const command = '  printf "%s\\n" "$NODE_AGENT_ID"\n'
     materials.steps[0].commands = [command, 'docker compose ps']
     api.post.mockResolvedValue({ data: materials })
