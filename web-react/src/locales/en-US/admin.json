@@ -2159,7 +2159,7 @@
       "username": "admin (only when using password login)",
       "password": "API Token preferred; password as fallback"
     },
-    "update_available_chip": "Update available: {{latest}}",
+    "update_available": "Update available: {{latest}}",
     "hint": {
       "name": "Display name; the internal reference uses the database ID.",
       "update_channel": "Saved preference for installation and upgrade lists. Docker files follow latest for Stable or beta for Testing by default; manual and systemd installation still use an exact reviewed release. Saving does not install, upgrade, or change server/node identities or credentials. Temporary channel selections in dialogs are not saved.",
