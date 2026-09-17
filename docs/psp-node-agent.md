@@ -797,6 +797,9 @@ PSP 拨入时「这次没到」的证据由 PSP 的传输层产生，节点拨�
 
 ## 9. ⏸ 后续增量（不影响当前 Xray / sing-box 生产路径）
 
+- 无特权主机可观测性、历史指标、告警、诊断与后续 rootless 运维能力的完整实施规格见
+  [psp-node-rootless-observability-plan.md](psp-node-rootless-observability-plan.md)。该规格明确
+  不新增 root helper 或 Linux capability，不配置 BBR，不通过 tc/eBPF 强制限速。
 - 交付形态已完成：单文件六平台二进制、Linux amd64/arm64 Docker、校验和与发布 CI。agent 自身
   升级机制仍未定。
 - core：Xray 与 sing-box 的 `Compiler / Supervisor / Telemetry` 均已接入生产 composition；PSP
