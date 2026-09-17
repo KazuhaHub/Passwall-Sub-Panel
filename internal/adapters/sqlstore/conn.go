@@ -3,8 +3,9 @@
 package sqlstore
 
 import (
+	"context"
+	"errors"
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 	"time"
@@ -15,6 +16,7 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 
+	pkglog "github.com/KazuhaHub/passwall-sub-panel/internal/pkg/log"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 )
 
@@ -31,16 +33,81 @@ func Open(kind, dsn string) (*gorm.DB, error) {
 	// the row may be absent (settings on fresh boot, saml/oidc/mail
 	// config never set, defaults seeded on the fly). Silence that one
 	// specific case so the log isn't drowned in normal-path noise.
-	gormLogger := logger.New(
-		log.New(os.Stderr, "\r\n", log.LstdFlags),
-		logger.Config{
-			SlowThreshold:             200 * time.Millisecond,
-			LogLevel:                  logger.Warn,
-			IgnoreRecordNotFoundError: true,
-			Colorful:                  false,
-		},
-	)
+	gormLogger := newGORMLogger()
 	return openWithLogger(kind, dsn, gormLogger)
+}
+
+// gormLogHandler keeps database diagnostics on the same Xray-style stream as
+// the rest of PSP. GORM's default logger writes a multi-line diagnostic with a
+// second, unrelated format, which makes a single journal hard to scan and
+// filter. SQL is still included for slow/error queries because it is the
+// useful part of the diagnostic; the existing warn-level threshold remains.
+type gormLogHandler struct {
+	level                     logger.LogLevel
+	slowThreshold             time.Duration
+	ignoreRecordNotFoundError bool
+}
+
+func newGORMLogger() logger.Interface {
+	return &gormLogHandler{
+		level:                     logger.Warn,
+		slowThreshold:             200 * time.Millisecond,
+		ignoreRecordNotFoundError: true,
+	}
+}
+
+func (l *gormLogHandler) LogMode(level logger.LogLevel) logger.Interface {
+	copyHandler := *l
+	copyHandler.level = level
+	return &copyHandler
+}
+
+func (l *gormLogHandler) Info(_ context.Context, msg string, data ...interface{}) {
+	if l.level >= logger.Info {
+		pkglog.Info("database: " + fmt.Sprintf(msg, data...))
+	}
+}
+
+func (l *gormLogHandler) Warn(_ context.Context, msg string, data ...interface{}) {
+	if l.level >= logger.Warn {
+		pkglog.Warn("database: " + fmt.Sprintf(msg, data...))
+	}
+}
+
+func (l *gormLogHandler) Error(_ context.Context, msg string, data ...interface{}) {
+	if l.level >= logger.Error {
+		pkglog.Error("database: " + fmt.Sprintf(msg, data...))
+	}
+}
+
+func (l *gormLogHandler) Trace(_ context.Context, begin time.Time, query func() (string, int64), queryErr error) {
+	if l.level <= logger.Silent {
+		return
+	}
+
+	elapsed := time.Since(begin)
+	switch {
+	case queryErr != nil && l.level >= logger.Error &&
+		(!errors.Is(queryErr, logger.ErrRecordNotFound) || !l.ignoreRecordNotFoundError):
+		l.writeQuery(pkglog.Error, "database query failed", elapsed, query, queryErr)
+	case elapsed > l.slowThreshold && l.slowThreshold != 0 && l.level >= logger.Warn:
+		l.writeQuery(pkglog.Warn, "slow database query", elapsed, query, fmt.Sprintf("threshold=%s", l.slowThreshold))
+	case l.level == logger.Info:
+		l.writeQuery(pkglog.Info, "database query", elapsed, query, nil)
+	}
+}
+
+func (l *gormLogHandler) writeQuery(write func(string, ...any), message string, elapsed time.Duration, query func() (string, int64), detail any) {
+	sql, rows := query()
+	args := []any{"elapsed", elapsed.String(), "rows", rows, "sql", sql}
+	if detail != nil {
+		if queryErr, ok := detail.(error); ok {
+			args = append([]any{"err", queryErr}, args...)
+		} else {
+			args = append(args, "detail", detail)
+		}
+	}
+	write(message, args...)
 }
 
 // OpenQuiet keeps driver initialization diagnostics out of maintenance

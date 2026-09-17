@@ -7,7 +7,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"log"
 	stdlog "log/slog"
 	"net/http"
 	"os"
@@ -65,12 +64,18 @@ func applyEarlyLogLevel(debugFlag bool) bool {
 	return false
 }
 
-func ensureDirs(cfg *config.Config) {
+func ensureDirs(cfg *config.Config) error {
 	for _, d := range []string{cfg.ConfigDir, cfg.DataDir} {
 		if err := os.MkdirAll(d, 0o755); err != nil {
-			log.Fatalf("create directory %s: %v", d, err)
+			return fmt.Errorf("create directory %s: %w", d, err)
 		}
 	}
+	return nil
+}
+
+func fatalLog(msg string, args ...any) {
+	pkglog.Error(msg, args...)
+	os.Exit(1)
 }
 
 const retiredMigrateMessage = "ERROR: psp migrate (V2→V3) was retired in V4. Use the frozen PSP v3.9.2 release to migrate V2→V3, then finish the V3 upgrade. The final V3 release (v3.9.2 / v3.9.2-beta.20) upgrades to V4 automatically on normal startup; no migrate command is needed."
@@ -81,7 +86,7 @@ func main() {
 	// positional arguments, so simply deleting the dispatch could accidentally
 	// start the panel (and migrate its configured database) instead of refusing.
 	if len(os.Args) > 1 && os.Args[1] == "migrate" {
-		fmt.Fprintln(os.Stderr, retiredMigrateMessage)
+		pkglog.Error(retiredMigrateMessage)
 		os.Exit(2)
 	}
 	// `psp normalize-upn` folds stored login names to their canonical form.
@@ -99,9 +104,9 @@ func main() {
 	// `psp version` prints the version then exits — useful in scripts /
 	// CI to confirm the deployed binary matches the release tag.
 	if len(os.Args) > 1 && (os.Args[1] == "version" || os.Args[1] == "--version" || os.Args[1] == "-v") {
-		log.Printf("%s", version.String())
+		pkglog.Info("version", "value", version.String())
 		if version.BuildDate != "" {
-			log.Printf("built %s", version.BuildDate)
+			pkglog.Info("build", "date", version.BuildDate)
 		}
 		return
 	}
@@ -118,9 +123,10 @@ func main() {
 	// ignoring it would turn an attempted maintenance command into daemon boot.
 	if flag.NArg() != 0 {
 		if flag.Arg(0) == "migrate" {
-			fmt.Fprintln(os.Stderr, retiredMigrateMessage)
+			pkglog.Error(retiredMigrateMessage)
 		} else {
-			fmt.Fprintln(os.Stderr, "ERROR: unexpected positional arguments. Panel startup accepts only --config and --debug; commands (version / normalize-upn / migrate-server) must come first.")
+			pkglog.Error("unexpected positional arguments",
+				"detail", "Panel startup accepts only --config and --debug; commands (version / normalize-upn / migrate-server) must come first.")
 		}
 		os.Exit(2)
 	}
@@ -137,20 +143,22 @@ func main() {
 	cfgPath := config.ResolvePath(*cfgPathFlag)
 	cfg, err := config.LoadOrGenerate(cfgPath)
 	if err != nil {
-		log.Fatalf("load config %s: %v", cfgPath, err)
+		fatalLog("load config", "path", cfgPath, "err", err)
 	}
 	if !earlyLevelSet && cfg.LogLevel != "" {
 		if lvl, ok := parseLogLevel(cfg.LogLevel); ok {
 			pkglog.SetLevel(lvl)
 		}
 	}
-	ensureDirs(cfg)
+	if err := ensureDirs(cfg); err != nil {
+		fatalLog("prepare directories", "err", err)
+	}
 
 	// Release baked-in default rulesets / templates into ConfigDir when
 	// they're missing. Lets a fresh systemd / Docker bind-mount deploy run
 	// without manual file copying. Idempotent: existing files are preserved.
 	if err := seed.Ensure(cfg.ConfigDir); err != nil {
-		log.Fatalf("seed defaults into %s: %v", cfg.ConfigDir, err)
+		fatalLog("seed defaults", "config_dir", cfg.ConfigDir, "err", err)
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -158,12 +166,12 @@ func main() {
 
 	a, err := app.Build(ctx, cfg)
 	if err != nil {
-		log.Fatalf("build app: %v", err)
+		fatalLog("build app", "err", err)
 	}
 
 	errCh := make(chan error, 1)
 	go func() {
-		log.Printf("Passwall-Sub-Panel %s listening on %s", version.String(), cfg.Listen)
+		pkglog.Info("server listening", "version", version.String(), "address", cfg.Listen)
 		if err := a.Run(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			errCh <- err
 		}
@@ -173,15 +181,15 @@ func main() {
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	select {
 	case sig := <-quit:
-		log.Printf("got signal %s, shutting down...", sig)
+		pkglog.Info("shutdown requested", "signal", sig.String())
 	case err := <-errCh:
-		log.Printf("server error: %v, shutting down...", err)
+		pkglog.Error("server error; shutting down", "err", err)
 	}
 
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer shutdownCancel()
 	if err := a.Shutdown(shutdownCtx); err != nil {
-		log.Printf("shutdown: %v", err)
+		pkglog.Error("shutdown failed", "err", err)
 	}
 }
 
