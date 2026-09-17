@@ -3,17 +3,14 @@ name: Test
 # Runs the Go test suite, the SPA type/build check, and a cross-platform compile
 # check. The build job cross-compiles the deployable binary for every release
 # GOOS/GOARCH (CGO off, pure Go) so a platform-specific build break is caught
-# here on push/PR instead of only when a release tag is cut. All three Go test
-# jobs run the WHOLE suite (go test ./...); the postgres and mysql jobs additionally
-# set PSP_TEST_DB_KIND / PSP_TEST_DB_DSN so internal/adapters/sqlstore/testdb_test.go
-# points the DB-adapter tests (schema + every repo + the grouped / scoped-settings
-# layer) at a real server, giving each test its own database on the shared
-# service container, to verify cross-dialect behaviour that SQLite alone can't.
-# Packages outside sqlstore don't read those env vars, so they still run against
-# whatever DB (usually an in-process SQLite) their own test setup uses — see the
-# note on internal/service/rollup/rollup_test.go if that ever needs cross-dialect
-# coverage too. Each Go job uploads its test output as an artifact on failure for
-# diagnosis.
+# here on push/PR instead of only when a release tag is cut. The sqlite job runs
+# the WHOLE Go suite (go test ./...). The postgres and mysql jobs run only the
+# DB-adapter package (go test ./internal/adapters/sqlstore/...) with
+# PSP_TEST_DB_KIND / PSP_TEST_DB_DSN set, so schema + every repo + the grouped /
+# scoped-settings layer run against a real server, verifying cross-dialect
+# behaviour that SQLite alone can't. Packages outside sqlstore are covered by
+# the full SQLite run and do not need to be repeated for each SQL dialect. Each
+# Go job uploads its test output as an artifact on failure for diagnosis.
 
 on:
   push:
@@ -294,7 +291,7 @@ jobs:
           path: test-output.txt
 
   postgres:
-    name: postgres (full suite)
+    name: postgres (sqlstore dialect)
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -332,7 +329,7 @@ jobs:
       - name: test
         run: |
           set -o pipefail
-          go test ./... 2>&1 | tee test-output.txt
+          go test ./internal/adapters/sqlstore/... 2>&1 | tee test-output.txt
       - name: upload test output
         if: failure()
         uses: actions/upload-artifact@v4
@@ -341,7 +338,7 @@ jobs:
           path: test-output.txt
 
   mysql:
-    name: mysql (full suite)
+    name: mysql (sqlstore dialect)
     runs-on: ubuntu-latest
     services:
       mysql:
@@ -379,7 +376,7 @@ jobs:
       - name: test
         run: |
           set -o pipefail
-          go test ./... 2>&1 | tee test-output.txt
+          go test ./internal/adapters/sqlstore/... 2>&1 | tee test-output.txt
       - name: upload test output
         if: failure()
         uses: actions/upload-artifact@v4
