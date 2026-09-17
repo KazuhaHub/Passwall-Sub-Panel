@@ -326,6 +326,24 @@ describe('Passwall Node installation', () => {
     await screen.findByText('admin:servers.native.files_ready')
   })
 
+  it('keeps the Docker upgrade helper off by default and adds it only from Advanced', async () => {
+    installReads({ '/admin/servers/7/node-agent-status': waiting })
+    api.post.mockResolvedValue({ data: generatedFiles('docker') })
+    mount(<NativeInstallationDialog server={nativeServer} initialProvisioning={provisioning}
+      onClose={vi.fn()} onRotate={vi.fn()} />)
+    await selectMethod('docker')
+    await waitFor(() => expect(versionInput().value).toBe('latest'))
+    fireEvent.click(screen.getByRole('button', { name: 'admin:servers.native.advanced' }))
+    const remoteUpgrade = screen.getByRole('switch', { name: 'admin:servers.native.docker_remote_upgrade' }) as HTMLInputElement
+    expect(remoteUpgrade.checked).toBe(false)
+    fireEvent.click(remoteUpgrade)
+    expect(remoteUpgrade.checked).toBe(true)
+    fireEvent.click(screen.getByRole('button', { name: 'admin:servers.native.generate_files' }))
+    await waitFor(() => expect(api.post).toHaveBeenCalledWith('/admin/servers/7/node-installation-files', {
+      version: 'latest', method: 'docker', docker_remote_upgrade: true,
+    }, expect.objectContaining({ signal: expect.any(AbortSignal) })))
+  })
+
   it.each([['3xui', '3X-UI'], ['sui', 'S-UI']] as const)('opens one existing %s install/reinstall entry with its original backend and configures that same record', async (panelType, label) => {
     const upstream: Server = { ...nativeServer, panel_type: panelType, auth_method: 'token', url: 'https://upstream.test', has_api_token: true }
     installReads({ '/admin/servers': list([upstream]) })

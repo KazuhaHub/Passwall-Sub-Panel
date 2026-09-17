@@ -138,6 +138,7 @@ export interface NativeInstallationSelection {
   method: NativeInstallMethod
   os: NativeInstallOS
   arch: NativeInstallArch
+  dockerRemoteUpgrade?: boolean
 }
 
 export interface NativeInstallationFiles {
@@ -264,7 +265,10 @@ export async function createNodeMigrationCommand(id: number, input: {
 
 export async function createNativeInstallationFiles(id: number, version: string, selection: NativeInstallationSelection, signal?: AbortSignal) {
   const { data } = await client.post<NativeInstallationFiles>(`/admin/servers/${id}/node-installation-files`,
-    { version, method: selection.method, ...(selection.method === 'manual' ? { os: selection.os, arch: selection.arch } : {}) },
+    { version, method: selection.method,
+      ...(selection.method === 'manual' ? { os: selection.os, arch: selection.arch } : {}),
+      ...(selection.method === 'docker' && selection.dockerRemoteUpgrade ? { docker_remote_upgrade: true } : {}),
+    },
     { signal, _skipErrorToast: true },
   )
   return data

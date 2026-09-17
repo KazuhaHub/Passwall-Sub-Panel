@@ -52,5 +52,12 @@ describe('administrator Node installation API', () => {
     expect(http.post).toHaveBeenCalledWith('/admin/servers/7/node-installation-files', {
       version: 'beta', method: 'docker',
     }, { signal, _skipErrorToast: true })
+
+    await createNativeInstallationFiles(7, 'beta', {
+      method: 'docker', os: 'linux', arch: 'amd64', dockerRemoteUpgrade: true,
+    }, signal)
+    expect(http.post).toHaveBeenLastCalledWith('/admin/servers/7/node-installation-files', {
+      version: 'beta', method: 'docker', docker_remote_upgrade: true,
+    }, { signal, _skipErrorToast: true })
   })
 })

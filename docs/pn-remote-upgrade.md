@@ -14,8 +14,9 @@ Xray/sing-box。管理员选择已发布的精确版本并确认短暂连接中�
 检查当轮报告，详细规则见 [ADR 0033](adr/0033-native-node-compatibility-and-upgrade-admission.md) 与
 [机器兼容矩阵](compat/node-v4.json)。旧 beta2 没有升级能力，需先人工升级一次并保留身份和数据。
 
-Linux/systemd 使用固定路径的独立 root helper。受管 Docker 安装使用面板生成的双服务 Compose：Agent
-保持非 root 且不挂载 Docker socket，隔离 updater 无网络但独占 socket；升级以精确 digest 拉取目标镜像，
+Linux/systemd 使用固定路径的独立 root helper。Docker 默认生成兼容 NAS 项目编辑器的单服务 Compose；
+只有管理员在安装弹窗“高级”中显式开启远程升级时，才生成双服务 Compose：Agent 保持非 root 且不挂载
+Docker socket，隔离 updater 无网络但独占 socket；升级以精确 digest 拉取目标镜像，
 通过重启、重新同步与收敛检查后提交，失败自动恢复保留的旧容器。手动 Docker 配置、单容器旧安装以及其他
 系统仍需宿主机/人工升级，不能为了方便把 socket 或特权交给 Agent。
 
