@@ -3,14 +3,14 @@ name: Test
 # Runs the Go test suite, the SPA type/build check, and a cross-platform compile
 # check. The build job cross-compiles the deployable binary for every release
 # GOOS/GOARCH (CGO off, pure Go) so a platform-specific build break is caught
-# here on push/PR instead of only when a release tag is cut. The sqlite job runs
-# the WHOLE Go suite (go test ./...). The postgres and mysql jobs run only the
-# DB-adapter package (go test ./internal/adapters/sqlstore/...) with
-# PSP_TEST_DB_KIND / PSP_TEST_DB_DSN set, so schema + every repo + the grouped /
-# scoped-settings layer run against a real server, verifying cross-dialect
-# behaviour that SQLite alone can't. Packages outside sqlstore are covered by
-# the full SQLite run and do not need to be repeated for each SQL dialect. Each
-# Go job uploads its test output as an artifact on failure for diagnosis.
+# here on push/PR instead of only when a release tag is cut. Go static checks
+# run once, while all Go packages outside internal/adapters/sqlstore are split
+# into four parallel test shards. The SQLite, PostgreSQL and MySQL jobs run the
+# DB-adapter package separately, with the latter two using real servers to
+# verify cross-dialect behaviour that SQLite alone can't. A stable aggregation
+# check collects the non-database matrix so branch protection does not depend on
+# dynamic matrix job names. Each Go test job uploads its test output as an
+# artifact on failure for diagnosis.
 
 on:
   push:
@@ -257,8 +257,8 @@ jobs:
           TARGET_RESULT: ${{ needs.build_targets.result }}
         run: test "$TARGET_RESULT" = success
 
-  sqlite:
-    name: sqlite (full suite)
+  go_static:
+    name: go (static checks)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -279,10 +279,122 @@ jobs:
       - run: go vet ./...
       - name: Reachable vulnerability check
         run: go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
+
+  go_test_matrix:
+    name: prepare Go test matrix
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v6
+        # Allow toolchain selection; setup-go exports local after installation.
+        env:
+          GOTOOLCHAIN: auto
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Verify exact preferred compiler
+        run: |
+          set -eu
+          build_toolchain=$(awk '$1 == "toolchain" { print $2 }' go.mod)
+          test -n "$build_toolchain"
+          test "$(go env GOVERSION)" = "$build_toolchain"
+          test "$(go tool compile -V | awk '{ print $3 }')" = "$build_toolchain"
+      - name: Build non-database test shards
+        id: matrix
+        shell: bash
+        run: |
+          set -euo pipefail
+          shard_count=4
+          packages=()
+          while IFS= read -r package; do
+            [[ "$package" == */internal/adapters/sqlstore ]] && continue
+            packages+=("$package")
+          done < <(go list ./...)
+
+          printf '%s\n' "${packages[@]}" | jq -R -s -c --argjson shard_count "$shard_count" '
+            split("\n")
+            | map(select(length > 0))
+            | to_entries
+            | reduce .[] as $item
+                ([range(0; $shard_count) | {shard: ., packages: []}];
+                 .[$item.key % $shard_count].packages += [$item.value])
+            | map({shard: (.shard + 1 | tostring), packages: .packages})
+            | {include: .}
+          ' > matrix.json
+          echo "matrix=$(<matrix.json)" >> "$GITHUB_OUTPUT"
+
+  go_tests:
+    name: go test (shard ${{ matrix.shard }}/4)
+    needs: go_test_matrix
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.go_test_matrix.outputs.matrix) }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v6
+        # Allow toolchain selection; setup-go exports local after installation.
+        env:
+          GOTOOLCHAIN: auto
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Verify exact preferred compiler
+        run: |
+          set -eu
+          build_toolchain=$(awk '$1 == "toolchain" { print $2 }' go.mod)
+          test -n "$build_toolchain"
+          test "$(go env GOVERSION)" = "$build_toolchain"
+          test "$(go tool compile -V | awk '{ print $3 }')" = "$build_toolchain"
+      - name: test
+        env:
+          PACKAGES: ${{ join(matrix.packages, ' ') }}
+        run: |
+          set -o pipefail
+          go test $PACKAGES 2>&1 | tee "go-test-output-${{ matrix.shard }}.txt"
+      - name: upload test output
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: go-test-output-shard-${{ matrix.shard }}
+          path: go-test-output-${{ matrix.shard }}.txt
+
+  go:
+    name: go (non-database tests)
+    runs-on: ubuntu-latest
+    needs: go_tests
+    if: ${{ always() }}
+    steps:
+      - name: Verify all non-database test shards passed
+        env:
+          TEST_RESULT: ${{ needs.go_tests.result }}
+        run: test "$TEST_RESULT" = success
+
+  sqlite:
+    name: sqlite (sqlstore dialect)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v6
+        # Allow toolchain selection; setup-go exports local after installation.
+        env:
+          GOTOOLCHAIN: auto
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Verify exact preferred compiler
+        run: |
+          set -eu
+          build_toolchain=$(awk '$1 == "toolchain" { print $2 }' go.mod)
+          test -n "$build_toolchain"
+          test "$(go env GOVERSION)" = "$build_toolchain"
+          test "$(go tool compile -V | awk '{ print $3 }')" = "$build_toolchain"
       - name: test
         run: |
           set -o pipefail
-          go test ./... 2>&1 | tee test-output.txt
+          go test ./internal/adapters/sqlstore/... 2>&1 | tee test-output.txt
       - name: upload test output
         if: failure()
         uses: actions/upload-artifact@v4
