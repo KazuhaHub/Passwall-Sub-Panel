@@ -54,11 +54,15 @@ func TestNodeInstallationFilesPrivateStableAcrossMethodsAndPlatforms(t *testing.
 						t.Fatal("private response or selected method/platform was lost")
 					}
 					credentialFiles := 0
+					expectedCredentialName := "node-credential"
+					if method == "docker" {
+						expectedCredentialName = "node-credential.txt"
+					}
 					for _, file := range result.Files {
 						if !fileName.MatchString(file.Name) || file.Content == "" {
 							t.Fatal("unsafe artifact name or empty content")
 						}
-						if file.Name == "node-credential" {
+						if file.Name == expectedCredentialName {
 							credentialFiles++
 							if !file.Sensitive || file.Content != credential+"\n" {
 								t.Fatal("credential bytes or sensitivity changed")
@@ -197,7 +201,7 @@ func TestNodeInstallationFilesDockerDefaultsToPortableSingleServiceCompose(t *te
 			compose = file.Content
 		}
 	}
-	for _, required := range []string{"services:\n", "container_name: passwall-node-server-41-agent", "image: ghcr.io/kazuhahub/passwall-node:beta", "platform: linux/arm64", "network_mode: host", "PSP_NODE_ENDPOINT: \"https://panel.example/a$$VAR'path/v1/node/sync\"", "PSP_NODE_DOCKER_REMOTE_UPGRADE: \"false\"", "./node-credential:/run/secrets/node_credential:ro", "passwall-node-data:/var/lib/passwall-node"} {
+	for _, required := range []string{"services:\n", "container_name: passwall-node-server-41-agent", "image: ghcr.io/kazuhahub/passwall-node:beta", "platform: linux/arm64", "network_mode: host", "PSP_NODE_ENDPOINT: \"https://panel.example/a$$VAR'path/v1/node/sync\"", "PSP_NODE_DOCKER_REMOTE_UPGRADE: \"false\"", "./node-credential.txt:/run/secrets/node_credential:ro", "passwall-node-data:/var/lib/passwall-node"} {
 		if !strings.Contains(compose, required) {
 			t.Fatalf("portable compose requirement absent: %s\n%s", required, compose)
 		}
@@ -221,7 +225,7 @@ func TestNodeInstallationFilesDockerDefaultsToPortableSingleServiceCompose(t *te
 			protect = strings.Join(step.Commands, "\n")
 		}
 	}
-	if !strings.Contains(protect, "chmod 0600 ./node-credential ./compose.yaml") || strings.Contains(protect, "node.env") {
+	if !strings.Contains(protect, "chmod 0600 ./node-credential.txt ./compose.yaml") || strings.Contains(protect, "node.env") {
 		t.Fatal("entrypoint compatibility weakened host credential permissions")
 	}
 }

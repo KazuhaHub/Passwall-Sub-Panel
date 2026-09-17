@@ -2220,7 +2220,7 @@
       },
       "step_description": {
         "docker": {
-          "prepare": "使用 Linux Docker Engine 与标准 Compose。新建私有项目目录，在校验或部署前将 compose.yaml、node-credential 按原文件名放在同一目录。NAS 项目编辑器必须把该目录设为项目路径。重装或更新须保留同一项目及数据卷；复用身份前先停止旧机器。",
+          "prepare": "使用 Linux Docker Engine 与标准 Compose。新建私有项目目录，在校验或部署前将 compose.yaml、node-credential.txt 按原文件名放在同一目录。NAS 项目编辑器必须把该目录设为项目路径。重装或更新须保留同一项目及数据卷；复用身份前先停止旧机器。",
           "credential": "通过私有渠道传输文件，并限制读取权限。不要将凭据放进命令参数、环境变量、命令追踪、shell 历史或共享日志。检查 Compose 版本并验证配置，任何命令失败都先停止。",
           "start": "启动生成的 Agent 服务。若已开启高级远程升级选项，还会启动无网络的隔离 updater，并且只有它会挂载等同 root 权限的 Docker socket。动态监听使用 host 网络。不要把 socket 挂进 Agent，也不要使用特权容器。",
           "check": "核对生成的服务、程序版本和 Passwall Sub Panel 中的 Agent 状态，再单独配置节点；心跳不代表代理内核已运行。启用 updater 时，它只接受官方精确版本，替换容器未完成同步与配置收敛时会恢复保留的旧容器。备份私有目录与数据卷，更新时不要运行 docker compose down --volumes。"

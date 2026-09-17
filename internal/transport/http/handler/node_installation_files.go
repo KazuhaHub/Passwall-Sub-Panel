@@ -59,7 +59,14 @@ type nodeInstallationFilesResponse struct {
 
 func renderNodeInstallationFiles(panelID int64, p nativeServerCreateResponse, r nodeInstallationFilesRequest) nodeInstallationFilesResponse {
 	result := nodeInstallationFilesResponse{Method: r.Method, OS: r.OS, Arch: r.Arch}
-	credential := nodeInstallationFile{Name: "node-credential", Content: p.Credential + "\n", Sensitive: true}
+	credentialName := "node-credential"
+	if r.Method == "docker" {
+		// NAS file managers may treat the extensionless secret source as a folder
+		// during import. Keep the manual-install contract unchanged, but make the
+		// Docker artifact unambiguously a regular text file.
+		credentialName = "node-credential.txt"
+	}
+	credential := nodeInstallationFile{Name: credentialName, Content: p.Credential + "\n", Sensitive: true}
 	if r.Method == "docker" {
 		// Keep the default file within the conservative Compose subset understood by
 		// NAS project editors as well as Docker Compose itself. Endpoint and agent ID
@@ -82,7 +89,7 @@ func renderNodeInstallationFiles(panelID int64, p nativeServerCreateResponse, r 
       PSP_NODE_ALLOW_INSECURE_HTTP: "false"
       PSP_NODE_DOCKER_REMOTE_UPGRADE: %q
     volumes:
-      - ./node-credential:/run/secrets/node_credential:ro
+      - ./node-credential.txt:/run/secrets/node_credential:ro
       - passwall-node-data:/var/lib/passwall-node
     stop_grace_period: 30s
 `, agentContainer, r.Version, platformLine, composeYAMLString(p.Endpoint), composeYAMLString(p.AgentID), fmt.Sprint(r.DockerRemoteUpgrade))
@@ -133,8 +140,8 @@ func renderNodeInstallationFiles(panelID int64, p nativeServerCreateResponse, r 
 			upgradeSummary = "The updater enables authenticated remote upgrades with automatic rollback; it accepts official exact releases only and never receives the node credential."
 		}
 		result.Steps = []nodeInstallationStep{
-			{ID: "prepare", Title: "Prepare a private installation directory", Description: "Use Linux Docker Engine with a standard Compose implementation. Unless an architecture was explicitly selected, the multi-platform image selects the host architecture. Save compose.yaml and node-credential with their exact names in the same private project directory before validating or deploying. NAS project editors must use that directory as the project path. Preserve the same project and data volume when reinstalling or updating. Stop the old machine before reusing this identity.", Commands: []string{"set -eu\numask 077\nmkdir ./passwall-node-install\nchmod 0700 ./passwall-node-install\ncd ./passwall-node-install"}},
-			{ID: "credential", Title: "Protect the credential file", Description: "Transfer the files through a private channel. Never put the credential in command arguments, environment variables, tracing, shell history or shared logs.", Commands: []string{"set -eu\nchmod 0600 ./node-credential ./compose.yaml\ndocker compose version\ndocker compose -f compose.yaml config --quiet"}},
+			{ID: "prepare", Title: "Prepare a private installation directory", Description: "Use Linux Docker Engine with a standard Compose implementation. Unless an architecture was explicitly selected, the multi-platform image selects the host architecture. Save compose.yaml and node-credential.txt with their exact names in the same private project directory before validating or deploying. NAS project editors must use that directory as the project path. Preserve the same project and data volume when reinstalling or updating. Stop the old machine before reusing this identity.", Commands: []string{"set -eu\numask 077\nmkdir ./passwall-node-install\nchmod 0700 ./passwall-node-install\ncd ./passwall-node-install"}},
+			{ID: "credential", Title: "Protect the credential file", Description: "Transfer the files through a private channel. Never put the credential in command arguments, environment variables, tracing, shell history or shared logs.", Commands: []string{"set -eu\nchmod 0600 ./node-credential.txt ./compose.yaml\ndocker compose version\ndocker compose -f compose.yaml config --quiet"}},
 			{ID: "start", Title: "Pull and start the selected container image", Description: "The default latest/beta tag follows the selected release channel; an exact version stays pinned for rollback. Start " + serviceSummary + ". Host networking is required by the Agent for PSP-managed dynamic listeners. Choose free listener ports >=1024 unless the Linux host explicitly permits non-root low ports. Do not use a privileged container or mount the Docker socket into the Agent.", Commands: []string{startCommand}},
 			{ID: "check", Title: "Verify the version and connect to PSP", Description: "Check the generated service or services, the reported version and Agent status in PSP, then configure nodes separately. Agent heartbeat alone is not proof of a running proxy core. " + upgradeSummary + " Back up this private directory and the persistent data volume; never run compose down --volumes to update.", Commands: []string{checkCommand}},
 		}
