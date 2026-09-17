@@ -14,7 +14,7 @@ RUN node scripts/gen-locale-hant.mjs --builtin
 RUN npx tsc -b && npx vite build --outDir /web/dist --emptyOutDir
 
 # Stage 2 — build the Go binary with the SPA assets embedded.
-FROM golang:1.26.8-alpine3.24 AS go-builder
+FROM golang:1.27.1-alpine3.24 AS go-builder
 ENV GOTOOLCHAIN=local GOWORK=off
 RUN apk add --no-cache git
 WORKDIR /src
