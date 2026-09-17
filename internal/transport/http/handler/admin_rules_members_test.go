@@ -28,7 +28,7 @@ func TestAdminRuleSetsSavePersistsMembersAndOptionsAndInvalidatesRenderCache(t *
 	h := NewAdminRuleSetsHandler(repo, staticRuleNodes{nodes: []*domain.Node{{ID: 42, DisplayName: "China", Enabled: true}}}, nil, func() { invalidations++ }, t.TempDir())
 
 	body := ruleSetDTO{
-		Slug: "custom", Name: "Custom", Enabled: true, Content: "- MATCH,🇨🇳 中国大陆",
+		Slug: "custom", Name: "Custom", Enabled: true, DirectSubscriptionDomain: true, Content: "- MATCH,🇨🇳 中国大陆",
 		ProxyGroupMembers: map[string][]domain.ProxyGroupMember{
 			// A load-balance group may only health-check real endpoints, so its
 			// members are proxy-side (a specific node, the node selector, and the
@@ -49,6 +49,9 @@ func TestAdminRuleSetsSavePersistsMembersAndOptionsAndInvalidatesRenderCache(t *
 	got, err := repo.GetBySlug(context.Background(), "custom")
 	if err != nil {
 		t.Fatal(err)
+	}
+	if !got.DirectSubscriptionDomain {
+		t.Fatal("direct subscription domain option was not persisted")
 	}
 	if members := got.ProxyGroupMembers["🇨🇳 中国大陆"]; len(members) != 3 || members[0].NodeID != 42 {
 		t.Fatalf("members=%#v", members)

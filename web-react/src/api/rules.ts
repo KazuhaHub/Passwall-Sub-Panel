@@ -6,6 +6,7 @@ export interface RuleSet {
   name: string
   sort: number
   enabled: boolean
+  direct_subscription_domain: boolean
   proxy_group_order: string[]
   proxy_group_members?: Record<string, ProxyGroupMember[]>
   proxy_group_options?: Record<string, ProxyGroupOptions>

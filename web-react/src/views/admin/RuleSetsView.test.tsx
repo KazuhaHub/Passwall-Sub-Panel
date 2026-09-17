@@ -4,7 +4,7 @@ import { expect, it } from 'vitest'
 import { editRow, installReads, list, mount } from '@/test/adminSaveHarness'
 import RuleSetsView from './RuleSetsView'
 
-const row = { slug: 'custom', name: 'old-name', sort: 1, enabled: true, proxy_group_order: [], content: 'rules: []' }
+const row = { slug: 'custom', name: 'old-name', sort: 1, enabled: true, direct_subscription_domain: false, proxy_group_order: [], content: 'rules: []' }
 
 it('reopens with the saved rule without reloading the stale list', async () => {
   installReads({ '/admin/rules': list([row]) })

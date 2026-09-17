@@ -1000,6 +1000,7 @@
       "name": "Name",
       "sort": "Sort",
       "enabled": "Enabled",
+      "direct_subscription_domain": "DIRECT subscription domain",
       "proxy_group_order": "Proxy group order",
       "content": "Rule content"
     },
@@ -1010,7 +1011,8 @@
       "content": "- DOMAIN-SUFFIX,example.com,DIRECT"
     },
     "hint": {
-      "proxy_group_order": "Optional; one group name per line. Unlisted groups are placed first and keep their order of first occurrence in the rule content."
+      "proxy_group_order": "Optional; one group name per line. Unlisted groups are placed first and keep their order of first occurrence in the rule content.",
+      "direct_subscription_domain": "When enabled, the subscription Base URL hostname is prepended as DOMAIN-SUFFIX,<hostname>,DIRECT. Nothing is generated without a valid subscription Base URL; when disabled, subscription updates follow the other rules."
     },
     "tabs": {
       "rules": "Rules",

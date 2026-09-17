@@ -1084,11 +1084,16 @@ type SyncTask struct {
 
 // RuleSet is one rules shard stored in the DB.
 type RuleSet struct {
-	Slug            string
-	Name            string
-	Sort            int
-	Enabled         bool
-	ProxyGroupOrder []string
+	Slug    string
+	Name    string
+	Sort    int
+	Enabled bool
+	// DirectSubscriptionDomain prepends a rule for the hostname in
+	// UISettings.SubBaseURL so clients fetch their next subscription directly.
+	// The hostname is resolved at render time so changing the public URL does
+	// not leave a stale domain in a ruleset file.
+	DirectSubscriptionDomain bool
+	ProxyGroupOrder          []string
 	// ProxyGroupMembers optionally overrides the generated choices for an
 	// individual policy group. A nil/empty map preserves the legacy
 	// name-based defaults in render.proxyGroupChoices.
