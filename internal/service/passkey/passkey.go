@@ -273,8 +273,9 @@ func (s *Service) BeginLogin(ctx context.Context) (*protocol.PublicKeyCredential
 	// session's UserVerification is Required, so force it per-ceremony here. The
 	// option flows into SessionData.UserVerification (login.go), so
 	// FinishDiscoverableLogin rejects a UV=false assertion.
-	requireUV := func(o *protocol.PublicKeyCredentialRequestOptions) {
+	requireUV := func(o *protocol.PublicKeyCredentialRequestOptions) error {
 		o.UserVerification = protocol.VerificationRequired
+		return nil
 	}
 	assertion, session, err := wa.BeginDiscoverableLogin(requireUV)
 	if err != nil {
