@@ -2183,13 +2183,15 @@
       "method_label": "选择安装方式",
       "method": {
         "linux": "面板一键安装（推荐）",
+        "github": "GitHub 公开安装器",
         "docker": "Docker",
-        "manual": "GitHub 交互安装"
+        "manual": "手动 / 离线安装包"
       },
       "method_hint": {
         "linux": "适合启用 systemd 的 Linux 服务器。面板会生成一条简短、私有且仅用于这台服务器的一键命令，安装固定版本并配置专用用户与服务。",
+        "github": "在 Linux/systemd 主机执行一条公开命令。默认安装所选频道的最新版本并立即询问 PSP 对接信息；也提供仅安装、不配置的命令。",
         "docker": "需要 Linux Docker Engine、标准 Docker Compose 与 host 网络。默认生成使用保守语法的单服务 Compose，可兼容 NAS 项目编辑器并跟随所选 latest/beta 频道。Docker 远程升级是显式高级选项，因为隔离 updater 需要挂载等同 root 权限的 Docker socket。",
-        "manual": "从公开 GitHub 仓库安装官方 Linux/systemd 版本，再在交互流程中填入此服务器的同步地址、Agent ID 与凭据；公开命令本身不包含任何私密信息。"
+        "manual": "为 Linux、macOS 或 Windows 选择已审核的准确安装包；在能访问 GitHub 的设备下载，连同面板生成的身份文件传到目标机，再离线校验并运行。"
       },
       "method_version_hint": "先选择安装方式并保存服务器，再生成该服务器的专属安装文件。切换安装方式不会轮换凭据或改变服务器身份。",
       "platform_label": "操作系统",
@@ -2204,13 +2206,14 @@
       "files_ready": "安装材料已生成。请安全保存，并仅在目标服务器使用。",
       "file_content": "安装文件：{{name}}",
       "download_file": "下载 {{name}}",
+      "download_release_file": "打开官方 {{name}}",
       "copy_file": "复制 {{name}}",
       "command_label": "步骤 {{number}}：{{title}}",
       "copy_step": "复制此步骤命令",
       "downloads_hint": "将所有文件保存到目标服务器的同一个私有目录。凭据文件在 Linux / macOS 使用 0600 权限，Windows 限制为运行账号可读取；不要分享、上传日志或提交到 Git。",
-      "manual_platform_hint": "手动方式支持 Linux / macOS / Windows 的 amd64 / arm64，均以前台命令运行，不安装 systemd 服务。依次下载准确版本发行档和 SHA256 校验和、核验、解压、保存私有凭据、核对程序版本后启动。Linux / macOS 的凭据文件权限为 0600，Windows 限制为运行账号可读取；保留原身份与数据，不要同时运行多个 Passwall Node 实例。",
+      "manual_platform_hint": "手动 / 离线方式支持 Linux / macOS / Windows 的 amd64 / arm64，均以前台命令运行，不安装 systemd。先在可联网的管理设备下载准确发行档与 SHA256SUMS.txt，连同两个身份文件传到目标机，再完全离线校验并运行。保留原身份与数据，不要同时运行多个实例。",
       "step_title": {
-        "download_verify": "下载并核验发行文件",
+        "download_verify": "核验已传入的发行文件",
         "extract": "解压程序",
         "credential": "保存私有凭据",
         "run": "核对版本并前台启动",
@@ -2220,14 +2223,14 @@
       },
       "step_description": {
         "docker": {
-          "prepare": "使用 Linux Docker Engine 与标准 Compose。新建私有项目目录，在校验或部署前将 compose.yaml、node-credential 按原文件名放在同一目录。NAS 项目编辑器必须把该目录设为项目路径。重装或更新须保留同一项目及数据卷；复用身份前先停止旧机器。",
+          "prepare": "使用 Linux Docker Engine 与标准 Compose。新建私有项目目录，在校验或部署前将 compose.yaml、node-credential 按原文件名放在同一目录。凭据保持只读，数据必须可写；NAS 上建议保留生成的命名数据卷，除非你明确配置了绑定目录及匹配的 PUID/PGID。重装或更新须保留同一项目及数据卷。",
           "credential": "通过私有渠道传输文件，并限制读取权限。不要将凭据放进命令参数、环境变量、命令追踪、shell 历史或共享日志。检查 Compose 版本并验证配置，任何命令失败都先停止。",
           "start": "启动生成的 Agent 服务。若已开启高级远程升级选项，还会启动无网络的隔离 updater，并且只有它会挂载等同 root 权限的 Docker socket。动态监听使用 host 网络。不要把 socket 挂进 Agent，也不要使用特权容器。",
           "check": "核对生成的服务、程序版本和 Passwall Sub Panel 中的 Agent 状态，再单独配置节点；心跳不代表代理内核已运行。启用 updater 时，它只接受官方精确版本，替换容器未完成同步与配置收敛时会恢复保留的旧容器。备份私有目录与数据卷，更新时不要运行 docker compose down --volumes。"
         },
         "manual": {
-          "prepare": "使用所选系统与架构的非特权账号及对应工具：Linux / macOS 需要 curl、tar、awk 和 SHA-256 工具；Windows 需要标准非管理员账号、NTFS、curl.exe，以及 PowerShell 5.1＋.NET Framework 4.7.2 或更高版本，或 PowerShell 7。新建并保护私有目录，通过私有渠道将 node-credential 和 node-config.json 按原文件名保存；不要覆盖现有安装或数据。",
-          "download_verify": "仅从官方固定 HTTPS 发行标签下载，要求校验文件中恰好有一条与所选发行档准确匹配的 SHA-256 记录。校验和验证相对于同一受信发行方的文件完整性，不是独立数字签名。任何命令失败都先停止。",
+          "prepare": "在可联网的管理设备下载页面列出的两个准确公开发行文件，再通过可信渠道把它们与 node-credential、node-config.json 一并传到目标机。目标机只需本地解压与校验工具，不需要访问 GitHub；不要覆盖已有安装或数据目录。",
+          "download_verify": "使用恰好一条匹配记录核验已经传入的发行档；命令不会访问网络。校验和验证相对于同一受信发行方的完整性，不是独立数字签名；失败时立即停止。",
           "extract": "只读取所选发行档中的准确程序文件、LICENSE 和 NOTICE，且必须是普通文件。Windows 需要 PowerShell 5.1＋.NET Framework 4.7.2 或更高版本，或 PowerShell 7，以检查 ZIP 条目属性；缺少该能力时停止，不跳过安全检查。不要解压任意路径、链接或文件所有权到系统目录；目标文件已经存在时停止并人工检查。",
           "credential": "node-config.json 只是非敏感安装参数记录，不是供 daemon 通过 --config 加载的配置。不要将凭据放进命令参数、环境变量、命令追踪、shell 历史或日志。持久化 data 目录保存身份、SQLite 计数、已下载内核及已确认运行状态；手动更新前一起备份匹配的凭据、安装记录和数据。",
           "run": "先核对程序版本，再以前台方式运行并保持终端打开。Agent 连接后在 Passwall Sub Panel 单独配置节点；Linux / macOS 非特权模式选择空闲的 1024 或以上端口。此方式不注册系统服务，也不安装 systemd 或远程升级助手；Linux 长期服务可另选推荐安装方式。复用凭据前先停止旧机器。"
@@ -2235,8 +2238,9 @@
       },
       "method_steps": {
         "linux": "1. 保存服务器并生成固定版本的私有安装脚本。\n2. 将脚本传到目标 Linux 服务器，以 root 权限执行提供的命令。\n3. 确认服务与心跳后，前往节点页面单独配置 inbound。",
+        "github": "1. 在目标 Linux/systemd 主机执行默认公开命令；除非这台服务器已保存为 Beta 频道，否则使用稳定版。\n2. 按提示输入这里显示的同步地址、Agent ID 与凭据。\n3. 需要稍后配置时才使用“仅安装”命令，之后运行 sudo pn connect 完成对接。",
         "docker": "1. 保存服务器并生成专属 Compose 与私有凭据文件。\n2. 将两个文件放入同一私有项目目录并启动 Agent；仅在需要远程升级时从“高级”启用 updater。\n3. 保留项目及数据卷，确认生成的服务与心跳后单独配置 inbound。",
-        "manual": "1. 在目标 Linux/systemd 主机执行公开 GitHub 命令。\n2. 选择稳定版或 Beta，再按提示输入此处显示的同步地址、Agent ID 与凭据。\n3. 确认服务与心跳；若交互配置中断，之后运行 pn connect 继续。"
+        "manual": "1. 选择目标系统、架构和已审核的准确版本，再生成全部专属文件。\n2. 在可联网设备下载列出的两个公开发行文件，把四个文件一起传到目标机。\n3. 按“高级”中的离线核验与前台运行步骤操作；目标机不需要访问 GitHub。"
       },
       "agent_id": "Agent ID",
       "credential": "长期节点凭据",
@@ -2245,12 +2249,15 @@
       "copy_credential": "复制凭据",
       "copy_endpoint": "复制同步地址",
       "copy_agent_id": "复制 Agent ID",
-      "github_manual_summary": "公开 GitHub 安装器不包含任何服务器凭据。它以交互方式安装所选公开版本，再调用 pn connect，让你填写下方三项信息；凭据不会进入 shell 历史。",
-      "github_install_command": "公开 GitHub 安装命令",
+      "github_manual_summary": "默认公开命令会安装 Passwall Node，并立即进入私密的 pn connect 提示；命令本身不含服务器凭据。只有需要稍后配置时才使用“仅安装”命令。",
+      "github_install_command": "GitHub 公开安装并配置命令",
+      "github_install_only_command": "可选：仅安装",
       "copy_github_command": "复制 GitHub 命令",
+      "copy_github_install_only_command": "复制仅安装命令",
       "github_values_title": "pn connect 提示时填入以下信息",
       "github_connect_hint": "如果程序安装完成但尚未配置，请运行 sudo pn connect。已配置节点不会被 pn connect 覆盖；只有明确更换身份时才使用另行确认的 pn rebind。",
       "github_advanced_hint": "公开安装器仅支持 Linux/systemd 的 amd64 与 arm64。它拒绝覆盖已有安装或无关 pn 命令，校验所选发行档，并让 daemon 与管理菜单一起安装和升级；安装命令不携带凭据。",
+      "offline_summary": "PSP 会给出全部对接信息与私有文件。请在可联网设备下载下方两个准确公开发行文件，把所有文件传到目标机，再按“高级”中的离线步骤操作。",
       "copy_command": "复制启动命令",
       "saved_confirm": "我已安全保存",
       "rotate_title": "轮换 Passwall Node 凭据",
@@ -2313,7 +2320,7 @@
       "credential_file_command": "已有安装的私有凭据文件替换命令",
       "copy_file_command": "复制文件替换命令",
       "http_warning": "当前同步地址使用明文 HTTP，凭据可能被监听。仅用于受信测试网络；生产环境请先配置公开可达的 HTTPS 同步地址。",
-      "docker_hint": "Docker 方式要求 Linux Docker Engine、标准 Compose 与 host 网络。默认单服务文件使用兼容 NAS 项目编辑器的保守语法。远程升级默认关闭；仅当此受信主机允许把等同 root 权限的 Docker socket 交给隔离 updater 时再在上方启用。保留项目和数据卷；不支持 Windows 容器 host 网络。",
+      "docker_hint": "Docker 方式要求 Linux Docker Engine、标准 Compose 与 host 网络。生成的凭据挂载保持只读是正确的；命名数据卷可写，并能避开常见 NAS 绑定目录权限问题。Agent 日志带结构化时间，Docker 默认轮转 3 个 10 MiB 日志文件。远程升级默认关闭，只在受信主机启用。",
       "docker_docs": "查看 Linux Compose 示例",
       "status_title": "Passwall Node 状态",
       "status_failed": "无法读取运行状态。",

@@ -174,7 +174,7 @@ func TestNewUsesOnlyReviewedMajorAndDoesNotFetch(t *testing.T) {
 			for i, reviewed := range catalog.reviewed {
 				versions[i] = reviewed.Version
 			}
-			if !reflect.DeepEqual(versions, []string{fixtureVersion, "v0.0.1-beta4"}) {
+			if !reflect.DeepEqual(versions, []string{fixtureVersion, "v0.0.1-beta4", "v0.0.1-beta6", "v0.0.1-beta7"}) {
 				t.Fatalf("unexpected current registry: %+v", catalog.reviewed)
 			}
 			continue
@@ -190,12 +190,12 @@ func TestNewUsesOnlyReviewedMajorAndDoesNotFetch(t *testing.T) {
 	}
 }
 
-func TestCatalogFullReviewedRegistryRetainsBeta3AndListsBeta4First(t *testing.T) {
+func TestCatalogFullReviewedRegistryRetainsReviewedReleasesAndListsNewestFirst(t *testing.T) {
 	var requested []string
 	catalog, err := New(Options{
 		HTTPClient: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 			version, ok := strings.CutPrefix(req.URL.String(), "https://api.github.com/repos/KazuhaHub/Passwall-Node/releases/tags/")
-			if !ok || (version != fixtureVersion && version != "v0.0.1-beta4") {
+			if !ok || (version != fixtureVersion && version != "v0.0.1-beta4" && version != "v0.0.1-beta6" && version != "v0.0.1-beta7") {
 				t.Fatalf("registry requested an unreviewed endpoint: %s", req.URL)
 			}
 			requested = append(requested, version)
@@ -207,17 +207,17 @@ func TestCatalogFullReviewedRegistryRetainsBeta3AndListsBeta4First(t *testing.T)
 		t.Fatal(err)
 	}
 	list, err := catalog.List(context.Background())
-	if err != nil || !reflect.DeepEqual(requested, []string{fixtureVersion, "v0.0.1-beta4"}) || len(list.Releases) != 2 || !list.CheckedAt.Equal(fixtureNow) {
+	if err != nil || !reflect.DeepEqual(requested, []string{fixtureVersion, "v0.0.1-beta4", "v0.0.1-beta6", "v0.0.1-beta7"}) || len(list.Releases) != 4 || !list.CheckedAt.Equal(fixtureNow) {
 		t.Fatalf("full registry requests=%v list=%+v err=%v", requested, list, err)
 	}
-	for i, version := range []string{"v0.0.1-beta4", fixtureVersion} {
+	for i, version := range []string{"v0.0.1-beta7", "v0.0.1-beta6", "v0.0.1-beta4", fixtureVersion} {
 		entry := list.Releases[i]
 		if entry.Version != version || entry.Channel != "testing" || entry.ReleaseURL != "https://github.com/KazuhaHub/Passwall-Node/releases/tag/"+version ||
 			!reflect.DeepEqual(entry.Methods, []string{"linux", "docker", "manual"}) || !reflect.DeepEqual(entry.Platforms, fixturePlatforms) {
 			t.Fatalf("full registry did not retain exact reviewed installation availability: %+v", entry)
 		}
 	}
-	if !strings.Contains(list.Releases[0].Notes, "startup does not prove PSP sync, core or proxy readiness") {
+	if !strings.Contains(list.Releases[2].Notes, "startup does not prove PSP sync, core or proxy readiness") {
 		t.Fatal("beta4 review lost the startup-only limitation")
 	}
 }

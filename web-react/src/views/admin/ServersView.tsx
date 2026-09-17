@@ -146,7 +146,16 @@ const EMPTY_FORM: FormState = {
 }
 
 const DEFAULT_INSTALLATION: NativeInstallationSelection = { method: 'linux', os: 'linux', arch: 'amd64' }
-export const PUBLIC_NODE_INSTALL_COMMAND = "curl --disable --fail --silent --show-error --location --proto '=https' --proto-redir '=https' --tlsv1.2 https://raw.githubusercontent.com/KazuhaHub/Passwall-Node/main/install.sh | sudo sh"
+const PUBLIC_NODE_INSTALL_BASE_COMMAND = "curl --disable --fail --silent --show-error --location --proto '=https' --proto-redir '=https' --tlsv1.2 https://raw.githubusercontent.com/KazuhaHub/Passwall-Node/main/install.sh | sudo sh"
+export function publicNodeInstallCommands(channel: NodeUpdateChannel) {
+  const args = channel === 'beta' ? ['--channel beta'] : []
+  const command = (extra: string[]) => extra.length
+    ? `${PUBLIC_NODE_INSTALL_BASE_COMMAND} -s -- ${extra.join(' ')}`
+    : PUBLIC_NODE_INSTALL_BASE_COMMAND
+  return { install: command(args), installOnly: command([...args, '--install-only']) }
+}
+export const PUBLIC_NODE_INSTALL_COMMAND = publicNodeInstallCommands('stable').install
+export const PUBLIC_NODE_INSTALL_ONLY_COMMAND = publicNodeInstallCommands('stable').installOnly
 
 function credentialsConfigured(s: Server): boolean {
 	return s.panel_type === 'psp' || s.has_api_token || s.has_password
@@ -1829,8 +1838,19 @@ function NativeInstallationMethodFields({ selection, onChange, disabled = false,
   return <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
     <TextField select fullWidth label={t('admin:servers.native.method_label')} value={selection.method} disabled={disabled}
       onChange={event => onChange({ ...selection, method: event.target.value as NativeInstallationSelection['method'] })}>
-      {(['linux', 'docker', 'manual'] as const).map(method => <MenuItem key={method} value={method}>{t(`admin:servers.native.method.${method}`)}</MenuItem>)}
+      {(['linux', 'github', 'docker', 'manual'] as const).map(method => <MenuItem key={method} value={method}>{t(`admin:servers.native.method.${method}`)}</MenuItem>)}
     </TextField>
+    {selection.method === 'manual' && <Box sx={{ display: 'flex', gap: 1.5, flexDirection: { xs: 'column', sm: 'row' } }}>
+      <TextField select fullWidth label={t('admin:servers.native.platform_label')} value={selection.os} disabled={disabled}
+        onChange={event => onChange({ ...selection, os: event.target.value as NativeInstallationSelection['os'] })}>
+        {(['linux', 'darwin', 'windows'] as const).map(os => <MenuItem key={os} value={os}>{t(`admin:servers.native.platform.${os}`)}</MenuItem>)}
+      </TextField>
+      <TextField select fullWidth label={t('admin:servers.native.architecture')} value={selection.arch} disabled={disabled}
+        onChange={event => onChange({ ...selection, arch: event.target.value as NativeInstallationSelection['arch'] })}>
+        <MenuItem value="amd64">amd64</MenuItem>
+        <MenuItem value="arm64">arm64</MenuItem>
+      </TextField>
+    </Box>}
     {!compact && <Alert severity="info" sx={{ whiteSpace: 'pre-line' }}>
       {t(`admin:servers.native.method_hint.${selection.method}`)}
       <Typography variant="body2" sx={{ mt: 1, whiteSpace: 'pre-line' }}>{t(`admin:servers.native.method_steps.${selection.method}`)}</Typography>
@@ -1846,6 +1866,11 @@ export function isNodeReleaseVersion(version: string): boolean {
 
 function isNodeDockerImageSelection(version: string): boolean {
   return version === 'latest' || version === 'beta' || isNodeReleaseVersion(version)
+}
+
+function isOfficialNodeReleaseDownload(download: { name: string; url: string }, version: string): boolean {
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/.test(download.name) || !isNodeReleaseVersion(version)) return false
+  return download.url === `https://github.com/KazuhaHub/Passwall-Node/releases/download/${version}/${download.name}`
 }
 
 function installationErrorMessage(error: unknown, fallback: string): string {
@@ -1920,9 +1945,10 @@ export function NativeInstallationDialog({ server, initialProvisioning, onClose,
   const filesRequest = useRef<AbortController | null>(null)
   const commandRequest = useRef<AbortController | null>(null)
   const serverID = server?.id
-  const versionValid = selection.method === 'manual' || (selection.method === 'docker'
+  const versionValid = selection.method === 'github' || (selection.method === 'docker'
     ? isNodeDockerImageSelection(version.trim())
     : isNodeReleaseVersion(version.trim()))
+  const publicInstallCommands = publicNodeInstallCommands(server?.update_channel === 'beta' ? 'beta' : 'stable')
 
   useEffect(() => {
     const controller = new AbortController()
@@ -2080,7 +2106,7 @@ export function NativeInstallationDialog({ server, initialProvisioning, onClose,
   }
 
   async function generateFiles() {
-    if (!server || !provisioning || !versionValid || selection.method !== 'docker' || filesBusy || rotating) return
+    if (!server || !provisioning || !versionValid || !['docker', 'manual'].includes(selection.method) || filesBusy || rotating) return
     const controller = new AbortController()
     filesRequest.current = controller
     setFilesBusy(true)
@@ -2089,10 +2115,15 @@ export function NativeInstallationDialog({ server, initialProvisioning, onClose,
     try {
       const result = await createNativeInstallationFiles(server.id, version.trim(), selection, controller.signal)
       if (controller.signal.aborted) return
-      if (result.method !== selection.method || result.os !== 'linux' ||
+      const expectedOS = selection.method === 'manual' ? selection.os : 'linux'
+      if (result.method !== selection.method || result.os !== expectedOS ||
         !Array.isArray(result.files) || !result.files.length ||
         result.files.some(file => !/^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/.test(file.name) || typeof file.content !== 'string') ||
-        !Array.isArray(result.steps)) throw new Error(t('admin:servers.native.files_failed'))
+        !Array.isArray(result.steps) || (selection.method === 'manual' &&
+          (!Array.isArray(result.downloads) || result.downloads.length !== 2 ||
+            result.downloads.some(download => !isOfficialNodeReleaseDownload(download, version.trim()))))) {
+        throw new Error(t('admin:servers.native.files_failed'))
+      }
       setFiles(result)
     } catch (error) {
       if (!controller.signal.aborted) setFilesError(installationErrorMessage(error, t('admin:servers.native.files_failed')))
@@ -2128,16 +2159,20 @@ export function NativeInstallationDialog({ server, initialProvisioning, onClose,
         </Box>
       </Box>}
       {provisioning && <>
-        {selection.method !== 'manual' && <NodeReleaseSelector compact key={serverID} enabled={!!server} selection={selection} value={version}
+        {selection.method !== 'github' && <NodeReleaseSelector compact key={serverID} enabled={!!server} selection={selection} value={version}
           initialChannel={server?.update_channel === 'beta' ? 'testing' : 'stable'}
           onChange={next => { invalidateMaterials(); setVersion(next) }} disabled={rotating} />}
         {provisioning.endpoint.startsWith('http://') && <Alert severity="warning">{t('admin:servers.native.http_warning')}</Alert>}
-        {selection.method === 'manual' ? <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+        {selection.method === 'github' ? <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
           <Alert severity="info">{t('admin:servers.native.github_manual_summary')}</Alert>
-          <TextField label={t('admin:servers.native.github_install_command')} value={PUBLIC_NODE_INSTALL_COMMAND}
+          <TextField label={t('admin:servers.native.github_install_command')} value={publicInstallCommands.install}
             fullWidth multiline minRows={2} slotProps={{ input: { readOnly: true, sx: { fontFamily: 'monospace', fontSize: 13 } } }} />
           <Button variant="contained" startIcon={<ContentCopyIcon />} sx={{ alignSelf: 'flex-start' }}
-            onClick={() => void copyToClipboard(PUBLIC_NODE_INSTALL_COMMAND)}>{t('admin:servers.native.copy_github_command')}</Button>
+            onClick={() => void copyToClipboard(publicInstallCommands.install)}>{t('admin:servers.native.copy_github_command')}</Button>
+          <TextField label={t('admin:servers.native.github_install_only_command')} value={publicInstallCommands.installOnly}
+            fullWidth multiline minRows={2} slotProps={{ input: { readOnly: true, sx: { fontFamily: 'monospace', fontSize: 13 } } }} />
+          <Button variant="outlined" startIcon={<ContentCopyIcon />} sx={{ alignSelf: 'flex-start' }}
+            onClick={() => void copyToClipboard(publicInstallCommands.installOnly)}>{t('admin:servers.native.copy_github_install_only_command')}</Button>
           <Typography variant="subtitle2">{t('admin:servers.native.github_values_title')}</Typography>
           <TextField label={t('admin:servers.native.endpoint')} value={provisioning.endpoint} fullWidth slotProps={{ input: { readOnly: true } }} />
           <TextField label={t('admin:servers.native.agent_id')} value={provisioning.agent_id} fullWidth slotProps={{ input: { readOnly: true } }} />
@@ -2149,25 +2184,38 @@ export function NativeInstallationDialog({ server, initialProvisioning, onClose,
             <Button startIcon={<ContentCopyIcon />} onClick={() => void copyToClipboard(provisioning.credential)}>{t('admin:servers.native.copy_credential')}</Button>
           </Box>
           <Typography variant="body2" color="text.secondary">{t('admin:servers.native.github_connect_hint')}</Typography>
-        </Box> : <Button variant="contained" sx={{ alignSelf: 'flex-start' }}
+        </Box> : <>
+          {selection.method === 'manual' && <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.25 }}>
+            <Alert severity="info">{t('admin:servers.native.offline_summary')}</Alert>
+            <TextField label={t('admin:servers.native.endpoint')} value={provisioning.endpoint} fullWidth slotProps={{ input: { readOnly: true } }} />
+            <TextField label={t('admin:servers.native.agent_id')} value={provisioning.agent_id} fullWidth slotProps={{ input: { readOnly: true } }} />
+            <TextField label={t('admin:servers.native.credential')} type="password" value={provisioning.credential}
+              autoComplete="off" fullWidth slotProps={{ input: { readOnly: true } }} />
+          </Box>}
+          <Button variant="contained" sx={{ alignSelf: 'flex-start' }}
           disabled={selection.method === 'linux'
             ? !canConfigure || provisioning.server.id !== serverID || !versionValid || commandBusy || rotating
             : !versionValid || filesBusy || rotating}
           startIcon={commandBusy || filesBusy ? <CircularProgress size={16} color="inherit" /> : <DownloadIcon />}
           onClick={() => void (selection.method === 'linux' ? generateInstallCommand() : generateFiles())}>
           {t(selection.method === 'linux' ? 'admin:servers.native.generate_command' : 'admin:servers.native.generate_files')}
-        </Button>}
+          </Button>
+        </>}
         {commandError && <Alert severity="error">{commandError}</Alert>}
         {filesError && <Alert severity="error">{filesError}</Alert>}
         {selection.method === 'linux' && installCommand && <NodeInstallCommand command={installCommand.command}
           expiresAt={installCommand.expires_at} disabled={commandExpired} onExpired={() => setCommandExpired(true)} />}
-        {selection.method === 'docker' && files && <>
+        {(selection.method === 'docker' || selection.method === 'manual') && files && <>
           <Typography variant="body2">{t('admin:servers.native.files_ready')}</Typography>
           <Typography variant="caption" color="text.secondary">{t('admin:servers.native.files_advanced_hint')}</Typography>
           <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
             {files.files.map(file => <Button key={file.name} variant="outlined" startIcon={<DownloadIcon />}
               onClick={() => downloadInstallationFile(file.name, file.content)}>
               {t('admin:servers.native.download_file', { name: file.name })}
+            </Button>)}
+            {files.downloads?.map(download => <Button key={download.name} component="a" href={download.url}
+              target="_blank" rel="noopener noreferrer" variant="outlined" startIcon={<DownloadIcon />}>
+              {t('admin:servers.native.download_release_file', { name: download.name })}
             </Button>)}
           </Box>
         </>}
@@ -2188,7 +2236,7 @@ export function NativeInstallationDialog({ server, initialProvisioning, onClose,
         <AccordionDetails sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
           {server && !newServer && <Typography variant="body2">{t('admin:servers.passwall_node_install.existing_hint')}</Typography>}
           <Typography variant="body2">{t('admin:servers.native.private_warning')}</Typography>
-          {selection.method !== 'manual' && <>
+          {selection.method !== 'github' && selection.method !== 'manual' && <>
             <TextField label={t('admin:servers.native.agent_id')} value={provisioning.agent_id} fullWidth slotProps={{ input: { readOnly: true } }} />
             <TextField label={t('admin:servers.native.endpoint')} value={provisioning.endpoint} fullWidth slotProps={{ input: { readOnly: true } }} />
             <TextField label={t('admin:servers.native.credential')} type="password" value={provisioning.credential}
@@ -2229,8 +2277,8 @@ export function NativeInstallationDialog({ server, initialProvisioning, onClose,
             <TextField label={t('admin:servers.native.run_script_command')}
               value={`chmod 0600 ./passwall-node-install-${provisioning.agent_id}.sh\nsudo bash ./passwall-node-install-${provisioning.agent_id}.sh`}
               fullWidth multiline minRows={2} slotProps={{ input: { readOnly: true } }} />
-          </> : selection.method === 'docker' ? <>
-            <Typography variant="body2">{t('admin:servers.native.docker_hint')}</Typography>
+          </> : selection.method === 'docker' || selection.method === 'manual' ? <>
+            <Typography variant="body2">{t(selection.method === 'docker' ? 'admin:servers.native.docker_hint' : 'admin:servers.native.manual_platform_hint')}</Typography>
             {files && <>
               <Typography variant="body2">{t('admin:servers.native.downloads_hint')}</Typography>
             {files.files.map(file => <Box component="section" aria-label={file.name} key={file.name} sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
