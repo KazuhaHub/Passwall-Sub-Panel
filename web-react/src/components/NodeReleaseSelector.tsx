@@ -15,6 +15,8 @@ export interface NodeReleaseSelectorProps {
   initialChannel?: NodeReleaseChannel
   /** Installation keeps publication metadata folded; upgrades retain their full review surface. */
   compact?: boolean
+  /** Upgrade flows can opt into selecting the newest reviewed release automatically. */
+  autoSelectLatest?: boolean
 }
 
 function supportsSelection(release: NodeRelease, selection: NativeInstallationSelection): boolean {
@@ -36,7 +38,7 @@ function officialReleaseURL(release: NodeRelease): string | undefined {
   return release.release_url === expected ? expected : undefined
 }
 
-export default function NodeReleaseSelector({ enabled, selection, value, onChange, disabled = false, initialChannel = 'stable', compact = false }: NodeReleaseSelectorProps) {
+export default function NodeReleaseSelector({ enabled, selection, value, onChange, disabled = false, initialChannel = 'stable', compact = false, autoSelectLatest = false }: NodeReleaseSelectorProps) {
   const { t, i18n } = useTranslation(['admin', 'common'])
   const reviewID = useId()
   const [channel, setChannel] = useState<NodeReleaseChannel>(initialChannel)
@@ -104,7 +106,8 @@ export default function NodeReleaseSelector({ enabled, selection, value, onChang
       return
     }
     if (value && !acceptedValue) onChangeRef.current('')
-  }, [acceptedValue, channelTag, enabled, failed, loading, options.length, releases, selection.method, value])
+    if (autoSelectLatest && !disabled && !value && options.length > 0) onChangeRef.current(options[0].version)
+  }, [acceptedValue, autoSelectLatest, channelTag, disabled, enabled, failed, loading, options, releases, selection.method, value])
 
   if (!enabled) return null
   const published = selected && new Date(selected.published_at)
@@ -149,8 +152,8 @@ export default function NodeReleaseSelector({ enabled, selection, value, onChang
         {t(channel === 'stable' ? 'admin:servers.native.release_follow_stable' : 'admin:servers.native.release_follow_testing')}
         {` (${t('admin:servers.native.release_recommended')})`}
       </MenuItem>}
-      {options.map(release => <MenuItem key={release.version} value={release.version} aria-label={release.version}>
-        {release.version}
+      {options.map((release, index) => <MenuItem key={release.version} value={release.version} aria-label={release.version}>
+        {release.version}{index === 0 ? ` (${t('admin:servers.native.release_recommended')})` : ''}
       </MenuItem>)}
     </TextField>
     </Stack>
