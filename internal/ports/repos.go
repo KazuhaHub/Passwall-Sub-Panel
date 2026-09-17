@@ -782,8 +782,8 @@ type TemplateRepo interface {
 }
 
 // LocaleRepo persists runtime-uploaded UI language packs as one JSON file per
-// language under <ConfigDir>/locales/. Packs are additive on top of the two
-// compiled-in built-ins (zh-CN / en-US); there is no seed/reset for them.
+// language under <ConfigDir>/locales/. Packs are additive on top of the three
+// compiled-in built-ins (zh-CN / zh-TW / en-US); there is no seed/reset for them.
 type LocaleRepo interface {
 	// List returns the manifest (codes/names/etags, no translation bodies).
 	List(ctx context.Context) ([]domain.LocaleMeta, error)

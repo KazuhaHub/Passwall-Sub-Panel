@@ -25,7 +25,7 @@ var Namespaces = []string{"common", "appearance", "language", "auth", "nav", "ad
 // reserved are the built-in language codes compiled into the SPA bundle. Uploaded
 // packs must not collide with them: the built-ins are the always-present fallback
 // and can never be overwritten or deleted via this feature.
-var reserved = map[string]bool{"zh-CN": true, "en-US": true}
+var reserved = map[string]bool{"zh-CN": true, "zh-TW": true, "en-US": true}
 
 // codePattern mirrors the file-safe slug rule used by the YAML config repos
 // (letters/digits/'_'/'-'), which is also a valid i18next code shape and blocks

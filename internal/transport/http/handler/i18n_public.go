@@ -21,7 +21,7 @@ func NewI18nPublicHandler(repo ports.LocaleRepo) *I18nPublicHandler {
 	return &I18nPublicHandler{repo: repo}
 }
 
-// Langs returns the manifest of uploaded packs (the SPA already knows the two
+// Langs returns the manifest of uploaded packs (the SPA already knows the three
 // compiled-in built-ins). Body-less rows keep this cheap on the boot path.
 func (h *I18nPublicHandler) Langs(c *gin.Context) {
 	metas, err := h.repo.List(c.Request.Context())

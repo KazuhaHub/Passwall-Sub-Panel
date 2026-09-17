@@ -5,3 +5,4 @@ dist-ssr
 .vite
 .DS_Store
 scripts/generated
+src/locales/zh-TW

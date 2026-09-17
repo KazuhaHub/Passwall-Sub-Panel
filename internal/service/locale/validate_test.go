@@ -57,7 +57,7 @@ func TestValidate_BadCode(t *testing.T) {
 }
 
 func TestValidate_ReservedCode(t *testing.T) {
-	for _, code := range []string{"zh-CN", "en-US"} {
+	for _, code := range []string{"zh-CN", "zh-TW", "en-US"} {
 		p := validPack()
 		p.Code = code
 		if err := Validate(p); !errors.Is(err, domain.ErrValidation) {
@@ -103,7 +103,7 @@ func TestValidate_NonStringLeaf(t *testing.T) {
 }
 
 func TestIsReserved(t *testing.T) {
-	if !IsReserved("zh-CN") || !IsReserved("en-US") {
+	if !IsReserved("zh-CN") || !IsReserved("zh-TW") || !IsReserved("en-US") {
 		t.Fatal("built-in codes must be reserved")
 	}
 	if IsReserved("fr-FR") {

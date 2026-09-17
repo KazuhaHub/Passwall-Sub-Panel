@@ -7,15 +7,19 @@
 // whenever src/locales/zh-CN/* changes — zero maintenance.
 //
 // Usage:
-//   node scripts/gen-locale-hant.mjs            # default: zh-TW (Taiwan, s2twp)
-//   node scripts/gen-locale-hant.mjs zh-TW zh-HK
+//   node scripts/gen-locale-hant.mjs                  # pack for admin upload
+//   node scripts/gen-locale-hant.mjs zh-TW zh-HK      # upload packs
+//   node scripts/gen-locale-hant.mjs --builtin        # built-in zh-TW locale files
+//   node scripts/gen-locale-hant.mjs --builtin zh-TW # same, explicit code
 //
-// Output: scripts/generated/<code>.json — upload it on the admin "Language packs"
-// page, or drop it into the panel's <ConfigDir>/locales/.
+// Normal output: scripts/generated/<code>.json — upload it on the admin
+// "Language packs" page, or drop it into the panel's <ConfigDir>/locales/.
+// Built-in output: src/locales/<code>/*.json — generated before the Vite build
+// so the compiled SPA always ships the current Traditional-Chinese resources.
 //
 // Safety: only string VALUES are converted; object KEYS (i18next dotted
-// identifiers) and interpolation placeholders like {{count}} are left untouched
-// (OpenCC never rewrites ASCII / braces).
+// identifiers) and every {{...}} placeholder are left untouched, including
+// placeholders whose Go-template field name contains Chinese characters.
 
 import { readdirSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { dirname, join } from 'node:path'
@@ -26,6 +30,7 @@ import * as OpenCC from 'opencc-js'
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const SRC_DIR = join(__dirname, '..', 'src', 'locales', 'zh-CN')
 const OUT_DIR = join(__dirname, 'generated')
+const BUILTIN_DIR = join(__dirname, '..', 'src', 'locales')
 
 // Pack format version — keep in sync with service/locale.Format (backend) and
 // LANGUAGE_PACK_FORMAT (web-react/src/i18n/index.ts).
@@ -53,7 +58,7 @@ function panelVersion() {
 // convertDeep walks a translation tree, converting only string leaves. Keys and
 // placeholders are preserved verbatim.
 function convertDeep(value, convert) {
-  if (typeof value === 'string') return convert(value)
+  if (typeof value === 'string') return convertText(value, convert)
   if (Array.isArray(value)) return value.map(v => convertDeep(v, convert))
   if (value && typeof value === 'object') {
     const out = {}
@@ -63,13 +68,26 @@ function convertDeep(value, convert) {
   return value
 }
 
-function buildPack(code) {
+// OpenCC must not translate identifiers inside interpolation or Go-template
+// expressions. Protect the complete {{...}} spans with ASCII sentinels while
+// converting the surrounding prose, then restore the exact original bytes.
+function convertText(value, convert) {
+  const placeholders = []
+  const protectedValue = value.replace(/{{[\s\S]*?}}/g, match => {
+    const token = `__PSP_OPENCC_PLACEHOLDER_${placeholders.length}__`
+    placeholders.push([token, match])
+    return token
+  })
+  const converted = convert(protectedValue)
+  return placeholders.reduce((text, [token, original]) => text.replace(token, original), converted)
+}
+
+function convertedNamespaces(code) {
   const variant = VARIANTS[code]
   if (!variant) {
     throw new Error(`unknown variant ${code}; known: ${Object.keys(VARIANTS).join(', ')}`)
   }
   const convert = OpenCC.Converter({ from: 'cn', to: variant.to })
-
   const namespaces = {}
   for (const file of readdirSync(SRC_DIR)) {
     if (!file.endsWith('.json')) continue
@@ -77,6 +95,15 @@ function buildPack(code) {
     const tree = JSON.parse(readFileSync(join(SRC_DIR, file), 'utf8'))
     namespaces[ns] = convertDeep(tree, convert)
   }
+  return namespaces
+}
+
+function buildPack(code) {
+  const variant = VARIANTS[code]
+  if (!variant) {
+    throw new Error(`unknown variant ${code}; known: ${Object.keys(VARIANTS).join(', ')}`)
+  }
+  const namespaces = convertedNamespaces(code)
 
   return {
     psp_language_pack: PACK_FORMAT,
@@ -89,16 +116,36 @@ function buildPack(code) {
   }
 }
 
+function writeBuiltin(code) {
+  const namespaces = convertedNamespaces(code)
+  const outDir = join(BUILTIN_DIR, code)
+  mkdirSync(outDir, { recursive: true })
+  for (const [ns, tree] of Object.entries(namespaces)) {
+    writeFileSync(join(outDir, `${ns}.json`), JSON.stringify(tree, null, 2) + '\n', 'utf8')
+  }
+  // eslint-disable-next-line no-console
+  console.log(`wrote ${outDir}  (${Object.keys(namespaces).length} namespaces)`)
+}
+
 function main() {
-  const codes = process.argv.slice(2)
+  const args = process.argv.slice(2)
+  const builtin = args.includes('--builtin')
+  const codes = args.filter(arg => arg !== '--builtin')
+  if (builtin && codes.length > 1) {
+    throw new Error('--builtin accepts at most one language code')
+  }
   const targets = codes.length ? codes : ['zh-TW']
-  mkdirSync(OUT_DIR, { recursive: true })
-  for (const code of targets) {
-    const pack = buildPack(code)
-    const outPath = join(OUT_DIR, `${code}.json`)
-    writeFileSync(outPath, JSON.stringify(pack, null, 2) + '\n', 'utf8')
-    // eslint-disable-next-line no-console
-    console.log(`wrote ${outPath}  (${Object.keys(pack.namespaces).length} namespaces)`)
+  if (builtin) {
+    for (const code of targets) writeBuiltin(code)
+  } else {
+    mkdirSync(OUT_DIR, { recursive: true })
+    for (const code of targets) {
+      const pack = buildPack(code)
+      const outPath = join(OUT_DIR, `${code}.json`)
+      writeFileSync(outPath, JSON.stringify(pack, null, 2) + '\n', 'utf8')
+      // eslint-disable-next-line no-console
+      console.log(`wrote ${outPath}  (${Object.keys(pack.namespaces).length} namespaces)`)
+    }
   }
 }
 

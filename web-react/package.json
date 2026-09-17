@@ -4,14 +4,17 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "predev": "node scripts/gen-locale-hant.mjs --builtin",
     "dev": "vite",
+    "prebuild": "node scripts/gen-locale-hant.mjs --builtin",
     "build": "tsc -b && vite build",
     "postbuild": "node scripts/restore-dist-gitkeep.mjs",
     "preview": "vite preview",
     "smoke:dist": "node scripts/smoke-dist.mjs",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
-    "gen:locale-hant": "node scripts/gen-locale-hant.mjs"
+    "gen:locale-hant": "node scripts/gen-locale-hant.mjs",
+    "gen:locale-hant:builtin": "node scripts/gen-locale-hant.mjs --builtin"
   },
   "dependencies": {
     "@codemirror/lang-yaml": "^6.1.3",

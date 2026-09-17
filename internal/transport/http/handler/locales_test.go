@@ -168,17 +168,19 @@ func TestLocalesHandler_SaveTooLarge(t *testing.T) {
 func TestLocalesHandler_DeleteReserved(t *testing.T) {
 	repo := newFakeLocaleRepo()
 	r := localeRouter(repo)
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, httptest.NewRequest(http.MethodDelete, "/api/admin/locales/zh-CN", nil))
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("delete reserved code = %d, want 400", w.Code)
+	for _, code := range []string{"zh-CN", "zh-TW"} {
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, httptest.NewRequest(http.MethodDelete, "/api/admin/locales/"+code, nil))
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("delete reserved code %s = %d, want 400", code, w.Code)
+		}
 	}
 }
 
 func TestLocalesHandler_BundleReservedOrMissing404(t *testing.T) {
 	repo := newFakeLocaleRepo()
 	r := localeRouter(repo)
-	for _, lang := range []string{"en-US", "xx-YY"} {
+	for _, lang := range []string{"en-US", "zh-TW", "xx-YY"} {
 		w := httptest.NewRecorder()
 		r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/i18n/"+lang, nil))
 		if w.Code != http.StatusNotFound {

@@ -18,7 +18,7 @@ export interface LocaleBundle {
   namespaces: Record<string, Record<string, unknown>>
 }
 
-// fetchLanguages returns the manifest of uploaded packs (the two built-ins are
+// fetchLanguages returns the manifest of uploaded packs (the three built-ins are
 // compiled in and are not listed here).
 export async function fetchLanguages(): Promise<LocaleMeta[]> {
   const res = await fetch(`${panelAPIBase}/i18n/langs`, { headers: { Accept: 'application/json' } })

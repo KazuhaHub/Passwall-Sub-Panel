@@ -4,6 +4,10 @@ WORKDIR /web
 COPY web-react/package.json web-react/package-lock.json* ./
 RUN if [ -f package-lock.json ]; then npm ci; else npm install; fi
 COPY web-react/ ./
+# Keep the source Docker build on the same generated-locale path as the CI and
+# release builds. This Dockerfile invokes Vite directly to override outDir, so
+# it cannot rely on npm's prebuild lifecycle hook.
+RUN node scripts/gen-locale-hant.mjs --builtin
 # Vite writes into ../internal/web/dist by config, but inside this stage we
 # only have /web. Redirect outDir to the local dist/ here, then copy across
 # stages.
