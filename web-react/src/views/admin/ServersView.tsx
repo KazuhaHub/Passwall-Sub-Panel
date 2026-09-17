@@ -1042,7 +1042,7 @@ export default function ServersView() {
       <Box sx={{
         display: 'inline-block', px: 1.25, py: 0.25,
         borderRadius: 1, fontSize: 12, fontWeight: 500,
-        bgcolor: bg, color: fg, whiteSpace: 'nowrap', mt: 0.25,
+        bgcolor: bg, color: fg, whiteSpace: 'nowrap',
       }}>
         {label}
       </Box>
@@ -1055,25 +1055,30 @@ export default function ServersView() {
     const updateVersion = s.panel_type === 'psp' ? nativeUpdate?.version
       : s.panel_type === 'sui' && suiReleaseVersion ? newerSUIRelease(s.panel_version, suiReleaseVersion)
       : s.update_available ? upstreamUpdateVersion : undefined
-    const updateHintStyle = {
-      display: 'block', mt: 0.25,
-      fontSize: 11, lineHeight: 1.4, fontWeight: 500,
-      color: md.tertiary, whiteSpace: 'nowrap',
+    const updateChipStyle = {
+      display: 'inline-block', px: 1.25, py: 0.25,
+      borderRadius: 1, fontSize: 12, fontWeight: 500,
+      bgcolor: md.tertiaryContainer, color: md.onTertiaryContainer,
+      whiteSpace: 'nowrap',
     }
     const updateLabel = updateVersion && t('admin:servers.update_available', {
       latest: updateVersion,
       defaultValue: 'Update available: {{latest}}',
     })
     const updateHint = updateLabel && (
-      <Typography component="div" sx={{ ...updateHintStyle, ml: badge ? 0.5 : 0 }}>
+      <Box sx={updateChipStyle}>
         {updateLabel}
-      </Typography>
+      </Box>
     )
     const stacked = (
       <Box>
         {versionText}
-        {badge}
-        {updateHint}
+        {(badge || updateHint) && (
+          <Box sx={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 0.5, mt: 0.25 }}>
+            {badge}
+            {updateHint}
+          </Box>
+        )}
         {s.panel_type === 'psp' && nodeReleaseCheckFailed && <Typography
           variant="caption" color="text.secondary">{t('admin:servers.native.update_check_failed')}</Typography>}
       </Box>
