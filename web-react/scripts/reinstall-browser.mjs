@@ -325,8 +325,8 @@ try {
   dialog = page.getByRole('dialog');
   await inspectOriginalIdentity(dialog);
   await expect(dialog.getByRole('combobox', { name: s('native.release_channel'), exact: true })).toHaveText(s('native.release_testing'));
-  await expect(dialog.getByRole('combobox', { name: s('native.agent_version'), exact: true }).locator('..').locator('input')).toHaveValue('');
-  await expect(dialog.getByRole('button', { name: s('native.generate_command'), exact: true })).toBeDisabled();
+  await expect(dialog.getByRole('combobox', { name: s('native.agent_version'), exact: true }).locator('..').locator('input')).toHaveValue(version);
+  await expect(dialog.getByRole('button', { name: s('native.generate_command'), exact: true })).toBeEnabled();
   // A temporary override must not save a second preference or replace identity.
   await dialog.getByRole('combobox', { name: s('native.release_channel'), exact: true }).click();
   await page.getByRole('option', { name: s('native.release_stable'), exact: true }).click();
