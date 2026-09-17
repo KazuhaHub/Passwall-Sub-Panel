@@ -6,3 +6,10 @@ dist-ssr
 .DS_Store
 scripts/generated
 src/locales/zh-TW
+
+# Emitted by `tsc -b` from vite.config.ts (tsconfig.node.json is composite).
+# Committing them meant every build dirtied the tree, and Vite resolves
+# vite.config.js ahead of vite.config.ts, so a stale copy silently won.
+vite.config.js
+vite.config.d.ts
+tsconfig.node.tsbuildinfo
