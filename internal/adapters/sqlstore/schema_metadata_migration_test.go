@@ -39,7 +39,7 @@ func (migrator onceColumnMetadataMigrator) ColumnTypes(value any) ([]gorm.Column
 func TestV4ValueMigrationMetadataFailureDoesNotStampOrChangeSourceAndCanRetry(t *testing.T) {
 	for _, name := range []string{"node-endpoint", "attachment-state"} {
 		t.Run(name, func(t *testing.T) {
-			db, err := openTestDB(t)
+			db, err := openIsolatedTestDB(t)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -103,7 +103,7 @@ func TestV4ValueMigrationMetadataFailureDoesNotStampOrChangeSourceAndCanRetry(t 
 }
 
 func TestV4IdentityMigrationPreservesUnexpectedOperatorIndexDefinition(t *testing.T) {
-	db, err := openTestDB(t)
+	db, err := openIsolatedTestDB(t)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -135,7 +135,7 @@ func TestV4IdentityMigrationPreservesUnexpectedOperatorIndexDefinition(t *testin
 }
 
 func TestV4BaselineIndexNormalizationPreservesReusedOperatorUniqueIndex(t *testing.T) {
-	db, err := openTestDB(t)
+	db, err := openIsolatedTestDB(t)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -162,7 +162,7 @@ func TestV4BaselineIndexNormalizationPreservesReusedOperatorUniqueIndex(t *testi
 }
 
 func TestCurrentSchemaUsesUniqueIndexesInsteadOfColumnUniqueTags(t *testing.T) {
-	db, err := openTestDB(t)
+	db, err := openIsolatedTestDB(t)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -183,7 +183,7 @@ func TestPostgresV4IdentityIndexesAreIsolatedToCurrentSchema(t *testing.T) {
 	for _, currentSchema := range []string{"public", "psp.current"} {
 		for _, baseline := range []string{"v3", "fresh"} {
 			t.Run(currentSchema+"/"+baseline, func(t *testing.T) {
-				db, err := openTestDB(t)
+				db, err := openDatabaseIsolatedTestDB(t)
 				if err != nil {
 					t.Fatal(err)
 				}

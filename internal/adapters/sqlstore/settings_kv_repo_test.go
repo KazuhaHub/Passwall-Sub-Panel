@@ -26,7 +26,7 @@ func TestKVSettings_ZeroRetentionMeansForever(t *testing.T) {
 		t.Fatalf("open: %v", err)
 	}
 	t.Cleanup(func() { sqlDB, _ := db.DB(); _ = sqlDB.Close() })
-	if err := EnsureSchema(db); err != nil {
+	if err := ensureTestSchema(db); err != nil {
 		t.Fatalf("schema: %v", err)
 	}
 	repo := newKVSettingsRepo(db)
@@ -69,7 +69,7 @@ func TestKVSettings_AuthEventRetentionFreelyEditable(t *testing.T) {
 		t.Fatalf("open: %v", err)
 	}
 	t.Cleanup(func() { sqlDB, _ := db.DB(); _ = sqlDB.Close() })
-	if err := EnsureSchema(db); err != nil {
+	if err := ensureTestSchema(db); err != nil {
 		t.Fatalf("schema: %v", err)
 	}
 	repo := newKVSettingsRepo(db)
@@ -122,7 +122,7 @@ func TestKVSettingsRoundtrip(t *testing.T) {
 			_ = sqlDB.Close()
 		}
 	})
-	if err := EnsureSchema(db); err != nil {
+	if err := ensureTestSchema(db); err != nil {
 		t.Fatalf("schema: %v", err)
 	}
 
@@ -254,7 +254,7 @@ func TestKVSettingsDefaultsOnEmpty(t *testing.T) {
 			_ = sqlDB.Close()
 		}
 	})
-	if err := EnsureSchema(db); err != nil {
+	if err := ensureTestSchema(db); err != nil {
 		t.Fatalf("schema: %v", err)
 	}
 
@@ -367,7 +367,7 @@ func TestSave_DoesNotGrowAutoIncrement(t *testing.T) {
 		t.Fatalf("open: %v", err)
 	}
 	t.Cleanup(func() { sqlDB, _ := db.DB(); _ = sqlDB.Close() })
-	if err := EnsureSchema(db); err != nil {
+	if err := ensureTestSchema(db); err != nil {
 		t.Fatalf("schema: %v", err)
 	}
 	repo := newKVSettingsRepo(db)
@@ -415,7 +415,7 @@ func TestSave_FreshEmptyTable_InsertsAll(t *testing.T) {
 		t.Fatalf("open: %v", err)
 	}
 	t.Cleanup(func() { sqlDB, _ := db.DB(); _ = sqlDB.Close() })
-	if err := EnsureSchema(db); err != nil {
+	if err := ensureTestSchema(db); err != nil {
 		t.Fatalf("schema: %v", err)
 	}
 	repo := newKVSettingsRepo(db)
@@ -447,7 +447,7 @@ func TestSave_NewKeyGetsInserted(t *testing.T) {
 		t.Fatalf("open: %v", err)
 	}
 	t.Cleanup(func() { sqlDB, _ := db.DB(); _ = sqlDB.Close() })
-	if err := EnsureSchema(db); err != nil {
+	if err := ensureTestSchema(db); err != nil {
 		t.Fatalf("schema: %v", err)
 	}
 	repo := newKVSettingsRepo(db)
@@ -494,7 +494,7 @@ func TestSave_EncryptedRoundTrip(t *testing.T) {
 		t.Fatalf("open: %v", err)
 	}
 	t.Cleanup(func() { sqlDB, _ := db.DB(); _ = sqlDB.Close() })
-	if err := EnsureSchema(db); err != nil {
+	if err := ensureTestSchema(db); err != nil {
 		t.Fatalf("schema: %v", err)
 	}
 	// Install a process-wide key for the duration of this test, then restore.
@@ -549,7 +549,7 @@ func TestKVSettingsBoolMarshal(t *testing.T) {
 			_ = sqlDB.Close()
 		}
 	})
-	if err := EnsureSchema(db); err != nil {
+	if err := ensureTestSchema(db); err != nil {
 		t.Fatalf("schema: %v", err)
 	}
 	repo := newKVSettingsRepo(db)

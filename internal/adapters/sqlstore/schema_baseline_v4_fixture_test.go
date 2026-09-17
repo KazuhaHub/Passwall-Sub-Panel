@@ -224,7 +224,7 @@ func seedV4Beta1Baseline(t *testing.T, db *gorm.DB) {
 }
 
 func TestV400Beta1BaselineUpgradePreservesConvergenceAndNativeEvidence(t *testing.T) {
-	db, err := openTestDB(t)
+	db, err := openIsolatedTestDB(t)
 	if err != nil {
 		t.Fatal(err)
 	}

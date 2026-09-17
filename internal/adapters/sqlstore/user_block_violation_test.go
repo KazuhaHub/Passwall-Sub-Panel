@@ -17,7 +17,7 @@ func TestAdvanceBlockViolationGatesOnWindow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
-	if err := EnsureSchema(db); err != nil {
+	if err := ensureTestSchema(db); err != nil {
 		t.Fatalf("schema: %v", err)
 	}
 	t.Cleanup(func() {

@@ -50,7 +50,7 @@ func TestGetByUPNResolvesCaseAndWhitespaceVariants(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
-	if err := EnsureSchema(db); err != nil {
+	if err := ensureTestSchema(db); err != nil {
 		t.Fatalf("schema: %v", err)
 	}
 	repos := NewRepos(db)
@@ -98,7 +98,7 @@ func TestCreateDuplicateUPNReportsAlreadyExists(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
-	if err := EnsureSchema(db); err != nil {
+	if err := ensureTestSchema(db); err != nil {
 		t.Fatalf("schema: %v", err)
 	}
 	repos := NewRepos(db)
@@ -140,7 +140,7 @@ func TestGetByUPNStillResolvesLegacyMixedCaseRow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
-	if err := EnsureSchema(db); err != nil {
+	if err := ensureTestSchema(db); err != nil {
 		t.Fatalf("schema: %v", err)
 	}
 	repos := NewRepos(db)
@@ -176,7 +176,7 @@ func TestConcurrentCreateSameUPNYieldsOneRow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
-	if err := EnsureSchema(db); err != nil {
+	if err := ensureTestSchema(db); err != nil {
 		t.Fatalf("schema: %v", err)
 	}
 	repos := NewRepos(db)

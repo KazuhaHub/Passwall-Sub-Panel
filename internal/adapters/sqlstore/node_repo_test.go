@@ -19,7 +19,7 @@ func newNodeTestRepo(t *testing.T) (*nodeRepo, context.Context) {
 	// t.TempDir's auto-cleanup would otherwise fail.
 	sqlDB, _ := db.DB()
 	t.Cleanup(func() { _ = sqlDB.Close() })
-	if err := EnsureSchema(db); err != nil {
+	if err := ensureTestSchema(db); err != nil {
 		t.Fatalf("schema: %v", err)
 	}
 	return &nodeRepo{db: db}, context.Background()

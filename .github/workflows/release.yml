@@ -110,10 +110,12 @@ jobs:
             exit 1
           }
           owner_lc=$(printf '%s' "$GITHUB_REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]')
-          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
-          echo "owner_lc=${owner_lc}" >> "$GITHUB_OUTPUT"
-          echo "sha=${release_sha}" >> "$GITHUB_OUTPUT"
-          echo "build_date=$(date -u +%FT%TZ)" >> "$GITHUB_OUTPUT"
+          {
+            echo "tag=${tag}"
+            echo "owner_lc=${owner_lc}"
+            echo "sha=${release_sha}"
+            echo "build_date=$(date -u +%FT%TZ)"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Set up Node.js for immutable image preflight
         uses: actions/setup-node@v6
@@ -362,7 +364,7 @@ jobs:
             fi
           done
 
-          (cd dist && sha256sum * > SHA256SUMS.txt)
+          (cd dist && sha256sum -- * > SHA256SUMS.txt)
 
       - name: Generate release body
         shell: bash

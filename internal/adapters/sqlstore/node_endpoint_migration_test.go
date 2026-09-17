@@ -19,7 +19,7 @@ type legacyNodeEndpointRow struct {
 func (legacyNodeEndpointRow) TableName() string { return "nodes" }
 
 func TestNodeEndpointMigrationSplitsLegacyValueWithoutChangingBehavior(t *testing.T) {
-	db, err := openTestDB(t)
+	db, err := openIsolatedTestDB(t)
 	if err != nil {
 		t.Fatal(err)
 	}

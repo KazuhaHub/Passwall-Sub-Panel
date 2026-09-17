@@ -19,7 +19,7 @@ func newPanelRepo(t *testing.T) *xuiPanelRepo {
 	if err != nil {
 		t.Fatalf("open test db: %v", err)
 	}
-	if err := EnsureSchema(db); err != nil {
+	if err := ensureTestSchema(db); err != nil {
 		t.Fatalf("ensure schema: %v", err)
 	}
 	return &xuiPanelRepo{db: db}

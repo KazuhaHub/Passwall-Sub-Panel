@@ -39,7 +39,7 @@ func TestXUIPanelKindSchemaRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
-	if err := EnsureSchema(db); err != nil {
+	if err := ensureTestSchema(db); err != nil {
 		t.Fatalf("schema: %v", err)
 	}
 	sqlDB, err := db.DB()

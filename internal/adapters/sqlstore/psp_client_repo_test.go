@@ -27,7 +27,7 @@ func newPSPClientTestRepo(t *testing.T) (interface {
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
-	if err := EnsureSchema(db); err != nil {
+	if err := ensureTestSchema(db); err != nil {
 		t.Fatalf("schema: %v", err)
 	}
 	t.Cleanup(func() {

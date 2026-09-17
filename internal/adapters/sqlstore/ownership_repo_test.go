@@ -13,7 +13,7 @@ import (
 // per-row column scope must match the single-row UpdateCounters; an aborted
 // batch must not partially apply.
 func TestOwnershipBatchUpdateCounters(t *testing.T) {
-	db, err := openTestDB(t)
+	db, err := openIsolatedTestDB(t)
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
@@ -108,7 +108,7 @@ func TestOwnershipBatchUpdateCounters(t *testing.T) {
 // without rows are absent (not nil-valued), and empty input returns an
 // empty non-nil map so callers don't need a guard.
 func TestOwnershipListByUsers(t *testing.T) {
-	db, err := openTestDB(t)
+	db, err := openIsolatedTestDB(t)
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
@@ -202,7 +202,7 @@ func lookupEmail(target *domain.XUIClientEntry, originals []*domain.XUIClientEnt
 // keeps the table while rows remain, drops it once empty, and afterwards reads
 // short-circuit to empty (the table is gone) instead of erroring.
 func TestOwnershipDropIfMigrated(t *testing.T) {
-	db, err := openTestDB(t)
+	db, err := openIsolatedTestDB(t)
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
@@ -258,7 +258,7 @@ func TestOwnershipDropIfMigrated(t *testing.T) {
 // depend on that external gating staying correct forever — exactly the fragile
 // implicit coupling we don't want; the repo must be self-safe.
 func TestOwnershipWritesNoopAfterDrop(t *testing.T) {
-	db, err := openTestDB(t)
+	db, err := openIsolatedTestDB(t)
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}

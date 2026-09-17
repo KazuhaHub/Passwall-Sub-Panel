@@ -3,7 +3,7 @@ package sqlstore
 import "testing"
 
 func TestServerMigrationSchemaCheckIsReadOnly(t *testing.T) {
-	db, err := openTestDB(t)
+	db, err := openIsolatedTestDB(t)
 	if err != nil {
 		t.Fatal(err)
 	}

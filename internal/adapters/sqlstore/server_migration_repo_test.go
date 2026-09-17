@@ -33,7 +33,7 @@ func newServerMigrationFixture(t *testing.T) *serverMigrationFixture {
 	previousKey := append([]byte(nil), dbSecretKey...)
 	ConfigureSecretKey("server-migration-fixture-encryption-key")
 	t.Cleanup(func() { dbSecretKey = previousKey })
-	db, err := openTestDB(t)
+	db, err := openIsolatedTestDB(t)
 	if err != nil {
 		t.Fatal(err)
 	}
