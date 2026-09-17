@@ -146,7 +146,9 @@ const EMPTY_FORM: FormState = {
   show_api_token: false, show_password: false,
 }
 
-const DEFAULT_INSTALLATION: NativeInstallationSelection = { method: 'linux', os: 'linux', arch: 'amd64' }
+const DEFAULT_INSTALLATION: NativeInstallationSelection = {
+  method: 'linux', os: 'linux', arch: 'amd64', dockerRemoteUpgrade: true,
+}
 const PUBLIC_NODE_INSTALL_BASE_COMMAND = "curl --disable --fail --silent --show-error --location --proto '=https' --proto-redir '=https' --tlsv1.2 https://raw.githubusercontent.com/KazuhaHub/Passwall-Node/main/install.sh | sudo sh"
 export function publicNodeInstallCommands(channel: NodeUpdateChannel) {
   const args = channel === 'beta' ? ['--channel beta'] : []

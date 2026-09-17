@@ -47,6 +47,7 @@ jobs:
           - v0.0.1-beta6
           - v0.0.1-beta7
           - v0.0.1-beta8
+          - v0.0.1-beta9
     steps:
       - uses: actions/checkout@v6
       - name: Checkout released Passwall Node

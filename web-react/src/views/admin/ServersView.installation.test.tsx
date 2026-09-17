@@ -345,12 +345,12 @@ describe('Passwall Node installation', () => {
     expect(generate.disabled).toBe(false)
     fireEvent.click(generate)
     await waitFor(() => expect(api.post).toHaveBeenCalledWith('/admin/servers/7/node-installation-files', {
-      version: imageTag, method: 'docker',
+      version: imageTag, method: 'docker', docker_remote_upgrade: true,
     }, expect.objectContaining({ signal: expect.any(AbortSignal) })))
     await screen.findByText('admin:servers.native.files_ready')
   })
 
-  it('keeps the Docker upgrade helper off by default and adds it only from Advanced', async () => {
+  it('enables the isolated Docker upgrade helper by default and allows opting out from Advanced', async () => {
     installReads({ '/admin/servers/7/node-agent-status': waiting })
     api.post.mockResolvedValue({ data: generatedFiles() })
     mount(<NativeInstallationDialog server={nativeServer} initialProvisioning={provisioning}
@@ -359,12 +359,12 @@ describe('Passwall Node installation', () => {
     await waitFor(() => expect(versionInput().value).toBe('latest'))
     fireEvent.click(screen.getByRole('button', { name: 'admin:servers.native.advanced' }))
     const remoteUpgrade = screen.getByRole('switch', { name: 'admin:servers.native.docker_remote_upgrade' }) as HTMLInputElement
-    expect(remoteUpgrade.checked).toBe(false)
-    fireEvent.click(remoteUpgrade)
     expect(remoteUpgrade.checked).toBe(true)
+    fireEvent.click(remoteUpgrade)
+    expect(remoteUpgrade.checked).toBe(false)
     fireEvent.click(screen.getByRole('button', { name: 'admin:servers.native.generate_files' }))
     await waitFor(() => expect(api.post).toHaveBeenCalledWith('/admin/servers/7/node-installation-files', {
-      version: 'latest', method: 'docker', docker_remote_upgrade: true,
+      version: 'latest', method: 'docker',
     }, expect.objectContaining({ signal: expect.any(AbortSignal) })))
   })
 
@@ -784,7 +784,7 @@ describe('Passwall Node installation', () => {
     fireEvent.click(screen.getByRole('button', { name: 'admin:servers.native.generate_files' }))
     await screen.findAllByLabelText('admin:servers.native.file_content')
     expect(api.post).toHaveBeenCalledWith('/admin/servers/7/node-installation-files', {
-      version: 'v1.2.3-beta.1', method: 'docker',
+      version: 'v1.2.3-beta.1', method: 'docker', docker_remote_upgrade: true,
     }, expect.objectContaining({ signal: expect.any(AbortSignal) }))
     expect(materialContents()).toEqual(materialPreviews(materials))
     const privateFile = within(screen.getByRole('region', { name: 'config/node-credential.txt' })).getByLabelText('admin:servers.native.file_content') as HTMLInputElement

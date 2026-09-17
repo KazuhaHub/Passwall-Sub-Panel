@@ -74,6 +74,21 @@
         {"os": "windows", "arch": "arm64"}
       ],
       "docker_published_tag": "v0.0.1-beta8"
+    },
+    {
+      "version": "v0.0.1-beta9",
+      "psp_major": 4,
+      "notes": "Reviewed PSP v4 agent protocol, exact release packaging and managed Docker upgrades. Docker startup now uses BusyBox-compatible ownership repair for the ./data directory; the published Alpine image is acceptance-tested with the documented ./config and ./data directory bind mounts.",
+      "methods": ["linux", "docker", "manual"],
+      "platforms": [
+        {"os": "linux", "arch": "amd64"},
+        {"os": "linux", "arch": "arm64"},
+        {"os": "darwin", "arch": "amd64"},
+        {"os": "darwin", "arch": "arm64"},
+        {"os": "windows", "arch": "amd64"},
+        {"os": "windows", "arch": "arm64"}
+      ],
+      "docker_published_tag": "v0.0.1-beta9"
     }
   ]
 }

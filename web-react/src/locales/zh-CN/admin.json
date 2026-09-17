@@ -2192,7 +2192,7 @@
       "method_hint": {
         "linux": "适合启用 systemd 的 Linux 服务器。面板会生成一条简短、私有且仅用于这台服务器的一键命令，安装固定版本并配置专用用户与服务。",
         "github": "在 Linux/systemd 主机执行一条公开命令。默认安装所选频道的最新版本并立即询问 PSP 对接信息；也提供仅安装、不配置的命令。",
-        "docker": "需要 Linux Docker Engine、标准 Docker Compose 与 host 网络。默认生成使用保守语法的单服务 Compose，可兼容 NAS 项目编辑器并跟随所选 latest/beta 频道。Docker 远程升级是显式高级选项，因为隔离 updater 需要挂载等同 root 权限的 Docker socket。",
+        "docker": "需要 Linux Docker Engine、标准 Docker Compose 与 host 网络。生成的 Compose 跟随所选 latest/beta 频道，并默认启用隔离的远程升级服务。只有 updater 挂载等同 root 权限的 Docker socket；如需最精简的 NAS 单服务部署，可在“高级”中关闭。",
         "manual": "为 Linux、macOS 或 Windows 选择已审核的准确安装包；在能访问 GitHub 的设备下载，连同面板生成的身份文件传到目标机，再离线校验并运行。"
       },
       "method_version_hint": "先选择安装方式并保存服务器，再生成该服务器的专属安装文件。切换安装方式不会轮换凭据或改变服务器身份。",
@@ -2241,7 +2241,7 @@
       "method_steps": {
         "linux": "1. 保存服务器并生成固定版本的私有安装脚本。\n2. 将脚本传到目标 Linux 服务器，以 root 权限执行提供的命令。\n3. 确认服务与心跳后，前往节点页面单独配置 inbound。",
         "github": "1. 在目标 Linux/systemd 主机执行默认公开命令；除非这台服务器已保存为 Beta 频道，否则使用稳定版。\n2. 按提示输入这里显示的同步地址、Agent ID 与凭据。\n3. 需要稍后配置时才使用“仅安装”命令，之后运行 sudo pn connect 完成对接。",
-        "docker": "1. 保存服务器并生成 compose.yaml 与 node-credential.txt。\n2. compose.yaml 放项目根目录，node-credential.txt 放进 ./config，并保留生成的 ./data；仅在需要远程升级时从“高级”启用 updater。\n3. 保留整个项目目录，确认生成的服务与心跳后单独配置 inbound。",
+        "docker": "1. 保存服务器并生成 compose.yaml 与 node-credential.txt。\n2. compose.yaml 放项目根目录，node-credential.txt 放进 ./config，并保留生成的 ./data。updater 默认启用；若主机不应暴露 Docker socket，请在“高级”中关闭。\n3. 保留整个项目目录，确认生成的服务与心跳后单独配置 inbound。",
         "manual": "1. 选择目标系统、架构和已审核的准确版本，再生成全部专属文件。\n2. 在可联网设备下载列出的两个公开发行文件，把四个文件一起传到目标机。\n3. 按“高级”中的离线核验与前台运行步骤操作；目标机不需要访问 GitHub。"
       },
       "agent_id": "Agent ID",
@@ -2294,7 +2294,7 @@
       "release_review": "版本说明与发布详情",
       "advanced": "高级：身份、私有文件及操作说明",
       "docker_remote_upgrade": "启用 Docker 远程升级",
-      "docker_remote_upgrade_hint": "默认关闭。启用后会增加隔离 updater 服务，Docker socket 只挂载到该服务。Docker socket 权限等同宿主机 root，仅在受信主机上使用。",
+      "docker_remote_upgrade_hint": "默认开启。它会增加隔离 updater 服务，Docker socket 只挂载到该服务。Docker socket 权限等同宿主机 root；不受信或权限严格的主机请关闭。",
       "reinstall_safety": "重装保留原节点与配置；请先停止旧节点实例。",
       "files_advanced_hint": "请保密保存这些文件，展开“高级”查看必要的核验与安装步骤。",
       "command_safety": "私有、仅限一次 · 在节点机以 root 执行，不是在 PSP 主机 · {{time}} 过期",
@@ -2322,7 +2322,7 @@
       "credential_file_command": "已有安装的私有凭据文件替换命令",
       "copy_file_command": "复制文件替换命令",
       "http_warning": "当前同步地址使用明文 HTTP，凭据可能被监听。仅用于受信测试网络；生产环境请先配置公开可达的 HTTPS 同步地址。",
-      "docker_hint": "Docker 方式要求 Linux Docker Engine、标准 Compose 与 host 网络。生成的宿主机挂载全部使用明确目录：./config 只读、./data 可写；启用 updater 时另用 ./upgrades。Agent 启动时会先修复 data 所有权，再降权运行；日志带结构化时间，Docker 默认轮转 3 个 10 MiB 日志文件。远程升级默认关闭，只在受信主机启用。",
+      "docker_hint": "Docker 方式要求 Linux Docker Engine、标准 Compose 与 host 网络。生成的宿主机挂载全部使用明确目录：./config 只读、./data 可写；启用 updater 时另用 ./upgrades。Agent 启动时会先修复 data 所有权，再降权运行；日志带结构化时间，Docker 默认轮转 3 个 10 MiB 日志文件。远程升级默认开启，会授予 updater 等同宿主机 root 的 Docker socket 权限；不受信主机请关闭。",
       "docker_docs": "查看 Linux Compose 示例",
       "status_title": "Passwall Node 状态",
       "status_failed": "无法读取运行状态。",

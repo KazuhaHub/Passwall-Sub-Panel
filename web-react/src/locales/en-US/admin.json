@@ -2194,7 +2194,7 @@
       "method_hint": {
         "linux": "For Linux servers running systemd. The panel generates one short, private, server-specific command that installs an exact release with a dedicated user and service.",
         "github": "Run one public command on a Linux/systemd host. By default it installs the newest selected channel and immediately asks for the PSP connection values; an install-only command is also available.",
-        "docker": "Requires Linux Docker Engine, standard Docker Compose, and host networking. The default one-service Compose uses conservative syntax for NAS project editors and follows the selected latest/beta channel. Docker remote upgrade is an explicit advanced option because its isolated updater requires the root-equivalent Docker socket.",
+        "docker": "Requires Linux Docker Engine, standard Docker Compose, and host networking. The generated Compose follows the selected latest/beta channel and enables an isolated remote-upgrade service by default. The updater alone mounts the root-equivalent Docker socket; turn it off in Advanced for a minimal one-service NAS deployment.",
         "manual": "Choose an exact reviewed package for Linux, macOS or Windows. Download it on a connected device, transfer it with the generated identity files, then verify and run it without requiring GitHub access on the target host."
       },
       "method_version_hint": "Choose an installation method and save the server before generating its installation files. Switching methods does not rotate credentials or change the server identity.",
@@ -2243,7 +2243,7 @@
       "method_steps": {
         "linux": "1. Save the server and generate the private script for an exact release.\n2. Transfer the script to the target Linux server and run the provided commands as root.\n3. Confirm the service and heartbeat, then configure inbounds separately on the Nodes page.",
         "github": "1. Run the default public command on the target Linux/systemd host; it uses Stable unless this server's saved channel is Beta.\n2. Enter the endpoint, Agent ID and credential shown here when prompted.\n3. Use the install-only command when configuration must be deferred; finish later with sudo pn connect.",
-        "docker": "1. Save the server and generate compose.yaml plus node-credential.txt.\n2. Put compose.yaml in the project root and node-credential.txt in ./config; retain the generated ./data directory. Enable the updater only from Advanced when remote upgrades are required.\n3. Preserve the complete project directory, confirm the generated service(s) and heartbeat, then configure inbounds separately.",
+        "docker": "1. Save the server and generate compose.yaml plus node-credential.txt.\n2. Put compose.yaml in the project root and node-credential.txt in ./config; retain the generated ./data directory. The updater is enabled by default; turn it off from Advanced if this host must not expose its Docker socket.\n3. Preserve the complete project directory, confirm the generated service(s) and heartbeat, then configure inbounds separately.",
         "manual": "1. Select the target OS, architecture and exact reviewed release, then generate all server-specific files.\n2. Download the listed public release files on a connected device and transfer all four files to the target.\n3. Follow the offline verification and foreground-run steps in Advanced; no target-side GitHub access is required."
       },
       "agent_id": "Agent ID",
@@ -2296,7 +2296,7 @@
       "release_review": "Release notes and publication details",
       "advanced": "Advanced: identity, private files and instructions",
       "docker_remote_upgrade": "Enable Docker remote upgrades",
-      "docker_remote_upgrade_hint": "Off by default. Enabling it adds an isolated updater service and mounts the Docker socket only there. Docker socket access is equivalent to host root; use it only on a trusted host.",
+      "docker_remote_upgrade_hint": "On by default. It adds an isolated updater service and mounts the Docker socket only there. Docker socket access is equivalent to host root; turn this off on an untrusted or tightly restricted host.",
       "reinstall_safety": "Reinstallation keeps the original nodes and configuration. Stop the old node instance first.",
       "files_advanced_hint": "Keep these files private. Open Advanced for the required verification and installation steps.",
       "command_safety": "Private, single-use command · run as root on the node host, not PSP · expires {{time}}",
@@ -2324,7 +2324,7 @@
       "credential_file_command": "Replace the private credential file in an existing installation",
       "copy_file_command": "Copy file replacement commands",
       "http_warning": "This sync endpoint uses plaintext HTTP and may expose credentials to network observers. Use only on a trusted test network; configure a publicly reachable HTTPS sync endpoint for production first.",
-      "docker_hint": "Docker requires Linux Docker Engine, standard Compose, and host networking. All generated host mounts use explicit directories: ./config is read-only, ./data is writable, and optional ./upgrades is shared only with the isolated updater. The Agent repairs data ownership before dropping privileges, emits timestamped structured logs, and Docker rotates three 10 MiB log files. Remote upgrade is off by default; enable it only on a trusted host.",
+      "docker_hint": "Docker requires Linux Docker Engine, standard Compose, and host networking. All generated host mounts use explicit directories: ./config is read-only, ./data is writable, and ./upgrades is shared only with the isolated updater when enabled. The Agent repairs data ownership before dropping privileges, emits timestamped structured logs, and Docker rotates three 10 MiB log files. Remote upgrade is on by default and grants the updater root-equivalent Docker socket access; turn it off on an untrusted host.",
       "docker_docs": "View Linux Compose example",
       "status_title": "Passwall Node status",
       "status_failed": "Could not read runtime status.",
