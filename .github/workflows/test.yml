@@ -4,19 +4,16 @@ name: Test
 # check. The build job cross-compiles the deployable binary for every release
 # GOOS/GOARCH (CGO off, pure Go) so a platform-specific build break is caught
 # here on push/PR instead of only when a release tag is cut. Go static checks
-# run once, while all Go packages outside internal/adapters/sqlstore are split
-# into four parallel test shards. The SQLite, PostgreSQL and MySQL jobs run the
-# DB-adapter package separately, with the latter two using real servers to
-# verify cross-dialect behaviour that SQLite alone can't. A stable aggregation
-# check collects the non-database matrix so branch protection does not depend on
-# dynamic matrix job names. Each Go test job uploads its test output as an
-# artifact on failure for diagnosis.
+# and non-database tests each run once. The SQLite, PostgreSQL and MySQL jobs
+# run the DB-adapter package separately; server dialects reuse an initialized
+# schema for ordinary repository tests while migration/DDL tests retain fresh
+# databases. Every Go test invocation bypasses the Go result cache and uploads
+# output on failure.
 
 on:
   push:
     branches: [main]
   pull_request:
-  merge_group:
   workflow_dispatch:
 
 env:
@@ -26,35 +23,20 @@ env:
 permissions:
   contents: read
 
+# Superseded commits do not need to keep consuming the public-runner pool. A
+# main push still runs the full suite: branch protection currently permits a
+# tested PR to merge without first updating to the latest base.
+concurrency:
+  group: test-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   node-compatibility:
-    name: node compatibility (${{ matrix.node_version }})
+    name: node compatibility (released range)
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    permissions:
-      contents: read
-    strategy:
-      fail-fast: false
-      matrix:
-        node_version:
-          - v0.0.1-beta1
-          - v0.0.1-beta2
-          - v0.0.1-beta3
-          - v0.0.1-beta4
-          - v0.0.1-beta5
-          - v0.0.1-beta6
-          - v0.0.1-beta7
-          - v0.0.1-beta8
-          - v0.0.1-beta9
     steps:
       - uses: actions/checkout@v6
-      - name: Checkout released Passwall Node
-        uses: actions/checkout@v6
-        with:
-          repository: KazuhaHub/Passwall-Node
-          ref: ${{ matrix.node_version }}
-          path: .compat/passwall-node
-          persist-credentials: false
       - uses: actions/setup-go@v6
         env:
           GOTOOLCHAIN: auto
@@ -68,21 +50,47 @@ jobs:
           test -n "$build_toolchain"
           test "$(go env GOVERSION)" = "$build_toolchain"
           test "$(go tool compile -V | awk '{ print $3 }')" = "$build_toolchain"
-      - name: Exercise the released wire contract
-        env:
-          PSP_LIVE_NODE_REPO: ${{ github.workspace }}/.compat/passwall-node
+      - name: Exercise every released wire contract
         run: |
           set -euo pipefail
-          go test -count=1 -timeout=5m ./internal/service/nodesync \
-            -run '^TestLive_RealNode(AgentContract|MigratedServerContract|TaskEvidenceReceipt|TaskExpiryContract)$' -v
+          node_repo="$RUNNER_TEMP/passwall-node"
+          git init "$node_repo"
+          git -C "$node_repo" remote add origin https://github.com/KazuhaHub/Passwall-Node.git
+          failed=0
+          for node_version in \
+            v0.0.1-beta1 v0.0.1-beta2 v0.0.1-beta3 \
+            v0.0.1-beta4 v0.0.1-beta5 v0.0.1-beta6 \
+            v0.0.1-beta7 v0.0.1-beta8 v0.0.1-beta9
+          do
+            git -C "$node_repo" fetch --force --depth=1 origin "refs/tags/$node_version"
+            git -C "$node_repo" checkout --force --detach FETCH_HEAD
+            if PSP_LIVE_NODE_REPO="$node_repo" go test -count=1 -timeout=5m \
+              ./internal/service/nodesync \
+              -run '^TestLive_RealNode(AgentContract|MigratedServerContract|TaskEvidenceReceipt|TaskExpiryContract)$' -v \
+              2>&1 | tee "node-compatibility-$node_version.txt"
+            then
+              echo "✓ $node_version"
+            else
+              echo "✗ $node_version"
+              failed=1
+            fi
+          done
+          exit "$failed"
+      - name: upload test output
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: node-compatibility-test-output
+          path: node-compatibility-*.txt
 
   node-contract:
     name: node contract (pinned published source)
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     env:
       GOWORK: "off"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: actions/setup-go@v6
         # Allow toolchain selection; setup-go exports local after installation.
         env:
@@ -171,10 +179,11 @@ jobs:
   web:
     name: web (typecheck + build + test)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Set up Node.js
         uses: actions/setup-node@v6
         with:
@@ -204,6 +213,7 @@ jobs:
   build_targets:
     name: build (${{ matrix.goos }}/${{ matrix.goarch }})
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
@@ -215,7 +225,7 @@ jobs:
           - { goos: windows, goarch: amd64 }
           - { goos: windows, goarch: arm64 }
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: actions/setup-go@v6
         # Allow toolchain selection; setup-go exports local after installation.
         env:
@@ -249,6 +259,7 @@ jobs:
   build:
     name: build (cross-compile release targets)
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     needs: build_targets
     if: ${{ always() }}
     steps:
@@ -260,8 +271,9 @@ jobs:
   go_static:
     name: go (static checks)
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: actions/setup-go@v6
         # Allow toolchain selection; setup-go exports local after installation.
         env:
@@ -280,60 +292,12 @@ jobs:
       - name: Reachable vulnerability check
         run: go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
 
-  go_test_matrix:
-    name: prepare Go test matrix
+  go:
+    name: go (non-database tests)
     runs-on: ubuntu-latest
-    outputs:
-      matrix: ${{ steps.matrix.outputs.matrix }}
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v6
-        # Allow toolchain selection; setup-go exports local after installation.
-        env:
-          GOTOOLCHAIN: auto
-        with:
-          go-version-file: go.mod
-          cache: true
-      - name: Verify exact preferred compiler
-        run: |
-          set -eu
-          build_toolchain=$(awk '$1 == "toolchain" { print $2 }' go.mod)
-          test -n "$build_toolchain"
-          test "$(go env GOVERSION)" = "$build_toolchain"
-          test "$(go tool compile -V | awk '{ print $3 }')" = "$build_toolchain"
-      - name: Build non-database test shards
-        id: matrix
-        shell: bash
-        run: |
-          set -euo pipefail
-          shard_count=4
-          packages=()
-          while IFS= read -r package; do
-            [[ "$package" == */internal/adapters/sqlstore ]] && continue
-            packages+=("$package")
-          done < <(go list ./...)
-
-          printf '%s\n' "${packages[@]}" | jq -R -s -c --argjson shard_count "$shard_count" '
-            split("\n")
-            | map(select(length > 0))
-            | to_entries
-            | reduce .[] as $item
-                ([range(0; $shard_count) | {shard: ., packages: []}];
-                 .[$item.key % $shard_count].packages += [$item.value])
-            | map({shard: (.shard + 1 | tostring), packages: .packages})
-            | {include: .}
-          ' > matrix.json
-          echo "matrix=$(<matrix.json)" >> "$GITHUB_OUTPUT"
-
-  go_tests:
-    name: go test (shard ${{ matrix.shard }}/4)
-    needs: go_test_matrix
-    strategy:
-      fail-fast: false
-      matrix: ${{ fromJSON(needs.go_test_matrix.outputs.matrix) }}
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: actions/setup-go@v6
         # Allow toolchain selection; setup-go exports local after installation.
         env:
@@ -349,34 +313,24 @@ jobs:
           test "$(go env GOVERSION)" = "$build_toolchain"
           test "$(go tool compile -V | awk '{ print $3 }')" = "$build_toolchain"
       - name: test
-        env:
-          PACKAGES: ${{ join(matrix.packages, ' ') }}
         run: |
-          set -o pipefail
-          go test $PACKAGES 2>&1 | tee "go-test-output-${{ matrix.shard }}.txt"
+          set -euo pipefail
+          mapfile -t packages < <(go list ./... | grep -v '/internal/adapters/sqlstore$')
+          test "${#packages[@]}" -gt 0
+          go test -count=1 -timeout=8m "${packages[@]}" 2>&1 | tee go-test-output.txt
       - name: upload test output
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: go-test-output-shard-${{ matrix.shard }}
-          path: go-test-output-${{ matrix.shard }}.txt
-
-  go:
-    name: go (non-database tests)
-    runs-on: ubuntu-latest
-    needs: go_tests
-    if: ${{ always() }}
-    steps:
-      - name: Verify all non-database test shards passed
-        env:
-          TEST_RESULT: ${{ needs.go_tests.result }}
-        run: test "$TEST_RESULT" = success
+          name: go-test-output
+          path: go-test-output.txt
 
   sqlite:
     name: sqlite (sqlstore dialect)
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: actions/setup-go@v6
         # Allow toolchain selection; setup-go exports local after installation.
         env:
@@ -394,7 +348,7 @@ jobs:
       - name: test
         run: |
           set -o pipefail
-          go test ./internal/adapters/sqlstore/... 2>&1 | tee test-output.txt
+          go test -count=1 -timeout=8m ./internal/adapters/sqlstore/... 2>&1 | tee test-output.txt
       - name: upload test output
         if: failure()
         uses: actions/upload-artifact@v4
@@ -405,6 +359,7 @@ jobs:
   postgres:
     name: postgres (sqlstore dialect)
     runs-on: ubuntu-latest
+    timeout-minutes: 12
     services:
       postgres:
         image: postgres:16
@@ -422,8 +377,9 @@ jobs:
     env:
       PSP_TEST_DB_KIND: postgres
       PSP_TEST_DB_DSN: postgres://psp:psp@localhost:5432/psptest?sslmode=disable
+      PSP_TEST_DB_REUSE_SCHEMA: "true"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: actions/setup-go@v6
         # Allow toolchain selection; setup-go exports local after installation.
         env:
@@ -441,7 +397,7 @@ jobs:
       - name: test
         run: |
           set -o pipefail
-          go test ./internal/adapters/sqlstore/... 2>&1 | tee test-output.txt
+          go test -count=1 -timeout=8m ./internal/adapters/sqlstore/... 2>&1 | tee test-output.txt
       - name: upload test output
         if: failure()
         uses: actions/upload-artifact@v4
@@ -452,6 +408,7 @@ jobs:
   mysql:
     name: mysql (sqlstore dialect)
     runs-on: ubuntu-latest
+    timeout-minutes: 12
     services:
       mysql:
         image: mysql:8
@@ -467,10 +424,11 @@ jobs:
           --health-retries 30
     env:
       PSP_TEST_DB_KIND: mysql
-      # {schema} is substituted with a per-test database name by openTestDB.
+      # {schema} is substituted by the test database fixture.
       PSP_TEST_DB_DSN: root:psp@tcp(127.0.0.1:3306)/{schema}?parseTime=true&multiStatements=true
+      PSP_TEST_DB_REUSE_SCHEMA: "true"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: actions/setup-go@v6
         # Allow toolchain selection; setup-go exports local after installation.
         env:
@@ -488,7 +446,7 @@ jobs:
       - name: test
         run: |
           set -o pipefail
-          go test ./internal/adapters/sqlstore/... 2>&1 | tee test-output.txt
+          go test -count=1 -timeout=8m ./internal/adapters/sqlstore/... 2>&1 | tee test-output.txt
       - name: upload test output
         if: failure()
         uses: actions/upload-artifact@v4

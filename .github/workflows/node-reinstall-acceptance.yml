@@ -33,14 +33,18 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: node-reinstall-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   systemd:
     name: Ubuntu 24.04 / published Node beta4
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
         with:
           go-version: '1.26.8'
           cache: true
@@ -63,8 +67,7 @@ jobs:
           test "$RUNNER_ENVIRONMENT" = github-hosted
           sudo --preserve-env=GITHUB_ACTIONS,RUNNER_ENVIRONMENT,PSP_NODE_REINSTALL_EPHEMERAL \
             "$RUNNER_TEMP/node-reinstall-acceptance.test" -test.v -test.run '^TestDisposableSystemdNodeReinstall$' -test.timeout 24m \
-            > "$RUNNER_TEMP/node-reinstall-acceptance.log" 2>&1
-          cat "$RUNNER_TEMP/node-reinstall-acceptance.log"
+            2>&1 | tee "$RUNNER_TEMP/node-reinstall-acceptance.log"
           test "$(grep -c '^--- PASS: TestDisposableSystemdNodeReinstall ' "$RUNNER_TEMP/node-reinstall-acceptance.log")" = 1
           ! grep -q -- '--- SKIP:' "$RUNNER_TEMP/node-reinstall-acceptance.log"
       - name: Retain bounded acceptance evidence
