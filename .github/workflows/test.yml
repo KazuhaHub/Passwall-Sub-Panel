@@ -78,7 +78,7 @@ jobs:
           exit "$failed"
       - name: upload test output
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: node-compatibility-test-output
           path: node-compatibility-*.txt
@@ -126,7 +126,7 @@ jobs:
             2>&1 | tee node-contract-output.txt
       - name: upload test output
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: node-contract-test-output
           path: node-contract-output.txt
@@ -320,7 +320,7 @@ jobs:
           go test -race -count=1 -timeout=8m ./... 2>&1 | tee test-output.txt
       - name: upload test output
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: sqlite-test-output
           path: test-output.txt
@@ -369,7 +369,7 @@ jobs:
           go test -count=1 -timeout=8m ./internal/adapters/sqlstore/... 2>&1 | tee test-output.txt
       - name: upload test output
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: postgres-test-output
           path: test-output.txt
@@ -418,7 +418,7 @@ jobs:
           go test -count=1 -timeout=8m ./internal/adapters/sqlstore/... 2>&1 | tee test-output.txt
       - name: upload test output
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: mysql-test-output
           path: test-output.txt
