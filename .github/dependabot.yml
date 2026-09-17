@@ -1,0 +1,70 @@
+# Dependency updates for passwall-sub-panel.
+#
+# This file is the only thing that keeps dependencies moving on a schedule.
+# Neither of the two vulnerability scanners available to this repository is
+# sufficient on its own:
+#
+#   - govulncheck reads the Go vulnerability database
+#   - Dependabot security updates read the GitHub Advisory Database
+#
+# GHSA-qhrp-hfff-vphr (goxmldsig, memory amplification reachable from the
+# unauthenticated SAML ACS endpoint) was in NEITHER: it is a repository-level
+# advisory that was never promoted to the global GitHub Advisory Database, so
+# both scanners reported this repository clean while it was affected. Routine
+# version updates are what close that gap, because they do not depend on an
+# advisory existing anywhere.
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+    commit-message:
+      prefix: "deps"
+    groups:
+      # Non-security libraries can land together to keep PR noise down.
+      minor-and-patch:
+        update-types:
+          - minor
+          - patch
+        exclude-patterns:
+          - "github.com/crewjam/saml"
+          - "github.com/russellhaering/goxmldsig"
+          - "github.com/beevik/etree"
+          - "github.com/go-webauthn/*"
+          - "github.com/coreos/go-oidc/*"
+          - "github.com/golang-jwt/jwt/*"
+          - "golang.org/x/crypto"
+    # Identity, XML signature and crypto libraries get their own PR each, so a
+    # bump is always reviewed on its own and never buried in a batch. etree is
+    # on this list because it, not goxmldsig, carried the actual fix for
+    # GHSA-qhrp-hfff-vphr -- an indirect dependency can be the security-
+    # relevant one.
+
+  - package-ecosystem: npm
+    directory: /web-react
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+    commit-message:
+      prefix: "deps(web)"
+    groups:
+      minor-and-patch:
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "ci"
+
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "docker"
