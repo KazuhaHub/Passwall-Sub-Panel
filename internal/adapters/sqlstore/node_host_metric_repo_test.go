@@ -2,6 +2,8 @@ package sqlstore
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"math"
 	"strings"
@@ -454,5 +456,80 @@ func TestNodeHostCountersRoundTripAtTheBoundary(t *testing.T) {
 	}
 	if samples[0].SystemCPUIOWait != nil {
 		t.Fatal("a column that was never set came back as a value")
+	}
+}
+
+// NOTHING ELSE WOULD CLEAN UP AFTER A DELETED NODE. The four telemetry tables are
+// keyed by agent id with no foreign key to cascade from, so a panel deletion that
+// did not remove them would leave history no later operation could find or
+// remove — and the interface rows in particular would outlive the sample they
+// belong to.
+//
+// It runs through the real deletion path rather than calling the repository
+// directly, because the guarantee is that DELETING A PANEL removes the telemetry,
+// not that a helper can.
+func TestDeletingANativePanelRemovesItsTelemetry(t *testing.T) {
+	db, err := openTestDB(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ensureTestSchema(db); err != nil {
+		t.Fatal(err)
+	}
+	repos := NewRepos(db)
+	ctx := context.Background()
+	digest := sha256.Sum256([]byte("pspn_0123456789abcdefghijklmnopqrstuvwxyzABCDEFG"))
+	panel := &domain.XUIPanel{Kind: domain.PanelKindPSP, Name: "native-1", URL: "psp://agt_native_1"}
+	agentIdentity := &domain.NodeAgent{
+		AgentID: "agt_native_1", CredentialSHA256: hex.EncodeToString(digest[:]),
+	}
+	if err := repos.NativeAgentProvisioning.Create(ctx, panel, agentIdentity); err != nil {
+		t.Fatal(err)
+	}
+	// The deletion only proceeds once every converged stream is empty.
+	now := time.Now().UTC()
+	emptyConfig, _, err := repos.NodeAgent.MintStream(ctx, agentIdentity.AgentID,
+		domain.NodeAgentStreamConfig, []byte(`{"listeners":[],"coverage":{}}`), now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := repos.NodeAgent.RecordApplied(ctx, agentIdentity.AgentID, domain.NodeAgentStreamConfig,
+		agentIdentity.Epoch, emptyConfig.DesiredVersion, emptyConfig.DesiredETag, now); err != nil {
+		t.Fatal(err)
+	}
+
+	agentID, sampleID := agentIdentity.AgentID, strings.Repeat("a", 32)
+	if _, err := repos.NodeHostMetric.Persist(ctx, domain.NodeHostPersistRequest{
+		Observation: hostObservation(agentID, sampleID, strings.Repeat("b", 64), hostBaseTime),
+		Sample:      hostSample(agentID, sampleID, strings.Repeat("b", 64), hostBaseTime),
+		Interfaces:  hostInterfaces(agentID, sampleID, hostBaseTime),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repos.NodeHostMetric.UpsertHourly(ctx, []domain.NodeHostMetricHourly{{
+		BucketStart: hostBaseTime.Truncate(time.Hour), AgentID: agentID, SampleCount: 1, CoverageSeconds: 60,
+	}}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := repos.NativeAgentProvisioning.DeleteConverged(ctx, panel.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repos.NodeHostMetric.Latest(ctx, agentID); err == nil {
+		t.Fatal("the snapshot outlived the panel")
+	}
+	samples, err := repos.NodeHostMetric.RawRange(ctx, agentID, hostBaseTime.Add(-time.Hour), hostBaseTime.Add(time.Hour), false)
+	if err != nil || len(samples) != 0 {
+		t.Fatalf("history outlived the panel: %d rows, %v", len(samples), err)
+	}
+	// The interface rows matter most: they are keyed by the sample they belong
+	// to, so leaving them behind would draw gaps nobody could explain.
+	interfaces, err := repos.NodeHostMetric.InterfaceRange(ctx, agentID, "eth0", hostBaseTime.Add(-time.Hour), hostBaseTime.Add(time.Hour))
+	if err != nil || len(interfaces) != 0 {
+		t.Fatalf("interface rows outlived the panel: %d rows, %v", len(interfaces), err)
+	}
+	hourly, err := repos.NodeHostMetric.HourlyRange(ctx, agentID, hostBaseTime.Add(-time.Hour), hostBaseTime.Add(time.Hour))
+	if err != nil || len(hourly) != 0 {
+		t.Fatalf("hourly rows outlived the panel: %d rows, %v", len(hourly), err)
 	}
 }

@@ -175,10 +175,10 @@ type nodeInterfaceMetricSampleRow struct {
 	// rows by id, and the three dialects disagree about whether DELETE ... LIMIT
 	// exists.
 	ID             int64  `gorm:"primaryKey;autoIncrement"`
-	AgentID        string `gorm:"not null;size:64;uniqueIndex:idx_node_iface_sample,priority:1"`
+	AgentID        string `gorm:"not null;size:64;uniqueIndex:idx_node_iface_sample,priority:1;index:idx_node_iface_agent,priority:1"`
 	SampleID       string `gorm:"not null;size:32;uniqueIndex:idx_node_iface_sample,priority:2"`
 	InterfaceIndex int    `gorm:"not null;uniqueIndex:idx_node_iface_sample,priority:3"`
-	InterfaceName  string `gorm:"not null;size:64"`
+	InterfaceName  string `gorm:"not null;size:64;index:idx_node_iface_agent,priority:2"`
 	IsDefaultIPv4  bool   `gorm:"not null"`
 	IsDefaultIPv6  bool   `gorm:"not null"`
 	MTU            int    `gorm:"not null"`
@@ -192,7 +192,7 @@ type nodeInterfaceMetricSampleRow struct {
 	TXPackets      int64     `gorm:"not null"`
 	TXErrors       int64     `gorm:"not null"`
 	TXDropped      int64     `gorm:"not null"`
-	ReceivedAt     time.Time `gorm:"not null;index:idx_node_iface_received,priority:1"`
+	ReceivedAt     time.Time `gorm:"not null;index:idx_node_iface_agent,priority:3"`
 }
 
 func (nodeInterfaceMetricSampleRow) TableName() string { return "node_interface_metric_samples" }

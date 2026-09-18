@@ -356,6 +356,26 @@ func (r *nativeAgentProvisioningRepo) DeleteConverged(ctx context.Context, panel
 		if err := tx.Where("agent_id = ?", agent.AgentID).Delete(&nodeAgentStreamRow{}).Error; err != nil {
 			return err
 		}
+		// Host telemetry goes with the agent, IN THIS TRANSACTION. Nothing else
+		// would clean it up — the four tables are keyed by agent id with no
+		// foreign key to cascade from — and a panel deleted halfway would leave
+		// history that no later operation could find or remove.
+		//
+		// Interfaces first, then the samples they belong to: an interruption
+		// between the two would otherwise leave interface rows whose sample is
+		// gone, which an interface chart draws as unexplained gaps.
+		if err := tx.Where("agent_id = ?", agent.AgentID).Delete(&nodeInterfaceMetricSampleRow{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("agent_id = ?", agent.AgentID).Delete(&nodeHostMetricSampleRow{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("agent_id = ?", agent.AgentID).Delete(&nodeHostMetricHourlyRow{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("agent_id = ?", agent.AgentID).Delete(&nodeHostObservationRow{}).Error; err != nil {
+			return err
+		}
 		if err := tx.Delete(&nodeAgentRow{}, agent.ID).Error; err != nil {
 			return err
 		}
