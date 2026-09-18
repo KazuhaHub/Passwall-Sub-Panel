@@ -494,7 +494,12 @@ export default function MeView() {
     } finally { setRulesBusy(false) }
   }
 
-  if (loading) {
+  // Only the FIRST load may take the page down. A refresh triggered by a child
+  // dialog's onChanged() must not: tearing the tree down unmounts that dialog,
+  // and PasskeyDialog loses the one-time recovery codes it was just handed
+  // between the server returning them and the user seeing them. The server
+  // returns them exactly once, so losing them there is losing them for good.
+  if (loading && !profile) {
     return <Box sx={{ p: 3, display: 'grid', placeItems: 'center', minHeight: 400 }}><CircularProgress /></Box>
   }
   if (!profile) return null
