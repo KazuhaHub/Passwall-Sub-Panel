@@ -1,0 +1,27 @@
+# How long each package takes under `go test -race`, used only to balance shards.
+#
+# ONLY THE HEAVY PACKAGES ARE LISTED. Race cost here is a tight body (median
+# 3.0s) with a handful of outliers, so packing from these ten measured within 1%
+# of packing from the complete package list — the outliers are the only entries
+# worth recording, and everything unlisted takes the planner's default.
+#
+# A NEW PACKAGE NEEDS NO ENTRY HERE. The planner takes its package list from
+# `go list`, so an unlisted package still runs, on its default weight. Nothing
+# about correctness depends on this file; only balance does.
+#
+# Seconds are wall-clock from one 2026-09-18 darwin/arm64 run under `-race` with
+# a warm build cache. They are RELATIVE WEIGHTS for packing, not a prediction of
+# the CI runner's timings, and they should be refreshed when the shape of the
+# suite changes rather than trusted indefinitely.
+#
+# <seconds> <import path>
+70.4 github.com/KazuhaHub/passwall-sub-panel/internal/adapters/sqlstore
+45.1 github.com/KazuhaHub/passwall-sub-panel/internal/pkg/nodebootstrap
+18.4 github.com/KazuhaHub/passwall-sub-panel/cmd/panel
+18.1 github.com/KazuhaHub/passwall-sub-panel/internal/service/health
+15.2 github.com/KazuhaHub/passwall-sub-panel/internal/service/nodesync
+8.0 github.com/KazuhaHub/passwall-sub-panel/internal/transport/http/handler
+6.8 github.com/KazuhaHub/passwall-sub-panel/internal/service/nodeagentupgrade
+6.0 github.com/KazuhaHub/passwall-sub-panel/internal/app
+5.4 github.com/KazuhaHub/passwall-sub-panel/internal/adapters/acme
+5.2 github.com/KazuhaHub/passwall-sub-panel/internal/version

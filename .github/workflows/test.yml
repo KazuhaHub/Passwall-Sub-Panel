@@ -293,10 +293,46 @@ jobs:
       - name: Reachable vulnerability check
         run: go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
 
-  sqlite:
-    name: sqlite (full suite, race)
+  # The race suite is sharded, not split by hand. A plan job divides the packages
+  # by measured cost and the shards run in parallel; `sqlite (full suite, race)`
+  # becomes a gate over them rather than the run itself.
+  #
+  # THE GATE KEEPS THE OLD JOB'S NAME ON PURPOSE. Branch protection requires
+  # that exact context, and a matrix reports as several checks — so a split that
+  # renamed the job would leave the required context unproduced and block every
+  # merge on main.
+  race-plan:
+    name: plan race shards
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: partition the suite
+        id: plan
+        run: |
+          set -euo pipefail
+          matrix=$(.github/scripts/plan-race-shards.sh \
+            --shards 4 --weights .github/race-shard-weights.txt)
+          echo "matrix<<RACE_PLAN_EOF" >> "$GITHUB_OUTPUT"
+          echo "$matrix" >> "$GITHUB_OUTPUT"
+          echo "RACE_PLAN_EOF" >> "$GITHUB_OUTPUT"
+
+  race-shard:
+    name: race shard
+    needs: race-plan
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    strategy:
+      # A failing shard must not cancel its siblings: the reason to shard is to
+      # see every failure in one run, and fail-fast would hide the rest.
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.race-plan.outputs.matrix) }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
@@ -316,15 +352,29 @@ jobs:
       - name: test
         run: |
           set -o pipefail
-          # Keep one canonical full-suite race run. PostgreSQL/MySQL below focus
-          # on dialect correctness without multiplying race-detector runtime.
-          go test -race -count=1 -timeout=8m ./... 2>&1 | tee test-output.txt
+          # Still one canonical full-suite race run: the shards are a partition
+          # of the same package set, so every package is covered exactly once.
+          # PostgreSQL/MySQL below focus on dialect correctness without
+          # multiplying race-detector runtime.
+          go test -race -count=1 -timeout=8m ${{ matrix.packages }} 2>&1 | tee test-output.txt
       - name: upload test output
         if: failure()
         uses: actions/upload-artifact@v7
         with:
-          name: sqlite-test-output
+          name: race-shard-${{ matrix.index }}-test-output
           path: test-output.txt
+
+  sqlite:
+    name: sqlite (full suite, race)
+    needs: race-shard
+    # always() so a failed, cancelled or never-planned shard still produces a
+    # verdict here. A skipped gate would report as a missing required check,
+    # which reads as "not run" rather than "failed".
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: every shard passed
+        run: test "${{ needs.race-shard.result }}" = success
 
   postgres:
     name: postgres (sqlstore dialect)
