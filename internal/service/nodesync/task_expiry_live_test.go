@@ -50,7 +50,7 @@ func TestLive_RealNodeTaskExpiryContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(fixtureDir) })
-	if err := os.WriteFile(filepath.Join(fixtureDir, "main.go"), []byte(realNodeTaskExpiryFixture), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(fixtureDir, "main.go"), []byte(nodeFixture(t, nodeRepo, realNodeTaskExpiryFixture)), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -419,7 +419,7 @@ func run() (runErr error) {
 			CoreVersion: "coreless", CoreState: "running", Store: store, Capabilities: worker.Capabilities()},
 		Syncer: syncer, Store: store, Processor: processor, TaskClock: clock,
 	}
-	if _, err := synchronizer.SyncOnce(ctx, false); err != nil { return fmt.Errorf("initial deadline offer: %w", err) }
+	if _, err := synchronizer.SyncOnce(ctx, false/*psp:host*/); err != nil { return fmt.Errorf("initial deadline offer: %w", err) }
 	if len(syncer.response.Tasks) != 1 || syncer.response.Tasks[0].ID != os.Args[4] || syncer.response.Tasks[0].NotAfterMS != deadlineMS {
 		return fmt.Errorf("real PSP did not offer protected task: %+v", syncer.response.Tasks)
 	}
@@ -449,9 +449,9 @@ func run() (runErr error) {
 	if mode == "late-completion-terminal-replay" {
 		select { case <-ready: case <-ctx.Done(): return ctx.Err() }
 		if err := checkTerminal("started fresh and completed late", false); err != nil { return err }
-		if _, err := synchronizer.SyncOnce(ctx, true); err != nil { return fmt.Errorf("late result receipt and terminal replay: %w", err) }
+		if _, err := synchronizer.SyncOnce(ctx, true/*psp:host*/); err != nil { return fmt.Errorf("late result receipt and terminal replay: %w", err) }
 		if err := checkTerminal("expired terminal replay rearmed exact result", false); err != nil { return err }
-		if _, err := synchronizer.SyncOnce(ctx, true); err != nil { return fmt.Errorf("terminal replay result receipt: %w", err) }
+		if _, err := synchronizer.SyncOnce(ctx, true/*psp:host*/); err != nil { return fmt.Errorf("terminal replay result receipt: %w", err) }
 		if err := checkTerminal("terminal replay ACK", true); err != nil { return err }
 		task, err := store.Task(ctx, os.Args[4])
 		if err != nil { return err }
@@ -462,7 +462,7 @@ func run() (runErr error) {
 	}
 	if err := checkUnknown("complete body crossed start deadline", 1); err != nil { return err }
 	for round := 2; round <= 3; round++ {
-		result, err := synchronizer.SyncOnce(ctx, true)
+		result, err := synchronizer.SyncOnce(ctx, true/*psp:host*/)
 		if err != nil { return fmt.Errorf("unknown journal replay round %d: %w", round, err) }
 		if result.ReportImmediately { return fmt.Errorf("duplicate fenced replay caused immediate-poll loop at round %d", round) }
 		if err := checkUnknown(fmt.Sprintf("replay round %d after Issue ACK", round), 0); err != nil { return err }

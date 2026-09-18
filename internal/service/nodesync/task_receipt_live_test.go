@@ -171,7 +171,7 @@ func TestLive_RealNodeTaskEvidenceReceipt(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(fixtureDir) })
 	fixturePath := filepath.Join(fixtureDir, "main.go")
-	if err := os.WriteFile(fixturePath, []byte(realNodeTaskReceiptFixture), 0o600); err != nil {
+	if err := os.WriteFile(fixturePath, []byte(nodeFixture(t, nodeRepo, realNodeTaskReceiptFixture)), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	// Run a module-relative package, not an absolute main.go file: the latter
@@ -284,7 +284,7 @@ func run() error {
 			CoreEngine: "xray", CoreVersion: "coreless", CoreState: "running", Store: store, Capabilities: registry.Capabilities()},
 		Syncer: syncer, Store: store, Processor: processor,
 	}
-	if _, err := synchronizer.SyncOnce(ctx, false); err != nil { return fmt.Errorf("initial offer: %w", err) }
+	if _, err := synchronizer.SyncOnce(ctx, false/*psp:host*/); err != nil { return fmt.Errorf("initial offer: %w", err) }
 	originalResponse := syncer.response
 	if len(originalResponse.Tasks) != 1 || originalResponse.Tasks[0].ID != os.Args[4] { return fmt.Errorf("real PSP did not offer task: %+v", originalResponse.Tasks) }
 	ticker := time.NewTicker(5*time.Millisecond)
@@ -311,10 +311,10 @@ func run() error {
 	// Removing the kind capability must not block receipt of old results.
 	synchronizer.Reports.Capabilities = nil
 	for _, phase := range []string{"500 after durable receipt", "invalid 2xx envelope"} {
-		if _, err := synchronizer.SyncOnce(ctx, true); err == nil { return fmt.Errorf("%s unexpectedly accepted", phase) }
+		if _, err := synchronizer.SyncOnce(ctx, true/*psp:host*/); err == nil { return fmt.Errorf("%s unexpectedly accepted", phase) }
 		if err := check(phase, false); err != nil { return err }
 	}
-	if _, err := synchronizer.SyncOnce(ctx, true); err != nil { return fmt.Errorf("valid evidence receipt: %w", err) }
+	if _, err := synchronizer.SyncOnce(ctx, true/*psp:host*/); err != nil { return fmt.Errorf("valid evidence receipt: %w", err) }
 	if err := check("valid receipt ACK", true); err != nil { return err }
 	// Replay the original, genuinely offered response locally through the real
 	// Processor. This is intentionally not a PSP restore/reoffer simulation.
@@ -322,7 +322,7 @@ func run() error {
 	if err != nil || !processed.ReportImmediately { return fmt.Errorf("local original-response replay: (%+v, %v)", processed, err) }
 	if err := check("terminal replay rearmed", false); err != nil { return err }
 	if _, err := store.ClaimNextTask(ctx, time.Now().UnixMilli()); !errors.Is(err, state.ErrNotFound) { return fmt.Errorf("terminal replay became executable: %v", err) }
-	if _, err := synchronizer.SyncOnce(ctx, true); err != nil { return fmt.Errorf("replayed evidence receipt: %w", err) }
+	if _, err := synchronizer.SyncOnce(ctx, true/*psp:host*/); err != nil { return fmt.Errorf("replayed evidence receipt: %w", err) }
 	if err := check("replayed receipt ACK", true); err != nil { return err }
 	finalTask, err := store.Task(ctx, os.Args[4])
 	if err != nil { return err }
