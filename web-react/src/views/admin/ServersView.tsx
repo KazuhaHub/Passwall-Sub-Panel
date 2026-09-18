@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type FormEvent, type MouseEvent } from 'react'
 import { NativeAgentUpgradeDialog } from './NativeAgentUpgradeDialog'
 import NodeMetricsDialog from './NodeMetricsDialog'
+import NodeDiagnosticsDialog from './NodeDiagnosticsDialog'
 import { NodeMigrationPreviewDialog } from './NodeMigrationPreviewDialog'
 import { ReinstallBackendDialog } from './ReinstallBackendDialog'
 import NodeReleaseSelector from '@/components/NodeReleaseSelector'
@@ -59,6 +60,7 @@ import MoreVertIcon from '@mui/icons-material/MoreVert'
 import InsightsIcon from '@mui/icons-material/Insights'
 import UpgradeIcon from '@mui/icons-material/UploadOutlined'
 import TuneIcon from '@mui/icons-material/TuneOutlined'
+import TroubleshootIcon from '@mui/icons-material/Troubleshoot'
 import { listNodeReleases, type NodeRelease } from '@/api/nodeReleases'
 import { newerNodeRelease } from '@/utils/nodeReleaseUpdate'
 import { newerSUIRelease } from '@/utils/suiReleaseUpdate'
@@ -194,6 +196,7 @@ export default function ServersView() {
   // require an exact version, and fail closed if the catalog is unavailable.
   const [coreDialogTarget, setCoreDialogTarget] = useState<Server | null>(null)
   const [metricsTarget, setMetricsTarget] = useState<Server | null>(null)
+  const [diagnosticsTarget, setDiagnosticsTarget] = useState<Server | null>(null)
   const [coreVersionPick, setCoreVersionPick] = useState<string>('')
   const [legacyXrayVersions, setLegacyXrayVersions] = useState<string[]>([])
 	const [coreReleases, setCoreReleases] = useState<CoreRelease[]>([])
@@ -1484,6 +1487,22 @@ export default function ServersView() {
                         </IconButton>
                       </Tooltip>
                     )}
+                    {/* ADMIN ONLY, mirroring the admin route group the endpoint
+                        lives in: the result is the machine's detail, and an
+                        operator who can see the server list must not reach it.
+                        Gated on config.write, which is the SPA's existing
+                        admin-only capability. */}
+                    {s.panel_type === 'psp' && canConfigure && (
+                      <Tooltip title={t('admin:nodeDiagnostics.title', { name: s.name })}>
+                        <IconButton
+                          size="small"
+                          onClick={() => setDiagnosticsTarget(s)}
+                          aria-label={t('admin:nodeDiagnostics.title', { name: s.name })}
+                        >
+                          <TroubleshootIcon fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
+                    )}
                     {(canConfigure || s.panel_type === 'psp' || s.capabilities?.includes('panel.upgrade') || s.capabilities?.includes('core.upgrade')) && <IconButton
                       size="small"
                       onClick={e => openMenu(e, s)}
@@ -1847,6 +1866,11 @@ export default function ServersView() {
         server={metricsTarget}
         open={metricsTarget !== null}
         onClose={() => setMetricsTarget(null)}
+      />
+      <NodeDiagnosticsDialog
+        server={diagnosticsTarget}
+        open={diagnosticsTarget !== null}
+        onClose={() => setDiagnosticsTarget(null)}
       />
       <NativeAgentUpgradeDialog server={nativeUpgradeTarget} onClose={() => { setNativeUpgradeTarget(null); refresh() }} />
       <ReinstallBackendDialog key={`reinstall-${reinstallTarget?.id ?? 'closed'}`} server={reinstallTarget}
