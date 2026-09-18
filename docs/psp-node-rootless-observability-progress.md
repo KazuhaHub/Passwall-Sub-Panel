@@ -113,26 +113,49 @@
 - [x] proc stat 解析覆盖 comm 含括号与空格、截断、非数字、零值
 - [ ] 采集器侧：拿到 handle 后**重新读取** starttime 再比对，不一致即丢弃 Core section
 
-**采集器本体（待做）**
+**采集器本体（已完成字段覆盖）**
 
-- [ ] `internal/host` 包：`Collector` 接口与 Linux 实现
-- [ ] 固定 proc/sys parser（§7.2 的来源表，路径全部写死在代码里）
-- [ ] cgroup v1 / v2（§7.4 的解析规则）
-- [ ] statfs、network / TCP / socket / process、BBR 只读
-- [ ] fixture 测试（§18.2 清单）
-- [ ] resource scope 判定（§4.3）
+- [x] `internal/host` 包：`Collector` 接口与 Linux 实现
+      分支 `kazuha/node-host-collector`（叠在 WP0 之上，并合入 #25 的 handle）
+- [x] 固定 proc/sys parser（§7.2 的来源表，路径全部写死在代码里）
+- [x] cgroup v1 / v2（§7.4 的解析规则）
+- [x] statfs、network / TCP / socket / conntrack、process、BBR 只读
+- [x] fixture 测试（§18.2 清单的大部分）
+- [x] resource scope 判定（§4.3）
+- [x] 采集器侧：拿到 handle 后重新读取 starttime 再比对，不一致即丢弃 Core section
+      （已用变异测试确认：去掉再比对，PID 复用测试立即失败）
+
+**实现方式上的一处主动偏离（已记录理由）**
+
+规格 §7.1 把解析器放在 `procfs_linux.go` 等带平台标签的文件里。实际实现是
+**解析逻辑为平台无关的纯函数、组装层跑在注入的根目录上**，只有 `New` 一个函数带
+`//go:build linux`。理由：这样"老内核没有 MemAvailable""容器读宿主 /proc"
+"cgroup v1"这些真正值得测的场景，在非 Linux 开发机上就能跑，而不是全部推给 CI。
+规格 §21 允许这种偏离（"文件名是导航建议，不是线上合约；若现有包结构要求改名，
+仍必须保持本节的分层职责"）。
+
+**新发现的一处规格自相矛盾**
+
+- [ ] **§5.10 关于 AT_CLKTCK 的那句话无法同时满足。**
+      规格说"读取失败时仍可报告 RSS、FD 和 thread，但两项 CPU 字段为 nil"，
+      但 `StartedAtMS` 在 §6 里是必填且必须由 boot time 与 proc starttime 推导 ——
+      没有 CLKTCK 就推不出来。实现选择：CLKTCK 缺失时**整个 processes 节省略**并加
+      `process.agent` token，而不是用猜的 tick 率编一个启动时间。
+      需要规格明确到底是放宽 `StartedAtMS`，还是接受整节缺失。
 
 完成判据：
 
-- [ ] 无外部命令（§7.3 禁止清单）
-- [ ] 非 root unit 与 Docker 均可采集
-- [ ] 每个文件缺失都有测试
-- [ ] 100 次 fixture benchmark 无泄漏、无非线性遍历
-- [ ] `go test -race` 通过
+- [x] 无外部命令（§7.3 禁止清单）——由源码扫描测试守住，
+      并且是在**防止以后有人加进来**（运行期无法察觉）
+- [ ] 非 root unit 与 Docker 均可采集 —— **需要真实 Linux 环境**
+- [x] 每个文件缺失都有测试（§18.2 清单中除"真实内核边界"外的项）
+- [x] 100 次 fixture benchmark 无泄漏、无非线性遍历
+      —— `-benchtime=100x` 实测约 0.58 ms/次，远低于 100 ms 软预算
+- [x] `go test -race` 通过
 
-**本地环境限制**：`//go:build linux` 的测试在本机（darwin）跑不了，
-只能用 `GOOS=linux go vet` 做编译检查，实际执行依赖 CI。WP1 的验收判据
-（"非 root unit 与 Docker 均可采集"）需要真实 Linux 环境，见文末"必须由人工完成"。
+**本地环境限制**：本机是 darwin，`//go:build linux` 的部分只能用
+`GOOS=linux go vet` 做编译检查；不过因为解析器是平台无关的，绝大部分断言
+（含 cgroup v1、老内核、容器作用域）都在本机实际执行。
 
 ## WP2 调度与同步统计（Passwall-Node）
 
