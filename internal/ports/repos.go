@@ -522,6 +522,18 @@ type NodeAgentTaskRepo interface {
 	// it never recomputes its deadline or protection floor from today's policy.
 	CreateOrGet(ctx context.Context, task *domain.NodeAgentTask) (stored *domain.NodeAgentTask, created bool, err error)
 	GetByTaskID(ctx context.Context, taskID string) (*domain.NodeAgentTask, error)
+	// ActiveByKind returns the agent's non-terminal task of one kind, or nil when
+	// there is none.
+	//
+	// IT EXISTS BECAUSE THE IDEMPOTENCY KEY CANNOT EXPRESS THIS RULE. Section
+	// 13.1 says an agent has at most one active diagnostic task, merged at the
+	// producer — but a diagnostic's identity is the MACHINE, not the request:
+	// two calls asking for different sections are still one question about one
+	// host. A per-agent key merges equal input, which is too narrow, and a
+	// per-request key conflicts on different input, which is wrong the other
+	// way. Newest-first by creation so a caller that finds one returns the task
+	// it would have created.
+	ActiveByKind(ctx context.Context, agentID, kind string) (*domain.NodeAgentTask, error)
 	// GetQuarantinedResult returns complete, integrity-validated agent-local
 	// evidence, never an authoritative task outcome.
 	GetQuarantinedResult(ctx context.Context, agentID, taskID string) (*domain.NodeAgentTaskResultQuarantine, error)
