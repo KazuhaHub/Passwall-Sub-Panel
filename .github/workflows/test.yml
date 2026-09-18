@@ -328,7 +328,7 @@ jobs:
         run: |
           set -euo pipefail
           matrix=$(.github/scripts/plan-race-shards.sh \
-            --shards 4 --weights .github/race-shard-weights.txt)
+            --shards 4 --default 1 --weights .github/race-shard-weights.txt)
           echo "matrix<<RACE_PLAN_EOF" >> "$GITHUB_OUTPUT"
           echo "$matrix" >> "$GITHUB_OUTPUT"
           echo "RACE_PLAN_EOF" >> "$GITHUB_OUTPUT"

@@ -1,27 +1,29 @@
 # How long each package takes under `go test -race`, used only to balance shards.
 #
-# ONLY THE HEAVY PACKAGES ARE LISTED. Race cost here is a tight body (median
-# 3.0s) with a handful of outliers, so packing from these ten measured within 1%
-# of packing from the complete package list — the outliers are the only entries
-# worth recording, and everything unlisted takes the planner's default.
+# MEASURED ON THE CI RUNNER, NOT ON A DEVELOPER MACHINE. The first version of
+# this file used local timings and they did not transfer: sqlstore is 18% of the
+# suite locally and 45% on the runner, while nodebootstrap is 45s locally and 4s
+# there. Packing from the wrong table is worse than packing from none, because
+# it looks balanced. These numbers come from the shard logs of the run that
+# introduced the split, which report each package's own duration.
 #
-# A NEW PACKAGE NEEDS NO ENTRY HERE. The planner takes its package list from
-# `go list`, so an unlisted package still runs, on its default weight. Nothing
-# about correctness depends on this file; only balance does.
+# ONLY THE HEAVY PACKAGES ARE LISTED; the rest take the planner's default. A NEW
+# PACKAGE NEEDS NO ENTRY — the planner takes its package list from `go list`, so
+# an unlisted package still runs, on the default weight. Nothing about
+# correctness depends on this file; only balance does.
 #
-# Seconds are wall-clock from one 2026-09-18 darwin/arm64 run under `-race` with
-# a warm build cache. They are RELATIVE WEIGHTS for packing, not a prediction of
-# the CI runner's timings, and they should be refreshed when the shape of the
-# suite changes rather than trusted indefinitely.
+# REFRESH BY READING THE SHARD LOGS when the shape of the suite changes.
 #
 # <seconds> <import path>
-70.4 github.com/KazuhaHub/passwall-sub-panel/internal/adapters/sqlstore
-45.1 github.com/KazuhaHub/passwall-sub-panel/internal/pkg/nodebootstrap
-18.4 github.com/KazuhaHub/passwall-sub-panel/cmd/panel
-18.1 github.com/KazuhaHub/passwall-sub-panel/internal/service/health
-15.2 github.com/KazuhaHub/passwall-sub-panel/internal/service/nodesync
-8.0 github.com/KazuhaHub/passwall-sub-panel/internal/transport/http/handler
-6.8 github.com/KazuhaHub/passwall-sub-panel/internal/service/nodeagentupgrade
-6.0 github.com/KazuhaHub/passwall-sub-panel/internal/app
-5.4 github.com/KazuhaHub/passwall-sub-panel/internal/adapters/acme
-5.2 github.com/KazuhaHub/passwall-sub-panel/internal/version
+174.2 github.com/KazuhaHub/passwall-sub-panel/internal/adapters/sqlstore
+27.6 github.com/KazuhaHub/passwall-sub-panel/internal/service/nodeagentupgrade
+25.6 github.com/KazuhaHub/passwall-sub-panel/internal/service/nodesync
+19.0 github.com/KazuhaHub/passwall-sub-panel/cmd/panel
+18.3 github.com/KazuhaHub/passwall-sub-panel/internal/service/rollup
+18.1 github.com/KazuhaHub/passwall-sub-panel/internal/transport/http/handler
+16.0 github.com/KazuhaHub/passwall-sub-panel/internal/service/health
+6.2 github.com/KazuhaHub/passwall-sub-panel/internal/app
+4.2 github.com/KazuhaHub/passwall-sub-panel/internal/pkg/nodebootstrap
+3.8 github.com/KazuhaHub/passwall-sub-panel/internal/service/clientdoc
+3.8 github.com/KazuhaHub/passwall-sub-panel/internal/service/user
+2.7 github.com/KazuhaHub/passwall-sub-panel/internal/adapters/xui
