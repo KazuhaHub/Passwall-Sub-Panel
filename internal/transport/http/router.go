@@ -362,6 +362,9 @@ func NewRouter(d Deps) stdhttp.Handler {
 		userGroup.GET("/traffic", userMe.Traffic)
 		userGroup.GET("/traffic/history", userMe.TrafficHistory)
 		userGroup.GET("/server-status", userMe.ServerStatus)
+		// The caller's own sync tasks. The target comes from the session, never
+		// from the request.
+		userGroup.GET("/sync-status", userMe.SyncStatus)
 		userGroup.GET("/rules", userMe.GetRules)
 		userGroup.PUT("/rules", userMe.PutRules)
 		userGroup.POST("/emergency-access", userMe.EmergencyAccess)
@@ -433,6 +436,10 @@ func NewRouter(d Deps) stdhttp.Handler {
 		staffGroup.POST("/users/:id/unlink-sso", users.UnlinkSSO)
 		staffGroup.POST("/users/:id/set-enabled", users.SetEnabled)
 		staffGroup.POST("/users/:id/set-service-status", users.SetServiceStatus)
+		// What local sync work is still observable for this user. Read-only, and
+		// scoped by role inside the handler: an admin may inspect a deleted
+		// target, an operator may not (ADR 0034).
+		staffGroup.GET("/users/:id/sync-status", users.GetSyncStatus)
 		// adminGroup, not staffGroup: the answer names every panel the user is
 		// on and how each one is configured, which is deployment shape rather
 		// than day-to-day user work — the same line the diagnostics snapshot
