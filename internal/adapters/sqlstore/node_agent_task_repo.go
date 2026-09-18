@@ -377,6 +377,40 @@ func (r *nodeAgentTaskRepo) GetByTaskID(ctx context.Context, taskID string) (*do
 	return row.toDomain(), nil
 }
 
+// ActiveByKind returns the agent's non-terminal task of one kind.
+//
+// NEWEST FIRST, so a producer that finds one returns the task it would have
+// created rather than the oldest survivor of a long outage. The non-terminal
+// set is spelled out rather than derived so a status added to the CHECK
+// constraint above shows up here as a compile-visible decision instead of a
+// silent behaviour change.
+func (r *nodeAgentTaskRepo) ActiveByKind(ctx context.Context, agentID, kind string) (*domain.NodeAgentTask, error) {
+	if agentID == "" || kind == "" {
+		return nil, fmt.Errorf("%w: agent ID and task kind are required", domain.ErrValidation)
+	}
+	terminal := []string{
+		string(domain.NodeAgentTaskSucceeded),
+		string(domain.NodeAgentTaskFailed),
+		string(domain.NodeAgentTaskIndeterminate),
+	}
+	var row nodeAgentTaskRow
+	err := r.db.WithContext(ctx).
+		Where("agent_id = ? AND kind = ? AND status NOT IN ?", agentID, kind, terminal).
+		Order("created_at DESC, task_id DESC").
+		First(&row).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		// ABSENCE IS THE ORDINARY ANSWER HERE, unlike GetByTaskID. That one is
+		// asked for a task the caller believes exists, so a miss is a failure;
+		// this one asks whether there is one, and "no" is what a producer sees
+		// immediately before it creates the task.
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return row.toDomain(), nil
+}
+
 func (r *nodeAgentTaskRepo) Offer(ctx context.Context, agentID string, support ports.NodeAgentTaskOfferSupport, limit, maxTaskJSONBytes int, offeredAt time.Time) ([]*domain.NodeAgentTask, error) {
 	if agentID == "" {
 		return nil, fmt.Errorf("%w: agent ID is required", domain.ErrValidation)
