@@ -323,6 +323,116 @@ VM 里起 Postgres 17 与 MySQL 8 容器，交叉编译 `internal/adapters/sqlst
 规格说"JSON 语法或控制面契约失败仍拒绝整个请求，仅 Host 子树的语义错误隔离"，
 所以隔离只适用于"能解码但验证不过"的子树。测试里写明了这条分界。
 
+## WP6 派生与 rollup（Passwall-Sub-Panel）
+
+依赖：WP4。分支 `kazuha/psp-node-host-metrics`
+
+- [x] sample differ 与 §9 的全部公式（纯函数，无 I/O、无时钟、无配置）
+- [x] counter epoch / gap 判定（时间倒流、超出窗口、重启、epoch 变化、计数回退）
+- [x] minute readers（含 predecessor 作为差分基线）
+- [x] hourly rollup（按有效 interval 秒数加权、跨 UTC 小时按比例分摊、coverage）
+- [x] raw/hourly prune（批量、cutoff 向下取整到整点）
+- [x] coverage
+
+完成判据：
+
+- [x] 本文 §9 每个公式有 table test
+- [x] reset、wrap、boot change、time reversal 都产生 gap
+- [x] rollup-before-prune（一次调用完成，顺序无法被调用方颠倒）
+- [x] UTC 小时边界
+- [x] DST 不影响（bucket 一律 UTC，显示时区只影响呈现）
+- [x] 三方言结果一致 —— MySQL 全量通过，Postgres 通过 node-host 相关测试
+
+**测试抓到的一个真实 bug**：coverage 只按小时边界裁剪，没有按派生窗口裁剪，
+于是一段 49 分钟的间隔被算成 2940 秒覆盖，尽管 `Derive` 判定它是缺口——
+等于报出一个"完全覆盖"的小时，而平均值的来源是空的。已修。
+
+另有两处主动增加：port 增加 `AgentIDs` 与 `InterfaceNames`（rollup 无法枚举
+自己的工作），以及 §5.8 要求接口身份含 counter_epoch 但 §8.3 列字典没有该列——
+采集器的 network epoch 就是 boot id，样本上已有，按此实现并记录。
+
+## WP7 健康与告警（Passwall-Sub-Panel）
+
+依赖：WP6
+
+- [x] `nodehealth` 纯 evaluator（重放 trigger/recovery 状态机）
+- [x] 从 metric history live derive finding
+- [x] alert.Service 接线（新增 `TypeNodeResource`，admin-only）
+- [x] hysteresis（恢复阈值与触发阈值分离）
+- [x] offline suppression（节点离线时跳过资源告警）
+- [x] 通知本地化（21 个 code 的中英文案）
+
+完成判据：
+
+- [x] 本文阈值、持续窗口、恢复全部有测试
+- [x] 缺数据不误报 0
+- [x] 一次尖峰不告警
+- [x] offline 不产生重复 stale spam
+- [x] 告警 identity 稳定（`node_resource:<panel_id>`）
+
+四个形状不同的规则单列：OOM 是有界生命的事件、重启循环是滚动窗口计数、
+时钟偏移是取绝对值的量、新鲜度是关于**样本缺失**而非样本值——
+staleness 以 capability 为门，从未声明能力的旧节点是 unsupported 而非 stale。
+
+## WP8 管理 API（Passwall-Sub-Panel）
+
+依赖：WP5、WP6、WP7
+
+- [x] current / history / interfaces / refresh / health
+- [x] admin route（仅在服务存在时注册）
+- [x] range/point 上限（90 天、2500 点、minute 2500 分钟）
+- [x] 服务器列表批量摘要（单查询，无 N+1）
+- [x] audit（沿用既有 AuditWrites 中间件覆盖 /api/admin/）
+
+完成判据：
+
+- [x] RBAC（挂在 adminGroup）
+- [x] 404/unsupported/missing 状态固定
+- [x] 2500 点上限
+- [x] 无 N+1
+- [x] uint64 不直接泄露给 JS
+- [x] handler contract test
+
+**列表的 CPU/内存百分比需要改动写入侧**：速率需要两个样本，而列表不可能逐行
+取前一条（正是规格禁止的 N+1）。解法是在**采集时**就把这两个值算好存进快照行——
+采集本来就读了前一条用于写入节流，那里免费，读取侧则不可能。
+
+列表的 resource_health 是**映射出的摘要徽章**（§10.1 允许），权威 finding 在详情端点。
+
+## WP9 前端（Passwall-Sub-Panel/web-react）
+
+依赖：WP8
+
+- [x] types / API
+- [x] 列表徽章（紧凑健康入口）
+- [x] 四个 tab（概览 / 性能 / 网络 / 诊断）
+- [x] ECharts（新增 `NodeMetricsChart`，仅注册用到的图表类型）
+- [x] empty / stale / scope 状态
+- [x] refresh（等 sample_id 变化，不是等固定延时）
+- [x] i18n（中英各一份，key 对齐）
+- [x] mobile / dark（颜色全部取自主题）
+
+完成判据：
+
+- [x] Vitest 覆盖所有状态（6 条新测试；全量 540 通过）
+- [x] TypeScript strict build
+- [x] 不存在 unused import
+- [x] 旧 Node UI（unsupported 分支有专门测试）
+- [x] Docker mixed scope UI（有专门测试）
+- [x] null gap 断线（`connectNulls: false`）
+- [x] production build + smoke:dist（真实浏览器，4 项检查通过；需 `CHROME_PATH`）
+
+## 第一阶段完成（WP0–WP9）
+
+**WP10（远程诊断）是规格明定的第二阶段**，不在本批次内。
+
+### 合并前的阻塞项
+
+- [ ] **PSP 依赖未发布的 Node 修订**（伪版本）。必须先合并 Node 侧
+      （#24、#25、#26），切正式 tag，再 bump PSP 的 go.mod。
+- [ ] 三方言全量：MySQL 通过；Postgres 有一个**在未修改 main 上同样失败**的
+      基线迁移测试（环境性，非本计划引入），详见第 3 节。
+
 ## 后续批次（尚未排期）
 
 依赖图见规格 §17。WP8 之前不得跳到前端。
