@@ -170,9 +170,14 @@ func (nodeHostMetricSampleRow) TableName() string { return "node_host_metric_sam
 // surrogate: an interface's identity IS the sample it belongs to plus its index,
 // and that key is what makes a retried insert a no-op instead of a duplicate row.
 type nodeInterfaceMetricSampleRow struct {
-	AgentID        string `gorm:"primaryKey;size:64"`
-	SampleID       string `gorm:"primaryKey;size:32"`
-	InterfaceIndex int    `gorm:"primaryKey"`
+	// A surrogate primary key sits in front of the natural uniqueness for the
+	// same reason the hourly table's does: the batched retention delete selects
+	// rows by id, and the three dialects disagree about whether DELETE ... LIMIT
+	// exists.
+	ID             int64  `gorm:"primaryKey;autoIncrement"`
+	AgentID        string `gorm:"not null;size:64;uniqueIndex:idx_node_iface_sample,priority:1"`
+	SampleID       string `gorm:"not null;size:32;uniqueIndex:idx_node_iface_sample,priority:2"`
+	InterfaceIndex int    `gorm:"not null;uniqueIndex:idx_node_iface_sample,priority:3"`
 	InterfaceName  string `gorm:"not null;size:64"`
 	IsDefaultIPv4  bool   `gorm:"not null"`
 	IsDefaultIPv6  bool   `gorm:"not null"`
