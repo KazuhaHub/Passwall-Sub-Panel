@@ -9,7 +9,14 @@
 # run into a check that passes without testing anything — a failure the
 # single-job version could not have.
 #
-# Emits a GitHub Actions matrix as JSON on stdout.
+# The partition is deterministic, so each shard can compute its own slice
+# instead of receiving it: `--shard K` prints that shard's packages and nothing
+# else. That keeps the package list out of the matrix, which otherwise ends up
+# in the job name — GitHub appends every matrix value, so a matrix carrying
+# package lists produces a check called "race shard (0, <80 package paths>)".
+#
+# Without --shard it prints the whole partition, one shard per line, for
+# inspecting a change to the weights.
 #
 # Deliberately bash 3.2-compatible (no mapfile, no associative arrays) so the
 # planner can be exercised on a developer machine before it is trusted with the
@@ -17,12 +24,14 @@
 set -euo pipefail
 
 shards=4
+only=""
 weights=""
-default_weight=3
+default_weight=1
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --shards) shards="$2"; shift 2 ;;
+    --shard) only="$2"; shift 2 ;;
     --weights) weights="$2"; shift 2 ;;
     --default) default_weight="$2"; shift 2 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
@@ -36,6 +45,15 @@ if [ "$shards" -lt 1 ]; then
   echo "shard count must be at least 1, got '$shards'" >&2
   exit 2
 fi
+if [ -n "$only" ]; then
+  case "$only" in
+    ''|*[!0-9]*) echo "shard index must be a non-negative integer, got '$only'" >&2; exit 2 ;;
+  esac
+  if [ "$only" -ge "$shards" ]; then
+    echo "shard index $only is outside 0..$((shards - 1))" >&2
+    exit 2
+  fi
+fi
 if [ -n "$weights" ] && [ ! -f "$weights" ]; then
   echo "weights file not found: $weights" >&2
   exit 1
@@ -46,12 +64,11 @@ fi
 # regression in what the job proves.
 count=$(go list ./... | awk 'END { print NR }')
 if [ "$count" -eq 0 ]; then
-  # An empty matrix would let the aggregate job pass having run nothing.
   echo "go list returned no packages; refusing to plan an empty run" >&2
   exit 1
 fi
 
-go list ./... | awk -v n="$shards" -v weights="$weights" -v fallback="$default_weight" '
+go list ./... | awk -v n="$shards" -v only="$only" -v weights="$weights" -v fallback="$default_weight" '
   BEGIN {
     if (weights != "") {
       while ((getline line < weights) > 0) {
@@ -86,14 +103,6 @@ go list ./... | awk -v n="$shards" -v weights="$weights" -v fallback="$default_w
       load[best] += weight[i]
       shard[best] = (shard[best] == "" ? "" : shard[best] " ") name[i]
     }
-    # `include` rather than a named dimension: fromJSON takes the matrix OBJECT,
-    # so emitting {"shard":[{...}]} would define one dimension called "shard"
-    # whose values are objects, leaving `matrix.packages` empty in the steps
-    # while the job names still rendered correctly.
-    printf "{\"include\":["
-    for (i = 1; i <= n; i++) {
-      printf "%s{\"index\":\"%d\",\"packages\":\"%s\"}", (i > 1 ? "," : ""), i - 1, shard[i]
-    }
-    printf "]}"
+    if (only != "") { print shard[only + 1]; exit }
+    for (i = 1; i <= n; i++) printf "%d %s\n", i - 1, shard[i]
   }'
-echo

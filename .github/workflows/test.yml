@@ -293,56 +293,28 @@ jobs:
       - name: Reachable vulnerability check
         run: go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
 
-  # The race suite is sharded, not split by hand. A plan job divides the packages
-  # by measured cost and the shards run in parallel; `sqlite (full suite, race)`
-  # becomes a gate over them rather than the run itself.
+  # The race suite is sharded because it is the critical path: at 4m22s it was
+  # still running while the other twenty-two checks had finished.
   #
-  # THE GATE KEEPS THE OLD JOB'S NAME ON PURPOSE. Branch protection requires
-  # that exact context, and a matrix reports as several checks — so a split that
-  # renamed the job would leave the required context unproduced and block every
-  # merge on main.
-  race-plan:
-    name: plan race shards
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    outputs:
-      matrix: ${{ steps.plan.outputs.matrix }}
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
-        # Allow toolchain selection; setup-go exports local after installation.
-        env:
-          GOTOOLCHAIN: auto
-        with:
-          go-version-file: go.mod
-          cache: true
-      - name: Verify exact preferred compiler
-        run: |
-          set -eu
-          build_toolchain=$(awk '$1 == "toolchain" { print $2 }' go.mod)
-          test -n "$build_toolchain"
-          test "$(go env GOVERSION)" = "$build_toolchain"
-          test "$(go tool compile -V | awk '{ print $3 }')" = "$build_toolchain"
-      - name: partition the suite
-        id: plan
-        run: |
-          set -euo pipefail
-          matrix=$(.github/scripts/plan-race-shards.sh \
-            --shards 4 --default 1 --weights .github/race-shard-weights.txt)
-          echo "matrix<<RACE_PLAN_EOF" >> "$GITHUB_OUTPUT"
-          echo "$matrix" >> "$GITHUB_OUTPUT"
-          echo "RACE_PLAN_EOF" >> "$GITHUB_OUTPUT"
-
+  # THE SHARDS COMPUTE THEIR OWN PACKAGES from a deterministic planner, so the
+  # matrix carries only the shard number. Putting the package list in the matrix
+  # would put it in the job name as well — GitHub appends every matrix value —
+  # and the check would read "race shard (0, <eighty package paths>)".
+  #
+  # `sqlite (full suite, race)` keeps its name and becomes a gate over them.
+  # Branch protection requires that exact context, and a matrix reports as
+  # several checks, so a split that renamed the job would leave the required
+  # context unproduced and block every merge on main.
   race-shard:
     name: race shard
-    needs: race-plan
     runs-on: ubuntu-latest
     timeout-minutes: 10
     strategy:
       # A failing shard must not cancel its siblings: the reason to shard is to
       # see every failure in one run, and fail-fast would hide the rest.
       fail-fast: false
-      matrix: ${{ fromJSON(needs.race-plan.outputs.matrix) }}
+      matrix:
+        shard: [0, 1, 2, 3]
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
@@ -362,20 +334,23 @@ jobs:
       - name: test
         run: |
           set -o pipefail
+          packages=$(.github/scripts/plan-race-shards.sh \
+            --shards 4 --shard "${{ matrix.shard }}" \
+            --default 1 --weights .github/race-shard-weights.txt)
           # A planner that produced no packages would otherwise run `go test`
           # with no arguments — which tests the repository root and reports
           # "no Go files in ...", naming the symptom rather than the cause.
-          test -n "${{ matrix.packages }}"
+          test -n "$packages"
           # Still one canonical full-suite race run: the shards are a partition
           # of the same package set, so every package is covered exactly once.
           # PostgreSQL/MySQL below focus on dialect correctness without
           # multiplying race-detector runtime.
-          go test -race -count=1 -timeout=8m ${{ matrix.packages }} 2>&1 | tee test-output.txt
+          go test -race -count=1 -timeout=8m $packages 2>&1 | tee test-output.txt
       - name: upload test output
         if: failure()
         uses: actions/upload-artifact@v7
         with:
-          name: race-shard-${{ matrix.index }}-test-output
+          name: race-shard-${{ matrix.shard }}-test-output
           path: test-output.txt
 
   sqlite:
