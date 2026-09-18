@@ -9,13 +9,19 @@
 | 编号 | 标题 | 状态 |
 |---|---|---|
 | [0023](0023-saml-assertion-replay-protection.md) | SAML 断言重放防护必须持久化 | 已接受（v3.9.2） |
+| [0024](0024-credential-derivation-byte-equality.md) | 渲染侧派生的凭据必须与共享客户端存储的凭据逐字节相等 | 已接受（追认既有决策；实现自 v3.9.0） |
 | [0024](0024-psp-native-node-backend.md) | 自研节点后端作为一个 PanelKind，而不是一套新架构 | 搁置（2026-09-08 所有者已决定自研；仍等上游协议调研这一前置作业） |
 | [0025](0025-push-pull-decision-rule.md) | 推还是拉：决策规则，以及 PSP 今天为什么没有选择权 | 已接受（规则）；Q2a 的结论随 ADR 0024 解冻 |
+| [0025](0025-resync-membership-phase-order.md) | `ResyncMembership` 的阶段顺序是强制性的 | 已接受 |
+| [0026](0026-shutdown-drain-before-cancel.md) | 关停时必须先排空请求再取消后台上下文 | 已接受 |
+| [0027](0027-sub-opaque-404.md) | 订阅令牌无效时返回不可区分的 404 | 已接受 |
+| [0028](0028-local-login-enumeration-and-timing.md) | 本地登录不得泄露账号是否存在（含时序） | 已接受 |
 | [0029](0029-xray-reality-client-compatibility.md) | Xray core 升级按客户端兼容矩阵放行，不跟随 latest | 已接受（2026-09-10） |
 | [0030](0030-separate-quic-and-udp-controls.md) | QUIC 与普通 UDP 独立、无地区假设地控制 | 已接受（2026-09-11） |
 | [0031](0031-native-task-id-incarnations.md) | 原生任务 ID 使用新启动 incarnation，不跟随数据库回退 | 已接受（ID 机制；生命周期闸尚未完成） |
 | [0032](0032-native-task-lifecycle.md) | 原生任务的到期、结果证据与恢复边界 | 提案（支持窗口待确认） |
 | [0033](0033-native-node-compatibility-and-upgrade-admission.md) | Passwall Node 兼容信息与远程升级准入 | 已接受（2026-09-16） |
+| [0034](0034-sync-status-contract.md) | 前端需要「同步状态」时，后端应给出什么 | 已接受（2026-09-18；选择资源任务状态，operation 与上游配置验证延后；实现待完成） |
 
 > 编号从 0023 起始：更早的设计决策分散记录在 [ARCHITECTURE.md](../ARCHITECTURE.md)、各专题文档（如 [3xui-compat.md](../3xui-compat.md)、[panel-adapters.md](../panel-adapters.md)）以及提交历史中，尚未回溯整理为 ADR。新增决策请沿用此处的递增编号。
 
