@@ -465,7 +465,7 @@ fixture 现在在参数位置留一个标记，参数个数从被测修订的源
 ## WP10 实现前的规格缺口（2026-09-18 已补入规格）
 
 WP10（`diagnostics.collect.v1`）在 §13 里定义得比前面几个 WP 薄。按规格开头的规矩——
-"需要改变时，先修改本文并记录理由"——这四处**已先改规格、再动手**，改动与理由都写在规格
+"需要改变时，先修改本文并记录理由"——这六处**已先改规格、再动手**，改动与理由都写在规格
 §13 内，本文件只记"已闭合"与落点。
 
 - [x] **§13.2 的截断优先级** → 规格中定死：只有 `events` 可丢；按时间**从最旧开始**，同时间
@@ -478,6 +478,15 @@ WP10（`diagnostics.collect.v1`）在 §13 里定义得比前面几个 WP 薄。
       "最多 8"降为给将来新增留的天花板。
 - [x] **"未来另立脱敏规范"被两处引用却不存在** → 同上，v1 不引用该例外；它是 §14.4 那条
       尚未承诺路线的附属物。
+- [x] **§13.2 `runtime` 的 `stream_state` 没有语义** → v1 的 `runtime` 只有 `core_state` 与
+      `core_config_digest`（分别与 §7 的 `core.selection`、`core.confirmed_config_digest`
+      同源）；`stream_state` 在 v1 不出现，与 §14.4 的日志路线同属未承诺范围。
+      （写协议类型时才发现的第五处——这类缺口只能靠动手才会暴露，所以规格里那句"先改本文"
+      才重要。）
+- [x] **§13.2 `events` 的字段与 `severity` 取值没给** → 规格中定死：每条恰好
+      `{code, at_ms, severity, summary}`；`code` v1 取值集合为 `sync.failed`、`core.started`、
+      `core.stopped`、`core.restarted`、`task.rejected`、`collector.unavailable`；
+      `severity` ∈ `info|warning|error`，**不复用 §7 的 check status**；`summary` ≤ 512 字节。
 
 **无需补规格、可直接实现的部分**（列出来，是为了把"能做的"和"要补规格的"分开；实现时
 不必再回看这一段）：

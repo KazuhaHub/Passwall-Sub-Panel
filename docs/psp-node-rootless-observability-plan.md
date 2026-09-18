@@ -1603,8 +1603,9 @@ PSP 原生节点行增加一个紧凑健康入口：
 
 第二阶段新增 diagnostics.collect.v1。它是只读任务，不扩展权限。
 
-> **2026-09-18 修订**：本节有三处原文当作已给定、实际没有给定：§13.1 的 sections 集合、
-> §13.2 的截断优先级、§13.2 `events` 的来源。三者都在本日定稿，理由分别记在各自条目下。
+> **2026-09-18 修订**：本节有五处原文当作已给定、实际没有给定，都在本日定稿，理由分别记在
+> 各自条目下：§13.1 的 sections 集合；§13.2 的截断优先级；§13.2 `events` 的来源；
+> §13.2 `runtime` 的字段（`stream_state` 在 v1 不出现）；§13.2 `events` 的字段与 severity 取值。
 > 按本文开头的规矩（"需要改变时，先修改本文并记录理由"），改的是本文，不是实现。
 
 ### 13.1 Args
@@ -1671,6 +1672,25 @@ v1 的范围，而不是替 §14.4 定稿——**v1 只实现"Agent 自有结构
 且 `events` 只在 `sections` 显式请求时出现。Core stdout/stderr 的 tee、以及任何形式的日志
 上传，仍然不承诺，也仍然需要 §14.4 所说的秘密扫描与测试；§13.3 里"除非未来另立脱敏规范"
 那个例外因此在本版**不被行使**。
+
+**`runtime` 的字段**（2026-09-18 修订）：v1 只有两个——
+
+- `core_state`：Core 进程当前状态，取值与 §7 的 `core.selection` 同源；
+- `core_config_digest`：已确认配置的摘要，与 §7 的 `core.confirmed_config_digest` 同一个值。
+
+示例里的 `stream_state` **在 v1 不出现**。全文没有定义它要表达什么，而 §13.3 又禁止完整
+config body，所以它不可能是配置本身；要定义它得先知道它的语义。它与 §14.4 的日志路线同属
+未承诺范围，等单独定稿。
+
+**`events` 的字段**（2026-09-18 修订）：每条恰好是 `{code, at_ms, severity, summary}`——
+
+- `code`：稳定字符串，**v1 只含 Agent 自己产生的事件**，取值集合为 `sync.failed`、
+  `core.started`、`core.stopped`、`core.restarted`、`task.rejected`、`collector.unavailable`。
+  与本节其它稳定 code 一样：已发布的取值不改含义，改含义就换新值。
+- `at_ms`：事件发生时间，UTC epoch 毫秒。
+- `severity` ∈ `info`、`warning`、`error`。**不复用 §7 的 check status**：那四个值回答的是
+  "这项检查怎么样"，这里回答的是"这件事有多要紧"，混用会让两边的含义互相污染。
+- `summary`：最长 512 字节，与 §7 的 check summary 同界，并受 §13.3 约束。
 
 ### 13.3 绝不能进入结果
 
