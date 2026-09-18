@@ -41,6 +41,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/mailer"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/node"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/nodeagentupgrade"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/nodemetrics"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/nodesync"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/reconcile"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/render"
@@ -133,6 +134,11 @@ type App struct {
 	trafficRepo ports.TrafficRepo
 	nodeTraffic ports.NodeTrafficRepo
 	rollup      *rollup.Service
+	// nodeMetrics owns node host telemetry's ingest and its hourly maintenance.
+	// It is kept here so the same instance serves the sync path and the
+	// maintenance loop: the refresh window lives in that instance's memory, and a
+	// second one would have a window nobody could close.
+	nodeMetrics *nodemetrics.Service
 	saml        *auth.SAMLService
 	// repos kept around so Run() can call initAdminIfNeeded AFTER the
 	// listen socket is bound — that way a bind failure (port busy / TLS
@@ -265,9 +271,14 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	// socket can actually bind; the user would lose it to a crash dump.
 
 	panelRegistry := paneladapter.NewRegistry()
+	nodeMetrics, err := nodemetrics.New(nodemetrics.Options{Repo: repos.NodeHostMetric, Now: time.Now})
+	if err != nil {
+		return nil, fmt.Errorf("node metrics: %w", err)
+	}
 	nativeSync, err := nodesync.New(nodesync.Options{
 		Desired: repos.NativeDesired, Agents: repos.NodeAgent, Issues: repos.NodeAgentIssue, Tasks: repos.NodeAgentTask, Users: repos.User,
 		Clients: repos.PSPClient, Nodes: repos.Node, Settings: repos.ScopedSettings, Panels: repos.XUIPanel,
+		Host: nodeMetrics,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("native node sync: %w", err)
@@ -529,6 +540,7 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	a.syncTasks = repos.SyncTask
 	a.trafficRepo = repos.Traffic
 	a.nodeTraffic = repos.NodeTraffic
+	a.nodeMetrics = nodeMetrics
 	a.trafficInterval = time.Duration(sysSettings.CronTrafficPullMinutes) * time.Minute
 	// Rollup's gap heartbeat is derived from the poll cadence so a coarse poll
 	// interval doesn't make every segment exceed a fixed heartbeat (blank charts).
@@ -1033,6 +1045,14 @@ func (a *App) runAuditCleanupLoop(ctx context.Context) {
 	defer t.Stop()
 	log.Info("audit cleanup loop started", "interval", interval.String())
 	for {
+		// Node host telemetry does its own rollup-then-prune in one call, for the
+		// same reason the traffic pass below orders them this way: deleting raw
+		// rows before they have been aggregated loses the hour permanently.
+		if a.nodeMetrics != nil {
+			if err := a.nodeMetrics.RollupAndPrune(ctx, time.Now().UTC()); err != nil && ctx.Err() == nil {
+				log.Warn("node host metric maintenance failed", "err", err)
+			}
+		}
 		// Rollup before prune so the freshly-completed hour is captured in
 		// hourly BEFORE raw retention has a chance to delete it. Without
 		// this ordering the first tick after a panel boot could lose data

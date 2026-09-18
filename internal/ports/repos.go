@@ -563,6 +563,72 @@ type NativeDesiredSnapshotRepo interface {
 	Load(ctx context.Context, panelID int64) (*NativeDesiredSnapshot, error)
 }
 
+// NodeHostMetricRepo persists and reads node host telemetry.
+//
+// ONE PORT FOR ALL FOUR TABLES, deliberately. The latest snapshot, the minute
+// history, the interface rows and the hourly aggregates are written together and
+// read together, and splitting them into four ports would mean four
+// repositories that could not share a transaction — so a latest row could commit
+// while the history it came from rolled back, leaving the detail view describing
+// a sample the charts never saw.
+//
+// The repository does NOT accept protocol types or raw JSON. The service layer
+// validates the wire payload and converts it; nothing here has to know what the
+// agent sent.
+type NodeHostMetricRepo interface {
+	// Persist is the single write path: latest, an optional history row, and the
+	// interfaces that accompany it, in one transaction.
+	Persist(ctx context.Context, request domain.NodeHostPersistRequest) (domain.NodeHostPersistResult, error)
+
+	Latest(ctx context.Context, agentID string) (*domain.NodeHostObservation, error)
+
+	// LatestBatchByPanelIDs is the list view's one query. It exists because the
+	// server list is paginated and a per-row snapshot read is the N+1 the spec
+	// forbids; the returned map omits servers with no telemetry.
+	LatestBatchByPanelIDs(ctx context.Context, panelIDs []int64) (map[int64]domain.NodeHostSummary, error)
+
+	// RawRange returns minute samples in received_at order.
+	//
+	// includePredecessor additionally returns the newest row BEFORE from, which
+	// the caller needs as the differencing baseline: a rate needs two samples,
+	// and without the one before the window the first point of every chart would
+	// have nothing to subtract. The extra row is a baseline, not a data point —
+	// the caller must not plot it.
+	RawRange(ctx context.Context, agentID string, from, to time.Time, includePredecessor bool) ([]domain.NodeHostMetricSample, error)
+
+	// InterfaceRange returns one interface's rows. The interface is named rather
+	// than indexed because a renumbered interface is a different series to a
+	// reader, and the name is what the URL carries.
+	InterfaceRange(ctx context.Context, agentID, interfaceName string, from, to time.Time) ([]domain.NodeInterfaceMetricSample, error)
+
+	HourlyRange(ctx context.Context, agentID string, from, to time.Time) ([]domain.NodeHostMetricHourly, error)
+
+	// UpsertHourly is idempotent: recomputing the same bucket writes the same
+	// bytes, which the rollup relies on to be safe to re-run before a prune.
+	UpsertHourly(ctx context.Context, rows []domain.NodeHostMetricHourly) error
+
+	// DeleteByAgentID removes every row for one agent. It is transactional, and
+	// it exists because nothing else would clean up after a deleted node.
+	DeleteByAgentID(ctx context.Context, agentID string) error
+
+	Prune(ctx context.Context, request domain.NodeHostPruneRequest) (domain.NodeHostPruneResult, error)
+
+	// AgentIDs lists the agents that have raw history.
+	//
+	// It is here because the rollup cannot otherwise enumerate its work: raw
+	// samples are keyed by agent, and there is no table to walk that would name
+	// the agents with data worth aggregating. Without it the rollup could only
+	// run for agents some OTHER caller happened to name.
+	AgentIDs(ctx context.Context) ([]string, error)
+
+	// InterfaceNames lists the interface names one agent has rows for.
+	//
+	// The rollup reads interface history by name because that is the shape the
+	// (agent, name, received_at) index supports, and it has to discover the names
+	// from somewhere: they are the host's layout, which no configuration knows.
+	InterfaceNames(ctx context.Context, agentID string) ([]string, error)
+}
+
 type TrafficRepo interface {
 	Insert(ctx context.Context, s *domain.TrafficSnapshot) error
 	LatestForUser(ctx context.Context, userID int64) (*domain.TrafficSnapshot, error)
@@ -1642,6 +1708,7 @@ type Repos struct {
 	NodeAgentIssue          NodeAgentIssueRepo
 	NodeAgentTask           NodeAgentTaskRepo
 	NativeDesired           NativeDesiredSnapshotRepo
+	NodeHostMetric          NodeHostMetricRepo
 	Traffic                 TrafficRepo
 	NodeTraffic             NodeTrafficRepo
 	Audit                   AuditRepo

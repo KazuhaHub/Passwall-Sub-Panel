@@ -202,6 +202,7 @@ func NewRepos(db *gorm.DB) ports.Repos {
 		NodeAgentIssue:          &nodeAgentIssueRepo{db: db},
 		NodeAgentTask:           newNodeAgentTaskRepo(db, defaultNodeAgentTaskQuota()),
 		NativeDesired:           &nativeDesiredRepo{db: db},
+		NodeHostMetric:          &nodeHostMetricRepo{db: db},
 		Traffic:                 &trafficRepo{db: db},
 		NodeTraffic:             &nodeTrafficRepo{db: db},
 		Audit:                   &auditRepo{db: db},

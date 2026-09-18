@@ -39,7 +39,13 @@ const (
 type Type string
 
 const (
-	TypeNodeHealth    Type = "node_health"
+	TypeNodeHealth Type = "node_health"
+	// TypeNodeResource is ADMIN-ONLY resource telemetry, kept separate from
+	// TypeNodeHealth rather than folded into it: that one is about whether the
+	// node is reachable and converging, and this one is about the machine it runs
+	// on. Merging them would make "the agent stopped calling" and "the disk is
+	// full" the same notification.
+	TypeNodeResource  Type = "node_resource"
 	TypeCertFailed    Type = "cert_failed"
 	TypeCertExpiring  Type = "cert_expiring"
 	TypePanelUpgrade  Type = "panel_upgrade"
@@ -73,7 +79,7 @@ type Alert struct {
 // bell never offers them a link to a page they're forbidden to open.
 func (t Type) AdminOnly() bool {
 	switch t {
-	case TypeCertFailed, TypeCertExpiring, TypePanelUpgrade, TypePSPUpgrade:
+	case TypeCertFailed, TypeCertExpiring, TypePanelUpgrade, TypePSPUpgrade, TypeNodeResource:
 		return true
 	default:
 		return false
@@ -139,6 +145,10 @@ type Deps struct {
 	// for the psp_upgrade alert. ("","",false) when up to date / unknown. Injected
 	// so the service stays decoupled from the version package. nil → no psp_upgrade.
 	PSPUpgrade func() (current, latest string, available bool)
+	// NodeResource reports each native server's active resource findings. nil →
+	// no node_resource alerts, which is what a build without host telemetry
+	// wants rather than an empty list it would have to distinguish from none.
+	NodeResource NodeResourceSource
 	// Now defaults to time.Now.
 	Now func() time.Time
 }

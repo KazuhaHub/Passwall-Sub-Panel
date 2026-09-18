@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type FormEvent, type MouseEvent } from 'react'
 import { NativeAgentUpgradeDialog } from './NativeAgentUpgradeDialog'
+import NodeMetricsDialog from './NodeMetricsDialog'
 import { NodeMigrationPreviewDialog } from './NodeMigrationPreviewDialog'
 import { ReinstallBackendDialog } from './ReinstallBackendDialog'
 import NodeReleaseSelector from '@/components/NodeReleaseSelector'
@@ -55,6 +56,7 @@ import { allSettledLimited } from '@/utils/promises'
 
 import WarningAmberIcon from '@mui/icons-material/WarningAmber'
 import MoreVertIcon from '@mui/icons-material/MoreVert'
+import InsightsIcon from '@mui/icons-material/Insights'
 import UpgradeIcon from '@mui/icons-material/UploadOutlined'
 import TuneIcon from '@mui/icons-material/TuneOutlined'
 import { listNodeReleases, type NodeRelease } from '@/api/nodeReleases'
@@ -191,6 +193,7 @@ export default function ServersView() {
   // may use "latest"; native PSP nodes load the shared audited engine catalog,
   // require an exact version, and fail closed if the catalog is unavailable.
   const [coreDialogTarget, setCoreDialogTarget] = useState<Server | null>(null)
+  const [metricsTarget, setMetricsTarget] = useState<Server | null>(null)
   const [coreVersionPick, setCoreVersionPick] = useState<string>('')
   const [legacyXrayVersions, setLegacyXrayVersions] = useState<string[]>([])
 	const [coreReleases, setCoreReleases] = useState<CoreRelease[]>([])
@@ -1469,6 +1472,18 @@ export default function ServersView() {
                         "update available" hint lives in the Version
                         column (see versionCell), not on this button,
                         so the kebab stays neutral. */}
+                    {s.panel_type === 'psp' && (
+                      <Tooltip title={nodeMetricsTooltip(t, s)}>
+                        <IconButton
+                          size="small"
+                          onClick={() => setMetricsTarget(s)}
+                          aria-label={t('admin:nodeMetrics.title', { name: s.name })}
+                          sx={{ color: (theme) => nodeMetricsColor(s, theme.palette) }}
+                        >
+                          <InsightsIcon fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
+                    )}
                     {(canConfigure || s.panel_type === 'psp' || s.capabilities?.includes('panel.upgrade') || s.capabilities?.includes('core.upgrade')) && <IconButton
                       size="small"
                       onClick={e => openMenu(e, s)}
@@ -1828,6 +1843,11 @@ export default function ServersView() {
         </DialogActions>
         </>}
       </Dialog>
+      <NodeMetricsDialog
+        server={metricsTarget}
+        open={metricsTarget !== null}
+        onClose={() => setMetricsTarget(null)}
+      />
       <NativeAgentUpgradeDialog server={nativeUpgradeTarget} onClose={() => { setNativeUpgradeTarget(null); refresh() }} />
       <ReinstallBackendDialog key={`reinstall-${reinstallTarget?.id ?? 'closed'}`} server={reinstallTarget}
         onClose={() => setReinstallTarget(null)}
@@ -2406,4 +2426,49 @@ function SecretField(p: SecretFieldProps) {
       }}
     />
   );
+}
+
+/**
+ * The list's compact resource entry.
+ *
+ * FIVE STATES, FOUR COLOURS, AND ONE OF THEM IS GREY. A node whose build predates
+ * the feature reports `unsupported`, and showing that as green would say "healthy"
+ * about a node whose metrics nobody can see — while showing it as red would put a
+ * permanent alarm on every older node.
+ *
+ * The palette is taken from the ACTIVE THEME, so dark mode is not a second table.
+ */
+function nodeMetricsColor(server: Server, palette: {
+  success: { main: string }
+  warning: { main: string }
+  error: { main: string }
+  md: { onSurfaceVariant: string }
+}): string {
+  switch (server.node_resource_health) {
+    case 'healthy':
+    case 'warming_up':
+      return palette.success.main
+    case 'warning':
+    case 'stale':
+      return palette.warning.main
+    case 'critical':
+      return palette.error.main
+    default:
+      return palette.md.onSurfaceVariant
+  }
+}
+
+/** The tooltip separates connectivity from resources, because they answer different questions. */
+function nodeMetricsTooltip(t: (key: string, options?: Record<string, unknown>) => string, server: Server): string {
+  const health = server.node_resource_health ?? 'unsupported'
+  const lines = [t(`admin:nodeMetrics.freshness.${health}`)]
+  const cpu = server.node_cpu_percent
+  const memory = server.node_memory_percent
+  if (cpu !== undefined && cpu !== null) lines.push(`${t('admin:nodeMetrics.cpu')}: ${cpu.toFixed(1)}%`)
+  if (memory !== undefined && memory !== null) lines.push(`${t('admin:nodeMetrics.memory')}: ${memory.toFixed(1)}%`)
+  if (cpu === undefined || cpu === null) {
+    // Never "0% CPU": an unpublished figure is not an idle machine.
+    lines.push(t('admin:nodeMetrics.unsupported'))
+  }
+  return lines.join('\n')
 }

@@ -22,6 +22,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/keyedmutex"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/nodemetrics"
 )
 
 const (
@@ -51,6 +52,10 @@ type Service struct {
 	// invalidateRender is late-bound because the native adapter needs this
 	// service before the panel pool (and therefore render service) can exist.
 	invalidateRender func()
+	// host ingests the optional telemetry subtree. NIL MEANS THIS BUILD DOES NOT
+	// COLLECT IT, which is what keeps a panel with no metrics repository from
+	// advertising a cadence it cannot honour.
+	host *nodemetrics.Service
 }
 
 // receivedFullReport keeps the control plane's receipt time beside the latest
@@ -72,7 +77,10 @@ type Options struct {
 	Nodes    ports.NodeRepo
 	Settings ports.ScopedSettings
 	Panels   ports.XUIPanelRepo
-	Now      func() time.Time
+	// Host is optional: a build without a metrics repository simply does not
+	// ingest telemetry, and the envelope carries no cadence for it.
+	Host *nodemetrics.Service
+	Now  func() time.Time
 }
 
 func New(options Options) (*Service, error) {
@@ -91,6 +99,7 @@ func New(options Options) (*Service, error) {
 		reports: make(map[string]receivedFullReport),
 		anchors: make(map[int64]nodeprotocol.ClientCounters), now: now,
 		grants: make(map[string]map[nodeprotocol.ClientKey]int64),
+		host:   options.Host,
 	}, nil
 }
 
@@ -101,7 +110,18 @@ func (s *Service) SetRenderInvalidator(invalidate func()) { s.invalidateRender =
 // this service: the production HTTP boundary resolves a strict Bearer digest
 // to the same agent ID before calling this coordinator.
 func (s *Service) Sync(ctx context.Context, report nodeprotocol.NodeReport) (nodeprotocol.SyncResponse, error) {
-	if err := nodeprotocol.ValidateNodeReport(report); err != nil {
+	// THE TELEMETRY SUBTREE LEAVES THE CONTROL PATH HERE, before anything reads
+	// the report. Everything below this line decides config, roster, directives,
+	// tasks and accounting, and none of it may be influenced by a telemetry
+	// field — which is what makes "a bad sample cannot cost a node its roster"
+	// structural rather than a promise someone has to keep.
+	//
+	// It is removed rather than validated-and-kept so that no later step can
+	// reach it by accident, including the clones that put the report in the
+	// latest-full cache.
+	host := report.Host
+	report.Host = nil
+	if err := nodeprotocol.ValidateNodeReportBase(report); err != nil {
 		return nodeprotocol.SyncResponse{}, fmt.Errorf("nodesync: invalid report: %w", err)
 	}
 	// A node has one ordered sync stream. Serializing by stable agent identity
@@ -165,6 +185,22 @@ func (s *Service) Sync(ctx context.Context, report nodeprotocol.NodeReport) (nod
 	response.Tasks = tasks
 	if hadFirstOffer {
 		response.Envelope.NextPollSeconds = 1
+	}
+
+	// TELEMETRY RUNS LAST, after the control response is fully built, so a slow
+	// or failing store can delay this round but never change it. The ingest
+	// returns no error by construction: the only way this feature could break the
+	// data plane is by returning one, and that is the outcome it exists to be
+	// incapable of.
+	if s.host != nil {
+		if host != nil {
+			s.host.Ingest(ctx, agent.AgentID, host, now)
+		}
+		// A refresh the operator asked for is answered by the sample just stored.
+		// Asking after the ingest is what lets the window close on this round
+		// rather than waiting for a timer, and a failed write leaves it open so
+		// the next round tries again.
+		response.Envelope.WantHostReport = s.host.WantsHostReport(agent.AgentID)
 	}
 
 	if err := nodeprotocol.ValidateSyncResponse(response); err != nil {
@@ -594,6 +630,11 @@ func cloneReport(in nodeprotocol.NodeReport) nodeprotocol.NodeReport {
 		out.TaskResults[i].Result = append([]byte(nil), in.TaskResults[i].Result...)
 	}
 	out.Capabilities = append([]string(nil), in.Capabilities...)
+	// Host is cleared EXPLICITLY as a second line of defence. The caller already
+	// removes it before this is reached, but a clone that silently carried 128 KiB
+	// per agent into the latest-full cache is the kind of regression that only
+	// shows up as memory, months later.
+	out.Host = nil
 	return out
 }
 
@@ -606,6 +647,7 @@ func cloneObservationReport(in nodeprotocol.NodeReport) nodeprotocol.NodeReport 
 	out.Issues = nil
 	out.TaskResults = nil
 	out.Capabilities = nil
+	out.Host = nil
 	return out
 }
 
@@ -851,6 +893,12 @@ func (s *Service) buildDirectives(ctx context.Context, agent *domain.NodeAgent, 
 	envelope := nodeprotocol.Envelope{
 		ComputedAtMS: now.UnixMilli(), NextPollSeconds: nextPollSeconds,
 		FullReportSeconds: settings.FullReportSeconds, WantFullReport: !hasFull,
+	}
+	// Zero would mean "carry a sample on every report", so it is only left unset
+	// when this build has no ingest at all — in which case the panel has nothing
+	// to ask for and must not tell the node to report anything.
+	if s.host != nil {
+		envelope.HostReportSeconds = int(nodemetrics.DefaultNodeHostReportInterval / time.Second)
 	}
 	envelope.NumeratorAsOfMS, envelope.NumeratorOldestReportAgeMS,
 		envelope.OverburnHeadroomBytes = s.recordGrantsAndFleetEnvelope(agent.AgentID, body.Quota, now, oldestReportMS)
