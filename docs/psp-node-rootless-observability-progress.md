@@ -54,11 +54,16 @@
 
 规格把这些当作既有条件，实际不是。开工前必须先在规格里补记理由，再实现。
 
-- [ ] **§5.10 依赖的 Core 子进程 handle 并不存在。**
+- [x] **§5.10 依赖的 Core 子进程 handle 并不存在。**
       `internal/core/core.go:87` 的 `Supervisor` 接口只有 `Run/Apply/Deploy/Status`，
       `*exec.Cmd` 被封在 `process.managedProcess` 内部，没有任何对外暴露 PID 的路径。
-      WP1 需要先扩接口（xray 与 singbox 两个实现都要动），
-      并保证暴露的是"受控 handle + 预期 starttime"而非任意 PID。
+      → 已解决：**KazuhaHub/Passwall-Node#25**（分支 `kazuha/node-core-process-handle`）
+      新增 `agentcore.ProcessHandle`（PID + 内核 starttime）与 `Supervisor.ProcessHandle()`。
+      该改动不依赖 protocol 类型，可与 WP0 并行落地。
+      实现中两个值得记的点：proc stat 的字段必须**从最后一个 `)` 之后数**
+      （comm 里的可执行名不被转义，二进制被替换时读作 `xray) (deleted)`）；
+      非 Linux 平台 starttime 不可得，返回"有 Core 运行但不可校验"，
+      由 `Verifiable()` 区分，采集器据此报 unavailable 而非"零占用的可用 Core"。
 
 ## WP0 协议骨架（Passwall-Node）
 
@@ -98,15 +103,24 @@
 
 ## WP1 Linux collector（Passwall-Node）
 
-依赖：WP0
+依赖：WP0。分支 `kazuha/node-collector`（待建，基于 `origin/main`）
 
+**第一片（Core 身份）已完成** → **KazuhaHub/Passwall-Node#25**
+
+- [x] 扩 `core.Supervisor`，暴露受控子进程 handle 与预期 starttime
+- [x] handle 在每个终止路径上清除（配置切换、context 取消、启动失败、自行退出）；
+      已用变异测试确认：去掉 `stop()` 里的清除，生命周期测试立即失败
+- [x] proc stat 解析覆盖 comm 含括号与空格、截断、非数字、零值
+- [ ] 采集器侧：拿到 handle 后**重新读取** starttime 再比对，不一致即丢弃 Core section
+
+**采集器本体（待做）**
+
+- [ ] `internal/host` 包：`Collector` 接口与 Linux 实现
 - [ ] 固定 proc/sys parser（§7.2 的来源表，路径全部写死在代码里）
 - [ ] cgroup v1 / v2（§7.4 的解析规则）
 - [ ] statfs、network / TCP / socket / process、BBR 只读
 - [ ] fixture 测试（§18.2 清单）
 - [ ] resource scope 判定（§4.3）
-- [ ] **先扩 `core.Supervisor` 接口**，暴露受控子进程 handle 与预期 starttime
-      （见上方"实现前需要补的规格缺口"）
 
 完成判据：
 
@@ -115,6 +129,10 @@
 - [ ] 每个文件缺失都有测试
 - [ ] 100 次 fixture benchmark 无泄漏、无非线性遍历
 - [ ] `go test -race` 通过
+
+**本地环境限制**：`//go:build linux` 的测试在本机（darwin）跑不了，
+只能用 `GOOS=linux go vet` 做编译检查，实际执行依赖 CI。WP1 的验收判据
+（"非 root unit 与 Docker 均可采集"）需要真实 Linux 环境，见文末"必须由人工完成"。
 
 ## WP2 调度与同步统计（Passwall-Node）
 
