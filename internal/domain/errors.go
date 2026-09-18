@@ -16,6 +16,14 @@ var (
 	// existing work has drained; HTTP transports should map it to 429.
 	ErrResourceExhausted = errors.New("resource exhausted")
 
+	// ErrUnavailable means a read could not be answered because a dependency it
+	// needs is missing or failing — as opposed to the answer being "nothing".
+	// HTTP transports should map it to 503. It exists so a caller never has to
+	// express "unknown" as an empty success: a task-status read that returns
+	// "no pending tasks" when its store is down is the failure this sentinel
+	// prevents.
+	ErrUnavailable = errors.New("unavailable")
+
 	// ErrSSONoAccount is returned by EnsureSSO when a non-admin SSO principal
 	// has no pre-provisioned account. The caller should redirect the user to a
 	// "contact your administrator" page rather than auto-creating an account.
