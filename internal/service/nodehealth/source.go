@@ -233,9 +233,6 @@ func (s *Source) healthFor(ctx context.Context, agent *domain.NodeAgent) Health 
 	if !ok {
 		return Health{Status: HealthUnavailable, Freshness: FreshnessMissing}
 	}
-	entry := alert.NodeResourceEntry{PanelID: agent.PanelID, PanelName: agent.AgentID}
-	entry.Offline = agent.LastSeen == nil || now.Sub(*agent.LastSeen) > offlineThreshold
-
 	health := Health{Freshness: freshnessOf(window)}
 	findings := Evaluate(window, Options{CapabilityObserved: true})
 	if health.Freshness != FreshnessFresh {
