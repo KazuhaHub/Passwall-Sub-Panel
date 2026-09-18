@@ -70,6 +70,65 @@ func (r *syncTaskRepo) HasActiveByTargetAny(ctx context.Context, types []domain.
 	return n > 0, err
 }
 
+// ListActiveByTarget returns up to limit pending/running tasks of the given
+// types for one target, newest first. See ports.SyncTaskRepo for why the target
+// filter lives here rather than in the generic List filter.
+func (r *syncTaskRepo) ListActiveByTarget(ctx context.Context, types []domain.SyncTaskType, targetType string, targetID int64, limit int) ([]*domain.SyncTask, error) {
+	if len(types) == 0 || limit <= 0 {
+		return nil, nil
+	}
+	var rows []syncTaskRow
+	err := r.db.WithContext(ctx).
+		Where("target_type = ? AND target_id = ? AND type IN ? AND status IN ?",
+			targetType, targetID, syncTaskTypeStrings(types),
+			[]string{string(domain.SyncTaskPending), string(domain.SyncTaskRunning)}).
+		Order("updated_at DESC, id DESC").
+		Limit(limit).
+		Find(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	return syncTaskRowsToDomain(rows), nil
+}
+
+// ListTerminalByTarget returns up to limit finished tasks of the given types for
+// one target, newest finished first. Kept separate from the active query so the
+// two caps are independent — a long retry history must not squeeze out the
+// active rows, and vice versa.
+func (r *syncTaskRepo) ListTerminalByTarget(ctx context.Context, types []domain.SyncTaskType, targetType string, targetID int64, limit int) ([]*domain.SyncTask, error) {
+	if len(types) == 0 || limit <= 0 {
+		return nil, nil
+	}
+	var rows []syncTaskRow
+	err := r.db.WithContext(ctx).
+		Where("target_type = ? AND target_id = ? AND type IN ? AND status NOT IN ?",
+			targetType, targetID, syncTaskTypeStrings(types),
+			[]string{string(domain.SyncTaskPending), string(domain.SyncTaskRunning)}).
+		Order("finished_at DESC, id DESC").
+		Limit(limit).
+		Find(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	return syncTaskRowsToDomain(rows), nil
+}
+
+func syncTaskTypeStrings(types []domain.SyncTaskType) []string {
+	out := make([]string, len(types))
+	for i, t := range types {
+		out[i] = string(t)
+	}
+	return out
+}
+
+func syncTaskRowsToDomain(rows []syncTaskRow) []*domain.SyncTask {
+	out := make([]*domain.SyncTask, len(rows))
+	for i := range rows {
+		out[i] = rows[i].toDomain()
+	}
+	return out
+}
+
 func (r *syncTaskRepo) List(ctx context.Context, filter ports.SyncTaskFilter) ([]*domain.SyncTask, int64, error) {
 	q := r.db.WithContext(ctx).Model(&syncTaskRow{})
 	if filter.Status != nil {
