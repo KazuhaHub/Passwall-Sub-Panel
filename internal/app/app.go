@@ -41,6 +41,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/mailer"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/node"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/nodeagentupgrade"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/nodemetrics"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/nodesync"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/reconcile"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/render"
@@ -265,9 +266,14 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	// socket can actually bind; the user would lose it to a crash dump.
 
 	panelRegistry := paneladapter.NewRegistry()
+	nodeMetrics, err := nodemetrics.New(nodemetrics.Options{Repo: repos.NodeHostMetric, Now: time.Now})
+	if err != nil {
+		return nil, fmt.Errorf("node metrics: %w", err)
+	}
 	nativeSync, err := nodesync.New(nodesync.Options{
 		Desired: repos.NativeDesired, Agents: repos.NodeAgent, Issues: repos.NodeAgentIssue, Tasks: repos.NodeAgentTask, Users: repos.User,
 		Clients: repos.PSPClient, Nodes: repos.Node, Settings: repos.ScopedSettings, Panels: repos.XUIPanel,
+		Host: nodeMetrics,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("native node sync: %w", err)

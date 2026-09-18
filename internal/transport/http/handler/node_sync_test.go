@@ -130,3 +130,112 @@ func TestNodeSyncHandlerRejectsOversizedCoordinatorResponse(t *testing.T) {
 		t.Fatalf("oversized coordinator response = status %d body %q", response.Code, response.Body.String())
 	}
 }
+
+// A MALFORMED SAMPLE MUST COST THE PANEL A METRIC AND NOTHING ELSE. The node is
+// waiting on this same round trip for its roster and its quota, so dropping the
+// telemetry has to leave the request a success — which is the one failure mode
+// this feature is built to be incapable of producing.
+func TestNodeSyncHandlerDropsAMalformedHostAndStillAnswers(t *testing.T) {
+	baseHave := `"have":{"config":{"applied":{},"etag":""},"roster":{"applied":{},"etag":""},"directives":{"applied":{},"etag":""}}`
+	cases := []struct {
+		name string
+		host string
+	}{
+		{"a sample id that is not hex", `{"sample_id":"not-a-sample-id","collected_at_ms":1789000000000,"uptime_ms":1,"scope":{},"platform":{}}`},
+		{"a scope the contract refuses", `{"sample_id":"0123456789abcdef0123456789abcdef","collected_at_ms":1789000000000,"uptime_ms":1,"scope":{"deployment":"kubernetes"},"platform":{}}`},
+		{"a missing required identity", `{"collected_at_ms":1789000000000,"uptime_ms":1,"scope":{},"platform":{}}`},
+	}
+	// NOT COVERED HERE, DELIBERATELY: a host that is not an object at all is a
+	// JSON TYPE error, not a semantic one, and the spec rejects the whole request
+	// for that — the isolation rule is for a subtree that decodes and then fails
+	// validation. See TestNodeSyncHandlerRejectsATypedHostBelow."""
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			delivered := false
+			var seen nodeprotocol.NodeReport
+			handler, err := NewNodeSyncHandler(nodeSyncServiceFunc(func(_ context.Context, report nodeprotocol.NodeReport) (nodeprotocol.SyncResponse, error) {
+				delivered = true
+				seen = report
+				return nodeprotocol.SyncResponse{Envelope: nodeprotocol.Envelope{NextPollSeconds: 30}}, nil
+			}), NodeAuthenticatorFunc(func(*http.Request) (string, error) { return "agt_1", nil }))
+			if err != nil {
+				t.Fatal(err)
+			}
+			body := `{"agent_id":"agt_1","partial":false,` + baseHave + `,"host":` + testCase.host + `}`
+			request := httptest.NewRequest(http.MethodPost, "/v1/node/sync", strings.NewReader(body))
+			recorder := httptest.NewRecorder()
+			handler.ServeHTTP(recorder, request)
+
+			if recorder.Code != http.StatusOK {
+				t.Fatalf("a malformed sample failed the round: status %d, body %s", recorder.Code, recorder.Body.String())
+			}
+			if !delivered {
+				t.Fatal("the sync service was never reached")
+			}
+			if seen.Host != nil {
+				t.Fatal("a sample the contract refuses reached the service")
+			}
+		})
+	}
+}
+
+// THE RAW SUBTREE IS WHAT THE BOUND IS FOR. A decoded struct cannot see fields it
+// does not know about, so a future agent's unknown section is only ever visible
+// in the bytes — and this is the only layer holding them.
+func TestNodeSyncHandlerDropsAnOversizedRawHostSubtree(t *testing.T) {
+	var seen nodeprotocol.NodeReport
+	handler, err := NewNodeSyncHandler(nodeSyncServiceFunc(func(_ context.Context, report nodeprotocol.NodeReport) (nodeprotocol.SyncResponse, error) {
+		seen = report
+		return nodeprotocol.SyncResponse{Envelope: nodeprotocol.Envelope{NextPollSeconds: 30}}, nil
+	}), NodeAuthenticatorFunc(func(*http.Request) (string, error) { return "agt_1", nil }))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A valid sample plus an unknown section large enough to blow the bound. The
+	// known fields are all well within it, which is exactly the case a struct
+	// validator cannot catch.
+	padding := strings.Repeat("x", int(nodeprotocol.MaxHostObservationBytes)+1024)
+	body := `{"agent_id":"agt_1","partial":false,` +
+		`"have":{"config":{"applied":{},"etag":""},"roster":{"applied":{},"etag":""},"directives":{"applied":{},"etag":""}},` +
+		`"host":{"sample_id":"0123456789abcdef0123456789abcdef","collected_at_ms":1789000000000,"uptime_ms":1,` +
+		`"scope":{"deployment":"systemd","resource_scope":"host","cgroup_version":2,"data_filesystem_scope":"host_mount"},` +
+		`"platform":{"os":"linux","arch":"amd64","logical_cpus":4},"future_section":"` + padding + `"}}`
+	request := httptest.NewRequest(http.MethodPost, "/v1/node/sync", strings.NewReader(body))
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("an oversized subtree failed the round: status %d", recorder.Code)
+	}
+	if seen.Host != nil {
+		t.Fatal("an oversized host subtree was carried past the wire boundary")
+	}
+}
+
+// The counterpart: a sample the contract accepts is passed through untouched, so
+// the drop tests above are not passing because everything is dropped.
+func TestNodeSyncHandlerPassesAValidHostThrough(t *testing.T) {
+	var seen nodeprotocol.NodeReport
+	handler, err := NewNodeSyncHandler(nodeSyncServiceFunc(func(_ context.Context, report nodeprotocol.NodeReport) (nodeprotocol.SyncResponse, error) {
+		seen = report
+		return nodeprotocol.SyncResponse{Envelope: nodeprotocol.Envelope{NextPollSeconds: 30}}, nil
+	}), NodeAuthenticatorFunc(func(*http.Request) (string, error) { return "agt_1", nil }))
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := `{"agent_id":"agt_1","partial":false,` +
+		`"have":{"config":{"applied":{},"etag":""},"roster":{"applied":{},"etag":""},"directives":{"applied":{},"etag":""}},` +
+		`"host":{"sample_id":"0123456789abcdef0123456789abcdef","collected_at_ms":1789000000000,"uptime_ms":1,` +
+		`"scope":{"deployment":"systemd","resource_scope":"host","cgroup_version":2,"data_filesystem_scope":"host_mount"},` +
+		`"platform":{"os":"linux","arch":"amd64","logical_cpus":4}}}`
+	request := httptest.NewRequest(http.MethodPost, "/v1/node/sync", strings.NewReader(body))
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("a valid sample failed the round: status %d", recorder.Code)
+	}
+	if seen.Host == nil || seen.Host.SampleID != "0123456789abcdef0123456789abcdef" {
+		t.Fatalf("a valid sample did not reach the service: %+v", seen.Host)
+	}
+}

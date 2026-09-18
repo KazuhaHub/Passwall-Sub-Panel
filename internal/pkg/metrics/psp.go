@@ -344,3 +344,52 @@ var ByteBuckets = []float64{
 	1 << 30, 5 << 30, 10 << 30, 50 << 30, 100 << 30, 500 << 30, // 1 GiB .. 500 GiB
 	1 << 40, // 1 TiB
 }
+
+// ---- Node host telemetry --------------------------------------------
+//
+// THE LABEL VALUES ARE FIXED SETS, and that is a constraint rather than a
+// convention. An agent id or a server name on any of these would be a
+// high-cardinality label, which is how a metrics endpoint quietly becomes a
+// memory leak. The outcome strings below are the whole vocabulary.
+
+const (
+	NodeHostOutcomeAccepted         = "accepted"
+	NodeHostOutcomeNoHost           = "no_host"
+	NodeHostOutcomeInvalid          = "invalid"
+	NodeHostOutcomeIdentityConflict = "identity_conflict"
+	NodeHostOutcomeStorageError     = "storage_error"
+
+	NodeHostHistoryInserted     = "inserted"
+	NodeHostHistoryThrottled    = "throttled"
+	NodeHostHistoryDuplicate    = "duplicate"
+	NodeHostHistoryStorageError = "storage_error"
+)
+
+var (
+	NodeHostReportTotal = NewCounterVec(
+		"psp_node_host_report_total",
+		"Host telemetry reports handled, by outcome.",
+		"outcome",
+	)
+	NodeHostHistoryTotal = NewCounterVec(
+		"psp_node_host_history_total",
+		"Host telemetry history writes, by outcome.",
+		"outcome",
+	)
+	// The persist budget is 500 ms, so the buckets cluster below it and one sits
+	// above: a report that misses the budget has to appear as a miss, not as the
+	// last bucket of a range that stops at the budget.
+	NodeHostPersistMS = NewHistogram(
+		"psp_node_host_persist_ms",
+		"Time spent persisting one host telemetry report, in milliseconds.",
+		"ms", []float64{5, 10, 25, 50, 100, 250, 500, 1000},
+	)
+	// The wire bound is 128 KiB, so the buckets climb to it: the interesting
+	// question is how close real samples come to a limit that exists to bound
+	// storage rather than to be reached.
+	NodeHostSnapshotBytes = NewHistogram(
+		"psp_node_host_snapshot_bytes",
+		"Encoded size of a stored host telemetry snapshot.",
+		"bytes", []float64{1 << 10, 4 << 10, 16 << 10, 32 << 10, 64 << 10, 128 << 10},
+	)
+)
