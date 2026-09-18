@@ -462,13 +462,57 @@ fixture 现在在参数位置留一个标记，参数个数从被测修订的源
 - [x] WP9 前端
 - [ ] WP10 远程诊断（第二阶段）
 
+## §20 验收场景实测（2026-09-18，Lima VM）
+
+在 `psp-node`（Ubuntu 26.04、内核 7.0.0-28-generic/aarch64、cgroup v2）上，
+用从合并后的 main 交叉编译出来的二进制实测。这里记的是逐条对照 §20 判据的结果，
+不是"跑通了"。
+
+### 场景 B：systemd Linux（宿主，uid 501 非 root）
+
+| §20 判据 | 结果 |
+|---|---|
+| passwall-node 用户运行 | ✅ `Deployment=systemd`，uid 501，非 root |
+| CPU/内存/磁盘/网络/Core 指标出现 | ✅ `cpu`/`memory`/`filesystem`/`network`/`tcp`/`sockets`/`processes` 全部出现 |
+| BBR 只读出现 | ✅ `tuning = {available:[cubic,reno], default:cubic, qdisc:fq_codel}`，只读 |
+| unit capability 未扩大 | ✅ `CapabilityBoundingSet` 与特性前逐字节相同；本特性在 `deployment/` 下只新增了 `capture-host-interfaces.sh` |
+| `doctor --json` 无秘密 | ✅ 10 个稳定检查码齐全；把可识别串写进凭据文件后，该串在 stdout 与 stderr 中都不出现 |
+
+本机的 `available` 不含 `bbr`，正好覆盖 §18 测试矩阵里 "BBR unavailable" 那一行。
+§5.12 要求的"available 含 bbr 不得显示成 BBR 已启用"是 UI 侧的事。
+
+### 场景 C：Docker 512 MiB
+
+| §20 判据 | 结果 |
+|---|---|
+| scope=mixed/container | ✅ `Deployment=docker`、`ResourceScope=mixed`、`DataFilesystemScope=container_mount` |
+| 主卡显示 cgroup 512 MiB，不把宿主总内存当作可用容量 | ✅ Node 侧同时给出 `cgroup.limit_bytes=536870912` 和容器里读得到的 `system.total_bytes`，并明确标 `ResourceScope=mixed`——这正是面板用来分辨两者的信号；渲染由 WP9 的 Docker mixed scope 专项测试覆盖 |
+| host-network 接口不被宣称为完整宿主机管理能力 | ✅ `--network host --cap-drop ALL` 实测：该容器根本没挂 `/sys`，Node 如实把 `network.interfaces` 列进 `unavailable`，而不是宣称拥有宿主网卡 |
+| 无 privileged / Docker socket | ✅ `--cap-drop ALL`，未挂载任何 socket |
+
+### 这一步又抓出一个真实缺陷
+
+`TestCollectOnTheRealHost` 在断言"真实宿主应提供 network 段"之后，无条件地对
+`observation.Network.Interfaces` 取长度。于是一个**合法地**没有该段的环境——上面那个
+没挂 `/sys` 的容器——会在日志行上 panic，把刚触发的断言盖掉，报的还是日志行号。
+已修复（Passwall-Node#27），现在打印 `interfaces=none`。
+
+值得记一笔的是**它证明了什么**：没挂 `/sys` 的容器看不见 `/sys/class/net`，
+Node 报告"不可用"是对的，不该凭空编一段出来；错的只是测试脚手架。
+
+### 尚未演练
+
+场景 D（面板暂时不可达）、E（Node 重启）、F（宿主机重启）依赖"断点/恢复"的时间演化，
+本次未做——它们与 §23 的 7 天 DoD 在同一条时间线上，属于同一批未完成项。
+
 ## 必须由人工/真实环境完成的事项
 
 这些不是"实现完就算完"的项，列在这里以免被误判为已完成。
 
 - [x] **发布 Node module revision/tag**，再 bump PSP `go.mod`
       （2026-09-18 完成：tag `v0.0.1-beta10`）
-- [ ] §20 场景 B/C 的真实 systemd / Docker 非 root 实测
+- [x] §20 场景 B/C 的真实 systemd / Docker 非 root 实测（2026-09-18，见下节）
+- [ ] §20 场景 D/E/F（面板不可达、Node 重启、宿主机重启）——依赖时间演化，未演练
 - [ ] §23 DoD 的"1 台 systemd + 1 台 Docker 运行 7 天"
 - [ ] PostgreSQL / MySQL 全套 repo 测试（本地跑不全，依赖 CI）
 - [ ] 数据库增长、wire 大小、collector P95 耗时的实测记录
