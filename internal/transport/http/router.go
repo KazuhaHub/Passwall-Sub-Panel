@@ -30,6 +30,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/loginguard"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/mailer"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/node"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/nodehealth"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/passkey"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/reconcile"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/recovery"
@@ -579,6 +580,12 @@ func NewRouter(d Deps) stdhttp.Handler {
 			// Self-update nudge: a newer STABLE PSP release than this build.
 			PSPUpgrade: func() (string, string, bool) {
 				return version.Version, version.LatestPSP(), version.IsPSPUpdateAvailable()
+			},
+			// Host resource health. The source reads stored telemetry and replays
+			// it through the evaluator, so the bell and the node detail page can
+			// never disagree about whether a condition is active.
+			NodeResource: &nodehealth.Source{
+				Agents: d.Repos.NodeAgent, Metrics: d.Repos.NodeHostMetric,
 			},
 		})
 		staffGroup.GET("/alerts", handler.NewAdminAlertsHandler(alertSvc).List)
