@@ -19,7 +19,13 @@ type stubRepo struct {
 	err       error
 	previous  []domain.NodeHostMetricSample
 	rangeCall int
+	agentIDs  []string
+	names     []string
 }
+
+func (r *stubRepo) AgentIDs(context.Context) ([]string, error) { return r.agentIDs, nil }
+
+func (r *stubRepo) InterfaceNames(context.Context, string) ([]string, error) { return r.names, nil }
 
 func (r *stubRepo) Persist(_ context.Context, request domain.NodeHostPersistRequest) (domain.NodeHostPersistResult, error) {
 	r.persists = append(r.persists, request)

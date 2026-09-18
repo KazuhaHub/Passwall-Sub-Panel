@@ -612,6 +612,21 @@ type NodeHostMetricRepo interface {
 	DeleteByAgentID(ctx context.Context, agentID string) error
 
 	Prune(ctx context.Context, request domain.NodeHostPruneRequest) (domain.NodeHostPruneResult, error)
+
+	// AgentIDs lists the agents that have raw history.
+	//
+	// It is here because the rollup cannot otherwise enumerate its work: raw
+	// samples are keyed by agent, and there is no table to walk that would name
+	// the agents with data worth aggregating. Without it the rollup could only
+	// run for agents some OTHER caller happened to name.
+	AgentIDs(ctx context.Context) ([]string, error)
+
+	// InterfaceNames lists the interface names one agent has rows for.
+	//
+	// The rollup reads interface history by name because that is the shape the
+	// (agent, name, received_at) index supports, and it has to discover the names
+	// from somewhere: they are the host's layout, which no configuration knows.
+	InterfaceNames(ctx context.Context, agentID string) ([]string, error)
 }
 
 type TrafficRepo interface {

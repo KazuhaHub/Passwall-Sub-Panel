@@ -383,6 +383,29 @@ func (r *nodeHostMetricRepo) DeleteByAgentID(ctx context.Context, agentID string
 	})
 }
 
+// AgentIDs lists the agents with raw history.
+func (r *nodeHostMetricRepo) AgentIDs(ctx context.Context) ([]string, error) {
+	var ids []string
+	err := r.db.WithContext(ctx).Model(&nodeHostMetricSampleRow{}).
+		Distinct().Order("agent_id").Pluck("agent_id", &ids).Error
+	if err != nil {
+		return nil, fmt.Errorf("list node host metric agents: %w", err)
+	}
+	return ids, nil
+}
+
+// InterfaceNames lists the interface names one agent has rows for.
+func (r *nodeHostMetricRepo) InterfaceNames(ctx context.Context, agentID string) ([]string, error) {
+	var names []string
+	err := r.db.WithContext(ctx).Model(&nodeInterfaceMetricSampleRow{}).
+		Where("agent_id = ?", agentID).Distinct().Order("interface_name").
+		Pluck("interface_name", &names).Error
+	if err != nil {
+		return nil, fmt.Errorf("list node interface names: %w", err)
+	}
+	return names, nil
+}
+
 // Prune removes history older than the retention cutoffs, in bounded batches.
 //
 // IT DELETES IN BOUNDED BATCHES rather than one statement. A large installation's

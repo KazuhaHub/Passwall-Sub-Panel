@@ -533,3 +533,44 @@ func TestDeletingANativePanelRemovesItsTelemetry(t *testing.T) {
 		t.Fatalf("hourly rows outlived the panel: %d rows, %v", len(hourly), err)
 	}
 }
+
+// The rollup cannot enumerate its own work without these two, and neither is
+// reachable from any other query: raw samples are keyed by agent, and an
+// interface's name is the host's layout rather than anything the panel knows.
+func TestNodeHostEnumerationsListWhatTheRollupNeeds(t *testing.T) {
+	repo, _ := hostTestRepos(t)
+	ctx := context.Background()
+
+	agents, err := repo.AgentIDs(ctx)
+	if err != nil || len(agents) != 0 {
+		t.Fatalf("empty enumeration = (%v, %v)", agents, err)
+	}
+
+	for _, agentID := range []string{"agt_2", "agt_1"} {
+		sampleID := strings.Repeat("a", 31) + agentID[len(agentID)-1:]
+		if _, err := repo.Persist(ctx, domain.NodeHostPersistRequest{
+			Observation: hostObservation(agentID, sampleID, strings.Repeat("b", 64), hostBaseTime),
+			Sample:      hostSample(agentID, sampleID, strings.Repeat("b", 64), hostBaseTime),
+			Interfaces: []domain.NodeInterfaceMetricSample{
+				{AgentID: agentID, SampleID: sampleID, InterfaceIndex: 3, InterfaceName: "eth1", MTU: 1500, ReceivedAt: hostBaseTime},
+				{AgentID: agentID, SampleID: sampleID, InterfaceIndex: 2, InterfaceName: "eth0", MTU: 1500, ReceivedAt: hostBaseTime},
+			},
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Sorted, so a pass has a deterministic order and two panels agree about it.
+	agents, err = repo.AgentIDs(ctx)
+	if err != nil || len(agents) != 2 || agents[0] != "agt_1" || agents[1] != "agt_2" {
+		t.Fatalf("agents = (%v, %v)", agents, err)
+	}
+	names, err := repo.InterfaceNames(ctx, "agt_1")
+	if err != nil || len(names) != 2 || names[0] != "eth0" || names[1] != "eth1" {
+		t.Fatalf("names = (%v, %v)", names, err)
+	}
+	// One agent's enumeration does not leak another's.
+	if names, err := repo.InterfaceNames(ctx, "agt_absent"); err != nil || len(names) != 0 {
+		t.Fatalf("absent agent names = (%v, %v)", names, err)
+	}
+}

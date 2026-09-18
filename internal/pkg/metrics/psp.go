@@ -363,6 +363,14 @@ const (
 	NodeHostHistoryThrottled    = "throttled"
 	NodeHostHistoryDuplicate    = "duplicate"
 	NodeHostHistoryStorageError = "storage_error"
+
+	NodeHostRollupWritten = "written"
+	NodeHostRollupEmpty   = "empty"
+	NodeHostRollupError   = "error"
+
+	NodeHostPruneRawTable       = "raw"
+	NodeHostPruneInterfaceTable = "interface"
+	NodeHostPruneHourlyTable    = "hourly"
 )
 
 var (
@@ -391,5 +399,18 @@ var (
 		"psp_node_host_snapshot_bytes",
 		"Encoded size of a stored host telemetry snapshot.",
 		"bytes", []float64{1 << 10, 4 << 10, 16 << 10, 32 << 10, 64 << 10, 128 << 10},
+	)
+	NodeHostRollupTotal = NewCounterVec(
+		"psp_node_host_rollup_total",
+		"Node host hourly rollup passes, by outcome.",
+		"outcome",
+	)
+	// A counter rather than a gauge, because the question is how much has been
+	// removed over time — a gauge of what is currently being deleted would read
+	// zero on every pass that had nothing to do.
+	NodeHostPrunedRowsTotal = NewCounterVec(
+		"psp_node_host_pruned_rows_total",
+		"Node host telemetry rows removed by retention, by table.",
+		"table",
 	)
 )
