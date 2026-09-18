@@ -299,14 +299,14 @@ jobs:
   # THE SHARDS COMPUTE THEIR OWN PACKAGES from a deterministic planner, so the
   # matrix carries only the shard number. Putting the package list in the matrix
   # would put it in the job name as well — GitHub appends every matrix value —
-  # and the check would read "race shard (0, <eighty package paths>)".
+  # and the check would read "go race full (1/4, <eighty package paths>)".
   #
   # `sqlite (full suite, race)` keeps its name and becomes a gate over them.
   # Branch protection requires that exact context, and a matrix reports as
   # several checks, so a split that renamed the job would leave the required
   # context unproduced and block every merge on main.
   race-shard:
-    name: race shard
+    name: go race full (${{ matrix.part }}/4)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     strategy:
@@ -314,7 +314,7 @@ jobs:
       # see every failure in one run, and fail-fast would hide the rest.
       fail-fast: false
       matrix:
-        shard: [0, 1, 2, 3]
+        part: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
@@ -335,7 +335,7 @@ jobs:
         run: |
           set -o pipefail
           packages=$(.github/scripts/plan-race-shards.sh \
-            --shards 4 --shard "${{ matrix.shard }}" \
+            --shards 4 --shard "${{ matrix.part }}" \
             --default 1 --weights .github/race-shard-weights.txt)
           # A planner that produced no packages would otherwise run `go test`
           # with no arguments — which tests the repository root and reports
@@ -350,7 +350,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v7
         with:
-          name: race-shard-${{ matrix.shard }}-test-output
+          name: race-shard-${{ matrix.part }}-test-output
           path: test-output.txt
 
   sqlite:

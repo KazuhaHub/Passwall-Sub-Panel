@@ -13,7 +13,9 @@
 # instead of receiving it: `--shard K` prints that shard's packages and nothing
 # else. That keeps the package list out of the matrix, which otherwise ends up
 # in the job name — GitHub appends every matrix value, so a matrix carrying
-# package lists produces a check called "race shard (0, <80 package paths>)".
+# package lists produces a check called "go race full (1/4, <80 package paths>)".
+#
+# Shards are numbered 1..N, matching how they read in the check list.
 #
 # Without --shard it prints the whole partition, one shard per line, for
 # inspecting a change to the weights.
@@ -47,10 +49,10 @@ if [ "$shards" -lt 1 ]; then
 fi
 if [ -n "$only" ]; then
   case "$only" in
-    ''|*[!0-9]*) echo "shard index must be a non-negative integer, got '$only'" >&2; exit 2 ;;
+    ''|*[!0-9]*) echo "shard number must be a positive integer, got '$only'" >&2; exit 2 ;;
   esac
-  if [ "$only" -ge "$shards" ]; then
-    echo "shard index $only is outside 0..$((shards - 1))" >&2
+  if [ "$only" -lt 1 ] || [ "$only" -gt "$shards" ]; then
+    echo "shard number $only is outside 1..$shards" >&2
     exit 2
   fi
 fi
@@ -103,6 +105,6 @@ go list ./... | awk -v n="$shards" -v only="$only" -v weights="$weights" -v fall
       load[best] += weight[i]
       shard[best] = (shard[best] == "" ? "" : shard[best] " ") name[i]
     }
-    if (only != "") { print shard[only + 1]; exit }
-    for (i = 1; i <= n; i++) printf "%d %s\n", i - 1, shard[i]
+    if (only != "") { print shard[only]; exit }
+    for (i = 1; i <= n; i++) printf "%d/%d %s\n", i, n, shard[i]
   }'
