@@ -434,6 +434,9 @@ staleness 以 capability 为门，从未声明能力的旧节点是 unsupported 
 - [x] PSP `go.mod` 从伪版本切到 `v0.0.1-beta10`；四处枚举已发布版本的位置同步更新：
       `test.yml` 的兼容循环、`release.yml` 的矩阵、`docs/compat/node-v4.json`、
       `node_compat_matrix_test.go`（该测试先以 "has 9 rows, want 10" 失败，行数在起作用）
+- [x] PSP #123 合入 main（squash `9c083a6`）。首次合并被 ruleset 的
+      `required_review_thread_resolution` 挡住：code-quality 报告 `healthFor` 里
+      一个写了却从不读的 `NodeResourceEntry`，确属死代码，删除后才解开
 - [x] 三方言全量：MySQL 通过；Postgres 有一个**在未修改 main 上同样失败**的
       基线迁移测试（环境性，非本计划引入），详见第 3 节。
 
