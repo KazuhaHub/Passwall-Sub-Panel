@@ -247,6 +247,54 @@ PR：**KazuhaHub/Passwall-Node#24**（WP0 协议）、**#25**（Core 进程身�
 
 尚未开 PR 的：无。Node 侧到此为止，后续是 PSP 侧 WP4–WP9。
 
+## WP4 Panel domain、ports、SQL（Passwall-Sub-Panel）
+
+依赖：WP0 发布 module。分支 `kazuha/psp-node-host-metrics`
+
+- [x] `NodeHostObservation` 及 latest/sample/interface/hourly domain
+- [x] repo 接口（`NodeHostMetricRepo`，9 个方法，一个 port 覆盖四张表）
+- [x] 三方言 schema + `schemaModels` 登记
+- [x] 幂等写入（重试=重复、同 id 异 payload=identity conflict、迟到不覆盖）
+- [x] 批量列表摘要（`LatestBatchByPanelIDs`，一次 join，无 N+1）
+- [ ] 删除 agent 的级联服务逻辑（repo 层 `DeleteByAgentID` 已完成，
+      还需在删节点的服务路径上调用）
+- [ ] app.go 接线（hourly maintenance 与 retention）
+
+完成判据：
+
+- [x] SQLite/Postgres/MySQL 全套 repo 测试 —— 见下
+- [x] duplicate sample 幂等
+- [x] late sample 不覆盖 latest（变异测试确认：去掉判定即失败）
+- [x] 每 agent 60 秒 throttle —— **throttle 是 service 的决定**，
+      repo 只写被给到的东西；测试把这条边界固定下来
+- [x] 删除 agent 不留 orphan
+- [x] 大整数边界一致（MaxInt64 往返 + 负数按损坏拒绝）
+
+### 三方言实测（2026-09-18，用第 3 节的 VM）
+
+VM 里起 Postgres 17 与 MySQL 8 容器，交叉编译 `internal/adapters/sqlstore`
+的测试二进制跑**全量**：
+
+| 方言 | 结果 |
+|---|---|
+| SQLite | 全过（本机） |
+| MySQL 8 | **全量零失败** |
+| PostgreSQL 17 | 全量仅 1 个失败 |
+
+那一个失败是 `TestV4BaselineDoesNotReinterpretHistoricalLimitsIdentityAndDisableState`。
+**在未修改的 `origin/main` 上、同一个数据库里，它失败得一模一样**
+（用 `git worktree` 检出 main 做对照实验确认）。所以**不是本计划引入的回归**。
+但它值得单独查：要么仓库的 Postgres CI 用了不同版本或配置，
+要么 v3.9.2 基线迁移在 Postgres 17 上确有潜伏问题。
+
+### 依赖与前置条件
+
+- PSP 目前依赖**未发布的 Node 修订**（伪版本
+  `v0.0.1-beta9.0.20260918045153-97ace17e5f31`）以取得 WP0 的协议类型。
+  **合并前必须换成正式 tag。**
+- 升级立刻暴露一个真实前置条件：`nodebootstrap` 的 preflight 测试发现
+  新版安装器需要 `ln`，而既有迁移脚本没覆盖它。已补。
+
 ## 后续批次（尚未排期）
 
 依赖图见规格 §17。WP8 之前不得跳到前端。
