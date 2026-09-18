@@ -1,0 +1,29 @@
+# How long each package takes under `go test -race`, used only to balance shards.
+#
+# MEASURED ON THE CI RUNNER, NOT ON A DEVELOPER MACHINE. The first version of
+# this file used local timings and they did not transfer: sqlstore is 18% of the
+# suite locally and 45% on the runner, while nodebootstrap is 45s locally and 4s
+# there. Packing from the wrong table is worse than packing from none, because
+# it looks balanced. These numbers come from the shard logs of the run that
+# introduced the split, which report each package's own duration.
+#
+# ONLY THE HEAVY PACKAGES ARE LISTED; the rest take the planner's default. A NEW
+# PACKAGE NEEDS NO ENTRY — the planner takes its package list from `go list`, so
+# an unlisted package still runs, on the default weight. Nothing about
+# correctness depends on this file; only balance does.
+#
+# REFRESH BY READING THE SHARD LOGS when the shape of the suite changes.
+#
+# <seconds> <import path>
+174.2 github.com/KazuhaHub/passwall-sub-panel/internal/adapters/sqlstore
+27.6 github.com/KazuhaHub/passwall-sub-panel/internal/service/nodeagentupgrade
+25.6 github.com/KazuhaHub/passwall-sub-panel/internal/service/nodesync
+19.0 github.com/KazuhaHub/passwall-sub-panel/cmd/panel
+18.3 github.com/KazuhaHub/passwall-sub-panel/internal/service/rollup
+18.1 github.com/KazuhaHub/passwall-sub-panel/internal/transport/http/handler
+16.0 github.com/KazuhaHub/passwall-sub-panel/internal/service/health
+6.2 github.com/KazuhaHub/passwall-sub-panel/internal/app
+4.2 github.com/KazuhaHub/passwall-sub-panel/internal/pkg/nodebootstrap
+3.8 github.com/KazuhaHub/passwall-sub-panel/internal/service/clientdoc
+3.8 github.com/KazuhaHub/passwall-sub-panel/internal/service/user
+2.7 github.com/KazuhaHub/passwall-sub-panel/internal/adapters/xui
