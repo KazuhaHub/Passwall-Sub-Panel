@@ -41,6 +41,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/mailer"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/node"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/nodeagentupgrade"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/nodediagnostics"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/nodemetrics"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/nodesync"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/reconcile"
@@ -293,6 +294,12 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	if err != nil {
 		return nil, fmt.Errorf("native agent upgrade service: %w", err)
 	}
+	nodeDiagnostics, err := nodediagnostics.New(nodediagnostics.Options{
+		Panels: repos.XUIPanel, Agents: repos.NodeAgent, Tasks: repos.NodeAgentTask, Settings: repos.Settings, IDs: upgradeIDs,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("node diagnostics service: %w", err)
+	}
 	if err := panelRegistry.Register(domain.PanelKind3XUI, func(p *domain.Panel) (ports.PanelClient, error) {
 		return xuiadapter.New(p)
 	}); err != nil {
@@ -511,6 +518,7 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 		Geo:              geoSvc,
 		NodeSync:         nativeSync,
 		NodeAgentUpgrade: nativeUpgrade,
+		NodeDiagnostics:  nodeDiagnostics,
 		NodeReleases:     nodeReleases,
 		ServerMigration:  servermigration.New(repos.ServerMigration),
 		SubPerIPPerMin:   sysSettings.SubPerIPPerMin,

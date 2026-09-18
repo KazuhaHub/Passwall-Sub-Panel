@@ -42,6 +42,7 @@ type AdminServersHandler struct {
 	agents           ports.NodeAgentRepo
 	nodeSettings     ports.SettingsRepo
 	nativeUpgrade    NativeAgentUpgradeService
+	nodeDiagnostics  NodeDiagnosticsService
 	nodeReleases     ports.NodeReleaseCatalog
 	serverMigration  ServerMigrationPreviewer
 	nodeMetrics      ports.NodeHostMetricRepo

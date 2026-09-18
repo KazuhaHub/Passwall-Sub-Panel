@@ -89,6 +89,7 @@ type Deps struct {
 	Geo              *geo.Service
 	NodeSync         handler.NodeSyncService
 	NodeAgentUpgrade handler.NativeAgentUpgradeService
+	NodeDiagnostics  handler.NodeDiagnosticsService
 	// NodeMetrics serves the resource-telemetry API. Optional: absent, its
 	// routes are simply not registered, so a build without host telemetry does
 	// not answer 200 with an empty series.
@@ -621,6 +622,7 @@ func NewRouter(d Deps) stdhttp.Handler {
 			WithNodeAgents(d.Repos.NodeAgent).
 			WithNodeSettings(d.Repos.Settings).
 			WithNativeAgentUpgrade(d.NodeAgentUpgrade).
+			WithNodeDiagnostics(d.NodeDiagnostics).
 			WithNodeReleaseCatalog(d.NodeReleases).
 			WithServerMigrationPreviewer(d.ServerMigration)
 		bootstrapPublic = handler.NewNodeBootstrapHandler(servers, d.Repos.ServerMigration, d.OperationGate)
@@ -669,6 +671,10 @@ func NewRouter(d Deps) stdhttp.Handler {
 		adminGroup.GET("/servers/:id/node-agent-status", servers.NodeAgentStatus)
 		adminGroup.POST("/servers/:id/upgrade-node-agent", servers.UpgradeNativeAgent)
 		adminGroup.GET("/servers/:id/node-agent-upgrades/:task_id", servers.GetNativeAgentUpgrade)
+		// Admin only, and the RESULT is admin only too: section 13.5 returns a
+		// diagnostic to administrators alone.
+		adminGroup.POST("/servers/:id/node-diagnostics", servers.RequestNodeDiagnostics)
+		adminGroup.GET("/servers/:id/node-diagnostics/:task_id", servers.GetNodeDiagnostics)
 		adminGroup.POST("/servers/probe", servers.Test)
 		adminGroup.GET("/servers/:id/upgrade-preview", servers.UpgradePreview)
 		adminGroup.POST("/servers/:id/upgrade-panel", servers.UpgradePanel)
