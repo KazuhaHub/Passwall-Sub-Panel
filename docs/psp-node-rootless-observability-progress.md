@@ -249,16 +249,17 @@ PR：**KazuhaHub/Passwall-Node#24**（WP0 协议）、**#25**（Core 进程身�
 
 ## WP4 Panel domain、ports、SQL（Passwall-Sub-Panel）
 
-依赖：WP0 发布 module。分支 `kazuha/psp-node-host-metrics`
+依赖：WP0 的协议类型。分支 `kazuha/psp-node-host-metrics`，**PR #123**
 
 - [x] `NodeHostObservation` 及 latest/sample/interface/hourly domain
 - [x] repo 接口（`NodeHostMetricRepo`，9 个方法，一个 port 覆盖四张表）
 - [x] 三方言 schema + `schemaModels` 登记
 - [x] 幂等写入（重试=重复、同 id 异 payload=identity conflict、迟到不覆盖）
 - [x] 批量列表摘要（`LatestBatchByPanelIDs`，一次 join，无 N+1）
-- [ ] 删除 agent 的级联服务逻辑（repo 层 `DeleteByAgentID` 已完成，
-      还需在删节点的服务路径上调用）
+- [x] 删除 agent 的级联逻辑 —— 加在 `DeleteConverged` 的事务里，
+      与 agent 的其他行一起删；已用变异测试确认
 - [ ] app.go 接线（hourly maintenance 与 retention）
+      —— **属于 WP6**（§17 把 retention 与 rollup 放在一起，清理必须在降采样之后）
 
 完成判据：
 
