@@ -2670,5 +2670,50 @@
       "node_clock_skew": "The node clock is skewed",
       "node_collector_slow": "Collection is taking too long"
     }
+  },
+  "nodeDiagnostics": {
+    "title": "Remote diagnostics · {{name}}",
+    "sections": "Sections",
+    "section": {
+      "host": "Host",
+      "runtime": "Runtime",
+      "state": "State",
+      "events": "Events"
+    },
+    "collect": "Collect",
+    "waiting": "Waiting for the node to answer…",
+    "requestFailed": "Could not request a diagnostic",
+    "failed": "The node could not collect a diagnostic.",
+    "indeterminate": "The node's outcome is unknown; it may or may not have collected.",
+    "truncated": "Truncated",
+    "recovered": "Re-collected after a restart",
+    "checks": "Checks",
+    "check": {
+      "code": "Check",
+      "status": "Verdict",
+      "summary": "Detail"
+    },
+    "checkStatus": {
+      "ok": "OK",
+      "warning": "Warning",
+      "failed": "Failed",
+      "unavailable": "Unavailable"
+    },
+    "state": "State: integrity {{quickCheck}}, {{outbox}} undelivered, {{tasks}} unfinished",
+    "runtime": "Core: {{core}} · config {{digest}}",
+    "events": "Events",
+    "noEvents": "The node recorded no events.",
+    "severity": {
+      "info": "Info",
+      "warning": "Warning",
+      "error": "Error"
+    },
+    "status": {
+      "queued": "Queued",
+      "offered": "Offered",
+      "succeeded": "Succeeded",
+      "failed": "Failed",
+      "indeterminate": "Indeterminate"
+    }
   }
 }

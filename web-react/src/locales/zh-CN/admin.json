@@ -2668,5 +2668,50 @@
       "node_clock_skew": "节点时钟偏差过大",
       "node_collector_slow": "采集耗时过长"
     }
+  },
+  "nodeDiagnostics": {
+    "title": "远程诊断 · {{name}}",
+    "sections": "采集范围",
+    "section": {
+      "host": "主机",
+      "runtime": "运行时",
+      "state": "状态",
+      "events": "事件"
+    },
+    "collect": "开始采集",
+    "waiting": "等待节点返回…",
+    "requestFailed": "无法发起诊断",
+    "failed": "节点未能完成采集。",
+    "indeterminate": "节点结果未知——可能采集了，也可能没有。",
+    "truncated": "已截断",
+    "recovered": "重启后重新采集",
+    "checks": "检查项",
+    "check": {
+      "code": "检查",
+      "status": "结论",
+      "summary": "详情"
+    },
+    "checkStatus": {
+      "ok": "正常",
+      "warning": "警告",
+      "failed": "失败",
+      "unavailable": "不可用"
+    },
+    "state": "状态：完整性 {{quickCheck}}，{{outbox}} 条未投递，{{tasks}} 个未完成任务",
+    "runtime": "核心：{{core}} · 配置 {{digest}}",
+    "events": "事件",
+    "noEvents": "节点没有记录任何事件。",
+    "severity": {
+      "info": "提示",
+      "warning": "警告",
+      "error": "错误"
+    },
+    "status": {
+      "queued": "排队中",
+      "offered": "已下发",
+      "succeeded": "成功",
+      "failed": "失败",
+      "indeterminate": "结果未知"
+    }
   }
 }
