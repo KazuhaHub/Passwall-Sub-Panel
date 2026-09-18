@@ -296,6 +296,33 @@ VM 里起 Postgres 17 与 MySQL 8 容器，交叉编译 `internal/adapters/sqlst
 - 升级立刻暴露一个真实前置条件：`nodebootstrap` 的 preflight 测试发现
   新版安装器需要 `ln`，而既有迁移脚本没覆盖它。已补。
 
+## WP5 nodesync 接收（Passwall-Sub-Panel）
+
+依赖：WP4。分支 `kazuha/psp-node-host-metrics`（与 WP4 同分支）
+
+- [x] Host validator —— 分两段：wire 边界先验 Base 再验 Host
+- [x] latest/history ingest
+- [x] best-effort 持久化边界（`Ingest` 签名里**没有 error 可返回**）
+- [x] current capability observation —— 既有机制已覆盖：
+      `UpdateProtocolObservation` 每轮把 `report.Capabilities` 写进
+      `node_agents.observed_capabilities`，`host.telemetry.v1` 自然流过去
+- [x] refresh request 热窗（API 在 WP8）
+- [x] `cloneReport` / `cloneObservationReport` 不保留 Host（显式清空，第二道防线）
+
+完成判据：
+
+- [x] Host DB 写失败仍返回有效 SyncResponse
+- [x] malformed Host 在 SQL 前丢弃，但仍返回有效 SyncResponse
+- [x] partial/full 均接收
+- [x] 旧 Node 无回归（原有 nodesync 测试全过）
+- [x] refresh 合并和过期测试
+- [x] **§6 第 14 条（128 KiB）落地** —— 在 handler 里对**原始** host 子树量长度，
+      这是唯一能看到"未来 agent 新增的未知字段"的层。WP0 记录的缺口已闭合。
+
+一处值得记的边界：**`"host": "字符串"` 属于 JSON 类型错误，仍拒绝整个请求**。
+规格说"JSON 语法或控制面契约失败仍拒绝整个请求，仅 Host 子树的语义错误隔离"，
+所以隔离只适用于"能解码但验证不过"的子树。测试里写明了这条分界。
+
 ## 后续批次（尚未排期）
 
 依赖图见规格 §17。WP8 之前不得跳到前端。
