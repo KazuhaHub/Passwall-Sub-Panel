@@ -113,7 +113,12 @@ describe('Server update hints and paired tray icons', () => {
     mount(<ServersView />)
     const row = await rowFor(limited.name)
     expect(within(row).getByText('admin:servers.native.compatibility.limited')).toBeTruthy()
-    expect(within(row).getByText('admin:servers.update_available')).toBeTruthy()
+    // AWAITED, UNLIKE THE BADGE ABOVE. The compatibility badge is server row
+    // data and is there when the row renders; the update hint comes from the
+    // node release catalog, a second read that resolves afterwards. Asserting it
+    // synchronously passed whenever the catalog happened to win the race and
+    // failed under load — which is how this test flaked, not the code.
+    expect(await within(row).findByText('admin:servers.update_available')).toBeTruthy()
     expect(within(row).queryByRole('button', { name: 'admin:servers.agent_upgrade.available' })).toBeNull()
     fireEvent.click(within(row).getByRole('button', { name: 'admin:servers.action.more' }))
     expect(screen.getByRole('menuitem', { name: 'admin:servers.agent_upgrade.action' }).getAttribute('aria-disabled')).toBe('true')
