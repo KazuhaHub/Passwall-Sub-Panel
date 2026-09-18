@@ -147,11 +147,49 @@
 
 - [x] 无外部命令（§7.3 禁止清单）——由源码扫描测试守住，
       并且是在**防止以后有人加进来**（运行期无法察觉）
-- [ ] 非 root unit 与 Docker 均可采集 —— **需要真实 Linux 环境**
+- [x] 非 root unit 与 Docker 均可采集 —— **已在真实 Linux 上验证**，见下
 - [x] 每个文件缺失都有测试（§18.2 清单中除"真实内核边界"外的项）
 - [x] 100 次 fixture benchmark 无泄漏、无非线性遍历
       —— `-benchtime=100x` 实测约 0.58 ms/次，远低于 100 ms 软预算
 - [x] `go test -race` 通过
+
+## 真实 Linux 验证（2026-09-18）
+
+本机装了 Lima（`brew install lima`），虚拟机名 **`psp-node`**：
+Ubuntu 26.04、内核 7.0.0-28-generic/aarch64、cgroup v2、含 containerd+nerdctl。
+`limactl shell psp-node -- <cmd>` 即可进入；`limactl stop psp-node` 停。
+
+验证方式：本机 `GOOS=linux GOARCH=arm64 go test -c` 交叉编译出测试二进制，
+拷进 VM 直接运行（VM 里不用装 Go）。门控环境变量 `PSP_HOST_LIVE=1`。
+
+结果：
+
+| 场景 | Deployment | ResourceScope | DataFilesystemScope |
+|---|---|---|---|
+| 宿主，uid 501（非 root） | `systemd` | `host` | `host_mount` |
+| 容器，cap_drop ALL + 512 MiB | `docker` | `mixed` | `container_mount` |
+
+**这一步抓出了三个真实缺陷**，全部是"画在图上看起来很合理"的那类：
+
+1. **没有默认路由的地址族被当成失败**。纯 IPv4 主机的 IPv6 表里根本没有默认路由
+   （所有全零目标项属于 loopback 且未 UP）。这会给每台单栈机器永久打上
+   `network.default_route`——和"某个非默认 veth 没有 speed 不能标记整机"是同一条规则。
+   token 现在只表示"无法确定"。
+2. **裸机上的 tmpfs 被标成容器挂载**。`/tmp`、`/run` 在裸机上就是 tmpfs，
+   映射成 `container_mount` 等于告诉面板这些数字描述的是别处——与这个字段存在的
+   目的恰好相反。文件系统类型单独不足以判定：overlay 在哪都是容器层，
+   而内存文件系统只有在 agent 身处容器中时才是容器的。
+3. **private cgroupns 的容器探测不到运行时**。这种容器的 `/proc/self/cgroup` 是
+   `0::/`，PID 1 的也一样，cgroup 路径里没有任何运行时名字。容器里的 agent
+   因此把自己报成 `manual` + `host` scope——把宿主 CPU 说成容器自己的占用。
+   根文件系统是 overlay 是唯一能穿透该 namespace 的信号，现在与路径标记一起检查。
+
+交叉核对（观测值 vs 原始内核文件）：文件系统数字正好等于 mountinfo 里 `/tmp` 的
+`size=1994416k` 与 `nr_inodes=1048576`；`cpuset.cpus.effective=0-3` 对应
+`effective_cpus=4`；`MemTotal` 与 `/proc/meminfo` 一致。
+
+**建议**：后续每个 WP 的验收都走一遍这个 VM。WP0 的协议层也能在这里验
+（真实 HostObservation 过 validator），WP3 的 doctor 更是必须在真机上跑。
 
 **本地环境限制**：本机是 darwin，`//go:build linux` 的部分只能用
 `GOOS=linux go vet` 做编译检查；不过因为解析器是平台无关的，绝大部分断言
@@ -159,23 +197,26 @@
 
 ## WP2 调度与同步统计（Passwall-Node）
 
-依赖：WP0、WP1
+依赖：WP0、WP1。分支 `kazuha/node-host-collector`（与 WP1 同分支）
 
-- [ ] `HostReporter` cache 与 single-flight（§7.5 的 latch 语义）
-- [ ] `ShouldSendHost` 接线
-- [ ] `RuntimeStats`（§7.6）
-- [ ] `ReportBuilder` 注入 Host
-- [ ] collector 失败 Issue episode（§5.3）
-- [ ] `fitReportToWire` 降级顺序：先带 Host → 超限则移除 Host 重试 → 仍超限才走 outbox partial（§7.1）
+- [x] `HostReporter` cache 与 single-flight（§7.5 的 latch 语义）
+      已用变异测试确认：让超时的调用方也释放 latch，latch 测试立即失败
+- [x] `ShouldSendHost` 接线
+- [x] `RuntimeStats`（§7.6）
+- [x] `ReportBuilder` 注入 Host
+- [x] collector 失败 Issue episode（§5.3）
+- [x] `fitReportToWire` 降级顺序（§7.1）
+- [x] `cmd/node` 组合接线
 
 完成判据：
 
-- [ ] 60 秒周期在 30 秒 poll 下每两轮一次
-- [ ] `WantHostReport` 下一轮生效一次
-- [ ] POST 失败不错误推进 last sent
-- [ ] 重发 sample id 幂等
-- [ ] collector 超时不阻断 sync
-- [ ] capability 只在实现存在时声明
+- [x] 60 秒周期在 30 秒 poll 下每两轮一次
+- [x] `WantHostReport` 下一轮生效一次
+- [x] POST 失败不错误推进 last sent
+- [x] 重发 sample id 幂等
+- [x] collector 超时不阻断 sync
+- [x] capability 只在实现存在时声明
+- [ ] **端到端**：真实 Node 对着真实 PSP 跑一轮，确认 Host 出现在报告里（要等 PSP 侧 WP5）
 
 ## WP3 passwall-node doctor（Passwall-Node）
 
