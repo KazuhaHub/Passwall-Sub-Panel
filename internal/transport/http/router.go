@@ -31,6 +31,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/mailer"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/node"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/nodehealth"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/nodemetrics"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/passkey"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/reconcile"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/recovery"
@@ -88,9 +89,13 @@ type Deps struct {
 	Geo              *geo.Service
 	NodeSync         handler.NodeSyncService
 	NodeAgentUpgrade handler.NativeAgentUpgradeService
-	NodeReleases     ports.NodeReleaseCatalog
-	ServerMigration  handler.ServerMigrationPreviewer
-	Async            AsyncDispatcher
+	// NodeMetrics serves the resource-telemetry API. Optional: absent, its
+	// routes are simply not registered, so a build without host telemetry does
+	// not answer 200 with an empty series.
+	NodeMetrics     *nodemetrics.Service
+	NodeReleases    ports.NodeReleaseCatalog
+	ServerMigration handler.ServerMigrationPreviewer
+	Async           AsyncDispatcher
 
 	// SharedClients answers, for one user, which panels hold their clients and
 	// whether each can store the connection caps. Read-only; serves the
@@ -564,6 +569,12 @@ func NewRouter(d Deps) stdhttp.Handler {
 		// 3X-UI tag + the cached tested range), so panel_upgrade makes zero new
 		// GitHub calls; CheckXUI(latest)==Supported ensures we only nudge toward
 		// upgrades PSP has actually verified.
+		// One source instance serves both the bell and the detail endpoints. Two
+		// would be two evaluations of the same history, and the day they disagree
+		// is the day nobody trusts either.
+		nodeHealthSource := &nodehealth.Source{
+			Agents: d.Repos.NodeAgent, Metrics: d.Repos.NodeHostMetric,
+		}
 		alertSvc := alert.New(alert.Deps{
 			Nodes:    d.Repos.Node,
 			Panels:   d.Repos.XUIPanel,
@@ -584,9 +595,7 @@ func NewRouter(d Deps) stdhttp.Handler {
 			// Host resource health. The source reads stored telemetry and replays
 			// it through the evaluator, so the bell and the node detail page can
 			// never disagree about whether a condition is active.
-			NodeResource: &nodehealth.Source{
-				Agents: d.Repos.NodeAgent, Metrics: d.Repos.NodeHostMetric,
-			},
+			NodeResource: nodeHealthSource,
 		})
 		staffGroup.GET("/alerts", handler.NewAdminAlertsHandler(alertSvc).List)
 
@@ -608,6 +617,7 @@ func NewRouter(d Deps) stdhttp.Handler {
 		}
 		servers := handler.NewAdminServersHandler(d.Repos.XUIPanel, d.Pool, d.Repos.Node, d.Repos.Audit, d.Async, invalidateRender).
 			WithNativeAgentProvisioning(d.Repos.NativeAgentProvisioning).
+			WithNodeMetrics(d.Repos.NodeHostMetric).
 			WithNodeAgents(d.Repos.NodeAgent).
 			WithNodeSettings(d.Repos.Settings).
 			WithNativeAgentUpgrade(d.NodeAgentUpgrade).
@@ -625,6 +635,27 @@ func NewRouter(d Deps) stdhttp.Handler {
 		adminGroup.GET("/servers/:id/node-installation", servers.NodeInstallation)
 		adminGroup.POST("/servers/:id/node-install-command", bootstrapPublic.MintInstall)
 		adminGroup.POST("/servers/:id/node-migration-command", bootstrapPublic.MintMigration)
+		// Node host resource telemetry. Admin-only like every other server-detail
+		// endpoint: it names the host's kernel, its interface names and its
+		// distribution, which is operational detail a subscriber has no business
+		// reading.
+		// Registered only when the service exists. A build without host telemetry
+		// leaves the routes absent rather than answering 200 with an empty series,
+		// so "this build cannot tell you" stays distinguishable from "nothing is
+		// wrong" — the same rule the optional Geo and SharedClients deps follow.
+		if d.NodeMetrics != nil {
+			nodeMetrics, metricsErr := handler.NewAdminNodeMetricsHandler(
+				d.Repos.XUIPanel, d.Repos.NodeAgent, d.NodeMetrics, nodeHealthSource)
+			if metricsErr != nil {
+				log.Error("node metrics routes are unavailable", "err", metricsErr)
+			} else {
+				adminGroup.GET("/servers/:id/node-metrics/current", nodeMetrics.Current)
+				adminGroup.GET("/servers/:id/node-metrics/history", nodeMetrics.History)
+				adminGroup.GET("/servers/:id/node-metrics/interfaces", nodeMetrics.Interfaces)
+				adminGroup.POST("/servers/:id/node-metrics/refresh", nodeMetrics.Refresh)
+				adminGroup.GET("/servers/:id/node-health", nodeMetrics.Health)
+			}
+		}
 		adminGroup.GET("/servers/:id/node-migration-preview", servers.NodeMigrationPreview)
 		// A missing API method otherwise reaches the SPA fallback (possibly
 		// HTTP 200). Explicitly refuse an attempted online conversion.

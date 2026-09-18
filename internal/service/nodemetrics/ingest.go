@@ -136,6 +136,17 @@ func (s *Service) Ingest(ctx context.Context, agentID string, observation *nodep
 		SnapshotJSON:  canonical,
 	}
 
+	// The predecessor is read ONCE and used twice: for the write throttle below,
+	// and for the two figures the server list renders. Reading it here rather than
+	// at read time is what keeps that list to one query — a rate needs two
+	// samples, and the list cannot fetch a predecessor per row.
+	previous, hasPrevious := s.previousSample(ctx, agentID, receivedAt)
+	if hasPrevious {
+		rates := Derive(previous, sampleFromObservation(agentID, &observationForStorage, observation))
+		observationForStorage.CPUPercent = rates.CPUPercent
+		observationForStorage.MemoryPercent = rates.MemoryUsedPercent
+	}
+
 	// The whole persistence attempt runs under its own deadline, so a slow disk
 	// cannot hold the node's sync open.
 	bounded, cancel := context.WithTimeout(ctx, nodeHostPersistBudget)
@@ -147,7 +158,6 @@ func (s *Service) Ingest(ctx context.Context, agentID string, observation *nodep
 	}()
 
 	request := domain.NodeHostPersistRequest{Observation: &observationForStorage}
-	previous, hasPrevious := s.previousSample(bounded, agentID, receivedAt)
 	if isHistoryDue(previous, hasPrevious, observation, receivedAt) {
 		sample := sampleFromObservation(agentID, &observationForStorage, observation)
 		request.Sample = sample

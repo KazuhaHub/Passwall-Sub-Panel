@@ -44,6 +44,7 @@ type AdminServersHandler struct {
 	nativeUpgrade    NativeAgentUpgradeService
 	nodeReleases     ports.NodeReleaseCatalog
 	serverMigration  ServerMigrationPreviewer
+	nodeMetrics      ports.NodeHostMetricRepo
 
 	// startedAt is when THIS PSP process began listening. It exists because a
 	// node's silence during the panel's own downtime is not evidence about the
@@ -86,16 +87,27 @@ func NewAdminServersHandler(repo ports.XUIPanelRepo, pool ports.XUIPool, nodes p
 // connection" trigger. Native nodes additionally expose desired core identity
 // from NodeAgent separately from the last observed runtime identity.
 type serverDTO struct {
-	ID            int64                   `json:"id"`
-	Kind          string                  `json:"panel_type"`
-	Capabilities  []ports.PanelCapability `json:"capabilities"`
-	Name          string                  `json:"name"`
-	URL           string                  `json:"url"`
-	Username      string                  `json:"username,omitempty"`
-	Remark        string                  `json:"remark,omitempty"`
-	UpdateChannel string                  `json:"update_channel,omitempty"`
-	HasAPIToken   bool                    `json:"has_api_token"`
-	HasPassword   bool                    `json:"has_password"`
+	ID int64 `json:"id"`
+	// Node host resource telemetry, for the list's compact health entry.
+	//
+	// THE LIST GETS A MAPPED BADGE, NOT THE FINDING SET. §10.1 allows the list to
+	// collapse the two health dimensions into one highest-priority badge, and the
+	// detail endpoint carries the authoritative findings. Deriving the badge from
+	// batched values is what keeps the list off a per-row history replay.
+	NodeResourceHealth   string                  `json:"node_resource_health,omitempty"`
+	NodeMetricsFreshness string                  `json:"node_metrics_freshness,omitempty"`
+	NodeCPUPercent       *float64                `json:"node_cpu_percent"`
+	NodeMemoryPercent    *float64                `json:"node_memory_percent"`
+	NodeMetricReceivedAt *time.Time              `json:"node_metric_received_at"`
+	Kind                 string                  `json:"panel_type"`
+	Capabilities         []ports.PanelCapability `json:"capabilities"`
+	Name                 string                  `json:"name"`
+	URL                  string                  `json:"url"`
+	Username             string                  `json:"username,omitempty"`
+	Remark               string                  `json:"remark,omitempty"`
+	UpdateChannel        string                  `json:"update_channel,omitempty"`
+	HasAPIToken          bool                    `json:"has_api_token"`
+	HasPassword          bool                    `json:"has_password"`
 	// AuthMethod is the EFFECTIVE auth mode ("token" | "password") so the edit
 	// form pre-selects correctly — resolved from the stored method, falling back
 	// to inference for legacy rows. InsecureHTTPS skips TLS cert verification.
@@ -240,12 +252,111 @@ func (h *AdminServersHandler) List(c *gin.Context) {
 			}
 		}
 	}
+	// ONE batched query for every listed panel. A per-row read would be the N+1
+	// the spec forbids, on the page an operator loads most often.
+	metricsByPanel := map[int64]domain.NodeHostSummary{}
+	if h.nodeMetrics != nil {
+		panelIDs := make([]int64, 0, len(panels))
+		for _, panel := range panels {
+			if panel != nil && domain.NormalizePanelKind(panel.Kind) == domain.PanelKindPSP {
+				panelIDs = append(panelIDs, panel.ID)
+			}
+		}
+		summaries, metricsErr := h.nodeMetrics.LatestBatchByPanelIDs(ctx, panelIDs)
+		if metricsErr != nil {
+			// The resource badge is not worth failing the server list for.
+			log.Warn("alert: node metric summaries", "err", metricsErr)
+		} else {
+			metricsByPanel = summaries
+		}
+	}
 	out := make([]serverDTO, len(panels))
 	for i, panel := range panels {
 		out[i] = h.toServerDTOWithAgent(panel, agentsByPanel[panel.ID])
+		applyNodeMetrics(&out[i], agentsByPanel[panel.ID], metricsByPanel[panel.ID])
 	}
 	c.JSON(http.StatusOK, pagedEnvelope(out, total, p))
 }
+
+// applyNodeMetrics fills the list's compact resource entry.
+//
+// THE MAPPING IS A SUMMARY AND SAYS SO: freshness first, because a node whose
+// telemetry stopped is stale regardless of what its last numbers were, then the
+// two figures it carries. The authoritative findings — including the ones this
+// cannot see, like iowait and disk — live on the detail endpoint.
+// WithNodeMetrics attaches the resource-telemetry repository. Optional: without
+// it the list simply carries no resource entry, which is distinguishable from a
+// node that reported nothing.
+func (h *AdminServersHandler) WithNodeMetrics(metrics ports.NodeHostMetricRepo) *AdminServersHandler {
+	h.nodeMetrics = metrics
+	return h
+}
+
+func applyNodeMetrics(dto *serverDTO, agent *domain.NodeAgent, summary domain.NodeHostSummary) {
+	if agent == nil {
+		// A 3X-UI panel has no agent and cannot report, which is not the same as
+		// reporting nothing.
+		dto.NodeResourceHealth = "unsupported"
+		return
+	}
+	if summary.ReceivedAt.IsZero() {
+		dto.NodeMetricsFreshness = "missing"
+		dto.NodeResourceHealth = "unavailable"
+		return
+	}
+	received := summary.ReceivedAt.UTC()
+	dto.NodeMetricReceivedAt = &received
+	dto.NodeCPUPercent = summary.CPUPercent
+	dto.NodeMemoryPercent = summary.MemoryPercent
+	age := time.Since(received)
+	switch {
+	case age > 5*nodeMetricsPeriod:
+		dto.NodeMetricsFreshness = "missing"
+		dto.NodeResourceHealth = "stale"
+	case age > 2*nodeMetricsPeriod:
+		dto.NodeMetricsFreshness = "stale"
+		dto.NodeResourceHealth = "stale"
+	default:
+		dto.NodeMetricsFreshness = "fresh"
+		dto.NodeResourceHealth = nodeResourceBadge(summary, agent)
+	}
+}
+
+// nodeResourceBadge maps the batched figures onto the list badge.
+func nodeResourceBadge(summary domain.NodeHostSummary, agent *domain.NodeAgent) string {
+	capable := false
+	for _, capability := range agent.ObservedCapabilities {
+		if capability == "host.telemetry.v1" {
+			capable = true
+			break
+		}
+	}
+	if !capable {
+		return "unsupported"
+	}
+	if summary.CPUPercent != nil {
+		if *summary.CPUPercent >= 97 {
+			return "critical"
+		}
+		if *summary.CPUPercent >= 90 {
+			return "warning"
+		}
+	}
+	if summary.MemoryPercent != nil {
+		if *summary.MemoryPercent >= 95 {
+			return "critical"
+		}
+		if *summary.MemoryPercent >= 90 {
+			return "warning"
+		}
+	}
+	return "healthy"
+}
+
+// nodeMetricsPeriod is the assumed telemetry cadence for the list's freshness
+// badge. The panel asks for this cadence, so it is the right denominator for a
+// badge whose only job is to say "this looks current".
+const nodeMetricsPeriod = 60 * time.Second
 
 func (h *AdminServersHandler) Create(c *gin.Context) {
 	var req serverCreateRequest

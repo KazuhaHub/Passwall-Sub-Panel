@@ -39,6 +39,11 @@ type NodeHostObservation struct {
 	BootID        string
 	ResourceScope string
 	SnapshotJSON  []byte
+	// CPUPercent and MemoryPercent are derived when the sample is ingested and
+	// stored beside it, so the server list can render them from one batched query
+	// rather than fetching a predecessor per row.
+	CPUPercent    *float64
+	MemoryPercent *float64
 	CreatedAt     time.Time
 	UpdatedAt     time.Time
 }
@@ -274,6 +279,10 @@ type NodeHostSummary struct {
 	// than the token list, because the list view needs to know the snapshot is
 	// incomplete, not which parts of it are.
 	Unavailable int
+	// CPUPercent and MemoryPercent are the values stored at ingest, so the list
+	// gets them from the same query as everything else.
+	CPUPercent    *float64
+	MemoryPercent *float64
 }
 
 // NodeHostPersistRequest is one write attempt.

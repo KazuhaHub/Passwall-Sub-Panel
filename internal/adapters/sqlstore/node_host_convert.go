@@ -36,6 +36,7 @@ func observationRowFromDomain(observation *domain.NodeHostObservation) *nodeHost
 		BootID:        observation.BootID,
 		ResourceScope: observation.ResourceScope,
 		SnapshotJSON:  string(observation.SnapshotJSON),
+		CPUPercent:    observation.CPUPercent, MemoryPercent: observation.MemoryPercent,
 	}
 }
 

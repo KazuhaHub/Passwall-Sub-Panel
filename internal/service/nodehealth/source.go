@@ -173,3 +173,118 @@ func observedHostTelemetry(agent *domain.NodeAgent) bool {
 // hostTelemetryCapability mirrors the wire constant without importing the
 // protocol package for one string.
 const hostTelemetryCapability = "host.telemetry.v1"
+
+// Health is the resource-health verdict for one node.
+type Health struct {
+	// Status is one of the §10.1 resource_health values. It is deliberately NOT
+	// collapsed with connectivity: a node can be online and critical, or offline
+	// and unknown, and the two answer different questions.
+	Status   string
+	Findings []Finding
+	// Freshness is fresh, stale, missing or unsupported.
+	Freshness string
+}
+
+const (
+	HealthHealthy     = "healthy"
+	HealthWarmingUp   = "warming_up"
+	HealthWarning     = "warning"
+	HealthCritical    = "critical"
+	HealthStale       = "stale"
+	HealthUnavailable = "unavailable"
+
+	FreshnessFresh       = "fresh"
+	FreshnessStale       = "stale"
+	FreshnessMissing     = "missing"
+	FreshnessUnsupported = "unsupported"
+)
+
+// Health evaluates one panel.
+//
+// THE DECISION ORDER IS THE SPEC'S and it matters: a missing capability outranks
+// everything, because an unsupported node has no metrics to judge; staleness
+// outranks the findings, because conditions derived from a window that has
+// stopped advancing describe the past rather than the present; and warming up
+// outranks healthy, because a short window is not a clean bill of health.
+func (s *Source) Health(ctx context.Context, panelID int64) (Health, error) {
+	agents, err := s.Agents.List(ctx)
+	if err != nil {
+		return Health{}, err
+	}
+	for _, agent := range agents {
+		if agent == nil || agent.PanelID != panelID {
+			continue
+		}
+		return s.healthFor(ctx, agent), nil
+	}
+	return Health{Status: HealthUnavailable, Freshness: FreshnessUnsupported}, domain.ErrNotFound
+}
+
+func (s *Source) healthFor(ctx context.Context, agent *domain.NodeAgent) Health {
+	now := time.Now().UTC()
+	if s.Now != nil {
+		now = s.Now().UTC()
+	}
+	capable := observedHostTelemetry(agent)
+	if !capable {
+		return Health{Status: HealthUnavailable, Freshness: FreshnessUnsupported}
+	}
+	window, ok := s.buildWindow(ctx, agent, now)
+	if !ok {
+		return Health{Status: HealthUnavailable, Freshness: FreshnessMissing}
+	}
+	entry := alert.NodeResourceEntry{PanelID: agent.PanelID, PanelName: agent.AgentID}
+	entry.Offline = agent.LastSeen == nil || now.Sub(*agent.LastSeen) > offlineThreshold
+
+	health := Health{Freshness: freshnessOf(window)}
+	findings := Evaluate(window, Options{CapabilityObserved: true})
+	if health.Freshness != FreshnessFresh {
+		// Stale outranks the findings: a condition derived from a window that
+		// stopped advancing describes the past, and reporting it as the present
+		// is how a node that went dark keeps alerting about a disk that filled up
+		// before it did.
+		health.Status = HealthStale
+		health.Findings = findings
+		return health
+	}
+	health.Findings = findings
+	health.Status = healthStatusOf(findings, WarmingUp(window))
+	return health
+}
+
+func healthStatusOf(findings []Finding, warmingUp bool) string {
+	critical, warning := false, false
+	for _, finding := range findings {
+		if finding.Severity == SeverityCritical {
+			critical = true
+		} else {
+			warning = true
+		}
+	}
+	switch {
+	case critical:
+		return HealthCritical
+	case warning:
+		return HealthWarning
+	case warmingUp:
+		return HealthWarmingUp
+	default:
+		return HealthHealthy
+	}
+}
+
+// freshnessOf applies §9.7's thresholds against the window's own end.
+func freshnessOf(window Window) string {
+	if window.EffectivePeriod <= 0 || len(window.Points) == 0 {
+		return FreshnessMissing
+	}
+	age := window.Now.Sub(window.Points[len(window.Points)-1].Sample.ReceivedAt)
+	switch {
+	case age <= 2*window.EffectivePeriod:
+		return FreshnessFresh
+	case age <= 5*window.EffectivePeriod:
+		return FreshnessStale
+	default:
+		return FreshnessMissing
+	}
+}

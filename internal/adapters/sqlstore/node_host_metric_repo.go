@@ -126,6 +126,8 @@ func applyLatestPrecedence(tx *gorm.DB, existing *nodeHostObservationRow, observ
 		"boot_id":        observation.BootID,
 		"resource_scope": observation.ResourceScope,
 		"snapshot_json":  string(observation.SnapshotJSON),
+		"cpu_percent":    observation.CPUPercent,
+		"memory_percent": observation.MemoryPercent,
 		"updated_at":     time.Now().UTC(),
 	}
 	if err := tx.Model(&nodeHostObservationRow{}).
@@ -197,11 +199,14 @@ func (r *nodeHostMetricRepo) LatestBatchByPanelIDs(ctx context.Context, panelIDs
 		ReceivedAt    time.Time
 		ResourceScope string
 		SnapshotJSON  string
+		CPUPercent    *float64
+		MemoryPercent *float64
 	}
 	err := r.db.WithContext(ctx).
 		Table("node_host_observations AS o").
 		Select("a.panel_id AS panel_id, o.agent_id AS agent_id, o.sample_id AS sample_id, "+
-			"o.received_at AS received_at, o.resource_scope AS resource_scope, o.snapshot_json AS snapshot_json").
+			"o.received_at AS received_at, o.resource_scope AS resource_scope, o.snapshot_json AS snapshot_json, "+
+			"o.cpu_percent AS cpu_percent, o.memory_percent AS memory_percent").
 		Joins("JOIN node_agents AS a ON a.agent_id = o.agent_id").
 		Where("a.panel_id IN ?", panelIDs).
 		Scan(&rows).Error
@@ -214,6 +219,7 @@ func (r *nodeHostMetricRepo) LatestBatchByPanelIDs(ctx context.Context, panelIDs
 			ReceivedAt:    row.ReceivedAt.UTC(),
 			ResourceScope: row.ResourceScope,
 			Unavailable:   countUnavailable(row.SnapshotJSON),
+			CPUPercent:    row.CPUPercent, MemoryPercent: row.MemoryPercent,
 		}
 	}
 	return summaries, nil

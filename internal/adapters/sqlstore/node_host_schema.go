@@ -36,8 +36,17 @@ type nodeHostObservationRow struct {
 	// service before it reaches here; the column is text so the three dialects
 	// agree on how it comes back.
 	SnapshotJSON string `gorm:"not null;type:text"`
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
+	// CPUPercent and MemoryPercent are DERIVED AT INGEST and stored, which is
+	// what lets the server list render two figures from ONE batched query.
+	//
+	// Computing them at read time would need each agent's previous sample, and
+	// the list cannot fetch that per row without the N+1 the spec forbids. The
+	// ingest already reads the predecessor for its write throttle, so the rate is
+	// free there and impossible here.
+	CPUPercent    *float64
+	MemoryPercent *float64
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
 }
 
 func (nodeHostObservationRow) TableName() string { return "node_host_observations" }
