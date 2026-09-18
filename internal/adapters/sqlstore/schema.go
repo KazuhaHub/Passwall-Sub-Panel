@@ -1524,6 +1524,13 @@ var schemaModels = []any{
 	&acmeAccountRow{},
 	&tlsCertificateRow{},
 	&certEventRow{},
+	// Node host telemetry (v4.x). Four tables because the four shapes are read
+	// differently: one row per agent, an append-only range, a per-layout list,
+	// and an upserted hourly aggregate.
+	&nodeHostObservationRow{},
+	&nodeHostMetricSampleRow{},
+	&nodeInterfaceMetricSampleRow{},
+	&nodeHostMetricHourlyRow{},
 }
 
 // EnsureSchema validates the supported input before performing any DDL, then
