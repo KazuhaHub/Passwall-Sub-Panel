@@ -220,21 +220,32 @@ Ubuntu 26.04、内核 7.0.0-28-generic/aarch64、cgroup v2、含 containerd+nerd
 
 ## WP3 passwall-node doctor（Passwall-Node）
 
-依赖：WP1（复用同一套采集器，不得另写第二份）
+依赖：WP1（复用同一套采集器，不得另写第二份）。分支 `kazuha/node-host-collector`
 
-- [ ] `doctor` / `doctor --json` 子命令，在 daemon flag 解析之前识别
-- [ ] §7.7 的固定 check code 全集
-- [ ] data-dir 的 `O_CREATE|O_EXCL` probe
-- [ ] SQLite 只读 `PRAGMA quick_check`
-- [ ] 退出码 0/1/2
+- [x] `doctor` / `doctor --json` 子命令，在 daemon flag 解析之前识别
+- [x] §7.7 的固定 check code 全集（10 个，每个恒出现一次、按 code 排序）
+- [x] data-dir 的 `O_CREATE|O_EXCL` probe（fsync → close → 立即删除，
+      失败路径也删；probe 名不进输出）
+- [x] SQLite 只读 `PRAGMA quick_check`（`mode=ro`，**不跑 migration**）
+- [x] 退出码 0/1/2
 
 完成判据：
 
-- [ ] 文本输出兼容
-- [ ] JSON schema 固定
-- [ ] secret golden test
-- [ ] 非 root systemd 安装与 Docker 容器内均可运行
-- [ ] exit code 测试
+- [x] 文本输出兼容（文本与 JSON 由同一个 CheckResult slice 渲染）
+- [x] JSON schema 固定（stdout 只有一个 document，诊断进 stderr）
+- [x] secret golden test
+- [x] 非 root systemd 安装与 Docker 容器内均可运行 —— 已在真机验证
+- [x] exit code 测试（0/1/2 全部覆盖，含相对路径、位置参数等用法错误）
+
+一处值得记的判断：doctor **不启动 Core**，所以 `collector.process` 只能报
+unavailable——这是规格 §7.7 的直接后果，不是缺口。
+
+## Node 侧批次完成（WP0–WP3）
+
+PR：**KazuhaHub/Passwall-Node#24**（WP0 协议）、**#25**（Core 进程身份）、
+**#26**（WP1–WP3，叠在前两者之上）。三个都合入后本地 main 需再次 fetch 核对。
+
+尚未开 PR 的：无。Node 侧到此为止，后续是 PSP 侧 WP4–WP9。
 
 ## 后续批次（尚未排期）
 
