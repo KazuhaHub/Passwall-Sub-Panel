@@ -85,6 +85,19 @@ export interface Server {
   ip_limit_enforcement?: IPLimitEnforcement
   /** When the current state was established — NOT when a probe was last attempted. */
   ip_limit_probed_at?: string
+  /**
+   * Host resource telemetry for the list's compact health entry. Native nodes
+   * only; every 3X-UI and S-UI server reports `unsupported`, which is a
+   * different statement from `unavailable`.
+   *
+   * The absent fields are `null` rather than missing, so a cell can render the
+   * placeholder without branching on which keys exist.
+   */
+  node_resource_health?: 'healthy' | 'warming_up' | 'warning' | 'critical' | 'stale' | 'unavailable' | 'unsupported'
+  node_metrics_freshness?: 'fresh' | 'stale' | 'missing' | 'unsupported'
+  node_cpu_percent?: number | null
+  node_memory_percent?: number | null
+  node_metric_received_at?: string | null
 }
 
 export type IPLimitEnforcement =
