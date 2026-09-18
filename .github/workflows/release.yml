@@ -153,6 +153,7 @@ jobs:
           - v0.0.1-beta8
           - v0.0.1-beta9
           - v0.0.1-beta10
+          - v0.0.1-beta11
     steps:
       - name: Checkout trusted panel source
         uses: actions/checkout@v7

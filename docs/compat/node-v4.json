@@ -85,6 +85,13 @@
       "base_sync": "supported",
       "remote_upgrade": "conditional",
       "upgrade_methods": ["linux-systemd", "managed-docker"]
+    },
+    {
+      "version": "v0.0.1-beta11",
+      "protocol_version": 1,
+      "base_sync": "supported",
+      "remote_upgrade": "conditional",
+      "upgrade_methods": ["linux-systemd", "managed-docker"]
     }
   ]
 }
