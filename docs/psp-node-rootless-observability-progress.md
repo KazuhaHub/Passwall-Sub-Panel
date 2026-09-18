@@ -496,7 +496,10 @@ fixture 现在在参数位置留一个标记，参数个数从被测修订的源
 
 ### 仍未完成（不属于本阶段范围）
 
-- 发布：`beta10`、`beta11` 仍在受保护的 `release-signing` environment 后面等人工批准
+- [x] 发布：`v0.0.1-beta10`（09:37Z）与 `v0.0.1-beta11`（10:31Z）**都已产出**。各 8 个资产
+      ——6 个平台二进制、`SHA256SUMS.txt`、以及 **`SHA256SUMS.txt.sig` 签名**（这正是
+      `release-signing` environment 那一步的产物），发布流水线的 9 个 job 全部成功，
+      含 "Publish GitHub release" 与 "Publish container image"
 - §23 的 7 天 DoD、数据库增长实测——需要真实时间；§20 全部场景已实测（见上文）
 
 ## WP10 实现前的规格缺口（2026-09-18 已补入规格）
@@ -683,6 +686,11 @@ cpu.system = d6b30a61-94cc-4703-abda-50c1fc2f3229
 
 - Node 工作树上的 `README.zh-CN.md` 是未跟踪文件，属于独立的 README 中文化工作，
   **不在本计划范围内**，无需处理。
+- **`web-react/src/views/admin/ServersView.installation.test.tsx` 会在超时线上偶发失败**
+  （2026-09-18 观察到两次，重跑即过）：该文件 67 个用例共 60.8s、平均约 0.9s，而失败的
+  两个约 **5.03s**，正好压在 vitest 默认的 5000ms 单用例超时上。与本计划无关（一个是纯
+  Go 改动的 PR 上就出现过），但会让 `main` 间歇变红。修法是给这两个用例单独放宽超时，
+  或削掉它们 setup 里的部分串行步骤——**该文件属于另一个进行中的前端改动，故未擅自改**。
 
 ## 附录：§23 的实测数字（2026-09-18）
 
