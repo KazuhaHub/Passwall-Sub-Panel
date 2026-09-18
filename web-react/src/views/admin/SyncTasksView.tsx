@@ -36,11 +36,12 @@ import { useSiteStore } from '@/stores/site'
 
 import {
   cancelSyncTask,
-  listSyncTasks,
   purgeFinishedSyncTasks,
   retrySyncTask,
   type SyncTaskListParams,
 } from '@/api/syncTasks'
+import { useQueryScope } from '@/query/useQueryScope'
+import { useSyncTasks } from '@/query/syncTasks'
 import type { SyncTask, SyncTaskStatus, SyncTaskType } from '@/api/types'
 import { confirm } from '@/components/ConfirmHost'
 import { pushSnack } from '@/components/SnackbarHost'
@@ -82,8 +83,6 @@ export default function SyncTasksView() {
   // Admin view: times in panel tz (+ browser tz disclosed when they differ).
   const panelTz = useSiteStore(s => s.timezone)
 
-  const [items, setItems] = useState<SyncTask[]>([])
-  const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState<number>(initialPageSize)
   function setPageSizePersist(n: number) {
@@ -91,9 +90,23 @@ export default function SyncTasksView() {
     try { localStorage.setItem('psp_page_size', String(n)) } catch { /* ignore */ }
     setPage(1)
   }
-  const [loading, setLoading] = useState(false)
   const [statusFilter, setStatusFilter] = useState<SyncTaskStatus | ''>('')
   const [typeFilter, setTypeFilter] = useState<SyncTaskType | ''>('')
+
+  const scope = useQueryScope()
+  const listParams = useMemo<SyncTaskListParams>(() => ({
+    page,
+    page_size: pageSize,
+    ...(statusFilter ? { status: statusFilter } : {}),
+    ...(typeFilter ? { type: typeFilter } : {}),
+  }), [page, pageSize, statusFilter, typeFilter])
+
+  const tasksQuery = useSyncTasks(scope, listParams)
+  const items = tasksQuery.data?.items ?? []
+  const total = tasksQuery.data?.total ?? 0
+  const loading = tasksQuery.isPending
+
+  function load() { void tasksQuery.refetch() }
   const [selected, setSelected] = useState<Set<number>>(new Set())
   const [batchBusy, setBatchBusy] = useState<'retry' | 'cancel' | ''>('')
 
@@ -103,20 +116,10 @@ export default function SyncTasksView() {
   const pendingCount = useMemo(() => items.filter(r => statusOf(r) === 'pending').length, [items])
   const actionableItems = items.filter(r => statusOf(r) !== 'retired')
 
-  useEffect(() => { void load()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, pageSize, statusFilter, typeFilter])
-
-  async function load() {
-    setLoading(true)
-    try {
-      const params: SyncTaskListParams = { page, page_size: pageSize }
-      if (statusFilter) params.status = statusFilter
-      if (typeFilter) params.type = typeFilter
-      const res = await listSyncTasks(params)
-      setItems(res.items); setTotal(res.total); setSelected(new Set())
-    } finally { setLoading(false) }
-  }
+  // Reset the selection when the QUERY changes (page / filters), not on every
+  // read: the loader used to clear it on each call, so a plain refresh dropped
+  // a batch the operator was still assembling.
+  useEffect(() => { setSelected(new Set()) }, [page, pageSize, statusFilter, typeFilter])
 
   function toggleAll(checked: boolean) {
     setSelected(checked ? new Set(actionableItems.map(idOf)) : new Set())

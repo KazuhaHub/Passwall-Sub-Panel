@@ -1,11 +1,13 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import {
   Box, CircularProgress, Table, TableBody, TableCell,
   TableContainer, TableFooter, TableHead, TableRow, TableSortLabel, Typography, useTheme,
 } from '@mui/material'
 import { useTranslation } from 'react-i18next'
 
-import { getUserServerUsage, type UserServerUsageRow } from '@/api/traffic'
+import type { UserServerUsageRow } from '@/api/traffic'
+import { useUserServerUsage } from '@/query/traffic'
+import { useQueryScope } from '@/query/useQueryScope'
 
 // fmt renders a byte count compactly (single-letter unit).
 function fmt(n: number): string {
@@ -28,18 +30,11 @@ type SortKey = 'lifetime' | 'period' | 'today'
 export function UserServerUsage({ userId }: { userId: number }) {
   const { t } = useTranslation('admin')
   const md = useTheme().palette.md
-  const [rows, setRows] = useState<UserServerUsageRow[] | null>(null)
+  const scope = useQueryScope()
+  const { data, isPending, isError } = useUserServerUsage(scope, userId)
+  const rows = data
   const [orderBy, setOrderBy] = useState<SortKey>('period')
   const [orderDir, setOrderDir] = useState<'asc' | 'desc'>('desc')
-
-  useEffect(() => {
-    let alive = true
-    setRows(null)
-    getUserServerUsage(userId)
-      .then(r => { if (alive) setRows(r) })
-      .catch(() => { if (alive) setRows([]) })
-    return () => { alive = false }
-  }, [userId])
 
   const grand = useMemo(() => (rows ?? []).reduce((a, r) => ({
     lifetime: a.lifetime + r.lifetime_total_bytes, lifeUp: a.lifeUp + r.lifetime_up_bytes, lifeDown: a.lifeDown + r.lifetime_down_bytes,
@@ -66,10 +61,22 @@ export function UserServerUsage({ userId }: { userId: number }) {
     </Typography>
   )
 
-  if (rows === null) {
+  if (isPending) {
     return <Box>{title}<CircularProgress size={20} /></Box>
   }
-  if (rows.length === 0) {
+  // A failed read is NOT "this user has no servers" — that claim would send an
+  // admin looking for a coverage problem that may not exist.
+  if (isError) {
+    return (
+      <Box>
+        {title}
+        <Typography sx={{ fontSize: 12, color: md.error }}>
+          {t('users.serverusage.unavailable', { defaultValue: '暂时无法获取服务器用量' })}
+        </Typography>
+      </Box>
+    )
+  }
+  if (!rows || rows.length === 0) {
     return (
       <Box>
         {title}

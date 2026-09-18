@@ -1,42 +1,44 @@
-import { useEffect, useState } from 'react'
 import { Box, CircularProgress, Typography, useTheme } from '@mui/material'
 import { useTranslation } from 'react-i18next'
 
-import { listAuthEvents, type AuthEvent } from '@/api/authEvents'
+import type { AuthEvent } from '@/api/authEvents'
+import { useUserActivity } from '@/query/authEvents'
+import { useQueryScope } from '@/query/useQueryScope'
 import { formatRegion } from '@/utils/geo'
 import { formatDualTz } from '@/utils/datetime'
 import { useSiteStore } from '@/stores/site'
 
 /** UserActivity shows a user's recent sign-in events (a per-user slice of the
- *  authentication log) inside the admin user-edit dialog. Read-only; fetches
- *  the latest few auth_events for the user when mounted. */
+ *  authentication log) inside the admin user-edit dialog. Read-only; reads the
+ *  latest few auth_events for the user through the shared query cache. */
 export function UserActivity({ userId }: { userId: number }) {
   const { t } = useTranslation('admin')
   const md = useTheme().palette.md
   const panelTz = useSiteStore(s => s.timezone)
-  const [items, setItems] = useState<AuthEvent[] | null>(null)
-
-  useEffect(() => {
-    let alive = true
-    setItems(null)
-    listAuthEvents({ user_id: userId, page_size: 8 })
-      .then(r => { if (alive) setItems(r.items) })
-      .catch(() => { if (alive) setItems([]) })
-    return () => { alive = false }
-  }, [userId])
+  const scope = useQueryScope()
+  const { data, isPending, isError } = useUserActivity(scope, userId)
+  const items: AuthEvent[] | undefined = data?.items
 
   return (
     <Box sx={{ mt: 1 }}>
       <Typography sx={{ fontSize: 13, fontWeight: 600, color: md.onSurfaceVariant, mb: 0.75 }}>
         {t('users.activity.title', { defaultValue: '最近登录' })}
       </Typography>
-      {items === null && <CircularProgress size={18} />}
-      {items !== null && items.length === 0 && (
+      {isPending && <CircularProgress size={18} />}
+      {/* A failed read is NOT an empty history. "No sign-in records" is a claim
+          about the account, and a security view is exactly where presenting an
+          outage as a clean record does the most damage. */}
+      {isError && (
+        <Typography sx={{ fontSize: 12, color: md.error }}>
+          {t('users.activity.unavailable', { defaultValue: '暂时无法获取登录记录' })}
+        </Typography>
+      )}
+      {!isError && items !== undefined && items.length === 0 && (
         <Typography sx={{ fontSize: 12, color: md.onSurfaceVariant }}>
           {t('users.activity.empty', { defaultValue: '暂无登录记录' })}
         </Typography>
       )}
-      {items !== null && items.length > 0 && (
+      {!isError && items !== undefined && items.length > 0 && (
         <Box sx={{ display: 'flex', flexDirection: 'column' }}>
           {items.map(r => (
             <Box key={r.id} sx={{ fontSize: 12, display: 'flex', flexDirection: 'column', gap: 0.25, py: 0.5, borderTop: `1px solid ${md.outlineVariant}` }}>

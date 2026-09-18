@@ -30,8 +30,11 @@ export interface EmailLogFilter {
   until?: string
 }
 
-export async function getEmailLogs(filter: EmailLogFilter = {}) {
-  const { data } = await client.get<EmailLogListResponse>('/admin/email-logs', { params: filter })
+export async function getEmailLogs(filter: EmailLogFilter = {}, opts: { signal?: AbortSignal } = {}) {
+  const { data } = await client.get<EmailLogListResponse>('/admin/email-logs', {
+    params: filter,
+    signal: opts.signal,
+  })
   return data
 }
 

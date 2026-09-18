@@ -39,3 +39,14 @@ for (const testCase of [
     })
   })
 }
+
+describe('read failure', () => {
+  it('reports a failed read instead of showing empty certificate tables', async () => {
+    // The loader swallowed the error and relied on a toast, which disappears —
+    // leaving tables that read as "this panel has no certificates at all".
+    api.get.mockRejectedValue(new Error('offline'))
+    mount(<CertificatesView />)
+
+    await waitFor(() => expect(screen.getByText('admin:certs.load_failed')).toBeTruthy())
+  })
+})

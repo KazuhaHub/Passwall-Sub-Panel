@@ -57,7 +57,10 @@ function withTz<T extends TrafficHistoryParams>(params: T): T {
   return { ...params, tz: params.tz ?? browserTz() }
 }
 
-export async function topTraffic(limit = 20, opts: { silent?: boolean } = {}) {
+export async function topTraffic(
+  limit = 20,
+  opts: { silent?: boolean; signal?: AbortSignal } = {},
+) {
   // `silent` flips the axios global error toast off for callers that
   // treat this as best-effort enrichment (DashboardView's top-5 widget,
   // UsersView's per-row usage column). Without it, a transient failure
@@ -66,17 +69,24 @@ export async function topTraffic(limit = 20, opts: { silent?: boolean } = {}) {
   const { data } = await client.get<{ items: TrafficRow[] }>('/admin/traffic/top', {
     params: { limit },
     _skipErrorToast: opts.silent,
+    signal: opts.signal,
   })
   return data.items
 }
 
-export async function trafficHistory(params: TrafficHistoryParams = {}) {
-  const { data } = await client.get<TrafficHistoryResponse>('/admin/traffic/history', { params: withTz(params) })
+export async function trafficHistory(params: TrafficHistoryParams = {}, opts: { signal?: AbortSignal } = {}) {
+  const { data } = await client.get<TrafficHistoryResponse>('/admin/traffic/history', {
+    params: withTz(params),
+    signal: opts.signal,
+  })
   return data
 }
 
-export async function userTrafficHistory(userId: number, params: TrafficHistoryParams = {}) {
-  const { data } = await client.get<TrafficHistoryResponse>(`/admin/traffic/user/${userId}/history`, { params: withTz(params) })
+export async function userTrafficHistory(userId: number, params: TrafficHistoryParams = {}, opts: { signal?: AbortSignal } = {}) {
+  const { data } = await client.get<TrafficHistoryResponse>(`/admin/traffic/user/${userId}/history`, {
+    params: withTz(params),
+    signal: opts.signal,
+  })
   return data
 }
 
@@ -107,15 +117,22 @@ export interface NodeTrafficRow {
   today_used_bytes: number
 }
 
-export async function topNodes(limit = 20) {
+export async function topNodes(limit = 20, opts: { signal?: AbortSignal } = {}) {
   const { data } = await client.get<{ items: NodeTrafficRow[] }>('/admin/traffic/nodes/top', {
     params: { limit },
+    signal: opts.signal,
   })
   return data.items
 }
 
-export async function nodeTrafficHistory(params: TrafficHistoryParams & { node_id?: number } = {}) {
-  const { data } = await client.get<TrafficHistoryResponse>('/admin/traffic/nodes/history', { params: withTz(params) })
+export async function nodeTrafficHistory(
+  params: TrafficHistoryParams & { node_id?: number } = {},
+  opts: { signal?: AbortSignal } = {},
+) {
+  const { data } = await client.get<TrafficHistoryResponse>('/admin/traffic/nodes/history', {
+    params: withTz(params),
+    signal: opts.signal,
+  })
   return data
 }
 
@@ -138,8 +155,10 @@ export interface UserNodeUsageRow {
   today_total_bytes: number
 }
 
-export async function getUserNodeUsage(userId: number) {
-  const { data } = await client.get<{ items: UserNodeUsageRow[] }>(`/admin/traffic/user/${userId}/nodes`)
+export async function getUserNodeUsage(userId: number, opts: { signal?: AbortSignal } = {}) {
+  const { data } = await client.get<{ items: UserNodeUsageRow[] }>(`/admin/traffic/user/${userId}/nodes`, {
+    signal: opts.signal,
+  })
   return data.items ?? []
 }
 
@@ -160,13 +179,15 @@ export interface UserServerUsageRow {
   today_total_bytes: number
 }
 
-export async function getUserServerUsage(userId: number) {
-  const { data } = await client.get<{ items: UserServerUsageRow[] }>(`/admin/traffic/user/${userId}/servers`)
+export async function getUserServerUsage(userId: number, opts: { signal?: AbortSignal } = {}) {
+  const { data } = await client.get<{ items: UserServerUsageRow[] }>(`/admin/traffic/user/${userId}/servers`, {
+    signal: opts.signal,
+  })
   return data.items ?? []
 }
 
-export async function getMyUsage() {
-  const { data } = await client.get<UsageReport>('/user/me/traffic')
+export async function getMyUsage(opts: { signal?: AbortSignal } = {}) {
+  const { data } = await client.get<UsageReport>('/user/me/traffic', { signal: opts.signal })
   return data
 }
 

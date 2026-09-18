@@ -76,7 +76,9 @@ describe('native-task lifecycle settings', () => {
   it('shows the server defaults with units, bounds, and conservative policy notices', async () => {
     await mountSettings()
 
-    expect(api.get).toHaveBeenCalledWith('/admin/settings/ui')
+    // The read now goes through the query cache, so it carries an AbortSignal
+    // config. The assertion is about the endpoint being read, not the arity.
+    expect(api.get).toHaveBeenCalledWith('/admin/settings/ui', expect.anything())
     expect(input('node_task_offline_reconcile_days').value).toBe('30')
     expect(input('node_task_backup_restore_days').value).toBe('30')
     expect(input('node_task_result_retention_days').value).toBe('90')
@@ -174,5 +176,52 @@ describe('native-task lifecycle settings', () => {
     save()
     expect(api.put).not.toHaveBeenCalled()
     expect(snack).toHaveBeenLastCalledWith('admin:settings.general.node_task_retention_minimum', 'warning')
+  })
+})
+
+describe('read failure', () => {
+  it('reports a failed settings read instead of spinning forever', async () => {
+    // The loader had no catch: `loading` went false but `settings` stayed null,
+    // and the render guard is `loading || !settings` — so a failed read left the
+    // page on a spinner that could never resolve.
+    api.get.mockRejectedValue(new Error('offline'))
+    mount(<SettingsView />)
+
+    await waitFor(() => expect(screen.getByText('admin:settings.load_failed')).toBeTruthy())
+  })
+
+  it('reports a failed mail read instead of spinning forever', async () => {
+    // Same shape inside the Mail tab: `loading || !mail` with an uncatch'd loader.
+    installReads({
+      '/admin/settings/ui': generalSettings(),
+      '/admin/groups': list([]),
+    })
+    api.get.mockImplementation(async (url: string) => {
+      if (url === '/admin/settings/mail') throw new Error('offline')
+      if (url === '/admin/settings/ui') return { data: generalSettings() }
+      if (url === '/admin/groups') return { data: list([]) }
+      throw new Error(`Unexpected GET ${url}`)
+    })
+    mount(<SettingsView />)
+    fireEvent.click(await screen.findByRole('tab', { name: 'admin:settings.tab_mail' }))
+
+    await waitFor(() => expect(screen.getByText('admin:settings.mail_load_failed')).toBeTruthy())
+  })
+
+  it('reports a failed SSO read instead of spinning forever', async () => {
+    // Both SSO halves share the shape: `loading || !cfg` with an uncatch'd load.
+    const reads: Record<string, unknown> = {
+      '/admin/settings/ui': generalSettings(),
+      '/admin/groups': list([]),
+    }
+    api.get.mockImplementation(async (url: string) => {
+      if (url in reads) return { data: reads[url] }
+      if (url === '/admin/settings/saml' || url === '/admin/settings/oidc') throw new Error('offline')
+      throw new Error(`Unexpected GET ${url}`)
+    })
+    mount(<SettingsView />)
+    fireEvent.click(await screen.findByRole('tab', { name: 'admin:settings.tab_sso' }))
+
+    await waitFor(() => expect(screen.getByText('admin:settings.saml_load_failed')).toBeTruthy())
   })
 })

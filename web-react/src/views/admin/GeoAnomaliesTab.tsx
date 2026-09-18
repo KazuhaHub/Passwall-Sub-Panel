@@ -1,12 +1,13 @@
-import { useEffect, useState } from 'react'
-import {
-  Box, Chip, CircularProgress, Table, TableBody, TableCell,
+import { Box, Chip, CircularProgress, Table, TableBody, TableCell,
   TableContainer, TableHead, TableRow, Tooltip, Typography, useTheme,
 } from '@mui/material'
 import WarningAmberIcon from '@mui/icons-material/WarningAmber'
 import { useTranslation } from 'react-i18next'
+import { isAxiosError } from 'axios'
 
-import { listGeoAnomalies, type GeoAnomaly } from '@/api/geoAnomalies'
+import type { GeoAnomaly } from '@/api/geoAnomalies'
+import { useGeoAnomalies } from '@/query/geoAnomalies'
+import { useQueryScope } from '@/query/useQueryScope'
 
 /**
  * Colour carries meaning here, so it is assigned by what the operator should
@@ -33,27 +34,24 @@ export default function GeoAnomaliesTab() {
   const { t } = useTranslation(['admin'])
   const theme = useTheme()
   const md = theme.palette.md
-  const [rows, setRows] = useState<GeoAnomaly[] | null>(null)
-  const [err, setErr] = useState('')
+  const scope = useQueryScope()
+  const { data, isPending, error } = useGeoAnomalies(scope)
+  const rows = data ?? []
 
-  useEffect(() => {
-    const ac = new AbortController()
-    listGeoAnomalies(ac.signal)
-      .then(setRows)
-      .catch(e => {
-        if (ac.signal.aborted) return
-        // 503 means the detector is not wired in this build. Reporting that as
-        // "no anomalies" would be the worst possible answer, so it surfaces as
-        // its own message rather than an empty table.
-        setErr(e?.response?.status === 503
-          ? t('admin:geo_anomalies.unwired', { defaultValue: '本部署未启用异地并发检测。' })
-          : String(e?.response?.data?.error ?? e))
-        setRows([])
-      })
-    return () => ac.abort()
-  }, [t])
+  if (isPending) return <Box sx={{ p: 3 }}><CircularProgress size={24} /></Box>
 
-  if (rows === null) return <Box sx={{ p: 3 }}><CircularProgress size={24} /></Box>
+  // 503 means the detector is not wired in this build. Reporting that as "no
+  // anomalies" would be the worst possible answer, so it surfaces as its own
+  // message rather than as an empty table.
+  const err = (() => {
+    if (!error) return ''
+    if (isAxiosError(error) && error.response?.status === 503) {
+      return t('admin:geo_anomalies.unwired', { defaultValue: '本部署未启用异地并发检测。' })
+    }
+    return isAxiosError(error)
+      ? String(error.response?.data?.error ?? error)
+      : String(error)
+  })()
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>

@@ -51,14 +51,10 @@ import {
   generateRealityKeypair,
   getNode,
   importNode,
-  listNodes,
-  listSeparators,
-  listUnmanagedInbounds,
   recreateNodeInbound,
   reorderNodes,
   reorderSeparators,
   setNodeEnabled,
-  type Separator,
   type SeparatorMode,
   updateInboundConfig,
   updateNodeMetadata,
@@ -66,10 +62,19 @@ import {
 } from '@/api/nodes'
 import { listUsers } from '@/api/users'
 import { fetchPanelWebCert, listCerts, setNodeCertSource, type Cert } from '@/api/certs'
-import { listServers, type PanelCapability, type PanelType, type Server } from '@/api/servers'
+import type { PanelCapability, PanelType, Server } from '@/api/servers'
 import { MenuItem, Select, FormControlLabel } from '@mui/material'
 import KeyIcon from '@mui/icons-material/VpnKey'
-import type { Node, RelayLine, UnmanagedInbound, User } from '@/api/types'
+import type { ListResponse, Node, RelayLine, UnmanagedInbound, User } from '@/api/types'
+import type { Separator } from '@/api/nodes'
+import { nodeKeys } from '@/query/keys'
+import { useNodesList, useSeparators, useUnmanagedInbounds } from '@/query/nodes'
+import { useServersList } from '@/query/servers'
+import { useQueryScope } from '@/query/useQueryScope'
+import { useQueryClient } from '@tanstack/react-query'
+
+/** The managed-tab read always covers the whole set, so its key is a constant. */
+const NODES_PARAMS = { page: 1, page_size: 500 } as const
 import { confirm } from '@/components/ConfirmHost'
 import PageHeader from '@/components/PageHeader'
 import { PagedTableFooter } from '@/components/PagedTableFooter'
@@ -2101,30 +2106,55 @@ export default function NodesView() {
   const panelTz = useSiteStore(s => s.timezone)
 
   const [tab, setTab] = useTabParam<'managed' | 'unmanaged'>('tab', 'managed', ['managed', 'unmanaged'])
-  const [managed, setManaged] = useState<Node[]>([])
+  const qScope = useQueryScope()
+  const queryClient = useQueryClient()
+  // Drag-to-reorder spans the full set, so the query fetches everything; the
+  // visible table still paginates client-side against that complete ordering.
+  const nodesQuery = useNodesList(qScope, { page: 1, page_size: 500 })
+  const managed = nodesQuery.data?.items ?? []
+  const nodesFailed = nodesQuery.isError
   // Separators live in nodes_separator (since v3.0.0-beta.7) and load
   // through a dedicated endpoint. They render interleaved with real nodes
   // in the managed table by SortOrder, matching what the subscription
   // render does — admins see the same list order they'd see in a
   // generated config.
-  const [separators, setSeparators] = useState<Separator[]>([])
+  const separatorsQuery = useSeparators(qScope)
+  const separators = separatorsQuery.data ?? []
+
+  /** Patch the cached node list after a write, so the table updates without a
+   *  round-trip (drag-reorder, enable toggle, batch actions). */
+  function mutateManaged(updater: (prev: Node[]) => Node[]) {
+    queryClient.setQueryData<ListResponse<Node>>(nodeKeys.list(qScope, NODES_PARAMS), prev =>
+      prev ? { ...prev, items: updater(prev.items) } : prev)
+  }
+  function mutateSeparators(updater: (prev: Separator[]) => Separator[]) {
+    queryClient.setQueryData<Separator[]>(nodeKeys.separators(qScope), prev => prev ? updater(prev) : prev)
+  }
   // Groups feed the multi-select inside the separator dialog when an
   // Groups list was previously loaded for the separator dialog's
   // "show in groups" picker. rc.4 switched separator visibility from
   // group_ids to node_ids, so the dialog picks from `managed` instead
   // and the groups state itself is no longer read.
-  const [unmanaged, setUnmanaged] = useState<UnmanagedInbound[]>([])
   // The unmanaged tab is scoped to one server: nothing is fetched until the
   // admin picks a panel. null = no selection yet (shows the empty prompt).
   const [unmanagedPanelId, setUnmanagedPanelId] = useState<number | null>(null)
+  const unmanagedQuery = useUnmanagedInbounds(qScope, unmanagedPanelId)
+  const unmanaged = unmanagedQuery.data?.items ?? []
   // Last error from loading the selected panel's inbounds (e.g. panel
   // unreachable) — surfaced inline with a Retry instead of failing silently.
-  const [unmanagedError, setUnmanagedError] = useState<string | null>(null)
+  const unmanagedError = unmanagedQuery.isError
+    ? ((unmanagedQuery.error as { response?: { data?: { error?: string } } })?.response?.data?.error
+      || (unmanagedQuery.error as Error)?.message || String(unmanagedQuery.error))
+    : null
   // Free-text filter on the unmanaged-inbound tab. Matches against panel
   // name, protocol, remark, port and inbound ID so the operator can find a
   // specific inbound by whatever piece they remember.
   const [unmanagedSearch, setUnmanagedSearch] = useState('')
-  const [loading, setLoading] = useState(false)
+  // The active tab's loading state: the managed list, or the selected panel's
+  // unmanaged list. Derived, not stored — nothing sets it independently now.
+  const loading = tab === 'unmanaged'
+    ? unmanagedPanelId != null && unmanagedQuery.isPending
+    : nodesQuery.isPending
 
   // Distinct values surfaced as Autocomplete suggestions, tagged by source
   // field so MUI's groupBy can render them under section headers like
@@ -2348,7 +2378,7 @@ export default function NodesView() {
       }
       if (separatorEditingId !== null) {
         const saved = await updateSeparator(separatorEditingId, payload)
-        setSeparators(prev => prev.map(item => item.id === saved.id ? saved : item))
+        mutateSeparators(prev => prev.map(item => item.id === saved.id ? saved : item))
         pushSnack(t('admin:nodes.toast.separator_updated', { defaultValue: '分隔标题已更新' }), 'success')
       } else {
         await createSeparator(payload)
@@ -2373,7 +2403,10 @@ export default function NodesView() {
   type ClaimField = 'user_id' | 'client_email'
   const [claimErr, setClaimErr] = useState<FieldErrors<ClaimField>>({})
 
-  const [servers, setServers] = useState<Server[]>([])
+  // The panel picker. Shared with ServersView's list read, so the servers list
+  // has one owner instead of two independent fetchers.
+  const serversQuery = useServersList(qScope, { page: 1, page_size: 200 })
+  const servers = serversQuery.data?.items ?? []
   const writableServers = useMemo(
     () => servers.filter(s => s.capabilities?.includes('inbound.create') && s.capabilities?.includes('inbound.delete')),
     [servers],
@@ -2411,18 +2444,6 @@ export default function NodesView() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab])
 
-  useEffect(() => { void loadServers() }, [])
-
-  async function loadServers() {
-    // For the picker dropdown we want every panel. Request a large
-    // page_size that the backend will clamp to 200, which is plenty
-    // for an individual deployment.
-    try {
-      const res = await listServers({ page: 1, page_size: 200 })
-      setServers(res.items)
-    } catch { /* toast */ }
-  }
-
   async function load() {
     // Unmanaged is scoped to the picked panel and manages its own loading
     // state, so don't run the managed-tab spinner path for it.
@@ -2430,26 +2451,9 @@ export default function NodesView() {
       await loadUnmanaged(unmanagedPanelId)
       return
     }
-    setLoading(true)
-    try {
-      // Pull nodes + separators in parallel — the table interleaves
-      // them but they live on independent endpoints. Group list is
-      // also refreshed so the separator dialog's "Show in groups"
-      // picker reflects whatever the admin just added in Groups view.
-      const [n, s] = await Promise.all([
-        // Drag-to-reorder spans the full set, so fetch all nodes here.
-        // Large fleets paginate the visible *table* via filteredManaged
-        // slicing below but the drag handler still computes positions
-        // against the complete ordering.
-        listNodes({ page: 1, page_size: 500 }),
-        listSeparators().catch(() => [] as Separator[]),
-      ])
-      setManaged(n.items)
-      setSeparators(s)
-      setSelected(new Set())
-    } finally {
-      setLoading(false)
-    }
+    setSelected(new Set())
+    // Drag-to-reorder spans the full set, so both reads cover everything.
+    await Promise.all([nodesQuery.refetch(), separatorsQuery.refetch()])
   }
 
   // loadUnmanaged fetches the selected panel's unmanaged inbounds. With no
@@ -2459,29 +2463,11 @@ export default function NodesView() {
   // Last-wins guard: switching panels fires a new fetch; a slow earlier
   // panel's response must not overwrite the list/error for the panel now
   // selected.
-  const unmanagedSeq = useRef(0)
-
-  async function loadUnmanaged(panelId: number | null) {
-    const seq = ++unmanagedSeq.current
-    setUnmanagedError(null)
-    if (panelId == null) {
-      setUnmanaged([])
-      return
-    }
-    setLoading(true)
-    try {
-      const res = await listUnmanagedInbounds(panelId)
-      if (seq === unmanagedSeq.current) setUnmanaged(res.items)
-    } catch (e) {
-      if (seq === unmanagedSeq.current) {
-        setUnmanaged([])
-        const msg = (e as { response?: { data?: { error?: string } } })?.response?.data?.error
-          || (e as Error)?.message || String(e)
-        setUnmanagedError(msg)
-      }
-    } finally {
-      if (seq === unmanagedSeq.current) setLoading(false)
-    }
+  function loadUnmanaged(panelId: number | null) {
+    // Picking a different panel just moves the key, and the query fetches.
+    // Re-picking the same one is an explicit refresh.
+    if (panelId !== unmanagedPanelId) { setUnmanagedPanelId(panelId); return Promise.resolve() }
+    return unmanagedQuery.refetch()
   }
 
   function selectUnmanagedPanel(panelId: number | null) {
@@ -2552,7 +2538,7 @@ export default function NodesView() {
         hide_direct: editForm.hide_direct,
         show_relay_status: editForm.hide_direct || editForm.show_relay_status,
       })
-      setManaged(prev => prev.map(node => node.id === saved.id ? saved : node))
+      mutateManaged(prev => prev.map(node => node.id === saved.id ? saved : node))
       pushSnack(t('admin:nodes.toast.saved'), 'success')
       setEditOpen(false)
     } finally { setEditBusy(false) }
@@ -2563,7 +2549,7 @@ export default function NodesView() {
     try {
       const next = !n.enabled
       await setNodeEnabled(n.id, next)
-      setManaged(prev => prev.map(x => x.id === n.id ? { ...x, enabled: next } : x))
+      mutateManaged(prev => prev.map(x => x.id === n.id ? { ...x, enabled: next } : x))
       pushSnack(t(next ? 'admin:nodes.toast.enabled' : 'admin:nodes.toast.disabled'), 'success')
     } finally {
       setEnabledBusy(p => ({ ...p, [n.id]: false }))
@@ -2580,10 +2566,10 @@ export default function NodesView() {
     if (!ok) return
     if (n.kind === 'separator') {
       await deleteSeparator(n.id)
-      setSeparators(prev => prev.filter(s => s.id !== n.id))
+      mutateSeparators(prev => prev.filter(s => s.id !== n.id))
     } else {
       await deleteNode(n.id)
-      setManaged(prev => prev.filter(x => x.id !== n.id))
+      mutateManaged(prev => prev.filter(x => x.id !== n.id))
     }
     pushSnack(t('admin:nodes.toast.deleted'), 'success')
   }
@@ -2599,7 +2585,7 @@ export default function NodesView() {
     })
     if (!ok) return
     await detachNode(n.id)
-    setManaged(prev => prev.filter(x => x.id !== n.id))
+    mutateManaged(prev => prev.filter(x => x.id !== n.id))
     pushSnack(t('admin:nodes.toast.detached'), 'success')
   }
 
@@ -2657,7 +2643,7 @@ export default function NodesView() {
       const results = await allSettledLimited(rows, r => deleteNode(r.id))
       const okIds = rows.filter((_, i) => results[i].status === 'fulfilled').map(r => r.id)
       const failed = rows.length - okIds.length
-      setManaged(prev => prev.filter(x => !okIds.includes(x.id)))
+      mutateManaged(prev => prev.filter(x => !okIds.includes(x.id)))
       setSelected(new Set())
       if (failed > 0) {
         pushSnack(t('admin:nodes.toast.batch_partial', { ok: okIds.length, fail: failed }), 'warning')
@@ -2712,8 +2698,8 @@ export default function NodesView() {
 
     // Optimistic local state — separate maps keep node/separator updates
     // isolated even when IDs collide.
-    setManaged(previousManaged.map(n => ({ ...n, sort_order: newNodeOrder.get(n.id) ?? n.sort_order })))
-    setSeparators(previousSeparators.map(s => ({ ...s, sort_order: newSepOrder.get(s.id) ?? s.sort_order })))
+    mutateManaged(() => previousManaged.map(n => ({ ...n, sort_order: newNodeOrder.get(n.id) ?? n.sort_order })))
+    mutateSeparators(() => previousSeparators.map(s => ({ ...s, sort_order: newSepOrder.get(s.id) ?? s.sort_order })))
 
     setReorderBusy(true)
     try {
@@ -2726,8 +2712,8 @@ export default function NodesView() {
       ])
       pushSnack(t('admin:nodes.toast.reordered'), 'success')
     } catch (err) {
-      setManaged(previousManaged)
-      setSeparators(previousSeparators)
+      mutateManaged(() => previousManaged)
+      mutateSeparators(() => previousSeparators)
       pushSnack(t('admin:nodes.toast.reorder_failed'), 'error')
       // eslint-disable-next-line no-console
       console.error('reorder failed', err)
@@ -3227,6 +3213,21 @@ export default function NodesView() {
       setTab('managed')
       await load()
     } finally { setImportBusy(false) }
+  }
+
+  // The loader had no catch, so a failed read raised an unhandled rejection and
+  // the table rendered with no nodes — indistinguishable from a fleet with none.
+  if (nodesFailed) {
+    return (
+      <Box sx={{ p: 3, display: 'grid', placeItems: 'center', gap: 2, minHeight: 400 }}>
+        <Typography sx={{ color: md.onSurfaceVariant }}>
+          {t('admin:nodes.load_failed', { defaultValue: '暂时无法加载节点' })}
+        </Typography>
+        <Button variant="outlined" onClick={() => void load()}>
+          {t('admin:nodes.retry', { defaultValue: '重试' })}
+        </Button>
+      </Box>
+    )
   }
 
   return (

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useState } from 'react'
 import {
   Card,
   Chip,
@@ -14,7 +14,8 @@ import {
 import { useTranslation } from 'react-i18next'
 
 import { PagedTableFooter } from '@/components/PagedTableFooter'
-import { listCertEvents, type CertEvent } from '@/api/certs'
+import { useCertEvents } from '@/query/certs'
+import { useQueryScope } from '@/query/useQueryScope'
 import { formatDualTz } from '@/utils/datetime'
 import { useSiteStore } from '@/stores/site'
 
@@ -27,28 +28,15 @@ export default function CertEventsTab() {
   const { t } = useTranslation(['admin', 'common'])
   const panelTz = useSiteStore(s => s.timezone)
 
-  const [events, setEvents] = useState<CertEvent[]>([])
-  const [total, setTotal] = useState(0)
+  const scope = useQueryScope()
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(25)
-  const [loading, setLoading] = useState(true)
 
-  const load = useCallback(async () => {
-    setLoading(true)
-    try {
-      const r = await listCertEvents(page, pageSize)
-      setEvents(r.events)
-      setTotal(r.total)
-    } catch {
-      /* error toast via the axios interceptor */
-    } finally {
-      setLoading(false)
-    }
-  }, [page, pageSize])
-
-  useEffect(() => {
-    void load()
-  }, [load])
+  const eventsQuery = useCertEvents(scope, page, pageSize)
+  const events = eventsQuery.data?.events ?? []
+  const total = eventsQuery.data?.total ?? 0
+  const loading = eventsQuery.isPending
+  const failed = eventsQuery.isError
 
   return (
     <Card sx={{ bgcolor: md.surfaceContainerLow, boxShadow: '0 1px 2px rgba(0,0,0,.3),0 1px 3px 1px rgba(0,0,0,.15)', overflow: 'hidden' }}>
@@ -67,7 +55,13 @@ export default function CertEventsTab() {
             {loading && events.length === 0 && (
               <TableRow><TableCell colSpan={5} sx={{ textAlign: 'center', py: 6 }}><CircularProgress size={24} /></TableCell></TableRow>
             )}
-            {!loading && events.length === 0 && (
+            {/* A failed read is NOT "nothing was ever issued". */}
+            {!loading && failed && (
+              <TableRow><TableCell colSpan={5} sx={{ textAlign: 'center', py: 6, color: md.error }}>
+                {t('admin:logs.cert_load_failed', { defaultValue: '暂时无法加载证书日志' })}
+              </TableCell></TableRow>
+            )}
+            {!loading && !failed && events.length === 0 && (
               <TableRow><TableCell colSpan={5} sx={{ textAlign: 'center', py: 6, color: md.onSurfaceVariant }}>—</TableCell></TableRow>
             )}
             {events.map(e => (

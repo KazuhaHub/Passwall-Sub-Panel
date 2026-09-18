@@ -37,8 +37,11 @@ export interface SubLogFilter {
   until?: string
 }
 
-export async function getSubLogs(filter: SubLogFilter = {}) {
-  const { data } = await client.get<SubLogListResponse>('/admin/sub-logs', { params: filter })
+export async function getSubLogs(filter: SubLogFilter = {}, opts: { signal?: AbortSignal } = {}) {
+  const { data } = await client.get<SubLogListResponse>('/admin/sub-logs', {
+    params: filter,
+    signal: opts.signal,
+  })
   return data
 }
 

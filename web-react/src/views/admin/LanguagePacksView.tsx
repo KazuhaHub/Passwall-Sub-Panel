@@ -27,7 +27,9 @@ import WarningAmberIcon from '@mui/icons-material/WarningAmberOutlined'
 import { useTranslation } from 'react-i18next'
 
 import { useCan } from '@/utils/permissions'
-import { listLocales, saveLocale, deleteLocale, MAX_LOCALE_PACK_BYTES, type LocaleMeta, type LocalePack } from '@/api/locales'
+import { saveLocale, deleteLocale, MAX_LOCALE_PACK_BYTES, type LocaleMeta, type LocalePack } from '@/api/locales'
+import { useLocales } from '@/query/locales'
+import { useQueryScope } from '@/query/useQueryScope'
 import { loadBuiltinSource, LANGUAGE_PACK_FORMAT } from '@/i18n'
 import { getVersion } from '@/api/version'
 import { confirm } from '@/components/ConfirmHost'
@@ -45,8 +47,10 @@ export default function LanguagePacksView() {
   const { t } = useTranslation(['admin', 'common'])
   const canConfig = useCan('config.write')
 
-  const [items, setItems] = useState<LocaleMeta[]>([])
-  const [loading, setLoading] = useState(false)
+  const qScope = useQueryScope()
+  const localesQuery = useLocales(qScope)
+  const items = localesQuery.data ?? []
+  const localesFailed = localesQuery.isError
   const [dialogOpen, setDialogOpen] = useState(false)
   const [jsonText, setJsonText] = useState('')
   const [busy, setBusy] = useState(false)
@@ -58,10 +62,7 @@ export default function LanguagePacksView() {
   useEffect(() => { void load(); void loadVersion() }, [])
 
   async function load() {
-    setLoading(true)
-    try {
-      setItems(await listLocales())
-    } finally { setLoading(false) }
+    await localesQuery.refetch()
   }
 
   async function loadVersion() {
@@ -190,10 +191,16 @@ export default function LanguagePacksView() {
               </TableRow>
             </TableHead>
             <TableBody>
-              {loading && items.length === 0 && (
+              {localesQuery.isPending && (
                 <TableRow><TableCell colSpan={5} sx={{ textAlign: 'center', py: 6 }}><CircularProgress size={24} /></TableCell></TableRow>
               )}
-              {!loading && items.length === 0 && (
+              {/* A failed read is NOT "no packs uploaded". */}
+              {localesFailed && (
+                <TableRow><TableCell colSpan={5} sx={{ textAlign: 'center', py: 6, color: md.error }}>
+                  {t('admin:languagePacks.load_failed', { defaultValue: '暂时无法加载语言包' })}
+                </TableCell></TableRow>
+              )}
+              {!localesQuery.isPending && !localesFailed && items.length === 0 && (
                 <TableRow><TableCell colSpan={5} sx={{ textAlign: 'center', py: 6, color: md.onSurfaceVariant }}>
                   {t('admin:languagePacks.empty')}
                 </TableCell></TableRow>

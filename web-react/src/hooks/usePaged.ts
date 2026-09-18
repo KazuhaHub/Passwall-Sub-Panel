@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { useSearchParams } from 'react-router'
+import { usePageState, type PageRequest, type UsePageStateOptions } from './usePageState'
+
+export type { PageRequest }
 
 /**
  * Page response envelope returned by every paged list endpoint. Mirrors
@@ -13,37 +15,7 @@ export interface PagedResponse<T> {
   page_size: number
 }
 
-/**
- * The request object the hook hands to the fetcher. Fetchers should
- * turn it into a query string (`?page=1&page_size=25&keyword=...&sort_by=...&sort_dir=...`)
- * and call the backend.
- */
-export interface PageRequest {
-  page: number
-  page_size: number
-  keyword: string
-  sort_by: string
-  sort_dir: 'asc' | 'desc'
-}
-
-export interface UsePagedOptions {
-  /** Initial page size. Falls back to localStorage (psp_page_size) and
-   * then to 25. */
-  defaultPageSize?: number
-  /** Initial sort_by column. Empty string defers to the backend's
-   * resource-specific default order. */
-  defaultSortBy?: string
-  /** Initial sort_dir; defaults to "desc" since newest-first is the
-   * common pattern for log-like tables. */
-  defaultSortDir?: 'asc' | 'desc'
-  /** Page-size options offered to the user. Defaults to [10, 25, 50, 100]. */
-  pageSizeOptions?: number[]
-  /** URL param namespace prefix. Useful when two paged tables share a
-   * page (e.g. tabs) — prefix one with "tab1_" so their state doesn't
-   * collide. Empty default keeps URLs short for the typical single-table
-   * page. */
-  paramPrefix?: string
-}
+export type UsePagedOptions = UsePageStateOptions
 
 export interface UsePagedResult<T> {
   items: T[]
@@ -71,124 +43,43 @@ export interface UsePagedResult<T> {
   mutateItems: (updater: (prev: T[]) => T[]) => void
 }
 
-const STORAGE_KEY = 'psp_page_size'
-
-function readStoredPageSize(): number | null {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY)
-    if (!raw) return null
-    const n = parseInt(raw, 10)
-    if (!Number.isFinite(n) || n < 1) return null
-    return n
-  } catch {
-    return null
-  }
-}
-
-function writeStoredPageSize(n: number) {
-  try { localStorage.setItem(STORAGE_KEY, String(n)) } catch { /* localStorage may be disabled */ }
-}
-
 /**
- * usePaged manages page / page_size / keyword / sort state for one
- * paginated list view, syncs everything but page_size to the URL
- * (page_size lives in localStorage so admin's "show 100" preference
- * carries across every list), and re-fetches whenever any of those
- * change.
+ * Paging state plus a hand-rolled fetcher, for list views not yet migrated to
+ * the shared query cache. The paging half lives in `usePageState`; this adds
+ * only the request/replace cycle.
  *
- * The fetcher receives a fully-formed PageRequest and returns a
- * PagedResponse. Caller's responsibility to map the PageRequest into a
- * query string for its own API client.
+ * It aborts in-flight requests when params change rapidly (e.g. admin types in
+ * the search box) so an older slow response can't overwrite a newer fast one.
+ * The fetcher gets the AbortSignal as a second arg.
  *
- * Aborts in-flight requests when params change rapidly (e.g. admin types
- * in the search box) so an older slow response can't overwrite a newer
- * fast one. The fetcher gets the AbortSignal as a second arg.
+ * Migrated views should compose `usePageState` with `useQuery` instead — that
+ * gives them cancellation, dedupe and invalidation for free.
  */
 export function usePaged<T>(
   fetcher: (req: PageRequest, signal: AbortSignal) => Promise<PagedResponse<T>>,
   opts: UsePagedOptions = {},
 ): UsePagedResult<T> {
-  const [params, setParams] = useSearchParams()
-  const prefix = opts.paramPrefix ?? ''
-  const keyOf = useCallback((k: string) => prefix ? `${prefix}_${k}` : k, [prefix])
-
-  // Initial values: URL > localStorage (page_size only) > defaults.
-  const initialPage = Math.max(1, parseInt(params.get(keyOf('page')) || '1', 10) || 1)
-  const initialKeyword = params.get(keyOf('q')) || ''
-  const sortRaw = params.get(keyOf('sort')) || ''
-  const sortParts = sortRaw.split('-')
-  const initialSortBy = sortRaw ? sortParts[0] : (opts.defaultSortBy ?? '')
-  const initialSortDir: 'asc' | 'desc' = sortRaw
-    ? (sortParts[1] === 'asc' ? 'asc' : 'desc')
-    : (opts.defaultSortDir ?? 'desc')
-  const storedSize = readStoredPageSize()
-  const initialPageSize = storedSize ?? opts.defaultPageSize ?? 25
-
-  const [page, setPageState] = useState(initialPage)
-  const [pageSize, setPageSizeState] = useState(initialPageSize)
-  const [keyword, setKeywordState] = useState(initialKeyword)
-  const [sortBy, setSortBy] = useState(initialSortBy)
-  const [sortDir, setSortDir] = useState<'asc' | 'desc'>(initialSortDir)
+  const ps = usePageState(opts)
 
   const [items, setItems] = useState<T[]>([])
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<Error | null>(null)
 
-  // refreshTick is bumped by refresh() to force a re-fetch without
-  // touching any other dep.
+  // refreshTick is bumped by refresh() to force a re-fetch without touching
+  // any other dep.
   const [refreshTick, setRefreshTick] = useState(0)
   const refresh = useCallback(() => setRefreshTick(t => t + 1), [])
 
-  // URL sync. Default values (page=1, no keyword, no sort) stay omitted
-  // so URLs stay short and bookmarks for the "default view" don't get
-  // polluted with redundant query params.
-  useEffect(() => {
-    setParams(prev => {
-      const next = new URLSearchParams(prev)
-      if (page === 1) next.delete(keyOf('page')); else next.set(keyOf('page'), String(page))
-      if (!keyword) next.delete(keyOf('q')); else next.set(keyOf('q'), keyword)
-      if (!sortBy) next.delete(keyOf('sort')); else next.set(keyOf('sort'), `${sortBy}-${sortDir}`)
-      return next
-    }, { replace: true })
-  }, [page, keyword, sortBy, sortDir, keyOf, setParams])
-
-  // Reverse URL → state sync. Pre-v3.6.1-beta.5 the hook only read
-  // URL params at mount, so the browser Back / Forward button moved
-  // the address bar without updating the table state (admin sees a
-  // ?q=tw URL but no keyword filter applied). This effect listens
-  // for URL changes (whether from history navigation or another tab-
-  // local component editing search params) and pulls them back into
-  // state. setState bails out when the value is unchanged, so the
-  // outgoing URL-sync effect above won't loop with this one.
-  useEffect(() => {
-    const urlPage = Math.max(1, parseInt(params.get(keyOf('page')) || '1', 10) || 1)
-    const urlKeyword = params.get(keyOf('q')) || ''
-    const sortRawNow = params.get(keyOf('sort')) || ''
-    const sortPartsNow = sortRawNow.split('-')
-    const urlSortBy = sortRawNow ? sortPartsNow[0] : (opts.defaultSortBy ?? '')
-    const urlSortDir: 'asc' | 'desc' = sortRawNow
-      ? (sortPartsNow[1] === 'asc' ? 'asc' : 'desc')
-      : (opts.defaultSortDir ?? 'desc')
-    setPageState(urlPage)
-    setKeywordState(urlKeyword)
-    setSortBy(urlSortBy)
-    setSortDir(urlSortDir)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [params, keyOf])
-
-  // Fetch on any dep change. AbortController cancels in-flight requests
-  // so a slow earlier response can't clobber a fast later one.
+  // Fetch on any dep change. `ps.request` is memoised, so it only changes when
+  // one of the five paging values actually does.
   const fetcherRef = useRef(fetcher)
   fetcherRef.current = fetcher
   useEffect(() => {
     const ac = new AbortController()
     setLoading(true)
     setError(null)
-    fetcherRef.current(
-      { page, page_size: pageSize, keyword, sort_by: sortBy, sort_dir: sortDir },
-      ac.signal,
-    )
+    fetcherRef.current(ps.request, ac.signal)
       .then(resp => {
         if (ac.signal.aborted) return
         setItems(resp.items ?? [])
@@ -202,34 +93,7 @@ export function usePaged<T>(
         if (!ac.signal.aborted) setLoading(false)
       })
     return () => ac.abort()
-  }, [page, pageSize, keyword, sortBy, sortDir, refreshTick])
-
-  const setPage = useCallback((n: number) => setPageState(Math.max(1, n)), [])
-  const setPageSize = useCallback((n: number) => {
-    setPageSizeState(n)
-    writeStoredPageSize(n)
-    // Reset to page 1 — staying on page 5 when shrinking from 100/page
-    // to 25/page silently puts admin past the new last_page; the table
-    // would then show empty.
-    setPageState(1)
-  }, [])
-  const setKeyword = useCallback((s: string) => {
-    setKeywordState(s)
-    setPageState(1) // changing the filter set should restart paging
-  }, [])
-  const setSort = useCallback((col: string, initialDir: 'asc' | 'desc' = 'asc') => {
-    setSortBy(prev => {
-      if (prev === col) {
-        // Same column — toggle direction.
-        setSortDir(d => d === 'asc' ? 'desc' : 'asc')
-        return prev
-      }
-      // New column — set the supplied initial direction.
-      setSortDir(initialDir)
-      return col
-    })
-    setPageState(1)
-  }, [])
+  }, [ps.request, refreshTick])
 
   const mutateItems = useCallback((updater: (prev: T[]) => T[]) => {
     setItems(prev => updater(prev))
@@ -237,7 +101,8 @@ export function usePaged<T>(
 
   return {
     items, total, loading, error,
-    page, pageSize, keyword, sortBy, sortDir,
-    setPage, setPageSize, setKeyword, setSort, refresh, mutateItems,
+    page: ps.page, pageSize: ps.pageSize, keyword: ps.keyword, sortBy: ps.sortBy, sortDir: ps.sortDir,
+    setPage: ps.setPage, setPageSize: ps.setPageSize, setKeyword: ps.setKeyword, setSort: ps.setSort,
+    refresh, mutateItems,
   }
 }

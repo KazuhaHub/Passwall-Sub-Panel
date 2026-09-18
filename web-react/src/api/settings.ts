@@ -262,8 +262,12 @@ export interface UISettings {
   require_2fa_for_staff: boolean
 }
 
-export async function getUISettings() {
-  const { data } = await client.get<UISettings>('/admin/settings/ui')
+export async function getUISettings(opts: { signal?: AbortSignal } = {}) {
+  // Pass a config only when a signal is actually supplied: callers that do not
+  // cancel keep the single-argument call shape they have always made.
+  const { data } = opts.signal
+    ? await client.get<UISettings>('/admin/settings/ui', { signal: opts.signal })
+    : await client.get<UISettings>('/admin/settings/ui')
   return data
 }
 

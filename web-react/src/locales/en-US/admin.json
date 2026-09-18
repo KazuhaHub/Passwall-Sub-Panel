@@ -1,6 +1,7 @@
 {
   "languagePacks": {
     "title": "Language packs",
+    "load_failed": "Language packs are temporarily unavailable",
     "subtitle": "Upload custom UI language packs. After uploading, reload the page to pick the language from the language menu.",
     "upload": "Upload",
     "upload_title": "Upload language pack",
@@ -35,6 +36,7 @@
   "alerts": {
     "bell_title": "Notifications",
     "empty": "Nothing needs attention",
+    "unavailable": "Notifications are temporarily unavailable",
     "title": {
       "node_health": "Node {{name}} is unhealthy",
       "cert_failed": "Certificate {{name}} failed",
@@ -61,6 +63,8 @@
     "form_has_errors": "Please fix the highlighted fields first"
   },
   "dashboard": {
+    "summary_failed": "Dashboard data is temporarily unavailable",
+    "retry": "Retry",
     "title": "Dashboard",
     "metric": {
       "users": "Total users",
@@ -94,6 +98,11 @@
   },
   "settings": {
     "title": "System settings",
+    "load_failed": "Settings are temporarily unavailable",
+    "mail_load_failed": "Mail settings are temporarily unavailable",
+    "saml_load_failed": "SAML configuration is temporarily unavailable",
+    "oidc_load_failed": "OIDC configuration is temporarily unavailable",
+    "retry": "Retry",
     "tab_general": "General",
     "tab_security": "Login & Security",
     "tab_brand": "Brand",
@@ -589,6 +598,8 @@
   },
   "traffic": {
     "title": "Traffic",
+    "load_failed": "Traffic data is temporarily unavailable",
+    "retry": "Retry",
     "poll_now": "Poll now",
     "poll_done": "Poll complete",
     "scope_user": "By user",
@@ -640,6 +651,8 @@
   },
   "templates": {
     "title": "Templates",
+    "load_failed": "Templates are temporarily unavailable",
+    "retry": "Retry",
     "subtitle": "A template = client format + bound rule sets. Subscription rendering uses the bindings set here.",
     "create": "New template",
     "edit_title": "Edit template",
@@ -898,6 +911,9 @@
   },
   "logs": {
     "title": "Logs",
+    "load_failed": "Log data is temporarily unavailable",
+    "cert_load_failed": "Certificate log is temporarily unavailable",
+    "retry": "Retry",
     "tab_sub": "Subscription logs",
     "tab_audit": "Audit logs",
     "tab_auth": "Auth logs",
@@ -988,6 +1004,8 @@
   },
   "rules": {
     "title": "Rule sets",
+    "load_failed": "Rule sets are temporarily unavailable",
+    "retry": "Retry",
     "subtitle": "Rule sets are reusable snippets — they only participate in subscription rendering when bound to a template.",
     "create": "New rule set",
     "edit_title": "Edit rule set",
@@ -1152,6 +1170,8 @@
     "duplicate": "Duplicate as a new rule set"
   },
   "nodes": {
+    "load_failed": "Nodes are temporarily unavailable",
+    "retry": "Retry",
     "cert_source": {
       "from_panel": "Fetch cert paths from panel",
       "from_panel_filled": "Filled in the panel's cert paths",
@@ -1482,15 +1502,21 @@
     "title": "Users",
     "create": "New user",
     "edit_title": "Edit user",
+    "edit": {
+      "row_changed": "This user was changed elsewhere. Your edits are not updated automatically.",
+      "reload_saved": "Reload saved values"
+    },
     "activity": {
       "title": "Recent sign-ins",
       "empty": "No sign-in records",
+      "unavailable": "Sign-in records are temporarily unavailable",
       "ok": "OK",
       "fail": "Failed"
     },
     "nodeusage": {
       "title": "Usage by node",
       "empty": "No nodes for this user",
+      "unavailable": "Node usage is temporarily unavailable",
       "lifetime": "Lifetime",
       "period": "Period",
       "today": "Today",
@@ -1502,6 +1528,7 @@
     "serverusage": {
       "title": "Usage by server",
       "empty": "No servers for this user",
+      "unavailable": "Server usage is temporarily unavailable",
       "server": "Server",
       "node_count": "{{n}} nodes"
     },
@@ -1772,6 +1799,8 @@
   },
   "groups": {
     "title": "Groups",
+    "load_failed": "Groups are temporarily unavailable",
+    "retry": "Retry",
     "create": "New group",
     "edit_title": "Edit group",
     "search_placeholder": "Search name / slug",
@@ -1891,6 +1920,8 @@
   },
   "certs": {
     "tab_certs": "Certificates",
+    "load_failed": "Certificate data is temporarily unavailable",
+    "retry": "Retry",
     "tab_creds": "DNS credentials",
     "tab_acme": "ACME accounts",
     "page_title": "Certificates",

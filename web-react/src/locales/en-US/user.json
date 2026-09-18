@@ -1,4 +1,6 @@
 {
+  "load_failed": "Could not load this page. Please try again.",
+  "retry": "Retry",
   "tabs": {
     "overview": "Overview",
     "traffic": "Traffic",

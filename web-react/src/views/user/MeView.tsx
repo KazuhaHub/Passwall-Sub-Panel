@@ -49,7 +49,6 @@ import { useTranslation } from 'react-i18next'
 
 import {
   changeMyPassword,
-  getMyProfile,
   getMyRules,
   getMyServerStatus,
   resetMyCredentials,
@@ -60,12 +59,15 @@ import {
   type QuickLink,
 } from '@/api/me'
 import { useTabParam } from '@/hooks/useTabParam'
+import { useQueryClient } from '@tanstack/react-query'
+import { meKeys } from '@/query/keys'
+import { useMyProfile, useMyUsage } from '@/query/me'
+import { useQueryScope } from '@/query/useQueryScope'
 import { QuickLinkIcon } from '@/components/QuickLinkIcon'
 import type { M3Tokens } from '@/theme'
 import { useSiteStore } from '@/stores/site'
 import {
   getMyTrafficHistory,
-  getMyUsage,
   type TrafficHistoryItem,
   type TrafficHistoryPeriod,
   type UsageReport,
@@ -266,9 +268,13 @@ export default function MeView() {
   const { t } = useTranslation('user')
 
   const [tab, setTab] = useTabParam<'overview' | 'traffic' | 'clients' | 'status'>('tab', 'overview', ['overview', 'traffic', 'clients', 'status'])
-  const [profile, setProfile] = useState<MeProfile | null>(null)
-  const [usage, setUsage] = useState<UsageReport | null>(null)
-  const [loading, setLoading] = useState(true)
+  const scope = useQueryScope()
+  const queryClient = useQueryClient()
+  const profileQuery = useMyProfile(scope)
+  const usageQuery = useMyUsage(scope)
+  const profile = profileQuery.data
+  const usage = usageQuery.data ?? null
+  const loading = profileQuery.isPending
   // Announcement popup: starts hidden, opens after the profile loads
   // unless the visitor has previously chosen "don't remind again" for
   // this exact announcement version.
@@ -332,7 +338,6 @@ export default function MeView() {
   const [subUrlRevealed, setSubUrlRevealed] = useState(false)
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'))
 
-  useEffect(() => { void load() }, [])
   useEffect(() => { void loadTrend()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [trendPeriod, trendDays])
@@ -404,7 +409,7 @@ export default function MeView() {
       // counts, so update the badge immediately. A subsequent load() refetches
       // the full profile (and would over-write this) — without the optimistic
       // step the user sees the old "remaining" until the GET completes.
-      setProfile(prev => prev ? {
+      queryClient.setQueryData<MeProfile>(meKeys.profile(scope), prev => prev ? {
         ...prev,
         expire_at: res.extended_until ?? res.until ?? prev.expire_at,
         emergency_access: prev.emergency_access ? {
@@ -425,17 +430,15 @@ export default function MeView() {
   }
 
   async function load() {
-    setLoading(true)
-    try {
-      const [p, u] = await Promise.all([
-        getMyProfile(),
-        getMyUsage().catch(() => null),
-      ])
-      setProfile(p); setUsage(u)
-      // Always re-mask on reload — e.g., after "重置凭证" the URL changed and
-      // leaving the old reveal flag on would briefly display the new URL.
-      setSubUrlRevealed(false)
-    } finally { setLoading(false) }
+    // Re-mask before the read, not after: after "重置凭证" the URL has changed,
+    // and leaving the reveal flag on would display the new one.
+    setSubUrlRevealed(false)
+    // Usage is auxiliary — the profile read is the one the page cannot render
+    // without, so it alone decides whether we are in an error state.
+    await Promise.all([
+      profileQuery.refetch(),
+      usageQuery.refetch(),
+    ])
   }
 
   async function copy(text: string) {
@@ -499,10 +502,24 @@ export default function MeView() {
   // and PasskeyDialog loses the one-time recovery codes it was just handed
   // between the server returning them and the user seeing them. The server
   // returns them exactly once, so losing them there is losing them for good.
-  if (loading && !profile) {
+  if (loading) {
     return <Box sx={{ p: 3, display: 'grid', placeItems: 'center', minHeight: 400 }}><CircularProgress /></Box>
   }
-  if (!profile) return null
+  // The whole page hangs off the profile, and the loader used to have no catch:
+  // a failed read therefore produced a completely blank screen — no spinner, no
+  // message, and nothing to retry.
+  if (!profile) {
+    return (
+      <Box sx={{ p: 3, display: 'grid', placeItems: 'center', gap: 2, minHeight: 400 }}>
+        <Typography sx={{ color: md.onSurfaceVariant }}>
+          {t('load_failed', { defaultValue: '暂时无法加载，请稍后重试' })}
+        </Typography>
+        <Button variant="outlined" onClick={() => void load()}>
+          {t('retry', { defaultValue: '重试' })}
+        </Button>
+      </Box>
+    )
+  }
 
   const announcement = profile.global_announcement
   // Popup mode is gated by both an admin opt-in (announcement.popup) and
