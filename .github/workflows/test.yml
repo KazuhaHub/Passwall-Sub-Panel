@@ -352,6 +352,10 @@ jobs:
       - name: test
         run: |
           set -o pipefail
+          # A planner that produced no packages would otherwise run `go test`
+          # with no arguments — which tests the repository root and reports
+          # "no Go files in ...", naming the symptom rather than the cause.
+          test -n "${{ matrix.packages }}"
           # Still one canonical full-suite race run: the shards are a partition
           # of the same package set, so every package is covered exactly once.
           # PostgreSQL/MySQL below focus on dialect correctness without

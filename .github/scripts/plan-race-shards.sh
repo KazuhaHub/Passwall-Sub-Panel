@@ -86,7 +86,11 @@ go list ./... | awk -v n="$shards" -v weights="$weights" -v fallback="$default_w
       load[best] += weight[i]
       shard[best] = (shard[best] == "" ? "" : shard[best] " ") name[i]
     }
-    printf "{\"shard\":["
+    # `include` rather than a named dimension: fromJSON takes the matrix OBJECT,
+    # so emitting {"shard":[{...}]} would define one dimension called "shard"
+    # whose values are objects, leaving `matrix.packages` empty in the steps
+    # while the job names still rendered correctly.
+    printf "{\"include\":["
     for (i = 1; i <= n; i++) {
       printf "%s{\"index\":\"%d\",\"packages\":\"%s\"}", (i > 1 ? "," : ""), i - 1, shard[i]
     }
