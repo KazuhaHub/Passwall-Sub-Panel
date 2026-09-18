@@ -2,7 +2,7 @@
 
 - **规格**：[psp-node-rootless-observability-plan.md](psp-node-rootless-observability-plan.md)（冻结于 2026-09-17，唯一权威）
 - **建立日期**：2026-09-17
-- **当前批次**：Node 侧 WP0 → WP3（一次性做完后统一评审）
+- **当前批次**：第一阶段（WP0–WP9）已完成并随 `v0.0.1-beta10` 发布，见文末
 
 本文件只做勾选、记录决策与偏差。任何字段名、公式、阈值、边界的争议**一律回到规格**，
 本文件不复制规格内容，以免两份文档漂移。
@@ -28,7 +28,7 @@
 - [x] WP0 分支自 `origin/main` 切出 —— #23 只触及 `cmd/node/`、`deployment/`、
       `docker-entrypoint.sh`、`README.md`，与 `protocol/` 无重叠，无需等待其合并
 - [x] 提交并开 PR：**KazuhaHub/Passwall-Node#24**（分支 `kazuha/node-wp0-protocol`）
-- [ ] **#23、#24 合入 `origin/main`**
+- [x] **#23、#24 合入 `origin/main`**（2026-09-18）
 
 ### 仓库同步状态（2026-09-17 核对）
 
@@ -426,31 +426,45 @@ staleness 以 capability 为门，从未声明能力的旧节点是 unsupported 
 
 **WP10（远程诊断）是规格明定的第二阶段**，不在本批次内。
 
-### 合并前的阻塞项
+### 发布与合并（2026-09-18 完成）
 
-- [ ] **PSP 依赖未发布的 Node 修订**（伪版本）。必须先合并 Node 侧
-      （#24、#25、#26），切正式 tag，再 bump PSP 的 go.mod。
-- [ ] 三方言全量：MySQL 通过；Postgres 有一个**在未修改 main 上同样失败**的
+- [x] Node 侧 #24、#25、#26、#23 全部 squash 合并进 main
+- [x] 打 tag `v0.0.1-beta10`。发布 job 在受保护的 `release-signing` environment
+      后面，**需要人工批准才会真正签名并发布产物**，所以推 tag 本身不会自动上线
+- [x] PSP `go.mod` 从伪版本切到 `v0.0.1-beta10`；四处枚举已发布版本的位置同步更新：
+      `test.yml` 的兼容循环、`release.yml` 的矩阵、`docs/compat/node-v4.json`、
+      `node_compat_matrix_test.go`（该测试先以 "has 9 rows, want 10" 失败，行数在起作用）
+- [x] 三方言全量：MySQL 通过；Postgres 有一个**在未修改 main 上同样失败**的
       基线迁移测试（环境性，非本计划引入），详见第 3 节。
 
-## 后续批次（尚未排期）
+### 跨仓兼容闸门的一处修正
+
+`SyncOnce` 在 WP2 增加了 `includeHost` 参数，而两个 job 对 fixture 的参数个数要求相反：
+`node compatibility (released range)` 把 fixture 编译到每一个已发布 tag 上（beta9 及以前
+是两参数），`node contract (pinned published source)` 编译到 PSP pin 的修订上（三参数）。
+任何写死的参数个数都会让其中一端构建失败——这正是当初先只修好一端、另一端仍红的那个坑。
+
+fixture 现在在参数位置留一个标记，参数个数从被测修订的源码读取；无法识别的形状直接报错
+而不是猜，因为猜错会把一个构建错误变成一道什么都没验证的闸门。已对 beta1–beta10 全部验证。
+
+## 后续批次
 
 依赖图见规格 §17。WP8 之前不得跳到前端。
 
-- [ ] WP4 Panel domain / ports / SQL（依赖 WP0 发布 module）
-- [ ] WP5 nodesync 接收与故障隔离
-- [ ] WP6 派生与 rollup
-- [ ] WP7 健康与 alert
-- [ ] WP8 管理 API
-- [ ] WP9 前端
+- [x] WP4 Panel domain / ports / SQL
+- [x] WP5 nodesync 接收与故障隔离
+- [x] WP6 派生与 rollup
+- [x] WP7 健康与 alert
+- [x] WP8 管理 API
+- [x] WP9 前端
 - [ ] WP10 远程诊断（第二阶段）
 
 ## 必须由人工/真实环境完成的事项
 
 这些不是"实现完就算完"的项，列在这里以免被误判为已完成。
 
-- [ ] **发布 Node module revision/tag**，再 bump PSP `go.mod`
-      （PSP 当前 pin 的是 `v0.0.1-beta5`，与基准 tag `beta9` 之间差 4 个版本）
+- [x] **发布 Node module revision/tag**，再 bump PSP `go.mod`
+      （2026-09-18 完成：tag `v0.0.1-beta10`）
 - [ ] §20 场景 B/C 的真实 systemd / Docker 非 root 实测
 - [ ] §23 DoD 的"1 台 systemd + 1 台 Docker 运行 7 天"
 - [ ] PostgreSQL / MySQL 全套 repo 测试（本地跑不全，依赖 CI）
