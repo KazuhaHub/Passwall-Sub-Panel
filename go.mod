@@ -5,7 +5,7 @@ go 1.26.0
 toolchain go1.27.1
 
 require (
-	github.com/KazuhaHub/passwall-node v0.0.1-beta9.0.20260918045153-97ace17e5f31
+	github.com/KazuhaHub/passwall-node v0.0.1-beta10
 	github.com/coreos/go-oidc/v3 v3.21.0
 	github.com/crewjam/saml v0.5.1
 	github.com/gin-gonic/gin v1.12.0
