@@ -84,13 +84,37 @@
 - 已知限制
 - 运行时界面／API 示例
 - 发布 needs 图（`compatibility gate` 是所有发布动作的唯一入口）
-- 分支保护设置，其中 `compatibility gate` 必须已被 ruleset 要求
+
+### 分支保护现状
+
+`main` 由 ruleset `main protection`（id `23046834`，`enforcement: active`，范围 `refs/heads/main`）约束，规则为 `deletion` / `non_fast_forward` / `pull_request` / `required_status_checks`。要求的检查是九个：
+
+```
+go (static checks)                         node contract (pinned published source)
+sqlite (full suite, race)                  web (typecheck + build + test)
+mysql (sqlstore dialect)                   Docker source and release runtime baselines
+postgres (sqlstore dialect)                build (cross-compile release targets)
+compatibility gate
+```
+
+核对的命令与**改前原值**（R03 第 4 条要求记录，否则改名后无从回退）：
+
+```bash
+gh api repos/KazuhaHub/Passwall-Sub-Panel/rulesets/23046834 \
+  -q '.rules[] | select(.type=="required_status_checks") | .parameters.required_status_checks[].context'
+
+# 改前（2026-09-19 加 `compatibility gate` 之前的原值）：上面除最后一行外的八个。
+# 经典的 branch protection 子资源（/branches/main/protection/required_status_checks）
+# 在这台仓库上是空的 —— 检查来自 ruleset，不是 classic protection。改错那一侧会看起来
+# 毫无效果。
+```
+
+再强调一次：**检查名必须与作业实际产出的名字一致**。`compatibility gate` 之所以能要求，是因为它在 `test.yml` 里且跑在 `pull_request` 上（`if: always()`）；只改 YAML 而不看 ruleset，等于没接。
 
 ## 7. 还没做完的部分
 
 诚实列出，别让下一任以为已经自动化了：
 
-- **`compatibility gate` 还没进 ruleset。** 不改 GitHub 设置的话，这个门不拦任何东西。原值见整改手册 R03。
-- **反方向（候选 Node × 清单内旧 PSP）没有 CI。** R05 需要真实旧 PSP 发布物与候选 PN 作为两个进程跑。
+- **反方向（候选 Node × 清单内旧 PSP）有可跑的 harness，但还没有 CI。** `deployment/compat/old-psp.sh` 覆盖 B01–B08（B06 为有据的 N/A），需要真实旧 PSP 发布物与候选 PN 作为两个进程跑，因此尚未接进 workflow。
 - **历史升级／回退、真实第三方隔离、真实代理链路**分别是 R06／R07／R08，都需要真实环境。
 - **第三方范围与上限的机器可读政策**还没有（`docs/compat/v4-ranges.json` 是实测记录，不是政策）。
