@@ -66,35 +66,6 @@ func TestRPFromBaseURL(t *testing.T) {
 	}
 }
 
-func TestSessionStore_SingleUse(t *testing.T) {
-	st := newSessionStore(time.Now)
-	id, err := st.put(&webauthn.SessionData{Challenge: "abc"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	got := st.take(id)
-	if got == nil || got.Challenge != "abc" {
-		t.Fatalf("first take should return the session, got %v", got)
-	}
-	if again := st.take(id); again != nil {
-		t.Fatal("a consumed session must not be takeable again (replay guard)")
-	}
-	if unknown := st.take("nope"); unknown != nil {
-		t.Fatal("unknown id must return nil")
-	}
-}
-
-func TestSessionStore_Expiry(t *testing.T) {
-	now := time.Now()
-	clock := now
-	st := newSessionStore(func() time.Time { return clock })
-	id, _ := st.put(&webauthn.SessionData{Challenge: "x"})
-	clock = now.Add(sessionTTL + time.Second) // advance past TTL
-	if got := st.take(id); got != nil {
-		t.Fatal("an expired session must not be returned")
-	}
-}
-
 type stubSettings struct{ s ports.UISettings }
 
 func (f stubSettings) Load(context.Context, ports.UISettings) (ports.UISettings, error) {

@@ -5,6 +5,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/passkey"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/transport/http/middleware"
 )
 
@@ -27,7 +28,9 @@ func (h *UserMeHandler) StepUpPasskeyBegin(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Passkeys are not available"})
 		return
 	}
-	opts, sessionID, err := h.passkey.BeginLoginForUser(c.Request.Context(), claims.UserID)
+	// Step-up, not a second factor: the purpose is decided by this endpoint and
+	// bound to the challenge, so these two ceremonies cannot be swapped.
+	opts, sessionID, err := h.passkey.BeginLoginForUser(c.Request.Context(), claims.UserID, passkey.PurposeStepUp)
 	if err != nil {
 		respondError(c, err)
 		return
@@ -54,7 +57,7 @@ func (h *UserMeHandler) StepUpPasskeyFinish(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Unknown step-up action"})
 		return
 	}
-	if err := h.passkey.FinishLoginForUser(c.Request.Context(), claims.UserID, c.Query("session"), c.Request); err != nil {
+	if err := h.passkey.FinishLoginForUser(c.Request.Context(), claims.UserID, passkey.PurposeStepUp, c.Query("session"), c.Request); err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Passkey verification failed"})
 		return
 	}
