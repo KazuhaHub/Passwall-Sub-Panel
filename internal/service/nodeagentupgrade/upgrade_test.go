@@ -96,6 +96,14 @@ func TestUpgradeRequestRequiresAnExactNewerRelease(t *testing.T) {
 	}{
 		{"v0.0.1-beta3", "v0.0.1-beta2", true},
 		{"v0.0.1-beta.10", "v0.0.1-beta.9", true},
+		// THE DOTLESS FORM IS THE ONE THE REAL RELEASES USE. v0.0.1-beta9 and
+		// v0.0.1-beta11 are the Node project's published tags, and plain semver
+		// ranks beta11 BELOW beta9 — '1' < '9' on the trailing character. This is
+		// not a display ordering: it decides whether PSP will even submit the
+		// request, and the Node side checks the same thing on receipt.
+		{"v0.0.1-beta11", "v0.0.1-beta9", true},
+		{"v0.0.1-beta9", "v0.0.1-beta11", false},
+		{"v0.0.1-beta10", "v0.0.1-beta9", true},
 		{"v0.0.1", "v0.0.1-beta3", true},
 		{"v0.0.2-beta.1", "v0.0.1", true},
 		{"v100000000000000000000.0.0", "v99999999999999999999.0.0", true},

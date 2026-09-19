@@ -16,7 +16,6 @@ import (
 
 	"github.com/KazuhaHub/passwall-node/deployment"
 	nodeprotocol "github.com/KazuhaHub/passwall-node/protocol"
-	"golang.org/x/mod/semver"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/compatadmission"
@@ -84,7 +83,10 @@ func validateRequest(request Request) error {
 	if !deployment.ValidReleaseVersion(request.Version) || !deployment.ValidReleaseVersion(request.ExpectedVersion) {
 		return fmt.Errorf("%w: exact canonical target and expected Node versions are required", domain.ErrValidation)
 	}
-	if semver.Compare(request.Version, request.ExpectedVersion) <= 0 {
+	// NOT semver.Compare: the project publishes dotless prerelease tags, and
+	// semver ranks "beta11" below "beta9". The node checks the same pair with the
+	// same rule on receipt, so both sides must order them the same way.
+	if version.CompareNodeRelease(request.Version, request.ExpectedVersion) <= 0 {
 		return fmt.Errorf("%w: native upgrade target must be newer than its expected current version", domain.ErrValidation)
 	}
 	return nil
