@@ -52,6 +52,12 @@ PSP 侧测试对这两点的覆盖：`TestIsResolvable` 增加了三个组播用
 - **变化**：`github.com/oschwald/maxminddb-golang v1.13.1` 由**直接**变为**间接**——包装层不再直接 import 它。**这不等于依赖消失**：它仍通过 authcore/geoip 留在模块图里。计划书 §2.4 预判的正是这一情形。
 - 其余四个上游库（crewjam、go-webauthn、base64Captcha、maxminddb）仍在图中，与本实验无关。
 
+**版本推进说明（交付复核时处理）。** §1 的测量是在 `authcore v0.3.0` 上做的；本次交付把钉住的
+版本推进到 **`v0.4.0`**（该 tag 包含 A1 的审计改动，是目前维护中的发布，而非被取代的版本）。
+这一步对本包是**可证明的行为中性**：两个版本之间 `geoip/` 目录**逐字节相同**
+（`diff -r $GOMODCACHE/github.com/!kazuha!hub/authcore@v0.3.0/geoip …@v0.4.0/geoip` 为空），
+差异只落在 `passkey/`、`saml/` 与文档上。因此 §1 的 `A` / `D_pre` / `Δ` 无需重算。
+
 ## 4. 测试的移动（不是删除覆盖）
 
 `internal/pkg/geoip/geoip_test.go`：删除 64 行、新增 60 行。
@@ -90,4 +96,4 @@ $ GOWORK=off go mod tidy               # go.mod 变化见 §3
 
 - **没有真实数据库下载与真实 IP 查询**：G01/G02/G03 的等价验证走的是 authcore 的生成 fixture 与本机单元测试，不需要联网。真实 MaxMind 文件的表现未实测。
 - **MySQL/PostgreSQL 无关**：本包不碰数据库。
-- **未测量前端影响**：该包只被 `service/geo` 与登录来源展示使用；未跑前端 smoke（本机 headless Chrome 不可用；原因见 `kazuha/passkey-state-hardening` 分支上的 `docs/authcore-baseline/h-saml-artifact-smoke.txt` §3）。
+- **未测量前端影响**：该包只被 `service/geo` 与登录来源展示使用；未跑前端 smoke（本机 headless Chrome 不可用；原因见 `kazuha/auth-hardening` 分支上的 `docs/authcore-baseline/h-saml-artifact-smoke.txt` §3）。
