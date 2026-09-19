@@ -190,7 +190,13 @@ jobs:
           PSP_LIVE_NODE_REPO: ${{ github.workspace }}/.compat/passwall-node
         run: |
           set -euo pipefail
-          mkdir -p evidence
+          # The evidence directory is named for the CASE, not for the job. The
+          # summary gate derives the expected set and looks each case up by name,
+          # so evidence filed under any other name reads as a case that never
+          # reported — which is exactly what a cancelled leg looks like.
+          case_id='node-wire-v1@${{ matrix.node_version }}'
+          evidence="evidence/$case_id"
+          mkdir -p "$evidence"
           # The exit code is CAPTURED rather than allowed to end the step, so the
           # validator still runs and reports WHICH required item did not pass —
           # see the same guard in test.yml. stderr stays in its own file so a
@@ -198,15 +204,99 @@ jobs:
           test_exit=0
           go test -json -count=1 -timeout=5m ./internal/service/nodesync \
             -run '^TestLive_RealNode(AgentContract|MigratedServerContract|TaskEvidenceReceipt|TaskExpiryContract)$' \
-            > evidence/go-events.jsonl 2> evidence/go-stderr.txt || test_exit=$?
+            > "$evidence/go-events.jsonl" 2> "$evidence/go-stderr.txt" || test_exit=$?
           # Judged against the profile, never against the run's own exit code: a
           # green `go test` with `-run` matching nothing is still no coverage,
           # and this job's whole value is that it exercised the released tag.
           node deploy/compat/check-go-results.mjs \
             --profile node-wire-v1 \
-            --input evidence/go-events.jsonl \
+            --input "$evidence/go-events.jsonl" \
             --go-exit-code "$test_exit" \
-            --output evidence/result.json
+            --output "$evidence/result.json"
+      - name: record the case environment
+        if: always()
+        env:
+          PSP_SHA: ${{ github.sha }}
+          NODE_VERSION: ${{ matrix.node_version }}
+        run: |
+          set -euo pipefail
+          case_id="node-wire-v1@$NODE_VERSION"
+          evidence="evidence/$case_id"
+          mkdir -p "$evidence"
+          # WHICH two implementations produced this result, and where. A report
+          # that cannot name its inputs cannot be re-checked, and this job's
+          # matrix resolves the tag at run time rather than pinning a commit.
+          node_sha=$(git -C .compat/passwall-node rev-parse HEAD)
+          cat > "$evidence/environment.json" <<JSON
+          {
+            "case": "$case_id",
+            "profile": "node-wire-v1",
+            "psp_sha": "$PSP_SHA",
+            "node_version": "$NODE_VERSION",
+            "node_sha": "$node_sha",
+            "runner_os": "$RUNNER_OS",
+            "runner_arch": "$RUNNER_ARCH",
+            "run_id": "${{ github.run_id }}",
+            "run_attempt": "${{ github.run_attempt }}"
+          }
+          JSON
+          cat "$evidence/environment.json"
+      - name: upload case evidence
+        # Uploaded whatever the verdict was. A report is only useful when it can
+        # be read after a failure, and a failure is the only time anybody looks.
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: node-wire-v1@${{ matrix.node_version }}
+          path: evidence/node-wire-v1@${{ matrix.node_version }}/
+          if-no-files-found: error
+          retention-days: 90
+
+  # THE SUMMARY GATE. A matrix reports as several checks, so a leg that was
+  # cancelled leaves the others green and the run "passes" with a version
+  # untested. This collapses them into ONE verdict that knows the expected case
+  # set — and every publishing job below depends on it rather than on the
+  # matrix, so there is no path to a release that skips the question.
+  compatibility:
+    name: compatibility gate
+    runs-on: ubuntu-latest
+    needs: [node-compatibility]
+    # always(), so a failed or cancelled leg still produces a verdict. A skipped
+    # gate reports as an absent check, which reads as "not run" rather than
+    # "failed" — and an absent required check blocks nothing on a branch that
+    # never had it.
+    if: always()
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout trusted panel source
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+      - name: Download every case report
+        uses: actions/download-artifact@v7
+        with:
+          path: evidence
+      - name: the matrix leg itself succeeded
+        env:
+          LEG: ${{ needs.node-compatibility.result }}
+        run: |
+          # The case-set check below would also notice a cancelled leg, but it
+          # would report it as a pile of missing cases. Naming the cause first
+          # keeps the failure readable.
+          test "$LEG" = success
+      - name: every expected case reported a pass
+        run: |
+          set -euo pipefail
+          node deploy/compat/check-case-set.mjs --reports evidence --output case-set.json
+      - name: upload the case-set verdict
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: compatibility-gate-summary
+          path: case-set.json
+          if-no-files-found: warn
+          retention-days: 90
 
   web:
     name: Build web assets
@@ -324,7 +414,10 @@ jobs:
   release:
     name: Publish GitHub Release
     runs-on: ubuntu-latest
-    needs: [setup, build, node-compatibility]
+    # Through the GATE, never straight onto the matrix: the gate is the only job
+    # that knows whether the whole case set reported, so reaching around it
+    # would let a release publish on a run where a version went untested.
+    needs: [setup, build, compatibility]
     permissions:
       contents: write
     steps:
@@ -467,7 +560,9 @@ jobs:
   docker:
     name: Publish container image
     runs-on: ubuntu-latest
-    needs: [setup, build, node-compatibility]
+    # Same reason as `release` above: a channel this job rolls forward must not
+    # move on a run whose compatibility evidence is incomplete.
+    needs: [setup, build, compatibility]
     permissions:
       contents: read
       packages: write

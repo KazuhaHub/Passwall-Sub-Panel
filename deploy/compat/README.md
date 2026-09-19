@@ -1,7 +1,18 @@
 # Compatibility result validation
 
-`check-go-results.mjs` judges one `go test -json` stream against a named profile
-and reports whether the run actually covered what the profile requires.
+Two checkers, because they answer different questions:
+
+| Tool | Question |
+| --- | --- |
+| `check-go-results.mjs` | Was **this case** measured? |
+| `check-case-set.mjs` | Was **every case** measured? |
+
+The second exists because the two failures look nothing alike. A cancelled
+matrix leg, or an artifact upload that failed, leaves every report that *did*
+arrive perfectly passing — so a gate that only inspected the reports it found
+would call that complete.
+
+## `check-go-results.mjs`
 
 ## Why it exists
 
@@ -81,7 +92,7 @@ never counted as coverage.
 ## Tests
 
 ```bash
-node --test deploy/compat/check-go-results.test.mjs
+node --test deploy/compat/check-go-results.test.mjs deploy/compat/check-case-set.test.mjs
 ```
 
 Every row of the failure table in the remediation plan's R02 is a case here,
@@ -89,3 +100,37 @@ plus the negative controls: an empty log, a package-only log, a same-named test
 in the wrong package, a skip, a skipped subtest under a passing parent, a
 failure that later reports success, a truncated stream, a non-JSON line, a test
 with no terminal state, and a pass with a non-zero Go exit code.
+
+Both suites are wired into the `container` job of `test.yml`, which already runs
+the other `deploy/*_test.mjs` guards.
+
+## `check-case-set.mjs`
+
+Runs in the `compatibility` summary job of both workflows, over the artifacts
+the per-case jobs uploaded.
+
+```bash
+node deploy/compat/check-case-set.mjs --reports evidence --output case-set.json
+```
+
+The expected set is **derived** — profiles × the supported versions in
+`docs/compat/node-v4.json`, sliced by position at `min_supported` — never read
+back out of the reports directory. "Every report I found is fine" is a statement
+that is trivially true of an empty directory, and an empty directory is what a
+run with no uploads produces.
+
+Reports are found by walking the tree for `result.json` and naming each case
+after its directory, so the layout `actions/download-artifact` produces
+(`evidence/<artifact-name>/<case-id>/`) works without the gate knowing about it.
+
+| Exit | Meaning |
+| --- | --- |
+| 0 | Every expected case reported, and its own verdict was a pass |
+| 1 | At least one case did not report, or did not pass |
+| 2 | The expected set could not be derived, or the result could not be written |
+
+Evidence for cases nobody expected is recorded in `unexpected` rather than
+rejected: a name that drifted between the matrix and the profiles shows up there
+first. `pinned-source` — the `node-contract` job's evidence — appears there by
+design, since it exercises the revision `go.mod` pins rather than a released
+tag, and is therefore not one of the per-version cases the panel promises.
