@@ -35,7 +35,9 @@ Against a real 3X-UI 3.8.5 and sing-box 1.12.9:
   the user's real UUID — and `Subscription-Userinfo: total=1073741824`.
 - The sing-box render carried a `vless` outbound for that node plus a `mixed`
   inbound, and **a real sing-box 1.12.9 process loaded and ran it**.
-- With the node selected, a request through the client's proxy returned 200.
+- With the node selected, a PUBLIC destination routes through the node —
+  `outbound/vless[r08-node]: outbound connection to example.com:80` — while a
+  private address is matched by an earlier direct rule and never reaches it.
 
 ## Finding: an imported subscription proxies nothing until a node is selected
 
@@ -55,8 +57,10 @@ connection resolves to `direct`. Measured with a real client: `example.com`,
 outbound/direct[direct]: outbound connection to example.com:80
 ```
 
-Changing that one default to the node — which is what a user does when they pick
-a node in their client's UI — made the same request succeed through the proxy.
+Changing that one default to the node — what a user does in their client's UI —
+changes which outbound a public destination takes (`vless[r08-node]` instead of
+`direct`). It does NOT change a private address, which an earlier rule sends
+direct regardless of the selector.
 
 **Stated as an observation, not a diagnosis.** Whether a subscription that
 defaults to direct is intended template policy or a defect is not established
@@ -66,9 +70,17 @@ than an assumption.
 
 ## What this does NOT establish
 
-- **That the traffic traversed the panel's core.** The proxy path returned 200
-  with the node selected, but the panel-side counter check did not complete in
-  the run recorded here. Until it does, this is a client-side observation.
+- **That the traffic traversed the panel's core.** An earlier reading of this run
+  claimed the proxied request returned 200 with the node selected. That was
+  wrong twice over: the instance holding the proxy port was still the one using
+  the direct default — the selected instance had failed to bind and exited — and
+  the target was a private address, which the ruleset sends direct regardless of
+  the selector. Corrected here because the claim was in a PR body.
+  What is established: with the selected config running, a public destination
+  routes to `vless[r08-node]`. What is not: that the connection completed through
+  the panel, because the panel no longer holds PSP's node — the launcher was
+  restarted afterwards and rebuilt the panel's volume, which removed the inbound
+  PSP had created on it.
 - **Enforcement.** No test here disables the user, exhausts the quota, or expires
   the subscription and confirms the next connection is refused. That is R08's
   remaining half and the reason the policy separates "connected" from "correctly
