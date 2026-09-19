@@ -15,6 +15,7 @@ import (
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/nodecompat"
 )
 
 type nativeCoreClientStub struct {
@@ -282,7 +283,7 @@ func TestNativeCompatibilityDTOStatesAreFailClosed(t *testing.T) {
 		}, want: "incompatible"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			got := handler.toServerDTOWithAgent(panel, test.agent)
+			got := handler.toServerDTOWithAgent(panel, test.agent, nodecompat.Policy(nodecompat.DefaultObservationAge()))
 			if got.NodeCompatibility != test.want || got.NodeUpgradeReady != test.upgradeReady {
 				t.Fatalf("compatibility = %+v", got)
 			}

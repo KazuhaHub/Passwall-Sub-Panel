@@ -14,6 +14,7 @@ import (
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/nodecompat"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/version"
 )
 
@@ -72,7 +73,7 @@ func TestServerDTOSUIUpdateHintIsIndependentOfXUIAndUpgradeCapabilities(t *testi
 		{"1.6.1", true}, {"v1.6.2", false}, {"1.7.0", false}, {"dev", false}, {"", false},
 	} {
 		h := &AdminServersHandler{pool: fakeWebCertPool{client: &suiUpdateClient{}}}
-		dto := h.toServerDTOWithAgent(&domain.Panel{ID: 1, Kind: domain.PanelKindSUI, PanelVersion: tc.current}, nil)
+		dto := h.toServerDTOWithAgent(&domain.Panel{ID: 1, Kind: domain.PanelKindSUI, PanelVersion: tc.current}, nil, nodecompat.Policy(nodecompat.DefaultObservationAge()))
 		if dto.UpdateAvailable != tc.want || dto.LatestXUIVersion != "" {
 			t.Fatalf("current=%q DTO=%+v", tc.current, dto)
 		}

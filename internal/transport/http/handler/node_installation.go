@@ -72,7 +72,7 @@ func (h *AdminServersHandler) installation(c *gin.Context, panel *domain.Panel) 
 		return nativeServerCreateResponse{}, false
 	}
 	return nativeServerCreateResponse{
-		Server: h.toServerDTOWithAgent(panel, agent), AgentID: agent.AgentID,
+		Server: h.toServerDTOWithAgent(panel, agent, h.compatPolicy(c.Request.Context())), AgentID: agent.AgentID,
 		Credential: credential,
 		Endpoint:   panelpath.PanelURL(base, panelpath.FromRequest(c.Request), "/v1/node/sync"),
 	}, true

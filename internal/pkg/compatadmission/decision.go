@@ -41,6 +41,12 @@ const (
 	// OperationRemoteUpgrade replaces the peer's own binary. It requires a
 	// fresh observation AND a verified upgrade edge.
 	OperationRemoteUpgrade Operation = "remote-upgrade"
+	// OperationUpgradeEligibility asks whether the peer could be upgraded at
+	// all, which is what a server list shows. It is deliberately NOT the same
+	// question as OperationRemoteUpgrade: eligibility says nothing about the
+	// specific from/to edge, so a node can be shown as upgradeable while a
+	// particular upgrade is still refused for want of an edge.
+	OperationUpgradeEligibility Operation = "upgrade-eligibility"
 )
 
 // Reason is the stable code a caller branches on. Free text lives in Detail.
@@ -124,7 +130,9 @@ type Decision struct {
 // traffic, so base sync proceeds on the last known-good observation; anything
 // that acts on the peer's capabilities must not.
 func requiresFreshObservation(operation Operation) bool {
-	return operation == OperationConfigWrite || operation == OperationRemoteUpgrade
+	return operation == OperationConfigWrite ||
+		operation == OperationRemoteUpgrade ||
+		operation == OperationUpgradeEligibility
 }
 
 func effectiveProtocolVersion(reported, legacyZeroMapsTo int) int {
