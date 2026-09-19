@@ -5,6 +5,7 @@ go 1.26.0
 toolchain go1.27.1
 
 require (
+	github.com/KazuhaHub/authcore v0.4.0
 	github.com/KazuhaHub/passwall-node v0.0.1-beta11
 	github.com/coreos/go-oidc/v3 v3.21.0
 	github.com/crewjam/saml v0.5.1
@@ -16,7 +17,6 @@ require (
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/google/uuid v1.6.0
 	github.com/mojocn/base64Captcha v1.3.8
-	github.com/oschwald/maxminddb-golang v1.13.1
 	github.com/pquerna/otp v1.5.0
 	golang.org/x/crypto v0.57.0
 	golang.org/x/oauth2 v0.37.0
@@ -26,7 +26,10 @@ require (
 	gorm.io/gorm v1.31.2
 )
 
-require github.com/ncruces/go-strftime v1.0.0 // indirect
+require (
+	github.com/ncruces/go-strftime v1.0.0 // indirect
+	github.com/oschwald/maxminddb-golang v1.13.1 // indirect
+)
 
 require (
 	cloud.google.com/go/auth v0.20.0 // indirect
