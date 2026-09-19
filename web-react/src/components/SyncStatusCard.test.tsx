@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createAppTheme } from '@/theme'
 import { makeTestQueryClient, queryWrapper } from '@/test/queryTestUtils'
 import { WATCH_BUDGET_MS, WATCH_INTERVAL_MS } from '@/query/syncStatus'
+import { announcePending } from '@/api/syncPending'
 import SyncStatusCard from './SyncStatusCard'
 
 const api = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() }))
@@ -198,5 +199,37 @@ describe('SyncStatusCard', () => {
     const reads = api.get.mock.calls.length
     await act(async () => { await vi.advanceTimersByTimeAsync(WATCH_INTERVAL_MS) })
     expect(api.get.mock.calls.length).toBeGreaterThan(reads)
+  })
+
+  it('opens a new window when a write queues work for this user', async () => {
+    vi.useFakeTimers()
+    api.get.mockResolvedValue({
+      data: statusBody({ state: 'active_tasks', active_tasks: [pendingTask] }),
+    })
+    mount()
+    await act(async () => { await vi.advanceTimersByTimeAsync(WATCH_BUDGET_MS) })
+    expect(screen.getByText('自动刷新已暂停，以下为上次观察结果，可能已经变化')).toBeTruthy()
+
+    // A save in this dialog queued upstream work. The area is the thing that
+    // can show it, so it must pick the work up rather than stay paused until
+    // the admin closes and reopens the dialog.
+    await act(async () => { announcePending('/admin/users/7/set-enabled') })
+    await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+
+    expect(screen.queryByText('自动刷新已暂停，以下为上次观察结果，可能已经变化')).toBeNull()
+  })
+
+  it('ignores a write queued for somebody else', async () => {
+    vi.useFakeTimers()
+    api.get.mockResolvedValue({
+      data: statusBody({ state: 'active_tasks', active_tasks: [pendingTask] }),
+    })
+    mount()
+    await act(async () => { await vi.advanceTimersByTimeAsync(WATCH_BUDGET_MS) })
+
+    await act(async () => { announcePending('/admin/users/8/set-enabled') })
+    await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+
+    expect(screen.getByText('自动刷新已暂停，以下为上次观察结果，可能已经变化')).toBeTruthy()
   })
 })

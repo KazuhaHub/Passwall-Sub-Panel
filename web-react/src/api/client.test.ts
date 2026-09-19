@@ -1,4 +1,5 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { observeUser } from './syncPending'
 
 const mocks = vi.hoisted(() => {
   const state: {
@@ -91,6 +92,26 @@ describe('shared API client interceptors', () => {
     vi.setSystemTime(7_001)
     mocks.state.responseOK?.(response)
     expect(mocks.pushSnack).toHaveBeenCalledTimes(2)
+  })
+
+  it('lets an open status area speak for the signal instead of a toast', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(100_000)
+    const response = {
+      headers: { 'x-sync-pending': '1' },
+      config: { url: '/admin/users/7/set-enabled' },
+    }
+
+    // The status area for user 7 is on screen and already reports this queued
+    // work in more detail, so the toast would be the same news twice.
+    const release = observeUser(7)
+    mocks.state.responseOK?.(response)
+    expect(mocks.pushSnack).not.toHaveBeenCalled()
+
+    // Once it closes, the toast is the only surface left and must come back.
+    release()
+    mocks.state.responseOK?.(response)
+    expect(mocks.pushSnack).toHaveBeenCalledTimes(1)
   })
 
   it('does not turn intentional cancellation into an error toast', async () => {

@@ -4,6 +4,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 
 import type { SyncStatus } from '@/api/syncStatus'
+import { observeUser, onPendingForUser } from '@/api/syncPending'
 import { syncStatusKeys } from '@/query/keys'
 import { syncStatusErrorStatus, useObservationWindow, useSyncStatus } from '@/query/syncStatus'
 import { useQueryScope } from '@/query/useQueryScope'
@@ -67,6 +68,22 @@ export default function SyncStatusCard({ userId }: { userId: number }) {
     if (!refused || watch.watching) return
     queryClient.removeQueries({ queryKey: syncStatusKeys.user(scope, userId) })
   }, [refused, watch.watching, queryClient, scope, userId])
+
+  useEffect(() => {
+    // Claims this target while the area is on screen. Two things depend on it:
+    // a write reporting queued work finds the area to hand it to, and the
+    // transport skips its toast because this area already says the same thing.
+    const release = observeUser(userId)
+    const offPending = onPendingForUser(id => {
+      if (id !== userId) return
+      // A save in this dialog queued upstream work. Start a new window now
+      // rather than leaving the admin to reopen the dialog to see it.
+      setRefused(false)
+      watch.restart()
+      void query.refetch()
+    })
+    return () => { release(); offPending() }
+  }, [userId, watch.restart, query.refetch])
 
   const active = status?.active_tasks ?? []
   const terminal = status?.recent_terminal_tasks ?? []
