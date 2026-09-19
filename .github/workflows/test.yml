@@ -73,10 +73,35 @@ jobs:
           do
             git -C "$node_repo" fetch --force --depth=1 origin "refs/tags/$node_version"
             git -C "$node_repo" checkout --force --detach FETCH_HEAD
-            if PSP_LIVE_NODE_REPO="$node_repo" go test -count=1 -timeout=5m \
+
+            # ONE EVIDENCE DIRECTORY PER VERSION. A shared one would let the
+            # last version's log overwrite an earlier one's, so the report that
+            # survived would be about whichever happened to run last.
+            evidence="evidence/$node_version"
+            mkdir -p "$evidence"
+
+            # The exit code is CAPTURED rather than allowed to end the step. The
+            # validator has to run even when the tests failed, because its report
+            # is what says WHICH required item did not pass; stopping here would
+            # leave a red build and no reason. stderr is kept in its own file so
+            # a panic or a build error cannot leak into the JSON stream the
+            # validator parses.
+            test_exit=0
+            PSP_LIVE_NODE_REPO="$node_repo" go test -json -count=1 -timeout=5m \
               ./internal/service/nodesync \
-              -run '^TestLive_RealNode(AgentContract|MigratedServerContract|TaskEvidenceReceipt|TaskExpiryContract)$' -v \
-              2>&1 | tee "node-compatibility-$node_version.txt"
+              -run '^TestLive_RealNode(AgentContract|MigratedServerContract|TaskEvidenceReceipt|TaskExpiryContract)$' \
+              > "$evidence/go-events.jsonl" 2> "$evidence/go-stderr.txt" || test_exit=$?
+
+            # A green `go test` is not evidence that the contract was exercised.
+            # `-run` matching nothing, a skip taken because PSP_LIVE_NODE_REPO
+            # was never set, and a truncated log all exit 0 with no coverage —
+            # so the run is judged against the profile, never against its own
+            # exit code.
+            if node deploy/compat/check-go-results.mjs \
+              --profile node-wire-v1 \
+              --input "$evidence/go-events.jsonl" \
+              --go-exit-code "$test_exit" \
+              --output "$evidence/result.json"
             then
               echo "✓ $node_version"
             else
@@ -90,7 +115,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: node-compatibility-test-output
-          path: node-compatibility-*.txt
+          path: evidence/
 
   node-contract:
     name: node contract (pinned published source)
@@ -129,16 +154,26 @@ jobs:
           cp -R "$node_module_dir/." "$contract_repo/"
           chmod -R u+w "$contract_repo"
           test -f "$contract_repo/go.mod"
-          PSP_LIVE_NODE_REPO="$contract_repo" go test -count=1 -timeout=5m \
+          mkdir -p evidence
+          # Captured, not propagated: the validator has to run even when the
+          # tests failed, because its report is what names the required item that
+          # did not pass. stderr stays separate from the JSON stream.
+          test_exit=0
+          PSP_LIVE_NODE_REPO="$contract_repo" go test -json -count=1 -timeout=5m \
             ./internal/service/nodesync \
-            -run '^TestLive_RealNode(AgentContract|MigratedServerContract|TaskEvidenceReceipt|TaskExpiryContract)$' -v \
-            2>&1 | tee node-contract-output.txt
+            -run '^TestLive_RealNode(AgentContract|MigratedServerContract|TaskEvidenceReceipt|TaskExpiryContract)$' \
+            > evidence/go-events.jsonl 2> evidence/go-stderr.txt || test_exit=$?
+          node deploy/compat/check-go-results.mjs \
+            --profile node-wire-v1 \
+            --input evidence/go-events.jsonl \
+            --go-exit-code "$test_exit" \
+            --output evidence/result.json
       - name: upload test output
         if: failure()
         uses: actions/upload-artifact@v7
         with:
           name: node-contract-test-output
-          path: node-contract-output.txt
+          path: evidence/
 
   container:
     name: Docker source and release runtime baselines
@@ -182,8 +217,8 @@ jobs:
             # This verifies binary execution, not the panel's production startup.
             docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges --user 10001:10001 --entrypoint /app/psp "$image" --version
           done
-      - name: Publisher identity and fail-closed guard tests
-        run: node --test deploy/check_image_test.mjs deploy/check_build_test.mjs deploy/release_workflow_test.mjs
+      - name: Publisher identity, compat result validator and fail-closed guard tests
+        run: node --test deploy/check_image_test.mjs deploy/check_build_test.mjs deploy/release_workflow_test.mjs deploy/compat/check-go-results.test.mjs
 
   web:
     name: web (typecheck + build + test)
