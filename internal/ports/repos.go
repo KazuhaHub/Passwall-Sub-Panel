@@ -816,6 +816,17 @@ type SyncTaskRepo interface {
 	// pending/running for the target. Single round-trip alternative to
 	// looping GetActiveByTarget per type.
 	HasActiveByTargetAny(ctx context.Context, types []domain.SyncTaskType, targetType string, targetID int64) (bool, error)
+	// ListActiveByTarget returns up to limit pending/running tasks of the given
+	// types for ONE target, newest first. Deliberately its own method rather
+	// than a List filter: the target filter must be part of the query, and a
+	// parameter the generic List path ignores would look like filtering while
+	// doing nothing. targetType is required — target IDs are per-kind integers,
+	// so user 7 and node 7 collide numerically.
+	ListActiveByTarget(ctx context.Context, types []domain.SyncTaskType, targetType string, targetID int64, limit int) ([]*domain.SyncTask, error)
+	// ListTerminalByTarget returns up to limit finished tasks of the given types
+	// for ONE target, newest finished first. Separate from the active query so
+	// each can be separately capped.
+	ListTerminalByTarget(ctx context.Context, types []domain.SyncTaskType, targetType string, targetID int64, limit int) ([]*domain.SyncTask, error)
 	List(ctx context.Context, filter SyncTaskFilter) (items []*domain.SyncTask, total int64, err error)
 	ListDue(ctx context.Context, now time.Time, limit int) ([]*domain.SyncTask, error)
 	// MarkRunning atomically claims a Pending task (Pending -> Running).
