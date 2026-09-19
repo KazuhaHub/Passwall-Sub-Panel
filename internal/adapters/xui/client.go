@@ -23,6 +23,16 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/version"
 )
 
+// The 3X-UI adapter is the primary one and had no interface assertions at all,
+// which is how a missing capability implementation could have gone unnoticed:
+// ports.SupportsCapability answers "yes" for anything that does not implement
+// CapabilityProvider, so the UI would offer every gated action and each one
+// would come back 501. The sibling adapters already assert both.
+var (
+	_ ports.PanelClient        = (*Client)(nil)
+	_ ports.CapabilityProvider = (*Client)(nil)
+)
+
 // Client implements ports.XUIClient for a single 3X-UI panel.
 //
 // Auth priority:
