@@ -50,18 +50,26 @@ jobs:
           test -n "$build_toolchain"
           test "$(go env GOVERSION)" = "$build_toolchain"
           test "$(go tool compile -V | awk '{ print $3 }')" = "$build_toolchain"
-      - name: Exercise every released wire contract
+      - name: Exercise every supported wire contract
         run: |
           set -euo pipefail
+          # THE SUPPORTED SET IS DERIVED, NOT LISTED. `min_supported` in the
+          # manifest names the oldest node this panel still supports, and
+          # everything from that row onward is what gets exercised — so the
+          # matrix stops growing once the floor moves, instead of gaining a
+          # permanent row per release. The list used to be hardcoded here, in
+          # release.yml and in the manifest, which meant three places to forget.
+          #
+          # Matched by POSITION, never by comparing versions: the prerelease
+          # suffix sorts lexically, so v0.0.1-beta9 ranks above v0.0.1-beta11.
+          versions=$(python3 -c 'import json;d=json.load(open("docs/compat/node-v4.json"));r=[x["version"] for x in d["released_nodes"]];print(" ".join(r[r.index(d["min_supported"]):]))')
+          test -n "$versions"
+          echo "supported nodes: $versions"
           node_repo="$RUNNER_TEMP/passwall-node"
           git init "$node_repo"
           git -C "$node_repo" remote add origin https://github.com/KazuhaHub/Passwall-Node.git
           failed=0
-          for node_version in \
-            v0.0.1-beta1 v0.0.1-beta2 v0.0.1-beta3 \
-            v0.0.1-beta4 v0.0.1-beta5 v0.0.1-beta6 \
-            v0.0.1-beta7 v0.0.1-beta8 v0.0.1-beta9 \
-            v0.0.1-beta10 v0.0.1-beta11
+          for node_version in $versions
           do
             git -C "$node_repo" fetch --force --depth=1 origin "refs/tags/$node_version"
             git -C "$node_repo" checkout --force --detach FETCH_HEAD
