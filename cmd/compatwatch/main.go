@@ -67,6 +67,158 @@ const (
 // moved, API shape changed, rate limited) survives all three attempts.
 const fetchAttempts = 3
 
+// githubAPI is the one outbound dependency, behind a struct so the rules that
+// actually decide a verdict — paging, draft filtering, ordering, backoff — can
+// be tested without reaching GitHub or spending the backoff in wall-clock time.
+// The zero value is the production configuration.
+type githubAPI struct {
+	client  *http.Client
+	baseURL string
+	// sleep is the backoff seam. Production leaves it nil and waits for real;
+	// a test replaces it to assert the retry policy rather than pay for it.
+	sleep func(context.Context, time.Duration) error
+}
+
+func (g githubAPI) url(path string) string {
+	base := g.baseURL
+	if base == "" {
+		base = "https://api.github.com"
+	}
+	return base + path
+}
+
+func (g githubAPI) wait(ctx context.Context, d time.Duration) error {
+	if g.sleep != nil {
+		return g.sleep(ctx, d)
+	}
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(d):
+		return nil
+	}
+}
+
+// latestRelease returns the newest non-prerelease tag for owner/repo.
+func (g githubAPI) latestRelease(ctx context.Context, repo string) (string, error) {
+	var payload struct {
+		TagName string `json:"tag_name"`
+	}
+	if err := g.getRetry(ctx, "/repos/"+repo+"/releases/latest", &payload); err != nil {
+		return "", err
+	}
+	if payload.TagName == "" {
+		return "", errors.New("release has no tag_name")
+	}
+	return payload.TagName, nil
+}
+
+// allReleases lists every published tag for owner/repo, newest published first.
+//
+// PRERELEASES ARE INCLUDED AND DRAFTS ARE NOT: the releases this guards are
+// betas, which GitHub marks prerelease, so filtering them out would leave the
+// check with nothing to look at.
+//
+// SORTED BY PUBLICATION TIME, THE SAME AXIS THE CATALOG ITSELF USES. The tag
+// strings sort lexically, which ranks v0.0.1-beta11 BELOW v0.0.1-beta9 — the
+// very confusion that let beta10 and beta11 sit unoffered — so any ordering
+// derived from the strings would be actively misleading here.
+//
+// Paging is bounded and a full last page is an error rather than a silent
+// truncation: this registry holds at most sixteen entries, so a repository past
+// the page limit would have releases this check cannot see, and reporting
+// "all accounted for" over an unseen tail is the one answer it must never give.
+func (g githubAPI) allReleases(ctx context.Context, repo string) ([]string, error) {
+	const perPage = 100
+	const maxPages = 10
+	type release struct {
+		TagName     string    `json:"tag_name"`
+		Draft       bool      `json:"draft"`
+		PublishedAt time.Time `json:"published_at"`
+	}
+	var collected []release
+	for page := 1; page <= maxPages; page++ {
+		var batch []release
+		path := fmt.Sprintf("/repos/%s/releases?per_page=%d&page=%d", repo, perPage, page)
+		if err := g.getRetry(ctx, path, &batch); err != nil {
+			return nil, err
+		}
+		collected = append(collected, batch...)
+		if len(batch) < perPage {
+			break
+		}
+		if page == maxPages {
+			return nil, fmt.Errorf("%s has more releases than this check pages through (%d pages)", repo, maxPages)
+		}
+	}
+	sort.SliceStable(collected, func(i, j int) bool {
+		return collected[i].PublishedAt.After(collected[j].PublishedAt)
+	})
+	tags := make([]string, 0, len(collected))
+	for _, release := range collected {
+		if release.Draft || release.TagName == "" {
+			continue
+		}
+		tags = append(tags, release.TagName)
+	}
+	return tags, nil
+}
+
+// getRetry retries a GitHub read so a single blip cannot be reported as an
+// unreadable registry — see fetchAttempts. A caller that has given up is not
+// kept alive for the rest of the retry budget, and the context error survives
+// rather than being replaced by the last transport failure.
+func (g githubAPI) getRetry(ctx context.Context, path string, out any) error {
+	var lastErr error
+	for attempt := 1; attempt <= fetchAttempts; attempt++ {
+		if attempt > 1 {
+			// Checked here AND inside the wait, and neither is redundant: this
+			// one keeps the retry policy independent of whatever the wait does,
+			// while a real wait is cancellable *during* the gap rather than only
+			// before it.
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			if err := g.wait(ctx, time.Duration(attempt-1)*2*time.Second); err != nil {
+				return err
+			}
+		}
+		lastErr = g.get(ctx, path, out)
+		if lastErr == nil {
+			return nil
+		}
+	}
+	return lastErr
+}
+
+func (g githubAPI) get(ctx context.Context, path string, out any) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, g.url(path), nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+	// The workflow passes the run's own GITHUB_TOKEN. Anonymous callers get 60
+	// requests an hour per IP and Actions runners share addresses, so without it
+	// a rate-limited run would report "unknown" for reasons that have nothing to
+	// do with either upstream.
+	if tok := os.Getenv("GITHUB_TOKEN"); tok != "" {
+		req.Header.Set("Authorization", "Bearer "+tok)
+	}
+	client := g.client
+	if client == nil {
+		client = &http.Client{Timeout: 15 * time.Second}
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
+	return json.NewDecoder(resp.Body).Decode(out)
+}
+
 func main() {
 	if err := run(); err != nil {
 		fmt.Fprintln(os.Stderr, "compatwatch:", err)
@@ -88,9 +240,10 @@ func run() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 
+	api := githubAPI{}
 	reports := make([]version.CeilingReport, 0, len(upstreams))
 	for _, u := range upstreams {
-		latest, ferr := latestRelease(ctx, u.Repo)
+		latest, ferr := api.latestRelease(ctx, u.Repo)
 		r := version.CompareCeiling(u.Name, ceilings[u.Name], latest)
 		// A fetch error is more informative than the empty tag it produced, so
 		// it replaces the generic reason — "rate limited" and "repo not found"
@@ -113,7 +266,7 @@ func run() error {
 	if err := json.Unmarshal(registryRaw, &registry); err != nil {
 		return fmt.Errorf("%s: %w", nodeRegistryPath, err)
 	}
-	published, releaseErr := allReleases(ctx, nodeRepo)
+	published, releaseErr := api.allReleases(ctx, nodeRepo)
 	reports = append(reports, nodeRegistryReport(registry, published, releaseErr))
 
 	// Print every row on every run, whatever the verdicts. One "behind" row
@@ -315,113 +468,4 @@ func orDash(s string) string {
 		return "—"
 	}
 	return s
-}
-
-// latestRelease returns the newest non-prerelease tag for owner/repo.
-func latestRelease(ctx context.Context, repo string) (string, error) {
-	var payload struct {
-		TagName string `json:"tag_name"`
-	}
-	if err := getJSONRetry(ctx, "https://api.github.com/repos/"+repo+"/releases/latest", &payload); err != nil {
-		return "", err
-	}
-	if payload.TagName == "" {
-		return "", errors.New("release has no tag_name")
-	}
-	return payload.TagName, nil
-}
-
-// allReleases lists every published tag for owner/repo, newest published first.
-//
-// PRERELEASES ARE INCLUDED AND DRAFTS ARE NOT: the releases this guards are
-// betas, which GitHub marks prerelease, so filtering them out would leave the
-// check with nothing to look at.
-//
-// SORTED BY PUBLICATION TIME, THE SAME AXIS THE CATALOG ITSELF USES. The tag
-// strings sort lexically, which ranks v0.0.1-beta11 BELOW v0.0.1-beta9 — the
-// very confusion that let beta10 and beta11 sit unoffered — so any ordering
-// derived from the strings would be actively misleading here.
-//
-// Paging is bounded and a full last page is an error rather than a silent
-// truncation: this registry holds at most sixteen entries, so a repository past
-// the page limit would have releases this check cannot see, and reporting
-// "all accounted for" over an unseen tail is the one answer it must never give.
-func allReleases(ctx context.Context, repo string) ([]string, error) {
-	const perPage = 100
-	const maxPages = 10
-	type release struct {
-		TagName     string    `json:"tag_name"`
-		Draft       bool      `json:"draft"`
-		PublishedAt time.Time `json:"published_at"`
-	}
-	var collected []release
-	for page := 1; page <= maxPages; page++ {
-		var batch []release
-		url := fmt.Sprintf("https://api.github.com/repos/%s/releases?per_page=%d&page=%d", repo, perPage, page)
-		if err := getJSONRetry(ctx, url, &batch); err != nil {
-			return nil, err
-		}
-		collected = append(collected, batch...)
-		if len(batch) < perPage {
-			break
-		}
-		if page == maxPages {
-			return nil, fmt.Errorf("%s has more releases than this check pages through (%d pages)", repo, maxPages)
-		}
-	}
-	sort.SliceStable(collected, func(i, j int) bool {
-		return collected[i].PublishedAt.After(collected[j].PublishedAt)
-	})
-	tags := make([]string, 0, len(collected))
-	for _, release := range collected {
-		if release.Draft || release.TagName == "" {
-			continue
-		}
-		tags = append(tags, release.TagName)
-	}
-	return tags, nil
-}
-
-// getJSONRetry retries a GitHub read so a single blip cannot be reported as an
-// unreadable registry — see fetchAttempts.
-func getJSONRetry(ctx context.Context, url string, out any) error {
-	var lastErr error
-	for attempt := 1; attempt <= fetchAttempts; attempt++ {
-		if attempt > 1 {
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-time.After(time.Duration(attempt-1) * 2 * time.Second):
-			}
-		}
-		lastErr = getJSON(ctx, url, out)
-		if lastErr == nil {
-			return nil
-		}
-	}
-	return lastErr
-}
-
-func getJSON(ctx context.Context, url string, out any) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Accept", "application/vnd.github+json")
-	// The workflow passes the run's own GITHUB_TOKEN. Anonymous callers get 60
-	// requests an hour per IP and Actions runners share addresses, so without it
-	// a rate-limited run would report "unknown" for reasons that have nothing to
-	// do with either upstream.
-	if tok := os.Getenv("GITHUB_TOKEN"); tok != "" {
-		req.Header.Set("Authorization", "Bearer "+tok)
-	}
-	resp, err := (&http.Client{Timeout: 15 * time.Second}).Do(req)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("HTTP %d", resp.StatusCode)
-	}
-	return json.NewDecoder(resp.Body).Decode(out)
 }
