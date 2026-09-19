@@ -11,7 +11,7 @@ import (
 	"sync"
 	"testing"
 
-	nodeprotocol "github.com/KazuhaHub/passwall-node/protocol"
+	nodeprotocol "github.com/KazuhaHub/passwall-protocol/protocol"
 )
 
 var canonicalTaskID = regexp.MustCompile(`^tsk1_[0-9a-f]{48}_[0-9a-f]{16}$`)

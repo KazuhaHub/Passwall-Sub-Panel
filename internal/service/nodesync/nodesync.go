@@ -17,7 +17,7 @@ import (
 	"time"
 
 	"github.com/KazuhaHub/passwall-node/corecatalog"
-	nodeprotocol "github.com/KazuhaHub/passwall-node/protocol"
+	nodeprotocol "github.com/KazuhaHub/passwall-protocol/protocol"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/keyedmutex"

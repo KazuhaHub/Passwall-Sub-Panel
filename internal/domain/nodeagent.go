@@ -3,7 +3,7 @@ package domain
 import (
 	"time"
 
-	nodeprotocol "github.com/KazuhaHub/passwall-node/protocol"
+	nodeprotocol "github.com/KazuhaHub/passwall-protocol/protocol"
 )
 
 type NodeCoreEngine string
