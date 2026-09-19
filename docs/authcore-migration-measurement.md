@@ -2,7 +2,7 @@
 
 本文件是 [ADR 0037](adr/0037-authcore-shareability-experiment.md) 的测量载体。**判据与归类规则在 ADR 0037 中冻结,本文件只记录数据与职责归属。** 看到 M 的候选结果后再改判据或改归类,视为重新立项。
 
-状态：P0 已建立基线;H/M 数据待填。最后更新：2026-09-18。
+状态：P0 基线已建立；H 线完成；M1/M2/G1 三个实验均已完成并在 §6 定论（SAML rejected、Passkey rejected、GeoIP adopted）。最后更新：2026-09-19。
 
 ## 1. 基线
 
@@ -123,10 +123,26 @@ H/M 各阶段用同一组命令重测并追加 `dependencies-H.txt` / `dependenc
 
 | 包 | B0 | H | M | `A` | `D_pre` | `D_hardening` | `D_bridge` | `Δ_actual` | `Δ_conservative` | 判据 | 结论 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| SAML | `4697f29b` | 待填 | 待填 | 待测 | 待测 | 待测 | 待测 | 待测 | 待测 | ADR 0037 §4 | 待实验 |
-| Passkey | `4697f29b` | 待填 | 待填 | 待测 | 待测 | 待测 | 待测 | 待测 | 待测 | ADR 0037 §4 | 独立候选 |
-| GeoIP | `4697f29b` | = B0 | 待填 | 待测 | 待测 | 0 | 待测 | 待测 | 待测 | `Δ_conservative<=0` | 可选 |
+| SAML | `4697f29b` | `ea01ea44` | `814414c7`+`7125b2a1`+M1 分支尖端 | 610 | 353 | 315 | 0 | −58 | **+257** | ADR 0037 §4（预算 25%×353 = 88.25） | **rejected** |
+| Passkey | `4697f29b` | `af11cdb0` | `13be75ad` | 772 | 219 | 74 | 0 | **+479** | **+553** | ADR 0037 §4（预算 25%×219 = 54.75） | **rejected** |
+| GeoIP | `4697f29b` | = B0（无 H 阶段） | `kazuha/authcore-geoip-experiment` | 57 | 113 | 0 | 0 | −56 | **−56** | `Δ_conservative<=0` | **adopted** |
 | 验证码 | — | — | — | — | — | — | — | — | — | 重新准入 | deferred |
+
+SAML 行的完整记录见 `kazuha/authcore-saml-experiment` 分支上的
+`docs/authcore-baseline/saml-m1-report.md`;Passkey 行见 `kazuha/authcore-passkey-experiment` 分支上的
+`docs/authcore-baseline/passkey-m2-report.md`。
+两份报告都附有 `--numstat` 全文、逐 hunk 归属表、每个 `D_*` 的 ID 依据与口径敏感性分析。
+两行的行为等价性均通过(同一组用例全绿),否决都来自成本面。
+
+**Passkey 与 SAML 的差别值得单记。** M1 的 `Δ_actual` 是 −58 —— 它靠删除 315 行 H 阶段
+**自主加固**才得到一个为负的净账,而这部分删除接不接库都要发生(ADR 0037 §3 正是要堵这个口子)。
+M2 的 `Δ_actual` 是 **+479**:净增,且**没有任何读法能让它变成负数**(剔除注释后仍是 +207)。
+即:Passkey 的替换即便按最宽松的口径也是亏的;SAML 只是没通过那条更严的预算线。
+
+**一处归类保留:** S-REPLAY 的 60 行 —— 职责表把该类定为 `D_pre`(H2 修改的是 B0 已有的职责),
+但代码物理上写于 H2。上表按职责表字面取 `D_pre`;若改按行龄归 `D_hardening`,
+则为 `D_pre = 293`、`Δ_conservative = 260`、预算 73.25 → 仍为 rejected(超支 3.55 倍)。
+两种读法结论一致,故未按 §7 记为「归类更正」。
 
 每行必须附：`git diff --numstat --find-renames H M` 全文、逐文件归属表、以及每个被记入 `D_*` 的 ID 的归类依据（引用 §5 的 ID）。
 
@@ -136,3 +152,27 @@ H/M 各阶段用同一组命令重测并追加 `dependencies-H.txt` / `dependenc
 - `D_bridge` 永不产生收益,不进入 `Δ_actual`。
 - 结论取值只允许 adopted / rejected / deferred / not_attempted;后两者**不算实验已证明有效或无效**。
 - 每包结论独立;SAML 被拒绝不自动否定 Passkey。
+
+## 8. E1：并表结果
+
+三个包的实验都已结束，§6 的表已填满：
+
+| 包 | 结论 | 依据 |
+| --- | --- | --- |
+| SAML | rejected | `Δ_conservative` +257 对预算 88.25（2.91×）；报告在 `kazuha/authcore-saml-experiment` |
+| Passkey | rejected | `Δ_conservative` +553 对预算 54.75（10.1×）；报告在 `kazuha/authcore-passkey-experiment` |
+| GeoIP | **adopted** | `Δ_conservative` −56 ≤ 0；报告在 `kazuha/authcore-geoip-experiment` |
+| 验证码 | deferred | 计划书默认不实施（§5.4 仅预留 ID） |
+
+**一处更正已并入上表。** SAML 行的 `A` 初版记为 553,复核时更正为 **610**:初版测量用 `git diff <commit>`,而该命令**不含未跟踪文件**,当时 `internal/adapters/authcore/factory.go` 仍是 `??` 状态,其 57 行被整体漏掉。更正后 `Δ_actual = −58`、`Δ_conservative = +257`,**结论不变(rejected)**。更正的全文与原因记录在 M1 报告顶部的「更正记录」。
+
+**并表说明。** GeoIP 一行的数字取自 `kazuha/authcore-geoip-experiment` 分支上的
+`docs/authcore-baseline/geoip-g1-report.md`（该分支基于 `origin/main`，与 H 线无关，因此其
+`A`/`D_pre` 只覆盖 `internal/pkg/geoip/geoip.go` 一个文件，与 SAML/Passkey 的行不共享 H 起点）。
+三份报告都是各自分支上的权威记录；本表是唯一的汇总处，分支上不再保留分叉副本。
+
+**这三条实验分支目前都未推送**，因此那些报告是本地工作稿。汇总表与实施记录是本次交付随代码一并进入主线的部分；若今后需要长期引用某一份报告，应把它推送或并入 `docs/authcore-baseline/`。
+
+**取值口径未变**：三行的结论都直接来自预先冻结的 §5 职责表与 ADR 0037 §4 的算术，
+没有在看到行数后调整任何归类（§7）。唯一一处需要读者知晓的归类含糊是 SAML 的 S-REPLAY
+（见上），两种读法结论一致。
