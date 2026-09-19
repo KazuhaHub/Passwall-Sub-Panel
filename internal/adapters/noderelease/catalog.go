@@ -265,7 +265,27 @@ func (c *Catalog) fetch(ctx context.Context) (ports.NodeReleaseList, error) {
 			result.Releases = append(result.Releases, entry)
 		}
 	}
-	sort.Slice(result.Releases, func(i, j int) bool { return semver.Compare(result.Releases[i].Version, result.Releases[j].Version) > 0 })
+	// NEWEST PUBLISHED FIRST, NOT HIGHEST VERSION FIRST.
+	//
+	// semver compares prerelease identifiers character by character, so
+	// v0.0.1-beta11 ranks BELOW v0.0.1-beta9. Sorting by it put the older
+	// release at the top, and had beta10/beta11 been reviewed into the registry
+	// they would have been filed behind beta3 — in the list that drives the
+	// upgrade dialog, where the first entry is labelled the recommended version.
+	//
+	// Publication time is the axis a version string cannot reinterpret. The
+	// version is only a tie-break, for releases sharing a publication instant —
+	// and semver is the right one there, because it ranks a prerelease below its
+	// own stable, which lexically comparing the strings gets backwards. The
+	// two-digit pathology cannot arise between two releases published in the
+	// same second.
+	sort.Slice(result.Releases, func(i, j int) bool {
+		left, right := result.Releases[i], result.Releases[j]
+		if !left.PublishedAt.Equal(right.PublishedAt) {
+			return left.PublishedAt.After(right.PublishedAt)
+		}
+		return semver.Compare(left.Version, right.Version) > 0
+	})
 	result.CheckedAt = c.now().UTC()
 	return result, nil
 }

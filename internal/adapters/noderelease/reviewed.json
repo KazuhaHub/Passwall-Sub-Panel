@@ -89,6 +89,50 @@
         {"os": "windows", "arch": "arm64"}
       ],
       "docker_published_tag": "v0.0.1-beta9"
+    },
+    {
+      "version": "v0.0.1-beta10",
+      "psp_major": 4,
+      "notes": "Reviewed PSP v4 agent protocol, exact release packaging and managed Docker upgrades. The v1 report contract gains host telemetry: CPU, memory, disk, network and load are collected on the Node side without root. Core process identity is published as a verifiable handle, and agent logs adopt the panel's Xray line format.",
+      "methods": ["linux", "docker", "manual"],
+      "platforms": [
+        {"os": "linux", "arch": "amd64"},
+        {"os": "linux", "arch": "arm64"},
+        {"os": "darwin", "arch": "amd64"},
+        {"os": "darwin", "arch": "arm64"},
+        {"os": "windows", "arch": "amd64"},
+        {"os": "windows", "arch": "arm64"}
+      ],
+      "docker_published_tag": "v0.0.1-beta10"
+    },
+    {
+      "version": "v0.0.1-beta11",
+      "psp_major": 4,
+      "notes": "Reviewed PSP v4 agent protocol, exact release packaging and managed Docker upgrades. Adds the diagnostics.collect.v1 contract and the remote diagnostic that answers it, carrying the four events a diagnostic records. Supersedes v0.0.1-beta10, which panics when a host report has no network section.",
+      "methods": ["linux", "docker", "manual"],
+      "platforms": [
+        {"os": "linux", "arch": "amd64"},
+        {"os": "linux", "arch": "arm64"},
+        {"os": "darwin", "arch": "amd64"},
+        {"os": "darwin", "arch": "arm64"},
+        {"os": "windows", "arch": "amd64"},
+        {"os": "windows", "arch": "arm64"}
+      ],
+      "docker_published_tag": "v0.0.1-beta11"
+    }
+  ],
+  "excluded": [
+    {
+      "version": "v0.0.1-beta1",
+      "reason": "Predates this registry: published 2026-09-12, hours before the file existed, whose first reviewed entry was v0.0.1-beta3. Never reviewed and long superseded, so it is not offered for remote upgrade."
+    },
+    {
+      "version": "v0.0.1-beta2",
+      "reason": "Predates this registry, like v0.0.1-beta1: published 2026-09-12, before the file existed. Never reviewed and long superseded, so it is not offered for remote upgrade."
+    },
+    {
+      "version": "v0.0.1-beta5",
+      "reason": "Passed over at the time: the commit that added v0.0.1-beta6 and v0.0.1-beta7 skipped it, and no review was ever recorded. Superseded and no longer offered. Listed here so the omission is a decision on record rather than a gap."
     }
   ]
 }

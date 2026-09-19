@@ -1,24 +1,33 @@
 name: Upstream compat watch
 
 # Watches 3X-UI and S-UI for releases past the tested ceilings in
-# the active v4 prerelease-aware range overlay.
+# the active v4 prerelease-aware range overlay, and watches our OWN published
+# Node releases for ones the upgrade registry has not ruled on.
 #
-# WHY THIS IS A JOB AND NOT A CHECKLIST ITEM: that ceiling is the only compat
+# WHY THIS IS A JOB AND NOT A CHECKLIST ITEM: the ceiling is the only compat
 # fact that goes stale with nobody editing anything — it is a claim about an
 # upstream that keeps shipping. And its failure is quiet from the maintainer's
 # side but loud from the admin's: PSP refuses a panel upgrade whose target
 # exceeds the ceiling, so a stale file shows up as somebody being blocked from
 # upgrading, months after the release that did it.
 #
-# It never edits the file. Raising a ceiling means the live-panel review pass in
-# docs/3xui-compat.md; a job that bumped the number automatically would be
-# asserting precisely the thing it did not verify.
+# The Node registry check exists because its failure is quiet from EVERY side.
+# Every other check reads that registry instead of questioning it, so a release
+# that shipped and that nobody reviewed is invisible to all of them: the upgrade
+# dialog just keeps recommending whatever it already had. It is the mirror of the
+# ceiling above — there an upstream outran us, here our own releases did.
+#
+# It never edits either file. Raising a ceiling means the live-panel review pass
+# in docs/3xui-compat.md; reviewing a Node release means a human deciding whether
+# to offer it. A job that edited them automatically would be asserting precisely
+# the thing it did not verify. What it refuses to allow is SILENCE.
 #
 # A red run here is not a broken build — it is the signal. Two different reds:
-# exit 1 means an upstream is ahead (do the review pass), exit 2 means a
-# comparison could not be made at all (the watcher itself needs attention).
-# "Could not tell" is deliberately not green, because an upstream whose releases
-# we can no longer read looks exactly like one that has shipped nothing.
+# exit 1 means a real gap (do the review pass, or record the decision), exit 2
+# means a comparison could not be made at all (the watcher itself needs
+# attention). "Could not tell" is deliberately not green, because an upstream
+# whose releases we can no longer read looks exactly like one that has shipped
+# nothing.
 
 on:
   schedule:
@@ -28,11 +37,14 @@ on:
   workflow_dispatch:
   # Also on changes to the inputs, so an edit that puts the compat file out of
   # reach of its own watcher is caught on the PR rather than on the next Monday.
+  # reviewed.json is listed for the same reason from the other direction: adding
+  # a release is the very edit this check has an opinion about.
   pull_request:
     paths:
       - "docs/compat/**"
       - "cmd/compatwatch/**"
       - "internal/version/ceiling*.go"
+      - "internal/adapters/noderelease/reviewed.json"
       - ".github/workflows/compat-watch.yml"
 
 permissions:
@@ -40,7 +52,7 @@ permissions:
 
 jobs:
   watch:
-    name: ceilings vs upstream releases
+    name: ceilings and node registry vs published releases
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -55,7 +67,7 @@ jobs:
       # `go run` and as 2 when the built binary is executed.
       - name: build the watcher
         run: go build -o /tmp/compatwatch ./cmd/compatwatch
-      - name: compare ceilings against upstream releases
+      - name: compare ceilings and the node registry against published releases
         env:
           # Lifts the GitHub API quota off the anonymous 60/hour-per-IP limit
           # that Actions runners share, so an "unknown" verdict means something
@@ -67,9 +79,9 @@ jobs:
           code=$?
           set -e
           case "$code" in
-            0) echo "::notice::Both upstream ceilings are current." ;;
-            1) echo "::error::An upstream has released past its tested ceiling. Do the live-panel review in docs/3xui-compat.md before moving the number in docs/compat/v4-ranges.json." ;;
-            2) echo "::error::The ceiling comparison could not be made — the watcher itself needs attention (upstream repo moved, API shape changed, or rate limited). This is NOT a clean bill of health." ;;
+            0) echo "::notice::Upstream ceilings are current and every published Node release is accounted for." ;;
+            1) echo "::error::A compat gap is real. Either an upstream has released past its tested ceiling (do the live-panel review in docs/3xui-compat.md before moving the number in docs/compat/v4-ranges.json), or a published Node release is neither reviewed in internal/adapters/noderelease/reviewed.json nor excluded there with a reason. The table above names which." ;;
+            2) echo "::error::A comparison could not be made — the watcher itself needs attention (upstream repo moved, API shape changed, or rate limited). This is NOT a clean bill of health." ;;
             *) echo "::error::compatwatch exited $code" ;;
           esac
           exit $code
