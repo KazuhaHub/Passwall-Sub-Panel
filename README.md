@@ -436,6 +436,7 @@ GET                 /api/admin/sync-tasks
 
 - [架构设计](docs/ARCHITECTURE.md) — 核心概念、数据模型、模块交互
 - [后端兼容、升级与 CI 规范](docs/compat-policy.md) — PSP／PN／第三方支持边界、验证证据与实施验收
+- [兼容体系整改实施手册](docs/compat-remediation-plan.md) — 分仓任务、实施步骤、测试与交接清单
 
 ## 许可证
 
