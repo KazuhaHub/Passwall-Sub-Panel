@@ -95,6 +95,7 @@ R10 的路径被真实执行到**推广之前**为止，全部在本地、不产
 | 步骤 | 执行了什么 | 结果 |
 | --- | --- | --- |
 | 2 构建候选 | 六个目标（linux/darwin/windows × amd64/arm64）用 release 的同一组 `-trimpath -ldflags` 构建，逐个过 `deploy/check-build.sh` | 六个全部通过来源校验（编译器、GOOS/GOARCH、`vcs.revision`、干净工作树、CGO 关闭） |
+| 1 发布 tag 校验 | `release-tag v4.0.0-beta.20`，以及四种非法形态（`not-a-version`／`v4.0`／空／`latest`） | 前者退出 0；后者各退出 1 并给出 `release requires an explicit vMAJOR.MINOR.PATCH[-prerelease] tag` |
 | 3 运行证据 | darwin/arm64 二进制**原生**执行 `psp version`；linux 侧由 `test.yml` 的 `container` 作业提供运行基线 | 报出被戳入的 version 与 commit，退出 0 |
 | 4 证据索引 | 在提交 `d9008721` 上取该次 CI 的四个 artifact，配本地六个产物的 sha256，跑 `evidence-index.mjs` | 11 个 case、`missing: []`、退出 0 |
 
