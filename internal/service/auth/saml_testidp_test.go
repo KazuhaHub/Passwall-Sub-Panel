@@ -329,10 +329,29 @@ func testSAML(t *testing.T) (*SAMLService, *testIdP) {
 	}}
 	svc.SetReplayStore(&memReplayStore{})
 	svc.SetSAMLRequestStore(&memRequestStore{})
+	svc.SetConfigRepo(&fakeConfigRepo{})
 	return svc, idp
 }
 
-// setConfigForTest publishes a new configuration the way Reload does, so a test
+// fakeConfigRepo is a ports.SAMLConfigRepo that records what was persisted and
+// can be made to fail, so a test can tell "the save failed" from "the apply
+// failed" — the two outcomes the API contract keeps separate.
+type fakeConfigRepo struct {
+	saved []*config.SAMLConfig
+	err   error
+}
+
+func (f *fakeConfigRepo) Load(context.Context) (*config.SAMLConfig, error) { return nil, nil }
+
+func (f *fakeConfigRepo) Save(_ context.Context, cfg *config.SAMLConfig) error {
+	if f.err != nil {
+		return f.err
+	}
+	f.saved = append(f.saved, cfg)
+	return nil
+}
+
+// setConfigForTest publishes a new configuration the way SaveConfig does, so a test
 // exercises the same generation change production sees instead of mutating a
 // published snapshot in place.
 func (s *SAMLService) setConfigForTest(cfg *config.SAMLConfig) {

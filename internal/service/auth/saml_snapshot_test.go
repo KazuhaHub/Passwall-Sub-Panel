@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/config"
@@ -12,7 +13,7 @@ import (
 // mapping rules with an old trust anchor (or the reverse) is the failure this
 // guards against, and "it compiled and still logs people in" is exactly how it
 // would hide.
-func TestReload_FailureLeavesNoProviderRatherThanTheStaleOne(t *testing.T) {
+func TestSaveConfig_FailureLeavesNoProviderRatherThanTheStaleOne(t *testing.T) {
 	svc, _ := testSAML(t)
 	if !svc.Enabled() {
 		t.Fatal("precondition: the harness should start enabled")
@@ -21,7 +22,11 @@ func TestReload_FailureLeavesNoProviderRatherThanTheStaleOne(t *testing.T) {
 
 	broken := config.CloneSAMLConfig(before.cfg)
 	broken.IDP.MetadataURL = "https://unreachable.invalid/saml/metadata"
-	if err := svc.Reload(context.Background(), broken); err == nil {
+	saved, applyErr := svc.SaveConfig(context.Background(), broken)
+	if !saved {
+		t.Fatalf("the configuration was not persisted: %v", applyErr)
+	}
+	if applyErr == nil {
 		t.Fatal("expected the provider build to fail for an unreachable metadata URL")
 	}
 
@@ -42,13 +47,13 @@ func TestReload_FailureLeavesNoProviderRatherThanTheStaleOne(t *testing.T) {
 
 // Disabling SSO must not require the new configuration to be valid first: an
 // admin has to be able to switch it off even while replacing broken values.
-func TestReload_DisablingTearsDownTheProvider(t *testing.T) {
+func TestSaveConfig_DisablingTearsDownTheProvider(t *testing.T) {
 	svc, _ := testSAML(t)
 
 	disabled := config.CloneSAMLConfig(svc.snapshot().cfg)
 	disabled.Enabled = false
-	if err := svc.Reload(context.Background(), disabled); err != nil {
-		t.Fatalf("disabling SAML returned an error: %v", err)
+	if saved, applyErr := svc.SaveConfig(context.Background(), disabled); !saved || applyErr != nil {
+		t.Fatalf("disabling SAML failed: saved=%v err=%v", saved, applyErr)
 	}
 	if svc.Enabled() {
 		t.Fatal("a disabled configuration left SAML enabled")
@@ -58,15 +63,15 @@ func TestReload_DisablingTearsDownTheProvider(t *testing.T) {
 // A snapshot that a request already took must keep working after a later reload,
 // and must not be mutated by it. This is the concurrency boundary the plan
 // describes: requests already past the snapshot point finish on their snapshot.
-func TestInFlightSnapshotSurvivesALaterReload(t *testing.T) {
+func TestInFlightSnapshotSurvivesALaterSave(t *testing.T) {
 	svc, _ := testSAML(t)
 	inFlight := svc.snapshot()
 	digestBefore := inFlight.digest
 
 	disabled := config.CloneSAMLConfig(inFlight.cfg)
 	disabled.Enabled = false
-	if err := svc.Reload(context.Background(), disabled); err != nil {
-		t.Fatalf("Reload: %v", err)
+	if saved, applyErr := svc.SaveConfig(context.Background(), disabled); !saved || applyErr != nil {
+		t.Fatalf("SaveConfig: saved=%v err=%v", saved, applyErr)
 	}
 
 	if !inFlight.enabled() {
@@ -82,21 +87,66 @@ func TestInFlightSnapshotSurvivesALaterReload(t *testing.T) {
 	}
 }
 
-func TestReload_GenerationIsStrictlyIncreasing(t *testing.T) {
+func TestSaveConfig_GenerationIsStrictlyIncreasing(t *testing.T) {
 	svc, _ := testSAML(t)
 	seen := svc.snapshot().generation
 
 	for i := 0; i < 3; i++ {
 		next := config.CloneSAMLConfig(svc.snapshot().cfg)
 		next.Enabled = false
-		if err := svc.Reload(context.Background(), next); err != nil {
-			t.Fatalf("Reload %d: %v", i, err)
+		if saved, applyErr := svc.SaveConfig(context.Background(), next); !saved || applyErr != nil {
+			t.Fatalf("SaveConfig %d: saved=%v err=%v", i, saved, applyErr)
 		}
 		got := svc.snapshot().generation
 		if got <= seen {
 			t.Fatalf("generation did not increase: %d then %d", seen, got)
 		}
 		seen = got
+	}
+}
+
+// A save that fails must leave the runtime exactly as it was: nothing persisted,
+// no generation published, the previous configuration still serving. Otherwise a
+// rejected write would quietly change behaviour, which is the opposite of what a
+// failed save should mean.
+func TestSaveConfig_FailedPersistLeavesTheRuntimeUntouched(t *testing.T) {
+	svc, _ := testSAML(t)
+	before := svc.snapshot()
+
+	svc.SetConfigRepo(&fakeConfigRepo{err: errors.New("disk full")})
+	next := config.CloneSAMLConfig(before.cfg)
+	next.Enabled = false
+
+	saved, applyErr := svc.SaveConfig(context.Background(), next)
+	if saved {
+		t.Fatal("a failed persist reported success")
+	}
+	if applyErr == nil {
+		t.Fatal("a failed persist reported no error")
+	}
+	if after := svc.snapshot(); after != before {
+		t.Fatal("a failed save published a new generation")
+	}
+	if !svc.Enabled() {
+		t.Fatal("a failed save disabled the running configuration")
+	}
+}
+
+// Persisting without a repository is an assembly error, and it is refused rather
+// than silently applying a configuration that would be lost on restart.
+func TestSaveConfig_WithoutARepositoryRefuses(t *testing.T) {
+	svc, _ := testSAML(t)
+	before := svc.snapshot()
+	svc.SetConfigRepo(nil)
+
+	next := config.CloneSAMLConfig(before.cfg)
+	next.Enabled = false
+	saved, err := svc.SaveConfig(context.Background(), next)
+	if saved || err == nil {
+		t.Fatalf("saved=%v err=%v, want a refusal", saved, err)
+	}
+	if after := svc.snapshot(); after != before {
+		t.Fatal("a refused save still published a generation")
 	}
 }
 

@@ -282,17 +282,20 @@ func (h *AdminSAMLHandler) Put(c *gin.Context) {
 		}
 	}
 
-	if err := h.repo.Save(c.Request.Context(), cfg); err != nil {
-		respondError(c, err)
+	// Persist and apply as ONE serialized operation. Two saves that each did
+	// Save-then-Reload could interleave and leave the database on the newer
+	// configuration while the process served the older one (ADR 0036 D6).
+	saved, applyErr := h.saml.SaveConfig(c.Request.Context(), cfg)
+	if !saved {
+		respondError(c, applyErr)
 		return
 	}
-
-	// Best-effort live reload: persistence already succeeded, so a bad SP
-	// build (eg. malformed cert) is reported but does not fail the request.
-	if err := h.saml.Reload(c.Request.Context(), cfg); err != nil {
+	// Best-effort apply: persistence already succeeded, so a bad SP build (eg. a
+	// malformed cert) is reported but does not fail the request.
+	if applyErr != nil {
 		c.JSON(http.StatusOK, gin.H{
 			"saved":        true,
-			"reload_error": err.Error(),
+			"reload_error": applyErr.Error(),
 			"config":       toSAMLDTO(cfg),
 		})
 		return

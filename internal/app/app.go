@@ -368,6 +368,10 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 		return nil, fmt.Errorf("saml is enabled but no durable login-request store is wired")
 	}
 	samlSvc.SetSAMLRequestStore(repos.SAMLRequest)
+	// Lets the service persist and apply a configuration as one serialized
+	// operation, so two concurrent saves cannot leave the stored configuration
+	// ahead of the running one.
+	samlSvc.SetConfigRepo(repos.SAMLConfig)
 
 	// Boot-time configuration audit for existing installs. The new rules do not
 	// block startup — a bad SAML configuration must not take the whole panel down,

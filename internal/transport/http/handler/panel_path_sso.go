@@ -11,8 +11,30 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/auth"
 )
 
+// samlConfigReloader is what the migrator needs from the SAML service. SaveConfig
+// is part of it rather than the migrator pairing Save with Reload itself: that
+// pairing is exactly the interleaving D6 forbids, since two callers doing
+// Save-then-Reload can leave the database on the newer configuration and the
+// process on the older one.
 type samlConfigReloader interface {
-	Reload(context.Context, *config.SAMLConfig) error
+	SaveConfig(context.Context, *config.SAMLConfig) (bool, error)
+}
+
+// saveAndApplySAML persists and applies through the service, so the save and the
+// generation change stay ordered. A migrator built without a service falls back to
+// persisting alone, which is what the migration's own tests rely on.
+func (m *PanelPathSSOMigrator) saveAndApplySAML(ctx context.Context, cfg *config.SAMLConfig) error {
+	if m.saml == nil {
+		return m.samlRepo.Save(ctx, cfg)
+	}
+	saved, applyErr := m.saml.SaveConfig(ctx, cfg)
+	if !saved {
+		return fmt.Errorf("save migrated SAML configuration: %w", applyErr)
+	}
+	if applyErr != nil {
+		return fmt.Errorf("reload migrated SAML configuration: %w", applyErr)
+	}
+	return nil
 }
 
 type oidcConfigReloader interface {
@@ -107,16 +129,11 @@ func (tx *panelPathSSOMigration) apply(ctx context.Context) error {
 		return nil
 	}
 	if tx.newSAML != nil {
-		if err := tx.owner.samlRepo.Save(ctx, tx.newSAML); err != nil {
-			return fmt.Errorf("save migrated SAML configuration: %w", err)
-		}
-		if tx.owner.saml != nil {
-			if err := tx.owner.saml.Reload(ctx, tx.newSAML); err != nil {
-				if rollbackErr := tx.rollback(ctx); rollbackErr != nil {
-					return fmt.Errorf("reload migrated SAML configuration: %w; SSO rollback failed: %v", err, rollbackErr)
-				}
-				return fmt.Errorf("reload migrated SAML configuration: %w", err)
+		if err := tx.owner.saveAndApplySAML(ctx, tx.newSAML); err != nil {
+			if rollbackErr := tx.rollback(ctx); rollbackErr != nil {
+				return fmt.Errorf("apply migrated SAML configuration: %w; SSO rollback failed: %v", err, rollbackErr)
 			}
+			return fmt.Errorf("apply migrated SAML configuration: %w", err)
 		}
 	}
 	if tx.newOIDC != nil {
@@ -154,13 +171,8 @@ func (tx *panelPathSSOMigration) rollback(ctx context.Context) error {
 		}
 	}
 	if tx.oldSAML != nil {
-		if err := tx.owner.samlRepo.Save(ctx, tx.oldSAML); err != nil && firstErr == nil {
+		if err := tx.owner.saveAndApplySAML(ctx, tx.oldSAML); err != nil && firstErr == nil {
 			firstErr = err
-		}
-		if tx.owner.saml != nil {
-			if err := tx.owner.saml.Reload(ctx, tx.oldSAML); err != nil && firstErr == nil {
-				firstErr = err
-			}
 		}
 	}
 	return firstErr

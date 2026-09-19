@@ -66,6 +66,10 @@ type SAMLService struct {
 	// server-side fact rather than a claim RelayState makes about itself
 	// (ADR 0036 D2). Wired by SetSAMLRequestStore; nil refuses every login.
 	requestStore ports.SAMLRequestRepo
+	// configRepo lets SaveConfig persist and apply under one lock. Optional: a
+	// service built without it can still Reload a configuration the caller
+	// persisted itself, which is what the tests and the boot path do.
+	configRepo ports.SAMLConfigRepo
 }
 
 // samlSnapshot is one generation of SAML runtime state. cfg and sp are published
@@ -233,7 +237,15 @@ func newProvider(cfg *config.SAMLConfig, idpMeta *saml.EntityDescriptor) (*saml.
 // configured AND its provider is built with a usable IdP metadata document.
 func (s *SAMLService) Enabled() bool { return s.snapshot().enabled() }
 
-// Reload applies a new configuration and publishes a new generation.
+// SetConfigRepo installs the configuration repository, which lets SaveConfig
+// persist and apply under one lock.
+func (s *SAMLService) SetConfigRepo(r ports.SAMLConfigRepo) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.configRepo = r
+}
+
+// SaveConfig persists a configuration and applies it as ONE serialized operation.
 //
 // The candidate provider is built BEFORE anything is published, and the publish
 // is a single pointer swap, so a build failure cannot leave the new mapping rules
@@ -243,13 +255,39 @@ func (s *SAMLService) Enabled() bool { return s.snapshot().enabled() }
 // validated against one trust anchor and mapped by another set of rules is not
 // (ADR 0036 D6).
 //
-// A disabled or unusable configuration still replaces the stored one — an admin
-// must always be able to switch SSO off, or to replace broken values, without the
-// new values having to be valid first.
-func (s *SAMLService) Reload(ctx context.Context, cfg *config.SAMLConfig) error {
+// A disabled or unusable configuration still replaces the stored one, and is
+// still persisted: an admin must always be able to switch SSO off, or to replace
+// broken values, without the new values having to be valid first.
+//
+// Two callers that each did Save-then-Reload could interleave: A persists v1, B
+// persists v2, B applies v2, A applies v1 — leaving the database on v2 while the
+// running process serves v1, so the panel would apply older rules than it stores
+// until the next save or restart. Holding applyMu across both steps removes that
+// ordering entirely (ADR 0036 D6).
+//
+// saved and applyErr are separate on purpose: the API contract already
+// distinguishes them, because a configuration that persisted but whose provider
+// cannot be built is exactly the state an admin has to be told about — and it is
+// not a failed save.
+func (s *SAMLService) SaveConfig(ctx context.Context, cfg *config.SAMLConfig) (saved bool, applyErr error) {
 	s.applyMu.Lock()
 	defer s.applyMu.Unlock()
 
+	s.mu.RLock()
+	repo := s.configRepo
+	s.mu.RUnlock()
+	if repo == nil {
+		return false, fmt.Errorf("saml: no configuration repository is wired")
+	}
+	if err := repo.Save(ctx, cfg); err != nil {
+		return false, err
+	}
+	return true, s.applyLocked(ctx, cfg)
+}
+
+// applyLocked builds the candidate provider and publishes it. The caller holds
+// applyMu, which is what makes build-then-publish look atomic to readers.
+func (s *SAMLService) applyLocked(ctx context.Context, cfg *config.SAMLConfig) error {
 	var (
 		sp  *saml.ServiceProvider
 		err error
