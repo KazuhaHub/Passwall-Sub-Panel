@@ -32,3 +32,35 @@ it('excludes retired tasks from select-all and bulk retry calls', async () => {
   await waitFor(() => expect(api.post).toHaveBeenCalledWith('/admin/sync-tasks/8/retry'))
   expect(api.post.mock.calls.every(([url]) => url === '/admin/sync-tasks/8/retry')).toBe(true)
 })
+
+it('keeps the batch selection across a same-scope refresh', async () => {
+  // The loader used to clear the selection on every read, so a plain refresh
+  // dropped a batch an operator was assembling. The selection may only reset
+  // when the QUERY changes (page / filters).
+  installReads({ '/admin/sync-tasks': list([pending]) })
+  // The harness returns the same array instance every call, which React's
+  // state bail-out hides; clone it so a refresh really delivers new objects.
+  const base = api.get.getMockImplementation()!
+  api.get.mockImplementation(async (url: string) => {
+    const res = await base(url)
+    if (url !== '/admin/sync-tasks') return res
+    return { data: { ...res.data, items: res.data.items.map((r: object) => ({ ...r })) } }
+  })
+  mount(<SyncTasksView />)
+
+  const row = (await screen.findByText(pending.summary)).closest('tr')!
+  const box = within(row).getByRole('checkbox') as HTMLInputElement
+  fireEvent.click(box)
+  await waitFor(() => expect(box.checked).toBe(true))
+
+  const before = api.get.mock.calls.length
+  fireEvent.click(screen.getByRole('button', { name: 'admin:sync_tasks.refresh' }))
+  await waitFor(() => expect(api.get.mock.calls.length).toBeGreaterThan(before))
+
+  // Re-query the row: a detached input keeps its `checked` value, so asserting
+  // on the pre-refresh node would pass even if the row were unmounted.
+  const refreshed = (await screen.findByText(pending.summary)).closest('tr')!
+  await waitFor(() =>
+    expect((within(refreshed).getByRole('checkbox') as HTMLInputElement).checked).toBe(true),
+  )
+})

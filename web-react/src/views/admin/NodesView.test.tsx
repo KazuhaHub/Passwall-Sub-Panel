@@ -203,3 +203,12 @@ it('ignores an older read result after closing and reopening the editor', async 
   expect(within(dialog).queryByText('admin:nodes.edit_inbound_dialog.unsupported')).toBeNull()
   expect(api.put).not.toHaveBeenCalled()
 })
+
+it('reports a failed read instead of showing an empty node list', async () => {
+  // The loader had no catch, so a failure raised an unhandled rejection and the
+  // table rendered with no nodes — indistinguishable from a fleet with none.
+  api.get.mockRejectedValue(new Error('offline'))
+  mount(<NodesView />)
+
+  await waitFor(() => expect(screen.getByText('admin:nodes.load_failed')).toBeTruthy())
+})

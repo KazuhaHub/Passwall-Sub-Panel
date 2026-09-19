@@ -1,4 +1,5 @@
 import { client } from './client'
+import type { ReadOptions } from './requestOptions'
 
 export type AlertSeverity = 'error' | 'warning' | 'info'
 export type AlertType =
@@ -39,7 +40,10 @@ export interface AlertsResponse {
 // getAlerts fetches the unified notification feed. Skips the shared error toast
 // — the bell polls quietly in the background and shouldn't pop a toast on a
 // transient blip.
-export async function getAlerts(): Promise<AlertsResponse> {
-  const { data } = await client.get<AlertsResponse>('/admin/alerts', { _skipErrorToast: true })
+export async function getAlerts(opts: ReadOptions = {}): Promise<AlertsResponse> {
+  const { data } = await client.get<AlertsResponse>('/admin/alerts', {
+    _skipErrorToast: true,
+    signal: opts.signal,
+  })
   return data
 }

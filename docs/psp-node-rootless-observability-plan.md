@@ -492,6 +492,15 @@ CounterEpoch 必须在同一进程实例中稳定，Linux 使用 BootID + proc s
 不得每个样本生成随机值。StartedAtMS 由系统 boot time 与 proc starttime 推导，不使用
 文件 mtime。
 
+> **2026-09-18 修订**：上面两句做不到同时成立。AT_CLKTCK 读不到时要求"仍可报告 RSS、FD 和
+> thread，但两项 CPU 字段为 nil"，可是 `StartedAtMS` 是**必填**，而它必须由 boot time 与
+> proc starttime 推导——把 tick 换算成毫秒，靠的正是 CLKTCK。二者只能取一个。
+>
+> 实现取的是**整节 processes 省略**，并在 Unavailable 里加 `process.agent` token，而不是
+> 拿一个猜的 tick 率编一个启动时间。理由与本规格其它地方一致：编出来的启动时间和真实值
+> 长得一模一样，会照样通过校验、被下游当真；而"这一节读不到"是可分辨的。放宽 `StartedAtMS`
+> 为可选是另一条路，但那会让一个必填字段在真实机器上时有时无。
+
 Core 采集必须由 Supervisor 返回受控的子进程 handle 与预期 starttime，collector 打开对应
 proc 文件后再次比对 starttime。不相同时当作 PID reuse，丢弃 Core section；禁止只传一个
 无身份的任意 PID 给 collector。

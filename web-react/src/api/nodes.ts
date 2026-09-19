@@ -265,9 +265,10 @@ export async function reorderNodes(items: NodeReorderItem[]) {
 // listUnmanagedInbounds is scoped to one panel — the caller picks a server
 // and only that panel is queried (one 3X-UI round trip; a dead panel can't
 // stall the others). The backend returns an empty list when panel_id is absent.
-export async function listUnmanagedInbounds(panelId: number) {
+export async function listUnmanagedInbounds(panelId: number, opts: { signal?: AbortSignal } = {}) {
   const { data } = await client.get<ListResponse<UnmanagedInbound>>('/admin/nodes/unmanaged', {
     params: { panel_id: panelId },
+    signal: opts.signal,
   })
   return data
 }

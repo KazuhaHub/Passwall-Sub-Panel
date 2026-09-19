@@ -132,8 +132,8 @@ export async function useEmergencyAccess() {
   return data
 }
 
-export async function getMyProfile() {
-  const { data } = await client.get<MeProfile>('/user/me')
+export async function getMyProfile(opts: { signal?: AbortSignal } = {}) {
+  const { data } = await client.get<MeProfile>('/user/me', { signal: opts.signal })
   return data
 }
 

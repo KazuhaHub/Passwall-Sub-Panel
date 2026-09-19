@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useState, type FormEvent } from 'react'
+import { lazy, Suspense, useMemo, useState, type FormEvent } from 'react'
 import {
   Box,
   Button,
@@ -36,10 +36,13 @@ import { useTranslation } from 'react-i18next'
 import { useCan } from '@/utils/permissions'
 import { allSettledLimited } from '@/utils/promises'
 
-import { deleteRuleSet, inspectProxyGroups, listRuleSets, resetRuleSet, saveRuleSet, SEEDED_RULESET_SLUGS, type RuleSet } from '@/api/rules'
-import { listGroups } from '@/api/groups'
-import type { Group } from '@/api/types'
-import { listTemplates, type Template } from '@/api/templates'
+import { deleteRuleSet, inspectProxyGroups, resetRuleSet, saveRuleSet, SEEDED_RULESET_SLUGS, type RuleSet } from '@/api/rules'
+import { useGroupsList } from '@/query/groups'
+import { ruleKeys } from '@/query/keys'
+import { useRuleSets, useTemplates } from '@/query/rules'
+import { useQueryScope } from '@/query/useQueryScope'
+import { useQueryClient } from '@tanstack/react-query'
+import type { ListResponse } from '@/api/types'
 import { confirm } from '@/components/ConfirmHost'
 import { pushSnack } from '@/components/SnackbarHost'
 import { PagedTableFooter } from '@/components/PagedTableFooter'
@@ -69,11 +72,24 @@ export default function RuleSetsView() {
   const { t } = useTranslation(['admin', 'common'])
   const canConfig = useCan('config.write')
 
-  const [items, setItems] = useState<RuleSet[]>([])
-  const [templates, setTemplates] = useState<Template[]>([])
-  const [groups, setGroups] = useState<Group[]>([])
-  const [loading, setLoading] = useState(false)
+  const qScope = useQueryScope()
+  const queryClient = useQueryClient()
+  const rulesQuery = useRuleSets(qScope)
+  const templatesQuery = useTemplates(qScope)
+  const groupsQuery = useGroupsList(qScope)
+  const items = rulesQuery.data?.items ?? []
+  const templates = templatesQuery.data?.items ?? []
+  const groups = groupsQuery.data?.items ?? []
+  const loading = rulesQuery.isPending
+  const rulesFailed = rulesQuery.isError || templatesQuery.isError || groupsQuery.isError
   const [selected, setSelected] = useState<Set<string>>(new Set())
+
+  /** Patch the cached rule-set list after a write, so the table updates without
+   *  a round-trip. */
+  function mutateRuleItems(updater: (prev: RuleSet[]) => RuleSet[]) {
+    queryClient.setQueryData<ListResponse<RuleSet>>(ruleKeys.list(qScope, {}), prev =>
+      prev ? { ...prev, items: updater(prev.items) } : prev)
+  }
   const [batchBusy, setBatchBusy] = useState<'enable' | 'disable' | 'delete' | ''>('')
 
   const [dialogOpen, setDialogOpen] = useState(false)
@@ -108,14 +124,11 @@ export default function RuleSetsView() {
   const allChecked = pagedItems.length > 0 && pagedItems.every(i => selected.has(i.slug))
   const someChecked = selected.size > 0 && !allChecked
 
-  useEffect(() => { void load() }, [])
-
-  async function load() {
-    setLoading(true)
-    try {
-      const [rules, tpls, grps] = await Promise.all([listRuleSets(), listTemplates(), listGroups()])
-      setItems(rules.items); setTemplates(tpls.items); setGroups(grps.items); setSelected(new Set())
-    } finally { setLoading(false) }
+  // Reload after a write. Clearing the selection is deliberate (the rows it
+  // referred to may be gone), and the mount-time call is a no-op.
+  function load() {
+    setSelected(new Set())
+    return Promise.all([rulesQuery.refetch(), templatesQuery.refetch(), groupsQuery.refetch()])
   }
 
   function toggleAll(checked: boolean) {
@@ -211,7 +224,7 @@ export default function RuleSetsView() {
       }
       const saved = await saveRuleSet(draft)
       if (editing) {
-        setItems(prev => prev.map(item => item.slug === saved.slug ? saved : item))
+        mutateRuleItems(prev => prev.map(item => item.slug === saved.slug ? saved : item))
       }
       pushSnack(t('admin:rules.toast.saved'), 'success')
       setDialogOpen(false)
@@ -278,7 +291,7 @@ export default function RuleSetsView() {
       const results = await allSettledLimited(rows, r => deleteRuleSet(r.slug))
       const okSlugs = rows.filter((_, i) => results[i].status === 'fulfilled').map(r => r.slug)
       const failed = rows.length - okSlugs.length
-      setItems(prev => prev.filter(x => !okSlugs.includes(x.slug)))
+      mutateRuleItems(prev => prev.filter(x => !okSlugs.includes(x.slug)))
       setSelected(new Set())
       if (failed > 0) pushSnack(t('admin:rules.toast.batch_partial', { ok: okSlugs.length, fail: failed }), 'warning')
       else pushSnack(t('admin:rules.toast.batch_deleted', { count: okSlugs.length }), 'success')
@@ -295,6 +308,22 @@ export default function RuleSetsView() {
       borderRadius: 1, fontSize: 12, fontWeight: 500,
       bgcolor: bg, color: fg, whiteSpace: 'nowrap',
     }}>{label}</Box>
+  }
+
+  // The loader had no catch on three parallel reads, so a failure raised an
+  // unhandled rejection and rendered an empty table — indistinguishable from
+  // "no rule sets are configured".
+  if (rulesFailed) {
+    return (
+      <Box sx={{ p: 3, display: 'grid', placeItems: 'center', gap: 2, minHeight: 400 }}>
+        <Typography sx={{ color: md.onSurfaceVariant }}>
+          {t('admin:rules.load_failed', { defaultValue: '暂时无法加载规则集' })}
+        </Typography>
+        <Button variant="outlined" onClick={() => void load()}>
+          {t('admin:rules.retry', { defaultValue: '重试' })}
+        </Button>
+      </Box>
+    )
   }
 
   return (

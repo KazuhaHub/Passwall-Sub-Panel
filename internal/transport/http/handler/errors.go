@@ -71,6 +71,11 @@ func respondErrorDetail(c *gin.Context, err error, leakDetail bool) {
 		c.JSON(http.StatusConflict, gin.H{"error": "Conflict"})
 	case errors.Is(err, domain.ErrResourceExhausted):
 		c.JSON(http.StatusTooManyRequests, gin.H{"error": "Resource exhausted"})
+	case errors.Is(err, domain.ErrUnavailable):
+		// A dependency could not answer, which is not the same as "nothing".
+		// Handlers that need a machine-readable code (the sync-status read
+		// writes sync_status_unavailable) add it themselves.
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Service unavailable, try again"})
 	case errors.Is(err, domain.ErrAlreadyExists):
 		c.JSON(http.StatusConflict, gin.H{"error": "Already exists"})
 	case errors.Is(err, domain.ErrSSONoAccount):

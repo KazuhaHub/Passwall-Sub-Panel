@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
 import {
   Autocomplete,
   Box,
@@ -23,21 +23,12 @@ import {
 } from '@mui/material'
 import { useTranslation } from 'react-i18next'
 
-import { listUsers } from '@/api/users'
-import { listNodes } from '@/api/nodes'
-import {
-  nodeTrafficHistory,
-  pollTrafficNow,
-  topNodes,
-  topTraffic,
-  trafficHistory,
-  userTrafficHistory,
-  type NodeTrafficRow,
-  type TrafficHistoryPeriod,
-  type TrafficHistoryResponse,
-  type TrafficRow,
-} from '@/api/traffic'
+import { pollTrafficNow, type TrafficHistoryParams, type TrafficHistoryPeriod } from '@/api/traffic'
 import type { Node, User } from '@/api/types'
+import { useNodesList } from '@/query/nodes'
+import { type HistoryTarget, useHistoryTarget, useTopNodes, useTopTraffic } from '@/query/traffic'
+import { useUsersList } from '@/query/users'
+import { useQueryScope } from '@/query/useQueryScope'
 import { UserServerUsage } from './UserServerUsage'
 import { getUISettings } from '@/api/settings'
 import PageHeader from '@/components/PageHeader'
@@ -110,13 +101,6 @@ export default function TrafficView() {
 
   const [tab, setTab] = useTabParam<'trend' | 'rank'>('tab', 'trend', ['trend', 'rank'])
   const [scope, setScope] = useTabParam<'user' | 'node'>('scope', 'user', ['user', 'node'])
-  const [items, setItems] = useState<TrafficRow[]>([])
-  const [nodeItems, setNodeItems] = useState<NodeTrafficRow[]>([])
-  const [users, setUsers] = useState<User[]>([])
-  const [nodes, setNodes] = useState<Node[]>([])
-  const [history, setHistory] = useState<TrafficHistoryResponse | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [chartLoading, setChartLoading] = useState(false)
   const [pollLoading, setPollLoading] = useState(false)
 
   const [limit, setLimit] = useState(20)
@@ -194,77 +178,52 @@ export default function TrafficView() {
     setTzInput(realign)
   }, [panelTz])
 
+  const scopeQ = useQueryScope()
+
+  // Rank leaderboard. One entry per (scope, limit); the component reads
+  // whichever one the current scope points at.
+  const userRankQuery = useTopTraffic(scopeQ, limit)
+  const nodeRankQuery = useTopNodes(scopeQ, limit)
+  const activeRank = scope === 'node' ? nodeRankQuery : userRankQuery
+  const items = scope === 'user' ? (userRankQuery.data ?? []) : []
+  const nodeItems = scope === 'node' ? (nodeRankQuery.data ?? []) : []
+  const loading = activeRank.isPending
+
+  // Pickers. Slow-moving dictionaries: loaded once and invalidated on write,
+  // never re-read on a filter change.
+  const usersQuery = useUsersList(scopeQ, { page: 1, page_size: 200 })
+  const nodesQuery = useNodesList(scopeQ, { page: 1, page_size: 500 })
+  const users = usersQuery.data?.items ?? []
+  const nodes = nodesQuery.data?.items ?? []
+
+  // Which series the chart draws. Modelled explicitly so the panel-wide,
+  // per-user and per-node answers can never share a cache entry.
+  const historyTarget = useMemo<HistoryTarget>(
+    () => (scope === 'node'
+      ? { kind: 'node', nodeId: selectedNodeId }
+      : (selectedUserId > 0 ? { kind: 'user', userId: selectedUserId } : { kind: 'panel' })),
+    [scope, selectedNodeId, selectedUserId],
+  )
+  const historyParams = useMemo<TrafficHistoryParams>(() => ({
+    period,
+    since: dateString(daysAgo(rangeDays - 1)),
+    until: dateString(new Date()),
+    tz: selectedTz || undefined,
+  }), [period, rangeDays, selectedTz])
+
+  const historyQuery = useHistoryTarget(scopeQ, historyTarget, historyParams)
+  const history = historyQuery.data
   const historyItems = history?.items ?? []
+  const chartLoading = historyQuery.isPending
+
   const summary = useMemo(() => {
     let total = 0, up = 0, down = 0
     for (const it of historyItems) { total += it.total_bytes; up += it.up_bytes; down += it.down_bytes }
     return { total, up, down }
   }, [historyItems])
 
-  useEffect(() => {
-    void Promise.all([loadRank(), loadUsers(), loadNodes(), loadHistory()])
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-
-  useEffect(() => { void loadRank()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [limit, scope])
-
-  useEffect(() => { void loadHistory()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scope, selectedUserId, selectedNodeId, period, rangeDays, selectedTz])
-
-  // Last-wins guards: rapid scope/filter/range changes fire overlapping
-  // requests; without a sequence check a slow earlier response can land after
-  // a newer one and paint stale data under the current selection.
-  const rankSeq = useRef(0)
-  const historySeq = useRef(0)
-
-  async function loadRank() {
-    const seq = ++rankSeq.current
-    setLoading(true)
-    try {
-      if (scope === 'node') {
-        const res = await topNodes(limit)
-        if (seq === rankSeq.current) setNodeItems(res)
-      } else {
-        const res = await topTraffic(limit)
-        if (seq === rankSeq.current) setItems(res)
-      }
-    } finally { if (seq === rankSeq.current) setLoading(false) }
-  }
-
-  async function loadUsers() {
-    const res = await listUsers({ page: 1, page_size: 200 })
-    setUsers(res.items)
-  }
-
-  async function loadNodes() {
-    try {
-      const res = await listNodes({ page: 1, page_size: 500 })
-      setNodes(res.items)
-    } catch { /* toasted by client */ }
-  }
-
-  async function loadHistory() {
-    const seq = ++historySeq.current
-    setChartLoading(true)
-    try {
-      const params = {
-        period, since: dateString(daysAgo(rangeDays - 1)), until: dateString(new Date()),
-        tz: selectedTz || undefined,
-      }
-      let res: TrafficHistoryResponse
-      if (scope === 'node') {
-        res = await nodeTrafficHistory(selectedNodeId > 0 ? { ...params, node_id: selectedNodeId } : params)
-      } else {
-        res = selectedUserId > 0
-          ? await userTrafficHistory(selectedUserId, params)
-          : await trafficHistory(params)
-      }
-      if (seq === historySeq.current) setHistory(res)
-    } finally { if (seq === historySeq.current) setChartLoading(false) }
-  }
+  function loadRank() { return activeRank.refetch() }
+  function loadHistory() { return historyQuery.refetch() }
 
   async function pollNow() {
     setPollLoading(true)
@@ -281,6 +240,22 @@ export default function TrafficView() {
 
   function nodeLabel(n: Node) {
     return `${n.display_name} · ${n.region}`
+  }
+
+  // The four loads used to run in one Promise.all with no catch, so a failed
+  // read raised an unhandled rejection and left the page showing zero traffic —
+  // indistinguishable from a fleet that genuinely moved no data.
+  if (activeRank.isError || historyQuery.isError) {
+    return (
+      <Box sx={{ p: 3, display: 'grid', placeItems: 'center', gap: 2, minHeight: 400 }}>
+        <Typography sx={{ color: md.onSurfaceVariant }}>
+          {t('traffic.load_failed', { defaultValue: '暂时无法加载流量数据' })}
+        </Typography>
+        <Button variant="outlined" onClick={() => { void loadRank(); void loadHistory() }}>
+          {t('traffic.retry', { defaultValue: '重试' })}
+        </Button>
+      </Box>
+    )
   }
 
   return (

@@ -30,7 +30,7 @@ export interface DashboardSummary {
   node_alerts: DashboardNodeAlert[]
 }
 
-export async function dashboardSummary(): Promise<DashboardSummary> {
-  const { data } = await client.get<DashboardSummary>('/admin/dashboard/summary')
+export async function dashboardSummary(opts: { signal?: AbortSignal } = {}): Promise<DashboardSummary> {
+  const { data } = await client.get<DashboardSummary>('/admin/dashboard/summary', { signal: opts.signal })
   return data
 }

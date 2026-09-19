@@ -115,3 +115,12 @@ it('still blocks saving when a surviving group has an error after cleanup', asyn
   expect(api.put).not.toHaveBeenCalled()
   expect(within(dialog).getByRole('tab', { name: 'admin:rules.tabs.members' }).getAttribute('aria-selected')).toBe('true')
 })
+
+it('reports a failed read instead of showing an empty rule-set list', async () => {
+  // The loader had no catch, so a failure raised an unhandled rejection and the
+  // table rendered with no rule sets — indistinguishable from "none exist".
+  api.get.mockRejectedValue(new Error('offline'))
+  mount(<RuleSetsView />)
+
+  await waitFor(() => expect(screen.getByText('admin:rules.load_failed')).toBeTruthy())
+})

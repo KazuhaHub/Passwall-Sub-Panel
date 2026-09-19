@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import {
   Autocomplete,
   Box,
@@ -50,10 +50,7 @@ import {
   deleteDNSCred,
   downloadCert,
   getCertDetail,
-  listACMEAccounts,
   listACMEKeyTypes,
-  listCerts,
-  listDNSCreds,
   listDNSProviders,
   renewCert,
   updateACMEAccount,
@@ -67,6 +64,10 @@ import {
   type DNSProviderInfo,
 } from '@/api/certs'
 import { getUISettings, putUISettings, type UISettings } from '@/api/settings'
+import { useACMEAccounts, useCerts, useDNSCreds } from '@/query/certs'
+import { certKeys } from '@/query/keys'
+import { useQueryScope } from '@/query/useQueryScope'
+import { useQueryClient } from '@tanstack/react-query'
 import PageHeader from '@/components/PageHeader'
 import { PagedTableFooter } from '@/components/PagedTableFooter'
 import { confirm } from '@/components/ConfirmHost'
@@ -152,37 +153,35 @@ export default function CertificatesView() {
   const panelTz = useSiteStore(s => s.timezone)
 
   const [tab, setTab] = useState(0)
-  const [certs, setCerts] = useState<Cert[]>([])
-  const [creds, setCreds] = useState<DNSCredential[]>([])
-  const [accounts, setAccounts] = useState<ACMEAccount[]>([])
   const [keyTypes, setKeyTypes] = useState<string[]>([])
   const [providers, setProviders] = useState<DNSProviderInfo[]>([])
-  const [loading, setLoading] = useState(true)
+
+  const qScope = useQueryScope()
+  const queryClient = useQueryClient()
+  const certsQuery = useCerts(qScope)
+  const credsQuery = useDNSCreds(qScope)
+  const accountsQuery = useACMEAccounts(qScope)
+  const certs = certsQuery.data ?? []
+  const creds = credsQuery.data ?? []
+  const accounts = accountsQuery.data ?? []
+  const loading = certsQuery.isPending || credsQuery.isPending || accountsQuery.isPending
+  const certsFailed = certsQuery.isError || credsQuery.isError || accountsQuery.isError
+
+  function reload() {
+    return Promise.all([certsQuery.refetch(), credsQuery.refetch(), accountsQuery.refetch()])
+  }
   const [certPage, setCertPage] = useState(1)
   const [certPageSize, setCertPageSize] = useState(25)
   const [credPage, setCredPage] = useState(1)
   const [credPageSize, setCredPageSize] = useState(25)
 
-  const reload = useCallback(async () => {
-    setLoading(true)
-    try {
-      const [c, d, a] = await Promise.all([listCerts(), listDNSCreds(), listACMEAccounts()])
-      setCerts(c)
-      setCreds(d)
-      setAccounts(a)
-    } catch {
-      /* the axios interceptor surfaces the error toast */
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
   useEffect(() => {
-    reload()
+    // Dictionaries with sensible defaults: a failure here leaves the field empty
+    // rather than blanking a page whose primary data loaded fine.
     listDNSProviders().then(setProviders).catch(() => {})
     listACMEKeyTypes().then(setKeyTypes).catch(() => {})
     getUISettings().then(setSettings).catch(() => {})
-  }, [reload])
+  }, [])
 
   // ---- certificate dialog ----
   const [certOpen, setCertOpen] = useState(false)
@@ -233,7 +232,8 @@ export default function CertificatesView() {
       }
       if (certEditing) {
         const saved = await updateCert(certEditing.id, req)
-        setCerts(prev => prev.map(cert => cert.id === saved.id ? saved : cert))
+        queryClient.setQueryData<Cert[]>(certKeys.list(qScope), prev =>
+          prev ? prev.map(cert => cert.id === saved.id ? saved : cert) : prev)
         pushSnack(t('common:saved', { defaultValue: '已保存' }), 'success')
       } else {
         await createCert(req)
@@ -287,7 +287,8 @@ export default function CertificatesView() {
       }
       if (acctEditing) {
         const saved = await updateACMEAccount(acctEditing.id, req)
-        setAccounts(prev => prev.map(account => account.id === saved.id ? saved : account))
+        queryClient.setQueryData<ACMEAccount[]>(certKeys.accounts(qScope), prev =>
+          prev ? prev.map(account => account.id === saved.id ? saved : account) : prev)
       } else {
         await createACMEAccount(req)
       }
@@ -501,7 +502,8 @@ export default function CertificatesView() {
     try {
       if (credEditing) {
         const saved = await updateDNSCred(credEditing.id, { name: credName.trim(), provider: credProvider.trim(), credentials })
-        setCreds(prev => prev.map(credential => credential.id === saved.id ? saved : credential))
+        queryClient.setQueryData<DNSCredential[]>(certKeys.creds(qScope), prev =>
+          prev ? prev.map(credential => credential.id === saved.id ? saved : credential) : prev)
       } else {
         await createDNSCred({ name: credName.trim(), provider: credProvider.trim(), credentials })
       }
@@ -548,6 +550,21 @@ export default function CertificatesView() {
     } finally {
       setAcmeBusy(false)
     }
+  }
+
+  // The loader swallowed the error and relied on a toast, which disappears —
+  // leaving tables that read as "this panel has no certificates at all".
+  if (certsFailed) {
+    return (
+      <Box sx={{ p: 3, display: 'grid', placeItems: 'center', gap: 2, minHeight: 400 }}>
+        <Typography sx={{ color: md.onSurfaceVariant }}>
+          {t('admin:certs.load_failed', { defaultValue: '暂时无法加载证书数据' })}
+        </Typography>
+        <Button variant="outlined" onClick={() => void reload()}>
+          {t('admin:certs.retry', { defaultValue: '重试' })}
+        </Button>
+      </Box>
+    )
   }
 
   return (

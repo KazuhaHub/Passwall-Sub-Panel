@@ -41,6 +41,7 @@ import MoreVertIcon from '@mui/icons-material/MoreVert'
 import LaunchIcon from '@mui/icons-material/Launch'
 import DownloadIcon from '@mui/icons-material/Download'
 import StarIcon from '@mui/icons-material/Star'
+import DevicesOtherOutlinedIcon from '@mui/icons-material/DevicesOtherOutlined'
 import HelpOutlineIcon from '@mui/icons-material/HelpOutlined'
 import VisibilityIcon from '@mui/icons-material/Visibility'
 import VisibilityOffIcon from '@mui/icons-material/VisibilityOff'
@@ -49,7 +50,6 @@ import { useTranslation } from 'react-i18next'
 
 import {
   changeMyPassword,
-  getMyProfile,
   getMyRules,
   getMyServerStatus,
   resetMyCredentials,
@@ -60,12 +60,15 @@ import {
   type QuickLink,
 } from '@/api/me'
 import { useTabParam } from '@/hooks/useTabParam'
+import { useQueryClient } from '@tanstack/react-query'
+import { meKeys } from '@/query/keys'
+import { useMyProfile, useMyUsage } from '@/query/me'
+import { useQueryScope } from '@/query/useQueryScope'
 import { QuickLinkIcon } from '@/components/QuickLinkIcon'
 import type { M3Tokens } from '@/theme'
 import { useSiteStore } from '@/stores/site'
 import {
   getMyTrafficHistory,
-  getMyUsage,
   type TrafficHistoryItem,
   type TrafficHistoryPeriod,
   type UsageReport,
@@ -266,9 +269,13 @@ export default function MeView() {
   const { t } = useTranslation('user')
 
   const [tab, setTab] = useTabParam<'overview' | 'traffic' | 'clients' | 'status'>('tab', 'overview', ['overview', 'traffic', 'clients', 'status'])
-  const [profile, setProfile] = useState<MeProfile | null>(null)
-  const [usage, setUsage] = useState<UsageReport | null>(null)
-  const [loading, setLoading] = useState(true)
+  const scope = useQueryScope()
+  const queryClient = useQueryClient()
+  const profileQuery = useMyProfile(scope)
+  const usageQuery = useMyUsage(scope)
+  const profile = profileQuery.data
+  const usage = usageQuery.data ?? null
+  const loading = profileQuery.isPending
   // Announcement popup: starts hidden, opens after the profile loads
   // unless the visitor has previously chosen "don't remind again" for
   // this exact announcement version.
@@ -332,7 +339,6 @@ export default function MeView() {
   const [subUrlRevealed, setSubUrlRevealed] = useState(false)
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'))
 
-  useEffect(() => { void load() }, [])
   useEffect(() => { void loadTrend()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [trendPeriod, trendDays])
@@ -404,7 +410,7 @@ export default function MeView() {
       // counts, so update the badge immediately. A subsequent load() refetches
       // the full profile (and would over-write this) — without the optimistic
       // step the user sees the old "remaining" until the GET completes.
-      setProfile(prev => prev ? {
+      queryClient.setQueryData<MeProfile>(meKeys.profile(scope), prev => prev ? {
         ...prev,
         expire_at: res.extended_until ?? res.until ?? prev.expire_at,
         emergency_access: prev.emergency_access ? {
@@ -425,17 +431,15 @@ export default function MeView() {
   }
 
   async function load() {
-    setLoading(true)
-    try {
-      const [p, u] = await Promise.all([
-        getMyProfile(),
-        getMyUsage().catch(() => null),
-      ])
-      setProfile(p); setUsage(u)
-      // Always re-mask on reload — e.g., after "重置凭证" the URL changed and
-      // leaving the old reveal flag on would briefly display the new URL.
-      setSubUrlRevealed(false)
-    } finally { setLoading(false) }
+    // Re-mask before the read, not after: after "重置凭证" the URL has changed,
+    // and leaving the reveal flag on would display the new one.
+    setSubUrlRevealed(false)
+    // Usage is auxiliary — the profile read is the one the page cannot render
+    // without, so it alone decides whether we are in an error state.
+    await Promise.all([
+      profileQuery.refetch(),
+      usageQuery.refetch(),
+    ])
   }
 
   async function copy(text: string) {
@@ -499,10 +503,24 @@ export default function MeView() {
   // and PasskeyDialog loses the one-time recovery codes it was just handed
   // between the server returning them and the user seeing them. The server
   // returns them exactly once, so losing them there is losing them for good.
-  if (loading && !profile) {
+  if (loading) {
     return <Box sx={{ p: 3, display: 'grid', placeItems: 'center', minHeight: 400 }}><CircularProgress /></Box>
   }
-  if (!profile) return null
+  // The whole page hangs off the profile, and the loader used to have no catch:
+  // a failed read therefore produced a completely blank screen — no spinner, no
+  // message, and nothing to retry.
+  if (!profile) {
+    return (
+      <Box sx={{ p: 3, display: 'grid', placeItems: 'center', gap: 2, minHeight: 400 }}>
+        <Typography sx={{ color: md.onSurfaceVariant }}>
+          {t('load_failed', { defaultValue: '暂时无法加载，请稍后重试' })}
+        </Typography>
+        <Button variant="outlined" onClick={() => void load()}>
+          {t('retry', { defaultValue: '重试' })}
+        </Button>
+      </Box>
+    )
+  }
 
   const announcement = profile.global_announcement
   // Popup mode is gated by both an admin opt-in (announcement.popup) and
@@ -638,6 +656,76 @@ export default function MeView() {
       return
     }
     window.location.href = url
+  }
+
+  function renderRecommendedClient(showMoreClients: boolean) {
+    const platform = detectPlatform()
+    const client = platform
+      ? importClients.find(c => c.recommended_for?.includes(platform))
+      : undefined
+    if (!client) return null
+    const tutorialURL = profile?.sub_import_tutorial_url
+
+    return (
+      <Card sx={{ p: { xs: 2.5, sm: 3 }, mb: { xs: 2, sm: 3 }, bgcolor: md.primaryContainer, color: md.onPrimaryContainer }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+          <StarIcon sx={{ fontSize: 18 }} />
+          <Typography sx={{ fontSize: 12, fontWeight: 500, textTransform: 'uppercase', letterSpacing: '.5px' }}>
+            {t('import.recommended_label', { defaultValue: '推荐客户端' })}
+          </Typography>
+        </Box>
+        <Typography sx={{ fontWeight: 500, mb: 0.5, fontSize: { xs: 20, sm: 24 }, lineHeight: 1.2 }}>
+          {client.name}
+        </Typography>
+        <Typography variant="body2" sx={{ mb: 2, opacity: 0.85 }}>
+          {client.platforms.map(p => t(`import.platform_${p}`, { defaultValue: p })).join(' · ')}
+        </Typography>
+        <Box sx={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 1, flexWrap: 'wrap' }}>
+          {/* On mobile pack the three client actions into a 2-col grid
+              instead of stacking each full-width. */}
+          <Box sx={{
+            display: { xs: 'grid', sm: 'flex' },
+            gridTemplateColumns: { xs: '1fr 1fr', sm: 'none' },
+            gap: { xs: 1, sm: 1.5 },
+            flexWrap: 'wrap',
+            flex: { xs: '1 1 100%', sm: '0 1 auto' },
+          }}>
+            <Button size={isMobile ? 'medium' : 'large'} variant="contained"
+              startIcon={<LaunchIcon />}
+              onClick={() => { void triggerImport(buildImportURL(client)) }}
+              sx={{ bgcolor: md.primary, color: md.onPrimary, '&:hover': { bgcolor: md.primary } }}>
+              {t('import.import')}
+            </Button>
+            <Button size={isMobile ? 'medium' : 'large'} variant="outlined"
+              startIcon={<DownloadIcon />}
+              onClick={() => window.open(client.install_url, '_blank', 'noopener,noreferrer')}
+              sx={{ borderColor: md.onPrimaryContainer, color: md.onPrimaryContainer,
+                '&:hover': { borderColor: md.onPrimaryContainer, bgcolor: 'rgba(0,0,0,.06)' } }}>
+              {t('import.install')}
+            </Button>
+            {tutorialURL && (
+              <Button size={isMobile ? 'medium' : 'large'} variant="outlined"
+                startIcon={<HelpOutlineIcon />}
+                onClick={() => window.open(tutorialURL, '_blank', 'noopener,noreferrer')}
+                sx={{
+                  borderColor: md.onPrimaryContainer, color: md.onPrimaryContainer,
+                  gridColumn: { xs: '1 / -1', sm: 'auto' },
+                  '&:hover': { borderColor: md.onPrimaryContainer, bgcolor: 'rgba(0,0,0,.06)' },
+                }}>
+                {t('import.tutorial')}
+              </Button>
+            )}
+          </Box>
+          {showMoreClients && (
+            <Button size="small" variant="text" startIcon={<DevicesOtherOutlinedIcon fontSize="small" />}
+              onClick={() => setTab('clients')}
+              sx={{ ml: 'auto', color: md.onPrimaryContainer }}>
+              {t('import.others_title', { defaultValue: '更多客户端' })}
+            </Button>
+          )}
+        </Box>
+      </Card>
+    )
   }
 
   // Quick links are admin-configured web URLs. Require http(s) so a hostile
@@ -795,70 +883,10 @@ export default function MeView() {
         <Tab value="status" label={t('tabs.server_status', { defaultValue: '服务器状态' })} sx={{ minHeight: 40 }} />
       </Tabs>
       {tab === 'status' && <ServerStatusPanel md={md} />}
-      {tab === 'overview' && (<>
-      {/* HERO — pick the client whose recommended_for covers the visitor's
-          detected platform. Falls back to nothing if no client is configured
-          for this OS (or detection fails entirely). */}
-      {(() => {
-        const platform = detectPlatform()
-        const hero = platform
-          ? importClients.find(c => c.recommended_for?.includes(platform))
-          : undefined
-        if (!hero) return null
-        return (
-          <Card sx={{ p: { xs: 2.5, sm: 3 }, mb: { xs: 2, sm: 3 }, bgcolor: md.primaryContainer, color: md.onPrimaryContainer }}>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
-              <StarIcon sx={{ fontSize: 18 }} />
-              <Typography sx={{ fontSize: 12, fontWeight: 500, textTransform: 'uppercase', letterSpacing: '.5px' }}>
-                {t('import.recommended_label', { defaultValue: '推荐客户端' })}
-              </Typography>
-            </Box>
-            <Typography sx={{ fontWeight: 500, mb: 0.5, fontSize: { xs: 20, sm: 24 }, lineHeight: 1.2 }}>
-              {hero.name}
-            </Typography>
-            <Typography variant="body2" sx={{ mb: 2, opacity: 0.85 }}>
-              {hero.platforms.map(p => t(`import.platform_${p}`, { defaultValue: p })).join(' · ')}
-            </Typography>
-            {/* On mobile pack the three buttons into a 2-col grid (导入 +
-                安装 on row 1, 查看教程 spans row 2) instead of stacking each
-                full-width — saves ~2 vertical button-heights. Desktop keeps
-                the inline row with comfortable large buttons. */}
-            <Box sx={{
-              display: { xs: 'grid', sm: 'flex' },
-              gridTemplateColumns: { xs: '1fr 1fr', sm: 'none' },
-              gap: { xs: 1, sm: 1.5 },
-              flexWrap: 'wrap',
-            }}>
-              <Button size={isMobile ? 'medium' : 'large'} variant="contained"
-                startIcon={<LaunchIcon />}
-                onClick={() => { void triggerImport(buildImportURL(hero)) }}
-                sx={{ bgcolor: md.primary, color: md.onPrimary, '&:hover': { bgcolor: md.primary } }}>
-                {t('import.import')}
-              </Button>
-              <Button size={isMobile ? 'medium' : 'large'} variant="outlined"
-                startIcon={<DownloadIcon />}
-                onClick={() => window.open(hero.install_url, '_blank', 'noopener,noreferrer')}
-                sx={{ borderColor: md.onPrimaryContainer, color: md.onPrimaryContainer,
-                  '&:hover': { borderColor: md.onPrimaryContainer, bgcolor: 'rgba(0,0,0,.06)' } }}>
-                {t('import.install')}
-              </Button>
-              {profile.sub_import_tutorial_url && (
-                <Button size={isMobile ? 'medium' : 'large'} variant="outlined"
-                  startIcon={<HelpOutlineIcon />}
-                  onClick={() => window.open(profile.sub_import_tutorial_url, '_blank', 'noopener,noreferrer')}
-                  sx={{
-                    borderColor: md.onPrimaryContainer, color: md.onPrimaryContainer,
-                    gridColumn: { xs: '1 / -1', sm: 'auto' },
-                    '&:hover': { borderColor: md.onPrimaryContainer, bgcolor: 'rgba(0,0,0,.06)' },
-                  }}>
-                  {t('import.tutorial')}
-                </Button>
-              )}
-            </Box>
-          </Card>
-        )
-      })()}
-      </>)}
+      {/* Pick the client recommended for the visitor's platform. The same card
+          leads both the overview and client tabs; only the overview adds the
+          small shortcut that switches to the complete client list. */}
+      {(tab === 'overview' || tab === 'clients') && renderRecommendedClient(tab === 'overview')}
       {/* Two-column layout below the hero. Each column is an independent
           flex stack so a tall card on one side doesn't open a gap on the
           other (grid-template-rows would force row alignment by max

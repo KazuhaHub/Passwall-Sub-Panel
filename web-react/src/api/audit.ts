@@ -22,8 +22,11 @@ export interface AuditFilter {
   until?: string
 }
 
-export async function listAudit(params: AuditFilter = {}) {
-  const { data } = await client.get<{ items: AuditEntry[]; total: number }>('/admin/audit', { params })
+export async function listAudit(params: AuditFilter = {}, opts: { signal?: AbortSignal } = {}) {
+  const { data } = await client.get<{ items: AuditEntry[]; total: number }>('/admin/audit', {
+    params,
+    signal: opts.signal,
+  })
   return data
 }
 

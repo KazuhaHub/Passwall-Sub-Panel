@@ -62,8 +62,8 @@ export interface DNSCredentialRequest {
   credentials: Record<string, string>
 }
 
-export async function listCerts(): Promise<Cert[]> {
-  const { data } = await client.get<{ certs: Cert[] }>('/admin/certs')
+export async function listCerts(opts: { signal?: AbortSignal } = {}): Promise<Cert[]> {
+  const { data } = await client.get<{ certs: Cert[] }>('/admin/certs', { signal: opts.signal })
   return data.certs
 }
 
@@ -136,15 +136,20 @@ export interface CertEvent {
   created_at: string
 }
 
-export async function listCertEvents(page: number, pageSize: number): Promise<{ events: CertEvent[]; total: number }> {
+export async function listCertEvents(
+  page: number,
+  pageSize: number,
+  opts: { signal?: AbortSignal } = {},
+): Promise<{ events: CertEvent[]; total: number }> {
   const { data } = await client.get<{ events: CertEvent[]; total: number }>('/admin/cert-events', {
     params: { page, page_size: pageSize },
+    signal: opts.signal,
   })
   return data
 }
 
-export async function listDNSCreds(): Promise<DNSCredential[]> {
-  const { data } = await client.get<{ credentials: DNSCredential[] }>('/admin/dns-credentials')
+export async function listDNSCreds(opts: { signal?: AbortSignal } = {}): Promise<DNSCredential[]> {
+  const { data } = await client.get<{ credentials: DNSCredential[] }>('/admin/dns-credentials', { signal: opts.signal })
   return data.credentials
 }
 
@@ -190,8 +195,8 @@ export async function listDNSProviders(): Promise<DNSProviderInfo[]> {
 
 // ---- ACME accounts (multi-account: a cert issues under a chosen CA account) ----
 
-export async function listACMEAccounts(): Promise<ACMEAccount[]> {
-  const { data } = await client.get<{ accounts: ACMEAccount[] }>('/admin/acme-accounts')
+export async function listACMEAccounts(opts: { signal?: AbortSignal } = {}): Promise<ACMEAccount[]> {
+  const { data } = await client.get<{ accounts: ACMEAccount[] }>('/admin/acme-accounts', { signal: opts.signal })
   return data.accounts
 }
 

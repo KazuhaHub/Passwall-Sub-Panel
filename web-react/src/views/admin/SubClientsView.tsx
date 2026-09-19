@@ -21,7 +21,9 @@ import SaveIcon from '@mui/icons-material/Save'
 import HelpOutlineIcon from '@mui/icons-material/HelpOutlined'
 import { useTranslation } from 'react-i18next'
 
-import { getUISettings, putUISettings, type UISettings } from '@/api/settings'
+import { putUISettings, type UISettings } from '@/api/settings'
+import { useUISettings } from '@/query/settings'
+import { useQueryScope } from '@/query/useQueryScope'
 import PageHeader from '@/components/PageHeader'
 import { pushSnack } from '@/components/SnackbarHost'
 import ClientRegistryEditor, { normalizeRegistry } from './subclients/clientRegistry'
@@ -30,11 +32,17 @@ export default function SubClientsView() {
   const theme = useTheme()
   const md = theme.palette.md
   const { t } = useTranslation(['admin', 'nav'])
+  const scope = useQueryScope()
+  const settingsQuery = useUISettings(scope)
+  // The DRAFT. Seeded once from the first successful read; a background
+  // revalidation must never overwrite edits the admin has not saved yet.
   const [settings, setSettings] = useState<UISettings | null>(null)
-  const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
 
-  useEffect(() => { void load() }, [])
+  useEffect(() => {
+    if (settings !== null || !settingsQuery.data) return
+    setSettings(normalize(settingsQuery.data))
+  }, [settingsQuery.data, settings])
 
   function normalize(s: UISettings): UISettings {
     return {
@@ -44,11 +52,10 @@ export default function SubClientsView() {
     }
   }
 
-  async function load() {
-    setLoading(true)
-    try {
-      setSettings(normalize(await getUISettings()))
-    } finally { setLoading(false) }
+  // "Cancel" discards the draft and re-reads; it does not touch the cache.
+  function load() {
+    if (settingsQuery.data) setSettings(normalize(settingsQuery.data))
+    void settingsQuery.refetch()
   }
 
   async function save(e?: FormEvent) {
@@ -68,7 +75,23 @@ export default function SubClientsView() {
     setSettings(prev => prev ? { ...prev, [key]: value } : prev)
   }
 
-  if (loading || !settings) {
+  // The loader had no catch: `loading` went false but `settings` stayed null,
+  // and the render guard is `loading || !settings` — so a failed read left the
+  // page on a spinner that could never resolve.
+  if (settingsQuery.isError) {
+    return (
+      <Box sx={{ p: 3, display: 'grid', placeItems: 'center', gap: 2, minHeight: 400 }}>
+        <Typography sx={{ color: md.onSurfaceVariant }}>
+          {t('settings.load_failed', { defaultValue: '暂时无法加载设置' })}
+        </Typography>
+        <Button variant="outlined" onClick={() => void settingsQuery.refetch()}>
+          {t('settings.retry', { defaultValue: '重试' })}
+        </Button>
+      </Box>
+    )
+  }
+
+  if (!settings) {
     return <Box sx={{ p: 3, display: 'grid', placeItems: 'center', minHeight: 400 }}><CircularProgress /></Box>
   }
 

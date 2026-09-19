@@ -88,19 +88,30 @@
 - [x] 新旧 JSON 互通（未知新增字段不导致拒绝）
 - [x] `ValidateHostObservation` 拒绝 malformed host
 - [x] partial / full 都可携带 Host
-- [ ] wire 上限测试（见下方缺口）
+- [x] wire 上限测试——见下方 §6 那条，已在 Panel 的原始字节层落地并补了测试
 - [x] PSP 尚未改动时，Node protocol 包独立测试全绿
-- [ ] **真旧二进制 fixture 的四向兼容验证**（§18.7）——需 checkout `v0.0.1-beta9` 编译
+- [x] **真实旧二进制的兼容验证**（§18.7 第 6 条：旧 Node 对新 PSP）——由 CI 的
+      `node compatibility (released range)` 覆盖：逐个 checkout `v0.0.1-beta1`…`v0.0.1-beta11`
+      再跑真实的跨仓 live 测试
+- [x] §18.7 第 7 条（**新 Node 对旧 PSP**）——**2026-09-19 实测通过**，见
+      "§18.7 第 7 条：新 Node 对旧 PSP"一节。这条此前只写着"理论上兼容"，
+      而"理论上"不是"验过"：实测是 `v0.0.1-beta11` 的 agent 对着 `v4.0.0-beta.19`
+      的面板跑通，旧面板零报错
 
 ### WP0 记录的两处规格缺口
 
-- [ ] **§6 第 14 条（Host 编码后最大 128 KiB）在结构体校验器里不可达。**
+- [x] **§6 第 14 条（Host 编码后最大 128 KiB）在结构体校验器里不可达。**
       各字段上限相加远低于 128 KiB，真正要防的是"未来 agent 新增的未知字段"把原始子树撑大，
       那必须在拿到原始字节的层做：Node 发送前、Panel 解码前。
-      计划：Panel 侧先用 `json.RawMessage` 取 `host` 子树量长度，再解码完整 report。
-      这条随 WP5 落地并补测试，**不**写成结构体校验器里的死代码。
-- [ ] `protocol/conformance/` 目前是语义契约（attachment / object_state / quota）配变异测试，
-      与 §18.7 要求的跨版本 fixture 不是一回事；后者尚未开始。
+      **已按此落地**：`internal/transport/http/handler/node_sync.go` 先把 body 解进一个只有
+      `Host json.RawMessage` 的封装，用原始长度比 `MaxHostObservationBytes`，超了就丢样本
+      并计数，然后才解码完整 report——这正是"在拿到原始字节的层做"，且有测试。
+      **没有**写成结构体校验器里的死代码。
+- [x] `protocol/conformance/` 与 §18.7 不是一回事——这点仍需记住：**前者是语义契约
+      （attachment / object_state / quota）配变异测试，与跨版本 fixture 无关。**
+      而 §18.7 要的跨版本验证由 CI 的 `node compatibility (released range)` 用**真实的
+      已发布 tag** 覆盖，比一个签入的 fixture 更强；`conformance/` 因此**不需要**扩展成
+      fixture 目录。
 
 ## WP1 Linux collector（Passwall-Node）
 
@@ -112,7 +123,9 @@
 - [x] handle 在每个终止路径上清除（配置切换、context 取消、启动失败、自行退出）；
       已用变异测试确认：去掉 `stop()` 里的清除，生命周期测试立即失败
 - [x] proc stat 解析覆盖 comm 含括号与空格、截断、非数字、零值
-- [ ] 采集器侧：拿到 handle 后**重新读取** starttime 再比对，不一致即丢弃 Core section
+- [x] 采集器侧：拿到 handle 后**重新读取** starttime 再比对，不一致即丢弃 Core section
+      （与下节同一条，已由 `internal/host/process.go` 的 `startedAtTicks != handle.StartTicks`
+      与 `handle.Verifiable()` 落地并有变异测试）
 
 **采集器本体（已完成字段覆盖）**
 
@@ -137,12 +150,13 @@
 
 **新发现的一处规格自相矛盾**
 
-- [ ] **§5.10 关于 AT_CLKTCK 的那句话无法同时满足。**
+- [x] **§5.10 关于 AT_CLKTCK 的那句话无法同时满足。**
       规格说"读取失败时仍可报告 RSS、FD 和 thread，但两项 CPU 字段为 nil"，
       但 `StartedAtMS` 在 §6 里是必填且必须由 boot time 与 proc starttime 推导 ——
       没有 CLKTCK 就推不出来。实现选择：CLKTCK 缺失时**整个 processes 节省略**并加
       `process.agent` token，而不是用猜的 tick 率编一个启动时间。
-      需要规格明确到底是放宽 `StartedAtMS`，还是接受整节缺失。
+      **已按规格自己的规矩闭合**：规格 §5.10 里补了修订块，写明两句不能同时成立、
+      为什么选整节省略而不是编一个 tick 率、以及为什么不改用"放宽 StartedAtMS 为可选"。
 
 完成判据：
 
@@ -217,7 +231,8 @@ Ubuntu 26.04、内核 7.0.0-28-generic/aarch64、cgroup v2、含 containerd+nerd
 - [x] 重发 sample id 幂等
 - [x] collector 超时不阻断 sync
 - [x] capability 只在实现存在时声明
-- [ ] **端到端**：真实 Node 对着真实 PSP 跑一轮，确认 Host 出现在报告里（要等 PSP 侧 WP5）
+- [x] **端到端**：真实 Node 对着真实 PSP 跑一轮，确认 Host 出现在报告里——**已在 2026-09-18
+      做过**，见"§20 场景 D / 首次真实端到端"一节：真面板收到真 agent 的 host 样本
 
 ## WP3 passwall-node doctor（Passwall-Node）
 
@@ -259,7 +274,8 @@ PR：**KazuhaHub/Passwall-Node#24**（WP0 协议）、**#25**（Core 进程身�
 - [x] 批量列表摘要（`LatestBatchByPanelIDs`，一次 join，无 N+1）
 - [x] 删除 agent 的级联逻辑 —— 加在 `DeleteConverged` 的事务里，
       与 agent 的其他行一起删；已用变异测试确认
-- [ ] app.go 接线（hourly maintenance 与 retention）
+- [x] app.go 接线（hourly maintenance 与 retention）——`app.go` 的 audit-cleanup 循环里调用
+      `a.nodeMetrics.RollupAndPrune`，且**先 rollup 后 prune**（同一段注释写明了理由）
       —— **属于 WP6**（§17 把 retention 与 rollup 放在一起，清理必须在降采样之后）
 
 完成判据：
@@ -664,8 +680,29 @@ cpu.system = d6b30a61-94cc-4703-abda-50c1fc2f3229
 
 ### 复现注意
 
-**不要用默认的 `:8788`**——这个环境里那个端口是用户在跑的另一个面板。本次用的是一个
-验过空闲的非默认端口。
+**不要用默认的 `:8788`**——本机那个端口是用户自己临时起面板测试用的（他们测完会关，
+所以它"看起来"是空闲的）。本次用的是另一个验过空闲的非默认端口。
+
+## §18.7 第 7 条：新 Node 对旧 PSP（2026-09-19 实测）
+
+这条此前一直写着"理论上兼容"。实测就是把方向反过来：拿最新发布的 `v0.0.1-beta11`
+agent，对着本次工作之前的最后一个面板发布 `v4.0.0-beta.19`（该 tag 里确实没有
+`nodehost.go` / `nodemetrics`，已核对——否则等于没测）。
+
+| 观察点 | 结果 |
+|---|---|
+| 旧面板收不收 | ✅ 连续两次 `POST /v1/node/sync` → **200** |
+| agent 侧有无报错 | ✅ `sync failed` 计数为 **0** |
+| 旧面板日志有无 Error / Warning | ✅ 无——不是降级成警告，是根本不产生 |
+| 旧面板怎么处理不认识的 `host` 子树 | ✅ 静默丢弃：它的库里**没有任何 host 相关表** |
+| 新 capability 会不会让旧面板出错 | ✅ 不会，`observed_capabilities` 照原样存下（含 `host.telemetry.v1`、`task.diagnostics.collect.v1`） |
+
+结论：加成式扩展的承诺在**真实二进制**上成立，而不只是在协议测试里成立。
+
+⚠️ **但"能跑通"不等于"受支持"。** 行业惯例是**只保证一个方向**——旧客户端对新服务端；
+反向通常明确不保证，甚至由服务端直接拒绝过新的客户端。这次实测只说明当前实现**碰巧**
+容忍这个组合；要不要把它变成一条明确的策略，是另一个决定（矩阵怎么设窗口、要不要拒过新的
+Node，见另行记录的研究）。
 
 ## 必须由人工/真实环境完成的事项
 
@@ -677,7 +714,8 @@ cpu.system = d6b30a61-94cc-4703-abda-50c1fc2f3229
 - [x] §20 场景 E（Node 重启）、F（宿主机重启）实测（2026-09-18，见"§20 场景 E / F"一节）
 - [x] §20 场景 D（面板暂时不可达）实测（2026-09-18，见"§20 场景 D / 首次真实端到端"一节）
 - [ ] §23 DoD 的"1 台 systemd + 1 台 Docker 运行 7 天"
-- [ ] PostgreSQL / MySQL 全套 repo 测试（本地跑不全，依赖 CI）
+- [x] PostgreSQL / MySQL 全套 repo 测试——**由 CI 覆盖**：`test.yml` 的 postgres 与 mysql
+      job 跑的是整个套件（不只是 sqlstore），不是只跑方言适配那部分
 - [x] wire 大小与 collector P95 耗时的实测记录（2026-09-18，见文末附录）
 - [ ] 数据库增长速率的实测记录——要有意义的数字就得让真实部署跑够时间，
       和 §23 的 7 天 DoD 是同一件事，不另行凑一个合成数字
