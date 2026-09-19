@@ -1,0 +1,187 @@
+#!/usr/bin/env bash
+#
+# Starts an isolated third-party panel for the live adapter tests, mints a
+# credential, and prints the environment those tests read.
+#
+# WHY A SCRIPT AND NOT A COMPOSE FILE. Neither panel is usable the moment its
+# container is up, and both need things that are not obvious from the image:
+#
+#   - 3X-UI 3.8.x keeps API tokens in a dedicated `api_tokens` table (name,
+#     scope, expiry) and only ever shows the plaintext once, so a token has to be
+#     created THROUGH THE PANEL, which means a cookie session plus the
+#     `X-CSRF-Token` header the login POST now requires.
+#   - Its shared-client tests SKIP unless the panel already holds two inbounds,
+#     and a skip is indistinguishable from a pass to anything reading the exit
+#     code — see deploy/compat/check-go-results.mjs.
+#   - Its traffic-floor matrix writes usage straight into the panel's SQLite
+#     file, so it needs PSP_LIVE_XUI_DB and write access to the DIRECTORY, not
+#     just the file: SQLite creates its journal beside it.
+#   - S-UI serves the panel under a configurable webPath. On a fresh install that
+#     is `/app/`, so the API is at `/app/apiv2/...`. Pointing the tests at the
+#     bare origin produces a 404 on every call, which reads like a broken
+#     adapter rather than a wrong base URL.
+#
+# Everything here is pinned to a digest-carrying tag by the caller. Nothing
+# touches the host's docker state beyond this case's own container and volume.
+set -euo pipefail
+
+RUNTIME="${PSP_CONTAINER_RUNTIME:-}"
+if [ -z "$RUNTIME" ]; then
+  for candidate in docker nerdctl podman; do
+    if command -v "$candidate" >/dev/null 2>&1; then RUNTIME="$candidate"; break; fi
+  done
+fi
+[ -n "$RUNTIME" ] || { echo "no container runtime found (docker/nerdctl/podman)" >&2; exit 2; }
+
+SUDO=""
+if ! "$RUNTIME" info >/dev/null 2>&1; then SUDO="sudo"; fi
+
+THIRD_PARTY_IMAGE_3XUI="${PSP_LIVE_3XUI_IMAGE:-ghcr.io/mhsanaei/3x-ui:latest}"
+THIRD_PARTY_IMAGE_SUI="${PSP_LIVE_SUI_IMAGE:-ghcr.io/alireza0/s-ui:latest}"
+# A STABLE path, not a fresh mktemp per invocation: `env` and `down` have to find
+# what `up` created, and a per-run temp directory silently made them look at an
+# empty one — which reads as "the credential was never minted".
+WORKDIR="${PSP_BACKEND_WORKDIR:-/tmp/psp-compat-backends}"
+HOST="${PSP_BACKEND_HOST:-127.0.0.1}"
+
+XUI_PORT="${PSP_LIVE_XUI_PORT:-2053}"
+SUI_PORT="${PSP_LIVE_SUI_PORT:-2095}"
+XUI_NAME=psp-compat-3xui
+SUI_NAME=psp-compat-sui
+
+log() { printf '%s\n' "$*" >&2; }
+
+# wait_for polls the panel's own authenticated surface with a bounded deadline.
+# A fixed sleep would either be too short on a cold runner or slow on a warm one,
+# and "the container is up" is not "the panel answers".
+wait_for() {
+  local url="$1" deadline="$2" started now
+  started=$(date +%s)
+  while :; do
+    if curl -fsS -o /dev/null --max-time 3 "$url" 2>/dev/null; then return 0; fi
+    now=$(date +%s)
+    if [ $((now - started)) -ge "$deadline" ]; then
+      log "timed out after ${deadline}s waiting for $url"
+      return 1
+    fi
+    sleep 2
+  done
+}
+
+# ---------------------------------------------------------------- 3X-UI
+
+xui_token() {
+  # Cookie session first: 3.8.x refuses a login POST without the CSRF header,
+  # and the header is only obtainable once the session cookie is set.
+  local jar="$WORKDIR/xui.cookies" csrf body
+  curl -sS -o /dev/null -c "$jar" "$XUI_ORIGIN/"
+  csrf=$(curl -sS -b "$jar" -c "$jar" "$XUI_ORIGIN/csrf-token" | python3 -c 'import json,sys;print(json.load(sys.stdin)["obj"])')
+  curl -sS -o /dev/null -b "$jar" -c "$jar" -X POST \
+    -H "X-CSRF-Token: $csrf" -H 'Content-Type: application/x-www-form-urlencoded' \
+    -d 'username=admin&password=admin' "$XUI_ORIGIN/login"
+  csrf=$(curl -sS -b "$jar" -c "$jar" "$XUI_ORIGIN/csrf-token" | python3 -c 'import json,sys;print(json.load(sys.stdin)["obj"])')
+  body=$(curl -sS -b "$jar" -X POST -H "X-CSRF-Token: $csrf" -H 'Content-Type: application/json' \
+    -d '{"name":"psp-compat","scope":"admin"}' "$XUI_ORIGIN/panel/api/setting/apiTokens/create")
+  printf '%s' "$body" | python3 -c 'import json,sys;print(json.load(sys.stdin)["obj"]["token"])'
+}
+
+xui_seed() {
+  # The shared-client tests skip below two inbounds, and a skip is not a pass.
+  local token="$1" i port
+  for i in a b; do
+    if [ "$i" = a ]; then port=24443; else port=24444; fi
+    curl -sS -o /dev/null -X POST -H "Authorization: Bearer $token" -H 'Content-Type: application/json' \
+      -d "{\"up\":0,\"down\":0,\"total\":0,\"remark\":\"psp-compat-$i\",\"enable\":true,\"expiryTime\":0,\"listen\":\"\",\"port\":$port,\"protocol\":\"vless\",\"settings\":\"{\\\"clients\\\":[],\\\"decryption\\\":\\\"none\\\",\\\"fallbacks\\\":[]}\",\"streamSettings\":\"{\\\"network\\\":\\\"tcp\\\",\\\"security\\\":\\\"none\\\"}\",\"sniffing\":\"{\\\"enabled\\\":false,\\\"destOverride\\\":[\\\"http\\\",\\\"tls\\\"]}\",\"allocate\":\"{\\\"strategy\\\":\\\"always\\\",\\\"refresh\\\":5,\\\"concurrency\\\":10}\"}" \
+      "$XUI_ORIGIN/panel/api/inbounds/add"
+  done
+  # The floor matrix writes usage directly; SQLite needs the DIRECTORY writable
+  # to create its journal beside the file.
+  chmod 777 "$WORKDIR/3xui" 2>/dev/null || true
+  chmod 666 "$WORKDIR/3xui/x-ui.db"* 2>/dev/null || true
+}
+
+# ---------------------------------------------------------------- S-UI
+
+sui_token() {
+  # S-UI keeps tokens in its own `tokens` table and has no mint endpoint the
+  # panel itself uses for first-run; the row is inserted directly. `expiry` is
+  # in SECONDS (PSP's own expiry fields are milliseconds), and 0 means no expiry.
+  local token
+  token=$(python3 -c 'import secrets;print(secrets.token_urlsafe(32))')
+  $SUDO sqlite3 "$WORKDIR/sui/s-ui.db" \
+    "delete from tokens; insert into tokens (desc, token, expiry, user_id) values ('psp-compat', '$token', 0, 1);"
+  printf '%s' "$token"
+}
+
+# ---------------------------------------------------------------- commands
+
+up() {
+  rm -rf "$WORKDIR"
+  mkdir -p "$WORKDIR/3xui" "$WORKDIR/sui"
+  log "workdir: $WORKDIR"
+
+  log "pulling $THIRD_PARTY_IMAGE_3XUI"
+  $SUDO "$RUNTIME" pull "$THIRD_PARTY_IMAGE_3XUI" >/dev/null
+  $SUDO "$RUNTIME" rm -f "$XUI_NAME" >/dev/null 2>&1 || true
+  $SUDO "$RUNTIME" run -d --name "$XUI_NAME" -p "$XUI_PORT:2053" -v "$WORKDIR/3xui:/etc/x-ui" "$THIRD_PARTY_IMAGE_3XUI" >/dev/null
+  XUI_ORIGIN="http://$HOST:$XUI_PORT"
+  wait_for "$XUI_ORIGIN/" 120
+  log "3X-UI ready at $XUI_ORIGIN"
+  local token; token=$(xui_token)
+  xui_seed "$token"
+  printf '%s' "$token" > "$WORKDIR/3xui.token"
+
+  log "pulling $THIRD_PARTY_IMAGE_SUI"
+  $SUDO "$RUNTIME" pull "$THIRD_PARTY_IMAGE_SUI" >/dev/null
+  $SUDO "$RUNTIME" rm -f "$SUI_NAME" >/dev/null 2>&1 || true
+  $SUDO "$RUNTIME" run -d --name "$SUI_NAME" -p "$SUI_PORT:2095" -v "$WORKDIR/sui:/app/db" "$THIRD_PARTY_IMAGE_SUI" >/dev/null
+  # The panel is NOT reachable at the bare origin: it serves under webPath, so
+  # waiting there would 404 until the deadline however healthy the panel is. Wait
+  # for the database to exist first — that is what says the process started —
+  # then read webPath out of it and wait on the real base.
+  local waited=0
+  while [ ! -f "$WORKDIR/sui/s-ui.db" ]; do
+    [ "$waited" -ge 120 ] && { log "S-UI never created its database"; return 1; }
+    sleep 2; waited=$((waited + 2))
+  done
+  # webPath is looked up rather than assumed: a fresh install uses /app/, and
+  # guessing the bare origin 404s every call.
+  local web_path=""
+  while [ -z "$web_path" ]; do
+    [ "$waited" -ge 150 ] && { log "S-UI never published a webPath"; return 1; }
+    web_path=$($SUDO sqlite3 "$WORKDIR/sui/s-ui.db" "select value from settings where key='webPath';" 2>/dev/null || true)
+    [ -n "$web_path" ] && break
+    sleep 2; waited=$((waited + 2))
+  done
+  local sui_base="http://$HOST:$SUI_PORT${web_path%/}"
+  wait_for "$sui_base/" 60
+  log "S-UI ready at $sui_base"
+  local sui_tok; sui_tok=$(sui_token)
+  $SUDO "$RUNTIME" restart "$SUI_NAME" >/dev/null
+  sleep 8
+  printf '%s' "$sui_tok" > "$WORKDIR/sui.token"
+  printf '%s' "$sui_base" > "$WORKDIR/sui.base"
+}
+
+down() {
+  # Only this case's resources. A global prune would take other work with it.
+  for name in "$XUI_NAME" "$SUI_NAME"; do
+    $SUDO "$RUNTIME" rm -f "$name" >/dev/null 2>&1 || true
+  done
+  log "removed $XUI_NAME and $SUI_NAME (workdir $WORKDIR left in place)"
+}
+
+env_out() {
+  printf 'PSP_LIVE_XUI_URL=http://%s:%s\n' "$HOST" "$XUI_PORT"
+  printf 'PSP_LIVE_XUI_TOKEN=%s\n' "$(cat "$WORKDIR/3xui.token")"
+  printf 'PSP_LIVE_XUI_DB=%s\n' "$WORKDIR/3xui/x-ui.db"
+  printf 'PSP_LIVE_SUI_URL=%s\n' "$(cat "$WORKDIR/sui.base")"
+  printf 'PSP_LIVE_SUI_TOKEN=%s\n' "$(cat "$WORKDIR/sui.token")"
+}
+
+case "${1:-}" in
+  up) up ;;
+  down) down ;;
+  env) env_out ;;
+  *) echo "usage: $0 {up|env|down}" >&2; exit 2 ;;
+esac

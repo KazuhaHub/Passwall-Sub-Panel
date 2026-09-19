@@ -286,6 +286,70 @@ jobs:
           if-no-files-found: warn
           retention-days: 90
 
+  # THE REAL THIRD-PARTY PANELS. Everything above this point checks the panel
+  # against fixtures; this starts actual 3X-UI and S-UI containers and drives the
+  # adapters against them. It is the G2 layer, and it is the only evidence of its
+  # type in the repository.
+  third-party-isolated:
+    name: third-party adapters (isolated real panels)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        env:
+          GOTOOLCHAIN: auto
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "26"
+      - name: verify the preferred compiler
+        run: |
+          set -eu
+          build_toolchain=$(awk '$1 == "toolchain" { print $2 }' go.mod)
+          test "$(go env GOVERSION)" = "$build_toolchain"
+      - name: start the isolated panels
+        env:
+          PSP_LIVE_3XUI_IMAGE: ${{ vars.PSP_LIVE_3XUI_IMAGE || 'ghcr.io/mhsanaei/3x-ui:latest' }}
+          PSP_LIVE_SUI_IMAGE: ${{ vars.PSP_LIVE_SUI_IMAGE || 'ghcr.io/alireza0/s-ui:latest' }}
+        run: deploy/compat/backends/third-party.sh up
+      - name: drive every adapter surface
+        run: |
+          set -uo pipefail
+          mkdir -p evidence
+          # Each suite gets its own log and its own validator run: they are
+          # different packages with different profiles, and a single combined
+          # verdict could not say which of them measured less than it claims.
+          eval "$(deploy/compat/backends/third-party.sh env)"
+          run_suite() {
+            profile="$1"; pkg="$2"; out="$3"
+            code=0
+            go test -json -count=1 -timeout=20m "$pkg" -run '^TestLive_' > "evidence/$out.jsonl" 2> "evidence/$out.stderr" || code=$?
+            node deploy/compat/check-go-results.mjs --profile "$profile" \
+              --profiles deploy/compat/profiles-third-party.json \
+              --input "evidence/$out.jsonl" --go-exit-code "$code" \
+              --output "evidence/$out.json"
+          }
+          failed=0
+          run_suite third-party-3xui-live ./internal/adapters/xui 3xui || failed=1
+          run_suite third-party-sui-live ./internal/adapters/sui sui || failed=1
+          exit "$failed"
+      - name: upload the evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: third-party-adapter-evidence
+          path: evidence/
+          if-no-files-found: warn
+          retention-days: 90
+      - name: stop the panels
+        if: always()
+        run: deploy/compat/backends/third-party.sh down
+
   container:
     name: Docker source and release runtime baselines
     runs-on: ubuntu-24.04
