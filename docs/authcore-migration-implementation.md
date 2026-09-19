@@ -14,8 +14,11 @@
 | H1 | `kazuha/saml-validation-hardening` | `e28afa93` | `internal/pkg/samlguard` + 接入 `ParseACSResponse`（ADR 0036 D3） |
 | H2 | `kazuha/saml-state-hardening` | 11 个提交（见 §2） | ADR 0036 D1–D8 全部 |
 | H3 | `kazuha/passkey-state-hardening` | 4 个提交（见 §3） | ADR 0036 §7.3、§7.4 |
+| G1 | `kazuha/authcore-geoip-experiment`（**基于 `origin/main`**，与 H 线无关） | 1 个提交 | GeoIP 接入，结论 **adopted**（见 §5） |
+| A1 | authcore 仓库 / `kazuha/authcore-protocol-contracts` | 已合并为 `498c4e3`，发布 `v0.4.0`（见 §4） | 迁移前置改动 |
 
-**未 push，未开 PR。** 制品的构建与运行证据见 [h-saml-artifact-smoke.txt](authcore-baseline/h-saml-artifact-smoke.txt)。
+**PSP 侧四条分支：未 push，未开 PR。** 制品与运行证据见 [h-saml-artifact-smoke.txt](authcore-baseline/h-saml-artifact-smoke.txt)。
+**authcore 侧 A1：已合并并发布**（§4）。
 
 ## 2. H2：SAML 加固线（ADR 0036 D1–D8）
 
@@ -45,7 +48,25 @@
 | §7.4 验收 | 自建软件认证器（真实 ES256 签名，未新增依赖）；W01/W02/W03/W05/W06/W08/W09 + 撤销 + 三个否定对照 | `ffc29c16` |
 | 部署影响记录 | 部署清单 §8.2 | `af11cdb0` |
 
-## 4. 制品
+## 4. A1：authcore 前置改动（已合并并发布）
+
+| 项 | 内容 |
+| --- | --- |
+| PR | [KazuhaHub/authcore#16](https://github.com/KazuhaHub/authcore/pull/16)，squash 合并（仓库历史线性，无 merge commit） |
+| 合并提交 | `498c4e3315f5110daa797696a06d67cebb5d42b8`（`origin/main` 尖端） |
+| 发布 tag | **`v0.4.0`**（注解 tag `497794eb3a338f359426c19b999bd13caa697f26`，解引用为上述提交） |
+| 可被引用 | PSP 工作树内 `go list -m github.com/KazuhaHub/authcore@v0.4.0` 可解析 |
+| CI | PR 上 `build, vet, fmt, test` 与 `govulncheck` 两个任务均通过 |
+
+1. **`Assertion.AttributesByName`** —— 只按 Attribute 的 `Name` 索引，永不索引 `FriendlyName`；值规则（顺序、重复合并、空值、无 Name 不索引）与 `Attributes` 一致；两个 map 不共享底层数组；`Attributes` 行为不变。
+2. **Passkey 写回契约** —— 把"两种 Finish 都调用 `UpdateSignCount`、Store 可以在写入前按策略拒绝、非 nil error 必须让两种 Finish 返回 nil result + 可 `errors.Is` 的错误、挑战已被消费"写进接口文档与包文档，并配两个 Finish 的契约测试（克隆用例由**真实计数器回退**驱动，另有一个 Store 接受时的对照）。`MIGRATION.md` 与 README 里"Finish 之后检查 CloneWarning"的写法已更正——那形状永远拿不到零写入。
+3. **白名单锁定**（计划书未列，本次补的）—— authcore 原本对签名/摘要白名单**没有任何测试**，而 H 侧逐字复制了它，两端的一致性此前没有上游保护。现锁定精确集合，并单独钉住 `xmlenc#sha384` 的**故意缺席**。
+
+`go.mod` **未变**：没有新增上游依赖，版本与之前一致。三次变异验证（吞掉写回错误、给摘要表加一项）都让新测试变红后恢复。
+
+**未做**：对 Report Portal 的编译回归——该仓库不在本机，需在其仓库内单独执行（A1 对不拒绝写回的 Store 是行为无关的，因此预期只需重新编译）。
+
+## 5. 制品
 
 | 制品 | 源码 | sha256 |
 | --- | --- | --- |
@@ -54,27 +75,27 @@
 
 H_SAML 制品已在本机以真实进程启动并验证：内嵌 SPA 返回 200、`renderIndex` 注入生效、自检端点返回完整报告（`replay_store`/`request_store` 均为 `passed`）、未认证访问 401、SSO 未启用时登录与 ACS 均 404。详见 [h-saml-artifact-smoke.txt](authcore-baseline/h-saml-artifact-smoke.txt)。
 
-## 5. 每包状态
+## 6. 每包状态
 
 | 包 | 状态 | 证据 |
 | --- | --- | --- |
 | SAML | **H 线完成**，M1 未开始 | 见 §2 与制品 |
 | Passkey | **H 线完成**，M2 未开始 | 见 §3 |
-| GeoIP | **未开始**（G1 可选，计划书允许 not_attempted） | — |
+| GeoIP | **G1 已 adopted**（`Δ_conservative = −56`，三项机制转移）；在独立分支上 | 见 §5 与 `kazuha/authcore-geoip-experiment` 分支上的 `docs/authcore-baseline/geoip-g1-report.md` |
 | 验证码 | **未开始**（C1 默认 deferred） | — |
 | OIDC | 本轮不实施，仍在 PSP | — |
 
-## 6. 未完成 / 未验证（不声称已完成）
+## 7. 未完成 / 未验证（不声称已完成）
 
 - **M1 / M2 未开始**：未引用 authcore 任何版本；`go.mod` 至今不含该模块。因此 §1.3 的成本/职责判据（`A` / `D_pre` / `D_hardening` / `Δ_conservative`）**尚无数据**，测量表 [authcore-migration-measurement.md](authcore-migration-measurement.md) §6 保持"待填"。
-- **A1 的前置改动未提交到 authcore**：`AttributesByName`、以及 §5.2 的写回契约（`UpdateSignCount` 返回 error 时两种 Finish 必须返回 nil result + error）都还没做。**A1 必须同时补一个锁定摘要白名单的双向测试**——authcore 目前对该白名单没有任何测试（见 §7）。
+- ~~A1 的前置改动未提交到 authcore~~ **已完成并发布为 `v0.4.0`**（§4）。
 - **三数据库**：SQLite（全量）与 PostgreSQL 18.4（新增 SQL 定向）已实测；**MySQL 本机无实例**，仅由 CI 覆盖。
 - **真实浏览器 / 真实 IdP**：未执行。S18/S24 的 Cookie 属性、非根 `panel_path`、代理部署仍需浏览器验证；`npm run smoke:dist` 在本机因 headless Chrome 环境问题不可运行（脚本自身提示非渲染回归），且本次改动未触碰前端文件。
 - **§6.9 的用户可见原因码**：`auth_events.reason` 与 metric 已分开记录，但 SSO 失败页仍沿用 `error=auth_failed` + `description`；把它收敛为带中英文文案的低基数原因码仍未做。
 - **多实例**：按 D8 只声明单实例；HA1–HA4 未做。
 
-## 7. 给下一阶段的输入
+## 8. 给下一阶段的输入
 
-1. **A1 的两件事**（缺一不可）：`AttributesByName`；写回错误必须使两种 Finish 失败的正式契约 + 真实流程测试。外加**摘要白名单的锁定测试**，否则 H 侧 `TestCheck_RejectsDigestOutsideAuthcoreAllowlist` 这个 parity 锚点是单向的。
+1. **A1 已就绪**：固定 `v0.4.0`（`498c4e33…`）即可开始 M1/M2；三项交付与 PR 链接见 §4。
 2. **测量基线已就绪**：`git diff --numstat H M` 的两个 H 尖端分别是 `ea01ea44`（SAML）与 `af11cdb0`（Passkey）；职责表 ID 见测量文档 §5，`D_hardening` 的归类必须从该表推导，不得在看到 M 行数后调整。
 3. **H 与 M 共用同一 schema 与线上状态契约**：M1 不得改动请求表、RelayState/Cookie 格式、配置摘要算法、错误语义与 replay 保留期。
