@@ -1,0 +1,66 @@
+# B0 基线行为证据
+
+- 基线提交：PSP `origin/main` = `4697f29b`（2026-09-18）
+- 取证时间：2026-09-18
+- 取证命令与结果：
+
+```
+$ GOWORK=off go test -count=1 ./internal/service/auth/... ./internal/service/passkey/... \
+      ./internal/pkg/geoip/... ./internal/service/captcha/...
+ok  github.com/KazuhaHub/passwall-sub-panel/internal/service/auth     0.580s
+ok  github.com/KazuhaHub/passwall-sub-panel/internal/service/passkey  0.744s
+ok  github.com/KazuhaHub/passwall-sub-panel/internal/pkg/geoip        0.315s
+ok  github.com/KazuhaHub/passwall-sub-panel/internal/service/captcha  1.073s
+```
+
+本文件记录**在改动任何实现之前**已通过的基线测试，作为 ADR 0037 要求的"原行为有证据"。H/M 的比较以这份清单为共同基线：**H 与 M 都必须让这些断言继续成立**，除非该条被对应的 ADR 明确替代（见文末）。
+
+## 必须由 H 与 M 共同保持的基线断言
+
+### Passkey
+
+| 测试 | 固化的行为 |
+| --- | --- |
+| `TestFinalizeAssertion_RejectsClone` | CloneWarning ⇒ 拒绝登录，且 credential / sign_count / last_used_at **零写入**（计划书 W08） |
+| `TestFinalizeAssertion_PersistsCleanLogin` | 无告警的登录写回推进后的计数器 |
+| `TestSessionStore_SingleUse` | 挑战一次性：Take 后不可重用（W07） |
+| `TestSessionStore_Expiry` | 挑战 5 分钟过期（W07） |
+| `TestBeginLogin_RequiresUserVerification` | 无用户名登录强制 `UserVerification=Required`（W05） |
+| `TestRPFromBaseURL` | RP ID / Origin 由 `SubBaseURL` 推导（§3.2 不变式） |
+| `TestRevokeAll` | 管理员撤销行为（W17） |
+| `TestAvailableAndPasswordless` | 全局/组设置驱动的可用性判断（W13） |
+| 凭证数据 fixture | `internal/service/passkey/testdata/baseline-credential.json` —— W01 的同一份数据（本 PR 新增） |
+
+### SAML
+
+| 测试 | 固化的行为 |
+| --- | --- |
+| `TestAssertionReplayCache_SeenOrAdd` | 进程内缓存的首见/再见语义 |
+| `TestAssertionReplayCache_ExpiresOutOfWindow` | 窗口关闭后不再算重放 |
+| `TestAssertionReplayCache_EmptyIDIgnored` | 空 ID 不记录（由调用方硬拒绝） |
+| `TestAssertionReplayCache_BoundedUnderValidFlood` | 缓存有界（容量 65536，低水位淘汰） |
+| `TestAssertionAlreadyConsumed_NoStoreUsesMemoryCache` | 无持久化 store 时退化为进程内缓存 |
+| `TestAssertionAlreadyConsumed_StoreCatchesUnseenID` | 持久化层能抓住本进程没见过的断言 |
+| `TestAssertionAlreadyConsumed_MemoryCatchesWhatStoreMisses` | 两个来源任一命中即判重放 |
+
+### GeoIP / 验证码
+
+| 测试 | 固化的行为 |
+| --- | --- |
+| `TestMapRecord_MaxMindSchema` / `TestMapRecord_IPinfoSchema` / `TestMapRecord_EnNameFallback` | 三类 MMDB 形态的字段映射与 name 回退（G01） |
+| `TestIsResolvable` | 非法/私有/保留地址判定为不可解析 |
+| `TestGranularityOf` | 库类型 → 粒度 |
+| 验证码包全部测试 | 图片参数、一次性语义与 provider 契约的现状基线 |
+
+## 明确将被替代的基线断言（不在 H/M 的共同保持范围内）
+
+| 测试 | 由谁替代 | 原因 |
+| --- | --- | --- |
+| `TestAssertionAlreadyConsumed_StoreErrorFallsBackToMemory` | **H2**（ADR 0036 D1） | 该测试固化的是"存储故障回退到内存缓存"，正是 ADR 0036 翻转的决定。H2 应替换其断言以反映 fail-closed，并在注释中引用 ADR 0036，**不是简单删除**（计划书 §10.1 文末要求）。 |
+
+## 尚未取证的部分（不得声称已完成）
+
+- **真实浏览器跨站 POST 与 Cookie 行为**：本文件只有 Go 测试结果，不能替代浏览器验证（计划书 §12.1 第 4 项）。
+- **真实 IdP / 测试 IdP 的端到端登录**：未执行。
+- **MySQL / PostgreSQL 下的 sqlstore 测试**：本文件只跑了默认 SQLite；三数据库证据在 H2 阶段补（计划书 §11）。
+- **前端构建与 smoke**：本次改动不含前端，未执行 `npm run build` / `smoke:dist`。

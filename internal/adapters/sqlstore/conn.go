@@ -209,6 +209,7 @@ func NewRepos(db *gorm.DB) ports.Repos {
 		AuthEvent:               &authEventRepo{db: db},
 		AuthToken:               &authTokenRepo{db: db},
 		SAMLReplay:              &samlReplayRepo{db: db},
+		SAMLRequest:             &samlRequestRepo{db: db},
 		WebAuthn:                &webauthnCredentialRepo{db: db},
 		SubLog:                  &subLogRepo{db: db},
 		SyncTask:                &syncTaskRepo{db: db},

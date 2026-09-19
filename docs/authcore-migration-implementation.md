@@ -1,0 +1,126 @@
+# authcore 迁移实施记录
+
+本文件按 [计划书](authcore-migration-plan.md) §14 记录**已完成且有证据**的结果。未实施或未验证的阶段写"未开始"/"未验证"，不用计划代替结果，也不把设计描述成已通过。
+
+最后更新：2026-09-19（H 线完成；M1 与 M2 均已实验并判为 rejected）。
+
+## 1. 分支与提交
+
+四条叠放的分支，均基于核对时的 `origin/main`（`4697f29b`），后一条包含前一条：
+
+| 阶段 | 分支 | 提交 | 内容 |
+| --- | --- | --- | --- |
+| P0 | `kazuha/authcore-experiment-baseline` | `d9284b80` | ADR 0036/0037、测量与职责表、部署清单、依赖快照、凭证 fixture、B0 基线证据 |
+| H1 | `kazuha/saml-validation-hardening` | `e28afa93` | `internal/pkg/samlguard` + 接入 `ParseACSResponse`（ADR 0036 D3） |
+| H2 | `kazuha/saml-state-hardening` | 11 个提交（见 §2） | ADR 0036 D1–D8 全部 |
+| H3 | `kazuha/passkey-state-hardening` → PR 分支 `kazuha/auth-hardening` | 4 个提交（见 §3） | ADR 0036 §7.3、§7.4 |
+| G1 | `kazuha/authcore-geoip-experiment`（**基于 `origin/main`**，与 H 线无关） | 1 个提交 | GeoIP 接入，结论 **adopted**（见 §5） |
+| A1 | authcore 仓库 / `kazuha/authcore-protocol-contracts` | 已合并为 `498c4e3`，发布 `v0.4.0`（见 §4） | 迁移前置改动 |
+| M1 | `kazuha/authcore-saml-experiment`（基于 H_SAML 尖端） | 3 个提交，尖端见 `docs/authcore-baseline/saml-m1-report.md` | SAML 换用 authcore，结论 **rejected**（见 §6） |
+| M2 | `kazuha/authcore-passkey-experiment`（基于 H 尖端 `43cd20eb`） | `13be75ad` | Passkey 换用 authcore，结论 **rejected**（见 §6、§9） |
+
+**分支状态。** H 线（H1–H3，尖端 `43cd20eb`）已改名为 `kazuha/auth-hardening`，作为本 PR 的分支推送；本文件与测量表随该 PR 一并进入主线。P0 基线、G1、M1、M2 四条**实验**分支未推送，只存在于本机 —— 它们的报告因此是本地工作稿。制品与运行证据见 [h-saml-artifact-smoke.txt](authcore-baseline/h-saml-artifact-smoke.txt)。
+**authcore 侧 A1：已合并并发布**（§4）。
+
+## 2. H2：SAML 加固线（ADR 0036 D1–D8）
+
+| 决定 | 落地 | 提交 | 主要测试 |
+| --- | --- | --- | --- |
+| D1 防重放 fail-closed、删除内存回退 | `assertNotConsumed` 只返回 error；nil store 视为装配错误；`app.Build` 启动即拒 | `b6e1c13b` | `saml_replay_store_test.go`（5 例，含"缺 store 拒绝"与"存储故障 ≠ 重放"） |
+| D2 一次性请求表 + 浏览器绑定 | `saml_login_requests` 表与 repo；`BeginLogin` / `CompleteLogin`；绑定 Cookie | `da26dfc0` | `saml_request_repo_test.go`（9 例，SQLite + PostgreSQL 18.4，含并发消费） |
+| D2 配置摘要 | `SAMLConfigDigest`（反射遍历 + 三处显式排除，排除路径有存活测试） | `1047b543` | `saml_config_digest_test.go`（确定性、25 个敏感字段、3 处不敏感、排除路径存活） |
+| D2 浏览器流程 | RelayState 只载 opaque token（形态先校验再用作 Cookie 名）；请求 ID 与回跳目标均取自服务端记录；入口同源/HTTPS 校验 | `a96bd6ef` | `saml_login_test.go`（token 形态、入口、绑定、单次消费、中途改配置失效、过期） |
+| D3 原始 XML 预检 | `samlguard`：Destination 必填、拒绝多断言、拒绝弱算法；在验签之前、对同一份字节执行 | `e28afa93` | `samlguard_test.go`（38 例，含四个与 authcore 的 parity 锚点） |
+| D4 保留期公式 | `samlReplayExpiry`：`max(now+5m, Conditions, 各 SCData) + MaxClockSkew + 1m`；可注入时钟 | `ea01ea44` | `saml_replay_expiry_test.go`（9 个分支） |
+| D5 过期接管原子化、读取错误不再伪装成重放 | `takeOverExpiredRow` 条件 UPDATE；`readExistingRow` 区分"行不存在"与"读失败" | `87fa8c93` | `saml_replay_repo_test.go`（确定性 + 并发，变异验证过） |
+| D6 不可变快照与 generation | `samlSnapshot`（cfg+digest+generation+provider）；`applyMu` 串行化；失败构建发布"无 provider"的世代 | `d9c34f8b` | `saml_snapshot_test.go`（失败不配旧 provider、禁用即拆、在途快照不受影响、世代单调、刷新不得覆盖新配置） |
+| D6 保存与换代同一串行入口 | `SaveConfig`（`saved` 与 `applyErr` 分开）；`admin_saml` 与 `PanelPathSSOMigrator` 均改走它；删除已无调用点的 `Reload` | `5c9b726c` | 同上（保存失败不改运行态、无 repo 拒绝） |
+| D7 保存前校验 + 只读自检 + 启动审计 | `StaticPreflight` / `RuntimeChecks`；`PUT` 在 Save 前校验（停用始终放行）；`GET /api/admin/settings/saml/preflight`；`app.Build` 记录失败检查项 | `d08c4317` | `saml_preflight_test.go`（11 例拒绝 + 根路径部署 + not_checked 边界）、`admin_saml_preflight_test.go`（两个独立结论、缺件为 failed、读不到配置不返回绿色、不回显密钥） |
+| D8 单实例声明 | 报告恒带 `supported_topology: single_instance`；部署清单 §1 声明 | `d08c4317` | 同上 |
+| §6.5.1/§6.9 可观测 | 封闭原因码集合 + `psp_saml_acs_failure_total` | `9a79ecb4` | `auth_saml_failure_test.go`（重放与存储故障必须可区分） |
+
+顺带交付的测试设施：`saml_testidp_test.go`（crewjam `IdentityProvider` 构成的真实签名测试 IdP，无新增依赖）与 `saml_acs_test.go`（S01–S08、S11 等服务层验收）。
+
+## 3. H3：Passkey 加固（ADR 0036 §7.3、§7.4）
+
+| 项 | 落地 | 提交 |
+| --- | --- | --- |
+| §7.3 撤销竞态 | 写门失败后重读凭证：缺失/换行/换账户/计数反而落后一律拒绝；读失败归类为基础设施错误而非"未授权" | `2cbcd68c` |
+| §7.4 用途隔离、账户与 RP 绑定、硬容量 | 挑战记录 purpose/userID/rpDigest/expires；Take 先删后判；容量满拒绝而不淘汰有效挑战；两个 allow-listed ceremony 各自声明用途 | `ace08b3a` |
+| §7.4 验收 | 自建软件认证器（真实 ES256 签名，未新增依赖）；W01/W02/W03/W05/W06/W08/W09 + 撤销 + 三个否定对照 | `ffc29c16` |
+| 部署影响记录 | 部署清单 §8.2 | `af11cdb0` |
+
+## 4. A1：authcore 前置改动（已合并并发布）
+
+| 项 | 内容 |
+| --- | --- |
+| PR | [KazuhaHub/authcore#16](https://github.com/KazuhaHub/authcore/pull/16)，squash 合并（仓库历史线性，无 merge commit） |
+| 合并提交 | `498c4e3315f5110daa797696a06d67cebb5d42b8`（`origin/main` 尖端） |
+| 发布 tag | **`v0.4.0`**（注解 tag `497794eb3a338f359426c19b999bd13caa697f26`，解引用为上述提交） |
+| 可被引用 | PSP 工作树内 `go list -m github.com/KazuhaHub/authcore@v0.4.0` 可解析 |
+| CI | PR 上 `build, vet, fmt, test` 与 `govulncheck` 两个任务均通过 |
+
+1. **`Assertion.AttributesByName`** —— 只按 Attribute 的 `Name` 索引，永不索引 `FriendlyName`；值规则（顺序、重复合并、空值、无 Name 不索引）与 `Attributes` 一致；两个 map 不共享底层数组；`Attributes` 行为不变。
+2. **Passkey 写回契约** —— 把"两种 Finish 都调用 `UpdateSignCount`、Store 可以在写入前按策略拒绝、非 nil error 必须让两种 Finish 返回 nil result + 可 `errors.Is` 的错误、挑战已被消费"写进接口文档与包文档，并配两个 Finish 的契约测试（克隆用例由**真实计数器回退**驱动，另有一个 Store 接受时的对照）。`MIGRATION.md` 与 README 里"Finish 之后检查 CloneWarning"的写法已更正——那形状永远拿不到零写入。
+3. **白名单锁定**（计划书未列，本次补的）—— authcore 原本对签名/摘要白名单**没有任何测试**，而 H 侧逐字复制了它，两端的一致性此前没有上游保护。现锁定精确集合，并单独钉住 `xmlenc#sha384` 的**故意缺席**。
+
+`go.mod` **未变**：没有新增上游依赖，版本与之前一致。三次变异验证（吞掉写回错误、给摘要表加一项）都让新测试变红后恢复。
+
+**未做**：对 Report Portal 的编译回归——该仓库不在本机，需在其仓库内单独执行（A1 对不拒绝写回的 Store 是行为无关的，因此预期只需重新编译）。
+
+## 5. 制品
+
+| 制品 | 源码 | sha256 |
+| --- | --- | --- |
+| H_SAML | `ea01ea44` | `ef5b9b470e2f552e258d4164833d53efdb58803f43bb712a5071d6584f84c08a` |
+| H_PASSKEY | `af11cdb0` | `1e1f669daf04f2db8dd79d1c2e5c5d8109e7f3ea9a194164cf7d962e0ffecb1d` |
+
+H_SAML 制品已在本机以真实进程启动并验证：内嵌 SPA 返回 200、`renderIndex` 注入生效、自检端点返回完整报告（`replay_store`/`request_store` 均为 `passed`）、未认证访问 401、SSO 未启用时登录与 ACS 均 404。详见 [h-saml-artifact-smoke.txt](authcore-baseline/h-saml-artifact-smoke.txt)。
+
+## 6. 每包状态
+
+| 包 | 状态 | 证据 |
+| --- | --- | --- |
+| SAML | **H 线完成；M1 实验完成，结论 rejected** | 见 §2 与制品；M1 报告(`kazuha/authcore-saml-experiment` 分支) |
+| Passkey | **H 线完成；M2 实验完成，结论 rejected** | 见 §3；M2 报告见 §9 |
+| GeoIP | **G1 已 adopted**（`Δ_conservative = −56`，三项机制转移）；在独立分支上 | 见 §5 与 `kazuha/authcore-geoip-experiment` 分支上的 `docs/authcore-baseline/geoip-g1-report.md` |
+| 验证码 | **未开始**（C1 默认 deferred） | — |
+| OIDC | 本轮不实施，仍在 PSP | — |
+
+## 7. 未完成 / 未验证（不声称已完成）
+
+- ~~**M1 / M2 未开始**~~ **两个实验都已完成并判为 rejected**：测量表 [authcore-migration-measurement.md](authcore-migration-measurement.md) §6 已填（SAML `Δ_conservative`=+257、Passkey `Δ_conservative`=+553）。两处替换都**未采纳**，本文件的 H 线描述仍是可部署实现。
+- ~~A1 的前置改动未提交到 authcore~~ **已完成并发布为 `v0.4.0`**（§4）。
+- **三数据库**：SQLite（全量）与 PostgreSQL 18.4（新增 SQL 定向）已实测；**MySQL 本机无实例**，仅由 CI 覆盖。
+- **真实浏览器 / 真实 IdP**：未执行。S18/S24 的 Cookie 属性、非根 `panel_path`、代理部署仍需浏览器验证；`npm run smoke:dist` 在本机因 headless Chrome 环境问题不可运行（脚本自身提示非渲染回归），且本次改动未触碰前端文件。
+- **§6.9 的用户可见原因码**：`auth_events.reason` 与 metric 已分开记录，但 SSO 失败页仍沿用 `error=auth_failed` + `description`；把它收敛为带中英文文案的低基数原因码仍未做。
+- **多实例**：按 D8 只声明单实例；HA1–HA4 未做。
+
+## 8. 给下一阶段的输入
+
+1. **A1 已就绪**：固定 `v0.4.0`（`498c4e33…`）即可开始 M1/M2；三项交付与 PR 链接见 §4。
+2. **测量基线已就绪**：`git diff --numstat H M` 的两个 H 尖端分别是 `ea01ea44`（SAML）与 `af11cdb0`（Passkey）；职责表 ID 见测量文档 §5，`D_hardening` 的归类必须从该表推导，不得在看到 M 行数后调整。
+3. **H 与 M 共用同一 schema 与线上状态契约**：M1 不得改动请求表、RelayState/Cookie 格式、配置摘要算法、错误语义与 replay 保留期。
+
+## 9. M 线结果（两个实验都已完成）
+
+| 包 | 分支 | 尖端 | `A` | `D_pre` | `D_hardening` | `Δ_actual` | `Δ_conservative` | 预算 | 结论 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| SAML | `kazuha/authcore-saml-experiment` | 见 M1 报告 | 610 | 353 | 315 | −58 | **+257** | 88.25 | **rejected**（超支 2.91×） |
+| Passkey | `kazuha/authcore-passkey-experiment` | `13be75ad` | 772 | 219 | 74 | **+479** | **+553** | 54.75 | **rejected**（超支 10.1×） |
+
+两次都以**行为等价性通过**为前提：同一个验收套件（S 系列 / W 系列）在 authcore 适配器上全绿，
+全仓 `go build` / `go vet` / `gofmt` 干净、测试包全 ok。**否决只来自成本面。**
+
+两条共同的实测结论，供今后对"把这个包换成共享库"做估算时参照：
+
+1. **接缝税是真实的，而且逐项可枚举。** 每个被委派的边界都要补一层**错误分类桥**
+   （M1 的 `classifyResponseError`、M2 的 `classifyCeremonyError`）；委派之后服务不能再假定
+   "失败 = 校验失败"。M2 另有：每次登录多一次 SELECT（库的写回以凭证 id 为键、PSP 的受闸写入以行 id 为键）、
+   每次命名注册多一次写（库的注册契约里没有显示名）、以及**被迫重构的验收套件**
+   （ceremony 实现成了装配期注入的端口实现，套件只能改成外部测试包才能导入真适配器，约 830 行）。
+2. **依赖面在两项上都没有缩小。** authcore 的 SAML API 以 crewjam 的 `EntityDescriptor` 为输入；
+   Passkey 的端口 DTO 用的就是 go-webauthn 的 `SessionData`/`Credential`。两者都仍是直接依赖。
+
+**H 线保持为可部署实现**：H_SAML `ea01ea44`、H_PASSKEY `af11cdb0`（制品见 §5）。
+M1 / M2 两条分支**均未合并**，保留为实验证据。

@@ -141,6 +141,32 @@ func (h *AdminSAMLHandler) Get(c *gin.Context) {
 	c.JSON(http.StatusOK, toSAMLDTO(cfg))
 }
 
+// Preflight is the read-only administrator self-check (ADR 0036 D7). It answers
+// "would a sign-in work, and if not why" without performing one: it creates no
+// user, issues no token, writes nothing to the replay or login-request tables,
+// and returns no secret, no cookie and no assertion.
+//
+// It reports two verdicts rather than one. configuration_valid is about the stored
+// values; runtime_ready is about this process (provider built, both durable stores
+// wired). An operator fixing a typo and an operator investigating a broken
+// deployment are looking at different problems, and a single boolean would tell
+// them apart only by accident.
+func (h *AdminSAMLHandler) Preflight(c *gin.Context) {
+	cfg, err := h.repo.Load(c.Request.Context())
+	if err != nil {
+		// Readiness is unknown here, and "valid" is the one wrong answer: a 5xx
+		// says so, whereas a green report would send someone looking in the wrong
+		// place.
+		respondError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, h.saml.Preflight(auth.PreflightInput{
+		Config:     cfg,
+		PanelPath:  currentPanelPath(c.Request),
+		PublicBase: resolveSubBase(c.Request.Context(), h.settings),
+	}))
+}
+
 func (h *AdminSAMLHandler) Put(c *gin.Context) {
 	var req samlUpdateRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -228,17 +254,48 @@ func (h *AdminSAMLHandler) Put(c *gin.Context) {
 
 	config.ApplySAMLDefaults(cfg)
 
-	if err := h.repo.Save(c.Request.Context(), cfg); err != nil {
-		respondError(c, err)
-		return
+	// Static validation BEFORE persisting: a configuration that cannot serve a
+	// login should fail while the admin is still looking at the form, rather than
+	// at the first sign-in attempt.
+	//
+	// Disabling SSO is always allowed through. An admin must be able to switch it
+	// off — or to replace broken values — without the new values having to be
+	// valid first, and blocking a disable on a bad certificate would leave them
+	// stuck with the broken configuration they are trying to escape (ADR 0036 D7).
+	//
+	// The public base URL comes from settings, never from this request: the URL a
+	// user will actually sign in at must not depend on the name an admin happened
+	// to reach the panel by.
+	if cfg.Enabled {
+		report := auth.StaticPreflight(auth.PreflightInput{
+			Config:     cfg,
+			PanelPath:  currentPanelPath(c.Request),
+			PublicBase: resolveSubBase(c.Request.Context(), h.settings),
+		})
+		if !report.ConfigurationValid {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error":  "SAML configuration is not usable: " + report.FailureDetail(),
+				"failed": report.FailedChecks(),
+				"checks": report.Checks,
+			})
+			return
+		}
 	}
 
-	// Best-effort live reload: persistence already succeeded, so a bad SP
-	// build (eg. malformed cert) is reported but does not fail the request.
-	if err := h.saml.Reload(c.Request.Context(), cfg); err != nil {
+	// Persist and apply as ONE serialized operation. Two saves that each did
+	// Save-then-Reload could interleave and leave the database on the newer
+	// configuration while the process served the older one (ADR 0036 D6).
+	saved, applyErr := h.saml.SaveConfig(c.Request.Context(), cfg)
+	if !saved {
+		respondError(c, applyErr)
+		return
+	}
+	// Best-effort apply: persistence already succeeded, so a bad SP build (eg. a
+	// malformed cert) is reported but does not fail the request.
+	if applyErr != nil {
 		c.JSON(http.StatusOK, gin.H{
 			"saved":        true,
-			"reload_error": err.Error(),
+			"reload_error": applyErr.Error(),
 			"config":       toSAMLDTO(cfg),
 		})
 		return

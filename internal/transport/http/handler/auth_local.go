@@ -609,7 +609,10 @@ func (h *AuthLocalHandler) TwoFAPasskeyBegin(c *gin.Context) {
 	if !h.passkeyTwoFAAllowed(c, u, claims) {
 		return
 	}
-	opts, sessionID, err := h.passkey.BeginLoginForUser(c.Request.Context(), u.ID)
+	// The purpose is decided HERE, by which endpoint is running, and is bound to
+	// the challenge: a browser cannot present this ceremony as a step-up, and a
+	// step-up challenge cannot be completed here.
+	opts, sessionID, err := h.passkey.BeginLoginForUser(c.Request.Context(), u.ID, passkey.PurposeSecondFactor)
 	if err != nil {
 		respondError(c, err)
 		return
@@ -628,7 +631,7 @@ func (h *AuthLocalHandler) TwoFAPasskeyFinish(c *gin.Context) {
 	if !h.passkeyTwoFAAllowed(c, u, claims) {
 		return
 	}
-	if err := h.passkey.FinishLoginForUser(c.Request.Context(), u.ID, c.Query("session"), c.Request); err != nil {
+	if err := h.passkey.FinishLoginForUser(c.Request.Context(), u.ID, passkey.PurposeSecondFactor, c.Query("session"), c.Request); err != nil {
 		recordAuthEvent(c, h.authEvents, domain.AuthMethodPasskey, domain.AuthOutcomeFailure, u.ID, u.UPN, "2fa_passkey_invalid")
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Passkey verification failed"})
 		return

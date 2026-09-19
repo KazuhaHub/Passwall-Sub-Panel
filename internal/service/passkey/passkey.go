@@ -12,6 +12,7 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -95,24 +96,60 @@ func (s *Service) Passwordless(ctx context.Context) bool {
 	return err == nil && set.PasskeyEnabled && set.PasskeyPasswordless
 }
 
+// rpParams is the relying-party identity in force. digest binds a challenge to
+// it; the display name is branding and is deliberately not part of that digest.
+type rpParams struct {
+	id     string
+	origin string
+	digest string
+}
+
+// LoginPurpose names the allow-listed ceremony an assertion is being used for.
+//
+// The SERVER decides it at the call site. It is never taken from the request, so
+// a browser cannot promote a step-up ceremony into a full login — the two differ
+// in what the caller may do afterwards, not in how the assertion is verified.
+type LoginPurpose string
+
+const (
+	PurposeSecondFactor LoginPurpose = "login_second_factor"
+	PurposeStepUp       LoginPurpose = "step_up"
+)
+
+// challengePurpose maps the caller-facing purpose onto the store's, refusing an
+// unset one rather than defaulting to something permissive.
+func (p LoginPurpose) challengePurpose() (challengePurpose, error) {
+	switch p {
+	case PurposeSecondFactor:
+		return purposeLoginSecondFactor, nil
+	case PurposeStepUp:
+		return purposeStepUp, nil
+	default:
+		return "", fmt.Errorf("%w: unknown passkey login purpose %q", domain.ErrValidation, string(p))
+	}
+}
+
 // newWebAuthn builds the relying-party config from the configured subscription
 // base URL. RP ID is the bare hostname and the single allowed origin is the
 // scheme+host — deriving these from an attacker-controllable request Host header
 // would be the classic RP-ID poisoning hole, so an unconfigured base URL is a
 // hard error rather than a fallback.
-func (s *Service) newWebAuthn(ctx context.Context) (*webauthn.WebAuthn, error) {
+//
+// It returns the parameters alongside the handle so a caller can bind its
+// challenge to exactly the RP that was in force when it was issued.
+func (s *Service) newWebAuthn(ctx context.Context) (*webauthn.WebAuthn, rpParams, error) {
 	set, err := s.d.Settings.Load(ctx, ports.UISettings{})
 	if err != nil {
-		return nil, err
+		return nil, rpParams{}, err
 	}
 	rpID, origin, err := rpFromBaseURL(set.SubBaseURL)
 	if err != nil {
-		return nil, err
+		return nil, rpParams{}, err
 	}
-	display := set.BrandName()
-	return webauthn.New(&webauthn.Config{
+	params := rpParams{id: rpID, origin: origin, digest: rpDigestOf(rpID, origin)}
+	wa, err := webauthn.New(&webauthn.Config{
 		RPID:          rpID,
-		RPDisplayName: display,
+		RPDisplayName: set.BrandName(),
 		RPOrigins:     []string{origin},
 		AuthenticatorSelection: protocol.AuthenticatorSelection{
 			// Prefer a discoverable (resident) credential so usernameless login
@@ -122,6 +159,10 @@ func (s *Service) newWebAuthn(ctx context.Context) (*webauthn.WebAuthn, error) {
 			UserVerification: protocol.VerificationPreferred,
 		},
 	})
+	if err != nil {
+		return nil, rpParams{}, err
+	}
+	return wa, params, nil
 }
 
 // rpFromBaseURL derives the WebAuthn relying-party id (bare hostname, no port)
@@ -188,7 +229,7 @@ func (s *Service) BeginRegistration(ctx context.Context, userID int64) (*protoco
 	if !s.availableForUser(ctx, userID) {
 		return nil, "", fmt.Errorf("%w: passkeys are not enabled on this panel", domain.ErrForbidden)
 	}
-	wa, err := s.newWebAuthn(ctx)
+	wa, rp, err := s.newWebAuthn(ctx)
 	if err != nil {
 		return nil, "", err
 	}
@@ -203,7 +244,9 @@ func (s *Service) BeginRegistration(ctx context.Context, userID int64) (*protoco
 	if err != nil {
 		return nil, "", err
 	}
-	id, err := s.sessions.put(session)
+	id, err := s.sessions.put(session, challengeRequest{
+		purpose: purposeRegistration, userID: userID, rpDigest: rp.digest,
+	})
 	if err != nil {
 		return nil, "", err
 	}
@@ -217,13 +260,15 @@ func (s *Service) FinishRegistration(ctx context.Context, userID int64, sessionI
 	if !s.availableForUser(ctx, userID) {
 		return nil, fmt.Errorf("%w: passkeys are not enabled on this panel", domain.ErrForbidden)
 	}
-	session := s.sessions.take(sessionID)
-	if session == nil {
-		return nil, fmt.Errorf("%w: enrollment session expired; start again", domain.ErrValidation)
-	}
-	wa, err := s.newWebAuthn(ctx)
+	wa, rp, err := s.newWebAuthn(ctx)
 	if err != nil {
 		return nil, err
+	}
+	session, err := s.sessions.take(sessionID, challengeRequest{
+		purpose: purposeRegistration, userID: userID, rpDigest: rp.digest,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("%w: enrollment session is no longer usable; start again", domain.ErrValidation)
 	}
 	wu, _, err := s.loadUser(ctx, userID)
 	if err != nil {
@@ -261,7 +306,7 @@ func (s *Service) BeginLogin(ctx context.Context) (*protocol.PublicKeyCredential
 	if !s.Passwordless(ctx) {
 		return nil, "", fmt.Errorf("%w: passwordless passkey login is not enabled", domain.ErrForbidden)
 	}
-	wa, err := s.newWebAuthn(ctx)
+	wa, rp, err := s.newWebAuthn(ctx)
 	if err != nil {
 		return nil, "", err
 	}
@@ -281,7 +326,12 @@ func (s *Service) BeginLogin(ctx context.Context) (*protocol.PublicKeyCredential
 	if err != nil {
 		return nil, "", err
 	}
-	id, err := s.sessions.put(session)
+	// userID 0: a discoverable ceremony does not know the account until the
+	// credential comes back, so the challenge is bound to no account rather than
+	// to a guess.
+	id, err := s.sessions.put(session, challengeRequest{
+		purpose: purposeDiscoverableLogin, rpDigest: rp.digest,
+	})
 	if err != nil {
 		return nil, "", err
 	}
@@ -294,13 +344,15 @@ func (s *Service) FinishLogin(ctx context.Context, sessionID string, r *http.Req
 	if !s.Passwordless(ctx) {
 		return nil, fmt.Errorf("%w: passwordless passkey login is not enabled", domain.ErrForbidden)
 	}
-	session := s.sessions.take(sessionID)
-	if session == nil {
-		return nil, fmt.Errorf("%w: login session expired; try again", domain.ErrValidation)
-	}
-	wa, err := s.newWebAuthn(ctx)
+	wa, rp, err := s.newWebAuthn(ctx)
 	if err != nil {
 		return nil, err
+	}
+	session, err := s.sessions.take(sessionID, challengeRequest{
+		purpose: purposeDiscoverableLogin, rpDigest: rp.digest,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("%w: login session is no longer usable; try again", domain.ErrValidation)
 	}
 
 	// resolved is captured by the handler so we can write back the gated sign
@@ -340,11 +392,15 @@ func (s *Service) FinishLogin(ctx context.Context, sessionID string, r *http.Req
 // (discoverable/usernameless), it only needs the enrollment master switch, not
 // passwordless, and it errors if the user has no passkeys. Returns request
 // options (with the user's credentials as the allow-list) + a session id.
-func (s *Service) BeginLoginForUser(ctx context.Context, userID int64) (*protocol.PublicKeyCredentialRequestOptions, string, error) {
+func (s *Service) BeginLoginForUser(ctx context.Context, userID int64, purpose LoginPurpose) (*protocol.PublicKeyCredentialRequestOptions, string, error) {
+	storePurpose, err := purpose.challengePurpose()
+	if err != nil {
+		return nil, "", err
+	}
 	if !s.availableForUser(ctx, userID) {
 		return nil, "", fmt.Errorf("%w: passkeys are not enabled on this panel", domain.ErrForbidden)
 	}
-	wa, err := s.newWebAuthn(ctx)
+	wa, rp, err := s.newWebAuthn(ctx)
 	if err != nil {
 		return nil, "", err
 	}
@@ -359,7 +415,11 @@ func (s *Service) BeginLoginForUser(ctx context.Context, userID int64) (*protoco
 	if err != nil {
 		return nil, "", err
 	}
-	id, err := s.sessions.put(session)
+	// The purpose and the account are both bound to the challenge: this ceremony
+	// must not be completed as a different one, or for a different user.
+	id, err := s.sessions.put(session, challengeRequest{
+		purpose: storePurpose, userID: userID, rpDigest: rp.digest,
+	})
 	if err != nil {
 		return nil, "", err
 	}
@@ -370,17 +430,23 @@ func (s *Service) BeginLoginForUser(ctx context.Context, userID int64) (*protoco
 // credentials (the 2FA-step counterpart of FinishLogin). The userID comes from a
 // verified pending token, so this never resolves identity from the assertion. On
 // success it rejects a cloned authenticator and advances the gated sign count.
-func (s *Service) FinishLoginForUser(ctx context.Context, userID int64, sessionID string, r *http.Request) error {
+func (s *Service) FinishLoginForUser(ctx context.Context, userID int64, purpose LoginPurpose, sessionID string, r *http.Request) error {
+	storePurpose, err := purpose.challengePurpose()
+	if err != nil {
+		return err
+	}
 	if !s.availableForUser(ctx, userID) {
 		return fmt.Errorf("%w: passkeys are not enabled on this panel", domain.ErrForbidden)
 	}
-	session := s.sessions.take(sessionID)
-	if session == nil {
-		return fmt.Errorf("%w: login session expired; try again", domain.ErrValidation)
-	}
-	wa, err := s.newWebAuthn(ctx)
+	wa, rp, err := s.newWebAuthn(ctx)
 	if err != nil {
 		return err
+	}
+	session, err := s.sessions.take(sessionID, challengeRequest{
+		purpose: storePurpose, userID: userID, rpDigest: rp.digest,
+	})
+	if err != nil {
+		return fmt.Errorf("%w: login session is no longer usable; try again", domain.ErrValidation)
 	}
 	wu, stored, err := s.loadUser(ctx, userID)
 	if err != nil {
@@ -411,10 +477,14 @@ func (s *Service) FinishLoginForUser(ctx context.Context, userID int64, sessionI
 // cred.Authenticator.CloneWarning and keeps the OLD count (and deliberately
 // exempts the all-zero case, so platform authenticators that always report
 // counter 0 are not falsely flagged). So CloneWarning — not the DB gate — is the
-// real clone guard; refuse the login when it's set. The gated UpdateAfterLogin
-// then keeps the stored count monotonic, but a lost gate there is a benign
-// concurrent-login race (another login already advanced it), not a clone, so it
-// must NOT fail the login.
+// real clone guard; refuse the login when it's set.
+//
+// The gated write keeps the stored count monotonic, and when its gate refuses the
+// write the cause has to be looked up rather than assumed. A concurrent login
+// that stored at least this count is benign; a credential that was revoked
+// between verification and here is not, and silently continuing would let an
+// administrator's revoke fail to take effect on a login that was already in
+// flight (ADR 0036 §7.3).
 func (s *Service) finalizeAssertion(ctx context.Context, stored *domain.PasskeyCredential, cred *webauthn.Credential) error {
 	if cred.Authenticator.CloneWarning {
 		return fmt.Errorf("%w: authenticator state regression (possible clone or replay)", domain.ErrUnauthorized)
@@ -423,9 +493,38 @@ func (s *Service) finalizeAssertion(ctx context.Context, stored *domain.PasskeyC
 	if err != nil {
 		return err
 	}
-	if _, err := s.d.Creds.UpdateAfterLogin(ctx, stored.ID, raw, int64(cred.Authenticator.SignCount), s.now()); err != nil {
+	presented := int64(cred.Authenticator.SignCount)
+	applied, err := s.d.Creds.UpdateAfterLogin(ctx, stored.ID, raw, presented, s.now())
+	if err != nil {
 		return err
 	}
+	if applied {
+		return nil
+	}
+
+	// The gate refused the write. Only a look can say which of the two causes it
+	// was, and the two mean opposite things.
+	current, err := s.d.Creds.FindByCredentialID(ctx, stored.CredentialID)
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			return fmt.Errorf("%w: the credential was revoked during the login", domain.ErrUnauthorized)
+		}
+		// An unreadable credential is an infrastructure failure, and saying
+		// "unauthorized" for it would teach an operator to distrust the word.
+		return fmt.Errorf("passkey: re-reading the credential after a refused write gate: %w", err)
+	}
+	if current == nil || current.ID != stored.ID || current.UserID != stored.UserID {
+		// Another row owns this credential ID now, or the row moved to a different
+		// account. Either way the assertion does not belong to it.
+		return fmt.Errorf("%w: the credential no longer belongs to the verified account", domain.ErrUnauthorized)
+	}
+	if current.SignCount < presented {
+		// The gate should have matched a count this far behind, so its refusal came
+		// from something other than a concurrent advance. Refuse rather than guess.
+		return fmt.Errorf("%w: the stored sign count is behind this assertion with no concurrent advance", domain.ErrUnauthorized)
+	}
+	// A concurrent login got there first and stored at least this count: the
+	// monotonicity the gate exists to keep, and not a clone.
 	return nil
 }
 

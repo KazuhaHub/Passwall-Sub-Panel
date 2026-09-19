@@ -181,3 +181,109 @@ func TestSAMLReplayRepo_BlankIDIsIgnored(t *testing.T) {
 		t.Fatalf("blank id: seen=%v err=%v", seen, err)
 	}
 }
+
+// Takeover of a closed-window row must be conditional on the row STILL being
+// closed. Both calls below carry the same stale observation "this row was
+// expired"; only the first may win. An unconditional UPDATE would report
+// RowsAffected == 1 to both, so two concurrent recyclers would both be told
+// "first" — the same defect the insert path avoids via the primary key
+// (ADR 0036 D5).
+func TestSAMLReplayRepo_TakeoverIsConditionalOnTheRowStillBeingExpired(t *testing.T) {
+	r := newSAMLReplayRepo(t)
+	ctx := context.Background()
+	now := time.Now()
+
+	// Seed a row whose window has already closed.
+	if _, err := r.SeenOrAdd(ctx, "recycled", now.Add(-time.Minute), now.Add(-2*time.Minute)); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	ok, err := r.takeOverExpiredRow(ctx, "recycled", now.Add(5*time.Minute), now)
+	if err != nil {
+		t.Fatalf("first takeover: %v", err)
+	}
+	if !ok {
+		t.Fatal("first takeover was refused; a recycled ID would lock the user out")
+	}
+
+	ok, err = r.takeOverExpiredRow(ctx, "recycled", now.Add(5*time.Minute), now)
+	if err != nil {
+		t.Fatalf("second takeover: %v", err)
+	}
+	if ok {
+		t.Fatal("a second takeover of the same row was admitted; concurrent recyclers would both be told \"first\"")
+	}
+}
+
+// Concurrent recyclers of one expired ID: exactly one is admitted. This is the
+// queue-level counterpart of the deterministic test above, and it is the one
+// that would catch a regression on a database that actually runs the racers in
+// parallel (MySQL, PostgreSQL).
+func TestSAMLReplayRepo_ConcurrentTakeoverAdmitsExactlyOne(t *testing.T) {
+	r := newSAMLReplayRepo(t)
+	ctx := context.Background()
+	now := time.Now()
+
+	if _, err := r.SeenOrAdd(ctx, "recycled-race", now.Add(-time.Minute), now.Add(-2*time.Minute)); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	later := now.Add(10 * time.Minute)
+	exp := later.Add(5 * time.Minute)
+
+	const racers = 8
+	var (
+		wg       sync.WaitGroup
+		mu       sync.Mutex
+		accepted int
+	)
+	for i := 0; i < racers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			seen, err := r.SeenOrAdd(ctx, "recycled-race", exp, later)
+			if err != nil {
+				return // a busy-DB error is not an acceptance
+			}
+			if !seen {
+				mu.Lock()
+				accepted++
+				mu.Unlock()
+			}
+		}()
+	}
+	wg.Wait()
+	if accepted != 1 {
+		t.Fatalf("takeover admitted %d concurrent submissions, want exactly 1", accepted)
+	}
+}
+
+// The read-back after a conflict has three outcomes with three different
+// meanings, and conflating them is a real bug: a vanished row is a replay (the
+// safe direction), a read failure is an infrastructure fault that must be
+// reportable, and neither may be reported as the other.
+func TestSAMLReplayRepo_ExistingRowReadDistinguishesMissingFromBroken(t *testing.T) {
+	r := newSAMLReplayRepo(t)
+	ctx := context.Background()
+
+	if _, found, err := readExistingRow(ctx, r.db, "absent"); err != nil || found {
+		t.Fatalf("absent row: found=%v err=%v, want found=false err=nil", found, err)
+	}
+
+	sqlDB, err := r.db.DB()
+	if err != nil {
+		t.Fatalf("db handle: %v", err)
+	}
+	if err := sqlDB.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	if _, found, err := readExistingRow(ctx, r.db, "absent"); err == nil {
+		t.Fatalf("a broken database was reported as found=%v err=nil; a read failure must not look like a missing row", found)
+	}
+
+	// The public contract too: an unusable store must never be presented as
+	// "already consumed" or as an acceptance, only as an error.
+	if seen, err := r.SeenOrAdd(ctx, "x", time.Now().Add(time.Minute), time.Now()); err == nil {
+		t.Fatalf("SeenOrAdd on a broken store returned seen=%v with no error", seen)
+	}
+}

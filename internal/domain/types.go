@@ -1048,6 +1048,44 @@ type PasskeyCredential struct {
 	LastUsedAt   *time.Time
 }
 
+// SAMLLoginRequest is one SP-initiated SAML login: the server-side record that
+// makes "we really did start this login, in this browser, under this
+// configuration" a fact rather than a claim the request makes about itself.
+//
+// Only hashes are stored. RelayState round-trips through the IdP and is
+// therefore attacker-controlled, so the raw token is never persisted — a stolen
+// database row must not be replayable as a login — and the browser binding
+// random is likewise kept only as a digest.
+type SAMLLoginRequest struct {
+	// TokenHash is SHA-256 hex of the RelayState token, and the primary key.
+	TokenHash string
+	// BrowserHash is SHA-256 hex of the per-request binding random that is also
+	// set as a host-only cookie. A different browser holding the same token
+	// cannot complete the login without it.
+	BrowserHash string
+	// RequestID is the AuthnRequest ID. The ACS passes exactly this value as the
+	// only possible request ID, so a Response cannot nominate its own.
+	RequestID string
+	// ConfigDigest is a deterministic digest of the effective SAML
+	// configuration at the moment the login started, so a request begun under
+	// one set of trust and mapping rules cannot be completed under another.
+	ConfigDigest string
+	// ReturnTo is an already-sanitised in-site path. It is re-sanitised before
+	// the redirect, and it never comes from the ACS payload.
+	ReturnTo string
+	// CreatedAt and ExpiresAt are UTC. ExpiresAt is the only expiry that counts;
+	// a cookie's MaxAge is browser housekeeping.
+	CreatedAt time.Time
+	ExpiresAt time.Time
+	// ConsumedAt is set when the request is claimed. Consumed rows are kept
+	// until the window closes, so a replayed POST lands on "already used"
+	// rather than "unknown token".
+	ConsumedAt *time.Time
+}
+
+// Consumed reports whether this request has already been claimed.
+func (r *SAMLLoginRequest) Consumed() bool { return r != nil && r.ConsumedAt != nil }
+
 // GeoLocation is a resolved geolocation for an IP. Empty fields mean
 // "unknown" (private/reserved IP, lookup disabled, or provider failure).
 // CountryCode is ISO 3166-1 alpha-2 (e.g. "HK"); the frontend renders the

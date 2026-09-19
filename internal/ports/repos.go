@@ -1701,6 +1701,37 @@ type SAMLReplayRepo interface {
 	DeleteExpired(ctx context.Context, now time.Time) (int64, error)
 }
 
+// SAMLRequestRepo is the server-side record of SP-initiated SAML logins. It
+// exists because RelayState round-trips through the IdP and is therefore
+// attacker-controlled: without a record, "we started this login" is a claim the
+// request makes about itself, and the AuthnRequest ID it carries is just a
+// string the attacker also controls (ADR 0036 D2).
+type SAMLRequestRepo interface {
+	// Create records a new login request. A duplicate TokenHash is an error:
+	// the token is 32 random bytes, so a collision means a broken source of
+	// randomness or a caller recycling a token, and neither should be papered
+	// over.
+	Create(ctx context.Context, req *domain.SAMLLoginRequest) error
+
+	// Consume atomically claims the request and returns it, or returns
+	// domain.ErrSAMLRequestInvalid.
+	//
+	// The claim requires the token hash, browser hash and config digest to ALL
+	// match, the row to be unconsumed, and the window to still be open — as one
+	// conditional statement. A read followed by an unconditional write would let
+	// two concurrent ACS posts both believe they had claimed it, which is the
+	// same defect the replay set avoids via its primary key.
+	//
+	// A failed claim leaves the row untouched, so a wrong guess cannot burn the
+	// legitimate browser's request.
+	Consume(ctx context.Context, tokenHash, browserHash, configDigest string, now time.Time) (*domain.SAMLLoginRequest, error)
+
+	// DeleteExpired drops requests whose window has closed. Consumed rows are
+	// kept until then on purpose: that is what makes a replayed POST report
+	// "already used" instead of "unknown token".
+	DeleteExpired(ctx context.Context, now time.Time) (int64, error)
+}
+
 // SAMLConfigRepo persists the panel's SAML/SSO configuration in the
 // relational DB so admin can edit it from the panel without shell access.
 type SAMLConfigRepo interface {
@@ -1750,6 +1781,7 @@ type Repos struct {
 	Mail                    MailRepo
 	SAMLConfig              SAMLConfigRepo
 	SAMLReplay              SAMLReplayRepo
+	SAMLRequest             SAMLRequestRepo
 	OIDCConfig              OIDCConfigRepo
 
 	Certificate   CertificateRepo

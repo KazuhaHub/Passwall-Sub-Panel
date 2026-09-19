@@ -5,6 +5,8 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 )
 
 type fakeReplayStore struct {
@@ -20,70 +22,89 @@ func (f *fakeReplayStore) SeenOrAdd(context.Context, string, time.Time, time.Tim
 
 func (f *fakeReplayStore) DeleteExpired(context.Context, time.Time) (int64, error) { return 0, nil }
 
-// With no durable store the service must behave exactly as it did before the
-// table existed: process-local protection, still catching a double submit.
-func TestAssertionAlreadyConsumed_NoStoreUsesMemoryCache(t *testing.T) {
-	s := &SAMLService{}
-	now := time.Now()
-	exp := now.Add(5 * time.Minute)
-
-	if s.assertionAlreadyConsumed(context.Background(), "a1", exp, now) {
-		t.Fatal("first submission reported as replay")
-	}
-	if !s.assertionAlreadyConsumed(context.Background(), "a1", exp, now.Add(time.Second)) {
-		t.Fatal("second submission not detected without a store")
-	}
-}
-
-// The durable store is authoritative for IDs this process never saw — the
-// restart / second-instance case.
-func TestAssertionAlreadyConsumed_StoreCatchesUnseenID(t *testing.T) {
-	store := &fakeReplayStore{seen: true}
+func TestAssertNotConsumed_FirstSightingIsAdmitted(t *testing.T) {
+	store := &fakeReplayStore{seen: false}
 	s := &SAMLService{}
 	s.SetReplayStore(store)
-	now := time.Now()
 
-	// Memory cache is empty for this ID, so only the store can reject it.
-	if !s.assertionAlreadyConsumed(context.Background(), "never-seen-here", now.Add(5*time.Minute), now) {
-		t.Fatal("store-reported replay was not honoured")
+	if err := s.assertNotConsumed(context.Background(), "a1", time.Now().Add(5*time.Minute), time.Now()); err != nil {
+		t.Fatalf("first sighting refused: %v", err)
 	}
 	if store.calls != 1 {
 		t.Fatalf("store consulted %d times, want 1", store.calls)
 	}
 }
 
-// A store error must degrade to the in-memory answer — never weaker than the
-// pre-existing behaviour, and never a hard lockout of all SSO logins.
-func TestAssertionAlreadyConsumed_StoreErrorFallsBackToMemory(t *testing.T) {
-	store := &fakeReplayStore{err: errors.New("db down")}
+// The durable store is authoritative for IDs this process never saw — the
+// restart / second-instance case.
+func TestAssertNotConsumed_StoreCatchesUnseenID(t *testing.T) {
+	store := &fakeReplayStore{seen: true}
 	s := &SAMLService{}
 	s.SetReplayStore(store)
-	now := time.Now()
-	exp := now.Add(5 * time.Minute)
 
-	// First submission still admitted: a DB blip must not lock everyone out.
-	if s.assertionAlreadyConsumed(context.Background(), "a2", exp, now) {
-		t.Fatal("first submission rejected while the store was erroring")
+	err := s.assertNotConsumed(context.Background(), "never-seen-here", time.Now().Add(5*time.Minute), time.Now())
+	if err == nil {
+		t.Fatal("store-reported replay was not honoured")
 	}
-	// ...but the process-local cache still catches the replay.
-	if !s.assertionAlreadyConsumed(context.Background(), "a2", exp, now.Add(time.Second)) {
-		t.Fatal("replay slipped through while the store was erroring — fallback is weaker than the old behaviour")
+	if !errors.Is(err, ErrSAMLAssertionReplayed) {
+		t.Fatalf("a replay should be reported as one, got %v", err)
 	}
 }
 
-// Even when the store reports "not seen" (for example its row was swept), a
-// same-process double submit must still be caught by the memory cache.
-func TestAssertionAlreadyConsumed_MemoryCatchesWhatStoreMisses(t *testing.T) {
-	store := &fakeReplayStore{seen: false}
+// Supersedes TestAssertionAlreadyConsumed_StoreErrorFallsBackToMemory
+// (ADR 0023 item 3). ADR 0036 D1 flips that decision: accepting a login asserts
+// the assertion has not been used before, and a process-local answer cannot
+// support that assertion across a restart or a second instance — which is the
+// whole reason the durable set exists.
+//
+// The in-process cache is therefore gone from the decision path entirely, so
+// this is not a "slower fallback", it is a refusal.
+func TestAssertNotConsumed_StoreErrorRefusesInsteadOfFallingBackToMemory(t *testing.T) {
+	store := &fakeReplayStore{err: errors.New("db down")}
 	s := &SAMLService{}
 	s.SetReplayStore(store)
-	now := time.Now()
-	exp := now.Add(5 * time.Minute)
 
-	if s.assertionAlreadyConsumed(context.Background(), "a3", exp, now) {
-		t.Fatal("first submission reported as replay")
+	err := s.assertNotConsumed(context.Background(), "a2", time.Now().Add(5*time.Minute), time.Now())
+	if err == nil {
+		t.Fatal("a store failure admitted the login; the replay question could not be answered")
 	}
-	if !s.assertionAlreadyConsumed(context.Background(), "a3", exp, now.Add(time.Second)) {
-		t.Fatal("memory cache did not catch a replay the store missed")
+	if !errors.Is(err, domain.ErrUnavailable) {
+		t.Fatalf("a store failure must be classifiable as unavailable, got %v", err)
+	}
+}
+
+// Supersedes TestAssertionAlreadyConsumed_NoStoreUsesMemoryCache and
+// TestAssertionAlreadyConsumed_MemoryCatchesWhatStoreMisses (ADR 0023 item 4).
+// A missing store is an assembly error, not a silent degradation: with no
+// durable set there is no answer that survives a restart, so there is no safe
+// answer at all.
+func TestAssertNotConsumed_MissingStoreRefuses(t *testing.T) {
+	s := &SAMLService{} // deliberately not wired
+
+	err := s.assertNotConsumed(context.Background(), "a3", time.Now().Add(5*time.Minute), time.Now())
+	if err == nil {
+		t.Fatal("a login was admitted with no durable replay store configured")
+	}
+	if !errors.Is(err, domain.ErrUnavailable) {
+		t.Fatalf("a missing store must be classifiable as unavailable, got %v", err)
+	}
+}
+
+// A replay and a storage fault mean opposite things and must stay separable:
+// one is an attack to alert on, the other is an outage to fix, and an operator
+// seeing "replay" for both would eventually stop trusting the signal.
+func TestAssertNotConsumed_ReplayIsDistinctFromStorageFailure(t *testing.T) {
+	replay := &SAMLService{}
+	replay.SetReplayStore(&fakeReplayStore{seen: true})
+	err := replay.assertNotConsumed(context.Background(), "a4", time.Now().Add(5*time.Minute), time.Now())
+	if err == nil || errors.Is(err, domain.ErrUnavailable) {
+		t.Fatalf("a replayed assertion must not look like a storage outage: %v", err)
+	}
+
+	outage := &SAMLService{}
+	outage.SetReplayStore(&fakeReplayStore{err: errors.New("db down")})
+	err = outage.assertNotConsumed(context.Background(), "a4", time.Now().Add(5*time.Minute), time.Now())
+	if err == nil || errors.Is(err, ErrSAMLAssertionReplayed) {
+		t.Fatalf("a storage outage must not look like a replay: %v", err)
 	}
 }

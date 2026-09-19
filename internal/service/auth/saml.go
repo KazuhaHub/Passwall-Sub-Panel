@@ -7,6 +7,7 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -18,10 +19,60 @@ import (
 	"github.com/crewjam/saml"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/config"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/log"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/safego"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/samlguard"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 )
+
+// The replay record's window, in two parts.
+//
+// samlReplayFloor covers an assertion that carries neither a Conditions window nor
+// a SubjectConfirmationData one. crewjam would already have rejected such an
+// assertion, so this exists only so the record is not immediately collectable.
+//
+// samlReplayExpiryMargin sits on top of crewjam's own MaxClockSkew. It is a named
+// constant rather than a literal because it is half of an equality: the
+// replacement line computes the same window from the same inputs, and a drift
+// would silently reopen a replay window on one side of the switch.
+const (
+	samlReplayFloor        = 5 * time.Minute
+	samlReplayExpiryMargin = time.Minute
+)
+
+// samlReplayExpiry computes how long an assertion's ID must be remembered: the
+// LATEST of its Conditions.NotOnOrAfter and every SubjectConfirmationData's
+// NotOnOrAfter — crewjam enforces both, so an attacker gets the benefit of
+// whichever is later — plus crewjam's clock skew, since it accepts the assertion
+// until NotOnOrAfter+skew, plus the margin.
+//
+// Missing only one of the two windows is the case the previous implementation got
+// wrong: it read Conditions alone, so an assertion whose SubjectConfirmationData
+// outlived its Conditions would have its record expire while crewjam would still
+// accept a second presentation (ADR 0036 D4).
+func samlReplayExpiry(a *saml.Assertion, now time.Time) time.Time {
+	latest := now.Add(samlReplayFloor)
+	if a.Conditions != nil && !a.Conditions.NotOnOrAfter.IsZero() && a.Conditions.NotOnOrAfter.After(latest) {
+		latest = a.Conditions.NotOnOrAfter
+	}
+	if a.Subject != nil {
+		for _, sc := range a.Subject.SubjectConfirmations {
+			if sc.SubjectConfirmationData != nil && !sc.SubjectConfirmationData.NotOnOrAfter.IsZero() &&
+				sc.SubjectConfirmationData.NotOnOrAfter.After(latest) {
+				latest = sc.SubjectConfirmationData.NotOnOrAfter
+			}
+		}
+	}
+	return latest.Add(saml.MaxClockSkew).Add(samlReplayExpiryMargin)
+}
+
+// ErrSAMLAssertionReplayed marks a Response whose assertion ID the durable set
+// has already consumed inside its validity window. It is deliberately NOT a
+// domain.ErrUnavailable: a replay is an attack signal an operator should alert
+// on, an unavailable store is an outage signal to fix, and folding them
+// together would make both unreadable.
+var ErrSAMLAssertionReplayed = errors.New("saml: assertion already consumed")
 
 // SAMLService is a thin wrapper around crewjam/saml's ServiceProvider that
 // exposes only what the panel's HTTP handlers need: AuthnRequest URL,
@@ -31,122 +82,187 @@ import (
 // by StartMetadataRefresh so IdP-side certificate rotations are picked up
 // without restarting the panel.
 type SAMLService struct {
-	cfg *config.SAMLConfig
-	mu  sync.RWMutex
-	sp  *saml.ServiceProvider
-	// replay tracks Assertion IDs we've already accepted in the recent
-	// past so a stolen SAMLResponse can't be replayed inside its
-	// signature-validity window. crewjam/saml validates NotBefore /
-	// NotOnOrAfter and the signature, but does not maintain a
-	// consumed-ID set.
-	replay assertionReplayCache
-	// replayStore is the DURABLE consumed-ID set. The in-memory cache above
-	// only protects one running process, so on its own it leaves two windows
-	// open: a restart forgets every consumed ID, and a second panel instance
-	// never learns what the first consumed. When this is non-nil it is the
-	// authority; the memory cache stays as the fallback for the nil case and
-	// for transient DB errors. May be nil (tests, DB-less construction).
+	mu sync.RWMutex
+	// applyMu serializes configuration applications. It is deliberately NOT mu:
+	// mu guards the pointer swap and must never be held across an IdP metadata
+	// fetch, or every login would queue behind the network. Holding applyMu across
+	// build-then-publish is what makes generation numbers strictly increasing and
+	// keeps a slow build from landing after a newer configuration.
+	applyMu sync.Mutex
+	// snap is the current immutable generation of runtime state. A request reads
+	// it ONCE and works from that value, so a configuration change mid-flight
+	// cannot pair one generation's trust anchor with another's mapping rules
+	// (ADR 0036 D6). It is replaced wholesale, never mutated in place.
+	snap *samlSnapshot
+	// replayStore is the durable consumed-assertion set and the ONLY replay
+	// authority. crewjam/saml validates NotBefore / NotOnOrAfter and the
+	// signature but keeps no consumed-ID set of its own, and a process-local one
+	// cannot answer "has this assertion been used before" across a restart or a
+	// second instance — so it is not kept as a fallback (ADR 0036 D1). Wired by
+	// SetReplayStore at startup; nil means every login is refused rather than
+	// silently unchecked.
 	replayStore ports.SAMLReplayRepo
+	// requestStore is the durable record of logins this panel started. It is what
+	// makes "we began this login, in this browser, under this configuration" a
+	// server-side fact rather than a claim RelayState makes about itself
+	// (ADR 0036 D2). Wired by SetSAMLRequestStore; nil refuses every login.
+	requestStore ports.SAMLRequestRepo
+	// clockFn is the clock, injectable so the replay-window branches can be tested
+	// at their boundaries rather than only around the current instant.
+	clockFn func() time.Time
+	// configRepo lets SaveConfig persist and apply under one lock. Optional: a
+	// service built without it can still Reload a configuration the caller
+	// persisted itself, which is what the tests and the boot path do.
+	configRepo ports.SAMLConfigRepo
+}
+
+// samlSnapshot is one generation of SAML runtime state. cfg and sp are published
+// together or not at all — the invariant D6 exists for is that a new set of
+// mapping rules is never paired with an old trust anchor, or the reverse.
+type samlSnapshot struct {
+	cfg    *config.SAMLConfig
+	digest string
+	// generation increments on every application of a configuration. A metadata
+	// refresh carries the generation it started under, so a slow response for a
+	// configuration the admin has since replaced cannot publish itself.
+	generation uint64
+	sp         *saml.ServiceProvider
+}
+
+// enabled reports whether this generation can serve a login at all. A generation
+// whose provider failed to build is disabled rather than falling back to an
+// earlier one.
+func (g *samlSnapshot) enabled() bool {
+	return g != nil && g.cfg != nil && g.cfg.Enabled && g.sp != nil && g.sp.IDPMetadata != nil
+}
+
+// now reads the clock, defaulting to the wall clock when none is injected.
+func (s *SAMLService) now() time.Time {
+	if s != nil && s.clockFn != nil {
+		return s.clockFn()
+	}
+	return time.Now()
+}
+
+// snapshot returns the current generation. Callers must take it once and use
+// that value for the whole operation.
+func (s *SAMLService) snapshot() *samlSnapshot {
+	if s == nil {
+		return nil
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.snap
 }
 
 // SetReplayStore installs the durable replay set. Wired in app startup once the
-// repositories exist; safe to leave unset, in which case replay protection
-// degrades to the process-local cache (pre-existing behaviour).
+// repositories exist, and REQUIRED whenever SAML is enabled: leaving it unset
+// refuses every login rather than degrading to process-local protection.
 func (s *SAMLService) SetReplayStore(r ports.SAMLReplayRepo) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.replayStore = r
 }
 
-// assertionAlreadyConsumed reports whether this assertion ID has already been
-// spent. It ALWAYS records into the in-memory cache (cheap, and it keeps
-// single-process protection intact no matter what the database does), then lets
-// the durable store override the answer when one is configured.
+// assertNotConsumed records the assertion ID and returns nil only when the
+// login may proceed. Three outcomes, three classes:
 //
-// On a store error the durable answer is unavailable, and the two options are
-// to fail the login or to fall back to the memory result. Falling back is
-// chosen deliberately: a transient DB blip would otherwise lock every SSO user
-// out, and the fallback is exactly the protection level that shipped before
-// this table existed — never weaker. The error is logged at ERROR so the
-// degradation is visible rather than silent.
-func (s *SAMLService) assertionAlreadyConsumed(ctx context.Context, id string, expiresAt, now time.Time) bool {
-	memorySeen := s.replay.SeenOrAdd(id, expiresAt, now)
-
+//	nil                        — not seen before; the assertion is now recorded
+//	ErrSAMLAssertionReplayed   — already used inside its window (an attack signal)
+//	domain.ErrUnavailable      — the question could not be answered (an outage signal)
+//
+// It returns an error rather than a bool deliberately. A bool has a fail-open
+// spelling, and for a replay check the fail-open direction is an accepted
+// replay, so the shape of the return value is part of the control (ADR 0036 D1).
+func (s *SAMLService) assertNotConsumed(ctx context.Context, id string, expiresAt, now time.Time) error {
 	s.mu.RLock()
 	store := s.replayStore
 	s.mu.RUnlock()
 	if store == nil {
-		return memorySeen
+		// Answer "unavailable", never "not seen". A missing store is an assembly
+		// error, and with no durable set there is no answer that survives a
+		// restart — so there is no safe answer at all.
+		return fmt.Errorf("%w: no durable assertion-replay store is configured", domain.ErrUnavailable)
 	}
-
 	seen, err := store.SeenOrAdd(ctx, id, expiresAt, now)
 	if err != nil {
-		log.Error("saml: durable replay check failed, falling back to in-process cache "+
-			"(replay protection is process-local until the store recovers)",
-			"assertion_id", id, "err", err)
-		return memorySeen
+		// Propagate as its own class and do NOT consult anything process-local.
+		// A fallback here would leave a database outage indistinguishable from
+		// normal operation while quietly downgrading replay protection to one
+		// process, which is exactly the trade ADR 0036 D1 reverses.
+		return fmt.Errorf("%w: replay store: %w", domain.ErrUnavailable, err)
 	}
-	// Either source claiming the ID is enough: the memory cache catches a
-	// same-process double submit even if the row was swept, and the store
-	// catches submits this process never saw.
-	return seen || memorySeen
+	if seen {
+		return ErrSAMLAssertionReplayed
+	}
+	return nil
 }
 
 // NewSAML constructs the service. If cfg.Enabled is false, the returned
-// service is a no-op whose Enabled() reports false and whose other methods
-// return errors. If IdP metadata cannot be fetched at construction, the
-// service stays disabled until StartMetadataRefresh succeeds.
+// service reports Enabled() false and whose other methods return errors. If IdP
+// metadata cannot be fetched at construction, the first generation exists with
+// no provider and stays disabled until StartMetadataRefresh succeeds.
 func NewSAML(cfg *config.SAMLConfig) (*SAMLService, error) {
-	s := &SAMLService{cfg: cfg}
+	s := &SAMLService{snap: &samlSnapshot{cfg: cfg, digest: SAMLConfigDigest(cfg), generation: 1}}
 	if cfg == nil || !cfg.Enabled {
 		return s, nil
 	}
-	if err := s.buildSP(context.Background()); err != nil {
-		log.Warn("saml: initial SP build failed, will retry on metadata refresh", "err", err)
+	sp, err := buildProvider(context.Background(), cfg)
+	if err != nil {
+		// The generation exists but carries no provider: SAML is unusable until a
+		// refresh succeeds. It is recorded as exactly that rather than as a
+		// configuration with a stale provider.
+		log.Warn("saml: initial provider build failed, will retry on metadata refresh", "err", err)
+		return s, nil
 	}
+	s.snap.sp = sp
 	return s, nil
 }
 
-func (s *SAMLService) buildSP(ctx context.Context) error {
-	s.mu.RLock()
-	cfg := s.cfg
-	s.mu.RUnlock()
+// buildProvider fetches the IdP metadata and constructs a provider from one
+// configuration. It touches no service state, which is what lets Reload build a
+// candidate outside the lock and publish it only if it succeeded.
+func buildProvider(ctx context.Context, cfg *config.SAMLConfig) (*saml.ServiceProvider, error) {
+	idpMeta, err := fetchIDPMetadata(ctx, cfg.IDP.MetadataURL)
+	if err != nil {
+		return nil, fmt.Errorf("fetch IdP metadata: %w", err)
+	}
+	return newProvider(cfg, idpMeta)
+}
+
+// newProvider is the pure half: it parses the SP key material and assembles the
+// provider from an already-fetched metadata document. No I/O, so it is safe to
+// call while holding a lock, which the metadata-refresh retry path relies on.
+func newProvider(cfg *config.SAMLConfig, idpMeta *saml.EntityDescriptor) (*saml.ServiceProvider, error) {
 	if cfg == nil {
-		return fmt.Errorf("saml config not set")
+		return nil, fmt.Errorf("saml config not set")
 	}
 	certPEM := []byte(cfg.SP.CertPEM)
 	keyPEM := []byte(cfg.SP.KeyPEM)
 	if len(certPEM) == 0 || len(keyPEM) == 0 {
-		return fmt.Errorf("SP cert/key PEM not provided")
+		return nil, fmt.Errorf("SP cert/key PEM not provided")
 	}
 	keyPair, err := tls.X509KeyPair(certPEM, keyPEM)
 	if err != nil {
-		return fmt.Errorf("parse SP keypair: %w", err)
+		return nil, fmt.Errorf("parse SP keypair: %w", err)
 	}
 	if len(keyPair.Certificate) == 0 {
-		return fmt.Errorf("SP cert has no entries")
+		return nil, fmt.Errorf("SP cert has no entries")
 	}
 	leaf, err := x509.ParseCertificate(keyPair.Certificate[0])
 	if err != nil {
-		return fmt.Errorf("parse SP cert: %w", err)
+		return nil, fmt.Errorf("parse SP cert: %w", err)
 	}
 	priv, ok := keyPair.PrivateKey.(*rsa.PrivateKey)
 	if !ok {
-		return fmt.Errorf("SP private key must be RSA")
+		return nil, fmt.Errorf("SP private key must be RSA")
 	}
 	acsURL, err := url.Parse(cfg.SP.ACSURL)
 	if err != nil {
-		return fmt.Errorf("parse ACS URL: %w", err)
+		return nil, fmt.Errorf("parse ACS URL: %w", err)
 	}
 
-	idpMeta, err := fetchIDPMetadata(ctx, cfg.IDP.MetadataURL)
-	if err != nil {
-		return fmt.Errorf("fetch IdP metadata: %w", err)
-	}
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.sp = &saml.ServiceProvider{
+	return &saml.ServiceProvider{
 		EntityID:    cfg.SP.EntityID,
 		Key:         priv,
 		Certificate: leaf,
@@ -166,47 +282,82 @@ func (s *SAMLService) buildSP(ctx context.Context) error {
 		// (typically Email Address sourced from user.userprincipalname)
 		// is what we get — a stable, human-readable UPN.
 		AuthnNameIDFormat: saml.UnspecifiedNameIDFormat,
-	}
-	return nil
+	}, nil
 }
 
-// Enabled reports whether SAML SSO is configured AND the SP is initialised
-// with a usable IdP metadata document.
-func (s *SAMLService) Enabled() bool {
-	if s == nil {
-		return false
-	}
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	if s.cfg == nil || !s.cfg.Enabled {
-		return false
-	}
-	return s.sp != nil && s.sp.IDPMetadata != nil
-}
+// Enabled reports whether the current generation can serve a login: SAML is
+// configured AND its provider is built with a usable IdP metadata document.
+func (s *SAMLService) Enabled() bool { return s.snapshot().enabled() }
 
-// Config returns the active SAML configuration (read-only). Handlers need
-// it for the new-user defaults and default group slug.
-func (s *SAMLService) Config() *config.SAMLConfig {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.cfg
-}
-
-// Reload swaps in a new SAML configuration and rebuilds the underlying
-// crewjam ServiceProvider. Admin-UI saves call this so an SSO config edit
-// takes effect without restarting the panel. If the new config disables
-// SSO, the SP is torn down.
-func (s *SAMLService) Reload(ctx context.Context, cfg *config.SAMLConfig) error {
+// SetConfigRepo installs the configuration repository, which lets SaveConfig
+// persist and apply under one lock.
+func (s *SAMLService) SetConfigRepo(r ports.SAMLConfigRepo) {
 	s.mu.Lock()
-	s.cfg = cfg
-	if cfg == nil || !cfg.Enabled {
-		s.sp = nil
-		s.mu.Unlock()
-		return nil
+	defer s.mu.Unlock()
+	s.configRepo = r
+}
+
+// SaveConfig persists a configuration and applies it as ONE serialized operation.
+//
+// The candidate provider is built BEFORE anything is published, and the publish
+// is a single pointer swap, so a build failure cannot leave the new mapping rules
+// beside the old trust anchor. A failed build produces a generation with no
+// provider at all, which means SAML is simply unusable until it is fixed. That is
+// the deliberate direction: a temporarily dead SSO is recoverable, an assertion
+// validated against one trust anchor and mapped by another set of rules is not
+// (ADR 0036 D6).
+//
+// A disabled or unusable configuration still replaces the stored one, and is
+// still persisted: an admin must always be able to switch SSO off, or to replace
+// broken values, without the new values having to be valid first.
+//
+// Two callers that each did Save-then-Reload could interleave: A persists v1, B
+// persists v2, B applies v2, A applies v1 — leaving the database on v2 while the
+// running process serves v1, so the panel would apply older rules than it stores
+// until the next save or restart. Holding applyMu across both steps removes that
+// ordering entirely (ADR 0036 D6).
+//
+// saved and applyErr are separate on purpose: the API contract already
+// distinguishes them, because a configuration that persisted but whose provider
+// cannot be built is exactly the state an admin has to be told about — and it is
+// not a failed save.
+func (s *SAMLService) SaveConfig(ctx context.Context, cfg *config.SAMLConfig) (saved bool, applyErr error) {
+	s.applyMu.Lock()
+	defer s.applyMu.Unlock()
+
+	s.mu.RLock()
+	repo := s.configRepo
+	s.mu.RUnlock()
+	if repo == nil {
+		return false, fmt.Errorf("saml: no configuration repository is wired")
 	}
-	s.mu.Unlock()
-	// buildSP takes its own write lock; release first.
-	return s.buildSP(ctx)
+	if err := repo.Save(ctx, cfg); err != nil {
+		return false, err
+	}
+	return true, s.applyLocked(ctx, cfg)
+}
+
+// applyLocked builds the candidate provider and publishes it. The caller holds
+// applyMu, which is what makes build-then-publish look atomic to readers.
+func (s *SAMLService) applyLocked(ctx context.Context, cfg *config.SAMLConfig) error {
+	var (
+		sp  *saml.ServiceProvider
+		err error
+	)
+	if cfg != nil && cfg.Enabled {
+		sp, err = buildProvider(ctx, cfg)
+	}
+	s.publish(&samlSnapshot{cfg: cfg, digest: SAMLConfigDigest(cfg), sp: sp})
+	return err
+}
+
+// publish swaps in a new generation. Callers hold applyMu, so a generation number
+// allocated here is strictly increasing even under concurrent saves.
+func (s *SAMLService) publish(snap *samlSnapshot) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	snap.generation = s.snap.generation + 1
+	s.snap = snap
 }
 
 // StartMetadataRefresh launches a goroutine that re-fetches the IdP
@@ -226,12 +377,10 @@ func (s *SAMLService) StartMetadataRefresh(ctx context.Context, wg ...*sync.Wait
 			defer wg[0].Done()
 		}
 		for {
-			s.mu.RLock()
-			cfg := s.cfg
-			s.mu.RUnlock()
+			snap := s.snapshot()
 			interval := 24 * time.Hour
-			if cfg != nil && cfg.IDP.MetadataRefreshInterval > 0 {
-				interval = cfg.IDP.MetadataRefreshInterval
+			if snap != nil && snap.cfg != nil && snap.cfg.IDP.MetadataRefreshInterval > 0 {
+				interval = snap.cfg.IDP.MetadataRefreshInterval
 			}
 			// Floor at 1 minute so a misconfigured tiny interval (or a
 			// finger-slip in the admin UI) can't turn the panel into an
@@ -246,38 +395,67 @@ func (s *SAMLService) StartMetadataRefresh(ctx context.Context, wg ...*sync.Wait
 				return
 			case <-time.After(interval):
 			}
-			s.mu.RLock()
-			cfg = s.cfg
-			s.mu.RUnlock()
-			if cfg == nil || !cfg.Enabled {
+
+			// Re-read: Reload() may have changed the metadata URL or disabled SSO
+			// while this goroutine was waiting.
+			snap = s.snapshot()
+			if snap == nil || snap.cfg == nil || !snap.cfg.Enabled {
 				continue
 			}
-			meta, err := fetchIDPMetadata(ctx, cfg.IDP.MetadataURL)
+			meta, err := fetchIDPMetadata(ctx, snap.cfg.IDP.MetadataURL)
 			if err != nil {
 				log.Warn("saml: idp metadata refresh failed", "err", err)
 				continue
 			}
-			s.mu.Lock()
-			if s.sp == nil {
-				// Initial build hadn't succeeded yet — do it now.
-				s.mu.Unlock()
-				if err := s.buildSP(ctx); err != nil {
-					log.Warn("saml: deferred SP build failed", "err", err)
-				}
-				continue
+			if s.commitMetadataRefresh(snap, meta) {
+				log.Info("saml: idp metadata refreshed")
 			}
-			// Replace s.sp wholesale rather than mutating IDPMetadata in
-			// place — readers (ParseACSResponse, BuildAuthnURL) take a
-			// snapshot of s.sp under RLock and then operate on it without
-			// the lock; mutating a shared pointer field underneath them
-			// would be a data race on the underlying library's internals.
-			newSP := *s.sp
-			newSP.IDPMetadata = meta
-			s.sp = &newSP
-			s.mu.Unlock()
-			log.Info("saml: idp metadata refreshed")
 		}
 	}()
+}
+
+// commitMetadataRefresh installs a refreshed IdP metadata document into the
+// generation the fetch was started under, and reports whether it was applied.
+//
+// It refuses two things. It will not publish into a generation that is no longer
+// current — a slow response for a URL the admin has since changed must not
+// resurrect the old configuration. And it will not patch a generation whose
+// provider is missing: that generation's build failed, so this refresh is the
+// retry, and the rebuild goes through newProvider with the SAME configuration
+// under applyMu rather than fetching a second time and racing a save.
+//
+// A refresh of an unchanged configuration deliberately does NOT bump the
+// generation or change the digest. The trust anchor rotated; the rules did not,
+// so logins already in flight on this snapshot keep working.
+func (s *SAMLService) commitMetadataRefresh(started *samlSnapshot, meta *saml.EntityDescriptor) bool {
+	s.applyMu.Lock()
+	defer s.applyMu.Unlock()
+
+	s.mu.Lock()
+	current := s.snap
+	if current == nil || current.generation != started.generation || current.cfg != started.cfg {
+		s.mu.Unlock()
+		return false
+	}
+	if current.sp != nil {
+		// Copy the provider rather than mutating it: readers hold their snapshot
+		// without the lock and would otherwise race on the library's internals.
+		replaced := *current.sp
+		replaced.IDPMetadata = meta
+		s.snap = &samlSnapshot{cfg: current.cfg, digest: current.digest, sp: &replaced, generation: current.generation}
+		s.mu.Unlock()
+		return true
+	}
+	cfg := current.cfg
+	s.mu.Unlock()
+
+	sp, err := newProvider(cfg, meta)
+	if err != nil {
+		log.Warn("saml: provider rebuild failed", "err", err)
+		return false
+	}
+	s.publish(&samlSnapshot{cfg: cfg, digest: SAMLConfigDigest(cfg), sp: sp})
+	return true
 }
 
 // IDPMetadataSummary is a small read-only view the admin UI uses to verify
@@ -373,39 +551,42 @@ func fetchIDPMetadata(ctx context.Context, metaURL string) (*saml.EntityDescript
 
 // SPMetadataXML returns the SP metadata XML that the IdP admin imports.
 func (s *SAMLService) SPMetadataXML() ([]byte, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	if s.sp == nil {
+	snap := s.snapshot()
+	if snap == nil || snap.sp == nil {
 		return nil, fmt.Errorf("saml not initialised")
 	}
-	return xml.MarshalIndent(s.sp.Metadata(), "", "  ")
+	return xml.MarshalIndent(snap.sp.Metadata(), "", "  ")
 }
 
-// BuildAuthnURL returns the IdP redirect URL for an SP-initiated login.
-// The AuthnRequest ID is embedded in the RelayState as "id|returnURL" so it
-// survives the SAML round-trip without a cookie — the SAML POST binding is
-// cross-site, so SameSite=Lax cookies are never sent with the ACS POST.
-func (s *SAMLService) BuildAuthnURL(returnURL string) (string, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	if s.sp == nil {
-		return "", fmt.Errorf("saml not initialised")
+// buildAuthnURL returns the IdP redirect URL for an SP-initiated login, plus the
+// AuthnRequest's ID so the caller can record which request a Response must
+// answer.
+//
+// The relayState is supplied by the CALLER rather than being assembled here: the
+// caller mints it (and already holds it) before the request exists, which is
+// what lets the request record be written before the browser leaves the panel.
+// sp is passed in rather than read from the service so the redirect and the
+// record's configuration digest come from one snapshot.
+func buildAuthnURL(sp *saml.ServiceProvider, relayState string) (redirectURL, requestID string, err error) {
+	if sp == nil {
+		return "", "", fmt.Errorf("saml not initialised")
 	}
-	idpURL := s.sp.GetSSOBindingLocation(saml.HTTPRedirectBinding)
+	idpURL := sp.GetSSOBindingLocation(saml.HTTPRedirectBinding)
 	if idpURL == "" {
-		return "", fmt.Errorf("idp metadata missing HTTP-Redirect binding")
+		return "", "", fmt.Errorf("idp metadata missing HTTP-Redirect binding")
 	}
-	req, err := s.sp.MakeAuthenticationRequest(idpURL, saml.HTTPRedirectBinding, saml.HTTPPostBinding)
+	req, err := sp.MakeAuthenticationRequest(idpURL, saml.HTTPRedirectBinding, saml.HTTPPostBinding)
 	if err != nil {
-		return "", fmt.Errorf("make authn request: %w", err)
+		return "", "", fmt.Errorf("make authn request: %w", err)
 	}
-	// Embed req.ID so ACS can validate InResponseTo without a cookie.
-	relayState := req.ID + "|" + returnURL
-	u, err := req.Redirect(relayState, s.sp)
+	u, err := req.Redirect(relayState, sp)
 	if err != nil {
-		return "", fmt.Errorf("build redirect: %w", err)
+		return "", "", fmt.Errorf("build redirect: %w", err)
 	}
-	return u.String(), nil
+	// The whole redirect is returned as built: the SAMLRequest query is covered
+	// by the IdP's expected signature, so re-assembling or re-encoding it here
+	// would be a way to break the very thing it protects.
+	return u.String(), req.ID, nil
 }
 
 // SAMLAssertion captures the subset of SAML attributes the user store cares about.
@@ -475,14 +656,56 @@ func parseSAMLStatus(rawB64 string) (topCode, subCode, message string) {
 		strings.TrimSpace(env.Status.StatusMessage)
 }
 
+// precheckResponse enforces the structural and algorithm constraints on a raw
+// SAML Response BEFORE the signature-verifying parser sees it: a required
+// Destination, exactly one assertion, and SHA-256-or-stronger signature and
+// digest algorithms (see internal/pkg/samlguard for why each is a gap in
+// crewjam/saml rather than a redundant check).
+//
+// It decodes with base64.StdEncoding from the already-whitespace-stripped form
+// value for the same reason crewjam does in parseResponseHTTP: the pre-check and
+// the verification must judge the SAME bytes, or a difference in decoding would
+// become a bypass. rawB64 is the PostForm value AFTER ParseACSResponse has
+// stripped the MIME line wrapping some IdPs emit.
+//
+// A nil return means only "the verifier may proceed". The pre-check produces no
+// identity data, and it deliberately runs before verification: the multi-
+// assertion gap is exploitable precisely because a legitimate, correctly-signed
+// assertion can be accompanied by a second one.
+func precheckResponse(acsURL, rawB64 string) error {
+	if rawB64 == "" {
+		// Also the artifact-binding case: crewjam would divert to a SOAP
+		// artifact resolution when SAMLart is present. PSP only ever builds
+		// Redirect-binding AuthnRequests, so refusing an unrecognised payload
+		// here is the fail-closed direction rather than a lost capability.
+		return fmt.Errorf("%w: no SAMLResponse form value", samlguard.ErrMalformed)
+	}
+	decoded, err := base64.StdEncoding.DecodeString(rawB64)
+	if err != nil {
+		return fmt.Errorf("decode SAML response: %w", err)
+	}
+	return samlguard.New(acsURL).Check(decoded)
+}
+
 // ParseACSResponse validates the SAML Response posted by the IdP and
 // returns the extracted attributes. possibleRequestIDs should contain the
 // AuthnRequest ID stored at login time; pass nil only for IdP-initiated SSO.
+//
+// It is the protocol boundary, and the shape the replacement line's port takes.
+// The production path is CompleteLogin, which takes the request context into
+// account and calls parseACSResponse directly with the snapshot whose digest it
+// already checked; a caller that has some other way of establishing the request
+// context can use this entry point instead.
 func (s *SAMLService) ParseACSResponse(r *http.Request, possibleRequestIDs []string) (*SAMLAssertion, error) {
-	s.mu.RLock()
-	sp := s.sp
-	cfg := s.cfg
-	s.mu.RUnlock()
+	snap := s.snapshot()
+	if snap == nil {
+		return nil, fmt.Errorf("saml not initialised")
+	}
+	return s.parseACSResponse(snap.sp, snap.cfg, r, possibleRequestIDs)
+}
+
+// parseACSResponse does the work against an explicit runtime snapshot.
+func (s *SAMLService) parseACSResponse(sp *saml.ServiceProvider, cfg *config.SAMLConfig, r *http.Request, possibleRequestIDs []string) (*SAMLAssertion, error) {
 	if sp == nil {
 		return nil, fmt.Errorf("saml not initialised")
 	}
@@ -500,6 +723,14 @@ func (s *SAMLService) ParseACSResponse(r *http.Request, possibleRequestIDs []str
 			}
 			return r
 		}, raw))
+	}
+	// Pre-check the response we are about to verify. It runs on the stripped
+	// form value so it judges exactly the bytes crewjam decodes next, and it
+	// refuses shapes crewjam would otherwise accept: an absent Destination, a
+	// second assertion smuggled alongside a signed one, or a weak algorithm.
+	if err := precheckResponse(cfg.SP.ACSURL, r.PostForm.Get("SAMLResponse")); err != nil {
+		log.Warn("saml: response rejected by pre-check", "err", err)
+		return nil, fmt.Errorf("SAML response rejected: %w", err)
 	}
 	assertion, err := sp.ParseResponse(r, possibleRequestIDs)
 	if err != nil {
@@ -533,17 +764,18 @@ func (s *SAMLService) ParseACSResponse(r *http.Request, possibleRequestIDs []str
 	if assertion.ID == "" {
 		return nil, fmt.Errorf("SAML assertion missing required ID")
 	}
-	exp := assertion.IssueInstant.Add(10 * time.Minute) // generous fallback
-	if assertion.Conditions != nil && !assertion.Conditions.NotOnOrAfter.IsZero() {
-		// crewjam/saml accepts an assertion until NotOnOrAfter + MaxClockSkew, so
-		// the replay cache must hold the entry that long too — otherwise a captured
-		// assertion with a sub-skew condition window could validate again after the
-		// cache already expired it. Pad by MaxClockSkew to close that window.
-		exp = assertion.Conditions.NotOnOrAfter.Add(saml.MaxClockSkew)
-	}
-	if s.assertionAlreadyConsumed(r.Context(), assertion.ID, exp, time.Now()) {
-		log.Warn("saml: assertion replay detected", "assertion_id", assertion.ID)
-		return nil, fmt.Errorf("SAML assertion already consumed")
+	now := s.now()
+	if err := s.assertNotConsumed(r.Context(), assertion.ID, samlReplayExpiry(assertion, now), now); err != nil {
+		if errors.Is(err, ErrSAMLAssertionReplayed) {
+			log.Warn("saml: assertion replay detected", "assertion_id", assertion.ID)
+		} else {
+			// An unanswered replay question is an infrastructure fault, not an
+			// attack. Logged at ERROR so a degraded control is visible instead of
+			// being buried among ordinary SSO failures (ADR 0036 §6.5.1).
+			log.Error("saml: replay store unavailable, refusing the login",
+				"assertion_id", assertion.ID, "err", err)
+		}
+		return nil, fmt.Errorf("SAML response rejected: %w", err)
 	}
 
 	out := &SAMLAssertion{Attributes: map[string][]string{}}

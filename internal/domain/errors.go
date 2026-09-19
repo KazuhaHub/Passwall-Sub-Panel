@@ -29,6 +29,17 @@ var (
 	// "contact your administrator" page rather than auto-creating an account.
 	ErrSSONoAccount = errors.New("sso: no matching account")
 
+	// ErrSAMLRequestInvalid is returned when an SP-initiated SAML login request
+	// cannot be consumed: unknown token, wrong browser binding, wrong
+	// configuration generation, already used, or past its expiry.
+	//
+	// Those cases are deliberately NOT distinguished for the caller. The only
+	// party who benefits from knowing which one failed is an attacker probing a
+	// stolen token, and the legitimate browser already knows why it failed
+	// (it can see whether it holds the binding cookie). Operators get the
+	// distinction from the surrounding log line, not from this error.
+	ErrSAMLRequestInvalid = errors.New("saml: login request is invalid, expired, or already used")
+
 	// ErrSSOAccountConflict is returned by EnsureSSO when a UPN matches an
 	// existing panel row that is already bound to a DIFFERENT SSO
 	// (provider, subject) than the one currently logging in. The strict
