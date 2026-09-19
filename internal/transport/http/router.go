@@ -719,6 +719,10 @@ func NewRouter(d Deps) stdhttp.Handler {
 		adminGroup.GET("/settings/saml", samlAdmin.Get)
 		adminGroup.PUT("/settings/saml", samlAdmin.Put)
 		adminGroup.POST("/settings/saml/fetch", samlAdmin.FetchMetadata)
+		// Read-only self-check: what would a sign-in need, and what is missing.
+		// Admin-only, and deliberately not a public endpoint — it is a diagnostic,
+		// not an authentication surface.
+		adminGroup.GET("/settings/saml/preflight", samlAdmin.Preflight)
 
 		oidcAdmin := handler.NewAdminOIDCHandler(d.Repos.OIDCConfig, d.OIDC, d.Repos.Group)
 		adminGroup.GET("/settings/oidc", oidcAdmin.Get)

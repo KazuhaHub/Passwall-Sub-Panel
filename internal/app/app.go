@@ -368,6 +368,25 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 		return nil, fmt.Errorf("saml is enabled but no durable login-request store is wired")
 	}
 	samlSvc.SetSAMLRequestStore(repos.SAMLRequest)
+
+	// Boot-time configuration audit for existing installs. The new rules do not
+	// block startup — a bad SAML configuration must not take the whole panel down,
+	// and the provider build already leaves SSO disabled on its own — but the
+	// reason has to be locatable without a shell, so it is logged with the
+	// failing checks named (ADR 0036 D7).
+	if samlCfg != nil && samlCfg.Enabled {
+		if ui, uiErr := repos.Settings.Load(ctx, ports.UISettings{}); uiErr == nil {
+			report := auth.StaticPreflight(auth.PreflightInput{
+				Config:     samlCfg,
+				PanelPath:  ui.PanelPath,
+				PublicBase: ui.SubBaseURL,
+			})
+			if !report.ConfigurationValid {
+				log.Error("saml: the stored configuration cannot serve a sign-in; SSO is unavailable until it is fixed",
+					"failed_checks", report.FailedChecks(), "detail", report.FailureDetail())
+			}
+		}
+	}
 	oidcSvc, err := auth.NewOIDC(oidcCfg)
 	if err != nil {
 		return nil, fmt.Errorf("init oidc: %w", err)

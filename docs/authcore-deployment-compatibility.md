@@ -70,7 +70,7 @@
 
 ## 6. 管理员自检命令（只读）
 
-该端点是 H2 新增的**管理员专用只读** `GET /api/admin/settings/saml/preflight`，当前基线尚不存在。使用既有管理员凭证，不提供公开免认证检查。
+该端点是**管理员专用只读** `GET /api/admin/settings/saml/preflight`（H2 新增，已实现）。使用既有管理员凭证，不提供公开免认证检查。
 
 ```sh
 PSP_PUBLIC_ORIGIN='https://panel.example.com'
@@ -83,8 +83,9 @@ curl --fail-with-body --silent --show-error \
 
 - [ ] 根路径部署时 `PSP_PANEL_PATH` 设为空。
 - [ ] 逐个核对 `configuration_valid` 与 `checks` 枚举，不要只看 HTTP 200——**200 不代表检查全通过**。
-- [ ] `checks` 中**已知缺失**（如 replay 后端未装配）应为 `failed`；只有未实际执行的验证才是 `not_checked`。
-- [ ] `configuration_valid` 只表示配置合法，运行准备情况另看；两者不互相顶替。
+- [ ] `checks` 中**已知缺失**（如 replay 后端未装配）应为 `failed`；只有未实际执行的验证才是 `not_checked`。报告固定包含 `database_write` 与 `browser_cookie` 两项 `not_checked`，它们是这份自检**不能**证明的东西。
+- [ ] `configuration_valid` 只表示**存储的配置值**合法；进程是否就绪另看 `runtime_ready`（provider 是否构建成功、两个持久化存储是否装配）。两者分开，不要用一个布尔值代替另一个。
+- [ ] 报告的 `supported_topology` 恒为 `single_instance`；`configuration_valid: true` **不**代表可以多实例部署。
 
 **自检的边界**：它不证明浏览器接受 Cookie，也不证明数据库**未来**可写（当前不可写会表现为 `not_checked` 之外的运行时失败）。这些仍必须由相应验收证据覆盖。
 
