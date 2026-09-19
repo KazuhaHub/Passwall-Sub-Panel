@@ -22,6 +22,16 @@ export default function SsoCallbackView() {
         navigate(params.get('next') || '/user/me', { replace: true })
       } catch (e) {
         if (cancelled) return
+        // The exchange is single-use — it spends the cookies the ACS set — so
+        // asking a second time is answered 401 even though the session is real.
+        // This page can be mounted twice (a remount, a reload, two tabs), and the
+        // one that loses the race must not strand a signed-in person on an error
+        // screen showing the server's own text. Read the state rather than the
+        // closure: the winning instance has already updated it by now.
+        if (useAuthStore.getState().hasToken) {
+          navigate(params.get('next') || '/user/me', { replace: true })
+          return
+        }
         const msg = (e as { response?: { data?: { error?: string } } }).response?.data?.error
           ?? t('sso_callback_failed')
         setError(msg)
