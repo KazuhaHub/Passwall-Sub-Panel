@@ -98,20 +98,23 @@ jobs:
               > "$evidence/go-events.jsonl" 2> "$evidence/go-stderr.txt" || test_exit=$?
 
             # WHICH two implementations produced this result, and where. A report
-            # that cannot name its inputs cannot be re-checked.
-            cat > "$evidence/environment.json" <<JSON
+            # that cannot name its inputs cannot be re-checked. Written with
+            # printf rather than a heredoc: this block sits one level inside a
+            # loop, and a heredoc terminator keeps whatever indentation the block
+            # scalar left it, so it would never close.
             {
-              "case": "$case_id",
-              "profile": "node-wire-v1",
-              "psp_sha": "${{ github.sha }}",
-              "node_version": "$node_version",
-              "node_sha": "$(git -C "$node_repo" rev-parse HEAD)",
-              "runner_os": "$RUNNER_OS",
-              "runner_arch": "$RUNNER_ARCH",
-              "run_id": "${{ github.run_id }}",
-              "run_attempt": "${{ github.run_attempt }}"
-            }
-            JSON
+              printf '{\n'
+              printf '  "case": "%s",\n' "$case_id"
+              printf '  "profile": "node-wire-v1",\n'
+              printf '  "psp_sha": "%s",\n' "${{ github.sha }}"
+              printf '  "node_version": "%s",\n' "$node_version"
+              printf '  "node_sha": "%s",\n' "$(git -C "$node_repo" rev-parse HEAD)"
+              printf '  "runner_os": "%s",\n' "$RUNNER_OS"
+              printf '  "runner_arch": "%s",\n' "$RUNNER_ARCH"
+              printf '  "run_id": "%s",\n' "${{ github.run_id }}"
+              printf '  "run_attempt": "%s"\n' "${{ github.run_attempt }}"
+              printf '}\n'
+            } > "$evidence/environment.json"
 
             # A green `go test` is not evidence that the contract was exercised.
             # `-run` matching nothing, a skip taken because PSP_LIVE_NODE_REPO
