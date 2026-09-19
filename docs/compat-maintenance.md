@@ -88,18 +88,11 @@
 - 运行时界面／API 示例
 - 发布 needs 图（`compatibility gate` 是所有发布动作的唯一入口）
 
-### 发布路径的试跑范围（2026-09-19）
+### 发布路径：已完整执行（2026-09-19）
 
-R10 的路径被真实执行到**推广之前**为止，全部在本地、不产生任何公开产物：
+`v4.0.0-beta.25` 是第一次真实发布，路径从头走到尾。第一次运行在证据索引那一步失败——`.compat/digests.json` 被引用但无人产出——门挡住了发布，修复见 #173；随后重跑成功。产物与被验收提交见[交接包 §11](compat-handover.md)。
 
-| 步骤 | 执行了什么 | 结果 |
-| --- | --- | --- |
-| 2 构建候选 | 六个目标（linux/darwin/windows × amd64/arm64）用 release 的同一组 `-trimpath -ldflags` 构建，逐个过 `deploy/check-build.sh` | 六个全部通过来源校验（编译器、GOOS/GOARCH、`vcs.revision`、干净工作树、CGO 关闭） |
-| 1 发布 tag 校验 | `release-tag v4.0.0-beta.20`，以及四种非法形态（`not-a-version`／`v4.0`／空／`latest`） | 前者退出 0；后者各退出 1 并给出 `release requires an explicit vMAJOR.MINOR.PATCH[-prerelease] tag` |
-| 3 运行证据 | darwin/arm64 二进制**原生**执行 `psp version`；linux 侧由 `test.yml` 的 `container` 作业提供运行基线 | 报出被戳入的 version 与 commit，退出 0 |
-| 4 证据索引 | 在提交 `d9008721` 上取该次 CI 的四个 artifact，配本地六个产物的 sha256，跑 `evidence-index.mjs` | 11 个 case、`missing: []`、退出 0 |
-
-**没有做的是推广**：打 tag、上传归档、推 `:latest`／`:beta`。那是不可逆的公开动作，也正因为它是路径的最后一步而不是路径本身，上面的试跑不能替代它——**一次真实发布仍然没有发生过**，R10 的"候选→摘要→门禁→索引→推广同一摘要"里最后一环尚无实机证据。
+先前的"试跑"记录已删除：它的表格描述的是**发布之前**能驱动哪些门，而那条路径现在已完整执行过，留着它只会让下一任以为还差一次发布。它当时抓不到的正是这次执行抓到的东西——本地试跑用自己算的摘要喂索引,而 workflow 缺的就是那段交接。
 
 ### 分支保护现状
 
