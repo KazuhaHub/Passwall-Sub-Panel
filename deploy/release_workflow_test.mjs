@@ -222,6 +222,39 @@ test('the compatibility gate actually runs the case-set checker', () => {
   assert(gate.includes('actions/download-artifact'))
 })
 
+// R10 STEP 1, MADE ENFORCEABLE. "Walk the release needs graph and list every job
+// that really writes a release asset, an image or a channel" is a one-off reading
+// of the file; the property worth keeping is that a job ADDED LATER cannot write
+// without the gate. So the publishing set is derived from what each job is
+// permitted to write, not listed here — a list would only confirm that someone
+// remembered to update it.
+test('every job that can write is behind the compatibility gate', () => {
+  const names = [...workflow.matchAll(/^  ([a-z][a-z0-9_-]*):\n/gm)].map((m) => m[1])
+  assert(names.length > 3, `expected the workflow to declare jobs, found ${names.length}`)
+  const writers = names.filter((name) => /^ {6}(contents|packages|id-token):\s*write\s*$/m.test(job(name)))
+  assert(writers.length > 0, 'no job can write; either the workflow changed or this matcher broke')
+  for (const name of writers) {
+    assert(
+      /needs: \[[^\]]*\bcompatibility\b[^\]]*\]/.test(job(name)),
+      `${name} can write but does not depend on the compatibility summary`
+    )
+  }
+})
+
+// R10 STEP 3: "cross-platform compilation does not substitute for runtime
+// acceptance". The compile matrix is what makes a release buildable on every
+// platform; it is not evidence that any of them RUNS. A publishing job that
+// depends on it must still depend on the gate, or a green cross-compile would
+// stand in for acceptance.
+test('a cross-compile job is never a publishing job\'s only dependency', () => {
+  for (const name of ['release', 'docker']) {
+    const needs = /needs: \[([^\]]*)\]/.exec(job(name))
+    assert(needs, `${name} declares no needs`)
+    const deps = needs[1].split(',').map((d) => d.trim())
+    assert(deps.includes('compatibility'), `${name} must depend on the gate`)
+  }
+})
+
 test('publisher cache guard rejects implicit defaults and explicit cache restoration', () => {
   for (const [label, mutated] of [
     ['implicit Go cache', workflow.replace('          cache: false\n', '')],
