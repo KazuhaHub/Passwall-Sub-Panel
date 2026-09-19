@@ -82,16 +82,30 @@ PASS: the proxied request was refused after the user expired (window 180s)
 PASS: the panel's own view of the client is enable=False
 restoring the user (window 180s)
 PASS: traffic resumed after the user was restored
+exhausting the user's quota (window 300s)
+PASS: the proxied request was refused after the quota was exhausted (window 300s)
+PASS: the panel's own view of the client is enable=False
+clearing the usage (window 180s)
+PASS: traffic resumed after the usage was cleared
 ```
 
-The expiry path was used rather than quota exhaustion. Both act on the same
-service axis, so this does not establish that the quota path behaves the same —
-it establishes the axis.
+**Both enforcement triggers are driven.** Expiry and quota act on the same
+service axis, but they are different triggers with different paths to it, so
+establishing one does not establish the other — which is why both are here.
 
-**The window is a profile value, not a retry count** (`PSP_DATA_ENFORCE_WINDOW_SECONDS`,
-`PSP_DATA_RESTORE_WINDOW_SECONDS`, both 180). "It eventually refused" and "it
-refused within its stated window" are different claims and only the second is
-testable, so the number is written down where a reader can disagree with it.
+The quota case sets the period usage above the user's limit rather than
+accumulating real traffic: a gigabyte through a test target would take longer
+than the window being measured.
+
+**Every window is a profile value, not a retry count**
+(`PSP_DATA_ENFORCE_WINDOW_SECONDS`, `PSP_DATA_RESTORE_WINDOW_SECONDS` — both 180;
+`PSP_DATA_QUOTA_WINDOW_SECONDS` — 300). "It eventually refused" and "it refused
+within its stated window" are different claims and only the second is testable,
+so each number is written down where a reader can disagree with it.
+
+The quota window is larger because quota enforcement is reached through the
+traffic path rather than the reconcile path, and 300 is what this configuration
+needed. That number is a measurement of this setup, not a promise about another.
 
 ## The negative controls, and what they proved
 
@@ -162,12 +176,11 @@ in the render and on the panel by construction.
 
 - **Which transport or security layer carries it, beyond the one measured.** One
   VLESS/TCP/none combination is exercised. TLS, REALITY and the other transports
-  are not.
-- **The quota path.** Expiry was used. Both act on the service axis, but a quota
-  exhaustion is a different trigger and is not tested here.
-- **The window under a different cadence.** 180s is the harness's declared bound
-  on this configuration. It says nothing about how a longer traffic-pull interval
-  or a larger fleet changes it.
+  are not, and the plan requires a core upgraded through a third-party panel to
+  have its key TLS/REALITY combinations re-checked — that is not here.
+- **The window under a different cadence.** The windows above are this
+  configuration's declared bounds. They say nothing about how a longer
+  traffic-pull interval or a larger fleet changes them.
 - **That the refusal is the node's rather than the client's.** The client is
   still configured and still routes the destination to the node's outbound; the
   connection fails at the node. The panel-side probe (`enable=False`) is what
