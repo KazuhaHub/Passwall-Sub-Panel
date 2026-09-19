@@ -127,7 +127,14 @@ export async function passkeyLoginFinish(
 }
 
 export async function ssoComplete(): Promise<AuthLoginResponse> {
-  const { data } = await client.get<AuthLoginResponse>('/auth/sso-complete')
+  // Pre-session, like the passkey and 2FA calls above: its 401 means "there is no
+  // SSO session to hand over" — which is the normal answer when this page asks a
+  // second time, because the ACS cookies are single-use and the first call spent
+  // them — not an expired session. Left unmanaged, that 401 goes through
+  // refresh-then-logout and tears down the session this very call may have just
+  // established.
+  const { data } = await client.get<AuthLoginResponse>('/auth/sso-complete',
+    { _skipErrorToast: true, _skipRefresh: true })
   return data
 }
 

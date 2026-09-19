@@ -22,6 +22,13 @@ describe('authentication API contracts', () => {
     await auth.ssoComplete()
 
     expect(http.get).toHaveBeenCalledWith('/auth/captcha', { _skipErrorToast: true })
+    // The exchange that ESTABLISHES the session is a pre-session endpoint like the
+    // others here: its 401 means "there is no SSO session to hand over" — the
+    // normal answer to a repeat, since the cookies are single-use — not an expired
+    // session. Left unmanaged it goes through refresh-then-logout, which tears down
+    // the session this very call may have just created.
+    expect(http.get).toHaveBeenCalledWith('/auth/sso-complete',
+      { _skipErrorToast: true, _skipRefresh: true })
     expect(http.post).toHaveBeenCalledWith('/auth/local/login', {
       upn: 'user@example.com', password: 'secret', captcha_token: 'captcha',
     })
