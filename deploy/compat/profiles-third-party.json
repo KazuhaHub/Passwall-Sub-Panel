@@ -1,0 +1,35 @@
+{
+  "third-party-3xui-live": {
+    "description": "The live 3X-UI adapter surface against an isolated real panel. Required tests are the ones the panel-backed launcher can actually satisfy. The two fail2ban probes are listed here AND waived below: a waiver only attaches to an item the profile already requires, so naming them N/A without requiring them left the waiver inert and the tests reported as UNEXPECTED rather than as N/A. They need a separate fail2ban endpoint the panel image does not run, so they skip — and a silent skip would read as coverage.",
+    "package": "github.com/KazuhaHub/passwall-sub-panel/internal/adapters/xui",
+    "required": {
+      "TestLive_XUISurface": {},
+      "TestLive_XUIRealityScan": {},
+      "TestLive_XUIConnectionLimits": {},
+      "TestLive_MultiInboundClientSurface": {},
+      "TestLive_SharedClientMigrationFlow": {},
+      "TestLive_BulkDelPreservesSharedClient": {},
+      "TestLive_ConcurrentSameClientNoCorruption": {},
+      "TestLive_TwoClientsSameBackendNoCorruption": {},
+      "TestLive_XUITrafficFloorMatrix": {},
+      "TestLive_Fail2banStatus": {},
+      "TestLive_Fail2banStatusUnknownRouteIsUnsupported": {}
+    },
+    "notApplicable": {
+      "TestLive_Fail2banStatus": {
+        "reason": "needs a fail2ban endpoint the 3X-UI image does not run; not part of the panel-backed surface"
+      },
+      "TestLive_Fail2banStatusUnknownRouteIsUnsupported": {
+        "reason": "same fail2ban endpoint as TestLive_Fail2banStatus"
+      }
+    }
+  },
+  "third-party-sui-live": {
+    "description": "The live S-UI adapter surface against an isolated real panel. S-UI exposes one live entry point; the note in docs/compat/v4-ranges.json is that its FLOOR is unestablished, which is a different claim from its surface working.",
+    "package": "github.com/KazuhaHub/passwall-sub-panel/internal/adapters/sui",
+    "required": {
+      "TestLive_SUISurface": {}
+    },
+    "notApplicable": {}
+  }
+}
