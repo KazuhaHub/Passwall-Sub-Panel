@@ -94,6 +94,40 @@ func samlFailureReason(err error) string {
 	}
 }
 
+// The codes the FAILURE PAGE understands. They are coarser than the observability
+// reasons on purpose: what a user can act on is "try again", "an administrator has
+// an IdP setting to fix", or "that did not work" — and every code here needs copy
+// in two languages.
+const (
+	samlPageAuthFailed  = "auth_failed"
+	samlPageConfig      = "saml_config"
+	samlPageUnavailable = "saml_unavailable"
+)
+
+// samlFailurePageCode maps the observability reason onto the page code. The fine
+// reason still reaches the metric and the audit row; only the page collapses it.
+func samlFailurePageCode(err error) string {
+	switch samlFailureReason(err) {
+	case samlReasonStoreError:
+		return samlPageUnavailable
+	case samlReasonWeakSignature, samlReasonMultiAssertion, samlReasonDestination:
+		return samlPageConfig
+	default:
+		return samlPageAuthFailed
+	}
+}
+
+// samlFailureRedirect is the failure-page target for an ACS refusal.
+//
+// It carries the page code and nothing else. A description would be rendered by
+// the SPA — so anything a caller or an IdP chose to say would be reflected into
+// the page — it would survive in browser history and in Referer headers, and it
+// would override the localized copy. The full error goes to the process log and
+// the classified reason to the metric, which is where an operator reads it.
+func samlFailureRedirect(err error) string {
+	return "/sso-error?error=" + samlFailurePageCode(err)
+}
+
 // Login initiates SP-initiated SSO.
 //
 // The browser is bound to the login by a per-request cookie rather than by
@@ -118,7 +152,7 @@ func (h *AuthSAMLHandler) Login(c *gin.Context) {
 		metrics.SAMLACSFailureTotal.With(reason).Inc()
 		recordAuthEvent(c, h.authEvents, domain.AuthMethodSAML, domain.AuthOutcomeFailure, 0, "", reason)
 		log.Warn("saml: login could not be started", "err", err)
-		c.Redirect(http.StatusFound, panelRedirect(c, "/sso-error?error=auth_failed&description="+url.QueryEscape(samlFailureDescription(err))))
+		c.Redirect(http.StatusFound, panelRedirect(c, samlFailureRedirect(err)))
 		return
 	}
 
@@ -145,13 +179,6 @@ func samlACSCookiePath(c *gin.Context) string {
 // needs and has always seen here. Infrastructure failures do not: their text is
 // about databases and connections, and it belongs in the log rather than in a
 // URL the browser keeps (ADR 0036 §6.9).
-func samlFailureDescription(err error) string {
-	if errors.Is(err, domain.ErrUnavailable) {
-		return "Sign-in is temporarily unavailable. Please try again shortly."
-	}
-	return err.Error()
-}
-
 // ACS handles the SAML Response POSTed back by the IdP. It consumes the
 // server-side record of the login, validates the assertion against the request ID
 // that record names, upserts the user, issues JWT tokens, and redirects the
@@ -193,7 +220,7 @@ func (h *AuthSAMLHandler) ACS(c *gin.Context) {
 		metrics.SAMLACSFailureTotal.With(reason).Inc()
 		recordAuthEvent(c, h.authEvents, domain.AuthMethodSAML, domain.AuthOutcomeFailure, 0, "", reason)
 		log.Warn("saml: assertion refused", "err", err)
-		c.Redirect(http.StatusFound, panelRedirect(c, "/sso-error?error=auth_failed&description="+url.QueryEscape(samlFailureDescription(err))))
+		c.Redirect(http.StatusFound, panelRedirect(c, samlFailureRedirect(err)))
 		return
 	}
 
@@ -237,12 +264,12 @@ func (h *AuthSAMLHandler) ACS(c *gin.Context) {
 	}
 	if errors.Is(err, domain.ErrSSOAccountConflict) {
 		recordAuthEvent(c, h.authEvents, domain.AuthMethodSAML, domain.AuthOutcomeFailure, 0, assertion.UPN, "sso_conflict")
-		c.Redirect(http.StatusFound, panelRedirect(c, "/sso-error?error=sso_conflict&description="+url.QueryEscape(err.Error())))
+		c.Redirect(http.StatusFound, panelRedirect(c, "/sso-error?error=sso_conflict"))
 		return
 	}
 	if err != nil {
 		recordAuthEvent(c, h.authEvents, domain.AuthMethodSAML, domain.AuthOutcomeFailure, 0, assertion.UPN, "sso_error")
-		c.Redirect(http.StatusFound, panelRedirect(c, "/sso-error?error=sso_error&description="+url.QueryEscape(err.Error())))
+		c.Redirect(http.StatusFound, panelRedirect(c, "/sso-error?error=sso_error"))
 		return
 	}
 	if !domain.AccountLoginAllowed(u.Enabled, u.AutoDisabledReason) {
