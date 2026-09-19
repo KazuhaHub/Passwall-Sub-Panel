@@ -1,5 +1,5 @@
 # Stage 1 — build the React SPA bundle.
-FROM node:24-alpine AS web-builder
+FROM node:26-alpine AS web-builder
 WORKDIR /web
 COPY web-react/package.json web-react/package-lock.json* ./
 RUN if [ -f package-lock.json ]; then npm ci; else npm install; fi
