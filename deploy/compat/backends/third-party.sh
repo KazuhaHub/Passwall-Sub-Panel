@@ -140,6 +140,28 @@ PY
 
 # ---------------------------------------------------------------- commands
 
+# THE TRAFFIC-FLOOR MATRIX WRITES THIS DATABASE, and writing it needs the
+# DIRECTORY.
+#
+# The panel runs as its own root, so x-ui.db and the folder holding it belong to
+# uid 0. The matrix seeds accumulated usage with a plain UPDATE, and SQLite
+# creates its journal beside the file — so an unwritable folder fails the open
+# itself, reported as `unable to open database file: out of memory (14)`, which
+# reads like a corrupt database rather than a permission on the folder. Handing
+# the folder to the invoking user is what makes the difference; root inside the
+# container keeps writing it either way.
+#
+# Measured as passing before this existed, but only from a root shell — the VM's
+# harness ran as root, where the folder was writable all along. On a runner it
+# is not, which is why the failure appeared only once the tests stopped skipping.
+hand_over_xui_db() {
+  if [ -n "$DB_SUDO" ]; then
+    $DB_SUDO chown -R "$(id -u):$(id -g)" "$WORKDIR/3xui"
+  elif [ ! -w "$WORKDIR/3xui" ]; then
+    log "WARNING: $WORKDIR/3xui is not writable by $(id -un) and no sudo is available to hand it over; TestLive_XUITrafficFloorMatrix will fail to seed"
+  fi
+}
+
 up() {
   rm -rf "$WORKDIR"
   mkdir -p "$WORKDIR/3xui" "$WORKDIR/sui"
@@ -155,6 +177,7 @@ up() {
   local token; token=$(xui_token)
   xui_seed "$token"
   printf '%s' "$token" > "$WORKDIR/3xui.token"
+  hand_over_xui_db
 
   log "pulling $THIRD_PARTY_IMAGE_SUI"
   $SUDO "$RUNTIME" pull "$THIRD_PARTY_IMAGE_SUI" >/dev/null

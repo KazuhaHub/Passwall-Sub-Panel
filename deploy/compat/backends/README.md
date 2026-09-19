@@ -24,7 +24,7 @@ data, and evaluated unquoted a space word-splits it and a `$(...)` runs.
 `third-party_env.test.mjs` asserts both properties from a child process, and the
 workflow re-checks them with `printenv`, which is a child too.
 
-| Suite | Pass | Skip | Fail |
+| Suite | Pass | N/A | Fail |
 | --- | --- | --- | --- |
 | 3X-UI adapter | 9 | 2 | 0 |
 | S-UI adapter | 1 | 0 | 0 |
@@ -32,13 +32,26 @@ workflow re-checks them with `printenv`, which is a child too.
 Both ship at the exact versions `docs/compat/v4-ranges.json` records as the
 tested ceilings.
 
-## The two skips, and why they are declared rather than tolerated
+## The two probes that skip, and why a waiver has to be REQUIRED to count
 
-The fail2ban probe needs a fail2ban endpoint the panel image does not run. It is
-declared `notApplicable` in `profiles-third-party.json` with a reason, so it is
-reported as N/A and **never counted as coverage** — the alternative, leaving it
-to skip, is indistinguishable from a pass to anything reading the exit code,
-which is the failure `check-go-results.mjs` exists to prevent.
+The fail2ban probes need a fail2ban endpoint the panel image does not run, so
+they skip. They are declared `notApplicable` in `profiles-third-party.json` with
+a reason, so they are reported **N/A and never counted as coverage** — the
+alternative, leaving them to skip, is indistinguishable from a pass to anything
+reading the exit code, which is the failure `check-go-results.mjs` exists to
+prevent.
+
+**They must be listed in `required` as well as waived**, and that is not
+redundant. A waiver only attaches to an item the profile already requires
+(`if (!expected.has(name)) continue`); waived-but-not-required is inert, so
+nothing reports as N/A and the skipped test instead reports as **unexpected** —
+which fails the run when it is top-level. While the launcher exported nothing,
+every test skipped and the run failed as `skip`, which hid this; the moment the
+environment reached `go test`, the same profile produced `unexpected-test`.
+`deploy/compat/profiles.test.mjs` holds that invariant over every shipped
+profile, because the validator cannot: its own reasoning — an ignored waiver
+leaves "the item still required" — holds only when the name is a typo of a
+required one, not when the item is absent from `required` altogether.
 
 ## Things the images do not tell you
 
@@ -55,7 +68,12 @@ broken adapter rather than a missing setup step.
   exits 0.
 - **The traffic-floor matrix needs `PSP_LIVE_XUI_DB` and a writable DIRECTORY**,
   not just a writable file: it seeds usage straight into the panel's SQLite, and
-  SQLite creates its journal beside the file.
+  SQLite creates its journal beside the file. The panel runs as its own root, so
+  both belong to uid 0 and `up` hands the folder to the invoking user — without
+  that, the open fails as `unable to open database file: out of memory (14)`,
+  which reads like a corrupt database rather than a permission on the folder.
+  This went unnoticed because the only runs that had ever reached the tests were
+  from a root shell, where the folder was writable anyway.
 - **S-UI serves the panel under a configurable `webPath`** — `/app/` on a fresh
   install — so the API is at `/app/apiv2/...`. The launcher reads the value out of
   the database rather than assuming it, and waits on the real base: the bare

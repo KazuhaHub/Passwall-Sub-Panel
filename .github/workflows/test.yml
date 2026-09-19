@@ -347,6 +347,13 @@ jobs:
             value=$(printenv "$name" || true)
             test -n "$value" || { echo "::error::$name is not exported to child processes; the launcher did not publish it for go test"; exit 1; }
           done
+          # The floor matrix WRITES the panel's SQLite, and the write needs the
+          # DIRECTORY, not the file: SQLite creates its journal beside it. Checked
+          # here so a permission problem names itself, rather than surfacing as
+          # `seed usage: unable to open database file: out of memory (14)` inside
+          # a test log, which reads like a corrupt database.
+          xui_db_dir=$(dirname "$PSP_LIVE_XUI_DB")
+          test -w "$xui_db_dir" || { echo "::error::$xui_db_dir is not writable by $(id -un); TestLive_XUITrafficFloorMatrix seeds usage straight into it"; exit 1; }
           run_suite() {
             profile="$1"; pkg="$2"; out="$3"
             code=0
@@ -415,7 +422,7 @@ jobs:
             docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges --user 10001:10001 --entrypoint /app/psp "$image" --version
           done
       - name: Publisher identity, compat result validators and fail-closed guard tests
-        run: node --test deploy/check_image_test.mjs deploy/check_build_test.mjs deploy/release_workflow_test.mjs deploy/compat/check-go-results.test.mjs deploy/compat/check-case-set.test.mjs deploy/compat/plan.test.mjs deploy/compat/backends/third-party_env.test.mjs deploy/test_workflow_test.mjs
+        run: node --test deploy/check_image_test.mjs deploy/check_build_test.mjs deploy/release_workflow_test.mjs deploy/compat/check-go-results.test.mjs deploy/compat/check-case-set.test.mjs deploy/compat/plan.test.mjs deploy/compat/profiles.test.mjs deploy/compat/backends/third-party_env.test.mjs deploy/test_workflow_test.mjs
 
   web:
     name: web (typecheck + build + test)
