@@ -16,6 +16,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/idgen"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/version"
 )
 
 type upgradeFixture struct {
@@ -52,6 +53,22 @@ func newUpgradeFixtureWithObservation(t *testing.T, observed bool) *upgradeFixtu
 		agent.ObservedCapabilities = nodeprotocol.AgentUpgradeCapabilities()
 		agent.ProtocolObservedAt = &observedAt
 	}
+	// THE EDGE IS PART OF THE FIXTURE, because it is now part of the question.
+	// Admission requires the requested from→to path to be a VERIFIED one, so a
+	// fixture that asks for an upgrade must also say which edge it is asking
+	// along — otherwise every case here would be measuring the refusal, which
+	// has its own case below.
+	//
+	// TWO EDGES, because the key-reuse case needs a SECOND request that IS
+	// admitted: it reuses an idempotency key with different content and expects
+	// the conflict the repository resolves, and a target that failed admission
+	// first would answer a different question.
+	version.SetActiveUpgradeEdges([]version.UpgradeEdge{
+		{ID: "fixture", From: validUpgradeRequest.ExpectedVersion, To: validUpgradeRequest.Version},
+		{ID: "fixture-alt", From: "v0.0.1-beta2", To: "v0.0.1-beta4"},
+	})
+	t.Cleanup(func() { version.SetActiveUpgradeEdges(nil) })
+
 	if err := repos.NativeAgentProvisioning.Create(context.Background(), panel, agent); err != nil {
 		t.Fatal(err)
 	}
@@ -345,5 +362,40 @@ func TestUpgradeRequestStrictShapeAndOwnerIsolation(t *testing.T) {
 	broken.InputSHA256 = strings.Repeat("d", 64)
 	if _, err := f.service.status(broken, f.panel, f.agent, f.now); !errors.Is(err, domain.ErrConflict) {
 		t.Fatalf("corrupt identity accepted: %v", err)
+	}
+}
+
+// AN UPGRADE IS OFFERED ONLY ALONG A VERIFIED EDGE, AND ITS ABSENCE IS NAMED.
+//
+// The fixture installs the beta2→beta3 edge so the cases above measure
+// admission. This one removes it and measures the refusal, because a gate that
+// is only ever exercised in the "edge present" direction is a gate nobody has
+// seen work.
+func TestUpgradeRequestRefusesAnUnverifiedEdge(t *testing.T) {
+	f := newUpgradeFixture(t)
+	version.SetActiveUpgradeEdges(nil)
+
+	_, created, err := f.service.Request(context.Background(), f.panel.ID, validUpgradeRequest, upgradeRequestKey)
+	if !errors.Is(err, domain.ErrValidation) {
+		t.Fatalf("an upgrade along an unverified edge was admitted: %v", err)
+	}
+	if created {
+		t.Fatal("a task was created for an upgrade along an unverified edge")
+	}
+	// THE REFUSAL NAMES THE PATH, NOT JUST THE EVIDENCE. An operator has to be
+	// able to tell "this node cannot be upgraded" from "this particular path is
+	// not verified" — the node here is eligible, and saying so is the difference
+	// between a fixable request and a dead end.
+	if !strings.Contains(err.Error(), "upgrade path has not been verified") {
+		t.Fatalf("the refusal does not name the edge: %v", err)
+	}
+
+	// AND A DIFFERENT PATH IS STILL REFUSED. The edge in force is beta2→beta3;
+	// beta2→beta4 must not be admitted on the strength of a neighbouring edge,
+	// which is the whole difference between an edge and a range.
+	version.SetActiveUpgradeEdges([]version.UpgradeEdge{{ID: "fixture", From: "v0.0.1-beta2", To: "v0.0.1-beta3"}})
+	other := Request{Version: "v0.0.1-beta4", ExpectedVersion: "v0.0.1-beta2"}
+	if _, _, err := f.service.Request(context.Background(), f.panel.ID, other, upgradeRequestKey); !errors.Is(err, domain.ErrValidation) {
+		t.Fatalf("a neighbouring edge admitted an unverified path: %v", err)
 	}
 }

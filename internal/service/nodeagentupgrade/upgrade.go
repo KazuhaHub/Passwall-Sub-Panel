@@ -22,6 +22,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/compatadmission"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/nodecompat"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/version"
 )
 
 const Kind = nodeprotocol.TaskKindAgentUpgradeV1
@@ -123,17 +124,23 @@ func (s *Service) Request(ctx context.Context, panelID int64, request Request, k
 	}
 	now := s.options.Now().UTC()
 
-	// ONE DECISION SOURCE. The server list asks the same question through the
-	// same function, so the list cannot offer an upgrade this refuses.
+	// ONE DECISION SOURCE, AND NOW AN EDGE.
 	//
-	// It is the ELIGIBILITY question, not the edge question: nothing in the panel
-	// verifies a specific from/to upgrade edge, so asking for
-	// OperationRemoteUpgrade here would assert an edge nobody checked. When edge
-	// verification exists this becomes nodecompat.Request(...) with
-	// UpgradeEdgeVerified set from it, and the reason code will name the edge
-	// rather than the evidence.
+	// This is the ELIGIBILITY question AND the edge question, and it is the one
+	// place both ends of the edge are known: the request carries the exact
+	// version it expects the node to be on and the exact version it wants it to
+	// reach. The plan requires the second without accepting the first — a
+	// target that is merely a release this panel lists is not a path anybody
+	// checked — so an edge nobody verified refuses the request by name.
+	//
+	// The edge list is empty today, which means every upgrade is refused. That
+	// is the truthful state rather than a regression: docs/compat/verification-v1.json
+	// publishes the edge model with no edges in it, and the first verified edge
+	// turns this back on for that one path.
 	compatPolicy := nodecompat.Policy(time.Duration(policy.OfflineReconcileDays) * 24 * time.Hour)
-	if decision := nodecompat.Decide(agent, compatadmission.OperationUpgradeEligibility, now, compatPolicy); !decision.Allowed {
+	admission := nodecompat.Request(agent, compatadmission.OperationRemoteUpgrade, now, compatPolicy)
+	admission.UpgradeEdgeVerified = version.UpgradeEdgeVerified(request.ExpectedVersion, request.Version)
+	if decision := compatadmission.Decide(admission); !decision.Allowed {
 		return nil, false, fmt.Errorf("%w: %s", domain.ErrValidation, nodecompat.Message(agent, decision))
 	}
 	if now.UnixMilli() <= 0 || now.Add(startAuthorization).Before(now) {
