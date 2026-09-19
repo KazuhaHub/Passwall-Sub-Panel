@@ -40,6 +40,18 @@ fi
 SUDO=""
 if ! "$RUNTIME" info >/dev/null 2>&1; then SUDO="sudo"; fi
 
+# The privilege needed to READ a container's files is a different question from the
+# one needed to TALK to the runtime. On a runner docker needs none, so $SUDO is
+# empty, while the database and the -shm/-wal beside it belong to the container's
+# root and refuse an unprivileged read — which surfaced as a panel that never
+# published a webPath. The two are decided separately for that reason.
+# Unconditional where sudo exists, NOT tied to $SUDO. Gating it on $SUDO got the
+# two environments backwards: in the VM the runtime needs sudo so $SUDO is set and
+# this would have been left empty, reading as an unprivileged user a database that
+# belongs to root. sudo is passwordless on the runner and here.
+DB_SUDO=""
+if command -v sudo >/dev/null 2>&1; then DB_SUDO="sudo"; fi
+
 THIRD_PARTY_IMAGE_3XUI="${PSP_LIVE_3XUI_IMAGE:-ghcr.io/mhsanaei/3x-ui:latest}"
 THIRD_PARTY_IMAGE_SUI="${PSP_LIVE_SUI_IMAGE:-ghcr.io/alireza0/s-ui:latest}"
 # A STABLE path, not a fresh mktemp per invocation: `env` and `down` have to find
@@ -115,11 +127,11 @@ sui_token() {
   # python3, not sqlite3: the runner does not reliably have the sqlite3 CLI, and
   # the script already depends on python3. A missing tool here presented as "the
   # panel never published a webPath", which names the symptom and not the cause.
-  $SUI_READ SUI_DB="$WORKDIR/sui/s-ui.db" SUI_TOKEN="$token" python3 - <<'PY'
-import os, sqlite3
-db = sqlite3.connect(os.environ["SUI_DB"])
+  $DB_SUDO python3 - "$WORKDIR/sui/s-ui.db" "$token" <<'PY'
+import sqlite3, sys
+db = sqlite3.connect(sys.argv[1])
 db.execute("delete from tokens")
-db.execute("insert into tokens (desc, token, expiry, user_id) values ('psp-compat', ?, 0, 1)", (os.environ["SUI_TOKEN"],))
+db.execute("insert into tokens (desc, token, expiry, user_id) values ('psp-compat', ?, 0, 1)", (sys.argv[2],))
 db.commit()
 db.close()
 PY
@@ -164,15 +176,21 @@ up() {
   # it depends on whether the runtime needed sudo at all — on a runner, docker
   # does not, $SUDO is empty, and the read is refused. The privilege is therefore
   # decided from the file rather than from the runtime.
-  SUI_READ=""
-  if [ ! -r "$WORKDIR/sui/s-ui.db" ]; then SUI_READ="sudo"; fi
-  export SUI_DB="$WORKDIR/sui/s-ui.db"
+  # ALWAYS with the privilege, not conditionally. A condition on the main database
+  # file is not enough: SQLite also needs the -shm and -wal beside it, and those
+  # are the container's root's too. Deciding from the one file that happens to be
+  # readable is how this failed twice while looking fixed. sudo is present here
+  # and on the runner; where it is not, the runtime already needed it anyway.
   local web_path=""
   while [ -z "$web_path" ]; do
     if [ "$waited" -ge 150 ]; then log "S-UI never published a webPath"; return 1; fi
-    web_path=$($SUI_READ python3 - <<'PY' 2>/dev/null || true
-import os, sqlite3
-db = sqlite3.connect(f"file:{os.environ['SUI_DB']}?mode=ro", uri=True)
+    # THE PATH IS AN ARGUMENT, NOT AN ENVIRONMENT VARIABLE. sudo resets the
+    # environment, so an exported SUI_DB never reaches the interpreter and the
+    # read dies with a KeyError that the redirect above hides — which is how this
+    # presented as a panel that never published a webPath.
+    web_path=$($DB_SUDO python3 - "$WORKDIR/sui/s-ui.db" <<'PY' 2>/dev/null || true
+import sqlite3, sys
+db = sqlite3.connect(sys.argv[1])
 row = db.execute("select value from settings where key='webPath'").fetchone()
 print(row[0] if row else "")
 PY
