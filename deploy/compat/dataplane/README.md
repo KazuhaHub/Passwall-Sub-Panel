@@ -70,40 +70,86 @@ than an assumption.
 
 ## Measured: the connection, and its refusal
 
-With the launcher publishing the node's port, the chain completes:
+The harness now drives all of it — traversal, refusal, and the return — and
+prints the following on a run that passes:
 
-| | Result |
-| --- | --- |
-| Baseline, through the node | `example.com -> HTTP 200` over `outbound/vless[r08-node3]` |
-| Panel-side counter after it | `inb 3 r08-i3 port 24447 | inb up 110` |
-| After expiring the user | `attempt 1 -> HTTP 000`, `attempt 2 -> HTTP 000` |
-| Panel-side after expiring | `u2@psp.local enable False`, `expiryTime 1789801199000` |
-
-The port stays open at the transport layer while the handshake is refused, which
-is the correct shape: the panel refuses at the protocol, not by dropping the
-listener.
+```
+target healthy at http://example.com/ (direct, unproxied)
+PASS: the client routed example.com through the node's vless outbound
+PASS: the rendered subscription loaded and carried a request
+expiring the user (window 180s)
+PASS: the proxied request was refused after the user expired (window 180s)
+PASS: the panel's own view of the client is enable=False
+restoring the user (window 180s)
+PASS: traffic resumed after the user was restored
+```
 
 The expiry path was used rather than quota exhaustion. Both act on the same
 service axis, so this does not establish that the quota path behaves the same —
 it establishes the axis.
 
+**The window is a profile value, not a retry count** (`PSP_DATA_ENFORCE_WINDOW_SECONDS`,
+`PSP_DATA_RESTORE_WINDOW_SECONDS`, both 180). "It eventually refused" and "it
+refused within its stated window" are different claims and only the second is
+testable, so the number is written down where a reader can disagree with it.
+
+## Four ways this harness lied before it worked
+
+Each of these produced a green or red result that was about the harness rather
+than about the chain. They are recorded because each one reads like a finding.
+
+- **The target must be one the ruleset sends through the node.** A local target
+  cannot be: private addresses go `direct` regardless of the selector. An earlier
+  version pointed at the node's own LAN address and reported, for 180 seconds,
+  that an expired user was still being carried — while the containers had already
+  been removed and every one of those 200s came from the direct rule.
+- **A 200 does not say which outbound produced it.** The harness now requires the
+  client's own log to name a `vless` outbound for the destination before it
+  believes anything downstream. Without that, `direct` and the node are
+  indistinguishable.
+- **A leftover client on the proxy port is not a node fault.** sing-box dies at
+  startup with `bind: address already in use`, every request then returns
+  `HTTP 000`, and that reads as a refusal by the node. The run that produced the
+  table above was first blocked by a `/tmp/sing-box12` from an earlier session
+  holding 127.0.0.1:7890. The harness now checks the port first and stops its own
+  client on exit.
+- **The panel is not reachable at loopback.** PSP's `safehttp` refuses loopback
+  by design — the SSRF guard doing its job — so a panel published at
+  `http://127.0.0.1:2053` cannot be used by the panel under test. The node-create
+  path fails with `refusing connection to non-public address 127.0.0.1` and PSP
+  answers `202 {"queued": true}`, which reads as "still syncing" rather than
+  "this address can never work". Run the launcher with
+  `PSP_BACKEND_HOST=<non-loopback address>`.
+
+## The panel-side probe addresses the client by UUID
+
+The client's email is derived from the user's ID (`u2@psp.local`), so looking for
+the UPN inside it finds nothing and returns empty — which reads as "the panel does
+not have this client". The probe matches on the VPN UUID, which is the same value
+in the render and on the panel by construction.
+
+
 ## What this does NOT establish
 
-- **That the traffic traversed the panel's core.** An earlier reading of this run
-  claimed the proxied request returned 200 with the node selected. That was
-  wrong twice over: the instance holding the proxy port was still the one using
-  the direct default — the selected instance had failed to bind and exited — and
-  the target was a private address, which the ruleset sends direct regardless of
-  the selector. Corrected here because the claim was in a PR body.
-  What is established: with the selected config running, a public destination
-  routes to `vless[r08-node]`. What is not: that the connection completed through
-  the panel, because the panel no longer holds PSP's node — the launcher was
-  restarted afterwards and rebuilt the panel's volume, which removed the inbound
-  PSP had created on it.
+- **Which transport or security layer carries it, beyond the one measured.** One
+  VLESS/TCP/none combination is exercised. TLS, REALITY and the other transports
+  are not.
 - **The quota path.** Expiry was used. Both act on the service axis, but a quota
   exhaustion is a different trigger and is not tested here.
-- **The full protocol matrix.** One VLESS/TCP/none combination was exercised.
-  TLS, REALITY and the other transports are not covered.
+- **The window under a different cadence.** 180s is the harness's declared bound
+  on this configuration. It says nothing about how a longer traffic-pull interval
+  or a larger fleet changes it.
+- **That the refusal is the node's rather than the client's.** The client is
+  still configured and still routes the destination to the node's outbound; the
+  connection fails at the node. The panel-side probe (`enable=False`) is what
+  makes that attribution, and it is checked in the same run.
+
+Earlier revisions of this file carried a claim that the proxied request returned
+200 with the node selected, which was wrong twice over — the instance holding the
+proxy port was the one using the direct default, and the target was a private
+address the ruleset sends direct. The outbound assertion above exists so that
+this specific claim cannot be made again without the client's own log supporting
+it.
 
 ## Scope
 
