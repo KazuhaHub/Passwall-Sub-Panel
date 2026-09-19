@@ -185,6 +185,18 @@ export const policies = {
     note: 'Panel-scoped pick list; focus revalidation plus explicit Refresh.',
   },
   /**
+   * Observable sync tasks for one user. The interval is deliberately false:
+   * the cadence belongs to the observation window in `query/syncStatus.ts`,
+   * which has to stop on a wall-clock budget and on there being nothing left
+   * to watch — neither of which a fixed interval can express.
+   */
+  syncStatus: {
+    staleTime: 0,
+    gcTime: 5 * MINUTE,
+    refetchInterval: false,
+    note: 'Paced by the observation window (15s, 5 min budget), not by this policy.',
+  },
+  /**
    * The global UI settings blob. Slow to change and edited in forms, so it is
    * never polled and its cached copy is only a starting point for a draft.
    */
