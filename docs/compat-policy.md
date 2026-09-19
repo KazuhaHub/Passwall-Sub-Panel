@@ -81,6 +81,18 @@ release 固定到 SHA，运行基础 profile 与声明的升级／回退验证�
 程序版本拒绝器。移动这个值必须同步说明协议是否仍接受旧节点，不能用缩小测试集合假装已经
 完成协议退出。3X-UI 的编译下限保留，S-UI 未确立下限时不得编造。
 
+**“supported”在现有代码里指三件不同的事，任何一处都不能代入另一处：**
+
+| 说法 | 属于 | 语义与落点 |
+| --- | --- | --- |
+| `CompatStatus.supported` | 运行时判断 | 当前能跟这台第三方面板通话；`version >= 下限 && <= 最后实测`，低于下限即 `too_old`。见 `internal/version/compat.go` |
+| PN `min_supported`／“supported set” | 测试选择 | 这一版还在 CI 里被跑。只有两条 workflow 与矩阵测试读取，生产代码零消费者 |
+| 单行 `base_sync: "supported"` | 证据状态 | 在这一版上**验证过**基础同步。见 `docs/compat/node-v4.json` 的 `released_nodes` |
+
+三者方向相反：运行时结论低于下限就**拒绝**，测试选择低于 floor 只是**不再测**，证据状态
+只描述**已经测过什么**。混用会得出错误的保证——尤其把 `min_supported` 读成运行时拒绝器，
+会让一次 CI 瘦身看起来像一次协议退出，也会让“新版本低于已测下限”被当成“新版本不受支持”。
+
 预发布版本不自动继承稳定版本承诺，但显式列入清单的 PN beta 继续享有已声明的测试支持；
 不能用“预发布一概不保证”取消 beta1–beta11 的既有承诺。
 
@@ -138,7 +150,7 @@ advisory 必须描述具体受影响功能；不能未经评估就把新最低�
 | --- | --- |
 | 政策头 | schema 版本、不可变修订、适用产品版本、发布时间 |
 | 运行组合 | 精确实现身份或显式支持范围、后端种类、profile、能力限制、适用平台／安装方式 |
-| 证据 | 唯一 ID、双方 commit／发布物摘要、测试套件 commit、CI URL、运行时间、逐项结论 |
+| 证据 | 唯一 ID、证据类型、双方 commit／发布物摘要、测试套件 commit、CI URL、运行时间、逐项结论 |
 | 链路证据 | 额外记录内核、客户端、协议／传输／TLS 组合及测试目标 |
 | 升级边 | 源与目标身份、安装方式、源／目标 schema、前提、升级证据、回退是否支持及证据 |
 | 已知问题 | 精确影响范围、失败功能、操作限制、修复路径 |
@@ -147,6 +159,21 @@ advisory 必须描述具体受影响功能；不能未经评估就把新最低�
 状态分为政策承诺、实测通过、推定可用、未验证和已知失败，不能互相代换。只测试两个边界
 不能声称范围内每个版本都实测；声明范围支持时必须说明抽样策略和风险，并保留已知坏版本的排除项。
 S-UI 只有上限证据时不得凭空补最低支持版本。基础范围与精确例外的优先级必须确定且可测试。
+
+**证据类型**：每条证据只属于一类，六类互不代换。这是对**证据**的分类，不是新的 API 状态
+枚举，也不重命名 `CompatStatus`——那个是运行时结论，两回事。
+
+| 类型 | 证明 | 不证明 |
+| --- | --- | --- |
+| `wire-contract` | 双方按协议的请求／响应与业务语义正确 | 真实代理内核、完整安装认证 |
+| `adapter-live` | 对真实第三方发行物的认证与读写语义 | 版本范围内每个发布物、完整流量 |
+| `dataplane` | 订阅经真实客户端与真实内核实际连通；应拒绝的确实被拒 | 其他协议／TLS 组合 |
+| `upgrade-mechanism` | 升级与回退机制在受控身份下正确 | 历史代码之间的数据兼容 |
+| `historical-upgrade` | 真实旧程序造出的数据被新程序读取并收敛 | 未声明的升级边 |
+| `artifact-runtime` | 最终发布的归档／镜像在原生目标上可运行 | 源码重建与发布物等价 |
+
+一条声明若其对应类型尚无证据，必须显示为未验证，不能用相邻类型顶替——例如 `wire-contract`
+通过不构成 `dataplane` 证据，`upgrade-mechanism` 通过不构成 `historical-upgrade` 证据。
 
 历史记录不可被新代码测试覆盖成“旧二进制也支持”。扩大旧 PSP 支持范围必须使用旧 PSP
 实现验证；修改文案或比较函数不能增加那个旧程序实际拥有的能力。
@@ -251,15 +278,20 @@ PR 不使用生产凭据或生产后端；外部 PR 不能通过高权限 workfl
 核对基线：PSP 分支 `kazuha/node-compat-policy` 的 `27cad1d24124f7a952c229c65be9648ae8f7963b`；PN
 `60d96490f2b0561279ae9332ef6a809e14aab996`。这是源码／workflow 核对，不是本次重新运行测试的结果。
 
-| 现有入口 | 已有基础 | 不能据此宣称 |
-| --- | --- | --- |
-| [ADR 0033](adr/0033-native-node-compatibility-and-upgrade-admission.md)、[PN 矩阵](compat/node-v4.json) | v1 范围、升级能力门控、保留旧 PN | 完整双向支持与任意升级路径 |
-| [PSP Test workflow](../.github/workflows/test.yml) | 固定 PN 依赖与从 min_supported 派生的 beta1–beta11 协议测试 | 完整 Bearer 认证、安装和真实核心链路 |
-| [协议测试说明](../internal/service/nodesync/contract_live_test.go) | 实际 HTTP／状态／收敛，确定性核心替身 | 真实代理握手及内核计数恢复 |
-| [旧 PSP 人工验证记录](psp-node-rootless-observability-progress.md) | 具体旧 PSP／新 PN 的观测上报实测记录 | 所有基础功能或反方向持续 CI |
-| PN `.github/workflows/test.yml` 升级 E2E | 当前源码带不同版本身份验证升级机制 | 真实历史数据迁移兼容 |
-| [第三方矩阵](compat/v4-ranges.json)、[live tests](../internal/adapters/sui/client_live_test.go) | 有实测范围记录和隔离测试入口 | 版本范围内所有发布物／完整流量都已测试 |
-| [上游 watcher](../.github/workflows/compat-watch.yml) | 每周发现超出已测上限的新版本 | 自动认证新上游 |
+| 现有入口 | 证据类型 | 已有基础 | 不能据此宣称 |
+| --- | --- | --- | --- |
+| [ADR 0033](adr/0033-native-node-compatibility-and-upgrade-admission.md)、[PN 矩阵](compat/node-v4.json) | `wire-contract` | v1 范围、升级能力门控、保留旧 PN | 完整双向支持与任意升级路径 |
+| [PSP Test workflow](../.github/workflows/test.yml) | `wire-contract` | 固定 PN 依赖与从 min_supported 派生的 beta1–beta11 协议测试 | 完整 Bearer 认证、安装和真实核心链路 |
+| [协议测试说明](../internal/service/nodesync/contract_live_test.go) | `wire-contract` | 实际 HTTP／状态／收敛，确定性核心替身 | 真实代理握手及内核计数恢复 |
+| [旧 PSP 人工验证记录](psp-node-rootless-observability-progress.md) | `wire-contract`（人工、一次性） | 具体旧 PSP／新 PN 的观测上报实测记录 | 所有基础功能或反方向持续 CI |
+| PN `.github/workflows/test.yml` 升级 E2E | `upgrade-mechanism` | 当前源码带不同版本身份验证升级机制 | 真实历史数据迁移兼容 |
+| [第三方矩阵](compat/v4-ranges.json)、[live tests](../internal/adapters/sui/client_live_test.go) | `adapter-live` | 有实测范围记录和隔离测试入口 | 版本范围内所有发布物／完整流量都已测试 |
+| [上游 watcher](../.github/workflows/compat-watch.yml) | —（发现，不是证据） | 每周发现超出已测上限的新版本 | 自动认证新上游 |
+
+**六类里今天只有三类有实例。** 上表覆盖 `wire-contract`、`adapter-live` 和
+`upgrade-mechanism`；`dataplane`、`historical-upgrade`、`artifact-runtime` **一条都没有**。
+这不是遗漏，而是 P3／P4／P5 各自要产出的东西——在它们完成之前，任何声称“完整链路”“历史
+数据兼容”“发布物已验证”的说法都没有对应证据可引，只能显示为未验证。
 
 按以下顺序实施；每项独立提交与验收，不因本文落库自动标为已完成：
 
