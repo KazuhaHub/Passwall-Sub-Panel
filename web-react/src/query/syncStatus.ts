@@ -20,7 +20,7 @@ export const WATCH_BUDGET_MS = 5 * 60_000
  * How long to wait before the next status read, or false to stop.
  *
  * Pure so the rules can be read and tested on their own — this is the part of
- * the observation that decides load, and it has three ways to stop.
+ * the observation that decides load, and it has four ways to stop.
  */
 export function watchIntervalMs(input: {
   /** The area is open, the target and session are unchanged, the tab visible. */
@@ -29,14 +29,34 @@ export function watchIntervalMs(input: {
   elapsedMs: number
   /** The state from the last successful read; undefined while still unknown. */
   state?: SyncStatusState
+  /** HTTP status of the last failed read, when the last read failed. */
+  errorStatus?: number
 }): number | false {
   if (!input.watching) return false
   if (input.elapsedMs >= WATCH_BUDGET_MS) return false
+  // A refusal is an answer, not a failure: 403 means this caller may not read
+  // the target, 404 means there is no such target. Neither changes on its own,
+  // so retrying just repeats the same refusal until the budget runs out.
+  if (input.errorStatus !== undefined && REFUSAL_STATUSES.includes(input.errorStatus)) return false
   // Settled: nothing pending. An unknown state (no answer yet, or a failed
   // read) deliberately does NOT stop the window — the next round is how an
   // unknown becomes an answer.
   if (input.state === 'no_active_tasks') return false
   return WATCH_INTERVAL_MS
+}
+
+/** The HTTP statuses that mean "you may not read this", not "try again". */
+const REFUSAL_STATUSES = [403, 404]
+
+/**
+ * The HTTP status behind a failed read, or undefined if there wasn't one.
+ *
+ * A transport failure has no response at all, and that is deliberately not a
+ * refusal: a dropped connection is exactly the case the next round is for.
+ */
+export function syncStatusErrorStatus(error: unknown): number | undefined {
+  const status = (error as { response?: { status?: number } } | null)?.response?.status
+  return typeof status === 'number' ? status : undefined
 }
 
 export function syncStatusQuery(scope: QueryScope, userId: number) {
@@ -90,7 +110,10 @@ export function useObservationWindow() {
   }, [windowStart])
 
   const restart = useCallback(() => setWindowStart(Date.now()), [])
-  return { watching: !expired, windowStart, expired, restart }
+  // Ends the window without waiting for the clock. Used when the read is
+  // refused: the answer will not change, so there is nothing left to watch.
+  const stop = useCallback(() => setExpired(true), [])
+  return { watching: !expired, windowStart, expired, restart, stop }
 }
 
 /**
@@ -105,28 +128,30 @@ export interface ObservationWindow {
   windowStart: number
 }
 
-export function useSyncStatus(scope: QueryScope, userId: number, window: ObservationWindow) {
+export function useSyncStatus(scope: QueryScope, userId: number, watch: ObservationWindow) {
   return useQuery({
     ...syncStatusQuery(scope, userId),
-    enabled: window.watching,
+    enabled: watch.watching,
     refetchInterval: (query) =>
       watchIntervalMs({
-        watching: window.watching,
-        elapsedMs: Date.now() - window.windowStart,
+        watching: watch.watching,
+        elapsedMs: Date.now() - watch.windowStart,
         state: query.state.data?.state,
+        errorStatus: syncStatusErrorStatus(query.state.error),
       }),
   })
 }
 
-export function useMySyncStatus(scope: QueryScope, window: ObservationWindow) {
+export function useMySyncStatus(scope: QueryScope, watch: ObservationWindow) {
   return useQuery({
     ...mySyncStatusQuery(scope),
-    enabled: window.watching,
+    enabled: watch.watching,
     refetchInterval: (query) =>
       watchIntervalMs({
-        watching: window.watching,
-        elapsedMs: Date.now() - window.windowStart,
+        watching: watch.watching,
+        elapsedMs: Date.now() - watch.windowStart,
         state: query.state.data?.state,
+        errorStatus: syncStatusErrorStatus(query.state.error),
       }),
   })
 }

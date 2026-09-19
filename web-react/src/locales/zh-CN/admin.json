@@ -781,6 +781,7 @@
     "refresh": "刷新",
     "none": "当前未发现待处理任务",
     "unknown": "同步状态暂时未知",
+    "target_unavailable": "目标已不可查询",
     "attempts": "重试 {{count}} 次",
     "has_error": "有执行错误记录，任务待重试",
     "truncated": "仅显示最近的部分任务",

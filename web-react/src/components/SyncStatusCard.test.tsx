@@ -4,7 +4,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createAppTheme } from '@/theme'
 import { makeTestQueryClient, queryWrapper } from '@/test/queryTestUtils'
-import { WATCH_BUDGET_MS } from '@/query/syncStatus'
+import { WATCH_BUDGET_MS, WATCH_INTERVAL_MS } from '@/query/syncStatus'
 import SyncStatusCard from './SyncStatusCard'
 
 const api = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() }))
@@ -148,5 +148,55 @@ describe('SyncStatusCard', () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(0) })
 
     expect(screen.queryByText('自动刷新已暂停，以下为上次观察结果，可能已经变化')).toBeNull()
+  })
+
+  it('gives up on a refusal, and keeps none of the snapshot it had', async () => {
+    vi.useFakeTimers()
+    // A successful read first, so there IS a snapshot to wrongly keep.
+    api.get.mockResolvedValueOnce({
+      data: statusBody({ state: 'active_tasks', active_tasks: [pendingTask] }),
+    })
+    mount()
+    await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+    expect(screen.getByText('user_resync')).toBeTruthy()
+
+    // The target then becomes unreadable: 403 (not permitted) / 404 (gone).
+    // Neither will change on its own, so neither is worth another 20 reads.
+    api.get.mockRejectedValue({ response: { status: 403, data: { error: 'Forbidden' } } })
+    fireEvent.click(screen.getByRole('button', { name: '刷新' }))
+    await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+
+    expect(screen.getByText('目标已不可查询')).toBeTruthy()
+    // The snapshot was fetched under a permission the caller no longer has.
+    expect(screen.queryByText('user_resync')).toBeNull()
+    expect(screen.queryByText('同步状态暂时未知')).toBeNull()
+
+    const readsAfterRefusal = api.get.mock.calls.length
+    await act(async () => { await vi.advanceTimersByTimeAsync(WATCH_BUDGET_MS) })
+    expect(api.get.mock.calls.length).toBe(readsAfterRefusal)
+  })
+
+  it('keeps waiting through a failure the next round might answer', async () => {
+    vi.useFakeTimers()
+    // Active tasks, so there is something left to watch after the failure.
+    api.get.mockResolvedValueOnce({
+      data: statusBody({ state: 'active_tasks', active_tasks: [pendingTask] }),
+    })
+    mount()
+    await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+
+    // A 503 is "cannot answer now", not "will never answer". That difference
+    // from a 403 is the whole reason the two are separate branches.
+    api.get.mockRejectedValue({ response: { status: 503, data: { code: 'sync_status_unavailable' } } })
+    fireEvent.click(screen.getByRole('button', { name: '刷新' }))
+    await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+
+    expect(screen.queryByText('目标已不可查询')).toBeNull()
+    expect(screen.getByText('读取失败，以下为上次观察结果，可能已经变化')).toBeTruthy()
+
+    // The window is still open, so another round is attempted.
+    const reads = api.get.mock.calls.length
+    await act(async () => { await vi.advanceTimersByTimeAsync(WATCH_INTERVAL_MS) })
+    expect(api.get.mock.calls.length).toBeGreaterThan(reads)
   })
 })

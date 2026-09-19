@@ -781,6 +781,7 @@
     "refresh": "Refresh",
     "none": "No pending tasks observed",
     "unknown": "Sync state is currently unknown",
+    "target_unavailable": "This target is no longer queryable",
     "attempts": "Retried {{count}} times",
     "has_error": "An error was recorded; the task is waiting to retry",
     "truncated": "Showing only the most recent tasks",

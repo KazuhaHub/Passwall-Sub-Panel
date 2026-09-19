@@ -44,6 +44,24 @@ describe('watchIntervalMs', () => {
     expect(got).toBe(WATCH_INTERVAL_MS)
     expect(WATCH_INTERVAL_MS).toBeGreaterThanOrEqual(10_000)
   })
+
+  it('stops outright on a refusal that will not change on its own', () => {
+    // 403 (not allowed to read this target) and 404 (no such target) are
+    // answers, not failures. Polling them for the rest of the budget would
+    // repeat the same refusal twenty times (ADR 0034, frontend §7).
+    expect(watchIntervalMs({ watching: true, elapsedMs: 0, errorStatus: 403 })).toBe(false)
+    expect(watchIntervalMs({ watching: true, elapsedMs: 0, errorStatus: 404 })).toBe(false)
+  })
+
+  it('keeps waiting through a failure that may clear on its own', () => {
+    // A 503 means the store could not answer, not that it never will — the
+    // next round is how an unknown becomes an answer, within the budget.
+    expect(watchIntervalMs({ watching: true, elapsedMs: 0, errorStatus: 503 }))
+      .toBe(WATCH_INTERVAL_MS)
+    expect(watchIntervalMs({ watching: true, elapsedMs: 0, errorStatus: 500 }))
+      .toBe(WATCH_INTERVAL_MS)
+    expect(watchIntervalMs({ watching: true, elapsedMs: 0 })).toBe(WATCH_INTERVAL_MS)
+  })
 })
 
 describe('useObservationWindow', () => {
