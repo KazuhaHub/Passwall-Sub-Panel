@@ -112,8 +112,17 @@ sui_token() {
   # in SECONDS (PSP's own expiry fields are milliseconds), and 0 means no expiry.
   local token
   token=$(python3 -c 'import secrets;print(secrets.token_urlsafe(32))')
-  $SUDO sqlite3 "$WORKDIR/sui/s-ui.db" \
-    "delete from tokens; insert into tokens (desc, token, expiry, user_id) values ('psp-compat', '$token', 0, 1);"
+  # python3, not sqlite3: the runner does not reliably have the sqlite3 CLI, and
+  # the script already depends on python3. A missing tool here presented as "the
+  # panel never published a webPath", which names the symptom and not the cause.
+  SUI_DB="$WORKDIR/sui/s-ui.db" SUI_TOKEN="$token" python3 - <<'PY'
+import os, sqlite3
+db = sqlite3.connect(os.environ["SUI_DB"])
+db.execute("delete from tokens")
+db.execute("insert into tokens (desc, token, expiry, user_id) values ('psp-compat', ?, 0, 1)", (os.environ["SUI_TOKEN"],))
+db.commit()
+db.close()
+PY
   printf '%s' "$token"
 }
 
@@ -153,7 +162,13 @@ up() {
   local web_path=""
   while [ -z "$web_path" ]; do
     if [ "$waited" -ge 150 ]; then log "S-UI never published a webPath"; return 1; fi
-    web_path=$($SUDO sqlite3 "$WORKDIR/sui/s-ui.db" "select value from settings where key='webPath';" 2>/dev/null || true)
+    web_path=$(SUI_DB="$WORKDIR/sui/s-ui.db" python3 - <<'PY' 2>/dev/null || true
+import os, sqlite3
+db = sqlite3.connect(f"file:{os.environ['SUI_DB']}?mode=ro", uri=True)
+row = db.execute("select value from settings where key='webPath'").fetchone()
+print(row[0] if row else "")
+PY
+)
     if [ -n "$web_path" ]; then break; fi
     sleep 2; waited=$((waited + 2))
   done

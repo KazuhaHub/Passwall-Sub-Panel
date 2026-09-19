@@ -304,14 +304,19 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-      - uses: actions/setup-node@v7
-        with:
-          node-version: "26"
-      - name: verify the preferred compiler
+      # The compiler gate must sit IMMEDIATELY after setup-go: the baseline guard
+      # reads job steps positionally, so anything between them, including the Node
+      # setup this job also needs, is a failure rather than a style choice.
+      - name: Verify exact preferred compiler
         run: |
           set -eu
           build_toolchain=$(awk '$1 == "toolchain" { print $2 }' go.mod)
+          test -n "$build_toolchain"
           test "$(go env GOVERSION)" = "$build_toolchain"
+          test "$(go tool compile -V | awk '{ print $3 }')" = "$build_toolchain"
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "26"
       - name: start the isolated panels
         env:
           PSP_LIVE_3XUI_IMAGE: ${{ vars.PSP_LIVE_3XUI_IMAGE || 'ghcr.io/mhsanaei/3x-ui:latest' }}
