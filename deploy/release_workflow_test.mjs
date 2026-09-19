@@ -255,6 +255,17 @@ test('a cross-compile job is never a publishing job\'s only dependency', () => {
   }
 })
 
+// R10 STEP 4: the evidence index is what still exists once the run's logs have
+// expired, so its absence is not a missing convenience — it is a claim nobody can
+// check later. Asserted by shape because this guard reads the workflow as text:
+// the step must name the indexer and the index must be uploaded.
+test('the release gate records an evidence index', () => {
+  const gate = job('compatibility')
+  assert(gate.includes('deploy/compat/evidence-index.mjs'), 'the gate must assemble an evidence index')
+  assert(gate.includes('deploy/compat/plan.mjs'), 'the index must be built against the planned case manifest, not the reports')
+  assert(gate.includes('compatibility-evidence-index'), 'the index must be uploaded, or it expires with the runner')
+})
+
 test('publisher cache guard rejects implicit defaults and explicit cache restoration', () => {
   for (const [label, mutated] of [
     ['implicit Go cache', workflow.replace('          cache: false\n', '')],

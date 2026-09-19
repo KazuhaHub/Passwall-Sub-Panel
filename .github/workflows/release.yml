@@ -125,7 +125,7 @@ jobs:
           package-manager-cache: false
 
       - name: Test fail-closed publication guards
-        run: node --test deploy/check_image_test.mjs deploy/check_build_test.mjs deploy/release_workflow_test.mjs deploy/compat/plan.test.mjs deploy/compat/check-case-set.test.mjs deploy/test_workflow_test.mjs
+        run: node --test deploy/check_image_test.mjs deploy/check_build_test.mjs deploy/release_workflow_test.mjs deploy/compat/plan.test.mjs deploy/compat/check-case-set.test.mjs deploy/compat/evidence-index.test.mjs deploy/test_workflow_test.mjs
 
       - name: Refuse an already published exact image tag
         env:
@@ -308,6 +308,32 @@ jobs:
         run: |
           set -euo pipefail
           node deploy/compat/check-case-set.mjs --reports evidence --output case-set.json
+      # THE EVIDENCE INDEX. The report above answers "may this run publish"; this
+      # records WHAT was claimed, by which source, against which artifacts, so the
+      # claim can still be read once the run's logs have expired. It runs after
+      # the gate, not instead of it: the gate decides, this records.
+      - name: assemble the evidence index
+        run: |
+          set -euo pipefail
+          # The digests of the exact archives and images this release would
+          # publish, taken from the build job's own output rather than re-derived.
+          # The case manifest comes from the planner, not from the reports: the
+          # index has to say what was CLAIMED as well as what came back.
+          node deploy/compat/plan.mjs --output plan.json
+          node deploy/compat/evidence-index.mjs \
+            --evidence evidence \
+            --plan plan.json \
+            --digests "${{ github.workspace }}/.compat/digests.json" \
+            --source-sha "${{ github.sha }}" \
+            --output evidence-index.json
+      - name: upload the evidence index
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: compatibility-evidence-index
+          path: evidence-index.json
+          if-no-files-found: warn
+          retention-days: 90
       - name: upload the case-set verdict
         if: always()
         uses: actions/upload-artifact@v7
