@@ -120,7 +120,7 @@ jobs:
       - name: Set up Node.js for immutable image preflight
         uses: actions/setup-node@v7
         with:
-          node-version: "24"
+          node-version: "26"
           package-manager-cache: false
 
       - name: Test fail-closed publication guards
@@ -201,7 +201,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v7
         with:
-          node-version: "24"
+          node-version: "26"
           package-manager-cache: false
 
       - name: Install dependencies
@@ -475,7 +475,7 @@ jobs:
       - name: Set up Node.js for immutable image preflight
         uses: actions/setup-node@v7
         with:
-          node-version: "24"
+          node-version: "26"
           package-manager-cache: false
 
       - name: Log in to GitHub Container Registry
