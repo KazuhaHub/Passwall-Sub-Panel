@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -40,7 +41,7 @@ func TestAdminRuleSetsSavePersistsMembersAndOptionsAndInvalidatesRenderCache(t *
 		},
 	}
 	w := performRuleSave(t, h, body)
-	if w.Code != http.StatusNoContent {
+	if w.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
 	}
 	if invalidations != 1 {
@@ -59,6 +60,51 @@ func TestAdminRuleSetsSavePersistsMembersAndOptionsAndInvalidatesRenderCache(t *
 	options := got.ProxyGroupOptions["🇨🇳 中国大陆"]
 	if options.Type != "load-balance" || options.Strategy != "consistent-hashing" || options.URL == "" || options.Interval == nil || options.Lazy == nil || options.Timeout == nil {
 		t.Fatalf("options were not normalized and persisted: %#v", options)
+	}
+}
+
+func TestAdminRuleSetsSavePrunesRemovedGroupMetadataAndReturnsPersistedRuleSet(t *testing.T) {
+	repo, err := yamladapter.NewRuleSetRepo(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	invalidations := 0
+	h := NewAdminRuleSetsHandler(repo, staticRuleNodes{}, nil, func() { invalidations++ }, t.TempDir())
+	body := ruleSetDTO{
+		Slug: "custom", Name: "Custom", Enabled: true,
+		Content:         "- MATCH,🐟 漏网之鱼",
+		ProxyGroupOrder: []string{"📣 谷歌FCM", "🐟 漏网之鱼"},
+		ProxyGroupMembers: map[string][]domain.ProxyGroupMember{
+			"📣 谷歌FCM": {{Kind: "builtin", Value: "DIRECT"}},
+			"🐟 漏网之鱼":  {{Kind: "node_set", Value: "remaining"}},
+		},
+		ProxyGroupOptions: map[string]domain.ProxyGroupOptions{
+			"📣 谷歌FCM": {Type: "fallback"},
+		},
+	}
+	w := performRuleSave(t, h, body)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+	if invalidations != 1 {
+		t.Fatalf("invalidations=%d", invalidations)
+	}
+	var response ruleSetDTO
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(response.ProxyGroupOrder, []string{"🐟 漏网之鱼"}) || response.ProxyGroupMembers["📣 谷歌FCM"] != nil {
+		t.Fatalf("response was not normalized: %#v", response)
+	}
+	if len(response.ProxyGroupOptions) != 0 {
+		t.Fatalf("orphan options survived in response: %#v", response.ProxyGroupOptions)
+	}
+	got, err := repo.GetBySlug(context.Background(), "custom")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got.ProxyGroupOrder, response.ProxyGroupOrder) || !reflect.DeepEqual(got.ProxyGroupMembers, response.ProxyGroupMembers) || !reflect.DeepEqual(got.ProxyGroupOptions, response.ProxyGroupOptions) {
+		t.Fatalf("response and repository differ: response=%#v stored=%#v", response, got)
 	}
 }
 
@@ -154,6 +200,31 @@ func TestAdminRuleSetsSaveRejectsMemberCycleWithoutInvalidating(t *testing.T) {
 	}
 	if invalidations != 0 {
 		t.Fatalf("invalidations=%d", invalidations)
+	}
+}
+
+func TestAdminRuleSetsSaveStillRejectsSurvivingReferenceToRemovedGroup(t *testing.T) {
+	repo, err := yamladapter.NewRuleSetRepo(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	invalidations := 0
+	h := NewAdminRuleSetsHandler(repo, staticRuleNodes{}, nil, func() { invalidations++ }, t.TempDir())
+	body := ruleSetDTO{
+		Slug: "bad", Name: "Bad", Enabled: true, Content: "- MATCH,Keep",
+		ProxyGroupMembers: map[string][]domain.ProxyGroupMember{
+			"Keep": {{Kind: "proxy_group", Value: "Removed"}},
+		},
+	}
+	w := performRuleSave(t, h, body)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+	if invalidations != 0 {
+		t.Fatalf("invalidations=%d", invalidations)
+	}
+	if !bytes.Contains(w.Body.Bytes(), []byte(`"code":"missing_group"`)) {
+		t.Fatalf("missing_group issue not returned: %s", w.Body.String())
 	}
 }
 

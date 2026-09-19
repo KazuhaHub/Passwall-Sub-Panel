@@ -36,7 +36,7 @@ import { useTranslation } from 'react-i18next'
 import { useCan } from '@/utils/permissions'
 import { allSettledLimited } from '@/utils/promises'
 
-import { deleteRuleSet, listRuleSets, resetRuleSet, saveRuleSet, SEEDED_RULESET_SLUGS, type RuleSet } from '@/api/rules'
+import { deleteRuleSet, inspectProxyGroups, listRuleSets, resetRuleSet, saveRuleSet, SEEDED_RULESET_SLUGS, type RuleSet } from '@/api/rules'
 import { listGroups } from '@/api/groups'
 import type { Group } from '@/api/types'
 import { listTemplates, type Template } from '@/api/templates'
@@ -45,6 +45,7 @@ import { pushSnack } from '@/components/SnackbarHost'
 import { PagedTableFooter } from '@/components/PagedTableFooter'
 import PageHeader from '@/components/PageHeader'
 import ProxyGroupMembersEditor from '@/components/ProxyGroupMembersEditor'
+import { pruneRuleSetProxyGroupMetadata } from '@/utils/proxyGroupMembers'
 
 // Lazy-load the CodeMirror editor so its (heavy) deps stay out of the initial
 // SPA bundle — fetched only when a rule-set editor dialog opens.
@@ -83,7 +84,6 @@ export default function RuleSetsView() {
   const [initialProxyGroupOptions, setInitialProxyGroupOptions] = useState<NonNullable<RuleSet['proxy_group_options']>>({})
   const [busy, setBusy] = useState(false)
   const [dialogTab, setDialogTab] = useState<'rules' | 'members'>('rules')
-  const [memberValidationErrors, setMemberValidationErrors] = useState(false)
 
   // Client-side pagination — rule-set lists are tiny but the footer
   // gives the admin a per-page selector consistent with other tables.
@@ -136,14 +136,14 @@ export default function RuleSetsView() {
   }
 
   function openCreate() {
-    setEditing(false); setForm({ ...EMPTY, proxy_group_order: [], proxy_group_members: {}, proxy_group_options: {} }); setInitialProxyGroupOrder([]); setInitialProxyGroupMembers({}); setInitialProxyGroupOptions({}); setDialogTab('rules'); setMemberValidationErrors(false); setDialogOpen(true)
+    setEditing(false); setForm({ ...EMPTY, proxy_group_order: [], proxy_group_members: {}, proxy_group_options: {} }); setInitialProxyGroupOrder([]); setInitialProxyGroupMembers({}); setInitialProxyGroupOptions({}); setDialogTab('rules'); setDialogOpen(true)
   }
   function openEdit(rs: RuleSet) {
     const proxyGroupMembers = cloneProxyGroupMembers(rs.proxy_group_members)
     const proxyGroupOptions = cloneProxyGroupOptions(rs.proxy_group_options)
     setEditing(true); setForm({ ...rs, proxy_group_members: proxyGroupMembers, proxy_group_options: proxyGroupOptions }); setInitialProxyGroupMembers(cloneProxyGroupMembers(proxyGroupMembers)); setInitialProxyGroupOptions(cloneProxyGroupOptions(proxyGroupOptions))
     setInitialProxyGroupOrder([...(rs.proxy_group_order || [])])
-    setDialogTab('rules'); setMemberValidationErrors(false)
+    setDialogTab('rules')
     setDialogOpen(true)
   }
   // Duplicate clones the row into the create flow with a -copy suffix so
@@ -164,7 +164,7 @@ export default function RuleSetsView() {
     setInitialProxyGroupMembers(cloneProxyGroupMembers(proxyGroupMembers))
     setInitialProxyGroupOptions(cloneProxyGroupOptions(proxyGroupOptions))
     setInitialProxyGroupOrder([...(rs.proxy_group_order || [])])
-    setDialogTab('rules'); setMemberValidationErrors(false)
+    setDialogTab('rules')
     setDialogOpen(true)
   }
 
@@ -172,10 +172,6 @@ export default function RuleSetsView() {
     e.preventDefault()
     if (!form.slug || !form.name) {
       pushSnack(t('admin:rules.validate.slug_name_required'), 'warning'); return
-    }
-    if (memberValidationErrors) {
-      setDialogTab('members')
-      pushSnack(t('admin:rules.validate.proxy_group_members'), 'warning'); return
     }
     // Creating/duplicating (not editing) with an existing slug would silently
     // overwrite that rule set server-side (Save is a slug-keyed upsert). Block
@@ -186,9 +182,36 @@ export default function RuleSetsView() {
     }
     setBusy(true)
     try {
-      await saveRuleSet(form)
+      let draft = form
+      let inspection = await inspectProxyGroups({
+        content: draft.content,
+        proxy_group_members: draft.proxy_group_members || {},
+        proxy_group_options: draft.proxy_group_options || {},
+      })
+      const cleanup = pruneRuleSetProxyGroupMetadata(draft, inspection.groups)
+      if (cleanup.removedGroups.length > 0) {
+        const ok = await confirm({
+          title: t('admin:rules.confirm.cleanup_groups_title'),
+          message: t('admin:rules.confirm.cleanup_groups_message', { names: cleanup.removedGroups.join('、') }),
+          destructive: true,
+        })
+        if (!ok) return
+        draft = cleanup.ruleSet
+        setForm(draft)
+        inspection = await inspectProxyGroups({
+          content: draft.content,
+          proxy_group_members: draft.proxy_group_members || {},
+          proxy_group_options: draft.proxy_group_options || {},
+        })
+      }
+      const hasErrors = inspection.issues.some(issue => issue.level === 'error')
+      if (hasErrors) {
+        setDialogTab('members')
+        pushSnack(t('admin:rules.validate.proxy_group_members'), 'warning'); return
+      }
+      const saved = await saveRuleSet(draft)
       if (editing) {
-        setItems(prev => prev.map(item => item.slug === form.slug ? form : item))
+        setItems(prev => prev.map(item => item.slug === saved.slug ? saved : item))
       }
       pushSnack(t('admin:rules.toast.saved'), 'success')
       setDialogOpen(false)
@@ -474,7 +497,6 @@ export default function RuleSetsView() {
                 initialOptions={initialProxyGroupOptions}
                 onOptionsChange={proxy_group_options => setForm(current => ({ ...current, proxy_group_options }))}
                 previewGroups={groups}
-                onValidationChange={setMemberValidationErrors}
               />
             )}
           </Box>

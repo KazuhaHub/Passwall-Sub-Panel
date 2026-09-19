@@ -88,7 +88,8 @@ export async function getRuleSet(slug: string) {
 }
 
 export async function saveRuleSet(rs: RuleSet) {
-  await client.put(`/admin/rules/${rs.slug}`, rs)
+  const { data } = await client.put<RuleSet>(`/admin/rules/${rs.slug}`, rs)
+  return data
 }
 
 export async function inspectProxyGroups(req: {

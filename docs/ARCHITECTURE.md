@@ -1244,6 +1244,8 @@ HTTP/3 常见的 `UDP/443` 与其他 UDP 分开控制：`⚡ QUIC控制` 默认�
 
 `proxy_group_members` 可选地覆盖单个策略组内部的成员顺序，Mihomo 与 sing-box 共用。支持具体节点（稳定 `node_id`）、内置出口、其他策略组以及 `remaining` / `region:XX` / `tag:name` 动态节点集合；展开后按首次出现去重。字段缺失时继续使用内置的名称匹配默认顺序。后台入口为「规则库 → 编辑规则集 → 策略组成员」。
 
+规则正文（加上渲染器自动补充的必要依赖组）是策略组存在性的真相源。删除正文中某个策略组后，后台保存前会列出并确认级联删除该组的 `proxy_group_order`、`proxy_group_members` 与 `proxy_group_options` 项；保存接口也会执行相同规范化并返回实际落盘实体，确保直接 API 调用不会留下不可见的孤立配置。仅删除以该组为键的顶层配置；其它存活组若仍把它作为成员引用，继续按 `missing_group` 拦截，不能静默改变存活组的路由语义。已有孤立配置不做启动时批量迁移，在下一次保存该规则集时清理。
+
 > **跨规则集引用限制**：`proxy_group` 成员的校验以单个规则集为单位——被引用的组必须出现在**当前规则集自身**的规则内容中，否则保存时按 `missing_group` 拦截（编辑器预览同样如此，反馈一致）。渲染时多个规则集会拼接，因此已保存的跨规则集引用能正常解析；但保存阶段暂不支持引用只在其它规则集里定义的组。若需要跨规则集引用，请把相关组定义在同一规则集内。
 
 `proxy_group_options` 可选地覆盖单个策略组的 Mihomo 类型，支持 `select`、`url-test`、`fallback`、`load-balance`。三个自动类型共用 `url`、`interval`、`lazy`、`timeout`；`url-test` 额外支持 `tolerance`，`load-balance` 额外支持 `round-robin` / `consistent-hashing` / `sticky-sessions`。该字段仅影响 Mihomo；sing-box 始终生成 `selector`。自动类型（`url-test` / `fallback` / `load-balance`）的成员必须是真实出口（具体节点或其它代理组），不能包含 `DIRECT` / `REJECT` 等内置出口——保存校验会直接拦截，渲染时也会剥离内置出口；若某用户可授权节点与配置成员没有交集导致成员为空，该组会安全降级为 `select`（避免生成把全部流量导向 `DIRECT` 的伪自动组）。模板绑定多个规则集且同名组重复配置时，members 与 options 分别按规则集顺序取第一个配置。

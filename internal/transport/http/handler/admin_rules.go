@@ -43,6 +43,18 @@ type ruleSetDTO struct {
 	Content                  string                               `json:"content"`
 }
 
+func ruleSetDTOFromDomain(r *domain.RuleSet) ruleSetDTO {
+	return ruleSetDTO{
+		Slug: r.Slug, Name: r.Name, Sort: r.Sort,
+		Enabled:                  r.Enabled,
+		DirectSubscriptionDomain: r.DirectSubscriptionDomain,
+		ProxyGroupOrder:          r.ProxyGroupOrder,
+		ProxyGroupMembers:        r.ProxyGroupMembers,
+		ProxyGroupOptions:        r.ProxyGroupOptions,
+		Content:                  r.Content,
+	}
+}
+
 func (h *AdminRuleSetsHandler) List(c *gin.Context) {
 	p := parsePagination(c)
 	items, total, err := h.repo.ListPaged(c.Request.Context(), p)
@@ -52,15 +64,7 @@ func (h *AdminRuleSetsHandler) List(c *gin.Context) {
 	}
 	out := make([]ruleSetDTO, len(items))
 	for i, r := range items {
-		out[i] = ruleSetDTO{
-			Slug: r.Slug, Name: r.Name, Sort: r.Sort,
-			Enabled:                  r.Enabled,
-			DirectSubscriptionDomain: r.DirectSubscriptionDomain,
-			ProxyGroupOrder:          r.ProxyGroupOrder,
-			ProxyGroupMembers:        r.ProxyGroupMembers,
-			ProxyGroupOptions:        r.ProxyGroupOptions,
-			Content:                  r.Content,
-		}
+		out[i] = ruleSetDTOFromDomain(r)
 	}
 	c.JSON(http.StatusOK, pagedEnvelope(out, total, p))
 }
@@ -76,15 +80,7 @@ func (h *AdminRuleSetsHandler) Get(c *gin.Context) {
 		respondError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, ruleSetDTO{
-		Slug: r.Slug, Name: r.Name, Sort: r.Sort,
-		Enabled:                  r.Enabled,
-		DirectSubscriptionDomain: r.DirectSubscriptionDomain,
-		ProxyGroupOrder:          r.ProxyGroupOrder,
-		ProxyGroupMembers:        r.ProxyGroupMembers,
-		ProxyGroupOptions:        r.ProxyGroupOptions,
-		Content:                  r.Content,
-	})
+	c.JSON(http.StatusOK, ruleSetDTOFromDomain(r))
 }
 
 func (h *AdminRuleSetsHandler) Save(c *gin.Context) {
@@ -102,22 +98,24 @@ func (h *AdminRuleSetsHandler) Save(c *gin.Context) {
 		respondError(c, err)
 		return
 	}
-	inspection := render.InspectProxyGroups(req.Content, req.ProxyGroupMembers, req.ProxyGroupOptions, nodes)
+	metadata := render.NormalizeProxyGroupMetadata(req.Content, req.ProxyGroupOrder, req.ProxyGroupMembers, req.ProxyGroupOptions)
+	inspection := render.InspectProxyGroups(req.Content, metadata.Members, metadata.Options, nodes)
 	for _, issue := range inspection.Issues {
 		if issue.Level == "error" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid proxy group members", "issues": inspection.Issues})
 			return
 		}
 	}
-	if err := h.repo.Save(c.Request.Context(), &domain.RuleSet{
+	saved := &domain.RuleSet{
 		Slug: req.Slug, Name: req.Name, Sort: req.Sort,
 		Enabled:                  req.Enabled,
 		DirectSubscriptionDomain: req.DirectSubscriptionDomain,
-		ProxyGroupOrder:          req.ProxyGroupOrder,
-		ProxyGroupMembers:        req.ProxyGroupMembers,
-		ProxyGroupOptions:        render.NormalizeProxyGroupOptionsMap(req.ProxyGroupOptions),
+		ProxyGroupOrder:          metadata.Order,
+		ProxyGroupMembers:        metadata.Members,
+		ProxyGroupOptions:        render.NormalizeProxyGroupOptionsMap(metadata.Options),
 		Content:                  req.Content,
-	}); err != nil {
+	}
+	if err := h.repo.Save(c.Request.Context(), saved); err != nil {
 		if errors.Is(err, domain.ErrValidation) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
@@ -128,7 +126,7 @@ func (h *AdminRuleSetsHandler) Save(c *gin.Context) {
 	if h.invalidate != nil {
 		h.invalidate()
 	}
-	c.Status(http.StatusNoContent)
+	c.JSON(http.StatusOK, ruleSetDTOFromDomain(saved))
 }
 
 type inspectProxyGroupsRequest struct {

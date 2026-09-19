@@ -1142,6 +1142,8 @@
       "delete_used_suffix": "\n\n该规则集正在被 {{names}} 引用，删除后这些配置方案会跳过它。",
       "reset_title": "恢复为内置默认？",
       "reset_message": "将磁盘上的 {{slug}} 内容覆盖为当前 binary 内嵌的默认版本，自定义修改会丢失。",
+      "cleanup_groups_title": "同时删除策略组配置？",
+      "cleanup_groups_message": "当前规则内容已不再包含以下策略组：{{names}}。继续保存将同时删除它们的自定义成员、类型和排序配置。",
       "batch_delete_title": "批量删除规则集",
       "batch_delete_message": "确定删除 {{count}} 个规则集？"
     },

@@ -170,6 +170,56 @@ func TestInspectProxyGroupsWarnsWhenDynamicSetHasNoCurrentMatch(t *testing.T) {
 	t.Fatalf("expected empty_node_set warning: %#v", inspection.Issues)
 }
 
+func TestNormalizeProxyGroupMetadataRemovesOrphansWithoutMutatingInput(t *testing.T) {
+	interval := 60
+	order := []string{"Keep", "📣 谷歌FCM", "🚀 节点选择"}
+	members := map[string][]domain.ProxyGroupMember{
+		"Keep":    {{Kind: "proxy_group", Value: "🚀 节点选择"}},
+		"📣 谷歌FCM": {{Kind: "builtin", Value: "DIRECT"}},
+	}
+	options := map[string]domain.ProxyGroupOptions{
+		"Keep":    {Type: ProxyGroupTypeURLTest, Interval: &interval},
+		"📣 谷歌FCM": {Type: ProxyGroupTypeFallback},
+	}
+
+	got := NormalizeProxyGroupMetadata("- MATCH,Keep", order, members, options)
+	if !reflect.DeepEqual(got.Removed, []string{"📣 谷歌FCM"}) {
+		t.Fatalf("removed=%#v", got.Removed)
+	}
+	if !reflect.DeepEqual(got.Order, []string{"Keep", "🚀 节点选择"}) {
+		t.Fatalf("order=%#v", got.Order)
+	}
+	if _, ok := got.Members["📣 谷歌FCM"]; ok {
+		t.Fatalf("orphan members survived: %#v", got.Members)
+	}
+	if _, ok := got.Options["📣 谷歌FCM"]; ok {
+		t.Fatalf("orphan options survived: %#v", got.Options)
+	}
+	if got.Members["Keep"][0].Value != "🚀 节点选择" || got.Options["Keep"].Interval == nil || *got.Options["Keep"].Interval != 60 {
+		t.Fatalf("valid metadata changed: %#v %#v", got.Members, got.Options)
+	}
+
+	got.Members["Keep"][0].Value = "changed"
+	*got.Options["Keep"].Interval = 30
+	if members["Keep"][0].Value != "🚀 节点选择" || *options["Keep"].Interval != 60 {
+		t.Fatalf("normalization mutated or aliased input: %#v %#v", members, options)
+	}
+}
+
+func TestNormalizeProxyGroupMetadataDoesNotKeepDependencyFromOrphanOwner(t *testing.T) {
+	members := map[string][]domain.ProxyGroupMember{
+		"Removed": {{Kind: "proxy_group", Value: "🚀 节点选择"}},
+		"🚀 节点选择":  {{Kind: "builtin", Value: "DIRECT"}},
+	}
+	got := NormalizeProxyGroupMetadata("- MATCH,DIRECT", []string{"Removed", "🚀 节点选择"}, members, nil)
+	if len(got.Order) != 0 || len(got.Members) != 0 {
+		t.Fatalf("orphan dependency survived: %#v", got)
+	}
+	if !reflect.DeepEqual(got.Removed, []string{"Removed", "🚀 节点选择"}) {
+		t.Fatalf("removed=%#v", got.Removed)
+	}
+}
+
 func TestMergeFirstProxyGroupMembersKeepsTemplateRuleSetPrecedence(t *testing.T) {
 	dst := map[string][]domain.ProxyGroupMember{
 		"A": {{Kind: "builtin", Value: "DIRECT"}},

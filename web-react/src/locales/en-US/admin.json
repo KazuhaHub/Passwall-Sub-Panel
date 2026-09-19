@@ -1144,6 +1144,8 @@
       "delete_used_suffix": "\n\nThis rule set is referenced by {{names}}. After deletion those templates will skip it.",
       "reset_title": "Restore seeded default?",
       "reset_message": "Overwrite the on-disk content of {{slug}} with the version embedded in this build. Any customizations will be lost.",
+      "cleanup_groups_title": "Delete related proxy-group settings?",
+      "cleanup_groups_message": "The current rule content no longer contains these proxy groups: {{names}}. Continuing will also delete their custom members, type, and ordering settings.",
       "batch_delete_title": "Delete rule sets",
       "batch_delete_message": "Delete {{count}} rule sets?"
     },

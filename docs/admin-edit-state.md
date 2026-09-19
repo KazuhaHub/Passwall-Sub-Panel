@@ -98,12 +98,12 @@ setDialogOpen(false)
 
 `mutateItems` 有意不改 `total`，所以它只用于已有行内容更新。创建和删除仍走 `refresh()`，不能把新行随手 append 到分页结果后假装总数没有变化。
 
-### 3.3 写接口没有实体响应：使用完整表单快照
+### 3.3 写接口没有实体响应：仅在后端不规范化时使用表单快照
 
-规则集与模板按 `slug` 做整对象 upsert，写接口不返回实体；其表单已经包含完整文件模型，可以直接写回：
+模板按 `slug` 做整对象 upsert，写接口不返回实体；其表单已经包含完整文件模型，可以直接写回：
 
 ```tsx
-await saveRuleSet(form)
+await saveTemplate(form)
 setItems(previous =>
   previous.map(item => item.slug === form.slug ? form : item)
 )
@@ -117,6 +117,8 @@ setDialogOpen(false)
 - 表单更新遵守 React 不可变数据约定，写回后不会被原地修改。
 
 新接口若不满足这些条件，应优先让 `PUT/PATCH` 返回安全的完整实体，而不是再加一次列表读取。
+
+规则集是一个明确的反例：保存时会删除规则正文中已不存在策略组的 `proxy_group_order`、`proxy_group_members` 与 `proxy_group_options` 项，并规范化代理组类型参数，因此 `PUT /api/admin/rules/:slug` 返回实际落盘的完整实体。前端必须用该响应替换本地行，不能把提交前的表单快照写回。
 
 ### 3.4 创建与编辑必须分开
 

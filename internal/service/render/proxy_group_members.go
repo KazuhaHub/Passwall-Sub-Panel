@@ -52,13 +52,74 @@ type ProxyGroupInspection struct {
 	Issues   []ProxyGroupIssue        `json:"issues"`
 }
 
+// ProxyGroupMetadata is the rule-set metadata whose keys must refer to groups
+// that still exist in the rule content. NormalizeProxyGroupMetadata returns a
+// detached copy so callers can persist the result without mutating the request
+// object used for validation or error reporting.
+type ProxyGroupMetadata struct {
+	Order   []string
+	Members map[string][]domain.ProxyGroupMember
+	Options map[string]domain.ProxyGroupOptions
+	Removed []string
+}
+
+// NormalizeProxyGroupMetadata removes top-level configuration for groups that
+// no longer occur in the rule content. References from a surviving group to a
+// removed group are deliberately retained: the normal validator must surface
+// those as missing_group instead of silently changing the surviving layout.
+func NormalizeProxyGroupMetadata(content string, order []string, members map[string][]domain.ProxyGroupMember, options map[string]domain.ProxyGroupOptions) ProxyGroupMetadata {
+	targets := proxyGroupTargets(content, members)
+	valid := make(map[string]bool, len(targets))
+	for _, target := range targets {
+		valid[target] = true
+	}
+
+	removedSet := map[string]bool{}
+	normalizedOrder := make([]string, 0, len(order))
+	for _, group := range order {
+		if valid[group] {
+			normalizedOrder = append(normalizedOrder, group)
+		} else if strings.TrimSpace(group) != "" {
+			removedSet[group] = true
+		}
+	}
+
+	normalizedMembers := make(map[string][]domain.ProxyGroupMember, len(members))
+	for group, configured := range members {
+		if !valid[group] {
+			removedSet[group] = true
+			continue
+		}
+		normalizedMembers[group] = append([]domain.ProxyGroupMember(nil), configured...)
+	}
+
+	normalizedOptions := make(map[string]domain.ProxyGroupOptions, len(options))
+	for group, configured := range options {
+		if !valid[group] {
+			removedSet[group] = true
+			continue
+		}
+		normalizedOptions[group] = cloneProxyGroupOptions(configured)
+	}
+
+	if len(normalizedMembers) == 0 {
+		normalizedMembers = nil
+	}
+	if len(normalizedOptions) == 0 {
+		normalizedOptions = nil
+	}
+	return ProxyGroupMetadata{
+		Order: normalizedOrder, Members: normalizedMembers, Options: normalizedOptions,
+		Removed: sortedKeys(removedSet),
+	}
+}
+
 // InspectProxyGroups parses the same target set used by subscription rendering,
 // validates a draft member map, and resolves a metadata-only preview. It is
 // intentionally free of repositories so the admin handler and unit tests can
 // use the exact compiler semantics without constructing a render Service.
 func InspectProxyGroups(content string, members map[string][]domain.ProxyGroupMember, options map[string]domain.ProxyGroupOptions, nodes []*domain.Node, previewScope ...[]*domain.Node) ProxyGroupInspection {
-	targets := withRequiredProxyGroupDependencies(ruleTargetsInOrder(content))
-	targets = withConfiguredProxyGroupDependencies(targets, members)
+	targets := proxyGroupTargets(content, members)
 	issues := validateProxyGroupMembers(targets, members, nodes)
 	issues = append(issues, validateProxyGroupOptions(targets, options)...)
 
@@ -150,15 +211,28 @@ func InspectProxyGroups(content string, members map[string][]domain.ProxyGroupMe
 	}
 }
 
+func proxyGroupTargets(content string, members map[string][]domain.ProxyGroupMember) []string {
+	targets := withRequiredProxyGroupDependencies(ruleTargetsInOrder(content))
+	return withConfiguredProxyGroupDependencies(targets, members)
+}
+
 func withConfiguredProxyGroupDependencies(targets []string, configs map[string][]domain.ProxyGroupMember) []string {
 	hasNodeSelector := false
 	needsNodeSelector := false
+	targetSet := make(map[string]bool, len(targets))
 	for _, target := range targets {
+		targetSet[target] = true
 		if target == "🚀 节点选择" {
 			hasNodeSelector = true
 		}
 	}
-	for _, members := range configs {
+	for group, members := range configs {
+		// An orphaned owner cannot make another otherwise-unused group valid.
+		// This keeps cleanup stable when the removed group happened to reference
+		// the canonical node selector.
+		if !targetSet[group] {
+			continue
+		}
 		for _, member := range members {
 			if member.Kind == "proxy_group" && member.Value == "🚀 节点选择" {
 				needsNodeSelector = true

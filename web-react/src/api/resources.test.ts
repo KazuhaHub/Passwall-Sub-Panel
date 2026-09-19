@@ -82,7 +82,8 @@ describe('resource API contracts', () => {
     const rule = { slug: 'r', name: 'Rule', sort: 1, enabled: true, direct_subscription_domain: false, proxy_group_order: [], content: '' }
     await rules.listRuleSets({ keyword: 'r' }, signal)
     await rules.getRuleSet('r')
-    await rules.saveRuleSet(rule)
+    http.put.mockResolvedValueOnce({ data: rule })
+    await expect(rules.saveRuleSet(rule)).resolves.toEqual(rule)
     await rules.deleteRuleSet('r')
     await rules.resetRuleSet('r')
 
