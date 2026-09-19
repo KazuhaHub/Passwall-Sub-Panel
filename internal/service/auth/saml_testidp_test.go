@@ -7,6 +7,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/base64"
+	"errors"
 	"html"
 	"math/big"
 	"net/http"
@@ -22,6 +23,7 @@ import (
 	"github.com/crewjam/saml"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/config"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 )
 
 // This file builds a real, fully-functional crewjam/saml IdentityProvider so
@@ -249,6 +251,60 @@ func (m *memReplayStore) SeenOrAdd(_ context.Context, id string, expiresAt, now 
 
 func (m *memReplayStore) DeleteExpired(context.Context, time.Time) (int64, error) { return 0, nil }
 
+// memRequestStore is an in-memory ports.SAMLRequestRepo with the same claim
+// semantics as the SQL one: a single conditional claim, and a failed claim that
+// leaves the row untouched. The real repo's atomicity is proven against
+// SQLite/MySQL/PostgreSQL in the sqlstore package; this exists so the login flow
+// can be driven end to end without a database.
+type memRequestStore struct {
+	mu      sync.Mutex
+	records map[string]*domain.SAMLLoginRequest
+}
+
+func (m *memRequestStore) Create(_ context.Context, req *domain.SAMLLoginRequest) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.records == nil {
+		m.records = map[string]*domain.SAMLLoginRequest{}
+	}
+	if _, exists := m.records[req.TokenHash]; exists {
+		return errors.New("duplicate token hash")
+	}
+	cp := *req
+	m.records[req.TokenHash] = &cp
+	return nil
+}
+
+func (m *memRequestStore) Consume(_ context.Context, tokenHash, browserHash, configDigest string, now time.Time) (*domain.SAMLLoginRequest, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	rec, ok := m.records[tokenHash]
+	if !ok {
+		return nil, domain.ErrSAMLRequestInvalid
+	}
+	if rec.BrowserHash != browserHash || rec.ConfigDigest != configDigest ||
+		rec.ConsumedAt != nil || !now.Before(rec.ExpiresAt) {
+		return nil, domain.ErrSAMLRequestInvalid
+	}
+	consumed := now
+	rec.ConsumedAt = &consumed
+	cp := *rec
+	return &cp, nil
+}
+
+func (m *memRequestStore) DeleteExpired(_ context.Context, now time.Time) (int64, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var n int64
+	for k, rec := range m.records {
+		if !now.Before(rec.ExpiresAt) {
+			delete(m.records, k)
+			n++
+		}
+	}
+	return n, nil
+}
+
 // testSAML wires a service pointed at a test IdP without touching the network.
 // The returned IdP can be mutated before a response is produced.
 func testSAML(t *testing.T) (*SAMLService, *testIdP) {
@@ -271,6 +327,7 @@ func testSAML(t *testing.T) (*SAMLService, *testIdP) {
 		},
 	}
 	svc.SetReplayStore(&memReplayStore{})
+	svc.SetSAMLRequestStore(&memRequestStore{})
 	return svc, idp
 }
 

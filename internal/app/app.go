@@ -361,6 +361,13 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 		return nil, fmt.Errorf("saml is enabled but no durable assertion-replay store is wired")
 	}
 	samlSvc.SetReplayStore(repos.SAMLReplay)
+	// Durable one-time login-request store. Also required, and also checked here
+	// for the same reason: with no store the panel cannot prove it started a
+	// login, so every attempt would fail at the ACS instead of at boot.
+	if samlCfg != nil && samlCfg.Enabled && repos.SAMLRequest == nil {
+		return nil, fmt.Errorf("saml is enabled but no durable login-request store is wired")
+	}
+	samlSvc.SetSAMLRequestStore(repos.SAMLRequest)
 	oidcSvc, err := auth.NewOIDC(oidcCfg)
 	if err != nil {
 		return nil, fmt.Errorf("init oidc: %w", err)

@@ -28,6 +28,7 @@ func TestSAMLFailureReason(t *testing.T) {
 		{"destination mismatch", samlguard.ErrDestinationMismatch, samlReasonDestination},
 		{"malformed response", samlguard.ErrMalformed, samlReasonAssertionInvalid},
 		{"login request invalid", domain.ErrSAMLRequestInvalid, samlReasonRequestInvalid},
+		{"wrong entry point", auth.ErrSAMLEntryPoint, samlReasonEntryPoint},
 		{"signature failure from crewjam", errors.New("parse SAML response: signature invalid"), samlReasonAssertionInvalid},
 		{"nil never panics", nil, samlReasonAssertionInvalid},
 	}

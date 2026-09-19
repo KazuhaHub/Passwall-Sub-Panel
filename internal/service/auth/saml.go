@@ -52,6 +52,11 @@ type SAMLService struct {
 	// SetReplayStore at startup; nil means every login is refused rather than
 	// silently unchecked.
 	replayStore ports.SAMLReplayRepo
+	// requestStore is the durable record of logins this panel started. It is what
+	// makes "we began this login, in this browser, under this configuration" a
+	// server-side fact rather than a claim RelayState makes about itself
+	// (ADR 0036 D2). Wired by SetSAMLRequestStore; nil refuses every login.
+	requestStore ports.SAMLRequestRepo
 }
 
 // SetReplayStore installs the durable replay set. Wired in app startup once the
@@ -386,31 +391,35 @@ func (s *SAMLService) SPMetadataXML() ([]byte, error) {
 	return xml.MarshalIndent(s.sp.Metadata(), "", "  ")
 }
 
-// BuildAuthnURL returns the IdP redirect URL for an SP-initiated login.
-// The AuthnRequest ID is embedded in the RelayState as "id|returnURL" so it
-// survives the SAML round-trip without a cookie — the SAML POST binding is
-// cross-site, so SameSite=Lax cookies are never sent with the ACS POST.
-func (s *SAMLService) BuildAuthnURL(returnURL string) (string, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	if s.sp == nil {
-		return "", fmt.Errorf("saml not initialised")
+// buildAuthnURL returns the IdP redirect URL for an SP-initiated login, plus the
+// AuthnRequest's ID so the caller can record which request a Response must
+// answer.
+//
+// The relayState is supplied by the CALLER rather than being assembled here: the
+// caller mints it (and already holds it) before the request exists, which is
+// what lets the request record be written before the browser leaves the panel.
+// sp is passed in rather than read from the service so the redirect and the
+// record's configuration digest come from one snapshot.
+func buildAuthnURL(sp *saml.ServiceProvider, relayState string) (redirectURL, requestID string, err error) {
+	if sp == nil {
+		return "", "", fmt.Errorf("saml not initialised")
 	}
-	idpURL := s.sp.GetSSOBindingLocation(saml.HTTPRedirectBinding)
+	idpURL := sp.GetSSOBindingLocation(saml.HTTPRedirectBinding)
 	if idpURL == "" {
-		return "", fmt.Errorf("idp metadata missing HTTP-Redirect binding")
+		return "", "", fmt.Errorf("idp metadata missing HTTP-Redirect binding")
 	}
-	req, err := s.sp.MakeAuthenticationRequest(idpURL, saml.HTTPRedirectBinding, saml.HTTPPostBinding)
+	req, err := sp.MakeAuthenticationRequest(idpURL, saml.HTTPRedirectBinding, saml.HTTPPostBinding)
 	if err != nil {
-		return "", fmt.Errorf("make authn request: %w", err)
+		return "", "", fmt.Errorf("make authn request: %w", err)
 	}
-	// Embed req.ID so ACS can validate InResponseTo without a cookie.
-	relayState := req.ID + "|" + returnURL
-	u, err := req.Redirect(relayState, s.sp)
+	u, err := req.Redirect(relayState, sp)
 	if err != nil {
-		return "", fmt.Errorf("build redirect: %w", err)
+		return "", "", fmt.Errorf("build redirect: %w", err)
 	}
-	return u.String(), nil
+	// The whole redirect is returned as built: the SAMLRequest query is covered
+	// by the IdP's expected signature, so re-assembling or re-encoding it here
+	// would be a way to break the very thing it protects.
+	return u.String(), req.ID, nil
 }
 
 // SAMLAssertion captures the subset of SAML attributes the user store cares about.
@@ -514,11 +523,21 @@ func precheckResponse(acsURL, rawB64 string) error {
 // ParseACSResponse validates the SAML Response posted by the IdP and
 // returns the extracted attributes. possibleRequestIDs should contain the
 // AuthnRequest ID stored at login time; pass nil only for IdP-initiated SSO.
+//
+// It is the protocol boundary, and the shape the replacement line's port takes.
+// The production path is CompleteLogin, which takes the request context into
+// account and calls parseACSResponse directly with the snapshot whose digest it
+// already checked; a caller that has some other way of establishing the request
+// context can use this entry point instead.
 func (s *SAMLService) ParseACSResponse(r *http.Request, possibleRequestIDs []string) (*SAMLAssertion, error) {
 	s.mu.RLock()
-	sp := s.sp
-	cfg := s.cfg
+	sp, cfg := s.sp, s.cfg
 	s.mu.RUnlock()
+	return s.parseACSResponse(sp, cfg, r, possibleRequestIDs)
+}
+
+// parseACSResponse does the work against an explicit runtime snapshot.
+func (s *SAMLService) parseACSResponse(sp *saml.ServiceProvider, cfg *config.SAMLConfig, r *http.Request, possibleRequestIDs []string) (*SAMLAssertion, error) {
 	if sp == nil {
 		return nil, fmt.Errorf("saml not initialised")
 	}
