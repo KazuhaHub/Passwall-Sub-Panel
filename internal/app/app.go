@@ -1083,6 +1083,7 @@ func (a *App) runAuditCleanupLoop(ctx context.Context) {
 		a.pruneAuthEvents(ctx)
 		a.pruneAuthTokens(ctx)
 		a.pruneSAMLReplay(ctx)
+		a.pruneSAMLRequests(ctx)
 		a.pruneSyncTasks(ctx)
 		a.pruneTrafficSnapshots(ctx)
 		a.pruneMailSent(ctx)
@@ -1352,6 +1353,24 @@ func (a *App) pruneSAMLReplay(ctx context.Context) {
 	}
 	if deleted > 0 {
 		log.Info("saml replay cleanup", "deleted", deleted)
+	}
+}
+
+// pruneSAMLRequests drops login requests whose window has closed. Consumed rows
+// are kept until then on purpose — that is what makes a replayed ACS POST report
+// "already used" rather than "unknown token". There is no retention setting: the
+// window is dictated by the AuthnRequest TTL, not by an admin preference.
+func (a *App) pruneSAMLRequests(ctx context.Context) {
+	if a.repos.SAMLRequest == nil {
+		return
+	}
+	deleted, err := a.repos.SAMLRequest.DeleteExpired(ctx, time.Now())
+	if err != nil {
+		log.Warn("saml login request cleanup", "err", err)
+		return
+	}
+	if deleted > 0 {
+		log.Info("saml login request cleanup", "deleted", deleted)
 	}
 }
 

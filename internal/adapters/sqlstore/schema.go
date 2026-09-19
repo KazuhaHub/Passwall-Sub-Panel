@@ -787,6 +787,28 @@ type ssoAssertionSeenRow struct {
 
 func (ssoAssertionSeenRow) TableName() string { return "sso_assertion_seen" }
 
+// samlLoginRequestRow is one SP-initiated SAML login's server-side record (see
+// ports.SAMLRequestRepo). TokenHash is the primary key: the raw RelayState token
+// round-trips through the IdP and is attacker-controlled, so only its SHA-256 is
+// stored and a stolen row is not itself replayable as a login.
+//
+// Every string column is a bounded size:N rather than type:text. These are all
+// fixed-shape digests or identifiers, and a type:text column must never carry a
+// DEFAULT (MySQL error 1101), so keeping them varchar avoids that entire class
+// of cross-dialect trouble.
+type samlLoginRequestRow struct {
+	TokenHash    string    `gorm:"primaryKey;size:64"`
+	BrowserHash  string    `gorm:"size:64;not null"`
+	RequestID    string    `gorm:"size:255;not null"`
+	ConfigDigest string    `gorm:"size:64;not null"`
+	ReturnTo     string    `gorm:"size:2048;not null"`
+	CreatedAt    time.Time `gorm:"not null"`
+	ExpiresAt    time.Time `gorm:"index:idx_saml_request_expires;not null"`
+	ConsumedAt   *time.Time
+}
+
+func (samlLoginRequestRow) TableName() string { return "saml_login_requests" }
+
 func (r *authEventRow) toDomain() *domain.AuthEvent {
 	return &domain.AuthEvent{
 		ID:      r.ID,
@@ -1506,6 +1528,7 @@ var schemaModels = []any{
 	&auditRow{},
 	&authEventRow{},
 	&ssoAssertionSeenRow{},
+	&samlLoginRequestRow{},
 	&authTokenRow{},
 	&webauthnCredentialRow{},
 	&subLogRow{},
