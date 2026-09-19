@@ -21,6 +21,10 @@
 #     bare origin produces a 404 on every call, which reads like a broken
 #     adapter rather than a wrong base URL.
 #
+# A NOTE ON `[ cond ] && cmd`: under `set -e` that list returns 1 when cond is
+# FALSE, which exits the script silently. Every wait loop below uses `if`, so a
+# loop waits rather than dying on its first empty read.
+
 # Everything here is pinned to a digest-carrying tag by the caller. Nothing
 # touches the host's docker state beyond this case's own container and volume.
 set -euo pipefail
@@ -141,16 +145,16 @@ up() {
   # then read webPath out of it and wait on the real base.
   local waited=0
   while [ ! -f "$WORKDIR/sui/s-ui.db" ]; do
-    [ "$waited" -ge 120 ] && { log "S-UI never created its database"; return 1; }
+    if [ "$waited" -ge 120 ]; then log "S-UI never created its database"; return 1; fi
     sleep 2; waited=$((waited + 2))
   done
   # webPath is looked up rather than assumed: a fresh install uses /app/, and
   # guessing the bare origin 404s every call.
   local web_path=""
   while [ -z "$web_path" ]; do
-    [ "$waited" -ge 150 ] && { log "S-UI never published a webPath"; return 1; }
+    if [ "$waited" -ge 150 ]; then log "S-UI never published a webPath"; return 1; fi
     web_path=$($SUDO sqlite3 "$WORKDIR/sui/s-ui.db" "select value from settings where key='webPath';" 2>/dev/null || true)
-    [ -n "$web_path" ] && break
+    if [ -n "$web_path" ]; then break; fi
     sleep 2; waited=$((waited + 2))
   done
   local sui_base="http://$HOST:$SUI_PORT${web_path%/}"
