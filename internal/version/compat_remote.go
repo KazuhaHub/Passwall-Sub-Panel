@@ -235,6 +235,74 @@ func pspMajor(v string) (int, bool) {
 	return n, true
 }
 
+// revisionRegressed reports whether the fetched manifest is OLDER than the one
+// already applied.
+//
+// THE THIRD REFUSAL. fetchAndApply already refuses a document whose schema it
+// does not understand and one that declares the wrong major. Neither catches a
+// document that is perfectly valid and perfectly well-formed but older than what
+// is in force — a stale CDN edge, a reverted commit, a rollback of the published
+// file. Without this, that document silently replaces a newer tested range with
+// an older one, and the panel then refuses an upgrade an admin was already told
+// was supported, with nothing recording why.
+//
+// A manifest that cannot be ordered is refused rather than trusted, in both
+// directions: an unparseable fetched revision cannot be shown to be newer, and
+// an unparseable applied revision means there is nothing to compare against. The
+// fail-closed outcome is the same either way — the range already in force stays.
+func revisionRegressed(applied, fetched string) (bool, error) {
+	fetchedAt, err := parseManifestRevision(fetched)
+	if err != nil {
+		return false, fmt.Errorf("compat JSON updated_at %q cannot be ordered: %w", fetched, err)
+	}
+	if applied == "" {
+		return false, nil
+	}
+	appliedAt, err := parseManifestRevision(applied)
+	if err != nil {
+		return false, fmt.Errorf("the applied compat revision %q cannot be ordered, so a fetched one cannot be compared against it: %w", applied, err)
+	}
+	return fetchedAt.Before(appliedAt), nil
+}
+
+// parseManifestRevision accepts the two forms the published manifests use.
+//
+// DATE-ONLY IS THE FORM EVERY PUBLISHED FILE ACTUALLY CARRIES — v3.json,
+// v4.json, v4-ranges.json and node-v4.json all say "2026-09-16". An RFC3339
+// parser alone would therefore refuse the real manifests and take the whole
+// compat load down with them, which is how this was found: a test that drives
+// the real document rather than a fixture written to match the parser.
+//
+// Both forms resolve to an instant, so a file may move from one to the other.
+// Moving to a full timestamp on the SAME DAY reads as a regression, because the
+// bare date resolves to midnight; keep one form per file.
+func parseManifestRevision(value string) (time.Time, error) {
+	if at, err := time.Parse(time.RFC3339, value); err == nil {
+		return at, nil
+	}
+	return time.Parse("2006-01-02", value)
+}
+
+// appliedRevision is the updated_at of the manifest currently in force. It is
+// kept independently of the refresh mutex because fetchAndApply also runs while
+// that mutex is held.
+var (
+	appliedRevisionMu sync.Mutex
+	appliedRevision   string
+)
+
+func setAppliedRevision(revision string) {
+	appliedRevisionMu.Lock()
+	appliedRevision = revision
+	appliedRevisionMu.Unlock()
+}
+
+func currentAppliedRevision() string {
+	appliedRevisionMu.Lock()
+	defer appliedRevisionMu.Unlock()
+	return appliedRevision
+}
+
 func fetchAndApply(ctx context.Context, url string) error {
 	payload, err := fetchCompatPayload(ctx, url)
 	if err != nil {
@@ -254,6 +322,17 @@ func fetchAndApply(ctx context.Context, url string) error {
 		// content to v4.json. Refuse to apply so we don't install
 		// the wrong major's range.
 		return fmt.Errorf("compat JSON declares major=%d but this PSP is major=%d (wrong file at URL?)", payload.Major, currentMajor)
+	}
+	// Checked HERE, before the overlay fetch and before any mutation, so a
+	// document that will be refused costs no second request and cannot
+	// half-install a range.
+	applied := currentAppliedRevision()
+	regressed, err := revisionRegressed(applied, payload.UpdatedAt)
+	if err != nil {
+		return err
+	}
+	if regressed {
+		return fmt.Errorf("compat JSON updated_at %s is older than the applied revision %s; refusing to replace a newer tested range with an older one", payload.UpdatedAt, applied)
 	}
 
 	// New readers can opt into prerelease-aware ranges without changing the
@@ -305,6 +384,10 @@ func fetchAndApply(ctx context.Context, url string) error {
 	SetActiveAdvisories(canonAdvisories(payload.Advisories))
 	applySUICompat(payload)
 	_ = saveCompatCache(entry.MaxTestedXUI)
+	// Recorded AFTER the install succeeds, so a failure part-way leaves the old
+	// revision in force and the next fetch is still compared against what is
+	// actually applied rather than against what was attempted.
+	setAppliedRevision(payload.UpdatedAt)
 	return nil
 }
 

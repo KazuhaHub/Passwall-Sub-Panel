@@ -63,6 +63,16 @@ func (r *Registry) NewClient(def *domain.Panel) (ports.PanelClient, error) {
 	if err != nil {
 		return nil, fmt.Errorf("init %s adapter for %s: %w", kind, def.Name, err)
 	}
+	// AN ADAPTER MUST BE ABLE TO SAY WHAT IT CAN DO. ports.SupportsCapability
+	// answers "yes" for anything that does not implement CapabilityProvider,
+	// which is deliberate for hand-made test doubles but catastrophic for a
+	// production adapter: every capability-gated action would be offered, and
+	// each one would come back 501 from the panel it was offered for. The
+	// registry is the only path production takes, so the requirement is enforced
+	// here rather than left to whoever adds the next adapter to remember.
+	if _, ok := client.(ports.CapabilityProvider); !ok {
+		return nil, fmt.Errorf("panel adapter %q cannot report its capabilities: a production adapter must implement ports.CapabilityProvider, because SupportsCapability otherwise reports every capability as present", kind)
+	}
 	return client, nil
 }
 

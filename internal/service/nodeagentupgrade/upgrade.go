@@ -12,7 +12,6 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
-	"strings"
 	"time"
 
 	"github.com/KazuhaHub/passwall-node/deployment"
@@ -20,7 +19,9 @@ import (
 	"golang.org/x/mod/semver"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/compatadmission"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/nodecompat"
 )
 
 const Kind = nodeprotocol.TaskKindAgentUpgradeV1
@@ -107,19 +108,6 @@ func (s *Service) Request(ctx context.Context, panelID int64, request Request, k
 	if err != nil {
 		return nil, false, err
 	}
-	compatibility, observed := agent.ProtocolCompatibility()
-	if !observed {
-		return nil, false, fmt.Errorf("%w: native agent compatibility has not been observed; wait for a successful check-in", domain.ErrValidation)
-	}
-	if !compatibility.ProtocolSupported {
-		return nil, false, fmt.Errorf("%w: native agent protocol version %d is outside the reviewed range %d..%d",
-			domain.ErrValidation, compatibility.EffectiveProtocolVersion,
-			nodeprotocol.MinSupportedProtocolVersion, nodeprotocol.MaxSupportedProtocolVersion)
-	}
-	if !compatibility.AgentUpgrade {
-		return nil, false, fmt.Errorf("%w: native agent does not currently advertise remote-upgrade capabilities: %s",
-			domain.ErrValidation, strings.Join(compatibility.MissingAgentUpgrade, ", "))
-	}
 	defaults := domain.DefaultNodeTaskLifecyclePolicy()
 	settings, err := s.options.Settings.Load(ctx, ports.UISettings{
 		NodeTaskOfflineReconcileDays: defaults.OfflineReconcileDays,
@@ -134,6 +122,20 @@ func (s *Service) Request(ctx context.Context, panelID int64, request Request, k
 		return nil, false, err
 	}
 	now := s.options.Now().UTC()
+
+	// ONE DECISION SOURCE. The server list asks the same question through the
+	// same function, so the list cannot offer an upgrade this refuses.
+	//
+	// It is the ELIGIBILITY question, not the edge question: nothing in the panel
+	// verifies a specific from/to upgrade edge, so asking for
+	// OperationRemoteUpgrade here would assert an edge nobody checked. When edge
+	// verification exists this becomes nodecompat.Request(...) with
+	// UpgradeEdgeVerified set from it, and the reason code will name the edge
+	// rather than the evidence.
+	compatPolicy := nodecompat.Policy(time.Duration(policy.OfflineReconcileDays) * 24 * time.Hour)
+	if decision := nodecompat.Decide(agent, compatadmission.OperationUpgradeEligibility, now, compatPolicy); !decision.Allowed {
+		return nil, false, fmt.Errorf("%w: %s", domain.ErrValidation, nodecompat.Message(agent, decision))
+	}
 	if now.UnixMilli() <= 0 || now.Add(startAuthorization).Before(now) {
 		return nil, false, fmt.Errorf("%w: native upgrade authorization time is invalid", domain.ErrValidation)
 	}

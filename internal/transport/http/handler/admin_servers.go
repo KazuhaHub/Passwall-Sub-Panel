@@ -13,10 +13,12 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/compatadmission"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/idgen"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/log"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/panelpath"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/service/nodecompat"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/transport/http/middleware"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/version"
 )
@@ -112,24 +114,28 @@ type serverDTO struct {
 	// AuthMethod is the EFFECTIVE auth mode ("token" | "password") so the edit
 	// form pre-selects correctly — resolved from the stored method, falling back
 	// to inference for legacy rows. InsecureHTTPS skips TLS cert verification.
-	AuthMethod                   string     `json:"auth_method"`
-	InsecureHTTPS                bool       `json:"insecure_https"`
-	PanelVersion                 string     `json:"panel_version,omitempty"`
-	XrayVersion                  string     `json:"xray_version,omitempty"`
-	CoreEngine                   string     `json:"core_engine,omitempty"`
-	CoreVersion                  string     `json:"core_version,omitempty"`
-	DesiredCoreEngine            string     `json:"desired_core_engine,omitempty"`
-	DesiredCoreVersion           string     `json:"desired_core_version,omitempty"`
-	NodeProtocolVersion          *int       `json:"node_protocol_version,omitempty"`
-	NodeEffectiveProtocolVersion *int       `json:"node_effective_protocol_version,omitempty"`
-	NodeCapabilities             []string   `json:"node_capabilities,omitempty"`
-	NodeCompatibility            string     `json:"node_compatibility,omitempty"` // unknown | compatible | limited | incompatible
-	NodeUpgradeReady             bool       `json:"node_upgrade_ready,omitempty"`
-	NodeMissingCapabilities      []string   `json:"node_missing_capabilities,omitempty"`
-	NodeProtocolObservedAt       *time.Time `json:"node_protocol_observed_at,omitempty"`
-	VersionCheckedAt             *time.Time `json:"version_checked_at,omitempty"`
-	CompatStatus                 string     `json:"compat_status,omitempty"`  // "supported" | "too_old" | "untested" | "unknown"
-	CompatMessage                string     `json:"compat_message,omitempty"` // human-readable, for tooltip / banner
+	AuthMethod                   string   `json:"auth_method"`
+	InsecureHTTPS                bool     `json:"insecure_https"`
+	PanelVersion                 string   `json:"panel_version,omitempty"`
+	XrayVersion                  string   `json:"xray_version,omitempty"`
+	CoreEngine                   string   `json:"core_engine,omitempty"`
+	CoreVersion                  string   `json:"core_version,omitempty"`
+	DesiredCoreEngine            string   `json:"desired_core_engine,omitempty"`
+	DesiredCoreVersion           string   `json:"desired_core_version,omitempty"`
+	NodeProtocolVersion          *int     `json:"node_protocol_version,omitempty"`
+	NodeEffectiveProtocolVersion *int     `json:"node_effective_protocol_version,omitempty"`
+	NodeCapabilities             []string `json:"node_capabilities,omitempty"`
+	NodeCompatibility            string   `json:"node_compatibility,omitempty"` // unknown | compatible | limited | incompatible
+	// NodeCompatibilityReason is the stable code behind NodeCompatibility, so a
+	// caller can tell "nothing was ever reported" from "the last report is too
+	// old to act on" without parsing prose. Absent when no decision was taken.
+	NodeCompatibilityReason string     `json:"node_compatibility_reason,omitempty"`
+	NodeUpgradeReady        bool       `json:"node_upgrade_ready,omitempty"`
+	NodeMissingCapabilities []string   `json:"node_missing_capabilities,omitempty"`
+	NodeProtocolObservedAt  *time.Time `json:"node_protocol_observed_at,omitempty"`
+	VersionCheckedAt        *time.Time `json:"version_checked_at,omitempty"`
+	CompatStatus            string     `json:"compat_status,omitempty"`  // "supported" | "too_old" | "untested" | "unknown"
+	CompatMessage           string     `json:"compat_message,omitempty"` // human-readable, for tooltip / banner
 	// LatestXUIVersion / UpdateAvailable are derived per-request from the
 	// PSP-wide version.LatestXUI() snapshot (one GitHub query feeds every
 	// row) compared against this panel's PanelVersion. NOT persisted per
@@ -271,9 +277,10 @@ func (h *AdminServersHandler) List(c *gin.Context) {
 			metricsByPanel = summaries
 		}
 	}
+	policy := h.compatPolicy(ctx)
 	out := make([]serverDTO, len(panels))
 	for i, panel := range panels {
-		out[i] = h.toServerDTOWithAgent(panel, agentsByPanel[panel.ID])
+		out[i] = h.toServerDTOWithAgent(panel, agentsByPanel[panel.ID], policy)
 		applyNodeMetrics(&out[i], agentsByPanel[panel.ID], metricsByPanel[panel.ID])
 	}
 	c.JSON(http.StatusOK, pagedEnvelope(out, total, p))
@@ -1618,10 +1625,50 @@ func (h *AdminServersHandler) toServerDTO(ctx context.Context, p *domain.Panel) 
 			log.Warn("admin servers: load native core selection", "panel_id", p.ID, "err", err)
 		}
 	}
-	return h.toServerDTOWithAgent(p, agent)
+	return h.toServerDTOWithAgent(p, agent, h.compatPolicy(ctx))
 }
 
-func (h *AdminServersHandler) toServerDTOWithAgent(p *domain.Panel, agent *domain.NodeAgent) serverDTO {
+// compatPolicy resolves the observation-age bound once per request.
+//
+// A failure to read settings falls back to the documented default rather than
+// failing the list: the bound gates high-risk actions, and a server list is not
+// one. Using the same function as the admission path is the point — a display
+// that computed its own answer is how the list comes to offer an action the
+// service refuses.
+func (h *AdminServersHandler) compatPolicy(ctx context.Context) compatadmission.Policy {
+	age := nodecompat.DefaultObservationAge()
+	if h.nodeSettings != nil {
+		defaults := domain.DefaultNodeTaskLifecyclePolicy()
+		settings, err := h.nodeSettings.Load(ctx, ports.UISettings{NodeTaskOfflineReconcileDays: defaults.OfflineReconcileDays})
+		if err != nil {
+			log.Warn("admin servers: load node task lifecycle policy", "err", err)
+		} else {
+			age = time.Duration(settings.NodeTaskLifecyclePolicy().OfflineReconcileDays) * 24 * time.Hour
+		}
+	}
+	return nodecompat.Policy(age)
+}
+
+// nodeCompatibilityState maps the decision to the three-state string the API
+// has always exposed. It is a projection, not a second opinion: every branch
+// reads the model's Status, and nothing here re-derives anything.
+func nodeCompatibilityState(decision compatadmission.Decision) string {
+	switch decision.Status {
+	case compatadmission.StatusIncompatible:
+		return "incompatible"
+	case compatadmission.StatusLimited:
+		return "limited"
+	case compatadmission.StatusVerified:
+		return "compatible"
+	default:
+		// Unverified: an observation exists but is too old to act on. Reported
+		// as unknown rather than as a fourth state, because the API contract is
+		// the enum above; NodeCompatibilityReason carries the distinction.
+		return "unknown"
+	}
+}
+
+func (h *AdminServersHandler) toServerDTOWithAgent(p *domain.Panel, agent *domain.NodeAgent, policy compatadmission.Policy) serverDTO {
 	dto := toServerDTO(p)
 	if domain.NormalizePanelKind(p.Kind) == domain.PanelKindPSP {
 		dto.CoreVersion = p.XrayVersion
@@ -1638,15 +1685,14 @@ func (h *AdminServersHandler) toServerDTOWithAgent(p *domain.Panel, agent *domai
 				dto.NodeCapabilities = append([]string(nil), agent.ObservedCapabilities...)
 				dto.NodeProtocolObservedAt = agent.ProtocolObservedAt
 				dto.NodeMissingCapabilities = append([]string(nil), compatibility.MissingAgentUpgrade...)
-				switch {
-				case !compatibility.ProtocolSupported:
-					dto.NodeCompatibility = "incompatible"
-				case compatibility.AgentUpgrade:
-					dto.NodeCompatibility = "compatible"
-					dto.NodeUpgradeReady = true
-				default:
-					dto.NodeCompatibility = "limited"
-				}
+				// THE VERDICT COMES FROM THE SAME FUNCTION THE ADMISSION PATH
+				// USES. The raw protocol fields above are a projection of the
+				// observation, not a decision; this is the decision, so the list
+				// and the upgrade action cannot disagree about what is eligible.
+				decision := nodecompat.Decide(agent, compatadmission.OperationUpgradeEligibility, time.Now().UTC(), policy)
+				dto.NodeCompatibility = nodeCompatibilityState(decision)
+				dto.NodeCompatibilityReason = string(decision.Reason)
+				dto.NodeUpgradeReady = decision.Allowed
 			}
 		}
 	}
