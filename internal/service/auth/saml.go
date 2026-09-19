@@ -20,6 +20,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/config"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/log"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/safego"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/samlguard"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 )
 
@@ -475,6 +476,37 @@ func parseSAMLStatus(rawB64 string) (topCode, subCode, message string) {
 		strings.TrimSpace(env.Status.StatusMessage)
 }
 
+// precheckResponse enforces the structural and algorithm constraints on a raw
+// SAML Response BEFORE the signature-verifying parser sees it: a required
+// Destination, exactly one assertion, and SHA-256-or-stronger signature and
+// digest algorithms (see internal/pkg/samlguard for why each is a gap in
+// crewjam/saml rather than a redundant check).
+//
+// It decodes with base64.StdEncoding from the already-whitespace-stripped form
+// value for the same reason crewjam does in parseResponseHTTP: the pre-check and
+// the verification must judge the SAME bytes, or a difference in decoding would
+// become a bypass. rawB64 is the PostForm value AFTER ParseACSResponse has
+// stripped the MIME line wrapping some IdPs emit.
+//
+// A nil return means only "the verifier may proceed". The pre-check produces no
+// identity data, and it deliberately runs before verification: the multi-
+// assertion gap is exploitable precisely because a legitimate, correctly-signed
+// assertion can be accompanied by a second one.
+func precheckResponse(acsURL, rawB64 string) error {
+	if rawB64 == "" {
+		// Also the artifact-binding case: crewjam would divert to a SOAP
+		// artifact resolution when SAMLart is present. PSP only ever builds
+		// Redirect-binding AuthnRequests, so refusing an unrecognised payload
+		// here is the fail-closed direction rather than a lost capability.
+		return fmt.Errorf("%w: no SAMLResponse form value", samlguard.ErrMalformed)
+	}
+	decoded, err := base64.StdEncoding.DecodeString(rawB64)
+	if err != nil {
+		return fmt.Errorf("decode SAML response: %w", err)
+	}
+	return samlguard.New(acsURL).Check(decoded)
+}
+
 // ParseACSResponse validates the SAML Response posted by the IdP and
 // returns the extracted attributes. possibleRequestIDs should contain the
 // AuthnRequest ID stored at login time; pass nil only for IdP-initiated SSO.
@@ -500,6 +532,14 @@ func (s *SAMLService) ParseACSResponse(r *http.Request, possibleRequestIDs []str
 			}
 			return r
 		}, raw))
+	}
+	// Pre-check the response we are about to verify. It runs on the stripped
+	// form value so it judges exactly the bytes crewjam decodes next, and it
+	// refuses shapes crewjam would otherwise accept: an absent Destination, a
+	// second assertion smuggled alongside a signed one, or a weak algorithm.
+	if err := precheckResponse(cfg.SP.ACSURL, r.PostForm.Get("SAMLResponse")); err != nil {
+		log.Warn("saml: response rejected by pre-check", "err", err)
+		return nil, fmt.Errorf("SAML response rejected: %w", err)
 	}
 	assertion, err := sp.ParseResponse(r, possibleRequestIDs)
 	if err != nil {

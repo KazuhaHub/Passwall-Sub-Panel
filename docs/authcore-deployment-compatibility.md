@@ -113,3 +113,14 @@ curl --fail-with-body --silent --show-error \
 - [ ] **SAML 严格校验**已生效（Destination 必填、拒绝多断言与弱签名）。
 - [ ] replay 存储故障时 **fail-closed**，以及它的运维含义（见 ADR 0036 后果）。
 - [ ] 安全回滚的限制：回滚到未加固版本等于撤销上述保护。
+
+### 8.1 H1 严格校验的实际影响（上线前逐项确认）
+
+H1 的预检在验签之前执行（`internal/pkg/samlguard`，接入 `ParseACSResponse`），上线即生效，不需要等 M1。它对现有部署有三处真实影响：
+
+- [ ] **IdP 仍在用 rsa-sha1 的部署会立即登不进去。** ADFS 与旧版 Keycloak 的历史默认算法就是 rsa-sha1，这正是预检要拒绝的。**必须在维护窗口内先确认 IdP 当前的签名与摘要算法**，并在 IdP 侧升级到 SHA-256 以上之后再上线。摘要算法允许集来自 authcore 的白名单，只有三个：`xmlenc#sha256`、`xmldsig-more#sha384`、`xmlenc#sha512`（注意**不含** `xmlenc#sha384`）。
+- [ ] **所有响应必须携带与配置 ACS URL 完全一致的 `Destination`。** 主流 IdP（Entra/Okta/Google/ADFS）都会带；自建或老版本 IdP 若省略，需先在 IdP 侧修正。
+- [ ] **携带 `SAMLart` 的 artifact-binding 请求会被拒绝。** PSP 只构造 Redirect-binding 的 AuthnRequest，从不请求 artifact binding，因此这是"拒绝一个从未使用的路径"，不是能力丢失。若某个部署确实依赖它，须在 H1 上线前提出，不能默认它继续可用。
+- [ ] 响应必须恰好携带一个 `Assertion` 或 `EncryptedAssertion`（加密断言仍被接受，SP 私钥可解密）。
+
+预检的失败原因会出现在 SSO 失败页的 `description` 参数中。**其中包含收到的 `Destination` 等外部值**；把它收敛为低基数原因码属于 H2 的范围（计划书 §6.9），H1 上线时按现状记录。
