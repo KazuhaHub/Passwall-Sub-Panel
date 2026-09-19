@@ -1,6 +1,6 @@
 # ADR 0034：前端需要「同步状态」时，后端应给出什么
 
-- **状态**：**已接受（2026-09-18）：选择档一「资源任务状态」，实现与验收待完成。** 完整 operation 与上游配置验证不纳入本次范围。
+- **状态**：**已接受（2026-09-18）：选择档一「资源任务状态」。** 实现与验收结果见「实施与验收」；三个 PR（#140 / #139 / #141）尚未合并发布。完整 operation 与上游配置验证不纳入本次范围。
 - **日期**：2026-09-18
 - **相关代码**：`internal/transport/http/handler/admin_user.go`（`X-Sync-Pending`）、`internal/transport/http/handler/user_me.go`、`internal/service/user/user.go`（`HasPendingSync`）、`internal/ports/repos.go`（`SyncTaskFilter`）、`internal/domain/types.go`（`SyncTask`）、`internal/domain/enums.go`（`SyncTaskType`）、`internal/transport/http/router.go`
 - **前置**：`docs/react-data-freshness-plan.md`、`docs/react-data-freshness-plan-review.md` §12
@@ -166,6 +166,11 @@
   operator 在界面上打开 admin 目标时显示「目标已不可查询」并停止观察，不会把拒绝当作失败重试。
 - **读取失败与拒绝的区分。** 对状态读取注入真实 503 时，卡片保留上次快照并标明失效；403/404 则终止窗口并丢弃快照，两者不混同（`watchIntervalMs` 的纯函数规则与卡片行为均有测试固定）。
 - **目标切换。** 切换目标后迟到的响应不会落到新目标——按目标分键，且有测试固定。
+- **前端 §2 / §3。** pending 元数据落在 `api/syncPending`：`syncPendingOf` 的值域是 `reported` / `not_reported`（缺失 header 一律 `not_reported`，任何路径都不生成「成功」）；`announcePending` 把写操作报告给该目标的观察方，卡片据此开启新窗口，目标仍打开时跳过全局 toast，节流窗口只由真正弹出的 toast 推进。卡片挂载即读取一次，不以 header 为唯一入口；用户列表无逐行轮询器。
+
+  **说明：** 本条以传输层把 pending 交给观察方实现，**未改动 `api/users.ts` 写方法的返回值**——写方法仍不返回报告，需要该值的调用方可直接取用 `syncPendingOf`。这是对 §2「交给调用者」的一种实现方式，不是逐字实现；若要求写方法本身返回值，需另作调整。
+
+- **前端 §4–§7。** 15 秒 / 5 分钟墙钟、同目标单 query key、不叠加 retry；无活跃任务时停止并显示「当前未发现待处理任务」；预算耗尽显示「自动刷新已暂停」与最后观察时间并保留手动刷新；关闭区域、切换目标、403/404 停止观察并清理快照。
 - **新增索引。** `idx_task_target(target_type, target_id)` 已存在并服务该查询。
 
 尚未验证（不构成本次实现的完备性，但发布前仍需）：
