@@ -337,9 +337,15 @@ jobs:
           test -n "$service_env"
           echo "$service_env" | sed 's/\(TOKEN=\).*/\1<redacted>/'
           eval "$service_env"
-          for name in PSP_LIVE_XUI_URL PSP_LIVE_XUI_TOKEN PSP_LIVE_SUI_URL PSP_LIVE_SUI_TOKEN; do
-            eval "value=\$$name"
-            test -n "$value" || { echo "::error::$name is empty; the launcher did not publish it"; exit 1; }
+          # READ THROUGH A CHILD PROCESS. `printenv` is an external command, so
+          # it sees the EXPORTED environment and nothing else -- which is the
+          # whole question, because `go test` below is a child too. Reading
+          # `$name` here instead would have passed while the launcher printed
+          # bare assignments: eval set a shell variable, every test skipped for
+          # want of an environment, and this loop reported the environment fine.
+          for name in PSP_LIVE_XUI_URL PSP_LIVE_XUI_TOKEN PSP_LIVE_XUI_DB PSP_LIVE_SUI_URL PSP_LIVE_SUI_TOKEN; do
+            value=$(printenv "$name" || true)
+            test -n "$value" || { echo "::error::$name is not exported to child processes; the launcher did not publish it for go test"; exit 1; }
           done
           run_suite() {
             profile="$1"; pkg="$2"; out="$3"
@@ -409,7 +415,7 @@ jobs:
             docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges --user 10001:10001 --entrypoint /app/psp "$image" --version
           done
       - name: Publisher identity, compat result validators and fail-closed guard tests
-        run: node --test deploy/check_image_test.mjs deploy/check_build_test.mjs deploy/release_workflow_test.mjs deploy/compat/check-go-results.test.mjs deploy/compat/check-case-set.test.mjs deploy/compat/plan.test.mjs deploy/test_workflow_test.mjs
+        run: node --test deploy/check_image_test.mjs deploy/check_build_test.mjs deploy/release_workflow_test.mjs deploy/compat/check-go-results.test.mjs deploy/compat/check-case-set.test.mjs deploy/compat/plan.test.mjs deploy/compat/backends/third-party_env.test.mjs deploy/test_workflow_test.mjs
 
   web:
     name: web (typecheck + build + test)

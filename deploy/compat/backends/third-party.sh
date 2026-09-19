@@ -216,12 +216,31 @@ down() {
   log "removed $XUI_NAME and $SUI_NAME (workdir $WORKDIR left in place)"
 }
 
+# `env` IS MEANT TO BE EVALUATED, and only `export` survives that for a child.
+#
+# The documented consumer is `eval "$(third-party.sh env)"` (see the README), and
+# what it feeds — `go test` — is a CHILD process, so it inherits the EXPORTED
+# environment only. A bare `NAME=value` sets a shell variable and stops there:
+# every check the evaluating shell can make about itself passes, the tests see
+# nothing, and the suite answers with SKIPs that read as passes to anything
+# reading an exit code. That is the failure check-go-results.mjs exists to
+# refuse, so it was reported rather than hidden -- but only after a whole
+# isolated-backends job had run and measured nothing.
+sq() {
+  # `%q` is bash's "quote this so it can be read back as shell input", which is
+  # precisely this function's job. Hand-rolling it does not work: the
+  # `${v//\'/...}` idiom produced a literal `\'\\'\'` here rather than the
+  # `'\''` it is supposed to, and the resulting eval died with "unexpected EOF
+  # while looking for matching `'`".
+  printf '%q' "$1"
+}
+
 env_out() {
-  printf 'PSP_LIVE_XUI_URL=http://%s:%s\n' "$HOST" "$XUI_PORT"
-  printf 'PSP_LIVE_XUI_TOKEN=%s\n' "$(cat "$WORKDIR/3xui.token")"
-  printf 'PSP_LIVE_XUI_DB=%s\n' "$WORKDIR/3xui/x-ui.db"
-  printf 'PSP_LIVE_SUI_URL=%s\n' "$(cat "$WORKDIR/sui.base")"
-  printf 'PSP_LIVE_SUI_TOKEN=%s\n' "$(cat "$WORKDIR/sui.token")"
+  printf 'export PSP_LIVE_XUI_URL=%s\n' "$(sq "http://$HOST:$XUI_PORT")"
+  printf 'export PSP_LIVE_XUI_TOKEN=%s\n' "$(sq "$(cat "$WORKDIR/3xui.token")")"
+  printf 'export PSP_LIVE_XUI_DB=%s\n' "$(sq "$WORKDIR/3xui/x-ui.db")"
+  printf 'export PSP_LIVE_SUI_URL=%s\n' "$(sq "$(cat "$WORKDIR/sui.base")")"
+  printf 'export PSP_LIVE_SUI_TOKEN=%s\n' "$(sq "$(cat "$WORKDIR/sui.token")")"
 }
 
 case "${1:-}" in

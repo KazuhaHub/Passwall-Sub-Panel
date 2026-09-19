@@ -15,6 +15,15 @@ deploy/compat/backends/third-party.sh down   # removes only this case's containe
 Measured on `ghcr.io/mhsanaei/3x-ui:3.8.5` (Xray 26.9.9) and
 `ghcr.io/alireza0/s-ui:1.6.3`, from an empty host:
 
+`env` prints `export` statements, because the documented way to consume it is
+`eval` and the consumer is a **child** process: `go test` inherits the exported
+environment only, so a bare `NAME=value` would set a shell variable, leave every
+test to SKIP for want of a variable, and pass any check the evaluating shell
+could make about itself. Values are quoted with `%q` — a token or a path is
+data, and evaluated unquoted a space word-splits it and a `$(...)` runs.
+`third-party_env.test.mjs` asserts both properties from a child process, and the
+workflow re-checks them with `printenv`, which is a child too.
+
 | Suite | Pass | Skip | Fail |
 | --- | --- | --- | --- |
 | 3X-UI adapter | 9 | 2 | 0 |
