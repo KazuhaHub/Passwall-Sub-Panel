@@ -22,6 +22,7 @@
 | [0032](0032-native-task-lifecycle.md) | 原生任务的到期、结果证据与恢复边界 | 提案（支持窗口待确认） |
 | [0033](0033-native-node-compatibility-and-upgrade-admission.md) | Passwall Node 兼容信息与远程升级准入 | 已接受（2026-09-16） |
 | [0034](0034-sync-status-contract.md) | 前端需要「同步状态」时，后端应给出什么 | 已接受（2026-09-18；选择资源任务状态，operation 与上游配置验证延后；实现待完成） |
+| [0035](0035-backend-compatibility-and-release-evidence.md) | 后端兼容承诺与发布证据 | 提案（规范基线已整理，实施门禁待完成） |
 
 > 编号从 0023 起始：更早的设计决策分散记录在 [ARCHITECTURE.md](../ARCHITECTURE.md)、各专题文档（如 [3xui-compat.md](../3xui-compat.md)、[panel-adapters.md](../panel-adapters.md)）以及提交历史中，尚未回溯整理为 ADR。新增决策请沿用此处的递增编号。
 
