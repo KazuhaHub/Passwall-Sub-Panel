@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
-import type { ProxyGroupMember } from '@/api/rules'
-import { appendUniqueProxyGroupMember, applyProxyGroupOrder, defaultProxyGroupOptions, proxyGroupMemberIdentity, proxyGroupMemberListsEqual, proxyGroupOptionsEqual, proxyGroupOrderEqual, reorderProxyGroupMembers, reorderProxyGroupNames } from './proxyGroupMembers'
+import type { ProxyGroupInspectGroup, ProxyGroupMember, RuleSet } from '@/api/rules'
+import { appendUniqueProxyGroupMember, applyProxyGroupOrder, defaultProxyGroupOptions, pruneRuleSetProxyGroupMetadata, proxyGroupMemberIdentity, proxyGroupMemberListsEqual, proxyGroupOptionsEqual, proxyGroupOrderEqual, reorderProxyGroupMembers, reorderProxyGroupNames } from './proxyGroupMembers'
 
 describe('proxy group member editor helpers', () => {
   const node: ProxyGroupMember = { kind: 'node', node_id: 42 }
@@ -68,5 +68,23 @@ describe('proxy group member editor helpers', () => {
       '🐟 漏网之鱼',
       '🏠 自定义代理组',
     ])
+  })
+
+  it('prunes orphaned members, options, and order without mutating the rule set', () => {
+    const ruleSet: RuleSet = {
+      slug: 'custom', name: 'Custom', sort: 1, enabled: true, direct_subscription_domain: false,
+      content: '- MATCH,Keep', proxy_group_order: ['Removed', 'Keep'],
+      proxy_group_members: { Removed: [direct], Keep: [remaining] },
+      proxy_group_options: { Removed: { type: 'fallback' } },
+    }
+    const groups = [{ name: 'Keep' }] as ProxyGroupInspectGroup[]
+    const result = pruneRuleSetProxyGroupMetadata(ruleSet, groups)
+
+    expect(result.removedGroups).toEqual(['Removed'])
+    expect(result.ruleSet.proxy_group_order).toEqual(['Keep'])
+    expect(result.ruleSet.proxy_group_members).toEqual({ Keep: [remaining] })
+    expect(result.ruleSet.proxy_group_options).toEqual({})
+    expect(ruleSet.proxy_group_order).toEqual(['Removed', 'Keep'])
+    expect(ruleSet.proxy_group_members).toHaveProperty('Removed')
   })
 })

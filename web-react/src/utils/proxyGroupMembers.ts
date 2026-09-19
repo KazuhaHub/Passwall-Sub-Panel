@@ -1,4 +1,4 @@
-import type { LoadBalanceStrategy, ProxyGroupMember, ProxyGroupOptions, ProxyGroupType } from '@/api/rules'
+import type { LoadBalanceStrategy, ProxyGroupInspectGroup, ProxyGroupMember, ProxyGroupOptions, ProxyGroupType, RuleSet } from '@/api/rules'
 
 export const DEFAULT_PROXY_GROUP_TEST_URL = 'https://www.gstatic.com/generate_204'
 export const DEFAULT_PROXY_GROUP_INTERVAL = 300
@@ -104,4 +104,28 @@ export function appendUniqueProxyGroupMember(members: ProxyGroupMember[], member
 export function proxyGroupMemberListsEqual(left?: ProxyGroupMember[], right?: ProxyGroupMember[]): boolean {
   if (left === undefined || right === undefined) return left === right
   return left.length === right.length && left.every((member, index) => proxyGroupMemberIdentity(member) === proxyGroupMemberIdentity(right[index]))
+}
+
+export function pruneRuleSetProxyGroupMetadata(ruleSet: RuleSet, groups: ProxyGroupInspectGroup[]): { ruleSet: RuleSet; removedGroups: string[] } {
+  const valid = new Set(groups.map(group => group.name))
+  const removed = new Set<string>()
+  const proxy_group_order = (ruleSet.proxy_group_order || []).filter(group => {
+    if (valid.has(group)) return true
+    if (group.trim()) removed.add(group)
+    return false
+  })
+  const proxy_group_members = Object.fromEntries(Object.entries(ruleSet.proxy_group_members || {}).filter(([group]) => {
+    if (valid.has(group)) return true
+    removed.add(group)
+    return false
+  }).map(([group, members]) => [group, members.map(member => ({ ...member }))]))
+  const proxy_group_options = Object.fromEntries(Object.entries(ruleSet.proxy_group_options || {}).filter(([group]) => {
+    if (valid.has(group)) return true
+    removed.add(group)
+    return false
+  }).map(([group, options]) => [group, { ...options }]))
+  return {
+    ruleSet: { ...ruleSet, proxy_group_order, proxy_group_members, proxy_group_options },
+    removedGroups: [...removed].sort((left, right) => left.localeCompare(right)),
+  }
 }
