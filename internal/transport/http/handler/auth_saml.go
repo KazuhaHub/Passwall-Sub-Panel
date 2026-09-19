@@ -10,6 +10,8 @@ import (
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/config"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/metrics"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/samlguard"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/auth"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/user"
@@ -41,6 +43,50 @@ type AuthSAMLHandler struct {
 
 func NewAuthSAMLHandler(samlSvc *auth.SAMLService, authSvc *auth.Service, userSvc *user.Service, authEvents ports.AuthEventRepo) *AuthSAMLHandler {
 	return &AuthSAMLHandler{saml: samlSvc, auth: authSvc, user: userSvc, authEvents: authEvents}
+}
+
+// Reason codes recorded for a refused SAML ACS request, on both the auth event
+// and the metric label. A CLOSED set — adding one is a deliberate act, and the
+// classifier below never interpolates error text, so the label space cannot
+// grow with attacker input.
+//
+// The separation that earns its keep is replay vs. replay-store failure. Those
+// are an attack to investigate and an outage to fix; giving them one code, which
+// is what the single "saml_assertion_invalid" they used to share amounted to,
+// means an operator eventually stops trusting the word "replay"
+// (ADR 0036 §6.5.1). The guard's three rejections get their own codes for the
+// same reason: they point at an IdP configuration to correct rather than at a
+// credential to distrust.
+const (
+	samlReasonAssertionInvalid = "saml_assertion_invalid"
+	samlReasonReplayed         = "saml_assertion_replayed"
+	samlReasonStoreError       = "saml_replay_store_error"
+	samlReasonWeakSignature    = "saml_weak_signature"
+	samlReasonMultiAssertion   = "saml_multiple_assertions"
+	samlReasonDestination      = "saml_destination"
+	samlReasonRequestInvalid   = "saml_request_invalid"
+)
+
+// samlFailureReason classifies an ACS failure for observability. Classification
+// only: it changes no control flow, and a nil error maps to the default rather
+// than panicking, because a caller misusing it should not take down the ACS.
+func samlFailureReason(err error) string {
+	switch {
+	case errors.Is(err, auth.ErrSAMLAssertionReplayed):
+		return samlReasonReplayed
+	case errors.Is(err, domain.ErrUnavailable):
+		return samlReasonStoreError
+	case errors.Is(err, samlguard.ErrWeakSignatureAlgorithm):
+		return samlReasonWeakSignature
+	case errors.Is(err, samlguard.ErrTooManyAssertions):
+		return samlReasonMultiAssertion
+	case errors.Is(err, samlguard.ErrMissingDestination), errors.Is(err, samlguard.ErrDestinationMismatch):
+		return samlReasonDestination
+	case errors.Is(err, domain.ErrSAMLRequestInvalid):
+		return samlReasonRequestInvalid
+	default:
+		return samlReasonAssertionInvalid
+	}
 }
 
 // Login initiates SP-initiated SSO by redirecting the browser to the IdP.
@@ -85,7 +131,11 @@ func (h *AuthSAMLHandler) ACS(c *gin.Context) {
 
 	assertion, err := h.saml.ParseACSResponse(c.Request, possibleIDs)
 	if err != nil {
-		recordAuthEvent(c, h.authEvents, domain.AuthMethodSAML, domain.AuthOutcomeFailure, 0, "", "saml_assertion_invalid")
+		// Classify once, then use the same code for the metric and the audit row
+		// so the two can never disagree about why a login was refused.
+		reason := samlFailureReason(err)
+		metrics.SAMLACSFailureTotal.With(reason).Inc()
+		recordAuthEvent(c, h.authEvents, domain.AuthMethodSAML, domain.AuthOutcomeFailure, 0, "", reason)
 		c.Redirect(http.StatusFound, panelRedirect(c, "/sso-error?error=auth_failed&description="+url.QueryEscape(err.Error())))
 		return
 	}

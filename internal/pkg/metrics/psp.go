@@ -414,3 +414,27 @@ var (
 		"table",
 	)
 )
+
+// ---------------------------------------------------------------------
+// SAML ACS refusals — answers "is this refusal an attack, an outage, or a bad
+// configuration?" Those three need different responses and, before this counter,
+// all arrived as a single reason code.
+//
+// Labelled by the CLOSED set of classified reasons, never by the raw error, so
+// the label space cannot grow with attacker input. The distinction that matters
+// operationally is replay vs. replay-store failure: an operator who sees
+// "replay" for a database outage will eventually stop trusting the word
+// (ADR 0036 §6.5.1).
+//
+// Recorded in-process, so a database outage cannot suppress it. Note the
+// READING path is an admin route that itself needs the database, so process
+// logs remain the channel that survives a full outage — the counter is for
+// rate and shape, not for outage detection.
+// ---------------------------------------------------------------------
+var (
+	SAMLACSFailureTotal = NewCounterVec(
+		"psp_saml_acs_failure_total",
+		"SAML ACS requests refused, by classified reason. Replay and replay-store failure are separate labels on purpose.",
+		"reason",
+	)
+)
