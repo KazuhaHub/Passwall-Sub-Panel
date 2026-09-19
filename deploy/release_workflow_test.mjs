@@ -298,6 +298,61 @@ test('the publisher verifies its own artifacts and relaxes nothing', () => {
   }
 })
 
+// R10 STEP 7: "rolling channels follow the repository's existing semantics, and
+// a candidate that did not pass cannot become an automatic upgrade target."
+//
+// The string assertions above prove the expressions are still written. They do not
+// prove the expressions are RIGHT, and this is the one place where being wrong is
+// silent and public: `:latest` mirrors GitHub's /releases/latest, which PSP's own
+// in-app upgrade nudge reads, so a prerelease reaching `latest` offers every
+// installed panel a beta it never asked for. So the expressions are EXTRACTED and
+// EVALUATED against tags that matter, rather than pattern-matched.
+function channelEnabled(expression, tag) {
+  const startsWithV = tag.startsWith('v')
+  const containsHyphen = tag.includes('-')
+  switch (expression) {
+    case 'startsWith_v:!contains_hyphen':
+      return startsWithV && !containsHyphen
+    case 'startsWith_v':
+      return startsWithV
+    default:
+      throw new Error(`unknown channel expression: ${expression}`)
+  }
+}
+
+function channelExpressions(dockerJob) {
+  const latest = /value=latest,enable=\$\{\{ (.*?) \}\}/.exec(dockerJob)
+  const beta = /value=beta,enable=\$\{\{ (.*?) \}\}/.exec(dockerJob)
+  assert(latest && beta, 'the image channels must both declare an enable condition')
+  const normalise = (expr) => {
+    const v = /startsWith\([^,]+,\s*'v'\)/.test(expr)
+    const hyphen = /!contains\([^,]+,\s*'-'\)/.test(expr)
+    if (v && hyphen) return 'startsWith_v:!contains_hyphen'
+    if (v && !expr.includes('contains')) return 'startsWith_v'
+    throw new Error(`the channel condition is not one this guard understands: ${expr}`)
+  }
+  return { latest: normalise(latest[1]), beta: normalise(beta[1]) }
+}
+
+test('latest never points at a prerelease and beta always tracks the newest of any kind', () => {
+  const { latest, beta } = channelExpressions(job('docker'))
+  const cases = [
+    ['v1.0.0', true, true],
+    ['v4.0.0', true, true],
+    // The scheme this project actually publishes.
+    ['v0.0.1-beta11', false, true],
+    ['v0.0.1-beta9', false, true],
+    ['v1.0.0-rc1', false, true],
+    // Not a release tag at all; neither channel may move.
+    ['1.0.0', false, false],
+    ['nightly', false, false]
+  ]
+  for (const [tag, wantLatest, wantBeta] of cases) {
+    assert.equal(channelEnabled(latest, tag), wantLatest, `latest for ${tag}`)
+    assert.equal(channelEnabled(beta, tag), wantBeta, `beta for ${tag}`)
+  }
+})
+
 test('publisher cache guard rejects implicit defaults and explicit cache restoration', () => {
   for (const [label, mutated] of [
     ['implicit Go cache', workflow.replace('          cache: false\n', '')],
