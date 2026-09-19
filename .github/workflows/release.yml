@@ -52,6 +52,7 @@ jobs:
       owner_lc: ${{ steps.identity.outputs.owner_lc }}
       sha: ${{ steps.identity.outputs.sha }}
       build_date: ${{ steps.identity.outputs.build_date }}
+      node_versions: ${{ steps.node_support.outputs.node_versions }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -132,6 +133,19 @@ jobs:
           RELEASE_VERSION: ${{ steps.identity.outputs.tag }}
         run: node deploy/check-image.mjs "${IMAGE_OWNER}/passwall-sub-panel" "$RELEASE_VERSION"
 
+      # DERIVED FROM THE MANIFEST, like the same loop in test.yml. The release
+      # gate used to carry its own copy of every released version, so a release
+      # had to be added here as well as in test.yml and the manifest.
+      - name: Resolve the supported Node set
+        id: node_support
+        shell: bash
+        run: |
+          set -euo pipefail
+          versions=$(python3 -c 'import json;d=json.load(open("docs/compat/node-v4.json"));r=[x["version"] for x in d["released_nodes"]];print(json.dumps(r[r.index(d["min_supported"]):]))')
+          test "$versions" != "[]"
+          echo "supported nodes: $versions"
+          echo "node_versions=$versions" >> "$GITHUB_OUTPUT"
+
   node-compatibility:
     name: Released Node compatibility (${{ matrix.node_version }})
     runs-on: ubuntu-latest
@@ -141,19 +155,10 @@ jobs:
       contents: read
     strategy:
       fail-fast: false
+      # Derived from docs/compat/node-v4.json's min_supported, so the supported
+      # set is one piece of data rather than a list restated per workflow.
       matrix:
-        node_version:
-          - v0.0.1-beta1
-          - v0.0.1-beta2
-          - v0.0.1-beta3
-          - v0.0.1-beta4
-          - v0.0.1-beta5
-          - v0.0.1-beta6
-          - v0.0.1-beta7
-          - v0.0.1-beta8
-          - v0.0.1-beta9
-          - v0.0.1-beta10
-          - v0.0.1-beta11
+        node_version: ${{ fromJSON(needs.setup.outputs.node_versions) }}
     steps:
       - name: Checkout trusted panel source
         uses: actions/checkout@v7

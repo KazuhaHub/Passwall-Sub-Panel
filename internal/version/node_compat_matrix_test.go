@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"reflect"
+	"slices"
 	"testing"
 
 	nodeprotocol "github.com/KazuhaHub/passwall-node/protocol"
@@ -23,13 +24,36 @@ type nodeCompatibilityMatrix struct {
 			RequiredCapabilities []string `json:"required_capabilities"`
 		} `json:"agent_upgrade_v1"`
 	} `json:"features"`
-	ReleasedNodes []struct {
+	// MinSupported names the OLDEST node version the panel still supports. It is
+	// matched by POSITION in ReleasedNodes, never by comparing the strings: the
+	// prerelease suffix sorts lexically, so v0.0.1-beta9 ranks ABOVE
+	// v0.0.1-beta11 and a string comparison would invert the floor silently.
+	MinSupported    string `json:"min_supported"`
+	MinSupportedDoc string `json:"min_supported_doc"`
+	ReleasedNodes   []struct {
 		Version         string   `json:"version"`
 		ProtocolVersion int      `json:"protocol_version"`
 		BaseSync        string   `json:"base_sync"`
 		RemoteUpgrade   string   `json:"remote_upgrade"`
 		UpgradeMethods  []string `json:"upgrade_methods"`
 	} `json:"released_nodes"`
+}
+
+// supportedFromFloor is the ONE derivation of "which nodes this panel supports",
+// and it is deliberately a plain position slice with no version arithmetic.
+// The CI matrix reads the same rule from the same file; the two agree because
+// they agree on the data, not because they share code.
+func supportedFromFloor(matrix nodeCompatibilityMatrix) []string {
+	for i, release := range matrix.ReleasedNodes {
+		if release.Version == matrix.MinSupported {
+			versions := make([]string, 0, len(matrix.ReleasedNodes)-i)
+			for _, row := range matrix.ReleasedNodes[i:] {
+				versions = append(versions, row.Version)
+			}
+			return versions
+		}
+	}
+	return nil
 }
 
 func TestNodeV4CompatibilityMatrixMatchesSharedProtocolPolicy(t *testing.T) {
@@ -51,23 +75,49 @@ func TestNodeV4CompatibilityMatrixMatchesSharedProtocolPolicy(t *testing.T) {
 		t.Fatalf("upgrade capability matrix = %v, shared policy = %v",
 			matrix.Features.AgentUpgradeV1.RequiredCapabilities, nodeprotocol.AgentUpgradeCapabilities())
 	}
-	wantReleases := []string{"v0.0.1-beta1", "v0.0.1-beta2", "v0.0.1-beta3", "v0.0.1-beta4", "v0.0.1-beta5", "v0.0.1-beta6", "v0.0.1-beta7", "v0.0.1-beta8", "v0.0.1-beta9", "v0.0.1-beta10", "v0.0.1-beta11"}
-	if len(matrix.ReleasedNodes) != len(wantReleases) {
-		t.Fatalf("released node matrix has %d rows, want %d", len(matrix.ReleasedNodes), len(wantReleases))
+
+	// THIS FILE NO LONGER CARRIES A COPY OF EVERY RELEASED VERSION. It used to,
+	// which meant each release had to be added in four places — here, the
+	// manifest, and two workflows — and the copy could only ever confirm that
+	// someone had remembered to update all four. What is asserted now is that the
+	// manifest is SELF-CONSISTENT and that its floor resolves, so the supported
+	// set is DERIVED from the data rather than restated beside it.
+	if matrix.MinSupported == "" || matrix.MinSupportedDoc == "" {
+		t.Fatal("the node matrix must declare min_supported and explain it")
 	}
+	supported := supportedFromFloor(matrix)
+	if len(supported) == 0 {
+		t.Fatalf("min_supported %q names no row in released_nodes, so the panel would support nothing",
+			matrix.MinSupported)
+	}
+	if len(supported) == 0 || supported[0] != matrix.MinSupported {
+		t.Fatalf("the derived support list must start at the floor, got %v", supported)
+	}
+
+	seen := make(map[string]struct{}, len(matrix.ReleasedNodes))
 	for i, release := range matrix.ReleasedNodes {
-		if release.Version != wantReleases[i] || release.ProtocolVersion != nodeprotocol.ProtocolVersion1 || release.BaseSync != "supported" {
+		if release.Version == "" || release.ProtocolVersion != nodeprotocol.ProtocolVersion1 || release.BaseSync != "supported" {
 			t.Fatalf("released node row %d = %+v", i, release)
 		}
-		if i < 2 && (release.RemoteUpgrade != "unsupported" || len(release.UpgradeMethods) != 0) {
-			t.Fatalf("legacy release unexpectedly promises remote upgrade: %+v", release)
+		if _, duplicate := seen[release.Version]; duplicate {
+			t.Fatalf("released node row %d repeats %s", i, release.Version)
 		}
-		wantMethods := []string{"linux-systemd"}
-		if release.Version == "v0.0.1-beta5" || release.Version == "v0.0.1-beta6" || release.Version == "v0.0.1-beta7" || release.Version == "v0.0.1-beta8" || release.Version == "v0.0.1-beta9" || release.Version == "v0.0.1-beta10" || release.Version == "v0.0.1-beta11" {
-			wantMethods = append(wantMethods, "managed-docker")
-		}
-		if i >= 2 && (release.RemoteUpgrade != "conditional" || !reflect.DeepEqual(release.UpgradeMethods, wantMethods)) {
-			t.Fatalf("upgrade-capable release matrix drifted: %+v", release)
+		seen[release.Version] = struct{}{}
+		// THE SHAPE OF A ROW, WITHOUT NAMING A VERSION. A release that promises no
+		// remote upgrade carries no methods; one that promises a conditional
+		// upgrade must carry the method that was actually verified. Encoding this
+		// by version name is what made the old copy churn every release.
+		switch release.RemoteUpgrade {
+		case "unsupported":
+			if len(release.UpgradeMethods) != 0 {
+				t.Fatalf("row %s promises no remote upgrade but lists methods: %+v", release.Version, release.UpgradeMethods)
+			}
+		case "conditional":
+			if !slices.Contains(release.UpgradeMethods, "linux-systemd") {
+				t.Fatalf("row %s offers a conditional upgrade without the verified method: %+v", release.Version, release.UpgradeMethods)
+			}
+		default:
+			t.Fatalf("row %s has an unknown remote_upgrade %q", release.Version, release.RemoteUpgrade)
 		}
 	}
 }

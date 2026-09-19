@@ -17,6 +17,8 @@
       ]
     }
   },
+  "min_supported": "v0.0.1-beta1",
+  "min_supported_doc": "The OLDEST Passwall-Node version this panel still supports. Everything from this row onward in released_nodes is the supported set, and that set is exactly what the released-range CI matrix exercises. MATCHED BY POSITION IN released_nodes, NOT by semver comparison: v0.0.1-beta9 sorts ABOVE v0.0.1-beta11 lexically, so comparing the strings would silently invert the floor. Raising this value is a BREAKING decision that drops every node below it; record it in docs/compat-policy.md's history with who it strands. It exists so the matrix can stop growing: without a floor every release adds a permanent row.",
   "released_nodes": [
     {
       "version": "v0.0.1-beta1",
@@ -35,63 +37,88 @@
       "protocol_version": 1,
       "base_sync": "supported",
       "remote_upgrade": "conditional",
-      "upgrade_methods": ["linux-systemd"]
+      "upgrade_methods": [
+        "linux-systemd"
+      ]
     },
     {
       "version": "v0.0.1-beta4",
       "protocol_version": 1,
       "base_sync": "supported",
       "remote_upgrade": "conditional",
-      "upgrade_methods": ["linux-systemd"]
+      "upgrade_methods": [
+        "linux-systemd"
+      ]
     },
     {
       "version": "v0.0.1-beta5",
       "protocol_version": 1,
       "base_sync": "supported",
       "remote_upgrade": "conditional",
-      "upgrade_methods": ["linux-systemd", "managed-docker"]
+      "upgrade_methods": [
+        "linux-systemd",
+        "managed-docker"
+      ]
     },
     {
       "version": "v0.0.1-beta6",
       "protocol_version": 1,
       "base_sync": "supported",
       "remote_upgrade": "conditional",
-      "upgrade_methods": ["linux-systemd", "managed-docker"]
+      "upgrade_methods": [
+        "linux-systemd",
+        "managed-docker"
+      ]
     },
     {
       "version": "v0.0.1-beta7",
       "protocol_version": 1,
       "base_sync": "supported",
       "remote_upgrade": "conditional",
-      "upgrade_methods": ["linux-systemd", "managed-docker"]
+      "upgrade_methods": [
+        "linux-systemd",
+        "managed-docker"
+      ]
     },
     {
       "version": "v0.0.1-beta8",
       "protocol_version": 1,
       "base_sync": "supported",
       "remote_upgrade": "conditional",
-      "upgrade_methods": ["linux-systemd", "managed-docker"]
+      "upgrade_methods": [
+        "linux-systemd",
+        "managed-docker"
+      ]
     },
     {
       "version": "v0.0.1-beta9",
       "protocol_version": 1,
       "base_sync": "supported",
       "remote_upgrade": "conditional",
-      "upgrade_methods": ["linux-systemd", "managed-docker"]
+      "upgrade_methods": [
+        "linux-systemd",
+        "managed-docker"
+      ]
     },
     {
       "version": "v0.0.1-beta10",
       "protocol_version": 1,
       "base_sync": "supported",
       "remote_upgrade": "conditional",
-      "upgrade_methods": ["linux-systemd", "managed-docker"]
+      "upgrade_methods": [
+        "linux-systemd",
+        "managed-docker"
+      ]
     },
     {
       "version": "v0.0.1-beta11",
       "protocol_version": 1,
       "base_sync": "supported",
       "remote_upgrade": "conditional",
-      "upgrade_methods": ["linux-systemd", "managed-docker"]
+      "upgrade_methods": [
+        "linux-systemd",
+        "managed-docker"
+      ]
     }
   ]
 }

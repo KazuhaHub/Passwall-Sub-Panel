@@ -140,11 +140,45 @@ test('publisher explicitly disables every Go and Node shared dependency cache', 
   assertPublisherCachesDisabled(workflow)
 })
 
-test('release compatibility gate covers every retained Passwall Node release', () => {
+// THE GATE MUST COVER EVERY RETAINED NODE RELEASE, and how it does that has
+// changed. The matrix used to be eleven literal lines in this file, which meant
+// the supported set lived here, in test.yml and in the manifest, and a release
+// added to one but not the others was covered exactly until somebody noticed.
+// It is derived now.
+//
+// So this asserts the DERIVATION rather than restating the list. Pinning the
+// literals again would pass against a hand-maintained copy that had already
+// drifted — which is the failure this test exists to refuse, and it is not
+// hypothetical: beta10 and beta11 shipped while every check stayed green,
+// because nothing compared the offered set against the published one.
+test('release compatibility gate derives its Node set from the single source of truth', () => {
   const compatibility = job('node-compatibility')
-  for (const version of ['v0.0.1-beta1', 'v0.0.1-beta2', 'v0.0.1-beta3', 'v0.0.1-beta4', 'v0.0.1-beta5']) {
-    assert(compatibility.includes(`          - ${version}`), `missing ${version} from release compatibility matrix`)
-  }
+  const setup = job('setup')
+
+  // Derived, not enumerated: the matrix reads the set setup resolved.
+  assert(
+    compatibility.includes('node_version: ${{ fromJSON(needs.setup.outputs.node_versions) }}'),
+    'the compatibility matrix must be derived, not listed'
+  )
+  // And no version literal may reappear in this job at all. Matched as "any
+  // literal" rather than as the bare-list shape the old matrix happened to use,
+  // because a reintroduced list could equally arrive as `- node_version: v…` or
+  // an inline array, and every one of those shadows the derivation and drifts
+  // from it just as quietly. The derived job contains no version string, so
+  // there is nothing here to allowlist.
+  assert(
+    !/v\d+\.\d+\.\d+/.test(compatibility),
+    'the compatibility job must not name a version literal; derive it instead'
+  )
+
+  // setup must derive that set from the manifest, BY POSITION at min_supported.
+  // Position and not comparison: v0.0.1-beta11 sorts BELOW v0.0.1-beta9, so
+  // ordering these by version would drop the newest releases from the gate.
+  assert(setup.includes('docs/compat/node-v4.json'), 'the supported set must come from the shared manifest')
+  assert(setup.includes('min_supported'), 'the supported set must resolve from min_supported')
+  assert(setup.includes('.index('), 'the floor must be located by position, not compared as a version')
+
+  // The gate still exercises the live contract tests and still blocks release.
   assert(compatibility.includes('TestLive_RealNode(AgentContract|MigratedServerContract|TaskEvidenceReceipt|TaskExpiryContract)'))
   assert(job('release').includes('needs: [setup, build, node-compatibility]'))
   assert(job('docker').includes('needs: [setup, build, node-compatibility]'))
