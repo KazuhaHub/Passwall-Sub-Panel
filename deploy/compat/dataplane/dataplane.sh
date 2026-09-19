@@ -106,6 +106,37 @@ for out in render.get("outbounds", []):
 json.dump(render, open(sys.argv[2], "w"), indent=1)
 PY
 
+if [ "$SABOTAGE" = "credentials" ]; then
+  log "SABOTAGE: replacing the rendered credential with a wrong one"
+  python3 - "$WORKDIR/client.json" <<'PY'
+import json, sys
+path = sys.argv[1]
+render = json.load(open(path))
+for out in render.get("outbounds", []):
+    if out.get("type") == "vless":
+        out["uuid"] = "00000000-0000-4000-8000-000000000000"
+json.dump(render, open(path, "w"), indent=1)
+PY
+fi
+
+# SABOTAGE: A DELIBERATE BREAK, SO THE ASSERTIONS CAN BE SHOWN TO FAIL.
+#
+# R08's completion criterion names three breaks that must each make the
+# corresponding case fail — the real core closed, the rendered credentials wrong,
+# the limit enforcement removed — and a harness whose green does not depend on any
+# of them is a harness that would stay green through all three. These modes are
+# how that is checked, and they exist for nothing else.
+#
+#   credentials     the render's credential is replaced with a wrong one, so the
+#                   traversal below must NOT succeed
+#   no-enforcement  the expiry is never pushed, so the refusal case must NOT pass
+#
+# `credentials` stands in for closing the core as well: both leave the node
+# unable to carry the connection, which is the property the traversal assertion
+# is supposed to be sensitive to.
+SABOTAGE="${PSP_DATA_SABOTAGE:-}"
+[ -z "$SABOTAGE" ] || log "SABOTAGE=$SABOTAGE — this run is EXPECTED to fail"
+
 log "checking the target"
 # THE TARGET MUST BE ONE THE RULESET SENDS THROUGH THE NODE.
 #
@@ -260,10 +291,16 @@ print(json.load(open(sys.argv[1]))["user"]["id"])
 PY
 )
 
-log "expiring the user (window ${ENFORCE_WINDOW_SECONDS}s)"
-api -X PUT -H 'Content-Type: application/json' \
-  -d '{"expire_at":"2020-01-01T00:00:00Z"}' \
-  "$PSP_URL/api/admin/users/$USER_ID" > "$WORKDIR/expire.json"
+if [ "$SABOTAGE" = "no-enforcement" ]; then
+  # The limit enforcement is never applied, so nothing below has any reason to
+  # refuse. A harness that passes here is asserting something it did not do.
+  log "SABOTAGE: NOT expiring the user; the refusal case below must fail"
+else
+  log "expiring the user (window ${ENFORCE_WINDOW_SECONDS}s)"
+  api -X PUT -H 'Content-Type: application/json' \
+    -d '{"expire_at":"2020-01-01T00:00:00Z"}' \
+    "$PSP_URL/api/admin/users/$USER_ID" > "$WORKDIR/expire.json"
+fi
 
 if ! proxied_attempt "000" "$ENFORCE_WINDOW_SECONDS" >/dev/null; then
   log "FAIL: an expired user was still carried through the node after ${ENFORCE_WINDOW_SECONDS}s"

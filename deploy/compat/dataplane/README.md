@@ -93,6 +93,35 @@ it establishes the axis.
 refused within its stated window" are different claims and only the second is
 testable, so the number is written down where a reader can disagree with it.
 
+## The negative controls, and what they proved
+
+A green harness proves nothing until the breaks it is supposed to catch are shown
+to make it fail. R08's completion criterion names three; two are driven here.
+
+```bash
+PSP_DATA_SABOTAGE=credentials     ./deploy/compat/dataplane/dataplane.sh
+PSP_DATA_SABOTAGE=no-enforcement  ./deploy/compat/dataplane/dataplane.sh
+```
+
+| Sabotage | Result |
+| --- | --- |
+| `credentials` — the rendered UUID replaced with a wrong one | exits 1 |
+| `no-enforcement` — the expiry is never pushed | exits 1 at `FAIL: an expired user was still carried through the node after 180s` |
+
+The second is the one that matters: it is the refusal assertion itself failing,
+which is what makes the pass above evidence rather than a coincidence.
+
+`credentials` exits before the traversal assertion, because the client cannot
+even fetch its rule-sets through a node it cannot authenticate to. That is a
+correct failure, and it is also a **dependency worth knowing about**: the
+baseline is not self-contained. It needs GitHub reachable *through the node*, so
+a run against a destination-blocking ruleset or without egress fails at startup
+rather than at an assertion.
+
+`credentials` stands in for closing the real core as well — both leave the node
+unable to carry the connection, which is the property the traversal assertion is
+sensitive to.
+
 ## Four ways this harness lied before it worked
 
 Each of these produced a green or red result that was about the harness rather
