@@ -74,10 +74,15 @@ jobs:
             git -C "$node_repo" fetch --force --depth=1 origin "refs/tags/$node_version"
             git -C "$node_repo" checkout --force --detach FETCH_HEAD
 
-            # ONE EVIDENCE DIRECTORY PER VERSION. A shared one would let the
-            # last version's log overwrite an earlier one's, so the report that
-            # survived would be about whichever happened to run last.
-            evidence="evidence/$node_version"
+            # ONE EVIDENCE DIRECTORY PER CASE, NAMED FOR THE CASE. The summary
+            # gate derives the expected set and looks each case up by name, so
+            # evidence filed under any other name reads as a case that never
+            # reported — which is exactly what a cancelled run looks like. A
+            # shared directory would also let the last version's log overwrite an
+            # earlier one's, so the surviving report would describe whichever
+            # happened to run last.
+            case_id="node-wire-v1@$node_version"
+            evidence="evidence/$case_id"
             mkdir -p "$evidence"
 
             # The exit code is CAPTURED rather than allowed to end the step. The
@@ -91,6 +96,25 @@ jobs:
               ./internal/service/nodesync \
               -run '^TestLive_RealNode(AgentContract|MigratedServerContract|TaskEvidenceReceipt|TaskExpiryContract)$' \
               > "$evidence/go-events.jsonl" 2> "$evidence/go-stderr.txt" || test_exit=$?
+
+            # WHICH two implementations produced this result, and where. A report
+            # that cannot name its inputs cannot be re-checked. Written with
+            # printf rather than a heredoc: this block sits one level inside a
+            # loop, and a heredoc terminator keeps whatever indentation the block
+            # scalar left it, so it would never close.
+            {
+              printf '{\n'
+              printf '  "case": "%s",\n' "$case_id"
+              printf '  "profile": "node-wire-v1",\n'
+              printf '  "psp_sha": "%s",\n' "${{ github.sha }}"
+              printf '  "node_version": "%s",\n' "$node_version"
+              printf '  "node_sha": "%s",\n' "$(git -C "$node_repo" rev-parse HEAD)"
+              printf '  "runner_os": "%s",\n' "$RUNNER_OS"
+              printf '  "runner_arch": "%s",\n' "$RUNNER_ARCH"
+              printf '  "run_id": "%s",\n' "${{ github.run_id }}"
+              printf '  "run_attempt": "%s"\n' "${{ github.run_attempt }}"
+              printf '}\n'
+            } > "$evidence/environment.json"
 
             # A green `go test` is not evidence that the contract was exercised.
             # `-run` matching nothing, a skip taken because PSP_LIVE_NODE_REPO
@@ -110,12 +134,17 @@ jobs:
             fi
           done
           exit "$failed"
-      - name: upload test output
-        if: failure()
+      - name: upload case evidence
+        # Uploaded whatever the verdicts were. A report is only useful when it
+        # can be read after a failure, and a failure is the only time anybody
+        # looks.
+        if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: node-compatibility-test-output
+          name: node-compatibility-evidence
           path: evidence/
+          if-no-files-found: error
+          retention-days: 90
 
   node-contract:
     name: node contract (pinned published source)
@@ -154,7 +183,13 @@ jobs:
           cp -R "$node_module_dir/." "$contract_repo/"
           chmod -R u+w "$contract_repo"
           test -f "$contract_repo/go.mod"
-          mkdir -p evidence
+          # NOT a per-version case: this job exercises the exact published
+          # revision PSP consumes, whatever go.mod pins, rather than a released
+          # tag. It is filed under its own name so it cannot collide with the
+          # matrix case for the same version, and so it is visible as additional
+          # evidence rather than mistaken for one of the promised cases.
+          evidence="evidence/pinned-source"
+          mkdir -p "$evidence"
           # Captured, not propagated: the validator has to run even when the
           # tests failed, because its report is what names the required item that
           # did not pass. stderr stays separate from the JSON stream.
@@ -162,18 +197,77 @@ jobs:
           PSP_LIVE_NODE_REPO="$contract_repo" go test -json -count=1 -timeout=5m \
             ./internal/service/nodesync \
             -run '^TestLive_RealNode(AgentContract|MigratedServerContract|TaskEvidenceReceipt|TaskExpiryContract)$' \
-            > evidence/go-events.jsonl 2> evidence/go-stderr.txt || test_exit=$?
+            > "$evidence/go-events.jsonl" 2> "$evidence/go-stderr.txt" || test_exit=$?
           node deploy/compat/check-go-results.mjs \
             --profile node-wire-v1 \
-            --input evidence/go-events.jsonl \
+            --input "$evidence/go-events.jsonl" \
             --go-exit-code "$test_exit" \
-            --output evidence/result.json
-      - name: upload test output
-        if: failure()
+            --output "$evidence/result.json"
+          cat > "$evidence/environment.json" <<JSON
+          {
+            "case": "pinned-source",
+            "profile": "node-wire-v1",
+            "psp_sha": "${{ github.sha }}",
+            "node_module": "$(go list -m -f '{{.Version}}' github.com/KazuhaHub/passwall-node)",
+            "node_sha": "$(git -C "$contract_repo" rev-parse HEAD 2>/dev/null || echo unknown)",
+            "runner_os": "$RUNNER_OS",
+            "runner_arch": "$RUNNER_ARCH",
+            "run_id": "${{ github.run_id }}",
+            "run_attempt": "${{ github.run_attempt }}"
+          }
+          JSON
+      - name: upload case evidence
+        if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: node-contract-test-output
+          name: node-contract-evidence
           path: evidence/
+          if-no-files-found: error
+          retention-days: 90
+
+  # THE SUMMARY GATE FOR THE NODE WIRE CONTRACT. The two jobs above report their
+  # own verdicts, but neither can answer the question this asks: whether EVERY
+  # case the panel promises to test actually reported. A leg cancelled by a
+  # superseded push, or an artifact upload that failed, leaves every case that
+  # did report perfectly green and the run looking complete.
+  compatibility:
+    name: compatibility gate
+    runs-on: ubuntu-latest
+    needs: [node-compatibility, node-contract]
+    # always(), so a failed or cancelled leg still produces a verdict. A skipped
+    # gate would report as an absent check, which reads as "not run" rather than
+    # "failed" — and an absent check blocks nothing.
+    if: always()
+    steps:
+      - uses: actions/checkout@v7
+      - name: Download every case report
+        uses: actions/download-artifact@v7
+        with:
+          path: evidence
+      - name: the compatibility jobs themselves succeeded
+        env:
+          RANGE: ${{ needs.node-compatibility.result }}
+          CONTRACT: ${{ needs.node-contract.result }}
+        run: |
+          # Checked before the case set, so a cancelled or failed leg reads as
+          # "the job did not succeed" rather than as a pile of missing cases.
+          # The case-set check would also catch it, and would name the wrong
+          # cause.
+          test "$RANGE" = success
+          test "$CONTRACT" = success
+      - name: every expected case reported a pass
+        run: |
+          set -euo pipefail
+          node deploy/compat/check-case-set.mjs --reports evidence --output case-set.json
+          cat case-set.json
+      - name: upload the case-set verdict
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: compatibility-gate-summary
+          path: case-set.json
+          if-no-files-found: warn
+          retention-days: 90
 
   container:
     name: Docker source and release runtime baselines
@@ -217,8 +311,8 @@ jobs:
             # This verifies binary execution, not the panel's production startup.
             docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges --user 10001:10001 --entrypoint /app/psp "$image" --version
           done
-      - name: Publisher identity, compat result validator and fail-closed guard tests
-        run: node --test deploy/check_image_test.mjs deploy/check_build_test.mjs deploy/release_workflow_test.mjs deploy/compat/check-go-results.test.mjs
+      - name: Publisher identity, compat result validators and fail-closed guard tests
+        run: node --test deploy/check_image_test.mjs deploy/check_build_test.mjs deploy/release_workflow_test.mjs deploy/compat/check-go-results.test.mjs deploy/compat/check-case-set.test.mjs
 
   web:
     name: web (typecheck + build + test)

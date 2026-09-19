@@ -180,8 +180,40 @@ test('release compatibility gate derives its Node set from the single source of 
 
   // The gate still exercises the live contract tests and still blocks release.
   assert(compatibility.includes('TestLive_RealNode(AgentContract|MigratedServerContract|TaskEvidenceReceipt|TaskExpiryContract)'))
-  assert(job('release').includes('needs: [setup, build, node-compatibility]'))
-  assert(job('docker').includes('needs: [setup, build, node-compatibility]'))
+  assert(job('release').includes('needs: [setup, build, compatibility]'))
+  assert(job('docker').includes('needs: [setup, build, compatibility]'))
+})
+
+// EVERY PUBLISHING JOB REACHES THE COMPATIBILITY EVIDENCE ONLY THROUGH THE
+// GATE. Chaining `needs` directly onto node-compatibility would let a job
+// publish while the gate — which is the thing that knows whether the whole case
+// set reported — is still failing or was never produced.
+test('every publishing job is gated behind the compatibility summary', () => {
+  const gate = job('compatibility')
+  // always(), so a cancelled or failed leg still produces a verdict. A skipped
+  // gate reports as an absent check, which reads as "not run" rather than
+  // "failed", and would let a branch merge on evidence that was never gathered.
+  assert(gate.includes('if: always()'))
+  assert(gate.includes('node-compatibility'), 'the gate must summarise the compatibility leg')
+  for (const name of ['release', 'docker']) {
+    assert(
+      job(name).includes('needs: [setup, build, compatibility]'),
+      `${name} must depend on the summary gate`
+    )
+    assert(
+      !/needs: \[[^\]]*node-compatibility/.test(job(name)),
+      `${name} must reach node-compatibility only through the gate`
+    )
+  }
+})
+
+// The suite above is only evidence if something runs it. This asserts the file
+// is wired into the job that already runs the other deploy guards, so a renamed
+// or dropped checker cannot quietly stop being executed.
+test('the compatibility gate actually runs the case-set checker', () => {
+  const gate = job('compatibility')
+  assert(gate.includes('deploy/compat/check-case-set.mjs'))
+  assert(gate.includes('actions/download-artifact'))
 })
 
 test('publisher cache guard rejects implicit defaults and explicit cache restoration', () => {
