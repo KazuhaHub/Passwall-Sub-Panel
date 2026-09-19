@@ -1,0 +1,18 @@
+{
+  "node-wire-v1": {
+    "description": "The Node wire contract PSP must hold with every Node release it still supports. The required set is declared HERE and never inferred from the log: a checker that reads its expectations out of the run it is judging can only ever confirm that the run agrees with itself.",
+    "package": "github.com/KazuhaHub/passwall-sub-panel/internal/service/nodesync",
+    "required": {
+      "TestLive_RealNodeAgentContract": {},
+      "TestLive_RealNodeMigratedServerContract": {},
+      "TestLive_RealNodeTaskEvidenceReceipt": {},
+      "TestLive_RealNodeTaskExpiryContract": {
+        "subtests": [
+          "late-completion-terminal-replay",
+          "delayed-body-unknown-journal"
+        ]
+      }
+    },
+    "notApplicable": {}
+  }
+}
