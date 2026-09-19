@@ -775,3 +775,55 @@ func TestReviewedRegistryRejectsUnsafeOrUnverifiedRecords(t *testing.T) {
 		t.Fatal("current reviewed registry is invalid")
 	}
 }
+
+// A PRERELEASE SUFFIX IS NOT A NUMBER, and this is the test that would have
+// caught it before an operator noticed instead.
+//
+// semver compares prerelease identifiers character by character, so
+// v0.0.1-beta11 ranks BELOW v0.0.1-beta9. Sorting "newest first" with it
+// therefore puts beta9 at the top and, once beta10 and beta11 were reviewed in,
+// would have filed them behind beta3 — while the UI marks index 0 as the
+// recommended version, so every operator would have been recommended the older
+// release. The fixtures never noticed because none of them had a two-digit
+// prerelease.
+//
+// RECENCY COMES FROM THE PUBLICATION TIME, which is the only axis a version
+// string cannot reinterpret.
+func TestCatalogOrdersByPublicationNotByPrereleaseNumber(t *testing.T) {
+	// Deliberately ascending in publication order while the version strings are
+	// not: beta9 shipped first, then beta10, then beta11.
+	released := []string{"v0.0.1-beta9", "v0.0.1-beta10", "v0.0.1-beta11"}
+	published := make(map[string]time.Time, len(released))
+	base := fixtureNow.Add(-time.Duration(len(released)) * time.Hour)
+	for index, version := range released {
+		published[version] = base.Add(time.Duration(index) * time.Hour)
+	}
+	catalog := fixtureCatalog(t, func(req *http.Request) (*http.Response, error) {
+		version := strings.TrimPrefix(req.URL.String(), "https://api.github.com/repos/KazuhaHub/Passwall-Node/releases/tags/")
+		release := fixtureRelease(version)
+		at := published[version]
+		release.PublishedAt = &at
+		return fixtureResponse(req, http.StatusOK, fixtureBody(t, release)), nil
+	}, nil)
+
+	template := catalog.reviewed[0]
+	catalog.reviewed = nil
+	for _, version := range released {
+		reviewed := template
+		reviewed.Version, reviewed.DockerPublishedTag = version, version
+		catalog.reviewed = append(catalog.reviewed, reviewed)
+	}
+
+	list, err := catalog.List(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := make([]string, 0, len(list.Releases))
+	for _, entry := range list.Releases {
+		got = append(got, entry.Version)
+	}
+	want := []string{"v0.0.1-beta11", "v0.0.1-beta10", "v0.0.1-beta9"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("catalog order = %v, want newest-published first %v", got, want)
+	}
+}
