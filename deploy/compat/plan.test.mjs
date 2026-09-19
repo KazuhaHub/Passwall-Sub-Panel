@@ -220,3 +220,37 @@ test('a known-bad version must be excluded with a reason, not hidden between the
   assert.ok(!withReason.result.cases.some((c) => c.version === 'v0.0.1-beta7'))
   assert.deepEqual(withReason.result.excluded, [{ version: 'v0.0.1-beta7', reason: 'installer regression' }])
 })
+
+// THE MIGRATION HAS TO BE VERIFIED BY THE OLD READER. A new reader agreeing with
+// itself proves nothing about the panel already deployed, which is why these
+// assert that an unknown field is IGNORED rather than that the new reader can
+// read the new shape. The manifest is the runtime format the panel ships, so a
+// field a later revision adds must not change what this one plans — and a field
+// claiming a narrower range must not narrow it either, because this revision
+// does not know what that claim means.
+test('an unknown manifest field neither breaks the plan nor changes the set', () => {
+  const manifest = realManifest()
+  manifest.future_section = { min_supported: 'v9.9.9', note: 'added by a later revision' }
+  manifest.released_nodes = manifest.released_nodes.map((row) => ({ ...row, rollout_note: 'added by a later revision' }))
+  const baseline = plan().result
+  const extended = plan({ manifest }).result
+  assert.equal(extended.verdict, 'ok')
+  assert.deepEqual(extended.cases, baseline.cases, 'an unknown field must not be able to move the planned set')
+})
+
+test('an unknown verification field is ignored rather than trusted', () => {
+  const verification = realVerification()
+  verification.future_section = { required_profiles: ['node-wire-v99'], min_supported: 'v9.9.9' }
+  const baseline = plan().result
+  const extended = plan({ verification }).result
+  assert.equal(extended.verdict, 'ok')
+  assert.deepEqual(extended.cases, baseline.cases)
+})
+
+// The revision is what a stored decision and a stored report point back at, so it
+// has to be present and has to change when the policy does.
+test('the plan carries the policy revision it was built under', () => {
+  const { result } = plan()
+  assert.equal(result.revision, realVerification().revision)
+  assert.notEqual(result.revision, '')
+})
