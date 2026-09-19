@@ -1,6 +1,6 @@
 # ADR 0023：SAML 断言重放防护必须持久化
 
-- **状态**：已接受（v3.9.2）
+- **状态**：已接受（v3.9.2）。**第 3、4 项决定已被 [ADR 0036](0036-saml-pre-migration-hardening.md) 替代（2026-09-18）**：存储层出错不再回退到内存缓存，改为 fail-closed；内存缓存不再作为生产路径的兜底。第 1、2 项（持久化集合、单语句原子插入、过期行不算重放）继续有效。以下正文保留当时的推理与取舍，作为历史语境。
 - **日期**：2026-07-29
 - **相关代码**：`internal/ports/repos.go`（`SAMLReplayRepo`）、`internal/adapters/sqlstore/saml_replay_repo.go`、`internal/adapters/sqlstore/schema.go`（`ssoAssertionSeenRow`）、`internal/service/auth/saml.go`（`assertionAlreadyConsumed`）、`internal/service/auth/saml_replay.go`（进程内缓存）
 

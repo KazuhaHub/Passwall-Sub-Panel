@@ -22,6 +22,10 @@
 | [0032](0032-native-task-lifecycle.md) | 原生任务的到期、结果证据与恢复边界 | 提案（支持窗口待确认） |
 | [0033](0033-native-node-compatibility-and-upgrade-admission.md) | Passwall Node 兼容信息与远程升级准入 | 已接受（2026-09-16） |
 | [0034](0034-sync-status-contract.md) | 前端需要「同步状态」时，后端应给出什么 | 已接受（2026-09-18；选择资源任务状态，operation 与上游配置验证延后；实现待完成） |
+| [0036](0036-saml-pre-migration-hardening.md) | SAML 加固线：先收紧本地校验与请求绑定，再考虑替换协议实现 | 已接受（2026-09-18；替代 ADR 0023 第 3、4 项；H1/H2 实现待完成） |
+| [0037](0037-authcore-shareability-experiment.md) | authcore 共享收益实验的测量口径与退出判据 | 已接受（2026-09-18；判据已在结果出现前冻结） |
+
+> 编号 0035 由另一条在途分支（`kazuha/node-compat-policy` 的 `0035-backend-compatibility-and-release-evidence.md`）占用，本目录暂缺该号。
 
 > 编号从 0023 起始：更早的设计决策分散记录在 [ARCHITECTURE.md](../ARCHITECTURE.md)、各专题文档（如 [3xui-compat.md](../3xui-compat.md)、[panel-adapters.md](../panel-adapters.md)）以及提交历史中，尚未回溯整理为 ADR。新增决策请沿用此处的递增编号。
 
