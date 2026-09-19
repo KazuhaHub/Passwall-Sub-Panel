@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent, type ChangeEvent } from 'react'
+import { useEffect, useMemo, useState, type FormEvent, type ChangeEvent } from 'react'
 import {
   Box,
   Button,
@@ -32,11 +32,13 @@ import { useTranslation } from 'react-i18next'
 import { useCan } from '@/utils/permissions'
 
 import PageHeader from '@/components/PageHeader'
-import { clearAudit, listAudit, type AuditEntry } from '@/api/audit'
-import { listAuthEvents, type AuthEvent } from '@/api/authEvents'
-import { clearSubLogs, getSubLogs, purgeSubLogs, type SubLog } from '@/api/subLogs'
+import { clearAudit, type AuditEntry } from '@/api/audit'
+import { type AuthEvent, type AuthEventFilter } from '@/api/authEvents'
+import { clearSubLogs, purgeSubLogs, type SubLog, type SubLogFilter } from '@/api/subLogs'
 import { formatRegion } from '@/utils/geo'
-import { clearEmailLogs, getEmailLogs, purgeEmailLogs, type EmailLog } from '@/api/emailLogs'
+import { clearEmailLogs, purgeEmailLogs, type EmailLog, type EmailLogFilter } from '@/api/emailLogs'
+import { useAuditLog, useAuthLog, useEmailLog, useSubLogs } from '@/query/logs'
+import { useQueryScope } from '@/query/useQueryScope'
 import { getUISettings, putUISettings } from '@/api/settings'
 import { confirm } from '@/components/ConfirmHost'
 import { pushSnack } from '@/components/SnackbarHost'
@@ -77,12 +79,9 @@ export default function LogsView() {
   const [tab, setTab] = useTabParam<'sub' | 'audit' | 'auth' | 'email' | 'certs' | 'geo'>('tab', 'sub', ['sub', 'audit', 'auth', 'email', 'certs', 'geo'])
 
   // Sub logs
-  const [subItems, setSubItems] = useState<SubLog[]>([])
-  const [subTotal, setSubTotal] = useState(0)
   const [subPage, setSubPage] = useState(1)
   const [subPageSize, setSubPageSize] = useState<number>(initialPageSize)
   function setSubPageSizePersist(n: number) { setSubPageSize(n); persistPageSize(n); setSubPage(1) }
-  const [subLoading, setSubLoading] = useState(false)
   const [subSearch, setSubSearch] = useState('')
   // appliedSearch is what loads/pagination key off; subSearch is just the live
   // input. Splitting them means paging doesn't pick up a half-typed term, and
@@ -116,24 +115,18 @@ export default function LogsView() {
   }
 
   // Audit logs
-  const [auditItems, setAuditItems] = useState<AuditEntry[]>([])
-  const [auditTotal, setAuditTotal] = useState(0)
   const [auditPage, setAuditPage] = useState(1)
   const [auditPageSize, setAuditPageSize] = useState<number>(initialPageSize)
   function setAuditPageSizePersist(n: number) { setAuditPageSize(n); persistPageSize(n); setAuditPage(1) }
-  const [auditLoading, setAuditLoading] = useState(false)
   const [auditSearch, setAuditSearch] = useState('')
   const [auditAppliedSearch, setAuditAppliedSearch] = useState('')
   const [auditDetailOpen, setAuditDetailOpen] = useState(false)
   const [auditDetail, setAuditDetail] = useState<AuditEntry | null>(null)
 
   // Auth events — logins across local / saml / oidc, success + failure.
-  const [authItems, setAuthItems] = useState<AuthEvent[]>([])
-  const [authTotal, setAuthTotal] = useState(0)
   const [authPage, setAuthPage] = useState(1)
   const [authPageSize, setAuthPageSize] = useState<number>(initialPageSize)
   function setAuthPageSizePersist(n: number) { setAuthPageSize(n); persistPageSize(n); setAuthPage(1) }
-  const [authLoading, setAuthLoading] = useState(false)
   const [authSearch, setAuthSearch] = useState('')
   const [authAppliedSearch, setAuthAppliedSearch] = useState('')
   const [authMethod, setAuthMethod] = useState<'' | AuthEvent['method']>('')
@@ -143,12 +136,9 @@ export default function LogsView() {
   // mailer service (mail_sent table). Same pagination + clear/purge
   // pattern as sub logs; retention is admin-tunable separately under
   // notify settings (MailSentRetentionDays, default 30 days).
-  const [emailItems, setEmailItems] = useState<EmailLog[]>([])
-  const [emailTotal, setEmailTotal] = useState(0)
   const [emailPage, setEmailPage] = useState(1)
   const [emailPageSize, setEmailPageSize] = useState<number>(initialPageSize)
   function setEmailPageSizePersist(n: number) { setEmailPageSize(n); persistPageSize(n); setEmailPage(1) }
-  const [emailLoading, setEmailLoading] = useState(false)
   const [emailSearch, setEmailSearch] = useState('')
   const [emailAppliedSearch, setEmailAppliedSearch] = useState('')
   const [emailDetailOpen, setEmailDetailOpen] = useState(false)
@@ -176,63 +166,60 @@ export default function LogsView() {
     } finally { setEmailRetentionSaving(false) }
   }
 
-  useEffect(() => {
-    if (tab === 'sub') void loadSub()
-    else if (tab === 'audit') void loadAudit()
-    else if (tab === 'auth') void loadAuth()
-    else void loadEmail()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab,
-    subPage, subPageSize, subAppliedSearch,
-    auditPage, auditPageSize, auditAppliedSearch,
-    authPage, authPageSize, authAppliedSearch, authMethod, authOutcome,
-    emailPage, emailPageSize, emailAppliedSearch,
-  ])
+  const scope = useQueryScope()
 
-  // Last-wins guards: connecting Pagination / filter submit fires overlapping
-  // loads within one tab; a slow earlier page must not overwrite the newer one.
-  const subSeq = useRef(0)
-  const auditSeq = useRef(0)
-  const authSeq = useRef(0)
-  const emailSeq = useRef(0)
+  // Each tab is mounted only while it is the active one, so these are read on
+  // demand — never in the background. The filter objects must carry every
+  // argument that changes the response; anything omitted is a stale-data bug.
+  const subFilter = useMemo<SubLogFilter>(
+    () => ({ page: subPage, page_size: subPageSize, search: subAppliedSearch || undefined }),
+    [subPage, subPageSize, subAppliedSearch],
+  )
+  const auditFilter = useMemo(
+    () => ({ page: auditPage, page_size: auditPageSize, search: auditAppliedSearch || undefined }),
+    [auditPage, auditPageSize, auditAppliedSearch],
+  )
+  const authFilter = useMemo<AuthEventFilter>(
+    () => ({
+      page: authPage, page_size: authPageSize, search: authAppliedSearch || undefined,
+      method: authMethod || undefined, outcome: authOutcome || undefined,
+    }),
+    [authPage, authPageSize, authAppliedSearch, authMethod, authOutcome],
+  )
+  const emailFilter = useMemo<EmailLogFilter>(
+    () => ({ page: emailPage, page_size: emailPageSize, search: emailAppliedSearch || undefined }),
+    [emailPage, emailPageSize, emailAppliedSearch],
+  )
 
-  async function loadSub() {
-    const seq = ++subSeq.current
-    setSubLoading(true)
-    try {
-      const res = await getSubLogs({ page: subPage, page_size: subPageSize, search: subAppliedSearch || undefined })
-      if (seq !== subSeq.current) return
-      setSubItems(res.items); setSubTotal(res.total)
-    } finally { if (seq === subSeq.current) setSubLoading(false) }
-  }
+  const subQuery = useSubLogs(scope, subFilter)
+  const auditQuery = useAuditLog(scope, auditFilter)
+  const authQuery = useAuthLog(scope, authFilter)
+  const emailQuery = useEmailLog(scope, emailFilter)
 
-  async function loadAudit() {
-    const seq = ++auditSeq.current
-    setAuditLoading(true)
-    try {
-      const res = await listAudit({
-        page: auditPage, page_size: auditPageSize,
-        search: auditAppliedSearch || undefined,
-      })
-      if (seq !== auditSeq.current) return
-      setAuditItems(res.items); setAuditTotal(res.total)
-    } finally { if (seq === auditSeq.current) setAuditLoading(false) }
-  }
+  const subItems = subQuery.data?.items ?? []
+  const subTotal = subQuery.data?.total ?? 0
+  const subLoading = subQuery.isPending
+  const auditItems = auditQuery.data?.items ?? []
+  const auditTotal = auditQuery.data?.total ?? 0
+  const auditLoading = auditQuery.isPending
+  const authItems = authQuery.data?.items ?? []
+  const authTotal = authQuery.data?.total ?? 0
+  const authLoading = authQuery.isPending
+  const emailItems = emailQuery.data?.items ?? []
+  const emailTotal = emailQuery.data?.total ?? 0
+  const emailLoading = emailQuery.isPending
 
-  async function loadAuth() {
-    const seq = ++authSeq.current
-    setAuthLoading(true)
-    try {
-      const res = await listAuthEvents({
-        page: authPage, page_size: authPageSize,
-        search: authAppliedSearch || undefined,
-        method: authMethod || undefined,
-        outcome: authOutcome || undefined,
-      })
-      if (seq !== authSeq.current) return
-      setAuthItems(res.items); setAuthTotal(res.total)
-    } finally { if (seq === authSeq.current) setAuthLoading(false) }
-  }
+  // Only the active tab's failure matters: the others are not mounted, so they
+  // cannot be showing anything to disbelieve.
+  const activeLogQuery = tab === 'sub' ? subQuery
+    : tab === 'audit' ? auditQuery
+      : tab === 'auth' ? authQuery
+        : tab === 'email' ? emailQuery
+          : null
+
+  function loadSub() { return subQuery.refetch() }
+  function loadAudit() { return auditQuery.refetch() }
+  function loadEmail() { return emailQuery.refetch() }
   function onAuthFilter(e: FormEvent) { e.preventDefault(); setAuthPage(1); setAuthAppliedSearch(authSearch) }
 
   async function clearSubAll() {
@@ -273,16 +260,6 @@ export default function LogsView() {
   function onSubFilter(e: FormEvent) { e.preventDefault(); setSubPage(1); setSubAppliedSearch(subSearch) }
   function onEmailFilter(e: FormEvent) { e.preventDefault(); setEmailPage(1); setEmailAppliedSearch(emailSearch) }
 
-  async function loadEmail() {
-    const seq = ++emailSeq.current
-    setEmailLoading(true)
-    try {
-      const res = await getEmailLogs({ page: emailPage, page_size: emailPageSize, search: emailAppliedSearch || undefined })
-      if (seq !== emailSeq.current) return
-      setEmailItems(res.items); setEmailTotal(res.total)
-    } finally { if (seq === emailSeq.current) setEmailLoading(false) }
-  }
-
   async function clearEmailAll() {
     const ok = await confirm({
       title: t('admin:logs.confirm.clear_email_title'),
@@ -300,6 +277,22 @@ export default function LogsView() {
     const r = await purgeEmailLogs()
     pushSnack(t('admin:logs.toast.purged', { count: r.deleted }), 'success')
     await loadEmail()
+  }
+
+  // A failed read is NOT an empty log. The loaders ran with no catch, so a
+  // failure raised an unhandled rejection and left the table reading as a clean
+  // history — the one answer an audit view must never invent.
+  if (activeLogQuery?.isError) {
+    return (
+      <Box sx={{ p: 3, display: 'grid', placeItems: 'center', gap: 2, minHeight: 400 }}>
+        <Typography sx={{ color: md.onSurfaceVariant }}>
+          {t('admin:logs.load_failed', { defaultValue: '暂时无法加载日志' })}
+        </Typography>
+        <Button variant="outlined" onClick={() => void activeLogQuery.refetch()}>
+          {t('admin:logs.retry', { defaultValue: '重试' })}
+        </Button>
+      </Box>
+    )
   }
 
   return (

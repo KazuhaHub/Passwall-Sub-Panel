@@ -8,8 +8,11 @@ export interface SyncTaskListParams {
   type?: SyncTaskType
 }
 
-export async function listSyncTasks(params: SyncTaskListParams = {}) {
-  const { data } = await client.get<ListResponse<SyncTask>>('/admin/sync-tasks', { params })
+export async function listSyncTasks(params: SyncTaskListParams = {}, opts: { signal?: AbortSignal } = {}) {
+  const { data } = await client.get<ListResponse<SyncTask>>('/admin/sync-tasks', {
+    params,
+    signal: opts.signal,
+  })
   return data
 }
 

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type MouseEvent } from 'react'
+import { useEffect, useMemo, useState, type FormEvent, type MouseEvent } from 'react'
 import {
   Autocomplete,
   Box,
@@ -58,7 +58,6 @@ import {
   createUser,
   deleteUser,
   getUserRules,
-  listUsers,
   reset2FA,
   resetCredentials,
   resetEmergencyUsage,
@@ -69,7 +68,7 @@ import {
   updateUser,
   updateUserRules,
 } from '@/api/users'
-import type { UpdateUserRequest } from '@/api/users'
+import type { UpdateUserRequest, UserListParams } from '@/api/users'
 import { listGroups } from '@/api/groups'
 import { getLimitEnforcement, type LimitEnforcement, type LimitPanel } from '@/api/limitEnforcement'
 import { assessDeviceLimit, assessIPLimit, isMisleading, type CapAssessment } from '@/utils/limitEnforcement'
@@ -77,8 +76,8 @@ import FieldHint from '@/components/FieldHint'
 import { listServers, type Server } from '@/api/servers'
 import { deviceCapIsInert, ipCapUnenforcedPanels, unenforceablePanels } from '@/utils/capabilities'
 import { runReconcile } from '@/api/reconcile'
-import { setUserTraffic, topTraffic, type TrafficRow } from '@/api/traffic'
-import type { Group, ResetPeriod, Role, User } from '@/api/types'
+import { setUserTraffic } from '@/api/traffic'
+import type { Group, ListResponse, ResetPeriod, Role, User } from '@/api/types'
 import type { ReconcileReport } from '@/api/reconcile'
 import { UserActivity } from './UserActivity'
 import AdminPasskeysDialog from './AdminPasskeysDialog'
@@ -94,7 +93,12 @@ import PageHeader from '@/components/PageHeader'
 import { pushSnack } from '@/components/SnackbarHost'
 import { PagedTableFooter } from '@/components/PagedTableFooter'
 import { SortableTableCell } from '@/components/SortableTableCell'
-import { usePaged } from '@/hooks/usePaged'
+import { usePageState } from '@/hooks/usePageState'
+import { useQueryClient } from '@tanstack/react-query'
+import { trafficKeys, userKeys } from '@/query/keys'
+import { useTopTraffic } from '@/query/traffic'
+import { useUsersList } from '@/query/users'
+import { useQueryScope } from '@/query/useQueryScope'
 import {
   type FieldErrors,
   firstError,
@@ -186,6 +190,22 @@ const EMPTY_EDIT: EditForm = {
 
 function bytesToGB(b: number) { return Math.round((b / 1024 / 1024 / 1024) * 100) / 100 }
 
+/**
+ * Fingerprint of the fields the edit dialog seeds from a row. Comparing this
+ * lets the dialog notice the STORED row moved while it was open, without
+ * diffing whole objects — the backend attaches fields (usage, access, poll
+ * timestamps) that change constantly and mean nothing to this form.
+ */
+function rowFingerprint(u: User): string {
+  return JSON.stringify([
+    u.display_name ?? '', u.email ?? '', u.role, u.group_id,
+    u.traffic_limit_bytes, u.expire_date ?? '', u.expire_at ?? '',
+    u.ip_limit, u.device_limit, accountEnabledForEdit(u),
+    !!u.inherits_traffic_limit, !!u.inherits_ip_limit, !!u.inherits_device_limit,
+    u.traffic_reset_period, u.remark ?? '',
+  ])
+}
+
 // avatarColor maps a seed (UPN) to a stable HSL so each user's initial block
 // gets a consistent, distinct color in the details dialog.
 function avatarColor(seed: string): string {
@@ -272,39 +292,39 @@ export default function UsersView() {
   // asserting a cap is fine.
   const [limitFacts, setLimitFacts] = useState<LimitEnforcement | null>(null)
   const [reconcileBusy, setReconcileBusy] = useState(false)
-  // Paged user list. The fetcher closes over groupFilter so changing
-  // the group filter triggers a re-fetch through the hook's normal
-  // dep tracking.
-  const fetchUsers = useCallback(
-    async (req: { page: number; page_size: number; keyword: string; sort_by: string; sort_dir: 'asc' | 'desc' }, signal: AbortSignal) => {
-      const res = await listUsers({
-        page: req.page,
-        page_size: req.page_size,
-        keyword: req.keyword || undefined,
-        sort_by: req.sort_by || undefined,
-        sort_dir: req.sort_dir,
-        group_id: groupFilter === '' ? undefined : groupFilter,
-      }, signal)
-      return {
-        items: res.items,
-        total: res.total,
-        page: res.page ?? req.page,
-        page_size: res.page_size ?? req.page_size,
-      }
-    },
-    [groupFilter],
-  )
-  const paged = usePaged<User>(fetchUsers, { defaultSortBy: 'id', defaultSortDir: 'desc' })
-  const { items, total, loading, page, pageSize, sortBy, sortDir, setPage, setPageSize, setKeyword, setSort, refresh, mutateItems } = paged
-  // groupFilter is captured by fetchUsers' useCallback closure but the
-  // hook's fetch effect deps are page/pageSize/keyword/sort — NOT the
-  // fetcher itself (which lives in a ref). Without this effect, picking
-  // a different group from the dropdown silently leaves the table
-  // showing the previous group's users. paged.refresh() reuses the same
-  // pagination state but re-invokes the fetcher.
-  useEffect(() => { refresh()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [groupFilter])
+  // Paged user list. Paging state (page / sort / keyword / URL sync) lives in
+  // usePageState; the request goes through the shared query cache, so this view
+  // and any other observer of the same key stay consistent.
+  const ps = usePageState({ defaultSortBy: 'id', defaultSortDir: 'desc' })
+  const { page, pageSize, keyword, sortBy, sortDir, setPage, setPageSize, setKeyword, setSort, resetPage } = ps
+  const scope = useQueryScope()
+  const queryClient = useQueryClient()
+
+  // groupFilter belongs in the query key, not in a fetcher closure. As a closure
+  // it was invisible to the hook's deps and had to be patched with a follow-up
+  // refresh() — which issued a throwaway request for the new filter at the
+  // stale page before the page-1 request. As a key it is a different query, so
+  // the previous group's rows can never be rendered under the new filter.
+  const listParams = useMemo<UserListParams>(() => ({
+    ...ps.request,
+    keyword: ps.request.keyword || undefined,
+    sort_by: ps.request.sort_by || undefined,
+    ...(groupFilter === '' ? {} : { group_id: groupFilter }),
+  }), [ps.request, groupFilter])
+
+  const usersQuery = useUsersList(scope, listParams)
+  const items = usersQuery.data?.items ?? []
+  const total = usersQuery.data?.total ?? 0
+  // isPending, not isFetching: a background refresh must not blank the table or
+  // disable controls that key off `loading`.
+  const loading = usersQuery.isPending
+
+  function refresh() { void usersQuery.refetch() }
+
+  function mutateItems(updater: (prev: User[]) => User[]) {
+    queryClient.setQueryData<ListResponse<User>>(userKeys.list(scope, listParams), prev =>
+      prev ? { ...prev, items: updater(prev.items) } : prev)
+  }
 
   const [selected, setSelected] = useState<Set<number>>(new Set())
   const [batchBusy, setBatchBusy] = useState<BatchKind>('')
@@ -323,6 +343,13 @@ export default function UsersView() {
   const [editOpen, setEditOpen] = useState(false)
   const [editBusy, setEditBusy] = useState(false)
   const [editing, setEditing] = useState<User | null>(null)
+  // Fingerprint of the row as it was when the dialog opened. Compared against
+  // the live row so the dialog can say "this changed" instead of silently
+  // leaving the admin editing a stale snapshot.
+  const [editBaseline, setEditBaseline] = useState<string | null>(null)
+  // The stored row moved while the dialog was open. This is surfaced, never
+  // acted on: the admin's draft survives until they choose to reload it.
+  const editRowChanged = !!editing && editBaseline !== null && rowFingerprint(editing) !== editBaseline
   const [editForm, setEditForm] = useState<EditForm>(EMPTY_EDIT)
   type EditField = 'display_name' | 'email' | 'group_id' | 'expire_at' | 'traffic_limit_gb' | 'period_used_gb' | 'ip_limit' | 'device_limit'
   const [editErr, setEditErr] = useState<FieldErrors<EditField>>({})
@@ -371,12 +398,16 @@ export default function UsersView() {
   useEffect(() => {
     setSecurityUser(prev => (prev ? items.find(u => u.id === prev.id) ?? prev : prev))
   }, [items])
+  // Same treatment for the open edit dialog. Its own 恢复/暂停 actions reload the
+  // table, and the dialog must show the fresh row's read-only status and action
+  // buttons rather than the snapshot it opened with — otherwise resuming from the
+  // dialog leaves it displaying "service suspended" until a manual page reload.
+  // Only the snapshot is re-pointed; the editable draft lives in editForm.
+  useEffect(() => {
+    setEditing(prev => (prev ? items.find(u => u.id === prev.id) ?? prev : prev))
+  }, [items])
   // Batch More menu
   const [batchMoreAnchor, setBatchMoreAnchor] = useState<HTMLElement | null>(null)
-
-  // Per-user current-period usage. Loaded alongside the user list via
-  // /admin/traffic/top so each row can display "used / limit".
-  const [usageMap, setUsageMap] = useState<Map<number, TrafficRow>>(new Map())
 
   const groupNameMap = useMemo(() => new Map(groups.map(g => [g.id, g.name])), [groups])
   const selectableIds = items.filter(canSelect).map(u => u.id)
@@ -385,41 +416,41 @@ export default function UsersView() {
   const selectedRows = items.filter(u => selected.has(u.id))
 
   useEffect(() => { void loadGroups(); void loadServers() }, [])
-  // Reset row selection whenever the visible page changes — selection
-  // state is per-id, but admin scrolling away from rows they had
-  // checked shouldn't carry the action forward.
-  useEffect(() => { setSelected(new Set()) }, [items])
-  // Best-effort fetch of per-user current-period usage. Re-fires each
-  // time the items list changes (any page / sort / search / page-size
-  // change — usePaged refetches items on pageSize change too, so we
-  // only need items in the dep array to catch every case without
-  // double-firing). loadSeq pins the usageMap to the most recent
-  // successful response so a slow earlier fetch can't pair stale usage
-  // with a newer page's rows.
-  //
-  // limit is capped at the current page size — pre-fix this asked for
-  // 1000 every time, which on the backend triggered a paginated walk
-  // of 1000 users plus a per-page batch report-fetch. The visible
-  // table is at most pageSize rows, so a tighter cap means the dashboard
-  // never pulls more usage rows than it shows. pageSize is read via a
-  // ref-like access (just reading the latest hook value at effect-fire
-  // time) so it's not in the dep array — items already encodes the
-  // last-fetched page size.
-  const usageSeq = useRef(0)
+  // Reset row selection when the QUERY changes (page / sort / filter), not
+  // whenever the rows arrive as a new array. Keying this off `items` identity
+  // meant any refresh — including the background refresh this work introduces —
+  // silently dropped a batch the admin was still assembling.
   useEffect(() => {
-    const seq = ++usageSeq.current
-    // silent: usage column is best-effort enrichment. Without this flag
-    // a topTraffic blip would surface a "Network error" toast on the
-    // Users page (whose primary list already loaded fine) — exactly
-    // the user-visible bug reported during the beta.7 → beta.8 review.
-    void topTraffic(Math.max(pageSize, 25), { silent: true })
-      .then(rows => { if (seq === usageSeq.current) setUsageMap(new Map(rows.map(r => [r.user_id, r]))) })
-      .catch(err => {
-        // eslint-disable-next-line no-console
-        console.warn('UsersView: topTraffic failed', err)
-      })
+    setSelected(new Set())
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page, pageSize, keyword, sortBy, sortDir, groupFilter])
+  // Independently, drop ids that left the page or stopped being actionable, so
+  // a batch can never target a row the admin can no longer act on. Bailing out
+  // with the same Set when nothing changed keeps this from re-rendering on
+  // every refresh.
+  useEffect(() => {
+    setSelected(prev => {
+      if (prev.size === 0) return prev
+      const valid = new Set(items.filter(canSelect).map(u => u.id))
+      if ([...prev].every(id => valid.has(id))) return prev
+      return new Set([...prev].filter(id => valid.has(id)))
+    })
   }, [items])
+  // Per-user current-period usage, read through the shared query cache. Going
+  // through the cache is what makes this invalidatable: a write that changes
+  // usage (a usage edit, an emergency reset) can now drop the entry, which the
+  // hand-rolled effect could not express. `limit` tracks pageSize, and the
+  // request walks every user server-side, so it never rides the list refresh.
+  const topUsage = useTopTraffic(scope, Math.max(pageSize, 25))
+  const usageMap = useMemo(
+    () => new Map((topUsage.data ?? []).map(r => [r.user_id, r])),
+    [topUsage.data],
+  )
+
+  /** Drop the usage leaderboard so the next observer re-reads it. */
+  function invalidateUsage() {
+    void queryClient.invalidateQueries({ queryKey: trafficKeys.all(scope) })
+  }
 
   async function loadGroups() {
     try { const res = await listGroups(); setGroups(res.items) } catch { /* toast */ }
@@ -614,10 +645,11 @@ export default function UsersView() {
   }
 
   // ---- Edit ----
-  function openEdit(u: User) {
-    setEditing(u)
+  /** Seeds the editable draft from a row. Shared by openEdit and the reload
+   *  action, so "reload saved values" cannot drift from "open". */
+  function buildEditForm(u: User): EditForm {
     const usedGB = bytesToGB(usageMap.get(u.id)?.period_used_bytes ?? 0)
-    setEditForm({
+    return {
       display_name: u.display_name ?? '', email: u.email ?? '',
       group_id: u.group_id, role: u.role,
       expire_mode: u.expire_at ? 'date' : 'permanent',
@@ -637,7 +669,13 @@ export default function UsersView() {
       period_used_initial: usedGB,
       emergency_used_count: u.emergency_used_count,
       enabled: accountEnabledForEdit(u),
-    })
+    }
+  }
+
+  function openEdit(u: User) {
+    setEditing(u)
+    setEditBaseline(rowFingerprint(u))
+    setEditForm(buildEditForm(u))
     setEditErr({})
     // Cleared before the fetch, not after: showing the PREVIOUS user's panel
     // facts next to this user's number would be worse than showing none.
@@ -647,6 +685,17 @@ export default function UsersView() {
          fleet-wide hint rather than claiming the caps are fine. */
     })
     setEditOpen(true)
+  }
+
+  /**
+   * Discards the draft and re-seeds from the CURRENT row. Explicit, because a
+   * refresh must never do this silently — the admin's unsaved edits are theirs.
+   */
+  function reloadSavedEdit() {
+    if (!editing) return
+    setEditForm(buildEditForm(editing))
+    setEditBaseline(rowFingerprint(editing))
+    setEditErr({})
   }
 
   function validateEdit(f: EditForm): FieldErrors<EditField> {
@@ -713,13 +762,10 @@ export default function UsersView() {
       // jitter is treated as no-op so refreshing the dialog without changing
       // anything doesn't synthesise a baseline snapshot.
       if (Math.abs(editForm.period_used_gb - editForm.period_used_initial) > 0.001) {
-        const usage = await setUserTraffic(editing.id, editForm.period_used_gb)
-        setUsageMap(prev => {
-          const next = new Map(prev)
-          const current = next.get(editing.id)
-          next.set(editing.id, { ...current, ...usage, upn: editing.upn })
-          return next
-        })
+        await setUserTraffic(editing.id, editForm.period_used_gb)
+        // The leaderboard is a shared cached read now, so drop it rather than
+        // patching a local copy the next refresh would contradict.
+        invalidateUsage()
       }
       // Enable state rides the dedicated endpoint (updateUser has no `enabled`
       // field). Only fire when actually flipped — and never let an admin
@@ -968,6 +1014,7 @@ export default function UsersView() {
     closeMore()
     await resetEmergencyUsage(u.id)
     pushSnack(t('admin:users.credentials.emergency_reset'), 'success')
+    invalidateUsage()
     await load()
   }
 
@@ -1017,6 +1064,7 @@ export default function UsersView() {
       const failed = results.filter(r => r.status === 'rejected').length
       if (failed > 0) pushSnack(t('admin:users.batch.emergency_partial', { ok: rows.length - failed, fail: failed }), 'warning')
       else pushSnack(t('admin:users.batch.emergency_count', { count: rows.length }), 'success')
+      invalidateUsage()
       await load()
     } finally { setBatchBusy('') }
   }
@@ -1201,23 +1249,27 @@ export default function UsersView() {
 
   function trafficCell(u: User) {
     const limitGB = bytesToGB(u.traffic_limit_bytes)
-    const usedGB = bytesToGB(usageMap.get(u.id)?.period_used_bytes ?? 0)
+    const usage = usageMap.get(u.id)
+    // usageMap is fed by the Top-N leaderboard, so a missing row means this user
+    // is NOT in the leaderboard — unknown usage, not zero. Rendering 0 here
+    // would understate a real figure and read as a hard fact.
+    const usedGB = usage ? bytesToGB(usage.period_used_bytes) : null
     if (limitGB === 0) {
       // Unlimited — still surface usage so admin sees what's flowing.
       return (
         <Typography sx={{ fontSize: 13, color: md.onSurfaceVariant, fontVariantNumeric: 'tabular-nums' }}>
-          {usedGB} GB / {t('admin:users.status.unlimited')}
+          {usedGB ?? '—'} GB / {t('admin:users.status.unlimited')}
         </Typography>
       )
     }
-    const overLimit = usedGB >= limitGB
+    const overLimit = usedGB !== null && usedGB >= limitGB
     return (
       <Typography sx={{
         fontSize: 13, fontVariantNumeric: 'tabular-nums',
         color: overLimit ? md.error : 'inherit',
         fontWeight: overLimit ? 500 : 400,
       }}>
-        {usedGB} / {limitGB} GB
+        {usedGB ?? '—'} / {limitGB} GB
       </Typography>
     )
   }
@@ -1248,7 +1300,7 @@ export default function UsersView() {
             sx={{ flex: 1, fontSize: 14, color: md.onSurface }} />
         </Box>
         <Select size="small" value={groupFilter} displayEmpty
-          onChange={e => { setGroupFilter(e.target.value as number | '') }}
+          onChange={e => { setGroupFilter(e.target.value as number | ''); resetPage() }}
           sx={{ minWidth: 160, height: 40, '& .MuiSelect-select': { py: 1 } }}>
           <MenuItem value="">{t('admin:users.filter_group_all')}</MenuItem>
           {groups.map(g => <MenuItem key={g.id} value={g.id}>{g.name}</MenuItem>)}
@@ -1669,6 +1721,23 @@ export default function UsersView() {
         }}>
         <DialogTitle>{t('admin:users.edit_title')} — {editing?.upn}</DialogTitle>
         <DialogContent>
+          {editRowChanged && (
+            <Box sx={{
+              display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap',
+              mt: 1, px: 2, py: 1, borderRadius: 2,
+              bgcolor: md.tertiaryContainer, color: md.onTertiaryContainer,
+            }}>
+              <Typography sx={{ flex: 1, fontSize: 13 }}>
+                {t('admin:users.edit.row_changed', {
+                  defaultValue: '该用户已被其他操作修改。当前编辑内容不会自动更新。',
+                })}
+              </Typography>
+              <Button size="small" variant="outlined" color="inherit" disabled={editBusy}
+                onClick={reloadSavedEdit}>
+                {t('admin:users.edit.reload_saved', { defaultValue: '重新载入已保存值' })}
+              </Button>
+            </Box>
+          )}
           <Box sx={{ display: 'flex', gap: 3, pt: 1, flexWrap: 'wrap', alignItems: 'flex-start' }}>
             {/* LEFT — identity + traffic usage (read-only) */}
             <Box sx={{ width: 300, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
@@ -1958,9 +2027,15 @@ export default function UsersView() {
                         await resetEmergencyUsage(editing.id)
                         setEditForm({ ...editForm, emergency_used_count: 0 })
                         // Reflect the cleared window locally so the panel
-                        // below disappears immediately without a refetch.
+                        // below disappears immediately without waiting on a
+                        // round-trip...
                         setEditing({ ...editing, emergency_until: null, emergency_used_bytes: 0 })
                         pushSnack(t('admin:users.credentials.emergency_reset'), 'success')
+                        // ...but still reconcile: the local tweak alone leaves
+                        // the row's usage and the leaderboard showing the old
+                        // window, which is the stale-display class of bug.
+                        invalidateUsage()
+                        await load()
                       }}>
                       {t('admin:users.more_menu.reset_emergency')}
                     </Button>

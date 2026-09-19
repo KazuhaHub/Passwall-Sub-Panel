@@ -1,4 +1,5 @@
 import { client } from './client'
+import type { ReadOptions } from './requestOptions'
 import type { GeoLocation } from './subLogs'
 
 export type AuthMethod = 'local' | 'saml' | 'oidc'
@@ -31,7 +32,10 @@ export interface AuthEventFilter {
   until?: string
 }
 
-export async function listAuthEvents(params: AuthEventFilter = {}) {
-  const { data } = await client.get<{ items: AuthEvent[]; total: number }>('/admin/auth-events', { params })
+export async function listAuthEvents(params: AuthEventFilter = {}, opts: ReadOptions = {}) {
+  const { data } = await client.get<{ items: AuthEvent[]; total: number }>('/admin/auth-events', {
+    params,
+    signal: opts.signal,
+  })
   return data
 }

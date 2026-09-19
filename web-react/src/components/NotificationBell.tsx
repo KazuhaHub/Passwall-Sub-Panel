@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type MouseEvent } from 'react'
+import { useMemo, useState, type MouseEvent } from 'react'
 import {
   Badge,
   Box,
@@ -22,7 +22,9 @@ import CheckCircleIcon from '@mui/icons-material/CheckCircle'
 import { useNavigate } from 'react-router'
 import { useTranslation } from 'react-i18next'
 
-import { getAlerts, type Alert, type AlertSeverity, type AlertType } from '@/api/alerts'
+import type { Alert, AlertSeverity, AlertType } from '@/api/alerts'
+import { useAlerts } from '@/query/alerts'
+import { useQueryScope } from '@/query/useQueryScope'
 
 // In-app deep links per alert type. psp_upgrade is intentionally absent — it opens
 // the GitHub releases page externally (handled in go()).
@@ -37,8 +39,6 @@ const ROUTE: Partial<Record<AlertType, string>> = {
 const PSP_RELEASES_URL = 'https://github.com/KazuhaHub/passwall-sub-panel/releases'
 
 const SEVERITY_RANK: Record<AlertSeverity, number> = { error: 0, warning: 1, info: 2 }
-
-const POLL_MS = 60_000
 
 function typeIcon(type: AlertType, severity: AlertSeverity) {
   switch (type) {
@@ -63,28 +63,16 @@ export default function NotificationBell() {
   const { t } = useTranslation(['admin'])
   const navigate = useNavigate()
 
-  const [alerts, setAlerts] = useState<Alert[]>([])
-  const [loading, setLoading] = useState(true)
+  const scope = useQueryScope()
   const [anchor, setAnchor] = useState<HTMLElement | null>(null)
-  const timer = useRef<ReturnType<typeof setInterval> | null>(null)
+  const { data, isFetching, isError, refetch } = useAlerts(scope)
 
-  const load = useCallback(async () => {
-    try {
-      const res = await getAlerts()
-      const sorted = [...res.alerts].sort((a, b) => SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity])
-      setAlerts(sorted)
-    } catch {
-      // quiet — keep the previous snapshot on a transient failure
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  useEffect(() => {
-    void load()
-    timer.current = setInterval(() => { void load() }, POLL_MS)
-    return () => { if (timer.current) clearInterval(timer.current) }
-  }, [load])
+  // Sort a copy for display. Sorting the cached array in place would mutate
+  // what every other observer of this query key reads.
+  const alerts = useMemo(
+    () => [...(data?.alerts ?? [])].sort((a, b) => SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity]),
+    [data],
+  )
 
   const total = alerts.length
   const highest: AlertSeverity = alerts.some(a => a.severity === 'error')
@@ -134,8 +122,7 @@ export default function NotificationBell() {
 
   function openMenu(e: MouseEvent<HTMLElement>) {
     setAnchor(e.currentTarget)
-    setLoading(true) // show the spinner during the on-open refresh
-    void load() // refresh on open
+    void refetch() // refresh on open
   }
 
   function go(a: Alert) {
@@ -167,13 +154,24 @@ export default function NotificationBell() {
       >
         <Box sx={{ px: 2, py: 1.25, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <Typography sx={{ fontWeight: 600, color: md.onSurface }}>{t('alerts.bell_title', { defaultValue: '通知' })}</Typography>
-          {loading && <CircularProgress size={14} />}
+          {isFetching && <CircularProgress size={14} />}
         </Box>
         <Divider />
         {total === 0 ? (
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, px: 2, py: 3, color: md.onSurfaceVariant, fontSize: 14 }}>
-            <CheckCircleIcon sx={{ fontSize: 18, color: '#22c55e' }} />
-            {t('alerts.empty', { defaultValue: '暂无通知' })}
+            {/* "No notifications" is a claim about the server; a failed request
+                is not evidence for it. Never present an outage as an empty feed. */}
+            {isError ? (
+              <>
+                <ErrorOutlineIcon sx={{ fontSize: 18, color: md.error }} />
+                {t('alerts.unavailable', { defaultValue: '通知暂时不可用' })}
+              </>
+            ) : (
+              <>
+                <CheckCircleIcon sx={{ fontSize: 18, color: '#22c55e' }} />
+                {t('alerts.empty', { defaultValue: '暂无通知' })}
+              </>
+            )}
           </Box>
         ) : (
           alerts.map(a => (

@@ -1,4 +1,6 @@
 {
+  "load_failed": "暂时无法加载，请稍后重试",
+  "retry": "重试",
   "tabs": {
     "overview": "概览",
     "traffic": "流量",

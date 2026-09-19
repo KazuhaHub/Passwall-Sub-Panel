@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react'
+import { useMemo, useState, type FormEvent } from 'react'
 import {
   Box,
   Button,
@@ -39,8 +39,13 @@ import { useTranslation } from 'react-i18next'
 import { useCan } from '@/utils/permissions'
 import { allSettledLimited } from '@/utils/promises'
 
-import { deleteTemplate, listTemplates, resetTemplate, saveTemplate, SEEDED_TEMPLATE_SLUGS, type Template } from '@/api/templates'
-import { listRuleSets, type RuleSet } from '@/api/rules'
+import { deleteTemplate, resetTemplate, saveTemplate, SEEDED_TEMPLATE_SLUGS, type Template } from '@/api/templates'
+import type { RuleSet } from '@/api/rules'
+import type { ListResponse } from '@/api/types'
+import { templateKeys } from '@/query/keys'
+import { useRuleSets, useTemplates } from '@/query/rules'
+import { useQueryScope } from '@/query/useQueryScope'
+import { useQueryClient } from '@tanstack/react-query'
 import { confirm } from '@/components/ConfirmHost'
 import { pushSnack } from '@/components/SnackbarHost'
 import { PagedTableFooter } from '@/components/PagedTableFooter'
@@ -98,11 +103,23 @@ export default function TemplatesView() {
   const { t } = useTranslation(['admin', 'common'])
   const canConfig = useCan('config.write')
 
-  const [items, setItems] = useState<Template[]>([])
-  const [ruleSets, setRuleSets] = useState<RuleSet[]>([])
-  const [loading, setLoading] = useState(false)
+  const qScope = useQueryScope()
+  const queryClient = useQueryClient()
+  const templatesQuery = useTemplates(qScope)
+  const ruleSetsQuery = useRuleSets(qScope)
+  const items = templatesQuery.data?.items ?? []
+  const ruleSets = ruleSetsQuery.data?.items ?? []
+  const loading = templatesQuery.isPending
+  const templatesFailed = templatesQuery.isError || ruleSetsQuery.isError
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [batchBusy, setBatchBusy] = useState(false)
+
+  /** Patch the cached template list after a write, so the table updates
+   *  without a round-trip. */
+  function mutateTemplateItems(updater: (prev: Template[]) => Template[]) {
+    queryClient.setQueryData<ListResponse<Template>>(templateKeys.list(qScope, {}), prev =>
+      prev ? { ...prev, items: updater(prev.items) } : prev)
+  }
 
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editing, setEditing] = useState(false)
@@ -135,14 +152,11 @@ export default function TemplatesView() {
 
   const ruleSetMap = useMemo(() => new Map(ruleSets.map(r => [r.slug, r])), [ruleSets])
 
-  useEffect(() => { void load() }, [])
-
-  async function load() {
-    setLoading(true)
-    try {
-      const [tpls, rules] = await Promise.all([listTemplates(), listRuleSets()])
-      setItems(tpls.items); setRuleSets(rules.items); setSelected(new Set())
-    } finally { setLoading(false) }
+  // Reload after a write. Clearing the selection is deliberate (the rows it
+  // referred to may be gone), and the mount-time call is a no-op.
+  function load() {
+    setSelected(new Set())
+    return Promise.all([templatesQuery.refetch(), ruleSetsQuery.refetch()])
   }
 
   function toggleAll(checked: boolean) {
@@ -197,7 +211,7 @@ export default function TemplatesView() {
     try {
       await saveTemplate(form)
       if (editing) {
-        setItems(prev => prev.map(item => item.slug === form.slug ? form : item))
+        mutateTemplateItems(prev => prev.map(item => item.slug === form.slug ? form : item))
       }
       pushSnack(t('admin:templates.toast.saved'), 'success')
       setDialogOpen(false)
@@ -243,7 +257,7 @@ export default function TemplatesView() {
       const results = await allSettledLimited(rows, r => deleteTemplate(r.slug))
       const okSlugs = rows.filter((_, i) => results[i].status === 'fulfilled').map(r => r.slug)
       const failed = rows.length - okSlugs.length
-      setItems(prev => prev.filter(x => !okSlugs.includes(x.slug)))
+      mutateTemplateItems(prev => prev.filter(x => !okSlugs.includes(x.slug)))
       setSelected(new Set())
       if (failed > 0) pushSnack(t('admin:templates.toast.batch_partial', { ok: okSlugs.length, fail: failed }), 'warning')
       else pushSnack(t('admin:templates.toast.batch_deleted', { count: okSlugs.length }), 'success')
@@ -304,6 +318,22 @@ export default function TemplatesView() {
     return null
   }
   const hint = formHint()
+
+  // The loader had no catch on two parallel reads, so a failure raised an
+  // unhandled rejection and rendered an empty table — indistinguishable from
+  // "no templates are configured".
+  if (templatesFailed) {
+    return (
+      <Box sx={{ p: 3, display: 'grid', placeItems: 'center', gap: 2, minHeight: 400 }}>
+        <Typography sx={{ color: md.onSurfaceVariant }}>
+          {t('admin:templates.load_failed', { defaultValue: '暂时无法加载配置方案' })}
+        </Typography>
+        <Button variant="outlined" onClick={() => void load()}>
+          {t('admin:templates.retry', { defaultValue: '重试' })}
+        </Button>
+      </Box>
+    )
+  }
 
   return (
     <Box sx={{ p: 3 }}>

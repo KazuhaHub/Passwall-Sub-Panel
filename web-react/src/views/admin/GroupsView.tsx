@@ -38,7 +38,12 @@ import { deviceCapIsInert } from '@/utils/capabilities'
 import { useCan } from '@/utils/permissions'
 import { allSettledLimited } from '@/utils/promises'
 
-import { createGroup, deleteGroup, listGroups, updateGroup } from '@/api/groups'
+import { createGroup, deleteGroup, updateGroup } from '@/api/groups'
+import type { ListResponse } from '@/api/types'
+import { groupKeys } from '@/query/keys'
+import { useGroupsList } from '@/query/groups'
+import { useQueryScope } from '@/query/useQueryScope'
+import { useQueryClient } from '@tanstack/react-query'
 import { listNodes } from '@/api/nodes'
 import type { Group, Node } from '@/api/types'
 import { confirm } from '@/components/ConfirmHost'
@@ -191,9 +196,20 @@ export default function GroupsView() {
   const { t } = useTranslation(['admin', 'common'])
   const canConfig = useCan('config.write')
 
-  const [items, setItems] = useState<Group[]>([])
   const [search, setSearch] = useState('')
-  const [loading, setLoading] = useState(false)
+  const qScope = useQueryScope()
+  const queryClient = useQueryClient()
+  const groupsQuery = useGroupsList(qScope)
+  const items = groupsQuery.data?.items ?? []
+  const loading = groupsQuery.isPending
+  const groupsFailed = groupsQuery.isError
+
+  /** Patch the cached list in place after a write, so the table reflects it
+   *  immediately instead of waiting for the next read. */
+  function mutateGroupItems(updater: (prev: Group[]) => Group[]) {
+    queryClient.setQueryData<ListResponse<Group>>(groupKeys.list(qScope, {}), prev =>
+      prev ? { ...prev, items: updater(prev.items) } : prev)
+  }
   const [selected, setSelected] = useState<Set<number>>(new Set())
   const [batchBusy, setBatchBusy] = useState(false)
 
@@ -284,15 +300,12 @@ export default function GroupsView() {
 
   useEffect(() => { void load() }, [])
 
-  async function load() {
-    setLoading(true)
-    try {
-      const res = await listGroups()
-      setItems(res.items)
-      setSelected(new Set())
-    } finally {
-      setLoading(false)
-    }
+  // Reload after a write. Clearing the selection is deliberate here (the rows it
+  // referred to may no longer exist), and the mount-time call is a no-op
+  // because the selection starts empty.
+  function load() {
+    setSelected(new Set())
+    return groupsQuery.refetch()
   }
 
   function openCreate() {
@@ -374,7 +387,7 @@ export default function GroupsView() {
           ...limitField('device_limit', form.device_limit, 'clear_device_limit'),
         })
         await applyScopeOverrides(editing.id)
-        setItems(prev => prev.map(item => item.id === res.group.id ? res.group : item))
+        mutateGroupItems(prev => prev.map(item => item.id === res.group.id ? res.group : item))
         pushSnack(t('admin:groups.toast.updated'), 'success')
         if (res.resync_errors?.length) {
           pushSnack(t('admin:groups.toast.resync_partial', { count: res.resync_errors.length }), 'warning')
@@ -435,7 +448,7 @@ export default function GroupsView() {
       const results = await allSettledLimited(rows, r => deleteGroup(r.id))
       const okIds = rows.filter((_, i) => results[i].status === 'fulfilled').map(r => r.id)
       const failed = rows.length - okIds.length
-      setItems(prev => prev.filter(g => !okIds.includes(g.id)))
+      mutateGroupItems(prev => prev.filter(g => !okIds.includes(g.id)))
       setSelected(new Set())
       if (failed > 0) {
         pushSnack(t('admin:groups.toast.batch_partial', { ok: okIds.length, fail: failed }), 'warning')
@@ -504,6 +517,21 @@ export default function GroupsView() {
             {tag}
           </Box>
         ))}
+      </Box>
+    )
+  }
+
+  // The mount load had no catch, so a failed read raised an unhandled rejection
+  // and rendered an empty table — indistinguishable from "no groups exist".
+  if (groupsFailed) {
+    return (
+      <Box sx={{ p: 3, display: 'grid', placeItems: 'center', gap: 2, minHeight: 400 }}>
+        <Typography sx={{ color: md.onSurfaceVariant }}>
+          {t('admin:groups.load_failed', { defaultValue: '暂时无法加载分组' })}
+        </Typography>
+        <Button variant="outlined" onClick={() => void groupsQuery.refetch()}>
+          {t('admin:groups.retry', { defaultValue: '重试' })}
+        </Button>
       </Box>
     )
   }

@@ -43,10 +43,6 @@ import { panelPath } from '@/panelPath'
 
 import {
   fetchSAMLMetadata,
-  getMailSettings,
-  getOIDC,
-  getSAML,
-  getUISettings,
   previewMailTemplate,
   putMailSettings,
   putMailTemplate,
@@ -90,6 +86,8 @@ import {
 import { useSiteStore } from '@/stores/site'
 import { useTabParam } from '@/hooks/useTabParam'
 import { listAllGroups } from '@/api/groups'
+import { useMailSettings, useOidcConfig, useSamlConfig, useUISettings } from '@/query/settings'
+import { useQueryScope } from '@/query/useQueryScope'
 import type { Group } from '@/api/types'
 import { normalizeRegistry } from './subclients/clientRegistry'
 import ScopeOverridesEditor from '@/components/scope/ScopeOverridesEditor'
@@ -167,8 +165,11 @@ export default function SettingsView() {
 
   const [tab, setTab] = useTabParam<TabKey>('tab', 'general',
     ['general', 'security', 'brand', 'subscription', 'portal', 'mail', 'sso'])
+  const qScope = useQueryScope()
+  const settingsQuery = useUISettings(qScope)
+  // The DRAFT. Seeded once from the first successful read; a background
+  // revalidation must never overwrite edits the admin has not saved yet.
   const [settings, setSettings] = useState<UISettings | null>(null)
-  const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [geoStatus, setGeoStatus] = useState<GeoIPStatus | null>(null)
   const [geoBusy, setGeoBusy] = useState(false)
@@ -280,21 +281,28 @@ export default function SettingsView() {
   }
 
   async function load() {
-    setLoading(true)
-    try {
-      const loaded = normalize(await getUISettings())
-      if (!loaded.sub_base_url) {
-        loaded.sub_base_url = window.location.origin
-      }
-      setSettings(loaded)
-      const changedPath = sessionStorage.getItem('psp_panel_path_changed')
-      if (changedPath !== null && changedPath === (panelPath || '/')) {
-        sessionStorage.removeItem('psp_panel_path_changed')
-        pushSnack(t('settings.panel_path_sso_notice'), 'warning')
-      }
+    const res = await settingsQuery.refetch()
+    if (!res.data) return
+    const loaded = normalize(res.data)
+    if (!loaded.sub_base_url) {
+      loaded.sub_base_url = window.location.origin
     }
-    finally { setLoading(false) }
+    setSettings(loaded)
+    const changedPath = sessionStorage.getItem('psp_panel_path_changed')
+    if (changedPath !== null && changedPath === (panelPath || '/')) {
+      sessionStorage.removeItem('psp_panel_path_changed')
+      pushSnack(t('settings.panel_path_sso_notice'), 'warning')
+    }
   }
+
+  // Seed the draft from the first successful read. Deliberately not on every
+  // response — see the draft comment above.
+  useEffect(() => {
+    if (settings !== null || !settingsQuery.data) return
+    const loaded = normalize(settingsQuery.data)
+    if (!loaded.sub_base_url) loaded.sub_base_url = window.location.origin
+    setSettings(loaded)
+  }, [settingsQuery.data, settings])
 
   // save persists the whole settings object. Returns true on success, false on
   // a validation failure (already surfaced via snack), and throws on a network
@@ -406,7 +414,23 @@ export default function SettingsView() {
     setSettings(prev => prev ? { ...prev, [key]: value } : prev)
   }
 
-  if (loading || !settings) {
+  // A failed read is NOT an empty settings page. The loader had no catch:
+  // `loading` went false while `settings` stayed null, so the old guard below
+  // left the page on a spinner that could never resolve.
+  if (settingsQuery.isError && !settings) {
+    return (
+      <Box sx={{ p: 3, display: 'grid', placeItems: 'center', gap: 2, minHeight: 400 }}>
+        <Typography sx={{ color: md.onSurfaceVariant }}>
+          {t('settings.load_failed', { defaultValue: '暂时无法加载设置' })}
+        </Typography>
+        <Button variant="outlined" onClick={() => void load()}>
+          {t('settings.retry', { defaultValue: '重试' })}
+        </Button>
+      </Box>
+    )
+  }
+
+  if (!settings) {
     return <Box sx={{ p: 3, display: 'grid', placeItems: 'center', minHeight: 400 }}><CircularProgress /></Box>
   }
 
@@ -1406,9 +1430,12 @@ function MailTab() {
   const md = theme.palette.md
   const { t } = useTranslation('admin')
 
+  const mailScope = useQueryScope()
+  const mailQuery = useMailSettings(mailScope)
+  // Draft, seeded once — same rule as the container's settings draft.
   const [mail, setMail] = useState<MailSettings | null>(null)
   const [templates, setTemplates] = useState<MailTemplate[]>([])
-  const [loading, setLoading] = useState(false)
+  const [mailDraftLoaded, setMailDraftLoaded] = useState(false)
   const [saving, setSaving] = useState(false)
   const [changePwd, setChangePwd] = useState(false)
   const [showPwd, setShowPwd] = useState(false)
@@ -1428,13 +1455,18 @@ function MailTab() {
 
   useEffect(() => { void load() }, [])
 
+  useEffect(() => {
+    if (mailDraftLoaded || !mailQuery.data) return
+    setMail(mailQuery.data.settings)
+    setTemplates(mailQuery.data.templates)
+    setMailDraftLoaded(true)
+  }, [mailQuery.data, mailDraftLoaded])
+
   async function load() {
-    setLoading(true)
-    try {
-      const r = await getMailSettings()
-      setMail(r.settings)
-      setTemplates(r.templates)
-    } finally { setLoading(false) }
+    const res = await mailQuery.refetch()
+    if (!res.data) return
+    setMail(res.data.settings)
+    setTemplates(res.data.templates)
   }
 
   function patchMail<K extends keyof MailSettings>(key: K, value: MailSettings[K]) {
@@ -1522,7 +1554,22 @@ function MailTab() {
     } finally { setTplBusy(false) }
   }
 
-  if (loading || !mail) {
+  // A failed read is NOT an empty mail config. The loader had no catch, so
+  // `loading` went false while `mail` stayed null — a spinner that never ends.
+  if (mailQuery.isError && !mail) {
+    return (
+      <Box sx={{ p: 3, display: 'grid', placeItems: 'center', gap: 2, minHeight: 400 }}>
+        <Typography sx={{ color: md.onSurfaceVariant }}>
+          {t('settings.mail_load_failed', { defaultValue: '暂时无法加载邮件设置' })}
+        </Typography>
+        <Button variant="outlined" onClick={() => void load()}>
+          {t('settings.retry', { defaultValue: '重试' })}
+        </Button>
+      </Box>
+    )
+  }
+
+  if (!mail) {
     return <Box sx={{ display: 'grid', placeItems: 'center', py: 6 }}><CircularProgress /></Box>
   }
 
@@ -2416,7 +2463,6 @@ function SamlPanel() {
   const md = theme.palette.md
   const { t } = useTranslation('admin')
   const [cfg, setCfg] = useState<SAMLConfig | null>(null)
-  const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [changeKey, setChangeKey] = useState(false)
   const [keyPem, setKeyPem] = useState('')
@@ -2468,10 +2514,20 @@ function SamlPanel() {
       role_rules: c.role_rules ?? [],
     }
   }
+  const samlScope = useQueryScope()
+  const samlQuery = useSamlConfig(samlScope)
+  // Draft, seeded once — a background revalidation must not reset the form.
+  const [samlDraftLoaded, setSamlDraftLoaded] = useState(false)
+
+  useEffect(() => {
+    if (samlDraftLoaded || !samlQuery.data) return
+    setCfg(normalizeSAML(samlQuery.data))
+    setSamlDraftLoaded(true)
+  }, [samlQuery.data, samlDraftLoaded])
+
   async function load() {
-    setLoading(true)
-    try { setCfg(normalizeSAML(await getSAML())) }
-    finally { setLoading(false) }
+    const res = await samlQuery.refetch()
+    if (res.data) setCfg(normalizeSAML(res.data))
   }
   function patch<K extends keyof SAMLConfig>(key: K, value: SAMLConfig[K]) {
     setCfg(prev => prev ? { ...prev, [key]: value } : prev)
@@ -2560,7 +2616,22 @@ function SamlPanel() {
     await saveConfig(cfg)
   }
 
-  if (loading || !cfg) return <Box sx={{ display: 'grid', placeItems: 'center', py: 6 }}><CircularProgress /></Box>
+  // A failed read is NOT an empty config. The loader had no catch, so `loading`
+  // went false while `cfg` stayed null — a spinner that could never resolve.
+  if (samlQuery.isError && !cfg) {
+    return (
+      <Box sx={{ display: 'grid', placeItems: 'center', gap: 2, py: 6 }}>
+        <Typography sx={{ color: md.onSurfaceVariant }}>
+          {t('settings.saml_load_failed', { defaultValue: '暂时无法加载 SAML 配置' })}
+        </Typography>
+        <Button variant="outlined" onClick={() => void load()}>
+          {t('settings.retry', { defaultValue: '重试' })}
+        </Button>
+      </Box>
+    )
+  }
+
+  if (!cfg) return <Box sx={{ display: 'grid', placeItems: 'center', py: 6 }}><CircularProgress /></Box>
 
   return (
     <Box component="form" onSubmit={save} sx={{ display: 'flex', flexDirection: 'column' }}>
@@ -2819,7 +2890,6 @@ function OidcPanel() {
   const md = theme.palette.md
   const { t } = useTranslation('admin')
   const [cfg, setCfg] = useState<OIDCConfig | null>(null)
-  const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [changeSecret, setChangeSecret] = useState(false)
   const [secret, setSecret] = useState('')
@@ -2848,10 +2918,20 @@ function OidcPanel() {
       role_rules: c.role_rules ?? [],
     }
   }
+  const oidcScope = useQueryScope()
+  const oidcQuery = useOidcConfig(oidcScope)
+  // Draft, seeded once — same rule as the SAML half.
+  const [oidcDraftLoaded, setOidcDraftLoaded] = useState(false)
+
+  useEffect(() => {
+    if (oidcDraftLoaded || !oidcQuery.data) return
+    setCfg(normalizeOIDC(oidcQuery.data))
+    setOidcDraftLoaded(true)
+  }, [oidcQuery.data, oidcDraftLoaded])
+
   async function load() {
-    setLoading(true)
-    try { setCfg(normalizeOIDC(await getOIDC())) }
-    finally { setLoading(false) }
+    const res = await oidcQuery.refetch()
+    if (res.data) setCfg(normalizeOIDC(res.data))
   }
   function patch<K extends keyof OIDCConfig>(key: K, value: OIDCConfig[K]) {
     setCfg(prev => prev ? { ...prev, [key]: value } : prev)
@@ -2895,7 +2975,22 @@ function OidcPanel() {
     } finally { setSaving(false) }
   }
 
-  if (loading || !cfg) return <Box sx={{ display: 'grid', placeItems: 'center', py: 6 }}><CircularProgress /></Box>
+  // Same as the SAML half: an uncatch'd load left `cfg` null and the guard
+  // below spun forever.
+  if (oidcQuery.isError && !cfg) {
+    return (
+      <Box sx={{ display: 'grid', placeItems: 'center', gap: 2, py: 6 }}>
+        <Typography sx={{ color: md.onSurfaceVariant }}>
+          {t('settings.oidc_load_failed', { defaultValue: '暂时无法加载 OIDC 配置' })}
+        </Typography>
+        <Button variant="outlined" onClick={() => void load()}>
+          {t('settings.retry', { defaultValue: '重试' })}
+        </Button>
+      </Box>
+    )
+  }
+
+  if (!cfg) return <Box sx={{ display: 'grid', placeItems: 'center', py: 6 }}><CircularProgress /></Box>
 
   return (
     <Box component="form" onSubmit={save} sx={{ display: 'flex', flexDirection: 'column' }}>

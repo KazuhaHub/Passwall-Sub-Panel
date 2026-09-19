@@ -1,6 +1,7 @@
 {
   "languagePacks": {
     "title": "语言包",
+    "load_failed": "暂时无法加载语言包",
     "subtitle": "上传自定义界面语言包，上传后重新载入页面即可在语言菜单中选择。",
     "upload": "上传",
     "upload_title": "上传语言包",
@@ -35,6 +36,7 @@
   "alerts": {
     "bell_title": "通知",
     "empty": "暂无需要处理的通知",
+    "unavailable": "通知暂时不可用",
     "title": {
       "node_health": "节点 {{name}} 异常",
       "cert_failed": "证书 {{name}} 签发失败",
@@ -61,6 +63,8 @@
     "form_has_errors": "请先修正表单中标红的字段"
   },
   "dashboard": {
+    "summary_failed": "暂时无法加载概览数据",
+    "retry": "重试",
     "title": "总览",
     "metric": {
       "users": "用户总数",
@@ -94,6 +98,11 @@
   },
   "settings": {
     "title": "系统设置",
+    "load_failed": "暂时无法加载设置",
+    "mail_load_failed": "暂时无法加载邮件设置",
+    "saml_load_failed": "暂时无法加载 SAML 配置",
+    "oidc_load_failed": "暂时无法加载 OIDC 配置",
+    "retry": "重试",
     "tab_general": "基本设置",
     "tab_security": "登录与安全",
     "tab_brand": "站点品牌",
@@ -589,6 +598,8 @@
   },
   "traffic": {
     "title": "流量看板",
+    "load_failed": "暂时无法加载流量数据",
+    "retry": "重试",
     "poll_now": "立即采集",
     "poll_done": "采集完成",
     "scope_user": "按用户",
@@ -640,6 +651,8 @@
   },
   "templates": {
     "title": "配置方案",
+    "load_failed": "暂时无法加载配置方案",
+    "retry": "重试",
     "subtitle": "一个方案由客户端模板和绑定规则集组成，订阅渲染会以这里的绑定为准。",
     "create": "新增方案",
     "edit_title": "编辑配置方案",
@@ -896,6 +909,9 @@
   },
   "logs": {
     "title": "日志管理",
+    "load_failed": "暂时无法加载日志",
+    "cert_load_failed": "暂时无法加载证书日志",
+    "retry": "重试",
     "tab_sub": "订阅日志",
     "tab_audit": "审计日志",
     "tab_auth": "认证日志",
@@ -986,6 +1002,8 @@
   },
   "rules": {
     "title": "规则库",
+    "load_failed": "暂时无法加载规则集",
+    "retry": "重试",
     "subtitle": "规则集是可复用片段，只有绑定到配置方案后才会参与订阅渲染。",
     "create": "新增规则集",
     "edit_title": "编辑规则集",
@@ -1150,6 +1168,8 @@
     "duplicate": "复制为新的规则集"
   },
   "nodes": {
+    "load_failed": "暂时无法加载节点",
+    "retry": "重试",
     "cert_source": {
       "from_panel": "从面板获取证书路径",
       "from_panel_filled": "已填入面板证书路径",
@@ -1480,15 +1500,21 @@
     "title": "用户管理",
     "create": "新增用户",
     "edit_title": "编辑用户",
+    "edit": {
+      "row_changed": "该用户已被其他操作修改。当前编辑内容不会自动更新。",
+      "reload_saved": "重新载入已保存值"
+    },
     "activity": {
       "title": "最近登录",
       "empty": "暂无登录记录",
+      "unavailable": "暂时无法获取登录记录",
       "ok": "成功",
       "fail": "失败"
     },
     "nodeusage": {
       "title": "按节点用量",
       "empty": "该用户暂无节点",
+      "unavailable": "暂时无法获取节点用量",
       "lifetime": "累计",
       "period": "本周期",
       "today": "今日",
@@ -1500,6 +1526,7 @@
     "serverusage": {
       "title": "按服务器用量",
       "empty": "该用户暂无服务器",
+      "unavailable": "暂时无法获取服务器用量",
       "server": "服务器",
       "node_count": "{{n}} 节点"
     },
@@ -1770,6 +1797,8 @@
   },
   "groups": {
     "title": "分组管理",
+    "load_failed": "暂时无法加载分组",
+    "retry": "重试",
     "create": "新增分组",
     "edit_title": "编辑分组",
     "search_placeholder": "搜索名称 / slug",
@@ -1889,6 +1918,8 @@
   },
   "certs": {
     "tab_certs": "证书",
+    "load_failed": "暂时无法加载证书数据",
+    "retry": "重试",
     "tab_creds": "DNS 凭据",
     "tab_acme": "ACME 账号",
     "page_title": "证书",

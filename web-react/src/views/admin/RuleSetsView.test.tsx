@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { expect, it } from 'vitest'
-import { editRow, installReads, list, mount } from '@/test/adminSaveHarness'
+import { api, editRow, installReads, list, mount } from '@/test/adminSaveHarness'
 import RuleSetsView from './RuleSetsView'
 
 const row = { slug: 'custom', name: 'old-name', sort: 1, enabled: true, direct_subscription_domain: false, proxy_group_order: [], content: 'rules: []' }
@@ -17,4 +17,13 @@ it('reopens with the saved rule without reloading the stale list', async () => {
   await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
   const reopened = await editRow('new-name')
   expect(within(reopened).getByDisplayValue('new-name')).toBeTruthy()
+})
+
+it('reports a failed read instead of showing an empty rule-set list', async () => {
+  // The loader had no catch, so a failure raised an unhandled rejection and the
+  // table rendered with no rule sets — indistinguishable from "none exist".
+  api.get.mockRejectedValue(new Error('offline'))
+  mount(<RuleSetsView />)
+
+  await waitFor(() => expect(screen.getByText('admin:rules.load_failed')).toBeTruthy())
 })

@@ -30,6 +30,11 @@ interface AuthState {
   // directly (which doesn't trigger re-renders). Kept in sync by
   // login / loginSSO / logout / the cross-tab storage listener.
   hasToken: boolean
+  // authEpoch is a non-secret session generation. It advances on login,
+  // logout, and any identity/role switch so cached server data can be scoped
+  // to one session and discarded when that session ends. A plain access-token
+  // refresh deliberately does NOT advance it — that is the same session.
+  authEpoch: number
   login: (upn: string, password: string, captcha?: LoginCaptcha) => Promise<LoginOutcome>
   // loginPasskey runs a usernameless WebAuthn login. Same outcome contract as
   // login() — it may surface a 2FA challenge for accounts that also enrolled TOTP.
@@ -54,14 +59,26 @@ interface PersistedAuthState {
   upn: string
   displayName: string
   role: Role | ''
+  // Persisted so a reload keeps the same session scope instead of looking like
+  // a brand-new session; older stored blobs simply lack it and read as 0.
+  authEpoch: number
 }
 
 function loadFromStorage(): PersistedAuthState {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
-    if (raw) return JSON.parse(raw) as PersistedAuthState
+    if (raw) {
+      const parsed = JSON.parse(raw) as Partial<PersistedAuthState>
+      return {
+        userId: parsed.userId ?? null,
+        upn: parsed.upn ?? '',
+        displayName: parsed.displayName ?? '',
+        role: parsed.role ?? '',
+        authEpoch: parsed.authEpoch ?? 0,
+      }
+    }
   } catch { /* ignore */ }
-  return { userId: null, upn: '', displayName: '', role: '' }
+  return { userId: null, upn: '', displayName: '', role: '', authEpoch: 0 }
 }
 
 function persist(state: PersistedAuthState) {
@@ -70,14 +87,22 @@ function persist(state: PersistedAuthState) {
 
 // applySession writes the tokens + user identity from a full login response into
 // localStorage and the store. Shared by login / complete2FA / loginSSO.
-function applySession(res: AuthLoginResponse, set: (partial: Partial<AuthState>) => void) {
+function applySession(
+  res: AuthLoginResponse,
+  set: (partial: Partial<AuthState>) => void,
+  currentEpoch: number,
+) {
   localStorage.setItem('psp_access', res.access_token)
   localStorage.setItem('psp_refresh', res.refresh_token)
+  // Advance the session generation: everything cached under the previous
+  // identity must become unreachable, including on a logout-then-login as the
+  // same account.
   const next: PersistedAuthState = {
     userId: res.user.id,
     upn: res.user.upn,
     displayName: res.user.display_name || '',
     role: res.user.role,
+    authEpoch: currentEpoch + 1,
   }
   set({ ...next, hasToken: true })
   persist(next)
@@ -94,7 +119,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     if (isTwoFAChallenge(res)) {
       return { twoFA: true, pendingToken: res.pending_token, methods: res.methods ?? ['totp', 'recovery'] }
     }
-    applySession(res, set)
+    applySession(res, set, get().authEpoch)
     return { twoFA: false }
   },
 
@@ -106,39 +131,30 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     if (isTwoFAChallenge(res)) {
       return { twoFA: true, pendingToken: res.pending_token, methods: res.methods ?? ['totp', 'recovery'] }
     }
-    applySession(res, set)
+    applySession(res, set, get().authEpoch)
     return { twoFA: false }
   },
 
   async complete2FA(pendingToken, code) {
     const res = await verify2FA(pendingToken, code)
-    applySession(res, set)
+    applySession(res, set, get().authEpoch)
   },
 
   async complete2FAPasskey(pendingToken) {
     const { session_id, publicKey } = await passkey2FABegin(pendingToken)
     const assertion = await startAuthentication({ optionsJSON: publicKey })
     const res = await passkey2FAFinish(pendingToken, session_id, assertion)
-    applySession(res, set)
+    applySession(res, set, get().authEpoch)
   },
 
   async loginSSO() {
     const res = await ssoComplete()
-    localStorage.setItem('psp_access', res.access_token)
-    localStorage.setItem('psp_refresh', res.refresh_token)
-    const next: PersistedAuthState = {
-      userId: res.user.id,
-      upn: res.user.upn,
-      displayName: res.user.display_name || '',
-      role: res.user.role,
-    }
-    set({ ...next, hasToken: true })
-    persist(next)
+    applySession(res, set, get().authEpoch)
   },
 
   setDisplayName(name) {
-    const { userId, upn, role } = get()
-    const next: PersistedAuthState = { userId, upn, displayName: name, role }
+    const { userId, upn, role, authEpoch } = get()
+    const next: PersistedAuthState = { userId, upn, displayName: name, role, authEpoch }
     set(next)
     persist(next)
   },
@@ -147,7 +163,12 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     localStorage.removeItem('psp_access')
     localStorage.removeItem('psp_refresh')
     localStorage.removeItem(STORAGE_KEY)
-    set({ userId: null, upn: '', displayName: '', role: '', hasToken: false })
+    // Advance the generation as well as clearing the identity: if the next
+    // login happens to be the same account, it still lands in a fresh scope.
+    set({
+      userId: null, upn: '', displayName: '', role: '', hasToken: false,
+      authEpoch: get().authEpoch + 1,
+    })
     window.location.replace(panelURL('/logged-out'))
   },
 

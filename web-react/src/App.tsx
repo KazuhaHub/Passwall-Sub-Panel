@@ -11,6 +11,7 @@ import { useAppearanceStore, selectEffectiveColor, resolveEffectiveMode } from '
 import SnackbarHost from '@/components/SnackbarHost'
 import ConfirmHost from '@/components/ConfirmHost'
 import ErrorBoundary from '@/components/ErrorBoundary'
+import { QuerySessionProvider } from '@/query/QuerySessionProvider'
 import { router } from '@/router'
 
 // Snapshot of prefers-color-scheme. SSR-safe defaults to "light" so
@@ -70,9 +71,14 @@ export default function App() {
           render crash inside a route can still surface as a snack or
           confirm dialog if anything in cleanup tries to push one. */}
       <ErrorBoundary>
-        <Suspense fallback={<RouteFallback />}>
-          <RouterProvider router={router} />
-        </Suspense>
+        {/* Outside Suspense on purpose: the client must survive a lazy route
+            suspending, or every route transition would start from an empty
+            cache. */}
+        <QuerySessionProvider>
+          <Suspense fallback={<RouteFallback />}>
+            <RouterProvider router={router} />
+          </Suspense>
+        </QuerySessionProvider>
       </ErrorBoundary>
       <SnackbarHost />
       <ConfirmHost />

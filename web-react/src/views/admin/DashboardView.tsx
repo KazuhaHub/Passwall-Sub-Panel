@@ -1,6 +1,7 @@
-import { lazy, Suspense, useEffect, useState } from 'react'
+import { lazy, Suspense, useMemo } from 'react'
 import {
   Box,
+  Button,
   Card,
   CardContent,
   Chip,
@@ -24,8 +25,10 @@ import WarningAmberIcon from '@mui/icons-material/WarningAmber'
 import ScheduleIcon from '@mui/icons-material/Schedule'
 import CheckCircleIcon from '@mui/icons-material/CheckCircle'
 
-import { dashboardSummary, type DashboardSummary } from '@/api/dashboard'
-import { topTraffic, trafficHistory, type TrafficHistoryItem, type TrafficRow } from '@/api/traffic'
+import type { TrafficHistoryParams } from '@/api/traffic'
+import { useDashboardSummary, useTrafficTrend } from '@/query/dashboard'
+import { useTopTraffic } from '@/query/traffic'
+import { useQueryScope } from '@/query/useQueryScope'
 import PageHeader from '@/components/PageHeader'
 import TzHint from '@/components/TzHint'
 import { useSiteStore } from '@/stores/site'
@@ -108,68 +111,39 @@ export default function DashboardView() {
   const md = theme.palette.md
   const { t } = useTranslation('admin')
 
-  const [loading, setLoading] = useState(true)
-  const [summary, setSummary] = useState<DashboardSummary | null>(null)
-  const [topUsers, setTopUsers] = useState<TrafficRow[]>([])
-  const [trend, setTrend] = useState<TrafficHistoryItem[]>([])
-  const [trendLoading, setTrendLoading] = useState(true)
   // Panel-configured display timezone (from the site store). The 7-day trend is
   // windowed + bucketed on PANEL-tz day boundaries — consistent with traffic
   // resets / expiry and the Traffic page (all panel-tz) — not the viewer's
   // browser tz. Empty → panelDayStr + the api's withTz both fall back to browser.
   const panelTz = useSiteStore(s => s.timezone)
+  const scope = useQueryScope()
 
-  useEffect(() => {
-    let cancelled = false
-    async function load() {
-      try {
-        // The dashboard summary endpoint returns pre-aggregated counts
-        // + the small "expiring" and "node alerts" lists the page
-        // renders. Pre-fix this hook fetched listUsers({page_size:500})
-        // + listNodes({page_size:500}) + listGroups() purely to compute
-        // four counters and two five-row lists — the entire user and
-        // node lists were downloaded on every dashboard open.
-        const [s, top] = await Promise.all([
-          dashboardSummary(),
-          // silent: best-effort enrichment, axios global toast off so
-          // a transient failure here doesn't surface "Network error"
-          // on a dashboard whose primary data loaded fine.
-          topTraffic(5, { silent: true }).catch(err => {
-            // eslint-disable-next-line no-console
-            console.warn('DashboardView: topTraffic(5) failed', err)
-            return []
-          }),
-        ])
-        if (cancelled) return
-        setSummary(s)
-        setTopUsers(top)
-      } finally {
-        if (!cancelled) setLoading(false)
-      }
-    }
-    void load()
-    return () => { cancelled = true }
-  }, [])
+  // The summary has no fallback: every figure below is `summary?.x ?? 0`, so a
+  // failed read used to render a zeroed all-clear. Through the cache the
+  // failure is a value this page can see and report.
+  const summaryQuery = useDashboardSummary(scope)
+  const summary = summaryQuery.data
+  const loading = summaryQuery.isPending
+  const summaryFailed = summaryQuery.isError
 
-  // Separate effect: the trend depends on panelTz (loaded async from the site
-  // store), so it re-fetches once that lands — without re-fetching the summary.
-  useEffect(() => {
-    let cancelled = false
-    async function loadTrend() {
-      setTrendLoading(true)
-      try {
-        // Last 7 PANEL-tz days [today-6, today]; pass tz so the backend parses
-        // these dates AND buckets snapshots in the same zone.
-        const sStr = panelDayStr(panelTz, -6)
-        const tStr = panelDayStr(panelTz, 0)
-        const res = await trafficHistory({ period: 'day', since: sStr, until: tStr, tz: panelTz || undefined })
-        if (!cancelled) setTrend(res.items)
-      } catch { /* ignore */ }
-      finally { if (!cancelled) setTrendLoading(false) }
-    }
-    void loadTrend()
-    return () => { cancelled = true }
-  }, [panelTz])
+  // Best-effort enrichment — the policy keeps it silent, and its failure is
+  // allowed to leave the leaderboard empty without taking the page down.
+  const topQuery = useTopTraffic(scope, 5)
+  const topUsers = topQuery.data ?? []
+
+  const trendParams = useMemo<TrafficHistoryParams>(() => ({
+    period: 'day',
+    since: panelDayStr(panelTz, -6),
+    until: panelDayStr(panelTz, 0),
+    tz: panelTz || undefined,
+  }), [panelTz])
+  const trendQuery = useTrafficTrend(scope, trendParams)
+  const trend = trendQuery.data ?? []
+  const trendLoading = trendQuery.isPending
+
+  // The summary endpoint returns pre-aggregated counts + the small "expiring"
+  // and "node alerts" lists; the page no longer downloads the full user / node
+  // lists just to compute four counters and two five-row lists.
 
   // Aggregates now come pre-computed from /admin/dashboard/summary,
   // so the page no longer downloads + walks the full user / node lists
@@ -185,6 +159,22 @@ export default function DashboardView() {
   const enabledNodeCount = summary?.node_enabled ?? 0
   const userTotal = summary?.user_total ?? 0
   const groupCount = summary?.group_count ?? 0
+
+  // Everything below reads `summary?.x ?? 0`, so a failed summary would render
+  // "0 users / 0 nodes / all healthy" — a clean bill of health for a fleet
+  // nobody actually read. Say so instead.
+  if (summaryFailed) {
+    return (
+      <Box sx={{ p: 3, display: 'grid', placeItems: 'center', gap: 2, minHeight: 400 }}>
+        <Typography sx={{ color: md.onSurfaceVariant }}>
+          {t('dashboard.summary_failed', { defaultValue: '暂时无法加载概览数据' })}
+        </Typography>
+        <Button variant="outlined" onClick={() => void summaryQuery.refetch()}>
+          {t('dashboard.retry', { defaultValue: '重试' })}
+        </Button>
+      </Box>
+    )
+  }
 
   return (
     <Box sx={{ p: { xs: 2, sm: 3 } }}>

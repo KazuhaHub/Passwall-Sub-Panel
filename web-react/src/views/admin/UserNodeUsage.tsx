@@ -7,7 +7,9 @@ import {
 import SearchIcon from '@mui/icons-material/Search'
 import { useTranslation } from 'react-i18next'
 
-import { getUserNodeUsage, type UserNodeUsageRow } from '@/api/traffic'
+import type { UserNodeUsageRow } from '@/api/traffic'
+import { useUserNodeUsage } from '@/query/traffic'
+import { useQueryScope } from '@/query/useQueryScope'
 
 // fmt renders a byte count compactly (single-letter unit).
 function fmt(n: number): string {
@@ -31,23 +33,19 @@ type SortKey = 'lifetime' | 'period' | 'today'
 export function UserNodeUsage({ userId }: { userId: number }) {
   const { t } = useTranslation('admin')
   const md = useTheme().palette.md
-  const [rows, setRows] = useState<UserNodeUsageRow[] | null>(null)
+  const scope = useQueryScope()
+  const { data, isPending, isError } = useUserNodeUsage(scope, userId)
+  const rows = data
   const [keyword, setKeyword] = useState('')
   const [orderBy, setOrderBy] = useState<SortKey>('period')
   const [orderDir, setOrderDir] = useState<'asc' | 'desc'>('desc')
   const [page, setPage] = useState(0)
   const [rowsPerPage, setRowsPerPage] = useState(10)
 
-  useEffect(() => {
-    let alive = true
-    setRows(null)
-    setPage(0)
-    setKeyword('')
-    getUserNodeUsage(userId)
-      .then(r => { if (alive) setRows(r) })
-      .catch(() => { if (alive) setRows([]) })
-    return () => { alive = false }
-  }, [userId])
+  // Switching user resets the client-side view state. The rows themselves come
+  // from the query, which is keyed by user id — so a new target starts pending
+  // rather than briefly showing the previous user's nodes.
+  useEffect(() => { setPage(0); setKeyword('') }, [userId])
 
   // Grand total = EVERY node, always — independent of search / paging so it
   // keeps matching the user-level period/lifetime figures shown elsewhere.
@@ -87,10 +85,22 @@ export function UserNodeUsage({ userId }: { userId: number }) {
     </Typography>
   )
 
-  if (rows === null) {
+  if (isPending) {
     return <Box>{title}<CircularProgress size={20} /></Box>
   }
-  if (rows.length === 0) {
+  // A failed read is NOT "this user has no nodes" — that claim would send an
+  // admin hunting for a group-coverage problem that may not exist.
+  if (isError) {
+    return (
+      <Box>
+        {title}
+        <Typography sx={{ fontSize: 12, color: md.error }}>
+          {t('users.nodeusage.unavailable', { defaultValue: '暂时无法获取节点用量' })}
+        </Typography>
+      </Box>
+    )
+  }
+  if (!rows || rows.length === 0) {
     return (
       <Box>
         {title}

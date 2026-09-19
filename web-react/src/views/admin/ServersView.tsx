@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useMemo, useRef, useState, type FormEvent, type MouseEvent } from 'react'
+import { useEffect, useId, useMemo, useRef, useState, type FormEvent, type MouseEvent } from 'react'
 import { NativeAgentUpgradeDialog } from './NativeAgentUpgradeDialog'
 import NodeMetricsDialog from './NodeMetricsDialog'
 import NodeDiagnosticsDialog from './NodeDiagnosticsDialog'
@@ -75,7 +75,6 @@ import {
 	getNativeInstallation,
 	importNativeCredential,
 	listCoreReleases,
-  listServers,
   getSUIRelease,
   listXrayVersions,
 	rotateNativeCredential,
@@ -104,7 +103,12 @@ import PageHeader from '@/components/PageHeader'
 import { pushSnack } from '@/components/SnackbarHost'
 import { PagedTableFooter } from '@/components/PagedTableFooter'
 import { SortableTableCell } from '@/components/SortableTableCell'
-import { usePaged } from '@/hooks/usePaged'
+import { usePageState } from '@/hooks/usePageState'
+import { useQueryClient } from '@tanstack/react-query'
+import { serverKeys } from '@/query/keys'
+import { type ServerListResponse, useServersList } from '@/query/servers'
+import type { ServerListParams } from '@/api/servers'
+import { useQueryScope } from '@/query/useQueryScope'
 import { ipCapBadgeTone, type IPCapTone } from '@/utils/capabilities'
 import { copyToClipboard } from '@/utils/clipboard'
 import { useCan } from '@/utils/permissions'
@@ -228,28 +232,33 @@ export default function ServersView() {
   type ServerField = 'name' | 'url' | 'api_token' | 'password'
   const [fieldErr, setFieldErr] = useState<FieldErrors<ServerField>>({})
 
-  // Paged server list. Substring search now lives on the backend
-  // (matches name/url/remark/username case-insensitively).
-  const fetchServers = useCallback(
-    async (req: { page: number; page_size: number; keyword: string; sort_by: string; sort_dir: 'asc' | 'desc' }, signal: AbortSignal) => {
-      const res = await listServers({
-        page: req.page,
-        page_size: req.page_size,
-        keyword: req.keyword || undefined,
-        sort_by: req.sort_by || undefined,
-        sort_dir: req.sort_dir,
-      }, signal)
-      return {
-        items: res.items,
-        total: res.total,
-        page: res.page ?? req.page,
-        page_size: res.page_size ?? req.page_size,
-      }
-    },
-    [],
-  )
-  const paged = usePaged<Server>(fetchServers, { defaultSortBy: 'id', defaultSortDir: 'asc' })
-  const { items, total, loading, page, pageSize, sortBy, sortDir, setPage, setPageSize, setKeyword, setSort, refresh, mutateItems } = paged
+  // Paged server list — a plain database read through the shared query cache.
+  // Substring search lives on the backend (name/url/remark/username,
+  // case-insensitive). Kept strictly read-only and unpolled: the connection
+  // probe below is a separate concern, so refreshing this list must never
+  // imply an upstream request.
+  const ps = usePageState({ defaultSortBy: 'id', defaultSortDir: 'asc' })
+  const { page, pageSize, sortBy, sortDir, setPage, setPageSize, setKeyword, setSort } = ps
+  const scope = useQueryScope()
+  const queryClient = useQueryClient()
+
+  const listParams = useMemo<ServerListParams>(() => ({
+    ...ps.request,
+    keyword: ps.request.keyword || undefined,
+    sort_by: ps.request.sort_by || undefined,
+  }), [ps.request])
+
+  const serversQuery = useServersList(scope, listParams)
+  const items = serversQuery.data?.items ?? []
+  const total = serversQuery.data?.total ?? 0
+  const loading = serversQuery.isPending
+
+  function refresh() { void serversQuery.refetch() }
+
+  function mutateItems(updater: (prev: Server[]) => Server[]) {
+    queryClient.setQueryData<ServerListResponse>(serverKeys.list(scope, listParams), prev =>
+      prev ? { ...prev, items: updater(prev.items) } : prev)
+  }
   // pageIdsKey is a stable string keyed off the set of row IDs on the
   // current page. Crucial guard for the side-effect hooks below: each
   // probe response calls mutateItems() to merge fresh version data
