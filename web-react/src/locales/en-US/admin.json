@@ -737,10 +737,14 @@
       "user_delete": "User delete",
       "user_resync": "User resync",
       "user_push_config": "User push config",
+      "user_migrate": "User migrate",
       "node_create": "Node create",
       "node_delete": "Node delete",
       "node_set_enabled": "Node set enabled",
-      "node_update": "Node update"
+      "node_update": "Node update",
+      "mail_notify": "Mail notification",
+      "cert_issue": "Certificate issue",
+      "cert_renew": "Certificate renew"
     },
     "table": {
       "id": "ID",
@@ -771,6 +775,19 @@
       "batch_partial": "{{ok}} done, {{fail}} failed"
     },
     "detail_title": "Task detail"
+  },
+  "sync_status": {
+    "title": "Background sync tasks",
+    "refresh": "Refresh",
+    "none": "No pending tasks observed",
+    "unknown": "Sync state is currently unknown",
+    "attempts": "Retried {{count}} times",
+    "has_error": "An error was recorded; the task is waiting to retry",
+    "truncated": "Showing only the most recent tasks",
+    "recent": "Recent results (retained records only)",
+    "read_failed": "Read failed; this is the last observation and may have changed",
+    "watch_paused": "Auto-refresh paused; this is the last observation and may have changed",
+    "observed_at": "Last observed: {{time}}"
   },
   "node_issues": {
     "title": "Node issues",

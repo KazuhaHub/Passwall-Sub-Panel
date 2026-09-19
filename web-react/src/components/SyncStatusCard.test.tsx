@@ -1,18 +1,25 @@
 // @vitest-environment jsdom
 import { ThemeProvider } from '@mui/material/styles'
-import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createAppTheme } from '@/theme'
 import { makeTestQueryClient, queryWrapper } from '@/test/queryTestUtils'
+import { WATCH_BUDGET_MS } from '@/query/syncStatus'
 import SyncStatusCard from './SyncStatusCard'
 
 const api = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() }))
 vi.mock('@/api/client', () => ({ client: api }))
 vi.mock('@/i18n', () => ({ default: { t: (k: string) => k, language: 'zh-CN' } }))
+vi.mock('@/stores/site', () => ({
+  useSiteStore: (sel: (s: { timezone: string }) => unknown) => sel({ timezone: 'UTC' }),
+}))
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
-    t: (_k: string, o?: { defaultValue?: string; count?: number }) =>
-      (o?.defaultValue ?? _k).replace('{{count}}', String(o?.count ?? '')),
+    // Interpolate every placeholder from the options, so a default template can
+    // be asserted on its shape rather than on a stubbed-away value.
+    t: (k: string, o?: Record<string, unknown>) =>
+      ((o?.defaultValue as string) ?? k).replace(/\{\{(\w+)\}\}/g, (_m, name: string) =>
+        String(o?.[name] ?? '')),
     i18n: { language: 'zh-CN' },
   }),
 }))
@@ -32,6 +39,12 @@ function statusBody(over: Record<string, unknown> = {}) {
   }
 }
 
+const pendingTask = {
+  id: 1, type: 'user_resync', status: 'pending', attempts: 3,
+  next_run_at: '2026-09-18T12:00:00Z', created_at: '2026-09-18T11:00:00Z',
+  updated_at: '2026-09-18T11:30:00Z', has_error: true,
+}
+
 function mount(userId = 7) {
   render(
     <ThemeProvider theme={theme}>
@@ -42,10 +55,13 @@ function mount(userId = 7) {
 }
 
 beforeEach(() => vi.clearAllMocks())
-afterEach(cleanup)
+afterEach(() => {
+  cleanup()
+  vi.useRealTimers()
+})
 
 describe('SyncStatusCard', () => {
-  it('says nothing is pending, not that upstream is in sync', async () => {
+  it('says nothing is queued, not that upstream is in sync', async () => {
     api.get.mockResolvedValue({ data: statusBody() })
     mount()
 
@@ -54,22 +70,17 @@ describe('SyncStatusCard', () => {
     expect(screen.queryByText(/已同步|同步成功|upstream/)).toBeNull()
   })
 
-  it('lists active tasks and surfaces that an error was recorded', async () => {
+  it('lists active tasks with their shared labels, attempts and error indicator', async () => {
     api.get.mockResolvedValue({
-      data: statusBody({
-        state: 'active_tasks',
-        active_tasks: [{
-          id: 1, type: 'user_resync', status: 'pending', attempts: 3,
-          next_run_at: '2026-09-18T12:00:00Z', created_at: '2026-09-18T11:00:00Z',
-          updated_at: '2026-09-18T11:30:00Z', has_error: true,
-        }],
-      }),
+      data: statusBody({ state: 'active_tasks', active_tasks: [pendingTask] }),
     })
     mount()
 
+    // Labels come from the sync-task vocabulary, so one task reads the same way
+    // here and on the Sync tasks page.
     await waitFor(() => expect(screen.getByText('user_resync')).toBeTruthy())
     expect(screen.getByText('重试 3 次')).toBeTruthy()
-    expect(screen.getByText('有错误记录')).toBeTruthy()
+    expect(screen.getByText('有执行错误记录，任务待重试')).toBeTruthy()
   })
 
   it('reports an unknown state rather than an empty queue when the read fails', async () => {
@@ -79,5 +90,63 @@ describe('SyncStatusCard', () => {
     await waitFor(() => expect(screen.getByText('同步状态暂时未知')).toBeTruthy())
     // "Nothing pending" is a claim the failed read cannot support.
     expect(screen.queryByText('当前未发现待处理任务')).toBeNull()
+  })
+
+  it('keeps a retained snapshot but marks it historical when a later read fails', async () => {
+    api.get.mockResolvedValueOnce({
+      data: statusBody({ state: 'active_tasks', active_tasks: [pendingTask] }),
+    })
+    mount()
+    await waitFor(() => expect(screen.getByText('user_resync')).toBeTruthy())
+
+    api.get.mockRejectedValue(new Error('offline'))
+    fireEvent.click(screen.getByRole('button', { name: '刷新' }))
+
+    // Not "unknown" (there IS a snapshot) and not silently current either.
+    await waitFor(() =>
+      expect(screen.getByText('读取失败，以下为上次观察结果，可能已经变化')).toBeTruthy())
+    expect(screen.getByText('user_resync')).toBeTruthy()
+    expect(screen.getByText(/最后观察时间：/)).toBeTruthy()
+    expect(screen.queryByText('同步状态暂时未知')).toBeNull()
+  })
+
+  it('stops the automatic refresh at the budget and says the result is historical', async () => {
+    vi.useFakeTimers()
+    api.get.mockResolvedValue({
+      data: statusBody({ state: 'active_tasks', active_tasks: [pendingTask] }),
+    })
+    mount()
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+    expect(screen.getByText('user_resync')).toBeTruthy()
+
+    // One full budget, during which the interval is expected to keep reading.
+    const readsBefore = api.get.mock.calls.length
+    await act(async () => { await vi.advanceTimersByTimeAsync(WATCH_BUDGET_MS) })
+    expect(api.get.mock.calls.length).toBeGreaterThan(readsBefore)
+
+    expect(screen.getByText('自动刷新已暂停，以下为上次观察结果，可能已经变化')).toBeTruthy()
+    // Paused is not settled: the task is still on screen, and still unconfirmed.
+    expect(screen.getByText('user_resync')).toBeTruthy()
+
+    // Nothing new may be read once the window is closed.
+    const readsAtPause = api.get.mock.calls.length
+    await act(async () => { await vi.advanceTimersByTimeAsync(WATCH_BUDGET_MS) })
+    expect(api.get.mock.calls.length).toBe(readsAtPause)
+  })
+
+  it('restarts the observation window from the refresh button', async () => {
+    vi.useFakeTimers()
+    api.get.mockResolvedValue({
+      data: statusBody({ state: 'active_tasks', active_tasks: [pendingTask] }),
+    })
+    mount()
+    await act(async () => { await vi.advanceTimersByTimeAsync(WATCH_BUDGET_MS) })
+    expect(screen.getByText('自动刷新已暂停，以下为上次观察结果，可能已经变化')).toBeTruthy()
+
+    fireEvent.click(screen.getByRole('button', { name: '刷新' }))
+    await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+
+    expect(screen.queryByText('自动刷新已暂停，以下为上次观察结果，可能已经变化')).toBeNull()
   })
 })

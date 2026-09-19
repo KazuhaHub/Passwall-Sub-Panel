@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
-import { describe, expect, it } from 'vitest'
-import { WATCH_BUDGET_MS, WATCH_INTERVAL_MS, watchIntervalMs } from './syncStatus'
+import { act, renderHook } from '@testing-library/react'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { WATCH_BUDGET_MS, WATCH_INTERVAL_MS, useObservationWindow, watchIntervalMs } from './syncStatus'
 
 describe('watchIntervalMs', () => {
   it('polls on the configured cadence while there is something to watch', () => {
@@ -42,5 +43,51 @@ describe('watchIntervalMs', () => {
     const got = watchIntervalMs({ watching: true, elapsedMs: 1, state: 'active_tasks' })
     expect(got).toBe(WATCH_INTERVAL_MS)
     expect(WATCH_INTERVAL_MS).toBeGreaterThanOrEqual(10_000)
+  })
+})
+
+describe('useObservationWindow', () => {
+  afterEach(() => vi.useRealTimers())
+
+  it('opens watching and reports the wall clock it started at', () => {
+    vi.useFakeTimers()
+    const { result } = renderHook(() => useObservationWindow())
+
+    expect(result.current.watching).toBe(true)
+    expect(result.current.expired).toBe(false)
+    // The start time is what the interval predicate measures against, so it
+    // must be a real clock reading, not a counter.
+    expect(result.current.windowStart).toBe(Date.now())
+  })
+
+  it('closes on the wall clock, not on a tick count', () => {
+    vi.useFakeTimers()
+    const { result } = renderHook(() => useObservationWindow())
+
+    act(() => { vi.advanceTimersByTime(WATCH_BUDGET_MS - 1) })
+    expect(result.current.watching).toBe(true)
+
+    act(() => { vi.advanceTimersByTime(1) })
+    expect(result.current.watching).toBe(false)
+    expect(result.current.expired).toBe(true)
+  })
+
+  it('begins a new window when restarted, so a spent budget is not sticky', () => {
+    vi.useFakeTimers()
+    const { result } = renderHook(() => useObservationWindow())
+
+    act(() => { vi.advanceTimersByTime(WATCH_BUDGET_MS) })
+    expect(result.current.expired).toBe(true)
+    const spentStart = result.current.windowStart
+
+    act(() => { result.current.restart() })
+    expect(result.current.watching).toBe(true)
+    expect(result.current.expired).toBe(false)
+    // The new window must move the clock forward; a restart that only cleared
+    // the flag would re-expire immediately against the old start time.
+    expect(result.current.windowStart).toBeGreaterThan(spentStart)
+
+    act(() => { vi.advanceTimersByTime(WATCH_BUDGET_MS - 1) })
+    expect(result.current.watching).toBe(true)
   })
 })
