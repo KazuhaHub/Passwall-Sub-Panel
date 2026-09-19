@@ -1612,7 +1612,7 @@ func (s *Service) UpdateProfile(ctx context.Context, userID int64, in UpdateInpu
 	}
 	if in.Role != nil && *in.Role != u.Role {
 		if !u.HasLocalPassword() {
-			return fmt.Errorf("%w: only local users can be assigned admin role here", domain.ErrValidation)
+			return fmt.Errorf("%w: only local users can have their role changed here", domain.ErrValidation)
 		}
 		// Last-admin lockout guard: refuse to demote the only enabled admin, or
 		// the panel would be left with nobody able to manage it.
@@ -1625,8 +1625,14 @@ func (s *Service) UpdateProfile(ctx context.Context, userID int64, in UpdateInpu
 				return fmt.Errorf("%w: cannot demote the last enabled admin", domain.ErrValidation)
 			}
 		}
+		// operator is included deliberately: it is the day-to-day staff
+		// role, the SPA's role select offers it, and an SSO role rule can
+		// already emit it — accepting only admin/user here made the
+		// editor's third option fail with "invalid role". Letting an
+		// operator caller reach it is not a concern: the handler's
+		// guardOperatorRoleAssignment restricts them to `user`.
 		switch *in.Role {
-		case domain.RoleAdmin, domain.RoleUser:
+		case domain.RoleAdmin, domain.RoleOperator, domain.RoleUser:
 			u.Role = *in.Role
 		default:
 			return fmt.Errorf("%w: invalid role", domain.ErrValidation)
