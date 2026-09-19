@@ -502,21 +502,27 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 			}
 			return cli.GetServerStatus(ctx)
 		},
-		Auth:             authSvc,
-		SAML:             samlSvc,
-		OIDC:             oidcSvc,
-		User:             userSvc,
-		Group:            groupSvc,
-		Node:             nodeSvc,
-		Cert:             certSvc,
-		Render:           renderSvc,
-		Audit:            auditSvc,
-		Sync:             syncSvc,
-		Traffic:          trafficSvc,
-		Mail:             mailSvc,
-		Reconcile:        reconcileSvc,
-		Geo:              geoSvc,
-		NodeSync:         nativeSync,
+		Auth:      authSvc,
+		SAML:      samlSvc,
+		OIDC:      oidcSvc,
+		User:      userSvc,
+		Group:     groupSvc,
+		Node:      nodeSvc,
+		Cert:      certSvc,
+		Render:    renderSvc,
+		Audit:     auditSvc,
+		Sync:      syncSvc,
+		Traffic:   trafficSvc,
+		Mail:      mailSvc,
+		Reconcile: reconcileSvc,
+		Geo:       geoSvc,
+		NodeSync:  nativeSync,
+		// THE SAME INSTANCE THAT INGESTS AND ROLLS UP. Its routes are the read
+		// side of the telemetry the server list already shows, and the field is
+		// optional so an omission here is silent: the writes and the list keep
+		// working while every chart 404s. That is what happened until an
+		// end-to-end caught it.
+		NodeMetrics:      nodeMetrics,
 		NodeAgentUpgrade: nativeUpgrade,
 		NodeDiagnostics:  nodeDiagnostics,
 		NodeReleases:     nodeReleases,
