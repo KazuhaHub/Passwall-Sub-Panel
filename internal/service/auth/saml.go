@@ -26,6 +26,47 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 )
 
+// The replay record's window, in two parts.
+//
+// samlReplayFloor covers an assertion that carries neither a Conditions window nor
+// a SubjectConfirmationData one. crewjam would already have rejected such an
+// assertion, so this exists only so the record is not immediately collectable.
+//
+// samlReplayExpiryMargin sits on top of crewjam's own MaxClockSkew. It is a named
+// constant rather than a literal because it is half of an equality: the
+// replacement line computes the same window from the same inputs, and a drift
+// would silently reopen a replay window on one side of the switch.
+const (
+	samlReplayFloor        = 5 * time.Minute
+	samlReplayExpiryMargin = time.Minute
+)
+
+// samlReplayExpiry computes how long an assertion's ID must be remembered: the
+// LATEST of its Conditions.NotOnOrAfter and every SubjectConfirmationData's
+// NotOnOrAfter — crewjam enforces both, so an attacker gets the benefit of
+// whichever is later — plus crewjam's clock skew, since it accepts the assertion
+// until NotOnOrAfter+skew, plus the margin.
+//
+// Missing only one of the two windows is the case the previous implementation got
+// wrong: it read Conditions alone, so an assertion whose SubjectConfirmationData
+// outlived its Conditions would have its record expire while crewjam would still
+// accept a second presentation (ADR 0036 D4).
+func samlReplayExpiry(a *saml.Assertion, now time.Time) time.Time {
+	latest := now.Add(samlReplayFloor)
+	if a.Conditions != nil && !a.Conditions.NotOnOrAfter.IsZero() && a.Conditions.NotOnOrAfter.After(latest) {
+		latest = a.Conditions.NotOnOrAfter
+	}
+	if a.Subject != nil {
+		for _, sc := range a.Subject.SubjectConfirmations {
+			if sc.SubjectConfirmationData != nil && !sc.SubjectConfirmationData.NotOnOrAfter.IsZero() &&
+				sc.SubjectConfirmationData.NotOnOrAfter.After(latest) {
+				latest = sc.SubjectConfirmationData.NotOnOrAfter
+			}
+		}
+	}
+	return latest.Add(saml.MaxClockSkew).Add(samlReplayExpiryMargin)
+}
+
 // ErrSAMLAssertionReplayed marks a Response whose assertion ID the durable set
 // has already consumed inside its validity window. It is deliberately NOT a
 // domain.ErrUnavailable: a replay is an attack signal an operator should alert
@@ -66,6 +107,9 @@ type SAMLService struct {
 	// server-side fact rather than a claim RelayState makes about itself
 	// (ADR 0036 D2). Wired by SetSAMLRequestStore; nil refuses every login.
 	requestStore ports.SAMLRequestRepo
+	// clockFn is the clock, injectable so the replay-window branches can be tested
+	// at their boundaries rather than only around the current instant.
+	clockFn func() time.Time
 	// configRepo lets SaveConfig persist and apply under one lock. Optional: a
 	// service built without it can still Reload a configuration the caller
 	// persisted itself, which is what the tests and the boot path do.
@@ -90,6 +134,14 @@ type samlSnapshot struct {
 // earlier one.
 func (g *samlSnapshot) enabled() bool {
 	return g != nil && g.cfg != nil && g.cfg.Enabled && g.sp != nil && g.sp.IDPMetadata != nil
+}
+
+// now reads the clock, defaulting to the wall clock when none is injected.
+func (s *SAMLService) now() time.Time {
+	if s != nil && s.clockFn != nil {
+		return s.clockFn()
+	}
+	return time.Now()
 }
 
 // snapshot returns the current generation. Callers must take it once and use
@@ -712,15 +764,8 @@ func (s *SAMLService) parseACSResponse(sp *saml.ServiceProvider, cfg *config.SAM
 	if assertion.ID == "" {
 		return nil, fmt.Errorf("SAML assertion missing required ID")
 	}
-	exp := assertion.IssueInstant.Add(10 * time.Minute) // generous fallback
-	if assertion.Conditions != nil && !assertion.Conditions.NotOnOrAfter.IsZero() {
-		// crewjam/saml accepts an assertion until NotOnOrAfter + MaxClockSkew, so
-		// the replay cache must hold the entry that long too — otherwise a captured
-		// assertion with a sub-skew condition window could validate again after the
-		// cache already expired it. Pad by MaxClockSkew to close that window.
-		exp = assertion.Conditions.NotOnOrAfter.Add(saml.MaxClockSkew)
-	}
-	if err := s.assertNotConsumed(r.Context(), assertion.ID, exp, time.Now()); err != nil {
+	now := s.now()
+	if err := s.assertNotConsumed(r.Context(), assertion.ID, samlReplayExpiry(assertion, now), now); err != nil {
 		if errors.Is(err, ErrSAMLAssertionReplayed) {
 			log.Warn("saml: assertion replay detected", "assertion_id", assertion.ID)
 		} else {
