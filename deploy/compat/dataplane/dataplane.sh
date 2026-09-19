@@ -26,6 +26,25 @@ api() { curl -fsS -H "Authorization: Bearer $TOKEN" "$@"; }
 
 mkdir -p "$WORKDIR"
 
+# SABOTAGE: A DELIBERATE BREAK, SO THE ASSERTIONS CAN BE SHOWN TO FAIL.
+#
+# R08's completion criterion names three breaks that must each make the
+# corresponding case fail — the real core closed, the rendered credentials wrong,
+# the limit enforcement removed — and a harness whose green does not depend on any
+# of them is a harness that would stay green through all three. These modes are
+# how that is checked, and they exist for nothing else.
+#
+#   credentials     the render's credential is replaced with a wrong one, so the
+#                   traversal below must NOT succeed
+#   no-enforcement  the expiry is never pushed, so the refusal case must NOT pass
+#
+# `credentials` stands in for closing the core as well: both leave the node
+# unable to carry the connection, which is the property the traversal assertion
+# is supposed to be sensitive to.
+SABOTAGE="${PSP_DATA_SABOTAGE:-}"
+[ -z "$SABOTAGE" ] || log "SABOTAGE=$SABOTAGE — this run is EXPECTED to fail"
+
+
 log "logging into the candidate panel"
 TOKEN=$(curl -fsS -X POST -H 'Content-Type: application/json' \
   -d "{\"upn\":\"admin\",\"password\":\"$ADMIN_PASSWORD\"}" "$PSP_URL/api/auth/local/login" |
@@ -118,24 +137,6 @@ for out in render.get("outbounds", []):
 json.dump(render, open(path, "w"), indent=1)
 PY
 fi
-
-# SABOTAGE: A DELIBERATE BREAK, SO THE ASSERTIONS CAN BE SHOWN TO FAIL.
-#
-# R08's completion criterion names three breaks that must each make the
-# corresponding case fail — the real core closed, the rendered credentials wrong,
-# the limit enforcement removed — and a harness whose green does not depend on any
-# of them is a harness that would stay green through all three. These modes are
-# how that is checked, and they exist for nothing else.
-#
-#   credentials     the render's credential is replaced with a wrong one, so the
-#                   traversal below must NOT succeed
-#   no-enforcement  the expiry is never pushed, so the refusal case must NOT pass
-#
-# `credentials` stands in for closing the core as well: both leave the node
-# unable to carry the connection, which is the property the traversal assertion
-# is supposed to be sensitive to.
-SABOTAGE="${PSP_DATA_SABOTAGE:-}"
-[ -z "$SABOTAGE" ] || log "SABOTAGE=$SABOTAGE — this run is EXPECTED to fail"
 
 log "checking the target"
 # THE TARGET MUST BE ONE THE RULESET SENDS THROUGH THE NODE.
@@ -326,4 +327,43 @@ if ! proxied_attempt "200" "$RESTORE_WINDOW_SECONDS" >/dev/null; then
 fi
 log "PASS: traffic resumed after the user was restored"
 
-log "PASS: the chain carried traffic, refused it once the user expired, and carried it again once restored"
+# ------------------------------------------------- quota exhaustion
+
+# THE SAME SERVICE AXIS, A DIFFERENT TRIGGER. Expiry and quota both act on the
+# service axis, so establishing one does not establish the other: the trigger
+# paths differ, and the plan names both. The harness sets the period usage above
+# the user's limit rather than waiting for real traffic to accumulate, because
+# accumulating a gigabyte through a test target would take longer than the window
+# being measured.
+QUOTA_WINDOW_SECONDS="${PSP_DATA_QUOTA_WINDOW_SECONDS:-300}"
+
+log "exhausting the user's quota (window ${QUOTA_WINDOW_SECONDS}s)"
+api -X PUT -H 'Content-Type: application/json' \
+  -d '{"period_used_gb":2}' \
+  "$PSP_URL/api/admin/traffic/user/$USER_ID" > "$WORKDIR/quota.json"
+
+if ! proxied_attempt "000" "$QUOTA_WINDOW_SECONDS" >/dev/null; then
+  log "FAIL: an over-quota user was still carried through the node after ${QUOTA_WINDOW_SECONDS}s"
+  exit 1
+fi
+log "PASS: the proxied request was refused after the quota was exhausted (window ${QUOTA_WINDOW_SECONDS}s)"
+
+enabled=$(panel_client_enabled)
+if [ "$enabled" != "False" ]; then
+  log "FAIL: the panel still reports the client as enabled=${enabled:-<absent>} after quota exhaustion"
+  exit 1
+fi
+log "PASS: the panel's own view of the client is enable=False"
+
+log "clearing the usage (window ${RESTORE_WINDOW_SECONDS}s)"
+api -X PUT -H 'Content-Type: application/json' \
+  -d '{"period_used_gb":0}' \
+  "$PSP_URL/api/admin/traffic/user/$USER_ID" > "$WORKDIR/quota-clear.json"
+
+if ! proxied_attempt "200" "$RESTORE_WINDOW_SECONDS" >/dev/null; then
+  log "FAIL: traffic did not resume within ${RESTORE_WINDOW_SECONDS}s of clearing the usage"
+  exit 1
+fi
+log "PASS: traffic resumed after the usage was cleared"
+
+log "PASS: the chain carried traffic, refused it under expiry and under quota exhaustion, and carried it again after each was lifted"
