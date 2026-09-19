@@ -2,6 +2,7 @@ import axios, { AxiosError, AxiosRequestConfig, InternalAxiosRequestConfig } fro
 import i18n from '@/i18n'
 import { pushSnack } from '@/components/SnackbarHost'
 import { panelAPIBase, panelURL } from '@/panelPath'
+import { announcePending, isUserObserved, syncPendingOf, userIdFromURL } from './syncPending'
 
 // Shared axios instance. Bearer token is attached automatically from
 // local storage. The response interceptor centralises three concerns:
@@ -137,9 +138,20 @@ client.interceptors.response.use(
     // side, but 3X-UI sync had to be queued for background retry" via the
     // X-Sync-Pending response header. Surface that here so the admin
     // knows changes won't reach 3X-UI until the panel can reach it.
-    if (res.headers?.['x-sync-pending'] === '1') {
+    if (syncPendingOf(res) === 'reported') {
+      // Publish first: an open status area for this target starts observing on
+      // the strength of this, rather than waiting to be reopened.
+      const url = res.config?.url
+      announcePending(url)
+      // ...and a status area on screen is why the toast is skipped. It already
+      // reports the same thing with more detail; two surfaces for one piece of
+      // news is the duplication ADR 0034 asks us to remove.
+      const target = userIdFromURL(url)
+      const coveredByStatusArea = target !== undefined && isUserObserved(target)
       const now = Date.now()
-      if (now - lastSyncPendingToast > 3000) {
+      if (!coveredByStatusArea && now - lastSyncPendingToast > 3000) {
+        // Only the toast we actually showed moves the window; a suppressed one
+        // must not swallow the next genuine notification.
         lastSyncPendingToast = now
         pushSnack(i18n.t('common:errors.sync_pending'), 'warning')
       }

@@ -80,6 +80,7 @@ import { setUserTraffic } from '@/api/traffic'
 import type { Group, ListResponse, ResetPeriod, Role, User } from '@/api/types'
 import type { ReconcileReport } from '@/api/reconcile'
 import { UserActivity } from './UserActivity'
+import SyncStatusCard from '@/components/SyncStatusCard'
 import AdminPasskeysDialog from './AdminPasskeysDialog'
 import AccountSecurityDrawer from './AccountSecurityDrawer'
 import { Link as RouterLink } from 'react-router'
@@ -1806,6 +1807,7 @@ export default function UsersView() {
                 {t('admin:users.more_menu.copy_sub')}
               </Button>
               {editing && <UserActivity userId={editing.id} />}
+              {editing && <SyncStatusCard userId={editing.id} />}
             </Box>
 
             {/* RIGHT — editable fields */}

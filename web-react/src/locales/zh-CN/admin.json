@@ -737,10 +737,14 @@
       "user_delete": "删除用户",
       "user_resync": "同步用户节点",
       "user_push_config": "同步用户配置",
+      "user_migrate": "迁移用户客户端",
       "node_create": "创建节点",
       "node_delete": "删除节点",
       "node_set_enabled": "同步节点启用",
-      "node_update": "更新节点配置"
+      "node_update": "更新节点配置",
+      "mail_notify": "邮件通知",
+      "cert_issue": "证书签发",
+      "cert_renew": "证书续期"
     },
     "table": {
       "id": "ID",
@@ -771,6 +775,20 @@
       "batch_partial": "已处理 {{ok}} 个，失败 {{fail}} 个"
     },
     "detail_title": "任务详情"
+  },
+  "sync_status": {
+    "title": "后台同步任务",
+    "refresh": "刷新",
+    "none": "当前未发现待处理任务",
+    "unknown": "同步状态暂时未知",
+    "target_unavailable": "目标已不可查询",
+    "attempts": "重试 {{count}} 次",
+    "has_error": "有执行错误记录，任务待重试",
+    "truncated": "仅显示最近的部分任务",
+    "recent": "最近结果（仅保留的记录）",
+    "read_failed": "读取失败，以下为上次观察结果，可能已经变化",
+    "watch_paused": "自动刷新已暂停，以下为上次观察结果，可能已经变化",
+    "observed_at": "最后观察时间：{{time}}"
   },
   "node_issues": {
     "title": "节点问题",

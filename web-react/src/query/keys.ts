@@ -117,6 +117,13 @@ export const localeKeys = {
   list: (s: QueryScope) => [...localeKeys.all(s), 'list'] as const,
 }
 
+/** Observable sync tasks for one user (or the caller's own). */
+export const syncStatusKeys = {
+  all: (s: QueryScope) => [...privateRoot(s), 'sync-status'] as const,
+  user: (s: QueryScope, userId: number) => [...syncStatusKeys.all(s), 'user', userId] as const,
+  mine: (s: QueryScope) => [...syncStatusKeys.all(s), 'me'] as const,
+}
+
 export const serverKeys = {
   all: (s: QueryScope) => [...privateRoot(s), 'servers'] as const,
   lists: (s: QueryScope) => [...serverKeys.all(s), 'list'] as const,
