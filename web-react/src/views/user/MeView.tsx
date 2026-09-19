@@ -41,6 +41,7 @@ import MoreVertIcon from '@mui/icons-material/MoreVert'
 import LaunchIcon from '@mui/icons-material/Launch'
 import DownloadIcon from '@mui/icons-material/Download'
 import StarIcon from '@mui/icons-material/Star'
+import DevicesOtherOutlinedIcon from '@mui/icons-material/DevicesOtherOutlined'
 import HelpOutlineIcon from '@mui/icons-material/HelpOutlined'
 import VisibilityIcon from '@mui/icons-material/Visibility'
 import VisibilityOffIcon from '@mui/icons-material/VisibilityOff'
@@ -640,6 +641,76 @@ export default function MeView() {
     window.location.href = url
   }
 
+  function renderRecommendedClient(showMoreClients: boolean) {
+    const platform = detectPlatform()
+    const client = platform
+      ? importClients.find(c => c.recommended_for?.includes(platform))
+      : undefined
+    if (!client) return null
+    const tutorialURL = profile?.sub_import_tutorial_url
+
+    return (
+      <Card sx={{ p: { xs: 2.5, sm: 3 }, mb: { xs: 2, sm: 3 }, bgcolor: md.primaryContainer, color: md.onPrimaryContainer }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+          <StarIcon sx={{ fontSize: 18 }} />
+          <Typography sx={{ fontSize: 12, fontWeight: 500, textTransform: 'uppercase', letterSpacing: '.5px' }}>
+            {t('import.recommended_label', { defaultValue: '推荐客户端' })}
+          </Typography>
+        </Box>
+        <Typography sx={{ fontWeight: 500, mb: 0.5, fontSize: { xs: 20, sm: 24 }, lineHeight: 1.2 }}>
+          {client.name}
+        </Typography>
+        <Typography variant="body2" sx={{ mb: 2, opacity: 0.85 }}>
+          {client.platforms.map(p => t(`import.platform_${p}`, { defaultValue: p })).join(' · ')}
+        </Typography>
+        <Box sx={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 1, flexWrap: 'wrap' }}>
+          {/* On mobile pack the three client actions into a 2-col grid
+              instead of stacking each full-width. */}
+          <Box sx={{
+            display: { xs: 'grid', sm: 'flex' },
+            gridTemplateColumns: { xs: '1fr 1fr', sm: 'none' },
+            gap: { xs: 1, sm: 1.5 },
+            flexWrap: 'wrap',
+            flex: { xs: '1 1 100%', sm: '0 1 auto' },
+          }}>
+            <Button size={isMobile ? 'medium' : 'large'} variant="contained"
+              startIcon={<LaunchIcon />}
+              onClick={() => { void triggerImport(buildImportURL(client)) }}
+              sx={{ bgcolor: md.primary, color: md.onPrimary, '&:hover': { bgcolor: md.primary } }}>
+              {t('import.import')}
+            </Button>
+            <Button size={isMobile ? 'medium' : 'large'} variant="outlined"
+              startIcon={<DownloadIcon />}
+              onClick={() => window.open(client.install_url, '_blank', 'noopener,noreferrer')}
+              sx={{ borderColor: md.onPrimaryContainer, color: md.onPrimaryContainer,
+                '&:hover': { borderColor: md.onPrimaryContainer, bgcolor: 'rgba(0,0,0,.06)' } }}>
+              {t('import.install')}
+            </Button>
+            {tutorialURL && (
+              <Button size={isMobile ? 'medium' : 'large'} variant="outlined"
+                startIcon={<HelpOutlineIcon />}
+                onClick={() => window.open(tutorialURL, '_blank', 'noopener,noreferrer')}
+                sx={{
+                  borderColor: md.onPrimaryContainer, color: md.onPrimaryContainer,
+                  gridColumn: { xs: '1 / -1', sm: 'auto' },
+                  '&:hover': { borderColor: md.onPrimaryContainer, bgcolor: 'rgba(0,0,0,.06)' },
+                }}>
+                {t('import.tutorial')}
+              </Button>
+            )}
+          </Box>
+          {showMoreClients && (
+            <Button size="small" variant="text" startIcon={<DevicesOtherOutlinedIcon fontSize="small" />}
+              onClick={() => setTab('clients')}
+              sx={{ ml: 'auto', color: md.onPrimaryContainer }}>
+              {t('import.others_title', { defaultValue: '更多客户端' })}
+            </Button>
+          )}
+        </Box>
+      </Card>
+    )
+  }
+
   // Quick links are admin-configured web URLs. Require http(s) so a hostile
   // config can't smuggle a javascript:/data: URL that runs on click.
   function openQuickLink(l: { url: string; new_window: boolean }) {
@@ -795,70 +866,10 @@ export default function MeView() {
         <Tab value="status" label={t('tabs.server_status', { defaultValue: '服务器状态' })} sx={{ minHeight: 40 }} />
       </Tabs>
       {tab === 'status' && <ServerStatusPanel md={md} />}
-      {tab === 'overview' && (<>
-      {/* HERO — pick the client whose recommended_for covers the visitor's
-          detected platform. Falls back to nothing if no client is configured
-          for this OS (or detection fails entirely). */}
-      {(() => {
-        const platform = detectPlatform()
-        const hero = platform
-          ? importClients.find(c => c.recommended_for?.includes(platform))
-          : undefined
-        if (!hero) return null
-        return (
-          <Card sx={{ p: { xs: 2.5, sm: 3 }, mb: { xs: 2, sm: 3 }, bgcolor: md.primaryContainer, color: md.onPrimaryContainer }}>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
-              <StarIcon sx={{ fontSize: 18 }} />
-              <Typography sx={{ fontSize: 12, fontWeight: 500, textTransform: 'uppercase', letterSpacing: '.5px' }}>
-                {t('import.recommended_label', { defaultValue: '推荐客户端' })}
-              </Typography>
-            </Box>
-            <Typography sx={{ fontWeight: 500, mb: 0.5, fontSize: { xs: 20, sm: 24 }, lineHeight: 1.2 }}>
-              {hero.name}
-            </Typography>
-            <Typography variant="body2" sx={{ mb: 2, opacity: 0.85 }}>
-              {hero.platforms.map(p => t(`import.platform_${p}`, { defaultValue: p })).join(' · ')}
-            </Typography>
-            {/* On mobile pack the three buttons into a 2-col grid (导入 +
-                安装 on row 1, 查看教程 spans row 2) instead of stacking each
-                full-width — saves ~2 vertical button-heights. Desktop keeps
-                the inline row with comfortable large buttons. */}
-            <Box sx={{
-              display: { xs: 'grid', sm: 'flex' },
-              gridTemplateColumns: { xs: '1fr 1fr', sm: 'none' },
-              gap: { xs: 1, sm: 1.5 },
-              flexWrap: 'wrap',
-            }}>
-              <Button size={isMobile ? 'medium' : 'large'} variant="contained"
-                startIcon={<LaunchIcon />}
-                onClick={() => { void triggerImport(buildImportURL(hero)) }}
-                sx={{ bgcolor: md.primary, color: md.onPrimary, '&:hover': { bgcolor: md.primary } }}>
-                {t('import.import')}
-              </Button>
-              <Button size={isMobile ? 'medium' : 'large'} variant="outlined"
-                startIcon={<DownloadIcon />}
-                onClick={() => window.open(hero.install_url, '_blank', 'noopener,noreferrer')}
-                sx={{ borderColor: md.onPrimaryContainer, color: md.onPrimaryContainer,
-                  '&:hover': { borderColor: md.onPrimaryContainer, bgcolor: 'rgba(0,0,0,.06)' } }}>
-                {t('import.install')}
-              </Button>
-              {profile.sub_import_tutorial_url && (
-                <Button size={isMobile ? 'medium' : 'large'} variant="outlined"
-                  startIcon={<HelpOutlineIcon />}
-                  onClick={() => window.open(profile.sub_import_tutorial_url, '_blank', 'noopener,noreferrer')}
-                  sx={{
-                    borderColor: md.onPrimaryContainer, color: md.onPrimaryContainer,
-                    gridColumn: { xs: '1 / -1', sm: 'auto' },
-                    '&:hover': { borderColor: md.onPrimaryContainer, bgcolor: 'rgba(0,0,0,.06)' },
-                  }}>
-                  {t('import.tutorial')}
-                </Button>
-              )}
-            </Box>
-          </Card>
-        )
-      })()}
-      </>)}
+      {/* Pick the client recommended for the visitor's platform. The same card
+          leads both the overview and client tabs; only the overview adds the
+          small shortcut that switches to the complete client list. */}
+      {(tab === 'overview' || tab === 'clients') && renderRecommendedClient(tab === 'overview')}
       {/* Two-column layout below the hero. Each column is an independent
           flex stack so a tall card on one side doesn't open a gap on the
           other (grid-template-rows would force row alignment by max
