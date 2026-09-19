@@ -1,0 +1,94 @@
+# H 制品的运行验证（本机，2026-09-19）
+
+本文件记录 H_SAML / H_PASSKEY 两个**可部署制品**的构建与运行证据。制品存在的意义是回滚：M 阶段失败时回到 H，而不是回到未加固的 B0（见 [部署清单](../authcore-deployment-compatibility.md) §7）。
+
+## 1. 制品
+
+前端先构建（`go:embed` 依赖它），再构建二进制：
+
+```sh
+cd web-react && npm ci && npm run build && cd ..
+go build -ldflags='-s -w' -o <out> ./cmd/panel
+```
+
+| 制品 | 源码提交 | 说明 | sha256 |
+| --- | --- | --- | --- |
+| **H_SAML** | `ea01ea44`（H2 分支 `kazuha/saml-state-hardening` 的尖端） | SAML 加固线完整（H1+H2，ADR 0036 D1–D8） | `ef5b9b470e2f552e258d4164833d53efdb58803f43bb712a5071d6584f84c08a` |
+| **H_PASSKEY** | `af11cdb0`（H3 分支 `kazuha/passkey-state-hardening` 的尖端） | 上者 + Passkey 加固（§7.3/§7.4）与 ceremony 验收 | `1e1f669daf04f2db8dd79d1c2e5c5d8109e7f3ea9a194164cf7d962e0ffecb1d` |
+
+制品保存在仓库外（二进制不入库）：`~/Codes/psp-authcore-artifacts/psp-h-saml`、`~/Codes/psp-authcore-artifacts/psp-h-passkey`；若目录丢失，按本文件的构建命令与上表 SHA 可重建并逐字节核对。
+
+两者均为 65 MiB（`-s -w`）。前端构建产物在 `internal/web/dist/`（除 `.gitkeep` 外均被 gitignore），`npm run build` 的 postbuild 钩子重写 `.gitkeep` 后工作树保持干净——本次验证后 `git status` 无输出。
+
+## 2. 运行验证（H_SAML 制品，真实进程）
+
+在 `/tmp` 下以独立配置启动（`listen: 127.0.0.1:18788`，未占用既有实例端口），首次启动生成 bootstrap 管理员：
+
+```
+bootstrap admin created upn=admin password=<printed once> user_id=1 group=default
+```
+
+启动日志显示全部后台循环就绪（audit-cleanup / node-health / sync-task / traffic 等），并且：
+
+```
+[Error] database query failed err="SQL logic error: no such table: user_xui_clients (1)"
+[Info]  shared-client boot heal pass verified_or_repaired=1
+```
+
+`user_xui_clients` 查不到是**预期**行为：该表已退役且刻意不在 `schemaModels` 中，boot 的 shared-migration / heal 路径按设计自愈（见 `CLAUDE.md`）。
+
+### 2.1 内嵌 SPA 可用
+
+```
+$ curl -s -o index.html -w "status=%{http_code} bytes=%{size_download}\n" http://127.0.0.1:18788/
+status=200 bytes=1260
+```
+
+响应是 `renderIndex` 在请求时注入过的 `index.html`，`<base href="/"><meta name="psp-panel-path" content="">` 与哈希资源名 `./assets/index-DObIhmvW.js` 都在——即 `panel_path` 的运行时注入点在该制品中正常工作。
+
+### 2.2 管理员自检端点（D7/D8 的线上证据）
+
+```
+$ curl -s -H "Authorization: Bearer $TOKEN" \
+    http://127.0.0.1:18788/api/admin/settings/saml/preflight
+{
+  "configuration_valid": false,
+  "runtime_ready": false,
+  "login_url": "/api/auth/saml/login",
+  "supported_topology": "single_instance",
+  "checks": [
+    {"name":"public_base","status":"failed","detail":"the panel's public base URL (sub_base_url) is not configured, so the sign-in and callback URLs cannot be derived"},
+    {"name":"login_url","status":"failed","detail":"the public sign-in URL could not be derived: not an absolute URL"},
+    {"name":"https","status":"failed","detail":"both the panel's public base URL and the ACS URL must be HTTPS"},
+    {"name":"same_origin","status":"failed","detail":"the sign-in URL and the ACS URL must share an origin"},
+    {"name":"acs_url_shape","status":"failed","detail":"the configured ACS URL is not an absolute URL"},
+    {"name":"sp_entity_id","status":"failed","detail":"the SP entity ID is empty"},
+    {"name":"sp_keypair","status":"failed","detail":"the SP certificate and private key must both be provided"},
+    {"name":"idp_metadata_url","status":"failed","detail":"the IdP metadata URL must be an absolute URL"},
+    {"name":"database_write","status":"not_checked","detail":"a read-only database surfaces at the first login; this check does not write, and must not, to find out"},
+    {"name":"browser_cookie","status":"not_checked","detail":"whether a real browser stores and returns the binding cookie needs a browser; the deployment checklist's browser verification covers it"},
+    {"name":"provider_built","status":"failed","detail":"no usable provider is built; the IdP metadata fetch or the SP key material failed at boot — see the panel log"},
+    {"name":"replay_store","status":"passed"},
+    {"name":"request_store","status":"passed"}
+  ]
+}
+```
+
+这台全新实例没有配置 SAML，所以静态检查全项 `failed` 是**正确**结果；关键证据在最后两行：**`replay_store` 与 `request_store` 都是 `passed`**，即 H2 的装配检查在真实进程里确实看到了两个持久化存储，而 `provider_built` 恰当地为 `failed`。两个 `not_checked` 也如期出现，没有把"查不了"说成"查过了"。
+
+### 2.3 边界行为
+
+```
+== 未认证访问 preflight(应 401) ==        status=401
+== SSO 未启用时 GET /api/auth/saml/login(应 404) ==  status=404
+== SSO 未启用时 POST /api/auth/saml/acs(应 404) ==   status=404
+== 已认证 GET /api/admin/settings/saml ==  status=200
+```
+
+自检端点是**管理员专用**的（401），不是公开的认证面；SAML 未启用时登录入口与 ACS 都按设计 404。
+
+## 3. 未执行的验证（不声称已完成）
+
+- **前端 smoke**：`npm run smoke:dist` 在本机**不可运行**——脚本自身报 "The page never reached its --virtual-time-budget of 5s, so this is a browser or runner problem, NOT a rendering regression"，stderr 是 macOS headless Chrome 的 `CVDisplayLinkCreateWithCurrentCGDisplay failed` / `task_policy_set` 错误。这是运行环境问题，且本次改动**未触碰任何前端文件**。
+- **真实浏览器跨站 SAML 登录**（S18/S24）、**真实 IdP 端到端**：需要浏览器与测试 IdP，未执行；服务层的等价验收见 `internal/service/auth/saml_acs_test.go`（真实签名断言）与 `internal/service/passkey/ceremony_test.go`（真实 WebAuthn ceremony）。
+- **MySQL 腿**：本机无实例，仅 SQLite 与 PostgreSQL 18.4 实测。
