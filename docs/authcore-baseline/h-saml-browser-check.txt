@@ -1,0 +1,44 @@
+# SSO failure page — real-browser check (2026-09-19)
+
+Harness: the SPA served by `vite dev` (port 5174) from the hardened tree, opened in a real
+browser; the failure view renders from the query string alone, so no panel is involved and no
+TLS is needed for this check.
+
+## What was checked, and what the page showed
+
+Three loads, each read from the accessibility tree (not a screenshot alone), with the copy
+language set via `localStorage['psp-lang']`.
+
+| URL loaded | Language | Heading | Body |
+| --- | --- | --- | --- |
+| `/sso-error?error=saml_unavailable&description=IGNORED-FREE-TEXT` | en-US | `Sign-in temporarily unavailable` | `Sign-in is temporarily unavailable. Please retry shortly; if it persists, contact an administrator.` |
+| `/sso-error?error=auth_failed&description=IdP%20said%3A%20not%20licensed` | zh-CN | `认证失败` | `SSO 认证失败，请重试或联系管理员。` |
+| `/sso-error?error=saml_config` | zh-CN | `SSO 配置需要处理` | `身份提供方返回的响应未通过校验（签名算法、断言数量或目标地址）。请将这一情况告知管理员，以便修正 IdP 配置。` |
+
+The two loads carrying a `description` rendered the **localized copy**, and the description text
+(`IGNORED-FREE-TEXT`, `IdP said: not licensed`) appeared **nowhere** in the rendered tree. That is
+the property this change exists for: a description used to win over the copy, so an IdP's own
+words reached the page and the sentence was whatever the server happened to write.
+
+Also confirmed in the same session: the copy is looked up from `SSO_ERROR_KEYS`, so an unknown
+code falls back to the generic sentence rather than rendering a raw key.
+
+## Why a full browser SSO login was not run here
+
+It is **not possible in this environment, by design rather than by omission**. Three separate
+checks in the panel require HTTPS, and they are deliberate:
+
+- `internal/service/auth/saml_preflight.go` — the panel's public base URL and the ACS URL must
+  both be HTTPS, *because the browser binding cookie is `Secure; SameSite=None`, which an HTTP
+  origin cannot use* (pinned by `saml_preflight_test.go`, the `https` check).
+- The same file's `metadataURLProblem` — **the IdP metadata URL must be HTTPS too.**
+- `internal/pkg/safehttp` — the outbound dialer accepts a literal IP host and refuses loopback,
+  and it verifies TLS normally.
+
+So a local end-to-end login would need a publicly-trusted certificate for a local IdP, or a
+locally-trusted CA installed into the machine's trust store. The second is a machine-level change
+to the developer's system and was not made. What such a run would add over the tests is
+transport-level evidence — the `Set-Cookie` attributes on the wire and the redirect chain — so it
+remains the one gap worth closing **in a deployed environment**, where a real IdP and a real
+certificate already exist. The protocol itself is covered end to end by the S-series against a
+real signed Response (`saml_acs_test.go`, `saml_testidp_test.go`).
