@@ -1,16 +1,47 @@
 # Compatibility result validation
 
-Two checkers, because they answer different questions:
+Three tools, because they answer different questions:
 
 | Tool | Question |
 | --- | --- |
+| `plan.mjs` | **Which cases exist**, and what identity does each run against? |
 | `check-go-results.mjs` | Was **this case** measured? |
 | `check-case-set.mjs` | Was **every case** measured? |
 
-The second exists because the two failures look nothing alike. A cancelled
+The second and third exist because those failures look nothing alike. A cancelled
 matrix leg, or an artifact upload that failed, leaves every report that *did*
 arrive perfectly passing — so a gate that only inspected the reports it found
 would call that complete.
+
+## `plan.mjs`
+
+```bash
+node deploy/compat/plan.mjs --output plan.json      # the full plan
+node deploy/compat/plan.mjs --emit versions         # JSON array of versions
+node deploy/compat/plan.mjs --emit cases            # JSON array of case objects
+```
+
+**The supported version list is not in any of these files, and must not be.** It
+is sliced from `docs/compat/node-v4.json` by **position** at `min_supported` —
+never by comparing version strings, because `v0.0.1-beta9` sorts above
+`v0.0.1-beta11` and a comparison would silently invert the floor. Restating the
+list here would make the plan agree with itself while disagreeing with the
+manifest the panel ships, which is how a version stops being tested without
+anybody deciding it should.
+
+What `docs/compat/verification-v1.json` adds is **identity**: the commit each tag
+resolved to when it was first pinned. A version the manifest supports but the
+verification file does not pin **fails the plan**, rather than being tested
+against whatever the tag points at today. Both workflows check the resolved
+commit against the pinned one and refuse to run on a moved tag.
+
+The planner rejects: an unresolvable or empty floor, a duplicate version, a
+version with no pinned SHA, a version that is not a release version, a profile
+referencing a test set that does not exist, two cases resolving to one id, an
+empty required set, and an upgrade edge missing either end or half its schema. An
+exclusion must carry a reason; a bare version is not a decision, and hiding a
+known-bad release between two good ends of a range is what explicit exclusions
+exist to prevent.
 
 ## `check-go-results.mjs`
 
