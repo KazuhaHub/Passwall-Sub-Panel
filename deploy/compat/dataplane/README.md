@@ -68,6 +68,25 @@ here. What is established is that a subscriber who imports this render and does
 nothing else sends no traffic through the panel, which is worth a decision rather
 than an assumption.
 
+## Measured: the connection, and its refusal
+
+With the launcher publishing the node's port, the chain completes:
+
+| | Result |
+| --- | --- |
+| Baseline, through the node | `example.com -> HTTP 200` over `outbound/vless[r08-node3]` |
+| Panel-side counter after it | `inb 3 r08-i3 port 24447 | inb up 110` |
+| After expiring the user | `attempt 1 -> HTTP 000`, `attempt 2 -> HTTP 000` |
+| Panel-side after expiring | `u2@psp.local enable False`, `expiryTime 1789801199000` |
+
+The port stays open at the transport layer while the handshake is refused, which
+is the correct shape: the panel refuses at the protocol, not by dropping the
+listener.
+
+The expiry path was used rather than quota exhaustion. Both act on the same
+service axis, so this does not establish that the quota path behaves the same —
+it establishes the axis.
+
 ## What this does NOT establish
 
 - **That the traffic traversed the panel's core.** An earlier reading of this run
@@ -81,10 +100,8 @@ than an assumption.
   the panel, because the panel no longer holds PSP's node — the launcher was
   restarted afterwards and rebuilt the panel's volume, which removed the inbound
   PSP had created on it.
-- **Enforcement.** No test here disables the user, exhausts the quota, or expires
-  the subscription and confirms the next connection is refused. That is R08's
-  remaining half and the reason the policy separates "connected" from "correctly
-  refused".
+- **The quota path.** Expiry was used. Both act on the service axis, but a quota
+  exhaustion is a different trigger and is not tested here.
 - **The full protocol matrix.** One VLESS/TCP/none combination was exercised.
   TLS, REALITY and the other transports are not covered.
 
