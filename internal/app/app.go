@@ -351,9 +351,15 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	if err != nil {
 		return nil, fmt.Errorf("init saml: %w", err)
 	}
-	// Durable assertion-replay set. Without it, replay protection is
-	// process-local: a restart forgets every consumed assertion and a second
-	// instance never learns what the first consumed.
+	// Durable assertion-replay set — the ONLY replay authority since ADR 0036
+	// D1 removed the process-local fallback, so a nil store means every SSO
+	// login would be refused at the first attempt rather than at boot. This is
+	// an assembly error, not a runtime condition: a nil repo field has happened
+	// here before (AuthEvent came out nil from a field-by-field copy and
+	// handlers panicked), so it is checked where the wiring is, not trusted.
+	if samlCfg != nil && samlCfg.Enabled && repos.SAMLReplay == nil {
+		return nil, fmt.Errorf("saml is enabled but no durable assertion-replay store is wired")
+	}
 	samlSvc.SetReplayStore(repos.SAMLReplay)
 	oidcSvc, err := auth.NewOIDC(oidcCfg)
 	if err != nil {

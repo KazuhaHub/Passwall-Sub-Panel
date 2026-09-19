@@ -7,6 +7,7 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -18,11 +19,19 @@ import (
 	"github.com/crewjam/saml"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/config"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/log"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/safego"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/samlguard"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 )
+
+// ErrSAMLAssertionReplayed marks a Response whose assertion ID the durable set
+// has already consumed inside its validity window. It is deliberately NOT a
+// domain.ErrUnavailable: a replay is an attack signal an operator should alert
+// on, an unavailable store is an outage signal to fix, and folding them
+// together would make both unreadable.
+var ErrSAMLAssertionReplayed = errors.New("saml: assertion already consumed")
 
 // SAMLService is a thin wrapper around crewjam/saml's ServiceProvider that
 // exposes only what the panel's HTTP handlers need: AuthnRequest URL,
@@ -35,62 +44,57 @@ type SAMLService struct {
 	cfg *config.SAMLConfig
 	mu  sync.RWMutex
 	sp  *saml.ServiceProvider
-	// replay tracks Assertion IDs we've already accepted in the recent
-	// past so a stolen SAMLResponse can't be replayed inside its
-	// signature-validity window. crewjam/saml validates NotBefore /
-	// NotOnOrAfter and the signature, but does not maintain a
-	// consumed-ID set.
-	replay assertionReplayCache
-	// replayStore is the DURABLE consumed-ID set. The in-memory cache above
-	// only protects one running process, so on its own it leaves two windows
-	// open: a restart forgets every consumed ID, and a second panel instance
-	// never learns what the first consumed. When this is non-nil it is the
-	// authority; the memory cache stays as the fallback for the nil case and
-	// for transient DB errors. May be nil (tests, DB-less construction).
+	// replayStore is the durable consumed-assertion set and the ONLY replay
+	// authority. crewjam/saml validates NotBefore / NotOnOrAfter and the
+	// signature but keeps no consumed-ID set of its own, and a process-local one
+	// cannot answer "has this assertion been used before" across a restart or a
+	// second instance — so it is not kept as a fallback (ADR 0036 D1). Wired by
+	// SetReplayStore at startup; nil means every login is refused rather than
+	// silently unchecked.
 	replayStore ports.SAMLReplayRepo
 }
 
 // SetReplayStore installs the durable replay set. Wired in app startup once the
-// repositories exist; safe to leave unset, in which case replay protection
-// degrades to the process-local cache (pre-existing behaviour).
+// repositories exist, and REQUIRED whenever SAML is enabled: leaving it unset
+// refuses every login rather than degrading to process-local protection.
 func (s *SAMLService) SetReplayStore(r ports.SAMLReplayRepo) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.replayStore = r
 }
 
-// assertionAlreadyConsumed reports whether this assertion ID has already been
-// spent. It ALWAYS records into the in-memory cache (cheap, and it keeps
-// single-process protection intact no matter what the database does), then lets
-// the durable store override the answer when one is configured.
+// assertNotConsumed records the assertion ID and returns nil only when the
+// login may proceed. Three outcomes, three classes:
 //
-// On a store error the durable answer is unavailable, and the two options are
-// to fail the login or to fall back to the memory result. Falling back is
-// chosen deliberately: a transient DB blip would otherwise lock every SSO user
-// out, and the fallback is exactly the protection level that shipped before
-// this table existed — never weaker. The error is logged at ERROR so the
-// degradation is visible rather than silent.
-func (s *SAMLService) assertionAlreadyConsumed(ctx context.Context, id string, expiresAt, now time.Time) bool {
-	memorySeen := s.replay.SeenOrAdd(id, expiresAt, now)
-
+//	nil                        — not seen before; the assertion is now recorded
+//	ErrSAMLAssertionReplayed   — already used inside its window (an attack signal)
+//	domain.ErrUnavailable      — the question could not be answered (an outage signal)
+//
+// It returns an error rather than a bool deliberately. A bool has a fail-open
+// spelling, and for a replay check the fail-open direction is an accepted
+// replay, so the shape of the return value is part of the control (ADR 0036 D1).
+func (s *SAMLService) assertNotConsumed(ctx context.Context, id string, expiresAt, now time.Time) error {
 	s.mu.RLock()
 	store := s.replayStore
 	s.mu.RUnlock()
 	if store == nil {
-		return memorySeen
+		// Answer "unavailable", never "not seen". A missing store is an assembly
+		// error, and with no durable set there is no answer that survives a
+		// restart — so there is no safe answer at all.
+		return fmt.Errorf("%w: no durable assertion-replay store is configured", domain.ErrUnavailable)
 	}
-
 	seen, err := store.SeenOrAdd(ctx, id, expiresAt, now)
 	if err != nil {
-		log.Error("saml: durable replay check failed, falling back to in-process cache "+
-			"(replay protection is process-local until the store recovers)",
-			"assertion_id", id, "err", err)
-		return memorySeen
+		// Propagate as its own class and do NOT consult anything process-local.
+		// A fallback here would leave a database outage indistinguishable from
+		// normal operation while quietly downgrading replay protection to one
+		// process, which is exactly the trade ADR 0036 D1 reverses.
+		return fmt.Errorf("%w: replay store: %w", domain.ErrUnavailable, err)
 	}
-	// Either source claiming the ID is enough: the memory cache catches a
-	// same-process double submit even if the row was swept, and the store
-	// catches submits this process never saw.
-	return seen || memorySeen
+	if seen {
+		return ErrSAMLAssertionReplayed
+	}
+	return nil
 }
 
 // NewSAML constructs the service. If cfg.Enabled is false, the returned
@@ -581,9 +585,17 @@ func (s *SAMLService) ParseACSResponse(r *http.Request, possibleRequestIDs []str
 		// cache already expired it. Pad by MaxClockSkew to close that window.
 		exp = assertion.Conditions.NotOnOrAfter.Add(saml.MaxClockSkew)
 	}
-	if s.assertionAlreadyConsumed(r.Context(), assertion.ID, exp, time.Now()) {
-		log.Warn("saml: assertion replay detected", "assertion_id", assertion.ID)
-		return nil, fmt.Errorf("SAML assertion already consumed")
+	if err := s.assertNotConsumed(r.Context(), assertion.ID, exp, time.Now()); err != nil {
+		if errors.Is(err, ErrSAMLAssertionReplayed) {
+			log.Warn("saml: assertion replay detected", "assertion_id", assertion.ID)
+		} else {
+			// An unanswered replay question is an infrastructure fault, not an
+			// attack. Logged at ERROR so a degraded control is visible instead of
+			// being buried among ordinary SSO failures (ADR 0036 §6.5.1).
+			log.Error("saml: replay store unavailable, refusing the login",
+				"assertion_id", assertion.ID, "err", err)
+		}
+		return nil, fmt.Errorf("SAML response rejected: %w", err)
 	}
 
 	out := &SAMLAssertion{Attributes: map[string][]string{}}
