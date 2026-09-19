@@ -266,6 +266,38 @@ test('the release gate records an evidence index', () => {
   assert(gate.includes('compatibility-evidence-index'), 'the index must be uploaded, or it expires with the runner')
 })
 
+// R10 STEP 5: signature verification and the candidate's test trust chain are
+// SEPARATE, and a private candidate must never be made trusted by relaxing the
+// publisher. The manual's words are "do not modify production code to trust an
+// arbitrary release source for a private candidate".
+//
+// PSP publishes checksums rather than signatures, so there is no signature step
+// to separate here — but the same rule has a checkable form: the publisher must
+// still verify what it produced, and nothing in the path may be relaxed to make a
+// candidate pass. Each pattern below is a way that rule gets broken quietly.
+test('the publisher verifies its own artifacts and relaxes nothing', () => {
+  // The checksum verification has to be a real step, not a swallowed one. Asserting
+  // only that the command appears is not enough — it still appears with `|| true`
+  // appended, and that is precisely the shape a quiet relaxation takes.
+  const verifyLines = workflow.split('\n').filter((line) => /sha256sum -c\s+SHA256SUMS\.txt/.test(line))
+  assert(verifyLines.length > 0, 'the publisher must verify the checksums it published')
+  for (const line of verifyLines) {
+    const after = line.slice(line.indexOf('SHA256SUMS.txt') + 'SHA256SUMS.txt'.length)
+    assert(!/\|\||&&|;/.test(after), `the checksum verification is followed by more shell, which can swallow its failure: ${line.trim()}`)
+  }
+  for (const pattern of [
+    /\|\|\s*true[^\n]*sha256/i,
+    /sha256sum[^\n]*--insecure/,
+    /--no-check-certificate/,
+    /NODE_TLS_REJECT_UNAUTHORIZED/,
+    /npm[^\n]*--strict-ssl[= ]false/,
+    /docker[^\n]*--tls-verify[= ]false/,
+    /cosign[^\n]*--insecure-ignore-tlog/
+  ]) {
+    assert(!pattern.test(workflow), `the publisher relaxes verification: ${pattern}`)
+  }
+})
+
 test('publisher cache guard rejects implicit defaults and explicit cache restoration', () => {
   for (const [label, mutated] of [
     ['implicit Go cache', workflow.replace('          cache: false\n', '')],
