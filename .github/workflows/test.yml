@@ -329,7 +329,18 @@ jobs:
           # Each suite gets its own log and its own validator run: they are
           # different packages with different profiles, and a single combined
           # verdict could not say which of them measured less than it claims.
-          eval "$(deploy/compat/backends/third-party.sh env)"
+          # FAIL LOUDLY IF THE ENVIRONMENT IS EMPTY. An `env` that quietly
+          # produces nothing leaves the tests to SKIP, and a skip is not a pass —
+          # the validator below reports it as one of those, naming the profile
+          # rather than the launcher that never gave it anything to run with.
+          service_env=$(deploy/compat/backends/third-party.sh env)
+          test -n "$service_env"
+          echo "$service_env" | sed 's/\(TOKEN=\).*/\1<redacted>/'
+          eval "$service_env"
+          for name in PSP_LIVE_XUI_URL PSP_LIVE_XUI_TOKEN PSP_LIVE_SUI_URL PSP_LIVE_SUI_TOKEN; do
+            eval "value=\$$name"
+            test -n "$value" || { echo "::error::$name is empty; the launcher did not publish it"; exit 1; }
+          done
           run_suite() {
             profile="$1"; pkg="$2"; out="$3"
             code=0
