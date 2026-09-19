@@ -88,6 +88,18 @@
 - 运行时界面／API 示例
 - 发布 needs 图（`compatibility gate` 是所有发布动作的唯一入口）
 
+### 发布路径的试跑范围（2026-09-19）
+
+R10 的路径被真实执行到**推广之前**为止，全部在本地、不产生任何公开产物：
+
+| 步骤 | 执行了什么 | 结果 |
+| --- | --- | --- |
+| 2 构建候选 | 六个目标（linux/darwin/windows × amd64/arm64）用 release 的同一组 `-trimpath -ldflags` 构建，逐个过 `deploy/check-build.sh` | 六个全部通过来源校验（编译器、GOOS/GOARCH、`vcs.revision`、干净工作树、CGO 关闭） |
+| 3 运行证据 | darwin/arm64 二进制**原生**执行 `psp version`；linux 侧由 `test.yml` 的 `container` 作业提供运行基线 | 报出被戳入的 version 与 commit，退出 0 |
+| 4 证据索引 | 在提交 `d9008721` 上取该次 CI 的四个 artifact，配本地六个产物的 sha256，跑 `evidence-index.mjs` | 11 个 case、`missing: []`、退出 0 |
+
+**没有做的是推广**：打 tag、上传归档、推 `:latest`／`:beta`。那是不可逆的公开动作，也正因为它是路径的最后一步而不是路径本身，上面的试跑不能替代它——**一次真实发布仍然没有发生过**，R10 的"候选→摘要→门禁→索引→推广同一摘要"里最后一环尚无实机证据。
+
 ### 分支保护现状
 
 `main` 由 ruleset `main protection`（id `23046834`，`enforcement: active`，范围 `refs/heads/main`）约束，规则为 `deletion` / `non_fast_forward` / `pull_request` / `required_status_checks`。要求的检查是九个：
