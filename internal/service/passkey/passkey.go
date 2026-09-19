@@ -12,6 +12,7 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -411,10 +412,14 @@ func (s *Service) FinishLoginForUser(ctx context.Context, userID int64, sessionI
 // cred.Authenticator.CloneWarning and keeps the OLD count (and deliberately
 // exempts the all-zero case, so platform authenticators that always report
 // counter 0 are not falsely flagged). So CloneWarning — not the DB gate — is the
-// real clone guard; refuse the login when it's set. The gated UpdateAfterLogin
-// then keeps the stored count monotonic, but a lost gate there is a benign
-// concurrent-login race (another login already advanced it), not a clone, so it
-// must NOT fail the login.
+// real clone guard; refuse the login when it's set.
+//
+// The gated write keeps the stored count monotonic, and when its gate refuses the
+// write the cause has to be looked up rather than assumed. A concurrent login
+// that stored at least this count is benign; a credential that was revoked
+// between verification and here is not, and silently continuing would let an
+// administrator's revoke fail to take effect on a login that was already in
+// flight (ADR 0036 §7.3).
 func (s *Service) finalizeAssertion(ctx context.Context, stored *domain.PasskeyCredential, cred *webauthn.Credential) error {
 	if cred.Authenticator.CloneWarning {
 		return fmt.Errorf("%w: authenticator state regression (possible clone or replay)", domain.ErrUnauthorized)
@@ -423,9 +428,38 @@ func (s *Service) finalizeAssertion(ctx context.Context, stored *domain.PasskeyC
 	if err != nil {
 		return err
 	}
-	if _, err := s.d.Creds.UpdateAfterLogin(ctx, stored.ID, raw, int64(cred.Authenticator.SignCount), s.now()); err != nil {
+	presented := int64(cred.Authenticator.SignCount)
+	applied, err := s.d.Creds.UpdateAfterLogin(ctx, stored.ID, raw, presented, s.now())
+	if err != nil {
 		return err
 	}
+	if applied {
+		return nil
+	}
+
+	// The gate refused the write. Only a look can say which of the two causes it
+	// was, and the two mean opposite things.
+	current, err := s.d.Creds.FindByCredentialID(ctx, stored.CredentialID)
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			return fmt.Errorf("%w: the credential was revoked during the login", domain.ErrUnauthorized)
+		}
+		// An unreadable credential is an infrastructure failure, and saying
+		// "unauthorized" for it would teach an operator to distrust the word.
+		return fmt.Errorf("passkey: re-reading the credential after a refused write gate: %w", err)
+	}
+	if current == nil || current.ID != stored.ID || current.UserID != stored.UserID {
+		// Another row owns this credential ID now, or the row moved to a different
+		// account. Either way the assertion does not belong to it.
+		return fmt.Errorf("%w: the credential no longer belongs to the verified account", domain.ErrUnauthorized)
+	}
+	if current.SignCount < presented {
+		// The gate should have matched a count this far behind, so its refusal came
+		// from something other than a concurrent advance. Refuse rather than guess.
+		return fmt.Errorf("%w: the stored sign count is behind this assertion with no concurrent advance", domain.ErrUnauthorized)
+	}
+	// A concurrent login got there first and stored at least this count: the
+	// monotonicity the gate exists to keep, and not a clone.
 	return nil
 }
 
