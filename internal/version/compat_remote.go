@@ -95,6 +95,16 @@ type remoteCompatPayload struct {
 	// entries replace only the XUI/SUI ranges. Advisories stay in this base
 	// document so old readers retain the full upgrade guidance.
 	RangeOverlay string `json:"range_overlay,omitempty"`
+	// UpgradeEdges lists the Node upgrade edges that have been VERIFIED. It is
+	// the same model the planner validates in docs/compat/verification-v1.json,
+	// republished here because the runtime can only read this document.
+	//
+	// OPTIONAL, and its absence is meaningful rather than tolerated: a manifest
+	// without it publishes no verified edge, so no upgrade is recommended. That
+	// is the state every manifest is in today, and it is the truthful one — an
+	// edge is a claim that somebody checked a specific path, not a property of
+	// the target release.
+	UpgradeEdges []UpgradeEdge `json:"upgrade_edges,omitempty"`
 }
 
 // remoteCompatPSPEntry covers one PSP version range. In a schema-v2 base
@@ -382,6 +392,10 @@ func fetchAndApply(ctx context.Context, url string) error {
 	// Advisories are top-level (PSP-version-independent) and runtime-only; install
 	// the whole map, canonicalizing keys so "v3.5.0"/"3.5" both resolve on lookup.
 	SetActiveAdvisories(canonAdvisories(payload.Advisories))
+	// Edges come from the BASE document, not the range overlay: an overlay
+	// carries ranges, while an edge is a claim about a path — a reviewer signs
+	// off on the path, and replacing ranges must not silently restate it.
+	SetActiveUpgradeEdges(payload.UpgradeEdges)
 	applySUICompat(payload)
 	_ = saveCompatCache(entry.MaxTestedXUI)
 	// Recorded AFTER the install succeeds, so a failure part-way leaves the old

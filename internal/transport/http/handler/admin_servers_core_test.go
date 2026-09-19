@@ -16,6 +16,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/nodecompat"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/version"
 )
 
 type nativeCoreClientStub struct {
@@ -225,6 +226,11 @@ func TestServerListSeparatesDesiredAndObservedNativeCoreWithoutPerRowQueries(t *
 		ObservedCoreEngine: domain.NodeCoreXray, ObservedProtocolVersion: nodeprotocol.ProtocolVersion1,
 		ObservedCapabilities: nodeprotocol.AgentUpgradeCapabilities(), ProtocolObservedAt: &protocolObservedAt,
 	}}}
+	// THE EDGE IS PART OF THE FIXTURE: readiness now also requires a verified
+	// path out of the version this panel reports, so a fixture that expects
+	// NodeUpgradeReady has to publish the path it expects to take.
+	version.SetActiveUpgradeEdges([]version.UpgradeEdge{{ID: "fixture", From: "v0.2.0", To: "v0.2.1"}})
+	t.Cleanup(func() { version.SetActiveUpgradeEdges(nil) })
 	handler := &AdminServersHandler{
 		repo: nativeCoreListPanelRepo{panels: []*domain.XUIPanel{panel}},
 		pool: fakeWebCertPool{client: &nativeCoreClientStub{}}, agents: agents,
@@ -262,7 +268,12 @@ func TestServerListSeparatesDesiredAndObservedNativeCoreWithoutPerRowQueries(t *
 }
 
 func TestNativeCompatibilityDTOStatesAreFailClosed(t *testing.T) {
-	panel := &domain.XUIPanel{ID: 9, Kind: domain.PanelKindPSP, Name: "native"}
+	// A VERSION AND AN EDGE, for the same reason as above: with neither, every
+	// row below is edge-less and the "compatible" case could not distinguish
+	// "upgradeable" from "merely compatible".
+	panel := &domain.XUIPanel{ID: 9, Kind: domain.PanelKindPSP, Name: "native", PanelVersion: "v0.2.0"}
+	version.SetActiveUpgradeEdges([]version.UpgradeEdge{{ID: "fixture", From: "v0.2.0", To: "v0.2.1"}})
+	t.Cleanup(func() { version.SetActiveUpgradeEdges(nil) })
 	handler := &AdminServersHandler{pool: fakeWebCertPool{client: &nativeCoreClientStub{}}}
 	observedAt := time.Date(2026, 9, 16, 13, 0, 0, 0, time.UTC)
 	for _, test := range []struct {
@@ -288,5 +299,43 @@ func TestNativeCompatibilityDTOStatesAreFailClosed(t *testing.T) {
 				t.Fatalf("compatibility = %+v", got)
 			}
 		})
+	}
+}
+
+// THE LIST CANNOT OFFER WHAT ADMISSION REFUSES.
+//
+// Admission now requires a verified from→to edge as well as an eligible node, so
+// a list that reported readiness on eligibility alone would offer an upgrade
+// every request is refused for — the drift `nodecompat` exists to prevent. This
+// pins the split: the node stays `compatible`, because it is, and readiness
+// alone goes false, with the reason naming the edge rather than the evidence.
+func TestNativeUpgradeReadinessRequiresAVerifiedEdge(t *testing.T) {
+	observedAt := time.Date(2026, 9, 16, 14, 0, 0, 0, time.UTC)
+	panel := &domain.XUIPanel{ID: 9, Kind: domain.PanelKindPSP, Name: "native", PanelVersion: "v0.2.0"}
+	agent := &domain.NodeAgent{
+		ObservedProtocolVersion: nodeprotocol.ProtocolVersion1,
+		ObservedCapabilities:    nodeprotocol.AgentUpgradeCapabilities(),
+		ProtocolObservedAt:      &observedAt,
+	}
+	handler := &AdminServersHandler{pool: fakeWebCertPool{client: &nativeCoreClientStub{}}}
+	policy := nodecompat.Policy(nodecompat.DefaultObservationAge())
+
+	version.SetActiveUpgradeEdges(nil)
+	t.Cleanup(func() { version.SetActiveUpgradeEdges(nil) })
+	without := handler.toServerDTOWithAgent(panel, agent, policy)
+	if without.NodeCompatibility != "compatible" {
+		t.Fatalf("the node is eligible and must still read compatible: %+v", without)
+	}
+	if without.NodeUpgradeReady {
+		t.Fatal("readiness was offered with no verified edge out of the node's version")
+	}
+	if without.NodeCompatibilityReason != "upgrade-edge-missing" {
+		t.Fatalf("reason = %q, want the edge named rather than the evidence", without.NodeCompatibilityReason)
+	}
+
+	version.SetActiveUpgradeEdges([]version.UpgradeEdge{{ID: "fixture", From: "v0.2.0", To: "v0.2.1"}})
+	with := handler.toServerDTOWithAgent(panel, agent, policy)
+	if !with.NodeUpgradeReady {
+		t.Fatal("a verified edge out of the node's version did not restore readiness")
 	}
 }

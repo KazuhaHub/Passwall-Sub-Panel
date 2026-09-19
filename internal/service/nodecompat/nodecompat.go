@@ -123,6 +123,13 @@ func Message(agent *domain.NodeAgent, decision compatadmission.Decision) string 
 		compatibility := nodeprotocol.AssessCompatibility(agent.ObservedProtocolVersion, agent.ObservedCapabilities)
 		return fmt.Sprintf("native agent does not currently advertise remote-upgrade capabilities: %s",
 			strings.Join(compatibility.MissingAgentUpgrade, ", "))
+	case compatadmission.ReasonUpgradeEdgeMissing:
+		// The model's own Detail says the edge is unverified without saying which
+		// one, because it does not know this layer's vocabulary for ends. Naming
+		// both here is what makes the refusal actionable: the operator can see
+		// that the incompatibility is with the PAIR they asked for, not with the
+		// node, which is still eligible.
+		return "this node is compatible, but the requested upgrade path has not been verified; no upgrade is offered along an edge nobody checked"
 	default:
 		return decision.Detail
 	}

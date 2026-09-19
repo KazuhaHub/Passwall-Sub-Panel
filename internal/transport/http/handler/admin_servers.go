@@ -1692,7 +1692,27 @@ func (h *AdminServersHandler) toServerDTOWithAgent(p *domain.Panel, agent *domai
 				decision := nodecompat.Decide(agent, compatadmission.OperationUpgradeEligibility, time.Now().UTC(), policy)
 				dto.NodeCompatibility = nodeCompatibilityState(decision)
 				dto.NodeCompatibilityReason = string(decision.Reason)
-				dto.NodeUpgradeReady = decision.Allowed
+				// THE LIST MUST NOT OFFER WHAT ADMISSION REFUSES. Eligibility is
+				// no longer the whole answer: admission also requires a verified
+				// from→to edge, so a node with no verified path out of the
+				// version it reports has to read as not-ready here too — or the
+				// dialog offers an upgrade that every request is refused for.
+				//
+				// WHAT THIS ASKS IS DELIBERATELY WEAKER THAN ADMISSION ASKS. A
+				// list names no target, so it cannot ask whether one specific
+				// edge is verified; it asks whether ANY verified edge leaves the
+				// node's current version. That is enough to stop the drift, and
+				// the reason names the edge rather than the evidence so an
+				// operator can tell the two refusals apart.
+				// The version read here is the PANEL row's, which for a native
+				// node is the agent's own report — nodesync writes
+				// report.AgentVersion through UpdateVersion. There is no
+				// version field on NodeAgent to read instead.
+				edgeFromHere := version.HasUpgradeEdgeFrom(p.PanelVersion)
+				if decision.Allowed && !edgeFromHere {
+					dto.NodeCompatibilityReason = string(compatadmission.ReasonUpgradeEdgeMissing)
+				}
+				dto.NodeUpgradeReady = decision.Allowed && edgeFromHere
 			}
 		}
 	}
