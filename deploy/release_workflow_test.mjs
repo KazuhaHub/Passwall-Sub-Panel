@@ -222,6 +222,137 @@ test('the compatibility gate actually runs the case-set checker', () => {
   assert(gate.includes('actions/download-artifact'))
 })
 
+// R10 STEP 1, MADE ENFORCEABLE. "Walk the release needs graph and list every job
+// that really writes a release asset, an image or a channel" is a one-off reading
+// of the file; the property worth keeping is that a job ADDED LATER cannot write
+// without the gate. So the publishing set is derived from what each job is
+// permitted to write, not listed here — a list would only confirm that someone
+// remembered to update it.
+test('every job that can write is behind the compatibility gate', () => {
+  const names = [...workflow.matchAll(/^  ([a-z][a-z0-9_-]*):\n/gm)].map((m) => m[1])
+  assert(names.length > 3, `expected the workflow to declare jobs, found ${names.length}`)
+  const writers = names.filter((name) => /^ {6}(contents|packages|id-token):\s*write\s*$/m.test(job(name)))
+  assert(writers.length > 0, 'no job can write; either the workflow changed or this matcher broke')
+  for (const name of writers) {
+    assert(
+      /needs: \[[^\]]*\bcompatibility\b[^\]]*\]/.test(job(name)),
+      `${name} can write but does not depend on the compatibility summary`
+    )
+  }
+})
+
+// R10 STEP 3: "cross-platform compilation does not substitute for runtime
+// acceptance". The compile matrix is what makes a release buildable on every
+// platform; it is not evidence that any of them RUNS. A publishing job that
+// depends on it must still depend on the gate, or a green cross-compile would
+// stand in for acceptance.
+test('a cross-compile job is never a publishing job\'s only dependency', () => {
+  for (const name of ['release', 'docker']) {
+    const needs = /needs: \[([^\]]*)\]/.exec(job(name))
+    assert(needs, `${name} declares no needs`)
+    const deps = needs[1].split(',').map((d) => d.trim())
+    assert(deps.includes('compatibility'), `${name} must depend on the gate`)
+  }
+})
+
+// R10 STEP 4: the evidence index is what still exists once the run's logs have
+// expired, so its absence is not a missing convenience — it is a claim nobody can
+// check later. Asserted by shape because this guard reads the workflow as text:
+// the step must name the indexer and the index must be uploaded.
+test('the release gate records an evidence index', () => {
+  const gate = job('compatibility')
+  assert(gate.includes('deploy/compat/evidence-index.mjs'), 'the gate must assemble an evidence index')
+  assert(gate.includes('deploy/compat/plan.mjs'), 'the index must be built against the planned case manifest, not the reports')
+  assert(gate.includes('compatibility-evidence-index'), 'the index must be uploaded, or it expires with the runner')
+})
+
+// R10 STEP 5: signature verification and the candidate's test trust chain are
+// SEPARATE, and a private candidate must never be made trusted by relaxing the
+// publisher. The manual's words are "do not modify production code to trust an
+// arbitrary release source for a private candidate".
+//
+// PSP publishes checksums rather than signatures, so there is no signature step
+// to separate here — but the same rule has a checkable form: the publisher must
+// still verify what it produced, and nothing in the path may be relaxed to make a
+// candidate pass. Each pattern below is a way that rule gets broken quietly.
+test('the publisher verifies its own artifacts and relaxes nothing', () => {
+  // The checksum verification has to be a real step, not a swallowed one. Asserting
+  // only that the command appears is not enough — it still appears with `|| true`
+  // appended, and that is precisely the shape a quiet relaxation takes.
+  const verifyLines = workflow.split('\n').filter((line) => /sha256sum -c\s+SHA256SUMS\.txt/.test(line))
+  assert(verifyLines.length > 0, 'the publisher must verify the checksums it published')
+  for (const line of verifyLines) {
+    const after = line.slice(line.indexOf('SHA256SUMS.txt') + 'SHA256SUMS.txt'.length)
+    assert(!/\|\||&&|;/.test(after), `the checksum verification is followed by more shell, which can swallow its failure: ${line.trim()}`)
+  }
+  for (const pattern of [
+    /\|\|\s*true[^\n]*sha256/i,
+    /sha256sum[^\n]*--insecure/,
+    /--no-check-certificate/,
+    /NODE_TLS_REJECT_UNAUTHORIZED/,
+    /npm[^\n]*--strict-ssl[= ]false/,
+    /docker[^\n]*--tls-verify[= ]false/,
+    /cosign[^\n]*--insecure-ignore-tlog/
+  ]) {
+    assert(!pattern.test(workflow), `the publisher relaxes verification: ${pattern}`)
+  }
+})
+
+// R10 STEP 7: "rolling channels follow the repository's existing semantics, and
+// a candidate that did not pass cannot become an automatic upgrade target."
+//
+// The string assertions above prove the expressions are still written. They do not
+// prove the expressions are RIGHT, and this is the one place where being wrong is
+// silent and public: `:latest` mirrors GitHub's /releases/latest, which PSP's own
+// in-app upgrade nudge reads, so a prerelease reaching `latest` offers every
+// installed panel a beta it never asked for. So the expressions are EXTRACTED and
+// EVALUATED against tags that matter, rather than pattern-matched.
+function channelEnabled(expression, tag) {
+  const startsWithV = tag.startsWith('v')
+  const containsHyphen = tag.includes('-')
+  switch (expression) {
+    case 'startsWith_v:!contains_hyphen':
+      return startsWithV && !containsHyphen
+    case 'startsWith_v':
+      return startsWithV
+    default:
+      throw new Error(`unknown channel expression: ${expression}`)
+  }
+}
+
+function channelExpressions(dockerJob) {
+  const latest = /value=latest,enable=\$\{\{ (.*?) \}\}/.exec(dockerJob)
+  const beta = /value=beta,enable=\$\{\{ (.*?) \}\}/.exec(dockerJob)
+  assert(latest && beta, 'the image channels must both declare an enable condition')
+  const normalise = (expr) => {
+    const v = /startsWith\([^,]+,\s*'v'\)/.test(expr)
+    const hyphen = /!contains\([^,]+,\s*'-'\)/.test(expr)
+    if (v && hyphen) return 'startsWith_v:!contains_hyphen'
+    if (v && !expr.includes('contains')) return 'startsWith_v'
+    throw new Error(`the channel condition is not one this guard understands: ${expr}`)
+  }
+  return { latest: normalise(latest[1]), beta: normalise(beta[1]) }
+}
+
+test('latest never points at a prerelease and beta always tracks the newest of any kind', () => {
+  const { latest, beta } = channelExpressions(job('docker'))
+  const cases = [
+    ['v1.0.0', true, true],
+    ['v4.0.0', true, true],
+    // The scheme this project actually publishes.
+    ['v0.0.1-beta11', false, true],
+    ['v0.0.1-beta9', false, true],
+    ['v1.0.0-rc1', false, true],
+    // Not a release tag at all; neither channel may move.
+    ['1.0.0', false, false],
+    ['nightly', false, false]
+  ]
+  for (const [tag, wantLatest, wantBeta] of cases) {
+    assert.equal(channelEnabled(latest, tag), wantLatest, `latest for ${tag}`)
+    assert.equal(channelEnabled(beta, tag), wantBeta, `beta for ${tag}`)
+  }
+})
+
 test('publisher cache guard rejects implicit defaults and explicit cache restoration', () => {
   for (const [label, mutated] of [
     ['implicit Go cache', workflow.replace('          cache: false\n', '')],

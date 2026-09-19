@@ -63,6 +63,9 @@ HOST="${PSP_BACKEND_HOST:-127.0.0.1}"
 XUI_PORT="${PSP_LIVE_XUI_PORT:-2053}"
 SUI_PORT="${PSP_LIVE_SUI_PORT:-2095}"
 XUI_NAME=psp-compat-3xui
+# The range a rendered node may use; published so a client outside the container
+# can reach it.
+NODE_PORT_RANGE="${PSP_LIVE_XUI_NODE_PORTS:-24443-24450}"
 SUI_NAME=psp-compat-sui
 
 log() { printf '%s\n' "$*" >&2; }
@@ -170,7 +173,13 @@ up() {
   log "pulling $THIRD_PARTY_IMAGE_3XUI"
   $SUDO "$RUNTIME" pull "$THIRD_PARTY_IMAGE_3XUI" >/dev/null
   $SUDO "$RUNTIME" rm -f "$XUI_NAME" >/dev/null 2>&1 || true
-  $SUDO "$RUNTIME" run -d --name "$XUI_NAME" -p "$XUI_PORT:2053" -v "$WORKDIR/3xui:/etc/x-ui" "$THIRD_PARTY_IMAGE_3XUI" >/dev/null
+  # THE NODE PORT RANGE IS PUBLISHED TOO. Only the panel port would leave every
+  # inbound the panel creates — and therefore every subscription rendered from
+  # it — unreachable from outside the container, so a dataplane test would fail
+  # with connection refused against a node that is correctly configured.
+  # 3X-UI restarts its core when an inbound is added, so the range has to be
+  # published before the node exists.
+  $SUDO "$RUNTIME" run -d --name "$XUI_NAME" -p "$XUI_PORT:2053" -p "$NODE_PORT_RANGE:$NODE_PORT_RANGE" -v "$WORKDIR/3xui:/etc/x-ui" "$THIRD_PARTY_IMAGE_3XUI" >/dev/null
   XUI_ORIGIN="http://$HOST:$XUI_PORT"
   wait_for "$XUI_ORIGIN/" 120
   log "3X-UI ready at $XUI_ORIGIN"
