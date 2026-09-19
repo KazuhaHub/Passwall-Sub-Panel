@@ -232,4 +232,43 @@ describe('SyncStatusCard', () => {
 
     expect(screen.getByText('自动刷新已暂停，以下为上次观察结果，可能已经变化')).toBeTruthy()
   })
+
+  it('never lands one target\'s late answer on another', async () => {
+    // The first target answers slowly; the admin switches to a second before it
+    // does. An answer for the first must not appear under the second — the read
+    // is keyed by target, so the late response belongs to a cache entry this
+    // card is no longer rendering.
+    let releaseSlow: () => void = () => {}
+    api.get.mockImplementation((url: string) => {
+      if (String(url).includes('/users/7/')) {
+        return new Promise(resolve => {
+          releaseSlow = () => resolve({
+            data: statusBody({ target_id: 7, state: 'active_tasks', active_tasks: [{ ...pendingTask, id: 71, type: 'user_resync' }] }),
+          })
+        })
+      }
+      return Promise.resolve({
+        data: statusBody({ target_id: 9, state: 'active_tasks', active_tasks: [{ ...pendingTask, id: 91, type: 'user_delete' }] }),
+      })
+    })
+
+    const { rerender } = render(
+      <ThemeProvider theme={theme}>
+        <SyncStatusCard userId={7} />
+      </ThemeProvider>,
+      { wrapper: queryWrapper(makeTestQueryClient()) },
+    )
+    rerender(
+      <ThemeProvider theme={theme}>
+        <SyncStatusCard userId={9} />
+      </ThemeProvider>,
+    )
+
+    await waitFor(() => expect(screen.getByText('user_delete')).toBeTruthy())
+
+    await act(async () => { releaseSlow() })
+
+    expect(screen.getByText('user_delete')).toBeTruthy()
+    expect(screen.queryByText('user_resync')).toBeNull()
+  })
 })
