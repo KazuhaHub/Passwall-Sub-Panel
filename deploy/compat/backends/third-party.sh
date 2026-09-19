@@ -115,7 +115,7 @@ sui_token() {
   # python3, not sqlite3: the runner does not reliably have the sqlite3 CLI, and
   # the script already depends on python3. A missing tool here presented as "the
   # panel never published a webPath", which names the symptom and not the cause.
-  SUI_DB="$WORKDIR/sui/s-ui.db" SUI_TOKEN="$token" python3 - <<'PY'
+  $SUI_READ SUI_DB="$WORKDIR/sui/s-ui.db" SUI_TOKEN="$token" python3 - <<'PY'
 import os, sqlite3
 db = sqlite3.connect(os.environ["SUI_DB"])
 db.execute("delete from tokens")
@@ -159,10 +159,18 @@ up() {
   done
   # webPath is looked up rather than assumed: a fresh install uses /app/, and
   # guessing the bare origin 404s every call.
+  #
+  # The database is owned by the CONTAINER's root, so whether this shell can read
+  # it depends on whether the runtime needed sudo at all — on a runner, docker
+  # does not, $SUDO is empty, and the read is refused. The privilege is therefore
+  # decided from the file rather than from the runtime.
+  SUI_READ=""
+  if [ ! -r "$WORKDIR/sui/s-ui.db" ]; then SUI_READ="sudo"; fi
+  export SUI_DB="$WORKDIR/sui/s-ui.db"
   local web_path=""
   while [ -z "$web_path" ]; do
     if [ "$waited" -ge 150 ]; then log "S-UI never published a webPath"; return 1; fi
-    web_path=$(SUI_DB="$WORKDIR/sui/s-ui.db" python3 - <<'PY' 2>/dev/null || true
+    web_path=$($SUI_READ python3 - <<'PY' 2>/dev/null || true
 import os, sqlite3
 db = sqlite3.connect(f"file:{os.environ['SUI_DB']}?mode=ro", uri=True)
 row = db.execute("select value from settings where key='webPath'").fetchone()
