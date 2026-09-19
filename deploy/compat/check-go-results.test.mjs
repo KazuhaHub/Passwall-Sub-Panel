@@ -272,7 +272,6 @@ test('a declared not-applicable item is reported as N/A and does not count as a 
 
 test('an undeclared skip of something not in the profile still cannot pass silently', () => {
   // Negative control for the row above: without the waiver, the same log fails.
-  const parent = REQUIRED.at(-1)
   const lines = passingLog().filter((row) => !row.includes(EXPIRY_SUBTESTS[1]))
   const { code } = check({ lines })
   assert.equal(code, 1)
