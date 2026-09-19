@@ -279,7 +279,12 @@ jobs:
   compatibility:
     name: compatibility gate
     runs-on: ubuntu-latest
-    needs: [node-compatibility]
+    # `build` is here because the gate now gathers the artifact digests the build
+    # legs emit; without the edge it could run first and find none. The build
+    # itself does not depend on the gate, so this adds no cycle — and `release`
+    # and `docker` still reach this job, never the matrix, which is what keeps
+    # the gate the only way to publish.
+    needs: [node-compatibility, build]
     # always(), so a failed or cancelled leg still produces a verdict. A skipped
     # gate reports as an absent check, which reads as "not run" rather than
     # "failed" — and an absent required check blocks nothing on a branch that
@@ -308,6 +313,40 @@ jobs:
         run: |
           set -euo pipefail
           node deploy/compat/check-case-set.mjs --reports evidence --output case-set.json
+      - name: gather the artifact digests the index will name
+        run: |
+          set -euo pipefail
+          # THE GATE READS THIS FILE AND NOTHING PRODUCED IT. Every release since
+          # this step was written would have failed here — the index step asked
+          # for `.compat/digests.json`, the build job uploaded only binaries, and
+          # the reference was to a path that never existed. It went unnoticed
+          # because the release path had not been executed since; the first run
+          # found it, which is what the first run is for.
+          #
+          # The digests arrive as one small artifact per build leg. Collected
+          # here rather than re-derived, so the index names what the build job
+          # measured and not a copy of it.
+          mkdir -p .compat
+          node -e '
+            const fs = require("fs");
+            const path = require("path");
+            const digests = {};
+            for (const entry of fs.readdirSync("evidence")) {
+              if (!entry.startsWith("compat-digest-")) continue;
+              const dir = path.join("evidence", entry);
+              for (const file of fs.readdirSync(dir)) {
+                const [sha, name] = fs.readFileSync(path.join(dir, file), "utf8").trim().split(/\s+/);
+                digests[name] = sha;
+              }
+            }
+            if (Object.keys(digests).length === 0) {
+              console.error("no artifact digests were downloaded; the build legs uploaded none");
+              process.exit(1);
+            }
+            fs.writeFileSync(".compat/digests.json", JSON.stringify(digests, null, 2) + "\n");
+            console.log("recorded", Object.keys(digests).length, "artifact digests:", Object.keys(digests).sort().join(", "));
+          '
+
       # THE EVIDENCE INDEX. The report above answers "may this run publish"; this
       # records WHAT was claimed, by which source, against which artifacts, so the
       # claim can still be read once the run's logs have expired. It runs after
@@ -453,6 +492,33 @@ jobs:
         with:
           name: psp-${{ matrix.goos }}-${{ matrix.goarch }}
           path: out/psp${{ matrix.ext }}
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Record the artifact digest
+        shell: bash
+        run: |
+          set -euo pipefail
+          # THE DIGESTS COME FROM THE JOB THAT PRODUCED THE BYTES. The evidence
+          # index records which artifacts a claim was tested against, and the
+          # only honest source for that is the build that made them — deriving
+          # them again downstream would record a copy, not the artifact.
+          #
+          # It is emitted HERE rather than assembled later because the gate runs
+          # BEFORE the archives exist: packaging happens in the release job,
+          # which the gate itself gates. So the index names the binaries the
+          # archives will be built from, which is the strongest statement
+          # available at the point the decision is taken.
+          mkdir -p .compat
+          digest=$(sha256sum "out/psp${{ matrix.ext }}" | cut -d' ' -f1)
+          printf '%s  %s\n' "$digest" "psp-${{ matrix.goos }}-${{ matrix.goarch }}" \
+            > ".compat/digest-${{ matrix.goos }}-${{ matrix.goarch }}.txt"
+
+      - name: Upload artifact digest
+        uses: actions/upload-artifact@v7
+        with:
+          name: compat-digest-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: .compat/digest-${{ matrix.goos }}-${{ matrix.goarch }}.txt
           if-no-files-found: error
           retention-days: 1
 
