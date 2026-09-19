@@ -52,7 +52,7 @@ jobs:
       owner_lc: ${{ steps.identity.outputs.owner_lc }}
       sha: ${{ steps.identity.outputs.sha }}
       build_date: ${{ steps.identity.outputs.build_date }}
-      node_versions: ${{ steps.node_support.outputs.node_versions }}
+      node_cases: ${{ steps.node_support.outputs.node_cases }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -125,7 +125,7 @@ jobs:
           package-manager-cache: false
 
       - name: Test fail-closed publication guards
-        run: node --test deploy/check_image_test.mjs deploy/check_build_test.mjs deploy/release_workflow_test.mjs
+        run: node --test deploy/check_image_test.mjs deploy/check_build_test.mjs deploy/release_workflow_test.mjs deploy/compat/plan.test.mjs deploy/compat/check-case-set.test.mjs deploy/test_workflow_test.mjs
 
       - name: Refuse an already published exact image tag
         env:
@@ -133,21 +133,26 @@ jobs:
           RELEASE_VERSION: ${{ steps.identity.outputs.tag }}
         run: node deploy/check-image.mjs "${IMAGE_OWNER}/passwall-sub-panel" "$RELEASE_VERSION"
 
-      # DERIVED FROM THE MANIFEST, like the same loop in test.yml. The release
-      # gate used to carry its own copy of every released version, so a release
-      # had to be added here as well as in test.yml and the manifest.
-      - name: Resolve the supported Node set
+      # THE PLAN, NOT A LIST. The supported versions come from the manifest by
+      # position at min_supported, and each one carries the commit its tag
+      # resolved to when it was first pinned. The release gate used to carry its
+      # own copy of every released version, so a release had to be added here as
+      # well as in test.yml and the manifest.
+      - name: Resolve the compatible Node cases
         id: node_support
         shell: bash
         run: |
           set -euo pipefail
-          versions=$(python3 -c 'import json;d=json.load(open("docs/compat/node-v4.json"));r=[x["version"] for x in d["released_nodes"]];print(json.dumps(r[r.index(d["min_supported"]):]))')
-          test "$versions" != "[]"
-          echo "supported nodes: $versions"
-          echo "node_versions=$versions" >> "$GITHUB_OUTPUT"
+          # Emitted as JSON and read by the matrix as structure, never
+          # interpolated into a shell command: a name that drifted could
+          # otherwise turn into an argument.
+          cases=$(node deploy/compat/plan.mjs --emit cases)
+          test "$cases" != "[]"
+          echo "planned cases: $(echo "$cases" | python3 -c 'import json,sys;print(" ".join(c["id"] for c in json.load(sys.stdin)))')"
+          echo "node_cases=$cases" >> "$GITHUB_OUTPUT"
 
   node-compatibility:
-    name: Released Node compatibility (${{ matrix.node_version }})
+    name: Released Node compatibility (${{ matrix.node_case.version }})
     runs-on: ubuntu-latest
     needs: setup
     timeout-minutes: 10
@@ -155,10 +160,10 @@ jobs:
       contents: read
     strategy:
       fail-fast: false
-      # Derived from docs/compat/node-v4.json's min_supported, so the supported
-      # set is one piece of data rather than a list restated per workflow.
+      # The plan, so each leg carries BOTH the label to check out and the commit
+      # that label must still resolve to.
       matrix:
-        node_version: ${{ fromJSON(needs.setup.outputs.node_versions) }}
+        node_case: ${{ fromJSON(needs.setup.outputs.node_cases) }}
     steps:
       - name: Checkout trusted panel source
         uses: actions/checkout@v7
@@ -168,9 +173,23 @@ jobs:
         uses: actions/checkout@v7
         with:
           repository: KazuhaHub/Passwall-Node
-          ref: ${{ matrix.node_version }}
+          ref: ${{ matrix.node_case.version }}
           path: .compat/passwall-node
           persist-credentials: false
+      - name: the tag still resolves to the commit the plan pinned
+        env:
+          EXPECTED: ${{ matrix.node_case.sha }}
+        run: |
+          set -euo pipefail
+          resolved=$(git -C .compat/passwall-node rev-parse HEAD)
+          # A TAG IS A LABEL, NOT AN IDENTITY. If it was moved, the leg would
+          # otherwise test a different commit from the one the policy was
+          # verified against while still reporting the same version — the one
+          # substitution this matrix cannot afford to make silently.
+          if [ "$resolved" != "$EXPECTED" ]; then
+            echo "::error::${{ matrix.node_case.version }} now resolves to $resolved, but the plan pinned $EXPECTED. A tag moved; re-verify before re-pinning."
+            exit 1
+          fi
       - name: Set up Go
         uses: actions/setup-go@v7
         env:
@@ -194,7 +213,7 @@ jobs:
           # summary gate derives the expected set and looks each case up by name,
           # so evidence filed under any other name reads as a case that never
           # reported — which is exactly what a cancelled leg looks like.
-          case_id='node-wire-v1@${{ matrix.node_version }}'
+          case_id='node-wire-v1@${{ matrix.node_case.version }}'
           evidence="evidence/$case_id"
           mkdir -p "$evidence"
           # The exit code is CAPTURED rather than allowed to end the step, so the
@@ -217,7 +236,7 @@ jobs:
         if: always()
         env:
           PSP_SHA: ${{ github.sha }}
-          NODE_VERSION: ${{ matrix.node_version }}
+          NODE_VERSION: ${{ matrix.node_case.version }}
         run: |
           set -euo pipefail
           case_id="node-wire-v1@$NODE_VERSION"
@@ -247,8 +266,8 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: node-wire-v1@${{ matrix.node_version }}
-          path: evidence/node-wire-v1@${{ matrix.node_version }}/
+          name: node-wire-v1@${{ matrix.node_case.version }}
+          path: evidence/node-wire-v1@${{ matrix.node_case.version }}/
           if-no-files-found: error
           retention-days: 90
 

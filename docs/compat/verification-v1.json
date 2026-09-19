@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "revision": "2026-09-19.1",
+  "note": "IDENTITY AND PROFILE METADATA ONLY. This file deliberately does NOT list which Node versions are supported \u2014 that list lives in docs/compat/node-v4.json and is sliced by position at min_supported, so there is exactly one place to move a floor. This file supplies what that list cannot: which commit each tag pointed at when it was first resolved, and what a case against it claims. A version the manifest supports but this file does not pin fails the plan rather than being tested against whatever the tag points at today.",
+  "profiles": {
+    "node-wire-v1": {
+      "class": "required",
+      "direction": "candidate-psp-against-released-node",
+      "install_methods": [
+        "linux-systemd",
+        "managed-docker"
+      ],
+      "platforms": [
+        "linux/amd64"
+      ],
+      "expected_tests": "deploy/compat/profiles.json#node-wire-v1"
+    }
+  },
+  "pinned_sources": {
+    "v0.0.1-beta1": "36c7f0b10a2605d918e3fe1874db710d4ae5452b",
+    "v0.0.1-beta2": "dc5270c00d7aa560deb0cf291b6bae940e946172",
+    "v0.0.1-beta3": "91c36bffeae2742784a8fc7a91cab845062a7a1a",
+    "v0.0.1-beta4": "4b40af2e162a9510a33a243e06dd446ec24afcd5",
+    "v0.0.1-beta5": "f76259501ae9c51f3af481e3a3bd38db0ec5c732",
+    "v0.0.1-beta6": "2cea4045fcf9340af39cf9850f87615b2ee6f87f",
+    "v0.0.1-beta7": "9880b99bcc4de0927a191b68255cb17865d77e72",
+    "v0.0.1-beta8": "5a7eb9fe7a5d5104be95758fd88bc0736ad7c6b5",
+    "v0.0.1-beta9": "1f80aee4043fb64eda3ac896897aab0687530502",
+    "v0.0.1-beta10": "fe607ebd240e11e5bbf0a8cc459109854fc0d52c",
+    "v0.0.1-beta11": "60d96490f2b0561279ae9332ef6a809e14aab996"
+  },
+  "excluded": [],
+  "upgrade_edges": [],
+  "pinned_sources_note": "THESE ARE COMMITS, NOT TAG OBJECTS. `git ls-remote --tags` lists both refs/tags/X (the annotated tag object) and refs/tags/X^{} (the commit it points at); pinning the former fails every leg, because a checkout resolves to the commit. The matrix verifies the resolved commit against these, so a wrong-but-well-formed SHA is caught on the first run rather than after it has quietly tested a different revision."
+}

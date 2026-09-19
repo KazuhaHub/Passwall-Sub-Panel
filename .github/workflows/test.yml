@@ -53,26 +53,43 @@ jobs:
       - name: Exercise every supported wire contract
         run: |
           set -euo pipefail
-          # THE SUPPORTED SET IS DERIVED, NOT LISTED. `min_supported` in the
-          # manifest names the oldest node this panel still supports, and
-          # everything from that row onward is what gets exercised — so the
-          # matrix stops growing once the floor moves, instead of gaining a
-          # permanent row per release. The list used to be hardcoded here, in
-          # release.yml and in the manifest, which meant three places to forget.
+          # THE PLAN, NOT A LIST. `min_supported` in the manifest names the oldest
+          # node this panel still tests, and everything from that row onward is
+          # what gets exercised — so the matrix stops growing once the floor
+          # moves, instead of gaining a permanent row per release. The list used
+          # to be hand-written here, in release.yml and in the manifest, which
+          # meant three places to forget. The planner reads the one data source,
+          # and each case carries the commit its tag must still resolve to.
           #
           # Matched by POSITION, never by comparing versions: the prerelease
           # suffix sorts lexically, so v0.0.1-beta9 ranks above v0.0.1-beta11.
-          versions=$(python3 -c 'import json;d=json.load(open("docs/compat/node-v4.json"));r=[x["version"] for x in d["released_nodes"]];print(" ".join(r[r.index(d["min_supported"]):]))')
-          test -n "$versions"
-          echo "supported nodes: $versions"
+          #
+          # Written to a file and read back line by line rather than expanded
+          # into the shell: the planner validates every element, and nothing it
+          # emits should ever become a shell argument by string interpolation.
+          node deploy/compat/plan.mjs --emit cases \
+            | python3 -c 'import json,sys;[print(c["version"], c["sha"]) for c in json.load(sys.stdin)]' \
+            > "$RUNNER_TEMP/node-cases.txt"
+          test -s "$RUNNER_TEMP/node-cases.txt"
+          echo "planned cases:"; cat "$RUNNER_TEMP/node-cases.txt"
           node_repo="$RUNNER_TEMP/passwall-node"
           git init "$node_repo"
           git -C "$node_repo" remote add origin https://github.com/KazuhaHub/Passwall-Node.git
           failed=0
-          for node_version in $versions
+          while read -r node_version node_sha
           do
             git -C "$node_repo" fetch --force --depth=1 origin "refs/tags/$node_version"
             git -C "$node_repo" checkout --force --detach FETCH_HEAD
+
+            # A TAG IS A LABEL, NOT AN IDENTITY. If it moved, this leg would
+            # otherwise test a different commit from the one the policy was
+            # verified against while still reporting the same version.
+            resolved=$(git -C "$node_repo" rev-parse HEAD)
+            if [ "$resolved" != "$node_sha" ]; then
+              echo "::error::$node_version now resolves to $resolved, but the plan pinned $node_sha. A tag moved; re-verify before re-pinning."
+              failed=1
+              continue
+            fi
 
             # ONE EVIDENCE DIRECTORY PER CASE, NAMED FOR THE CASE. The summary
             # gate derives the expected set and looks each case up by name, so
@@ -132,7 +149,7 @@ jobs:
               echo "✗ $node_version"
               failed=1
             fi
-          done
+          done < "$RUNNER_TEMP/node-cases.txt"
           exit "$failed"
       - name: upload case evidence
         # Uploaded whatever the verdicts were. A report is only useful when it
@@ -312,7 +329,7 @@ jobs:
             docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges --user 10001:10001 --entrypoint /app/psp "$image" --version
           done
       - name: Publisher identity, compat result validators and fail-closed guard tests
-        run: node --test deploy/check_image_test.mjs deploy/check_build_test.mjs deploy/release_workflow_test.mjs deploy/compat/check-go-results.test.mjs deploy/compat/check-case-set.test.mjs
+        run: node --test deploy/check_image_test.mjs deploy/check_build_test.mjs deploy/release_workflow_test.mjs deploy/compat/check-go-results.test.mjs deploy/compat/check-case-set.test.mjs deploy/compat/plan.test.mjs deploy/test_workflow_test.mjs
 
   web:
     name: web (typecheck + build + test)

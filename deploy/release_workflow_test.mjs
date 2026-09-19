@@ -155,10 +155,10 @@ test('release compatibility gate derives its Node set from the single source of 
   const compatibility = job('node-compatibility')
   const setup = job('setup')
 
-  // Derived, not enumerated: the matrix reads the set setup resolved.
+  // Derived, not enumerated: the matrix reads the plan setup built.
   assert(
-    compatibility.includes('node_version: ${{ fromJSON(needs.setup.outputs.node_versions) }}'),
-    'the compatibility matrix must be derived, not listed'
+    compatibility.includes('node_case: ${{ fromJSON(needs.setup.outputs.node_cases) }}'),
+    'the compatibility matrix must be derived from the plan, not listed'
   )
   // And no version literal may reappear in this job at all. Matched as "any
   // literal" rather than as the bare-list shape the old matrix happened to use,
@@ -171,12 +171,18 @@ test('release compatibility gate derives its Node set from the single source of 
     'the compatibility job must not name a version literal; derive it instead'
   )
 
-  // setup must derive that set from the manifest, BY POSITION at min_supported.
-  // Position and not comparison: v0.0.1-beta11 sorts BELOW v0.0.1-beta9, so
-  // ordering these by version would drop the newest releases from the gate.
-  assert(setup.includes('docs/compat/node-v4.json'), 'the supported set must come from the shared manifest')
-  assert(setup.includes('min_supported'), 'the supported set must resolve from min_supported')
-  assert(setup.includes('.index('), 'the floor must be located by position, not compared as a version')
+  // The plan is built by the planner, which is the only thing that reads the
+  // manifest. Locating the floor BY POSITION is a property of the planner and is
+  // asserted in its own suite; what matters here is that this workflow does not
+  // derive the set itself.
+  assert(setup.includes('deploy/compat/plan.mjs'), 'the supported set must come from the planner')
+  assert(setup.includes('--emit cases'), 'the planner must emit the cases the matrix consumes')
+
+  // A tag is a label, not an identity. Each leg carries the commit the plan
+  // pinned and refuses to run on a different one, so a moved tag cannot swap the
+  // source while still reporting the same version.
+  assert(compatibility.includes('${{ matrix.node_case.sha }}'), 'each leg must carry the pinned commit')
+  assert(compatibility.includes('rev-parse HEAD'), 'each leg must verify the resolved commit')
 
   // The gate still exercises the live contract tests and still blocks release.
   assert(compatibility.includes('TestLive_RealNode(AgentContract|MigratedServerContract|TaskEvidenceReceipt|TaskExpiryContract)'))
