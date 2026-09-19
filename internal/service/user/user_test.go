@@ -231,6 +231,45 @@ func TestUpdateProfile_BlocksDemotingLastAdmin(t *testing.T) {
 	}
 }
 
+// TestUpdateProfile_AllowsPromotingToOperator pins that operator is an
+// assignable role. Three things already treat it as one: the SPA's role select
+// offers it, ARCHITECTURE.md documents it as the day-to-day staff role, and an
+// SSO role rule can emit it. Only this switch accepted `admin`/`user`, so
+// picking it in the user editor failed with "invalid role".
+//
+// Escalation is unaffected: guardOperatorRoleAssignment stops an operator
+// caller assigning anything but `user`, so only an admin reaches this path.
+func TestUpdateProfile_AllowsPromotingToOperator(t *testing.T) {
+	u := &domain.User{ID: 1, Role: domain.RoleUser, Enabled: true, PasswordHash: "x", GroupID: 1}
+	repo := &memoryUserRepo{byID: map[int64]*domain.User{1: u}}
+	svc := &Service{users: repo}
+	roleOperator := domain.RoleOperator
+
+	if err := svc.UpdateProfile(context.Background(), 1, UpdateInput{Role: &roleOperator}); err != nil {
+		t.Fatalf("promoting to operator must be allowed: %v", err)
+	}
+	if repo.byID[1].Role != domain.RoleOperator {
+		t.Errorf("role = %v, want operator", repo.byID[1].Role)
+	}
+}
+
+// A role the panel does not know stays rejected — the default branch exists to
+// stop a typo (or a hand-crafted request) from writing a role no gate
+// understands into the column every gate reads.
+func TestUpdateProfile_RejectsUnknownRole(t *testing.T) {
+	u := &domain.User{ID: 1, Role: domain.RoleUser, Enabled: true, PasswordHash: "x", GroupID: 1}
+	repo := &memoryUserRepo{byID: map[int64]*domain.User{1: u}}
+	svc := &Service{users: repo}
+	bogus := domain.Role("superuser")
+
+	if err := svc.UpdateProfile(context.Background(), 1, UpdateInput{Role: &bogus}); err == nil {
+		t.Fatal("an unknown role must be rejected")
+	}
+	if repo.byID[1].Role != domain.RoleUser {
+		t.Errorf("role changed to %v despite the rejection", repo.byID[1].Role)
+	}
+}
+
 // TestRunUserResyncTask_DeletedUserIsDone pins that a resync task for a
 // since-deleted user completes (nil) instead of failing with ErrNotFound and
 // being retried ~100x by the task processor.
