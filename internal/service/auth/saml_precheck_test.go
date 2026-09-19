@@ -157,10 +157,10 @@ func TestPrecheckResponse_UsesTheConfiguredACSURL(t *testing.T) {
 // End-to-end coverage through the real HTTP ACS entry point with a test IdP is
 // a separate requirement (acceptance S03) and is not claimed here.
 func TestParseACSResponse_PreChecksBeforeVerifying(t *testing.T) {
-	svc := &SAMLService{
-		cfg: &config.SAMLConfig{SP: config.SPConf{ACSURL: precheckACS}},
-		sp:  &saml.ServiceProvider{},
-	}
+	cfg := &config.SAMLConfig{SP: config.SPConf{ACSURL: precheckACS}}
+	svc := &SAMLService{snap: &samlSnapshot{
+		cfg: cfg, digest: SAMLConfigDigest(cfg), generation: 1, sp: &saml.ServiceProvider{},
+	}}
 
 	cases := map[string]struct {
 		xml  string

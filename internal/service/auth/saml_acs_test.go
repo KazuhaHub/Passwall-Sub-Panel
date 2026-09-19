@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/crewjam/saml"
+
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/samlguard"
 )
 
@@ -85,7 +87,9 @@ func TestParseACSResponse_RejectsWrongAudience(t *testing.T) {
 	raw, requestID := signedLogin(t, svc, idp)
 	// The IdP addressed the assertion to the SP entity ID it was built with;
 	// point the SP at a different one.
-	svc.sp.EntityID = "https://other.example.org/saml/metadata"
+	svc.withProviderForTest(func(p *saml.ServiceProvider) {
+		p.EntityID = "https://other.example.org/saml/metadata"
+	})
 	if _, err := svc.ParseACSResponse(acsRequest(t, raw, "relaystate", false), []string{requestID}); err == nil {
 		t.Fatal("an assertion for a different audience was accepted")
 	}

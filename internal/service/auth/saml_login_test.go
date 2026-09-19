@@ -109,7 +109,9 @@ func TestBeginLogin_RejectsTheWrongEntryPoint(t *testing.T) {
 // one is a refusal rather than a silent skip.
 func TestBeginLogin_RequiresAUsableACSURL(t *testing.T) {
 	svc, _ := testSAML(t)
-	svc.cfg.SP.ACSURL = ""
+	cfg := config.CloneSAMLConfig(svc.snapshot().cfg)
+	cfg.SP.ACSURL = ""
+	svc.setConfigForTest(cfg)
 	_, err := svc.BeginLogin(context.Background(), BeginLoginOptions{
 		RequestOrigin: "https://panel.example.com", ReturnTo: "/user/me", Now: time.Now(),
 	})
@@ -262,9 +264,11 @@ func TestCompleteLogin_RejectsAConfigurationChangedMidFlight(t *testing.T) {
 	redirectURL, token, binding := beginLogin(t, svc)
 
 	// An admin saves a new role rule while the browser is at the IdP.
-	svc.cfg.RoleRules = append(svc.cfg.RoleRules, config.SSORoleRule{
+	changed := config.CloneSAMLConfig(svc.snapshot().cfg)
+	changed.RoleRules = append(changed.RoleRules, config.SSORoleRule{
 		Attribute: "groups", Value: "ops", Role: "operator",
 	})
+	svc.setConfigForTest(changed)
 
 	raw := idp.signedResponse(t, redirectURL)
 	_, err := svc.CompleteLogin(context.Background(), acsRequest(t, raw, token, false), CompleteLoginOptions{

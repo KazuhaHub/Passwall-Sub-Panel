@@ -311,24 +311,41 @@ func testSAML(t *testing.T) (*SAMLService, *testIdP) {
 	t.Helper()
 	sp := newTestSPMaterial(t)
 	idp := newTestIdP(t, sp.entityID, sp.acsURL, sp.cert)
-	svc := &SAMLService{
-		cfg: &config.SAMLConfig{
-			Enabled:          true,
-			SP:               config.SPConf{EntityID: sp.entityID, ACSURL: sp.acsURL},
-			AttributeMapping: config.SAMLAttributeMap{UPN: "upn", Email: "email", DisplayName: "displayName", Groups: "groups"},
-		},
-		sp: &saml.ServiceProvider{
-			EntityID:          sp.entityID,
-			Key:               sp.key,
-			Certificate:       sp.cert,
-			AcsURL:            mustParseURL(t, sp.acsURL),
-			IDPMetadata:       idp.idp.Metadata(),
-			AuthnNameIDFormat: saml.UnspecifiedNameIDFormat,
-		},
+	cfg := &config.SAMLConfig{
+		Enabled:          true,
+		SP:               config.SPConf{EntityID: sp.entityID, ACSURL: sp.acsURL},
+		AttributeMapping: config.SAMLAttributeMap{UPN: "upn", Email: "email", DisplayName: "displayName", Groups: "groups"},
 	}
+	provider := &saml.ServiceProvider{
+		EntityID:          sp.entityID,
+		Key:               sp.key,
+		Certificate:       sp.cert,
+		AcsURL:            mustParseURL(t, sp.acsURL),
+		IDPMetadata:       idp.idp.Metadata(),
+		AuthnNameIDFormat: saml.UnspecifiedNameIDFormat,
+	}
+	svc := &SAMLService{snap: &samlSnapshot{
+		cfg: cfg, digest: SAMLConfigDigest(cfg), generation: 1, sp: provider,
+	}}
 	svc.SetReplayStore(&memReplayStore{})
 	svc.SetSAMLRequestStore(&memRequestStore{})
 	return svc, idp
+}
+
+// setConfigForTest publishes a new configuration the way Reload does, so a test
+// exercises the same generation change production sees instead of mutating a
+// published snapshot in place.
+func (s *SAMLService) setConfigForTest(cfg *config.SAMLConfig) {
+	s.publish(&samlSnapshot{cfg: cfg, digest: SAMLConfigDigest(cfg), sp: s.snapshot().sp})
+}
+
+// withProviderForTest swaps in a modified copy of the current provider, mirroring
+// what Reload does so a test never mutates a published snapshot.
+func (s *SAMLService) withProviderForTest(mutate func(*saml.ServiceProvider)) {
+	cur := s.snapshot()
+	cp := *cur.sp
+	mutate(&cp)
+	s.publish(&samlSnapshot{cfg: cur.cfg, digest: cur.digest, sp: &cp})
 }
 
 // authnRequest builds a real AuthnRequest the way the Login handler does, so the
@@ -339,9 +356,7 @@ func testSAML(t *testing.T) (*SAMLService, *testIdP) {
 // RelayState-only binding leans on.
 func (s *SAMLService) authnRequest(t *testing.T, relayState string) (redirectURL, requestID string) {
 	t.Helper()
-	s.mu.RLock()
-	sp := s.sp
-	s.mu.RUnlock()
+	sp := s.snapshot().sp
 	req, err := sp.MakeAuthenticationRequest(testIDPSSOURL, saml.HTTPRedirectBinding, saml.HTTPPostBinding)
 	if err != nil {
 		t.Fatalf("make authn request: %v", err)

@@ -160,13 +160,15 @@ type BeginLoginResult struct {
 // one it could never complete, so spending a real authentication at the IdP on
 // it would be pure waste (ADR 0036 D2).
 func (s *SAMLService) BeginLogin(ctx context.Context, opts BeginLoginOptions) (*BeginLoginResult, error) {
+	snap := s.snapshot()
 	s.mu.RLock()
-	cfg, sp, store := s.cfg, s.sp, s.requestStore
+	store := s.requestStore
 	s.mu.RUnlock()
 
-	if cfg == nil || !cfg.Enabled || sp == nil || sp.IDPMetadata == nil {
+	if !snap.enabled() {
 		return nil, fmt.Errorf("saml: not enabled")
 	}
+	cfg := snap.cfg
 	if err := samlOriginMismatch(opts.RequestOrigin, cfg.SP.ACSURL); err != nil {
 		return nil, err
 	}
@@ -178,7 +180,7 @@ func (s *SAMLService) BeginLogin(ctx context.Context, opts BeginLoginOptions) (*
 	if err != nil {
 		return nil, err
 	}
-	redirectURL, requestID, err := buildAuthnURL(sp, ticket.Token)
+	redirectURL, requestID, err := buildAuthnURL(snap.sp, ticket.Token)
 	if err != nil {
 		return nil, err
 	}
@@ -188,7 +190,7 @@ func (s *SAMLService) BeginLogin(ctx context.Context, opts BeginLoginOptions) (*
 		TokenHash:    ticket.TokenHash,
 		BrowserHash:  ticket.BindingHash,
 		RequestID:    requestID,
-		ConfigDigest: SAMLConfigDigest(cfg),
+		ConfigDigest: snap.digest,
 		ReturnTo:     opts.ReturnTo,
 		CreatedAt:    now,
 		ExpiresAt:    now.Add(SAMLLoginTTL),
@@ -243,11 +245,12 @@ func (s *SAMLService) CompleteLogin(ctx context.Context, r *http.Request, opts C
 		return nil, fmt.Errorf("%w: the browser binding cookie is absent", domain.ErrSAMLRequestInvalid)
 	}
 
+	snap := s.snapshot()
 	s.mu.RLock()
-	cfg, sp, store := s.cfg, s.sp, s.requestStore
+	store := s.requestStore
 	s.mu.RUnlock()
 
-	if cfg == nil || !cfg.Enabled || sp == nil || sp.IDPMetadata == nil {
+	if !snap.enabled() {
 		return nil, fmt.Errorf("saml: not enabled")
 	}
 	if store == nil {
@@ -257,7 +260,7 @@ func (s *SAMLService) CompleteLogin(ctx context.Context, r *http.Request, opts C
 	rec, err := store.Consume(ctx,
 		SHA256Hex(opts.RelayState),
 		SHA256Hex(opts.BindingCookie),
-		SAMLConfigDigest(cfg),
+		snap.digest,
 		opts.Now.UTC())
 	if err != nil {
 		return nil, err
@@ -265,11 +268,11 @@ func (s *SAMLService) CompleteLogin(ctx context.Context, r *http.Request, opts C
 
 	// The record's request ID is the ONLY possible request ID: a response may not
 	// nominate its own by declaring an InResponseTo.
-	assertion, err := s.parseACSResponse(sp, cfg, r, []string{rec.RequestID})
+	assertion, err := s.parseACSResponse(snap.sp, snap.cfg, r, []string{rec.RequestID})
 	if err != nil {
 		return nil, err
 	}
-	return &CompleteLoginResult{Assertion: assertion, Config: cfg, ReturnTo: rec.ReturnTo}, nil
+	return &CompleteLoginResult{Assertion: assertion, Config: snap.cfg, ReturnTo: rec.ReturnTo}, nil
 }
 
 // samlOriginMismatch reports whether the browser's externally visible origin can

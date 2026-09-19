@@ -179,13 +179,12 @@ func rewritePanelCallback(raw, oldPanelPath, newPanelPath, suffix string) (strin
 	return u.String(), true
 }
 
+// cloneSAMLConfig deep-copies a SAML configuration. It delegates rather than
+// open-coding the copy: the previous local version replicated RoleRules but not
+// GroupRules, so the "copy" shared that slice with the original and a rollback
+// could not have restored group rules the apply had touched.
 func cloneSAMLConfig(in *config.SAMLConfig) *config.SAMLConfig {
-	if in == nil {
-		return &config.SAMLConfig{}
-	}
-	out := *in
-	out.RoleRules = append([]config.SSORoleRule(nil), in.RoleRules...)
-	return &out
+	return config.CloneSAMLConfig(in)
 }
 
 func cloneOIDCConfig(in *config.OIDCConfig) *config.OIDCConfig {

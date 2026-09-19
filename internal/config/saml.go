@@ -85,6 +85,23 @@ type SAMLNewUserDefaults struct {
 	TrafficResetPeriod string
 }
 
+// CloneSAMLConfig returns a deep copy: the struct plus every slice it owns.
+//
+// The slices matter. A shallow copy shares the backing array with the original,
+// so a caller that "edits a copy" would mutate the configuration the runtime is
+// still serving, and a rollback path could not restore what it thought it had
+// saved. A nil input yields an empty (not nil) config, which is what the
+// panel-path migration expects when no row has been persisted yet.
+func CloneSAMLConfig(in *SAMLConfig) *SAMLConfig {
+	if in == nil {
+		return &SAMLConfig{}
+	}
+	out := *in
+	out.RoleRules = append([]SSORoleRule(nil), in.RoleRules...)
+	out.GroupRules = append([]SSOGroupRule(nil), in.GroupRules...)
+	return &out
+}
+
 // ApplySAMLDefaults fills in any zero fields with sensible defaults.
 // Kept here so runtime storage and a future bootstrap CLI share one rule set.
 func ApplySAMLDefaults(c *SAMLConfig) {

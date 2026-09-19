@@ -41,9 +41,18 @@ var ErrSAMLAssertionReplayed = errors.New("saml: assertion already consumed")
 // by StartMetadataRefresh so IdP-side certificate rotations are picked up
 // without restarting the panel.
 type SAMLService struct {
-	cfg *config.SAMLConfig
-	mu  sync.RWMutex
-	sp  *saml.ServiceProvider
+	mu sync.RWMutex
+	// applyMu serializes configuration applications. It is deliberately NOT mu:
+	// mu guards the pointer swap and must never be held across an IdP metadata
+	// fetch, or every login would queue behind the network. Holding applyMu across
+	// build-then-publish is what makes generation numbers strictly increasing and
+	// keeps a slow build from landing after a newer configuration.
+	applyMu sync.Mutex
+	// snap is the current immutable generation of runtime state. A request reads
+	// it ONCE and works from that value, so a configuration change mid-flight
+	// cannot pair one generation's trust anchor with another's mapping rules
+	// (ADR 0036 D6). It is replaced wholesale, never mutated in place.
+	snap *samlSnapshot
 	// replayStore is the durable consumed-assertion set and the ONLY replay
 	// authority. crewjam/saml validates NotBefore / NotOnOrAfter and the
 	// signature but keeps no consumed-ID set of its own, and a process-local one
@@ -57,6 +66,37 @@ type SAMLService struct {
 	// server-side fact rather than a claim RelayState makes about itself
 	// (ADR 0036 D2). Wired by SetSAMLRequestStore; nil refuses every login.
 	requestStore ports.SAMLRequestRepo
+}
+
+// samlSnapshot is one generation of SAML runtime state. cfg and sp are published
+// together or not at all — the invariant D6 exists for is that a new set of
+// mapping rules is never paired with an old trust anchor, or the reverse.
+type samlSnapshot struct {
+	cfg    *config.SAMLConfig
+	digest string
+	// generation increments on every application of a configuration. A metadata
+	// refresh carries the generation it started under, so a slow response for a
+	// configuration the admin has since replaced cannot publish itself.
+	generation uint64
+	sp         *saml.ServiceProvider
+}
+
+// enabled reports whether this generation can serve a login at all. A generation
+// whose provider failed to build is disabled rather than falling back to an
+// earlier one.
+func (g *samlSnapshot) enabled() bool {
+	return g != nil && g.cfg != nil && g.cfg.Enabled && g.sp != nil && g.sp.IDPMetadata != nil
+}
+
+// snapshot returns the current generation. Callers must take it once and use
+// that value for the whole operation.
+func (s *SAMLService) snapshot() *samlSnapshot {
+	if s == nil {
+		return nil
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.snap
 }
 
 // SetReplayStore installs the durable replay set. Wired in app startup once the
@@ -103,60 +143,70 @@ func (s *SAMLService) assertNotConsumed(ctx context.Context, id string, expiresA
 }
 
 // NewSAML constructs the service. If cfg.Enabled is false, the returned
-// service is a no-op whose Enabled() reports false and whose other methods
-// return errors. If IdP metadata cannot be fetched at construction, the
-// service stays disabled until StartMetadataRefresh succeeds.
+// service reports Enabled() false and whose other methods return errors. If IdP
+// metadata cannot be fetched at construction, the first generation exists with
+// no provider and stays disabled until StartMetadataRefresh succeeds.
 func NewSAML(cfg *config.SAMLConfig) (*SAMLService, error) {
-	s := &SAMLService{cfg: cfg}
+	s := &SAMLService{snap: &samlSnapshot{cfg: cfg, digest: SAMLConfigDigest(cfg), generation: 1}}
 	if cfg == nil || !cfg.Enabled {
 		return s, nil
 	}
-	if err := s.buildSP(context.Background()); err != nil {
-		log.Warn("saml: initial SP build failed, will retry on metadata refresh", "err", err)
+	sp, err := buildProvider(context.Background(), cfg)
+	if err != nil {
+		// The generation exists but carries no provider: SAML is unusable until a
+		// refresh succeeds. It is recorded as exactly that rather than as a
+		// configuration with a stale provider.
+		log.Warn("saml: initial provider build failed, will retry on metadata refresh", "err", err)
+		return s, nil
 	}
+	s.snap.sp = sp
 	return s, nil
 }
 
-func (s *SAMLService) buildSP(ctx context.Context) error {
-	s.mu.RLock()
-	cfg := s.cfg
-	s.mu.RUnlock()
+// buildProvider fetches the IdP metadata and constructs a provider from one
+// configuration. It touches no service state, which is what lets Reload build a
+// candidate outside the lock and publish it only if it succeeded.
+func buildProvider(ctx context.Context, cfg *config.SAMLConfig) (*saml.ServiceProvider, error) {
+	idpMeta, err := fetchIDPMetadata(ctx, cfg.IDP.MetadataURL)
+	if err != nil {
+		return nil, fmt.Errorf("fetch IdP metadata: %w", err)
+	}
+	return newProvider(cfg, idpMeta)
+}
+
+// newProvider is the pure half: it parses the SP key material and assembles the
+// provider from an already-fetched metadata document. No I/O, so it is safe to
+// call while holding a lock, which the metadata-refresh retry path relies on.
+func newProvider(cfg *config.SAMLConfig, idpMeta *saml.EntityDescriptor) (*saml.ServiceProvider, error) {
 	if cfg == nil {
-		return fmt.Errorf("saml config not set")
+		return nil, fmt.Errorf("saml config not set")
 	}
 	certPEM := []byte(cfg.SP.CertPEM)
 	keyPEM := []byte(cfg.SP.KeyPEM)
 	if len(certPEM) == 0 || len(keyPEM) == 0 {
-		return fmt.Errorf("SP cert/key PEM not provided")
+		return nil, fmt.Errorf("SP cert/key PEM not provided")
 	}
 	keyPair, err := tls.X509KeyPair(certPEM, keyPEM)
 	if err != nil {
-		return fmt.Errorf("parse SP keypair: %w", err)
+		return nil, fmt.Errorf("parse SP keypair: %w", err)
 	}
 	if len(keyPair.Certificate) == 0 {
-		return fmt.Errorf("SP cert has no entries")
+		return nil, fmt.Errorf("SP cert has no entries")
 	}
 	leaf, err := x509.ParseCertificate(keyPair.Certificate[0])
 	if err != nil {
-		return fmt.Errorf("parse SP cert: %w", err)
+		return nil, fmt.Errorf("parse SP cert: %w", err)
 	}
 	priv, ok := keyPair.PrivateKey.(*rsa.PrivateKey)
 	if !ok {
-		return fmt.Errorf("SP private key must be RSA")
+		return nil, fmt.Errorf("SP private key must be RSA")
 	}
 	acsURL, err := url.Parse(cfg.SP.ACSURL)
 	if err != nil {
-		return fmt.Errorf("parse ACS URL: %w", err)
+		return nil, fmt.Errorf("parse ACS URL: %w", err)
 	}
 
-	idpMeta, err := fetchIDPMetadata(ctx, cfg.IDP.MetadataURL)
-	if err != nil {
-		return fmt.Errorf("fetch IdP metadata: %w", err)
-	}
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.sp = &saml.ServiceProvider{
+	return &saml.ServiceProvider{
 		EntityID:    cfg.SP.EntityID,
 		Key:         priv,
 		Certificate: leaf,
@@ -176,47 +226,48 @@ func (s *SAMLService) buildSP(ctx context.Context) error {
 		// (typically Email Address sourced from user.userprincipalname)
 		// is what we get — a stable, human-readable UPN.
 		AuthnNameIDFormat: saml.UnspecifiedNameIDFormat,
-	}
-	return nil
+	}, nil
 }
 
-// Enabled reports whether SAML SSO is configured AND the SP is initialised
-// with a usable IdP metadata document.
-func (s *SAMLService) Enabled() bool {
-	if s == nil {
-		return false
-	}
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	if s.cfg == nil || !s.cfg.Enabled {
-		return false
-	}
-	return s.sp != nil && s.sp.IDPMetadata != nil
-}
+// Enabled reports whether the current generation can serve a login: SAML is
+// configured AND its provider is built with a usable IdP metadata document.
+func (s *SAMLService) Enabled() bool { return s.snapshot().enabled() }
 
-// Config returns the active SAML configuration (read-only). Handlers need
-// it for the new-user defaults and default group slug.
-func (s *SAMLService) Config() *config.SAMLConfig {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.cfg
-}
-
-// Reload swaps in a new SAML configuration and rebuilds the underlying
-// crewjam ServiceProvider. Admin-UI saves call this so an SSO config edit
-// takes effect without restarting the panel. If the new config disables
-// SSO, the SP is torn down.
+// Reload applies a new configuration and publishes a new generation.
+//
+// The candidate provider is built BEFORE anything is published, and the publish
+// is a single pointer swap, so a build failure cannot leave the new mapping rules
+// beside the old trust anchor. A failed build produces a generation with no
+// provider at all, which means SAML is simply unusable until it is fixed. That is
+// the deliberate direction: a temporarily dead SSO is recoverable, an assertion
+// validated against one trust anchor and mapped by another set of rules is not
+// (ADR 0036 D6).
+//
+// A disabled or unusable configuration still replaces the stored one — an admin
+// must always be able to switch SSO off, or to replace broken values, without the
+// new values having to be valid first.
 func (s *SAMLService) Reload(ctx context.Context, cfg *config.SAMLConfig) error {
-	s.mu.Lock()
-	s.cfg = cfg
-	if cfg == nil || !cfg.Enabled {
-		s.sp = nil
-		s.mu.Unlock()
-		return nil
+	s.applyMu.Lock()
+	defer s.applyMu.Unlock()
+
+	var (
+		sp  *saml.ServiceProvider
+		err error
+	)
+	if cfg != nil && cfg.Enabled {
+		sp, err = buildProvider(ctx, cfg)
 	}
-	s.mu.Unlock()
-	// buildSP takes its own write lock; release first.
-	return s.buildSP(ctx)
+	s.publish(&samlSnapshot{cfg: cfg, digest: SAMLConfigDigest(cfg), sp: sp})
+	return err
+}
+
+// publish swaps in a new generation. Callers hold applyMu, so a generation number
+// allocated here is strictly increasing even under concurrent saves.
+func (s *SAMLService) publish(snap *samlSnapshot) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	snap.generation = s.snap.generation + 1
+	s.snap = snap
 }
 
 // StartMetadataRefresh launches a goroutine that re-fetches the IdP
@@ -236,12 +287,10 @@ func (s *SAMLService) StartMetadataRefresh(ctx context.Context, wg ...*sync.Wait
 			defer wg[0].Done()
 		}
 		for {
-			s.mu.RLock()
-			cfg := s.cfg
-			s.mu.RUnlock()
+			snap := s.snapshot()
 			interval := 24 * time.Hour
-			if cfg != nil && cfg.IDP.MetadataRefreshInterval > 0 {
-				interval = cfg.IDP.MetadataRefreshInterval
+			if snap != nil && snap.cfg != nil && snap.cfg.IDP.MetadataRefreshInterval > 0 {
+				interval = snap.cfg.IDP.MetadataRefreshInterval
 			}
 			// Floor at 1 minute so a misconfigured tiny interval (or a
 			// finger-slip in the admin UI) can't turn the panel into an
@@ -256,38 +305,67 @@ func (s *SAMLService) StartMetadataRefresh(ctx context.Context, wg ...*sync.Wait
 				return
 			case <-time.After(interval):
 			}
-			s.mu.RLock()
-			cfg = s.cfg
-			s.mu.RUnlock()
-			if cfg == nil || !cfg.Enabled {
+
+			// Re-read: Reload() may have changed the metadata URL or disabled SSO
+			// while this goroutine was waiting.
+			snap = s.snapshot()
+			if snap == nil || snap.cfg == nil || !snap.cfg.Enabled {
 				continue
 			}
-			meta, err := fetchIDPMetadata(ctx, cfg.IDP.MetadataURL)
+			meta, err := fetchIDPMetadata(ctx, snap.cfg.IDP.MetadataURL)
 			if err != nil {
 				log.Warn("saml: idp metadata refresh failed", "err", err)
 				continue
 			}
-			s.mu.Lock()
-			if s.sp == nil {
-				// Initial build hadn't succeeded yet — do it now.
-				s.mu.Unlock()
-				if err := s.buildSP(ctx); err != nil {
-					log.Warn("saml: deferred SP build failed", "err", err)
-				}
-				continue
+			if s.commitMetadataRefresh(snap, meta) {
+				log.Info("saml: idp metadata refreshed")
 			}
-			// Replace s.sp wholesale rather than mutating IDPMetadata in
-			// place — readers (ParseACSResponse, BuildAuthnURL) take a
-			// snapshot of s.sp under RLock and then operate on it without
-			// the lock; mutating a shared pointer field underneath them
-			// would be a data race on the underlying library's internals.
-			newSP := *s.sp
-			newSP.IDPMetadata = meta
-			s.sp = &newSP
-			s.mu.Unlock()
-			log.Info("saml: idp metadata refreshed")
 		}
 	}()
+}
+
+// commitMetadataRefresh installs a refreshed IdP metadata document into the
+// generation the fetch was started under, and reports whether it was applied.
+//
+// It refuses two things. It will not publish into a generation that is no longer
+// current — a slow response for a URL the admin has since changed must not
+// resurrect the old configuration. And it will not patch a generation whose
+// provider is missing: that generation's build failed, so this refresh is the
+// retry, and the rebuild goes through newProvider with the SAME configuration
+// under applyMu rather than fetching a second time and racing a save.
+//
+// A refresh of an unchanged configuration deliberately does NOT bump the
+// generation or change the digest. The trust anchor rotated; the rules did not,
+// so logins already in flight on this snapshot keep working.
+func (s *SAMLService) commitMetadataRefresh(started *samlSnapshot, meta *saml.EntityDescriptor) bool {
+	s.applyMu.Lock()
+	defer s.applyMu.Unlock()
+
+	s.mu.Lock()
+	current := s.snap
+	if current == nil || current.generation != started.generation || current.cfg != started.cfg {
+		s.mu.Unlock()
+		return false
+	}
+	if current.sp != nil {
+		// Copy the provider rather than mutating it: readers hold their snapshot
+		// without the lock and would otherwise race on the library's internals.
+		replaced := *current.sp
+		replaced.IDPMetadata = meta
+		s.snap = &samlSnapshot{cfg: current.cfg, digest: current.digest, sp: &replaced, generation: current.generation}
+		s.mu.Unlock()
+		return true
+	}
+	cfg := current.cfg
+	s.mu.Unlock()
+
+	sp, err := newProvider(cfg, meta)
+	if err != nil {
+		log.Warn("saml: provider rebuild failed", "err", err)
+		return false
+	}
+	s.publish(&samlSnapshot{cfg: cfg, digest: SAMLConfigDigest(cfg), sp: sp})
+	return true
 }
 
 // IDPMetadataSummary is a small read-only view the admin UI uses to verify
@@ -383,12 +461,11 @@ func fetchIDPMetadata(ctx context.Context, metaURL string) (*saml.EntityDescript
 
 // SPMetadataXML returns the SP metadata XML that the IdP admin imports.
 func (s *SAMLService) SPMetadataXML() ([]byte, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	if s.sp == nil {
+	snap := s.snapshot()
+	if snap == nil || snap.sp == nil {
 		return nil, fmt.Errorf("saml not initialised")
 	}
-	return xml.MarshalIndent(s.sp.Metadata(), "", "  ")
+	return xml.MarshalIndent(snap.sp.Metadata(), "", "  ")
 }
 
 // buildAuthnURL returns the IdP redirect URL for an SP-initiated login, plus the
@@ -530,10 +607,11 @@ func precheckResponse(acsURL, rawB64 string) error {
 // already checked; a caller that has some other way of establishing the request
 // context can use this entry point instead.
 func (s *SAMLService) ParseACSResponse(r *http.Request, possibleRequestIDs []string) (*SAMLAssertion, error) {
-	s.mu.RLock()
-	sp, cfg := s.sp, s.cfg
-	s.mu.RUnlock()
-	return s.parseACSResponse(sp, cfg, r, possibleRequestIDs)
+	snap := s.snapshot()
+	if snap == nil {
+		return nil, fmt.Errorf("saml not initialised")
+	}
+	return s.parseACSResponse(snap.sp, snap.cfg, r, possibleRequestIDs)
 }
 
 // parseACSResponse does the work against an explicit runtime snapshot.
