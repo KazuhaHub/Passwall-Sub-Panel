@@ -130,6 +130,30 @@ describe('product version vectors', () => {
     }
   })
 
+  // THE TWO COMPARATORS AGREE ON PRODUCT VERSIONS THE UPGRADE LIST CAN PASS
+  // THEM, and that is asserted because the list relies on it: it applies
+  // compareLegacyTag to every release, product ones included, while the vectors
+  // pin each comparator against its OWN section — so a change that made the
+  // legacy rule misorder a product version would fail nowhere and surface as a
+  // node offered the wrong target.
+  //
+  // THE DEFINITION IS "THREE SEGMENTS", NOT "EVERY VECTOR". The two rules
+  // genuinely differ on a SHORT FORM: the product comparator pads, so 102.1 and
+  // 102.1.0 are equal, while the legacy comparator orders by segment count, so
+  // 102.1 is below it. That difference is real, is the same in Go, and is
+  // unreachable here — every string this function compares has already been
+  // through the shape validation, which requires three segments. Asserting it
+  // over the raw vectors would be asserting a property the caller never needs and
+  // the two rules do not have.
+  it('orders three-segment product versions the same way through either comparator', () => {
+    for (const tc of vectors.order) {
+      if (tc.a.split('.').length !== 3 || tc.b.split('.').length !== 3) continue
+      const throughLegacy = compareLegacyTag(tc.a, tc.b)
+      const throughProduct = compareProductVersion(parseProductVersion(tc.a), parseProductVersion(tc.b))
+      expect(throughLegacy, `${tc.a} vs ${tc.b}`).toBe(throughProduct)
+    }
+  })
+
   it('keeps the legacy ordering, whose dotless prereleases sort numerically', () => {
     for (const tc of vectors.legacy_order) {
       expect(compareLegacyTag(tc.a, tc.b), `${tc.a} vs ${tc.b}`).toBe(tc.cmp)

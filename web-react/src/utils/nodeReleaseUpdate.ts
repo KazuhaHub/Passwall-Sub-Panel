@@ -74,6 +74,14 @@ export function newerNodeRelease(
     // no newer release. compareLegacyTag is the same rule the panel's admission
     // check and Passwall Node's own comparator use; this is the third place it
     // is applied, and three implementations of an ordering is two too many.
+    //
+    // IT IS ALSO THE RULE APPLIED TO PRODUCT VERSIONS HERE, which is sound rather
+    // than intended: the legacy rule compares numeric segments numerically and
+    // ranks a release above its own prereleases, and a product version is three
+    // numeric segments with no prerelease. The two schemes have separate
+    // comparators, so that agreement is asserted in the vectors test instead of
+    // being left as a coincidence a later edit could break without anything
+    // failing — which would surface as a node offered the wrong target.
     return compareLegacyTag(release.version, identity[1]) > 0
   }).sort((left, right) => compareLegacyTag(right.version, left.version))[0]
 }
