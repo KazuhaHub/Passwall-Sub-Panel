@@ -82,9 +82,12 @@ var _ ports.NodeReleaseCatalog = (*Catalog)(nil)
 // having no canonical identity at all, and the catalog would have been silently
 // disabled rather than answering with the wrong major.
 //
-// A release line of zero is refused here and not in the shape rule: PSP has
-// never released one, while every Node release in the field is v0.0.1-*, so
-// requiring it of the shape would refuse the history the catalog exists to read.
+// A RELEASE LINE OF ZERO HAS NO ANSWER HERE. This function answers "which
+// compatibility major is this build", and a build whose own version names no
+// release line cannot be answered — so the refusal is deliberate, not a leftover
+// of the shape rule. The history it used to protect was the v0.0.1-* line, every
+// Node release in the field at the time; that scheme is gone, and with it every
+// caller for whom zero was a meaningful release line.
 func PSPMajorForVersion(stamp string) (int, error) {
 	if stamp == "dev" {
 		return compiledMajor, nil
@@ -390,17 +393,14 @@ func catalogEntry(reviewed reviewedRelease, release *githubRelease, tag string) 
 	if release.Prerelease {
 		entry.Channel = "testing"
 	}
-	// WHICH SCHEME, AND THEREFORE WHETHER THERE IS A PRODUCT VERSION AT ALL.
-	// A legacy release has none: its version IS its tag, and normalising it into
-	// a product version would name an identity no release ever had. The namespace
-	// is what distinguishes them, and it is the same one ReleaseTagFor used to
-	// build the tag a few lines up.
-	if strings.HasPrefix(tag, version.ProductTagNamespace) {
-		entry.ProductVersion = reviewed.Version
-		entry.Scheme = "product"
-	} else {
-		entry.Scheme = "legacy"
-	}
+	// THERE IS ONE SCHEME, AND THE NAMESPACE IS WHAT SAYS SO. This used to branch:
+	// a tag inside `release/` carried a product version of its own, and a tag
+	// outside it was a legacy release whose version WAS its tag. The legacy scheme
+	// is gone, so a tag outside the namespace is not a release this project has —
+	// the reviewed registry cannot hold one, and ReleaseTagFor cannot build one —
+	// and what remains is the namespace as the single address form.
+	entry.ProductVersion = reviewed.Version
+	entry.Scheme = "product"
 	assets := make(map[string]githubAsset, len(release.Assets))
 	for _, asset := range release.Assets {
 		if _, duplicate := assets[asset.Name]; duplicate {
