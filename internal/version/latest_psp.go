@@ -62,6 +62,10 @@ func LatestPSPRefreshAt() time.Time {
 	return latestPSPLastAt
 }
 
+// releaseTagNamespace is where product-scheme tags live. Named here so the one
+// place that must distinguish the schemes does not spell the prefix inline.
+const releaseTagNamespace = "release/"
+
 // IsPrerelease reports whether a PSP version string is a pre-release build
 // (carries a "-beta"/"-rc"/... suffix). Drives the UI channel indicator
 // (stable = green, pre-release = yellow) and the self-update comparison below.
@@ -171,14 +175,41 @@ func fetchLatestPSP(ctx context.Context) error {
 
 // acceptLatestPSPStable decides whether a /releases/latest payload yields a
 // usable latest-STABLE tag. Stable-only, defended two ways: GitHub's prerelease
-// flag AND the tag string itself (a "-beta"/"-rc"/... suffix). The tag check is
-// the load-bearing one — a release published WITHOUT the prerelease flag set
-// (e.g. an older beta cut before the workflow began marking pre-releases) could
-// still arrive here, and must never be treated as a stable. Anything empty,
+// flag AND — for LEGACY tags only — the tag string itself. Anything empty,
 // pre-release, or not a parseable semver yields ("", false) so the self-update
 // nudge only ever points at a real stable release.
+//
+// THE TAG-TEXT TEST IS SCOPED TO THE LEGACY SCHEME, deliberately. It exists for
+// a real historical gap: an older beta cut before the workflow began setting the
+// prerelease flag would arrive here without it, and must never be treated as
+// stable. That reasoning depends on a v-prefixed version, where a hyphen has
+// always meant a pre-release.
+//
+// Under the product scheme a tag is release/MAJOR.MINOR.PATCH — three integers
+// in an explicit namespace, with no hyphen at all — so running the historical
+// test there would find nothing to reject and would accept a testing candidate
+// GitHub had correctly flagged. The exemption is scoped to that NAMESPACE, not
+// to "anything without a v": a tag that is neither scheme keeps the fail-safe
+// test, because for an unrecognised form the characters are all there is to go
+// on. There the explicit flag decides, which is what the migration plan
+// requires: validate the historical form with the historical rule and the new
+// form with its own scheme, rather than by inference from the tag text.
+//
+// THE EXEMPTION HAS NO OBSERVABLE EFFECT YET, and saying so is part of it:
+// parseSemver still refuses any release/… tag, so a product tag is rejected a
+// line later whatever this test does. It becomes load-bearing when V04 teaches
+// the panel to read a product tag, and the test below records the contract it
+// must then satisfy.
+//
+// The scheme test is the namespace check github.com/KazuhaHub/passwall-node's
+// releaseid uses (release/… is a product tag, v… is legacy). It is written here
+// as a prefix rather than imported because it is a two-line shape check, not the
+// ordering rule — those are the ones that must have one implementation.
 func acceptLatestPSPStable(tagName string, prerelease bool) (string, bool) {
-	if tagName == "" || prerelease || IsPrerelease(tagName) {
+	if tagName == "" || prerelease {
+		return "", false
+	}
+	if !strings.HasPrefix(tagName, releaseTagNamespace) && IsPrerelease(tagName) {
 		return "", false
 	}
 	if _, ok := parseSemver(tagName); !ok {

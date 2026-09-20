@@ -65,3 +65,73 @@ func TestIsPrerelease(t *testing.T) {
 		}
 	}
 }
+
+// The tag-text pre-release test is a LEGACY defence, and scoping it that way is
+// the point: under the product scheme a version has no hyphen, so running the
+// same test would find nothing to reject and would accept a testing candidate
+// GitHub had correctly flagged.
+func TestStableSelectionUsesTheFlagForNonLegacyTags(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		tag        string
+		prerelease bool
+		want       bool
+		why        string
+	}{
+		{
+			name: "a legacy beta the flag missed",
+			tag:  "v4.0.0-beta.25", prerelease: false, want: false,
+			why: "an older cut published before the workflow set the flag must still not be taken as stable",
+		},
+		{
+			name: "a legacy beta the flag caught",
+			tag:  "v4.0.0-beta.25", prerelease: true, want: false,
+			why: "refused either way",
+		},
+		{
+			name: "a legacy stable",
+			tag:  "v4.0.0", prerelease: false, want: true,
+			why: "the historical form it has always been",
+		},
+		{
+			name: "an unprefixed version the flag marks testing",
+			tag:  "4.0.0", prerelease: true, want: false,
+			why: "no hyphen to find, so the explicit flag is what decides",
+		},
+		{
+			name: "an unprefixed version the flag calls released",
+			tag:  "4.0.0", prerelease: false, want: true,
+			why: "the flag is the authority for a form that carries no hyphen",
+		},
+		{
+			name: "a product tag",
+			tag:  "release/4.0.0", prerelease: false, want: false,
+			why: "the panel cannot identify a product-scheme release yet; refusing is honest, not a regression",
+		},
+		{
+			// The exemption is scoped to the product NAMESPACE, not to "no v".
+			// A tag in neither scheme keeps the fail-safe test, because for an
+			// unrecognised form the characters are all there is to go on.
+			name: "an rc in neither scheme",
+			tag:  "4.0.0-rc.1", prerelease: false, want: false,
+			why: "not the product namespace, so the hyphen still means pre-release",
+		},
+		{
+			name: "nothing at all",
+			tag:  "", prerelease: false, want: false,
+			why: "an empty tag is never a stable release",
+		},
+		{
+			name: "not a version",
+			tag:  "latest", prerelease: false, want: false,
+			why: "unparseable",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, ok := acceptLatestPSPStable(tc.tag, tc.prerelease)
+			if ok != tc.want {
+				t.Fatalf("acceptLatestPSPStable(%q, %v) = %v, want %v — %s", tc.tag, tc.prerelease, ok, tc.want, tc.why)
+			}
+		})
+	}
+}
