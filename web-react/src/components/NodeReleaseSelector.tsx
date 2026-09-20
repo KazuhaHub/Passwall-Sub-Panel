@@ -32,6 +32,15 @@ export interface NodeReleaseSelectorProps {
    * list cannot offer something the service would reject for being older.
    */
   newerThan?: string
+  /**
+   * When set, only these versions are offered.
+   *
+   * The upgrade dialog passes the releases a verified edge actually reaches.
+   * `newerThan` narrows by version, which is a weaker claim: a release can be
+   * ahead of the node and still be a path nobody has walked, and offering it
+   * invites a request the edge check refuses.
+   */
+  targets?: readonly string[]
 }
 
 function supportsSelection(release: NodeRelease, selection: NativeInstallationSelection): boolean {
@@ -53,7 +62,7 @@ function officialReleaseURL(release: NodeRelease): string | undefined {
   return release.release_url === expected ? expected : undefined
 }
 
-export default function NodeReleaseSelector({ enabled, selection, value, onChange, disabled = false, initialChannel = 'stable', compact = false, autoSelectLatest = false, newerThan }: NodeReleaseSelectorProps) {
+export default function NodeReleaseSelector({ enabled, selection, value, onChange, disabled = false, initialChannel = 'stable', compact = false, autoSelectLatest = false, newerThan, targets }: NodeReleaseSelectorProps) {
   const { t, i18n } = useTranslation(['admin', 'common'])
   const reviewID = useId()
   const [channel, setChannel] = useState<NodeReleaseChannel>(initialChannel)
@@ -107,8 +116,9 @@ export default function NodeReleaseSelector({ enabled, selection, value, onChang
 
   const options = useMemo(() => (releases ?? []).filter(release =>
     release.channel === channel && officialReleaseURL(release) && supportsSelection(release, selection) &&
-    (!newerThan || compareLegacyTag(release.version, newerThan) > 0),
-  ), [releases, channel, selection, newerThan])
+    (!newerThan || compareLegacyTag(release.version, newerThan) > 0) &&
+    (!targets || targets.includes(release.version)),
+  ), [releases, channel, selection, newerThan, targets])
   const selected = options.find(release => release.version === value)
   const selectedURL = selected ? officialReleaseURL(selected) : undefined
   const channelTag = channel === 'stable' ? 'latest' : 'beta'

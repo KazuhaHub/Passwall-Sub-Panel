@@ -274,3 +274,34 @@ describe('the upgrade list offers only targets that are actually ahead', () => {
     await waitFor(() => expect(screen.queryByRole('option', { name: 'v0.0.1-beta9' })).toBeNull())
   })
 })
+
+// `newerThan` narrows by version, which is a weaker claim than "a path somebody
+// walked": a release can be ahead of the node and still be a target no verified
+// edge reaches. When the instance names the reachable ones, that is the list.
+describe('an explicit target list wins over being merely newer', () => {
+  it('offers only the versions the instance named', async () => {
+    const beta = (version: string): NodeRelease => ({
+      ...testing, version,
+      release_url: `https://github.com/KazuhaHub/Passwall-Node/releases/tag/${version}`,
+    })
+    reads([beta('v0.0.1-beta10'), beta('v0.0.1-beta11'), beta('v0.0.1-beta12')])
+    mount(<NodeReleaseSelector enabled selection={linux} value="" onChange={() => {}}
+      initialChannel="testing" newerThan="v0.0.1-beta9" targets={['v0.0.1-beta11']} />)
+    const field = screen.getByRole('combobox', { name: 'admin:servers.native.agent_version' })
+    await waitFor(() => expect(field.getAttribute('aria-disabled')).not.toBe('true'))
+    fireEvent.mouseDown(field)
+    expect(await screen.findByRole('option', { name: 'v0.0.1-beta11' })).toBeTruthy()
+    // Ahead, but nobody walked a path to it.
+    expect(screen.queryByRole('option', { name: 'v0.0.1-beta12' })).toBeNull()
+    expect(screen.queryByRole('option', { name: 'v0.0.1-beta10' })).toBeNull()
+  })
+
+  it('offers nothing when the instance names no reachable target', async () => {
+    reads([{ ...testing, version: 'v0.0.1-beta11',
+      release_url: 'https://github.com/KazuhaHub/Passwall-Node/releases/tag/v0.0.1-beta11' }])
+    mount(<NodeReleaseSelector enabled selection={linux} value="" onChange={() => {}}
+      initialChannel="testing" targets={[]} />)
+    // An empty list is the honest answer here: nothing the instance will accept.
+    expect(await screen.findByText('admin:servers.native.release_no_testing')).toBeTruthy()
+  })
+})
