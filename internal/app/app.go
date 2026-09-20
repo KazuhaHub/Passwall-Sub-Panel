@@ -195,6 +195,23 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	if err := version.LoadPolicySnapshot(); err != nil {
 		log.Warn("load compat policy snapshot (will recover on first refresh)", "err", err)
 	}
+	// The keys a policy signature is verified against. NOTHING FETCHES A POLICY
+	// YET, so installing the root does not by itself change any decision — it
+	// only makes verification possible for the code that will.
+	//
+	// An EMPTY root is the default and is a real state: it trusts nothing, so no
+	// policy can be installed, which is correct for a deployment that has not
+	// been given keys. A root that was CONFIGURED but does not build stops the
+	// boot instead: the operator has said they expect signatures to verify, and
+	// silently trusting nothing looks identical to a working setup from their
+	// side until a policy is rejected with no explanation.
+	if len(cfg.PolicyTrustKeys) > 0 {
+		root, err := version.NewPolicyTrustRoot(cfg.PolicyTrustKeys)
+		if err != nil {
+			return nil, fmt.Errorf("policy trust root: %w", err)
+		}
+		version.SetPolicyTrustRoot(root)
+	}
 	// Same boot pattern for the centralized "latest 3X-UI release tag"
 	// snapshot: cold-boot off the cache so the ⋮ kebab "update available"
 	// badge can render immediately, then the first RefreshLatestXUI call

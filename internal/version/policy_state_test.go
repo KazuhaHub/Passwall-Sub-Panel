@@ -219,3 +219,34 @@ func TestAHigherRevisionSupersedes(t *testing.T) {
 		t.Fatalf("an equal revision must be reused, not re-installed: installed=%v err=%v", installed, err)
 	}
 }
+
+// The trust root is what a policy signature is checked against, so "no keys" has
+// to be a distinct, visible state rather than a root that happens to accept
+// everything. Nothing fetches a policy yet, so installing this changes no
+// decision; it only makes verification possible for the code that will.
+func TestTheTrustRootHolderIsFailClosed(t *testing.T) {
+	t.Cleanup(func() { SetPolicyTrustRoot(nil) })
+
+	SetPolicyTrustRoot(nil)
+	if ActivePolicyTrustRoot() != nil {
+		t.Fatal("an unconfigured trust root is nil, not an empty-but-present one")
+	}
+	// With no root, nothing verifies — the empty root is what enforces that.
+	root, err := NewPolicyTrustRoot(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	SetPolicyTrustRoot(root)
+	if ActivePolicyTrustRoot() == nil {
+		t.Fatal("a root was installed")
+	}
+	if ActivePolicyTrustRoot().Trusts("anything") {
+		t.Fatal("an empty root must trust nothing")
+	}
+
+	id, pub, _ := signingKey(t)
+	SetPolicyTrustRoot(trustRoot(t, id, pub))
+	if !ActivePolicyTrustRoot().Trusts(id) {
+		t.Fatalf("the installed root does not hold %s", id)
+	}
+}

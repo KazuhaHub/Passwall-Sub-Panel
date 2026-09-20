@@ -102,3 +102,27 @@ data_dir: "./data"
 #   dsn: "postgres://psp:pw@127.0.0.1:5432/passwall?sslmode=disable"
 #
 # Env override: PSP_POSTGRES_DSN replaces everything in the postgres block.
+
+# Upgrade-policy signing keys.
+#
+# The panel verifies a published upgrade policy against these before anything in
+# it is trusted. They live here rather than in the settings table on purpose: a
+# trust root that the admin API can change is one the admin API can be talked
+# into changing, and the point of the signature is that the policy's authority
+# does not come from whoever is logged in.
+#
+# Each entry is a key id and a base64 ed25519 PUBLIC key. ABSENT IS A REAL AND
+# SAFE STATE: with no keys, no policy can be verified, so the panel keeps using
+# what it already had. A key that is present but malformed is refused at boot
+# instead, because silently trusting nothing looks identical to a working setup
+# from your side until a policy is rejected with no explanation.
+#
+# Rotation happens inside the signed documents — a key the panel already trusts
+# approves new ones — so this list is only the starting point and does not need
+# to be edited for every rotation.
+#
+# policy_trust_keys:
+#   primary: "BASE64_ED25519_PUBLIC_KEY"
+#   backup: "BASE64_ED25519_PUBLIC_KEY"
+#
+# Env override: PSP_POLICY_TRUST_KEYS="primary=BASE64,backup=BASE64"

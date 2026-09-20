@@ -2,6 +2,7 @@
 package config
 
 import (
+	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/base64"
 	"errors"
@@ -40,6 +41,20 @@ type Config struct {
 	// Empty = keep the default (info). Override order: --debug flag >
 	// PSP_LOG_LEVEL env > this field > default.
 	LogLevel string `yaml:"log_level"`
+
+	// PolicyTrustKeys maps a key id to a base64 ed25519 public key, and is what
+	// the panel verifies an upgrade policy against.
+	//
+	// IT BELONGS IN BOOT CONFIG, NOT IN THE SETTINGS TABLE. A trust root that can
+	// be changed through the admin API is a trust root the admin API can be
+	// talked into changing, and the whole point of the policy signature is that
+	// the published policy's authority does not come from whoever is logged in.
+	//
+	// Empty is the default and is not an error: it means no policy can be
+	// verified, which is the correct state for a deployment that has not been
+	// given keys. Rotation works inside the signed documents, so this list is
+	// only the seed.
+	PolicyTrustKeys map[string]string `yaml:"policy_trust_keys"`
 }
 
 // HTTPConfig groups reverse-proxy-aware request-handling settings.
@@ -375,6 +390,13 @@ func Load(path string) (*Config, error) {
 	if tp := os.Getenv("PSP_TRUSTED_PROXIES"); tp != "" {
 		c.HTTP.TrustedProxies = tp
 	}
+	if keys := os.Getenv("PSP_POLICY_TRUST_KEYS"); keys != "" {
+		parsed, err := ParseTrustKeys(keys)
+		if err != nil {
+			return nil, fmt.Errorf("PSP_POLICY_TRUST_KEYS: %w", err)
+		}
+		c.PolicyTrustKeys = parsed
+	}
 
 	if err := c.validate(); err != nil {
 		return nil, err
@@ -434,8 +456,53 @@ func (c *Config) validate() error {
 	if c.JWTSecret == "" {
 		return fmt.Errorf("jwt_secret must be set (in config or env PSP_JWT_SECRET)")
 	}
+	// A malformed trust key is refused HERE rather than degrading to "no keys".
+	// Silently trusting nothing looks identical to a working configuration from
+	// the operator's side, and they would find out when a policy was rejected
+	// with no explanation.
+	for id, encoded := range c.PolicyTrustKeys {
+		if id == "" {
+			return fmt.Errorf("policy_trust_keys has an entry with an empty key id")
+		}
+		raw, err := base64.StdEncoding.DecodeString(encoded)
+		if err != nil {
+			return fmt.Errorf("policy_trust_keys[%s] is not base64: %w", id, err)
+		}
+		if len(raw) != ed25519.PublicKeySize {
+			return fmt.Errorf("policy_trust_keys[%s] is %d bytes, want %d for an ed25519 public key", id, len(raw), ed25519.PublicKeySize)
+		}
+	}
 	// DSN is optional; empty falls back to SQLite at <DataDir>/panel.db.
 	return nil
+}
+
+// ParseTrustKeys reads the "keyid=base64,keyid2=base64" form used by the
+// PSP_POLICY_TRUST_KEYS env override. The same shape is accepted from YAML as a
+// map, so the env form exists only for deployments that inject configuration
+// rather than mount a file.
+func ParseTrustKeys(value string) (map[string]string, error) {
+	keys := make(map[string]string)
+	for _, entry := range strings.Split(value, ",") {
+		entry = strings.TrimSpace(entry)
+		if entry == "" {
+			continue
+		}
+		id, encoded, ok := strings.Cut(entry, "=")
+		id, encoded = strings.TrimSpace(id), strings.TrimSpace(encoded)
+		if !ok || id == "" || encoded == "" {
+			return nil, fmt.Errorf("entry %q is not key_id=base64", entry)
+		}
+		if _, duplicate := keys[id]; duplicate {
+			// Two keys under one id would make which one verifies depend on
+			// parse order, and a rotation would silently pick a winner.
+			return nil, fmt.Errorf("key id %q appears twice", id)
+		}
+		keys[id] = encoded
+	}
+	if len(keys) == 0 {
+		return nil, fmt.Errorf("no keys found in %q", value)
+	}
+	return keys, nil
 }
 
 // DBKind returns the active database driver: "mysql", "postgres" or

@@ -122,3 +122,29 @@ func applicablePolicy(buildVersion string) *ReleasesPolicy {
 	}
 	return policy
 }
+
+// The trust root the panel verifies policies against.
+//
+// COMPILED OR CONFIGURED, NEVER FETCHED. A trust root obtained over the same
+// channel as the thing it authenticates authenticates nothing, so it comes from
+// configuration and never from the network. Empty is the default and is a real
+// state: it means no policy can be verified, which is correct for a deployment
+// that has not been given keys — failing closed is "no policy", not "any policy".
+var activeTrustRoot atomic.Value // *PolicyTrustRoot
+
+// SetPolicyTrustRoot installs the keys this build accepts. Passing nil restores
+// the empty root, which trusts nothing.
+func SetPolicyTrustRoot(root *PolicyTrustRoot) {
+	if root == nil {
+		activeTrustRoot.Store((*PolicyTrustRoot)(nil))
+		return
+	}
+	activeTrustRoot.Store(root)
+}
+
+// ActivePolicyTrustRoot returns the trusted keys, or nil when none are
+// configured.
+func ActivePolicyTrustRoot() *PolicyTrustRoot {
+	root, _ := activeTrustRoot.Load().(*PolicyTrustRoot)
+	return root
+}
