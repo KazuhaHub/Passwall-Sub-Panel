@@ -77,9 +77,9 @@ func TestPolicySnapshotOnlyInstallsWhereTheDocumentApplies(t *testing.T) {
 		wantErr    bool
 		wantUnread bool
 	}{
-		{name: "the pre-beta.9 range", current: "v4.0.0-beta.1", wantMax: "3.7.0"},
-		{name: "the beta.9 range", current: "v4.0.0-beta.9", wantMax: "3.8.5"},
-		{name: "the stable line", current: "v4.0.0", wantMax: "3.8.5"},
+		{name: "the pre-beta.9 range", current: "3.0.0", wantMax: "3.7.0"},
+		{name: "the beta.9 range", current: "4.0.0", wantMax: "3.8.5"},
+		{name: "the stable line", current: "4.0.0", wantMax: "3.8.5"},
 		{name: "another major", current: "v3.9.2", wantErr: true, wantUnread: true},
 		{name: "unparseable identity", current: "dev", wantErr: true, wantUnread: true},
 	} {
@@ -114,7 +114,7 @@ func TestPolicySnapshotOnlyInstallsWhereTheDocumentApplies(t *testing.T) {
 // A snapshot that cannot be stored is a DEGRADATION — the next boot fetches
 // instead of replaying — and not a refresh that did not happen.
 func TestAnUnwritableSnapshotDirectoryDoesNotFailTheApply(t *testing.T) {
-	isolatedCompatCache(t, "v4.0.0")
+	isolatedCompatCache(t, "4.0.0")
 	// A FILE where the directory should be. MkdirAll cannot succeed, so the write
 	// fails the way a read-only data directory does — and, unlike a chmod, it fails
 	// for root too, so the case means the same thing wherever it runs.
@@ -212,7 +212,7 @@ func TestPolicySnapshotRefusesADocumentThatFailsItsOwnIntegrityCheck(t *testing.
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			dir := isolatedCompatCache(t, "v4.0.0")
+			dir := isolatedCompatCache(t, "4.0.0")
 			writeSnapshot(t, dir, mergedPolicy(t))
 			path := filepath.Join(dir, policySnapshotFile)
 			raw, err := os.ReadFile(path)
@@ -238,7 +238,7 @@ func TestPolicySnapshotRefusesADocumentThatFailsItsOwnIntegrityCheck(t *testing.
 // a valid digest over a document for ANOTHER major is exactly what a
 // snapshot from a different build looks like.
 func TestPolicySnapshotRoundTripsAndKeepsItsProvenance(t *testing.T) {
-	dir := isolatedCompatCache(t, "v4.0.0")
+	dir := isolatedCompatCache(t, "4.0.0")
 	snapshot := writeSnapshot(t, dir, mergedPolicy(t))
 
 	if snapshot.SnapshotSchema != policySnapshotSchema {
@@ -264,7 +264,7 @@ func TestPolicySnapshotRoundTripsAndKeepsItsProvenance(t *testing.T) {
 }
 
 func TestPolicySnapshotMissingOrDisabledIsNotAnError(t *testing.T) {
-	isolatedCompatCache(t, "v4.0.0")
+	isolatedCompatCache(t, "4.0.0")
 	if err := LoadPolicySnapshot(); err != nil {
 		t.Fatalf("missing optional snapshot: %v", err)
 	}
@@ -278,7 +278,7 @@ func TestPolicySnapshotMissingOrDisabledIsNotAnError(t *testing.T) {
 // snapshot or the new one, never a partial file, and the temporary file does not
 // survive.
 func TestPolicySnapshotWriteLeavesNoTemporaryBehind(t *testing.T) {
-	dir := isolatedCompatCache(t, "v4.0.0")
+	dir := isolatedCompatCache(t, "4.0.0")
 	writeSnapshot(t, dir, mergedPolicy(t))
 
 	entries, err := os.ReadDir(dir)
@@ -301,7 +301,7 @@ func TestLoadLatestXUICacheIsPSPMajorIndependent(t *testing.T) {
 	if err := saveLatestXUICache("v3.7.0"); err != nil {
 		t.Fatal(err)
 	}
-	Version = "v4.0.0-beta.1"
+	Version = "3.0.0"
 	SetLatestXUI("")
 	if err := LoadLatestXUICache(); err != nil || LatestXUI() != "v3.7.0" {
 		t.Fatalf("upstream latest tag must survive PSP major changes: tag=%q error=%v", LatestXUI(), err)
@@ -313,7 +313,7 @@ func TestLoadLatestXUICacheIsPSPMajorIndependent(t *testing.T) {
 // loss of the panel's working range — the failure would be worse than the
 // problem.
 func TestAFailedSnapshotLeavesTheActiveRangeAlone(t *testing.T) {
-	dir := isolatedCompatCache(t, "v4.0.0")
+	dir := isolatedCompatCache(t, "4.0.0")
 	writeSnapshot(t, dir, mergedPolicy(t))
 	path := filepath.Join(dir, policySnapshotFile)
 	if err := os.WriteFile(path, []byte("{ not json"), 0o600); err != nil {

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -43,8 +44,61 @@ func SetLatestSUI(tag string) { latestSUITag.Store(tag) }
 // release, including a beta being behind its own stable. Empty/dev/unknown
 // observations never produce an upgrade hint; being different is not enough.
 func IsSUIUpdateAvailable(panelVersion string) bool {
-	latest, ok := acceptLatestPSPStable(LatestSUI(), false)
-	return ok && pspBehindStable(panelVersion, latest)
+	latest, ok := acceptedSUIStable(LatestSUI(), false)
+	return ok && suiBehindStable(panelVersion, latest)
+}
+
+// S-UI'S TAGS ARE NOT OUR VERSIONS, AND BORROWING OUR RULE WAS A DEFECT.
+//
+// Upstream S-UI tags its releases `v1.6.2`, which is the shape this project also
+// published until the legacy scheme was removed — so this probe used to call
+// acceptLatestPSPStable and pspBehindStable and read correctly for as long as the
+// two vocabularies happened to overlap. They are not the same vocabulary: S-UI's
+// versioning is not ours to define, and the day our own shape rule narrowed, S-UI
+// release detection stopped working without a word — no error, and no update hint
+// ever again. Upstream tags are accepted and ordered on their own terms, with the
+// same upstream-agnostic helpers the 3X-UI probe uses.
+func acceptedSUIStable(tagName string, prerelease bool) (string, bool) {
+	if tagName == "" || prerelease || hasPrereleaseSuffix(tagName) {
+		return "", false
+	}
+	if _, ok := parseSemver(tagName); !ok {
+		return "", false
+	}
+	return tagName, true
+}
+
+func suiBehindStable(current, latestStable string) bool {
+	if current == "" || latestStable == "" {
+		return false
+	}
+	cur, ok := parseSemver(current)
+	latest, ok2 := parseSemver(latestStable)
+	if !ok || !ok2 {
+		return false
+	}
+	if cmp := cmpSemver(cur, latest); cmp != 0 {
+		return cmp < 0
+	}
+	// The same base version: behind only when the observed build is a prerelease
+	// of it and the target is not — S-UI publishing v1.6.2 after v1.6.2-beta.1.
+	return hasPrereleaseSuffix(current) && !hasPrereleaseSuffix(latestStable)
+}
+
+// hasPrereleaseSuffix reports whether a version string carries a prerelease
+// suffix — `v1.6.2-beta.1` yes, `v1.6.2+build2` no.
+//
+// IT READS AN UPSTREAM TAG VOCABULARY, not this project's. A version of ours has
+// no suffix at all, and a candidate of ours is distinguished by the CHANNEL it was
+// published on, so there is nothing here for it to answer.
+func hasPrereleaseSuffix(v string) bool {
+	v = strings.TrimSpace(v)
+	v = strings.TrimPrefix(v, "v")
+	v = strings.TrimPrefix(v, "V")
+	if i := strings.IndexByte(v, '+'); i >= 0 { // build metadata comes last
+		v = v[:i]
+	}
+	return strings.IndexByte(v, '-') >= 0
 }
 
 // RefreshLatestSUI is single-flight and throttles failed attempts too: opening
@@ -86,7 +140,7 @@ func LatestSUIRelease(ctx context.Context) (string, error) {
 	if err := requestCtx.Err(); err != nil {
 		return "", err
 	}
-	if tag, ok := acceptLatestPSPStable(LatestSUI(), false); ok {
+	if tag, ok := acceptedSUIStable(LatestSUI(), false); ok {
 		return tag, nil
 	}
 	if err := RefreshLatestSUI(requestCtx); err != nil {
@@ -105,7 +159,7 @@ func LatestSUIRelease(ctx context.Context) (string, error) {
 	if err := requestCtx.Err(); err != nil {
 		return "", err
 	}
-	if tag, ok := acceptLatestPSPStable(LatestSUI(), false); ok {
+	if tag, ok := acceptedSUIStable(LatestSUI(), false); ok {
 		return tag, nil
 	}
 	if err := LatestSUIRefreshError(); err != nil {
@@ -147,7 +201,7 @@ func fetchLatestSUI(ctx context.Context) error {
 	}
 	// Defend the stable-only promise against accidental prerelease/draft
 	// payloads and beta tags published without their GitHub prerelease flag.
-	tag, ok := acceptLatestPSPStable(release.TagName, release.Prerelease || release.Draft)
+	tag, ok := acceptedSUIStable(release.TagName, release.Prerelease || release.Draft)
 	if !ok {
 		return fmt.Errorf("latest S-UI release has no usable stable tag")
 	}

@@ -7,29 +7,42 @@ func TestPSPBehindStable(t *testing.T) {
 		current, latest string
 		want            bool
 	}{
-		{"v3.6.4", "v3.7.0", true},          // older stable base
-		{"v3.7.0", "v3.7.0", false},         // same stable
-		{"v3.7.1", "v3.7.0", false},         // ahead
-		{"v3.7.0-beta.16", "v3.7.0", true},  // beta behind its stable (the key case)
-		{"v3.7.0-beta.16", "v3.6.4", false}, // beta ahead of latest stable
-		{"v3.8.0-beta.1", "v3.7.0", false},  // newer base, even as a beta → not behind
-		{"v3.6.4-beta.2", "v3.7.0", true},   // older base beta
-		{"dev", "v3.7.0", false},            // dev build never nagged
-		{"v3.7.0", "", false},               // no latest yet
-		{"", "v3.7.0", false},               // unknown current
-		// The product scheme: the LATEST is a tag and the CURRENT is a version,
-		// and they are different strings. Comparing them as they arrive finds
-		// nothing newer every time, so the nudge silently never appears.
-		{"4.0.0", "release/4.0.1", true},   // behind a newer product release
-		{"4.0.0", "release/4.0.0", false},  // same product release
+		// The latest is a TAG and the current is a VERSION, and they are never the
+		// same string. Comparing them as they arrive finds nothing newer every
+		// time, so the nudge silently never appears.
+		{"4.0.0", "release/4.0.1", true},   // behind a newer release
+		{"4.0.0", "release/4.0.0", false},  // same release
 		{"4.1.0", "release/4.0.0", false},  // ahead of it
 		{"4.0.0", "release/102.1.0", true}, // behind across a release line
-		{"3.9.2", "release/4.0.0", true},   // a legacy build behind a product release
-		{"4.0.0", "v4.0.0", false},         // same version, the other scheme's tag
+		{"1.0.0", "release/4.0.0", true},   // behind on the first segment
+		// A BUILD COMPONENT IS PART OF THE ORDER. This is why the comparison is
+		// the project's own rule rather than a three-integer parse: the parse
+		// refuses the string outright, so a build stamped with a fourth segment
+		// would never be nudged at all — silently, and only for the builds the
+		// reordering work exists to distinguish.
+		{"4.0.0.1", "release/4.0.0", false}, // ahead of its base
+		{"4.0.0", "release/4.0.0.1", true},  // behind a rebuilt base
+		// NOTHING TO COMPARE, OR NOTHING TO COMPARE IT TO.
+		{"dev", "release/4.0.0", false}, // a source build is never nagged
+		{"4.0.0", "", false},            // no latest yet
+		{"", "release/4.0.0", false},    // unknown current
+		{"dev-abc123", "release/4.0.0", false},
 	}
 	for _, c := range cases {
 		if got := pspBehindStable(c.current, c.latest); got != c.want {
 			t.Errorf("pspBehindStable(%q, %q) = %v, want %v", c.current, c.latest, got, c.want)
+		}
+	}
+}
+
+// A LATEST THAT IS NOT ONE OF OUR TAGS IS NOT A LATEST. Two shapes reach here
+// from outside and neither is an address this project publishes: a bare version
+// (`4.0.0` — a version, not a path) and the legacy v-prefixed tag. Accepting
+// either would build a nudge around a release the panel cannot then describe.
+func TestPSPBehindStableRefusesALatestThatIsNotAReleaseTag(t *testing.T) {
+	for _, latest := range []string{"4.0.0", "v4.0.0", "v3.7.0", "release/4.0", "release/latest", "latest", "release/"} {
+		if pspBehindStable("4.0.0", latest) {
+			t.Errorf("pspBehindStable(4.0.0, %q) claimed this build is behind it", latest)
 		}
 	}
 }
@@ -41,12 +54,26 @@ func TestAcceptLatestPSPStable(t *testing.T) {
 		wantTag    string
 		wantOK     bool
 	}{
-		{"v3.7.0", false, "v3.7.0", true},
-		{"v3.7.0-beta.16", false, "", false}, // load-bearing: flag false but the tag is a beta
+		{"release/4.0.0", false, "release/4.0.0", true},
+		{"release/102.1.0", false, "release/102.1.0", true},
+		{"release/4.0.0", true, "", false}, // GitHub flagged it prerelease
+		// THE ADDRESS IS REQUIRED. A bare version is a version, not a tag, and a
+		// caller that took one would ask GitHub for a release at a path no
+		// publication writes to.
+		{"4.0.0", false, "", false},
+		{"4.0.0", true, "", false},
+		// THE LEGACY TAG IS GONE, flag or no flag. This is the one that used to be
+		// load-bearing the other way: `v3.7.0-beta.16` arriving with the flag
+		// unset had to be caught by the tag text.
+		{"v3.7.0", false, "", false},
+		{"v3.7.0-beta.16", false, "", false},
 		{"v3.7.0-beta.16", true, "", false},
-		{"v3.7.0", true, "", false}, // GitHub flagged it pre-release
+		// SHORTHAND AND NONSENSE.
+		{"release/4.0", false, "", false},
+		{"release/4.0.0.0", false, "", false},
 		{"", false, "", false},
-		{"garbage", false, "", false}, // not a parseable semver
+		{"garbage", false, "", false},
+		{"latest", false, "", false},
 	}
 	for _, c := range cases {
 		gotTag, gotOK := acceptLatestPSPStable(c.tag, c.prerelease)
@@ -57,95 +84,30 @@ func TestAcceptLatestPSPStable(t *testing.T) {
 	}
 }
 
-func TestIsPrerelease(t *testing.T) {
-	for _, c := range []struct {
-		v    string
-		want bool
-	}{
-		{"v3.7.0", false},
-		{"3.7.0", false},
-		{"v3.7.0-beta.16", true},
-		{"v3.7.0-rc.1", true},
-		{"v3.7.0+build5", false}, // build metadata is not a pre-release
-		{"dev", false},
-	} {
-		if got := IsPrerelease(c.v); got != c.want {
-			t.Errorf("IsPrerelease(%q) = %v, want %v", c.v, got, c.want)
-		}
-	}
-}
-
-// The tag-text pre-release test is a LEGACY defence, and scoping it that way is
-// the point: under the product scheme a version has no hyphen, so running the
-// same test would find nothing to reject and would accept a testing candidate
-// GitHub had correctly flagged.
-func TestStableSelectionUsesTheFlagForNonLegacyTags(t *testing.T) {
+// THE FLAG DECIDES, BECAUSE THERE IS NO SECOND SIGNAL LEFT TO READ. The hyphen
+// test that used to sit beside it existed for one historical gap: a beta cut
+// before the workflow set the prerelease flag would arrive without it. A product
+// tag is `release/MAJOR.MINOR.PATCH` — three integers in an explicit namespace,
+// no hyphen anywhere — so the test found nothing to reject there, and the code
+// carried an exemption to keep it from being applied where it was meaningless.
+// With that shape gone there is no gap and no exemption: the flag is the whole
+// decision, and the tag only has to be one of ours.
+func TestStableSelectionIsTheFlagAndNothingElse(t *testing.T) {
 	for _, tc := range []struct {
 		name       string
 		tag        string
 		prerelease bool
 		want       bool
-		why        string
 	}{
-		{
-			name: "a legacy beta the flag missed",
-			tag:  "v4.0.0-beta.25", prerelease: false, want: false,
-			why: "an older cut published before the workflow set the flag must still not be taken as stable",
-		},
-		{
-			name: "a legacy beta the flag caught",
-			tag:  "v4.0.0-beta.25", prerelease: true, want: false,
-			why: "refused either way",
-		},
-		{
-			name: "a legacy stable",
-			tag:  "v4.0.0", prerelease: false, want: true,
-			why: "the historical form it has always been",
-		},
-		{
-			name: "an unprefixed version the flag marks testing",
-			tag:  "4.0.0", prerelease: true, want: false,
-			why: "no hyphen to find, so the explicit flag is what decides",
-		},
-		{
-			name: "an unprefixed version the flag calls released",
-			tag:  "4.0.0", prerelease: false, want: true,
-			why: "the flag is the authority for a form that carries no hyphen",
-		},
-		{
-			// This used to read "the panel cannot identify a product-scheme
-			// release yet; refusing is honest, not a regression". It can now —
-			// the catalog reads product tags and versions — and refusing here
-			// would be the regression: the update nudge would simply never
-			// appear for a product release, which is invisible rather than
-			// honest.
-			name: "a product tag",
-			tag:  "release/4.0.0", prerelease: false, want: true,
-			why: "the panel reads product tags, so a released product tag is a stable release",
-		},
-		{
-			// The exemption is scoped to the product NAMESPACE, not to "no v".
-			// A tag in neither scheme keeps the fail-safe test, because for an
-			// unrecognised form the characters are all there is to go on.
-			name: "an rc in neither scheme",
-			tag:  "4.0.0-rc.1", prerelease: false, want: false,
-			why: "not the product namespace, so the hyphen still means pre-release",
-		},
-		{
-			name: "nothing at all",
-			tag:  "", prerelease: false, want: false,
-			why: "an empty tag is never a stable release",
-		},
-		{
-			name: "not a version",
-			tag:  "latest", prerelease: false, want: false,
-			why: "unparseable",
-		},
+		{name: "a testing candidate", tag: "release/4.0.0", prerelease: true, want: false},
+		{name: "a released candidate", tag: "release/4.0.0", prerelease: false, want: true},
+		{name: "a candidate the flag calls released", tag: "release/4.0.1", prerelease: false, want: true},
+		{name: "nothing at all", tag: "", prerelease: false, want: false},
+		{name: "not ours", tag: "4.0.0", prerelease: false, want: false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, ok := acceptLatestPSPStable(tc.tag, tc.prerelease)
-			if ok != tc.want {
-				t.Fatalf("acceptLatestPSPStable(%q, %v) = %v, want %v — %s", tc.tag, tc.prerelease, ok, tc.want, tc.why)
+			if _, ok := acceptLatestPSPStable(tc.tag, tc.prerelease); ok != tc.want {
+				t.Fatalf("acceptLatestPSPStable(%q, %v) = %v, want %v", tc.tag, tc.prerelease, ok, tc.want)
 			}
 		})
 	}

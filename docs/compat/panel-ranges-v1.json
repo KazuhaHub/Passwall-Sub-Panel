@@ -1,48 +1,28 @@
 {
   "schema_version": 1,
-  "revision": 1,
+  "revision": 2,
   "issued_at": "2026-09-19T00:00:00Z",
   "expires_at": "2027-09-19T00:00:00Z",
   "applies_to_psp": {
-    "min": "v4.0.0-beta.1",
-    "max": "v4.99.99"
+    "min": "4.0.0",
+    "max": "4.99.99"
   },
-  "_comment": "The MERGED view of docs/compat/v4.json: its base entries with v4-ranges.json folded in, because the overlay is where the current reviewed ranges live. Publishing the base entries alone would understate what has been verified, and a panel would report a supported ceiling as untested. Reached BY NAME, because under the product scheme the first segment of a version is a release line rather than a compatibility major, so there is no v<major>.json for a product build to derive. The window starts at the PRERELEASE line: a prerelease ranks below its own release, so a window opening at 4.0.0 would exclude the rows for v4.0.0-beta.*, which this document carries. The per-major files stay for builds that read them.",
+  "_comment": "The MERGED view of docs/compat/v4.json: its base entries with v4-ranges.json folded in, because the overlay is where the current reviewed ranges live. Publishing the base entries alone would understate what has been verified, and a panel would report a supported ceiling as untested. Reached BY NAME, because under the product scheme the first segment of a version is a release line rather than a compatibility major, so there is no v<major>.json for a product build to derive. THE WINDOW OPENS AT THE RELEASE ITSELF, 4.0.0. It used to open one prerelease earlier, at v4.0.0-beta.1, so that the rows for the beta line fell inside it; the legacy scheme is gone, a prerelease is no longer a version this project has, and the rows that window existed for are not identities any more either. The per-major files stay for builds that read them.",
   "entries": [
     {
-      "psp_min": "v4.0.0-beta.9",
-      "psp_max": "v4.0.0-beta.99",
+      "psp_min": "4.0.0",
+      "psp_max": "4.99.99",
       "min_xui": "3.4.2",
       "max_tested_xui": "3.8.5",
-      "notes": "3X-UI 3.8.5 live adapter verification (2026-09-16 UTC) used PSP main at 2440112 against upstream tag 7ef22f94 and Xray 26.9.9 on darwin/arm64. TestLive_XUISurface, TestLive_XUIConnectionLimits and TestLive_XUIRealityScan passed. PSP v4.0.0-beta.9 introduced the required negative-subSortIndex preservation and already carried the 26.9.8+ REALITY ML-KEM subscription handling. This range deliberately starts at beta.9; beta.1 through beta.8 remain on the 3.7.0 ceiling."
-    },
-    {
-      "psp_min": "v4.0.0",
-      "psp_max": "v4.99.99",
-      "min_xui": "3.4.2",
-      "max_tested_xui": "3.8.5",
-      "notes": "The v4 stable line contains the beta.9 3X-UI 3.8.x inbound-update fix and the verified adapter surface recorded above. Keep a narrower entry ahead of this baseline if a later v4 release changes the contract."
-    },
-    {
-      "psp_min": "v4.0.0-beta.1",
-      "psp_max": "v4.0.0-beta.8",
-      "min_xui": "3.4.2",
-      "max_tested_xui": "3.7.0",
-      "notes": "Historical v4 betas before beta.9 do not preserve negative 3X-UI 3.8.x subSortIndex values and therefore retain the 3.7.0 ceiling."
+      "notes": "3X-UI 3.8.5 live adapter verification (2026-09-16 UTC) used PSP main at 2440112 against upstream tag 7ef22f94 and Xray 26.9.9 on darwin/arm64. TestLive_XUISurface, TestLive_XUIConnectionLimits and TestLive_XUIRealityScan passed. The release carries the negative-subSortIndex preservation and the 26.9.8+ REALITY ML-KEM subscription handling that verification exercised. THIS ENTRY REPLACES TWO. They were keyed by the PSP beta line - beta.9 and up on 3.8.5, beta.1 through beta.8 on 3.7.0 - and a build of the beta line no longer has an identity to be offered under, so the ceiling recorded for it is not a range anything can be matched against. Keep a narrower entry ahead of this baseline if a later release changes the contract."
     }
   ],
   "sui_entries": [
     {
-      "psp_min": "v4.0.0-beta.1",
-      "psp_max": "v4.0.0-beta.99",
+      "psp_min": "4.0.0",
+      "psp_max": "4.99.99",
       "max_tested_sui": "1.6.3",
-      "notes": "S-UI 1.6.3 live adapter verification (2026-09-16 UTC) used PSP main at 2440112 against upstream tag 13abbdc4 and sing-box 1.14.1 on darwin/arm64. TestLive_SUISurface passed after upgrading the 1.6.2 scratch database. Token authentication and inbound/client read-write shapes remain compatible; the new session API and multi-user Snell support are additive."
-    },
-    {
-      "psp_min": "v4.0.0",
-      "psp_max": "v4.99.99",
-      "max_tested_sui": "1.6.3",
-      "notes": "The v4 stable line uses the same S-UI adapter contract live-verified against 1.6.3. No S-UI minimum or new optional capability is claimed."
+      "notes": "S-UI 1.6.3 live adapter verification (2026-09-16 UTC) used PSP main at 2440112 against upstream tag 13abbdc4 and sing-box 1.14.1 on darwin/arm64. TestLive_SUISurface passed after upgrading the 1.6.2 scratch database. Token authentication and inbound/client read-write shapes remain compatible; the new session API and multi-user Snell support are additive. The beta-line row this replaces recorded the same contract for builds that no longer have an identity. No S-UI minimum or new optional capability is claimed."
     }
   ],
   "xui_advisories": {

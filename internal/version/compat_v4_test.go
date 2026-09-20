@@ -97,7 +97,7 @@ func TestCompatV4ReleaseRange(t *testing.T) {
 	if payload.RangeOverlay != "v4-ranges.json" {
 		t.Fatalf("V4 base manifest lost its prerelease-aware range overlay: %q", payload.RangeOverlay)
 	}
-	for _, version := range []string{"v4.0.0-beta.1", "v4.0.0", "4.0.1", "v4.99.99"} {
+	for _, version := range []string{"v4.0.0-beta.1", "4.0.0", "4.0.1", "v4.99.99"} {
 		xui, ok := lookupForPSPVersion(payload, version)
 		if !ok || xui.MinXUI != MinXUI || xui.MaxTestedXUI != "3.7.0" {
 			t.Fatalf("V4 initial XUI contract for %q: %#v found=%v", version, xui, ok)
@@ -125,22 +125,33 @@ func TestCompatV4ReleaseRange(t *testing.T) {
 	}
 }
 
-func TestCompatV4PrereleaseAwareRangeOverlay(t *testing.T) {
+// THE OVERLAY COVERS THE RELEASE LINE, AND NOTHING FINER.
+//
+// It used to be prerelease-aware: a row for beta.9 and up on 3.8.5 and a narrower
+// one for beta.1 through beta.8 on 3.7.0, so a panel reported the ceiling its own
+// build had earned. The legacy scheme is gone, the beta line is not a set of
+// identities any more, and what is left is the property the finer rows existed to
+// protect — that the ceiling a build is given is a reviewed one. There is one
+// review now, so there is one answer.
+func TestCompatV4RangeOverlay(t *testing.T) {
 	payload := readCompatRangeOverlay(t)
-	for _, version := range []string{"v4.0.0-beta.1", "v4.0.0-beta.8"} {
-		xui, ok := lookupForPSPVersion(payload, version)
-		if !ok || xui.MaxTestedXUI != "3.7.0" {
-			t.Fatalf("historical beta %q was over-certified: %#v found=%v", version, xui, ok)
-		}
-	}
-	for _, version := range []string{"v4.0.0-beta.9", "v4.0.0-beta.10", "v4.0.0-beta.99", "v4.0.0", "v4.0.1", "v4.99.99"} {
+	for _, version := range []string{"4.0.0", "4.0.0.1", "4.0.1", "4.99.99"} {
 		xui, ok := lookupForPSPVersion(payload, version)
 		if !ok || xui.MinXUI != MinXUI || xui.MaxTestedXUI != "3.8.5" {
-			t.Fatalf("fixed v4 range missing for %q: %#v found=%v", version, xui, ok)
+			t.Fatalf("v4 range missing for %q: %#v found=%v", version, xui, ok)
 		}
 		sui, ok := lookupSUIForPSPVersion(payload, version)
 		if !ok || sui.MinSUI != "" || sui.MaxTestedSUI != "1.6.3" {
 			t.Fatalf("SUI overlay range missing for %q: %#v found=%v", version, sui, ok)
+		}
+	}
+	// AND THE LINE IS BOUNDED. These canonicalise to something, and none of them
+	// lands inside the reviewed line: the two outside it belong to other release
+	// lines, and the legacy stamp belongs BELOW it, where it used to have a row
+	// of its own.
+	for _, version := range []string{"3.9.2", "5.0.0", "v4.0.0-beta.9", "v4.0.0-beta.1"} {
+		if xui, ok := lookupForPSPVersion(payload, version); ok {
+			t.Fatalf("a version outside the reviewed line was certified: %q -> %#v", version, xui)
 		}
 	}
 }
@@ -154,7 +165,7 @@ func (f compatV4RoundTripper) RoundTrip(req *http.Request) (*http.Response, erro
 // Exercise the actual runtime fetch/apply path with a local in-memory HTTP
 // response. No live panel or network is used, and this is not a V4 panel smoke.
 func TestCompatV4FetchAppliesPublishedShape(t *testing.T) {
-	dir := isolatedCompatCache(t, "v4.0.0-beta.10")
+	dir := isolatedCompatCache(t, "4.0.0")
 	oldClient := httpClient
 	oldFloor, _ := activeMinXUI.Load().(string)
 	oldSUIFloor, oldSUICeiling := ActiveMinSUI(), ActiveMaxTestedSUI()

@@ -10,30 +10,32 @@ import (
 // Passwall Node must rank the same pair the same way.
 //
 // The node validates the ordering again when an upgrade request reaches it
-// (PN's TestUpgradeVersionOrder walks this same list), and a disagreement is one
-// of two failures: a request PSP will not send, or one the node rejects. The two
-// implementations cannot share code — the node's comparator is internal to its
-// module — so the agreement is asserted rather than assumed, and that is the only
-// thing holding them together.
+// (releaseid.CompareProductVersion, walked by PN's own vectors), and a
+// disagreement is one of two failures: a request PSP will not send, or one the
+// node rejects. The two implementations cannot share code — the node's
+// comparator is internal to its module — so the agreement is asserted rather
+// than assumed, and that is the only thing holding them together.
 //
 // THE LIST IS ASCENDING, so the expected result of every pair is the sign of
 // (i - j). There are no separate expectations to drift from the data: a pair that
 // moves in the list changes both sides of the assertion at once.
+//
+// IT USED TO BE THE LEGACY BETA LINE. Those vectors were the released history —
+// beta1, beta2, beta3, beta9, beta11, the alpha/beta identifiers — and they
+// pinned the dotless-prerelease rule that made beta11 rank above beta9. The
+// scheme is gone, so what is pinned now is the order a product version obeys:
+// plain integer segments, a missing trailing segment read as zero, and the
+// optional fourth BUILD segment falling between its own base and the next patch.
 var nodeReleaseOrderVectors = []string{
-	"v0.0.1-beta1",
-	"v0.0.1-beta2",
-	"v0.0.1-beta3",
-	"v0.0.1-beta9",
-	"v0.0.1-beta11",
-	"v0.0.1",
-	"v0.0.2-alpha.1",
-	"v0.0.2-alpha.2",
-	"v0.0.2-alpha.10",
-	"v0.0.2-beta.1",
-	"v0.0.2",
-	"v1.0.0",
-	"v10.0.0",
-	"v9999999999999999999999.0.0",
+	"1.0.0",
+	"4.0.0",
+	"4.0.0.1", // a rebuild of 4.0.0, above it and below the next patch
+	"4.0.1",
+	"4.1.0",
+	"4.1.0.1",
+	"102.0.3",
+	"102.1.0",
+	"99999999999999999999.0.0", // past any representable integer: length, not value
 }
 
 func TestTheReleaseOrderAgreesWithTheNodesRule(t *testing.T) {

@@ -56,21 +56,16 @@ func TestTheReleaseOrderFromTheVectors(t *testing.T) {
 	}
 }
 
-// The defect the vector above pins, stated as itself so a regression is read as
-// one: SemVer orders these two the other way round, and that is the whole reason
-// this function exists.
-func TestTheDotlessPrereleaseIsNotComparedAsText(t *testing.T) {
-	if got := version.CompareRelease("v0.0.1-beta11", "v0.0.1-beta9"); got <= 0 {
-		t.Fatalf("beta11 vs beta9 = %d; a text comparison puts beta9 first", got)
-	}
-	if got := version.CompareRelease("v0.0.1-beta9", "v0.0.1-beta11"); got >= 0 {
-		t.Fatalf("beta9 vs beta11 = %d", got)
-	}
-	// And a release outranks its own prereleases, which every scheme needs.
-	if got := version.CompareRelease("v0.0.1", "v0.0.1-beta11"); got <= 0 {
-		t.Fatalf("a release must outrank its prereleases, got %d", got)
-	}
-}
+// THE DOTLESS-PRERELEASE RULE IS GONE WITH THE SCHEME IT WAS FOR.
+//
+// SemVer compared `v0.0.1-beta11` below `v0.0.1-beta9`, and this file existed to
+// undo that: the project published beta1..beta12, so the SemVer answer put the
+// older release first wherever the order mattered. A test used to sit here
+// pinning the correction. Nothing publishes that shape now — a version is three
+// integers and a candidate release is a CHANNEL — so there is no rule to pin and
+// the test was deleted with it rather than left asserting a property of strings
+// this project will not act on. What the comparator still owes is in the vectors
+// above: numeric segments, padding, and the build component.
 
 // A range check has to be able to say OUTSIDE. The primitive this replaced
 // answers zero for a bare product version, and zero is "equal", so a check built
