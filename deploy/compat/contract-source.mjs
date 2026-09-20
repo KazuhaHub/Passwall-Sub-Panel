@@ -31,6 +31,17 @@ export function contractSource(verification) {
   if (!/^[0-9a-f]{40}$/.test(source.commit)) {
     throw new Error(`contract_source.commit is not a full commit SHA: ${source.commit}`)
   }
+  // A MODULE PATH, NOT A URL. The job used to compose a fetch URL as
+  // `https://github.com/${module_path}.git`, which is the doubled host
+  // `github.com/github.com/...` for this value and a Not Found at the first
+  // fetch — a failure two layers away from any diff. The composition moved into
+  // repositoryURL below, and this refuses the input that caused it.
+  if (source.module_path.includes('://')) {
+    throw new Error(`contract_source.module_path must be a module path, not a URL: ${source.module_path}`)
+  }
+  if (!/^[a-z0-9.-]+\.[a-z]{2,}\/[^/\s]+\/[^/\s]+$/.test(source.module_path)) {
+    throw new Error(`contract_source.module_path is not host and two path segments: ${source.module_path}`)
+  }
   // A tag pinning a commit the manifest also claims must agree with the reviewed
   // pin for that tag; two places naming different revisions is worse than one.
   const reviewed = (verification.pinned_sources ?? {})[source.tag]
@@ -40,6 +51,16 @@ export function contractSource(verification) {
     )
   }
   return source
+}
+
+// repositoryURL is the git remote the pinned-source job fetches from.
+//
+// IT IS THE MODULE PATH WITH A SCHEME, and nothing else: a Go module path on
+// GitHub already begins with the host, so a URL is `https://<module_path>.git`.
+// Adding the host again — which the workflow did — produces a URL GitHub answers
+// with Not Found, and the job fails before it can test anything.
+export function repositoryURL(source) {
+  return `https://${source.module_path}.git`
 }
 
 function main() {
@@ -61,8 +82,11 @@ function main() {
     case '--module':
       console.log(source.module_path)
       break
+    case '--repo-url':
+      console.log(repositoryURL(source))
+      break
     default:
-      console.error('contract-source: expected one of --commit, --tag, --module')
+      console.error('contract-source: expected one of --commit, --tag, --module, --repo-url')
       process.exit(2)
   }
 }
