@@ -19,18 +19,18 @@ function release(version: string, overrides: Partial<NodeRelease> = {}): NodeRel
 describe('newerNodeRelease', () => {
   it('finds the highest newer reviewed release without changing catalog order', () => {
     const older = release('4.2.1')
-    const highest = release('v1.0.0')
-    const middle = release('v0.1.0')
+    const highest = release('4.0.0')
+    const middle = release('1.0.0')
     const catalog = [older, highest, middle]
     expect(newerNodeRelease({ panel_version: '4.2.1' }, catalog)).toBe(highest)
     expect(catalog).toEqual([older, highest, middle])
   })
 
   it('has no badge for equal, older or absent releases', () => {
-    const catalog = [release('v1.0.0'), release('v0.9.0')]
-    expect(newerNodeRelease({ panel_version: 'v1.0.0' }, catalog)).toBeUndefined()
-    expect(newerNodeRelease({ panel_version: 'v2.0.0' }, catalog)).toBeUndefined()
-    expect(newerNodeRelease({ panel_version: 'v1.0.0' }, [])).toBeUndefined()
+    const catalog = [release('4.0.0'), release('1.0.2')]
+    expect(newerNodeRelease({ panel_version: '4.0.0' }, catalog)).toBeUndefined()
+    expect(newerNodeRelease({ panel_version: '4.0.1' }, catalog)).toBeUndefined()
+    expect(newerNodeRelease({ panel_version: '4.0.0' }, [])).toBeUndefined()
   })
 
   // A CHANNEL PROMOTION REFRESHES STATE. IT DOES NOT CREATE AN UPDATE.
@@ -41,32 +41,32 @@ describe('newerNodeRelease', () => {
   // only refreshes state and must not manufacture an update-available notice" —
   // and it is the kind of notice an operator learns to ignore once it is wrong.
   it('manufactures nothing when the same version was promoted between channels', () => {
-    const promoted = release('v2.0.0', { channel: 'stable' })
-    expect(newerNodeRelease({ panel_version: 'v2.0.0' }, [promoted])).toBeUndefined()
+    const promoted = release('4.0.1', { channel: 'stable' })
+    expect(newerNodeRelease({ panel_version: '4.0.1' }, [promoted])).toBeUndefined()
     // Including for the node whose own channel the promotion concerns.
-    expect(newerNodeRelease({ panel_version: 'v2.0.0', update_channel: 'beta' }, [promoted])).toBeUndefined()
+    expect(newerNodeRelease({ panel_version: '4.0.1', update_channel: 'beta' }, [promoted])).toBeUndefined()
     // And the promotion does not make an OLDER release look newer either.
-    expect(newerNodeRelease({ panel_version: 'v2.0.0', update_channel: 'beta' }, [promoted, release('v1.9.0')])).toBeUndefined()
+    expect(newerNodeRelease({ panel_version: '4.0.1', update_channel: 'beta' }, [promoted, release('v1.9.0')])).toBeUndefined()
   })
 
-  it.each(['v1.0.0', 'v1.0.0 (abc1234)', `v1.0.0 (${'A'.repeat(40)})`])('accepts an official daemon identity: %s', panel_version => {
+  it.each(['4.0.0', 'v1.0.0 (abc1234)', `v1.0.0 (${'A'.repeat(40)})`])('accepts an official daemon identity: %s', panel_version => {
     const next = release('v1.0.1')
     expect(newerNodeRelease({ panel_version }, [next])).toBe(next)
   })
 
   it.each([
-    undefined, '', 'dev', 'dev (abc1234)', ' v1.0.0', 'v1.0.0 ',
+    undefined, '', 'dev', 'dev (abc1234)', ' 4.0.0', 'v1.0.0 ',
     // `1.0.0` USED TO BE IN THIS LIST, and that was the defect rather than the
     // rule: the product scheme stamps exactly that, so a migrated node reported
     // an identity this function refused and the upgrade badge could never
     // appear. The product-scheme block below asserts it is accepted; what stays
     // here is the near misses, which are still not identities.
     '1.0', '04.0.0', '1.0.0.1.2', 'release/1.0.0',
-    'v01.0.0', 'v1.0', 'v1.0.0+local', 'v1.0.0-beta.01', 'v1.0.0 (abc123)',
+    '01.0.0', 'v1.0', 'v1.0.0+local', 'v1.0.0-beta.01', 'v1.0.0 (abc123)',
     `v1.0.0 (${'a'.repeat(41)})`, 'v1.0.0 (xyz1234)', 'v1.0.0(abc1234)',
     'v1.0.0 (abc1234) extra', 'v1.0.0\n',
   ])('does not guess an unknown or malformed daemon identity: %s', panel_version => {
-    expect(newerNodeRelease({ panel_version }, [release('v2.0.0')])).toBeUndefined()
+    expect(newerNodeRelease({ panel_version }, [release('4.0.1')])).toBeUndefined()
   })
 
   // THE SAVED CHANNEL IS A FLOOR, NOT A FILTER, and this test used to assert the
@@ -82,7 +82,7 @@ describe('newerNodeRelease', () => {
   // "may see released targets" cannot become "was moved back onto the stable
   // line".
   it('treats the saved stable or beta channel as a floor, not a filter', () => {
-    const stable = release('v1.0.0')
+    const stable = release('4.0.0')
     const beta = release('v2.0.0-beta.1')
     const catalog = [beta, stable]
     expect(newerNodeRelease({ panel_version: '4.2.1' }, catalog)).toBe(stable)
@@ -93,10 +93,10 @@ describe('newerNodeRelease', () => {
     // A beta node IS offered a released one, and the higher version wins whichever
     // channel published it.
     expect(newerNodeRelease({ panel_version: '4.2.1', update_channel: 'beta' }, [stable])).toBe(stable)
-    expect(newerNodeRelease({ panel_version: 'v1.0.0', update_channel: 'beta' }, [release('v1.1.0-beta.1'), release('v1.2.0')])?.version).toBe('v1.2.0')
+    expect(newerNodeRelease({ panel_version: '4.0.0', update_channel: 'beta' }, [release('v1.1.0-beta.1'), release('v1.2.0')])?.version).toBe('v1.2.0')
     // And nothing older is offered, so the wider set cannot downgrade.
     expect(newerNodeRelease({ panel_version: 'v1.2.0', update_channel: 'beta' }, [stable])).toBeUndefined()
-    expect(newerNodeRelease({ panel_version: 'v1.0.0', update_channel: 'beta' }, [release('v0.9.0'), release('v0.8.0')])).toBeUndefined()
+    expect(newerNodeRelease({ panel_version: '4.0.0', update_channel: 'beta' }, [release('1.0.2'), release('1.0.1')])).toBeUndefined()
     // An unrecognised saved channel is still refused rather than widened.
     expect(newerNodeRelease({ panel_version: '4.2.1', update_channel: 'testing' as Server['update_channel'] }, catalog)).toBeUndefined()
   })
@@ -134,30 +134,30 @@ describe('newerNodeRelease', () => {
     { platforms: [{ os: 'linux', arch: 'amd64' }, { os: 'windows', arch: 'arm64' }] },
     { platforms: [] },
   ] satisfies Partial<NodeRelease>[])('rejects releases unsupported by the Linux upgrade selector: %j', overrides => {
-    expect(newerNodeRelease({ panel_version: 'v1.0.0' }, [release('v2.0.0', overrides)])).toBeUndefined()
+    expect(newerNodeRelease({ panel_version: '4.0.0' }, [release('4.0.1', overrides)])).toBeUndefined()
   })
 
   it('requires channel metadata to agree with actual prerelease status', () => {
-    expect(newerNodeRelease({ panel_version: 'v1.0.0' }, [release('v2.0.0-beta.1', { channel: 'stable' })])).toBeUndefined()
-    expect(newerNodeRelease({ panel_version: 'v1.0.0', update_channel: 'beta' }, [release('v2.0.0', { channel: 'testing' })])).toBeUndefined()
+    expect(newerNodeRelease({ panel_version: '4.0.0' }, [release('v2.0.0-beta.1', { channel: 'stable' })])).toBeUndefined()
+    expect(newerNodeRelease({ panel_version: '4.0.0', update_channel: 'beta' }, [release('4.0.1', { channel: 'testing' })])).toBeUndefined()
   })
 
   it.each([
-    '2.0.0', 'v02.0.0', 'v2.0', 'v2.0.0+build', 'v2.0.0-beta.01', 'v2.0.0-beta..1',
-    'v2.0.0-', 'v2.0.0 (abc1234)', ' v2.0.0', 'v2.0.0 ',
+    '2.0.0', '02.0.0', 'v2.0', 'v2.0.0+build', 'v2.0.0-beta.01', 'v2.0.0-beta..1',
+    'v2.0.0-', 'v2.0.0 (abc1234)', ' 4.0.1', 'v2.0.0 ',
   ])('rejects noncanonical or invalid candidate tags: %s', version => {
-    expect(newerNodeRelease({ panel_version: 'v1.0.0' }, [release(version)])).toBeUndefined()
-    expect(newerNodeRelease({ panel_version: 'v1.0.0', update_channel: 'beta' }, [release(version)])).toBeUndefined()
+    expect(newerNodeRelease({ panel_version: '4.0.0' }, [release(version)])).toBeUndefined()
+    expect(newerNodeRelease({ panel_version: '4.0.0', update_channel: 'beta' }, [release(version)])).toBeUndefined()
   })
 
   it.each([
-    'https://github.com/attacker/Passwall-Node/releases/tag/v2.0.0',
-    'https://github.com/KazuhaHub/Passwall-Node/releases/tag/v2.0.1',
-    'https://github.com/KazuhaHub/Passwall-Node/releases/tag/v2.0.0?download=1',
-    'https://github.com/KazuhaHub/Passwall-Node/releases/tag/v2.0.0#notes',
-    'http://github.com/KazuhaHub/Passwall-Node/releases/tag/v2.0.0',
+    'https://github.com/attacker/Passwall-Node/releases/tag/release/4.0.1',
+    'https://github.com/KazuhaHub/Passwall-Node/releases/tag/release/4.0.2',
+    'https://github.com/KazuhaHub/Passwall-Node/releases/tag/release/4.0.1?download=1',
+    'https://github.com/KazuhaHub/Passwall-Node/releases/tag/release/4.0.1#notes',
+    'http://github.com/KazuhaHub/Passwall-Node/releases/tag/release/4.0.1',
   ])('rejects metadata that does not link exactly to the official tag: %s', release_url => {
-    expect(newerNodeRelease({ panel_version: 'v1.0.0' }, [release('v2.0.0', { release_url })])).toBeUndefined()
+    expect(newerNodeRelease({ panel_version: '4.0.0' }, [release('4.0.1', { release_url })])).toBeUndefined()
   })
 })
 

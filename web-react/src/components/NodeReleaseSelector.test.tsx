@@ -15,13 +15,13 @@ const platforms: NodeRelease['platforms'] = [
   { os: 'windows', arch: 'amd64' }, { os: 'windows', arch: 'arm64' },
 ]
 const stable: NodeRelease = {
-  version: 'v1.2.3', channel: 'stable', published_at: '2026-09-12T12:36:16Z',
-  release_url: 'https://github.com/KazuhaHub/Passwall-Node/releases/tag/v1.2.3',
+  version: '4.1.0', channel: 'stable', published_at: '2026-09-12T12:36:16Z',
+  release_url: 'https://github.com/KazuhaHub/Passwall-Node/releases/tag/release/4.1.0',
   notes: 'Reviewed protocol compatibility; install exactly this tag.', methods: ['linux', 'docker', 'manual'], platforms,
 }
 const testing: NodeRelease = {
-  ...stable, version: 'v1.2.4-beta.1', channel: 'testing',
-  release_url: 'https://github.com/KazuhaHub/Passwall-Node/releases/tag/v1.2.4-beta.1',
+  ...stable, version: '4.1.1', channel: 'testing',
+  release_url: 'https://github.com/KazuhaHub/Passwall-Node/releases/tag/release/4.1.1',
 }
 
 function reads(releases: NodeRelease[]) {

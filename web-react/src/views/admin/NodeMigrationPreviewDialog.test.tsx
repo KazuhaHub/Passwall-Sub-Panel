@@ -193,7 +193,7 @@ describe('3X-UI to Passwall Node node-host migration command', () => {
     fireEvent.mouseDown(screen.getByRole('combobox', { name: 'admin:servers.native.release_channel' }))
     fireEvent.click(screen.getByRole('option', { name: 'admin:servers.native.release_testing' }))
     const input = screen.getByRole('combobox', { name: 'admin:servers.native.agent_version' }).parentElement!.querySelector('input')!
-    fireEvent.change(input, { target: { value: 'v99.99.99' } })
+    fireEvent.change(input, { target: { value: '99.99.99' } })
     expect(input.value).toBe('')
     expect(generateButton().disabled).toBe(true)
     expect(api.post).not.toHaveBeenCalled()

@@ -38,9 +38,9 @@ describe('administrator Node installation API', () => {
     const signal = new AbortController().signal
     http.post.mockResolvedValueOnce({ data: { ok: true } })
     await expect(importNativeCredential(7, 'original-secret', signal)).resolves.toEqual({ ok: true })
-    await expect(createNativeInstallScript(7, 'v1.2.3-beta.1', signal)).resolves.toBe('#!/bin/sh\n# private script\n')
+    await expect(createNativeInstallScript(7, '4.2.0', signal)).resolves.toBe('#!/bin/sh\n# private script\n')
     expect(http.post).toHaveBeenCalledWith('/admin/servers/7/node-credential', { credential: 'original-secret' }, { signal, _skipErrorToast: true })
-    expect(http.post).toHaveBeenCalledWith('/admin/servers/7/node-install-script', { version: 'v1.2.3-beta.1' }, { responseType: 'text', signal, _skipErrorToast: true })
+    expect(http.post).toHaveBeenCalledWith('/admin/servers/7/node-install-script', { version: '4.2.0' }, { responseType: 'text', signal, _skipErrorToast: true })
     expect(http.post.mock.calls.every(([url]) => !String(url).includes('secret'))).toBe(true)
   })
 
