@@ -257,7 +257,13 @@ jobs:
         uses: actions/checkout@v7
         with:
           repository: KazuhaHub/Passwall-Node
-          ref: ${{ matrix.node_case.version }}
+          # BY TAG, BECAUSE A VERSION IS NOT A GIT REF. The release lives at
+          # refs/tags/release/4.0.0 and is named 4.0.0, so asking git to resolve
+          # the version fails outright — the job dies before it records anything,
+          # and the failure surfaces two jobs away from this line. The planner
+          # emits both fields; this one addresses the source and the version
+          # names the build.
+          ref: ${{ matrix.node_case.tag }}
           path: .compat/passwall-node
           persist-credentials: false
       - name: the tag still resolves to the commit the plan pinned
