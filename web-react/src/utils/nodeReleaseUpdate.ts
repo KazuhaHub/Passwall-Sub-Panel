@@ -1,4 +1,5 @@
-import { gt, prerelease, rcompare, valid } from 'semver'
+import { prerelease, valid } from 'semver'
+import { compareLegacyTag } from './productVersion'
 import type { NodeRelease } from '@/api/nodeReleases'
 import type { Server } from '@/api/servers'
 
@@ -34,6 +35,12 @@ export function newerNodeRelease(
     // The remote Linux upgrade recipe detects architecture, so it requires
     // both assets just like the installation/upgrade version selector does.
     if (!['amd64', 'arm64'].every(arch => release.platforms.some(platform => platform?.os === 'linux' && platform.arch === arch))) return false
-    return gt(version, current)
-  }).sort((left, right) => rcompare(left.version, right.version))[0]
+    // THE PROJECT'S ORDER, NOT SEMVER'S. These are dotless prerelease tags,
+    // and SemVer compares the identifier character by character — "beta11"
+    // against "beta9" is '1' against '9', so a node on beta9 was told there was
+    // no newer release. compareLegacyTag is the same rule the panel's admission
+    // check and Passwall Node's own comparator use; this is the third place it
+    // is applied, and three implementations of an ordering is two too many.
+    return compareLegacyTag(release.version, identity[1]) > 0
+  }).sort((left, right) => compareLegacyTag(right.version, left.version))[0]
 }

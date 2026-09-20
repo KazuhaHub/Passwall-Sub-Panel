@@ -59,11 +59,22 @@ describe('newerNodeRelease', () => {
     expect(newerNodeRelease({ panel_version: 'v0.0.1', update_channel: 'testing' as Server['update_channel'] }, catalog)).toBeUndefined()
   })
 
-  it('uses SemVer rather than natural-number sorting for legacy beta suffixes', () => {
+  // THIS TEST USED TO ASSERT THE OPPOSITE, and the change is the point of it.
+  //
+  // It was named "uses SemVer rather than natural-number sorting for legacy beta
+  // suffixes" and asserted that a node on beta10 was offered beta3, and that a
+  // node on beta3 was NOT offered beta10 — which is SemVer's ordering of
+  // "beta10" against "beta3", character by character. That is the defect, not
+  // the contract: this project publishes beta1..beta11 and its release order is
+  // numeric, which is why the panel's admission check, Passwall Node's own
+  // comparator and the release catalog were all changed to compare the digit run
+  // numerically. A test pinning the old behaviour would have kept this the one
+  // place the rule disagreed with the other three.
+  it('orders the legacy beta suffixes the way the project publishes them', () => {
     const beta10 = release('v0.0.1-beta10')
     const beta3 = release('v0.0.1-beta3')
-    expect(newerNodeRelease({ panel_version: 'v0.0.1-beta10', update_channel: 'beta' }, [beta3, beta10])).toBe(beta3)
-    expect(newerNodeRelease({ panel_version: 'v0.0.1-beta3', update_channel: 'beta' }, [beta10])).toBeUndefined()
+    expect(newerNodeRelease({ panel_version: 'v0.0.1-beta3', update_channel: 'beta' }, [beta3, beta10])).toBe(beta10)
+    expect(newerNodeRelease({ panel_version: 'v0.0.1-beta10', update_channel: 'beta' }, [beta3])).toBeUndefined()
   })
 
   it('compares numeric dotted beta identifiers numerically', () => {
@@ -105,5 +116,41 @@ describe('newerNodeRelease', () => {
     'http://github.com/KazuhaHub/Passwall-Node/releases/tag/v2.0.0',
   ])('rejects metadata that does not link exactly to the official tag: %s', release_url => {
     expect(newerNodeRelease({ panel_version: 'v1.0.0' }, [release('v2.0.0', { release_url })])).toBeUndefined()
+  })
+})
+
+// The dotless prerelease form is what this project publishes, and plain SemVer
+// gets it backwards: "beta11" compares as less than "beta9" on the trailing
+// character, so a node on beta9 was told there was no newer release. The same
+// defect was fixed in the panel's admission check and in Passwall Node's own
+// comparator; this is the third place the rule is applied, and it must be the
+// same rule rather than a fourth opinion.
+describe('newerNodeRelease and the published prerelease tags', () => {
+  it('treats beta11 as newer than beta9', () => {
+    const beta11 = release('v0.0.1-beta11')
+    expect(newerNodeRelease({ panel_version: 'v0.0.1-beta9', update_channel: 'beta' }, [beta11])).toBe(beta11)
+  })
+
+  it('treats beta10 as newer than beta9 and older than beta11', () => {
+    const beta10 = release('v0.0.1-beta10')
+    const beta11 = release('v0.0.1-beta11')
+    expect(newerNodeRelease({ panel_version: 'v0.0.1-beta9', update_channel: 'beta' }, [beta10, beta11])).toBe(beta11)
+    expect(newerNodeRelease({ panel_version: 'v0.0.1-beta10', update_channel: 'beta' }, [beta11])).toBe(beta11)
+  })
+
+  it('does not offer a beta the node is already on or past', () => {
+    const beta11 = release('v0.0.1-beta11')
+    expect(newerNodeRelease({ panel_version: 'v0.0.1-beta11', update_channel: 'beta' }, [beta11])).toBeUndefined()
+    const beta9 = release('v0.0.1-beta9')
+    expect(newerNodeRelease({ panel_version: 'v0.0.1-beta10', update_channel: 'beta' }, [beta9])).toBeUndefined()
+  })
+
+  it('picks the highest of several published betas, not the lexically first', () => {
+    // A catalog ordered newest-published-first puts beta11 ahead of beta9; a
+    // comparator that disagrees with that order would pick beta9 again whenever
+    // the catalog arrived newest-first.
+    const catalog = [release('v0.0.1-beta11'), release('v0.0.1-beta10'), release('v0.0.1-beta9')]
+    expect(newerNodeRelease({ panel_version: 'v0.0.1-beta9', update_channel: 'beta' }, catalog)?.version).toBe('v0.0.1-beta11')
+    expect(newerNodeRelease({ panel_version: 'v0.0.1-beta1', update_channel: 'beta' }, [...catalog].reverse())?.version).toBe('v0.0.1-beta11')
   })
 })
