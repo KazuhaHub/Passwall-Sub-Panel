@@ -144,3 +144,43 @@ func TestTheTagAVersionIsPublishedUnder(t *testing.T) {
 		}
 	}
 }
+
+// The other inverse: the version a tag names.
+//
+// Needed wherever a TAG arrives from outside — GitHub reports a release's
+// tag_name, and the update nudge compares that against this build's version.
+// The two are the same string in the legacy scheme and different in the product
+// one, so a comparison that skips this step is comparing a tag to a version and
+// silently finding no update.
+func TestTheVersionATagNames(t *testing.T) {
+	for _, tc := range []struct {
+		tag     string
+		version string
+	}{
+		{"release/4.0.0", "4.0.0"},
+		{"release/102.1.0", "102.1.0"},
+		{"v0.0.1-beta11", "v0.0.1-beta11"},
+		{"v4.0.0", "v4.0.0"},
+	} {
+		t.Run(tc.tag, func(t *testing.T) {
+			got, ok := version.VersionOfReleaseTag(tc.tag)
+			if !ok {
+				t.Fatalf("VersionOfReleaseTag(%q) refused a release tag", tc.tag)
+			}
+			if got != tc.version {
+				t.Errorf("VersionOfReleaseTag(%q) = %q, want %q", tc.tag, got, tc.version)
+			}
+			// And the round trip, so a caller cannot address one release and
+			// compare against another.
+			back, ok := version.ReleaseTagFor(got)
+			if !ok || back != tc.tag {
+				t.Errorf("ReleaseTagFor(%q) = %q, %v; the round trip must be lossless", got, back, ok)
+			}
+		})
+	}
+	for _, tag := range []string{"", "4.0.0", "v4", "release/4.0", "release/v4.0.0", "nightly"} {
+		if got, ok := version.VersionOfReleaseTag(tag); ok {
+			t.Errorf("VersionOfReleaseTag(%q) = %q, want a refusal", tag, got)
+		}
+	}
+}

@@ -17,6 +17,15 @@ func TestPSPBehindStable(t *testing.T) {
 		{"dev", "v3.7.0", false},            // dev build never nagged
 		{"v3.7.0", "", false},               // no latest yet
 		{"", "v3.7.0", false},               // unknown current
+		// The product scheme: the LATEST is a tag and the CURRENT is a version,
+		// and they are different strings. Comparing them as they arrive finds
+		// nothing newer every time, so the nudge silently never appears.
+		{"4.0.0", "release/4.0.1", true},   // behind a newer product release
+		{"4.0.0", "release/4.0.0", false},  // same product release
+		{"4.1.0", "release/4.0.0", false},  // ahead of it
+		{"4.0.0", "release/102.1.0", true}, // behind across a release line
+		{"3.9.2", "release/4.0.0", true},   // a legacy build behind a product release
+		{"4.0.0", "v4.0.0", false},         // same version, the other scheme's tag
 	}
 	for _, c := range cases {
 		if got := pspBehindStable(c.current, c.latest); got != c.want {
@@ -104,9 +113,15 @@ func TestStableSelectionUsesTheFlagForNonLegacyTags(t *testing.T) {
 			why: "the flag is the authority for a form that carries no hyphen",
 		},
 		{
+			// This used to read "the panel cannot identify a product-scheme
+			// release yet; refusing is honest, not a regression". It can now —
+			// the catalog reads product tags and versions — and refusing here
+			// would be the regression: the update nudge would simply never
+			// appear for a product release, which is invisible rather than
+			// honest.
 			name: "a product tag",
-			tag:  "release/4.0.0", prerelease: false, want: false,
-			why: "the panel cannot identify a product-scheme release yet; refusing is honest, not a regression",
+			tag:  "release/4.0.0", prerelease: false, want: true,
+			why: "the panel reads product tags, so a released product tag is a stable release",
 		},
 		{
 			// The exemption is scoped to the product NAMESPACE, not to "no v".

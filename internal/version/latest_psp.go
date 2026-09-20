@@ -92,8 +92,16 @@ func pspBehindStable(current, latestStable string) bool {
 	if current == "" || latestStable == "" {
 		return false
 	}
+	// latestStable is a TAG as GitHub reported it, and current is a VERSION.
+	// The two coincide in the legacy scheme, which is why this compared them
+	// directly; a product tag carries its namespace, so comparing the strings
+	// as they arrive finds nothing newer and the nudge never appears.
+	latestVersion := latestStable
+	if converted, ok := VersionOfReleaseTag(latestStable); ok {
+		latestVersion = converted
+	}
 	cur, ok1 := parseSemver(current)
-	lat, ok2 := parseSemver(latestStable)
+	lat, ok2 := parseSemver(latestVersion)
 	if !ok1 || !ok2 {
 		return false
 	}
@@ -105,7 +113,7 @@ func pspBehindStable(current, latestStable string) bool {
 	default:
 		// Same base version: behind only when THIS build is a pre-release and the
 		// target is a stable (the common "running v3.7.0-beta.N, v3.7.0 shipped").
-		return IsPrerelease(current) && !IsPrerelease(latestStable)
+		return IsPrerelease(current) && !IsPrerelease(latestVersion)
 	}
 }
 
@@ -196,11 +204,10 @@ func fetchLatestPSP(ctx context.Context) error {
 // requires: validate the historical form with the historical rule and the new
 // form with its own scheme, rather than by inference from the tag text.
 //
-// THE EXEMPTION HAS NO OBSERVABLE EFFECT YET, and saying so is part of it:
-// parseSemver still refuses any release/… tag, so a product tag is rejected a
-// line later whatever this test does. It becomes load-bearing when V04 teaches
-// the panel to read a product tag, and the test below records the contract it
-// must then satisfy.
+// THE EXEMPTION IS NOW LOAD-BEARING. It used to have no observable effect:
+// parseSemver refused any release/… tag, so a product tag was rejected a line
+// later whatever the exemption did. The panel reads product tags now, so the
+// second check has to accept one as a TAG — which is what IsReleaseTag is for.
 //
 // The scheme test is the namespace check github.com/KazuhaHub/passwall-node's
 // releaseid uses (release/… is a product tag, v… is legacy). It is written here
@@ -213,7 +220,11 @@ func acceptLatestPSPStable(tagName string, prerelease bool) (string, bool) {
 	if !strings.HasPrefix(tagName, ProductTagNamespace) && IsPrerelease(tagName) {
 		return "", false
 	}
-	if _, ok := parseSemver(tagName); !ok {
+	// A release tag in either scheme. IsReleaseVersion is kept alongside so a
+	// bare three-segment version is accepted exactly as it was before: it is
+	// what the historical fail-safe path did with an unrecognised form, and
+	// narrowing it here would be a behaviour change this does not need.
+	if !IsReleaseTag(tagName) && !IsReleaseVersion(tagName) {
 		return "", false
 	}
 	return tagName, true

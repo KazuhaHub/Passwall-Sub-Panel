@@ -174,3 +174,20 @@ func IsReleaseTag(tag string) bool {
 	}
 	return strings.HasPrefix(tag, "v") && IsReleaseVersion(tag)
 }
+
+// VersionOfReleaseTag is the other inverse: the version a tag names.
+//
+// A TAG ARRIVES FROM OUTSIDE. GitHub reports a release's tag_name, and callers
+// here compare that against this build's version — which is a version. In the
+// legacy scheme the two are the same string; in the product scheme they are
+// not, and a comparison that skips this step is comparing a tag to a version
+// and concluding there is nothing new. That failure is silent: the update nudge
+// simply never appears.
+func VersionOfReleaseTag(tag string) (string, bool) {
+	if !IsReleaseTag(tag) {
+		return "", false
+	}
+	// The namespace is an address, so it comes off. A legacy tag has none and
+	// is its own version, which is what the historical scheme always meant.
+	return strings.TrimPrefix(tag, ProductTagNamespace), true
+}
