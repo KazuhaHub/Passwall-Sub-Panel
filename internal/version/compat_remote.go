@@ -21,7 +21,7 @@ import (
 // major file, and bumping to a new major (v4) is just "create v4.json,
 // leave v3.json frozen".
 //
-// THE BRANCH IS release/v3, NOT main (changed in v3.9.3). Up to v3.9.2 this
+// THE BRANCH IS release/v3, NOT main (changed in v3.9.4). Up to v3.9.3 this
 // pointed at main, which was right only while main still carried the V3 line.
 // It does not: main's history begins 2026-09-18 and shares no commit with this
 // branch — they are unrelated histories — and its docs/compat/ has moved on to
@@ -38,7 +38,7 @@ import (
 // refs/heads/ is spelled out rather than the shorter ".../release/v3/docs/..."
 // so the ref can never be read as a branch "release" plus a "v3/" path prefix.
 //
-// DO NOT DELETE main's docs/compat/v3.json. Every V3 binary up to v3.9.2 has
+// DO NOT DELETE main's docs/compat/v3.json. Every V3 binary up to v3.9.3 has
 // the old main URL compiled in and keeps fetching it; that copy is now a frozen
 // mirror serving those deployments, not the source of truth.
 const defaultRemoteCompatURLBase = "https://raw.githubusercontent.com/KazuhaHub/passwall-sub-panel/refs/heads/release/v3/docs/compat/"
