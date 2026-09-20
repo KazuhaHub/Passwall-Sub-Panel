@@ -894,6 +894,22 @@ func (h *AdminServersHandler) UpgradePreview(c *gin.Context) {
 	if rerr := version.RefreshRemoteCompat(context.Background(), "", true); rerr != nil {
 		log.Debug("upgrade-preview: force-refresh remote compat", "panel_id", id, "err", rerr)
 	}
+	// THE TARGET IS NOT PINNABLE, AND THE RESPONSE SAYS SO.
+	//
+	// 3X-UI's /updatePanel takes no version argument: it fetches the latest
+	// GitHub release at the moment it runs. PSP reads latestVersion for this
+	// preview and again before firing, which narrows the window but cannot close
+	// it — upstream can publish between the two reads. So this is not "upgrade to
+	// X"; it is "upgrade to whatever is latest when the panel runs", and a caller
+	// that treats target_version as a promise is wrong about that.
+	//
+	// The plan's consequence, stated here rather than buried: a STRICT managed
+	// upgrade needs an executor that can be pinned to a target, and this one
+	// cannot. The interface keeps working for an operator who accepts pulling
+	// latest, but it must not be presented as a verified upgrade to a known
+	// version.
+	resp["target_pinnable"] = false
+	resp["upgrade_mode"] = "latest_only"
 	compat := version.CheckXUI(info.LatestVersion)
 	resp["compat_status"] = compat.String()
 	resp["compat_message"] = version.CompatMessage(info.LatestVersion, compat)
@@ -1019,7 +1035,10 @@ func (h *AdminServersHandler) UpgradePanel(c *gin.Context) {
 		"ok":             true,
 		"started":        true,
 		"target_version": info.LatestVersion,
-		"message":        "3X-UI upgrade initiated; the panel is restarting. PSP will run a smoke probe in ~60s and log success or failure to the audit trail.",
+		// Same disclosure as the preview: accepted is not the same as pinned.
+		"target_pinnable": false,
+		"upgrade_mode":    "latest_only",
+		"message":         "3X-UI upgrade initiated; the panel is restarting. PSP will run a smoke probe in ~60s and log success or failure to the audit trail.",
 	})
 }
 
