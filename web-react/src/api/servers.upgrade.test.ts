@@ -8,8 +8,8 @@ beforeEach(() => { vi.clearAllMocks(); http.post.mockResolvedValue({ data: { tas
 
 it('requests an exact release with a stable idempotency header and no secret URL', async () => {
   const signal = new AbortController().signal
-  await expect(requestNativeAgentUpgrade(7, 'v0.0.1-beta3', 'v0.0.1-beta2', 'same-request-identity', signal)).resolves.toEqual({ task_id: 'task-test' })
-  expect(http.post).toHaveBeenCalledWith('/admin/servers/7/upgrade-node-agent', { version: 'v0.0.1-beta3', expected_version: 'v0.0.1-beta2' },
+  await expect(requestNativeAgentUpgrade(7, '4.0.2', '4.0.1', 'same-request-identity', signal)).resolves.toEqual({ task_id: 'task-test' })
+  expect(http.post).toHaveBeenCalledWith('/admin/servers/7/upgrade-node-agent', { version: '4.0.2', expected_version: '4.0.1' },
     { headers: { 'Idempotency-Key': 'same-request-identity' }, signal, _skipErrorToast: true })
 })
 

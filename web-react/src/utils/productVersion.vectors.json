@@ -1,6 +1,6 @@
 {
   "format": 1,
-  "comment": "Shared product-version vectors. Go, TypeScript and the release CLI consume THIS file; a second copy of the ordering rules is how three implementations start disagreeing. See docs: product-version-migration-plan.md section 8.",
+  "comment": "THE SHARED VECTORS. One file, three consumers: this package, the web front end (web-react/src/utils/productVersion.vectors.json), and the panel's Go mirror. It is COPIED rather than fetched, because a test may not reach into another module at run time.\n\nONE SCHEME. The legacy v-prefixed forms were removed from every section here when the products stopped publishing them — the scheme went away with the deployments that would have needed migrating, and a vector that keeps a string the rule now refuses is a vector that documents a rule nobody implements.\n\nWHAT IT PINS IS THE SHAPE, THE ORDER AND THE ADDRESSES. The order section carries the BUILD COMPONENT pairs, which nothing covered before: the fourth segment was ignored by the comparison, so a rebuild and its base compared equal while the panel's mirror disagreed.",
   "max_segment": 2147483647,
   "normalize": [
     {
@@ -209,6 +209,26 @@
       "a": "102.0.0",
       "b": "102.0.0",
       "cmp": 0
+    },
+    {
+      "a": "4.0.0",
+      "b": "4.0.0.1",
+      "cmp": -1
+    },
+    {
+      "a": "4.0.0.1",
+      "b": "4.0.0",
+      "cmp": 1
+    },
+    {
+      "a": "4.0.0.1",
+      "b": "4.0.1",
+      "cmp": -1
+    },
+    {
+      "a": "4.0.1",
+      "b": "4.0.0.1",
+      "cmp": 1
     }
   ],
   "tags": [
@@ -221,22 +241,6 @@
       "in": "release/1.0.0",
       "scheme": "product",
       "version": "1.0.0"
-    },
-    {
-      "in": "v0.0.1-beta11",
-      "scheme": "legacy"
-    },
-    {
-      "in": "v0.0.1-beta9",
-      "scheme": "legacy"
-    },
-    {
-      "in": "v4.0.0-beta.25",
-      "scheme": "legacy"
-    },
-    {
-      "in": "v0.0.1",
-      "scheme": "legacy"
     },
     {
       "in": "release/102.1.0.1",
@@ -316,59 +320,7 @@
       "channel": ""
     }
   ],
-  "legacy_order": [
-    {
-      "a": "v0.0.1-beta9",
-      "b": "v0.0.1-beta10",
-      "cmp": -1
-    },
-    {
-      "a": "v0.0.1-beta10",
-      "b": "v0.0.1-beta11",
-      "cmp": -1
-    },
-    {
-      "a": "v0.0.1-beta9",
-      "b": "v0.0.1-beta11",
-      "cmp": -1
-    },
-    {
-      "a": "v0.0.1-beta11",
-      "b": "v0.0.1-beta9",
-      "cmp": 1
-    },
-    {
-      "a": "v0.0.1-beta11",
-      "b": "v0.0.1-beta11",
-      "cmp": 0
-    }
-  ],
   "versions": [
-    {
-      "in": "v0.0.1-beta11",
-      "scheme": "legacy",
-      "ok": true
-    },
-    {
-      "in": "v0.0.1-beta9",
-      "scheme": "legacy",
-      "ok": true
-    },
-    {
-      "in": "v4.0.0-beta.25",
-      "scheme": "legacy",
-      "ok": true
-    },
-    {
-      "in": "v1.0.0",
-      "scheme": "legacy",
-      "ok": true
-    },
-    {
-      "in": "v102.1.0",
-      "scheme": "legacy",
-      "ok": true
-    },
     {
       "in": "1.0.0",
       "scheme": "product",
@@ -385,104 +337,9 @@
       "ok": true
     },
     {
-      "in": "v01.0.0",
-      "ok": false,
-      "why": "leading zeroes are not the historical form"
-    },
-    {
-      "in": "v1.0.0-alpha.01",
-      "ok": false,
-      "why": "a redundant leading zero in a numeric prerelease segment"
-    },
-    {
-      "in": "v1.0",
-      "ok": false,
-      "why": "the historical form always wrote three segments"
-    },
-    {
-      "in": "v1.0.0+build",
-      "ok": false,
-      "why": "build metadata is not part of a version"
-    },
-    {
-      "in": "v",
-      "ok": false,
-      "why": "no version after the v"
-    },
-    {
-      "in": "V1.0.0",
-      "ok": false,
-      "why": "the historical prefix is a lower-case v"
-    },
-    {
-      "in": "0.1.0",
-      "ok": false,
-      "why": "a zero release line is not a released identity"
-    },
-    {
-      "in": "4.0",
-      "ok": false,
-      "why": "a version is never shorthand, so a short form names nothing anyone published"
-    },
-    {
       "in": "4.0.0.1",
       "scheme": "product",
       "ok": true
-    },
-    {
-      "in": "04.0.0",
-      "ok": false,
-      "why": "leading zeroes are not the product form"
-    },
-    {
-      "in": "4.0.0-beta.1",
-      "ok": false,
-      "why": "the product scheme distinguishes a candidate by its channel, not by a prerelease"
-    },
-    {
-      "in": "2147483648.0.0",
-      "ok": false,
-      "why": "one past the segment ceiling"
-    },
-    {
-      "in": "release/4.0.0",
-      "ok": false,
-      "why": "a tag is not a version"
-    },
-    {
-      "in": "",
-      "ok": false,
-      "why": "empty"
-    },
-    {
-      "in": "latest",
-      "ok": false,
-      "why": "neither scheme"
-    },
-    {
-      "in": "main",
-      "ok": false,
-      "why": "neither scheme"
-    },
-    {
-      "in": " 4.0.0",
-      "ok": false,
-      "why": "surrounding whitespace is the caller's to trim"
-    },
-    {
-      "in": "4.0.0/../../PRIVATE_RESPONSE",
-      "ok": false,
-      "why": "a path separator must never survive into a URL built from a version"
-    },
-    {
-      "in": "4.0.0.1.2",
-      "ok": false,
-      "why": "a fifth segment is a different format, not something to truncate"
-    },
-    {
-      "in": "4.0.0.0",
-      "ok": false,
-      "why": "a zero fourth segment is another spelling of 4.0.0"
     }
   ]
 }

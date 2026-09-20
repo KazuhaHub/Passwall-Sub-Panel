@@ -1,9 +1,9 @@
 {
   "schema_version": 1,
-  "revision": 1,
+  "revision": 2,
   "issued_at": "2026-09-19T00:00:00Z",
   "expires_at": "2026-09-26T00:00:00Z",
-  "comment": "The Passwall Node upgrade policy: which releases this panel may offer as an upgrade target, and along which verified paths. Read by NEW code only; older PSP builds keep reading docs/compat/v<major>.json, which this file does not replace or restate. revision is a monotonic publication counter: a higher number supersedes a lower one, and a lower one is refused rather than applied. See docs/release-catalog-redesign-plan.md.",
+  "comment": "The Passwall Node upgrade policy: which releases this panel may offer as an upgrade target. revision is a monotonic publication counter: a higher number supersedes a lower one, and a lower one is refused rather than applied. REVISION 2 IS THE SINGLE-SCHEME REGISTRY. The legacy scheme was removed - there is no production deployment, so nothing needed migrating off it - and the two v0.0.1-beta releases that were listed here are not versions any more, nor are the three beta refusals decisions about names that can still be requested. What replaces them is the release the products actually publish. THE PATH MODEL IS GONE from this document: which releases may be offered is this list, and a path between two of them is no longer a separate thing to certify.",
   "applies_to_psp": {
     "min": "4.0.0",
     "max": "4.99.99",
@@ -11,37 +11,14 @@
   },
   "releases": [
     {
-      "version": "v0.0.1-beta11",
-      "release_tag": "v0.0.1-beta11",
-      "scheme": "legacy",
-      "evidence": [
-        "node-wire-v1",
-        "reverse-direction-b01-b08"
-      ],
-      "comment": "The newest reviewed release at the time of writing. Evidence names come from the compat verification plan; a release with no evidence is not an upgrade target."
-    },
-    {
-      "version": "v0.0.1-beta10",
-      "release_tag": "v0.0.1-beta10",
-      "scheme": "legacy",
+      "version": "4.0.0",
+      "release_tag": "release/4.0.0",
+      "scheme": "product",
       "evidence": [
         "node-wire-v1"
       ],
-      "comment": "Superseded by beta11, which fixes a panic on a host report with no network section. Still a valid target for a node already on it."
+      "comment": "The first product-scheme release, and the version both products are on. The evidence named is the one that exists: the v1 node wire, verified by the released-range matrix against this release's pinned commit. Nothing here claims a path to it from anywhere else."
     }
   ],
-  "refusals": [
-    {
-      "version": "v0.0.1-beta1",
-      "reason": "Predates the reviewed registry, never reviewed, long superseded."
-    },
-    {
-      "version": "v0.0.1-beta2",
-      "reason": "Predates the reviewed registry, never reviewed, long superseded."
-    },
-    {
-      "version": "v0.0.1-beta5",
-      "reason": "Passed over when beta6 and beta7 were reviewed and never recorded. Listed so the omission is a decision on record."
-    }
-  ]
+  "refusals": []
 }

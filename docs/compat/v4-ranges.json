@@ -1,42 +1,22 @@
 {
   "schema_version": 3,
   "major": 4,
-  "updated_at": "2026-09-16",
+  "updated_at": "2026-09-20",
   "entries": [
     {
-      "psp_min": "v4.0.0-beta.9",
-      "psp_max": "v4.0.0-beta.99",
+      "psp_min": "4.0.0",
+      "psp_max": "4.99.99",
       "min_xui": "3.4.2",
       "max_tested_xui": "3.8.5",
-      "notes": "3X-UI 3.8.5 live adapter verification (2026-09-16 UTC) used PSP main at 2440112 against upstream tag 7ef22f94 and Xray 26.9.9 on darwin/arm64. TestLive_XUISurface, TestLive_XUIConnectionLimits and TestLive_XUIRealityScan passed. PSP v4.0.0-beta.9 introduced the required negative-subSortIndex preservation and already carried the 26.9.8+ REALITY ML-KEM subscription handling. This range deliberately starts at beta.9; beta.1 through beta.8 remain on the 3.7.0 ceiling."
-    },
-    {
-      "psp_min": "v4.0.0",
-      "psp_max": "v4.99.99",
-      "min_xui": "3.4.2",
-      "max_tested_xui": "3.8.5",
-      "notes": "The v4 stable line contains the beta.9 3X-UI 3.8.x inbound-update fix and the verified adapter surface recorded above. Keep a narrower entry ahead of this baseline if a later v4 release changes the contract."
-    },
-    {
-      "psp_min": "v4.0.0-beta.1",
-      "psp_max": "v4.0.0-beta.8",
-      "min_xui": "3.4.2",
-      "max_tested_xui": "3.7.0",
-      "notes": "Historical v4 betas before beta.9 do not preserve negative 3X-UI 3.8.x subSortIndex values and therefore retain the 3.7.0 ceiling."
+      "notes": "3X-UI 3.8.5 live adapter verification (2026-09-16 UTC) used PSP main at 2440112 against upstream tag 7ef22f94 and Xray 26.9.9 on darwin/arm64. TestLive_XUISurface, TestLive_XUIConnectionLimits and TestLive_XUIRealityScan passed. The release carries the negative-subSortIndex preservation and the 26.9.8+ REALITY ML-KEM subscription handling that verification exercised. THIS ENTRY REPLACES THREE. They were keyed by the PSP beta line - beta.9 and up on 3.8.5, beta.1 through beta.8 on 3.7.0 - and the legacy scheme is gone, so a build of that line is not an identity anything can be matched against. The 3.7.0 ceiling recorded for the early betas belonged to builds that no longer have a name. Keep a narrower entry ahead of this baseline if a later release changes the contract."
     }
   ],
   "sui_entries": [
     {
-      "psp_min": "v4.0.0-beta.1",
-      "psp_max": "v4.0.0-beta.99",
+      "psp_min": "4.0.0",
+      "psp_max": "4.99.99",
       "max_tested_sui": "1.6.3",
-      "notes": "S-UI 1.6.3 live adapter verification (2026-09-16 UTC) used PSP main at 2440112 against upstream tag 13abbdc4 and sing-box 1.14.1 on darwin/arm64. TestLive_SUISurface passed after upgrading the 1.6.2 scratch database. Token authentication and inbound/client read-write shapes remain compatible; the new session API and multi-user Snell support are additive."
-    },
-    {
-      "psp_min": "v4.0.0",
-      "psp_max": "v4.99.99",
-      "max_tested_sui": "1.6.3",
-      "notes": "The v4 stable line uses the same S-UI adapter contract live-verified against 1.6.3. No S-UI minimum or new optional capability is claimed."
+      "notes": "S-UI 1.6.3 live adapter verification (2026-09-16 UTC) used PSP main at 2440112 against upstream tag 13abbdc4 and sing-box 1.14.1 on darwin/arm64. TestLive_SUISurface passed after upgrading the 1.6.2 scratch database. Token authentication and inbound/client read-write shapes remain compatible; the new session API and multi-user Snell support are additive. No S-UI minimum or new optional capability is claimed."
     }
   ]
 }

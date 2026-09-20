@@ -44,7 +44,7 @@ func TestNodeInstallationFilesPrivateStableAcrossMethodsAndPlatforms(t *testing.
 			}
 			for _, arch := range []string{"amd64", "arm64"} {
 				t.Run(method+"/"+platform+"/"+arch, func(t *testing.T) {
-					body, _ := json.Marshal(nodeInstallationFilesRequest{Version: "v0.0.1-beta3", Method: method, OS: platform, Arch: arch})
+					body, _ := json.Marshal(nodeInstallationFilesRequest{Version: "4.0.0", Method: method, OS: platform, Arch: arch})
 					w := installationRequest(h, http.MethodPost, "node-installation-files", string(body), "/panel", domain.RoleAdmin)
 					var result nodeInstallationFilesResponse
 					if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &result) != nil {
@@ -117,16 +117,19 @@ func TestNodeInstallationFilesRejectsUnsupportedInputsAndNonAdministrators(t *te
 		`{"method":"manual","version":"beta"}`,
 		`{"method":"docker","version":"edge"}`,
 		`{"method":"manual","version":"v0.01.0"}`,
-		`{"method":"manual","version":"v0.0.1;id"}`,
-		`{"method":"manual","version":"v0.0.1","arch":"amd64;id"}`,
-		`{"method":"manual","version":"v0.0.1","os":"freebsd"}`,
-		`{"method":"docker","version":"v0.0.1","os":"windows"}`,
-		`{"method":"systemd","version":"v0.0.1"}`,
-		`{"method":"manual","version":" v0.0.1"}`,
-		// Product-scheme near misses. The shape rule moved; the refusals did not.
+		`{"method":"manual","version":"4.0.0;id"}`,
+		`{"method":"manual","version":"4.0.0","arch":"amd64;id"}`,
+		`{"method":"manual","version":"4.0.0","os":"freebsd"}`,
+		`{"method":"docker","version":"4.0.0","os":"windows"}`,
+		`{"method":"systemd","version":"4.0.0"}`,
+		`{"method":"manual","version":" 4.0.0"}`,
+		// Near misses of the single scheme. The shape rule moved; the refusals
+		// did not — and `4.0.0.1` is NOT among them any more, because the fourth
+		// segment is a version now. It was refused here when the rule accepted
+		// three integers and nothing else.
 		`{"method":"manual","version":"4.0"}`,
 		`{"method":"manual","version":"04.0.0"}`,
-		`{"method":"manual","version":"4.0.0.1"}`,
+		`{"method":"manual","version":"v4.0.0"}`,
 		`{"method":"manual","version":"release/4.0.0"}`,
 		`not-json`,
 	} {
@@ -136,38 +139,56 @@ func TestNodeInstallationFilesRejectsUnsupportedInputsAndNonAdministrators(t *te
 		}
 	}
 	for _, role := range []domain.Role{"", domain.RoleUser, domain.RoleOperator} {
-		w := installationRequest(h, http.MethodPost, "node-installation-files", `{"method":"manual","version":"v0.0.1-beta3"}`, "", role)
+		w := installationRequest(h, http.MethodPost, "node-installation-files", `{"method":"manual","version":"4.0.0"}`, "", role)
 		if (w.Code != http.StatusUnauthorized && w.Code != http.StatusForbidden) || strings.Contains(w.Body.String(), repo.credential) {
 			t.Fatal("non-administrator could retrieve secret materials")
 		}
 	}
 	before := *repo.agent
 	repo.credential = ""
-	w := installationRequest(h, http.MethodPost, "node-installation-files", `{"method":"docker","version":"v0.0.1-beta3"}`, "", domain.RoleAdmin)
+	w := installationRequest(h, http.MethodPost, "node-installation-files", `{"method":"docker","version":"4.0.0"}`, "", domain.RoleAdmin)
 	if w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "node_credential_unavailable") || !reflect.DeepEqual(before, *repo.agent) {
 		t.Fatal("legacy credential absence must not mint or rotate a replacement")
 	}
 }
 
 func TestNodeInstallationMaterialsRequireSuccessfulSecretReadAudit(t *testing.T) {
-	for _, action := range []string{"node-install-script", "node-installation-files"} {
-		h, repo := installationFixture(t)
-		audit := &installationAudit{err: fmt.Errorf("audit unavailable")}
-		h.audit = audit
-		before, credential := *repo.agent, repo.credential
-		body := `{"version":"v0.0.1-beta3","method":"manual"}`
-		w := installationRequest(h, http.MethodPost, action, body, "", domain.RoleAdmin)
-		if w.Code != http.StatusServiceUnavailable || strings.Contains(w.Body.String(), credential) || len(audit.entries) != 1 || !reflect.DeepEqual(before, *repo.agent) || repo.credential != credential {
-			t.Fatal("failed read audit released credentials or altered identity")
-		}
-		encoded, _ := json.Marshal(audit.entries)
-		if strings.Contains(string(encoded), credential) {
-			t.Fatal("read audit contained private materials")
-		}
-	}
 	h, repo := installationFixture(t)
+	audit := &installationAudit{err: fmt.Errorf("audit unavailable")}
+	h.audit = audit
+	before, credential := *repo.agent, repo.credential
+	w := installationRequest(h, http.MethodPost, "node-installation-files", `{"version":"4.0.0","method":"manual"}`, "", domain.RoleAdmin)
+	if w.Code != http.StatusServiceUnavailable || strings.Contains(w.Body.String(), credential) || len(audit.entries) != 1 || !reflect.DeepEqual(before, *repo.agent) || repo.credential != credential {
+		t.Fatal("failed read audit released credentials or altered identity")
+	}
+	encoded, _ := json.Marshal(audit.entries)
+	if strings.Contains(string(encoded), credential) {
+		t.Fatal("read audit contained private materials")
+	}
+
+	// THE SCRIPT ENDPOINT CANNOT REACH THE AUDIT AT ALL, and that is a
+	// cross-repository blocker recorded here rather than a decision. It renders
+	// the version into the Node installer template, whose own rule still reads the
+	// legacy release shape and uses the version as the download path — so a
+	// release this panel accepts is refused before any credential is touched. The
+	// property under test still has to hold, by whatever route is taken: nothing
+	// is released and no identity changes.
+	h, repo = installationFixture(t)
+	scriptAudit := &installationAudit{}
+	h.audit = scriptAudit
+	credential = repo.credential
+	before = *repo.agent
+	w = installationRequest(h, http.MethodPost, "node-install-script", `{"version":"4.0.0"}`, "", domain.RoleAdmin)
+	if w.Code != http.StatusBadRequest || strings.Contains(w.Body.String(), credential) ||
+		len(scriptAudit.entries) != 0 || !reflect.DeepEqual(before, *repo.agent) || repo.credential != credential {
+		t.Fatalf("the script endpoint did not refuse before reading a credential: status=%d body=%s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "template") {
+		t.Fatalf("the refusal does not say which side refused: %s", w.Body.String())
+	}
+	h, repo = installationFixture(t)
 	h.repo = nonnativeInstallationPanelRepo{}
-	w := installationRequest(h, http.MethodPost, "node-installation-files", `{"version":"v0.0.1-beta3","method":"manual"}`, "", domain.RoleAdmin)
+	w = installationRequest(h, http.MethodPost, "node-installation-files", `{"version":"4.0.0","method":"manual"}`, "", domain.RoleAdmin)
 	if w.Code != http.StatusBadRequest || strings.Contains(w.Body.String(), repo.credential) {
 		t.Fatal("upstream panel received native installation files")
 	}
@@ -179,7 +200,7 @@ func TestNodeInstallationFilesAuditContainsMetadataNotGeneratedSecrets(t *testin
 	router := gin.New()
 	router.Use(middleware.AuditWrites(audit.New(entries), nil))
 	router.POST("/api/admin/servers/:id/node-installation-files", h.NodeInstallationFiles)
-	request := httptest.NewRequest(http.MethodPost, "https://panel.example/api/admin/servers/41/node-installation-files", strings.NewReader(`{"method":"docker","version":"v0.0.1-beta3"}`))
+	request := httptest.NewRequest(http.MethodPost, "https://panel.example/api/admin/servers/41/node-installation-files", strings.NewReader(`{"method":"docker","version":"4.0.0"}`))
 	request.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, request)
@@ -267,7 +288,7 @@ func TestNodeInstallationFilesDockerRemoteUpgradeIsExplicitAdvancedOption(t *tes
 
 func TestNodeInstallationFilesDockerAllowsStableChannelAndExactPin(t *testing.T) {
 	h, _ := installationFixture(t)
-	for _, version := range []string{"latest", "beta", "v0.0.1-beta3"} {
+	for _, version := range []string{"latest", "beta", "4.0.0"} {
 		w := installationRequest(h, http.MethodPost, "node-installation-files", `{"method":"docker","version":"`+version+`"}`, "", domain.RoleAdmin)
 		if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "ghcr.io/kazuhahub/passwall-node:"+version) {
 			t.Fatalf("Docker image selection %q was not preserved: status=%d body=%s", version, w.Code, w.Body.String())
@@ -276,7 +297,7 @@ func TestNodeInstallationFilesDockerAllowsStableChannelAndExactPin(t *testing.T)
 }
 
 func TestNodeInstallationFilesWindowsRequiresArchiveAttributeSupport(t *testing.T) {
-	steps := manualWindowsSteps(nativeServerCreateResponse{}, nodeInstallationFilesRequest{Method: "manual", Version: "v0.0.1-beta3", OS: "windows", Arch: "amd64"})
+	steps := manualWindowsSteps(nativeServerCreateResponse{}, nodeInstallationFilesRequest{Method: "manual", Version: "4.0.0", OS: "windows", Arch: "amd64"})
 	if !strings.Contains(steps[0].Description, ".NET Framework >=4.7.2") || !strings.Contains(steps[0].Description, "PowerShell 7") {
 		t.Fatal("Windows prerequisites do not identify supported archive runtimes")
 	}
@@ -296,7 +317,7 @@ func TestNodeInstallationFilesWindowsRequiresArchiveAttributeSupport(t *testing.
 
 func TestNodeInstallationFilesDockerDefaultsToNativeHostArchitecture(t *testing.T) {
 	h, _ := installationFixture(t)
-	w := installationRequest(h, http.MethodPost, "node-installation-files", `{"version":"v0.0.1-beta3","method":"docker"}`, "", domain.RoleAdmin)
+	w := installationRequest(h, http.MethodPost, "node-installation-files", `{"version":"4.0.0","method":"docker"}`, "", domain.RoleAdmin)
 	var result nodeInstallationFilesResponse
 	if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &result) != nil || result.Arch != "" || strings.Contains(w.Body.String(), `"arch":`) {
 		t.Fatal("default Docker guide must not force or report an architecture")
@@ -312,7 +333,7 @@ func TestNodeInstallationFilesManualExactArchivesAndSafeQuoting(t *testing.T) {
 	_, repo := installationFixture(t)
 	p := nativeServerCreateResponse{AgentID: repo.agent.AgentID, Credential: repo.credential, Endpoint: "https://panel.example/a'$(touch-not-a-command)/v1/node/sync"}
 	for _, platform := range []string{"linux", "darwin", "windows"} {
-		result := renderNodeInstallationFiles(41, p, nodeInstallationFilesRequest{Method: "manual", Version: "v0.0.1-beta3", OS: platform, Arch: "arm64"})
+		result := renderNodeInstallationFiles(41, p, nodeInstallationFilesRequest{Method: "manual", Version: "4.0.0", OS: platform, Arch: "arm64"})
 		var verify, extract, run string
 		for _, step := range result.Steps {
 			switch step.ID {
@@ -334,12 +355,12 @@ func TestNodeInstallationFilesManualExactArchivesAndSafeQuoting(t *testing.T) {
 		} else if !strings.Contains(run, nodeInstallShellQuote(p.Endpoint)) || !strings.Contains(verify, "count != 1") || !strings.Contains(extract, "tar -xOzf") || strings.Contains(extract, "tar -xzf") {
 			t.Fatal("Unix guide weakened literal argv or safe member extraction")
 		}
-		asset := "passwall-node_v0.0.1-beta3_" + platform + "_arm64" + ext
+		asset := "passwall-node_4.0.0_" + platform + "_arm64" + ext
 		if !strings.Contains(verify, asset) || strings.Contains(verify, "curl") || strings.Contains(verify, "https://") || !strings.Contains(run, "--credential-file") {
 			t.Fatal("manual guide did not use the fixed offline archive/credential-file")
 		}
 		if len(result.Downloads) != 2 || result.Downloads[0].Name != asset ||
-			result.Downloads[0].URL != "https://github.com/KazuhaHub/Passwall-Node/releases/download/v0.0.1-beta3/"+asset ||
+			result.Downloads[0].URL != "https://github.com/KazuhaHub/Passwall-Node/releases/download/release/4.0.0/"+asset ||
 			result.Downloads[1].Name != "SHA256SUMS.txt" || !strings.HasSuffix(result.Downloads[1].URL, "/SHA256SUMS.txt") {
 			t.Fatal("manual response did not expose the exact release downloads")
 		}
@@ -361,8 +382,8 @@ func TestNodeInstallationManualUnixChecksumVariantsExecute(t *testing.T) {
 		if _, err := exec.LookPath(tool); err != nil {
 			continue // Each native CI platform exercises its available SHA tool.
 		}
-		request := nodeInstallationFilesRequest{Method: "manual", Version: "v0.0.1-beta3", OS: platform, Arch: "amd64"}
-		asset := "passwall-node_v0.0.1-beta3_" + platform + "_amd64.tar.gz"
+		request := nodeInstallationFilesRequest{Method: "manual", Version: "4.0.0", OS: platform, Arch: "amd64"}
+		asset := "passwall-node_4.0.0_" + platform + "_amd64.tar.gz"
 		content := []byte("fixture archive bytes, never a downloaded program")
 		digest := fmt.Sprintf("%x", sha256.Sum256(content))
 		download := manualUnixSteps(nativeServerCreateResponse{}, request)[1].Commands[0]
@@ -408,8 +429,8 @@ func TestNodeInstallationManualUnixExtractsOnlyFreshRegularMembers(t *testing.T)
 	if runtime.GOOS == "windows" {
 		return
 	}
-	request := nodeInstallationFilesRequest{Method: "manual", Version: "v0.0.1-beta3", OS: "linux", Arch: "amd64"}
-	packageName := "passwall-node_v0.0.1-beta3_linux_amd64"
+	request := nodeInstallationFilesRequest{Method: "manual", Version: "4.0.0", OS: "linux", Arch: "amd64"}
+	packageName := "passwall-node_4.0.0_linux_amd64"
 	for _, test := range []struct {
 		name        string
 		kind        byte
@@ -514,10 +535,10 @@ func TestReleaseAssetURLAddressesTheTagAsAPath(t *testing.T) {
 		why  string
 	}{
 		{
-			name: "a legacy tag is unchanged",
-			tag:  "v0.0.1-beta11",
-			want: "https://github.com/KazuhaHub/Passwall-Node/releases/download/v0.0.1-beta11/SHA256SUMS.txt",
-			why:  "dots and hyphens are unreserved, so escaping must not alter it",
+			name: "dots are unreserved and stay as they are",
+			tag:  "release/102.1.0",
+			want: "https://github.com/KazuhaHub/Passwall-Node/releases/download/release/102.1.0/SHA256SUMS.txt",
+			why:  "the path is the ref the publisher made, and escaping it would address something else",
 		},
 		{
 			name: "a product tag keeps its slash as a separator",

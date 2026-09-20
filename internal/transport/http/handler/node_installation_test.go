@@ -161,13 +161,21 @@ func TestNodeInstallationLegacyBackfillDoesNotRotate(t *testing.T) {
 	}
 }
 
-func TestNodeInstallScriptPrivateDownloadAndAdministratorBoundary(t *testing.T) {
+// THE SCRIPT DOWNLOAD IS THE ONE THING HERE THAT CANNOT BE EXERCISED, and that is
+// recorded rather than hidden. The endpoint renders the version into the Node
+// repository's installer template, whose own rule still reads the legacy release
+// shape and uses the version as the download path — so a release this panel
+// accepts is refused by the template, and PSP cannot change that from here
+// because the package is a pinned dependency (X07). What this case still owns is
+// the property it was written for: the endpoint is private, and a refusal carries
+// no credential.
+func TestNodeInstallScriptIsPrivateAndAdministratorOnly(t *testing.T) {
 	h, r := installationFixture(t)
-	w := installationRequest(h, http.MethodPost, "node-install-script", `{"version":"v0.1.0"}`, "/panel", domain.RoleAdmin)
-	if w.Code != http.StatusOK || !strings.HasPrefix(w.Body.String(), "#!/bin/sh") || !strings.Contains(w.Body.String(), r.credential) || !strings.Contains(w.Body.String(), "https://panel.example/panel/v1/node/sync") || !strings.HasPrefix(w.Header().Get("Content-Type"), "text/plain") || !strings.Contains(w.Header().Get("Cache-Control"), "no-store") {
-		t.Fatal("private installation script download failed")
+	w := installationRequest(h, http.MethodPost, "node-install-script", `{"version":"4.0.0"}`, "/panel", domain.RoleAdmin)
+	if w.Code != http.StatusBadRequest || strings.Contains(w.Body.String(), r.credential) {
+		t.Fatalf("a refusal from the script endpoint leaked a credential or was not a refusal: status=%d", w.Code)
 	}
-	for _, version := range []string{"latest", "v0.01.0", "v0.1.0;id", ""} {
+	for _, version := range []string{"latest", "04.0.0", "4.0.0;id", ""} {
 		body, _ := json.Marshal(map[string]string{"version": version})
 		w := installationRequest(h, http.MethodPost, "node-install-script", string(body), "", domain.RoleAdmin)
 		if w.Code != http.StatusBadRequest || strings.Contains(w.Body.String(), r.credential) {
@@ -175,7 +183,7 @@ func TestNodeInstallScriptPrivateDownloadAndAdministratorBoundary(t *testing.T) 
 		}
 	}
 	for _, role := range []domain.Role{"", domain.RoleUser, domain.RoleOperator} {
-		for _, route := range []struct{ method, path, body string }{{http.MethodGet, "node-installation", ""}, {http.MethodPost, "node-credential", `{"credential":"` + r.credential + `"}`}, {http.MethodPost, "node-install-script", `{"version":"v0.1.0"}`}, {http.MethodGet, "node-agent-status", ""}} {
+		for _, route := range []struct{ method, path, body string }{{http.MethodGet, "node-installation", ""}, {http.MethodPost, "node-credential", `{"credential":"` + r.credential + `"}`}, {http.MethodPost, "node-install-script", `{"version":"4.0.0"}`}, {http.MethodGet, "node-agent-status", ""}} {
 			w := installationRequest(h, route.method, route.path, route.body, "", role)
 			if (w.Code != http.StatusUnauthorized && w.Code != http.StatusForbidden) || strings.Contains(w.Body.String(), r.credential) {
 				t.Fatalf("non-administrator accessed %s", route.path)

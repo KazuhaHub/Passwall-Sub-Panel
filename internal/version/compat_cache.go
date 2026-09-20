@@ -118,7 +118,7 @@ func LoadLatestSUICache() error {
 	if err := json.Unmarshal(body, &payload); err != nil {
 		return fmt.Errorf("decode latest-sui cache: %w", err)
 	}
-	tag, ok := acceptLatestPSPStable(payload.Tag, false)
+	tag, ok := acceptedSUIStable(payload.Tag, false)
 	if !ok {
 		return fmt.Errorf("cached S-UI tag %q is not a usable stable version", payload.Tag)
 	}

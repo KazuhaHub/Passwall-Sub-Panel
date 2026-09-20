@@ -62,13 +62,20 @@ jobs:
           # and each case carries the commit its tag must still resolve to.
           #
           # Matched by POSITION, never by comparing versions: the prerelease
-          # suffix sorts lexically, so v0.0.1-beta9 ranks above v0.0.1-beta11.
+          # suffix sorted lexically, so v0.0.1-beta9 ranked above v0.0.1-beta11.
+          # The scheme is gone and the rule is kept, because it is the mechanism
+          # both sides implement: a version compares numerically now, so the two
+          # agree, and the floor stays an index rather than a comparison.
           #
           # Written to a file and read back line by line rather than expanded
           # into the shell: the planner validates every element, and nothing it
           # emits should ever become a shell argument by string interpolation.
+          # THE TAG IS THE REF AND THE VERSION IS THE IDENTITY. They are never the
+          # same string: a release lives at refs/tags/release/4.0.0 and is named
+          # 4.0.0, so fetching the ref by version asks for a tag that does not
+          # exist, and the case id is built from the version.
           node deploy/compat/plan.mjs --emit cases \
-            | python3 -c 'import json,sys;[print(c["version"], c["sha"]) for c in json.load(sys.stdin)]' \
+            | python3 -c 'import json,sys;[print(c["tag"], c["version"], c["sha"]) for c in json.load(sys.stdin)]' \
             > "$RUNNER_TEMP/node-cases.txt"
           test -s "$RUNNER_TEMP/node-cases.txt"
           echo "planned cases:"; cat "$RUNNER_TEMP/node-cases.txt"
@@ -76,9 +83,9 @@ jobs:
           git init "$node_repo"
           git -C "$node_repo" remote add origin https://github.com/KazuhaHub/Passwall-Node.git
           failed=0
-          while read -r node_version node_sha
+          while read -r node_tag node_version node_sha
           do
-            git -C "$node_repo" fetch --force --depth=1 origin "refs/tags/$node_version"
+            git -C "$node_repo" fetch --force --depth=1 origin "refs/tags/$node_tag"
             git -C "$node_repo" checkout --force --detach FETCH_HEAD
 
             # A TAG IS A LABEL, NOT AN IDENTITY. If it moved, this leg would
@@ -86,7 +93,7 @@ jobs:
             # verified against while still reporting the same version.
             resolved=$(git -C "$node_repo" rev-parse HEAD)
             if [ "$resolved" != "$node_sha" ]; then
-              echo "::error::$node_version now resolves to $resolved, but the plan pinned $node_sha. A tag moved; re-verify before re-pinning."
+              echo "::error::$node_tag now resolves to $resolved, but the plan pinned $node_sha. A tag moved; re-verify before re-pinning."
               failed=1
               continue
             fi

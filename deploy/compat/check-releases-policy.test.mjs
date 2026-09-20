@@ -32,7 +32,7 @@ test('offering a release the manifest calls remote_upgrade unsupported is refuse
   const problems = checkReleasesPolicy(
     documents({
       nodeEdit: n => {
-        n.released_nodes.find(node => node.version === 'v0.0.1-beta11').remote_upgrade = 'unsupported'
+        n.released_nodes.find(node => node.version === '4.0.0').remote_upgrade = 'unsupported'
       },
     }),
   )
@@ -46,7 +46,7 @@ test('offering a release with no pinned commit is refused', () => {
   const problems = checkReleasesPolicy(
     documents({
       verificationEdit: v => {
-        delete v.pinned_sources['v0.0.1-beta11']
+        delete v.pinned_sources['4.0.0']
       },
     }),
   )
@@ -59,8 +59,8 @@ test('offering a version the manifest has never heard of is refused', () => {
   const problems = checkReleasesPolicy(
     documents({
       policyEdit: p => {
-        p.releases[0].version = 'v0.0.1-beta99'
-        p.releases[0].release_tag = 'v0.0.1-beta99'
+        p.releases[0].version = '9.9.9'
+        p.releases[0].release_tag = 'release/9.9.9'
       },
     }),
   )
@@ -71,7 +71,7 @@ test('a refusal naming an unknown version is refused', () => {
   const problems = checkReleasesPolicy(
     documents({
       policyEdit: p => {
-        p.refusals.push({ version: 'v0.0.1-beta404', reason: 'typo' })
+        p.refusals.push({ version: '9.9.9', reason: 'typo' })
       },
     }),
   )
@@ -83,7 +83,7 @@ test('a version that is both offered and refused is refused', () => {
   const problems = checkReleasesPolicy(
     documents({
       policyEdit: p => {
-        p.refusals.push({ version: 'v0.0.1-beta10', reason: 'contradiction' })
+        p.refusals.push({ version: '4.0.0', reason: 'contradiction' })
       },
     }),
   )

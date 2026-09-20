@@ -18,15 +18,15 @@ vi.mock('./NativeAgentUpgradeDialog', () => ({
 
 const native: Server = {
   id: 7, name: 'native beta', panel_type: 'psp', update_channel: 'beta',
-  panel_version: 'v0.0.1-beta3 (abcdef0)', url: '', capabilities: ['core.upgrade'],
+  panel_version: '4.0.2 (abcdef0)', url: '', capabilities: ['core.upgrade'],
   node_compatibility: 'compatible', node_upgrade_ready: true,
   auth_method: '', has_api_token: false, has_password: false, insecure_https: false,
 }
 const catalog: NodeReleaseCatalog = {
   checked_at: '2026-09-14T00:00:00Z',
   releases: [{
-    version: 'v0.0.1-beta4', channel: 'testing', published_at: '2026-09-13T00:00:00Z',
-    release_url: 'https://github.com/KazuhaHub/Passwall-Node/releases/tag/v0.0.1-beta4',
+    version: '4.0.3', channel: 'testing', published_at: '2026-09-13T00:00:00Z',
+    release_url: 'https://github.com/KazuhaHub/Passwall-Node/releases/tag/release/4.0.3',
     notes: '', methods: ['linux'], platforms: [{ os: 'linux', arch: 'amd64' }, { os: 'linux', arch: 'arm64' }],
   }],
 }
@@ -68,14 +68,14 @@ describe('Server update hints and paired tray icons', () => {
 
   it('reads one shared catalog, shows only the newer matching-channel Node, and keeps the hint non-interactive', async () => {
     const stable = { ...native, id: 10, name: 'native stable', update_channel: 'stable' as const }
-    const current = { ...native, id: 11, name: 'native current', panel_version: 'v0.0.1-beta4' }
+    const current = { ...native, id: 11, name: 'native current', panel_version: '4.0.3' }
     installReads({ '/admin/servers': list([native, stable, current]) })
     mount(<ServersView />)
     const target = await rowFor(native.name)
     expect(await within(target).findByText('admin:servers.update_available')).toBeTruthy()
-    const version = within(target).getByText('Passwall Node v0.0.1-beta3')
+    const version = within(target).getByText('Passwall Node 4.0.2')
     expect(version).toBeTruthy()
-    expect(within(target).queryByText('Passwall Node v0.0.1-beta3 (abcdef0)')).toBeNull()
+    expect(within(target).queryByText('Passwall Node 4.0.2 (abcdef0)')).toBeNull()
     fireEvent.mouseOver(version)
     expect(await screen.findByText('commit: abcdef0')).toBeTruthy()
     expect(within(target).queryByText('admin:servers.native.compatibility.compatible')).toBeNull()

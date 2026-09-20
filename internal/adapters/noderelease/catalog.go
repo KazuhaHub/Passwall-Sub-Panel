@@ -19,7 +19,6 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/safehttp"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/version"
-	"golang.org/x/mod/semver"
 )
 
 const (
@@ -76,15 +75,18 @@ var _ ports.NodeReleaseCatalog = (*Catalog)(nil)
 // Unstamped local builds explicitly use this catalog's compiled major; malformed
 // release identities must not accidentally inherit v4 compatibility.
 //
-// THE STAMP IS A VERSION, IN EITHER SCHEME, and reading its major is the whole
-// job. This used to ask the INSTALLER's rule, which knows only the legacy
-// v-prefixed shape — so the first build stamped `4.0.0` would have been read as
-// having no canonical identity at all, and the catalog would have been silently
-// disabled rather than answering with the wrong major.
+// THE STAMP IS A VERSION, and reading its major is the whole job. This used to
+// ask the INSTALLER's rule, which knows only the legacy v-prefixed shape — so the
+// first build stamped `4.0.0` would have been read as having no canonical
+// identity at all, and the catalog would have been silently disabled rather than
+// answering with the wrong major.
 //
-// A release line of zero is refused here and not in the shape rule: PSP has
-// never released one, while every Node release in the field is v0.0.1-*, so
-// requiring it of the shape would refuse the history the catalog exists to read.
+// A RELEASE LINE OF ZERO HAS NO ANSWER HERE. This function answers "which
+// compatibility major is this build", and a build whose own version names no
+// release line cannot be answered — so the refusal is deliberate, not a leftover
+// of the shape rule. The history it used to protect was the v0.0.1-* line, every
+// Node release in the field at the time; that scheme is gone, and with it every
+// caller for whom zero was a meaningful release line.
 func PSPMajorForVersion(stamp string) (int, error) {
 	if stamp == "dev" {
 		return compiledMajor, nil
@@ -283,24 +285,25 @@ func (c *Catalog) fetch(ctx context.Context) (ports.NodeReleaseList, error) {
 	}
 	// NEWEST PUBLISHED FIRST, NOT HIGHEST VERSION FIRST.
 	//
-	// semver compares prerelease identifiers character by character, so
-	// v0.0.1-beta11 ranks BELOW v0.0.1-beta9. Sorting by it put the older
-	// release at the top, and had beta10/beta11 been reviewed into the registry
-	// they would have been filed behind beta3 — in the list that drives the
-	// upgrade dialog, where the first entry is labelled the recommended version.
+	// Publication time is the axis a version string cannot reinterpret: the
+	// registry used to hold a beta line whose publication order and version order
+	// disagreed (beta11 sorts below beta9 as text), and sorting by the version put
+	// the older release at the top of the list that drives the upgrade dialog.
 	//
-	// Publication time is the axis a version string cannot reinterpret. The
-	// version is only a tie-break, for releases sharing a publication instant —
-	// and semver is the right one there, because it ranks a prerelease below its
-	// own stable, which lexically comparing the strings gets backwards. The
-	// two-digit pathology cannot arise between two releases published in the
-	// same second.
+	// THE VERSION IS ONLY A TIE-BREAK, for releases sharing a publication instant,
+	// and it is now the PROJECT'S OWN order rather than x/mod/semver. Semver was
+	// chosen while every version had three segments; it cannot parse the fourth
+	// BUILD component at all — it answers zero for `4.0.0.1`, which the sort reads
+	// as equality and leaves the registry's file order standing. Two releases with
+	// the same publication time cannot disagree about their publication order, but
+	// they can disagree about their versions, and that is the one thing this has
+	// to get right.
 	sort.Slice(result.Releases, func(i, j int) bool {
 		left, right := result.Releases[i], result.Releases[j]
 		if !left.PublishedAt.Equal(right.PublishedAt) {
 			return left.PublishedAt.After(right.PublishedAt)
 		}
-		return semver.Compare(left.Version, right.Version) > 0
+		return version.CompareRelease(left.Version, right.Version) > 0
 	})
 	result.CheckedAt = c.now().UTC()
 	return result, nil
@@ -390,17 +393,14 @@ func catalogEntry(reviewed reviewedRelease, release *githubRelease, tag string) 
 	if release.Prerelease {
 		entry.Channel = "testing"
 	}
-	// WHICH SCHEME, AND THEREFORE WHETHER THERE IS A PRODUCT VERSION AT ALL.
-	// A legacy release has none: its version IS its tag, and normalising it into
-	// a product version would name an identity no release ever had. The namespace
-	// is what distinguishes them, and it is the same one ReleaseTagFor used to
-	// build the tag a few lines up.
-	if strings.HasPrefix(tag, version.ProductTagNamespace) {
-		entry.ProductVersion = reviewed.Version
-		entry.Scheme = "product"
-	} else {
-		entry.Scheme = "legacy"
-	}
+	// THERE IS ONE SCHEME, AND THE NAMESPACE IS WHAT SAYS SO. This used to branch:
+	// a tag inside `release/` carried a product version of its own, and a tag
+	// outside it was a legacy release whose version WAS its tag. The legacy scheme
+	// is gone, so a tag outside the namespace is not a release this project has —
+	// the reviewed registry cannot hold one, and ReleaseTagFor cannot build one —
+	// and what remains is the namespace as the single address form.
+	entry.ProductVersion = reviewed.Version
+	entry.Scheme = "product"
 	assets := make(map[string]githubAsset, len(release.Assets))
 	for _, asset := range release.Assets {
 		if _, duplicate := assets[asset.Name]; duplicate {

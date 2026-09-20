@@ -5,8 +5,8 @@
   "range_overlay": "v4-ranges.json",
   "entries": [
     {
-      "psp_min": "v4.0.0",
-      "psp_max": "v4.99.99",
+      "psp_min": "4.0.0",
+      "psp_max": "4.99.99",
       "min_xui": "3.4.2",
       "max_tested_xui": "3.7.0",
       "notes": "3.8.0 review (2026-09-14 UTC): current PSP source at 06073ca plus the negative-subSortIndex preservation fix was live-verified against fresh upstream tag 837addf and official Xray 26.9.9 on darwin/arm64. The live surface, IP/HWID limits, REALITY scan, seeded-counter traffic-floor matrix and supplemental negative-rank/shared-client checks passed. This fix is absent from published v4.0.0-beta.1..beta.8; the v3 release renderer also lacks the current REALITY ML-KEM adaptation. Keep the published 3.7.0 ceiling unchanged rather than applying current-source evidence to unpatched binaries. Numeric manifest matching does not distinguish v4.0.0 prereleases. See docs/3xui-compat.md for the verification scope and upgrade advisory. Initial v4 range inherits the existing v3.9.2-line adapter contract, not a new live-panel run of the v4 release binary. The compiled 3.4.2 floor remains necessary for POST /panel/api/server/scanRealityTargets; the 3.7.0 ceiling comes from the live PSP-adapter verification recorded in v3.json (shared-client, inbound, status and REALITY paths). Current source and request-shape tests retain that surface, including explicit panel-renewal-off fields and PSP-owned HWID limits. Register 3X-UI 3.7.0 with an admin-scoped API token; monitor/node-sync scopes do not cover PSP's API surface. Adopted hand-made finalmask inbounds may require re-saving after the upstream 3.6.0 migration. Panel/core upgrade endpoints were checked for route presence in the recorded verification, not executed. This manifest does not certify PN remote upgrades, traffic/quota end-to-end behaviour, or rollback of a migrated PSP database. Add a narrower entry first if a later v4 adapter changes its required contract."
@@ -14,8 +14,8 @@
   ],
   "sui_entries": [
     {
-      "psp_min": "v4.0.0",
-      "psp_max": "v4.99.99",
+      "psp_min": "4.0.0",
+      "psp_max": "4.99.99",
       "max_tested_sui": "1.6.3",
       "notes": "S-UI 1.6.3 live adapter verification (2026-09-16 UTC) used PSP main at 2440112 against tag 13abbdc4 and sing-box 1.14.1 on darwin/arm64, upgrading the existing 1.6.2 scratch database. TestLive_SUISurface passed: Token authentication, status, inbound/client read-write and cleanup remained compatible. Source review found only additive session endpoints and Snell multi-user support on the PSP-facing API; the reset-traffic fix is internal to S-UI. No production adapter changes were required. This does not certify full proxy traffic/quota enforcement or every historical PSP beta binary. No minimum S-UI version or additional optional capability is published."
     }

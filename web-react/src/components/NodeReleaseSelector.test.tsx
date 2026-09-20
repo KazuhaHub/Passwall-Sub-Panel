@@ -6,6 +6,7 @@ import { api, installReads, mount } from '@/test/adminSaveHarness'
 import type { NodeRelease, NodeReleaseCatalog, NodeReleaseChannel } from '@/api/nodeReleases'
 import type { NativeInstallationSelection } from '@/api/servers'
 import NodeReleaseSelector from './NodeReleaseSelector'
+import { releaseTag } from '@/utils/productVersion'
 
 const endpoint = '/admin/servers/node-releases'
 const linux: NativeInstallationSelection = { method: 'linux', os: 'linux', arch: 'amd64' }
@@ -15,13 +16,13 @@ const platforms: NodeRelease['platforms'] = [
   { os: 'windows', arch: 'amd64' }, { os: 'windows', arch: 'arm64' },
 ]
 const stable: NodeRelease = {
-  version: 'v1.2.3', channel: 'stable', published_at: '2026-09-12T12:36:16Z',
-  release_url: 'https://github.com/KazuhaHub/Passwall-Node/releases/tag/v1.2.3',
+  version: '4.1.0', channel: 'stable', published_at: '2026-09-12T12:36:16Z',
+  release_url: 'https://github.com/KazuhaHub/Passwall-Node/releases/tag/release/4.1.0',
   notes: 'Reviewed protocol compatibility; install exactly this tag.', methods: ['linux', 'docker', 'manual'], platforms,
 }
 const testing: NodeRelease = {
-  ...stable, version: 'v1.2.4-beta.1', channel: 'testing',
-  release_url: 'https://github.com/KazuhaHub/Passwall-Node/releases/tag/v1.2.4-beta.1',
+  ...stable, version: '4.1.1', channel: 'testing',
+  release_url: 'https://github.com/KazuhaHub/Passwall-Node/releases/tag/release/4.1.1',
 }
 
 function reads(releases: NodeRelease[]) {
@@ -259,40 +260,41 @@ describe('the empty state answers the question that was asked', () => {
 describe('the upgrade list offers only targets that are actually ahead', () => {
   const beta = (version: string): NodeRelease => ({
     ...testing, version,
-    release_url: `https://github.com/KazuhaHub/Passwall-Node/releases/tag/${version}`,
+    release_url: `https://github.com/KazuhaHub/Passwall-Node/releases/tag/${releaseTag(version)}`,
   })
 
   it('excludes the node’s own version and everything older', async () => {
-    reads([beta('v0.0.1-beta9'), beta('v0.0.1-beta10'), beta('v0.0.1-beta11')])
+    reads([beta('4.0.6'), beta('4.1.0'), beta('4.1.1')])
     mount(<NodeReleaseSelector enabled selection={linux} value="" onChange={() => {}}
-      initialChannel="testing" newerThan="v0.0.1-beta10" />)
+      initialChannel="testing" newerThan="4.1.0" />)
     const field = screen.getByRole('combobox', { name: 'admin:servers.native.agent_version' })
     // The field is disabled until the catalog resolves, so opening it before
     // then opens nothing — wait for it to become usable first.
     await waitFor(() => expect(field.getAttribute('aria-disabled')).not.toBe('true'))
     fireEvent.mouseDown(field)
-    await screen.findByRole('option', { name: 'v0.0.1-beta11' })
-    expect(screen.queryByRole('option', { name: 'v0.0.1-beta10' })).toBeNull()
-    expect(screen.queryByRole('option', { name: 'v0.0.1-beta9' })).toBeNull()
+    await screen.findByRole('option', { name: '4.1.1' })
+    expect(screen.queryByRole('option', { name: '4.1.0' })).toBeNull()
+    expect(screen.queryByRole('option', { name: '4.0.6' })).toBeNull()
   })
 
-  it('ranks the dotless prereleases the way the project publishes them', async () => {
-    // SemVer ranks beta11 BELOW beta9 on the trailing character. With that rule
-    // this list would be empty and the node would be told it is up to date.
-    reads([beta('v0.0.1-beta11')])
+  it('ranks a release above the node it is ahead of', async () => {
+    // The comparison is the project's own, on parsed versions: a string ordering
+    // is what puts 4.0.10 below 4.0.9, and a node ahead of its own upgrade would
+    // be told it is up to date.
+    reads([beta('4.1.1')])
     mount(<NodeReleaseSelector enabled selection={linux} value="" onChange={() => {}}
-      initialChannel="testing" newerThan="v0.0.1-beta9" />)
+      initialChannel="testing" newerThan="4.0.6" />)
     const field = screen.getByRole('combobox', { name: 'admin:servers.native.agent_version' })
     await waitFor(() => expect(field.getAttribute('aria-disabled')).not.toBe('true'))
     fireEvent.mouseDown(field)
-    expect(await screen.findByRole('option', { name: 'v0.0.1-beta11' })).toBeTruthy()
+    expect(await screen.findByRole('option', { name: '4.1.1' })).toBeTruthy()
   })
 
   it('offers nothing when the list has nothing ahead of the node', async () => {
-    reads([beta('v0.0.1-beta9')])
+    reads([beta('4.0.6')])
     mount(<NodeReleaseSelector enabled selection={linux} value="" onChange={() => {}}
-      initialChannel="testing" newerThan="v0.0.1-beta9" />)
-    await waitFor(() => expect(screen.queryByRole('option', { name: 'v0.0.1-beta9' })).toBeNull())
+      initialChannel="testing" newerThan="4.0.6" />)
+    await waitFor(() => expect(screen.queryByRole('option', { name: '4.0.6' })).toBeNull())
   })
 })
 
@@ -303,23 +305,23 @@ describe('an explicit target list wins over being merely newer', () => {
   it('offers only the versions the instance named', async () => {
     const beta = (version: string): NodeRelease => ({
       ...testing, version,
-      release_url: `https://github.com/KazuhaHub/Passwall-Node/releases/tag/${version}`,
+      release_url: `https://github.com/KazuhaHub/Passwall-Node/releases/tag/${releaseTag(version)}`,
     })
-    reads([beta('v0.0.1-beta10'), beta('v0.0.1-beta11'), beta('v0.0.1-beta12')])
+    reads([beta('4.1.0'), beta('4.1.1'), beta('4.2.0')])
     mount(<NodeReleaseSelector enabled selection={linux} value="" onChange={() => {}}
-      initialChannel="testing" newerThan="v0.0.1-beta9" targets={['v0.0.1-beta11']} />)
+      initialChannel="testing" newerThan="4.0.6" targets={['4.1.1']} />)
     const field = screen.getByRole('combobox', { name: 'admin:servers.native.agent_version' })
     await waitFor(() => expect(field.getAttribute('aria-disabled')).not.toBe('true'))
     fireEvent.mouseDown(field)
-    expect(await screen.findByRole('option', { name: 'v0.0.1-beta11' })).toBeTruthy()
+    expect(await screen.findByRole('option', { name: '4.1.1' })).toBeTruthy()
     // Ahead, but nobody walked a path to it.
-    expect(screen.queryByRole('option', { name: 'v0.0.1-beta12' })).toBeNull()
-    expect(screen.queryByRole('option', { name: 'v0.0.1-beta10' })).toBeNull()
+    expect(screen.queryByRole('option', { name: '4.2.0' })).toBeNull()
+    expect(screen.queryByRole('option', { name: '4.1.0' })).toBeNull()
   })
 
   it('offers nothing when the instance names no reachable target', async () => {
-    reads([{ ...testing, version: 'v0.0.1-beta11',
-      release_url: 'https://github.com/KazuhaHub/Passwall-Node/releases/tag/v0.0.1-beta11' }])
+    reads([{ ...testing, version: '4.1.1',
+      release_url: 'https://github.com/KazuhaHub/Passwall-Node/releases/tag/4.1.1' }])
     mount(<NodeReleaseSelector enabled selection={linux} value="" onChange={() => {}}
       initialChannel="testing" targets={[]} />)
     // An empty list is the honest answer here: nothing the instance will accept.

@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { test } from 'node:test'
+import { after, test } from 'node:test'
 
 // ---------------------------------------------------------------------------
 // The gate over every compatibility case. A per-case validator (R02) says
@@ -21,11 +21,32 @@ import { test } from 'node:test'
 const CHECKER = fileURLToPath(new URL('check-case-set.mjs', import.meta.url))
 const MANIFEST = fileURLToPath(new URL('../../docs/compat/node-v4.json', import.meta.url))
 
-// The versions the panel still supports, matched by POSITION at min_supported —
-// never by comparing version strings, because v0.0.1-beta11 sorts below
-// v0.0.1-beta9.
-function supportedVersions() {
+// A TWO-RELEASE MANIFEST, BECAUSE MOST OF THESE CASES ARE ABOUT A SET.
+//
+// The shipped manifest carries one release — the products publish one, and there
+// is no deployment whose set has to stay covered while it is narrowed — and a set
+// of one cannot show a dropped leg, a failed report, an unreadable one, or a
+// narrowed floor: every one of those cases needs a case that SURVIVES it. So the
+// gate is driven against the shipped manifest plus a release, and what the cases
+// below exercise is the gate rather than the file.
+const EXTRA_RELEASES = ['4.0.1', '4.0.2', '4.0.3']
+const manifestDir = mkdtempSync(join(tmpdir(), 'psp-manifest-'))
+const MANIFEST_TWO = join(manifestDir, 'node-v4.json')
+after(() => rmSync(manifestDir, { recursive: true, force: true }))
+
+function twoReleaseManifest() {
   const manifest = JSON.parse(readFileSync(MANIFEST, 'utf8'))
+  manifest.released_nodes = [
+    ...manifest.released_nodes,
+    ...EXTRA_RELEASES.map((version) => ({ version, protocol_version: 1, base_sync: 'supported', remote_upgrade: 'conditional' }))
+  ]
+  return manifest
+}
+writeFileSync(MANIFEST_TWO, JSON.stringify(twoReleaseManifest()))
+
+// The versions the panel still supports, matched by POSITION at min_supported.
+function supportedVersions(path = MANIFEST_TWO) {
+  const manifest = JSON.parse(readFileSync(path, 'utf8'))
   const names = manifest.released_nodes.map((row) => row.version)
   return names.slice(names.indexOf(manifest.min_supported))
 }
@@ -41,7 +62,8 @@ function writeCase(root, id, { verdict = 'pass', raw } = {}) {
   writeFileSync(join(dir, 'environment.json'), JSON.stringify({ psp_sha: 'x', node_sha: 'y' }))
 }
 
-function check(build, { extraArgs = [] } = {}) {
+function check(build, { extraArgs: given = [] } = {}) {
+  let extraArgs = [...given]
   const dir = mkdtempSync(join(tmpdir(), 'psp-caseset-'))
   try {
     const reports = join(dir, 'evidence')
@@ -50,6 +72,7 @@ function check(build, { extraArgs = [] } = {}) {
     const output = join(dir, 'case-set.json')
     let code = 0
     try {
+      if (!extraArgs.includes('--manifest')) extraArgs = [...extraArgs, '--manifest', MANIFEST_TWO]
       execFileSync(process.execPath, [CHECKER, '--reports', reports, '--output', output, ...extraArgs], { stdio: 'pipe' })
     } catch (err) {
       code = err.status ?? 1
@@ -132,20 +155,20 @@ test('reports for cases nobody asked about are recorded', () => {
   // a name that drifted between the matrix and the profile shows up here first.
   const { code, result } = check((reports) => {
     everyCase(reports)
-    writeCase(reports, 'node-wire-v1@v9.9.9')
+    writeCase(reports, 'node-wire-v1@9.9.9')
   })
   assert.equal(code, 0)
-  assert.deepEqual(result.unexpected, ['node-wire-v1@v9.9.9'])
+  assert.deepEqual(result.unexpected, ['node-wire-v1@9.9.9'])
 })
 
 test('a shortened version list narrows the expected set rather than being ignored', () => {
   // The floor is the single source for which versions are still covered; the
   // gate must follow it, or a floor move would leave the gate demanding reports
   // for versions the matrix no longer runs.
-  const manifest = JSON.parse(readFileSync(MANIFEST, 'utf8'))
+  const manifest = JSON.parse(readFileSync(MANIFEST_TWO, 'utf8'))
   const trimmed = join(mkdtempSync(join(tmpdir(), 'psp-manifest-')), 'node-v4.json')
-  writeFileSync(trimmed, JSON.stringify({ ...manifest, min_supported: 'v0.0.1-beta9' }))
+  writeFileSync(trimmed, JSON.stringify({ ...manifest, min_supported: EXTRA_RELEASES.at(-1) }))
   const { code, result } = check(everyCase, { extraArgs: ['--manifest', trimmed] })
   assert.equal(code, 0)
-  assert.deepEqual(result.expected, ['node-wire-v1@v0.0.1-beta9', 'node-wire-v1@v0.0.1-beta10', 'node-wire-v1@v0.0.1-beta11'])
+  assert.deepEqual(result.expected, [`node-wire-v1@${EXTRA_RELEASES.at(-1)}`])
 })

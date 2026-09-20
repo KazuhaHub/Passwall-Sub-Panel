@@ -35,12 +35,18 @@ test('the release workflow triggers on both tag schemes', () => {
     if (!/^      - /.test(line)) break
     patterns.push(line.replace(/^\s*- /, '').replace(/^["']|["']$/g, ''))
   }
-  for (const required of ['v*', 'release/*']) {
-    assert(
-      patterns.includes(required),
-      `the release workflow does not trigger on ${required} (found ${patterns.join(', ')}). A tag the workflow does not trigger on is a release that does not happen: no red run, no artifact, and a tag that names nothing.`,
-    )
-  }
+  // AND THE HISTORICAL TRIGGER IS REFUSED, which is the half that reversed when
+  // the scheme was removed. A workflow that still triggers on a v-prefixed tag is
+  // a way to cut a release the panel cannot read: it would publish artifacts and
+  // a release document for a name nothing on the reading side accepts.
+  assert(
+    !patterns.includes('v*'),
+    `the release workflow still triggers on a v-prefixed tag (found ${patterns.join(', ')}). The scheme is gone; a tag it does trigger on is a release it will publish.`,
+  )
+  assert(
+    patterns.includes('release/*'),
+    `the release workflow does not trigger on release/* (found ${patterns.join(', ')}). A tag the workflow does not trigger on is a release that does not happen: no red run, no artifact, and a tag that names nothing.`,
+  )
 })
 
 // THE TAG AND THE VERSION ARE TWO IDENTITIES, and in the legacy scheme they are

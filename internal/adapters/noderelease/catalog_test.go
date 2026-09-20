@@ -8,7 +8,6 @@ import (
 	"io"
 	"net/http"
 	"reflect"
-	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -19,7 +18,7 @@ import (
 	versionpkg "github.com/KazuhaHub/passwall-sub-panel/internal/version"
 )
 
-const fixtureVersion = "v0.0.1-beta3"
+const fixtureVersion = "4.0.0"
 
 var fixturePlatforms = []ports.NodeReleasePlatform{
 	{OS: "linux", Arch: "amd64"},
@@ -94,35 +93,27 @@ var fixtureProductPrerelease = map[string]bool{
 	"release/4.0.0": true,
 }
 
+// fixturePrerelease states what a fixture release was PUBLISHED as. It used to
+// fall back to the hyphen for a tag outside the namespace, because a legacy tag
+// spelled its channel in its text; there are no such tags any more, and a tag
+// that is not in the namespace is not a release this project publishes.
 func fixturePrerelease(tag string) bool {
-	if strings.HasPrefix(tag, versionpkg.ProductTagNamespace) {
-		return fixtureProductPrerelease[tag]
-	}
-	return strings.Contains(tag, "-")
+	return fixtureProductPrerelease[tag]
 }
 
 // realPublicationTimes are the instants these releases actually went out on
 // GitHub. The registry test stamps releases with them, because ordering by
-// anything derived from the version string is the defect this file guards:
-// v0.0.1-beta11 sorts BELOW v0.0.1-beta9, so a version-derived order files the
-// newest release seventh and labels the seventh as recommended.
+// anything derived from the version string is the defect this file guards — and
+// the table exists to hold a time that is NOT the order a version sort would
+// produce.
 //
-// Every other fixture deliberately keeps ONE shared timestamp, so the semver
-// tie-break that applies to genuinely simultaneous releases stays under test.
+// IT HAS ONE ENTRY NOW, WHICH IS A LIMITATION RATHER THAN A DESIGN. It used to
+// hold the whole v0.0.1-beta line, whose publication order and version order
+// genuinely disagreed (beta11 sorts below beta9 as text). Integer versions sort
+// the way they were published, so the disagreement has to be CONSTRUCTED by a
+// case that wants to observe it; the cases below do that with their own
+// releases rather than by reading this table.
 var realPublicationTimes = map[string]time.Time{
-	"v0.0.1-beta3":  time.Date(2026, 9, 12, 12, 36, 16, 0, time.UTC),
-	"v0.0.1-beta4":  time.Date(2026, 9, 13, 4, 58, 3, 0, time.UTC),
-	"v0.0.1-beta6":  time.Date(2026, 9, 17, 2, 24, 43, 0, time.UTC),
-	"v0.0.1-beta7":  time.Date(2026, 9, 17, 3, 38, 27, 0, time.UTC),
-	"v0.0.1-beta8":  time.Date(2026, 9, 17, 7, 19, 57, 0, time.UTC),
-	"v0.0.1-beta9":  time.Date(2026, 9, 17, 8, 10, 41, 0, time.UTC),
-	"v0.0.1-beta10": time.Date(2026, 9, 18, 9, 37, 2, 0, time.UTC),
-	"v0.0.1-beta11": time.Date(2026, 9, 18, 10, 31, 27, 0, time.UTC),
-	// The two the migration added: the last legacy release, and the first under
-	// the product scheme. KEYED BY TAG, which is what withRealPublicationTime looks
-	// up — the two are one string for a legacy release and are not for a product
-	// one, so `release/4.0.0` is the key and `4.0.0` is not.
-	"v0.0.1-beta12": time.Date(2026, 9, 20, 7, 8, 15, 0, time.UTC),
 	"release/4.0.0": time.Date(2026, 9, 20, 9, 1, 33, 0, time.UTC),
 }
 
@@ -206,18 +197,22 @@ func TestPSPMajorForVersionBindsStampedCompatibility(t *testing.T) {
 		major   int
 	}{
 		{"dev", 4},
-		// The legacy scheme, still stamped by every build in the field.
-		{"v4.0.0-beta.2", 4},
-		{"v4.0.0", 4},
-		{"v3.9.2-beta.20", 3},
-		{"v5.0.0-beta.1", 5},
-		{"v102.1.0", 102},
-		// The product scheme: three or four integers, no prefix.
+		// The single scheme: three or four integers, no prefix.
 		{"4.0.0", 4},
 		{"4.0.0.1", 4},
 		{"102.1.0", 102},
 		// Refusals. A stamp that is not canonical must not inherit reviewed
 		// compatibility, and must not be repaired into something that does.
+		//
+		// THE LEGACY STAMPS ARE HERE NOW. Every build in the field used to be one
+		// of these, and this table asserted they carried their major; the scheme
+		// is gone, so a build stamped that way names no release line this catalog
+		// can bind compatibility to.
+		{"v4.0.0-beta.2", 0},
+		{"v4.0.0", 0},
+		{"v3.9.2-beta.20", 0},
+		{"v5.0.0-beta.1", 0},
+		{"v102.1.0", 0},
 		{"v0.1.0", 0},
 		{"", 0},
 		{"latest", 0},
@@ -274,7 +269,7 @@ func TestNewUsesOnlyReviewedMajorAndDoesNotFetch(t *testing.T) {
 			for i, reviewed := range catalog.reviewed {
 				versions[i] = reviewed.Version
 			}
-			if !reflect.DeepEqual(versions, []string{fixtureVersion, "v0.0.1-beta4", "v0.0.1-beta6", "v0.0.1-beta7", "v0.0.1-beta8", "v0.0.1-beta9", "v0.0.1-beta10", "v0.0.1-beta11", "v0.0.1-beta12", "4.0.0"}) {
+			if !reflect.DeepEqual(versions, []string{fixtureVersion}) {
 				t.Fatalf("unexpected current registry: %+v", catalog.reviewed)
 			}
 			continue
@@ -290,85 +285,88 @@ func TestNewUsesOnlyReviewedMajorAndDoesNotFetch(t *testing.T) {
 	}
 }
 
-// reviewedVersions is the reviewed registry in file order, and
-// reviewedNewestPublishedFirst is the order the catalog must present it in.
+// THE CATALOG PRESENTS RELEASES BY PUBLICATION, NOT BY VERSION, AND THAT NEEDS
+// TWO RELEASES TO OBSERVE.
 //
-// Declared once because two different properties are worth pinning and neither
-// is worth restating per release: the catalog may touch EXACTLY these versions,
-// and it must present them by publication. The second is not the first reversed
-// — beta11 was published after beta9 while sorting below it, which is the whole
-// reason the ordering fix exists. The two lists differ on purpose for that one
-// pair; anywhere else a difference between them is a bug.
-var (
-	reviewedVersions = []string{
-		fixtureVersion, "v0.0.1-beta4", "v0.0.1-beta6", "v0.0.1-beta7",
-		"v0.0.1-beta8", "v0.0.1-beta9", "v0.0.1-beta10", "v0.0.1-beta11",
-		"v0.0.1-beta12", "4.0.0",
+// It used to read the disagreement off the reviewed registry, where beta11 was
+// published after beta9 and sorts below it as text. The registry carries one
+// release now — the products publish one — so there is no disagreement in it to
+// find, and integer versions sort the way they were published anyway. The case
+// therefore CONSTRUCTS the arrangement a version sort would get wrong: two
+// releases whose publication times are the reverse of their versions.
+//
+// The other property it keeps is that the catalog touches EXACTLY the releases
+// the registry names: a release added to the file must be fetched, and nothing
+// else may be.
+func TestCatalogListsByPublicationNotByVersion(t *testing.T) {
+	const (
+		lower  = "4.0.1" // the HIGHER publication time
+		higher = "4.0.2" // published EARLIER, so it must come second
+	)
+	publishedAt := func(version string) time.Time {
+		if version == lower {
+			return fixtureNow.Add(-time.Hour)
+		}
+		return fixtureNow.Add(-48 * time.Hour)
 	}
-	reviewedNewestPublishedFirst = []string{
-		"4.0.0", "v0.0.1-beta12",
-		"v0.0.1-beta11", "v0.0.1-beta10", "v0.0.1-beta9", "v0.0.1-beta8",
-		"v0.0.1-beta7", "v0.0.1-beta6", "v0.0.1-beta4", fixtureVersion,
+	// Shaped like a real reviewed entry: all six platforms uploaded, all three
+	// methods offered. A partial entry is dropped by the catalog rather than
+	// presented — which is a property of its own, asserted elsewhere.
+	reviewed := []reviewedRelease{
+		{Version: higher, PSPMajor: 4, Notes: "reviewed: the older publication",
+			Methods: []string{"linux", "docker", "manual"}, Platforms: fixturePlatforms, DockerPublishedTag: higher},
+		{Version: lower, PSPMajor: 4, Notes: "reviewed: the newer publication",
+			Methods: []string{"linux", "docker", "manual"}, Platforms: fixturePlatforms, DockerPublishedTag: lower},
 	}
-)
-
-func TestCatalogFullReviewedRegistryRetainsReviewedReleasesAndListsNewestFirst(t *testing.T) {
 	var requested []string
 	catalog, err := New(Options{
 		HTTPClient: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 			tag, ok := strings.CutPrefix(req.URL.String(), "https://api.github.com/repos/KazuhaHub/Passwall-Node/releases/tags/")
-			// THE URL CARRIES THE TAG AND THE REGISTRY HOLDS VERSIONS. The two are
-			// one string in the legacy scheme, which is why this compared them
-			// directly; a product release is addressed as release/4.0.0 and named
-			// 4.0.0, so the fixture makes the same mapping the catalog does — by
-			// asking the same function rather than by restating the rule.
+			// THE URL CARRIES THE TAG AND THE REGISTRY HOLDS VERSIONS. The fixture
+			// makes the same mapping the catalog does, by asking the same function
+			// rather than by restating the rule.
 			version, identified := versionpkg.VersionOfReleaseTag(tag)
-			if !ok || !identified || !slices.Contains(reviewedVersions, version) {
+			if !ok || !identified || (version != lower && version != higher) {
 				t.Fatalf("registry requested an unreviewed endpoint: %s", req.URL)
 			}
 			requested = append(requested, version)
-			return fixtureResponse(req, http.StatusOK, fixtureBody(t, withRealPublicationTime(fixtureRelease(version)))), nil
+			release := fixtureRelease(version)
+			published := publishedAt(version)
+			release.PublishedAt = &published
+			release.Prerelease = true // published as a candidate, like every release so far
+			return fixtureResponse(req, http.StatusOK, fixtureBody(t, release)), nil
 		})},
 		Now: func() time.Time { return fixtureNow }, PSPMajor: 4,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The registry is the catalog's, and the shipped one carries a single release;
+	// this case says which releases it is asking about.
+	catalog.reviewed = reviewed
+
 	list, err := catalog.List(context.Background())
-	if err != nil || !reflect.DeepEqual(requested, reviewedVersions) || len(list.Releases) != len(reviewedVersions) || !list.CheckedAt.Equal(fixtureNow) {
-		t.Fatalf("full registry requests=%v list=%+v err=%v", requested, list, err)
+	if err != nil || len(list.Releases) != 2 || !list.CheckedAt.Equal(fixtureNow) {
+		t.Fatalf("list=%+v err=%v", list, err)
 	}
-	for i, version := range reviewedNewestPublishedFirst {
-		entry := list.Releases[i]
-		// THE IDENTITY SPLIT IS ASSERTED PER SCHEME, because the two schemes answer
-		// it differently: a legacy release has NO product version and its tag is its
-		// version, while a product release has one and is addressed under the
-		// namespace. Asserting the legacy shape for every entry made this loop wrong
-		// the moment a product release entered the registry — which is the point of
-		// the field being explicit rather than inferred from the string.
-		wantTag := version
-		if entry.Scheme == "product" {
-			wantTag = versionpkg.ProductTagNamespace + version
-			if entry.ProductVersion != version {
-				t.Fatalf("product identity split wrong: scheme=%q tag=%q product_version=%q", entry.Scheme, entry.ReleaseTag, entry.ProductVersion)
-			}
-		} else if entry.Scheme != "legacy" || entry.ProductVersion != "" {
-			t.Fatalf("legacy identity split wrong: scheme=%q tag=%q product_version=%q", entry.Scheme, entry.ReleaseTag, entry.ProductVersion)
-		}
-		if entry.ReleaseTag != wantTag {
-			t.Fatalf("release %q is addressed as %q, want %q", version, entry.ReleaseTag, wantTag)
-		}
-		if entry.Version != version || entry.Channel != "testing" || entry.ReleaseURL != "https://github.com/KazuhaHub/Passwall-Node/releases/tag/"+wantTag ||
-			!reflect.DeepEqual(entry.Methods, []string{"linux", "docker", "manual"}) || !reflect.DeepEqual(entry.Platforms, fixturePlatforms) {
-			t.Fatalf("full registry did not retain exact reviewed installation availability: %+v", entry)
-		}
+	if !reflect.DeepEqual(requested, []string{higher, lower}) {
+		t.Fatalf("the catalog did not fetch exactly the reviewed releases: %v", requested)
 	}
-	// Located by VERSION, not by index: an index would have to be re-derived
-	// every time a release is added, and being wrong about it would silently
-	// assert the notes of a different release.
+	if list.Releases[0].Version != lower || list.Releases[1].Version != higher {
+		t.Fatalf("presented %s then %s, want the newer PUBLICATION first",
+			list.Releases[0].Version, list.Releases[1].Version)
+	}
+	// AND THE IDENTITY SPLIT IS THE SAME FOR EVERY ENTRY, which is what one scheme
+	// means: the tag is the namespace plus the version, and the product version is
+	// the version.
 	for _, entry := range list.Releases {
-		if entry.Version == "v0.0.1-beta4" && !strings.Contains(entry.Notes, "startup does not prove PSP sync, core or proxy readiness") {
-			t.Fatal("beta4 review lost the startup-only limitation")
+		if entry.Scheme != "product" || entry.ProductVersion != entry.Version ||
+			entry.ReleaseTag != versionpkg.ProductTagNamespace+entry.Version ||
+			entry.ReleaseURL != "https://github.com/KazuhaHub/Passwall-Node/releases/tag/"+entry.ReleaseTag {
+			t.Fatalf("identity split wrong: %+v", entry)
+		}
+		if entry.Channel != "testing" {
+			t.Fatalf("channel lost: %+v", entry)
 		}
 	}
 }
@@ -379,7 +377,7 @@ func TestCatalogPublishedOfficialReleaseAndTrustedReviewMetadata(t *testing.T) {
 	var calls int
 	catalog := fixtureCatalog(t, func(req *http.Request) (*http.Response, error) {
 		calls++
-		if req.Method != http.MethodGet || req.URL.String() != "https://api.github.com/repos/KazuhaHub/Passwall-Node/releases/tags/v0.0.1-beta3" {
+		if req.Method != http.MethodGet || req.URL.String() != "https://api.github.com/repos/KazuhaHub/Passwall-Node/releases/tags/release/4.0.0" {
 			t.Errorf("unexpected official request: %s %s", req.Method, req.URL)
 		}
 		if req.Header.Get("Accept") != "application/vnd.github+json" || req.Header.Get("X-GitHub-Api-Version") == "" || req.Header.Get("User-Agent") == "" {
@@ -520,7 +518,13 @@ func TestCatalogRejectsPublishedReleaseIdentityMismatch(t *testing.T) {
 		mutate func(*githubRelease)
 	}{
 		{"wrong exact tag", func(r *githubRelease) { r.TagName = "v0.0.1-beta2" }},
-		{"beta advertised stable", func(r *githubRelease) { r.Prerelease = false }},
+		// "a pre-release advertised as stable" used to be here, and it set
+		// Prerelease false on a v-prefixed beta tag: the tag spelled the channel,
+		// so the two could disagree. A product tag spells no channel — that is the
+		// whole reason a candidate is a publication rather than a suffix — so the
+		// flag IS the channel and there is nothing for it to contradict. A wrong
+		// channel is a wrong publication, which this catalog is not in a position
+		// to detect and does not claim to.
 		{"wrong release owner", func(r *githubRelease) {
 			r.HTMLURL = "https://github.com/attacker/Passwall-Node/releases/tag/" + fixtureVersion
 		}},
@@ -604,10 +608,17 @@ func TestCatalogRejectsDuplicateAssetNames(t *testing.T) {
 }
 
 func TestCatalogOnlyExplicitReviewedReleasesAndSortsExactVersions(t *testing.T) {
-	versions := []string{fixtureVersion, "v0.0.1", "v0.0.2-beta.1"}
+	versions := []string{fixtureVersion, "4.0.0.1", "4.1.0"}
 	var requested []string
 	catalog := fixtureCatalog(t, func(req *http.Request) (*http.Response, error) {
-		version := strings.TrimPrefix(req.URL.String(), "https://api.github.com/repos/KazuhaHub/Passwall-Node/releases/tags/")
+		// THE URL CARRIES THE TAG AND THE RECORD HOLDS THE VERSION. Reading the
+		// path segment as the version is the swap this whole file is about: it
+		// would build a fixture release named `release/4.0.0`.
+		tag := strings.TrimPrefix(req.URL.String(), "https://api.github.com/repos/KazuhaHub/Passwall-Node/releases/tags/")
+		version, identified := versionpkg.VersionOfReleaseTag(tag)
+		if !identified {
+			t.Fatalf("the catalog asked for a tag this project does not publish: %s", tag)
+		}
 		requested = append(requested, version)
 		return fixtureResponse(req, http.StatusOK, fixtureBody(t, fixtureRelease(version))), nil
 	}, nil)
@@ -621,14 +632,22 @@ func TestCatalogOnlyExplicitReviewedReleasesAndSortsExactVersions(t *testing.T) 
 	if err != nil || len(list.Releases) != 3 || !reflect.DeepEqual(requested, versions) {
 		t.Fatalf("requests=%v list=%+v err=%v", requested, list, err)
 	}
-	wanted := []string{"v0.0.2-beta.1", "v0.0.1", fixtureVersion}
+	wanted := []string{"4.1.0", "4.0.0.1", fixtureVersion}
 	for i, version := range wanted {
 		if list.Releases[i].Version != version {
 			t.Fatalf("catalog is not semver descending: %+v", list)
 		}
 	}
-	if list.Releases[1].Channel != "stable" || list.Releases[0].Channel != "testing" {
-		t.Fatalf("stable/testing channels were inferred incorrectly: %+v", list)
+	// CHANNELS COME FROM THE RELEASE, NOT FROM THE TEXT, so they are read by
+	// version rather than by position: the shipped release is published as a
+	// pre-release and the two added here as released, and nothing about their
+	// version strings says either.
+	channels := make(map[string]string, len(list.Releases))
+	for _, entry := range list.Releases {
+		channels[entry.Version] = entry.Channel
+	}
+	if channels[fixtureVersion] != "testing" || channels["4.0.0.1"] != "stable" || channels["4.1.0"] != "stable" {
+		t.Fatalf("stable/testing channels were inferred incorrectly: %v", channels)
 	}
 	// The curated methods remain an upper bound even if all public assets exist.
 	catalog = fixtureCatalog(t, func(req *http.Request) (*http.Response, error) {
@@ -927,30 +946,35 @@ func TestReviewedRegistryRejectsUnsafeOrUnverifiedRecords(t *testing.T) {
 	}
 }
 
-// A PRERELEASE SUFFIX IS NOT A NUMBER, and this is the test that would have
-// caught it before an operator noticed instead.
+// A TWO-DIGIT SEGMENT IS NOT TWO CHARACTERS, and this is the test that would have
+// caught it before an operator noticed.
 //
-// semver compares prerelease identifiers character by character, so
-// v0.0.1-beta11 ranks BELOW v0.0.1-beta9. Sorting "newest first" with it
-// therefore puts beta9 at the top and, once beta10 and beta11 were reviewed in,
-// would have filed them behind beta3 — while the UI marks index 0 as the
-// recommended version, so every operator would have been recommended the older
-// release. The fixtures never noticed because none of them had a two-digit
-// prerelease.
+// The pathology used to be spelled in a prerelease: semver compares identifiers
+// character by character, so v0.0.1-beta11 ranked BELOW v0.0.1-beta9, and sorting
+// "newest first" with it put the older release at the top of the list whose first
+// entry the UI marks as recommended. The scheme that could spell it that way is
+// gone, and the SEGMENT form is the same mistake: `4.0.10` against `4.0.9` as
+// text ranks the tenth patch below the ninth.
 //
 // RECENCY COMES FROM THE PUBLICATION TIME, which is the only axis a version
-// string cannot reinterpret.
-func TestCatalogOrdersByPublicationNotByPrereleaseNumber(t *testing.T) {
-	// Deliberately ascending in publication order while the version strings are
-	// not: beta9 shipped first, then beta10, then beta11.
-	released := []string{"v0.0.1-beta9", "v0.0.1-beta10", "v0.0.1-beta11"}
+// string cannot reinterpret — and the versions here are the ones a text
+// comparison would invert.
+func TestCatalogOrdersByPublicationNotByVersionText(t *testing.T) {
+	// Deliberately ascending in publication order, with a segment whose text and
+	// numeric order disagree.
+	released := []string{"4.0.9", "4.0.10", "4.0.11"}
 	published := make(map[string]time.Time, len(released))
 	base := fixtureNow.Add(-time.Duration(len(released)) * time.Hour)
 	for index, version := range released {
 		published[version] = base.Add(time.Duration(index) * time.Hour)
 	}
 	catalog := fixtureCatalog(t, func(req *http.Request) (*http.Response, error) {
-		version := strings.TrimPrefix(req.URL.String(), "https://api.github.com/repos/KazuhaHub/Passwall-Node/releases/tags/")
+		// THE URL CARRIES THE TAG; the fixture release is named by the version.
+		tag := strings.TrimPrefix(req.URL.String(), "https://api.github.com/repos/KazuhaHub/Passwall-Node/releases/tags/")
+		version, identified := versionpkg.VersionOfReleaseTag(tag)
+		if !identified {
+			t.Fatalf("the catalog asked for a tag this project does not publish: %s", tag)
+		}
 		release := fixtureRelease(version)
 		at := published[version]
 		release.PublishedAt = &at
@@ -973,11 +997,12 @@ func TestCatalogOrdersByPublicationNotByPrereleaseNumber(t *testing.T) {
 	for _, entry := range list.Releases {
 		got = append(got, entry.Version)
 	}
-	want := []string{"v0.0.1-beta11", "v0.0.1-beta10", "v0.0.1-beta9"}
+	want := []string{"4.0.11", "4.0.10", "4.0.9"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("catalog order = %v, want newest-published first %v", got, want)
 	}
 }
+
 
 // The agreement check between GitHub's prerelease flag and the tag text is a
 // LEGACY defence, and it is load-bearing there: an older beta cut before the

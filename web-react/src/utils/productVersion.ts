@@ -39,14 +39,14 @@ export interface ProductVersion {
   build: number
 }
 
-export type Scheme = 'product' | 'legacy'
+export type Scheme = 'product'
 
 export interface ReleaseTag {
   /** The exact tag as published. What goes in a URL and a git ref, never
    *  reconstructed from the parsed parts. */
   raw: string
   scheme: Scheme
-  /** Set only for the product scheme. */
+  /** The parsed version, present for every tag this parser accepts. */
   product?: ProductVersion
 }
 
@@ -111,14 +111,20 @@ export function formatProductVersion(v: ProductVersion): string {
  * Orders two product versions, -1 / 0 / +1.
  *
  * Segment by segment as integers: 102.1.10 is above 102.1.9, which any string
- * comparison gets backwards. Only product versions are comparable here; a legacy
- * tag has no place in this ordering.
+ * comparison gets backwards.
+ *
+ * THE BUILD SEGMENT IS PART OF THE ORDER, and it was not: comparing the first
+ * three segments made `4.0.0` and `4.0.0.1` equal here while the Go side ranked
+ * the rebuild above its base. A rebuild could then never be installed, because
+ * the node refuses a target that does not compare above its current version.
  */
+
 export function compareProductVersion(a: ProductVersion, b: ProductVersion): number {
   const pairs: Array<[number, number]> = [
     [a.major, b.major],
     [a.minor, b.minor],
     [a.patch, b.patch],
+    [a.build, b.build],
   ]
   for (const [left, right] of pairs) {
     if (left !== right) return left < right ? -1 : 1
@@ -129,43 +135,45 @@ export function compareProductVersion(a: ProductVersion, b: ProductVersion): num
 /**
  * Parses a release tag.
  *
- * "release/MAJOR.MINOR.PATCH[.BUILD]" is the current scheme, and the version part must
- * be three or four segments: a tag is a published identity, so the short forms
- * that are legal as parse input do not get releases of their own.
+ * "release/MAJOR.MINOR.PATCH[.BUILD]" is the form, and the version part must be
+ * three or four segments: a tag is a published identity, so the short forms that
+ * are legal as parse input do not get releases of their own.
  *
- * Anything beginning with "v" is a LEGACY tag, returned as such without its
- * version being interpreted. That matters for the v-prefixed numeric form:
- * "v102.1.0" is not a product version someone forgot to strip a letter from, it
- * is a legacy identity, and treating it as the former would grant a release
- * credit it has not earned.
+ * A v INSIDE THE NAMESPACE (release/v4.0.0) is refused: it would be read as a tag
+ * by one rule and a version by another, and the two readings differ about which
+ * release it names.
  */
 export function parseReleaseTag(raw: string): ReleaseTag {
-  if (raw.startsWith(TAG_PREFIX)) {
-    const body = raw.slice(TAG_PREFIX.length)
-    if (body.startsWith('v')) {
-      throw new ReleaseIdError(`releaseid: ${JSON.stringify(raw)} puts a v inside the product tag namespace`)
-    }
-    const dots = (body.match(/\./g) ?? []).length
-    if (dots !== 2 && dots !== 3) {
-      throw new ReleaseIdError(`releaseid: ${JSON.stringify(raw)} is a product tag, which is three or four segments`)
-    }
-    const product = parseProductVersion(body)
-    if (product.major === 0) {
-      throw new ReleaseIdError(`releaseid: ${JSON.stringify(raw)} has a zero release line, which is not a released identity`)
-    }
-    return { raw, scheme: 'product', product }
+  if (!raw.startsWith(TAG_PREFIX)) {
+    throw new ReleaseIdError(`releaseid: ${JSON.stringify(raw)} is not a ${TAG_PREFIX}MAJOR.MINOR.PATCH tag`)
   }
-  if (raw.startsWith('v')) {
-    // "Keep the old tag as it is" means do not REINTERPRET it — not accept
-    // anything starting with a v. A tag is an identity, and recognising a
-    // string that merely begins with v would put a value into the support
-    // matrix that no release ever published.
-    if (!/^v\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/.test(raw)) {
-      throw new ReleaseIdError(`releaseid: ${JSON.stringify(raw)} begins with v but is not a version`)
-    }
-    return { raw, scheme: 'legacy' }
+  const body = raw.slice(TAG_PREFIX.length)
+  if (body.startsWith('v')) {
+    throw new ReleaseIdError(`releaseid: ${JSON.stringify(raw)} puts a v inside the product tag namespace`)
   }
-  throw new ReleaseIdError(`releaseid: ${JSON.stringify(raw)} is neither ${TAG_PREFIX}MAJOR.MINOR.PATCH nor a legacy v-tag`)
+  const dots = (body.match(/\./g) ?? []).length
+  if (dots !== 2 && dots !== 3) {
+    throw new ReleaseIdError(`releaseid: ${JSON.stringify(raw)} is a product tag, which is three or four segments`)
+  }
+  const product = parseProductVersion(body)
+  if (product.major === 0) {
+    throw new ReleaseIdError(`releaseid: ${JSON.stringify(raw)} has a zero release line, which is not a released identity`)
+  }
+  return { raw, scheme: 'product', product }
+}
+
+/**
+ * Orders two release VERSION strings, -1 / 0 / +1.
+ *
+ * The typed comparator takes parsed versions; this takes what a catalog carries,
+ * which is a string. An unparseable input compares EQUAL, and the callers turn
+ * that into a refusal: a version that cannot be shown to be newer is not newer.
+ */
+export function compareReleaseVersion(a: string, b: string): number {
+  const left = canonicalReleaseVersion(a)
+  const right = canonicalReleaseVersion(b)
+  if (left === undefined || right === undefined) return 0
+  return compareProductVersion(parseProductVersion(left), parseProductVersion(right))
 }
 
 /**
@@ -183,123 +191,14 @@ export function resolveChannel(draft: boolean, prerelease: boolean): Channel | n
 }
 
 /**
- * Orders two historical v-prefixed tags, -1 / 0 / +1.
- *
- * A SEPARATE RULE from compareProductVersion, not the same rule with a flag. The
- * historical order is the project's release order, where v0.0.1-beta11 is above
- * v0.0.1-beta9 — the dotless prerelease form this project actually published,
- * which string comparison gets backwards.
- */
-export function compareLegacyTag(a: string, b: string): number {
-  const [leftCore, leftPre = ''] = stripPrefix(a).split('-', 2)
-  const [rightCore, rightPre = ''] = stripPrefix(b).split('-', 2)
-  const leftSegments = leftCore.split('.')
-  const rightSegments = rightCore.split('.')
-  for (let i = 0; i < leftSegments.length && i < rightSegments.length; i++) {
-    const c = compareNumericStrings(leftSegments[i], rightSegments[i])
-    if (c !== 0) return c
-  }
-  if (leftSegments.length !== rightSegments.length) {
-    return sign(leftSegments.length - rightSegments.length)
-  }
-  if (leftPre === rightPre) return 0
-  if (leftPre === '') return 1 // a release outranks its own prereleases
-  if (rightPre === '') return -1
-
-  const leftIds = leftPre.split('.')
-  const rightIds = rightPre.split('.')
-  for (let i = 0; i < leftIds.length && i < rightIds.length; i++) {
-    const leftNumeric = isAllDigits(leftIds[i])
-    const rightNumeric = isAllDigits(rightIds[i])
-    if (leftNumeric && rightNumeric) {
-      const c = compareNumericStrings(leftIds[i], rightIds[i])
-      if (c !== 0) return c
-      continue
-    }
-    if (leftNumeric !== rightNumeric) {
-      // A numeric identifier ranks below an alphanumeric one.
-      return leftNumeric ? -1 : 1
-    }
-    const c = comparePrereleaseIdentifier(leftIds[i], rightIds[i])
-    if (c !== 0) return c
-  }
-  return sign(leftIds.length - rightIds.length)
-}
-
-function stripPrefix(tag: string): string {
-  return tag.startsWith('v') ? tag.slice(1) : tag
-}
-
-/** The shared alphabetic prefix first, then the number after it as a number. */
-function comparePrereleaseIdentifier(a: string, b: string): number {
-  const { prefix: aPrefix, digits: aDigits } = splitTrailingDigits(a)
-  const { prefix: bPrefix, digits: bDigits } = splitTrailingDigits(b)
-  if (aPrefix !== bPrefix) return aPrefix < bPrefix ? -1 : 1
-  if (aDigits === '' || bDigits === '') {
-    // One has a numeric suffix the other lacks; whole-identifier comparison
-    // keeps "alpha" below "alpha1".
-    return a < b ? -1 : a > b ? 1 : 0
-  }
-  return compareNumericStrings(aDigits, bDigits)
-}
-
-function splitTrailingDigits(s: string): { prefix: string; digits: string } {
-  let i = s.length
-  while (i > 0 && s[i - 1] >= '0' && s[i - 1] <= '9') i--
-  return { prefix: s.slice(0, i), digits: s.slice(i) }
-}
-
-function isAllDigits(s: string): boolean {
-  return s !== '' && /^[0-9]+$/.test(s)
-}
-
-/** Length first, so a number too large for a double still compares correctly. */
-function compareNumericStrings(a: string, b: string): number {
-  if (a.length !== b.length) return sign(a.length - b.length)
-  return a < b ? -1 : a > b ? 1 : 0
-}
-
-function sign(n: number): number {
-  return n < 0 ? -1 : n > 0 ? 1 : 0
-}
-
-/**
- * The historical VERSION rule, which is stricter than the historical TAG rule
- * above, and deliberately so.
- *
- * The tag rule CLASSIFIES a published name and is permissive: a tag it wrongly
- * rejects is a release that can no longer be read. A version rule VALIDATES a
- * string a caller is about to act on, so it refuses what only looks close —
- * leading zeroes, a missing segment, build metadata, and a redundant leading
- * zero in a numeric prerelease identifier.
- */
-const LEGACY_VERSION_SHAPE = /^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$/
-
-function validLegacyVersion(value: string): boolean {
-  if (!LEGACY_VERSION_SHAPE.test(value)) return false
-  const dash = value.indexOf('-')
-  if (dash < 0) return true
-  return value
-    .slice(dash + 1)
-    .split('.')
-    .every(segment => !(segment.length > 1 && segment[0] === '0' && /^[0-9]+$/.test(segment)))
-}
-
-/**
- * The version a release is identified by, in either scheme — the string a daemon
- * is stamped with and the string the catalog carries. Undefined for anything
- * that is not a version in either scheme.
+ * The version a release is identified by — the string a daemon is stamped with
+ * and the string the catalog carries. Undefined for anything that is not one.
  *
  * A TAG IS NOT A VERSION and this returns undefined for one: `release/4.0.0` is
- * an address, `4.0.0` is the thing. A legacy version has no namespace of its
- * own, so it IS its own tag; a product version has one, which is what
- * tagForVersion adds.
+ * an address, `4.0.0` is the thing.
  */
 export function canonicalReleaseVersion(input: string): string | undefined {
   if (typeof input !== 'string' || input === '' || input.includes('+')) return undefined
-  if (input.startsWith('v')) {
-    return validLegacyVersion(input) ? input : undefined
-  }
   // Three or four segments, never fewer: a version is a published identity, and
   // the short forms parseProductVersion pads are input convenience, not
   // identities. The fourth is the optional BUILD component.
@@ -317,9 +216,8 @@ export function canonicalReleaseVersion(input: string): string | undefined {
 /**
  * The tag a version is published under.
  *
- * NOT ALWAYS THE VERSION. A legacy release is published under its version
- * unchanged; a product release is published under `release/` + its version,
- * because the namespace is what keeps a product tag from being mistaken for a Go
+ * NEVER THE VERSION ITSELF. A release is published under `release/` + its
+ * version, because the namespace is what keeps a tag from being mistaken for a Go
  * module version — it is part of the ADDRESS, not part of the version. A caller
  * that puts a version where a tag belongs asks for a release that does not
  * exist, and the 404 reads as "no such release" rather than "wrong identity".
@@ -327,7 +225,7 @@ export function canonicalReleaseVersion(input: string): string | undefined {
 export function tagForVersion(version: string): string | undefined {
   const canonical = canonicalReleaseVersion(version)
   if (canonical === undefined) return undefined
-  return canonical.startsWith('v') ? canonical : TAG_PREFIX + canonical
+  return TAG_PREFIX + canonical
 }
 
 /**
