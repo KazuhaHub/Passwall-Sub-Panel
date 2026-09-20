@@ -65,20 +65,6 @@ export function checkReleasesPolicy({ policy, nodeManifest, verification }) {
     }
   }
 
-  for (const edge of policy.upgrade_edges ?? []) {
-    for (const [end, version] of [['from', edge.from], ['to', edge.to]]) {
-      if (!known.has(version)) {
-        problems.push(`upgrade edge ${edge.from} -> ${edge.to}: ${end}=${version} is not a version node-v4.json lists`)
-      }
-    }
-    // A path to a target the policy does not offer leads nowhere: the edge would
-    // be published, reviewed and unreachable, which reads as "this upgrade is
-    // available" to anyone skimming the file.
-    if (edge.to && !offered.has(edge.to)) {
-      problems.push(`upgrade edge ${edge.from} -> ${edge.to} targets a release the policy does not offer`)
-    }
-  }
-
   for (const version of refused) {
     if (!known.has(version)) {
       problems.push(`refusal ${version} names a version node-v4.json does not list — check for a typo`)

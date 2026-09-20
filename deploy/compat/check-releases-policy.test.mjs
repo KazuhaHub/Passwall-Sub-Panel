@@ -79,36 +79,6 @@ test('a refusal naming an unknown version is refused', () => {
   assert.match(problems[0], /check for a typo/)
 })
 
-test('an edge whose target is not offered is refused', () => {
-  // The path would be published, reviewed and unreachable, which reads as
-  // "this upgrade is available" to anyone skimming the file.
-  // THE SHIPPED POLICY CERTIFIES NO PATH, so there is no edge here to point
-  // somewhere else: one is added, and its target is a release the manifest knows
-  // but the policy does not offer.
-  const problems = checkReleasesPolicy(
-    documents({
-      nodeEdit: n => n.released_nodes.push({
-        version: '4.0.1', protocol_version: 1, base_sync: 'supported', remote_upgrade: 'conditional'
-      }),
-      policyEdit: p => {
-        p.upgrade_edges = [{ id: 'e1', from: '4.0.0', to: '4.0.1', evidence: ['upgrade-mechanism'] }]
-      },
-    }),
-  )
-  assert.ok(problems.some(p => /targets a release the policy does not offer/.test(p)), problems.join('; '))
-})
-
-test('an edge naming a version the manifest does not list is refused', () => {
-  const problems = checkReleasesPolicy(
-    documents({
-      policyEdit: p => {
-        p.upgrade_edges = [{ id: 'e1', from: '9.9.9', to: '4.0.0', evidence: ['upgrade-mechanism'] }]
-      },
-    }),
-  )
-  assert.ok(problems.some(p => /from=9\.9\.9 is not a version/.test(p)), problems.join('; '))
-})
-
 test('a version that is both offered and refused is refused', () => {
   const problems = checkReleasesPolicy(
     documents({

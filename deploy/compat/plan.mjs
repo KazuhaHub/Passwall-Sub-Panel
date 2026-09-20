@@ -100,18 +100,6 @@ function build(manifest, verification, profiles) {
     }
   }
 
-  // The edge model has to exist before it can be populated, and an edge naming
-  // only one end is not a checkable claim.
-  for (const edge of verification.upgrade_edges ?? []) {
-    const id = edge.id ?? '(no id)'
-    if (!edge.id) problems.push('an upgrade edge has no id')
-    if (!edge.from) problems.push(`upgrade edge ${id} has no source`)
-    if (!edge.to) problems.push(`upgrade edge ${id} has no target`)
-    if (edge.schema !== undefined && (edge.schema.from === undefined || edge.schema.to === undefined)) {
-      problems.push(`upgrade edge ${id} declares a schema without both ends`)
-    }
-  }
-
   const pinned = verification.pinned_sources ?? {}
   const cases = []
   const ids = new Set()

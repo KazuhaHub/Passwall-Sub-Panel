@@ -102,22 +102,6 @@ const rangeOverlaySchemaVersion = 3
 //
 // Unknown fields are tolerated (Go json default) so an old PSP can still
 // consume a newer JSON as long as the v2 essentials are present.
-// UpgradeEdge is one Node upgrade edge as the documents record it: a claim that
-// upgrading a Node from From to To has been checked, rather than that To happens
-// to be a release this panel knows about.
-//
-// IT IS RECORDED AND NOT DECIDED ON. Admission used to require a reviewed edge for
-// the specific pair, which made a compatible peer un-upgradeable and put the
-// remedy in a policy document the operator had no reason to know about. PSP is the
-// source of truth for what is supported, so the field is carried — the documents
-// still make the claim, and a reviewer can still read it — while nothing refuses a
-// request for the absence of one. The same shape is validated by
-// deploy/compat/plan.mjs in docs/compat/verification-v1.json.
-type UpgradeEdge struct {
-	ID   string `json:"id"`
-	From string `json:"from"`
-	To   string `json:"to"`
-}
 
 type remoteCompatPayload struct {
 	SchemaVersion int                    `json:"schema_version"`
@@ -139,16 +123,6 @@ type remoteCompatPayload struct {
 	// entries replace only the XUI/SUI ranges. Advisories stay in this base
 	// document so old readers retain the full upgrade guidance.
 	RangeOverlay string `json:"range_overlay,omitempty"`
-	// UpgradeEdges lists the Node upgrade edges that have been VERIFIED. It is
-	// the same model the planner validates in docs/compat/verification-v1.json,
-	// republished here because the runtime can only read this document.
-	//
-	// OPTIONAL, and its absence is meaningful rather than tolerated: a manifest
-	// without it publishes no verified edge, so no upgrade is recommended. That
-	// is the state every manifest is in today, and it is the truthful one — an
-	// edge is a claim that somebody checked a specific path, not a property of
-	// the target release.
-	UpgradeEdges []UpgradeEdge `json:"upgrade_edges,omitempty"`
 	// AppliesToPSP is set ONLY when this payload came from a panel ranges
 	// document, and it is what makes such a document installable at all.
 	//

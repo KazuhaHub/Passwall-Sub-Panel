@@ -209,17 +209,6 @@ test('a profile nobody defines fails the plan', () => {
   assert.equal(result.verdict, 'invalid')
 })
 
-test('an upgrade edge missing its source or target fails the plan', () => {
-  // The edge model has to be present before it can be populated, and an edge
-  // that names only one end is not a checkable claim.
-  for (const edge of [{ id: 'e1', from: 'psp-a' }, { id: 'e2', to: 'psp-b' }, { id: 'e3', from: 'a', to: 'b', schema: { from: 9 } }]) {
-    const verification = { ...realVerification(), upgrade_edges: [edge] }
-    const { code, result } = plan({ verification })
-    assert.equal(code, 1, `edge ${JSON.stringify(edge)} must be rejected`)
-    assert.equal(result.verdict, 'invalid')
-  }
-})
-
 test('a duplicate case id fails the plan', () => {
   const verification = realVerification()
   // Two profiles resolving to the same case id would collapse in the matrix and
