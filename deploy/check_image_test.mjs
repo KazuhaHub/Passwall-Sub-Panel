@@ -119,6 +119,24 @@ test('token and manifest redirects are never followed or interpreted as absence'
   await rejectsRedacted(fixture(redirected).fetchImpl)
 })
 
+// A PRODUCT VERSION IS NOT `v`-PREFIXED, AND THIS FILE REQUIRED THAT IT WAS. The
+// shape it enforced was the LEGACY one, so the first product release was refused
+// before the registry was consulted at all: `GHCR exact-tag preflight failed`,
+// which reads as a registry problem rather than as a shape this file got wrong.
+//
+// The shape authority is the pinned published Node CLI the workflow has already
+// run by this point; re-deciding what a version is here would be a second opinion,
+// and this file cannot see `releaseid` to have a good one. What remains is I/O
+// safety, and both shapes have to reach the registry.
+test('both version shapes reach the registry', async () => {
+  for (const version of ['4.0.0', 'v4.0.0-beta.1', '102.1.0', 'v0.0.1-beta12']) {
+    const { calls, fetchImpl } = fixture(json({ errors: [{ code: 'MANIFEST_UNKNOWN' }] }, 404))
+    await verifyImageTagMissing(repository, version, fetchImpl)
+    assert.equal(calls.length, 2, `${version} did not reach the registry`)
+    assert.equal(calls[1].url, `https://ghcr.io/v2/${repository}/manifests/${version}`)
+  }
+})
+
 test('invalid coordinates are rejected before any network request', async () => {
   for (const [candidateRepository, candidateTag] of [
     ['KazuhaHub/passwall-sub-panel', tag], ['kazuhahub/passwall-node', tag],
@@ -126,6 +144,13 @@ test('invalid coordinates are rejected before any network request', async () => 
     ['../passwall-sub-panel', tag], ['owner_name/passwall-sub-panel', tag], ['a'.repeat(40) + '/passwall-sub-panel', tag],
     [repository, 'latest'], [repository, 'beta'], [repository, ''], [repository, 'v1?token=secret'],
     [repository, 'v1/another'], [repository, 'v1%2Fanother'], [repository, 'v1\nsecret'], [repository, 'v' + '1'.repeat(128)],
+    // THE PRODUCT SHAPE IS NOT A LICENCE TO PASS ANYTHING. These are the same
+    // refusals in the shape that used to be turned away by the missing `v`, and
+    // they are the reason the leading character and the reserved names are
+    // checked rather than left to fall out of a prefix.
+    [repository, '4.0.0/../../evil'], [repository, '4.0.0?x=1'], [repository, '4.0.0%2Fevil'],
+    [repository, '-4.0.0'], [repository, '.4.0.0'], [repository, '4.0.0 '], [repository, '4.0.0\nsecret'],
+    [repository, '4' + '0'.repeat(128)],
   ]) {
     let calls = 0
     await assert.rejects(verifyImageTagMissing(candidateRepository, candidateTag, async () => { calls++; return json({}) }))
