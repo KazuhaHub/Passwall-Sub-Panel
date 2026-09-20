@@ -38,10 +38,20 @@ const remoteFetchThrottle = 60 * time.Second
 // can never block the Test handler's response path for long.
 const httpFetchTimeout = 8 * time.Second
 
-// pspMajorRe extracts the major number from PSP's own version.Version
-// (forms: "v3.6.0", "v3.6.0-beta.7", "3.6.99", "dev"). Used to pick which
-// per-major JSON file to fetch and to validate the file's `major` field.
-var pspMajorRe = regexp.MustCompile(`^v?(\d+)\.`)
+// pspMajorRe extracts the compatibility major from a LEGACY PSP version — the
+// v-prefixed form ("v3.6.0", "v3.6.0-beta.7").
+//
+// THE v IS REQUIRED, and requiring it is the point. Under the product scheme a
+// version is three integers with no prefix, and its first integer is a RELEASE
+// LINE, not a compatibility major: 102.1.0 is the hundred-and-second release
+// line, not "compat major 102", and there is no v102.json for it. Accepting an
+// unprefixed version here would have derived that path and fetched a file that
+// does not exist — or worse, that exists and means something else.
+//
+// So a build whose version is not the legacy form gets no per-major URL at all;
+// its compatibility comes from the release policy, which states its applicable
+// range explicitly instead of inferring one from a number.
+var pspMajorRe = regexp.MustCompile(`^v(\d+)\.`)
 
 // schemaVersion is what the base per-major JSON files must carry. Bumped to 2
 // when the v3.6.0-beta.7 redesign switched from a single-file map keyed
@@ -226,13 +236,16 @@ func LastRefreshAt() time.Time {
 func defaultURLForCurrentVersion() (string, error) {
 	major, ok := pspMajor(Version)
 	if !ok {
-		return "", fmt.Errorf("cannot derive PSP major from version %q (dev build?) — compat refresh disabled, use force override to upgrade panels", Version)
+		return "", fmt.Errorf("version %q is not a legacy v-prefixed build, so no per-major compat manifest applies to it; "+
+			"a product version's first segment is a release line, not a compatibility major, so this build reads its policy instead", Version)
 	}
 	return defaultRemoteCompatURLBase + "v" + strconv.Itoa(major) + ".json", nil
 }
 
-// pspMajor extracts the integer major from PSP's own version string.
-// Returns 0/false for "dev" or anything else parseSemver-incompatible.
+// pspMajor extracts the compatibility major from a legacy version string.
+// Returns 0/false for "dev", for a product-scheme version, and for anything else
+// that is not the v-prefixed form — each of which means "no per-major manifest
+// is derivable from this".
 func pspMajor(v string) (int, bool) {
 	m := pspMajorRe.FindStringSubmatch(v)
 	if len(m) < 2 {
