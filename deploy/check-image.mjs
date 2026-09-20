@@ -10,13 +10,30 @@ const manifestTypes = [
   'application/vnd.docker.distribution.manifest.v2+json',
 ].join(', ')
 
+// THE TWO TAGS THE CHANNEL RULES OWN, refused by name rather than by shape.
+// Before this list existed they were turned away by the `v` prefix requirement
+// below, which is also what refused every product version.
+const reservedImageTags = new Set(['latest', 'beta'])
+
 function validateCoordinates(repository, tag) {
   const match = typeof repository === 'string' && /^([a-z0-9]+(?:-[a-z0-9]+)*)\/passwall-sub-panel$/.exec(repository)
   if (!match || match[1].length > 39) throw new Error('require a canonical GitHub owner/passwall-sub-panel repository')
-  // URL/tag I/O safety only. The workflow's pinned published Node Go CLI is
-  // the single semver authority; this intentionally does not replace it.
-  if (typeof tag !== 'string' || !/^v[0-9][0-9A-Za-z_.-]{0,126}$/.test(tag)) {
-    throw new Error('require an explicit version tag without aliases or URL syntax')
+  // I/O SAFETY, NOT A VERSION RULE. The shape authority is the pinned published
+  // Node CLI the workflow has already run by this point; re-deciding what a
+  // version is here would be a second opinion about it, and this file cannot see
+  // `releaseid` to have a good one.
+  //
+  // IT USED TO REQUIRE A LEADING `v`, which is the LEGACY version shape. A product
+  // version is three integers, so the first product release was refused before the
+  // registry was consulted at all — `GHCR exact-tag preflight failed`, which reads
+  // as a registry problem rather than as a shape this file got wrong.
+  //
+  // The leading character is a letter or digit and the rest is the URL-safe set, so
+  // a slash, an encoded slash, whitespace and URL syntax are still refused; the
+  // reserved names are refused by name, because the looser shape would otherwise
+  // let `latest` through.
+  if (typeof tag !== 'string' || !/^[0-9A-Za-z][0-9A-Za-z_.-]{0,126}$/.test(tag) || reservedImageTags.has(tag)) {
+    throw new Error('require an explicit version without aliases or URL syntax')
   }
 }
 
