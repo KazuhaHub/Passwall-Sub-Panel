@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -215,42 +216,74 @@ func TestAnOversizedPolicyIsRefused(t *testing.T) {
 }
 
 // The backoff is tested through the SCHEDULE the loop asks for, not by timing it:
-// a jitterFn that records its arguments and returns zero makes the retry cadence
-// a value rather than a race.
-func TestTheRefreshLoopBacksOffOnFailureAndRecovers(t *testing.T) {
-	collect := func() (*[]time.Duration, func(time.Duration) time.Duration) {
-		delays := &[]time.Duration{}
-		return delays, func(d time.Duration) time.Duration {
-			*delays = append(*delays, d)
-			return 0 // fire immediately; the schedule is what is under test
-		}
-	}
+// a jitterFn that records its arguments makes the retry cadence a value rather
+// than a duration to measure.
+//
+// THE RECORDING STILL HAS TO BE SYNCHRONISED. The callback runs on the loop's
+// goroutine while the test reads, so a bare slice here is a data race — one the
+// race detector finds in CI and an ordinary `go test` cannot, which is how this
+// arrived: the sentence above was written about the timing and was true of it.
+type delayRecorder struct {
+	mu     sync.Mutex
+	delays []time.Duration
+}
 
-	waitFor := func(t *testing.T, delays *[]time.Duration, n int) {
-		t.Helper()
-		deadline := time.Now().Add(2 * time.Second)
-		for time.Now().Before(deadline) {
-			if len(*delays) >= n {
-				return
-			}
-			time.Sleep(time.Millisecond)
+func (r *delayRecorder) jitter(d time.Duration) time.Duration {
+	r.mu.Lock()
+	r.delays = append(r.delays, d)
+	r.mu.Unlock()
+	return 0 // fire immediately; the schedule is what is under test
+}
+
+func (r *delayRecorder) snapshot() []time.Duration {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]time.Duration(nil), r.delays...)
+}
+
+// startRefreshLoop runs the loop and returns a channel closed when it has LEFT.
+//
+// THE WAIT IS THE POINT. withTestServer replaces the package-level policyHTTPClient,
+// and the loop reads it — in production nothing swaps it at runtime, so the race is
+// the test's: a subtest that cancels and moves on while its loop is still running
+// leaves the next subtest writing a variable the previous one is still reading.
+func startRefreshLoop(ctx context.Context, baseURL string, interval time.Duration, recorder *delayRecorder) <-chan struct{} {
+	stopped := make(chan struct{})
+	go func() {
+		defer close(stopped)
+		RunPolicyRefresh(ctx, baseURL, interval, recorder.jitter, nil)
+	}()
+	return stopped
+}
+
+func waitForAttempts(t *testing.T, recorder *delayRecorder, n int) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if len(recorder.snapshot()) >= n {
+			return
 		}
-		t.Fatalf("only %d attempts in two seconds", len(*delays))
+		time.Sleep(time.Millisecond)
 	}
+	t.Fatalf("only %d attempts in two seconds", len(recorder.snapshot()))
+}
+
+func TestTheRefreshLoopBacksOffOnFailureAndRecovers(t *testing.T) {
 
 	t.Run("a failing source is retried further apart", func(t *testing.T) {
 		installTestTrustRoot(t)
 		baseURL := withTestServer(t, func(w http.ResponseWriter, _ *http.Request) { http.NotFound(w, nil) })
-		delays, jitter := collect()
+		recorder := &delayRecorder{}
 
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 		interval := 10 * time.Millisecond
-		go RunPolicyRefresh(ctx, baseURL, interval, jitter, nil)
+		stopped := startRefreshLoop(ctx, baseURL, interval, recorder)
 
-		waitFor(t, delays, 4)
+		waitForAttempts(t, recorder, 4)
 		cancel()
-		got := append([]time.Duration(nil), (*delays)[:4]...)
+		<-stopped // the loop must have left before a later subtest swaps the client
+		got := recorder.snapshot()[:4]
 		want := []time.Duration{interval, 2 * interval, 4 * interval, 8 * interval}
 		for i := range want {
 			if got[i] != want[i] {
@@ -267,16 +300,17 @@ func TestTheRefreshLoopBacksOffOnFailureAndRecovers(t *testing.T) {
 			t.Fatal(err)
 		}
 		baseURL := withTestServer(t, handler)
-		delays, jitter := collect()
+		recorder := &delayRecorder{}
 
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 		interval := 5 * time.Millisecond
-		go RunPolicyRefresh(ctx, baseURL, interval, jitter, nil)
+		stopped := startRefreshLoop(ctx, baseURL, interval, recorder)
 
-		waitFor(t, delays, 3)
+		waitForAttempts(t, recorder, 3)
 		cancel()
-		for i, delay := range (*delays)[:3] {
+		<-stopped
+		for i, delay := range recorder.snapshot()[:3] {
 			if delay != interval {
 				t.Fatalf("attempt %d waited %v, want %v — a success must not back off", i, delay, interval)
 			}
@@ -284,10 +318,10 @@ func TestTheRefreshLoopBacksOffOnFailureAndRecovers(t *testing.T) {
 	})
 
 	t.Run("no source means no loop", func(t *testing.T) {
-		delays, jitter := collect()
-		RunPolicyRefresh(context.Background(), "", time.Millisecond, jitter, nil)
-		if len(*delays) != 0 {
-			t.Fatalf("a loop with no source asked to wait %v", *delays)
+		recorder := &delayRecorder{}
+		RunPolicyRefresh(context.Background(), "", time.Millisecond, recorder.jitter, nil)
+		if got := recorder.snapshot(); len(got) != 0 {
+			t.Fatalf("a loop with no source asked to wait %v", got)
 		}
 	})
 }
