@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 // These cases intentionally do not run in parallel: Version and the active
@@ -98,6 +99,40 @@ func TestPolicySnapshotOnlyInstallsWhereTheDocumentApplies(t *testing.T) {
 				t.Fatal("a document that does not apply must not establish a supported range")
 			}
 		})
+	}
+}
+
+// THE DOCUMENT IS APPLIED; THE SNAPSHOT IS A DIFFERENT THING.
+//
+// storePolicySnapshot persists what the NEXT boot replays when it cannot fetch.
+// Its failure used to be returned as the apply's failure, so the panel reported
+// "the most recent refresh failed" while it was running the newest policy — and
+// showed the PREVIOUS ceiling beside that claim. An operator read a banner that
+// contradicted itself, about a data directory this deployment had never needed
+// before: the panel runs on MySQL, so no SQLite file writes there either.
+//
+// A snapshot that cannot be stored is a DEGRADATION — the next boot fetches
+// instead of replaying — and not a refresh that did not happen.
+func TestAnUnwritableSnapshotDirectoryDoesNotFailTheApply(t *testing.T) {
+	isolatedCompatCache(t, "v4.0.0")
+	// A FILE where the directory should be. MkdirAll cannot succeed, so the write
+	// fails the way a read-only data directory does — and, unlike a chmod, it fails
+	// for root too, so the case means the same thing wherever it runs.
+	blocker := filepath.Join(t.TempDir(), "not-a-dir")
+	if err := os.WriteFile(blocker, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	SetCacheDir(filepath.Join(blocker, "data"))
+
+	raw, err := os.ReadFile(filepath.Join("..", "..", "docs", "compat", "panel-ranges-v1.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := applyPanelRangesDocument(raw, time.Now().UTC()); err != nil {
+		t.Fatalf("an unwritable snapshot directory failed the apply: %v", err)
+	}
+	if got := ActiveMaxTestedXUI(); got != "3.8.5" {
+		t.Fatalf("active range=%q, want 3.8.5 — the document was validated and must have taken effect", got)
 	}
 }
 
