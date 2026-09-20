@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/KazuhaHub/passwall-node/corecatalog"
@@ -1328,21 +1329,62 @@ func (h *AdminServersHandler) UpgradeXray(c *gin.Context) {
 		})
 		return
 	}
-	h.writeUpgradeAudit(c, "xray_upgrade_completed", panel, req.Version, "")
-	// Refresh version snapshot — installXray triggers an xray restart
-	// so the panel's reported xray.version field updates immediately.
-	if status, perr := client.GetServerStatus(c.Request.Context()); perr == nil {
-		now := time.Now()
-		if err := h.repo.UpdateVersion(c.Request.Context(), id, status.PanelVersion, status.XrayVersion, &now); err != nil {
-			log.Warn("xray upgrade: write version", "panel_id", id, "err", err)
-		} else if h.invalidateRender != nil {
-			h.invalidateRender()
-		}
+	// SUCCESS IS THE VERSION, NOT THE CALL RETURNING.
+	//
+	// installXray returns once it has asked the core to switch; it does not
+	// promise which build comes up, and the previous behaviour recorded
+	// _completed for any successful call — including one that asked for
+	// "latest", where there was no target to hold the panel to at all. That is
+	// the same "reachable is not upgraded" mistake the panel upgrade made.
+	//
+	// Refresh the snapshot first, because the restart is what makes the panel's
+	// reported xray.version field meaningful, then decide what actually happened.
+	status, perr := client.GetServerStatus(c.Request.Context())
+	if perr != nil {
+		h.writeUpgradeAudit(c, "xray_upgrade_unverified", panel, req.Version,
+			"core install returned but the panel could not be read back: "+perr.Error())
+		c.JSON(http.StatusBadGateway, gin.H{
+			"ok": false, "reason": "core_version_unverified", "version": req.Version,
+			"error": "the core install was accepted but the resulting version could not be read back: " + perr.Error(),
+		})
+		return
 	}
+	now := time.Now()
+	if err := h.repo.UpdateVersion(c.Request.Context(), id, status.PanelVersion, status.XrayVersion, &now); err != nil {
+		log.Warn("xray upgrade: write version", "panel_id", id, "err", err)
+	} else if h.invalidateRender != nil {
+		h.invalidateRender()
+	}
+
+	if req.Version == "latest" {
+		// No target was named, so nothing can be compared. Recording this as a
+		// COMPLETED upgrade would claim a version was reached when the request
+		// never named one.
+		h.writeUpgradeAudit(c, "xray_upgrade_latest", panel, status.XrayVersion,
+			"installed latest; the panel reports "+status.XrayVersion)
+		c.JSON(http.StatusOK, gin.H{
+			"ok": true, "version": status.XrayVersion, "target_pinnable": false,
+			"message": "Xray latest installed; the panel now reports " + status.XrayVersion + ".",
+		})
+		return
+	}
+	// Equality is not ordering: both strings come from the same audited catalog,
+	// so this compares what was asked for with what came up, and does not involve
+	// the project's release-ordering rule.
+	if strings.TrimPrefix(status.XrayVersion, "v") != strings.TrimPrefix(req.Version, "v") {
+		h.writeUpgradeAudit(c, "xray_upgrade_target_mismatch", panel, req.Version,
+			"asked for "+req.Version+", the panel reports "+status.XrayVersion)
+		c.JSON(http.StatusConflict, gin.H{
+			"ok": false, "reason": "core_target_mismatch",
+			"requested_version": req.Version, "observed_version": status.XrayVersion,
+			"message": "the core install was accepted but the panel came up on " + status.XrayVersion + ", not " + req.Version,
+		})
+		return
+	}
+	h.writeUpgradeAudit(c, "xray_upgrade_completed", panel, req.Version, "panel reports "+status.XrayVersion)
 	c.JSON(http.StatusOK, gin.H{
-		"ok":      true,
-		"version": req.Version,
-		"message": "Xray upgrade completed.",
+		"ok": true, "version": status.XrayVersion, "target_pinnable": true,
+		"message": "Xray upgrade completed; the panel reports " + status.XrayVersion + ".",
 	})
 }
 

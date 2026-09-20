@@ -3,10 +3,12 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -35,6 +37,9 @@ type upgradeModeRepo struct {
 
 func (r upgradeModeRepo) GetByID(_ context.Context, _ int64) (*domain.XUIPanel, error) {
 	return r.panel, nil
+}
+func (r upgradeModeRepo) UpdateVersion(_ context.Context, _ int64, _, _ string, _ *time.Time) error {
+	return nil
 }
 
 func upgradePreflight(t *testing.T, client ports.XUIClient) map[string]any {
@@ -115,5 +120,151 @@ func TestAPanelThatCannotUpgradeIsRefusedByTheAPI(t *testing.T) {
 				t.Fatalf("%s body does not name the unsupported capability: %s", tc.name, recorder.Body.String())
 			}
 		})
+	}
+}
+
+// Records the audit actions a handler wrote, so a test can assert not only what
+// the response said but what the trail will show a reviewer later.
+type upgradeGateAudit struct {
+	ports.AuditRepo
+	actions []string
+}
+
+func (a *upgradeGateAudit) Insert(_ context.Context, e *domain.AuditEntry) error {
+	a.actions = append(a.actions, e.Action)
+	return nil
+}
+
+func (a *upgradeGateAudit) saw(action string) bool {
+	for _, got := range a.actions {
+		if got == action {
+			return true
+		}
+	}
+	return false
+}
+
+type coreUpgradeClient struct {
+	ports.PanelClient
+	status    ports.ServerStatus
+	statusErr error
+	installed string
+}
+
+func (c *coreUpgradeClient) GetCoreVersionList(_ context.Context) ([]string, error) {
+	return []string{"26.9.9", "26.9.8"}, nil
+}
+func (c *coreUpgradeClient) InstallCore(_ context.Context, version string) error {
+	c.installed = version
+	return nil
+}
+func (c *coreUpgradeClient) GetServerStatus(_ context.Context) (*ports.ServerStatus, error) {
+	return &c.status, c.statusErr
+}
+
+func coreUpgrade(t *testing.T, client *coreUpgradeClient, body string) (*httptest.ResponseRecorder, *upgradeGateAudit) {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	audit := &upgradeGateAudit{}
+	h := &AdminServersHandler{
+		repo:  upgradeModeRepo{panel: &domain.XUIPanel{ID: 7, Kind: domain.PanelKind3XUI}},
+		pool:  fakeWebCertPool{client: client},
+		audit: audit,
+	}
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Params = gin.Params{{Key: "id", Value: "7"}}
+	c.Request = httptest.NewRequest(http.MethodPost, "/admin/servers/7/upgrade-xray", strings.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+	h.UpgradeXray(c)
+	return recorder, audit
+}
+
+// The core upgrade used to record _completed for any call that returned. That is
+// the same "reachable is not upgraded" mistake the panel upgrade made: the
+// install returning says the request was accepted, not which build came up.
+func TestACoreUpgradeIsCompletedOnlyWhenThePanelReportsTheTarget(t *testing.T) {
+	client := &coreUpgradeClient{status: ports.ServerStatus{PanelVersion: "3.5.1", XrayVersion: "26.9.9"}}
+	recorder, audit := coreUpgrade(t, client, `{"version":"26.9.9"}`)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("response = %d %s", recorder.Code, recorder.Body.String())
+	}
+	if !audit.saw("xray_upgrade_completed") {
+		t.Fatalf("actions = %v, want xray_upgrade_completed", audit.actions)
+	}
+}
+
+func TestACoreUpgradeThatCameUpElsewhereIsNotASuccess(t *testing.T) {
+	// The install returned and the panel answers; it just is not the version that
+	// was asked for.
+	client := &coreUpgradeClient{status: ports.ServerStatus{PanelVersion: "3.5.1", XrayVersion: "26.9.8"}}
+	recorder, audit := coreUpgrade(t, client, `{"version":"26.9.9"}`)
+
+	if recorder.Code != http.StatusConflict {
+		t.Fatalf("response = %d %s, want a conflict", recorder.Code, recorder.Body.String())
+	}
+	if audit.saw("xray_upgrade_completed") {
+		t.Fatalf("a mismatch was recorded as completed: %v", audit.actions)
+	}
+	if !audit.saw("xray_upgrade_target_mismatch") {
+		t.Fatalf("actions = %v, want xray_upgrade_target_mismatch", audit.actions)
+	}
+	var body struct {
+		Reason   string `json:"reason"`
+		Observed string `json:"observed_version"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Reason != "core_target_mismatch" || body.Observed != "26.9.8" {
+		t.Fatalf("body = %+v", body)
+	}
+}
+
+// "latest" names no target, so nothing can be compared and the outcome is
+// reported as the version that actually came up.
+func TestACoreUpgradeToLatestDoesNotClaimAReachedVersion(t *testing.T) {
+	client := &coreUpgradeClient{status: ports.ServerStatus{PanelVersion: "3.5.1", XrayVersion: "26.9.9"}}
+	recorder, audit := coreUpgrade(t, client, `{}`)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("response = %d %s", recorder.Code, recorder.Body.String())
+	}
+	if audit.saw("xray_upgrade_completed") {
+		t.Fatalf("latest was recorded as a completed upgrade to a named version: %v", audit.actions)
+	}
+	if !audit.saw("xray_upgrade_latest") {
+		t.Fatalf("actions = %v, want xray_upgrade_latest", audit.actions)
+	}
+	var body struct {
+		Pinnable bool   `json:"target_pinnable"`
+		Version  string `json:"version"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Pinnable || body.Version != "26.9.9" {
+		t.Fatalf("body = %+v, want the observed version and target_pinnable=false", body)
+	}
+	if client.installed != "latest" {
+		t.Fatalf("installed %q, want latest for a legacy panel with no version named", client.installed)
+	}
+}
+
+// A read-back that fails is not a success: the install was accepted and nothing
+// is known about the outcome.
+func TestACoreUpgradeThatCannotBeReadBackIsNotASuccess(t *testing.T) {
+	client := &coreUpgradeClient{statusErr: errors.New("panel restarting")}
+	recorder, audit := coreUpgrade(t, client, `{"version":"26.9.9"}`)
+
+	if recorder.Code != http.StatusBadGateway {
+		t.Fatalf("response = %d %s, want 502", recorder.Code, recorder.Body.String())
+	}
+	if audit.saw("xray_upgrade_completed") {
+		t.Fatalf("an unverified install was recorded as completed: %v", audit.actions)
+	}
+	if !audit.saw("xray_upgrade_unverified") {
+		t.Fatalf("actions = %v, want xray_upgrade_unverified", audit.actions)
 	}
 }
