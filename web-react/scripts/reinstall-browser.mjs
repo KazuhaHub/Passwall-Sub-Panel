@@ -56,10 +56,10 @@ const servers = [
   { id: 27, panel_type: 'sui', name: 'Fixture S-UI', url: 'https://fixture-sui.invalid',
     capabilities: [], auth_method: 'token', has_api_token: true },
 ].map(server => ({ has_password: false, insecure_https: false, core_version: '26.6.27',
-  xray_version: '26.6.27', panel_version: server.panel_type === '3xui' ? '3.7.0' : server.panel_type === 'psp' ? 'v0.0.1-beta2 (fixture)' : '',
+  xray_version: '26.6.27', panel_version: server.panel_type === '3xui' ? '3.7.0' : server.panel_type === 'psp' ? '4.0.0 (fixture)' : '',
   compat_status: 'supported', ...server }));
 const credential = 'fixture-fixed-node-credential-not-production';
-const version = 'v0.0.1-beta4';
+const version = '4.0.1';
 const fingerprint = 'a'.repeat(64);
 const requests = [];
 const failures = [];
@@ -111,7 +111,9 @@ async function fixture(request, response, url) {
     if (pathname === '/api/admin/servers/node-releases') return reply(response, {
       checked_at: new Date().toISOString(), releases: [{ version, channel: 'testing',
         published_at: '2026-09-12T12:00:00Z', notes: 'Reviewed browser acceptance fixture',
-        release_url: `https://github.com/KazuhaHub/Passwall-Node/releases/tag/${version}`,
+        // THE ADDRESS IS THE TAG AND THE RECORD IS THE VERSION, which are never the same
+        // string: the panel rejects a release whose page is not addressed under release/.
+        release_url: `https://github.com/KazuhaHub/Passwall-Node/releases/tag/release/${version}`,
         methods: ['linux', 'docker', 'manual'], platforms: ['amd64', 'arm64'].map(arch => ({ os: 'linux', arch })) }],
     });
     // THE UPGRADE DIALOG ASKS THE INSTANCE WHICH TARGETS ARE REACHABLE, so the
@@ -121,9 +123,9 @@ async function fixture(request, response, url) {
     // what the dialog worked out for itself before it started asking, so the
     // surface behaves identically and the question is answered rather than dodged.
     if (pathname === '/api/admin/servers/7/upgrade-options') return reply(response, {
-      component: 'agent', state: 'ready', current_version: 'v0.0.1-beta2', target_version: version,
+      component: 'agent', state: 'ready', current_version: '4.0.0', target_version: version,
       target_pinnable: true, reason_codes: [],
-      targets: [{ version, edge_verified: true, offered_by_policy: true }],
+      targets: [{ version, offered_by_policy: true }],
     });
     if (pathname === '/api/admin/servers/7/node-installation') return reply(response, provisioning(7));
     if (pathname === '/api/admin/servers/7/node-agent-status') return reply(response, { state: 'running', core_state: 'running', configured_nodes: 3 });
