@@ -20,7 +20,28 @@ import (
 // a single major ships" (~10), maintainers only ever edit the active-
 // major file, and bumping to a new major (v4) is just "create v4.json,
 // leave v3.json frozen".
-const defaultRemoteCompatURLBase = "https://raw.githubusercontent.com/KazuhaHub/passwall-sub-panel/main/docs/compat/"
+//
+// THE BRANCH IS release/v3, NOT main (changed in v3.9.3). Up to v3.9.2 this
+// pointed at main, which was right only while main still carried the V3 line.
+// It does not: main's history begins 2026-09-18 and shares no commit with this
+// branch — they are unrelated histories — and its docs/compat/ has moved on to
+// the V4 manifests. V3's manifest survived that transition only because someone
+// copied the file across by hand, which is the whole problem: the V3 line was
+// one forgotten copy away from every deployed V3 panel quietly losing its
+// compat refresh, and nothing on either branch would have said so.
+//
+// Pointing at release/v3 makes the file PSP fetches the same file this branch
+// ships and TestMinXUIConstMatchesCompatJSON validates. A V3 compat edit
+// becomes one commit on one branch, and the guard that checks it finally runs
+// against the copy that is actually served.
+//
+// refs/heads/ is spelled out rather than the shorter ".../release/v3/docs/..."
+// so the ref can never be read as a branch "release" plus a "v3/" path prefix.
+//
+// DO NOT DELETE main's docs/compat/v3.json. Every V3 binary up to v3.9.2 has
+// the old main URL compiled in and keeps fetching it; that copy is now a frozen
+// mirror serving those deployments, not the source of truth.
+const defaultRemoteCompatURLBase = "https://raw.githubusercontent.com/KazuhaHub/passwall-sub-panel/refs/heads/release/v3/docs/compat/"
 
 // remoteFetchThrottle gates how often RefreshRemoteCompat actually hits the
 // network. The Test handler triggers a refresh on every "test connection"

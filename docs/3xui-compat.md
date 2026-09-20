@@ -310,11 +310,21 @@ PSP `rawInbound` 这四个字段定义为 Go `string`,`json.Unmarshal` 一个 ob
 每个 PSP major 一个 JSON 文件(v3.x 都拉 `docs/compat/v3.json`,v4.x 都拉 `v4.json`)。
 这是 v3.6.0-beta.7 引入的 per-major 分文件设计,理由见 ARCHITECTURE.md。
 
+**改哪个分支(v3.9.3 起变了)**:V3 的 manifest 现在从 **`release/v3`** 拉,也就是你正在
+看的这个分支——改这里、push 这里,就够了。v3.9.2 及更早是从 `main` 拉的;而 `main` 现在是
+V4 线、和本分支**没有共同祖先**,V3 的 manifest 在那边只是一份手抄件。所以:
+
+- **源头是本分支的 `docs/compat/v3.json`**,`TestMinXUIConstMatchesCompatJSON` 校验的也正是
+  它——从此「被校验的文件」和「被下发的文件」是同一个。
+- **`main` 上那份不要删**:v3.9.2 及更早的二进制把旧 URL 编译进去了,还在拉它。它现在是给那批
+  老部署的**冻结镜像**——只有当你的改动需要覆盖它们时,才顺手同步过去一份。
+
 ### 何时改 / 改什么
 
 - **新 3X-UI 出 patch 版本(无 API 改动)** ── 在当前 active major 的 JSON 里把
   覆盖你 PSP 版本那条 entry 的 `max_tested_xui` 改成新版本号,顺手更新 `updated_at`
-  和 `notes`。commit + push 到 main → 所有该 major 的 PSP 部署 60 秒内自动感知。
+  和 `notes`。commit + push 到 **`release/v3`** → 所有 v3.9.3+ 的部署 60 秒内自动感知
+  (v3.9.2 及更早只看 `main` 上那份冻结镜像,要覆盖它们才需要同步过去)。
 - **PSP 发新 minor (比如 v3.6 → v3.7)** ── 在当前 major 的 JSON 加新 entry,
   `psp_min: "v3.7.0"`, `psp_max: "v3.7.99"`,把新 entry 放在 `entries` 数组**最前**
   (first-match-wins 让新版优先匹配)。
