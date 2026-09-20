@@ -27,7 +27,6 @@ type ReleasesPolicy struct {
 	ExpiresAt     time.Time       `json:"expires_at"`
 	AppliesToPSP  PolicyPSPRange  `json:"applies_to_psp"`
 	Releases      []PolicyRelease `json:"releases"`
-	UpgradeEdges  []PolicyEdge    `json:"upgrade_edges"`
 	Refusals      []PolicyRefusal `json:"refusals"`
 }
 
@@ -50,12 +49,6 @@ type PolicyRelease struct {
 
 // PolicyEdge is one VERIFIED upgrade path. A release being listed is not the
 // same as a path to it having been checked.
-type PolicyEdge struct {
-	From     string   `json:"from"`
-	To       string   `json:"to"`
-	Evidence []string `json:"evidence"`
-}
-
 // PolicyRefusal records a release that must not be offered, with the reason on
 // the record. An undocumented exclusion is indistinguishable from an oversight.
 type PolicyRefusal struct {
@@ -139,18 +132,6 @@ func ParseReleasesPolicy(raw []byte, now time.Time) (ReleasesPolicy, error) {
 			return ReleasesPolicy{}, fmt.Errorf("%w: %s is offered with no evidence", ErrPolicyMalformed, release.Version)
 		}
 		offered[release.Version] = struct{}{}
-	}
-
-	for i, edge := range policy.UpgradeEdges {
-		if strings.TrimSpace(edge.From) == "" || strings.TrimSpace(edge.To) == "" {
-			return ReleasesPolicy{}, fmt.Errorf("%w: upgrade_edges[%d] needs both ends", ErrPolicyMalformed, i)
-		}
-		if edge.From == edge.To {
-			return ReleasesPolicy{}, fmt.Errorf("%w: upgrade_edges[%d] goes from %s to itself", ErrPolicyMalformed, i, edge.From)
-		}
-		if len(edge.Evidence) == 0 {
-			return ReleasesPolicy{}, fmt.Errorf("%w: upgrade_edges[%d] (%s -> %s) has no evidence", ErrPolicyMalformed, i, edge.From, edge.To)
-		}
 	}
 	return policy, nil
 }

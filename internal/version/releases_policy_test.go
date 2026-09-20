@@ -21,7 +21,6 @@ func TestReleasePolicyRefusals(t *testing.T) {
 	  "expires_at": "2026-09-26T00:00:00Z",
 	  "applies_to_psp": {"min": "4.0.0", "max": "4.99.99"},
 	  "releases": [{"version": "v0.0.1-beta11", "release_tag": "v0.0.1-beta11", "scheme": "legacy", "evidence": ["node-wire-v1"]}],
-	  "upgrade_edges": [{"from": "v0.0.1-beta3", "to": "v0.0.1-beta11", "evidence": ["upgrade-mechanism"]}],
 	  "refusals": [{"version": "v0.0.1-beta1", "reason": "never reviewed"}]
 	}`
 
@@ -77,18 +76,6 @@ func TestReleasePolicyRefusals(t *testing.T) {
 			detail:  "no evidence",
 		},
 		{
-			name:    "an edge missing an end",
-			doc:     strings.Replace(valid, `{"from": "v0.0.1-beta3", "to": "v0.0.1-beta11", "evidence": ["upgrade-mechanism"]}`, `{"from": "v0.0.1-beta3", "evidence": ["upgrade-mechanism"]}`, 1),
-			wantErr: ErrPolicyMalformed,
-			detail:  "both ends",
-		},
-		{
-			name:    "an edge with no evidence",
-			doc:     strings.Replace(valid, `{"from": "v0.0.1-beta3", "to": "v0.0.1-beta11", "evidence": ["upgrade-mechanism"]}`, `{"from": "v0.0.1-beta3", "to": "v0.0.1-beta11"}`, 1),
-			wantErr: ErrPolicyMalformed,
-			detail:  "no evidence",
-		},
-		{
 			name:    "a refusal with no reason",
 			doc:     strings.Replace(valid, `{"version": "v0.0.1-beta1", "reason": "never reviewed"}`, `{"version": "v0.0.1-beta1"}`, 1),
 			wantErr: ErrPolicyMalformed,
@@ -137,7 +124,7 @@ func TestReleasePolicyAppliesOnlyToItsReviewedBuilds(t *testing.T) {
 	  "schema_version": 1, "revision": 7,
 	  "issued_at": "2026-09-19T00:00:00Z", "expires_at": "2026-09-26T00:00:00Z",
 	  "applies_to_psp": {"min": "4.0.0", "max": "4.99.99"},
-	  "releases": [], "upgrade_edges": [], "refusals": []
+	  "releases": [], "refusals": []
 	}`), now)
 	if err != nil {
 		t.Fatal(err)

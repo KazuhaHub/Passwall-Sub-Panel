@@ -36,6 +36,5 @@
     "commit": "60d96490f2b0561279ae9332ef6a809e14aab996",
     "module_path": "github.com/KazuhaHub/passwall-node"
   },
-  "upgrade_edges": [],
   "pinned_sources_note": "THESE ARE COMMITS, NOT TAG OBJECTS. `git ls-remote --tags` lists both refs/tags/X (the annotated tag object) and refs/tags/X^{} (the commit it points at); pinning the former fails every leg, because a checkout resolves to the commit. The matrix verifies the resolved commit against these, so a wrong-but-well-formed SHA is caught on the first run rather than after it has quietly tested a different revision."
 }
