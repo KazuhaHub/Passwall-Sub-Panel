@@ -510,7 +510,13 @@ describe('Passwall Node installation', () => {
     expect(api.get.mock.calls.some(([url]) => String(url).includes('node-installation'))).toBe(false)
     fireEvent.click(screen.getByRole('button', { name: 'admin:servers.install_reinstall.continue' }))
     await screen.findByLabelText('admin:servers.native.agent_version')
-    expect(versionInput().value).toBe('v1.2.3')
+    // THE VALUE IS WRITTEN BY AN EFFECT, so its existence and its value are two
+    // different moments: the field is on screen before the selection lands, and
+    // reading it straight after the await raced the effect. That is a flake with a
+    // rate of about one run in thirty — enough to fail CI on a branch whose diff
+    // cannot cause it, which is how it was found: a Go-only pull request was red on
+    // the web job.
+    await waitFor(() => expect(versionInput().value).toBe('v1.2.3'))
     expect(copyScript().disabled).toBe(false)
     expect((screen.getByLabelText('admin:servers.native.credential') as HTMLInputElement).value).toBe(provisioning.credential)
     expect((screen.getByLabelText('admin:servers.native.agent_id') as HTMLInputElement).value).toBe(provisioning.agent_id)
