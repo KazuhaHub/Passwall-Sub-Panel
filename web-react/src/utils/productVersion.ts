@@ -249,3 +249,68 @@ function compareNumericStrings(a: string, b: string): number {
 function sign(n: number): number {
   return n < 0 ? -1 : n > 0 ? 1 : 0
 }
+
+/**
+ * The historical VERSION rule, which is stricter than the historical TAG rule
+ * above, and deliberately so.
+ *
+ * The tag rule CLASSIFIES a published name and is permissive: a tag it wrongly
+ * rejects is a release that can no longer be read. A version rule VALIDATES a
+ * string a caller is about to act on, so it refuses what only looks close —
+ * leading zeroes, a missing segment, build metadata, and a redundant leading
+ * zero in a numeric prerelease identifier.
+ */
+const LEGACY_VERSION_SHAPE = /^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$/
+
+function validLegacyVersion(value: string): boolean {
+  if (!LEGACY_VERSION_SHAPE.test(value)) return false
+  const dash = value.indexOf('-')
+  if (dash < 0) return true
+  return value
+    .slice(dash + 1)
+    .split('.')
+    .every(segment => !(segment.length > 1 && segment[0] === '0' && /^[0-9]+$/.test(segment)))
+}
+
+/**
+ * The version a release is identified by, in either scheme — the string a daemon
+ * is stamped with and the string the catalog carries. Undefined for anything
+ * that is not a version in either scheme.
+ *
+ * A TAG IS NOT A VERSION and this returns undefined for one: `release/4.0.0` is
+ * an address, `4.0.0` is the thing. A legacy version has no namespace of its
+ * own, so it IS its own tag; a product version has one, which is what
+ * tagForVersion adds.
+ */
+export function canonicalReleaseVersion(input: string): string | undefined {
+  if (typeof input !== 'string' || input === '' || input.includes('+')) return undefined
+  if (input.startsWith('v')) {
+    return validLegacyVersion(input) ? input : undefined
+  }
+  // Three segments, always: a version is a published identity, and the short
+  // forms parseProductVersion pads are input convenience, not identities.
+  if ((input.match(/\./g) ?? []).length !== 2) return undefined
+  try {
+    const product = parseProductVersion(input)
+    if (product.major === 0) return undefined
+    return formatProductVersion(product)
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * The tag a version is published under.
+ *
+ * NOT ALWAYS THE VERSION. A legacy release is published under its version
+ * unchanged; a product release is published under `release/` + its version,
+ * because the namespace is what keeps a product tag from being mistaken for a Go
+ * module version — it is part of the ADDRESS, not part of the version. A caller
+ * that puts a version where a tag belongs asks for a release that does not
+ * exist, and the 404 reads as "no such release" rather than "wrong identity".
+ */
+export function tagForVersion(version: string): string | undefined {
+  const canonical = canonicalReleaseVersion(version)
+  if (canonical === undefined) return undefined
+  return canonical.startsWith('v') ? canonical : TAG_PREFIX + canonical
+}

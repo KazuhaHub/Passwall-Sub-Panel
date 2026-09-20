@@ -329,5 +329,137 @@
       "b": "v0.0.1-beta11",
       "cmp": 0
     }
+  ],
+  "versions": [
+    {
+      "in": "v0.0.1-beta11",
+      "scheme": "legacy",
+      "ok": true
+    },
+    {
+      "in": "v0.0.1-beta9",
+      "scheme": "legacy",
+      "ok": true
+    },
+    {
+      "in": "v4.0.0-beta.25",
+      "scheme": "legacy",
+      "ok": true
+    },
+    {
+      "in": "v1.0.0",
+      "scheme": "legacy",
+      "ok": true
+    },
+    {
+      "in": "v102.1.0",
+      "scheme": "legacy",
+      "ok": true
+    },
+    {
+      "in": "1.0.0",
+      "scheme": "product",
+      "ok": true
+    },
+    {
+      "in": "4.0.0",
+      "scheme": "product",
+      "ok": true
+    },
+    {
+      "in": "102.1.0",
+      "scheme": "product",
+      "ok": true
+    },
+    {
+      "in": "v01.0.0",
+      "ok": false,
+      "why": "leading zeroes are not the historical form"
+    },
+    {
+      "in": "v1.0.0-alpha.01",
+      "ok": false,
+      "why": "a redundant leading zero in a numeric prerelease segment"
+    },
+    {
+      "in": "v1.0",
+      "ok": false,
+      "why": "the historical form always wrote three segments"
+    },
+    {
+      "in": "v1.0.0+build",
+      "ok": false,
+      "why": "build metadata is not part of a version"
+    },
+    {
+      "in": "v",
+      "ok": false,
+      "why": "no version after the v"
+    },
+    {
+      "in": "V1.0.0",
+      "ok": false,
+      "why": "the historical prefix is a lower-case v"
+    },
+    {
+      "in": "0.1.0",
+      "ok": false,
+      "why": "a zero release line is not a released identity"
+    },
+    {
+      "in": "4.0",
+      "ok": false,
+      "why": "a product version is always three segments"
+    },
+    {
+      "in": "4.0.0.1",
+      "ok": false,
+      "why": "four segments is a different format"
+    },
+    {
+      "in": "04.0.0",
+      "ok": false,
+      "why": "leading zeroes are not the product form"
+    },
+    {
+      "in": "4.0.0-beta.1",
+      "ok": false,
+      "why": "the product scheme distinguishes a candidate by its channel, not by a prerelease"
+    },
+    {
+      "in": "2147483648.0.0",
+      "ok": false,
+      "why": "one past the segment ceiling"
+    },
+    {
+      "in": "release/4.0.0",
+      "ok": false,
+      "why": "a tag is not a version"
+    },
+    {
+      "in": "",
+      "ok": false,
+      "why": "empty"
+    },
+    {
+      "in": "latest",
+      "ok": false,
+      "why": "neither scheme"
+    },
+    {
+      "in": "main",
+      "ok": false,
+      "why": "neither scheme"
+    },
+    {
+      "in": " 4.0.0",
+      "ok": false,
+      "why": "surrounding whitespace is the caller's to trim"
+    },
+    {
+      "in": "4.0.0/../../PRIVATE_RESPONSE",
+      "ok": false,
+      "why": "a path separator must never survive into a URL built from a version"
+    }
   ]
 }

@@ -39,7 +39,13 @@ describe('newerNodeRelease', () => {
   })
 
   it.each([
-    undefined, '', 'dev', 'dev (abc1234)', '1.0.0', ' v1.0.0', 'v1.0.0 ',
+    undefined, '', 'dev', 'dev (abc1234)', ' v1.0.0', 'v1.0.0 ',
+    // `1.0.0` USED TO BE IN THIS LIST, and that was the defect rather than the
+    // rule: the product scheme stamps exactly that, so a migrated node reported
+    // an identity this function refused and the upgrade badge could never
+    // appear. The product-scheme block below asserts it is accepted; what stays
+    // here is the near misses, which are still not identities.
+    '1.0', '04.0.0', '1.0.0.1', 'release/1.0.0',
     'v01.0.0', 'v1.0', 'v1.0.0+local', 'v1.0.0-beta.01', 'v1.0.0 (abc123)',
     `v1.0.0 (${'a'.repeat(41)})`, 'v1.0.0 (xyz1234)', 'v1.0.0(abc1234)',
     'v1.0.0 (abc1234) extra', 'v1.0.0\n',
@@ -152,5 +158,69 @@ describe('newerNodeRelease and the published prerelease tags', () => {
     const catalog = [release('v0.0.1-beta11'), release('v0.0.1-beta10'), release('v0.0.1-beta9')]
     expect(newerNodeRelease({ panel_version: 'v0.0.1-beta9', update_channel: 'beta' }, catalog)?.version).toBe('v0.0.1-beta11')
     expect(newerNodeRelease({ panel_version: 'v0.0.1-beta1', update_channel: 'beta' }, [...catalog].reverse())?.version).toBe('v0.0.1-beta11')
+  })
+})
+
+// THE PRODUCT SCHEME, end to end through this function.
+//
+// Every string this function reads is a VERSION, not a tag: the daemon is
+// stamped with the release version, and the catalog's `version` field is the
+// version too. A product version has no v prefix, so a rule that required one
+// found no release for any product release — the badge simply never appeared,
+// which is the failure mode that looks like "no upgrade available".
+//
+// The URLs are the other half: the release PAGE is addressed by the TAG, and the
+// backend now builds it from the tag, so a product release's URL contains
+// `tag/release/4.0.0` while its `version` is `4.0.0`.
+describe('newerNodeRelease, product scheme', () => {
+  function product(version: string, overrides: Partial<NodeRelease> = {}): NodeRelease {
+    return release(version, {
+      release_url: `https://github.com/KazuhaHub/Passwall-Node/releases/tag/release/${version}`,
+      ...overrides,
+    })
+  }
+
+  it.each(['4.0.0', '4.0.0 (dc5270c)', `4.0.0 (${'A'.repeat(40)})`])('accepts a product daemon identity: %s', panel_version => {
+    const next = product('4.0.1')
+    expect(newerNodeRelease({ panel_version }, [next])).toBe(next)
+  })
+
+  it('does not offer a product release the node is already on or past', () => {
+    const catalog = [product('4.0.0'), product('3.9.0')]
+    expect(newerNodeRelease({ panel_version: '4.0.0' }, catalog)).toBeUndefined()
+    expect(newerNodeRelease({ panel_version: '4.0.1' }, catalog)).toBeUndefined()
+  })
+
+  it('picks the highest newer product release', () => {
+    const catalog = [product('4.0.1'), product('4.1.0'), product('4.0.2')]
+    expect(newerNodeRelease({ panel_version: '4.0.0' }, catalog)?.version).toBe('4.1.0')
+  })
+
+  // THE CHANNEL IS METADATA, NOT SOMETHING THE VERSION TEXT CARRIES. A legacy
+  // version spells its channel in a prerelease suffix; a product version has
+  // none, because a candidate is distinguished by the channel it was published
+  // to. Requiring the text to agree made every product release invisible to a
+  // beta-channel node, which is the only node that is supposed to see one.
+  it('offers a testing product release to a beta channel and not to a stable one', () => {
+    const candidate = product('4.0.1', { channel: 'testing' })
+    expect(newerNodeRelease({ panel_version: '4.0.0', update_channel: 'beta' }, [candidate])).toBe(candidate)
+    expect(newerNodeRelease({ panel_version: '4.0.0', update_channel: 'stable' }, [candidate])).toBeUndefined()
+  })
+
+  it('does not guess a malformed product identity', () => {
+    for (const panel_version of ['4.0', '04.0.0', '4.0.0.1', '4.0.0+local', 'release/4.0.0', ' 4.0.0', '4.0.0 ']) {
+      expect(newerNodeRelease({ panel_version }, [product('4.1.0')])).toBeUndefined()
+    }
+  })
+
+  // A LEGACY NODE STILL SEES PRODUCT RELEASES, and the two schemes are compared
+  // at the release line: a v0.x build is behind a 4.0.0 release. The channel
+  // still decides — a beta node is offered testing releases only, which is what
+  // the existing legacy cases pin too.
+  it('offers a testing product release to a legacy node, and nothing to a product node from the legacy line', () => {
+    const modern = product('4.0.0', { channel: 'testing' })
+    expect(newerNodeRelease({ panel_version: 'v0.0.1-beta11', update_channel: 'beta' }, [modern])?.version).toBe('4.0.0')
+    const legacy = release('v0.0.1-beta11')
+    expect(newerNodeRelease({ panel_version: '4.0.0', update_channel: 'beta' }, [legacy])).toBeUndefined()
   })
 })

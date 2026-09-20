@@ -2,12 +2,15 @@ import { describe, expect, it } from 'vitest'
 import vectors from './productVersion.vectors.json'
 import {
   MAX_SEGMENT,
+  TAG_PREFIX,
+  canonicalReleaseVersion,
   compareLegacyTag,
   compareProductVersion,
   formatProductVersion,
   parseProductVersion,
   parseReleaseTag,
   resolveChannel,
+  tagForVersion,
 } from './productVersion'
 
 // The vectors are the contract, shared with the Go package of the same name and
@@ -67,6 +70,38 @@ describe('product version vectors', () => {
         expect(got, `draft=${tc.draft} prerelease=${tc.prerelease}`).toBeNull()
       } else {
         expect(got, `draft=${tc.draft} prerelease=${tc.prerelease}`).toBe(tc.channel)
+      }
+    }
+  })
+
+  it('accepts and refuses versions the way both schemes say', () => {
+    // The version shape, which the Go side checks against the same section,
+    // so the two readings are held to one piece of data instead of to each
+    // other.
+    //
+    // A `v` PREFIXED TO A PRODUCT VERSION IS NOT AN ERROR AND IS NOT ASSERTED
+    // AS ONE: `v1.0.0` is the legacy identity for those same numbers, and the
+    // scheme separation is that a product version never carries the prefix,
+    // not that the prefix poisons the string.
+    for (const tc of vectors.versions as Array<{ in: string; scheme?: string; ok: boolean; why?: string }>) {
+      const canonical = canonicalReleaseVersion(tc.in)
+      if (!tc.ok) {
+        expect(canonical, `${tc.in} (${tc.why ?? ''})`).toBeUndefined()
+        continue
+      }
+      expect(canonical, `${tc.in} (${tc.why ?? ''})`).toBe(tc.in)
+      const tag = tagForVersion(tc.in)
+      expect(tag, tc.in).toBe(tc.scheme === 'product' ? `${TAG_PREFIX}${tc.in}` : tc.in)
+    }
+  })
+
+  it('does not read a tag as a version, or a version as a tag', () => {
+    for (const tc of vectors.tags) {
+      // A tag is an address. The version inside it is versionOfTag's business,
+      // and asking the version rule about the tag must not answer yes.
+      if (tc.scheme === 'product') {
+        expect(canonicalReleaseVersion(tc.in), tc.in).toBeUndefined()
+        expect(tagForVersion(tc.in), tc.in).toBeUndefined()
       }
     }
   })
