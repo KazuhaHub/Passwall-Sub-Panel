@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { readFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { test } from 'node:test'
 
 const workflow = readFileSync(new URL('../.github/workflows/release.yml', import.meta.url), 'utf8')
@@ -113,8 +115,8 @@ test('published releases and exact images cannot silently overwrite while rollin
   assert(docker.includes('release tag changed during the build'))
   assert(job('setup').includes('node deploy/check-image.mjs'))
   assert(docker.includes('node deploy/check-image.mjs'))
-  assert(docker.includes("value=latest,enable=${{ startsWith(needs.setup.outputs.tag, 'v') && !contains(needs.setup.outputs.tag, '-') }}"))
-  assert(docker.includes("value=beta,enable=${{ startsWith(needs.setup.outputs.tag, 'v') }}"))
+  assert(docker.includes("value=latest,enable=${{ needs.setup.outputs.image_channel == 'true' && needs.setup.outputs.prerelease == 'false' }}"))
+  assert(docker.includes("value=beta,enable=${{ needs.setup.outputs.image_channel == 'true' }}"))
   assert(workflow.includes('group: release-passwall-sub-panel\n  cancel-in-progress: false'))
 })
 
@@ -320,37 +322,73 @@ function channelEnabled(expression, tag) {
   }
 }
 
-function channelExpressions(dockerJob) {
-  const latest = /value=latest,enable=\$\{\{ (.*?) \}\}/.exec(dockerJob)
-  const beta = /value=beta,enable=\$\{\{ (.*?) \}\}/.exec(dockerJob)
-  assert(latest && beta, 'the image channels must both declare an enable condition')
-  const normalise = (expr) => {
-    const v = /startsWith\([^,]+,\s*'v'\)/.test(expr)
-    const hyphen = /!contains\([^,]+,\s*'-'\)/.test(expr)
-    if (v && hyphen) return 'startsWith_v:!contains_hyphen'
-    if (v && !expr.includes('contains')) return 'startsWith_v'
-    throw new Error(`the channel condition is not one this guard understands: ${expr}`)
+// The resolution is a SCRIPT, so the guard RUNS it instead of modelling it. A
+// model of a rule is a second implementation of that rule, and the two drift —
+// which is exactly what the old expression-simulating helper made easy when the
+// rule changed shape. This runs the bytes the workflow runs.
+function resolveChannel(tag, requested = 'auto') {
+  const jobText = job('setup')
+  const stepStart = jobText.indexOf('Resolve the publication channel')
+  assert(stepStart >= 0, 'the channel resolution step must exist in setup')
+  const after = jobText.slice(stepStart)
+  const runStart = after.indexOf('run: |\n')
+  assert(runStart >= 0, 'the channel step must run a script')
+  const body = after.slice(runStart + 'run: |\n'.length)
+  // The block ends at the next step or at the end of the job.
+  const end = body.search(/\n {6}- name:/)
+  const script = end >= 0 ? body.slice(0, end) : body
+  const dedented = script.split('\n').map(line => line.replace(/^ {10}/, '')).join('\n')
+
+  const dir = mkdtempSync(join(tmpdir(), 'psp-channel-'))
+  const outputs = join(dir, 'outputs')
+  writeFileSync(outputs, '')
+  execFileSync('bash', ['-c', dedented], {
+    env: { ...process.env, PINNED_TAG: tag, REQUESTED: requested, GITHUB_OUTPUT: outputs },
+  })
+  const text = readFileSync(outputs, 'utf8')
+  const read = name => {
+    const found = new RegExp(`${name}=(true|false)`).exec(text)
+    assert(found, `the resolution did not write ${name} for tag ${tag} (channel ${requested})`)
+    return found[1] === 'true'
   }
-  return { latest: normalise(latest[1]), beta: normalise(beta[1]) }
+  return { prerelease: read('prerelease'), images: read('images') }
 }
 
-test('latest never points at a prerelease and beta always tracks the newest of any kind', () => {
-  const { latest, beta } = channelExpressions(job('docker'))
-  const cases = [
-    ['v1.0.0', true, true],
-    ['v4.0.0', true, true],
-    // The scheme this project actually publishes.
-    ['v0.0.1-beta11', false, true],
-    ['v0.0.1-beta9', false, true],
-    ['v1.0.0-rc1', false, true],
-    // Not a release tag at all; neither channel may move.
-    ['1.0.0', false, false],
-    ['nightly', false, false]
-  ]
-  for (const [tag, wantLatest, wantBeta] of cases) {
-    assert.equal(channelEnabled(latest, tag), wantLatest, `latest for ${tag}`)
-    assert.equal(channelEnabled(beta, tag), wantBeta, `beta for ${tag}`)
+test('the image channels both read the one resolved answer', () => {
+  const docker = job('docker')
+  const latest = /value=latest,enable=\$\{\{ (.*?) \}\}/.exec(docker)
+  const beta = /value=beta,enable=\$\{\{ (.*?) \}\}/.exec(docker)
+  assert(latest && beta, 'the image channels must both declare an enable condition')
+  for (const [name, expression] of [['latest', latest[1]], ['beta', beta[1]]]) {
+    assert(
+      expression.includes("needs.setup.outputs.image_channel == 'true'"),
+      `${name} must read whether images are published at all: ${expression}`,
+    )
   }
+  assert(latest[1].includes("needs.setup.outputs.prerelease == 'false'"),
+    'latest must move only for a stable release')
+  assert(!beta[1].includes('prerelease'),
+    'beta tracks the newest of any kind, so it must not read the channel')
+})
+
+test('latest never points at a prerelease and beta always tracks the newest of any kind', () => {
+  // The scheme this project publishes today.
+  assert.deepEqual(resolveChannel('v1.0.0'), { prerelease: false, images: true })
+  assert.deepEqual(resolveChannel('v0.0.1-beta11'), { prerelease: true, images: true })
+  assert.deepEqual(resolveChannel('v1.0.0-rc1'), { prerelease: true, images: true })
+
+  // The scheme it is moving to. A tag with no hyphen is NOT stable by default:
+  // publishing a candidate as stable moves a pointer consumers follow, and no
+  // later edit takes it back.
+  assert.deepEqual(resolveChannel('release/4.0.0'), { prerelease: true, images: true })
+
+  // Not a release tag at all: neither channel may move.
+  assert.deepEqual(resolveChannel('1.0.0'), { prerelease: true, images: false })
+  assert.deepEqual(resolveChannel('nightly'), { prerelease: true, images: false })
+
+  // An explicit channel overrides the shape, which is what the input is for.
+  assert.deepEqual(resolveChannel('release/4.0.0', 'stable'), { prerelease: false, images: true })
+  assert.deepEqual(resolveChannel('v1.0.0', 'testing'), { prerelease: true, images: true })
 })
 
 test('publisher cache guard rejects implicit defaults and explicit cache restoration', () => {
@@ -373,27 +411,34 @@ test('publisher cache guard rejects implicit defaults and explicit cache restora
 // `prerelease: contains(tag, '-')` was the whole rule, and it is a LEGACY rule: a
 // v-prefixed tag with a hyphen has always meant a pre-release. A product-scheme
 // tag (release/MAJOR.MINOR.PATCH) has no hyphen at all, so the same test would
-// publish every testing candidate as STABLE — and this is the one place where
-// being wrong is not recoverable by a later edit, because `prerelease: false`
-// moves /releases/latest, which PSP's own in-app upgrade nudge reads.
-test('the publication channel is resolved, never inferred from a hyphen', () => {
+// publish every testing candidate as STABLE and would tag no image at all —
+// neither of which is recoverable by a later edit, because `prerelease: false`
+// and the `latest` image tag are what a consumer reads as "released".
+test('the publication channel is resolved once, never inferred from a hyphen', () => {
+  const setup = job('setup')
   const release = job('release')
+  const docker = job('docker')
+
   assert(
-    !/prerelease:\s*\$\{\{\s*contains\(/.test(release),
-    'the release job derives the channel from the tag text again; a product-scheme tag has no hyphen',
+    !/prerelease:\s*\$\{\{\s*contains\(/.test(workflow),
+    'a job derives the channel from the tag text again; a product-scheme tag has no hyphen',
   )
   assert(
-    /prerelease:\s*\$\{\{\s*steps\.channel\.outputs\.prerelease\s*\}\}/.test(release),
-    'the release job must publish the channel the resolution step produced',
+    !/type=raw,value=(?:latest|beta),enable=\$\{\{\s*contains\(/.test(workflow),
+    'an image channel tag is derived from the tag text again',
   )
-  assert(
-    release.includes('Resolve the publication channel'),
-    'the resolution step is what states the rule; without it the field has no source',
-  )
-  // The recoverable direction for an unrecognised tag: pre-release. Getting this
-  // wrong toward stable cannot be undone without moving a pointer users follow.
-  assert(
-    /Resolve the publication channel[\s\S]*?echo 'prerelease=true'/.test(release),
-    'an unrecognised tag must default to pre-release',
-  )
+
+  // ONE ANSWER, IN SETUP, READ BY BOTH. Two places deciding a channel separately
+  // is how they disagree.
+  assert(setup.includes('Resolve the publication channel'), 'setup must resolve the channel')
+  assert(/prerelease: \$\{\{ steps\.channel\.outputs\.prerelease \}\}/.test(setup), 'setup must expose the channel')
+  assert(/image_channel: \$\{\{ steps\.channel\.outputs\.images \}\}/.test(setup), 'setup must expose whether images are tagged')
+
+  assert(/prerelease: \$\{\{ needs\.setup\.outputs\.prerelease \}\}/.test(release), 'the release must publish the resolved channel')
+  assert(/type=raw,value=latest,enable=\$\{\{ needs\.setup\.outputs\.image_channel/.test(docker), 'latest must read the resolved answer')
+  assert(/type=raw,value=beta,enable=\$\{\{ needs\.setup\.outputs\.image_channel/.test(docker), 'beta must read the resolved answer')
+
+  // The recoverable direction for a tag in neither scheme: a deliberate promotion
+  // can correct it, and pointing stable at something unreviewed cannot.
+  assert(/\*\)\s+prerelease=true/.test(setup), 'an unrecognised tag must default to pre-release')
 })
