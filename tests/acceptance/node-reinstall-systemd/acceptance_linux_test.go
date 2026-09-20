@@ -49,11 +49,16 @@ const (
 	nodeUnit    = "/etc/systemd/system/passwall-node.service"
 	installLock = "/opt/.passwall-node-install.lock"
 	ownerMarker = nodeRoot + "/.psp-disposable-reinstall-owner"
-	nodeVersion = "v0.0.1-beta4"
-	// The published beta4 annotated tag peels to 4b40af2e162a9510a33a243e06dd446ec24afcd5.
-	// The publisher stamps short7; the daemon reports version.String(), not a
-	// bare version. Pin the real identity rather than accepting an arbitrary suffix.
-	nodeReportedIdentity = "v0.0.1-beta4 (4b40af2)"
+	// THE FIRST RELEASE UNDER THE CURRENT SCHEME, and a real published one: this
+	// suite downloads and verifies the actual archive, so the identity has to name
+	// a release that exists. It used to name the published beta4, which the panel
+	// cannot read any more — a legacy version is not a version, so the bootstrap
+	// endpoint refused it before anything was installed.
+	nodeVersion = "4.0.0"
+	// The release/4.0.0 tag peels to 5fd84eca5b1ffbc5d999979ea6b3ec377b0c6d33.
+	// The publisher stamps short7; the daemon reports version.String(), not a bare
+	// version. Pin the real identity rather than accepting an arbitrary suffix.
+	nodeReportedIdentity = "4.0.0 (5fd84ec)"
 	coreVersion          = "26.6.27"
 )
 
@@ -62,7 +67,7 @@ const (
 type pinnedCatalog struct{}
 
 func (pinnedCatalog) List(context.Context) (ports.NodeReleaseList, error) {
-	return ports.NodeReleaseList{Releases: []ports.NodeReleaseCatalogEntry{{Version: nodeVersion, Channel: "beta", Methods: []string{"linux"}, Platforms: []ports.NodeReleasePlatform{{OS: "linux", Arch: "amd64"}, {OS: "linux", Arch: "arm64"}}}}}, nil
+	return ports.NodeReleaseList{Releases: []ports.NodeReleaseCatalogEntry{{Version: nodeVersion, Channel: "testing", Methods: []string{"linux"}, Platforms: []ports.NodeReleasePlatform{{OS: "linux", Arch: "amd64"}, {OS: "linux", Arch: "arm64"}}}}}, nil
 }
 
 type fixture struct {
@@ -83,7 +88,7 @@ type fixture struct {
 func TestDisposableSystemdNodeReinstall(t *testing.T) {
 	assertDisposable(t)
 	if strings.Contains(nodeReportedIdentity, "_PENDING") {
-		t.Fatal("fill the exact verified published beta4 build identity before running acceptance")
+		t.Fatal("fill the exact verified published build identity before running acceptance")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
 	defer cancel()
