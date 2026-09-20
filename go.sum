@@ -35,6 +35,8 @@ github.com/KazuhaHub/authcore v0.4.0 h1:7mlbLaCm695Y6XURIXgUiYC9h5ipcRloiQpl+Zc7
 github.com/KazuhaHub/authcore v0.4.0/go.mod h1:ARcronV/ULV12fWRztXH8hW/E/z2PKlOIhkpWolFIVs=
 github.com/KazuhaHub/passwall-node v0.0.1-beta11 h1:PKOc7hIf1GabOD5K/Z5peZlVsLIpvOIRraHiMW8YYWc=
 github.com/KazuhaHub/passwall-node v0.0.1-beta11/go.mod h1:psrbk07SQd/zDl58/z4lJSOSTTRVVvU8r6xTGGthDZk=
+github.com/KazuhaHub/passwall-node v0.0.1-beta12 h1:0e6BH7qQMzDpDCEh7EOJWkFY6lYqV3lkV9s+BKJk0aQ=
+github.com/KazuhaHub/passwall-node v0.0.1-beta12/go.mod h1:Rhi/6PWBO+pfvjAFnFV9rXBmP3x0DTyA44xmTIAO/M8=
 github.com/KazuhaHub/passwall-protocol v0.1.0 h1:B5Y/vHXflIGGEogeConPbBh9xjitGmzKpu6+x1QUgOE=
 github.com/KazuhaHub/passwall-protocol v0.1.0/go.mod h1:IQAhUtHV50QCZFbjIKDvrQBzyQY1tZerGp7F4KfquBI=
 github.com/KazuhaHub/passwall-protocol v0.2.0 h1:nYnqmFMJYXZ3TuiCfKOGeT8zrSOALUPkbp2DqUgQUIw=

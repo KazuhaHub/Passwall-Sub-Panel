@@ -25,14 +25,15 @@ import (
 // intended: an allowlist that outlives its entries is a description of a
 // repository that no longer exists, and it is what the next reader would trust.
 //
-// Deleting entries from this map IS the migration. One has MOVED rather than
-// gone: PSP's direct use of the Node module's protocol package is zero, and what
-// keeps it in the closure is the two packages beside it. What remains, each with
-// a named successor:
+// Deleting entries from this map IS the migration. Two have MOVED rather than
+// gone: PSP's direct use of the Node module's protocol package is zero, and the
+// package itself has now left the closure as well. What remains, each with a
+// named successor:
 //
-//	protocol     → already imported from github.com/KazuhaHub/passwall-protocol
 //	deployment   → the installation contract PSP consumes as an adapter (X07)
 //	corecatalog  → the dynamically reviewed release policy (X07)
+//	releaseid    → leaves with deployment; reached only through it
+//	nodeconfig   → leaves with deployment; reached only through it
 type residualDependency struct {
 	// successor is what will replace this dependency, so the reason for the
 	// entry is not "it is still here", which is not a reason.
@@ -44,16 +45,13 @@ type residualDependency struct {
 }
 
 var allowedResidual = map[string]residualDependency{
-	// TRANSITIVE NOW, AND THAT IS THE PROGRESS. PSP's production code imports the
-	// shared contract from github.com/KazuhaHub/passwall-protocol and no longer
-	// from the Node module's copy — zero files. The package is still in the
-	// dependency CLOSURE because `deployment` and `corecatalog` use it
-	// themselves, and `go list -deps` reports what ships rather than what was
-	// typed. It leaves when they do.
-	"github.com/KazuhaHub/passwall-node/protocol": {
-		successor: "leaves with deployment and corecatalog; PSP no longer imports it",
-		files:     0,
-	},
+	// THIS ONE LEFT, AND THIS GUARD IS HOW THAT WAS NOTICED. `passwall-node/protocol`
+	// was a transitive entry because `deployment` and `corecatalog` used it
+	// themselves. Moving the dependency pin to the verified Node main commit
+	// dropped it from the closure — the Node side now reaches the shared contract
+	// from `github.com/KazuhaHub/passwall-protocol` — and an allowlist entry that
+	// outlived the package would have been a description of a repository that no
+	// longer exists. The entry is deleted rather than kept for safety.
 	"github.com/KazuhaHub/passwall-node/deployment": {
 		successor: "a pinned, signed installation template consumed by a PSP adapter",
 		files:     2,
@@ -62,6 +60,21 @@ var allowedResidual = map[string]residualDependency{
 		successor: "the dynamically reviewed release policy",
 		files:     5,
 	},
+	// ADDED BY THE PIN MOVE, AND THAT IS A DECISION RATHER THAN A SLIP. The
+	// verified revision drops `protocol` and gains this: the `release-tag`
+	// command PSP's release workflow runs resolves the tag through `releaseid`,
+	// which is the whole reason the pin moved, so it cannot be avoided by
+	// choosing a different revision. Zero files import it directly — it arrives
+	// through `deployment`, exactly as `nodeconfig` does, and it leaves when
+	// `deployment` does.
+	//
+	// IF PSP EVER NEEDS THE RULE DIRECTLY, that is a separate decision about
+	// where the rule should live — the Node module or the shared protocol module —
+	// and not something to settle by importing whichever copy is nearest.
+	"github.com/KazuhaHub/passwall-node/releaseid": {
+		successor: "leaves with deployment; not separately removable",
+		files:     0,
+	},
 	// Reached only through the Node packages above, never imported by PSP
 	// directly: `deployment` uses it to render the connection environment. It
 	// leaves when they do, and it cannot be removed on its own. It is listed
@@ -69,11 +82,12 @@ var allowedResidual = map[string]residualDependency{
 	// tool reports would be describing a different dependency graph than the
 	// one that exists.
 	//
-	// The surface has SHRUNK twice since this list was written: the Node release
-	// catalog and the agent-upgrade service each stopped reaching for a rule the
-	// installer owns, and both times this guard failed on the stale count before
-	// anything else noticed. That is the property worth keeping — the number is
-	// not documentation, it is a tripwire.
+	// The surface has SHRUNK three times since this list was written: the Node
+	// release catalog and the agent-upgrade service each stopped reaching for a
+	// rule the installer owns, and then `protocol` left the closure entirely.
+	// Every time this guard failed on the stale entries before anything else
+	// noticed. That is the property worth keeping — the number is not
+	// documentation, it is a tripwire.
 	"github.com/KazuhaHub/passwall-node/internal/nodeconfig": {
 		successor: "leaves with deployment; not separately removable",
 		files:     0,

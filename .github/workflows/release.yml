@@ -17,14 +17,21 @@ name: Release
 on:
   push:
     tags:
-      # BOTH SCHEMES, FOR AS LONG AS BOTH EXIST. `v*` is the legacy shape and
-      # stays until the last v-named release is out of support; `release/*` is
-      # the product shape (release/MAJOR.MINOR.PATCH). Leaving it out does not
-      # fail loudly — the tag is pushed, no run starts, and the name points at
-      # nothing — which is why the guard in deploy/release_workflow_test.mjs
-      # asserts both patterns rather than only the channel rule.
+      # ONLY THE LEGACY SCHEME, AND THAT IS DELIBERATE. The publish side
+      # already separates the tag from the version, so a product tag would build
+      # and publish correctly — but a product release's TAG is not its VERSION,
+      # and two consumers of a published release still read the tag as the
+      # version: the public Node installer, and PSP's own cmd/compatwatch, which
+      # reconciles the Node repo's `tag_name` against
+      # internal/adapters/noderelease/reviewed.json.
+      #
+      # So a `release/4.0.0` pushed today would run, resolve its identity, and
+      # then be refused by the check-image step on an image tag that is not the
+      # version — a release that fails late, after the tag exists and names
+      # nothing. Adding `release/*` here opens in the SAME BATCH as that consumer
+      # work; deploy/release_workflow_test.mjs asserts the absence until then and
+      # is rewritten in that batch, not deleted.
       - "v*"
-      - "release/*"
   workflow_dispatch:
     inputs:
       tag:
@@ -65,6 +72,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       tag: ${{ steps.identity.outputs.tag }}
+      version: ${{ steps.identity.outputs.version }}
       owner_lc: ${{ steps.identity.outputs.owner_lc }}
       sha: ${{ steps.identity.outputs.sha }}
       build_date: ${{ steps.identity.outputs.build_date }}
@@ -107,9 +115,21 @@ jobs:
           else
             tag="${GITHUB_REF_NAME}"
           fi
-          # Use the pinned, published Node installer/publisher tag authority,
-          # not a second PSP regex or an automatically resolved latest version.
-          go run github.com/KazuhaHub/passwall-node/deployment/cmd/release-tag "$tag"
+          # Use the pinned, published Node installer/publisher tag authority, not
+          # a second PSP regex or an automatically resolved latest version. It
+          # PRINTS THE VERSION, which for the legacy scheme is the tag itself and
+          # for the product scheme is not: `release/4.0.0` names the release
+          # `4.0.0`. Discarding that output — which is what this did — left the
+          # tag standing in for the version everywhere downstream.
+          #
+          # It refuses an unpublishable tag, and the emptiness check is the belt
+          # to its braces: an empty version reaching ldflags or an archive name is
+          # a silently wrong artifact rather than a failure.
+          version=$(go run github.com/KazuhaHub/passwall-node/deployment/cmd/release-tag "$tag")
+          test -n "$version" || {
+            echo 'the release tag produced no version' >&2
+            exit 1
+          }
           test "$GITHUB_REF" = "refs/tags/${tag}" || {
             echo 'select the exact release tag ref for dispatch' >&2
             exit 1
@@ -129,8 +149,17 @@ jobs:
             exit 1
           }
           owner_lc=$(printf '%s' "$GITHUB_REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]')
+          # WHICH IDENTITY GOES WHERE, because the two are the same string in the
+          # legacy scheme and using one for the other is invisible until the
+          # product scheme, where it is a different release:
+          #
+          #   tag     — the git ref, the release's tag_name and title, and the
+          #             shape the publication channel is read from.
+          #   version — the build stamp, the archive name, the exact image tag and
+          #             the OCI version label.
           {
             echo "tag=${tag}"
+            echo "version=${version}"
             echo "owner_lc=${owner_lc}"
             echo "sha=${release_sha}"
             echo "build_date=$(date -u +%FT%TZ)"
@@ -186,7 +215,7 @@ jobs:
       - name: Refuse an already published exact image tag
         env:
           IMAGE_OWNER: ${{ steps.identity.outputs.owner_lc }}
-          RELEASE_VERSION: ${{ steps.identity.outputs.tag }}
+          RELEASE_VERSION: ${{ steps.identity.outputs.version }}
         run: node deploy/check-image.mjs "${IMAGE_OWNER}/passwall-sub-panel" "$RELEASE_VERSION"
 
       # THE PLAN, NOT A LIST. The supported versions come from the manifest by
@@ -529,7 +558,7 @@ jobs:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: "0"
-          VERSION: ${{ needs.setup.outputs.tag }}
+          VERSION: ${{ needs.setup.outputs.version }}
           COMMIT: ${{ needs.setup.outputs.sha }}
           BUILD_DATE: ${{ needs.setup.outputs.build_date }}
         run: |
@@ -602,7 +631,7 @@ jobs:
       - name: Package archives
         shell: bash
         env:
-          VERSION: ${{ needs.setup.outputs.tag }}
+          VERSION: ${{ needs.setup.outputs.version }}
         run: |
           set -euo pipefail
           mkdir -p dist build
@@ -651,7 +680,8 @@ jobs:
       - name: Generate release body
         shell: bash
         env:
-          VERSION: ${{ needs.setup.outputs.tag }}
+          VERSION: ${{ needs.setup.outputs.version }}
+          PRERELEASE: ${{ needs.setup.outputs.prerelease }}
           OWNER_LC: ${{ needs.setup.outputs.owner_lc }}
         run: |
           set -euo pipefail
@@ -661,7 +691,14 @@ jobs:
           # image instead of the build they are looking at — the one failure
           # mode where following the instructions verbatim gets you the wrong
           # binary and no error. So a pre-release names its own tag, only.
-          if [[ "${VERSION}" == *-* ]]; then
+          #
+          # AND THE ANSWER COMES FROM setup, NOT FROM A HYPHEN IN THIS SCRIPT.
+          # This tested `${VERSION}` for a hyphen, which is the legacy shape rule
+          # living a second time in a place nobody would look for it: a product
+          # version is three digits with no hyphen, so every testing candidate
+          # would have been handed the `:latest` command above — this comment's
+          # own failure mode, in the release it was written to protect.
+          if [ "${PRERELEASE}" = "true" ]; then
             PULL_LINES="docker pull ghcr.io/${OWNER_LC}/passwall-sub-panel:${VERSION}"
           else
             PULL_LINES="docker pull ghcr.io/${OWNER_LC}/passwall-sub-panel:latest
@@ -690,15 +727,19 @@ jobs:
             cat "$note" >> release_notes.md
           fi
 
+      # THE TAG, NOT THE VERSION, and the variable says which. This looks up a
+      # GIT REF, so binding it to the version would ask for `refs/tags/4.0.0` —
+      # a ref that does not exist for a product release, and the failure would
+      # read as "the tag changed during the build" rather than "wrong identity".
       - name: Recheck immutable tag before publication
         shell: bash
         env:
-          VERSION: ${{ needs.setup.outputs.tag }}
+          TAG: ${{ needs.setup.outputs.tag }}
           COMMIT: ${{ needs.setup.outputs.sha }}
         run: |
           set -euo pipefail
-          git fetch --force --no-tags origin "refs/tags/${VERSION}:refs/tags/${VERSION}"
-          test "$(git rev-parse --verify "refs/tags/${VERSION}^{commit}")" = "$COMMIT" || {
+          git fetch --force --no-tags origin "refs/tags/${TAG}:refs/tags/${TAG}"
+          test "$(git rev-parse --verify "refs/tags/${TAG}^{commit}")" = "$COMMIT" || {
             echo 'release tag changed during the build; refusing publication' >&2
             exit 1
           }
@@ -771,7 +812,13 @@ jobs:
         with:
           images: ghcr.io/${{ needs.setup.outputs.owner_lc }}/passwall-sub-panel
           tags: |
-            type=raw,value=${{ needs.setup.outputs.tag }}
+            # THE EXACT IMAGE TAG IS THE VERSION, NOT THE GIT TAG. A product tag
+            # contains a slash, and a slash in a Docker tag is not rejected — it
+            # is read as a REPOSITORY separator, so
+            # `passwall-sub-panel:release/4.0.0` addresses a repository named
+            # `passwall-sub-panel/release`. The build would succeed and push to
+            # somewhere nobody is watching.
+            type=raw,value=${{ needs.setup.outputs.version }}
             # Two rolling channels:
             #   :latest → newest STABLE only. Mirrors GitHub /releases/latest and
             #             PSP's in-app self-update nudge, so a :latest deploy never
@@ -787,18 +834,18 @@ jobs:
             org.opencontainers.image.title=passwall-sub-panel
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ needs.setup.outputs.sha }}
-            org.opencontainers.image.version=${{ needs.setup.outputs.tag }}
+            org.opencontainers.image.version=${{ needs.setup.outputs.version }}
             org.opencontainers.image.licenses=AGPL-3.0
 
       - name: Recheck immutable tag before image publication
         shell: bash
         env:
-          VERSION: ${{ needs.setup.outputs.tag }}
+          TAG: ${{ needs.setup.outputs.tag }}
           COMMIT: ${{ needs.setup.outputs.sha }}
         run: |
           set -euo pipefail
-          git fetch --force --no-tags origin "refs/tags/${VERSION}:refs/tags/${VERSION}"
-          test "$(git rev-parse --verify "refs/tags/${VERSION}^{commit}")" = "$COMMIT" || {
+          git fetch --force --no-tags origin "refs/tags/${TAG}:refs/tags/${TAG}"
+          test "$(git rev-parse --verify "refs/tags/${TAG}^{commit}")" = "$COMMIT" || {
             echo 'release tag changed during the build; refusing image publication' >&2
             exit 1
           }
@@ -806,7 +853,7 @@ jobs:
       - name: Refuse an already published exact image tag
         env:
           IMAGE_OWNER: ${{ needs.setup.outputs.owner_lc }}
-          RELEASE_VERSION: ${{ needs.setup.outputs.tag }}
+          RELEASE_VERSION: ${{ needs.setup.outputs.version }}
         run: node deploy/check-image.mjs "${IMAGE_OWNER}/passwall-sub-panel" "$RELEASE_VERSION"
 
       - name: Build and push multi-arch image
