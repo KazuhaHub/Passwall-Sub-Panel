@@ -15,7 +15,7 @@ import (
 	"time"
 
 	"github.com/KazuhaHub/passwall-node/deployment"
-	nodeprotocol "github.com/KazuhaHub/passwall-node/protocol"
+	nodeprotocol "github.com/KazuhaHub/passwall-protocol/protocol"
 	"golang.org/x/mod/semver"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"

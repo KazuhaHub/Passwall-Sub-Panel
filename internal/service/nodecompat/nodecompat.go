@@ -16,7 +16,7 @@ import (
 	"strings"
 	"time"
 
-	nodeprotocol "github.com/KazuhaHub/passwall-node/protocol"
+	nodeprotocol "github.com/KazuhaHub/passwall-protocol/protocol"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/compatadmission"
@@ -114,13 +114,13 @@ func Message(agent *domain.NodeAgent, decision compatadmission.Decision) string 
 	case compatadmission.ReasonProtocolIncompatible:
 		return fmt.Sprintf("native agent protocol version %d is outside the reviewed range %d..%d",
 			nodeprotocol.EffectiveProtocolVersion(agent.ObservedProtocolVersion),
-			nodeprotocol.MinSupportedProtocolVersion, nodeprotocol.MaxSupportedProtocolVersion)
+			domain.SupportedNodeProtocolGenerations().Min, domain.SupportedNodeProtocolGenerations().Max)
 	case compatadmission.ReasonCapabilityMissing:
 		// Read through the shared protocol assessment rather than re-deriving:
 		// this is a projection of the observation for the message, not a second
 		// decision. It is the same function the wire layer uses, so the names in
 		// the message cannot drift from the names on the wire.
-		compatibility := nodeprotocol.AssessCompatibility(agent.ObservedProtocolVersion, agent.ObservedCapabilities)
+		compatibility := nodeprotocol.AssessCompatibilityIn(agent.ObservedProtocolVersion, agent.ObservedCapabilities, domain.SupportedNodeProtocolGenerations())
 		return fmt.Sprintf("native agent does not currently advertise remote-upgrade capabilities: %s",
 			strings.Join(compatibility.MissingAgentUpgrade, ", "))
 	case compatadmission.ReasonUpgradeEdgeMissing:

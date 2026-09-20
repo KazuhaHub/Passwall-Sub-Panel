@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"time"
 
-	nodeprotocol "github.com/KazuhaHub/passwall-node/protocol"
+	nodeprotocol "github.com/KazuhaHub/passwall-protocol/protocol"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 

@@ -7,7 +7,7 @@ import (
 	"slices"
 	"testing"
 
-	nodeprotocol "github.com/KazuhaHub/passwall-node/protocol"
+	nodeprotocol "github.com/KazuhaHub/passwall-protocol/protocol"
 )
 
 type nodeCompatibilityMatrix struct {
