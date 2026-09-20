@@ -3,7 +3,7 @@ import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Server } from '@/api/servers'
 import type { NodeReleaseCatalog } from '@/api/nodeReleases'
-import { api, installReads, list, mount } from '@/test/adminSaveHarness'
+import { api, installReads, list, mount, snack } from '@/test/adminSaveHarness'
 import ConfirmHost from '@/components/ConfirmHost'
 import { useAuthStore } from '@/stores/auth'
 import english from '@/locales/en-US/admin.json'
@@ -226,5 +226,70 @@ describe('the 3X-UI upgrade confirm states what the target is not', () => {
     // harness, so a substring regex is what matches a single line.
     expect(await screen.findByText(/admin:servers\.confirm\.upgrade_target(?![_])/)).toBeTruthy()
     expect(screen.queryByText(/admin:servers\.confirm\.upgrade_target_unpinnable/)).toBeNull()
+  })
+})
+
+// The instance decides whether it may upgrade a component; the dialog asks.
+// Showing a confirm and letting the request fail would teach the operator that
+// the button is unreliable, and firing on a state the server already called
+// unavailable makes the client the first place the decision was made.
+describe('the upgrade action asks the instance before it fires', () => {
+  const optionRead = (state: string, reason_codes = ['capability_missing']) => ({
+    '/admin/servers/9/upgrade-options': { component: 'panel', state, target_pinnable: false, reason_codes },
+  })
+
+  it.each(['unsupported', 'blocked'])('does not fire when the instance answers %s', async state => {
+    installReads({ '/admin/servers': list([xui]), ...optionRead(state) })
+    mount(<><ConfirmHost /><ServersView /></>)
+
+    const row = await rowFor(xui.name)
+    fireEvent.click(within(row).getByRole('button', { name: 'admin:servers.action.more' }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'admin:servers.action.upgrade_panel' }))
+
+    // The harness mocks pushSnack, so the message is read from the spy rather
+    // than the DOM — and it is the i18n KEY, because t() resolves keys to
+    // themselves here.
+    await waitFor(() => expect(snack.mock.calls.some(([message]) => /upgrade_unavailable/.test(message))).toBe(true))
+    // No confirm and no request: the refusal came from the instance, so there is
+    // nothing for the operator to agree to.
+    expect(screen.queryByText('admin:servers.confirm.upgrade_panel_title')).toBeNull()
+    expect(upgradeWrites()).toHaveLength(0)
+  })
+
+  it('still asks for confirmation when the instance says the upgrade is manual only', async () => {
+    // manual_only is not a refusal — the upgrade is possible, it just cannot be
+    // held to a version — so the operator still gets the dialog.
+    installReads({
+      '/admin/servers': list([xui]),
+      ...optionRead('manual_only', ['target_not_pinnable']),
+      '/admin/servers/9/upgrade-preview': {
+        update_available: true, current_version: '3.4.2', target_version: 'v3.7.0',
+        compat_status: 'supported', target_pinnable: false,
+      },
+    })
+    mount(<><ConfirmHost /><ServersView /></>)
+
+    const row = await rowFor(xui.name)
+    fireEvent.click(within(row).getByRole('button', { name: 'admin:servers.action.more' }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'admin:servers.action.upgrade_panel' }))
+
+    expect(await screen.findByText('admin:servers.confirm.upgrade_panel_title')).toBeTruthy()
+    expect(snack.mock.calls.some(([message]) => /upgrade_unavailable/.test(message))).toBe(false)
+  })
+
+  it('falls through to the existing flow when the instance cannot answer', async () => {
+    // A failed read is NOT a refusal: the write path still protects the fire, so
+    // a control-plane blip must not remove an action the operator was using.
+    installReads({
+      '/admin/servers': list([xui]),
+      '/admin/servers/9/upgrade-preview': { update_available: true, current_version: '3.4.2', target_version: 'v3.7.0' },
+    })
+    mount(<><ConfirmHost /><ServersView /></>)
+
+    const row = await rowFor(xui.name)
+    fireEvent.click(within(row).getByRole('button', { name: 'admin:servers.action.more' }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'admin:servers.action.upgrade_panel' }))
+
+    expect(await screen.findByText('admin:servers.confirm.upgrade_panel_title')).toBeTruthy()
   })
 })

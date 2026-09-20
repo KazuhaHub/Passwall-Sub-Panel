@@ -81,6 +81,7 @@ import {
 	selectCore,
   testServer,
   updateServer,
+  upgradeOptions,
   upgradePanel,
   upgradePreview,
   upgradeXray,
@@ -395,6 +396,22 @@ export default function ServersView() {
     // during the confirm modal could fire two upgrade POSTs.
     setUpgrading(s.id)
     try {
+      // ASK THE INSTANCE FIRST, when it can answer. The decision is the
+      // server's; a dialog that decided for itself would be a second decision
+      // source, and the one the operator saw would not be the one enforced.
+      // A failure here is NOT a refusal — the write path still protects the
+      // fire — so it falls through to the existing flow.
+      const option = await upgradeOptions(s.id, 'panel').catch(() => null)
+      if (option?.state === 'unsupported' || option?.state === 'blocked') {
+        pushSnack(
+          t('admin:servers.toast.upgrade_unavailable', {
+            reasons: option.reason_codes.join(', '),
+            defaultValue: '此实例当前不能升级该组件（{{reasons}}）。',
+          }),
+          'warning',
+        )
+        return
+      }
       if (!force) {
         closeMenu()
         // Read-only pre-flight: target version + tested-range check + advisory,

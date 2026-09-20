@@ -468,6 +468,32 @@ export async function upgradePreview(id: number) {
   return data
 }
 
+// upgrade-options answers, per component, whether THIS instance may upgrade it.
+// The four states are distinct on purpose: `unsupported` means the backend has
+// no such operation, `blocked` that the operation exists and is refused now, and
+// `manual_only` that it can be done but not by an executor that can be held to a
+// version. The server decides; this module only carries the answer.
+export type UpgradeOptionState = 'ready' | 'manual_only' | 'unsupported' | 'blocked'
+export type UpgradeComponent = 'panel' | 'core' | 'agent'
+export interface UpgradeOption {
+  component: UpgradeComponent
+  state: UpgradeOptionState
+  current_version?: string
+  target_version?: string
+  target_pinnable: boolean
+  reason_codes: string[]
+}
+
+export async function upgradeOptions(id: number, component: UpgradeComponent) {
+  // Best-effort at the call site: a failure here falls back to the existing
+  // flow rather than blocking an upgrade the write path still enforces.
+  const { data } = await client.get<UpgradeOption>(`/admin/servers/${id}/upgrade-options`, {
+    params: { component },
+    _skipErrorToast: true,
+  })
+  return data
+}
+
 export interface UpgradeXrayResult {
   ok: boolean
 	engine?: NativeCoreEngine

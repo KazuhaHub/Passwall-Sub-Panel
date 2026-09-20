@@ -2496,7 +2496,8 @@
       "batch_upgrade_xray_partial": "Upgraded Xray on {{ok}} server(s); {{fail}} failed",
       "batch_upgrade_panel_ok": "Initiated 3X-UI upgrade on {{count}} server(s); each runs a smoke probe in ~60s (results in the audit log)",
       "batch_upgrade_panel_ok_latest": "Initiated 3X-UI upgrade on {{count}} server(s); {{latest}} already on the latest version (skipped)",
-      "batch_upgrade_panel_partial": "Initiated {{ok}}; {{latest}} already latest; {{blocked}} blocked (target outside tested range — force per-panel); {{fail}} failed"
+      "batch_upgrade_panel_partial": "Initiated {{ok}}; {{latest}} already latest; {{blocked}} blocked (target outside tested range — force per-panel); {{fail}} failed",
+      "upgrade_unavailable": "This instance cannot upgrade that component right now ({{reasons}})."
     },
     "confirm": {
       "delete_title": "Delete server",
