@@ -224,17 +224,35 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	// read from there. Set BEFORE the boot fetch so a pre-flight arriving during
 	// it sees the same source.
 	version.SetPolicySource(cfg.PolicySourceURL)
+	var policyErr error
 	if cfg.PolicySourceURL != "" {
-		if err := version.RefreshReleasesPolicy(ctx, cfg.PolicySourceURL, time.Now().UTC()); err != nil {
-			log.Warn("release policy not loaded; admission falls back to what is already in force",
-				"source", cfg.PolicySourceURL, "err", err)
-		} else if version.PolicyLoaded() {
-			log.Info("release policy loaded", "source", cfg.PolicySourceURL, "enforcing", version.PolicyEnforcing())
+		policyErr = version.RefreshReleasesPolicy(ctx, cfg.PolicySourceURL, time.Now().UTC())
+	}
+	// ENFORCEMENT IS A SEPARATE SWITCH, applied after the load so a policy that
+	// failed to fetch cannot leave the panel enforcing nothing.
+	//
+	// IT IS DECIDED BEFORE ANYTHING REPORTS IT. The first version logged the state
+	// from above this line, so a panel that was enforcing printed
+	// `enforcing=false` — the log said one thing and the process did another, and
+	// the log is what an operator has.
+	version.SetPolicyEnforcement(cfg.PolicyEnforce && version.PolicyLoaded())
+	if cfg.PolicySourceURL != "" || cfg.PolicyEnforce {
+		fields := []any{
+			"source", cfg.PolicySourceURL,
+			"installed", version.PolicyInstalled(),
+			"applicable", version.PolicyLoaded(),
+			"enforcing", version.PolicyEnforcing(),
+		}
+		if policyErr != nil {
+			fields = append(fields, "err", policyErr)
+		}
+		// A failure is not a boot failure: the panel keeps whatever policy it has.
+		if policyErr != nil {
+			log.Warn("release policy not refreshed; admission falls back to what is already in force", fields...)
+		} else {
+			log.Info("release policy state", fields...)
 		}
 	}
-	// ENFORCEMENT IS A SEPARATE SWITCH, and it is applied after the load so a
-	// policy that failed to fetch cannot leave the panel enforcing nothing.
-	version.SetPolicyEnforcement(cfg.PolicyEnforce && version.PolicyLoaded())
 	if cfg.PolicyEnforce && !version.PolicyLoaded() {
 		log.Warn("policy_enforce is set but no policy is loaded; admission is unchanged")
 	}
