@@ -337,3 +337,35 @@ describe('the fleet-level compatibility state', () => {
     expect(screen.queryByText(/compat_notice\./)).toBeNull()
   })
 })
+
+// The manual-maintenance copy existed in both locales and was rendered nowhere —
+// written and never wired, which looks identical to never having written it. Its
+// absence matters because "there is a newer release" and "there is something for
+// you to do" are different sentences.
+describe('the S-UI manual-upgrade hint', () => {
+  it('tells an S-UI operator the release is theirs to install', async () => {
+    installReads({ '/admin/servers': list([sui]) })
+    mount(<ServersView />)
+    const row = await rowFor(sui.name)
+    expect(await within(row).findByText('admin:servers.sui_update.manual_hint')).toBeTruthy()
+  })
+
+  it('does not say it when there is no update to install', async () => {
+    // The hint is a step, not a permanent caveat about the backend.
+    installReads({ '/admin/servers': list([{ ...sui, update_available: false, latest_sui_version: undefined }]) })
+    mount(<ServersView />)
+    const row = await rowFor(sui.name)
+    await within(row).findByText('S-UI 1.5.0')
+    expect(within(row).queryByText('admin:servers.sui_update.manual_hint')).toBeNull()
+  })
+
+  it('does not attach it to a 3X-UI row', async () => {
+    // 3X-UI has a managed path from the row menu; telling its operator to
+    // maintain it by hand would be the opposite of true.
+    installReads({ '/admin/servers': list([xui]) })
+    mount(<ServersView />)
+    const row = await rowFor(xui.name)
+    expect(await within(row).findByText(/admin:servers.update_available/)).toBeTruthy()
+    expect(within(row).queryByText('admin:servers.sui_update.manual_hint')).toBeNull()
+  })
+})

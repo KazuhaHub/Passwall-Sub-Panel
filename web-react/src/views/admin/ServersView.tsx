@@ -1158,6 +1158,14 @@ export default function ServersView() {
         )}
         {s.panel_type === 'psp' && nodeReleaseCheckFailed && <Typography
           variant="caption" color="text.secondary">{t('admin:servers.native.update_check_failed')}</Typography>}
+        {/* S-UI KEEPS A MANUAL UPGRADE, and saying so is the difference between
+            "there is a newer release" and "there is something for you to do".
+            The copy for this existed in both locales and was rendered NOWHERE —
+            written and never wired, which looks identical to not having written
+            it. Shown only when there is an update, so it reads as a step rather
+            than as a permanent caveat about the backend. */}
+        {s.panel_type === 'sui' && !!updateVersion && <Typography
+          variant="caption" color="text.secondary">{t('admin:servers.sui_update.manual_hint')}</Typography>}
       </Box>
     )
     return stacked
