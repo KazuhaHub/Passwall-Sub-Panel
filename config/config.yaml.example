@@ -139,5 +139,14 @@ data_dir: "./data"
 # missing one.
 #
 # policy_source_url: "https://example.invalid/compat"
+
+# Whether a loaded policy DECIDES admission, as opposed to being reported.
 #
-# Env override: PSP_POLICY_SOURCE_URL
+# OFF BY DEFAULT, and the distinction is the point: loading a policy reports it
+# and changes nothing, so configuring a source cannot change what the panel
+# offers as a side effect. Switch this on to let the policy gate upgrades.
+#
+# Enforcement without a verifiable source is REFUSED at boot: it would refuse
+# every upgrade with no policy to justify the refusal.
+#
+# Env override: PSP_POLICY_ENFORCE=1

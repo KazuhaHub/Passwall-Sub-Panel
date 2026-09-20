@@ -40,7 +40,7 @@ func SetActiveUpgradeEdges(edges []UpgradeEdge) {
 // list nobody updated. Before any policy exists the manifest is the only source,
 // which is the state every deployment starts in.
 func ActiveUpgradeEdges() []UpgradeEdge {
-	if policy := applicablePolicy(Version); policy != nil {
+	if policy := policyThatDecides(Version); policy != nil {
 		edges := make([]UpgradeEdge, 0, len(policy.UpgradeEdges))
 		for _, edge := range policy.UpgradeEdges {
 			edges = append(edges, UpgradeEdge{From: edge.From, To: edge.To})

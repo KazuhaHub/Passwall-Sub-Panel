@@ -124,3 +124,45 @@ func TestAPolicySourceWithoutKeysIsRefusedAtBoot(t *testing.T) {
 		t.Fatalf("keys without a source must validate: %v", err)
 	}
 }
+
+// Enforcement without a verifiable source refuses every upgrade with no policy
+// to justify the refusal. That is not a stricter configuration, it is a broken
+// one, and it is cheaper to find at boot than in a refused request.
+func TestPolicyEnforcementNeedsSomethingItCanEnforce(t *testing.T) {
+	key := testKey(t)
+	for _, tc := range []struct {
+		name string
+		cfg  Config
+	}{
+		{
+			name: "enforce with no source and no keys",
+			cfg:  Config{JWTSecret: "x", PolicyEnforce: true},
+		},
+		{
+			name: "enforce with a source but no keys",
+			cfg:  Config{JWTSecret: "x", PolicyEnforce: true, PolicySourceURL: "https://policy.example/"},
+		},
+		{
+			name: "enforce with keys but no source",
+			cfg:  Config{JWTSecret: "x", PolicyEnforce: true, PolicyTrustKeys: map[string]string{"k": key}},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.cfg.validate()
+			if err == nil || !strings.Contains(err.Error(), "policy_enforce") {
+				t.Fatalf("error = %v, want it to name policy_enforce", err)
+			}
+		})
+	}
+
+	// The complete configuration validates, and enforcement stays off by default.
+	complete := Config{JWTSecret: "x", PolicyEnforce: true,
+		PolicySourceURL: "https://policy.example/", PolicyTrustKeys: map[string]string{"k": key}}
+	if err := complete.validate(); err != nil {
+		t.Fatalf("a complete enforcing configuration must validate: %v", err)
+	}
+	if (&Config{JWTSecret: "x", PolicySourceURL: "https://policy.example/",
+		PolicyTrustKeys: map[string]string{"k": key}}).PolicyEnforce {
+		t.Fatal("enforcement must default to off")
+	}
+}

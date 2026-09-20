@@ -42,9 +42,33 @@ func ActiveReleasesPolicy() *ReleasesPolicy {
 	return &copied
 }
 
-// PolicyInForce reports whether an authenticated policy that applies to THIS
-// build is deciding. A policy installed for another build is not in force here.
-func PolicyInForce() bool { return applicablePolicy(Version) != nil }
+// activePolicyEnforcement separates LOADING a policy from LETTING IT DECIDE.
+//
+// The plan stages this deliberately: the new policy service may run in
+// OBSERVATION first, and only then switch admission. Without the split, fetching
+// a policy would change what the panel offers the moment it succeeded — which is
+// a change nobody reviewed as a change, arriving as a side effect of configuring
+// a source.
+//
+// It defaults OFF, so a deployment that loads a policy sees it reported and
+// nothing more until it says otherwise.
+var activePolicyEnforcement atomic.Bool
+
+// SetPolicyEnforcement turns the policy's effect on admission on or off. Loading
+// is independent: a policy can be in force for reporting without deciding.
+func SetPolicyEnforcement(enabled bool) { activePolicyEnforcement.Store(enabled) }
+
+// PolicyEnforcing reports whether the policy in force is allowed to decide.
+func PolicyEnforcing() bool { return activePolicyEnforcement.Load() }
+
+// PolicyLoaded reports whether an authenticated policy that applies to THIS build
+// has been installed — whether or not it is deciding.
+func PolicyLoaded() bool { return applicablePolicy(Version) != nil }
+
+// PolicyInForce reports whether the policy is DECIDING: installed, applicable to
+// this build, and switched on. Every admission path asks this one, so a policy
+// that is merely loaded cannot gate anything.
+func PolicyInForce() bool { return PolicyLoaded() && PolicyEnforcing() }
 
 // PolicyOffersRelease reports whether the policy in force lists this release as
 // an upgrade target.
@@ -109,6 +133,15 @@ func LoadReleasesPolicy(raw, signatureDoc []byte, root *PolicyTrustRoot, now tim
 	}
 	SetActiveReleasesPolicy(&policy)
 	return true, nil
+}
+
+// policyThatDecides returns the policy only when it is both applicable and
+// switched on. Observational readers use applicablePolicy instead.
+func policyThatDecides(buildVersion string) *ReleasesPolicy {
+	if !PolicyEnforcing() {
+		return nil
+	}
+	return applicablePolicy(buildVersion)
 }
 
 // applicablePolicy reports whether the policy in force covers this build. A

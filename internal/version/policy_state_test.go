@@ -50,8 +50,14 @@ func indexOf(haystack, needle string) int {
 	return -1
 }
 
+// installPolicy loads a policy AND switches enforcement on, because these cases
+// are about what the policy DECIDES. Loading alone is a separate state with its
+// own test below.
 func installPolicy(t *testing.T, body []byte, revision int) (*PolicyTrustRoot, ed25519.PrivateKey) {
 	t.Helper()
+	previousEnforcement := PolicyEnforcing()
+	t.Cleanup(func() { SetPolicyEnforcement(previousEnforcement) })
+	SetPolicyEnforcement(true)
 	id, pub, priv := signingKey(t)
 	doc, err := SignReleasesPolicy(body, id, priv, nil)
 	if err != nil {
@@ -138,6 +144,53 @@ func TestAPolicyReplacesTheManifestEdgesRatherThanAddingToThem(t *testing.T) {
 	}
 	if HasUpgradeEdgeFrom("v0.0.1-beta9") {
 		t.Fatal("a list question answered from the superseded manifest")
+	}
+}
+
+// LOADING IS NOT DECIDING. A policy can be reported — its revision, its releases,
+// its edges — without any of it changing what the panel offers, which is the
+// staging the plan requires: observe first, switch admission later. Without this
+// split, fetching a policy would change admission the moment it succeeded, as a
+// side effect of configuring a source rather than as a reviewed change.
+func TestALoadedPolicyDecidesNothingUntilItIsSwitchedOn(t *testing.T) {
+	isolatedCompatCache(t, "v4.0.0")
+	t.Cleanup(func() { SetActiveReleasesPolicy(nil) })
+	previousEnforcement := PolicyEnforcing()
+	t.Cleanup(func() { SetPolicyEnforcement(previousEnforcement) })
+
+	SetActiveUpgradeEdges([]UpgradeEdge{{ID: "manifest", From: "v0.0.1-beta3", To: "v0.0.1-beta11"}})
+	t.Cleanup(func() { SetActiveUpgradeEdges(nil) })
+
+	// Load, without switching enforcement on.
+	SetPolicyEnforcement(false)
+	id, pub, priv := signingKey(t)
+	doc, err := SignReleasesPolicy([]byte(policyBody), id, priv, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadReleasesPolicy([]byte(policyBody), doc, trustRoot(t, id, pub), policyNow()); err != nil {
+		t.Fatal(err)
+	}
+
+	// Reported: the policy is there and can be read.
+	if !PolicyLoaded() {
+		t.Fatal("the policy should be loaded")
+	}
+	if policy := ActiveReleasesPolicy(); policy == nil || policy.Revision == 0 {
+		t.Fatal("a loaded policy must be readable")
+	}
+	// Not deciding: nothing it says gates anything, and the manifest still does.
+	if PolicyInForce() {
+		t.Fatal("a loaded policy must not decide before it is switched on")
+	}
+	if UpgradeEdgeVerified("v0.0.1-beta3", "v0.0.1-beta11") != true {
+		t.Fatal("the manifest's edges should still decide while the policy only observes")
+	}
+
+	// Switched on: now it decides.
+	SetPolicyEnforcement(true)
+	if !PolicyInForce() {
+		t.Fatal("an enforcing policy that applies to this build is in force")
 	}
 }
 

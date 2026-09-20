@@ -66,6 +66,15 @@ type Config struct {
 	// would be left believing a source was in use. The pair is the setting; half
 	// of it is a mistake.
 	PolicySourceURL string `yaml:"policy_source_url"`
+
+	// PolicyEnforce lets a loaded policy DECIDE admission, as opposed to being
+	// reported. Default false: loading a policy reports it and changes nothing.
+	//
+	// The staging is the plan's — observe first, switch admission later — and it
+	// exists because otherwise configuring a source would change what the panel
+	// offers the moment the fetch succeeded, which is a change nobody reviewed as
+	// a change.
+	PolicyEnforce bool `yaml:"policy_enforce"`
 }
 
 // HTTPConfig groups reverse-proxy-aware request-handling settings.
@@ -401,6 +410,9 @@ func Load(path string) (*Config, error) {
 	if tp := os.Getenv("PSP_TRUSTED_PROXIES"); tp != "" {
 		c.HTTP.TrustedProxies = tp
 	}
+	if enforce := os.Getenv("PSP_POLICY_ENFORCE"); enforce == "1" || strings.EqualFold(enforce, "true") {
+		c.PolicyEnforce = true
+	}
 	if source := os.Getenv("PSP_POLICY_SOURCE_URL"); source != "" {
 		c.PolicySourceURL = source
 	}
@@ -485,6 +497,11 @@ func (c *Config) validate() error {
 		if len(raw) != ed25519.PublicKeySize {
 			return fmt.Errorf("policy_trust_keys[%s] is %d bytes, want %d for an ed25519 public key", id, len(raw), ed25519.PublicKeySize)
 		}
+	}
+	if c.PolicyEnforce && (c.PolicySourceURL == "" || len(c.PolicyTrustKeys) == 0) {
+		return fmt.Errorf("policy_enforce is set but the panel has no verifiable source: " +
+			"enforcement needs both policy_source_url and policy_trust_keys, and switching it on without them " +
+			"would refuse every upgrade with no policy to justify the refusal")
 	}
 	if c.PolicySourceURL != "" && len(c.PolicyTrustKeys) == 0 {
 		return fmt.Errorf("policy_source_url is set but policy_trust_keys is empty: " +

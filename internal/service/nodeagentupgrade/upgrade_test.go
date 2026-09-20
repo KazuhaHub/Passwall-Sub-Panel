@@ -413,8 +413,13 @@ func TestAPolicyInForceRefusesATargetItDoesNotOffer(t *testing.T) {
 	t.Cleanup(func() { version.Version = previousVersion })
 	version.Version = "v4.0.0-beta.25"
 
+	previousEnforcement := version.PolicyEnforcing()
+	t.Cleanup(func() { version.SetPolicyEnforcement(previousEnforcement) })
 	install := func(releases ...string) {
 		t.Helper()
+		// Loading a policy is not the same as letting it decide; this case is
+		// about the gate, so it switches enforcement on.
+		version.SetPolicyEnforcement(true)
 		entries := make([]version.PolicyRelease, 0, len(releases))
 		for _, r := range releases {
 			entries = append(entries, version.PolicyRelease{Version: r, ReleaseTag: r, Scheme: "legacy", Evidence: []string{"test"}})

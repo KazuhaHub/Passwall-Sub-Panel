@@ -223,9 +223,15 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 		if err := version.RefreshReleasesPolicy(ctx, cfg.PolicySourceURL, time.Now().UTC()); err != nil {
 			log.Warn("release policy not loaded; admission falls back to what is already in force",
 				"source", cfg.PolicySourceURL, "err", err)
-		} else {
-			log.Info("release policy loaded and in force", "source", cfg.PolicySourceURL)
+		} else if version.PolicyLoaded() {
+			log.Info("release policy loaded", "source", cfg.PolicySourceURL, "enforcing", version.PolicyEnforcing())
 		}
+	}
+	// ENFORCEMENT IS A SEPARATE SWITCH, and it is applied after the load so a
+	// policy that failed to fetch cannot leave the panel enforcing nothing.
+	version.SetPolicyEnforcement(cfg.PolicyEnforce && version.PolicyLoaded())
+	if cfg.PolicyEnforce && !version.PolicyLoaded() {
+		log.Warn("policy_enforce is set but no policy is loaded; admission is unchanged")
 	}
 	// Same boot pattern for the centralized "latest 3X-UI release tag"
 	// snapshot: cold-boot off the cache so the ⋮ kebab "update available"
