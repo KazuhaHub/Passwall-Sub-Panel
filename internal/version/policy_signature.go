@@ -211,7 +211,13 @@ func policySigningMessage(raw []byte, approves []PolicyApprovedKey) ([]byte, err
 	if err != nil {
 		return nil, fmt.Errorf("%w: approvals cannot be encoded", ErrPolicyUnsigned)
 	}
-	message := make([]byte, 0, len(raw)+1+len(encoded))
+	// NO CAPACITY HINT, DELIBERATELY. `make([]byte, 0, len(raw)+1+len(encoded))`
+	// saves two reallocations on a message that is built once per policy fetch,
+	// and costs a reader the job of checking that the sum cannot overflow — which
+	// is a static-analysis alert, and which the reader cannot settle from here
+	// because the bounds live in the caller. The append growth is amortised, and
+	// paying it is cheaper than defending the arithmetic.
+	var message []byte
 	message = append(message, raw...)
 	message = append(message, 0x00)
 	message = append(message, encoded...)
