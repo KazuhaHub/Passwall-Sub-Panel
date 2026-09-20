@@ -7,12 +7,30 @@ import { test } from 'node:test'
 
 const workflow = readFileSync(new URL('../.github/workflows/release.yml', import.meta.url), 'utf8')
 
-// A TAG THE WORKFLOW DOES NOT TRIGGER ON IS A RELEASE THAT DOES NOT HAPPEN. The
-// product scheme (release/MAJOR.MINOR.PATCH) is decided and the channel logic
-// already answers for it, but a trigger list of `v*` alone means the tag can be
-// pushed and nothing runs at all. That failure is the quietest one available:
-// no red run, no artifact, and a tag that now names nothing.
-test('the release workflow triggers on the product tag scheme, not only the legacy one', () => {
+// A TRIGGER THAT FIRES BEFORE THE CONSUMERS UNDERSTAND THE TAG OPENS A RELEASE
+// NOBODY CAN INSTALL — so this asserts the ABSENCE of the product pattern, for
+// the same reason PN's TestTheNodeReleaseWorkflowDoesNotTriggerOnProductTagsYet
+// does. The product scheme (release/MAJOR.MINOR.PATCH) is decided and the
+// channel logic already answers for it; what is not ready is the reading side. A
+// product release's TAG is not its VERSION, and two consumers of a published
+// release still read the tag as the version:
+//
+//   - the public Node installer, which resolves its version from the release's
+//     `tag_name`; and
+//   - PSP's own cmd/compatwatch, which reads the same field on the Node repo and
+//     reconciles it against internal/adapters/noderelease/reviewed.json.
+//
+// A `release/4.0.0` pushed today therefore starts a run whose identity step
+// SUCCEEDS and whose image tag is then refused by check-image — a release that
+// fails late, after the tag exists and names nothing. Making the two workflows
+// agree on the trigger without those consumers would look like consistency and
+// publish nothing.
+//
+// SO THE TRIGGER OPENS IN THE SAME BATCH AS THE CONSUMERS, and this asserts the
+// state in between rather than leaving it to be discovered. When that batch
+// lands, this test is REWRITTEN to require the pattern (as PN's is renamed and
+// flipped) — it does not start passing on its own.
+test('the release workflow does not trigger on the product tag scheme yet', () => {
   const patterns = []
   const lines = workflow.split('\n')
   const start = lines.indexOf('    tags:')
@@ -26,13 +44,107 @@ test('the release workflow triggers on the product tag scheme, not only the lega
     if (!/^      - /.test(line)) break
     patterns.push(line.replace(/^\s*- /, '').replace(/^["']|["']$/g, ''))
   }
-  for (const required of ['v*', 'release/*']) {
-    assert(
-      patterns.includes(required),
-      `the release workflow does not trigger on ${required} (found ${patterns.join(', ')})`,
-    )
+  assert(
+    patterns.includes('v*'),
+    `the release workflow must still trigger on the legacy scheme, or a legacy release runs nothing (found ${patterns.join(', ')})`,
+  )
+  assert(
+    !patterns.includes('release/*'),
+    'the release workflow now triggers on product tags; the public Node installer and PSP cmd/compatwatch both resolve a release version from its tag_name and cannot tell a product tag from its version, so a product release started here would be refused late and name nothing. Read the comment on this test and land the consumer work first — and rewrite this test to require the pattern rather than deleting it.',
+  )
+})
+
+// THE TAG AND THE VERSION ARE TWO IDENTITIES, and in the legacy scheme they are
+// the same string — which is exactly why using one for the other is invisible
+// until the product scheme, where it addresses a different release:
+// `release/4.0.0` is a git ref, and `4.0.0` is what the build stamp, the archive
+// name and the image tag are made of. PN asserts the same split in
+// TestTheReleaseWorkflowKeepsTheTagAndTheVersionApart; this is the PSP half, so
+// the two repositories' mechanisms stay the same mechanism.
+test('the release workflow keeps the tag and the version apart', () => {
+  // One derivation, from the one implementation. A shell `case` or a `${tag#v}`
+  // here would be a second copy of a rule whose whole point is that there is one.
+  assert(
+    workflow.includes('version=$(go run github.com/KazuhaHub/passwall-node/deployment/cmd/release-tag "$tag")'),
+    'the workflow must derive the version from the pinned release-tag command, not a second shell rule',
+  )
+  for (const strip of ['${tag#v}', '${tag##v}']) {
+    assert(!workflow.includes(strip), `the workflow strips the v prefix itself (${strip}), which is a second version derivation`)
+  }
+
+  // A version belongs in each of these. Every one is a published name for the
+  // release's CONTENTS.
+  for (const required of [
+    'VERSION: ${{ needs.setup.outputs.version }}',
+    'org.opencontainers.image.version=${{ needs.setup.outputs.version }}',
+    'RELEASE_VERSION: ${{ steps.identity.outputs.version }}',
+    'RELEASE_VERSION: ${{ needs.setup.outputs.version }}',
+    'type=raw,value=${{ needs.setup.outputs.version }}',
+  ]) {
+    assert(workflow.includes(required), `a version-bearing surface does not use the version: missing ${required}`)
+  }
+
+  // The git ref, the release it publishes, and the shape the channel is read from
+  // are the TAG's job. Substituting the version would address a release that is
+  // not there — the recheck steps fetch `refs/tags/<x>`, and the failure would
+  // read as "the tag changed during the build".
+  for (const required of [
+    'tag_name: ${{ needs.setup.outputs.tag }}',
+    'TAG: ${{ needs.setup.outputs.tag }}',
+    'refs/tags/${TAG}',
+    'PINNED_TAG: ${{ steps.identity.outputs.tag }}',
+  ]) {
+    assert(workflow.includes(required), `the published identity is not the tag: missing ${required}`)
+  }
+
+  // Both identities have to leave setup, or the jobs below cannot tell which one
+  // they were given.
+  assert(/^      version: \$\{\{ steps\.identity\.outputs\.version \}\}$/m.test(workflow), 'setup does not export the version')
+  assert(/^      tag: \$\{\{ steps\.identity\.outputs\.tag \}\}$/m.test(workflow), 'setup does not export the tag')
+
+  // AND THE CHANNEL IS RESOLVED ONCE. The release body used to decide for itself
+  // by testing the version for a hyphen — the legacy shape rule living a second
+  // time in a shell script, where a product version (three digits, no hyphen)
+  // would take the stable branch and hand the reader a `:latest` command that
+  // installs a different build. The one resolved answer is the only input.
+  assert(
+    !/\$\{VERSION\}"?\s*==\s*\*-/.test(workflow),
+    'the workflow decides the channel from a hyphen in the version; read needs.setup.outputs.prerelease instead',
+  )
+  assert(
+    workflow.includes('PRERELEASE: ${{ needs.setup.outputs.prerelease }}'),
+    'the release body must read the channel setup resolved',
+  )
+})
+
+// A LEGACY TAG MUST KEEP THE CHANNEL A HYPHEN GAVE IT. The split is a no-op for
+// the legacy scheme — the pinned command returns the tag as the version, so every
+// version-bearing surface gets the same string — EXCEPT where a rule was replaced,
+// and the channel is the one place a wrong answer is not recoverable: a stable
+// pointer that moved cannot be moved back by editing a workflow.
+//
+// So the resolved answer is pinned to reproduce the rule it replaced, for the
+// shapes that exist today. This is the batch that must not change legacy
+// behaviour; a later batch that changes it has to change this test.
+test('a legacy tag keeps the publication channel a hyphen always gave it', () => {
+  const setup = job('setup')
+  const auto = /case "\$PINNED_TAG" in\s*\n([\s\S]*?)\n\s*esac/.exec(setup)
+  assert(auto, 'the channel step must read the tag shape for an automatic channel')
+  const arms = auto[1]
+  // The three legacy/spec cases, verbatim. `v*-*` is a v-prefixed tag with a
+  // hyphen, which has always meant a pre-release; a plain `v*` has always meant
+  // stable; and anything unrecognised defaults to pre-release, the direction a
+  // deliberate promotion can correct.
+  const expected = [
+    [/v\*-\*\)\s*prerelease=true/, 'a legacy pre-release tag must stay a pre-release'],
+    [/v\*\)\s*prerelease=false/, 'a plain legacy tag must stay stable'],
+    [/^\s*\*\)\s*prerelease=true/m, 'an unrecognised tag must default to pre-release'],
+  ]
+  for (const [pattern, message] of expected) {
+    assert(pattern.test(arms), message)
   }
 })
+
 
 // This intentionally guards a bounded, canonical workflow layout; the Go
 // version package additionally parses the full YAML and validates SDK gates.
