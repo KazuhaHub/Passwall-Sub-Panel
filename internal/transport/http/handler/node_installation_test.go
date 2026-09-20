@@ -169,11 +169,22 @@ func TestNodeInstallationLegacyBackfillDoesNotRotate(t *testing.T) {
 // because the package is a pinned dependency (X07). What this case still owns is
 // the property it was written for: the endpoint is private, and a refusal carries
 // no credential.
-func TestNodeInstallScriptIsPrivateAndAdministratorOnly(t *testing.T) {
+func TestNodeInstallScriptPrivateDownloadAndAdministratorBoundary(t *testing.T) {
 	h, r := installationFixture(t)
 	w := installationRequest(h, http.MethodPost, "node-install-script", `{"version":"4.0.0"}`, "/panel", domain.RoleAdmin)
-	if w.Code != http.StatusBadRequest || strings.Contains(w.Body.String(), r.credential) {
-		t.Fatalf("a refusal from the script endpoint leaked a credential or was not a refusal: status=%d", w.Code)
+	if w.Code != http.StatusOK || !strings.HasPrefix(w.Body.String(), "#!/bin/sh") || !strings.Contains(w.Body.String(), r.credential) || !strings.Contains(w.Body.String(), "https://panel.example/panel/v1/node/sync") || !strings.HasPrefix(w.Header().Get("Content-Type"), "text/plain") || !strings.Contains(w.Header().Get("Cache-Control"), "no-store") {
+		t.Fatalf("private installation script download failed: status=%d", w.Code)
+	}
+	// THE SCRIPT CARRIES BOTH IDENTITIES, WHICH IS THE POINT. It builds the
+	// download path from the TAG and the asset name from the VERSION, and they are
+	// never the same string: the path segment a release lives at is
+	// `release/4.0.0` while the archive it serves is `passwall-node_4.0.0_…`. A
+	// renderer that had only one of them — which is what the template used to
+	// take — could address no release this project publishes.
+	for _, want := range []string{"version='4.0.0'", "tag='release/4.0.0'", "releases/download/${tag}", "passwall-node_${version}_linux_${arch}"} {
+		if !strings.Contains(w.Body.String(), want) {
+			t.Fatalf("the rendered script is missing %q, so it does not address the release by tag and name it by version", want)
+		}
 	}
 	for _, version := range []string{"latest", "04.0.0", "4.0.0;id", ""} {
 		body, _ := json.Marshal(map[string]string{"version": version})

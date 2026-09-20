@@ -49,7 +49,7 @@ func (r bootstrapAgentRepo) GetByPanelID(context.Context, int64) (*domain.NodeAg
 type bootstrapCatalog struct{ err error }
 
 func (r bootstrapCatalog) List(context.Context) (ports.NodeReleaseList, error) {
-	return ports.NodeReleaseList{Releases: []ports.NodeReleaseCatalogEntry{{Version: "v0.0.1-beta3", Methods: []string{"linux"}, Platforms: []ports.NodeReleasePlatform{{OS: "linux", Arch: "amd64"}, {OS: "linux", Arch: "arm64"}}}}}, r.err
+	return ports.NodeReleaseList{Releases: []ports.NodeReleaseCatalogEntry{{Version: "4.0.0", Methods: []string{"linux"}, Platforms: []ports.NodeReleasePlatform{{OS: "linux", Arch: "amd64"}, {OS: "linux", Arch: "arm64"}}}}}, r.err
 }
 
 type bootstrapPreview struct{ blocked, stale bool }
@@ -170,10 +170,10 @@ var commandToken = regexp.MustCompile(`/node-bootstrap/([A-Za-z0-9_-]{43})`)
 
 func mintBootstrap(t *testing.T, f *bootstrapFixture, migration bool) (string, *bootstrapTicket) {
 	t.Helper()
-	action, body := "node-install-command", `{"version":"v0.0.1-beta3"}`
+	action, body := "node-install-command", `{"version":"4.0.0"}`
 	if migration {
 		action = "node-migration-command"
-		body = `{"version":"v0.0.1-beta3","core_version":"26.6.27","fingerprint":"` + strings.Repeat("a", 64) + `","managed_only":true,"confirm_single_instance":true}`
+		body = `{"version":"4.0.0","core_version":"26.6.27","fingerprint":"` + strings.Repeat("a", 64) + `","managed_only":true,"confirm_single_instance":true}`
 	}
 	w := f.request(http.MethodPost, "/api/admin/servers/41/"+action, body, "")
 	if w.Code != 200 {
@@ -326,10 +326,10 @@ func TestNodeBootstrapRejectsUnreviewedVersionAndUnsupportedMigration(t *testing
 	for _, mode := range []string{"version", "scope", "single_instance", "blockers", "stale", "audit"} {
 		t.Run(mode, func(t *testing.T) {
 			f := newBootstrapFixture(t, true)
-			body := `{"version":"v0.0.1-beta3","core_version":"26.6.27","fingerprint":"` + strings.Repeat("a", 64) + `","managed_only":true,"confirm_single_instance":true}`
+			body := `{"version":"4.0.0","core_version":"26.6.27","fingerprint":"` + strings.Repeat("a", 64) + `","managed_only":true,"confirm_single_instance":true}`
 			switch mode {
 			case "version":
-				body = strings.Replace(body, "v0.0.1-beta3", "latest", 1)
+				body = strings.Replace(body, "4.0.0", "latest", 1)
 			case "scope":
 				body = strings.Replace(body, `"managed_only":true`, `"managed_only":false`, 1)
 			case "single_instance":

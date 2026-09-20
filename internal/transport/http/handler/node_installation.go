@@ -17,6 +17,11 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/version"
 )
 
+// validationVersionPlaceholder is a version that names no release, used only to
+// carry a Docker floating image tag through the installer package's shape check.
+// It is never rendered, never published and never compared to anything.
+const validationVersionPlaceholder = "1.0.0"
+
 // The installation endpoints belong to the existing administrator-only server
 // group. They never mint an identity, rotate a verifier, or publish a secret URL.
 func privateNodeResponse(c *gin.Context) {
@@ -151,27 +156,24 @@ func (h *AdminServersHandler) NodeInstallScript(c *gin.Context) {
 	if !ok {
 		return
 	}
-	// THE VERSION IS CHECKED BY PSP'S RULE FIRST. It is the authority for what
-	// this panel may be asked to install, and checking it here means a bad version
-	// gets the answer about the version.
+	// THE VERSION IS CHECKED BY PSP'S RULE, and then the template renders it.
+	//
+	// THIS COULD NOT BE DONE FROM HERE UNTIL THE NODE SIDE MOVED. The template
+	// used the version as the download path, so a release this panel accepts was
+	// refused by the installer that had to fetch it, and the operator was told
+	// something about the endpoint instead. The template takes the tag separately
+	// now — deployment/release.go derives it — so the two rules agree and the
+	// requested version is what it is rendered with.
 	if !version.IsReleaseVersion(req.Version) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "an exact published Node version is required"})
 		return
 	}
-	// AND THEN THE TEMPLATE CHECKS IT AGAIN, BY A RULE THAT IS NOT PSP'S.
-	// RenderLinux comes from the Node repository, its version rule knows only the
-	// legacy v-prefixed shape, and the template uses the version as the DOWNLOAD
-	// PATH — which is the one thing a product version is not. So a release this
-	// panel accepts cannot be rendered into a script yet, and the operator is told
-	// that rather than handed a sentence about the endpoint. Closing it means the
-	// Node side taking the tag and the version as separate inputs, which PSP
-	// cannot do from here: the package is a pinned dependency (X07).
 	script, err := deployment.RenderLinux(deployment.Options{
 		Endpoint: provisioning.Endpoint, AgentID: provisioning.AgentID,
 		Credential: provisioning.Credential, Version: req.Version,
 	})
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "the Node installer template cannot address this release: it still reads the legacy release shape, so a product version cannot be rendered into it"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "a canonical HTTPS PSP endpoint and exact published Node version are required"})
 		return
 	}
 	if !h.auditNodeCredentialRead(c, panel.ID, provisioning.AgentID) {
@@ -180,13 +182,6 @@ func (h *AdminServersHandler) NodeInstallScript(c *gin.Context) {
 	c.Header("Content-Disposition", "attachment; filename=passwall-node-install.sh")
 	c.Data(http.StatusOK, "text/plain; charset=utf-8", []byte(script))
 }
-
-// validationVersionPlaceholder is a canonical LEGACY-SHAPED version, and it exists
-// only because the Node deployment package's version check knows that shape and no
-// other. It names no release and is never rendered to an operator: the version the
-// operator asked for is validated by PSP's own rule in normalize() and rendered by
-// renderNodeInstallationFiles, which builds the download address from the tag.
-const validationVersionPlaceholder = "v0.0.0"
 
 // NodeInstallationFiles generates private administrator-delivered files, not a
 // public bootstrap URL. Retrieving materials never creates or rotates an agent.
@@ -205,20 +200,22 @@ func (h *AdminServersHandler) NodeInstallationFiles(c *gin.Context) {
 		return
 	}
 	// Reuse the released Node deployment package's canonical HTTPS, identity and
-	// credential validation.
+	// credential validation, with the version the request asked for.
 	//
-	// THE VERSION IS ALWAYS THE PLACEHOLDER, AND THAT IS THE POINT. This call is
-	// here for the ENDPOINT and the CREDENTIAL; the version it also validates is
-	// judged by the INSTALLER's rule, which knows only the legacy v-prefixed shape
-	// and therefore refuses every version this project now publishes. Passing the
-	// requested version through would make the product scheme's first release
-	// impossible to install from the panel — and it used to, silently, as a 400
-	// with a message about the endpoint. The request's own version was already
-	// checked by normalize() against PSP's rule, which is the authority for what
-	// this panel may be asked to install.
+	// THE FLOATING IMAGE TAGS ARE THE ONE EXCEPTION, and they need a version the
+	// rule accepts because they are not versions: normalize() has already reduced
+	// them to the closed latest/beta set, which only the Docker method may use, so
+	// a value is supplied solely to get past the shape check and is never rendered
+	// to anyone. It is a version this project could publish — the placeholder used
+	// to be v-prefixed, which was the only shape the rule accepted when the
+	// installer version doubled as a download path.
+	validationVersion := req.Version
+	if validationVersion == "latest" || validationVersion == "beta" {
+		validationVersion = validationVersionPlaceholder
+	}
 	if _, err := deployment.RenderLinux(deployment.Options{
 		Endpoint: provisioning.Endpoint, AgentID: provisioning.AgentID,
-		Credential: provisioning.Credential, Version: validationVersionPlaceholder,
+		Credential: provisioning.Credential, Version: validationVersion,
 	}); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "a canonical HTTPS PSP endpoint and supported Node image selection are required"})
 		return

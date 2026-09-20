@@ -153,42 +153,28 @@ func TestNodeInstallationFilesRejectsUnsupportedInputsAndNonAdministrators(t *te
 }
 
 func TestNodeInstallationMaterialsRequireSuccessfulSecretReadAudit(t *testing.T) {
+	// BOTH ENDPOINTS, AGAIN. The script endpoint could not reach the audit while
+	// the installer template refused a version this panel publishes, and the case
+	// for it asserted the refusal that produced. The template takes the tag
+	// separately now, so both go through the same gate and the case is what it was.
+	for _, action := range []string{"node-install-script", "node-installation-files"} {
+		h, repo := installationFixture(t)
+		audit := &installationAudit{err: fmt.Errorf("audit unavailable")}
+		h.audit = audit
+		before, credential := *repo.agent, repo.credential
+		body := `{"version":"4.0.0","method":"manual"}`
+		w := installationRequest(h, http.MethodPost, action, body, "", domain.RoleAdmin)
+		if w.Code != http.StatusServiceUnavailable || strings.Contains(w.Body.String(), credential) || len(audit.entries) != 1 || !reflect.DeepEqual(before, *repo.agent) || repo.credential != credential {
+			t.Fatalf("%s: a failed read audit released credentials or altered identity", action)
+		}
+		encoded, _ := json.Marshal(audit.entries)
+		if strings.Contains(string(encoded), credential) {
+			t.Fatal("read audit contained private materials")
+		}
+	}
 	h, repo := installationFixture(t)
-	audit := &installationAudit{err: fmt.Errorf("audit unavailable")}
-	h.audit = audit
-	before, credential := *repo.agent, repo.credential
-	w := installationRequest(h, http.MethodPost, "node-installation-files", `{"version":"4.0.0","method":"manual"}`, "", domain.RoleAdmin)
-	if w.Code != http.StatusServiceUnavailable || strings.Contains(w.Body.String(), credential) || len(audit.entries) != 1 || !reflect.DeepEqual(before, *repo.agent) || repo.credential != credential {
-		t.Fatal("failed read audit released credentials or altered identity")
-	}
-	encoded, _ := json.Marshal(audit.entries)
-	if strings.Contains(string(encoded), credential) {
-		t.Fatal("read audit contained private materials")
-	}
-
-	// THE SCRIPT ENDPOINT CANNOT REACH THE AUDIT AT ALL, and that is a
-	// cross-repository blocker recorded here rather than a decision. It renders
-	// the version into the Node installer template, whose own rule still reads the
-	// legacy release shape and uses the version as the download path — so a
-	// release this panel accepts is refused before any credential is touched. The
-	// property under test still has to hold, by whatever route is taken: nothing
-	// is released and no identity changes.
-	h, repo = installationFixture(t)
-	scriptAudit := &installationAudit{}
-	h.audit = scriptAudit
-	credential = repo.credential
-	before = *repo.agent
-	w = installationRequest(h, http.MethodPost, "node-install-script", `{"version":"4.0.0"}`, "", domain.RoleAdmin)
-	if w.Code != http.StatusBadRequest || strings.Contains(w.Body.String(), credential) ||
-		len(scriptAudit.entries) != 0 || !reflect.DeepEqual(before, *repo.agent) || repo.credential != credential {
-		t.Fatalf("the script endpoint did not refuse before reading a credential: status=%d body=%s", w.Code, w.Body.String())
-	}
-	if !strings.Contains(w.Body.String(), "template") {
-		t.Fatalf("the refusal does not say which side refused: %s", w.Body.String())
-	}
-	h, repo = installationFixture(t)
 	h.repo = nonnativeInstallationPanelRepo{}
-	w = installationRequest(h, http.MethodPost, "node-installation-files", `{"version":"4.0.0","method":"manual"}`, "", domain.RoleAdmin)
+	w := installationRequest(h, http.MethodPost, "node-installation-files", `{"version":"4.0.0","method":"manual"}`, "", domain.RoleAdmin)
 	if w.Code != http.StatusBadRequest || strings.Contains(w.Body.String(), repo.credential) {
 		t.Fatal("upstream panel received native installation files")
 	}
