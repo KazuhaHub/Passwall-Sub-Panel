@@ -87,6 +87,18 @@ func validateRequest(request Request) error {
 	if semver.Compare(request.Version, request.ExpectedVersion) <= 0 {
 		return fmt.Errorf("%w: native upgrade target must be newer than its expected current version", domain.ErrValidation)
 	}
+	// THE POLICY GATE IS HERE because this is the one function both entry points
+	// pass through — the API handler and DecodeRequest. A check placed at the
+	// handler would be a check a caller can skip by reaching the service another
+	// way, and "the UI does not list it" is not a refusal.
+	//
+	// It only bites when a policy is actually in force. Before one exists the
+	// panel is in its manifest-only state, which is where every deployment
+	// starts; once one is installed, a target it does not offer is refused
+	// rather than falling back to whatever the panel happens to list.
+	if version.PolicyInForce() && !version.PolicyOffersRelease(request.Version) {
+		return fmt.Errorf("%w: %s is not a release the policy in force offers", domain.ErrValidation, request.Version)
+	}
 	return nil
 }
 

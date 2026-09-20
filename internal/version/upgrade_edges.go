@@ -32,7 +32,21 @@ func SetActiveUpgradeEdges(edges []UpgradeEdge) {
 
 // ActiveUpgradeEdges returns the edges in force. Nil means none have been
 // published, which is the same answer as an empty list and is deliberate.
+//
+// THE POLICY WINS WHEN THERE IS ONE. An authenticated policy's edges replace the
+// manifest's rather than adding to them, because the two lists can each authorise
+// an upgrade: if the manifest's edges stayed available after a policy was
+// installed, a target the policy had removed would remain reachable through the
+// list nobody updated. Before any policy exists the manifest is the only source,
+// which is the state every deployment starts in.
 func ActiveUpgradeEdges() []UpgradeEdge {
+	if policy := applicablePolicy(Version); policy != nil {
+		edges := make([]UpgradeEdge, 0, len(policy.UpgradeEdges))
+		for _, edge := range policy.UpgradeEdges {
+			edges = append(edges, UpgradeEdge{From: edge.From, To: edge.To})
+		}
+		return edges
+	}
 	edges, _ := activeUpgradeEdges.Load().([]UpgradeEdge)
 	return edges
 }
