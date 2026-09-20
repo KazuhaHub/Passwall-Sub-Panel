@@ -207,10 +207,36 @@ func CheckXUI(panelVersion string) CompatStatus {
 	return CompatSupported
 }
 
-// parseSemver accepts "3.1.0", "v3.1.0", "3.1.0-beta.1" (build/pre-release
-// suffix ignored), "3.1" (minor-only, patch defaults to 0). Returns false on
-// anything else so probe paths can treat the panel as Unknown rather than
-// crashing.
+// CanForceXUI reports whether an admin may override the upgrade gate for a
+// target the panel would upgrade to.
+//
+// Force exists to accept ONE risk: PSP has not measured a release, so we cannot
+// promise it works. That is CompatUntested, and only that. It is not a way past
+// a hard rejection — a panel below the compiled floor (CompatTooOld) is one this
+// build's code was not written to speak to, and a version PSP cannot classify
+// (CompatUnknown) is one it has no basis to approve. Forcing either would fire
+// an upgrade at a panel PSP cannot even talk to, which is not a risk the admin
+// is in a position to accept.
+func CanForceXUI(status CompatStatus) bool {
+	return status == CompatUntested
+}
+
+// SameXUIRelease reports whether two 3X-UI version strings name the same
+// release. 3X-UI's own endpoints disagree on the "v" prefix — /server/status
+// answers "3.1.0" while getPanelUpdateInfo answers "v3.1.0" — so a post-upgrade
+// check comparing the raw strings would call a successful upgrade a mismatch.
+// Both forms go through parseSemver, which also drops a prerelease/build suffix
+// (the panel runs that version's code either way).
+//
+// Anything unparseable is NOT the same release: a target PSP cannot read back is
+// a target it cannot confirm was reached, and the caller must say so rather than
+// assume success.
+func SameXUIRelease(a, b string) bool {
+	av, ok1 := parseSemver(a)
+	bv, ok2 := parseSemver(b)
+	return ok1 && ok2 && cmpSemver(av, bv) == 0
+}
+
 // XUIAtLeast reports whether a probed 3X-UI panel version is at or above the
 // given floor. Unparseable or empty versions answer FALSE.
 //
@@ -237,6 +263,10 @@ func XUIAtLeast(panelVersion, floor string) bool {
 	return cmpSemver(have, want) >= 0
 }
 
+// parseSemver accepts "3.1.0", "v3.1.0", "3.1.0-beta.1" (build/pre-release
+// suffix ignored), "3.1" (minor-only, patch defaults to 0). Returns false on
+// anything else so probe paths can treat the panel as Unknown rather than
+// crashing.
 func parseSemver(s string) ([3]int, bool) {
 	var zero [3]int
 	s = strings.TrimSpace(s)

@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	nodeprotocol "github.com/KazuhaHub/passwall-node/protocol"
+	nodeprotocol "github.com/KazuhaHub/passwall-protocol/protocol"
 	sqlitedriver "github.com/glebarez/sqlite"
 	mysqldriver "gorm.io/driver/mysql"
 	"gorm.io/gorm"

@@ -438,6 +438,7 @@ GET                 /api/admin/sync-tasks
 - [后端兼容、升级与 CI 规范](docs/compat-policy.md) — PSP／PN／第三方支持边界、验证证据与实施验收
 - [兼容体系整改实施手册](docs/compat-remediation-plan.md) — 分仓任务、实施步骤、测试与交接清单
 - [兼容体系维护 SOP](docs/compat-maintenance.md) — 例行步骤、支持退出与交接清单
+- [发布运行手册](docs/release-runbook.md) — 补丁／转正式／撤销／回退，以及今天还缺哪些机制
 
 ## 许可证
 

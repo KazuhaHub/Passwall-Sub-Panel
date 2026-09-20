@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { Alert, Box, Button, CircularProgress, Dialog, DialogActions, DialogContent, DialogTitle, TextField, Typography } from '@mui/material'
 import { useTranslation } from 'react-i18next'
-import { getNativeAgentUpgrade, requestNativeAgentUpgrade, type NativeAgentUpgrade, type Server } from '@/api/servers'
+import { getNativeAgentUpgrade, requestNativeAgentUpgrade, upgradeOptions, type NativeAgentUpgrade, type Server } from '@/api/servers'
 import NodeReleaseSelector from '@/components/NodeReleaseSelector'
+import { canonicalReleaseVersion } from '@/utils/productVersion'
 
 export function NativeAgentUpgradeDialog({ server, onClose }: { server: Server | null, onClose: () => void }) {
   const { t } = useTranslation()
@@ -11,16 +12,43 @@ export function NativeAgentUpgradeDialog({ server, onClose }: { server: Server |
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [retry, setRetry] = useState(0)
+  // The releases a verified edge actually reaches. `newerThan` alone would offer
+  // anything ahead of the node, including paths nobody has walked — and a
+  // request along one of those is refused, which teaches the operator to distrust
+  // the list rather than the request.
+  const [targets, setTargets] = useState<string[] | undefined>(undefined)
   const key = useRef('')
   const requestController = useRef<AbortController | null>(null)
   const expected = server?.panel_version?.split(' ')[0] ?? ''
-  const exact = (s: string) => /^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$/.test(s)
+  // A VERSION, IN EITHER SCHEME. This was a local copy of the shape rule and it
+  // knew only the legacy one, so a node reporting a product version — three
+  // integers, no prefix — could not be confirmed at all: the action was disabled
+  // and nothing said why. The rule lives in the module that reads the shared
+  // vectors.
+  const exact = (s: string) => canonicalReleaseVersion(s) !== undefined
 
   useEffect(() => {
     requestController.current?.abort()
     setVersion(''); setTask(null); setBusy(false); setError(''); key.current = ''
     return () => requestController.current?.abort()
   }, [server?.id, server?.update_channel])
+
+  useEffect(() => {
+    if (!server) { setTargets(undefined); return }
+    let live = true
+    // Best-effort: without an answer the list falls back to "strictly newer",
+    // which is weaker but not wrong, and the write path still protects the fire.
+    void upgradeOptions(server.id, 'agent')
+      .then(option => {
+        if (!live) return
+        const reachable = (option.targets ?? [])
+          .filter(target => target.edge_verified && target.offered_by_policy)
+          .map(target => target.version)
+        setTargets(reachable)
+      })
+      .catch(() => { if (live) setTargets(undefined) })
+    return () => { live = false }
+  }, [server?.id])
 
   useEffect(() => {
     if (!server || !task || ['verified', 'failed', 'manual_attention', 'dispatch_closed'].includes(task.upgrade_state)) return
@@ -62,7 +90,8 @@ export function NativeAgentUpgradeDialog({ server, onClose }: { server: Server |
         <TextField label={t('admin:servers.agent_upgrade.current')} value={expected} slotProps={{ input: { readOnly: true } }} />
         <NodeReleaseSelector key={server?.id} enabled={!!server} selection={{ method: 'linux', os: 'linux', arch: 'amd64' }}
           initialChannel={server?.update_channel === 'beta' ? 'testing' : 'stable'} value={version}
-          onChange={next => { setVersion(next); if (!error) key.current = '' }} autoSelectLatest context="upgrade" disabled={busy || !!task || !!error} />
+          onChange={next => { setVersion(next); if (!error) key.current = '' }} autoSelectLatest context="upgrade"
+          newerThan={exact(expected) ? expected : undefined} targets={targets} disabled={busy || !!task || !!error} />
         <Typography variant="body2">{t('admin:servers.agent_upgrade.version_hint')}</Typography>
         {error && <Alert severity="error">{error}</Alert>}
         {task && <>

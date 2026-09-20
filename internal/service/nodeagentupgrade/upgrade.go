@@ -14,9 +14,12 @@ import (
 	"regexp"
 	"time"
 
-	"github.com/KazuhaHub/passwall-node/deployment"
-	nodeprotocol "github.com/KazuhaHub/passwall-node/protocol"
-	"golang.org/x/mod/semver"
+	// The shared contract from its own module (#177), and NOT the Node module's
+	// copy — which this branch stopped importing altogether. Neither
+	// `deployment` nor `semver` is here: the installer's version rule was the
+	// wrong question for a caller's version, and x/mod/semver answers zero for a
+	// product version, so the ordering is version.CompareRelease.
+	nodeprotocol "github.com/KazuhaHub/passwall-protocol/protocol"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/compatadmission"
@@ -75,17 +78,38 @@ func New(options Options) (*Service, error) {
 }
 
 var (
-	requestKey       = regexp.MustCompile(`^[A-Za-z0-9_.:-]{16,128}$`)
-	binaryDigest     = regexp.MustCompile(`^[0-9a-f]{64}$`)
-	observedIdentity = regexp.MustCompile(`^(v[^ ]+)(?: \([0-9a-f]{7,40}\))?$`)
+	requestKey   = regexp.MustCompile(`^[A-Za-z0-9_.:-]{16,128}$`)
+	binaryDigest = regexp.MustCompile(`^[0-9a-f]{64}$`)
+	// The node's reported identity: its version, optionally followed by the
+	// commit it was built from. WHICH SHAPES ARE OFFICIAL IS NOT DECIDED HERE —
+	// this takes anything non-spaced and IsReleaseVersion is the one rule that
+	// says whether it is a version. Requiring a v in the pattern as well put the
+	// shape decision in two places, and the copy here was the one that was wrong.
+	observedIdentity = regexp.MustCompile(`^([^ ]+)(?: \([0-9a-f]{7,40}\))?$`)
 )
 
 func validateRequest(request Request) error {
-	if !deployment.ValidReleaseVersion(request.Version) || !deployment.ValidReleaseVersion(request.ExpectedVersion) {
+	if !version.IsReleaseVersion(request.Version) || !version.IsReleaseVersion(request.ExpectedVersion) {
 		return fmt.Errorf("%w: exact canonical target and expected Node versions are required", domain.ErrValidation)
 	}
-	if semver.Compare(request.Version, request.ExpectedVersion) <= 0 {
+	// THE PROJECT'S RELEASE ORDER, not x/mod/semver: that package answers ZERO
+	// for a bare product version, and zero is "equal", so this check would refuse
+	// every product upgrade as "not newer" — after the guard above had been
+	// widened to let it through.
+	if version.CompareRelease(request.Version, request.ExpectedVersion) <= 0 {
 		return fmt.Errorf("%w: native upgrade target must be newer than its expected current version", domain.ErrValidation)
+	}
+	// THE POLICY GATE IS HERE because this is the one function both entry points
+	// pass through — the API handler and DecodeRequest. A check placed at the
+	// handler would be a check a caller can skip by reaching the service another
+	// way, and "the UI does not list it" is not a refusal.
+	//
+	// It only bites when a policy is actually in force. Before one exists the
+	// panel is in its manifest-only state, which is where every deployment
+	// starts; once one is installed, a target it does not offer is refused
+	// rather than falling back to whatever the panel happens to list.
+	if version.PolicyInForce() && !version.PolicyOffersRelease(request.Version) {
+		return fmt.Errorf("%w: %s is not a release the policy in force offers", domain.ErrValidation, request.Version)
 	}
 	return nil
 }
@@ -242,7 +266,7 @@ func (s *Service) status(task *domain.NodeAgentTask, panel *domain.XUIPanel, age
 			status.DispatchClosedReason = "dispatch_closed"
 		}
 	}
-	if identity := observedIdentity.FindStringSubmatch(panel.PanelVersion); len(identity) == 2 && deployment.ValidReleaseVersion(identity[1]) {
+	if identity := observedIdentity.FindStringSubmatch(panel.PanelVersion); len(identity) == 2 && version.IsReleaseVersion(identity[1]) {
 		status.ObservedVersion = identity[1]
 	}
 	switch task.Status {

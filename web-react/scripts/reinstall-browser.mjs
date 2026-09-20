@@ -114,6 +114,17 @@ async function fixture(request, response, url) {
         release_url: `https://github.com/KazuhaHub/Passwall-Node/releases/tag/${version}`,
         methods: ['linux', 'docker', 'manual'], platforms: ['amd64', 'arm64'].map(arch => ({ os: 'linux', arch })) }],
     });
+    // THE UPGRADE DIALOG ASKS THE INSTANCE WHICH TARGETS ARE REACHABLE, so the
+    // fixture has to answer it: a route this does not know is a throw, and the
+    // acceptance counts a fixture error as its own failure. The one target is the
+    // release the catalog above publishes, offered along a verified edge — which is
+    // what the dialog worked out for itself before it started asking, so the
+    // surface behaves identically and the question is answered rather than dodged.
+    if (pathname === '/api/admin/servers/7/upgrade-options') return reply(response, {
+      component: 'agent', state: 'ready', current_version: 'v0.0.1-beta2', target_version: version,
+      target_pinnable: true, reason_codes: [],
+      targets: [{ version, edge_verified: true, offered_by_policy: true }],
+    });
     if (pathname === '/api/admin/servers/7/node-installation') return reply(response, provisioning(7));
     if (pathname === '/api/admin/servers/7/node-agent-status') return reply(response, { state: 'running', core_state: 'running', configured_nodes: 3 });
     const createdRead = previewOnly && pathname.match(/^\/api\/admin\/servers\/(\d+)\/(node-installation|node-agent-status)$/);

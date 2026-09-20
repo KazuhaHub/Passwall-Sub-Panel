@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "revision": 1,
+  "issued_at": "2026-09-19T00:00:00Z",
+  "expires_at": "2026-09-26T00:00:00Z",
+  "comment": "The Passwall Node upgrade policy: which releases this panel may offer as an upgrade target, and along which verified paths. Read by NEW code only; older PSP builds keep reading docs/compat/v<major>.json, which this file does not replace or restate. revision is a monotonic publication counter: a higher number supersedes a lower one, and a lower one is refused rather than applied. See docs/release-catalog-redesign-plan.md.",
+  "applies_to_psp": {
+    "min": "4.0.0",
+    "max": "4.99.99",
+    "comment": "The PSP versions this revision was reviewed for. A build outside this range must not apply it. This is separate from the FIRST segment of a product version, which is a release line and not a compatibility major."
+  },
+  "releases": [
+    {
+      "version": "v0.0.1-beta11",
+      "release_tag": "v0.0.1-beta11",
+      "scheme": "legacy",
+      "evidence": ["node-wire-v1", "reverse-direction-b01-b08"],
+      "comment": "The newest reviewed release at the time of writing. Evidence names come from the compat verification plan; a release with no evidence is not an upgrade target."
+    },
+    {
+      "version": "v0.0.1-beta10",
+      "release_tag": "v0.0.1-beta10",
+      "scheme": "legacy",
+      "evidence": ["node-wire-v1"],
+      "comment": "Superseded by beta11, which fixes a panic on a host report with no network section. Still a valid target for a node already on it."
+    }
+  ],
+  "upgrade_edges": [
+    {
+      "from": "v0.0.1-beta3",
+      "to": "v0.0.1-beta11",
+      "evidence": ["upgrade-mechanism"],
+      "comment": "An edge is a claim about a PATH, reviewed as such. A release being in range is not the same as a path to it having been checked, which is why the two are separate lists."
+    }
+  ],
+  "refusals": [
+    {
+      "version": "v0.0.1-beta1",
+      "reason": "Predates the reviewed registry, never reviewed, long superseded."
+    },
+    {
+      "version": "v0.0.1-beta2",
+      "reason": "Predates the reviewed registry, never reviewed, long superseded."
+    },
+    {
+      "version": "v0.0.1-beta5",
+      "reason": "Passed over when beta6 and beta7 were reviewed and never recorded. Listed so the omission is a decision on record."
+    }
+  ]
+}

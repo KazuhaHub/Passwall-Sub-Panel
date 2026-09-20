@@ -469,19 +469,27 @@ export async function upgradePreview(id: number) {
 }
 
 // upgrade-options answers, per component, whether THIS instance may upgrade it.
-// The four states are distinct on purpose: `unsupported` means the backend has
-// no such operation, `blocked` that the operation exists and is refused now, and
-// `manual_only` that it can be done but not by an executor that can be held to a
-// version. The server decides; this module only carries the answer.
-export type UpgradeOptionState = 'ready' | 'manual_only' | 'unsupported' | 'blocked'
+// The agent answer carries \`targets\`: the releases a verified edge actually
+// reaches from this node, so a caller can offer those rather than everything
+// that happens to be newer.
+//
+// ONE COPY OF THESE TYPES. Two branches added them and the merge put both in the
+// file; this is the superset — it keeps \`targets\`, which the other side's copy
+// did not have — and the other was dropped rather than reconciled.
 export type UpgradeComponent = 'panel' | 'core' | 'agent'
+export interface AgentUpgradeTarget {
+  version: string
+  edge_verified: boolean
+  offered_by_policy: boolean
+}
 export interface UpgradeOption {
   component: UpgradeComponent
-  state: UpgradeOptionState
+  state: 'ready' | 'manual_only' | 'unsupported' | 'blocked'
   current_version?: string
   target_version?: string
   target_pinnable: boolean
   reason_codes: string[]
+  targets?: AgentUpgradeTarget[]
 }
 
 export async function upgradeOptions(id: number, component: UpgradeComponent) {

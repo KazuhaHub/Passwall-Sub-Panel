@@ -2,116 +2,260 @@ package version
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
 )
 
 // These cases intentionally do not run in parallel: Version and the active
 // compat state are process-wide globals, just as they are during app boot.
 func isolatedCompatCache(t *testing.T, version string) string {
 	t.Helper()
-	oldVersion, oldDir, oldMax := Version, getCacheDir(), ActiveMaxTestedXUI()
+	oldVersion, oldDir, oldMax, oldMin := Version, getCacheDir(), ActiveMaxTestedXUI(), ActiveMinXUI()
+	oldSUI := ActiveMaxTestedSUI()
 	dir := t.TempDir()
 	Version = version
 	SetCacheDir(dir)
 	SetActiveMaxTestedXUI("")
+	SetActiveMinXUI("")
+	SetActiveMaxTestedSUI("")
 	t.Cleanup(func() {
 		Version = oldVersion
 		SetCacheDir(oldDir)
 		SetActiveMaxTestedXUI(oldMax)
+		SetActiveMinXUI(oldMin)
+		SetActiveMaxTestedSUI(oldSUI)
 	})
 	return dir
 }
 
-func TestLoadCompatCacheIsolatesPSPMajors(t *testing.T) {
+func writeSnapshot(t *testing.T, dir string, payload remoteCompatPayload) policySnapshot {
+	t.Helper()
+	if err := storePolicySnapshot(payload); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(filepath.Join(dir, policySnapshotFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var snapshot policySnapshot
+	if err := json.Unmarshal(raw, &snapshot); err != nil {
+		t.Fatal(err)
+	}
+	return snapshot
+}
+
+// mergedPolicy builds the document a fetch would have applied: the base
+// manifest with its range overlay folded in, exactly as fetchAndApply does
+// before it installs anything.
+func mergedPolicy(t *testing.T) remoteCompatPayload {
+	t.Helper()
+	base := readCompatJSONForMajor(t, 4)
+	overlay := readCompatRangeOverlay(t)
+	base.SchemaVersion = overlay.SchemaVersion
+	base.Entries = overlay.Entries
+	base.SUIEntries = overlay.SUIEntries
+	return base
+}
+
+// The snapshot stores the DOCUMENT, not a conclusion. These cases exercise what
+// that buys: boot re-runs the same applicability test a fetch would, so a cached
+// document installs only where it applies — and, because the merged document
+// carries prerelease-aware ranges, it lands on a DIFFERENT row for a beta than
+// for the stable line.
+func TestPolicySnapshotOnlyInstallsWhereTheDocumentApplies(t *testing.T) {
+	manifest := mergedPolicy(t)
+
 	for _, tc := range []struct {
-		name, current, cached, max string
-		want                       string
-		wantError                  bool
+		name       string
+		current    string
+		wantMax    string
+		wantErr    bool
+		wantUnread bool
 	}{
-		{name: "same release", current: "v4.0.0-beta.1", cached: "v4.0.0-beta.1", max: "3.7.0", want: "3.7.0"},
-		{name: "same major patch", current: "v4.0.2", cached: "v4.0.1", max: "3.7.0", want: "3.7.0"},
-		{name: "same major minor", current: "v4.1.0", cached: "v4.0.0-beta.1", max: "3.7.0", want: "3.7.0"},
-		{name: "stable after beta", current: "4.0.0", cached: "v4.0.0-beta.1", max: "3.7.0", want: "3.7.0"},
-		{name: "v3 to v4", current: "v4.0.0-beta.1", cached: "v3.9.2-beta.20", max: "3.7.0"},
-		{name: "v4 to v3", current: "v3.9.2-beta.20", cached: "v4.0.0-beta.1", max: "3.7.0"},
-		{name: "irrelevant malformed range", current: "v4.0.0", cached: "v3.9.2", max: "corrupt"},
-		{name: "missing cached identity", current: "v4.0.0", max: "3.7.0"},
-		{name: "unknown cached identity", current: "v4.0.0", cached: "dev", max: "3.7.0"},
-		{name: "malformed cached identity", current: "v4.0.0", cached: "v4.invalid", max: "3.7.0"},
-		{name: "unknown current identity", current: "dev", cached: "v4.0.0", max: "3.7.0"},
-		{name: "invalid current identity", current: "v4.invalid", cached: "v4.0.0", max: "3.7.0"},
-		{name: "zero major", current: "v0.0.0", cached: "v0.0.0", max: "3.7.0"},
-		{name: "same major corrupt range", current: "v4.0.0", cached: "v4.0.1", max: "corrupt", wantError: true},
+		{name: "the pre-beta.9 range", current: "v4.0.0-beta.1", wantMax: "3.7.0"},
+		{name: "the beta.9 range", current: "v4.0.0-beta.9", wantMax: "3.8.5"},
+		{name: "the stable line", current: "v4.0.0", wantMax: "3.8.5"},
+		{name: "another major", current: "v3.9.2", wantErr: true, wantUnread: true},
+		{name: "unparseable identity", current: "dev", wantErr: true, wantUnread: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := isolatedCompatCache(t, tc.current)
-			payload, err := json.Marshal(compatCachePayload{
-				MaxTestedXUI: tc.max, CachedAt: time.Now().UTC(), PSPVersion: tc.cached,
-			})
-			if err != nil {
-				t.Fatal(err)
+			writeSnapshot(t, dir, manifest)
+
+			err := LoadPolicySnapshot()
+
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("load error=%v, wantError=%v", err, tc.wantErr)
 			}
-			path := filepath.Join(dir, compatCacheFile)
-			if err := os.WriteFile(path, payload, 0o600); err != nil {
-				t.Fatal(err)
+			if got := ActiveMaxTestedXUI(); got != tc.wantMax {
+				t.Fatalf("active range=%q, want %q", got, tc.wantMax)
 			}
-			err = LoadCompatCache()
-			if (err != nil) != tc.wantError {
-				t.Fatalf("load error=%v, wantError=%v", err, tc.wantError)
-			}
-			if got := ActiveMaxTestedXUI(); got != tc.want {
-				t.Fatalf("active range=%q, want %q", got, tc.want)
-			}
-			if tc.want == "" && CheckXUI("3.7.0") != CompatUnknown {
-				t.Fatal("ignored cache must not establish a supported range")
-			}
-			after, err := os.ReadFile(path)
-			if err != nil || !bytes.Equal(after, payload) {
-				t.Fatalf("loader must not mutate the cache file: %v", err)
+			if tc.wantUnread && CheckXUI("3.7.0") != CompatUnknown {
+				t.Fatal("a document that does not apply must not establish a supported range")
 			}
 		})
 	}
 }
 
-func TestSaveCompatCacheBindsCurrentMajor(t *testing.T) {
-	dir := isolatedCompatCache(t, "v4.0.0-beta.1")
-	if err := saveCompatCache("3.7.0"); err != nil {
-		t.Fatal(err)
-	}
-	raw, err := os.ReadFile(filepath.Join(dir, compatCacheFile))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var payload compatCachePayload
-	if err := json.Unmarshal(raw, &payload); err != nil {
-		t.Fatal(err)
-	}
-	if payload.PSPVersion != Version || payload.CachedAt.IsZero() {
-		t.Fatalf("cache lost build provenance: %#v", payload)
-	}
-	Version = "v4.0.1"
-	if err := LoadCompatCache(); err != nil || ActiveMaxTestedXUI() != "3.7.0" {
-		t.Fatalf("same-major round trip: active=%q error=%v", ActiveMaxTestedXUI(), err)
-	}
-	SetActiveMaxTestedXUI("")
-	Version = "v3.9.2"
-	if err := LoadCompatCache(); err != nil || ActiveMaxTestedXUI() != "" {
-		t.Fatalf("different-major round trip: active=%q error=%v", ActiveMaxTestedXUI(), err)
+func TestPolicySnapshotRefusesADocumentThatFailsItsOwnIntegrityCheck(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		mutate func(t *testing.T, dir string, raw []byte) []byte
+	}{
+		{
+			name: "payload edited after the digest was taken",
+			mutate: func(t *testing.T, dir string, raw []byte) []byte {
+				var snapshot policySnapshot
+				if err := json.Unmarshal(raw, &snapshot); err != nil {
+					t.Fatal(err)
+				}
+				edited := bytes.Replace(snapshot.Payload, []byte(`"major":4`), []byte(`"major":3`), 1)
+				snapshot.Payload = edited // digest deliberately NOT recomputed
+				out, err := json.Marshal(snapshot)
+				if err != nil {
+					t.Fatal(err)
+				}
+				return out
+			},
+		},
+		{
+			name: "digest field rewritten to match an edited payload",
+			mutate: func(t *testing.T, dir string, raw []byte) []byte {
+				var snapshot policySnapshot
+				if err := json.Unmarshal(raw, &snapshot); err != nil {
+					t.Fatal(err)
+				}
+				snapshot.Payload = bytes.Replace(snapshot.Payload, []byte(`"major":4`), []byte(`"major":3`), 1)
+				sum := sha256.Sum256(snapshot.Payload)
+				snapshot.Digest = hex.EncodeToString(sum[:])
+				out, err := json.Marshal(snapshot)
+				if err != nil {
+					t.Fatal(err)
+				}
+				return out
+			},
+		},
+		{
+			name: "truncated file",
+			mutate: func(t *testing.T, dir string, raw []byte) []byte {
+				return raw[:len(raw)/2]
+			},
+		},
+		{
+			name: "unknown snapshot format",
+			mutate: func(t *testing.T, dir string, raw []byte) []byte {
+				var snapshot map[string]any
+				if err := json.Unmarshal(raw, &snapshot); err != nil {
+					t.Fatal(err)
+				}
+				snapshot["snapshot_schema"] = policySnapshotSchema + 1
+				out, err := json.Marshal(snapshot)
+				if err != nil {
+					t.Fatal(err)
+				}
+				return out
+			},
+		},
+		{
+			name: "no payload at all",
+			mutate: func(t *testing.T, dir string, raw []byte) []byte {
+				var snapshot map[string]any
+				if err := json.Unmarshal(raw, &snapshot); err != nil {
+					t.Fatal(err)
+				}
+				delete(snapshot, "payload")
+				out, err := json.Marshal(snapshot)
+				if err != nil {
+					t.Fatal(err)
+				}
+				return out
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := isolatedCompatCache(t, "v4.0.0")
+			writeSnapshot(t, dir, mergedPolicy(t))
+			path := filepath.Join(dir, policySnapshotFile)
+			raw, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, tc.mutate(t, dir, raw), 0o600); err != nil {
+				t.Fatal(err)
+			}
+
+			if err := LoadPolicySnapshot(); err == nil {
+				t.Fatal("a snapshot that fails its own integrity check must be refused")
+			}
+			if ActiveMaxTestedXUI() != "" || CheckXUI("3.7.0") != CompatUnknown {
+				t.Fatalf("a refused snapshot still established a range: %q", ActiveMaxTestedXUI())
+			}
+		})
 	}
 }
 
-func TestLoadCompatCacheMissingOrDisabled(t *testing.T) {
+// The second mutation above rewrites the digest to match its edited payload, so
+// it exercises the schema/major checks rather than the digest one. Both matter:
+// a valid digest over a document for ANOTHER major is exactly what a
+// snapshot from a different build looks like.
+func TestPolicySnapshotRoundTripsAndKeepsItsProvenance(t *testing.T) {
+	dir := isolatedCompatCache(t, "v4.0.0")
+	snapshot := writeSnapshot(t, dir, mergedPolicy(t))
+
+	if snapshot.SnapshotSchema != policySnapshotSchema {
+		t.Fatalf("snapshot format = %d", snapshot.SnapshotSchema)
+	}
+	if snapshot.Revision == "" || snapshot.Source == "" || snapshot.FetchedAt.IsZero() || snapshot.Digest == "" {
+		t.Fatalf("snapshot lost its provenance: %#v", snapshot)
+	}
+	if len(snapshot.Payload) == 0 {
+		t.Fatal("snapshot stored no document")
+	}
+
+	// Replay installs, then a different major does not — without the file
+	// having changed between the two.
+	if err := LoadPolicySnapshot(); err != nil || ActiveMaxTestedXUI() != "3.8.5" {
+		t.Fatalf("same-major replay: active=%q error=%v", ActiveMaxTestedXUI(), err)
+	}
+	SetActiveMaxTestedXUI("")
+	Version = "v3.9.2"
+	if err := LoadPolicySnapshot(); err == nil || ActiveMaxTestedXUI() != "" {
+		t.Fatalf("cross-major replay: active=%q error=%v", ActiveMaxTestedXUI(), err)
+	}
+}
+
+func TestPolicySnapshotMissingOrDisabledIsNotAnError(t *testing.T) {
 	isolatedCompatCache(t, "v4.0.0")
-	if err := LoadCompatCache(); err != nil {
-		t.Fatalf("missing optional cache: %v", err)
+	if err := LoadPolicySnapshot(); err != nil {
+		t.Fatalf("missing optional snapshot: %v", err)
 	}
 	SetCacheDir("")
-	if err := LoadCompatCache(); err != nil {
-		t.Fatalf("disabled optional cache: %v", err)
+	if err := LoadPolicySnapshot(); err != nil {
+		t.Fatalf("disabled optional snapshot: %v", err)
+	}
+}
+
+// The writer must publish atomically: a reader either sees the previous
+// snapshot or the new one, never a partial file, and the temporary file does not
+// survive.
+func TestPolicySnapshotWriteLeavesNoTemporaryBehind(t *testing.T) {
+	dir := isolatedCompatCache(t, "v4.0.0")
+	writeSnapshot(t, dir, mergedPolicy(t))
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	names := make([]string, 0, len(entries))
+	for _, e := range entries {
+		names = append(names, e.Name())
+	}
+	if len(names) != 1 || names[0] != policySnapshotFile {
+		t.Fatalf("cache dir holds %v, want only %s", names, policySnapshotFile)
 	}
 }
 
@@ -126,5 +270,30 @@ func TestLoadLatestXUICacheIsPSPMajorIndependent(t *testing.T) {
 	SetLatestXUI("")
 	if err := LoadLatestXUICache(); err != nil || LatestXUI() != "v3.7.0" {
 		t.Fatalf("upstream latest tag must survive PSP major changes: tag=%q error=%v", LatestXUI(), err)
+	}
+}
+
+// A snapshot that cannot be trusted must leave the instance exactly as it was.
+// Clearing the active range on a bad cache would turn a corrupted file into a
+// loss of the panel's working range — the failure would be worse than the
+// problem.
+func TestAFailedSnapshotLeavesTheActiveRangeAlone(t *testing.T) {
+	dir := isolatedCompatCache(t, "v4.0.0")
+	writeSnapshot(t, dir, mergedPolicy(t))
+	path := filepath.Join(dir, policySnapshotFile)
+	if err := os.WriteFile(path, []byte("{ not json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	SetActiveMaxTestedXUI("3.5.0")
+	SetActiveMinXUI("3.4.2")
+
+	if err := LoadPolicySnapshot(); err == nil {
+		t.Fatal("a corrupt snapshot must be refused")
+	}
+	if got := ActiveMaxTestedXUI(); got != "3.5.0" {
+		t.Fatalf("a refused snapshot changed the active ceiling to %q", got)
+	}
+	if got := ActiveMinXUI(); got != "3.4.2" {
+		t.Fatalf("a refused snapshot changed the active floor to %q", got)
 	}
 }

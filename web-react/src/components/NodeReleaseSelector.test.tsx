@@ -252,3 +252,208 @@ describe('the empty state answers the question that was asked', () => {
     expect(screen.queryByText('admin:servers.native.release_no_target_for_node')).toBeNull()
   })
 })
+
+// An upgrade list that includes the version you are on, and older ones, invites
+// a request the service refuses — and offering a downgrade as though it were a
+// target is how an operator learns to distrust the list rather than the request.
+describe('the upgrade list offers only targets that are actually ahead', () => {
+  const beta = (version: string): NodeRelease => ({
+    ...testing, version,
+    release_url: `https://github.com/KazuhaHub/Passwall-Node/releases/tag/${version}`,
+  })
+
+  it('excludes the node’s own version and everything older', async () => {
+    reads([beta('v0.0.1-beta9'), beta('v0.0.1-beta10'), beta('v0.0.1-beta11')])
+    mount(<NodeReleaseSelector enabled selection={linux} value="" onChange={() => {}}
+      initialChannel="testing" newerThan="v0.0.1-beta10" />)
+    const field = screen.getByRole('combobox', { name: 'admin:servers.native.agent_version' })
+    // The field is disabled until the catalog resolves, so opening it before
+    // then opens nothing — wait for it to become usable first.
+    await waitFor(() => expect(field.getAttribute('aria-disabled')).not.toBe('true'))
+    fireEvent.mouseDown(field)
+    await screen.findByRole('option', { name: 'v0.0.1-beta11' })
+    expect(screen.queryByRole('option', { name: 'v0.0.1-beta10' })).toBeNull()
+    expect(screen.queryByRole('option', { name: 'v0.0.1-beta9' })).toBeNull()
+  })
+
+  it('ranks the dotless prereleases the way the project publishes them', async () => {
+    // SemVer ranks beta11 BELOW beta9 on the trailing character. With that rule
+    // this list would be empty and the node would be told it is up to date.
+    reads([beta('v0.0.1-beta11')])
+    mount(<NodeReleaseSelector enabled selection={linux} value="" onChange={() => {}}
+      initialChannel="testing" newerThan="v0.0.1-beta9" />)
+    const field = screen.getByRole('combobox', { name: 'admin:servers.native.agent_version' })
+    await waitFor(() => expect(field.getAttribute('aria-disabled')).not.toBe('true'))
+    fireEvent.mouseDown(field)
+    expect(await screen.findByRole('option', { name: 'v0.0.1-beta11' })).toBeTruthy()
+  })
+
+  it('offers nothing when the list has nothing ahead of the node', async () => {
+    reads([beta('v0.0.1-beta9')])
+    mount(<NodeReleaseSelector enabled selection={linux} value="" onChange={() => {}}
+      initialChannel="testing" newerThan="v0.0.1-beta9" />)
+    await waitFor(() => expect(screen.queryByRole('option', { name: 'v0.0.1-beta9' })).toBeNull())
+  })
+})
+
+// `newerThan` narrows by version, which is a weaker claim than "a path somebody
+// walked": a release can be ahead of the node and still be a target no verified
+// edge reaches. When the instance names the reachable ones, that is the list.
+describe('an explicit target list wins over being merely newer', () => {
+  it('offers only the versions the instance named', async () => {
+    const beta = (version: string): NodeRelease => ({
+      ...testing, version,
+      release_url: `https://github.com/KazuhaHub/Passwall-Node/releases/tag/${version}`,
+    })
+    reads([beta('v0.0.1-beta10'), beta('v0.0.1-beta11'), beta('v0.0.1-beta12')])
+    mount(<NodeReleaseSelector enabled selection={linux} value="" onChange={() => {}}
+      initialChannel="testing" newerThan="v0.0.1-beta9" targets={['v0.0.1-beta11']} />)
+    const field = screen.getByRole('combobox', { name: 'admin:servers.native.agent_version' })
+    await waitFor(() => expect(field.getAttribute('aria-disabled')).not.toBe('true'))
+    fireEvent.mouseDown(field)
+    expect(await screen.findByRole('option', { name: 'v0.0.1-beta11' })).toBeTruthy()
+    // Ahead, but nobody walked a path to it.
+    expect(screen.queryByRole('option', { name: 'v0.0.1-beta12' })).toBeNull()
+    expect(screen.queryByRole('option', { name: 'v0.0.1-beta10' })).toBeNull()
+  })
+
+  it('offers nothing when the instance names no reachable target', async () => {
+    reads([{ ...testing, version: 'v0.0.1-beta11',
+      release_url: 'https://github.com/KazuhaHub/Passwall-Node/releases/tag/v0.0.1-beta11' }])
+    mount(<NodeReleaseSelector enabled selection={linux} value="" onChange={() => {}}
+      initialChannel="testing" targets={[]} />)
+    // An empty list is the honest answer here: nothing the instance will accept.
+    expect(await screen.findByText('admin:servers.native.release_no_testing')).toBeTruthy()
+  })
+})
+
+// THE PRODUCT SCHEME. Everything here is a VERSION — the catalog's version field
+// — while the release PAGE is addressed by the TAG, which the backend builds
+// from the tag since the two identities were split.
+//
+// The guard below used to require a v-prefixed version and to rebuild the
+// expected URL from the version, so every product release failed it. That is not
+// a broken link: the URL check is a FILTER, so the release did not appear in the
+// list at all, and an operator with nothing to choose from concludes there is
+// nothing to install.
+describe('a product-scheme release, whose page is addressed by its tag', () => {
+  const product = (version: string, release_url: string): NodeRelease => ({
+    ...stable, version, release_url,
+  })
+  const official = (version: string) => `https://github.com/KazuhaHub/Passwall-Node/releases/tag/release/${version}`
+
+  it('lists it, selects it and links to its tag page', async () => {
+    const release = product('4.0.0', official('4.0.0'))
+    reads([release])
+    mount(<Controlled />)
+    await waitFor(() => expect(screen.queryByRole('status')).toBeNull())
+    await chooseVersion('4.0.0')
+    expect(selected()).toBe('4.0.0')
+    const link = screen.getByRole('link', { name: 'admin:servers.native.release_details' })
+    expect(link.getAttribute('href')).toBe(release.release_url)
+    expect(link.getAttribute('rel')).toBe('noopener noreferrer')
+  })
+
+  it('refuses a product release whose link is built from its version instead', async () => {
+    // tag/4.0.0 is not where a product release lives; tag/release/4.0.0 is.
+    reads([product('4.0.0', 'https://github.com/KazuhaHub/Passwall-Node/releases/tag/4.0.0')])
+    mount(<Controlled />)
+    await screen.findByText('admin:servers.native.release_no_stable')
+    expect(screen.queryByRole('link')).toBeNull()
+    expect(selected()).toBe('')
+  })
+
+  it('still refuses a product link from anywhere else, and any injected scheme', async () => {
+    for (const release_url of [
+      'https://github.com/attacker/Passwall-Node/releases/tag/release/4.0.0',
+      'javascript:alert(1)',
+      'https://github.com/KazuhaHub/Passwall-Node/releases/tag/release/4.0.0?download=1',
+      'http://github.com/KazuhaHub/Passwall-Node/releases/tag/release/4.0.0',
+    ]) {
+      reads([product('4.0.0', release_url)])
+      const view = mount(<Controlled />)
+      await screen.findByText('admin:servers.native.release_no_stable')
+      expect(screen.queryByRole('link'), release_url).toBeNull()
+      view.unmount()
+    }
+  })
+
+  it('does not turn a version with a path in it into a link', async () => {
+    reads([product('4.0.0/../../latest', official('4.0.0'))])
+    mount(<Controlled />)
+    await screen.findByText('admin:servers.native.release_no_stable')
+    expect(screen.queryByRole('link')).toBeNull()
+  })
+})
+
+// THE PANEL'S OWN ANSWER WINS.
+//
+// The catalog now states the tag it published, and a front end that re-derived
+// the mapping would be answering a question the panel already answered — with the
+// added risk that the two rules disagree. The stated value is used when present;
+// the derivation stays for a panel older than the field, which is why the cases
+// above (no `release_tag`) still pass.
+describe('a release whose tag the panel states', () => {
+  it('uses the stated tag rather than deriving one', async () => {
+    // THE STATED TAG HAS TO DIFFER FROM THE DERIVED ONE FOR THIS TO PROVE
+    // ANYTHING. For a consistent pair they are the same string by construction —
+    // `release/` + version — so a case like that passes whichever value is used,
+    // and the test would be describing a preference it never exercised. Here the
+    // panel's tag and its version disagree, and only the stated value reaches the
+    // URL.
+    const release: NodeRelease = {
+      ...stable, version: '4.0.0', release_tag: 'release/4.0.1',
+      release_url: 'https://github.com/KazuhaHub/Passwall-Node/releases/tag/release/4.0.1',
+    }
+    reads([release])
+    mount(<Controlled />)
+    await waitFor(() => expect(screen.queryByRole('status')).toBeNull())
+    await chooseVersion('4.0.0')
+    expect(selected()).toBe('4.0.0')
+    expect(screen.getByRole('link', { name: 'admin:servers.native.release_details' }).getAttribute('href')).toBe(release.release_url)
+  })
+
+  it('refuses a stated tag that disagrees with the URL', async () => {
+    reads([{
+      ...stable, version: '4.0.0', release_tag: 'release/4.0.1',
+      release_url: 'https://github.com/KazuhaHub/Passwall-Node/releases/tag/release/4.0.0',
+    }])
+    mount(<Controlled />)
+    await screen.findByText('admin:servers.native.release_no_stable')
+    expect(screen.queryByRole('link')).toBeNull()
+  })
+
+  it('still refuses a stated tag that is not a release tag', async () => {
+    reads([{
+      ...stable, version: '4.0.0', release_tag: '4.0.0',
+      release_url: 'https://github.com/KazuhaHub/Passwall-Node/releases/tag/4.0.0',
+    }])
+    mount(<Controlled />)
+    await screen.findByText('admin:servers.native.release_no_stable')
+    expect(screen.queryByRole('link')).toBeNull()
+  })
+})
+
+// A BETA-PREFERENCE NODE CAN STILL REACH A RELEASED TARGET, and it can here
+// WITHOUT this selector changing.
+//
+// The migration plan says a testing user may be offered released targets as well
+// as testing ones, which the NUDGE honours — it no longer filters by the saved
+// channel. This surface needs no such change: the channel is the operator's
+// explicit choice, and both options are reachable from it. Widening the
+// "testing" toggle to list released releases too would make its label say one
+// thing and its list another, which is the opposite of the problem being solved.
+describe('a node saved on the testing channel', () => {
+  it('opens on testing and can still pick a released target by switching', async () => {
+    reads([testing, stable])
+    mount(<Controlled initialChannel="testing" />)
+    await waitFor(() => expect(screen.queryByRole('status')).toBeNull())
+    await chooseVersion(testing.version)
+    expect(selected()).toBe(testing.version)
+    // The released target is reachable from the same surface.
+    fireEvent.mouseDown(screen.getByRole('combobox', { name: 'admin:servers.native.release_channel' }))
+    fireEvent.click(await screen.findByRole('option', { name: 'admin:servers.native.release_stable' }))
+    await chooseVersion(stable.version)
+    expect(selected()).toBe(stable.version)
+  })
+})

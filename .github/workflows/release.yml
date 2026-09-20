@@ -17,13 +17,29 @@ name: Release
 on:
   push:
     tags:
+      # BOTH SCHEMES, FOR AS LONG AS BOTH EXIST. `v*` is the legacy shape and
+      # stays until the last v-named release is out of support; `release/*` is
+      # the product shape (release/MAJOR.MINOR.PATCH). Leaving it out does not
+      # fail loudly — the tag is pushed, no run starts, and the name points at
+      # nothing — which is why the guard in deploy/release_workflow_test.mjs
+      # asserts both patterns rather than only the channel rule.
       - "v*"
+      - "release/*"
   workflow_dispatch:
     inputs:
       tag:
         description: "Release tag, for example v1.0.0"
         required: true
         type: string
+      channel:
+        description: "Publication channel. auto reads it from the tag; stable and testing state it."
+        required: false
+        default: auto
+        type: choice
+        options:
+          - auto
+          - stable
+          - testing
 
 env:
   GOWORK: "off"
@@ -53,6 +69,8 @@ jobs:
       sha: ${{ steps.identity.outputs.sha }}
       build_date: ${{ steps.identity.outputs.build_date }}
       node_cases: ${{ steps.node_support.outputs.node_cases }}
+      prerelease: ${{ steps.channel.outputs.prerelease }}
+      image_channel: ${{ steps.channel.outputs.images }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -117,6 +135,44 @@ jobs:
             echo "sha=${release_sha}"
             echo "build_date=$(date -u +%FT%TZ)"
           } >> "$GITHUB_OUTPUT"
+
+      # THE CHANNEL IS STATED OR READ FROM THE LEGACY SHAPE, NEVER GUESSED FROM A
+      # HYPHEN. `contains(tag, '-')` was the whole rule, and it is a LEGACY rule:
+      # a v-prefixed tag with a hyphen has always meant a pre-release. A
+      # product-scheme tag (release/MAJOR.MINOR.PATCH) has no hyphen at all, so
+      # the same test would publish every testing candidate as STABLE — and this
+      # is the one place where getting it wrong is not recoverable by a later
+      # edit, because `prerelease: false` points /releases/latest, which PSP's own
+      # in-app upgrade nudge reads.
+      #
+      # So: an explicit input wins; the legacy shape decides for a legacy tag;
+      # and anything else defaults to pre-release, the direction that can be
+      # corrected by promotion without having moved a stable pointer.
+      - name: Resolve the publication channel
+        id: channel
+        env:
+          REQUESTED: ${{ inputs.channel }}
+          PINNED_TAG: ${{ steps.identity.outputs.tag }}
+        run: |
+          set -euo pipefail
+          case "${REQUESTED:-auto}" in
+            stable)  prerelease=false ;;
+            testing) prerelease=true ;;
+            auto)
+              case "$PINNED_TAG" in
+                v*-*) prerelease=true ;;
+                v*)   prerelease=false ;;
+                *)    prerelease=true ;;
+              esac
+              ;;
+            *) echo "unknown publication channel: ${REQUESTED}" >&2; exit 1 ;;
+          esac
+          case "$PINNED_TAG" in
+            v*|release/*) images=true ;;
+            *)            images=false ;;
+          esac
+          echo "prerelease=${prerelease}" >> "$GITHUB_OUTPUT"
+          echo "images=${images}" >> "$GITHUB_OUTPUT"
 
       - name: Set up Node.js for immutable image preflight
         uses: actions/setup-node@v7
@@ -653,11 +709,9 @@ jobs:
           tag_name: ${{ needs.setup.outputs.tag }}
           target_commitish: ${{ needs.setup.outputs.sha }}
           name: ${{ needs.setup.outputs.tag }}
-          # Mark pre-release tags (anything with a "-beta"/"-rc"/... suffix) as a
-          # GitHub pre-release so /releases/latest excludes them — PSP's in-app
-          # self-update nudge (psp_upgrade alert) reads /releases/latest and must
-          # only ever point at a STABLE release, never a beta.
-          prerelease: ${{ contains(needs.setup.outputs.tag, '-') }}
+          # Resolved once in setup, where the reason for each answer is written
+          # down; both this job and the image job read that one answer.
+          prerelease: ${{ needs.setup.outputs.prerelease }}
           generate_release_notes: true
           body_path: release_notes.md
           append_body: true
@@ -727,8 +781,8 @@ jobs:
             #             build. A :beta deploy therefore auto-rolls forward onto a
             #             stable once that stable is the newest release, then onto
             #             the next beta — "always newest", not "betas only".
-            type=raw,value=latest,enable=${{ startsWith(needs.setup.outputs.tag, 'v') && !contains(needs.setup.outputs.tag, '-') }}
-            type=raw,value=beta,enable=${{ startsWith(needs.setup.outputs.tag, 'v') }}
+            type=raw,value=latest,enable=${{ needs.setup.outputs.image_channel == 'true' && needs.setup.outputs.prerelease == 'false' }}
+            type=raw,value=beta,enable=${{ needs.setup.outputs.image_channel == 'true' }}
           labels: |
             org.opencontainers.image.title=passwall-sub-panel
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}

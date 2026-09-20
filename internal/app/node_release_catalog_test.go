@@ -5,8 +5,15 @@ import (
 	"testing"
 )
 
+// A stamp that is not a canonical release version disables the catalog and
+// nothing else.
+//
+// `4.0.0` used to be in this list, and that was the defect: it is exactly what
+// the product scheme stamps, so the first release named that way would have had
+// its Node release catalog disabled as though the build had no identity at all.
+// It is a valid stamp and is asserted as one below.
 func TestNodeReleaseCatalogCustomStampDisablesOnlyCatalog(t *testing.T) {
-	for _, stamped := range []string{"ci", "custom-build", "", "4.0.0", "v4.0.0+local"} {
+	for _, stamped := range []string{"ci", "custom-build", "", "v4.0.0+local", "4.0", "release/4.0.0"} {
 		catalog, err := newNodeReleaseCatalog(stamped)
 		if err != nil || catalog != nil {
 			t.Fatalf("custom stamp %q must disable only optional catalog: catalog=%v err=%v", stamped, catalog, err)
@@ -15,7 +22,9 @@ func TestNodeReleaseCatalogCustomStampDisablesOnlyCatalog(t *testing.T) {
 }
 
 func TestNodeReleaseCatalogCompositionUsesActualMajorWithoutNetwork(t *testing.T) {
-	for _, stamped := range []string{"dev", "v4.0.0-beta.2", "v3.9.2", "v5.0.0"} {
+	// The last two are the product scheme, in the form the release workflow
+	// stamps and at a release line the compiled reviews do not cover.
+	for _, stamped := range []string{"dev", "v4.0.0-beta.2", "v3.9.2", "v5.0.0", "4.0.0", "102.1.0"} {
 		catalog, err := newNodeReleaseCatalog(stamped)
 		if err != nil || catalog == nil {
 			t.Fatalf("valid stamp %q failed local catalog construction: %v", stamped, err)

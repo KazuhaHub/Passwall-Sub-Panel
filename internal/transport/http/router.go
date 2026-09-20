@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	nodeprotocol "github.com/KazuhaHub/passwall-node/protocol"
+	nodeprotocol "github.com/KazuhaHub/passwall-protocol/protocol"
 	"github.com/gin-gonic/gin"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/config"
@@ -637,6 +637,7 @@ func NewRouter(d Deps) stdhttp.Handler {
 		adminGroup.GET("/servers", servers.List)
 		adminGroup.GET("/servers/node-releases", servers.ListNodeReleases)
 		adminGroup.GET("/servers/sui-release", servers.GetSUIRelease)
+		adminGroup.GET("/servers/compat-status", servers.CompatStatus)
 		adminGroup.POST("/servers", servers.Create)
 		adminGroup.PUT("/servers/:id", servers.Update)
 		adminGroup.DELETE("/servers/:id", servers.Delete)
@@ -683,6 +684,7 @@ func NewRouter(d Deps) stdhttp.Handler {
 		adminGroup.POST("/servers/:id/node-diagnostics", servers.RequestNodeDiagnostics)
 		adminGroup.GET("/servers/:id/node-diagnostics/:task_id", servers.GetNodeDiagnostics)
 		adminGroup.POST("/servers/probe", servers.Test)
+		adminGroup.GET("/servers/:id/upgrade-options", servers.UpgradeOptions)
 		adminGroup.GET("/servers/:id/upgrade-preview", servers.UpgradePreview)
 		adminGroup.POST("/servers/:id/upgrade-panel", servers.UpgradePanel)
 		adminGroup.POST("/servers/:id/upgrade-xray", servers.UpgradeXray)

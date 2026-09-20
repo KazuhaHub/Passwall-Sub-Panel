@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	nodeprotocol "github.com/KazuhaHub/passwall-node/protocol"
+	nodeprotocol "github.com/KazuhaHub/passwall-protocol/protocol"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/adapters/sqlstore"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
@@ -98,7 +98,11 @@ func TestUpgradeRequestRequiresAnExactNewerRelease(t *testing.T) {
 		{"v0.0.1-beta.10", "v0.0.1-beta.9", true},
 		{"v0.0.1", "v0.0.1-beta3", true},
 		{"v0.0.2-beta.1", "v0.0.1", true},
-		{"v100000000000000000000.0.0", "v99999999999999999999.0.0", true},
+		// `v100000000000000000000.0.0` against a 20-digit major used to be here,
+		// asserting that the comparison does not overflow. That property is
+		// asserted where it lives, in the comparator; the string itself is now
+		// REFUSED by the shape rule, which bounds a segment because PSP returns a
+		// major and cannot represent one this large. See MaxVersionSegmentBounds.,
 		{"v0.0.1-beta2", "v0.0.1-beta2", false},
 		{"v0.0.1-beta2", "v0.0.1-beta3", false},
 		{"v0.0.1-beta.9", "v0.0.1-beta.10", false},
@@ -107,6 +111,22 @@ func TestUpgradeRequestRequiresAnExactNewerRelease(t *testing.T) {
 		{"v0.1", "v0.0.1", false},
 		{"v0.0.2+build", "v0.0.1", false},
 		{"latest", "v0.0.1", false},
+		{"v100000000000000000000.0.0", "v99999999999999999999.0.0", false},
+		// THE PRODUCT SCHEME. This is the SERVER's gate — the front end mirrors
+		// it, but a request that reaches the API directly passes through here,
+		// and refusing a product version would make remote upgrade unavailable
+		// for every release named that way.
+		{"4.0.1", "4.0.0", true},
+		{"102.1.0", "102.0.3", true},
+		{"4.0.0", "4.0.0", false},
+		{"4.0.0", "4.0.1", false},
+		{"4.0", "4.0.0", false},
+		{"04.0.0", "4.0.0", false},
+		{"release/4.0.0", "4.0.0", false},
+		// Across the schemes, ordered by the release line: a v0.x build is
+		// behind 4.0.0 and ahead of nothing after it.
+		{"4.0.0", "v0.0.1-beta11", true},
+		{"v0.0.1-beta11", "4.0.0", false},
 	} {
 		err := validateRequest(Request{Version: tc.target, ExpectedVersion: tc.expected})
 		if tc.valid && err != nil || !tc.valid && !errors.Is(err, domain.ErrValidation) {
@@ -397,5 +417,89 @@ func TestUpgradeRequestRefusesAnUnverifiedEdge(t *testing.T) {
 	other := Request{Version: "v0.0.1-beta4", ExpectedVersion: "v0.0.1-beta2"}
 	if _, _, err := f.service.Request(context.Background(), f.panel.ID, other, upgradeRequestKey); !errors.Is(err, domain.ErrValidation) {
 		t.Fatalf("a neighbouring edge admitted an unverified path: %v", err)
+	}
+}
+
+// A policy in force decides which targets may be requested, and it must decide
+// for BOTH entry points: the API handler reaches the service through
+// validateRequest, and DecodeRequest — used when a task is read back — goes
+// through the same function. A gate placed on one of them would be a gate a
+// caller can walk around.
+func TestAPolicyInForceRefusesATargetItDoesNotOffer(t *testing.T) {
+	// A policy only applies to a build it names, and a `go test` build calls
+	// itself "dev" — so the build identity is stamped here the way the release
+	// binary stamps it, and restored afterwards.
+	previousVersion := version.Version
+	t.Cleanup(func() { version.Version = previousVersion })
+	version.Version = "v4.0.0-beta.25"
+
+	previousEnforcement := version.PolicyEnforcing()
+	t.Cleanup(func() { version.SetPolicyEnforcement(previousEnforcement) })
+	install := func(releases ...string) {
+		t.Helper()
+		// Loading a policy is not the same as letting it decide; this case is
+		// about the gate, so it switches enforcement on.
+		version.SetPolicyEnforcement(true)
+		entries := make([]version.PolicyRelease, 0, len(releases))
+		for _, r := range releases {
+			entries = append(entries, version.PolicyRelease{Version: r, ReleaseTag: r, Scheme: "legacy", Evidence: []string{"test"}})
+		}
+		version.SetActiveReleasesPolicy(&version.ReleasesPolicy{
+			SchemaVersion: 1,
+			Revision:      1,
+			IssuedAt:      time.Now().UTC().Add(-time.Hour),
+			ExpiresAt:     time.Now().UTC().Add(time.Hour),
+			AppliesToPSP:  version.PolicyPSPRange{Min: version.Version, Max: version.Version},
+			Releases:      entries,
+		})
+	}
+	t.Cleanup(func() { version.SetActiveReleasesPolicy(nil) })
+
+	// No policy: the pre-policy state, unchanged.
+	version.SetActiveReleasesPolicy(nil)
+	if err := validateRequest(validUpgradeRequest); err != nil {
+		t.Fatalf("without a policy the request must still validate: %v", err)
+	}
+
+	// A policy that does not list the target refuses it.
+	install("v0.0.1-beta11")
+	if err := validateRequest(validUpgradeRequest); !errors.Is(err, domain.ErrValidation) || !strings.Contains(err.Error(), "policy in force offers") {
+		t.Fatalf("a policy must refuse a target it does not offer: %v", err)
+	}
+	// ...including through the decode path, which is the other way in.
+	payload, err := json.Marshal(nodeprotocol.AgentUpgradeArgs{Version: validUpgradeRequest.Version, ExpectedVersion: validUpgradeRequest.ExpectedVersion})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := DecodeRequest(payload); !errors.Is(err, domain.ErrValidation) {
+		t.Fatalf("DecodeRequest must apply the same gate: %v", err)
+	}
+
+	// A policy that lists the target lets it through, so the gate is a filter
+	// and not a blanket refusal.
+	install("v0.0.1-beta2", "v0.0.1-beta3")
+	if err := validateRequest(validUpgradeRequest); err != nil {
+		t.Fatalf("a policy that offers the target must allow it: %v", err)
+	}
+}
+
+// A policy reviewed for a different build is installed but not in force here, so
+// it must not start refusing requests this build was always allowed to make.
+func TestAPolicyForAnotherBuildDoesNotGateThisOne(t *testing.T) {
+	previousVersion := version.Version
+	t.Cleanup(func() { version.Version = previousVersion })
+	version.Version = "v4.0.0-beta.25"
+
+	version.SetActiveReleasesPolicy(&version.ReleasesPolicy{
+		SchemaVersion: 1,
+		Revision:      1,
+		IssuedAt:      time.Now().UTC().Add(-time.Hour),
+		ExpiresAt:     time.Now().UTC().Add(time.Hour),
+		AppliesToPSP:  version.PolicyPSPRange{Min: "v9.0.0", Max: "v9.99.99"},
+	})
+	t.Cleanup(func() { version.SetActiveReleasesPolicy(nil) })
+
+	if err := validateRequest(validUpgradeRequest); err != nil {
+		t.Fatalf("a policy for another build must not gate this one: %v", err)
 	}
 }

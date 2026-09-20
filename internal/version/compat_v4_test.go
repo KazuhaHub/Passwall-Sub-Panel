@@ -3,6 +3,8 @@ package version
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -216,13 +218,27 @@ func TestCompatV4FetchAppliesPublishedShape(t *testing.T) {
 	if a, ok := LookupSUIAdvisory("v1.6.3"); !ok || !a.AffectsXray || a.Severity != "info" || a.Text == "" {
 		t.Fatal("runtime lost the SUI 1.6.3 core-upgrade advisory")
 	}
-	cache, err := os.ReadFile(filepath.Join(dir, compatCacheFile))
+	// The snapshot stores the VALIDATED DOCUMENT and its digest, not a bare
+	// value: a reader replaying it must be able to re-run the same applicability
+	// test rather than trust a conclusion whose premises are gone.
+	cache, err := os.ReadFile(filepath.Join(dir, policySnapshotFile))
 	if err != nil {
 		t.Fatal(err)
 	}
-	var stored compatCachePayload
-	if err := json.Unmarshal(cache, &stored); err != nil || stored.PSPVersion != Version || stored.MaxTestedXUI != "3.8.5" {
-		t.Fatalf("runtime cache has wrong provenance: %#v error=%v", stored, err)
+	var stored policySnapshot
+	if err := json.Unmarshal(cache, &stored); err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(stored.Payload)
+	if stored.SnapshotSchema != policySnapshotSchema || stored.Digest != hex.EncodeToString(sum[:]) {
+		t.Fatalf("snapshot integrity fields are wrong: %#v", stored)
+	}
+	var replayed remoteCompatPayload
+	if err := json.Unmarshal(stored.Payload, &replayed); err != nil || replayed.UpdatedAt == "" {
+		t.Fatalf("snapshot payload is not the applied document: %v", err)
+	}
+	if replayed.Major != 4 {
+		t.Fatalf("snapshot payload declares major=%d, want 4", replayed.Major)
 	}
 
 	// Even an override serving a valid v3 document must not replace the
@@ -239,9 +255,9 @@ func TestCompatV4FetchAppliesPublishedShape(t *testing.T) {
 	if ActiveMaxTestedXUI() != "3.5.0" {
 		t.Fatal("wrong-major fetch changed active state")
 	}
-	after, err := os.ReadFile(filepath.Join(dir, compatCacheFile))
+	after, err := os.ReadFile(filepath.Join(dir, policySnapshotFile))
 	if err != nil || !bytes.Equal(after, cache) {
-		t.Fatalf("wrong-major fetch changed the persisted cache: %v", err)
+		t.Fatalf("wrong-major fetch changed the persisted snapshot: %v", err)
 	}
 }
 
