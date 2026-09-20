@@ -4,6 +4,7 @@ import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import { useTranslation } from 'react-i18next'
 import { listNodeReleases, type NodeRelease, type NodeReleaseChannel } from '@/api/nodeReleases'
 import type { NativeInstallationSelection } from '@/api/servers'
+import { compareLegacyTag, releaseTag } from '@/utils/productVersion'
 
 export interface NodeReleaseSelectorProps {
   enabled: boolean
@@ -17,6 +18,29 @@ export interface NodeReleaseSelectorProps {
   compact?: boolean
   /** Upgrade flows can opt into selecting the newest reviewed release automatically. */
   autoSelectLatest?: boolean
+  /**
+   * When set, only releases STRICTLY NEWER than this version are offered.
+   *
+   * The upgrade dialog sets it to the node's own version. A list that includes
+   * the version you are already on — and older ones — invites a request the
+   * service refuses, and offering a downgrade as though it were a target is how
+   * an operator learns to distrust the list instead of the request.
+   *
+   * The comparison is the project's release order, NOT SemVer's: these are the
+   * dotless prerelease tags this project publishes, where SemVer ranks beta11
+   * below beta9. It is the same rule the panel's admission check applies, so the
+   * list cannot offer something the service would reject for being older.
+   */
+  newerThan?: string
+  /**
+   * When set, only these versions are offered.
+   *
+   * The upgrade dialog passes the releases a verified edge actually reaches.
+   * `newerThan` narrows by version, which is a weaker claim: a release can be
+   * ahead of the node and still be a path nobody has walked, and offering it
+   * invites a request the edge check refuses.
+   */
+  targets?: readonly string[]
 }
 
 function supportsSelection(release: NodeRelease, selection: NativeInstallationSelection): boolean {
@@ -31,14 +55,26 @@ function supportsSelection(release: NodeRelease, selection: NativeInstallationSe
 }
 
 function officialReleaseURL(release: NodeRelease): string | undefined {
-  // Keep externally supplied metadata out of href unless it names exactly
-  // this project's official tag page, without credentials/query/fragment.
-  if (!/^v[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?$/.test(release.version)) return undefined
-  const expected = `https://github.com/KazuhaHub/Passwall-Node/releases/tag/${release.version}`
+  // Keep externally supplied metadata out of href unless it names exactly this
+  // project's official tag page, without credentials/query/fragment.
+  //
+  // THE PAGE IS ADDRESSED BY THE TAG, AND A TAG IS NOT A VERSION. A product
+  // release lives at `tag/release/4.0.0` while its version is `4.0.0`, so a
+  // guard that required a v-prefixed version AND rebuilt the URL from the
+  // version failed every product release. That is not a broken link: this is
+  // called as a FILTER, so the release never appeared in the list, and an
+  // operator with nothing to choose from concludes there is nothing to install.
+  //
+  // releaseTag is what the PANEL states, falling back to the shared rule for a
+  // panel older than the field — so the refusals that used to be the regex here,
+  // junk and anything readable as a path, are made by one rule either way.
+  const tag = releaseTag(release.version, release.release_tag)
+  if (!tag) return undefined
+  const expected = `https://github.com/KazuhaHub/Passwall-Node/releases/tag/${tag}`
   return release.release_url === expected ? expected : undefined
 }
 
-export default function NodeReleaseSelector({ enabled, selection, value, onChange, disabled = false, initialChannel = 'stable', compact = false, autoSelectLatest = false }: NodeReleaseSelectorProps) {
+export default function NodeReleaseSelector({ enabled, selection, value, onChange, disabled = false, initialChannel = 'stable', compact = false, autoSelectLatest = false, newerThan, targets }: NodeReleaseSelectorProps) {
   const { t, i18n } = useTranslation(['admin', 'common'])
   const reviewID = useId()
   const [channel, setChannel] = useState<NodeReleaseChannel>(initialChannel)
@@ -91,8 +127,10 @@ export default function NodeReleaseSelector({ enabled, selection, value, onChang
   }, [enabled, attempt])
 
   const options = useMemo(() => (releases ?? []).filter(release =>
-    release.channel === channel && officialReleaseURL(release) && supportsSelection(release, selection),
-  ), [releases, channel, selection])
+    release.channel === channel && officialReleaseURL(release) && supportsSelection(release, selection) &&
+    (!newerThan || compareLegacyTag(release.version, newerThan) > 0) &&
+    (!targets || targets.includes(release.version)),
+  ), [releases, channel, selection, newerThan, targets])
   const selected = options.find(release => release.version === value)
   const selectedURL = selected ? officialReleaseURL(selected) : undefined
   const channelTag = channel === 'stable' ? 'latest' : 'beta'

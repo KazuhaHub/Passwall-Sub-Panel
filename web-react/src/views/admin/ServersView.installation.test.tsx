@@ -104,8 +104,11 @@ function generatedFiles(): NativeInstallationFiles {
   }
 }
 
-function generatedManualFiles(): NativeInstallationFiles {
-  const version = 'v1.2.3-beta.1'
+// `tag` defaults to the version, which is what a legacy release is addressed
+// by. A product release is addressed by its tag and named by its version, so the
+// two are passed separately rather than derived — the fixture should not carry
+// its own copy of the rule it is checking.
+function generatedManualFiles(version = 'v1.2.3-beta.1', tag = version): NativeInstallationFiles {
   const asset = `passwall-node_${version}_linux_amd64.tar.gz`
   return {
     method: 'manual', os: 'linux', arch: 'amd64',
@@ -114,8 +117,8 @@ function generatedManualFiles(): NativeInstallationFiles {
       { name: 'node-config.json', content: JSON.stringify({ endpoint: provisioning.endpoint, agent_id: provisioning.agent_id, version }) },
     ],
     downloads: [
-      { name: asset, url: `https://github.com/KazuhaHub/Passwall-Node/releases/download/${version}/${asset}` },
-      { name: 'SHA256SUMS.txt', url: `https://github.com/KazuhaHub/Passwall-Node/releases/download/${version}/SHA256SUMS.txt` },
+      { name: asset, url: `https://github.com/KazuhaHub/Passwall-Node/releases/download/${tag}/${asset}` },
+      { name: 'SHA256SUMS.txt', url: `https://github.com/KazuhaHub/Passwall-Node/releases/download/${tag}/SHA256SUMS.txt` },
     ],
     steps: [{ id: 'download_verify', title: 'Verify transferred files', commands: ['sha256sum --check selected.sha256'] }],
   }
@@ -955,6 +958,63 @@ describe('Passwall Node installation', () => {
     expect((screen.getByLabelText('admin:servers.native.credential') as HTMLInputElement).value).toBe(provisioning.credential)
   })
 
+  // THE PRODUCT SCHEME, through the whole install surface.
+  //
+  // Two guards stood in the way and neither said anything. The version rule
+  // required a v prefix, so the product release was not even listed; and the
+  // download check rebuilt the URL from the version, while the publisher
+  // addresses the path by the TAG — so the response was rejected as unusable and
+  // the operator was told the release had no installation assets.
+  it('installs a product-scheme release, addressed by its tag and named by its version', async () => {
+    const product: NodeReleaseCatalog = {
+      checked_at: '2026-09-12T13:00:00Z',
+      releases: [{
+        version: '4.0.0', channel: 'stable', published_at: '2026-09-12T12:00:00Z', notes: 'Reviewed contract fixture',
+        release_url: 'https://github.com/KazuhaHub/Passwall-Node/releases/tag/release/4.0.0',
+        methods: ['linux', 'docker', 'manual'],
+        platforms: (['linux', 'darwin', 'windows'] as const).flatMap(os =>
+          (['amd64', 'arm64'] as const).map(arch => ({ os, arch }))),
+      }],
+    }
+    releaseReads.mockResolvedValue(product)
+    const materials = generatedManualFiles('4.0.0', 'release/4.0.0')
+    api.post.mockResolvedValue({ data: materials })
+    mountExpanded(<NativeInstallationDialog server={nativeServer} initialProvisioning={provisioning} onClose={vi.fn()} onRotate={vi.fn()} />)
+    await selectMethod('manual')
+    await selectVersion('4.0.0')
+    fireEvent.click(screen.getByRole('button', { name: 'admin:servers.native.generate_files' }))
+    await screen.findAllByLabelText('admin:servers.native.file_content')
+    expect(api.post).toHaveBeenCalledWith('/admin/servers/7/node-installation-files', {
+      version: '4.0.0', method: 'manual', os: 'linux', arch: 'amd64',
+    }, expect.objectContaining({ signal: expect.any(AbortSignal) }))
+    for (const download of materials.downloads ?? []) {
+      const matches = screen.getAllByRole('link', { name: 'admin:servers.native.download_release_file' })
+      expect(matches.some(candidate => candidate.getAttribute('href') === download.url)).toBe(true)
+    }
+  })
+
+  it('rejects a product release whose download path is built from its version', async () => {
+    const product: NodeReleaseCatalog = {
+      checked_at: '2026-09-12T13:00:00Z',
+      releases: [{
+        version: '4.0.0', channel: 'stable', published_at: '2026-09-12T12:00:00Z', notes: 'Reviewed contract fixture',
+        release_url: 'https://github.com/KazuhaHub/Passwall-Node/releases/tag/release/4.0.0',
+        methods: ['linux', 'docker', 'manual'],
+        platforms: (['linux', 'darwin', 'windows'] as const).flatMap(os =>
+          (['amd64', 'arm64'] as const).map(arch => ({ os, arch }))),
+      }],
+    }
+    releaseReads.mockResolvedValue(product)
+    // Untagged path: what a URL built from the version looks like.
+    api.post.mockResolvedValue({ data: generatedManualFiles('4.0.0', '4.0.0') })
+    mountExpanded(<NativeInstallationDialog server={nativeServer} initialProvisioning={provisioning} onClose={vi.fn()} onRotate={vi.fn()} />)
+    await selectMethod('manual')
+    await selectVersion('4.0.0')
+    fireEvent.click(screen.getByRole('button', { name: 'admin:servers.native.generate_files' }))
+    await screen.findByText('admin:servers.native.files_failed')
+    expect(screen.queryByLabelText('admin:servers.native.file_content')).toBeNull()
+  })
+
   it('invalidates displayed files after a release change instead of allowing obsolete files to be copied', async () => {
     reads()
     api.post.mockResolvedValue({ data: generatedFiles() })
@@ -1081,11 +1141,23 @@ describe('Passwall Node installation', () => {
 })
 
 describe('native installation inputs', () => {
-  it.each(['', 'latest', '1.2.3', 'v01.2.3', 'v1.2.3-beta.01', 'https://example.test/v1.2.3'])('rejects noncanonical release version %s', version => {
+  it.each([
+    '', 'latest', 'https://example.test/v1.2.3',
+    // `1.2.3` USED TO BE IN THIS LIST, and that was the defect rather than the
+    // rule: it is exactly what the product scheme stamps, so a released product
+    // version left the install action disabled with nothing said about why. It
+    // is asserted as accepted below, and the near misses stay here.
+    '1.2', '1.2.3.4', '04.0.0', '1.2.3-beta.1', 'release/1.2.3',
+    'v01.2.3', 'v1.2.3-beta.01', 'v1.2', 'v1.2.3.4',
+  ])('rejects noncanonical release version %s', version => {
     expect(isNodeReleaseVersion(version)).toBe(false)
   })
 
-  it.each(['v0.1.0', 'v1.2.3', 'v1.2.3-beta.1', 'v1.2.3-rc-1'])('accepts canonical release version %s', version => {
+  it.each([
+    'v0.1.0', 'v1.2.3', 'v1.2.3-beta.1', 'v1.2.3-rc-1',
+    // The product scheme: three integers, no prefix, no prerelease.
+    '1.2.3', '4.0.0', '102.1.0',
+  ])('accepts canonical release version %s', version => {
     expect(isNodeReleaseVersion(version)).toBe(true)
   })
 

@@ -112,6 +112,7 @@ import { useQueryScope } from '@/query/useQueryScope'
 import { ipCapBadgeTone, type IPCapTone } from '@/utils/capabilities'
 import { copyToClipboard } from '@/utils/clipboard'
 import { useCan } from '@/utils/permissions'
+import { canonicalReleaseVersion, tagForVersion } from '@/utils/productVersion'
 import {
   type FieldErrors,
   firstError,
@@ -1933,19 +1934,31 @@ function NativeInstallationMethodFields({ selection, onChange, disabled = false,
   </Box>
 }
 
+// Whether the string names a release this project publishes, in either scheme.
+//
+// THIS USED TO BE A FOURTH COPY of the version-shape rule, and it knew only the
+// legacy one — so a product version left the install action disabled with
+// nothing said about why, which reads as "this release cannot be installed"
+// rather than "this build does not recognise it". The rule lives in the module
+// that reads the shared vectors; this asks it.
 export function isNodeReleaseVersion(version: string): boolean {
-  if (!/^v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/.test(version)) return false
-  const prerelease = version.slice(version.indexOf('-') + 1)
-  return !version.includes('-') || prerelease.split('.').every(segment => !/^0\d+$/.test(segment))
+  return canonicalReleaseVersion(version) !== undefined
 }
 
 function isNodeDockerImageSelection(version: string): boolean {
   return version === 'latest' || version === 'beta' || isNodeReleaseVersion(version)
 }
 
+// THE DOWNLOAD PATH IS ADDRESSED BY THE TAG AND THE ASSET IS NAMED BY THE
+// VERSION, which is what the publisher does. Rebuilding the path from the
+// version left every product release unusable: the response was rejected as
+// though it named some other file, and the operator was told the release had no
+// installation assets.
 function isOfficialNodeReleaseDownload(download: { name: string; url: string }, version: string): boolean {
-  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/.test(download.name) || !isNodeReleaseVersion(version)) return false
-  return download.url === `https://github.com/KazuhaHub/Passwall-Node/releases/download/${version}/${download.name}`
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/.test(download.name)) return false
+  const tag = tagForVersion(version)
+  if (!tag) return false
+  return download.url === `https://github.com/KazuhaHub/Passwall-Node/releases/download/${tag}/${download.name}`
 }
 
 function installationErrorMessage(error: unknown, fallback: string): string {

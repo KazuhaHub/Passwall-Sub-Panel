@@ -69,7 +69,30 @@ async function confirmAndSelect(version = 'v0.0.1') {
   await waitFor(() => expect(generateButton().disabled).toBe(false))
 }
 
+// THE PRODUCT SCHEME. The generate button required a v-prefixed version, so a
+// product release could be selected in the picker and then left the last step of
+// the migration unusable, with the button disabled and nothing said about why.
 describe('3X-UI to Passwall Node node-host migration command', () => {
+  it('generates the command for a product-scheme release', async () => {
+    releaseReads.mockResolvedValue({
+      checked_at: '2026-09-12T13:00:00Z',
+      releases: [{
+        version: '4.0.0', channel: 'stable', published_at: '2026-09-12T12:00:00Z', notes: 'Reviewed release fixture',
+        release_url: 'https://github.com/KazuhaHub/Passwall-Node/releases/tag/release/4.0.0',
+        methods: ['linux'], platforms: [{ os: 'linux', arch: 'amd64' }, { os: 'linux', arch: 'arm64' }],
+      }],
+    })
+    reads()
+    mount(<ServersView />)
+    await openMenu(server)
+    fireEvent.click(screen.getByRole('menuitem', { name: 'admin:servers.install_reinstall.action' }))
+    await chooseBackend('Passwall Node')
+    fireEvent.click(screen.getByRole('button', { name: 'admin:servers.install_reinstall.precheck' }))
+    await confirmAndSelect('4.0.0')
+    fireEvent.click(generateButton())
+    await waitFor(() => expect(command()?.value).toBe(generated().command))
+  })
+
   it('opens one unified selector with the original backend, then prechecks an explicitly chosen Passwall Node migration', async () => {
     reads()
     mount(<ServersView />)

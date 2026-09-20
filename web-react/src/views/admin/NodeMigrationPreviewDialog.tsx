@@ -7,6 +7,7 @@ import { createNodeMigrationCommand, getNodeMigrationPreview, type NativeInstall
 import NodeReleaseSelector from '@/components/NodeReleaseSelector'
 import NodeInstallCommand from '@/components/NodeInstallCommand'
 import { useCan } from '@/utils/permissions'
+import { canonicalReleaseVersion } from '@/utils/productVersion'
 
 const knownIssues = new Set([
   'missing_snapshot', 'unsupported_protocol', 'inbound_expiry', 'external_files', 'fallback_dependency',
@@ -86,7 +87,12 @@ export function NodeMigrationPreviewDialog({ server, onClose, onRefreshServer, o
   activeBinding.current = commandBinding
   const command = issuedCommand?.binding === commandBinding ? issuedCommand : null
   const ready = !!(supported && preview && serverID && eligiblePreview(preview, serverID, acknowledged))
-  const canGenerate = ready && /^v[0-9]+\.[0-9]+\.[0-9]+(?:-[A-Za-z0-9.-]+)?$/.test(version) && managedOnly && singleInstance
+  // A VERSION, IN EITHER SCHEME, by the shared rule. The regex this replaced
+  // knew only the legacy form, so a product release could be picked and then
+  // left the last step of the migration permanently disabled. It was also
+  // LOOSER than the rule it was standing in for — it accepted `v01.0.0` and any
+  // prerelease spelling — so delegating tightens it as well as widening it.
+  const canGenerate = ready && canonicalReleaseVersion(version) !== undefined && managedOnly && singleInstance
 
   function clearCommand() {
     commandRequest.current?.abort()

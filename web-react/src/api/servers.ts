@@ -457,6 +457,37 @@ export async function upgradePreview(id: number) {
   return data
 }
 
+// upgrade-options answers, per component, whether THIS instance may upgrade it.
+// The agent answer carries `targets`: the releases a verified edge actually
+// reaches from this node, so a caller can offer those rather than everything
+// that happens to be newer.
+//
+// NOTE: PSP #180 adds this function too. Whichever of the two merges second
+// should drop its copy rather than keep two.
+export type UpgradeComponent = 'panel' | 'core' | 'agent'
+export interface AgentUpgradeTarget {
+  version: string
+  edge_verified: boolean
+  offered_by_policy: boolean
+}
+export interface UpgradeOption {
+  component: UpgradeComponent
+  state: 'ready' | 'manual_only' | 'unsupported' | 'blocked'
+  current_version?: string
+  target_version?: string
+  target_pinnable: boolean
+  reason_codes: string[]
+  targets?: AgentUpgradeTarget[]
+}
+
+export async function upgradeOptions(id: number, component: UpgradeComponent) {
+  const { data } = await client.get<UpgradeOption>(`/admin/servers/${id}/upgrade-options`, {
+    params: { component },
+    _skipErrorToast: true,
+  })
+  return data
+}
+
 export interface UpgradeXrayResult {
   ok: boolean
 	engine?: NativeCoreEngine
