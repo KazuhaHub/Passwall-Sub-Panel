@@ -39,6 +39,23 @@ const (
 	upgradeBlocked upgradeOptionState = "blocked"
 )
 
+// agentUpgradeTarget is one release this node could be moved to, with the claim
+// that matters attached to it.
+//
+// "NEWER" AND "A PATH SOMEBODY WALKED" ARE DIFFERENT CLAIMS. A list filtered only
+// by version offers releases that are ahead and that nobody has ever moved a
+// node onto; the request is then refused by the edge check, and the operator
+// learns to distrust the list instead of the request. Answering per TARGET is
+// what lets the list say which of the ahead ones are actually reachable.
+type agentUpgradeTarget struct {
+	Version string `json:"version"`
+	// EdgeVerified: a verified edge starts at the node's version and ends here.
+	EdgeVerified bool `json:"edge_verified"`
+	// OfferedByPolicy is meaningful only when a policy is in force; before one
+	// exists there is no offered-target list and the edges are the whole answer.
+	OfferedByPolicy bool `json:"offered_by_policy"`
+}
+
 type upgradeOption struct {
 	Component      string             `json:"component"`
 	State          upgradeOptionState `json:"state"`
@@ -49,6 +66,10 @@ type upgradeOption struct {
 	// and "this will reach a known version" are different promises.
 	TargetPinnable bool     `json:"target_pinnable"`
 	ReasonCodes    []string `json:"reason_codes"`
+	// Targets is populated for the agent component: every release a verified
+	// edge leaves this node's version along, so a caller can offer exactly those
+	// rather than everything that happens to be newer.
+	Targets []agentUpgradeTarget `json:"targets,omitempty"`
 }
 
 // decidePanelUpgrade answers for the 3X-UI panel component.
@@ -208,7 +229,58 @@ func (h *AdminServersHandler) decideAgentOption(c *gin.Context, panelID int64) u
 	// Before a policy exists the panel is in its pre-policy state, where the
 	// manifest's edges are the only source and there is no offered-target list
 	// to consult. Once one is in force it answers both questions.
-	targetOffered := !version.PolicyInForce() || (current != "" && version.PolicyOffersRelease(current))
+	policyInForce := version.PolicyInForce()
+	policyReleases := []string(nil)
+	if policy := version.ActiveReleasesPolicy(); policy != nil {
+		for _, release := range policy.Releases {
+			policyReleases = append(policyReleases, release.Version)
+		}
+	}
+	targetOffered := !policyInForce || (current != "" && version.PolicyOffersRelease(current))
 	edgeVerified := current != "" && version.HasUpgradeEdgeFrom(current)
-	return decideAgentUpgrade(current, targetOffered, edgeVerified)
+	option := decideAgentUpgrade(current, targetOffered, edgeVerified)
+	// The per-target answer, so a caller can offer exactly the releases somebody
+	// has walked a node onto rather than everything that happens to be newer.
+	option.Targets = agentTargets(current, version.ActiveUpgradeEdges(), policyInForce, policyReleases)
+	return option
+}
+
+// agentTargets lists what a verified edge leaves `current` along.
+//
+// It answers from the edges in force, which are the policy's when one is
+// installed and the manifest's before that — the same two sources the admission
+// check uses, so a list built from this cannot offer a path the service would
+// refuse for being unverified.
+//
+// "NEWER" AND "A PATH SOMEBODY WALKED" ARE DIFFERENT CLAIMS, which is why this
+// exists at all: filtering a release list by version alone offers releases that
+// are ahead and that nobody has ever moved a node onto.
+func agentTargets(current string, edges []version.UpgradeEdge, policyInForce bool, policyReleases []string) []agentUpgradeTarget {
+	if current == "" {
+		return nil
+	}
+	offered := make(map[string]struct{}, len(policyReleases))
+	for _, release := range policyReleases {
+		offered[release] = struct{}{}
+	}
+	targets := make([]agentUpgradeTarget, 0, len(edges))
+	seen := make(map[string]struct{}, len(edges))
+	for _, edge := range edges {
+		if edge.From != current || edge.To == "" {
+			continue
+		}
+		// One target, one entry: the edges are keyed by id and two rows may name
+		// the same pair.
+		if _, duplicate := seen[edge.To]; duplicate {
+			continue
+		}
+		seen[edge.To] = struct{}{}
+		_, listed := offered[edge.To]
+		targets = append(targets, agentUpgradeTarget{
+			Version:         edge.To,
+			EdgeVerified:    true,
+			OfferedByPolicy: !policyInForce || listed,
+		})
+	}
+	return targets
 }

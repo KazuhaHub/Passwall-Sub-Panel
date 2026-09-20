@@ -176,3 +176,54 @@ func TestUpgradeOptionsReportsUnsupportedForABackendWithoutTheCapability(t *test
 		}
 	}
 }
+
+// Filtering a release list by version alone offers releases that are ahead and
+// that nobody has ever moved a node onto. The request is then refused by the edge
+// check, and the operator learns to distrust the list instead of the request —
+// so the list is built from the edges, not from the catalog.
+func TestAgentTargetsComeFromWalkedPaths(t *testing.T) {
+	edges := []version.UpgradeEdge{
+		{ID: "a", From: "v0.0.1-beta3", To: "v0.0.1-beta11"},
+		{ID: "b", From: "v0.0.1-beta9", To: "v0.0.1-beta10"},
+		{ID: "c", From: "v0.0.1-beta3", To: "v0.0.1-beta11"}, // same pair again
+	}
+
+	targets := agentTargets("v0.0.1-beta3", edges, false, nil)
+	if len(targets) != 1 {
+		t.Fatalf("targets = %+v, want exactly the one path leaving beta3", targets)
+	}
+	if targets[0].Version != "v0.0.1-beta11" || !targets[0].EdgeVerified {
+		t.Fatalf("target = %+v", targets[0])
+	}
+	// No policy in force: there is no offered-target list to consult, and the
+	// edge is the whole answer.
+	if !targets[0].OfferedByPolicy {
+		t.Fatal("without a policy every walked path is what there is")
+	}
+
+	// A node with no edge leaving it has no targets, whatever the catalog says.
+	if got := agentTargets("v0.0.1-beta11", edges, false, nil); len(got) != 0 {
+		t.Fatalf("targets = %+v, want none", got)
+	}
+	// An unknown identity cannot be the start of anything.
+	if got := agentTargets("", edges, false, nil); got != nil {
+		t.Fatalf("targets = %+v, want nil", got)
+	}
+}
+
+// With a policy in force the offered list is part of the answer: a walked path
+// to a release the policy no longer offers is not something to put in front of
+// an operator.
+func TestAgentTargetsCarryThePolicyAnswerWhenOneIsInForce(t *testing.T) {
+	edges := []version.UpgradeEdge{{ID: "a", From: "v0.0.1-beta3", To: "v0.0.1-beta11"}}
+
+	listed := agentTargets("v0.0.1-beta3", edges, true, []string{"v0.0.1-beta11"})
+	if len(listed) != 1 || !listed[0].OfferedByPolicy {
+		t.Fatalf("targets = %+v, want it reported as offered", listed)
+	}
+
+	unlisted := agentTargets("v0.0.1-beta3", edges, true, []string{"v0.0.1-beta10"})
+	if len(unlisted) != 1 || unlisted[0].OfferedByPolicy {
+		t.Fatalf("targets = %+v, want the policy answer carried rather than assumed", unlisted)
+	}
+}
