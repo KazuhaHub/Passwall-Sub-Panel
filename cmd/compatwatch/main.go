@@ -32,6 +32,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -377,27 +378,47 @@ func unaccountedReleases(published, accounted []string) []string {
 type publishedRelease struct {
 	Tag     string
 	Version string
+	// Historical marks a release published under the scheme this project used to
+	// have. It is not a version here — nothing reads one out of it — and it is
+	// outside what the registry can account for.
+	Historical bool
 }
 
-// publishedReleases pairs each published tag with the version it names.
+// legacyPublishedShape RECOGNISES the historical published form. It does not read
+// it as an identity, and no other part of this build accepts one.
 //
-// A TAG IT CANNOT IDENTIFY IS AN ERROR RATHER THAN AN ENTRY TO SKIP. Skipping one
-// would let the registry check pass while describing a repository with a release
-// nobody can account for — the silence this job exists to refuse, arriving
-// through the one door this function controls.
+// THE SCHEME IS GONE AND THE RELEASES ARE NOT. Nine v0.0.1-beta releases are on
+// GitHub and always will be. A watcher that refuses to look at them reports
+// "unknown" on every run, and a watcher that cannot run is worse than one that
+// classifies: the silence this job refuses would be its own.
+var legacyPublishedShape = regexp.MustCompile(`^v\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$`)
+
+// publishedReleases pairs each published tag with the version it names, and
+// separates the releases published before the current scheme from the ones the
+// registry can account for.
 //
-// The rule is the shared one in internal/version, not a second copy here. The same
-// mapping decides whether a node's reported identity is newer than this build's
-// version, and two copies would disagree about which release a tag names.
+// A TAG IT CANNOT IDENTIFY AT ALL IS STILL AN ERROR RATHER THAN AN ENTRY TO SKIP.
+// That is what keeps the check honest about a repository that has grown a release
+// nobody can account for — a typo, a second naming scheme, a stray tag — while a
+// release under the KNOWN historical form is history rather than a gap.
+//
+// The mapping for the current scheme is the shared one in internal/version, not a
+// second copy here. The same mapping decides whether a node's reported identity is
+// newer than this build's version, and two copies would disagree about which
+// release a tag names.
 func publishedReleases(tags []string) ([]publishedRelease, error) {
 	published := make([]publishedRelease, 0, len(tags))
 	for _, tag := range tags {
-		named, ok := version.VersionOfReleaseTag(tag)
-		if !ok {
-			return nil, fmt.Errorf("cannot identify the release published as %q: it is not a %q tag",
-				tag, version.ProductTagNamespace)
+		if named, ok := version.VersionOfReleaseTag(tag); ok {
+			published = append(published, publishedRelease{Tag: tag, Version: named})
+			continue
 		}
-		published = append(published, publishedRelease{Tag: tag, Version: named})
+		if legacyPublishedShape.MatchString(tag) {
+			published = append(published, publishedRelease{Tag: tag, Historical: true})
+			continue
+		}
+		return nil, fmt.Errorf("cannot identify the release published as %q: it is neither a %q tag nor a historical release",
+			tag, version.ProductTagNamespace)
 	}
 	return published, nil
 }
@@ -419,14 +440,35 @@ func nodeRegistryReport(registry nodeRegistry, published []publishedRelease, fet
 		report.Reason = fmt.Sprintf("%s reported no published releases at all", nodeRepo)
 		return report
 	}
-	report.Latest = published[0].Tag
+	// THE ACCOUNTING IS OVER THE RELEASES THIS PROJECT STILL PUBLISHES. A release
+	// under the historical scheme cannot be reviewed into a registry keyed by
+	// versions, and reporting it as a gap would make the gap permanent: the only
+	// remedy the check names is a registry entry that could never be written. It is
+	// COUNTED and it is SAID, so a release nobody has classified is still visible.
+	current := make([]publishedRelease, 0, len(published))
+	for _, release := range published {
+		if !release.Historical {
+			current = append(current, release)
+		}
+	}
+	historical := len(published) - len(current)
+	note := ""
+	if historical > 0 {
+		note = fmt.Sprintf(" (%d published before the current scheme, outside the registry by construction)", historical)
+	}
+	if len(current) == 0 {
+		report.Verdict = version.CeilingUnknown
+		report.Reason = fmt.Sprintf("%s publishes no release under the current scheme%s", nodeRepo, note)
+		return report
+	}
+	report.Latest = current[0].Tag
 
 	accounted := registry.accounted()
 	// THE PUBLISHED SIDE IS COMPARED BY VERSION. The registry names versions; the
 	// published side arrives as tags. Comparing the two directly is how a reviewed
 	// product release reads as unreviewed.
-	named := make([]string, 0, len(published))
-	for _, release := range published {
+	named := make([]string, 0, len(current))
+	for _, release := range current {
 		named = append(named, release.Version)
 	}
 	if missing := unaccountedReleases(named, accounted); len(missing) > 0 {
@@ -439,19 +481,20 @@ func nodeRegistryReport(registry nodeRegistry, published []publishedRelease, fet
 		for _, ruled := range accounted {
 			known[ruled] = struct{}{}
 		}
-		for _, release := range published {
+		for _, release := range current {
 			if _, ok := known[release.Version]; ok {
 				report.Ceiling = release.Tag
 				break
 			}
 		}
 		report.Verdict = version.CeilingBehind
-		report.Reason = fmt.Sprintf("published but unaccounted: %s", strings.Join(missing, ", "))
+		report.Reason = fmt.Sprintf("published but unaccounted: %s%s", strings.Join(missing, ", "), note)
 		return report
 	}
 	report.Ceiling = report.Latest
 	report.Verdict = version.CeilingCurrent
-	report.Reason = fmt.Sprintf("every one of the %d published releases is reviewed or excluded with a reason", len(published))
+	report.Reason = fmt.Sprintf("every one of the %d published releases is reviewed or excluded with a reason%s",
+		len(current), note)
 	return report
 }
 

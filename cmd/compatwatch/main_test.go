@@ -119,6 +119,51 @@ func TestUnaccountedReleases(t *testing.T) {
 	}
 }
 
+// A RELEASE PUBLISHED BEFORE THE CURRENT SCHEME IS HISTORY, NOT A GAP.
+//
+// Nine legacy releases are on GitHub and always will be, and the registry is
+// keyed by versions — so a release under that scheme can never be reviewed into
+// it. Reporting one as unaccounted would make the gap permanent, and refusing to
+// look at it at all turned every run into "unknown": the check stopped being able
+// to run, which is the silence this job exists to refuse arriving through its own
+// door.
+//
+// IT IS CLASSIFIED, NOT PARSED. Nothing reads a version out of a historical tag;
+// the shape is enough to leave it out of the accounting, and it is COUNTED so a
+// release nobody has classified is still visible.
+func TestHistoricalReleasesAreClassifiedAndCountedRatherThanRefused(t *testing.T) {
+	published, err := publishedReleases([]string{"release/4.0.0", "v0.0.1-beta12", "v0.0.1-beta11"})
+	if err != nil {
+		t.Fatalf("a historical release was refused: %v", err)
+	}
+	if len(published) != 3 || published[0].Historical || !published[1].Historical || !published[2].Historical {
+		t.Fatalf("classification is wrong: %+v", published)
+	}
+	if published[0].Version != "4.0.0" || published[1].Version != "" {
+		t.Fatalf("a historical tag must not be read as a version: %+v", published)
+	}
+
+	// The accounting leaves them out, and the row says how many it left out.
+	report := nodeRegistryReport(nodeRegistry{
+		Releases: []nodeRegistryRelease{{Version: "4.0.0"}},
+	}, published, nil)
+	if report.Verdict != version.CeilingCurrent {
+		t.Fatalf("verdict = %s, want current: a historical release is not a gap", report.Verdict)
+	}
+	if !strings.Contains(report.Reason, "2 published before the current scheme") {
+		t.Fatalf("the row does not say what it left out: %q", report.Reason)
+	}
+	if report.Latest != "release/4.0.0" {
+		t.Fatalf("latest = %q, want the newest release under the current scheme", report.Latest)
+	}
+
+	// AND A TAG THAT IS NEITHER IS STILL AN ERROR. That is what keeps this honest
+	// about a repository that has grown a release nobody can account for.
+	if _, err := publishedReleases([]string{"release/4.0.0", "nightly-2026"}); err == nil {
+		t.Fatal("a tag that is neither a release nor a historical release was accepted")
+	}
+}
+
 // The registry row asks the opposite question from the panel rows above it, so
 // the thing worth pinning is that both directions still reach the SAME two
 // states: a real gap exits 1, and anything unreadable exits 2 rather than
