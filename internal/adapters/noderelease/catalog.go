@@ -382,12 +382,24 @@ func packageName(version string, platform ports.NodeReleasePlatform) string {
 // second and the URLs use the first.
 func catalogEntry(reviewed reviewedRelease, release *githubRelease, tag string) (ports.NodeReleaseCatalogEntry, error) {
 	entry := ports.NodeReleaseCatalogEntry{
-		Version: reviewed.Version, Channel: "stable", PublishedAt: release.PublishedAt.UTC(),
+		Version: reviewed.Version, ReleaseTag: tag,
+		Channel: "stable", PublishedAt: release.PublishedAt.UTC(),
 		ReleaseURL: releaseBase + "tag/" + tag, Notes: reviewed.Notes,
 		Methods: []string{}, Platforms: []ports.NodeReleasePlatform{},
 	}
 	if release.Prerelease {
 		entry.Channel = "testing"
+	}
+	// WHICH SCHEME, AND THEREFORE WHETHER THERE IS A PRODUCT VERSION AT ALL.
+	// A legacy release has none: its version IS its tag, and normalising it into
+	// a product version would name an identity no release ever had. The namespace
+	// is what distinguishes them, and it is the same one ReleaseTagFor used to
+	// build the tag a few lines up.
+	if strings.HasPrefix(tag, version.ProductTagNamespace) {
+		entry.ProductVersion = reviewed.Version
+		entry.Scheme = "product"
+	} else {
+		entry.Scheme = "legacy"
 	}
 	assets := make(map[string]githubAsset, len(release.Assets))
 	for _, asset := range release.Assets {

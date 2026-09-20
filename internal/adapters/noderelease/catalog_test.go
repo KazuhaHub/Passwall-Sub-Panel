@@ -286,6 +286,12 @@ func TestCatalogFullReviewedRegistryRetainsReviewedReleasesAndListsNewestFirst(t
 	}
 	for i, version := range reviewedNewestPublishedFirst {
 		entry := list.Releases[i]
+		// A LEGACY RELEASE HAS NO PRODUCT VERSION, and the tag is its version.
+		// Stating that explicitly is what lets a consumer tell the two schemes
+		// apart without inferring anything from the characters in a string.
+		if entry.Scheme != "legacy" || entry.ReleaseTag != version || entry.ProductVersion != "" {
+			t.Fatalf("legacy identity split wrong: scheme=%q tag=%q product_version=%q", entry.Scheme, entry.ReleaseTag, entry.ProductVersion)
+		}
 		if entry.Version != version || entry.Channel != "testing" || entry.ReleaseURL != "https://github.com/KazuhaHub/Passwall-Node/releases/tag/"+version ||
 			!reflect.DeepEqual(entry.Methods, []string{"linux", "docker", "manual"}) || !reflect.DeepEqual(entry.Platforms, fixturePlatforms) {
 			t.Fatalf("full registry did not retain exact reviewed installation availability: %+v", entry)
@@ -1012,6 +1018,19 @@ func TestAProductReleaseIsAddressedByItsTagAndNamedByItsVersion(t *testing.T) {
 	entry := list.Releases[0]
 	if entry.Version != version {
 		t.Errorf("entry version = %q, want the version %q", entry.Version, version)
+	}
+	// THE IDENTITIES ARE STATED, NOT LEFT TO BE DERIVED. A consumer that builds
+	// the release page or the download path needs the TAG, and before this it had
+	// to re-derive the mapping from the version — which is how the front end came
+	// to ask for tag/4.0.0.
+	if entry.ReleaseTag != tag {
+		t.Errorf("entry release_tag = %q, want the tag %q", entry.ReleaseTag, tag)
+	}
+	if entry.ProductVersion != version {
+		t.Errorf("entry product_version = %q, want %q", entry.ProductVersion, version)
+	}
+	if entry.Scheme != "product" {
+		t.Errorf("entry scheme = %q, want product", entry.Scheme)
 	}
 	if want := releaseBase + "tag/" + tag; entry.ReleaseURL != want {
 		t.Errorf("release url = %q, want %q", entry.ReleaseURL, want)
