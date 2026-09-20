@@ -367,3 +367,33 @@ test('publisher cache guard rejects implicit defaults and explicit cache restora
     assert.throws(() => assertPublisherCachesDisabled(mutated), { name: 'AssertionError' }, label)
   }
 })
+
+// THE PUBLICATION CHANNEL IS NOT READ OUT OF THE TAG TEXT.
+//
+// `prerelease: contains(tag, '-')` was the whole rule, and it is a LEGACY rule: a
+// v-prefixed tag with a hyphen has always meant a pre-release. A product-scheme
+// tag (release/MAJOR.MINOR.PATCH) has no hyphen at all, so the same test would
+// publish every testing candidate as STABLE — and this is the one place where
+// being wrong is not recoverable by a later edit, because `prerelease: false`
+// moves /releases/latest, which PSP's own in-app upgrade nudge reads.
+test('the publication channel is resolved, never inferred from a hyphen', () => {
+  const release = job('release')
+  assert(
+    !/prerelease:\s*\$\{\{\s*contains\(/.test(release),
+    'the release job derives the channel from the tag text again; a product-scheme tag has no hyphen',
+  )
+  assert(
+    /prerelease:\s*\$\{\{\s*steps\.channel\.outputs\.prerelease\s*\}\}/.test(release),
+    'the release job must publish the channel the resolution step produced',
+  )
+  assert(
+    release.includes('Resolve the publication channel'),
+    'the resolution step is what states the rule; without it the field has no source',
+  )
+  // The recoverable direction for an unrecognised tag: pre-release. Getting this
+  // wrong toward stable cannot be undone without moving a pointer users follow.
+  assert(
+    /Resolve the publication channel[\s\S]*?echo 'prerelease=true'/.test(release),
+    'an unrecognised tag must default to pre-release',
+  )
+})

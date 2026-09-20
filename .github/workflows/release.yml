@@ -24,6 +24,15 @@ on:
         description: "Release tag, for example v1.0.0"
         required: true
         type: string
+      channel:
+        description: "Publication channel. auto reads it from the tag; stable and testing state it."
+        required: false
+        default: auto
+        type: choice
+        options:
+          - auto
+          - stable
+          - testing
 
 env:
   GOWORK: "off"
@@ -647,17 +656,45 @@ jobs:
             exit 1
           }
 
+      # THE CHANNEL IS STATED OR READ FROM THE LEGACY SHAPE, NEVER GUESSED FROM A
+      # HYPHEN. `contains(tag, '-')` was the whole rule, and it is a LEGACY rule:
+      # a v-prefixed tag with a hyphen has always meant a pre-release. A
+      # product-scheme tag (release/MAJOR.MINOR.PATCH) has no hyphen at all, so
+      # the same test would publish every testing candidate as STABLE — and this
+      # is the one place where getting it wrong is not recoverable by a later
+      # edit, because `prerelease: false` points /releases/latest, which PSP's own
+      # in-app upgrade nudge reads.
+      #
+      # So: an explicit input wins; the legacy shape decides for a legacy tag;
+      # and anything else defaults to pre-release, the direction that can be
+      # corrected by promotion without having moved a stable pointer.
+      - name: Resolve the publication channel
+        id: channel
+        env:
+          REQUESTED: ${{ inputs.channel }}
+          TAG: ${{ needs.setup.outputs.tag }}
+        run: |
+          set -euo pipefail
+          case "${REQUESTED:-auto}" in
+            stable)  echo 'prerelease=false' >> "$GITHUB_OUTPUT"; exit 0 ;;
+            testing) echo 'prerelease=true'  >> "$GITHUB_OUTPUT"; exit 0 ;;
+            auto)    : ;;
+            *) echo "unknown publication channel: ${REQUESTED}" >&2; exit 1 ;;
+          esac
+          case "$TAG" in
+            v*-*) echo 'prerelease=true'  >> "$GITHUB_OUTPUT" ;;
+            v*)   echo 'prerelease=false' >> "$GITHUB_OUTPUT" ;;
+            *)    echo 'prerelease=true'  >> "$GITHUB_OUTPUT" ;;
+          esac
+
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ needs.setup.outputs.tag }}
           target_commitish: ${{ needs.setup.outputs.sha }}
           name: ${{ needs.setup.outputs.tag }}
-          # Mark pre-release tags (anything with a "-beta"/"-rc"/... suffix) as a
-          # GitHub pre-release so /releases/latest excludes them — PSP's in-app
-          # self-update nudge (psp_upgrade alert) reads /releases/latest and must
-          # only ever point at a STABLE release, never a beta.
-          prerelease: ${{ contains(needs.setup.outputs.tag, '-') }}
+          # Resolved above, where the reason for each answer is written down.
+          prerelease: ${{ steps.channel.outputs.prerelease }}
           generate_release_notes: true
           body_path: release_notes.md
           append_body: true
