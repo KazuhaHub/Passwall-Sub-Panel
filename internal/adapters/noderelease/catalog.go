@@ -12,14 +12,13 @@ import (
 	"io"
 	"net/http"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/KazuhaHub/passwall-node/deployment"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/safehttp"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/version"
 	"golang.org/x/mod/semver"
 )
 
@@ -76,15 +75,22 @@ var _ ports.NodeReleaseCatalog = (*Catalog)(nil)
 // PSPMajorForVersion binds review selection to the actual stamped PSP major.
 // Unstamped local builds explicitly use this catalog's compiled major; malformed
 // release identities must not accidentally inherit v4 compatibility.
-func PSPMajorForVersion(version string) (int, error) {
-	if version == "dev" {
+//
+// THE STAMP IS A VERSION, IN EITHER SCHEME, and reading its major is the whole
+// job. This used to ask the INSTALLER's rule, which knows only the legacy
+// v-prefixed shape — so the first build stamped `4.0.0` would have been read as
+// having no canonical identity at all, and the catalog would have been silently
+// disabled rather than answering with the wrong major.
+//
+// A release line of zero is refused here and not in the shape rule: PSP has
+// never released one, while every Node release in the field is v0.0.1-*, so
+// requiring it of the shape would refuse the history the catalog exists to read.
+func PSPMajorForVersion(stamp string) (int, error) {
+	if stamp == "dev" {
 		return compiledMajor, nil
 	}
-	if !deployment.ValidReleaseVersion(version) {
-		return 0, errors.New("invalid PSP version for Node release catalog")
-	}
-	major, err := strconv.Atoi(strings.TrimPrefix(semver.Major(version), "v"))
-	if err != nil || major < 1 {
+	major, ok := version.MajorOfRelease(stamp)
+	if !ok || major < 1 {
 		return 0, errors.New("invalid PSP version for Node release catalog")
 	}
 	return major, nil
@@ -134,7 +140,7 @@ func New(opts Options) (*Catalog, error) {
 }
 
 func validReviewed(entry reviewedRelease) bool {
-	if !deployment.ValidReleaseVersion(entry.Version) || entry.PSPMajor < 1 ||
+	if !version.IsReleaseVersion(entry.Version) || entry.PSPMajor < 1 ||
 		len(entry.Notes) == 0 || len(entry.Notes) > 4096 || len(entry.Methods) == 0 ||
 		len(entry.Platforms) == 0 || len(entry.Platforms) > 6 {
 		return false
@@ -246,18 +252,28 @@ func (c *Catalog) fetch(ctx context.Context) (ports.NodeReleaseList, error) {
 		if err := ctx.Err(); err != nil {
 			return ports.NodeReleaseList{}, err
 		}
-		release, err := c.fetchRelease(ctx, reviewed.Version)
+		// THE TAG ADDRESSES THE RELEASE; THE VERSION NAMES WHAT IS INSIDE IT.
+		// Deriving the tag here from the version keeps the reviewed records to
+		// one field, and every address below uses it — the API path, the tag
+		// GitHub reports back, the release page and the download path. Using the
+		// version for the last of those is how a catalogue ends up empty for
+		// exactly the releases it was extended to cover.
+		tag, ok := version.ReleaseTagFor(reviewed.Version)
+		if !ok {
+			return ports.NodeReleaseList{}, errUnavailable
+		}
+		release, err := c.fetchRelease(ctx, tag)
 		if err != nil {
 			return ports.NodeReleaseList{}, err
 		}
 		if release == nil || release.Draft || release.PublishedAt == nil || release.PublishedAt.IsZero() {
 			continue
 		}
-		if release.TagName != reviewed.Version || release.Prerelease != strings.Contains(reviewed.Version, "-") ||
-			release.HTMLURL != releaseBase+"tag/"+reviewed.Version {
+		if release.TagName != tag || !releaseChannelAgrees(tag, release.Prerelease) ||
+			release.HTMLURL != releaseBase+"tag/"+tag {
 			return ports.NodeReleaseList{}, errUnavailable
 		}
-		entry, err := catalogEntry(reviewed, release)
+		entry, err := catalogEntry(reviewed, release, tag)
 		if err != nil {
 			return ports.NodeReleaseList{}, err
 		}
@@ -290,12 +306,38 @@ func (c *Catalog) fetch(ctx context.Context) (ports.NodeReleaseList, error) {
 	return result, nil
 }
 
-func (c *Catalog) fetchRelease(ctx context.Context, version string) (*githubRelease, error) {
+// releaseChannelAgrees reports whether GitHub's prerelease flag may be taken at
+// face value for this tag.
+//
+// FOR A LEGACY TAG IT MUST MATCH THE TAG TEXT, and that check is load-bearing:
+// an older beta cut before the workflow began setting the flag would arrive with
+// prerelease=false, and a hyphen has always meant a pre-release in that form.
+//
+// FOR A PRODUCT TAG THE FLAG IS THE AUTHORITY, because the tag has no hyphen at
+// all — release/4.0.0 is three integers in a namespace. Requiring agreement there
+// would reject every testing candidate, and it would reject it here, where the
+// failure is the WHOLE catalog rather than one entry: a single misclassified
+// release would empty the list an operator chooses an upgrade from.
+func releaseChannelAgrees(tagName string, prerelease bool) bool {
+	if strings.HasPrefix(tagName, version.ProductTagNamespace) {
+		return true
+	}
+	return prerelease == strings.Contains(tagName, "-")
+}
+
+// fetchRelease reads one release by its TAG, which is what the API path is made
+// of. The version is not the tag under the product scheme, and asking for the
+// version there returns 404 — which reads as a missing release rather than a
+// wrong address.
+func (c *Catalog) fetchRelease(ctx context.Context, tag string) (*githubRelease, error) {
 	// Even test-injected compatibility records cannot select an arbitrary URL.
-	if !deployment.ValidReleaseVersion(version) {
+	// The tag is derived from a validated version by the caller, and this is the
+	// second check: the path segment is built by concatenation, so what reaches
+	// it must not be able to contain a separator.
+	if !version.IsReleaseTag(tag) {
 		return nil, errUnavailable
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiBase+version, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiBase+tag, nil)
 	if err != nil {
 		return nil, errUnavailable
 	}
@@ -335,14 +377,29 @@ func packageName(version string, platform ports.NodeReleasePlatform) string {
 	return fmt.Sprintf("passwall-node_%s_%s_%s%s", version, platform.OS, platform.Arch, ext)
 }
 
-func catalogEntry(reviewed reviewedRelease, release *githubRelease) (ports.NodeReleaseCatalogEntry, error) {
+// catalogEntry builds one entry. tag is the ADDRESS the release was published
+// under and reviewed.Version is the identity inside it; the asset names use the
+// second and the URLs use the first.
+func catalogEntry(reviewed reviewedRelease, release *githubRelease, tag string) (ports.NodeReleaseCatalogEntry, error) {
 	entry := ports.NodeReleaseCatalogEntry{
-		Version: reviewed.Version, Channel: "stable", PublishedAt: release.PublishedAt.UTC(),
-		ReleaseURL: releaseBase + "tag/" + reviewed.Version, Notes: reviewed.Notes,
+		Version: reviewed.Version, ReleaseTag: tag,
+		Channel: "stable", PublishedAt: release.PublishedAt.UTC(),
+		ReleaseURL: releaseBase + "tag/" + tag, Notes: reviewed.Notes,
 		Methods: []string{}, Platforms: []ports.NodeReleasePlatform{},
 	}
 	if release.Prerelease {
 		entry.Channel = "testing"
+	}
+	// WHICH SCHEME, AND THEREFORE WHETHER THERE IS A PRODUCT VERSION AT ALL.
+	// A legacy release has none: its version IS its tag, and normalising it into
+	// a product version would name an identity no release ever had. The namespace
+	// is what distinguishes them, and it is the same one ReleaseTagFor used to
+	// build the tag a few lines up.
+	if strings.HasPrefix(tag, version.ProductTagNamespace) {
+		entry.ProductVersion = reviewed.Version
+		entry.Scheme = "product"
+	} else {
+		entry.Scheme = "legacy"
 	}
 	assets := make(map[string]githubAsset, len(release.Assets))
 	for _, asset := range release.Assets {
@@ -354,7 +411,7 @@ func catalogEntry(reviewed reviewedRelease, release *githubRelease) (ports.NodeR
 	available := func(name string) bool {
 		asset, ok := assets[name]
 		return ok && asset.State == "uploaded" && asset.Size > 0 &&
-			asset.BrowserDownloadURL == releaseBase+"download/"+reviewed.Version+"/"+name
+			asset.BrowserDownloadURL == releaseBase+"download/"+tag+"/"+name
 	}
 	if !available("SHA256SUMS.txt") {
 		return entry, nil

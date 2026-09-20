@@ -1,0 +1,418 @@
+package version
+
+import (
+	"context"
+	"crypto/ed25519"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+)
+
+// installTestTrustRoot gives the process a root that trusts a fresh key, so a
+// policy signed by it verifies.
+func installTestTrustRoot(t *testing.T) (string, ed25519.PublicKey, ed25519.PrivateKey) {
+	t.Helper()
+	previous := ActivePolicyTrustRoot()
+	t.Cleanup(func() {
+		SetPolicyTrustRoot(previous)
+		SetActiveReleasesPolicy(nil)
+	})
+	id, pub, priv := signingKey(t)
+	SetPolicyTrustRoot(trustRoot(t, id, pub))
+	return id, pub, priv
+}
+
+func policyDocument(expiresAt time.Time) []byte {
+	return []byte(`{
+	  "schema_version": 1, "revision": 7,
+	  "issued_at": "2026-09-19T00:00:00Z", "expires_at": "` + expiresAt.UTC().Format(time.RFC3339) + `",
+	  "applies_to_psp": {"min": "4.0.0", "max": "4.99.99"},
+	  "releases": [{"version": "v0.0.1-beta11", "release_tag": "v0.0.1-beta11", "scheme": "legacy", "evidence": ["node-wire-v1"]}],
+	  "upgrade_edges": [], "refusals": []
+	}`)
+}
+
+// servePolicy serves a document and its detached signature over the two asset
+// names, which is what a publication is.
+func servePolicy(document []byte, priv ed25519.PrivateKey) (http.HandlerFunc, error) {
+	signature, err := SignReleasesPolicy(document, "key-1", priv, nil)
+	if err != nil {
+		return nil, err
+	}
+	return func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/" + PolicyDocumentAsset:
+			_, _ = w.Write(document)
+		case "/" + PolicySignatureAsset:
+			_, _ = w.Write(signature)
+		default:
+			http.NotFound(w, r)
+		}
+	}, nil
+}
+
+func TestARefreshedPolicyIsVerifiedThenInstalled(t *testing.T) {
+	document := policyDocument(time.Now().Add(24 * time.Hour))
+	// The handler needs the key, and the key needs no URL — so build the handler
+	// first, with a key generated here rather than by the server helper.
+	_, _, priv := installTestTrustRoot(t)
+	handler, err := servePolicy(document, priv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	baseURL := withTestServer(t, handler)
+
+	if err := RefreshReleasesPolicy(context.Background(), baseURL, time.Now()); err != nil {
+		t.Fatalf("a correctly signed policy must install: %v", err)
+	}
+	if policy := ActiveReleasesPolicy(); policy == nil || policy.Revision != 7 {
+		t.Fatalf("policy in force = %v", policy)
+	}
+}
+
+func withTestServer(t *testing.T, handler http.HandlerFunc) string {
+	t.Helper()
+	server := httptest.NewServer(handler)
+	t.Cleanup(server.Close)
+	previous := policyHTTPClient
+	t.Cleanup(func() { policyHTTPClient = previous })
+	policyHTTPClient = server.Client()
+	return server.URL
+}
+
+// A publication that cannot be verified must leave the running policy alone. This
+// is the property the fetch most needs: "clear and reload" would let a bad
+// publication — or a 404 — withdraw the policy the panel is running on.
+func TestAFailedRefreshLeavesTheInstalledPolicyAlone(t *testing.T) {
+	document := policyDocument(time.Now().Add(24 * time.Hour))
+	_, _, priv := installTestTrustRoot(t)
+	good, err := servePolicy(document, priv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	baseURL := withTestServer(t, good)
+	if err := RefreshReleasesPolicy(context.Background(), baseURL, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	_ = baseURL
+	installed := ActiveReleasesPolicy()
+	if installed == nil {
+		t.Fatal("the harness is wrong: nothing installed")
+	}
+
+	staleSignature, err := SignReleasesPolicy(document, "key-1", priv, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tc := range []struct {
+		name    string
+		handler http.HandlerFunc
+		wants   string
+	}{
+		{
+			name: "the signature 404s",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/"+PolicySignatureAsset {
+					http.NotFound(w, r)
+					return
+				}
+				_, _ = w.Write(document)
+			},
+			wants: "returned 404",
+		},
+		{
+			name: "the document and the signature do not match",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/"+PolicyDocumentAsset {
+					_, _ = w.Write(policyDocument(time.Now().Add(48 * time.Hour)))
+					return
+				}
+				_, _ = w.Write(staleSignature)
+			},
+			wants: "verify",
+		},
+		{
+			name: "the window has closed",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				expired := policyDocument(time.Now().Add(-time.Hour))
+				if r.URL.Path == "/"+PolicyDocumentAsset {
+					_, _ = w.Write(expired)
+					return
+				}
+				expiredSignature, signErr := SignReleasesPolicy(expired, "key-1", priv, nil)
+				if signErr != nil {
+					t.Error(signErr)
+					return
+				}
+				_, _ = w.Write(expiredSignature)
+			},
+			wants: "expired",
+		},
+		{
+			name:    "the whole publication is missing",
+			handler: func(w http.ResponseWriter, r *http.Request) { http.NotFound(w, r) },
+			wants:   "returned 404",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// The FAULTY handler must be where the fetch goes: swapping the
+			// client while keeping the good URL simply fetched the good policy
+			// again, and every case "passed" by installing it twice.
+			faultyURL := withTestServer(t, tc.handler)
+			err := RefreshReleasesPolicy(context.Background(), faultyURL, time.Now())
+			if err == nil || !strings.Contains(err.Error(), tc.wants) {
+				t.Fatalf("error = %v, want it to mention %q", err, tc.wants)
+			}
+			after := ActiveReleasesPolicy()
+			if after == nil || after.Revision != installed.Revision {
+				t.Fatalf("a failed refresh changed the policy in force: %v -> %v", installed.Revision, after)
+			}
+		})
+	}
+}
+
+// Without keys nothing can be verified, and that is a state rather than a broken
+// publication — the message says which so an operator does not go looking at the
+// server.
+func TestARefreshWithoutATrustRootSaysSo(t *testing.T) {
+	previous := ActivePolicyTrustRoot()
+	t.Cleanup(func() { SetPolicyTrustRoot(previous) })
+	SetPolicyTrustRoot(nil)
+
+	err := RefreshReleasesPolicy(context.Background(), "https://example.invalid", time.Now())
+	if err == nil || !strings.Contains(err.Error(), "no trust root") {
+		t.Fatalf("error = %v, want it to name the trust root", err)
+	}
+}
+
+func TestARefreshWithoutASourceSaysSo(t *testing.T) {
+	installTestTrustRoot(t)
+	err := RefreshReleasesPolicy(context.Background(), "", time.Now())
+	if err == nil || !strings.Contains(err.Error(), "no source") {
+		t.Fatalf("error = %v, want it to name the missing source", err)
+	}
+}
+
+// A body larger than any policy is refused rather than read: a wrong URL serving
+// something huge must not become memory the panel holds.
+func TestAnOversizedPolicyIsRefused(t *testing.T) {
+	installTestTrustRoot(t)
+	baseURL := withTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/"+PolicyDocumentAsset {
+			_, _ = w.Write(make([]byte, maxPolicyDocumentBytes+16))
+			return
+		}
+		_, _ = w.Write([]byte("{}"))
+	})
+
+	err := RefreshReleasesPolicy(context.Background(), baseURL, time.Now())
+	if err == nil || !strings.Contains(err.Error(), "larger than") {
+		t.Fatalf("error = %v, want an oversized refusal", err)
+	}
+}
+
+// The backoff is tested through the SCHEDULE the loop asks for, not by timing it:
+// a jitterFn that records its arguments makes the retry cadence a value rather
+// than a duration to measure.
+//
+// THE RECORDING STILL HAS TO BE SYNCHRONISED. The callback runs on the loop's
+// goroutine while the test reads, so a bare slice here is a data race — one the
+// race detector finds in CI and an ordinary `go test` cannot, which is how this
+// arrived: the sentence above was written about the timing and was true of it.
+type delayRecorder struct {
+	mu     sync.Mutex
+	delays []time.Duration
+}
+
+func (r *delayRecorder) jitter(d time.Duration) time.Duration {
+	r.mu.Lock()
+	r.delays = append(r.delays, d)
+	r.mu.Unlock()
+	return 0 // fire immediately; the schedule is what is under test
+}
+
+func (r *delayRecorder) snapshot() []time.Duration {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]time.Duration(nil), r.delays...)
+}
+
+// startRefreshLoop runs the loop and returns a channel closed when it has LEFT.
+//
+// THE WAIT IS THE POINT. withTestServer replaces the package-level policyHTTPClient,
+// and the loop reads it — in production nothing swaps it at runtime, so the race is
+// the test's: a subtest that cancels and moves on while its loop is still running
+// leaves the next subtest writing a variable the previous one is still reading.
+func startRefreshLoop(ctx context.Context, baseURL string, interval time.Duration, recorder *delayRecorder) <-chan struct{} {
+	stopped := make(chan struct{})
+	go func() {
+		defer close(stopped)
+		RunPolicyRefresh(ctx, baseURL, interval, recorder.jitter, nil)
+	}()
+	return stopped
+}
+
+func waitForAttempts(t *testing.T, recorder *delayRecorder, n int) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if len(recorder.snapshot()) >= n {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("only %d attempts in two seconds", len(recorder.snapshot()))
+}
+
+func TestTheRefreshLoopBacksOffOnFailureAndRecovers(t *testing.T) {
+
+	t.Run("a failing source is retried further apart", func(t *testing.T) {
+		installTestTrustRoot(t)
+		baseURL := withTestServer(t, func(w http.ResponseWriter, _ *http.Request) { http.NotFound(w, nil) })
+		recorder := &delayRecorder{}
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		interval := 10 * time.Millisecond
+		stopped := startRefreshLoop(ctx, baseURL, interval, recorder)
+
+		waitForAttempts(t, recorder, 4)
+		cancel()
+		<-stopped // the loop must have left before a later subtest swaps the client
+		got := recorder.snapshot()[:4]
+		want := []time.Duration{interval, 2 * interval, 4 * interval, 8 * interval}
+		for i := range want {
+			if got[i] != want[i] {
+				t.Fatalf("delays = %v, want %v", got, want)
+			}
+		}
+	})
+
+	t.Run("a working source keeps the interval", func(t *testing.T) {
+		document := policyDocument(time.Now().Add(24 * time.Hour))
+		_, _, priv := installTestTrustRoot(t)
+		handler, err := servePolicy(document, priv)
+		if err != nil {
+			t.Fatal(err)
+		}
+		baseURL := withTestServer(t, handler)
+		recorder := &delayRecorder{}
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		interval := 5 * time.Millisecond
+		stopped := startRefreshLoop(ctx, baseURL, interval, recorder)
+
+		waitForAttempts(t, recorder, 3)
+		cancel()
+		<-stopped
+		for i, delay := range recorder.snapshot()[:3] {
+			if delay != interval {
+				t.Fatalf("attempt %d waited %v, want %v — a success must not back off", i, delay, interval)
+			}
+		}
+	})
+
+	t.Run("no source means no loop", func(t *testing.T) {
+		recorder := &delayRecorder{}
+		RunPolicyRefresh(context.Background(), "", time.Millisecond, recorder.jitter, nil)
+		if got := recorder.snapshot(); len(got) != 0 {
+			t.Fatalf("a loop with no source asked to wait %v", got)
+		}
+	})
+}
+
+// A forced refresh bypasses the 30-minute schedule, so it needs its own floor:
+// an admin clicking through panels would otherwise fetch the publication once per
+// click. The floor is on the ATTEMPT rather than the success, because the failure
+// case is the one that needs protecting.
+func TestThePreflightRefreshThrottlesAndBacksOff(t *testing.T) {
+	reset := func(t *testing.T) {
+		t.Helper()
+		previousSource, previousTry, previousWait := ConfiguredPolicySource(), policyLastTry, policyFailedWait
+		t.Cleanup(func() {
+			SetPolicySource(previousSource)
+			policyAttemptMu.Lock()
+			policyLastTry, policyFailedWait = previousTry, previousWait
+			policyAttemptMu.Unlock()
+		})
+		policyAttemptMu.Lock()
+		policyLastTry, policyFailedWait = time.Time{}, 0
+		policyAttemptMu.Unlock()
+	}
+
+	t.Run("no source is not a degraded state", func(t *testing.T) {
+		reset(t)
+		SetPolicySource("")
+		// Nothing to fetch, nothing to say — and crucially no error for a caller
+		// to act on.
+		RefreshPolicyForPreflight(context.Background(), time.Now())
+	})
+
+	t.Run("a second pre-flight inside the window does not fetch again", func(t *testing.T) {
+		reset(t)
+		document := policyDocument(time.Now().Add(24 * time.Hour))
+		_, _, priv := installTestTrustRoot(t)
+		handler, err := servePolicy(document, priv)
+		if err != nil {
+			t.Fatal(err)
+		}
+		requested := 0
+		baseURL := withTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+			requested++
+			handler(w, r)
+		})
+		SetPolicySource(baseURL)
+
+		now := time.Now()
+		RefreshPolicyForPreflight(context.Background(), now)
+		after := requested
+		if after == 0 {
+			t.Fatal("the first pre-flight did not fetch")
+		}
+		RefreshPolicyForPreflight(context.Background(), now.Add(policyPreflightThrottle/2))
+		if requested != after {
+			t.Fatalf("a second pre-flight inside the window fetched again: %d -> %d", after, requested)
+		}
+		RefreshPolicyForPreflight(context.Background(), now.Add(policyPreflightThrottle*2))
+		if requested == after {
+			t.Fatal("a pre-flight past the window did not fetch")
+		}
+	})
+
+	t.Run("a failing source is asked for less often", func(t *testing.T) {
+		reset(t)
+		installTestTrustRoot(t)
+		requested := 0
+		baseURL := withTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
+			requested++
+			http.NotFound(w, nil)
+		})
+		SetPolicySource(baseURL)
+
+		now := time.Now()
+		RefreshPolicyForPreflight(context.Background(), now)
+		// ONE failure leaves the floor at the base throttle, so an attempt one
+		// second past it is still allowed — and its failure is what grows the floor.
+		RefreshPolicyForPreflight(context.Background(), now.Add(policyPreflightThrottle+time.Second))
+		grown := requested
+		if grown != 2 {
+			t.Fatalf("expected two attempts, got %d", grown)
+		}
+		// Now the floor is twice the base, so an attempt a base-window later is
+		// refused: that is the backoff doing its job.
+		RefreshPolicyForPreflight(context.Background(), now.Add(policyPreflightThrottle*2+time.Second))
+		if requested != grown {
+			t.Fatalf("the failure backoff did not grow the floor: %d -> %d", grown, requested)
+		}
+		// Past the grown floor it tries again.
+		RefreshPolicyForPreflight(context.Background(), now.Add(policyPreflightThrottle*4))
+		if requested == grown {
+			t.Fatal("a pre-flight past the grown floor did not fetch")
+		}
+	})
+}

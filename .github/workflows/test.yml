@@ -185,20 +185,37 @@ jobs:
           test -n "$build_toolchain"
           test "$(go env GOVERSION)" = "$build_toolchain"
           test "$(go tool compile -V | awk '{ print $3 }')" = "$build_toolchain"
-      # Exercise exactly the published Node revision consumed by PSP, not a
-      # floating main branch or a developer's go.work replacement. The live
-      # task test needs a writable test-only fixture inside that module; copy
-      # the checksum-verified source instead of modifying the module cache.
+      # Exercise exactly the Node revision the manifest names, not a floating
+      # main branch, not a developer's go.work replacement, and NOT whatever
+      # PSP's go.mod happens to pin.
+      #
+      # THE SOURCE IS A FACT ABOUT WHAT TO TEST, NOT ABOUT WHAT PSP DEPENDS ON.
+      # Resolving it from go.mod made the evidence move with every dependency
+      # bump, and would have removed this job's entry point the moment the PN
+      # root module was dropped (X07) — the test would have disappeared along
+      # with the dependency rather than outliving it.
+      #
+      # A commit, checked out and verified: a tag can be moved, and the
+      # assertion below is what turns a moved tag into a failure instead of a
+      # different revision quietly under test.
       - name: real Node sync, durable result receipt and task expiry
         run: |
           set -euo pipefail
-          go mod download github.com/KazuhaHub/passwall-node
-          node_module_dir=$(go list -m -f '{{.Dir}}' github.com/KazuhaHub/passwall-node)
-          test -n "$node_module_dir"
-          test -f "$node_module_dir/go.mod"
+          source_commit=$(node deploy/compat/contract-source.mjs --commit)
+          source_tag=$(node deploy/compat/contract-source.mjs --tag)
+          # THE URL IS COMPOSED WHERE IT IS TESTED. It used to be built here as
+          # "https://github.com/${module_path}.git", and module_path is a GO MODULE
+          # PATH that already begins with the host — so the fetch asked for
+          # github.com/github.com/... and the job failed at its first step, blaming
+          # whatever diff was in front of it. The composition lives in
+          # contract-source.mjs now, one line with a test.
+          source_url=$(node deploy/compat/contract-source.mjs --repo-url)
           contract_repo=$(mktemp -d "$RUNNER_TEMP/psp-node-contract.XXXXXX")
-          cp -R "$node_module_dir/." "$contract_repo/"
-          chmod -R u+w "$contract_repo"
+          git -C "$contract_repo" init -q
+          git -C "$contract_repo" remote add origin "$source_url"
+          git -C "$contract_repo" fetch -q --depth 1 origin "$source_commit"
+          git -C "$contract_repo" checkout -q FETCH_HEAD
+          test "$(git -C "$contract_repo" rev-parse HEAD)" = "$source_commit"
           test -f "$contract_repo/go.mod"
           # NOT a per-version case: this job exercises the exact published
           # revision PSP consumes, whatever go.mod pins, rather than a released
@@ -225,7 +242,7 @@ jobs:
             "case": "pinned-source",
             "profile": "node-wire-v1",
             "psp_sha": "${{ github.sha }}",
-            "node_module": "$(go list -m -f '{{.Version}}' github.com/KazuhaHub/passwall-node)",
+            "node_pinned_tag": "$source_tag",
             "node_sha": "$(git -C "$contract_repo" rev-parse HEAD 2>/dev/null || echo unknown)",
             "runner_os": "$RUNNER_OS",
             "runner_arch": "$RUNNER_ARCH",
@@ -421,8 +438,13 @@ jobs:
             # This verifies binary execution, not the panel's production startup.
             docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges --user 10001:10001 --entrypoint /app/psp "$image" --version
           done
+      # A policy and a manifest that disagree are both well-formed, which is why
+      # the Go validator cannot catch it. This reads all three documents.
+      - name: Release policy agrees with the manifest beside it
+        run: node deploy/compat/check-releases-policy.mjs
+
       - name: Publisher identity, compat result validators and fail-closed guard tests
-        run: node --test deploy/check_image_test.mjs deploy/check_build_test.mjs deploy/release_workflow_test.mjs deploy/compat/check-go-results.test.mjs deploy/compat/check-case-set.test.mjs deploy/compat/plan.test.mjs deploy/compat/profiles.test.mjs deploy/compat/backends/third-party_env.test.mjs deploy/compat/evidence-index.test.mjs deploy/tracked_text_test.mjs deploy/test_workflow_test.mjs
+        run: node --test deploy/check_image_test.mjs deploy/check_build_test.mjs deploy/release_workflow_test.mjs deploy/compat/check-go-results.test.mjs deploy/compat/check-case-set.test.mjs deploy/compat/plan.test.mjs deploy/compat/profiles.test.mjs deploy/compat/backends/third-party_env.test.mjs deploy/compat/evidence-index.test.mjs deploy/compat/check-releases-policy.test.mjs deploy/compat/contract-source.test.mjs deploy/tracked_text_test.mjs deploy/test_workflow_test.mjs
 
   web:
     name: web (typecheck + build + test)

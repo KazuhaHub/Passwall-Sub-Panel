@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/rand"
 	"net"
 	"net/http"
 	"sync"
@@ -184,14 +185,76 @@ type App struct {
 // goroutines or listeners; call Run() for that.
 func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	// Wire the version-compat on-disk cache to PSP's DataDir BEFORE any
-	// RefreshRemoteCompat could fire, so the first refresh persists to
-	// the right place and a same-process load picks up the cached
-	// snapshot. LoadCompatCache here means a cold boot with no network
-	// still has a sane active range to work from — admins won't be
-	// stuck staring at "compat unknown" until the first manual Test.
+	// RefreshRemoteCompat could fire, so the first refresh persists to the right
+	// place and a same-process load picks up the cached snapshot.
+	// LoadPolicySnapshot replays the last VALIDATED policy document through the
+	// same apply path a fetch uses, so a cold boot with no network still has the
+	// range it had before the restart — and a document that no longer applies to
+	// this build installs nothing rather than being trusted for having been
+	// stored.
 	version.SetCacheDir(cfg.DataDir)
-	if err := version.LoadCompatCache(); err != nil {
-		log.Warn("load compat cache (will recover on first refresh)", "err", err)
+	if err := version.LoadPolicySnapshot(); err != nil {
+		log.Warn("load compat policy snapshot (will recover on first refresh)", "err", err)
+	}
+	// The keys a policy signature is verified against. NOTHING FETCHES A POLICY
+	// YET, so installing the root does not by itself change any decision — it
+	// only makes verification possible for the code that will.
+	//
+	// An EMPTY root is the default and is a real state: it trusts nothing, so no
+	// policy can be installed, which is correct for a deployment that has not
+	// been given keys. A root that was CONFIGURED but does not build stops the
+	// boot instead: the operator has said they expect signatures to verify, and
+	// silently trusting nothing looks identical to a working setup from their
+	// side until a policy is rejected with no explanation.
+	if len(cfg.PolicyTrustKeys) > 0 {
+		root, err := version.NewPolicyTrustRoot(cfg.PolicyTrustKeys)
+		if err != nil {
+			return nil, fmt.Errorf("policy trust root: %w", err)
+		}
+		version.SetPolicyTrustRoot(root)
+	}
+	// The policy source is FETCHED HERE ONLY WHEN ONE IS CONFIGURED. Neither the
+	// source nor the keys exist in a default deployment, so nothing is fetched
+	// and no admission decision changes; a deployment that sets both has opted
+	// into the policy path, and the log says so rather than leaving it implicit.
+	//
+	// A failure is logged and does not stop the boot: the panel keeps whatever
+	// policy it has, and an unreachable source must not take the panel down.
+	// The request path has no configuration, so the source is held here once and
+	// read from there. Set BEFORE the boot fetch so a pre-flight arriving during
+	// it sees the same source.
+	version.SetPolicySource(cfg.PolicySourceURL)
+	var policyErr error
+	if cfg.PolicySourceURL != "" {
+		policyErr = version.RefreshReleasesPolicy(ctx, cfg.PolicySourceURL, time.Now().UTC())
+	}
+	// ENFORCEMENT IS A SEPARATE SWITCH, applied after the load so a policy that
+	// failed to fetch cannot leave the panel enforcing nothing.
+	//
+	// IT IS DECIDED BEFORE ANYTHING REPORTS IT. The first version logged the state
+	// from above this line, so a panel that was enforcing printed
+	// `enforcing=false` — the log said one thing and the process did another, and
+	// the log is what an operator has.
+	version.SetPolicyEnforcement(cfg.PolicyEnforce && version.PolicyLoaded())
+	if cfg.PolicySourceURL != "" || cfg.PolicyEnforce {
+		fields := []any{
+			"source", cfg.PolicySourceURL,
+			"installed", version.PolicyInstalled(),
+			"applicable", version.PolicyLoaded(),
+			"enforcing", version.PolicyEnforcing(),
+		}
+		if policyErr != nil {
+			fields = append(fields, "err", policyErr)
+		}
+		// A failure is not a boot failure: the panel keeps whatever policy it has.
+		if policyErr != nil {
+			log.Warn("release policy not refreshed; admission falls back to what is already in force", fields...)
+		} else {
+			log.Info("release policy state", fields...)
+		}
+	}
+	if cfg.PolicyEnforce && !version.PolicyLoaded() {
+		log.Warn("policy_enforce is set but no policy is loaded; admission is unchanged")
 	}
 	// Same boot pattern for the centralized "latest 3X-UI release tag"
 	// snapshot: cold-boot off the cache so the ⋮ kebab "update available"
@@ -738,6 +801,15 @@ func (a *App) Run() error {
 	safego.GoTracked(&a.bgWG, "reconcile-loop", func() { a.runReconcileLoop(bgCtx) })
 	safego.GoTracked(&a.bgWG, "health-loop", func() { a.runHealthLoop(bgCtx) })
 	safego.GoTracked(&a.bgWG, "cert-renewal-loop", func() { a.runCertRenewalLoop(bgCtx) })
+	// The policy refresh runs ONLY when a source is configured, and it is the one
+	// worker whose absence is a normal state rather than a degradation: a default
+	// deployment has no source, keeps whatever policy it loaded at boot (none),
+	// and is not worse off for the loop not running.
+	if a.cfg.PolicySourceURL != "" {
+		safego.GoTracked(&a.bgWG, "policy-refresh", func() {
+			version.RunPolicyRefresh(bgCtx, a.cfg.PolicySourceURL, policyRefreshInterval, policyRefreshJitter, nil)
+		})
+	}
 
 	return a.server.Serve(ln)
 }
@@ -1055,6 +1127,18 @@ func (a *App) runGeoUpdateLoop(ctx context.Context) {
 // The heavy ACME work runs in the sync-task processor; this loop only scans +
 // enqueues. Interval (and the renew-before-days threshold) are re-read from
 // settings each cycle, so cadence changes take effect without a restart.
+// policyRefreshInterval is the plan's initial value. It is not a setting: nothing
+// reads a policy faster than it can be published, and a knob nobody turns is a
+// knob nobody can reason about.
+const policyRefreshInterval = 30 * time.Minute
+
+// policyRefreshJitter spreads refreshes over ±10% of the interval, so a fleet of
+// panels configured from one document does not fetch it in lockstep.
+func policyRefreshJitter(d time.Duration) time.Duration {
+	spread := float64(d) * 0.1
+	return d - time.Duration(spread) + time.Duration(rand.Float64()*2*spread)
+}
+
 func (a *App) runCertRenewalLoop(ctx context.Context) {
 	if a.cert == nil {
 		return

@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "revision": "2026-09-19.1",
-  "note": "IDENTITY AND PROFILE METADATA ONLY. This file deliberately does NOT list which Node versions are supported \u2014 that list lives in docs/compat/node-v4.json and is sliced by position at min_supported, so there is exactly one place to move a floor. This file supplies what that list cannot: which commit each tag pointed at when it was first resolved, and what a case against it claims. A version the manifest supports but this file does not pin fails the plan rather than being tested against whatever the tag points at today.",
+  "note": "IDENTITY AND PROFILE METADATA ONLY. This file deliberately does NOT list which Node versions are supported — that list lives in docs/compat/node-v4.json and is sliced by position at min_supported, so there is exactly one place to move a floor. This file supplies what that list cannot: which commit each tag pointed at when it was first resolved, and what a case against it claims. A version the manifest supports but this file does not pin fails the plan rather than being tested against whatever the tag points at today.",
   "profiles": {
     "node-wire-v1": {
       "class": "required",
@@ -30,6 +30,12 @@
     "v0.0.1-beta11": "60d96490f2b0561279ae9332ef6a809e14aab996"
   },
   "excluded": [],
+  "contract_source": {
+    "note": "THE SOURCE THE PINNED-SOURCE CONTRACT JOB TESTS, named here rather than taken from PSP's go.mod. When the job resolved it from go.mod, the evidence for 'PSP speaks to a real released Node' moved whenever a dependency bump happened, and removing the PN root dependency (X07) would have removed the test entry point with it. A commit, not a tag: the matrix resolves the commit and checks it, so a moved tag is caught instead of silently testing a different revision.",
+    "tag": "v0.0.1-beta11",
+    "commit": "60d96490f2b0561279ae9332ef6a809e14aab996",
+    "module_path": "github.com/KazuhaHub/passwall-node"
+  },
   "upgrade_edges": [],
   "pinned_sources_note": "THESE ARE COMMITS, NOT TAG OBJECTS. `git ls-remote --tags` lists both refs/tags/X (the annotated tag object) and refs/tags/X^{} (the commit it points at); pinning the former fails every leg, because a checkout resolves to the commit. The matrix verifies the resolved commit against these, so a wrong-but-well-formed SHA is caught on the first run rather than after it has quietly tested a different revision."
 }

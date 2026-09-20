@@ -55,6 +55,12 @@ func (r *upgradeGateRepo) UpdateVersion(_ context.Context, _ int64, panelVersion
 	return nil
 }
 
+// Records the audit actions a handler wrote, so a test can assert not only what
+// the response said but what the trail will show a reviewer later.
+//
+// ONE COPY. Two branches each added a double for this port and the merge put both
+// in the package; this is the superset — it keeps the detail JSON as well as the
+// action — so the other was deleted rather than reconciled.
 type upgradeGateAudit struct {
 	ports.AuditRepo
 	actions []string

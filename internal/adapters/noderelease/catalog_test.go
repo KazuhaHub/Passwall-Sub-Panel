@@ -148,24 +148,49 @@ func assertUnavailable(t *testing.T, list ports.NodeReleaseList, err error) {
 }
 
 func TestPSPMajorForVersionBindsStampedCompatibility(t *testing.T) {
+	// A BUILD STAMP IS NOT A RELEASE TAG. This function answers "which reviewed
+	// major does the build that is running belong to", so the input is the
+	// version PSP's own workflow stamped into it.
+	//
+	// `4.0.0` used to be in the refusal list below, and that was the defect
+	// rather than the rule: the product scheme stamps exactly that, so the
+	// first release named this way would have had its Node release catalog
+	// silently disabled — `newNodeReleaseCatalog` returns nil and the list is
+	// simply unavailable. The table now covers both schemes.
 	for _, tc := range []struct {
 		version string
 		major   int
 	}{
 		{"dev", 4},
+		// The legacy scheme, still stamped by every build in the field.
 		{"v4.0.0-beta.2", 4},
 		{"v4.0.0", 4},
 		{"v3.9.2-beta.20", 3},
 		{"v5.0.0-beta.1", 5},
+		{"v102.1.0", 102},
+		// The product scheme: three integers, no prefix.
+		{"4.0.0", 4},
+		{"102.1.0", 102},
+		// Refusals. A stamp that is not canonical must not inherit reviewed
+		// compatibility, and must not be repaired into something that does.
 		{"v0.1.0", 0},
 		{"", 0},
 		{"latest", 0},
 		{"v4", 0},
-		{"4.0.0", 0},
 		{"v04.0.0", 0},
 		{"v4.0.0+build", 0},
 		{"v4.0.0/../../PRIVATE_RESPONSE", 0},
 		{"v999999999999999999999999999.0.0", 0},
+		// The product scheme is exactly three segments with no prerelease: a
+		// candidate is distinguished by its CHANNEL, not by its version.
+		{"4.0", 0},
+		{"4.0.0.1", 0},
+		{"04.0.0", 0},
+		{"0.1.0", 0},
+		{"4.0.0-beta.1", 0},
+		{"4.0.0+build", 0},
+		// A tag is not a version, and this is the swap that produces it.
+		{"release/4.0.0", 0},
 	} {
 		t.Run(tc.version, func(t *testing.T) {
 			major, err := PSPMajorForVersion(tc.version)
@@ -261,6 +286,12 @@ func TestCatalogFullReviewedRegistryRetainsReviewedReleasesAndListsNewestFirst(t
 	}
 	for i, version := range reviewedNewestPublishedFirst {
 		entry := list.Releases[i]
+		// A LEGACY RELEASE HAS NO PRODUCT VERSION, and the tag is its version.
+		// Stating that explicitly is what lets a consumer tell the two schemes
+		// apart without inferring anything from the characters in a string.
+		if entry.Scheme != "legacy" || entry.ReleaseTag != version || entry.ProductVersion != "" {
+			t.Fatalf("legacy identity split wrong: scheme=%q tag=%q product_version=%q", entry.Scheme, entry.ReleaseTag, entry.ProductVersion)
+		}
 		if entry.Version != version || entry.Channel != "testing" || entry.ReleaseURL != "https://github.com/KazuhaHub/Passwall-Node/releases/tag/"+version ||
 			!reflect.DeepEqual(entry.Methods, []string{"linux", "docker", "manual"}) || !reflect.DeepEqual(entry.Platforms, fixturePlatforms) {
 			t.Fatalf("full registry did not retain exact reviewed installation availability: %+v", entry)
@@ -879,5 +910,142 @@ func TestCatalogOrdersByPublicationNotByPrereleaseNumber(t *testing.T) {
 	want := []string{"v0.0.1-beta11", "v0.0.1-beta10", "v0.0.1-beta9"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("catalog order = %v, want newest-published first %v", got, want)
+	}
+}
+
+// The agreement check between GitHub's prerelease flag and the tag text is a
+// LEGACY defence, and it is load-bearing there: an older beta cut before the
+// workflow set the flag arrives with prerelease=false, and a hyphen has always
+// meant a pre-release in that form.
+//
+// It is not a rule about product tags, which have no hyphen at all. Requiring
+// agreement there would reject every testing candidate — and it would do it in
+// the catalog's LOOP, so one misclassified release empties the whole list an
+// operator chooses an upgrade from rather than dropping one row.
+func TestReleaseChannelAgreementIsScopedToTheLegacyForm(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		tag        string
+		prerelease bool
+		want       bool
+		why        string
+	}{
+		{
+			name: "a legacy beta the flag caught", tag: "v0.0.1-beta11", prerelease: true, want: true,
+			why: "flag and tag agree",
+		},
+		{
+			name: "a legacy beta the flag missed", tag: "v0.0.1-beta11", prerelease: false, want: false,
+			why: "the gap this check exists for: published before the workflow set the flag",
+		},
+		{
+			name: "a legacy stable", tag: "v0.0.1", prerelease: false, want: true,
+			why: "no hyphen, no flag",
+		},
+		{
+			name: "a product tag the flag marks testing", tag: "release/4.0.0", prerelease: true, want: true,
+			why: "no hyphen to find, so the flag decides",
+		},
+		{
+			name: "a product tag the flag calls released", tag: "release/4.0.0", prerelease: false, want: true,
+			why: "the flag is the authority for this namespace",
+		},
+		{
+			name: "a tag in neither scheme", tag: "4.0.0-rc.1", prerelease: false, want: false,
+			why: "for an unrecognised form the characters are all there is to go on",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := releaseChannelAgrees(tc.tag, tc.prerelease); got != tc.want {
+				t.Fatalf("releaseChannelAgrees(%q, %v) = %v, want %v — %s", tc.tag, tc.prerelease, got, tc.want, tc.why)
+			}
+		})
+	}
+}
+
+// fixtureProductAsset names the asset by the VERSION and addresses it under the
+// TAG, which is what the release workflow publishes.
+func fixtureProductAsset(tag, version, name string) githubAsset {
+	return githubAsset{
+		Name: name, State: "uploaded", Size: 123,
+		BrowserDownloadURL: "https://github.com/KazuhaHub/Passwall-Node/releases/download/" + tag + "/" + name,
+	}
+}
+
+func fixtureProductRelease(tag, version string) githubRelease {
+	published := fixtureNow.Add(-time.Hour)
+	release := githubRelease{
+		TagName: tag, Prerelease: true, PublishedAt: &published,
+		HTMLURL: "https://github.com/KazuhaHub/Passwall-Node/releases/tag/" + tag,
+		Assets:  []githubAsset{fixtureProductAsset(tag, version, "SHA256SUMS.txt")},
+	}
+	for _, platform := range fixturePlatforms {
+		release.Assets = append(release.Assets, fixtureProductAsset(tag, version, fixturePackage(version, platform)))
+	}
+	return release
+}
+
+// A release under the product scheme is addressed by its TAG and names its
+// contents by its VERSION, and the two are different strings.
+//
+// Every address in the catalog is one or the other, and the failure of getting
+// it wrong is not a wrong list — it is `errUnavailable`, so the WHOLE catalog
+// goes dark rather than one entry disappearing. The API path, the tag GitHub
+// reports back, the release page and the download path are all the tag; the
+// asset names and the entry's own version are the version.
+func TestAProductReleaseIsAddressedByItsTagAndNamedByItsVersion(t *testing.T) {
+	const version, tag = "4.0.0", "release/4.0.0"
+	release := fixtureProductRelease(tag, version)
+	catalog := fixtureCatalog(t, roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if got := req.URL.String(); got != "https://api.github.com/repos/KazuhaHub/Passwall-Node/releases/tags/"+tag {
+			t.Fatalf("the catalog asked for %s, and the release lives at %s", got, tag)
+		}
+		return fixtureResponse(req, http.StatusOK, fixtureBody(t, release)), nil
+	}), nil)
+	catalog.reviewed = []reviewedRelease{{
+		Version: version, PSPMajor: 4, Notes: "reviewed",
+		Methods: []string{"linux", "docker", "manual"}, Platforms: fixturePlatforms,
+		DockerPublishedTag: version,
+	}}
+
+	list, err := catalog.List(context.Background())
+	if err != nil {
+		t.Fatalf("a product-scheme release must be readable: %v", err)
+	}
+	if len(list.Releases) != 1 {
+		t.Fatalf("releases = %+v", list.Releases)
+	}
+	entry := list.Releases[0]
+	if entry.Version != version {
+		t.Errorf("entry version = %q, want the version %q", entry.Version, version)
+	}
+	// THE IDENTITIES ARE STATED, NOT LEFT TO BE DERIVED. A consumer that builds
+	// the release page or the download path needs the TAG, and before this it had
+	// to re-derive the mapping from the version — which is how the front end came
+	// to ask for tag/4.0.0.
+	if entry.ReleaseTag != tag {
+		t.Errorf("entry release_tag = %q, want the tag %q", entry.ReleaseTag, tag)
+	}
+	if entry.ProductVersion != version {
+		t.Errorf("entry product_version = %q, want %q", entry.ProductVersion, version)
+	}
+	if entry.Scheme != "product" {
+		t.Errorf("entry scheme = %q, want product", entry.Scheme)
+	}
+	if want := releaseBase + "tag/" + tag; entry.ReleaseURL != want {
+		t.Errorf("release url = %q, want %q", entry.ReleaseURL, want)
+	}
+	// The platforms are only reported when every asset was found at the address
+	// built from the tag with the name built from the version, so this is the
+	// assertion that the whole path/name split is right.
+	if !reflect.DeepEqual(entry.Platforms, fixturePlatforms) {
+		t.Errorf("platforms = %+v, want %+v", entry.Platforms, fixturePlatforms)
+	}
+	if !reflect.DeepEqual(entry.Methods, []string{"linux", "docker", "manual"}) {
+		t.Errorf("methods = %+v", entry.Methods)
+	}
+	// Published under a prerelease flag, so it is a candidate.
+	if entry.Channel != "testing" {
+		t.Errorf("channel = %q, want testing", entry.Channel)
 	}
 }

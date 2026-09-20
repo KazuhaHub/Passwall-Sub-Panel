@@ -1,0 +1,97 @@
+{
+  "schema_version": 1,
+  "revision": 1,
+  "issued_at": "2026-09-19T00:00:00Z",
+  "expires_at": "2027-09-19T00:00:00Z",
+  "applies_to_psp": {
+    "min": "v4.0.0-beta.1",
+    "max": "v4.99.99"
+  },
+  "_comment": "The MERGED view of docs/compat/v4.json: its base entries with v4-ranges.json folded in, because the overlay is where the current reviewed ranges live. Publishing the base entries alone would understate what has been verified, and a panel would report a supported ceiling as untested. Reached BY NAME, because under the product scheme the first segment of a version is a release line rather than a compatibility major, so there is no v<major>.json for a product build to derive. The window starts at the PRERELEASE line: a prerelease ranks below its own release, so a window opening at 4.0.0 would exclude the rows for v4.0.0-beta.*, which this document carries. The per-major files stay for builds that read them.",
+  "entries": [
+    {
+      "psp_min": "v4.0.0-beta.9",
+      "psp_max": "v4.0.0-beta.99",
+      "min_xui": "3.4.2",
+      "max_tested_xui": "3.8.5",
+      "notes": "3X-UI 3.8.5 live adapter verification (2026-09-16 UTC) used PSP main at 2440112 against upstream tag 7ef22f94 and Xray 26.9.9 on darwin/arm64. TestLive_XUISurface, TestLive_XUIConnectionLimits and TestLive_XUIRealityScan passed. PSP v4.0.0-beta.9 introduced the required negative-subSortIndex preservation and already carried the 26.9.8+ REALITY ML-KEM subscription handling. This range deliberately starts at beta.9; beta.1 through beta.8 remain on the 3.7.0 ceiling."
+    },
+    {
+      "psp_min": "v4.0.0",
+      "psp_max": "v4.99.99",
+      "min_xui": "3.4.2",
+      "max_tested_xui": "3.8.5",
+      "notes": "The v4 stable line contains the beta.9 3X-UI 3.8.x inbound-update fix and the verified adapter surface recorded above. Keep a narrower entry ahead of this baseline if a later v4 release changes the contract."
+    },
+    {
+      "psp_min": "v4.0.0-beta.1",
+      "psp_max": "v4.0.0-beta.8",
+      "min_xui": "3.4.2",
+      "max_tested_xui": "3.7.0",
+      "notes": "Historical v4 betas before beta.9 do not preserve negative 3X-UI 3.8.x subSortIndex values and therefore retain the 3.7.0 ceiling."
+    }
+  ],
+  "sui_entries": [
+    {
+      "psp_min": "v4.0.0-beta.1",
+      "psp_max": "v4.0.0-beta.99",
+      "max_tested_sui": "1.6.3",
+      "notes": "S-UI 1.6.3 live adapter verification (2026-09-16 UTC) used PSP main at 2440112 against upstream tag 13abbdc4 and sing-box 1.14.1 on darwin/arm64. TestLive_SUISurface passed after upgrading the 1.6.2 scratch database. Token authentication and inbound/client read-write shapes remain compatible; the new session API and multi-user Snell support are additive."
+    },
+    {
+      "psp_min": "v4.0.0",
+      "psp_max": "v4.99.99",
+      "max_tested_sui": "1.6.3",
+      "notes": "The v4 stable line uses the same S-UI adapter contract live-verified against 1.6.3. No S-UI minimum or new optional capability is claimed."
+    }
+  ],
+  "xui_advisories": {
+    "3.5.0": {
+      "severity": "warning",
+      "affects_xray": true,
+      "text": "升级 3X-UI 到 3.5.0 会同时升级内置 Xray-core 到 v26.7.11 并重启内核。上游拒绝同时启用 Final Mask 与 REALITY 的 inbound；MTProto 会迁移到多客户端模型，且 tg:// 链接不再携带 remark。另有流量计数修复与 inbound 端口旧 UNIQUE 约束移除。PSP 适配器兼容依据沿用 v3 清单的既有验证记录，不代表对 V4 发布二进制另做实机验证。"
+    },
+    "3.6.0": {
+      "severity": "warning",
+      "affects_xray": true,
+      "text": "升级 3X-UI 到 3.6.0 会同时升级内置 Xray-core 到 v26.7.28 并重启内核。手工配置过 finalmask 的 inbound 请注意：XMC 格式从 usernames 改为 profiles，旧掩码需手工更新；REALITY inbound 的 finalmask.tcp 会被开机迁移删除。若该 inbound 已被 PSP 接管，旧配置快照可能持续 pending，请在 PSP 节点编辑器中重新保存；订阅只读 finalmask.udp，不受这处删除影响。PSP 自己创建的节点不受上述手工配置迁移影响。兼容依据是 v3 清单记录的既有适配器验证，而非 V4 发布二进制新实测。"
+    },
+    "3.7.0": {
+      "severity": "warning",
+      "affects_xray": false,
+      "text": "3X-UI 3.7.0 内置 Xray-core 仍锁定 3.6.0 的 commit（5ca6f4b / v26.7.28）。给 PSP 新建 API token 时必须使用 admin scope；monitor 和 node-sync scope 覆盖不了 PSP 的接口。旧 token 的空 scope 会由上游迁移补为 admin。不要在 3X-UI 中为 PSP 管理的客户端设置面板侧自动续期或流量重置周期：PSP 会主动关闭 resetDay/resetMax/trafficReset/trafficResetDay，避免面板改写 PSP 的到期与流量账本。HWID 上限 limitHwid 由 PSP 管理，应在 PSP 用户编辑界面设置，PSP 会覆盖面板侧改动；非 PSP 管理的客户端不受影响。兼容上限沿用 v3 清单记录的既有 3.7.0 适配器实机验证，并非 V4 发布二进制新实测。"
+    },
+    "3.8.0": {
+      "severity": "warning",
+      "affects_xray": true,
+      "text": "3X-UI 3.8.0 会升级内置 Xray-core 到 26.9.9、重启内核，并迁移全局 Xray 模板中的 outbound/DNS 配置。PSP 当前源码已有 REALITY ML-KEM-first 适配：Mihomo 订阅使用 chrome 指纹及 support-x25519mlkem768，请使用支持这些选项的客户端并刷新订阅；sing-box 输出会省略受影响的 REALITY 节点。已发布 PSP v4.0.0-beta.1–beta.8 编辑负数 subSortIndex 时仍会将排序重置为 1，需使用包含本次修复的 PSP 构建；当前源码实机验证不代表旧发布版本已修复，兼容上限暂保持 3.7.0。新增 TUIC sidecar、AmneziaWG 等功能不属于 PSP 已支持的 3X-UI 功能。"
+    },
+    "3.8.5": {
+      "severity": "warning",
+      "affects_xray": true,
+      "text": "3X-UI 3.8.5 是 3.8.0 系列的修复版，内置 Xray-core 仍为 26.9.9。PSP 已在真实 3.8.5 面板上验证状态、入站、共享客户端、连接上限及 REALITY 扫描，无需新增适配器代码。请使用 PSP v4.0.0-beta.9 或更新版本；beta.1–beta.8 不保留负数 subSortIndex，仍只认证到 3X-UI 3.7.0。升级跨过 3.8.0 时仍会重启内核并执行全局 Xray 模板迁移；PSP 不支持 3X-UI 新增的原生 TUIC sidecar。"
+    }
+  },
+  "sui_advisories": {
+    "1.6.0": {
+      "severity": "warning",
+      "affects_xray": true,
+      "text": "S-UI 1.6.0 会升级内置 sing-box 到 1.14 并重启内核，还会迁移全局 DNS、缓存、rule-set 和 TLS ACME 配置。legacy DNS address 过滤器及 DNS 规则 strategy 动作不会自动迁移，需要按上游提示手工转换。客户端名称从此不能为空、不能与其他客户端重名，保存时会去除首尾空格；PSP 的唯一客户端 email 满足这项要求。/apiv2、Token 认证和客户端/inbound 模型的兼容依据来自 v3 清单记录的既有 1.6.0 适配器实机验证，并非 V4 发布二进制新实测。"
+    },
+    "1.6.1": {
+      "severity": "info",
+      "affects_xray": false,
+      "text": "S-UI 1.6.1 内置 sing-box 仍为 1.14.0。PSP 已在临时 1.6.1 面板上完成现有适配器接口验证，Token 认证及客户端、入站读写兼容，无需修改适配器。新增维护模式会主动停止内核并保持停止，需在 S-UI 中退出维护模式才能恢复服务；PSP 当前显示内核停止状态。浏览器登录失败 10 次会锁定来源地址 10 分钟，公开地址的反向代理不再受信任，可能影响登录日志和限流的来源地址识别；这些调整不影响 PSP 的 Token 请求。新增 TLS spoofing 与 OpenVPN/OpenConnect endpoint TLS 不属于 PSP 已支持的功能，本次验证也不代表完整代理流量、配额执法或已有数据库升级验证。"
+    },
+    "1.6.2": {
+      "severity": "info",
+      "affects_xray": false,
+      "text": "S-UI 1.6.2 修复设置页因迁移标记被当作未知设置而无法保存的问题（#1258），内置 sing-box 仍为 1.14.0。PSP 已验证现有 Token、客户端及入站接口兼容，无需修改适配器。1.6.1 引入的登录失败限流和可信代理规则仍适用；维护模式会保持内核停止，需在 S-UI 中退出才能恢复代理服务。"
+    },
+    "1.6.3": {
+      "severity": "info",
+      "affects_xray": true,
+      "text": "S-UI 1.6.3 将 sing-box 从 1.14.0 升到 1.14.1，并新增实时会话查看/断开及 Snell 多用户支持；这些接口对 PSP 都是附加项。PSP 已用真实 1.6.3 面板验证 Token、状态、入站及客户端完整读写流程，无需修改适配器。上游同时修复了客户端重新启用后被流量重置逻辑再次停用的问题。升级会重启 sing-box，请按维护窗口操作。"
+    }
+  }
+}
