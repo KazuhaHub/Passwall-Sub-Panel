@@ -591,3 +591,26 @@ test('the publication channel is resolved once, never inferred from a hyphen', (
   // tags in neither scheme: `stable` is reachable only through the stated input.
   assert(/auto\)\s*prerelease=true/.test(setup), 'an automatic channel must default to pre-release')
 })
+
+// THE NODE CASE IS ADDRESSED BY ITS TAG, NOT ITS VERSION.
+//
+// A version is not a git ref. The release lives at refs/tags/release/4.0.0 and is
+// named 4.0.0, so a checkout asked to resolve the version fails outright: the job
+// dies before it records anything, and the release it gates never runs — which is
+// exactly how the 4.0.1 release died, with the failure two jobs away from the
+// line that caused it.
+//
+// The planner emits both fields. This pins which one addresses the source, and
+// which one names the build.
+test('the compat matrix addresses the node case by its tag', () => {
+  assert.match(
+    workflow,
+    /ref:\s*\$\{\{\s*matrix\.node_case\.tag\s*\}\}/,
+    'the compat matrix does not check the node case out by its tag, so it asks git for a ref that does not exist',
+  )
+  assert.doesNotMatch(
+    workflow,
+    /ref:\s*\$\{\{\s*matrix\.node_case\.version\s*\}\}/,
+    'the compat matrix checks the node case out by its VERSION, which is not a git ref',
+  )
+})
