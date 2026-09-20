@@ -48,9 +48,21 @@ const httpFetchTimeout = 8 * time.Second
 // unprefixed version here would have derived that path and fetched a file that
 // does not exist — or worse, that exists and means something else.
 //
-// So a build whose version is not the legacy form gets no per-major URL at all;
-// its compatibility comes from the release policy, which states its applicable
-// range explicitly instead of inferring one from a number.
+// So a build whose version is not the legacy form gets no per-major URL at all.
+//
+// WHAT IT GETS INSTEAD IS NOT BUILT YET, and saying so is the point of this line.
+// The release policy that governs Node releases carries `applies_to_psp` — an
+// explicit applicable range rather than a number to index a file by — but it
+// carries RELEASES, not XUI/SUI COMPATIBILITY RANGES. So as things stand a
+// product-versioned build reads neither: its ceiling is empty and a probed panel
+// is reported as untested. That is fail-closed, and it is a GAP rather than a
+// design; the earlier wording here said the build "reads its policy instead",
+// which described a document that does not exist.
+//
+// Closing it is V03's remaining work: carry the compat ranges in a policy-shaped
+// document with its own applicable range, and keep the per-major files for builds
+// that still read them. What must NOT happen first is an unprefixed version
+// deriving a path from this pattern.
 var pspMajorRe = regexp.MustCompile(`^v(\d+)\.`)
 
 // schemaVersion is what the base per-major JSON files must carry. Bumped to 2
@@ -236,8 +248,9 @@ func LastRefreshAt() time.Time {
 func defaultURLForCurrentVersion() (string, error) {
 	major, ok := pspMajor(Version)
 	if !ok {
-		return "", fmt.Errorf("version %q is not a legacy v-prefixed build, so no per-major compat manifest applies to it; "+
-			"a product version's first segment is a release line, not a compatibility major, so this build reads its policy instead", Version)
+		return "", fmt.Errorf("version %q is not a legacy v-prefixed build, so no per-major compat manifest applies to it: "+
+			"a product version's first segment is a release line, not a compatibility major. No compatibility range is "+
+			"configured for this build, so its supported ceiling stays unknown until one is", Version)
 	}
 	return defaultRemoteCompatURLBase + "v" + strconv.Itoa(major) + ".json", nil
 }

@@ -21,6 +21,11 @@ import (
 // untested rather than as supported. An empty answer is the conservative one;
 // the failure this guards against is a product build quietly deriving a major
 // and inheriting a range nobody published for it.
+//
+// IT IS A GAP, NOT A DESIGN, and this file does not pretend otherwise: nothing
+// carries the compat ranges in a policy-shaped document yet, so a product build
+// has no source for them at all. The error message says that rather than naming a
+// document that does not exist.
 func TestAProductBuildDerivesNoPerMajorManifest(t *testing.T) {
 	previous := Version
 	t.Cleanup(func() { Version = previous })
@@ -47,7 +52,9 @@ func TestAProductBuildDerivesNoPerMajorManifest(t *testing.T) {
 				if err == nil {
 					t.Fatalf("Version=%q derived %q; it must not read a per-major manifest (%s)", tc.version, url, tc.why)
 				}
-				if !strings.Contains(err.Error(), "release line") {
+				// The message names the cause and states the consequence — an
+				// operator reading it must not be told a range was configured.
+				if !strings.Contains(err.Error(), "release line") || !strings.Contains(err.Error(), "stays unknown") {
 					t.Fatalf("the refusal must say why; it said %q", err)
 				}
 				return
