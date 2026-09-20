@@ -32,7 +32,7 @@ test('offering a release the manifest calls remote_upgrade unsupported is refuse
   const problems = checkReleasesPolicy(
     documents({
       nodeEdit: n => {
-        n.released_nodes.find(node => node.version === 'v0.0.1-beta11').remote_upgrade = 'unsupported'
+        n.released_nodes.find(node => node.version === '4.0.0').remote_upgrade = 'unsupported'
       },
     }),
   )
@@ -46,7 +46,7 @@ test('offering a release with no pinned commit is refused', () => {
   const problems = checkReleasesPolicy(
     documents({
       verificationEdit: v => {
-        delete v.pinned_sources['v0.0.1-beta11']
+        delete v.pinned_sources['4.0.0']
       },
     }),
   )
@@ -59,8 +59,8 @@ test('offering a version the manifest has never heard of is refused', () => {
   const problems = checkReleasesPolicy(
     documents({
       policyEdit: p => {
-        p.releases[0].version = 'v0.0.1-beta99'
-        p.releases[0].release_tag = 'v0.0.1-beta99'
+        p.releases[0].version = '9.9.9'
+        p.releases[0].release_tag = 'release/9.9.9'
       },
     }),
   )
@@ -71,7 +71,7 @@ test('a refusal naming an unknown version is refused', () => {
   const problems = checkReleasesPolicy(
     documents({
       policyEdit: p => {
-        p.refusals.push({ version: 'v0.0.1-beta404', reason: 'typo' })
+        p.refusals.push({ version: '9.9.9', reason: 'typo' })
       },
     }),
   )
@@ -82,10 +82,16 @@ test('a refusal naming an unknown version is refused', () => {
 test('an edge whose target is not offered is refused', () => {
   // The path would be published, reviewed and unreachable, which reads as
   // "this upgrade is available" to anyone skimming the file.
+  // THE SHIPPED POLICY CERTIFIES NO PATH, so there is no edge here to point
+  // somewhere else: one is added, and its target is a release the manifest knows
+  // but the policy does not offer.
   const problems = checkReleasesPolicy(
     documents({
+      nodeEdit: n => n.released_nodes.push({
+        version: '4.0.1', protocol_version: 1, base_sync: 'supported', remote_upgrade: 'conditional'
+      }),
       policyEdit: p => {
-        p.releases = p.releases.filter(release => release.version !== 'v0.0.1-beta11')
+        p.upgrade_edges = [{ id: 'e1', from: '4.0.0', to: '4.0.1', evidence: ['upgrade-mechanism'] }]
       },
     }),
   )
@@ -96,18 +102,18 @@ test('an edge naming a version the manifest does not list is refused', () => {
   const problems = checkReleasesPolicy(
     documents({
       policyEdit: p => {
-        p.upgrade_edges[0].from = 'v0.0.1-beta404'
+        p.upgrade_edges = [{ id: 'e1', from: '9.9.9', to: '4.0.0', evidence: ['upgrade-mechanism'] }]
       },
     }),
   )
-  assert.ok(problems.some(p => /from=v0.0.1-beta404 is not a version/.test(p)), problems.join('; '))
+  assert.ok(problems.some(p => /from=9\.9\.9 is not a version/.test(p)), problems.join('; '))
 })
 
 test('a version that is both offered and refused is refused', () => {
   const problems = checkReleasesPolicy(
     documents({
       policyEdit: p => {
-        p.refusals.push({ version: 'v0.0.1-beta10', reason: 'contradiction' })
+        p.refusals.push({ version: '4.0.0', reason: 'contradiction' })
       },
     }),
   )
