@@ -80,22 +80,23 @@ func TestTheCoreAnswerIsPinnable(t *testing.T) {
 	}
 }
 
-func TestTheAgentAnswerNeedsBothAnOfferedTargetAndAWalkedPath(t *testing.T) {
+func TestTheAgentAnswerNeedsAnIdentityAndAnOfferedTarget(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
 		current string
 		offered bool
-		edge    bool
 		state   upgradeOptionState
 		reason  string
 	}{
-		{"no identity", "", true, true, upgradeBlocked, "identity_unknown"},
-		{"not offered", "v0.0.1-beta11", false, true, upgradeBlocked, "no_offered_target"},
-		{"offered but never walked", "v0.0.1-beta3", true, false, upgradeBlocked, "upgrade_edge_unverified"},
-		{"offered and walked", "v0.0.1-beta3", true, true, upgradeReady, "edge_verified"},
+		{"no identity", "", true, upgradeBlocked, "identity_unknown"},
+		{"not offered", "v0.0.1-beta11", false, upgradeBlocked, "no_offered_target"},
+		// NO THIRD INPUT. "Nobody walked this path" used to be a refusal of its
+		// own, beside an eligibility answer that said the node was compatible —
+		// two answers to one question. What decides is the decision.
+		{"compatible", "v0.0.1-beta3", true, upgradeReady, "compatible"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			option := decideAgentUpgrade(tc.current, tc.offered, tc.edge)
+			option := decideAgentUpgrade(tc.current, tc.offered)
 			if option.State != tc.state {
 				t.Fatalf("state = %q, want %q", option.State, tc.state)
 			}
@@ -177,53 +178,57 @@ func TestUpgradeOptionsReportsUnsupportedForABackendWithoutTheCapability(t *test
 	}
 }
 
-// Filtering a release list by version alone offers releases that are ahead and
-// that nobody has ever moved a node onto. The request is then refused by the edge
-// check, and the operator learns to distrust the list instead of the request —
-// so the list is built from the edges, not from the catalog.
-func TestAgentTargetsComeFromWalkedPaths(t *testing.T) {
-	edges := []version.UpgradeEdge{
-		{ID: "a", From: "v0.0.1-beta3", To: "v0.0.1-beta11"},
-		{ID: "b", From: "v0.0.1-beta9", To: "v0.0.1-beta10"},
-		{ID: "c", From: "v0.0.1-beta3", To: "v0.0.1-beta11"}, // same pair again
+// THE LIST NAMES RELEASES THE PANEL ACCEPTS, NOT PATHS SOMEBODY WALKED.
+//
+// It was built from the verified edges, so a node on a version no edge started from
+// got an empty dialog — and the remedy was a document edit the operator had no
+// reason to know about. The catalog is the panel's own answer about what it
+// supports, so that is what the list is built from.
+func TestAgentTargetsComeFromTheReleaseList(t *testing.T) {
+	releases := []string{"v0.0.1-beta3", "v0.0.1-beta10", "v0.0.1-beta11", "v0.0.1-beta11"}
+
+	targets := agentTargets("v0.0.1-beta3", releases, false, nil)
+	// The node's own version is not a target, and the catalog may name one release
+	// twice through two platforms.
+	if len(targets) != 2 {
+		t.Fatalf("targets = %+v, want the two releases that are not the node's own", targets)
+	}
+	for _, target := range targets {
+		if target.Version == "v0.0.1-beta3" {
+			t.Fatalf("the node's own version was offered as a target: %+v", target)
+		}
+		if !target.OfferedByPolicy {
+			t.Fatalf("without a policy every reviewed release is a candidate: %+v", target)
+		}
 	}
 
-	targets := agentTargets("v0.0.1-beta3", edges, false, nil)
-	if len(targets) != 1 {
-		t.Fatalf("targets = %+v, want exactly the one path leaving beta3", targets)
-	}
-	if targets[0].Version != "v0.0.1-beta11" || !targets[0].EdgeVerified {
-		t.Fatalf("target = %+v", targets[0])
-	}
-	// No policy in force: there is no offered-target list to consult, and the
-	// edge is the whole answer.
-	if !targets[0].OfferedByPolicy {
-		t.Fatal("without a policy every walked path is what there is")
+	// A VERSION NO EDGE EVER STARTED FROM IS NO LONGER A DEAD END. beta9 is the
+	// case this rewrite exists for: it had no edge and therefore no targets at all.
+	fromBeta9 := agentTargets("v0.0.1-beta9", releases, false, nil)
+	if len(fromBeta9) != 3 {
+		t.Fatalf("targets = %+v, want the three releases that are not beta9", fromBeta9)
 	}
 
-	// A node with no edge leaving it has no targets, whatever the catalog says.
-	if got := agentTargets("v0.0.1-beta11", edges, false, nil); len(got) != 0 {
-		t.Fatalf("targets = %+v, want none", got)
-	}
 	// An unknown identity cannot be the start of anything.
-	if got := agentTargets("", edges, false, nil); got != nil {
+	if got := agentTargets("", releases, false, nil); got != nil {
 		t.Fatalf("targets = %+v, want nil", got)
 	}
 }
 
-// With a policy in force the offered list is part of the answer: a walked path
-// to a release the policy no longer offers is not something to put in front of
-// an operator.
+// With a policy in force the offered list is part of the answer: a release the
+// policy no longer offers is not something to put in front of an operator.
 func TestAgentTargetsCarryThePolicyAnswerWhenOneIsInForce(t *testing.T) {
-	edges := []version.UpgradeEdge{{ID: "a", From: "v0.0.1-beta3", To: "v0.0.1-beta11"}}
+	releases := []string{"v0.0.1-beta10", "v0.0.1-beta11"}
 
-	listed := agentTargets("v0.0.1-beta3", edges, true, []string{"v0.0.1-beta11"})
-	if len(listed) != 1 || !listed[0].OfferedByPolicy {
-		t.Fatalf("targets = %+v, want it reported as offered", listed)
+	listed := agentTargets("v0.0.1-beta3", releases, true, []string{"v0.0.1-beta11"})
+	if len(listed) != 2 {
+		t.Fatalf("targets = %+v, want both releases", listed)
 	}
-
-	unlisted := agentTargets("v0.0.1-beta3", edges, true, []string{"v0.0.1-beta10"})
-	if len(unlisted) != 1 || unlisted[0].OfferedByPolicy {
-		t.Fatalf("targets = %+v, want the policy answer carried rather than assumed", unlisted)
+	byVersion := map[string]bool{}
+	for _, target := range listed {
+		byVersion[target.Version] = target.OfferedByPolicy
+	}
+	if !byVersion["v0.0.1-beta11"] || byVersion["v0.0.1-beta10"] {
+		t.Fatalf("targets = %+v, want the policy answer carried rather than assumed", listed)
 	}
 }

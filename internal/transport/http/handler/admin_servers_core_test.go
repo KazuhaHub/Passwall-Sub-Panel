@@ -16,7 +16,6 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/domain"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/nodecompat"
-	"github.com/KazuhaHub/passwall-sub-panel/internal/version"
 )
 
 type nativeCoreClientStub struct {
@@ -229,8 +228,8 @@ func TestServerListSeparatesDesiredAndObservedNativeCoreWithoutPerRowQueries(t *
 	// THE EDGE IS PART OF THE FIXTURE: readiness now also requires a verified
 	// path out of the version this panel reports, so a fixture that expects
 	// NodeUpgradeReady has to publish the path it expects to take.
-	version.SetActiveUpgradeEdges([]version.UpgradeEdge{{ID: "fixture", From: "v0.2.0", To: "v0.2.1"}})
-	t.Cleanup(func() { version.SetActiveUpgradeEdges(nil) })
+	// (the edge gate was removed: readiness and admission follow the decision)
+	// (the edge gate was removed: readiness and admission follow the decision)
 	handler := &AdminServersHandler{
 		repo: nativeCoreListPanelRepo{panels: []*domain.XUIPanel{panel}},
 		pool: fakeWebCertPool{client: &nativeCoreClientStub{}}, agents: agents,
@@ -272,8 +271,8 @@ func TestNativeCompatibilityDTOStatesAreFailClosed(t *testing.T) {
 	// row below is edge-less and the "compatible" case could not distinguish
 	// "upgradeable" from "merely compatible".
 	panel := &domain.XUIPanel{ID: 9, Kind: domain.PanelKindPSP, Name: "native", PanelVersion: "v0.2.0"}
-	version.SetActiveUpgradeEdges([]version.UpgradeEdge{{ID: "fixture", From: "v0.2.0", To: "v0.2.1"}})
-	t.Cleanup(func() { version.SetActiveUpgradeEdges(nil) })
+	// (the edge gate was removed: readiness and admission follow the decision)
+	// (the edge gate was removed: readiness and admission follow the decision)
 	handler := &AdminServersHandler{pool: fakeWebCertPool{client: &nativeCoreClientStub{}}}
 	observedAt := time.Date(2026, 9, 16, 13, 0, 0, 0, time.UTC)
 	for _, test := range []struct {
@@ -302,14 +301,15 @@ func TestNativeCompatibilityDTOStatesAreFailClosed(t *testing.T) {
 	}
 }
 
-// THE LIST CANNOT OFFER WHAT ADMISSION REFUSES.
+// READINESS IS THE DECISION, NOT A SECOND GATE.
 //
-// Admission now requires a verified from→to edge as well as an eligible node, so
-// a list that reported readiness on eligibility alone would offer an upgrade
-// every request is refused for — the drift `nodecompat` exists to prevent. This
-// pins the split: the node stays `compatible`, because it is, and readiness
-// alone goes false, with the reason naming the edge rather than the evidence.
-func TestNativeUpgradeReadinessRequiresAVerifiedEdge(t *testing.T) {
+// It used to require a separately reviewed from→to edge on top of the decision, so
+// a row read "compatible" while the upgrade action was disabled — and the refusal
+// named an edge the operator could not see from the row, satisfying which meant
+// editing a policy document. PSP is the source of truth for what is supported, so a
+// peer its own judgement accepts is ready. The DECISION is untouched by this: a
+// peer that is not eligible is still not ready, which the second half measures.
+func TestNativeUpgradeReadinessFollowsTheDecision(t *testing.T) {
 	observedAt := time.Date(2026, 9, 16, 14, 0, 0, 0, time.UTC)
 	panel := &domain.XUIPanel{ID: 9, Kind: domain.PanelKindPSP, Name: "native", PanelVersion: "v0.2.0"}
 	agent := &domain.NodeAgent{
@@ -320,22 +320,24 @@ func TestNativeUpgradeReadinessRequiresAVerifiedEdge(t *testing.T) {
 	handler := &AdminServersHandler{pool: fakeWebCertPool{client: &nativeCoreClientStub{}}}
 	policy := nodecompat.Policy(nodecompat.DefaultObservationAge())
 
-	version.SetActiveUpgradeEdges(nil)
-	t.Cleanup(func() { version.SetActiveUpgradeEdges(nil) })
+	// (the edge gate was removed: readiness and admission follow the decision)
+	// (the edge gate was removed: readiness and admission follow the decision)
 	without := handler.toServerDTOWithAgent(panel, agent, policy)
-	if without.NodeCompatibility != "compatible" {
-		t.Fatalf("the node is eligible and must still read compatible: %+v", without)
+	if without.NodeCompatibility != "compatible" || !without.NodeUpgradeReady {
+		t.Fatalf("a compatible peer must read ready with no edges recorded: %+v", without)
 	}
-	if without.NodeUpgradeReady {
-		t.Fatal("readiness was offered with no verified edge out of the node's version")
-	}
-	if without.NodeCompatibilityReason != "upgrade-edge-missing" {
-		t.Fatalf("reason = %q, want the edge named rather than the evidence", without.NodeCompatibilityReason)
+	if without.NodeCompatibilityReason == "upgrade-edge-missing" {
+		t.Fatal("readiness still reports the removed edge gate")
 	}
 
-	version.SetActiveUpgradeEdges([]version.UpgradeEdge{{ID: "fixture", From: "v0.2.0", To: "v0.2.1"}})
-	with := handler.toServerDTOWithAgent(panel, agent, policy)
-	if !with.NodeUpgradeReady {
-		t.Fatal("a verified edge out of the node's version did not restore readiness")
+	// A PEER WITHOUT THE CAPABILITY IS STILL REFUSED. Removing one gate must not
+	// remove the decision: this is the direction that keeps readiness meaningful.
+	crippled := &domain.NodeAgent{
+		ObservedProtocolVersion: nodeprotocol.ProtocolVersion1,
+		ObservedCapabilities:    []string{"task.execution.v1"},
+		ProtocolObservedAt:      &observedAt,
+	}
+	if got := handler.toServerDTOWithAgent(panel, crippled, policy); got.NodeUpgradeReady {
+		t.Fatalf("a peer with no upgrade capability must not read ready: %+v", got)
 	}
 }

@@ -81,25 +81,15 @@ func TestWithoutAPolicyNothingIsAuthorisedByIt(t *testing.T) {
 	isolatedCompatCache(t, "v4.0.0")
 	t.Cleanup(func() { SetActiveReleasesPolicy(nil) })
 	SetActiveReleasesPolicy(nil)
-	SetActiveUpgradeEdges([]UpgradeEdge{{ID: "manifest", From: "v0.0.1-beta3", To: "v0.0.1-beta11"}})
-	t.Cleanup(func() { SetActiveUpgradeEdges(nil) })
-
 	if PolicyInForce() {
 		t.Fatal("no policy is installed, so none is in force")
 	}
 	if PolicyOffersRelease("v0.0.1-beta11") {
 		t.Fatal("a release must not be offered by a policy that does not exist")
 	}
-	if PolicyEdgeVerified("v0.0.1-beta3", "v0.0.1-beta11") {
-		t.Fatal("a path must not be verified by a policy that does not exist")
-	}
-	// The manifest edge is still what decides, which is the pre-policy state.
-	if !UpgradeEdgeVerified("v0.0.1-beta3", "v0.0.1-beta11") {
-		t.Fatal("the manifest's edges must still decide while no policy exists")
-	}
 }
 
-func TestAnInstalledPolicyDecidesReleasesAndEdges(t *testing.T) {
+func TestAnInstalledPolicyDecidesWhichReleasesAreOffered(t *testing.T) {
 	isolatedCompatCache(t, "v4.0.0")
 	t.Cleanup(func() { SetActiveReleasesPolicy(nil) })
 	installPolicy(t, []byte(policyBody), 7)
@@ -113,38 +103,6 @@ func TestAnInstalledPolicyDecidesReleasesAndEdges(t *testing.T) {
 	if PolicyOffersRelease("v0.0.1-beta12") {
 		t.Fatal("a release the policy does not list must not be offered")
 	}
-	if !PolicyEdgeVerified("v0.0.1-beta3", "v0.0.1-beta11") {
-		t.Fatal("a listed path must verify")
-	}
-	if PolicyEdgeVerified("v0.0.1-beta11", "v0.0.1-beta3") {
-		t.Fatal("the reverse of a listed path is not listed")
-	}
-}
-
-// The precedence that keeps a removed target removed: once a policy is in force,
-// a manifest edge it does not list must NOT verify. If the two lists could each
-// authorise, the one nobody updated would stay a way through.
-func TestAPolicyReplacesTheManifestEdgesRatherThanAddingToThem(t *testing.T) {
-	isolatedCompatCache(t, "v4.0.0")
-	t.Cleanup(func() { SetActiveReleasesPolicy(nil) })
-	SetActiveUpgradeEdges([]UpgradeEdge{{ID: "manifest-only", From: "v0.0.1-beta9", To: "v0.0.1-beta10"}})
-	t.Cleanup(func() { SetActiveUpgradeEdges(nil) })
-
-	if !UpgradeEdgeVerified("v0.0.1-beta9", "v0.0.1-beta10") {
-		t.Fatal("the harness is wrong: the manifest edge should decide before a policy exists")
-	}
-
-	installPolicy(t, []byte(policyBody), 7)
-
-	if UpgradeEdgeVerified("v0.0.1-beta9", "v0.0.1-beta10") {
-		t.Fatal("an edge only the manifest lists survived the policy taking over")
-	}
-	if !UpgradeEdgeVerified("v0.0.1-beta3", "v0.0.1-beta11") {
-		t.Fatal("the policy's own edge should decide")
-	}
-	if HasUpgradeEdgeFrom("v0.0.1-beta9") {
-		t.Fatal("a list question answered from the superseded manifest")
-	}
 }
 
 // LOADING IS NOT DECIDING. A policy can be reported — its revision, its releases,
@@ -157,9 +115,6 @@ func TestALoadedPolicyDecidesNothingUntilItIsSwitchedOn(t *testing.T) {
 	t.Cleanup(func() { SetActiveReleasesPolicy(nil) })
 	previousEnforcement := PolicyEnforcing()
 	t.Cleanup(func() { SetPolicyEnforcement(previousEnforcement) })
-
-	SetActiveUpgradeEdges([]UpgradeEdge{{ID: "manifest", From: "v0.0.1-beta3", To: "v0.0.1-beta11"}})
-	t.Cleanup(func() { SetActiveUpgradeEdges(nil) })
 
 	// Load, without switching enforcement on.
 	SetPolicyEnforcement(false)
@@ -179,12 +134,9 @@ func TestALoadedPolicyDecidesNothingUntilItIsSwitchedOn(t *testing.T) {
 	if policy := ActiveReleasesPolicy(); policy == nil || policy.Revision == 0 {
 		t.Fatal("a loaded policy must be readable")
 	}
-	// Not deciding: nothing it says gates anything, and the manifest still does.
+	// Not deciding: nothing it says gates anything yet.
 	if PolicyInForce() {
 		t.Fatal("a loaded policy must not decide before it is switched on")
-	}
-	if UpgradeEdgeVerified("v0.0.1-beta3", "v0.0.1-beta11") != true {
-		t.Fatal("the manifest's edges should still decide while the policy only observes")
 	}
 
 	// Switched on: now it decides.

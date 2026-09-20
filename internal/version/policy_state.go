@@ -95,22 +95,6 @@ func PolicyOffersRelease(version string) bool {
 	return false
 }
 
-// PolicyEdgeVerified reports whether the policy in force lists a verified path
-// from one release to another. Like PolicyOffersRelease, an absent policy
-// answers false.
-func PolicyEdgeVerified(from, to string) bool {
-	policy := applicablePolicy(Version)
-	if policy == nil {
-		return false
-	}
-	for _, edge := range policy.UpgradeEdges {
-		if edge.From == from && edge.To == to {
-			return true
-		}
-	}
-	return false
-}
-
 // LoadReleasesPolicy verifies, validates and installs a policy document.
 //
 // The order is the point. Verification comes first because a document that has

@@ -479,7 +479,9 @@ export async function upgradePreview(id: number) {
 export type UpgradeComponent = 'panel' | 'core' | 'agent'
 export interface AgentUpgradeTarget {
   version: string
-  edge_verified: boolean
+  // Whether the policy in force offers this release. There used to be an
+  // edge_verified beside it; admission no longer requires a reviewed
+  // from-to edge, so the panel stopped reporting one.
   offered_by_policy: boolean
 }
 export interface UpgradeOption {

@@ -76,7 +76,6 @@ func TestDecide(t *testing.T) {
 			mutate: func(r *Request) {
 				r.Operation = OperationRemoteUpgrade
 				r.Observed.ObservedAt = now.Add(-2 * time.Hour)
-				r.UpgradeEdgeVerified = true
 			},
 			status: StatusUnverified, reason: ReasonObservationStale,
 		},
@@ -93,7 +92,6 @@ func TestDecide(t *testing.T) {
 			mutate: func(r *Request) {
 				r.Operation = OperationRemoteUpgrade
 				r.Observed.Capabilities = []string{"task.execution.v1"}
-				r.UpgradeEdgeVerified = true
 			},
 			status: StatusLimited, reason: ReasonCapabilityMissing,
 		},
@@ -110,9 +108,15 @@ func TestDecide(t *testing.T) {
 			allowed: true, status: StatusVerified, reason: ReasonAllowed,
 		},
 		{
-			name:   "a remote upgrade with no verified edge is refused on the edge, not on evidence",
-			mutate: func(r *Request) { r.Operation = OperationRemoteUpgrade; r.UpgradeEdgeVerified = false },
-			status: StatusLimited, reason: ReasonUpgradeEdgeMissing,
+			// PSP IS THE SOURCE OF TRUTH FOR WHAT IS SUPPORTED, and a peer that is
+			// compatible and advertises the capability is inside that judgement.
+			// A separate review of each from→to pair was a second gate nothing
+			// else in the pipeline could see: an operator read "compatible" on the
+			// row and found the upgrade action disabled, with the only remedy a
+			// document edit nobody had asked for.
+			name:    "a compatible peer is admitted for a remote upgrade",
+			mutate:  func(r *Request) { r.Operation = OperationRemoteUpgrade },
+			allowed: true, status: StatusVerified, reason: ReasonAllowed,
 		},
 		{
 			name: "a known-bad peer version is refused whatever else it reports",
@@ -141,7 +145,6 @@ func TestDecide(t *testing.T) {
 				r.Operation = OperationRemoteUpgrade
 				r.Observed.Capabilities = nil
 				r.Force = true
-				r.UpgradeEdgeVerified = true
 			},
 			status: StatusLimited, reason: ReasonCapabilityMissing,
 		},
@@ -182,12 +185,11 @@ func TestDecide(t *testing.T) {
 // withdrawn capability keeps working.
 func TestDecideReevaluatesRatherThanCaching(t *testing.T) {
 	request := Request{
-		PeerVersion:         "v0.0.1-beta11",
-		Operation:           OperationRemoteUpgrade,
-		Observed:            fresh(1, "task.execution.v1", "task.expiry.v1", "task.agent.upgrade.v1"),
-		Now:                 now,
-		Policy:              policy(),
-		UpgradeEdgeVerified: true,
+		PeerVersion: "v0.0.1-beta11",
+		Operation:   OperationRemoteUpgrade,
+		Observed:    fresh(1, "task.execution.v1", "task.expiry.v1", "task.agent.upgrade.v1"),
+		Now:         now,
+		Policy:      policy(),
 	}
 	if got := Decide(request); !got.Allowed {
 		t.Fatalf("the first evaluation should allow it: %s", got.Detail)
@@ -204,7 +206,7 @@ func TestDecideReevaluatesRatherThanCaching(t *testing.T) {
 func TestReasonCodesAreStableStrings(t *testing.T) {
 	for _, reason := range []Reason{
 		ReasonAllowed, ReasonProtocolIncompatible, ReasonCapabilityMissing,
-		ReasonUnverified, ReasonObservationStale, ReasonUpgradeEdgeMissing, ReasonKnownBad,
+		ReasonUnverified, ReasonObservationStale, ReasonKnownBad,
 	} {
 		if string(reason) == "" || string(reason) == " " {
 			t.Fatalf("reason code %q is not usable by a caller", reason)

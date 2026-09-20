@@ -163,7 +163,6 @@ func (s *Service) Request(ctx context.Context, panelID int64, request Request, k
 	// turns this back on for that one path.
 	compatPolicy := nodecompat.Policy(time.Duration(policy.OfflineReconcileDays) * 24 * time.Hour)
 	admission := nodecompat.Request(agent, compatadmission.OperationRemoteUpgrade, now, compatPolicy)
-	admission.UpgradeEdgeVerified = version.UpgradeEdgeVerified(request.ExpectedVersion, request.Version)
 	if decision := compatadmission.Decide(admission); !decision.Allowed {
 		return nil, false, fmt.Errorf("%w: %s", domain.ErrValidation, nodecompat.Message(agent, decision))
 	}
