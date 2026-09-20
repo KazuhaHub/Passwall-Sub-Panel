@@ -33,6 +33,22 @@ describe('newerNodeRelease', () => {
     expect(newerNodeRelease({ panel_version: 'v1.0.0' }, [])).toBeUndefined()
   })
 
+  // A CHANNEL PROMOTION REFRESHES STATE. IT DOES NOT CREATE AN UPDATE.
+  //
+  // Promoting v2.0.0 from testing to stable republishes the same bytes under the
+  // same version, so a node already running v2.0.0 has nothing to install. This is
+  // an acceptance item in the migration plan — "a same-version channel promotion
+  // only refreshes state and must not manufacture an update-available notice" —
+  // and it is the kind of notice an operator learns to ignore once it is wrong.
+  it('manufactures nothing when the same version was promoted between channels', () => {
+    const promoted = release('v2.0.0', { channel: 'stable' })
+    expect(newerNodeRelease({ panel_version: 'v2.0.0' }, [promoted])).toBeUndefined()
+    // Including for the node whose own channel the promotion concerns.
+    expect(newerNodeRelease({ panel_version: 'v2.0.0', update_channel: 'beta' }, [promoted])).toBeUndefined()
+    // And the promotion does not make an OLDER release look newer either.
+    expect(newerNodeRelease({ panel_version: 'v2.0.0', update_channel: 'beta' }, [promoted, release('v1.9.0')])).toBeUndefined()
+  })
+
   it.each(['v1.0.0', 'v1.0.0 (abc1234)', `v1.0.0 (${'A'.repeat(40)})`])('accepts an official daemon identity: %s', panel_version => {
     const next = release('v1.0.1')
     expect(newerNodeRelease({ panel_version }, [next])).toBe(next)
