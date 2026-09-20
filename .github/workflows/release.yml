@@ -39,8 +39,23 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Release tag, for example release/4.0.0"
-        required: true
+        # BLANK CUTS THE NEXT ONE. The form is the normal release path; naming
+        # the tag by hand is the exception, for a line's first release or for a
+        # tag that already exists. See the `tag` job.
+        description: "Release tag, for example release/4.0.0. Leave blank to cut the next one on the line."
+        required: false
+        type: string
+      line:
+        # A LINE'S FIRST RELEASE IS NAMED, NOT ALLOCATED, and nothing in a
+        # repository knows whether the next release belongs on 4.0 or 4.1 — so
+        # the person releasing names the line. Required only when the tag is
+        # blank; ignored when the tag is given.
+        description: "Release line, MAJOR.MINOR (for example 4.0). Required only when the tag is blank."
+        required: false
+        type: string
+      notes:
+        description: "Release notes, stored on the annotated tag. Defaults to a one-line title."
+        required: false
         type: string
       channel:
         description: "Publication channel. auto reads it from the tag; stable and testing state it."
@@ -71,8 +86,127 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # THE TAG IS CUT HERE, NOT ON SOMEBODY'S LAPTOP.
+  #
+  # The release is one dispatch against the latest tested main commit, and this
+  # job creates the annotated tag once that commit has passed the test suite. A
+  # hand-pushed tag is still accepted (the `push` trigger above), so this adds a
+  # path rather than replacing one — but the hand-pushed path is the exception.
+  # Before this, the tag had to exist first and the run had to be dispatched FROM
+  # it, so a fix to the release path itself cost a PR and a merge before a release
+  # could run at all.
+  tag:
+    name: Cut the release tag
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # NOTHING TO CUT when a tag was pushed (that tag is the trigger) or when the
+    # form named one. The job is the blank-tag path, and only that path.
+    if: github.event_name == 'workflow_dispatch' && inputs.tag == ''
+    permissions:
+      contents: write
+      actions: read
+    outputs:
+      tag: ${{ steps.cut.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v7
+        env:
+          GOTOOLCHAIN: auto
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Refuse a commit the test suite has not passed
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          # ASK ABOUT THE GATE, NOT ABOUT EVERY RUN ON THE COMMIT. Enumerating the
+          # commit's check runs would include this very release run, still in
+          # progress and therefore inconclusive, and the commit would be refused
+          # for its own existence.
+          conclusion=$(gh run list --repo "$GITHUB_REPOSITORY" \
+            --workflow test.yml --commit "$SHA" --limit 1 \
+            --json status,conclusion \
+            --jq '.[] | select(.status == "completed") | .conclusion' | head -n 1)
+          test "$conclusion" = "success" || {
+            echo "the test suite has not succeeded on ${SHA:0:7} (conclusion: ${conclusion:-none})" >&2
+            exit 1
+          }
+
+      - name: Allocate the next number on the line and create the tag
+        id: cut
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.sha }}
+          RELEASE_LINE: ${{ inputs.line }}
+          NOTES: ${{ inputs.notes }}
+        run: |
+          set -euo pipefail
+          line=${RELEASE_LINE:?name the release line, MAJOR.MINOR, when the tag is blank}
+          # THE NUMBER COMES FROM THE PINNED ALLOCATOR, NOT FROM ARITHMETIC HERE.
+          # "An incremental fix takes the fourth segment" and "a number, once
+          # bound to a revision, is never reused" are one rule, and it lives in
+          # Passwall Node's releaseid so that every consumer applies the same one.
+          # `go run` resolves the module at the version go.mod pins, so this is
+          # the allocator this repository was tested against, not today's main.
+          all_tags() { git ls-remote --tags --refs origin | sed 's#.*refs/tags/##'; }
+          tags_on_this_commit() {
+            git ls-remote --tags origin | awk -v sha="$SHA" '$1 == sha { sub("^refs/tags/", "", $2); print $2 }'
+          }
+          note=${NOTES:-Passwall Sub Panel}
+          # ALLOCATE, THEN CONFIRM WITH THE ATOMIC RESULT OF CREATING AN IMMUTABLE
+          # TAG. `git push` refuses to move an existing ref, so losing that race is
+          # how a second run finds out: it re-reads, resumes its own number when the
+          # tag on the revision is its own, and otherwise allocates the one after.
+          # Creating the tag is the only step that can decide a race, so the create
+          # and the decision are the same step.
+          attempt=0
+          tag=
+          while [ "$attempt" -lt 5 ]; do
+            tag=$(go run github.com/KazuhaHub/passwall-node/deployment/cmd/allocate-release-tag \
+              -line "$line" \
+              -existing "$(all_tags | tr '\n' ',')" \
+              -on-commit "$(tags_on_this_commit)")
+            # A REFUSAL PRINTS NOTHING, so emptiness is the refusal. The first
+            # release of a line is NAMED rather than derived — nothing in a
+            # repository knows whether the next release belongs on 4.0 or 4.1 —
+            # and it arrives through the tag input.
+            test -n "$tag" || {
+              echo "the allocator will not put a number on line $line; name the first release of a line in the tag input" >&2
+              exit 1
+            }
+            # ANNOTATED AT CREATION, because the notes are the artefact a reader
+            # opens and the only place a note survives a rerun. Writing it here
+            # also keeps the push atomic: one ref, created once or not at all.
+            git tag -a --cleanup=verbatim "$tag" -m "$note"
+            if git push --quiet origin "refs/tags/$tag" 2>/dev/null; then
+              break
+            fi
+            git tag -d "$tag" >/dev/null
+            attempt=$((attempt + 1))
+            tag=
+          done
+          test -n "$tag" || {
+            echo "could not bind a release tag for ${SHA:0:7} on line $line after 5 attempts" >&2
+            exit 1
+          }
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "Cut the release tag $tag at ${SHA:0:7} on line $line." >> "$GITHUB_STEP_SUMMARY"
+
   setup:
     name: Resolve release identity
+    # THE TAG JOB IS SKIPPED ON THE PATHS THAT DO NOT NEED IT — a pushed tag, or
+    # a form that named one — and a skipped dependency skips its dependents
+    # unless the condition says otherwise, which would have meant no release at
+    # all. Only a tag job that FAILED stops the release.
+    needs: tag
+    if: always() && (needs.tag.result == 'success' || needs.tag.result == 'skipped')
     runs-on: ubuntu-latest
     outputs:
       tag: ${{ steps.identity.outputs.tag }}
@@ -110,15 +244,26 @@ jobs:
         shell: bash
         env:
           REQUESTED_TAG: ${{ inputs.tag }}
+          CUT_TAG: ${{ needs.tag.outputs.tag }}
           EVENT_NAME: ${{ github.event_name }}
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+          # THREE WAYS IN, AND THEY ARE NOT INTERCHANGEABLE. A tag cut by this run
+          # comes first: it is the one this run made and the reason the run exists.
+          # A tag named on the form is next, and a pushed tag last, where the ref
+          # that triggered the run IS the tag.
+          if [ -n "${CUT_TAG}" ]; then
+            tag="$CUT_TAG"
+          elif [ "$EVENT_NAME" = "workflow_dispatch" ]; then
             tag="$REQUESTED_TAG"
           else
             tag="${GITHUB_REF_NAME}"
           fi
+          test -n "$tag" || {
+            echo 'no release tag: name one on the form, or name the line so one can be cut' >&2
+            exit 1
+          }
           # Use the pinned, published Node installer/publisher tag authority, not
           # a second PSP regex or an automatically resolved latest version. It
           # PRINTS THE VERSION, which for the legacy scheme is the tag itself and
@@ -134,10 +279,17 @@ jobs:
             echo 'the release tag produced no version' >&2
             exit 1
           }
-          test "$GITHUB_REF" = "refs/tags/${tag}" || {
-            echo 'select the exact release tag ref for dispatch' >&2
-            exit 1
-          }
+          # A TAG THIS RUN CUT IS NOT IN GITHUB_REF, because the run was
+          # dispatched from a branch rather than from the tag — so the ref check
+          # cannot apply to it, and does not. What replaces it is the check below
+          # and the one the tag job already made: the tag points at this commit,
+          # and the commit's test suite passed.
+          if [ -z "${CUT_TAG}" ]; then
+            test "$GITHUB_REF" = "refs/tags/${tag}" || {
+              echo 'select the exact release tag ref for dispatch' >&2
+              exit 1
+            }
+          fi
           release_sha=$(git rev-parse --verify "refs/tags/${tag}^{commit}")
           test "$release_sha" = "$GITHUB_SHA" || {
             echo 'release tag does not identify this workflow commit' >&2
