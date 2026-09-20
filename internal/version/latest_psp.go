@@ -62,9 +62,10 @@ func LatestPSPRefreshAt() time.Time {
 	return latestPSPLastAt
 }
 
-// releaseTagNamespace is where product-scheme tags live. Named here so the one
-// place that must distinguish the schemes does not spell the prefix inline.
-const releaseTagNamespace = "release/"
+// ProductTagNamespace is where product-scheme tags live. Exported because more
+// than one place has to distinguish the schemes, and each of them spelling the
+// prefix inline is how the two come to disagree about which namespace it is.
+const ProductTagNamespace = "release/"
 
 // IsPrerelease reports whether a PSP version string is a pre-release build
 // (carries a "-beta"/"-rc"/... suffix). Drives the UI channel indicator
@@ -209,7 +210,7 @@ func acceptLatestPSPStable(tagName string, prerelease bool) (string, bool) {
 	if tagName == "" || prerelease {
 		return "", false
 	}
-	if !strings.HasPrefix(tagName, releaseTagNamespace) && IsPrerelease(tagName) {
+	if !strings.HasPrefix(tagName, ProductTagNamespace) && IsPrerelease(tagName) {
 		return "", false
 	}
 	if _, ok := parseSemver(tagName); !ok {

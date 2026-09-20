@@ -20,6 +20,7 @@ import (
 	"github.com/KazuhaHub/passwall-node/deployment"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/safehttp"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/version"
 	"golang.org/x/mod/semver"
 )
 
@@ -253,7 +254,7 @@ func (c *Catalog) fetch(ctx context.Context) (ports.NodeReleaseList, error) {
 		if release == nil || release.Draft || release.PublishedAt == nil || release.PublishedAt.IsZero() {
 			continue
 		}
-		if release.TagName != reviewed.Version || release.Prerelease != strings.Contains(reviewed.Version, "-") ||
+		if release.TagName != reviewed.Version || !releaseChannelAgrees(reviewed.Version, release.Prerelease) ||
 			release.HTMLURL != releaseBase+"tag/"+reviewed.Version {
 			return ports.NodeReleaseList{}, errUnavailable
 		}
@@ -288,6 +289,25 @@ func (c *Catalog) fetch(ctx context.Context) (ports.NodeReleaseList, error) {
 	})
 	result.CheckedAt = c.now().UTC()
 	return result, nil
+}
+
+// releaseChannelAgrees reports whether GitHub's prerelease flag may be taken at
+// face value for this tag.
+//
+// FOR A LEGACY TAG IT MUST MATCH THE TAG TEXT, and that check is load-bearing:
+// an older beta cut before the workflow began setting the flag would arrive with
+// prerelease=false, and a hyphen has always meant a pre-release in that form.
+//
+// FOR A PRODUCT TAG THE FLAG IS THE AUTHORITY, because the tag has no hyphen at
+// all — release/4.0.0 is three integers in a namespace. Requiring agreement there
+// would reject every testing candidate, and it would reject it here, where the
+// failure is the WHOLE catalog rather than one entry: a single misclassified
+// release would empty the list an operator chooses an upgrade from.
+func releaseChannelAgrees(tagName string, prerelease bool) bool {
+	if strings.HasPrefix(tagName, version.ProductTagNamespace) {
+		return true
+	}
+	return prerelease == strings.Contains(tagName, "-")
 }
 
 func (c *Catalog) fetchRelease(ctx context.Context, version string) (*githubRelease, error) {

@@ -881,3 +881,53 @@ func TestCatalogOrdersByPublicationNotByPrereleaseNumber(t *testing.T) {
 		t.Fatalf("catalog order = %v, want newest-published first %v", got, want)
 	}
 }
+
+// The agreement check between GitHub's prerelease flag and the tag text is a
+// LEGACY defence, and it is load-bearing there: an older beta cut before the
+// workflow set the flag arrives with prerelease=false, and a hyphen has always
+// meant a pre-release in that form.
+//
+// It is not a rule about product tags, which have no hyphen at all. Requiring
+// agreement there would reject every testing candidate — and it would do it in
+// the catalog's LOOP, so one misclassified release empties the whole list an
+// operator chooses an upgrade from rather than dropping one row.
+func TestReleaseChannelAgreementIsScopedToTheLegacyForm(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		tag        string
+		prerelease bool
+		want       bool
+		why        string
+	}{
+		{
+			name: "a legacy beta the flag caught", tag: "v0.0.1-beta11", prerelease: true, want: true,
+			why: "flag and tag agree",
+		},
+		{
+			name: "a legacy beta the flag missed", tag: "v0.0.1-beta11", prerelease: false, want: false,
+			why: "the gap this check exists for: published before the workflow set the flag",
+		},
+		{
+			name: "a legacy stable", tag: "v0.0.1", prerelease: false, want: true,
+			why: "no hyphen, no flag",
+		},
+		{
+			name: "a product tag the flag marks testing", tag: "release/4.0.0", prerelease: true, want: true,
+			why: "no hyphen to find, so the flag decides",
+		},
+		{
+			name: "a product tag the flag calls released", tag: "release/4.0.0", prerelease: false, want: true,
+			why: "the flag is the authority for this namespace",
+		},
+		{
+			name: "a tag in neither scheme", tag: "4.0.0-rc.1", prerelease: false, want: false,
+			why: "for an unrecognised form the characters are all there is to go on",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := releaseChannelAgrees(tc.tag, tc.prerelease); got != tc.want {
+				t.Fatalf("releaseChannelAgrees(%q, %v) = %v, want %v — %s", tc.tag, tc.prerelease, got, tc.want, tc.why)
+			}
+		})
+	}
+}
