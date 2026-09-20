@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/ports"
+	versionpkg "github.com/KazuhaHub/passwall-sub-panel/internal/version"
 )
 
 const fixtureVersion = "v0.0.1-beta3"
@@ -35,10 +36,15 @@ type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) { return f(req) }
 
-func fixtureAsset(version, name string) githubAsset {
+// THE ADDRESS CARRIES THE TAG AND THE NAME CARRIES THE VERSION, which is the
+// publisher's own rule and the third place this file had to be told so: the
+// download path was built from the version, which for a product release asks for
+// a release that does not exist under that name — and the catalog, correctly,
+// found no assets and dropped the entry.
+func fixtureAsset(tag, name string) githubAsset {
 	return githubAsset{
 		Name: name, State: "uploaded", Size: 123,
-		BrowserDownloadURL: "https://github.com/KazuhaHub/Passwall-Node/releases/download/" + version + "/" + name,
+		BrowserDownloadURL: "https://github.com/KazuhaHub/Passwall-Node/releases/download/" + tag + "/" + name,
 	}
 }
 
@@ -53,15 +59,46 @@ func fixturePackage(version string, platform ports.NodeReleasePlatform) string {
 
 func fixtureRelease(version string) githubRelease {
 	published := fixtureNow.Add(-time.Hour)
+	// THE TAG IS DERIVED FROM THE VERSION, by the panel's own rule. Setting one to
+	// the other is what this whole migration is about: a product release is
+	// addressed as release/4.0.0 and named 4.0.0, and a fixture that conflated them
+	// would build a release the catalog then correctly refuses.
+	tag, ok := versionpkg.ReleaseTagFor(version)
+	if !ok {
+		panic("fixtureRelease: not a version: " + version)
+	}
 	release := githubRelease{
-		TagName: version, Prerelease: strings.Contains(version, "-"), PublishedAt: &published,
-		HTMLURL: "https://github.com/KazuhaHub/Passwall-Node/releases/tag/" + version,
-		Assets:  []githubAsset{fixtureAsset(version, "SHA256SUMS.txt")},
+		TagName: tag, Prerelease: fixturePrerelease(tag), PublishedAt: &published,
+		HTMLURL: "https://github.com/KazuhaHub/Passwall-Node/releases/tag/" + tag,
+		Assets:  []githubAsset{fixtureAsset(tag, "SHA256SUMS.txt")},
 	}
 	for _, platform := range fixturePlatforms {
-		release.Assets = append(release.Assets, fixtureAsset(version, fixturePackage(version, platform)))
+		release.Assets = append(release.Assets, fixtureAsset(tag, fixturePackage(version, platform)))
 	}
 	return release
+}
+
+// fixturePrerelease states what each fixture release was PUBLISHED as.
+//
+// A LEGACY TAG SPELLS ITS CHANNEL IN ITS TEXT, which is why this used to read the
+// hyphen: `v0.0.1-beta11` has always meant a pre-release. A PRODUCT TAG HAS NO
+// HYPHEN AT ALL, so the same test classified `release/4.0.0` — published as
+// testing, like every Passwall Node release so far — as STABLE, and the catalog
+// then dropped it from a testing caller's list. The channel is publication
+// metadata; a hyphen in a tag is the legacy scheme's way of writing it down, not
+// the rule.
+// KEYED BY TAG, like realPublicationTimes and for the same reason: this is the
+// field the release object carries, and for a product release the tag is not the
+// version. Getting that wrong twice in one file is why both maps say it.
+var fixtureProductPrerelease = map[string]bool{
+	"release/4.0.0": true,
+}
+
+func fixturePrerelease(tag string) bool {
+	if strings.HasPrefix(tag, versionpkg.ProductTagNamespace) {
+		return fixtureProductPrerelease[tag]
+	}
+	return strings.Contains(tag, "-")
 }
 
 // realPublicationTimes are the instants these releases actually went out on
@@ -81,10 +118,17 @@ var realPublicationTimes = map[string]time.Time{
 	"v0.0.1-beta9":  time.Date(2026, 9, 17, 8, 10, 41, 0, time.UTC),
 	"v0.0.1-beta10": time.Date(2026, 9, 18, 9, 37, 2, 0, time.UTC),
 	"v0.0.1-beta11": time.Date(2026, 9, 18, 10, 31, 27, 0, time.UTC),
+	// The two the migration added: the last legacy release, and the first under
+	// the product scheme. KEYED BY TAG, which is what withRealPublicationTime looks
+	// up — the two are one string for a legacy release and are not for a product
+	// one, so `release/4.0.0` is the key and `4.0.0` is not.
+	"v0.0.1-beta12": time.Date(2026, 9, 20, 7, 8, 15, 0, time.UTC),
+	"release/4.0.0": time.Date(2026, 9, 20, 9, 1, 33, 0, time.UTC),
 }
 
-// withRealPublicationTime gives a fixture release its real instant. Versions
-// outside the table keep the shared timestamp.
+// withRealPublicationTime gives a fixture release its real instant, LOOKED UP BY
+// TAG because that is what the release carries. Tags outside the table keep the
+// shared timestamp.
 func withRealPublicationTime(release githubRelease) githubRelease {
 	if published, ok := realPublicationTimes[release.TagName]; ok {
 		release.PublishedAt = &published
@@ -228,7 +272,7 @@ func TestNewUsesOnlyReviewedMajorAndDoesNotFetch(t *testing.T) {
 			for i, reviewed := range catalog.reviewed {
 				versions[i] = reviewed.Version
 			}
-			if !reflect.DeepEqual(versions, []string{fixtureVersion, "v0.0.1-beta4", "v0.0.1-beta6", "v0.0.1-beta7", "v0.0.1-beta8", "v0.0.1-beta9", "v0.0.1-beta10", "v0.0.1-beta11"}) {
+			if !reflect.DeepEqual(versions, []string{fixtureVersion, "v0.0.1-beta4", "v0.0.1-beta6", "v0.0.1-beta7", "v0.0.1-beta8", "v0.0.1-beta9", "v0.0.1-beta10", "v0.0.1-beta11", "v0.0.1-beta12", "4.0.0"}) {
 				t.Fatalf("unexpected current registry: %+v", catalog.reviewed)
 			}
 			continue
@@ -257,8 +301,10 @@ var (
 	reviewedVersions = []string{
 		fixtureVersion, "v0.0.1-beta4", "v0.0.1-beta6", "v0.0.1-beta7",
 		"v0.0.1-beta8", "v0.0.1-beta9", "v0.0.1-beta10", "v0.0.1-beta11",
+		"v0.0.1-beta12", "4.0.0",
 	}
 	reviewedNewestPublishedFirst = []string{
+		"4.0.0", "v0.0.1-beta12",
 		"v0.0.1-beta11", "v0.0.1-beta10", "v0.0.1-beta9", "v0.0.1-beta8",
 		"v0.0.1-beta7", "v0.0.1-beta6", "v0.0.1-beta4", fixtureVersion,
 	}
@@ -268,8 +314,14 @@ func TestCatalogFullReviewedRegistryRetainsReviewedReleasesAndListsNewestFirst(t
 	var requested []string
 	catalog, err := New(Options{
 		HTTPClient: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
-			version, ok := strings.CutPrefix(req.URL.String(), "https://api.github.com/repos/KazuhaHub/Passwall-Node/releases/tags/")
-			if !ok || !slices.Contains(reviewedVersions, version) {
+			tag, ok := strings.CutPrefix(req.URL.String(), "https://api.github.com/repos/KazuhaHub/Passwall-Node/releases/tags/")
+			// THE URL CARRIES THE TAG AND THE REGISTRY HOLDS VERSIONS. The two are
+			// one string in the legacy scheme, which is why this compared them
+			// directly; a product release is addressed as release/4.0.0 and named
+			// 4.0.0, so the fixture makes the same mapping the catalog does — by
+			// asking the same function rather than by restating the rule.
+			version, identified := versionpkg.VersionOfReleaseTag(tag)
+			if !ok || !identified || !slices.Contains(reviewedVersions, version) {
 				t.Fatalf("registry requested an unreviewed endpoint: %s", req.URL)
 			}
 			requested = append(requested, version)
@@ -286,13 +338,25 @@ func TestCatalogFullReviewedRegistryRetainsReviewedReleasesAndListsNewestFirst(t
 	}
 	for i, version := range reviewedNewestPublishedFirst {
 		entry := list.Releases[i]
-		// A LEGACY RELEASE HAS NO PRODUCT VERSION, and the tag is its version.
-		// Stating that explicitly is what lets a consumer tell the two schemes
-		// apart without inferring anything from the characters in a string.
-		if entry.Scheme != "legacy" || entry.ReleaseTag != version || entry.ProductVersion != "" {
+		// THE IDENTITY SPLIT IS ASSERTED PER SCHEME, because the two schemes answer
+		// it differently: a legacy release has NO product version and its tag is its
+		// version, while a product release has one and is addressed under the
+		// namespace. Asserting the legacy shape for every entry made this loop wrong
+		// the moment a product release entered the registry — which is the point of
+		// the field being explicit rather than inferred from the string.
+		wantTag := version
+		if entry.Scheme == "product" {
+			wantTag = versionpkg.ProductTagNamespace + version
+			if entry.ProductVersion != version {
+				t.Fatalf("product identity split wrong: scheme=%q tag=%q product_version=%q", entry.Scheme, entry.ReleaseTag, entry.ProductVersion)
+			}
+		} else if entry.Scheme != "legacy" || entry.ProductVersion != "" {
 			t.Fatalf("legacy identity split wrong: scheme=%q tag=%q product_version=%q", entry.Scheme, entry.ReleaseTag, entry.ProductVersion)
 		}
-		if entry.Version != version || entry.Channel != "testing" || entry.ReleaseURL != "https://github.com/KazuhaHub/Passwall-Node/releases/tag/"+version ||
+		if entry.ReleaseTag != wantTag {
+			t.Fatalf("release %q is addressed as %q, want %q", version, entry.ReleaseTag, wantTag)
+		}
+		if entry.Version != version || entry.Channel != "testing" || entry.ReleaseURL != "https://github.com/KazuhaHub/Passwall-Node/releases/tag/"+wantTag ||
 			!reflect.DeepEqual(entry.Methods, []string{"linux", "docker", "manual"}) || !reflect.DeepEqual(entry.Platforms, fixturePlatforms) {
 			t.Fatalf("full registry did not retain exact reviewed installation availability: %+v", entry)
 		}
