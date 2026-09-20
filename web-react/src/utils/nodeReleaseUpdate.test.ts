@@ -53,15 +53,35 @@ describe('newerNodeRelease', () => {
     expect(newerNodeRelease({ panel_version }, [release('v2.0.0')])).toBeUndefined()
   })
 
-  it('strictly follows the saved stable or beta channel, including legacy omission', () => {
+  // THE SAVED CHANNEL IS A FLOOR, NOT A FILTER, and this test used to assert the
+  // opposite: a beta node with only a stable release ahead of it was told there
+  // was nothing newer. The migration plan states the rule — "stable users see
+  // stable targets only; testing users MAY see released and testing targets" —
+  // and the case it exists for is a beta line that has fallen behind: a node on
+  // 4.8.0 with 5.0.0-beta.1 and 4.9.0 published was offered only the beta, because
+  // the newer STABLE release was filtered out by the channel it was saved on.
+  //
+  // WHAT IT MUST NOT DO IS DOWNGRADE. A stable target older than what the node
+  // runs is not offered, which the strictly-newer comparison enforces — so
+  // "may see released targets" cannot become "was moved back onto the stable
+  // line".
+  it('treats the saved stable or beta channel as a floor, not a filter', () => {
     const stable = release('v1.0.0')
     const beta = release('v2.0.0-beta.1')
     const catalog = [beta, stable]
     expect(newerNodeRelease({ panel_version: 'v0.0.1' }, catalog)).toBe(stable)
     expect(newerNodeRelease({ panel_version: 'v0.0.1', update_channel: 'stable' }, catalog)).toBe(stable)
     expect(newerNodeRelease({ panel_version: 'v0.0.1', update_channel: 'beta' }, catalog)).toBe(beta)
+    // A stable node is not offered a testing target.
     expect(newerNodeRelease({ panel_version: 'v0.0.1', update_channel: 'stable' }, [beta])).toBeUndefined()
-    expect(newerNodeRelease({ panel_version: 'v0.0.1', update_channel: 'beta' }, [stable])).toBeUndefined()
+    // A beta node IS offered a released one, and the higher version wins whichever
+    // channel published it.
+    expect(newerNodeRelease({ panel_version: 'v0.0.1', update_channel: 'beta' }, [stable])).toBe(stable)
+    expect(newerNodeRelease({ panel_version: 'v1.0.0', update_channel: 'beta' }, [release('v1.1.0-beta.1'), release('v1.2.0')])?.version).toBe('v1.2.0')
+    // And nothing older is offered, so the wider set cannot downgrade.
+    expect(newerNodeRelease({ panel_version: 'v1.2.0', update_channel: 'beta' }, [stable])).toBeUndefined()
+    expect(newerNodeRelease({ panel_version: 'v1.0.0', update_channel: 'beta' }, [release('v0.9.0'), release('v0.8.0')])).toBeUndefined()
+    // An unrecognised saved channel is still refused rather than widened.
     expect(newerNodeRelease({ panel_version: 'v0.0.1', update_channel: 'testing' as Server['update_channel'] }, catalog)).toBeUndefined()
   })
 

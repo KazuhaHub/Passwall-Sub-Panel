@@ -412,3 +412,27 @@ describe('a release whose tag the panel states', () => {
     expect(screen.queryByRole('link')).toBeNull()
   })
 })
+
+// A BETA-PREFERENCE NODE CAN STILL REACH A RELEASED TARGET, and it can here
+// WITHOUT this selector changing.
+//
+// The migration plan says a testing user may be offered released targets as well
+// as testing ones, which the NUDGE honours — it no longer filters by the saved
+// channel. This surface needs no such change: the channel is the operator's
+// explicit choice, and both options are reachable from it. Widening the
+// "testing" toggle to list released releases too would make its label say one
+// thing and its list another, which is the opposite of the problem being solved.
+describe('a node saved on the testing channel', () => {
+  it('opens on testing and can still pick a released target by switching', async () => {
+    reads([testing, stable])
+    mount(<Controlled initialChannel="testing" />)
+    await waitFor(() => expect(screen.queryByRole('status')).toBeNull())
+    await chooseVersion(testing.version)
+    expect(selected()).toBe(testing.version)
+    // The released target is reachable from the same surface.
+    fireEvent.mouseDown(screen.getByRole('combobox', { name: 'admin:servers.native.release_channel' }))
+    fireEvent.click(await screen.findByRole('option', { name: 'admin:servers.native.release_stable' }))
+    await chooseVersion(stable.version)
+    expect(selected()).toBe(stable.version)
+  })
+})

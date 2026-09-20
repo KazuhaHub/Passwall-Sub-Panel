@@ -1,6 +1,6 @@
 import { prerelease } from 'semver'
 import { canonicalReleaseVersion, compareLegacyTag, releaseTag } from './productVersion'
-import type { NodeRelease } from '@/api/nodeReleases'
+import type { NodeRelease, NodeReleaseChannel } from '@/api/nodeReleases'
 import type { Server } from '@/api/servers'
 
 /**
@@ -52,12 +52,21 @@ export function newerNodeRelease(
   const current = canonicalVersion(identity[1])
   if (!current) return undefined
   if (server.update_channel !== undefined && server.update_channel !== 'stable' && server.update_channel !== 'beta') return undefined
-  const channel = server.update_channel === 'beta' ? 'testing' : 'stable'
+  // THE SAVED CHANNEL IS A FLOOR ON HOW ADVENTUROUS THE NODE MAY BE, NOT A
+  // FILTER ON WHAT IT MAY BE OFFERED. A stable node takes released targets only; a
+  // testing node takes released OR testing ones. Making the beta channel
+  // testing-only hides a newer RELEASED build from every node on the beta line —
+  // a node on 4.8.0 with 5.0.0-beta.1 and 4.9.0 published was offered only the
+  // beta — and the migration plan states the rule the other way round.
+  //
+  // IT CANNOT BECOME A DOWNGRADE: the strictly-newer comparison below still
+  // applies, so a released target older than the running version is not offered.
+  const channels: NodeReleaseChannel[] = server.update_channel === 'beta' ? ['stable', 'testing'] : ['stable']
 
   return releases.filter(release => {
     if (!release) return false
     const version = canonicalVersion(release.version)
-    if (!version || release.channel !== channel || !channelAgrees(version, channel)) return false
+    if (!version || !channels.includes(release.channel) || !channelAgrees(version, release.channel)) return false
     // THE RELEASE PAGE IS ADDRESSED BY THE TAG. A product release lives at
     // `tag/release/4.0.0` while its version is `4.0.0`, so rebuilding the URL
     // from the version asks for a page that does not exist and drops the
