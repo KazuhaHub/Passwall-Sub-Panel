@@ -2517,7 +2517,8 @@
       "select_core_message": "为 {{name}} 选择经过审计的内核与精确版本。Node 会先校验来源、SHA-256 与现有配置，再原子切换；启动失败自动回滚。",
       "restricted_core_title": "此版本会缩窄 REALITY 客户端兼容范围",
       "restricted_core_message": "Xray {{version}}：{{summary}} 选择后 sing-box REALITY 节点会被订阅输出排除；Mihomo 会固定 chrome 并开启 ML-KEM。是否接受这个兼容范围？",
-      "restricted_core_confirm": "接受并选择"
+      "restricted_core_confirm": "接受并选择",
+      "upgrade_target_unpinnable": "注意：3X-UI 的升级接口不接受版本参数，它会拉取当时的最新版。上面的目标版本是刚读到的值，不是面板会遵守的承诺。"
     }
   },
   "diagnostics": {

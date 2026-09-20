@@ -2519,7 +2519,8 @@
       "select_core_message": "Select an audited core engine and exact release for {{name}}. The Node verifies source, SHA-256, and the current config before an atomic switch, and rolls back on startup failure.",
       "restricted_core_title": "This release narrows REALITY client compatibility",
       "restricted_core_message": "Xray {{version}}: {{summary}} sing-box REALITY nodes will be omitted from subscriptions; Mihomo is pinned to chrome with ML-KEM enabled. Accept this compatibility scope?",
-      "restricted_core_confirm": "Accept and select"
+      "restricted_core_confirm": "Accept and select",
+      "upgrade_target_unpinnable": "Note: the 3X-UI upgrade endpoint takes no version argument — it fetches whatever is latest when it runs. The target above is what PSP read a moment ago, not a version the panel will be held to."
     }
   },
   "diagnostics": {

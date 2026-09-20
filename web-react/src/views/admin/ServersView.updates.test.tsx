@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Server } from '@/api/servers'
 import type { NodeReleaseCatalog } from '@/api/nodeReleases'
 import { api, installReads, list, mount } from '@/test/adminSaveHarness'
+import ConfirmHost from '@/components/ConfirmHost'
 import { useAuthStore } from '@/stores/auth'
 import english from '@/locales/en-US/admin.json'
 import ServersView from './ServersView'
@@ -170,5 +171,60 @@ describe('Server update hints and paired tray icons', () => {
     expect(within(await rowFor(current.name)).queryByText('admin:servers.update_available')).toBeNull()
     expect(api.get.mock.calls.filter(([url]) => url === '/admin/servers/sui-release')).toHaveLength(1)
     expect(upgradeWrites()).toHaveLength(0)
+  })
+})
+
+// The 3X-UI upgrade endpoint takes no version argument, and the API says so with
+// target_pinnable=false. The dialog has to repeat it, because a confirm that
+// shows a target version and nothing else reads as a promise the API explicitly
+// denies — and an admin who believes the promise stops watching the outcome.
+describe('the 3X-UI upgrade confirm states what the target is not', () => {
+  it('warns that the target cannot be pinned when the API reports it', async () => {
+    installReads({
+      '/admin/servers': list([xui]),
+      '/admin/servers/9/upgrade-preview': {
+        update_available: true,
+        current_version: '3.4.2',
+        target_version: 'v3.7.0',
+        compat_status: 'supported',
+        can_force: false,
+        target_pinnable: false,
+        upgrade_mode: 'latest_only',
+      },
+    })
+    mount(<><ConfirmHost /><ServersView /></>)
+
+    const row = await rowFor(xui.name)
+    fireEvent.click(within(row).getByRole('button', { name: 'admin:servers.action.more' }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'admin:servers.action.upgrade_panel' }))
+
+    // The dialog body is one joined string whose lines are i18n KEYS in this
+    // harness, so a substring regex is what matches a single line.
+    expect(await screen.findByText(/admin:servers\.confirm\.upgrade_target_unpinnable/)).toBeTruthy()
+  })
+
+  it('does not add the warning when the API says the target is pinnable', async () => {
+    installReads({
+      '/admin/servers': list([xui]),
+      '/admin/servers/9/upgrade-preview': {
+        update_available: true,
+        current_version: '3.4.2',
+        target_version: 'v3.7.0',
+        compat_status: 'supported',
+        target_pinnable: true,
+      },
+    })
+    mount(<><ConfirmHost /><ServersView /></>)
+
+    const row = await rowFor(xui.name)
+    fireEvent.click(within(row).getByRole('button', { name: 'admin:servers.action.more' }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'admin:servers.action.upgrade_panel' }))
+
+    // The target line is present, so the dialog did open; the caveat is absent
+    // because nothing said the target was unpinnable.
+    // The dialog body is one joined string whose lines are i18n KEYS in this
+    // harness, so a substring regex is what matches a single line.
+    expect(await screen.findByText(/admin:servers\.confirm\.upgrade_target(?![_])/)).toBeTruthy()
+    expect(screen.queryByText(/admin:servers\.confirm\.upgrade_target_unpinnable/)).toBeNull()
   })
 })

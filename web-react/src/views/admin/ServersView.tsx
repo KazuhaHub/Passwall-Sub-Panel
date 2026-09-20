@@ -432,6 +432,14 @@ export default function ServersView() {
             defaultValue: '目标版本：{{target}}',
           }))
         }
+        if (preview?.target_pinnable === false) {
+          // The response says the target cannot be pinned, so the dialog must not
+          // present it as a version the panel will be held to. Leaving it out
+          // would make the confirm read as a promise the API explicitly denies.
+          lines.push(t('admin:servers.confirm.upgrade_target_unpinnable', {
+            defaultValue: '注意：3X-UI 的升级接口不接受版本参数，它会拉取当时的最新版。上面的目标版本是刚读到的值，不是面板会遵守的承诺。',
+          }))
+        }
         if (advisory?.text) {
           lines.push('⚠️ ' + advisory.text)
         }

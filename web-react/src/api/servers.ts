@@ -398,6 +398,11 @@ export interface UpgradePanelResult {
    *  {force: true}. False / absent means the rejection is structural
    *  (e.g. panel unreachable) and force won't help. */
   can_force?: boolean
+  // Absent on a panel whose upgrade cannot name a target; false when the API
+  // says so explicitly. The accepted response repeats it because "accepted" is
+  // not the same as "pinned".
+  target_pinnable?: boolean
+  upgrade_mode?: 'latest_only' | string
   error?: string
 }
 
@@ -443,6 +448,12 @@ export interface UpgradePreviewResult {
   psp_max_xui?: string
   can_force?: boolean
   advisory?: XUIAdvisory
+  // target_pinnable / upgrade_mode come from the panel's own report that
+  // 3X-UI's /updatePanel takes no version argument: the target shown is what PSP
+  // read from upstream a moment ago, not something the panel will be held to.
+  // The dialog says so rather than presenting a version as a promise.
+  target_pinnable?: boolean
+  upgrade_mode?: 'latest_only' | string
 }
 
 // upgradePreview fetches the target version + tested-range check + advisory for
