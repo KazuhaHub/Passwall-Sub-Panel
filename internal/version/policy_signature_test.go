@@ -144,7 +144,7 @@ func TestAnApprovalInjectedInTransitBreaksTheSignature(t *testing.T) {
 	if err := json.Unmarshal(doc, &parsed); err != nil {
 		t.Fatal(err)
 	}
-	parsed.Approves = []policyApprovedKey{{
+	parsed.Approves = []PolicyApprovedKey{{
 		KeyID:     "attacker",
 		PublicKey: base64.StdEncoding.EncodeToString(approvedPub),
 	}}
@@ -169,7 +169,7 @@ func TestAKeyRotatedInByATrustedKeyIsAccepted(t *testing.T) {
 	id, pub, priv := signingKey(t)
 	nextID, nextPub, nextPriv := signingKey(t)
 
-	rotation, err := SignReleasesPolicy([]byte(policyForSigning), id, priv, []policyApprovedKey{{
+	rotation, err := SignReleasesPolicy([]byte(policyForSigning), id, priv, []PolicyApprovedKey{{
 		KeyID:     nextID,
 		PublicKey: base64.StdEncoding.EncodeToString(nextPub),
 	}})

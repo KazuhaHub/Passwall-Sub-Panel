@@ -83,10 +83,16 @@ type policySigningDoc struct {
 	// the document alone would leave this list editable in transit, and anyone
 	// who could edit it could add a key of their own to a rotation nobody
 	// performed.
-	Approves []policyApprovedKey `json:"approves,omitempty"`
+	Approves []PolicyApprovedKey `json:"approves,omitempty"`
 }
 
-type policyApprovedKey struct {
+// PolicyApprovedKey is a key a trusted signer introduces for future policies.
+//
+// EXPORTED BECAUSE THE SIGNING FUNCTION TAKES IT. It was unexported while
+// SignReleasesPolicy named it, which made that function unusable from any other
+// package — a signature that lists a type a caller cannot construct is not a
+// public API, it is a private one wearing an exported name.
+type PolicyApprovedKey struct {
 	KeyID     string `json:"key_id"`
 	PublicKey string `json:"public_key"`
 }
@@ -171,7 +177,7 @@ func (r *PolicyTrustRoot) lookup(keyID string) (ed25519.PublicKey, bool) {
 
 // SignReleasesPolicy produces the detached signature document for a policy. It
 // exists for the publishing tool and the tests; the panel only ever verifies.
-func SignReleasesPolicy(raw []byte, keyID string, privateKey ed25519.PrivateKey, approves []policyApprovedKey) ([]byte, error) {
+func SignReleasesPolicy(raw []byte, keyID string, privateKey ed25519.PrivateKey, approves []PolicyApprovedKey) ([]byte, error) {
 	if keyID == "" || len(privateKey) != ed25519.PrivateKeySize {
 		return nil, errors.New("release policy: signing needs a key id and an ed25519 private key")
 	}
@@ -197,9 +203,9 @@ func SignReleasesPolicy(raw []byte, keyID string, privateKey ed25519.PrivateKey,
 // both in one message is what ties the authorisation to the key that granted it.
 //
 // The separator is a NUL, which cannot appear in the document: it is JSON text.
-func policySigningMessage(raw []byte, approves []policyApprovedKey) ([]byte, error) {
+func policySigningMessage(raw []byte, approves []PolicyApprovedKey) ([]byte, error) {
 	if approves == nil {
-		approves = []policyApprovedKey{}
+		approves = []PolicyApprovedKey{}
 	}
 	encoded, err := json.Marshal(approves)
 	if err != nil {
