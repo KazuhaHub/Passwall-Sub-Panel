@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/safehttp"
@@ -13,12 +14,11 @@ import (
 
 // Fetching a release policy.
 //
-// THIS IS BUILT AND NOT WIRED. Nothing calls RefreshReleasesPolicy, so installing
-// the trust root and this fetch path together change no decision. That is
-// deliberate and it is what the plan allows — code may be merged switched off —
-// and the switch is the instance upgrade API's admission, which waits for the
-// evidence in S05. Building it now means the fetch is REVIEWED on its own rather
-// than as part of the change that turns it on.
+// IT RUNS ONLY WHEN A SOURCE IS CONFIGURED. Neither the source nor the keys exist
+// in a default deployment, so nothing is fetched and no admission decision
+// changes; a deployment that sets them has opted in. The plan sequences enabling
+// the policy path after S05's evidence, and `policy_enforce` is what actually
+// switches admission — loading a policy reports it and gates nothing.
 
 // PolicyDocumentAsset and PolicySignatureAsset are the two files a policy
 // publication consists of. Two files, not one: the signature is detached so the
@@ -52,6 +52,11 @@ var policyHTTPClient = safehttp.NewClient(httpFetchTimeout)
 // is running on. That is the opposite of what a naive "clear and reload" would
 // do, and it is the property a policy fetch most needs.
 func RefreshReleasesPolicy(ctx context.Context, baseURL string, now time.Time) error {
+	// ONE REFRESH AT A TIME. Two callers fetching the same publication would
+	// install it twice, and the second install would compare an equal revision
+	// and report a state that looks like a refusal for no stated reason.
+	policyRefreshMu.Lock()
+	defer policyRefreshMu.Unlock()
 	if baseURL == "" {
 		return errors.New("release policy: no source configured")
 	}
@@ -105,4 +110,59 @@ func fetchPolicyAsset(ctx context.Context, baseURL, asset string) ([]byte, error
 		return nil, fmt.Errorf("release policy: %s is larger than %d bytes", asset, maxPolicyDocumentBytes)
 	}
 	return body, nil
+}
+
+// Background refresh.
+//
+// A policy loaded at boot is only current until the next publication. The plan's
+// parameters are 30 minutes with jitter, and a refresh that cannot overlap itself
+// — a manual refresh and the loop must not both be fetching, because the second
+// would install a document the first already installed and the revision check
+// would report a confusing "equal revision" for no reason.
+
+// policyRefreshMu serialises refreshes. A fetch is cheap and rare, so the cost of
+// holding the lock across it is a blocked second caller, not a stalled panel —
+// and the alternative is two installs racing on the same global state.
+var policyRefreshMu sync.Mutex
+
+// policyMaxBackoff bounds the failure backoff. A source that is down should be
+// retried less often, not never, and not at a rate that turns an outage into
+// load.
+const policyMaxBackoff = 4 * time.Hour
+
+// RunPolicyRefresh refreshes the policy until ctx is done.
+//
+// jitterFn is a parameter rather than a call to math/rand inside, so a test can
+// pin the schedule. Production passes a jittered interval.
+//
+// A failure does NOT stop the loop: the panel keeps whatever policy it has, and
+// the backoff grows so a source that stays down is not hammered.
+func RunPolicyRefresh(ctx context.Context, source string, interval time.Duration, jitterFn func(time.Duration) time.Duration, now func() time.Time) {
+	if source == "" || interval <= 0 {
+		return
+	}
+	if jitterFn == nil {
+		jitterFn = func(d time.Duration) time.Duration { return d }
+	}
+	if now == nil {
+		now = time.Now
+	}
+	backoff := interval
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(jitterFn(backoff)):
+		}
+		// The clock is read here rather than captured, so a policy whose window
+		// closed while the panel was idle is refused on the next attempt.
+		if err := RefreshReleasesPolicy(ctx, source, now().UTC()); err != nil {
+			backoff *= 2
+			if backoff > policyMaxBackoff {
+				backoff = policyMaxBackoff
+			}
+			continue
+		}
+		backoff = interval
+	}
 }

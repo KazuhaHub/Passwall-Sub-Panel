@@ -213,3 +213,81 @@ func TestAnOversizedPolicyIsRefused(t *testing.T) {
 		t.Fatalf("error = %v, want an oversized refusal", err)
 	}
 }
+
+// The backoff is tested through the SCHEDULE the loop asks for, not by timing it:
+// a jitterFn that records its arguments and returns zero makes the retry cadence
+// a value rather than a race.
+func TestTheRefreshLoopBacksOffOnFailureAndRecovers(t *testing.T) {
+	collect := func() (*[]time.Duration, func(time.Duration) time.Duration) {
+		delays := &[]time.Duration{}
+		return delays, func(d time.Duration) time.Duration {
+			*delays = append(*delays, d)
+			return 0 // fire immediately; the schedule is what is under test
+		}
+	}
+
+	waitFor := func(t *testing.T, delays *[]time.Duration, n int) {
+		t.Helper()
+		deadline := time.Now().Add(2 * time.Second)
+		for time.Now().Before(deadline) {
+			if len(*delays) >= n {
+				return
+			}
+			time.Sleep(time.Millisecond)
+		}
+		t.Fatalf("only %d attempts in two seconds", len(*delays))
+	}
+
+	t.Run("a failing source is retried further apart", func(t *testing.T) {
+		installTestTrustRoot(t)
+		baseURL := withTestServer(t, func(w http.ResponseWriter, _ *http.Request) { http.NotFound(w, nil) })
+		delays, jitter := collect()
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		interval := 10 * time.Millisecond
+		go RunPolicyRefresh(ctx, baseURL, interval, jitter, nil)
+
+		waitFor(t, delays, 4)
+		cancel()
+		got := append([]time.Duration(nil), (*delays)[:4]...)
+		want := []time.Duration{interval, 2 * interval, 4 * interval, 8 * interval}
+		for i := range want {
+			if got[i] != want[i] {
+				t.Fatalf("delays = %v, want %v", got, want)
+			}
+		}
+	})
+
+	t.Run("a working source keeps the interval", func(t *testing.T) {
+		document := policyDocument(time.Now().Add(24 * time.Hour))
+		_, _, priv := installTestTrustRoot(t)
+		handler, err := servePolicy(document, priv)
+		if err != nil {
+			t.Fatal(err)
+		}
+		baseURL := withTestServer(t, handler)
+		delays, jitter := collect()
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		interval := 5 * time.Millisecond
+		go RunPolicyRefresh(ctx, baseURL, interval, jitter, nil)
+
+		waitFor(t, delays, 3)
+		cancel()
+		for i, delay := range (*delays)[:3] {
+			if delay != interval {
+				t.Fatalf("attempt %d waited %v, want %v — a success must not back off", i, delay, interval)
+			}
+		}
+	})
+
+	t.Run("no source means no loop", func(t *testing.T) {
+		delays, jitter := collect()
+		RunPolicyRefresh(context.Background(), "", time.Millisecond, jitter, nil)
+		if len(*delays) != 0 {
+			t.Fatalf("a loop with no source asked to wait %v", *delays)
+		}
+	})
+}

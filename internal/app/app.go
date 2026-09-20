@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/rand"
 	"net"
 	"net/http"
 	"sync"
@@ -778,6 +779,15 @@ func (a *App) Run() error {
 	safego.GoTracked(&a.bgWG, "reconcile-loop", func() { a.runReconcileLoop(bgCtx) })
 	safego.GoTracked(&a.bgWG, "health-loop", func() { a.runHealthLoop(bgCtx) })
 	safego.GoTracked(&a.bgWG, "cert-renewal-loop", func() { a.runCertRenewalLoop(bgCtx) })
+	// The policy refresh runs ONLY when a source is configured, and it is the one
+	// worker whose absence is a normal state rather than a degradation: a default
+	// deployment has no source, keeps whatever policy it loaded at boot (none),
+	// and is not worse off for the loop not running.
+	if a.cfg.PolicySourceURL != "" {
+		safego.GoTracked(&a.bgWG, "policy-refresh", func() {
+			version.RunPolicyRefresh(bgCtx, a.cfg.PolicySourceURL, policyRefreshInterval, policyRefreshJitter, nil)
+		})
+	}
 
 	return a.server.Serve(ln)
 }
@@ -1095,6 +1105,18 @@ func (a *App) runGeoUpdateLoop(ctx context.Context) {
 // The heavy ACME work runs in the sync-task processor; this loop only scans +
 // enqueues. Interval (and the renew-before-days threshold) are re-read from
 // settings each cycle, so cadence changes take effect without a restart.
+// policyRefreshInterval is the plan's initial value. It is not a setting: nothing
+// reads a policy faster than it can be published, and a knob nobody turns is a
+// knob nobody can reason about.
+const policyRefreshInterval = 30 * time.Minute
+
+// policyRefreshJitter spreads refreshes over ±10% of the interval, so a fleet of
+// panels configured from one document does not fetch it in lockstep.
+func policyRefreshJitter(d time.Duration) time.Duration {
+	spread := float64(d) * 0.1
+	return d - time.Duration(spread) + time.Duration(rand.Float64()*2*spread)
+}
+
 func (a *App) runCertRenewalLoop(ctx context.Context) {
 	if a.cert == nil {
 		return
