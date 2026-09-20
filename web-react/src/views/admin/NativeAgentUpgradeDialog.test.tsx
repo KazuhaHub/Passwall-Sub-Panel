@@ -5,11 +5,12 @@ import { beforeEach, expect, it } from 'vitest'
 import { api, installReads, mount } from '@/test/adminSaveHarness'
 import { NativeAgentUpgradeDialog } from './NativeAgentUpgradeDialog'
 import type { NativeAgentUpgrade, Server } from '@/api/servers'
+import { releaseTag } from '@/utils/productVersion'
 
 const server: Server = { id: 7, name: 'native', panel_type: 'psp', url: 'psp://agt_7', panel_version: '4.0.1 (abcdef0)', capabilities: [], auth_method: '', has_api_token: false, has_password: false, insecure_https: false }
 const queued: NativeAgentUpgrade = { task_id: 'upgrade-test', agent_id: 'agt_7', version: '4.0.2', expected_version: '4.0.1', status: 'queued', upgrade_state: 'queued', not_after_ms: 10000, dispatch_closed: false }
 const catalog = { releases: [{ version: queued.version, channel: 'testing', published_at: '2026-09-12T12:00:00Z',
-  release_url: `https://github.com/KazuhaHub/Passwall-Node/releases/tag/${queued.version}`, notes: 'Reviewed release fixture',
+  release_url: `https://github.com/KazuhaHub/Passwall-Node/releases/tag/${releaseTag(queued.version)}`, notes: 'Reviewed release fixture',
   methods: ['linux'], platforms: [{ os: 'linux', arch: 'amd64' }, { os: 'linux', arch: 'arm64' }] }], checked_at: '' }
 beforeEach(() => installReads({ '/admin/servers/node-releases': catalog,
   '/admin/servers/7/node-agent-upgrades/upgrade-test': queued }))
@@ -115,9 +116,9 @@ it('uses the saved beta preference but still requires an exact reviewed version 
 // in force does not offer is not put in front of anyone.
 it('offers the targets the instance offers, and no others', async () => {
   const further = { ...catalog.releases[0], version: '4.0.6',
-    release_url: 'https://github.com/KazuhaHub/Passwall-Node/releases/tag/4.0.6' }
+    release_url: `https://github.com/KazuhaHub/Passwall-Node/releases/tag/${releaseTag('4.0.6')}` }
   const unlisted = { ...catalog.releases[0], version: '4.0.4',
-    release_url: 'https://github.com/KazuhaHub/Passwall-Node/releases/tag/4.0.4' }
+    release_url: `https://github.com/KazuhaHub/Passwall-Node/releases/tag/${releaseTag('4.0.4')}` }
   installReads({
     '/admin/servers/node-releases': { ...catalog, releases: [catalog.releases[0], further, unlisted] },
     '/admin/servers/7/node-agent-upgrades/upgrade-test': queued,
@@ -147,7 +148,7 @@ it('offers the targets the instance offers, and no others', async () => {
 // "strictly newer" filter rather than emptying the list.
 it('falls back to offering what is newer when the instance cannot answer', async () => {
   const further = { ...catalog.releases[0], version: '4.0.6',
-    release_url: 'https://github.com/KazuhaHub/Passwall-Node/releases/tag/4.0.6' }
+    release_url: `https://github.com/KazuhaHub/Passwall-Node/releases/tag/${releaseTag('4.0.6')}` }
   installReads({
     '/admin/servers/node-releases': { ...catalog, releases: [catalog.releases[0], further] },
     '/admin/servers/7/node-agent-upgrades/upgrade-test': queued,

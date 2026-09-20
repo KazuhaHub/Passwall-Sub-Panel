@@ -6,6 +6,7 @@ import { api, installReads, mount } from '@/test/adminSaveHarness'
 import type { NodeRelease, NodeReleaseCatalog, NodeReleaseChannel } from '@/api/nodeReleases'
 import type { NativeInstallationSelection } from '@/api/servers'
 import NodeReleaseSelector from './NodeReleaseSelector'
+import { releaseTag } from '@/utils/productVersion'
 
 const endpoint = '/admin/servers/node-releases'
 const linux: NativeInstallationSelection = { method: 'linux', os: 'linux', arch: 'amd64' }
@@ -259,7 +260,7 @@ describe('the empty state answers the question that was asked', () => {
 describe('the upgrade list offers only targets that are actually ahead', () => {
   const beta = (version: string): NodeRelease => ({
     ...testing, version,
-    release_url: `https://github.com/KazuhaHub/Passwall-Node/releases/tag/${version}`,
+    release_url: `https://github.com/KazuhaHub/Passwall-Node/releases/tag/${releaseTag(version)}`,
   })
 
   it('excludes the node’s own version and everything older', async () => {
@@ -276,9 +277,10 @@ describe('the upgrade list offers only targets that are actually ahead', () => {
     expect(screen.queryByRole('option', { name: '4.0.6' })).toBeNull()
   })
 
-  it('ranks the dotless prereleases the way the project publishes them', async () => {
-    // SemVer ranks beta11 BELOW beta9 on the trailing character. With that rule
-    // this list would be empty and the node would be told it is up to date.
+  it('ranks a release above the node it is ahead of', async () => {
+    // The comparison is the project's own, on parsed versions: a string ordering
+    // is what puts 4.0.10 below 4.0.9, and a node ahead of its own upgrade would
+    // be told it is up to date.
     reads([beta('4.1.1')])
     mount(<NodeReleaseSelector enabled selection={linux} value="" onChange={() => {}}
       initialChannel="testing" newerThan="4.0.6" />)
@@ -303,7 +305,7 @@ describe('an explicit target list wins over being merely newer', () => {
   it('offers only the versions the instance named', async () => {
     const beta = (version: string): NodeRelease => ({
       ...testing, version,
-      release_url: `https://github.com/KazuhaHub/Passwall-Node/releases/tag/${version}`,
+      release_url: `https://github.com/KazuhaHub/Passwall-Node/releases/tag/${releaseTag(version)}`,
     })
     reads([beta('4.1.0'), beta('4.1.1'), beta('4.2.0')])
     mount(<NodeReleaseSelector enabled selection={linux} value="" onChange={() => {}}

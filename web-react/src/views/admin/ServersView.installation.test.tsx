@@ -1,13 +1,14 @@
 // @vitest-environment jsdom
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { NodeReleaseCatalog } from '@/api/nodeReleases'
+import type { NodeReleaseCatalog, NodeReleaseChannel } from '@/api/nodeReleases'
 import type { NativeAgentStatus, NativeInstallationFiles, NativeServerProvisioning, Server } from '@/api/servers'
 import { api, installReads, list, mount } from '@/test/adminSaveHarness'
 import { useAuthStore } from '@/stores/auth'
 import ConfirmHost from '@/components/ConfirmHost'
 import ServersView, { isNodeReleaseVersion, NativeInstallationDialog, publicNodeInstallCommands, PUBLIC_NODE_INSTALL_COMMAND, PUBLIC_NODE_INSTALL_ONLY_COMMAND } from './ServersView'
 import { hostFromURL } from './NodesView'
+import { releaseTag } from '@/utils/productVersion'
 
 const copy = vi.hoisted(() => vi.fn().mockResolvedValue(true))
 vi.mock('@/utils/clipboard', () => ({ copyToClipboard: copy }))
@@ -16,10 +17,15 @@ vi.mock('@/api/nodeReleases', () => ({ listNodeReleases: releaseReads }))
 
 const releaseCatalog: NodeReleaseCatalog = {
   checked_at: '2026-09-12T13:00:00Z',
-  releases: ['v1.2.3', 'v1.2.3-beta.2', 'v1.2.3-beta.1'].map(version => ({
-    version, channel: version.includes('-') ? 'testing' : 'stable',
+  releases: ['4.1.0', '4.1.2', '4.1.1'].map(version => ({
+    version,
+    // A CANDIDATE IS A CHANNEL, NOT A HYPHEN. This used to read the version text,
+    // which worked while a beta spelled itself; a product version does not, so the
+    // fixture states the channel. The arrangement is the one the old fixture had:
+    // the release is stable and the two above it are testing candidates.
+    channel: version === '4.1.0' ? 'stable' : 'testing',
     published_at: '2026-09-12T12:00:00Z', notes: 'Reviewed contract fixture',
-    release_url: `https://github.com/KazuhaHub/Passwall-Node/releases/tag/${version}`,
+    release_url: `https://github.com/KazuhaHub/Passwall-Node/releases/tag/${releaseTag(version)}`,
     methods: ['linux', 'docker', 'manual'],
     platforms: (['linux', 'darwin', 'windows'] as const).flatMap(os =>
       (['amd64', 'arm64'] as const).map(arch => ({ os, arch }))),
@@ -48,8 +54,18 @@ function versionInput(): HTMLInputElement {
   return screen.getByRole('combobox', { name: 'admin:servers.native.agent_version' }).parentElement!.querySelector('input')!
 }
 
-async function selectVersion(version: string) {
-  const channel = version.includes('-') ? 'testing' : 'stable'
+async function selectVersion(version: string, publishedAs?: NodeReleaseChannel) {
+  // THE CHANNEL COMES FROM THE CATALOG, not from the version text. A product
+  // version does not spell one, and deriving it from a hyphen made every candidate
+  // look stable — so the two testing releases were never selectable and every case
+  // that names one failed to find the option. A case that serves its OWN catalog
+  // says which channel it published the release to.
+  let channel = publishedAs
+  if (!channel) {
+    const entry = releaseCatalog.releases.find(release => release.version === version)
+    if (!entry) throw new Error(`the fixture publishes no ${version}`)
+    channel = entry.channel
+  }
   const channelSelect = await screen.findByRole('combobox', { name: 'admin:servers.native.release_channel' })
   fireEvent.mouseDown(channelSelect)
   fireEvent.click(await screen.findByRole('option', { name: `admin:servers.native.release_${channel}` }))
@@ -95,7 +111,7 @@ function generatedFiles(): NativeInstallationFiles {
     method: 'docker', os: 'linux',
     files: [
       { name: 'node-credential.txt', destination: 'config/node-credential.txt', content: `${provisioning.credential}\n`, sensitive: true },
-      { name: 'compose.yaml', destination: 'compose.yaml', content: 'services:\n  node:\n    image: ghcr.io/kazuhahub/passwall-node:v1.2.3-beta.1\n    network_mode: host\n' },
+      { name: 'compose.yaml', destination: 'compose.yaml', content: 'services:\n  node:\n    image: ghcr.io/kazuhahub/passwall-node:4.1.1\n    network_mode: host\n' },
     ],
     steps: [
       { title: 'Private files', commands: ['chmod 0600 ./config/node-credential.txt'] },
@@ -104,11 +120,10 @@ function generatedFiles(): NativeInstallationFiles {
   }
 }
 
-// `tag` defaults to the version, which is what a legacy release is addressed
-// by. A product release is addressed by its tag and named by its version, so the
-// two are passed separately rather than derived — the fixture should not carry
-// its own copy of the rule it is checking.
-function generatedManualFiles(version = 'v1.2.3-beta.1', tag = version): NativeInstallationFiles {
+// `tag` defaults to the TAG the version is published under, which is not the
+// version: a release is addressed as release/4.1.1 and named 4.1.1. A case that
+// wants the wrong shape passes it explicitly — that is what one of them checks.
+function generatedManualFiles(version = '4.1.1', tag = releaseTag(version)): NativeInstallationFiles {
   const asset = `passwall-node_${version}_linux_amd64.tar.gz`
   return {
     method: 'manual', os: 'linux', arch: 'amd64',
@@ -182,7 +197,7 @@ describe('Passwall Node installation', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: 'admin:servers.native.create_continue' }))
     await screen.findByRole('combobox', { name: 'admin:servers.native.agent_version' })
     expect(api.post).toHaveBeenCalledWith('/admin/servers', { name: nativeServer.name, panel_type: 'psp', remark: 'optional note', update_channel: 'beta' })
-    await waitFor(() => expect(versionInput().value).toBe('v1.2.3-beta.2'))
+    await waitFor(() => expect(versionInput().value).toBe('4.1.2'))
     expect(api.post).toHaveBeenCalledTimes(1)
   })
 
@@ -256,7 +271,7 @@ describe('Passwall Node installation', () => {
     expect(advanced.tagName).toBe('BUTTON')
     expect(advanced.getAttribute('aria-expanded')).toBe('false')
     expect(advanced.getAttribute('tabindex')).not.toBe('-1')
-    await selectVersion('v1.2.3')
+    await selectVersion('4.1.0')
     expect(screen.queryByText('Reviewed contract fixture')).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'admin:servers.native.generate_command' }))
     const field = await screen.findByRole('textbox', { name: 'admin:servers.native.install_command' }) as HTMLInputElement
@@ -301,7 +316,7 @@ describe('Passwall Node installation', () => {
     const channel = preference === 'beta' ? 'testing' : 'stable'
     await showIdentity()
     expect(screen.getByRole('combobox', { name: 'admin:servers.native.release_channel' }).textContent).toBe(`admin:servers.native.release_${channel}`)
-    expect(versionInput().value).toBe(preference === 'beta' ? 'v1.2.3-beta.2' : 'v1.2.3')
+    expect(versionInput().value).toBe(preference === 'beta' ? '4.1.2' : '4.1.0')
     expect((screen.getByLabelText('admin:servers.native.credential') as HTMLInputElement).value).toBe(provisioning.credential)
     expect((screen.getByLabelText('admin:servers.native.agent_id') as HTMLInputElement).value).toBe(provisioning.agent_id)
     fireEvent.mouseDown(screen.getByRole('combobox', { name: 'admin:servers.native.release_channel' }))
@@ -329,7 +344,7 @@ describe('Passwall Node installation', () => {
     await showIdentity()
     expect(api.post).toHaveBeenCalledWith('/admin/servers', { name: nativeServer.name, panel_type: 'psp', remark: undefined, update_channel: 'beta' })
     expect(screen.getByRole('combobox', { name: 'admin:servers.native.release_channel' }).textContent).toBe('admin:servers.native.release_testing')
-    expect(versionInput().value).toBe('v1.2.3-beta.2')
+    expect(versionInput().value).toBe('4.1.2')
     expect(api.post).toHaveBeenCalledTimes(1)
   })
 
@@ -401,13 +416,13 @@ describe('Passwall Node installation', () => {
     expect(button.disabled).toBe(true)
     fireEvent.click(button)
     expect(api.post).not.toHaveBeenCalled()
-    await selectVersion('v1.2.3')
+    await selectVersion('4.1.0')
     fireEvent.click(button)
     const command = await screen.findByLabelText('admin:servers.native.install_command') as HTMLInputElement
     expect(command.value).toBe(generated.command)
     expect(command.readOnly).toBe(true)
     expect(screen.getByText('admin:servers.native.command_safety')).toBeTruthy()
-    expect(api.post).toHaveBeenCalledWith('/admin/servers/7/node-install-command', { version: 'v1.2.3' }, expect.objectContaining({ signal: expect.any(AbortSignal) }))
+    expect(api.post).toHaveBeenCalledWith('/admin/servers/7/node-install-command', { version: '4.1.0' }, expect.objectContaining({ signal: expect.any(AbortSignal) }))
     fireEvent.click(screen.getByRole('button', { name: 'admin:servers.native.copy_command' }))
     await waitFor(() => expect(copy).toHaveBeenCalledWith(generated.command))
     expect((screen.getByLabelText('admin:servers.native.credential') as HTMLInputElement).value).toBe(provisioning.credential)
@@ -420,8 +435,8 @@ describe('Passwall Node installation', () => {
     reads()
     mountExpanded(<NativeInstallationDialog server={nativeServer} initialProvisioning={provisioning} onClose={vi.fn()} onRotate={vi.fn()} />)
     await waitFor(() => expect(screen.getByRole('combobox', { name: 'admin:servers.native.agent_version' }).getAttribute('aria-disabled')).not.toBe('true'))
-    fireEvent.change(versionInput(), { target: { value: 'v99.99.99' } })
-    expect(versionInput().value).toBe('v1.2.3')
+    fireEvent.change(versionInput(), { target: { value: '99.99.99' } })
+    expect(versionInput().value).toBe('4.1.0')
     const button = screen.getByRole('button', { name: 'admin:servers.native.generate_command' }) as HTMLButtonElement
     expect(button.disabled).toBe(false)
     expect(api.post).not.toHaveBeenCalled()
@@ -431,7 +446,7 @@ describe('Passwall Node installation', () => {
     reads()
     mountExpanded(<NativeInstallationDialog server={nativeServer} initialProvisioning={{ ...provisioning,
       server: { ...nativeServer, id: 8 } }} onClose={vi.fn()} onRotate={vi.fn()} />)
-    await selectVersion('v1.2.3')
+    await selectVersion('4.1.0')
     const button = screen.getByRole('button', { name: 'admin:servers.native.generate_command' }) as HTMLButtonElement
     expect(button.disabled).toBe(true)
     fireEvent.click(button)
@@ -443,7 +458,7 @@ describe('Passwall Node installation', () => {
     api.post.mockImplementation(async () => ({ data: { server_id: 7, command: 'short-lived command',
       expires_at: new Date(Date.now() + 500).toISOString() } }))
     mountExpanded(<NativeInstallationDialog server={nativeServer} initialProvisioning={provisioning} onClose={vi.fn()} onRotate={vi.fn()} />)
-    await selectVersion('v1.2.3')
+    await selectVersion('4.1.0')
     fireEvent.click(screen.getByRole('button', { name: 'admin:servers.native.generate_command' }))
     await screen.findByLabelText('admin:servers.native.install_command')
     await screen.findByText('admin:servers.native.command_expired')
@@ -466,11 +481,11 @@ describe('Passwall Node installation', () => {
       ? new Promise(resolve => { finish = resolve }) : Promise.resolve({ data: {} }))
     mount(<ServersView />)
     await openInstallation(nativeServer)
-    await selectVersion('v1.2.3')
+    await selectVersion('4.1.0')
     fireEvent.click(screen.getByRole('button', { name: 'admin:servers.native.generate_command' }))
     await waitFor(() => expect(api.post.mock.calls.some(([url]) => url === '/admin/servers/7/node-install-command')).toBe(true))
     const request = api.post.mock.calls.find(([url]) => url === '/admin/servers/7/node-install-command')![2]
-    if (change === 'version') await selectVersion('v1.2.3-beta.1')
+    if (change === 'version') await selectVersion('4.1.1')
     else if (change === 'method') await selectMethod('manual')
     else {
       fireEvent.click(screen.getByRole('button', { name: 'common:actions.close' }))
@@ -494,7 +509,7 @@ describe('Passwall Node installation', () => {
       command: invalid === 'empty' ? '' : 'private command',
       expires_at: new Date(Date.now() + (invalid === 'expired' ? -60_000 : 15 * 60_000)).toISOString() } })
     mountExpanded(<NativeInstallationDialog server={nativeServer} initialProvisioning={provisioning} onClose={vi.fn()} onRotate={vi.fn()} />)
-    await selectVersion('v1.2.3')
+    await selectVersion('4.1.0')
     fireEvent.click(screen.getByRole('button', { name: 'admin:servers.native.generate_command' }))
     await screen.findByText('admin:servers.native.command_failed')
     expect(screen.queryByLabelText('admin:servers.native.install_command')).toBeNull()
@@ -519,7 +534,7 @@ describe('Passwall Node installation', () => {
     // rate of about one run in thirty — enough to fail CI on a branch whose diff
     // cannot cause it, which is how it was found: a Go-only pull request was red on
     // the web job.
-    await waitFor(() => expect(versionInput().value).toBe('v1.2.3'))
+    await waitFor(() => expect(versionInput().value).toBe('4.1.0'))
     expect(copyScript().disabled).toBe(false)
     expect((screen.getByLabelText('admin:servers.native.credential') as HTMLInputElement).value).toBe(provisioning.credential)
     expect((screen.getByLabelText('admin:servers.native.agent_id') as HTMLInputElement).value).toBe(provisioning.agent_id)
@@ -708,14 +723,14 @@ describe('Passwall Node installation', () => {
     mountExpanded(<NativeInstallationDialog server={nativeServer} initialProvisioning={provisioning} onClose={vi.fn()} onRotate={vi.fn()} />)
     await screen.findByText('admin:servers.native.agent_status.unconfigured')
     expect(screen.queryByText('admin:servers.native.agent_status.running')).toBeNull()
-    expect(versionInput().value).toBe('v1.2.3')
+    expect(versionInput().value).toBe('4.1.0')
     expect(copyScript().disabled).toBe(false)
     expect(screen.queryByRole('textbox', { name: 'admin:servers.native.agent_version' })).toBeNull()
     expect(api.post).not.toHaveBeenCalled()
-    await selectVersion('v1.2.3-beta.1')
+    await selectVersion('4.1.1')
     fireEvent.click(copyScript())
     await waitFor(() => expect(copy).toHaveBeenCalledWith(`#!/bin/sh\n# ${provisioning.credential}\n`))
-    expect(api.post).toHaveBeenCalledWith('/admin/servers/7/node-install-script', { version: 'v1.2.3-beta.1' }, expect.objectContaining({ responseType: 'text' }))
+    expect(api.post).toHaveBeenCalledWith('/admin/servers/7/node-install-script', { version: '4.1.1' }, expect.objectContaining({ responseType: 'text' }))
     expect(screen.queryByLabelText('admin:servers.native.start_command')).toBeNull()
     const run = (screen.getByLabelText('admin:servers.native.run_script_command') as HTMLTextAreaElement).value
     expect(run).toContain('sudo bash ./passwall-node-install-agt_7.sh')
@@ -725,7 +740,7 @@ describe('Passwall Node installation', () => {
   it('preserves identity and private credential while Docker follows the selected release channel', async () => {
     reads()
     mountExpanded(<NativeInstallationDialog server={nativeServer} initialProvisioning={provisioning} onClose={vi.fn()} onRotate={vi.fn()} />)
-    await selectVersion('v1.2.3-beta.1')
+    await selectVersion('4.1.1')
     for (const method of ['docker', 'github', 'manual', 'linux'] as const) {
       await selectMethod(method)
       expect((screen.getByLabelText('admin:servers.native.agent_id') as HTMLInputElement).value).toBe(provisioning.agent_id)
@@ -734,7 +749,7 @@ describe('Passwall Node installation', () => {
         expect(screen.queryByLabelText('admin:servers.native.agent_version')).toBeNull()
         expect((screen.getByLabelText('admin:servers.native.github_install_command') as HTMLTextAreaElement).value).toBe(PUBLIC_NODE_INSTALL_COMMAND)
       } else {
-        await waitFor(() => expect(versionInput().value).toBe(method === 'docker' ? 'beta' : 'v1.2.3'))
+        await waitFor(() => expect(versionInput().value).toBe(method === 'docker' ? 'beta' : '4.1.0'))
       }
       expect(screen.getByRole('combobox', { name: 'admin:servers.native.method_label' }).textContent).toBe(`admin:servers.native.method.${method}`)
     }
@@ -747,9 +762,9 @@ describe('Passwall Node installation', () => {
     let finish!: (response: { data: string }) => void
     api.post.mockReturnValue(new Promise<{ data: string }>(resolve => { finish = resolve }))
     mountExpanded(<NativeInstallationDialog server={nativeServer} initialProvisioning={provisioning} onClose={vi.fn()} onRotate={vi.fn()} />)
-    await selectVersion('v1.2.3')
+    await selectVersion('4.1.0')
     fireEvent.click(copyScript())
-    await waitFor(() => expect(api.post).toHaveBeenCalledWith('/admin/servers/7/node-install-script', { version: 'v1.2.3' }, expect.objectContaining({ signal: expect.any(AbortSignal) })))
+    await waitFor(() => expect(api.post).toHaveBeenCalledWith('/admin/servers/7/node-install-script', { version: '4.1.0' }, expect.objectContaining({ signal: expect.any(AbortSignal) })))
     const request = api.post.mock.calls.find(([url]) => url === '/admin/servers/7/node-install-script')!
     await selectMethod('github')
     expect(request[2].signal.aborted).toBe(true)
@@ -767,14 +782,14 @@ describe('Passwall Node installation', () => {
     let finish!: (response: { data: string }) => void
     api.post.mockReturnValue(new Promise<{ data: string }>(resolve => { finish = resolve }))
     mountExpanded(<NativeInstallationDialog server={nativeServer} initialProvisioning={provisioning} onClose={vi.fn()} onRotate={vi.fn()} />)
-    await selectVersion('v1.2.3-beta.1')
+    await selectVersion('4.1.1')
     fireEvent.click(copyScript())
     await waitFor(() => expect(api.post).toHaveBeenCalledTimes(1))
     const request = api.post.mock.calls[0][2]
     fireEvent.mouseDown(screen.getByRole('combobox', { name: 'admin:servers.native.release_channel' }))
     fireEvent.click(await screen.findByRole('option', { name: 'admin:servers.native.release_stable' }))
     expect(request.signal.aborted).toBe(true)
-    expect(versionInput().value).toBe('v1.2.3')
+    expect(versionInput().value).toBe('4.1.0')
     expect(copyScript().disabled).toBe(false)
     await act(async () => { finish({ data: `#!/bin/sh\n# obsolete ${provisioning.credential}\n` }) })
     expect(copy).not.toHaveBeenCalled()
@@ -789,11 +804,11 @@ describe('Passwall Node installation', () => {
     api.post.mockResolvedValue({ data: materials })
     mountExpanded(<NativeInstallationDialog server={nativeServer} initialProvisioning={provisioning} onClose={vi.fn()} onRotate={vi.fn()} />)
     await selectMethod('docker')
-    await selectVersion('v1.2.3-beta.1')
+    await selectVersion('4.1.1')
     fireEvent.click(screen.getByRole('button', { name: 'admin:servers.native.generate_files' }))
     await screen.findAllByLabelText('admin:servers.native.file_content')
     expect(api.post).toHaveBeenCalledWith('/admin/servers/7/node-installation-files', {
-      version: 'v1.2.3-beta.1', method: 'docker', docker_remote_upgrade: true,
+      version: '4.1.1', method: 'docker', docker_remote_upgrade: true,
     }, expect.objectContaining({ signal: expect.any(AbortSignal) }))
     expect(materialContents()).toEqual(materialPreviews(materials))
     const privateFile = within(screen.getByRole('region', { name: 'config/node-credential.txt' })).getByLabelText('admin:servers.native.file_content') as HTMLInputElement
@@ -826,7 +841,7 @@ describe('Passwall Node installation', () => {
     })
     mountExpanded(<NativeInstallationDialog server={nativeServer} initialProvisioning={provisioning} onClose={vi.fn()} onRotate={vi.fn()} />)
     await selectMethod('docker')
-    await selectVersion('v1.2.3-beta.1')
+    await selectVersion('4.1.1')
     fireEvent.click(screen.getByRole('button', { name: 'admin:servers.native.generate_files' }))
     await screen.findAllByLabelText('admin:servers.native.file_content')
     fireEvent.click(screen.getAllByRole('button', { name: 'admin:servers.native.download_file' })[0])
@@ -849,7 +864,7 @@ describe('Passwall Node installation', () => {
     api.post.mockImplementation(() => new Promise<{ data: NativeInstallationFiles }>(resolve => { finishDocker = resolve }))
     mountExpanded(<NativeInstallationDialog server={nativeServer} initialProvisioning={provisioning} onClose={vi.fn()} onRotate={vi.fn()} />)
     await selectMethod('docker')
-    await selectVersion('v1.2.3-beta.1')
+    await selectVersion('4.1.1')
     fireEvent.click(screen.getByRole('button', { name: 'admin:servers.native.generate_files' }))
     await waitFor(() => expect(api.post).toHaveBeenCalledTimes(1))
     const oldRequest = api.post.mock.calls[0][2]
@@ -883,7 +898,7 @@ describe('Passwall Node installation', () => {
     await openInstallation(nativeServer)
     await showIdentity()
     await selectMethod('docker')
-    await selectVersion('v1.2.3-beta.1')
+    await selectVersion('4.1.1')
     fireEvent.click(screen.getByRole('button', { name: 'admin:servers.native.generate_files' }))
     await waitFor(() => expect(api.post.mock.calls.filter(([url]) => String(url).endsWith('/node-installation-files'))).toHaveLength(1))
     const oldRequest = api.post.mock.calls.find(([url]) => String(url).endsWith('/node-installation-files'))![2]
@@ -943,11 +958,11 @@ describe('Passwall Node installation', () => {
     api.post.mockResolvedValue({ data: materials })
     mountExpanded(<NativeInstallationDialog server={nativeServer} initialProvisioning={provisioning} onClose={vi.fn()} onRotate={vi.fn()} />)
     await selectMethod('manual')
-    await selectVersion('v1.2.3-beta.1')
+    await selectVersion('4.1.1')
     fireEvent.click(screen.getByRole('button', { name: 'admin:servers.native.generate_files' }))
     await screen.findAllByLabelText('admin:servers.native.file_content')
     expect(api.post).toHaveBeenCalledWith('/admin/servers/7/node-installation-files', {
-      version: 'v1.2.3-beta.1', method: 'manual', os: 'linux', arch: 'amd64',
+      version: '4.1.1', method: 'manual', os: 'linux', arch: 'amd64',
     }, expect.objectContaining({ signal: expect.any(AbortSignal) }))
     for (const download of materials.downloads ?? []) {
       const matches = screen.getAllByRole('link', { name: 'admin:servers.native.download_release_file' })
@@ -981,7 +996,7 @@ describe('Passwall Node installation', () => {
     api.post.mockResolvedValue({ data: materials })
     mountExpanded(<NativeInstallationDialog server={nativeServer} initialProvisioning={provisioning} onClose={vi.fn()} onRotate={vi.fn()} />)
     await selectMethod('manual')
-    await selectVersion('4.0.0')
+    await selectVersion('4.0.0', 'stable')
     fireEvent.click(screen.getByRole('button', { name: 'admin:servers.native.generate_files' }))
     await screen.findAllByLabelText('admin:servers.native.file_content')
     expect(api.post).toHaveBeenCalledWith('/admin/servers/7/node-installation-files', {
@@ -1009,7 +1024,7 @@ describe('Passwall Node installation', () => {
     api.post.mockResolvedValue({ data: generatedManualFiles('4.0.0', '4.0.0') })
     mountExpanded(<NativeInstallationDialog server={nativeServer} initialProvisioning={provisioning} onClose={vi.fn()} onRotate={vi.fn()} />)
     await selectMethod('manual')
-    await selectVersion('4.0.0')
+    await selectVersion('4.0.0', 'stable')
     fireEvent.click(screen.getByRole('button', { name: 'admin:servers.native.generate_files' }))
     await screen.findByText('admin:servers.native.files_failed')
     expect(screen.queryByLabelText('admin:servers.native.file_content')).toBeNull()
@@ -1020,10 +1035,10 @@ describe('Passwall Node installation', () => {
     api.post.mockResolvedValue({ data: generatedFiles() })
     mountExpanded(<NativeInstallationDialog server={nativeServer} initialProvisioning={provisioning} onClose={vi.fn()} onRotate={vi.fn()} />)
     await selectMethod('docker')
-    await selectVersion('v1.2.3-beta.1')
+    await selectVersion('4.1.1')
     fireEvent.click(screen.getByRole('button', { name: 'admin:servers.native.generate_files' }))
     await screen.findAllByLabelText('admin:servers.native.file_content')
-    await selectVersion('v1.2.3-beta.2')
+    await selectVersion('4.1.2')
     expect(screen.queryByLabelText('admin:servers.native.file_content')).toBeNull()
     expect(screen.queryByRole('button', { name: 'admin:servers.native.copy_file' })).toBeNull()
     expect(screen.getByRole('button', { name: 'admin:servers.native.generate_files' }).getAttribute('disabled')).toBeNull()
@@ -1036,7 +1051,7 @@ describe('Passwall Node installation', () => {
     api.post.mockRejectedValue({ response: { status: 400, data: { error: 'Chosen release unavailable' } } })
     mountExpanded(<NativeInstallationDialog server={nativeServer} initialProvisioning={provisioning} onClose={vi.fn()} onRotate={vi.fn()} />)
     await selectMethod('docker')
-    await selectVersion('v1.2.3-beta.1')
+    await selectVersion('4.1.1')
     fireEvent.click(screen.getByRole('button', { name: 'admin:servers.native.generate_files' }))
     await screen.findByText('Chosen release unavailable')
     expect(screen.queryByLabelText('admin:servers.native.file_content')).toBeNull()
@@ -1052,7 +1067,7 @@ describe('Passwall Node installation', () => {
     api.post.mockResolvedValue({ data: materials })
     mountExpanded(<NativeInstallationDialog server={nativeServer} initialProvisioning={provisioning} onClose={vi.fn()} onRotate={vi.fn()} />)
     await selectMethod('docker')
-    await selectVersion('v1.2.3-beta.1')
+    await selectVersion('4.1.1')
     fireEvent.click(screen.getByRole('button', { name: 'admin:servers.native.generate_files' }))
     await screen.findByText('admin:servers.native.files_failed')
     expect(screen.queryByLabelText('admin:servers.native.file_content')).toBeNull()
@@ -1072,7 +1087,7 @@ describe('Passwall Node installation', () => {
     api.post.mockResolvedValue({ data: materials })
     mountExpanded(<NativeInstallationDialog server={nativeServer} initialProvisioning={provisioning} onClose={vi.fn()} onRotate={vi.fn()} />)
     await selectMethod('docker')
-    await selectVersion('v1.2.3-beta.1')
+    await selectVersion('4.1.1')
     fireEvent.click(screen.getByRole('button', { name: 'admin:servers.native.generate_files' }))
     const step = await screen.findByRole('region', { name: 'Private files' })
     fireEvent.click(within(step).getAllByRole('button', { name: 'admin:servers.native.copy_step' })[0])
@@ -1119,7 +1134,7 @@ describe('Passwall Node installation', () => {
       downloads.push({ file: this.download, url: this.href })
     })
     mountExpanded(<NativeInstallationDialog server={nativeServer} initialProvisioning={provisioning} onClose={vi.fn()} onRotate={vi.fn()} />)
-    await selectVersion('v1.2.3')
+    await selectVersion('4.1.0')
     fireEvent.click(screen.getByRole('button', { name: 'admin:servers.native.download_script' }))
     await waitFor(() => expect(downloads).toEqual([{ file: 'passwall-node-install-agt_7.sh', url: 'blob:private-install-script' }]))
     expect(createURL).toHaveBeenCalledWith(expect.any(Blob))
@@ -1131,7 +1146,7 @@ describe('Passwall Node installation', () => {
     reads()
     api.post.mockRejectedValue({ response: { status: 400, data: '{"error":"Release has no installation assets"}' } })
     mountExpanded(<NativeInstallationDialog server={nativeServer} initialProvisioning={provisioning} onClose={vi.fn()} onRotate={vi.fn()} />)
-    await selectVersion('v1.2.3')
+    await selectVersion('4.1.0')
     fireEvent.click(copyScript())
     await screen.findByText('Release has no installation assets')
     expect(copy).not.toHaveBeenCalled()
@@ -1142,20 +1157,23 @@ describe('Passwall Node installation', () => {
 
 describe('native installation inputs', () => {
   it.each([
-    '', 'latest', 'https://example.test/v1.2.3',
-    // `1.2.3` USED TO BE IN THIS LIST, and that was the defect rather than the
-    // rule: it is exactly what the product scheme stamps, so a released product
-    // version left the install action disabled with nothing said about why. It
-    // is asserted as accepted below, and the near misses stay here.
-    '1.2', '1.2.3.4.5', '04.0.0', '1.2.3-beta.1', 'release/1.2.3',
-    'v01.2.3', 'v1.2.3-beta.01', 'v1.2', 'v1.2.3.4',
+    '', 'latest', 'https://example.test/4.1.0',
+    // `4.1.0` USED TO BE IN THIS LIST, and that was the defect rather than the
+    // rule: it is exactly what this scheme stamps, so a released product version
+    // left the install action disabled with nothing said about why. It is
+    // asserted as accepted below, and the near misses stay here — a short form,
+    // too many segments, a prerelease, a tag, a leading zero and a zero build.
+    '4.1', '4.1.0.4.5', '04.1.0', '4.1.0-rc.1', 'release/4.1.0',
+    '01.2.3', '4.1.0.0', '4.1.0-beta.01', '4.1.0.1.2',
   ])('rejects noncanonical release version %s', version => {
     expect(isNodeReleaseVersion(version)).toBe(false)
   })
 
   it.each([
-    'v0.1.0', 'v1.2.3', 'v1.2.3-beta.1', 'v1.2.3-rc-1',
-    // The product scheme: three integers, no prefix, no prerelease.
+    '1.0.0', '4.1.0', '4.1.1', '4.1.4',
+    // The optional BUILD component, which is part of the identity.
+    '4.1.0.4',
+    // The forms this project publishes.
     '1.2.3', '4.0.0', '102.1.0',
   ])('accepts canonical release version %s', version => {
     expect(isNodeReleaseVersion(version)).toBe(true)

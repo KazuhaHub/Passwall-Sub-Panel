@@ -7,6 +7,7 @@ import type { NodeReleaseCatalog } from '@/api/nodeReleases'
 import type { NodeMigrationPreview, Server } from '@/api/servers'
 import { NodeMigrationPreviewDialog } from './NodeMigrationPreviewDialog'
 import ServersView from './ServersView'
+import { releaseTag } from '@/utils/productVersion'
 
 const copy = vi.hoisted(() => vi.fn().mockResolvedValue(true))
 vi.mock('@/utils/clipboard', () => ({ copyToClipboard: copy }))
@@ -26,7 +27,7 @@ const catalog: NodeReleaseCatalog = {
   releases: ['4.2.1', '4.0.2', '4.0.1'].map(version => ({
     version, channel: version.includes('-') ? 'testing' : 'stable',
     published_at: '2026-09-12T12:00:00Z', notes: 'Reviewed release fixture',
-    release_url: `https://github.com/KazuhaHub/Passwall-Node/releases/tag/${version}`,
+    release_url: `https://github.com/KazuhaHub/Passwall-Node/releases/tag/${releaseTag(version)}`,
     methods: ['linux'], platforms: [{ os: 'linux', arch: 'amd64' }, { os: 'linux', arch: 'arm64' }],
   })),
 }

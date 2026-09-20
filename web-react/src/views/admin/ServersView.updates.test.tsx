@@ -26,7 +26,7 @@ const catalog: NodeReleaseCatalog = {
   checked_at: '2026-09-14T00:00:00Z',
   releases: [{
     version: '4.0.3', channel: 'testing', published_at: '2026-09-13T00:00:00Z',
-    release_url: 'https://github.com/KazuhaHub/Passwall-Node/releases/tag/4.0.3',
+    release_url: 'https://github.com/KazuhaHub/Passwall-Node/releases/tag/release/4.0.3',
     notes: '', methods: ['linux'], platforms: [{ os: 'linux', arch: 'amd64' }, { os: 'linux', arch: 'arm64' }],
   }],
 }

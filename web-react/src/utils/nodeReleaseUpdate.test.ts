@@ -2,13 +2,20 @@ import { describe, expect, it } from 'vitest'
 import type { NodeRelease } from '@/api/nodeReleases'
 import type { Server } from '@/api/servers'
 import { newerNodeRelease } from './nodeReleaseUpdate'
+import { releaseTag } from './productVersion'
 
+// THE URL CARRIES THE TAG AND THE RECORD CARRIES THE VERSION, which are never the
+// same string. The fixture used to build the URL out of the version — correct
+// while a version was also its own address — and every case below then failed the
+// link check for a reason that had nothing to do with what it was testing.
 function release(version: string, overrides: Partial<NodeRelease> = {}): NodeRelease {
   return {
     version,
-    channel: version.includes('-') ? 'testing' : 'stable',
+    // A CANDIDATE IS A CHANNEL, NOT A HYPHEN. The version says nothing about
+    // whether it was published as testing; a case that wants one says so.
+    channel: 'stable',
     published_at: '2026-09-14T00:00:00Z',
-    release_url: `https://github.com/KazuhaHub/Passwall-Node/releases/tag/${version}`,
+    release_url: `https://github.com/KazuhaHub/Passwall-Node/releases/tag/${releaseTag(version)}`,
     notes: '',
     methods: ['linux', 'docker', 'manual'],
     platforms: [{ os: 'linux', arch: 'amd64' }, { os: 'linux', arch: 'arm64' }],
@@ -18,11 +25,11 @@ function release(version: string, overrides: Partial<NodeRelease> = {}): NodeRel
 
 describe('newerNodeRelease', () => {
   it('finds the highest newer reviewed release without changing catalog order', () => {
-    const older = release('4.2.1')
-    const highest = release('4.0.0')
-    const middle = release('1.0.0')
+    const older = release('4.0.1')
+    const highest = release('4.2.1')
+    const middle = release('4.1.0')
     const catalog = [older, highest, middle]
-    expect(newerNodeRelease({ panel_version: '4.2.1' }, catalog)).toBe(highest)
+    expect(newerNodeRelease({ panel_version: '4.0.1' }, catalog)).toBe(highest)
     expect(catalog).toEqual([older, highest, middle])
   })
 
@@ -35,8 +42,8 @@ describe('newerNodeRelease', () => {
 
   // A CHANNEL PROMOTION REFRESHES STATE. IT DOES NOT CREATE AN UPDATE.
   //
-  // Promoting v2.0.0 from testing to stable republishes the same bytes under the
-  // same version, so a node already running v2.0.0 has nothing to install. This is
+  // Promoting 4.1.0 from testing to stable republishes the same bytes under the
+  // same version, so a node already running 4.1.0 has nothing to install. This is
   // an acceptance item in the migration plan — "a same-version channel promotion
   // only refreshes state and must not manufacture an update-available notice" —
   // and it is the kind of notice an operator learns to ignore once it is wrong.
@@ -46,25 +53,25 @@ describe('newerNodeRelease', () => {
     // Including for the node whose own channel the promotion concerns.
     expect(newerNodeRelease({ panel_version: '4.0.1', update_channel: 'beta' }, [promoted])).toBeUndefined()
     // And the promotion does not make an OLDER release look newer either.
-    expect(newerNodeRelease({ panel_version: '4.0.1', update_channel: 'beta' }, [promoted, release('v1.9.0')])).toBeUndefined()
+    expect(newerNodeRelease({ panel_version: '4.0.1', update_channel: 'beta' }, [promoted, release('4.0.0')])).toBeUndefined()
   })
 
-  it.each(['4.0.0', 'v1.0.0 (abc1234)', `v1.0.0 (${'A'.repeat(40)})`])('accepts an official daemon identity: %s', panel_version => {
-    const next = release('v1.0.1')
+  it.each(['4.0.0', '4.0.0 (abc1234)', `4.0.0 (${'A'.repeat(40)})`])('accepts an official daemon identity: %s', panel_version => {
+    const next = release('4.0.7')
     expect(newerNodeRelease({ panel_version }, [next])).toBe(next)
   })
 
   it.each([
-    undefined, '', 'dev', 'dev (abc1234)', ' 4.0.0', 'v1.0.0 ',
+    undefined, '', 'dev', 'dev (abc1234)', ' 4.0.0', '4.0.0 ',
     // `1.0.0` USED TO BE IN THIS LIST, and that was the defect rather than the
     // rule: the product scheme stamps exactly that, so a migrated node reported
     // an identity this function refused and the upgrade badge could never
     // appear. The product-scheme block below asserts it is accepted; what stays
     // here is the near misses, which are still not identities.
     '1.0', '04.0.0', '1.0.0.1.2', 'release/1.0.0',
-    '01.0.0', 'v1.0', 'v1.0.0+local', 'v1.0.0-beta.01', 'v1.0.0 (abc123)',
-    `v1.0.0 (${'a'.repeat(41)})`, 'v1.0.0 (xyz1234)', 'v1.0.0(abc1234)',
-    'v1.0.0 (abc1234) extra', 'v1.0.0\n',
+    '01.0.0', '4.0', '4.0.0+local', '4.0.0-beta.01', '4.0.0 (abc123)',
+    `4.0.0 (${'a'.repeat(41)})`, '4.0.0 (xyz1234)', '4.0.0(abc1234)',
+    '4.0.0 (abc1234) extra', '4.0.0\n',
   ])('does not guess an unknown or malformed daemon identity: %s', panel_version => {
     expect(newerNodeRelease({ panel_version }, [release('4.0.1')])).toBeUndefined()
   })
@@ -82,24 +89,25 @@ describe('newerNodeRelease', () => {
   // "may see released targets" cannot become "was moved back onto the stable
   // line".
   it('treats the saved stable or beta channel as a floor, not a filter', () => {
-    const stable = release('4.0.0')
-    const beta = release('v2.0.0-beta.1')
+    const stable = release('4.0.1')
+    const beta = release('4.0.6', { channel: 'testing' })
     const catalog = [beta, stable]
-    expect(newerNodeRelease({ panel_version: '4.2.1' }, catalog)).toBe(stable)
-    expect(newerNodeRelease({ panel_version: '4.2.1', update_channel: 'stable' }, catalog)).toBe(stable)
-    expect(newerNodeRelease({ panel_version: '4.2.1', update_channel: 'beta' }, catalog)).toBe(beta)
+    expect(newerNodeRelease({ panel_version: '4.0.0' }, catalog)).toBe(stable)
+    expect(newerNodeRelease({ panel_version: '4.0.0', update_channel: 'stable' }, catalog)).toBe(stable)
+    expect(newerNodeRelease({ panel_version: '4.0.0', update_channel: 'beta' }, catalog)).toBe(beta)
     // A stable node is not offered a testing target.
-    expect(newerNodeRelease({ panel_version: '4.2.1', update_channel: 'stable' }, [beta])).toBeUndefined()
+    expect(newerNodeRelease({ panel_version: '4.0.0', update_channel: 'stable' }, [beta])).toBeUndefined()
     // A beta node IS offered a released one, and the higher version wins whichever
     // channel published it.
-    expect(newerNodeRelease({ panel_version: '4.2.1', update_channel: 'beta' }, [stable])).toBe(stable)
-    expect(newerNodeRelease({ panel_version: '4.0.0', update_channel: 'beta' }, [release('v1.1.0-beta.1'), release('v1.2.0')])?.version).toBe('v1.2.0')
+    expect(newerNodeRelease({ panel_version: '4.0.0', update_channel: 'beta' }, [stable])).toBe(stable)
+    expect(newerNodeRelease({ panel_version: '4.0.0', update_channel: 'beta' }, [release('4.0.2'), release('4.0.8')])?.version).toBe('4.0.8')
     // And nothing older is offered, so the wider set cannot downgrade.
-    expect(newerNodeRelease({ panel_version: 'v1.2.0', update_channel: 'beta' }, [stable])).toBeUndefined()
+    expect(newerNodeRelease({ panel_version: '4.0.8', update_channel: 'beta' }, [stable])).toBeUndefined()
     expect(newerNodeRelease({ panel_version: '4.0.0', update_channel: 'beta' }, [release('1.0.2'), release('1.0.1')])).toBeUndefined()
     // An unrecognised saved channel is still refused rather than widened.
-    expect(newerNodeRelease({ panel_version: '4.2.1', update_channel: 'testing' as Server['update_channel'] }, catalog)).toBeUndefined()
+    expect(newerNodeRelease({ panel_version: '4.0.0', update_channel: 'testing' as Server['update_channel'] }, catalog)).toBeUndefined()
   })
+
 
   // THIS TEST USED TO ASSERT THE OPPOSITE, and the change is the point of it.
   //
@@ -112,14 +120,14 @@ describe('newerNodeRelease', () => {
   // comparator and the release catalog were all changed to compare the digit run
   // numerically. A test pinning the old behaviour would have kept this the one
   // place the rule disagreed with the other three.
-  it('orders the legacy beta suffixes the way the project publishes them', () => {
+  it('orders release versions numerically, not as text', () => {
     const beta10 = release('4.1.0')
     const beta3 = release('4.0.2')
     expect(newerNodeRelease({ panel_version: '4.0.2', update_channel: 'beta' }, [beta3, beta10])).toBe(beta10)
     expect(newerNodeRelease({ panel_version: '4.1.0', update_channel: 'beta' }, [beta3])).toBeUndefined()
   })
 
-  it('compares numeric dotted beta identifiers numerically', () => {
+  it('orders a version past its base by the segment, not by the string', () => {
     const beta10 = release('4.0.7')
     const beta9 = release('4.0.5')
     expect(newerNodeRelease({ panel_version: '4.0.5 (abc1234)', update_channel: 'beta' }, [beta9, beta10])).toBe(beta10)
@@ -137,14 +145,17 @@ describe('newerNodeRelease', () => {
     expect(newerNodeRelease({ panel_version: '4.0.0' }, [release('4.0.1', overrides)])).toBeUndefined()
   })
 
-  it('requires channel metadata to agree with actual prerelease status', () => {
-    expect(newerNodeRelease({ panel_version: '4.0.0' }, [release('v2.0.0-beta.1', { channel: 'stable' })])).toBeUndefined()
-    expect(newerNodeRelease({ panel_version: '4.0.0', update_channel: 'beta' }, [release('4.0.1', { channel: 'testing' })])).toBeUndefined()
-  })
+  // A VERSION NO LONGER SPELLS ITS CHANNEL, so there is nothing for the metadata
+  // to agree or disagree with: the flag IS the channel. A case that asked a
+  // product version to confirm its own prerelease status was asserting a rule the
+  // legacy scheme had and this one does not — the property that survives, that a
+  // testing candidate is offered to a beta node and not to a stable one, is
+  // asserted in the product block below.
+
 
   it.each([
-    '2.0.0', '02.0.0', 'v2.0', 'v2.0.0+build', 'v2.0.0-beta.01', 'v2.0.0-beta..1',
-    'v2.0.0-', 'v2.0.0 (abc1234)', ' 4.0.1', 'v2.0.0 ',
+    '2.0.0', '02.0.0', '4.0', '4.0.0+build', '4.0.0-beta.01', '4.0.0-beta..1',
+    '4.0.0-', '4.1.0 (abc1234)', ' 4.0.1', '4.1.0 ',
   ])('rejects noncanonical or invalid candidate tags: %s', version => {
     expect(newerNodeRelease({ panel_version: '4.0.0' }, [release(version)])).toBeUndefined()
     expect(newerNodeRelease({ panel_version: '4.0.0', update_channel: 'beta' }, [release(version)])).toBeUndefined()
@@ -249,14 +260,10 @@ describe('newerNodeRelease, product scheme', () => {
     }
   })
 
-  // A LEGACY NODE STILL SEES PRODUCT RELEASES, and the two schemes are compared
-  // at the release line: a v0.x build is behind a 4.0.0 release. The channel
-  // still decides — a beta node is offered testing releases only, which is what
-  // the existing legacy cases pin too.
-  it('offers a testing product release to a legacy node, and nothing to a product node from the legacy line', () => {
-    const modern = product('4.0.0', { channel: 'testing' })
-    expect(newerNodeRelease({ panel_version: '4.1.1', update_channel: 'beta' }, [modern])?.version).toBe('4.0.0')
-    const legacy = release('4.1.1')
-    expect(newerNodeRelease({ panel_version: '4.0.0', update_channel: 'beta' }, [legacy])).toBeUndefined()
-  })
+  // THE LADDER IS ONE LINE NOW. A case used to sit here comparing a legacy node
+  // against a product release and a product node against a legacy one — the
+  // ordering ACROSS schemes, which the release line decided. There is one scheme,
+  // so a version that is not one of ours is not a target, and that is the whole
+  // of it.
+
 })
