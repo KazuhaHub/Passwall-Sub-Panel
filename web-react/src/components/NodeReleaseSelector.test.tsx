@@ -305,3 +305,62 @@ describe('an explicit target list wins over being merely newer', () => {
     expect(await screen.findByText('admin:servers.native.release_no_testing')).toBeTruthy()
   })
 })
+
+// THE PRODUCT SCHEME. Everything here is a VERSION — the catalog's version field
+// — while the release PAGE is addressed by the TAG, which the backend builds
+// from the tag since the two identities were split.
+//
+// The guard below used to require a v-prefixed version and to rebuild the
+// expected URL from the version, so every product release failed it. That is not
+// a broken link: the URL check is a FILTER, so the release did not appear in the
+// list at all, and an operator with nothing to choose from concludes there is
+// nothing to install.
+describe('a product-scheme release, whose page is addressed by its tag', () => {
+  const product = (version: string, release_url: string): NodeRelease => ({
+    ...stable, version, release_url,
+  })
+  const official = (version: string) => `https://github.com/KazuhaHub/Passwall-Node/releases/tag/release/${version}`
+
+  it('lists it, selects it and links to its tag page', async () => {
+    const release = product('4.0.0', official('4.0.0'))
+    reads([release])
+    mount(<Controlled />)
+    await waitFor(() => expect(screen.queryByRole('status')).toBeNull())
+    await chooseVersion('4.0.0')
+    expect(selected()).toBe('4.0.0')
+    const link = screen.getByRole('link', { name: 'admin:servers.native.release_details' })
+    expect(link.getAttribute('href')).toBe(release.release_url)
+    expect(link.getAttribute('rel')).toBe('noopener noreferrer')
+  })
+
+  it('refuses a product release whose link is built from its version instead', async () => {
+    // tag/4.0.0 is not where a product release lives; tag/release/4.0.0 is.
+    reads([product('4.0.0', 'https://github.com/KazuhaHub/Passwall-Node/releases/tag/4.0.0')])
+    mount(<Controlled />)
+    await screen.findByText('admin:servers.native.release_no_stable')
+    expect(screen.queryByRole('link')).toBeNull()
+    expect(selected()).toBe('')
+  })
+
+  it('still refuses a product link from anywhere else, and any injected scheme', async () => {
+    for (const release_url of [
+      'https://github.com/attacker/Passwall-Node/releases/tag/release/4.0.0',
+      'javascript:alert(1)',
+      'https://github.com/KazuhaHub/Passwall-Node/releases/tag/release/4.0.0?download=1',
+      'http://github.com/KazuhaHub/Passwall-Node/releases/tag/release/4.0.0',
+    ]) {
+      reads([product('4.0.0', release_url)])
+      const view = mount(<Controlled />)
+      await screen.findByText('admin:servers.native.release_no_stable')
+      expect(screen.queryByRole('link'), release_url).toBeNull()
+      view.unmount()
+    }
+  })
+
+  it('does not turn a version with a path in it into a link', async () => {
+    reads([product('4.0.0/../../latest', official('4.0.0'))])
+    mount(<Controlled />)
+    await screen.findByText('admin:servers.native.release_no_stable')
+    expect(screen.queryByRole('link')).toBeNull()
+  })
+})

@@ -4,7 +4,7 @@ import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import { useTranslation } from 'react-i18next'
 import { listNodeReleases, type NodeRelease, type NodeReleaseChannel } from '@/api/nodeReleases'
 import type { NativeInstallationSelection } from '@/api/servers'
-import { compareLegacyTag } from '@/utils/productVersion'
+import { compareLegacyTag, tagForVersion } from '@/utils/productVersion'
 
 export interface NodeReleaseSelectorProps {
   enabled: boolean
@@ -55,10 +55,22 @@ function supportsSelection(release: NodeRelease, selection: NativeInstallationSe
 }
 
 function officialReleaseURL(release: NodeRelease): string | undefined {
-  // Keep externally supplied metadata out of href unless it names exactly
-  // this project's official tag page, without credentials/query/fragment.
-  if (!/^v[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?$/.test(release.version)) return undefined
-  const expected = `https://github.com/KazuhaHub/Passwall-Node/releases/tag/${release.version}`
+  // Keep externally supplied metadata out of href unless it names exactly this
+  // project's official tag page, without credentials/query/fragment.
+  //
+  // THE PAGE IS ADDRESSED BY THE TAG, AND A TAG IS NOT A VERSION. A product
+  // release lives at `tag/release/4.0.0` while its version is `4.0.0`, so a
+  // guard that required a v-prefixed version AND rebuilt the URL from the
+  // version failed every product release. That is not a broken link: this is
+  // called as a FILTER, so the release never appeared in the list, and an
+  // operator with nothing to choose from concludes there is nothing to install.
+  //
+  // tagForVersion carries the shape rule, so the refusals that used to be the
+  // regex here — junk, and anything that could be read as a path — are refused
+  // by the shared rule instead of by a second copy of it.
+  const tag = tagForVersion(release.version)
+  if (!tag) return undefined
+  const expected = `https://github.com/KazuhaHub/Passwall-Node/releases/tag/${tag}`
   return release.release_url === expected ? expected : undefined
 }
 
