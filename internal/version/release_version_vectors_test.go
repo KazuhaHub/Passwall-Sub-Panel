@@ -50,6 +50,13 @@ type releaseVectors struct {
 		In  string `json:"in"`
 		Why string `json:"why"`
 	} `json:"reject"`
+
+	Versions []struct {
+		In     string `json:"in"`
+		Scheme string `json:"scheme"`
+		OK     bool   `json:"ok"`
+		Why    string `json:"why"`
+	} `json:"versions"`
 }
 
 func loadReleaseVectors(t *testing.T) releaseVectors {
@@ -65,7 +72,7 @@ func loadReleaseVectors(t *testing.T) releaseVectors {
 	if vectors.Format != 1 {
 		t.Fatalf("vectors format = %d, want 1", vectors.Format)
 	}
-	if len(vectors.Tags) == 0 || len(vectors.RejectTags) == 0 || len(vectors.Reject) == 0 {
+	if len(vectors.Tags) == 0 || len(vectors.RejectTags) == 0 || len(vectors.Reject) == 0 || len(vectors.Versions) == 0 {
 		t.Fatal("the vectors lost a section this test reads; a section that vanished would make this pass vacuously")
 	}
 	return vectors
@@ -132,6 +139,42 @@ func TestReleaseVersionVectorsRejectTheRejectedProductVersions(t *testing.T) {
 			}
 			if tag, ok := version.ReleaseTagFor(tc.In); ok && tag != tc.In {
 				t.Errorf("ReleaseTagFor(%q) = %q; a refused product version must not acquire a product tag", tc.In, tag)
+			}
+		})
+	}
+}
+
+// The version-shape vectors, which both consumers check.
+//
+// This is the section that keeps PSP's implementation and the released package
+// from drifting APART rather than merely each being self-consistent: a shape
+// PSP accepts and the released rule refuses shows up as a failure here, and the
+// vector's own reason is what the failure prints.
+//
+// The MAJOR is not part of this section. PSP reads one out of the accepted
+// strings and the released package has no equivalent accessor, so there is no
+// shared data to hold it to — its own table covers it, and the split is stated
+// rather than implied.
+func TestReleaseVersionVectorsAcceptAndRefuseVersions(t *testing.T) {
+	for _, tc := range loadReleaseVectors(t).Versions {
+		t.Run(tc.In, func(t *testing.T) {
+			if got := version.IsReleaseVersion(tc.In); got != tc.OK {
+				t.Fatalf("IsReleaseVersion(%q) = %v, and the released data says %v (%s)", tc.In, got, tc.OK, tc.Why)
+			}
+			if !tc.OK {
+				return
+			}
+			// An accepted string is a version in exactly one scheme, and the tag
+			// it is published under follows from which.
+			want := tc.In
+			if tc.Scheme == "product" {
+				want = version.ProductTagNamespace + tc.In
+			} else if tc.Scheme != "legacy" {
+				t.Fatalf("%q is accepted with scheme %q, which is neither", tc.In, tc.Scheme)
+			}
+			tag, ok := version.ReleaseTagFor(tc.In)
+			if !ok || tag != want {
+				t.Errorf("ReleaseTagFor(%q) = %q, %v; want %q", tc.In, tag, ok, want)
 			}
 		})
 	}
