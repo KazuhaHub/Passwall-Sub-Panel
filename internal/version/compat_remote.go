@@ -417,7 +417,8 @@ func applyPanelRangesDocument(raw []byte, now time.Time) error {
 	if err := applyCompatPayload(payload); err != nil {
 		return err
 	}
-	return storePolicySnapshot(payload)
+	storePolicySnapshotOrWarn(payload)
+	return nil
 }
 
 // applyPerMajorManifest is the per-major path: a manifest fetched by a URL that
@@ -486,7 +487,8 @@ func applyPerMajorManifest(ctx context.Context, raw []byte, url string) error {
 	if err := applyCompatPayload(payload); err != nil {
 		return err
 	}
-	return storePolicySnapshot(payload)
+	storePolicySnapshotOrWarn(payload)
+	return nil
 }
 
 // applyCompatPayload installs a fully-resolved policy document for the CURRENT

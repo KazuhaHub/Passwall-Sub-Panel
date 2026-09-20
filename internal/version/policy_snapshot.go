@@ -9,6 +9,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/KazuhaHub/passwall-sub-panel/internal/pkg/log"
 )
 
 // policySnapshotFile is the on-disk record of the last policy document this
@@ -42,6 +44,27 @@ type policySnapshot struct {
 	FetchedAt      time.Time       `json:"fetched_at"`
 	Digest         string          `json:"digest"`
 	Payload        json.RawMessage `json:"payload"`
+}
+
+// storePolicySnapshotOrWarn records the document that was applied, and reports a
+// failure to record it as the DEGRADATION it is rather than as a failed refresh.
+//
+// THE DOCUMENT IS ALREADY APPLIED AT THIS POINT. Returning this failure as the
+// apply's made the panel say "the most recent refresh failed" while it was running
+// the newest policy and showing the ceiling from the one before — a banner that
+// contradicts itself, about a local file. That is what an operator saw on a MySQL
+// deployment: nothing else had ever written to the data directory, so this
+// snapshot was the first thing to try, and it ran as a user with no permission
+// there.
+//
+// What is lost is the NEXT boot's replay when it cannot fetch. That path already
+// treats a missing snapshot as "nothing cached" and fetches, which is where it
+// starts without a snapshot at all — so this is a named degradation, logged
+// rather than swallowed, and not a reason to claim the policy did not arrive.
+func storePolicySnapshotOrWarn(payload remoteCompatPayload) {
+	if err := storePolicySnapshot(payload); err != nil {
+		log.Warn("policy snapshot not stored; the document is applied, and a boot that cannot fetch will fall back to the compiled baseline", "err", err)
+	}
 }
 
 // storePolicySnapshot persists the document that was just applied.
