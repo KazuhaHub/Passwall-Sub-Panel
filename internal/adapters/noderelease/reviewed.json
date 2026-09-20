@@ -4,14 +4,36 @@
       "version": "v0.0.1-beta3",
       "psp_major": 4,
       "notes": "Reviewed PSP v4 agent protocol and exact release packaging. Remote upgrades require Linux/systemd, the upgrade helper, and unchanged state schema 9. Docker uses container-managed updates. Docker and Windows end-to-end installation has not been verified.",
-      "methods": ["linux", "docker", "manual"],
+      "methods": [
+        "linux",
+        "docker",
+        "manual"
+      ],
       "platforms": [
-        {"os": "linux", "arch": "amd64"},
-        {"os": "linux", "arch": "arm64"},
-        {"os": "darwin", "arch": "amd64"},
-        {"os": "darwin", "arch": "arm64"},
-        {"os": "windows", "arch": "amd64"},
-        {"os": "windows", "arch": "arm64"}
+        {
+          "os": "linux",
+          "arch": "amd64"
+        },
+        {
+          "os": "linux",
+          "arch": "arm64"
+        },
+        {
+          "os": "darwin",
+          "arch": "amd64"
+        },
+        {
+          "os": "darwin",
+          "arch": "arm64"
+        },
+        {
+          "os": "windows",
+          "arch": "amd64"
+        },
+        {
+          "os": "windows",
+          "arch": "arm64"
+        }
       ],
       "docker_published_tag": "v0.0.1-beta3"
     },
@@ -19,14 +41,36 @@
       "version": "v0.0.1-beta4",
       "psp_major": 4,
       "notes": "Reviewed PSP v4 agent protocol and exact release packaging. The Linux installer adds six-stage terminal feedback, TTY download progress and bounded active/running process checks; startup does not prove PSP sync, core or proxy readiness. Remote upgrades require Linux/systemd, the upgrade helper, and unchanged state schema 9. Docker uses container-managed updates. Docker and Windows end-to-end installation has not been verified.",
-      "methods": ["linux", "docker", "manual"],
+      "methods": [
+        "linux",
+        "docker",
+        "manual"
+      ],
       "platforms": [
-        {"os": "linux", "arch": "amd64"},
-        {"os": "linux", "arch": "arm64"},
-        {"os": "darwin", "arch": "amd64"},
-        {"os": "darwin", "arch": "arm64"},
-        {"os": "windows", "arch": "amd64"},
-        {"os": "windows", "arch": "arm64"}
+        {
+          "os": "linux",
+          "arch": "amd64"
+        },
+        {
+          "os": "linux",
+          "arch": "arm64"
+        },
+        {
+          "os": "darwin",
+          "arch": "amd64"
+        },
+        {
+          "os": "darwin",
+          "arch": "arm64"
+        },
+        {
+          "os": "windows",
+          "arch": "amd64"
+        },
+        {
+          "os": "windows",
+          "arch": "arm64"
+        }
       ],
       "docker_published_tag": "v0.0.1-beta4"
     },
@@ -34,14 +78,36 @@
       "version": "v0.0.1-beta6",
       "psp_major": 4,
       "notes": "Reviewed PSP v4 agent protocol, pn management workflow, Docker remote upgrades and exact release packaging. Manual packages cover Linux, macOS and Windows on amd64 and arm64.",
-      "methods": ["linux", "docker", "manual"],
+      "methods": [
+        "linux",
+        "docker",
+        "manual"
+      ],
       "platforms": [
-        {"os": "linux", "arch": "amd64"},
-        {"os": "linux", "arch": "arm64"},
-        {"os": "darwin", "arch": "amd64"},
-        {"os": "darwin", "arch": "arm64"},
-        {"os": "windows", "arch": "amd64"},
-        {"os": "windows", "arch": "arm64"}
+        {
+          "os": "linux",
+          "arch": "amd64"
+        },
+        {
+          "os": "linux",
+          "arch": "arm64"
+        },
+        {
+          "os": "darwin",
+          "arch": "amd64"
+        },
+        {
+          "os": "darwin",
+          "arch": "arm64"
+        },
+        {
+          "os": "windows",
+          "arch": "amd64"
+        },
+        {
+          "os": "windows",
+          "arch": "arm64"
+        }
       ],
       "docker_published_tag": "v0.0.1-beta6"
     },
@@ -49,14 +115,36 @@
       "version": "v0.0.1-beta7",
       "psp_major": 4,
       "notes": "Reviewed PSP v4 agent protocol, exact release packaging and managed Docker upgrades. The public Linux installer defaults to Stable, supports explicit Beta and install-only modes, and can install from an already verified offline release package. Container startup and Agent logs include timestamps and actionable credential/data mount diagnostics.",
-      "methods": ["linux", "docker", "manual"],
+      "methods": [
+        "linux",
+        "docker",
+        "manual"
+      ],
       "platforms": [
-        {"os": "linux", "arch": "amd64"},
-        {"os": "linux", "arch": "arm64"},
-        {"os": "darwin", "arch": "amd64"},
-        {"os": "darwin", "arch": "arm64"},
-        {"os": "windows", "arch": "amd64"},
-        {"os": "windows", "arch": "arm64"}
+        {
+          "os": "linux",
+          "arch": "amd64"
+        },
+        {
+          "os": "linux",
+          "arch": "arm64"
+        },
+        {
+          "os": "darwin",
+          "arch": "amd64"
+        },
+        {
+          "os": "darwin",
+          "arch": "arm64"
+        },
+        {
+          "os": "windows",
+          "arch": "amd64"
+        },
+        {
+          "os": "windows",
+          "arch": "arm64"
+        }
       ],
       "docker_published_tag": "v0.0.1-beta7"
     },
@@ -64,14 +152,36 @@
       "version": "v0.0.1-beta8",
       "psp_major": 4,
       "notes": "Reviewed PSP v4 agent protocol, exact release packaging and managed Docker upgrades. Docker deployments use explicit project directories: ./config for the read-only credential, ./data for persistent writable state, and ./upgrades only when the updater is enabled. This avoids NAS Compose implementations creating a missing file bind source as a directory.",
-      "methods": ["linux", "docker", "manual"],
+      "methods": [
+        "linux",
+        "docker",
+        "manual"
+      ],
       "platforms": [
-        {"os": "linux", "arch": "amd64"},
-        {"os": "linux", "arch": "arm64"},
-        {"os": "darwin", "arch": "amd64"},
-        {"os": "darwin", "arch": "arm64"},
-        {"os": "windows", "arch": "amd64"},
-        {"os": "windows", "arch": "arm64"}
+        {
+          "os": "linux",
+          "arch": "amd64"
+        },
+        {
+          "os": "linux",
+          "arch": "arm64"
+        },
+        {
+          "os": "darwin",
+          "arch": "amd64"
+        },
+        {
+          "os": "darwin",
+          "arch": "arm64"
+        },
+        {
+          "os": "windows",
+          "arch": "amd64"
+        },
+        {
+          "os": "windows",
+          "arch": "arm64"
+        }
       ],
       "docker_published_tag": "v0.0.1-beta8"
     },
@@ -79,14 +189,36 @@
       "version": "v0.0.1-beta9",
       "psp_major": 4,
       "notes": "Reviewed PSP v4 agent protocol, exact release packaging and managed Docker upgrades. Docker startup now uses BusyBox-compatible ownership repair for the ./data directory; the published Alpine image is acceptance-tested with the documented ./config and ./data directory bind mounts.",
-      "methods": ["linux", "docker", "manual"],
+      "methods": [
+        "linux",
+        "docker",
+        "manual"
+      ],
       "platforms": [
-        {"os": "linux", "arch": "amd64"},
-        {"os": "linux", "arch": "arm64"},
-        {"os": "darwin", "arch": "amd64"},
-        {"os": "darwin", "arch": "arm64"},
-        {"os": "windows", "arch": "amd64"},
-        {"os": "windows", "arch": "arm64"}
+        {
+          "os": "linux",
+          "arch": "amd64"
+        },
+        {
+          "os": "linux",
+          "arch": "arm64"
+        },
+        {
+          "os": "darwin",
+          "arch": "amd64"
+        },
+        {
+          "os": "darwin",
+          "arch": "arm64"
+        },
+        {
+          "os": "windows",
+          "arch": "amd64"
+        },
+        {
+          "os": "windows",
+          "arch": "arm64"
+        }
       ],
       "docker_published_tag": "v0.0.1-beta9"
     },
@@ -94,14 +226,36 @@
       "version": "v0.0.1-beta10",
       "psp_major": 4,
       "notes": "Reviewed PSP v4 agent protocol, exact release packaging and managed Docker upgrades. The v1 report contract gains host telemetry: CPU, memory, disk, network and load are collected on the Node side without root. Core process identity is published as a verifiable handle, and agent logs adopt the panel's Xray line format.",
-      "methods": ["linux", "docker", "manual"],
+      "methods": [
+        "linux",
+        "docker",
+        "manual"
+      ],
       "platforms": [
-        {"os": "linux", "arch": "amd64"},
-        {"os": "linux", "arch": "arm64"},
-        {"os": "darwin", "arch": "amd64"},
-        {"os": "darwin", "arch": "arm64"},
-        {"os": "windows", "arch": "amd64"},
-        {"os": "windows", "arch": "arm64"}
+        {
+          "os": "linux",
+          "arch": "amd64"
+        },
+        {
+          "os": "linux",
+          "arch": "arm64"
+        },
+        {
+          "os": "darwin",
+          "arch": "amd64"
+        },
+        {
+          "os": "darwin",
+          "arch": "arm64"
+        },
+        {
+          "os": "windows",
+          "arch": "amd64"
+        },
+        {
+          "os": "windows",
+          "arch": "arm64"
+        }
       ],
       "docker_published_tag": "v0.0.1-beta10"
     },
@@ -109,16 +263,112 @@
       "version": "v0.0.1-beta11",
       "psp_major": 4,
       "notes": "Reviewed PSP v4 agent protocol, exact release packaging and managed Docker upgrades. Adds the diagnostics.collect.v1 contract and the remote diagnostic that answers it, carrying the four events a diagnostic records. Supersedes v0.0.1-beta10, which panics when a host report has no network section.",
-      "methods": ["linux", "docker", "manual"],
+      "methods": [
+        "linux",
+        "docker",
+        "manual"
+      ],
       "platforms": [
-        {"os": "linux", "arch": "amd64"},
-        {"os": "linux", "arch": "arm64"},
-        {"os": "darwin", "arch": "amd64"},
-        {"os": "darwin", "arch": "arm64"},
-        {"os": "windows", "arch": "amd64"},
-        {"os": "windows", "arch": "arm64"}
+        {
+          "os": "linux",
+          "arch": "amd64"
+        },
+        {
+          "os": "linux",
+          "arch": "arm64"
+        },
+        {
+          "os": "darwin",
+          "arch": "amd64"
+        },
+        {
+          "os": "darwin",
+          "arch": "arm64"
+        },
+        {
+          "os": "windows",
+          "arch": "amd64"
+        },
+        {
+          "os": "windows",
+          "arch": "arm64"
+        }
       ],
       "docker_published_tag": "v0.0.1-beta11"
+    },
+    {
+      "version": "v0.0.1-beta12",
+      "psp_major": 4,
+      "notes": "Reviewed PSP v4 agent protocol and exact release packaging. A bridge release: it carries the release-identity rule (releaseid), the tag/version split in the release and upgrade paths, and a supervisor fix that stopped a core exiting exactly at the startup grace from being accepted as started. State schema 9 and upgrade contract 1 are unchanged from v0.0.1-beta11, and the signing code is byte-identical, so nothing downstream of the artifacts changes. Remote upgrades require Linux/systemd, the upgrade helper, and unchanged state schema 9. Docker uses container-managed updates. Docker and Windows end-to-end installation has not been verified, and no end-to-end upgrade on a real host has been performed for this release.",
+      "methods": [
+        "linux",
+        "docker",
+        "manual"
+      ],
+      "platforms": [
+        {
+          "os": "linux",
+          "arch": "amd64"
+        },
+        {
+          "os": "linux",
+          "arch": "arm64"
+        },
+        {
+          "os": "darwin",
+          "arch": "amd64"
+        },
+        {
+          "os": "darwin",
+          "arch": "arm64"
+        },
+        {
+          "os": "windows",
+          "arch": "amd64"
+        },
+        {
+          "os": "windows",
+          "arch": "arm64"
+        }
+      ],
+      "docker_published_tag": "v0.0.1-beta12"
+    },
+    {
+      "version": "4.0.0",
+      "psp_major": 4,
+      "notes": "Reviewed PSP v4 agent protocol and exact release packaging. The first release under the product scheme: the tag is release/4.0.0 and the version is 4.0.0, the archive is named passwall-node_4.0.0_linux_<arch>.tar.gz, and the exact image tag is 4.0.0. The download chain was verified against the published release rather than constructed: the slash-bearing URL serves the asset, the checksum manifest names it exactly once, and sha256sum --check passes. State schema 9 and upgrade contract 1 are unchanged. Published as a pre-release, so no stable pointer moved. Remote upgrades require Linux/systemd, the upgrade helper, and unchanged state schema 9. Docker uses container-managed updates. Docker and Windows end-to-end installation has not been verified, and no end-to-end upgrade on a real host has been performed for this release.",
+      "methods": [
+        "linux",
+        "docker",
+        "manual"
+      ],
+      "platforms": [
+        {
+          "os": "linux",
+          "arch": "amd64"
+        },
+        {
+          "os": "linux",
+          "arch": "arm64"
+        },
+        {
+          "os": "darwin",
+          "arch": "amd64"
+        },
+        {
+          "os": "darwin",
+          "arch": "arm64"
+        },
+        {
+          "os": "windows",
+          "arch": "amd64"
+        },
+        {
+          "os": "windows",
+          "arch": "arm64"
+        }
+      ],
+      "docker_published_tag": "4.0.0"
     }
   ],
   "excluded": [
