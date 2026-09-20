@@ -2403,7 +2403,8 @@
         "applying": "Agent applying configuration; runtime not yet confirmed",
         "running": "Proxy core confirmed running",
         "error": "Agent or core reported an error. Check the node logs."
-      }
+      },
+      "release_no_target_for_node": "No release in this channel applies to this node."
     },
     "table": {
       "name": "Server name",

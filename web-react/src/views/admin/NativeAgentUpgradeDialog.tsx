@@ -62,7 +62,7 @@ export function NativeAgentUpgradeDialog({ server, onClose }: { server: Server |
         <TextField label={t('admin:servers.agent_upgrade.current')} value={expected} slotProps={{ input: { readOnly: true } }} />
         <NodeReleaseSelector key={server?.id} enabled={!!server} selection={{ method: 'linux', os: 'linux', arch: 'amd64' }}
           initialChannel={server?.update_channel === 'beta' ? 'testing' : 'stable'} value={version}
-          onChange={next => { setVersion(next); if (!error) key.current = '' }} autoSelectLatest disabled={busy || !!task || !!error} />
+          onChange={next => { setVersion(next); if (!error) key.current = '' }} autoSelectLatest context="upgrade" disabled={busy || !!task || !!error} />
         <Typography variant="body2">{t('admin:servers.agent_upgrade.version_hint')}</Typography>
         {error && <Alert severity="error">{error}</Alert>}
         {task && <>

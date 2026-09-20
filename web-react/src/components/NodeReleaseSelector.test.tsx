@@ -231,3 +231,24 @@ describe('Passwall Node release selection', () => {
     expect(selected()).toBe('')
   })
 })
+
+// An empty list means different things to the two callers, and the difference is
+// not cosmetic: an INSTALL list is empty when the channel has nothing for this
+// platform, an UPGRADE list when nothing in the channel applies to the node in
+// front of you. Saying "no stable releases" to someone upgrading sends them
+// looking for a release that is not missing.
+describe('the empty state answers the question that was asked', () => {
+  it('tells an upgrade caller that nothing applies to this node', async () => {
+    reads([])
+    mount(<NodeReleaseSelector enabled selection={linux} value="" onChange={() => {}} context="upgrade" />)
+    expect(await screen.findByText('admin:servers.native.release_no_target_for_node')).toBeTruthy()
+    expect(screen.queryByText('admin:servers.native.release_no_stable')).toBeNull()
+  })
+
+  it('keeps the channel wording for an install caller', async () => {
+    reads([])
+    mount(<NodeReleaseSelector enabled selection={linux} value="" onChange={() => {}} />)
+    expect(await screen.findByText('admin:servers.native.release_no_stable')).toBeTruthy()
+    expect(screen.queryByText('admin:servers.native.release_no_target_for_node')).toBeNull()
+  })
+})

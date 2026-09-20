@@ -17,6 +17,14 @@ export interface NodeReleaseSelectorProps {
   compact?: boolean
   /** Upgrade flows can opt into selecting the newest reviewed release automatically. */
   autoSelectLatest?: boolean
+  /**
+   * What the caller is selecting for. The empty-state message differs because
+   * the reason does: an INSTALL list is empty when the channel has nothing for
+   * this platform, and an UPGRADE list is empty when nothing in the channel
+   * applies to the node in front of you — which is not the same sentence and,
+   * said wrong, sends the operator looking for a release that is not missing.
+   */
+  context?: 'install' | 'upgrade'
 }
 
 function supportsSelection(release: NodeRelease, selection: NativeInstallationSelection): boolean {
@@ -38,7 +46,7 @@ function officialReleaseURL(release: NodeRelease): string | undefined {
   return release.release_url === expected ? expected : undefined
 }
 
-export default function NodeReleaseSelector({ enabled, selection, value, onChange, disabled = false, initialChannel = 'stable', compact = false, autoSelectLatest = false }: NodeReleaseSelectorProps) {
+export default function NodeReleaseSelector({ enabled, selection, value, onChange, disabled = false, initialChannel = 'stable', compact = false, autoSelectLatest = false, context = 'install' }: NodeReleaseSelectorProps) {
   const { t, i18n } = useTranslation(['admin', 'common'])
   const reviewID = useId()
   const [channel, setChannel] = useState<NodeReleaseChannel>(initialChannel)
@@ -166,7 +174,9 @@ export default function NodeReleaseSelector({ enabled, selection, value, onChang
       {t('admin:servers.native.release_failed')}
     </Alert>}
     {!loading && !failed && releases !== null && options.length === 0 && <Alert severity="info">
-      {t(channel === 'stable' ? 'admin:servers.native.release_no_stable' : 'admin:servers.native.release_no_testing')}
+      {context === 'upgrade'
+        ? t('admin:servers.native.release_no_target_for_node')
+        : t(channel === 'stable' ? 'admin:servers.native.release_no_stable' : 'admin:servers.native.release_no_testing')}
     </Alert>}
     {details && (compact ? <Accordion key={value} disableGutters elevation={0} slotProps={{ transition: { unmountOnExit: true } }}>
       <AccordionSummary id={reviewID} aria-controls={`${reviewID}-details`} expandIcon={<ExpandMoreIcon />}>

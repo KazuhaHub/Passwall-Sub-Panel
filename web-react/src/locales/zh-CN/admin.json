@@ -2401,7 +2401,8 @@
         "applying": "Agent 正在应用配置，尚未确认运行",
         "running": "代理内核已确认运行",
         "error": "Agent 或内核报告错误，请检查节点日志"
-      }
+      },
+      "release_no_target_for_node": "该渠道下没有适用于此节点的发布版本。"
     },
     "table": {
       "name": "服务器名称",
