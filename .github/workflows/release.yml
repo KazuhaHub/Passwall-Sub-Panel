@@ -17,8 +17,9 @@ name: Release
 on:
   push:
     tags:
-      # BOTH SCHEMES. `v*` is the legacy shape and stays until the last v-named
-      # release is out of support; `release/*` is the product shape
+      # ONE SCHEME. `release/*` is the shape this project publishes; the v-prefixed
+      # trigger went with the scheme it belonged to, because a workflow that can
+      # still cut a v-named release is a way to publish one the panel cannot read
       # (release/MAJOR.MINOR.PATCH).
       #
       # IT WAS WITHHELD UNTIL THE READING SIDE CAUGHT UP, because a product
@@ -34,12 +35,11 @@ on:
       # reconciling it (#183). That is the condition this trigger was waiting on,
       # and deploy/release_workflow_test.mjs was rewritten to REQUIRE the pattern
       # in the same change rather than deleted.
-      - "v*"
       - "release/*"
   workflow_dispatch:
     inputs:
       tag:
-        description: "Release tag, for example v1.0.0"
+        description: "Release tag, for example release/4.0.0"
         required: true
         type: string
       channel:

@@ -62,7 +62,10 @@ jobs:
           # and each case carries the commit its tag must still resolve to.
           #
           # Matched by POSITION, never by comparing versions: the prerelease
-          # suffix sorts lexically, so v0.0.1-beta9 ranks above v0.0.1-beta11.
+          # suffix sorted lexically, so v0.0.1-beta9 ranked above v0.0.1-beta11.
+          # The scheme is gone and the rule is kept, because it is the mechanism
+          # both sides implement: a version compares numerically now, so the two
+          # agree, and the floor stays an index rather than a comparison.
           #
           # Written to a file and read back line by line rather than expanded
           # into the shell: the planner validates every element, and nothing it
