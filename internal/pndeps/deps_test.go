@@ -48,7 +48,7 @@ var allowedResidual = map[string]residualDependency{
 	},
 	"github.com/KazuhaHub/passwall-node/deployment": {
 		successor: "a pinned, signed installation template consumed by a PSP adapter",
-		files:     5,
+		files:     4,
 	},
 	"github.com/KazuhaHub/passwall-node/corecatalog": {
 		successor: "the dynamically reviewed release policy",
