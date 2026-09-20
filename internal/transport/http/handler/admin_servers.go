@@ -826,12 +826,13 @@ func (h *AdminServersHandler) Test(c *gin.Context) {
 // pulling a future schema-breaking release (e.g. the 2026-05-23 v3.1.0
 // inbound serialization change that v3.5.1 had to special-case).
 //
-// Admin can bypass the gate with body {"force": true} — that path is
-// the explicit "I know it's untested, do it anyway" escape hatch and is
-// audited separately as panel_upgrade_forced so the trail is obvious.
-// Force is also the only way to recover when remote-compat JSON has
-// never been fetched (CheckXUI returns Unknown for everything, normal
-// path always refuses).
+// Admin can bypass the gate with body {"force": true} for a target that is
+// merely UNTESTED — the explicit "I know PSP hasn't verified this release, do it
+// anyway" escape hatch, audited separately as panel_upgrade_forced. It does NOT
+// cover every non-supported status: a panel below the compiled MinXUI floor, or
+// one whose version PSP cannot classify, is refused with or without force (see
+// version.CanForceXUI). Firing an upgrade at a panel this build cannot speak to
+// is not a risk the admin is in a position to accept.
 //
 // 3X-UI's /updatePanel has no version-selection knob — it always pulls
 // latest from GitHub. So PSP can't "downgrade" or "pin" the target; it
@@ -841,8 +842,10 @@ func (h *AdminServersHandler) Test(c *gin.Context) {
 // written, the post-upgrade smoke probe is scheduled, and the handler
 // returns 202 Accepted immediately (the panel restart drops the
 // connection mid-call; the adapter swallows the resulting EOF). The
-// smoke probe writes a follow-up panel_upgrade_succeeded / _failed
-// audit row when it eventually concludes.
+// smoke probe writes a follow-up audit row when it eventually concludes:
+// panel_upgrade_succeeded (back on the requested release), _target_mismatch
+// (reachable, but on some other version), _schema_break (reachable, inbounds
+// no longer decode) or _failed (never came back).
 type upgradePanelRequest struct {
 	Force bool `json:"force"`
 }
@@ -899,9 +902,10 @@ func (h *AdminServersHandler) UpgradePreview(c *gin.Context) {
 	resp["compat_message"] = version.CompatMessage(info.LatestVersion, compat)
 	resp["psp_min_xui"] = version.ActiveMinXUI()
 	resp["psp_max_xui"] = version.ActiveMaxTestedXUI()
-	// can_force mirrors UpgradePanel's gate: an untested target is overridable,
-	// so the UI can pre-color the confirm as "forced" before the admin proceeds.
-	resp["can_force"] = compat != version.CompatSupported
+	// can_force mirrors UpgradePanel's gate: only an untested target is
+	// overridable, so the UI can pre-color the confirm as "forced" before the
+	// admin proceeds — and never offers an override the server would refuse.
+	resp["can_force"] = version.CanForceXUI(compat)
 	if adv, ok := version.LookupXUIAdvisory(info.LatestVersion); ok {
 		resp["advisory"] = gin.H{
 			"severity":     adv.Severity,
@@ -966,22 +970,32 @@ func (h *AdminServersHandler) UpgradePanel(c *gin.Context) {
 		log.Warn("upgrade-panel: force-refresh remote compat", "panel_id", id, "err", rerr)
 	}
 	compat := version.CheckXUI(info.LatestVersion)
-	if compat != version.CompatSupported && !req.Force {
-		// Refuse: latest is outside the currently-loaded tested range
-		// (or compat data isn't loaded yet → everything is Unknown).
-		// Audit the rejection so the trail shows admin tried + got
-		// blocked + can retry with force.
+	// Force accepts ONE risk — an unmeasured release — not every non-supported
+	// status. A target below the compiled floor, or one PSP cannot classify at
+	// all, is refused whether or not the body says force; see version.CanForceXUI.
+	if compat != version.CompatSupported && !(version.CanForceXUI(compat) && req.Force) {
+		// Refuse: latest is outside the currently-loaded tested range, or is
+		// below the floor this build speaks to, or compat data isn't loaded yet
+		// (everything reads Unknown). Audit the rejection so the trail shows
+		// admin tried + got blocked.
+		reason := "untested_target"
+		message := version.CompatMessage(info.LatestVersion, compat) + " — upgrade PSP first, or resend with {force: true} to override at your own risk"
+		if !version.CanForceXUI(compat) {
+			// Force would not help here, so do not invite the admin to try it.
+			reason = "hard_incompatible"
+			message = version.CompatMessage(info.LatestVersion, compat) + " — force cannot override this; the panel must be moved to a version PSP supports"
+		}
 		h.writeUpgradeAudit(c, "panel_upgrade_blocked", panel, info.LatestVersion,
 			"target latest version "+info.LatestVersion+" outside PSP active tested range ["+version.ActiveMinXUI()+", "+version.ActiveMaxTestedXUI()+"] (compat="+compat.String()+")")
 		c.JSON(http.StatusConflict, gin.H{
 			"ok":             false,
-			"reason":         "untested_target",
+			"reason":         reason,
 			"latest_version": info.LatestVersion,
 			"compat_status":  compat.String(),
 			"psp_min_xui":    version.ActiveMinXUI(),
 			"psp_max_xui":    version.ActiveMaxTestedXUI(),
-			"message":        version.CompatMessage(info.LatestVersion, compat) + " — upgrade PSP first, or resend with {force: true} to override at your own risk",
-			"can_force":      true,
+			"message":        message,
+			"can_force":      version.CanForceXUI(compat),
 		})
 		return
 	}
@@ -1327,12 +1341,27 @@ func (h *AdminServersHandler) UpgradeXray(c *gin.Context) {
 	})
 }
 
+// Timings for runPostUpgradeSmoke. They are variables rather than constants so
+// a test can drive the whole retry loop instead of waiting out a real panel
+// restart; production never writes them.
+var (
+	upgradeSmokeGrace    = 60 * time.Second
+	upgradeSmokeInterval = 10 * time.Second
+	upgradeSmokeAttempts = 12
+)
+
 // runPostUpgradeSmoke waits for the panel to come back after a
-// /updatePanel restart, then verifies both that /server/status returns
-// 200 (panel is alive) and that /inbounds/list decodes (schema didn't
-// silently break, à la the v3.1.0 incident). Records the outcome via
-// audit. Runs in the panel-wide background context so it survives the
-// admin's HTTP request returning.
+// /updatePanel restart, then verifies BOTH that it is running the release the
+// upgrade asked for and that /inbounds/list still decodes (schema didn't
+// silently break, à la the v3.1.0 incident). Records the outcome via audit.
+// Runs in the panel-wide background context so it survives the admin's HTTP
+// request returning.
+//
+// The version check is the point. 3X-UI's /updatePanel pulls the latest GitHub
+// release on its own schedule, so a panel can come back alive — status 200,
+// inbounds decoding — while still running the version it had before. Treating
+// "reachable" as "upgraded" is how a failed upgrade gets recorded as a success
+// and the admin stops looking; only the requested release counts.
 //
 // Timing: 60s initial grace (3X-UI usually takes ~10-15s to come back
 // up; 60s gives broad headroom), then poll every 10s for up to 2 minutes
@@ -1340,9 +1369,9 @@ func (h *AdminServersHandler) UpgradeXray(c *gin.Context) {
 // /inbounds/list errors with a JSON decode failure, that's the v3.1.0
 // pattern — flagged explicitly so admin grep on "schema_break" finds it.
 func (h *AdminServersHandler) runPostUpgradeSmoke(ctx context.Context, panelID int64, panelName, targetVersion string) {
-	const initialGrace = 60 * time.Second
-	const probeInterval = 10 * time.Second
-	const maxAttempts = 12
+	initialGrace := upgradeSmokeGrace
+	probeInterval := upgradeSmokeInterval
+	maxAttempts := upgradeSmokeAttempts
 
 	select {
 	case <-time.After(initialGrace):
@@ -1363,6 +1392,10 @@ func (h *AdminServersHandler) runPostUpgradeSmoke(ctx context.Context, panelID i
 		return
 	}
 	var lastErr error
+	// The version the panel last reported while reachable. Empty means it never
+	// answered at all, which is a different verdict from "answered at the wrong
+	// version" and must be reported as one.
+	var lastObserved string
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		if ctx.Err() != nil {
 			h.writeSmokeAudit(context.Background(), "panel_upgrade_aborted", panelID, panelName, targetVersion,
@@ -1384,7 +1417,24 @@ func (h *AdminServersHandler) runPostUpgradeSmoke(ctx context.Context, panelID i
 			}
 			continue
 		}
-		// /status came back — second probe: schema-decode of
+		// The panel answered — but answering is not the same as having upgraded.
+		// Keep polling until it reports the exact release this upgrade asked for;
+		// a panel mid-restart can serve /status before it has swapped binaries,
+		// so a mismatch on an early attempt is not yet a verdict.
+		lastObserved = status.PanelVersion
+		if !version.SameXUIRelease(status.PanelVersion, targetVersion) {
+			log.Debug("upgrade smoke: panel up at the wrong version", "panel_id", panelID, "attempt", attempt,
+				"observed", status.PanelVersion, "target", targetVersion)
+			select {
+			case <-time.After(probeInterval):
+			case <-ctx.Done():
+				h.writeSmokeAudit(context.Background(), "panel_upgrade_aborted", panelID, panelName, targetVersion,
+					"smoke probe cancelled during retry sleep on attempt "+strconv.Itoa(attempt)+" — admin should manually verify")
+				return
+			}
+			continue
+		}
+		// At the requested release — second probe: schema-decode of
 		// /inbounds/list. If decoding errors, that's the schema-break
 		// signature (the v3.1.0 incident shape).
 		listCtx, lcancel := context.WithTimeout(ctx, 15*time.Second)
@@ -1407,11 +1457,20 @@ func (h *AdminServersHandler) runPostUpgradeSmoke(ctx context.Context, panelID i
 			"panel back online at "+status.PanelVersion+" (xray "+status.XrayVersion+"), inbounds decode ok")
 		return
 	}
+	if lastObserved != "" {
+		// The panel is up and serving, but never on the requested release. The
+		// upgrade did not land; say so instead of reporting a success the admin
+		// would take at face value.
+		h.writeSmokeAudit(ctx, "panel_upgrade_target_mismatch", panelID, panelName, targetVersion,
+			"panel is reachable but reports "+lastObserved+", not the requested "+targetVersion+
+				" — the upgrade did not land (3X-UI's /updatePanel pulls latest on its own schedule)")
+		return
+	}
 	if lastErr == nil {
 		lastErr = errors.New("unknown")
 	}
 	h.writeSmokeAudit(ctx, "panel_upgrade_failed", panelID, panelName, targetVersion,
-		"panel still unreachable after "+initialGrace.String()+" grace + "+(probeInterval*maxAttempts).String()+" of retries: "+lastErr.Error())
+		"panel still unreachable after "+initialGrace.String()+" grace + "+(probeInterval*time.Duration(maxAttempts)).String()+" of retries: "+lastErr.Error())
 }
 
 // writeUpgradeAudit is the in-request audit writer. detail is opaque text
