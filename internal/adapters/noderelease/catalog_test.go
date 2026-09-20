@@ -168,8 +168,9 @@ func TestPSPMajorForVersionBindsStampedCompatibility(t *testing.T) {
 		{"v3.9.2-beta.20", 3},
 		{"v5.0.0-beta.1", 5},
 		{"v102.1.0", 102},
-		// The product scheme: three integers, no prefix.
+		// The product scheme: three or four integers, no prefix.
 		{"4.0.0", 4},
+		{"4.0.0.1", 4},
 		{"102.1.0", 102},
 		// Refusals. A stamp that is not canonical must not inherit reviewed
 		// compatibility, and must not be repaired into something that does.
@@ -181,10 +182,11 @@ func TestPSPMajorForVersionBindsStampedCompatibility(t *testing.T) {
 		{"v4.0.0+build", 0},
 		{"v4.0.0/../../PRIVATE_RESPONSE", 0},
 		{"v999999999999999999999999999.0.0", 0},
-		// The product scheme is exactly three segments with no prerelease: a
+		// The product scheme is three or four segments with no prerelease: a
 		// candidate is distinguished by its CHANNEL, not by its version.
 		{"4.0", 0},
-		{"4.0.0.1", 0},
+		{"4.0.0.1.2", 0},
+		{"4.0.0.0", 0},
 		{"04.0.0", 0},
 		{"0.1.0", 0},
 		{"4.0.0-beta.1", 0},

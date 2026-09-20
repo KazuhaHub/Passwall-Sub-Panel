@@ -32,6 +32,11 @@ export interface ProductVersion {
   major: number
   minor: number
   patch: number
+  /** The optional fourth segment. ZERO MEANS ABSENT, which is why a literal
+   *  trailing zero is refused below: with it accepted, `1.2.3` and `1.2.3.0`
+   *  would be two spellings of one version, and a release identity is one string
+   *  naming one release. */
+  build: number
 }
 
 export type Scheme = 'product' | 'legacy'
@@ -61,16 +66,21 @@ export type Channel = 'stable' | 'testing'
 export function parseProductVersion(input: string): ProductVersion {
   if (input === '') throw new ReleaseIdError('releaseid: empty')
   const parts = input.split('.')
-  if (parts.length > 3) {
+  if (parts.length > 4) {
     throw new ReleaseIdError(
-      `releaseid: ${JSON.stringify(input)} has ${parts.length} segments, the format has three`,
+      `releaseid: ${JSON.stringify(input)} has ${parts.length} segments, the format has at most four`,
     )
   }
-  const segments = [0, 0, 0]
+  const segments = [0, 0, 0, 0]
   parts.forEach((part, i) => {
     segments[i] = parseSegment(part, input)
   })
-  return { major: segments[0], minor: segments[1], patch: segments[2] }
+  if (parts.length === 4 && segments[3] === 0) {
+    throw new ReleaseIdError(
+      `releaseid: ${JSON.stringify(input)} has a zero fourth segment, which is another way to write ${segments[0]}.${segments[1]}.${segments[2]}`,
+    )
+  }
+  return { major: segments[0], minor: segments[1], patch: segments[2], build: segments[3] }
 }
 
 function parseSegment(part: string, whole: string): number {
@@ -90,8 +100,10 @@ function parseSegment(part: string, whole: string): number {
   return n
 }
 
-/** Renders the fixed three-segment form. Every published surface uses this. */
+/** Renders the canonical form: three segments, or four when the BUILD component
+ *  is present. Lossless, because a zero fourth is refused at parse time. */
 export function formatProductVersion(v: ProductVersion): string {
+  if (v.build > 0) return `${v.major}.${v.minor}.${v.patch}.${v.build}`
   return `${v.major}.${v.minor}.${v.patch}`
 }
 
@@ -117,8 +129,8 @@ export function compareProductVersion(a: ProductVersion, b: ProductVersion): num
 /**
  * Parses a release tag.
  *
- * "release/MAJOR.MINOR.PATCH" is the current scheme, and the version part must
- * be exactly three segments: a tag is a published identity, so the short forms
+ * "release/MAJOR.MINOR.PATCH[.BUILD]" is the current scheme, and the version part must
+ * be three or four segments: a tag is a published identity, so the short forms
  * that are legal as parse input do not get releases of their own.
  *
  * Anything beginning with "v" is a LEGACY tag, returned as such without its
@@ -133,8 +145,9 @@ export function parseReleaseTag(raw: string): ReleaseTag {
     if (body.startsWith('v')) {
       throw new ReleaseIdError(`releaseid: ${JSON.stringify(raw)} puts a v inside the product tag namespace`)
     }
-    if ((body.match(/\./g) ?? []).length !== 2) {
-      throw new ReleaseIdError(`releaseid: ${JSON.stringify(raw)} is a product tag, which is always three segments`)
+    const dots = (body.match(/\./g) ?? []).length
+    if (dots !== 2 && dots !== 3) {
+      throw new ReleaseIdError(`releaseid: ${JSON.stringify(raw)} is a product tag, which is three or four segments`)
     }
     const product = parseProductVersion(body)
     if (product.major === 0) {
@@ -287,9 +300,11 @@ export function canonicalReleaseVersion(input: string): string | undefined {
   if (input.startsWith('v')) {
     return validLegacyVersion(input) ? input : undefined
   }
-  // Three segments, always: a version is a published identity, and the short
-  // forms parseProductVersion pads are input convenience, not identities.
-  if ((input.match(/\./g) ?? []).length !== 2) return undefined
+  // Three or four segments, never fewer: a version is a published identity, and
+  // the short forms parseProductVersion pads are input convenience, not
+  // identities. The fourth is the optional BUILD component.
+  const dots = (input.match(/\./g) ?? []).length
+  if (dots !== 2 && dots !== 3) return undefined
   try {
     const product = parseProductVersion(input)
     if (product.major === 0) return undefined
