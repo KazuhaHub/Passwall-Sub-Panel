@@ -49,17 +49,41 @@ func writeSnapshot(t *testing.T, dir string, payload remoteCompatPayload) policy
 	return snapshot
 }
 
-// mergedPolicy builds the document a fetch would have applied: the base
-// manifest with its range overlay folded in, exactly as fetchAndApply does
-// before it installs anything.
-func mergedPolicy(t *testing.T) remoteCompatPayload {
+// productPolicy builds the document a PRODUCT build actually reads, the way the
+// apply path builds it: from docs/compat/panel-ranges-v1.json, reached by name.
+//
+// IT REPLACES A PER-MAJOR FIXTURE. The old one folded v4.json's range overlay in,
+// which is the route a build with a derivable compatibility major takes — and a
+// product version has none, because its first segment is a release LINE rather
+// than a major, so no number can name that build's file. These cases are about
+// what a snapshot replays, so the fixture is the document the build would have
+// fetched.
+// The instant the shipped document is read at. Fixed rather than taken from the
+// clock: the document carries a window, and a test that moved with the wall clock
+// would start failing on the day the window closes rather than on the day the
+// document changes.
+var compatCacheNow = time.Date(2026, 9, 20, 12, 0, 0, 0, time.UTC)
+
+func productPolicy(t *testing.T) remoteCompatPayload {
 	t.Helper()
-	base := readCompatJSONForMajor(t, 4)
-	overlay := readCompatRangeOverlay(t)
-	base.SchemaVersion = overlay.SchemaVersion
-	base.Entries = overlay.Entries
-	base.SUIEntries = overlay.SUIEntries
-	return base
+	raw, err := os.ReadFile(filepath.Join("..", "..", "docs", "compat", "panel-ranges-v1.json"))
+	if err != nil {
+		t.Fatalf("read the shipped document: %v", err)
+	}
+	policy, err := ParsePanelRangesPolicy(raw, compatCacheNow)
+	if err != nil {
+		t.Fatalf("the shipped document does not parse: %v", err)
+	}
+	window := policy.AppliesToPSP
+	return remoteCompatPayload{
+		SchemaVersion: schemaVersion,
+		UpdatedAt:     policy.IssuedAt.UTC().Format(time.RFC3339),
+		Entries:       policy.Entries,
+		SUIEntries:    policy.SUIEntries,
+		Advisories:    policy.Advisories,
+		SUIAdvisories: policy.SUIAdvisories,
+		AppliesToPSP:  &window,
+	}
 }
 
 // The snapshot stores the DOCUMENT, not a conclusion. These cases exercise what
@@ -68,7 +92,7 @@ func mergedPolicy(t *testing.T) remoteCompatPayload {
 // carries prerelease-aware ranges, it lands on a DIFFERENT row for a beta than
 // for the stable line.
 func TestPolicySnapshotOnlyInstallsWhereTheDocumentApplies(t *testing.T) {
-	manifest := mergedPolicy(t)
+	manifest := productPolicy(t)
 
 	for _, tc := range []struct {
 		name       string
@@ -77,10 +101,15 @@ func TestPolicySnapshotOnlyInstallsWhereTheDocumentApplies(t *testing.T) {
 		wantErr    bool
 		wantUnread bool
 	}{
-		{name: "the pre-beta.9 range", current: "3.0.0", wantMax: "3.7.0"},
-		{name: "the beta.9 range", current: "4.0.0", wantMax: "3.8.5"},
-		{name: "the stable line", current: "4.0.0", wantMax: "3.8.5"},
-		{name: "another major", current: "v3.9.2", wantErr: true, wantUnread: true},
+		{name: "the released line", current: "4.0.0", wantMax: "3.8.5"},
+		{name: "a later release on the same line", current: "4.0.1", wantMax: "3.8.5"},
+		{name: "the top of the reviewed window", current: "4.99.99", wantMax: "3.8.5"},
+		// A LEGACY STAMP IS NOT AN IDENTITY ANY MORE, so it cannot be matched
+		// against a window either: the document does not apply, and no range is
+		// established for it.
+		{name: "a legacy stamp", current: "v4.0.0-beta.9", wantErr: true, wantUnread: true},
+		{name: "below the line", current: "3.9.2", wantErr: true, wantUnread: true},
+		{name: "above the window", current: "5.0.0", wantErr: true, wantUnread: true},
 		{name: "unparseable identity", current: "dev", wantErr: true, wantUnread: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -148,7 +177,15 @@ func TestPolicySnapshotRefusesADocumentThatFailsItsOwnIntegrityCheck(t *testing.
 				if err := json.Unmarshal(raw, &snapshot); err != nil {
 					t.Fatal(err)
 				}
-				edited := bytes.Replace(snapshot.Payload, []byte(`"major":4`), []byte(`"major":3`), 1)
+				// A FIELD THE NAMED DOCUMENT ACTUALLY CARRIES. This used to edit
+				// `"major":4`, which is a per-major manifest field: a panel ranges
+				// document has no major, so the edit changed nothing and the case
+				// stopped testing what it says it tests. The window is the field
+				// that decides whether the document applies at all.
+				edited := bytes.Replace(snapshot.Payload, []byte(`"max":"4.99.99"`), []byte(`"max":"9.99.99"`), 1)
+				if bytes.Equal(edited, snapshot.Payload) {
+					t.Fatal("the fixture payload carries no window to edit; this case would pass vacuously")
+				}
 				snapshot.Payload = edited // digest deliberately NOT recomputed
 				out, err := json.Marshal(snapshot)
 				if err != nil {
@@ -164,7 +201,13 @@ func TestPolicySnapshotRefusesADocumentThatFailsItsOwnIntegrityCheck(t *testing.
 				if err := json.Unmarshal(raw, &snapshot); err != nil {
 					t.Fatal(err)
 				}
-				snapshot.Payload = bytes.Replace(snapshot.Payload, []byte(`"major":4`), []byte(`"major":3`), 1)
+				// THE WINDOW'S FLOOR, not its ceiling: this case recomputes the
+				// digest, so the refusal has to come from the document's own
+				// applicability. Raising the floor above the build is what makes
+				// the document describe a release line this panel is not on —
+				// which is the named-document form of "a document for another
+				// major".
+				snapshot.Payload = bytes.Replace(snapshot.Payload, []byte(`"min":"4.0.0"`), []byte(`"min":"9.0.0"`), 1)
 				sum := sha256.Sum256(snapshot.Payload)
 				snapshot.Digest = hex.EncodeToString(sum[:])
 				out, err := json.Marshal(snapshot)
@@ -213,7 +256,7 @@ func TestPolicySnapshotRefusesADocumentThatFailsItsOwnIntegrityCheck(t *testing.
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := isolatedCompatCache(t, "4.0.0")
-			writeSnapshot(t, dir, mergedPolicy(t))
+			writeSnapshot(t, dir, productPolicy(t))
 			path := filepath.Join(dir, policySnapshotFile)
 			raw, err := os.ReadFile(path)
 			if err != nil {
@@ -239,7 +282,7 @@ func TestPolicySnapshotRefusesADocumentThatFailsItsOwnIntegrityCheck(t *testing.
 // snapshot from a different build looks like.
 func TestPolicySnapshotRoundTripsAndKeepsItsProvenance(t *testing.T) {
 	dir := isolatedCompatCache(t, "4.0.0")
-	snapshot := writeSnapshot(t, dir, mergedPolicy(t))
+	snapshot := writeSnapshot(t, dir, productPolicy(t))
 
 	if snapshot.SnapshotSchema != policySnapshotSchema {
 		t.Fatalf("snapshot format = %d", snapshot.SnapshotSchema)
@@ -257,7 +300,7 @@ func TestPolicySnapshotRoundTripsAndKeepsItsProvenance(t *testing.T) {
 		t.Fatalf("same-major replay: active=%q error=%v", ActiveMaxTestedXUI(), err)
 	}
 	SetActiveMaxTestedXUI("")
-	Version = "v3.9.2"
+	Version = "3.9.2"
 	if err := LoadPolicySnapshot(); err == nil || ActiveMaxTestedXUI() != "" {
 		t.Fatalf("cross-major replay: active=%q error=%v", ActiveMaxTestedXUI(), err)
 	}
@@ -279,7 +322,7 @@ func TestPolicySnapshotMissingOrDisabledIsNotAnError(t *testing.T) {
 // survive.
 func TestPolicySnapshotWriteLeavesNoTemporaryBehind(t *testing.T) {
 	dir := isolatedCompatCache(t, "4.0.0")
-	writeSnapshot(t, dir, mergedPolicy(t))
+	writeSnapshot(t, dir, productPolicy(t))
 
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -314,7 +357,7 @@ func TestLoadLatestXUICacheIsPSPMajorIndependent(t *testing.T) {
 // problem.
 func TestAFailedSnapshotLeavesTheActiveRangeAlone(t *testing.T) {
 	dir := isolatedCompatCache(t, "4.0.0")
-	writeSnapshot(t, dir, mergedPolicy(t))
+	writeSnapshot(t, dir, productPolicy(t))
 	path := filepath.Join(dir, policySnapshotFile)
 	if err := os.WriteFile(path, []byte("{ not json"), 0o600); err != nil {
 		t.Fatal(err)

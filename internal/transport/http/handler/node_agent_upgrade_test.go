@@ -65,11 +65,11 @@ func upgradeHTTPRequest(service NativeAgentUpgradeService, role domain.Role, met
 	return response
 }
 
-const upgradeHTTPBody = `{"version":"v0.0.1-beta3","expected_version":"v0.0.1-beta2"}`
+const upgradeHTTPBody = `{"version":"4.0.1","expected_version":"4.0.0"}`
 const upgradeHTTPKey = "request-upgrade-http-0001"
 
 func TestNativeUpgradeHTTPAdministratorBoundaryAndPrivateStatus(t *testing.T) {
-	status := &nodeagentupgrade.Status{TaskID: "tsk1_test", AgentID: "agt_test", Version: "v0.0.1-beta3", ExpectedVersion: "v0.0.1-beta2", Status: domain.NodeAgentTaskQueued, UpgradeState: "queued", NotAfterMS: 123456789}
+	status := &nodeagentupgrade.Status{TaskID: "tsk1_test", AgentID: "agt_test", Version: "4.0.1", ExpectedVersion: "4.0.0", Status: domain.NodeAgentTaskQueued, UpgradeState: "queued", NotAfterMS: 123456789}
 	service := &nativeUpgradeHTTPStub{status: status, created: true}
 	w := upgradeHTTPRequest(service, domain.RoleAdmin, http.MethodPost, "41/upgrade-node-agent", upgradeHTTPBody, upgradeHTTPKey)
 	if w.Code != http.StatusAccepted || service.calls != 1 || service.panelID != 41 || service.key != upgradeHTTPKey || service.request.Version != status.Version || service.request.ExpectedVersion != status.ExpectedVersion {
@@ -106,7 +106,7 @@ func TestNativeUpgradeHTTPAdministratorBoundaryAndPrivateStatus(t *testing.T) {
 }
 
 func TestNativeUpgradeHTTPStrictBoundedMetadataAndIdempotency(t *testing.T) {
-	for _, body := range []string{`null`, `{}`, `{"version":"latest","expected_version":"v0.0.1-beta2"}`, `{"version":"v0.0.1-beta2","expected_version":"v0.0.1-beta2"}`, `{"version":"v0.0.1-beta1","expected_version":"v0.0.1-beta2"}`, `{"version":"v0.0.1-beta3","expected_version":"v0.0.1-beta2","command":"private-secret"}`, `{"version":"v0.0.1-beta3","version":"v0.0.1-beta4","expected_version":"v0.0.1-beta2"}`, `{"VERSION":"v0.0.1-beta3","expected_version":"v0.0.1-beta2"}`, `{"version":1,"expected_version":"v0.0.1-beta2"}`, upgradeHTTPBody + ` {}`, strings.Repeat(" ", 4097) + upgradeHTTPBody} {
+	for _, body := range []string{`null`, `{}`, `{"version":"latest","expected_version":"4.0.0"}`, `{"version":"4.0.0","expected_version":"4.0.0"}`, `{"version":"4.0.0","expected_version":"4.0.1"}`, `{"version":"4.0.1","expected_version":"4.0.0","command":"private-secret"}`, `{"version":"4.0.1","version":"4.0.2","expected_version":"4.0.0"}`, `{"VERSION":"4.0.1","expected_version":"4.0.0"}`, `{"version":1,"expected_version":"4.0.0"}`, upgradeHTTPBody + ` {}`, strings.Repeat(" ", 4097) + upgradeHTTPBody} {
 		service := &nativeUpgradeHTTPStub{}
 		w := upgradeHTTPRequest(service, domain.RoleAdmin, http.MethodPost, "41/upgrade-node-agent", body, upgradeHTTPKey)
 		if w.Code != http.StatusBadRequest || service.calls != 0 {

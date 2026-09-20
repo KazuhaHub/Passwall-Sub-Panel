@@ -369,9 +369,8 @@ func unaccountedReleases(published, accounted []string) []string {
 // publishedRelease is one published release in both of its identities.
 //
 // THE TAG LOCATES IT AND THE VERSION ACCOUNTS FOR IT. GitHub reports a release's
-// tag_name, and this project publishes under two schemes in which those differ: a
-// product release's tag is `release/4.0.0` and its version is `4.0.0`. The
-// registry is keyed by version — it is the list of releases the panel may offer —
+// tag_name, and they are never the same string: a release's tag is
+// `release/4.0.0` and its version is `4.0.0`. The registry is keyed by version — it is the list of releases the panel may offer —
 // so reconciling on the tag would report a fully reviewed release as a gap whose
 // only remedy is an entry that is already there. The tag is kept because it is
 // what names a release to a reader and what addresses it on GitHub.
@@ -395,7 +394,7 @@ func publishedReleases(tags []string) ([]publishedRelease, error) {
 	for _, tag := range tags {
 		named, ok := version.VersionOfReleaseTag(tag)
 		if !ok {
-			return nil, fmt.Errorf("cannot identify the release published as %q: it is neither a legacy version tag nor a %q tag",
+			return nil, fmt.Errorf("cannot identify the release published as %q: it is not a %q tag",
 				tag, version.ProductTagNamespace)
 		}
 		published = append(published, publishedRelease{Tag: tag, Version: named})

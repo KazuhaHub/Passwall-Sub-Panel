@@ -91,30 +91,30 @@ func TestRenderKeepsTheDenominatorVisible(t *testing.T) {
 // WITHOUT making the decision automatic: the registry still says which releases
 // are offered, and this only refuses to let one go unmentioned.
 func TestUnaccountedReleases(t *testing.T) {
-	published := []string{"v0.0.1-beta3", "v0.0.1-beta4", "v0.0.1-beta9", "v0.0.1-beta10", "v0.0.1-beta11"}
+	published := []string{"4.0.0", "4.0.1", "4.0.2", "4.1.0", "4.1.1"}
 
 	// Everything decided: nothing to report.
-	if got := unaccountedReleases(published, []string{"v0.0.1-beta3", "v0.0.1-beta4", "v0.0.1-beta9", "v0.0.1-beta10", "v0.0.1-beta11"}); len(got) != 0 {
+	if got := unaccountedReleases(published, []string{"4.0.0", "4.0.1", "4.0.2", "4.1.0", "4.1.1"}); len(got) != 0 {
 		t.Fatalf("fully accounted registry reported %v", got)
 	}
 
 	// A release nobody has ruled on — the live case this exists for.
-	got := unaccountedReleases(published, []string{"v0.0.1-beta3", "v0.0.1-beta4", "v0.0.1-beta9"})
-	if len(got) != 2 || got[0] != "v0.0.1-beta10" || got[1] != "v0.0.1-beta11" {
+	got := unaccountedReleases(published, []string{"4.0.0", "4.0.1", "4.0.2"})
+	if len(got) != 2 || got[0] != "4.1.0" || got[1] != "4.1.1" {
 		t.Fatalf("unaccounted = %v, want the two newest", got)
 	}
 
 	// A MIDDLE release that was skipped rather than the newest — the case a
 	// "is the newest reviewed?" check would miss entirely.
-	got = unaccountedReleases(published, []string{"v0.0.1-beta3", "v0.0.1-beta4", "v0.0.1-beta10", "v0.0.1-beta11"})
-	if len(got) != 1 || got[0] != "v0.0.1-beta9" {
+	got = unaccountedReleases(published, []string{"4.0.0", "4.0.1", "4.1.0", "4.1.1"})
+	if len(got) != 1 || got[0] != "4.0.2" {
 		t.Fatalf("unaccounted = %v, want the skipped middle release", got)
 	}
 
 	// Order is the published order, so the report reads the way releases
 	// happened rather than the way a map happened to iterate.
-	got = unaccountedReleases([]string{"v0.0.1-beta11", "v0.0.1-beta10"}, nil)
-	if len(got) != 2 || got[0] != "v0.0.1-beta11" || got[1] != "v0.0.1-beta10" {
+	got = unaccountedReleases([]string{"4.1.1", "4.1.0"}, nil)
+	if len(got) != 2 || got[0] != "4.1.1" || got[1] != "4.1.0" {
 		t.Fatalf("unaccounted = %v, want the published order preserved", got)
 	}
 }
@@ -124,24 +124,29 @@ func TestUnaccountedReleases(t *testing.T) {
 // states: a real gap exits 1, and anything unreadable exits 2 rather than
 // passing for an all-clear.
 func TestNodeRegistryReport(t *testing.T) {
-	published, err := publishedReleases([]string{"v0.0.1-beta11", "v0.0.1-beta10", "v0.0.1-beta9", "v0.0.1-beta3"})
+	published, err := publishedReleases([]string{"release/4.1.1", "release/4.1.0", "release/4.0.2", "release/4.0.0"})
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	t.Run("an unruled-on release is a gap, naming the release", func(t *testing.T) {
 		got := nodeRegistryReport(nodeRegistry{
-			Releases: []nodeRegistryRelease{{Version: "v0.0.1-beta3"}, {Version: "v0.0.1-beta9"}},
+			Releases: []nodeRegistryRelease{{Version: "4.0.0"}, {Version: "4.0.2"}},
 		}, published, nil)
 		if got.Verdict != version.CeilingBehind {
 			t.Fatalf("verdict = %s, want behind", got.Verdict)
 		}
 		// The ceiling is the newest release that WAS ruled on, so the row reads
 		// as the gap: releases exist past the point anyone reviewed.
-		if got.Ceiling != "v0.0.1-beta9" || got.Latest != "v0.0.1-beta11" {
+		// REPORTED AS TAGS, which is what a release is addressed by: the match
+		// against the registry is made on the version and the tag is what comes
+		// out, so a reader can go and look at the release. The two were one
+		// string until the legacy scheme was removed, which is why this used to
+		// read as a pair of versions.
+		if got.Ceiling != "release/4.0.2" || got.Latest != "release/4.1.1" {
 			t.Fatalf("ceiling/latest = %s/%s, want the newest reviewed and the newest published", got.Ceiling, got.Latest)
 		}
-		for _, want := range []string{"v0.0.1-beta10", "v0.0.1-beta11"} {
+		for _, want := range []string{"4.1.0", "4.1.1"} {
 			if !strings.Contains(got.Reason, want) {
 				t.Errorf("reason does not name %s, so the reader cannot act: %q", want, got.Reason)
 			}
@@ -154,8 +159,8 @@ func TestNodeRegistryReport(t *testing.T) {
 	t.Run("a full accounting is current", func(t *testing.T) {
 		got := nodeRegistryReport(nodeRegistry{
 			Releases: []nodeRegistryRelease{
-				{Version: "v0.0.1-beta3"}, {Version: "v0.0.1-beta9"},
-				{Version: "v0.0.1-beta10"}, {Version: "v0.0.1-beta11"},
+				{Version: "4.0.0"}, {Version: "4.0.2"},
+				{Version: "4.1.0"}, {Version: "4.1.1"},
 			},
 		}, published, nil)
 		if got.Verdict != version.CeilingCurrent {
@@ -169,11 +174,11 @@ func TestNodeRegistryReport(t *testing.T) {
 	t.Run("an exclusion counts only when it says why", func(t *testing.T) {
 		// Decided, and the next reader can see why.
 		excluded := nodeRegistryReport(nodeRegistry{
-			Releases: []nodeRegistryRelease{{Version: "v0.0.1-beta3"}},
+			Releases: []nodeRegistryRelease{{Version: "4.0.0"}},
 			Excluded: []nodeRegistryExclusion{
-				{Version: "v0.0.1-beta9", Reason: "broken installer"},
-				{Version: "v0.0.1-beta10", Reason: "superseded by beta11"},
-				{Version: "v0.0.1-beta11", Reason: "withdrawn before rollout"},
+				{Version: "4.0.2", Reason: "broken installer"},
+				{Version: "4.1.0", Reason: "superseded by beta11"},
+				{Version: "4.1.1", Reason: "withdrawn before rollout"},
 			},
 		}, published, nil)
 		if excluded.Verdict != version.CeilingCurrent {
@@ -182,14 +187,14 @@ func TestNodeRegistryReport(t *testing.T) {
 		// A bare version moves the silence one line down instead of resolving
 		// it, so it must not count as having ruled on the release.
 		silent := nodeRegistryReport(nodeRegistry{
-			Releases: []nodeRegistryRelease{{Version: "v0.0.1-beta3"}},
+			Releases: []nodeRegistryRelease{{Version: "4.0.0"}},
 			Excluded: []nodeRegistryExclusion{
-				{Version: "v0.0.1-beta9", Reason: "broken installer"},
-				{Version: "v0.0.1-beta10", Reason: "superseded by beta11"},
-				{Version: "v0.0.1-beta11"},
+				{Version: "4.0.2", Reason: "broken installer"},
+				{Version: "4.1.0", Reason: "superseded by beta11"},
+				{Version: "4.1.1"},
 			},
 		}, published, nil)
-		if silent.Verdict != version.CeilingBehind || !strings.Contains(silent.Reason, "v0.0.1-beta11") {
+		if silent.Verdict != version.CeilingBehind || !strings.Contains(silent.Reason, "4.1.1") {
 			t.Fatalf("an exclusion with no reason must stay unaccounted: %+v", silent)
 		}
 	})
@@ -271,13 +276,12 @@ func TestPublishedReleasesRefusesATagItCannotIdentify(t *testing.T) {
 			}
 		})
 	}
-	// And the legacy scheme still resolves to itself.
-	legacy, err := publishedReleases([]string{"v0.0.1-beta11"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(legacy) != 1 || legacy[0].Tag != "v0.0.1-beta11" || legacy[0].Version != "v0.0.1-beta11" {
-		t.Fatalf("a legacy tag must resolve to itself as its version: %+v", legacy)
+	// A BARE VERSION IS NOT AN ADDRESS. This used to be the legacy round trip -
+	// the tag and the version were one string, so a bare version resolved to
+	// itself - and it is a refusal now: a release is published AT
+	// release/<version>, and a string that names no address locates no release.
+	if _, err := publishedReleases([]string{"4.1.1"}); err == nil {
+		t.Fatal("a bare version was accepted as a tag")
 	}
 }
 
@@ -287,7 +291,7 @@ func TestRemedyPointsAtTheRightFile(t *testing.T) {
 	var sb strings.Builder
 	writeTable(&sb, []version.CeilingReport{
 		{Upstream: "3X-UI", Ceiling: "3.7.0", Latest: "3.8.0", Verdict: version.CeilingBehind, Reason: "ahead"},
-		{Upstream: nodeRegistryUpstream, Ceiling: "v0.0.1-beta9", Latest: "v0.0.1-beta11", Verdict: version.CeilingBehind, Reason: "unaccounted"},
+		{Upstream: nodeRegistryUpstream, Ceiling: "4.0.2", Latest: "4.1.1", Verdict: version.CeilingBehind, Reason: "unaccounted"},
 	})
 	out := sb.String()
 	if !strings.Contains(out, compatPath) {
@@ -397,15 +401,15 @@ func serveListing(t *testing.T, pages map[int]string) (githubAPI, *githubRecorde
 // dialog came to recommend beta9 while beta11 was already published.
 func TestAllReleasesOrdersByPublicationNotVersion(t *testing.T) {
 	api, _ := serveListing(t, map[int]string{1: listing(
-		releaseJSON("v0.0.1-beta9", false, "2026-09-17T08:10:41Z"),
-		releaseJSON("v0.0.1-beta11", false, "2026-09-18T10:31:27Z"),
-		releaseJSON("v0.0.1-beta10", false, "2026-09-18T09:37:02Z"),
+		releaseJSON("4.0.2", false, "2026-09-17T08:10:41Z"),
+		releaseJSON("4.1.1", false, "2026-09-18T10:31:27Z"),
+		releaseJSON("4.1.0", false, "2026-09-18T09:37:02Z"),
 	)})
 	got, err := api.allReleases(context.Background(), "o/r")
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"v0.0.1-beta11", "v0.0.1-beta10", "v0.0.1-beta9"}
+	want := []string{"4.1.1", "4.1.0", "4.0.2"}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("allReleases = %v, want newest published first %v", got, want)
 	}
@@ -416,7 +420,7 @@ func TestAllReleasesOrdersByPublicationNotVersion(t *testing.T) {
 // release that does not exist.
 func TestAllReleasesDropsDraftsAndUntagged(t *testing.T) {
 	api, _ := serveListing(t, map[int]string{1: listing(
-		releaseJSON("v0.0.1-beta11", false, "2026-09-18T10:31:27Z"),
+		releaseJSON("4.1.1", false, "2026-09-18T10:31:27Z"),
 		releaseJSON("v0.0.1-beta12", true, "2026-09-18T11:00:00Z"),
 		releaseJSON("", false, "2026-09-18T12:00:00Z"),
 	)})
@@ -424,7 +428,7 @@ func TestAllReleasesDropsDraftsAndUntagged(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 1 || got[0] != "v0.0.1-beta11" {
+	if len(got) != 1 || got[0] != "4.1.1" {
 		t.Fatalf("allReleases = %v, want only the published, tagged release", got)
 	}
 }

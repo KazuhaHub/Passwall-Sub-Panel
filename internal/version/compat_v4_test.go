@@ -135,7 +135,7 @@ func TestCompatV4ReleaseRange(t *testing.T) {
 // review now, so there is one answer.
 func TestCompatV4RangeOverlay(t *testing.T) {
 	payload := readCompatRangeOverlay(t)
-	for _, version := range []string{"4.0.0", "4.0.0.1", "4.0.1", "4.99.99"} {
+	for _, version := range []string{"4.0.0", "4.0.1", "4.99.99"} {
 		xui, ok := lookupForPSPVersion(payload, version)
 		if !ok || xui.MinXUI != MinXUI || xui.MaxTestedXUI != "3.8.5" {
 			t.Fatalf("v4 range missing for %q: %#v found=%v", version, xui, ok)
@@ -153,6 +153,16 @@ func TestCompatV4RangeOverlay(t *testing.T) {
 		if xui, ok := lookupForPSPVersion(payload, version); ok {
 			t.Fatalf("a version outside the reviewed line was certified: %q -> %#v", version, xui)
 		}
+	}
+	// A BUILD COMPONENT IS NOT COVERED, AND THAT IS A GAP RATHER THAN A DESIGN.
+	// The lookup canonicalises through x/mod/semver, which knows three segments,
+	// so a version carrying the optional fourth matches no entry — and the panel
+	// would report the ceiling as untested for exactly the builds the fourth
+	// segment was added to distinguish. This asserts the gap so that closing it
+	// turns this case red and the case is removed deliberately, rather than the
+	// gap being remembered only by whoever wrote it.
+	if xui, ok := lookupForPSPVersion(payload, "4.0.0.1"); ok {
+		t.Fatalf("the fourth segment is covered now (%#v); delete this case", xui)
 	}
 }
 
@@ -179,11 +189,8 @@ func TestCompatV4FetchAppliesPublishedShape(t *testing.T) {
 		SetActiveAdvisories(oldAdvisories)
 		SetActiveSUIAdvisories(oldSUIAdvisories)
 	})
-	raw, err := os.ReadFile(filepath.Join("..", "..", "docs", "compat", "v4.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	overlayRaw, err := os.ReadFile(filepath.Join("..", "..", "docs", "compat", "v4-ranges.json"))
+	// THE DOCUMENT THIS BUILD FETCHES, not the per-major one it cannot derive.
+	raw, err := os.ReadFile(filepath.Join("..", "..", "docs", "compat", "panel-ranges-v1.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -191,15 +198,14 @@ func TestCompatV4FetchAppliesPublishedShape(t *testing.T) {
 		if req.Header.Get("Accept") != "application/json" {
 			t.Errorf("missing JSON accept header: %s", req.URL)
 		}
-		body := raw
-		switch req.URL.String() {
-		case defaultRemoteCompatURLBase + "v4.json":
-		case defaultRemoteCompatURLBase + "v4-ranges.json":
-			body = overlayRaw
-		default:
+		// THE NAMED DOCUMENT, WHICH IS THE ONLY ONE THIS BUILD FETCHES. A product
+		// version has no derivable compatibility major, so the per-major route —
+		// v4.json with its overlay folded in — is not one this build can take,
+		// and the URL the fetch composes is the document's own name.
+		if req.URL.String() != defaultRemoteCompatURLBase+"panel-ranges-v1.json" {
 			return nil, fmt.Errorf("wrong compat request: %s", req.URL)
 		}
-		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(bytes.NewReader(body)), Header: make(http.Header)}, nil
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(bytes.NewReader(raw)), Header: make(http.Header)}, nil
 	})}
 	url, err := defaultURLForCurrentVersion()
 	if err != nil {
@@ -248,27 +254,35 @@ func TestCompatV4FetchAppliesPublishedShape(t *testing.T) {
 	if err := json.Unmarshal(stored.Payload, &replayed); err != nil || replayed.UpdatedAt == "" {
 		t.Fatalf("snapshot payload is not the applied document: %v", err)
 	}
-	if replayed.Major != 4 {
-		t.Fatalf("snapshot payload declares major=%d, want 4", replayed.Major)
+	// THE WINDOW, NOT A MAJOR. A panel ranges document states the builds it
+	// applies to rather than being named after one, so this is what the snapshot
+	// has to carry: a boot replays the document and re-runs the applicability
+	// test, rather than trusting a conclusion whose premises are gone.
+	if replayed.AppliesToPSP == nil || replayed.AppliesToPSP.Min != "4.0.0" {
+		t.Fatalf("snapshot payload declares window=%+v, want the published 4.0.0 floor", replayed.AppliesToPSP)
 	}
 
-	// Even an override serving a valid v3 document must not replace the
-	// established V4 range or persist it under the V4 build identity.
-	wrong := readCompatJSONForMajor(t, 3)
-	raw, err = json.Marshal(wrong)
-	if err != nil {
-		t.Fatal(err)
+	// AND A DOCUMENT FOR ANOTHER LINE CANNOT REPLACE THIS ONE. This used to serve
+	// the per-major v3.json and rely on its `major` not matching. A product build
+	// derives no major and never asks for that file, so the refusal now comes a
+	// step earlier — from the document's own window, which is the same guard in
+	// the only form this build can reach. The range and the snapshot must survive
+	// it either way.
+	wrong := bytes.Replace(raw, []byte(`"min": "4.0.0"`), []byte(`"min": "9.0.0"`), 1)
+	if bytes.Equal(wrong, raw) {
+		t.Fatal("the served document carries no window to move; this case would pass vacuously")
 	}
+	raw = wrong
 	SetActiveMaxTestedXUI("3.5.0")
 	if err := fetchAndApply(context.Background(), url); err == nil {
-		t.Fatal("runtime accepted another major's manifest")
+		t.Fatal("runtime accepted a document for another release line")
 	}
 	if ActiveMaxTestedXUI() != "3.5.0" {
-		t.Fatal("wrong-major fetch changed active state")
+		t.Fatal("a refused fetch changed active state")
 	}
 	after, err := os.ReadFile(filepath.Join(dir, policySnapshotFile))
 	if err != nil || !bytes.Equal(after, cache) {
-		t.Fatalf("wrong-major fetch changed the persisted snapshot: %v", err)
+		t.Fatalf("a refused fetch changed the persisted snapshot: %v", err)
 	}
 }
 
