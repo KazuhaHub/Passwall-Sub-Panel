@@ -1,0 +1,96 @@
+{
+  "format": 1,
+  "comment": "Shared product-version vectors. Go, TypeScript and the release CLI consume THIS file; a second copy of the ordering rules is how three implementations start disagreeing. See docs: product-version-migration-plan.md section 8.",
+  "max_segment": 2147483647,
+
+  "normalize": [
+    { "in": "102", "out": "102.0.0" },
+    { "in": "102.0", "out": "102.0.0" },
+    { "in": "102.0.0", "out": "102.0.0" },
+    { "in": "102.1", "out": "102.1.0" },
+    { "in": "102.1.9", "out": "102.1.9" },
+    { "in": "102.1.10", "out": "102.1.10" },
+    { "in": "1.0.0", "out": "1.0.0" },
+    { "in": "0.0.0", "out": "0.0.0" },
+    { "in": "2147483647.2147483647.2147483647", "out": "2147483647.2147483647.2147483647" },
+    { "in": "102.0.1", "out": "102.0.1" }
+  ],
+
+  "reject": [
+    { "in": "0102.1", "why": "leading zero on a segment" },
+    { "in": "102.01", "why": "leading zero on a segment" },
+    { "in": "102..1", "why": "empty segment" },
+    { "in": "102.1.0.1", "why": "a fourth segment is a different format, not something to truncate" },
+    { "in": "102.1.0.0", "why": "a fourth segment is rejected even when it is zero" },
+    { "in": "", "why": "empty" },
+    { "in": ".", "why": "empty segments" },
+    { "in": "102.", "why": "trailing separator makes an empty segment" },
+    { "in": ".102", "why": "leading separator makes an empty segment" },
+    { "in": "-102", "why": "negative" },
+    { "in": "+102", "why": "sign" },
+    { "in": "102.-1", "why": "negative segment" },
+    { "in": " 102", "why": "surrounding whitespace is the caller's to trim; the parser is strict" },
+    { "in": "102 ", "why": "surrounding whitespace" },
+    { "in": "1e2", "why": "scientific notation" },
+    { "in": "1E2", "why": "scientific notation" },
+    { "in": "0x102", "why": "hex" },
+    { "in": "１０２", "why": "full-width digits are not ASCII digits" },
+    { "in": "102.1.0-beta", "why": "the new scheme has no prerelease suffix; that is a legacy identity" },
+    { "in": "102.1.0+build", "why": "no build metadata in the product version" },
+    { "in": "2147483648", "why": "one past the segment ceiling" },
+    { "in": "99999999999999999999", "why": "far past the ceiling, must not overflow or truncate" },
+    { "in": "v102.1.0", "why": "the v-prefixed form is a legacy identity, never normalised into the new scheme" },
+    { "in": "release/102.1.0", "why": "a tag is not a product version" },
+    { "in": "102.1.0 ", "why": "trailing whitespace" }
+  ],
+
+  "order": [
+    { "a": "102.1.9", "b": "102.1.10", "cmp": -1 },
+    { "a": "102.1.10", "b": "102.1.9", "cmp": 1 },
+    { "a": "102.1.9", "b": "102.1.9", "cmp": 0 },
+    { "a": "102.1", "b": "102.1.0", "cmp": 0 },
+    { "a": "102", "b": "102.0.0", "cmp": 0 },
+    { "a": "102.1.9", "b": "102.2.0", "cmp": -1 },
+    { "a": "102.1.9", "b": "103.0.0", "cmp": -1 },
+    { "a": "9.0.0", "b": "10.0.0", "cmp": -1 },
+    { "a": "10.0.0", "b": "9.0.0", "cmp": 1 },
+    { "a": "0.0.0", "b": "0.0.1", "cmp": -1 },
+    { "a": "102.0.0", "b": "102.0.0", "cmp": 0 }
+  ],
+
+  "tags": [
+    { "in": "release/102.1.0", "scheme": "product", "version": "102.1.0" },
+    { "in": "release/1.0.0", "scheme": "product", "version": "1.0.0" },
+    { "in": "v0.0.1-beta11", "scheme": "legacy" },
+    { "in": "v0.0.1-beta9", "scheme": "legacy" },
+    { "in": "v4.0.0-beta.25", "scheme": "legacy" },
+    { "in": "v0.0.1", "scheme": "legacy" }
+  ],
+
+  "reject_tags": [
+    { "in": "release/102.1", "why": "a new tag is always three segments; short forms do not get their own release" },
+    { "in": "release/102", "why": "a new tag is always three segments" },
+    { "in": "release/102.1.0.1", "why": "fourth segment" },
+    { "in": "102.1.0", "why": "a bare product version is not a tag" },
+    { "in": "release/v102.1.0", "why": "the product tag namespace does not carry a v" },
+    { "in": "v", "why": "no version after the v" },
+    { "in": "", "why": "empty" },
+    { "in": "beta11", "why": "neither scheme" },
+    { "in": "V0.0.1", "why": "legacy tags are lower-case v" }
+  ],
+
+  "channels": [
+    { "draft": false, "prerelease": false, "channel": "stable" },
+    { "draft": false, "prerelease": true, "channel": "testing" },
+    { "draft": true, "prerelease": false, "channel": "" },
+    { "draft": true, "prerelease": true, "channel": "" }
+  ],
+
+  "legacy_order": [
+    { "a": "v0.0.1-beta9", "b": "v0.0.1-beta10", "cmp": -1 },
+    { "a": "v0.0.1-beta10", "b": "v0.0.1-beta11", "cmp": -1 },
+    { "a": "v0.0.1-beta9", "b": "v0.0.1-beta11", "cmp": -1 },
+    { "a": "v0.0.1-beta11", "b": "v0.0.1-beta9", "cmp": 1 },
+    { "a": "v0.0.1-beta11", "b": "v0.0.1-beta11", "cmp": 0 }
+  ]
+}
