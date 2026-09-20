@@ -231,3 +231,46 @@ describe('Passwall Node release selection', () => {
     expect(selected()).toBe('')
   })
 })
+
+// An upgrade list that includes the version you are on, and older ones, invites
+// a request the service refuses — and offering a downgrade as though it were a
+// target is how an operator learns to distrust the list rather than the request.
+describe('the upgrade list offers only targets that are actually ahead', () => {
+  const beta = (version: string): NodeRelease => ({
+    ...testing, version,
+    release_url: `https://github.com/KazuhaHub/Passwall-Node/releases/tag/${version}`,
+  })
+
+  it('excludes the node’s own version and everything older', async () => {
+    reads([beta('v0.0.1-beta9'), beta('v0.0.1-beta10'), beta('v0.0.1-beta11')])
+    mount(<NodeReleaseSelector enabled selection={linux} value="" onChange={() => {}}
+      initialChannel="testing" newerThan="v0.0.1-beta10" />)
+    const field = screen.getByRole('combobox', { name: 'admin:servers.native.agent_version' })
+    // The field is disabled until the catalog resolves, so opening it before
+    // then opens nothing — wait for it to become usable first.
+    await waitFor(() => expect(field.getAttribute('aria-disabled')).not.toBe('true'))
+    fireEvent.mouseDown(field)
+    await screen.findByRole('option', { name: 'v0.0.1-beta11' })
+    expect(screen.queryByRole('option', { name: 'v0.0.1-beta10' })).toBeNull()
+    expect(screen.queryByRole('option', { name: 'v0.0.1-beta9' })).toBeNull()
+  })
+
+  it('ranks the dotless prereleases the way the project publishes them', async () => {
+    // SemVer ranks beta11 BELOW beta9 on the trailing character. With that rule
+    // this list would be empty and the node would be told it is up to date.
+    reads([beta('v0.0.1-beta11')])
+    mount(<NodeReleaseSelector enabled selection={linux} value="" onChange={() => {}}
+      initialChannel="testing" newerThan="v0.0.1-beta9" />)
+    const field = screen.getByRole('combobox', { name: 'admin:servers.native.agent_version' })
+    await waitFor(() => expect(field.getAttribute('aria-disabled')).not.toBe('true'))
+    fireEvent.mouseDown(field)
+    expect(await screen.findByRole('option', { name: 'v0.0.1-beta11' })).toBeTruthy()
+  })
+
+  it('offers nothing when the list has nothing ahead of the node', async () => {
+    reads([beta('v0.0.1-beta9')])
+    mount(<NodeReleaseSelector enabled selection={linux} value="" onChange={() => {}}
+      initialChannel="testing" newerThan="v0.0.1-beta9" />)
+    await waitFor(() => expect(screen.queryByRole('option', { name: 'v0.0.1-beta9' })).toBeNull())
+  })
+})

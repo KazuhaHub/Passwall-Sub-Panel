@@ -4,6 +4,7 @@ import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import { useTranslation } from 'react-i18next'
 import { listNodeReleases, type NodeRelease, type NodeReleaseChannel } from '@/api/nodeReleases'
 import type { NativeInstallationSelection } from '@/api/servers'
+import { compareLegacyTag } from '@/utils/productVersion'
 
 export interface NodeReleaseSelectorProps {
   enabled: boolean
@@ -17,6 +18,20 @@ export interface NodeReleaseSelectorProps {
   compact?: boolean
   /** Upgrade flows can opt into selecting the newest reviewed release automatically. */
   autoSelectLatest?: boolean
+  /**
+   * When set, only releases STRICTLY NEWER than this version are offered.
+   *
+   * The upgrade dialog sets it to the node's own version. A list that includes
+   * the version you are already on — and older ones — invites a request the
+   * service refuses, and offering a downgrade as though it were a target is how
+   * an operator learns to distrust the list instead of the request.
+   *
+   * The comparison is the project's release order, NOT SemVer's: these are the
+   * dotless prerelease tags this project publishes, where SemVer ranks beta11
+   * below beta9. It is the same rule the panel's admission check applies, so the
+   * list cannot offer something the service would reject for being older.
+   */
+  newerThan?: string
 }
 
 function supportsSelection(release: NodeRelease, selection: NativeInstallationSelection): boolean {
@@ -38,7 +53,7 @@ function officialReleaseURL(release: NodeRelease): string | undefined {
   return release.release_url === expected ? expected : undefined
 }
 
-export default function NodeReleaseSelector({ enabled, selection, value, onChange, disabled = false, initialChannel = 'stable', compact = false, autoSelectLatest = false }: NodeReleaseSelectorProps) {
+export default function NodeReleaseSelector({ enabled, selection, value, onChange, disabled = false, initialChannel = 'stable', compact = false, autoSelectLatest = false, newerThan }: NodeReleaseSelectorProps) {
   const { t, i18n } = useTranslation(['admin', 'common'])
   const reviewID = useId()
   const [channel, setChannel] = useState<NodeReleaseChannel>(initialChannel)
@@ -91,8 +106,9 @@ export default function NodeReleaseSelector({ enabled, selection, value, onChang
   }, [enabled, attempt])
 
   const options = useMemo(() => (releases ?? []).filter(release =>
-    release.channel === channel && officialReleaseURL(release) && supportsSelection(release, selection),
-  ), [releases, channel, selection])
+    release.channel === channel && officialReleaseURL(release) && supportsSelection(release, selection) &&
+    (!newerThan || compareLegacyTag(release.version, newerThan) > 0),
+  ), [releases, channel, selection, newerThan])
   const selected = options.find(release => release.version === value)
   const selectedURL = selected ? officialReleaseURL(selected) : undefined
   const channelTag = channel === 'stable' ? 'latest' : 'beta'
