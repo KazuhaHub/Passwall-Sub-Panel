@@ -175,3 +175,29 @@ func TestTheShippedDocumentYieldsTheReviewedCeiling(t *testing.T) {
 		t.Fatalf("ceiling = %q, want the reviewed 3.8.5", got)
 	}
 }
+
+// The name the code fetches and the name the repository publishes must be the
+// same file.
+//
+// Nothing else connects them: the constant is a string and the document is a path,
+// and a rename on one side makes the fetch 404 — which lands as a build that
+// reports its ceilings as unknown, with the cause several layers away from the
+// symptom. Cheap to assert, and the alternative is discovering it in a release.
+func TestTheFetchedDocumentNameIsThePublishedOne(t *testing.T) {
+	path := filepath.Join("..", "..", "docs", "compat", panelRangesDocumentName)
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("the code fetches %q but the repository publishes no such document: %v", panelRangesDocumentName, err)
+	}
+	// And the URL the code builds must point at it, not at a path that merely
+	// looks similar.
+	previous := Version
+	t.Cleanup(func() { Version = previous })
+	Version = "4.0.0"
+	url, err := defaultURLForCurrentVersion()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasSuffix(url, "/docs/compat/"+panelRangesDocumentName) {
+		t.Fatalf("URL = %q, want it to end in /docs/compat/%s", url, panelRangesDocumentName)
+	}
+}
