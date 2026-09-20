@@ -637,6 +637,7 @@ func NewRouter(d Deps) stdhttp.Handler {
 		adminGroup.GET("/servers", servers.List)
 		adminGroup.GET("/servers/node-releases", servers.ListNodeReleases)
 		adminGroup.GET("/servers/sui-release", servers.GetSUIRelease)
+		adminGroup.GET("/servers/compat-status", servers.CompatStatus)
 		adminGroup.POST("/servers", servers.Create)
 		adminGroup.PUT("/servers/:id", servers.Update)
 		adminGroup.DELETE("/servers/:id", servers.Delete)

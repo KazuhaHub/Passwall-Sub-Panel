@@ -61,6 +61,12 @@ func SetPolicyEnforcement(enabled bool) { activePolicyEnforcement.Store(enabled)
 // PolicyEnforcing reports whether the policy in force is allowed to decide.
 func PolicyEnforcing() bool { return activePolicyEnforcement.Load() }
 
+// PolicyInstalled reports whether an authenticated policy is in this process,
+// whether or not it applies here. "Installed but written for another build" is a
+// real state, and a report that folded it into "not installed" would send an
+// operator looking for a document that is already there.
+func PolicyInstalled() bool { return ActiveReleasesPolicy() != nil }
+
 // PolicyLoaded reports whether an authenticated policy that applies to THIS build
 // has been installed — whether or not it is deciding.
 func PolicyLoaded() bool { return applicablePolicy(Version) != nil }
