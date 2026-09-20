@@ -58,7 +58,6 @@ const (
 	ReasonObservationStale     Reason = "observation-stale"
 	ReasonProtocolIncompatible Reason = "protocol-incompatible"
 	ReasonCapabilityMissing    Reason = "capability-missing"
-	ReasonUpgradeEdgeMissing   Reason = "upgrade-edge-missing"
 	ReasonKnownBad             Reason = "known-bad"
 )
 
@@ -107,9 +106,6 @@ type Request struct {
 	Observed    *Observation
 	Now         time.Time
 	Policy      Policy
-	// UpgradeEdgeVerified says the specific from/to edge this operation would
-	// take has been verified. It is not implied by the peer being compatible.
-	UpgradeEdgeVerified bool
 	// Force is an operator's explicit acknowledgement of THIN EVIDENCE. It is
 	// not a way past a protocol generation the panel cannot speak, a release
 	// known to break, or a capability the peer does not have.
@@ -225,13 +221,6 @@ func Decide(request Request) Decision {
 		decision.Status = StatusLimited
 		decision.Reason = ReasonCapabilityMissing
 		decision.Detail = fmt.Sprintf("%s requires %v, which the peer does not currently report", request.Operation, missing)
-		return decision
-	}
-
-	if request.Operation == OperationRemoteUpgrade && !request.UpgradeEdgeVerified {
-		decision.Status = StatusLimited
-		decision.Reason = ReasonUpgradeEdgeMissing
-		decision.Detail = "this peer is compatible, but the specific upgrade edge has not been verified"
 		return decision
 	}
 

@@ -59,15 +59,10 @@ func newUpgradeFixtureWithObservation(t *testing.T, observed bool) *upgradeFixtu
 	// along — otherwise every case here would be measuring the refusal, which
 	// has its own case below.
 	//
-	// TWO EDGES, because the key-reuse case needs a SECOND request that IS
-	// admitted: it reuses an idempotency key with different content and expects
-	// the conflict the repository resolves, and a target that failed admission
-	// first would answer a different question.
-	version.SetActiveUpgradeEdges([]version.UpgradeEdge{
-		{ID: "fixture", From: validUpgradeRequest.ExpectedVersion, To: validUpgradeRequest.Version},
-		{ID: "fixture-alt", From: "v0.0.1-beta2", To: "v0.0.1-beta4"},
-	})
-	t.Cleanup(func() { version.SetActiveUpgradeEdges(nil) })
+	// NO EDGES TO INSTALL. The fixture used to record two, because the key-reuse
+	// case needs a SECOND request that IS admitted and nothing was admitted along
+	// a pair nobody had walked. Admission follows the decision now, so a
+	// compatible target is admitted without anything recorded here.
 
 	if err := repos.NativeAgentProvisioning.Create(context.Background(), panel, agent); err != nil {
 		t.Fatal(err)
@@ -385,38 +380,34 @@ func TestUpgradeRequestStrictShapeAndOwnerIsolation(t *testing.T) {
 	}
 }
 
-// AN UPGRADE IS OFFERED ONLY ALONG A VERIFIED EDGE, AND ITS ABSENCE IS NAMED.
+// AN UPGRADE NO LONGER NEEDS A SEPARATELY REVIEWED EDGE.
 //
-// The fixture installs the beta2→beta3 edge so the cases above measure
-// admission. This one removes it and measures the refusal, because a gate that
-// is only ever exercised in the "edge present" direction is a gate nobody has
-// seen work.
-func TestUpgradeRequestRefusesAnUnverifiedEdge(t *testing.T) {
+// It used to, and this fixture measured exactly that: the cases above install a
+// beta2→beta3 edge so admission could be measured at all, and this one removed it
+// to measure the refusal — including that a NEIGHBOURING edge must not admit a
+// different path. Both directions are gone with the gate.
+//
+// PSP is the source of truth for what is supported. A per-pair review was a second
+// gate whose refusal an operator could neither see coming from the row — which read
+// "compatible" — nor satisfy without editing a policy document.
+func TestUpgradeIsAdmittedWithNoUpgradeEdgesAtAll(t *testing.T) {
 	f := newUpgradeFixture(t)
-	version.SetActiveUpgradeEdges(nil)
+// (the edge gate was removed: readiness and admission follow the decision)
 
 	_, created, err := f.service.Request(context.Background(), f.panel.ID, validUpgradeRequest, upgradeRequestKey)
-	if !errors.Is(err, domain.ErrValidation) {
-		t.Fatalf("an upgrade along an unverified edge was admitted: %v", err)
+	if err != nil {
+		t.Fatalf("a compatible peer was refused for the absence of an edge: %v", err)
 	}
-	if created {
-		t.Fatal("a task was created for an upgrade along an unverified edge")
-	}
-	// THE REFUSAL NAMES THE PATH, NOT JUST THE EVIDENCE. An operator has to be
-	// able to tell "this node cannot be upgraded" from "this particular path is
-	// not verified" — the node here is eligible, and saying so is the difference
-	// between a fixable request and a dead end.
-	if !strings.Contains(err.Error(), "upgrade path has not been verified") {
-		t.Fatalf("the refusal does not name the edge: %v", err)
+	if !created {
+		t.Fatal("no task was created for a compatible peer")
 	}
 
-	// AND A DIFFERENT PATH IS STILL REFUSED. The edge in force is beta2→beta3;
-	// beta2→beta4 must not be admitted on the strength of a neighbouring edge,
-	// which is the whole difference between an edge and a range.
-	version.SetActiveUpgradeEdges([]version.UpgradeEdge{{ID: "fixture", From: "v0.0.1-beta2", To: "v0.0.1-beta3"}})
+	// AND THE SAME HOLDS FOR A PATH NO EDGE EVER DESCRIBED. The old gate refused
+	// beta2→beta4 because only beta2→beta3 was recorded; what decides now is that
+	// beta4 is a version this panel's judgement accepts.
 	other := Request{Version: "v0.0.1-beta4", ExpectedVersion: "v0.0.1-beta2"}
-	if _, _, err := f.service.Request(context.Background(), f.panel.ID, other, upgradeRequestKey); !errors.Is(err, domain.ErrValidation) {
-		t.Fatalf("a neighbouring edge admitted an unverified path: %v", err)
+	if _, created, err := f.service.Request(context.Background(), f.panel.ID, other, upgradeRequestKey+"-other-version"); err != nil || !created {
+		t.Fatalf("a compatible target was refused for want of a recorded edge: err=%v created=%v", err, created)
 	}
 }
 

@@ -107,22 +107,26 @@ it('uses the saved beta preference but still requires an exact reviewed version 
   expect((screen.getByRole('button', { name: 'admin:servers.agent_upgrade.confirm' }) as HTMLButtonElement).disabled).toBe(true)
 })
 
-// A release can be ahead of the node and still be a target no verified edge
-// reaches. The list offers the reachable ones, not everything newer — a request
-// along an unwalked path is refused, and that teaches the operator to distrust
-// the list rather than the request.
-it('offers only the targets the instance says are reachable', async () => {
+// ONE PREDICATE, NOT TWO. The list used to exclude a target that no VERIFIED EDGE
+// reached, because a request along an unwalked path was refused — so a node on a
+// version no edge started from had an empty dialog, and the remedy was a policy
+// document the operator had no reason to know about. Admission follows the panel's
+// own judgement now, and what remains is the policy's answer: a release the policy
+// in force does not offer is not put in front of anyone.
+it('offers the targets the instance offers, and no others', async () => {
   const further = { ...catalog.releases[0], version: 'v0.0.1-beta9',
     release_url: 'https://github.com/KazuhaHub/Passwall-Node/releases/tag/v0.0.1-beta9' }
+  const unlisted = { ...catalog.releases[0], version: 'v0.0.1-beta8',
+    release_url: 'https://github.com/KazuhaHub/Passwall-Node/releases/tag/v0.0.1-beta8' }
   installReads({
-    '/admin/servers/node-releases': { ...catalog, releases: [catalog.releases[0], further] },
+    '/admin/servers/node-releases': { ...catalog, releases: [catalog.releases[0], further, unlisted] },
     '/admin/servers/7/node-agent-upgrades/upgrade-test': queued,
     '/admin/servers/7/upgrade-options': {
-      component: 'agent', state: 'ready', target_pinnable: true, reason_codes: ['edge_verified'],
+      component: 'agent', state: 'ready', target_pinnable: true, reason_codes: ['compatible'],
       targets: [
-        { version: queued.version, edge_verified: true, offered_by_policy: true },
-        { version: further.version, edge_verified: false, offered_by_policy: true },
-        { version: 'v0.0.1-beta8', edge_verified: true, offered_by_policy: false },
+        { version: queued.version, offered_by_policy: true },
+        { version: further.version, offered_by_policy: true },
+        { version: unlisted.version, offered_by_policy: false },
       ],
     },
   })
@@ -132,7 +136,10 @@ it('offers only the targets the instance says are reachable', async () => {
   await waitFor(() => expect(field.getAttribute('aria-disabled')).not.toBe('true'))
   fireEvent.mouseDown(field)
   expect(await screen.findByRole('option', { name: queued.version })).toBeTruthy()
-  expect(screen.queryByRole('option', { name: 'v0.0.1-beta9' })).toBeNull()
+  // IN THE CATALOG AND AHEAD OF THE NODE, and still offered: the only thing that
+  // excludes a release now is a policy that does not list it.
+  expect(await screen.findByRole('option', { name: 'v0.0.1-beta9' })).toBeTruthy()
+  expect(screen.queryByRole('option', { name: 'v0.0.1-beta8' })).toBeNull()
 })
 
 // A control-plane blip must not remove an action the operator was using, and the

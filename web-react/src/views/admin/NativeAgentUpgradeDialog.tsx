@@ -42,7 +42,12 @@ export function NativeAgentUpgradeDialog({ server, onClose }: { server: Server |
       .then(option => {
         if (!live) return
         const reachable = (option.targets ?? [])
-          .filter(target => target.edge_verified && target.offered_by_policy)
+          // ONE PREDICATE, NOT TWO. The list was filtered by a verified edge as
+          // well, because admission refused a pair nobody had walked — so a node on a
+          // version no edge started from got an empty dialog, and the remedy was a
+          // policy document the operator had no reason to know about. Admission
+          // follows the panel's own judgement now.
+          .filter(target => target.offered_by_policy)
           .map(target => target.version)
         setTargets(reachable)
       })

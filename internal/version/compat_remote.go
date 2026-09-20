@@ -102,6 +102,23 @@ const rangeOverlaySchemaVersion = 3
 //
 // Unknown fields are tolerated (Go json default) so an old PSP can still
 // consume a newer JSON as long as the v2 essentials are present.
+// UpgradeEdge is one Node upgrade edge as the documents record it: a claim that
+// upgrading a Node from From to To has been checked, rather than that To happens
+// to be a release this panel knows about.
+//
+// IT IS RECORDED AND NOT DECIDED ON. Admission used to require a reviewed edge for
+// the specific pair, which made a compatible peer un-upgradeable and put the
+// remedy in a policy document the operator had no reason to know about. PSP is the
+// source of truth for what is supported, so the field is carried — the documents
+// still make the claim, and a reviewer can still read it — while nothing refuses a
+// request for the absence of one. The same shape is validated by
+// deploy/compat/plan.mjs in docs/compat/verification-v1.json.
+type UpgradeEdge struct {
+	ID   string `json:"id"`
+	From string `json:"from"`
+	To   string `json:"to"`
+}
+
 type remoteCompatPayload struct {
 	SchemaVersion int                    `json:"schema_version"`
 	Major         int                    `json:"major"`
@@ -575,10 +592,6 @@ func applyCompatPayload(payload remoteCompatPayload) error {
 	// Advisories are top-level (PSP-version-independent) and runtime-only; install
 	// the whole map, canonicalizing keys so "v3.5.0"/"3.5" both resolve on lookup.
 	SetActiveAdvisories(canonAdvisories(payload.Advisories))
-	// Edges come from the BASE document, not the range overlay: an overlay
-	// carries ranges, while an edge is a claim about a path — a reviewer signs
-	// off on the path, and replacing ranges must not silently restate it.
-	SetActiveUpgradeEdges(payload.UpgradeEdges)
 	applySUICompat(payload)
 	// Recorded AFTER the install succeeds, so a failure part-way leaves the old
 	// revision in force and the next fetch is still compared against what is

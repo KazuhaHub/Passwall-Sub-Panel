@@ -85,10 +85,10 @@ func Observation(agent *domain.NodeAgent) *compatadmission.Observation {
 	}
 }
 
-// Request builds the request for one operation. The caller that knows whether a
-// specific upgrade edge has been verified sets UpgradeEdgeVerified on the result;
-// display callers leave it false and ask OperationUpgradeEligibility instead,
-// which is the question that does not depend on an edge.
+// Request builds the request for one operation. The operation is the only thing
+// that varies: there used to be a second axis — whether a specific upgrade edge had
+// been verified — which made the display question and the action question differ
+// about the same peer.
 func Request(agent *domain.NodeAgent, operation compatadmission.Operation, now time.Time, policy compatadmission.Policy) compatadmission.Request {
 	return compatadmission.Request{
 		Operation: operation,
@@ -123,13 +123,6 @@ func Message(agent *domain.NodeAgent, decision compatadmission.Decision) string 
 		compatibility := nodeprotocol.AssessCompatibilityIn(agent.ObservedProtocolVersion, agent.ObservedCapabilities, domain.SupportedNodeProtocolGenerations())
 		return fmt.Sprintf("native agent does not currently advertise remote-upgrade capabilities: %s",
 			strings.Join(compatibility.MissingAgentUpgrade, ", "))
-	case compatadmission.ReasonUpgradeEdgeMissing:
-		// The model's own Detail says the edge is unverified without saying which
-		// one, because it does not know this layer's vocabulary for ends. Naming
-		// both here is what makes the refusal actionable: the operator can see
-		// that the incompatibility is with the PAIR they asked for, not with the
-		// node, which is still eligible.
-		return "this node is compatible, but the requested upgrade path has not been verified; no upgrade is offered along an edge nobody checked"
 	default:
 		return decision.Detail
 	}

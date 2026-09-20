@@ -87,21 +87,17 @@ func TestDecidePassesTheAgentObservationThrough(t *testing.T) {
 		}
 	})
 
-	t.Run("an unverified upgrade edge blocks the action but not eligibility", func(t *testing.T) {
-		// The display question is "is this node eligible at all"; the action
-		// question is "may we take THIS edge". One conversion builds the request;
-		// the action sets the one field the display cannot know.
+	t.Run("a compatible and capable peer may take the upgrade", func(t *testing.T) {
+		// ONE ANSWER, NOT TWO. Eligibility and the action used to differ by a
+		// per-edge review, so a row could read as eligible while every request was
+		// refused for an edge nobody had recorded. What decides now is whether the
+		// peer is compatible and advertises the capability — the judgement PSP owns.
 		a := agent(1, nodeprotocol.AgentUpgradeCapabilities(), observedAt)
 		if display := Decide(a, compatadmission.OperationUpgradeEligibility, observedAt, policy); !display.Allowed {
-			t.Fatalf("eligibility must not depend on a specific edge: %s", display.Reason)
+			t.Fatalf("a compatible peer must be eligible: %s", display.Reason)
 		}
-		action := Request(a, compatadmission.OperationRemoteUpgrade, observedAt, policy)
-		if got := compatadmission.Decide(action); got.Reason != compatadmission.ReasonUpgradeEdgeMissing {
-			t.Fatalf("an unverified edge read as %s, want upgrade-edge-missing", got.Reason)
-		}
-		action.UpgradeEdgeVerified = true
-		if got := compatadmission.Decide(action); !got.Allowed {
-			t.Fatalf("a verified edge must be admitted: %s", got.Reason)
+		if got := compatadmission.Decide(Request(a, compatadmission.OperationRemoteUpgrade, observedAt, policy)); !got.Allowed {
+			t.Fatalf("the same peer must be admitted for the action: %s", got.Reason)
 		}
 	})
 }
