@@ -15,7 +15,7 @@ const policyForSigning = `{
   "issued_at": "2026-09-19T00:00:00Z", "expires_at": "2026-09-26T00:00:00Z",
   "applies_to_psp": {"min": "4.0.0", "max": "4.99.99"},
   "releases": [{"version": "v0.0.1-beta11", "release_tag": "v0.0.1-beta11", "scheme": "legacy", "evidence": ["node-wire-v1"]}],
-  "upgrade_edges": [], "refusals": []
+  "refusals": []
 }`
 
 func signingKey(t *testing.T) (string, ed25519.PublicKey, ed25519.PrivateKey) {
@@ -123,7 +123,7 @@ func TestATamperedDocumentFailsTheSignature(t *testing.T) {
 	  "applies_to_psp": {"min": "4.0.0", "max": "4.99.99"},
 	  "releases": [{"version": "v0.0.1-beta11", "release_tag": "v0.0.1-beta11", "scheme": "legacy", "evidence": ["node-wire-v1"]},
 	               {"version": "v9.9.9", "release_tag": "v9.9.9", "scheme": "legacy", "evidence": ["made-up"]}],
-	  "upgrade_edges": [], "refusals": []
+	  "refusals": []
 	}`)
 	if _, err := ParseReleasesPolicy(tampered, policyNow()); err != nil {
 		t.Fatalf("the harness is wrong: the tampered document should still be well-formed: %v", err)

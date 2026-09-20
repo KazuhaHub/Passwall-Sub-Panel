@@ -79,30 +79,6 @@ test('a refusal naming an unknown version is refused', () => {
   assert.match(problems[0], /check for a typo/)
 })
 
-test('an edge whose target is not offered is refused', () => {
-  // The path would be published, reviewed and unreachable, which reads as
-  // "this upgrade is available" to anyone skimming the file.
-  const problems = checkReleasesPolicy(
-    documents({
-      policyEdit: p => {
-        p.releases = p.releases.filter(release => release.version !== 'v0.0.1-beta11')
-      },
-    }),
-  )
-  assert.ok(problems.some(p => /targets a release the policy does not offer/.test(p)), problems.join('; '))
-})
-
-test('an edge naming a version the manifest does not list is refused', () => {
-  const problems = checkReleasesPolicy(
-    documents({
-      policyEdit: p => {
-        p.upgrade_edges[0].from = 'v0.0.1-beta404'
-      },
-    }),
-  )
-  assert.ok(problems.some(p => /from=v0.0.1-beta404 is not a version/.test(p)), problems.join('; '))
-})
-
 test('a version that is both offered and refused is refused', () => {
   const problems = checkReleasesPolicy(
     documents({

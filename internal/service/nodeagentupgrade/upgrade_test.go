@@ -390,9 +390,9 @@ func TestUpgradeRequestStrictShapeAndOwnerIsolation(t *testing.T) {
 // PSP is the source of truth for what is supported. A per-pair review was a second
 // gate whose refusal an operator could neither see coming from the row — which read
 // "compatible" — nor satisfy without editing a policy document.
-func TestUpgradeIsAdmittedWithNoUpgradeEdgesAtAll(t *testing.T) {
+func TestUpgradeIsAdmittedForACompatiblePeer(t *testing.T) {
 	f := newUpgradeFixture(t)
-// (the edge gate was removed: readiness and admission follow the decision)
+	// (the edge gate was removed: readiness and admission follow the decision)
 
 	_, created, err := f.service.Request(context.Background(), f.panel.ID, validUpgradeRequest, upgradeRequestKey)
 	if err != nil {

@@ -14,23 +14,20 @@
       "version": "v0.0.1-beta11",
       "release_tag": "v0.0.1-beta11",
       "scheme": "legacy",
-      "evidence": ["node-wire-v1", "reverse-direction-b01-b08"],
+      "evidence": [
+        "node-wire-v1",
+        "reverse-direction-b01-b08"
+      ],
       "comment": "The newest reviewed release at the time of writing. Evidence names come from the compat verification plan; a release with no evidence is not an upgrade target."
     },
     {
       "version": "v0.0.1-beta10",
       "release_tag": "v0.0.1-beta10",
       "scheme": "legacy",
-      "evidence": ["node-wire-v1"],
+      "evidence": [
+        "node-wire-v1"
+      ],
       "comment": "Superseded by beta11, which fixes a panic on a host report with no network section. Still a valid target for a node already on it."
-    }
-  ],
-  "upgrade_edges": [
-    {
-      "from": "v0.0.1-beta3",
-      "to": "v0.0.1-beta11",
-      "evidence": ["upgrade-mechanism"],
-      "comment": "An edge is a claim about a PATH, reviewed as such. A release being in range is not the same as a path to it having been checked, which is why the two are separate lists."
     }
   ],
   "refusals": [

@@ -31,7 +31,7 @@ func policyDocument(expiresAt time.Time) []byte {
 	  "issued_at": "2026-09-19T00:00:00Z", "expires_at": "` + expiresAt.UTC().Format(time.RFC3339) + `",
 	  "applies_to_psp": {"min": "4.0.0", "max": "4.99.99"},
 	  "releases": [{"version": "v0.0.1-beta11", "release_tag": "v0.0.1-beta11", "scheme": "legacy", "evidence": ["node-wire-v1"]}],
-	  "upgrade_edges": [], "refusals": []
+	  "refusals": []
 	}`)
 }
 
