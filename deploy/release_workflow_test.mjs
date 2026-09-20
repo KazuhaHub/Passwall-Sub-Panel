@@ -7,30 +7,21 @@ import { test } from 'node:test'
 
 const workflow = readFileSync(new URL('../.github/workflows/release.yml', import.meta.url), 'utf8')
 
-// A TRIGGER THAT FIRES BEFORE THE CONSUMERS UNDERSTAND THE TAG OPENS A RELEASE
-// NOBODY CAN INSTALL — so this asserts the ABSENCE of the product pattern, for
-// the same reason PN's TestTheNodeReleaseWorkflowDoesNotTriggerOnProductTagsYet
-// does. The product scheme (release/MAJOR.MINOR.PATCH) is decided and the
-// channel logic already answers for it; what is not ready is the reading side. A
-// product release's TAG is not its VERSION, and two consumers of a published
-// release still read the tag as the version:
+// THE PRODUCT SCHEME IS OPEN, WHICH IS WHAT THE PREVIOUS VERSION OF THIS TEST WAS
+// WAITING FOR. It asserted the ABSENCE of `release/*` because a product release's
+// tag is not its version (`release/4.0.0` names the release `4.0.0`) and the two
+// consumers of a published release read the tag as the version:
 //
-//   - the public Node installer, which resolves its version from the release's
-//     `tag_name`; and
-//   - PSP's own cmd/compatwatch, which reads the same field on the Node repo and
-//     reconciles it against internal/adapters/noderelease/reviewed.json.
+//   - the public Node installer, which now takes the version out of the asset
+//     name and the address out of the release document (Passwall-Node#40); and
+//   - PSP's own cmd/compatwatch, which now parses the tag into a version before
+//     reconciling it against internal/adapters/noderelease/reviewed.json (#183).
 //
-// A `release/4.0.0` pushed today therefore starts a run whose identity step
-// SUCCEEDS and whose image tag is then refused by check-image — a release that
-// fails late, after the tag exists and names nothing. Making the two workflows
-// agree on the trigger without those consumers would look like consistency and
-// publish nothing.
-//
-// SO THE TRIGGER OPENS IN THE SAME BATCH AS THE CONSUMERS, and this asserts the
-// state in between rather than leaving it to be discovered. When that batch
-// lands, this test is REWRITTEN to require the pattern (as PN's is renamed and
-// flipped) — it does not start passing on its own.
-test('the release workflow does not trigger on the product tag scheme yet', () => {
+// Both landed, so this test is REWRITTEN to require the pattern rather than
+// deleted — the same way its counterpart PN test is, and for the same reason: the
+// absence it used to assert is a decision with a condition attached, and the
+// condition is now met rather than waived.
+test('the release workflow triggers on both tag schemes', () => {
   const patterns = []
   const lines = workflow.split('\n')
   const start = lines.indexOf('    tags:')
@@ -44,14 +35,12 @@ test('the release workflow does not trigger on the product tag scheme yet', () =
     if (!/^      - /.test(line)) break
     patterns.push(line.replace(/^\s*- /, '').replace(/^["']|["']$/g, ''))
   }
-  assert(
-    patterns.includes('v*'),
-    `the release workflow must still trigger on the legacy scheme, or a legacy release runs nothing (found ${patterns.join(', ')})`,
-  )
-  assert(
-    !patterns.includes('release/*'),
-    'the release workflow now triggers on product tags; the public Node installer and PSP cmd/compatwatch both resolve a release version from its tag_name and cannot tell a product tag from its version, so a product release started here would be refused late and name nothing. Read the comment on this test and land the consumer work first — and rewrite this test to require the pattern rather than deleting it.',
-  )
+  for (const required of ['v*', 'release/*']) {
+    assert(
+      patterns.includes(required),
+      `the release workflow does not trigger on ${required} (found ${patterns.join(', ')}). A tag the workflow does not trigger on is a release that does not happen: no red run, no artifact, and a tag that names nothing.`,
+    )
+  }
 })
 
 // THE TAG AND THE VERSION ARE TWO IDENTITIES, and in the legacy scheme they are

@@ -17,21 +17,25 @@ name: Release
 on:
   push:
     tags:
-      # ONLY THE LEGACY SCHEME, AND THAT IS DELIBERATE. The publish side
-      # already separates the tag from the version, so a product tag would build
-      # and publish correctly — but a product release's TAG is not its VERSION,
-      # and two consumers of a published release still read the tag as the
+      # BOTH SCHEMES. `v*` is the legacy shape and stays until the last v-named
+      # release is out of support; `release/*` is the product shape
+      # (release/MAJOR.MINOR.PATCH).
+      #
+      # IT WAS WITHHELD UNTIL THE READING SIDE CAUGHT UP, because a product
+      # release's TAG is not its VERSION — `release/4.0.0` names the release
+      # `4.0.0` — and two consumers of a published release read the tag as the
       # version: the public Node installer, and PSP's own cmd/compatwatch, which
-      # reconciles the Node repo's `tag_name` against
+      # reconciles the Node repo's releases against
       # internal/adapters/noderelease/reviewed.json.
       #
-      # So a `release/4.0.0` pushed today would run, resolve its identity, and
-      # then be refused by the check-image step on an image tag that is not the
-      # version — a release that fails late, after the tag exists and names
-      # nothing. Adding `release/*` here opens in the SAME BATCH as that consumer
-      # work; deploy/release_workflow_test.mjs asserts the absence until then and
-      # is rewritten in that batch, not deleted.
+      # Both now handle both identities: the installer takes the version out of
+      # the asset name and the address out of the release document
+      # (Passwall-Node#40), and compatwatch parses the tag into a version before
+      # reconciling it (#183). That is the condition this trigger was waiting on,
+      # and deploy/release_workflow_test.mjs was rewritten to REQUIRE the pattern
+      # in the same change rather than deleted.
       - "v*"
+      - "release/*"
   workflow_dispatch:
     inputs:
       tag:
