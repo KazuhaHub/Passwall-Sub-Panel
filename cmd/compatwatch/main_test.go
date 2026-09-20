@@ -124,7 +124,10 @@ func TestUnaccountedReleases(t *testing.T) {
 // states: a real gap exits 1, and anything unreadable exits 2 rather than
 // passing for an all-clear.
 func TestNodeRegistryReport(t *testing.T) {
-	published := []string{"v0.0.1-beta11", "v0.0.1-beta10", "v0.0.1-beta9", "v0.0.1-beta3"}
+	published, err := publishedReleases([]string{"v0.0.1-beta11", "v0.0.1-beta10", "v0.0.1-beta9", "v0.0.1-beta3"})
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	t.Run("an unruled-on release is a gap, naming the release", func(t *testing.T) {
 		got := nodeRegistryReport(nodeRegistry{
@@ -206,6 +209,76 @@ func TestNodeRegistryReport(t *testing.T) {
 			t.Fatalf("an empty release listing must not read as all-clear: %+v", empty)
 		}
 	})
+}
+
+// A PRODUCT RELEASE'S TAG IS NOT ITS VERSION, and the registry is keyed by the
+// version. Reconciling on the tag would report a fully reviewed product release
+// as a gap — a red run whose only remedy is an entry that is already there, and
+// which the maintainer cannot satisfy by adding anything.
+func TestNodeRegistryReconcilesTheVersionNotTheTag(t *testing.T) {
+	published, err := publishedReleases([]string{"release/4.1.0", "release/4.0.0"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("both versions reviewed is current", func(t *testing.T) {
+		got := nodeRegistryReport(nodeRegistry{
+			Releases: []nodeRegistryRelease{{Version: "4.0.0"}, {Version: "4.1.0"}},
+		}, published, nil)
+		if got.Verdict != version.CeilingCurrent {
+			t.Fatalf("verdict = %s, want current: %+v", got.Verdict, got)
+		}
+		if exitCode([]version.CeilingReport{got}) != 0 {
+			t.Error("a fully accounted registry must exit 0")
+		}
+		// The row still speaks in tags, because a tag is what locates a release.
+		if got.Latest != "release/4.1.0" {
+			t.Fatalf("latest = %q, want the published tag", got.Latest)
+		}
+	})
+
+	t.Run("an unreviewed version is a gap named by version", func(t *testing.T) {
+		got := nodeRegistryReport(nodeRegistry{
+			Releases: []nodeRegistryRelease{{Version: "4.0.0"}},
+		}, published, nil)
+		if got.Verdict != version.CeilingBehind {
+			t.Fatalf("verdict = %s, want behind: %+v", got.Verdict, got)
+		}
+		// The registry is keyed by version, so the reason names the version to add
+		// rather than the tag nobody writes there.
+		if !strings.Contains(got.Reason, "4.1.0") || strings.Contains(got.Reason, "release/4.1.0") {
+			t.Errorf("reason must name the version to review, not the tag: %q", got.Reason)
+		}
+		// The ceiling is the newest release that WAS ruled on, shown as its tag.
+		if got.Ceiling != "release/4.0.0" {
+			t.Fatalf("ceiling = %q, want the tag of the newest reviewed release", got.Ceiling)
+		}
+	})
+}
+
+// A TAG THAT NAMES NO VERSION IS NOT SKIPPED. Dropping it would let the registry
+// check pass while describing a repository with a release nobody can account for,
+// which is the silence this job exists to refuse.
+func TestPublishedReleasesRefusesATagItCannotIdentify(t *testing.T) {
+	for _, tag := range []string{"main", "release/4.0", "v4.0.0.1", "release/v4.0.0"} {
+		t.Run(tag, func(t *testing.T) {
+			got, err := publishedReleases([]string{"release/4.0.0", tag})
+			if err == nil {
+				t.Fatalf("publishedReleases(%q) accepted a tag it cannot identify: %+v", tag, got)
+			}
+			if !strings.Contains(err.Error(), tag) {
+				t.Errorf("refusal does not name the tag the reader has to look at: %v", err)
+			}
+		})
+	}
+	// And the legacy scheme still resolves to itself.
+	legacy, err := publishedReleases([]string{"v0.0.1-beta11"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(legacy) != 1 || legacy[0].Tag != "v0.0.1-beta11" || legacy[0].Version != "v0.0.1-beta11" {
+		t.Fatalf("a legacy tag must resolve to itself as its version: %+v", legacy)
+	}
 }
 
 // The remedy is what a maintainer acts on, so a gap in our own registry must not

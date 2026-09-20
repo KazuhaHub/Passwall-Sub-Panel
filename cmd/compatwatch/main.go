@@ -266,8 +266,9 @@ func run() error {
 	if err := json.Unmarshal(registryRaw, &registry); err != nil {
 		return fmt.Errorf("%s: %w", nodeRegistryPath, err)
 	}
-	published, releaseErr := api.allReleases(ctx, nodeRepo)
-	reports = append(reports, nodeRegistryReport(registry, published, releaseErr))
+	tags, releaseErr := api.allReleases(ctx, nodeRepo)
+	published, identifyErr := publishedReleases(tags)
+	reports = append(reports, nodeRegistryReport(registry, published, errors.Join(releaseErr, identifyErr)))
 
 	// Print every row on every run, whatever the verdicts. One "behind" row
 	// must not become the whole message: the reader needs to see that the OTHER
@@ -365,7 +366,44 @@ func unaccountedReleases(published, accounted []string) []string {
 //
 // published is the repository's releases, newest first. It is the fact; the
 // registry is the ruling on that fact, and this compares the two.
-func nodeRegistryReport(registry nodeRegistry, published []string, fetchErr error) version.CeilingReport {
+// publishedRelease is one published release in both of its identities.
+//
+// THE TAG LOCATES IT AND THE VERSION ACCOUNTS FOR IT. GitHub reports a release's
+// tag_name, and this project publishes under two schemes in which those differ: a
+// product release's tag is `release/4.0.0` and its version is `4.0.0`. The
+// registry is keyed by version — it is the list of releases the panel may offer —
+// so reconciling on the tag would report a fully reviewed release as a gap whose
+// only remedy is an entry that is already there. The tag is kept because it is
+// what names a release to a reader and what addresses it on GitHub.
+type publishedRelease struct {
+	Tag     string
+	Version string
+}
+
+// publishedReleases pairs each published tag with the version it names.
+//
+// A TAG IT CANNOT IDENTIFY IS AN ERROR RATHER THAN AN ENTRY TO SKIP. Skipping one
+// would let the registry check pass while describing a repository with a release
+// nobody can account for — the silence this job exists to refuse, arriving
+// through the one door this function controls.
+//
+// The rule is the shared one in internal/version, not a second copy here. The same
+// mapping decides whether a node's reported identity is newer than this build's
+// version, and two copies would disagree about which release a tag names.
+func publishedReleases(tags []string) ([]publishedRelease, error) {
+	published := make([]publishedRelease, 0, len(tags))
+	for _, tag := range tags {
+		named, ok := version.VersionOfReleaseTag(tag)
+		if !ok {
+			return nil, fmt.Errorf("cannot identify the release published as %q: it is neither a legacy version tag nor a %q tag",
+				tag, version.ProductTagNamespace)
+		}
+		published = append(published, publishedRelease{Tag: tag, Version: named})
+	}
+	return published, nil
+}
+
+func nodeRegistryReport(registry nodeRegistry, published []publishedRelease, fetchErr error) version.CeilingReport {
 	report := version.CeilingReport{Upstream: nodeRegistryUpstream}
 	if fetchErr != nil {
 		// Fail closed rather than assert an empty registry: "could not read"
@@ -382,19 +420,29 @@ func nodeRegistryReport(registry nodeRegistry, published []string, fetchErr erro
 		report.Reason = fmt.Sprintf("%s reported no published releases at all", nodeRepo)
 		return report
 	}
-	report.Latest = published[0]
+	report.Latest = published[0].Tag
 
 	accounted := registry.accounted()
-	if missing := unaccountedReleases(published, accounted); len(missing) > 0 {
+	// THE PUBLISHED SIDE IS COMPARED BY VERSION. The registry names versions; the
+	// published side arrives as tags. Comparing the two directly is how a reviewed
+	// product release reads as unreviewed.
+	named := make([]string, 0, len(published))
+	for _, release := range published {
+		named = append(named, release.Version)
+	}
+	if missing := unaccountedReleases(named, accounted); len(missing) > 0 {
 		// The ceiling is the newest release that WAS ruled on, so the row reads
 		// as the gap it is: releases exist past the point anyone has reviewed.
+		//
+		// IT IS REPORTED AS A TAG, like Latest beside it, so the match is made on
+		// the version and the tag is what comes out.
 		known := make(map[string]struct{}, len(accounted))
-		for _, version := range accounted {
-			known[version] = struct{}{}
+		for _, ruled := range accounted {
+			known[ruled] = struct{}{}
 		}
-		for _, version := range published {
-			if _, ok := known[version]; ok {
-				report.Ceiling = version
+		for _, release := range published {
+			if _, ok := known[release.Version]; ok {
+				report.Ceiling = release.Tag
 				break
 			}
 		}
