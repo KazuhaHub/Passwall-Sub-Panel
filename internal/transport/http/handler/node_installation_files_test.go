@@ -483,3 +483,45 @@ func TestNodeInstallationManualUnixExtractsOnlyFreshRegularMembers(t *testing.T)
 		})
 	}
 }
+
+// The tag is a path SEGMENT, and concatenating it is how a tag containing a
+// separator silently becomes a different URL: the segment ends early and the rest
+// is read as a deeper path, so the request addresses something that does not
+// exist and the failure looks like a missing release rather than a bad URL.
+func TestReleaseAssetURLKeepsTheTagInOneSegment(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		tag  string
+		want string
+		why  string
+	}{
+		{
+			name: "a legacy tag is unchanged",
+			tag:  "v0.0.1-beta11",
+			want: "https://github.com/KazuhaHub/Passwall-Node/releases/download/v0.0.1-beta11/SHA256SUMS.txt",
+			why:  "dots and hyphens are unreserved, so escaping must not alter it",
+		},
+		{
+			name: "a product tag keeps its slash inside the segment",
+			tag:  "release/4.0.0",
+			want: "https://github.com/KazuhaHub/Passwall-Node/releases/download/release%2F4.0.0/SHA256SUMS.txt",
+			why:  "unescaped, the slash would end the tag segment and address a path that does not exist",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := nodeReleaseAssetURL(tc.tag, "SHA256SUMS.txt"); got != tc.want {
+				t.Fatalf("nodeReleaseAssetURL(%q) = %q, want %q — %s", tc.tag, got, tc.want, tc.why)
+			}
+		})
+	}
+}
+
+// The asset name is built from values the request supplies, and it is escaped
+// for the same reason the tag is.
+func TestReleaseAssetURLEscapesTheAssetNameToo(t *testing.T) {
+	got := nodeReleaseAssetURL("v1.0.0", "a b/c")
+	want := "https://github.com/KazuhaHub/Passwall-Node/releases/download/v1.0.0/a%20b%2Fc"
+	if got != want {
+		t.Fatalf("nodeReleaseAssetURL = %q, want %q", got, want)
+	}
+}

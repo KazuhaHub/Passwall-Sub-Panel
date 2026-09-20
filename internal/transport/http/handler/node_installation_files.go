@@ -3,6 +3,7 @@ package handler
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"strings"
 
 	"github.com/KazuhaHub/passwall-node/deployment"
@@ -179,16 +180,36 @@ func renderNodeInstallationFiles(panelID int64, p nativeServerCreateResponse, r 
 	return result
 }
 
+// nodeReleaseDownloadBase is where a released Passwall Node asset lives.
+const nodeReleaseDownloadBase = "https://github.com/KazuhaHub/Passwall-Node/releases/download/"
+
+// nodeReleaseAssetURL builds the official URL for one asset of one release.
+//
+// THE TAG IS A PATH SEGMENT, NOT PART OF A PATH. Concatenating it is how a tag
+// containing a separator silently becomes a DIFFERENT URL: the segment ends
+// early and the rest is read as a deeper path, so the request addresses something
+// that does not exist and fails in a way that looks like a missing release.
+// Escaping it as one segment is the only construction that cannot do that.
+//
+// Legacy tags are unaffected — dots and hyphens are unreserved — and the product
+// form carries a slash, which is exactly the case that needs the escape.
+//
+// NOTHING HERE CLAIMS GITHUB RESOLVES THE ESCAPED FORM. The migration plan
+// requires that be settled by a real download test rather than assumed; this
+// builds the only URL that could be right, and says so rather than guessing.
+func nodeReleaseAssetURL(tag, asset string) string {
+	return nodeReleaseDownloadBase + url.PathEscape(tag) + "/" + url.PathEscape(asset)
+}
+
 func manualReleaseDownloads(r nodeInstallationFilesRequest) []nodeInstallationDownload {
 	ext := ".tar.gz"
 	if r.OS == "windows" {
 		ext = ".zip"
 	}
 	asset := "passwall-node_" + r.Version + "_" + r.OS + "_" + r.Arch + ext
-	base := "https://github.com/KazuhaHub/Passwall-Node/releases/download/" + r.Version + "/"
 	return []nodeInstallationDownload{
-		{Name: asset, URL: base + asset},
-		{Name: "SHA256SUMS.txt", URL: base + "SHA256SUMS.txt"},
+		{Name: asset, URL: nodeReleaseAssetURL(r.Version, asset)},
+		{Name: "SHA256SUMS.txt", URL: nodeReleaseAssetURL(r.Version, "SHA256SUMS.txt")},
 	}
 }
 
