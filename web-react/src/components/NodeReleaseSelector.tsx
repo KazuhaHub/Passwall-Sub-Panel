@@ -4,7 +4,7 @@ import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import { useTranslation } from 'react-i18next'
 import { listNodeReleases, type NodeRelease, type NodeReleaseChannel } from '@/api/nodeReleases'
 import type { NativeInstallationSelection } from '@/api/servers'
-import { compareLegacyTag, tagForVersion } from '@/utils/productVersion'
+import { compareLegacyTag, releaseTag } from '@/utils/productVersion'
 
 export interface NodeReleaseSelectorProps {
   enabled: boolean
@@ -65,10 +65,10 @@ function officialReleaseURL(release: NodeRelease): string | undefined {
   // called as a FILTER, so the release never appeared in the list, and an
   // operator with nothing to choose from concludes there is nothing to install.
   //
-  // tagForVersion carries the shape rule, so the refusals that used to be the
-  // regex here — junk, and anything that could be read as a path — are refused
-  // by the shared rule instead of by a second copy of it.
-  const tag = tagForVersion(release.version)
+  // releaseTag is what the PANEL states, falling back to the shared rule for a
+  // panel older than the field — so the refusals that used to be the regex here,
+  // junk and anything readable as a path, are made by one rule either way.
+  const tag = releaseTag(release.version, release.release_tag)
   if (!tag) return undefined
   const expected = `https://github.com/KazuhaHub/Passwall-Node/releases/tag/${tag}`
   return release.release_url === expected ? expected : undefined

@@ -1,5 +1,5 @@
 import { prerelease } from 'semver'
-import { canonicalReleaseVersion, compareLegacyTag, tagForVersion } from './productVersion'
+import { canonicalReleaseVersion, compareLegacyTag, releaseTag } from './productVersion'
 import type { NodeRelease } from '@/api/nodeReleases'
 import type { Server } from '@/api/servers'
 
@@ -62,7 +62,7 @@ export function newerNodeRelease(
     // `tag/release/4.0.0` while its version is `4.0.0`, so rebuilding the URL
     // from the version asks for a page that does not exist and drops the
     // release — silently, because a release that fails a check is skipped.
-    const tag = tagForVersion(release.version)
+    const tag = releaseTag(release.version, release.release_tag)
     if (!tag || release.release_url !== `https://github.com/KazuhaHub/Passwall-Node/releases/tag/${tag}`) return false
     if (!Array.isArray(release.methods) || !release.methods.includes('linux') || !Array.isArray(release.platforms)) return false
     // The remote Linux upgrade recipe detects architecture, so it requires

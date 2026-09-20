@@ -314,3 +314,46 @@ export function tagForVersion(version: string): string | undefined {
   if (canonical === undefined) return undefined
   return canonical.startsWith('v') ? canonical : TAG_PREFIX + canonical
 }
+
+/**
+ * Whether the string is a tag one of this project's releases could be published
+ * under.
+ *
+ * One implementation with parseReleaseTag, deliberately: a second shape check
+ * beside the parser is the arrangement that lets a value be accepted here and
+ * refused there.
+ */
+export function isReleaseTag(tag: string): boolean {
+  try {
+    parseReleaseTag(tag)
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
+ * The tag a release is ADDRESSED by, from the two strings a catalog entry
+ * carries: the version, and the tag the PANEL stated if it sent one.
+ *
+ * THE STATED VALUE WINS, because the panel knows the tag it published while this
+ * only re-derives it — and the derivation stays for a panel older than the field,
+ * pinned by the shared vectors so it cannot drift from the rule the panel
+ * applies.
+ *
+ * A STATED TAG IS STILL CHECKED. Taking "the panel said so" as the same thing as
+ * "it is one of our tags" would leave this value — which goes into an href —
+ * validated by nothing at all; a tag that fails the rule is refused rather than
+ * quietly re-derived, because falling back would address a release the panel did
+ * not name.
+ *
+ * It lives here, and takes two strings, so that a pure module does not have to
+ * import the API layer to answer the question — which it did, and which dragged
+ * an HTTP client into a node-environment test.
+ */
+export function releaseTag(version: string, stated?: string): string | undefined {
+  if (stated !== undefined) {
+    return isReleaseTag(stated) ? stated : undefined
+  }
+  return tagForVersion(version)
+}

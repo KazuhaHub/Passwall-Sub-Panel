@@ -9,7 +9,9 @@ import {
   formatProductVersion,
   parseProductVersion,
   parseReleaseTag,
+  isReleaseTag,
   resolveChannel,
+  releaseTag,
   tagForVersion,
 } from './productVersion'
 
@@ -55,6 +57,13 @@ describe('product version vectors', () => {
         expect(formatProductVersion(tag.product!), tc.in).toBe(tc.version)
       }
     }
+  })
+
+  // isReleaseTag is the predicate the catalog's stated tag goes through, so it is
+  // held to the same two sections as the parser it delegates to.
+  it('agrees with the vectors about which strings are tags', () => {
+    for (const tc of vectors.tags) expect(isReleaseTag(tc.in), tc.in).toBe(true)
+    for (const tc of vectors.reject_tags) expect(isReleaseTag(tc.in), `${tc.in} (${tc.why})`).toBe(false)
   })
 
   it('refuses tags that are not tags', () => {

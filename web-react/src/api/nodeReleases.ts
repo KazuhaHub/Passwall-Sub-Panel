@@ -6,6 +6,12 @@ export type NodeReleaseChannel = 'stable' | 'testing'
 /** Published official releases accepted by this panel's compatibility catalog. */
 export interface NodeRelease {
   version: string
+  /** The tag the release is published under, as the PANEL states it. */
+  release_tag?: string
+  /** The product version, absent for a legacy release. */
+  product_version?: string
+  /** "product" or "legacy", as the panel classifies it. */
+  scheme?: 'product' | 'legacy'
   channel: NodeReleaseChannel
   published_at: string
   release_url: string

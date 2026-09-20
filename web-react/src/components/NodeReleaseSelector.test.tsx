@@ -364,3 +364,51 @@ describe('a product-scheme release, whose page is addressed by its tag', () => {
     expect(screen.queryByRole('link')).toBeNull()
   })
 })
+
+// THE PANEL'S OWN ANSWER WINS.
+//
+// The catalog now states the tag it published, and a front end that re-derived
+// the mapping would be answering a question the panel already answered — with the
+// added risk that the two rules disagree. The stated value is used when present;
+// the derivation stays for a panel older than the field, which is why the cases
+// above (no `release_tag`) still pass.
+describe('a release whose tag the panel states', () => {
+  it('uses the stated tag rather than deriving one', async () => {
+    // THE STATED TAG HAS TO DIFFER FROM THE DERIVED ONE FOR THIS TO PROVE
+    // ANYTHING. For a consistent pair they are the same string by construction —
+    // `release/` + version — so a case like that passes whichever value is used,
+    // and the test would be describing a preference it never exercised. Here the
+    // panel's tag and its version disagree, and only the stated value reaches the
+    // URL.
+    const release: NodeRelease = {
+      ...stable, version: '4.0.0', release_tag: 'release/4.0.1',
+      release_url: 'https://github.com/KazuhaHub/Passwall-Node/releases/tag/release/4.0.1',
+    }
+    reads([release])
+    mount(<Controlled />)
+    await waitFor(() => expect(screen.queryByRole('status')).toBeNull())
+    await chooseVersion('4.0.0')
+    expect(selected()).toBe('4.0.0')
+    expect(screen.getByRole('link', { name: 'admin:servers.native.release_details' }).getAttribute('href')).toBe(release.release_url)
+  })
+
+  it('refuses a stated tag that disagrees with the URL', async () => {
+    reads([{
+      ...stable, version: '4.0.0', release_tag: 'release/4.0.1',
+      release_url: 'https://github.com/KazuhaHub/Passwall-Node/releases/tag/release/4.0.0',
+    }])
+    mount(<Controlled />)
+    await screen.findByText('admin:servers.native.release_no_stable')
+    expect(screen.queryByRole('link')).toBeNull()
+  })
+
+  it('still refuses a stated tag that is not a release tag', async () => {
+    reads([{
+      ...stable, version: '4.0.0', release_tag: '4.0.0',
+      release_url: 'https://github.com/KazuhaHub/Passwall-Node/releases/tag/4.0.0',
+    }])
+    mount(<Controlled />)
+    await screen.findByText('admin:servers.native.release_no_stable')
+    expect(screen.queryByRole('link')).toBeNull()
+  })
+})
