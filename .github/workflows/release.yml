@@ -169,18 +169,19 @@ jobs:
             echo "build_date=$(date -u +%FT%TZ)"
           } >> "$GITHUB_OUTPUT"
 
-      # THE CHANNEL IS STATED OR READ FROM THE LEGACY SHAPE, NEVER GUESSED FROM A
-      # HYPHEN. `contains(tag, '-')` was the whole rule, and it is a LEGACY rule:
-      # a v-prefixed tag with a hyphen has always meant a pre-release. A
-      # product-scheme tag (release/MAJOR.MINOR.PATCH) has no hyphen at all, so
-      # the same test would publish every testing candidate as STABLE — and this
-      # is the one place where getting it wrong is not recoverable by a later
-      # edit, because `prerelease: false` points /releases/latest, which PSP's own
-      # in-app upgrade nudge reads.
-      #
-      # So: an explicit input wins; the legacy shape decides for a legacy tag;
-      # and anything else defaults to pre-release, the direction that can be
-      # corrected by promotion without having moved a stable pointer.
+        # THE DEFAULT IS A PRE-RELEASE, STATED OR NOT. A release published without an
+        # explicit channel goes out as one, because that is the direction a deliberate
+        # promotion can correct and the one that cannot move `latest` or
+        # /releases/latest — pointers consumers follow, which no later edit takes back.
+        #
+        # SO THE TAG TEXT NO LONGER DECIDES THE CHANNEL AT ALL. It used to:
+        # `contains(tag, '-')` read a hyphen as pre-release and a plain `v*` as STABLE.
+        # That made a v-tag the one publishable mistake with an unrecoverable half, and
+        # it is the same legacy shape rule the product scheme had to be exempted from.
+        # Publishing stable is now something a maintainer states through the input.
+        #
+        # The tag is still read for one thing — whether it addresses a release at all,
+        # in the image-channel case — and that is about the ADDRESS, not the channel.
       - name: Resolve the publication channel
         id: channel
         env:
@@ -191,13 +192,7 @@ jobs:
           case "${REQUESTED:-auto}" in
             stable)  prerelease=false ;;
             testing) prerelease=true ;;
-            auto)
-              case "$PINNED_TAG" in
-                v*-*) prerelease=true ;;
-                v*)   prerelease=false ;;
-                *)    prerelease=true ;;
-              esac
-              ;;
+            auto)    prerelease=true ;;
             *) echo "unknown publication channel: ${REQUESTED}" >&2; exit 1 ;;
           esac
           case "$PINNED_TAG" in

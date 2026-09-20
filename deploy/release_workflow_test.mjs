@@ -106,33 +106,55 @@ test('the release workflow keeps the tag and the version apart', () => {
   )
 })
 
-// A LEGACY TAG MUST KEEP THE CHANNEL A HYPHEN GAVE IT. The split is a no-op for
-// the legacy scheme — the pinned command returns the tag as the version, so every
-// version-bearing surface gets the same string — EXCEPT where a rule was replaced,
-// and the channel is the one place a wrong answer is not recoverable: a stable
-// pointer that moved cannot be moved back by editing a workflow.
+// The `case … esac` block starting at `opener`, with nesting respected.
 //
-// So the resolved answer is pinned to reproduce the rule it replaced, for the
-// shapes that exist today. This is the batch that must not change legacy
-// behaviour; a later batch that changes it has to change this test.
-test('a legacy tag keeps the publication channel a hyphen always gave it', () => {
-  const setup = job('setup')
-  const auto = /case "\$PINNED_TAG" in\s*\n([\s\S]*?)\n\s*esac/.exec(setup)
-  assert(auto, 'the channel step must read the tag shape for an automatic channel')
-  const arms = auto[1]
-  // The three legacy/spec cases, verbatim. `v*-*` is a v-prefixed tag with a
-  // hyphen, which has always meant a pre-release; a plain `v*` has always meant
-  // stable; and anything unrecognised defaults to pre-release, the direction a
-  // deliberate promotion can correct.
-  const expected = [
-    [/v\*-\*\)\s*prerelease=true/, 'a legacy pre-release tag must stay a pre-release'],
-    [/v\*\)\s*prerelease=false/, 'a plain legacy tag must stay stable'],
-    [/^\s*\*\)\s*prerelease=true/m, 'an unrecognised tag must default to pre-release'],
-  ]
-  for (const [pattern, message] of expected) {
-    assert(pattern.test(arms), message)
+// A NON-GREEDY `[\s\S]*?esac` DOES NOT WORK HERE and this is not a style point: the
+// channel arms used to CONTAIN a nested `case`, so the lazy match stopped at the
+// inner `esac` and the assertions below read a truncated body — a guard that
+// misparses is worse than no guard, because it reports on a region nobody chose.
+function caseBlock(text, opener) {
+  const start = text.indexOf(opener)
+  if (start < 0) return null
+  const re = /\b(case|esac)\b/g
+  re.lastIndex = start
+  let depth = 0
+  for (let m = re.exec(text); m; m = re.exec(text)) {
+    depth += m[1] === 'case' ? 1 : -1
+    if (depth === 0) return text.slice(start, m.index + m[1].length)
   }
+  return null
+}
+
+// THE DEFAULT IS A PRE-RELEASE, STATED OR NOT. A release published without an
+// explicit channel goes out as one, because that is the direction a deliberate
+// promotion can correct and the one that cannot move `latest` or /releases/latest
+// — pointers consumers follow, which no later edit takes back.
+//
+// SO THE TAG TEXT NO LONGER DECIDES THE CHANNEL AT ALL. It used to: a plain legacy
+// `v*` tag meant STABLE, which made a v-tag the one publishable mistake with an
+// unrecoverable half. This test used to PIN that behaviour, on the reasoning that
+// the batch introducing the split must not change legacy releases; it is rewritten
+// because the policy changed on purpose, and the change is the *removal* of a rule
+// rather than a new one.
+//
+// The image-channel case still reads the tag, and that is about the ADDRESS — is
+// this a release ref at all — rather than about the channel.
+test('every automatic channel is a pre-release, and stable is stated', () => {
+  const setup = job('setup')
+  const channel = caseBlock(setup, 'case "${REQUESTED:-auto}" in')
+  assert(channel, 'the channel step must resolve the requested channel')
+  assert(/stable\)\s*prerelease=false/.test(channel), 'an explicit stable must resolve to stable')
+  assert(/auto\)\s*prerelease=true/.test(channel), 'an automatic channel must be a pre-release')
+  assert(
+    !/PINNED_TAG/.test(channel),
+    'the channel reads the tag shape again; that is how a plain v-tag becomes stable by default, and a moved stable pointer is not undone by editing a workflow',
+  )
+  assert(
+    /unknown publication channel/.test(channel),
+    'an unrecognised channel input must be refused rather than defaulted',
+  )
 })
+
 
 
 // This intentionally guards a bounded, canonical workflow layout; the Go
@@ -489,8 +511,11 @@ test('the image channels both read the one resolved answer', () => {
 })
 
 test('latest never points at a prerelease and beta always tracks the newest of any kind', () => {
-  // The scheme this project publishes today.
-  assert.deepEqual(resolveChannel('v1.0.0'), { prerelease: false, images: true })
+  // THE DEFAULT IS A PRE-RELEASE FOR EVERY TAG, INCLUDING A PLAIN LEGACY ONE. It
+  // used to be stable for `v1.0.0`, which made a v-tag the one publishable mistake
+  // with an unrecoverable half: it moves a pointer consumers follow. Publishing
+  // stable is now something a maintainer states.
+  assert.deepEqual(resolveChannel('v1.0.0'), { prerelease: true, images: true })
   assert.deepEqual(resolveChannel('v0.0.1-beta11'), { prerelease: true, images: true })
   assert.deepEqual(resolveChannel('v1.0.0-rc1'), { prerelease: true, images: true })
 
@@ -503,8 +528,9 @@ test('latest never points at a prerelease and beta always tracks the newest of a
   assert.deepEqual(resolveChannel('1.0.0'), { prerelease: true, images: false })
   assert.deepEqual(resolveChannel('nightly'), { prerelease: true, images: false })
 
-  // An explicit channel overrides the shape, which is what the input is for.
+  // An explicit channel overrides the default, which is what the input is for.
   assert.deepEqual(resolveChannel('release/4.0.0', 'stable'), { prerelease: false, images: true })
+  assert.deepEqual(resolveChannel('v1.0.0', 'stable'), { prerelease: false, images: true })
   assert.deepEqual(resolveChannel('v1.0.0', 'testing'), { prerelease: true, images: true })
 })
 
@@ -555,7 +581,7 @@ test('the publication channel is resolved once, never inferred from a hyphen', (
   assert(/type=raw,value=latest,enable=\$\{\{ needs\.setup\.outputs\.image_channel/.test(docker), 'latest must read the resolved answer')
   assert(/type=raw,value=beta,enable=\$\{\{ needs\.setup\.outputs\.image_channel/.test(docker), 'beta must read the resolved answer')
 
-  // The recoverable direction for a tag in neither scheme: a deliberate promotion
-  // can correct it, and pointing stable at something unreviewed cannot.
-  assert(/\*\)\s+prerelease=true/.test(setup), 'an unrecognised tag must default to pre-release')
+  // The recoverable direction is now the default for every tag, not a fallback for
+  // tags in neither scheme: `stable` is reachable only through the stated input.
+  assert(/auto\)\s*prerelease=true/.test(setup), 'an automatic channel must default to pre-release')
 })
