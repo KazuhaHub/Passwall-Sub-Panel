@@ -208,25 +208,34 @@ func TestTheShippedPanelRangesDocumentParses(t *testing.T) {
 	if len(policy.SUIEntries) == 0 || policy.SUIEntries[0].MaxTestedSUI == "" {
 		t.Fatalf("the shipped document carries no S-UI ceiling: %+v", policy.SUIEntries)
 	}
-	// And it must agree with the per-major file it was derived from, or the two
-	// would certify different panels depending on which one a build could reach.
-	manifest, err := os.ReadFile(filepath.Join("..", "..", "docs", "compat", "v4.json"))
+	// IT MUST CARRY THE MERGED VIEW, not v4.json's base entries. The base entry
+	// says 3.7.0 across the whole line; v4-ranges.json is where the current
+	// reviewed ranges live, and folding it in is what a legacy build actually
+	// gets. Publishing the base alone would UNDERSTATE what has been verified:
+	// a panel on the newer side would report a reviewed ceiling as untested.
+	//
+	// Expressed as the property rather than as a diff, because the property is
+	// what must hold: the two routes must reach the same ceiling for the same
+	// build, or the answer depends on which document a build could reach.
+	overlay, err := os.ReadFile(filepath.Join("..", "..", "docs", "compat", "v4-ranges.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	var fromManifest struct {
+	var ranges struct {
 		Entries    []map[string]any `json:"entries"`
 		SUIEntries []map[string]any `json:"sui_entries"`
 	}
-	if err := json.Unmarshal(manifest, &fromManifest); err != nil {
+	if err := json.Unmarshal(overlay, &ranges); err != nil {
 		t.Fatal(err)
 	}
-	if len(fromManifest.Entries) != len(policy.Entries) {
-		t.Fatalf("the document has %d XUI entries, v4.json has %d", len(policy.Entries), len(fromManifest.Entries))
+	if len(policy.Entries) != len(ranges.Entries) {
+		t.Fatalf("the document has %d XUI entries, the reviewed ranges have %d", len(policy.Entries), len(ranges.Entries))
 	}
-	for i, entry := range fromManifest.Entries {
-		if entry["max_tested_xui"] != policy.Entries[i].MaxTestedXUI || entry["min_xui"] != policy.Entries[i].MinXUI {
-			t.Fatalf("entry %d disagrees with v4.json: %v vs %+v", i, entry, policy.Entries[i])
+	for i, entry := range ranges.Entries {
+		if entry["max_tested_xui"] != policy.Entries[i].MaxTestedXUI ||
+			entry["min_xui"] != policy.Entries[i].MinXUI ||
+			entry["psp_min"] != policy.Entries[i].PSPMin || entry["psp_max"] != policy.Entries[i].PSPMax {
+			t.Fatalf("entry %d disagrees with the reviewed ranges: %v vs %+v", i, entry, policy.Entries[i])
 		}
 	}
 }

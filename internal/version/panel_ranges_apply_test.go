@@ -2,6 +2,8 @@ package version
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -147,5 +149,29 @@ func TestAMajorlessBuildPointedAtAManifestIsToldWhatToRead(t *testing.T) {
 	}
 	if got := ActiveMaxTestedXUI(); got != "" {
 		t.Fatalf("a refused manifest established a ceiling: %q", got)
+	}
+}
+
+// THE SAME BUILD MUST GET THE SAME CEILING WHICHEVER DOCUMENT IT REACHES.
+//
+// A legacy build folds v4.json's range overlay in; a product build reads the
+// named document. Both must land on the ceiling the reviewer actually approved,
+// and the failure of that is not a crash: it is one panel reporting a range as
+// supported while the other calls it untested. So this drives the shipped
+// document through the ordinary apply path and asserts the number.
+func TestTheShippedDocumentYieldsTheReviewedCeiling(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", "docs", "compat", "panel-ranges-v1.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	isolatedCompatCache(t, "4.0.0")
+	if err := applyPanelRangesDocument(raw, panelRangesApplyNow); err != nil {
+		t.Fatalf("the shipped document does not apply to 4.0.0: %v", err)
+	}
+	// 3.8.5 is the ceiling in docs/compat/v4-ranges.json for the stable line. If
+	// this reads 3.7.0 the document was published from the base entries and is
+	// understating the review.
+	if got := ActiveMaxTestedXUI(); got != "3.8.5" {
+		t.Fatalf("ceiling = %q, want the reviewed 3.8.5", got)
 	}
 }
