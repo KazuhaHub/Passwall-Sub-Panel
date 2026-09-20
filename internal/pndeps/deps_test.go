@@ -48,7 +48,7 @@ var allowedResidual = map[string]residualDependency{
 	},
 	"github.com/KazuhaHub/passwall-node/deployment": {
 		successor: "a pinned, signed installation template consumed by a PSP adapter",
-		files:     4,
+		files:     2,
 	},
 	"github.com/KazuhaHub/passwall-node/corecatalog": {
 		successor: "the dynamically reviewed release policy",
@@ -60,6 +60,12 @@ var allowedResidual = map[string]residualDependency{
 	// because `go list -deps` reports it, and a guard that ignored what the
 	// tool reports would be describing a different dependency graph than the
 	// one that exists.
+	//
+	// The surface has SHRUNK twice since this list was written: the Node release
+	// catalog and the agent-upgrade service each stopped reaching for a rule the
+	// installer owns, and both times this guard failed on the stale count before
+	// anything else noticed. That is the property worth keeping — the number is
+	// not documentation, it is a tripwire.
 	"github.com/KazuhaHub/passwall-node/internal/nodeconfig": {
 		successor: "leaves with deployment; not separately removable",
 		files:     0,

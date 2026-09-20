@@ -57,6 +57,18 @@ type releaseVectors struct {
 		OK     bool   `json:"ok"`
 		Why    string `json:"why"`
 	} `json:"versions"`
+
+	Order []struct {
+		A   string `json:"a"`
+		B   string `json:"b"`
+		Cmp int    `json:"cmp"`
+	} `json:"order"`
+
+	LegacyOrder []struct {
+		A   string `json:"a"`
+		B   string `json:"b"`
+		Cmp int    `json:"cmp"`
+	} `json:"legacy_order"`
 }
 
 func loadReleaseVectors(t *testing.T) releaseVectors {
@@ -72,7 +84,8 @@ func loadReleaseVectors(t *testing.T) releaseVectors {
 	if vectors.Format != 1 {
 		t.Fatalf("vectors format = %d, want 1", vectors.Format)
 	}
-	if len(vectors.Tags) == 0 || len(vectors.RejectTags) == 0 || len(vectors.Reject) == 0 || len(vectors.Versions) == 0 {
+	if len(vectors.Tags) == 0 || len(vectors.RejectTags) == 0 || len(vectors.Reject) == 0 ||
+		len(vectors.Versions) == 0 || len(vectors.Order) == 0 || len(vectors.LegacyOrder) == 0 {
 		t.Fatal("the vectors lost a section this test reads; a section that vanished would make this pass vacuously")
 	}
 	return vectors

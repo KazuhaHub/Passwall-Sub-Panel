@@ -123,6 +123,11 @@ func TestNodeInstallationFilesRejectsUnsupportedInputsAndNonAdministrators(t *te
 		`{"method":"docker","version":"v0.0.1","os":"windows"}`,
 		`{"method":"systemd","version":"v0.0.1"}`,
 		`{"method":"manual","version":" v0.0.1"}`,
+		// Product-scheme near misses. The shape rule moved; the refusals did not.
+		`{"method":"manual","version":"4.0"}`,
+		`{"method":"manual","version":"04.0.0"}`,
+		`{"method":"manual","version":"4.0.0.1"}`,
+		`{"method":"manual","version":"release/4.0.0"}`,
 		`not-json`,
 	} {
 		w := installationRequest(h, http.MethodPost, "node-installation-files", body, "", domain.RoleAdmin)
@@ -488,7 +493,20 @@ func TestNodeInstallationManualUnixExtractsOnlyFreshRegularMembers(t *testing.T)
 // separator silently becomes a different URL: the segment ends early and the rest
 // is read as a deeper path, so the request addresses something that does not
 // exist and the failure looks like a missing release rather than a bad URL.
-func TestReleaseAssetURLKeepsTheTagInOneSegment(t *testing.T) {
+// THE TAG IS A PATH; AN ASSET NAME IS ONE SEGMENT OF IT.
+//
+// This test used to assert the opposite for the tag — that `release/4.0.0`
+// becomes `release%2F4.0.0`, on the assumption that GitHub resolves the escaped
+// form to the same resource. It does not: the tag the publisher created is
+// `release/4.0.0`, a ref with a slash, and the URL that names it is two path
+// entries. Escaping it whole asks for a single entry literally called
+// `release%2F4.0.0`, which is a different address.
+//
+// What is still open is whether GitHub serves a slash-bearing tag at all; the
+// migration plan says to settle that with a real download rather than assume it,
+// and no such release exists yet. The comment on releaseTagPath says so as well,
+// rather than only here.
+func TestReleaseAssetURLAddressesTheTagAsAPath(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		tag  string
@@ -502,10 +520,16 @@ func TestReleaseAssetURLKeepsTheTagInOneSegment(t *testing.T) {
 			why:  "dots and hyphens are unreserved, so escaping must not alter it",
 		},
 		{
-			name: "a product tag keeps its slash inside the segment",
+			name: "a product tag keeps its slash as a separator",
 			tag:  "release/4.0.0",
-			want: "https://github.com/KazuhaHub/Passwall-Node/releases/download/release%2F4.0.0/SHA256SUMS.txt",
-			why:  "unescaped, the slash would end the tag segment and address a path that does not exist",
+			want: "https://github.com/KazuhaHub/Passwall-Node/releases/download/release/4.0.0/SHA256SUMS.txt",
+			why:  "the tag is the ref the publisher made; its slash is a real path entry",
+		},
+		{
+			name: "a segment is still escaped",
+			tag:  "release/4.0.0 a",
+			want: "https://github.com/KazuhaHub/Passwall-Node/releases/download/release/4.0.0%20a/SHA256SUMS.txt",
+			why:  "per-segment escaping neutralises what is inside a segment",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -516,12 +540,34 @@ func TestReleaseAssetURLKeepsTheTagInOneSegment(t *testing.T) {
 	}
 }
 
-// The asset name is built from values the request supplies, and it is escaped
-// for the same reason the tag is.
 func TestReleaseAssetURLEscapesTheAssetNameToo(t *testing.T) {
 	got := nodeReleaseAssetURL("v1.0.0", "a b/c")
 	want := "https://github.com/KazuhaHub/Passwall-Node/releases/download/v1.0.0/a%20b%2Fc"
 	if got != want {
 		t.Fatalf("nodeReleaseAssetURL = %q, want %q", got, want)
+	}
+}
+
+// A PRODUCT-SCHEME RELEASE, through the same renderer.
+//
+// The gate here refused one, so the request came back as a failure and the
+// surface reported that the release had no installation assets — an absence
+// attributed to the release rather than to the rule. The URLs are the other half:
+// the path is addressed by the TAG and the asset is named by the VERSION, and
+// before this the version was used for both.
+func TestNodeInstallationFilesRenderForAProductRelease(t *testing.T) {
+	_, repo := installationFixture(t)
+	p := nativeServerCreateResponse{AgentID: repo.agent.AgentID, Credential: repo.credential, Endpoint: "https://panel.example/v1/node/sync"}
+	result := renderNodeInstallationFiles(41, p, nodeInstallationFilesRequest{Method: "manual", Version: "4.0.0", OS: "linux", Arch: "amd64"})
+	if len(result.Steps) == 0 || len(result.Downloads) != 2 {
+		t.Fatalf("a product release produced no materials: %+v", result)
+	}
+	asset := "passwall-node_4.0.0_linux_amd64.tar.gz"
+	want := []nodeInstallationDownload{
+		{Name: asset, URL: "https://github.com/KazuhaHub/Passwall-Node/releases/download/release/4.0.0/" + asset},
+		{Name: "SHA256SUMS.txt", URL: "https://github.com/KazuhaHub/Passwall-Node/releases/download/release/4.0.0/SHA256SUMS.txt"},
+	}
+	if !reflect.DeepEqual(result.Downloads, want) {
+		t.Fatalf("downloads = %+v, want %+v", result.Downloads, want)
 	}
 }

@@ -6,7 +6,7 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/KazuhaHub/passwall-node/deployment"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/version"
 )
 
 type nodeInstallationFilesRequest struct {
@@ -19,7 +19,7 @@ type nodeInstallationFilesRequest struct {
 
 func (r *nodeInstallationFilesRequest) normalize() bool {
 	if (r.Method != "docker" && r.Method != "manual") ||
-		(!deployment.ValidReleaseVersion(r.Version) && !(r.Method == "docker" && (r.Version == "latest" || r.Version == "beta"))) {
+		(!version.IsReleaseVersion(r.Version) && !(r.Method == "docker" && (r.Version == "latest" || r.Version == "beta"))) {
 		return false
 	}
 	if r.OS == "" {
@@ -183,22 +183,39 @@ func renderNodeInstallationFiles(panelID int64, p nativeServerCreateResponse, r 
 // nodeReleaseDownloadBase is where a released Passwall Node asset lives.
 const nodeReleaseDownloadBase = "https://github.com/KazuhaHub/Passwall-Node/releases/download/"
 
+// releaseTagPath renders a release tag as the path it occupies under
+// releases/download/.
+//
+// THE SLASH IS A SEPARATOR, NOT DATA. GitHub published the tag and serves the
+// ref verbatim, so `release/4.0.0` is two path entries and that is the URL that
+// exists. Escaping the whole tag asks for a single entry literally named
+// `release%2F4.0.0`, which is a different resource — and the earlier version of
+// this function did exactly that, on the assumption that it would be equivalent.
+// Escaping PER SEGMENT keeps the separator while still neutralising anything
+// inside a segment; the tag is validated before it gets here, and this makes the
+// URL correct even if a future scheme allows a character that is not.
+//
+// WHAT IS STILL OPEN: whether GitHub resolves a slash-bearing tag this way is a
+// question the migration plan says to settle with a real download rather than
+// assume, and no such release exists yet. This builds the only URL that could be
+// right — the one the publisher's own tag names — rather than the one that
+// definitely is not.
+func releaseTagPath(tag string) string {
+	segments := strings.Split(tag, "/")
+	for i, segment := range segments {
+		segments[i] = url.PathEscape(segment)
+	}
+	return strings.Join(segments, "/")
+}
+
 // nodeReleaseAssetURL builds the official URL for one asset of one release.
 //
-// THE TAG IS A PATH SEGMENT, NOT PART OF A PATH. Concatenating it is how a tag
-// containing a separator silently becomes a DIFFERENT URL: the segment ends
-// early and the rest is read as a deeper path, so the request addresses something
-// that does not exist and fails in a way that looks like a missing release.
-// Escaping it as one segment is the only construction that cannot do that.
-//
-// Legacy tags are unaffected — dots and hyphens are unreserved — and the product
-// form carries a slash, which is exactly the case that needs the escape.
-//
-// NOTHING HERE CLAIMS GITHUB RESOLVES THE ESCAPED FORM. The migration plan
-// requires that be settled by a real download test rather than assumed; this
-// builds the only URL that could be right, and says so rather than guessing.
+// tag IS THE ADDRESS AND asset IS ONE SEGMENT OF IT. The asset name is built
+// from request values, so it is escaped whole: a name containing a separator must
+// never be read as more path than it is. The tag is the publisher's own ref, so
+// its separators are real.
 func nodeReleaseAssetURL(tag, asset string) string {
-	return nodeReleaseDownloadBase + url.PathEscape(tag) + "/" + url.PathEscape(asset)
+	return nodeReleaseDownloadBase + releaseTagPath(tag) + "/" + url.PathEscape(asset)
 }
 
 func manualReleaseDownloads(r nodeInstallationFilesRequest) []nodeInstallationDownload {
@@ -207,9 +224,19 @@ func manualReleaseDownloads(r nodeInstallationFilesRequest) []nodeInstallationDo
 		ext = ".zip"
 	}
 	asset := "passwall-node_" + r.Version + "_" + r.OS + "_" + r.Arch + ext
+	// THE PATH IS ADDRESSED BY THE TAG AND THE ASSET IS NAMED BY THE VERSION.
+	// Passing the version as the path — which this did — asks for a release that
+	// does not exist under that name, and the download fails as though the
+	// release were missing rather than the address wrong.
+	tag, ok := version.ReleaseTagFor(r.Version)
+	if !ok {
+		// Unreachable behind normalize(), which requires a release version. An
+		// address that cannot be built is no downloads rather than a guessed one.
+		return nil
+	}
 	return []nodeInstallationDownload{
-		{Name: asset, URL: nodeReleaseAssetURL(r.Version, asset)},
-		{Name: "SHA256SUMS.txt", URL: nodeReleaseAssetURL(r.Version, "SHA256SUMS.txt")},
+		{Name: asset, URL: nodeReleaseAssetURL(tag, asset)},
+		{Name: "SHA256SUMS.txt", URL: nodeReleaseAssetURL(tag, "SHA256SUMS.txt")},
 	}
 }
 

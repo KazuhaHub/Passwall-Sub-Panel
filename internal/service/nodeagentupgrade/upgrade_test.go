@@ -98,7 +98,11 @@ func TestUpgradeRequestRequiresAnExactNewerRelease(t *testing.T) {
 		{"v0.0.1-beta.10", "v0.0.1-beta.9", true},
 		{"v0.0.1", "v0.0.1-beta3", true},
 		{"v0.0.2-beta.1", "v0.0.1", true},
-		{"v100000000000000000000.0.0", "v99999999999999999999.0.0", true},
+		// `v100000000000000000000.0.0` against a 20-digit major used to be here,
+		// asserting that the comparison does not overflow. That property is
+		// asserted where it lives, in the comparator; the string itself is now
+		// REFUSED by the shape rule, which bounds a segment because PSP returns a
+		// major and cannot represent one this large. See MaxVersionSegmentBounds.,
 		{"v0.0.1-beta2", "v0.0.1-beta2", false},
 		{"v0.0.1-beta2", "v0.0.1-beta3", false},
 		{"v0.0.1-beta.9", "v0.0.1-beta.10", false},
@@ -107,6 +111,22 @@ func TestUpgradeRequestRequiresAnExactNewerRelease(t *testing.T) {
 		{"v0.1", "v0.0.1", false},
 		{"v0.0.2+build", "v0.0.1", false},
 		{"latest", "v0.0.1", false},
+		{"v100000000000000000000.0.0", "v99999999999999999999.0.0", false},
+		// THE PRODUCT SCHEME. This is the SERVER's gate — the front end mirrors
+		// it, but a request that reaches the API directly passes through here,
+		// and refusing a product version would make remote upgrade unavailable
+		// for every release named that way.
+		{"4.0.1", "4.0.0", true},
+		{"102.1.0", "102.0.3", true},
+		{"4.0.0", "4.0.0", false},
+		{"4.0.0", "4.0.1", false},
+		{"4.0", "4.0.0", false},
+		{"04.0.0", "4.0.0", false},
+		{"release/4.0.0", "4.0.0", false},
+		// Across the schemes, ordered by the release line: a v0.x build is
+		// behind 4.0.0 and ahead of nothing after it.
+		{"4.0.0", "v0.0.1-beta11", true},
+		{"v0.0.1-beta11", "4.0.0", false},
 	} {
 		err := validateRequest(Request{Version: tc.target, ExpectedVersion: tc.expected})
 		if tc.valid && err != nil || !tc.valid && !errors.Is(err, domain.ErrValidation) {

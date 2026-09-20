@@ -26,6 +26,17 @@ import (
 // MaxVersionSegmentBounds the segments. It matches the ceiling every other
 // implementation uses; a version beyond it is a different format, not a longer
 // one.
+//
+// IT APPLIES TO BOTH SCHEMES HERE, WHICH IS NARROWER THAN THE AUTHORITY. The
+// released rule checks the legacy shape with a regex, and a regex does not do
+// arithmetic — so it accepts a legacy version whose major is larger than any int
+// while the product rule refuses one past the ceiling. PSP cannot copy that: it
+// returns a MAJOR, and a major it cannot represent is not a version it can act
+// on. The divergence is named here and pinned by a test rather than left for a
+// reader to discover from two implementations that disagree about one absurd
+// string. The property the old behaviour was protecting — that comparing very
+// large segments does not overflow — belongs to the comparator and is asserted
+// there.
 const MaxVersionSegmentBounds = 2147483647
 
 // MajorOfRelease returns the release line of a release version, and whether the
