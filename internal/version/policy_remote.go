@@ -166,3 +166,88 @@ func RunPolicyRefresh(ctx context.Context, source string, interval time.Duration
 		backoff = interval
 	}
 }
+
+// The source, and the forced refresh a pre-flight asks for.
+//
+// The source is boot configuration, but the pre-flight is a request handler —
+// which has no configuration. A holder set once at boot is what lets the request
+// path ask for a refresh without the handler learning where configuration lives.
+
+var (
+	policySourceMu sync.RWMutex
+	policySource   string
+)
+
+// SetPolicySource records where the policy publication lives. Empty means none,
+// and every refresh path treats that as "nothing to do" rather than an error.
+func SetPolicySource(url string) {
+	policySourceMu.Lock()
+	policySource = url
+	policySourceMu.Unlock()
+}
+
+// ConfiguredPolicySource returns the source, or "" when none is configured.
+func ConfiguredPolicySource() string {
+	policySourceMu.RLock()
+	defer policySourceMu.RUnlock()
+	return policySource
+}
+
+// Pre-flight throttling. A forced refresh bypasses the 30-minute schedule, so it
+// needs its own floor: an admin clicking through panels would otherwise fetch the
+// publication once per click, and a source that is down would be retried at the
+// same rate. The floor is on the ATTEMPT, not the success, because the failure
+// case is the one that needs protecting.
+const (
+	policyPreflightThrottle = 60 * time.Second
+	policyPreflightMaxWait  = 30 * time.Minute
+)
+
+var (
+	policyAttemptMu  sync.Mutex
+	policyLastTry    time.Time
+	policyFailedWait time.Duration
+)
+
+// RefreshPolicyForPreflight refreshes when the last attempt is old enough, and is
+// silent otherwise. It NEVER returns an error the caller must act on: a policy
+// that cannot be refreshed is a state the panel already reports, and a pre-flight
+// is not the place to fail a request over it.
+func RefreshPolicyForPreflight(ctx context.Context, now time.Time) {
+	source := ConfiguredPolicySource()
+	if source == "" {
+		// Nothing configured is not a degraded state; it is the default.
+		return
+	}
+	policyAttemptMu.Lock()
+	wait := policyPreflightThrottle
+	if policyFailedWait > wait {
+		wait = policyFailedWait
+	}
+	if !policyLastTry.IsZero() && now.Sub(policyLastTry) < wait {
+		policyAttemptMu.Unlock()
+		return
+	}
+	policyLastTry = now
+	policyAttemptMu.Unlock()
+
+	if err := RefreshReleasesPolicy(ctx, source, now); err != nil {
+		policyAttemptMu.Lock()
+		// Grow the floor for the FAILURE case. Doubling from the base each time
+		// rather than from the current value keeps a long outage from reaching the
+		// cap and staying there after the source recovers.
+		if policyFailedWait == 0 {
+			policyFailedWait = policyPreflightThrottle
+		} else {
+			policyFailedWait *= 2
+		}
+		if policyFailedWait > policyPreflightMaxWait {
+			policyFailedWait = policyPreflightMaxWait
+		}
+		policyAttemptMu.Unlock()
+		return
+	}
+	policyAttemptMu.Lock()
+	policyFailedWait = 0
+	policyAttemptMu.Unlock()
+}

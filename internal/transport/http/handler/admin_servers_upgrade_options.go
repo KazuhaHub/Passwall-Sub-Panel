@@ -3,6 +3,7 @@ package handler
 import (
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -176,6 +177,14 @@ func (h *AdminServersHandler) UpgradeOptions(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Server not registered in pool: " + err.Error()})
 		return
 	}
+
+	// THE PRE-FLIGHT FORCES A REFRESH, because a pre-flight answered from a
+	// schedule is answered from whatever the schedule last saw — and the whole
+	// point of asking before an upgrade is to know NOW. The call is silent: it
+	// throttles itself, backs off when the source is down, and never fails the
+	// request over a refresh, because the state it could not refresh is already
+	// reported by compat-status.
+	version.RefreshPolicyForPreflight(c.Request.Context(), time.Now().UTC())
 
 	var option upgradeOption
 	switch component {

@@ -291,3 +291,94 @@ func TestTheRefreshLoopBacksOffOnFailureAndRecovers(t *testing.T) {
 		}
 	})
 }
+
+// A forced refresh bypasses the 30-minute schedule, so it needs its own floor:
+// an admin clicking through panels would otherwise fetch the publication once per
+// click. The floor is on the ATTEMPT rather than the success, because the failure
+// case is the one that needs protecting.
+func TestThePreflightRefreshThrottlesAndBacksOff(t *testing.T) {
+	reset := func(t *testing.T) {
+		t.Helper()
+		previousSource, previousTry, previousWait := ConfiguredPolicySource(), policyLastTry, policyFailedWait
+		t.Cleanup(func() {
+			SetPolicySource(previousSource)
+			policyAttemptMu.Lock()
+			policyLastTry, policyFailedWait = previousTry, previousWait
+			policyAttemptMu.Unlock()
+		})
+		policyAttemptMu.Lock()
+		policyLastTry, policyFailedWait = time.Time{}, 0
+		policyAttemptMu.Unlock()
+	}
+
+	t.Run("no source is not a degraded state", func(t *testing.T) {
+		reset(t)
+		SetPolicySource("")
+		// Nothing to fetch, nothing to say — and crucially no error for a caller
+		// to act on.
+		RefreshPolicyForPreflight(context.Background(), time.Now())
+	})
+
+	t.Run("a second pre-flight inside the window does not fetch again", func(t *testing.T) {
+		reset(t)
+		document := policyDocument(time.Now().Add(24 * time.Hour))
+		_, _, priv := installTestTrustRoot(t)
+		handler, err := servePolicy(document, priv)
+		if err != nil {
+			t.Fatal(err)
+		}
+		requested := 0
+		baseURL := withTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+			requested++
+			handler(w, r)
+		})
+		SetPolicySource(baseURL)
+
+		now := time.Now()
+		RefreshPolicyForPreflight(context.Background(), now)
+		after := requested
+		if after == 0 {
+			t.Fatal("the first pre-flight did not fetch")
+		}
+		RefreshPolicyForPreflight(context.Background(), now.Add(policyPreflightThrottle/2))
+		if requested != after {
+			t.Fatalf("a second pre-flight inside the window fetched again: %d -> %d", after, requested)
+		}
+		RefreshPolicyForPreflight(context.Background(), now.Add(policyPreflightThrottle*2))
+		if requested == after {
+			t.Fatal("a pre-flight past the window did not fetch")
+		}
+	})
+
+	t.Run("a failing source is asked for less often", func(t *testing.T) {
+		reset(t)
+		installTestTrustRoot(t)
+		requested := 0
+		baseURL := withTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
+			requested++
+			http.NotFound(w, nil)
+		})
+		SetPolicySource(baseURL)
+
+		now := time.Now()
+		RefreshPolicyForPreflight(context.Background(), now)
+		// ONE failure leaves the floor at the base throttle, so an attempt one
+		// second past it is still allowed — and its failure is what grows the floor.
+		RefreshPolicyForPreflight(context.Background(), now.Add(policyPreflightThrottle+time.Second))
+		grown := requested
+		if grown != 2 {
+			t.Fatalf("expected two attempts, got %d", grown)
+		}
+		// Now the floor is twice the base, so an attempt a base-window later is
+		// refused: that is the backoff doing its job.
+		RefreshPolicyForPreflight(context.Background(), now.Add(policyPreflightThrottle*2+time.Second))
+		if requested != grown {
+			t.Fatalf("the failure backoff did not grow the floor: %d -> %d", grown, requested)
+		}
+		// Past the grown floor it tries again.
+		RefreshPolicyForPreflight(context.Background(), now.Add(policyPreflightThrottle*4))
+		if requested == grown {
+			t.Fatal("a pre-flight past the grown floor did not fetch")
+		}
+	})
+}

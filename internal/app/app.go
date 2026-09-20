@@ -220,6 +220,10 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 	//
 	// A failure is logged and does not stop the boot: the panel keeps whatever
 	// policy it has, and an unreachable source must not take the panel down.
+	// The request path has no configuration, so the source is held here once and
+	// read from there. Set BEFORE the boot fetch so a pre-flight arriving during
+	// it sees the same source.
+	version.SetPolicySource(cfg.PolicySourceURL)
 	if cfg.PolicySourceURL != "" {
 		if err := version.RefreshReleasesPolicy(ctx, cfg.PolicySourceURL, time.Now().UTC()); err != nil {
 			log.Warn("release policy not loaded; admission falls back to what is already in force",
