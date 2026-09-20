@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "note": "HISTORICAL REGRESSION PINS, AND NOTHING READS THIS FILE. These are the released Passwall-Node revisions the compatibility matrix used to test against, recorded under the legacy v-prefixed scheme that the products no longer publish. The scheme was removed - there is no production deployment, so nothing needed migrating off it - and the matrix was narrowed to the releases the products actually publish, which is why the pins here are not planned into any case. THEY ARE KEPT BECAUSE THE COVERAGE WAS REAL: each case proved the candidate panel speaks the v1 node wire against a released node, and that claim is about the wire rather than about the naming. Restoring one is a matter of moving the entry back into verification-v1.json's pinned_sources; the commits below are still the commits those tags pointed at when they were first resolved.",
+  "contract_source": {
+    "note": "THE SOURCE THE PINNED-SOURCE CONTRACT JOB TESTS, named here rather than taken from PSP's go.mod. When the job resolved it from go.mod, the evidence for 'PSP speaks to a real released Node' moved whenever a dependency bump happened, and removing the PN root dependency (X07) would have removed the test entry point with it. A commit, not a tag: the matrix resolves the commit and checks it, so a moved tag is caught instead of silently testing a different revision.",
+    "tag": "v0.0.1-beta11",
+    "commit": "60d96490f2b0561279ae9332ef6a809e14aab996",
+    "module_path": "github.com/KazuhaHub/passwall-node"
+  },
+  "pinned_sources": {
+    "v0.0.1-beta1": "36c7f0b10a2605d918e3fe1874db710d4ae5452b",
+    "v0.0.1-beta2": "dc5270c00d7aa560deb0cf291b6bae940e946172",
+    "v0.0.1-beta3": "91c36bffeae2742784a8fc7a91cab845062a7a1a",
+    "v0.0.1-beta4": "4b40af2e162a9510a33a243e06dd446ec24afcd5",
+    "v0.0.1-beta5": "f76259501ae9c51f3af481e3a3bd38db0ec5c732",
+    "v0.0.1-beta6": "2cea4045fcf9340af39cf9850f87615b2ee6f87f",
+    "v0.0.1-beta7": "9880b99bcc4de0927a191b68255cb17865d77e72",
+    "v0.0.1-beta8": "5a7eb9fe7a5d5104be95758fd88bc0736ad7c6b5",
+    "v0.0.1-beta9": "1f80aee4043fb64eda3ac896897aab0687530502",
+    "v0.0.1-beta10": "fe607ebd240e11e5bbf0a8cc459109854fc0d52c",
+    "v0.0.1-beta11": "60d96490f2b0561279ae9332ef6a809e14aab996"
+  },
+  "why_it_moved": "The panel's own version rule became single-scheme (docs/compat/releases-v1.json revision 2). The matrix keys its cases by a version from node-v4.json's released_nodes, and those rows were legacy stamps that no longer name anything a build can be matched against. Rather than delete the pins - which would have removed the only evidence that the wire survives a node built before the current scheme - they were moved here in full."
+}

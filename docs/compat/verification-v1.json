@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "revision": "2026-09-19.1",
-  "note": "IDENTITY AND PROFILE METADATA ONLY. This file deliberately does NOT list which Node versions are supported — that list lives in docs/compat/node-v4.json and is sliced by position at min_supported, so there is exactly one place to move a floor. This file supplies what that list cannot: which commit each tag pointed at when it was first resolved, and what a case against it claims. A version the manifest supports but this file does not pin fails the plan rather than being tested against whatever the tag points at today.",
+  "revision": "2026-09-20.1",
+  "note": "IDENTITY AND PROFILE METADATA ONLY. This file deliberately does NOT list which Node versions are supported — that list lives in docs/compat/node-v4.json and is sliced by position at min_supported, so there is exactly one place to move a floor. This file supplies what that list cannot: which commit each release resolved to, and what a case against it claims. A version the manifest supports but this file does not pin fails the plan rather than being tested against whatever a tag points at today. THE KEYS ARE VERSIONS, NOT TAGS. They were the same string while the legacy scheme was the only one, and the two consumers split on it: the case planner looked a version up and the contract check looked a tag up. Neither was wrong, and nothing noticed, because no release had ever had two names. A product release does — `release/4.0.0` is the address, `4.0.0` is the version — so the key is the VERSION and each consumer derives the tag where it needs one. The legacy pins moved to docs/compat/historical-pins.json, which nothing reads.",
   "profiles": {
     "node-wire-v1": {
       "class": "required",
@@ -17,25 +17,15 @@
     }
   },
   "pinned_sources": {
-    "v0.0.1-beta1": "36c7f0b10a2605d918e3fe1874db710d4ae5452b",
-    "v0.0.1-beta2": "dc5270c00d7aa560deb0cf291b6bae940e946172",
-    "v0.0.1-beta3": "91c36bffeae2742784a8fc7a91cab845062a7a1a",
-    "v0.0.1-beta4": "4b40af2e162a9510a33a243e06dd446ec24afcd5",
-    "v0.0.1-beta5": "f76259501ae9c51f3af481e3a3bd38db0ec5c732",
-    "v0.0.1-beta6": "2cea4045fcf9340af39cf9850f87615b2ee6f87f",
-    "v0.0.1-beta7": "9880b99bcc4de0927a191b68255cb17865d77e72",
-    "v0.0.1-beta8": "5a7eb9fe7a5d5104be95758fd88bc0736ad7c6b5",
-    "v0.0.1-beta9": "1f80aee4043fb64eda3ac896897aab0687530502",
-    "v0.0.1-beta10": "fe607ebd240e11e5bbf0a8cc459109854fc0d52c",
-    "v0.0.1-beta11": "60d96490f2b0561279ae9332ef6a809e14aab996"
+    "4.0.0": "5fd84eca5b1ffbc5d999979ea6b3ec377b0c6d33"
   },
   "excluded": [],
   "contract_source": {
-    "note": "THE SOURCE THE PINNED-SOURCE CONTRACT JOB TESTS, named here rather than taken from PSP's go.mod. When the job resolved it from go.mod, the evidence for 'PSP speaks to a real released Node' moved whenever a dependency bump happened, and removing the PN root dependency (X07) would have removed the test entry point with it. A commit, not a tag: the matrix resolves the commit and checks it, so a moved tag is caught instead of silently testing a different revision.",
-    "tag": "v0.0.1-beta11",
-    "commit": "60d96490f2b0561279ae9332ef6a809e14aab996",
+    "note": "THE SOURCE THE PINNED-SOURCE CONTRACT JOB TESTS, named here rather than taken from PSP's go.mod. When the job resolved it from go.mod, the evidence for 'PSP speaks to a real released Node' moved whenever a dependency bump happened, and removing the PN root dependency (X07) would have removed the test entry point with it. A commit, not a tag: the matrix resolves the commit and checks it, so a moved tag is caught instead of silently testing a different revision. The tag names the release this build is a candidate against, and the pin it must agree with is looked up by the VERSION that tag names — see the pin-key note above.",
+    "tag": "release/4.0.0",
+    "commit": "5fd84eca5b1ffbc5d999979ea6b3ec377b0c6d33",
     "module_path": "github.com/KazuhaHub/passwall-node"
   },
   "upgrade_edges": [],
-  "pinned_sources_note": "THESE ARE COMMITS, NOT TAG OBJECTS. `git ls-remote --tags` lists both refs/tags/X (the annotated tag object) and refs/tags/X^{} (the commit it points at); pinning the former fails every leg, because a checkout resolves to the commit. The matrix verifies the resolved commit against these, so a wrong-but-well-formed SHA is caught on the first run rather than after it has quietly tested a different revision."
+  "pinned_sources_note": "THESE ARE COMMITS, NOT TAG OBJECTS. `git ls-remote --tags` lists both refs/tags/X (the annotated tag object) and refs/tags/X^{} (the commit it points at); pinning the former fails every leg, because a checkout resolves to the commit. The matrix verifies the resolved commit against these, so a wrong-but-well-formed SHA is caught on the first run rather than after it has quietly tested a different revision. These are commits of the PRODUCT releases, whose tags live under `release/`; the commit below is what that tag resolved to when it was first resolved."
 }

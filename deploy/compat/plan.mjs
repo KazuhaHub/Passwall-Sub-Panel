@@ -27,7 +27,17 @@ const DEFAULTS = {
   profiles: fileURLToPath(new URL('profiles.json', import.meta.url))
 }
 
-const RELEASE_VERSION = /^v\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/
+// A VERSION IS THREE INTEGERS, or four with the build component: no prefix, no
+// suffix. The legacy v-prefixed form this pattern used to accept is gone with the
+// scheme — there is no production deployment, so nothing needed migrating off it —
+// and a manifest row that still carried one would now be refused as "not a release
+// version" rather than planned into a case nobody can run.
+const RELEASE_VERSION = /^\d+\.\d+\.\d+(\.\d+)?$/
+// TAG_NAMESPACE is where a release's address lives. A version is the identity and
+// a tag is where it was published, and they are never the same string under the
+// product scheme — the case below carries the tag as a readable label beside the
+// SHA that is the real identity.
+const TAG_NAMESPACE = 'release/'
 const SHA = /^[0-9a-f]{40}$/
 
 function parseArgs(argv) {
@@ -130,8 +140,10 @@ function build(manifest, verification, profiles) {
         direction: spec.direction ?? '',
         version,
         // The tag is a readable label; the SHA is the identity. Carrying only
-        // the tag would let a moved tag silently substitute another commit.
-        tag: version,
+        // the tag would let a moved tag silently substitute another commit — and
+        // the tag is DERIVED from the version rather than copied from it, because
+        // a product version is not the path its release lives at.
+        tag: `${TAG_NAMESPACE}${version}`,
         sha: pinned[version],
         install_methods: spec.install_methods ?? [],
         platforms: spec.platforms ?? [],

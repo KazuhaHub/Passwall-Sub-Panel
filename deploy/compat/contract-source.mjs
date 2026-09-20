@@ -43,14 +43,38 @@ export function contractSource(verification) {
     throw new Error(`contract_source.module_path is not host and two path segments: ${source.module_path}`)
   }
   // A tag pinning a commit the manifest also claims must agree with the reviewed
-  // pin for that tag; two places naming different revisions is worse than one.
-  const reviewed = (verification.pinned_sources ?? {})[source.tag]
-  if (reviewed && reviewed !== source.commit) {
+  // pin for that release; two places naming different revisions is worse than one.
+  //
+  // THE PIN IS LOOKED UP BY VERSION, NOT BY THE TAG IT ARRIVED AS. They were the
+  // same string while the legacy scheme was the only one, so this read
+  // `pinned_sources[tag]` and never had to say which it meant. A product tag is an
+  // ADDRESS — `release/4.0.0` — and the pin is keyed by the VERSION it names, so
+  // the lookup found nothing the moment the two diverged. That was worse than a
+  // missing check: `if (reviewed && …)` treats an ABSENT pin as agreement, and
+  // agreement is exactly what this is here to refuse. It now requires the pin to
+  // exist and to match.
+  const reviewed = (verification.pinned_sources ?? {})[versionOfTag(source.tag)]
+  if (reviewed !== source.commit) {
     throw new Error(
-      `contract_source says ${source.tag} is ${source.commit} but pinned_sources says ${reviewed}`,
+      `contract_source says ${source.tag} is ${source.commit} but pinned_sources says ${reviewed ?? 'nothing'}`,
     )
   }
   return source
+}
+
+// versionOfTag is the release a tag names. The namespace is part of the ADDRESS,
+// so it comes off — the same rule the Go side applies, written here because the
+// two are in different languages and the tag is what this file is given.
+//
+// A TAG OUTSIDE THE NAMESPACE IS REFUSED rather than passed through: a pin is a
+// claim about a release this project publishes, and a tag that is not in the
+// namespace names no such release.
+const TAG_NAMESPACE = 'release/'
+function versionOfTag(tag) {
+  if (!tag.startsWith(TAG_NAMESPACE)) {
+    throw new Error(`contract_source.tag is not in the ${TAG_NAMESPACE} namespace: ${tag}`)
+  }
+  return tag.slice(TAG_NAMESPACE.length)
 }
 
 // repositoryURL is the git remote the pinned-source job fetches from.

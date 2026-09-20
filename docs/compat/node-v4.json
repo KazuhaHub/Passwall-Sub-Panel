@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "panel_major": 4,
-  "updated_at": "2026-09-18",
+  "updated_at": "2026-09-20",
   "wire": {
     "endpoint": "/v1/node/sync",
     "min_protocol_version": 1,
@@ -18,101 +18,11 @@
     }
   },
   "upgrade_edges": [],
-  "min_supported": "v0.0.1-beta1",
-  "min_supported_doc": "The OLDEST Passwall-Node version this panel still tests. Everything from this row onward in released_nodes is the supported set, and that set is exactly what the released-range CI matrix exercises. MATCHED BY POSITION IN released_nodes, NOT by semver comparison: v0.0.1-beta9 sorts ABOVE v0.0.1-beta11 lexically, so comparing the strings would silently invert the floor. THIS SELECTS WHAT IS TESTED, NOT WHAT MAY CONNECT. No production code reads this field -- only the two workflows and the matrix test do -- so raising it stops testing the versions below it and does nothing else: an older node keeps syncing, and nothing refuses it for sitting below this row. Refusing a node is a separate decision about the wire generation (see wire.min_protocol_version) and needs its own change, announcement and migration acceptance; a floor move must not do that work by implication. Raising it is still BREAKING in the sense that matters here: every version below it stops being tested, so a regression in one of them stops being caught. Record it in docs/compat-policy.md's history, naming what is now untested. The field exists so the matrix can stop growing -- without a floor every release adds a permanent row.",
+  "min_supported": "4.0.0",
+  "min_supported_doc": "The OLDEST Passwall-Node version this panel still tests. Everything from this row onward in released_nodes is the supported set, and that set is exactly what the released-range CI matrix exercises. MATCHED BY POSITION IN released_nodes, NOT by a version comparison. The positional rule was introduced because the legacy scheme's dotless prereleases sorted wrongly as text ('v0.0.1-beta9' above 'v0.0.1-beta11'), so comparing the strings would have silently inverted the floor. THAT REASON IS GONE - a version is three integers now, and integers compare correctly - and the mechanism stays because it is the one both sides already implement: the planner slices this list by indexOf exactly as this field is read. THIS SELECTS WHAT IS TESTED, NOT WHAT MAY CONNECT. No production code reads this field.",
   "released_nodes": [
     {
-      "version": "v0.0.1-beta1",
-      "protocol_version": 1,
-      "base_sync": "supported",
-      "remote_upgrade": "unsupported"
-    },
-    {
-      "version": "v0.0.1-beta2",
-      "protocol_version": 1,
-      "base_sync": "supported",
-      "remote_upgrade": "unsupported"
-    },
-    {
-      "version": "v0.0.1-beta3",
-      "protocol_version": 1,
-      "base_sync": "supported",
-      "remote_upgrade": "conditional",
-      "upgrade_methods": [
-        "linux-systemd"
-      ]
-    },
-    {
-      "version": "v0.0.1-beta4",
-      "protocol_version": 1,
-      "base_sync": "supported",
-      "remote_upgrade": "conditional",
-      "upgrade_methods": [
-        "linux-systemd"
-      ]
-    },
-    {
-      "version": "v0.0.1-beta5",
-      "protocol_version": 1,
-      "base_sync": "supported",
-      "remote_upgrade": "conditional",
-      "upgrade_methods": [
-        "linux-systemd",
-        "managed-docker"
-      ]
-    },
-    {
-      "version": "v0.0.1-beta6",
-      "protocol_version": 1,
-      "base_sync": "supported",
-      "remote_upgrade": "conditional",
-      "upgrade_methods": [
-        "linux-systemd",
-        "managed-docker"
-      ]
-    },
-    {
-      "version": "v0.0.1-beta7",
-      "protocol_version": 1,
-      "base_sync": "supported",
-      "remote_upgrade": "conditional",
-      "upgrade_methods": [
-        "linux-systemd",
-        "managed-docker"
-      ]
-    },
-    {
-      "version": "v0.0.1-beta8",
-      "protocol_version": 1,
-      "base_sync": "supported",
-      "remote_upgrade": "conditional",
-      "upgrade_methods": [
-        "linux-systemd",
-        "managed-docker"
-      ]
-    },
-    {
-      "version": "v0.0.1-beta9",
-      "protocol_version": 1,
-      "base_sync": "supported",
-      "remote_upgrade": "conditional",
-      "upgrade_methods": [
-        "linux-systemd",
-        "managed-docker"
-      ]
-    },
-    {
-      "version": "v0.0.1-beta10",
-      "protocol_version": 1,
-      "base_sync": "supported",
-      "remote_upgrade": "conditional",
-      "upgrade_methods": [
-        "linux-systemd",
-        "managed-docker"
-      ]
-    },
-    {
-      "version": "v0.0.1-beta11",
+      "version": "4.0.0",
       "protocol_version": 1,
       "base_sync": "supported",
       "remote_upgrade": "conditional",
