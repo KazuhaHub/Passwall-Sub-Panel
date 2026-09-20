@@ -125,3 +125,27 @@ func TestAnExpiredRangesDocumentInstallsNothing(t *testing.T) {
 		t.Fatalf("an expired document established a ceiling: %q", got)
 	}
 }
+
+// A build pointed at a PER-MAJOR manifest has no major to match it by, and the
+// refusal has to say what it should read instead.
+//
+// That situation is one this design creates: a URL override can point anywhere,
+// and before the named document existed there was nothing to point a major-less
+// build at — so "cannot derive a major" was the whole truth. It is now half of
+// it, and the missing half is the actionable one.
+func TestAMajorlessBuildPointedAtAManifestIsToldWhatToRead(t *testing.T) {
+	isolatedCompatCache(t, "4.0.0")
+	manifest := []byte(`{"schema_version": 2, "major": 4, "updated_at": "2026-09-19",
+	  "entries": [{"psp_min": "v4.0.0", "psp_max": "v4.99.99", "min_xui": "3.4.2", "max_tested_xui": "3.7.0"}]}`)
+
+	err := applyPerMajorManifest(t.Context(), manifest, "https://example.test/v4.json")
+	if err == nil {
+		t.Fatal("a build with no derivable major accepted a per-major manifest")
+	}
+	if !strings.Contains(err.Error(), panelRangesDocumentName) {
+		t.Fatalf("the refusal does not name the document that would work: %v", err)
+	}
+	if got := ActiveMaxTestedXUI(); got != "" {
+		t.Fatalf("a refused manifest established a ceiling: %q", got)
+	}
+}

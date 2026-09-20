@@ -432,7 +432,12 @@ func applyPerMajorManifest(ctx context.Context, raw []byte, url string) error {
 	}
 	currentMajor, ok := pspMajor(Version)
 	if !ok {
-		return fmt.Errorf("cannot derive PSP major from version %q", Version)
+		// NOT JUST A REFUSAL: it names what this build DOES read. A URL override
+		// can point a build at a manifest, and without this the operator gets
+		// "cannot derive a major" with no hint that a document exists which is
+		// addressed by name and would have worked.
+		return fmt.Errorf("cannot derive a PSP major from version %q, so no per-major manifest applies to it; "+
+			"a build with no derivable major reads the %s document instead", Version, panelRangesDocumentName)
 	}
 	if payload.Major != currentMajor {
 		// Self-validation: PSP fetched v<currentMajor>.json but the
@@ -519,9 +524,13 @@ func payloadApplies(payload remoteCompatPayload) error {
 		}
 		return nil
 	}
+	// Checked BEFORE the overlay fetch so a document that will be refused costs
+	// no second request. applyCompatPayload makes the same check again at the end;
+	// this one exists for its position, not for its verdict.
 	currentMajor, ok := pspMajor(Version)
 	if !ok {
-		return fmt.Errorf("cannot derive PSP major from version %q", Version)
+		return fmt.Errorf("cannot derive a PSP major from version %q, so no per-major manifest applies to it; "+
+			"a build with no derivable major reads the %s document instead", Version, panelRangesDocumentName)
 	}
 	if payload.Major != currentMajor {
 		// Self-validation: PSP fetched v<currentMajor>.json but the file's
