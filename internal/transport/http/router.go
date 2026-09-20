@@ -683,6 +683,7 @@ func NewRouter(d Deps) stdhttp.Handler {
 		adminGroup.POST("/servers/:id/node-diagnostics", servers.RequestNodeDiagnostics)
 		adminGroup.GET("/servers/:id/node-diagnostics/:task_id", servers.GetNodeDiagnostics)
 		adminGroup.POST("/servers/probe", servers.Test)
+		adminGroup.GET("/servers/:id/upgrade-options", servers.UpgradeOptions)
 		adminGroup.GET("/servers/:id/upgrade-preview", servers.UpgradePreview)
 		adminGroup.POST("/servers/:id/upgrade-panel", servers.UpgradePanel)
 		adminGroup.POST("/servers/:id/upgrade-xray", servers.UpgradeXray)
