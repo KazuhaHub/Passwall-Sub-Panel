@@ -40,6 +40,8 @@ type PanelRangesPolicy struct {
 	SUIEntries []remoteCompatSUIEntry `json:"sui_entries,omitempty"`
 	// Advisories is the manifest's version→advisory map, carried unchanged.
 	Advisories map[string]XUIAdvisory `json:"xui_advisories,omitempty"`
+	// SUIAdvisories mirrors Advisories for S-UI releases, as in the manifest.
+	SUIAdvisories map[string]XUIAdvisory `json:"sui_advisories,omitempty"`
 }
 
 // panelRangesSchema is the only schema this build reads. An unknown one is
