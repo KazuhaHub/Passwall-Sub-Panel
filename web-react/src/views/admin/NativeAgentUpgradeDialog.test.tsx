@@ -101,3 +101,49 @@ it('uses the saved beta preference but still requires an exact reviewed version 
   expect(screen.getByRole('combobox', { name: 'admin:servers.native.release_channel' }).textContent).toBe('admin:servers.native.release_testing')
   expect((screen.getByRole('button', { name: 'admin:servers.agent_upgrade.confirm' }) as HTMLButtonElement).disabled).toBe(true)
 })
+
+// A release can be ahead of the node and still be a target no verified edge
+// reaches. The list offers the reachable ones, not everything newer — a request
+// along an unwalked path is refused, and that teaches the operator to distrust
+// the list rather than the request.
+it('offers only the targets the instance says are reachable', async () => {
+  const further = { ...catalog.releases[0], version: 'v0.0.1-beta9',
+    release_url: 'https://github.com/KazuhaHub/Passwall-Node/releases/tag/v0.0.1-beta9' }
+  installReads({
+    '/admin/servers/node-releases': { ...catalog, releases: [catalog.releases[0], further] },
+    '/admin/servers/7/node-agent-upgrades/upgrade-test': queued,
+    '/admin/servers/7/upgrade-options': {
+      component: 'agent', state: 'ready', target_pinnable: true, reason_codes: ['edge_verified'],
+      targets: [
+        { version: queued.version, edge_verified: true, offered_by_policy: true },
+        { version: further.version, edge_verified: false, offered_by_policy: true },
+        { version: 'v0.0.1-beta8', edge_verified: true, offered_by_policy: false },
+      ],
+    },
+  })
+  mount(<NativeAgentUpgradeDialog server={{ ...server, update_channel: 'beta' }} onClose={() => {}} />)
+
+  const field = screen.getByRole('combobox', { name: 'admin:servers.native.agent_version' })
+  await waitFor(() => expect(field.getAttribute('aria-disabled')).not.toBe('true'))
+  fireEvent.mouseDown(field)
+  expect(await screen.findByRole('option', { name: queued.version })).toBeTruthy()
+  expect(screen.queryByRole('option', { name: 'v0.0.1-beta9' })).toBeNull()
+})
+
+// A control-plane blip must not remove an action the operator was using, and the
+// write path still protects the fire — so a failed read falls back to the weaker
+// "strictly newer" filter rather than emptying the list.
+it('falls back to offering what is newer when the instance cannot answer', async () => {
+  const further = { ...catalog.releases[0], version: 'v0.0.1-beta9',
+    release_url: 'https://github.com/KazuhaHub/Passwall-Node/releases/tag/v0.0.1-beta9' }
+  installReads({
+    '/admin/servers/node-releases': { ...catalog, releases: [catalog.releases[0], further] },
+    '/admin/servers/7/node-agent-upgrades/upgrade-test': queued,
+  })
+  mount(<NativeAgentUpgradeDialog server={{ ...server, update_channel: 'beta' }} onClose={() => {}} />)
+
+  const field = screen.getByRole('combobox', { name: 'admin:servers.native.agent_version' })
+  await waitFor(() => expect(field.getAttribute('aria-disabled')).not.toBe('true'))
+  fireEvent.mouseDown(field)
+  expect(await screen.findByRole('option', { name: 'v0.0.1-beta9' })).toBeTruthy()
+})
