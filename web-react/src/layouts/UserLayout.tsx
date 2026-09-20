@@ -20,6 +20,8 @@ import LogoutIcon from '@mui/icons-material/Logout'
 
 import AppearanceMenu from '@/components/AppearanceMenu'
 import LanguageMenu from '@/components/LanguageMenu'
+import { useMyProfile } from '@/query/me'
+import { useQueryScope } from '@/query/useQueryScope'
 import BrandLogo from '@/components/BrandLogo'
 import { useAuthStore, selectLabel } from '@/stores/auth'
 import { useSiteStore } from '@/stores/site'
@@ -34,6 +36,9 @@ export default function UserLayout() {
   const auth = useAuthStore()
   const label = selectLabel(auth)
   const site = useSiteStore()
+  const { data: profile } = useMyProfile(useQueryScope())
+  const versionDisplay = profile?.version_display
+  const productVersion = profile?.product_version || ''
   const appearance = useAppearanceStore()
 
   const [userAnchor, setUserAnchor] = useState<HTMLElement | null>(null)
@@ -57,9 +62,10 @@ export default function UserLayout() {
       <AppBar position="static">
         <Toolbar sx={{ gap: 0.5, minHeight: 64 }}>
           <BrandLogo height={36} />
-          <Typography variant="h6" sx={{ ml: 1.5, fontWeight: 500, fontSize: 17 }}>
+          <Typography variant="h6" sx={{ ml: 1.5, fontWeight: 500, fontSize: 17, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {site.appTitle || site.siteTitle}
           </Typography>
+          {versionDisplay === 'header' && productVersion && <Typography variant="caption" sx={{ ml: 0.75, color: 'text.secondary', flexShrink: 0 }}>{productVersion}</Typography>}
           <Box sx={{ flex: 1 }} />
           <LanguageMenu value={currentLanguage()} onChange={handleLanguageChange} />
           <AppearanceMenu
@@ -102,7 +108,7 @@ export default function UserLayout() {
           <Outlet />
         </Suspense>
       </Box>
-      {site.footerText && (
+      {(site.footerText || (versionDisplay === 'footer' && productVersion)) && (
         <Box component="footer" sx={{
           py: 1.25, textAlign: 'center',
           fontSize: 11, color: md.onSurfaceVariant,
@@ -110,6 +116,7 @@ export default function UserLayout() {
           bgcolor: md.surfaceContainerLow,
         }}>
           {site.footerText}
+          {versionDisplay === 'footer' && productVersion && <Box>{productVersion}</Box>}
         </Box>
       )}
     </Box>

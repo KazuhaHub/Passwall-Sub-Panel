@@ -48,6 +48,8 @@ export interface GlobalAnnouncement {
 }
 
 export interface MeProfile {
+ version_display?: 'hidden' | 'footer' | 'header'
+ product_version?: string
   id: number
   display_name?: string
   upn: string

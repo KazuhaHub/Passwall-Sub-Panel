@@ -2772,5 +2772,11 @@
       "failed": "失败",
       "indeterminate": "结果未知"
     }
-  }
+  },
+  "settings.brand.version_display": "版本号显示位置",
+  "settings.brand.version_display.hidden": "不显示",
+  "settings.brand.version_display.footer": "页面底部（默认）",
+  "settings.brand.version_display.header": "名称右侧",
+  "groups.scope.cat_brand": "页面展示",
+  "groups.scope.version_display": "版本号显示位置"
 }

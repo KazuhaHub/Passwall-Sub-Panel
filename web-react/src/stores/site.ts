@@ -12,6 +12,8 @@ interface SiteState {
   logoUrl: string
   logoUrlDark: string
   iconUrl: string
+  versionDisplay: 'hidden' | 'footer' | 'header'
+  productVersion: string
   footerText: string
   themeColor: string | undefined
   themeDefaultMode: 'light' | 'dark' | undefined
@@ -21,7 +23,7 @@ interface SiteState {
   loaded: boolean
   load: () => Promise<void>
   update: (patch: Partial<Pick<SiteState,
-    'siteTitle' | 'appTitle' | 'logoUrl' | 'logoUrlDark' | 'iconUrl' | 'footerText' | 'themeColor' | 'themeDefaultMode' | 'timezone'
+    'versionDisplay' | 'siteTitle' | 'appTitle' | 'logoUrl' | 'logoUrlDark' | 'iconUrl' | 'footerText' | 'themeColor' | 'themeDefaultMode' | 'timezone'
   >>) => void
 }
 
@@ -42,6 +44,8 @@ export const useSiteStore = create<SiteState>((set, get) => ({
   logoUrl: '',
   logoUrlDark: '',
   iconUrl: '',
+  versionDisplay: 'footer',
+  productVersion: '',
   footerText: '© Kazuha Hub Passwall',
   themeColor: undefined,
   themeDefaultMode: undefined,
@@ -58,6 +62,8 @@ export const useSiteStore = create<SiteState>((set, get) => ({
         logoUrl: m.logo_url || '',
         logoUrlDark: m.logo_url_dark || '',
         iconUrl: m.icon_url || '',
+        versionDisplay: m.version_display || 'footer',
+        productVersion: m.product_version || '',
         footerText: m.footer_text || '© Kazuha Hub Passwall',
         themeColor: m.theme_color,
         themeDefaultMode: m.theme_default_mode,

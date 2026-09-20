@@ -393,6 +393,7 @@ export default function SettingsView() {
         logoUrl: saved.logo_url || '',
         logoUrlDark: saved.logo_url_dark || '',
         iconUrl: saved.icon_url || '',
+        versionDisplay: saved.version_display || 'footer',
         footerText: saved.footer_text || '© Kazuha Hub Passwall',
         themeColor: saved.theme_color || undefined,
       })
@@ -448,7 +449,7 @@ export default function SettingsView() {
   // save() reads component state directly, so the bar lives outside the <form>
   // and just calls it; Cancel re-fetches, discarding unsaved edits. Shown only
   // on tabs whose global form is mounted (see render).
-  const showFormBar = tab === 'brand' || tab === 'portal'
+  const showFormBar = (tab === 'brand' && scopeGroupId === 0) || tab === 'portal'
     || ((tab === 'general' || tab === 'security' || tab === 'subscription') && scopeGroupId === 0)
   const actionBar = (
     <Box sx={{
@@ -1235,7 +1236,7 @@ export default function SettingsView() {
 
         </Box>
       ))}
-      {tab === 'brand' && (
+      {tab === 'brand' && renderScopeTab(['brand'], (
         <Box component="form" onSubmit={save} sx={{ display: 'flex', flexDirection: 'column', gap: 2.5, maxWidth: 880 }}>          <Section title={t('settings.brand.section_text')} md={md}>
             <Pair>
               <TextField fullWidth label={t('settings.brand.site_title')}
@@ -1245,6 +1246,10 @@ export default function SettingsView() {
             </Pair>
             <TextField fullWidth label={t('settings.brand.footer_text')}
               value={settings.footer_text} onChange={e => patch('footer_text', e.target.value)} />
+            <TextField select fullWidth label={t('settings.brand.version_display')} value={settings.version_display || 'footer'}
+              onChange={e => patch('version_display', e.target.value as UISettings['version_display'])}>
+              {['hidden', 'footer', 'header'].map(value => <MenuItem key={value} value={value}>{t(`settings.brand.version_display.${value}`)}</MenuItem>)}
+            </TextField>
             {(() => {
               // Live URL check so the admin sees the format error inline
               // instead of having to hit save and read the snack. validateUrl
@@ -1313,7 +1318,7 @@ export default function SettingsView() {
               value={settings.email_domain} onChange={e => patch('email_domain', e.target.value)} />
           </Section>
         </Box>
-      )}
+      ))}
       {tab === 'subscription' && renderScopeTab(['sub'], (
         <Box component="form" onSubmit={save} sx={{ display: 'flex', flexDirection: 'column', gap: 2.5, maxWidth: 880 }}>          <Section title={t('settings.subscription.section_basic')} md={md}>
             <TextField fullWidth label={t('settings.subscription.sub_path')}

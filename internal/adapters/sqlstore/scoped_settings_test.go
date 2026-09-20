@@ -232,3 +232,44 @@ func TestScopedSettings_SkipsNonOverridableRow(t *testing.T) {
 			g.Require2FAForStaff, gl.Require2FAForStaff)
 	}
 }
+
+func TestVersionDisplayInheritance(t *testing.T) {
+	global, scope, resolver := newScopedTestRepos(t)
+	ctx := context.Background()
+	base, err := global.Load(ctx, ports.UISettings{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if base.VersionDisplay != "footer" {
+		t.Fatalf("default = %q", base.VersionDisplay)
+	}
+	base.VersionDisplay = "header"
+	if err := global.Save(ctx, base); err != nil {
+		t.Fatal(err)
+	}
+	for _, value := range []string{"hidden", "footer", "header"} {
+		if err := scope.SetOverride(ctx, "group", 1, ports.ScopeOverride{Type: "site", Name: "version_display", Value: value}); err != nil {
+			t.Fatal(err)
+		}
+		got, err := resolver.LoadForUser(ctx, &domain.User{GroupID: 1}, ports.UISettings{})
+		if err != nil || got.VersionDisplay != value {
+			t.Fatalf("override %q: %q, %v", value, got.VersionDisplay, err)
+		}
+		other, err := resolver.LoadForGroup(ctx, 2, ports.UISettings{})
+		if err != nil || other.VersionDisplay != "header" {
+			t.Fatalf("other group: %q, %v", other.VersionDisplay, err)
+		}
+	}
+	for _, value := range []string{"", "invalid"} {
+		if err := scope.SetOverride(ctx, "group", 1, ports.ScopeOverride{Type: "site", Name: "version_display", Value: value}); err == nil {
+			t.Fatalf("accepted %q", value)
+		}
+	}
+	if err := scope.DeleteOverride(ctx, "group", 1, "site", "version_display"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := resolver.LoadForGroup(ctx, 1, ports.UISettings{})
+	if err != nil || got.VersionDisplay != "header" {
+		t.Fatalf("restored inheritance: %q, %v", got.VersionDisplay, err)
+	}
+}

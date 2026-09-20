@@ -79,6 +79,7 @@ type settingsDTO struct {
 	SubRegionFlagPrefix        bool                     `json:"sub_region_flag_prefix"`
 	QuickLinks                 []ports.QuickLink        `json:"quick_links"`
 	GlobalAnnouncement         ports.GlobalAnnouncement `json:"global_announcement"`
+	VersionDisplay             string                   `json:"version_display"`
 	FooterText                 string                   `json:"footer_text"`
 	ThemeColor                 string                   `json:"theme_color"`
 	// Notify thresholds (moved from mail_settings to settings KV type='notify').
@@ -277,6 +278,7 @@ func settingsToDTO(s ports.UISettings) settingsDTO {
 		SubRegionFlagPrefix:         s.SubRegionFlagPrefix,
 		QuickLinks:                  s.QuickLinks,
 		GlobalAnnouncement:          s.GlobalAnnouncement,
+		VersionDisplay:              s.EffectiveVersionDisplay(),
 		FooterText:                  s.FooterText,
 		ThemeColor:                  s.ThemeColor,
 		ExpireBeforeDays:            s.ExpireBeforeDays,
@@ -408,6 +410,7 @@ func (h *AdminSettingsHandler) Put(c *gin.Context) {
 		SubRegionFlagPrefix:        req.SubRegionFlagPrefix,
 		QuickLinks:                 normalizeQuickLinks(req.QuickLinks),
 		GlobalAnnouncement:         normalizeGlobalAnnouncement(req.GlobalAnnouncement, prev.GlobalAnnouncement),
+		VersionDisplay:             req.VersionDisplay,
 		FooterText:                 strings.TrimSpace(req.FooterText),
 		ThemeColor:                 strings.TrimSpace(req.ThemeColor),
 		ExpireBeforeDays:           req.ExpireBeforeDays,
@@ -469,6 +472,10 @@ func (h *AdminSettingsHandler) Put(c *gin.Context) {
 	var pathErr error
 	if s.PanelPath, pathErr = panelpath.Normalize(s.PanelPath); pathErr != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": pathErr.Error()})
+		return
+	}
+	if !ports.ValidVersionDisplay(s.VersionDisplay) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid version_display"})
 		return
 	}
 	if err := panelpath.Validate(s.PanelPath, s.SubPath); err != nil {

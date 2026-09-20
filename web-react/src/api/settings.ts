@@ -133,6 +133,7 @@ export interface UISettings {
   sub_region_flag_prefix: boolean
   quick_links: QuickLink[]
   global_announcement: GlobalAnnouncement
+  version_display?: 'hidden' | 'footer' | 'header'
   footer_text: string
   /** M3 source hex color used as the system-default theme. Empty falls back to the frontend default. */
   theme_color: string

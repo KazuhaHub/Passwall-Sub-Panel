@@ -21,6 +21,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/twofa"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/user"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/transport/http/middleware"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/version"
 )
 
 // UserMeHandler exposes the end-user self-service endpoints under
@@ -81,10 +82,12 @@ func (h *UserMeHandler) Profile(c *gin.Context) {
 	now := time.Now()
 	access := u.AccessSnapshot(now)
 	c.JSON(http.StatusOK, gin.H{
-		"id":           u.ID,
-		"display_name": u.DisplayName,
-		"upn":          u.UPN,
-		"sub_url":      h.subURL(c.Request, u.SubToken),
+		"id":              u.ID,
+		"version_display": suEff.EffectiveVersionDisplay(),
+		"product_version": version.Version,
+		"display_name":    u.DisplayName,
+		"upn":             u.UPN,
+		"sub_url":         h.subURL(c.Request, u.SubToken),
 		// profile_name is the server-resolved SubProfileNameTemplate.
 		// Exposing it pre-rendered means the frontend's buildImportURL
 		// can drop {{ profile_name_encoded }} into deep links exactly

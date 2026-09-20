@@ -340,6 +340,7 @@ func settingDescriptors(s *ports.UISettings) []settingDescriptor {
 		strField("site", "logo_url", &s.LogoURL),
 		strField("site", "logo_url_dark", &s.LogoURLDark),
 		strField("site", "footer_text", &s.FooterText),
+		strField("site", "version_display", &s.VersionDisplay),
 		strField("site", "theme_color", &s.ThemeColor),
 		strField("site", "email_domain", &s.EmailDomain),
 		strField("site", "sub_base_url", &s.SubBaseURL),
@@ -737,6 +738,7 @@ func applyUISettingsDefaults(out, defaults ports.UISettings) ports.UISettings {
 	if out.SubUpdateIntervalHours <= 0 {
 		out.SubUpdateIntervalHours = 24
 	}
+	out.VersionDisplay = out.EffectiveVersionDisplay()
 	if out.FooterText == "" {
 		out.FooterText = "© Kazuha Hub Passwall"
 	}

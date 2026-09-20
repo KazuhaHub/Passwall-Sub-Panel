@@ -19,6 +19,7 @@ import (
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/passkey"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/twofa"
 	"github.com/KazuhaHub/passwall-sub-panel/internal/service/user"
+	"github.com/KazuhaHub/passwall-sub-panel/internal/version"
 )
 
 // AuthLocalHandler exposes /api/auth/local/login and the public /methods
@@ -97,6 +98,8 @@ func (h *AuthLocalHandler) Methods(c *gin.Context) {
 		"logo_url":         s.LogoURL,
 		"logo_url_dark":    s.LogoURLDark,
 		"footer_text":      s.FooterText,
+		"version_display":  s.EffectiveVersionDisplay(),
+		"product_version":  version.Version,
 		"theme_color":      s.ThemeColor,
 		"timezone":         s.Timezone,
 		"captcha_enabled":  s.CaptchaEnabled,

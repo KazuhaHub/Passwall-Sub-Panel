@@ -13,7 +13,7 @@ const snack = vi.hoisted(() => vi.fn())
 
 vi.mock('@/api/client', () => ({ client: api }))
 vi.mock('@/components/SnackbarHost', () => ({ pushSnack: snack }))
-vi.mock('@/i18n', () => ({ default: { t: (key: string) => key, language: 'en-US' } }))
+vi.mock('@/i18n', () => ({ default: { t: (key: string) => key, language: 'en-US' }, currentLanguage: () => 'en-US', setLanguage: vi.fn() }))
 vi.mock('react-i18next', () => ({
   useTranslation: (namespace: string | string[] = 'admin') => ({
     t: (key: string) => key.includes(':') ? key : `${Array.isArray(namespace) ? namespace[0] : namespace}:${key}`,

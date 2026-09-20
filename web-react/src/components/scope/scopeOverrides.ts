@@ -33,6 +33,7 @@ export interface ScopeKeyMeta {
 }
 
 export const SCOPE_CATEGORIES: ScopeCategoryMeta[] = [
+ { id: 'brand', labelKey: 'cat_brand', def: '页面展示' },
   { id: '2fa', labelKey: 'cat_2fa', def: '两步验证 (2FA) 方式' },
   { id: 'notify', labelKey: 'cat_notify', def: '通知阈值' },
   { id: 'emergency', labelKey: 'cat_emergency', def: '紧急访问（超额救急）' },
@@ -41,6 +42,7 @@ export const SCOPE_CATEGORIES: ScopeCategoryMeta[] = [
 ]
 
 export const SCOPE_KEYS: ScopeKeyMeta[] = [
+ { cat: 'brand', key: 'site.version_display', type: 'site', name: 'version_display', kind: 'str', field: 'version_display', labelKey: 'version_display', def: '版本号显示位置' },
   { cat: '2fa', key: 'security.totp_enabled', type: 'security', name: 'totp_enabled', kind: 'bool', field: 'totp_enabled', labelKey: 'totp', def: '验证器 App (TOTP)' },
   { cat: '2fa', key: 'security.passkey_enabled', type: 'security', name: 'passkey_enabled', kind: 'bool', field: 'passkey_enabled', labelKey: 'passkey', def: '通行密钥' },
   { cat: '2fa', key: 'security.twofa_allow_email', type: 'security', name: 'twofa_allow_email', kind: 'bool', field: 'twofa_allow_email', labelKey: 'email', def: '邮箱验证码' },

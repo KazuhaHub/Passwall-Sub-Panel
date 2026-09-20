@@ -1400,6 +1400,8 @@ type UISettings struct {
 	// FooterText is the text displayed at the bottom of the login page.
 	// Defaults to "© Kazuha Hub Passwall".
 	FooterText string `yaml:"footer_text" json:"footer_text"`
+	// VersionDisplay controls user-facing placement; admin UI is independent.
+	VersionDisplay string `yaml:"version_display" json:"version_display"`
 	// ThemeColor is the M3 source color (HEX, e.g. "#0061A4") used as the
 	// system-default theme for every user. Empty = fall back to the
 	// frontend's compiled-in DEFAULT_PRESET_HEX. Individual users can still
@@ -1580,6 +1582,7 @@ type ScopeSettingsRepo interface {
 // require_2fa_for_staff stays global too (Group.Require2FA covers per-group
 // enrollment). Grow this set one category at a time as consumers migrate.
 var OverridableScopeKeys = map[string]bool{
+	"site.version_display": true,
 	// Concurrent-location anomaly policy — traffic.observeLiveIPs. Per-group
 	// so a team that genuinely works across borders can be exempted or
 	// loosened without weakening detection for everyone else. See
@@ -1788,4 +1791,18 @@ type Repos struct {
 	DNSCredential DNSCredentialRepo
 	ACMEAccount   ACMEAccountRepo
 	CertEvent     CertEventRepo
+}
+
+// EffectiveVersionDisplay preserves the footer default for old installations.
+func (s UISettings) EffectiveVersionDisplay() string {
+	switch s.VersionDisplay {
+	case "hidden", "header":
+		return s.VersionDisplay
+	default:
+		return "footer"
+	}
+}
+
+func ValidVersionDisplay(value string) bool {
+	return value == "" || value == "hidden" || value == "footer" || value == "header"
 }

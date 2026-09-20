@@ -360,6 +360,8 @@ export interface AuthMethods {
   icon_url: string
   logo_url: string
   logo_url_dark: string
+  version_display?: 'hidden' | 'footer' | 'header'
+  product_version?: string
   footer_text: string
   // Step 1.0 expects these fields once the backend gains theme settings.
   // Until then, the panel returns undefined and the frontend falls back.

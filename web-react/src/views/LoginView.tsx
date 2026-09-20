@@ -598,6 +598,7 @@ export default function LoginView({ forceLocal = false }: { forceLocal?: boolean
             <BrandLogo height={56} />
             <Typography variant="h5" sx={{ fontWeight: 500, color: md.onSurface, mt: 1.5 }}>
               {site.appTitle || site.siteTitle}
+              {site.versionDisplay === 'header' && site.productVersion && <Typography component="span" variant="caption" sx={{ ml: 1, color: 'text.secondary', whiteSpace: 'nowrap' }}>{site.productVersion}</Typography>}
             </Typography>
             <Typography variant="body2" sx={{ mt: 0.5 }}>{t(forceLocal ? 'auth:local_only_subtitle' : 'auth:subtitle')}</Typography>
           </Box>
@@ -612,9 +613,10 @@ export default function LoginView({ forceLocal = false }: { forceLocal?: boolean
         </Card>
       </Box>
 
-      {site.footerText && (
+      {(site.footerText || (site.versionDisplay === 'footer' && site.productVersion)) && (
         <Box sx={{ p: 2, textAlign: 'center', fontSize: 12, color: md.onSurfaceVariant }}>
           {site.footerText}
+          {site.versionDisplay === 'footer' && site.productVersion && <Box>{site.productVersion}</Box>}
         </Box>
       )}
     </Box>

@@ -59,6 +59,9 @@ func (r *kvScopeSettingsRepo) ListOverrides(ctx context.Context, scopeType strin
 }
 
 func (r *kvScopeSettingsRepo) SetOverride(ctx context.Context, scopeType string, scopeID int64, o ports.ScopeOverride) error {
+	if o.Type == "site" && o.Name == "version_display" && (!ports.ValidVersionDisplay(o.Value) || o.Value == "") {
+		return fmt.Errorf("invalid version_display")
+	}
 	enc, known := settingKeyEncrypted(o.Type, o.Name)
 	if !known {
 		// Refuse to strand a value on a dead key — same drift concern as the

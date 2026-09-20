@@ -6,7 +6,7 @@
 // Each row is three columns — label (flex) | toggle + state (fixed) | value
 // (fixed, right-aligned) — so the switches and values line up across every row
 // regardless of inherit/override state.
-import { Box, Switch, TextField, Typography } from '@mui/material'
+import { Box, MenuItem, Switch, TextField, Typography } from '@mui/material'
 import { useTranslation } from 'react-i18next'
 
 import { SCOPE_CATEGORIES, SCOPE_KEYS, type ScopeKind, type ScopeState } from './scopeOverrides'
@@ -76,7 +76,11 @@ export default function ScopeOverridesEditor({
                   {/* value — fixed column, right-aligned */}
                   <Box sx={{ width: VALUE_COL, flexShrink: 0, display: 'flex', justifyContent: 'flex-end', alignItems: 'center' }}>
                     {st.on ? (
-                      k.kind === 'bool' ? (
+                      k.key === 'site.version_display' ? (
+                        <TextField select size="small" fullWidth value={st.value} onChange={e => setEdit({ on: true, value: e.target.value })}>
+                          {['hidden', 'footer', 'header'].map(value => <MenuItem key={value} value={value}>{t(`admin:settings.brand.version_display.${value}`)}</MenuItem>)}
+                        </TextField>
+                      ) : k.kind === 'bool' ? (
                         <Switch size="small" checked={st.value === '1'}
                           onChange={(_, c) => setEdit({ on: true, value: c ? '1' : '0' })} />
                       ) : k.kind === 'str' ? (
@@ -91,7 +95,7 @@ export default function ScopeOverridesEditor({
                       )
                     ) : (
                       <Typography variant="caption" color="text.secondary" sx={{ textAlign: 'right' }}>
-                        {t('admin:groups.scope.global_prefix', { defaultValue: '全局' })}: {fmtVal(k.kind, scope.global[k.key])}
+                        {t('admin:groups.scope.global_prefix', { defaultValue: '全局' })}: {k.key === 'site.version_display' ? t(`admin:settings.brand.version_display.${scope.global[k.key]}`) : fmtVal(k.kind, scope.global[k.key])}
                       </Typography>
                     )}
                   </Box>

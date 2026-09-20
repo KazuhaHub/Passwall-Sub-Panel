@@ -2774,5 +2774,11 @@
       "failed": "Failed",
       "indeterminate": "Indeterminate"
     }
-  }
+  },
+  "settings.brand.version_display": "Version display position",
+  "settings.brand.version_display.hidden": "Hidden",
+  "settings.brand.version_display.footer": "Page footer (default)",
+  "settings.brand.version_display.header": "Beside site name",
+  "groups.scope.cat_brand": "Page appearance",
+  "groups.scope.version_display": "Version display position"
 }
