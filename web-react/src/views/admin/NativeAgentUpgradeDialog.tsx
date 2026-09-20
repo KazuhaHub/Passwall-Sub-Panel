@@ -3,6 +3,7 @@ import { Alert, Box, Button, CircularProgress, Dialog, DialogActions, DialogCont
 import { useTranslation } from 'react-i18next'
 import { getNativeAgentUpgrade, requestNativeAgentUpgrade, upgradeOptions, type NativeAgentUpgrade, type Server } from '@/api/servers'
 import NodeReleaseSelector from '@/components/NodeReleaseSelector'
+import { canonicalReleaseVersion } from '@/utils/productVersion'
 
 export function NativeAgentUpgradeDialog({ server, onClose }: { server: Server | null, onClose: () => void }) {
   const { t } = useTranslation()
@@ -19,7 +20,12 @@ export function NativeAgentUpgradeDialog({ server, onClose }: { server: Server |
   const key = useRef('')
   const requestController = useRef<AbortController | null>(null)
   const expected = server?.panel_version?.split(' ')[0] ?? ''
-  const exact = (s: string) => /^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$/.test(s)
+  // A VERSION, IN EITHER SCHEME. This was a local copy of the shape rule and it
+  // knew only the legacy one, so a node reporting a product version — three
+  // integers, no prefix — could not be confirmed at all: the action was disabled
+  // and nothing said why. The rule lives in the module that reads the shared
+  // vectors.
+  const exact = (s: string) => canonicalReleaseVersion(s) !== undefined
 
   useEffect(() => {
     requestController.current?.abort()

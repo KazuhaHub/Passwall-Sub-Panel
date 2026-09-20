@@ -147,3 +147,59 @@ it('falls back to offering what is newer when the instance cannot answer', async
   fireEvent.mouseDown(field)
   expect(await screen.findByRole('option', { name: 'v0.0.1-beta9' })).toBeTruthy()
 })
+
+// A NODE THAT REPORTS A PRODUCT-SCHEME VERSION.
+//
+// `panel_version` is a VERSION — the product scheme stamps three integers with no
+// prefix — and this dialog required a v prefix on it before it would enable
+// Confirm. So the operator could open the upgrade page, see the node's version,
+// pick a target, and find the action permanently disabled with nothing said
+// about why. `exact()` is used three times: to gate submit, to gate the button,
+// and to decide whether the node's own version can be passed as `newerThan`.
+it('upgrades a node that reports a product-scheme version', async () => {
+  const modernServer: Server = { ...server, panel_version: '4.0.0 (dc5270c)' }
+  installReads({
+    '/admin/servers/node-releases': {
+      checked_at: '',
+      releases: [{
+        version: '4.0.1', channel: 'stable', published_at: '2026-09-12T12:00:00Z',
+        release_url: 'https://github.com/KazuhaHub/Passwall-Node/releases/tag/release/4.0.1',
+        notes: 'Reviewed release fixture', methods: ['linux'],
+        platforms: [{ os: 'linux', arch: 'amd64' }, { os: 'linux', arch: 'arm64' }],
+      }],
+    },
+  })
+  mount(<NativeAgentUpgradeDialog server={modernServer} onClose={() => {}} />)
+  expect((screen.getByLabelText('admin:servers.agent_upgrade.current') as HTMLInputElement).value).toBe('4.0.0')
+  const button = screen.getByRole('button', { name: 'admin:servers.agent_upgrade.confirm' }) as HTMLButtonElement
+  expect(button.disabled).toBe(true)
+  const field = screen.getByRole('combobox', { name: 'admin:servers.native.agent_version' })
+  await waitFor(() => expect(field.getAttribute('aria-disabled')).not.toBe('true'))
+  fireEvent.mouseDown(field)
+  fireEvent.click(await screen.findByRole('option', { name: '4.0.1' }))
+  await waitFor(() => expect(button.disabled).toBe(false))
+})
+
+// A version that is not one in either scheme is still refused, and the near
+// misses stay refused: the point is that the rule moved, not that it went away.
+it('still refuses a node whose reported version is not a release', async () => {
+  for (const panel_version of ['4.0', '04.0.0', '4.0.0.1', 'release/4.0.0', 'dev', 'latest']) {
+    installReads({
+      '/admin/servers/node-releases': {
+        checked_at: '',
+        releases: [{
+          version: '4.0.1', channel: 'stable', published_at: '2026-09-12T12:00:00Z',
+          release_url: 'https://github.com/KazuhaHub/Passwall-Node/releases/tag/release/4.0.1',
+          notes: 'Reviewed release fixture', methods: ['linux'],
+          platforms: [{ os: 'linux', arch: 'amd64' }, { os: 'linux', arch: 'arm64' }],
+        }],
+      },
+    })
+    const view = mount(<NativeAgentUpgradeDialog server={{ ...server, panel_version }} onClose={() => {}} />)
+    // The node's own version cannot be confirmed as exact, so nothing is
+    // submittable — which is the correct answer for a string that names no
+    // release.
+    expect((screen.getByRole('button', { name: 'admin:servers.agent_upgrade.confirm' }) as HTMLButtonElement).disabled, panel_version).toBe(true)
+    view.unmount()
+  }
+})
