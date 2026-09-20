@@ -7,6 +7,33 @@ import { test } from 'node:test'
 
 const workflow = readFileSync(new URL('../.github/workflows/release.yml', import.meta.url), 'utf8')
 
+// A TAG THE WORKFLOW DOES NOT TRIGGER ON IS A RELEASE THAT DOES NOT HAPPEN. The
+// product scheme (release/MAJOR.MINOR.PATCH) is decided and the channel logic
+// already answers for it, but a trigger list of `v*` alone means the tag can be
+// pushed and nothing runs at all. That failure is the quietest one available:
+// no red run, no artifact, and a tag that now names nothing.
+test('the release workflow triggers on the product tag scheme, not only the legacy one', () => {
+  const patterns = []
+  const lines = workflow.split('\n')
+  const start = lines.indexOf('    tags:')
+  assert(start >= 0, 'the release workflow must trigger on tag pushes')
+  // Read to the end of the block, not to the next non-blank line: comments and
+  // blank lines are ordinary YAML here and a parser that stops at one would
+  // report a trigger list that is really there.
+  for (let i = start + 1; i < lines.length; i++) {
+    const line = lines[i]
+    if (line.trim() === '' || line.trimStart().startsWith('#')) continue
+    if (!/^      - /.test(line)) break
+    patterns.push(line.replace(/^\s*- /, '').replace(/^["']|["']$/g, ''))
+  }
+  for (const required of ['v*', 'release/*']) {
+    assert(
+      patterns.includes(required),
+      `the release workflow does not trigger on ${required} (found ${patterns.join(', ')})`,
+    )
+  }
+})
+
 // This intentionally guards a bounded, canonical workflow layout; the Go
 // version package additionally parses the full YAML and validates SDK gates.
 function job(name) {
