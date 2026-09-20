@@ -212,6 +212,21 @@ func Build(ctx context.Context, cfg *config.Config) (*App, error) {
 		}
 		version.SetPolicyTrustRoot(root)
 	}
+	// The policy source is FETCHED HERE ONLY WHEN ONE IS CONFIGURED. Neither the
+	// source nor the keys exist in a default deployment, so nothing is fetched
+	// and no admission decision changes; a deployment that sets both has opted
+	// into the policy path, and the log says so rather than leaving it implicit.
+	//
+	// A failure is logged and does not stop the boot: the panel keeps whatever
+	// policy it has, and an unreachable source must not take the panel down.
+	if cfg.PolicySourceURL != "" {
+		if err := version.RefreshReleasesPolicy(ctx, cfg.PolicySourceURL, time.Now().UTC()); err != nil {
+			log.Warn("release policy not loaded; admission falls back to what is already in force",
+				"source", cfg.PolicySourceURL, "err", err)
+		} else {
+			log.Info("release policy loaded and in force", "source", cfg.PolicySourceURL)
+		}
+	}
 	// Same boot pattern for the centralized "latest 3X-UI release tag"
 	// snapshot: cold-boot off the cache so the ⋮ kebab "update available"
 	// badge can render immediately, then the first RefreshLatestXUI call

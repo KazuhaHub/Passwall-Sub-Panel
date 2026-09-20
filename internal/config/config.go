@@ -55,6 +55,17 @@ type Config struct {
 	// given keys. Rotation works inside the signed documents, so this list is
 	// only the seed.
 	PolicyTrustKeys map[string]string `yaml:"policy_trust_keys"`
+
+	// PolicySourceURL is where a signed release policy is published. ABSENT IS
+	// THE DEFAULT AND THE PATH IS OFF: with no source nothing is fetched and no
+	// decision changes.
+	//
+	// A source WITHOUT KEYS IS REFUSED AT BOOT rather than run, because it is a
+	// configuration that can never work: every document would fail verification,
+	// the panel would report no error a reader could act on, and the operator
+	// would be left believing a source was in use. The pair is the setting; half
+	// of it is a mistake.
+	PolicySourceURL string `yaml:"policy_source_url"`
 }
 
 // HTTPConfig groups reverse-proxy-aware request-handling settings.
@@ -390,6 +401,9 @@ func Load(path string) (*Config, error) {
 	if tp := os.Getenv("PSP_TRUSTED_PROXIES"); tp != "" {
 		c.HTTP.TrustedProxies = tp
 	}
+	if source := os.Getenv("PSP_POLICY_SOURCE_URL"); source != "" {
+		c.PolicySourceURL = source
+	}
 	if keys := os.Getenv("PSP_POLICY_TRUST_KEYS"); keys != "" {
 		parsed, err := ParseTrustKeys(keys)
 		if err != nil {
@@ -471,6 +485,10 @@ func (c *Config) validate() error {
 		if len(raw) != ed25519.PublicKeySize {
 			return fmt.Errorf("policy_trust_keys[%s] is %d bytes, want %d for an ed25519 public key", id, len(raw), ed25519.PublicKeySize)
 		}
+	}
+	if c.PolicySourceURL != "" && len(c.PolicyTrustKeys) == 0 {
+		return fmt.Errorf("policy_source_url is set but policy_trust_keys is empty: " +
+			"a source with no keys can never verify anything, so this would look configured and do nothing")
 	}
 	// DSN is optional; empty falls back to SQLite at <DataDir>/panel.db.
 	return nil

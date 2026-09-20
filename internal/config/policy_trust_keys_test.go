@@ -95,3 +95,32 @@ func TestValidateRefusesAMalformedTrustKey(t *testing.T) {
 		t.Fatalf("an absent trust root must not fail validation: %v", err)
 	}
 }
+
+// A source with no keys is a configuration that can never work. Every document
+// would fail verification, the panel would report nothing an operator could act
+// on, and they would be left believing a source was in use. The pair is the
+// setting; half of it is a mistake, and a mistake is cheaper to find at boot.
+func TestAPolicySourceWithoutKeysIsRefusedAtBoot(t *testing.T) {
+	key := testKey(t)
+
+	broken := &Config{JWTSecret: "x", PolicySourceURL: "https://policy.example/"}
+	err := broken.validate()
+	if err == nil || !strings.Contains(err.Error(), "policy_trust_keys is empty") {
+		t.Fatalf("error = %v, want it to name the missing keys", err)
+	}
+
+	complete := &Config{JWTSecret: "x", PolicySourceURL: "https://policy.example/", PolicyTrustKeys: map[string]string{"k": key}}
+	if err := complete.validate(); err != nil {
+		t.Fatalf("a source with keys must validate: %v", err)
+	}
+
+	// Absent is the default: no source, no keys, no policy path.
+	if err := (&Config{JWTSecret: "x"}).validate(); err != nil {
+		t.Fatalf("the default configuration must validate: %v", err)
+	}
+	// Keys without a source are also fine — a panel can be given the keys before
+	// it is given somewhere to read from.
+	if err := (&Config{JWTSecret: "x", PolicyTrustKeys: map[string]string{"k": key}}).validate(); err != nil {
+		t.Fatalf("keys without a source must validate: %v", err)
+	}
+}

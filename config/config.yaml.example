@@ -126,3 +126,18 @@ data_dir: "./data"
 #   backup: "BASE64_ED25519_PUBLIC_KEY"
 #
 # Env override: PSP_POLICY_TRUST_KEYS="primary=BASE64,backup=BASE64"
+
+# Where a signed release policy is published, if you use one.
+#
+# ABSENT IS THE NORMAL STATE AND THE POLICY PATH IS OFF: with no source the panel
+# fetches nothing and no admission decision changes. Setting BOTH this and
+# policy_trust_keys above turns the policy path on — the panel then offers only
+# the upgrade targets that policy lists, and refuses ones it does not.
+#
+# A source WITHOUT keys is refused at boot rather than run: it could never verify
+# anything, and a setting that looks configured and does nothing is worse than a
+# missing one.
+#
+# policy_source_url: "https://example.invalid/compat"
+#
+# Env override: PSP_POLICY_SOURCE_URL
